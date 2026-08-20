@@ -3387,6 +3387,26 @@ type blockingSaveConfigStorage struct {
 	saveCount   int
 }
 
+type blockingSaveSchedulerConfigStorage struct {
+	storage.Storage
+	saveStarted chan struct{}
+	releaseSave chan struct{}
+	mu          sync.Mutex
+	saveCount   int
+}
+
+func (s *blockingSaveSchedulerConfigStorage) SaveSchedulerConfig(name string, data []byte) error {
+	s.mu.Lock()
+	s.saveCount++
+	isFirstSave := s.saveCount == 1
+	s.mu.Unlock()
+	if isFirstSave {
+		close(s.saveStarted)
+		<-s.releaseSave
+	}
+	return s.Storage.SaveSchedulerConfig(name, data)
+}
+
 func (s *blockingSaveConfigStorage) SaveConfig(cfg any) error {
 	s.mu.Lock()
 	s.saveCount++
@@ -3462,6 +3482,54 @@ func TestScheduleConfigPersistenceIsSerialized(t *testing.T) {
 	_, reloadedOpt, err := newTestScheduleConfig()
 	re.NoError(err)
 	re.NoError(reloadedOpt.Reload(storage))
+	re.Equal(float64(60), reloadedOpt.GetScheduleConfig().DefaultStoreLimit.AddPeer)
+}
+
+func TestInitSchedulersPreservesConcurrentScheduleUpdate(t *testing.T) {
+	re := require.New(t)
+	oldAddPeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
+	defer sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, oldAddPeer)
+
+	blockingStorage := &blockingSaveSchedulerConfigStorage{
+		saveStarted: make(chan struct{}),
+		releaseSave: make(chan struct{}),
+	}
+	tc, co, cleanup := prepare(nil, func(tc *testCluster) {
+		blockingStorage.Storage = tc.storage
+		tc.storage = blockingStorage
+	}, nil, re)
+	defer cleanup()
+
+	var releaseOnce sync.Once
+	release := func() {
+		releaseOnce.Do(func() { close(blockingStorage.releaseSave) })
+	}
+	defer release()
+
+	initDone := make(chan struct{})
+	go func() {
+		co.InitSchedulers(false)
+		close(initDone)
+	}()
+
+	select {
+	case <-blockingStorage.saveStarted:
+	case <-time.After(time.Second):
+		t.Fatal("InitSchedulers did not start saving scheduler config")
+	}
+
+	re.NoError(tc.SetAllStoresLimit(storelimit.AddPeer, 60))
+	release()
+	select {
+	case <-initDone:
+	case <-time.After(time.Second):
+		t.Fatal("InitSchedulers did not finish")
+	}
+
+	re.Equal(float64(60), tc.GetScheduleConfig().DefaultStoreLimit.AddPeer)
+	_, reloadedOpt, err := newTestScheduleConfig()
+	re.NoError(err)
+	re.NoError(reloadedOpt.Reload(tc.GetStorage()))
 	re.Equal(float64(60), reloadedOpt.GetScheduleConfig().DefaultStoreLimit.AddPeer)
 }
 

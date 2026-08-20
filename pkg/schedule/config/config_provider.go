@@ -69,6 +69,10 @@ type SchedulerConfigProvider interface {
 
 	GetScheduleConfig() *ScheduleConfig
 	SetScheduleConfig(*ScheduleConfig)
+	UpdateScheduleConfig(
+		endpoint.ConfigStorage,
+		func(current, next *ScheduleConfig) (changed bool, err error),
+	) error
 }
 
 // CheckerConfigProvider is the interface for checker configurations.

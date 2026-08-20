@@ -89,6 +89,18 @@ func (o *PersistOptions) SetScheduleConfig(cfg *sc.ScheduleConfig) {
 	o.schedule.Store(cfg)
 }
 
+// mutateScheduleConfig serializes an in-memory field update with schedule
+// persistence transactions. It prevents a helper from publishing a stale full
+// ScheduleConfig after another field has changed.
+func (o *PersistOptions) mutateScheduleConfig(update func(next *sc.ScheduleConfig)) {
+	o.persistMu.Lock()
+	defer o.persistMu.Unlock()
+
+	next := o.GetScheduleConfig().Clone()
+	update(next)
+	o.SetScheduleConfig(next)
+}
+
 // UpdateScheduleConfig serializes a schedule-config read-modify-persist
 // transaction with every other full-config persistence. The current config is
 // read-only; changes must be applied to next. Returning changed=false skips the
@@ -253,16 +265,16 @@ func (o *PersistOptions) GetSplitScatterScheduleLimit() uint64 {
 
 // SetAffinityScheduleLimit sets the limit for affinity schedule.
 func (o *PersistOptions) SetAffinityScheduleLimit(limit uint64) {
-	v := o.GetScheduleConfig().Clone()
-	v.AffinityScheduleLimit = limit
-	o.SetScheduleConfig(v)
+	o.mutateScheduleConfig(func(next *sc.ScheduleConfig) {
+		next.AffinityScheduleLimit = limit
+	})
 }
 
 // SetSplitScatterScheduleLimit sets the limit for split-scatter schedule.
 func (o *PersistOptions) SetSplitScatterScheduleLimit(limit uint64) {
-	v := o.GetScheduleConfig().Clone()
-	v.SplitScatterScheduleLimit = limit
-	o.SetScheduleConfig(v)
+	o.mutateScheduleConfig(func(next *sc.ScheduleConfig) {
+		next.SplitScatterScheduleLimit = limit
+	})
 }
 
 // SetPlacementRuleEnabled set PlacementRuleEnabled
@@ -368,9 +380,9 @@ func (o *PersistOptions) GetSplitMergeInterval() time.Duration {
 
 // SetSplitMergeInterval to set the interval between finishing split and starting to merge. It's only used to test.
 func (o *PersistOptions) SetSplitMergeInterval(splitMergeInterval time.Duration) {
-	v := o.GetScheduleConfig().Clone()
-	v.SplitMergeInterval = typeutil.Duration{Duration: splitMergeInterval}
-	o.SetScheduleConfig(v)
+	o.mutateScheduleConfig(func(next *sc.ScheduleConfig) {
+		next.SplitMergeInterval = typeutil.Duration{Duration: splitMergeInterval}
+	})
 }
 
 // GetSwitchWitnessInterval returns the interval between promote to non-witness and starting to switch to witness.
@@ -385,9 +397,9 @@ func (o *PersistOptions) IsDiagnosticAllowed() bool {
 
 // SetEnableDiagnostic to set the option for diagnose. It's only used to test.
 func (o *PersistOptions) SetEnableDiagnostic(enable bool) {
-	v := o.GetScheduleConfig().Clone()
-	v.EnableDiagnostic = enable
-	o.SetScheduleConfig(v)
+	o.mutateScheduleConfig(func(next *sc.ScheduleConfig) {
+		next.EnableDiagnostic = enable
+	})
 }
 
 // IsWitnessAllowed returns whether is enable to use witness.
@@ -397,86 +409,85 @@ func (o *PersistOptions) IsWitnessAllowed() bool {
 
 // SetEnableWitness to set the option for witness. It's only used to test.
 func (o *PersistOptions) SetEnableWitness(enable bool) {
-	v := o.GetScheduleConfig().Clone()
-	v.EnableWitness = enable
-	o.SetScheduleConfig(v)
+	o.mutateScheduleConfig(func(next *sc.ScheduleConfig) {
+		next.EnableWitness = enable
+	})
 }
 
 // SetMaxStoreDownTime to set the max store down time. It's only used to test.
 func (o *PersistOptions) SetMaxStoreDownTime(time time.Duration) {
-	v := o.GetScheduleConfig().Clone()
-	v.MaxStoreDownTime = typeutil.NewDuration(time)
-	o.SetScheduleConfig(v)
+	o.mutateScheduleConfig(func(next *sc.ScheduleConfig) {
+		next.MaxStoreDownTime = typeutil.NewDuration(time)
+	})
 }
 
 // SetMaxMergeRegionSize sets the max merge region size.
 func (o *PersistOptions) SetMaxMergeRegionSize(maxMergeRegionSize uint64) {
-	v := o.GetScheduleConfig().Clone()
-	v.MaxMergeRegionSize = maxMergeRegionSize
-	o.SetScheduleConfig(v)
+	o.mutateScheduleConfig(func(next *sc.ScheduleConfig) {
+		next.MaxMergeRegionSize = maxMergeRegionSize
+	})
 }
 
 // SetMaxAffinityMergeRegionSize sets the max affinity merge region size.
 func (o *PersistOptions) SetMaxAffinityMergeRegionSize(maxAffinityMergeRegionSize uint64) {
-	v := o.GetScheduleConfig().Clone()
-	v.MaxAffinityMergeRegionSize = maxAffinityMergeRegionSize
-	o.SetScheduleConfig(v)
+	o.mutateScheduleConfig(func(next *sc.ScheduleConfig) {
+		next.MaxAffinityMergeRegionSize = maxAffinityMergeRegionSize
+	})
 }
 
 // SetMaxMergeRegionKeys sets the max merge region keys.
 func (o *PersistOptions) SetMaxMergeRegionKeys(maxMergeRegionKeys uint64) {
-	v := o.GetScheduleConfig().Clone()
-	v.MaxMergeRegionKeys = maxMergeRegionKeys
-	o.SetScheduleConfig(v)
+	o.mutateScheduleConfig(func(next *sc.ScheduleConfig) {
+		next.MaxMergeRegionKeys = maxMergeRegionKeys
+	})
 }
 
 // SetStoreLimit sets a store limit for a given type and rate.
 func (o *PersistOptions) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePerMin float64) {
-	v := o.GetScheduleConfig().Clone()
-	defaultStoreLimit := v.GetDefaultStoreLimit()
-	var slc sc.StoreLimitConfig
-	var rate float64
-	switch typ {
-	case storelimit.AddPeer:
-		if _, ok := v.StoreLimit[storeID]; !ok {
-			rate = defaultStoreLimit.RemovePeer
-		} else {
-			rate = v.StoreLimit[storeID].RemovePeer
+	o.mutateScheduleConfig(func(next *sc.ScheduleConfig) {
+		defaultStoreLimit := next.GetDefaultStoreLimit()
+		var slc sc.StoreLimitConfig
+		var rate float64
+		switch typ {
+		case storelimit.AddPeer:
+			if _, ok := next.StoreLimit[storeID]; !ok {
+				rate = defaultStoreLimit.RemovePeer
+			} else {
+				rate = next.StoreLimit[storeID].RemovePeer
+			}
+			slc = sc.StoreLimitConfig{AddPeer: ratePerMin, RemovePeer: rate}
+		case storelimit.RemovePeer:
+			if _, ok := next.StoreLimit[storeID]; !ok {
+				rate = defaultStoreLimit.AddPeer
+			} else {
+				rate = next.StoreLimit[storeID].AddPeer
+			}
+			slc = sc.StoreLimitConfig{AddPeer: rate, RemovePeer: ratePerMin}
 		}
-		slc = sc.StoreLimitConfig{AddPeer: ratePerMin, RemovePeer: rate}
-	case storelimit.RemovePeer:
-		if _, ok := v.StoreLimit[storeID]; !ok {
-			rate = defaultStoreLimit.AddPeer
-		} else {
-			rate = v.StoreLimit[storeID].AddPeer
-		}
-		slc = sc.StoreLimitConfig{AddPeer: rate, RemovePeer: ratePerMin}
-	}
-	v.StoreLimit[storeID] = slc
-	o.SetScheduleConfig(v)
+		next.StoreLimit[storeID] = slc
+	})
 }
 
 // SetAllStoresLimit sets all store limit for a given type and rate.
 func (o *PersistOptions) SetAllStoresLimit(typ storelimit.Type, ratePerMin float64) {
-	v := o.GetScheduleConfig().Clone()
-	switch typ {
-	case storelimit.AddPeer:
-		v.DefaultStoreLimit.AddPeer = ratePerMin
-		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, ratePerMin)
-		for storeID := range v.StoreLimit {
-			sc := sc.StoreLimitConfig{AddPeer: ratePerMin, RemovePeer: v.StoreLimit[storeID].RemovePeer}
-			v.StoreLimit[storeID] = sc
+	o.mutateScheduleConfig(func(next *sc.ScheduleConfig) {
+		switch typ {
+		case storelimit.AddPeer:
+			next.DefaultStoreLimit.AddPeer = ratePerMin
+			sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, ratePerMin)
+			for storeID := range next.StoreLimit {
+				sc := sc.StoreLimitConfig{AddPeer: ratePerMin, RemovePeer: next.StoreLimit[storeID].RemovePeer}
+				next.StoreLimit[storeID] = sc
+			}
+		case storelimit.RemovePeer:
+			next.DefaultStoreLimit.RemovePeer = ratePerMin
+			sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, ratePerMin)
+			for storeID := range next.StoreLimit {
+				sc := sc.StoreLimitConfig{AddPeer: next.StoreLimit[storeID].AddPeer, RemovePeer: ratePerMin}
+				next.StoreLimit[storeID] = sc
+			}
 		}
-	case storelimit.RemovePeer:
-		v.DefaultStoreLimit.RemovePeer = ratePerMin
-		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, ratePerMin)
-		for storeID := range v.StoreLimit {
-			sc := sc.StoreLimitConfig{AddPeer: v.StoreLimit[storeID].AddPeer, RemovePeer: ratePerMin}
-			v.StoreLimit[storeID] = sc
-		}
-	}
-
-	o.SetScheduleConfig(v)
+	})
 }
 
 // IsOneWayMergeEnabled returns if a region can only be merged into the next region of it.
@@ -539,11 +550,15 @@ func (o *PersistOptions) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitCo
 	if limit, ok := o.GetScheduleConfig().StoreLimit[storeID]; ok {
 		return limit
 	}
-	cfg := o.GetScheduleConfig().Clone()
-	limitCfg := cfg.GetDefaultStoreLimit()
-	cfg.StoreLimit[storeID] = limitCfg
-	o.SetScheduleConfig(cfg)
-	return o.GetScheduleConfig().StoreLimit[storeID]
+	o.mutateScheduleConfig(func(next *sc.ScheduleConfig) {
+		if limit, ok := next.StoreLimit[storeID]; ok {
+			returnSC = limit
+			return
+		}
+		returnSC = next.GetDefaultStoreLimit()
+		next.StoreLimit[storeID] = returnSC
+	})
+	return returnSC
 }
 
 // GetStoreLimitByType returns the limit of a store with a given type.
@@ -694,9 +709,9 @@ func (o *PersistOptions) IsUseJointConsensus() bool {
 
 // SetEnableUseJointConsensus to set the option for using joint consensus. It's only used to test.
 func (o *PersistOptions) SetEnableUseJointConsensus(enable bool) {
-	v := o.GetScheduleConfig().Clone()
-	v.EnableJointConsensus = enable
-	o.SetScheduleConfig(v)
+	o.mutateScheduleConfig(func(next *sc.ScheduleConfig) {
+		next.EnableJointConsensus = enable
+	})
 }
 
 // IsTraceRegionFlow returns if the region flow is tracing.
@@ -750,42 +765,41 @@ func (o *PersistOptions) GetHotRegionsReservedDays() uint64 {
 // AddSchedulerCfg adds the scheduler configurations.
 func (o *PersistOptions) AddSchedulerCfg(tp types.CheckerSchedulerType, args []string) {
 	oldType := types.SchedulerTypeCompatibleMap[tp]
-	v := o.GetScheduleConfig().Clone()
-	for i, schedulerCfg := range v.Schedulers {
-		// comparing args is to cover the case that there are schedulers in same type but not with same name
-		// such as two schedulers of type "evict-leader",
-		// one name is "evict-leader-scheduler-1" and the other is "evict-leader-scheduler-2"
-		if reflect.DeepEqual(schedulerCfg, sc.SchedulerConfig{Type: oldType, Args: args, Disable: false}) {
-			return
-		}
+	o.mutateScheduleConfig(func(next *sc.ScheduleConfig) {
+		for i, schedulerCfg := range next.Schedulers {
+			// comparing args is to cover the case that there are schedulers in same type but not with same name
+			// such as two schedulers of type "evict-leader",
+			// one name is "evict-leader-scheduler-1" and the other is "evict-leader-scheduler-2"
+			if reflect.DeepEqual(schedulerCfg, sc.SchedulerConfig{Type: oldType, Args: args, Disable: false}) {
+				return
+			}
 
-		if reflect.DeepEqual(schedulerCfg, sc.SchedulerConfig{Type: oldType, Args: args, Disable: true}) {
-			schedulerCfg.Disable = false
-			v.Schedulers[i] = schedulerCfg
-			o.SetScheduleConfig(v)
-			return
+			if reflect.DeepEqual(schedulerCfg, sc.SchedulerConfig{Type: oldType, Args: args, Disable: true}) {
+				schedulerCfg.Disable = false
+				next.Schedulers[i] = schedulerCfg
+				return
+			}
 		}
-	}
-	v.Schedulers = append(v.Schedulers, sc.SchedulerConfig{Type: oldType, Args: args, Disable: false})
-	o.SetScheduleConfig(v)
+		next.Schedulers = append(next.Schedulers, sc.SchedulerConfig{Type: oldType, Args: args, Disable: false})
+	})
 }
 
 // RemoveSchedulerCfg removes the scheduler configurations.
 func (o *PersistOptions) RemoveSchedulerCfg(tp types.CheckerSchedulerType) {
 	oldType := types.SchedulerTypeCompatibleMap[tp]
-	v := o.GetScheduleConfig().Clone()
-	for i, schedulerCfg := range v.Schedulers {
-		if oldType == schedulerCfg.Type {
-			if sc.IsDefaultScheduler(oldType) {
-				schedulerCfg.Disable = true
-				v.Schedulers[i] = schedulerCfg
-			} else {
-				v.Schedulers = append(v.Schedulers[:i], v.Schedulers[i+1:]...)
+	o.mutateScheduleConfig(func(next *sc.ScheduleConfig) {
+		for i, schedulerCfg := range next.Schedulers {
+			if oldType == schedulerCfg.Type {
+				if sc.IsDefaultScheduler(oldType) {
+					schedulerCfg.Disable = true
+					next.Schedulers[i] = schedulerCfg
+				} else {
+					next.Schedulers = append(next.Schedulers[:i], next.Schedulers[i+1:]...)
+				}
+				return
 			}
-			o.SetScheduleConfig(v)
-			return
 		}
-	}
+	})
 }
 
 // SetLabelProperty sets the label property.
@@ -1038,9 +1052,9 @@ func (*PersistOptions) SetSchedulingAllowanceStatus(halt bool, source string) {
 
 // SetHaltScheduling set HaltScheduling.
 func (o *PersistOptions) SetHaltScheduling(halt bool, source string) {
-	v := o.GetScheduleConfig().Clone()
-	v.HaltScheduling = halt
-	o.SetScheduleConfig(v)
+	o.mutateScheduleConfig(func(next *sc.ScheduleConfig) {
+		next.HaltScheduling = halt
+	})
 	o.SetSchedulingAllowanceStatus(halt, source)
 }
 
