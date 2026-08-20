@@ -694,6 +694,11 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 			if err := lw.postEventsFn(wresp.Events); err != nil {
 				log.Error("run post event failed in watch loop", zap.Error(err),
 					zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
+				if lw.compactionReloadFn != nil {
+					// Recreate the watch from the unadvanced revision. If it was
+					// compacted, the custom reload will reconcile the snapshot.
+					return revision, err
+				}
 			} else {
 				for _, event := range appliedEvents {
 					if event.Type == clientv3.EventTypeDelete {

@@ -177,6 +177,30 @@ func TestScanRuleSnapshotKeyRanges(t *testing.T) {
 	re.Greater(callbackCount, 2)
 }
 
+func TestRuleWatcherAllowsEmptyInitialSnapshot(t *testing.T) {
+	re := require.New(t)
+	ctx, client, clean := prepare(t, false)
+	defer clean()
+
+	storage := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	ruleManager := placement.NewRuleManager(ctx, storage, nil, nil)
+	re.NoError(ruleManager.Initialize(3, nil, "", true))
+	watchCtx, cancel := context.WithCancel(ctx)
+	rw := &Watcher{
+		ctx:                 watchCtx,
+		cancel:              cancel,
+		rulesPathPrefix:     keypath.RulesPathPrefix(),
+		ruleGroupPathPrefix: keypath.RuleGroupPathPrefix(),
+		etcdClient:          client,
+		ruleStorage:         storage,
+		ruleManager:         ruleManager,
+	}
+	defer rw.Close()
+
+	re.NoError(rw.initializeRuleWatcher())
+	re.Zero(ruleManager.GetRulesCount())
+}
+
 func TestReconcileRuleSnapshot(t *testing.T) {
 	re := require.New(t)
 	ctx, client, clean := prepare(t, false)

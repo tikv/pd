@@ -479,8 +479,16 @@ func (rw *Watcher) initializeRuleWatcher() error {
 	}
 	postEventsFn := func(events []*clientv3.Event) error {
 		defer rw.ruleManager.Unlock()
+		if applyFailed {
+			rw.ruleRevisionContinuous = false
+			return errors.New("failed to apply placement rule events")
+		}
+		// A scheduling server can start before PD has persisted placement rules.
+		// Keep the empty local state until the watch receives the first rule.
+		if len(events) == 0 && maxLoadedRevision == 0 {
+			return nil
+		}
 		if err := rw.ruleManager.TryCommitPatchLocked(rw.patch); err != nil {
-			applyFailed = true
 			rw.ruleRevisionContinuous = false
 			log.Error("failed to commit patch", zap.Error(err))
 			return err
@@ -488,12 +496,8 @@ func (rw *Watcher) initializeRuleWatcher() error {
 		for _, kr := range suspectKeyRanges.Ranges() {
 			rw.checkerController.AddSuspectKeyRange(kr.StartKey, kr.EndKey)
 		}
-		if len(events) > 0 {
-			if applyFailed {
-				rw.ruleRevisionContinuous = false
-			} else if rw.ruleRevisionContinuous {
-				rw.ruleRevision = max(rw.ruleRevision, maxLoadedRevision)
-			}
+		if len(events) > 0 && rw.ruleRevisionContinuous {
+			rw.ruleRevision = max(rw.ruleRevision, maxLoadedRevision)
 		}
 		return nil
 	}
