@@ -33,6 +33,7 @@ import (
 	"github.com/coreos/go-semver/semver"
 	"github.com/gogo/protobuf/proto"
 	"github.com/gorilla/mux"
+	"github.com/prometheus/client_golang/prometheus"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	etcdtypes "go.etcd.io/etcd/client/pkg/v3/types"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -114,8 +115,20 @@ const (
 	lostPDLeaderReElectionFactor = 10
 )
 
-// EtcdStartTimeout the timeout of the startup etcd.
+// EtcdStartTimeout is the timeout for starting the embedded etcd. It is used as
+// a no-progress timeout rather than a fixed overall deadline: startEtcd only
+// gives up when etcd makes no apply progress for this duration, so a
+// slow-but-healthy startup that keeps catching up its raft log is not killed.
+// See waitEtcdReady.
 var EtcdStartTimeout = time.Minute * 5
+
+// etcdStartProgressCheckInterval is how often startEtcd polls the embedded
+// etcd applied index to tell a slow-but-progressing startup apart from a hang.
+const etcdStartProgressCheckInterval = time.Second
+
+// etcdStartProgressLogInterval rate-limits the "still making progress" log, so a
+// recovery that runs for many minutes does not emit one line per poll.
+const etcdStartProgressLogInterval = 30 * time.Second
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
@@ -345,9 +358,6 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 }
 
 func (s *Server) startEtcd(ctx context.Context) (retErr error) {
-	newCtx, cancel := context.WithTimeout(ctx, EtcdStartTimeout)
-	defer cancel()
-
 	etcd, err := embed.StartEtcd(s.etcdCfg)
 	if err != nil {
 		return errs.ErrStartEtcd.Wrap(err).GenWithStackByCause()
@@ -395,11 +405,11 @@ func (s *Server) startEtcd(ctx context.Context) (retErr error) {
 		return err
 	}
 
-	select {
-	// Wait etcd until it is ready to use
-	case <-etcd.Server.ReadyNotify():
-	case <-newCtx.Done():
-		return errs.ErrCancelStartEtcd.FastGenByArgs()
+	// Wait until etcd is ready to use. Instead of a fixed overall deadline, only
+	// give up when etcd makes no apply progress for EtcdStartTimeout, so a slow
+	// but healthy startup that is still catching up its raft log is not killed.
+	if err = waitEtcdReady(ctx, etcd); err != nil {
+		return err
 	}
 
 	// Start the etcd and HTTP clients, then init the member.
@@ -407,13 +417,146 @@ func (s *Server) startEtcd(ctx context.Context) (retErr error) {
 	if err != nil {
 		return err
 	}
-	err = s.initMember(newCtx, etcd)
+	initCtx, cancel := context.WithTimeout(ctx, EtcdStartTimeout)
+	defer cancel()
+	err = s.initMember(initCtx, etcd)
 	if err != nil {
 		return err
 	}
 
 	s.initGRPCServiceLabels()
 	return nil
+}
+
+// etcdSnapshotMetrics are the etcd-owned Prometheus gauges that track whether
+// this member is currently receiving or applying an incoming raft snapshot:
+//   - etcd_network_snapshot_receive_inflights_total is set while the snapshot
+//     file is being downloaded from the leader, before raft ever surfaces it.
+//   - etcd_server_snapshot_apply_in_progress_total is set while the downloaded
+//     snapshot is being applied to the storage backend.
+//
+// AppliedIndex does not move during either phase even though the member is
+// healthy, so waitEtcdReadyProgress treats a nonzero reading as progress too.
+// Both gauges are registered by etcd itself on the process-wide default
+// registerer; there is no typed API for this on *embed.Etcd.
+var etcdSnapshotMetrics = map[string]struct{}{
+	"etcd_network_snapshot_receive_inflights_total": {},
+	"etcd_server_snapshot_apply_in_progress_total":  {},
+}
+
+func isEtcdSnapshotting() bool {
+	mfs, err := prometheus.DefaultGatherer.Gather()
+	if err != nil {
+		return false
+	}
+	for _, mf := range mfs {
+		if _, ok := etcdSnapshotMetrics[mf.GetName()]; !ok {
+			continue
+		}
+		for _, m := range mf.GetMetric() {
+			if m.GetGauge().GetValue() > 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// waitEtcdReady blocks until the embedded etcd is ready to serve requests.
+//
+// Rather than bounding the wait by a fixed deadline, it treats the etcd applied
+// index as a liveness signal: as long as the applied index keeps advancing, the
+// startup is still making progress (e.g. applying its raft log while catching
+// up) and we keep waiting. Only when there is no apply progress for
+// EtcdStartTimeout do we give up. This distinguishes a slow-but-healthy startup
+// from a genuine hang, such as a removed member that can never rejoin the
+// quorum. It also fails fast when etcd reports a startup error or stops before
+// becoming ready, and honors ctx cancellation for normal shutdown.
+func waitEtcdReady(ctx context.Context, etcd *embed.Etcd) error {
+	return waitEtcdReadyProgress(ctx, etcd.Server.ReadyNotify(), etcd.Server.StopNotify(),
+		etcd.Err(), etcd.Server.AppliedIndex, isEtcdSnapshotting, etcdStartProgressCheckInterval, EtcdStartTimeout)
+}
+
+// waitEtcdReadyProgress is the testable core of waitEtcdReady, decoupled from
+// *embed.Etcd so it can be driven without a real server. It keeps waiting while
+// appliedIndex advances, or while snapshotting reports that etcd is receiving
+// or applying a raft snapshot (during which appliedIndex cannot advance), and
+// reports a no-progress failure only when neither signal shows progress for
+// noProgressTimeout. It fails fast when:
+//   - etcd reports an asynchronous startup error on errCh (e.g. listener or
+//     serving failures);
+//   - the etcd server stops before becoming ready (stopped), e.g. an internal
+//     EtcdServer.run failure that may not surface on errCh — the underlying
+//     error is preserved when etcd published one;
+//   - ctx is canceled (normal shutdown).
+func waitEtcdReadyProgress(
+	ctx context.Context,
+	ready, stopped <-chan struct{},
+	errCh <-chan error,
+	appliedIndex func() uint64,
+	snapshotting func() bool,
+	checkInterval, noProgressTimeout time.Duration,
+) error {
+	ticker := time.NewTicker(checkInterval)
+	defer ticker.Stop()
+
+	lastApplied := appliedIndex()
+	lastProgress := time.Now()
+	lastLog := lastProgress
+	for {
+		select {
+		case <-ready:
+			return nil
+		case err := <-errCh:
+			return errs.ErrStartEtcd.Wrap(err).GenWithStackByCause()
+		case <-stopped:
+			// The server terminated before becoming ready; surface the real
+			// cause if etcd published one, otherwise report the stop itself.
+			select {
+			case err := <-errCh:
+				return errs.ErrStartEtcd.Wrap(err).GenWithStackByCause()
+			default:
+				return errs.ErrStartEtcd.GenWithStackByArgs()
+			}
+		case <-ctx.Done():
+			return errs.ErrCancelStartEtcd.FastGenByArgs()
+		case <-ticker.C:
+			applied := appliedIndex()
+			// Sample the wall clock here rather than reusing the ticker's
+			// scheduled time: a tick buffered during a scheduling or GC pause
+			// carries a stale timestamp that could otherwise trip a false
+			// no-progress timeout on the following tick.
+			now := time.Now()
+			if applied > lastApplied {
+				lastApplied = applied
+				lastProgress = now
+				// Rate-limit: this path can run for many minutes during a slow
+				// recovery, so avoid logging on every poll.
+				if now.Sub(lastLog) >= etcdStartProgressLogInterval {
+					log.Info("etcd is not ready yet but still making apply progress, keep waiting",
+						zap.Uint64("applied-index", applied))
+					lastLog = now
+				}
+				continue
+			}
+			if snapshotting() {
+				lastProgress = now
+				if now.Sub(lastLog) >= etcdStartProgressLogInterval {
+					log.Info("etcd is not ready yet but is installing a raft snapshot, keep waiting",
+						zap.Uint64("applied-index", applied))
+					lastLog = now
+				}
+				continue
+			}
+			if stalled := now.Sub(lastProgress); stalled >= noProgressTimeout {
+				log.Warn("etcd is not ready and made no apply progress, stop waiting",
+					zap.Uint64("applied-index", applied),
+					zap.Duration("no-progress-duration", stalled),
+					zap.Duration("timeout", noProgressTimeout))
+				return errs.ErrCancelStartEtcd.FastGenByArgs()
+			}
+		}
+	}
 }
 
 func (s *Server) initGRPCServiceLabels() {
