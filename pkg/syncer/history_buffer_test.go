@@ -96,7 +96,7 @@ func TestHistoryBufferRecordsAndFlushes(t *testing.T) {
 	}
 	re.Equal(6, h1.len())
 	re.Equal(uint64(6), h1.nextIndex())
-	h1.persist()
+	re.NoError(h1.persist())
 
 	h2 := newHistoryBufferWithConfig(100, 100, 100, kvMem)
 	re.Equal(uint64(6), h2.nextIndex())
@@ -131,7 +131,7 @@ func TestHistoryBufferPersistsNextIndexOnly(t *testing.T) {
 		h1.record(newHistoryBufferTestRegion(uint64(i)))
 	}
 	re.Equal(3, h1.len())
-	h1.persist()
+	re.NoError(h1.persist())
 
 	h2 := newHistoryBufferWithConfig(4, 8, 1, kvMem)
 	re.Equal(uint64(3), h2.nextIndex())

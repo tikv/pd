@@ -16,10 +16,12 @@ package storage
 
 import (
 	"context"
+	"fmt"
 	"sync/atomic"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
@@ -163,6 +165,67 @@ func TryLoadRegionsOnce(ctx context.Context, s Storage, f func(region *core.Regi
 		ps.regionLoaded = fromLeveldb
 	}
 	return nil
+}
+
+// TryLoadRegionsFromLocalStorageOnce switches a core storage to its local
+// Region storage and loads those Regions into memory once. It is used before
+// leader promotion when the normal configuration reload cannot run without an
+// existing PD leader.
+func TryLoadRegionsFromLocalStorageOnce(
+	ctx context.Context,
+	s Storage,
+	f func(region *core.RegionInfo) []*core.RegionInfo,
+) error {
+	ps, ok := s.(*coreStorage)
+	if !ok {
+		return s.LoadRegions(ctx, f)
+	}
+
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	ps.useRegionStorage.Store(true)
+	if ps.regionLoaded == fromLeveldb {
+		return nil
+	}
+	if err := ps.regionStorage.LoadRegions(ctx, f); err != nil {
+		return err
+	}
+	ps.regionLoaded = fromLeveldb
+	return nil
+}
+
+// ClearRegionStorage removes all persisted Region metadata from the active
+// Region storage without touching non-Region keys.
+func ClearRegionStorage(ctx context.Context, s Storage) error {
+	regionStorage := RetrieveRegionStorage(s)
+	regionKV, ok := regionStorage.(kv.Base)
+	if !ok {
+		return errors.New("region storage does not support range scan")
+	}
+	startKey := keypath.RegionPath(0)
+	endKey := keypath.RegionPath(^uint64(0)) + "\x00"
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		keys, _, err := regionKV.LoadRange(startKey, endKey, endpoint.MaxKVRangeLimit)
+		if err != nil {
+			return fmt.Errorf("load regions from local storage: %w", err)
+		}
+		if len(keys) == 0 {
+			return nil
+		}
+		if err := regionKV.RunInTxn(ctx, func(txn kv.Txn) error {
+			for _, key := range keys {
+				if err := txn.Remove(key); err != nil {
+					return err
+				}
+			}
+			return nil
+		}); err != nil {
+			return fmt.Errorf("delete regions from local storage: %w", err)
+		}
+	}
 }
 
 // LoadRegion loads one region from storage.

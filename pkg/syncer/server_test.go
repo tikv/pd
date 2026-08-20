@@ -984,8 +984,12 @@ func TestSyncHistoryRegionStopsAtSyncStartIndex(t *testing.T) {
 	err := syncer.syncHistoryRegion(context.Background(), request, syncStream, syncStartIndex)
 
 	re.NoError(err)
-	re.Equal(uint64(10), stream.lastResponse().GetStartIndex())
-	re.Equal([]*metapb.Region{{Id: 1}}, stream.lastResponse().GetRegions())
+	responses := stream.sentResponses()
+	re.Len(responses, 2)
+	re.Equal(uint64(10), responses[0].GetStartIndex())
+	re.Equal([]*metapb.Region{{Id: 1}}, responses[0].GetRegions())
+	re.Equal(syncStartIndex, responses[1].GetStartIndex())
+	re.Empty(responses[1].GetRegions())
 }
 
 type testServerStream struct {
@@ -1279,6 +1283,9 @@ func TestClientWaitsForEmptySnapshotCatchUpCompletion(t *testing.T) {
 	syncStream := newRegionSyncStream(stream, syncStartIndex)
 
 	re.NoError(syncFullRegionsForTest(context.Background(), leaderSyncer, syncStream, syncStartIndex))
+	marker := mustRecvSyncRegionResponse(t, stream, "expected empty full sync marker")
+	re.Zero(marker.GetStartIndex())
+	re.Empty(marker.GetRegions())
 	first := mustRecvSyncRegionResponse(t, stream, "expected first catch-up response")
 	re.Equal(uint64(0), first.GetStartIndex())
 	re.Len(first.GetRegions(), maxSyncRegionBatchSize)
@@ -1301,7 +1308,12 @@ func TestClientWaitsForEmptySnapshotCatchUpCompletion(t *testing.T) {
 	clientSyncer.history.resetWithIndex(syncStartIndex)
 	bc := core.NewBasicCluster()
 
-	handled, fullSyncing := clientSyncer.handleRegionSyncResponse(context.Background(), first, bc, regionStorage, false)
+	handled, fullSyncing := clientSyncer.handleRegionSyncResponse(context.Background(), marker, bc, regionStorage, false)
+	re.True(handled)
+	re.True(fullSyncing)
+	re.False(clientSyncer.IsRunning())
+
+	handled, fullSyncing = clientSyncer.handleRegionSyncResponse(context.Background(), first, bc, regionStorage, fullSyncing)
 	re.True(handled)
 	re.True(fullSyncing)
 	re.False(clientSyncer.IsRunning())
@@ -1316,6 +1328,98 @@ func TestClientWaitsForEmptySnapshotCatchUpCompletion(t *testing.T) {
 	re.False(fullSyncing)
 	re.True(clientSyncer.IsRunning())
 	re.Equal(syncStartIndex+uint64(maxSyncRegionBatchSize)+1, clientSyncer.history.getNextIndex())
+}
+
+func TestEmptyFullSyncSendsSnapshotMarkerBeforeCompletion(t *testing.T) {
+	re := require.New(t)
+	leaderSyncer, _ := newTestRegionSyncer(t)
+	syncStartIndex := uint64(42)
+	leaderSyncer.history.resetWithIndex(syncStartIndex)
+	stream := newMockSyncRegionsServer()
+	syncStream := newRegionSyncStream(stream, syncStartIndex)
+
+	re.NoError(syncFullRegionsForTest(context.Background(), leaderSyncer, syncStream, syncStartIndex))
+	marker := mustRecvSyncRegionResponse(t, stream, "expected empty full sync marker")
+	re.Zero(marker.GetStartIndex())
+	re.Empty(marker.GetRegions())
+	completion := mustRecvSyncRegionResponse(t, stream, "expected empty full sync completion response")
+	re.Equal(syncStartIndex, completion.GetStartIndex())
+	re.Empty(completion.GetRegions())
+}
+
+func TestClientWaitsForEmptySnapshotCompletionAndClearsStaleState(t *testing.T) {
+	syncStartIndex := uint64(42)
+	testCases := []struct {
+		name    string
+		prepare func(*RegionSyncer) error
+	}{
+		{
+			name: "synced follower with non-zero history index",
+			prepare: func(syncer *RegionSyncer) error {
+				syncer.history.resetWithIndex(syncStartIndex)
+				return syncer.MarkHistorySynced()
+			},
+		},
+		{
+			name: "synced follower with zero history index",
+			prepare: func(syncer *RegionSyncer) error {
+				syncer.history.resetWithIndex(0)
+				if err := syncer.MarkHistorySynced(); err != nil {
+					return err
+				}
+				syncer.initialFollowerSyncCompleted.Store(true)
+				return nil
+			},
+		},
+		{
+			name: "restarted follower with reset history index",
+			prepare: func(syncer *RegionSyncer) error {
+				return syncer.MarkHistoryIncomplete()
+			},
+		},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			regionStorage := storage.NewStorageWithMemoryBackend()
+			server := mockserver.NewMockServer(
+				context.Background(),
+				nil,
+				nil,
+				regionStorage,
+				core.NewBasicCluster(),
+			)
+			clientSyncer := NewRegionSyncer(server)
+			bc := core.NewBasicCluster()
+			staleRegion := newTestSyncRegion(1, 11)
+			bc.PutRegion(staleRegion)
+			re.NoError(regionStorage.SaveRegion(staleRegion.GetMeta()))
+			re.NoError(testCase.prepare(clientSyncer))
+
+			handled, fullSyncing := clientSyncer.handleRegionSyncResponse(context.Background(), &pdpb.SyncRegionResponse{
+				Header:     &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
+				StartIndex: 0,
+			}, bc, regionStorage, false)
+			re.True(handled)
+			re.True(fullSyncing)
+			re.False(clientSyncer.IsRunning())
+			re.Zero(clientSyncer.history.getNextIndex())
+			re.Zero(bc.GetTotalRegionCount())
+			stored := &metapb.Region{}
+			ok, err := regionStorage.LoadRegion(staleRegion.GetID(), stored)
+			re.NoError(err)
+			re.False(ok)
+
+			handled, fullSyncing = clientSyncer.handleRegionSyncResponse(context.Background(), &pdpb.SyncRegionResponse{
+				Header:     &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
+				StartIndex: syncStartIndex,
+			}, bc, regionStorage, fullSyncing)
+			re.True(handled)
+			re.False(fullSyncing)
+			re.True(clientSyncer.IsRunning())
+			re.Equal(syncStartIndex, clientSyncer.history.getNextIndex())
+		})
+	}
 }
 
 func newTestRegionSyncer(t *testing.T, regions ...*core.RegionInfo) (*RegionSyncer, *core.BasicCluster) {
@@ -1352,13 +1456,13 @@ func newTestSyncRegion(regionID, peerID uint64) *core.RegionInfo {
 }
 
 func newTestSyncRegionWithRange(regionID, peerID uint64) *core.RegionInfo {
-	return core.NewRegionInfo(&metapb.Region{
-		Id:          regionID,
-		StartKey:    []byte{byte(regionID >> 8), byte(regionID)},
-		EndKey:      []byte{byte((regionID + 1) >> 8), byte(regionID + 1)},
-		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
-		Peers:       []*metapb.Peer{{Id: peerID, StoreId: 1}},
-	}, &metapb.Peer{Id: peerID, StoreId: 1})
+	return core.NewTestRegionInfo(
+		regionID,
+		1,
+		[]byte{byte(regionID >> 8), byte(regionID)},
+		[]byte{byte((regionID + 1) >> 8), byte(regionID + 1)},
+		core.WithNewPeerIDs(peerID),
+	)
 }
 
 func startTestRegionSync(ctx context.Context, syncer *RegionSyncer, stream *mockSyncRegionsServer) chan error {
