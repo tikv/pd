@@ -235,8 +235,13 @@ func TransferPrimary(client *clientv3.Client, p *member.Participant, serviceName
 	return nil
 }
 
+// isSamePrimary reports whether primary identifies member, by name or by
+// service address. The address comparison ignores scheme so a caller
+// supplying a group's persisted (possibly pre-migration) address still
+// matches during the supported HTTP-to-HTTPS transition (see
+// KeyspaceGroupMember.IsAddressEquivalent, issue #8284).
 func isSamePrimary(member discovery.ServiceRegistryEntry, primary string) bool {
-	return primary != "" && (member.Name == primary || member.ServiceAddr == primary)
+	return primary != "" && (member.Name == primary || typeutil.EqualBaseURLs(member.ServiceAddr, primary))
 }
 
 // isGroupMember reports whether addr belongs to tsoMembersMap, which is keyed by

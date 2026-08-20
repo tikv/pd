@@ -116,6 +116,11 @@ func TestIsSamePrimary(t *testing.T) {
 	re.False(isSamePrimary(entry, "tso-2"))                 // different name
 	re.False(isSamePrimary(entry, "http://127.0.0.1:2380")) // different address
 	re.False(isSamePrimary(entry, ""))                      // empty target never matches
+
+	// A caller identifying the member by its persisted (possibly pre-migration)
+	// address must still match during the supported HTTP-to-HTTPS transition.
+	httpsEntry := discovery.ServiceRegistryEntry{Name: "tso-2", ServiceAddr: "https://127.0.0.1:1"}
+	re.True(isSamePrimary(httpsEntry, "http://127.0.0.1:1"))
 }
 
 // TestIsValidPrimaryCandidate covers the pre-check evictPrimary uses to reject an
@@ -153,6 +158,20 @@ func TestIsValidPrimaryCandidateToleratesSchemeMismatch(t *testing.T) {
 
 	re.True(IsValidPrimaryCandidate(entries, "tso-1", groupMembers),
 		"tso-1 is a group member even though the live registry's scheme differs from the persisted address")
+}
+
+// TestIsValidPrimaryCandidateToleratesSchemeMismatchByAddress covers targeting
+// by the group's persisted (pre-migration) address rather than by name:
+// isGroupMember alone is not enough to accept it, since IsValidPrimaryCandidate
+// still has to match it against the live registry entry via isSamePrimary.
+func TestIsValidPrimaryCandidateToleratesSchemeMismatchByAddress(t *testing.T) {
+	re := require.New(t)
+	entries := []discovery.ServiceRegistryEntry{
+		{Name: "tso-1", ServiceAddr: "https://127.0.0.1:1"},
+	}
+	groupMembers := map[string]bool{"http://127.0.0.1:1": true}
+
+	re.True(IsValidPrimaryCandidate(entries, "http://127.0.0.1:1", groupMembers))
 }
 
 func TestIsGroupMember(t *testing.T) {

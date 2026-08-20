@@ -45,6 +45,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/apiutil/multiservicesapi"
 	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
 const (
@@ -448,8 +449,11 @@ func evictPrimary(c *gin.Context) {
 	// treats a target equal to the current primary as a self-transfer and silently
 	// no-ops, which would report "success" while leaving the node undrained. Match
 	// on both name and service address since IsValidPrimaryCandidate and
-	// TransferPrimary accept either as an identifier for new_primary.
-	if input.NewPrimary != "" && (input.NewPrimary == svr.Name() || input.NewPrimary == svr.GetAdvertiseListenAddr()) {
+	// TransferPrimary accept either as an identifier for new_primary. The address
+	// comparison ignores scheme, like isSamePrimary, so a caller supplying this
+	// node's persisted (possibly pre-migration) address cannot bypass this guard
+	// during the supported HTTP-to-HTTPS transition.
+	if input.NewPrimary != "" && (input.NewPrimary == svr.Name() || typeutil.EqualBaseURLs(input.NewPrimary, svr.GetAdvertiseListenAddr())) {
 		c.String(http.StatusBadRequest, "new_primary must not be the node being evicted")
 		return
 	}
