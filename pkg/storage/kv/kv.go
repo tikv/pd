@@ -116,6 +116,21 @@ type Txn interface {
 	BaseReadWrite
 }
 
+type txnRevisionProvider interface {
+	txnRevision() int64
+}
+
+// TxnRevision returns a revision that can fence cache state derived from txn.
+// For an etcd transaction that commits successfully, this is the commit
+// revision; before commit it is the latest point-read revision. Backends without
+// revision support return zero.
+func TxnRevision(txn Txn) int64 {
+	if provider, ok := txn.(txnRevisionProvider); ok {
+		return provider.txnRevision()
+	}
+	return 0
+}
+
 // Base is an abstract interface for load/save pd cluster data.
 type Base interface {
 	BaseReadWrite
