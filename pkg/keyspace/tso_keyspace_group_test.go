@@ -114,16 +114,18 @@ func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupUsesBoundedTran
 	re := suite.Require()
 	keyspaceCount := maxKeyspaceRemovalBatchSize*2 + 1
 	keyspaceIDs := suite.createArchivedKeyspaces(keyspaceCount)
-	batchBoundaries := 0
+	batchBoundaryCh := make(chan struct{}, 2)
+	continueCh := make(chan struct{})
+	stopCh := make(chan struct{})
 	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/keyspace/afterRemoveKeyspacesFromGroupBatch", func() {
-		batchBoundaries++
-		locked := suite.kgm.TryLock()
-		if locked {
-			suite.kgm.Unlock()
+		batchBoundaryCh <- struct{}{}
+		select {
+		case <-continueCh:
+		case <-stopCh:
 		}
-		re.False(locked)
 	}))
 	defer func() {
+		close(stopCh)
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/afterRemoveKeyspacesFromGroupBatch"))
 	}()
 
@@ -132,14 +134,75 @@ func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupUsesBoundedTran
 	countingStore := &countingKeyspaceGroupStorage{StorageEndpoint: store}
 	suite.kgm.store = countingStore
 
-	group, err := suite.kgm.RemoveKeyspacesFromGroup(constant.DefaultKeyspaceGroupID, suite.kg, keyspaceIDs)
-	re.NoError(err)
-	re.Equal(int32(3), countingStore.runInTxnCount.Load())
-	re.Equal(2, batchBoundaries)
+	type removalResult struct {
+		group *endpoint.KeyspaceGroup
+		err   error
+	}
+	resultCh := make(chan removalResult, 1)
+	go func() {
+		group, err := suite.kgm.RemoveKeyspacesFromGroup(constant.DefaultKeyspaceGroupID, suite.kg, keyspaceIDs)
+		resultCh <- removalResult{group: group, err: err}
+	}()
+
+	createdKeyspaceIDs := make([]uint32, 0, 2)
+	for i := range 2 {
+		select {
+		case <-batchBoundaryCh:
+		case <-time.After(5 * time.Second):
+			re.FailNow("timed out waiting for a keyspace removal batch boundary")
+		}
+
+		// The manager lock is released between batches so an unrelated keyspace
+		// can be created, while relocation of existing keyspaces remains blocked.
+		managerLocked := suite.kgm.TryLock()
+		re.True(managerLocked)
+		if managerLocked {
+			suite.kgm.Unlock()
+		}
+		membershipMutationLocked := suite.kgm.membershipMutationLock.TryLock()
+		re.False(membershipMutationLocked)
+		if membershipMutationLocked {
+			suite.kgm.membershipMutationLock.Unlock()
+		}
+
+		type createResult struct {
+			meta *keyspacepb.KeyspaceMeta
+			err  error
+		}
+		createResultCh := make(chan createResult, 1)
+		go func() {
+			meta, err := suite.kg.CreateKeyspace(&CreateKeyspaceRequest{
+				Name:       fmt.Sprintf("concurrent-create-%d", i),
+				Config:     map[string]string{},
+				CreateTime: time.Now().Unix(),
+			})
+			createResultCh <- createResult{meta: meta, err: err}
+		}()
+		select {
+		case result := <-createResultCh:
+			re.NoError(result.err)
+			createdKeyspaceIDs = append(createdKeyspaceIDs, result.meta.GetId())
+		case <-time.After(5 * time.Second):
+			re.FailNow("creating a keyspace was blocked between removal batches")
+		}
+		continueCh <- struct{}{}
+	}
+
+	result := <-resultCh
+	re.NoError(result.err)
+	// Three removal transactions plus one group-membership transaction for each
+	// concurrently created keyspace.
+	re.Equal(int32(5), countingStore.runInTxnCount.Load())
 	for _, keyspaceID := range keyspaceIDs {
-		re.NotContains(group.Keyspaces, keyspaceID)
+		re.NotContains(result.group.Keyspaces, keyspaceID)
 		_, err := suite.kg.LoadKeyspaceByID(keyspaceID)
 		re.ErrorIs(err, errs.ErrKeyspaceNotFound)
+	}
+	for _, keyspaceID := range createdKeyspaceIDs {
+		re.Contains(result.group.Keyspaces, keyspaceID)
+		meta, err := suite.kg.LoadKeyspaceByID(keyspaceID)
+		re.NoError(err)
+		re.Equal(keyspacepb.KeyspaceState_ENABLED, meta.GetState())
 	}
 }
 

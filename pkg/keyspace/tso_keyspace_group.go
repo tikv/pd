@@ -78,6 +78,10 @@ type GroupManager struct {
 	client *clientv3.Client
 
 	syncutil.RWMutex
+	// membershipMutationLock prevents operations that relocate existing keyspaces
+	// from interleaving with a multi-batch removal. Adding a newly created
+	// keyspace does not take this lock, so creation can proceed between batches.
+	membershipMutationLock syncutil.RWMutex
 	// groups is the cache of keyspace group related information.
 	// user kind -> keyspace group
 	groups map[endpoint.UserKind]*indexedHeap
@@ -399,6 +403,8 @@ func (m *GroupManager) initTSONodesWatcher(client *clientv3.Client) {
 
 // CreateKeyspaceGroups creates keyspace groups.
 func (m *GroupManager) CreateKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceGroup) error {
+	m.membershipMutationLock.Lock()
+	defer m.membershipMutationLock.Unlock()
 	m.Lock()
 	defer m.Unlock()
 	if err := m.saveKeyspaceGroups(keyspaceGroups, false); err != nil {
@@ -453,6 +459,8 @@ func (m *GroupManager) DeleteKeyspaceGroupByID(id uint32) (*endpoint.KeyspaceGro
 		err error
 	)
 
+	m.membershipMutationLock.Lock()
+	defer m.membershipMutationLock.Unlock()
 	m.Lock()
 	defer m.Unlock()
 	if err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
@@ -567,8 +575,9 @@ func (m *GroupManager) GetGroupByKeyspaceID(id uint32) (uint32, error) {
 
 // RemoveKeyspacesFromGroup removes the specified keyspaces from the given keyspace group.
 // If a keyspace is not in the group, it will be skipped (no error). Large removals
-// are split into bounded transactions. Each batch is atomic, and the operation is
-// safe to retry if a later batch fails after earlier batches have committed.
+// are split into bounded transactions. Each batch is atomic. Operations that
+// relocate existing keyspaces are blocked across all batches, while newly created
+// keyspaces can still be added to the group between batches.
 func (m *GroupManager) RemoveKeyspacesFromGroup(groupID uint32, km *Manager, keyspaceIDs []uint32) (*endpoint.KeyspaceGroup, error) {
 	uniqueIDs := make([]uint32, 0, len(keyspaceIDs))
 	seen := make(map[uint32]struct{}, len(keyspaceIDs))
@@ -583,23 +592,23 @@ func (m *GroupManager) RemoveKeyspacesFromGroup(groupID uint32, km *Manager, key
 		uniqueIDs = append(uniqueIDs, keyspaceID)
 	}
 
-	// Keep the group membership stable across all batches. Otherwise a split or
-	// merge could move the remaining keyspaces after an earlier batch commits,
-	// causing a later batch to silently skip them.
-	m.Lock()
-	defer m.Unlock()
+	// Keep existing keyspaces in the group stable across all batches. New
+	// keyspaces may still be added between batches and are preserved because each
+	// batch reloads the latest group and only removes IDs from uniqueIDs.
+	m.membershipMutationLock.RLock()
+	defer m.membershipMutationLock.RUnlock()
 
 	// Still run one transaction for an empty removal so that the group is loaded
 	// and its state is validated consistently with a non-empty request.
 	if len(uniqueIDs) == 0 {
-		return m.removeKeyspacesFromGroupBatchLocked(groupID, km, nil)
+		return m.removeKeyspacesFromGroupBatch(groupID, km, nil)
 	}
 
 	var kg *endpoint.KeyspaceGroup
 	for start := 0; start < len(uniqueIDs); start += maxKeyspaceRemovalBatchSize {
 		end := min(start+maxKeyspaceRemovalBatchSize, len(uniqueIDs))
 		var err error
-		kg, err = m.removeKeyspacesFromGroupBatchLocked(groupID, km, uniqueIDs[start:end])
+		kg, err = m.removeKeyspacesFromGroupBatch(groupID, km, uniqueIDs[start:end])
 		if err != nil {
 			return nil, err
 		}
@@ -608,6 +617,12 @@ func (m *GroupManager) RemoveKeyspacesFromGroup(groupID uint32, km *Manager, key
 		}
 	}
 	return kg, nil
+}
+
+func (m *GroupManager) removeKeyspacesFromGroupBatch(groupID uint32, km *Manager, keyspaceIDs []uint32) (*endpoint.KeyspaceGroup, error) {
+	m.Lock()
+	defer m.Unlock()
+	return m.removeKeyspacesFromGroupBatchLocked(groupID, km, keyspaceIDs)
 }
 
 // removeKeyspacesFromGroupBatchLocked removes one bounded batch while the
@@ -681,6 +696,10 @@ func (m *GroupManager) UpdateKeyspaceForGroup(userKind endpoint.UserKind, groupI
 	if err != nil {
 		return err
 	}
+	if mutation == opDelete {
+		m.membershipMutationLock.Lock()
+		defer m.membershipMutationLock.Unlock()
+	}
 
 	failpoint.Inject("externalAllocNode", func(val failpoint.Value) {
 		failpointOnce.Do(func() {
@@ -744,6 +763,8 @@ func (m *GroupManager) UpdateKeyspaceGroup(oldGroupID, newGroupID string, oldUse
 		return err
 	}
 
+	m.membershipMutationLock.Lock()
+	defer m.membershipMutationLock.Unlock()
 	m.Lock()
 	defer m.Unlock()
 	oldKG := m.groups[oldUserKind].Get(uint32(oldID))
@@ -806,6 +827,8 @@ func (m *GroupManager) SplitKeyspaceGroupByID(
 	keyspaces []uint32, keyspaceIDRange ...uint32,
 ) error {
 	var splitSourceKg, splitTargetKg *endpoint.KeyspaceGroup
+	m.membershipMutationLock.Lock()
+	defer m.membershipMutationLock.Unlock()
 	m.Lock()
 	defer m.Unlock()
 	if err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) (err error) {
@@ -1205,6 +1228,8 @@ func (m *GroupManager) MergeKeyspaceGroups(mergeTargetID uint32, mergeList []uin
 		groups        = make(map[uint32]*endpoint.KeyspaceGroup, mergeListNum+1)
 		mergeTargetKg *endpoint.KeyspaceGroup
 	)
+	m.membershipMutationLock.Lock()
+	defer m.membershipMutationLock.Unlock()
 	m.Lock()
 	defer m.Unlock()
 	if err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) (err error) {

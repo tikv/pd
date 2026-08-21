@@ -602,8 +602,13 @@ func RemoveKeyspacesFromGroup(c *gin.Context) {
 	}
 
 	// Filter keyspaces: only keep those in ARCHIVED or TOMBSTONE state
-	var validKeyspaces []uint32
+	validKeyspaces := make([]uint32, 0, len(params.Keyspaces))
+	seenKeyspaces := make(map[uint32]struct{}, len(params.Keyspaces))
 	for _, keyspaceID := range params.Keyspaces {
+		if _, ok := seenKeyspaces[keyspaceID]; ok {
+			continue
+		}
+		seenKeyspaces[keyspaceID] = struct{}{}
 		// Load the keyspace meta to check its state
 		keyspaceMeta, err := keyspaceManager.LoadKeyspaceByID(keyspaceID)
 		if err != nil {
