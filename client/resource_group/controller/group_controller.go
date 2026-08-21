@@ -788,9 +788,7 @@ func (gc *groupCostController) onRequestWaitImpl(
 	*gc.mu.storeCounter[info.StoreID()] = *gc.mu.globalCounter
 	gc.mu.Unlock()
 	gc.metrics.addRequestSourceRUDelta(requestSource(info), reportedDelta)
-	if collector != nil {
-		collector.CollectRUCalculation(*detail)
-	}
+	collectRUCalculation(collector, detail, delta)
 
 	return delta, penalty, waitDuration, gc.getMeta().GetPriority(), nil
 }
@@ -827,9 +825,7 @@ func (gc *groupCostController) onResponseImpl(
 	gc.mu.Unlock()
 
 	gc.metrics.addRequestSourceRUDelta(requestSource(req), reportedDelta)
-	if collector != nil {
-		collector.CollectRUCalculation(*detail)
-	}
+	collectRUCalculation(collector, detail, delta)
 
 	return delta, nil
 }
@@ -889,9 +885,7 @@ func (gc *groupCostController) onResponseWaitImpl(
 	gc.mu.Unlock()
 
 	gc.metrics.addRequestSourceRUDelta(requestSource(req), reportedDelta)
-	if collector != nil {
-		collector.CollectRUCalculation(*detail)
-	}
+	collectRUCalculation(collector, detail, delta)
 
 	return delta, waitDuration, nil
 }
@@ -902,6 +896,15 @@ func newRUCalculationDetail(req RequestInfo) (RUCalculationCollector, *RUCalcula
 		return nil, nil
 	}
 	return collector, &RUCalculation{}
+}
+
+func collectRUCalculation(collector RUCalculationCollector, detail *RUCalculation, consumption *rmpb.Consumption) {
+	if collector == nil {
+		return
+	}
+	detail.RRU = consumption.RRU
+	detail.WRU = consumption.WRU
+	collector.CollectRUCalculation(*detail)
 }
 
 func (gc *groupCostController) addRUConsumption(consumption *rmpb.Consumption) {
