@@ -243,7 +243,7 @@ func checkGCPendingOpInfos(re *require.Assertions, enablePlacementRules bool) {
 	}
 
 	storeInfos := statistics.SummaryStoreInfos(tc.GetStores())
-	hb.summaryPendingInfluence(storeInfos) // Calling this function will GC.
+	hb.summaryPendingInfluence(tc, storeInfos) // Calling this function will GC.
 
 	for i := range opInfluenceCreators {
 		for j, typ := range typs {
@@ -2093,7 +2093,7 @@ func TestInfluenceByRWType(t *testing.T) {
 	re.NotNil(op)
 
 	storeInfos := statistics.SummaryStoreInfos(tc.GetStores())
-	hb.(*hotScheduler).summaryPendingInfluence(storeInfos)
+	hb.(*hotScheduler).summaryPendingInfluence(tc, storeInfos)
 	re.True(nearlyAbout(storeInfos[1].PendingSum.Loads[utils.RegionWriteKeys], -0.5*units.MiB))
 	re.True(nearlyAbout(storeInfos[1].PendingSum.Loads[utils.RegionWriteBytes], -0.5*units.MiB))
 	re.True(nearlyAbout(storeInfos[4].PendingSum.Loads[utils.RegionWriteKeys], 0.5*units.MiB))
@@ -2118,7 +2118,7 @@ func TestInfluenceByRWType(t *testing.T) {
 	re.NotNil(op)
 
 	storeInfos = statistics.SummaryStoreInfos(tc.GetStores())
-	hb.(*hotScheduler).summaryPendingInfluence(storeInfos)
+	hb.(*hotScheduler).summaryPendingInfluence(tc, storeInfos)
 	// assert read/write influence is the sum of write peer and write leader
 	re.True(nearlyAbout(storeInfos[1].PendingSum.Loads[utils.RegionWriteKeys], -1.2*units.MiB))
 	re.True(nearlyAbout(storeInfos[1].PendingSum.Loads[utils.RegionWriteBytes], -1.2*units.MiB))
@@ -2655,23 +2655,27 @@ func TestSummaryPendingInfluenceSkipsRemovedStoreMetric(t *testing.T) {
 	re := require.New(t)
 	defer HotPendingSum.Reset()
 
+	cancel, _, tc, _ := prepareSchedulersTest()
+	defer cancel()
 	hb := newBaseHotScheduler(nil, 0, 0, initHotRegionScheduleConfig())
 	storeID := uint64(1)
+	removed := core.NewStoreInfo(&metapb.Store{
+		Id:        storeID,
+		NodeState: metapb.NodeState_Removed,
+	})
+	tc.PutStore(removed)
 	loads := make([]float64, utils.RegionStatCount)
 	loads[utils.RegionWriteBytes] = 1
 	storeInfos := map[uint64]*statistics.StoreSummaryInfo{
 		storeID: {
-			StoreInfo: core.NewStoreInfo(&metapb.Store{
-				Id:        storeID,
-				NodeState: metapb.NodeState_Removed,
-			}),
+			StoreInfo:  removed,
 			PendingSum: &statistics.Influence{Loads: loads},
 		},
 	}
 
 	metric := HotPendingSum.WithLabelValues("1", utils.Write.String(), utils.DimToString(utils.ByteDim))
 	metric.Set(42)
-	hb.summaryPendingInfluence(storeInfos)
+	hb.summaryPendingInfluence(tc, storeInfos)
 
 	re.Equal(float64(42), promtestutil.ToFloat64(metric))
 }

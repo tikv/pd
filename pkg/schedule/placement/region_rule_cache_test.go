@@ -240,14 +240,40 @@ func TestToStoreCacheListDoesNotReinsertStaleStore(t *testing.T) {
 	re.False(ok)
 }
 
+func TestToStoreCacheListReturnsUncacheableForRemovedStore(t *testing.T) {
+	re := require.New(t)
+	manager := NewRegionRuleFitCacheManager()
+	live := core.NewStoreInfo(&metapb.Store{
+		Id:        1,
+		NodeState: metapb.NodeState_Serving,
+	})
+	storeSet := core.NewStoresInfo()
+	storeSet.PutStore(live)
+
+	_, cacheable := manager.toStoreCacheList(storeSet, []*core.StoreInfo{live})
+	re.True(cacheable)
+
+	// storeSet now shows the store removed while the stores slice still holds
+	// the stale (pre-bury) snapshot -- SetCache must not persist a
+	// region-level cache built from this call, or it would look valid
+	// (region/rule/store-state comparisons all pass against the same stale
+	// snapshot) and never get re-evaluated until an unrelated region-level
+	// change invalidates it.
+	removed := live.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
+	storeSet.PutStore(removed)
+	_, cacheable = manager.toStoreCacheList(storeSet, []*core.StoreInfo{live})
+	re.False(cacheable)
+}
+
 func (manager *RegionRuleFitCacheManager) mockRegionRuleFitCache(region *core.RegionInfo, rules []*Rule, regionStores []*core.StoreInfo) *regionRuleFitCache {
 	storeSet := core.NewStoresInfo()
 	for _, s := range regionStores {
 		storeSet.PutStore(s)
 	}
+	storeCacheList, _ := manager.toStoreCacheList(storeSet, regionStores)
 	return &regionRuleFitCache{
 		region:       toRegionCache(region),
-		regionStores: manager.toStoreCacheList(storeSet, regionStores),
+		regionStores: storeCacheList,
 		rules:        toRuleCacheList(rules),
 		bestFit: &RegionFit{
 			regionStores: regionStores,

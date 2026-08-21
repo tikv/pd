@@ -102,7 +102,7 @@ func newBaseHotScheduler(
 func (s *baseHotScheduler) prepareForBalance(typ resourceType, cluster sche.SchedulerCluster) {
 	stores := cluster.GetStores()
 	storeInfos := statistics.SummaryStoreInfos(stores)
-	s.summaryPendingInfluence(storeInfos)
+	s.summaryPendingInfluence(cluster, storeInfos)
 	s.stHistoryLoads.GC(stores)
 	storesLoads := cluster.GetStoresLoads()
 	isTraceRegionFlow := cluster.GetSchedulerConfig().IsTraceRegionFlow()
@@ -162,7 +162,7 @@ func (s *baseHotScheduler) getEffectivePendingWeight() float64 {
 // summaryPendingInfluence calculate the summary of pending Influence for each store
 // and clean the region from regionInfluence if they have ended operator.
 // It makes each dim rate or count become `weight` times to the origin value.
-func (s *baseHotScheduler) summaryPendingInfluence(storeInfos map[uint64]*statistics.StoreSummaryInfo) {
+func (s *baseHotScheduler) summaryPendingInfluence(cluster sche.SchedulerCluster, storeInfos map[uint64]*statistics.StoreSummaryInfo) {
 	pendingWeight := s.getEffectivePendingWeight()
 	for id, p := range s.regionPendings {
 		for _, from := range p.froms {
@@ -187,12 +187,12 @@ func (s *baseHotScheduler) summaryPendingInfluence(storeInfos map[uint64]*statis
 	}
 	// for metrics
 	for storeID, info := range storeInfos {
-		// storeInfos comes from SummaryStoreInfos(cluster.GetStores()), which
-		// includes tombstoned stores; without this check a pending influence
-		// entry still in its zombie period keeps republishing HotPendingSum
-		// for a removed store every Schedule() round, even after bury/final
-		// -removal or collectHotMetrics deletes the series.
-		if info.IsRemoved() {
+		// storeInfos is built from a snapshot taken at the top of
+		// prepareForBalance, so info.IsRemoved() can be stale by the time
+		// this loop runs; re-check the store fresh through cluster instead,
+		// otherwise a store buried after the snapshot was taken but before
+		// this write can still recreate HotPendingSum for it.
+		if store := cluster.GetStore(storeID); store == nil || store.IsRemoved() {
 			continue
 		}
 		storeLabel := strconv.FormatUint(storeID, 10)

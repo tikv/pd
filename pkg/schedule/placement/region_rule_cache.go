@@ -99,7 +99,11 @@ func (manager *RegionRuleFitCacheManager) SetCache(storeSet StoreSet, region *co
 		}
 		return
 	}
-	manager.regionCaches[region.GetID()] = manager.toRegionRuleFitCache(storeSet, region, fit)
+	newCache, cacheable := manager.toRegionRuleFitCache(storeSet, region, fit)
+	if !cacheable {
+		return
+	}
+	manager.regionCaches[region.GetID()] = newCache
 }
 
 // regionRuleFitCache stores regions RegionFit result and involving variables
@@ -146,14 +150,15 @@ func storesEqual(a []*storeCache, b []*core.StoreInfo) bool {
 	})
 }
 
-func (manager *RegionRuleFitCacheManager) toRegionRuleFitCache(storeSet StoreSet, region *core.RegionInfo, fit *RegionFit) *regionRuleFitCache {
+func (manager *RegionRuleFitCacheManager) toRegionRuleFitCache(storeSet StoreSet, region *core.RegionInfo, fit *RegionFit) (*regionRuleFitCache, bool) {
+	storeCacheList, cacheable := manager.toStoreCacheList(storeSet, fit.regionStores)
 	return &regionRuleFitCache{
 		region:       toRegionCache(region),
-		regionStores: manager.toStoreCacheList(storeSet, fit.regionStores),
+		regionStores: storeCacheList,
 		rules:        toRuleCacheList(fit.rules),
 		bestFit:      nil,
 		hitCount:     0,
-	}
+	}, cacheable
 }
 
 type ruleCache struct {
@@ -197,8 +202,21 @@ func (s storeCache) storeEqual(store *core.StoreInfo) bool {
 		labelEqual(s.labels, store.GetLabels())
 }
 
-func (manager *RegionRuleFitCacheManager) toStoreCacheList(storeSet StoreSet, stores []*core.StoreInfo) (c []*storeCache) {
+func (manager *RegionRuleFitCacheManager) toStoreCacheList(storeSet StoreSet, stores []*core.StoreInfo) (c []*storeCache, cacheable bool) {
+	cacheable = true
 	for _, s := range stores {
+		// The stores slice can be a stale RegionInfo/FitRegion snapshot taken
+		// before a store was buried, so re-check the store fresh through
+		// storeSet rather than trusting s.IsRemoved(). If any current store is
+		// missing or removed, the caller must not persist a region-level cache
+		// entry either -- one built from this stale snapshot would otherwise
+		// look valid (region/rule/store-state comparisons all pass) and never
+		// get re-evaluated until an unrelated region-level change invalidates
+		// it.
+		current := storeSet.GetStore(s.GetID())
+		if current == nil || current.IsRemoved() {
+			cacheable = false
+		}
 		sCache, ok := manager.storeCaches[s.GetID()]
 		if !ok || !sCache.storeEqual(s) {
 			m := make(map[string]string)
@@ -212,18 +230,13 @@ func (manager *RegionRuleFitCacheManager) toStoreCacheList(storeSet StoreSet, st
 			}
 			// A removed store's entry is only ever cleared once, when it's
 			// buried or finally removed; nothing sweeps it again after that.
-			// The stores slice can be a stale RegionInfo snapshot taken before
-			// a store was buried, so re-check the store fresh through storeSet
-			// here rather than trusting s.IsRemoved() -- otherwise a store that
-			// was buried while this same FitRegion call was still computing
-			// could get re-added and linger in storeCaches for good.
-			if current := storeSet.GetStore(s.GetID()); current != nil && !current.IsRemoved() {
+			if current != nil && !current.IsRemoved() {
 				manager.storeCaches[s.GetID()] = sCache
 			}
 		}
 		c = append(c, sCache)
 	}
-	return c
+	return c, cacheable
 }
 
 func labelEqual(label1 map[string]string, label2 []*metapb.StoreLabel) bool {
