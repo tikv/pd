@@ -1037,31 +1037,66 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 
 // RemoveKeyspace removes the keyspace specified by id if it's in proper state and not protected.
 func (manager *Manager) RemoveKeyspace(txn kv.Txn, id uint32) error {
+	if err := manager.removeKeyspacesMetadata(txn, []uint32{id}); err != nil {
+		return err
+	}
+	manager.evictKeyspacesFromCache([]uint32{id})
+	return nil
+}
+
+// removeKeyspacesMetadata schedules persistent metadata removal for the given
+// keyspaces in txn. It deliberately leaves cache eviction to the transaction
+// owner, which can perform it after a successful commit.
+func (manager *Manager) removeKeyspacesMetadata(txn kv.Txn, ids []uint32) error {
+	assignmentCounts := make(map[string]int)
+	for _, id := range ids {
+		groupID, err := manager.removeKeyspaceMetadata(txn, id)
+		if err != nil {
+			return err
+		}
+		if groupID != "" {
+			assignmentCounts[groupID]++
+		}
+	}
+	if manager.mgm == nil {
+		return nil
+	}
+	for groupID, count := range assignmentCounts {
+		if err := manager.mgm.decrementAssignmentTxn(txn, groupID, count); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (manager *Manager) removeKeyspaceMetadata(txn kv.Txn, id uint32) (string, error) {
 	manager.metaLock.Lock(id)
 	defer manager.metaLock.Unlock(id)
 	if isProtectedKeyspaceID(id) {
-		return newModifyProtectedKeyspaceError()
+		return "", newModifyProtectedKeyspaceError()
 	}
 	meta, err := manager.store.LoadKeyspaceMeta(txn, id)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if meta == nil {
-		return errs.ErrKeyspaceNotFound
+		return "", errs.ErrKeyspaceNotFound
 	}
 	if meta.GetState() == keyspacepb.KeyspaceState_ENABLED || meta.GetState() == keyspacepb.KeyspaceState_DISABLED {
-		return errors.Errorf("cannot remove keyspace in state %s", meta.GetState().String())
+		return "", errors.Errorf("cannot remove keyspace in state %s", meta.GetState().String())
 	}
 	err = manager.store.RemoveKeyspace(txn, id, meta.GetName())
 	if err != nil {
-		return err
+		return "", err
 	}
-	manager.keyspaceNameLookup.Delete(id)
-	manager.keyspaceStateLookup.Delete(id)
-	// Keep the meta-service group assignment accounting in sync within the same
-	// txn. Without this, removed keyspaces leak count and could permanently block
-	// deleting an otherwise-empty group.
-	return manager.unassignKeyspaceFromMetaServiceGroup(txn, meta)
+	return meta.GetConfig()[MetaServiceGroupIDKey], nil
+}
+
+func (manager *Manager) evictKeyspacesFromCache(ids []uint32) {
+	for _, id := range ids {
+		manager.keyspaceNameLookup.Delete(id)
+		manager.keyspaceStateLookup.Delete(id)
+	}
 }
 
 // UpdateKeyspaceStateByID updates target keyspace to the given state if it's not already in that state.
