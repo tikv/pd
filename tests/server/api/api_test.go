@@ -866,6 +866,28 @@ func TestFollowerRegionAPIWithNoForward(t *testing.T) {
 	re.Equal(http.StatusOK, resp.StatusCode, string(body))
 	re.Contains(string(body), fmt.Sprintf(`"id":%d`, regions[0].GetID()))
 
+	leaderOnlyRegionPaths := []string{
+		"/pd/api/v1/regions/writequery",
+		"/pd/api/v1/regions/readquery",
+		"/pd/api/v1/regions/size",
+		"/pd/api/v1/regions/keys",
+		"/pd/api/v1/regions/cpu",
+		"/pd/api/v1/regions/check/hist-size",
+		"/pd/api/v1/regions/check/hist-keys",
+	}
+	for _, path := range leaderOnlyRegionPaths {
+		req, err = http.NewRequest(http.MethodGet, follower.GetAddr()+path, http.NoBody)
+		re.NoError(err)
+		req.Header.Set(apiutil.PDAllowFollowerHandleHeader, "true")
+		resp, err = tests.TestDialClient.Do(req)
+		re.NoError(err)
+		body, err = io.ReadAll(resp.Body)
+		re.NoError(err)
+		re.NoError(resp.Body.Close())
+		re.Equal(http.StatusInternalServerError, resp.StatusCode, path)
+		re.Contains(string(body), "TiKV cluster not bootstrapped", path)
+	}
+
 	req, err = http.NewRequest(http.MethodGet, follower.GetAddr()+"/pd/api/v1/regions/check/miss-peer", http.NoBody)
 	re.NoError(err)
 	req.Header.Set(apiutil.PDAllowFollowerHandleHeader, "true")
