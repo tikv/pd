@@ -1086,7 +1086,7 @@ func (r *RegionsInfo) GetRegion(regionID uint64) *RegionInfo {
 
 func (r *RegionsInfo) getRegionLocked(regionID uint64) *RegionInfo {
 	if item := r.regions[regionID]; item != nil {
-		return item.RegionInfo
+		return item.getRegion()
 	}
 	return nil
 }
@@ -1097,7 +1097,7 @@ func (r *RegionsInfo) CheckAndPutRegion(region *RegionInfo) []*RegionInfo {
 	origin := r.getRegionLocked(region.GetID())
 	var ols []*RegionInfo
 	if origin == nil || !bytes.Equal(origin.GetStartKey(), region.GetStartKey()) || !bytes.Equal(origin.GetEndKey(), region.GetEndKey()) {
-		ols = r.tree.overlaps(&regionItem{RegionInfo: region})
+		ols = r.tree.overlaps(newRegionItem(region))
 	}
 	err := check(region, origin, ols)
 	if err != nil {
@@ -1133,7 +1133,7 @@ func (r *RegionsInfo) AtomicCheckAndPutRegion(ctx *MetaProcessContext, region *R
 	var ols []*RegionInfo
 	origin := r.getRegionLocked(region.GetID())
 	if origin == nil || !bytes.Equal(origin.GetStartKey(), region.GetStartKey()) || !bytes.Equal(origin.GetEndKey(), region.GetEndKey()) {
-		ols = r.tree.overlaps(&regionItem{RegionInfo: region})
+		ols = r.tree.overlaps(newRegionItem(region))
 	}
 	tracer.OnCheckOverlapsFinished()
 	err := check(region, origin, ols)
@@ -1159,7 +1159,7 @@ func (r *RegionsInfo) CheckAndPutRootTree(ctx *MetaProcessContext, region *Regio
 	var ols []*RegionInfo
 	origin := r.getRegionLocked(region.GetID())
 	if origin == nil || !bytes.Equal(origin.GetStartKey(), region.GetStartKey()) || !bytes.Equal(origin.GetEndKey(), region.GetEndKey()) {
-		ols = r.tree.overlaps(&regionItem{RegionInfo: region})
+		ols = r.tree.overlaps(newRegionItem(region))
 	}
 	tracer.OnCheckOverlapsFinished()
 	err := check(region, origin, ols)
@@ -1201,7 +1201,7 @@ func (r *RegionsInfo) UpdateSubTreeOrderInsensitive(region *RegionInfo) {
 	defer r.st.Unlock()
 	originItem, ok := r.subRegions[region.GetID()]
 	if ok {
-		origin = originItem.RegionInfo
+		origin = originItem.getRegion()
 	}
 	rangeChanged := true
 	if origin != nil {
@@ -1240,14 +1240,14 @@ func (r *RegionsInfo) preUpdateSubTreeLocked(
 		// to keep region tree consistent with subtree, we need to drop this update.
 		if tree, ok := r.subRegions[region.GetID()]; ok {
 			// Fetch the origin region info from the subtree again to ensure it is up-to-date.
-			origin := tree.RegionInfo
+			origin := tree.getRegion()
 			r.updateSubTreeStat(origin, region)
 			// overlapTree is the only ref-counted subtree and the shared item is
 			// repointed to region below, so transfer its reference here. Otherwise
 			// a flow-only update leaves the live region stuck at ref 1 while it is
 			// still present in the subtree.
 			r.overlapTree.updateRef(origin, region)
-			tree.RegionInfo = region
+			tree.setRegion(region)
 		}
 		return true
 	}
@@ -1270,7 +1270,7 @@ func (r *RegionsInfo) updateSubTreeLocked(rangeChanged bool, overlaps []*RegionI
 		}
 	}
 	// Reinsert the region into all subtrees.
-	item := &regionItem{region}
+	item := newRegionItem(region)
 	r.subRegions[region.GetID()] = item
 	r.overlapTree.update(item, false)
 	// Add leaders and followers.
@@ -1302,7 +1302,7 @@ func (r *RegionsInfo) updateSubTreeLocked(rangeChanged bool, overlaps []*RegionI
 }
 
 func (r *RegionsInfo) getOverlapRegionFromOverlapTreeLocked(region *RegionInfo) []*RegionInfo {
-	return r.overlapTree.overlaps(&regionItem{RegionInfo: region})
+	return r.overlapTree.overlaps(newRegionItem(region))
 }
 
 // GetRelevantRegions returns the relevant regions for a given region.
@@ -1311,7 +1311,7 @@ func (r *RegionsInfo) GetRelevantRegions(region *RegionInfo) (origin *RegionInfo
 	defer r.t.RUnlock()
 	origin = r.getRegionLocked(region.GetID())
 	if origin == nil || !bytes.Equal(origin.GetStartKey(), region.GetStartKey()) || !bytes.Equal(origin.GetEndKey(), region.GetEndKey()) {
-		return origin, r.tree.overlaps(&regionItem{RegionInfo: region})
+		return origin, r.tree.overlaps(newRegionItem(region))
 	}
 	return
 }
@@ -1355,11 +1355,10 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo, withOverlaps bool, ol 
 
 	if item = r.regions[region.GetID()]; item != nil {
 		// If this ID already exists, use the existing regionItem and pick out the origin.
-		origin = item.RegionInfo
+		origin = item.getRegion()
 		rangeChanged = !origin.rangeEqualsTo(region)
 		if rangeChanged {
 			// Delete itself in regionTree so that overlaps will not contain itself.
-			// Because the regionItem is reused, there is no need to delete it in the regionMap.
 			idx := -1
 			for i, o := range ol {
 				if o.GetID() == region.GetID() {
@@ -1370,19 +1369,35 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo, withOverlaps bool, ol 
 			if idx >= 0 {
 				ol = append(ol[:idx], ol[idx+1:]...)
 			}
+			// Remove the origin first, while the old item still holds it: remove
+			// locates the tree item by the origin's own key range, and adjusts the
+			// tree statistics and the reference count through it.
 			r.tree.remove(origin)
-			// Update the RegionInfo in the regionItem.
-			item.RegionInfo = region
+			// The key range changed, so the old item cannot be reused. An item that
+			// has been in a tree must never change its range, or an outstanding
+			// copy-on-write snapshot would keep it at its old position while
+			// reporting the new range. Allocate a fresh item and repoint the map
+			// entry; see regionItem.
+			//
+			// The assignment below cannot be undone by the overlap cleanup further
+			// down, because overlaps never contains this region itself: either it
+			// was filtered out of ol just above, or tree.update recomputes the
+			// overlaps after the tree.remove call above has already taken this
+			// region out of the tree.
+			item = newRegionItem(region)
+			r.regions[region.GetID()] = item
 		} else {
 			// If the range is not changed, only the statistical on the regionTree needs to be updated.
 			r.tree.updateStat(origin, region)
-			// Update the RegionInfo in the regionItem.
-			item.RegionInfo = region
+			// The range is unchanged, so the item may keep its position and only
+			// its value is replaced. This is the region-heartbeat path, and it is
+			// the only place allowed to replace a tree-resident item's value.
+			item.setRegion(region)
 			return origin, nil, rangeChanged
 		}
 	} else {
 		// If this ID does not exist, generate a new regionItem and save it in the regionMap.
-		item = &regionItem{RegionInfo: region}
+		item = newRegionItem(region)
 		r.regions[region.GetID()] = item
 	}
 	var overlaps []*RegionInfo
@@ -1438,6 +1453,19 @@ func (r *RegionsInfo) updateSubTreeStat(origin *RegionInfo, region *RegionInfo) 
 	updatePeersStat(r.pendingPeers, region.GetPendingPeers())
 }
 
+// snapshotRootTree returns a read-only snapshot of the root region tree, so that
+// a long scan does not have to hold r.t for its whole duration. See
+// rootRangeSnapshot for what the snapshot does and does not guarantee.
+//
+// This takes the write lock rather than the read lock, because btree Clone
+// rewrites the source tree's copy-on-write context. The critical section is O(1):
+// a struct copy and two small allocations, independent of the number of regions.
+func (r *RegionsInfo) snapshotRootTree() *rootRangeSnapshot {
+	r.t.Lock()
+	defer r.t.Unlock()
+	return r.tree.snapshot()
+}
+
 // TreeLen returns the RegionsInfo tree length(now only used in test)
 func (r *RegionsInfo) TreeLen() int {
 	r.t.RLock()
@@ -1449,7 +1477,7 @@ func (r *RegionsInfo) TreeLen() int {
 func (r *RegionsInfo) GetOverlaps(region *RegionInfo) []*RegionInfo {
 	r.t.RLock()
 	defer r.t.RUnlock()
-	return r.tree.overlaps(&regionItem{RegionInfo: region})
+	return r.tree.overlaps(newRegionItem(region))
 }
 
 // RemoveRegion removes RegionInfo from regionTree and regionMap
@@ -1581,7 +1609,7 @@ func (r *RegionsInfo) GetRegions() []*RegionInfo {
 	defer r.t.RUnlock()
 	regions := make([]*RegionInfo, 0, len(r.regions))
 	for _, item := range r.regions {
-		regions = append(regions, item.RegionInfo)
+		regions = append(regions, item.getRegion())
 	}
 	return regions
 }
@@ -1884,7 +1912,7 @@ func (r *RegionsInfo) GetMetaRegions() []*metapb.Region {
 	defer r.t.RUnlock()
 	regions := make([]*metapb.Region, 0, len(r.regions))
 	for _, item := range r.regions {
-		regions = append(regions, typeutil.DeepClone(item.meta, RegionFactory))
+		regions = append(regions, typeutil.DeepClone(item.getRegion().meta, RegionFactory))
 	}
 	return regions
 }
@@ -1998,7 +2026,7 @@ func (r *RegionsInfo) GetLeader(storeID uint64, region *RegionInfo) *RegionInfo 
 	r.st.RLock()
 	defer r.st.RUnlock()
 	if leaders, ok := r.leaders[storeID]; ok {
-		return leaders.find(&regionItem{RegionInfo: region}).RegionInfo
+		return leaders.find(newRegionItem(region)).getRegion()
 	}
 	return nil
 }
@@ -2008,7 +2036,7 @@ func (r *RegionsInfo) GetFollower(storeID uint64, region *RegionInfo) *RegionInf
 	r.st.RLock()
 	defer r.st.RUnlock()
 	if followers, ok := r.followers[storeID]; ok {
-		return followers.find(&regionItem{RegionInfo: region}).RegionInfo
+		return followers.find(newRegionItem(region)).getRegion()
 	}
 	return nil
 }
@@ -2144,6 +2172,13 @@ func (r *RegionsInfo) BatchScanRegions(keyRanges *keyutil.KeyRanges, opts ...Bat
 		opt(scanOptions)
 	}
 
+	// This holds r.t for the whole scan, which a rootRangeSnapshot could avoid.
+	// Measured on 1M regions, that is a bad trade here: the scan is short and the
+	// call rate is high, so taking r.t exclusively once per call to clone the tree
+	// costs far more than the read lock it replaces. At GOMAXPROCS=4 with
+	// concurrent heartbeat writers, eight-region scans went from 3.1us to 20.7us
+	// per call. Only a shared, invalidated-on-structural-change snapshot would help
+	// this shape of caller; see rootRangeSnapshot.
 	r.t.RLock()
 	defer r.t.RUnlock()
 	for _, keyRange := range krs {
@@ -2235,31 +2270,24 @@ func (r *RegionsInfo) GetRegionSizeByRange(startKey, endKey []byte) int64 {
 		defer r.t.RUnlock()
 		return r.tree.totalSize
 	}
+	// Walk a snapshot instead of scanning the live tree in chunks.
+	//
+	// The chunked version took r.t once per ScanRegionLimit regions, so on a large
+	// cluster one call acquired the lock hundreds of times, and each acquisition
+	// let at most one waiting writer through. It was also not exact: it resumed
+	// each chunk at the previous region's end key, and scanRange resolves that key
+	// to the region *containing* it, so a merge across a chunk boundary made the
+	// merged region contribute its whole size to a range that had already been
+	// counted in part.
+	snap := r.snapshotRootTree()
 	var size int64
-	for {
-		r.t.RLock()
-		var cnt int
-		r.tree.scanRange(startKey, func(region *RegionInfo) bool {
-			if len(endKey) > 0 && bytes.Compare(region.GetStartKey(), endKey) >= 0 {
-				return false
-			}
-			if cnt >= ScanRegionLimit {
-				return false
-			}
-			cnt++
-			startKey = region.GetEndKey()
-			size += region.GetApproximateSize()
-			return true
-		})
-		r.t.RUnlock()
-		if cnt == 0 {
-			break
+	snap.scanRange(startKey, func(region *RegionInfo) bool {
+		if len(endKey) > 0 && bytes.Compare(region.GetStartKey(), endKey) >= 0 {
+			return false
 		}
-		if len(startKey) == 0 {
-			break
-		}
-	}
-
+		size += region.GetApproximateSize()
+		return true
+	})
 	return size
 }
 
@@ -2306,10 +2334,10 @@ func (r *RegionsInfo) GetAdjacentRegions(region *RegionInfo) (prev, next *Region
 	p, n := r.tree.getAdjacentRegions(region)
 	// check key to avoid key range hole
 	if p != nil && bytes.Equal(p.GetEndKey(), region.GetStartKey()) {
-		prev = p.RegionInfo
+		prev = p.getRegion()
 	}
 	if n != nil && bytes.Equal(region.GetEndKey(), n.GetStartKey()) {
-		next = n.RegionInfo
+		next = n.getRegion()
 	}
 	return prev, next
 }
