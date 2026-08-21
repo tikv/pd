@@ -87,6 +87,7 @@ func prepare(t require.TestingT) (context.Context, *clientv3.Client, func()) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cfg := etcdutil.NewTestEtcdConfig()
+	cfg.UnsafeNoFsync = true
 	var err error
 	cfg.Dir, err = os.MkdirTemp("", "pd_tests")
 	re.NoError(err)
