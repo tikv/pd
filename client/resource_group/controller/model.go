@@ -159,6 +159,9 @@ type RUCalculationInputs struct {
 type RUCalculation struct {
 	Factors RUFactorSnapshot
 	Inputs  RUCalculationInputs
+	// RRU and WRU are the actual consumption produced by KVCalculator for Inputs.
+	RRU float64
+	WRU float64
 }
 
 // RUCalculationCollector is optionally implemented by requests that need the
@@ -179,23 +182,8 @@ func (c *RUCalculation) Add(other RUCalculation) {
 	c.Inputs.ReplicaWeightedWriteBytes += other.Inputs.ReplicaWeightedWriteBytes
 	c.Inputs.FailedWriteRPCCount += other.Inputs.FailedWriteRPCCount
 	c.Inputs.FailedWriteBytes += other.Inputs.FailedWriteBytes
-}
-
-// RRU returns the read RU represented by this calculation.
-func (c *RUCalculation) RRU() float64 {
-	factors, inputs := c.Factors, c.Inputs
-	return inputs.ReadRPCCount*factors.ReadBaseCost +
-		inputs.ReadRPCCount*factors.ReadPerBatchBaseCost*factors.BatchProportion +
-		inputs.ReadBytes*factors.ReadBytesCost + inputs.KVCPUTimeMs*factors.CPUMsCost
-}
-
-// WRU returns the write RU represented by this calculation.
-func (c *RUCalculation) WRU() float64 {
-	factors, inputs := c.Factors, c.Inputs
-	return inputs.ReplicaWeightedWriteRPCCount*factors.WriteBaseCost +
-		inputs.ReplicaWeightedWriteRPCCount*factors.WritePerBatchBaseCost*factors.BatchProportion +
-		inputs.ReplicaWeightedWriteBytes*factors.WriteBytesCost -
-		inputs.FailedWriteRPCCount*factors.WriteBaseCost - inputs.FailedWriteBytes*factors.WriteBytesCost
+	c.RRU += other.RRU
+	c.WRU += other.WRU
 }
 
 // ResourceCalculator is used to calculate the resource consumption of a request.

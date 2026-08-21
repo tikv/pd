@@ -288,7 +288,7 @@ func TestRUCalculationDetail(t *testing.T) {
 	}, requestDetail.Factors)
 	re.Equal(float64(1), requestDetail.Inputs.ReadRPCCount)
 	re.Equal(float64(10), requestDetail.Inputs.ReadBytes)
-	re.InDelta(requestConsumption.RRU, requestDetail.RRU(), 1e-12)
+	re.InDelta(requestConsumption.RRU, requestDetail.RRU, 1e-12)
 
 	readResp := &TestResponseInfo{
 		readBytes: 4,
@@ -303,12 +303,24 @@ func TestRUCalculationDetail(t *testing.T) {
 	re.Equal(requestDetail.Factors, responseDetail.Factors)
 	re.Equal(float64(-6), responseDetail.Inputs.ReadBytes)
 	re.Equal(float64(1), responseDetail.Inputs.KVCPUTimeMs)
-	re.InDelta(responseConsumption.RRU, responseDetail.RRU(), 1e-12)
+	re.InDelta(responseConsumption.RRU, responseDetail.RRU, 1e-12)
 
 	requestDetail.Add(responseDetail)
 	re.Equal(float64(1), requestDetail.Inputs.ReadRPCCount)
 	re.Equal(float64(4), requestDetail.Inputs.ReadBytes)
 	re.Equal(float64(1), requestDetail.Inputs.KVCPUTimeMs)
+	re.InDelta(requestConsumption.RRU+responseConsumption.RRU, requestDetail.RRU, 1e-12)
+
+	nonWaitingReq := &ruCalculationCollectingRequest{TestRequestInfo: &TestRequestInfo{
+		predictedReadBytes: 10,
+		isCop:              true,
+	}}
+	_, _, _, _, err = gc.onRequestWaitImpl(context.Background(), nonWaitingReq)
+	re.NoError(err)
+	nonWaitingConsumption, err := gc.onResponseImpl(nonWaitingReq, readResp)
+	re.NoError(err)
+	re.Len(nonWaitingReq.calculations, 2)
+	re.InDelta(nonWaitingConsumption.RRU, nonWaitingReq.calculations[1].RRU, 1e-12)
 
 	writeReq := &ruCalculationCollectingRequest{TestRequestInfo: &TestRequestInfo{
 		isWrite:     true,
@@ -322,7 +334,7 @@ func TestRUCalculationDetail(t *testing.T) {
 	re.InDelta(25.5, writeConsumption.WRU, 1e-12)
 	re.Equal(float64(3), writeDetail.Inputs.ReplicaWeightedWriteRPCCount)
 	re.Equal(float64(30), writeDetail.Inputs.ReplicaWeightedWriteBytes)
-	re.InDelta(writeConsumption.WRU, writeDetail.WRU(), 1e-12)
+	re.InDelta(writeConsumption.WRU, writeDetail.WRU, 1e-12)
 
 	paybackConsumption, _, err := gc.onResponseWaitImpl(
 		context.Background(), writeReq, &TestResponseInfo{succeed: false},
@@ -333,13 +345,14 @@ func TestRUCalculationDetail(t *testing.T) {
 	re.InDelta(-5, paybackConsumption.WRU, 1e-12)
 	re.Equal(float64(1), paybackDetail.Inputs.FailedWriteRPCCount)
 	re.Equal(float64(10), paybackDetail.Inputs.FailedWriteBytes)
-	re.InDelta(paybackConsumption.WRU, paybackDetail.WRU(), 1e-12)
+	re.InDelta(paybackConsumption.WRU, paybackDetail.WRU, 1e-12)
 
 	writeDetail.Add(paybackDetail)
 	re.Equal(float64(3), writeDetail.Inputs.ReplicaWeightedWriteRPCCount)
 	re.Equal(float64(30), writeDetail.Inputs.ReplicaWeightedWriteBytes)
 	re.Equal(float64(1), writeDetail.Inputs.FailedWriteRPCCount)
 	re.Equal(float64(10), writeDetail.Inputs.FailedWriteBytes)
+	re.InDelta(writeConsumption.WRU+paybackConsumption.WRU, writeDetail.WRU, 1e-12)
 
 	retryConsumption, _, _, _, err := gc.onRequestWaitImpl(context.Background(), writeReq)
 	re.NoError(err)
@@ -357,6 +370,7 @@ func TestRUCalculationDetail(t *testing.T) {
 	re.Equal(float64(6), writeDetail.Inputs.ReplicaWeightedWriteRPCCount)
 	re.Equal(float64(60), writeDetail.Inputs.ReplicaWeightedWriteBytes)
 	re.Equal(float64(1), writeDetail.Inputs.FailedWriteRPCCount)
+	re.InDelta(writeConsumption.WRU+paybackConsumption.WRU+retryConsumption.WRU, writeDetail.WRU, 1e-12)
 }
 
 type ruCalculationCollectingRequest struct {
