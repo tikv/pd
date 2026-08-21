@@ -40,6 +40,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
+	serverconfig "github.com/tikv/pd/server/config"
 )
 
 func TestMain(m *testing.M) {
@@ -69,7 +70,7 @@ type mockConfig struct {
 	WaitRegionSplitTimeout   typeutil.Duration
 	CheckRegionSplitInterval typeutil.Duration
 	// MetaServiceGroups is used to mock the meta-service groups for keyspace assignment.
-	MetaServiceGroups map[string]string
+	MetaServiceGroups map[string]serverconfig.MetaServiceGroupConfig
 }
 
 func (m *mockConfig) GetPreAlloc() []string {
@@ -88,12 +89,24 @@ func (m *mockConfig) GetCheckRegionSplitInterval() time.Duration {
 	return m.CheckRegionSplitInterval.Duration
 }
 
-func (m *mockConfig) SetMetaServiceGroups(metaServiceGroups map[string]string) {
+func (m *mockConfig) SetMetaServiceGroups(metaServiceGroups map[string]serverconfig.MetaServiceGroupConfig) {
 	m.MetaServiceGroups = metaServiceGroups
 }
 
 func (m *mockConfig) GetMetaServiceGroups() map[string]string {
-	return m.MetaServiceGroups
+	ret := make(map[string]string, len(m.MetaServiceGroups))
+	for name, group := range m.MetaServiceGroups {
+		ret[name] = group.Addresses
+	}
+	return ret
+}
+
+func (m *mockConfig) GetMetaServiceGroupConfigs() map[string]serverconfig.MetaServiceGroupConfig {
+	ret := make(map[string]serverconfig.MetaServiceGroupConfig, len(m.MetaServiceGroups))
+	for name, group := range m.MetaServiceGroups {
+		ret[name] = group
+	}
+	return ret
 }
 
 func (suite *keyspaceTestSuite) SetupTest() {
@@ -1095,7 +1108,7 @@ func TestAssignGroupAndSaveKeyspace(t *testing.T) {
 	kgm := NewKeyspaceGroupManager(ctx, store, nil)
 
 	// No groups available: assign=true (stale pre-check) must not fail creation.
-	emptyMgm := NewMetaServiceGroupManager(store, map[string]string{})
+	emptyMgm := NewMetaServiceGroupManager(store, map[string]serverconfig.MetaServiceGroupConfig{})
 	managerNoGroup := NewKeyspaceManager(ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{}, kgm, emptyMgm)
 	cfg := map[string]string{}
 	ks := &keyspacepb.KeyspaceMeta{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 100}, Name: "ks-stale-precheck", Config: cfg}
@@ -1107,7 +1120,9 @@ func TestAssignGroupAndSaveKeyspace(t *testing.T) {
 
 	// A present, enabled group is still assigned. Groups are disabled by
 	// default, so it must be enabled before it is eligible for assignment.
-	mgm := NewMetaServiceGroupManager(store, map[string]string{"g1": "addr1"})
+	mgm := NewMetaServiceGroupManager(store, map[string]serverconfig.MetaServiceGroupConfig{
+		"g1": {Addresses: "addr1"},
+	})
 	enabled := true
 	re.NoError(mgm.PatchStatus(ctx, "g1", &MetaServiceGroupStatusPatch{Enabled: &enabled}))
 	managerWithGroup := NewKeyspaceManager(ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{}, kgm, mgm)
@@ -1116,14 +1131,26 @@ func TestAssignGroupAndSaveKeyspace(t *testing.T) {
 	re.NoError(managerWithGroup.assignGroupAndSaveKeyspace(true, &cfg2, ks2))
 	re.Equal("g1", ks2.GetConfig()[MetaServiceGroupIDKey])
 
+	// A group enabled by config should also be assigned without needing a
+	// runtime status patch.
+	enabledByConfig := true
+	enabledByConfigMgm := NewMetaServiceGroupManager(store, map[string]serverconfig.MetaServiceGroupConfig{
+		"g2": {Addresses: "addr2", Enabled: &enabledByConfig},
+	})
+	managerEnabledByConfig := NewKeyspaceManager(ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{}, kgm, enabledByConfigMgm)
+	cfg3 := map[string]string{}
+	ks3 := &keyspacepb.KeyspaceMeta{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 102}, Name: "ks-enabled-by-config", Config: cfg3}
+	re.NoError(managerEnabledByConfig.assignGroupAndSaveKeyspace(true, &cfg3, ks3))
+	re.Equal("g2", ks3.GetConfig()[MetaServiceGroupIDKey])
+
 	// A group that exists but is disabled must not fail creation: the keyspace is
 	// created without a meta-service group assignment instead.
-	disabledMgm := NewMetaServiceGroupManager(store, map[string]string{"g2": "addr2"})
+	disabledMgm := NewMetaServiceGroupManager(store, map[string]serverconfig.MetaServiceGroupConfig{"g3": {Addresses: "addr3"}})
 	managerDisabled := NewKeyspaceManager(ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{}, kgm, disabledMgm)
-	cfg3 := map[string]string{}
-	ks3 := &keyspacepb.KeyspaceMeta{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 102}, Name: "ks-disabled-group", Config: cfg3}
-	re.NoError(managerDisabled.assignGroupAndSaveKeyspace(true, &cfg3, ks3))
-	re.NotContains(ks3.GetConfig(), MetaServiceGroupIDKey)
+	cfg4 := map[string]string{}
+	ks4 := &keyspacepb.KeyspaceMeta{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 103}, Name: "ks-disabled-group", Config: cfg4}
+	re.NoError(managerDisabled.assignGroupAndSaveKeyspace(true, &cfg4, ks4))
+	re.NotContains(ks4.GetConfig(), MetaServiceGroupIDKey)
 }
 
 func (suite *keyspaceTestSuite) TestTombstoneKeyspaceUnassignsMetaServiceGroup() {
@@ -1135,7 +1162,7 @@ func (suite *keyspaceTestSuite) TestTombstoneKeyspaceUnassignsMetaServiceGroup()
 	re.True(ok)
 	// Start without any group so creation never auto-assigns: meta-service groups
 	// are disabled by default, and this keeps the test independent of that.
-	manager.mgm = NewMetaServiceGroupManager(metaServiceGroupStore, map[string]string{})
+	manager.mgm = NewMetaServiceGroupManager(metaServiceGroupStore, map[string]serverconfig.MetaServiceGroupConfig{})
 	manager.mgm.SetKeyspaceAssignmentCounter(manager.CountKeyspacesByMetaServiceGroup)
 
 	created, err := manager.CreateKeyspace(&CreateKeyspaceRequest{
@@ -1164,7 +1191,7 @@ func (suite *keyspaceTestSuite) TestTombstoneKeyspaceUnassignsMetaServiceGroup()
 			return manager.mgm.updateAssignmentTxn(txn, "", groupID)
 		}))
 	}
-	manager.mgm.updateGroups(map[string]string{groupID: groupEndpoint})
+	manager.mgm.updateGroups(map[string]serverconfig.MetaServiceGroupConfig{groupID: {Addresses: groupEndpoint}})
 	assignKeyspaceToGroup(created.GetId())
 
 	counts, err := manager.mgm.GetAssignmentCounts(suite.ctx)

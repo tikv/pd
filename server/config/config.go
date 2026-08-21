@@ -261,6 +261,58 @@ var (
 	defaultRuntimeServices = []string{}
 )
 
+// MetaServiceGroupConfig stores the configured meta-service group endpoint and
+// whether the group should be enabled by default.
+type MetaServiceGroupConfig struct {
+	Addresses string `toml:"addresses" json:"addresses"`
+	// Enabled is nil when the config omits the field.
+	Enabled *bool `toml:"enabled" json:"enabled,omitempty"`
+}
+
+// Clone returns a deep copy of the meta-service group config.
+func (c *MetaServiceGroupConfig) Clone() MetaServiceGroupConfig {
+	if c == nil {
+		return MetaServiceGroupConfig{}
+	}
+	cloned := *c
+	if c.Enabled != nil {
+		enabled := *c.Enabled
+		cloned.Enabled = &enabled
+	}
+	return cloned
+}
+
+// UnmarshalJSON accepts either a string address or an object with addresses
+// and enabled fields.
+func (c *MetaServiceGroupConfig) UnmarshalJSON(data []byte) error {
+	if strings.TrimSpace(string(data)) == "null" {
+		*c = MetaServiceGroupConfig{}
+		return nil
+	}
+	var address string
+	if err := json.Unmarshal(data, &address); err == nil {
+		c.Addresses = address
+		return nil
+	}
+	type alias MetaServiceGroupConfig
+	var cfg alias
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return err
+	}
+	*c = MetaServiceGroupConfig(cfg)
+	return nil
+}
+
+// UnmarshalTOML accepts either a string address or a table with addresses and
+// enabled fields.
+func (c *MetaServiceGroupConfig) UnmarshalTOML(data any) error {
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	return c.UnmarshalJSON(raw)
+}
+
 func init() {
 	initByLDFlags(versioninfo.PDEdition)
 }
@@ -882,8 +934,9 @@ type KeyspaceConfig struct {
 	// CheckRegionSplitInterval indicates the interval to check whether the region split is complete
 	CheckRegionSplitInterval typeutil.Duration `toml:"check-region-split-interval" json:"check-region-split-interval"`
 	// MetaServiceGroups is the available external meta-service groups.
-	// The key is the meta-service group name, and the value is the corresponding endpoint.
-	MetaServiceGroups map[string]string `toml:"meta-service-groups" json:"meta-service-groups"`
+	// The key is the meta-service group name, and the value is the corresponding
+	// endpoint plus the default enabled state.
+	MetaServiceGroups map[string]MetaServiceGroupConfig `toml:"meta-service-groups" json:"meta-service-groups"`
 }
 
 // Validate checks if keyspace config falls within acceptable range.
@@ -921,9 +974,9 @@ func IsValidMetaServiceGroupID(id string) bool {
 }
 
 // AdjustMetaServiceGroups validates and adjusts the meta-service groups configuration.
-func AdjustMetaServiceGroups(metaGroups map[string]string) error {
-	dict := make(map[string]string, len(metaGroups))
-	for groupID, endpoint := range metaGroups {
+func AdjustMetaServiceGroups(metaGroups map[string]MetaServiceGroupConfig) error {
+	dict := make(map[string]MetaServiceGroupConfig, len(metaGroups))
+	for groupID, group := range metaGroups {
 		id := strings.TrimSpace(groupID)
 		if id == "" {
 			return errors.New("[keyspace] meta-service group ID cannot be empty")
@@ -931,21 +984,22 @@ func AdjustMetaServiceGroups(metaGroups map[string]string) error {
 		if !IsValidMetaServiceGroupID(id) {
 			return errors.New(fmt.Sprintf("[keyspace] meta-service group ID cannot contain '/': %s", id))
 		}
-		address := strings.TrimSpace(endpoint)
+		address := strings.TrimSpace(group.Addresses)
 		if address == "" {
 			return errors.New("[keyspace] meta-service group addresses cannot be empty")
 		}
 		if _, ok := dict[id]; ok {
 			return errors.New(fmt.Sprintf("[keyspace] meta-service group ID cannot be duplicated: %s", id))
 		}
-		dict[id] = address
+		group.Addresses = address
+		dict[id] = group
 	}
 	// Clear the original map and copy the validated values back to it.
 	for groupID := range metaGroups {
 		delete(metaGroups, groupID)
 	}
-	for groupID, endpoint := range dict {
-		metaGroups[groupID] = endpoint
+	for groupID, group := range dict {
+		metaGroups[groupID] = group
 	}
 
 	return nil
@@ -956,9 +1010,9 @@ func (c *KeyspaceConfig) Clone() *KeyspaceConfig {
 	cfg := *c
 	cfg.PreAlloc = append(c.PreAlloc[:0:0], c.PreAlloc...)
 	if c.MetaServiceGroups != nil {
-		cfg.MetaServiceGroups = make(map[string]string, len(c.MetaServiceGroups))
-		for name, endpoint := range c.MetaServiceGroups {
-			cfg.MetaServiceGroups[name] = endpoint
+		cfg.MetaServiceGroups = make(map[string]MetaServiceGroupConfig, len(c.MetaServiceGroups))
+		for name, group := range c.MetaServiceGroups {
+			cfg.MetaServiceGroups[name] = group.Clone()
 		}
 	}
 	return &cfg
@@ -986,16 +1040,26 @@ func (c *KeyspaceConfig) GetCheckRegionSplitInterval() time.Duration {
 	return c.CheckRegionSplitInterval.Duration
 }
 
-// GetMetaServiceGroups returns the current meta-service-group configuration.
+// GetMetaServiceGroups returns the current meta-service-group addresses.
 func (c *KeyspaceConfig) GetMetaServiceGroups() map[string]string {
 	ret := make(map[string]string, len(c.MetaServiceGroups))
-	for name, endpoint := range c.MetaServiceGroups {
-		ret[name] = endpoint
+	for name, group := range c.MetaServiceGroups {
+		ret[name] = group.Addresses
 	}
 	return ret
 }
 
 // SetMetaServiceGroups updates the current meta-service-group configuration.
-func (c *KeyspaceConfig) SetMetaServiceGroups(metaServiceGroups map[string]string) {
+func (c *KeyspaceConfig) SetMetaServiceGroups(metaServiceGroups map[string]MetaServiceGroupConfig) {
 	c.MetaServiceGroups = metaServiceGroups
+}
+
+// GetMetaServiceGroupConfigs returns the current meta-service-group
+// configuration.
+func (c *KeyspaceConfig) GetMetaServiceGroupConfigs() map[string]MetaServiceGroupConfig {
+	ret := make(map[string]MetaServiceGroupConfig, len(c.MetaServiceGroups))
+	for name, group := range c.MetaServiceGroups {
+		ret[name] = group.Clone()
+	}
+	return ret
 }

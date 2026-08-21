@@ -41,6 +41,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
+	serverconfig "github.com/tikv/pd/server/config"
 )
 
 const (
@@ -79,10 +80,12 @@ type Config interface {
 	ToWaitRegionSplit() bool
 	GetWaitRegionSplitTimeout() time.Duration
 	GetCheckRegionSplitInterval() time.Duration
-	// GetMetaServiceGroups returns the meta-service groups for keyspace assignment.
-	// key is the meta-service group id and value is the meta-service group addresses.
-	SetMetaServiceGroups(map[string]string)
+	// SetMetaServiceGroups updates the configured meta-service groups.
+	SetMetaServiceGroups(map[string]serverconfig.MetaServiceGroupConfig)
+	// GetMetaServiceGroups returns the meta-service group addresses for keyspace assignment.
 	GetMetaServiceGroups() map[string]string
+	// GetMetaServiceGroupConfigs returns the full meta-service group config.
+	GetMetaServiceGroupConfigs() map[string]serverconfig.MetaServiceGroupConfig
 }
 
 // Manager manages keyspace related data.
@@ -244,7 +247,7 @@ func (manager *Manager) initReserveKeyspace(id uint32, name string) error {
 func (manager *Manager) UpdateConfig(cfg Config) {
 	manager.config = cfg
 	if manager.mgm != nil {
-		manager.mgm.updateGroups(cfg.GetMetaServiceGroups())
+		manager.mgm.updateGroups(cfg.GetMetaServiceGroupConfigs())
 	}
 }
 
