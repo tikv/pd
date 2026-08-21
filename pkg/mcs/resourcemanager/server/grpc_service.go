@@ -250,6 +250,7 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 			if req.GetIsBackground() {
 				continue
 			}
+			keyspaceName := s.manager.getKeyspaceNameForMetrics(s.ctx, keyspaceID)
 			now := time.Now()
 			resp := &rmpb.TokenBucketResponse{
 				ResourceGroupName: rg.Name,
@@ -268,7 +269,7 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 						grt := krgm.getOrCreateGroupRUTracker(rg.Name)
 						grt.sample(clientUniqueID, now, requiredToken)
 						// Request the tokens from the resource group.
-						tokens = rg.RequestRU(now, requiredToken, targetPeriodMs, clientUniqueID, grt, krgm.getServiceLimiter())
+						tokens = rg.RequestRU(now, requiredToken, targetPeriodMs, clientUniqueID, keyspaceName, grt, krgm.getServiceLimiter())
 					}
 					if tokens == nil {
 						continue
