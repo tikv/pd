@@ -396,6 +396,11 @@ func transferPrimary(c *gin.Context) {
 // against an unbounded or malicious request.
 const maxEvictPrimaryRequestBytes int64 = 4 << 10
 
+// EvictPrimaryRequest is the request body for /primary/evict.
+type EvictPrimaryRequest struct {
+	NewPrimary string `json:"new_primary"`
+}
+
 // evictPrimary transfers away every keyspace group primary currently held by this
 // node, moving each to another member of the same group. Groups that this node is
 // not serving as primary are skipped.
@@ -417,11 +422,11 @@ const maxEvictPrimaryRequestBytes int64 = 4 << 10
 // @Tags     primary
 // @Summary  Evict all keyspace group primaries held by this node.
 // @Produce  json
-// @Param    new_primary  body  string  false  "new primary name"
-// @Success  200          {object}  map[string]string
-// @Failure  400          {string}  string  "invalid request"
-// @Failure  413          {string}  string  "request body too large"
-// @Failure  500          {object}  map[string]string
+// @Param    body  body  EvictPrimaryRequest  false  "eviction options"
+// @Success  200   {object}  map[string]string
+// @Failure  400   {string}  string  "invalid request"
+// @Failure  413   {string}  string  "request body too large"
+// @Failure  500   {object}  map[string]string
 // @Router   /primary/evict [post]
 func evictPrimary(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*tsoserver.Service)
@@ -436,9 +441,7 @@ func evictPrimary(c *gin.Context) {
 		c.String(status, err.Error())
 		return
 	}
-	var input struct {
-		NewPrimary string `json:"new_primary"`
-	}
+	var input EvictPrimaryRequest
 	if len(body) > 0 {
 		if err := json.Unmarshal(body, &input); err != nil {
 			c.String(http.StatusBadRequest, err.Error())
