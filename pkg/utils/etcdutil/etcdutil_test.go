@@ -1276,6 +1276,56 @@ func (suite *loopWatcherTestSuite) TestWatcherReloadsAfterCompactionWhenEnabled(
 	re.GreaterOrEqual(result.revision, updatedResp.Header.Revision+1)
 }
 
+func (suite *loopWatcherTestSuite) TestWatcherDoesNotAdvanceAfterLivePostCallbackFailure() {
+	re := suite.Require()
+	ctx, cancel := context.WithTimeout(suite.ctx, 3*time.Second)
+	defer cancel()
+
+	const key = "TestWatcherDoesNotAdvanceAfterLivePostCallbackFailure"
+	initialResp, err := suite.client.Put(ctx, key, "initial")
+	re.NoError(err)
+
+	postErr := errors.New("post callback failed")
+	watcher := NewLoopWatcher(
+		ctx,
+		&sync.WaitGroup{},
+		suite.client,
+		"test",
+		key,
+		func([]*clientv3.Event) error { return nil },
+		func(*mvccpb.KeyValue) error { return nil },
+		func(*mvccpb.KeyValue) error { return nil },
+		func([]*clientv3.Event) error { return postErr },
+		false, /* withPrefix */
+	)
+	watcher.SetCompactionReloadFn(func(context.Context) (int64, error) {
+		return 42, nil
+	})
+	revision, shouldContinue := watcher.reloadAfterCompaction(ctx)
+	re.True(shouldContinue)
+	re.Equal(int64(42), revision)
+
+	type watchResult struct {
+		revision int64
+		err      error
+	}
+	watchDone := make(chan watchResult, 1)
+	go func() {
+		nextRevision, watchErr := watcher.watch(ctx, initialResp.Header.Revision+1)
+		watchDone <- watchResult{revision: nextRevision, err: watchErr}
+	}()
+	_, err = suite.client.Put(suite.ctx, key, "updated")
+	re.NoError(err)
+
+	select {
+	case result := <-watchDone:
+		re.ErrorIs(result.err, postErr)
+		re.Equal(initialResp.Header.Revision+1, result.revision)
+	case <-time.After(3 * time.Second):
+		suite.T().Fatal("watcher advanced after the failed live event batch")
+	}
+}
+
 func (suite *loopWatcherTestSuite) TestWatcherStopsCompactionReloadWhenContextCanceled() {
 	re := suite.Require()
 	const key = "TestWatcherStopsCompactionReloadWhenContextCanceled"

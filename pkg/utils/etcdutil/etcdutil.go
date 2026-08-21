@@ -419,6 +419,9 @@ type LoopWatcher struct {
 	// reloadOnCompaction is enabled by consumers that can reconcile a full
 	// snapshot without changing their externally visible event contract.
 	reloadOnCompaction bool
+	// compactionReloadFn replaces the default full-value reload for consumers
+	// that need a specialized reconciliation strategy.
+	compactionReloadFn func(context.Context) (int64, error)
 	// updateClientCh is used to update the etcd client.
 	// It's only used for testing.
 	updateClientCh chan *clientv3.Client
@@ -628,7 +631,7 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 			})
 			lastReceivedResponseTime = time.Now()
 			if wresp.CompactRevision != 0 {
-				if !lw.reloadOnCompaction {
+				if !lw.reloadOnCompaction && lw.compactionReloadFn == nil {
 					log.Warn("required revision has been compacted, use the compact revision in watch loop",
 						zap.Int64("required-revision", revision), zap.Int64("compact-revision", wresp.CompactRevision),
 						zap.String("name", lw.name), zap.String("key", lw.key))
@@ -691,6 +694,11 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 			if err := lw.postEventsFn(wresp.Events); err != nil {
 				log.Error("run post event failed in watch loop", zap.Error(err),
 					zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
+				if lw.compactionReloadFn != nil {
+					// Recreate the watch from the unadvanced revision. If it was
+					// compacted, the custom reload will reconcile the snapshot.
+					return revision, err
+				}
 			} else {
 				for _, event := range appliedEvents {
 					if event.Type == clientv3.EventTypeDelete {
@@ -715,7 +723,11 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 func (lw *LoopWatcher) reloadAfterCompaction(ctx context.Context) (int64, bool) {
 	retryInterval := lw.watchChangeRetryInterval
 	for {
-		loadedRevision, err := lw.load(ctx)
+		loadFn := lw.load
+		if lw.compactionReloadFn != nil {
+			loadFn = lw.compactionReloadFn
+		}
+		loadedRevision, err := loadFn(ctx)
 		if err == nil {
 			return loadedRevision, ctx.Err() == nil
 		}
@@ -1001,6 +1013,13 @@ func (lw *LoopWatcher) SetInitialLoadSuccessFn(fn func()) {
 // keep failed loads private.
 func (lw *LoopWatcher) SetReloadOnCompaction() {
 	lw.reloadOnCompaction = true
+}
+
+// SetCompactionReloadFn sets a consumer-specific compaction reload and enables
+// it. The callback must return the next revision to watch after reconciliation.
+// It must be called before StartWatchLoop.
+func (lw *LoopWatcher) SetCompactionReloadFn(fn func(context.Context) (int64, error)) {
+	lw.compactionReloadFn = fn
 }
 
 // SetReconcileDeletedKeys enables deletion reconciliation and full snapshot
