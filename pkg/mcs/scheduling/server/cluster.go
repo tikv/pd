@@ -328,6 +328,7 @@ func (c *Cluster) SetRuntimeResources(
 	c.affinityWatcher = affinityWatcher
 	metaWatcher.SetOnStoreTombstoned(func(storeID uint64) {
 		c.hotStat.RemoveRollingStoreStats(storeID)
+		c.ruleManager.RemoveStoreCache(storeID)
 		DeleteStoreMetrics(strconv.FormatUint(storeID, 10))
 	})
 }
