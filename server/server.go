@@ -442,7 +442,9 @@ func (s *Server) startClient() error {
 	if err != nil {
 		return errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
 	}
-	// This etcd client will only be used to read and write the election-related data, such as leader key.
+	// Keep this client pinned to local etcd. Local lease renewal verifies this
+	// member's etcd leadership, preventing a stalled member from renewing through
+	// a healthy peer (tikv/pd#10671).
 	s.electionClient, err = etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.AdvertiseClientUrls, etcdutil.ElectionEtcdClientPurpose, false)
 	if err != nil {
 		return errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()

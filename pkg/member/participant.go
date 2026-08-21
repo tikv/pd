@@ -83,7 +83,7 @@ func (p *Participant) InitInfo(participant participant, purpose string) {
 	}
 	p.participant = participant
 	p.participantValue = string(data)
-	p.leadership = election.NewLeadership(p.client, p.GetElectionPath(), purpose)
+	p.leadership = election.NewLeadership(p.client, p.GetElectionPath(), purpose, participant.GetName())
 	log.Info("participant joining election", zap.String("participant-info", participant.String()), zap.String("primary-path", p.GetElectionPath()))
 }
 
