@@ -253,6 +253,135 @@ func TestRequestAndResponseConsumption(t *testing.T) {
 	}
 }
 
+func TestRUCalculationDetail(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+	cfg := *DefaultRUConfig()
+	cfg.ReadBaseCost = 1
+	cfg.ReadPerBatchBaseCost = 2
+	cfg.ReadBytesCost = 0.1
+	cfg.WriteBaseCost = 3
+	cfg.WritePerBatchBaseCost = 5
+	cfg.WriteBytesCost = 0.2
+	cfg.CPUMsCost = 0.5
+	gc.mainCfg = &cfg
+	gc.calculators = []ResourceCalculator{newKVCalculator(&cfg), newSQLCalculator(&cfg)}
+
+	readReq := &ruCalculationCollectingRequest{TestRequestInfo: &TestRequestInfo{
+		predictedReadBytes: 10,
+		isCop:              true,
+	}}
+	requestConsumption, _, _, _, err := gc.onRequestWaitImpl(context.Background(), readReq)
+	re.NoError(err)
+	re.Len(readReq.calculations, 1)
+	requestDetail := readReq.calculations[0]
+	re.InDelta(3.4, requestConsumption.RRU, 1e-12)
+	re.Equal(RUFactorSnapshot{
+		ReadBaseCost:          1,
+		ReadPerBatchBaseCost:  2,
+		ReadBytesCost:         0.1,
+		WriteBaseCost:         3,
+		WritePerBatchBaseCost: 5,
+		WriteBytesCost:        0.2,
+		CPUMsCost:             0.5,
+		BatchProportion:       0.7,
+	}, requestDetail.Factors)
+	re.Equal(float64(1), requestDetail.Inputs.ReadRPCCount)
+	re.Equal(float64(10), requestDetail.Inputs.ReadBytes)
+	re.InDelta(requestConsumption.RRU, requestDetail.RRU, 1e-12)
+
+	readResp := &TestResponseInfo{
+		readBytes: 4,
+		kvCPU:     time.Millisecond,
+		succeed:   true,
+	}
+	responseConsumption, _, err := gc.onResponseWaitImpl(context.Background(), readReq, readResp)
+	re.NoError(err)
+	re.Len(readReq.calculations, 2)
+	responseDetail := readReq.calculations[1]
+	re.InDelta(-0.1, responseConsumption.RRU, 1e-12)
+	re.Equal(requestDetail.Factors, responseDetail.Factors)
+	re.Equal(float64(-6), responseDetail.Inputs.ReadBytes)
+	re.Equal(float64(1), responseDetail.Inputs.KVCPUTimeMs)
+	re.InDelta(responseConsumption.RRU, responseDetail.RRU, 1e-12)
+
+	requestDetail.Add(responseDetail)
+	re.Equal(float64(1), requestDetail.Inputs.ReadRPCCount)
+	re.Equal(float64(4), requestDetail.Inputs.ReadBytes)
+	re.Equal(float64(1), requestDetail.Inputs.KVCPUTimeMs)
+	re.InDelta(requestConsumption.RRU+responseConsumption.RRU, requestDetail.RRU, 1e-12)
+
+	nonWaitingReq := &ruCalculationCollectingRequest{TestRequestInfo: &TestRequestInfo{
+		predictedReadBytes: 10,
+		isCop:              true,
+	}}
+	_, _, _, _, err = gc.onRequestWaitImpl(context.Background(), nonWaitingReq)
+	re.NoError(err)
+	nonWaitingConsumption, err := gc.onResponseImpl(nonWaitingReq, readResp)
+	re.NoError(err)
+	re.Len(nonWaitingReq.calculations, 2)
+	re.InDelta(nonWaitingConsumption.RRU, nonWaitingReq.calculations[1].RRU, 1e-12)
+
+	writeReq := &ruCalculationCollectingRequest{TestRequestInfo: &TestRequestInfo{
+		isWrite:     true,
+		writeBytes:  10,
+		numReplicas: 3,
+	}}
+	writeConsumption, _, _, _, err := gc.onRequestWaitImpl(context.Background(), writeReq)
+	re.NoError(err)
+	re.Len(writeReq.calculations, 1)
+	writeDetail := writeReq.calculations[0]
+	re.InDelta(25.5, writeConsumption.WRU, 1e-12)
+	re.Equal(float64(3), writeDetail.Inputs.ReplicaWeightedWriteRPCCount)
+	re.Equal(float64(30), writeDetail.Inputs.ReplicaWeightedWriteBytes)
+	re.InDelta(writeConsumption.WRU, writeDetail.WRU, 1e-12)
+
+	paybackConsumption, _, err := gc.onResponseWaitImpl(
+		context.Background(), writeReq, &TestResponseInfo{succeed: false},
+	)
+	re.NoError(err)
+	re.Len(writeReq.calculations, 2)
+	paybackDetail := writeReq.calculations[1]
+	re.InDelta(-5, paybackConsumption.WRU, 1e-12)
+	re.Equal(float64(1), paybackDetail.Inputs.FailedWriteRPCCount)
+	re.Equal(float64(10), paybackDetail.Inputs.FailedWriteBytes)
+	re.InDelta(paybackConsumption.WRU, paybackDetail.WRU, 1e-12)
+
+	writeDetail.Add(paybackDetail)
+	re.Equal(float64(3), writeDetail.Inputs.ReplicaWeightedWriteRPCCount)
+	re.Equal(float64(30), writeDetail.Inputs.ReplicaWeightedWriteBytes)
+	re.Equal(float64(1), writeDetail.Inputs.FailedWriteRPCCount)
+	re.Equal(float64(10), writeDetail.Inputs.FailedWriteBytes)
+	re.InDelta(writeConsumption.WRU+paybackConsumption.WRU, writeDetail.WRU, 1e-12)
+
+	retryConsumption, _, _, _, err := gc.onRequestWaitImpl(context.Background(), writeReq)
+	re.NoError(err)
+	re.Len(writeReq.calculations, 3)
+	retryDetail := writeReq.calculations[2]
+	re.InDelta(25.5, retryConsumption.WRU, 1e-12)
+	_, _, err = gc.onResponseWaitImpl(
+		context.Background(), writeReq, &TestResponseInfo{succeed: true},
+	)
+	re.NoError(err)
+	re.Len(writeReq.calculations, 4)
+	retryResponseDetail := writeReq.calculations[3]
+	writeDetail.Add(retryDetail)
+	writeDetail.Add(retryResponseDetail)
+	re.Equal(float64(6), writeDetail.Inputs.ReplicaWeightedWriteRPCCount)
+	re.Equal(float64(60), writeDetail.Inputs.ReplicaWeightedWriteBytes)
+	re.Equal(float64(1), writeDetail.Inputs.FailedWriteRPCCount)
+	re.InDelta(writeConsumption.WRU+paybackConsumption.WRU+retryConsumption.WRU, writeDetail.WRU, 1e-12)
+}
+
+type ruCalculationCollectingRequest struct {
+	*TestRequestInfo
+	calculations []RUCalculation
+}
+
+func (r *ruCalculationCollectingRequest) CollectRUCalculation(calculation RUCalculation) {
+	r.calculations = append(r.calculations, calculation)
+}
+
 func TestOnResponseWaitConsumption(t *testing.T) {
 	re := require.New(t)
 	gc := createTestGroupCostController(re)
