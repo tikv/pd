@@ -23,11 +23,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/docker/go-units"
+	"github.com/prometheus/client_golang/prometheus"
+	prometheus_testutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
@@ -44,6 +47,7 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
+	mcsconstant "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/mock/mockhbstream"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/progress"
@@ -2019,13 +2023,17 @@ func TestCalculateStoreSize1(t *testing.T) {
 	kr := keyutil.NewKeyRange("", "")
 	regionSizes := newRegionSizeCache(cluster.GetRegionSizeByRange)
 	// 100 * 100 * 2 (placement rule) / 4 (host) * 0.9 = 4500
-	re.Equal(4500.0, cluster.getThreshold(stores, store, &kr, regionSizes))
+	threshold, available := cluster.getThreshold(stores, store, &kr, regionSizes)
+	re.True(available)
+	re.Equal(4500.0, threshold)
 
 	cluster.opt.SetPlacementRuleEnabled(false)
 	cluster.opt.SetLocationLabels([]string{"zone", "rack", "host"})
 	regionSizes = newRegionSizeCache(cluster.GetRegionSizeByRange)
 	// 30000 (total region size) / 3 (zone) / 4 (host) * 0.9 = 2250
-	re.Equal(2250.0, cluster.getThreshold(stores, store, &kr, regionSizes))
+	threshold, available = cluster.getThreshold(stores, store, &kr, regionSizes)
+	re.True(available)
+	re.Equal(2250.0, threshold)
 }
 
 func TestRegionSizeCacheAcrossStoresAndRules(t *testing.T) {
@@ -2070,20 +2078,157 @@ func TestRegionSizeCacheAcrossStoresAndRules(t *testing.T) {
 	regionSizes := newRegionSizeCache(loader)
 
 	stores := cluster.GetStores()
-	threshold1 := cluster.getThreshold(stores, cluster.GetStore(1), &kr, regionSizes)
-	threshold2 := cluster.getThreshold(stores, cluster.GetStore(2), &kr, regionSizes)
+	threshold1, available := cluster.getThreshold(stores, cluster.GetStore(1), &kr, regionSizes)
+	re.True(available)
+	threshold2, available := cluster.getThreshold(stores, cluster.GetStore(2), &kr, regionSizes)
+	re.True(available)
 	// (100 * 3 replicas / 2 stores + 100 * 1 learner / 2 stores) * 0.9 = 180.
 	re.Equal(180.0, threshold1)
 	re.Equal(180.0, threshold2)
 	re.Equal(1, loadCounts[regionSizeCacheKey{startKey: "a", endKey: "m"}])
 
 	// A different range is loaded separately, then shared by all rules.
-	re.Equal(360.0, cluster.getThreshold(stores, cluster.GetStore(1), &otherKR, regionSizes))
+	threshold, available := cluster.getThreshold(stores, cluster.GetStore(1), &otherKR, regionSizes)
+	re.True(available)
+	re.Equal(360.0, threshold)
 	re.Equal(1, loadCounts[regionSizeCacheKey{startKey: "m", endKey: "z"}])
 
 	nextRoundRegionSizes := newRegionSizeCache(loader)
-	re.Equal(threshold1, cluster.getThreshold(stores, cluster.GetStore(1), &kr, nextRoundRegionSizes))
+	threshold, available = cluster.getThreshold(stores, cluster.GetStore(1), &kr, nextRoundRegionSizes)
+	re.True(available)
+	re.Equal(threshold1, threshold)
 	re.Equal(2, loadCounts[regionSizeCacheKey{startKey: "a", endKey: "m"}])
+}
+
+func TestPreparingRegionSizeUsesRegionSizeTree(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	cluster.SetServiceIndependent(mcsconstant.SchedulingServiceName)
+	peer := &metapb.Peer{Id: 1, StoreId: 1}
+	region := core.NewRegionInfo(&metapb.Region{
+		Id:       1,
+		StartKey: []byte("a"),
+		EndKey:   []byte("z"),
+		Peers:    []*metapb.Peer{peer},
+	}, peer, core.SetApproximateSize(10))
+	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
+	result := cluster.getPreparingRegionSize(nil, nil)
+	re.Equal(int64(10), result.size)
+	re.True(result.available)
+
+	cluster.StartRegionSizeTree(ctx)
+	t.Cleanup(cluster.StopRegionSizeTree)
+	re.Eventually(func() bool {
+		result := cluster.getPreparingRegionSize([]byte("a"), []byte("z"))
+		return result.size == 10 && result.available
+	}, 5*time.Second, 10*time.Millisecond)
+
+	updated := region.Clone(core.SetApproximateSize(40))
+	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), updated))
+	re.Equal(int64(40), cluster.GetRegionSizeByRange(nil, nil))
+	result = cluster.getPreparingRegionSize(nil, nil)
+	re.Equal(int64(40), result.size)
+	re.True(result.available)
+	re.Eventually(func() bool {
+		result := cluster.getPreparingRegionSize([]byte("a"), []byte("z"))
+		return result.size == 40 && result.available
+	}, 5*time.Second, 10*time.Millisecond)
+}
+
+func TestCheckStoreDefersPreparingWhenRegionSizeTreeIsUnavailable(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	opt.SetPlacementRuleEnabled(true)
+	opt.SetMaxReplicas(1)
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	re.NoError(cluster.ruleManager.SetRule(&placement.Rule{
+		GroupID:     placement.DefaultGroupID,
+		ID:          "bounded",
+		StartKeyHex: "00",
+		EndKeyHex:   "ff",
+		Role:        placement.Voter,
+		Count:       1,
+	}))
+	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
+	cluster.SetPrepared()
+	cluster.progressManager = progress.NewManager(cluster.GetCoordinator().GetCheckerController(),
+		nodeStateCheckJobInterval)
+
+	now := time.Now()
+	stores := newTestStores(2, "8.5.0")
+	for i, store := range stores {
+		if i == 0 {
+			store = store.Clone(
+				core.SetNodeState(metapb.NodeState_Preparing),
+				core.SetStoreStartTime(now.Unix()),
+			)
+		}
+		re.NoError(cluster.PutMetaStore(store.GetMeta()))
+		cluster.PutStore(cluster.GetStore(store.GetID()).Clone(
+			core.SetLastHeartbeatTS(now),
+			core.SetRegionCount(10),
+			core.SetRegionSize(15),
+		))
+	}
+
+	for i := range core.InitClusterRegionThreshold {
+		peer := &metapb.Peer{Id: uint64(i + 1), StoreId: stores[len(stores)-1].GetID()}
+		region := core.NewRegionInfo(&metapb.Region{
+			Id:       uint64(i + 1),
+			StartKey: []byte(fmt.Sprintf("%04d", i)),
+			EndKey:   []byte(fmt.Sprintf("%04d", i+1)),
+			Peers:    []*metapb.Peer{peer},
+		}, peer, core.SetApproximateSize(3))
+		cluster.PutRegion(region)
+	}
+
+	indexCtx, stopIndex := context.WithCancel(ctx)
+	stopIndex()
+	cluster.StartRegionSizeTree(indexCtx)
+	t.Cleanup(cluster.StopRegionSizeTree)
+
+	// The unavailable bounded index neither falls back to a root range scan nor
+	// treats the unknown threshold as zero.
+	cluster.checkStores()
+	re.Equal(metapb.NodeState_Preparing, cluster.GetStore(stores[0].GetID()).GetNodeState())
+	re.Nil(cluster.progressManager.GetProgressByStoreID(stores[0].GetID()))
+}
+
+func TestClusterMetricsCollectRegionSizeTreeInIndependentSchedulingMode(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cluster := &RaftCluster{BasicCluster: core.NewBasicCluster()}
+	cluster.PutRegion(core.NewRegionInfo(&metapb.Region{
+		Id:       1,
+		StartKey: []byte("a"),
+		EndKey:   []byte("z"),
+	}, nil, core.SetApproximateSize(10)))
+	cluster.StartRegionSizeTree(ctx)
+	t.Cleanup(cluster.StopRegionSizeTree)
+	require.Eventually(t, func() bool {
+		_, ready := cluster.GetRegionSizeByRangeFromSizeTree([]byte("a"), []byte("z"))
+		return ready
+	}, 5*time.Second, 10*time.Millisecond)
+
+	cluster.SetServiceIndependent(mcsconstant.SchedulingServiceName)
+	cluster.collectMetrics()
+	require.NoError(t, prometheus_testutil.GatherAndCompare(
+		prometheus.DefaultGatherer,
+		strings.NewReader(`# HELP pd_core_region_size_tree_ready Whether the eventually consistent Region size tree is ready for queries.
+# TYPE pd_core_region_size_tree_ready gauge
+pd_core_region_size_tree_ready 1
+`),
+		"pd_core_region_size_tree_ready",
+	))
 }
 
 func TestStatsRegions(t *testing.T) {
@@ -2194,7 +2339,9 @@ func TestCalculateStoreSize2(t *testing.T) {
 	kr := keyutil.NewKeyRange("", "")
 	regionSizes := newRegionSizeCache(cluster.GetRegionSizeByRange)
 	// 100 * 100 * 4 (total region size) / 2 (dc) / 2 (logic) / 3 (host) * 0.9 = 3000
-	re.Equal(3000.0, cluster.getThreshold(stores, store, &kr, regionSizes))
+	threshold, available := cluster.getThreshold(stores, store, &kr, regionSizes)
+	re.True(available)
+	re.Equal(3000.0, threshold)
 }
 
 func TestStores(t *testing.T) {

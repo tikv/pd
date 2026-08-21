@@ -478,6 +478,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	c.checkSchedulingService()
 	checkSchedulingDuration := time.Since(checkSchedulingStart)
 	log.Info("check scheduling service completed", zap.Duration("cost", checkSchedulingDuration))
+	c.StartRegionSizeTree(c.ctx)
 	backgroundJobsStart := time.Now()
 	c.wg.Add(11)
 	go c.runServiceCheckJob()
@@ -1038,6 +1039,7 @@ func (c *RaftCluster) Stop() {
 	}
 
 	c.wg.Wait()
+	c.StopRegionSizeTree()
 	log.Info("raft cluster is stopped")
 }
 
@@ -1960,31 +1962,59 @@ type regionSizeCacheKey struct {
 	endKey   string
 }
 
+type regionSizeCacheValue struct {
+	size      int64
+	available bool
+}
+
 // regionSizeCache is scoped to one checkStores round and is refreshed on the next round.
 type regionSizeCache struct {
-	loader func(startKey, endKey []byte) int64
-	sizes  map[regionSizeCacheKey]int64
+	loader func(startKey, endKey []byte) regionSizeCacheValue
+	sizes  map[regionSizeCacheKey]regionSizeCacheValue
 }
 
 func newRegionSizeCache(loader func(startKey, endKey []byte) int64) regionSizeCache {
+	return newRegionSizeCacheWithResult(func(startKey, endKey []byte) regionSizeCacheValue {
+		return regionSizeCacheValue{size: loader(startKey, endKey), available: true}
+	})
+}
+
+func newRegionSizeCacheWithResult(
+	loader func(startKey, endKey []byte) regionSizeCacheValue,
+) regionSizeCache {
 	return regionSizeCache{
 		loader: loader,
-		sizes:  make(map[regionSizeCacheKey]int64),
+		sizes:  make(map[regionSizeCacheKey]regionSizeCacheValue),
 	}
 }
 
-func (c regionSizeCache) getRegionSize(startKey, endKey []byte) int64 {
+func (c regionSizeCache) getRegionSize(startKey, endKey []byte) regionSizeCacheValue {
 	key := regionSizeCacheKey{
 		startKey: string(startKey),
 		endKey:   string(endKey),
 	}
-	if size, ok := c.sizes[key]; ok {
-		return size
+	result, ok := c.sizes[key]
+	if !ok {
+		result = c.loader(startKey, endKey)
+		c.sizes[key] = result
 	}
+	return result
+}
 
-	size := c.loader(startKey, endKey)
-	c.sizes[key] = size
-	return size
+func (c *RaftCluster) getPreparingRegionSize(startKey, endKey []byte) regionSizeCacheValue {
+	if len(startKey) == 0 && len(endKey) == 0 {
+		// The root tree already maintains the full-range total in O(1).
+		return regionSizeCacheValue{
+			size:      c.GetRegionSizeByRange(startKey, endKey),
+			available: true,
+		}
+	}
+	if size, ready := c.GetRegionSizeByRangeFromSizeTree(startKey, endKey); ready {
+		return regionSizeCacheValue{size: size, available: true}
+	}
+	// Avoid reading a partially built index. Preparing can safely defer this
+	// state transition until the independently maintained index is ready.
+	return regionSizeCacheValue{}
 }
 
 func (c *RaftCluster) checkStores() {
@@ -1992,8 +2022,8 @@ func (c *RaftCluster) checkStores() {
 		offlineStores []*metapb.Store
 		upStoreCount  int
 		stores        = c.GetStores()
-		regionSizes   = newRegionSizeCache(c.GetRegionSizeByRange)
 	)
+	regionSizes := newRegionSizeCacheWithResult(c.getPreparingRegionSize)
 
 	for _, store := range stores {
 		storeID := store.GetID()
@@ -2014,7 +2044,10 @@ func (c *RaftCluster) checkStores() {
 	}
 }
 
-func (c *RaftCluster) checkStore(storeID uint64, regionSizes regionSizeCache) (isInUp, isInOffline bool) {
+func (c *RaftCluster) checkStore(
+	storeID uint64,
+	regionSizes regionSizeCache,
+) (isInUp, isInOffline bool) {
 	c.storeStateLock.Lock(uint32(storeID))
 	defer c.storeStateLock.Unlock(uint32(storeID))
 
@@ -2025,8 +2058,9 @@ func (c *RaftCluster) checkStore(storeID uint64, regionSizes regionSizeCache) (i
 	}
 
 	var (
-		regionSize = float64(store.GetRegionSize())
-		threshold  float64
+		regionSize         = float64(store.GetRegionSize())
+		threshold          float64
+		thresholdAvailable = true
 	)
 	switch store.GetNodeState() {
 	case metapb.NodeState_Preparing:
@@ -2034,11 +2068,14 @@ func (c *RaftCluster) checkStore(storeID uint64, regionSizes regionSizeCache) (i
 			c.GetTotalRegionCount() < core.InitClusterRegionThreshold
 		if !readyToServe && (c.IsPrepared() || (c.IsServiceIndependent(constant.SchedulingServiceName) && c.isStorePrepared())) {
 			kr := keyutil.NewKeyRange("", "")
-			threshold = c.getThreshold(c.GetStores(), store, &kr, regionSizes)
-			log.Debug("store preparing threshold", zap.Uint64("store-id", storeID),
-				zap.Float64("threshold", threshold),
-				zap.Float64("region-size", regionSize))
-			readyToServe = regionSize >= threshold
+			stores := c.GetStores()
+			threshold, thresholdAvailable = c.getThreshold(stores, store, &kr, regionSizes)
+			if thresholdAvailable {
+				log.Debug("store preparing threshold", zap.Uint64("store-id", storeID),
+					zap.Float64("threshold", threshold),
+					zap.Float64("region-size", regionSize))
+				readyToServe = regionSize >= threshold
+			}
 		}
 		if readyToServe {
 			if err := c.ReadyToServeLocked(storeID); err != nil {
@@ -2079,7 +2116,9 @@ func (c *RaftCluster) checkStore(storeID uint64, regionSizes regionSizeCache) (i
 			log.Info("auto gc the tombstone store success", zap.Stringer("store", store.GetMeta()), zap.Duration("down-time", store.DownTime()))
 		}
 	}
-	c.progressManager.UpdateProgress(store, regionSize, threshold)
+	if thresholdAvailable {
+		c.progressManager.UpdateProgress(store, regionSize, threshold)
+	}
 	// When store is preparing or serving, we think it is in up.
 	// `checkStore` only may change store state from preparing to serving.
 	// So we don't need to get store again.
@@ -2092,30 +2131,43 @@ func (c *RaftCluster) getThreshold(
 	store *core.StoreInfo,
 	kr *keyutil.KeyRange,
 	regionSizes regionSizeCache,
-) float64 {
+) (float64, bool) {
 	start := time.Now()
 	if !c.opt.IsPlacementRulesEnabled() {
-		regionSize := regionSizes.getRegionSize(kr.StartKey, kr.EndKey) * int64(c.opt.GetMaxReplicas())
+		result := regionSizes.getRegionSize(kr.StartKey, kr.EndKey)
+		if !result.available {
+			return 0, false
+		}
+		regionSize := result.size * int64(c.opt.GetMaxReplicas())
 		weight := core.GetStoreTopoWeight(store, stores, c.opt.GetLocationLabels(), c.opt.GetMaxReplicas())
-		return float64(regionSize) * weight * 0.9
+		return float64(regionSize) * weight * 0.9, true
 	}
 
 	keys := c.ruleManager.GetSplitKeys(kr.StartKey, kr.EndKey)
 	if len(keys) == 0 {
-		return c.calculateRange(stores, store, kr.StartKey, kr.EndKey, regionSizes) * 0.9
+		storeSize, available := c.calculateRange(stores, store, kr.StartKey, kr.EndKey, regionSizes)
+		return storeSize * 0.9, available
 	}
 
 	storeSize := 0.0
 	startKey := kr.StartKey
 	for _, key := range keys {
 		endKey := key
-		storeSize += c.calculateRange(stores, store, startKey, endKey, regionSizes)
+		rangeSize, available := c.calculateRange(stores, store, startKey, endKey, regionSizes)
+		if !available {
+			return 0, false
+		}
+		storeSize += rangeSize
 		startKey = endKey
 	}
 	// the range from the last split key to the last key
-	storeSize += c.calculateRange(stores, store, startKey, kr.EndKey, regionSizes)
+	rangeSize, available := c.calculateRange(stores, store, startKey, kr.EndKey, regionSizes)
+	if !available {
+		return 0, false
+	}
+	storeSize += rangeSize
 	log.Debug("threshold calculation time", zap.Duration("cost", time.Since(start)))
-	return storeSize * 0.9
+	return storeSize * 0.9, true
 }
 
 func (c *RaftCluster) calculateRange(
@@ -2123,7 +2175,7 @@ func (c *RaftCluster) calculateRange(
 	store *core.StoreInfo,
 	startKey, endKey []byte,
 	regionSizes regionSizeCache,
-) float64 {
+) (float64, bool) {
 	rules := c.ruleManager.GetRulesForApplyRange(startKey, endKey)
 	var (
 		regionSize       int64
@@ -2135,7 +2187,11 @@ func (c *RaftCluster) calculateRange(
 			continue
 		}
 		if !regionSizeLoaded {
-			regionSize = regionSizes.getRegionSize(startKey, endKey)
+			result := regionSizes.getRegionSize(startKey, endKey)
+			if !result.available {
+				return 0, false
+			}
+			regionSize = result.size
 			regionSizeLoaded = true
 		}
 
@@ -2161,7 +2217,7 @@ func (c *RaftCluster) calculateRange(
 			zap.Float64("store-size", storeSize),
 		)
 	}
-	return storeSize
+	return storeSize, true
 }
 
 // RemoveTombStoneRecords removes the tombStone Records.
@@ -2228,6 +2284,7 @@ func (c *RaftCluster) deleteStore(store *core.StoreInfo) error {
 }
 
 func (c *RaftCluster) collectMetrics() {
+	c.CollectRegionSizeTreeMetrics()
 	c.collectHealthStatus()
 }
 
