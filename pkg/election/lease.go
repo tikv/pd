@@ -16,12 +16,15 @@ package election
 
 import (
 	"context"
+	"strings"
 	"sync/atomic"
 	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
+	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
@@ -41,6 +44,11 @@ const (
 type Lease struct {
 	// purpose is used to show what this election for
 	purpose string
+	// name identifies the member this lease belongs to. Every member in an
+	// election shares the same purpose, so purpose alone cannot tell them apart;
+	// the failpoints below need to single out one member of a cluster that runs
+	// several of them in a single process.
+	name string
 	// etcd client and lease
 	client *clientv3.Client
 	lease  clientv3.Lease
@@ -57,14 +65,35 @@ type Lease struct {
 	metrics leaseMetrics
 }
 
-// NewLease creates a new Lease instance.
-func NewLease(client *clientv3.Client, purpose string) *Lease {
+// NewLease creates a new Lease instance. `name` identifies the member the lease
+// belongs to; it is not part of the metrics labels, which stay keyed on purpose
+// alone so that the label cardinality does not grow with the cluster.
+func NewLease(client *clientv3.Client, purpose, name string) *Lease {
 	return &Lease{
 		purpose: purpose,
+		name:    name,
 		client:  client,
 		lease:   clientv3.NewLease(client),
 		metrics: newLeaseMetrics(purpose),
 	}
+}
+
+// matchesFailpointTarget reports whether a failpoint value of the form
+// "<purpose>@<name>" refers to this lease. Scoping on the member name as well as
+// the purpose matters because `failpoint.Enable` arms an injection point for the
+// whole process, while the integration tests run every member of a cluster
+// inside one process: a purpose-only match would degrade the members that are
+// supposed to stay healthy and take over.
+func (l *Lease) matchesFailpointTarget(val failpoint.Value) bool {
+	target, ok := val.(string)
+	if !ok {
+		return false
+	}
+	purpose, name, found := strings.Cut(target, "@")
+	if !found {
+		return false
+	}
+	return purpose == l.purpose && name == l.name
 }
 
 func (l *Lease) setID(id clientv3.LeaseID) {
@@ -130,6 +159,18 @@ func (l *Lease) Close() error {
 	localTTLRemaining.unregister(l)
 	// Reset expire time.
 	l.expireTime.Store(typeutil.ZeroTime)
+	// Everything below here talks to etcd or logs, so it can block for an
+	// unbounded time when the volume holding the data directory stops completing
+	// writes. This failpoint stands in for that, so a test can assert that the
+	// caller has already given up its identity in memory by the time it gets here.
+	// The pause is bounded rather than open-ended because Server.Close stops the
+	// server loop before it closes the election client, so a wait that only ends
+	// with the client would deadlock the shutdown it is meant to outlive.
+	failpoint.Inject("blockLeaseClose", func(val failpoint.Value) {
+		if l.matchesFailpointTarget(val) {
+			time.Sleep(10 * time.Second)
+		}
+	})
 	// Try to revoke lease to make subsequent elections faster.
 	ctx, cancel := context.WithTimeout(l.client.Ctx(), revokeLeaseTimeout)
 	defer cancel()
@@ -278,6 +319,19 @@ func (l *Lease) keepAliveWorker(ctx context.Context, interval time.Duration) <-c
 				requestStart := time.Now()
 				lastRequestStart, _ := lastTime.Swap(requestStart).(time.Time)
 				res, err := l.lease.KeepAliveOnce(ctx1, l.GetID())
+				failpoint.Inject("keepAliveFailed", func(val failpoint.Value) {
+					// Falsify only this caller's view of the renewal. The
+					// request above has already reached etcd and succeeded, so
+					// the lease is still being renewed server side and the
+					// leader key never expires on its own. That is deliberate:
+					// it leaves the local deadline as the only thing that can
+					// end the term, which is what the renewal tests need to
+					// isolate. Injecting ahead of the request instead would let
+					// the key really expire and prove something weaker.
+					if l.matchesFailpointTarget(val) {
+						res, err = nil, errors.New("keepAliveFailed")
+					}
+				})
 
 				// Record the duration of the `KeepAliveOnce` request.
 				l.metrics.observeKeepAliveRequestDurationMetrics(time.Since(requestStart), err)

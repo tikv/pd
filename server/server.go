@@ -443,6 +443,29 @@ func (s *Server) startClient() error {
 		return errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
 	}
 	// This etcd client will only be used to read and write the election-related data, such as leader key.
+	//
+	// Its health checker is disabled on purpose, and that must stay that way. The
+	// client is built from this member's own advertise client URLs and only the
+	// health checker ever rewrites that endpoint list, so leaving the checker off
+	// pins the client to the local etcd server for the lifetime of the process.
+	//
+	// That is what makes the leader lease a statement about *this* member.
+	// Renewing it has to be answered here, and when the local server still
+	// believes it is the etcd leader - which is exactly when the colocation check
+	// in `campaignLeader` is fooled too, since both read the same cached value -
+	// etcd answers only after proving that leadership with a linearizable read.
+	// A member that has stopped making progress cannot pass that, so the two
+	// signals cannot fail together. (When the local server knows it is not the
+	// leader, etcd instead forwards the renewal to the real one and the colocation
+	// check is the signal that fires.)
+	//
+	// With the checker enabled the client follows the healthy members instead, so
+	// a member whose own etcd has stopped making progress keeps renewing its
+	// leader lease through a peer and never gives up a leadership it can no
+	// longer serve. In tikv/pd#10671 that also blocked every other member from
+	// taking over, because the leader key hangs off the same lease.
+	//
+	// `TestElectionClientStaysOnLocalMember` guards this.
 	s.electionClient, err = etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.AdvertiseClientUrls, etcdutil.ElectionEtcdClientPurpose, false)
 	if err != nil {
 		return errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
@@ -2031,10 +2054,32 @@ func (s *Server) campaignLeader() {
 	//   2. load region could be slow. Based on lease we can recover TSO service faster.
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	var resetLeaderOnce sync.Once
-	defer resetLeaderOnce.Do(func() {
+	// As soon as the leadership keepalive is cancelled, another member has a
+	// chance to become the new leader.
+	//
+	// This is a named function rather than an inline defer because the step-down
+	// branches below call it before they log. Logging writes to a file that may
+	// share a volume with the data directory, so on a stalled volume it can block
+	// for an unbounded time - long enough that a deferred resign would never run
+	// and the member would keep answering as the leader through the paths that do
+	// not consult IsServing. Resigning first bounds that to the in-memory stores
+	// at the top of Member.Resign.
+	resetLeader := func() {
 		cancel()
 		s.member.Resign()
-	})
+		member.ServiceMemberGauge.WithLabelValues(PD).Set(0)
+	}
+	defer resetLeaderOnce.Do(resetLeader)
+
+	// stepDownAndLog gives the leadership up before it writes down the reason.
+	// Every exit from the loop below goes through it, so that the ordering is a
+	// property of this function rather than something each branch has to
+	// remember: separating the two again would reintroduce the bug this exists
+	// to prevent.
+	stepDownAndLog := func(msg string, fields ...zap.Field) {
+		resetLeaderOnce.Do(resetLeader)
+		log.Info(msg, fields...)
+	}
 
 	// maintain the PD leadership, after this, TSO can be service.
 	log.Info("start to keep leader lease")
@@ -2105,13 +2150,12 @@ func (s *Server) campaignLeader() {
 	enableLeaderDuration := time.Since(enableLeaderStart)
 	member.ServiceMemberGauge.WithLabelValues(PD).Set(1)
 	totalDuration := time.Since(leaderReadyStart)
-	defer resetLeaderOnce.Do(func() {
-		// as soon as cancel the leadership keepalive, then other member have chance
-		// to be new leader.
-		cancel()
-		s.member.Resign()
-		member.ServiceMemberGauge.WithLabelValues(PD).Set(0)
-	})
+	// Registered a second time on purpose, and it is not dead code: deferred
+	// calls run last in first out, so this one runs before the stopRaftCluster
+	// defer above, which waits on background jobs that can take an unbounded
+	// time. The leadership has to be gone before that wait starts.
+	// `resetLeaderOnce` is what makes the duplicate invocation harmless.
+	defer resetLeaderOnce.Do(resetLeader)
 
 	CheckPDVersionWithClusterVersion(s.persistOptions)
 	log.Info("PD leader is ready to serve",
@@ -2126,25 +2170,28 @@ func (s *Server) campaignLeader() {
 		select {
 		case <-leaderTicker.C:
 			if !s.member.IsServing() {
-				log.Info("no longer a leader because lease has expired, PD leader will step down")
+				stepDownAndLog("no longer a leader because lease has expired, PD leader will step down")
 				return
 			}
 			// add failpoint to test exit leader, failpoint judge the member is the give value, then break
 			failpoint.Inject("exitCampaignLeader", func(val failpoint.Value) {
 				if memberFailpointEnabled(val, s.member.ID()) {
-					log.Info("exit PD leader")
+					stepDownAndLog("exit PD leader")
 					failpoint.Return()
 				}
 			})
 
 			etcdLeader := s.member.GetEtcdLeader()
 			if etcdLeader != s.member.ID() {
-				log.Info("etcd leader changed, resigns pd leadership", zap.String("old-pd-leader-name", s.Name()))
+				stepDownAndLog("etcd leader changed, resigns pd leadership", zap.String("old-pd-leader-name", s.Name()))
 				return
 			}
 		case <-ctx.Done():
-			// Server is closed and it should return nil.
-			log.Info("server is closed")
+			// Server is closed and it should return nil. This is a shutdown
+			// rather than a step-down, but it reaches the same deferred resign
+			// through a log call that can block just as long, so it gives the
+			// leadership up first for the same reason.
+			stepDownAndLog("server is closed")
 			return
 		}
 	}

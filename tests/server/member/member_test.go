@@ -21,16 +21,20 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/goleak"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -425,4 +429,349 @@ func sendRequest(re *require.Assertions, wg *sync.WaitGroup, done <-chan bool, a
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+// TestElectionClientStaysOnLocalMember pins down the property that the PD
+// leader's ability to notice its own failure rests on: the election client must
+// only ever talk to this member's own etcd server.
+//
+// It is built from the local advertise client URLs, and only the health checker
+// ever rewrites that list, so the property holds exactly as long as the checker
+// stays disabled for this client. If it were enabled - as it is for the general
+// server client, which this test also exercises so that a checker that never ran
+// cannot make the assertion pass by accident - the client would follow the
+// healthy members, and a member whose own etcd had stopped making progress would
+// keep renewing its leader lease through a peer. See tikv/pd#7780, tikv/pd#10671
+// and tikv/pd#10746.
+func TestElectionClientStaysOnLocalMember(t *testing.T) {
+	re := require.New(t)
+	// Without this the health checker only ticks every 10s, which is longer than
+	// the test is willing to wait for the contrast assertion below.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick"))
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 3)
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+
+	for name, svr := range cluster.GetServers() {
+		s := svr.GetServer()
+		localURLs := strings.Split(s.GetConfig().AdvertiseClientUrls, ",")
+		// The general server client is health checked, so it discovers its peers
+		// and ends up with more endpoints than the member started with.
+		testutil.Eventually(re, func() bool {
+			return len(s.GetClient().Endpoints()) > len(localURLs)
+		})
+		// The election client must not have moved.
+		re.Equal(localURLs, s.GetMember().Client().Endpoints(), name)
+	}
+}
+
+// TestPDLeaderStepsDownWhenLeaseIsLostWithStaleEtcdLeaderView reproduces the
+// shape of tikv/pd#10671 and pins down the property that keeps tikv/pd#7780 from
+// being a correctness bug: a PD leader that has lost etcd leadership gives up
+// because its lease is gone, not because it noticed the change.
+//
+// The test runs in two phases. First it blinds the member with the
+// `staleEtcdLeaderView` failpoint - which freezes its cached etcd leader ID on
+// itself, the defect tikv/pd#7780 describes - and moves etcd leadership away for
+// real. That is the incident: a member holding a PD leadership it can no longer
+// justify, with the colocation check in `campaignLeader` unable to notice. It
+// must keep serving, which is what makes the second phase meaningful. Then the
+// leader lease is taken away, standing in for the renewals a member with stuck
+// storage can no longer complete, and the member must step down and let the new
+// etcd leader take over.
+//
+// Several lease derived paths can be the proximate trigger, and the test
+// deliberately does not care which: what is guarded is that losing the lease is
+// sufficient on its own, with the etcd leader view offering no help at all.
+func TestPDLeaderStepsDownWhenLeaseIsLostWithStaleEtcdLeaderView(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 3)
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+
+	oldLeaderName := cluster.WaitLeader()
+	re.NotEmpty(oldLeaderName)
+	oldLeaderServer := cluster.GetServer(oldLeaderName)
+	oldLeader := oldLeaderServer.GetServer()
+	var peer *tests.TestServer
+	for name, svr := range cluster.GetServers() {
+		if name != oldLeaderName {
+			peer = svr
+			break
+		}
+	}
+	re.NotNil(peer)
+
+	// Blind the member before anything else changes, so that its own colocation
+	// check cannot be what makes it step down later.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/staleEtcdLeaderView",
+		fmt.Sprintf("return(\"%s\")", oldLeaderName)))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/staleEtcdLeaderView"))
+	}()
+	re.Equal(oldLeader.GetMember().ID(), oldLeader.GetMember().GetEtcdLeader())
+
+	// Now really move etcd leadership away. The member cannot see this, exactly
+	// as it could not in the incident, and it also has to be true for a peer to
+	// be allowed to campaign at all.
+	testutil.Eventually(re, func() bool {
+		return oldLeaderServer.MoveEtcdLeader(oldLeaderServer.GetServerID(), peer.GetServerID()) == nil
+	})
+
+	// Control: while the lease is alive and the view is blinded, nothing makes
+	// the member give up, however wrong holding on has become. This is the state
+	// tikv/pd#10671 was stuck in, and it is what the lease has to break out of -
+	// without it the assertions below would pass for the wrong reason.
+	time.Sleep(2 * time.Second)
+	re.True(oldLeader.IsServing())
+	re.Equal(oldLeaderName, cluster.GetLeader())
+
+	// Take the lease away through the peer's client, leaving the old leader's own
+	// code path untouched.
+	lease := oldLeader.GetMember().GetLeadership().GetLease()
+	re.NotNil(lease)
+	leaseID := lease.GetID()
+	re.NotEqual(clientv3.NoLease, leaseID)
+	_, err = peer.GetServer().GetClient().Revoke(ctx, leaseID)
+	re.NoError(err)
+
+	// The lease is the only signal left, and it must be enough.
+	testutil.Eventually(re, func() bool {
+		return !oldLeader.IsServing() && oldLeader.GetRaftCluster() == nil
+	}, testutil.WithWaitFor(30*time.Second))
+	re.NotEqual(oldLeaderName, waitLeaderChange(re, cluster, oldLeaderName))
+}
+
+// TestPDLeaderStepsDownWhenRenewalsFail covers the step the other tests skip:
+// that the lease deadline itself is what ends the term. The lease is left in
+// place and only its renewals are made to fail, so the member has to notice
+// through `expireTime` elapsing rather than through the key disappearing.
+//
+// The etcd leader view is frozen on the member for the whole test, so the
+// colocation check in `campaignLeader` cannot be the thing that fires. That
+// leaves the lease as the only remaining signal, which is the point.
+func TestPDLeaderStepsDownWhenRenewalsFail(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 3)
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+
+	oldLeaderName := cluster.WaitLeader()
+	re.NotEmpty(oldLeaderName)
+	oldLeaderServer := cluster.GetServer(oldLeaderName)
+	oldLeader := oldLeaderServer.GetServer()
+
+	// Blind the colocation check so it cannot be what ends the term.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/staleEtcdLeaderView",
+		fmt.Sprintf("return(\"%s\")", oldLeaderName)))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/staleEtcdLeaderView"))
+	}()
+	re.True(oldLeader.IsServing())
+
+	// Stand in for a local etcd that can no longer answer a renewal, on this
+	// member only. The renewal really does reach etcd and succeed, so nothing
+	// revokes the lease and the leader key stays where it is: the local deadline
+	// is the only thing left that can end the term, which is the point.
+	//
+	// The target is named because `failpoint.Enable` arms the injection point for
+	// the whole process and every member of this cluster runs in it. Without the
+	// name the successor's renewals would fail too and the cluster would never
+	// settle on a new leader.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/keepAliveFailed",
+		fmt.Sprintf("return(\"leader election@%s\")", oldLeaderName)))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/keepAliveFailed"))
+	}()
+
+	testutil.Eventually(re, func() bool {
+		return !oldLeader.IsServing()
+	}, testutil.WithWaitFor(30*time.Second))
+	re.NotEqual(oldLeaderName, waitLeaderChange(re, cluster, oldLeaderName))
+}
+
+// TestPDLeaderClearsIdentityBeforeBlockingCleanup asserts the ordering inside the
+// step-down path: the in-memory leader identity is dropped before anything that
+// can block for an unbounded time.
+//
+// Two paths report leadership without consulting IsServing - GetMembers reads
+// GetLeader directly, and the v1 redirector handles a request locally when the
+// cached leader name is its own - so a member whose cleanup never finishes would
+// otherwise keep answering as the leader for as long as a storage stall lasts.
+func TestPDLeaderClearsIdentityBeforeBlockingCleanup(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// One member is enough: everything asserted below is this member's own
+	// in-memory state, and no peer has to take over for the assertions to mean
+	// what they say.
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+
+	leaderName := cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	leaderServer := cluster.GetServer(leaderName).GetServer()
+	re.True(leaderServer.IsServing())
+
+	// The lease this member currently holds. Its ID is what pins the assertion
+	// below to the term being given up here; see the comment on the conjunction.
+	oldLease := leaderServer.GetMember().GetLeadership().GetLease()
+	re.NotNil(oldLease)
+	oldLeaseID := oldLease.GetID()
+	re.NotEqual(clientv3.NoLease, oldLeaseID)
+
+	// Stand in for the part of the cleanup that can block. Everything in
+	// Lease.Close past this point either talks to the local etcd or logs, and on
+	// a stalled volume neither of those returns.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/blockLeaseClose",
+		fmt.Sprintf("return(\"leader election@%s\")", leaderName)))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/blockLeaseClose"))
+	}()
+	// Fail renewals so the local deadline is what ends the term.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/keepAliveFailed",
+		fmt.Sprintf("return(\"leader election@%s\")", leaderName)))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/keepAliveFailed"))
+	}()
+
+	// All four have to hold at the same instant, and that conjunction is the
+	// whole point of the test:
+	//
+	//   - the leader is already nil;
+	//   - the leader value is still set, which Leadership.Reset clears only after
+	//     Lease.Close returns, so the cleanup is provably still blocked;
+	//   - the lease reads as expired, so this is a term being given up rather
+	//     than one being campaigned for;
+	//   - and it is still the *same* lease, which is what makes the previous two
+	//     mean what they appear to mean.
+	//
+	// That last conjunct is what makes the first three mean what they appear to.
+	// Leadership.Campaign stores a non-empty leader value and installs a fresh
+	// lease before it grants that lease, and a fresh lease has no expire time and
+	// so reads as expired - so the first three are also satisfied while a
+	// campaign is in flight, and go on being satisfied indefinitely after one
+	// fails, since campaignLeader returns on a failed Campaign before it sets up
+	// the resign at all. Neither case arises in this one-member cluster, where
+	// Campaign does not fail and the in-flight window is a single local Grant
+	// wide, so the lease ID is not what makes the test fail today under a
+	// reversed Member.Resign. It is what keeps the assertion honest if the test
+	// grows back to several members, and what stops the failed-campaign state
+	// from ever standing in for a step-down. Reset never replaces the lease and
+	// Close never clears its ID, so the ID stays put through the blocked close,
+	// while every campaign installs a lease whose ID is either zero or newly
+	// assigned by etcd.
+	testutil.Eventually(re, func() bool {
+		m := leaderServer.GetMember()
+		return m.GetLeader() == nil &&
+			m.GetLeadership().GetLeaderValue() != "" &&
+			!m.GetLeadership().Check() &&
+			m.GetLeadership().GetLease().GetID() == oldLeaseID
+	}, testutil.WithWaitFor(30*time.Second))
+}
+
+// TestPDLeaderResignsBeforeLoggingStepDown covers the other half of the same
+// ordering, the one inside campaignLeader: the leadership is given up before the
+// line explaining why it was given up is written.
+//
+// The two are separate because they can be reversed separately. Member.Resign
+// puts the in-memory stores ahead of the lease teardown; campaignLeader puts the
+// whole resign ahead of its own log call. Logging is not obviously blocking, but
+// it writes to a file that can share a volume with the data directory, and on a
+// stalled volume it does not return - which is exactly when the member must not
+// still be answering as the leader.
+func TestPDLeaderResignsBeforeLoggingStepDown(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+
+	leaderName := cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	leaderServer := cluster.GetServer(leaderName).GetServer()
+	re.True(leaderServer.IsServing())
+
+	oldLease := leaderServer.GetMember().GetLeadership().GetLease()
+	re.NotNil(oldLease)
+	oldLeaseID := oldLease.GetID()
+	re.NotEqual(clientv3.NoLease, oldLeaseID)
+
+	// Capture the log after the cluster is up, so that this replacement is the
+	// one that sticks, and put the previous global logger back afterwards: the
+	// file is deleted when this test returns, and anything still writing to the
+	// replacement would be writing into a deleted file.
+	logCfg := &log.Config{Level: "info"}
+	logFile, err := os.CreateTemp("", "pd_tests")
+	re.NoError(err)
+	fname := logFile.Name()
+	re.NoError(logFile.Close())
+	logCfg.File.Filename = fname
+	lg, props, err := log.InitLogger(logCfg)
+	re.NoError(err)
+	restoreLogger := log.ReplaceGlobals(lg, props)
+	defer func() {
+		restoreLogger()
+		os.RemoveAll(fname)
+	}()
+
+	// Hold the step-down open inside Lease.Close, so that there is a window in
+	// which the resign has started but has not finished. Without it the log line
+	// would follow the resign too closely to observe either way.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/blockLeaseClose",
+		fmt.Sprintf("return(\"leader election@%s\")", leaderName)))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/blockLeaseClose"))
+	}()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/keepAliveFailed",
+		fmt.Sprintf("return(\"leader election@%s\")", leaderName)))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/keepAliveFailed"))
+	}()
+
+	const stepDownMsg = "no longer a leader because lease has expired"
+
+	// Wait for the member to be inside the blocked close of the term it started
+	// with, exactly as in the test above.
+	testutil.Eventually(re, func() bool {
+		m := leaderServer.GetMember()
+		return m.GetLeader() == nil &&
+			m.GetLeadership().GetLeaderValue() != "" &&
+			!m.GetLeadership().Check() &&
+			m.GetLeadership().GetLease().GetID() == oldLeaseID
+	}, testutil.WithWaitFor(30*time.Second))
+
+	// The identity is gone, and the reason has not been written yet. Reverse the
+	// two in campaignLeader and the line is already there by the time the resign
+	// it precedes has cleared the leader.
+	content, err := os.ReadFile(fname)
+	re.NoError(err)
+	re.NotContains(string(content), stepDownMsg)
+
+	// And the line does arrive once the blocked close finishes. This is what
+	// keeps the assertion above from passing merely because nothing was ever
+	// captured.
+	testutil.Eventually(re, func() bool {
+		content, err := os.ReadFile(fname)
+		re.NoError(err)
+		return strings.Contains(string(content), stepDownMsg)
+	}, testutil.WithWaitFor(30*time.Second))
 }

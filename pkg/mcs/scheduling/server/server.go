@@ -306,11 +306,14 @@ func (s *Server) campaignPrimary(expectedPrimary string) {
 	// Start keepalive the leadership and enable Scheduling service.
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	var resetPrimaryOnce sync.Once
-	defer resetPrimaryOnce.Do(func() {
+	// A named function rather than an inline defer because the step-down branch
+	// below calls it before it logs; see the comment there.
+	resetPrimary := func() {
 		cancel()
 		s.participant.Resign()
 		member.ServiceMemberGauge.WithLabelValues(serviceName).Set(0)
-	})
+	}
+	defer resetPrimaryOnce.Do(resetPrimary)
 
 	// maintain the leadership, after this, Scheduling could be ready to provide service.
 	s.participant.GetLeadership().Keep(ctx)
@@ -348,6 +351,12 @@ func (s *Server) campaignPrimary(expectedPrimary string) {
 			// expiration and a `{service}/primary/transfer` API call, which resigns
 			// this primary by revoking its leader lease.
 			if !s.participant.IsServing() {
+				// Resign before logging, not in the deferred reset above. The
+				// log can block for an unbounded time on a stalled volume, and
+				// the primary is reported through GetServingUrls without
+				// consulting IsServing, so a primary that is still waiting on
+				// that log would keep being handed out.
+				resetPrimaryOnce.Do(resetPrimary)
 				log.Info("no longer a primary because lease has expired or transferred, the scheduling primary will step down")
 				return
 			}
