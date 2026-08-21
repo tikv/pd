@@ -15,10 +15,10 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
-	"syscall"
 
 	"go.uber.org/zap/zapcore"
 
@@ -34,26 +34,7 @@ func main() {
 		os.Args = append(os.Args, "-u", pdAddr)
 	}
 
-	sc := make(chan os.Signal, 1)
-	signal.Notify(sc,
-		syscall.SIGHUP,
-		syscall.SIGINT,
-		syscall.SIGTERM,
-		syscall.SIGQUIT)
-
-	go func() {
-		sig := <-sc
-		fmt.Printf("\nGot signal [%v] to exit.\n", sig)
-		switch sig {
-		case syscall.SIGTERM:
-			os.Exit(0)
-		default:
-			os.Exit(1)
-		}
-		if command.PDCli != nil {
-			command.PDCli.Close()
-		}
-	}()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 
 	log.SetLevel(zapcore.FatalLevel)
 	var inputs []string
@@ -66,5 +47,13 @@ func main() {
 		}
 		inputs = in
 	}
-	pdctl.MainStart(append(os.Args[1:], inputs...))
+	exitCode := pdctl.MainStartContext(ctx, append(os.Args[1:], inputs...))
+	if ctx.Err() != nil {
+		exitCode = 130
+	}
+	stop()
+	if command.PDCli != nil {
+		command.PDCli.Close()
+	}
+	os.Exit(exitCode)
 }

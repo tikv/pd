@@ -15,6 +15,7 @@
 package pdctl
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -83,9 +84,15 @@ func GetRootCmd() *cobra.Command {
 	return rootCmd
 }
 
-// MainStart start main command
-func MainStart(args []string) {
+// MainStart starts the main command and returns its process exit code.
+func MainStart(args []string) int {
+	return MainStartContext(context.Background(), args)
+}
+
+// MainStartContext starts the main command with a cancelable context.
+func MainStartContext(ctx context.Context, args []string) int {
 	rootCmd := GetRootCmd()
+	rootCmd.SetContext(ctx)
 
 	rootCmd.Flags().BoolP("interact", "i", false, "Run pdctl with readline.")
 	rootCmd.Flags().BoolP("version", "V", false, "Print version information and exit.")
@@ -106,10 +113,19 @@ func MainStart(args []string) {
 	rootCmd.SetOut(os.Stdout)
 	rootCmd.SetErr(os.Stderr)
 
-	if err := rootCmd.Execute(); err != nil {
-		rootCmd.Println(err)
-		os.Exit(1)
+	return execute(rootCmd)
+}
+
+func execute(rootCmd *cobra.Command) int {
+	err := rootCmd.Execute()
+	if err == nil {
+		return 0
 	}
+	code, silent := command.ExitCode(err)
+	if !silent {
+		rootCmd.PrintErrln(err)
+	}
+	return code
 }
 
 func loop(persistentFlags *pflag.FlagSet, readlineCompleter readline.AutoCompleter) {
@@ -163,9 +179,7 @@ func loop(persistentFlags *pflag.FlagSet, readlineCompleter readline.AutoComplet
 		rootCmd := getREPLCmd()
 		rootCmd.SetArgs(args)
 		rootCmd.ParseFlags(args)
-		if err := rootCmd.Execute(); err != nil {
-			rootCmd.Println(err)
-		}
+		_ = execute(rootCmd)
 	}
 }
 
