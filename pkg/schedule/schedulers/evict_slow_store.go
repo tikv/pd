@@ -640,6 +640,15 @@ func (s *evictSlowStoreScheduler) detectAndHandleNetworkSlowStores(cluster sche.
 
 	// Evaluate each store for network slowness
 	for _, store := range stores {
+		// A tombstoned store stops heartbeating, so its GetNetworkSlowScores()
+		// is frozen at its last reported value; without this check, a frozen
+		// score that still looks slow would add it to
+		// networkSlowStoreRecoverStartAts and publish evictedSlowStoreStatusGauge
+		// for it here, even though tryRecoverNetworkSlowStores would just remove
+		// it again on the very next scheduling round.
+		if store.IsRemoved() {
+			continue
+		}
 		if shouldSkipStoreEvaluation(store, problematicNetwork, networkSlowStoreRecoverStartAts) {
 			continue
 		}

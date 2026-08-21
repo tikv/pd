@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core"
@@ -373,6 +374,42 @@ func (suite *evictSlowStoreTestSuite) TestNetworkSlowStore() {
 		checkNetworkSlowStore(re, es, suite.tc, storeID1, tc.expectedSlow, tc.expectedSlow, tc.recovery)
 	}
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap"))
+}
+
+func (suite *evictSlowStoreTestSuite) TestNetworkSlowStoreSkipsRemovedStore() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap"))
+	}()
+
+	es, ok := suite.es.(*evictSlowStoreScheduler)
+	re.True(ok)
+
+	storeInfo := suite.tc.GetStore(storeID1)
+	// This score pattern is the same "definitely slow" case already proven to
+	// trigger detection when the store is live (see the third case in
+	// TestNetworkSlowStore).
+	slow := storeInfo.Clone(func(store *core.StoreInfo) {
+		store.GetStoreStats().NetworkSlowScores = map[uint64]uint64{
+			storeID2: 10,
+			storeID3: 10,
+			storeID4: 100,
+		}
+	})
+	removed := slow.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
+	suite.tc.PutStore(removed)
+
+	// A tombstoned store stops heartbeating, so its NetworkSlowScores are
+	// frozen at this still-qualifying-as-slow value. Without the guard, the
+	// very first scheduleNetworkSlowStore call -- before
+	// tryRecoverNetworkSlowStores ever gets a chance to clean it up on a
+	// later round -- would add it to networkSlowStoreRecoverStartAts and
+	// publish evictedSlowStoreStatusGauge for it.
+	es.scheduleNetworkSlowStore(suite.tc)
+
+	_, ok = es.conf.networkSlowStoreRecoverStartAts[storeID1]
+	re.False(ok)
 }
 
 func (suite *evictSlowStoreTestSuite) TestNetworkSlowStoreReachLimit() {

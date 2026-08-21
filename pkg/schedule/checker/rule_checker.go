@@ -693,7 +693,7 @@ func (o *recorder) refresh(cluster sche.CheckerCluster) {
 	// re-count the offlineLeaderCounter if the store is already tombstone or store is gone.
 	if len(o.offlineLeaderCounter) > 0 && time.Since(o.lastUpdateTime) > offlineCounterTTL {
 		needClean := false
-		for _, storeID := range o.offlineLeaderCounter {
+		for storeID := range o.offlineLeaderCounter {
 			store := cluster.GetStore(storeID)
 			if store == nil || store.IsRemoved() {
 				needClean = true
