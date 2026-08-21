@@ -16,6 +16,7 @@ package command
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"io"
@@ -177,6 +178,11 @@ func doRequest(cmd *cobra.Command, prefix string, method string, customHeader ht
 
 func doRequestSingleEndpoint(cmd *cobra.Command, endpoint, prefix, method string, customHeader http.Header,
 	opts ...BodyOption) (string, error) {
+	return doRequestSingleEndpointWithContext(context.Background(), cmd, endpoint, prefix, method, customHeader, opts...)
+}
+
+func doRequestSingleEndpointWithContext(ctx context.Context, cmd *cobra.Command, endpoint, prefix, method string, customHeader http.Header,
+	opts ...BodyOption) (string, error) {
 	b := &bodyOption{}
 	for _, o := range opts {
 		o(b)
@@ -184,8 +190,8 @@ func doRequestSingleEndpoint(cmd *cobra.Command, endpoint, prefix, method string
 	var resp string
 	header := buildNoProxyHeader(cmd, customHeader)
 
-	err := requestURL(cmd, endpoint, func(endpoint string) error {
-		return do(endpoint, prefix, method, &resp, header, b)
+	err := requestURL(endpoint, func(endpoint string) error {
+		return doWithContext(ctx, endpoint, prefix, method, &resp, header, b)
 	})
 	return resp, err
 }
@@ -203,6 +209,8 @@ func buildNoProxyHeader(cmd *cobra.Command, customHeader http.Header) http.Heade
 }
 
 func dial(req *http.Request) (string, error) {
+	// pd-ctl sends requests only to operator-configured endpoints or client URLs advertised by PD.
+	// #nosec G704
 	resp, err := dialClient.Do(req)
 	if err != nil {
 		return "", err
@@ -254,11 +262,10 @@ func tryURLs(cmd *cobra.Command, endpoints []string, f DoFunc) error {
 	return err
 }
 
-func requestURL(cmd *cobra.Command, endpoint string, f DoFunc) error {
+func requestURL(endpoint string, f DoFunc) error {
 	endpoint, err := checkURL(endpoint)
 	if err != nil {
-		cmd.Println(err.Error())
-		os.Exit(1)
+		return err
 	}
 	return f(endpoint)
 }
@@ -328,6 +335,10 @@ func patchJSON(cmd *cobra.Command, prefix string, input map[string]any) {
 
 // do send a request to server. Default is Get.
 func do(endpoint, prefix, method string, resp *string, customHeader http.Header, b *bodyOption) error {
+	return doWithContext(context.Background(), endpoint, prefix, method, resp, customHeader, b)
+}
+
+func doWithContext(ctx context.Context, endpoint, prefix, method string, resp *string, customHeader http.Header, b *bodyOption) error {
 	var err error
 	url := endpoint + "/" + prefix
 	if method == "" {
@@ -335,7 +346,7 @@ func do(endpoint, prefix, method string, resp *string, customHeader http.Header,
 	}
 	var req *http.Request
 
-	req, err = http.NewRequest(method, url, b.body)
+	req, err = http.NewRequestWithContext(ctx, method, url, b.body)
 	if err != nil {
 		return err
 	}
