@@ -362,30 +362,37 @@ func (m *RuleManager) GetAllRules() []*Rule {
 }
 
 // GetIsolationPrefix returns the location labels up to the isolation level that every
-// rule agrees on, which names one isolation domain (see Rule.isolationPrefix). It reports
-// false when any rule enforces no isolation level, when a rule's isolation level is not one
-// of its location labels, when rules disagree, or when there are no rules at all.
+// effective rule agrees on, which names one isolation domain (see Rule.isolationPrefix). It
+// reports false when any effective rule enforces no isolation level, when a rule's isolation
+// level is not one of its location labels, when rules disagree, or when no rule applies.
+//
+// It walks the per-range applyRules rather than the persisted rule set, so a rule that is
+// overridden everywhere cannot veto the result. Every range has to agree because a caller
+// acting on this drains one domain for all regions at once, so a prefix that holds for only
+// part of the key space is not enough.
 //
 // Unlike GetAllRules this neither clones nor sorts, so callers on a hot path (schedulers run
 // as often as every 10ms) do not pay a JSON round-trip per rule, and the read lock is held
 // only for a few field reads. Reading rule fields directly is safe because every mutation
-// path takes the write lock and replaces map entries rather than editing rules in place.
+// path takes the write lock and rebuilds ruleList rather than editing rules in place.
 func (m *RuleManager) GetIsolationPrefix() ([]string, bool) {
 	m.RLock()
 	defer m.RUnlock()
 	var labels []string
 	found := false
-	for _, r := range m.ruleConfig.rules {
-		prefix, ok := r.isolationPrefix()
-		if !ok {
-			return nil, false
-		}
-		if !found {
-			labels, found = prefix, true
-			continue
-		}
-		if !slices.Equal(labels, prefix) {
-			return nil, false
+	for _, rr := range m.ruleList.ranges {
+		for _, r := range rr.applyRules {
+			prefix, ok := r.isolationPrefix()
+			if !ok {
+				return nil, false
+			}
+			if !found {
+				labels, found = prefix, true
+				continue
+			}
+			if !slices.Equal(labels, prefix) {
+				return nil, false
+			}
 		}
 	}
 	if !found {
