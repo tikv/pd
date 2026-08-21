@@ -16,10 +16,17 @@ package config
 
 import (
 	"context"
+<<<<<<< HEAD
 	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
+=======
+	"encoding/json"
+	"reflect"
+	"strconv"
+	"sync"
+>>>>>>> a186e0cc61 (config: persist default store limit for future stores (#10900))
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -45,6 +52,8 @@ import (
 // PersistOptions wraps all configurations that need to persist to storage and
 // allows to access them safely.
 type PersistOptions struct {
+	persistMu sync.Mutex
+
 	// configuration -> ttl value
 	ttl             *cache.TTLString
 	schedule        atomic.Value
@@ -84,6 +93,50 @@ func (o *PersistOptions) GetScheduleConfig() *sc.ScheduleConfig {
 // SetScheduleConfig sets the PD scheduling configuration.
 func (o *PersistOptions) SetScheduleConfig(cfg *sc.ScheduleConfig) {
 	o.schedule.Store(cfg)
+}
+
+// mutateScheduleConfig serializes an in-memory field update with schedule
+// persistence transactions. It prevents a helper from publishing a stale full
+// ScheduleConfig after another field has changed.
+func (o *PersistOptions) mutateScheduleConfig(update func(next *sc.ScheduleConfig)) {
+	o.persistMu.Lock()
+	defer o.persistMu.Unlock()
+
+	next := o.GetScheduleConfig().Clone()
+	update(next)
+	o.SetScheduleConfig(next)
+}
+
+// UpdateScheduleConfig serializes a schedule-config read-modify-persist
+// transaction with every other full-config persistence. The current config is
+// read-only; changes must be applied to next. Returning changed=false skips the
+// in-memory publication and persistence.
+func (o *PersistOptions) UpdateScheduleConfig(
+	storage endpoint.ConfigStorage,
+	update func(current, next *sc.ScheduleConfig) (changed bool, err error),
+) error {
+	o.persistMu.Lock()
+	defer o.persistMu.Unlock()
+
+	current := o.GetScheduleConfig()
+	next := current.Clone()
+	changed, err := update(current, next)
+	if err != nil || !changed {
+		return err
+	}
+	o.SetScheduleConfig(next)
+	if err := o.persistLocked(storage); err != nil {
+		o.SetScheduleConfig(current)
+		return err
+	}
+	return nil
+}
+
+// SetSchedulers replaces only the scheduler list on the latest schedule config.
+func (o *PersistOptions) SetSchedulers(schedulers sc.SchedulerConfigs) {
+	o.mutateScheduleConfig(func(next *sc.ScheduleConfig) {
+		next.Schedulers = append(sc.SchedulerConfigs(nil), schedulers...)
+	})
 }
 
 // GetReplicationConfig returns replication configurations.
@@ -386,48 +439,50 @@ func (o *PersistOptions) SetMaxMergeRegionKeys(maxMergeRegionKeys uint64) {
 
 // SetStoreLimit sets a store limit for a given type and rate.
 func (o *PersistOptions) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePerMin float64) {
-	v := o.GetScheduleConfig().Clone()
-	var slc sc.StoreLimitConfig
-	var rate float64
-	switch typ {
-	case storelimit.AddPeer:
-		if _, ok := v.StoreLimit[storeID]; !ok {
-			rate = sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer)
-		} else {
-			rate = v.StoreLimit[storeID].RemovePeer
+	o.mutateScheduleConfig(func(next *sc.ScheduleConfig) {
+		defaultStoreLimit := next.GetDefaultStoreLimit()
+		var slc sc.StoreLimitConfig
+		var rate float64
+		switch typ {
+		case storelimit.AddPeer:
+			if _, ok := next.StoreLimit[storeID]; !ok {
+				rate = defaultStoreLimit.RemovePeer
+			} else {
+				rate = next.StoreLimit[storeID].RemovePeer
+			}
+			slc = sc.StoreLimitConfig{AddPeer: ratePerMin, RemovePeer: rate}
+		case storelimit.RemovePeer:
+			if _, ok := next.StoreLimit[storeID]; !ok {
+				rate = defaultStoreLimit.AddPeer
+			} else {
+				rate = next.StoreLimit[storeID].AddPeer
+			}
+			slc = sc.StoreLimitConfig{AddPeer: rate, RemovePeer: ratePerMin}
 		}
-		slc = sc.StoreLimitConfig{AddPeer: ratePerMin, RemovePeer: rate}
-	case storelimit.RemovePeer:
-		if _, ok := v.StoreLimit[storeID]; !ok {
-			rate = sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
-		} else {
-			rate = v.StoreLimit[storeID].AddPeer
-		}
-		slc = sc.StoreLimitConfig{AddPeer: rate, RemovePeer: ratePerMin}
-	}
-	v.StoreLimit[storeID] = slc
-	o.SetScheduleConfig(v)
+		next.StoreLimit[storeID] = slc
+	})
 }
 
 // SetAllStoresLimit sets all store limit for a given type and rate.
 func (o *PersistOptions) SetAllStoresLimit(typ storelimit.Type, ratePerMin float64) {
-	v := o.GetScheduleConfig().Clone()
-	switch typ {
-	case storelimit.AddPeer:
-		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, ratePerMin)
-		for storeID := range v.StoreLimit {
-			sc := sc.StoreLimitConfig{AddPeer: ratePerMin, RemovePeer: v.StoreLimit[storeID].RemovePeer}
-			v.StoreLimit[storeID] = sc
+	o.mutateScheduleConfig(func(next *sc.ScheduleConfig) {
+		switch typ {
+		case storelimit.AddPeer:
+			next.DefaultStoreLimit.AddPeer = ratePerMin
+			sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, ratePerMin)
+			for storeID := range next.StoreLimit {
+				sc := sc.StoreLimitConfig{AddPeer: ratePerMin, RemovePeer: next.StoreLimit[storeID].RemovePeer}
+				next.StoreLimit[storeID] = sc
+			}
+		case storelimit.RemovePeer:
+			next.DefaultStoreLimit.RemovePeer = ratePerMin
+			sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, ratePerMin)
+			for storeID := range next.StoreLimit {
+				sc := sc.StoreLimitConfig{AddPeer: next.StoreLimit[storeID].AddPeer, RemovePeer: ratePerMin}
+				next.StoreLimit[storeID] = sc
+			}
 		}
-	case storelimit.RemovePeer:
-		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, ratePerMin)
-		for storeID := range v.StoreLimit {
-			sc := sc.StoreLimitConfig{AddPeer: v.StoreLimit[storeID].AddPeer, RemovePeer: ratePerMin}
-			v.StoreLimit[storeID] = sc
-		}
-	}
-
-	o.SetScheduleConfig(v)
+	})
 }
 
 // IsOneWayMergeEnabled returns if a region can only be merged into the next region of it.
@@ -494,6 +549,7 @@ func (o *PersistOptions) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitCo
 	if limit, ok := o.GetScheduleConfig().StoreLimit[storeID]; ok {
 		return limit
 	}
+<<<<<<< HEAD
 	cfg := o.GetScheduleConfig().Clone()
 	sc := sc.StoreLimitConfig{
 		AddPeer:    sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
@@ -523,6 +579,17 @@ func (o *PersistOptions) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitCo
 	cfg.StoreLimit[storeID] = sc
 	o.SetScheduleConfig(cfg)
 	return o.GetScheduleConfig().StoreLimit[storeID]
+=======
+	o.mutateScheduleConfig(func(next *sc.ScheduleConfig) {
+		if limit, ok := next.StoreLimit[storeID]; ok {
+			returnSC = limit
+			return
+		}
+		returnSC = next.GetDefaultStoreLimit()
+		next.StoreLimit[storeID] = returnSC
+	})
+	return returnSC
+>>>>>>> a186e0cc61 (config: persist default store limit for future stores (#10900))
 }
 
 // GetStoreLimitByType returns the limit of a store with a given type.
@@ -736,42 +803,41 @@ func (o *PersistOptions) GetHotRegionsReservedDays() uint64 {
 // AddSchedulerCfg adds the scheduler configurations.
 func (o *PersistOptions) AddSchedulerCfg(tp types.CheckerSchedulerType, args []string) {
 	oldType := types.SchedulerTypeCompatibleMap[tp]
-	v := o.GetScheduleConfig().Clone()
-	for i, schedulerCfg := range v.Schedulers {
-		// comparing args is to cover the case that there are schedulers in same type but not with same name
-		// such as two schedulers of type "evict-leader",
-		// one name is "evict-leader-scheduler-1" and the other is "evict-leader-scheduler-2"
-		if reflect.DeepEqual(schedulerCfg, sc.SchedulerConfig{Type: oldType, Args: args, Disable: false}) {
-			return
-		}
+	o.mutateScheduleConfig(func(next *sc.ScheduleConfig) {
+		for i, schedulerCfg := range next.Schedulers {
+			// comparing args is to cover the case that there are schedulers in same type but not with same name
+			// such as two schedulers of type "evict-leader",
+			// one name is "evict-leader-scheduler-1" and the other is "evict-leader-scheduler-2"
+			if reflect.DeepEqual(schedulerCfg, sc.SchedulerConfig{Type: oldType, Args: args, Disable: false}) {
+				return
+			}
 
-		if reflect.DeepEqual(schedulerCfg, sc.SchedulerConfig{Type: oldType, Args: args, Disable: true}) {
-			schedulerCfg.Disable = false
-			v.Schedulers[i] = schedulerCfg
-			o.SetScheduleConfig(v)
-			return
+			if reflect.DeepEqual(schedulerCfg, sc.SchedulerConfig{Type: oldType, Args: args, Disable: true}) {
+				schedulerCfg.Disable = false
+				next.Schedulers[i] = schedulerCfg
+				return
+			}
 		}
-	}
-	v.Schedulers = append(v.Schedulers, sc.SchedulerConfig{Type: oldType, Args: args, Disable: false})
-	o.SetScheduleConfig(v)
+		next.Schedulers = append(next.Schedulers, sc.SchedulerConfig{Type: oldType, Args: args, Disable: false})
+	})
 }
 
 // RemoveSchedulerCfg removes the scheduler configurations.
 func (o *PersistOptions) RemoveSchedulerCfg(tp types.CheckerSchedulerType) {
 	oldType := types.SchedulerTypeCompatibleMap[tp]
-	v := o.GetScheduleConfig().Clone()
-	for i, schedulerCfg := range v.Schedulers {
-		if oldType == schedulerCfg.Type {
-			if sc.IsDefaultScheduler(oldType) {
-				schedulerCfg.Disable = true
-				v.Schedulers[i] = schedulerCfg
-			} else {
-				v.Schedulers = append(v.Schedulers[:i], v.Schedulers[i+1:]...)
+	o.mutateScheduleConfig(func(next *sc.ScheduleConfig) {
+		for i, schedulerCfg := range next.Schedulers {
+			if oldType == schedulerCfg.Type {
+				if sc.IsDefaultScheduler(oldType) {
+					schedulerCfg.Disable = true
+					next.Schedulers[i] = schedulerCfg
+				} else {
+					next.Schedulers = append(next.Schedulers[:i], next.Schedulers[i+1:]...)
+				}
+				return
 			}
-			o.SetScheduleConfig(v)
-			return
 		}
-	}
+	})
 }
 
 // SetLabelProperty sets the label property.
@@ -810,14 +876,41 @@ type persistedConfig struct {
 	StoreConfig sc.StoreConfig `json:"store"`
 }
 
+// UnmarshalJSON consumes persisted schedule-field presence while decoding, so
+// decoder metadata never leaks into the runtime ScheduleConfig.
+func (c *persistedConfig) UnmarshalJSON(data []byte) error {
+	type plainPersistedConfig persistedConfig
+	if err := json.Unmarshal(data, (*plainPersistedConfig)(c)); err != nil {
+		return err
+	}
+	var fields struct {
+		Schedule json.RawMessage `json:"schedule"`
+	}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	if len(fields.Schedule) == 0 {
+		return nil
+	}
+	return c.Schedule.MigrateDeprecatedFlagsFromJSON(fields.Schedule)
+}
+
 // SwitchRaftV2 update some config if tikv raft engine switch into partition raft v2
 func (o *PersistOptions) SwitchRaftV2(storage endpoint.ConfigStorage) error {
-	o.GetScheduleConfig().StoreLimitVersion = "v2"
-	return o.Persist(storage)
+	return o.UpdateScheduleConfig(storage, func(_ *sc.ScheduleConfig, next *sc.ScheduleConfig) (bool, error) {
+		next.StoreLimitVersion = storelimit.VersionV2
+		return true, nil
+	})
 }
 
 // Persist saves the configuration to the storage.
 func (o *PersistOptions) Persist(storage endpoint.ConfigStorage) error {
+	o.persistMu.Lock()
+	defer o.persistMu.Unlock()
+	return o.persistLocked(storage)
+}
+
+func (o *PersistOptions) persistLocked(storage endpoint.ConfigStorage) error {
 	cfg := &persistedConfig{
 		Config: &Config{
 			Schedule:        *o.GetScheduleConfig(),

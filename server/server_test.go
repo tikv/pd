@@ -16,6 +16,7 @@ package server
 
 import (
 	"context"
+<<<<<<< HEAD
 	"fmt"
 	"io"
 	"net/http"
@@ -30,6 +31,23 @@ import (
 	"github.com/tikv/pd/pkg/utils/assertutil"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
+=======
+	stderrors "errors"
+	"fmt"
+	"sync"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
+
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/member"
+	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/keypath"
+>>>>>>> a186e0cc61 (config: persist default store limit for future stores (#10900))
 	"github.com/tikv/pd/server/config"
 	etcdtypes "go.etcd.io/etcd/client/pkg/v3/types"
 	"go.etcd.io/etcd/server/v3/embed"
@@ -40,8 +58,142 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
+<<<<<<< HEAD
 type leaderServerTestSuite struct {
 	suite.Suite
+=======
+func TestPartialScheduleConfigUpdatesPreserveLatestFields(t *testing.T) {
+	re := require.New(t)
+	cfg := config.NewConfig()
+	re.NoError(cfg.Adjust(nil, false))
+	store := storage.NewStorageWithMemoryBackend()
+	s := &Server{
+		persistOptions: config.NewPersistOptions(cfg),
+		storage:        store,
+	}
+
+	defaultLimit := s.GetScheduleConfig().DefaultStoreLimit.AddPeer + 30
+	re.NoError(s.persistOptions.UpdateScheduleConfig(store, func(_ *sc.ScheduleConfig, next *sc.ScheduleConfig) (bool, error) {
+		next.DefaultStoreLimit.AddPeer = defaultLimit
+		return true, nil
+	}))
+	re.NoError(s.PatchScheduleConfig([]byte(`{"max-snapshot-count":99}`)))
+	re.NoError(s.SetScheduleConfigItem("max-pending-peer-count", float64(88)))
+
+	current := s.GetScheduleConfig()
+	re.Equal(defaultLimit, current.DefaultStoreLimit.AddPeer)
+	re.Equal(uint64(99), current.MaxSnapshotCount)
+	re.Equal(uint64(88), current.MaxPendingPeerCount)
+
+	reloaded := config.NewPersistOptions(config.NewConfig())
+	re.NoError(reloaded.Reload(store))
+	re.Equal(defaultLimit, reloaded.GetScheduleConfig().DefaultStoreLimit.AddPeer)
+	re.Equal(uint64(99), reloaded.GetScheduleConfig().MaxSnapshotCount)
+	re.Equal(uint64(88), reloaded.GetScheduleConfig().MaxPendingPeerCount)
+}
+
+func TestConcurrentPartialScheduleConfigUpdatesDoNotConflict(t *testing.T) {
+	re := require.New(t)
+	cfg := config.NewConfig()
+	re.NoError(cfg.Adjust(nil, false))
+	store := storage.NewStorageWithMemoryBackend()
+	s := &Server{
+		persistOptions: config.NewPersistOptions(cfg),
+		storage:        store,
+	}
+
+	const updates = 16
+	start := make(chan struct{})
+	errCh := make(chan error, updates*2)
+	var wg sync.WaitGroup
+	for i := range updates {
+		wg.Add(2)
+		go func(value int) {
+			defer wg.Done()
+			<-start
+			errCh <- s.PatchScheduleConfig([]byte(fmt.Sprintf(`{"max-snapshot-count":%d}`, value+1)))
+		}(i)
+		go func(value int) {
+			defer wg.Done()
+			<-start
+			errCh <- s.persistOptions.UpdateScheduleConfig(store, func(_ *sc.ScheduleConfig, next *sc.ScheduleConfig) (bool, error) {
+				next.DefaultStoreLimit.AddPeer = float64(value + 30)
+				return true, nil
+			})
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		re.NoError(err)
+	}
+
+	current := s.GetScheduleConfig()
+	reloaded := config.NewPersistOptions(config.NewConfig())
+	re.NoError(reloaded.Reload(store))
+	re.Equal(current.DefaultStoreLimit, reloaded.GetScheduleConfig().DefaultStoreLimit)
+	re.Equal(current.MaxSnapshotCount, reloaded.GetScheduleConfig().MaxSnapshotCount)
+}
+
+func TestDeleteFollowerRegion(t *testing.T) {
+	tests := []struct {
+		name        string
+		setup       func(*require.Assertions, *Server) uint64
+		errContains string
+		check       func(*require.Assertions, *Server, uint64)
+	}{
+		{
+			name: "cached region",
+			setup: func(re *require.Assertions, s *Server) uint64 {
+				region := newTestFollowerRegionMeta(1)
+				re.NoError(s.storage.SaveRegion(region))
+				s.basicCluster.PutRegion(core.NewRegionInfo(region, nil, core.SetSource(core.Storage)))
+				return region.GetId()
+			},
+			check: assertTestFollowerRegionDeleted,
+		},
+		{
+			name: "storage-only region",
+			setup: func(re *require.Assertions, s *Server) uint64 {
+				region := newTestFollowerRegionMeta(2)
+				re.NoError(s.storage.SaveRegion(region))
+				return region.GetId()
+			},
+			check: assertTestFollowerRegionDeleted,
+		},
+		{
+			name: "missing region",
+			setup: func(*require.Assertions, *Server) uint64 {
+				return 3
+			},
+		},
+		{
+			name: "load storage error",
+			setup: func(_ *require.Assertions, s *Server) uint64 {
+				s.storage = &testFollowerRegionStorage{
+					Storage:       s.storage,
+					loadRegionErr: errTestFollowerRegionStorage,
+				}
+				return 4
+			},
+			errContains: "load follower region from local storage",
+		},
+		{
+			name: "delete storage error",
+			setup: func(_ *require.Assertions, s *Server) uint64 {
+				region := newTestFollowerRegionMeta(5)
+				s.basicCluster.PutRegion(core.NewRegionInfo(region, nil, core.SetSource(core.Storage)))
+				s.storage = &testFollowerRegionStorage{
+					Storage:         s.storage,
+					deleteRegionErr: errTestFollowerRegionStorage,
+				}
+				return region.GetId()
+			},
+			errContains: "delete follower region from local storage",
+		},
+	}
+>>>>>>> a186e0cc61 (config: persist default store limit for future stores (#10900))
 
 	ctx        context.Context
 	cancel     context.CancelFunc

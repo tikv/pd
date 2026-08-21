@@ -271,6 +271,20 @@ func (suite *configTestSuite) checkConfigSchedule(cluster *tests.TestCluster) {
 		re.NoError(tu.ReadGetJSON(re, tests.TestDialClient, addr, scheduleConfig1))
 		return reflect.DeepEqual(*scheduleConfig1, *scheduleConfig)
 	})
+
+	invalidDefaultStoreLimit := map[string]any{
+		"default-store-limit": map[string]any{
+			"add-peer":    -1,
+			"remove-peer": scheduleConfig.DefaultStoreLimit.RemovePeer,
+		},
+	}
+	postData, err = json.Marshal(invalidDefaultStoreLimit)
+	re.NoError(err)
+	err = testutil.CheckPostJSON(tests.TestDialClient, addr, postData,
+		testutil.StatusNotOK(re),
+		testutil.StringContain(re, "default-store-limit.add-peer should be finite and non-negative"))
+	re.NoError(err)
+	re.Equal(scheduleConfig.DefaultStoreLimit, leaderServer.GetPersistOptions().GetScheduleConfig().DefaultStoreLimit)
 }
 
 func (suite *configTestSuite) TestConfigReplication() {
