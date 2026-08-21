@@ -40,11 +40,13 @@ var errSaveKeyspaceGroup = errors.New("save keyspace group error")
 
 type errorKeyspaceGroupStorage struct {
 	*endpoint.StorageEndpoint
-	failOnSaveID uint32
+	failOnSaveID      uint32
+	failOnDefaultSave bool
 }
 
 func (s *errorKeyspaceGroupStorage) SaveKeyspaceGroup(txn kv.Txn, kg *endpoint.KeyspaceGroup) error {
-	if s.failOnSaveID != 0 && kg.ID == s.failOnSaveID {
+	if (s.failOnDefaultSave && kg.ID == constant.DefaultKeyspaceGroupID) ||
+		(s.failOnSaveID != 0 && kg.ID == s.failOnSaveID) {
 		return errSaveKeyspaceGroup
 	}
 	return s.StorageEndpoint.SaveKeyspaceGroup(txn, kg)
@@ -111,6 +113,9 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupOperations() {
 	re.Equal(uint32(0), kg.ID)
 	re.Equal(endpoint.Basic.String(), kg.UserKind)
 	re.False(kg.IsSplitting())
+	kg, err = suite.kgm.DeleteKeyspaceGroupByID(constant.DefaultKeyspaceGroupID)
+	re.Nil(kg)
+	re.ErrorIs(err, errs.ErrModifyDefaultKeyspaceGroup)
 	// get the keyspace group 3
 	kg, err = suite.kgm.GetKeyspaceGroupByID(3)
 	re.NoError(err)
@@ -125,10 +130,47 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupOperations() {
 	kg, err = suite.kgm.GetKeyspaceGroupByID(3)
 	re.NoError(err)
 	re.Empty(kg)
+	kg, err = suite.kgm.DeleteKeyspaceGroupByID(3)
+	re.NoError(err)
+	re.Nil(kg)
 	// create an existing keyspace group
 	keyspaceGroups = []*endpoint.KeyspaceGroup{{ID: uint32(1), UserKind: endpoint.Standard.String()}}
 	err = suite.kgm.CreateKeyspaceGroups(keyspaceGroups)
 	re.Error(err)
+}
+
+func (suite *keyspaceGroupTestSuite) TestDeleteKeyspaceGroupPublishesRevisionAtomically() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	errorStore := &errorKeyspaceGroupStorage{StorageEndpoint: store}
+	kgm := NewKeyspaceGroupManager(ctx, errorStore, nil)
+	re.NoError(kgm.Bootstrap(ctx))
+	re.NoError(kgm.CreateKeyspaceGroups([]*endpoint.KeyspaceGroup{{
+		ID:       1,
+		UserKind: endpoint.Standard.String(),
+	}}))
+
+	errorStore.failOnDefaultSave = true
+	kg, err := kgm.DeleteKeyspaceGroupByID(1)
+	re.Nil(kg)
+	re.ErrorIs(err, errSaveKeyspaceGroup)
+	kg, err = kgm.GetKeyspaceGroupByID(1)
+	re.NoError(err)
+	re.NotNil(kg)
+
+	errorStore.failOnDefaultSave = false
+	kg, err = kgm.DeleteKeyspaceGroupByID(1)
+	re.NoError(err)
+	re.Equal(uint32(1), kg.ID)
+	kg, err = kgm.GetKeyspaceGroupByID(1)
+	re.NoError(err)
+	re.Nil(kg)
+	defaultKG, err := kgm.GetKeyspaceGroupByID(constant.DefaultKeyspaceGroupID)
+	re.NoError(err)
+	re.NotNil(defaultKG)
 }
 
 func (suite *keyspaceGroupTestSuite) TestKeyspaceAssignment() {
@@ -566,6 +608,12 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupMerge() {
 	// merge the default keyspace group
 	err = suite.kgm.MergeKeyspaceGroups(1, []uint32{constant.DefaultKeyspaceGroupID})
 	re.ErrorIs(err, errs.ErrModifyDefaultKeyspaceGroup)
+	// merge target cannot also be deleted as a merge source
+	err = suite.kgm.MergeKeyspaceGroups(1, []uint32{1})
+	re.ErrorContains(err, "cannot be both merge target and source")
+	kg1, err = suite.kgm.GetKeyspaceGroupByID(1)
+	re.NoError(err)
+	re.NotNil(kg1)
 }
 
 func TestBuildSplitKeyspaces(t *testing.T) {
