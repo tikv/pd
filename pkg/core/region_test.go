@@ -1459,6 +1459,41 @@ func TestRegionCount(t *testing.T) {
 	}
 }
 
+func TestRegionTreeSnapshot(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+	regions.PutRegion(NewTestRegionInfo(1, 1, []byte("a"), []byte("b")))
+	regions.PutRegion(NewTestRegionInfo(2, 1, []byte("b"), []byte("c")))
+
+	snapshot := regions.GetRegionTreeSnapshot()
+	firstBatch := snapshot.ScanRegions([]byte("a"), []byte("c"), 1)
+	regions.PutRegion(NewTestRegionInfo(3, 1, []byte("a"), []byte("c")))
+
+	secondBatch := snapshot.ScanRegions(firstBatch[0].GetEndKey(), []byte("c"), 1)
+	re.Equal([]uint64{1, 2}, []uint64{firstBatch[0].GetID(), secondBatch[0].GetID()})
+	got := regions.ScanRegions([]byte("a"), []byte("c"), 0)
+	re.Equal([]uint64{3}, []uint64{got[0].GetID()})
+}
+
+func BenchmarkRegionTreeSnapshot(b *testing.B) {
+	regions := NewRegionsInfo()
+	const regionCount = 100000
+	for i := range regionCount {
+		regions.PutRegion(NewTestRegionInfo(
+			uint64(i+1), 1,
+			[]byte(fmt.Sprintf("%09d", i)),
+			[]byte(fmt.Sprintf("%09d", i+1)),
+		))
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		snapshot := regions.GetRegionTreeSnapshot()
+		_ = snapshot.ScanRegions(nil, nil, 1)
+	}
+}
+
 func TestResetRegionCache(t *testing.T) {
 	re := require.New(t)
 	regions := NewRegionsInfo()

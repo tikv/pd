@@ -15,8 +15,11 @@
 package api
 
 import (
+	"bytes"
 	"container/heap"
+	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"sort"
@@ -27,8 +30,11 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/unrolled/render"
 
+	"github.com/pingcap/errcode"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/log"
+	"go.uber.org/zap"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
@@ -36,6 +42,7 @@ import (
 	"github.com/tikv/pd/pkg/response"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server"
 )
@@ -284,6 +291,7 @@ func (h *regionsHandler) GetStoreRegions(w http.ResponseWriter, r *http.Request)
 //	@Summary	List regions belongs to the given keyspace ID.
 //	@Param		keyspace_id	query	string	true	"Keyspace ID"
 //	@Param		limit		query	integer	false	"Limit count"	default(16)
+//	@Param		batch		query	integer	false	"Maximum Regions processed per internal scan/write batch; does not change the result limit or schema"
 //	@Produce	json
 //	@Success	200	{object}	response.RegionsInfo
 //	@Failure	400	{string}	string	"The input is invalid."
@@ -309,12 +317,33 @@ func (h *regionsHandler) GetKeyspaceRegions(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	limit, err := h.AdjustLimit(r.URL.Query().Get("limit"))
+	query := r.URL.Query()
+	limit, err := h.AdjustLimit(query.Get("limit"))
 	if err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	regionBound := keyspace.MakeRegionBound(keyspaceID)
+	if query.Has("batch") {
+		batchStr := query.Get("batch")
+		if batchStr == "" {
+			apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errors.New("batch should be a positive number")))
+			return
+		}
+		batch, err := h.AdjustLimit(batchStr)
+		if err != nil {
+			apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(err))
+			return
+		}
+		if batch <= 0 {
+			apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errors.New("batch should be a positive number")))
+			return
+		}
+		snapshot := rc.GetBasicCluster().GetRegionTreeSnapshot()
+		h.writeKeyspaceRegionsInBatches(r.Context(), w, snapshot.ScanRegions, regionBound, limit, batch)
+		return
+	}
+
 	regions := rc.ScanRegions(regionBound.RawLeftBound, regionBound.RawRightBound, limit)
 	if limit <= 0 || limit > len(regions) {
 		txnRegion := rc.ScanRegions(regionBound.TxnLeftBound, regionBound.TxnRightBound, limit-len(regions))
@@ -326,6 +355,80 @@ func (h *regionsHandler) GetKeyspaceRegions(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	h.rd.Data(w, http.StatusOK, b)
+}
+
+func (*regionsHandler) writeKeyspaceRegionsInBatches(
+	ctx context.Context,
+	w http.ResponseWriter,
+	scanRegions func(startKey, endKey []byte, limit int) []*core.RegionInfo,
+	regionBound *keyspace.RegionBound,
+	limit, batch int,
+) {
+	if ctx.Err() != nil {
+		return
+	}
+	w.Header().Set(render.ContentType, render.ContentBinary)
+	w.WriteHeader(http.StatusOK)
+	if _, err := io.WriteString(w, `{"regions":[`); err != nil {
+		return
+	}
+
+	count := 0
+	defer func() {
+		// Keep the response structurally valid when a server-side cancellation
+		// happens after writing starts. A disconnected client will reject writes.
+		if _, err := io.WriteString(w, `],"count":`+strconv.Itoa(count)+"}"); err != nil {
+			log.Debug("failed to finish keyspace regions response", zap.Error(err))
+		}
+	}()
+	keyRanges := []keyutil.KeyRange{
+		{StartKey: regionBound.RawLeftBound, EndKey: regionBound.RawRightBound},
+		{StartKey: regionBound.TxnLeftBound, EndKey: regionBound.TxnRightBound},
+	}
+	for _, keyRange := range keyRanges {
+		startKey, endKey := keyRange.StartKey, keyRange.EndKey
+		for limit <= 0 || count < limit {
+			if ctx.Err() != nil {
+				return
+			}
+			scanLimit := batch
+			if limit > 0 && scanLimit > limit-count {
+				scanLimit = limit - count
+			}
+			regions := scanRegions(startKey, endKey, scanLimit)
+			if len(regions) == 0 {
+				break
+			}
+			for _, region := range regions {
+				b, err := response.MarshalRegionInfoJSON(ctx, region)
+				if err != nil {
+					return
+				}
+				if count > 0 {
+					if _, err := io.WriteString(w, ","); err != nil {
+						return
+					}
+				}
+				if _, err := w.Write(b); err != nil {
+					return
+				}
+				count++
+			}
+			failpoint.InjectCall("afterKeyspaceRegionsBatch")
+
+			nextKey := regions[len(regions)-1].GetEndKey()
+			if len(nextKey) == 0 || bytes.Compare(nextKey, endKey) >= 0 {
+				break
+			}
+			if bytes.Compare(nextKey, startKey) <= 0 {
+				break
+			}
+			startKey = nextKey
+		}
+		if limit > 0 && count >= limit {
+			break
+		}
+	}
 }
 
 // GetMissPeerRegions returns all regions that miss peer.
