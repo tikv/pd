@@ -178,11 +178,10 @@ type ResetTSParams struct {
 }
 
 // ResetTS is the http.HandlerFunc of ResetTS
-// FIXME: details of input json body params
 // @Tags     admin
 // @Summary  Reset the ts.
 // @Accept   json
-// @Param    body  body  object  true  "json params"
+// @Param    body  body  ResetTSParams  true  "reset ts parameters"
 // @Produce  json
 // @Success  200  {string}  string  "Reset ts successfully."
 // @Failure  400  {string}  string  "The input is invalid."
@@ -309,12 +308,17 @@ func getConfig(c *gin.Context) {
 	c.IndentedJSON(http.StatusOK, config)
 }
 
+// TransferPrimaryRequest is the request body for /primary/transfer.
+type TransferPrimaryRequest struct {
+	NewPrimary      string  `json:"new_primary"`
+	KeyspaceGroupID *uint32 `json:"keyspace_group_id"`
+}
+
 // transferPrimary transfers the primary member to `new_primary`.
 // @Tags     primary
 // @Summary  Transfer the primary member to `new_primary`.
 // @Produce  json
-// @Param    new_primary        body  string  false  "new primary name"
-// @Param    keyspace_group_id  body  integer false  "keyspace group ID (default: 0)"
+// @Param    body  body  TransferPrimaryRequest  true  "transfer options"
 // @Success  200  string  string
 // @Router   /primary/transfer [post]
 func transferPrimary(c *gin.Context) {
@@ -333,10 +337,7 @@ func transferPrimary(c *gin.Context) {
 		c.String(http.StatusBadRequest, "request body is required")
 		return
 	}
-	var input struct {
-		NewPrimary      string  `json:"new_primary"`
-		KeyspaceGroupID *uint32 `json:"keyspace_group_id"`
-	}
+	var input TransferPrimaryRequest
 	if err := json.Unmarshal(body, &input); err != nil {
 		c.String(http.StatusBadRequest, err.Error())
 		return
