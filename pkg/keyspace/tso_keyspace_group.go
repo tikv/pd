@@ -613,8 +613,9 @@ func (m *GroupManager) RemoveKeyspacesFromGroup(groupID uint32, km *Manager, key
 	defer m.Unlock()
 
 	var (
-		kg  *endpoint.KeyspaceGroup
-		err error
+		kg      *endpoint.KeyspaceGroup
+		err     error
+		removed []uint32
 	)
 
 	if err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
@@ -661,6 +662,7 @@ func (m *GroupManager) RemoveKeyspacesFromGroup(groupID uint32, km *Manager, key
 				if err != nil {
 					return err
 				}
+				removed = append(removed, ks)
 			}
 		}
 		kg.Keyspaces = newKeyspaces
@@ -674,6 +676,12 @@ func (m *GroupManager) RemoveKeyspacesFromGroup(groupID uint32, km *Manager, key
 	// Update the cache
 	userKind := endpoint.StringUserKind(kg.UserKind)
 	m.groups[userKind].Put(kg)
+	// Only now that the transaction has actually committed is it safe to
+	// refresh each removed keyspace's cache - see RemoveKeyspace and
+	// refreshKeyspaceMetaCache.
+	for _, id := range removed {
+		km.refreshKeyspaceMetaCache(id)
+	}
 
 	return kg, nil
 }
@@ -718,6 +726,8 @@ func (m *GroupManager) updateKeyspaceForGroupTxnOp(userKind endpoint.UserKind, i
 		if err != nil {
 			return
 		}
+		// Retry (with backoff) outside the lock so a transient load failure
+		// doesn't hold up other groups' callbacks.
 		var kg *endpoint.KeyspaceGroup
 		var loadErr error
 		for i := range 3 {
@@ -740,7 +750,25 @@ func (m *GroupManager) updateKeyspaceForGroupTxnOp(userKind endpoint.UserKind, i
 		}
 		m.Lock()
 		defer m.Unlock()
-		m.groups[userKind].Put(kg)
+		// Re-read once more under the lock instead of Put-ing the snapshot
+		// loaded above: this callback can be delayed behind a later commit
+		// whose own callback already ran and cached a newer membership, and
+		// Put-ing the stale outer snapshot would clobber it. Re-reading here
+		// means whichever callback's Put runs last always reads what is
+		// currently durable, so the cache converges to storage regardless of
+		// callback ordering.
+		var fresh *endpoint.KeyspaceGroup
+		loadErr = m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
+			var err error
+			fresh, err = m.store.LoadKeyspaceGroup(txn, uint32(groupID))
+			return err
+		})
+		if loadErr != nil || fresh == nil {
+			log.Error("failed to re-validate keyspace group before caching, cache may be stale",
+				zap.Uint64("group-id", groupID), zap.Error(loadErr))
+			return
+		}
+		m.groups[userKind].Put(fresh)
 	}
 	op := m.saveKeyspaceGroupTxnOp(uint32(groupID), keyspaceID, mutation)
 	return op, cb, nil

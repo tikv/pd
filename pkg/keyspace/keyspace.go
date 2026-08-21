@@ -517,10 +517,17 @@ func (manager *Manager) createKeyspaceWithoutCheck(tracer *createKeyspaceTracer,
 // that logic. The corresponding in-memory caches (TSO group cache, region
 // labeler rule index, keyspace name/state lookup) are only refreshed once that
 // transaction commits.
+//
+// metaLock is only held around the RunTxn call below, not the whole function:
+// updateKeyspaceForGroupTxnOp (and the callback it returns) briefly takes
+// GroupManager.Lock, while RemoveKeyspacesFromGroup takes GroupManager.Lock
+// first and then metaLock (via Manager.RemoveKeyspace) — holding metaLock
+// across those calls would invert that order and can deadlock against a
+// concurrent RemoveKeyspacesFromGroup. Keeping metaLock scoped to just the
+// commit still serializes this rollback against a concurrent
+// UpdateKeyspaceState/UpdateKeyspaceStateByID/enableNewKeyspace call for the
+// same id, same as before.
 func (manager *Manager) rollbackCreateKeyspace(tracer *createKeyspaceTracer, keyspace *keyspacepb.KeyspaceMeta) error {
-	manager.metaLock.Lock(keyspace.GetId())
-	defer manager.metaLock.Unlock(keyspace.GetId())
-
 	var regionLabeler *labeler.RegionLabeler
 	var ruleID string
 	if cl, ok := manager.cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler }); ok {
@@ -554,14 +561,27 @@ func (manager *Manager) rollbackCreateKeyspace(tracer *createKeyspaceTracer, key
 		}
 	}
 
+	// Captured once, outside the closure below: the closure runs again on
+	// each retry attempt (see the retry loop after this), and
+	// unassignKeyspaceFromMetaServiceGroup mutates meta.Config as a
+	// non-transactional side effect that a failed attempt would not undo,
+	// which would make a retried second attempt silently skip the
+	// assignment-count decrement. Reading the id once here and calling
+	// updateAssignmentTxn directly keeps this closure idempotent: it re-reads
+	// the persisted count fresh from txn on every attempt, and only the
+	// attempt that actually commits ever takes effect.
+	metaGroupID := keyspace.GetConfig()[MetaServiceGroupIDKey]
+
 	// Remove the meta, undo the meta-service group assignment count, and
 	// remove the region label rule, all in the same transaction.
 	addTxn(func(txn kv.Txn) error {
 		if err := manager.store.RemoveKeyspace(txn, keyspace.GetId(), keyspace.GetName()); err != nil {
 			return err
 		}
-		if err := manager.unassignKeyspaceFromMetaServiceGroup(txn, keyspace); err != nil {
-			return err
+		if metaGroupID != "" && manager.mgm != nil {
+			if err := manager.mgm.updateAssignmentTxn(txn, metaGroupID, ""); err != nil {
+				return err
+			}
 		}
 		if regionLabeler == nil {
 			return nil
@@ -569,15 +589,29 @@ func (manager *Manager) rollbackCreateKeyspace(tracer *createKeyspaceTracer, key
 		return regionLabeler.GetRuleStorage().DeleteRegionRule(txn, ruleID)
 	}, nil)
 
-	if err := manager.RunTxn(uint32(groupID), txnOps); err != nil {
+	// Retry a few times: the create transaction has already committed, so a
+	// transient failure here must not be allowed to strand the keyspace name
+	// permanently reserved with no way for the caller to retry the create.
+	manager.metaLock.Lock(keyspace.GetId())
+	var err error
+	for i := range 3 {
+		err = manager.RunTxn(uint32(groupID), txnOps)
+		if err == nil {
+			break
+		}
+		if i < 2 {
+			time.Sleep(time.Second)
+		}
+	}
+	manager.metaLock.Unlock(keyspace.GetId())
+	if err != nil {
 		return err
 	}
 	for _, cb := range txnCbs {
 		cb(nil)
 	}
 
-	manager.keyspaceNameLookup.Delete(keyspace.GetId())
-	manager.keyspaceStateLookup.Delete(keyspace.GetId())
+	manager.refreshKeyspaceMetaCache(keyspace.GetId())
 	if regionLabeler != nil {
 		regionLabeler.DeleteRuleWithoutTxn(ruleID)
 	}
@@ -664,10 +698,12 @@ func (manager *Manager) saveNewKeyspaceTxnOp(keyspace *keyspacepb.KeyspaceMeta) 
 		if err != nil {
 			return
 		}
-		manager.metaLock.Lock(keyspace.GetId())
-		defer manager.metaLock.Unlock(keyspace.GetId())
-		manager.keyspaceNameLookup.Store(keyspace.GetId(), keyspace.Name)
-		manager.keyspaceStateLookup.Store(keyspace.GetId(), keyspace.State)
+		// Re-read from storage instead of storing keyspace.Name/State captured
+		// here: this callback runs after txnLock is released (see the callback
+		// loop in createKeyspaceWithoutCheck), so it can be delayed behind a
+		// concurrent UpdateKeyspaceState(ByID) call that already committed and
+		// cached a newer state. See refreshKeyspaceMetaCache.
+		manager.refreshKeyspaceMetaCache(keyspace.GetId())
 	}
 	return func(txn kv.Txn) error {
 		// Save keyspace ID.
@@ -1080,7 +1116,7 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 		)
 		return nil, err
 	}
-	manager.storeKeyspaceStateCache(meta.GetId(), meta.GetState())
+	manager.refreshKeyspaceMetaCache(meta.GetId())
 	if manager.mgm != nil {
 		manager.mgm.AttachEndpoints(meta.GetConfig())
 	}
@@ -1092,13 +1128,40 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 	return meta, nil
 }
 
-// storeKeyspaceStateCache updates keyspaceStateLookup for a keyspace whose new
-// state has just been durably committed. Callers must not hold metaLock for id
-// when calling this.
-func (manager *Manager) storeKeyspaceStateCache(id uint32, state keyspacepb.KeyspaceState) {
+// refreshKeyspaceMetaCache re-reads the current durable keyspace meta and
+// syncs keyspaceNameLookup/keyspaceStateLookup to it under metaLock, instead
+// of writing a value the caller computed or captured earlier. A post-commit
+// cache update can be delayed arbitrarily (see runCreateKeyspaceTxn's
+// callback loop, which runs after txnLock is released); writing a caller-
+// captured value directly can let a slow, stale callback clobber a cache
+// entry a faster, later commit already refreshed. Re-reading under metaLock
+// instead means whichever call reaches this last always reads what is
+// currently durable, so the cache converges to storage regardless of
+// callback ordering. Callers must not hold metaLock for id when calling
+// this. If the reload itself fails, the cache is left untouched (not
+// cleared or overwritten) - GetKeyspaceNameByID/GetKeyspaceStateByID already
+// fall back to storage on a cache miss, so leaving a stale-or-absent entry
+// is safe; writing a wrong value would not be.
+func (manager *Manager) refreshKeyspaceMetaCache(id uint32) {
 	manager.metaLock.Lock(id)
 	defer manager.metaLock.Unlock(id)
-	manager.keyspaceStateLookup.Store(id, state)
+	var meta *keyspacepb.KeyspaceMeta
+	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+		var err error
+		meta, err = manager.store.LoadKeyspaceMeta(txn, id)
+		return err
+	})
+	if err != nil {
+		log.Warn("[keyspace] failed to refresh keyspace cache", zap.Uint32("keyspace-id", id), errs.ZapError(err))
+		return
+	}
+	if meta == nil {
+		manager.keyspaceNameLookup.Delete(id)
+		manager.keyspaceStateLookup.Delete(id)
+		return
+	}
+	manager.keyspaceNameLookup.Store(id, meta.GetName())
+	manager.keyspaceStateLookup.Store(id, meta.GetState())
 }
 
 // RemoveKeyspace removes the keyspace specified by id if it's in proper state and not protected.
@@ -1122,8 +1185,13 @@ func (manager *Manager) RemoveKeyspace(txn kv.Txn, id uint32) error {
 	if err != nil {
 		return err
 	}
-	manager.keyspaceNameLookup.Delete(id)
-	manager.keyspaceStateLookup.Delete(id)
+	// The cache is deliberately not touched here: txn belongs to the caller
+	// and may still be rolled back (RemoveKeyspacesFromGroup batches several
+	// of these into one transaction), so mutating the cache now could make it
+	// show a removal that storage later reverts. The caller must refresh the
+	// cache (see refreshKeyspaceMetaCache) once its transaction has actually
+	// committed.
+	//
 	// Keep the meta-service group assignment accounting in sync within the same
 	// txn. Without this, removed keyspaces leak count and could permanently block
 	// deleting an otherwise-empty group.
@@ -1171,7 +1239,7 @@ func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.K
 		)
 		return nil, err
 	}
-	manager.storeKeyspaceStateCache(meta.GetId(), meta.GetState())
+	manager.refreshKeyspaceMetaCache(meta.GetId())
 	log.Info("[keyspace] keyspace state updated",
 		zap.Uint32("keyspace-id", meta.GetId()),
 		zap.String("name", meta.GetName()),
@@ -1204,7 +1272,7 @@ func (manager *Manager) enableNewKeyspace(id uint32, now int64) error {
 	if err != nil {
 		return err
 	}
-	manager.storeKeyspaceStateCache(meta.GetId(), meta.GetState())
+	manager.refreshKeyspaceMetaCache(meta.GetId())
 	if manager.mgm != nil {
 		manager.mgm.AttachEndpoints(meta.GetConfig())
 	}
