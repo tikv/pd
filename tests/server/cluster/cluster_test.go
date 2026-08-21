@@ -544,6 +544,13 @@ func testStateAndLimit(re *require.Assertions, clusterID uint64, rc *cluster.Raf
 	// prepare
 	storeID := store.GetId()
 	oc := rc.GetOperatorController()
+	// The store can be left tombstoned by a previous call to this helper (the
+	// tombstone beforeState block runs it twice on the same store); reset it
+	// to a non-removed baseline first so these SetStoreLimit calls -- which
+	// only exist to seed a limit before resetStoreState below establishes the
+	// state this specific case actually wants to test -- aren't rejected by
+	// SetStoreLimit's own tombstone check.
+	resetStoreState(re, rc, storeID, metapb.StoreState_Up)
 	err := rc.SetStoreLimit(storeID, storelimit.AddPeer, 60)
 	re.NoError(err)
 	err = rc.SetStoreLimit(storeID, storelimit.RemovePeer, 60)

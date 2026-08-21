@@ -217,9 +217,13 @@ func TestPublicStoreCaches(t *testing.T) {
 }
 
 func (manager *RegionRuleFitCacheManager) mockRegionRuleFitCache(region *core.RegionInfo, rules []*Rule, regionStores []*core.StoreInfo) *regionRuleFitCache {
+	storeSet := core.NewStoresInfo()
+	for _, s := range regionStores {
+		storeSet.PutStore(s)
+	}
 	return &regionRuleFitCache{
 		region:       toRegionCache(region),
-		regionStores: manager.toStoreCacheList(regionStores),
+		regionStores: manager.toStoreCacheList(storeSet, regionStores),
 		rules:        toRuleCacheList(rules),
 		bestFit: &RegionFit{
 			regionStores: regionStores,

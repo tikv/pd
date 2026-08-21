@@ -86,7 +86,7 @@ func (manager *RegionRuleFitCacheManager) CheckAndGetCache(region *core.RegionIn
 }
 
 // SetCache stores RegionFit cache
-func (manager *RegionRuleFitCacheManager) SetCache(region *core.RegionInfo, fit *RegionFit) {
+func (manager *RegionRuleFitCacheManager) SetCache(storeSet StoreSet, region *core.RegionInfo, fit *RegionFit) {
 	if !ValidateRegion(region) || !ValidateFit(fit) || !ValidateStores(fit.regionStores) {
 		return
 	}
@@ -99,7 +99,7 @@ func (manager *RegionRuleFitCacheManager) SetCache(region *core.RegionInfo, fit 
 		}
 		return
 	}
-	manager.regionCaches[region.GetID()] = manager.toRegionRuleFitCache(region, fit)
+	manager.regionCaches[region.GetID()] = manager.toRegionRuleFitCache(storeSet, region, fit)
 }
 
 // regionRuleFitCache stores regions RegionFit result and involving variables
@@ -146,10 +146,10 @@ func storesEqual(a []*storeCache, b []*core.StoreInfo) bool {
 	})
 }
 
-func (manager *RegionRuleFitCacheManager) toRegionRuleFitCache(region *core.RegionInfo, fit *RegionFit) *regionRuleFitCache {
+func (manager *RegionRuleFitCacheManager) toRegionRuleFitCache(storeSet StoreSet, region *core.RegionInfo, fit *RegionFit) *regionRuleFitCache {
 	return &regionRuleFitCache{
 		region:       toRegionCache(region),
-		regionStores: manager.toStoreCacheList(fit.regionStores),
+		regionStores: manager.toStoreCacheList(storeSet, fit.regionStores),
 		rules:        toRuleCacheList(fit.rules),
 		bestFit:      nil,
 		hitCount:     0,
@@ -197,7 +197,7 @@ func (s storeCache) storeEqual(store *core.StoreInfo) bool {
 		labelEqual(s.labels, store.GetLabels())
 }
 
-func (manager *RegionRuleFitCacheManager) toStoreCacheList(stores []*core.StoreInfo) (c []*storeCache) {
+func (manager *RegionRuleFitCacheManager) toStoreCacheList(storeSet StoreSet, stores []*core.StoreInfo) (c []*storeCache) {
 	for _, s := range stores {
 		sCache, ok := manager.storeCaches[s.GetID()]
 		if !ok || !sCache.storeEqual(s) {
@@ -211,10 +211,13 @@ func (manager *RegionRuleFitCacheManager) toStoreCacheList(stores []*core.StoreI
 				state:   s.GetState(),
 			}
 			// A removed store's entry is only ever cleared once, when it's
-			// buried or finally removed; a stale RegionInfo snapshot that
-			// still lists it as a peer must not re-add it here, or it would
-			// linger in storeCaches for good since nothing sweeps it again.
-			if !s.IsRemoved() {
+			// buried or finally removed; nothing sweeps it again after that.
+			// The stores slice can be a stale RegionInfo snapshot taken before
+			// a store was buried, so re-check the store fresh through storeSet
+			// here rather than trusting s.IsRemoved() -- otherwise a store that
+			// was buried while this same FitRegion call was still computing
+			// could get re-added and linger in storeCaches for good.
+			if current := storeSet.GetStore(s.GetID()); current != nil && !current.IsRemoved() {
 				manager.storeCaches[s.GetID()] = sCache
 			}
 		}

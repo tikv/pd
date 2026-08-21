@@ -453,14 +453,14 @@ func (m *RuleManager) FitRegion(storeSet StoreSet, region *core.RegionInfo) (fit
 	fit.regionStores = regionStores
 	fit.rules = rules
 	if isCached {
-		m.SetRegionFitCache(region, fit)
+		m.SetRegionFitCache(storeSet, region, fit)
 	}
 	return fit
 }
 
 // SetRegionFitCache sets RegionFitCache
-func (m *RuleManager) SetRegionFitCache(region *core.RegionInfo, fit *RegionFit) {
-	m.cache.SetCache(region, fit)
+func (m *RuleManager) SetRegionFitCache(storeSet StoreSet, region *core.RegionInfo, fit *RegionFit) {
+	m.cache.SetCache(storeSet, region, fit)
 }
 
 // InvalidCache invalids the cache.

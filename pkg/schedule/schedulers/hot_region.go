@@ -187,6 +187,14 @@ func (s *baseHotScheduler) summaryPendingInfluence(storeInfos map[uint64]*statis
 	}
 	// for metrics
 	for storeID, info := range storeInfos {
+		// storeInfos comes from SummaryStoreInfos(cluster.GetStores()), which
+		// includes tombstoned stores; without this check a pending influence
+		// entry still in its zombie period keeps republishing HotPendingSum
+		// for a removed store every Schedule() round, even after bury/final
+		// -removal or collectHotMetrics deletes the series.
+		if info.IsRemoved() {
+			continue
+		}
 		storeLabel := strconv.FormatUint(storeID, 10)
 		if infl := info.PendingSum; infl != nil && len(infl.Loads) != 0 {
 			utils.ForeachRegionStats(func(rwTy utils.RWType, dim int, kind utils.RegionStatKind) {

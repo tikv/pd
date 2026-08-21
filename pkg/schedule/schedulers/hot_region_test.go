@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -2648,4 +2649,29 @@ func TestEncodeConfig(t *testing.T) {
 	data, err := sche.EncodeConfig()
 	re.NoError(err)
 	re.NotEqual("null", string(data))
+}
+
+func TestSummaryPendingInfluenceSkipsRemovedStoreMetric(t *testing.T) {
+	re := require.New(t)
+	defer HotPendingSum.Reset()
+
+	hb := newBaseHotScheduler(nil, 0, 0, initHotRegionScheduleConfig())
+	storeID := uint64(1)
+	loads := make([]float64, utils.RegionStatCount)
+	loads[utils.RegionWriteBytes] = 1
+	storeInfos := map[uint64]*statistics.StoreSummaryInfo{
+		storeID: {
+			StoreInfo: core.NewStoreInfo(&metapb.Store{
+				Id:        storeID,
+				NodeState: metapb.NodeState_Removed,
+			}),
+			PendingSum: &statistics.Influence{Loads: loads},
+		},
+	}
+
+	metric := HotPendingSum.WithLabelValues("1", utils.Write.String(), utils.DimToString(utils.ByteDim))
+	metric.Set(42)
+	hb.summaryPendingInfluence(storeInfos)
+
+	re.Equal(float64(42), promtestutil.ToFloat64(metric))
 }
