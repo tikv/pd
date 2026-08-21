@@ -21,6 +21,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -224,6 +225,8 @@ func (c *Config) Clone() *Config {
 // PersistConfig wraps all configurations that need to persist to storage and
 // allows to access them safely.
 type PersistConfig struct {
+	scheduleMu sync.Mutex
+
 	ttl *cache.TTLString
 	// Store the global configuration that is related to the scheduling.
 	clusterVersion unsafe.Pointer
@@ -286,6 +289,12 @@ func (o *PersistConfig) GetScheduleConfig() *sc.ScheduleConfig {
 
 // SetScheduleConfig sets the scheduling configuration dynamically.
 func (o *PersistConfig) SetScheduleConfig(cfg *sc.ScheduleConfig) {
+	o.scheduleMu.Lock()
+	defer o.scheduleMu.Unlock()
+	o.installScheduleConfig(cfg)
+}
+
+func (o *PersistConfig) installScheduleConfig(cfg *sc.ScheduleConfig) {
 	old := o.GetScheduleConfig()
 	o.schedule.Store(cfg)
 	// The coordinator is not aware of the underlying scheduler config changes,
@@ -293,6 +302,16 @@ func (o *PersistConfig) SetScheduleConfig(cfg *sc.ScheduleConfig) {
 	if !reflect.DeepEqual(old.Schedulers, cfg.Schedulers) {
 		o.tryNotifySchedulersUpdating()
 	}
+}
+
+// SetSchedulers replaces only the scheduler list.
+func (o *PersistConfig) SetSchedulers(schedulers sc.SchedulerConfigs) {
+	o.scheduleMu.Lock()
+	defer o.scheduleMu.Unlock()
+
+	next := o.GetScheduleConfig().Clone()
+	next.Schedulers = append(sc.SchedulerConfigs(nil), schedulers...)
+	o.installScheduleConfig(next)
 }
 
 // AdjustScheduleCfg adjusts the schedule config during the initialization.
@@ -305,6 +324,7 @@ func AdjustScheduleCfg(scheduleCfg *sc.ScheduleConfig) {
 			scheduleCfg.Schedulers = append(scheduleCfg.Schedulers, ps)
 		}
 	}
+	scheduleCfg.MigrateDeprecatedFlags()
 }
 
 // GetReplicationConfig returns replication configurations.
@@ -527,10 +547,7 @@ func (o *PersistConfig) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitCon
 		return limit
 	}
 	cfg := o.GetScheduleConfig().Clone()
-	sc := sc.StoreLimitConfig{
-		AddPeer:    sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
-		RemovePeer: sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
-	}
+	limitCfg := cfg.GetDefaultStoreLimit()
 	v, ok1, err := o.getTTLFloat("default-add-peer")
 	if err != nil {
 		log.Warn("failed to parse default-add-peer from PersistOptions's ttl storage", zap.Error(err))
@@ -552,7 +569,7 @@ func (o *PersistConfig) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitCon
 	if canSetAddPeer || canSetRemovePeer {
 		return returnSC
 	}
-	cfg.StoreLimit[storeID] = sc
+	cfg.StoreLimit[storeID] = limitCfg
 	o.SetScheduleConfig(cfg)
 	return o.GetScheduleConfig().StoreLimit[storeID]
 }
@@ -629,12 +646,14 @@ func (o *PersistConfig) SetAllStoresLimit(typ storelimit.Type, ratePerMin float6
 	v := o.GetScheduleConfig().Clone()
 	switch typ {
 	case storelimit.AddPeer:
+		v.DefaultStoreLimit.AddPeer = ratePerMin
 		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, ratePerMin)
 		for storeID := range v.StoreLimit {
 			sc := sc.StoreLimitConfig{AddPeer: ratePerMin, RemovePeer: v.StoreLimit[storeID].RemovePeer}
 			v.StoreLimit[storeID] = sc
 		}
 	case storelimit.RemovePeer:
+		v.DefaultStoreLimit.RemovePeer = ratePerMin
 		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, ratePerMin)
 		for storeID := range v.StoreLimit {
 			sc := sc.StoreLimitConfig{AddPeer: v.StoreLimit[storeID].AddPeer, RemovePeer: ratePerMin}
