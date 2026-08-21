@@ -22,9 +22,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
@@ -112,6 +114,18 @@ func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupUsesBoundedTran
 	re := suite.Require()
 	keyspaceCount := maxKeyspaceRemovalBatchSize*2 + 1
 	keyspaceIDs := suite.createArchivedKeyspaces(keyspaceCount)
+	batchBoundaries := 0
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/keyspace/afterRemoveKeyspacesFromGroupBatch", func() {
+		batchBoundaries++
+		locked := suite.kgm.TryLock()
+		if locked {
+			suite.kgm.Unlock()
+		}
+		re.False(locked)
+	}))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/afterRemoveKeyspacesFromGroupBatch"))
+	}()
 
 	store, ok := suite.kg.store.(*endpoint.StorageEndpoint)
 	re.True(ok)
@@ -121,6 +135,7 @@ func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupUsesBoundedTran
 	group, err := suite.kgm.RemoveKeyspacesFromGroup(constant.DefaultKeyspaceGroupID, suite.kg, keyspaceIDs)
 	re.NoError(err)
 	re.Equal(int32(3), countingStore.runInTxnCount.Load())
+	re.Equal(2, batchBoundaries)
 	for _, keyspaceID := range keyspaceIDs {
 		re.NotContains(group.Keyspaces, keyspaceID)
 		_, err := suite.kg.LoadKeyspaceByID(keyspaceID)

@@ -583,28 +583,36 @@ func (m *GroupManager) RemoveKeyspacesFromGroup(groupID uint32, km *Manager, key
 		uniqueIDs = append(uniqueIDs, keyspaceID)
 	}
 
+	// Keep the group membership stable across all batches. Otherwise a split or
+	// merge could move the remaining keyspaces after an earlier batch commits,
+	// causing a later batch to silently skip them.
+	m.Lock()
+	defer m.Unlock()
+
 	// Still run one transaction for an empty removal so that the group is loaded
 	// and its state is validated consistently with a non-empty request.
 	if len(uniqueIDs) == 0 {
-		return m.removeKeyspacesFromGroupBatch(groupID, km, nil)
+		return m.removeKeyspacesFromGroupBatchLocked(groupID, km, nil)
 	}
 
 	var kg *endpoint.KeyspaceGroup
 	for start := 0; start < len(uniqueIDs); start += maxKeyspaceRemovalBatchSize {
 		end := min(start+maxKeyspaceRemovalBatchSize, len(uniqueIDs))
 		var err error
-		kg, err = m.removeKeyspacesFromGroupBatch(groupID, km, uniqueIDs[start:end])
+		kg, err = m.removeKeyspacesFromGroupBatchLocked(groupID, km, uniqueIDs[start:end])
 		if err != nil {
 			return nil, err
+		}
+		if end < len(uniqueIDs) {
+			failpoint.InjectCall("afterRemoveKeyspacesFromGroupBatch")
 		}
 	}
 	return kg, nil
 }
 
-func (m *GroupManager) removeKeyspacesFromGroupBatch(groupID uint32, km *Manager, keyspaceIDs []uint32) (*endpoint.KeyspaceGroup, error) {
-	m.Lock()
-	defer m.Unlock()
-
+// removeKeyspacesFromGroupBatchLocked removes one bounded batch while the
+// caller holds m's write lock.
+func (m *GroupManager) removeKeyspacesFromGroupBatchLocked(groupID uint32, km *Manager, keyspaceIDs []uint32) (*endpoint.KeyspaceGroup, error) {
 	var (
 		kg         *endpoint.KeyspaceGroup
 		removedIDs []uint32
