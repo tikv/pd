@@ -216,6 +216,30 @@ func TestPublicStoreCaches(t *testing.T) {
 	}
 }
 
+func TestToStoreCacheListDoesNotReinsertStaleStore(t *testing.T) {
+	re := require.New(t)
+	manager := NewRegionRuleFitCacheManager()
+	live := core.NewStoreInfo(&metapb.Store{
+		Id:        1,
+		NodeState: metapb.NodeState_Serving,
+	})
+	// storeSet reflects the live, current cluster state; the stores slice
+	// passed to toStoreCacheList simulates a FitRegion call still holding an
+	// older StoreInfo snapshot taken before the store was buried.
+	storeSet := core.NewStoresInfo()
+	storeSet.PutStore(live)
+
+	manager.toStoreCacheList(storeSet, []*core.StoreInfo{live})
+	manager.RemoveStoreCache(1)
+
+	removed := live.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
+	storeSet.PutStore(removed)
+	manager.toStoreCacheList(storeSet, []*core.StoreInfo{live}) // stale FitRegion snapshot
+
+	_, ok := manager.storeCaches[1]
+	re.False(ok)
+}
+
 func (manager *RegionRuleFitCacheManager) mockRegionRuleFitCache(region *core.RegionInfo, rules []*Rule, regionStores []*core.StoreInfo) *regionRuleFitCache {
 	storeSet := core.NewStoresInfo()
 	for _, s := range regionStores {
