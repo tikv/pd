@@ -319,7 +319,9 @@ type TransferPrimaryRequest struct {
 // @Summary  Transfer the primary member to `new_primary`.
 // @Produce  json
 // @Param    body  body  TransferPrimaryRequest  true  "transfer options"
-// @Success  200  string  string
+// @Success  200   {string}  string  "success"
+// @Failure  400   {string}  string  "invalid request"
+// @Failure  500   {string}  string  "internal error"
 // @Router   /primary/transfer [post]
 func transferPrimary(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*tsoserver.Service)

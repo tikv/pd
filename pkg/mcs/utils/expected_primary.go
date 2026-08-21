@@ -164,6 +164,7 @@ func TransferPrimary(client *clientv3.Client, p *member.Participant, serviceName
 	if err != nil {
 		return err
 	}
+	entries = dedupeByLatestStart(entries)
 
 	if newPrimary != "" {
 		for _, member := range entries {
@@ -264,6 +265,30 @@ func isGroupMember(tsoMembersMap map[string]bool, addr string) bool {
 		}
 	}
 	return false
+}
+
+// dedupeByLatestStart collapses registry entries that share the same name down
+// to the one with the latest StartTimestamp. During a supported HTTP-to-HTTPS
+// restart, the same logical node's old address can still be registered under
+// its own etcd key (registry keys are keyed by address, not by node identity)
+// until that key's lease expires, so the live registry can transiently list
+// the same node twice under different schemes. Without this, matching by name
+// or by a scheme-insensitive address (see isSamePrimary, isGroupMember) can
+// resolve to both entries at once, letting the stale one be counted as a
+// distinct candidate and possibly be the one randomly selected.
+func dedupeByLatestStart(entries []discovery.ServiceRegistryEntry) []discovery.ServiceRegistryEntry {
+	latest := make(map[string]discovery.ServiceRegistryEntry, len(entries))
+	for _, entry := range entries {
+		existing, ok := latest[entry.Name]
+		if !ok || entry.StartTimestamp > existing.StartTimestamp {
+			latest[entry.Name] = entry
+		}
+	}
+	deduped := make([]discovery.ServiceRegistryEntry, 0, len(latest))
+	for _, entry := range latest {
+		deduped = append(deduped, entry)
+	}
+	return deduped
 }
 
 // IsValidPrimaryCandidate reports whether newPrimary identifies a member of the

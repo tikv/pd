@@ -183,3 +183,26 @@ func TestIsGroupMember(t *testing.T) {
 	re.True(isGroupMember(members, "https://127.0.0.1:1"), "scheme-insensitive fallback match")
 	re.False(isGroupMember(members, "http://127.0.0.1:2"), "different host is not a member")
 }
+
+// TestDedupeByLatestStart covers the supported HTTP-to-HTTPS restart, where the
+// same node's old registry entry can still be present alongside its new one
+// (registry keys are keyed by address, not by node identity) until the old
+// key's lease expires. Only the entry with the latest StartTimestamp for a
+// given name must survive.
+func TestDedupeByLatestStart(t *testing.T) {
+	re := require.New(t)
+	entries := []discovery.ServiceRegistryEntry{
+		{Name: "tso-1", ServiceAddr: "http://127.0.0.1:1", StartTimestamp: 100},
+		{Name: "tso-1", ServiceAddr: "https://127.0.0.1:1", StartTimestamp: 200},
+		{Name: "tso-2", ServiceAddr: "http://127.0.0.1:2", StartTimestamp: 150},
+	}
+
+	deduped := dedupeByLatestStart(entries)
+	re.Len(deduped, 2)
+	byName := make(map[string]discovery.ServiceRegistryEntry, len(deduped))
+	for _, entry := range deduped {
+		byName[entry.Name] = entry
+	}
+	re.Equal("https://127.0.0.1:1", byName["tso-1"].ServiceAddr, "the newer of the two tso-1 registrations must survive")
+	re.Equal("http://127.0.0.1:2", byName["tso-2"].ServiceAddr)
+}
