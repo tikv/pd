@@ -361,6 +361,40 @@ func (m *RuleManager) GetAllRules() []*Rule {
 	return rules
 }
 
+// GetIsolationPrefix returns the location labels up to the isolation level that every
+// rule agrees on, which names one isolation domain (see Rule.isolationPrefix). It reports
+// false when any rule enforces no isolation level, when a rule's isolation level is not one
+// of its location labels, when rules disagree, or when there are no rules at all.
+//
+// Unlike GetAllRules this neither clones nor sorts, so callers on a hot path (schedulers run
+// as often as every 10ms) do not pay a JSON round-trip per rule, and the read lock is held
+// only for a few field reads. Reading rule fields directly is safe because every mutation
+// path takes the write lock and replaces map entries rather than editing rules in place.
+func (m *RuleManager) GetIsolationPrefix() ([]string, bool) {
+	m.RLock()
+	defer m.RUnlock()
+	var labels []string
+	found := false
+	for _, r := range m.ruleConfig.rules {
+		prefix, ok := r.isolationPrefix()
+		if !ok {
+			return nil, false
+		}
+		if !found {
+			labels, found = prefix, true
+			continue
+		}
+		if !slices.Equal(labels, prefix) {
+			return nil, false
+		}
+	}
+	if !found {
+		return nil, false
+	}
+	// Copy: labels aliases a live rule's LocationLabels.
+	return slices.Clone(labels), true
+}
+
 // GetRulesCount returns the number of rules.
 func (m *RuleManager) GetRulesCount() int {
 	m.RLock()

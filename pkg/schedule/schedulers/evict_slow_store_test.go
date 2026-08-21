@@ -616,6 +616,27 @@ func (suite *evictSlowStoreTestSuite) TestEvictSlowStorePrepare() {
 	re.NoError(err)
 }
 
+func (suite *evictSlowStoreTestSuite) TestEvictSlowStorePrepareAtomic() {
+	re := suite.Require()
+	es2, ok := suite.es.(*evictSlowStoreScheduler)
+	re.True(ok)
+
+	// Store 5 is not in the cluster, so marking it fails. Store 1 is marked first and must
+	// be rolled back: PrepareConfig's caller does not start the scheduler on error, so a
+	// leaked mark would exclude store 1 from leader transfers with nothing left to clear it.
+	re.NoError(es2.conf.setEvictedStoresAndPersist([]uint64{1, 5}))
+	re.Error(suite.es.PrepareConfig(suite.tc))
+	re.False(suite.tc.GetStore(1).EvictedAsSlowStore())
+
+	// The mark is a balanced counter, so a leak would also survive a later evict/recover
+	// round trip. Verify a subsequent successful prepare/clean cycle leaves it at zero.
+	re.NoError(es2.conf.setEvictedStoresAndPersist([]uint64{1}))
+	re.NoError(suite.es.PrepareConfig(suite.tc))
+	re.True(suite.tc.GetStore(1).EvictedAsSlowStore())
+	es2.cleanupEvictLeader(suite.tc)
+	re.False(suite.tc.GetStore(1).EvictedAsSlowStore())
+}
+
 func (suite *evictSlowStoreTestSuite) TestEvictSlowStorePersistFail() {
 	re := suite.Require()
 	persisFail := "github.com/tikv/pd/pkg/schedule/schedulers/persistFail"

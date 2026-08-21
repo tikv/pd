@@ -15,7 +15,6 @@
 package schedulers
 
 import (
-	"errors"
 	"net/http"
 	"slices"
 	"strconv"
@@ -34,7 +33,6 @@ import (
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
-	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -492,26 +490,51 @@ func (s *evictSlowStoreScheduler) ReloadConfig() error {
 }
 
 // PrepareConfig implements the Scheduler interface.
+//
+// It is atomic: on any failure it undoes the marks it already applied and returns the error,
+// so a caller that aborts (Controller.AddScheduler does not start the scheduler, and hence
+// never runs CleanConfig) cannot leave a store excluded from leader transfers with nothing
+// left to recover it. This matters because slowStoreEvicted is a balanced counter, not a
+// flag: a leaked increment is never cleared by a later evict/recover round trip.
 func (s *evictSlowStoreScheduler) PrepareConfig(cluster sche.SchedulerCluster) error {
-	errs := make([]error, 0)
-
-	for _, evictStore := range s.conf.evictedStores() {
-		if err := cluster.SlowStoreEvicted(evictStore); err != nil {
-			errs = append(errs, err)
+	var (
+		evicted []uint64 // stores marked as slow-evicted
+		paused  []uint64 // stores whose inbound leader transfer was paused
+	)
+	rollback := func() {
+		for _, storeID := range paused {
+			cluster.ResumeLeaderTransfer(storeID, constant.In)
+			delete(s.conf.networkSlowStoreRecoverStartAts, storeID)
 		}
+		for _, storeID := range evicted {
+			cluster.SlowStoreRecovered(storeID)
+		}
+	}
+
+	for _, storeID := range s.conf.evictedStores() {
+		if err := cluster.SlowStoreEvicted(storeID); err != nil {
+			rollback()
+			return err
+		}
+		evicted = append(evicted, storeID)
 	}
 	for _, storeID := range s.conf.getPausedNetworkSlowStores() {
 		s.conf.networkSlowStoreRecoverStartAts[storeID] = nil
 		if err := cluster.PauseLeaderTransfer(storeID, constant.In); err != nil {
-			errs = append(errs, err)
+			delete(s.conf.networkSlowStoreRecoverStartAts, storeID)
+			rollback()
+			return err
 		}
+		paused = append(paused, storeID)
 	}
 	for _, storeID := range s.conf.getEvictNetworkSlowStores() {
 		if err := cluster.SlowStoreEvicted(storeID); err != nil {
-			errs = append(errs, err)
+			rollback()
+			return err
 		}
+		evicted = append(evicted, storeID)
 	}
-	return errors.Join(errs...)
+	return nil
 }
 
 // CleanConfig implements the Scheduler interface.
@@ -862,42 +885,15 @@ func filterNetworkSlowScores(
 // single survivor.
 const minRemainingHealthyDomains = 2
 
-// isolationPrefix returns the rule's location labels up to and including its isolation
-// level, which is the granularity PD actually isolates replicas at (see NewIsolationFilter):
-// with location-labels ["zone","rack","host"] and isolation-level "rack", replicas are forced
-// into distinct "zone,rack" domains, so that prefix names one drainable domain.
-// It reports false when the rule enforces no isolation level, or when the isolation level is
-// not one of the rule's location labels (then the domain is undefined and we must not group).
-func isolationPrefix(rule *placement.Rule) ([]string, bool) {
-	if rule.IsolationLevel == "" {
-		return nil, false
-	}
-	idx := slices.Index(rule.LocationLabels, rule.IsolationLevel)
-	if idx < 0 {
-		return nil, false
-	}
-	return rule.LocationLabels[:idx+1], true
-}
-
 // groupIsolationLabels returns the labels that identify a drainable failure domain. Group
 // eviction is only allowed when every placement rule enforces the same non-empty isolation
 // prefix, so draining a single domain is known to be safe for every region.
+//
+// This runs on every detection and reconciliation cycle, so it must stay cheap: it delegates
+// to GetIsolationPrefix rather than GetAllRules, which would clone every rule through JSON
+// and sort the result on each call.
 func groupIsolationLabels(cluster sche.SchedulerCluster) ([]string, bool) {
-	rules := cluster.GetRuleManager().GetAllRules() // includes default one
-	if len(rules) == 0 {
-		return nil, false
-	}
-	labels, ok := isolationPrefix(rules[0])
-	if !ok {
-		return nil, false
-	}
-	for _, r := range rules[1:] {
-		other, ok := isolationPrefix(r)
-		if !ok || !slices.Equal(labels, other) {
-			return nil, false
-		}
-	}
-	return labels, true
+	return cluster.GetRuleManager().GetIsolationPrefix()
 }
 
 // collectDiskSlowStores returns the serving/preparing stores that are currently slow.
