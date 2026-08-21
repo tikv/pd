@@ -275,10 +275,10 @@ func (o *PersistConfig) GetScheduleConfig() *sc.ScheduleConfig {
 func (o *PersistConfig) SetScheduleConfig(cfg *sc.ScheduleConfig) {
 	o.scheduleMu.Lock()
 	defer o.scheduleMu.Unlock()
-	o.setScheduleConfig(cfg)
+	o.installScheduleConfig(cfg)
 }
 
-func (o *PersistConfig) setScheduleConfig(cfg *sc.ScheduleConfig) {
+func (o *PersistConfig) installScheduleConfig(cfg *sc.ScheduleConfig) {
 	old := o.GetScheduleConfig()
 	o.schedule.Store(cfg)
 	// The coordinator is not aware of the underlying scheduler config changes,
@@ -295,7 +295,7 @@ func (o *PersistConfig) SetSchedulers(schedulers sc.SchedulerConfigs) {
 
 	next := o.GetScheduleConfig().Clone()
 	next.Schedulers = append(sc.SchedulerConfigs(nil), schedulers...)
-	o.setScheduleConfig(next)
+	o.installScheduleConfig(next)
 }
 
 // AdjustScheduleCfg adjusts the schedule config during the initialization.

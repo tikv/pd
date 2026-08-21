@@ -199,7 +199,6 @@ remove-peer = 70
 	re.NoError(json.Unmarshal(data, schedule))
 	re.NoError(schedule.MigrateDeprecatedFlagsFromJSON(data))
 	re.Equal(sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 60}, schedule.DefaultStoreLimit)
-
 }
 
 func TestReloadLegacyStoreBalanceRate(t *testing.T) {

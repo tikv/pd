@@ -579,7 +579,7 @@ func parseDeprecatedFlag(meta *configutil.ConfigMetaData, name string, old, new 
 
 // MigrateDeprecatedFlags updates new flags according to deprecated flags.
 func (c *ScheduleConfig) MigrateDeprecatedFlags() {
-	c.migrateDeprecatedFlags(true, true)
+	c.applyDeprecatedFlagMigration(true, true)
 }
 
 // MigrateDeprecatedFlagsFromJSON migrates a full persisted or remote schedule
@@ -595,11 +595,11 @@ func (c *ScheduleConfig) MigrateDeprecatedFlagsFromJSON(data []byte) error {
 	}
 	_, addPeerDefined := fields.DefaultStoreLimit["add-peer"]
 	_, removePeerDefined := fields.DefaultStoreLimit["remove-peer"]
-	c.migrateDeprecatedFlags(addPeerDefined, removePeerDefined)
+	c.applyDeprecatedFlagMigration(addPeerDefined, removePeerDefined)
 	return nil
 }
 
-func (c *ScheduleConfig) migrateDeprecatedFlags(addPeerDefined, removePeerDefined bool) {
+func (c *ScheduleConfig) applyDeprecatedFlagMigration(addPeerDefined, removePeerDefined bool) {
 	c.DisableLearner = false
 	c.migratePersistedStoreLimit(addPeerDefined, removePeerDefined)
 	for _, b := range c.migrateConfigurationMap() {
