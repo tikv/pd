@@ -2664,11 +2664,19 @@ func TestSummaryPendingInfluenceSkipsRemovedStoreMetric(t *testing.T) {
 		NodeState: metapb.NodeState_Removed,
 	})
 	tc.PutStore(removed)
+	// storeInfos holds a stale snapshot still showing the store as serving,
+	// simulating one taken before the store was buried -- this only passes
+	// if the check re-reads the store fresh through cluster instead of
+	// trusting info.IsRemoved() on the snapshot.
+	stale := core.NewStoreInfo(&metapb.Store{
+		Id:        storeID,
+		NodeState: metapb.NodeState_Serving,
+	})
 	loads := make([]float64, utils.RegionStatCount)
 	loads[utils.RegionWriteBytes] = 1
 	storeInfos := map[uint64]*statistics.StoreSummaryInfo{
 		storeID: {
-			StoreInfo:  removed,
+			StoreInfo:  stale,
 			PendingSum: &statistics.Influence{Loads: loads},
 		},
 	}
