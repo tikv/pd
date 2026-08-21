@@ -22,7 +22,6 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/pingcap/errors"
-	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
@@ -601,44 +600,9 @@ func RemoveKeyspacesFromGroup(c *gin.Context) {
 		return
 	}
 
-	// Filter keyspaces: only keep those in ARCHIVED or TOMBSTONE state
-	var validKeyspaces []uint32
-	for _, keyspaceID := range params.Keyspaces {
-		// Load the keyspace meta to check its state
-		keyspaceMeta, err := keyspaceManager.LoadKeyspaceByID(keyspaceID)
-		if err != nil {
-			// Skip if keyspace doesn't exist
-			if errors.ErrorEqual(err, errs.ErrKeyspaceNotFound) {
-				continue
-			}
-			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
-			return
-		}
-
-		// Check if the keyspace is in archived or tombstone state
-		state := keyspaceMeta.GetState()
-		if state == keyspacepb.KeyspaceState_ARCHIVED || state == keyspacepb.KeyspaceState_TOMBSTONE {
-			validKeyspaces = append(validKeyspaces, keyspaceID)
-		}
-	}
-
-	// If no valid keyspaces to remove, load and return the group without modification
-	if len(validKeyspaces) == 0 {
-		kg, err := groupManager.GetKeyspaceGroupByID(groupID)
-		if err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
-			return
-		}
-		if kg == nil {
-			c.AbortWithStatusJSON(http.StatusNotFound, errs.ErrKeyspaceGroupNotExists.FastGenByArgs(groupID).Error())
-			return
-		}
-		c.IndentedJSON(http.StatusOK, kg)
-		return
-	}
-
-	// Remove the keyspaces from the keyspace group
-	kg, err := groupManager.RemoveKeyspacesFromGroup(groupID, keyspaceManager, validKeyspaces)
+	// The group manager filters state and membership inside each bounded
+	// transaction, avoiding a separate etcd transaction per requested keyspace.
+	kg, err := groupManager.RemoveKeyspacesFromGroup(c.Request.Context(), groupID, keyspaceManager, params.Keyspaces)
 	if err != nil {
 		if errs.ErrKeyspaceGroupNotExists.Equal(err) {
 			c.AbortWithStatusJSON(http.StatusNotFound, err.Error())

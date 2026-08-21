@@ -18,11 +18,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
@@ -50,6 +54,16 @@ func (s *errorKeyspaceGroupStorage) SaveKeyspaceGroup(txn kv.Txn, kg *endpoint.K
 	return s.StorageEndpoint.SaveKeyspaceGroup(txn, kg)
 }
 
+type countingKeyspaceGroupStorage struct {
+	*endpoint.StorageEndpoint
+	runInTxnCount atomic.Int32
+}
+
+func (s *countingKeyspaceGroupStorage) RunInTxn(ctx context.Context, f func(txn kv.Txn) error) error {
+	s.runInTxnCount.Add(1)
+	return s.StorageEndpoint.RunInTxn(ctx, f)
+}
+
 type keyspaceGroupTestSuite struct {
 	suite.Suite
 	ctx    context.Context
@@ -75,6 +89,212 @@ func (suite *keyspaceGroupTestSuite) SetupTest() {
 
 func (suite *keyspaceGroupTestSuite) TearDownTest() {
 	suite.cancel()
+}
+
+func (suite *keyspaceGroupTestSuite) createArchivedKeyspaces(count int) []uint32 {
+	re := suite.Require()
+	keyspaceIDs := make([]uint32, 0, count)
+	for i := range count {
+		meta, err := suite.kg.CreateKeyspace(&CreateKeyspaceRequest{
+			Name:       fmt.Sprintf("remove-batch-%d", i),
+			Config:     map[string]string{},
+			CreateTime: time.Now().Unix(),
+		})
+		re.NoError(err)
+		_, err = suite.kg.UpdateKeyspaceStateByID(meta.GetId(), keyspacepb.KeyspaceState_DISABLED, time.Now().Unix())
+		re.NoError(err)
+		_, err = suite.kg.UpdateKeyspaceStateByID(meta.GetId(), keyspacepb.KeyspaceState_ARCHIVED, time.Now().Unix())
+		re.NoError(err)
+		keyspaceIDs = append(keyspaceIDs, meta.GetId())
+	}
+	return keyspaceIDs
+}
+
+func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupUsesBoundedTransactions() {
+	re := suite.Require()
+	keyspaceCount := maxKeyspaceRemovalBatchSize*2 + 1
+	keyspaceIDs := suite.createArchivedKeyspaces(keyspaceCount)
+	batchBoundaryCh := make(chan struct{}, 2)
+	continueCh := make(chan struct{})
+	stopCh := make(chan struct{})
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/keyspace/afterRemoveKeyspacesFromGroupBatch", func() {
+		batchBoundaryCh <- struct{}{}
+		select {
+		case <-continueCh:
+		case <-stopCh:
+		}
+	}))
+	defer func() {
+		close(stopCh)
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/afterRemoveKeyspacesFromGroupBatch"))
+	}()
+
+	store, ok := suite.kg.store.(*endpoint.StorageEndpoint)
+	re.True(ok)
+	countingStore := &countingKeyspaceGroupStorage{StorageEndpoint: store}
+	suite.kgm.store = countingStore
+
+	type removalResult struct {
+		group *endpoint.KeyspaceGroup
+		err   error
+	}
+	resultCh := make(chan removalResult, 1)
+	go func() {
+		group, err := suite.kgm.RemoveKeyspacesFromGroup(suite.ctx, constant.DefaultKeyspaceGroupID, suite.kg, keyspaceIDs)
+		resultCh <- removalResult{group: group, err: err}
+	}()
+
+	createdKeyspaceIDs := make([]uint32, 0, 2)
+	for i := range 2 {
+		select {
+		case <-batchBoundaryCh:
+		case <-time.After(5 * time.Second):
+			re.FailNow("timed out waiting for a keyspace removal batch boundary")
+		}
+
+		// The manager lock is released between batches so an unrelated keyspace
+		// can be created, while relocation of existing keyspaces remains blocked.
+		managerLocked := suite.kgm.TryLock()
+		re.True(managerLocked)
+		if managerLocked {
+			suite.kgm.Unlock()
+		}
+		membershipMutationLocked := suite.kgm.membershipMutationLock.TryLock()
+		re.False(membershipMutationLocked)
+		if membershipMutationLocked {
+			suite.kgm.membershipMutationLock.Unlock()
+		}
+
+		type createResult struct {
+			meta *keyspacepb.KeyspaceMeta
+			err  error
+		}
+		createResultCh := make(chan createResult, 1)
+		go func() {
+			meta, err := suite.kg.CreateKeyspace(&CreateKeyspaceRequest{
+				Name:       fmt.Sprintf("concurrent-create-%d", i),
+				Config:     map[string]string{},
+				CreateTime: time.Now().Unix(),
+			})
+			createResultCh <- createResult{meta: meta, err: err}
+		}()
+		select {
+		case result := <-createResultCh:
+			re.NoError(result.err)
+			createdKeyspaceIDs = append(createdKeyspaceIDs, result.meta.GetId())
+		case <-time.After(5 * time.Second):
+			re.FailNow("creating a keyspace was blocked between removal batches")
+		}
+		continueCh <- struct{}{}
+	}
+
+	result := <-resultCh
+	re.NoError(result.err)
+	// Three removal transactions plus one group-membership transaction for each
+	// concurrently created keyspace.
+	re.Equal(int32(5), countingStore.runInTxnCount.Load())
+	for _, keyspaceID := range keyspaceIDs {
+		re.NotContains(result.group.Keyspaces, keyspaceID)
+		_, err := suite.kg.LoadKeyspaceByID(keyspaceID)
+		re.ErrorIs(err, errs.ErrKeyspaceNotFound)
+	}
+	for _, keyspaceID := range createdKeyspaceIDs {
+		re.Contains(result.group.Keyspaces, keyspaceID)
+		meta, err := suite.kg.LoadKeyspaceByID(keyspaceID)
+		re.NoError(err)
+		re.Equal(keyspacepb.KeyspaceState_ENABLED, meta.GetState())
+	}
+}
+
+func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupFiltersInBatch() {
+	re := suite.Require()
+	archivedID := suite.createArchivedKeyspaces(1)[0]
+	enabled, err := suite.kg.CreateKeyspace(&CreateKeyspaceRequest{
+		Name:       "filter_enabled",
+		Config:     map[string]string{},
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+
+	store, ok := suite.kg.store.(*endpoint.StorageEndpoint)
+	re.True(ok)
+	countingStore := &countingKeyspaceGroupStorage{StorageEndpoint: store}
+	suite.kgm.store = countingStore
+	suite.kg.store = countingStore
+
+	keyspaceIDs := make([]uint32, 0, 103)
+	keyspaceIDs = append(keyspaceIDs, archivedID, enabled.GetId(), archivedID)
+	for i := range 100 {
+		keyspaceIDs = append(keyspaceIDs, uint32(100_000+i))
+	}
+
+	group, err := suite.kgm.RemoveKeyspacesFromGroup(
+		suite.ctx, constant.DefaultKeyspaceGroupID, suite.kg, keyspaceIDs)
+	re.NoError(err)
+	re.Equal(int32(1), countingStore.runInTxnCount.Load())
+	re.NotContains(group.Keyspaces, archivedID)
+	re.Contains(group.Keyspaces, enabled.GetId())
+	_, err = suite.kg.LoadKeyspaceByID(archivedID)
+	re.ErrorIs(err, errs.ErrKeyspaceNotFound)
+	_, err = suite.kg.LoadKeyspaceByID(enabled.GetId())
+	re.NoError(err)
+}
+
+func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupStopsAfterCancellation() {
+	re := suite.Require()
+	keyspaceIDs := suite.createArchivedKeyspaces(maxKeyspaceRemovalBatchSize*2 + 1)
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/keyspace/afterRemoveKeyspacesFromGroupBatch", cancel))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/afterRemoveKeyspacesFromGroupBatch"))
+	}()
+
+	store, ok := suite.kg.store.(*endpoint.StorageEndpoint)
+	re.True(ok)
+	countingStore := &countingKeyspaceGroupStorage{StorageEndpoint: store}
+	suite.kgm.store = countingStore
+
+	_, err := suite.kgm.RemoveKeyspacesFromGroup(
+		ctx, constant.DefaultKeyspaceGroupID, suite.kg, keyspaceIDs)
+	re.ErrorIs(err, context.Canceled)
+	re.Equal(int32(1), countingStore.runInTxnCount.Load())
+
+	group, err := suite.kgm.GetKeyspaceGroupByID(constant.DefaultKeyspaceGroupID)
+	re.NoError(err)
+	removed := 0
+	for _, keyspaceID := range keyspaceIDs {
+		_, err := suite.kg.LoadKeyspaceByID(keyspaceID)
+		if errors.Is(err, errs.ErrKeyspaceNotFound) {
+			removed++
+			re.NotContains(group.Keyspaces, keyspaceID)
+			continue
+		}
+		re.NoError(err)
+		re.Contains(group.Keyspaces, keyspaceID)
+	}
+	re.Equal(maxKeyspaceRemovalBatchSize, removed)
+}
+
+func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupAggregatesMetaServiceAssignments() {
+	re := suite.Require()
+	store, ok := suite.kg.store.(*endpoint.StorageEndpoint)
+	re.True(ok)
+	mgm := NewMetaServiceGroupManager(store, map[string]string{"meta-group-1": "127.0.0.1:12379"})
+	enabled := true
+	re.NoError(mgm.PatchStatus(suite.ctx, "meta-group-1", &MetaServiceGroupStatusPatch{Enabled: &enabled}))
+	suite.kg.mgm = mgm
+
+	keyspaceIDs := suite.createArchivedKeyspaces(2)
+	counts, err := mgm.GetAssignmentCounts(suite.ctx)
+	re.NoError(err)
+	re.Equal(2, counts["meta-group-1"])
+
+	_, err = suite.kgm.RemoveKeyspacesFromGroup(suite.ctx, constant.DefaultKeyspaceGroupID, suite.kg, keyspaceIDs)
+	re.NoError(err)
+	counts, err = mgm.GetAssignmentCounts(suite.ctx)
+	re.NoError(err)
+	re.Zero(counts["meta-group-1"])
 }
 
 func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupOperations() {

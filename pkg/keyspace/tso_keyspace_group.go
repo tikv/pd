@@ -53,6 +53,11 @@ const (
 	allocNodesToKeyspaceGroupsInterval = 1 * time.Second
 	allocNodesTimeout                  = 1 * time.Second
 	allocNodesInterval                 = 10 * time.Millisecond
+	// Each keyspace removal can add two delete operations plus, in the worst
+	// case, one meta-service group status update. Together with saving the
+	// keyspace group, a full batch uses at most 91 operations, leaving extra
+	// headroom below PD's conservative etcd transaction limit of 120.
+	maxKeyspaceRemovalBatchSize = 30
 	// defaultKeyspaceCountSplitThreshold is the keyspace count threshold for auto-splitting
 	// a keyspace group. When a group's keyspace count exceeds this value, a new group will be split automatically.
 	defaultKeyspaceCountSplitThreshold = 40000
@@ -73,6 +78,10 @@ type GroupManager struct {
 	client *clientv3.Client
 
 	syncutil.RWMutex
+	// membershipMutationLock prevents operations that relocate existing keyspaces
+	// from interleaving with a multi-batch removal. Adding a newly created
+	// keyspace does not take this lock, so creation can proceed between batches.
+	membershipMutationLock syncutil.RWMutex
 	// groups is the cache of keyspace group related information.
 	// user kind -> keyspace group
 	groups map[endpoint.UserKind]*indexedHeap
@@ -394,6 +403,8 @@ func (m *GroupManager) initTSONodesWatcher(client *clientv3.Client) {
 
 // CreateKeyspaceGroups creates keyspace groups.
 func (m *GroupManager) CreateKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceGroup) error {
+	m.membershipMutationLock.Lock()
+	defer m.membershipMutationLock.Unlock()
 	m.Lock()
 	defer m.Unlock()
 	if err := m.saveKeyspaceGroups(keyspaceGroups, false); err != nil {
@@ -448,6 +459,8 @@ func (m *GroupManager) DeleteKeyspaceGroupByID(id uint32) (*endpoint.KeyspaceGro
 		err error
 	)
 
+	m.membershipMutationLock.Lock()
+	defer m.membershipMutationLock.Unlock()
 	m.Lock()
 	defer m.Unlock()
 	if err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
@@ -561,18 +574,75 @@ func (m *GroupManager) GetGroupByKeyspaceID(id uint32) (uint32, error) {
 }
 
 // RemoveKeyspacesFromGroup removes the specified keyspaces from the given keyspace group.
-// If a keyspace is not in the group, it will be skipped (no error).
-// It returns the updated keyspace group and any error encountered.
-func (m *GroupManager) RemoveKeyspacesFromGroup(groupID uint32, km *Manager, keyspaceIDs []uint32) (*endpoint.KeyspaceGroup, error) {
+// If a keyspace is not in the group, it will be skipped (no error). Large removals
+// are split into bounded transactions. Each batch is atomic. Operations that
+// relocate existing keyspaces are blocked across all batches, while newly created
+// keyspaces can still be added to the group between batches.
+func (m *GroupManager) RemoveKeyspacesFromGroup(ctx context.Context, groupID uint32, km *Manager, keyspaceIDs []uint32) (*endpoint.KeyspaceGroup, error) {
+	remainingIDs := make(map[uint32]struct{}, len(keyspaceIDs))
+	for _, keyspaceID := range keyspaceIDs {
+		if isProtectedKeyspaceID(keyspaceID) {
+			continue
+		}
+		remainingIDs[keyspaceID] = struct{}{}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	// Keep existing keyspaces in the group stable across all batches. New
+	// keyspaces may still be added between batches and are preserved because each
+	// batch reloads the latest group and only removes requested IDs.
+	m.membershipMutationLock.RLock()
+	defer m.membershipMutationLock.RUnlock()
+
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		kg, processedIDs, hasMore, err := m.removeKeyspacesFromGroupBatch(ctx, groupID, km, remainingIDs)
+		if err != nil {
+			return nil, err
+		}
+		for _, keyspaceID := range processedIDs {
+			delete(remainingIDs, keyspaceID)
+		}
+		if !hasMore {
+			return kg, nil
+		}
+		failpoint.InjectCall("afterRemoveKeyspacesFromGroupBatch")
+	}
+}
+
+func (m *GroupManager) removeKeyspacesFromGroupBatch(
+	ctx context.Context,
+	groupID uint32,
+	km *Manager,
+	requestedIDs map[uint32]struct{},
+) (*endpoint.KeyspaceGroup, []uint32, bool, error) {
 	m.Lock()
 	defer m.Unlock()
+	return m.removeKeyspacesFromGroupBatchLocked(ctx, groupID, km, requestedIDs)
+}
 
+// removeKeyspacesFromGroupBatchLocked removes one bounded batch while the
+// caller holds m's write lock.
+func (m *GroupManager) removeKeyspacesFromGroupBatchLocked(
+	ctx context.Context,
+	groupID uint32,
+	km *Manager,
+	requestedIDs map[uint32]struct{},
+) (*endpoint.KeyspaceGroup, []uint32, bool, error) {
 	var (
-		kg  *endpoint.KeyspaceGroup
-		err error
+		kg               *endpoint.KeyspaceGroup
+		processedIDs     []uint32
+		removedIDs       []uint32
+		assignmentCounts = make(map[string]int)
+		hasMore          bool
+		err              error
 	)
 
-	if err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
+	if err := m.store.RunInTxn(ctx, func(txn kv.Txn) error {
 		// Load the keyspace group
 		kg, err = m.store.LoadKeyspaceGroup(txn, groupID)
 		if err != nil {
@@ -588,49 +658,52 @@ func (m *GroupManager) RemoveKeyspacesFromGroup(groupID uint32, km *Manager, key
 			return errs.ErrKeyspaceGroupInMerging.FastGenByArgs(groupID)
 		}
 
-		// Build a set of keyspaces to remove (excluding protected bootstrap/system keyspace)
-		toRemove := make(map[uint32]struct{})
-		for _, ksID := range keyspaceIDs {
-			// Keep the protected bootstrap/system keyspace in the default group.
-			if isProtectedKeyspaceID(ksID) {
+		newKeyspaces := make([]uint32, 0, len(kg.Keyspaces))
+		for _, ks := range kg.Keyspaces {
+			if _, requested := requestedIDs[ks]; !requested {
+				newKeyspaces = append(newKeyspaces, ks)
 				continue
 			}
-			// Only add if it exists in the group (skip if not present)
-			if slice.Contains(kg.Keyspaces, ksID) {
-				toRemove[ksID] = struct{}{}
+			if len(processedIDs) == maxKeyspaceRemovalBatchSize {
+				hasMore = true
+				newKeyspaces = append(newKeyspaces, ks)
+				continue
+			}
+
+			processedIDs = append(processedIDs, ks)
+			metaServiceGroupID, removed, err := km.tryRemoveKeyspaceMetadata(txn, ks)
+			if err != nil {
+				return err
+			}
+			if !removed {
+				newKeyspaces = append(newKeyspaces, ks)
+				continue
+			}
+			removedIDs = append(removedIDs, ks)
+			if metaServiceGroupID != "" {
+				assignmentCounts[metaServiceGroupID]++
 			}
 		}
-
-		// If nothing to remove, return nil to skip update
-		if len(toRemove) == 0 {
+		if len(removedIDs) == 0 {
 			return nil
 		}
-
-		// Filter out keyspaces to remove
-		newKeyspaces := make([]uint32, 0, len(kg.Keyspaces)-len(toRemove))
-		for _, ks := range kg.Keyspaces {
-			if _, shouldRemove := toRemove[ks]; !shouldRemove {
-				newKeyspaces = append(newKeyspaces, ks)
-			} else {
-				err = km.RemoveKeyspace(txn, ks)
-				if err != nil {
-					return err
-				}
-			}
+		if err = km.decrementMetaServiceGroupAssignmentsTxn(txn, assignmentCounts); err != nil {
+			return err
 		}
 		kg.Keyspaces = newKeyspaces
 
-		// Save the updated keyspace group
 		return m.store.SaveKeyspaceGroup(txn, kg)
 	}); err != nil {
-		return nil, err
+		return nil, nil, false, err
 	}
 
-	// Update the cache
+	// Persistent metadata and the group membership are committed at this point,
+	// so it is now safe to evict the corresponding keyspace cache entries.
+	km.evictKeyspacesFromCache(removedIDs)
 	userKind := endpoint.StringUserKind(kg.UserKind)
 	m.groups[userKind].Put(kg)
 
-	return kg, nil
+	return kg, processedIDs, hasMore, nil
 }
 
 var failpointOnce sync.Once
@@ -643,6 +716,10 @@ func (m *GroupManager) UpdateKeyspaceForGroup(userKind endpoint.UserKind, groupI
 	id, err := strconv.ParseUint(groupID, 10, 64)
 	if err != nil {
 		return err
+	}
+	if mutation == opDelete {
+		m.membershipMutationLock.Lock()
+		defer m.membershipMutationLock.Unlock()
 	}
 
 	failpoint.Inject("externalAllocNode", func(val failpoint.Value) {
@@ -707,6 +784,8 @@ func (m *GroupManager) UpdateKeyspaceGroup(oldGroupID, newGroupID string, oldUse
 		return err
 	}
 
+	m.membershipMutationLock.Lock()
+	defer m.membershipMutationLock.Unlock()
 	m.Lock()
 	defer m.Unlock()
 	oldKG := m.groups[oldUserKind].Get(uint32(oldID))
@@ -769,6 +848,8 @@ func (m *GroupManager) SplitKeyspaceGroupByID(
 	keyspaces []uint32, keyspaceIDRange ...uint32,
 ) error {
 	var splitSourceKg, splitTargetKg *endpoint.KeyspaceGroup
+	m.membershipMutationLock.Lock()
+	defer m.membershipMutationLock.Unlock()
 	m.Lock()
 	defer m.Unlock()
 	if err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) (err error) {
@@ -1168,6 +1249,8 @@ func (m *GroupManager) MergeKeyspaceGroups(mergeTargetID uint32, mergeList []uin
 		groups        = make(map[uint32]*endpoint.KeyspaceGroup, mergeListNum+1)
 		mergeTargetKg *endpoint.KeyspaceGroup
 	)
+	m.membershipMutationLock.Lock()
+	defer m.membershipMutationLock.Unlock()
 	m.Lock()
 	defer m.Unlock()
 	if err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) (err error) {
