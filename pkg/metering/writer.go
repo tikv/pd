@@ -105,6 +105,13 @@ func validateMeteringConfig(c *config.MeteringConfig) error {
 		if len(c.Bucket) == 0 {
 			return errors.New("bucket is required for the metering config")
 		}
+	case storage.ProviderTypeCOS:
+		if len(c.Region) == 0 && len(c.Endpoint) == 0 {
+			return errors.New("region is required for the metering config when endpoint is not set")
+		}
+		if len(c.Bucket) == 0 {
+			return errors.New("bucket is required for the metering config")
+		}
 	case storage.ProviderTypeAzure:
 		if len(c.Bucket) == 0 {
 			return errors.New("bucket is required for the metering config")
