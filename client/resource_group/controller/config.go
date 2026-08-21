@@ -59,6 +59,8 @@ const (
 	defaultWritePerBatchBaseCost = 1
 	// 1 RU = 64 KiB read bytes
 	defaultReadCostPerByte = 1. / (64 * 1024)
+	// Remote read bytes cost half as much as local read bytes by default.
+	defaultRemoteReadCostFactor = 0.5
 	// 1 RU = 1 KiB written bytes
 	defaultWriteCostPerByte = 1. / 1024
 	// 1 RU = 3 millisecond CPU time
@@ -176,6 +178,9 @@ type RequestUnitConfig struct {
 	ReadPerBatchBaseCost float64 `toml:"read-per-batch-base-cost" json:"read-per-batch-base-cost"`
 	// ReadCostPerByte is the cost for each byte read. It's 1 RU = 64 KiB by default.
 	ReadCostPerByte float64 `toml:"read-cost-per-byte" json:"read-cost-per-byte"`
+	// ReadCostPerByteRemote is the cost for each byte processed by a remote coprocessor.
+	// Nil means half of ReadCostPerByte. A pointer preserves an explicitly configured zero.
+	ReadCostPerByteRemote *float64 `toml:"read-cost-per-byte-remote" json:"read-cost-per-byte-remote,omitempty"`
 	// WriteBaseCost is the base cost for a write request. No matter how many bytes read/written or
 	// the CPU times taken for a request, this cost is inevitable.
 	WriteBaseCost float64 `toml:"write-base-cost" json:"write-base-cost"`
@@ -209,6 +214,7 @@ type RUConfig struct {
 	ReadBaseCost          RequestUnit
 	ReadPerBatchBaseCost  RequestUnit
 	ReadBytesCost         RequestUnit
+	RemoteReadBytesCost   RequestUnit
 	WriteBaseCost         RequestUnit
 	WritePerBatchBaseCost RequestUnit
 	WriteBytesCost        RequestUnit
@@ -232,10 +238,15 @@ func DefaultRUConfig() *RUConfig {
 
 // GenerateRUConfig generates the configuration by the given request unit configuration.
 func GenerateRUConfig(config *Config) *RUConfig {
+	remoteReadCostPerByte := config.RequestUnit.ReadCostPerByte * defaultRemoteReadCostFactor
+	if config.RequestUnit.ReadCostPerByteRemote != nil {
+		remoteReadCostPerByte = *config.RequestUnit.ReadCostPerByteRemote
+	}
 	return &RUConfig{
 		ReadBaseCost:             RequestUnit(config.RequestUnit.ReadBaseCost),
 		ReadPerBatchBaseCost:     RequestUnit(config.RequestUnit.ReadPerBatchBaseCost),
 		ReadBytesCost:            RequestUnit(config.RequestUnit.ReadCostPerByte),
+		RemoteReadBytesCost:      RequestUnit(remoteReadCostPerByte),
 		WriteBaseCost:            RequestUnit(config.RequestUnit.WriteBaseCost),
 		WritePerBatchBaseCost:    RequestUnit(config.RequestUnit.WritePerBatchBaseCost),
 		WriteBytesCost:           RequestUnit(config.RequestUnit.WriteCostPerByte),
