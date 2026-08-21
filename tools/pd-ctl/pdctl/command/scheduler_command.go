@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"path"
@@ -577,9 +578,60 @@ func newConfigBalanceLeaderCommand() *cobra.Command {
 		Use:   "set <key> <value>",
 		Short: "set the config item",
 		Run:   func(cmd *cobra.Command, args []string) { postSchedulerConfigCommandFunc(cmd, c.Name(), args) },
+	}, &cobra.Command{
+		Use:   "set-inbound-leader-transfer-rate <store_id> <leaders_per_second>",
+		Short: "limit automatic balance-leader transfers into one store with burst 1",
+		Run:   func(cmd *cobra.Command, args []string) { setInboundLeaderTransferRateCommandFunc(cmd, c.Name(), args) },
+	}, &cobra.Command{
+		Use:   "delete-inbound-leader-transfer-rate <store_id>",
+		Short: "remove the automatic balance-leader inbound rate limit for one store",
+		Run: func(cmd *cobra.Command, args []string) {
+			deleteInboundLeaderTransferRateCommandFunc(cmd, c.Name(), args)
+		},
 	})
 
 	return c
+}
+
+func setInboundLeaderTransferRateCommandFunc(cmd *cobra.Command, schedulerName string, args []string) {
+	if len(args) != 2 {
+		cmd.Println(cmd.UsageString())
+		return
+	}
+	storeID, err := strconv.ParseUint(args[0], 10, 64)
+	if err != nil || storeID == 0 {
+		cmd.Println("store_id must be a positive integer")
+		return
+	}
+	leadersPerSecond, err := strconv.ParseFloat(args[1], 64)
+	if err != nil || leadersPerSecond <= 0 || math.IsNaN(leadersPerSecond) || math.IsInf(leadersPerSecond, 0) {
+		cmd.Println("leaders_per_second must be a positive number")
+		return
+	}
+	input := map[string]any{
+		"store-id":           storeID,
+		"leaders-per-second": leadersPerSecond,
+	}
+	postJSON(cmd, path.Join(schedulerConfigPrefix, schedulerName, "config/inbound-leader-transfer-rate"), input)
+}
+
+func deleteInboundLeaderTransferRateCommandFunc(cmd *cobra.Command, schedulerName string, args []string) {
+	if len(args) != 1 {
+		cmd.Println(cmd.UsageString())
+		return
+	}
+	storeID, err := strconv.ParseUint(args[0], 10, 64)
+	if err != nil || storeID == 0 {
+		cmd.Println("store_id must be a positive integer")
+		return
+	}
+	requestPath := path.Join(schedulerConfigPrefix, schedulerName, "config/inbound-leader-transfer-rate", args[0])
+	_, err = doRequest(cmd, requestPath, http.MethodDelete, http.Header{})
+	if err != nil {
+		cmd.Println(err)
+		return
+	}
+	cmd.Println("Success!")
 }
 
 func newConfigBalanceRangeCommand() *cobra.Command {
