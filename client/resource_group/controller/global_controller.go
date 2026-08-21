@@ -186,10 +186,21 @@ type ResourceGroupsController struct {
 	// 0 means not loaded or not configured (treated as v1).
 	ruVersion atomic.Int32
 
+	// lifecycleMu serializes Start against Stop; without it, a Start racing
+	// a Stop could leak a run loop that no longer owns the process-wide
+	// slot.
+	lifecycleMu sync.Mutex
+	stopOnce    sync.Once
+	stopped     bool
+
 	wg sync.WaitGroup
 }
 
-// NewResourceGroupController returns a new ResourceGroupsController which impls ResourceGroupKVInterceptor
+// NewResourceGroupController returns a new ResourceGroupsController which impls ResourceGroupKVInterceptor.
+// At most one controller acquired through this constructor may exist in a
+// process at a time; a second acquisition fails with
+// ErrClientResourceGroupControllerAlreadyExists until the previous controller
+// has released ownership via Stop.
 func NewResourceGroupController(
 	ctx context.Context,
 	clientUniqueID uint64,
@@ -198,6 +209,17 @@ func NewResourceGroupController(
 	keyspaceID uint32,
 	opts ...ResourceControlCreateOption,
 ) (*ResourceGroupsController, error) {
+	// Reserve the ownership slot before any side effect: the steps below
+	// perform network I/O and update process-global state.
+	if err := ownership.reserve(); err != nil {
+		return nil, err
+	}
+	bound := false
+	defer func() {
+		if !bound {
+			ownership.unreserve()
+		}
+	}()
 	config, err := loadServerConfig(ctx, provider)
 	if err != nil {
 		return nil, err
@@ -226,6 +248,8 @@ func NewResourceGroupController(
 	enableControllerTraceLog.Store(config.EnableControllerTraceLog)
 	// Extract initial ruVersion from the controller config's RUVersionPolicy.
 	controller.updateRUVersionFromConfig(config)
+	ownership.bind(controller)
+	bound = true
 	return controller, nil
 }
 
@@ -299,7 +323,19 @@ const (
 )
 
 // Start starts ResourceGroupController service.
+// Canceling ctx stops the run loop but does not release the process-wide
+// ownership slot; call Stop to release it.
 func (c *ResourceGroupsController) Start(ctx context.Context) {
+	c.lifecycleMu.Lock()
+	defer c.lifecycleMu.Unlock()
+	if c.stopped {
+		log.Error("resource group controller is already stopped, cannot be started again")
+		return
+	}
+	if c.loopCtx != nil {
+		log.Error("resource group controller is already started")
+		return
+	}
 	c.loopCtx, c.loopCancel = context.WithCancel(ctx)
 	c.wg.Add(1)
 	go func() {
@@ -389,11 +425,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 				c.executeOnAllGroups((*groupCostController).resetEmergencyTokenAcquisition)
 			/* channels */
 			case <-c.loopCtx.Done():
-				metrics.ResourceGroupStatusGauge.Reset()
-				c.requestSourceStates.Range(func(_, v any) bool {
-					v.(*requestSourceMetricsState).cleanup()
-					return true
-				})
+				c.cleanupProcessGlobalMetrics()
 				return
 			case <-c.responseDeadlineCh:
 				c.run.inDegradedMode.Store(true)
@@ -514,14 +546,41 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 	}()
 }
 
-// Stop stops ResourceGroupController service.
+// Stop stops ResourceGroupController service and releases the process-wide
+// ownership slot, allowing a replacement controller to be constructed. It is
+// idempotent and also valid on a controller that was never started. A stopped
+// controller cannot be started again and must not serve further requests:
+// metric series created after Stop are never cleaned up.
 func (c *ResourceGroupsController) Stop() error {
-	if c.loopCancel == nil {
-		return errors.Errorf("resource groups controller does not start")
-	}
-	c.loopCancel()
-	c.wg.Wait()
+	c.stopOnce.Do(func() {
+		c.lifecycleMu.Lock()
+		c.stopped = true
+		cancel := c.loopCancel
+		c.lifecycleMu.Unlock()
+		if cancel != nil {
+			cancel()
+			c.wg.Wait()
+		}
+		// Also covers controllers without a run loop to do it on exit,
+		// e.g. never started, or used again after context cancellation.
+		c.cleanupProcessGlobalMetrics()
+		ownership.release(c)
+	})
 	return nil
+}
+
+// cleanupProcessGlobalMetrics is idempotent. It is restricted to the current
+// ownership holder so that a controller allocated outside the supported API
+// cannot reset the owner's process-global collectors.
+func (c *ResourceGroupsController) cleanupProcessGlobalMetrics() {
+	if !ownership.owns(c) {
+		return
+	}
+	metrics.ResourceGroupStatusGauge.Reset()
+	c.requestSourceStates.Range(func(_, v any) bool {
+		v.(*requestSourceMetricsState).cleanup()
+		return true
+	})
 }
 
 // loadGroupController just wraps the `Load` method of `sync.Map`.
