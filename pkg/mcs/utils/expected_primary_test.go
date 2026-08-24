@@ -116,4 +116,93 @@ func TestIsSamePrimary(t *testing.T) {
 	re.False(isSamePrimary(entry, "tso-2"))                 // different name
 	re.False(isSamePrimary(entry, "http://127.0.0.1:2380")) // different address
 	re.False(isSamePrimary(entry, ""))                      // empty target never matches
+
+	// A caller identifying the member by its persisted (possibly pre-migration)
+	// address must still match during the supported HTTP-to-HTTPS transition.
+	httpsEntry := discovery.ServiceRegistryEntry{Name: "tso-2", ServiceAddr: "https://127.0.0.1:1"}
+	re.True(isSamePrimary(httpsEntry, "http://127.0.0.1:1"))
+}
+
+// TestIsValidPrimaryCandidate covers the pre-check evictPrimary uses to reject an
+// out-of-group new_primary before transferring anything, instead of discovering it
+// mid-loop after other groups have already been moved.
+func TestIsValidPrimaryCandidate(t *testing.T) {
+	re := require.New(t)
+	entries := []discovery.ServiceRegistryEntry{
+		{Name: "tso-1", ServiceAddr: "http://127.0.0.1:1"},
+		{Name: "tso-2", ServiceAddr: "http://127.0.0.1:2"},
+		{Name: "tso-3", ServiceAddr: "http://127.0.0.1:3"},
+	}
+	// Only tso-1 and tso-2 belong to the group under evaluation.
+	groupMembers := map[string]bool{"http://127.0.0.1:1": true, "http://127.0.0.1:2": true}
+
+	re.True(IsValidPrimaryCandidate(entries, "", groupMembers), "an empty target always matches")
+	re.True(IsValidPrimaryCandidate(entries, "tso-2", groupMembers), "tso-2 is a group member")
+	re.True(IsValidPrimaryCandidate(entries, "http://127.0.0.1:2", groupMembers), "matching by service address must also work")
+	re.False(IsValidPrimaryCandidate(entries, "tso-3", groupMembers), "tso-3 is registered but not a member of this group")
+	re.False(IsValidPrimaryCandidate(entries, "tso-unknown", groupMembers), "an unregistered name never matches")
+}
+
+// TestIsValidPrimaryCandidateToleratesSchemeMismatch covers the supported
+// HTTP-to-HTTPS address transition, where the live registry can advertise a
+// scheme that differs from the one still persisted in the group's member list
+// (see KeyspaceGroupMember.IsAddressEquivalent, issue #8284). A member must not
+// be filtered out of its own group over a scheme difference alone.
+func TestIsValidPrimaryCandidateToleratesSchemeMismatch(t *testing.T) {
+	re := require.New(t)
+	entries := []discovery.ServiceRegistryEntry{
+		{Name: "tso-1", ServiceAddr: "https://127.0.0.1:1"},
+	}
+	// The group's persisted member address is still on the old scheme.
+	groupMembers := map[string]bool{"http://127.0.0.1:1": true}
+
+	re.True(IsValidPrimaryCandidate(entries, "tso-1", groupMembers),
+		"tso-1 is a group member even though the live registry's scheme differs from the persisted address")
+}
+
+// TestIsValidPrimaryCandidateToleratesSchemeMismatchByAddress covers targeting
+// by the group's persisted (pre-migration) address rather than by name:
+// isGroupMember alone is not enough to accept it, since IsValidPrimaryCandidate
+// still has to match it against the live registry entry via isSamePrimary.
+func TestIsValidPrimaryCandidateToleratesSchemeMismatchByAddress(t *testing.T) {
+	re := require.New(t)
+	entries := []discovery.ServiceRegistryEntry{
+		{Name: "tso-1", ServiceAddr: "https://127.0.0.1:1"},
+	}
+	groupMembers := map[string]bool{"http://127.0.0.1:1": true}
+
+	re.True(IsValidPrimaryCandidate(entries, "http://127.0.0.1:1", groupMembers))
+}
+
+func TestIsGroupMember(t *testing.T) {
+	re := require.New(t)
+	re.True(isGroupMember(nil, "http://127.0.0.1:1"), "a nil map means no group filter")
+
+	members := map[string]bool{"http://127.0.0.1:1": true}
+	re.True(isGroupMember(members, "http://127.0.0.1:1"), "exact match")
+	re.True(isGroupMember(members, "https://127.0.0.1:1"), "scheme-insensitive fallback match")
+	re.False(isGroupMember(members, "http://127.0.0.1:2"), "different host is not a member")
+}
+
+// TestDedupeByLatestStart covers the supported HTTP-to-HTTPS restart, where the
+// same node's old registry entry can still be present alongside its new one
+// (registry keys are keyed by address, not by node identity) until the old
+// key's lease expires. Only the entry with the latest StartTimestamp for a
+// given name must survive.
+func TestDedupeByLatestStart(t *testing.T) {
+	re := require.New(t)
+	entries := []discovery.ServiceRegistryEntry{
+		{Name: "tso-1", ServiceAddr: "http://127.0.0.1:1", StartTimestamp: 100},
+		{Name: "tso-1", ServiceAddr: "https://127.0.0.1:1", StartTimestamp: 200},
+		{Name: "tso-2", ServiceAddr: "http://127.0.0.1:2", StartTimestamp: 150},
+	}
+
+	deduped := dedupeByLatestStart(entries)
+	re.Len(deduped, 2)
+	byName := make(map[string]discovery.ServiceRegistryEntry, len(deduped))
+	for _, entry := range deduped {
+		byName[entry.Name] = entry
+	}
+	re.Equal("https://127.0.0.1:1", byName["tso-1"].ServiceAddr, "the newer of the two tso-1 registrations must survive")
+	re.Equal("http://127.0.0.1:2", byName["tso-2"].ServiceAddr)
 }
