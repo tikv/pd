@@ -513,12 +513,17 @@ func newBalanceRangeScheduler(opController *operator.Controller, conf *balanceRa
 // Schedule schedules the balance key range operator.
 func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	balanceRangeCounter.Inc()
+<<<<<<< HEAD
 	_, job := s.conf.peek()
 	if job == nil {
 		balanceRangeNoJobCounter.Inc()
 		return nil, nil
 	}
 	defer s.filterCounter.Flush()
+=======
+	job := s.job
+	defer s.filterCounter.Flush(cluster)
+>>>>>>> a77df243d9 (*: delete per-store metrics when a store is tombstoned (#11127))
 
 	faultStores := filter.SelectUnavailableTargetStores(s.stores, s.filters, cluster.GetSchedulerConfig(), nil, s.filterCounter)
 	sources := filter.SelectSourceStores(s.stores, s.filters, cluster.GetSchedulerConfig(), nil, s.filterCounter)
