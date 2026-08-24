@@ -17,16 +17,19 @@ package cluster
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/checker"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
+	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -130,8 +133,10 @@ func (sc *schedulingController) runStatsBackgroundJobs() {
 	defer ticker.Stop()
 
 	for _, store := range sc.GetStores() {
-		storeID := store.GetID()
-		sc.hotStat.GetOrCreateRollingStoreStats(storeID)
+		if store.IsRemoved() {
+			continue
+		}
+		sc.hotStat.GetOrCreateRollingStoreStats(store.GetID())
 	}
 	for {
 		select {
@@ -175,6 +180,8 @@ func resetSchedulingMetrics() {
 	statistics.ResetLabelStatsMetrics()
 	// reset hot cache metrics
 	statistics.ResetHotCacheStatusMetrics()
+	filter.ResetFilterMetrics()
+	hbstream.ResetHeartbeatStreamMetrics()
 }
 
 func (sc *schedulingController) collectSchedulingMetrics() {
@@ -183,8 +190,43 @@ func (sc *schedulingController) collectSchedulingMetrics() {
 	for _, s := range stores {
 		statsMap.Observe(s)
 		statistics.ObserveHotStat(s, sc.hotStat.StoresStats)
+		// Observe/ObserveHotStat write from this snapshot unconditionally, so a
+		// concurrent bury or final removal of s between GetStores() above and
+		// this write can have its own metric cleanup undone by it. Re-checking
+		// right after the write and redoing the cleanup closes that race
+		// without needing synchronization with the bury/removal path.
+		current := sc.GetStore(s.GetID())
+		// ResetStoreStatistics covers storeStatusGauge/storeStats, which
+		// observe() itself stops writing as soon as it sees a tombstoned
+		// store -- so, unlike the fields above, there's no legitimate write to
+		// preserve here once the store is IsRemoved(), not just once it's
+		// gone entirely. But storeStatusGauge's cleanup is a DeletePartialMatch
+		// full-vector scan, so only pay for it when this iteration's own s was
+		// still live (observe(s) could then have written using stale data);
+		// once a snapshot correctly shows IsRemoved(), observe() already
+		// skipped writing these fields and there's nothing to undo, so a
+		// tombstoned store sitting in GetStores() for up to 30 days doesn't
+		// cost a scan on every 10s tick.
+		if !s.IsRemoved() && (current == nil || current.IsRemoved()) {
+			statistics.ResetStoreStatistics(strconv.FormatUint(s.GetID(), 10))
+		}
 	}
 	statsMap.Collect()
+	// statsMap.Collect() writes statistics.StoreLimitGauge from its own
+	// GetStoresLimit() snapshot, taken independently of stores above and with
+	// no cluster reference of its own to re-check against. Reuse the stores
+	// snapshot already captured here to catch and undo it. Like
+	// ResetStoreStatistics above, a store limit has no legitimate reason to
+	// still be configured once the store is tombstoned (RemoveStoreLimit
+	// already clears it at bury time), so this also checks IsRemoved(), not
+	// just full removal.
+	for _, s := range stores {
+		if store := sc.GetStore(s.GetID()); store == nil || store.IsRemoved() {
+			id := strconv.FormatUint(s.GetID(), 10)
+			statistics.StoreLimitGauge.DeleteLabelValues(id, "add-peer")
+			statistics.StoreLimitGauge.DeleteLabelValues(id, "remove-peer")
+		}
+	}
 	sc.coordinator.GetSchedulersController().CollectSchedulerMetrics()
 	sc.coordinator.CollectHotSpotMetrics()
 	if sc.regionStats == nil {
@@ -201,6 +243,9 @@ func (sc *schedulingController) collectSchedulingMetrics() {
 func (sc *schedulingController) removeStoreStatistics(storeID uint64) {
 	sc.hotStat.RemoveRollingStoreStats(storeID)
 	sc.slowStat.RemoveSlowStoreStatus(storeID)
+	storeIDStr := strconv.FormatUint(storeID, 10)
+	schedulers.DeleteStoreMetrics(storeIDStr)
+	scatter.DeleteStoreMetrics(storeIDStr)
 }
 
 func (sc *schedulingController) updateStoreStatistics(storeID uint64, isSlow bool) {

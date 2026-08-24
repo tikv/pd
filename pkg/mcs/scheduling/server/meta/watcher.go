@@ -22,13 +22,19 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/statistics"
-	"github.com/tikv/pd/pkg/utils/etcdutil"
-	"github.com/tikv/pd/pkg/utils/keypath"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
+
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/schedule"
+	"github.com/tikv/pd/pkg/schedule/filter"
+	"github.com/tikv/pd/pkg/schedule/hbstream"
+	"github.com/tikv/pd/pkg/schedule/scatter"
+	"github.com/tikv/pd/pkg/schedule/schedulers"
+	"github.com/tikv/pd/pkg/statistics"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
 // Watcher is used to watch the PD API server for any meta changes.
@@ -84,8 +90,13 @@ func (w *Watcher) initializeStoreWatcher() error {
 		}
 
 		if store.GetNodeState() == metapb.NodeState_Removed {
-			statistics.ResetStoreStatistics(store.GetAddress(), strconv.FormatUint(store.GetId(), 10))
-			// TODO: remove hot stats
+			storeIDStr := strconv.FormatUint(store.GetId(), 10)
+			statistics.ResetStoreStatistics(storeIDStr)
+			filter.DeleteStoreMetrics(storeIDStr)
+			hbstream.DeleteStoreMetrics(storeIDStr)
+			schedulers.DeleteStoreMetrics(storeIDStr)
+			schedule.DeleteStoreMetrics(storeIDStr)
+			scatter.DeleteStoreMetrics(storeIDStr)
 		}
 
 		return nil
@@ -98,7 +109,17 @@ func (w *Watcher) initializeStoreWatcher() error {
 		}
 		origin := w.basicCluster.GetStore(storeID)
 		if origin != nil {
+			// Remove the store before the metric cleanup below, not after: see
+			// the matching comment on RaftCluster.deleteStore for why the order
+			// matters for a concurrently-running metrics collection tick.
 			w.basicCluster.DeleteStore(origin)
+			storeIDStr := strconv.FormatUint(storeID, 10)
+			statistics.ResetStoreStatistics(storeIDStr)
+			filter.DeleteStoreMetrics(storeIDStr)
+			hbstream.DeleteStoreMetrics(storeIDStr)
+			schedulers.DeleteStoreMetrics(storeIDStr)
+			schedule.DeleteStoreMetrics(storeIDStr)
+			scatter.DeleteStoreMetrics(storeIDStr)
 			log.Info("delete store meta", zap.Uint64("store-id", storeID))
 		}
 		return nil

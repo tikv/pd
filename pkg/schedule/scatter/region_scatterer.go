@@ -26,6 +26,8 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
+	"go.uber.org/zap"
+
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
@@ -36,7 +38,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"go.uber.org/zap"
 )
 
 const regionScatterName = "region-scatter"
@@ -524,23 +525,33 @@ func (r *RegionScatterer) Put(peers map[uint64]*metapb.Peer, leaderStoreID uint6
 		}
 		if engineFilter.Target(r.cluster.GetSharedConfig(), store).IsOK() {
 			r.ordinaryEngine.selectedPeer.Put(storeID, group)
-			scatterDistributionCounter.WithLabelValues(
-				fmt.Sprintf("%v", storeID),
-				fmt.Sprintf("%v", false),
-				core.EngineTiKV).Inc()
+			// A force-buried store can still show up in a region's existing
+			// placement; skip the metric so DeleteStoreMetrics' one-shot
+			// cleanup at bury time isn't undone by a later scatter that keeps
+			// or falls back to that placement.
+			if !store.IsRemoved() {
+				scatterDistributionCounter.WithLabelValues(
+					fmt.Sprintf("%v", storeID),
+					fmt.Sprintf("%v", false),
+					core.EngineTiKV).Inc()
+			}
 		} else {
 			engine := store.GetLabelValue(core.EngineKey)
 			ctx, _ := r.specialEngines.Load(engine)
 			ctx.(engineContext).selectedPeer.Put(storeID, group)
-			scatterDistributionCounter.WithLabelValues(
-				fmt.Sprintf("%v", storeID),
-				fmt.Sprintf("%v", false),
-				engine).Inc()
+			if !store.IsRemoved() {
+				scatterDistributionCounter.WithLabelValues(
+					fmt.Sprintf("%v", storeID),
+					fmt.Sprintf("%v", false),
+					engine).Inc()
+			}
 		}
 	}
 	r.ordinaryEngine.selectedLeader.Put(leaderStoreID, group)
-	scatterDistributionCounter.WithLabelValues(
-		fmt.Sprintf("%v", leaderStoreID),
-		fmt.Sprintf("%v", true),
-		core.EngineTiKV).Inc()
+	if leaderStore := r.cluster.GetStore(leaderStoreID); leaderStore != nil && !leaderStore.IsRemoved() {
+		scatterDistributionCounter.WithLabelValues(
+			fmt.Sprintf("%v", leaderStoreID),
+			fmt.Sprintf("%v", true),
+			core.EngineTiKV).Inc()
+	}
 }

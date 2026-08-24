@@ -16,6 +16,7 @@ package schedulers
 
 import (
 	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/tikv/pd/pkg/schedule/types"
 )
 
@@ -163,6 +164,18 @@ func init() {
 	prometheus.MustRegister(storeSlowTrendActionStatusGauge)
 	prometheus.MustRegister(storeSlowTrendMiscGauge)
 	prometheus.MustRegister(HotPendingSum)
+}
+
+// DeleteStoreMetrics deletes the per-store scheduler metrics of a store.
+func DeleteStoreMetrics(storeID string) {
+	opInfluenceStatus.DeletePartialMatch(prometheus.Labels{"store": storeID})
+	balanceWitnessCounter.DeleteLabelValues("move-witness", storeID+"-out")
+	balanceWitnessCounter.DeleteLabelValues("move-witness", storeID+"-in")
+	hotSchedulerResultCounter.DeletePartialMatch(prometheus.Labels{"store": storeID})
+	balanceDirectionCounter.DeletePartialMatch(prometheus.Labels{"store": storeID})
+	hotDirectionCounter.DeletePartialMatch(prometheus.Labels{"store": storeID})
+	storeSlowTrendEvictedStatusGauge.DeletePartialMatch(prometheus.Labels{"store": storeID})
+	HotPendingSum.DeletePartialMatch(prometheus.Labels{"store": storeID})
 }
 
 func balanceLeaderCounterWithEvent(event string) prometheus.Counter {

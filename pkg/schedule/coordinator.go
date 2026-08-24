@@ -23,6 +23,8 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
+	"go.uber.org/zap"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/checker"
@@ -39,7 +41,6 @@ import (
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"go.uber.org/zap"
 )
 
 const (
@@ -537,6 +538,19 @@ func collectHotMetrics(cluster sche.ClusterInformer, stores []*core.StoreInfo, t
 			utils.ForeachRegionStats(func(rwTy utils.RWType, dim int, _ utils.RegionStatKind) {
 				schedulers.HotPendingSum.DeleteLabelValues(storeLabel, rwTy.String(), utils.DimToString(dim))
 			})
+		}
+
+		// stores is a snapshot taken before this loop; if s was buried or fully
+		// removed concurrently, the writes above can recreate a series
+		// DeleteStoreMetrics already deleted for it. DeleteStoreMetrics is a
+		// DeletePartialMatch full-vector scan, so only pay for it when this
+		// iteration's own s was still live: once a snapshot correctly shows
+		// IsRemoved(), a tombstoned store sitting in GetStores() for up to 30
+		// days doesn't cost a scan on every tick.
+		if !s.IsRemoved() {
+			if store := cluster.GetStore(storeID); store == nil || store.IsRemoved() {
+				DeleteStoreMetrics(storeLabel)
+			}
 		}
 	}
 }

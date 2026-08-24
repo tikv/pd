@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/schedule/types"
 )
 
@@ -45,7 +46,7 @@ func TestCounter(t *testing.T) {
 	counter.inc(target, storeStateTombstone, 1, 2)
 	re.Equal(1, counter.counter[source][storeStateTombstone][1][2])
 	re.Equal(1, counter.counter[target][storeStateTombstone][1][2])
-	counter.Flush()
+	counter.Flush(nil)
 	re.Zero(counter.counter[source][storeStateTombstone][1][2])
 	re.Zero(counter.counter[target][storeStateTombstone][1][2])
 }

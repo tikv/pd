@@ -19,6 +19,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/smallnest/chanx"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -157,9 +158,16 @@ func (w *HotCache) GetHotPeerStat(kind utils.RWType, regionID, storeID uint64) *
 func (w *HotCache) CollectMetrics() {
 	w.CheckWriteAsync(func(cache *HotPeerCache) {
 		cache.collectMetrics()
+		// gc() is otherwise only triggered from UpdateStat, so a store removed while
+		// the cluster is idle (or was the only store still receiving updates) would
+		// never have its hotCacheStatusGauge series cleaned up. Piggyback on this
+		// periodic, activity-independent tick instead; gc() already self-throttles
+		// via topNTTL, so calling it every tick is cheap.
+		cache.gc()
 	})
 	w.CheckReadAsync(func(cache *HotPeerCache) {
 		cache.collectMetrics()
+		cache.gc()
 	})
 }
 
