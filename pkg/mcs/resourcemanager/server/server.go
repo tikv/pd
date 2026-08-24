@@ -261,6 +261,7 @@ func (s *Server) campaignLeader(expectedPrimary string) bool {
 	if utils.DeleteExpectedPrimaryFlag(s.GetClient(), &s.participant.MsParam, expectedPrimary, s.participant) {
 		log.Info("the expected primary has been changed to another member, stepping down",
 			zap.String("server-name", s.Name()))
+		time.Sleep(200 * time.Millisecond)
 		return false
 	}
 

@@ -95,14 +95,26 @@ func markExpectedPrimaryFlag(client *clientv3.Client, msParam *keypath.MsParam, 
 //     caller must step down so the re-election routes leadership to that target.
 func DeleteExpectedPrimaryFlag(client *clientv3.Client, msParam *keypath.MsParam, expectedValue string, p *member.Participant) (superseded bool) {
 	path := keypath.ExpectedPrimaryPath(msParam)
-	current, deleted := deleteMarkerIfEquals(client, path, expectedValue)
+	current, deleted, err := deleteMarkerIfEquals(client, path, expectedValue)
 	if deleted {
 		log.Info("delete expected primary flag", zap.String("primary-path", path))
 		return false
 	}
+	if err != nil {
+		// The reconciliation transaction itself failed (a real RPC/etcd error, not a
+		// value mismatch), so it is unknown whether a newer transfer rewrote the
+		// marker while this member was winning. A serving primary never watches the
+		// marker again (see the doc comment above), so silently assuming "no rewrite"
+		// here could strand that newer transfer forever. Fail closed instead: step
+		// down so the caller re-enters the election loop and this gets re-checked
+		// fresh on the next campaign attempt - a spurious step-down on a transient
+		// blip is far cheaper than a transfer that silently never takes effect.
+		log.Warn("failed to reconcile expected primary flag, stepping down to be safe",
+			zap.String("primary-path", path), errs.ZapError(err))
+		return true
+	}
 	if current == "" {
-		// The marker is already gone (deleted, expired, or it never existed), or the
-		// transaction failed; in the latter case the marker TTL bounds the staleness.
+		// The marker is confirmed absent: deleted, expired, or it never existed.
 		return false
 	}
 	// The marker was rewritten by a newer transfer while this member was winning.
@@ -110,7 +122,7 @@ func DeleteExpectedPrimaryFlag(client *clientv3.Client, msParam *keypath.MsParam
 		// The newer transfer also targets this member, which is already serving.
 		// Clean the marker up so it does not linger until its TTL. Best effort:
 		// on failure the TTL applies.
-		if _, deleted := deleteMarkerIfEquals(client, path, current); deleted {
+		if _, deleted, _ := deleteMarkerIfEquals(client, path, current); deleted {
 			log.Info("delete expected primary flag rewritten by a newer transfer to this member",
 				zap.String("primary-path", path))
 		}
@@ -124,10 +136,13 @@ func DeleteExpectedPrimaryFlag(client *clientv3.Client, msParam *keypath.MsParam
 
 // deleteMarkerIfEquals atomically deletes the expected primary marker and revokes
 // its lease when its value equals want. It returns the marker value observed by the
-// transaction ("" when the marker does not exist or the transaction failed) and
-// whether the marker was deleted. Note that etcd value comparisons always fail on a
-// missing key, so want == "" never deletes anything and reports the current value.
-func deleteMarkerIfEquals(client *clientv3.Client, path, want string) (current string, deleted bool) {
+// transaction ("" when the marker does not exist), whether the marker was deleted,
+// and a non-nil err when the transaction itself failed (as opposed to succeeding
+// with a value mismatch) - callers must not conflate the two: an err means the
+// marker's actual state is unknown, not that it is absent. Note that etcd value
+// comparisons always fail on a missing key, so want == "" never deletes anything
+// and reports the current value.
+func deleteMarkerIfEquals(client *clientv3.Client, path, want string) (current string, deleted bool, err error) {
 	resp, err := kv.NewSlowLogTxn(client).
 		If(clientv3.Compare(clientv3.Value(path), "=", want)).
 		Then(clientv3.OpGet(path), clientv3.OpDelete(path)).
@@ -135,14 +150,14 @@ func deleteMarkerIfEquals(client *clientv3.Client, path, want string) (current s
 		Commit()
 	if err != nil {
 		log.Warn("failed to delete expected primary flag", zap.String("primary-path", path), errs.ZapError(err))
-		return "", false
+		return "", false, err
 	}
 	kvs := resp.Responses[0].GetResponseRange().GetKvs()
 	if !resp.Succeeded {
 		if len(kvs) == 0 {
-			return "", false
+			return "", false, nil
 		}
-		return string(kvs[0].Value), false
+		return string(kvs[0].Value), false, nil
 	}
 	// Deleted. Revoke the lease the marker was bound to, so the "key deleted but
 	// lease persists" state can never exist (#10875).
@@ -158,7 +173,7 @@ func deleteMarkerIfEquals(client *clientv3.Client, path, want string) (current s
 				zap.String("primary-path", path), zap.Int64("lease-id", int64(leaseID)), errs.ZapError(err))
 		}
 	}
-	return want, true
+	return want, true, nil
 }
 
 // ExpectedPrimaryCmp returns an etcd comparison that guards a primary campaign
@@ -220,7 +235,9 @@ func TransferPrimary(client *clientv3.Client, p *member.Participant, serviceName
 	// ties the write to the exact leadership session IsServing() just checked for the
 	// whole duration of this function, not just its tail end.
 	leaderKeyPath := p.GetLeadership().GetLeaderKey()
-	leaderResp, err := client.Get(client.Ctx(), leaderKeyPath)
+	getCtx, getCancel := context.WithTimeout(client.Ctx(), etcdutil.DefaultRequestTimeout)
+	leaderResp, err := client.Get(getCtx, leaderKeyPath)
+	getCancel()
 	if err != nil {
 		return errors.Annotate(err, "failed to read leader key for transfer guard")
 	}

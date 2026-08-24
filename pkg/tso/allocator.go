@@ -327,6 +327,7 @@ func (a *Allocator) campaignPrimary(expectedPrimary string) {
 	// the re-election routes leadership to that target.
 	if mcsutils.DeleteExpectedPrimaryFlag(a.member.Client(), msParam, expectedPrimary, m) {
 		log.Info("the expected primary has been changed to another member, stepping down", a.logFields...)
+		time.Sleep(200 * time.Millisecond)
 		return
 	}
 
