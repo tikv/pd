@@ -251,6 +251,10 @@ const (
 	minCheckRegionSplitInterval     = 1 * time.Millisecond
 	maxCheckRegionSplitInterval     = 100 * time.Millisecond
 
+	defaultEnableTSOKeyspaceGroupAutoSplit         = true
+	defaultTSOKeyspaceGroupAutoSplitThreshold      = 40000
+	defaultTSOKeyspaceGroupAutoSplitPatrolInterval = 15 * time.Minute
+
 	defaultEnableSchedulingFallback      = true
 	defaultEnableTSODynamicSwitching     = false
 	defaultEnableResourceManagerFallback = true
@@ -884,6 +888,12 @@ type KeyspaceConfig struct {
 	// MetaServiceGroups is the available external meta-service groups.
 	// The key is the meta-service group name, and the value is the corresponding endpoint.
 	MetaServiceGroups map[string]string `toml:"meta-service-groups" json:"meta-service-groups"`
+	// EnableTSOKeyspaceGroupAutoSplit indicates whether to auto-split TSO keyspace groups by keyspace count.
+	EnableTSOKeyspaceGroupAutoSplit bool `toml:"enable-tso-keyspace-group-auto-split" json:"enable-tso-keyspace-group-auto-split"`
+	// TSOKeyspaceGroupAutoSplitThreshold is the keyspace count threshold for auto-splitting a TSO keyspace group.
+	TSOKeyspaceGroupAutoSplitThreshold int `toml:"tso-keyspace-group-auto-split-threshold" json:"tso-keyspace-group-auto-split-threshold"`
+	// TSOKeyspaceGroupAutoSplitPatrolInterval is the patrol interval for TSO keyspace group auto-split.
+	TSOKeyspaceGroupAutoSplitPatrolInterval typeutil.Duration `toml:"tso-keyspace-group-auto-split-patrol-interval" json:"tso-keyspace-group-auto-split-patrol-interval"`
 }
 
 // Validate checks if keyspace config falls within acceptable range.
@@ -894,6 +904,16 @@ func (c *KeyspaceConfig) Validate() error {
 	}
 	if c.CheckRegionSplitInterval.Duration >= c.WaitRegionSplitTimeout.Duration {
 		return errors.New("[keyspace] check-region-split-interval should be less than wait-region-split-timeout")
+	}
+	return c.validateTSOKeyspaceGroupAutoSplit()
+}
+
+func (c *KeyspaceConfig) validateTSOKeyspaceGroupAutoSplit() error {
+	if c.TSOKeyspaceGroupAutoSplitThreshold <= 0 {
+		return errors.New("[keyspace] tso-keyspace-group-auto-split-threshold should be greater than 0")
+	}
+	if c.TSOKeyspaceGroupAutoSplitPatrolInterval.Duration <= 0 {
+		return errors.New("[keyspace] tso-keyspace-group-auto-split-patrol-interval should be greater than 0")
 	}
 	return nil
 }
@@ -908,8 +928,20 @@ func (c *KeyspaceConfig) adjust(meta *configutil.ConfigMetaData) error {
 	if !meta.IsDefined("check-region-split-interval") {
 		c.CheckRegionSplitInterval = typeutil.NewDuration(defaultCheckRegionSplitInterval)
 	}
+	if !meta.IsDefined("enable-tso-keyspace-group-auto-split") {
+		c.EnableTSOKeyspaceGroupAutoSplit = defaultEnableTSOKeyspaceGroupAutoSplit
+	}
+	if !meta.IsDefined("tso-keyspace-group-auto-split-threshold") {
+		c.TSOKeyspaceGroupAutoSplitThreshold = defaultTSOKeyspaceGroupAutoSplitThreshold
+	}
+	if !meta.IsDefined("tso-keyspace-group-auto-split-patrol-interval") {
+		c.TSOKeyspaceGroupAutoSplitPatrolInterval = typeutil.NewDuration(defaultTSOKeyspaceGroupAutoSplitPatrolInterval)
+	}
 
-	return AdjustMetaServiceGroups(c.MetaServiceGroups)
+	if err := AdjustMetaServiceGroups(c.MetaServiceGroups); err != nil {
+		return err
+	}
+	return c.validateTSOKeyspaceGroupAutoSplit()
 }
 
 // IsValidMetaServiceGroupID reports whether id is safe to use as a single path
@@ -998,4 +1030,19 @@ func (c *KeyspaceConfig) GetMetaServiceGroups() map[string]string {
 // SetMetaServiceGroups updates the current meta-service-group configuration.
 func (c *KeyspaceConfig) SetMetaServiceGroups(metaServiceGroups map[string]string) {
 	c.MetaServiceGroups = metaServiceGroups
+}
+
+// IsTSOKeyspaceGroupAutoSplitEnabled returns whether TSO keyspace group auto-split is enabled.
+func (c *KeyspaceConfig) IsTSOKeyspaceGroupAutoSplitEnabled() bool {
+	return c.EnableTSOKeyspaceGroupAutoSplit
+}
+
+// GetTSOKeyspaceGroupAutoSplitThreshold returns the keyspace count threshold for auto-splitting.
+func (c *KeyspaceConfig) GetTSOKeyspaceGroupAutoSplitThreshold() int {
+	return c.TSOKeyspaceGroupAutoSplitThreshold
+}
+
+// GetTSOKeyspaceGroupAutoSplitPatrolInterval returns the patrol interval for TSO keyspace group auto-split.
+func (c *KeyspaceConfig) GetTSOKeyspaceGroupAutoSplitPatrolInterval() time.Duration {
+	return c.TSOKeyspaceGroupAutoSplitPatrolInterval.Duration
 }
