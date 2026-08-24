@@ -246,12 +246,16 @@ func (a *Allocator) primaryElectionLoop() {
 			ServiceName: constant.TSOServiceName,
 			GroupID:     a.keyspaceGroupID,
 		})
-		if err != nil {
-			// Do not campaign on a read failure: an empty flag would be treated as
-			// "no transfer" and skip the affinity guard, so retry instead.
-			log.Warn("failed to get expected primary flag, retry later", append(a.logFields, errs.ZapError(err))...)
-			time.Sleep(200 * time.Millisecond)
-			continue
+		readFailed := err != nil
+		if readFailed {
+			// ExpectedPrimaryCmp("") still atomically requires the marker to be
+			// absent at commit time, so campaigning with an empty flag here cannot
+			// let this member win over a real transfer target - it can only fail
+			// closed if a marker actually exists. Skipping campaigning on every read
+			// failure would otherwise leave the service leaderless for as long as
+			// the reads keep failing, even when no transfer is in progress.
+			log.Warn("failed to get expected primary flag, campaign without affinity guard", append(a.logFields, errs.ZapError(err))...)
+			expectedPrimary = ""
 		}
 		// skip campaign the primary if the expected primary is not empty and not this member.
 		// expected primary ONLY SET BY `{service}/primary/transfer` API.
@@ -264,6 +268,14 @@ func (a *Allocator) primaryElectionLoop() {
 		}
 
 		a.campaignPrimary(expectedPrimary)
+		if readFailed {
+			// The read failure usually means etcd itself is degraded, and
+			// campaigning (lease grant + txn commit) is heavier than the read that
+			// just failed - keep the same backoff the old skip-and-retry path used
+			// so a run of failing reads cannot turn into a tight retry loop against
+			// an already struggling etcd.
+			time.Sleep(200 * time.Millisecond)
+		}
 	}
 }
 
