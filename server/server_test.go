@@ -16,38 +16,23 @@ package server
 
 import (
 	"context"
-<<<<<<< HEAD
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/assertutil"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
-=======
-	stderrors "errors"
-	"fmt"
-	"sync"
-	"testing"
-
-	"github.com/stretchr/testify/require"
-
-	"github.com/pingcap/kvproto/pkg/metapb"
-
-	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/member"
-	sc "github.com/tikv/pd/pkg/schedule/config"
-	"github.com/tikv/pd/pkg/storage"
-	"github.com/tikv/pd/pkg/storage/kv"
-	"github.com/tikv/pd/pkg/utils/keypath"
->>>>>>> a186e0cc61 (config: persist default store limit for future stores (#10900))
 	"github.com/tikv/pd/server/config"
 	etcdtypes "go.etcd.io/etcd/client/pkg/v3/types"
 	"go.etcd.io/etcd/server/v3/embed"
@@ -58,10 +43,6 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
-<<<<<<< HEAD
-type leaderServerTestSuite struct {
-	suite.Suite
-=======
 func TestPartialScheduleConfigUpdatesPreserveLatestFields(t *testing.T) {
 	re := require.New(t)
 	cfg := config.NewConfig()
@@ -136,64 +117,8 @@ func TestConcurrentPartialScheduleConfigUpdatesDoNotConflict(t *testing.T) {
 	re.Equal(current.MaxSnapshotCount, reloaded.GetScheduleConfig().MaxSnapshotCount)
 }
 
-func TestDeleteFollowerRegion(t *testing.T) {
-	tests := []struct {
-		name        string
-		setup       func(*require.Assertions, *Server) uint64
-		errContains string
-		check       func(*require.Assertions, *Server, uint64)
-	}{
-		{
-			name: "cached region",
-			setup: func(re *require.Assertions, s *Server) uint64 {
-				region := newTestFollowerRegionMeta(1)
-				re.NoError(s.storage.SaveRegion(region))
-				s.basicCluster.PutRegion(core.NewRegionInfo(region, nil, core.SetSource(core.Storage)))
-				return region.GetId()
-			},
-			check: assertTestFollowerRegionDeleted,
-		},
-		{
-			name: "storage-only region",
-			setup: func(re *require.Assertions, s *Server) uint64 {
-				region := newTestFollowerRegionMeta(2)
-				re.NoError(s.storage.SaveRegion(region))
-				return region.GetId()
-			},
-			check: assertTestFollowerRegionDeleted,
-		},
-		{
-			name: "missing region",
-			setup: func(*require.Assertions, *Server) uint64 {
-				return 3
-			},
-		},
-		{
-			name: "load storage error",
-			setup: func(_ *require.Assertions, s *Server) uint64 {
-				s.storage = &testFollowerRegionStorage{
-					Storage:       s.storage,
-					loadRegionErr: errTestFollowerRegionStorage,
-				}
-				return 4
-			},
-			errContains: "load follower region from local storage",
-		},
-		{
-			name: "delete storage error",
-			setup: func(_ *require.Assertions, s *Server) uint64 {
-				region := newTestFollowerRegionMeta(5)
-				s.basicCluster.PutRegion(core.NewRegionInfo(region, nil, core.SetSource(core.Storage)))
-				s.storage = &testFollowerRegionStorage{
-					Storage:         s.storage,
-					deleteRegionErr: errTestFollowerRegionStorage,
-				}
-				return region.GetId()
-			},
-			errContains: "delete follower region from local storage",
-		},
-	}
->>>>>>> a186e0cc61 (config: persist default store limit for future stores (#10900))
+type leaderServerTestSuite struct {
+	suite.Suite
 
 	ctx        context.Context
 	cancel     context.CancelFunc

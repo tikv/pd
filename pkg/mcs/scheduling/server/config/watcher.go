@@ -74,9 +74,6 @@ type persistedConfig struct {
 	Store          sc.StoreConfig       `json:"store"`
 }
 
-<<<<<<< HEAD
-// NewWatcher creates a new watcher to watch the config meta change from PD API server.
-=======
 // UnmarshalJSON consumes persisted schedule-field presence while decoding, so
 // decoder metadata never leaks into the runtime ScheduleConfig.
 func (c *persistedConfig) UnmarshalJSON(data []byte) error {
@@ -97,7 +94,6 @@ func (c *persistedConfig) UnmarshalJSON(data []byte) error {
 }
 
 // NewWatcher creates a new watcher to watch the config meta change from PD.
->>>>>>> a186e0cc61 (config: persist default store limit for future stores (#10900))
 func NewWatcher(
 	ctx context.Context,
 	etcdClient *clientv3.Client,

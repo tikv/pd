@@ -16,17 +16,12 @@ package config
 
 import (
 	"context"
-<<<<<<< HEAD
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
-=======
-	"encoding/json"
-	"reflect"
-	"strconv"
 	"sync"
->>>>>>> a186e0cc61 (config: persist default store limit for future stores (#10900))
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -549,47 +544,37 @@ func (o *PersistOptions) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitCo
 	if limit, ok := o.GetScheduleConfig().StoreLimit[storeID]; ok {
 		return limit
 	}
-<<<<<<< HEAD
-	cfg := o.GetScheduleConfig().Clone()
-	sc := sc.StoreLimitConfig{
-		AddPeer:    sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
-		RemovePeer: sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
-	}
-	v, ok1, err := o.getTTLFloat("default-add-peer")
-	if err != nil {
-		log.Warn("failed to parse default-add-peer from PersistOptions's ttl storage", zap.Error(err))
-	}
-	canSetAddPeer := ok1 && err == nil
-	if canSetAddPeer {
-		returnSC.AddPeer = v
-	}
-
-	v, ok2, err := o.getTTLFloat("default-remove-peer")
-	if err != nil {
-		log.Warn("failed to parse default-remove-peer from PersistOptions's ttl storage", zap.Error(err))
-	}
-	canSetRemovePeer := ok2 && err == nil
-	if canSetRemovePeer {
-		returnSC.RemovePeer = v
-	}
-
-	if canSetAddPeer || canSetRemovePeer {
-		return returnSC
-	}
-	cfg.StoreLimit[storeID] = sc
-	o.SetScheduleConfig(cfg)
-	return o.GetScheduleConfig().StoreLimit[storeID]
-=======
 	o.mutateScheduleConfig(func(next *sc.ScheduleConfig) {
 		if limit, ok := next.StoreLimit[storeID]; ok {
 			returnSC = limit
 			return
 		}
-		returnSC = next.GetDefaultStoreLimit()
-		next.StoreLimit[storeID] = returnSC
+		limitCfg := next.GetDefaultStoreLimit()
+		v, ok1, err := o.getTTLFloat("default-add-peer")
+		if err != nil {
+			log.Warn("failed to parse default-add-peer from PersistOptions's ttl storage", zap.Error(err))
+		}
+		canSetAddPeer := ok1 && err == nil
+		if canSetAddPeer {
+			returnSC.AddPeer = v
+		}
+
+		v, ok2, err := o.getTTLFloat("default-remove-peer")
+		if err != nil {
+			log.Warn("failed to parse default-remove-peer from PersistOptions's ttl storage", zap.Error(err))
+		}
+		canSetRemovePeer := ok2 && err == nil
+		if canSetRemovePeer {
+			returnSC.RemovePeer = v
+		}
+
+		if canSetAddPeer || canSetRemovePeer {
+			return
+		}
+		next.StoreLimit[storeID] = limitCfg
+		returnSC = limitCfg
 	})
 	return returnSC
->>>>>>> a186e0cc61 (config: persist default store limit for future stores (#10900))
 }
 
 // GetStoreLimitByType returns the limit of a store with a given type.

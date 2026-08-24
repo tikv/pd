@@ -20,11 +20,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"strconv"
-<<<<<<< HEAD
 	"strings"
-=======
 	"sync"
->>>>>>> a186e0cc61 (config: persist default store limit for future stores (#10900))
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -237,7 +234,7 @@ type PersistConfig struct {
 	replication    atomic.Value
 	storeConfig    atomic.Value
 	// schedulersUpdatingNotifier is used to notify that the schedulers have been updated.
-	// Store as `chan<- struct{}`.
+	// Store as `chan struct{}`.
 	schedulersUpdatingNotifier atomic.Value
 }
 
@@ -255,16 +252,30 @@ func NewPersistConfig(cfg *Config, ttl *cache.TTLString) *PersistConfig {
 }
 
 // SetSchedulersUpdatingNotifier sets the schedulers updating notifier.
-func (o *PersistConfig) SetSchedulersUpdatingNotifier(notifier chan<- struct{}) {
+func (o *PersistConfig) SetSchedulersUpdatingNotifier(notifier chan struct{}) {
 	o.schedulersUpdatingNotifier.Store(notifier)
 }
 
-func (o *PersistConfig) getSchedulersUpdatingNotifier() chan<- struct{} {
+// ClearSchedulersUpdatingNotifier clears the schedulers updating notifier if it
+// still matches the given notifier.
+func (o *PersistConfig) ClearSchedulersUpdatingNotifier(notifier chan struct{}) {
+	if notifier == nil {
+		return
+	}
+	current := o.getSchedulersUpdatingNotifier()
+	if current != notifier {
+		return
+	}
+	var empty chan struct{}
+	o.schedulersUpdatingNotifier.CompareAndSwap(current, empty)
+}
+
+func (o *PersistConfig) getSchedulersUpdatingNotifier() chan struct{} {
 	v := o.schedulersUpdatingNotifier.Load()
 	if v == nil {
 		return nil
 	}
-	return v.(chan<- struct{})
+	return v.(chan struct{})
 }
 
 func (o *PersistConfig) tryNotifySchedulersUpdating() {
@@ -272,7 +283,11 @@ func (o *PersistConfig) tryNotifySchedulersUpdating() {
 	if notifier == nil {
 		return
 	}
-	notifier <- struct{}{}
+	// Scheduler update notifications are coalesced; one pending signal is enough.
+	select {
+	case notifier <- struct{}{}:
+	default:
+	}
 }
 
 // GetClusterVersion returns the cluster version.
@@ -560,11 +575,7 @@ func (o *PersistConfig) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitCon
 		return limit
 	}
 	cfg := o.GetScheduleConfig().Clone()
-<<<<<<< HEAD
-	sc := sc.StoreLimitConfig{
-		AddPeer:    sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
-		RemovePeer: sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
-	}
+	limitCfg := cfg.GetDefaultStoreLimit()
 	v, ok1, err := o.getTTLFloat("default-add-peer")
 	if err != nil {
 		log.Warn("failed to parse default-add-peer from PersistOptions's ttl storage", zap.Error(err))
@@ -586,11 +597,7 @@ func (o *PersistConfig) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitCon
 	if canSetAddPeer || canSetRemovePeer {
 		return returnSC
 	}
-	cfg.StoreLimit[storeID] = sc
-=======
-	limitCfg := cfg.GetDefaultStoreLimit()
 	cfg.StoreLimit[storeID] = limitCfg
->>>>>>> a186e0cc61 (config: persist default store limit for future stores (#10900))
 	o.SetScheduleConfig(cfg)
 	return o.GetScheduleConfig().StoreLimit[storeID]
 }
