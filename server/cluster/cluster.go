@@ -2475,6 +2475,18 @@ func (c *RaftCluster) SetExternalTS(timestamp uint64) error {
 
 // SetStoreLimit sets a store limit for a given type and rate.
 func (c *RaftCluster) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePerMin float64) error {
+	// A tombstoned store's config entry is only ever cleared once, at bury time
+	// (RemoveStoreLimit); nothing sweeps it again afterward. Without this check,
+	// setting a limit for an already-tombstoned store re-adds it, and
+	// StoreLimitGauge stays republished for it until final removal.
+	//
+	// GetStore returning nil is deliberately NOT treated the same as removed
+	// here: callers legitimately set a store's limit before the store itself
+	// is registered (see testCluster.addRegionStore), so nil just means
+	// "not created yet," not "already gone."
+	if store := c.GetStore(storeID); store != nil && store.IsRemoved() {
+		return errs.ErrStoreRemoved.FastGenByArgs(storeID)
+	}
 	err := c.opt.UpdateScheduleConfig(c.storage, func(_ *sc.ScheduleConfig, cfg *sc.ScheduleConfig) (bool, error) {
 		slc, ok := cfg.StoreLimit[storeID]
 		if !ok {
