@@ -163,7 +163,8 @@ type RaftCluster struct {
 
 	serverCtx context.Context
 	ctx       context.Context
-	cancel    context.CancelFunc
+	// cancel ends ctx. Stored atomically because Cancel reads it lock-free.
+	cancel atomic.Pointer[context.CancelFunc]
 
 	*core.BasicCluster // cached cluster info
 	member             *member.Member
@@ -171,7 +172,11 @@ type RaftCluster struct {
 	etcdClient *clientv3.Client
 	httpClient *http.Client
 
-	running                  bool
+	// started is true between a successful Start and the cleanup in Stop, and
+	// is guarded by the RWMutex. running is true from the end of Start until
+	// Cancel; it is atomic so that Cancel can clear it lock-free.
+	started                  bool
+	running                  atomic.Bool
 	isKeyspaceGroupEnabled   bool
 	tsoDynamicSwitchingState atomic.Int32
 	meta                     *metapb.Cluster
@@ -339,7 +344,9 @@ func (c *RaftCluster) InitCluster(
 	hbstreams *hbstream.HeartbeatStreams,
 	keyspaceGroupManager *keyspace.GroupManager) error {
 	c.opt, c.id = opt.(*config.PersistOptions), id
-	c.ctx, c.cancel = context.WithCancel(c.serverCtx)
+	ctx, cancel := context.WithCancel(c.serverCtx)
+	c.ctx = ctx
+	c.cancel.Store(&cancel)
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
 	failpoint.Inject("syncRegionChannelFull", func() {
 		c.changedRegions = make(chan *core.RegionInfo, 100)
@@ -367,7 +374,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	c.Lock()
 	defer c.Unlock()
 
-	if c.running {
+	if c.started {
 		log.Warn("raft cluster has already been started")
 		return nil
 	}
@@ -497,7 +504,8 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 
 	log.Info("start background jobs completed", zap.Duration("cost", time.Since(backgroundJobsStart)))
 	runnersStart := time.Now()
-	c.running = true
+	c.started = true
+	c.running.Store(true)
 	c.heartbeatRunner.Start(c.ctx)
 	c.miscRunner.Start(c.ctx)
 	c.logRunner.Start(c.ctx)
@@ -593,7 +601,7 @@ func (c *RaftCluster) runServiceCheckJob() {
 			// ensure raft cluster is running
 			// avoid unexpected startSchedulingJobs when raft cluster is stopping
 			c.RLock()
-			if c.running {
+			if c.running.Load() {
 				c.checkSchedulingService()
 			}
 			c.RUnlock()
@@ -602,7 +610,7 @@ func (c *RaftCluster) runServiceCheckJob() {
 			// avoid unexpected startTSOJobsIfNeeded when raft cluster is stopping
 			// ref: https://github.com/tikv/pd/issues/8781
 			c.RLock()
-			if c.running {
+			if c.running.Load() {
 				c.checkTSOService()
 			}
 			c.RUnlock()
@@ -617,7 +625,7 @@ func (c *RaftCluster) startTSOJobsIfNeeded() error {
 			log.Error("failed to initialize the TSO allocator", errs.ZapError(err))
 			return err
 		}
-	} else if !c.running {
+	} else if !c.running.Load() {
 		// If the TSO allocator is already initialized, but the running flag is false,
 		// it means there maybe unexpected error happened before.
 		log.Warn("the TSO allocator is already initialized before, but the cluster is not running")
@@ -983,16 +991,43 @@ func (c *RaftCluster) runReplicationMode() {
 	c.replicationMode.Run(c.ctx)
 }
 
-// Stop stops the cluster.
+// Cancel is the half of Stop that does not wait: it takes the cluster out of
+// service and cancels the context every background job and runner is built on,
+// so that none of them starts another round. Stop still has to run afterwards
+// to reclaim them, and must run before the cluster can be started again.
+//
+// The server calls it the moment a term ends, ahead of Member.Resign, whose
+// tail can block on a stalled volume. Ref: https://github.com/tikv/pd/issues/11106
+//
+// It takes no lock on purpose: runServiceCheckJob holds the read lock across
+// checkTSOService, which can sit in an etcd request on the pinned election
+// client for the whole request timeout, and a pending Lock would queue behind
+// it and block every other reader with it. Everything here is atomic.
+func (c *RaftCluster) Cancel() {
+	if !c.running.CompareAndSwap(true, false) {
+		return
+	}
+	if cancel := c.cancel.Load(); cancel != nil {
+		(*cancel)()
+	}
+}
+
+// Stop stops the cluster: the waiting half of the pair, see Cancel. The TSO
+// allocator reset and the GC state manager callback stay here on purpose, so
+// that only a step-down that actually reaches Stop resets them.
 func (c *RaftCluster) Stop() {
 	var (
-		cancel             context.CancelFunc
 		stopSchedulingJobs bool
 		heartbeatRunner    ratelimit.Runner
 		miscRunner         ratelimit.Runner
 		logRunner          ratelimit.Runner
 		syncRegionRunner   ratelimit.Runner
 	)
+
+	// Usually a no-op after resetLeader. It is the real signal when Stop runs
+	// first: an exit of campaignLeader before its second resetLeader defer, or a
+	// direct caller such as a test.
+	c.Cancel()
 
 	c.Lock()
 	// We need to try to stop tso jobs whatever the cluster is running or not.
@@ -1002,12 +1037,11 @@ func (c *RaftCluster) Stop() {
 	// In this case, the `running` in `RaftCluster` is false, but the tso job has been started.
 	// Ref: https://github.com/tikv/pd/issues/8836
 	c.stopTSOJobsIfNeeded()
-	if !c.running {
+	if !c.started {
 		c.Unlock()
 		return
 	}
-	c.running = false
-	cancel = c.cancel
+	c.started = false
 	stopSchedulingJobs = !c.IsServiceIndependent(constant.SchedulingServiceName)
 	heartbeatRunner = c.heartbeatRunner
 	miscRunner = c.miscRunner
@@ -1018,9 +1052,6 @@ func (c *RaftCluster) Stop() {
 	}
 	c.Unlock()
 
-	if cancel != nil {
-		cancel()
-	}
 	if stopSchedulingJobs {
 		c.stopSchedulingJobs()
 	}
@@ -1050,14 +1081,14 @@ func (c *RaftCluster) Wait() {
 func (c *RaftCluster) IsRunning() bool {
 	c.RLock()
 	defer c.RUnlock()
-	return c.running
+	return c.running.Load()
 }
 
 // Context returns the context of RaftCluster.
 func (c *RaftCluster) Context() context.Context {
 	c.RLock()
 	defer c.RUnlock()
-	if c.running {
+	if c.running.Load() {
 		return c.ctx
 	}
 	return nil

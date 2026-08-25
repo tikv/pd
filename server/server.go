@@ -2043,8 +2043,15 @@ func (s *Server) campaignLeader() {
 	// and the member would keep answering as the leader through the paths that do
 	// not consult IsServing. Resigning first bounds that to the in-memory stores
 	// at the top of Member.Resign.
+	//
+	// The RaftCluster is cancelled before the resign for the same reason: its
+	// jobs hang off the server context, not the campaign context, so only
+	// RaftCluster.Cancel reaches them, and anything placed after Resign would
+	// reach them only once the block clears. The wait for the jobs stays in
+	// the stopRaftCluster defer below.
 	resetLeader := func() {
 		cancel()
+		s.cluster.Cancel()
 		s.member.Resign()
 		member.ServiceMemberGauge.WithLabelValues(PD).Set(0)
 	}
@@ -2152,8 +2159,9 @@ func (s *Server) campaignLeader() {
 	// Registered a second time on purpose, and it is not dead code: deferred
 	// calls run last in first out, so this one runs before the stopRaftCluster
 	// defer above, which waits on background jobs that can take an unbounded
-	// time. The leadership has to be gone before that wait starts.
-	// `resetLeaderOnce` is what makes the duplicate invocation harmless.
+	// time. The leadership has to be gone, and the jobs told to stop, before
+	// that wait starts. `resetLeaderOnce` is what makes the duplicate
+	// invocation harmless.
 	defer resetLeaderOnce.Do(resetLeader)
 	leaderTicker := time.NewTicker(mcs.LeaderTickInterval)
 	defer leaderTicker.Stop()

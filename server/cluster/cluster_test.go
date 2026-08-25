@@ -4697,12 +4697,17 @@ func TestStopDoesNotHoldClusterLockWhileWaitingSchedulingJobs(t *testing.T) {
 	re.NoError(err)
 
 	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	// Detach the scheduling jobs from the cluster context, so that only the
+	// stopSchedulingJobs call inside Stop - not the Cancel that now precedes
+	// the lock - can wake the stand-in job below.
+	cluster.schedulingController = newSchedulingController(cluster.serverCtx, cluster.BasicCluster, cluster.opt, cluster.ruleManager)
 	cluster.heartbeatRunner = ratelimit.NewSyncRunner()
 	cluster.miscRunner = ratelimit.NewSyncRunner()
 	cluster.logRunner = ratelimit.NewSyncRunner()
 	cluster.syncRegionRunner = ratelimit.NewSyncRunner()
 	cluster.tsoAllocator = nil
-	cluster.running = true
+	cluster.started = true
+	cluster.running.Store(true)
 
 	cluster.coordinator = schedule.NewCoordinator(cluster.ctx, cluster, nil)
 	cluster.schedulingController.running = true
@@ -4734,6 +4739,64 @@ func TestStopDoesNotHoldClusterLockWhileWaitingSchedulingJobs(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("raft cluster stop blocked on scheduling jobs while holding cluster lock")
 	}
+}
+
+// TestCancelIsLockFreeAndStopReclaims pins the two properties the split of Stop
+// rests on: Cancel returns while another goroutine holds the cluster lock, and
+// a Stop after Cancel still tears everything down.
+func TestCancelIsLockFreeAndStopReclaims(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	cluster.heartbeatRunner = ratelimit.NewSyncRunner()
+	cluster.miscRunner = ratelimit.NewSyncRunner()
+	cluster.logRunner = ratelimit.NewSyncRunner()
+	cluster.syncRegionRunner = ratelimit.NewSyncRunner()
+	cluster.tsoAllocator = nil
+	cluster.started = true
+	cluster.running.Store(true)
+	cluster.coordinator = schedule.NewCoordinator(cluster.ctx, cluster, nil)
+	cluster.schedulingController.running = true
+
+	// Stand in for a background job holding the read lock, as
+	// runServiceCheckJob does across checkTSOService.
+	cluster.RLock()
+	cancelled := make(chan struct{})
+	go func() {
+		cluster.Cancel()
+		close(cancelled)
+	}()
+	select {
+	case <-cancelled:
+	case <-time.After(time.Second):
+		cluster.RUnlock()
+		t.Fatal("Cancel blocked behind a held read lock")
+	}
+	re.False(cluster.running.Load())
+	re.Error(cluster.ctx.Err())
+	re.True(cluster.started)
+	cluster.RUnlock()
+
+	// Cancel is idempotent, and Stop after it still reclaims everything.
+	cluster.Cancel()
+	stopped := make(chan struct{})
+	go func() {
+		cluster.Stop()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stop did not return after Cancel")
+	}
+	re.False(cluster.started)
+	re.False(cluster.IsRunning())
+	re.False(cluster.IsSchedulingControllerRunning())
 }
 
 func BenchmarkHandleStatsAsync(b *testing.B) {
