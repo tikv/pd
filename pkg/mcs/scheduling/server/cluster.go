@@ -580,6 +580,7 @@ func resetMetrics() {
 	schedule.ResetHotSpotMetrics()
 	filter.ResetFilterMetrics()
 	hbstream.ResetHeartbeatStreamMetrics()
+	operator.ResetOperatorMetrics()
 }
 
 // StartBackgroundJobs starts background jobs.

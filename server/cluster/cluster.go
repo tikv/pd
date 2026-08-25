@@ -58,6 +58,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/labeler"
+	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/scatter"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
@@ -1628,6 +1629,7 @@ func (c *RaftCluster) BuryStore(storeID uint64, forceBury bool) error {
 		filter.DeleteStoreMetrics(storeIDStr)
 		hbstream.DeleteStoreMetrics(storeIDStr)
 		schedule.DeleteStoreMetrics(storeIDStr)
+		operator.DeleteStoreMetrics(storeIDStr)
 		if !c.IsServiceIndependent(constant.SchedulingServiceName) {
 			c.removeStoreStatistics(storeID)
 		}
@@ -2141,6 +2143,7 @@ func (c *RaftCluster) deleteStore(store *core.StoreInfo) error {
 	schedule.DeleteStoreMetrics(storeIDStr)
 	schedulers.DeleteStoreMetrics(storeIDStr)
 	scatter.DeleteStoreMetrics(storeIDStr)
+	operator.DeleteStoreMetrics(storeIDStr)
 	if fn := c.onStoreBuried.Load(); fn != nil {
 		(*fn)(storeIDStr)
 	}
