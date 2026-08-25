@@ -49,8 +49,7 @@ var (
 			Name:      "info",
 			Help:      "Keyspace metadata. The value is always 1.",
 		}, []string{"keyspace_id", "keyspace_name"})
-	keyspaceInfoMetricsMu    sync.Mutex
-	keyspaceInfoMetricsCache = make(map[uint32]keyspaceInfoMetric)
+	keyspaceInfoMetricsMu sync.Mutex
 
 	createKeyspaceStepDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -71,11 +70,6 @@ var (
 	createKeyspaceStepDurationUpdateKG       prometheus.Observer
 )
 
-type keyspaceInfoMetric struct {
-	name  string
-	gauge prometheus.Gauge
-}
-
 func init() {
 	prometheus.MustRegister(keyspaceInfo)
 	prometheus.MustRegister(createKeyspaceStepDuration)
@@ -90,28 +84,19 @@ func init() {
 
 // setKeyspaceInfoMetricsLocked updates a keyspace info series while keyspaceInfoMetricsMu is held.
 func setKeyspaceInfoMetricsLocked(id uint32, name string) {
-	if metric, ok := keyspaceInfoMetricsCache[id]; ok {
-		metric.gauge.Set(1)
-		return
-	}
-	gauge := keyspaceInfo.WithLabelValues(strconv.FormatUint(uint64(id), 10), name)
-	keyspaceInfoMetricsCache[id] = keyspaceInfoMetric{name: name, gauge: gauge}
-	gauge.Set(1)
+	keyspaceInfo.WithLabelValues(strconv.FormatUint(uint64(id), 10), name).Set(1)
 }
 
 // deleteKeyspaceInfoMetricsLocked deletes a keyspace info series while keyspaceInfoMetricsMu is held.
 func deleteKeyspaceInfoMetricsLocked(id uint32, name string) {
 	keyspaceInfo.DeleteLabelValues(strconv.FormatUint(uint64(id), 10), name)
-	delete(keyspaceInfoMetricsCache, id)
 }
 
-// deleteKeyspaceInfoMetricsByIDLocked deletes a cached keyspace info series while keyspaceInfoMetricsMu is held.
+// deleteKeyspaceInfoMetricsByIDLocked deletes keyspace info series by ID while keyspaceInfoMetricsMu is held.
 func deleteKeyspaceInfoMetricsByIDLocked(id uint32) {
-	metric, ok := keyspaceInfoMetricsCache[id]
-	if !ok {
-		return
-	}
-	deleteKeyspaceInfoMetricsLocked(id, metric.name)
+	keyspaceInfo.DeletePartialMatch(prometheus.Labels{
+		"keyspace_id": strconv.FormatUint(uint64(id), 10),
+	})
 }
 
 // resetKeyspaceInfoMetrics deletes all keyspace info series and cached gauges.
@@ -124,7 +109,6 @@ func resetKeyspaceInfoMetrics() {
 // resetKeyspaceInfoMetricsLocked resets the metric while keyspaceInfoMetricsMu is held.
 func resetKeyspaceInfoMetricsLocked() {
 	keyspaceInfo.Reset()
-	clear(keyspaceInfoMetricsCache)
 }
 
 // createKeyspaceTracer traces create-keyspace steps: one callback per step (same pattern as RegionHeartbeatProcessTracer), records metrics and logs per step.

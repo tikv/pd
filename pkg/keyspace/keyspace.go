@@ -1116,7 +1116,7 @@ func (manager *Manager) UpdateKeyspaceInfoMetrics(meta *keyspacepb.KeyspaceMeta)
 	setKeyspaceInfoMetricsLocked(meta.GetId(), meta.GetName())
 }
 
-// DeleteKeyspaceInfoMetrics removes the cached keyspace info series for id.
+// DeleteKeyspaceInfoMetrics removes the keyspace info series for id.
 func (*Manager) DeleteKeyspaceInfoMetrics(id uint32) {
 	keyspaceInfoMetricsMu.Lock()
 	defer keyspaceInfoMetricsMu.Unlock()
