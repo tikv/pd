@@ -21,6 +21,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -224,6 +225,8 @@ func (c *Config) Clone() *Config {
 // PersistConfig wraps all configurations that need to persist to storage and
 // allows to access them safely.
 type PersistConfig struct {
+	scheduleMu sync.Mutex
+
 	ttl *cache.TTLString
 	// Store the global configuration that is related to the scheduling.
 	clusterVersion unsafe.Pointer
@@ -231,8 +234,13 @@ type PersistConfig struct {
 	replication    atomic.Value
 	storeConfig    atomic.Value
 	// schedulersUpdatingNotifier is used to notify that the schedulers have been updated.
-	// Store as `chan<- struct{}`.
+	// Store as `chan struct{}`.
 	schedulersUpdatingNotifier atomic.Value
+
+	// beforeGetStoreLimitWriteBack, when set, is called immediately before
+	// GetStoreLimit writes its computed default back to the schedule config.
+	// It exists only to make the write-back race deterministic in tests.
+	beforeGetStoreLimitWriteBack func()
 }
 
 // NewPersistConfig creates a new PersistConfig instance.
@@ -249,16 +257,30 @@ func NewPersistConfig(cfg *Config, ttl *cache.TTLString) *PersistConfig {
 }
 
 // SetSchedulersUpdatingNotifier sets the schedulers updating notifier.
-func (o *PersistConfig) SetSchedulersUpdatingNotifier(notifier chan<- struct{}) {
+func (o *PersistConfig) SetSchedulersUpdatingNotifier(notifier chan struct{}) {
 	o.schedulersUpdatingNotifier.Store(notifier)
 }
 
-func (o *PersistConfig) getSchedulersUpdatingNotifier() chan<- struct{} {
+// ClearSchedulersUpdatingNotifier clears the schedulers updating notifier if it
+// still matches the given notifier.
+func (o *PersistConfig) ClearSchedulersUpdatingNotifier(notifier chan struct{}) {
+	if notifier == nil {
+		return
+	}
+	current := o.getSchedulersUpdatingNotifier()
+	if current != notifier {
+		return
+	}
+	var empty chan struct{}
+	o.schedulersUpdatingNotifier.CompareAndSwap(current, empty)
+}
+
+func (o *PersistConfig) getSchedulersUpdatingNotifier() chan struct{} {
 	v := o.schedulersUpdatingNotifier.Load()
 	if v == nil {
 		return nil
 	}
-	return v.(chan<- struct{})
+	return v.(chan struct{})
 }
 
 func (o *PersistConfig) tryNotifySchedulersUpdating() {
@@ -266,7 +288,11 @@ func (o *PersistConfig) tryNotifySchedulersUpdating() {
 	if notifier == nil {
 		return
 	}
-	notifier <- struct{}{}
+	// Scheduler update notifications are coalesced; one pending signal is enough.
+	select {
+	case notifier <- struct{}{}:
+	default:
+	}
 }
 
 // GetClusterVersion returns the cluster version.
@@ -286,6 +312,12 @@ func (o *PersistConfig) GetScheduleConfig() *sc.ScheduleConfig {
 
 // SetScheduleConfig sets the scheduling configuration dynamically.
 func (o *PersistConfig) SetScheduleConfig(cfg *sc.ScheduleConfig) {
+	o.scheduleMu.Lock()
+	defer o.scheduleMu.Unlock()
+	o.installScheduleConfig(cfg)
+}
+
+func (o *PersistConfig) installScheduleConfig(cfg *sc.ScheduleConfig) {
 	old := o.GetScheduleConfig()
 	o.schedule.Store(cfg)
 	// The coordinator is not aware of the underlying scheduler config changes,
@@ -293,6 +325,16 @@ func (o *PersistConfig) SetScheduleConfig(cfg *sc.ScheduleConfig) {
 	if !reflect.DeepEqual(old.Schedulers, cfg.Schedulers) {
 		o.tryNotifySchedulersUpdating()
 	}
+}
+
+// SetSchedulers replaces only the scheduler list.
+func (o *PersistConfig) SetSchedulers(schedulers sc.SchedulerConfigs) {
+	o.scheduleMu.Lock()
+	defer o.scheduleMu.Unlock()
+
+	next := o.GetScheduleConfig().Clone()
+	next.Schedulers = append(sc.SchedulerConfigs(nil), schedulers...)
+	o.installScheduleConfig(next)
 }
 
 // AdjustScheduleCfg adjusts the schedule config during the initialization.
@@ -305,6 +347,7 @@ func AdjustScheduleCfg(scheduleCfg *sc.ScheduleConfig) {
 			scheduleCfg.Schedulers = append(scheduleCfg.Schedulers, ps)
 		}
 	}
+	scheduleCfg.MigrateDeprecatedFlags()
 }
 
 // GetReplicationConfig returns replication configurations.
@@ -526,11 +569,7 @@ func (o *PersistConfig) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitCon
 	if limit, ok := o.GetScheduleConfig().StoreLimit[storeID]; ok {
 		return limit
 	}
-	cfg := o.GetScheduleConfig().Clone()
-	sc := sc.StoreLimitConfig{
-		AddPeer:    sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
-		RemovePeer: sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
-	}
+
 	v, ok1, err := o.getTTLFloat("default-add-peer")
 	if err != nil {
 		log.Warn("failed to parse default-add-peer from PersistOptions's ttl storage", zap.Error(err))
@@ -552,9 +591,23 @@ func (o *PersistConfig) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitCon
 	if canSetAddPeer || canSetRemovePeer {
 		return returnSC
 	}
-	cfg.StoreLimit[storeID] = sc
-	o.SetScheduleConfig(cfg)
-	return o.GetScheduleConfig().StoreLimit[storeID]
+
+	if hook := o.beforeGetStoreLimitWriteBack; hook != nil {
+		hook()
+	}
+
+	// Recheck and write back under scheduleMu so a concurrent SetScheduleConfig
+	// (e.g. the watcher installing a newer default-store-limit) cannot be
+	// clobbered by a write-back computed from a stale snapshot.
+	o.scheduleMu.Lock()
+	defer o.scheduleMu.Unlock()
+	cfg := o.GetScheduleConfig().Clone()
+	if limit, ok := cfg.StoreLimit[storeID]; ok {
+		return limit
+	}
+	cfg.StoreLimit[storeID] = cfg.GetDefaultStoreLimit()
+	o.installScheduleConfig(cfg)
+	return cfg.StoreLimit[storeID]
 }
 
 // GetStoreLimitByType returns the limit of a store with a given type.
@@ -629,12 +682,14 @@ func (o *PersistConfig) SetAllStoresLimit(typ storelimit.Type, ratePerMin float6
 	v := o.GetScheduleConfig().Clone()
 	switch typ {
 	case storelimit.AddPeer:
+		v.DefaultStoreLimit.AddPeer = ratePerMin
 		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, ratePerMin)
 		for storeID := range v.StoreLimit {
 			sc := sc.StoreLimitConfig{AddPeer: ratePerMin, RemovePeer: v.StoreLimit[storeID].RemovePeer}
 			v.StoreLimit[storeID] = sc
 		}
 	case storelimit.RemovePeer:
+		v.DefaultStoreLimit.RemovePeer = ratePerMin
 		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, ratePerMin)
 		for storeID := range v.StoreLimit {
 			sc := sc.StoreLimitConfig{AddPeer: v.StoreLimit[storeID].AddPeer, RemovePeer: ratePerMin}
