@@ -243,11 +243,13 @@ func (manager *Manager) initReserveKeyspace(id uint32, name string) error {
 
 // UpdateConfig update keyspace manager's config.
 func (manager *Manager) UpdateConfig(cfg Config) {
+	keyspaceInfoMetricsMu.Lock()
 	wasEnabled := manager.config.IsKeyspaceLevelMetricsEnabled()
 	manager.config = cfg
 	if wasEnabled && !cfg.IsKeyspaceLevelMetricsEnabled() {
-		resetKeyspaceInfoMetrics()
+		resetKeyspaceInfoMetricsLocked()
 	}
+	keyspaceInfoMetricsMu.Unlock()
 	if manager.mgm != nil {
 		manager.mgm.updateGroups(cfg.GetMetaServiceGroups())
 	}
@@ -569,9 +571,7 @@ func (manager *Manager) saveNewKeyspace(keyspace *keyspacepb.KeyspaceMeta) error
 	if err == nil {
 		// Update the keyspace name cache only after the transaction commits.
 		manager.keyspaceNameLookup.Store(keyspace.GetId(), keyspace.Name)
-		if manager.config.IsKeyspaceLevelMetricsEnabled() {
-			setKeyspaceInfoMetrics(keyspace.GetId(), keyspace.GetName())
-		}
+		manager.UpdateKeyspaceInfoMetrics(keyspace)
 	}
 	return err
 }
@@ -1051,42 +1051,59 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 
 // RemoveKeyspace removes the keyspace specified by id if it's in proper state and not protected.
 func (manager *Manager) RemoveKeyspace(txn kv.Txn, id uint32) error {
+	_, err := manager.removeKeyspace(txn, id)
+	return err
+}
+
+// removeKeyspace stages keyspace removal and returns its metadata for post-commit cleanup.
+func (manager *Manager) removeKeyspace(txn kv.Txn, id uint32) (*keyspacepb.KeyspaceMeta, error) {
 	manager.metaLock.Lock(id)
 	defer manager.metaLock.Unlock(id)
 	if isProtectedKeyspaceID(id) {
-		return newModifyProtectedKeyspaceError()
+		return nil, newModifyProtectedKeyspaceError()
 	}
 	meta, err := manager.store.LoadKeyspaceMeta(txn, id)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if meta == nil {
-		return errs.ErrKeyspaceNotFound
+		return nil, errs.ErrKeyspaceNotFound
 	}
 	if meta.GetState() == keyspacepb.KeyspaceState_ENABLED || meta.GetState() == keyspacepb.KeyspaceState_DISABLED {
-		return errors.Errorf("cannot remove keyspace in state %s", meta.GetState().String())
+		return nil, errors.Errorf("cannot remove keyspace in state %s", meta.GetState().String())
 	}
 	err = manager.store.RemoveKeyspace(txn, id, meta.GetName())
 	if err != nil {
-		return err
-	}
-	manager.keyspaceNameLookup.Delete(id)
-	manager.keyspaceStateLookup.Delete(id)
-	if manager.config.IsKeyspaceLevelMetricsEnabled() {
-		deleteKeyspaceInfoMetrics(id, meta.GetName())
+		return nil, err
 	}
 	// Keep the meta-service group assignment accounting in sync within the same
 	// txn. Without this, removed keyspaces leak count and could permanently block
 	// deleting an otherwise-empty group.
-	return manager.unassignKeyspaceFromMetaServiceGroup(txn, meta)
+	if err := manager.unassignKeyspaceFromMetaServiceGroup(txn, meta); err != nil {
+		return nil, err
+	}
+	return meta, nil
+}
+
+// finishRemoveKeyspace clears the caches and metrics after a keyspace removal transaction commits.
+func (manager *Manager) finishRemoveKeyspace(meta *keyspacepb.KeyspaceMeta) {
+	manager.keyspaceNameLookup.Delete(meta.GetId())
+	manager.keyspaceStateLookup.Delete(meta.GetId())
+	keyspaceInfoMetricsMu.Lock()
+	defer keyspaceInfoMetricsMu.Unlock()
+	if manager.config.IsKeyspaceLevelMetricsEnabled() {
+		deleteKeyspaceInfoMetricsLocked(meta.GetId(), meta.GetName())
+	}
 }
 
 // UpdateKeyspaceInfoMetrics updates the keyspace ID-to-name mapping metric when keyspace-level metrics are enabled.
 func (manager *Manager) UpdateKeyspaceInfoMetrics(meta *keyspacepb.KeyspaceMeta) {
+	keyspaceInfoMetricsMu.Lock()
+	defer keyspaceInfoMetricsMu.Unlock()
 	if meta == nil || !manager.config.IsKeyspaceLevelMetricsEnabled() {
 		return
 	}
-	setKeyspaceInfoMetrics(meta.GetId(), meta.GetName())
+	setKeyspaceInfoMetricsLocked(meta.GetId(), meta.GetName())
 }
 
 // UpdateKeyspaceStateByID updates target keyspace to the given state if it's not already in that state.

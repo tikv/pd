@@ -16,9 +16,11 @@ package keyspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -142,6 +144,36 @@ func (suite *keyspaceTestSuite) TestKeyspaceInfoMetricsLifecycle() {
 	re.NoError(err)
 	re.Equal(float64(1), promtestutil.ToFloat64(keyspaceInfo.WithLabelValues(
 		strconv.FormatUint(uint64(created.GetId()), 10), created.GetName())))
+
+	_, err = suite.manager.UpdateKeyspaceState(created.GetName(), keyspacepb.KeyspaceState_DISABLED, time.Now().Unix())
+	re.NoError(err)
+	_, err = suite.manager.UpdateKeyspaceState(created.GetName(), keyspacepb.KeyspaceState_ARCHIVED, time.Now().Unix())
+	re.NoError(err)
+	_, err = suite.manager.UpdateKeyspaceState(created.GetName(), keyspacepb.KeyspaceState_TOMBSTONE, time.Now().Unix())
+	re.NoError(err)
+
+	errRollback := errors.New("rollback keyspace removal")
+	err = suite.manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		_, err := suite.manager.removeKeyspace(txn, created.GetId())
+		re.NoError(err)
+		return errRollback
+	})
+	re.ErrorIs(err, errRollback)
+	_, err = suite.manager.LoadKeyspace(created.GetName())
+	re.NoError(err)
+
+	var removed *keyspacepb.KeyspaceMeta
+	re.NoError(suite.manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		var err error
+		removed, err = suite.manager.removeKeyspace(txn, created.GetId())
+		return err
+	}))
+	suite.manager.finishRemoveKeyspace(removed)
+	expected := fmt.Sprintf(`# HELP pd_keyspace_info Keyspace metadata. The value is always 1.
+# TYPE pd_keyspace_info gauge
+pd_keyspace_info{keyspace_id="%d",keyspace_name="%s"} 1
+`, existing.GetId(), existing.GetName())
+	re.NoError(promtestutil.CollectAndCompare(keyspaceInfo, strings.NewReader(expected), "pd_keyspace_info"))
 
 	suite.manager.UpdateConfig(&mockConfig{})
 	re.Equal(0, promtestutil.CollectAndCount(keyspaceInfo))
@@ -1239,9 +1271,13 @@ func (suite *keyspaceTestSuite) TestTombstoneKeyspaceUnassignsMetaServiceGroup()
 	// Removing the already-tombstoned keyspace must not decrement the counter
 	// again: the group binding was cleared and persisted during the tombstone
 	// transition, so unassignment is a no-op and the count stays at zero.
+	var removed *keyspacepb.KeyspaceMeta
 	re.NoError(manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
-		return manager.RemoveKeyspace(txn, updated.GetId())
+		var err error
+		removed, err = manager.removeKeyspace(txn, updated.GetId())
+		return err
 	}))
+	manager.finishRemoveKeyspace(removed)
 	counts, err = manager.mgm.GetAssignmentCounts(suite.ctx)
 	re.NoError(err)
 	re.Equal(0, counts[groupID])

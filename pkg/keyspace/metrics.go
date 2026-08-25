@@ -49,7 +49,8 @@ var (
 			Name:      "info",
 			Help:      "Keyspace metadata. The value is always 1.",
 		}, []string{"keyspace_id", "keyspace_name"})
-	keyspaceInfoMetricsCache sync.Map // keyspace ID(uint32) -> prometheus.Gauge
+	keyspaceInfoMetricsMu    sync.Mutex
+	keyspaceInfoMetricsCache = make(map[uint32]prometheus.Gauge)
 
 	createKeyspaceStepDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -82,27 +83,34 @@ func init() {
 	createKeyspaceStepDurationUpdateKG = createKeyspaceStepDuration.WithLabelValues(StepUpdateKeyspaceGroup)
 }
 
-func setKeyspaceInfoMetrics(id uint32, name string) {
-	if gauge, ok := keyspaceInfoMetricsCache.Load(id); ok {
-		gauge.(prometheus.Gauge).Set(1)
+// setKeyspaceInfoMetricsLocked updates a keyspace info series while keyspaceInfoMetricsMu is held.
+func setKeyspaceInfoMetricsLocked(id uint32, name string) {
+	if gauge, ok := keyspaceInfoMetricsCache[id]; ok {
+		gauge.Set(1)
 		return
 	}
 	gauge := keyspaceInfo.WithLabelValues(strconv.FormatUint(uint64(id), 10), name)
-	actual, _ := keyspaceInfoMetricsCache.LoadOrStore(id, gauge)
-	actual.(prometheus.Gauge).Set(1)
+	keyspaceInfoMetricsCache[id] = gauge
+	gauge.Set(1)
 }
 
-func deleteKeyspaceInfoMetrics(id uint32, name string) {
+// deleteKeyspaceInfoMetricsLocked deletes a keyspace info series while keyspaceInfoMetricsMu is held.
+func deleteKeyspaceInfoMetricsLocked(id uint32, name string) {
 	keyspaceInfo.DeleteLabelValues(strconv.FormatUint(uint64(id), 10), name)
-	keyspaceInfoMetricsCache.Delete(id)
+	delete(keyspaceInfoMetricsCache, id)
 }
 
+// resetKeyspaceInfoMetrics deletes all keyspace info series and cached gauges.
 func resetKeyspaceInfoMetrics() {
+	keyspaceInfoMetricsMu.Lock()
+	defer keyspaceInfoMetricsMu.Unlock()
+	resetKeyspaceInfoMetricsLocked()
+}
+
+// resetKeyspaceInfoMetricsLocked resets the metric while keyspaceInfoMetricsMu is held.
+func resetKeyspaceInfoMetricsLocked() {
 	keyspaceInfo.Reset()
-	keyspaceInfoMetricsCache.Range(func(key, _ any) bool {
-		keyspaceInfoMetricsCache.Delete(key)
-		return true
-	})
+	clear(keyspaceInfoMetricsCache)
 }
 
 // createKeyspaceTracer traces create-keyspace steps: one callback per step (same pattern as RegionHeartbeatProcessTracer), records metrics and logs per step.
