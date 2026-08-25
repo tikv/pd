@@ -30,7 +30,6 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
-	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 
@@ -569,9 +568,8 @@ func (m *GroupManager) RemoveKeyspacesFromGroup(groupID uint32, km *Manager, key
 	defer m.Unlock()
 
 	var (
-		kg               *endpoint.KeyspaceGroup
-		removedKeyspaces []*keyspacepb.KeyspaceMeta
-		err              error
+		kg  *endpoint.KeyspaceGroup
+		err error
 	)
 
 	if err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
@@ -614,12 +612,10 @@ func (m *GroupManager) RemoveKeyspacesFromGroup(groupID uint32, km *Manager, key
 			if _, shouldRemove := toRemove[ks]; !shouldRemove {
 				newKeyspaces = append(newKeyspaces, ks)
 			} else {
-				meta, removeErr := km.stageRemoveKeyspace(txn, ks)
-				err = removeErr
+				err = km.RemoveKeyspace(txn, ks)
 				if err != nil {
 					return err
 				}
-				removedKeyspaces = append(removedKeyspaces, meta)
 			}
 		}
 		kg.Keyspaces = newKeyspaces
@@ -629,10 +625,6 @@ func (m *GroupManager) RemoveKeyspacesFromGroup(groupID uint32, km *Manager, key
 	}); err != nil {
 		return nil, err
 	}
-	for _, meta := range removedKeyspaces {
-		km.finishRemoveKeyspace(meta)
-	}
-
 	// Update the cache
 	userKind := endpoint.StringUserKind(kg.UserKind)
 	m.groups[userKind].Put(kg)

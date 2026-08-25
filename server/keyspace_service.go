@@ -29,6 +29,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
@@ -116,6 +117,7 @@ func (s *KeyspaceServer) WatchKeyspaces(request *keyspacepb.WatchKeyspacesReques
 	ctx, cancel := context.WithCancel(s.Context())
 	defer cancel()
 	startKey := keypath.KeyspaceMetaPrefix()
+	enableKeyspaceLevelMetrics := s.cfg.Keyspace.EnableKeyspaceLevelMetrics
 
 	keyspaces := make([]*keyspacepb.KeyspaceMeta, 0)
 	putFn := func(kv *mvccpb.KeyValue) error {
@@ -124,16 +126,27 @@ func (s *KeyspaceServer) WatchKeyspaces(request *keyspacepb.WatchKeyspacesReques
 			defer cancel() // cancel context to stop watcher
 			return err
 		}
-		s.GetKeyspaceManager().UpdateKeyspaceInfoMetrics(meta)
+		if enableKeyspaceLevelMetrics {
+			keyspace.SetKeyspaceInfoMetrics(meta.GetId(), meta.GetName())
+		}
 		keyspaces = append(keyspaces, meta)
 		return nil
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
+		if !enableKeyspaceLevelMetrics {
+			return nil
+		}
 		id, err := strconv.ParseUint(strings.TrimPrefix(string(kv.Key), startKey), 10, 32)
 		if err != nil {
 			return err
 		}
-		s.GetKeyspaceManager().DeleteKeyspaceInfoMetrics(uint32(id))
+		keyspace.DeleteKeyspaceInfoMetrics(uint32(id))
+		return nil
+	}
+	preEventsFn := func(events []*clientv3.Event) error {
+		if enableKeyspaceLevelMetrics && len(events) == 0 {
+			keyspace.ResetKeyspaceInfoMetrics()
+		}
 		return nil
 	}
 	postEventsFn := func([]*clientv3.Event) error {
@@ -162,7 +175,7 @@ func (s *KeyspaceServer) WatchKeyspaces(request *keyspacepb.WatchKeyspacesReques
 		s.client,
 		"keyspace-server-watcher",
 		startKey,
-		func([]*clientv3.Event) error { return nil },
+		preEventsFn,
 		putFn,
 		deleteFn,
 		postEventsFn,

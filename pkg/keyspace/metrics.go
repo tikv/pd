@@ -79,25 +79,21 @@ func init() {
 	createKeyspaceStepDurationUpdateKG = createKeyspaceStepDuration.WithLabelValues(StepUpdateKeyspaceGroup)
 }
 
-// setKeyspaceInfoMetrics updates a keyspace info series.
-func setKeyspaceInfoMetrics(id uint32, name string) {
+// SetKeyspaceInfoMetrics sets the keyspace ID-to-name mapping metric.
+func SetKeyspaceInfoMetrics(id uint32, name string) {
+	DeleteKeyspaceInfoMetrics(id)
 	keyspaceInfo.WithLabelValues(strconv.FormatUint(uint64(id), 10), name).Set(1)
 }
 
-// deleteKeyspaceInfoMetrics deletes a keyspace info series.
-func deleteKeyspaceInfoMetrics(id uint32, name string) {
-	keyspaceInfo.DeleteLabelValues(strconv.FormatUint(uint64(id), 10), name)
-}
-
-// deleteKeyspaceInfoMetricsByID deletes keyspace info series by ID.
-func deleteKeyspaceInfoMetricsByID(id uint32) {
+// DeleteKeyspaceInfoMetrics deletes the keyspace info series for an ID.
+func DeleteKeyspaceInfoMetrics(id uint32) {
 	keyspaceInfo.DeletePartialMatch(prometheus.Labels{
 		"keyspace_id": strconv.FormatUint(uint64(id), 10),
 	})
 }
 
-// resetKeyspaceInfoMetrics deletes all keyspace info series.
-func resetKeyspaceInfoMetrics() {
+// ResetKeyspaceInfoMetrics deletes all keyspace info series.
+func ResetKeyspaceInfoMetrics() {
 	keyspaceInfo.Reset()
 }
 

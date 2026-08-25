@@ -16,17 +16,14 @@ package keyspace
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"strconv"
-	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
@@ -67,17 +64,12 @@ func TestKeyspaceTestSuite(t *testing.T) {
 }
 
 type mockConfig struct {
-	PreAlloc                   []string
-	EnableKeyspaceLevelMetrics bool
-	WaitRegionSplit            bool
-	WaitRegionSplitTimeout     typeutil.Duration
-	CheckRegionSplitInterval   typeutil.Duration
+	PreAlloc                 []string
+	WaitRegionSplit          bool
+	WaitRegionSplitTimeout   typeutil.Duration
+	CheckRegionSplitInterval typeutil.Duration
 	// MetaServiceGroups is used to mock the meta-service groups for keyspace assignment.
 	MetaServiceGroups map[string]string
-}
-
-func (m *mockConfig) IsKeyspaceLevelMetricsEnabled() bool {
-	return m.EnableKeyspaceLevelMetrics
 }
 
 func (m *mockConfig) GetPreAlloc() []string {
@@ -116,95 +108,7 @@ func (suite *keyspaceTestSuite) SetupTest() {
 }
 
 func (suite *keyspaceTestSuite) TearDownTest() {
-	resetKeyspaceInfoMetrics()
 	suite.cancel()
-}
-
-func (suite *keyspaceTestSuite) TestKeyspaceInfoMetricsLifecycle() {
-	re := suite.Require()
-	suite.manager.UpdateConfig(&mockConfig{EnableKeyspaceLevelMetrics: true})
-	existing, err := suite.manager.CreateKeyspace(&CreateKeyspaceRequest{
-		Name:       "metrics_existing",
-		CreateTime: time.Now().Unix(),
-	})
-	re.NoError(err)
-	resetKeyspaceInfoMetrics()
-	re.Equal(0, promtestutil.CollectAndCount(keyspaceInfo))
-
-	existing, err = suite.manager.LoadKeyspace(existing.GetName())
-	re.NoError(err)
-	re.Equal(float64(1), promtestutil.ToFloat64(keyspaceInfo.WithLabelValues(
-		strconv.FormatUint(uint64(existing.GetId()), 10), existing.GetName())))
-
-	created, err := suite.manager.CreateKeyspace(&CreateKeyspaceRequest{
-		Name:       "metrics_new",
-		CreateTime: time.Now().Unix(),
-	})
-	re.NoError(err)
-	re.Equal(float64(1), promtestutil.ToFloat64(keyspaceInfo.WithLabelValues(
-		strconv.FormatUint(uint64(created.GetId()), 10), created.GetName())))
-
-	_, err = suite.manager.UpdateKeyspaceState(created.GetName(), keyspacepb.KeyspaceState_DISABLED, time.Now().Unix())
-	re.NoError(err)
-	_, err = suite.manager.UpdateKeyspaceState(created.GetName(), keyspacepb.KeyspaceState_ARCHIVED, time.Now().Unix())
-	re.NoError(err)
-	_, err = suite.manager.UpdateKeyspaceState(created.GetName(), keyspacepb.KeyspaceState_TOMBSTONE, time.Now().Unix())
-	re.NoError(err)
-
-	errRollback := errors.New("rollback keyspace removal")
-	err = suite.manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
-		_, err := suite.manager.stageRemoveKeyspace(txn, created.GetId())
-		re.NoError(err)
-		return errRollback
-	})
-	re.ErrorIs(err, errRollback)
-	re.Equal(float64(1), promtestutil.ToFloat64(keyspaceInfo.WithLabelValues(
-		strconv.FormatUint(uint64(created.GetId()), 10), created.GetName())))
-	_, err = suite.manager.LoadKeyspace(created.GetName())
-	re.NoError(err)
-
-	re.NoError(suite.manager.RemoveKeyspace(created.GetId()))
-	expected := fmt.Sprintf(`# HELP pd_keyspace_info Keyspace metadata. The value is always 1.
-# TYPE pd_keyspace_info gauge
-pd_keyspace_info{keyspace_id="%d",keyspace_name="%s"} 1
-`, existing.GetId(), existing.GetName())
-	re.NoError(promtestutil.CollectAndCompare(keyspaceInfo, strings.NewReader(expected), "pd_keyspace_info"))
-
-}
-
-func (suite *keyspaceTestSuite) TestKeyspaceInfoMetricsCreateRollback() {
-	re := suite.Require()
-	const skipSplitRegion = "github.com/tikv/pd/pkg/keyspace/skipSplitRegion"
-	re.NoError(failpoint.Disable(skipSplitRegion))
-	defer func() { re.NoError(failpoint.Enable(skipSplitRegion, "return(true)")) }()
-
-	suite.manager.UpdateConfig(&mockConfig{EnableKeyspaceLevelMetrics: true})
-	resetKeyspaceInfoMetrics()
-	_, err := suite.manager.CreateKeyspace(&CreateKeyspaceRequest{
-		Name:       "metrics_create_rollback",
-		CreateTime: time.Now().Unix(),
-	})
-	re.Error(err)
-	re.Equal(0, promtestutil.CollectAndCount(keyspaceInfo))
-}
-
-func (suite *keyspaceTestSuite) TestLoadRangeKeyspaceUpdatesInfoMetrics() {
-	re := suite.Require()
-	suite.manager.UpdateConfig(&mockConfig{EnableKeyspaceLevelMetrics: true})
-	created, err := suite.manager.CreateKeyspace(&CreateKeyspaceRequest{
-		Name:       "metrics_range_load",
-		CreateTime: time.Now().Unix(),
-	})
-	re.NoError(err)
-	resetKeyspaceInfoMetrics()
-
-	keyspaces, err := suite.manager.LoadRangeKeyspace(created.GetId(), 1)
-	re.NoError(err)
-	re.Len(keyspaces, 1)
-	re.Equal(float64(1), promtestutil.ToFloat64(keyspaceInfo.WithLabelValues(
-		strconv.FormatUint(uint64(created.GetId()), 10), created.GetName())))
-	suite.manager.DeleteKeyspaceInfoMetrics(created.GetId())
-	re.Equal(0, promtestutil.CollectAndCount(keyspaceInfo))
 }
 
 func (suite *keyspaceTestSuite) SetupSuite() {
@@ -1299,13 +1203,9 @@ func (suite *keyspaceTestSuite) TestTombstoneKeyspaceUnassignsMetaServiceGroup()
 	// Removing the already-tombstoned keyspace must not decrement the counter
 	// again: the group binding was cleared and persisted during the tombstone
 	// transition, so unassignment is a no-op and the count stays at zero.
-	var removed *keyspacepb.KeyspaceMeta
 	re.NoError(manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
-		var err error
-		removed, err = manager.stageRemoveKeyspace(txn, updated.GetId())
-		return err
+		return manager.RemoveKeyspace(txn, updated.GetId())
 	}))
-	manager.finishRemoveKeyspace(removed)
 	counts, err = manager.mgm.GetAssignmentCounts(suite.ctx)
 	re.NoError(err)
 	re.Equal(0, counts[groupID])

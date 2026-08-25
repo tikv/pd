@@ -82,6 +82,24 @@ func TestReloadConfig(t *testing.T) {
 	re.Equal(int64(512), newOpt.GetMaxMovableHotPeerSize())
 }
 
+func TestReloadPreservesStartupOnlyKeyspaceMetricsConfig(t *testing.T) {
+	re := require.New(t)
+	cfg := NewConfig()
+	re.NoError(cfg.Adjust(nil, false))
+	cfg.Keyspace.EnableKeyspaceLevelMetrics = true
+	options := NewPersistOptions(cfg)
+
+	store := storage.NewStorageWithMemoryBackend()
+	re.NoError(store.SaveConfig(map[string]any{
+		"keyspace": map[string]any{
+			"wait-region-split": true,
+		},
+	}))
+
+	re.NoError(options.Reload(store))
+	re.True(options.GetKeyspaceConfig().EnableKeyspaceLevelMetrics)
+}
+
 func TestReloadDefaultStoreLimit(t *testing.T) {
 	re := require.New(t)
 	oldAddPeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)

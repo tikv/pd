@@ -901,6 +901,9 @@ func (o *PersistOptions) Reload(storage endpoint.ConfigStorage) error {
 	// Some fields may not be stored in the storage, we need to calculate them manually.
 	cfg.StoreConfig.Adjust()
 	if isExist {
+		// This process-level switch is startup-only and intentionally excluded from
+		// the persisted JSON configuration.
+		cfg.Keyspace.EnableKeyspaceLevelMetrics = o.GetKeyspaceConfig().EnableKeyspaceLevelMetrics
 		o.schedule.Store(&cfg.Schedule)
 		o.replication.Store(&cfg.Replication)
 		o.pdServerConfig.Store(&cfg.PDServerCfg)
