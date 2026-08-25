@@ -285,10 +285,6 @@ func (kc *KVCalculator) beforeKVRequestWithDetail(consumption *rmpb.Consumption,
 	}
 }
 
-func (kc *KVCalculator) calculateWriteCost(consumption *rmpb.Consumption, req RequestInfo) {
-	kc.calculateWriteCostWithDetail(consumption, nil, req)
-}
-
 func (kc *KVCalculator) calculateWriteCostWithDetail(consumption *rmpb.Consumption, detail *RUCalculation, req RequestInfo) {
 	writeBytes := float64(req.WriteBytes())
 	consumption.WriteBytes += writeBytes
@@ -340,10 +336,6 @@ func (kc *KVCalculator) afterKVRequestWithDetail(consumption *rmpb.Consumption, 
 	calculateCrossAZTraffic(consumption, req, res)
 }
 
-func (kc *KVCalculator) calculateReadCost(consumption *rmpb.Consumption, res ResponseInfo) {
-	kc.calculateReadCostWithDetail(consumption, nil, res)
-}
-
 func (kc *KVCalculator) calculateReadCostWithDetail(consumption *rmpb.Consumption, detail *RUCalculation, res ResponseInfo) {
 	if consumption == nil {
 		return
@@ -354,10 +346,6 @@ func (kc *KVCalculator) calculateReadCostWithDetail(consumption *rmpb.Consumptio
 	if detail != nil {
 		detail.Inputs.ReadBytes += readBytes
 	}
-}
-
-func (kc *KVCalculator) calculateCPUCost(consumption *rmpb.Consumption, res ResponseInfo) {
-	kc.calculateCPUCostWithDetail(consumption, nil, res)
 }
 
 func (kc *KVCalculator) calculateCPUCostWithDetail(consumption *rmpb.Consumption, detail *RUCalculation, res ResponseInfo) {
