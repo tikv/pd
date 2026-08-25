@@ -614,7 +614,7 @@ func (m *GroupManager) RemoveKeyspacesFromGroup(groupID uint32, km *Manager, key
 			if _, shouldRemove := toRemove[ks]; !shouldRemove {
 				newKeyspaces = append(newKeyspaces, ks)
 			} else {
-				meta, removeErr := km.removeKeyspace(txn, ks)
+				meta, removeErr := km.stageRemoveKeyspace(txn, ks)
 				err = removeErr
 				if err != nil {
 					return err

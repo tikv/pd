@@ -154,7 +154,7 @@ func (suite *keyspaceTestSuite) TestKeyspaceInfoMetricsLifecycle() {
 
 	errRollback := errors.New("rollback keyspace removal")
 	err = suite.manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
-		_, err := suite.manager.removeKeyspace(txn, created.GetId())
+		_, err := suite.manager.stageRemoveKeyspace(txn, created.GetId())
 		re.NoError(err)
 		return errRollback
 	})
@@ -165,7 +165,7 @@ func (suite *keyspaceTestSuite) TestKeyspaceInfoMetricsLifecycle() {
 	var removed *keyspacepb.KeyspaceMeta
 	re.NoError(suite.manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
 		var err error
-		removed, err = suite.manager.removeKeyspace(txn, created.GetId())
+		removed, err = suite.manager.stageRemoveKeyspace(txn, created.GetId())
 		return err
 	}))
 	suite.manager.finishRemoveKeyspace(removed)
@@ -1274,7 +1274,7 @@ func (suite *keyspaceTestSuite) TestTombstoneKeyspaceUnassignsMetaServiceGroup()
 	var removed *keyspacepb.KeyspaceMeta
 	re.NoError(manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
 		var err error
-		removed, err = manager.removeKeyspace(txn, updated.GetId())
+		removed, err = manager.stageRemoveKeyspace(txn, updated.GetId())
 		return err
 	}))
 	manager.finishRemoveKeyspace(removed)

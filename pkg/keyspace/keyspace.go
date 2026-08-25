@@ -1051,12 +1051,12 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 
 // RemoveKeyspace removes the keyspace specified by id if it's in proper state and not protected.
 func (manager *Manager) RemoveKeyspace(txn kv.Txn, id uint32) error {
-	_, err := manager.removeKeyspace(txn, id)
+	_, err := manager.stageRemoveKeyspace(txn, id)
 	return err
 }
 
-// removeKeyspace stages keyspace removal and returns its metadata for post-commit cleanup.
-func (manager *Manager) removeKeyspace(txn kv.Txn, id uint32) (*keyspacepb.KeyspaceMeta, error) {
+// stageRemoveKeyspace stages keyspace removal and returns its metadata for post-commit cleanup.
+func (manager *Manager) stageRemoveKeyspace(txn kv.Txn, id uint32) (*keyspacepb.KeyspaceMeta, error) {
 	manager.metaLock.Lock(id)
 	defer manager.metaLock.Unlock(id)
 	if isProtectedKeyspaceID(id) {
