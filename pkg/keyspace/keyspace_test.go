@@ -114,7 +114,7 @@ func (suite *keyspaceTestSuite) SetupTest() {
 }
 
 func (suite *keyspaceTestSuite) TearDownTest() {
-	keyspaceInfo.Reset()
+	resetKeyspaceInfoMetrics()
 	suite.cancel()
 }
 
@@ -128,6 +128,10 @@ func (suite *keyspaceTestSuite) TestKeyspaceInfoMetricsLifecycle() {
 
 	cfg := &mockConfig{EnableKeyspaceLevelMetrics: true}
 	suite.manager.UpdateConfig(cfg)
+	re.Equal(0, promtestutil.CollectAndCount(keyspaceInfo))
+
+	existing, err = suite.manager.LoadKeyspace(existing.GetName())
+	re.NoError(err)
 	re.Equal(float64(1), promtestutil.ToFloat64(keyspaceInfo.WithLabelValues(
 		strconv.FormatUint(uint64(existing.GetId()), 10), existing.GetName())))
 

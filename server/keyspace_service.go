@@ -122,6 +122,7 @@ func (s *KeyspaceServer) WatchKeyspaces(request *keyspacepb.WatchKeyspacesReques
 			defer cancel() // cancel context to stop watcher
 			return err
 		}
+		s.GetKeyspaceManager().UpdateKeyspaceInfoMetrics(meta)
 		keyspaces = append(keyspaces, meta)
 		return nil
 	}

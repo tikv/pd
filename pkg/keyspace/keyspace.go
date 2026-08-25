@@ -203,9 +203,6 @@ func (manager *Manager) Bootstrap() error {
 			}
 		}()
 	}
-	if manager.config.IsKeyspaceLevelMetricsEnabled() {
-		return manager.refreshKeyspaceInfoMetrics()
-	}
 	return nil
 }
 
@@ -249,11 +246,7 @@ func (manager *Manager) UpdateConfig(cfg Config) {
 	wasEnabled := manager.config.IsKeyspaceLevelMetricsEnabled()
 	manager.config = cfg
 	if wasEnabled && !cfg.IsKeyspaceLevelMetricsEnabled() {
-		keyspaceInfo.Reset()
-	} else if !wasEnabled && cfg.IsKeyspaceLevelMetricsEnabled() {
-		if err := manager.refreshKeyspaceInfoMetrics(); err != nil {
-			log.Error("[keyspace] failed to refresh keyspace info metrics", zap.Error(err))
-		}
+		resetKeyspaceInfoMetrics()
 	}
 	if manager.mgm != nil {
 		manager.mgm.updateGroups(cfg.GetMetaServiceGroups())
@@ -785,6 +778,9 @@ func (manager *Manager) LoadKeyspace(name string) (*keyspacepb.KeyspaceMeta, err
 	if manager.mgm != nil && meta != nil {
 		manager.mgm.AttachEndpoints(meta.GetConfig())
 	}
+	if err == nil {
+		manager.UpdateKeyspaceInfoMetrics(meta)
+	}
 	return meta, err
 }
 
@@ -807,6 +803,9 @@ func (manager *Manager) LoadKeyspaceByID(spaceID uint32) (*keyspacepb.KeyspaceMe
 	})
 	if manager.mgm != nil && meta != nil {
 		manager.mgm.AttachEndpoints(meta.GetConfig())
+	}
+	if err == nil {
+		manager.UpdateKeyspaceInfoMetrics(meta)
 	}
 	return meta, err
 }
@@ -1082,24 +1081,12 @@ func (manager *Manager) RemoveKeyspace(txn kv.Txn, id uint32) error {
 	return manager.unassignKeyspaceFromMetaServiceGroup(txn, meta)
 }
 
-func (manager *Manager) refreshKeyspaceInfoMetrics() error {
-	keyspaceInfo.Reset()
-	startID := uint32(0)
-	for {
-		keyspaces, err := manager.LoadRangeKeyspace(startID, etcdutil.MaxEtcdTxnOps)
-		if err != nil {
-			return err
-		}
-		for _, meta := range keyspaces {
-			if meta != nil {
-				setKeyspaceInfoMetrics(meta.GetId(), meta.GetName())
-			}
-		}
-		if len(keyspaces) < etcdutil.MaxEtcdTxnOps {
-			return nil
-		}
-		startID = keyspaces[len(keyspaces)-1].GetId() + 1
+// UpdateKeyspaceInfoMetrics updates the keyspace ID-to-name mapping metric when keyspace-level metrics are enabled.
+func (manager *Manager) UpdateKeyspaceInfoMetrics(meta *keyspacepb.KeyspaceMeta) {
+	if meta == nil || !manager.config.IsKeyspaceLevelMetricsEnabled() {
+		return
 	}
+	setKeyspaceInfoMetrics(meta.GetId(), meta.GetName())
 }
 
 // UpdateKeyspaceStateByID updates target keyspace to the given state if it's not already in that state.
