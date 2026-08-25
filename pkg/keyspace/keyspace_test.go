@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
@@ -64,12 +65,17 @@ func TestKeyspaceTestSuite(t *testing.T) {
 }
 
 type mockConfig struct {
-	PreAlloc                 []string
-	WaitRegionSplit          bool
-	WaitRegionSplitTimeout   typeutil.Duration
-	CheckRegionSplitInterval typeutil.Duration
+	PreAlloc                  []string
+	EnableKeyspaceInfoMetrics bool
+	WaitRegionSplit           bool
+	WaitRegionSplitTimeout    typeutil.Duration
+	CheckRegionSplitInterval  typeutil.Duration
 	// MetaServiceGroups is used to mock the meta-service groups for keyspace assignment.
 	MetaServiceGroups map[string]string
+}
+
+func (m *mockConfig) IsKeyspaceInfoMetricsEnabled() bool {
+	return m.EnableKeyspaceInfoMetrics
 }
 
 func (m *mockConfig) GetPreAlloc() []string {
@@ -108,7 +114,33 @@ func (suite *keyspaceTestSuite) SetupTest() {
 }
 
 func (suite *keyspaceTestSuite) TearDownTest() {
+	keyspaceInfo.Reset()
 	suite.cancel()
+}
+
+func (suite *keyspaceTestSuite) TestKeyspaceInfoMetricsLifecycle() {
+	re := suite.Require()
+	existing, err := suite.manager.CreateKeyspace(&CreateKeyspaceRequest{
+		Name:       "metrics_existing",
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+
+	cfg := &mockConfig{EnableKeyspaceInfoMetrics: true}
+	suite.manager.UpdateConfig(cfg)
+	re.Equal(float64(1), promtestutil.ToFloat64(keyspaceInfo.WithLabelValues(
+		strconv.FormatUint(uint64(existing.GetId()), 10), existing.GetName())))
+
+	created, err := suite.manager.CreateKeyspace(&CreateKeyspaceRequest{
+		Name:       "metrics_new",
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+	re.Equal(float64(1), promtestutil.ToFloat64(keyspaceInfo.WithLabelValues(
+		strconv.FormatUint(uint64(created.GetId()), 10), created.GetName())))
+
+	suite.manager.UpdateConfig(&mockConfig{})
+	re.Equal(0, promtestutil.CollectAndCount(keyspaceInfo))
 }
 
 func (suite *keyspaceTestSuite) SetupSuite() {

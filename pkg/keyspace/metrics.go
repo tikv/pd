@@ -15,6 +15,7 @@
 package keyspace
 
 import (
+	"strconv"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -40,6 +41,14 @@ const (
 )
 
 var (
+	keyspaceInfo = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: subsystem,
+			Name:      "info",
+			Help:      "Keyspace metadata. The value is always 1.",
+		}, []string{"keyspace_id", "keyspace_name"})
+
 	createKeyspaceStepDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: namespace,
@@ -60,6 +69,7 @@ var (
 )
 
 func init() {
+	prometheus.MustRegister(keyspaceInfo)
 	prometheus.MustRegister(createKeyspaceStepDuration)
 	createKeyspaceStepDurationTotal = createKeyspaceStepDuration.WithLabelValues(StepTotal)
 	createKeyspaceStepDurationAllocateID = createKeyspaceStepDuration.WithLabelValues(StepAllocateID)
@@ -68,6 +78,14 @@ func init() {
 	createKeyspaceStepDurationSplitRegion = createKeyspaceStepDuration.WithLabelValues(StepSplitRegion)
 	createKeyspaceStepDurationEnableKeyspace = createKeyspaceStepDuration.WithLabelValues(StepEnableKeyspace)
 	createKeyspaceStepDurationUpdateKG = createKeyspaceStepDuration.WithLabelValues(StepUpdateKeyspaceGroup)
+}
+
+func setKeyspaceInfoMetrics(id uint32, name string) {
+	keyspaceInfo.WithLabelValues(strconv.FormatUint(uint64(id), 10), name).Set(1)
+}
+
+func deleteKeyspaceInfoMetrics(id uint32, name string) {
+	keyspaceInfo.DeleteLabelValues(strconv.FormatUint(uint64(id), 10), name)
 }
 
 // createKeyspaceTracer traces create-keyspace steps: one callback per step (same pattern as RegionHeartbeatProcessTracer), records metrics and logs per step.

@@ -76,6 +76,7 @@ const (
 // Config is the interface for keyspace config.
 type Config interface {
 	GetPreAlloc() []string
+	IsKeyspaceInfoMetricsEnabled() bool
 	ToWaitRegionSplit() bool
 	GetWaitRegionSplitTimeout() time.Duration
 	GetCheckRegionSplitInterval() time.Duration
@@ -202,6 +203,9 @@ func (manager *Manager) Bootstrap() error {
 			}
 		}()
 	}
+	if manager.config.IsKeyspaceInfoMetricsEnabled() {
+		return manager.refreshKeyspaceInfoMetrics()
+	}
 	return nil
 }
 
@@ -242,7 +246,15 @@ func (manager *Manager) initReserveKeyspace(id uint32, name string) error {
 
 // UpdateConfig update keyspace manager's config.
 func (manager *Manager) UpdateConfig(cfg Config) {
+	wasEnabled := manager.config.IsKeyspaceInfoMetricsEnabled()
 	manager.config = cfg
+	if wasEnabled && !cfg.IsKeyspaceInfoMetricsEnabled() {
+		keyspaceInfo.Reset()
+	} else if !wasEnabled && cfg.IsKeyspaceInfoMetricsEnabled() {
+		if err := manager.refreshKeyspaceInfoMetrics(); err != nil {
+			log.Error("[keyspace] failed to refresh keyspace info metrics", zap.Error(err))
+		}
+	}
 	if manager.mgm != nil {
 		manager.mgm.updateGroups(cfg.GetMetaServiceGroups())
 	}
@@ -564,6 +576,9 @@ func (manager *Manager) saveNewKeyspace(keyspace *keyspacepb.KeyspaceMeta) error
 	if err == nil {
 		// Update the keyspace name cache only after the transaction commits.
 		manager.keyspaceNameLookup.Store(keyspace.GetId(), keyspace.Name)
+		if manager.config.IsKeyspaceInfoMetricsEnabled() {
+			setKeyspaceInfoMetrics(keyspace.GetId(), keyspace.GetName())
+		}
 	}
 	return err
 }
@@ -1058,10 +1073,33 @@ func (manager *Manager) RemoveKeyspace(txn kv.Txn, id uint32) error {
 	}
 	manager.keyspaceNameLookup.Delete(id)
 	manager.keyspaceStateLookup.Delete(id)
+	if manager.config.IsKeyspaceInfoMetricsEnabled() {
+		deleteKeyspaceInfoMetrics(id, meta.GetName())
+	}
 	// Keep the meta-service group assignment accounting in sync within the same
 	// txn. Without this, removed keyspaces leak count and could permanently block
 	// deleting an otherwise-empty group.
 	return manager.unassignKeyspaceFromMetaServiceGroup(txn, meta)
+}
+
+func (manager *Manager) refreshKeyspaceInfoMetrics() error {
+	keyspaceInfo.Reset()
+	startID := uint32(0)
+	for {
+		keyspaces, err := manager.LoadRangeKeyspace(startID, etcdutil.MaxEtcdTxnOps)
+		if err != nil {
+			return err
+		}
+		for _, meta := range keyspaces {
+			if meta != nil {
+				setKeyspaceInfoMetrics(meta.GetId(), meta.GetName())
+			}
+		}
+		if len(keyspaces) < etcdutil.MaxEtcdTxnOps {
+			return nil
+		}
+		startID = keyspaces[len(keyspaces)-1].GetId() + 1
+	}
 }
 
 // UpdateKeyspaceStateByID updates target keyspace to the given state if it's not already in that state.
