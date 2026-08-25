@@ -399,6 +399,7 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 		zap.Uint32("keyspace-id", keyspace.GetId()),
 		zap.String("keyspace-name", keyspace.GetName()),
 	)
+	manager.UpdateKeyspaceInfoMetrics(keyspace)
 	return keyspace, nil
 }
 
@@ -536,6 +537,7 @@ func (manager *Manager) CreateKeyspaceByID(request *CreateKeyspaceByIDRequest) (
 		zap.String("keyspace-name", keyspace.GetName()),
 		zap.Any("keyspace", keyspace),
 	)
+	manager.UpdateKeyspaceInfoMetrics(keyspace)
 	return keyspace, nil
 }
 
@@ -571,7 +573,6 @@ func (manager *Manager) saveNewKeyspace(keyspace *keyspacepb.KeyspaceMeta) error
 	if err == nil {
 		// Update the keyspace name cache only after the transaction commits.
 		manager.keyspaceNameLookup.Store(keyspace.GetId(), keyspace.Name)
-		manager.UpdateKeyspaceInfoMetrics(keyspace)
 	}
 	return err
 }
@@ -1049,10 +1050,19 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 	return meta, nil
 }
 
-// RemoveKeyspace removes the keyspace specified by id if it's in proper state and not protected.
-func (manager *Manager) RemoveKeyspace(txn kv.Txn, id uint32) error {
-	_, err := manager.stageRemoveKeyspace(txn, id)
-	return err
+// RemoveKeyspace removes the keyspace specified by id and clears its caches after the transaction commits.
+func (manager *Manager) RemoveKeyspace(id uint32) error {
+	var removed *keyspacepb.KeyspaceMeta
+	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+		var err error
+		removed, err = manager.stageRemoveKeyspace(txn, id)
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	manager.finishRemoveKeyspace(removed)
+	return nil
 }
 
 // stageRemoveKeyspace stages keyspace removal and returns its metadata for post-commit cleanup.
@@ -1104,6 +1114,13 @@ func (manager *Manager) UpdateKeyspaceInfoMetrics(meta *keyspacepb.KeyspaceMeta)
 		return
 	}
 	setKeyspaceInfoMetricsLocked(meta.GetId(), meta.GetName())
+}
+
+// DeleteKeyspaceInfoMetrics removes the cached keyspace info series for id.
+func (manager *Manager) DeleteKeyspaceInfoMetrics(id uint32) {
+	keyspaceInfoMetricsMu.Lock()
+	defer keyspaceInfoMetricsMu.Unlock()
+	deleteKeyspaceInfoMetricsByIDLocked(id)
 }
 
 // UpdateKeyspaceStateByID updates target keyspace to the given state if it's not already in that state.
@@ -1231,6 +1248,9 @@ func (manager *Manager) LoadRangeKeyspace(startID uint32, limit int) ([]*keyspac
 				manager.mgm.AttachEndpoints(meta.GetConfig())
 			}
 		}
+	}
+	for _, meta := range keyspaces {
+		manager.UpdateKeyspaceInfoMetrics(meta)
 	}
 	return keyspaces, nil
 }

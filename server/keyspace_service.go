@@ -16,6 +16,8 @@ package server
 
 import (
 	"context"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
@@ -126,7 +128,12 @@ func (s *KeyspaceServer) WatchKeyspaces(request *keyspacepb.WatchKeyspacesReques
 		keyspaces = append(keyspaces, meta)
 		return nil
 	}
-	deleteFn := func(*mvccpb.KeyValue) error {
+	deleteFn := func(kv *mvccpb.KeyValue) error {
+		id, err := strconv.ParseUint(strings.TrimPrefix(string(kv.Key), startKey), 10, 32)
+		if err != nil {
+			return err
+		}
+		s.GetKeyspaceManager().DeleteKeyspaceInfoMetrics(uint32(id))
 		return nil
 	}
 	postEventsFn := func([]*clientv3.Event) error {

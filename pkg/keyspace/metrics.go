@@ -50,7 +50,7 @@ var (
 			Help:      "Keyspace metadata. The value is always 1.",
 		}, []string{"keyspace_id", "keyspace_name"})
 	keyspaceInfoMetricsMu    sync.Mutex
-	keyspaceInfoMetricsCache = make(map[uint32]prometheus.Gauge)
+	keyspaceInfoMetricsCache = make(map[uint32]keyspaceInfoMetric)
 
 	createKeyspaceStepDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -71,6 +71,11 @@ var (
 	createKeyspaceStepDurationUpdateKG       prometheus.Observer
 )
 
+type keyspaceInfoMetric struct {
+	name  string
+	gauge prometheus.Gauge
+}
+
 func init() {
 	prometheus.MustRegister(keyspaceInfo)
 	prometheus.MustRegister(createKeyspaceStepDuration)
@@ -85,12 +90,12 @@ func init() {
 
 // setKeyspaceInfoMetricsLocked updates a keyspace info series while keyspaceInfoMetricsMu is held.
 func setKeyspaceInfoMetricsLocked(id uint32, name string) {
-	if gauge, ok := keyspaceInfoMetricsCache[id]; ok {
-		gauge.Set(1)
+	if metric, ok := keyspaceInfoMetricsCache[id]; ok {
+		metric.gauge.Set(1)
 		return
 	}
 	gauge := keyspaceInfo.WithLabelValues(strconv.FormatUint(uint64(id), 10), name)
-	keyspaceInfoMetricsCache[id] = gauge
+	keyspaceInfoMetricsCache[id] = keyspaceInfoMetric{name: name, gauge: gauge}
 	gauge.Set(1)
 }
 
@@ -98,6 +103,15 @@ func setKeyspaceInfoMetricsLocked(id uint32, name string) {
 func deleteKeyspaceInfoMetricsLocked(id uint32, name string) {
 	keyspaceInfo.DeleteLabelValues(strconv.FormatUint(uint64(id), 10), name)
 	delete(keyspaceInfoMetricsCache, id)
+}
+
+// deleteKeyspaceInfoMetricsByIDLocked deletes a cached keyspace info series while keyspaceInfoMetricsMu is held.
+func deleteKeyspaceInfoMetricsByIDLocked(id uint32) {
+	metric, ok := keyspaceInfoMetricsCache[id]
+	if !ok {
+		return
+	}
+	deleteKeyspaceInfoMetricsLocked(id, metric.name)
 }
 
 // resetKeyspaceInfoMetrics deletes all keyspace info series and cached gauges.

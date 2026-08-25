@@ -159,16 +159,12 @@ func (suite *keyspaceTestSuite) TestKeyspaceInfoMetricsLifecycle() {
 		return errRollback
 	})
 	re.ErrorIs(err, errRollback)
+	re.Equal(float64(1), promtestutil.ToFloat64(keyspaceInfo.WithLabelValues(
+		strconv.FormatUint(uint64(created.GetId()), 10), created.GetName())))
 	_, err = suite.manager.LoadKeyspace(created.GetName())
 	re.NoError(err)
 
-	var removed *keyspacepb.KeyspaceMeta
-	re.NoError(suite.manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
-		var err error
-		removed, err = suite.manager.stageRemoveKeyspace(txn, created.GetId())
-		return err
-	}))
-	suite.manager.finishRemoveKeyspace(removed)
+	re.NoError(suite.manager.RemoveKeyspace(created.GetId()))
 	expected := fmt.Sprintf(`# HELP pd_keyspace_info Keyspace metadata. The value is always 1.
 # TYPE pd_keyspace_info gauge
 pd_keyspace_info{keyspace_id="%d",keyspace_name="%s"} 1
@@ -176,6 +172,41 @@ pd_keyspace_info{keyspace_id="%d",keyspace_name="%s"} 1
 	re.NoError(promtestutil.CollectAndCompare(keyspaceInfo, strings.NewReader(expected), "pd_keyspace_info"))
 
 	suite.manager.UpdateConfig(&mockConfig{})
+	re.Equal(0, promtestutil.CollectAndCount(keyspaceInfo))
+}
+
+func (suite *keyspaceTestSuite) TestKeyspaceInfoMetricsCreateRollback() {
+	re := suite.Require()
+	const skipSplitRegion = "github.com/tikv/pd/pkg/keyspace/skipSplitRegion"
+	re.NoError(failpoint.Disable(skipSplitRegion))
+	defer func() { re.NoError(failpoint.Enable(skipSplitRegion, "return(true)")) }()
+
+	suite.manager.UpdateConfig(&mockConfig{EnableKeyspaceLevelMetrics: true})
+	resetKeyspaceInfoMetrics()
+	_, err := suite.manager.CreateKeyspace(&CreateKeyspaceRequest{
+		Name:       "metrics_create_rollback",
+		CreateTime: time.Now().Unix(),
+	})
+	re.Error(err)
+	re.Equal(0, promtestutil.CollectAndCount(keyspaceInfo))
+}
+
+func (suite *keyspaceTestSuite) TestLoadRangeKeyspaceUpdatesInfoMetrics() {
+	re := suite.Require()
+	suite.manager.UpdateConfig(&mockConfig{EnableKeyspaceLevelMetrics: true})
+	created, err := suite.manager.CreateKeyspace(&CreateKeyspaceRequest{
+		Name:       "metrics_range_load",
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+	resetKeyspaceInfoMetrics()
+
+	keyspaces, err := suite.manager.LoadRangeKeyspace(created.GetId(), 1)
+	re.NoError(err)
+	re.Len(keyspaces, 1)
+	re.Equal(float64(1), promtestutil.ToFloat64(keyspaceInfo.WithLabelValues(
+		strconv.FormatUint(uint64(created.GetId()), 10), created.GetName())))
+	suite.manager.DeleteKeyspaceInfoMetrics(created.GetId())
 	re.Equal(0, promtestutil.CollectAndCount(keyspaceInfo))
 }
 
