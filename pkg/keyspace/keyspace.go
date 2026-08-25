@@ -1117,7 +1117,7 @@ func (manager *Manager) UpdateKeyspaceInfoMetrics(meta *keyspacepb.KeyspaceMeta)
 }
 
 // DeleteKeyspaceInfoMetrics removes the cached keyspace info series for id.
-func (manager *Manager) DeleteKeyspaceInfoMetrics(id uint32) {
+func (*Manager) DeleteKeyspaceInfoMetrics(id uint32) {
 	keyspaceInfoMetricsMu.Lock()
 	defer keyspaceInfoMetricsMu.Unlock()
 	deleteKeyspaceInfoMetricsByIDLocked(id)
