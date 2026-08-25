@@ -223,6 +223,9 @@ func (h *confHandler) updateConfig(cfg *config.Config, key string, value any) er
 }
 
 func (h *confHandler) updateKeyspaceConfig(key string, value any) error {
+	if key == "enable-keyspace-level-metrics" {
+		return errors.Errorf("cannot update config item %s dynamically", key)
+	}
 	oldCfg := h.svr.GetPersistOptions().GetKeyspaceConfig()
 	newCfg := oldCfg.Clone()
 	updated, found, err := jsonutil.AddKeyValue(newCfg, key, value)

@@ -876,6 +876,7 @@ type KeyspaceConfig struct {
 	// PreAlloc contains the keyspace to be allocated during keyspace manager initialization.
 	PreAlloc []string `toml:"pre-alloc" json:"pre-alloc"`
 	// EnableKeyspaceLevelMetrics enables metrics with keyspace-level labels.
+	// EnableKeyspaceLevelMetrics enables metrics labeled by keyspace. It is only configurable at startup.
 	EnableKeyspaceLevelMetrics bool `toml:"enable-keyspace-level-metrics" json:"enable-keyspace-level-metrics"`
 	// WaitRegionSplit indicates whether to wait for the region split to complete
 	WaitRegionSplit bool `toml:"wait-region-split" json:"wait-region-split"`

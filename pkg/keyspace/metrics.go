@@ -16,7 +16,6 @@ package keyspace
 
 import (
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -49,8 +48,6 @@ var (
 			Name:      "info",
 			Help:      "Keyspace metadata. The value is always 1.",
 		}, []string{"keyspace_id", "keyspace_name"})
-	keyspaceInfoMetricsMu sync.Mutex
-
 	createKeyspaceStepDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: namespace,
@@ -82,32 +79,25 @@ func init() {
 	createKeyspaceStepDurationUpdateKG = createKeyspaceStepDuration.WithLabelValues(StepUpdateKeyspaceGroup)
 }
 
-// setKeyspaceInfoMetricsLocked updates a keyspace info series while keyspaceInfoMetricsMu is held.
-func setKeyspaceInfoMetricsLocked(id uint32, name string) {
+// setKeyspaceInfoMetrics updates a keyspace info series.
+func setKeyspaceInfoMetrics(id uint32, name string) {
 	keyspaceInfo.WithLabelValues(strconv.FormatUint(uint64(id), 10), name).Set(1)
 }
 
-// deleteKeyspaceInfoMetricsLocked deletes a keyspace info series while keyspaceInfoMetricsMu is held.
-func deleteKeyspaceInfoMetricsLocked(id uint32, name string) {
+// deleteKeyspaceInfoMetrics deletes a keyspace info series.
+func deleteKeyspaceInfoMetrics(id uint32, name string) {
 	keyspaceInfo.DeleteLabelValues(strconv.FormatUint(uint64(id), 10), name)
 }
 
-// deleteKeyspaceInfoMetricsByIDLocked deletes keyspace info series by ID while keyspaceInfoMetricsMu is held.
-func deleteKeyspaceInfoMetricsByIDLocked(id uint32) {
+// deleteKeyspaceInfoMetricsByID deletes keyspace info series by ID.
+func deleteKeyspaceInfoMetricsByID(id uint32) {
 	keyspaceInfo.DeletePartialMatch(prometheus.Labels{
 		"keyspace_id": strconv.FormatUint(uint64(id), 10),
 	})
 }
 
-// resetKeyspaceInfoMetrics deletes all keyspace info series and cached gauges.
+// resetKeyspaceInfoMetrics deletes all keyspace info series.
 func resetKeyspaceInfoMetrics() {
-	keyspaceInfoMetricsMu.Lock()
-	defer keyspaceInfoMetricsMu.Unlock()
-	resetKeyspaceInfoMetricsLocked()
-}
-
-// resetKeyspaceInfoMetricsLocked resets the metric while keyspaceInfoMetricsMu is held.
-func resetKeyspaceInfoMetricsLocked() {
 	keyspaceInfo.Reset()
 }
 

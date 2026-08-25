@@ -122,14 +122,13 @@ func (suite *keyspaceTestSuite) TearDownTest() {
 
 func (suite *keyspaceTestSuite) TestKeyspaceInfoMetricsLifecycle() {
 	re := suite.Require()
+	suite.manager.UpdateConfig(&mockConfig{EnableKeyspaceLevelMetrics: true})
 	existing, err := suite.manager.CreateKeyspace(&CreateKeyspaceRequest{
 		Name:       "metrics_existing",
 		CreateTime: time.Now().Unix(),
 	})
 	re.NoError(err)
-
-	cfg := &mockConfig{EnableKeyspaceLevelMetrics: true}
-	suite.manager.UpdateConfig(cfg)
+	resetKeyspaceInfoMetrics()
 	re.Equal(0, promtestutil.CollectAndCount(keyspaceInfo))
 
 	existing, err = suite.manager.LoadKeyspace(existing.GetName())
@@ -171,8 +170,6 @@ pd_keyspace_info{keyspace_id="%d",keyspace_name="%s"} 1
 `, existing.GetId(), existing.GetName())
 	re.NoError(promtestutil.CollectAndCompare(keyspaceInfo, strings.NewReader(expected), "pd_keyspace_info"))
 
-	suite.manager.UpdateConfig(&mockConfig{})
-	re.Equal(0, promtestutil.CollectAndCount(keyspaceInfo))
 }
 
 func (suite *keyspaceTestSuite) TestKeyspaceInfoMetricsCreateRollback() {

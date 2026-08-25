@@ -243,13 +243,7 @@ func (manager *Manager) initReserveKeyspace(id uint32, name string) error {
 
 // UpdateConfig update keyspace manager's config.
 func (manager *Manager) UpdateConfig(cfg Config) {
-	keyspaceInfoMetricsMu.Lock()
-	wasEnabled := manager.config.IsKeyspaceLevelMetricsEnabled()
 	manager.config = cfg
-	if wasEnabled && !cfg.IsKeyspaceLevelMetricsEnabled() {
-		resetKeyspaceInfoMetricsLocked()
-	}
-	keyspaceInfoMetricsMu.Unlock()
 	if manager.mgm != nil {
 		manager.mgm.updateGroups(cfg.GetMetaServiceGroups())
 	}
@@ -1099,28 +1093,22 @@ func (manager *Manager) stageRemoveKeyspace(txn kv.Txn, id uint32) (*keyspacepb.
 func (manager *Manager) finishRemoveKeyspace(meta *keyspacepb.KeyspaceMeta) {
 	manager.keyspaceNameLookup.Delete(meta.GetId())
 	manager.keyspaceStateLookup.Delete(meta.GetId())
-	keyspaceInfoMetricsMu.Lock()
-	defer keyspaceInfoMetricsMu.Unlock()
 	if manager.config.IsKeyspaceLevelMetricsEnabled() {
-		deleteKeyspaceInfoMetricsLocked(meta.GetId(), meta.GetName())
+		deleteKeyspaceInfoMetrics(meta.GetId(), meta.GetName())
 	}
 }
 
 // UpdateKeyspaceInfoMetrics updates the keyspace ID-to-name mapping metric when keyspace-level metrics are enabled.
 func (manager *Manager) UpdateKeyspaceInfoMetrics(meta *keyspacepb.KeyspaceMeta) {
-	keyspaceInfoMetricsMu.Lock()
-	defer keyspaceInfoMetricsMu.Unlock()
 	if meta == nil || !manager.config.IsKeyspaceLevelMetricsEnabled() {
 		return
 	}
-	setKeyspaceInfoMetricsLocked(meta.GetId(), meta.GetName())
+	setKeyspaceInfoMetrics(meta.GetId(), meta.GetName())
 }
 
 // DeleteKeyspaceInfoMetrics removes the keyspace info series for id.
 func (*Manager) DeleteKeyspaceInfoMetrics(id uint32) {
-	keyspaceInfoMetricsMu.Lock()
-	defer keyspaceInfoMetricsMu.Unlock()
-	deleteKeyspaceInfoMetricsByIDLocked(id)
+	deleteKeyspaceInfoMetricsByID(id)
 }
 
 // UpdateKeyspaceStateByID updates target keyspace to the given state if it's not already in that state.
