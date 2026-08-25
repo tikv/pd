@@ -229,7 +229,7 @@ func TestRequestAndResponseConsumption(t *testing.T) {
 		re.Equal(priority, gc.meta.Priority)
 		expectedConsumption := &rmpb.Consumption{}
 		if testCase.req.IsWrite() {
-			kvCalculator.calculateWriteCost(expectedConsumption, testCase.req)
+			kvCalculator.calculateWriteCostWithDetail(expectedConsumption, nil, testCase.req)
 			re.Equal(expectedConsumption.WRU, consumption.WRU)
 			if testCase.req.AccessLocationType() != AccessUnknown {
 				re.Positive(expectedConsumption.WriteCrossAzTrafficBytes, caseNum)
@@ -237,8 +237,8 @@ func TestRequestAndResponseConsumption(t *testing.T) {
 		}
 		consumption, err = gc.onResponseImpl(testCase.req, testCase.resp)
 		re.NoError(err, caseNum)
-		kvCalculator.calculateReadCost(expectedConsumption, testCase.resp)
-		kvCalculator.calculateCPUCost(expectedConsumption, testCase.resp)
+		kvCalculator.calculateReadCostWithDetail(expectedConsumption, nil, testCase.resp)
+		kvCalculator.calculateCPUCostWithDetail(expectedConsumption, nil, testCase.resp)
 		calculateCrossAZTraffic(expectedConsumption, testCase.req, testCase.resp)
 		re.Equal(expectedConsumption.RRU, consumption.RRU, caseNum)
 		re.Equal(expectedConsumption.TotalCpuTimeMs, consumption.TotalCpuTimeMs, caseNum)
@@ -400,7 +400,7 @@ func TestOnResponseWaitConsumption(t *testing.T) {
 	verify := func() {
 		expectedConsumption := &rmpb.Consumption{}
 		kvCalculator := gc.getKVCalculator()
-		kvCalculator.calculateReadCost(expectedConsumption, resp)
+		kvCalculator.calculateReadCostWithDetail(expectedConsumption, nil, resp)
 		re.Equal(expectedConsumption.RRU, consumption.RRU)
 	}
 	verify()
