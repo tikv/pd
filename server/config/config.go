@@ -875,8 +875,8 @@ func (c *MicroserviceConfig) IsResourceManagerFallbackEnabled() bool {
 type KeyspaceConfig struct {
 	// PreAlloc contains the keyspace to be allocated during keyspace manager initialization.
 	PreAlloc []string `toml:"pre-alloc" json:"pre-alloc"`
-	// EnableKeyspaceInfoMetrics enables the keyspace ID-to-name mapping metric.
-	EnableKeyspaceInfoMetrics bool `toml:"enable-keyspace-info-metrics" json:"enable-keyspace-info-metrics"`
+	// EnableKeyspaceLevelMetrics enables metrics with keyspace-level labels.
+	EnableKeyspaceLevelMetrics bool `toml:"enable-keyspace-level-metrics" json:"enable-keyspace-level-metrics"`
 	// WaitRegionSplit indicates whether to wait for the region split to complete
 	WaitRegionSplit bool `toml:"wait-region-split" json:"wait-region-split"`
 	// WaitRegionSplitTimeout indicates the max duration to wait region split.
@@ -973,9 +973,9 @@ func (c *KeyspaceConfig) GetPreAlloc() []string {
 	return ret
 }
 
-// IsKeyspaceInfoMetricsEnabled returns whether the keyspace info metric is enabled.
-func (c *KeyspaceConfig) IsKeyspaceInfoMetricsEnabled() bool {
-	return c.EnableKeyspaceInfoMetrics
+// IsKeyspaceLevelMetricsEnabled returns whether metrics with keyspace-level labels are enabled.
+func (c *KeyspaceConfig) IsKeyspaceLevelMetricsEnabled() bool {
+	return c.EnableKeyspaceLevelMetrics
 }
 
 // ToWaitRegionSplit returns whether to wait for the region split to complete.

@@ -65,17 +65,17 @@ func TestKeyspaceTestSuite(t *testing.T) {
 }
 
 type mockConfig struct {
-	PreAlloc                  []string
-	EnableKeyspaceInfoMetrics bool
-	WaitRegionSplit           bool
-	WaitRegionSplitTimeout    typeutil.Duration
-	CheckRegionSplitInterval  typeutil.Duration
+	PreAlloc                   []string
+	EnableKeyspaceLevelMetrics bool
+	WaitRegionSplit            bool
+	WaitRegionSplitTimeout     typeutil.Duration
+	CheckRegionSplitInterval   typeutil.Duration
 	// MetaServiceGroups is used to mock the meta-service groups for keyspace assignment.
 	MetaServiceGroups map[string]string
 }
 
-func (m *mockConfig) IsKeyspaceInfoMetricsEnabled() bool {
-	return m.EnableKeyspaceInfoMetrics
+func (m *mockConfig) IsKeyspaceLevelMetricsEnabled() bool {
+	return m.EnableKeyspaceLevelMetrics
 }
 
 func (m *mockConfig) GetPreAlloc() []string {
@@ -126,7 +126,7 @@ func (suite *keyspaceTestSuite) TestKeyspaceInfoMetricsLifecycle() {
 	})
 	re.NoError(err)
 
-	cfg := &mockConfig{EnableKeyspaceInfoMetrics: true}
+	cfg := &mockConfig{EnableKeyspaceLevelMetrics: true}
 	suite.manager.UpdateConfig(cfg)
 	re.Equal(float64(1), promtestutil.ToFloat64(keyspaceInfo.WithLabelValues(
 		strconv.FormatUint(uint64(existing.GetId()), 10), existing.GetName())))

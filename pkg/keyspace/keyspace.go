@@ -76,7 +76,7 @@ const (
 // Config is the interface for keyspace config.
 type Config interface {
 	GetPreAlloc() []string
-	IsKeyspaceInfoMetricsEnabled() bool
+	IsKeyspaceLevelMetricsEnabled() bool
 	ToWaitRegionSplit() bool
 	GetWaitRegionSplitTimeout() time.Duration
 	GetCheckRegionSplitInterval() time.Duration
@@ -203,7 +203,7 @@ func (manager *Manager) Bootstrap() error {
 			}
 		}()
 	}
-	if manager.config.IsKeyspaceInfoMetricsEnabled() {
+	if manager.config.IsKeyspaceLevelMetricsEnabled() {
 		return manager.refreshKeyspaceInfoMetrics()
 	}
 	return nil
@@ -246,11 +246,11 @@ func (manager *Manager) initReserveKeyspace(id uint32, name string) error {
 
 // UpdateConfig update keyspace manager's config.
 func (manager *Manager) UpdateConfig(cfg Config) {
-	wasEnabled := manager.config.IsKeyspaceInfoMetricsEnabled()
+	wasEnabled := manager.config.IsKeyspaceLevelMetricsEnabled()
 	manager.config = cfg
-	if wasEnabled && !cfg.IsKeyspaceInfoMetricsEnabled() {
+	if wasEnabled && !cfg.IsKeyspaceLevelMetricsEnabled() {
 		keyspaceInfo.Reset()
-	} else if !wasEnabled && cfg.IsKeyspaceInfoMetricsEnabled() {
+	} else if !wasEnabled && cfg.IsKeyspaceLevelMetricsEnabled() {
 		if err := manager.refreshKeyspaceInfoMetrics(); err != nil {
 			log.Error("[keyspace] failed to refresh keyspace info metrics", zap.Error(err))
 		}
@@ -576,7 +576,7 @@ func (manager *Manager) saveNewKeyspace(keyspace *keyspacepb.KeyspaceMeta) error
 	if err == nil {
 		// Update the keyspace name cache only after the transaction commits.
 		manager.keyspaceNameLookup.Store(keyspace.GetId(), keyspace.Name)
-		if manager.config.IsKeyspaceInfoMetricsEnabled() {
+		if manager.config.IsKeyspaceLevelMetricsEnabled() {
 			setKeyspaceInfoMetrics(keyspace.GetId(), keyspace.GetName())
 		}
 	}
@@ -1073,7 +1073,7 @@ func (manager *Manager) RemoveKeyspace(txn kv.Txn, id uint32) error {
 	}
 	manager.keyspaceNameLookup.Delete(id)
 	manager.keyspaceStateLookup.Delete(id)
-	if manager.config.IsKeyspaceInfoMetricsEnabled() {
+	if manager.config.IsKeyspaceLevelMetricsEnabled() {
 		deleteKeyspaceInfoMetrics(id, meta.GetName())
 	}
 	// Keep the meta-service group assignment accounting in sync within the same
