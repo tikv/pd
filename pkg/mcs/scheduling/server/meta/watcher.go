@@ -18,6 +18,7 @@ import (
 	"context"
 	"strconv"
 	"sync"
+	"sync/atomic"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -50,6 +51,13 @@ type Watcher struct {
 	etcdClient   *clientv3.Client
 	basicCluster *core.BasicCluster
 	storeWatcher *etcdutil.LoopWatcher
+
+	// onStoreTombstoned is late-bound via SetOnStoreTombstoned once the parent
+	// Cluster (which owns hotStat, unavailable to this package without an
+	// import cycle) finishes construction. The watcher itself starts watching
+	// before that point, so it's read through an atomic pointer to stay safe
+	// against a store event racing the setup.
+	onStoreTombstoned atomic.Pointer[func(storeID uint64)]
 }
 
 // NewWatcher creates a new watcher to watch the meta change from PD API server.
@@ -97,6 +105,9 @@ func (w *Watcher) initializeStoreWatcher() error {
 			schedulers.DeleteStoreMetrics(storeIDStr)
 			schedule.DeleteStoreMetrics(storeIDStr)
 			scatter.DeleteStoreMetrics(storeIDStr)
+			if fn := w.onStoreTombstoned.Load(); fn != nil {
+				(*fn)(store.GetId())
+			}
 		}
 
 		return nil
@@ -120,6 +131,9 @@ func (w *Watcher) initializeStoreWatcher() error {
 			schedulers.DeleteStoreMetrics(storeIDStr)
 			schedule.DeleteStoreMetrics(storeIDStr)
 			scatter.DeleteStoreMetrics(storeIDStr)
+			if fn := w.onStoreTombstoned.Load(); fn != nil {
+				(*fn)(storeID)
+			}
 			log.Info("delete store meta", zap.Uint64("store-id", storeID))
 		}
 		return nil
@@ -135,6 +149,22 @@ func (w *Watcher) initializeStoreWatcher() error {
 	)
 	w.storeWatcher.StartWatchLoop()
 	return w.storeWatcher.WaitLoad()
+}
+
+// SetOnStoreTombstoned sets the callback invoked (at least once) when a store
+// transitions to tombstone, for cleanup that only the parent Cluster can do
+// without an import cycle (removing rolling hot stats). NewWatcher's initial
+// load runs before the caller has a chance to install this callback, so a
+// store already tombstoned at startup would otherwise never get it invoked;
+// reconcile against whatever the watcher has already loaded here to close
+// that gap.
+func (w *Watcher) SetOnStoreTombstoned(fn func(storeID uint64)) {
+	w.onStoreTombstoned.Store(&fn)
+	for _, store := range w.basicCluster.GetStores() {
+		if store.IsRemoved() {
+			fn(store.GetID())
+		}
+	}
 }
 
 // Close closes the watcher.

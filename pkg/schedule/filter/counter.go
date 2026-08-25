@@ -160,18 +160,22 @@ func (c *Counter) Flush(storeInformer core.StoreSetInformer) {
 						continue
 					}
 					count[targetID] = 0
-					// A tombstoned endpoint is rejected here on every scheduling cycle for
-					// as long as it stays known, so counting it would either leak (nothing
-					// ever calls Flush again to zero it) or fight with tombstone cleanup
-					// deleting the series between Flush calls. sourceID/targetID may be the
-					// zero placeholder for "no counterpart", which never matches a real
-					// store, so the lookup harmlessly misses.
+					// A tombstoned or already fully-removed endpoint is rejected here on
+					// every scheduling cycle for as long as it stays known, so counting it
+					// would either leak (nothing ever calls Flush again to zero it) or
+					// fight with tombstone cleanup deleting the series between Flush calls.
+					// sourceID/targetID may be the zero placeholder for "no counterpart",
+					// which is never a real store id and must not be looked up.
 					if storeInformer != nil {
-						if s := storeInformer.GetStore(sourceID); s != nil && s.IsRemoved() {
-							continue
+						if sourceID != 0 {
+							if s := storeInformer.GetStore(sourceID); s == nil || s.IsRemoved() {
+								continue
+							}
 						}
-						if s := storeInformer.GetStore(targetID); s != nil && s.IsRemoved() {
-							continue
+						if targetID != 0 {
+							if s := storeInformer.GetStore(targetID); s == nil || s.IsRemoved() {
+								continue
+							}
 						}
 					}
 					sourceIDStr := strconv.FormatUint(sourceID, 10)

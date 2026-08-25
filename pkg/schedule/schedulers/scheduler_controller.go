@@ -142,6 +142,7 @@ func ResetSchedulerMetrics() {
 	balanceWitnessCounter.Reset()
 	balanceDirectionCounter.Reset()
 	hotDirectionCounter.Reset()
+	hotPendingStatus.Reset()
 	storeSlowTrendEvictedStatusGauge.Reset()
 }
 

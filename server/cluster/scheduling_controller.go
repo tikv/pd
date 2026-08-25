@@ -196,13 +196,13 @@ func (sc *schedulingController) collectSchedulingMetrics() {
 		// right after the write and redoing the cleanup closes that race
 		// without needing synchronization with the bury/removal path.
 		current := sc.GetStore(s.GetID())
-		// ResetStoreStatistics covers storeStatusGauge/storeStats, which
-		// observe() itself stops writing as soon as it sees a tombstoned
-		// store -- so, unlike the fields above, there's no legitimate write to
-		// preserve here once the store is IsRemoved(), not just once it's
-		// gone entirely. But storeStatusGauge's cleanup is a DeletePartialMatch
-		// full-vector scan, so only pay for it when this iteration's own s was
-		// still live (observe(s) could then have written using stale data);
+		// ResetStoreStatistics covers storeStatusGauge, which observe()
+		// itself stops writing as soon as it sees a tombstoned store, so
+		// there's no legitimate write to preserve here once the store is
+		// IsRemoved(), not just once it's gone entirely. But its cleanup is a
+		// DeletePartialMatch full-vector scan, so only pay for it when this
+		// iteration's own s was still live (observe(s) could then have written
+		// using stale data);
 		// once a snapshot correctly shows IsRemoved(), observe() already
 		// skipped writing these fields and there's nothing to undo, so a
 		// tombstoned store sitting in GetStores() for up to 30 days doesn't

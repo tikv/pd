@@ -172,8 +172,13 @@ func DeleteStoreMetrics(storeID string) {
 	balanceWitnessCounter.DeleteLabelValues("move-witness", storeID+"-out")
 	balanceWitnessCounter.DeleteLabelValues("move-witness", storeID+"-in")
 	hotSchedulerResultCounter.DeletePartialMatch(prometheus.Labels{"store": storeID})
-	balanceDirectionCounter.DeletePartialMatch(prometheus.Labels{"store": storeID})
+	// balanceDirectionCounter and hotPendingStatus key on source/target rather
+	// than a single store label, so a store can appear on either side.
+	balanceDirectionCounter.DeletePartialMatch(prometheus.Labels{"source": storeID})
+	balanceDirectionCounter.DeletePartialMatch(prometheus.Labels{"target": storeID})
 	hotDirectionCounter.DeletePartialMatch(prometheus.Labels{"store": storeID})
+	hotPendingStatus.DeletePartialMatch(prometheus.Labels{"source": storeID})
+	hotPendingStatus.DeletePartialMatch(prometheus.Labels{"target": storeID})
 	storeSlowTrendEvictedStatusGauge.DeletePartialMatch(prometheus.Labels{"store": storeID})
 	HotPendingSum.DeletePartialMatch(prometheus.Labels{"store": storeID})
 }
