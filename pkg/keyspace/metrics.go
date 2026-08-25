@@ -46,7 +46,7 @@ var (
 			Namespace: namespace,
 			Subsystem: subsystem,
 			Name:      "info",
-			Help:      "Keyspace metadata. The value is always 1.",
+			Help:      "Keyspace ID-to-name mappings observed through client requests. The value is always 1.",
 		}, []string{"keyspace_id", "keyspace_name"})
 	createKeyspaceStepDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
