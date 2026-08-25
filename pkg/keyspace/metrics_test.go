@@ -23,8 +23,8 @@ import (
 )
 
 func TestKeyspaceInfoMetrics(t *testing.T) {
-	ResetKeyspaceInfoMetrics()
-	t.Cleanup(ResetKeyspaceInfoMetrics)
+	resetKeyspaceInfoMetrics()
+	t.Cleanup(resetKeyspaceInfoMetrics)
 
 	SetKeyspaceInfoMetrics(42, "old-name")
 	require.Equal(t, float64(1), testutil.ToFloat64(keyspaceInfo.WithLabelValues("42", "old-name")))
@@ -34,6 +34,6 @@ func TestKeyspaceInfoMetrics(t *testing.T) {
 	require.Equal(t, float64(1), testutil.ToFloat64(keyspaceInfo.WithLabelValues(
 		strconv.FormatUint(42, 10), "new-name")))
 
-	DeleteKeyspaceInfoMetrics(42)
+	deleteKeyspaceInfoMetrics(42)
 	require.Equal(t, 0, testutil.CollectAndCount(keyspaceInfo))
 }

@@ -81,19 +81,17 @@ func init() {
 
 // SetKeyspaceInfoMetrics sets the keyspace ID-to-name mapping metric.
 func SetKeyspaceInfoMetrics(id uint32, name string) {
-	DeleteKeyspaceInfoMetrics(id)
+	deleteKeyspaceInfoMetrics(id)
 	keyspaceInfo.WithLabelValues(strconv.FormatUint(uint64(id), 10), name).Set(1)
 }
 
-// DeleteKeyspaceInfoMetrics deletes the keyspace info series for an ID.
-func DeleteKeyspaceInfoMetrics(id uint32) {
+func deleteKeyspaceInfoMetrics(id uint32) {
 	keyspaceInfo.DeletePartialMatch(prometheus.Labels{
 		"keyspace_id": strconv.FormatUint(uint64(id), 10),
 	})
 }
 
-// ResetKeyspaceInfoMetrics deletes all keyspace info series.
-func ResetKeyspaceInfoMetrics() {
+func resetKeyspaceInfoMetrics() {
 	keyspaceInfo.Reset()
 }
 

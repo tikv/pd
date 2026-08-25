@@ -16,8 +16,6 @@ package server
 
 import (
 	"context"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
@@ -99,6 +97,9 @@ func (s *KeyspaceServer) LoadKeyspaceByID(_ context.Context, request *keyspacepb
 	if err != nil {
 		return &keyspacepb.LoadKeyspaceResponse{Header: getErrorHeader(err)}, nil
 	}
+	if s.cfg.Keyspace.EnableKeyspaceLevelMetrics {
+		keyspace.SetKeyspaceInfoMetrics(meta.GetId(), meta.GetName())
+	}
 	// TiKV needs keyspace metadata, including encryption settings, before it can
 	// split the keyspace regions. Checking the region bounds here would create a
 	// circular dependency between loading the metadata and splitting the regions.
@@ -117,7 +118,6 @@ func (s *KeyspaceServer) WatchKeyspaces(request *keyspacepb.WatchKeyspacesReques
 	ctx, cancel := context.WithCancel(s.Context())
 	defer cancel()
 	startKey := keypath.KeyspaceMetaPrefix()
-	enableKeyspaceLevelMetrics := s.cfg.Keyspace.EnableKeyspaceLevelMetrics
 
 	keyspaces := make([]*keyspacepb.KeyspaceMeta, 0)
 	putFn := func(kv *mvccpb.KeyValue) error {
@@ -126,29 +126,10 @@ func (s *KeyspaceServer) WatchKeyspaces(request *keyspacepb.WatchKeyspacesReques
 			defer cancel() // cancel context to stop watcher
 			return err
 		}
-		if enableKeyspaceLevelMetrics {
-			keyspace.SetKeyspaceInfoMetrics(meta.GetId(), meta.GetName())
-		}
 		keyspaces = append(keyspaces, meta)
 		return nil
 	}
-	deleteFn := func(kv *mvccpb.KeyValue) error {
-		if !enableKeyspaceLevelMetrics {
-			return nil
-		}
-		id, err := strconv.ParseUint(strings.TrimPrefix(string(kv.Key), startKey), 10, 32)
-		if err != nil {
-			return err
-		}
-		keyspace.DeleteKeyspaceInfoMetrics(uint32(id))
-		return nil
-	}
-	preEventsFn := func(events []*clientv3.Event) error {
-		if enableKeyspaceLevelMetrics && len(events) == 0 {
-			keyspace.ResetKeyspaceInfoMetrics()
-		}
-		return nil
-	}
+	deleteFn := func(*mvccpb.KeyValue) error { return nil }
 	postEventsFn := func([]*clientv3.Event) error {
 		if len(keyspaces) == 0 {
 			return nil
@@ -175,7 +156,7 @@ func (s *KeyspaceServer) WatchKeyspaces(request *keyspacepb.WatchKeyspacesReques
 		s.client,
 		"keyspace-server-watcher",
 		startKey,
-		preEventsFn,
+		func([]*clientv3.Event) error { return nil },
 		putFn,
 		deleteFn,
 		postEventsFn,
@@ -218,6 +199,11 @@ func (s *KeyspaceServer) GetAllKeyspaces(_ context.Context, request *keyspacepb.
 	keyspaces, err := manager.LoadRangeKeyspace(request.GetStartId(), int(request.Limit))
 	if err != nil {
 		return &keyspacepb.GetAllKeyspacesResponse{Header: getErrorHeader(err)}, nil
+	}
+	if s.cfg.Keyspace.EnableKeyspaceLevelMetrics {
+		for _, meta := range keyspaces {
+			keyspace.SetKeyspaceInfoMetrics(meta.GetId(), meta.GetName())
+		}
 	}
 
 	return &keyspacepb.GetAllKeyspacesResponse{

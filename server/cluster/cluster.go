@@ -1007,7 +1007,6 @@ func (c *RaftCluster) Stop() {
 		return
 	}
 	c.running = false
-	keyspace.ResetKeyspaceInfoMetrics()
 	cancel = c.cancel
 	stopSchedulingJobs = !c.IsServiceIndependent(constant.SchedulingServiceName)
 	heartbeatRunner = c.heartbeatRunner
