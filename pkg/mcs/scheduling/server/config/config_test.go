@@ -178,3 +178,34 @@ func TestAdjustScheduleConfigDefaultStoreLimit(t *testing.T) {
 		})
 	}
 }
+
+func TestGetStoreLimitPreservesConcurrentWatcherUpdate(t *testing.T) {
+	re := require.New(t)
+	cfg := NewConfig()
+	cfg.Schedule.StoreLimit = make(map[uint64]sc.StoreLimitConfig)
+	cfg.Schedule.DefaultStoreLimit = sc.StoreLimitConfig{AddPeer: 15, RemovePeer: 15}
+	persistConfig := NewPersistConfig(cfg, nil)
+
+	beforeWriteBack := make(chan struct{})
+	resumeWriteBack := make(chan struct{})
+	persistConfig.beforeGetStoreLimitWriteBack = func() {
+		close(beforeWriteBack)
+		<-resumeWriteBack
+	}
+
+	limitCh := make(chan sc.StoreLimitConfig, 1)
+	go func() {
+		limitCh <- persistConfig.GetStoreLimit(1)
+	}()
+	<-beforeWriteBack
+
+	watched := persistConfig.GetScheduleConfig().Clone()
+	watched.DefaultStoreLimit = sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 70}
+	persistConfig.SetScheduleConfig(watched)
+	close(resumeWriteBack)
+
+	limit := <-limitCh
+	re.Equal(watched.DefaultStoreLimit, persistConfig.GetScheduleConfig().DefaultStoreLimit)
+	re.Equal(watched.DefaultStoreLimit, persistConfig.GetScheduleConfig().StoreLimit[1])
+	re.Equal(watched.DefaultStoreLimit, limit)
+}
