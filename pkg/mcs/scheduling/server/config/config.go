@@ -236,6 +236,11 @@ type PersistConfig struct {
 	// schedulersUpdatingNotifier is used to notify that the schedulers have been updated.
 	// Store as `chan struct{}`.
 	schedulersUpdatingNotifier atomic.Value
+
+	// beforeGetStoreLimitWriteBack, when set, is called immediately before
+	// GetStoreLimit writes its computed default back to the schedule config.
+	// It exists only to make the write-back race deterministic in tests.
+	beforeGetStoreLimitWriteBack func()
 }
 
 // NewPersistConfig creates a new PersistConfig instance.
@@ -574,8 +579,7 @@ func (o *PersistConfig) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitCon
 	if limit, ok := o.GetScheduleConfig().StoreLimit[storeID]; ok {
 		return limit
 	}
-	cfg := o.GetScheduleConfig().Clone()
-	limitCfg := cfg.GetDefaultStoreLimit()
+
 	v, ok1, err := o.getTTLFloat("default-add-peer")
 	if err != nil {
 		log.Warn("failed to parse default-add-peer from PersistOptions's ttl storage", zap.Error(err))
@@ -597,9 +601,23 @@ func (o *PersistConfig) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitCon
 	if canSetAddPeer || canSetRemovePeer {
 		return returnSC
 	}
-	cfg.StoreLimit[storeID] = limitCfg
-	o.SetScheduleConfig(cfg)
-	return o.GetScheduleConfig().StoreLimit[storeID]
+
+	if hook := o.beforeGetStoreLimitWriteBack; hook != nil {
+		hook()
+	}
+
+	// Recheck and write back under scheduleMu so a concurrent SetScheduleConfig
+	// (e.g. the watcher installing a newer default-store-limit) cannot be
+	// clobbered by a write-back computed from a stale snapshot.
+	o.scheduleMu.Lock()
+	defer o.scheduleMu.Unlock()
+	cfg := o.GetScheduleConfig().Clone()
+	if limit, ok := cfg.StoreLimit[storeID]; ok {
+		return limit
+	}
+	cfg.StoreLimit[storeID] = cfg.GetDefaultStoreLimit()
+	o.installScheduleConfig(cfg)
+	return cfg.StoreLimit[storeID]
 }
 
 // GetStoreLimitByType returns the limit of a store with a given type.
