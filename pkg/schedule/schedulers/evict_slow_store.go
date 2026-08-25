@@ -632,28 +632,34 @@ func (s *evictSlowStoreScheduler) activatePausedNetworkSlowStores(cluster sche.S
 // detectAndHandleNetworkSlowStores detects new network slow stores and handles them
 func (s *evictSlowStoreScheduler) detectAndHandleNetworkSlowStores(cluster sche.SchedulerCluster) {
 	stores := cluster.GetStores()
+	// A tombstoned store stops heartbeating, so its GetNetworkSlowScores() is
+	// frozen at its last reported value. Restrict candidate evaluation, the
+	// "who reports whom" map, and the denominator used to decide consensus to
+	// stores that are still actually part of the cluster: otherwise a
+	// tombstoned store's frozen score could get it added to
+	// networkSlowStoreRecoverStartAts directly (even though
+	// tryRecoverNetworkSlowStores would just undo that on the very next
+	// round), and its presence in the denominator can also mask a genuinely
+	// slow live store from ever being detected in the first place.
+	liveStores := make([]*core.StoreInfo, 0, len(stores))
+	for _, store := range stores {
+		if !store.IsRemoved() {
+			liveStores = append(liveStores, store)
+		}
+	}
 	networkSlowStoreRecoverStartAts := s.conf.networkSlowStoreRecoverStartAts
 	pausedNetworkSlowStores := s.conf.PausedNetworkSlowStores
 
 	// Build problematic network map
-	problematicNetwork := buildProblematicNetworkMap(stores, networkSlowStoreRecoverStartAts)
+	problematicNetwork := buildProblematicNetworkMap(liveStores, networkSlowStoreRecoverStartAts)
 
 	// Evaluate each store for network slowness
-	for _, store := range stores {
-		// A tombstoned store stops heartbeating, so its GetNetworkSlowScores()
-		// is frozen at its last reported value; without this check, a frozen
-		// score that still looks slow would add it to
-		// networkSlowStoreRecoverStartAts and publish evictedSlowStoreStatusGauge
-		// for it here, even though tryRecoverNetworkSlowStores would just remove
-		// it again on the very next scheduling round.
-		if store.IsRemoved() {
-			continue
-		}
+	for _, store := range liveStores {
 		if shouldSkipStoreEvaluation(store, problematicNetwork, networkSlowStoreRecoverStartAts) {
 			continue
 		}
 
-		if isNetworkSlowStore(store, stores, problematicNetwork, networkSlowStoreRecoverStartAts) {
+		if isNetworkSlowStore(store, liveStores, problematicNetwork, networkSlowStoreRecoverStartAts) {
 			storeID := store.GetID()
 
 			if len(pausedNetworkSlowStores) >= defaultMaxNetworkSlowStore {

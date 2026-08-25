@@ -412,6 +412,54 @@ func (suite *evictSlowStoreTestSuite) TestNetworkSlowStoreSkipsRemovedStore() {
 	re.False(ok)
 }
 
+func (suite *evictSlowStoreTestSuite) TestNetworkSlowStoreUsesOnlyLiveStores() {
+	re := suite.Require()
+	es := suite.es.(*evictSlowStoreScheduler)
+
+	suite.tc.AddLeaderStore(storeID5, 0)
+	scores := map[uint64]map[uint64]uint64{
+		storeID1: {
+			storeID2: 100,
+			storeID3: 100,
+			storeID4: 100,
+		},
+		storeID2: {
+			storeID1: 100,
+			storeID3: 1,
+		},
+		storeID3: {
+			storeID1: 100,
+			storeID2: 1,
+		},
+		storeID4: {
+			storeID1: 100,
+			storeID2: 1,
+		},
+		storeID5: {
+			storeID1: 1,
+			storeID2: 1,
+		},
+	}
+
+	for storeID, networkScores := range scores {
+		store := suite.tc.GetStore(storeID)
+		suite.tc.PutStore(store.Clone(func(store *core.StoreInfo) {
+			store.GetStoreStats().NetworkSlowScores = networkScores
+		}))
+	}
+	// storeID5 is tombstoned after seeding scores above, so its own report is
+	// stale data, and it must not count toward the denominator that decides
+	// whether the three live peers reporting storeID1 as problematic (2, 3,
+	// 4) form a large-enough majority.
+	suite.tc.PutStore(suite.tc.GetStore(storeID5).Clone(
+		core.SetStoreState(metapb.StoreState_Tombstone),
+	))
+
+	es.scheduleNetworkSlowStore(suite.tc)
+
+	re.Contains(es.conf.networkSlowStoreRecoverStartAts, uint64(storeID1))
+}
+
 func (suite *evictSlowStoreTestSuite) TestNetworkSlowStoreReachLimit() {
 	re := suite.Require()
 	reachedLimit := false

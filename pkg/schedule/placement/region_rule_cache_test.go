@@ -265,6 +265,36 @@ func TestToStoreCacheListReturnsUncacheableForRemovedStore(t *testing.T) {
 	re.False(cacheable)
 }
 
+func TestSetCacheDoesNotPromoteStaleFitAfterStoreRemoval(t *testing.T) {
+	re := require.New(t)
+	manager := NewRegionRuleFitCacheManager()
+
+	stores := mockStores(3)
+	storeSet := core.NewStoresInfo()
+	for _, store := range stores {
+		storeSet.PutStore(store)
+	}
+	region := mockRegion(3, 0)
+	rules := addExtraRules(0)
+	fit := fitRegion(stores, region, rules, false)
+	fit.regionStores = stores
+	fit.rules = rules
+
+	manager.SetCache(storeSet, region, fit)
+	cache := manager.regionCaches[region.GetID()]
+	re.NotNil(cache)
+	cache.hitCount = minHitCountToCacheHit - 1
+
+	manager.RemoveStoreCache(stores[0].GetID())
+	storeSet.PutStore(stores[0].Clone(
+		core.SetStoreState(metapb.StoreState_Tombstone),
+	))
+
+	manager.SetCache(storeSet, region, fit) // stale pre-bury fit
+	cache, ok := manager.regionCaches[region.GetID()]
+	re.False(ok && cache.bestFit != nil)
+}
+
 func (manager *RegionRuleFitCacheManager) mockRegionRuleFitCache(region *core.RegionInfo, rules []*Rule, regionStores []*core.StoreInfo) *regionRuleFitCache {
 	storeSet := core.NewStoresInfo()
 	for _, s := range regionStores {

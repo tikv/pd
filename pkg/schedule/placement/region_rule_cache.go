@@ -95,6 +95,20 @@ func (manager *RegionRuleFitCacheManager) SetCache(storeSet StoreSet, region *co
 	if cache, ok := manager.regionCaches[region.GetID()]; ok {
 		cache.hitCount++
 		if cache.hitCount >= minHitCountToCacheHit {
+			if !allStoresLive(storeSet, fit.regionStores) {
+				// fit may have been computed from a stale, pre-bury snapshot
+				// held by an in-flight FitRegion call. Promoting it (or
+				// leaving the entry as-is for another in-flight caller with
+				// an equally stale snapshot to consume via CheckAndGetCache,
+				// which compares against this cache's own frozen
+				// regionStores rather than re-checking storeSet) would let a
+				// removed store's placement result leak into a real
+				// scheduling decision. Evict the entry instead, so the next
+				// caller recomputes and re-validates through the cacheable
+				// path below.
+				delete(manager.regionCaches, region.GetID())
+				return
+			}
 			cache.bestFit = fit
 		}
 		return
@@ -104,6 +118,17 @@ func (manager *RegionRuleFitCacheManager) SetCache(storeSet StoreSet, region *co
 		return
 	}
 	manager.regionCaches[region.GetID()] = newCache
+}
+
+// allStoresLive reports whether every store is currently known and not removed.
+func allStoresLive(storeSet StoreSet, stores []*core.StoreInfo) bool {
+	for _, s := range stores {
+		current := storeSet.GetStore(s.GetID())
+		if current == nil || current.IsRemoved() {
+			return false
+		}
+	}
+	return true
 }
 
 // regionRuleFitCache stores regions RegionFit result and involving variables
