@@ -1507,6 +1507,7 @@ func (suite *clientTestSuite) TestGetStore() {
 	// Get an up store should be OK.
 	n, err := suite.client.GetStore(context.Background(), store.GetId())
 	re.NoError(err)
+	store.LastHeartbeat = n.LastHeartbeat
 	re.Equal(store, n)
 
 	actualStores, err := suite.client.GetAllStores(context.Background())

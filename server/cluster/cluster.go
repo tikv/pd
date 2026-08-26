@@ -2103,7 +2103,6 @@ func (c *RaftCluster) RemoveTombStoneRecords() error {
 					errs.ZapError(err))
 				return err
 			}
-			c.RemoveStoreLimit(store.GetID())
 			log.Info("delete store succeeded",
 				zap.Stringer("store", store.GetMeta()))
 		}
@@ -2136,6 +2135,12 @@ func (c *RaftCluster) deleteStore(store *core.StoreInfo) error {
 	// leaving a series this cleanup just deleted with no later event able to
 	// find and remove it again.
 	c.DeleteStore(store)
+	// The auto-GC path (checkStores' NodeState_Removed branch) only ever calls
+	// deleteStore, never RemoveTombStoneRecords, so the store-limit config entry
+	// needs to be cleared here rather than by the manual remove-tombstone caller
+	// alone -- otherwise a store reclaimed purely by the 30-day auto-GC timer
+	// never gets this cleanup at all.
+	c.RemoveStoreLimit(store.GetID())
 	storeIDStr := strconv.FormatUint(store.GetID(), 10)
 	statistics.ResetStoreStatistics(storeIDStr)
 	filter.DeleteStoreMetrics(storeIDStr)
