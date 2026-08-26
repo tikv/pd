@@ -33,6 +33,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 
 	"github.com/tikv/pd/pkg/cluster"
@@ -482,6 +483,48 @@ func TestUpStore(t *testing.T) {
 	// store 4 not exist
 	err = cluster.UpStore(10)
 	re.True(errors.ErrorEqual(err, errs.ErrStoreNotFound.FastGenByArgs(4)))
+}
+
+// TestAutoGCTombstoneStoreCleansUpStaleStoreLimit covers the auto-GC path
+// (checkStores' NodeState_Removed branch, via deleteStore) clearing a store
+// limit entry that survived bury. BuryStore already clears the store limit
+// at bury time, but an in-flight SetStoreLimit that read IsRemoved()==false
+// just before bury and wrote just after can race back in and re-add it;
+// deleteStore -- not just BuryStore -- has to clean it up too, since it is
+// also reached by the 30-day auto-GC timer with no manual
+// RemoveTombStoneRecords call involved.
+func TestAutoGCTombstoneStoreCleansUpStaleStoreLimit(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
+
+	store := newTestStores(1, "5.0.0")[0]
+	re.NoError(cluster.PutMetaStore(store.GetMeta()))
+	// Back-date the heartbeat so the store is already past gcTombstoneInterval
+	// once tombstoned, letting the second checkStores() call below auto-GC it.
+	re.NoError(cluster.setStore(cluster.GetStore(1).Clone(core.SetLastHeartbeatTS(time.Now().Add(-31 * 24 * time.Hour)))))
+
+	re.NoError(cluster.RemoveStore(1, true))
+	cluster.checkStores() // buries store 1; also clears its store limit.
+
+	// Simulate the race: re-add the persisted entry and gauge series
+	// directly, bypassing RaftCluster.SetStoreLimit's IsRemoved guard, the
+	// way a request that read IsRemoved()==false just before bury and wrote
+	// just after would.
+	cluster.opt.SetStoreLimit(1, storelimit.AddPeer, 60)
+	statistics.StoreLimitGauge.WithLabelValues("1", "add-peer").Set(60)
+
+	cluster.checkStores() // auto-GC: DownTime() > gcTombstoneInterval.
+
+	re.NotContains(cluster.opt.GetStoresLimit(), uint64(1))
+	// DeletePartialMatch returns how many series it found and removed, so a
+	// zero return here proves the auto-GC path already deleted it.
+	re.Zero(statistics.StoreLimitGauge.DeletePartialMatch(prometheus.Labels{"store": "1"}))
 }
 
 func TestRemovingProcess(t *testing.T) {
