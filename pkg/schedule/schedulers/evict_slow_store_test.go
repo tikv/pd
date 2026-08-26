@@ -412,6 +412,69 @@ func (suite *evictSlowStoreTestSuite) TestNetworkSlowStoreSkipsRemovedStore() {
 	re.False(ok)
 }
 
+func (suite *evictSlowStoreTestSuite) TestNetworkSlowStoreIgnoresKnownRemovedTargets() {
+	re := suite.Require()
+
+	// storeID4 is buried (known removed); the unregistered ID 99 is only
+	// ambiguous, not proof of removal -- it must stay included (see
+	// TestNetworkSlowStoreReachLimit's scale-out storeID5 case, which relies
+	// on an unregistered target staying included too).
+	suite.tc.PutStore(suite.tc.GetStore(storeID4).Clone(
+		core.SetStoreState(metapb.StoreState_Tombstone),
+	))
+
+	scores := map[uint64]uint64{
+		storeID2: 10,
+		storeID3: 10,
+		storeID4: 100,
+		99:       100,
+	}
+	filtered := filterNetworkSlowScores(suite.tc, scores, nil)
+
+	re.NotContains(filtered, uint64(storeID4))
+	re.Contains(filtered, uint64(99))
+	re.Contains(filtered, uint64(storeID2))
+	re.Contains(filtered, uint64(storeID3))
+}
+
+func (suite *evictSlowStoreTestSuite) TestNetworkSlowDenominatorIgnoresRemovedRecoveryEntries() {
+	re := suite.Require()
+
+	// storeID4 was already removed, but a concurrent tryRecoverNetworkSlowStores
+	// round hasn't cleaned up its recovery-map entry yet.
+	suite.tc.PutStore(suite.tc.GetStore(storeID4).Clone(
+		core.SetStoreState(metapb.StoreState_Tombstone),
+	))
+	networkSlowStoreRecoverStartAts := map[uint64]*time.Time{
+		storeID4: nil,
+	}
+
+	allStores := []*core.StoreInfo{
+		suite.tc.GetStore(storeID1),
+		suite.tc.GetStore(storeID2),
+		suite.tc.GetStore(storeID3),
+	}
+	// Only storeID2 actually reports storeID1 as problematic; storeID3 does
+	// not, so consensus (all live peers, excluding this store and any live
+	// recovering peer) is not reached.
+	problematicNetwork := map[uint64]map[uint64]struct{}{
+		storeID1: {storeID2: {}},
+	}
+
+	store := suite.tc.GetStore(storeID1).Clone(func(s *core.StoreInfo) {
+		s.GetStoreStats().NetworkSlowScores = map[uint64]uint64{
+			storeID2: 10,
+			// Kept below networkSlowStoreFluctuationThreshold so the
+			// fallback fluctuation check can't independently return true --
+			// this test isolates the "all others report problems" branch.
+			storeID3: 5,
+			99:       5,
+		}
+	})
+
+	re.False(isNetworkSlowStore(suite.tc, store, allStores, problematicNetwork, networkSlowStoreRecoverStartAts))
+}
+
 func (suite *evictSlowStoreTestSuite) TestNetworkSlowStoreUsesOnlyLiveStores() {
 	re := suite.Require()
 	es := suite.es.(*evictSlowStoreScheduler)

@@ -43,28 +43,70 @@ type RegionRuleFitCacheManager struct {
 	mu           syncutil.RWMutex
 	regionCaches map[uint64]*regionRuleFitCache
 	storeCaches  map[uint64]*storeCache
+	// storesOfRegion is a reverse index from storeID to the IDs of cached
+	// regions whose fit references it. SetCache's existing-entry promotion
+	// path (the hitCount>=minHitCountToCacheHit branch) re-checks storeSet
+	// freshness through allStoresLive, but that read is not synchronized
+	// with a concurrent bury: allStoresLive/storeSet.GetStore reads
+	// StoresInfo's own lock, entirely independent of manager.mu, so a
+	// promotion can still land using a pre-bury snapshot after the bury
+	// completed. Unlike storeCaches, regionCaches has no other path that
+	// gets swept when a store is removed, so RemoveStoreCache uses this
+	// index to evict any region cache entry that referenced the removed
+	// store, closing that gap.
+	storesOfRegion map[uint64]map[uint64]struct{}
 }
 
 // NewRegionRuleFitCacheManager returns RegionRuleFitCacheManager
 func NewRegionRuleFitCacheManager() *RegionRuleFitCacheManager {
 	return &RegionRuleFitCacheManager{
-		regionCaches: make(map[uint64]*regionRuleFitCache),
-		storeCaches:  make(map[uint64]*storeCache),
+		regionCaches:   make(map[uint64]*regionRuleFitCache),
+		storeCaches:    make(map[uint64]*storeCache),
+		storesOfRegion: make(map[uint64]map[uint64]struct{}),
 	}
 }
 
-// RemoveStoreCache removes the store cache with a given store ID.
+// RemoveStoreCache removes the store cache with a given store ID, and evicts
+// any region cache entry whose fit referenced it.
 func (manager *RegionRuleFitCacheManager) RemoveStoreCache(storeID uint64) {
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
 	delete(manager.storeCaches, storeID)
+	regionIDs := make([]uint64, 0, len(manager.storesOfRegion[storeID]))
+	for regionID := range manager.storesOfRegion[storeID] {
+		regionIDs = append(regionIDs, regionID)
+	}
+	for _, regionID := range regionIDs {
+		manager.removeRegionCacheLocked(regionID)
+	}
+	delete(manager.storesOfRegion, storeID)
 }
 
 // Invalid cache by regionID
 func (manager *RegionRuleFitCacheManager) Invalid(regionID uint64) {
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
+	manager.removeRegionCacheLocked(regionID)
+}
+
+// removeRegionCacheLocked deletes a region's cache entry and the
+// storesOfRegion index entries it registered. Callers must hold manager.mu.
+func (manager *RegionRuleFitCacheManager) removeRegionCacheLocked(regionID uint64) {
+	cache, ok := manager.regionCaches[regionID]
+	if !ok {
+		return
+	}
 	delete(manager.regionCaches, regionID)
+	for _, sc := range cache.regionStores {
+		regions, ok := manager.storesOfRegion[sc.storeID]
+		if !ok {
+			continue
+		}
+		delete(regions, regionID)
+		if len(regions) == 0 {
+			delete(manager.storesOfRegion, sc.storeID)
+		}
+	}
 }
 
 // CheckAndGetCache checks whether the region and rules are changed for the stored cache
@@ -106,7 +148,7 @@ func (manager *RegionRuleFitCacheManager) SetCache(storeSet StoreSet, region *co
 				// scheduling decision. Evict the entry instead, so the next
 				// caller recomputes and re-validates through the cacheable
 				// path below.
-				delete(manager.regionCaches, region.GetID())
+				manager.removeRegionCacheLocked(region.GetID())
 				return
 			}
 			cache.bestFit = fit
@@ -177,6 +219,17 @@ func storesEqual(a []*storeCache, b []*core.StoreInfo) bool {
 
 func (manager *RegionRuleFitCacheManager) toRegionRuleFitCache(storeSet StoreSet, region *core.RegionInfo, fit *RegionFit) (*regionRuleFitCache, bool) {
 	storeCacheList, cacheable := manager.toStoreCacheList(storeSet, fit.regionStores)
+	if cacheable {
+		regionID := region.GetID()
+		for _, sc := range storeCacheList {
+			regions, ok := manager.storesOfRegion[sc.storeID]
+			if !ok {
+				regions = make(map[uint64]struct{})
+				manager.storesOfRegion[sc.storeID] = regions
+			}
+			regions[regionID] = struct{}{}
+		}
+	}
 	return &regionRuleFitCache{
 		region:       toRegionCache(region),
 		regionStores: storeCacheList,

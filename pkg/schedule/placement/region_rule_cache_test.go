@@ -295,6 +295,63 @@ func TestSetCacheDoesNotPromoteStaleFitAfterStoreRemoval(t *testing.T) {
 	re.False(ok && cache.bestFit != nil)
 }
 
+// buryAfterReadStoreSet wraps a *core.StoresInfo and buries the target store
+// as a side effect of the first GetStore(target) call, but still returns the
+// pre-bury snapshot from that same call -- modeling allStoresLive's read
+// racing a concurrent bury that completes between its read and SetCache
+// using the result, since the two are not synchronized by manager.mu.
+type buryAfterReadStoreSet struct {
+	*core.StoresInfo
+	target uint64
+	buried bool
+}
+
+func (s *buryAfterReadStoreSet) GetStore(id uint64) *core.StoreInfo {
+	store := s.StoresInfo.GetStore(id)
+	if id == s.target && !s.buried {
+		s.buried = true
+		s.StoresInfo.PutStore(store.Clone(
+			core.SetStoreState(metapb.StoreState_Tombstone),
+		))
+	}
+	return store
+}
+
+func TestSetCachePromotionCannotRaceStoreRemoval(t *testing.T) {
+	re := require.New(t)
+	manager := NewRegionRuleFitCacheManager()
+
+	stores := mockStores(3)
+	storeSet := core.NewStoresInfo()
+	for _, store := range stores {
+		storeSet.PutStore(store)
+	}
+	region := mockRegion(3, 0)
+	rules := addExtraRules(0)
+	fit := fitRegion(stores, region, rules, false)
+	fit.regionStores = stores
+	fit.rules = rules
+
+	manager.SetCache(storeSet, region, fit)
+	cache := manager.regionCaches[region.GetID()]
+	re.NotNil(cache)
+	cache.hitCount = minHitCountToCacheHit - 1
+
+	// allStoresLive reads the last store as still live (the pre-bury
+	// snapshot), then the bury completes as a side effect of that same read;
+	// the promotion below still goes through and writes cache.bestFit.
+	target := stores[len(stores)-1].GetID()
+	racingStoreSet := &buryAfterReadStoreSet{StoresInfo: storeSet, target: target}
+	manager.SetCache(racingStoreSet, region, fit)
+
+	// The cleanup that would normally run right after the bury completes.
+	manager.RemoveStoreCache(target)
+
+	hit, cachedFit := manager.CheckAndGetCache(region, rules, stores)
+	re.False(hit)
+	re.Nil(cachedFit)
+}
+
 func (manager *RegionRuleFitCacheManager) mockRegionRuleFitCache(region *core.RegionInfo, rules []*Rule, regionStores []*core.StoreInfo) *regionRuleFitCache {
 	storeSet := core.NewStoresInfo()
 	for _, s := range regionStores {
