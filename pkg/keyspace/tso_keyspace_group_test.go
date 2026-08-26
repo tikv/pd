@@ -21,8 +21,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
@@ -171,6 +174,35 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceAssignment() {
 		re.NoError(err)
 		re.Len(kg.Keyspaces, 33)
 	}
+}
+
+func (suite *keyspaceGroupTestSuite) TestRemoveKeyspaceCleansInfoMetrics() {
+	re := suite.Require()
+	resetKeyspaceInfoMetrics()
+	suite.T().Cleanup(resetKeyspaceInfoMetrics)
+
+	meta, err := suite.kg.CreateKeyspace(&CreateKeyspaceRequest{
+		Name:       "test-remove-metrics",
+		Config:     map[string]string{},
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+	SetKeyspaceInfoMetrics(meta.GetId(), meta.GetName())
+	re.Equal(1, testutil.CollectAndCount(keyspaceInfo))
+
+	for _, state := range []keyspacepb.KeyspaceState{
+		keyspacepb.KeyspaceState_DISABLED,
+		keyspacepb.KeyspaceState_ARCHIVED,
+		keyspacepb.KeyspaceState_TOMBSTONE,
+	} {
+		_, err = suite.kg.UpdateKeyspaceState(meta.GetName(), state, time.Now().Unix())
+		re.NoError(err)
+	}
+	groupID, err := suite.kgm.GetGroupByKeyspaceID(meta.GetId())
+	re.NoError(err)
+	_, err = suite.kgm.RemoveKeyspacesFromGroup(groupID, suite.kg, []uint32{meta.GetId()})
+	re.NoError(err)
+	re.Equal(0, testutil.CollectAndCount(keyspaceInfo))
 }
 
 func (suite *keyspaceGroupTestSuite) TestUpdateKeyspace() {

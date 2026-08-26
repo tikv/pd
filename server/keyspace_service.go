@@ -77,6 +77,9 @@ func (s *KeyspaceServer) LoadKeyspace(_ context.Context, request *keyspacepb.Loa
 		err = errs.ErrKeyspaceNotFound
 		return &keyspacepb.LoadKeyspaceResponse{Header: getErrorHeader(err)}, nil
 	}
+	if s.cfg.Keyspace.EnableKeyspaceLevelMetrics {
+		keyspace.SetKeyspaceInfoMetrics(meta.GetId(), meta.GetName())
+	}
 	return &keyspacepb.LoadKeyspaceResponse{
 		Header:   grpcutil.WrapHeader(),
 		Keyspace: meta,

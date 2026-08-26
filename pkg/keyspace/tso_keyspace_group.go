@@ -568,11 +568,13 @@ func (m *GroupManager) RemoveKeyspacesFromGroup(groupID uint32, km *Manager, key
 	defer m.Unlock()
 
 	var (
-		kg  *endpoint.KeyspaceGroup
-		err error
+		kg         *endpoint.KeyspaceGroup
+		removedIDs []uint32
+		err        error
 	)
 
 	if err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
+		removedIDs = removedIDs[:0]
 		// Load the keyspace group
 		kg, err = m.store.LoadKeyspaceGroup(txn, groupID)
 		if err != nil {
@@ -616,6 +618,7 @@ func (m *GroupManager) RemoveKeyspacesFromGroup(groupID uint32, km *Manager, key
 				if err != nil {
 					return err
 				}
+				removedIDs = append(removedIDs, ks)
 			}
 		}
 		kg.Keyspaces = newKeyspaces
@@ -624,6 +627,9 @@ func (m *GroupManager) RemoveKeyspacesFromGroup(groupID uint32, km *Manager, key
 		return m.store.SaveKeyspaceGroup(txn, kg)
 	}); err != nil {
 		return nil, err
+	}
+	for _, id := range removedIDs {
+		deleteKeyspaceInfoMetrics(id)
 	}
 	// Update the cache
 	userKind := endpoint.StringUserKind(kg.UserKind)

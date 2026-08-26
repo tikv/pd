@@ -16,6 +16,7 @@ package keyspace
 
 import (
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -65,7 +66,19 @@ var (
 	createKeyspaceStepDurationSplitRegion    prometheus.Observer
 	createKeyspaceStepDurationEnableKeyspace prometheus.Observer
 	createKeyspaceStepDurationUpdateKG       prometheus.Observer
+
+	keyspaceInfoMetrics = struct {
+		sync.Mutex
+		items map[uint32]keyspaceInfoMetric
+	}{
+		items: make(map[uint32]keyspaceInfoMetric),
+	}
 )
+
+type keyspaceInfoMetric struct {
+	name  string
+	gauge prometheus.Gauge
+}
 
 func init() {
 	prometheus.MustRegister(keyspaceInfo)
@@ -81,14 +94,40 @@ func init() {
 
 // SetKeyspaceInfoMetrics sets the keyspace ID-to-name mapping metric.
 func SetKeyspaceInfoMetrics(id uint32, name string) {
-	// A keyspace's ID-to-name mapping is immutable in normal operation. Repeated
-	// client observations therefore reuse the same GaugeVec child; deleting it
-	// first would only add a full-vector scan to every GetAllKeyspaces request.
-	keyspaceInfo.WithLabelValues(strconv.FormatUint(uint64(id), 10), name).Set(1)
+	keyspaceInfoMetrics.Lock()
+	defer keyspaceInfoMetrics.Unlock()
+
+	if metric, ok := keyspaceInfoMetrics.items[id]; ok {
+		if metric.name == name {
+			metric.gauge.Set(1)
+			return
+		}
+		keyspaceInfo.DeleteLabelValues(strconv.FormatUint(uint64(id), 10), metric.name)
+	}
+	idStr := strconv.FormatUint(uint64(id), 10)
+	gauge := keyspaceInfo.WithLabelValues(idStr, name)
+	gauge.Set(1)
+	keyspaceInfoMetrics.items[id] = keyspaceInfoMetric{name: name, gauge: gauge}
+}
+
+func deleteKeyspaceInfoMetrics(id uint32) {
+	keyspaceInfoMetrics.Lock()
+	defer keyspaceInfoMetrics.Unlock()
+
+	metric, ok := keyspaceInfoMetrics.items[id]
+	if !ok {
+		return
+	}
+	keyspaceInfo.DeleteLabelValues(strconv.FormatUint(uint64(id), 10), metric.name)
+	delete(keyspaceInfoMetrics.items, id)
 }
 
 func resetKeyspaceInfoMetrics() {
+	keyspaceInfoMetrics.Lock()
+	defer keyspaceInfoMetrics.Unlock()
+
 	keyspaceInfo.Reset()
+	clear(keyspaceInfoMetrics.items)
 }
 
 // createKeyspaceTracer traces create-keyspace steps: one callback per step (same pattern as RegionHeartbeatProcessTracer), records metrics and logs per step.
