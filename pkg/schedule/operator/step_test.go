@@ -17,6 +17,7 @@ package operator
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -50,12 +51,14 @@ func (suite *operatorStepTestSuite) SetupTest() {
 	ctx, cancel := context.WithCancel(context.Background())
 	suite.cancel = cancel
 	suite.cluster = mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
-	for i := 1; i <= 10; i++ {
+	for i := 1; i <= 11; i++ {
 		suite.cluster.PutStoreWithLabels(uint64(i))
 	}
 	suite.cluster.SetStoreDown(8)
 	suite.cluster.SetStoreDown(9)
 	suite.cluster.SetStoreDown(10)
+	// store 11 is unhealthy (>10min unreachable) but not yet down (<30min default MaxStoreDownTime).
+	suite.cluster.SetStoreLastHeartbeatInterval(11, 11*time.Minute)
 }
 
 func (suite *operatorStepTestSuite) TearDownTest() {
@@ -579,13 +582,120 @@ func (suite *operatorStepTestSuite) TestSwitchToWitness() {
 	suite.check(re, step, "switch peer 2 on store 2 to witness", testCases)
 }
 
+// TestNeedStoreHealthCheck verifies that store 11 (unhealthy but not yet down)
+// only fails CheckInProgress for steps that add data to the target store, and
+// only when the caller opts into needStoreHealthCheck.
+func (suite *operatorStepTestSuite) TestNeedStoreHealthCheck() {
+	re := suite.Require()
+
+	unhealthyPeers := []*metapb.Peer{
+		{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+		{Id: 11, StoreId: 11, Role: metapb.PeerRole_Voter},
+	}
+
+	tl := TransferLeader{FromStore: 1, ToStore: 11}
+	suite.checkWithHealthCheck(re, tl, "transfer leader from store 1 to store 11",
+		[]testCase{{unhealthyPeers, 0, false, re.NoError}}, false)
+	suite.checkWithHealthCheck(re, tl, "transfer leader from store 1 to store 11",
+		[]testCase{{unhealthyPeers, 0, false, re.Error}}, true)
+
+	ap := AddPeer{ToStore: 11, PeerID: 11}
+	suite.checkWithHealthCheck(re, ap, "add peer 11 on store 11",
+		[]testCase{{[]*metapb.Peer{{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter}}, 0, false, re.NoError}}, false)
+	suite.checkWithHealthCheck(re, ap, "add peer 11 on store 11",
+		[]testCase{{[]*metapb.Peer{{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter}}, 0, false, re.Error}}, true)
+
+	al := AddLearner{ToStore: 11, PeerID: 11}
+	suite.checkWithHealthCheck(re, al, "add learner peer 11 on store 11",
+		[]testCase{{[]*metapb.Peer{{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter}}, 0, false, re.NoError}}, false)
+	suite.checkWithHealthCheck(re, al, "add learner peer 11 on store 11",
+		[]testCase{{[]*metapb.Peer{{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter}}, 0, false, re.Error}}, true)
+
+	// BecomeWitness sheds data rather than adding it, so it must ignore
+	// needStoreHealthCheck even when the caller passes true.
+	bw := BecomeWitness{StoreID: 11, PeerID: 11}
+	witnessPeers := []*metapb.Peer{
+		{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+		{Id: 11, StoreId: 11, Role: metapb.PeerRole_Learner},
+	}
+	suite.checkWithHealthCheck(re, bw, "switch peer 11 on store 11 to witness",
+		[]testCase{{witnessPeers, 0, false, re.NoError}}, true)
+
+	// Once the target peer already exists (even pending), AddPeer/AddLearner
+	// must stop enforcing the extra check: cancelling wouldn't undo the conf
+	// change that already landed, and would just orphan the peer.
+	apLandedPeers := []*metapb.Peer{
+		{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+		{Id: 11, StoreId: 11, Role: metapb.PeerRole_Voter},
+	}
+	suite.checkWithHealthCheck(re, ap, "add peer 11 on store 11",
+		[]testCase{{apLandedPeers, 1, true, re.NoError}}, true)
+
+	alLandedPeers := []*metapb.Peer{
+		{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+		{Id: 11, StoreId: 11, Role: metapb.PeerRole_Learner},
+	}
+	suite.checkWithHealthCheck(re, al, "add learner peer 11 on store 11",
+		[]testCase{{alLandedPeers, 1, true, re.NoError}}, true)
+
+	// BecomeNonWitness: IsWitness still true means the flip hasn't landed yet,
+	// so the check still applies; IsWitness false means it already flipped
+	// and is mid data catch-up, so the check must stop applying.
+	bn := BecomeNonWitness{StoreID: 11, PeerID: 11}
+	notYetFlippedPeers := []*metapb.Peer{
+		{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+		{Id: 11, StoreId: 11, Role: metapb.PeerRole_Voter, IsWitness: true},
+	}
+	suite.checkWithHealthCheck(re, bn, "switch peer 11 on store 11 to non-witness",
+		[]testCase{{notYetFlippedPeers, 0, false, re.Error}}, true)
+	alreadyFlippedPeers := []*metapb.Peer{
+		{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+		{Id: 11, StoreId: 11, Role: metapb.PeerRole_Voter, IsWitness: false},
+	}
+	suite.checkWithHealthCheck(re, bn, "switch peer 11 on store 11 to non-witness",
+		[]testCase{{alreadyFlippedPeers, 1, true, re.NoError}}, true)
+
+	// PromoteLearner is an atomic role flip with no pending sub-state, so it
+	// can honor needStoreHealthCheck unconditionally.
+	pl := PromoteLearner{ToStore: 11, PeerID: 11}
+	notPromotedPeers := []*metapb.Peer{
+		{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+		{Id: 11, StoreId: 11, Role: metapb.PeerRole_Learner},
+	}
+	suite.checkWithHealthCheck(re, pl, "promote learner peer 11 on store 11 to voter",
+		[]testCase{{notPromotedPeers, 0, false, re.NoError}}, false)
+	suite.checkWithHealthCheck(re, pl, "promote learner peer 11 on store 11 to voter",
+		[]testCase{{notPromotedPeers, 0, false, re.Error}}, true)
+
+	// ChangePeerV2Enter: only reject a PromoteLearners target while it's
+	// still Learner (hasn't entered joint state); once IncomingVoter, the
+	// conf change already landed and cancelling can't undo it.
+	cpe := ChangePeerV2Enter{PromoteLearners: []PromoteLearner{{PeerID: 11, ToStore: 11}}}
+	notInJointStatePeers := []*metapb.Peer{
+		{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+		{Id: 11, StoreId: 11, Role: metapb.PeerRole_Learner},
+	}
+	suite.checkWithHealthCheck(re, cpe, "use joint consensus, promote learner peer 11 on store 11 to voter",
+		[]testCase{{notInJointStatePeers, 0, false, re.Error}}, true)
+	inJointStatePeers := []*metapb.Peer{
+		{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+		{Id: 11, StoreId: 11, Role: metapb.PeerRole_IncomingVoter},
+	}
+	suite.checkWithHealthCheck(re, cpe, "use joint consensus, promote learner peer 11 on store 11 to voter",
+		[]testCase{{inJointStatePeers, 1, true, re.NoError}}, true)
+}
+
 func (suite *operatorStepTestSuite) check(re *require.Assertions, step OpStep, desc string, testCases []testCase) {
+	suite.checkWithHealthCheck(re, step, desc, testCases, false)
+}
+
+func (suite *operatorStepTestSuite) checkWithHealthCheck(re *require.Assertions, step OpStep, desc string, testCases []testCase, needStoreHealthCheck bool) {
 	re.Equal(desc, step.String())
 	for _, testCase := range testCases {
 		region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: testCase.Peers}, testCase.Peers[0])
 		re.Equal(testCase.ConfVerChanged, step.ConfVerChanged(region))
 		re.Equal(testCase.IsFinish, step.IsFinish(region))
-		err := step.CheckInProgress(suite.cluster.GetBasicCluster(), suite.cluster.GetSharedConfig(), region)
+		err := step.CheckInProgress(suite.cluster.GetBasicCluster(), suite.cluster.GetSharedConfig(), region, needStoreHealthCheck)
 		testCase.CheckInProgress(err)
 		_ = step.GetCmd(region, true)
 

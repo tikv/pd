@@ -64,6 +64,7 @@ func newBalanceRegionScheduler(opController *operator.Controller, conf *balanceR
 	scheduler.filters = []filter.Filter{
 		&filter.StoreStateFilter{ActionScope: scheduler.GetName(), MoveRegion: true, OperatorLevel: constant.Medium},
 		filter.NewSpecialUseFilter(scheduler.GetName()),
+		filter.NewUnhealthyStoreFilter(scheduler.GetName()),
 	}
 	scheduler.filterCounter = filter.NewCounter(scheduler.GetName())
 	return scheduler
@@ -269,6 +270,7 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 		)
 		op.SetAdditionalInfo("sourceScore", strconv.FormatFloat(solver.sourceScore, 'f', 2, 64))
 		op.SetAdditionalInfo("targetScore", strconv.FormatFloat(solver.targetScore, 'f', 2, 64))
+		op.SetStoreHealthCheck(true)
 		return op
 	}
 

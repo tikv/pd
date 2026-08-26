@@ -26,6 +26,7 @@ var (
 	statusStoreDown         = plan.NewStatus(plan.StatusStoreDown)
 	statusStoreRemoved      = plan.NewStatus(plan.StatusStoreRemoved)
 	statusStoreDisconnected = plan.NewStatus(plan.StatusStoreDisconnected)
+	statusStoreUnhealthy    = plan.NewStatus(plan.StatusStoreUnhealthy)
 	statusStoresRemoving    = plan.NewStatus(plan.StatusStoreRemoving)
 	statusStoreLowSpace     = plan.NewStatus(plan.StatusStoreLowSpace)
 	statusStoreBusy         = plan.NewStatus(plan.StatusStoreBusy)

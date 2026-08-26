@@ -301,6 +301,31 @@ func TestStoreStateFilter(t *testing.T) {
 	check(store, testCases)
 }
 
+func TestUnhealthyStoreFilter(t *testing.T) {
+	re := require.New(t)
+	f := NewUnhealthyStoreFilter("")
+	opt := mockconfig.NewTestOptions()
+	store := core.NewStoreInfoWithLabel(1, map[string]string{})
+
+	// Healthy.
+	store = store.Clone(core.SetLastHeartbeatTS(time.Now()))
+	re.Equal(plan.StatusOK, f.Source(opt, store).StatusCode)
+	re.Equal(plan.StatusOK, f.Target(opt, store).StatusCode)
+
+	// Disconnected (>20s) but not yet Unhealthy (<10min): not rejected.
+	store = store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-5 * time.Minute)))
+	re.Equal(plan.StatusOK, f.Source(opt, store).StatusCode)
+	re.Equal(plan.StatusOK, f.Target(opt, store).StatusCode)
+
+	// Unhealthy (>10min unreachable, still under the 30min down threshold):
+	// rejected as a source; Target is always OK (regionTarget/leaderTarget
+	// already reject it earlier via isDisconnected, this filter adds nothing
+	// on the target side).
+	store = store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-15 * time.Minute)))
+	re.Equal(plan.StatusCode(plan.StatusStoreUnhealthy), f.Source(opt, store).StatusCode)
+	re.Equal(plan.StatusOK, f.Target(opt, store).StatusCode)
+}
+
 func TestHotRegionEvictedTargetFilter(t *testing.T) {
 	re := require.New(t)
 	filter := NewHotRegionEvictedTargetFilter("")

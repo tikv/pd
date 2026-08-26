@@ -57,7 +57,30 @@ type OpStep interface {
 	fmt.Stringer
 	ConfVerChanged(region *core.RegionInfo) uint64
 	IsFinish(region *core.RegionInfo) bool
-	CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo) error
+	// CheckInProgress validates that the step is still safe to keep running.
+	// needStoreHealthCheck is an opt-in, per-operator permission (see
+	// Operator.SetStoreHealthCheck) to additionally reject a target that has
+	// gone Unhealthy mid-execution, on top of the unconditional Down check in
+	// validateStore. A new step implementation must decide how to handle it:
+	//   - steps that shed responsibility from their target rather than adding
+	//     to it (e.g. RemovePeer, BecomeWitness, DemoteVoter) should ignore
+	//     the parameter entirely: the target doesn't need to be healthy for
+	//     the step to complete, and rejecting the removal of an unhealthy
+	//     peer would be backwards.
+	//   - steps that add responsibility/data to their target and complete
+	//     atomically with no pending/data-transfer sub-state (e.g.
+	//     TransferLeader, PromoteLearner) may honor the flag unconditionally:
+	//     if this step's own effect had already landed, IsFinish() would be
+	//     true and this method wouldn't be called for it anymore, so it's
+	//     always safe to reject here.
+	//   - steps that add responsibility/data but go through a pending
+	//     sub-state (e.g. AddPeer, AddLearner, BecomeNonWitness) must only
+	//     honor the flag before that sub-state begins (peer not created yet,
+	//     or role not yet flipped): once the conf change has landed, even if
+	//     still pending, cancelling the operator can't undo it and orphans
+	//     the peer with no other checker guaranteed to pick it up before the
+	//     store crosses the (much larger) max-store-down-time threshold.
+	CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo, needStoreHealthCheck bool) error
 	Influence(opInfluence *OpInfluence, region *core.RegionInfo)
 	Timeout(regionSize int64) time.Duration
 	GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *hbstream.Operation
@@ -91,7 +114,7 @@ func (tl TransferLeader) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (tl TransferLeader) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo) error {
+func (tl TransferLeader) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo, needStoreHealthCheck bool) error {
 	errList := make([]error, 0, len(tl.ToStores)+1)
 	for _, storeID := range append(tl.ToStores, tl.ToStore) {
 		peer := region.GetStorePeer(tl.ToStore)
@@ -103,7 +126,7 @@ func (tl TransferLeader) CheckInProgress(ci *core.BasicCluster, config config.Sh
 			errList = append(errList, errors.New("peer already is a learner"))
 			continue
 		}
-		if err := validateStore(ci, config, storeID); err != nil {
+		if err := validateStore(ci, config, storeID, needStoreHealthCheck); err != nil {
 			errList = append(errList, err)
 			continue
 		}
@@ -196,11 +219,14 @@ func (ap AddPeer) Influence(opInfluence *OpInfluence, region *core.RegionInfo) {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (ap AddPeer) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo) error {
-	if err := validateStore(ci, config, ap.ToStore); err != nil {
+func (ap AddPeer) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo, needStoreHealthCheck bool) error {
+	peer := region.GetStorePeer(ap.ToStore)
+	// Once the peer already exists on the target (even pending), the conf
+	// change has already landed; cancelling the operator here wouldn't undo
+	// that, so stop enforcing the extra health check.
+	if err := validateStore(ci, config, ap.ToStore, needStoreHealthCheck && peer == nil); err != nil {
 		return err
 	}
-	peer := region.GetStorePeer(ap.ToStore)
 	if peer != nil && peer.GetId() != ap.PeerID {
 		return errors.Errorf("peer %d has already existed in store %d, the timeout is trying to add peer %d on the same store", peer.GetId(), ap.ToStore, ap.PeerID)
 	}
@@ -250,8 +276,10 @@ func (bw BecomeWitness) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (bw BecomeWitness) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo) error {
-	if err := validateStore(ci, config, bw.StoreID); err != nil {
+func (bw BecomeWitness) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo, _ bool) error {
+	// BecomeWitness sheds data off the store rather than adding to it, so unlike
+	// AddPeer/AddLearner/BecomeNonWitness it never needs the extra health check.
+	if err := validateStore(ci, config, bw.StoreID, false); err != nil {
 		return err
 	}
 	peer := region.GetStorePeer(bw.StoreID)
@@ -312,11 +340,17 @@ func (bn BecomeNonWitness) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (bn BecomeNonWitness) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo) error {
-	if err := validateStore(ci, config, bn.StoreID); err != nil {
+func (bn BecomeNonWitness) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo, needStoreHealthCheck bool) error {
+	peer := region.GetStorePeer(bn.StoreID)
+	// This peer already exists (it's an existing witness); the thing that can
+	// still land is the witness->non-witness flip itself. IsWitness==true
+	// means the flip hasn't happened yet, so cancelling is safe; once it
+	// flips to false the store is mid data catch-up, same as AddLearner's
+	// pending window, and cancelling can't undo it.
+	stillPending := peer != nil && peer.IsWitness
+	if err := validateStore(ci, config, bn.StoreID, needStoreHealthCheck && stillPending); err != nil {
 		return err
 	}
-	peer := region.GetStorePeer(bn.StoreID)
 	if peer == nil || peer.GetId() != bn.PeerID {
 		return errors.New("peer does not exist")
 	}
@@ -398,14 +432,14 @@ func (bsw BatchSwitchWitness) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (bsw BatchSwitchWitness) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo) error {
+func (bsw BatchSwitchWitness) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo, needStoreHealthCheck bool) error {
 	for _, w := range bsw.ToWitnesses {
-		if err := w.CheckInProgress(ci, config, region); err != nil {
+		if err := w.CheckInProgress(ci, config, region, needStoreHealthCheck); err != nil {
 			return err
 		}
 	}
 	for _, nw := range bsw.ToNonWitnesses {
-		if err := nw.CheckInProgress(ci, config, region); err != nil {
+		if err := nw.CheckInProgress(ci, config, region, needStoreHealthCheck); err != nil {
 			return err
 		}
 	}
@@ -481,11 +515,13 @@ func (al AddLearner) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (al AddLearner) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo) error {
-	if err := validateStore(ci, config, al.ToStore); err != nil {
+func (al AddLearner) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo, needStoreHealthCheck bool) error {
+	peer := region.GetStorePeer(al.ToStore)
+	// Same reasoning as AddPeer: once the peer exists (even pending), the
+	// conf change has already landed and cancelling can't undo it.
+	if err := validateStore(ci, config, al.ToStore, needStoreHealthCheck && peer == nil); err != nil {
 		return err
 	}
-	peer := region.GetStorePeer(al.ToStore)
 	if peer == nil {
 		return nil
 	}
@@ -567,7 +603,15 @@ func (pl PromoteLearner) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (pl PromoteLearner) CheckInProgress(_ *core.BasicCluster, _ config.SharedConfigProvider, region *core.RegionInfo) error {
+func (pl PromoteLearner) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo, needStoreHealthCheck bool) error {
+	// Promoting is an atomic role flip with no pending/data-transfer phase
+	// (unlike AddLearner): if this step's own promotion had already landed,
+	// IsFinish() would be true and Operator.Check would have already moved
+	// past it, so CheckInProgress being called at all means it's still safe
+	// to reject here.
+	if err := validateStore(ci, config, pl.ToStore, needStoreHealthCheck); err != nil {
+		return err
+	}
 	peer := region.GetStorePeer(pl.ToStore)
 	if peer.GetId() != pl.PeerID {
 		return errors.New("peer does not exist")
@@ -619,7 +663,7 @@ func (rp RemovePeer) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (rp RemovePeer) CheckInProgress(_ *core.BasicCluster, _ config.SharedConfigProvider, region *core.RegionInfo) error {
+func (rp RemovePeer) CheckInProgress(_ *core.BasicCluster, _ config.SharedConfigProvider, region *core.RegionInfo, _ bool) error {
 	if rp.FromStore == region.GetLeader().GetStoreId() {
 		return errors.New("cannot remove leader peer")
 	}
@@ -693,7 +737,7 @@ func (mr MergeRegion) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (MergeRegion) CheckInProgress(*core.BasicCluster, config.SharedConfigProvider, *core.RegionInfo) error {
+func (MergeRegion) CheckInProgress(*core.BasicCluster, config.SharedConfigProvider, *core.RegionInfo, bool) error {
 	return nil
 }
 
@@ -761,7 +805,7 @@ func (SplitRegion) Influence(opInfluence *OpInfluence, region *core.RegionInfo) 
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (SplitRegion) CheckInProgress(*core.BasicCluster, config.SharedConfigProvider, *core.RegionInfo) error {
+func (SplitRegion) CheckInProgress(*core.BasicCluster, config.SharedConfigProvider, *core.RegionInfo, bool) error {
 	return nil
 }
 
@@ -886,7 +930,7 @@ func (cpe ChangePeerV2Enter) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (cpe ChangePeerV2Enter) CheckInProgress(_ *core.BasicCluster, _ config.SharedConfigProvider, region *core.RegionInfo) error {
+func (cpe ChangePeerV2Enter) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo, needStoreHealthCheck bool) error {
 	inJointState, notInJointState := false, false
 	for _, pl := range cpe.PromoteLearners {
 		peer := region.GetStorePeer(pl.ToStore)
@@ -902,6 +946,16 @@ func (cpe ChangePeerV2Enter) CheckInProgress(_ *core.BasicCluster, _ config.Shar
 			return errors.New("cannot promote a demoting voter")
 		default:
 			return errors.New("unexpected peer role")
+		}
+		// Only reject before this store's own promotion has entered joint
+		// state; once IncomingVoter, the conf change already landed and
+		// cancelling wouldn't undo it. DemoteVoters (below) shed voter
+		// responsibility rather than gain it, so they're never checked here,
+		// same as RemovePeer/BecomeWitness.
+		if needStoreHealthCheck && peer.GetRole() != metapb.PeerRole_IncomingVoter {
+			if err := validateStore(ci, config, pl.ToStore, true); err != nil {
+				return err
+			}
 		}
 	}
 	for _, dv := range cpe.DemoteVoters {
@@ -1015,7 +1069,7 @@ func (cpl ChangePeerV2Leave) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (cpl ChangePeerV2Leave) CheckInProgress(_ *core.BasicCluster, _ config.SharedConfigProvider, region *core.RegionInfo) error {
+func (cpl ChangePeerV2Leave) CheckInProgress(_ *core.BasicCluster, _ config.SharedConfigProvider, region *core.RegionInfo, _ bool) error {
 	inJointState, notInJointState, demoteLeader := false, false, false
 	leaderStoreID := region.GetLeader().GetStoreId()
 
@@ -1093,10 +1147,13 @@ func (ChangePeerV2Leave) GetCmd(_ *core.RegionInfo, useConfChangeV2 bool) *hbstr
 	}
 }
 
-func validateStore(ci *core.BasicCluster, config config.SharedConfigProvider, id uint64) error {
+func validateStore(ci *core.BasicCluster, config config.SharedConfigProvider, id uint64, needStoreHealthCheck bool) error {
 	store := ci.GetStore(id)
 	if store == nil {
 		return errors.New("target store does not exist")
+	}
+	if needStoreHealthCheck && store.IsUnhealthy() {
+		return errors.New("target store is unhealthy")
 	}
 	if store.DownTime() > config.GetMaxStoreDownTime() {
 		return errors.New("target store is down")

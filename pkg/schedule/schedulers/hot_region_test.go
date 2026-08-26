@@ -396,6 +396,7 @@ func checkHotWriteRegionPlacement(re *require.Assertions, enablePlacementRules b
 	re.NotEmpty(ops)
 	re.NotContains(ops[0].Step(1).String(), "transfer leader")
 	operatorutil.CheckTransferPeerWithLeaderTransfer(re, ops[0], operator.OpHotRegion, 1, 2)
+	re.True(ops[0].NeedStoreHealthCheck())
 	clearPendingInfluence(hb.(*hotScheduler))
 
 	err = tc.SetRule(&placement.Rule{

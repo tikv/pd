@@ -1104,6 +1104,9 @@ func (bs *balanceSolver) createOperator(region *core.RegionInfo, srcStoreID, dst
 				dstPeer)
 		}
 	}
+	if op != nil {
+		op.SetStoreHealthCheck(true)
+	}
 	return
 }
 

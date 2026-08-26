@@ -600,6 +600,46 @@ func (*hotRegionEvictedTargetFilter) Target(_ config.SharedConfigProvider, store
 	return statusOK
 }
 
+type unhealthyStoreFilter struct{ scope string }
+
+// NewUnhealthyStoreFilter creates a filter that rejects a store that has been
+// unreachable for a while (see core.StoreInfo.IsUnhealthy) as a schedule
+// source. It is deliberately kept separate from StoreStateFilter's shared
+// regionSource condition set: that set is also reused by
+// ReplicaStrategy.SelectStoreToRemove to pick which redundant peer to evict,
+// where excluding an unhealthy store would be backwards (see #11146).
+// Callers that want a load-balancing-style source (not a peer-eviction
+// candidate) to skip unhealthy stores should add this filter explicitly.
+func NewUnhealthyStoreFilter(scope string) Filter {
+	return &unhealthyStoreFilter{scope: scope}
+}
+
+// Scope returns the scheduler or the checker which the filter acts on.
+func (f *unhealthyStoreFilter) Scope() string {
+	return f.scope
+}
+
+// Type returns the type of the filter.
+func (*unhealthyStoreFilter) Type() filterType {
+	return storeStateUnhealthy
+}
+
+// Source filters stores when select them as schedule source.
+func (*unhealthyStoreFilter) Source(_ config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
+	if store.IsUnhealthy() {
+		return statusStoreUnhealthy
+	}
+	return statusOK
+}
+
+// Target filters stores when select them as schedule target. Target
+// selection already goes through StoreStateFilter's regionTarget/leaderTarget,
+// which reject a store far earlier via isDisconnected, so this filter has
+// nothing to add on the target side.
+func (*unhealthyStoreFilter) Target(config.SharedConfigProvider, *core.StoreInfo) *plan.Status {
+	return statusOK
+}
+
 // labelConstraintFilter is a filter that selects stores satisfy the constraints.
 type labelConstraintFilter struct {
 	scope       string
