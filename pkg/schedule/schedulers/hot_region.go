@@ -193,6 +193,14 @@ func (s *baseHotScheduler) summaryPendingInfluence(cluster sche.SchedulerCluster
 			utils.ForeachRegionStats(func(rwTy utils.RWType, dim int, kind utils.RegionStatKind) {
 				HotPendingSum.WithLabelValues(storeLabel, rwTy.String(), utils.DimToString(dim)).Set(infl.Loads[kind])
 			})
+			// The check above and this write are not atomic with DeleteStoreMetrics,
+			// so a bury landing in between can still let this write recreate the
+			// series after cleanup ran. Re-check right after writing to narrow that
+			// window; a store buried later still leaves a bounded residual until the
+			// next tick, which is an accepted, documented limitation.
+			if store := cluster.GetStore(storeID); store == nil || store.IsRemoved() {
+				HotPendingSum.DeletePartialMatch(prometheus.Labels{"store": storeLabel})
+			}
 		}
 	}
 }

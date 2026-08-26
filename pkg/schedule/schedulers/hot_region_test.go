@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+	"github.com/prometheus/client_golang/prometheus"
 	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -30,6 +31,7 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/types"
@@ -3020,6 +3022,62 @@ func TestSummaryPendingInfluenceSkipsRemovedStoreMetric(t *testing.T) {
 	hb.summaryPendingInfluence(tc, storeInfos)
 
 	re.Equal(float64(42), promtestutil.ToFloat64(metric))
+}
+
+// buryAfterGetStoreCluster wraps a sche.SchedulerCluster and buries the
+// target store as a side effect of the first GetStore(target) call, but
+// still returns the pre-bury snapshot from that same call -- modeling a
+// GetStore that raced a concurrent bury completing between its read and its
+// caller using the result.
+type buryAfterGetStoreCluster struct {
+	sche.SchedulerCluster
+	tc     *mockcluster.Cluster
+	target uint64
+	buried bool
+}
+
+func (c *buryAfterGetStoreCluster) GetStore(id uint64) *core.StoreInfo {
+	store := c.SchedulerCluster.GetStore(id)
+	if id == c.target && !c.buried {
+		c.buried = true
+		c.tc.PutStore(store.Clone(core.SetStoreState(metapb.StoreState_Tombstone)))
+	}
+	return store
+}
+
+func TestSummaryPendingInfluenceCannotRepublishAfterBury(t *testing.T) {
+	re := require.New(t)
+	defer HotPendingSum.Reset()
+
+	cancel, _, tc, _ := prepareSchedulersTest()
+	defer cancel()
+	hb := newBaseHotScheduler(nil, 0, 0, initHotRegionScheduleConfig())
+	storeID := uint64(1)
+	tc.PutStore(core.NewStoreInfo(&metapb.Store{
+		Id:        storeID,
+		NodeState: metapb.NodeState_Serving,
+	}))
+
+	loads := make([]float64, utils.RegionStatCount)
+	loads[utils.RegionWriteBytes] = 1
+	storeInfos := map[uint64]*statistics.StoreSummaryInfo{
+		storeID: {
+			StoreInfo:  tc.GetStore(storeID),
+			PendingSum: &statistics.Influence{Loads: loads},
+		},
+	}
+
+	// Simulate DeleteStoreMetrics having already run for this store, then a
+	// bury landing exactly between summaryPendingInfluence's pre-write check
+	// and the write completing.
+	racingCluster := &buryAfterGetStoreCluster{SchedulerCluster: tc, tc: tc, target: storeID}
+	hb.summaryPendingInfluence(racingCluster, storeInfos)
+
+	// The write must have happened for this to be a meaningful check: assert
+	// via DeletePartialMatch's return value (a series count), rather than
+	// reading the already-obtained Gauge handle, since a deleted series still
+	// reports its last-set value through that handle.
+	re.Equal(0, HotPendingSum.DeletePartialMatch(prometheus.Labels{"store": "1"}))
 }
 
 func TestBucketFirstStat(t *testing.T) {
