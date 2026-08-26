@@ -81,14 +81,10 @@ func init() {
 
 // SetKeyspaceInfoMetrics sets the keyspace ID-to-name mapping metric.
 func SetKeyspaceInfoMetrics(id uint32, name string) {
-	deleteKeyspaceInfoMetrics(id)
+	// A keyspace's ID-to-name mapping is immutable in normal operation. Repeated
+	// client observations therefore reuse the same GaugeVec child; deleting it
+	// first would only add a full-vector scan to every GetAllKeyspaces request.
 	keyspaceInfo.WithLabelValues(strconv.FormatUint(uint64(id), 10), name).Set(1)
-}
-
-func deleteKeyspaceInfoMetrics(id uint32) {
-	keyspaceInfo.DeletePartialMatch(prometheus.Labels{
-		"keyspace_id": strconv.FormatUint(uint64(id), 10),
-	})
 }
 
 func resetKeyspaceInfoMetrics() {

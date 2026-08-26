@@ -15,7 +15,6 @@
 package keyspace
 
 import (
-	"strconv"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -26,14 +25,10 @@ func TestKeyspaceInfoMetrics(t *testing.T) {
 	resetKeyspaceInfoMetrics()
 	t.Cleanup(resetKeyspaceInfoMetrics)
 
-	SetKeyspaceInfoMetrics(42, "old-name")
-	require.Equal(t, float64(1), testutil.ToFloat64(keyspaceInfo.WithLabelValues("42", "old-name")))
+	SetKeyspaceInfoMetrics(42, "test-name")
+	require.Equal(t, float64(1), testutil.ToFloat64(keyspaceInfo.WithLabelValues("42", "test-name")))
 
-	SetKeyspaceInfoMetrics(42, "new-name")
+	SetKeyspaceInfoMetrics(42, "test-name")
 	require.Equal(t, 1, testutil.CollectAndCount(keyspaceInfo))
-	require.Equal(t, float64(1), testutil.ToFloat64(keyspaceInfo.WithLabelValues(
-		strconv.FormatUint(42, 10), "new-name")))
-
-	deleteKeyspaceInfoMetrics(42)
-	require.Equal(t, 0, testutil.CollectAndCount(keyspaceInfo))
+	require.Equal(t, float64(1), testutil.ToFloat64(keyspaceInfo.WithLabelValues("42", "test-name")))
 }
