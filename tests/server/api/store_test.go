@@ -207,6 +207,46 @@ func (suite *storeTestSuite) checkGetAllLimit(cluster *tests.TestCluster) {
 	}
 }
 
+func (suite *storeTestSuite) TestSetLabelStoresLimitSkipsRemovedStore() {
+	suite.env.RunTestInNonMicroserviceEnv(suite.checkSetLabelStoresLimitSkipsRemovedStore)
+}
+
+func (suite *storeTestSuite) checkSetLabelStoresLimitSkipsRemovedStore(cluster *tests.TestCluster) {
+	re := suite.Require()
+	for _, store := range initStores() {
+		tests.MustPutStore(re, cluster, store)
+	}
+
+	leader := cluster.GetLeaderServer()
+	rc := leader.GetRaftCluster()
+	rc.RemoveStoreLimit(7)
+
+	// Store 7 is tombstoned with no engine label, so IsTiKV() still
+	// classifies it as TiKV -- without skipping removed stores up front,
+	// SetStoreLimit's tombstone rejection for store 7 would abort this
+	// whole request before the live TiKV stores below it get processed.
+	body, err := json.Marshal(map[string]any{
+		"rate":   60,
+		"type":   "add-peer",
+		"labels": map[string]string{"engine": "tikv"},
+	})
+	re.NoError(err)
+	err = testutil.CheckPostJSON(
+		tests.TestDialClient,
+		leader.GetAddr()+"/pd/api/v1/stores/limit",
+		body,
+		testutil.StatusOK(re),
+	)
+	re.NoError(err)
+
+	limits := rc.GetAllStoresLimit()
+	liveLimit, ok := limits[1]
+	re.True(ok)
+	re.Equal(float64(60), liveLimit.AddPeer)
+	_, ok = limits[7]
+	re.False(ok)
+}
+
 func (suite *storeTestSuite) checkStoreLabel(cluster *tests.TestCluster) {
 	re := suite.Require()
 
