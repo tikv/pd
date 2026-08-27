@@ -61,25 +61,34 @@ type OpStep interface {
 	// needStoreHealthCheck is an opt-in, per-operator permission (see
 	// Operator.SetStoreHealthCheck) to additionally reject a target that has
 	// gone Unhealthy mid-execution, on top of the unconditional Down check in
-	// validateStore. A new step implementation must decide how to handle it:
-	//   - steps that shed responsibility from their target rather than adding
-	//     to it (e.g. RemovePeer, BecomeWitness, DemoteVoter) should ignore
-	//     the parameter entirely: the target doesn't need to be healthy for
-	//     the step to complete, and rejecting the removal of an unhealthy
-	//     peer would be backwards.
-	//   - steps that add responsibility/data to their target and complete
-	//     atomically with no pending/data-transfer sub-state (e.g.
-	//     TransferLeader, PromoteLearner) may honor the flag unconditionally:
-	//     if this step's own effect had already landed, IsFinish() would be
-	//     true and this method wouldn't be called for it anymore, so it's
-	//     always safe to reject here.
-	//   - steps that add responsibility/data but go through a pending
-	//     sub-state (e.g. AddPeer, AddLearner, BecomeNonWitness) must only
-	//     honor the flag before that sub-state begins (peer not created yet,
-	//     or role not yet flipped): once the conf change has landed, even if
-	//     still pending, cancelling the operator can't undo it and orphans
-	//     the peer with no other checker guaranteed to pick it up before the
-	//     store crosses the (much larger) max-store-down-time threshold.
+	// validateStore. A new step implementation must decide how to handle it,
+	// based on whether the step's own conf change needs the target store to
+	// actively participate (be reachable) for raft to commit it:
+	//   - steps whose conf change is a pure role/metadata flip that the raft
+	//     group's current healthy majority can commit without the target's
+	//     participation (e.g. RemovePeer, BecomeWitness, DemoteVoter,
+	//     PromoteLearner) should ignore the parameter entirely: the change
+	//     will land whether or not the target is reachable right now, so
+	//     rejecting it provides no protection. It can also be actively
+	//     counterproductive: rejecting removal of a peer specifically
+	//     because its store is unhealthy is backwards (see #11146's
+	//     regionSource discussion), and a rejected promotion of an
+	//     already-caught-up learner is typically just silently redone by
+	//     another checker's operator that doesn't carry the flag, so the
+	//     rejection only fragments the original operator for no benefit.
+	//   - steps that require the target to actively receive something for
+	//     the step to complete (TransferLeader needs the target to actually
+	//     campaign and start serving as leader; AddPeer/AddLearner/
+	//     BecomeNonWitness need to stream a snapshot to the target) may
+	//     honor the flag. TransferLeader completes atomically with no
+	//     pending sub-state, so it's always safe to reject. AddPeer/
+	//     AddLearner/BecomeNonWitness go through a pending sub-state and
+	//     must only honor the flag before that sub-state begins (peer not
+	//     created yet, or role not yet flipped): once the conf change has
+	//     landed, even if still pending, cancelling the operator can't undo
+	//     it and orphans the peer with no other checker guaranteed to pick
+	//     it up before the store crosses the (much larger)
+	//     max-store-down-time threshold.
 	CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo, needStoreHealthCheck bool) error
 	Influence(opInfluence *OpInfluence, region *core.RegionInfo)
 	Timeout(regionSize int64) time.Duration
@@ -603,15 +612,7 @@ func (pl PromoteLearner) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (pl PromoteLearner) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo, needStoreHealthCheck bool) error {
-	// Promoting is an atomic role flip with no pending/data-transfer phase
-	// (unlike AddLearner): if this step's own promotion had already landed,
-	// IsFinish() would be true and Operator.Check would have already moved
-	// past it, so CheckInProgress being called at all means it's still safe
-	// to reject here.
-	if err := validateStore(ci, config, pl.ToStore, needStoreHealthCheck); err != nil {
-		return err
-	}
+func (pl PromoteLearner) CheckInProgress(_ *core.BasicCluster, _ config.SharedConfigProvider, region *core.RegionInfo, _ bool) error {
 	peer := region.GetStorePeer(pl.ToStore)
 	if peer.GetId() != pl.PeerID {
 		return errors.New("peer does not exist")
@@ -930,7 +931,7 @@ func (cpe ChangePeerV2Enter) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (cpe ChangePeerV2Enter) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo, needStoreHealthCheck bool) error {
+func (cpe ChangePeerV2Enter) CheckInProgress(_ *core.BasicCluster, _ config.SharedConfigProvider, region *core.RegionInfo, _ bool) error {
 	inJointState, notInJointState := false, false
 	for _, pl := range cpe.PromoteLearners {
 		peer := region.GetStorePeer(pl.ToStore)
@@ -946,16 +947,6 @@ func (cpe ChangePeerV2Enter) CheckInProgress(ci *core.BasicCluster, config confi
 			return errors.New("cannot promote a demoting voter")
 		default:
 			return errors.New("unexpected peer role")
-		}
-		// Only reject before this store's own promotion has entered joint
-		// state; once IncomingVoter, the conf change already landed and
-		// cancelling wouldn't undo it. DemoteVoters (below) shed voter
-		// responsibility rather than gain it, so they're never checked here,
-		// same as RemovePeer/BecomeWitness.
-		if needStoreHealthCheck && peer.GetRole() != metapb.PeerRole_IncomingVoter {
-			if err := validateStore(ci, config, pl.ToStore, true); err != nil {
-				return err
-			}
 		}
 	}
 	for _, dv := range cpe.DemoteVoters {

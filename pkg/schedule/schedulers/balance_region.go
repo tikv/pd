@@ -64,7 +64,6 @@ func newBalanceRegionScheduler(opController *operator.Controller, conf *balanceR
 	scheduler.filters = []filter.Filter{
 		&filter.StoreStateFilter{ActionScope: scheduler.GetName(), MoveRegion: true, OperatorLevel: constant.Medium},
 		filter.NewSpecialUseFilter(scheduler.GetName()),
-		filter.NewUnhealthyStoreFilter(scheduler.GetName()),
 	}
 	scheduler.filterCounter = filter.NewCounter(scheduler.GetName())
 	return scheduler

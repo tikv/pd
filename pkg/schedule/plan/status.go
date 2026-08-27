@@ -65,8 +65,6 @@ const (
 	StatusStoreDown
 	// StatusStoreDisconnected represents the the store is in disconnected state.
 	StatusStoreDisconnected
-	// StatusStoreUnhealthy represents the store is in unhealthy state.
-	StatusStoreUnhealthy
 )
 
 const (
@@ -129,7 +127,6 @@ var statusText = map[StatusCode]string{
 	StatusStoreRemoved:      "StoreRemoved",
 	StatusStoreDisconnected: "StoreDisconnected",
 	StatusStoreDown:         "StoreDown",
-	StatusStoreUnhealthy:    "StoreUnhealthy",
 	StatusStoreBusy:         "StoreBusy",
 
 	StatusStoreNotExisted: "StoreNotExisted",

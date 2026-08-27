@@ -655,34 +655,27 @@ func (suite *operatorStepTestSuite) TestNeedStoreHealthCheck() {
 	suite.checkWithHealthCheck(re, bn, "switch peer 11 on store 11 to non-witness",
 		[]testCase{{alreadyFlippedPeers, 1, true, re.NoError}}, true)
 
-	// PromoteLearner is an atomic role flip with no pending sub-state, so it
-	// can honor needStoreHealthCheck unconditionally.
+	// PromoteLearner doesn't need the target reachable for raft to commit the
+	// role flip, so it must ignore needStoreHealthCheck even when true, same
+	// as RemovePeer/BecomeWitness/DemoteVoter.
 	pl := PromoteLearner{ToStore: 11, PeerID: 11}
 	notPromotedPeers := []*metapb.Peer{
 		{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
 		{Id: 11, StoreId: 11, Role: metapb.PeerRole_Learner},
 	}
 	suite.checkWithHealthCheck(re, pl, "promote learner peer 11 on store 11 to voter",
-		[]testCase{{notPromotedPeers, 0, false, re.NoError}}, false)
-	suite.checkWithHealthCheck(re, pl, "promote learner peer 11 on store 11 to voter",
-		[]testCase{{notPromotedPeers, 0, false, re.Error}}, true)
+		[]testCase{{notPromotedPeers, 0, false, re.NoError}}, true)
 
-	// ChangePeerV2Enter: only reject a PromoteLearners target while it's
-	// still Learner (hasn't entered joint state); once IncomingVoter, the
-	// conf change already landed and cancelling can't undo it.
+	// ChangePeerV2Enter's PromoteLearners are the same as standalone
+	// PromoteLearner: ignore needStoreHealthCheck regardless of whether the
+	// target has already entered joint state.
 	cpe := ChangePeerV2Enter{PromoteLearners: []PromoteLearner{{PeerID: 11, ToStore: 11}}}
 	notInJointStatePeers := []*metapb.Peer{
 		{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
 		{Id: 11, StoreId: 11, Role: metapb.PeerRole_Learner},
 	}
 	suite.checkWithHealthCheck(re, cpe, "use joint consensus, promote learner peer 11 on store 11 to voter",
-		[]testCase{{notInJointStatePeers, 0, false, re.Error}}, true)
-	inJointStatePeers := []*metapb.Peer{
-		{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
-		{Id: 11, StoreId: 11, Role: metapb.PeerRole_IncomingVoter},
-	}
-	suite.checkWithHealthCheck(re, cpe, "use joint consensus, promote learner peer 11 on store 11 to voter",
-		[]testCase{{inJointStatePeers, 1, true, re.NoError}}, true)
+		[]testCase{{notInJointStatePeers, 0, false, re.NoError}}, true)
 }
 
 func (suite *operatorStepTestSuite) check(re *require.Assertions, step OpStep, desc string, testCases []testCase) {
