@@ -497,6 +497,12 @@ func (s *Server) startCluster(context.Context) error {
 	if err != nil {
 		return err
 	}
+	// This package's own hotStat rolling stats can't be cleaned up from within
+	// the meta watcher's tombstone path without an import cycle, so the
+	// watcher invokes this callback instead.
+	s.metaWatcher.SetOnStoreTombstoned(func(storeID uint64) {
+		s.cluster.GetStoresStats().RemoveRollingStoreStats(storeID)
+	})
 	// Inject the cluster components into the config watcher after the scheduler controller is created.
 	s.configWatcher.SetSchedulersController(s.cluster.GetCoordinator().GetSchedulersController())
 	// Start the rule watcher after the cluster is created.
