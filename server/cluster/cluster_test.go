@@ -527,6 +527,52 @@ func TestAutoGCTombstoneStoreCleansUpStaleStoreLimit(t *testing.T) {
 	re.Zero(statistics.StoreLimitGauge.DeletePartialMatch(prometheus.Labels{"store": "1"}))
 }
 
+// TestUpdateProgressCannotRepublishAfterBury covers updateProgress writing
+// the three progress gauges for a store that is already buried. deleteStore
+// never calls resetProgress again, so without a post-write recheck such a
+// write would leave the series stranded until the next full metrics reset.
+//
+// AddProgress's "already existed" gate means a single updateProgress call
+// right after bury can't reach the gauge writes by itself: resetProgress
+// removed the progress-manager entry, so that call just recreates it and
+// returns early. It takes a second call, with the entry now present, to
+// reach the writes -- modeling two updateProgress calls (e.g. from a stale
+// concurrent checkStores tick, or the entry being independently recreated
+// by another caller) landing back to back after the store was buried.
+func TestUpdateProgressCannotRepublishAfterBury(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
+	cluster.progressManager = progress.NewManager()
+
+	store := newTestStores(1, "5.0.0")[0]
+	re.NoError(cluster.PutMetaStore(store.GetMeta()))
+
+	re.NoError(cluster.RemoveStore(1, true))
+	cluster.checkStores() // buries store 1.
+
+	// First post-bury call: no progress entry exists yet, so AddProgress
+	// creates one and returns exist=false, and updateProgress returns before
+	// writing any gauge.
+	cluster.updateProgress(1, store.GetAddress(), removingAction, 10, 20, false /* dec */)
+	// Second post-bury call: the entry now exists, so this write proceeds
+	// unconditionally and reaches the gauge writes for the already-removed
+	// store.
+	cluster.updateProgress(1, store.GetAddress(), removingAction, 10, 20, false /* dec */)
+
+	// DeletePartialMatch returns how many series it found and removed, so a
+	// zero return here proves the write's post-write recheck already deleted
+	// it, rather than the write never having happened at all.
+	re.Zero(storesProgressGauge.DeletePartialMatch(prometheus.Labels{"store": "1"}))
+	re.Zero(storesSpeedGauge.DeletePartialMatch(prometheus.Labels{"store": "1"}))
+	re.Zero(storesETAGauge.DeletePartialMatch(prometheus.Labels{"store": "1"}))
+}
+
 func TestRemovingProcess(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())

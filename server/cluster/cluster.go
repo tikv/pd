@@ -2058,6 +2058,18 @@ func (c *RaftCluster) updateProgress(storeID uint64, storeAddress, action string
 	storesProgressGauge.WithLabelValues(storeAddress, storeLabel, action).Set(progress)
 	storesSpeedGauge.WithLabelValues(storeAddress, storeLabel, action).Set(currentSpeed)
 	storesETAGauge.WithLabelValues(storeAddress, storeLabel, action).Set(leftSeconds)
+	// The AddProgress/UpdateProgress calls above and this write are not atomic
+	// with BuryStore's resetProgress, so a bury landing in between can still
+	// let this write recreate the three gauges after resetProgress already
+	// cleaned them up -- and deleteStore never calls resetProgress again, so
+	// nothing else would remove them afterward. Re-check right after writing
+	// and delete the just-written series if the store turned out removed,
+	// narrowing that window.
+	if store := c.GetStore(storeID); store == nil || store.IsRemoved() {
+		storesProgressGauge.DeleteLabelValues(storeAddress, storeLabel, action)
+		storesSpeedGauge.DeleteLabelValues(storeAddress, storeLabel, action)
+		storesETAGauge.DeleteLabelValues(storeAddress, storeLabel, action)
+	}
 }
 
 func (c *RaftCluster) resetProgress(storeID uint64, storeAddress string) {
