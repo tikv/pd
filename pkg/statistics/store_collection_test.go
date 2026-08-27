@@ -20,9 +20,13 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
@@ -93,6 +97,22 @@ func TestStoreStatistics(t *testing.T) {
 	re.Equal([]uint64{1, 3, 5, 7}, stats.LabelCounter["host:h1"])
 	re.Len(stats.LabelCounter["host:h2"], 4)
 	re.Len(stats.LabelCounter["zone:unknown"], 2)
+}
+
+func TestResetStoreStatisticsClearsPlacementStatusGauge(t *testing.T) {
+	re := require.New(t)
+	defer placementStatusGauge.Reset()
+
+	metric := placementStatusGauge.WithLabelValues("label-type", "label-name", "1")
+	metric.Set(1)
+	re.NotZero(testutil.ToFloat64(metric))
+
+	ResetStoreStatistics("1")
+	// DeletePartialMatch returns how many series it found and removed, so a
+	// zero return here proves ResetStoreStatistics already deleted it --
+	// unlike checking WithLabelValues' value, which would recreate a fresh
+	// (zero-valued) series regardless of whether the old one was cleaned up.
+	re.Zero(placementStatusGauge.DeletePartialMatch(prometheus.Labels{"store": "1"}))
 }
 
 func TestSummaryStoreInfos(t *testing.T) {

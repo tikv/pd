@@ -16,6 +16,7 @@ package operator
 
 import (
 	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/tikv/pd/pkg/schedule/types"
 )
 
@@ -95,4 +96,14 @@ func init() {
 // IncOperatorLimitCounter increases the counter of operator meeting limit.
 func IncOperatorLimitCounter(typ types.CheckerSchedulerType, kind OpKind) {
 	operatorLimitCounter.WithLabelValues(typ.String(), kind.String()).Inc()
+}
+
+// DeleteStoreMetrics deletes the per-store operator metrics of a store.
+func DeleteStoreMetrics(storeID string) {
+	storeLimitCostCounter.DeletePartialMatch(prometheus.Labels{"store": storeID})
+}
+
+// ResetOperatorMetrics resets the operator metrics.
+func ResetOperatorMetrics() {
+	storeLimitCostCounter.Reset()
 }

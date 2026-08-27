@@ -23,6 +23,8 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
+	"go.uber.org/zap"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/checker"
@@ -39,7 +41,6 @@ import (
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"go.uber.org/zap"
 )
 
 const (
@@ -507,7 +508,15 @@ func collectHotMetrics(cluster sche.ClusterInformer, stores []*core.StoreInfo, t
 		storeAddress := s.GetAddress()
 		storeID := s.GetID()
 		storeLabel := strconv.FormatUint(storeID, 10)
+		// HotPeerCache.gc() only removes a tombstoned store from status.AsLeader/
+		// AsPeer's source data on its own TTL-throttled schedule, not every tick,
+		// so a known-tombstoned store here can still have stale hot-peer data.
+		// Treat it as not hot regardless, so the delete branches below run
+		// instead of republishing hotSpotStatusGauge every tick until
+		// HotPeerCache.gc() eventually catches up.
+		removed := s.IsRemoved()
 		stat, hasHotLeader := status.AsLeader[storeID]
+		hasHotLeader = hasHotLeader && !removed
 		if hasHotLeader {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_leader").Set(stat.TotalBytesRate)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_keys_as_leader").Set(stat.TotalKeysRate)
@@ -521,6 +530,7 @@ func collectHotMetrics(cluster sche.ClusterInformer, stores []*core.StoreInfo, t
 		}
 
 		stat, hasHotPeer := status.AsPeer[storeID]
+		hasHotPeer = hasHotPeer && !removed
 		if hasHotPeer {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_peer").Set(stat.TotalBytesRate)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_keys_as_peer").Set(stat.TotalKeysRate)
@@ -537,6 +547,19 @@ func collectHotMetrics(cluster sche.ClusterInformer, stores []*core.StoreInfo, t
 			utils.ForeachRegionStats(func(rwTy utils.RWType, dim int, _ utils.RegionStatKind) {
 				schedulers.HotPendingSum.DeleteLabelValues(storeLabel, rwTy.String(), utils.DimToString(dim))
 			})
+		}
+
+		// stores is a snapshot taken before this loop; if s was buried or fully
+		// removed concurrently, the writes above can recreate a series
+		// DeleteStoreMetrics already deleted for it. DeleteStoreMetrics is a
+		// DeletePartialMatch full-vector scan, so only pay for it when this
+		// iteration's own s was still live: once a snapshot correctly shows
+		// IsRemoved(), a tombstoned store sitting in GetStores() for up to 30
+		// days doesn't cost a scan on every tick.
+		if !removed {
+			if store := cluster.GetStore(storeID); store == nil || store.IsRemoved() {
+				DeleteStoreMetrics(storeLabel)
+			}
 		}
 	}
 }

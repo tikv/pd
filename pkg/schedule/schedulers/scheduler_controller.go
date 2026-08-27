@@ -23,6 +23,8 @@ import (
 	"time"
 
 	"github.com/pingcap/log"
+	"go.uber.org/zap"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	sche "github.com/tikv/pd/pkg/schedule/core"
@@ -33,7 +35,6 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"go.uber.org/zap"
 )
 
 const maxScheduleRetries = 10
@@ -136,6 +137,13 @@ func (c *Controller) CollectSchedulerMetrics() {
 func ResetSchedulerMetrics() {
 	schedulerStatusGauge.Reset()
 	ruleStatusGauge.Reset()
+	opInfluenceStatus.Reset()
+	hotSchedulerResultCounter.Reset()
+	balanceWitnessCounter.Reset()
+	balanceDirectionCounter.Reset()
+	hotDirectionCounter.Reset()
+	hotPendingStatus.Reset()
+	storeSlowTrendEvictedStatusGauge.Reset()
 }
 
 // AddSchedulerHandler adds the HTTP handler for a scheduler.

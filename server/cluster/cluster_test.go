@@ -33,7 +33,9 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/cluster"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
@@ -483,6 +485,94 @@ func TestUpStore(t *testing.T) {
 	re.True(errors.ErrorEqual(err, errs.ErrStoreNotFound.FastGenByArgs(4)))
 }
 
+// TestAutoGCTombstoneStoreCleansUpStaleStoreLimit covers the auto-GC path
+// (checkStores' NodeState_Removed branch, via deleteStore) clearing a store
+// limit entry that survived bury. BuryStore already clears the store limit
+// at bury time, but an in-flight SetStoreLimit that read IsRemoved()==false
+// just before bury and wrote just after can race back in and re-add it;
+// deleteStore -- not just BuryStore -- has to clean it up too, since it is
+// also reached by the 30-day auto-GC timer with no manual
+// RemoveTombStoneRecords call involved.
+func TestAutoGCTombstoneStoreCleansUpStaleStoreLimit(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
+
+	store := newTestStores(1, "5.0.0")[0]
+	re.NoError(cluster.PutMetaStore(store.GetMeta()))
+	// Back-date the heartbeat so the store is already past gcTombstoneInterval
+	// once tombstoned, letting the second checkStores() call below auto-GC it.
+	re.NoError(cluster.setStore(cluster.GetStore(1).Clone(core.SetLastHeartbeatTS(time.Now().Add(-31 * 24 * time.Hour)))))
+
+	re.NoError(cluster.RemoveStore(1, true))
+	cluster.checkStores() // buries store 1; also clears its store limit.
+
+	// Simulate the race: re-add the persisted entry and gauge series
+	// directly, bypassing RaftCluster.SetStoreLimit's IsRemoved guard, the
+	// way a request that read IsRemoved()==false just before bury and wrote
+	// just after would.
+	cluster.opt.SetStoreLimit(1, storelimit.AddPeer, 60)
+	statistics.StoreLimitGauge.WithLabelValues("1", "add-peer").Set(60)
+
+	cluster.checkStores() // auto-GC: DownTime() > gcTombstoneInterval.
+
+	re.NotContains(cluster.opt.GetStoresLimit(), uint64(1))
+	// DeletePartialMatch returns how many series it found and removed, so a
+	// zero return here proves the auto-GC path already deleted it.
+	re.Zero(statistics.StoreLimitGauge.DeletePartialMatch(prometheus.Labels{"store": "1"}))
+}
+
+// TestUpdateProgressCannotRepublishAfterBury covers updateProgress writing
+// the three progress gauges for a store that is already buried. deleteStore
+// never calls resetProgress again, so without a post-write recheck such a
+// write would leave the series stranded until the next full metrics reset.
+//
+// AddProgress's "already existed" gate means a single updateProgress call
+// right after bury can't reach the gauge writes by itself: resetProgress
+// removed the progress-manager entry, so that call just recreates it and
+// returns early. It takes a second call, with the entry now present, to
+// reach the writes -- modeling two updateProgress calls (e.g. from a stale
+// concurrent checkStores tick, or the entry being independently recreated
+// by another caller) landing back to back after the store was buried.
+func TestUpdateProgressCannotRepublishAfterBury(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
+	cluster.progressManager = progress.NewManager()
+
+	store := newTestStores(1, "5.0.0")[0]
+	re.NoError(cluster.PutMetaStore(store.GetMeta()))
+
+	re.NoError(cluster.RemoveStore(1, true))
+	cluster.checkStores() // buries store 1.
+
+	// First post-bury call: no progress entry exists yet, so AddProgress
+	// creates one and returns exist=false, and updateProgress returns before
+	// writing any gauge.
+	cluster.updateProgress(1, store.GetAddress(), removingAction, 10, 20, false /* dec */)
+	// Second post-bury call: the entry now exists, so this write proceeds
+	// unconditionally and reaches the gauge writes for the already-removed
+	// store.
+	cluster.updateProgress(1, store.GetAddress(), removingAction, 10, 20, false /* dec */)
+
+	// DeletePartialMatch returns how many series it found and removed, so a
+	// zero return here proves the write's post-write recheck already deleted
+	// it, rather than the write never having happened at all.
+	re.Zero(storesProgressGauge.DeletePartialMatch(prometheus.Labels{"store": "1"}))
+	re.Zero(storesSpeedGauge.DeletePartialMatch(prometheus.Labels{"store": "1"}))
+	re.Zero(storesETAGauge.DeletePartialMatch(prometheus.Labels{"store": "1"}))
+}
+
 func TestRemovingProcess(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -682,7 +772,8 @@ func TestBucketHeartbeat(t *testing.T) {
 		Version:  1,
 		Keys:     [][]byte{{'1'}, {'2'}},
 	}
-	re.Error(cluster.processReportBuckets(buckets))
+	_, err = cluster.processReportBuckets(buckets)
+	re.Error(err)
 
 	// case2: bucket can be processed after the region update.
 	stores := newTestStores(3, "2.0.0")
@@ -695,18 +786,21 @@ func TestBucketHeartbeat(t *testing.T) {
 	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), regions[0]))
 	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), regions[1]))
 	re.Nil(cluster.GetRegion(uint64(1)).GetBuckets())
-	re.NoError(cluster.processReportBuckets(buckets))
+	_, err = cluster.processReportBuckets(buckets)
+	re.NoError(err)
 	re.Equal(buckets, cluster.GetRegion(uint64(1)).GetBuckets())
 
 	// case3: the bucket version is same.
-	re.NoError(cluster.processReportBuckets(buckets))
+	_, err = cluster.processReportBuckets(buckets)
+	re.NoError(err)
 	// case4: the bucket version is changed.
 	newBuckets := &metapb.Buckets{
 		RegionId: 1,
 		Version:  3,
 		Keys:     [][]byte{{'1'}, {'2'}},
 	}
-	re.NoError(cluster.processReportBuckets(newBuckets))
+	_, err = cluster.processReportBuckets(newBuckets)
+	re.NoError(err)
 	re.Equal(newBuckets, cluster.GetRegion(uint64(1)).GetBuckets())
 
 	// case5: region update should inherit buckets.
@@ -1071,11 +1165,13 @@ func TestConcurrentReportBucket(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/concurrentBucketHeartbeat", "return(true)"))
 	go func() {
 		defer wg.Done()
-		cluster.processReportBuckets(bucket1)
+		_, err := cluster.processReportBuckets(bucket1)
+		re.NoError(err)
 	}()
 	time.Sleep(100 * time.Millisecond)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/concurrentBucketHeartbeat"))
-	re.NoError(cluster.processReportBuckets(bucket2))
+	_, err = cluster.processReportBuckets(bucket2)
+	re.NoError(err)
 	wg.Wait()
 	re.Equal(bucket1, cluster.GetRegion(1).GetBuckets())
 }

@@ -29,3 +29,14 @@ var (
 func init() {
 	prometheus.MustRegister(filterCounter)
 }
+
+// DeleteStoreMetrics deletes the filter metrics of a store.
+func DeleteStoreMetrics(storeID string) {
+	filterCounter.DeletePartialMatch(prometheus.Labels{"source": storeID})
+	filterCounter.DeletePartialMatch(prometheus.Labels{"target": storeID})
+}
+
+// ResetFilterMetrics resets the filter metrics.
+func ResetFilterMetrics() {
+	filterCounter.Reset()
+}

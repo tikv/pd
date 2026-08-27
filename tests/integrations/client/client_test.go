@@ -39,6 +39,9 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/goleak"
+
 	pd "github.com/tikv/pd/client"
 	clierrs "github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/retry"
@@ -57,8 +60,6 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/integrations/mcs"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/goleak"
 )
 
 const (
@@ -1497,11 +1498,16 @@ func (suite *clientTestSuite) TestGetStore() {
 	re := suite.Require()
 	cluster := suite.srv.GetRaftCluster()
 	re.NotNil(cluster)
-	store := stores[0]
+	// Use stores[3]: this test destructively transitions it through
+	// offline -> tombstone, and stores[0..2] are the ones other tests in
+	// this suite heartbeat regions through (peers[0..2]) and expect to
+	// stay live for the rest of the suite.
+	store := stores[3]
 
 	// Get an up store should be OK.
 	n, err := suite.client.GetStore(context.Background(), store.GetId())
 	re.NoError(err)
+	store.LastHeartbeat = n.LastHeartbeat
 	re.Equal(store, n)
 
 	actualStores, err := suite.client.GetAllStores(context.Background())

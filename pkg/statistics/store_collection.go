@@ -19,6 +19,8 @@ import (
 	"strconv"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
@@ -149,6 +151,15 @@ func (s *storeStatistics) observe(store *core.StoreInfo) {
 
 // ObserveHotStat records the hot region metrics for the store.
 func ObserveHotStat(store *core.StoreInfo, stats *StoresStats) {
+	// A store's RollingStoreStats can be recreated after bury by a StoreHeartbeat
+	// that was already in flight (HandleStoreHeartbeat only rejects a fully
+	// unknown store, not a tombstoned one). Without this check, that would make
+	// this function keep republishing storeStatusGauge every collection tick for
+	// as long as the entry exists, up to 30 days until final removal, instead of
+	// stopping once the store is known tombstoned like observe() already does.
+	if store.IsRemoved() {
+		return
+	}
 	// Store flows.
 	storeAddress := store.GetAddress()
 	id := strconv.FormatUint(store.GetID(), 10)
@@ -264,35 +275,24 @@ func (s *storeStatistics) collect() {
 }
 
 // ResetStoreStatistics resets the metrics of store.
-func ResetStoreStatistics(storeAddress string, id string) {
-	metrics := []string{
-		"region_score",
-		"leader_score",
-		"region_size",
-		"region_count",
-		"leader_size",
-		"leader_count",
-		"witness_count",
-		"learner_count",
-		"store_available",
-		"store_used",
-		"store_capacity",
-		"store_write_rate_bytes",
-		"store_read_rate_bytes",
-		"store_write_rate_keys",
-		"store_read_rate_keys",
-		"store_write_query_rate",
-		"store_read_query_rate",
-		"store_regions_write_rate_bytes",
-		"store_regions_write_rate_keys",
-		"store_slow_trend_cause_value",
-		"store_slow_trend_cause_rate",
-		"store_slow_trend_result_value",
-		"store_slow_trend_result_rate",
-	}
-	for _, m := range metrics {
-		storeStatusGauge.DeleteLabelValues(storeAddress, id, m)
-	}
+// Matches on the store label alone, not address: PD allows an existing store ID to
+// change address (e.g. after a TiKV restart with a new IP), so requiring the current
+// address to match as well would permanently leak any series recorded under a
+// previous address.
+func ResetStoreStatistics(id string) {
+	storeStatusGauge.DeletePartialMatch(prometheus.Labels{"store": id})
+	// placementStatusGauge's "name" label is an arbitrary, unbounded label-rule
+	// name (unlike clusterStatusGauge's small, fixed engine set below), so an
+	// exact DeleteLabelValues per combination isn't feasible here either --
+	// same tradeoff as storeStatusGauge above.
+	placementStatusGauge.DeletePartialMatch(prometheus.Labels{"store": id})
+	// mcs never cleaned StoreLimitGauge on its own: unlike the classic path's
+	// RemoveStoreLimit, the mcs scheduling service has no store-limit config
+	// of its own to persist a removal for. Deleting it here, alongside
+	// everything else this function already covers, closes that gap for
+	// both classic (redundant with RemoveStoreLimit, harmless) and mcs.
+	StoreLimitGauge.DeleteLabelValues(id, "add-peer")
+	StoreLimitGauge.DeleteLabelValues(id, "remove-peer")
 }
 
 type storeStatisticsMap struct {
@@ -323,6 +323,7 @@ func Reset() {
 	storeStatusGauge.Reset()
 	clusterStatusGauge.Reset()
 	placementStatusGauge.Reset()
+	StoreLimitGauge.Reset()
 	ResetRegionStatsMetrics()
 	ResetLabelStatsMetrics()
 	ResetHotCacheStatusMetrics()

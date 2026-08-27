@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/smallnest/chanx"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/statistics/utils"
@@ -190,6 +191,15 @@ func (f *HotPeerCache) CheckPeerFlow(region *core.RegionInfo, peers []*metapb.Pe
 	stats := make([]*HotPeerStat, 0, len(peers))
 	for _, peer := range peers {
 		storeID := peer.GetStoreId()
+		// A tombstoned store can still show up as a peer here: the leader reporting
+		// this region may not have caught up with a raft config change removing it
+		// yet. Skip it so gc() cleaning up its entries at bury time doesn't get
+		// undone by the very next heartbeat from this region's (live) leader. A
+		// store the cluster doesn't know about yet is a different case (e.g. a
+		// target store for an in-flight add-peer) and isn't skipped here.
+		if store := f.cluster.GetStore(storeID); store != nil && store.IsRemoved() {
+			continue
+		}
 		oldItem := f.getOldHotPeerStat(regionID, storeID)
 
 		// check whether the peer is allowed to be inherited
@@ -556,18 +566,37 @@ func (f *HotPeerCache) gc() {
 		return
 	}
 	f.lastGCTime = time.Now()
-	// remove tombstone stores
+	// remove tombstone stores. GetStores() still returns a tombstoned store
+	// until it's fully removed, so treat IsRemoved() the same as absent here
+	// -- nothing writes region heartbeats for it anymore, so there's no
+	// reason to wait for full removal before cleaning it up.
 	stores := make(map[uint64]struct{})
-	for _, storeID := range f.cluster.GetStores() {
-		stores[storeID.GetID()] = struct{}{}
+	for _, store := range f.cluster.GetStores() {
+		if store.IsRemoved() {
+			continue
+		}
+		stores[store.GetID()] = struct{}{}
 	}
+	// calcHotThresholds can populate thresholdsOfStore for a store that never becomes
+	// hot enough to enter peersOfStore, so peersOfStore alone can miss it; check the
+	// union of both.
+	removed := make(map[uint64]struct{})
 	for storeID := range f.peersOfStore {
 		if _, ok := stores[storeID]; !ok {
-			delete(f.peersOfStore, storeID)
-			delete(f.regionsOfStore, storeID)
-			delete(f.thresholdsOfStore, storeID)
-			delete(f.metrics, storeID)
+			removed[storeID] = struct{}{}
 		}
+	}
+	for storeID := range f.thresholdsOfStore {
+		if _, ok := stores[storeID]; !ok {
+			removed[storeID] = struct{}{}
+		}
+	}
+	for storeID := range removed {
+		delete(f.peersOfStore, storeID)
+		delete(f.regionsOfStore, storeID)
+		delete(f.thresholdsOfStore, storeID)
+		delete(f.metrics, storeID)
+		hotCacheStatusGauge.DeletePartialMatch(prometheus.Labels{"store": storeTag(storeID), "type": f.kind.String()})
 	}
 	// remove expired items
 	for _, peers := range f.peersOfStore {
