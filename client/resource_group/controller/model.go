@@ -145,14 +145,26 @@ type RUFactorSnapshot struct {
 }
 
 // RUCalculationInputs contains the inputs used by an RU v1 calculation.
+//
+// The write RU calculation is:
+//
+//	ReplicaWeightedWriteRPCCount * (WriteBaseCost + WritePerBatchBaseCost * BatchProportion)
+//	+ ReplicaWeightedWriteBytes * WriteBytesCost
+//	- FailedWriteBaseCostRefundCount * WriteBaseCost
+//	- FailedWriteRefundBytes * WriteBytesCost
+//
+// A failed write refunds neither the per-batch cost nor the replica-weighted
+// portion of the original charge.
 type RUCalculationInputs struct {
 	ReadRPCCount                 float64
 	ReadBytes                    float64
 	KVCPUTimeMs                  float64
 	ReplicaWeightedWriteRPCCount float64
 	ReplicaWeightedWriteBytes    float64
-	FailedWriteRPCCount          float64
-	FailedWriteBytes             float64
+	// FailedWriteBaseCostRefundCount is the number of unweighted write base-cost refunds.
+	FailedWriteBaseCostRefundCount float64
+	// FailedWriteRefundBytes is the unweighted byte input refunded using WriteBytesCost.
+	FailedWriteRefundBytes float64
 }
 
 // RUCalculation contains the factors and inputs needed to show an RU v1 formula.
@@ -180,8 +192,8 @@ func (c *RUCalculation) Add(other RUCalculation) {
 	c.Inputs.KVCPUTimeMs += other.Inputs.KVCPUTimeMs
 	c.Inputs.ReplicaWeightedWriteRPCCount += other.Inputs.ReplicaWeightedWriteRPCCount
 	c.Inputs.ReplicaWeightedWriteBytes += other.Inputs.ReplicaWeightedWriteBytes
-	c.Inputs.FailedWriteRPCCount += other.Inputs.FailedWriteRPCCount
-	c.Inputs.FailedWriteBytes += other.Inputs.FailedWriteBytes
+	c.Inputs.FailedWriteBaseCostRefundCount += other.Inputs.FailedWriteBaseCostRefundCount
+	c.Inputs.FailedWriteRefundBytes += other.Inputs.FailedWriteRefundBytes
 	c.RRU += other.RRU
 	c.WRU += other.WRU
 }
@@ -378,8 +390,8 @@ func (kc *KVCalculator) payBackWriteCostWithDetail(consumption *rmpb.Consumption
 	consumption.WriteBytes -= writeBytes
 	consumption.WRU -= float64(kc.WriteBaseCost) + float64(kc.WriteBytesCost)*writeBytes
 	if detail != nil {
-		detail.Inputs.FailedWriteRPCCount++
-		detail.Inputs.FailedWriteBytes += writeBytes
+		detail.Inputs.FailedWriteBaseCostRefundCount++
+		detail.Inputs.FailedWriteRefundBytes += writeBytes
 	}
 }
 

@@ -343,15 +343,21 @@ func TestRUCalculationDetail(t *testing.T) {
 	re.Len(writeReq.calculations, 2)
 	paybackDetail := writeReq.calculations[1]
 	re.InDelta(-5, paybackConsumption.WRU, 1e-12)
-	re.Equal(float64(1), paybackDetail.Inputs.FailedWriteRPCCount)
-	re.Equal(float64(10), paybackDetail.Inputs.FailedWriteBytes)
+	re.Equal(float64(1), paybackDetail.Inputs.FailedWriteBaseCostRefundCount)
+	re.Equal(float64(10), paybackDetail.Inputs.FailedWriteRefundBytes)
+	re.InDelta(
+		-paybackDetail.Inputs.FailedWriteBaseCostRefundCount*paybackDetail.Factors.WriteBaseCost-
+			paybackDetail.Inputs.FailedWriteRefundBytes*paybackDetail.Factors.WriteBytesCost,
+		paybackDetail.WRU,
+		1e-12,
+	)
 	re.InDelta(paybackConsumption.WRU, paybackDetail.WRU, 1e-12)
 
 	writeDetail.Add(paybackDetail)
 	re.Equal(float64(3), writeDetail.Inputs.ReplicaWeightedWriteRPCCount)
 	re.Equal(float64(30), writeDetail.Inputs.ReplicaWeightedWriteBytes)
-	re.Equal(float64(1), writeDetail.Inputs.FailedWriteRPCCount)
-	re.Equal(float64(10), writeDetail.Inputs.FailedWriteBytes)
+	re.Equal(float64(1), writeDetail.Inputs.FailedWriteBaseCostRefundCount)
+	re.Equal(float64(10), writeDetail.Inputs.FailedWriteRefundBytes)
 	re.InDelta(writeConsumption.WRU+paybackConsumption.WRU, writeDetail.WRU, 1e-12)
 
 	retryConsumption, _, _, _, err := gc.onRequestWaitImpl(context.Background(), writeReq)
@@ -369,7 +375,7 @@ func TestRUCalculationDetail(t *testing.T) {
 	writeDetail.Add(retryResponseDetail)
 	re.Equal(float64(6), writeDetail.Inputs.ReplicaWeightedWriteRPCCount)
 	re.Equal(float64(60), writeDetail.Inputs.ReplicaWeightedWriteBytes)
-	re.Equal(float64(1), writeDetail.Inputs.FailedWriteRPCCount)
+	re.Equal(float64(1), writeDetail.Inputs.FailedWriteBaseCostRefundCount)
 	re.InDelta(writeConsumption.WRU+paybackConsumption.WRU+retryConsumption.WRU, writeDetail.WRU, 1e-12)
 }
 
