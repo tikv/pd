@@ -54,9 +54,10 @@ type solver struct {
 	tolerantSizeRatio float64
 	tolerantSource    int64
 	fit               *placement.RegionFit
-
-	sourceScore float64
-	targetScore float64
+	sourceScore       float64
+	targetScore       float64
+	sourceDelta       int64
+	targetDelta       int64
 }
 
 func newSolver(basePlan *plan.BalanceSchedulerPlan, kind constant.ScheduleKind, cluster sche.SchedulerCluster, opInfluence *operator.OpInfluence) *solver {
@@ -106,16 +107,20 @@ func (p *solver) sourceStoreScore(scheduleName string) float64 {
 	var score float64
 	switch p.kind.Resource {
 	case constant.LeaderKind:
-		sourceDelta := influence - tolerantResource
-		score = p.Source.LeaderScore(p.kind.Policy, sourceDelta)
+		p.sourceDelta = influence - tolerantResource
+		score = p.Source.LeaderScore(p.kind.Policy, p.sourceDelta)
 	case constant.RegionKind:
-		sourceDelta := influence*influenceAmp - tolerantResource
-		score = p.Source.RegionScore(p.GetSchedulerConfig().GetRegionScoreFormulaVersion(), p.GetSchedulerConfig().GetHighSpaceRatio(), p.GetSchedulerConfig().GetLowSpaceRatio(), sourceDelta)
+		p.sourceDelta = influence*influenceAmp - tolerantResource
+		score = p.Source.RegionScore(p.GetSchedulerConfig().GetRegionScoreFormulaVersion(), p.GetSchedulerConfig().GetHighSpaceRatio(), p.GetSchedulerConfig().GetLowSpaceRatio(), p.sourceDelta)
 	case constant.WitnessKind:
-		sourceDelta := influence - tolerantResource
-		score = p.Source.WitnessScore(sourceDelta)
+		p.sourceDelta = influence - tolerantResource
+		score = p.Source.WitnessScore(p.sourceDelta)
 	}
 	return score
+}
+
+func (p *solver) calcSourceStoreScore(scheduleName string) {
+	p.sourceScore = p.sourceStoreScore(scheduleName)
 }
 
 func (p *solver) targetStoreScore(scheduleName string) float64 {
@@ -136,16 +141,20 @@ func (p *solver) targetStoreScore(scheduleName string) float64 {
 	var score float64
 	switch p.kind.Resource {
 	case constant.LeaderKind:
-		targetDelta := influence + tolerantResource
-		score = p.Target.LeaderScore(p.kind.Policy, targetDelta)
+		p.targetDelta = influence + tolerantResource
+		score = p.Target.LeaderScore(p.kind.Policy, p.targetDelta)
 	case constant.RegionKind:
-		targetDelta := influence*influenceAmp + tolerantResource
-		score = p.Target.RegionScore(p.GetSchedulerConfig().GetRegionScoreFormulaVersion(), p.GetSchedulerConfig().GetHighSpaceRatio(), p.GetSchedulerConfig().GetLowSpaceRatio(), targetDelta)
+		p.targetDelta = influence*influenceAmp + tolerantResource
+		score = p.Target.RegionScore(p.GetSchedulerConfig().GetRegionScoreFormulaVersion(), p.GetSchedulerConfig().GetHighSpaceRatio(), p.GetSchedulerConfig().GetLowSpaceRatio(), p.targetDelta)
 	case constant.WitnessKind:
-		targetDelta := influence + tolerantResource
-		score = p.Target.WitnessScore(targetDelta)
+		p.targetDelta = influence + tolerantResource
+		score = p.Target.WitnessScore(p.targetDelta)
 	}
 	return score
+}
+
+func (p *solver) calcTargetStoreScore(scheduleName string) {
+	p.targetScore = p.targetStoreScore(scheduleName)
 }
 
 // Both of the source store's score and target store's score should be calculated before calling this function.
@@ -168,6 +177,59 @@ func (p *solver) shouldBalance(scheduleName string) bool {
 			zap.Int64("tolerant-resource", p.getTolerantResource()))
 	}
 	return shouldBalance
+}
+
+func (p *solver) scoreStore(store *core.StoreInfo, delta int64) float64 {
+	switch p.kind.Resource {
+	case constant.LeaderKind:
+		return store.LeaderScore(p.kind.Policy, delta)
+	case constant.RegionKind:
+		return store.RegionScore(
+			p.GetSchedulerConfig().GetRegionScoreFormulaVersion(),
+			p.GetSchedulerConfig().GetHighSpaceRatio(),
+			p.GetSchedulerConfig().GetLowSpaceRatio(),
+			delta,
+		)
+	case constant.WitnessKind:
+		return store.WitnessScore(delta)
+	default:
+		return 0
+	}
+}
+
+// originalStoreScores returns the scores before the tolerated-resource shift is applied.
+func (p *solver) originalStoreScores() (sourceOriginalScore, targetOriginalScore float64) {
+	tolerantResource := p.getTolerantResource()
+	sourceOriginalScore = p.scoreStore(p.Source, p.sourceDelta+tolerantResource)
+	targetOriginalScore = p.scoreStore(p.Target, p.targetDelta-tolerantResource)
+	return sourceOriginalScore, targetOriginalScore
+}
+
+// isPotentialReverse reports whether the tolerated-resource shift would flip the
+// original score ordering for the current source/target pair. Call
+// calcSourceStoreScore and calcTargetStoreScore for the current p.Source and
+// p.Target first so originalStoreScores can reuse p.sourceDelta and
+// p.targetDelta with scoreStore and getTolerantResource.
+func (p *solver) isPotentialReverse() bool {
+	sourceOriginalScore, targetOriginalScore := p.originalStoreScores()
+	return sourceOriginalScore > targetOriginalScore && p.sourceScore <= p.targetScore
+}
+
+func (p *solver) recordPotentialReverse(scheduleName string) {
+	balancePotentialReverseCounter.WithLabelValues(scheduleName).Inc()
+	if log.GetLevel() > zap.DebugLevel {
+		return
+	}
+	sourceOriginalScore, targetOriginalScore := p.originalStoreScores()
+	log.Debug("potential reverse detected",
+		zap.String("scheduler", scheduleName),
+		zap.Uint64("region-id", p.Region.GetID()),
+		zap.Uint64("source-store", p.sourceStoreID()),
+		zap.Uint64("target-store", p.targetStoreID()),
+		zap.Float64("source-original-score", sourceOriginalScore),
+		zap.Float64("target-original-score", targetOriginalScore),
+		zap.Float64("source-score", p.sourceScore),
+		zap.Float64("target-score", p.targetScore))
 }
 
 func (p *solver) getTolerantResource() int64 {
