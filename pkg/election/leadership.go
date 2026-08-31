@@ -75,6 +75,13 @@ type Leadership struct {
 	campaignTimes []time.Time
 }
 
+// LeadershipTerm is an immutable snapshot of one granted leadership term.
+type LeadershipTerm struct {
+	leaderKey   string
+	leaderValue string
+	leaseID     clientv3.LeaseID
+}
+
 // NewLeadership creates a new Leadership.
 func NewLeadership(client *clientv3.Client, leaderKey, purpose string) *Leadership {
 	leadership := &Leadership{
@@ -127,6 +134,42 @@ func (ls *Leadership) GetLeaderValue() string {
 		return ""
 	}
 	return leaderValue.(string)
+}
+
+// CaptureTerm captures the currently granted leadership term.
+func (ls *Leadership) CaptureTerm() (LeadershipTerm, bool) {
+	if ls == nil {
+		return LeadershipTerm{}, false
+	}
+	lease := ls.GetLease()
+	if lease == nil {
+		return LeadershipTerm{}, false
+	}
+	term := LeadershipTerm{
+		leaderKey:   ls.GetLeaderKey(),
+		leaderValue: ls.GetLeaderValue(),
+		leaseID:     lease.GetID(),
+	}
+	return term, term.leaderKey != "" && term.leaderValue != "" && term.leaseID != 0
+}
+
+// Comparisons returns the etcd comparisons that fence a transaction to the
+// captured leadership term.
+func (term LeadershipTerm) Comparisons() []clientv3.Cmp {
+	return []clientv3.Cmp{
+		clientv3.Compare(clientv3.Value(term.leaderKey), "=", term.leaderValue),
+		clientv3.Compare(clientv3.LeaseValue(term.leaderKey), "=", term.leaseID),
+	}
+}
+
+// LeaderValue returns the leader value captured by the term.
+func (term LeadershipTerm) LeaderValue() string {
+	return term.leaderValue
+}
+
+// LeaseID returns the leadership lease ID captured by the term.
+func (term LeadershipTerm) LeaseID() clientv3.LeaseID {
+	return term.leaseID
 }
 
 // GetCampaignTimesNum is used to get the campaign times of the leader within `campaignTimesRecordTimeout`.

@@ -24,6 +24,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/goleak"
 
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
@@ -42,6 +43,7 @@ func TestEtcd(t *testing.T) {
 	testRange(re, kv)
 	testSaveMultiple(re, kv, 20)
 	testLoadConflict(re, kv)
+	testRunInTxnWithConditions(re, kv)
 	testRawTxn(re, kv)
 }
 
@@ -169,6 +171,36 @@ func testLoadConflict(re *require.Assertions, kv Base) {
 	}
 	// When other writer exists, loader must error.
 	re.Error(kv.RunInTxn(context.Background(), conflictLoader))
+}
+
+func testRunInTxnWithConditions(re *require.Assertions, kv *etcdKVBase) {
+	const (
+		conditionKey = "conditional-txn-guard"
+		dataKey      = "conditional-txn-data"
+	)
+	re.NoError(kv.Save(conditionKey, "current"))
+	re.NoError(kv.RunInTxnWithConditions(
+		context.Background(),
+		[]clientv3.Cmp{clientv3.Compare(clientv3.Value(conditionKey), "=", "current")},
+		func(txn Txn) error {
+			return txn.Save(dataKey, "committed")
+		},
+	))
+	value, err := kv.Load(dataKey)
+	re.NoError(err)
+	re.Equal("committed", value)
+
+	err = kv.RunInTxnWithConditions(
+		context.Background(),
+		[]clientv3.Cmp{clientv3.Compare(clientv3.Value(conditionKey), "=", "stale")},
+		func(txn Txn) error {
+			return txn.Save(dataKey, "must-not-commit")
+		},
+	)
+	re.ErrorIs(err, errs.ErrEtcdTxnConflict)
+	value, err = kv.Load(dataKey)
+	re.NoError(err)
+	re.Equal("committed", value)
 }
 
 // nolint:unparam

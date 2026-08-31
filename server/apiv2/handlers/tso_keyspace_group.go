@@ -602,7 +602,8 @@ func RemoveKeyspacesFromGroup(c *gin.Context) {
 
 	// The group manager filters state and membership inside each bounded
 	// transaction, avoiding a separate etcd transaction per requested keyspace.
-	kg, err := groupManager.RemoveKeyspacesFromGroup(c.Request.Context(), groupID, keyspaceManager, params.Keyspaces)
+	kg, err := groupManager.RemoveKeyspacesFromGroup(
+		c.Request.Context(), groupID, keyspaceManager, svr.GetMember().GetLeadership(), params.Keyspaces)
 	if err != nil {
 		if errs.ErrKeyspaceGroupNotExists.Equal(err) {
 			c.AbortWithStatusJSON(http.StatusNotFound, err.Error())

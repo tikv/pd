@@ -34,6 +34,7 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/balancer"
+	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/mcs/discovery"
@@ -578,7 +579,30 @@ func (m *GroupManager) GetGroupByKeyspaceID(id uint32) (uint32, error) {
 // are split into bounded transactions. Each batch is atomic. Operations that
 // relocate existing keyspaces are blocked across all batches, while newly created
 // keyspaces can still be added to the group between batches.
-func (m *GroupManager) RemoveKeyspacesFromGroup(ctx context.Context, groupID uint32, km *Manager, keyspaceIDs []uint32) (*endpoint.KeyspaceGroup, error) {
+func (m *GroupManager) RemoveKeyspacesFromGroup(
+	ctx context.Context,
+	groupID uint32,
+	km *Manager,
+	leadership *election.Leadership,
+	keyspaceIDs []uint32,
+) (*endpoint.KeyspaceGroup, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	term, ok := leadership.CaptureTerm()
+	if !ok {
+		return nil, errors.Errorf("%s because leadership term is unavailable", errs.NotLeaderErr)
+	}
+	return m.removeKeyspacesFromGroup(ctx, groupID, km, keyspaceIDs, term.Comparisons())
+}
+
+func (m *GroupManager) removeKeyspacesFromGroup(
+	ctx context.Context,
+	groupID uint32,
+	km *Manager,
+	keyspaceIDs []uint32,
+	leadershipConditions []clientv3.Cmp,
+) (*endpoint.KeyspaceGroup, error) {
 	remainingIDs := make(map[uint32]struct{}, len(keyspaceIDs))
 	for _, keyspaceID := range keyspaceIDs {
 		if isProtectedKeyspaceID(keyspaceID) {
@@ -600,7 +624,8 @@ func (m *GroupManager) RemoveKeyspacesFromGroup(ctx context.Context, groupID uin
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		kg, processedIDs, hasMore, err := m.removeKeyspacesFromGroupBatch(ctx, groupID, km, remainingIDs)
+		kg, processedIDs, hasMore, err := m.removeKeyspacesFromGroupBatch(
+			ctx, groupID, km, remainingIDs, leadershipConditions)
 		if err != nil {
 			return nil, err
 		}
@@ -619,10 +644,11 @@ func (m *GroupManager) removeKeyspacesFromGroupBatch(
 	groupID uint32,
 	km *Manager,
 	requestedIDs map[uint32]struct{},
+	leadershipConditions []clientv3.Cmp,
 ) (*endpoint.KeyspaceGroup, []uint32, bool, error) {
 	m.Lock()
 	defer m.Unlock()
-	return m.removeKeyspacesFromGroupBatchLocked(ctx, groupID, km, requestedIDs)
+	return m.removeKeyspacesFromGroupBatchLocked(ctx, groupID, km, requestedIDs, leadershipConditions)
 }
 
 // removeKeyspacesFromGroupBatchLocked removes one bounded batch while the
@@ -632,6 +658,7 @@ func (m *GroupManager) removeKeyspacesFromGroupBatchLocked(
 	groupID uint32,
 	km *Manager,
 	requestedIDs map[uint32]struct{},
+	leadershipConditions []clientv3.Cmp,
 ) (*endpoint.KeyspaceGroup, []uint32, bool, error) {
 	var (
 		kg               *endpoint.KeyspaceGroup
@@ -642,7 +669,7 @@ func (m *GroupManager) removeKeyspacesFromGroupBatchLocked(
 		err              error
 	)
 
-	if err := m.store.RunInTxn(ctx, func(txn kv.Txn) error {
+	runBatch := func(txn kv.Txn) error {
 		// Load the keyspace group
 		kg, err = m.store.LoadKeyspaceGroup(txn, groupID)
 		if err != nil {
@@ -693,7 +720,17 @@ func (m *GroupManager) removeKeyspacesFromGroupBatchLocked(
 		kg.Keyspaces = newKeyspaces
 
 		return m.store.SaveKeyspaceGroup(txn, kg)
-	}); err != nil {
+	}
+	if len(leadershipConditions) > 0 {
+		conditionalStore, ok := m.store.(kv.ConditionalTxnRunner)
+		if !ok {
+			return nil, nil, false, errors.New("keyspace group storage does not support conditional transactions")
+		}
+		err = conditionalStore.RunInTxnWithConditions(ctx, leadershipConditions, runBatch)
+	} else {
+		err = m.store.RunInTxn(ctx, runBatch)
+	}
+	if err != nil {
 		return nil, nil, false, err
 	}
 

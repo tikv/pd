@@ -28,12 +28,14 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
+	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/mock/mockid"
+	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -110,6 +112,101 @@ func (suite *keyspaceGroupTestSuite) createArchivedKeyspaces(count int) []uint32
 	return keyspaceIDs
 }
 
+func TestRemoveKeyspacesFromGroupIsFencedByLeadershipTerm(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+
+	store := storage.NewStorageWithEtcdBackend(client)
+	groupManager := NewKeyspaceGroupManager(ctx, store, nil)
+	defer groupManager.Close()
+	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	keyspaceManager := NewKeyspaceManager(
+		ctx, store, cluster, mockid.NewIDAllocator(), &mockConfig{}, groupManager, nil)
+	re.NoError(groupManager.Bootstrap(ctx))
+
+	leadership := election.NewLeadership(client, "/test/keyspace-removal-leader", "keyspace removal test")
+	re.NoError(leadership.Campaign(60, "same-leader"))
+	defer leadership.Reset()
+
+	keyspaceIDs := make([]uint32, 0, maxKeyspaceRemovalBatchSize+1)
+	for i := range maxKeyspaceRemovalBatchSize + 1 {
+		meta, err := keyspaceManager.CreateKeyspace(&CreateKeyspaceRequest{
+			Name:       fmt.Sprintf("term-fence-%d", i),
+			Config:     map[string]string{},
+			CreateTime: time.Now().Unix(),
+		})
+		re.NoError(err)
+		_, err = keyspaceManager.UpdateKeyspaceStateByID(
+			meta.GetId(), keyspacepb.KeyspaceState_DISABLED, time.Now().Unix())
+		re.NoError(err)
+		_, err = keyspaceManager.UpdateKeyspaceStateByID(
+			meta.GetId(), keyspacepb.KeyspaceState_ARCHIVED, time.Now().Unix())
+		re.NoError(err)
+		keyspaceIDs = append(keyspaceIDs, meta.GetId())
+	}
+
+	batchBoundaryCh := make(chan struct{}, 1)
+	continueCh := make(chan struct{})
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/keyspace/afterRemoveKeyspacesFromGroupBatch", func() {
+		batchBoundaryCh <- struct{}{}
+		select {
+		case <-continueCh:
+		case <-ctx.Done():
+		}
+	}))
+	defer func() {
+		cancel()
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/afterRemoveKeyspacesFromGroupBatch"))
+	}()
+
+	resultCh := make(chan error, 1)
+	go func() {
+		_, err := groupManager.RemoveKeyspacesFromGroup(
+			ctx, constant.DefaultKeyspaceGroupID, keyspaceManager, leadership, keyspaceIDs)
+		resultCh <- err
+	}()
+	select {
+	case <-batchBoundaryCh:
+	case <-time.After(5 * time.Second):
+		re.FailNow("timed out waiting for a keyspace removal batch boundary")
+	}
+
+	oldTerm, ok := leadership.CaptureTerm()
+	re.True(ok)
+	leadership.Reset()
+	re.NoError(leadership.Campaign(60, "same-leader"))
+	newTerm, ok := leadership.CaptureTerm()
+	re.True(ok)
+	re.Equal(oldTerm.LeaderValue(), newTerm.LeaderValue())
+	re.NotEqual(oldTerm.LeaseID(), newTerm.LeaseID())
+	close(continueCh)
+
+	select {
+	case err := <-resultCh:
+		re.ErrorIs(err, errs.ErrEtcdTxnConflict)
+	case <-time.After(5 * time.Second):
+		re.FailNow("timed out waiting for keyspace removal to stop")
+	}
+
+	group, err := groupManager.GetKeyspaceGroupByID(constant.DefaultKeyspaceGroupID)
+	re.NoError(err)
+	removed := 0
+	for _, keyspaceID := range keyspaceIDs {
+		_, err := keyspaceManager.LoadKeyspaceByID(keyspaceID)
+		if errors.Is(err, errs.ErrKeyspaceNotFound) {
+			removed++
+			re.NotContains(group.Keyspaces, keyspaceID)
+			continue
+		}
+		re.NoError(err)
+		re.Contains(group.Keyspaces, keyspaceID)
+	}
+	re.Equal(maxKeyspaceRemovalBatchSize, removed)
+}
+
 func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupUsesBoundedTransactions() {
 	re := suite.Require()
 	keyspaceCount := maxKeyspaceRemovalBatchSize*2 + 1
@@ -140,7 +237,8 @@ func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupUsesBoundedTran
 	}
 	resultCh := make(chan removalResult, 1)
 	go func() {
-		group, err := suite.kgm.RemoveKeyspacesFromGroup(suite.ctx, constant.DefaultKeyspaceGroupID, suite.kg, keyspaceIDs)
+		group, err := suite.kgm.removeKeyspacesFromGroup(
+			suite.ctx, constant.DefaultKeyspaceGroupID, suite.kg, keyspaceIDs, nil)
 		resultCh <- removalResult{group: group, err: err}
 	}()
 
@@ -228,8 +326,8 @@ func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupFiltersInBatch(
 		keyspaceIDs = append(keyspaceIDs, uint32(100_000+i))
 	}
 
-	group, err := suite.kgm.RemoveKeyspacesFromGroup(
-		suite.ctx, constant.DefaultKeyspaceGroupID, suite.kg, keyspaceIDs)
+	group, err := suite.kgm.removeKeyspacesFromGroup(
+		suite.ctx, constant.DefaultKeyspaceGroupID, suite.kg, keyspaceIDs, nil)
 	re.NoError(err)
 	re.Equal(int32(1), countingStore.runInTxnCount.Load())
 	re.NotContains(group.Keyspaces, archivedID)
@@ -285,8 +383,8 @@ func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupDoesNotDeadlock
 
 	removalResultCh := make(chan error, 1)
 	go func() {
-		_, err := suite.kgm.RemoveKeyspacesFromGroup(
-			suite.ctx, constant.DefaultKeyspaceGroupID, suite.kg, []uint32{enabled.GetId()})
+		_, err := suite.kgm.removeKeyspacesFromGroup(
+			suite.ctx, constant.DefaultKeyspaceGroupID, suite.kg, []uint32{enabled.GetId()}, nil)
 		removalResultCh <- err
 	}()
 
@@ -339,8 +437,8 @@ func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupStopsAfterCance
 	countingStore := &countingKeyspaceGroupStorage{StorageEndpoint: store}
 	suite.kgm.store = countingStore
 
-	_, err := suite.kgm.RemoveKeyspacesFromGroup(
-		ctx, constant.DefaultKeyspaceGroupID, suite.kg, keyspaceIDs)
+	_, err := suite.kgm.removeKeyspacesFromGroup(
+		ctx, constant.DefaultKeyspaceGroupID, suite.kg, keyspaceIDs, nil)
 	re.ErrorIs(err, context.Canceled)
 	re.Equal(int32(1), countingStore.runInTxnCount.Load())
 
@@ -374,7 +472,8 @@ func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupAggregatesMetaS
 	re.NoError(err)
 	re.Equal(2, counts["meta-group-1"])
 
-	_, err = suite.kgm.RemoveKeyspacesFromGroup(suite.ctx, constant.DefaultKeyspaceGroupID, suite.kg, keyspaceIDs)
+	_, err = suite.kgm.removeKeyspacesFromGroup(
+		suite.ctx, constant.DefaultKeyspaceGroupID, suite.kg, keyspaceIDs, nil)
 	re.NoError(err)
 	counts, err = mgm.GetAssignmentCounts(suite.ctx)
 	re.NoError(err)
