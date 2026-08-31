@@ -73,6 +73,77 @@ func (w *HotCache) CheckReadAsync(task func(cache *HotPeerCache)) bool {
 	}
 }
 
+// CheckRegionFlowAsync checks the expired read and write items and the write
+// flow for a region asynchronously. It preserves the original task count and
+// enqueue order while keeping only the fields used by HotPeerCache.
+func (w *HotCache) CheckRegionFlowAsync(region *core.RegionInfo) {
+	checkExpiredTask, checkWritePeerTask := newRegionFlowTasks(region)
+	w.CheckWriteAsync(checkExpiredTask)
+	w.CheckReadAsync(checkExpiredTask)
+	w.CheckWriteAsync(checkWritePeerTask)
+}
+
+func newRegionFlowTasks(region *core.RegionInfo) (checkExpiredTask, checkWritePeerTask func(*HotPeerCache)) {
+	regionInfo := newHotRegionInfo(region)
+	reportInterval := region.GetInterval()
+	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
+	writtenBytes := region.GetBytesWritten()
+	writtenKeys := region.GetKeysWritten()
+	writeQueryNum := region.GetWriteQueryNum()
+	return newExpiredRegionTask(regionInfo), newWriteRegionTask(regionInfo, interval, writtenBytes, writtenKeys, writeQueryNum)
+}
+
+func newExpiredRegionTask(regionInfo *hotRegionInfo) func(*HotPeerCache) {
+	return func(cache *HotPeerCache) {
+		expiredStats := cache.collectExpiredItemsForRegion(regionInfo)
+		for _, stat := range expiredStats {
+			cache.UpdateStat(stat)
+		}
+	}
+}
+
+func newWriteRegionTask(regionInfo *hotRegionInfo, interval, writtenBytes, writtenKeys, writeQueryNum uint64) func(*HotPeerCache) {
+	return func(cache *HotPeerCache) {
+		var loads [utils.RegionStatCount]float64
+		loads[utils.RegionWriteBytes] = float64(writtenBytes)
+		loads[utils.RegionWriteKeys] = float64(writtenKeys)
+		loads[utils.RegionWriteQueryNum] = float64(writeQueryNum)
+		stats := cache.checkPeerFlowForRegion(regionInfo, nil, loads[:], interval)
+		for _, stat := range stats {
+			cache.UpdateStat(stat)
+		}
+	}
+}
+
+// CheckReadPeerAsync checks the read flow for one peer asynchronously without
+// retaining the complete RegionInfo or Peer in the pending task.
+func (w *HotCache) CheckReadPeerAsync(region *core.RegionInfo, peer *metapb.Peer, loads []float64, interval uint64) bool {
+	return w.CheckReadAsync(newReadPeerTask(region, peer, loads, interval))
+}
+
+func newReadPeerTask(region *core.RegionInfo, peer *metapb.Peer, loads []float64, interval uint64) func(*HotPeerCache) {
+	regionInfo := newHotRegionInfo(region)
+	storeID := peer.GetStoreId()
+	return func(cache *HotPeerCache) {
+		stats := cache.checkPeerFlowForRegion(regionInfo, []uint64{storeID}, loads, interval)
+		for _, stat := range stats {
+			cache.UpdateStat(stat)
+		}
+	}
+}
+
+// CheckColdPeerAsync checks peers missing from a store heartbeat
+// asynchronously. The pending task only keeps the reported region IDs.
+func (w *HotCache) CheckColdPeerAsync(storeID uint64, reportedRegions map[uint64]struct{}, interval uint64) bool {
+	checkColdPeerTask := func(cache *HotPeerCache) {
+		stats := cache.checkColdPeerByRegionIDs(storeID, reportedRegions, interval)
+		for _, stat := range stats {
+			cache.UpdateStat(stat)
+		}
+	}
+	return w.CheckReadAsync(checkColdPeerTask)
+}
+
 // GetHotPeerStats returns hot peer stats for the specified kind (read/write).
 // It returns a map where the keys are store IDs and the values are slices of HotPeerStat.
 func (w *HotCache) GetHotPeerStats(kind utils.RWType, minHotDegree int) map[uint64][]*HotPeerStat {
