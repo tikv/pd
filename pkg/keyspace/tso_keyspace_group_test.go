@@ -240,6 +240,90 @@ func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupFiltersInBatch(
 	re.NoError(err)
 }
 
+func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupDoesNotDeadlockConfigGroupMove() {
+	re := suite.Require()
+	enabled, err := suite.kg.CreateKeyspace(&CreateKeyspaceRequest{
+		Name:       "concurrent-config-move",
+		Config:     map[string]string{},
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+	re.NoError(suite.kgm.CreateKeyspaceGroups([]*endpoint.KeyspaceGroup{{
+		ID:       1,
+		UserKind: endpoint.Basic.String(),
+	}}))
+
+	// Hold the per-keyspace metadata lock so the config update and removal reach
+	// their manager-lock boundaries in a deterministic order.
+	suite.kg.metaLock.Lock(enabled.GetId())
+	metaLocked := true
+	defer func() {
+		if metaLocked {
+			suite.kg.metaLock.Unlock(enabled.GetId())
+		}
+	}()
+
+	configResultCh := make(chan error, 1)
+	go func() {
+		_, err := suite.kg.UpdateKeyspaceConfig(enabled.GetName(), []*Mutation{{
+			Op:    OpPut,
+			Key:   TSOKeyspaceGroupIDKey,
+			Value: "1",
+		}})
+		configResultCh <- err
+	}()
+
+	// A group-moving config update must acquire the membership write lock before
+	// waiting for metaLock.
+	re.Eventually(func() bool {
+		locked := suite.kgm.membershipMutationLock.TryLock()
+		if locked {
+			suite.kgm.membershipMutationLock.Unlock()
+		}
+		return !locked
+	}, 5*time.Second, 10*time.Millisecond)
+
+	removalResultCh := make(chan error, 1)
+	go func() {
+		_, err := suite.kgm.RemoveKeyspacesFromGroup(
+			suite.ctx, constant.DefaultKeyspaceGroupID, suite.kg, []uint32{enabled.GetId()})
+		removalResultCh <- err
+	}()
+
+	// Removal is blocked by the membership lock and therefore cannot hold the
+	// manager lock while waiting for the same keyspace metadata lock.
+	managerLocked := suite.kgm.TryLock()
+	re.True(managerLocked)
+	if managerLocked {
+		suite.kgm.Unlock()
+	}
+
+	suite.kg.metaLock.Unlock(enabled.GetId())
+	metaLocked = false
+	select {
+	case err := <-configResultCh:
+		re.NoError(err)
+	case <-time.After(5 * time.Second):
+		re.FailNow("timed out waiting for the keyspace group config move")
+	}
+	select {
+	case err := <-removalResultCh:
+		re.NoError(err)
+	case <-time.After(5 * time.Second):
+		re.FailNow("timed out waiting for keyspace removal")
+	}
+
+	defaultGroup, err := suite.kgm.GetKeyspaceGroupByID(constant.DefaultKeyspaceGroupID)
+	re.NoError(err)
+	re.NotContains(defaultGroup.Keyspaces, enabled.GetId())
+	targetGroup, err := suite.kgm.GetKeyspaceGroupByID(1)
+	re.NoError(err)
+	re.Contains(targetGroup.Keyspaces, enabled.GetId())
+	meta, err := suite.kg.LoadKeyspaceByID(enabled.GetId())
+	re.NoError(err)
+	re.Equal("1", meta.GetConfig()[TSOKeyspaceGroupIDKey])
+}
+
 func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupStopsAfterCancellation() {
 	re := suite.Require()
 	keyspaceIDs := suite.createArchivedKeyspaces(maxKeyspaceRemovalBatchSize*2 + 1)

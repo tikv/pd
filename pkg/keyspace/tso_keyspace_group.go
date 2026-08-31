@@ -775,6 +775,18 @@ func (m *GroupManager) UpdateKeyspaceGroup(oldGroupID, newGroupID string, oldUse
 	if m == nil {
 		return nil
 	}
+	m.membershipMutationLock.Lock()
+	defer m.membershipMutationLock.Unlock()
+	return m.updateKeyspaceGroupWithMembershipLockHeld(oldGroupID, newGroupID, oldUserKind, newUserKind, keyspaceID)
+}
+
+// updateKeyspaceGroupWithMembershipLockHeld updates the keyspace group while
+// the caller holds membershipMutationLock for writing.
+func (m *GroupManager) updateKeyspaceGroupWithMembershipLockHeld(
+	oldGroupID, newGroupID string,
+	oldUserKind, newUserKind endpoint.UserKind,
+	keyspaceID uint32,
+) error {
 	oldID, err := strconv.ParseUint(oldGroupID, 10, 64)
 	if err != nil {
 		return err
@@ -784,8 +796,6 @@ func (m *GroupManager) UpdateKeyspaceGroup(oldGroupID, newGroupID string, oldUse
 		return err
 	}
 
-	m.membershipMutationLock.Lock()
-	defer m.membershipMutationLock.Unlock()
 	m.Lock()
 	defer m.Unlock()
 	oldKG := m.groups[oldUserKind].Get(uint32(oldID))

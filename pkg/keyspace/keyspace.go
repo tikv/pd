@@ -820,7 +820,7 @@ const (
 // UpdateKeyspaceConfig changes target keyspace's config in the order specified in mutations.
 // It returns error if saving failed, operation not allowed, or if keyspace not exists.
 func (manager *Manager) UpdateKeyspaceConfig(name string, mutations []*Mutation) (*keyspacepb.KeyspaceMeta, error) {
-	return manager.updateKeyspaceConfigTxn(name, func(meta *keyspacepb.KeyspaceMeta) error {
+	return manager.updateKeyspaceConfigTxn(name, mutationsAffectKeyspaceGroupMembership(mutations), func(meta *keyspacepb.KeyspaceMeta) error {
 		return applyKeyspaceConfigMutations(meta.Config, mutations)
 	})
 }
@@ -834,12 +834,21 @@ func (manager *Manager) UpdateKeyspaceConfigWithPreconditions(name string, mutat
 	if len(preconditions) == 0 {
 		return manager.UpdateKeyspaceConfig(name, mutations)
 	}
-	return manager.updateKeyspaceConfigTxn(name, func(meta *keyspacepb.KeyspaceMeta) error {
+	return manager.updateKeyspaceConfigTxn(name, mutationsAffectKeyspaceGroupMembership(mutations), func(meta *keyspacepb.KeyspaceMeta) error {
 		if err := checkKeyspaceConfigPreconditions(meta.GetConfig(), preconditions); err != nil {
 			return err
 		}
 		return applyKeyspaceConfigMutations(meta.Config, mutations)
 	})
+}
+
+func mutationsAffectKeyspaceGroupMembership(mutations []*Mutation) bool {
+	for _, mutation := range mutations {
+		if mutation.Key == UserKindKey || mutation.Key == TSOKeyspaceGroupIDKey {
+			return true
+		}
+	}
+	return false
 }
 
 func checkKeyspaceConfigPreconditions(config map[string]string, preconditions map[string]*string) error {
@@ -888,7 +897,19 @@ func (manager *Manager) runTxnWithMetaGroupLock(f func(txn kv.Txn) error) error 
 	return manager.store.RunInTxn(manager.ctx, f)
 }
 
-func (manager *Manager) updateKeyspaceConfigTxn(name string, update func(meta *keyspacepb.KeyspaceMeta) error) (*keyspacepb.KeyspaceMeta, error) {
+func (manager *Manager) updateKeyspaceConfigTxn(
+	name string,
+	mayUpdateKeyspaceGroup bool,
+	update func(meta *keyspacepb.KeyspaceMeta) error,
+) (*keyspacepb.KeyspaceMeta, error) {
+	// Keep the lock order consistent with bulk keyspace removal, which holds the
+	// membership read lock before inspecting keyspace metadata. Only updates that
+	// can relocate a keyspace need to serialize with removal.
+	if mayUpdateKeyspaceGroup && manager.kgm != nil {
+		manager.kgm.membershipMutationLock.Lock()
+		defer manager.kgm.membershipMutationLock.Unlock()
+	}
+
 	var meta *keyspacepb.KeyspaceMeta
 	oldConfig := make(map[string]string)
 	txnFunc := func(txn kv.Txn) error {
@@ -946,15 +967,15 @@ func (manager *Manager) updateKeyspaceConfigTxn(name string, update func(meta *k
 		oldID := oldConfig[TSOKeyspaceGroupIDKey]
 		newID := newConfig[TSOKeyspaceGroupIDKey]
 		needUpdate := oldUserKind != newUserKind || oldID != newID
-		if needUpdate {
-			if err := manager.kgm.UpdateKeyspaceGroup(oldID, newID, oldUserKind, newUserKind, meta.GetId()); err != nil {
+		if needUpdate && manager.kgm != nil {
+			if err := manager.kgm.updateKeyspaceGroupWithMembershipLockHeld(oldID, newID, oldUserKind, newUserKind, meta.GetId()); err != nil {
 				return err
 			}
 		}
 		// Save the updated keyspace meta.
 		if err := manager.store.SaveKeyspaceMeta(txn, meta); err != nil {
-			if needUpdate {
-				if err := manager.kgm.UpdateKeyspaceGroup(newID, oldID, newUserKind, oldUserKind, meta.GetId()); err != nil {
+			if needUpdate && manager.kgm != nil {
+				if err := manager.kgm.updateKeyspaceGroupWithMembershipLockHeld(newID, oldID, newUserKind, oldUserKind, meta.GetId()); err != nil {
 					log.Error("failed to revert keyspace group", zap.Error(err))
 				}
 			}
