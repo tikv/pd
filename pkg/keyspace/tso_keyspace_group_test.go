@@ -243,7 +243,7 @@ func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupFiltersInBatch(
 func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupDoesNotDeadlockConfigGroupMove() {
 	re := suite.Require()
 	enabled, err := suite.kg.CreateKeyspace(&CreateKeyspaceRequest{
-		Name:       "concurrent-config-move",
+		Name:       "concurrent_cfg_move",
 		Config:     map[string]string{},
 		CreateTime: time.Now().Unix(),
 	})
