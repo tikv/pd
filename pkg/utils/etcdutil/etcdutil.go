@@ -814,7 +814,7 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 			return 0, nil
 		default:
 		}
-		resp, err := EtcdKVGet(lw.client, startKey, opts...)
+		resp, err := EtcdKVGetWithContext(ctx, lw.client, startKey, opts...)
 		failpoint.Inject("meetEtcdError", func() {
 			if limit > minLoadBatchSize {
 				err = errors.New(codes.ResourceExhausted.String())

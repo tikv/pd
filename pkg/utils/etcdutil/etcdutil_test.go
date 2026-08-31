@@ -38,6 +38,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/goleak"
+	"google.golang.org/grpc"
 
 	"github.com/pingcap/failpoint"
 
@@ -516,6 +517,65 @@ func (suite *loopWatcherTestSuite) TestInitialLoadFailsWhenContextCanceled() {
 	)
 	watcher.StartWatchLoop()
 	re.Error(watcher.WaitLoad())
+}
+
+func (suite *loopWatcherTestSuite) TestWatcherLoadCancelsInFlightRequest() {
+	re := suite.Require()
+	requestStarted := make(chan struct{}, 1)
+	client, err := CreateEtcdClient(nil, suite.config.ListenClientUrls, TestEtcdClientPurpose, false,
+		func(config *clientv3.Config) {
+			config.DialOptions = append(config.DialOptions, grpc.WithChainUnaryInterceptor(
+				func(
+					ctx context.Context, method string, req, reply any,
+					cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption,
+				) error {
+					if method != "/etcdserverpb.KV/Range" {
+						return invoker(ctx, method, req, reply, cc, opts...)
+					}
+					select {
+					case requestStarted <- struct{}{}:
+					default:
+					}
+					<-ctx.Done()
+					return ctx.Err()
+				},
+			))
+		})
+	re.NoError(err)
+	defer client.Close()
+
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+	watcher := NewLoopWatcher(
+		ctx,
+		&suite.wg,
+		client,
+		"test",
+		"TestWatcherLoadCancelsInFlightRequest",
+		func([]*clientv3.Event) error { return nil },
+		func(*mvccpb.KeyValue) error { return nil },
+		func(*mvccpb.KeyValue) error { return nil },
+		func([]*clientv3.Event) error { return nil },
+		false, /* withPrefix */
+	)
+	loadDone := make(chan error, 1)
+	go func() {
+		_, err := watcher.load(ctx)
+		loadDone <- err
+	}()
+
+	select {
+	case <-requestStarted:
+	case <-time.After(3 * time.Second):
+		suite.T().Fatal("watcher did not start loading from etcd")
+	}
+	cancel()
+	select {
+	case err := <-loadDone:
+		re.ErrorIs(err, context.Canceled)
+	case <-time.After(3 * time.Second):
+		suite.T().Fatal("watcher did not cancel the in-flight etcd request")
+	}
 }
 
 func (suite *loopWatcherTestSuite) TestWatcherLoadReturnsLifecycleErrors() {
