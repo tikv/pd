@@ -926,16 +926,17 @@ func (c *Cli) processRequestsInner(
 		return &queryRegionStreamError{streamURL: streamURL, err: err}
 	}
 	headerErr := resp.GetHeader().GetError()
-	retryOnLeader := isFollower || headerErr.GetType() == pdpb.ErrorType_REGION_NOT_FOUND
+	retryOnLeader := isFollower ||
+		(headerErr != nil && headerErr.GetType() == pdpb.ErrorType_REGION_NOT_FOUND)
 	if headerErr != nil && !retryOnLeader {
 		return &queryRegionStreamError{streamURL: streamURL, err: errors.New(headerErr.String())}
 	}
 	if retryOnLeader {
-		// REGION_NOT_FOUND intentionally keeps partial results so only the
-		// missing requests need to be retried. Other header errors invalidate
-		// the entire follower response, matching the unary retry behavior.
+		// A successful follower response may contain both hits and misses, so
+		// only the missing requests need to be retried. A header error invalidates
+		// the entire response, matching the unary retry behavior.
 		responseForFinisher := resp
-		if headerErr != nil && headerErr.GetType() != pdpb.ErrorType_REGION_NOT_FOUND {
+		if headerErr != nil {
 			responseForFinisher = nil
 		}
 		missingRequests := make([]*Request, 0, len(requests))
