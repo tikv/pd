@@ -17,6 +17,7 @@ package rule
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -46,7 +47,9 @@ func TestMain(m *testing.M) {
 }
 
 const (
-	rulesNum = 16384
+	rulesNum                    = 16384
+	ruleSnapshotBenchmarkRules  = 1_000_000
+	ruleSnapshotBenchmarkTxnOps = 10_000
 )
 
 func TestLoadLargeRules(t *testing.T) {
@@ -90,9 +93,20 @@ func runWatcherLoadLabelRule(ctx context.Context, re *require.Assertions, client
 }
 
 func prepare(t require.TestingT, loadLabelRules bool) (context.Context, *clientv3.Client, func()) {
+	return prepareWithEtcdConfig(t, loadLabelRules, nil)
+}
+
+func prepareWithEtcdConfig(
+	t require.TestingT,
+	loadLabelRules bool,
+	configure func(*embed.Config),
+) (context.Context, *clientv3.Client, func()) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cfg := etcdutil.NewTestEtcdConfig()
+	if configure != nil {
+		configure(cfg)
+	}
 	var err error
 	cfg.Dir, err = os.MkdirTemp("", "pd_tests")
 	re.NoError(err)
@@ -129,6 +143,84 @@ func prepare(t require.TestingT, loadLabelRules bool) (context.Context, *clientv
 		etcd.Close()
 		os.RemoveAll(cfg.Dir)
 	}
+}
+
+// BenchmarkRuleSnapshotKeyScan compares the current paginated scan with and
+// without local-rule-derived range bounds against a one-shot keys-only scan.
+// Use -benchtime=1x because preparing the one-million-rule snapshot is costly.
+func BenchmarkRuleSnapshotKeyScan(b *testing.B) {
+	ctx, client, clean := prepareWithEtcdConfig(b, false, func(cfg *embed.Config) {
+		cfg.MaxTxnOps = ruleSnapshotBenchmarkTxnOps
+	})
+	defer clean()
+
+	prefix := keypath.RulesPathPrefix()
+	rangeEnds := make([]string, 0, ruleSnapshotBenchmarkRules/int(ruleSnapshotLoadBatchSize))
+	ops := make([]clientv3.Op, 0, ruleSnapshotBenchmarkTxnOps)
+	var snapshotRevision int64
+	commit := func() {
+		resp, err := client.Txn(ctx).Then(ops...).Commit()
+		require.NoError(b, err)
+		snapshotRevision = resp.Header.Revision
+		ops = ops[:0]
+	}
+	for i := range ruleSnapshotBenchmarkRules {
+		key := fmt.Sprintf("%s67-%016x", prefix, i)
+		if i > 0 && i%int(ruleSnapshotLoadBatchSize) == 0 {
+			rangeEnds = append(rangeEnds, key)
+		}
+		ops = append(ops, clientv3.OpPut(key, "{}"))
+		if len(ops) == ruleSnapshotBenchmarkTxnOps {
+			commit()
+		}
+	}
+	if len(ops) > 0 {
+		commit()
+	}
+
+	rw := &Watcher{etcdClient: client}
+	runPaged := func(b *testing.B, rangeEnds []string) {
+		b.ReportAllocs()
+		var totalRPCs int
+		for range b.N {
+			scanned, rpcs := 0, 0
+			revision, err := rw.scanRuleSnapshotKeys(
+				ctx, prefix, rangeEnds, snapshotRevision, ruleSnapshotLoadBatchSize,
+				func(page []*mvccpb.KeyValue, _ int64) error {
+					scanned += len(page)
+					rpcs++
+					return nil
+				})
+			require.NoError(b, err)
+			require.Equal(b, snapshotRevision, revision)
+			require.Equal(b, ruleSnapshotBenchmarkRules, scanned)
+			totalRPCs += rpcs
+		}
+		b.ReportMetric(float64(totalRPCs)/float64(b.N), "rpcs/op")
+	}
+
+	b.Run("paged/empty-local", func(b *testing.B) {
+		runPaged(b, nil)
+	})
+	b.Run("paged/matching-local", func(b *testing.B) {
+		runPaged(b, rangeEnds)
+	})
+	b.Run("one-shot", func(b *testing.B) {
+		b.ReportAllocs()
+		for range b.N {
+			resp, err := etcdutil.EtcdKVGetWithContext(
+				ctx,
+				client,
+				prefix,
+				clientv3.WithRange(clientv3.GetPrefixRangeEnd(prefix)),
+				clientv3.WithKeysOnly(),
+				clientv3.WithRev(snapshotRevision),
+			)
+			require.NoError(b, err)
+			require.Len(b, resp.Kvs, ruleSnapshotBenchmarkRules)
+		}
+		b.ReportMetric(1, "rpcs/op")
+	})
 }
 
 func TestScanRuleSnapshotKeyRanges(t *testing.T) {
