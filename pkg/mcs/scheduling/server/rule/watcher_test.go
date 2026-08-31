@@ -151,11 +151,12 @@ func prepareWithEtcdConfig(
 func BenchmarkRuleSnapshotKeyScan(b *testing.B) {
 	ctx, client, clean := prepareWithEtcdConfig(b, false, func(cfg *embed.Config) {
 		cfg.MaxTxnOps = ruleSnapshotBenchmarkTxnOps
+		cfg.LogLevel = "error"
 	})
 	defer clean()
 
 	prefix := keypath.RulesPathPrefix()
-	rangeEnds := make([]string, 0, ruleSnapshotBenchmarkRules/int(ruleSnapshotLoadBatchSize))
+	rangeEnds := make([]string, 0, ruleSnapshotBenchmarkRules/int(ruleSnapshotScanBatchSize))
 	ops := make([]clientv3.Op, 0, ruleSnapshotBenchmarkTxnOps)
 	var snapshotRevision int64
 	commit := func() {
@@ -166,7 +167,7 @@ func BenchmarkRuleSnapshotKeyScan(b *testing.B) {
 	}
 	for i := range ruleSnapshotBenchmarkRules {
 		key := fmt.Sprintf("%s67-%016x", prefix, i)
-		if i > 0 && i%int(ruleSnapshotLoadBatchSize) == 0 {
+		if i > 0 && i%int(ruleSnapshotScanBatchSize) == 0 {
 			rangeEnds = append(rangeEnds, key)
 		}
 		ops = append(ops, clientv3.OpPut(key, "{}"))
@@ -181,22 +182,19 @@ func BenchmarkRuleSnapshotKeyScan(b *testing.B) {
 	rw := &Watcher{etcdClient: client}
 	runPaged := func(b *testing.B, rangeEnds []string) {
 		b.ReportAllocs()
-		var totalRPCs int
 		for range b.N {
-			scanned, rpcs := 0, 0
+			scanned := 0
 			revision, err := rw.scanRuleSnapshotKeys(
-				ctx, prefix, rangeEnds, snapshotRevision, ruleSnapshotLoadBatchSize,
+				ctx, prefix, rangeEnds, snapshotRevision,
+				ruleSnapshotScanBatchSize, int(ruleSnapshotLoadBatchSize),
 				func(page []*mvccpb.KeyValue, _ int64) error {
 					scanned += len(page)
-					rpcs++
 					return nil
 				})
 			require.NoError(b, err)
 			require.Equal(b, snapshotRevision, revision)
 			require.Equal(b, ruleSnapshotBenchmarkRules, scanned)
-			totalRPCs += rpcs
 		}
-		b.ReportMetric(float64(totalRPCs)/float64(b.N), "rpcs/op")
 	}
 
 	b.Run("paged/empty-local", func(b *testing.B) {
@@ -219,8 +217,18 @@ func BenchmarkRuleSnapshotKeyScan(b *testing.B) {
 			require.NoError(b, err)
 			require.Len(b, resp.Kvs, ruleSnapshotBenchmarkRules)
 		}
-		b.ReportMetric(1, "rpcs/op")
 	})
+}
+
+func TestAdjustRuleSnapshotScanBatchSize(t *testing.T) {
+	re := require.New(t)
+	minimum := ruleSnapshotLoadBatchSize
+	re.Equal(int64(100000), adjustRuleSnapshotScanBatchSize(50000, minimum, 1024*1024))
+	re.Equal(int64(100000), adjustRuleSnapshotScanBatchSize(100000, minimum, 1024*1024))
+	re.Equal(int64(50000), adjustRuleSnapshotScanBatchSize(100000, minimum, 5*1024*1024))
+	re.Equal(int64(25000), adjustRuleSnapshotScanBatchSize(50000, minimum, 5*1024*1024))
+	re.Equal(minimum, adjustRuleSnapshotScanBatchSize(minimum, minimum, 5*1024*1024))
+	re.Equal(int64(50000), adjustRuleSnapshotScanBatchSize(50000, minimum, 3*1024*1024))
 }
 
 func TestScanRuleSnapshotKeyRanges(t *testing.T) {
@@ -246,8 +254,9 @@ func TestScanRuleSnapshotKeyRanges(t *testing.T) {
 	rw := &Watcher{etcdClient: client}
 	var loaded []string
 	callbackCount := 0
-	revision, err := rw.scanRuleSnapshotKeys(ctx, prefix, []string{prefix + "b"}, 0, 2,
+	revision, err := rw.scanRuleSnapshotKeys(ctx, prefix, []string{prefix + "b"}, 0, 4, 2,
 		func(page []*mvccpb.KeyValue, _ int64) error {
+			re.LessOrEqual(len(page), 2)
 			for _, item := range page {
 				loaded = append(loaded, string(item.Key))
 			}

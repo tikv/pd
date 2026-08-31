@@ -23,6 +23,7 @@ import (
 	"strings"
 	"sync"
 
+	"go.etcd.io/etcd/api/v3/etcdserverpb"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -38,7 +39,18 @@ import (
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
-const ruleSnapshotLoadBatchSize = int64(10000)
+const (
+	// Keep value loading and patch construction bounded independently from the
+	// larger keys-only etcd range responses.
+	ruleSnapshotLoadBatchSize = int64(10000)
+
+	// Aim for 2-4 MiB keys-only responses. The initial batch matches the lower
+	// bound for the typical placement-rule key size and may grow up to 100k.
+	ruleSnapshotScanBatchSize        = int64(50000)
+	ruleSnapshotScanMaxBatchSize     = int64(100000)
+	ruleSnapshotScanMinResponseBytes = 2 * 1024 * 1024
+	ruleSnapshotScanMaxResponseBytes = 4 * 1024 * 1024
+)
 
 // Watcher is used to watch the PD for any Placement Rule changes.
 type Watcher struct {
@@ -116,16 +128,29 @@ func NewWatcher(
 	return rw, nil
 }
 
+func adjustRuleSnapshotScanBatchSize(current, minimum int64, responseBytes int) int64 {
+	switch {
+	case responseBytes < ruleSnapshotScanMinResponseBytes:
+		return min(current*2, ruleSnapshotScanMaxBatchSize)
+	case responseBytes > ruleSnapshotScanMaxResponseBytes:
+		return max(current/2, minimum)
+	default:
+		return current
+	}
+}
+
 func (rw *Watcher) scanRuleSnapshotKeys(
 	ctx context.Context,
 	prefix string,
 	rangeEnds []string,
 	revision int64,
-	pageSize int64,
+	fetchBatchSize int64,
+	processBatchSize int,
 	handlePage func([]*mvccpb.KeyValue, int64) error,
 ) (int64, error) {
 	startKey := prefix
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
+	minFetchBatchSize := min(fetchBatchSize, int64(processBatchSize))
 	for rangeIndex := 0; rangeIndex <= len(rangeEnds); rangeIndex++ {
 		endKey := prefixEnd
 		if rangeIndex < len(rangeEnds) {
@@ -135,7 +160,7 @@ func (rw *Watcher) scanRuleSnapshotKeys(
 			opts := []clientv3.OpOption{
 				clientv3.WithRange(endKey),
 				// etcd ranges are key-ascending by default.
-				clientv3.WithLimit(pageSize + 1),
+				clientv3.WithLimit(fetchBatchSize + 1),
 				clientv3.WithKeysOnly(),
 			}
 			if revision > 0 {
@@ -157,8 +182,25 @@ func (rw *Watcher) scanRuleSnapshotKeys(
 				startKey = string(page[len(page)-1].Key)
 				page = page[:len(page)-1]
 			}
-			if err := handlePage(page, revision); err != nil {
-				return 0, err
+			if len(page) == 0 {
+				if err := handlePage(page, revision); err != nil {
+					return 0, err
+				}
+			} else {
+				for start := 0; start < len(page); start += processBatchSize {
+					end := min(start+processBatchSize, len(page))
+					if err := handlePage(page[start:end], revision); err != nil {
+						return 0, err
+					}
+				}
+			}
+			responseBytes := (*etcdserverpb.RangeResponse)(resp).Size()
+			if resp.More || responseBytes > ruleSnapshotScanMaxResponseBytes {
+				fetchBatchSize = adjustRuleSnapshotScanBatchSize(
+					fetchBatchSize,
+					minFetchBatchSize,
+					responseBytes,
+				)
 			}
 			if !resp.More {
 				break
@@ -227,7 +269,7 @@ func (rw *Watcher) reconcileRuleSnapshot(ctx context.Context) (int64, error) {
 
 	groupPrefix := []byte(rw.ruleGroupPathPrefix)
 	snapshotRevision, err := rw.scanRuleSnapshotKeys(
-		ctx, rw.ruleGroupPathPrefix, nil, 0, ruleSnapshotLoadBatchSize,
+		ctx, rw.ruleGroupPathPrefix, nil, 0, ruleSnapshotScanBatchSize, int(ruleSnapshotLoadBatchSize),
 		func(page []*mvccpb.KeyValue, revision int64) error {
 			type groupChange struct {
 				meta *mvccpb.KeyValue
@@ -299,12 +341,13 @@ func (rw *Watcher) reconcileRuleSnapshot(ctx context.Context) (int64, error) {
 	}
 	// Bound each etcd range with the already sorted local rule keys. etcd
 	// computes the count over the whole requested range even when a limit is set.
-	ruleRangeEnds := make([]string, 0, len(rules)/int(ruleSnapshotLoadBatchSize))
-	for i := int(ruleSnapshotLoadBatchSize); i < len(rules); i += int(ruleSnapshotLoadBatchSize) {
+	ruleRangeEnds := make([]string, 0, len(rules)/int(ruleSnapshotScanBatchSize))
+	for i := int(ruleSnapshotScanBatchSize); i < len(rules); i += int(ruleSnapshotScanBatchSize) {
 		ruleRangeEnds = append(ruleRangeEnds, rw.rulesPathPrefix+rules[i].StoreKey())
 	}
 	_, err = rw.scanRuleSnapshotKeys(
-		ctx, rw.rulesPathPrefix, ruleRangeEnds, snapshotRevision, ruleSnapshotLoadBatchSize,
+		ctx, rw.rulesPathPrefix, ruleRangeEnds, snapshotRevision,
+		ruleSnapshotScanBatchSize, int(ruleSnapshotLoadBatchSize),
 		func(page []*mvccpb.KeyValue, revision int64) error {
 			type ruleChange struct {
 				meta *mvccpb.KeyValue
