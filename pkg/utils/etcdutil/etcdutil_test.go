@@ -1148,8 +1148,7 @@ func (suite *loopWatcherTestSuite) TestWatcherReloadsAndReconcilesAfterCompactio
 	}()
 	cache := struct {
 		syncutil.RWMutex
-		data           map[string]string
-		deleteRevision int64
+		data map[string]string
 	}{data: make(map[string]string)}
 	checkCache := func(expected map[string]string) {
 		testutil.Eventually(re, func() bool {
@@ -1176,7 +1175,6 @@ func (suite *loopWatcherTestSuite) TestWatcherReloadsAndReconcilesAfterCompactio
 			cache.Lock()
 			defer cache.Unlock()
 			delete(cache.data, string(kv.Key))
-			cache.deleteRevision = kv.ModRevision
 			return nil
 		},
 		func([]*clientv3.Event) error { return nil },
@@ -1205,9 +1203,6 @@ func (suite *loopWatcherTestSuite) TestWatcherReloadsAndReconcilesAfterCompactio
 	re.NoError(err)
 	watcher.updateClientCh <- replacementClient
 	checkCache(map[string]string{keepKey: "after-compaction"})
-	cache.RLock()
-	re.Positive(cache.deleteRevision)
-	cache.RUnlock()
 }
 
 func (suite *loopWatcherTestSuite) TestWatcherSkipsCompactionReloadByDefault() {

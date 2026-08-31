@@ -18,16 +18,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
-
-	"github.com/pingcap/failpoint"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
@@ -38,7 +34,6 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
-	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
@@ -77,7 +72,17 @@ func (s *errorKeyspaceGroupStorage) SaveKeyspaceGroup(txn kv.Txn, kg *endpoint.K
 	return s.StorageEndpoint.SaveKeyspaceGroup(txn, kg)
 }
 
-func TestReconcileKeyspaceGroupsUsesCacheAndRevalidates(t *testing.T) {
+func getKeyspaceGroupReconcileEntry(
+	state *keyspaceGroupReconcileState,
+	groupID uint32,
+) (keyspaceGroupReconcileEntry, bool) {
+	state.RLock()
+	defer state.RUnlock()
+	entry, ok := state.groups[groupID]
+	return entry, ok
+}
+
+func TestReconcileKeyspaceGroupsUsesIndexAndRevalidates(t *testing.T) {
 	re := require.New(t)
 	ctx := t.Context()
 
@@ -87,12 +92,13 @@ func TestReconcileKeyspaceGroupsUsesCacheAndRevalidates(t *testing.T) {
 	defer manager.Close()
 	manager.nodesBalancer.Put("http://tso-1")
 	manager.nodesBalancer.Put("http://tso-2")
-	manager.groups[endpoint.Basic].Put(&endpoint.KeyspaceGroup{
-		Members:   []endpoint.KeyspaceGroupMember{{Address: "http://tso-1"}, {Address: "http://tso-2"}},
-		Keyspaces: make([]uint32, 1_000_000),
-	})
-
-	manager.reconcileKeyspaceGroups(ctx, nil)
+	tsoNodes := uniqueTSONodes(manager.nodesBalancer.GetAll())
+	state := newKeyspaceGroupReconcileState(func() {})
+	healthy := keyspaceGroupReconcileEntry{
+		id: 1, members: []endpoint.KeyspaceGroupMember{{Address: "http://tso-1"}, {Address: "http://tso-2"}},
+	}
+	state.apply(map[uint32]*keyspaceGroupReconcileEntry{healthy.id: &healthy})
+	manager.reconcileKeyspaceGroupIDs(ctx, state.groupsNeedingAllocation(tsoNodes))
 	re.Zero(store.loadCount)
 
 	storedGroup := &endpoint.KeyspaceGroup{
@@ -104,22 +110,14 @@ func TestReconcileKeyspaceGroupsUsesCacheAndRevalidates(t *testing.T) {
 		return baseStore.SaveKeyspaceGroup(txn, storedGroup)
 	}))
 
-	manager.groups[endpoint.Standard].Put(&endpoint.KeyspaceGroup{
-		ID:      storedGroup.ID,
-		Members: []endpoint.KeyspaceGroupMember{{Address: "http://tso-1"}},
-	})
-
-	manager.reconcileKeyspaceGroups(ctx, nil)
+	stale := keyspaceGroupReconcileEntry{
+		id: storedGroup.ID, members: []endpoint.KeyspaceGroupMember{{Address: "http://tso-1"}},
+	}
+	state.apply(map[uint32]*keyspaceGroupReconcileEntry{stale.id: &stale})
+	manager.reconcileKeyspaceGroupIDs(ctx, state.groupsNeedingAllocation(tsoNodes))
 	re.Equal(1, store.loadCount)
 	re.Zero(store.saveGroupCount)
 	re.Equal(storedGroup.Members, manager.groups[endpoint.Standard].Get(storedGroup.ID).Members)
-
-	re.NoError(baseStore.RunInTxn(ctx, func(txn kv.Txn) error {
-		return baseStore.DeleteKeyspaceGroup(txn, storedGroup.ID)
-	}))
-	manager.groups[endpoint.Standard].Put(&endpoint.KeyspaceGroup{ID: storedGroup.ID})
-	manager.reconcileKeyspaceGroups(ctx, nil)
-	re.Nil(manager.groups[endpoint.Standard].Get(storedGroup.ID))
 }
 
 func TestReconcileKeyspaceGroupsScopesErrors(t *testing.T) {
@@ -137,15 +135,13 @@ func TestReconcileKeyspaceGroupsScopesErrors(t *testing.T) {
 	defer manager.Close()
 	manager.nodesBalancer.Put("http://tso-1")
 	manager.nodesBalancer.Put("http://tso-2")
-	manager.groups[endpoint.Standard].Put(&endpoint.KeyspaceGroup{ID: 1})
-	manager.groups[endpoint.Standard].Put(&endpoint.KeyspaceGroup{ID: 2})
-
-	manager.reconcileKeyspaceGroups(ctx, nil)
+	groupIDs := []uint32{1, 2}
+	manager.reconcileKeyspaceGroupIDs(ctx, groupIDs)
 	re.Equal(1, store.loadCount)
 
 	store.loadCount = 0
 	store.loadGroupErr = errors.New("group error")
-	manager.reconcileKeyspaceGroups(ctx, nil)
+	manager.reconcileKeyspaceGroupIDs(ctx, groupIDs)
 	re.Equal(2, store.loadCount)
 }
 
@@ -180,17 +176,39 @@ func TestAutoSplitPatrolReconcilesLoadedGroups(t *testing.T) {
 	re.NotEqual(typeutil.TrimScheme(got.Members[0].Address), typeutil.TrimScheme(got.Members[1].Address))
 }
 
-func TestKeyspaceGroupWatcherTracksExternalChanges(t *testing.T) {
+func TestKeyspaceGroupReconcileWatcherTracksExternalChanges(t *testing.T) {
 	re := require.New(t)
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
 	store := endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(client), nil)
+	initialGroup := &endpoint.KeyspaceGroup{
+		ID:        1,
+		UserKind:  endpoint.Standard.String(),
+		Members:   []endpoint.KeyspaceGroupMember{{Address: "http://initial-tso"}},
+		Keyspaces: []uint32{41},
+	}
+	re.NoError(store.RunInTxn(t.Context(), func(txn kv.Txn) error {
+		return store.SaveKeyspaceGroup(txn, initialGroup)
+	}))
 	manager := NewKeyspaceGroupManager(t.Context(), store, client)
 	defer manager.Close()
 	re.NoError(manager.Bootstrap(t.Context()))
+	manager.RLock()
+	state := manager.reconcileState
+	manager.RUnlock()
+	re.NotNil(state)
+	findEntry := func(groupID uint32) (keyspaceGroupReconcileEntry, bool) {
+		return getKeyspaceGroupReconcileEntry(state, groupID)
+	}
+	entry, ok := findEntry(initialGroup.ID)
+	re.True(ok)
+	re.Equal(initialGroup.Members, entry.members)
+	manager.RLock()
+	re.Equal(initialGroup, manager.groups[endpoint.Standard].Get(initialGroup.ID))
+	manager.RUnlock()
 
 	group := &endpoint.KeyspaceGroup{
-		ID:        1,
+		ID:        2,
 		UserKind:  endpoint.Standard.String(),
 		Members:   []endpoint.KeyspaceGroupMember{{Address: "http://tso-1"}},
 		Keyspaces: []uint32{42},
@@ -199,11 +217,12 @@ func TestKeyspaceGroupWatcherTracksExternalChanges(t *testing.T) {
 		return store.SaveKeyspaceGroup(txn, group)
 	}))
 	re.Eventually(func() bool {
-		manager.RLock()
-		defer manager.RUnlock()
-		got := manager.groups[endpoint.Standard].Get(group.ID)
-		return got != nil && len(got.Members) == 1
+		entry, ok := findEntry(group.ID)
+		return ok && len(entry.members) == 1 && entry.members[0].Address == "http://tso-1"
 	}, 5*time.Second, 10*time.Millisecond)
+	manager.RLock()
+	re.Nil(manager.groups[endpoint.Standard].Get(group.ID))
+	manager.RUnlock()
 
 	group.UserKind = endpoint.Enterprise.String()
 	group.SplitState = &endpoint.SplitState{SplitSource: group.ID}
@@ -213,27 +232,17 @@ func TestKeyspaceGroupWatcherTracksExternalChanges(t *testing.T) {
 		return store.SaveKeyspaceGroup(txn, group)
 	}))
 	re.Eventually(func() bool {
-		manager.RLock()
-		defer manager.RUnlock()
-		got := manager.groups[endpoint.Enterprise].Get(group.ID)
-		return manager.groups[endpoint.Standard].Get(group.ID) == nil &&
-			got != nil && got.SplitState != nil && got.SplitState.SplitSource == group.ID &&
-			len(got.Members) == 1 && got.Members[0].Address == "http://tso-2" &&
-			slices.Equal(got.Keyspaces, []uint32{42, 43})
+		entry, ok := findEntry(group.ID)
+		return ok && entry.transitioning &&
+			len(entry.members) == 1 && entry.members[0].Address == "http://tso-2"
 	}, 5*time.Second, 10*time.Millisecond)
 
 	re.NoError(store.RunInTxn(t.Context(), func(txn kv.Txn) error {
 		return store.DeleteKeyspaceGroup(txn, group.ID)
 	}))
 	re.Eventually(func() bool {
-		manager.RLock()
-		defer manager.RUnlock()
-		for _, groups := range manager.groups {
-			if groups.Get(group.ID) != nil {
-				return false
-			}
-		}
-		return true
+		_, ok := findEntry(group.ID)
+		return !ok
 	}, 5*time.Second, 10*time.Millisecond)
 }
 
@@ -257,194 +266,41 @@ func TestDeleteDefaultKeyspaceGroupIsRejected(t *testing.T) {
 	re.NotNil(group)
 }
 
-func TestKeyspaceGroupWatcherRejectsPreviousTermUpdates(t *testing.T) {
+func TestKeyspaceGroupReconcileStateIsTermLocal(t *testing.T) {
 	re := require.New(t)
 	manager := NewKeyspaceGroupManager(t.Context(), endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil), nil)
 	defer manager.Close()
 
-	_, previousTerm := manager.beginKeyspaceGroupWatchTerm(t.Context())
-	_, currentTerm := manager.beginKeyspaceGroupWatchTerm(t.Context())
-	group := &endpoint.KeyspaceGroup{
-		ID:       1,
-		UserKind: endpoint.Standard.String(),
-		Members:  []endpoint.KeyspaceGroupMember{{Address: "http://current-tso"}},
-	}
-	manager.applyWatchedKeyspaceGroupUpdates(previousTerm, map[uint32]watchedKeyspaceGroupUpdate{
-		group.ID: {group: group, revision: 1},
-	})
-	manager.RLock()
-	got := manager.groups[endpoint.Standard].Get(group.ID)
-	manager.RUnlock()
-	re.Nil(got)
-
-	manager.applyWatchedKeyspaceGroupUpdates(currentTerm, map[uint32]watchedKeyspaceGroupUpdate{
-		group.ID: {group: group, revision: 1},
-	})
-	manager.applyWatchedKeyspaceGroupUpdates(previousTerm, map[uint32]watchedKeyspaceGroupUpdate{
-		group.ID: {revision: 2},
-	})
-	manager.RLock()
-	got = manager.groups[endpoint.Standard].Get(group.ID)
-	manager.RUnlock()
-	re.NotNil(got)
-	re.Equal("http://current-tso", got.Members[0].Address)
-
-	manager.applyWatchedKeyspaceGroupUpdates(currentTerm, map[uint32]watchedKeyspaceGroupUpdate{
-		group.ID: {revision: 2},
-	})
-	manager.RLock()
-	got = manager.groups[endpoint.Standard].Get(group.ID)
-	manager.RUnlock()
-	re.Nil(got)
-}
-
-func TestKeyspaceGroupWatcherRejectsStaleRevisions(t *testing.T) {
-	re := require.New(t)
-	manager := NewKeyspaceGroupManager(t.Context(), endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil), nil)
-	defer manager.Close()
-	_, term := manager.beginKeyspaceGroupWatchTerm(t.Context())
-
-	newerGroup := &endpoint.KeyspaceGroup{
-		ID:        1,
-		UserKind:  endpoint.Standard.String(),
-		Keyspaces: []uint32{42, 43},
-	}
-	staleGroup := &endpoint.KeyspaceGroup{
-		ID:        newerGroup.ID,
-		UserKind:  newerGroup.UserKind,
-		Keyspaces: []uint32{42},
-	}
-	manager.applyWatchedKeyspaceGroupUpdates(term, map[uint32]watchedKeyspaceGroupUpdate{
-		newerGroup.ID: {group: newerGroup, revision: 11},
-	})
-	manager.applyWatchedKeyspaceGroupUpdates(term, map[uint32]watchedKeyspaceGroupUpdate{
-		staleGroup.ID: {group: staleGroup, revision: 10},
-	})
-	manager.applyWatchedKeyspaceGroupUpdates(term, map[uint32]watchedKeyspaceGroupUpdate{
-		newerGroup.ID: {revision: 10},
-	})
-
-	manager.RLock()
-	got := manager.groups[endpoint.Standard].Get(newerGroup.ID)
-	manager.RUnlock()
-	re.NotNil(got)
-	re.Equal(newerGroup.Keyspaces, got.Keyspaces)
-
-	manager.applyWatchedKeyspaceGroupUpdates(term, map[uint32]watchedKeyspaceGroupUpdate{
-		newerGroup.ID: {revision: 12},
-	})
-	manager.applyWatchedKeyspaceGroupUpdates(term, map[uint32]watchedKeyspaceGroupUpdate{
-		newerGroup.ID: {group: newerGroup, revision: 11},
-	})
-	manager.RLock()
-	got = manager.groups[endpoint.Standard].Get(newerGroup.ID)
-	revision := manager.groupRevisions[newerGroup.ID]
-	manager.RUnlock()
-	re.Nil(got)
-	re.Equal(int64(12), revision)
-}
-
-func TestKeyspaceGroupReloadComparesRevisions(t *testing.T) {
-	re := require.New(t)
-	manager := NewKeyspaceGroupManager(t.Context(), endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil), nil)
-	defer manager.Close()
-	_, term := manager.beginKeyspaceGroupWatchTerm(t.Context())
-
-	cachedGroup := &endpoint.KeyspaceGroup{
-		ID:        1,
-		UserKind:  endpoint.Standard.String(),
-		Members:   []endpoint.KeyspaceGroupMember{{Address: "http://tso-1"}},
-		Keyspaces: []uint32{42, 43},
-	}
-	manager.applyWatchedKeyspaceGroupUpdates(term, map[uint32]watchedKeyspaceGroupUpdate{
-		cachedGroup.ID: {group: cachedGroup, revision: 10},
-	})
-	olderSnapshot := &endpoint.KeyspaceGroup{
-		ID:        cachedGroup.ID,
-		UserKind:  endpoint.Enterprise.String(),
-		Members:   []endpoint.KeyspaceGroupMember{{Address: "http://stale-tso"}},
-		Keyspaces: []uint32{42},
-	}
-	manager.applyWatchedKeyspaceGroupUpdates(term, map[uint32]watchedKeyspaceGroupUpdate{
-		olderSnapshot.ID: {group: olderSnapshot, revision: 9},
-	})
-	manager.RLock()
-	got := manager.groups[endpoint.Standard].Get(cachedGroup.ID)
-	manager.RUnlock()
-	re.Same(cachedGroup, got)
-
-	newerSnapshot := &endpoint.KeyspaceGroup{
-		ID:        cachedGroup.ID,
-		UserKind:  endpoint.Enterprise.String(),
-		Members:   []endpoint.KeyspaceGroupMember{{Address: "http://new-tso"}},
-		Keyspaces: []uint32{42, 44},
-	}
-	manager.applyWatchedKeyspaceGroupUpdates(term, map[uint32]watchedKeyspaceGroupUpdate{
-		newerSnapshot.ID: {group: newerSnapshot, revision: 11},
-	})
-	manager.RLock()
-	got = manager.groups[endpoint.Enterprise].Get(cachedGroup.ID)
-	old := manager.groups[endpoint.Standard].Get(cachedGroup.ID)
-	manager.RUnlock()
-	re.Same(newerSnapshot, got)
-	re.Nil(old)
-}
-
-func TestKeyspaceGroupWatcherPublishesResponseAtomically(t *testing.T) {
-	re := require.New(t)
-	manager := NewKeyspaceGroupManager(t.Context(), endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil), nil)
-	defer manager.Close()
-	_, term := manager.beginKeyspaceGroupWatchTerm(t.Context())
-
-	source := &endpoint.KeyspaceGroup{ID: 1, UserKind: endpoint.Standard.String(), Keyspaces: []uint32{42}}
-	target := &endpoint.KeyspaceGroup{ID: 2, UserKind: endpoint.Standard.String(), Keyspaces: []uint32{42}}
-	manager.applyWatchedKeyspaceGroupUpdates(term, map[uint32]watchedKeyspaceGroupUpdate{
-		source.ID: {group: source, revision: 1},
-	})
-
-	entered := make(chan struct{})
-	release := make(chan struct{})
-	var enterOnce, releaseOnce sync.Once
-	failpointName := "github.com/tikv/pd/pkg/keyspace/afterApplyWatchedKeyspaceGroupUpdate"
-	re.NoError(failpoint.EnableCall(failpointName, func() {
-		enterOnce.Do(func() {
-			close(entered)
-			<-release
-		})
-	}))
-	t.Cleanup(func() {
-		releaseOnce.Do(func() { close(release) })
-		re.NoError(failpoint.Disable(failpointName))
-	})
-
-	applied := make(chan struct{})
-	go func() {
-		defer close(applied)
-		manager.applyWatchedKeyspaceGroupUpdates(term, map[uint32]watchedKeyspaceGroupUpdate{
-			target.ID: {group: target, revision: 2},
-			source.ID: {revision: 2},
-		})
-	}()
-	<-entered
-
-	readerStarted := make(chan struct{})
-	observedDuplicate := make(chan bool, 1)
-	go func() {
-		close(readerStarted)
-		manager.RLock()
-		defer manager.RUnlock()
-		observedDuplicate <- manager.groups[endpoint.Standard].Get(source.ID) != nil &&
-			manager.groups[endpoint.Standard].Get(target.ID) != nil
-	}()
-	<-readerStarted
+	previousCtx, previousState := manager.beginKeyspaceGroupReconcileTerm(t.Context())
+	_, currentState := manager.beginKeyspaceGroupReconcileTerm(t.Context())
 	select {
-	case <-observedDuplicate:
-		t.Fatal("cache became observable before the complete watch response was published")
-	case <-time.After(100 * time.Millisecond):
+	case <-previousCtx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("previous reconciliation term was not canceled")
 	}
-	releaseOnce.Do(func() { close(release) })
-	re.False(<-observedDuplicate)
-	<-applied
+
+	entry := keyspaceGroupReconcileEntry{
+		id: 1, members: []endpoint.KeyspaceGroupMember{{Address: "http://tso-1"}},
+	}
+	previousState.apply(map[uint32]*keyspaceGroupReconcileEntry{entry.id: &entry})
+	_, ok := getKeyspaceGroupReconcileEntry(currentState, entry.id)
+	re.False(ok)
+
+	currentState.apply(map[uint32]*keyspaceGroupReconcileEntry{entry.id: &entry})
+	got, ok := getKeyspaceGroupReconcileEntry(currentState, entry.id)
+	re.True(ok)
+	re.Equal(entry, got)
+}
+
+func TestDecodeKeyspaceGroupReconcileEntry(t *testing.T) {
+	re := require.New(t)
+	entry, err := decodeKeyspaceGroupReconcileEntry([]byte(
+		`{"id":7,"members":[{"address":"http://tso-1","priority":1}],"keyspaces":[1,2,3]}`,
+	))
+	re.NoError(err)
+	re.Equal(uint32(7), entry.id)
+	re.Equal([]endpoint.KeyspaceGroupMember{{Address: "http://tso-1", Priority: 1}}, entry.members)
+	re.False(entry.transitioning)
 }
 
 func TestKeyspaceGroupOverwriteDoesNotRecreateDeletedGroup(t *testing.T) {
@@ -539,125 +395,6 @@ func TestKeyspaceGroupUpdatesRebaseOnStorage(t *testing.T) {
 		re.Equal(gotOld, manager.groups[endpoint.Standard].Get(oldGroup.ID))
 		re.Equal(gotNew, manager.groups[endpoint.Standard].Get(newGroup.ID))
 	})
-}
-
-func TestDefaultKeyspaceGroupIsRestoredAfterLegacyDelete(t *testing.T) {
-	t.Run("watch delete", func(t *testing.T) {
-		re := require.New(t)
-		base := kv.NewMemoryKV()
-		store := endpoint.NewStorageEndpoint(base, nil)
-		manager := NewKeyspaceGroupManager(t.Context(), store, nil)
-		defer manager.Close()
-		re.NoError(manager.Bootstrap(t.Context()))
-
-		defaultGroup := &endpoint.KeyspaceGroup{
-			ID:        constant.DefaultKeyspaceGroupID,
-			UserKind:  endpoint.Basic.String(),
-			Members:   []endpoint.KeyspaceGroupMember{{Address: "http://tso-1"}},
-			Keyspaces: []uint32{GetBootstrapKeyspaceID(), 42},
-		}
-		re.NoError(store.RunInTxn(t.Context(), func(txn kv.Txn) error {
-			return store.SaveKeyspaceGroup(txn, defaultGroup)
-		}))
-		manager.Lock()
-		manager.putKeyspaceGroupToCacheLocked(defaultGroup, 1)
-		manager.Unlock()
-		re.NoError(base.Remove(keypath.KeyspaceGroupIDPath(constant.DefaultKeyspaceGroupID)))
-
-		re.NoError(manager.applyWatchedKeyspaceGroupUpdatesWithContext(
-			t.Context(),
-			manager.groupWatcherTerm,
-			map[uint32]watchedKeyspaceGroupUpdate{
-				constant.DefaultKeyspaceGroupID: {revision: 2},
-			},
-		))
-		got, err := manager.GetKeyspaceGroupByID(constant.DefaultKeyspaceGroupID)
-		re.NoError(err)
-		re.Equal(defaultGroup, got)
-		re.Equal(defaultGroup, manager.groups[endpoint.Basic].Get(constant.DefaultKeyspaceGroupID))
-	})
-
-	t.Run("watch batch uses latest put", func(t *testing.T) {
-		re := require.New(t)
-		base := kv.NewMemoryKV()
-		store := endpoint.NewStorageEndpoint(base, nil)
-		manager := NewKeyspaceGroupManager(t.Context(), store, nil)
-		defer manager.Close()
-		re.NoError(manager.Bootstrap(t.Context()))
-
-		latestGroup := &endpoint.KeyspaceGroup{
-			ID:        constant.DefaultKeyspaceGroupID,
-			UserKind:  endpoint.Basic.String(),
-			Members:   []endpoint.KeyspaceGroupMember{{Address: "http://latest-tso"}},
-			Keyspaces: []uint32{GetBootstrapKeyspaceID(), 42},
-		}
-		re.NoError(store.RunInTxn(t.Context(), func(txn kv.Txn) error {
-			return store.SaveKeyspaceGroup(txn, latestGroup)
-		}))
-		re.NoError(base.Remove(keypath.KeyspaceGroupIDPath(constant.DefaultKeyspaceGroupID)))
-
-		updates := make(map[uint32]watchedKeyspaceGroupUpdate)
-		stageWatchedKeyspaceGroupUpdate(updates, constant.DefaultKeyspaceGroupID, latestGroup, 1)
-		stageWatchedKeyspaceGroupUpdate(updates, constant.DefaultKeyspaceGroupID, nil, 2)
-		re.NoError(manager.applyWatchedKeyspaceGroupUpdatesWithContext(
-			t.Context(), manager.groupWatcherTerm, updates,
-		))
-
-		got, err := manager.GetKeyspaceGroupByID(constant.DefaultKeyspaceGroupID)
-		re.NoError(err)
-		re.Equal(latestGroup, got)
-		re.Equal(latestGroup, manager.groups[endpoint.Basic].Get(constant.DefaultKeyspaceGroupID))
-	})
-
-	t.Run("initial load", func(t *testing.T) {
-		re := require.New(t)
-		base := kv.NewMemoryKV()
-		store := endpoint.NewStorageEndpoint(base, nil)
-		manager := NewKeyspaceGroupManager(t.Context(), store, nil)
-		defer manager.Close()
-		re.NoError(manager.Bootstrap(t.Context()))
-		re.NoError(base.Remove(keypath.KeyspaceGroupIDPath(constant.DefaultKeyspaceGroupID)))
-		_, term := manager.beginKeyspaceGroupWatchTerm(t.Context())
-
-		re.NoError(manager.ensureDefaultKeyspaceGroup(t.Context(), term))
-		got, err := manager.GetKeyspaceGroupByID(constant.DefaultKeyspaceGroupID)
-		re.NoError(err)
-		re.NotNil(got)
-		re.Equal(endpoint.Basic.String(), got.UserKind)
-		re.Equal([]uint32{GetBootstrapKeyspaceID()}, got.Keyspaces)
-		re.Equal(got, manager.groups[endpoint.Basic].Get(constant.DefaultKeyspaceGroupID))
-	})
-}
-
-func TestSnapshotKeyspaceGroupIDsConcurrentWatcherUpdates(t *testing.T) {
-	manager := NewKeyspaceGroupManager(t.Context(), endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil), nil)
-	defer manager.Close()
-	_, term := manager.beginKeyspaceGroupWatchTerm(t.Context())
-
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		for i := range 1000 {
-			group := &endpoint.KeyspaceGroup{
-				ID:       uint32(i%32 + 1),
-				UserKind: endpoint.Standard.String(),
-			}
-			manager.applyWatchedKeyspaceGroupUpdates(term, map[uint32]watchedKeyspaceGroupUpdate{
-				group.ID: {group: group, revision: int64(i*2 + 1)},
-			})
-			manager.applyWatchedKeyspaceGroupUpdates(term, map[uint32]watchedKeyspaceGroupUpdate{
-				group.ID: {revision: int64(i*2 + 2)},
-			})
-		}
-	}()
-	for range 1000 {
-		for _, groupIDs := range manager.snapshotKeyspaceGroupIDs() {
-			for _, groupID := range groupIDs {
-				require.LessOrEqual(t, groupID, uint32(32))
-			}
-		}
-	}
-	<-done
 }
 
 type keyspaceGroupTestSuite struct {

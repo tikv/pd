@@ -43,15 +43,6 @@ func TestEtcd(t *testing.T) {
 	testSaveMultiple(re, kv, 20)
 	testLoadConflict(re, kv)
 	testRawTxn(re, kv)
-	var txnWithRevision Txn
-	re.NoError(kv.RunInTxn(context.Background(), func(txn Txn) error {
-		txnWithRevision = txn
-		return txn.Save("revision-key", "value")
-	}))
-	revisionResp, err := client.Get(context.Background(), "revision-key")
-	re.NoError(err)
-	re.Len(revisionResp.Kvs, 1)
-	re.Equal(revisionResp.Kvs[0].ModRevision, TxnRevision(txnWithRevision))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -79,12 +70,6 @@ func TestMemKV(t *testing.T) {
 	testReadWrite(re, kv)
 	testRange(re, kv)
 	testSaveMultiple(re, kv, 20)
-	var txnWithoutRevision Txn
-	re.NoError(kv.RunInTxn(context.Background(), func(txn Txn) error {
-		txnWithoutRevision = txn
-		return txn.Save("revision-key", "value")
-	}))
-	re.Zero(TxnRevision(txnWithoutRevision))
 }
 
 func testReadWrite(re *require.Assertions, kv Base) {
