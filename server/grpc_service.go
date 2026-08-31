@@ -1626,8 +1626,9 @@ func (s *GrpcServer) QueryRegion(stream pdpb.PD_QueryRegionServer) error {
 		}
 
 		var rc *cluster.RaftCluster
+		isFollower := !s.member.IsServing()
 
-		if s.member.IsServing() {
+		if !isFollower {
 			rc = s.GetRaftCluster()
 			if rc == nil {
 				resp := &pdpb.QueryRegionResponse{
@@ -1654,8 +1655,14 @@ func (s *GrpcServer) QueryRegion(stream pdpb.PD_QueryRegionServer) error {
 			failpoint.Return(errs.ErrNotBootstrapped.FastGenByArgs())
 		})
 		start := time.Now()
-		request.NeedBuckets = s.member.IsServing() && rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets()
-		resp := grpcutil.QueryRegion(rc.GetBasicCluster(), request)
+		request.NeedBuckets = !isFollower && rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets()
+		basicCluster := rc.GetBasicCluster()
+		failpoint.Inject("queryRegionFollowerCacheMiss", func() {
+			if isFollower {
+				basicCluster = core.NewBasicCluster()
+			}
+		})
+		resp := grpcutil.QueryRegion(basicCluster, request, isFollower)
 		queryRegionDuration.Observe(time.Since(start).Seconds())
 		grpcutil.RequestCounter("QueryRegion", request.Header, resp.Header.Error, regionRequestCounter)
 		if err := stream.Send(resp); err != nil {

@@ -16,6 +16,7 @@ package client_test
 
 import (
 	"context"
+	"fmt"
 	"math/rand/v2"
 	"reflect"
 	"strings"
@@ -445,6 +446,101 @@ func (suite *routerClientSuite) TestConcurrentlyEnableFollowerHandle() {
 		case <-ctx.Done():
 		}
 	}
+}
+
+func (suite *routerClientSuite) TestFollowerMissingRegionFallsBackToLeader() {
+	if !suite.routerClientEnabled {
+		suite.T().Skip("QueryRegion is disabled")
+	}
+	re := suite.Require()
+	regionID := regionIDAllocator.alloc()
+	region := &metapb.Region{
+		Id:          regionID,
+		StartKey:    []byte("follower-fallback-a"),
+		EndKey:      []byte("follower-fallback-b"),
+		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
+		Peers:       peers,
+	}
+	re.NoError(suite.regionHeartbeat.Send(&pdpb.RegionHeartbeatRequest{
+		Header: newHeader(),
+		Region: region,
+		Leader: peers[0],
+	}))
+	nextRegion := &metapb.Region{
+		Id:          regionIDAllocator.alloc(),
+		StartKey:    region.GetEndKey(),
+		EndKey:      []byte("follower-fallback-c"),
+		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
+		Peers:       peers,
+	}
+	re.NoError(suite.regionHeartbeat.Send(&pdpb.RegionHeartbeatRequest{
+		Header: newHeader(),
+		Region: nextRegion,
+		Leader: peers[0],
+	}))
+	testutil.Eventually(re, func() bool {
+		got, err := suite.client.GetPrevRegion(context.Background(), nextRegion.GetStartKey())
+		return err == nil && got != nil && reflect.DeepEqual(region, got.Meta)
+	})
+
+	follower := suite.cluster.GetServer(suite.cluster.GetFollower())
+	re.NotNil(follower)
+	re.NoError(failpoint.Enable(
+		"github.com/tikv/pd/client/clients/router/forceUseFollower",
+		fmt.Sprintf("return(%q)", follower.GetAddr()),
+	))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/clients/router/forceUseFollower"))
+	}()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/queryRegionFollowerCacheMiss", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/queryRegionFollowerCacheMiss"))
+	}()
+
+	getRegion := func() (*router.Region, error) {
+		return suite.client.GetRegion(
+			context.Background(),
+			region.GetStartKey(),
+			opt.WithAllowFollowerHandle(),
+		)
+	}
+	getPrevRegion := func() (*router.Region, error) {
+		return suite.client.GetPrevRegion(
+			context.Background(),
+			nextRegion.GetStartKey(),
+			opt.WithAllowFollowerHandle(),
+		)
+	}
+	getRegionByID := func() (*router.Region, error) {
+		return suite.client.GetRegionByID(
+			context.Background(),
+			region.GetId(),
+			opt.WithAllowFollowerHandle(),
+		)
+	}
+	queries := []struct {
+		name string
+		get  func() (*router.Region, error)
+	}{
+		{name: "GetRegion", get: getRegion},
+		{name: "GetPrevRegion", get: getPrevRegion},
+		{name: "GetRegionByID", get: getRegionByID},
+	}
+	for _, query := range queries {
+		got, err := query.get()
+		re.NoError(err, query.name)
+		re.NotNil(got, query.name)
+		re.True(reflect.DeepEqual(region, got.Meta), query.name)
+	}
+
+	missingRegionID := regionIDAllocator.alloc()
+	got, err := suite.client.GetRegionByID(
+		context.Background(),
+		missingRegionID,
+		opt.WithAllowFollowerHandle(),
+	)
+	re.NoError(err)
+	re.Nil(got)
 }
 
 func TestRouterClientHeaderError(t *testing.T) {

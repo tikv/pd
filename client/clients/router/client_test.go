@@ -21,12 +21,16 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
+	"google.golang.org/grpc"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/pkg/batch"
+	cctx "github.com/tikv/pd/client/pkg/connectionctx"
 	"github.com/tikv/pd/client/pkg/utils/testutil"
+	sd "github.com/tikv/pd/client/servicediscovery"
 )
 
 func TestMain(m *testing.M) {
@@ -43,7 +47,7 @@ func newMockRegionResponse(id uint64) *pdpb.RegionResponse {
 
 // newTestRequest builds a *Request directly for finisher tests, mirroring the
 // invariants that the production newRequest guarantees: a non-nil options and a
-// buffered done channel. Callers set key, prevKey, or id afterwards.
+// buffered done channel. Callers set key/prevKey/id afterwards.
 func newTestRequest(ctx context.Context, opts ...opt.GetRegionOption) *Request {
 	req := &Request{
 		requestCtx: ctx,
@@ -189,4 +193,139 @@ func TestBuildQueryRegionRequest(t *testing.T) {
 	re.Empty(queryReq.GetPrevKeys()[0])
 	re.Equal([]uint64{0, math.MaxUint64}, queryReq.GetIds())
 	re.True(queryReq.GetNeedBuckets())
+}
+
+type queryRegionTestStream struct {
+	grpc.ClientStream
+	response   *pdpb.QueryRegionResponse
+	requests   []*pdpb.QueryRegionRequest
+	beforeRecv func()
+}
+
+func (s *queryRegionTestStream) Send(req *pdpb.QueryRegionRequest) error {
+	s.requests = append(s.requests, req)
+	return nil
+}
+
+func (s *queryRegionTestStream) Recv() (*pdpb.QueryRegionResponse, error) {
+	if s.beforeRecv != nil {
+		s.beforeRecv()
+	}
+	return s.response, nil
+}
+
+func TestProcessRequestsRetriesOnlyMissingRegions(t *testing.T) {
+	ctx := context.Background()
+
+	testCases := []struct {
+		name        string
+		headerError *pdpb.Error
+	}{
+		{name: "legacy success response"},
+		{name: "region not found", headerError: &pdpb.Error{Type: pdpb.ErrorType_REGION_NOT_FOUND}},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			keyFound := newTestRequest(ctx)
+			keyFound.key = []byte("key-found")
+			idFound := newTestRequest(ctx)
+			idFound.id = 3
+			prevKeyFound := newTestRequest(ctx)
+			prevKeyFound.prevKey = []byte("prev-key-found")
+			keyMissing := newTestRequest(ctx)
+			keyMissing.key = []byte("key-missing")
+			idMissing := newTestRequest(ctx)
+			idMissing.id = 4
+			prevKeyMissing := newTestRequest(ctx)
+			prevKeyMissing.prevKey = []byte("prev-key-missing")
+			requests := []*Request{
+				keyFound,
+				idFound,
+				prevKeyFound,
+				keyMissing,
+				idMissing,
+				prevKeyMissing,
+			}
+
+			followerStream := &queryRegionTestStream{
+				response: &pdpb.QueryRegionResponse{
+					Header:       &pdpb.ResponseHeader{Error: testCase.headerError},
+					KeyIdMap:     []uint64{1, 0},
+					PrevKeyIdMap: []uint64{2, 0},
+					RegionsById: map[uint64]*pdpb.RegionResponse{
+						1: newMockRegionResponse(1),
+						2: newMockRegionResponse(2),
+						3: newMockRegionResponse(3),
+						4: nil,
+					},
+				},
+			}
+			leaderStream := &queryRegionTestStream{
+				response: &pdpb.QueryRegionResponse{
+					Header:       &pdpb.ResponseHeader{},
+					KeyIdMap:     []uint64{5},
+					PrevKeyIdMap: []uint64{6},
+					RegionsById: map[uint64]*pdpb.RegionResponse{
+						4: newMockRegionResponse(4),
+						5: newMockRegionResponse(5),
+						6: newMockRegionResponse(6),
+					},
+				},
+			}
+			leaderStream.beforeRecv = func() {
+				re.Len(keyFound.done, 1)
+				re.Len(idFound.done, 1)
+				re.Len(prevKeyFound.done, 1)
+				re.Empty(keyMissing.done)
+				re.Empty(idMissing.done)
+				re.Empty(prevKeyMissing.done)
+			}
+			controller := batch.NewController[*Request](len(requests), requestFinisher(nil), nil)
+			requestCh := make(chan *Request, len(requests))
+			for _, req := range requests {
+				requestCh <- req
+			}
+			re.NoError(controller.FetchPendingRequests(ctx, requestCh, nil, 0))
+
+			const leaderURL = "leader"
+			client := &Cli{
+				svcDiscovery:    sd.NewMockServiceDiscovery(nil, nil),
+				conCtxMgr:       cctx.NewManager[pdpb.PD_QueryRegionClient](),
+				batchController: controller,
+			}
+			client.leaderURL.Store(leaderURL)
+			streamCtx, cancel := context.WithCancel(ctx)
+			re.True(client.conCtxMgr.Store(streamCtx, cancel, leaderURL, leaderStream))
+			defer client.conCtxMgr.ReleaseAll()
+
+			re.NoError(client.processRequestsInner(
+				followerStream.Send,
+				followerStream.Recv,
+				"follower",
+				true,
+			))
+
+			re.Len(followerStream.requests, 1)
+			re.Len(followerStream.requests[0].GetKeys(), 2)
+			re.Len(followerStream.requests[0].GetPrevKeys(), 2)
+			re.Equal([]uint64{3, 4}, followerStream.requests[0].GetIds())
+			re.Len(leaderStream.requests, 1)
+			re.Equal([][]byte{keyMissing.key}, leaderStream.requests[0].GetKeys())
+			re.Equal([][]byte{prevKeyMissing.prevKey}, leaderStream.requests[0].GetPrevKeys())
+			re.Equal([]uint64{4}, leaderStream.requests[0].GetIds())
+
+			for req, expectedID := range map[*Request]uint64{
+				keyFound:       1,
+				idFound:        3,
+				prevKeyFound:   2,
+				keyMissing:     5,
+				idMissing:      4,
+				prevKeyMissing: 6,
+			} {
+				re.NoError(<-req.done)
+				re.Equal(expectedID, req.region.Meta.GetId())
+			}
+		})
+	}
 }

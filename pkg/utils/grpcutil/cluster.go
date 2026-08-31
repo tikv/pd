@@ -205,7 +205,7 @@ func BatchScanRegions(rc *core.BasicCluster, request *pdpb.BatchScanRegionsReque
 }
 
 // QueryRegion provides a stream processing of the region query.
-func QueryRegion(rc *core.BasicCluster, request *pdpb.QueryRegionRequest) *pdpb.QueryRegionResponse {
+func QueryRegion(rc *core.BasicCluster, request *pdpb.QueryRegionRequest, isFollower bool) *pdpb.QueryRegionResponse {
 	needBuckets := request.GetNeedBuckets()
 	keyIDMap, prevKeyIDMap, regionsByID := rc.QueryRegions(
 		request.GetKeys(),
@@ -220,7 +220,34 @@ func QueryRegion(rc *core.BasicCluster, request *pdpb.QueryRegionRequest) *pdpb.
 		PrevKeyIdMap: prevKeyIDMap,
 		RegionsById:  regionsByID,
 	}
+	if isFollower && queryRegionHasMissingRegion(request, response) {
+		response.Header = RegionNotFound()
+	}
 	return response
+}
+
+func queryRegionHasMissingRegion(request *pdpb.QueryRegionRequest, response *pdpb.QueryRegionResponse) bool {
+	if len(response.GetKeyIdMap()) != len(request.GetKeys()) ||
+		len(response.GetPrevKeyIdMap()) != len(request.GetPrevKeys()) {
+		return true
+	}
+	for _, id := range response.GetKeyIdMap() {
+		if id == 0 {
+			return true
+		}
+	}
+	for _, id := range response.GetPrevKeyIdMap() {
+		if id == 0 {
+			return true
+		}
+	}
+	for _, id := range request.GetIds() {
+		region, ok := response.GetRegionsById()[id]
+		if !ok || region == nil || region.GetRegion() == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // GetStore implements gRPC PDServer.
