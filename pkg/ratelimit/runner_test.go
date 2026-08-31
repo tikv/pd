@@ -110,14 +110,39 @@ func TestConcurrentRunner(t *testing.T) {
 			time.Sleep(1 * time.Millisecond)
 		}
 
-		var originalSubmitted time.Time
-		for _, task := range runner.pendingTasks[runner.pendingHead:] {
-			if task.id == 6 {
-				originalSubmitted = task.submittedAt
+		originalSubmitted, lastSubmitted := func() (time.Time, time.Time) {
+			runner.pendingMu.Lock()
+			defer runner.pendingMu.Unlock()
+			var originalSubmitted time.Time
+			for _, task := range runner.pendingTasks[runner.pendingHead:] {
+				if task.id == 6 {
+					originalSubmitted = task.submittedAt
+				}
 			}
-		}
-		lastSubmitted := runner.pendingTasks[len(runner.pendingTasks)-1].submittedAt
+			lastSubmitted := runner.pendingTasks[len(runner.pendingTasks)-1].submittedAt
+			return originalSubmitted, lastSubmitted
+		}()
 		require.Less(t, originalSubmitted, lastSubmitted)
+	})
+
+	t.Run("DuplicatedTaskBeforeDispatch", func(t *testing.T) {
+		runner := NewConcurrentRunner("test", NewConcurrencyLimiter(1), time.Minute)
+		require.NoError(t, runner.RunTask(0, "test4", func(context.Context) {}))
+
+		oldCalls := 0
+		newCalls := 0
+		require.NoError(t, runner.RunTask(1, "test4", func(context.Context) { oldCalls++ }))
+
+		// Reproduce the state where the channel task has been consumed while
+		// another task with the duplicated ID is still pending.
+		<-runner.taskChan
+		require.NoError(t, runner.RunTask(1, "test4", func(context.Context) { newCalls++ }))
+
+		task := <-runner.taskChan
+		task.f(context.Background())
+		require.Zero(t, oldCalls)
+		require.Equal(t, 1, newCalls)
+		require.Zero(t, runner.pendingTaskNum())
 	})
 
 	t.Run("DuplicatedTaskKeepsQueueAge", func(t *testing.T) {

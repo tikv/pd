@@ -42,7 +42,7 @@ const (
 	initialCapacity = 10000
 	// maxPendingTaskNum bounds the closures and their captured objects retained
 	// by a runner that cannot keep up with incoming work.
-	maxPendingTaskNum = 100000
+	maxPendingTaskNum = 20000000
 )
 
 // Runner is the interface for running tasks.
@@ -237,7 +237,6 @@ func (cr *ConcurrentRunner) Stop() {
 
 // RunTask runs the task asynchronously.
 func (cr *ConcurrentRunner) RunTask(id uint64, name string, f func(context.Context), opts ...TaskOption) error {
-	cr.processPendingTasks()
 	cr.pendingMu.Lock()
 	defer func() {
 		cr.pendingMu.Unlock()
