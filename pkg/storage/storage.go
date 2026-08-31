@@ -107,15 +107,15 @@ func NewCoreStorage(defaultStorage Storage, regionStorage endpoint.RegionStorage
 }
 
 // RunInTxnWithConditions forwards a conditional transaction to the default storage.
-func (s *coreStorage) RunInTxnWithConditions(
+func (ps *coreStorage) RunInTxnWithConditions(
 	ctx context.Context,
 	conditions []clientv3.Cmp,
 	f func(txn kv.Txn) error,
 ) error {
 	if len(conditions) == 0 {
-		return s.RunInTxn(ctx, f)
+		return ps.RunInTxn(ctx, f)
 	}
-	runner, ok := s.Storage.(kv.ConditionalTxnRunner)
+	runner, ok := ps.Storage.(kv.ConditionalTxnRunner)
 	if !ok {
 		return errors.New("storage backend does not support conditional transactions")
 	}
