@@ -554,7 +554,7 @@ func (m *GroupManager) initKeyspaceGroupsWatcher(ctx context.Context, term uint6
 			}
 			return err
 		}
-		updates[groupID] = watchedKeyspaceGroupUpdate{group: group, revision: kv.ModRevision}
+		stageWatchedKeyspaceGroupUpdate(updates, groupID, group, kv.ModRevision)
 		return nil
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
@@ -565,7 +565,7 @@ func (m *GroupManager) initKeyspaceGroupsWatcher(ctx context.Context, term uint6
 			}
 			return err
 		}
-		updates[groupID] = watchedKeyspaceGroupUpdate{revision: kv.ModRevision}
+		stageWatchedKeyspaceGroupUpdate(updates, groupID, nil, kv.ModRevision)
 		return nil
 	}
 
@@ -603,8 +603,25 @@ func (m *GroupManager) initKeyspaceGroupsWatcher(ctx context.Context, term uint6
 }
 
 type watchedKeyspaceGroupUpdate struct {
-	group    *endpoint.KeyspaceGroup
-	revision int64
+	group            *endpoint.KeyspaceGroup
+	revision         int64
+	recoveryGroup    *endpoint.KeyspaceGroup
+	recoveryRevision int64
+}
+
+func stageWatchedKeyspaceGroupUpdate(
+	updates map[uint32]watchedKeyspaceGroupUpdate,
+	groupID uint32,
+	group *endpoint.KeyspaceGroup,
+	revision int64,
+) {
+	update := watchedKeyspaceGroupUpdate{group: group, revision: revision}
+	if groupID == constant.DefaultKeyspaceGroupID && group == nil {
+		previous := updates[groupID]
+		update.recoveryGroup = previous.group
+		update.recoveryRevision = previous.revision
+	}
+	updates[groupID] = update
 }
 
 func parseKeyspaceGroupID(compiledPattern *regexp.Regexp, key []byte) (uint32, error) {
@@ -643,7 +660,11 @@ func (m *GroupManager) applyWatchedKeyspaceGroupUpdatesWithContext(
 		return nil
 	}
 	if update, ok := updates[constant.DefaultKeyspaceGroupID]; ok && update.group == nil {
-		if err := m.restoreDefaultKeyspaceGroupLocked(ctx); err != nil {
+		recoveryGroup := update.recoveryGroup
+		if update.recoveryRevision <= m.groupRevisions[constant.DefaultKeyspaceGroupID] {
+			recoveryGroup = nil
+		}
+		if err := m.restoreDefaultKeyspaceGroupLocked(ctx, recoveryGroup); err != nil {
 			return err
 		}
 	}
@@ -671,15 +692,19 @@ func (m *GroupManager) ensureDefaultKeyspaceGroup(ctx context.Context, term uint
 			return nil
 		}
 	}
-	return m.restoreDefaultKeyspaceGroupLocked(ctx)
+	return m.restoreDefaultKeyspaceGroupLocked(ctx, nil)
 }
 
-func (m *GroupManager) restoreDefaultKeyspaceGroupLocked(ctx context.Context) error {
-	var defaultKeyspaceGroup *endpoint.KeyspaceGroup
-	for _, groups := range m.groups {
-		if group := groups.Get(constant.DefaultKeyspaceGroupID); group != nil {
-			defaultKeyspaceGroup = group
-			break
+func (m *GroupManager) restoreDefaultKeyspaceGroupLocked(
+	ctx context.Context,
+	defaultKeyspaceGroup *endpoint.KeyspaceGroup,
+) error {
+	if defaultKeyspaceGroup == nil {
+		for _, groups := range m.groups {
+			if group := groups.Get(constant.DefaultKeyspaceGroupID); group != nil {
+				defaultKeyspaceGroup = group
+				break
+			}
 		}
 	}
 	if defaultKeyspaceGroup == nil {

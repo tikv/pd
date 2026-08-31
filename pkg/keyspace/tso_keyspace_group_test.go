@@ -577,6 +577,38 @@ func TestDefaultKeyspaceGroupIsRestoredAfterLegacyDelete(t *testing.T) {
 		re.Equal(defaultGroup, manager.groups[endpoint.Basic].Get(constant.DefaultKeyspaceGroupID))
 	})
 
+	t.Run("watch batch uses latest put", func(t *testing.T) {
+		re := require.New(t)
+		base := kv.NewMemoryKV()
+		store := endpoint.NewStorageEndpoint(base, nil)
+		manager := NewKeyspaceGroupManager(t.Context(), store, nil)
+		defer manager.Close()
+		re.NoError(manager.Bootstrap(t.Context()))
+
+		latestGroup := &endpoint.KeyspaceGroup{
+			ID:        constant.DefaultKeyspaceGroupID,
+			UserKind:  endpoint.Basic.String(),
+			Members:   []endpoint.KeyspaceGroupMember{{Address: "http://latest-tso"}},
+			Keyspaces: []uint32{GetBootstrapKeyspaceID(), 42},
+		}
+		re.NoError(store.RunInTxn(t.Context(), func(txn kv.Txn) error {
+			return store.SaveKeyspaceGroup(txn, latestGroup)
+		}))
+		re.NoError(base.Remove(keypath.KeyspaceGroupIDPath(constant.DefaultKeyspaceGroupID)))
+
+		updates := make(map[uint32]watchedKeyspaceGroupUpdate)
+		stageWatchedKeyspaceGroupUpdate(updates, constant.DefaultKeyspaceGroupID, latestGroup, 1)
+		stageWatchedKeyspaceGroupUpdate(updates, constant.DefaultKeyspaceGroupID, nil, 2)
+		re.NoError(manager.applyWatchedKeyspaceGroupUpdatesWithContext(
+			t.Context(), manager.groupWatcherTerm, updates,
+		))
+
+		got, err := manager.GetKeyspaceGroupByID(constant.DefaultKeyspaceGroupID)
+		re.NoError(err)
+		re.Equal(latestGroup, got)
+		re.Equal(latestGroup, manager.groups[endpoint.Basic].Get(constant.DefaultKeyspaceGroupID))
+	})
+
 	t.Run("initial load", func(t *testing.T) {
 		re := require.New(t)
 		base := kv.NewMemoryKV()
