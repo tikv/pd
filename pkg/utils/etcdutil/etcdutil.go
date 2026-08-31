@@ -422,6 +422,9 @@ type LoopWatcher struct {
 	// compactionReloadFn replaces the default full-value reload for consumers
 	// that need a specialized reconciliation strategy.
 	compactionReloadFn func(context.Context) (int64, error)
+	// retryOnPostEventError keeps the watch revision unchanged when postEventsFn
+	// fails, so the same event batch is replayed after the watch is recreated.
+	retryOnPostEventError bool
 	// updateClientCh is used to update the etcd client.
 	// It's only used for testing.
 	updateClientCh chan *clientv3.Client
@@ -694,9 +697,9 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 			if err := lw.postEventsFn(wresp.Events); err != nil {
 				log.Error("run post event failed in watch loop", zap.Error(err),
 					zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
-				if lw.compactionReloadFn != nil {
-					// Recreate the watch from the unadvanced revision. If it was
-					// compacted, the custom reload will reconcile the snapshot.
+				if lw.retryOnPostEventError {
+					// Recreate the watch from the unadvanced revision so the
+					// consumer can apply the same event batch again.
 					return revision, err
 				}
 			} else {
@@ -1020,6 +1023,14 @@ func (lw *LoopWatcher) SetReloadOnCompaction() {
 // It must be called before StartWatchLoop.
 func (lw *LoopWatcher) SetCompactionReloadFn(fn func(context.Context) (int64, error)) {
 	lw.compactionReloadFn = fn
+}
+
+// SetRetryOnPostEventError makes a failed postEventsFn call recreate the watch
+// from the unadvanced revision. It must be called before StartWatchLoop.
+// Callbacks must keep changes private until postEventsFn publishes them and
+// must tolerate replaying the same event batch.
+func (lw *LoopWatcher) SetRetryOnPostEventError() {
+	lw.retryOnPostEventError = true
 }
 
 // SetReconcileDeletedKeys enables deletion reconciliation and full snapshot

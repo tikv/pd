@@ -84,10 +84,8 @@ type Watcher struct {
 	ruleWatcher  *etcdutil.LoopWatcher
 	labelWatcher *etcdutil.LoopWatcher
 
-	// ruleRevision remains a safe applied lower bound after a callback failure.
-	// A gap stops live events from advancing it until snapshot reconciliation.
-	ruleRevision           int64
-	ruleRevisionContinuous bool
+	// ruleRevision is the latest etcd revision successfully applied to ruleManager.
+	ruleRevision int64
 
 	// patch is used to cache the placement rule changes.
 	patch *placement.RuleConfigPatch
@@ -425,7 +423,6 @@ func (rw *Watcher) reconcileRuleSnapshot(ctx context.Context) (int64, error) {
 		}
 	}
 	rw.ruleRevision = snapshotRevision
-	rw.ruleRevisionContinuous = true
 	return snapshotRevision + 1, nil
 }
 
@@ -523,7 +520,6 @@ func (rw *Watcher) initializeRuleWatcher() error {
 	postEventsFn := func(events []*clientv3.Event) error {
 		defer rw.ruleManager.Unlock()
 		if applyFailed {
-			rw.ruleRevisionContinuous = false
 			return errors.New("failed to apply placement rule events")
 		}
 		// A scheduling server can start before PD has persisted placement rules.
@@ -532,14 +528,13 @@ func (rw *Watcher) initializeRuleWatcher() error {
 			return nil
 		}
 		if err := rw.ruleManager.TryCommitPatchLocked(rw.patch); err != nil {
-			rw.ruleRevisionContinuous = false
 			log.Error("failed to commit patch", zap.Error(err))
 			return err
 		}
 		for _, kr := range suspectKeyRanges.Ranges() {
 			rw.checkerController.AddSuspectKeyRange(kr.StartKey, kr.EndKey)
 		}
-		if len(events) > 0 && rw.ruleRevisionContinuous {
+		if len(events) > 0 {
 			rw.ruleRevision = max(rw.ruleRevision, maxLoadedRevision)
 		}
 		return nil
@@ -557,12 +552,10 @@ func (rw *Watcher) initializeRuleWatcher() error {
 	)
 	rw.ruleWatcher.SetConsistentLoad()
 	rw.ruleWatcher.SetInitialLoadSuccessFn(func() {
-		if !applyFailed {
-			rw.ruleRevision = maxLoadedRevision
-			rw.ruleRevisionContinuous = true
-		}
+		rw.ruleRevision = maxLoadedRevision
 	})
 	rw.ruleWatcher.SetCompactionReloadFn(rw.reconcileRuleSnapshot)
+	rw.ruleWatcher.SetRetryOnPostEventError()
 	rw.ruleWatcher.StartWatchLoop()
 	return rw.ruleWatcher.WaitLoad()
 }

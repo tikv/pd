@@ -353,13 +353,12 @@ func TestReconcileRuleSnapshot(t *testing.T) {
 	re.NoError(err)
 
 	rw := &Watcher{
-		rulesPathPrefix:        keypath.RulesPathPrefix(),
-		ruleGroupPathPrefix:    keypath.RuleGroupPathPrefix(),
-		etcdClient:             client,
-		ruleManager:            ruleManager,
-		checkerController:      checkerController,
-		ruleRevision:           initial.Header.Revision,
-		ruleRevisionContinuous: true,
+		rulesPathPrefix:     keypath.RulesPathPrefix(),
+		ruleGroupPathPrefix: keypath.RuleGroupPathPrefix(),
+		etcdClient:          client,
+		ruleManager:         ruleManager,
+		checkerController:   checkerController,
+		ruleRevision:        initial.Header.Revision,
 	}
 	nextRevision, err := rw.reconcileRuleSnapshot(ctx)
 	re.NoError(err)
@@ -369,7 +368,6 @@ func TestReconcileRuleSnapshot(t *testing.T) {
 	re.Equal(unchangedVersion, ruleManager.GetRule("g", "unchanged").Version)
 	re.Zero(ruleManager.GetRuleGroup("g").Index)
 	re.Equal(updated.Header.Revision, rw.ruleRevision)
-	re.True(rw.ruleRevisionContinuous)
 
 	updatedRule := ruleManager.GetRule("g", "unchanged")
 	updatedRule.LabelConstraints[0].Values = []string{"z2"}
@@ -388,7 +386,6 @@ func TestReconcileRuleSnapshot(t *testing.T) {
 	re.NoError(err)
 	re.Equal(updatedRuleResp.Header.Revision+1, nextRevision)
 	re.Equal(updatedRuleResp.Header.Revision, rw.ruleRevision)
-	re.True(rw.ruleRevisionContinuous)
 	re.Equal([]string{"z2"}, ruleManager.GetRule("g", "unchanged").LabelConstraints[0].Values)
 
 	mismatchedGroupValue, err := json.Marshal(&placement.RuleGroup{ID: "payload"})
