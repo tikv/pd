@@ -21,6 +21,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/tikv/pd/pkg/errs"
 )
 
 func TestConcurrentRunner(t *testing.T) {
@@ -108,13 +110,65 @@ func TestConcurrentRunner(t *testing.T) {
 			time.Sleep(1 * time.Millisecond)
 		}
 
-		var updatedSubmitted time.Time
-		for _, task := range runner.pendingTasks {
+		var originalSubmitted time.Time
+		for _, task := range runner.pendingTasks[runner.pendingHead:] {
 			if task.id == 6 {
-				updatedSubmitted = task.submittedAt
+				originalSubmitted = task.submittedAt
 			}
 		}
 		lastSubmitted := runner.pendingTasks[len(runner.pendingTasks)-1].submittedAt
-		require.Greater(t, updatedSubmitted, lastSubmitted)
+		require.Less(t, originalSubmitted, lastSubmitted)
+	})
+
+	t.Run("DuplicatedTaskKeepsQueueAge", func(t *testing.T) {
+		runner := NewConcurrentRunner("test", NewConcurrencyLimiter(1), time.Second)
+		require.NoError(t, runner.RunTask(1, "test4", func(context.Context) {}))
+		require.NoError(t, runner.RunTask(2, "test4", func(context.Context) {}))
+
+		originalSubmitted := time.Now().Add(-2 * time.Second)
+		runner.pendingTasks[runner.pendingHead].submittedAt = originalSubmitted
+		require.NoError(t, runner.RunTask(2, "test4", func(context.Context) {}))
+		require.Equal(t, originalSubmitted, runner.pendingTasks[runner.pendingHead].submittedAt)
+		require.ErrorIs(
+			t,
+			runner.RunTask(3, "test4", func(context.Context) {}),
+			errs.ErrMaxWaitingTasksExceeded,
+		)
+	})
+
+	t.Run("MaxPendingTasks", func(t *testing.T) {
+		runner := NewConcurrentRunner("test", NewConcurrencyLimiter(1), time.Minute)
+		runner.maxPendingTaskNum = 3
+		require.NoError(t, runner.RunTask(0, "test5", func(context.Context) {}))
+		for i := 1; i <= runner.maxPendingTaskNum; i++ {
+			require.NoError(t, runner.RunTask(uint64(i), "test5", func(context.Context) {}))
+		}
+
+		require.Equal(t, runner.maxPendingTaskNum, runner.pendingTaskNum())
+		require.NoError(t, runner.RunTask(1, "test5", func(context.Context) {}))
+		require.ErrorIs(
+			t,
+			runner.RunTask(4, "test5", func(context.Context) {}, WithRetained(true)),
+			errs.ErrMaxWaitingTasksExceeded,
+		)
+		require.Equal(t, runner.maxPendingTaskNum, runner.pendingTaskNum())
+	})
+
+	t.Run("CompactPendingTasks", func(t *testing.T) {
+		runner := NewConcurrentRunner("test", NewConcurrencyLimiter(1), time.Minute)
+		require.NoError(t, runner.RunTask(0, "test6", func(context.Context) {}))
+		for i := 1; i <= initialCapacity*2; i++ {
+			require.NoError(t, runner.RunTask(uint64(i), "test6", func(context.Context) {}))
+		}
+		require.Greater(t, cap(runner.pendingTasks), initialCapacity)
+
+		for runner.pendingTaskNum() > 0 {
+			<-runner.taskChan
+			runner.processPendingTasks()
+		}
+		<-runner.taskChan
+		require.Empty(t, runner.pendingTasks)
+		require.Equal(t, initialCapacity, cap(runner.pendingTasks))
+		require.Empty(t, runner.existTasks)
 	})
 }

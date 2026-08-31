@@ -39,8 +39,10 @@ const (
 )
 
 const (
-	initialCapacity   = 10000
-	maxPendingTaskNum = 20000000
+	initialCapacity = 10000
+	// maxPendingTaskNum bounds the closures and their captured objects retained
+	// by a runner that cannot keep up with incoming work.
+	maxPendingTaskNum = 100000
 )
 
 // Runner is the interface for running tasks.
@@ -72,11 +74,13 @@ type ConcurrentRunner struct {
 	name               string
 	limiter            *ConcurrencyLimiter
 	maxPendingDuration time.Duration
+	maxPendingTaskNum  int
 	taskChan           chan *Task
 	pendingMu          sync.Mutex
 	wg                 sync.WaitGroup
 	pendingTaskCount   map[string]int
 	pendingTasks       []*Task
+	pendingHead        int
 	existTasks         map[taskID]*Task
 	maxWaitingDuration prometheus.Gauge
 }
@@ -87,6 +91,7 @@ func NewConcurrentRunner(name string, limiter *ConcurrencyLimiter, maxPendingDur
 		name:               name,
 		limiter:            limiter,
 		maxPendingDuration: maxPendingDuration,
+		maxPendingTaskNum:  maxPendingTaskNum,
 		taskChan:           make(chan *Task, 1),
 		pendingTasks:       make([]*Task, 0, initialCapacity),
 		pendingTaskCount:   make(map[string]int),
@@ -126,15 +131,15 @@ func (cr *ConcurrentRunner) Start(ctx context.Context) {
 				}
 			case <-cr.ctx.Done():
 				cr.pendingMu.Lock()
-				cr.pendingTasks = make([]*Task, 0, initialCapacity)
+				cr.resetPendingTasks(0)
 				cr.pendingMu.Unlock()
 				log.Info("stopping async task runner", zap.String("name", cr.name))
 				return
 			case <-ticker.C:
 				maxDuration := time.Duration(0)
 				cr.pendingMu.Lock()
-				if len(cr.pendingTasks) > 0 {
-					maxDuration = time.Since(cr.pendingTasks[0].submittedAt)
+				if cr.pendingTaskNum() > 0 {
+					maxDuration = time.Since(cr.pendingTasks[cr.pendingHead].submittedAt)
 				}
 				for taskName, cnt := range cr.pendingTaskCount {
 					runnerPendingTasks.WithLabelValues(cr.name, taskName).Set(float64(cnt))
@@ -165,17 +170,62 @@ func (cr *ConcurrentRunner) run(ctx context.Context, task *Task, token *TaskToke
 func (cr *ConcurrentRunner) processPendingTasks() {
 	cr.pendingMu.Lock()
 	defer cr.pendingMu.Unlock()
-	if len(cr.pendingTasks) > 0 {
-		task := cr.pendingTasks[0]
+	if cr.pendingTaskNum() > 0 {
+		task := cr.pendingTasks[cr.pendingHead]
 		select {
 		case cr.taskChan <- task:
-			cr.pendingTasks[0] = nil // avoid memory leak
-			cr.pendingTasks = cr.pendingTasks[1:]
+			cr.pendingTasks[cr.pendingHead] = nil
+			cr.pendingHead++
 			cr.pendingTaskCount[task.name]--
 			delete(cr.existTasks, taskID{id: task.id, name: task.name})
+			cr.compactPendingTasks()
 		default:
 		}
 		return
+	}
+}
+
+func (cr *ConcurrentRunner) pendingTaskNum() int {
+	return len(cr.pendingTasks) - cr.pendingHead
+}
+
+// compactPendingTasks releases the consumed prefix and the high-water capacity
+// of the task index after a burst. It must be called with pendingMu held.
+func (cr *ConcurrentRunner) compactPendingTasks() {
+	pendingTaskNum := cr.pendingTaskNum()
+	if pendingTaskNum == 0 {
+		if cr.pendingHead >= initialCapacity {
+			cr.resetPendingTasks(initialCapacity)
+		} else {
+			cr.pendingTasks = cr.pendingTasks[:0]
+			cr.pendingHead = 0
+		}
+		return
+	}
+	if cr.pendingHead < initialCapacity || cr.pendingHead < pendingTaskNum {
+		return
+	}
+
+	capacity := max(initialCapacity, pendingTaskNum*2)
+	pendingTasks := make([]*Task, pendingTaskNum, capacity)
+	copy(pendingTasks, cr.pendingTasks[cr.pendingHead:])
+	cr.pendingTasks = pendingTasks
+	cr.pendingHead = 0
+	cr.existTasks = make(map[taskID]*Task, pendingTaskNum)
+	for _, task := range cr.pendingTasks {
+		cr.existTasks[taskID{id: task.id, name: task.name}] = task
+	}
+}
+
+// resetPendingTasks releases all pending task storage. It must be called with
+// pendingMu held. capacity is kept small during normal operation and zero when
+// the runner stops.
+func (cr *ConcurrentRunner) resetPendingTasks(capacity int) {
+	cr.pendingTasks = make([]*Task, 0, capacity)
+	cr.pendingHead = 0
+	cr.existTasks = make(map[taskID]*Task)
+	for taskName := range cr.pendingTaskCount {
+		cr.pendingTaskCount[taskName] = 0
 	}
 }
 
@@ -187,6 +237,23 @@ func (cr *ConcurrentRunner) Stop() {
 
 // RunTask runs the task asynchronously.
 func (cr *ConcurrentRunner) RunTask(id uint64, name string, f func(context.Context), opts ...TaskOption) error {
+	cr.processPendingTasks()
+	cr.pendingMu.Lock()
+	defer func() {
+		cr.pendingMu.Unlock()
+		cr.processPendingTasks()
+	}()
+
+	pendingTaskNum := cr.pendingTaskNum()
+	tid := taskID{id: id, name: name}
+	if pendingTaskNum > 0 {
+		// Here we use a map to find the task with the same ID.
+		// Then replace the old task with the new one.
+		if t, ok := cr.existTasks[tid]; ok {
+			t.f = f
+			return nil
+		}
+	}
 	task := &Task{
 		id:          id,
 		name:        name,
@@ -196,38 +263,22 @@ func (cr *ConcurrentRunner) RunTask(id uint64, name string, f func(context.Conte
 	for _, opt := range opts {
 		opt(task)
 	}
-	cr.processPendingTasks()
-	cr.pendingMu.Lock()
-	defer func() {
-		cr.pendingMu.Unlock()
-		cr.processPendingTasks()
-	}()
-
-	pendingTaskNum := len(cr.pendingTasks)
-	tid := taskID{task.id, task.name}
 	if pendingTaskNum > 0 {
-		// Here we use a map to find the task with the same ID.
-		// Then replace the old task with the new one.
-		if t, ok := cr.existTasks[tid]; ok {
-			t.f = f
-			t.submittedAt = time.Now()
-			return nil
-		}
 		if !task.retained {
-			maxWait := time.Since(cr.pendingTasks[0].submittedAt)
+			maxWait := time.Since(cr.pendingTasks[cr.pendingHead].submittedAt)
 			if maxWait > cr.maxPendingDuration {
-				runnerFailedTasks.WithLabelValues(cr.name, task.name).Inc()
+				runnerFailedTasks.WithLabelValues(cr.name, name).Inc()
 				return errs.ErrMaxWaitingTasksExceeded
 			}
 		}
-		if pendingTaskNum > maxPendingTaskNum {
-			runnerFailedTasks.WithLabelValues(cr.name, task.name).Inc()
+		if pendingTaskNum >= cr.maxPendingTaskNum {
+			runnerFailedTasks.WithLabelValues(cr.name, name).Inc()
 			return errs.ErrMaxWaitingTasksExceeded
 		}
 	}
 	cr.pendingTasks = append(cr.pendingTasks, task)
 	cr.existTasks[tid] = task
-	cr.pendingTaskCount[task.name]++
+	cr.pendingTaskCount[name]++
 	return nil
 }
 
