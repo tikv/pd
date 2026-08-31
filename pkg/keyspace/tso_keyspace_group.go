@@ -593,10 +593,10 @@ func (m *GroupManager) RemoveKeyspacesFromGroup(
 	if !ok {
 		return nil, errors.Errorf("%s because leadership term is unavailable", errs.NotLeaderErr)
 	}
-	return m.removeKeyspacesFromGroup(ctx, groupID, km, keyspaceIDs, term.Comparisons())
+	return m.removeKeyspacesFromGroupWithConditions(ctx, groupID, km, keyspaceIDs, term.Comparisons())
 }
 
-func (m *GroupManager) removeKeyspacesFromGroup(
+func (m *GroupManager) removeKeyspacesFromGroupWithConditions(
 	ctx context.Context,
 	groupID uint32,
 	km *Manager,
