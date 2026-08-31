@@ -24,18 +24,22 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
+
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
+type storeLimitTestCase struct {
+	name            string
+	kernelType      string
+	statusCode      int
+	args            []string
+	expectedOutput  string
+	expectedStatus  int
+	expectedUpdates int
+}
+
 func TestStoreLimitAllKernelAwareMaximum(t *testing.T) {
-	testCases := []struct {
-		name            string
-		kernelType      string
-		statusCode      int
-		args            []string
-		expectedOutput  string
-		expectedStatus  int
-		expectedUpdates int
-	}{
+	testCases := []storeLimitTestCase{
 		{
 			name:            "classic boundary does not query status",
 			args:            []string{"all", "200", "add-peer"},
@@ -43,28 +47,28 @@ func TestStoreLimitAllKernelAwareMaximum(t *testing.T) {
 		},
 		{
 			name:           "classic rejects above boundary",
-			kernelType:     "Classic",
+			kernelType:     kerneltype.Classic,
 			args:           []string{"all", "201", "add-peer"},
 			expectedOutput: "rate should be at most 200.0 for all",
 			expectedStatus: 1,
 		},
 		{
 			name:            "nextgen accepts boundary",
-			kernelType:      nextGenKernelType,
+			kernelType:      kerneltype.NextGen,
 			args:            []string{"all", "1000", "add-peer"},
 			expectedStatus:  1,
 			expectedUpdates: 1,
 		},
 		{
 			name:            "nextgen label filter accepts boundary",
-			kernelType:      nextGenKernelType,
+			kernelType:      kerneltype.NextGen,
 			args:            []string{"all", "engine", "tikv", "1000", "remove-peer"},
 			expectedStatus:  1,
 			expectedUpdates: 1,
 		},
 		{
 			name:           "nextgen rejects above boundary",
-			kernelType:     nextGenKernelType,
+			kernelType:     kerneltype.NextGen,
 			args:           []string{"all", "1001", "add-peer"},
 			expectedOutput: "rate should be at most 1000.0 for all",
 			expectedStatus: 1,
@@ -84,33 +88,11 @@ func TestStoreLimitAllKernelAwareMaximum(t *testing.T) {
 		},
 	}
 
-	for _, testCase := range testCases {
-		t.Run(testCase.name, func(t *testing.T) {
-			server, statusRequests, updates := newStoreLimitTestServer(t, testCase.kernelType, testCase.statusCode)
-			defer server.Close()
-
-			cmd := NewStoreLimitCommand()
-			cmd.Flags().String("pd", server.URL, "")
-			cmd.SetArgs(testCase.args)
-			output := executeStoreLimitCommand(t, cmd)
-			require.Equal(t, testCase.expectedStatus, *statusRequests)
-			require.Equal(t, testCase.expectedUpdates, *updates)
-			if testCase.expectedOutput != "" {
-				require.Contains(t, output, testCase.expectedOutput)
-			}
-		})
-	}
+	runStoreLimitTestCases(t, NewStoreLimitCommand, testCases)
 }
 
 func TestDeprecatedStoreLimitAllKernelAwareMaximum(t *testing.T) {
-	testCases := []struct {
-		name            string
-		kernelType      string
-		args            []string
-		expectedOutput  string
-		expectedStatus  int
-		expectedUpdates int
-	}{
+	testCases := []storeLimitTestCase{
 		{
 			name:            "classic boundary",
 			args:            []string{"200", "add-peer"},
@@ -118,33 +100,38 @@ func TestDeprecatedStoreLimitAllKernelAwareMaximum(t *testing.T) {
 		},
 		{
 			name:           "classic rejects above boundary",
-			kernelType:     "Classic",
+			kernelType:     kerneltype.Classic,
 			args:           []string{"201", "add-peer"},
 			expectedOutput: "rate should be at most 200.0 for all",
 			expectedStatus: 1,
 		},
 		{
 			name:            "nextgen boundary",
-			kernelType:      nextGenKernelType,
+			kernelType:      kerneltype.NextGen,
 			args:            []string{"1000", "remove-peer"},
 			expectedStatus:  1,
 			expectedUpdates: 1,
 		},
 		{
 			name:           "nextgen rejects above boundary",
-			kernelType:     nextGenKernelType,
+			kernelType:     kerneltype.NextGen,
 			args:           []string{"1001", "remove-peer"},
 			expectedOutput: "rate should be at most 1000.0 for all",
 			expectedStatus: 1,
 		},
 	}
 
+	runStoreLimitTestCases(t, NewSetAllLimitCommand, testCases)
+}
+
+func runStoreLimitTestCases(t *testing.T, newCommand func() *cobra.Command, testCases []storeLimitTestCase) {
+	t.Helper()
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			server, statusRequests, updates := newStoreLimitTestServer(t, testCase.kernelType, 0)
+			server, statusRequests, updates := newStoreLimitTestServer(t, testCase.kernelType, testCase.statusCode)
 			defer server.Close()
 
-			cmd := NewSetAllLimitCommand()
+			cmd := newCommand()
 			cmd.Flags().String("pd", server.URL, "")
 			cmd.SetArgs(testCase.args)
 			output := executeStoreLimitCommand(t, cmd)

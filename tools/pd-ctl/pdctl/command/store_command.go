@@ -30,6 +30,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/response"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 var (
@@ -43,7 +44,6 @@ const (
 	pdStatusPrefix       = "pd/api/v1/status"
 	classicMaxStoreLimit = float64(200)
 	nextGenMaxStoreLimit = float64(1000)
-	nextGenKernelType    = "Next Generation"
 )
 
 // NewStoreCommand return a stores subcommand of rootCmd
@@ -629,7 +629,7 @@ func validateAllStoresLimitRate(cmd *cobra.Command, rate float64) bool {
 			cmd.Printf("Failed to parse PD kernel type: %s\n", err)
 			return false
 		}
-		if status.KernelType == nextGenKernelType {
+		if status.KernelType == kerneltype.NextGen {
 			maxStoreLimit = nextGenMaxStoreLimit
 		}
 	}
