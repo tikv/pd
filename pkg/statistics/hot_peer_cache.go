@@ -69,40 +69,32 @@ type thresholds struct {
 	metrics     [utils.DimLen + 1]prometheus.Gauge // 0 is for byte, 1 is for key, 2 is for query, 3 is for cpu, 4 is for total length.
 }
 
-// hotRegionInfo contains only the immutable region fields used by HotPeerCache.
-// Keeping this compact snapshot in asynchronous tasks avoids retaining the
-// complete RegionInfo until the tasks are consumed.
+// hotRegionInfo references only the immutable region metadata used by
+// HotPeerCache. Asynchronous tasks can retain it without keeping the much
+// larger RegionInfo and its heartbeat statistics alive.
 type hotRegionInfo struct {
-	id               uint64
-	leaderStoreID    uint64
-	storeCount       int
-	inlineStoreIDs   [3]uint64 // Avoid an extra allocation for the common three-replica case.
-	overflowStoreIDs []uint64
+	meta          *metapb.Region
+	leaderStoreID uint64
 }
 
 func newHotRegionInfo(region *core.RegionInfo) *hotRegionInfo {
-	peers := region.GetPeers()
-	info := hotRegionInfo{
-		id:            region.GetID(),
+	return &hotRegionInfo{
+		meta:          region.GetMeta(),
 		leaderStoreID: region.GetLeader().GetStoreId(),
-		storeCount:    len(peers),
 	}
-	if len(peers) > len(info.inlineStoreIDs) {
-		info.overflowStoreIDs = make([]uint64, len(peers)-len(info.inlineStoreIDs))
-	}
-	for i, peer := range peers {
-		if i < len(info.inlineStoreIDs) {
-			info.inlineStoreIDs[i] = peer.GetStoreId()
-		} else {
-			info.overflowStoreIDs[i-len(info.inlineStoreIDs)] = peer.GetStoreId()
-		}
-	}
-	return &info
+}
+
+func (r *hotRegionInfo) id() uint64 {
+	return r.meta.GetId()
+}
+
+func (r *hotRegionInfo) storeCount() int {
+	return len(r.meta.GetPeers())
 }
 
 func (r *hotRegionInfo) containsStore(storeID uint64) bool {
-	for i := range r.storeCount {
-		if r.storeID(i) == storeID {
+	for _, peer := range r.meta.GetPeers() {
+		if peer.GetStoreId() == storeID {
 			return true
 		}
 	}
@@ -110,10 +102,7 @@ func (r *hotRegionInfo) containsStore(storeID uint64) bool {
 }
 
 func (r *hotRegionInfo) storeID(i int) uint64 {
-	if i < len(r.inlineStoreIDs) {
-		return r.inlineStoreIDs[i]
-	}
-	return r.overflowStoreIDs[i-len(r.inlineStoreIDs)]
+	return r.meta.GetPeers()[i].GetStoreId()
 }
 
 // HotPeerCache saves the hot peer's statistics.
@@ -199,7 +188,7 @@ func (f *HotPeerCache) CollectExpiredItems(region *core.RegionInfo) []*HotPeerSt
 }
 
 func (f *HotPeerCache) collectExpiredItemsForRegion(region *hotRegionInfo) []*HotPeerStat {
-	regionID := region.id
+	regionID := region.id()
 	items := make([]*HotPeerStat, 0)
 	if ids, ok := f.storesOfRegion[regionID]; ok {
 		for storeID := range ids {
@@ -235,11 +224,11 @@ func (f *HotPeerCache) checkPeerFlowForRegion(region *hotRegionInfo, peerStoreID
 		return nil
 	}
 
-	regionID := region.id
+	regionID := region.id()
 
 	peerCount := len(peerStoreIDs)
 	if peerStoreIDs == nil {
-		peerCount = region.storeCount
+		peerCount = region.storeCount()
 	}
 	stats := make([]*HotPeerStat, 0, peerCount)
 	for i := range peerCount {
@@ -263,13 +252,7 @@ func (f *HotPeerCache) checkPeerFlowForRegion(region *hotRegionInfo, peerStoreID
 		// check whether the peer is allowed to be inherited
 		source := utils.Direct
 		if oldItem == nil {
-			for _, storeID := range f.getAllStoreIDs(region) {
-				oldItem = f.getOldHotPeerStat(regionID, storeID)
-				if oldItem != nil && oldItem.allowInherited {
-					source = utils.Inherit
-					break
-				}
-			}
+			oldItem, source = f.findOldHotPeerStatForInheritance(region)
 		}
 		// check new item whether is hot
 		if oldItem == nil {
@@ -289,9 +272,9 @@ func (f *HotPeerCache) checkPeerFlowForRegion(region *hotRegionInfo, peerStoreID
 			Loads:      f.kind.GetLoadRates(deltaLoads, interval),
 			isLeader:   region.leaderStoreID == storeID,
 			actionType: utils.Update,
-			stores:     make([]uint64, region.storeCount),
+			stores:     make([]uint64, region.storeCount()),
 		}
-		for i := range region.storeCount {
+		for i := range region.storeCount() {
 			newItem.stores[i] = region.storeID(i)
 		}
 		if oldItem == nil {
@@ -417,32 +400,28 @@ func (f *HotPeerCache) calcHotThresholds(storeID uint64) []float64 {
 	return t.rates
 }
 
-// gets the storeIDs, including old region and new region
-func (f *HotPeerCache) getAllStoreIDs(region *hotRegionInfo) []uint64 {
-	ret := make([]uint64, 0, region.storeCount)
-	isInSlice := func(id uint64) bool {
-		for _, storeID := range ret {
-			if storeID == id {
-				return true
-			}
-		}
-		return false
-	}
-	// old stores
-	if ids, ok := f.storesOfRegion[region.id]; ok {
-		for storeID := range ids {
-			ret = append(ret, storeID)
+// findOldHotPeerStatForInheritance preserves getAllStoreIDs' lookup order
+// without allocating its temporary store-ID slice.
+func (f *HotPeerCache) findOldHotPeerStatForInheritance(region *hotRegionInfo) (*HotPeerStat, utils.SourceKind) {
+	oldStoreIDs := f.storesOfRegion[region.id()]
+	var oldItem *HotPeerStat
+	for storeID := range oldStoreIDs {
+		oldItem = f.getOldHotPeerStat(region.id(), storeID)
+		if oldItem != nil && oldItem.allowInherited {
+			return oldItem, utils.Inherit
 		}
 	}
-	// new stores
-	for i := range region.storeCount {
-		storeID := region.storeID(i)
-		if isInSlice(storeID) {
+	for _, peer := range region.meta.GetPeers() {
+		storeID := peer.GetStoreId()
+		if _, ok := oldStoreIDs[storeID]; ok {
 			continue
 		}
-		ret = append(ret, storeID)
+		oldItem = f.getOldHotPeerStat(region.id(), storeID)
+		if oldItem != nil && oldItem.allowInherited {
+			return oldItem, utils.Inherit
+		}
 	}
-	return ret
+	return oldItem, utils.Direct
 }
 
 func (f *HotPeerCache) isOldColdPeer(oldItem *HotPeerStat, storeID uint64) bool {
@@ -472,10 +451,10 @@ func (f *HotPeerCache) justTransferLeader(region *hotRegionInfo, oldItem *HotPee
 	if oldItem.isLeader { // old item is not nil according to the function
 		return oldItem.StoreID != region.leaderStoreID
 	}
-	ids, ok := f.storesOfRegion[region.id]
+	ids, ok := f.storesOfRegion[region.id()]
 	if ok {
 		for storeID := range ids {
-			oldItem := f.getOldHotPeerStat(region.id, storeID)
+			oldItem := f.getOldHotPeerStat(region.id(), storeID)
 			if oldItem == nil {
 				continue
 			}

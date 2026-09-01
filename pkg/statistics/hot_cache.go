@@ -74,8 +74,7 @@ func (w *HotCache) CheckReadAsync(task func(cache *HotPeerCache)) bool {
 }
 
 // CheckRegionFlowAsync checks the expired read and write items and the write
-// flow for a region asynchronously. It preserves the original task count and
-// enqueue order while keeping only the fields used by HotPeerCache.
+// flow for a region asynchronously while retaining only immutable metadata.
 func (w *HotCache) CheckRegionFlowAsync(region *core.RegionInfo) {
 	checkExpiredTask, checkWritePeerTask := newRegionFlowTasks(region)
 	w.CheckWriteAsync(checkExpiredTask)
@@ -84,31 +83,64 @@ func (w *HotCache) CheckRegionFlowAsync(region *core.RegionInfo) {
 }
 
 func newRegionFlowTasks(region *core.RegionInfo) (checkExpiredTask, checkWritePeerTask func(*HotPeerCache)) {
-	regionInfo := newHotRegionInfo(region)
+	if len(region.GetPeers()) <= 1 {
+		checkExpiredTask = func(cache *HotPeerCache) {
+			expiredStats := cache.CollectExpiredItems(region)
+			for _, stat := range expiredStats {
+				cache.UpdateStat(stat)
+			}
+		}
+		checkWritePeerTask = func(cache *HotPeerCache) {
+			reportInterval := region.GetInterval()
+			interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
+			var loads [utils.RegionStatCount]float64
+			loads[utils.RegionWriteBytes] = float64(region.GetBytesWritten())
+			loads[utils.RegionWriteKeys] = float64(region.GetKeysWritten())
+			loads[utils.RegionWriteQueryNum] = float64(region.GetWriteQueryNum())
+			stats := cache.CheckPeerFlow(region, region.GetPeers(), loads[:], interval)
+			for _, stat := range stats {
+				cache.UpdateStat(stat)
+			}
+		}
+		return checkExpiredTask, checkWritePeerTask
+	}
+	regionInfo := hotRegionInfo{
+		meta:          region.GetMeta(),
+		leaderStoreID: region.GetLeader().GetStoreId(),
+	}
 	reportInterval := region.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
 	writtenBytes := region.GetBytesWritten()
 	writtenKeys := region.GetKeysWritten()
 	writeQueryNum := region.GetWriteQueryNum()
-	return newExpiredRegionTask(regionInfo), newWriteRegionTask(regionInfo, interval, writtenBytes, writtenKeys, writeQueryNum)
+	return newExpiredRegionTask(regionInfo.meta), newWriteRegionTask(
+		regionInfo.meta,
+		regionInfo.leaderStoreID,
+		interval,
+		writtenBytes,
+		writtenKeys,
+		writeQueryNum,
+	)
 }
 
-func newExpiredRegionTask(regionInfo *hotRegionInfo) func(*HotPeerCache) {
+func newExpiredRegionTask(meta *metapb.Region) func(*HotPeerCache) {
 	return func(cache *HotPeerCache) {
-		expiredStats := cache.collectExpiredItemsForRegion(regionInfo)
+		regionInfo := hotRegionInfo{meta: meta}
+		expiredStats := cache.collectExpiredItemsForRegion(&regionInfo)
 		for _, stat := range expiredStats {
 			cache.UpdateStat(stat)
 		}
 	}
 }
 
-func newWriteRegionTask(regionInfo *hotRegionInfo, interval, writtenBytes, writtenKeys, writeQueryNum uint64) func(*HotPeerCache) {
+func newWriteRegionTask(meta *metapb.Region, leaderStoreID, interval, writtenBytes, writtenKeys, writeQueryNum uint64) func(*HotPeerCache) {
 	return func(cache *HotPeerCache) {
+		regionInfo := hotRegionInfo{meta: meta, leaderStoreID: leaderStoreID}
 		var loads [utils.RegionStatCount]float64
 		loads[utils.RegionWriteBytes] = float64(writtenBytes)
 		loads[utils.RegionWriteKeys] = float64(writtenKeys)
 		loads[utils.RegionWriteQueryNum] = float64(writeQueryNum)
-		stats := cache.checkPeerFlowForRegion(regionInfo, nil, loads[:], interval)
+		stats := cache.checkPeerFlowForRegion(&regionInfo, nil, loads[:], interval)
 		for _, stat := range stats {
 			cache.UpdateStat(stat)
 		}
@@ -122,10 +154,12 @@ func (w *HotCache) CheckReadPeerAsync(region *core.RegionInfo, peer *metapb.Peer
 }
 
 func newReadPeerTask(region *core.RegionInfo, peer *metapb.Peer, loads []float64, interval uint64) func(*HotPeerCache) {
-	regionInfo := newHotRegionInfo(region)
+	meta := region.GetMeta()
+	leaderStoreID := region.GetLeader().GetStoreId()
 	storeID := peer.GetStoreId()
 	return func(cache *HotPeerCache) {
-		stats := cache.checkPeerFlowForRegion(regionInfo, []uint64{storeID}, loads, interval)
+		regionInfo := hotRegionInfo{meta: meta, leaderStoreID: leaderStoreID}
+		stats := cache.checkPeerFlowForRegion(&regionInfo, []uint64{storeID}, loads, interval)
 		for _, stat := range stats {
 			cache.UpdateStat(stat)
 		}

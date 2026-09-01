@@ -101,6 +101,72 @@ func TestCheckPeerFlowWithMoreExplicitPeersThanRegionPeers(t *testing.T) {
 	re.Len(stats, len(peers))
 }
 
+func TestFindOldHotPeerStatForInheritance(t *testing.T) {
+	const regionID uint64 = 100
+	newCache := func() *HotPeerCache {
+		return &HotPeerCache{
+			peersOfStore:   make(map[uint64]*utils.TopN),
+			storesOfRegion: make(map[uint64]map[uint64]struct{}),
+		}
+	}
+	putPeer := func(cache *HotPeerCache, storeID uint64, allowInherited bool) *HotPeerStat {
+		stat := &HotPeerStat{
+			StoreID:        storeID,
+			RegionID:       regionID,
+			Loads:          make([]float64, utils.DimLen),
+			allowInherited: allowInherited,
+		}
+		peers := utils.NewTopN(utils.DimLen, TopNN, time.Minute)
+		peers.Put(stat)
+		cache.peersOfStore[storeID] = peers
+		return stat
+	}
+	newRegion := func(storeIDs ...uint64) *hotRegionInfo {
+		peers := make([]*metapb.Peer, len(storeIDs))
+		for i, storeID := range storeIDs {
+			peers[i] = &metapb.Peer{StoreId: storeID}
+		}
+		return &hotRegionInfo{meta: &metapb.Region{Id: regionID, Peers: peers}}
+	}
+
+	t.Run("inherit-from-old-store", func(t *testing.T) {
+		cache := newCache()
+		want := putPeer(cache, 1, true)
+		cache.storesOfRegion[regionID] = map[uint64]struct{}{1: {}}
+		got, source := cache.findOldHotPeerStatForInheritance(newRegion(2))
+		require.Same(t, want, got)
+		require.Equal(t, utils.Inherit, source)
+	})
+
+	t.Run("inherit-from-new-store", func(t *testing.T) {
+		cache := newCache()
+		putPeer(cache, 1, false)
+		want := putPeer(cache, 2, true)
+		cache.storesOfRegion[regionID] = map[uint64]struct{}{1: {}}
+		got, source := cache.findOldHotPeerStatForInheritance(newRegion(2))
+		require.Same(t, want, got)
+		require.Equal(t, utils.Inherit, source)
+	})
+
+	t.Run("preserve-last-direct-item", func(t *testing.T) {
+		cache := newCache()
+		want := putPeer(cache, 1, false)
+		cache.storesOfRegion[regionID] = map[uint64]struct{}{1: {}}
+		got, source := cache.findOldHotPeerStatForInheritance(newRegion(1))
+		require.Same(t, want, got)
+		require.Equal(t, utils.Direct, source)
+	})
+
+	t.Run("preserve-final-miss", func(t *testing.T) {
+		cache := newCache()
+		putPeer(cache, 1, false)
+		cache.storesOfRegion[regionID] = map[uint64]struct{}{1: {}}
+		got, source := cache.findOldHotPeerStatForInheritance(newRegion(2))
+		require.Nil(t, got)
+		require.Equal(t, utils.Direct, source)
+	})
+}
+
 func orderingPeers(cache *HotPeerCache, region *core.RegionInfo) []*metapb.Peer {
 	var peers []*metapb.Peer
 	for _, peer := range region.GetPeers() {

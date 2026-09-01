@@ -16,6 +16,7 @@ package statistics
 
 import (
 	"context"
+	"fmt"
 	"runtime"
 	"testing"
 
@@ -55,16 +56,21 @@ func TestIsHot(t *testing.T) {
 }
 
 func BenchmarkPendingRegionHeartbeatTasks(b *testing.B) {
-	b.Run("retain-region-info", func(b *testing.B) {
-		runPendingRegionHeartbeatTaskBenchmark(b, newRetainedRegionFlowTasks)
-	})
-	b.Run("compact-region-info", func(b *testing.B) {
-		runPendingRegionHeartbeatTaskBenchmark(b, newRegionFlowTasks)
-	})
+	for _, peerCount := range []int{1, 3, 5} {
+		b.Run(fmt.Sprintf("%d-peers", peerCount), func(b *testing.B) {
+			b.Run("retain-region-info", func(b *testing.B) {
+				runPendingRegionHeartbeatTaskBenchmark(b, peerCount, newOriginalRegionFlowTasks)
+			})
+			b.Run("retain-region-meta", func(b *testing.B) {
+				runPendingRegionHeartbeatTaskBenchmark(b, peerCount, newRegionFlowTasks)
+			})
+		})
+	}
 }
 
 func runPendingRegionHeartbeatTaskBenchmark(
 	b *testing.B,
+	peerCount int,
 	newTasks func(*core.RegionInfo) (func(*HotPeerCache), func(*HotPeerCache)),
 ) {
 	const maxPendingHeartbeats = 16 * 1024
@@ -76,7 +82,7 @@ func runPendingRegionHeartbeatTaskBenchmark(
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := range b.N {
-		region := newBenchmarkRegion(uint64(i + 1))
+		region := newBenchmarkRegion(uint64(i+1), peerCount)
 		checkExpiredTask, checkWritePeerTask := newTasks(region)
 		pending[i%len(pending)] = [3]func(*HotPeerCache){
 			checkExpiredTask,
@@ -95,7 +101,7 @@ func runPendingRegionHeartbeatTaskBenchmark(
 	runtime.KeepAlive(pending)
 }
 
-func newRetainedRegionFlowTasks(region *core.RegionInfo) (checkExpiredTask, checkWritePeerTask func(*HotPeerCache)) {
+func newOriginalRegionFlowTasks(region *core.RegionInfo) (checkExpiredTask, checkWritePeerTask func(*HotPeerCache)) {
 	checkExpiredTask = func(cache *HotPeerCache) {
 		expiredStats := cache.CollectExpiredItems(region)
 		for _, stat := range expiredStats {
@@ -113,11 +119,10 @@ func newRetainedRegionFlowTasks(region *core.RegionInfo) (checkExpiredTask, chec
 	return checkExpiredTask, checkWritePeerTask
 }
 
-func newBenchmarkRegion(regionID uint64) *core.RegionInfo {
-	peers := []*metapb.Peer{
-		{Id: regionID*10 + 1, StoreId: 1},
-		{Id: regionID*10 + 2, StoreId: 2},
-		{Id: regionID*10 + 3, StoreId: 3},
+func newBenchmarkRegion(regionID uint64, peerCount int) *core.RegionInfo {
+	peers := make([]*metapb.Peer, peerCount)
+	for i := range peerCount {
+		peers[i] = &metapb.Peer{Id: regionID*10 + uint64(i+1), StoreId: uint64(i + 1)}
 	}
 	return core.NewRegionInfo(
 		&metapb.Region{

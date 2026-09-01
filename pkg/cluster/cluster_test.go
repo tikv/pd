@@ -16,9 +16,12 @@ package cluster
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/log"
+	"go.uber.org/zap/zapcore"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
@@ -59,6 +62,23 @@ func (c *hotCacheBenchmarkCluster) GetCoordinator() *schedule.Coordinator {
 }
 
 func BenchmarkHandleStatsAsync(b *testing.B) {
+	for _, peerCount := range []int{1, 3, 5} {
+		b.Run(fmt.Sprintf("%d-peers", peerCount), func(b *testing.B) {
+			benchmarkHandleStatsAsync(b, peerCount, 0)
+		})
+	}
+}
+
+func BenchmarkHandleStatsAsyncSteady(b *testing.B) {
+	for _, peerCount := range []int{1, 3, 5} {
+		b.Run(fmt.Sprintf("%d-peers", peerCount), func(b *testing.B) {
+			benchmarkHandleStatsAsync(b, peerCount, 64)
+		})
+	}
+}
+
+func benchmarkHandleStatsAsync(b *testing.B, peerCount, drainEvery int) {
+	log.SetLevel(zapcore.FatalLevel)
 	ctx, cancel := context.WithCancel(context.Background())
 	b.Cleanup(cancel)
 	cluster := newHotCacheBenchmarkCluster(ctx)
@@ -66,17 +86,20 @@ func BenchmarkHandleStatsAsync(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := range b.N {
-		HandleStatsAsync(cluster, newHotCacheBenchmarkRegion(uint64(i+1)))
+		HandleStatsAsync(cluster, newHotCacheBenchmarkRegion(uint64(i+1), peerCount))
+		if drainEvery > 0 && (i+1)%drainEvery == 0 {
+			cluster.GetHotStat().GetHotPeerStats(utils.Write, 0)
+			cluster.GetHotStat().GetHotPeerStats(utils.Read, 0)
+		}
 	}
 	cluster.GetHotStat().GetHotPeerStats(utils.Write, 0)
 	cluster.GetHotStat().GetHotPeerStats(utils.Read, 0)
 }
 
-func newHotCacheBenchmarkRegion(regionID uint64) *core.RegionInfo {
-	peers := []*metapb.Peer{
-		{Id: regionID*10 + 1, StoreId: 1},
-		{Id: regionID*10 + 2, StoreId: 2},
-		{Id: regionID*10 + 3, StoreId: 3},
+func newHotCacheBenchmarkRegion(regionID uint64, peerCount int) *core.RegionInfo {
+	peers := make([]*metapb.Peer, peerCount)
+	for i := range peerCount {
+		peers[i] = &metapb.Peer{Id: regionID*10 + uint64(i+1), StoreId: uint64(i + 1)}
 	}
 	return core.NewRegionInfo(
 		&metapb.Region{
