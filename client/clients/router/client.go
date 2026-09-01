@@ -616,7 +616,7 @@ func (c *Cli) dispatcher() {
 	defer c.wg.Done()
 
 	var (
-		leaderRetryCh     = make(chan *Request, defaultMaxRouterRequestBatchSize)
+		leaderRetryCh     chan *Request
 		streamURL         string
 		timeoutTimer      *time.Timer
 		resetTimeoutTimer = func() {
@@ -637,9 +637,6 @@ func (c *Cli) dispatcher() {
 			timeoutTimer.Stop()
 		}
 		cancelErr := ctx.Err()
-		if cancelErr == nil {
-			cancelErr = context.Canceled
-		}
 		for len(leaderRetryCh) > 0 {
 			finishRegionRequest(<-leaderRetryCh, nil, cancelErr)
 		}
@@ -657,7 +654,7 @@ batchLoop:
 		// follower are prioritized in the next batch, while requests already waiting
 		// in the regular queue fill the remaining batch capacity.
 		isLeaderRetryBatch := len(leaderRetryCh) > 0
-		requestCh := c.requestCh
+		batchRequestCh := c.requestCh
 		if isLeaderRetryBatch {
 		fillLeaderRetryBatch:
 			for len(leaderRetryCh) < cap(leaderRetryCh) {
@@ -668,9 +665,9 @@ batchLoop:
 					break fillLeaderRetryBatch
 				}
 			}
-			requestCh = leaderRetryCh
+			batchRequestCh = leaderRetryCh
 		}
-		err := c.batchController.FetchPendingRequests(ctx, requestCh, nil, 0)
+		err := c.batchController.FetchPendingRequests(ctx, batchRequestCh, nil, 0)
 		if err != nil {
 			if err == context.Canceled {
 				log.Info("[router] stop fetching the pending router requests due to context canceled")
@@ -721,6 +718,9 @@ batchLoop:
 				return
 			}
 			continue
+		}
+		if len(retryRequests) > 0 && leaderRetryCh == nil {
+			leaderRetryCh = make(chan *Request, defaultMaxRouterRequestBatchSize)
 		}
 		for _, req := range retryRequests {
 			leaderRetryCh <- req
@@ -926,7 +926,10 @@ func (c *Cli) processRequestsInner(
 		if headerErr != nil {
 			responseForFinisher = nil
 		}
-		missingRequests := make([]*Request, 0, len(requests))
+		var missingRequests []*Request
+		if responseForFinisher == nil {
+			missingRequests = make([]*Request, 0, len(requests))
+		}
 		c.batchController.FinishCollectedRequests(
 			partialResponseFinisher(responseForFinisher, &missingRequests),
 			nil,
