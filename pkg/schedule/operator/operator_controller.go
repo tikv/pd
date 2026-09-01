@@ -619,6 +619,12 @@ func (oc *Controller) addOperatorInner(op *Operator) bool {
 	var step OpStep
 	if region := oc.cluster.GetRegion(op.RegionID()); region != nil {
 		if step = op.Check(region); step != nil {
+			// This is the operator's very first dispatch, before any
+			// heartbeat-driven Dispatch() call has a chance to run. Mark it
+			// the same way Dispatch() does, so checkStaleOperator's
+			// HasStepBeenDispatched check isn't blind to a command that was
+			// already sent here.
+			op.MarkStepDispatched(op.CurrentStepIndex())
 			oc.SendScheduleCommand(region, step, DispatchFromCreate)
 		}
 	}

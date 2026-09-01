@@ -279,6 +279,42 @@ func (suite *operatorControllerTestSuite) TestOperatorControllerStopsHealthCheck
 	re.Equal(CANCELED, op2.Status())
 }
 
+// TestOperatorControllerMarksStepDispatchedOnCreate guards against a gap
+// raised in review on tikv/pd#11146: AddOperator's own first dispatch
+// (addOperatorInner, DispatchFromCreate) sends the step's command
+// immediately at creation time, without waiting for a heartbeat-driven
+// Dispatch() call. That first send must also be recorded via
+// MarkStepDispatched, or checkStaleOperator wrongly treats the step as
+// never-dispatched and cancels the operator the moment the target goes
+// unhealthy before the next heartbeat arrives.
+func (suite *operatorControllerTestSuite) TestOperatorControllerMarksStepDispatchedOnCreate() {
+	re := suite.Require()
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(suite.ctx, opt)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc, false /* no need to run */)
+	oc := NewController(suite.ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
+	tc.AddLeaderStore(1, 1)
+	tc.AddLeaderStore(2, 1)
+	tc.AddLeaderStore(3, 1)
+	tc.AddLeaderStore(4, 0)
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	region := tc.GetRegion(1)
+
+	op := NewTestOperator(1, region.GetRegionEpoch(), OpRegion, AddLearner{ToStore: 4, PeerID: 4})
+	op.SetStoreHealthCheck(true)
+	re.True(oc.AddOperator(op))
+	// AddOperator's own creation-time dispatch must already have marked the
+	// step, before any Dispatch() call runs.
+	re.True(op.HasStepBeenDispatched(op.CurrentStepIndex()))
+
+	// Store 4 goes unhealthy before the next heartbeat. Since the step's
+	// command was already sent at creation time, this must not cancel the
+	// operator.
+	tc.SetStoreLastHeartbeatInterval(4, 11*time.Minute)
+	oc.Dispatch(region, DispatchFromHeartBeat, nil)
+	re.Equal(pdpb.OperatorStatus_RUNNING, oc.GetOperatorStatus(1).Status)
+}
+
 func (suite *operatorControllerTestSuite) TestCheckAddUnexpectedStatus() {
 	re := suite.Require()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/operator/unexpectedOperator"))
