@@ -651,20 +651,11 @@ batchLoop:
 		}
 
 		// Step 1: Fetch the pending router requests in batch. Requests missed by a
-		// follower are prioritized in the next batch, while requests already waiting
-		// in the regular queue fill the remaining batch capacity.
+		// follower are prioritized in the next standalone batch. Fresh requests retain
+		// their own routing and retry semantics.
 		isLeaderRetryBatch := len(leaderRetryCh) > 0
 		batchRequestCh := c.requestCh
 		if isLeaderRetryBatch {
-		fillLeaderRetryBatch:
-			for len(leaderRetryCh) < cap(leaderRetryCh) {
-				select {
-				case req := <-c.requestCh:
-					leaderRetryCh <- req
-				default:
-					break fillLeaderRetryBatch
-				}
-			}
 			batchRequestCh = leaderRetryCh
 		}
 		err := c.batchController.FetchPendingRequests(ctx, batchRequestCh, nil, 0)
