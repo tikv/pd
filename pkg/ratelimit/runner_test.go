@@ -114,12 +114,13 @@ func TestConcurrentRunner(t *testing.T) {
 			runner.pendingMu.Lock()
 			defer runner.pendingMu.Unlock()
 			var originalSubmitted time.Time
-			for _, task := range runner.pendingTasks[runner.pendingHead:] {
+			for i := range runner.pendingTaskNum() {
+				task := runner.pendingTaskAt(i)
 				if task.id == 6 {
 					originalSubmitted = task.submittedAt
 				}
 			}
-			lastSubmitted := runner.pendingTasks[len(runner.pendingTasks)-1].submittedAt
+			lastSubmitted := runner.pendingTaskAt(runner.pendingTaskNum() - 1).submittedAt
 			return originalSubmitted, lastSubmitted
 		}()
 		require.Less(t, originalSubmitted, lastSubmitted)
@@ -151,9 +152,9 @@ func TestConcurrentRunner(t *testing.T) {
 		require.NoError(t, runner.RunTask(2, "test4", func(context.Context) {}))
 
 		originalSubmitted := time.Now().Add(-2 * time.Second)
-		runner.pendingTasks[runner.pendingHead].submittedAt = originalSubmitted
+		runner.pendingTaskAt(0).submittedAt = originalSubmitted
 		require.NoError(t, runner.RunTask(2, "test4", func(context.Context) {}))
-		require.Equal(t, originalSubmitted, runner.pendingTasks[runner.pendingHead].submittedAt)
+		require.Equal(t, originalSubmitted, runner.pendingTaskAt(0).submittedAt)
 		require.ErrorIs(
 			t,
 			runner.RunTask(3, "test4", func(context.Context) {}),
@@ -179,7 +180,7 @@ func TestConcurrentRunner(t *testing.T) {
 		require.Equal(t, runner.maxPendingTaskNum, runner.pendingTaskNum())
 	})
 
-	t.Run("CompactPendingTasks", func(t *testing.T) {
+	t.Run("ReleasePendingStorage", func(t *testing.T) {
 		runner := NewConcurrentRunner("test", NewConcurrencyLimiter(1), time.Minute)
 		require.NoError(t, runner.RunTask(0, "test6", func(context.Context) {}))
 		for i := 1; i <= initialCapacity*2; i++ {
@@ -193,6 +194,39 @@ func TestConcurrentRunner(t *testing.T) {
 		}
 		<-runner.taskChan
 		require.Empty(t, runner.pendingTasks)
+		require.Equal(t, initialCapacity, cap(runner.pendingTasks))
+		require.Empty(t, runner.existTasks)
+	})
+
+	t.Run("ReusePendingStorage", func(t *testing.T) {
+		runner := NewConcurrentRunner("test", NewConcurrencyLimiter(1), time.Minute)
+		require.NoError(t, runner.RunTask(0, "test7", func(context.Context) {}))
+		for i := 1; i <= initialCapacity; i++ {
+			require.NoError(t, runner.RunTask(uint64(i), "test7", func(context.Context) {}))
+		}
+
+		storage := &runner.pendingTasks[0]
+		for range initialCapacity / 2 {
+			<-runner.taskChan
+			runner.processPendingTasks()
+		}
+		for i := initialCapacity + 1; i <= initialCapacity+initialCapacity/2; i++ {
+			require.NoError(t, runner.RunTask(uint64(i), "test7", func(context.Context) {}))
+		}
+
+		require.Equal(t, initialCapacity, runner.pendingTaskNum())
+		require.Equal(t, initialCapacity, cap(runner.pendingTasks))
+		require.Same(t, storage, &runner.pendingTasks[0])
+		require.Equal(t, uint64(initialCapacity/2+1), runner.pendingTaskAt(0).id)
+		require.Equal(t, uint64(initialCapacity+initialCapacity/2), runner.pendingTaskAt(runner.pendingTaskNum()-1).id)
+		require.Len(t, runner.existTasks, initialCapacity)
+
+		for id := initialCapacity / 2; id <= initialCapacity+initialCapacity/2; id++ {
+			task := <-runner.taskChan
+			require.Equal(t, uint64(id), task.id)
+			runner.processPendingTasks()
+		}
+		require.Zero(t, runner.pendingTaskNum())
 		require.Equal(t, initialCapacity, cap(runner.pendingTasks))
 		require.Empty(t, runner.existTasks)
 	})

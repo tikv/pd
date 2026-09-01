@@ -81,6 +81,7 @@ type ConcurrentRunner struct {
 	pendingTaskCount   map[string]int
 	pendingTasks       []*Task
 	pendingHead        int
+	pendingLen         int
 	existTasks         map[taskID]*Task
 	maxWaitingDuration prometheus.Gauge
 }
@@ -174,11 +175,9 @@ func (cr *ConcurrentRunner) processPendingTasks() {
 		task := cr.pendingTasks[cr.pendingHead]
 		select {
 		case cr.taskChan <- task:
-			cr.pendingTasks[cr.pendingHead] = nil
-			cr.pendingHead++
 			cr.pendingTaskCount[task.name]--
 			delete(cr.existTasks, taskID{id: task.id, name: task.name})
-			cr.compactPendingTasks()
+			cr.popPendingTask()
 		default:
 		}
 		return
@@ -186,15 +185,56 @@ func (cr *ConcurrentRunner) processPendingTasks() {
 }
 
 func (cr *ConcurrentRunner) pendingTaskNum() int {
-	return len(cr.pendingTasks) - cr.pendingHead
+	return cr.pendingLen
 }
 
-// compactPendingTasks releases the consumed prefix and the high-water capacity
-// of the task index after a burst. It must be called with pendingMu held.
-func (cr *ConcurrentRunner) compactPendingTasks() {
-	pendingTaskNum := cr.pendingTaskNum()
-	if pendingTaskNum == 0 {
-		if cr.pendingHead >= initialCapacity {
+// pendingTaskAt returns a pending task by its FIFO offset. It must be called
+// with pendingMu held.
+func (cr *ConcurrentRunner) pendingTaskAt(offset int) *Task {
+	index := cr.pendingHead + offset
+	if index >= cap(cr.pendingTasks) {
+		index -= cap(cr.pendingTasks)
+	}
+	return cr.pendingTasks[index]
+}
+
+// pushPendingTask appends a task to the pending ring. It must be called with
+// pendingMu held.
+func (cr *ConcurrentRunner) pushPendingTask(task *Task) {
+	if cr.pendingLen == 0 {
+		cr.pendingTasks = append(cr.pendingTasks, task)
+		cr.pendingHead = 0
+		cr.pendingLen = 1
+		return
+	}
+	if cr.pendingLen == cap(cr.pendingTasks) {
+		capacity := max(initialCapacity, cr.pendingLen*2)
+		pendingTasks := make([]*Task, cr.pendingLen, capacity)
+		for i := range cr.pendingLen {
+			pendingTasks[i] = cr.pendingTaskAt(i)
+		}
+		cr.pendingTasks = pendingTasks
+		cr.pendingHead = 0
+	}
+
+	index := cr.pendingHead + cr.pendingLen
+	if index >= cap(cr.pendingTasks) {
+		index -= cap(cr.pendingTasks)
+	}
+	if index == len(cr.pendingTasks) {
+		cr.pendingTasks = append(cr.pendingTasks, task)
+	} else {
+		cr.pendingTasks[index] = task
+	}
+	cr.pendingLen++
+}
+
+// popPendingTask removes the FIFO head. It must be called with pendingMu held.
+func (cr *ConcurrentRunner) popPendingTask() {
+	cr.pendingTasks[cr.pendingHead] = nil
+	if cr.pendingLen == 1 {
+		cr.pendingLen = 0
+		if len(cr.pendingTasks) >= initialCapacity {
 			cr.resetPendingTasks(initialCapacity)
 		} else {
 			cr.pendingTasks = cr.pendingTasks[:0]
@@ -202,19 +242,11 @@ func (cr *ConcurrentRunner) compactPendingTasks() {
 		}
 		return
 	}
-	if cr.pendingHead < initialCapacity || cr.pendingHead < pendingTaskNum {
-		return
+	cr.pendingHead++
+	if cr.pendingHead == cap(cr.pendingTasks) {
+		cr.pendingHead = 0
 	}
-
-	capacity := max(initialCapacity, pendingTaskNum*2)
-	pendingTasks := make([]*Task, pendingTaskNum, capacity)
-	copy(pendingTasks, cr.pendingTasks[cr.pendingHead:])
-	cr.pendingTasks = pendingTasks
-	cr.pendingHead = 0
-	cr.existTasks = make(map[taskID]*Task, pendingTaskNum)
-	for _, task := range cr.pendingTasks {
-		cr.existTasks[taskID{id: task.id, name: task.name}] = task
-	}
+	cr.pendingLen--
 }
 
 // resetPendingTasks releases all pending task storage. It must be called with
@@ -223,6 +255,7 @@ func (cr *ConcurrentRunner) compactPendingTasks() {
 func (cr *ConcurrentRunner) resetPendingTasks(capacity int) {
 	cr.pendingTasks = make([]*Task, 0, capacity)
 	cr.pendingHead = 0
+	cr.pendingLen = 0
 	cr.existTasks = make(map[taskID]*Task)
 	for taskName := range cr.pendingTaskCount {
 		cr.pendingTaskCount[taskName] = 0
@@ -275,7 +308,7 @@ func (cr *ConcurrentRunner) RunTask(id uint64, name string, f func(context.Conte
 			return errs.ErrMaxWaitingTasksExceeded
 		}
 	}
-	cr.pendingTasks = append(cr.pendingTasks, task)
+	cr.pushPendingTask(task)
 	cr.existTasks[tid] = task
 	cr.pendingTaskCount[name]++
 	return nil
