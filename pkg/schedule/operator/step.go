@@ -61,9 +61,17 @@ type OpStep interface {
 	// needStoreHealthCheck is an opt-in, per-operator permission (see
 	// Operator.SetStoreHealthCheck) to additionally reject a target that has
 	// gone Unhealthy mid-execution, on top of the unconditional Down check in
-	// validateStore. A new step implementation must decide how to handle it,
-	// based on whether the step's own conf change needs the target store to
-	// actively participate (be reachable) for raft to commit it:
+	// validateStore. The caller (checkStaleOperator) already resolves *when*
+	// it's safe to ask for this: it forces the parameter to false once the
+	// current step's command has ever been dispatched (Operator.
+	// HasStepBeenDispatched), because a region heartbeat is only a snapshot
+	// of the target as of whenever it was generated -- once dispatched, TiKV
+	// may already be applying (or have applied) the conf change regardless
+	// of what the current heartbeat happens to show, and cancelling past
+	// that point can't undo it. A step implementation only has to decide
+	// *whether* it ever wants the check at all, based on whether its own
+	// conf change needs the target store to actively participate (be
+	// reachable) for raft to commit it:
 	//   - steps whose conf change is a pure role/metadata flip that the raft
 	//     group's current healthy majority can commit without the target's
 	//     participation (e.g. RemovePeer, BecomeWitness, DemoteVoter,
@@ -76,19 +84,11 @@ type OpStep interface {
 	//     already-caught-up learner is typically just silently redone by
 	//     another checker's operator that doesn't carry the flag, so the
 	//     rejection only fragments the original operator for no benefit.
-	//   - steps that require the target to actively receive something for
-	//     the step to complete (TransferLeader needs the target to actually
+	//   - steps that need the target to actively receive something for the
+	//     step to complete (TransferLeader needs the target to actually
 	//     campaign and start serving as leader; AddPeer/AddLearner/
-	//     BecomeNonWitness need to stream a snapshot to the target) may
-	//     honor the flag. TransferLeader completes atomically with no
-	//     pending sub-state, so it's always safe to reject. AddPeer/
-	//     AddLearner/BecomeNonWitness go through a pending sub-state and
-	//     must only honor the flag before that sub-state begins (peer not
-	//     created yet, or role not yet flipped): once the conf change has
-	//     landed, even if still pending, cancelling the operator can't undo
-	//     it and orphans the peer with no other checker guaranteed to pick
-	//     it up before the store crosses the (much larger)
-	//     max-store-down-time threshold.
+	//     BecomeNonWitness need to stream a snapshot to the target) should
+	//     just pass the parameter straight through to validateStore.
 	CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo, needStoreHealthCheck bool) error
 	Influence(opInfluence *OpInfluence, region *core.RegionInfo)
 	Timeout(regionSize int64) time.Duration
@@ -229,13 +229,10 @@ func (ap AddPeer) Influence(opInfluence *OpInfluence, region *core.RegionInfo) {
 
 // CheckInProgress checks if the step is in the progress of advancing.
 func (ap AddPeer) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo, needStoreHealthCheck bool) error {
-	peer := region.GetStorePeer(ap.ToStore)
-	// Once the peer already exists on the target (even pending), the conf
-	// change has already landed; cancelling the operator here wouldn't undo
-	// that, so stop enforcing the extra health check.
-	if err := validateStore(ci, config, ap.ToStore, needStoreHealthCheck && peer == nil); err != nil {
+	if err := validateStore(ci, config, ap.ToStore, needStoreHealthCheck); err != nil {
 		return err
 	}
+	peer := region.GetStorePeer(ap.ToStore)
 	if peer != nil && peer.GetId() != ap.PeerID {
 		return errors.Errorf("peer %d has already existed in store %d, the timeout is trying to add peer %d on the same store", peer.GetId(), ap.ToStore, ap.PeerID)
 	}
@@ -350,16 +347,10 @@ func (bn BecomeNonWitness) IsFinish(region *core.RegionInfo) bool {
 
 // CheckInProgress checks if the step is in the progress of advancing.
 func (bn BecomeNonWitness) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo, needStoreHealthCheck bool) error {
-	peer := region.GetStorePeer(bn.StoreID)
-	// This peer already exists (it's an existing witness); the thing that can
-	// still land is the witness->non-witness flip itself. IsWitness==true
-	// means the flip hasn't happened yet, so cancelling is safe; once it
-	// flips to false the store is mid data catch-up, same as AddLearner's
-	// pending window, and cancelling can't undo it.
-	stillPending := peer != nil && peer.IsWitness
-	if err := validateStore(ci, config, bn.StoreID, needStoreHealthCheck && stillPending); err != nil {
+	if err := validateStore(ci, config, bn.StoreID, needStoreHealthCheck); err != nil {
 		return err
 	}
+	peer := region.GetStorePeer(bn.StoreID)
 	if peer == nil || peer.GetId() != bn.PeerID {
 		return errors.New("peer does not exist")
 	}
@@ -525,12 +516,10 @@ func (al AddLearner) IsFinish(region *core.RegionInfo) bool {
 
 // CheckInProgress checks if the step is in the progress of advancing.
 func (al AddLearner) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo, needStoreHealthCheck bool) error {
-	peer := region.GetStorePeer(al.ToStore)
-	// Same reasoning as AddPeer: once the peer exists (even pending), the
-	// conf change has already landed and cancelling can't undo it.
-	if err := validateStore(ci, config, al.ToStore, needStoreHealthCheck && peer == nil); err != nil {
+	if err := validateStore(ci, config, al.ToStore, needStoreHealthCheck); err != nil {
 		return err
 	}
+	peer := region.GetStorePeer(al.ToStore)
 	if peer == nil {
 		return nil
 	}

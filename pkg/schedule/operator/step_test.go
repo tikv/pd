@@ -584,7 +584,11 @@ func (suite *operatorStepTestSuite) TestSwitchToWitness() {
 
 // TestNeedStoreHealthCheck verifies that store 11 (unhealthy but not yet down)
 // only fails CheckInProgress for steps that add data to the target store, and
-// only when the caller opts into needStoreHealthCheck.
+// only when the caller opts into needStoreHealthCheck. These are bare step
+// calls with a fixed needStoreHealthCheck value, so they cover "should this
+// step type honor the flag at all" -- not "when is it safe to pass true",
+// which is Controller.checkStaleOperator's job (see
+// TestOperatorControllerStopsHealthCheckAfterDispatch).
 func (suite *operatorStepTestSuite) TestNeedStoreHealthCheck() {
 	re := suite.Require()
 
@@ -621,39 +625,18 @@ func (suite *operatorStepTestSuite) TestNeedStoreHealthCheck() {
 	suite.checkWithHealthCheck(re, bw, "switch peer 11 on store 11 to witness",
 		[]testCase{{witnessPeers, 0, false, re.NoError}}, true)
 
-	// Once the target peer already exists (even pending), AddPeer/AddLearner
-	// must stop enforcing the extra check: cancelling wouldn't undo the conf
-	// change that already landed, and would just orphan the peer.
-	apLandedPeers := []*metapb.Peer{
-		{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
-		{Id: 11, StoreId: 11, Role: metapb.PeerRole_Voter},
-	}
-	suite.checkWithHealthCheck(re, ap, "add peer 11 on store 11",
-		[]testCase{{apLandedPeers, 1, true, re.NoError}}, true)
-
-	alLandedPeers := []*metapb.Peer{
-		{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
-		{Id: 11, StoreId: 11, Role: metapb.PeerRole_Learner},
-	}
-	suite.checkWithHealthCheck(re, al, "add learner peer 11 on store 11",
-		[]testCase{{alLandedPeers, 1, true, re.NoError}}, true)
-
-	// BecomeNonWitness: IsWitness still true means the flip hasn't landed yet,
-	// so the check still applies; IsWitness false means it already flipped
-	// and is mid data catch-up, so the check must stop applying.
+	// BecomeNonWitness passes needStoreHealthCheck straight through, same as
+	// AddPeer/AddLearner above -- whether it's actually safe to ask for the
+	// check at all (i.e. whether this step's command has been dispatched
+	// before) is decided by Controller.checkStaleOperator, not by the step
+	// itself; see TestOperatorControllerStopsHealthCheckAfterDispatch.
 	bn := BecomeNonWitness{StoreID: 11, PeerID: 11}
-	notYetFlippedPeers := []*metapb.Peer{
+	notFlippedPeers := []*metapb.Peer{
 		{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
 		{Id: 11, StoreId: 11, Role: metapb.PeerRole_Voter, IsWitness: true},
 	}
 	suite.checkWithHealthCheck(re, bn, "switch peer 11 on store 11 to non-witness",
-		[]testCase{{notYetFlippedPeers, 0, false, re.Error}}, true)
-	alreadyFlippedPeers := []*metapb.Peer{
-		{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
-		{Id: 11, StoreId: 11, Role: metapb.PeerRole_Voter, IsWitness: false},
-	}
-	suite.checkWithHealthCheck(re, bn, "switch peer 11 on store 11 to non-witness",
-		[]testCase{{alreadyFlippedPeers, 1, true, re.NoError}}, true)
+		[]testCase{{notFlippedPeers, 0, false, re.Error}}, true)
 
 	// PromoteLearner doesn't need the target reachable for raft to commit the
 	// role flip, so it must ignore needStoreHealthCheck even when true, same

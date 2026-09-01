@@ -653,3 +653,26 @@ func TestOperatorStoreHealthCheck(t *testing.T) {
 	op.SetStoreHealthCheck(false)
 	re.False(op.NeedStoreHealthCheck())
 }
+
+func TestOperatorStepDispatched(t *testing.T) {
+	re := require.New(t)
+	op := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion,
+		AddPeer{ToStore: 1, PeerID: 1}, RemovePeer{FromStore: 2})
+	re.Equal(int32(0), op.CurrentStepIndex())
+
+	// Defaults to false for every step, and out-of-range indexes are safely
+	// treated as "not dispatched" rather than panicking.
+	re.False(op.HasStepBeenDispatched(0))
+	re.False(op.HasStepBeenDispatched(1))
+	re.False(op.HasStepBeenDispatched(-1))
+	re.False(op.HasStepBeenDispatched(2))
+
+	op.MarkStepDispatched(0)
+	re.True(op.HasStepBeenDispatched(0))
+	// Marking one step dispatched doesn't affect the others.
+	re.False(op.HasStepBeenDispatched(1))
+
+	// Out-of-range marks are a no-op, not a panic.
+	op.MarkStepDispatched(-1)
+	op.MarkStepDispatched(2)
+}
