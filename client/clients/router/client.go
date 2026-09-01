@@ -616,6 +616,7 @@ func (c *Cli) dispatcher() {
 	defer c.wg.Done()
 
 	var (
+		leaderRetryCh     = make(chan *Request, defaultMaxRouterRequestBatchSize)
 		streamURL         string
 		timeoutTimer      *time.Timer
 		resetTimeoutTimer = func() {
@@ -635,6 +636,13 @@ func (c *Cli) dispatcher() {
 		if timeoutTimer != nil {
 			timeoutTimer.Stop()
 		}
+		cancelErr := ctx.Err()
+		if cancelErr == nil {
+			cancelErr = context.Canceled
+		}
+		for len(leaderRetryCh) > 0 {
+			finishRegionRequest(<-leaderRetryCh, nil, cancelErr)
+		}
 		log.Info("[router] dispatcher exited")
 	}()
 batchLoop:
@@ -645,8 +653,24 @@ batchLoop:
 		default:
 		}
 
-		// Step 1: Fetch the pending router requests in batch.
-		err := c.batchController.FetchPendingRequests(ctx, c.requestCh, nil, 0)
+		// Step 1: Fetch the pending router requests in batch. Requests missed by a
+		// follower are prioritized in the next batch, while requests already waiting
+		// in the regular queue fill the remaining batch capacity.
+		isLeaderRetryBatch := len(leaderRetryCh) > 0
+		requestCh := c.requestCh
+		if isLeaderRetryBatch {
+		fillLeaderRetryBatch:
+			for len(leaderRetryCh) < cap(leaderRetryCh) {
+				select {
+				case req := <-c.requestCh:
+					leaderRetryCh <- req
+				default:
+					break fillLeaderRetryBatch
+				}
+			}
+			requestCh = leaderRetryCh
+		}
+		err := c.batchController.FetchPendingRequests(ctx, requestCh, nil, 0)
 		if err != nil {
 			if err == context.Canceled {
 				log.Info("[router] stop fetching the pending router requests due to context canceled")
@@ -675,9 +699,13 @@ batchLoop:
 				continue batchLoop
 			default:
 			}
-			processQueryFunc, streamURL = c.sendToMs(ctx)
-			if processQueryFunc == nil {
-				processQueryFunc, streamURL, retry = c.sendToPD(ctx)
+			if isLeaderRetryBatch {
+				processQueryFunc, streamURL, retry = c.sendToPD(ctx, true)
+			} else {
+				processQueryFunc, streamURL = c.sendToMs(ctx)
+				if processQueryFunc == nil {
+					processQueryFunc, streamURL, retry = c.sendToPD(ctx, false)
+				}
 			}
 			if retry {
 				continue connectionCtxChoosingLoop
@@ -687,15 +715,21 @@ batchLoop:
 
 		// Step 3: Dispatch the router requests to the stream connection.
 		// TODO: timeout handling if the stream takes too long to process the requests.
-		err = processQueryFunc()
-		if err != nil && !c.handleProcessRequestError(ctx, streamURL, err) {
-			return
+		retryRequests, err := processQueryFunc()
+		if err != nil {
+			if !c.handleProcessRequestError(ctx, streamURL, err) {
+				return
+			}
+			continue
+		}
+		for _, req := range retryRequests {
+			leaderRetryCh <- req
 		}
 	}
 }
 
-func (c *Cli) sendToPD(ctx context.Context) (processFn, string, bool) {
-	allowFollowerHandle := c.option.GetEnableFollowerHandle()
+func (c *Cli) sendToPD(ctx context.Context, forceLeader bool) (processFn, string, bool) {
+	allowFollowerHandle := !forceLeader && c.option.GetEnableFollowerHandle()
 	// Check whether allow the follower to handle this batch of requests.
 	if allowFollowerHandle {
 		// We need to ensure all requests in a same batch allow to be handled by the follower.
@@ -734,17 +768,17 @@ func (c *Cli) sendToPD(ctx context.Context) (processFn, string, bool) {
 	default:
 	}
 	isFollower := connectionCtx.StreamURL != c.getLeaderURL()
-	return func() error {
+	return func() ([]*Request, error) {
 		return c.processRequestsInner(
 			connectionCtx.Stream.Send,
 			connectionCtx.Stream.Recv,
-			connectionCtx.StreamURL,
 			isFollower,
+			forceLeader,
 		)
 	}, connectionCtx.StreamURL, false
 }
 
-type processFn func() error
+type processFn func() ([]*Request, error)
 
 // sendToMs returns the stream function, stream url
 func (c *Cli) sendToMs(ctx context.Context) (processFn, string) {
@@ -777,8 +811,8 @@ func (c *Cli) sendToMs(ctx context.Context) (processFn, string) {
 		return nil, ""
 	default:
 	}
-	return func() error {
-		return c.processRequestsInner(stream.Send, stream.Recv, streamURL, false)
+	return func() ([]*Request, error) {
+		return c.processRequestsInner(stream.Send, stream.Recv, false, false)
 	}, streamURL
 }
 
@@ -812,19 +846,10 @@ func buildQueryRegionRequest(clusterID uint64, requests []*Request) *pdpb.QueryR
 	return queryReq
 }
 
-type queryRegionStreamError struct {
-	streamURL string
-	err       error
-}
-
-func (e *queryRegionStreamError) Error() string { return e.err.Error() }
-func (e *queryRegionStreamError) Unwrap() error { return e.err }
-
 func (c *Cli) queryRegion(
 	send sendFn,
 	recv recvFn,
 	requests []*Request,
-	observeBatchSendLatency bool,
 ) (*pdpb.QueryRegionResponse, error) {
 	queryReq := buildQueryRegionRequest(c.svcDiscovery.GetClusterID(), requests)
 	start := time.Now()
@@ -832,11 +857,9 @@ func (c *Cli) queryRegion(
 		metrics.RequestFailedDurationQueryRegion.Observe(time.Since(start).Seconds())
 		return nil, err
 	}
-	if observeBatchSendLatency {
-		metrics.QueryRegionBatchSendLatency.Observe(
-			time.Since(c.batchController.GetExtraBatchingStartTime()).Seconds(),
-		)
-	}
+	metrics.QueryRegionBatchSendLatency.Observe(
+		time.Since(c.batchController.GetExtraBatchingStartTime()).Seconds(),
+	)
 	resp, err := recv()
 	if err != nil {
 		metrics.RequestFailedDurationQueryRegion.Observe(time.Since(start).Seconds())
@@ -858,48 +881,12 @@ func (c *Cli) queryRegion(
 	return resp, nil
 }
 
-func finishRegionRequests(requests []*Request, resp *pdpb.QueryRegionResponse, err error) {
-	finisher := requestFinisher(resp)
-	for i, req := range requests {
-		finisher(i, req, err)
-	}
-}
-
-func (c *Cli) retryMissingRegionRequests(requests []*Request) error {
-	leaderURL := c.getLeaderURL()
-	connectionCtx := c.conCtxMgr.GetConnectionCtx(leaderURL)
-	if connectionCtx == nil {
-		err := errs.ErrClientRouterConnectionTimeout
-		finishRegionRequests(requests, nil, err)
-		return &queryRegionStreamError{streamURL: leaderURL, err: err}
-	}
-	select {
-	case <-connectionCtx.Ctx.Done():
-		err := connectionCtx.Ctx.Err()
-		finishRegionRequests(requests, nil, err)
-		return &queryRegionStreamError{streamURL: leaderURL, err: err}
-	default:
-	}
-
-	resp, err := c.queryRegion(connectionCtx.Stream.Send, connectionCtx.Stream.Recv, requests, false)
-	if err == nil {
-		if headerErr := resp.GetHeader().GetError(); headerErr != nil {
-			err = errors.New(headerErr.String())
-		}
-	}
-	finishRegionRequests(requests, resp, err)
-	if err != nil {
-		return &queryRegionStreamError{streamURL: leaderURL, err: err}
-	}
-	return nil
-}
-
 func (c *Cli) processRequestsInner(
 	send sendFn,
 	recv recvFn,
-	streamURL string,
 	isFollower bool,
-) error {
+	isLeaderRetryBatch bool,
+) ([]*Request, error) {
 	var (
 		requests = c.batchController.GetCollectedRequests()
 		spans    = make([]opentracing.Span, 0, len(requests))
@@ -921,15 +908,15 @@ func (c *Cli) processRequestsInner(
 		traceRegion.End()
 	}()
 
-	resp, err := c.queryRegion(send, recv, requests, true)
+	resp, err := c.queryRegion(send, recv, requests)
 	if err != nil {
-		return &queryRegionStreamError{streamURL: streamURL, err: err}
+		return nil, err
 	}
 	headerErr := resp.GetHeader().GetError()
-	retryOnLeader := isFollower ||
-		(headerErr != nil && headerErr.GetType() == pdpb.ErrorType_REGION_NOT_FOUND)
+	retryOnLeader := !isLeaderRetryBatch && (isFollower ||
+		(headerErr != nil && headerErr.GetType() == pdpb.ErrorType_REGION_NOT_FOUND))
 	if headerErr != nil && !retryOnLeader {
-		return &queryRegionStreamError{streamURL: streamURL, err: errors.New(headerErr.String())}
+		return nil, errors.New(headerErr.String())
 	}
 	if retryOnLeader {
 		// A successful follower response may contain both hits and misses, so
@@ -944,13 +931,10 @@ func (c *Cli) processRequestsInner(
 			partialResponseFinisher(responseForFinisher, &missingRequests),
 			nil,
 		)
-		if len(missingRequests) > 0 {
-			return c.retryMissingRegionRequests(missingRequests)
-		}
-		return nil
+		return missingRequests, nil
 	}
 	c.doneCollectedRequests(resp)
-	return nil
+	return nil, nil
 }
 
 func (c *Cli) handleProcessRequestError(
@@ -958,11 +942,6 @@ func (c *Cli) handleProcessRequestError(
 	streamURL string,
 	err error,
 ) bool {
-	var streamErr *queryRegionStreamError
-	if errors.As(err, &streamErr) {
-		streamURL = streamErr.streamURL
-		err = streamErr.err
-	}
 	log.Error("[router] failed to process the router requests",
 		zap.String("stream-url", streamURL),
 		errs.ZapError(err))
