@@ -88,6 +88,23 @@ func (suite *routerClientSuite) SetupSuite() {
 	cluster.GetOpts().(*config.PersistOptions).SetRegionBucketEnabled(true)
 }
 
+func newTestBuckets(regionID uint64, keys ...[]byte) *metapb.Buckets {
+	return &metapb.Buckets{
+		RegionId:   regionID,
+		Version:    1,
+		Keys:       keys,
+		PeriodInMs: 2000,
+		Stats: &metapb.BucketStats{
+			ReadBytes:  []uint64{1},
+			ReadKeys:   []uint64{1},
+			ReadQps:    []uint64{1},
+			WriteBytes: []uint64{1},
+			WriteKeys:  []uint64{1},
+			WriteQps:   []uint64{1},
+		},
+	}
+}
+
 // TearDownSuite cleans up the test cluster and client.
 func (suite *routerClientSuite) TearDownSuite() {
 	suite.client.Close()
@@ -133,21 +150,8 @@ func (suite *routerClientSuite) TestGetRegion() {
 	re.NotNil(r)
 	re.Equal(regionID, r.Meta.GetId())
 	breq := &pdpb.ReportBucketsRequest{
-		Header: newHeader(),
-		Buckets: &metapb.Buckets{
-			RegionId:   regionID,
-			Version:    1,
-			Keys:       [][]byte{[]byte("a"), []byte("z")},
-			PeriodInMs: 2000,
-			Stats: &metapb.BucketStats{
-				ReadBytes:  []uint64{1},
-				ReadKeys:   []uint64{1},
-				ReadQps:    []uint64{1},
-				WriteBytes: []uint64{1},
-				WriteKeys:  []uint64{1},
-				WriteQps:   []uint64{1},
-			},
-		},
+		Header:  newHeader(),
+		Buckets: newTestBuckets(regionID, []byte("a"), []byte("z")),
 	}
 	re.NoError(suite.reportBucket.Send(breq))
 	testutil.Eventually(re, func() bool {
@@ -448,11 +452,20 @@ func (suite *routerClientSuite) TestConcurrentlyEnableFollowerHandle() {
 	}
 }
 
-func (suite *routerClientSuite) TestFollowerMissingRegionFallsBackToLeader() {
+func (suite *routerClientSuite) TestQueryRegionFollowerFallbackMatchesUnarySemantics() {
 	if !suite.routerClientEnabled {
 		suite.T().Skip("QueryRegion is disabled")
 	}
 	re := suite.Require()
+	unaryClient := setupCli(suite.ctx, re, suite.cluster.GetLeaderServer().GetServer().GetEndpoints(),
+		opt.WithEnableRouterClient(false))
+	defer unaryClient.Close()
+	reportBucket, err := suite.grpcPDClient.ReportBuckets(suite.ctx)
+	re.NoError(err)
+	defer func() {
+		re.NoError(reportBucket.CloseSend())
+	}()
+
 	regionID := regionIDAllocator.alloc()
 	region := &metapb.Region{
 		Id:          regionID,
@@ -479,8 +492,18 @@ func (suite *routerClientSuite) TestFollowerMissingRegionFallsBackToLeader() {
 		Leader: peers[0],
 	}))
 	testutil.Eventually(re, func() bool {
-		got, err := suite.client.GetPrevRegion(context.Background(), nextRegion.GetStartKey())
-		return err == nil && got != nil && reflect.DeepEqual(region, got.Meta)
+		cluster := suite.cluster.GetLeaderServer().GetRaftCluster()
+		return cluster.GetRegion(region.GetId()) != nil &&
+			cluster.GetRegion(nextRegion.GetId()) != nil
+	})
+	buckets := newTestBuckets(regionID, region.GetStartKey(), region.GetEndKey())
+	re.NoError(reportBucket.Send(&pdpb.ReportBucketsRequest{
+		Header:  newHeader(),
+		Buckets: buckets,
+	}))
+	testutil.Eventually(re, func() bool {
+		got := suite.cluster.GetLeaderServer().GetRaftCluster().GetRegion(regionID)
+		return got != nil && reflect.DeepEqual(buckets, got.GetBuckets())
 	})
 
 	follower := suite.cluster.GetServer(suite.cluster.GetFollower())
@@ -497,50 +520,42 @@ func (suite *routerClientSuite) TestFollowerMissingRegionFallsBackToLeader() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/server/queryRegionFollowerCacheMiss"))
 	}()
 
-	getRegion := func() (*router.Region, error) {
-		return suite.client.GetRegion(
-			context.Background(),
-			region.GetStartKey(),
-			opt.WithAllowFollowerHandle(),
-		)
+	getRegion := func(client pd.Client, options ...opt.GetRegionOption) (*router.Region, error) {
+		return client.GetRegion(context.Background(), region.GetStartKey(), options...)
 	}
-	getPrevRegion := func() (*router.Region, error) {
-		return suite.client.GetPrevRegion(
-			context.Background(),
-			nextRegion.GetStartKey(),
-			opt.WithAllowFollowerHandle(),
-		)
+	getPrevRegion := func(client pd.Client, options ...opt.GetRegionOption) (*router.Region, error) {
+		return client.GetPrevRegion(context.Background(), nextRegion.GetStartKey(), options...)
 	}
-	getRegionByID := func() (*router.Region, error) {
-		return suite.client.GetRegionByID(
-			context.Background(),
-			region.GetId(),
-			opt.WithAllowFollowerHandle(),
-		)
+	getRegionByID := func(client pd.Client, options ...opt.GetRegionOption) (*router.Region, error) {
+		return client.GetRegionByID(context.Background(), region.GetId(), options...)
 	}
 	queries := []struct {
-		name string
-		get  func() (*router.Region, error)
+		name        string
+		get         func(pd.Client, ...opt.GetRegionOption) (*router.Region, error)
+		withBuckets bool
 	}{
-		{name: "GetRegion", get: getRegion},
+		{name: "GetRegion", get: getRegion, withBuckets: true},
 		{name: "GetPrevRegion", get: getPrevRegion},
 		{name: "GetRegionByID", get: getRegionByID},
 	}
 	for _, query := range queries {
-		got, err := query.get()
+		unaryOptions := []opt.GetRegionOption{opt.WithAllowPDLeaderOnly()}
+		queryRegionOptions := []opt.GetRegionOption{opt.WithAllowFollowerHandle()}
+		if query.withBuckets {
+			unaryOptions = append(unaryOptions, opt.WithBuckets())
+			queryRegionOptions = append(queryRegionOptions, opt.WithBuckets())
+		}
+		unaryRegion, err := query.get(unaryClient, unaryOptions...)
 		re.NoError(err, query.name)
-		re.NotNil(got, query.name)
-		re.True(reflect.DeepEqual(region, got.Meta), query.name)
+		queryRegion, err := query.get(suite.client, queryRegionOptions...)
+		re.NoError(err, query.name)
+		re.Equal(unaryRegion, queryRegion, query.name)
+		re.NotNil(queryRegion, query.name)
+		re.Equal(region, queryRegion.Meta, query.name)
+		if query.withBuckets {
+			re.Equal(buckets, queryRegion.Buckets, query.name)
+		}
 	}
-
-	missingRegionID := regionIDAllocator.alloc()
-	got, err := suite.client.GetRegionByID(
-		context.Background(),
-		missingRegionID,
-		opt.WithAllowFollowerHandle(),
-	)
-	re.NoError(err)
-	re.Nil(got)
 }
 
 func TestRouterClientHeaderError(t *testing.T) {

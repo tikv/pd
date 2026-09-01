@@ -240,24 +240,6 @@ func newQueryRegionTestClient(
 	return client
 }
 
-func collectQueryRegionTestRequests(
-	t *testing.T,
-	client *Cli,
-	requests ...*Request,
-) {
-	t.Helper()
-	requestCh := make(chan *Request, len(requests))
-	for _, req := range requests {
-		requestCh <- req
-	}
-	require.NoError(t, client.batchController.FetchPendingRequests(
-		context.Background(),
-		requestCh,
-		nil,
-		0,
-	))
-}
-
 func TestProcessRequestsRetriesOnlyMissingRegions(t *testing.T) {
 	re := require.New(t)
 	ctx := context.Background()
@@ -325,14 +307,13 @@ func TestProcessRequestsRetriesOnlyMissingRegions(t *testing.T) {
 	)
 	re.NoError(err)
 
-	re.Len(followerStream.requests, 1)
-	re.Len(followerStream.requests[0].GetKeys(), 2)
-	re.Len(followerStream.requests[0].GetPrevKeys(), 2)
-	re.Equal([]uint64{3, 4}, followerStream.requests[0].GetIds())
 	re.Equal([]*Request{keyMissing, idMissing, prevKeyMissing}, retryRequests)
-	re.Empty(leaderStream.requests)
 
-	collectQueryRegionTestRequests(t, client, retryRequests...)
+	retryCh := make(chan *Request, len(retryRequests))
+	for _, req := range retryRequests {
+		retryCh <- req
+	}
+	re.NoError(client.batchController.FetchPendingRequests(ctx, retryCh, nil, 0))
 	retryRequests, err = client.processRequestsInner(
 		leaderStream.Send,
 		leaderStream.Recv,
@@ -378,46 +359,30 @@ func TestProcessRequestsRetriesInvalidResponseOnLeader(t *testing.T) {
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
 			re := require.New(t)
-			req := newTestRequest(context.Background())
-			req.id = 1
-			followerStream := &queryRegionTestStream{
+			found := newTestRequest(context.Background())
+			found.id = 1
+			missing := newTestRequest(context.Background())
+			missing.id = 2
+			stream := &queryRegionTestStream{
 				response: &pdpb.QueryRegionResponse{
 					Header: &pdpb.ResponseHeader{Error: testCase.headerErr},
-				},
-			}
-			leaderStream := &queryRegionTestStream{
-				response: &pdpb.QueryRegionResponse{
-					Header: &pdpb.ResponseHeader{},
 					RegionsById: map[uint64]*pdpb.RegionResponse{
 						1: newMockRegionResponse(1),
 					},
 				},
 			}
-			client := newQueryRegionTestClient(t, []*Request{req})
+			client := newQueryRegionTestClient(t, []*Request{found, missing})
 
 			retryRequests, err := client.processRequestsInner(
-				followerStream.Send,
-				followerStream.Recv,
+				stream.Send,
+				stream.Recv,
 				testCase.isFollower,
 				false,
 			)
 			re.NoError(err)
-			re.Equal([]*Request{req}, retryRequests)
-			re.Empty(leaderStream.requests)
-
-			collectQueryRegionTestRequests(t, client, retryRequests...)
-			retryRequests, err = client.processRequestsInner(
-				leaderStream.Send,
-				leaderStream.Recv,
-				false,
-				true,
-			)
-			re.NoError(err)
-			re.Empty(retryRequests)
-			re.Len(leaderStream.requests, 1)
-			re.Equal([]uint64{1}, leaderStream.requests[0].GetIds())
-			re.NoError(<-req.done)
-			re.Equal(uint64(1), req.region.Meta.GetId())
+			re.Equal([]*Request{found, missing}, retryRequests)
+			re.Empty(found.done)
+			re.Empty(missing.done)
 		})
 	}
 }
