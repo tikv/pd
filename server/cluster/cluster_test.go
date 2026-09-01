@@ -24,6 +24,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -3349,6 +3350,87 @@ func TestStoreLimitChangeRefreshLimiter(t *testing.T) {
 	store = rc.GetStore(storeID)
 	re.NotNil(store)
 	re.True(store.IsAvailable(storelimit.AddPeer, constant.Low))
+}
+
+// blockingConfigStorage wraps a storage.Storage and pauses the first
+// SaveConfig call until release is closed, letting a second, concurrent
+// SaveConfig call complete first -- modeling PersistOptions.Persist's
+// snapshot-then-write gap, where a paused caller's stale snapshot can
+// overwrite a faster caller's already-persisted, newer result.
+type blockingConfigStorage struct {
+	storage.Storage
+	entered chan struct{}
+	release chan struct{}
+	first   atomic.Bool
+}
+
+func (s *blockingConfigStorage) SaveConfig(cfg any) error {
+	if s.first.CompareAndSwap(false, true) {
+		close(s.entered)
+		<-s.release
+	}
+	return s.Storage.SaveConfig(cfg)
+}
+
+func TestDeleteStoreLimitDoesNotLoseConcurrentAllStoreUpdate(t *testing.T) {
+	re := require.New(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+
+	backend := storage.NewStorageWithMemoryBackend()
+	rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, backend)
+	const storeID = uint64(1)
+	tombstone := core.NewStoreInfo(&metapb.Store{
+		Id:        storeID,
+		State:     metapb.StoreState_Tombstone,
+		NodeState: metapb.NodeState_Removed,
+	})
+	rc.PutStore(tombstone)
+
+	// Seed a durable per-store limit before installing the barrier.
+	opt.SetStoreLimit(storeID, storelimit.AddPeer, 60)
+	re.NoError(backend.SaveStoreMeta(tombstone.GetMeta()))
+	re.NoError(opt.Persist(backend))
+
+	blocked := &blockingConfigStorage{
+		Storage: backend,
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	rc.storage = blocked
+
+	setDone := make(chan error, 1)
+	go func() {
+		setDone <- rc.SetAllStoresLimit(storelimit.AddPeer, 120)
+	}()
+	<-blocked.entered // SetAllStoresLimit holds storeLimitMu, paused inside SaveConfig.
+
+	// deleteStore -> RemoveStoreLimit must not be able to read, mutate, and
+	// persist while SetAllStoresLimit is mid-cycle: storeLimitMu should make
+	// it block here until the barrier below releases SetAllStoresLimit.
+	deleteDone := make(chan error, 1)
+	go func() {
+		deleteDone <- rc.deleteStore(tombstone)
+	}()
+	select {
+	case err := <-deleteDone:
+		re.Fail("deleteStore returned before SetAllStoresLimit released storeLimitMu", "err: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(blocked.release)
+	re.NoError(<-setDone)
+	re.NoError(<-deleteDone)
+
+	_, reloaded, err := newTestScheduleConfig()
+	re.NoError(err)
+	re.NoError(reloaded.Reload(backend))
+	_, ok := reloaded.GetScheduleConfig().StoreLimit[storeID]
+	re.False(ok)
 }
 
 func TestPatrolRegionConcurrency(t *testing.T) {

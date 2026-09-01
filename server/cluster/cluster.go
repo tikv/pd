@@ -159,7 +159,20 @@ type Server interface {
 type RaftCluster struct {
 	syncutil.RWMutex
 	storeStateLock *syncutil.LockGroup
-	wg             sync.WaitGroup
+	// storeLimitMu serializes the store-limit config's read-clone-mutate-
+	// persist cycle across AddStoreLimit/RemoveStoreLimit/SetStoreLimit/
+	// SetAllStoresLimit. Persist snapshots every PersistOptions field fresh
+	// at call time and writes it unconditionally (no version/CAS), so two of
+	// these methods racing can let a late writer's stale snapshot silently
+	// overwrite another's already-persisted, newer result -- e.g. an
+	// in-flight SetAllStoresLimit clobbering a concurrent deleteStore's
+	// RemoveStoreLimit cleanup with no later event to retry it. This lock
+	// only covers store-limit config writers; a Persist() caller for any
+	// other config section (scheduler config, keyspace config, and others --
+	// see the PR description's Known limitations) is not synchronized with
+	// these and can still race them the same way.
+	storeLimitMu syncutil.Mutex
+	wg           sync.WaitGroup
 
 	serverCtx context.Context
 	ctx       context.Context
@@ -2436,6 +2449,8 @@ func (c *RaftCluster) GetAllStoresLimit() map[uint64]sc.StoreLimitConfig {
 
 // AddStoreLimit add a store limit for a given store ID.
 func (c *RaftCluster) AddStoreLimit(store *metapb.Store) {
+	c.storeLimitMu.Lock()
+	defer c.storeLimitMu.Unlock()
 	storeID := store.GetId()
 	cfg := c.opt.GetScheduleConfig().Clone()
 	if _, ok := cfg.StoreLimit[storeID]; ok {
@@ -2468,6 +2483,8 @@ func (c *RaftCluster) AddStoreLimit(store *metapb.Store) {
 
 // RemoveStoreLimit remove a store limit for a given store ID.
 func (c *RaftCluster) RemoveStoreLimit(storeID uint64) {
+	c.storeLimitMu.Lock()
+	defer c.storeLimitMu.Unlock()
 	cfg := c.opt.GetScheduleConfig().Clone()
 	for _, limitType := range storelimit.TypeNameValue {
 		c.ResetStoreLimit(storeID, limitType)
@@ -2640,6 +2657,8 @@ func (c *RaftCluster) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePer
 	if store := c.GetStore(storeID); store != nil && store.IsRemoved() {
 		return errs.ErrStoreRemoved.FastGenByArgs(storeID)
 	}
+	c.storeLimitMu.Lock()
+	defer c.storeLimitMu.Unlock()
 	old := c.opt.GetScheduleConfig().Clone()
 	c.opt.SetStoreLimit(storeID, typ, ratePerMin)
 	if err := c.opt.Persist(c.storage); err != nil {
@@ -2655,6 +2674,8 @@ func (c *RaftCluster) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePer
 
 // SetAllStoresLimit sets all store limit for a given type and rate.
 func (c *RaftCluster) SetAllStoresLimit(typ storelimit.Type, ratePerMin float64) error {
+	c.storeLimitMu.Lock()
+	defer c.storeLimitMu.Unlock()
 	old := c.opt.GetScheduleConfig().Clone()
 	oldAdd := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
 	oldRemove := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer)
