@@ -86,6 +86,21 @@ func TestCache(t *testing.T) {
 	}
 }
 
+func TestCheckPeerFlowWithMoreExplicitPeersThanRegionPeers(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster := core.NewBasicCluster()
+	cache := NewHotPeerCache(ctx, cluster, utils.Write)
+	region, err := buildRegion(cluster, utils.Write, 3, 60)
+	re.NoError(err)
+
+	peers := append([]*metapb.Peer{}, region.GetPeers()...)
+	peers = append(peers, &metapb.Peer{Id: 4, StoreId: 4})
+	stats := cache.CheckPeerFlow(region, peers, region.GetLoads(), 60)
+	re.Len(stats, len(peers))
+}
+
 func orderingPeers(cache *HotPeerCache, region *core.RegionInfo) []*metapb.Peer {
 	var peers []*metapb.Peer
 	for _, peer := range region.GetPeers() {

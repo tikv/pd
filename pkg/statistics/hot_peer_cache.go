@@ -243,8 +243,10 @@ func (f *HotPeerCache) checkPeerFlowForRegion(region *hotRegionInfo, peerStoreID
 	}
 	stats := make([]*HotPeerStat, 0, peerCount)
 	for i := range peerCount {
-		storeID := region.storeID(i)
-		if peerStoreIDs != nil {
+		var storeID uint64
+		if peerStoreIDs == nil {
+			storeID = region.storeID(i)
+		} else {
 			storeID = peerStoreIDs[i]
 		}
 		// A tombstoned store can still show up as a peer here: the leader reporting
