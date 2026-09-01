@@ -158,7 +158,7 @@ func (rw *Watcher) scanRuleSnapshotKeys(
 			opts := []clientv3.OpOption{
 				clientv3.WithRange(endKey),
 				// etcd ranges are key-ascending by default.
-				clientv3.WithLimit(fetchBatchSize + 1),
+				clientv3.WithLimit(fetchBatchSize),
 				clientv3.WithKeysOnly(),
 			}
 			if revision > 0 {
@@ -177,8 +177,9 @@ func (rw *Watcher) scanRuleSnapshotKeys(
 				if len(page) == 0 {
 					return 0, errors.New("placement rule snapshot returned an empty page")
 				}
-				startKey = string(page[len(page)-1].Key)
-				page = page[:len(page)-1]
+				// Continue strictly after the last key while preserving keys for
+				// which the last key is a prefix.
+				startKey = string(append(page[len(page)-1].Key, 0))
 			}
 			if len(page) == 0 {
 				if err := handlePage(page, revision); err != nil {
@@ -215,9 +216,10 @@ func (rw *Watcher) loadRuleSnapshotValues(
 	revision int64,
 ) ([]*mvccpb.KeyValue, error) {
 	values := make([]*mvccpb.KeyValue, 0, len(metadata))
+	ops := make([]clientv3.Op, 0, min(len(metadata), etcdutil.MaxEtcdTxnOps))
 	for start := 0; start < len(metadata); start += etcdutil.MaxEtcdTxnOps {
 		end := min(start+etcdutil.MaxEtcdTxnOps, len(metadata))
-		ops := make([]clientv3.Op, 0, end-start)
+		ops = ops[:0]
 		for _, item := range metadata[start:end] {
 			ops = append(ops, clientv3.OpGet(string(item.Key), clientv3.WithRev(revision)))
 		}
@@ -269,11 +271,7 @@ func (rw *Watcher) reconcileRuleSnapshot(ctx context.Context) (int64, error) {
 	snapshotRevision, err := rw.scanRuleSnapshotKeys(
 		ctx, rw.ruleGroupPathPrefix, nil, 0, ruleSnapshotScanBatchSize, int(ruleSnapshotLoadBatchSize),
 		func(page []*mvccpb.KeyValue, revision int64) error {
-			type groupChange struct {
-				meta *mvccpb.KeyValue
-				old  *placement.RuleGroup
-			}
-			changes := make([]groupChange, 0)
+			oldGroups := make([]*placement.RuleGroup, 0)
 			metadata := make([]*mvccpb.KeyValue, 0)
 			for _, item := range page {
 				if !bytes.HasPrefix(item.Key, groupPrefix) {
@@ -292,7 +290,7 @@ func (rw *Watcher) reconcileRuleSnapshot(ctx context.Context) (int64, error) {
 				if old != nil && item.ModRevision <= rw.ruleRevision {
 					continue
 				}
-				changes = append(changes, groupChange{meta: item, old: old})
+				oldGroups = append(oldGroups, old)
 				metadata = append(metadata, item)
 			}
 
@@ -308,15 +306,12 @@ func (rw *Watcher) reconcileRuleSnapshot(ctx context.Context) (int64, error) {
 				if !bytes.Equal([]byte(group.ID), item.Key[len(groupPrefix):]) {
 					return fmt.Errorf("placement rule group snapshot key does not match payload identity: %q", item.Key)
 				}
-				old := changes[i].old
+				old := oldGroups[i]
 				if old != nil && old.ID == group.ID && old.Index == group.Index && old.Override == group.Override {
 					continue
 				}
 				patch.SetGroup(group)
 				changedGroups[group.ID] = struct{}{}
-				if old != nil {
-					changedGroups[old.ID] = struct{}{}
-				}
 				changed = true
 			}
 			return nil
@@ -347,33 +342,34 @@ func (rw *Watcher) reconcileRuleSnapshot(ctx context.Context) (int64, error) {
 		ctx, rw.rulesPathPrefix, ruleRangeEnds, snapshotRevision,
 		ruleSnapshotScanBatchSize, int(ruleSnapshotLoadBatchSize),
 		func(page []*mvccpb.KeyValue, revision int64) error {
-			type ruleChange struct {
-				meta *mvccpb.KeyValue
-				old  *placement.Rule
-			}
-			changes := make([]ruleChange, 0)
+			oldRules := make([]*placement.Rule, 0)
 			metadata := make([]*mvccpb.KeyValue, 0)
 			for _, item := range page {
 				if !bytes.HasPrefix(item.Key, rulePrefix) {
 					return fmt.Errorf("unexpected placement rule key %q", item.Key)
 				}
 				key := item.Key[len(rulePrefix):]
-				for ruleIndex < len(rules) && compareRuleKey(rules[ruleIndex], key) < 0 {
-					deleteRule(rules[ruleIndex])
-					ruleIndex++
-				}
 				var old *placement.Rule
-				if ruleIndex < len(rules) && compareRuleKey(rules[ruleIndex], key) == 0 {
-					old = rules[ruleIndex]
-					ruleIndex++
-					if _, ok := changedGroups[old.GroupID]; ok {
-						suspectKeyRanges.Append(old.StartKey, old.EndKey)
+				for ruleIndex < len(rules) {
+					comparison := compareRuleKey(rules[ruleIndex], key)
+					if comparison < 0 {
+						deleteRule(rules[ruleIndex])
+						ruleIndex++
+						continue
 					}
+					if comparison == 0 {
+						old = rules[ruleIndex]
+						ruleIndex++
+						if _, ok := changedGroups[old.GroupID]; ok {
+							suspectKeyRanges.Append(old.StartKey, old.EndKey)
+						}
+					}
+					break
 				}
 				if old != nil && item.ModRevision <= rw.ruleRevision {
 					continue
 				}
-				changes = append(changes, ruleChange{meta: item, old: old})
+				oldRules = append(oldRules, old)
 				metadata = append(metadata, item)
 			}
 
@@ -394,7 +390,7 @@ func (rw *Watcher) reconcileRuleSnapshot(ctx context.Context) (int64, error) {
 				}
 				patch.SetRule(rule)
 				suspectKeyRanges.Append(rule.StartKey, rule.EndKey)
-				if old := changes[i].old; old != nil {
+				if old := oldRules[i]; old != nil {
 					suspectKeyRanges.Append(old.StartKey, old.EndKey)
 				}
 				changed = true

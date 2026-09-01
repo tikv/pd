@@ -242,6 +242,7 @@ func TestScanRuleSnapshotKeyRanges(t *testing.T) {
 		prefix + "aa",
 		prefix + "aaa",
 		prefix + "aaaa",
+		prefix + "aaaaa",
 		prefix + "c",
 	}
 	ops := make([]clientv3.Op, 0, len(keys))
