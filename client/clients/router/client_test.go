@@ -16,6 +16,7 @@ package router
 
 import (
 	"context"
+	"errors"
 	"math"
 	"testing"
 	"time"
@@ -443,22 +444,25 @@ func TestLeaderRetryBatchDoesNotRetryAgain(t *testing.T) {
 	re.Len(leaderStream.requests, 1)
 }
 
-func TestDispatcherRetriesFollowerMissesInNextLeaderBatch(t *testing.T) {
+func TestDispatcherIsolatesLeaderRetryBatch(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 
-	found := newTestRequest(ctx, opt.WithAllowFollowerHandle())
-	found.id = 1
-	missing := newTestRequest(ctx, opt.WithAllowFollowerHandle())
-	missing.id = 2
-	queued := newTestRequest(ctx, opt.WithAllowFollowerHandle())
-	queued.id = 3
+	followerHit := newTestRequest(ctx, opt.WithAllowFollowerHandle())
+	followerHit.id = 1
+	followerMiss := newTestRequest(ctx, opt.WithAllowFollowerHandle())
+	followerMiss.id = 2
+	routerRequest := newTestRequest(ctx, opt.WithAllowRouterServiceHandle())
+	routerRequest.id = 3
 
+	leaderStreamErr := errors.New("leader stream failed")
 	leaderStream := &queryRegionTestStream{
+		sendErr: leaderStreamErr,
+	}
+	routerStream := &queryRegionTestStream{
 		response: &pdpb.QueryRegionResponse{
 			Header: &pdpb.ResponseHeader{},
 			RegionsById: map[uint64]*pdpb.RegionResponse{
-				2: newMockRegionResponse(2),
 				3: newMockRegionResponse(3),
 			},
 		},
@@ -495,7 +499,17 @@ func TestDispatcherRetriesFollowerMissesInNextLeaderBatch(t *testing.T) {
 			) {
 				leaderCancel()
 			}
-			client.requestCh <- queued
+			routerCtx, routerCancel := context.WithCancel(ctx)
+			if !client.msConCtxMgr.Store(
+				routerCtx,
+				routerCancel,
+				"router-service",
+				routerStream,
+			) {
+				routerCancel()
+			}
+			// Queue a fresh Router Service request while the follower batch is in flight.
+			client.requestCh <- routerRequest
 		},
 	}
 	followerCtx, followerCancel := context.WithCancel(ctx)
@@ -505,34 +519,41 @@ func TestDispatcherRetriesFollowerMissesInNextLeaderBatch(t *testing.T) {
 		"follower",
 		followerStream,
 	))
-	defer client.conCtxMgr.ReleaseAll()
 
-	client.requestCh <- found
-	client.requestCh <- missing
+	client.requestCh <- followerHit
+	client.requestCh <- followerMiss
 	client.wg.Add(1)
 	go client.dispatcher()
-	defer func() {
+	t.Cleanup(func() {
 		cancel()
 		client.wg.Wait()
-	}()
+		client.conCtxMgr.ReleaseAll()
+		client.msConCtxMgr.ReleaseAll()
+	})
 
-	for req, expectedID := range map[*Request]uint64{
-		found:   1,
-		missing: 2,
-		queued:  3,
-	} {
+	waitRequest := func(name string, req *Request) error {
+		t.Helper()
 		select {
 		case err := <-req.done:
-			re.NoError(err)
-			re.Equal(expectedID, req.region.Meta.GetId())
+			return err
 		case <-time.After(5 * time.Second):
-			t.Fatal("timed out waiting for query region request")
+			t.Fatalf("timed out waiting for %s", name)
+			return nil
 		}
 	}
+	re.NoError(waitRequest("follower hit", followerHit))
+	re.Equal(uint64(1), followerHit.region.Meta.GetId())
+	re.ErrorIs(waitRequest("leader retry", followerMiss), leaderStreamErr)
+	re.Nil(followerMiss.region)
+	re.NoError(waitRequest("queued router request", routerRequest))
+	re.Equal(uint64(3), routerRequest.region.Meta.GetId())
 	cancel()
+	client.wg.Wait()
 
 	re.Len(followerStream.requests, 1)
 	re.Equal([]uint64{1, 2}, followerStream.requests[0].GetIds())
 	re.Len(leaderStream.requests, 1)
-	re.Equal([]uint64{2, 3}, leaderStream.requests[0].GetIds())
+	re.Equal([]uint64{2}, leaderStream.requests[0].GetIds())
+	re.Len(routerStream.requests, 1)
+	re.Equal([]uint64{3}, routerStream.requests[0].GetIds())
 }
