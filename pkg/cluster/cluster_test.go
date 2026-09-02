@@ -19,9 +19,10 @@ import (
 	"fmt"
 	"testing"
 
+	"go.uber.org/zap/zapcore"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
-	"go.uber.org/zap/zapcore"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
@@ -64,7 +65,7 @@ func (c *hotCacheBenchmarkCluster) GetCoordinator() *schedule.Coordinator {
 func BenchmarkHandleStatsAsync(b *testing.B) {
 	for _, peerCount := range []int{1, 3, 5} {
 		b.Run(fmt.Sprintf("%d-peers", peerCount), func(b *testing.B) {
-			benchmarkHandleStatsAsync(b, peerCount, 0)
+			runHandleStatsAsyncBenchmark(b, peerCount, 0)
 		})
 	}
 }
@@ -72,12 +73,12 @@ func BenchmarkHandleStatsAsync(b *testing.B) {
 func BenchmarkHandleStatsAsyncSteady(b *testing.B) {
 	for _, peerCount := range []int{1, 3, 5} {
 		b.Run(fmt.Sprintf("%d-peers", peerCount), func(b *testing.B) {
-			benchmarkHandleStatsAsync(b, peerCount, 64)
+			runHandleStatsAsyncBenchmark(b, peerCount, 64)
 		})
 	}
 }
 
-func benchmarkHandleStatsAsync(b *testing.B, peerCount, drainEvery int) {
+func runHandleStatsAsyncBenchmark(b *testing.B, peerCount, drainEvery int) {
 	log.SetLevel(zapcore.FatalLevel)
 	ctx, cancel := context.WithCancel(context.Background())
 	b.Cleanup(cancel)
