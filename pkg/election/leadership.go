@@ -60,6 +60,8 @@ func GetLeader(c *clientv3.Client, leaderPath string) (*pdpb.Member, int64, erro
 type Leadership struct {
 	// purpose is used to show what this election for
 	purpose string
+	// name scopes test failpoints to one member.
+	name string
 	// The lease which is used to get this leadership
 	lease  atomic.Value // stored as *lease
 	client *clientv3.Client
@@ -82,10 +84,11 @@ type LeadershipTerm struct {
 	leaseID     clientv3.LeaseID
 }
 
-// NewLeadership creates a new Leadership.
-func NewLeadership(client *clientv3.Client, leaderKey, purpose string) *Leadership {
+// NewLeadership creates a new Leadership for the named member.
+func NewLeadership(client *clientv3.Client, leaderKey, purpose, name string) *Leadership {
 	leadership := &Leadership{
 		purpose:       purpose,
+		name:          name,
 		client:        client,
 		leaderKey:     leaderKey,
 		campaignTimes: make([]time.Time, 0, defaultCampaignTimesSlot),
@@ -210,7 +213,7 @@ func (ls *Leadership) AddCampaignTimes() {
 func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...clientv3.Cmp) error {
 	ls.leaderValue.Store(leaderData)
 	// Create a new lease to campaign
-	newLease := NewLease(ls.client, ls.purpose)
+	newLease := NewLease(ls.client, ls.purpose, ls.name)
 	ls.SetLease(newLease)
 
 	failpoint.Inject("skipGrantLeader", func(val failpoint.Value) {

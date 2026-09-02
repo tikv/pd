@@ -127,7 +127,8 @@ func TestRemoveKeyspacesFromGroupIsFencedByLeadershipTerm(t *testing.T) {
 		ctx, store, cluster, mockid.NewIDAllocator(), &mockConfig{}, groupManager, nil)
 	re.NoError(groupManager.Bootstrap(ctx))
 
-	leadership := election.NewLeadership(client, "/test/keyspace-removal-leader", "keyspace removal test")
+	leadership := election.NewLeadership(
+		client, "/test/keyspace-removal-leader", "keyspace removal test", "keyspace removal test")
 	re.NoError(leadership.Campaign(60, "same-leader"))
 	defer leadership.Reset()
 

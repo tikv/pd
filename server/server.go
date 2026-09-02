@@ -17,6 +17,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"math/rand/v2"
@@ -441,7 +442,9 @@ func (s *Server) startClient() error {
 	if err != nil {
 		return errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
 	}
-	// This etcd client will only be used to read and write the election-related data, such as leader key.
+	// Keep this client pinned to local etcd. Local lease renewal verifies this
+	// member's etcd leadership, preventing a stalled member from renewing through
+	// a healthy peer (tikv/pd#10671).
 	s.electionClient, err = etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.AdvertiseClientUrls, etcdutil.ElectionEtcdClientPurpose, false)
 	if err != nil {
 		return errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
@@ -1282,27 +1285,72 @@ func (s *Server) GetScheduleConfig() *sc.ScheduleConfig {
 }
 
 // SetScheduleConfig sets the balance config information.
-// This function is exported to be used by the API.
 func (s *Server) SetScheduleConfig(cfg sc.ScheduleConfig) error {
-	if err := cfg.Validate(); err != nil {
-		return err
-	}
-	if err := cfg.Deprecated(); err != nil {
-		return err
-	}
-	old := s.persistOptions.GetScheduleConfig()
-	s.persistOptions.SetScheduleConfig(&cfg)
-	if err := s.persistOptions.Persist(s.storage); err != nil {
-		s.persistOptions.SetScheduleConfig(old)
+	return s.updateScheduleConfig(func(_ *sc.ScheduleConfig, next *sc.ScheduleConfig) (bool, error) {
+		*next = *cfg.Clone()
+		return true, nil
+	})
+}
+
+// PatchScheduleConfig applies a partial JSON update to the latest schedule
+// config inside the schedule persistence transaction.
+func (s *Server) PatchScheduleConfig(data []byte) error {
+	return s.updateScheduleConfig(func(_ *sc.ScheduleConfig, next *sc.ScheduleConfig) (bool, error) {
+		if err := json.Unmarshal(data, next); err != nil {
+			return false, err
+		}
+		return true, nil
+	})
+}
+
+// SetScheduleConfigItem applies one legacy /config schedule item to the latest
+// schedule config inside the schedule persistence transaction.
+func (s *Server) SetScheduleConfigItem(key string, value any) error {
+	return s.updateScheduleConfig(func(_ *sc.ScheduleConfig, next *sc.ScheduleConfig) (bool, error) {
+		updated, found, err := jsonutil.AddKeyValue(next, key, value)
+		if err != nil {
+			return false, err
+		}
+		if !found {
+			return false, errors.Errorf("config item %s not found", key)
+		}
+		return updated, nil
+	})
+}
+
+func (s *Server) updateScheduleConfig(
+	update func(current, next *sc.ScheduleConfig) (changed bool, err error),
+) error {
+	var oldCfg, newCfg *sc.ScheduleConfig
+	var applied bool
+	err := s.persistOptions.UpdateScheduleConfig(s.storage, func(current, next *sc.ScheduleConfig) (bool, error) {
+		changed, err := update(current, next)
+		oldCfg, newCfg = current, next
+		if err != nil || !changed {
+			return changed, err
+		}
+		if err := next.Validate(); err != nil {
+			return false, err
+		}
+		if err := next.Deprecated(); err != nil {
+			return false, err
+		}
+		applied = true
+		return true, nil
+	})
+	if err != nil {
 		log.Error("failed to update schedule config",
-			zap.Reflect("new", cfg),
-			zap.Reflect("old", old),
+			zap.Reflect("new", newCfg),
+			zap.Reflect("old", oldCfg),
 			errs.ZapError(err))
 		return err
 	}
+	if !applied {
+		return nil
+	}
 	// Update the scheduling halt status at the same time.
-	s.persistOptions.SetSchedulingAllowanceStatus(cfg.HaltScheduling, "manually")
-	log.Info("schedule config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
+	s.persistOptions.SetSchedulingAllowanceStatus(newCfg.HaltScheduling, "manually")
+	log.Info("schedule config is updated", zap.Reflect("new", newCfg), zap.Reflect("old", oldCfg))
 	return nil
 }
 
