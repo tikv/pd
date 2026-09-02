@@ -82,6 +82,16 @@ func getKeyspaceGroupReconcileEntry(
 	return entry, ok
 }
 
+func TestGroupsNeedingAllocationReturnsSortedIDs(t *testing.T) {
+	state := newKeyspaceGroupReconcileState(func() {})
+	state.apply(map[uint32]*keyspaceGroupReconcileEntry{
+		3: {id: 3},
+		1: {id: 1},
+		2: {id: 2},
+	})
+	require.Equal(t, []uint32{1, 2, 3}, state.groupsNeedingAllocation(nil))
+}
+
 func BenchmarkKeyspaceGroupReconcileHealthyPath(b *testing.B) {
 	const keyspaceCount = 1_000_000
 
@@ -106,7 +116,10 @@ func BenchmarkKeyspaceGroupReconcileHealthyPath(b *testing.B) {
 	state.apply(map[uint32]*keyspaceGroupReconcileEntry{
 		group.ID: {id: group.ID, members: group.Members},
 	})
-	tsoNodes := uniqueTSONodes([]string{"http://tso-1", "http://tso-2"})
+	manager := NewKeyspaceGroupManager(b.Context(), store, nil)
+	defer manager.Close()
+	manager.nodesBalancer.Put("http://tso-1")
+	manager.nodesBalancer.Put("http://tso-2")
 
 	b.Run("legacy-full-storage-load", func(b *testing.B) {
 		b.ReportAllocs()
@@ -117,9 +130,10 @@ func BenchmarkKeyspaceGroupReconcileHealthyPath(b *testing.B) {
 			}
 		}
 	})
-	b.Run("indexed-member-scan", func(b *testing.B) {
+	b.Run("indexed-healthy-selection", func(b *testing.B) {
 		b.ReportAllocs()
 		for range b.N {
+			tsoNodes := uniqueTSONodes(manager.nodesBalancer.GetAll())
 			if groupIDs := state.groupsNeedingAllocation(tsoNodes); len(groupIDs) != 0 {
 				b.Fatalf("healthy group needs allocation: %v", groupIDs)
 			}

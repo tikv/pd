@@ -147,6 +147,7 @@ func (s *keyspaceGroupReconcileState) groupsNeedingAllocation(
 			groupIDs = append(groupIDs, group.id)
 		}
 	}
+	slices.Sort(groupIDs)
 	return groupIDs
 }
 
