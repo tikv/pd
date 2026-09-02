@@ -58,12 +58,13 @@ type balanceSolver struct {
 	curFit *placement.RegionFit
 	// curScope and revertScope contain placement-scoped load statistics. A nil
 	// scope uses the existing engine-wide statistics.
-	curScope                 *placementLoadScope
-	revertScope              *placementLoadScope
-	placementScopeCache      map[placementScopeKey]*placementLoadScope
-	placementPopulationIndex *placementPopulationIndex
-	placementV2Enabled       bool
-	placementCanRestrict     [2]bool
+	curScope                          *placementLoadScope
+	revertScope                       *placementLoadScope
+	placementScopeCache               map[placementScopeKey]*placementLoadScope
+	placementPopulationIndex          *placementPopulationIndex
+	placementPopulationIndexValidated bool
+	placementV2Enabled                bool
+	placementCanRestrict              [2]bool
 
 	best *solution
 	ops  []*operator.Operator
@@ -1104,15 +1105,33 @@ func (bs *balanceSolver) getPlacementLoadScope(rules []*placement.Rule, isTiKV b
 }
 
 func (bs *balanceSolver) getPlacementLoadPopulation(details []*statistics.StoreLoadDetail) []uint64 {
-	if bs.placementPopulationIndex == nil {
-		bs.placementPopulationIndex = newPlacementPopulationIndex(bs.stLoadDetail)
-	}
+	bs.ensurePlacementPopulationIndex()
 	population := make([]uint64, bs.placementPopulationIndex.wordCount)
 	for _, detail := range details {
 		position := bs.placementPopulationIndex.stores[detail.GetID()]
 		population[position/64] |= 1 << (position % 64)
 	}
 	return population
+}
+
+func (bs *balanceSolver) ensurePlacementPopulationIndex() {
+	if bs.placementPopulationIndexValidated {
+		return
+	}
+	bs.placementPopulationIndexValidated = true
+	if bs.placementPopulationIndex != nil {
+		for storeID := range bs.stLoadDetail {
+			if _, ok := bs.placementPopulationIndex.stores[storeID]; !ok {
+				bs.placementPopulationIndex = nil
+				break
+			}
+		}
+	}
+	if bs.placementPopulationIndex == nil {
+		// The cached index and the load details come from separate store snapshots.
+		// Rebuild from the load snapshot if a concurrent store removal made it stale.
+		bs.placementPopulationIndex = newPlacementPopulationIndex(bs.stLoadDetail)
+	}
 }
 
 func newPlacementPopulationIndex(details map[uint64]*statistics.StoreLoadDetail) *placementPopulationIndex {

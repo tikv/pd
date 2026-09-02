@@ -787,6 +787,27 @@ func TestPlacementLoadScopePreservesExpectationGuards(t *testing.T) {
 	re.False(samePlacementLoadPopulation(targetScope, true, otherScope, true))
 }
 
+func TestPlacementLoadPopulationHandlesStaleIndex(t *testing.T) {
+	details := map[uint64]*statistics.StoreLoadDetail{
+		1: {StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: core.NewStoreInfoWithLabel(1, nil)}},
+		2: {StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: core.NewStoreInfoWithLabel(2, nil)}},
+	}
+	bs := &balanceSolver{
+		stLoadDetail: details,
+		placementPopulationIndex: &placementPopulationIndex{
+			stores:    map[uint64]uint{1: 0, 3: 1},
+			wordCount: 1,
+		},
+	}
+
+	first := &placementLoadScope{population: bs.getPlacementLoadPopulation([]*statistics.StoreLoadDetail{details[1]})}
+	second := &placementLoadScope{population: bs.getPlacementLoadPopulation([]*statistics.StoreLoadDetail{details[2]})}
+	require.False(t, samePlacementLoadPopulation(first, true, second, true))
+	require.Len(t, bs.placementPopulationIndex.stores, len(details))
+	require.Contains(t, bs.placementPopulationIndex.stores, uint64(2))
+	require.NotContains(t, bs.placementPopulationIndex.stores, uint64(3))
+}
+
 func TestBeginSourcePlacementClearsPreviousEngineScope(t *testing.T) {
 	bs := &balanceSolver{
 		curScope:             &placementLoadScope{},
