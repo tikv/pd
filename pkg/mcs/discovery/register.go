@@ -190,7 +190,7 @@ func (sr *ServiceRegister) putWithTTL() (clientv3.LeaseID, error) {
 	// live instance (or a not-yet-expired entry from a prior process) and
 	// let the caller's retry loop wait for it to expire.
 	kvs := resp.Responses[0].GetResponseRange().Kvs
-	if len(kvs) == 0 || clientv3.LeaseID(kvs[0].Lease) != sr.leaseID {
+	if len(kvs) == 0 || sr.leaseID == clientv3.NoLease || clientv3.LeaseID(kvs[0].Lease) != sr.leaseID {
 		existingValue := ""
 		if len(kvs) > 0 {
 			existingValue = string(kvs[0].Value)

@@ -155,6 +155,26 @@ func TestRegisterConflictSameSerializedValue(t *testing.T) {
 	re.NoError(sr1.Deregister())
 }
 
+func TestRegisterRejectsUnleasedExistingKey(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sr := NewServiceRegister(ctx, client, "test_service", "127.0.0.1:1", "some-value", 2)
+	// Simulate a pre-existing registry key written without a lease. A fresh
+	// instance's leaseID is also the zero value (clientv3.NoLease), so
+	// comparing lease IDs alone could mistake this for its own prior
+	// registration and let it overwrite the key.
+	_, err := client.Put(ctx, sr.key, "some-value")
+	re.NoError(err)
+
+	err = sr.Register()
+	re.Error(err)
+	re.Contains(err.Error(), "occupied")
+}
+
 func getKeyAfterLeaseExpired(ctx context.Context, re *require.Assertions, client *clientv3.Client, key string) string {
 	time.Sleep(DefaultLeaseInSeconds * time.Second) // ensure that the lease is expired
 	time.Sleep(500 * time.Millisecond)              // wait for the etcd to clean up the expired keys
