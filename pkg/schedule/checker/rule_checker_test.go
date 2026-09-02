@@ -2497,27 +2497,6 @@ func (suite *ruleCheckerTestSuite) TestRegionPlacementChecksAllUnhealthyPeers() 
 	re.Equal(uint64(4), op.Step(0).(operator.AddLearner).ToStore)
 }
 
-func (suite *ruleCheckerTestSuite) TestRegionPlacementChecksAllRolePeers() {
-	re := suite.Require()
-	suite.cluster.AddLeaderStore(1, 1)
-	suite.cluster.AddLeaderStore(2, 1)
-	suite.cluster.AddLeaderRegion(1, 1, 2)
-	re.NoError(suite.ruleManager.SetRule(&placement.Rule{
-		GroupID:   placement.DefaultGroupID,
-		ID:        placement.DefaultRuleID,
-		Role:      placement.Voter,
-		Count:     2,
-		IsWitness: true,
-	}))
-
-	region := suite.cluster.GetRegion(1)
-	re.Equal(RegionPlacementStateInProgress, suite.rc.GetRegionPlacementState(region))
-	op := suite.rc.Check(region)
-	re.NotNil(op)
-	re.Equal("fix-witness-peer", op.Desc())
-	re.Equal(uint64(2), op.Step(0).(operator.BecomeWitness).StoreID)
-}
-
 func (suite *ruleCheckerTestSuite) TestRegionPlacementStateDoesNotUpdateSourceFilterMetrics() {
 	re := suite.Require()
 	suite.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})

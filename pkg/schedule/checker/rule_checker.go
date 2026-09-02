@@ -184,6 +184,7 @@ func (c *RuleChecker) evaluateRegionPlacementState(region *core.RegionInfo, cont
 			}
 			hasUnfixablePlacement = true
 			ruleUnfixable = true
+			break
 		}
 		if ruleUnfixable {
 			continue
@@ -638,24 +639,14 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 		return nil, replacementErr
 	}
 	// fix loose matched peers.
-	var roleErr error
 	for _, peer := range rf.PeersWithDifferentRole {
 		op, err := c.fixLooseMatchPeer(region, fit, rf, peer)
 		if err != nil {
-			if !errs.ErrPeerCannotBeLeader.Equal(err) &&
-				!errs.ErrNoNewLeader.Equal(err) &&
-				!errs.ErrPeerCannotBeWitness.Equal(err) {
-				return nil, err
-			}
-			roleErr = err
-			continue
+			return nil, err
 		}
 		if op != nil {
 			return op, nil
 		}
-	}
-	if roleErr != nil {
-		return nil, roleErr
 	}
 	return c.fixBetterLocation(region, fit, rf)
 }
