@@ -323,6 +323,11 @@ func (s *Server) GetConfig() *Config {
 	return s.cfg
 }
 
+// GetLeaderLease returns the configured leader lease in seconds.
+func (s *Server) GetLeaderLease() int64 {
+	return s.cfg.LeaderLease
+}
+
 // GetParticipant returns the participant.
 func (s *Server) GetParticipant() *member.Participant {
 	return s.participant
