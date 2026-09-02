@@ -82,6 +82,51 @@ func getKeyspaceGroupReconcileEntry(
 	return entry, ok
 }
 
+func BenchmarkKeyspaceGroupReconcileHealthyPath(b *testing.B) {
+	const keyspaceCount = 1_000_000
+
+	group := &endpoint.KeyspaceGroup{
+		ID:       1,
+		UserKind: endpoint.Standard.String(),
+		Members: []endpoint.KeyspaceGroupMember{
+			{Address: "http://tso-1"},
+			{Address: "http://tso-2"},
+		},
+		Keyspaces: make([]uint32, keyspaceCount),
+	}
+	for i := range group.Keyspaces {
+		group.Keyspaces[i] = uint32(i)
+	}
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	require.NoError(b, store.RunInTxn(b.Context(), func(txn kv.Txn) error {
+		return store.SaveKeyspaceGroup(txn, group)
+	}))
+
+	state := newKeyspaceGroupReconcileState(func() {})
+	state.apply(map[uint32]*keyspaceGroupReconcileEntry{
+		group.ID: {id: group.ID, members: group.Members},
+	})
+	tsoNodes := uniqueTSONodes([]string{"http://tso-1", "http://tso-2"})
+
+	b.Run("legacy-full-storage-load", func(b *testing.B) {
+		b.ReportAllocs()
+		for range b.N {
+			groups, err := store.LoadKeyspaceGroups(constant.DefaultKeyspaceGroupID, 0)
+			if err != nil || len(groups) != 1 {
+				b.Fatalf("unexpected load result: groups=%d, err=%v", len(groups), err)
+			}
+		}
+	})
+	b.Run("indexed-member-scan", func(b *testing.B) {
+		b.ReportAllocs()
+		for range b.N {
+			if groupIDs := state.groupsNeedingAllocation(tsoNodes); len(groupIDs) != 0 {
+				b.Fatalf("healthy group needs allocation: %v", groupIDs)
+			}
+		}
+	})
+}
+
 func TestReconcileKeyspaceGroupsUsesIndexAndRevalidates(t *testing.T) {
 	re := require.New(t)
 	ctx := t.Context()
