@@ -141,6 +141,47 @@ func BenchmarkKeyspaceGroupReconcileHealthyPath(b *testing.B) {
 	})
 }
 
+func BenchmarkKeyspaceGroupReconcileSelection4096(b *testing.B) {
+	manager := NewKeyspaceGroupManager(
+		b.Context(), endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil), nil,
+	)
+	defer manager.Close()
+	manager.nodesBalancer.Put("http://tso-1")
+	manager.nodesBalancer.Put("http://tso-2")
+
+	members := []endpoint.KeyspaceGroupMember{
+		{Address: "http://tso-1"},
+		{Address: "http://tso-2"},
+	}
+	healthyGroups := make(map[uint32]keyspaceGroupReconcileEntry, mcs.MaxKeyspaceGroupCountInUse)
+	candidateGroups := make(map[uint32]keyspaceGroupReconcileEntry, mcs.MaxKeyspaceGroupCountInUse)
+	for groupID := range mcs.MaxKeyspaceGroupCountInUse {
+		healthyGroups[groupID] = keyspaceGroupReconcileEntry{id: groupID, members: members}
+		candidateGroups[groupID] = keyspaceGroupReconcileEntry{id: groupID}
+	}
+	healthyState := newKeyspaceGroupReconcileState(func() {})
+	healthyState.replace(healthyGroups)
+	candidateState := newKeyspaceGroupReconcileState(func() {})
+	candidateState.replace(candidateGroups)
+
+	run := func(b *testing.B, state *keyspaceGroupReconcileState, expected int) {
+		b.ReportAllocs()
+		for range b.N {
+			tsoNodes := uniqueTSONodes(manager.nodesBalancer.GetAll())
+			groupIDs := state.groupsNeedingAllocation(tsoNodes)
+			if len(groupIDs) != expected {
+				b.Fatalf("unexpected candidate count: got %d, want %d", len(groupIDs), expected)
+			}
+		}
+	}
+	b.Run("all-healthy", func(b *testing.B) {
+		run(b, healthyState, 0)
+	})
+	b.Run("all-candidates", func(b *testing.B) {
+		run(b, candidateState, int(mcs.MaxKeyspaceGroupCountInUse))
+	})
+}
+
 func TestReconcileKeyspaceGroupsUsesIndexAndRevalidates(t *testing.T) {
 	re := require.New(t)
 	ctx := t.Context()
