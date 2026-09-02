@@ -159,20 +159,7 @@ type Server interface {
 type RaftCluster struct {
 	syncutil.RWMutex
 	storeStateLock *syncutil.LockGroup
-	// storeLimitMu serializes the store-limit config's read-clone-mutate-
-	// persist cycle across AddStoreLimit/RemoveStoreLimit/SetStoreLimit/
-	// SetAllStoresLimit. Persist snapshots every PersistOptions field fresh
-	// at call time and writes it unconditionally (no version/CAS), so two of
-	// these methods racing can let a late writer's stale snapshot silently
-	// overwrite another's already-persisted, newer result -- e.g. an
-	// in-flight SetAllStoresLimit clobbering a concurrent deleteStore's
-	// RemoveStoreLimit cleanup with no later event to retry it. This lock
-	// only covers store-limit config writers; a Persist() caller for any
-	// other config section (scheduler config, keyspace config, and others --
-	// see the PR description's Known limitations) is not synchronized with
-	// these and can still race them the same way.
-	storeLimitMu syncutil.Mutex
-	wg           sync.WaitGroup
+	wg             sync.WaitGroup
 
 	serverCtx context.Context
 	ctx       context.Context
@@ -2449,31 +2436,30 @@ func (c *RaftCluster) GetAllStoresLimit() map[uint64]sc.StoreLimitConfig {
 
 // AddStoreLimit add a store limit for a given store ID.
 func (c *RaftCluster) AddStoreLimit(store *metapb.Store) {
-	c.storeLimitMu.Lock()
-	defer c.storeLimitMu.Unlock()
 	storeID := store.GetId()
-	cfg := c.opt.GetScheduleConfig().Clone()
-	if _, ok := cfg.StoreLimit[storeID]; ok {
-		return
-	}
-
-	slc := sc.StoreLimitConfig{
-		AddPeer:    sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
-		RemovePeer: sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
-	}
-	if core.IsStoreContainLabel(store, core.EngineKey, core.EngineTiFlash) {
-		slc = sc.StoreLimitConfig{
-			AddPeer:    sc.DefaultTiFlashStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
-			RemovePeer: sc.DefaultTiFlashStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
-		}
-	}
-
-	cfg.StoreLimit[storeID] = slc
-	c.opt.SetScheduleConfig(cfg)
 	var err error
 	for range persistLimitRetryTimes {
-		if err = c.opt.Persist(c.storage); err == nil {
-			log.Info("store limit added", zap.Uint64("store-id", storeID))
+		added := false
+		err = c.opt.UpdateScheduleConfig(c.storage, func(_ *sc.ScheduleConfig, cfg *sc.ScheduleConfig) (bool, error) {
+			if _, ok := cfg.StoreLimit[storeID]; ok {
+				return false, nil
+			}
+
+			slc := cfg.GetDefaultStoreLimit()
+			if core.IsStoreContainLabel(store, core.EngineKey, core.EngineTiFlash) {
+				slc = sc.StoreLimitConfig{
+					AddPeer:    sc.DefaultTiFlashStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
+					RemovePeer: sc.DefaultTiFlashStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
+				}
+			}
+			cfg.StoreLimit[storeID] = slc
+			added = true
+			return true, nil
+		})
+		if err == nil {
+			if added {
+				log.Info("store limit added", zap.Uint64("store-id", storeID))
+			}
 			return
 		}
 		time.Sleep(persistLimitWaitTime)
@@ -2483,17 +2469,16 @@ func (c *RaftCluster) AddStoreLimit(store *metapb.Store) {
 
 // RemoveStoreLimit remove a store limit for a given store ID.
 func (c *RaftCluster) RemoveStoreLimit(storeID uint64) {
-	c.storeLimitMu.Lock()
-	defer c.storeLimitMu.Unlock()
-	cfg := c.opt.GetScheduleConfig().Clone()
 	for _, limitType := range storelimit.TypeNameValue {
 		c.ResetStoreLimit(storeID, limitType)
 	}
-	delete(cfg.StoreLimit, storeID)
-	c.opt.SetScheduleConfig(cfg)
 	var err error
 	for range persistLimitRetryTimes {
-		if err = c.opt.Persist(c.storage); err == nil {
+		err = c.opt.UpdateScheduleConfig(c.storage, func(_ *sc.ScheduleConfig, cfg *sc.ScheduleConfig) (bool, error) {
+			delete(cfg.StoreLimit, storeID)
+			return true, nil
+		})
+		if err == nil {
 			log.Info("store limit removed", zap.Uint64("store-id", storeID))
 			id := strconv.FormatUint(storeID, 10)
 			statistics.StoreLimitGauge.DeleteLabelValues(id, "add-peer")
@@ -2657,13 +2642,21 @@ func (c *RaftCluster) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePer
 	if store := c.GetStore(storeID); store != nil && store.IsRemoved() {
 		return errs.ErrStoreRemoved.FastGenByArgs(storeID)
 	}
-	c.storeLimitMu.Lock()
-	defer c.storeLimitMu.Unlock()
-	old := c.opt.GetScheduleConfig().Clone()
-	c.opt.SetStoreLimit(storeID, typ, ratePerMin)
-	if err := c.opt.Persist(c.storage); err != nil {
-		// roll back the store limit
-		c.opt.SetScheduleConfig(old)
+	err := c.opt.UpdateScheduleConfig(c.storage, func(_ *sc.ScheduleConfig, cfg *sc.ScheduleConfig) (bool, error) {
+		slc, ok := cfg.StoreLimit[storeID]
+		if !ok {
+			slc = cfg.GetDefaultStoreLimit()
+		}
+		switch typ {
+		case storelimit.AddPeer:
+			slc.AddPeer = ratePerMin
+		case storelimit.RemovePeer:
+			slc.RemovePeer = ratePerMin
+		}
+		cfg.StoreLimit[storeID] = slc
+		return true, nil
+	})
+	if err != nil {
 		log.Error("persist store limit meet error", errs.ZapError(err))
 		return err
 	}
@@ -2674,20 +2667,28 @@ func (c *RaftCluster) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePer
 
 // SetAllStoresLimit sets all store limit for a given type and rate.
 func (c *RaftCluster) SetAllStoresLimit(typ storelimit.Type, ratePerMin float64) error {
-	c.storeLimitMu.Lock()
-	defer c.storeLimitMu.Unlock()
-	old := c.opt.GetScheduleConfig().Clone()
-	oldAdd := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
-	oldRemove := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer)
-	c.opt.SetAllStoresLimit(typ, ratePerMin)
-	if err := c.opt.Persist(c.storage); err != nil {
-		// roll back the store limit
-		c.opt.SetScheduleConfig(old)
-		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, oldAdd)
-		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, oldRemove)
+	err := c.opt.UpdateScheduleConfig(c.storage, func(_ *sc.ScheduleConfig, cfg *sc.ScheduleConfig) (bool, error) {
+		switch typ {
+		case storelimit.AddPeer:
+			cfg.DefaultStoreLimit.AddPeer = ratePerMin
+			for storeID, limit := range cfg.StoreLimit {
+				limit.AddPeer = ratePerMin
+				cfg.StoreLimit[storeID] = limit
+			}
+		case storelimit.RemovePeer:
+			cfg.DefaultStoreLimit.RemovePeer = ratePerMin
+			for storeID, limit := range cfg.StoreLimit {
+				limit.RemovePeer = ratePerMin
+				cfg.StoreLimit[storeID] = limit
+			}
+		}
+		return true, nil
+	})
+	if err != nil {
 		log.Error("persist store limit meet error", errs.ZapError(err))
 		return err
 	}
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(typ, ratePerMin)
 	for _, storeID := range c.GetStoreIDs() {
 		c.refreshStoreRateLimit(storeID, typ)
 	}

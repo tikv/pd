@@ -31,11 +31,14 @@ type Request struct {
 	requestCtx context.Context
 	clientCtx  context.Context
 
-	// Key field represents this is a `GetRegion` request.
+	// The query kind is encoded without a separate discriminator. GetRegion and
+	// GetPrevRegion always set a non-nil (possibly empty) key field; otherwise,
+	// id is used by GetRegionByID, including Region ID 0.
+	// key is non-nil for GetRegion requests.
 	key []byte
-	// PrevKey field represents this is a `GetPrevRegion` request.
+	// prevKey is non-nil for GetPrevRegion requests.
 	prevKey []byte
-	// ID field represents this is a `GetRegionByID` request.
+	// id is the requested Region ID when both key and prevKey are nil.
 	id uint64
 
 	options *opt.GetRegionOp
