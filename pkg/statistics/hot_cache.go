@@ -83,30 +83,6 @@ func (w *HotCache) CheckRegionFlowAsync(region *core.RegionInfo) {
 }
 
 func newRegionFlowTasks(region *core.RegionInfo) (checkExpiredTask, checkWritePeerTask func(*HotPeerCache)) {
-	// Preserve the original one-peer fast path so this optimization doesn't add
-	// task-construction overhead to single-peer regions. The common multi-peer
-	// path below avoids retaining the complete RegionInfo.
-	if len(region.GetPeers()) <= 1 {
-		checkExpiredTask = func(cache *HotPeerCache) {
-			expiredStats := cache.CollectExpiredItems(region)
-			for _, stat := range expiredStats {
-				cache.UpdateStat(stat)
-			}
-		}
-		checkWritePeerTask = func(cache *HotPeerCache) {
-			reportInterval := region.GetInterval()
-			interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
-			var loads [utils.RegionStatCount]float64
-			loads[utils.RegionWriteBytes] = float64(region.GetBytesWritten())
-			loads[utils.RegionWriteKeys] = float64(region.GetKeysWritten())
-			loads[utils.RegionWriteQueryNum] = float64(region.GetWriteQueryNum())
-			stats := cache.CheckPeerFlow(region, region.GetPeers(), loads[:], interval)
-			for _, stat := range stats {
-				cache.UpdateStat(stat)
-			}
-		}
-		return checkExpiredTask, checkWritePeerTask
-	}
 	regionInfo := hotRegionInfo{
 		meta:          region.GetMeta(),
 		leaderStoreID: region.GetLeader().GetStoreId(),

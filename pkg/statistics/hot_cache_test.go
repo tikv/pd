@@ -55,6 +55,29 @@ func TestIsHot(t *testing.T) {
 	}
 }
 
+func TestRegionFlowTasksMatchOriginalForAnyPeerCount(t *testing.T) {
+	for _, peerCount := range []int{0, 1, 2, 3, 5, 9} {
+		t.Run(fmt.Sprintf("%d-peers", peerCount), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			originalCache := NewHotPeerCache(ctx, core.NewBasicCluster(), utils.Write)
+			compactCache := NewHotPeerCache(ctx, core.NewBasicCluster(), utils.Write)
+			region := newBenchmarkRegion(1, peerCount)
+
+			originalExpired, originalWrite := newOriginalRegionFlowTasks(region)
+			compactExpired, compactWrite := newRegionFlowTasks(region)
+			originalExpired(originalCache)
+			originalWrite(originalCache)
+			compactExpired(compactCache)
+			compactWrite(compactCache)
+
+			require.Equal(t, originalCache.GetHotPeerStats(0), compactCache.GetHotPeerStats(0))
+			require.Equal(t, originalCache.storesOfRegion, compactCache.storesOfRegion)
+			require.Equal(t, originalCache.regionsOfStore, compactCache.regionsOfStore)
+		})
+	}
+}
+
 func BenchmarkPendingRegionHeartbeatTasks(b *testing.B) {
 	for _, peerCount := range []int{1, 3, 5} {
 		b.Run(fmt.Sprintf("%d-peers", peerCount), func(b *testing.B) {
@@ -124,6 +147,10 @@ func newBenchmarkRegion(regionID uint64, peerCount int) *core.RegionInfo {
 	for i := range peerCount {
 		peers[i] = &metapb.Peer{Id: regionID*10 + uint64(i+1), StoreId: uint64(i + 1)}
 	}
+	var leader *metapb.Peer
+	if len(peers) > 0 {
+		leader = peers[0]
+	}
 	return core.NewRegionInfo(
 		&metapb.Region{
 			Id:          regionID,
@@ -132,7 +159,7 @@ func newBenchmarkRegion(regionID uint64, peerCount int) *core.RegionInfo {
 			RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
 			Peers:       peers,
 		},
-		peers[0],
+		leader,
 		core.SetWrittenBytes(1<<20),
 		core.SetWrittenKeys(1024),
 		core.SetReportInterval(0, utils.RegionHeartBeatReportInterval),
