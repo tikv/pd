@@ -171,6 +171,14 @@ func TestFindOldHotPeerStatForInheritance(t *testing.T) {
 		require.Nil(t, got)
 		require.Equal(t, utils.Direct, source)
 	})
+
+	t.Run("deduplicate-new-stores", func(t *testing.T) {
+		cache := newCache()
+		putPeer(cache, 2, false)
+		got, source := cache.findOldHotPeerStatForInheritance(newRegion(2, 3, 2))
+		require.Nil(t, got)
+		require.Equal(t, utils.Direct, source)
+	})
 }
 
 func orderingPeers(cache *HotPeerCache, region *core.RegionInfo) []*metapb.Peer {

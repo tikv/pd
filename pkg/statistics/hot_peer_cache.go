@@ -411,9 +411,20 @@ func (f *HotPeerCache) findOldHotPeerStatForInheritance(region *hotRegionInfo) (
 			return oldItem, utils.Inherit
 		}
 	}
-	for _, peer := range region.meta.GetPeers() {
+	peers := region.meta.GetPeers()
+	for i, peer := range peers {
 		storeID := peer.GetStoreId()
 		if _, ok := oldStoreIDs[storeID]; ok {
+			continue
+		}
+		seen := false
+		for _, previousPeer := range peers[:i] {
+			if previousPeer.GetStoreId() == storeID {
+				seen = true
+				break
+			}
+		}
+		if seen {
 			continue
 		}
 		oldItem = f.getOldHotPeerStat(region.id(), storeID)
