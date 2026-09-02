@@ -174,7 +174,6 @@ func (c *RuleChecker) evaluateRegionPlacementState(region *core.RegionInfo, cont
 			}
 			hasUnfixablePlacement = true
 			ruleUnfixable = true
-			break
 		}
 		if ruleUnfixable {
 			continue
@@ -185,7 +184,6 @@ func (c *RuleChecker) evaluateRegionPlacementState(region *core.RegionInfo, cont
 			}
 			hasUnfixablePlacement = true
 			ruleUnfixable = true
-			break
 		}
 		if ruleUnfixable {
 			continue
@@ -226,12 +224,45 @@ func isRegionPlacementSatisfied(region *core.RegionInfo, fit *placement.RegionFi
 			}
 		}
 		for _, store := range rf.Stores {
-			if !store.IsPreparing() && !store.IsServing() {
+			if store == nil || (!store.IsPreparing() && !store.IsServing()) {
 				return false
 			}
 		}
 		if !statistics.IsRegionLabelIsolationSatisfied(rf.Stores, rf.Rule.LocationLabels, rf.Rule.IsolationLevel) {
 			return false
+		}
+		if !isRuleFitIsolatedAtHighestLevel(fit, rf) {
+			return false
+		}
+	}
+	return true
+}
+
+// isRuleFitIsolatedAtHighestLevel returns whether the placement cannot be
+// improved further by the configured location labels.
+func isRuleFitIsolatedAtHighestLevel(fit *placement.RegionFit, rf *placement.RuleFit) bool {
+	if len(rf.Rule.LocationLabels) == 0 {
+		return true
+	}
+	stores := make([]*core.StoreInfo, 0, len(fit.GetRegionStores()))
+	for _, store := range fit.GetRegionStores() {
+		if store == nil {
+			return false
+		}
+		for _, rule := range fit.GetRules() {
+			if rule.Role == rf.Rule.Role && placement.MatchLabelConstraints(store, rule.LabelConstraints) {
+				stores = append(stores, store)
+				break
+			}
+		}
+	}
+	highestLevel := rf.Rule.LocationLabels[0]
+	for i, store := range stores {
+		labelValue := store.GetLabelValue(highestLevel)
+		for _, other := range stores[i+1:] {
+			if labelValue == other.GetLabelValue(highestLevel) {
+				return false
+			}
 		}
 	}
 	return true
@@ -399,8 +430,13 @@ func (c *RuleChecker) planOrphanPeerAction(region *core.RegionInfo, fit *placeme
 		}
 	}
 	if !hasUnhealthyFit {
+		for _, peer := range fit.OrphanPeers {
+			if canRemovePeer(peer) {
+				return action.withAction(orphanPeerActionRemove, "remove-orphan-peer", peer, nil, true, false)
+			}
+		}
 		peer := fit.OrphanPeers[0]
-		return action.withAction(orphanPeerActionRemove, "remove-orphan-peer", peer, nil, canRemovePeer(peer), false)
+		return action.withAction(orphanPeerActionRemove, "remove-orphan-peer", peer, nil, false, false)
 	}
 
 	if pinDownPeer != nil {
@@ -471,8 +507,9 @@ func (c *RuleChecker) hasStoreToSwapForMissingRule(region *core.RegionInfo, fit 
 
 		fastFailover := isWitnessEnabled(c.cluster) && store.IsTiKV() && oldRuleFit.Rule.IsWitness
 		strategy, candidateSet := context.getStrategy(c, region, oldRuleFit.Rule, fastFailover)
-		// addRulePeerWithOptions stops after trying the first matching peer.
-		return strategy.hasStoreToFix(candidateSet, getRuleFitStores(c.cluster, oldRuleFit), peer.GetStoreId())
+		if strategy.hasStoreToFix(candidateSet, getRuleFitStores(c.cluster, oldRuleFit), peer.GetStoreId()) {
+			return true
+		}
 	}
 	return false
 }
@@ -561,11 +598,17 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 		return c.addRulePeer(region, fit, rf)
 	}
 	// fix down/offline peers.
+	var replacementErr error
 	for _, peer := range rf.Peers {
 		if c.isDownPeer(region, peer) {
 			if c.isStoreDownTimeHitMaxDownTime(peer.GetStoreId()) {
 				ruleCheckerReplaceDownCounter.Inc()
-				return c.replaceUnexpectedRulePeer(region, rf, fit, peer, downStatus)
+				op, err := c.replaceUnexpectedRulePeer(region, rf, fit, peer, downStatus)
+				if err == nil || !errs.ErrNoStoreToReplace.Equal(err) {
+					return op, err
+				}
+				replacementErr = err
+				continue
 			}
 			// When witness placement rule is enabled, promotes the witness to voter when region has down voter.
 			if isWitnessEnabled(c.cluster) && core.IsVoter(peer) {
@@ -584,18 +627,35 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 				return op, nil
 			}
 			ruleCheckerReplaceOfflineCounter.Inc()
-			return c.replaceUnexpectedRulePeer(region, rf, fit, peer, offlineStatus)
+			op, err = c.replaceUnexpectedRulePeer(region, rf, fit, peer, offlineStatus)
+			if err == nil || !errs.ErrNoStoreToReplace.Equal(err) {
+				return op, err
+			}
+			replacementErr = err
 		}
 	}
+	if replacementErr != nil {
+		return nil, replacementErr
+	}
 	// fix loose matched peers.
+	var roleErr error
 	for _, peer := range rf.PeersWithDifferentRole {
 		op, err := c.fixLooseMatchPeer(region, fit, rf, peer)
 		if err != nil {
-			return nil, err
+			if !errs.ErrPeerCannotBeLeader.Equal(err) &&
+				!errs.ErrNoNewLeader.Equal(err) &&
+				!errs.ErrPeerCannotBeWitness.Equal(err) {
+				return nil, err
+			}
+			roleErr = err
+			continue
 		}
 		if op != nil {
 			return op, nil
 		}
+	}
+	if roleErr != nil {
+		return nil, roleErr
 	}
 	return c.fixBetterLocation(region, fit, rf)
 }
@@ -646,6 +706,7 @@ func (c *RuleChecker) addRulePeerWithOptions(region *core.RegionInfo, fit *place
 		}
 		// try to replace an existing peer that matches the label constraints.
 		// issue: https://github.com/tikv/pd/issues/7185
+		var replacementErr error
 		for _, p := range region.GetPeers() {
 			s := c.cluster.GetStore(p.GetStoreId())
 			if placement.MatchLabelConstraints(s, rf.Rule.LabelConstraints) {
@@ -656,12 +717,19 @@ func (c *RuleChecker) addRulePeerWithOptions(region *core.RegionInfo, fit *place
 				ruleCheckerNoStoreThenTryReplace.Inc()
 				op, err := c.replaceUnexpectedRulePeer(region, oldPeerRuleFit, fit, p, "swap-fit")
 				if err != nil {
-					return nil, err
+					if !errs.ErrNoStoreToReplace.Equal(err) {
+						return nil, err
+					}
+					replacementErr = err
+					continue
 				}
 				if op != nil {
 					return op, nil
 				}
 			}
+		}
+		if replacementErr != nil {
+			return nil, replacementErr
 		}
 		return nil, errs.ErrNoStoreToAdd
 	}

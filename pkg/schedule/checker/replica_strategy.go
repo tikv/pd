@@ -218,7 +218,7 @@ func (s *ReplicaStrategy) hasBetterLocation(
 	fit *placement.RegionFit,
 	ruleFit *placement.RuleFit,
 ) bool {
-	oldStoreID, _ := s.selectStoreToRemoveWithTempState(ruleFit.Stores)
+	oldStoreID := s.selectStoreToRemoveForState(ruleFit.Stores)
 	if oldStoreID == 0 {
 		return false
 	}
@@ -280,17 +280,43 @@ func (s *ReplicaStrategy) SelectStoreToRemove(coLocationStores []*core.StoreInfo
 }
 
 func (s *ReplicaStrategy) selectStoreToRemoveWithTempState(coLocationStores []*core.StoreInfo) (uint64, bool) {
+	return s.pickStoreToRemove(coLocationStores, true)
+}
+
+func (s *ReplicaStrategy) selectStoreToRemoveForState(coLocationStores []*core.StoreInfo) uint64 {
+	storeID, _ := s.pickStoreToRemove(coLocationStores, false)
+	return storeID
+}
+
+func (s *ReplicaStrategy) pickStoreToRemove(coLocationStores []*core.StoreInfo, recordMetrics bool) (uint64, bool) {
 	isolationComparer := filter.IsolationComparer(s.locationLabels, coLocationStores)
 	level := s.operatorLevel()
-	sourceCandidate := filter.NewCandidates(coLocationStores).
-		FilterSource(s.cluster.GetCheckerConfig(), nil, nil, &filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true, AllowTemporaryStates: true, OperatorLevel: level}).
+	conf := s.cluster.GetCheckerConfig()
+	filterSources := func(stores []*core.StoreInfo, storeFilter filter.Filter) []*core.StoreInfo {
+		if recordMetrics {
+			return filter.NewCandidates(stores).FilterSource(conf, nil, nil, storeFilter).Stores
+		}
+		selected := make([]*core.StoreInfo, 0, len(stores))
+		for _, store := range stores {
+			if storeFilter.Source(conf, store).IsOK() {
+				selected = append(selected, store)
+			}
+		}
+		return selected
+	}
+	sourceCandidate := filter.NewCandidates(filterSources(
+		coLocationStores,
+		&filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true, AllowTemporaryStates: true, OperatorLevel: level},
+	)).
 		KeepTheTopStores(isolationComparer, true)
 	if sourceCandidate.Len() == 0 {
 		log.Debug("no removable store", zap.Uint64("region-id", s.region.GetID()))
 		return 0, false
 	}
-	source := filter.NewCandidates(sourceCandidate.Stores).
-		FilterSource(s.cluster.GetCheckerConfig(), nil, nil, &filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true, OperatorLevel: level}).
+	source := filter.NewCandidates(filterSources(
+		sourceCandidate.Stores,
+		&filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true, OperatorLevel: level},
+	)).
 		PickTheTopStore(filter.RegionScoreComparer(s.cluster.GetCheckerConfig()), false)
 	if source != nil {
 		return source.GetID(), false

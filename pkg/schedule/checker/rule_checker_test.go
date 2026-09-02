@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/pingcap/failpoint"
@@ -54,6 +55,32 @@ type ruleCheckerTestSuite struct {
 	rc          *RuleChecker
 	ctx         context.Context
 	cancel      context.CancelFunc
+}
+
+func (suite *ruleCheckerTestSuite) sourceFilterMetricValue(source string) float64 {
+	metricFamilies, err := prometheus.DefaultGatherer.Gather()
+	suite.Require().NoError(err)
+	var value float64
+	for _, family := range metricFamilies {
+		if family.GetName() != "pd_schedule_source_filter" {
+			continue
+		}
+		for _, metric := range family.GetMetric() {
+			matchesScope, matchesSource := false, false
+			for _, label := range metric.GetLabel() {
+				switch label.GetName() {
+				case "scope":
+					matchesScope = label.GetValue() == suite.rc.Name()
+				case "source":
+					matchesSource = label.GetValue() == source
+				}
+			}
+			if matchesScope && matchesSource {
+				value += metric.GetCounter().GetValue()
+			}
+		}
+	}
+	return value
 }
 
 type getStoresCountingCluster struct {
@@ -782,12 +809,16 @@ func (suite *ruleCheckerTestSuite) TestBetterReplacement() {
 		LocationLabels: []string{"host"},
 	})
 	re.NoError(err)
-	op := suite.rc.Check(suite.cluster.GetRegion(1))
+	region := suite.cluster.GetRegion(1)
+	re.Equal(RegionPlacementStateInProgress, suite.rc.GetRegionPlacementState(region))
+	op := suite.rc.Check(region)
 	re.NotNil(op)
 	re.Equal("move-to-better-location", op.Desc())
 	re.Equal(uint64(4), op.Step(0).(operator.AddLearner).ToStore)
 	suite.cluster.AddLeaderRegionWithRange(1, "", "", 1, 3, 4)
-	op = suite.rc.Check(suite.cluster.GetRegion(1))
+	region = suite.cluster.GetRegion(1)
+	re.Equal(RegionPlacementStateReplicated, suite.rc.GetRegionPlacementState(region))
+	op = suite.rc.Check(region)
 	re.Nil(op)
 }
 
@@ -873,6 +904,7 @@ func (suite *ruleCheckerTestSuite) TestBetterReplacement3() {
 	err = suite.ruleManager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID)
 	re.NoError(err)
 	region := suite.cluster.GetRegion(10)
+	re.Equal(RegionPlacementStateInProgress, suite.rc.GetRegionPlacementState(region))
 	op := suite.rc.Check(region)
 	re.NotNil(op)
 	re.Equal("move-to-better-location", op.Desc())
@@ -2372,11 +2404,11 @@ func (suite *ruleCheckerTestSuite) TestRegionPlacementFollowsOrphanRemovalOrder(
 	fit := suite.ruleManager.FitRegionWithoutCache(suite.cluster, region)
 	re.Len(fit.OrphanPeers, 2)
 	re.Equal(uint64(1), fit.OrphanPeers[0].GetStoreId())
-	// The checker always tries the first orphan. It cannot remove the leader
-	// because no other peer is allowed to lead, even though the second orphan
-	// itself would be removable.
-	re.Equal(RegionPlacementStatePending, suite.rc.GetRegionPlacementState(region))
-	re.Nil(suite.rc.Check(region))
+	re.Equal(RegionPlacementStateInProgress, suite.rc.GetRegionPlacementState(region))
+	op := suite.rc.Check(region)
+	re.NotNil(op)
+	re.Equal("remove-orphan-peer", op.Desc())
+	re.Equal(uint64(3), op.Step(0).(operator.RemovePeer).FromStore)
 }
 
 func (suite *ruleCheckerTestSuite) TestRegionPlacementFollowsSwapPeerOrder() {
@@ -2423,10 +2455,95 @@ func (suite *ruleCheckerTestSuite) TestRegionPlacementFollowsSwapPeerOrder() {
 	re.NoError(suite.ruleManager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID))
 
 	region := suite.cluster.GetRegion(1)
-	// The first matching peer has no replacement target. The checker stops
-	// there even though a later matching peer could be replaced through Store 3.
-	re.Equal(RegionPlacementStatePending, suite.rc.GetRegionPlacementState(region))
-	re.Nil(suite.rc.Check(region))
+	re.Equal(RegionPlacementStateInProgress, suite.rc.GetRegionPlacementState(region))
+	op := suite.rc.Check(region)
+	re.NotNil(op)
+	re.Equal("replace-rule-swap-fit-peer", op.Desc())
+	re.Equal(uint64(3), op.Step(0).(operator.AddLearner).ToStore)
+
+	movedRegion := region.Clone(
+		core.WithRemoveStorePeer(2),
+		core.WithAddPeer(&metapb.Peer{Id: 100, StoreId: 3, Role: metapb.PeerRole_Voter}),
+	)
+	nextOp := suite.rc.Check(movedRegion)
+	re.NotNil(nextOp)
+	re.Equal("add-rule-peer", nextOp.Desc())
+	re.Equal(uint64(2), nextOp.Step(0).(operator.AddLearner).ToStore)
+}
+
+func (suite *ruleCheckerTestSuite) TestRegionPlacementChecksAllUnhealthyPeers() {
+	re := suite.Require()
+	suite.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
+	suite.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z2"})
+	suite.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z3"})
+	suite.cluster.AddLabelsStore(4, 1, map[string]string{"zone": "z2"})
+	suite.cluster.AddLeaderRegion(1, 3, 1, 2)
+	suite.cluster.SetStoreOffline(1)
+	suite.cluster.SetStoreOffline(2)
+	re.NoError(suite.ruleManager.SetRule(&placement.Rule{
+		GroupID:        placement.DefaultGroupID,
+		ID:             placement.DefaultRuleID,
+		Role:           placement.Voter,
+		Count:          3,
+		LocationLabels: []string{"zone"},
+		IsolationLevel: "zone",
+	}))
+
+	region := suite.cluster.GetRegion(1)
+	re.Equal(RegionPlacementStateInProgress, suite.rc.GetRegionPlacementState(region))
+	op := suite.rc.Check(region)
+	re.NotNil(op)
+	re.Equal("replace-rule-offline-peer", op.Desc())
+	re.Equal(uint64(4), op.Step(0).(operator.AddLearner).ToStore)
+}
+
+func (suite *ruleCheckerTestSuite) TestRegionPlacementChecksAllRolePeers() {
+	re := suite.Require()
+	suite.cluster.AddLeaderStore(1, 1)
+	suite.cluster.AddLeaderStore(2, 1)
+	suite.cluster.AddLeaderRegion(1, 1, 2)
+	re.NoError(suite.ruleManager.SetRule(&placement.Rule{
+		GroupID:   placement.DefaultGroupID,
+		ID:        placement.DefaultRuleID,
+		Role:      placement.Voter,
+		Count:     2,
+		IsWitness: true,
+	}))
+
+	region := suite.cluster.GetRegion(1)
+	re.Equal(RegionPlacementStateInProgress, suite.rc.GetRegionPlacementState(region))
+	op := suite.rc.Check(region)
+	re.NotNil(op)
+	re.Equal("fix-witness-peer", op.Desc())
+	re.Equal(uint64(2), op.Step(0).(operator.BecomeWitness).StoreID)
+}
+
+func (suite *ruleCheckerTestSuite) TestRegionPlacementStateDoesNotUpdateSourceFilterMetrics() {
+	re := suite.Require()
+	suite.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
+	suite.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z1"})
+	suite.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z1"})
+	suite.cluster.AddLabelsStore(4, 1, map[string]string{"zone": "z2"})
+	suite.cluster.AddLeaderRegion(1, 1, 2, 3)
+	suite.cluster.SetStoreBusy(1, true)
+	re.NoError(suite.ruleManager.SetRule(&placement.Rule{
+		GroupID:        placement.DefaultGroupID,
+		ID:             placement.DefaultRuleID,
+		Role:           placement.Voter,
+		Count:          3,
+		LocationLabels: []string{"zone"},
+		IsolationLevel: "zone",
+	}))
+
+	region := suite.cluster.GetRegion(1)
+	before := suite.sourceFilterMetricValue("1")
+	re.Equal(RegionPlacementStateInProgress, suite.rc.GetRegionPlacementState(region))
+	after := suite.sourceFilterMetricValue("1")
+	re.Equal(before, after)
+
+	op := suite.rc.Check(region)
+	re.NotNil(op)
+	re.Greater(suite.sourceFilterMetricValue("1"), after)
 }
 
 func (suite *ruleCheckerTestSuite) TestRegionsPlacementStateLoadsStoresOnce() {
