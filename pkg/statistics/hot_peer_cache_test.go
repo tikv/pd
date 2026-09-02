@@ -95,10 +95,16 @@ func TestCheckPeerFlowWithMoreExplicitPeersThanRegionPeers(t *testing.T) {
 	region, err := buildRegion(cluster, utils.Write, 3, 60)
 	re.NoError(err)
 
+	peerID, _, err := getIDAllocator().Alloc(1)
+	re.NoError(err)
+	storeID, _, err := getIDAllocator().Alloc(1)
+	re.NoError(err)
+	re.Nil(region.GetStorePeer(storeID))
 	peers := append([]*metapb.Peer{}, region.GetPeers()...)
-	peers = append(peers, &metapb.Peer{Id: 4, StoreId: 4})
+	peers = append(peers, &metapb.Peer{Id: peerID, StoreId: storeID})
 	stats := cache.CheckPeerFlow(region, peers, region.GetLoads(), 60)
 	re.Len(stats, len(peers))
+	re.Equal(storeID, stats[len(stats)-1].StoreID)
 }
 
 func TestFindOldHotPeerStatForInheritance(t *testing.T) {
