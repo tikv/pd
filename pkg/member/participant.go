@@ -86,6 +86,7 @@ func (m *Participant) InitInfo(p participant, rootPath string, leaderName string
 		// can't fail, so panic here.
 		log.Fatal("marshal leader meet error", zap.String("member-name", p.String()), errs.ZapError(errs.ErrMarshalLeader, err))
 	}
+<<<<<<< HEAD
 	m.member = p
 	m.memberValue = string(data)
 	m.rootPath = rootPath
@@ -93,6 +94,12 @@ func (m *Participant) InitInfo(p participant, rootPath string, leaderName string
 	m.leadership = election.NewLeadership(m.client, m.GetLeaderPath(), purpose)
 	m.lastLeaderUpdatedTime.Store(time.Now())
 	log.Info("participant joining election", zap.String("participant-info", p.String()), zap.String("leader-path", m.leaderPath))
+=======
+	p.participant = participant
+	p.participantValue = string(data)
+	p.leadership = election.NewLeadership(p.client, p.GetElectionPath(), purpose, participant.GetName())
+	log.Info("participant joining election", zap.String("participant-info", participant.String()), zap.String("primary-path", p.GetElectionPath()))
+>>>>>>> 703f4bb25d (server, member, election: document and test the election client pinning (#11110))
 }
 
 // ID returns the unique ID for this participant in the election group
