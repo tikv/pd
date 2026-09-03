@@ -481,6 +481,11 @@ error = '''
 trying to update GC safe point to a too large value that exceeds the txn safe point, current value: %v, given: %v, current txn safe point: %v
 '''
 
+["PD:gc:ErrGCStateWatcherSlowConsumer"]
+error = '''
+GC state watcher is too slow
+'''
+
 ["PD:gc:ErrGlobalGCBarrierTSBehindTxnSafePoint"]
 error = '''
 trying to set a global GC barrier on ts %d which is already behind the txn safe point %d of keyspace %s
