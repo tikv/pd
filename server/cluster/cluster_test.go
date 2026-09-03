@@ -3540,6 +3540,45 @@ func TestInitSchedulersPreservesConcurrentScheduleUpdate(t *testing.T) {
 	re.Equal(float64(60), reloadedOpt.GetScheduleConfig().DefaultStoreLimit.AddPeer)
 }
 
+// TestSetAllStoresLimitDoesNotRestoreRemovedStoreLimit guards against
+// PersistOptions.GetStoreLimit's create-on-miss side effect leaking into
+// SetAllStoresLimit's refreshStoreRateLimit loop. A tombstoned store stays in
+// GetStoreIDs() until its final removal, so that loop still visits it after
+// RemoveStoreLimit has deliberately deleted its config entry; a mutating
+// lookup there would resurrect the entry. No concurrency is needed to trigger
+// this -- it's deterministic within a single goroutine.
+func TestSetAllStoresLimitDoesNotRestoreRemovedStoreLimit(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	backend := storage.NewStorageWithMemoryBackend()
+	rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, backend)
+
+	const storeID = uint64(1)
+	store := core.NewStoreInfo(&metapb.Store{Id: storeID, State: metapb.StoreState_Up})
+	rc.PutStore(store)
+	rc.AddStoreLimit(store.GetMeta())
+
+	rc.PutStore(store.Clone(core.SetStoreState(metapb.StoreState_Tombstone)))
+	rc.RemoveStoreLimit(storeID)
+	_, ok := opt.GetScheduleConfig().StoreLimit[storeID]
+	re.False(ok)
+
+	re.NoError(rc.SetAllStoresLimit(storelimit.AddPeer, 60))
+	_, ok = opt.GetScheduleConfig().StoreLimit[storeID]
+	re.False(ok)
+
+	re.NoError(opt.Persist(backend))
+	_, reloaded, err := newTestScheduleConfig()
+	re.NoError(err)
+	re.NoError(reloaded.Reload(backend))
+	_, ok = reloaded.GetScheduleConfig().StoreLimit[storeID]
+	re.False(ok)
+}
+
 func TestPatrolRegionConcurrency(t *testing.T) {
 	re := require.New(t)
 

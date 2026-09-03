@@ -2708,7 +2708,12 @@ func (c *RaftCluster) refreshStoreRateLimit(storeID uint64, limitType storelimit
 	}
 	// Schedule config stores the unit in rate-per-minute, but limiter uses rate-per-second.
 	const storeBalanceBaseTime = float64(60)
-	ratePerSec := c.opt.GetStoreLimitByType(storeID, limitType) / storeBalanceBaseTime
+	// Peek, not Get: this runs for every currently-known store (SetAllStoresLimit
+	// loops all of them), including one whose config entry RemoveStoreLimit just
+	// deleted but that hasn't been finally removed from StoresInfo yet (tombstone
+	// is not deletion). Get's create-on-miss side effect would resurrect that
+	// entry here.
+	ratePerSec := c.opt.PeekStoreLimitByType(storeID, limitType) / storeBalanceBaseTime
 	if limit.Rate(limitType) != ratePerSec {
 		c.ResetStoreLimit(storeID, limitType, ratePerSec)
 	}
