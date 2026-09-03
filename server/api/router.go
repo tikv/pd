@@ -341,8 +341,10 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(apiRouter, "/ping", healthHandler.Ping, setMethods(http.MethodGet), setAuditBackend(prometheus))
 
 	// metric query use to query metric data, the protocol is compatible with prometheus.
-	registerFunc(apiRouter, "/metric/query", newqueryMetric(svr).queryMetric, setMethods(http.MethodGet, http.MethodPost), setAuditBackend(prometheus))
-	registerFunc(apiRouter, "/metric/query_range", newqueryMetric(svr).queryMetric, setMethods(http.MethodGet, http.MethodPost), setAuditBackend(prometheus))
+	metricHandler := newQueryMetric(svr)
+	svr.AddCloseCallback(metricHandler.close)
+	registerFunc(apiRouter, "/metric/query", metricHandler.queryMetric, setMethods(http.MethodGet, http.MethodPost), setAuditBackend(prometheus))
+	registerFunc(apiRouter, "/metric/query_range", metricHandler.queryMetric, setMethods(http.MethodGet, http.MethodPost), setAuditBackend(prometheus))
 
 	pprofHandler := newPprofHandler(svr, rd)
 	// profile API
@@ -371,6 +373,8 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	unsafeOperationHandler := newUnsafeOperationHandler(svr, rd)
 	registerFunc(clusterRouter, "/admin/unsafe/remove-failed-stores",
 		unsafeOperationHandler.RemoveFailedStores, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
+	registerFunc(clusterRouter, "/admin/unsafe/remove-failed-stores/abort",
+		unsafeOperationHandler.AbortFailedStoresRemoval, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
 	registerFunc(clusterRouter, "/admin/unsafe/remove-failed-stores/show",
 		unsafeOperationHandler.GetFailedStoresRemovalStatus, setMethods(http.MethodGet), setAuditBackend(prometheus))
 

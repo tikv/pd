@@ -17,8 +17,10 @@ package etcdutil
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math/rand/v2"
 	"net"
 	"os"
@@ -36,6 +38,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/goleak"
+	"google.golang.org/grpc"
 
 	"github.com/pingcap/failpoint"
 
@@ -445,10 +448,16 @@ func (suite *loopWatcherTestSuite) TearDownSuite() {
 
 func (suite *loopWatcherTestSuite) TestLoadNoExistedKey() {
 	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	var watcherWG sync.WaitGroup
+	defer func() {
+		cancel()
+		watcherWG.Wait()
+	}()
 	cache := make(map[string]struct{})
 	watcher := NewLoopWatcher(
-		suite.ctx,
-		&suite.wg,
+		ctx,
+		&watcherWG,
 		suite.client,
 		"test",
 		"TestLoadNoExistedKey",
@@ -467,16 +476,247 @@ func (suite *loopWatcherTestSuite) TestLoadNoExistedKey() {
 	re.Empty(cache)
 }
 
+func (suite *loopWatcherTestSuite) TestWatcherLoadInitializesEmptyReconciliationSnapshot() {
+	re := suite.Require()
+	watcher := NewLoopWatcher(
+		suite.ctx,
+		&suite.wg,
+		suite.client,
+		"test",
+		"TestWatcherLoadInitializesEmptyReconciliationSnapshot",
+		func([]*clientv3.Event) error { return nil },
+		func(*mvccpb.KeyValue) error { return nil },
+		func(*mvccpb.KeyValue) error { return nil },
+		func([]*clientv3.Event) error { return nil },
+		false, /* withPrefix */
+	)
+	watcher.SetReconcileDeletedKeys()
+
+	revision, err := watcher.load(suite.ctx)
+	re.NoError(err)
+	re.Positive(revision)
+	re.NotNil(watcher.loadedKeys)
+	re.Empty(watcher.loadedKeys)
+}
+
+func (suite *loopWatcherTestSuite) TestInitialLoadFailsWhenContextCanceled() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	cancel()
+	watcher := NewLoopWatcher(
+		ctx,
+		&suite.wg,
+		suite.client,
+		"test",
+		"TestInitialLoadFailsWhenContextCanceled",
+		func([]*clientv3.Event) error { return nil },
+		func(*mvccpb.KeyValue) error { return nil },
+		func(*mvccpb.KeyValue) error { return nil },
+		func([]*clientv3.Event) error { return nil },
+		false, /* withPrefix */
+	)
+	watcher.StartWatchLoop()
+	re.Error(watcher.WaitLoad())
+}
+
+func (suite *loopWatcherTestSuite) TestWatcherLoadCancelsInFlightRequest() {
+	re := suite.Require()
+	requestStarted := make(chan struct{}, 1)
+	client, err := CreateEtcdClient(nil, suite.config.ListenClientUrls, TestEtcdClientPurpose, false,
+		func(config *clientv3.Config) {
+			config.DialOptions = append(config.DialOptions, grpc.WithChainUnaryInterceptor(
+				func(
+					ctx context.Context, method string, req, reply any,
+					cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption,
+				) error {
+					if method != "/etcdserverpb.KV/Range" {
+						return invoker(ctx, method, req, reply, cc, opts...)
+					}
+					select {
+					case requestStarted <- struct{}{}:
+					default:
+					}
+					<-ctx.Done()
+					return ctx.Err()
+				},
+			))
+		})
+	re.NoError(err)
+	defer client.Close()
+
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+	watcher := NewLoopWatcher(
+		ctx,
+		&suite.wg,
+		client,
+		"test",
+		"TestWatcherLoadCancelsInFlightRequest",
+		func([]*clientv3.Event) error { return nil },
+		func(*mvccpb.KeyValue) error { return nil },
+		func(*mvccpb.KeyValue) error { return nil },
+		func([]*clientv3.Event) error { return nil },
+		false, /* withPrefix */
+	)
+	loadDone := make(chan error, 1)
+	go func() {
+		_, err := watcher.load(ctx)
+		loadDone <- err
+	}()
+
+	select {
+	case <-requestStarted:
+	case <-time.After(3 * time.Second):
+		suite.T().Fatal("watcher did not start loading from etcd")
+	}
+	cancel()
+	select {
+	case err := <-loadDone:
+		re.ErrorIs(err, context.Canceled)
+	case <-time.After(3 * time.Second):
+		suite.T().Fatal("watcher did not cancel the in-flight etcd request")
+	}
+}
+
+func (suite *loopWatcherTestSuite) TestWatcherLoadReturnsLifecycleErrors() {
+	suite.Run("pre callback", func() {
+		re := suite.Require()
+		preErr := errors.New("pre callback failed")
+		postCalled := false
+		watcher := NewLoopWatcher(
+			suite.ctx,
+			&suite.wg,
+			suite.client,
+			"test",
+			"TestWatcherLoadReturnsLifecycleErrors/pre",
+			func([]*clientv3.Event) error { return preErr },
+			func(*mvccpb.KeyValue) error {
+				re.Fail("put callback should not be called")
+				return nil
+			},
+			func(*mvccpb.KeyValue) error { return nil },
+			func([]*clientv3.Event) error {
+				postCalled = true
+				return nil
+			},
+			true, /* withPrefix */
+		)
+		watcher.SetReloadOnCompaction()
+
+		_, err := watcher.load(suite.ctx)
+		re.ErrorIs(err, preErr)
+		re.True(postCalled)
+	})
+
+	suite.Run("post callback", func() {
+		re := suite.Require()
+		postErr := errors.New("post callback failed")
+		watcher := NewLoopWatcher(
+			suite.ctx,
+			&suite.wg,
+			suite.client,
+			"test",
+			"TestWatcherLoadReturnsLifecycleErrors/post",
+			func([]*clientv3.Event) error { return nil },
+			func(*mvccpb.KeyValue) error { return nil },
+			func(*mvccpb.KeyValue) error { return nil },
+			func([]*clientv3.Event) error { return postErr },
+			true, /* withPrefix */
+		)
+		watcher.SetReloadOnCompaction()
+
+		_, err := watcher.load(suite.ctx)
+		re.ErrorIs(err, postErr)
+	})
+}
+
+func (suite *loopWatcherTestSuite) TestWatcherLoadKeepsDefaultCallbackSemantics() {
+	preErr := errors.New("pre callback failed")
+	firstPutErr := errors.New("first put callback failed")
+	lastPutErr := errors.New("last put callback failed")
+	postErr := errors.New("post callback failed")
+	tests := []struct {
+		name                            string
+		preErr, firstPutErr, lastPutErr error
+		postErr, expectedErr            error
+	}{
+		{
+			name:        "overwritten-errors",
+			preErr:      preErr,
+			firstPutErr: firstPutErr,
+			postErr:     postErr,
+		},
+		{
+			name:        "final-put-error",
+			lastPutErr:  lastPutErr,
+			expectedErr: lastPutErr,
+		},
+	}
+	for _, test := range tests {
+		suite.Run(test.name, func() {
+			re := suite.Require()
+			prefix := "TestWatcherLoadKeepsDefaultCallbackSemantics/" + test.name + "/"
+			for _, suffix := range []string{"a", "b", "c"} {
+				suite.put(re, prefix+suffix, "value")
+			}
+
+			processed := make([]string, 0, 3)
+			postCalls := 0
+			watcher := NewLoopWatcher(
+				suite.ctx,
+				&suite.wg,
+				suite.client,
+				"test",
+				prefix,
+				func([]*clientv3.Event) error { return test.preErr },
+				func(kv *mvccpb.KeyValue) error {
+					key := string(kv.Key)
+					processed = append(processed, key)
+					switch key {
+					case prefix + "a":
+						return test.firstPutErr
+					case prefix + "c":
+						return test.lastPutErr
+					}
+					return nil
+				},
+				func(*mvccpb.KeyValue) error { return nil },
+				func([]*clientv3.Event) error {
+					postCalls++
+					return test.postErr
+				},
+				true, /* withPrefix */
+			)
+			watcher.SetLoadBatchSize(1)
+
+			_, err := watcher.load(suite.ctx)
+			if test.expectedErr == nil {
+				re.NoError(err)
+			} else {
+				re.ErrorIs(err, test.expectedErr)
+			}
+			re.Equal([]string{prefix + "a", prefix + "b", prefix + "c"}, processed)
+			re.Equal(1, postCalls)
+		})
+	}
+}
+
 func (suite *loopWatcherTestSuite) TestLoadWithLimitChange() {
 	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	var watcherWG sync.WaitGroup
+	defer func() {
+		cancel()
+		watcherWG.Wait()
+	}()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/meetEtcdError", `return()`))
 	cache := make(map[string]struct{})
 	testutil.GenerateTestDataConcurrently(int(maxLoadBatchSize)*2, func(i int) {
 		suite.put(re, fmt.Sprintf("TestLoadWithLimitChange%d", i), "")
 	})
 	watcher := NewLoopWatcher(
-		suite.ctx,
-		&suite.wg,
+		ctx,
+		&watcherWG,
 		suite.client,
 		"test",
 		"TestLoadWithLimitChange",
@@ -498,6 +738,12 @@ func (suite *loopWatcherTestSuite) TestLoadWithLimitChange() {
 
 func (suite *loopWatcherTestSuite) TestCallBack() {
 	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	var watcherWG sync.WaitGroup
+	defer func() {
+		cancel()
+		watcherWG.Wait()
+	}()
 	cache := struct {
 		syncutil.RWMutex
 		data map[string]struct{}
@@ -506,8 +752,8 @@ func (suite *loopWatcherTestSuite) TestCallBack() {
 	}
 	result := make([]string, 0)
 	watcher := NewLoopWatcher(
-		suite.ctx,
-		&suite.wg,
+		ctx,
+		&watcherWG,
 		suite.client,
 		"test",
 		"TestCallBack",
@@ -549,7 +795,7 @@ func (suite *loopWatcherTestSuite) TestCallBack() {
 	// delete 10 keys
 	for i := range 10 {
 		key := fmt.Sprintf("TestCallBack%d", i)
-		_, err = suite.client.Delete(suite.ctx, key)
+		_, err = suite.client.Delete(ctx, key)
 		re.NoError(err)
 	}
 	time.Sleep(time.Second)
@@ -629,6 +875,215 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadLargeKey() {
 	err := watcher.WaitLoad()
 	re.NoError(err)
 	re.Len(cache, count)
+	re.Nil(watcher.loadedKeys)
+}
+
+func (suite *loopWatcherTestSuite) TestWatcherLoadPreservesFirstCallbackError() {
+	tests := []struct {
+		name       string
+		batchSize  int64
+		errorIndex int
+	}{
+		{name: "same page", batchSize: 0, errorIndex: 0},
+		{name: "middle page", batchSize: 1, errorIndex: 1},
+	}
+	for _, test := range tests {
+		suite.Run(test.name, func() {
+			re := suite.Require()
+			prefix := fmt.Sprintf("TestWatcherLoadPreservesFirstCallbackError/%s/", strings.ReplaceAll(test.name, " ", "-"))
+			for i := range 3 {
+				suite.put(re, fmt.Sprintf("%s%d", prefix, i), "")
+			}
+
+			firstErr := fmt.Errorf("callback failed at index %d", test.errorIndex)
+			errorKey := fmt.Sprintf("%s%d", prefix, test.errorIndex)
+			processed := make([]string, 0, 3)
+			watcher := NewLoopWatcher(
+				suite.ctx,
+				&suite.wg,
+				suite.client,
+				"test",
+				prefix,
+				func([]*clientv3.Event) error { return nil },
+				func(kv *mvccpb.KeyValue) error {
+					processed = append(processed, string(kv.Key))
+					if string(kv.Key) == errorKey {
+						return firstErr
+					}
+					return nil
+				},
+				func(*mvccpb.KeyValue) error { return nil },
+				func([]*clientv3.Event) error { return nil },
+				true, /* withPrefix */
+			)
+			watcher.SetReloadOnCompaction()
+			watcher.SetLoadBatchSize(test.batchSize)
+			_, err := watcher.load(suite.ctx)
+			re.ErrorIs(err, firstErr)
+			re.Len(processed, 3)
+		})
+	}
+}
+
+func (suite *loopWatcherTestSuite) TestWatcherConsistentLoadUsesSingleRevision() {
+	re := suite.Require()
+	const prefix = "TestWatcherConsistentLoadUsesSingleRevision/"
+	for _, suffix := range []string{"a", "b", "c"} {
+		suite.put(re, prefix+suffix, "old")
+	}
+	snapshotResp, err := suite.client.Get(
+		suite.ctx,
+		prefix,
+		clientv3.WithPrefix(),
+		clientv3.WithLimit(1),
+	)
+	re.NoError(err)
+	snapshotRevision := snapshotResp.Header.Revision
+
+	values := make(map[string]string)
+	updated := false
+	watcher := NewLoopWatcher(
+		suite.ctx,
+		&suite.wg,
+		suite.client,
+		"test",
+		prefix,
+		func([]*clientv3.Event) error { return nil },
+		func(kv *mvccpb.KeyValue) error {
+			values[string(kv.Key)] = string(kv.Value)
+			if !updated {
+				updated = true
+				// Update one loaded and one unloaded key in the same revision. A
+				// latest-page scan would combine the old a with the new b.
+				_, err := suite.client.Txn(suite.ctx).Then(
+					clientv3.OpPut(prefix+"a", "new"),
+					clientv3.OpPut(prefix+"b", "new"),
+				).Commit()
+				return err
+			}
+			return nil
+		},
+		func(*mvccpb.KeyValue) error { return nil },
+		func([]*clientv3.Event) error { return nil },
+		true, /* withPrefix */
+	)
+	watcher.SetConsistentLoad()
+	watcher.SetLoadBatchSize(1)
+	revision, err := watcher.load(suite.ctx)
+	re.NoError(err)
+	re.Equal(snapshotRevision+1, revision)
+	re.Equal("old", values[prefix+"a"])
+	re.Equal("old", values[prefix+"b"])
+	re.Equal("old", values[prefix+"c"])
+}
+
+func (suite *loopWatcherTestSuite) TestWatcherAtomicLoadCallbacksDiscardIncompleteLoad() {
+	re := suite.Require()
+	const prefix = "TestWatcherAtomicLoadCallbacksDiscardIncompleteLoad/"
+	for _, suffix := range []string{"a", "b", "c"} {
+		suite.put(re, prefix+suffix, "value")
+	}
+
+	ctx, cancel := context.WithCancel(suite.ctx)
+	staged := make(map[string]string)
+	published := false
+	watcher := NewLoopWatcher(
+		ctx,
+		&suite.wg,
+		suite.client,
+		"test",
+		prefix,
+		func([]*clientv3.Event) error { return nil },
+		func(kv *mvccpb.KeyValue) error {
+			staged[string(kv.Key)] = string(kv.Value)
+			cancel()
+			return nil
+		},
+		func(*mvccpb.KeyValue) error { return nil },
+		func([]*clientv3.Event) error {
+			published = true
+			return nil
+		},
+		true, /* withPrefix */
+	)
+	watcher.SetConsistentLoad()
+	watcher.SetAtomicLoadCallbacks()
+	watcher.SetLoadBatchSize(1)
+
+	_, err := watcher.load(ctx)
+	re.NoError(err)
+	re.NotEmpty(staged)
+	re.False(published)
+}
+
+func (suite *loopWatcherTestSuite) TestWatcherLoadKeepsDefaultPaginationAcrossCompaction() {
+	re := suite.Require()
+	const prefix = "TestWatcherLoadKeepsDefaultPaginationAcrossCompaction/"
+	for _, suffix := range []string{"a", "b", "c"} {
+		suite.put(re, prefix+suffix, "value")
+	}
+
+	loaded := make(map[string]string)
+	var published map[string]string
+	var advanceRevision int64
+	var triggerErr error
+	postCalls := 0
+	triggered := false
+	compacted := false
+	watcher := NewLoopWatcher(
+		suite.ctx,
+		&suite.wg,
+		suite.client,
+		"test",
+		prefix,
+		func([]*clientv3.Event) error { return nil },
+		func(kv *mvccpb.KeyValue) error {
+			loaded[string(kv.Key)] = string(kv.Value)
+			if triggered {
+				return nil
+			}
+			triggered = true
+			advanceResp, err := suite.client.Put(
+				suite.ctx,
+				strings.TrimSuffix(prefix, "/")+"-advance-revision",
+				"",
+			)
+			if err != nil {
+				triggerErr = err
+				return err
+			}
+			advanceRevision = advanceResp.Header.Revision
+			_, err = suite.etcd.Server.Compact(
+				suite.ctx,
+				&etcdserverpb.CompactionRequest{Revision: advanceRevision},
+			)
+			triggerErr = err
+			compacted = err == nil
+			return err
+		},
+		func(*mvccpb.KeyValue) error { return nil },
+		func([]*clientv3.Event) error {
+			postCalls++
+			published = maps.Clone(loaded)
+			return nil
+		},
+		true, /* withPrefix */
+	)
+	watcher.SetLoadBatchSize(1)
+
+	revision, err := watcher.load(suite.ctx)
+	re.True(triggered)
+	re.NoError(triggerErr)
+	re.True(compacted)
+	re.Equal(1, postCalls)
+	re.Len(published, 3)
+	re.Equal(map[string]string{
+		prefix + "a": "value",
+		prefix + "b": "value",
+		prefix + "c": "value",
+	}, published)
+	re.NoError(err)
+	re.Equal(advanceRevision+1, revision)
 }
 
 func (suite *loopWatcherTestSuite) TestWatcherBreak() {
@@ -725,17 +1180,584 @@ func (suite *loopWatcherTestSuite) TestWatcherBreak() {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/updateClient"))
 }
 
+func (suite *loopWatcherTestSuite) TestWatcherReloadsAndReconcilesAfterCompaction() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	var watcherWG sync.WaitGroup
+
+	const prefix = "TestWatcherReloadsAndReconcilesAfterCompaction/"
+	keepKey := prefix + "keep"
+	deletedKey := prefix + "deleted"
+	suite.put(re, keepKey, "before-compaction")
+	suite.put(re, deletedKey, "deleted")
+
+	watcherClient, err := CreateEtcdClient(nil, suite.config.ListenClientUrls, TestEtcdClientPurpose, true)
+	re.NoError(err)
+	var replacementClient *clientv3.Client
+	failpointEnabled := false
+	defer func() {
+		cancel()
+		watcherWG.Wait()
+		if failpointEnabled {
+			re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/updateClient"))
+		}
+		if replacementClient != nil {
+			re.NoError(replacementClient.Close())
+		}
+		_ = watcherClient.Close()
+	}()
+	cache := struct {
+		syncutil.RWMutex
+		data map[string]string
+	}{data: make(map[string]string)}
+	checkCache := func(expected map[string]string) {
+		testutil.Eventually(re, func() bool {
+			cache.RLock()
+			defer cache.RUnlock()
+			return maps.Equal(cache.data, expected)
+		}, testutil.WithWaitFor(3*time.Second), testutil.WithTickInterval(10*time.Millisecond))
+	}
+
+	watcher := NewLoopWatcher(
+		ctx,
+		&watcherWG,
+		watcherClient,
+		"test",
+		prefix,
+		func([]*clientv3.Event) error { return nil },
+		func(kv *mvccpb.KeyValue) error {
+			cache.Lock()
+			defer cache.Unlock()
+			cache.data[string(kv.Key)] = string(kv.Value)
+			return nil
+		},
+		func(kv *mvccpb.KeyValue) error {
+			cache.Lock()
+			defer cache.Unlock()
+			delete(cache.data, string(kv.Key))
+			return nil
+		},
+		func([]*clientv3.Event) error { return nil },
+		true, /* withPrefix */
+	)
+	watcher.SetReconcileDeletedKeys()
+	watcher.watchChangeRetryInterval = 100 * time.Millisecond
+	watcher.StartWatchLoop()
+	re.NoError(watcher.WaitLoad())
+	checkCache(map[string]string{keepKey: "before-compaction", deletedKey: "deleted"})
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/updateClient", "return(true)"))
+	failpointEnabled = true
+	re.NoError(watcherClient.Close())
+
+	_, err = suite.client.Put(ctx, keepKey, "after-compaction")
+	re.NoError(err)
+	_, err = suite.client.Delete(ctx, deletedKey)
+	re.NoError(err)
+	advanceResp, err := suite.client.Put(ctx, strings.TrimSuffix(prefix, "/")+"-advance-revision", "")
+	re.NoError(err)
+	_, err = suite.etcd.Server.Compact(ctx, &etcdserverpb.CompactionRequest{Revision: advanceResp.Header.Revision})
+	re.NoError(err)
+
+	replacementClient, err = CreateEtcdClient(nil, suite.config.ListenClientUrls, TestEtcdClientPurpose, true)
+	re.NoError(err)
+	watcher.updateClientCh <- replacementClient
+	checkCache(map[string]string{keepKey: "after-compaction"})
+}
+
+func (suite *loopWatcherTestSuite) TestWatcherSkipsCompactionReloadByDefault() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	const prefix = "TestWatcherSkipsCompactionReloadByDefault/"
+	legacyKey := prefix + "legacy"
+	newKey := prefix + "new"
+	advanceKey := strings.TrimSuffix(prefix, "/") + "-advance"
+	legacyResp, err := suite.client.Put(ctx, legacyKey, "legacy")
+	re.NoError(err)
+	advanceResp, err := suite.client.Put(ctx, advanceKey, "")
+	re.NoError(err)
+	_, err = suite.etcd.Server.Compact(ctx, &etcdserverpb.CompactionRequest{Revision: advanceResp.Header.Revision})
+	re.NoError(err)
+
+	callbackKeys := make(chan string, 4)
+	watcher := NewLoopWatcher(
+		ctx,
+		&sync.WaitGroup{},
+		suite.client,
+		"test",
+		prefix,
+		func([]*clientv3.Event) error { return nil },
+		func(kv *mvccpb.KeyValue) error {
+			callbackKeys <- string(kv.Key)
+			if string(kv.Key) == newKey {
+				cancel()
+			}
+			return nil
+		},
+		func(*mvccpb.KeyValue) error { return nil },
+		func([]*clientv3.Event) error { return nil },
+		true, /* withPrefix */
+	)
+	watchDone := make(chan error, 1)
+	go func() {
+		_, watchErr := watcher.watch(ctx, legacyResp.Header.Revision)
+		watchDone <- watchErr
+	}()
+
+	_, err = suite.client.Put(suite.ctx, newKey, "new")
+	re.NoError(err)
+	select {
+	case err = <-watchDone:
+		re.NoError(err)
+	case <-time.After(3 * time.Second):
+		suite.T().Fatal("watcher did not observe the post-compaction event")
+	}
+	close(callbackKeys)
+	var gotKeys []string
+	for key := range callbackKeys {
+		gotKeys = append(gotKeys, key)
+	}
+	re.Equal([]string{newKey}, gotKeys)
+}
+
+func (suite *loopWatcherTestSuite) TestWatcherReloadsAfterCompactionWhenEnabled() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	const key = "TestWatcherReloadsAfterCompactionWhenEnabled"
+	initialResp, err := suite.client.Put(ctx, key, "before-compaction")
+	re.NoError(err)
+	updatedResp, err := suite.client.Put(ctx, key, "after-compaction")
+	re.NoError(err)
+	_, err = suite.etcd.Server.Compact(ctx, &etcdserverpb.CompactionRequest{Revision: updatedResp.Header.Revision})
+	re.NoError(err)
+
+	loadedValues := make(chan string, 1)
+	watcher := NewLoopWatcher(
+		ctx,
+		&sync.WaitGroup{},
+		suite.client,
+		"test",
+		key,
+		func([]*clientv3.Event) error { return nil },
+		func(kv *mvccpb.KeyValue) error {
+			loadedValues <- string(kv.Value)
+			cancel()
+			return nil
+		},
+		func(*mvccpb.KeyValue) error { return nil },
+		func([]*clientv3.Event) error { return nil },
+		false, /* withPrefix */
+	)
+	watcher.SetReloadOnCompaction()
+
+	type watchResult struct {
+		revision int64
+		err      error
+	}
+	watchDone := make(chan watchResult, 1)
+	go func() {
+		revision, watchErr := watcher.watch(ctx, initialResp.Header.Revision)
+		watchDone <- watchResult{revision: revision, err: watchErr}
+	}()
+
+	select {
+	case value := <-loadedValues:
+		re.Equal("after-compaction", value)
+	case <-time.After(3 * time.Second):
+		suite.T().Fatal("watcher did not reload the compacted snapshot")
+	}
+	result := <-watchDone
+	re.NoError(result.err)
+	re.GreaterOrEqual(result.revision, updatedResp.Header.Revision+1)
+}
+
+func (suite *loopWatcherTestSuite) TestWatcherStopsCompactionReloadWhenContextCanceled() {
+	re := suite.Require()
+	const key = "TestWatcherStopsCompactionReloadWhenContextCanceled"
+	putResp, err := suite.client.Put(suite.ctx, key, "value")
+	re.NoError(err)
+
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	putCalls := 0
+	postCalls := 0
+	watcher := NewLoopWatcher(
+		ctx,
+		&suite.wg,
+		suite.client,
+		"test",
+		key,
+		func([]*clientv3.Event) error { return nil },
+		func(kv *mvccpb.KeyValue) error {
+			putCalls++
+			re.Equal(key, string(kv.Key))
+			return nil
+		},
+		func(*mvccpb.KeyValue) error { return nil },
+		func([]*clientv3.Event) error {
+			// Make the load succeed just as the watcher is stopped.
+			postCalls++
+			cancel()
+			return nil
+		},
+		false, /* withPrefix */
+	)
+	watcher.SetReloadOnCompaction()
+
+	revision, shouldContinue := watcher.reloadWithRetry(ctx)
+	re.False(shouldContinue)
+	re.GreaterOrEqual(revision, putResp.Header.Revision+1)
+	re.Equal(1, putCalls)
+	re.Equal(1, postCalls)
+
+	revision, shouldContinue = watcher.reloadWithRetry(ctx)
+	re.False(shouldContinue)
+	re.Zero(revision)
+	re.Equal(1, putCalls)
+	re.Equal(2, postCalls)
+}
+
+func (suite *loopWatcherTestSuite) TestWatcherRetriesReconciliationAfterPostCallbackFailure() {
+	re := suite.Require()
+	const prefix = "TestWatcherRetriesReconciliationAfterPostCallbackFailure/"
+	key := prefix + "deleted"
+	suite.put(re, key, "value")
+
+	cache := make(map[string]string)
+	var pending map[string]string
+	postErr := errors.New("post callback failed")
+	failPost := false
+	watcher := NewLoopWatcher(
+		suite.ctx,
+		&suite.wg,
+		suite.client,
+		"test",
+		prefix,
+		func([]*clientv3.Event) error {
+			pending = maps.Clone(cache)
+			return nil
+		},
+		func(kv *mvccpb.KeyValue) error {
+			pending[string(kv.Key)] = string(kv.Value)
+			return nil
+		},
+		func(kv *mvccpb.KeyValue) error {
+			delete(pending, string(kv.Key))
+			return nil
+		},
+		func([]*clientv3.Event) error {
+			if failPost {
+				return postErr
+			}
+			cache = pending
+			return nil
+		},
+		true, /* withPrefix */
+	)
+	watcher.SetReconcileDeletedKeys()
+
+	_, err := watcher.load(suite.ctx)
+	re.NoError(err)
+	re.Equal(map[string]string{key: "value"}, cache)
+
+	_, err = suite.client.Delete(suite.ctx, key)
+	re.NoError(err)
+	failPost = true
+	_, err = watcher.load(suite.ctx)
+	re.ErrorIs(err, postErr)
+	re.Equal(map[string]string{key: "value"}, cache)
+
+	failPost = false
+	_, err = watcher.load(suite.ctx)
+	re.NoError(err)
+	re.Empty(cache)
+}
+
+func (suite *loopWatcherTestSuite) TestWatcherCommitsPartialReconciliationProgress() {
+	re := suite.Require()
+	const prefix = "TestWatcherCommitsPartialReconciliationProgress/"
+	firstKey := prefix + "first"
+	secondKey := prefix + "second"
+	suite.put(re, firstKey, "first")
+	suite.put(re, secondKey, "second")
+
+	cache := make(map[string]string)
+	transientErr := errors.New("transient delete failure")
+	duplicateDeleteErr := errors.New("delete callback called twice")
+	failSecondDelete := true
+	watcher := NewLoopWatcher(
+		suite.ctx,
+		&suite.wg,
+		suite.client,
+		"test",
+		prefix,
+		func([]*clientv3.Event) error { return nil },
+		func(kv *mvccpb.KeyValue) error {
+			cache[string(kv.Key)] = string(kv.Value)
+			return nil
+		},
+		func(kv *mvccpb.KeyValue) error {
+			key := string(kv.Key)
+			if key == secondKey && failSecondDelete {
+				failSecondDelete = false
+				return transientErr
+			}
+			if _, ok := cache[key]; !ok {
+				return duplicateDeleteErr
+			}
+			delete(cache, key)
+			return nil
+		},
+		func([]*clientv3.Event) error { return nil },
+		true, /* withPrefix */
+	)
+	watcher.SetReconcileDeletedKeys()
+
+	_, err := watcher.load(suite.ctx)
+	re.NoError(err)
+	re.Len(cache, 2)
+
+	_, err = suite.client.Delete(suite.ctx, prefix, clientv3.WithPrefix())
+	re.NoError(err)
+	_, err = watcher.load(suite.ctx)
+	re.ErrorIs(err, transientErr)
+	re.Equal(map[string]string{secondKey: "second"}, cache)
+
+	_, err = watcher.load(suite.ctx)
+	re.NoError(err)
+	re.Empty(cache)
+}
+
+func (suite *loopWatcherTestSuite) TestWatcherRetriesWatchDeleteAfterPostCallbackFailure() {
+	re := suite.Require()
+	const prefix = "TestWatcherRetriesWatchDeleteAfterPostCallbackFailure/"
+	key := prefix + "deleted"
+	suite.put(re, key, "value")
+
+	ctx, cancel := context.WithCancel(suite.ctx)
+	cache := make(map[string]string)
+	var pending map[string]string
+	postErr := errors.New("post callback failed")
+	failPost := false
+	watcher := NewLoopWatcher(
+		ctx,
+		&suite.wg,
+		suite.client,
+		"test",
+		prefix,
+		func([]*clientv3.Event) error {
+			pending = maps.Clone(cache)
+			return nil
+		},
+		func(kv *mvccpb.KeyValue) error {
+			pending[string(kv.Key)] = string(kv.Value)
+			return nil
+		},
+		func(kv *mvccpb.KeyValue) error {
+			delete(pending, string(kv.Key))
+			return nil
+		},
+		func([]*clientv3.Event) error {
+			if failPost {
+				cancel()
+				return postErr
+			}
+			cache = pending
+			return nil
+		},
+		true, /* withPrefix */
+	)
+	watcher.SetReconcileDeletedKeys()
+
+	revision, err := watcher.load(ctx)
+	re.NoError(err)
+	re.Equal(map[string]string{key: "value"}, cache)
+
+	failPost = true
+	_, err = suite.client.Delete(suite.ctx, key)
+	re.NoError(err)
+	_, err = watcher.watch(ctx, revision)
+	re.NoError(err)
+	re.Equal(map[string]string{key: "value"}, cache)
+
+	failPost = false
+	_, err = watcher.load(suite.ctx)
+	re.NoError(err)
+	re.Empty(cache)
+}
+
+func (suite *loopWatcherTestSuite) TestWatcherReloadsFailedAtomicWatchBatch() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	const prefix = "TestWatcherReloadsFailedAtomicWatchBatch/"
+	validKey := prefix + "valid"
+	invalidKey := prefix + "invalid"
+	initial, err := suite.client.Get(ctx, prefix, clientv3.WithPrefix())
+	re.NoError(err)
+
+	cache := make(map[string]string)
+	var pending map[string]string
+	invalidErr := errors.New("invalid watch value")
+	firstFailure := make(chan struct{})
+	published := make(chan struct{}, 1)
+	failed := false
+	watcher := NewLoopWatcher(
+		ctx,
+		&sync.WaitGroup{},
+		suite.client,
+		"test",
+		prefix,
+		func([]*clientv3.Event) error {
+			pending = maps.Clone(cache)
+			return nil
+		},
+		func(kv *mvccpb.KeyValue) error {
+			key := string(kv.Key)
+			if key == invalidKey {
+				if !failed {
+					failed = true
+					if _, err := suite.client.Delete(suite.ctx, invalidKey); err != nil {
+						return err
+					}
+					close(firstFailure)
+				}
+				return invalidErr
+			}
+			pending[key] = string(kv.Value)
+			return nil
+		},
+		func(kv *mvccpb.KeyValue) error {
+			delete(pending, string(kv.Key))
+			return nil
+		},
+		func(events []*clientv3.Event) error {
+			for _, event := range events {
+				if string(event.Kv.Key) == invalidKey {
+					return invalidErr
+				}
+			}
+			cache = pending
+			if cache[validKey] == "valid" {
+				select {
+				case published <- struct{}{}:
+				default:
+				}
+			}
+			return nil
+		},
+		true, /* withPrefix */
+	)
+	watcher.SetConsistentLoad()
+	watcher.SetAtomicLoadCallbacks()
+	watcher.SetReconcileDeletedKeys()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := watcher.watch(ctx, initial.Header.Revision+1)
+		done <- err
+	}()
+
+	_, err = suite.client.Txn(ctx).Then(
+		clientv3.OpPut(validKey, "valid"),
+		clientv3.OpPut(invalidKey, "invalid"),
+	).Commit()
+	re.NoError(err)
+
+	select {
+	case <-firstFailure:
+	case <-time.After(3 * time.Second):
+		suite.T().Fatal("watcher did not process the failed batch")
+	}
+	select {
+	case <-published:
+	case <-time.After(3 * time.Second):
+		suite.T().Fatal("watcher did not reload the valid event from the failed batch")
+	}
+	re.Equal(map[string]string{validKey: "valid"}, cache)
+
+	cancel()
+	select {
+	case err := <-done:
+		re.NoError(err)
+	case <-time.After(3 * time.Second):
+		suite.T().Fatal("watcher did not stop")
+	}
+}
+
+func (suite *loopWatcherTestSuite) TestWatcherRetriesFailedCompactionReloadWithBackoff() {
+	re := suite.Require()
+	ctx, cancel := context.WithTimeout(suite.ctx, 3*time.Second)
+	defer cancel()
+
+	const key = "TestWatcherRetriesFailedCompactionReloadWithBackoff"
+	suite.put(re, key, "invalid")
+	resp, err := EtcdKVGet(suite.client, key)
+	re.NoError(err)
+	watchRevision := resp.Header.Revision
+	advanceResp, err := suite.client.Put(ctx, key+"-advance-revision", "")
+	re.NoError(err)
+	_, err = suite.etcd.Server.Compact(ctx, &etcdserverpb.CompactionRequest{Revision: advanceResp.Header.Revision})
+	re.NoError(err)
+
+	callbackErr := errors.New("callback failed")
+	var callbackTimes []time.Time
+	watcher := NewLoopWatcher(
+		ctx,
+		&sync.WaitGroup{},
+		suite.client,
+		"test",
+		key,
+		func([]*clientv3.Event) error { return nil },
+		func(*mvccpb.KeyValue) error {
+			callbackTimes = append(callbackTimes, time.Now())
+			if len(callbackTimes) < 3 {
+				return callbackErr
+			}
+			cancel()
+			return nil
+		},
+		func(*mvccpb.KeyValue) error { return nil },
+		func([]*clientv3.Event) error { return nil },
+		false, /* withPrefix */
+	)
+	watcher.reloadOnCompaction = true
+	watcher.watchChangeRetryInterval = 50 * time.Millisecond
+
+	_, err = watcher.watch(ctx, watchRevision)
+	re.NoError(err)
+	re.Len(callbackTimes, 3)
+	re.GreaterOrEqual(callbackTimes[1].Sub(callbackTimes[0]), 45*time.Millisecond)
+	re.GreaterOrEqual(callbackTimes[2].Sub(callbackTimes[1]), 95*time.Millisecond)
+}
+
 func (suite *loopWatcherTestSuite) TestWatcherRequestProgress() {
 	re := suite.Require()
 	checkWatcherRequestProgress := func(injectWatchChanBlock bool) {
+		ctx, cancel := context.WithCancel(suite.ctx)
+		defer cancel()
 		fname := testutil.InitTempFileLogger("debug")
 		defer os.RemoveAll(fname)
+		watcherName := "request-progress-test"
+		if injectWatchChanBlock {
+			watcherName = "request-progress-block-test"
+		}
+		startResp, err := suite.client.Put(ctx, watcherName+"-advance", "start")
+		re.NoError(err)
+		advancedResp, err := suite.client.Put(ctx, watcherName+"-advance", "advanced")
+		re.NoError(err)
 
 		watcher := NewLoopWatcher(
-			suite.ctx,
-			&suite.wg,
+			ctx,
+			&sync.WaitGroup{},
 			suite.client,
-			"test",
+			watcherName,
 			"TestWatcherChanBlock",
 			func([]*clientv3.Event) error { return nil },
 			func(*mvccpb.KeyValue) error { return nil },
@@ -745,11 +1767,14 @@ func (suite *loopWatcherTestSuite) TestWatcherRequestProgress() {
 		)
 		watcher.watchChTimeoutDuration = 2 * RequestProgressInterval
 
-		suite.wg.Add(1)
+		type watchResult struct {
+			revision int64
+			err      error
+		}
+		watchDone := make(chan watchResult, 1)
 		go func() {
-			defer suite.wg.Done()
-			_, err := watcher.watch(suite.ctx, 0)
-			re.NoError(err)
+			revision, err := watcher.watch(ctx, startResp.Header.Revision)
+			watchDone <- watchResult{revision: revision, err: err}
 		}()
 
 		if injectWatchChanBlock {
@@ -765,9 +1790,20 @@ func (suite *loopWatcherTestSuite) TestWatcherRequestProgress() {
 			testutil.Eventually(re, func() bool {
 				b, err := os.ReadFile(fname)
 				re.NoError(err)
-				l := string(b)
-				return strings.Contains(l, "watcher receives progress notify in watch loop")
+				for line := range strings.SplitSeq(string(b), "\n") {
+					if strings.Contains(line, "watcher receives progress notify in watch loop") &&
+						strings.Contains(line, watcherName) {
+						return true
+					}
+				}
+				return false
 			})
+		}
+		cancel()
+		result := <-watchDone
+		re.NoError(result.err)
+		if !injectWatchChanBlock {
+			re.GreaterOrEqual(result.revision, advancedResp.Header.Revision+1)
 		}
 	}
 	checkWatcherRequestProgress(false)

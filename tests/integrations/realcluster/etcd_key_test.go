@@ -81,13 +81,15 @@ var (
 		"/pd/cluster_id",
 	}
 	// The keys that prefix is `/ms`.
+	// Note: `expected_primary` is no longer present in steady state. It is only
+	// written transiently by the `{service}/primary/transfer` API and is deleted
+	// once the target wins the campaign (or expires via its TTL), so it must not be
+	// listed as an always-present key here.
 	msKeys = []string{
 		"",
 		"/ms//scheduling/primary",
-		"/ms//scheduling/primary/expected_primary",
 		"/ms//scheduling/registry/http://...:",
 		"/ms//tso//primary",
-		"/ms//tso//primary/expected_primary",
 		"/ms//tso/registry/http://...:",
 	}
 	// These keys with `/pd` are only in `ms` mode.

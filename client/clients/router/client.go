@@ -290,7 +290,7 @@ func requestFinisher(resp *pdpb.QueryRegionResponse) batch.FinisherFunc[*Request
 		} else if req.prevKey != nil {
 			id = resp.PrevKeyIdMap[prevKeyIdx]
 			prevKeyIdx++
-		} else if req.id != 0 {
+		} else {
 			id = req.id
 		}
 		if regionResp, ok := resp.RegionsById[id]; ok {
@@ -728,30 +728,13 @@ func (c *Cli) sendToMs(ctx context.Context) (processFn, string) {
 type recvFn func() (*pdpb.QueryRegionResponse, error)
 type sendFn func(*pdpb.QueryRegionRequest) error
 
-func (c *Cli) processRequestsInner(send sendFn, recv recvFn) error {
-	var (
-		requests     = c.batchController.GetCollectedRequests()
-		traceRegions = make([]*trace.Region, 0, len(requests))
-		spans        = make([]opentracing.Span, 0, len(requests))
-	)
-	for _, req := range requests {
-		traceRegions = append(traceRegions, trace.StartRegion(req.requestCtx, "pdclient.regionReqSend"))
-		if span := opentracing.SpanFromContext(req.requestCtx); span != nil && span.Tracer() != nil {
-			spans = append(spans, span.Tracer().StartSpan("pdclient.processRegionRequests", opentracing.ChildOf(span.Context())))
-		}
-	}
-	defer func() {
-		for i := range spans {
-			spans[i].Finish()
-		}
-		for i := range traceRegions {
-			traceRegions[i].End()
-		}
-	}()
-
+// buildQueryRegionRequest converts the collected requests into one QueryRegion
+// request. A request with neither key nor prevKey is an ID query, so the entire
+// uint64 ID range, including zero, is preserved.
+func buildQueryRegionRequest(clusterID uint64, requests []*Request) *pdpb.QueryRegionRequest {
 	queryReq := &pdpb.QueryRegionRequest{
 		Header: &pdpb.RequestHeader{
-			ClusterId: c.svcDiscovery.GetClusterID(),
+			ClusterId: clusterID,
 		},
 		Keys:     make([][]byte, 0, len(requests)),
 		PrevKeys: make([][]byte, 0, len(requests)),
@@ -765,12 +748,36 @@ func (c *Cli) processRequestsInner(send sendFn, recv recvFn) error {
 			queryReq.Keys = append(queryReq.Keys, req.key)
 		} else if req.prevKey != nil {
 			queryReq.PrevKeys = append(queryReq.PrevKeys, req.prevKey)
-		} else if req.id != 0 {
-			queryReq.Ids = append(queryReq.Ids, req.id)
 		} else {
-			panic("invalid region query request received")
+			queryReq.Ids = append(queryReq.Ids, req.id)
 		}
 	}
+	return queryReq
+}
+
+func (c *Cli) processRequestsInner(send sendFn, recv recvFn) error {
+	var (
+		requests = c.batchController.GetCollectedRequests()
+		spans    = make([]opentracing.Span, 0, len(requests))
+	)
+	traceCtx := context.Background()
+	if len(requests) > 0 {
+		traceCtx = requests[0].requestCtx
+	}
+	traceRegion := trace.StartRegion(traceCtx, "pdclient.regionReqSendBatch")
+	for _, req := range requests {
+		if span := opentracing.SpanFromContext(req.requestCtx); span != nil && span.Tracer() != nil {
+			spans = append(spans, span.Tracer().StartSpan("pdclient.processRegionRequests", opentracing.ChildOf(span.Context())))
+		}
+	}
+	defer func() {
+		for i := len(spans) - 1; i >= 0; i-- {
+			spans[i].Finish()
+		}
+		traceRegion.End()
+	}()
+
+	queryReq := buildQueryRegionRequest(c.svcDiscovery.GetClusterID(), requests)
 	start := time.Now()
 	err := send(queryReq)
 	if err != nil {

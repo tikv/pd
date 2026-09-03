@@ -81,6 +81,26 @@ func TestRUCollectorCollectSingleKeyspace(t *testing.T) {
 	re.Equal(metering.NewRUValue(40.0), record[meteringDataTiFlashRUV2Field])
 }
 
+func TestRUCollectorUsesConsumption(t *testing.T) {
+	re := require.New(t)
+	collector := newRUCollector()
+
+	collector.Collect(&consumptionItem{
+		keyspaceName: testKeyspaceName,
+		Consumption: &rmpb.Consumption{
+			RRU:        12,
+			WRU:        8,
+			WriteBytes: 1024,
+		},
+	})
+
+	records := collector.Aggregate()
+	re.Len(records, 1)
+	record := records[0]
+	re.Equal(metering.NewRUValue(20.0), record[meteringDataOLTPRUField])
+	re.Equal(metering.NewBytesValue(1024), record[meteringDataWriteBytesField])
+}
+
 func TestRUCollectorCollectMultipleKeyspaces(t *testing.T) {
 	re := require.New(t)
 	collector := newRUCollector()

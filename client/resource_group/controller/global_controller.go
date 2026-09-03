@@ -17,6 +17,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	goerrors "errors"
 	"slices"
 	"strings"
 	"sync"
@@ -25,6 +26,8 @@ import (
 
 	"github.com/gogo/protobuf/proto"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -144,11 +147,12 @@ var _ ResourceGroupKVInterceptor = (*ResourceGroupsController)(nil)
 
 // ResourceGroupsController implements ResourceGroupKVInterceptor.
 type ResourceGroupsController struct {
-	clientUniqueID   uint64
-	provider         ResourceGroupProvider
-	groupsController sync.Map
-	ruConfig         *RUConfig
-	keyspaceID       uint32
+	clientUniqueID      uint64
+	provider            ResourceGroupProvider
+	groupsController    sync.Map
+	requestSourceStates sync.Map
+	ruConfig            *RUConfig
+	keyspaceID          uint32
 
 	loopCtx    context.Context
 	loopCancel func()
@@ -343,7 +347,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			}
 		}
 
-		watchConfigChannel, err = c.provider.Watch(ctx, pd.ControllerConfigPathPrefixBytes, opt.WithRev(cfgRevision), opt.WithPrefix())
+		watchConfigChannel, err = c.provider.Watch(ctx, pd.ControllerConfigPathPrefixBytes, opt.WithRev(cfgRevision))
 		if err != nil {
 			log.Warn("watch resource group config failed", zap.Error(err))
 		}
@@ -375,7 +379,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					}
 				}
 				if watchConfigChannel == nil {
-					watchConfigChannel, err = c.provider.Watch(ctx, pd.ControllerConfigPathPrefixBytes, opt.WithRev(cfgRevision), opt.WithPrefix())
+					watchConfigChannel, err = c.provider.Watch(ctx, pd.ControllerConfigPathPrefixBytes, opt.WithRev(cfgRevision))
 					if err != nil {
 						log.Warn("watch resource group config failed", zap.Error(err))
 						watchRetryTimer.Reset(watchRetryInterval)
@@ -386,6 +390,10 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			/* channels */
 			case <-c.loopCtx.Done():
 				metrics.ResourceGroupStatusGauge.Reset()
+				c.requestSourceStates.Range(func(_, v any) bool {
+					v.(*requestSourceMetricsState).cleanup()
+					return true
+				})
 				return
 			case <-c.responseDeadlineCh:
 				c.run.inDegradedMode.Store(true)
@@ -435,7 +443,13 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 							continue
 						}
 						// If the resource group is marked as tombstone before, re-create the resource group controller.
-						newGC, err := newGroupCostController(group, c.ruConfig, c.lowTokenNotifyChan, c.tokenBucketUpdateChan)
+						newGC, err := newGroupCostController(
+							group,
+							c.ruConfig,
+							c.lowTokenNotifyChan,
+							c.tokenBucketUpdateChan,
+							c.getOrCreateRequestSourceMetricsState(name),
+						)
 						if err != nil {
 							log.Warn("[resource group controller] re-create resource group cost controller for tombstone failed",
 								zap.String("name", name), zap.Error(err))
@@ -525,10 +539,80 @@ func (c *ResourceGroupsController) loadOrStoreGroupController(name string, gc *g
 	return tmp.(*groupCostController), loaded
 }
 
+func (c *ResourceGroupsController) getOrCreateRequestSourceMetricsState(name string) *requestSourceMetricsState {
+	if state, ok := c.requestSourceStates.Load(name); ok {
+		return state.(*requestSourceMetricsState)
+	}
+	state := newRequestSourceMetricsState(name)
+	actual, _ := c.requestSourceStates.LoadOrStore(name, state)
+	return actual.(*requestSourceMetricsState)
+}
+
+func (c *ResourceGroupsController) cleanupRequestSourceMetricsState(name string) {
+	if v, loaded := c.requestSourceStates.LoadAndDelete(name); loaded {
+		v.(*requestSourceMetricsState).cleanup()
+	}
+}
+
 // NewResourceGroupNotExistErr returns a new error that indicates the resource group does not exist.
 // It's exported for testing.
 func NewResourceGroupNotExistErr(name string) error {
 	return &errs.ErrClientGetResourceGroup{ResourceGroupName: name, Cause: "resource group does not exist"}
+}
+
+func unwrapGetResourceGroupError(err error) error {
+	for err != nil {
+		var groupErr *errs.ErrClientGetResourceGroup
+		if !goerrors.As(err, &groupErr) || groupErr.Err == nil || groupErr.Err == err {
+			return err
+		}
+		err = groupErr.Err
+	}
+	return nil
+}
+
+func normalizeGetResourceGroupError(err error) error {
+	switch {
+	case goerrors.Is(err, context.Canceled):
+		return context.Canceled
+	case goerrors.Is(err, context.DeadlineExceeded):
+		return context.DeadlineExceeded
+	default:
+		return err
+	}
+}
+
+func isResourceGroupNotFoundError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "PD:resourcemanager:ErrGroupNotExists") ||
+		strings.Contains(msg, "resource group does not exist")
+}
+
+func (c *ResourceGroupsController) shouldUseDegradedResourceGroup(err error) bool {
+	if c.degradedRUSettings == nil || err == nil {
+		return false
+	}
+	if isResourceGroupNotFoundError(err) {
+		return false
+	}
+	if goerrors.Is(err, context.Canceled) || goerrors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	causeErr := unwrapGetResourceGroupError(err)
+	if errs.IsLeaderChange(causeErr) {
+		return true
+	}
+	switch status.Code(causeErr) {
+	case codes.Canceled:
+		return false
+	case codes.Unavailable, codes.DeadlineExceeded:
+		return true
+	default:
+		return false
+	}
 }
 
 func (c *ResourceGroupsController) getDegradedResourceGroup(resourceGroupName string) *rmpb.ResourceGroup {
@@ -559,11 +643,11 @@ func (c *ResourceGroupsController) tryGetResourceGroupController(
 	// Call gRPC to fetch the resource group info.
 	group, err := c.provider.GetResourceGroup(ctx, name)
 	if err != nil {
-		if c.degradedRUSettings != nil {
+		if c.shouldUseDegradedResourceGroup(err) {
 			isUseDegradedResourceGroup = true
 			group = c.getDegradedResourceGroup(name)
 		} else {
-			return nil, err
+			return nil, normalizeGetResourceGroupError(err)
 		}
 	}
 	if group == nil {
@@ -574,7 +658,13 @@ func (c *ResourceGroupsController) tryGetResourceGroupController(
 		return gc, nil
 	}
 	// Initialize the resource group controller.
-	gc, err = newGroupCostController(group, c.ruConfig, c.lowTokenNotifyChan, c.tokenBucketUpdateChan)
+	gc, err = newGroupCostController(
+		group,
+		c.ruConfig,
+		c.lowTokenNotifyChan,
+		c.tokenBucketUpdateChan,
+		c.getOrCreateRequestSourceMetricsState(name),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -606,15 +696,23 @@ func (c *ResourceGroupsController) tombstoneGroupCostController(name string) {
 		log.Warn("[resource group controller] get default resource group meta for tombstone failed",
 			zap.String("name", name), zap.Error(err))
 		// Directly delete the resource group controller if the default group is not available.
+		c.cleanupRequestSourceMetricsState(name)
 		c.groupsController.Delete(name)
 		return
 	}
 	// Create a default resource group controller for the tombstone resource group independently.
-	gc, err := newGroupCostController(defaultGC.getMeta(), c.ruConfig, c.lowTokenNotifyChan, c.tokenBucketUpdateChan)
+	gc, err := newGroupCostController(
+		defaultGC.getMeta(),
+		c.ruConfig,
+		c.lowTokenNotifyChan,
+		c.tokenBucketUpdateChan,
+		c.getOrCreateRequestSourceMetricsState(name),
+	)
 	if err != nil {
 		log.Warn("[resource group controller] create default resource group cost controller for tombstone failed",
 			zap.String("name", name), zap.Error(err))
 		// Directly delete the resource group controller if the default group controller cannot be created.
+		c.cleanupRequestSourceMetricsState(name)
 		c.groupsController.Delete(name)
 		return
 	}
@@ -636,8 +734,10 @@ func (c *ResourceGroupsController) cleanUpResourceGroup() {
 		gc.mu.Unlock()
 		if equalRU(latestConsumption, *gc.run.consumption) {
 			if gc.inactive || gc.tombstone.Load() {
+				c.cleanupRequestSourceMetricsState(resourceGroupName)
 				c.groupsController.Delete(resourceGroupName)
 				metrics.ResourceGroupStatusGauge.DeleteLabelValues(resourceGroupName, resourceGroupName)
+				gc.metrics.deletePagingLabels(resourceGroupName)
 				return true
 			}
 			gc.inactive = true
@@ -683,9 +783,7 @@ func (c *ResourceGroupsController) collectTokenBucketRequests(ctx context.Contex
 		gc := value.(*groupCostController)
 		request := gc.collectRequestAndConsumption(typ)
 		if request != nil {
-			request.KeyspaceId = &rmpb.KeyspaceIDValue{
-				Value: c.keyspaceID,
-			}
+			request.KeyspaceId = &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: c.keyspaceID}}
 			c.run.currentRequests = append(c.run.currentRequests, request)
 			gc.metrics.tokenRequestCounter.Inc()
 		}
@@ -803,6 +901,27 @@ func (c *ResourceGroupsController) GetResourceGroup(resourceGroupName string) (*
 		return nil, err
 	}
 	return gc.getMeta(), nil
+}
+
+// ResourceGroupRuntimeState describes generic local runtime signals derived
+// from token bucket responses.
+type ResourceGroupRuntimeState struct {
+	// HasLimitedBurst is true when the request-unit token bucket has a finite
+	// burst limit instead of unlimited burst.
+	HasLimitedBurst bool
+}
+
+// GetResourceGroupRuntimeState returns the resource group's local runtime
+// state. The second return value is false when the controller has no usable
+// local state for the group.
+func (c *ResourceGroupsController) GetResourceGroupRuntimeState(resourceGroupName string) (ResourceGroupRuntimeState, bool) {
+	gc, ok := c.loadGroupController(resourceGroupName)
+	if !ok || gc.tombstone.Load() || !gc.initialRequestCompleted.Load() {
+		return ResourceGroupRuntimeState{}, false
+	}
+	return ResourceGroupRuntimeState{
+		HasLimitedBurst: !gc.burstable.Load(),
+	}, true
 }
 
 // ReportConsumption is used to report ru consumption directly.

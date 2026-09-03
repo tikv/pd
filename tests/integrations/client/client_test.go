@@ -953,7 +953,7 @@ func TestConfigTTLAfterTransferLeader(t *testing.T) {
 			options.GetMaxSnapshotCount() == 999 &&
 			!options.IsLocationReplacementEnabled()
 	})
-	re.NoError(cluster.GetServer(leaderName).ResignLeader())
+	re.NoError(cluster.GetServer(leaderName).ResignLeaderWithRetry())
 	newLeaderName := cluster.WaitLeader()
 	re.NotEmpty(newLeaderName)
 	re.NotEqual(leaderName, newLeaderName)
@@ -1268,7 +1268,11 @@ func (suite *clientStatelessTestSuite) TestGetStore() {
 	re := suite.Require()
 	cluster := suite.srv.GetRaftCluster()
 	re.NotNil(cluster)
-	store := stores[0]
+	// Use stores[3]: this test destructively transitions it through
+	// offline -> tombstone, and stores[0..2] are the ones other tests in
+	// this suite heartbeat regions through (peers[0..2]) and expect to
+	// stay live for the rest of the suite.
+	store := stores[3]
 
 	// Get an up store should be OK.
 	n, err := suite.client.GetStore(context.Background(), store.GetId())
@@ -2342,7 +2346,7 @@ func (s *clientStatefulTestSuite) prepareKeyspacesForGCTest() {
 		CreateTime: time.Now().Unix(),
 	})
 	re.NoError(err)
-	re.Equal(uint32(1), ks1.Id)
+	re.Equal(uint32(1), ks1.GetId())
 
 	ks2, err := s.srv.GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{
 		Name:       "ks2",
@@ -2350,7 +2354,7 @@ func (s *clientStatefulTestSuite) prepareKeyspacesForGCTest() {
 		CreateTime: time.Now().Unix(),
 	})
 	re.NoError(err)
-	re.Equal(uint32(2), ks2.Id)
+	re.Equal(uint32(2), ks2.GetId())
 }
 
 func (s *clientStatefulTestSuite) TestAdvanceTxnSafePointBasic() {
@@ -2567,6 +2571,23 @@ func (s *clientStatefulTestSuite) TestGlobalGCBarriers() {
 	s.prepareKeyspacesForGCTest()
 	re := s.Require()
 	ctx := context.Background()
+	type barrierIDAndTS struct {
+		id string
+		ts uint64
+	}
+	sortedBarrierIDsAndTS := func(barriers []*gc.GlobalGCBarrierInfo) []barrierIDAndTS {
+		result := make([]barrierIDAndTS, 0, len(barriers))
+		for _, barrier := range barriers {
+			result = append(result, barrierIDAndTS{
+				id: barrier.BarrierID,
+				ts: barrier.BarrierTS,
+			})
+		}
+		sort.Slice(result, func(i, j int) bool {
+			return result[i].id < result[j].id
+		})
+		return result
+	}
 
 	var clients []gc.GCStatesClient
 	for _, keyspaceID := range []uint32{constants.NullKeyspaceID, 1, 2} {
@@ -2574,10 +2595,50 @@ func (s *clientStatefulTestSuite) TestGlobalGCBarriers() {
 		s.checkGlobalGCBarrier(re, "b1", 0)
 		clients = append(clients, cli)
 	}
+	for _, cli := range clients {
+		state, err := cli.GetGCState(ctx)
+		re.NoError(err)
+		re.False(state.HasGlobalGCBarriers())
+		_, err = state.GetGlobalGCBarriers()
+		re.Error(err)
+
+		state, err = cli.GetGCState(ctx, gc.ExcludeGlobalGCBarriers(false))
+		re.NoError(err)
+		re.True(state.HasGlobalGCBarriers())
+		barriers, err := state.GetGlobalGCBarriers()
+		re.NoError(err)
+		re.Empty(barriers)
+	}
+	_, err := s.srv.GetGCStateManager().SetGlobalGCBarrier(
+		ctx,
+		"expired",
+		1,
+		time.Second,
+		time.Now().Add(-2*time.Second),
+	)
+	re.NoError(err)
+	expectedExpired := []barrierIDAndTS{{id: "expired", ts: 1}}
+	for _, cli := range clients {
+		state, err := cli.GetGCState(ctx, gc.ExcludeGlobalGCBarriers(false))
+		re.NoError(err)
+		re.True(state.HasGlobalGCBarriers())
+		barriers, err := state.GetGlobalGCBarriers()
+		re.NoError(err)
+		re.Equal(expectedExpired, sortedBarrierIDsAndTS(barriers))
+		re.Zero(barriers[0].TTL)
+		re.True(barriers[0].IsExpired())
+	}
+	allStates, err := clients[0].GetAllKeyspacesGCStates(ctx, gc.ExcludeGlobalGCBarriers(false))
+	re.NoError(err)
+	allBarriers, err := allStates.GetGlobalGCBarriers()
+	re.NoError(err)
+	re.Equal(expectedExpired, sortedBarrierIDsAndTS(allBarriers))
 	// It doesn't matter what keyspace SetGlobalGCBarrier API is called on.
 	getCli := func() gc.GCStatesClient {
 		return clients[rand.IntN(len(clients))]
 	}
+	_, err = getCli().DeleteGlobalGCBarrier(ctx, "expired")
+	re.NoError(err)
 
 	b, err := getCli().SetGlobalGCBarrier(ctx, "b1", 10, math.MaxInt64)
 	re.NoError(err)
@@ -2645,6 +2706,50 @@ func (s *clientStatefulTestSuite) TestGlobalGCBarriers() {
 	_, err = getCli().SetGlobalGCBarrier(ctx, "b2", 20, math.MaxInt64)
 	re.NoError(err)
 	s.checkGlobalGCBarrier(re, "b2", 20)
+	expectedBarriers := []barrierIDAndTS{
+		{id: "b1", ts: 22},
+		{id: "b2", ts: 20},
+	}
+	for _, cli := range clients {
+		state, err := cli.GetGCState(ctx, gc.ExcludeGlobalGCBarriers(false))
+		re.NoError(err)
+		re.True(state.HasGlobalGCBarriers())
+		barriers, err := state.GetGlobalGCBarriers()
+		re.NoError(err)
+		re.Equal(expectedBarriers, sortedBarrierIDsAndTS(barriers))
+	}
+
+	_, err = clients[1].SetGCBarrier(ctx, "local-observer", 24, math.MaxInt64)
+	re.NoError(err)
+	state, err := clients[1].GetGCState(
+		ctx,
+		gc.ExcludeGCBarriers(false),
+		gc.ExcludeGlobalGCBarriers(false),
+	)
+	re.NoError(err)
+	re.True(state.HasGCBarriers())
+	localBarriers, err := state.GetGCBarriers()
+	re.NoError(err)
+	re.Len(localBarriers, 1)
+	re.Equal("local-observer", localBarriers[0].BarrierID)
+	re.True(state.HasGlobalGCBarriers())
+	globalBarriers, err := state.GetGlobalGCBarriers()
+	re.NoError(err)
+	re.Equal(expectedBarriers, sortedBarrierIDsAndTS(globalBarriers))
+
+	state, err = clients[1].GetGCState(
+		ctx,
+		gc.ExcludeGCBarriers(true),
+		gc.ExcludeGlobalGCBarriers(false),
+	)
+	re.NoError(err)
+	re.False(state.HasGCBarriers())
+	_, err = state.GetGCBarriers()
+	re.Error(err)
+	re.True(state.HasGlobalGCBarriers())
+	globalBarriers, err = state.GetGlobalGCBarriers()
+	re.NoError(err)
+	re.Equal(expectedBarriers, sortedBarrierIDsAndTS(globalBarriers))
 
 	for _, keyspaceID := range []uint32{constants.NullKeyspaceID, 1, 2} {
 		c := s.client.GetGCInternalController(keyspaceID)
@@ -2711,7 +2816,7 @@ func (s *clientStatefulTestSuite) TestGetAllKeyspaceGCStates() {
 		CreateTime: time.Now().Unix(),
 	})
 	re.NoError(err)
-	re.Equal(uint32(3), ks3.Id)
+	re.Equal(uint32(3), ks3.GetId())
 
 	// Modify some GC states and verify TestGetAllKeyspaceGCStates gets the correct result.
 	cli := s.client.GetGCStatesClient(constants.NullKeyspaceID)
@@ -2771,9 +2876,16 @@ func (s *clientStatefulTestSuite) TestGetAllKeyspaceGCStates() {
 	re.NoError(err)
 	res, err = cli.GetAllKeyspacesGCStates(ctx, gc.ExcludeGCBarriers(false), gc.ExcludeGlobalGCBarriers(false))
 	re.NoError(err)
-	state, ok = res.GCStates[2]
+	state1, ok := res.GCStates[1]
 	re.True(ok)
-	gcBarriers, err = state.GetGCBarriers()
+	re.True(state1.IsKeyspaceLevelGC)
+	state2, ok := res.GCStates[2]
+	re.True(ok)
+	re.True(state2.IsKeyspaceLevelGC)
+	state3, ok := res.GCStates[3]
+	re.True(ok)
+	re.False(state3.IsKeyspaceLevelGC)
+	gcBarriers, err = state2.GetGCBarriers()
 	re.NoError(err)
 	re.Equal("b4", gcBarriers[0].BarrierID)
 	re.Equal(uint64(14), gcBarriers[0].BarrierTS)

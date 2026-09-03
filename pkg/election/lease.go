@@ -16,12 +16,15 @@ package election
 
 import (
 	"context"
+	"strings"
 	"sync/atomic"
 	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
+	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
@@ -41,6 +44,8 @@ const (
 type Lease struct {
 	// purpose is used to show what this election for
 	purpose string
+	// name scopes test failpoints to one member.
+	name string
 	// etcd client and lease
 	client *clientv3.Client
 	lease  clientv3.Lease
@@ -48,17 +53,37 @@ type Lease struct {
 	// leaseTimeout and expireTime are used to control the lease's lifetime
 	leaseTimeout time.Duration
 	expireTime   atomic.Value
-	metrics      leaseMetrics
+	// closed guards Close against being run more than once. A leadership can be
+	// resigned concurrently from more than one path (e.g. a transfer API call and the
+	// election loop stepping down), and a lease is single-use, so the second Close
+	// must be a no-op instead of revoking an already-revoked lease and logging a
+	// spurious error.
+	closed  atomic.Bool
+	metrics leaseMetrics
 }
 
 // NewLease creates a new Lease instance.
-func NewLease(client *clientv3.Client, purpose string) *Lease {
+func NewLease(client *clientv3.Client, purpose, name string) *Lease {
 	return &Lease{
 		purpose: purpose,
+		name:    name,
 		client:  client,
 		lease:   clientv3.NewLease(client),
 		metrics: newLeaseMetrics(purpose),
 	}
+}
+
+// matchesFailpointTarget matches "<purpose>@<name>" for member-scoped failpoints.
+func (l *Lease) matchesFailpointTarget(val failpoint.Value) bool {
+	target, ok := val.(string)
+	if !ok {
+		return false
+	}
+	purpose, name, found := strings.Cut(target, "@")
+	if !found {
+		return false
+	}
+	return purpose == l.purpose && name == l.name
 }
 
 func (l *Lease) setID(id clientv3.LeaseID) {
@@ -106,12 +131,19 @@ func (l *Lease) Grant(leaseTimeout int64) error {
 	l.leaseTimeout = time.Duration(leaseTimeout) * time.Second
 	l.expireTime.Store(start.Add(time.Duration(leaseResp.TTL) * time.Second))
 	localTTLRemaining.register(l)
+	// A lease may be re-granted after being closed; clear the close guard so the
+	// next Close revokes this new grant.
+	l.closed.Store(false)
 	return nil
 }
 
-// Close releases the lease.
+// Close releases the lease. It is idempotent: only the first call revokes the lease
+// and tears down the client, subsequent calls are no-ops.
 func (l *Lease) Close() error {
 	if l == nil {
+		return nil
+	}
+	if !l.closed.CompareAndSwap(false, true) {
 		return nil
 	}
 	localTTLRemaining.unregister(l)
@@ -128,6 +160,17 @@ func (l *Lease) Close() error {
 			errs.ZapError(err))
 	}
 	return l.lease.Close()
+}
+
+// GetTimeoutSeconds returns the configured lease timeout in seconds, i.e. the
+// `leaseTimeout` the lease was granted with. It returns 0 when the lease is nil or
+// not granted yet; the caller is responsible for supplying a sensible default so a
+// non-positive timeout is never fed into an etcd lease grant.
+func (l *Lease) GetTimeoutSeconds() int64 {
+	if l == nil {
+		return 0
+	}
+	return int64(l.leaseTimeout / time.Second)
 }
 
 // IsExpired checks if the lease is expired. If it returns true,
@@ -254,6 +297,13 @@ func (l *Lease) keepAliveWorker(ctx context.Context, interval time.Duration) <-c
 				requestStart := time.Now()
 				lastRequestStart, _ := lastTime.Swap(requestStart).(time.Time)
 				res, err := l.lease.KeepAliveOnce(ctx1, l.GetID())
+				failpoint.Inject("keepAliveFailed", func(val failpoint.Value) {
+					// Inject after the request so etcd keeps the lease alive while
+					// the caller observes renewal failure.
+					if l.matchesFailpointTarget(val) {
+						res, err = nil, errors.New("keep alive failed")
+					}
+				})
 
 				// Record the duration of the `KeepAliveOnce` request.
 				l.metrics.observeKeepAliveRequestDurationMetrics(time.Since(requestStart), err)

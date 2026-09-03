@@ -16,6 +16,7 @@ package realcluster
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -46,17 +47,40 @@ func (s *rebootPDSuite) TestReloadLabel() {
 	re.NoError(err)
 	re.NotEmpty(resp.Stores)
 	firstStore := resp.Stores[0]
-	// TiFlash labels will be ["engine": "tiflash"]
-	// So we need to merge the labels
+	const zoneLabelKey = "zone"
 	storeLabels := map[string]string{
-		"zone": "zone1",
+		zoneLabelKey: "zone1",
 	}
+	expectedLabels := make(map[string]string, len(firstStore.Store.Labels)+len(storeLabels))
+	originalZoneKey, originalZone, hasOriginalZone := "", "", false
 	for _, label := range firstStore.Store.Labels {
-		storeLabels[label.Key] = label.Value
+		expectedLabels[label.Key] = label.Value
+		if !hasOriginalZone && strings.EqualFold(label.Key, zoneLabelKey) {
+			originalZoneKey, originalZone, hasOriginalZone = label.Key, label.Value, true
+		}
 	}
+	for key, value := range storeLabels {
+		expectedKey := key
+		if hasOriginalZone && strings.EqualFold(key, zoneLabelKey) {
+			expectedKey = originalZoneKey
+		}
+		expectedLabels[expectedKey] = value
+	}
+	// SetStoreLabels merges labels server-side. Do not echo existing labels
+	// back in the request because "engine" is reserved for TiKV/TiFlash.
 	re.NoError(pdHTTPCli.SetStoreLabels(ctx, firstStore.Store.ID, storeLabels))
 	defer func() {
-		re.NoError(pdHTTPCli.DeleteStoreLabel(ctx, firstStore.Store.ID, "zone"))
+		// The restarted client is closed before this cleanup runs because defers
+		// run in LIFO order, so use a fresh client to restore the store labels.
+		cleanupCli := http.NewClient("pd-real-cluster-test", getPDEndpoints(re))
+		defer cleanupCli.Close()
+		if hasOriginalZone {
+			re.NoError(cleanupCli.SetStoreLabels(ctx, firstStore.Store.ID, map[string]string{
+				originalZoneKey: originalZone,
+			}))
+			return
+		}
+		re.NoError(cleanupCli.DeleteStoreLabel(ctx, firstStore.Store.ID, zoneLabelKey))
 	}()
 
 	checkLabelsAreEqual := func() {
@@ -65,11 +89,10 @@ func (s *rebootPDSuite) TestReloadLabel() {
 
 		labelsMap := make(map[string]string)
 		for _, label := range resp.Store.Labels {
-			re.NotNil(label)
 			labelsMap[label.Key] = label.Value
 		}
 
-		for key, value := range storeLabels {
+		for key, value := range expectedLabels {
 			re.Equal(value, labelsMap[key])
 		}
 	}
@@ -78,5 +101,6 @@ func (s *rebootPDSuite) TestReloadLabel() {
 	// Restart to reload the label
 	s.cluster.restart()
 	pdHTTPCli = http.NewClient("pd-real-cluster-test", getPDEndpoints(re))
+	defer pdHTTPCli.Close()
 	checkLabelsAreEqual()
 }

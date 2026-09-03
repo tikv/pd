@@ -28,13 +28,13 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/ratelimit"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
-	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
 func TestMain(m *testing.M) {
@@ -80,6 +80,156 @@ func TestReloadConfig(t *testing.T) {
 	re.Equal(5, newOpt.GetMaxReplicas())
 	re.Equal(uint64(10), newOpt.GetMaxSnapshotCount())
 	re.Equal(int64(512), newOpt.GetMaxMovableHotPeerSize())
+}
+
+func TestReloadDefaultStoreLimit(t *testing.T) {
+	re := require.New(t)
+	oldAddPeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
+	oldRemovePeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer)
+	defer func() {
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, oldAddPeer)
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, oldRemovePeer)
+	}()
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, 15)
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, 15)
+
+	opt, err := newTestScheduleOption()
+	re.NoError(err)
+	opt.SetAllStoresLimit(storelimit.AddPeer, 60)
+	re.Equal(sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 15}, opt.GetScheduleConfig().DefaultStoreLimit)
+
+	storage := storage.NewStorageWithMemoryBackend()
+	re.NoError(opt.Persist(storage))
+
+	// Simulate a restarted process whose package-level default goes back to the built-in value.
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, 15)
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, 15)
+	newOpt, err := newTestScheduleOption()
+	re.NoError(err)
+	re.NoError(newOpt.Reload(storage))
+
+	expected := sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 15}
+	re.Equal(expected, newOpt.GetScheduleConfig().DefaultStoreLimit)
+	re.Equal(expected, newOpt.GetStoreLimit(100))
+
+	newOpt.SetStoreLimit(101, storelimit.RemovePeer, 70)
+	re.Equal(sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 70}, newOpt.GetStoreLimit(101))
+
+	cfg := newOpt.GetScheduleConfig().Clone()
+	cfg.DefaultStoreLimit.AddPeer = 0
+	newOpt.SetScheduleConfig(cfg)
+	re.NoError(newOpt.Persist(storage))
+
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, 15)
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, 15)
+	reloadedOpt, err := newTestScheduleOption()
+	re.NoError(err)
+	re.NoError(reloadedOpt.Reload(storage))
+	re.Equal(sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 15}, reloadedOpt.GetScheduleConfig().DefaultStoreLimit)
+	re.Equal(sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 15}, reloadedOpt.GetStoreLimit(102))
+}
+
+func TestDefaultStoreLimitAdjust(t *testing.T) {
+	re := require.New(t)
+	oldAddPeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
+	oldRemovePeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer)
+	defer func() {
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, oldAddPeer)
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, oldRemovePeer)
+	}()
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, 15)
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, 15)
+
+	cases := []struct {
+		name   string
+		config string
+		expect sc.StoreLimitConfig
+	}{
+		{
+			name: "preserve explicit zero",
+			config: `
+[schedule.default-store-limit]
+add-peer = 0
+remove-peer = 60
+`,
+			expect: sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 60},
+		},
+		{
+			name: "store balance rate backfills undefined field",
+			config: `
+[schedule]
+store-balance-rate = 50
+
+[schedule.default-store-limit]
+add-peer = 0
+`,
+			expect: sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 50},
+		},
+		{
+			name: "explicit default store limit wins over store balance rate",
+			config: `
+[schedule]
+store-balance-rate = 50
+
+[schedule.default-store-limit]
+add-peer = 60
+remove-peer = 70
+`,
+			expect: sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 70},
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			cfg := NewConfig()
+			meta, err := toml.Decode(testCase.config, cfg)
+			require.NoError(t, err)
+			require.NoError(t, cfg.Adjust(&meta, false))
+			require.Equal(t, testCase.expect, cfg.Schedule.DefaultStoreLimit)
+		})
+	}
+
+	schedule := &sc.ScheduleConfig{}
+	data := []byte(`{"store-balance-rate":50}`)
+	re.NoError(json.Unmarshal(data, schedule))
+	re.NoError(schedule.MigrateDeprecatedFlagsFromJSON(data))
+	re.Equal(sc.StoreLimitConfig{AddPeer: 50, RemovePeer: 50}, schedule.DefaultStoreLimit)
+
+	schedule = &sc.ScheduleConfig{}
+	data = []byte(`{"store-balance-rate":50,"default-store-limit":{"add-peer":0,"remove-peer":60}}`)
+	re.NoError(json.Unmarshal(data, schedule))
+	re.NoError(schedule.MigrateDeprecatedFlagsFromJSON(data))
+	re.Equal(sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 60}, schedule.DefaultStoreLimit)
+}
+
+func TestReloadLegacyStoreBalanceRate(t *testing.T) {
+	re := require.New(t)
+	oldAddPeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
+	oldRemovePeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer)
+	defer func() {
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, oldAddPeer)
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, oldRemovePeer)
+	}()
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, 15)
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, 15)
+
+	type legacyScheduleConfig struct {
+		StoreBalanceRate float64 `json:"store-balance-rate"`
+	}
+	type legacyConfig struct {
+		Schedule legacyScheduleConfig `json:"schedule"`
+	}
+	storage := storage.NewStorageWithMemoryBackend()
+	re.NoError(storage.SaveConfig(&legacyConfig{
+		Schedule: legacyScheduleConfig{StoreBalanceRate: 60},
+	}))
+
+	opt, err := newTestScheduleOption()
+	re.NoError(err)
+	re.NoError(opt.Reload(storage))
+	expected := sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 60}
+	re.Equal(expected, opt.GetScheduleConfig().DefaultStoreLimit)
+	re.Equal(expected, opt.GetStoreLimit(100))
+	re.Zero(opt.GetScheduleConfig().StoreBalanceRate)
 }
 
 func TestReloadUpgrade(t *testing.T) {
@@ -144,6 +294,17 @@ func TestValidation(t *testing.T) {
 	cfg.Schedule.LowSpaceRatio = 0.4
 	re.Error(cfg.Schedule.Validate())
 	cfg.Schedule.LowSpaceRatio = 0.8
+	re.NoError(cfg.Schedule.Validate())
+	cfg.Schedule.DefaultStoreLimit.AddPeer = -1
+	re.ErrorContains(cfg.Schedule.Validate(), "default-store-limit.add-peer")
+	cfg.Schedule.DefaultStoreLimit.AddPeer = math.Inf(1)
+	re.ErrorContains(cfg.Schedule.Validate(), "default-store-limit.add-peer")
+	cfg.Schedule.DefaultStoreLimit.AddPeer = 15
+	cfg.Schedule.DefaultStoreLimit.RemovePeer = -1
+	re.ErrorContains(cfg.Schedule.Validate(), "default-store-limit.remove-peer")
+	cfg.Schedule.DefaultStoreLimit.RemovePeer = math.NaN()
+	re.ErrorContains(cfg.Schedule.Validate(), "default-store-limit.remove-peer")
+	cfg.Schedule.DefaultStoreLimit.RemovePeer = 15
 	re.NoError(cfg.Schedule.Validate())
 	cfg.Schedule.TolerantSizeRatio = -0.6
 	re.Error(cfg.Schedule.Validate())
@@ -326,6 +487,23 @@ enable-make-up-replica = false
 disable-make-up-replica = false
 `)
 	re.Error(err)
+}
+
+func TestLegacyDisableRawKVRegionSplitConfigDoesNotPanic(t *testing.T) {
+	re := require.New(t)
+
+	re.NotPanics(func() {
+		cfg := NewConfig()
+		err := json.Unmarshal([]byte(`{"keyspace":{"disable-raw-kv-region-split":true}}`), cfg)
+		re.NoError(err)
+	})
+
+	re.NotPanics(func() {
+		cfg := NewConfig()
+		meta, err := toml.Decode("[keyspace]\ndisable-raw-kv-region-split = true\n", cfg)
+		re.NoError(err)
+		re.NoError(cfg.Adjust(&meta, false))
+	})
 }
 
 func TestPDServerConfig(t *testing.T) {
@@ -585,21 +763,65 @@ func TestRateLimitClone(t *testing.T) {
 	re.Zero(gdc.ConcurrencyLimit)
 }
 
-func TestKeyspaceConfigClone(t *testing.T) {
-	re := require.New(t)
-	cfg := &KeyspaceConfig{
-		PreAlloc:                 []string{"keyspace-1"},
-		MetaServiceGroups:        map[string]string{"group-1": "http://127.0.0.1:2379"},
-		CheckRegionSplitInterval: typeutil.NewDuration(10 * time.Millisecond),
-		WaitRegionSplitTimeout:   typeutil.NewDuration(1 * time.Minute),
+func TestAdjustMetaServiceGroups(t *testing.T) {
+	testCases := []struct {
+		name      string
+		groups    map[string]string
+		expected  map[string]string
+		expectErr bool
+		errorMsg  string
+	}{
+		{
+			name:     "trim group ID and endpoint",
+			groups:   map[string]string{" group-1 ": " http://127.0.0.1:2379 "},
+			expected: map[string]string{"group-1": "http://127.0.0.1:2379"},
+		},
+		{
+			name:     "multiple groups",
+			groups:   map[string]string{"group-1": "http://127.0.0.1:2379", " group-2 ": " http://127.0.0.1:2380 "}, //nolint:gocritic // intentional whitespace to verify trimming
+			expected: map[string]string{"group-1": "http://127.0.0.1:2379", "group-2": "http://127.0.0.1:2380"},
+		},
+		{
+			name:      "empty group ID after trim",
+			groups:    map[string]string{" ": "http://127.0.0.1:2379"},
+			expectErr: true,
+			errorMsg:  "[keyspace] meta-service group ID cannot be empty",
+		},
+		{
+			name:      "empty endpoint after trim",
+			groups:    map[string]string{"group-1": " "},
+			expectErr: true,
+			errorMsg:  "[keyspace] meta-service group addresses cannot be empty",
+		},
+		{
+			name:      "duplicate group ID after trim",
+			groups:    map[string]string{"group-1": "http://127.0.0.1:2379", " group-1 ": "http://127.0.0.1:2380"}, //nolint:gocritic // intentional whitespace to verify trimming
+			expectErr: true,
+			errorMsg:  "[keyspace] meta-service group ID cannot be duplicated: group-1",
+		},
+		{
+			name:      "group ID with slash is rejected",
+			groups:    map[string]string{"group/1": "http://127.0.0.1:2379"},
+			expectErr: true,
+			errorMsg:  "[keyspace] meta-service group ID cannot contain '/': group/1",
+		},
+		{
+			name:     "group ID with other special characters is allowed",
+			groups:   map[string]string{"group.1:8080": "http://127.0.0.1:2379"},
+			expected: map[string]string{"group.1:8080": "http://127.0.0.1:2379"},
+		},
 	}
 
-	re.NoError(cfg.Validate())
-	clone := cfg.Clone()
-	clone.MetaServiceGroups[""] = "http://127.0.0.1:2380"
-	re.Error(clone.Validate())
-
-	clone1 := cfg.Clone()
-	clone1.MetaServiceGroups["group-1"] = ""
-	re.Error(clone1.Validate())
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			err := AdjustMetaServiceGroups(testCase.groups)
+			if testCase.expectErr {
+				re.EqualError(err, testCase.errorMsg)
+				return
+			}
+			re.NoError(err)
+			re.Equal(testCase.expected, testCase.groups)
+		})
+	}
 }

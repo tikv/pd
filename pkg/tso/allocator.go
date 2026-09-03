@@ -20,19 +20,17 @@ import (
 	"fmt"
 	"runtime/trace"
 	"strconv"
-	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 
-	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
@@ -61,10 +59,13 @@ type Allocator struct {
 	// keyspaceGroupID is the keyspace group ID of the allocator.
 	keyspaceGroupID uint32
 	// for election use
-	member member.Election
-	// expectedPrimaryLease is used to store the expected primary lease.
-	expectedPrimaryLease atomic.Value // store as *election.LeaderLease
-	timestampOracle      *timestampOracle
+	member          member.Election
+	timestampOracle *timestampOracle
+	// timestampStateMu serializes timestamp initialization and reset.
+	// timestampStateID changes after each successful initialization and every reset,
+	// so an UpdateTSO failure can only reset the state it started with.
+	timestampStateMu sync.Mutex
+	timestampStateID uint64
 
 	// observability
 	tsoAllocatorRoleGauge prometheus.Gauge
@@ -130,12 +131,9 @@ func (a *Allocator) allocatorUpdater() {
 			if !a.isServing() || !a.IsInitialize() {
 				continue
 			}
+			stateIDBeforeUpdate := a.captureTimestampStateID()
 			if err := a.UpdateTSO(); err != nil {
-				log.Warn("failed to update allocator's timestamp, resetting the TSO allocator with leadership resignation",
-					append(a.logFields, errs.ZapError(err))...)
-				a.Reset(true)
-				// To wait for the allocator to be re-initialized next time.
-				continue
+				a.handleTSOUpdateFailure(stateIDBeforeUpdate, err)
 			}
 		case <-a.ctx.Done():
 			a.Reset(false)
@@ -156,8 +154,14 @@ func (a *Allocator) Close() {
 
 // Initialize will initialize the created TSO allocator.
 func (a *Allocator) Initialize() error {
+	a.timestampStateMu.Lock()
+	defer a.timestampStateMu.Unlock()
 	a.tsoAllocatorRoleGauge.Set(1)
-	return a.timestampOracle.syncTimestamp()
+	if err := a.timestampOracle.syncTimestamp(); err != nil {
+		return err
+	}
+	a.timestampStateID++
+	return nil
 }
 
 // IsInitialize is used to indicates whether this allocator is initialized.
@@ -183,6 +187,26 @@ func (a *Allocator) UpdateTSO() (err error) {
 	return err
 }
 
+func (a *Allocator) captureTimestampStateID() uint64 {
+	a.timestampStateMu.Lock()
+	defer a.timestampStateMu.Unlock()
+	return a.timestampStateID
+}
+
+func (a *Allocator) handleTSOUpdateFailure(stateIDBeforeUpdate uint64, err error) {
+	a.timestampStateMu.Lock()
+	defer a.timestampStateMu.Unlock()
+
+	if stateIDBeforeUpdate != a.timestampStateID {
+		log.Warn("ignored a stale allocator update failure because the timestamp state has changed",
+			append(a.logFields, errs.ZapError(err))...)
+		return
+	}
+	log.Warn("failed to update allocator's timestamp, resetting the TSO allocator with leadership resignation",
+		append(a.logFields, errs.ZapError(err))...)
+	a.resetAllocatorLocked(true)
+}
+
 // SetTSO sets the physical part with given TSO.
 func (a *Allocator) SetTSO(tso uint64, ignoreSmaller, skipUpperBoundCheck bool) error {
 	return a.timestampOracle.resetUserTimestamp(tso, ignoreSmaller, skipUpperBoundCheck)
@@ -202,6 +226,14 @@ func (a *Allocator) GenerateTSO(ctx context.Context, count uint32) (pdpb.Timesta
 
 // Reset is used to reset the TSO allocator, it will also reset the leadership if the `resetLeadership` flag is true.
 func (a *Allocator) Reset(resetLeadership bool) {
+	a.timestampStateMu.Lock()
+	defer a.timestampStateMu.Unlock()
+	a.resetAllocatorLocked(resetLeadership)
+}
+
+// resetAllocatorLocked resets the allocator. The caller must hold timestampStateMu.
+func (a *Allocator) resetAllocatorLocked(resetLeadership bool) {
+	a.timestampStateID++
 	a.tsoAllocatorRoleGauge.Set(0)
 	a.timestampOracle.resetTimestamp()
 	// Reset if it still has the leadership. Otherwise the data race may occur because of the re-campaigning.
@@ -246,13 +278,20 @@ func (a *Allocator) primaryElectionLoop() {
 		}
 
 		// To make sure the expected primary(if existed) and new primary are on the same server.
-		expectedPrimary := mcsutils.GetExpectedPrimaryFlag(a.member.Client(), &keypath.MsParam{
+		expectedPrimary, err := mcsutils.GetExpectedPrimaryFlag(a.member.Client(), &keypath.MsParam{
 			ServiceName: constant.TSOServiceName,
 			GroupID:     a.keyspaceGroupID,
 		})
-		// skip campaign the primary if the expected primary is not empty and not equal to the current memberValue.
+		if err != nil {
+			// Do not campaign on a read failure: an empty flag would be treated as
+			// "no transfer" and skip the affinity guard, so retry instead.
+			log.Warn("failed to get expected primary flag, retry later", append(a.logFields, errs.ZapError(err))...)
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+		// skip campaign the primary if the expected primary is not empty and not this member.
 		// expected primary ONLY SET BY `{service}/primary/transfer` API.
-		if len(expectedPrimary) > 0 && !strings.Contains(a.member.MemberValue(), expectedPrimary) {
+		if len(expectedPrimary) > 0 && !m.IsExpectedPrimary(expectedPrimary) {
 			log.Info("skip campaigning of tso primary and check later", append(a.logFields,
 				zap.String("expected-primary-id", expectedPrimary),
 				zap.String("cur-member-value", m.ParticipantString()))...)
@@ -260,14 +299,27 @@ func (a *Allocator) primaryElectionLoop() {
 			continue
 		}
 
-		a.campaignPrimary()
+		a.campaignPrimary(expectedPrimary)
 	}
 }
 
-func (a *Allocator) campaignPrimary() {
+// campaignPrimary campaigns the TSO primary for this keyspace group. expectedPrimary
+// is the value of the expected primary flag observed before campaigning (empty when
+// no transfer is in progress); it binds the campaign to the transfer target
+// atomically and is cleaned up once this member wins.
+func (a *Allocator) campaignPrimary(expectedPrimary string) {
 	log.Info("start to campaign the primary", a.logFields...)
 	lease := a.cfg.GetLease()
-	if err := a.member.Campaign(a.ctx, lease); err != nil {
+	msParam := &keypath.MsParam{
+		ServiceName: constant.TSOServiceName,
+		GroupID:     a.keyspaceGroupID,
+	}
+	m := a.member.(*member.Participant)
+	var cmps []clientv3.Cmp
+	if cmp := mcsutils.ExpectedPrimaryCmp(msParam, expectedPrimary); cmp != nil {
+		cmps = append(cmps, *cmp)
+	}
+	if err := m.CampaignWithCmps(a.ctx, lease, cmps...); err != nil {
 		if errors.Is(err, errs.ErrEtcdTxnConflict) {
 			log.Info("campaign tso primary meets error due to txn conflict, another tso server may campaign successfully",
 				a.logFields...)
@@ -295,6 +347,11 @@ func (a *Allocator) campaignPrimary() {
 	a.member.GetLeadership().Keep(ctx)
 	log.Info("campaign tso primary ok", a.logFields...)
 
+	// We have won the campaign, so the expected primary flag (if any) has served its
+	// purpose as the affinity guard. Delete it so steady state is clean and a later
+	// failure re-elects immediately instead of waiting for the flag's TTL.
+	mcsutils.DeleteExpectedPrimaryFlag(a.member.Client(), msParam, expectedPrimary)
+
 	log.Info("initializing the tso allocator")
 	if err := a.Initialize(); err != nil {
 		log.Error("failed to initialize the tso allocator", append(a.logFields, errs.ZapError(err))...)
@@ -305,18 +362,6 @@ func (a *Allocator) campaignPrimary() {
 		a.Reset(false)
 	}()
 
-	// check expected primary and watch the primary.
-	exitPrimary := make(chan struct{})
-	primaryLease, err := mcsutils.KeepExpectedPrimaryAlive(ctx, a.member.Client(), exitPrimary,
-		lease, &keypath.MsParam{
-			ServiceName: constant.TSOServiceName,
-			GroupID:     a.keyspaceGroupID,
-		}, a.member.(*member.Participant))
-	if err != nil {
-		log.Error("prepare tso primary watch error", append(a.logFields, errs.ZapError(err))...)
-		return
-	}
-	a.expectedPrimaryLease.Store(primaryLease)
 	a.member.PromoteSelf()
 
 	tsoLabel := fmt.Sprintf("TSO Service Group %d", a.keyspaceGroupID)
@@ -335,16 +380,16 @@ func (a *Allocator) campaignPrimary() {
 	for {
 		select {
 		case <-primaryTicker.C:
+			// Step down once the leader lease is gone. This covers both lease
+			// expiration and a `{service}/primary/transfer` API call, which resigns
+			// this primary by revoking its leader lease.
 			if !a.isServing() {
-				log.Info("no longer a primary because lease has expired, the tso primary will step down", a.logFields...)
+				log.Info("no longer a primary because lease has expired or transferred, the tso primary will step down", a.logFields...)
 				return
 			}
 		case <-ctx.Done():
 			// Server is closed and it should return nil.
 			log.Info("exit primary campaign", a.logFields...)
-			return
-		case <-exitPrimary:
-			log.Info("no longer be primary because primary have been updated, the TSO primary will step down", a.logFields...)
 			return
 		}
 	}
@@ -382,15 +427,6 @@ func (a *Allocator) isPrimaryElected() bool {
 		return false
 	}
 	return a.member.(*member.Participant).IsPrimaryElected()
-}
-
-// GetExpectedPrimaryLease returns the expected primary lease.
-func (a *Allocator) GetExpectedPrimaryLease() *election.Lease {
-	l := a.expectedPrimaryLease.Load()
-	if l == nil {
-		return nil
-	}
-	return l.(*election.Lease)
 }
 
 func (a *Allocator) getMetrics() *tsoMetrics {

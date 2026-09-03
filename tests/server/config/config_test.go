@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"reflect"
 	"testing"
@@ -79,6 +80,41 @@ func TestRateLimitConfigReload(t *testing.T) {
 	re.NotNil(leader)
 	re.True(leader.GetServer().GetServiceMiddlewarePersistOptions().IsRateLimitEnabled())
 	re.Len(leader.GetServer().GetServiceMiddlewarePersistOptions().GetRateLimitConfig().LimiterConfig, 1)
+}
+
+func TestMetricStorageValidationAtQueryTime(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+	leader := cluster.GetLeaderServer()
+	re.NotNil(leader)
+
+	configURL := leader.GetAddr() + "/pd/api/v1/config"
+	queryURL := leader.GetAddr() + "/pd/api/v1/metric/query"
+	for _, metricStorage := range []string{
+		"file:///tmp/metrics",
+		"http://127.0.0.1:9090",
+		"http://user:pass@metrics.example",
+		"not a URL",
+	} {
+		postData, err := json.Marshal(map[string]any{"metric-storage": metricStorage})
+		re.NoError(err)
+		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, configURL, postData, testutil.StatusOK(re)))
+		re.Equal(metricStorage, leader.GetServer().GetConfig().PDServerCfg.MetricStorage)
+
+		queryResp, err := tests.TestDialClient.Get(queryURL)
+		re.NoError(err)
+		queryBody, err := io.ReadAll(queryResp.Body)
+		re.NoError(err)
+		re.NoError(queryResp.Body.Close())
+		re.Equal(http.StatusBadGateway, queryResp.StatusCode)
+		re.JSONEq(`{"status":"error","errorType":"proxy","error":"metric query failed"}`, string(queryBody))
+	}
 }
 
 type configTestSuite struct {
@@ -269,6 +305,20 @@ func (suite *configTestSuite) checkConfigSchedule(cluster *tests.TestCluster) {
 		re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, addr, scheduleConfig1))
 		return reflect.DeepEqual(*scheduleConfig1, *scheduleConfig)
 	})
+
+	invalidDefaultStoreLimit := map[string]any{
+		"default-store-limit": map[string]any{
+			"add-peer":    -1,
+			"remove-peer": scheduleConfig.DefaultStoreLimit.RemovePeer,
+		},
+	}
+	postData, err = json.Marshal(invalidDefaultStoreLimit)
+	re.NoError(err)
+	err = testutil.CheckPostJSON(tests.TestDialClient, addr, postData,
+		testutil.StatusNotOK(re),
+		testutil.StringContain(re, "default-store-limit.add-peer should be finite and non-negative"))
+	re.NoError(err)
+	re.Equal(scheduleConfig.DefaultStoreLimit, leaderServer.GetPersistOptions().GetScheduleConfig().DefaultStoreLimit)
 }
 
 func (suite *configTestSuite) TestConfigReplication() {

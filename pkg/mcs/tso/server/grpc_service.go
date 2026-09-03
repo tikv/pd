@@ -79,7 +79,6 @@ func (s *Service) RegisterRESTHandler(userDefineHandlers map[string]http.Handler
 
 // Tso returns a stream of timestamps
 func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
-	stream = newTsoMetricsStream(stream)
 	ctx, cancel := context.WithCancel(stream.Context())
 	defer cancel()
 	for {
@@ -137,6 +136,9 @@ func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
 func (s *Service) FindGroupByKeyspaceID(
 	_ context.Context, request *tsopb.FindGroupByKeyspaceIDRequest,
 ) (*tsopb.FindGroupByKeyspaceIDResponse, error) {
+	if s.IsClosed() {
+		return nil, errs.ErrNotStarted
+	}
 	respKeyspaceGroup := request.GetHeader().GetKeyspaceGroupId()
 	if errorType, err := s.validRequest(request.GetHeader()); err != nil {
 		return &tsopb.FindGroupByKeyspaceIDResponse{
@@ -151,7 +153,9 @@ func (s *Service) FindGroupByKeyspaceID(
 			Header: wrapErrorToHeader(tsopb.ErrorType_INVALID_VALUE, errs.ErrKeyspaceGroupModRevisionStale.Error(), respKeyspaceGroup),
 		}, nil
 	}
-	if err != nil {
+	// If the error is the ErrGetAllocator, it indicates the server have watched the keyspace group meta.
+	// But this node's server is not one of the members.
+	if err != nil && !errs.ErrGetAllocator.Equal(err) {
 		return &tsopb.FindGroupByKeyspaceIDResponse{
 			Header: wrapErrorToHeader(tsopb.ErrorType_UNKNOWN, err.Error(), keyspaceGroupID),
 		}, nil
@@ -197,6 +201,9 @@ func (s *Service) FindGroupByKeyspaceID(
 func (s *Service) GetMinTS(
 	_ context.Context, request *tsopb.GetMinTSRequest,
 ) (*tsopb.GetMinTSResponse, error) {
+	if s.IsClosed() {
+		return nil, errs.ErrNotStarted
+	}
 	respKeyspaceGroup := request.GetHeader().GetKeyspaceGroupId()
 	if errorType, err := s.validRequest(request.GetHeader()); err != nil {
 		return &tsopb.GetMinTSResponse{
@@ -224,7 +231,7 @@ func (s *Service) GetMinTS(
 }
 
 func (s *Service) validRequest(header *tsopb.RequestHeader) (tsopb.ErrorType, error) {
-	if s.IsClosed() || s.keyspaceGroupManager == nil {
+	if s.keyspaceGroupManager == nil {
 		return tsopb.ErrorType_NOT_BOOTSTRAPPED, errs.ErrNotStarted
 	}
 	if header == nil || header.GetClusterId() != keypath.ClusterID() {

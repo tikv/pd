@@ -17,6 +17,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"math/rand/v2"
@@ -242,6 +243,7 @@ type Server struct {
 	resourceManagerPrimaryWatcher    *etcdutil.LoopWatcher
 	resourceGroupMetadataManager     *rm_server.Manager
 	resourceGroupMetadataManagerOnce sync.Once
+	membersCache                     *membersCache
 
 	// Cgroup Monitor
 	cgMonitor cgroup.Monitor
@@ -274,6 +276,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 		startTimestamp:                  time.Now().Unix(),
 		DiagnosticsServer:               sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
 		isKeyspaceGroupEnabled:          isKeyspaceGroupEnabled,
+		membersCache:                    newMembersCache(membersCacheTTL),
 		tsoClientPool: struct {
 			syncutil.RWMutex
 			clients map[string]*streamWrapper
@@ -439,7 +442,9 @@ func (s *Server) startClient() error {
 	if err != nil {
 		return errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
 	}
-	// This etcd client will only be used to read and write the election-related data, such as leader key.
+	// Keep this client pinned to local etcd. Local lease renewal verifies this
+	// member's etcd leadership, preventing a stalled member from renewing through
+	// a healthy peer (tikv/pd#10671).
 	s.electionClient, err = etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.AdvertiseClientUrls, etcdutil.ElectionEtcdClientPurpose, false)
 	if err != nil {
 		return errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
@@ -523,6 +528,10 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.tsoAllocator = tso.NewAllocator(s.ctx, constant.DefaultKeyspaceGroupID, s.member, tsoStorage, s)
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetMember(), s.GetBasicCluster(), s.GetStorage(), syncer.NewRegionSyncer(s), s.client, s.httpClient, s.tsoAllocator)
+	// This package's own heartbeat/bucket-report metrics can't be cleaned up from
+	// within RaftCluster's bury path without an import cycle, so RaftCluster invokes
+	// this callback instead.
+	s.cluster.SetOnStoreBuried(DeleteStoreMetrics)
 	keyspaceIDAllocator := id.NewAllocator(&id.AllocatorParams{
 		Client: s.client,
 		Label:  id.KeyspaceLabel,
@@ -1162,8 +1171,22 @@ func (s *Server) StartTimestamp() int64 {
 
 // GetMembers returns PD server list.
 func (s *Server) GetMembers() ([]*pdpb.Member, error) {
+	return s.loadMembers(false)
+}
+
+// ReloadMembers reloads PD server list and updates the cache.
+func (s *Server) ReloadMembers() ([]*pdpb.Member, error) {
+	return s.loadMembers(true)
+}
+
+func (s *Server) loadMembers(forceRefresh bool) ([]*pdpb.Member, error) {
 	if s.IsClosed() {
 		return nil, errs.ErrServerNotStarted.FastGenByArgs()
+	}
+	if s.membersCache != nil {
+		return s.membersCache.get(forceRefresh, func() ([]*pdpb.Member, error) {
+			return cluster.GetMembers(s.GetClient())
+		})
 	}
 	return cluster.GetMembers(s.GetClient())
 }
@@ -1198,6 +1221,20 @@ func (s *Server) GetKeyspaceConfig() *config.KeyspaceConfig {
 
 // SetKeyspaceConfig sets the keyspace config information.
 func (s *Server) SetKeyspaceConfig(oldCfg, newCfg *config.KeyspaceConfig) error {
+	return s.setKeyspaceConfigInner(oldCfg, newCfg, true)
+}
+
+// SetKeyspaceConfigWithoutKeyspaceManagerUpdate sets keyspace config without updating the keyspace manager.
+func (s *Server) SetKeyspaceConfigWithoutKeyspaceManagerUpdate(oldCfg, newCfg *config.KeyspaceConfig) error {
+	return s.setKeyspaceConfigInner(oldCfg, newCfg, false)
+}
+
+// UpdateKeyspaceConfig updates keyspace manager's keyspace config.
+func (s *Server) UpdateKeyspaceConfig(newCfg *config.KeyspaceConfig) {
+	s.keyspaceManager.UpdateConfig(newCfg)
+}
+
+func (s *Server) setKeyspaceConfigInner(oldCfg, newCfg *config.KeyspaceConfig, updateKeyspaceManager bool) error {
 	if err := newCfg.Validate(); err != nil {
 		return err
 	}
@@ -1213,7 +1250,9 @@ func (s *Server) SetKeyspaceConfig(oldCfg, newCfg *config.KeyspaceConfig) error 
 			errs.ZapError(err))
 		return err
 	}
-	s.keyspaceManager.UpdateConfig(newCfg)
+	if updateKeyspaceManager {
+		s.keyspaceManager.UpdateConfig(newCfg)
+	}
 
 	log.Info("keyspace config is updated", zap.Reflect("new", newCfg), zap.Reflect("old", oldCfg))
 	return nil
@@ -1246,27 +1285,72 @@ func (s *Server) GetScheduleConfig() *sc.ScheduleConfig {
 }
 
 // SetScheduleConfig sets the balance config information.
-// This function is exported to be used by the API.
 func (s *Server) SetScheduleConfig(cfg sc.ScheduleConfig) error {
-	if err := cfg.Validate(); err != nil {
-		return err
-	}
-	if err := cfg.Deprecated(); err != nil {
-		return err
-	}
-	old := s.persistOptions.GetScheduleConfig()
-	s.persistOptions.SetScheduleConfig(&cfg)
-	if err := s.persistOptions.Persist(s.storage); err != nil {
-		s.persistOptions.SetScheduleConfig(old)
+	return s.updateScheduleConfig(func(_ *sc.ScheduleConfig, next *sc.ScheduleConfig) (bool, error) {
+		*next = *cfg.Clone()
+		return true, nil
+	})
+}
+
+// PatchScheduleConfig applies a partial JSON update to the latest schedule
+// config inside the schedule persistence transaction.
+func (s *Server) PatchScheduleConfig(data []byte) error {
+	return s.updateScheduleConfig(func(_ *sc.ScheduleConfig, next *sc.ScheduleConfig) (bool, error) {
+		if err := json.Unmarshal(data, next); err != nil {
+			return false, err
+		}
+		return true, nil
+	})
+}
+
+// SetScheduleConfigItem applies one legacy /config schedule item to the latest
+// schedule config inside the schedule persistence transaction.
+func (s *Server) SetScheduleConfigItem(key string, value any) error {
+	return s.updateScheduleConfig(func(_ *sc.ScheduleConfig, next *sc.ScheduleConfig) (bool, error) {
+		updated, found, err := jsonutil.AddKeyValue(next, key, value)
+		if err != nil {
+			return false, err
+		}
+		if !found {
+			return false, errors.Errorf("config item %s not found", key)
+		}
+		return updated, nil
+	})
+}
+
+func (s *Server) updateScheduleConfig(
+	update func(current, next *sc.ScheduleConfig) (changed bool, err error),
+) error {
+	var oldCfg, newCfg *sc.ScheduleConfig
+	var applied bool
+	err := s.persistOptions.UpdateScheduleConfig(s.storage, func(current, next *sc.ScheduleConfig) (bool, error) {
+		changed, err := update(current, next)
+		oldCfg, newCfg = current, next
+		if err != nil || !changed {
+			return changed, err
+		}
+		if err := next.Validate(); err != nil {
+			return false, err
+		}
+		if err := next.Deprecated(); err != nil {
+			return false, err
+		}
+		applied = true
+		return true, nil
+	})
+	if err != nil {
 		log.Error("failed to update schedule config",
-			zap.Reflect("new", cfg),
-			zap.Reflect("old", old),
+			zap.Reflect("new", newCfg),
+			zap.Reflect("old", oldCfg),
 			errs.ZapError(err))
 		return err
 	}
+	if !applied {
+		return nil
+	}
 	// Update the scheduling halt status at the same time.
-	s.persistOptions.SetSchedulingAllowanceStatus(cfg.HaltScheduling, "manually")
-	log.Info("schedule config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
+	s.persistOptions.SetSchedulingAllowanceStatus(newCfg.HaltScheduling, "manually")
+	log.Info("schedule config is updated", zap.Reflect("new", newCfg), zap.Reflect("old", oldCfg))
 	return nil
 }
 
@@ -1831,6 +1915,23 @@ func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context) erro
 	s.leaderCallbacks = append(s.leaderCallbacks, callbacks...)
 }
 
+func memberFailpointEnabled(val failpoint.Value, memberID uint64) bool {
+	if enabled, ok := val.(bool); ok {
+		return enabled
+	}
+	memberString, ok := val.(string)
+	if !ok {
+		return false
+	}
+	for _, memberIDString := range strings.Split(memberString, ",") {
+		id, err := strconv.ParseUint(strings.TrimSpace(memberIDString), 10, 64)
+		if err == nil && id == memberID {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) leaderLoop() {
 	defer logutil.LogPanic()
 	defer s.serverLoopWg.Done()
@@ -1844,9 +1945,7 @@ func (s *Server) leaderLoop() {
 		leader, checkAgain := s.member.CheckLeader()
 		// add failpoint to test leader check go to stuck.
 		failpoint.Inject("leaderLoopCheckAgain", func(val failpoint.Value) {
-			memberString := val.(string)
-			memberID, _ := strconv.ParseUint(memberString, 10, 64)
-			if s.member.ID() == memberID {
+			if memberFailpointEnabled(val, s.member.ID()) {
 				checkAgain = true
 			}
 		})
@@ -1882,9 +1981,11 @@ func (s *Server) leaderLoop() {
 				// use random timeout to avoid leader campaigning storm.
 				randomTimeout := time.Duration(rand.IntN(lostPDLeaderMaxTimeoutSecs))*time.Second + lostPDLeaderMaxTimeoutSecs*time.Second + lostPDLeaderReElectionFactor*s.cfg.ElectionInterval.Duration
 				// add failpoint to test the campaign leader logic.
-				failpoint.Inject("timeoutWaitPDLeader", func() {
-					log.Info("timeoutWaitPDLeader is injected, skip wait other etcd leader be etcd leader")
-					randomTimeout = time.Duration(rand.IntN(10))*time.Millisecond + 100*time.Millisecond
+				failpoint.Inject("timeoutWaitPDLeader", func(val failpoint.Value) {
+					if memberFailpointEnabled(val, s.member.ID()) {
+						log.Info("timeoutWaitPDLeader is injected, skip wait other etcd leader be etcd leader")
+						randomTimeout = time.Duration(rand.IntN(10))*time.Millisecond + 100*time.Millisecond
+					}
 				})
 				if lastUpdated.Add(randomTimeout).Before(time.Now()) && !lastUpdated.IsZero() && etcdLeader != 0 {
 					log.Info("the pd leader is lost for a long time, try to re-campaign a pd leader with resign etcd leader",
@@ -1988,8 +2089,10 @@ func (s *Server) campaignLeader() {
 	createRaftClusterDuration := time.Since(createRaftClusterStart)
 	log.Info("create raft cluster completed", zap.Duration("cost", createRaftClusterDuration))
 	defer s.stopRaftCluster()
-	failpoint.Inject("rebaseErr", func() {
-		failpoint.Return()
+	failpoint.Inject("rebaseErr", func(val failpoint.Value) {
+		if memberFailpointEnabled(val, s.member.ID()) {
+			failpoint.Return()
+		}
 	})
 	rebaseStart := time.Now()
 	if err := s.idAllocator.Rebase(); err != nil {
@@ -2017,6 +2120,7 @@ func (s *Server) campaignLeader() {
 		zap.String("leader-name", s.Name()),
 		zap.Duration("total-cost", totalDuration),
 		zap.Duration("cost", enableLeaderDuration))
+	s.scheduleMicroserviceMetadataCleanup(ctx)
 	leaderTicker := time.NewTicker(mcs.LeaderTickInterval)
 	defer leaderTicker.Stop()
 
@@ -2029,9 +2133,7 @@ func (s *Server) campaignLeader() {
 			}
 			// add failpoint to test exit leader, failpoint judge the member is the give value, then break
 			failpoint.Inject("exitCampaignLeader", func(val failpoint.Value) {
-				memberString := val.(string)
-				memberID, _ := strconv.ParseUint(memberString, 10, 64)
-				if s.member.ID() == memberID {
+				if memberFailpointEnabled(val, s.member.ID()) {
 					log.Info("exit PD leader")
 					failpoint.Return()
 				}
@@ -2342,7 +2444,7 @@ func (s *Server) initServicePrimaryWatcher(serviceName string, primaryKey string
 		return nil
 	}
 	name := fmt.Sprintf("%s-primary-watcher", serviceName)
-	return etcdutil.NewLoopWatcher(
+	w := etcdutil.NewLoopWatcher(
 		s.serverLoopCtx,
 		&s.serverLoopWg,
 		s.client,
@@ -2354,6 +2456,8 @@ func (s *Server) initServicePrimaryWatcher(serviceName string, primaryKey string
 		func([]*clientv3.Event) error { return nil },
 		false, /* withPrefix */
 	)
+	w.SetReconcileDeletedKeys()
+	return w
 }
 
 // RecoverAllocID recover alloc id. set current base id to input id

@@ -21,7 +21,6 @@ import (
 	"os/signal"
 	"runtime"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -29,6 +28,7 @@ import (
 
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/spf13/cobra"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -257,10 +257,17 @@ func (s *Server) primaryElectionLoop() {
 		}
 
 		// To make sure the expected primary(if existed) and new primary are on the same server.
-		expectedPrimary := utils.GetExpectedPrimaryFlag(s.GetClient(), &s.participant.MsParam)
-		// skip campaign the primary if the expected primary is not empty and not equal to the current memberValue.
+		expectedPrimary, err := utils.GetExpectedPrimaryFlag(s.GetClient(), &s.participant.MsParam)
+		if err != nil {
+			// Do not campaign on a read failure: an empty flag would be treated as
+			// "no transfer" and skip the affinity guard, so retry instead.
+			log.Warn("failed to get expected primary flag, retry later", errs.ZapError(err))
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+		// skip campaign the primary if the expected primary is not empty and not this member.
 		// expected primary ONLY SET BY `{service}/primary/transfer` API.
-		if len(expectedPrimary) > 0 && !strings.Contains(s.participant.MemberValue(), expectedPrimary) {
+		if len(expectedPrimary) > 0 && !s.participant.IsExpectedPrimary(expectedPrimary) {
 			log.Info("skip campaigning of scheduling primary and check later",
 				zap.String("server-name", s.Name()),
 				zap.String("expected-primary-id", expectedPrimary),
@@ -270,13 +277,21 @@ func (s *Server) primaryElectionLoop() {
 			continue
 		}
 
-		s.campaignPrimary()
+		s.campaignPrimary(expectedPrimary)
 	}
 }
 
-func (s *Server) campaignPrimary() {
+// campaignPrimary campaigns the scheduling primary. expectedPrimary is the value of
+// the expected primary flag observed before campaigning (empty when no transfer is
+// in progress); it is used to bind the campaign to the transfer target atomically
+// and to clean the flag up once this server wins.
+func (s *Server) campaignPrimary(expectedPrimary string) {
 	log.Info("start to campaign the primary", zap.String("campaign-scheduling-primary-name", s.participant.Name()))
-	if err := s.participant.Campaign(s.Context(), s.cfg.LeaderLease); err != nil {
+	var cmps []clientv3.Cmp
+	if cmp := utils.ExpectedPrimaryCmp(&s.participant.MsParam, expectedPrimary); cmp != nil {
+		cmps = append(cmps, *cmp)
+	}
+	if err := s.participant.CampaignWithCmps(s.Context(), s.cfg.LeaderLease, cmps...); err != nil {
 		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
 			log.Info("campaign scheduling primary meets error due to txn conflict, another server may campaign successfully",
 				zap.String("campaign-scheduling-primary-name", s.participant.Name()))
@@ -301,6 +316,11 @@ func (s *Server) campaignPrimary() {
 	s.participant.GetLeadership().Keep(ctx)
 	log.Info("campaign scheduling primary ok", zap.String("campaign-scheduling-primary-name", s.participant.Name()))
 
+	// We have won the campaign, so the expected primary flag (if any) has served its
+	// purpose as the affinity guard. Delete it so steady state is clean and a later
+	// failure re-elects immediately instead of waiting for the flag's TTL.
+	utils.DeleteExpectedPrimaryFlag(s.GetClient(), &s.participant.MsParam, expectedPrimary)
+
 	log.Info("triggering the primary callback functions")
 	for _, cb := range s.primaryCallbacks {
 		if err := cb(ctx); err != nil {
@@ -313,17 +333,6 @@ func (s *Server) campaignPrimary() {
 			cb()
 		}
 	}()
-	// check expected primary and watch the primary.
-	exitPrimary := make(chan struct{})
-	lease, err := utils.KeepExpectedPrimaryAlive(ctx, s.GetClient(), exitPrimary,
-		s.cfg.LeaderLease, &keypath.MsParam{
-			ServiceName: constant.SchedulingServiceName,
-		}, s.participant)
-	if err != nil {
-		log.Error("prepare scheduling primary watch error", errs.ZapError(err))
-		return
-	}
-	s.participant.SetExpectedPrimaryLease(lease)
 	s.participant.PromoteSelf()
 
 	member.ServiceMemberGauge.WithLabelValues(serviceName).Set(1)
@@ -335,16 +344,16 @@ func (s *Server) campaignPrimary() {
 	for {
 		select {
 		case <-primaryTicker.C:
+			// Step down once the leader lease is gone. This covers both lease
+			// expiration and a `{service}/primary/transfer` API call, which resigns
+			// this primary by revoking its leader lease.
 			if !s.participant.IsServing() {
-				log.Info("no longer a primary because lease has expired, the scheduling primary will step down")
+				log.Info("no longer a primary because lease has expired or transferred, the scheduling primary will step down")
 				return
 			}
 		case <-ctx.Done():
 			// Server is closed and it should return nil.
 			log.Info("server is closed")
-			return
-		case <-exitPrimary:
-			log.Info("no longer be primary because primary have been updated, the scheduling primary will step down")
 			return
 		}
 	}

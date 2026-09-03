@@ -39,12 +39,19 @@ func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, conf config.
 		return slice.AllOf(filters, func(i int) bool {
 			status := filters[i].Source(conf, s)
 			if !status.IsOK() {
-				if counter != nil {
-					counter.inc(source, filters[i].Type(), s.GetID())
-				} else {
-					sourceID := strconv.FormatUint(s.GetID(), 10)
-					// TODO: pre-allocate gauge metrics
-					filterSourceCounter.WithLabelValues(filters[i].Scope(), filters[i].Type().String(), sourceID).Inc()
+				// A tombstoned store is rejected here on every scheduling cycle for as
+				// long as it stays known, so counting it would either leak (nothing
+				// ever calls Counter.Flush again to zero it) or fight with tombstone
+				// cleanup deleting the series between Flush calls. It's not an
+				// actionable rejection reason for an operator either way.
+				if !s.IsRemoved() {
+					if counter != nil {
+						counter.inc(source, filters[i].Type(), s.GetID())
+					} else {
+						sourceID := strconv.FormatUint(s.GetID(), 10)
+						// TODO: pre-allocate gauge metrics
+						filterSourceCounter.WithLabelValues(filters[i].Scope(), filters[i].Type().String(), sourceID).Inc()
+					}
 				}
 				if collector != nil {
 					collector.Collect(plan.SetResource(s), plan.SetStatus(status))
@@ -64,10 +71,12 @@ func SelectUnavailableTargetStores(stores []*core.StoreInfo, filters []Filter, c
 		return slice.AnyOf(filters, func(i int) bool {
 			status := filters[i].Target(conf, s)
 			if !status.IsOK() {
-				if counter != nil {
-					counter.inc(target, filters[i].Type(), s.GetID())
-				} else {
-					filterTargetCounter.WithLabelValues(filters[i].Scope(), filters[i].Type().String(), targetID).Inc()
+				if !s.IsRemoved() {
+					if counter != nil {
+						counter.inc(target, filters[i].Type(), s.GetID())
+					} else {
+						filterTargetCounter.WithLabelValues(filters[i].Scope(), filters[i].Type().String(), targetID).Inc()
+					}
 				}
 
 				if collector != nil {
@@ -92,11 +101,13 @@ func SelectTargetStores(stores []*core.StoreInfo, filters []Filter, conf config.
 			filter := filters[i]
 			status := filter.Target(conf, s)
 			if !status.IsOK() {
-				if counter != nil {
-					counter.inc(target, filter.Type(), s.GetID())
-				} else {
-					targetIDStr := strconv.FormatUint(s.GetID(), 10)
-					filterTargetCounter.WithLabelValues(filter.Scope(), filter.Type().String(), targetIDStr).Inc()
+				if !s.IsRemoved() {
+					if counter != nil {
+						counter.inc(target, filter.Type(), s.GetID())
+					} else {
+						targetIDStr := strconv.FormatUint(s.GetID(), 10)
+						filterTargetCounter.WithLabelValues(filter.Scope(), filter.Type().String(), targetIDStr).Inc()
+					}
 				}
 				if collector != nil {
 					collector.Collect(plan.SetResource(s), plan.SetStatus(status))
@@ -134,9 +145,12 @@ func Target(conf config.SharedConfigProvider, store *core.StoreInfo, filters []F
 	for _, filter := range filters {
 		status := filter.Target(conf, store)
 		if !status.IsOK() {
-			if status != statusStoreRemoved {
-				targetID := storeID
-				filterTargetCounter.WithLabelValues(filter.Scope(), filter.Type().String(), targetID).Inc()
+			// Check the store itself rather than this filter's own status: an
+			// earlier filter in the chain (e.g. an exclusion filter) can reject
+			// a tombstoned store for a reason other than statusStoreRemoved,
+			// which would otherwise still recreate the deleted series.
+			if !store.IsRemoved() {
+				filterTargetCounter.WithLabelValues(filter.Scope(), filter.Type().String(), storeID).Inc()
 			}
 			return false
 		}
@@ -565,6 +579,37 @@ func (f *StoreStateFilter) Target(conf config.SharedConfigProvider, store *core.
 		if status = f.anyConditionMatch(regionTarget, conf, store); !status.IsOK() {
 			return
 		}
+	}
+	return statusOK
+}
+
+type hotRegionEvictedTargetFilter struct{ scope string }
+
+// NewHotRegionEvictedTargetFilter creates a filter that rejects stores already
+// marked as unsuitable hot-region targets.
+func NewHotRegionEvictedTargetFilter(scope string) Filter {
+	return &hotRegionEvictedTargetFilter{scope: scope}
+}
+
+// Scope returns the scheduler or the checker which the filter acts on.
+func (f *hotRegionEvictedTargetFilter) Scope() string {
+	return f.scope
+}
+
+// Type returns the type of the filter.
+func (*hotRegionEvictedTargetFilter) Type() filterType {
+	return leaderEvicted
+}
+
+// Source filters stores when select them as schedule source.
+func (*hotRegionEvictedTargetFilter) Source(config.SharedConfigProvider, *core.StoreInfo) *plan.Status {
+	return statusOK
+}
+
+// Target filters stores when select them as schedule target.
+func (*hotRegionEvictedTargetFilter) Target(_ config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
+	if store.EvictedAsSlowStore() || store.EvictedAsStoppingStore() || store.IsEvictedAsSlowTrend() {
+		return statusStoreRejectLeader
 	}
 	return statusOK
 }

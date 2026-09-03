@@ -21,7 +21,6 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -29,6 +28,7 @@ import (
 
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/spf13/cobra"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -172,10 +172,17 @@ func (s *Server) primaryElectionLoop() {
 		}
 
 		// To make sure the expected primary(if existed) and new primary are on the same server.
-		expectedPrimary := utils.GetExpectedPrimaryFlag(s.GetClient(), &s.participant.MsParam)
-		// Skip campaign if the expected primary is not empty and not equal to the current memberValue.
+		expectedPrimary, err := utils.GetExpectedPrimaryFlag(s.GetClient(), &s.participant.MsParam)
+		if err != nil {
+			// Do not campaign on a read failure: an empty flag would be treated as
+			// "no transfer" and skip the affinity guard, so retry instead.
+			log.Warn("failed to get expected primary flag, retry later", errs.ZapError(err))
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+		// Skip campaign if the expected primary is not empty and not this member.
 		// Expected primary ONLY SET BY `{service}/primary/transfer` API.
-		if len(expectedPrimary) > 0 && !strings.Contains(s.participant.MemberValue(), expectedPrimary) {
+		if len(expectedPrimary) > 0 && !s.participant.IsExpectedPrimary(expectedPrimary) {
 			log.Info("skip campaigning of resource manager primary and check later",
 				zap.String("server-name", s.Name()),
 				zap.String("expected-primary-id", expectedPrimary),
@@ -185,7 +192,7 @@ func (s *Server) primaryElectionLoop() {
 			continue
 		}
 
-		if s.campaignLeader() {
+		if s.campaignLeader(expectedPrimary) {
 			log.Warn("backing off before retrying resource manager primary campaign after callback failure",
 				zap.Duration("retry-after", primaryCallbackFailureRetryInterval))
 			timer := time.NewTimer(primaryCallbackFailureRetryInterval)
@@ -202,9 +209,16 @@ func (s *Server) primaryElectionLoop() {
 // campaignLeader campaigns the primary/leader.
 // It returns true only when the server won the campaign but service-ready
 // callbacks failed, so the caller should back off before retrying.
-func (s *Server) campaignLeader() bool {
+// expectedPrimary is the value of the expected primary flag observed before
+// campaigning (empty when no transfer is in progress); it binds the campaign to the
+// transfer target atomically and is cleaned up once this server wins.
+func (s *Server) campaignLeader(expectedPrimary string) bool {
 	log.Info("start to campaign the primary/leader", zap.String("campaign-resource-manager-primary-name", s.participant.Name()))
-	if err := s.participant.Campaign(s.Context(), s.cfg.LeaderLease); err != nil {
+	var cmps []clientv3.Cmp
+	if cmp := utils.ExpectedPrimaryCmp(&s.participant.MsParam, expectedPrimary); cmp != nil {
+		cmps = append(cmps, *cmp)
+	}
+	if err := s.participant.CampaignWithCmps(s.Context(), s.cfg.LeaderLease, cmps...); err != nil {
 		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
 			log.Info("campaign resource manager primary meets error due to txn conflict, another server may campaign successfully",
 				zap.String("campaign-resource-manager-primary-name", s.participant.Name()))
@@ -229,6 +243,11 @@ func (s *Server) campaignLeader() bool {
 	s.participant.GetLeadership().Keep(ctx)
 	log.Info("campaign resource manager primary ok", zap.String("campaign-resource-manager-primary-name", s.participant.Name()))
 
+	// We have won the campaign, so the expected primary flag (if any) has served its
+	// purpose as the affinity guard. Delete it so steady state is clean and a later
+	// failure re-elects immediately instead of waiting for the flag's TTL.
+	utils.DeleteExpectedPrimaryFlag(s.GetClient(), &s.participant.MsParam, expectedPrimary)
+
 	log.Info("triggering the primary callback functions")
 	for _, cb := range s.primaryCallbacks {
 		if err := cb(ctx); err != nil {
@@ -239,16 +258,6 @@ func (s *Server) campaignLeader() bool {
 			return true
 		}
 	}
-	// Check expected primary and watch the primary.
-	exitPrimary := make(chan struct{})
-	lease, err := utils.KeepExpectedPrimaryAlive(ctx, s.GetClient(), exitPrimary,
-		s.cfg.LeaderLease, &keypath.MsParam{ServiceName: constant.ResourceManagerServiceName}, s.participant)
-	if err != nil {
-		log.Error("prepare resource manager primary watch error", errs.ZapError(err))
-		return false
-	}
-	s.participant.SetExpectedPrimaryLease(lease)
-
 	s.participant.PromoteSelf()
 	member.ServiceMemberGauge.WithLabelValues(serviceName).Set(1)
 	log.Info("resource manager primary is ready to serve", zap.String("resource-manager-primary-name", s.participant.Name()))
@@ -259,16 +268,16 @@ func (s *Server) campaignLeader() bool {
 	for {
 		select {
 		case <-leaderTicker.C:
+			// Step down once the leader lease is gone. This covers both lease
+			// expiration and a `{service}/primary/transfer` API call, which resigns
+			// this primary by revoking its leader lease.
 			if !s.participant.IsServing() {
-				log.Info("no longer a primary/leader because lease has expired, the resource manager primary/leader will step down")
+				log.Info("no longer a primary/leader because lease has expired or transferred, the resource manager primary/leader will step down")
 				return false
 			}
 		case <-ctx.Done():
 			// Server is closed and it should return nil.
 			log.Info("server is closed")
-			return false
-		case <-exitPrimary:
-			log.Info("no longer be primary because primary have been updated, the resource manager primary/leader will step down")
 			return false
 		}
 	}
