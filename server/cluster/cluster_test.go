@@ -44,6 +44,7 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
+	mcsconstant "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/mock/mockhbstream"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/progress"
@@ -75,6 +76,33 @@ import (
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
+
+type coalescingTaskKey struct {
+	id   uint64
+	name string
+}
+
+type coalescingTaskRunner struct {
+	tasks map[coalescingTaskKey]func(context.Context)
+}
+
+func newCoalescingTaskRunner() *coalescingTaskRunner {
+	return &coalescingTaskRunner{tasks: make(map[coalescingTaskKey]func(context.Context))}
+}
+
+func (r *coalescingTaskRunner) RunTask(
+	id uint64,
+	name string,
+	f func(context.Context),
+	_ ...ratelimit.TaskOption,
+) error {
+	r.tasks[coalescingTaskKey{id: id, name: name}] = f
+	return nil
+}
+
+func (*coalescingTaskRunner) Start(context.Context) {}
+
+func (*coalescingTaskRunner) Stop() {}
 
 func TestStoreHeartbeat(t *testing.T) {
 	re := require.New(t)
@@ -1317,6 +1345,118 @@ func TestRegionHeartbeat(t *testing.T) {
 		re.NoError(err)
 		re.Equal(overlapRegion.GetMeta(), region)
 	}
+}
+
+func TestPrepareRegionUpdateForSyncClassifiesCriticalChanges(t *testing.T) {
+	re := require.New(t)
+	meta := &metapb.Region{
+		Id:          1,
+		RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1},
+		Peers: []*metapb.Peer{
+			{Id: 1, StoreId: 1},
+			{Id: 2, StoreId: 2},
+		},
+	}
+	origin := core.NewRegionInfo(meta, meta.Peers[0], core.WithFlowRoundByDigit(2))
+	cluster := &RaftCluster{}
+
+	check := func(region *core.RegionInfo, expectStatsOnly, expectSync bool) {
+		saveKV, _, needSync, _ := regionGuide(core.ContextTODO(), region, origin)
+		update, ok := cluster.prepareRegionUpdateForSync(region, origin, saveKV, needSync)
+		re.Equal(expectSync, ok)
+		if ok {
+			re.Same(region, update.Region)
+			re.Equal(expectStatsOnly, update.StatsOnly)
+		}
+	}
+
+	flowOnly := origin.Clone(core.SetWrittenBytes(200), core.WithFlowRoundByDigit(2))
+	check(flowOnly, true, true)
+	check(flowOnly.Clone(core.WithLeader(meta.Peers[1]), core.WithFlowRoundByDigit(2)), false, true)
+	check(flowOnly.Clone(core.WithDownPeers([]*pdpb.PeerStats{{Peer: meta.Peers[1], DownSeconds: 1}}), core.WithFlowRoundByDigit(2)), false, true)
+	check(flowOnly.Clone(core.WithPendingPeers([]*metapb.Peer{meta.Peers[1]}), core.WithFlowRoundByDigit(2)), false, true)
+	check(origin.Clone(core.WithIncVersion()), false, true)
+
+	// Unknown future synchronization reasons must default to critical.
+	unknownReason := origin.Clone(core.SetApproximateSize(10), core.WithFlowRoundByDigit(2))
+	update, ok := cluster.prepareRegionUpdateForSync(unknownReason, origin, false, true)
+	re.True(ok)
+	re.False(update.StatsOnly)
+}
+
+func TestPrepareRegionUpdateForSyncSkipsStatsInMicroserviceMode(t *testing.T) {
+	re := require.New(t)
+	meta := &metapb.Region{
+		Id:          1,
+		RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1},
+		Peers: []*metapb.Peer{
+			{Id: 1, StoreId: 1},
+			{Id: 2, StoreId: 2},
+		},
+	}
+	origin := core.NewRegionInfo(meta, meta.Peers[0], core.WithFlowRoundByDigit(2))
+	flowOnly := origin.Clone(core.SetWrittenBytes(200), core.WithFlowRoundByDigit(2))
+	cluster := &RaftCluster{}
+	cluster.SetServiceIndependent(mcsconstant.SchedulingServiceName)
+
+	saveKV, _, needSync, _ := regionGuide(core.ContextTODO(), flowOnly, origin)
+	_, ok := cluster.prepareRegionUpdateForSync(flowOnly, origin, saveKV, needSync)
+	re.False(ok)
+
+	withLeaderChange := flowOnly.Clone(core.WithLeader(meta.Peers[1]), core.WithFlowRoundByDigit(2))
+	saveKV, _, needSync, _ = regionGuide(core.ContextTODO(), withLeaderChange, origin)
+	update, ok := cluster.prepareRegionUpdateForSync(withLeaderChange, origin, saveKV, needSync)
+	re.True(ok)
+	re.False(update.StatsOnly)
+}
+
+func TestSyncRegionCriticalUpdateSurvivesTaskCoalescing(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
+	meta := &metapb.Region{
+		Id:          1,
+		RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1},
+		Peers: []*metapb.Peer{
+			{Id: 1, StoreId: 1},
+			{Id: 2, StoreId: 2},
+		},
+	}
+	origin := core.NewRegionInfo(meta, meta.Peers[0], core.WithFlowRoundByDigit(2))
+	cluster.PutRegion(origin)
+
+	runner := newCoalescingTaskRunner()
+	processCtx := core.ContextTODO()
+	processCtx.SyncRegionRunner = runner
+	critical := origin.Clone(core.WithLeader(meta.Peers[1]), core.WithFlowRoundByDigit(2))
+	re.NoError(cluster.processRegionHeartbeat(processCtx, critical))
+	flowOnly := critical.Clone(core.SetWrittenBytes(200), core.WithFlowRoundByDigit(2))
+	re.NoError(cluster.processRegionHeartbeat(processCtx, flowOnly))
+
+	// ConcurrentRunner coalesces tasks with an equal region ID and task name.
+	// Critical and stats-only changes need separate keys so the latter cannot
+	// replace the former while full sync retention is active.
+	re.Len(runner.tasks, 2)
+	criticalKey := coalescingTaskKey{id: meta.Id, name: ratelimit.SyncRegionToFollower}
+	statsKey := coalescingTaskKey{id: meta.Id, name: ratelimit.SyncRegionStatsToFollower}
+	criticalTask, ok := runner.tasks[criticalKey]
+	re.True(ok)
+	statsTask, ok := runner.tasks[statsKey]
+	re.True(ok)
+	criticalTask(context.Background())
+	statsTask(context.Background())
+
+	criticalUpdate := <-cluster.changedRegions
+	re.Same(critical, criticalUpdate.Region)
+	re.False(criticalUpdate.StatsOnly)
+	statsUpdate := <-cluster.changedRegions
+	re.Same(flowOnly, statsUpdate.Region)
+	re.True(statsUpdate.StatsOnly)
 }
 
 func TestRegionFlowChanged(t *testing.T) {
