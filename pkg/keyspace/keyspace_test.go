@@ -231,11 +231,11 @@ func TestSaveKeyspaceRegionLabelerTxnOpReloadsFromStorage(t *testing.T) {
 	newer := MakeTxnLabelRule(id)
 	newer.Index = 7
 	newer.Labels[0].Value = "external-write"
-	re.NoError(cluster.RegionLabeler.SetLabelRule(newer))
+	re.NoError(cluster.SetLabelRule(newer))
 
 	cb(nil)
 
-	got := cluster.RegionLabeler.GetLabelRule(ruleID)
+	got := cluster.GetLabelRule(ruleID)
 	re.NotNil(got)
 	re.Equal(newer.Labels, got.Labels)
 }

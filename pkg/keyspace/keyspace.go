@@ -486,7 +486,7 @@ func (manager *Manager) createKeyspaceWithoutCheck(tracer *createKeyspaceTracer,
 			}
 		}
 		if err != nil {
-			if rbErr := manager.rollbackCreateKeyspace(tracer, keyspace); rbErr != nil {
+			if rbErr := manager.rollbackCreateKeyspace(keyspace); rbErr != nil {
 				log.Warn("[create-keyspace] failed to rollback keyspace after enable failed",
 					zap.Uint32("keyspace-id", tracer.keyspaceID),
 					zap.String("keyspace-name", tracer.keyspaceName),
@@ -580,7 +580,7 @@ func (manager *Manager) createKeyspaceWithoutCheck(tracer *createKeyspaceTracer,
 // and 3-4 still serializes them against a concurrent
 // UpdateKeyspaceState/UpdateKeyspaceStateByID/enableNewKeyspace call for the
 // same id, same as before.
-func (manager *Manager) rollbackCreateKeyspace(tracer *createKeyspaceTracer, keyspace *keyspacepb.KeyspaceMeta) error {
+func (manager *Manager) rollbackCreateKeyspace(keyspace *keyspacepb.KeyspaceMeta) error {
 	var regionLabeler *labeler.RegionLabeler
 	var ruleID string
 	if cl, ok := manager.cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler }); ok {
@@ -1004,8 +1004,15 @@ func (manager *Manager) waitKeyspaceRegionSplit(id uint32, boundType regionBound
 func (manager *Manager) CheckKeyspaceRegionBound(meta *keyspacepb.KeyspaceMeta) bool {
 	config := meta.GetConfig()
 	wait, ok := config[WaitRegionSplitKey]
-	// only this key exist and set as false means the keyspace is not waiting for split, so we can return true directly.
-	if ok && wait == "false" {
+	// wait_region_split == "false" means the keyspace was created without ever
+	// needing to wait for a split, so as long as it is still ENABLED we can
+	// return true directly without checking actual bounds. Once the keyspace
+	// is DISABLED/ARCHIVED/TOMBSTONE - regardless of how it left ENABLED -
+	// this shortcut must not apply: state, not wait_region_split, then
+	// governs whether the keyspace is usable, and callers such as
+	// LoadKeyspace rely on this to decide whether it should still be
+	// visible.
+	if ok && wait == "false" && meta.GetState() == keyspacepb.KeyspaceState_ENABLED {
 		return true
 	}
 	val, ok := config[RegionBoundType]
