@@ -445,8 +445,18 @@ var etcdSnapshotMetrics = map[string]struct{}{
 }
 
 func isEtcdSnapshotting() bool {
-	mfs, err := prometheus.DefaultGatherer.Gather()
-	if err != nil {
+	return snapshotGaugesNonzero(prometheus.DefaultGatherer)
+}
+
+// snapshotGaugesNonzero is the testable core of isEtcdSnapshotting, decoupled
+// from the process-wide default registerer so it can be driven with a fake
+// Gatherer.
+func snapshotGaugesNonzero(g prometheus.Gatherer) bool {
+	// Gather can return a non-nil err (e.g. an unrelated collector failed)
+	// alongside a partial but still-usable mfs; only bail out empty-handed
+	// when there is nothing to scan.
+	mfs, err := g.Gather()
+	if len(mfs) == 0 && err != nil {
 		return false
 	}
 	for _, mf := range mfs {
@@ -480,9 +490,13 @@ func waitEtcdReady(ctx context.Context, etcd *embed.Etcd) error {
 // waitEtcdReadyProgress is the testable core of waitEtcdReady, decoupled from
 // *embed.Etcd so it can be driven without a real server. It keeps waiting while
 // appliedIndex advances, or while snapshotting reports that etcd is receiving
-// or applying a raft snapshot (during which appliedIndex cannot advance), and
-// reports a no-progress failure only when neither signal shows progress for
-// noProgressTimeout. It fails fast when:
+// or applying a raft snapshot (during which appliedIndex cannot advance).
+// snapshotting is only a liveness bit, not proof the install itself is still
+// moving, so an unbroken streak of it reporting true is itself capped at
+// noProgressTimeout: a snapshot install that hangs (e.g. stuck disk I/O)
+// still eventually gives up instead of being treated as progress forever.
+// Outside of an active streak, a no-progress failure is reported once
+// appliedIndex has not advanced for noProgressTimeout. It fails fast when:
 //   - etcd reports an asynchronous startup error on errCh (e.g. listener or
 //     serving failures);
 //   - the etcd server stops before becoming ready (stopped), e.g. an internal
@@ -503,21 +517,39 @@ func waitEtcdReadyProgress(
 	lastApplied := appliedIndex()
 	lastProgress := time.Now()
 	lastLog := lastProgress
+	// snapshotSince marks the start of the current unbroken streak of
+	// snapshotting() reporting true with no AppliedIndex movement. It bounds
+	// how long a single raft snapshot install may be treated as progress: a
+	// nonzero snapshotting() signal is only a liveness bit, not proof the
+	// install itself is still moving, so without this bound a snapshot that
+	// hangs mid-install (e.g. stuck disk I/O) would refresh lastProgress on
+	// every poll forever and EtcdStartTimeout would never fire.
+	var snapshotSince time.Time
 	for {
 		select {
 		case <-ready:
 			return nil
-		case err := <-errCh:
+		case err, ok := <-errCh:
+			// errCh is closed once etcd.Close() runs (e.g. a concurrent
+			// shutdown), in which case a receive yields a nil err with
+			// ok == false; Wrap(nil) returns a nil *Error, and calling
+			// GenWithStackByCause on that would panic. Fall back to the
+			// generic cause-less error instead.
+			if !ok {
+				return errs.ErrStartEtcd.GenWithStackByArgs()
+			}
 			return errs.ErrStartEtcd.Wrap(err).GenWithStackByCause()
 		case <-stopped:
 			// The server terminated before becoming ready; surface the real
 			// cause if etcd published one, otherwise report the stop itself.
 			select {
-			case err := <-errCh:
-				return errs.ErrStartEtcd.Wrap(err).GenWithStackByCause()
+			case err, ok := <-errCh:
+				if ok {
+					return errs.ErrStartEtcd.Wrap(err).GenWithStackByCause()
+				}
 			default:
-				return errs.ErrStartEtcd.GenWithStackByArgs()
 			}
+			return errs.ErrStartEtcd.GenWithStackByArgs()
 		case <-ctx.Done():
 			return errs.ErrCancelStartEtcd.FastGenByArgs()
 		case <-ticker.C:
@@ -530,6 +562,7 @@ func waitEtcdReadyProgress(
 			if applied > lastApplied {
 				lastApplied = applied
 				lastProgress = now
+				snapshotSince = time.Time{}
 				// Rate-limit: this path can run for many minutes during a slow
 				// recovery, so avoid logging on every poll.
 				if now.Sub(lastLog) >= etcdStartProgressLogInterval {
@@ -540,13 +573,36 @@ func waitEtcdReadyProgress(
 				continue
 			}
 			if snapshotting() {
-				lastProgress = now
-				if now.Sub(lastLog) >= etcdStartProgressLogInterval {
-					log.Info("etcd is not ready yet but is installing a raft snapshot, keep waiting",
-						zap.Uint64("applied-index", applied))
-					lastLog = now
+				if snapshotSince.IsZero() {
+					snapshotSince = now
 				}
-				continue
+				// Cap the credit this streak can grant at noProgressTimeout,
+				// same as the AppliedIndex-based budget below, instead of
+				// refreshing lastProgress and extending the wait forever.
+				if now.Sub(snapshotSince) < noProgressTimeout {
+					if now.Sub(lastLog) >= etcdStartProgressLogInterval {
+						log.Info("etcd is not ready yet but is installing a raft snapshot, keep waiting",
+							zap.Uint64("applied-index", applied))
+						lastLog = now
+					}
+					continue
+				}
+				log.Warn("etcd has been installing a raft snapshot with no apply progress for too long, stop waiting",
+					zap.Uint64("applied-index", applied),
+					zap.Duration("snapshot-duration", now.Sub(snapshotSince)),
+					zap.Duration("timeout", noProgressTimeout))
+				return errs.ErrCancelStartEtcd.FastGenByArgs()
+			}
+			if !snapshotSince.IsZero() {
+				// A snapshot streak just ended (snapshotting() flipped back
+				// to false) without AppliedIndex having moved yet — e.g. the
+				// narrow gap between the network-receive gauge dropping and
+				// the apply gauge rising. Grant a fresh window from here
+				// instead of judging against a lastProgress mark from before
+				// the streak began, which would otherwise misfire on the
+				// very next tick.
+				lastProgress = now
+				snapshotSince = time.Time{}
 			}
 			if stalled := now.Sub(lastProgress); stalled >= noProgressTimeout {
 				log.Warn("etcd is not ready and made no apply progress, stop waiting",
