@@ -15,12 +15,14 @@
 package config
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
+	"github.com/tikv/pd/pkg/core/storelimit"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -86,5 +88,93 @@ func newScheduleConfig(schedulerType types.CheckerSchedulerType) *sc.ScheduleCon
 		Schedulers: []sc.SchedulerConfig{
 			{Type: types.SchedulerTypeCompatibleMap[schedulerType]},
 		},
+	}
+}
+
+func TestPersistConfigDefaultStoreLimit(t *testing.T) {
+	re := require.New(t)
+	oldAddPeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
+	oldRemovePeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer)
+	defer func() {
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, oldAddPeer)
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, oldRemovePeer)
+	}()
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, 15)
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, 15)
+
+	cfg := NewConfig()
+	re.NoError(cfg.adjust(nil))
+	persistConfig := NewPersistConfig(cfg, nil)
+	persistConfig.GetScheduleConfig().StoreLimit[1] = sc.StoreLimitConfig{AddPeer: 10, RemovePeer: 20}
+
+	persistConfig.SetAllStoresLimit(storelimit.AddPeer, 60)
+	re.Equal(sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 15}, persistConfig.GetScheduleConfig().DefaultStoreLimit)
+	re.Equal(sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 20}, persistConfig.GetStoreLimit(1))
+
+	data, err := json.Marshal(persistConfig.GetScheduleConfig())
+	re.NoError(err)
+	var reloadedScheduleConfig sc.ScheduleConfig
+	re.NoError(json.Unmarshal(data, &reloadedScheduleConfig))
+	restartedConfig := NewConfig()
+	restartedConfig.Schedule = reloadedScheduleConfig
+	restartedPersistConfig := NewPersistConfig(restartedConfig, nil)
+
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, 15)
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, 25)
+	re.Equal(sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 15}, restartedPersistConfig.GetStoreLimit(2))
+}
+
+func TestAdjustScheduleConfigDefaultStoreLimit(t *testing.T) {
+	oldAddPeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
+	oldRemovePeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer)
+	defer func() {
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, oldAddPeer)
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, oldRemovePeer)
+	}()
+
+	testCases := []struct {
+		name     string
+		config   string
+		expected sc.StoreLimitConfig
+	}{
+		{
+			name:     "legacy config without store limit default",
+			config:   `{"store-limit":{}}`,
+			expected: sc.StoreLimitConfig{AddPeer: 15, RemovePeer: 15},
+		},
+		{
+			name:     "legacy store balance rate",
+			config:   `{"store-balance-rate":60,"store-limit":{}}`,
+			expected: sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 60},
+		},
+		{
+			name:     "explicit zero wins over legacy store balance rate",
+			config:   `{"store-balance-rate":60,"default-store-limit":{"add-peer":0,"remove-peer":0},"store-limit":{}}`,
+			expected: sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 0},
+		},
+		{
+			name:     "legacy store balance rate backfills an omitted field",
+			config:   `{"store-balance-rate":60,"default-store-limit":{"add-peer":0},"store-limit":{}}`,
+			expected: sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 60},
+		},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, 15)
+			sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, 15)
+			watchedConfig := &persistedConfig{
+				Schedule: sc.ScheduleConfig{DefaultStoreLimit: sc.DefaultStoreLimitConfig()},
+			}
+			re.NoError(json.Unmarshal([]byte(`{"schedule":`+testCase.config+`}`), watchedConfig))
+			AdjustScheduleCfg(&watchedConfig.Schedule)
+			re.Equal(testCase.expected, watchedConfig.Schedule.DefaultStoreLimit)
+			re.Zero(watchedConfig.Schedule.StoreBalanceRate)
+
+			cfg := NewConfig()
+			cfg.Schedule = watchedConfig.Schedule
+			persistConfig := NewPersistConfig(cfg, nil)
+			re.Equal(testCase.expected, persistConfig.GetStoreLimit(100))
+		})
 	}
 }

@@ -18,6 +18,7 @@ import (
 	"context"
 	"strconv"
 	"sync"
+	"sync/atomic"
 
 	"github.com/gogo/protobuf/proto"
 	"go.etcd.io/etcd/api/v3/mvccpb"
@@ -28,6 +29,11 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/schedule"
+	"github.com/tikv/pd/pkg/schedule/filter"
+	"github.com/tikv/pd/pkg/schedule/hbstream"
+	"github.com/tikv/pd/pkg/schedule/scatter"
+	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
@@ -42,6 +48,13 @@ type Watcher struct {
 	etcdClient   *clientv3.Client
 	basicCluster *core.BasicCluster
 	storeWatcher *etcdutil.LoopWatcher
+
+	// onStoreTombstoned is late-bound via SetOnStoreTombstoned once the parent
+	// Cluster (which owns hotStat and the scheduling-server-only metrics that this
+	// package can't import without a cycle) finishes construction. The watcher
+	// itself starts watching before that point, so it's read through an atomic
+	// pointer to stay safe against a store event racing the setup.
+	onStoreTombstoned atomic.Pointer[func(storeID uint64)]
 }
 
 // NewWatcher creates a new watcher to watch the meta change from PD.
@@ -82,8 +95,16 @@ func (w *Watcher) initializeStoreWatcher() error {
 		}
 
 		if store.GetNodeState() == metapb.NodeState_Removed {
-			statistics.ResetStoreStatistics(store.GetAddress(), strconv.FormatUint(store.GetId(), 10))
-			// TODO: remove hot stats
+			storeIDStr := strconv.FormatUint(store.GetId(), 10)
+			statistics.ResetStoreStatistics(storeIDStr)
+			filter.DeleteStoreMetrics(storeIDStr)
+			hbstream.DeleteStoreMetrics(storeIDStr)
+			schedulers.DeleteStoreMetrics(storeIDStr)
+			schedule.DeleteStoreMetrics(storeIDStr)
+			scatter.DeleteStoreMetrics(storeIDStr)
+			if fn := w.onStoreTombstoned.Load(); fn != nil {
+				(*fn)(store.GetId())
+			}
 		}
 
 		return nil
@@ -96,8 +117,21 @@ func (w *Watcher) initializeStoreWatcher() error {
 		}
 		origin := w.basicCluster.GetStore(storeID)
 		if origin != nil {
-			statistics.DeleteClusterStatusMetrics(origin)
+			// Remove the store before the metric cleanup below, not after: see
+			// the matching comment on RaftCluster.deleteStore for why the order
+			// matters for a concurrently-running metrics collection tick.
 			w.basicCluster.DeleteStore(origin)
+			storeIDStr := strconv.FormatUint(storeID, 10)
+			statistics.DeleteClusterStatusMetrics(origin)
+			statistics.ResetStoreStatistics(storeIDStr)
+			filter.DeleteStoreMetrics(storeIDStr)
+			hbstream.DeleteStoreMetrics(storeIDStr)
+			schedulers.DeleteStoreMetrics(storeIDStr)
+			schedule.DeleteStoreMetrics(storeIDStr)
+			scatter.DeleteStoreMetrics(storeIDStr)
+			if fn := w.onStoreTombstoned.Load(); fn != nil {
+				(*fn)(storeID)
+			}
 			log.Info("delete store meta", zap.Uint64("store-id", storeID))
 		}
 		return nil
@@ -116,6 +150,22 @@ func (w *Watcher) initializeStoreWatcher() error {
 	w.storeWatcher.SetReconcileDeletedKeys()
 	w.storeWatcher.StartWatchLoop()
 	return w.storeWatcher.WaitLoad()
+}
+
+// SetOnStoreTombstoned sets the callback invoked (at least once) when a store
+// transitions to tombstone, for cleanup that only the parent Cluster can do
+// without an import cycle (removing rolling hot stats, resetting the
+// scheduling-server-owned heartbeat metrics). NewWatcher's initial load runs
+// before the caller has a chance to install this callback, so a store already
+// tombstoned at startup would otherwise never get it invoked; reconcile against
+// whatever the watcher has already loaded here to close that gap.
+func (w *Watcher) SetOnStoreTombstoned(fn func(storeID uint64)) {
+	w.onStoreTombstoned.Store(&fn)
+	for _, store := range w.basicCluster.GetStores() {
+		if store.IsRemoved() {
+			fn(store.GetID())
+		}
+	}
 }
 
 // Close closes the watcher.
