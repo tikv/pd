@@ -20,7 +20,6 @@ import (
 	"math"
 	"time"
 
-	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -571,11 +570,11 @@ func splitWatchGCStatesResponses(changes []*pdpb.GCStateChange, maxSize int) []*
 	responses := make([]*pdpb.WatchGCStatesResponse, 0, 1)
 	newResponse := func() (*pdpb.WatchGCStatesResponse, int) {
 		response := &pdpb.WatchGCStatesResponse{Header: grpcutil.WrapHeader()}
-		return response, proto.Size(response)
+		return response, response.Size()
 	}
 	current, currentSize := newResponse()
 	for _, change := range changes {
-		changeSize := proto.Size(&pdpb.WatchGCStatesResponse{Changes: []*pdpb.GCStateChange{change}})
+		changeSize := (&pdpb.WatchGCStatesResponse{Changes: []*pdpb.GCStateChange{change}}).Size()
 		if len(current.Changes) > 0 && currentSize+changeSize > maxSize {
 			responses = append(responses, current)
 			current, currentSize = newResponse()
