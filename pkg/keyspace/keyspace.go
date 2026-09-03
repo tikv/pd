@@ -1095,49 +1095,64 @@ func (manager *Manager) decrementMetaServiceGroupAssignmentsTxn(txn kv.Txn, assi
 }
 
 func (manager *Manager) removeKeyspaceMetadata(txn kv.Txn, id uint32) (string, error) {
-	groupID, _, err := manager.removeKeyspaceMetadataIfEligible(txn, id, false)
+	groupID, _, _, err := manager.removeKeyspaceMetadataIfEligible(txn, id, false, nil)
 	return groupID, err
 }
 
 // tryRemoveKeyspaceMetadata removes id only when it is currently archived or
-// tombstoned. Missing, protected, and non-removable keyspaces are skipped to
-// preserve the bulk-removal API semantics.
-func (manager *Manager) tryRemoveKeyspaceMetadata(txn kv.Txn, id uint32) (string, bool, error) {
-	return manager.removeKeyspaceMetadataIfEligible(txn, id, true)
+// tombstoned and canRemove accepts its meta-service group. Missing, protected,
+// and non-removable keyspaces are skipped to preserve the bulk-removal API
+// semantics. deferred reports that an eligible keyspace should be retried in
+// the next transaction.
+func (manager *Manager) tryRemoveKeyspaceMetadata(
+	txn kv.Txn,
+	id uint32,
+	canRemove func(metaServiceGroupID string) bool,
+) (metaServiceGroupID string, removed, deferred bool, err error) {
+	return manager.removeKeyspaceMetadataIfEligible(txn, id, true, canRemove)
 }
 
-func (manager *Manager) removeKeyspaceMetadataIfEligible(txn kv.Txn, id uint32, skipNonRemovable bool) (string, bool, error) {
+func (manager *Manager) removeKeyspaceMetadataIfEligible(
+	txn kv.Txn,
+	id uint32,
+	skipNonRemovable bool,
+	canRemove func(metaServiceGroupID string) bool,
+) (metaServiceGroupID string, removed, deferred bool, err error) {
 	manager.metaLock.Lock(id)
 	defer manager.metaLock.Unlock(id)
 	if isProtectedKeyspaceID(id) {
 		if skipNonRemovable {
-			return "", false, nil
+			return "", false, false, nil
 		}
-		return "", false, newModifyProtectedKeyspaceError()
+		return "", false, false, newModifyProtectedKeyspaceError()
 	}
 	meta, err := manager.store.LoadKeyspaceMeta(txn, id)
 	if err != nil {
-		return "", false, err
+		return "", false, false, err
 	}
 	if meta == nil {
 		if skipNonRemovable {
-			return "", false, nil
+			return "", false, false, nil
 		}
-		return "", false, errs.ErrKeyspaceNotFound
+		return "", false, false, errs.ErrKeyspaceNotFound
 	}
 	state := meta.GetState()
 	if skipNonRemovable {
 		if state != keyspacepb.KeyspaceState_ARCHIVED && state != keyspacepb.KeyspaceState_TOMBSTONE {
-			return "", false, nil
+			return "", false, false, nil
 		}
 	} else if state == keyspacepb.KeyspaceState_ENABLED || state == keyspacepb.KeyspaceState_DISABLED {
-		return "", false, errors.Errorf("cannot remove keyspace in state %s", state.String())
+		return "", false, false, errors.Errorf("cannot remove keyspace in state %s", state.String())
+	}
+	metaServiceGroupID = meta.GetConfig()[MetaServiceGroupIDKey]
+	if canRemove != nil && !canRemove(metaServiceGroupID) {
+		return metaServiceGroupID, false, true, nil
 	}
 	err = manager.store.RemoveKeyspace(txn, id, meta.GetName())
 	if err != nil {
-		return "", false, err
+		return "", false, false, err
 	}
-	return meta.GetConfig()[MetaServiceGroupIDKey], true, nil
+	return metaServiceGroupID, true, false, nil
 }
 
 func (manager *Manager) evictKeyspacesFromCache(ids []uint32) {

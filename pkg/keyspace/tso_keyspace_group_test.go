@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -746,6 +747,45 @@ func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupUsesBoundedTran
 		re.NoError(err)
 		re.Equal(keyspacepb.KeyspaceState_ENABLED, meta.GetState())
 	}
+}
+
+func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupKeepsSingleTransactionFastPath() {
+	re := suite.Require()
+	keyspaceIDs := suite.createArchivedKeyspaces(maxKeyspaceRemovalBatchSize)
+	store, ok := suite.kg.store.(*endpoint.StorageEndpoint)
+	re.True(ok)
+	countingStore := &countingKeyspaceGroupStorage{StorageEndpoint: store}
+	suite.kgm.store = countingStore
+
+	_, err := suite.kgm.removeKeyspacesFromGroupWithConditions(
+		suite.ctx, constant.DefaultKeyspaceGroupID, suite.kg, keyspaceIDs, nil)
+	re.NoError(err)
+	re.Equal(int32(1), countingStore.runInTxnCount.Load())
+}
+
+func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupBoundsDistinctAssignmentUpdates() {
+	re := suite.Require()
+	keyspaceCount := (maxKeyspaceRemovalTxnOps-1)/3 + 1
+	keyspaceIDs := suite.createArchivedKeyspaces(keyspaceCount)
+	for _, keyspaceID := range keyspaceIDs {
+		re.NoError(suite.kg.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+			meta, err := suite.kg.store.LoadKeyspaceMeta(txn, keyspaceID)
+			if err != nil {
+				return err
+			}
+			meta.Config[MetaServiceGroupIDKey] = strconv.FormatUint(uint64(keyspaceID), 10)
+			return suite.kg.store.SaveKeyspaceMeta(txn, meta)
+		}))
+	}
+	store, ok := suite.kg.store.(*endpoint.StorageEndpoint)
+	re.True(ok)
+	countingStore := &countingKeyspaceGroupStorage{StorageEndpoint: store}
+	suite.kgm.store = countingStore
+
+	_, err := suite.kgm.removeKeyspacesFromGroupWithConditions(
+		suite.ctx, constant.DefaultKeyspaceGroupID, suite.kg, keyspaceIDs, nil)
+	re.NoError(err)
+	re.Equal(int32(2), countingStore.runInTxnCount.Load())
 }
 
 func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupFiltersInBatch() {
