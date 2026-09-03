@@ -83,6 +83,7 @@ type RegionInfo struct {
 	readKeys                  uint64
 	approximateSize           int64
 	approximateKvSize         int64 // Unit: MiB
+	approximateIAKvSize       int64 // Unit: MiB
 	approximateColumnarKvSize int64 // Unit: MiB
 	approximateKeys           int64
 	interval                  *pdpb.TimeInterval
@@ -258,6 +259,7 @@ func RegionFromHeartbeat(heartbeat RegionHeartbeatRequest, flowRoundDivisor uint
 	// scheduling service doesn't need the following fields.
 	if h, ok := heartbeat.(*pdpb.RegionHeartbeatRequest); ok {
 		region.approximateKvSize = int64(h.GetApproximateKvSize() / units.MiB)
+		region.approximateIAKvSize = int64(h.GetApproximateIaKvSize() / units.MiB)
 		region.approximateColumnarKvSize = int64(h.GetApproximateColumnarKvSize() / units.MiB)
 		region.replicationStatus = h.GetReplicationStatus()
 		region.cpuStats = h.GetCpuStats()
@@ -335,6 +337,7 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 		readKeys:                  r.readKeys,
 		approximateSize:           r.approximateSize,
 		approximateKvSize:         r.approximateKvSize,
+		approximateIAKvSize:       r.approximateIAKvSize,
 		approximateColumnarKvSize: r.approximateColumnarKvSize,
 		approximateKeys:           r.approximateKeys,
 		interval:                  typeutil.DeepClone(r.interval, TimeIntervalFactory),
@@ -715,6 +718,11 @@ func (r *RegionInfo) GetStorePeerApproximateKeys(storeID uint64) int64 {
 // GetApproximateKvSize returns the approximate kv size of the region.
 func (r *RegionInfo) GetApproximateKvSize() int64 {
 	return r.approximateKvSize
+}
+
+// GetApproximateIAKvSize returns the approximate IA kv size of the region.
+func (r *RegionInfo) GetApproximateIAKvSize() int64 {
+	return r.approximateIAKvSize
 }
 
 // GetApproximateColumnarKvSize returns the approximate columnar kv size of the region.

@@ -26,9 +26,11 @@ import (
 
 const (
 	storageSizeCollectorCategory = "storage-size"
-	storageSizeMeteringVersion   = "1"
+	// The IA field is additive, so older consumers can keep using the total row-based size.
+	storageSizeMeteringVersion = "1"
 
 	meteringDataRowBasedStorageSizeField    = "row_based_storage_size"
+	meteringDataRowBasedIAStorageSizeField  = "row_based_ia_storage_size"
 	meteringDataColumnBasedStorageSizeField = "column_based_storage_size"
 )
 
@@ -36,13 +38,18 @@ var _ metering.Collector = (*storageSizeCollector)(nil)
 
 type storageSizeInfo struct {
 	keyspaceName string
-	// Both storage size are in MiB.
+	// All storage sizes are in MiB.
 	rowBasedStorageSize    uint64
+	rowBasedIAStorageSize  uint64 // IA subset; Standard is derived from total minus IA.
 	columnBasedStorageSize uint64
 }
 
 func (s *storageSizeInfo) rowBasedStorageSizeMeteringValue() common.MeteringValue {
 	return metering.NewBytesValue(s.rowBasedStorageSize * units.MiB)
+}
+
+func (s *storageSizeInfo) rowBasedIAStorageSizeMeteringValue() common.MeteringValue {
+	return metering.NewBytesValue(s.rowBasedIAStorageSize * units.MiB)
 }
 
 func (s *storageSizeInfo) columnBasedStorageSizeMeteringValue() common.MeteringValue {
@@ -88,6 +95,7 @@ func (c *storageSizeCollector) Aggregate() []map[string]any {
 			metering.DataClusterIDField:             keyspaceName, // keyspaceName is the logical cluster ID in the metering data.
 			metering.DataSourceNameField:            metering.SourceNamePD,
 			meteringDataRowBasedStorageSizeField:    storageSizeInfo.rowBasedStorageSizeMeteringValue(),
+			meteringDataRowBasedIAStorageSizeField:  storageSizeInfo.rowBasedIAStorageSizeMeteringValue(),
 			meteringDataColumnBasedStorageSizeField: storageSizeInfo.columnBasedStorageSizeMeteringValue(),
 		})
 	}

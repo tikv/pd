@@ -2904,6 +2904,7 @@ func (c *RaftCluster) collectStorageSize(
 			keyspaceName: keyspaceName,
 			// Use the user storage size to record the logical storage size.
 			rowBasedStorageSize:    uint64(regionStats.UserStorageSize),
+			rowBasedIAStorageSize:  uint64(regionStats.GetUserIAStorageSize()),
 			columnBasedStorageSize: uint64(regionStats.UserColumnarStorageSize),
 		})
 	}

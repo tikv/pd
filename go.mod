@@ -35,7 +35,7 @@ require (
 	github.com/pingcap/errcode v0.3.0
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c
 	github.com/pingcap/failpoint v0.0.0-20240528011301-b51a646c7c86
-	github.com/pingcap/kvproto v0.0.0-20260810080205-543bb79c8a8a
+	github.com/pingcap/kvproto v0.0.0-20260903054228-107095f1d250
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
 	github.com/pingcap/metering_sdk v0.0.0-20260814062708-9e3b68cd9adf
 	github.com/pingcap/sysutil v1.0.1-0.20230407040306-fb007c5aff21

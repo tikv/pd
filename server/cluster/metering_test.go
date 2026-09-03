@@ -69,6 +69,7 @@ func TestCollectStorageSize(t *testing.T) {
 	// Mock the storage size info since the region split won't work in the test.
 	for i := range storageSizeInfoList {
 		storageSizeInfoList[i].rowBasedStorageSize = uint64(i)
+		storageSizeInfoList[i].rowBasedIAStorageSize = uint64(i) / 2
 		storageSizeInfoList[i].columnBasedStorageSize = uint64(i)
 	}
 
@@ -82,8 +83,10 @@ func TestCollectStorageSize(t *testing.T) {
 	})
 	for idx, record := range records {
 		storageSizeInfo := storageSizeInfoList[idx]
+		re.Equal(storageSizeMeteringVersion, record[metering.DataVersionField])
 		re.Equal(storageSizeInfo.keyspaceName, record[metering.DataClusterIDField])
 		re.Equal(metering.NewBytesValue(storageSizeInfo.rowBasedStorageSize*units.MiB), record[meteringDataRowBasedStorageSizeField])
+		re.Equal(metering.NewBytesValue(storageSizeInfo.rowBasedIAStorageSize*units.MiB), record[meteringDataRowBasedIAStorageSizeField])
 		re.Equal(metering.NewBytesValue(storageSizeInfo.columnBasedStorageSize*units.MiB), record[meteringDataColumnBasedStorageSizeField])
 	}
 }

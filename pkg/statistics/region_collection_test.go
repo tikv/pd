@@ -29,6 +29,24 @@ import (
 	"github.com/tikv/pd/pkg/storage"
 )
 
+func TestRegionStatsObserveIAKVSize(t *testing.T) {
+	re := require.New(t)
+	region := core.NewRegionInfo(
+		&metapb.Region{Id: 1},
+		nil,
+		core.SetApproximateKvSize(100),
+		core.SetApproximateIAKvSize(40),
+	)
+
+	stats := GetRegionStats([]*core.RegionInfo{region}, nil)
+	re.Equal(int64(100), stats.UserStorageSize)
+	re.Equal(int64(40), stats.GetUserIAStorageSize())
+
+	region = region.Clone(core.SetApproximateIAKvSize(120))
+	stats = GetRegionStats([]*core.RegionInfo{region}, nil)
+	re.Equal(int64(100), stats.GetUserIAStorageSize())
+}
+
 func TestRegionStatistics(t *testing.T) {
 	re := require.New(t)
 	store := storage.NewStorageWithMemoryBackend()

@@ -27,6 +27,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/docker/go-units"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pingcap/failpoint"
@@ -72,6 +73,26 @@ func TestNeedMerge(t *testing.T) {
 		}
 		re.Equal(v.expect, r.NeedMerge(mererSize, mergeKeys))
 	}
+}
+
+func TestRegionFromHeartbeatIAKVSize(t *testing.T) {
+	re := require.New(t)
+	heartbeat := &pdpb.RegionHeartbeatRequest{
+		Region:              &metapb.Region{},
+		ApproximateKvSize:   100 * units.MiB,
+		ApproximateIaKvSize: 40 * units.MiB,
+	}
+
+	region := RegionFromHeartbeat(heartbeat, 1)
+	re.Equal(int64(100), region.GetApproximateKvSize())
+	re.Equal(int64(40), region.GetApproximateIAKvSize())
+	re.Equal(int64(40), region.Clone().GetApproximateIAKvSize())
+
+	oldHeartbeat := &pdpb.RegionHeartbeatRequest{
+		Region:            &metapb.Region{},
+		ApproximateKvSize: 100 * units.MiB,
+	}
+	re.Zero(RegionFromHeartbeat(oldHeartbeat, 1).GetApproximateIAKvSize())
 }
 
 func TestSortedEqual(t *testing.T) {
