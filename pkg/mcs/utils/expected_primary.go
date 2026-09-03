@@ -218,6 +218,20 @@ func ExpectedPrimaryCmp(msParam *keypath.MsParam, expectedValue string) clientv3
 	return clientv3.Compare(clientv3.Value(path), "=", expectedValue)
 }
 
+// leaderKeyClearPollTimeout bounds how long verifyLeaderKeyCleared waits for the old
+// leader key to clear before concluding the revoke failed. A concurrent Resign() on
+// the same participant (e.g. TSO's primaryPriorityCheckLoop racing an HTTP transfer)
+// returns immediately without waiting, because Lease.Close is idempotent via a
+// CompareAndSwap guard - so a single check right after Resign() can see a stale "not
+// yet cleared" state from a revoke that some other, concurrent caller triggered and is
+// genuinely still in flight. This must be at least as long as that revoke's own bound
+// (pkg/election/lease.go's unexported revokeLeaseTimeout, currently 1s) so a
+// legitimately in-flight concurrent revoke has time to land.
+const (
+	leaderKeyClearPollTimeout  = 2 * time.Second
+	leaderKeyClearPollInterval = 100 * time.Millisecond
+)
+
 // verifyLeaderKeyCleared checks whether the old leader key actually cleared after
 // Resign(). Resign() revokes the leader key's lease but is best-effort and swallows
 // its own error internally (see Leadership.Reset), so this is the only way the caller
@@ -229,8 +243,10 @@ func ExpectedPrimaryCmp(msParam *keypath.MsParam, expectedValue string) clientv3
 // ExpectedPrimaryCmp guard makes any other candidate's campaign transaction fail
 // atomically alongside the very same CreateRevision(leaderKey)==0 check (see
 // ExpectedPrimaryCmp and Leadership.Campaign) - so that case is success, not failure.
-// Only a leader key present with the same CreateRevision means the revoke genuinely
-// failed and the old key is still there.
+// A leader key present with the same CreateRevision means the revoke has not
+// completed yet - either this call's own, or (per leaderKeyClearPollTimeout's doc
+// comment) a concurrent caller's still in flight - so this polls instead of failing
+// on the first observation, and only reports failure once the poll budget is spent.
 //
 // This matters because the marker's own TTL clock starts at the lease Grant, before
 // Resign() even runs, while the old leader key - if its revoke fails - only starts
@@ -239,16 +255,22 @@ func ExpectedPrimaryCmp(msParam *keypath.MsParam, expectedValue string) clientv3
 // let the marker expire before the old leader key does, silently losing the transfer's
 // affinity guarantee even though the caller already reported success.
 func verifyLeaderKeyCleared(client *clientv3.Client, leaderKeyPath string, oldRevision int64) error {
-	ctx, cancel := context.WithTimeout(client.Ctx(), etcdutil.DefaultRequestTimeout)
-	resp, err := client.Get(ctx, leaderKeyPath)
-	cancel()
-	if err != nil {
-		return errors.Annotate(err, "failed to verify the old leader key cleared after resign")
+	deadline := time.Now().Add(leaderKeyClearPollTimeout)
+	for {
+		ctx, cancel := context.WithTimeout(client.Ctx(), etcdutil.DefaultRequestTimeout)
+		resp, err := client.Get(ctx, leaderKeyPath)
+		cancel()
+		if err != nil {
+			return errors.Annotate(err, "failed to verify the old leader key cleared after resign")
+		}
+		if len(resp.Kvs) == 0 || resp.Kvs[0].CreateRevision != oldRevision {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return errors.New("the old leader key did not clear after resign, etcd may be degraded; please retry the transfer")
+		}
+		time.Sleep(leaderKeyClearPollInterval)
 	}
-	if len(resp.Kvs) > 0 && resp.Kvs[0].CreateRevision == oldRevision {
-		return errors.New("the old leader key did not clear after resign, etcd may be degraded; please retry the transfer")
-	}
-	return nil
 }
 
 // TransferPrimary transfers the primary of the specified service to a target member.

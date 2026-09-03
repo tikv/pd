@@ -17,6 +17,7 @@ package utils
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -380,7 +381,8 @@ func TestVerifyLeaderKeyClearedDistinguishesFailureFromSupersede(t *testing.T) {
 	re.Len(oldResp.Kvs, 1)
 	oldRevision := oldResp.Kvs[0].CreateRevision
 
-	// The revoke failed and the old key is untouched: must be reported as a failure.
+	// The revoke failed and the old key stays untouched for the whole poll budget:
+	// must be reported as a failure. This case pays the full leaderKeyClearPollTimeout.
 	re.Error(verifyLeaderKeyCleared(client, leaderKeyPath, oldRevision))
 
 	// The revoke succeeded and the key is now gone: success.
@@ -398,6 +400,38 @@ func TestVerifyLeaderKeyClearedDistinguishesFailureFromSupersede(t *testing.T) {
 	newResp, err := client.Get(ctx, leaderKeyPath)
 	re.NoError(err)
 	re.NotEqual(oldRevision, newResp.Kvs[0].CreateRevision)
+	re.NoError(verifyLeaderKeyCleared(client, leaderKeyPath, oldRevision))
+}
+
+// TestVerifyLeaderKeyClearedPollsForConcurrentRevoke reconstructs the race flagged in
+// review: Lease.Close is idempotent (a CompareAndSwap guard), so a second, concurrent
+// Resign() on the same participant (e.g. TSO's primaryPriorityCheckLoop racing an HTTP
+// transfer) returns immediately without waiting for whichever caller's revoke is
+// actually in flight. A single check right after Resign() would see the old leader key
+// still present with the same CreateRevision and wrongly report a failure even though
+// that concurrent revoke is genuinely about to succeed. verifyLeaderKeyCleared must
+// poll long enough to observe the delayed clear instead of failing on the first look.
+func TestVerifyLeaderKeyClearedPollsForConcurrentRevoke(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+
+	ctx := context.Background()
+	const leaderKeyPath = "/pd/test-transfer-primary/leader"
+
+	_, err := client.Put(ctx, leaderKeyPath, "old-primary")
+	re.NoError(err)
+	oldResp, err := client.Get(ctx, leaderKeyPath)
+	re.NoError(err)
+	oldRevision := oldResp.Kvs[0].CreateRevision
+
+	// Simulate a concurrent caller's in-flight revoke landing partway through the poll
+	// window, well within leaderKeyClearPollTimeout.
+	go func() {
+		time.Sleep(leaderKeyClearPollInterval * 3)
+		_, _ = client.Delete(ctx, leaderKeyPath)
+	}()
+
 	re.NoError(verifyLeaderKeyCleared(client, leaderKeyPath, oldRevision))
 }
 
