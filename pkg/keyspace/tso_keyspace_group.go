@@ -958,18 +958,22 @@ func (m *GroupManager) getKeyspaceConfigByKindLocked(userKind endpoint.UserKind)
 	return config, nil
 }
 
-// GetGroupByKeyspaceID returns the keyspace group ID for the given keyspace ID.
-func (m *GroupManager) GetGroupByKeyspaceID(id uint32) (uint32, error) {
+// GetGroupByKeyspaceID returns the keyspace group ID and its user kind for the
+// given keyspace ID. The user kind is needed alongside the group ID by
+// anything that then looks the group up in the per-user-kind cache
+// (m.groups[userKind]) - assuming a caller-supplied user kind there can miss
+// a group that legitimately lives under a different one.
+func (m *GroupManager) GetGroupByKeyspaceID(id uint32) (uint32, endpoint.UserKind, error) {
 	m.RLock()
 	defer m.RUnlock()
-	for _, groups := range m.groups {
+	for userKind, groups := range m.groups {
 		for _, group := range groups.GetAll() {
 			if slice.Contains(group.Keyspaces, id) {
-				return group.ID, nil
+				return group.ID, userKind, nil
 			}
 		}
 	}
-	return 0, errs.ErrKeyspaceNotInAnyKeyspaceGroup
+	return 0, 0, errs.ErrKeyspaceNotInAnyKeyspaceGroup
 }
 
 // RemoveKeyspacesFromGroup removes the specified keyspaces from the given keyspace group.

@@ -33,7 +33,10 @@ import (
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
+	"github.com/tikv/pd/pkg/mock/mockcluster"
+	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/mock/mockid"
+	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -173,7 +176,7 @@ func (suite *keyspaceTestSuite) TestInitReserveKeyspaceRepairsGroupMembership() 
 	kg, err := manager.kgm.GetKeyspaceGroupByID(uint32(gid))
 	re.NoError(err)
 	re.NotContains(kg.Keyspaces, id)
-	_, err = manager.kgm.GetGroupByKeyspaceID(id)
+	_, _, err = manager.kgm.GetGroupByKeyspaceID(id)
 	re.ErrorIs(err, errs.ErrKeyspaceNotInAnyKeyspaceGroup)
 
 	// A restart re-runs Bootstrap -> initReserveKeyspace, which should repair the
@@ -187,9 +190,54 @@ func (suite *keyspaceTestSuite) TestInitReserveKeyspaceRepairsGroupMembership() 
 	// GetKeyspaceGroupByID reloads from storage regardless of cache state, so
 	// also check the in-memory group cache directly (what GetGroupByKeyspaceID
 	// reads) to confirm the repair's post-commit callback actually ran.
-	repairedGroupID, err := manager.kgm.GetGroupByKeyspaceID(id)
+	repairedGroupID, _, err := manager.kgm.GetGroupByKeyspaceID(id)
 	re.NoError(err)
 	re.Equal(uint32(gid), repairedGroupID)
+}
+
+// TestSaveKeyspaceRegionLabelerTxnOpReloadsFromStorage verifies that the
+// post-commit callback returned by saveKeyspaceRegionLabelerTxnOp re-reads the
+// label rule from storage instead of caching the snapshot captured when the op
+// was built. Nothing reserves the "keyspaces/<id>" rule ID against the generic
+// label-rule API, so a concurrent SetLabelRule/DeleteLabelRule on the same ID
+// landing between commit and this callback must win, not be silently reverted
+// by our stale snapshot.
+func TestSaveKeyspaceRegionLabelerTxnOpReloadsFromStorage(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	// Rebind the mock cluster's region labeler onto the same store the
+	// manager below uses, so the op's write and the callback's reload
+	// actually see each other - mockcluster.NewCluster otherwise builds its
+	// own separate in-memory storage.
+	var err error
+	cluster.RegionLabeler, err = labeler.NewRegionLabeler(ctx, store, time.Hour)
+	re.NoError(err)
+	manager := NewKeyspaceManager(ctx, store, cluster, mockid.NewIDAllocator(), &mockConfig{}, nil, nil)
+
+	id := uint32(123)
+	op, cb, err := manager.saveKeyspaceRegionLabelerTxnOp(id, txnRegionBound)
+	re.NoError(err)
+	re.NotNil(op)
+	re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error {
+		return op(txn)
+	}))
+
+	// Simulate a concurrent SetLabelRule on the same rule ID landing after our
+	// txn committed but before our callback reloads.
+	ruleID := getRegionLabelID(id)
+	newer := MakeTxnLabelRule(id)
+	newer.Index = 7
+	newer.Labels[0].Value = "external-write"
+	re.NoError(cluster.RegionLabeler.SetLabelRule(newer))
+
+	cb(nil)
+
+	got := cluster.RegionLabeler.GetLabelRule(ruleID)
+	re.NotNil(got)
+	re.Equal(newer.Labels, got.Labels)
 }
 
 func (suite *keyspaceTestSuite) TestCreateSameKeyspaceTwice() {
@@ -310,7 +358,7 @@ func (suite *keyspaceTestSuite) TestWaitSplitFailureRollsBackCrossSubsystemState
 	// The allocator hands out sequential ids starting at 1, and Bootstrap
 	// doesn't consume one (the reserved keyspace's id is fixed, not
 	// allocated), so this failed creation must have taken id 1.
-	_, err = manager.kgm.GetGroupByKeyspaceID(1)
+	_, _, err = manager.kgm.GetGroupByKeyspaceID(1)
 	re.ErrorIs(err, errs.ErrKeyspaceNotInAnyKeyspaceGroup)
 
 	status, err := manager.mgm.GetStatus(ctx)

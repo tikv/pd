@@ -114,6 +114,30 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfig() {
 	}
 }
 
+// TestUpdateKeyspaceConfigRejectsWaitRegionSplit verifies that
+// wait_region_split cannot be changed via PATCH: it is set once at creation
+// time and read by CheckKeyspaceRegionBound to decide whether the keyspace
+// is safe to use yet, so allowing a PATCH to flip it would let a keyspace be
+// used before its region boundaries actually exist.
+func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfigRejectsWaitRegionSplit() {
+	re := suite.Require()
+	created := MustCreateKeyspace(re, suite.server, &handlers.CreateKeyspaceParams{
+		Name:   "test_ks_wait_split",
+		Config: map[string]string{},
+	})
+	re.NotNil(created)
+
+	falseVal := "false"
+	status, body, meta := tryUpdateKeyspaceConfig(re, suite.server, created.Name, &handlers.UpdateConfigParams{
+		Config: map[string]*string{
+			keyspace.WaitRegionSplitKey: &falseVal,
+		},
+	})
+	re.Equal(http.StatusInternalServerError, status, body)
+	re.Nil(meta)
+	re.Contains(body, "wait region split")
+}
+
 func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfigPreconditions() {
 	re := suite.Require()
 	created := MustCreateKeyspace(re, suite.server, &handlers.CreateKeyspaceParams{

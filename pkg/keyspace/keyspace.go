@@ -507,37 +507,77 @@ func (manager *Manager) createKeyspaceWithoutCheck(tracer *createKeyspaceTracer,
 	return keyspace, nil
 }
 
-// rollbackCreateKeyspace undoes what createKeyspaceWithoutCheck committed, in
-// two independent steps:
+// rollbackCreateKeyspace undoes what createKeyspaceWithoutCheck committed.
+// The keyspace object passed in reflects a snapshot from when the create
+// transaction committed; by the time wait-split fails, an independent
+// operation (a state change, a config PATCH, or a TSO keyspace-group
+// split/merge) can have moved things on:
 //
-//  1. Remove the keyspace meta, undo the meta-service group assignment count,
-//     and remove the region label rule, all in one transaction. None of this
-//     depends on the TSO keyspace group's state, so it always runs and is
-//     retried on transient failure - freeing the keyspace name for a retried
-//     create must never be blocked by the TSO group being temporarily
-//     unavailable (step 2 below).
-//  2. Best-effort undo of the TSO keyspace-group membership. The group may be
-//     mid split/merge and reject this for a while (splits/merges are
-//     bounded, so a short retry usually clears it); if it still fails after
-//     retrying, the keyspace itself is already fully cleaned up by step 1, so
-//     this only leaves a stale membership entry in the group - logged for
-//     follow-up - instead of blocking the rollback the way returning early
-//     here used to.
+//   - The state API can transition this keyspace out of DISABLED (e.g. to
+//     ENABLED) while wait-split is still running elsewhere - nothing tracks
+//     "a create is in flight" as distinct from "is currently DISABLED". If
+//     that happened, this keyspace's lifecycle is no longer this failed
+//     create's to manage, and deleting it would destroy something another
+//     operation has legitimately taken over.
+//   - A TSO keyspace-group split/merge moves a keyspace between groups by
+//     rewriting the groups' own Keyspaces lists; it never touches the
+//     keyspace's own Config[TSOKeyspaceGroupIDKey]. So even a keyspace still
+//     correctly DISABLED can have that field pointing at a group it no
+//     longer belongs to.
+//   - Once the meta is deleted, this keyspace's id is free to be reused by
+//     an unrelated CreateKeyspaceByID call. If TSO group cleanup ran after
+//     that, resolving membership by id could hit the new keyspace's group
+//     instead and strip it.
 //
-// Doing step 1 first and unconditionally (rather than requiring both to
-// commit together) is deliberate: the alternative failure mode - meta
-// present but with no TSO group membership - reproduces exactly the
-// inconsistent state this PR exists to eliminate (see #10461), and would
-// also leave the keyspace name stuck. A stale group membership entry with no
-// backing meta is comparatively harmless.
+// To stay correct under all of these, rollback re-derives the truth from
+// durable state right before acting, instead of trusting the snapshot, and
+// orders its steps so the id is never "free" while group cleanup is still
+// in progress:
 //
-// metaLock is only held around step 1's RunTxn call, not the whole function:
-// step 2 (updateKeyspaceForGroupTxnOp and the callback it returns) briefly
-// takes GroupManager.Lock, while RemoveKeyspacesFromGroup takes
-// GroupManager.Lock first and then metaLock (via Manager.RemoveKeyspace) —
-// holding metaLock across step 2 would invert that order and can deadlock
-// against a concurrent RemoveKeyspacesFromGroup. Keeping metaLock scoped to
-// just step 1's commit still serializes it against a concurrent
+//  1. Reload the keyspace under metaLock. If it's gone, there's nothing to
+//     roll back. If it's no longer DISABLED, skip rollback entirely rather
+//     than deleting a keyspace something else has taken over.
+//  2. Best-effort undo of the TSO keyspace-group membership, done while the
+//     meta from step 1 still exists (so the id can't be reused out from
+//     under this step) - resolved via GetGroupByKeyspaceID (the group
+//     side's actual membership), re-read on every retry attempt, rather
+//     than Config[TSOKeyspaceGroupIDKey], so a split/merge that moves this
+//     keyspace mid-retry doesn't leave a later attempt targeting a group it
+//     no longer belongs to. The group may be mid split/merge and reject
+//     this for a while (bounded, so a short retry usually clears it); if it
+//     still fails after retrying, step 4 below still runs, so this only
+//     leaves a stale membership entry in the group - logged for follow-up -
+//     instead of blocking the rollback. metaLock isn't held for this step
+//     (see below), so the delete only ever commits alongside a
+//     same-transaction check (in undoTSOKeyspaceGroupMembership) that the id
+//     still identifies a DISABLED keyspace with the expected name - without
+//     it, an external takeover mid-step (or an id reused by an unrelated new
+//     keyspace once step 4 has run) could make this step silently strip a
+//     membership that's since become legitimate.
+//  3. Re-verify DISABLED again, under metaLock, right before the point of
+//     no return: step 2 ran without metaLock held (see below), so an
+//     external takeover could have happened during it. Relying on step 1's
+//     now-stale check here would reopen the same problem step 1 exists to
+//     close.
+//  4. Remove the meta, undo the meta-service group assignment count (read
+//     from this reload - meta-service group reassignment only ever happens
+//     through this same keyspace's own PATCH path, which does keep Config
+//     in sync), and remove the region label rule, all in one transaction,
+//     retried a few times since a transient failure here must not strand
+//     the keyspace name permanently. Unconditional on step 2's outcome: the
+//     alternative failure mode - meta present but with no TSO group
+//     membership - reproduces exactly the inconsistent state this PR exists
+//     to eliminate (see #10461), and would also leave the keyspace name
+//     stuck. A stale group membership entry with no backing meta (step 2
+//     exhausting its retries) is comparatively harmless.
+//
+// metaLock is held for steps 1 and 3-4, but released for step 2:
+// updateKeyspaceForGroupTxnOp (and the callback it returns) briefly takes
+// GroupManager.Lock, while RemoveKeyspacesFromGroup takes GroupManager.Lock
+// first and then metaLock (via Manager.RemoveKeyspace) — holding metaLock
+// across step 2 would invert that order and can deadlock against a
+// concurrent RemoveKeyspacesFromGroup. Keeping metaLock scoped to steps 1
+// and 3-4 still serializes them against a concurrent
 // UpdateKeyspaceState/UpdateKeyspaceStateByID/enableNewKeyspace call for the
 // same id, same as before.
 func (manager *Manager) rollbackCreateKeyspace(tracer *createKeyspaceTracer, keyspace *keyspacepb.KeyspaceMeta) error {
@@ -547,6 +587,58 @@ func (manager *Manager) rollbackCreateKeyspace(tracer *createKeyspaceTracer, key
 		regionLabeler = cl.GetRegionLabeler()
 		ruleID = getRegionLabelID(keyspace.GetId())
 	}
+	id := keyspace.GetId()
+
+	// Step 1: re-verify against durable storage instead of trusting the
+	// snapshot - see the function comment for why.
+	verified, err := manager.reloadKeyspaceIfStillDisabled(id)
+	if err != nil {
+		return err
+	}
+	if verified == nil {
+		return nil
+	}
+
+	// Step 2: best-effort, done before the meta is removed so the id can't
+	// be reused out from under it - see the function comment.
+	if err := manager.undoTSOKeyspaceGroupMembership(id, verified.GetName()); err != nil {
+		log.Error("[keyspace] rollback could not undo TSO keyspace-group membership; "+
+			"the group may still list a keyspace whose metadata is about to be removed",
+			zap.Uint32("keyspace-id", id),
+			errs.ZapError(err),
+		)
+	}
+
+	// Steps 3-4 share one continuous metaLock hold, deliberately: step 3's
+	// check must not go stale again before step 4 commits, the same reason
+	// step 1's check alone wasn't enough to cover through step 4 either.
+	manager.metaLock.Lock(id)
+
+	// Step 3: re-verify once more, right before actually deleting anything -
+	// see the function comment for why step 1's check isn't enough here.
+	var current *keyspacepb.KeyspaceMeta
+	loadErr := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+		var err error
+		current, err = manager.store.LoadKeyspaceMeta(txn, id)
+		return err
+	})
+	if loadErr != nil {
+		manager.metaLock.Unlock(id)
+		return loadErr
+	}
+	if current == nil {
+		manager.metaLock.Unlock(id)
+		return nil
+	}
+	if current.GetState() != keyspacepb.KeyspaceState_DISABLED {
+		manager.metaLock.Unlock(id)
+		log.Warn("[keyspace] skipping create rollback: keyspace was taken over externally during creation",
+			zap.Uint32("keyspace-id", id),
+			zap.String("state", current.GetState().String()),
+		)
+		return nil
+	}
+	keyspace = current
 
 	// Captured once: re-deriving this from keyspace.Config inside the retried
 	// closure below (as unassignKeyspaceFromMetaServiceGroup does) would not
@@ -558,7 +650,7 @@ func (manager *Manager) rollbackCreateKeyspace(tracer *createKeyspaceTracer, key
 	// ever takes effect.
 	metaGroupID := keyspace.GetConfig()[MetaServiceGroupIDKey]
 
-	// Step 1: remove the meta, undo the meta-service group assignment count,
+	// Step 4: remove the meta, undo the meta-service group assignment count,
 	// and remove the region label rule, all in one transaction, retried a
 	// few times since the create transaction has already committed and a
 	// transient failure here must not strand the keyspace name permanently.
@@ -576,8 +668,6 @@ func (manager *Manager) rollbackCreateKeyspace(tracer *createKeyspaceTracer, key
 		}
 		return regionLabeler.GetRuleStorage().DeleteRegionRule(txn, ruleID)
 	}}
-	manager.metaLock.Lock(keyspace.GetId())
-	var err error
 	for i := range 3 {
 		err = manager.RunTxn(0, metaTxnOps)
 		if err == nil {
@@ -587,53 +677,112 @@ func (manager *Manager) rollbackCreateKeyspace(tracer *createKeyspaceTracer, key
 			time.Sleep(time.Second)
 		}
 	}
-	manager.metaLock.Unlock(keyspace.GetId())
+	manager.metaLock.Unlock(id)
 	if err != nil {
 		return err
 	}
 
-	manager.refreshKeyspaceMetaCache(keyspace.GetId())
+	manager.refreshKeyspaceMetaCache(id)
 	if regionLabeler != nil {
 		regionLabeler.DeleteRuleWithoutTxn(ruleID)
-	}
-
-	// Step 2: best-effort undo of the TSO keyspace-group membership, symmetric
-	// to the opAdd done on the create path. Skipped when there's no group id,
-	// same as create.
-	if gid := keyspace.GetConfig()[TSOKeyspaceGroupIDKey]; gid != "" {
-		if err := manager.undoTSOKeyspaceGroupMembership(tracer.userKind, gid, keyspace.GetId()); err != nil {
-			log.Error("[keyspace] rollback could not undo TSO keyspace-group membership; "+
-				"the group still lists a keyspace whose metadata was already removed",
-				zap.Uint32("keyspace-id", keyspace.GetId()),
-				zap.String("group-id", gid),
-				errs.ZapError(err),
-			)
-		}
 	}
 	return nil
 }
 
-// undoTSOKeyspaceGroupMembership retries removing keyspaceID from the given
-// TSO keyspace group a few times, tolerating a transient failure - including
-// the group being mid split/merge, which is bounded and typically clears on
-// its own within a few seconds.
-func (manager *Manager) undoTSOKeyspaceGroupMembership(userKind endpoint.UserKind, gid string, keyspaceID uint32) error {
-	groupID, err := strconv.ParseUint(gid, 10, 32)
-	if err != nil {
+// reloadKeyspaceIfStillDisabled reloads the keyspace under metaLock and
+// returns it only if it still exists and is still DISABLED. A nil meta and
+// nil error together mean the caller should stop: either the keyspace is
+// already gone, or something else has taken over its lifecycle since it was
+// created (logged here either way).
+func (manager *Manager) reloadKeyspaceIfStillDisabled(id uint32) (*keyspacepb.KeyspaceMeta, error) {
+	manager.metaLock.Lock(id)
+	defer manager.metaLock.Unlock(id)
+	var current *keyspacepb.KeyspaceMeta
+	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+		var err error
+		current, err = manager.store.LoadKeyspaceMeta(txn, id)
 		return err
+	})
+	if err != nil {
+		return nil, err
 	}
+	if current == nil {
+		return nil, nil
+	}
+	if current.GetState() != keyspacepb.KeyspaceState_DISABLED {
+		log.Warn("[keyspace] skipping create rollback: keyspace was taken over externally during creation",
+			zap.Uint32("keyspace-id", id),
+			zap.String("state", current.GetState().String()),
+		)
+		return nil, nil
+	}
+	return current, nil
+}
+
+// errRollbackTargetChanged means the keyspace this rollback is cleaning up
+// (identified by id and expectedName together, since an id alone can be
+// reused by an unrelated keyspace) is no longer DISABLED under that same
+// identity by the time the TSO group membership delete was about to commit.
+// Not a transient failure: retrying it cannot succeed, since something else
+// has taken over this keyspace's lifecycle (or reused its id).
+var errRollbackTargetChanged = errors.New("keyspace no longer DISABLED under the same identity, not rolling back its TSO group membership")
+
+// undoTSOKeyspaceGroupMembership retries removing keyspaceID from whatever
+// TSO keyspace group it currently belongs to, tolerating a transient
+// failure - including the group being mid split/merge, which is bounded and
+// typically clears on its own within a few seconds. The group is resolved
+// fresh via GetGroupByKeyspaceID on every attempt (not just once up front),
+// so a split/merge that moves keyspaceID to a different group between
+// attempts doesn't leave a later attempt targeting a group it no longer
+// belongs to. Returns nil if the keyspace isn't (or is no longer) in any
+// group.
+//
+// The delete only ever commits alongside a same-transaction check that
+// keyspaceID still identifies a DISABLED keyspace named expectedName:
+// metaLock isn't held here (see the function comment on rollbackCreateKeyspace
+// for why), so between this being called and the delete actually committing,
+// something else could have taken this keyspace over - enabling it and
+// legitimately moving it to the group this call is about to strip - or its
+// id could have been freed and reused by an unrelated new keyspace. Folding
+// the check into the same transaction as the delete, rather than checking
+// separately beforehand, closes that gap: the two either commit together or
+// not at all.
+func (manager *Manager) undoTSOKeyspaceGroupMembership(keyspaceID uint32, expectedName string) error {
+	if manager.kgm == nil {
+		return nil
+	}
+	identityCheckOp := func(txn kv.Txn) error {
+		current, err := manager.store.LoadKeyspaceMeta(txn, keyspaceID)
+		if err != nil {
+			return err
+		}
+		if current == nil || current.GetState() != keyspacepb.KeyspaceState_DISABLED || current.GetName() != expectedName {
+			return errRollbackTargetChanged
+		}
+		return nil
+	}
+	var err error
 	backoff := time.Second
 	for i := range 3 {
+		var groupID uint32
+		var userKind endpoint.UserKind
+		if groupID, userKind, err = manager.kgm.GetGroupByKeyspaceID(keyspaceID); err != nil {
+			// Not currently in any group - nothing to undo.
+			return nil
+		}
+		gid := strconv.FormatUint(uint64(groupID), 10)
 		var op txnOp
 		var cb txnCb
-		op, cb, err = manager.kgm.updateKeyspaceForGroupTxnOp(userKind, gid, keyspaceID, opDelete)
-		if err == nil {
+		if op, cb, err = manager.kgm.updateKeyspaceForGroupTxnOp(userKind, gid, keyspaceID, opDelete); err == nil {
 			if op == nil {
 				// manager.kgm is nil (classic mode): nothing to undo.
 				return nil
 			}
-			if err = manager.RunTxn(uint32(groupID), []txnOp{op}); err == nil {
+			if err = manager.RunTxn(groupID, []txnOp{identityCheckOp, op}); err == nil {
 				cb(nil)
+				return nil
+			}
+			if err == errRollbackTargetChanged { //nolint:errorlint // fixed sentinel, never wrapped
 				return nil
 			}
 		}
@@ -787,14 +936,39 @@ func (manager *Manager) saveKeyspaceRegionLabelerTxnOp(id uint32, boundType regi
 	}
 	regionLabeler := cl.GetRegionLabeler()
 	cb := func(err error) {
-		if err == nil {
-			regionLabeler.SaveRuleWithoutTxn(keyspaceRule)
-			log.Info("added region label for keyspace",
-				zap.Uint32("keyspace-id", id),
-				zap.Any("label-rule", keyspaceRule),
-				zap.Stringer("key-type", boundType),
-			)
+		if err != nil {
+			return
 		}
+		// Re-read the rule from storage instead of caching the keyspaceRule
+		// snapshot captured above: this callback can run after a concurrent
+		// SetLabelRule/DeleteLabelRule on the same rule ID (nothing reserves
+		// the "keyspaces/<id>" namespace against the generic label-rule API)
+		// has already durably published a newer value or deleted it, and
+		// caching the stale snapshot would silently diverge from storage
+		// with no later reconciliation.
+		raw, loadErr := regionLabeler.GetRuleStorage().LoadRegionRule(keyspaceRule.ID)
+		if loadErr != nil {
+			log.Error("failed to reload region label rule into cache after commit, cache may be stale",
+				zap.Uint32("keyspace-id", id), zap.String("rule-id", keyspaceRule.ID), errs.ZapError(loadErr))
+			return
+		}
+		if raw == "" {
+			// Deleted by someone else after our commit landed.
+			regionLabeler.DeleteRuleWithoutTxn(keyspaceRule.ID)
+			return
+		}
+		fresh, decodeErr := labeler.NewLabelRuleFromJSON([]byte(raw))
+		if decodeErr != nil {
+			log.Error("failed to decode region label rule reloaded from storage, cache may be stale",
+				zap.Uint32("keyspace-id", id), zap.String("rule-id", keyspaceRule.ID), errs.ZapError(decodeErr))
+			return
+		}
+		regionLabeler.SaveRuleWithoutTxn(fresh)
+		log.Info("added region label for keyspace",
+			zap.Uint32("keyspace-id", id),
+			zap.Any("label-rule", fresh),
+			zap.Stringer("key-type", boundType),
+		)
 	}
 	return func(txn kv.Txn) error {
 		return regionLabeler.GetRuleStorage().SaveRegionRule(txn, keyspaceRule.ID, keyspaceRule)
@@ -1055,26 +1229,13 @@ func (manager *Manager) updateKeyspaceConfigTxn(name string, update func(meta *k
 		}
 		delete(meta.Config, MetaServiceGroupAddressesKey)
 		newConfig := meta.GetConfig()
-		oldMetaServiceGroup := oldConfig[MetaServiceGroupIDKey]
-		newMetaServiceGroup := newConfig[MetaServiceGroupIDKey]
-		oldUserKind := endpoint.StringUserKind(oldConfig[UserKindKey])
-		newUserKind := endpoint.StringUserKind(newConfig[UserKindKey])
-		oldID := oldConfig[TSOKeyspaceGroupIDKey]
-		newID := newConfig[TSOKeyspaceGroupIDKey]
-		// A DISABLED keyspace may still be mid wait-split, with
-		// rollbackCreateKeyspace ready to act on the group ids captured when
-		// the create transaction committed. Forbidding group reassignment
-		// while DISABLED keeps that snapshot from ever going stale, instead
-		// of trying to make rollback robust to a concurrent reassignment.
-		if meta.GetState() == keyspacepb.KeyspaceState_DISABLED &&
-			(oldMetaServiceGroup != newMetaServiceGroup || oldID != newID) {
-			return errors.Errorf("cannot change tso keyspace group or meta-service group for keyspace in state %s", meta.GetState().String())
-		}
 		// Reassign the meta-service group before moving the TSO keyspace group.
 		// reassignKeyspaceLocked only stages its changes in txn (discarded if the
 		// txn doesn't commit), while UpdateKeyspaceGroup persists immediately. Doing
 		// the fallible meta-service validation first avoids leaving the TSO group move
 		// persisted but unreverted when the meta-service reassignment fails.
+		oldMetaServiceGroup := oldConfig[MetaServiceGroupIDKey]
+		newMetaServiceGroup := newConfig[MetaServiceGroupIDKey]
 		if manager.mgm != nil && oldMetaServiceGroup != newMetaServiceGroup {
 			// The read lock held by runTxnWithMetaGroupLock keeps this validation and
 			// the assignment update atomic with respect to UpdateGroupsSafely.
@@ -1082,6 +1243,10 @@ func (manager *Manager) updateKeyspaceConfigTxn(name string, update func(meta *k
 				return err
 			}
 		}
+		oldUserKind := endpoint.StringUserKind(oldConfig[UserKindKey])
+		newUserKind := endpoint.StringUserKind(newConfig[UserKindKey])
+		oldID := oldConfig[TSOKeyspaceGroupIDKey]
+		newID := newConfig[TSOKeyspaceGroupIDKey]
 		needUpdate := oldUserKind != newUserKind || oldID != newID
 		if needUpdate {
 			if err := manager.kgm.UpdateKeyspaceGroup(oldID, newID, oldUserKind, newUserKind, meta.GetId()); err != nil {
