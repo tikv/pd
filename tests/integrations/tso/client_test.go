@@ -42,7 +42,6 @@ import (
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
-	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
@@ -662,7 +661,7 @@ func (suite *tsoClientTestSuite) TestTSOServiceDiscovery() {
 	re.NotEmpty(ts)
 	checkServiceDiscovery(re, pdClient, 3)
 
-	_, cleanup2 := tests.StartSingleTSOTestServer(suite.ctx, re, suite.pdLeaderServer.GetAddr(), tempurl.Alloc())
+	_, cleanup2 := tests.StartSingleTSOTestServer(suite.ctx, re, suite.pdLeaderServer.GetAddr(), "")
 	checkServiceDiscovery(re, pdClient, 4)
 	cleanup2()
 	checkServiceDiscovery(re, pdClient, 3)
@@ -698,7 +697,7 @@ func TestMixedTSODeployment(t *testing.T) {
 	err = pdSvr.Run()
 	re.NoError(err)
 
-	s, cleanup := tests.StartSingleTSOTestServer(ctx, re, backendEndpoints, tempurl.Alloc())
+	s, cleanup := tests.StartSingleTSOTestServer(ctx, re, backendEndpoints, "")
 	defer cleanup()
 	tests.WaitForPrimaryServing(re, map[string]bs.Server{s.GetAddr(): s})
 
