@@ -17,6 +17,7 @@ package core
 import (
 	"bytes"
 	"math/rand/v2"
+	"sync/atomic"
 
 	"go.uber.org/zap"
 
@@ -29,29 +30,73 @@ import (
 	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
+// regionItem is the value a region tree stores. It holds a *RegionInfo and
+// supplies the btree ordering for it.
+//
+// # Ordering immutability
+//
+// Once a regionItem has been inserted into a tree, its key range must never
+// change. The RegionInfo it holds may only be replaced by one whose start and end
+// keys are identical, see RegionInfo.rangeEqualsTo. A range change must allocate a
+// fresh regionItem instead; setRegionLocked does that.
+//
+// This is what lets an O(1) copy-on-write btree Clone serve as a usable read-only
+// snapshot: a clone shares regionItem pointers with the live tree, so changing a
+// shared item's range would leave it at the wrong position in the clone and
+// silently break the clone's ordering. See rootRangeSnapshot.
+//
+// # Publish-once
+//
+// The RegionInfo is held atomically so that snapshot readers can walk a cloned
+// tree without holding the tree's lock. The atomic protects the slot only. It does
+// not protect the RegionInfo, its metapb.Region, or its key slices, so a
+// *RegionInfo that has been stored here must never be mutated afterwards. The
+// exceptions are the fields that carry their own atomics: RegionInfo.ref and
+// RegionInfo.reportBuckets.
 type regionItem struct {
-	*RegionInfo
+	region atomic.Pointer[RegionInfo]
+}
+
+// newRegionItem returns a regionItem holding the given region.
+func newRegionItem(region *RegionInfo) *regionItem {
+	item := &regionItem{}
+	item.region.Store(region)
+	return item
+}
+
+// getRegion returns the RegionInfo held by the item.
+func (r *regionItem) getRegion() *RegionInfo {
+	return r.region.Load()
+}
+
+// setRegion replaces the RegionInfo held by the item.
+//
+// The caller must hold the write lock of every tree the item belongs to, and the
+// new region must cover the same key range as the current one. See the ordering
+// immutability note on regionItem.
+func (r *regionItem) setRegion(region *RegionInfo) {
+	r.region.Store(region)
 }
 
 // GetStartKey returns the start key of the region.
 func (r *regionItem) GetStartKey() []byte {
-	return r.meta.StartKey
+	return r.getRegion().meta.StartKey
 }
 
 // GetID returns the ID of the region.
 func (r *regionItem) GetID() uint64 {
-	return r.meta.GetId()
+	return r.getRegion().meta.GetId()
 }
 
 // GetEndKey returns the end key of the region.
 func (r *regionItem) GetEndKey() []byte {
-	return r.meta.EndKey
+	return r.getRegion().meta.EndKey
 }
 
 // Less returns true if the region start key is less than the other.
 func (r *regionItem) Less(other *regionItem) bool {
-	left := r.meta.StartKey
-	right := other.meta.StartKey
+	left := r.getRegion().meta.StartKey
+	right := other.getRegion().meta.StartKey
 	return bytes.Compare(left, right) < 0
 }
 
@@ -94,8 +139,8 @@ func newRegionTreeWithCountRef() *regionTree {
 
 // GetCountByRange returns the number of regions in the range [startKey, endKey).
 func (t *regionTree) GetCountByRange(startKey, endKey []byte) int {
-	start := &regionItem{&RegionInfo{meta: &metapb.Region{StartKey: startKey}}}
-	end := &regionItem{&RegionInfo{meta: &metapb.Region{StartKey: endKey}}}
+	start := newRegionItem(&RegionInfo{meta: &metapb.Region{StartKey: startKey}})
+	end := newRegionItem(&RegionInfo{meta: &metapb.Region{StartKey: endKey}})
 	// it returns 0 if startKey is nil.
 	item, startIndex := t.tree.GetWithIndex(start)
 	// if item is nil, it means that the startKey is not found in the tree, we need to check the previous item, avoid
@@ -151,7 +196,7 @@ func (t *regionTree) overlaps(item *regionItem) []*RegionInfo {
 		if len(endKey) > 0 && bytes.Compare(endKey, i.GetStartKey()) <= 0 {
 			return false
 		}
-		overlaps = append(overlaps, i.RegionInfo)
+		overlaps = append(overlaps, i.getRegion())
 		return true
 	})
 	return overlaps
@@ -172,7 +217,7 @@ func (t *regionTree) updateRef(origin, region *RegionInfo) {
 // It finds and deletes all the overlapped regions first, and then
 // insert the region.
 func (t *regionTree) update(item *regionItem, withOverlaps bool, overlaps ...*RegionInfo) []*RegionInfo {
-	region := item.RegionInfo
+	region := item.getRegion()
 	t.totalSize += region.approximateSize
 	regionWriteBytesRate, regionWriteKeysRate := region.GetWriteRate()
 	t.totalWriteBytesRate += regionWriteBytesRate
@@ -186,11 +231,11 @@ func (t *regionTree) update(item *regionItem, withOverlaps bool, overlaps ...*Re
 	}
 
 	for _, old := range overlaps {
-		t.tree.Delete(&regionItem{RegionInfo: old})
+		t.tree.Delete(newRegionItem(old))
 	}
 	t.tree.ReplaceOrInsert(item)
 	if t.countRef {
-		item.IncRef()
+		item.getRegion().IncRef()
 	}
 	result := make([]*RegionInfo, len(overlaps))
 	for i, overlap := range overlaps {
@@ -245,18 +290,18 @@ func (t *regionTree) remove(region *RegionInfo) {
 	if t.length() == 0 {
 		return
 	}
-	item := &regionItem{RegionInfo: region}
+	item := newRegionItem(region)
 	result := t.find(item)
 	if result == nil || result.GetID() != region.GetID() {
 		return
 	}
 
-	t.totalSize -= result.GetApproximateSize()
-	regionWriteBytesRate, regionWriteKeysRate := result.GetWriteRate()
+	t.totalSize -= result.getRegion().GetApproximateSize()
+	regionWriteBytesRate, regionWriteKeysRate := result.getRegion().GetWriteRate()
 	t.totalWriteBytesRate -= regionWriteBytesRate
 	t.totalWriteKeysRate -= regionWriteKeysRate
 	if t.countRef {
-		result.DecRef()
+		result.getRegion().DecRef()
 	}
 	if !region.LoadedFromStorage() {
 		t.notFromStorageRegionsCnt--
@@ -267,28 +312,28 @@ func (t *regionTree) remove(region *RegionInfo) {
 // search returns a region that contains the key.
 func (t *regionTree) search(regionKey []byte) *RegionInfo {
 	region := &RegionInfo{meta: &metapb.Region{StartKey: regionKey}}
-	result := t.find(&regionItem{RegionInfo: region})
+	result := t.find(newRegionItem(region))
 	if result == nil {
 		return nil
 	}
-	return result.RegionInfo
+	return result.getRegion()
 }
 
 // searchPrev returns the previous region of the region where the regionKey is located.
 func (t *regionTree) searchPrev(regionKey []byte) *RegionInfo {
 	curRegion := &RegionInfo{meta: &metapb.Region{StartKey: regionKey}}
-	curRegionItem := t.find(&regionItem{RegionInfo: curRegion})
+	curRegionItem := t.find(newRegionItem(curRegion))
 	if curRegionItem == nil {
 		return nil
 	}
-	prevRegionItem, _ := t.getAdjacentRegions(curRegionItem.RegionInfo)
+	prevRegionItem, _ := t.getAdjacentRegions(curRegionItem.getRegion())
 	if prevRegionItem == nil {
 		return nil
 	}
 	if !bytes.Equal(prevRegionItem.GetEndKey(), curRegionItem.GetStartKey()) {
 		return nil
 	}
-	return prevRegionItem.RegionInfo
+	return prevRegionItem.getRegion()
 }
 
 // searchByKeys searches the regions by keys and return a slice of `*RegionInfo` whose order is the same as the input keys.
@@ -311,38 +356,118 @@ func (t *regionTree) searchByPrevKeys(prevKeys [][]byte) []*RegionInfo {
 	return regions
 }
 
-// find returns the range item contains the start key.
-func (t *regionTree) find(item *regionItem) *regionItem {
+// rootRangeSnapshot is a read-only view of a region tree, produced by an O(1)
+// copy-on-write btree Clone. A caller can scan an arbitrarily large key range
+// from a snapshot without holding the tree's lock for the duration of the scan.
+//
+// # What a snapshot freezes
+//
+// The tree's shape: the set of items, each item's key range, and therefore the
+// key-space coverage, the iteration order and the length. Regions created, split,
+// merged or removed after the snapshot was taken are invisible to it, and regions
+// removed after it was taken stay visible to it.
+//
+// This is what a chunked scan cannot offer. A scan that releases the lock and
+// re-enters the tree at the last end key can see the key space change underneath
+// it: a split at a chunk boundary yields a region counted twice, and a merge that
+// swallows the boundary region leaves a range no chunk covers. A snapshot has no
+// second scan to be inconsistent with.
+//
+// # What a snapshot does not freeze
+//
+// The values. The RegionInfo behind an item may be replaced concurrently by the
+// heartbeat path, but only by one covering the same key range, see regionItem. So
+// a scan observes exactly one region per key, and for each of them either the
+// value that was live when the snapshot was taken or a later value for the same
+// range, with fresher epoch, leader, peers or statistics.
+//
+// A scan of a live tree under one read lock is stronger than this: there, every
+// region comes from a single instant. Callers that need agreement between two
+// different regions' values, rather than agreement about which key ranges exist,
+// must not use a snapshot.
+//
+// # References and lifetime
+//
+// A snapshot deliberately takes no reference on the regions it holds, see
+// RegionInfo.IncRef. Doing so would make it O(n), and the reference count carries
+// the functional "already present in the subtree" signal that RaftCluster relies
+// on. A region reached through a snapshot may therefore already be gone from the
+// live tree.
+//
+// A snapshot pins the btree nodes that existed when it was taken. Those nodes can
+// no longer be recycled through the shared free list, and the regions they point
+// at stay reachable. Keep a snapshot function-scoped and short-lived; never store
+// one in a long-lived struct.
+type rootRangeSnapshot struct {
+	tree *btree.BTreeG[*regionItem]
+}
+
+// snapshot returns a read-only view of the tree.
+//
+// The caller must hold the tree's *write* lock. btree Clone rewrites the source
+// tree's copy-on-write context, so it must not run concurrently with a write or
+// with another Clone; see btree.BTreeG.Clone.
+func (t *regionTree) snapshot() *rootRangeSnapshot {
+	return &rootRangeSnapshot{tree: t.tree.Clone()}
+}
+
+// scanRange scans from the first region containing or behind the start key until
+// f returns false. It takes no lock.
+func (s *rootRangeSnapshot) scanRange(startKey []byte, f func(*RegionInfo) bool) {
+	scanTreeRange(s.tree, startKey, f)
+}
+
+// length returns the number of regions the snapshot holds.
+func (s *rootRangeSnapshot) length() int {
+	return s.tree.Len()
+}
+
+// findItem returns the item in tree whose key range contains the start key of
+// the given item.
+//
+// It only reads tree, so it is also safe to call on a snapshot. See
+// rootRangeSnapshot.
+func findItem(tree *btree.BTreeG[*regionItem], item *regionItem) *regionItem {
 	var result *regionItem
-	t.tree.DescendLessOrEqual(item, func(i *regionItem) bool {
+	tree.DescendLessOrEqual(item, func(i *regionItem) bool {
 		result = i
 		return false
 	})
 
-	if result == nil || !result.contain(item.GetStartKey()) {
+	if result == nil || !result.getRegion().contain(item.GetStartKey()) {
 		return nil
 	}
 
 	return result
 }
 
-// scanRage scans from the first region containing or behind the start key
-// until f return false
-func (t *regionTree) scanRange(startKey []byte, f func(*RegionInfo) bool) {
+// scanTreeRange scans tree from the first region containing or behind the start
+// key until f returns false.
+//
+// It only reads tree, so it is also safe to call on a snapshot. See
+// rootRangeSnapshot.
+func scanTreeRange(tree *btree.BTreeG[*regionItem], startKey []byte, f func(*RegionInfo) bool) {
 	region := &RegionInfo{meta: &metapb.Region{StartKey: startKey}}
+	start := newRegionItem(region)
 	// find if there is a region with key range [s, d), s <= startKey < d
-	fn := func(item *regionItem) bool {
-		r := item
-		return f(r.RegionInfo)
-	}
-	start := &regionItem{RegionInfo: region}
-	startItem := t.find(start)
+	startItem := findItem(tree, start)
 	if startItem == nil {
 		startItem = start
 	}
-	t.tree.AscendGreaterOrEqual(startItem, func(item *regionItem) bool {
-		return fn(item)
+	tree.AscendGreaterOrEqual(startItem, func(item *regionItem) bool {
+		return f(item.getRegion())
 	})
+}
+
+// find returns the range item contains the start key.
+func (t *regionTree) find(item *regionItem) *regionItem {
+	return findItem(t.tree, item)
+}
+
+// scanRage scans from the first region containing or behind the start key
+// until f return false
+func (t *regionTree) scanRange(startKey []byte, f func(*RegionInfo) bool) {
+	scanTreeRange(t.tree, startKey, f)
 }
 
 func (t *regionTree) scanRanges() []*RegionInfo {
@@ -358,7 +483,7 @@ func (t *regionTree) scanRanges() []*RegionInfo {
 }
 
 func (t *regionTree) getAdjacentRegions(region *RegionInfo) (prev, next *regionItem) {
-	item := &regionItem{RegionInfo: &RegionInfo{meta: &metapb.Region{StartKey: region.GetStartKey()}}}
+	item := newRegionItem(&RegionInfo{meta: &metapb.Region{StartKey: region.GetStartKey()}})
 	return t.getAdjacentItem(item)
 }
 
@@ -402,10 +527,15 @@ func (t *regionTree) RandomRegions(n int, ranges []keyutil.KeyRange) []*RegionIn
 		startIndex, endIndex = 0, treeLen
 		randIndex            int
 		startItem            *regionItem
-		pivotItem            = &regionItem{&RegionInfo{meta: &metapb.Region{}}}
-		region               *RegionInfo
-		regions              = make([]*RegionInfo, 0, n)
-		curLen               = len(regions)
+		// pivotRegion is the region behind pivotItem. pivotItem is a scratch item
+		// that is only ever used to look up a key, and is never inserted into the
+		// tree, so its start key may be rewritten in place through pivotRegion.
+		// That does not violate the ordering immutability of tree-resident items.
+		pivotRegion = &RegionInfo{meta: &metapb.Region{}}
+		pivotItem   = newRegionItem(pivotRegion)
+		region      *RegionInfo
+		regions     = make([]*RegionInfo, 0, n)
+		curLen      = len(regions)
 		// setStartEndIndices is a helper function to set `startIndex` and `endIndex`
 		// according to the `startKey` and `endKey` and check if the range is invalid
 		// to skip the iteration.
@@ -416,10 +546,10 @@ func (t *regionTree) RandomRegions(n int, ranges []keyutil.KeyRange) []*RegionIn
 				startIndex, endIndex = 0, treeLen
 				return false
 			}
-			pivotItem.meta.StartKey = startKey
+			pivotRegion.meta.StartKey = startKey
 			startItem, startIndex = t.tree.GetWithIndex(pivotItem)
 			if endKeyLen > 0 {
-				pivotItem.meta.StartKey = endKey
+				pivotRegion.meta.StartKey = endKey
 				_, endIndex = t.tree.GetWithIndex(pivotItem)
 			} else {
 				endIndex = treeLen
@@ -427,7 +557,7 @@ func (t *regionTree) RandomRegions(n int, ranges []keyutil.KeyRange) []*RegionIn
 			// Consider that the item in the tree may not be continuous,
 			// we need to check if the previous item contains the key.
 			if startIndex != 0 && startItem == nil {
-				region = t.tree.GetAt(startIndex - 1).RegionInfo
+				region = t.tree.GetAt(startIndex - 1).getRegion()
 				if region.contain(startKey) {
 					startIndex--
 				}
@@ -455,7 +585,7 @@ func (t *regionTree) RandomRegions(n int, ranges []keyutil.KeyRange) []*RegionIn
 		}
 		for curLen < n {
 			randIndex = rand.IntN(endIndex-startIndex) + startIndex
-			region = t.tree.GetAt(randIndex).RegionInfo
+			region = t.tree.GetAt(randIndex).getRegion()
 			if region.isInvolved(startKey, endKey) {
 				regions = append(regions, region)
 				curLen++
@@ -478,7 +608,7 @@ func (t *regionTree) RandomRegions(n int, ranges []keyutil.KeyRange) []*RegionIn
 			}
 
 			randIndex = rand.IntN(endIndex-startIndex) + startIndex
-			region = t.tree.GetAt(randIndex).RegionInfo
+			region = t.tree.GetAt(randIndex).getRegion()
 			if region.isInvolved(startKey, endKey) {
 				regions = append(regions, region)
 				curLen++
