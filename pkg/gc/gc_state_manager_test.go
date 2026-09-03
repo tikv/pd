@@ -334,6 +334,30 @@ func (s *gcStateManagerTestSuite) TestGCStateWatchSkipsInitialLoading() {
 	}
 }
 
+func (s *gcStateManagerTestSuite) TestGCStateWatchCanceledBeforeInitialLoaderDoesNotIterate() {
+	re := s.Require()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var iterationStarted atomic.Bool
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/gc/onGetAllKeyspacesGCStatesStart", func() {
+		iterationStarted.Store(true)
+	}))
+	defer func() { re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/gc/onGetAllKeyspacesGCStatesStart")) }()
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/gc/watchGCStatesRegistered", cancel))
+	defer func() { re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/gc/watchGCStatesRegistered")) }()
+
+	// Suppress the automatic loader so this test can model a loader goroutine that
+	// starts only after registration has synchronously canceled its watcher.
+	w, err := s.manager.registerGCStateWatcher(ctx, true, gcStateWatchConfig{initialBatchSize: 1, liveChannelCapacity: 1})
+	re.NoError(err)
+	defer w.Close()
+	re.ErrorIs(w.Err(), context.Canceled)
+
+	s.manager.loadInitialGCStates(w, 1)
+	re.False(iterationStarted.Load())
+}
+
 func (s *gcStateManagerTestSuite) TestGCStateWatchLiveSuppressesPausedInitial() {
 	re := s.Require()
 	const keyspaceID = uint32(2)
