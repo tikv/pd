@@ -188,3 +188,52 @@ func TestGetMembersErrorResult(t *testing.T) {
 	require.Equal(t, pdpb.ErrorType_UNKNOWN, response.GetHeader().GetError().GetType())
 	require.Equal(t, internalErr.Error(), response.GetHeader().GetError().GetMessage())
 }
+
+func TestDialAddress(t *testing.T) {
+	re := require.New(t)
+	ctx := context.Background()
+
+	// A dialable address is valid.
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	re.NoError(err)
+	defer func() { re.NoError(listener.Close()) }()
+	re.NoError(dialAddress(ctx, listener.Addr().String()))
+
+	// mock:// addresses are accepted without dialing.
+	re.NoError(dialAddress(ctx, "mock://tikv-1:1"))
+
+	// TiKV registers its store address before it starts listening on it, so
+	// a refused connection still proves the address is valid.
+	notYetListening, err := net.Listen("tcp", "127.0.0.1:0")
+	re.NoError(err)
+	notYetListeningAddr := notYetListening.Addr().String()
+	re.NoError(notYetListening.Close())
+	re.NoError(dialAddress(ctx, notYetListeningAddr))
+
+	// An address that cannot be resolved at all is invalid.
+	re.Error(dialAddress(ctx, "unreachable-host.test.invalid:12345"))
+
+	// A malformed address with an empty host or port must be rejected
+	// before it reaches DialContext.
+	re.Error(dialAddress(ctx, ":1234"))
+	re.Error(dialAddress(ctx, "host:"))
+}
+
+func TestValidateStoreAddress(t *testing.T) {
+	re := require.New(t)
+	ctx := context.Background()
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	re.NoError(err)
+	defer func() { re.NoError(listener.Close()) }()
+
+	re.NoError(validateStoreAddress(ctx, &metapb.Store{
+		Address:       listener.Addr().String(),
+		StatusAddress: "mock://tikv-1-status:1",
+		PeerAddress:   "mock://tikv-1-peer:1",
+	}))
+
+	re.Error(validateStoreAddress(ctx, &metapb.Store{
+		Address: "unreachable-host.test.invalid:12345",
+	}))
+}

@@ -112,6 +112,11 @@ const (
 
 	lostPDLeaderMaxTimeoutSecs   = 10
 	lostPDLeaderReElectionFactor = 10
+
+	// storeAddressValidationQueueSize bounds the number of PutStore-triggered
+	// store address dial checks waiting to be processed. PutStore drops the
+	// check for a store instead of blocking once the queue is full.
+	storeAddressValidationQueueSize = 32
 )
 
 // EtcdStartTimeout the timeout of the startup etcd.
@@ -151,6 +156,12 @@ type Server struct {
 	serverLoopCtx    context.Context
 	serverLoopCancel func()
 	serverLoopWg     sync.WaitGroup
+
+	// storeAddressValidationQueue feeds storeAddressValidationLoop, the
+	// single background worker that dials newly registered store addresses
+	// on behalf of PutStore. It is bounded and non-blocking: PutStore drops
+	// the check instead of waiting when the queue is full.
+	storeAddressValidationQueue chan *metapb.Store
 
 	// for PD leader election.
 	member *member.Member
@@ -282,6 +293,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 		}{
 			clients: make(map[string]*streamWrapper),
 		},
+		storeAddressValidationQueue: make(chan *metapb.Store, storeAddressValidationQueueSize),
 	}
 	s.handler = newHandler(s)
 
@@ -715,11 +727,12 @@ func (s *Server) LoopContext() context.Context {
 
 func (s *Server) startServerLoop(ctx context.Context) {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(ctx)
-	s.serverLoopWg.Add(4)
+	s.serverLoopWg.Add(5)
 	go s.leaderLoop()
 	go s.etcdLeaderLoop()
 	go s.serverMetricsLoop()
 	go s.encryptionKeyManagerLoop()
+	go s.storeAddressValidationLoop()
 	if s.IsKeyspaceGroupEnabled() {
 		s.initTSOPrimaryWatcher()
 		s.initSchedulingPrimaryWatcher()
@@ -730,6 +743,28 @@ func (s *Server) startServerLoop(ctx context.Context) {
 func (s *Server) stopServerLoop() {
 	s.serverLoopCancel()
 	s.serverLoopWg.Wait()
+}
+
+// storeAddressValidationLoop drains storeAddressValidationQueue and dials
+// each store's addresses in the background, on behalf of PutStore. Running
+// it as a single long-lived worker (instead of one goroutine per PutStore
+// call) bounds concurrency and lets it be cancelled and waited on through
+// the same serverLoopCtx/serverLoopWg every other background loop uses, so
+// it cannot outlive server shutdown.
+func (s *Server) storeAddressValidationLoop() {
+	defer logutil.LogPanic()
+	defer s.serverLoopWg.Done()
+
+	for {
+		select {
+		case <-s.serverLoopCtx.Done():
+			return
+		case store := <-s.storeAddressValidationQueue:
+			if err := validateStoreAddress(s.serverLoopCtx, store); err != nil {
+				log.Warn("failed to dial store address", zap.Stringer("store", store), zap.Error(err))
+			}
+		}
+	}
 }
 
 func (s *Server) serverMetricsLoop() {

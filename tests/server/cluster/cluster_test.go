@@ -2241,7 +2241,7 @@ func TestPutStoreValidateStoreAddress(t *testing.T) {
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	re.NoError(err)
-	defer re.NoError(listener.Close())
+	defer func() { re.NoError(listener.Close()) }()
 
 	resp, err := putStore(grpcPDClient, clusterID, &metapb.Store{
 		Id:      101,

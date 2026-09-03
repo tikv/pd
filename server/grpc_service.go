@@ -835,8 +835,12 @@ func dialAddress(ctx context.Context, address string) error {
 	if u, err := url.Parse(address); err == nil && u.Host != "" {
 		hostPort = u.Host
 	}
-	if _, _, err := net.SplitHostPort(hostPort); err != nil {
+	host, port, err := net.SplitHostPort(hostPort)
+	if err != nil {
 		return errors.WithStack(err)
+	}
+	if host == "" || port == "" {
+		return errors.Errorf("invalid address %q: empty host or port", hostPort)
 	}
 
 	dialCtx, cancel := context.WithTimeout(ctx, defaultGRPCDialTimeout)
@@ -921,22 +925,22 @@ func (s *GrpcServer) PutStore(ctx context.Context, request *pdpb.PutStoreRequest
 		}, nil
 	}
 
-	// TiKV puts the store before listening on its store address, so a dial
-	// failure does not necessarily mean the address is invalid. Validate
-	// asynchronously and only log a warning, without blocking or rejecting
-	// the PutStore request. s.ctx (not the request ctx) is used so the check
-	// outlives the RPC and is only cancelled on server shutdown.
-	go func() {
-		defer logutil.LogPanic()
-		if err := validateStoreAddress(s.ctx, store); err != nil {
-			log.Warn("failed to dial store address", zap.Stringer("store", store), zap.Error(err))
-		}
-	}()
-
 	if err := rc.PutMetaStore(store); err != nil {
 		return &pdpb.PutStoreResponse{
 			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
+	}
+
+	// TiKV puts the store before listening on its store address, so a dial
+	// failure does not necessarily mean the address is invalid. The check is
+	// handed off to the single background storeAddressValidationLoop instead
+	// of blocking or rejecting the PutStore request; if the queue is full the
+	// check is simply skipped for this store rather than piling up work.
+	select {
+	case s.storeAddressValidationQueue <- store:
+	default:
+		log.Warn("store address validation queue is full, skip checking store address",
+			zap.Uint64("store-id", store.GetId()))
 	}
 
 	log.Info("put store ok", zap.Stringer("store", store))
