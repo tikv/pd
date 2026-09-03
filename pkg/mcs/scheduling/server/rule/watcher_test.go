@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -342,13 +343,20 @@ func TestReconcileRuleSnapshot(t *testing.T) {
 	re.NoError(err)
 
 	unchangedVersion := ruleManager.GetRule("g", "unchanged").Version
+	updatedGroup := &placement.RuleGroup{ID: "g", Index: 2}
+	updatedGroupValue, err := json.Marshal(updatedGroup)
+	re.NoError(err)
+	addedGroup := &placement.RuleGroup{ID: "added", Index: 3}
+	addedGroupValue, err := json.Marshal(addedGroup)
+	re.NoError(err)
 	updatedDefault := ruleManager.GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
 	updatedDefault.Count = 5
 	updatedValue, err := json.Marshal(updatedDefault)
 	re.NoError(err)
 	updated, err := client.Txn(ctx).Then(
 		clientv3.OpDelete(keypath.RuleKeyPath((&placement.Rule{GroupID: "g", ID: "deleted"}).StoreKey())),
-		clientv3.OpDelete(keypath.RuleGroupIDPath("g")),
+		clientv3.OpPut(keypath.RuleGroupIDPath(updatedGroup.ID), string(updatedGroupValue)),
+		clientv3.OpPut(keypath.RuleGroupIDPath(addedGroup.ID), string(addedGroupValue)),
 		clientv3.OpPut(keypath.RuleKeyPath(updatedDefault.StoreKey()), string(updatedValue)),
 	).Commit()
 	re.NoError(err)
@@ -367,8 +375,21 @@ func TestReconcileRuleSnapshot(t *testing.T) {
 	re.Nil(ruleManager.GetRule("g", "deleted"))
 	re.Equal(5, ruleManager.GetRule(placement.DefaultGroupID, placement.DefaultRuleID).Count)
 	re.Equal(unchangedVersion, ruleManager.GetRule("g", "unchanged").Version)
-	re.Zero(ruleManager.GetRuleGroup("g").Index)
+	re.Equal(updatedGroup, ruleManager.GetRuleGroup("g"))
+	re.Equal(addedGroup, ruleManager.GetRuleGroup("added"))
 	re.Equal(updated.Header.Revision, rw.ruleRevision)
+
+	groupsDeleted, err := client.Txn(ctx).Then(
+		clientv3.OpDelete(keypath.RuleGroupIDPath(updatedGroup.ID)),
+		clientv3.OpDelete(keypath.RuleGroupIDPath(addedGroup.ID)),
+	).Commit()
+	re.NoError(err)
+	nextRevision, err = rw.reconcileRuleSnapshot(ctx)
+	re.NoError(err)
+	re.Equal(groupsDeleted.Header.Revision+1, nextRevision)
+	re.Zero(ruleManager.GetRuleGroup("g").Index)
+	re.Nil(ruleManager.GetRuleGroup("added"))
+	re.Equal(groupsDeleted.Header.Revision, rw.ruleRevision)
 
 	updatedRule := ruleManager.GetRule("g", "unchanged")
 	updatedRule.LabelConstraints[0].Values = []string{"z2"}
@@ -379,7 +400,7 @@ func TestReconcileRuleSnapshot(t *testing.T) {
 
 	_, err = rw.reconcileRuleSnapshot(ctx)
 	re.ErrorContains(err, "can not match any store")
-	re.Equal(updated.Header.Revision, rw.ruleRevision)
+	re.Equal(groupsDeleted.Header.Revision, rw.ruleRevision)
 	re.Equal([]string{"z1"}, ruleManager.GetRule("g", "unchanged").LabelConstraints[0].Values)
 
 	cluster.SetStoreLabel(1, map[string]string{"zone": "z2"})
@@ -411,4 +432,75 @@ func TestReconcileRuleSnapshot(t *testing.T) {
 	re.ErrorContains(err, "placement rule snapshot key does not match payload identity")
 	re.Equal(updatedRuleResp.Header.Revision, rw.ruleRevision)
 	re.Nil(ruleManager.GetRule("payload", "rule"))
+}
+
+func TestRuleWatcherReplaysFailedLiveRuleUpdate(t *testing.T) {
+	re := require.New(t)
+	ctx, client, clean := prepare(t, false)
+	defer clean()
+
+	storage := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	conf := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, conf)
+	cluster.AddLabelsStore(1, 0, map[string]string{"zone": "z1"})
+	ruleManager := placement.NewRuleManager(ctx, storage, cluster, conf)
+	re.NoError(ruleManager.Initialize(3, nil, "", false))
+	re.NoError(ruleManager.SetRule(&placement.Rule{
+		GroupID: "g",
+		ID:      "r",
+		Role:    placement.Learner,
+		Count:   1,
+		LabelConstraints: []placement.LabelConstraint{
+			{Key: "zone", Op: placement.In, Values: []string{"z1"}},
+		},
+	}))
+	cluster.RuleManager = ruleManager
+
+	opController := operator.NewController(ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), nil)
+	checkerController := checker.NewController(ctx, cluster, cluster.GetCheckerConfig(), opController)
+	for _, rule := range ruleManager.GetAllRules() {
+		value, err := json.Marshal(rule)
+		re.NoError(err)
+		_, err = client.Put(ctx, keypath.RuleKeyPath(rule.StoreKey()), string(value))
+		re.NoError(err)
+	}
+
+	watchCtx, cancel := context.WithCancel(ctx)
+	rw := &Watcher{
+		ctx:                 watchCtx,
+		cancel:              cancel,
+		rulesPathPrefix:     keypath.RulesPathPrefix(),
+		ruleGroupPathPrefix: keypath.RuleGroupPathPrefix(),
+		etcdClient:          client,
+		ruleStorage:         storage,
+		ruleManager:         ruleManager,
+		checkerController:   checkerController,
+	}
+	defer rw.Close()
+	re.NoError(rw.initializeRuleWatcher())
+
+	logFile := testutil.InitTempFileLogger("info")
+	defer os.RemoveAll(logFile)
+	updatedRule := ruleManager.GetRule("g", "r")
+	updatedRule.LabelConstraints[0].Values = []string{"z2"}
+	updatedValue, err := json.Marshal(updatedRule)
+	re.NoError(err)
+	updated, err := client.Put(ctx, keypath.RuleKeyPath(updatedRule.StoreKey()), string(updatedValue))
+	re.NoError(err)
+
+	testutil.Eventually(re, func() bool {
+		contents, err := os.ReadFile(logFile)
+		return err == nil &&
+			strings.Contains(string(contents), "run post event failed in watch loop") &&
+			strings.Contains(string(contents), "scheduling-rule-watcher")
+	})
+	re.Equal([]string{"z1"}, ruleManager.GetRule("g", "r").LabelConstraints[0].Values)
+
+	cluster.SetStoreLabel(1, map[string]string{"zone": "z2"})
+	testutil.Eventually(re, func() bool {
+		rule := ruleManager.GetRule("g", "r")
+		return rule != nil && len(rule.LabelConstraints) == 1 &&
+			len(rule.LabelConstraints[0].Values) == 1 && rule.LabelConstraints[0].Values[0] == "z2"
+	})
+	re.Equal(updated.Header.Revision, rw.ruleRevision)
 }
