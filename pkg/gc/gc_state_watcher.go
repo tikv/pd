@@ -19,6 +19,8 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/log"
+	"go.uber.org/zap"
 
 	"github.com/tikv/pd/pkg/errs"
 )
@@ -271,6 +273,7 @@ func (m *GCStateManager) watchGCStates(
 	watcher.manager = m
 	watcher.id = m.nextWatcherID
 	m.watchers[watcher.id] = watcher
+	gcStateWatcherGauge.Inc()
 	m.mu.Unlock()
 
 	failpoint.InjectCall("watchGCStatesRegistered")
@@ -341,18 +344,50 @@ func (m *GCStateManager) terminateGCStateWatcher(
 	m.terminateGCStateWatcherLocked(watcher, cause, reason)
 }
 
+func (m *GCStateManager) publishGCStateChangeLocked(change GCStateChange) {
+	for _, watcher := range m.watchers {
+		select {
+		case watcher.liveCh <- change:
+		default:
+			log.Warn("GC state watcher is too slow",
+				zap.Uint64("watcher-id", watcher.id),
+				zap.Int("capacity", cap(watcher.liveCh)),
+				zap.Int("queue-length", len(watcher.liveCh)))
+			m.terminateGCStateWatcherLocked(watcher, errs.ErrGCStateWatcherSlowConsumer, watcherTerminationSlowConsumer)
+		}
+	}
+	// TODO: Publish keyspace metadata upserts and removals through this same serialized path when an authoritative GC-leader-owned lifecycle hook exists.
+}
+
 func (m *GCStateManager) terminateGCStateWatcherLocked(
 	watcher *GCStateWatcher,
 	cause error,
-	_ gcStateWatcherTerminationReason,
+	reason gcStateWatcherTerminationReason,
 ) bool {
 	registered, ok := m.watchers[watcher.id]
 	if !ok || registered != watcher {
 		return false
 	}
 	delete(m.watchers, watcher.id)
+	gcStateWatcherGauge.Dec()
+	recordGCStateWatcherTerminationMetrics(reason)
 	watcher.cancel(cause)
 	return true
+}
+
+func recordGCStateWatcherTerminationMetrics(reason gcStateWatcherTerminationReason) {
+	switch reason {
+	case watcherTerminationClientCancel:
+		gcStateWatcherTerminationClientCancelCounter.Inc()
+	case watcherTerminationLeaderLost:
+		gcStateWatcherTerminationLeaderLostCounter.Inc()
+	case watcherTerminationSlowConsumer:
+		gcStateWatcherTerminationSlowConsumerCounter.Inc()
+	case watcherTerminationInitError:
+		gcStateWatcherTerminationInitErrorCounter.Inc()
+	default:
+		panic("unknown GC state watcher termination reason")
+	}
 }
 
 func (m *GCStateManager) terminateAllGCStateWatchersLocked(
