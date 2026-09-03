@@ -20,6 +20,8 @@ import (
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keypath"
@@ -193,6 +195,9 @@ func (*StorageEndpoint) SaveKeyspaceGroup(txn kv.Txn, kg *KeyspaceGroup) error {
 
 // DeleteKeyspaceGroup deletes the keyspace group.
 func (*StorageEndpoint) DeleteKeyspaceGroup(txn kv.Txn, id uint32) error {
+	if id == constant.DefaultKeyspaceGroupID {
+		return errs.ErrModifyDefaultKeyspaceGroup
+	}
 	return txn.Remove(keypath.KeyspaceGroupIDPath(id))
 }
 

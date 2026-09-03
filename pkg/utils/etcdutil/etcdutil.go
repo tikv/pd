@@ -364,11 +364,11 @@ func CreateHTTPClient(tlsConfig *tls.Config) *http.Client {
 }
 
 const (
-	defaultEtcdRetryInterval         = time.Second
-	defaultLoadFromEtcdRetryTimes    = 3
-	maxCompactionReloadRetryInterval = time.Minute
-	maxLoadBatchSize                 = int64(10000)
-	minLoadBatchSize                 = int64(100)
+	defaultEtcdRetryInterval      = time.Second
+	defaultLoadFromEtcdRetryTimes = 3
+	maxWatcherReloadRetryInterval = time.Minute
+	maxLoadBatchSize              = int64(10000)
+	minLoadBatchSize              = int64(100)
 
 	// RequestProgressInterval is the interval to call RequestProgress for watcher.
 	RequestProgressInterval = 1 * time.Second
@@ -414,6 +414,9 @@ type LoopWatcher struct {
 	loadBatchSize int64
 	// consistentLoad pins paginated full loads to one etcd revision.
 	consistentLoad bool
+	// atomicLoadCallbacks keeps a failed or incomplete full load private by
+	// skipping postEventsFn. The consumer must stage changes until postEventsFn.
+	atomicLoadCallbacks bool
 	// watchChangeRetryInterval is used to set the retry interval for watching etcd change.
 	watchChangeRetryInterval time.Duration
 	// reloadOnCompaction is enabled by consumers that can reconcile a full
@@ -638,7 +641,7 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 				log.Warn("required revision has been compacted, reload from etcd in watch loop",
 					zap.Int64("required-revision", revision), zap.Int64("compact-revision", wresp.CompactRevision),
 					zap.String("name", lw.name), zap.String("key", lw.key))
-				loadedRevision, shouldContinue := lw.reloadAfterCompaction(ctx)
+				loadedRevision, shouldContinue := lw.reloadWithRetry(ctx)
 				if !shouldContinue {
 					return max(revision, loadedRevision), nil
 				}
@@ -691,6 +694,17 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 			if err := lw.postEventsFn(wresp.Events); err != nil {
 				log.Error("run post event failed in watch loop", zap.Error(err),
 					zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
+				if lw.atomicLoadCallbacks {
+					log.Warn("watch callback batch failed, reload from etcd in watch loop",
+						zap.Int64("revision", revision), zap.String("name", lw.name),
+						zap.String("key", lw.key), zap.Error(err))
+					loadedRevision, shouldContinue := lw.reloadWithRetry(ctx)
+					if !shouldContinue {
+						return max(revision, loadedRevision), nil
+					}
+					revision = loadedRevision
+					continue
+				}
 			} else {
 				for _, event := range appliedEvents {
 					if event.Type == clientv3.EventTypeDelete {
@@ -706,13 +720,13 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 	}
 }
 
-// reloadAfterCompaction rebuilds the watched state before a new watch is
-// created. A compacted watch cannot resume from its previous revision, so keep
-// the retry state local to this resync attempt and retry until it succeeds or
-// the watcher is stopped. The returned revision is the next revision after a
-// successful reload, even when the boolean is false; zero means no reload
-// completed. The boolean reports whether watching should continue.
-func (lw *LoopWatcher) reloadAfterCompaction(ctx context.Context) (int64, bool) {
+// reloadWithRetry rebuilds the watched state before a new watch is created.
+// The retry state is local to this resync attempt, which continues until it
+// succeeds or the watcher is stopped. The returned revision is the next
+// revision after a successful reload, even when the boolean is false; zero
+// means no reload completed. The boolean reports whether watching should
+// continue.
+func (lw *LoopWatcher) reloadWithRetry(ctx context.Context) (int64, bool) {
 	retryInterval := lw.watchChangeRetryInterval
 	for {
 		loadedRevision, err := lw.load(ctx)
@@ -723,7 +737,7 @@ func (lw *LoopWatcher) reloadAfterCompaction(ctx context.Context) (int64, bool) 
 			return 0, false
 		}
 
-		log.Warn("failed to reload compacted watcher state, retrying",
+		log.Warn("failed to reload watcher state, retrying",
 			zap.String("name", lw.name), zap.String("key", lw.key),
 			zap.Duration("retry-interval", retryInterval), zap.Error(err))
 		retryTimer := time.NewTimer(retryInterval)
@@ -733,7 +747,7 @@ func (lw *LoopWatcher) reloadAfterCompaction(ctx context.Context) (int64, bool) 
 			return 0, false
 		case <-retryTimer.C:
 		}
-		retryInterval = min(retryInterval*2, maxCompactionReloadRetryInterval)
+		retryInterval = min(retryInterval*2, maxWatcherReloadRetryInterval)
 	}
 }
 
@@ -757,6 +771,10 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 			zap.String("key", lw.key), zap.Error(err))
 	}
 	defer func() {
+		if consistentLoad && lw.atomicLoadCallbacks &&
+			(preErr != nil || callbackErr != nil || !loadCompleted) {
+			return
+		}
 		if postErr := lw.postEventsFn([]*clientv3.Event{}); postErr != nil {
 			log.Error("run post event failed in watch loop", zap.String("name", lw.name),
 				zap.String("key", lw.key), zap.Error(postErr))
@@ -796,7 +814,7 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 			return 0, nil
 		default:
 		}
-		resp, err := EtcdKVGet(lw.client, startKey, opts...)
+		resp, err := EtcdKVGetWithContext(ctx, lw.client, startKey, opts...)
 		failpoint.Inject("meetEtcdError", func() {
 			if limit > minLoadBatchSize {
 				err = errors.New(codes.ResourceExhausted.String())
@@ -985,6 +1003,16 @@ func (lw *LoopWatcher) SetLoadBatchSize(size int64) {
 // It must be called before StartWatchLoop.
 func (lw *LoopWatcher) SetConsistentLoad() {
 	lw.consistentLoad = true
+}
+
+// SetAtomicLoadCallbacks prevents postEventsFn from publishing an incomplete
+// consistent load. The consumer's put and delete callbacks must only stage
+// changes, and postEventsFn must publish them only when it returns nil. A watch
+// batch error reported by postEventsFn triggers a full reload, so the consumer
+// must make a full load authoritative. It must be called before StartWatchLoop
+// together with SetConsistentLoad.
+func (lw *LoopWatcher) SetAtomicLoadCallbacks() {
+	lw.atomicLoadCallbacks = true
 }
 
 // SetInitialLoadSuccessFn sets a callback that runs after the initial load succeeds.

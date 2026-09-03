@@ -199,6 +199,10 @@ func DeleteKeyspaceGroupByID(c *gin.Context) {
 	}
 	kg, err := manager.DeleteKeyspaceGroupByID(id)
 	if err != nil {
+		if errs.ErrModifyDefaultKeyspaceGroup.Equal(err) {
+			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
+			return
+		}
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
 	}

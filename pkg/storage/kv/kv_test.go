@@ -45,6 +45,13 @@ func TestEtcd(t *testing.T) {
 	testLoadConflict(re, kv)
 	testRunInTxnWithConditions(re, kv)
 	testRawTxn(re, kv)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	re.ErrorIs(kv.RunInTxn(ctx, func(txn Txn) error {
+		_, err := txn.Load("canceled-key")
+		return err
+	}), context.Canceled)
 }
 
 func TestLevelDB(t *testing.T) {
