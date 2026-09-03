@@ -92,7 +92,9 @@ const (
 	watcherTerminationInitError    gcStateWatcherTerminationReason = "init_error"
 )
 
-// GCStateWatcher receives a consistent initial view followed by live GC state changes.
+// GCStateWatcher merges ordered initial batches and live GC state changes for one stream.
+// The initial scan is not globally atomic and may interleave with live delivery. For each
+// keyspace, the merge prevents an older initial state from following a newer live state.
 //
 // A watcher supports one receiving goroutine. Close may be called concurrently with
 // receiving and with manager-owned lifecycle operations.
@@ -136,8 +138,9 @@ func (w *GCStateWatcher) receiveOne(block bool) (GCStateChange, bool, error) {
 			keyspaceID, ok := change.KeyspaceID()
 			if ok {
 				if _, dirty := w.dirtyDuringInit[keyspaceID]; dirty {
-					// For each scope, consumers observe either initial v1 followed by live v2,
-					// or live v2 with the later-arriving initial v1 suppressed.
+					// Registration precedes the initial scan, so a post-registration live v2 may
+					// race with initial v1. If v1 is consumed first, delivery is v1 then v2; if
+					// v2 is consumed first, this later v1 is suppressed and delivery is v2 only.
 					continue
 				}
 			}
@@ -203,7 +206,7 @@ func (w *GCStateWatcher) receiveOne(block bool) (GCStateChange, bool, error) {
 			w.dirtyDuringInit = nil
 			continue
 		}
-		w.pendingInit = append([]GCStateChange(nil), batch...)
+		w.pendingInit = batch
 	}
 }
 
@@ -287,6 +290,10 @@ func (m *GCStateManager) registerGCStateWatcher(
 }
 
 func (m *GCStateManager) loadInitialGCStates(watcher *GCStateWatcher, batchSize int) {
+	if watcher.Err() != nil {
+		return
+	}
+
 	batch := make([]GCStateChange, 0, batchSize)
 	stopped := false
 	flush := func() bool {
