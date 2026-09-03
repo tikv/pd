@@ -17,10 +17,11 @@ package gc
 import (
 	"context"
 
+	"go.uber.org/zap"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
-	"go.uber.org/zap"
 
 	"github.com/tikv/pd/pkg/errs"
 )
@@ -34,6 +35,7 @@ const (
 )
 
 // GCStateChange describes one effective GC state change for a keyspace scope.
+// nolint:revive // Keep GC in the name to match the established GCState domain API.
 type GCStateChange struct {
 	kind              gcStateChangeKind
 	upsert            GCState
@@ -94,6 +96,7 @@ const (
 //
 // A watcher supports one receiving goroutine. Close may be called concurrently with
 // receiving and with manager-owned lifecycle operations.
+// nolint:revive // Keep GC in the name to match the established GCState domain API.
 type GCStateWatcher struct {
 	ctx             context.Context
 	cancel          context.CancelCauseFunc
@@ -249,14 +252,14 @@ func (w *GCStateWatcher) Close() {
 
 // WatchGCStates registers a watcher in the current local leadership generation.
 func (m *GCStateManager) WatchGCStates(ctx context.Context, skipLoadingInitial bool) (*GCStateWatcher, error) {
-	return m.watchGCStates(ctx, skipLoadingInitial, gcStateWatchConfig{
+	return m.registerGCStateWatcher(ctx, skipLoadingInitial, gcStateWatchConfig{
 		initialBatchSize:    defaultGCStateWatchInitialBatchSize,
 		initChannelCapacity: defaultGCStateWatchInitChannelCapacity,
 		liveChannelCapacity: defaultGCStateWatchLiveChannelCapacity,
 	})
 }
 
-func (m *GCStateManager) watchGCStates(
+func (m *GCStateManager) registerGCStateWatcher(
 	ctx context.Context,
 	skipLoadingInitial bool,
 	cfg gcStateWatchConfig,
@@ -363,16 +366,15 @@ func (m *GCStateManager) terminateGCStateWatcherLocked(
 	watcher *GCStateWatcher,
 	cause error,
 	reason gcStateWatcherTerminationReason,
-) bool {
+) {
 	registered, ok := m.watchers[watcher.id]
 	if !ok || registered != watcher {
-		return false
+		return
 	}
 	delete(m.watchers, watcher.id)
 	gcStateWatcherGauge.Dec()
 	recordGCStateWatcherTerminationMetrics(reason)
 	watcher.cancel(cause)
-	return true
 }
 
 func recordGCStateWatcherTerminationMetrics(reason gcStateWatcherTerminationReason) {
