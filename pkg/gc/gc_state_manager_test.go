@@ -364,10 +364,6 @@ func (s *gcStateManagerTestSuite) TestGCStateWatchLiveSuppressesPausedInitial() 
 
 	_, err = s.manager.AdvanceTxnSafePoint(keyspaceID, 20, time.Now())
 	re.NoError(err)
-	// Task 2 connects successful state mutations to the live channel. Inject the
-	// corresponding live change directly here so this task remains scoped to the
-	// watcher merge and lifecycle.
-	w.liveCh <- NewGCStateUpsert(GCState{KeyspaceID: keyspaceID, IsKeyspaceLevel: true, TxnSafePoint: 20})
 	for {
 		changes, err := w.RecvBatch(1)
 		re.NoError(err)

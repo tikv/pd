@@ -394,6 +394,14 @@ func (m *GCStateManager) advanceGCSafePointImpl(ctx context.Context, keyspaceID 
 		TxnSafePoint: txnSafePoint,
 		GCSafePoint:  newGCSafePoint,
 	})
+	if newGCSafePoint != oldGCSafePoint {
+		m.publishGCStateChangeLocked(NewGCStateUpsert(GCState{
+			KeyspaceID:      keyspaceID,
+			IsKeyspaceLevel: keyspaceID != constant.NullKeyspaceID,
+			TxnSafePoint:    txnSafePoint,
+			GCSafePoint:     newGCSafePoint,
+		}))
+	}
 
 	if newGCSafePoint != oldGCSafePoint {
 		log.Info("advanced GC safe point",
@@ -570,6 +578,14 @@ func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID
 		TxnSafePoint: newTxnSafePoint,
 		GCSafePoint:  gcSafePoint,
 	})
+	if newTxnSafePoint != oldTxnSafePoint {
+		m.publishGCStateChangeLocked(NewGCStateUpsert(GCState{
+			KeyspaceID:      keyspaceID,
+			IsKeyspaceLevel: keyspaceID != constant.NullKeyspaceID,
+			TxnSafePoint:    newTxnSafePoint,
+			GCSafePoint:     gcSafePoint,
+		}))
+	}
 
 	blockerDesc := ""
 	simulatedServiceID := ""
