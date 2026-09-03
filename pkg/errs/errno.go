@@ -548,11 +548,12 @@ var (
 
 // GC errors
 var (
-	ErrGCOnInvalidKeyspace                 = errors.Normalize("trying to manage GC in keyspace %v (id: %v) where keyspace level GC is not enabled", errors.RFCCodeText("PD:gc:ErrGCOnInvalidKeyspace"))
-	ErrDecreasingGCSafePoint               = errors.Normalize("trying to update GC safe point to a smaller value, current value: %v, given: %v", errors.RFCCodeText("PD:gc:ErrDecreasingGCSafePoint"))
-	ErrGCSafePointExceedsTxnSafePoint      = errors.Normalize("trying to update GC safe point to a too large value that exceeds the txn safe point, current value: %v, given: %v, current txn safe point: %v", errors.RFCCodeText("PD:gc:ErrGCSafePointExceedsTxnSafePoint"))
-	ErrDecreasingTxnSafePoint              = errors.Normalize("trying to update txn safe point to a smaller value, current value: %v, given: %v", errors.RFCCodeText("PD:gc:ErrDecreasingTxnSafePoint"))
-	ErrGCStateWatcherSlowConsumer          = errors.Normalize("GC state watcher is too slow", errors.RFCCodeText("PD:gc:ErrGCStateWatcherSlowConsumer"))
+	ErrGCOnInvalidKeyspace            = errors.Normalize("trying to manage GC in keyspace %v (id: %v) where keyspace level GC is not enabled", errors.RFCCodeText("PD:gc:ErrGCOnInvalidKeyspace"))
+	ErrDecreasingGCSafePoint          = errors.Normalize("trying to update GC safe point to a smaller value, current value: %v, given: %v", errors.RFCCodeText("PD:gc:ErrDecreasingGCSafePoint"))
+	ErrGCSafePointExceedsTxnSafePoint = errors.Normalize("trying to update GC safe point to a too large value that exceeds the txn safe point, current value: %v, given: %v, current txn safe point: %v", errors.RFCCodeText("PD:gc:ErrGCSafePointExceedsTxnSafePoint"))
+	ErrDecreasingTxnSafePoint         = errors.Normalize("trying to update txn safe point to a smaller value, current value: %v, given: %v", errors.RFCCodeText("PD:gc:ErrDecreasingTxnSafePoint"))
+	// ErrGCStateWatcherSlowConsumer indicates that a watcher cannot keep up with live GC state changes.
+	ErrGCStateWatcherSlowConsumer          = errors.Normalize("gc state watcher is too slow", errors.RFCCodeText("PD:gc:ErrGCStateWatcherSlowConsumer"))
 	ErrGCBarrierTSBehindTxnSafePoint       = errors.Normalize("trying to set a GC barrier on ts %d which is already behind the txn safe point %d", errors.RFCCodeText("PD:gc:ErrGCBarrierTSBehindTxnSafePoint"))
 	ErrReservedGCBarrierID                 = errors.Normalize("trying to set a GC barrier with a barrier ID that is reserved: %v", errors.RFCCodeText("PD:gc:ErrReservedGCBarrierID"))
 	ErrGlobalGCBarrierTSBehindTxnSafePoint = errors.Normalize("trying to set a global GC barrier on ts %d which is already behind the txn safe point %d of keyspace %s", errors.RFCCodeText("PD:gc:ErrGlobalGCBarrierTSBehindTxnSafePoint"))

@@ -16,6 +16,7 @@ package gc
 
 import (
 	"context"
+	"errors"
 	"math"
 	"slices"
 	"sync"
@@ -23,9 +24,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/failpoint"
@@ -36,6 +39,7 @@ import (
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
+	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
@@ -259,6 +263,61 @@ func advanceWatchGCStatesTxnSafePoint(
 	require.NotNil(t, response.GetHeader())
 	require.Nil(t, response.GetHeader().GetError())
 	require.Equal(t, target, response.GetNewTxnSafePoint())
+}
+
+type failingWatchGCStatesServer struct {
+	ctx     context.Context
+	sendErr error
+}
+
+func (s *failingWatchGCStatesServer) Send(*pdpb.WatchGCStatesResponse) error {
+	return s.sendErr
+}
+
+func (*failingWatchGCStatesServer) SetHeader(metadata.MD) error  { return nil }
+func (*failingWatchGCStatesServer) SendHeader(metadata.MD) error { return nil }
+func (*failingWatchGCStatesServer) SetTrailer(metadata.MD)       {}
+
+func (s *failingWatchGCStatesServer) Context() context.Context {
+	return s.ctx
+}
+
+func (*failingWatchGCStatesServer) SendMsg(any) error { return nil }
+func (*failingWatchGCStatesServer) RecvMsg(any) error { return nil }
+
+func prometheusMetricValue(t *testing.T, name string, labels map[string]string) float64 {
+	t.Helper()
+	families, err := prometheus.DefaultGatherer.Gather()
+	require.NoError(t, err)
+	for _, family := range families {
+		if family.GetName() != name {
+			continue
+		}
+		for _, metric := range family.GetMetric() {
+			if len(metric.GetLabel()) != len(labels) {
+				continue
+			}
+			matches := true
+			for _, pair := range metric.GetLabel() {
+				if labels[pair.GetName()] != pair.GetValue() {
+					matches = false
+					break
+				}
+			}
+			if !matches {
+				continue
+			}
+			if gauge := metric.GetGauge(); gauge != nil {
+				return gauge.GetValue()
+			}
+			if counter := metric.GetCounter(); counter != nil {
+				return counter.GetValue()
+			}
+			require.FailNow(t, "metric has unsupported type", name)
+		}
+	}
+	require.FailNow(t, "metric not found", name)
+	return 0
 }
 
 func TestGCOperations(t *testing.T) {
@@ -1101,6 +1160,62 @@ func TestWatchGCStatesRequestPreflight(t *testing.T) {
 			require.Equal(t, test.wantCode, status.Code(err))
 		})
 	}
+}
+
+func TestWatchGCStatesSendFailureCleansUpPublicHandler(t *testing.T) {
+	re := require.New(t)
+	cluster := newWatchGCStatesCluster(t, 1, true)
+	leaderServer := cluster.GetLeaderServer()
+	re.NotNil(leaderServer)
+	pdServer := leaderServer.GetServer()
+
+	options := pdServer.GetServiceMiddlewarePersistOptions()
+	previousConfig := options.GetGRPCRateLimitConfig().Clone()
+	enabledConfig := previousConfig.Clone()
+	enabledConfig.EnableRateLimit = true
+	options.SetGRPCRateLimitConfig(enabledConfig)
+	limiter := pdServer.GetGRPCRateLimiter()
+	limiter.Update("WatchGCStates", ratelimit.UpdateConcurrencyLimiter(1))
+	t.Cleanup(func() {
+		limiter.Update("WatchGCStates", ratelimit.UpdateConcurrencyLimiter(0))
+		options.SetGRPCRateLimitConfig(previousConfig)
+	})
+
+	activeBefore := prometheusMetricValue(t, "pd_gc_watcher_count", nil)
+	clientCancelBefore := prometheusMetricValue(t, "pd_gc_watcher_termination_total", map[string]string{"reason": "client_cancel"})
+	registration := enableWatchGCStatesRegistrationPoint(t)
+	sendErr := errors.New("send failed")
+	streamCtx, cancelStream := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancelStream()
+	stream := &failingWatchGCStatesServer{ctx: streamCtx, sendErr: sendErr}
+	handlerDone := make(chan error, 1)
+	go func() {
+		handlerDone <- (&server.GrpcServer{Server: pdServer}).WatchGCStates(&pdpb.WatchGCStatesRequest{
+			Header:             testutil.NewRequestHeader(leaderServer.GetClusterID()),
+			SkipLoadingInitial: true,
+		}, stream)
+	}()
+
+	registration.wait(t)
+	registration.disable(re)
+	re.Equal(activeBefore+1, prometheusMetricValue(t, "pd_gc_watcher_count", nil))
+	limit, current := limiter.GetConcurrencyLimiterStatus("WatchGCStates")
+	re.Equal(uint64(1), limit)
+	re.Equal(uint64(1), current)
+
+	_, err := pdServer.GetGCStateManager().AdvanceTxnSafePoint(constant.NullKeyspaceID, 10, time.Now())
+	re.NoError(err)
+	select {
+	case err := <-handlerDone:
+		re.Same(sendErr, err)
+	case <-time.After(5 * time.Second):
+		re.FailNow("WatchGCStates handler did not return after the send failure")
+	}
+
+	re.Equal(activeBefore, prometheusMetricValue(t, "pd_gc_watcher_count", nil))
+	re.Equal(clientCancelBefore+1, prometheusMetricValue(t, "pd_gc_watcher_termination_total", map[string]string{"reason": "client_cancel"}))
+	_, current = limiter.GetConcurrencyLimiterStatus("WatchGCStates")
+	re.Zero(current)
 }
 
 func TestWatchGCStatesHoldsRateLimitTokenForStreamLifetime(t *testing.T) {
