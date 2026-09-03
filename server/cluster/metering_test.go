@@ -24,6 +24,7 @@ import (
 	"github.com/docker/go-units"
 	"github.com/stretchr/testify/require"
 
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/metering"
 	"github.com/tikv/pd/pkg/mock/mockid"
@@ -52,13 +53,25 @@ func TestCollectStorageSize(t *testing.T) {
 	keyspaceGroupManager := keyspace.NewKeyspaceGroupManager(ctx, tc.storage, tc.etcdClient)
 	re.NoError(keyspaceGroupManager.Bootstrap(ctx))
 	keyspaceManager := keyspace.NewKeyspaceManager(ctx, tc.storage, tc, mockid.NewIDAllocator(), &config.KeyspaceConfig{}, keyspaceGroupManager, nil)
+	var meteredKeyspaceID uint32
 	for i := range 10 {
-		_, err = keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+		created, err := keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
 			Name:       fmt.Sprintf("test-keyspace-%d", i),
 			CreateTime: time.Now().Unix(),
 		})
 		re.NoError(err)
+		if i == 0 {
+			meteredKeyspaceID = created.GetId()
+		}
 	}
+	regionBounds := keyspace.MakeRegionBound(meteredKeyspaceID)
+	meteredRegion := regions[0].Clone(
+		core.WithStartKey(regionBounds.TxnLeftBound),
+		core.WithEndKey(regionBounds.TxnRightBound),
+		core.SetApproximateKvSize(100),
+		core.SetApproximateIAKvSize(40),
+	)
+	re.NoError(tc.putRegion(meteredRegion))
 
 	storageSizeInfoList := tc.collectStorageSize(tc.regionLabeler, keyspaceManager)
 	re.Len(storageSizeInfoList, 10)
@@ -66,6 +79,9 @@ func TestCollectStorageSize(t *testing.T) {
 	sort.Slice(storageSizeInfoList, func(i, j int) bool {
 		return storageSizeInfoList[i].keyspaceName < storageSizeInfoList[j].keyspaceName
 	})
+	re.Equal("test-keyspace-0", storageSizeInfoList[0].keyspaceName)
+	re.Equal(uint64(100), storageSizeInfoList[0].rowBasedStorageSize)
+	re.Equal(uint64(40), storageSizeInfoList[0].rowBasedIAStorageSize)
 	// Mock the storage size info since the region split won't work in the test.
 	for i := range storageSizeInfoList {
 		storageSizeInfoList[i].rowBasedStorageSize = uint64(i)
