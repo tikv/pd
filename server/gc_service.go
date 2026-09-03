@@ -16,9 +16,11 @@ package server
 
 import (
 	"context"
+	"errors"
 	"math"
 	"time"
 
+	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -28,6 +30,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/gc"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -35,6 +38,16 @@ import (
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
+
+const (
+	watchGCStatesRecvBatchSize   = 1024
+	maxWatchGCStatesResponseSize = 1 << 20
+)
+
+type gcStateChangeReceiver interface {
+	RecvBatch(maxChanges int) ([]gc.GCStateChange, error)
+	Err() error
+}
 
 // UpdateGCSafePoint implements gRPC PDServer.
 //
@@ -533,6 +546,96 @@ func gcStateToProto(gcState gc.GCState, now time.Time) *pdpb.GCState {
 	}
 }
 
+func gcStateChangeToProto(change gc.GCStateChange) (*pdpb.GCStateChange, error) {
+	if state, ok := change.Upsert(); ok {
+		state.GCBarriers = nil
+		return &pdpb.GCStateChange{Change: &pdpb.GCStateChange_Upsert{
+			Upsert: gcStateToProto(state, time.Time{}),
+		}}, nil
+	}
+	if keyspaceID, ok := change.RemovedKeyspaceID(); ok {
+		return &pdpb.GCStateChange{Change: &pdpb.GCStateChange_Removed{
+			Removed: &pdpb.KeyspaceScope{
+				Keyspace: &pdpb.KeyspaceScope_KeyspaceId{KeyspaceId: keyspaceID},
+			},
+		}}, nil
+	}
+	return nil, errors.New("invalid GC state change")
+}
+
+func splitWatchGCStatesResponses(changes []*pdpb.GCStateChange, maxSize int) []*pdpb.WatchGCStatesResponse {
+	if len(changes) == 0 {
+		return nil
+	}
+
+	responses := make([]*pdpb.WatchGCStatesResponse, 0, 1)
+	newResponse := func() (*pdpb.WatchGCStatesResponse, int) {
+		response := &pdpb.WatchGCStatesResponse{Header: grpcutil.WrapHeader()}
+		return response, proto.Size(response)
+	}
+	current, currentSize := newResponse()
+	for _, change := range changes {
+		changeSize := proto.Size(&pdpb.WatchGCStatesResponse{Changes: []*pdpb.GCStateChange{change}})
+		if len(current.Changes) > 0 && currentSize+changeSize > maxSize {
+			responses = append(responses, current)
+			current, currentSize = newResponse()
+		}
+
+		current.Changes = append(current.Changes, change)
+		currentSize += changeSize
+		if len(current.Changes) == 1 && currentSize > maxSize {
+			log.Warn("GC state change exceeds WatchGCStates response size",
+				zap.Int("serialized-size", currentSize),
+				zap.Int("max-size", maxSize))
+			responses = append(responses, current)
+			current, currentSize = newResponse()
+		}
+	}
+	if len(current.Changes) > 0 {
+		responses = append(responses, current)
+	}
+	return responses
+}
+
+func watchGCStatesErrorToStatus(err error) error {
+	switch {
+	case errors.Is(err, errs.ErrGCStateWatcherSlowConsumer):
+		return status.Error(codes.ResourceExhausted, err.Error())
+	case errors.Is(err, errs.ErrNotLeader):
+		return errs.ErrNotLeader
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return status.FromContextError(err).Err()
+	default:
+		return status.Error(codes.Unavailable, err.Error())
+	}
+}
+
+func serveWatchGCStates(receiver gcStateChangeReceiver, stream pdpb.PD_WatchGCStatesServer, maxResponseSize int) error {
+	for {
+		changes, err := receiver.RecvBatch(watchGCStatesRecvBatchSize)
+		if err != nil {
+			return watchGCStatesErrorToStatus(err)
+		}
+		protoChanges := make([]*pdpb.GCStateChange, 0, len(changes))
+		for _, change := range changes {
+			converted, err := gcStateChangeToProto(change)
+			if err != nil {
+				log.Error("failed to convert GC state change", zap.Error(err))
+				return status.Error(codes.Internal, err.Error())
+			}
+			protoChanges = append(protoChanges, converted)
+		}
+		for _, response := range splitWatchGCStatesResponses(protoChanges, maxResponseSize) {
+			if err := receiver.Err(); err != nil {
+				return watchGCStatesErrorToStatus(err)
+			}
+			if err := stream.Send(response); err != nil {
+				return err
+			}
+		}
+	}
+}
+
 // AdvanceGCSafePoint tries to advance the GC safe point.
 func (s *GrpcServer) AdvanceGCSafePoint(ctx context.Context, request *pdpb.AdvanceGCSafePointRequest) (*pdpb.AdvanceGCSafePointResponse, error) {
 	done, err := s.rateLimitCheck()
@@ -804,6 +907,30 @@ func (s *GrpcServer) GetAllKeyspacesGCStates(ctx context.Context, request *pdpb.
 		GcStates:         gcStatesPb,
 		GlobalGcBarriers: gcBarriersPb,
 	}, nil
+}
+
+// WatchGCStates streams effective GC state changes from this PD server.
+func (s *GrpcServer) WatchGCStates(request *pdpb.WatchGCStatesRequest, stream pdpb.PD_WatchGCStatesServer) error {
+	done, err := s.rateLimitCheck()
+	if err != nil {
+		return err
+	}
+	if done != nil {
+		defer done()
+	}
+	if err := s.validateRequest(request.GetHeader()); err != nil {
+		return err
+	}
+	if s.GetRaftCluster() == nil {
+		return status.Error(codes.Unavailable, errs.ErrNotBootstrapped.FastGenByArgs().Error())
+	}
+
+	watcher, err := s.gcStateManager.WatchGCStates(stream.Context(), request.GetSkipLoadingInitial())
+	if err != nil {
+		return watchGCStatesErrorToStatus(err)
+	}
+	defer watcher.Close()
+	return serveWatchGCStates(watcher, stream, maxWatchGCStatesResponseSize)
 }
 
 // SetGlobalGCBarrier sets a global GC barrier.
