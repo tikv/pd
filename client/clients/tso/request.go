@@ -38,6 +38,7 @@ var (
 
 // Request is a TSO request.
 type Request struct {
+	mu         sync.RWMutex
 	requestCtx context.Context
 	clientCtx  context.Context
 	done       chan error
@@ -57,6 +58,8 @@ func (req *Request) IsFrom(pool *sync.Pool) bool {
 	if req == nil {
 		return false
 	}
+	req.mu.RLock()
+	defer req.mu.RUnlock()
 	return req.pool == pool
 }
 
@@ -70,40 +73,56 @@ func (req *Request) TryDone(err error) {
 
 // Wait will block until the TSO result is ready.
 func (req *Request) Wait() (physical int64, logical int64, err error) {
-	return req.waitCtx(req.requestCtx)
+	req.mu.RLock()
+	ctx := req.requestCtx
+	req.mu.RUnlock()
+
+	return req.waitCtx(ctx)
 }
 
 // waitCtx waits for the TSO result with specified ctx, while not using req.requestCtx.
 func (req *Request) waitCtx(ctx context.Context) (physical int64, logical int64, err error) {
+	req.mu.RLock()
+	startAt := req.start
+	clientCtx := req.clientCtx
+	pool := req.pool
+	requestCtxForTrace := req.requestCtx
+	req.mu.RUnlock()
+
 	// If tso command duration is observed very high, the reason could be it
 	// takes too long for Wait() be called.
 	start := time.Now()
-	metrics.CmdDurationTSOAsyncWait.Observe(start.Sub(req.start).Seconds())
+	metrics.CmdDurationTSOAsyncWait.Observe(start.Sub(startAt).Seconds())
 	select {
 	case err = <-req.done:
-		defer req.pool.Put(req)
-		defer trace.StartRegion(req.requestCtx, "pdclient.tsoReqDone").End()
+		defer pool.Put(req)
+		defer trace.StartRegion(requestCtxForTrace, "pdclient.tsoReqDone").End()
 		err = errors.WithStack(err)
 		now := time.Now()
 		if err != nil {
 			metrics.CmdFailedDurationTSOWait.Observe(now.Sub(start).Seconds())
-			metrics.CmdFailedDurationTSO.Observe(now.Sub(req.start).Seconds())
+			metrics.CmdFailedDurationTSO.Observe(now.Sub(startAt).Seconds())
 			return 0, 0, err
 		}
+		req.mu.RLock()
 		physical, logical = req.physical, req.logical
+		req.mu.RUnlock()
 		metrics.CmdDurationTSOWait.Observe(now.Sub(start).Seconds())
-		metrics.CmdDurationTSO.Observe(now.Sub(req.start).Seconds())
+		metrics.CmdDurationTSO.Observe(now.Sub(startAt).Seconds())
 		return
 	case <-ctx.Done():
 		return 0, 0, errors.WithStack(ctx.Err())
-	case <-req.clientCtx.Done():
-		return 0, 0, errors.WithStack(req.clientCtx.Err())
+	case <-clientCtx.Done():
+		return 0, 0, errors.WithStack(clientCtx.Err())
 	}
 }
 
 // waitTimeout waits for the TSO result for limited time. Currently only for test purposes.
 func (req *Request) waitTimeout(timeout time.Duration) (physical int64, logical int64, err error) {
-	ctx, cancel := context.WithTimeout(req.requestCtx, timeout)
+	req.mu.RLock()
+	ctx := req.requestCtx
+	req.mu.RUnlock()
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	return req.waitCtx(ctx)
 }
