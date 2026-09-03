@@ -39,15 +39,13 @@ The stream is a sequence of self-contained changes. An `upsert` replaces the con
 
 For `skip_loading_initial=false`, PD registers the live listener before starting the initial scan. Initial and live changes may be interleaved, and the initial scan is not a cross-keyspace transaction. For each individual keyspace, however, the server suppresses an initial value if a post-registration live value for the same scope has already been emitted. The stream therefore cannot regress from a live value `v2` to an older initial value `v1`.
 
-For `skip_loading_initial=true`, PD sends only effective changes produced after registration. This mode does not provide continuity with an earlier stream and is unsuitable for constructing a complete view on its own. A client establishing its first complete view or recovering from a disconnected stream uses `skip_loading_initial=false`.
+For `skip_loading_initial=true`, PD sends only effective safe-point changes produced after registration. This mode does not provide continuity with an earlier stream and is unsuitable for constructing a complete view on its own. A client establishing its first complete view or recovering from a disconnected stream uses `skip_loading_initial=false`.
 
 Clients should clear their materialized GC-state view before an initial connection or reconnection with `skip_loading_initial=false`, unless they independently reconcile stale entries. This is a recommended client convention rather than a server-enforced requirement. The first server implementation does not yet produce lifecycle-driven `removed` events, so a client that retains an old view cannot otherwise guarantee removal of scopes deleted while it was disconnected.
 
 The protocol does not expose an initial-scan completion marker. Consumers continuously apply changes in arrival order; correctness does not depend on distinguishing initial changes from live changes.
 
-The first implementation does not subscribe to keyspace metadata changes after registration. A connected client therefore is not guaranteed to learn that a keyspace was created, enabled, disabled, deleted, or switched between unified and keyspace-level GC until it reconnects and reloads, receives a later safe-point upsert that reflects the new metadata, or reconciles that metadata independently.
-
-Watch registration and publication are linearized only within one PD process and one local leadership generation. Existing GC-state write transactions are not fenced by the PD leadership lease. In the rare case that a transaction accepted by an old leader commits after the new leader has completed the corresponding initial read, the new stream might not observe that value until another effective mutation or another reconnection. This limitation does not permit an older value to follow a newer value on the same stream. Leadership-fenced GC-state transactions are deferred as a separate improvement because they require changes across every modern and legacy write path and the storage transaction layer.
+The first implementation does not subscribe to keyspace metadata changes after registration. A connected client might not learn that a keyspace was created, enabled, disabled, deleted, or switched between unified and keyspace-level GC until it reconnects, receives a later safe-point upsert that reflects the new metadata, or reconciles that metadata independently.
 
 ## Architecture
 
@@ -55,7 +53,7 @@ The design separates state observation, ordered merging, and transport adaptatio
 
 ### GC state manager
 
-`GCStateManager` owns a registry of active watchers. Registration, live publication, watcher removal caused by a full live queue, and local leader-generation transitions are serialized by the manager's existing mutex. This makes watcher registration linearizable with GC-state mutations in the same manager and leadership generation; it does not provide cross-process transaction fencing.
+`GCStateManager` owns a registry of active watchers. Its existing mutex serializes watcher registration, publication of effective safe-point changes, removal of slow watchers, and local leadership transitions. These guarantees apply within one manager and local leadership generation.
 
 The `pkg/gc` layer defines an internal `GCStateChange` representation with `upsert` and `removed` variants. The type is independent of protobuf. An upsert contains a complete effective GC state, including the scope, whether GC is managed at keyspace level, the transaction safe point, and the GC safe point. A removed change contains the affected scope.
 
@@ -68,7 +66,6 @@ Watcher mechanics live in a focused file such as `pkg/gc/gc_state_watcher.go`. E
 - `initCh`, a buffered channel of initial-state batches.
 - `liveCh`, a bounded channel of individual live changes.
 - `initDone`, which is owned by the merge consumer and becomes true when initial loading was skipped or after the closed `initCh` has been fully drained.
-- The local leadership generation in which the watcher was registered.
 - A cause-aware cancellation mechanism used for both cleanup and error reporting.
 - Merge state, including the set of scopes made dirty by live delivery while initial loading is active.
 
@@ -78,21 +75,9 @@ The watcher exposes a receive operation that returns at most a requested number 
 
 ### GC service
 
-`server/gc_service.go` remains a thin adapter. Its public `WatchGCStates` method performs the rate-limit check directly, validates the request, registers a watcher, converts internal changes to protobuf, splits changes into wire-size-bounded responses, sends them, and closes the watcher on every return path.
+`server/gc_service.go` remains a thin adapter. Its public `WatchGCStates` method performs the rate-limit check directly, validates the request locally, registers a watcher, converts internal changes to protobuf, splits changes into wire-size-bounded responses, sends them, and closes the watcher on every return path. The handler does not proxy the long-lived stream: a non-serving or unbootstrapped member returns `Unavailable`, and existing header and cluster-ID validation semantics remain unchanged.
 
-Keeping `rateLimitCheck` in the public handler preserves the externally visible method name `WatchGCStates` in the caller-derived rate-limit label. The rate-limit token is held for the lifetime of the stream and released when the handler returns.
-
-## RPC preflight
-
-The server-streaming handler performs a local preflight because it cannot reuse the unary forwarding callback to proxy a long-lived stream. The check order is:
-
-1. Acquire the `WatchGCStates` rate-limit token.
-2. Validate the request header, cluster ID, and local serving role with the existing validation helpers.
-3. Reject a request handled by a non-serving member with the existing not-leader `Unavailable` status instead of forwarding the stream.
-4. Reject an unbootstrapped server with `Unavailable` before registering a watcher.
-5. Register the watcher with the current local GC leadership generation.
-
-Every successful `WatchGCStatesResponse` contains `grpcutil.WrapHeader()`. Request validation and rate-limit failures retain their existing status codes. A structurally invalid internal change is a server bug: the handler logs it, closes the watcher, and returns gRPC `Internal` without assigning it a fabricated domain termination reason.
+Keeping `rateLimitCheck` in the public handler preserves the externally visible method name `WatchGCStates` in the caller-derived rate-limit label. The rate-limit token is held for the lifetime of the stream and released when the handler returns. Every successful `WatchGCStatesResponse` contains `grpcutil.WrapHeader()`; a structurally invalid internal change is logged and returned as gRPC `Internal`.
 
 ## Registration and initial loading
 
@@ -100,11 +85,11 @@ Registration establishes the boundary between pre-existing state and live change
 
 1. Lock `GCStateManager.mu`.
 2. Verify that this PD member has an active local GC leadership generation.
-3. Create the watcher, tag it with that generation, and add it to the registry.
+3. Create the watcher and add it to the registry.
 4. Unlock `GCStateManager.mu`.
 5. If `skip_loading_initial=false`, start the initial loader. Otherwise, mark initial loading complete immediately.
 
-Registering before scanning ensures that every effective mutation published by the same manager and leadership generation after the registration point is either queued as live data or causes that watcher to terminate as a slow consumer. No such mutation can fall into a gap between snapshot setup and live subscription.
+Registering before scanning ensures that every effective safe-point change published by the same manager and leadership generation after the registration point is either queued as live data or causes that watcher to terminate as a slow consumer. No such change can fall into a gap between snapshot setup and live subscription.
 
 The initial loader calls the incremental `iterateAllKeyspacesGCStates` path rather than `GetAllKeyspacesGCStates`, which materializes the full result before returning. It requests states without barriers and preserves the current handling of inactive keyspaces and unified GC mode.
 
@@ -116,7 +101,7 @@ Cancellation of the RPC or removal of the watcher cancels the loader as well. Th
 
 ## Live publication
 
-Live changes are published only after a mutation has committed successfully and the manager cache reflects the resulting effective state. Publication occurs before releasing `GCStateManager.mu`, preserving the same order for all watchers in that manager and leadership generation and serializing it with local follower transition and registration.
+Live changes are published only after a safe-point mutation has committed successfully and the manager cache reflects the resulting complete effective GC state. Publication occurs before releasing `GCStateManager.mu`, preserving the same order for all watchers in that manager and leadership generation and serializing it with local follower transition and registration.
 
 Publication is attached exactly once to the successful post-cache-update paths in `advanceGCSafePointImpl` and `advanceTxnSafePointImpl`. This covers `AdvanceGCSafePoint`, `AdvanceTxnSafePoint`, `CompatibleUpdateGCSafePoint`, and the `gc_worker` branch of `CompatibleUpdateServiceGCSafePoint` without duplicating events at public API entry points. Rejected, no-op, or failed mutations do not publish.
 
@@ -157,7 +142,7 @@ The lifecycle cases are:
 | Event | Manager behavior | Stream result |
 | --- | --- | --- |
 | Caller cancellation or send failure | Remove the watcher and cancel its loader | Return the caller or send error; record `client_cancel` |
-| A local leadership generation ends or is superseded | Remove and cancel the watchers registered in that generation while holding the manager mutex | Return the domain not-leader error, mapped to gRPC `Unavailable` |
+| A local leadership generation ends or is superseded | Remove and cancel all current watchers while holding the manager mutex | Return the domain not-leader error, mapped to gRPC `Unavailable` |
 | Initial scan fails | Remove and cancel the watcher with the initialization cause | End after any already-sent partial initial data; map to gRPC `Unavailable` |
 | `liveCh` is full | Remove and cancel only that watcher | Return the slow-consumer error, mapped to gRPC `ResourceExhausted` |
 | Initial scan completes | Close `initCh` and release merge-only initial state | Continue streaming live changes |
@@ -180,15 +165,15 @@ This approach avoids manually reproducing protobuf varint rules and avoids repea
 
 ## Leadership behavior
 
-The cluster lifecycle continues to notify `GCStateManager` synchronously. Under the manager mutex, `OnNodeBecomesLeader` creates a new local generation, cancels watchers left from older generations, clears the cache, and returns a teardown closure that captures the new generation. The cluster stores and invokes that closure when the corresponding leadership ends. No independent service-level leadership callback is introduced.
+The cluster lifecycle continues to notify `GCStateManager` synchronously. Under the manager mutex, `OnNodeBecomesLeader` advances the manager's local generation, cancels existing watchers, clears the cache, and returns a teardown closure that captures the new generation. The teardown acts only if its generation is still current; it then marks the manager as a follower, cancels all current watchers, and clears the cache. A delayed teardown from an older generation is therefore a no-op. Registration fails when the manager has no active local leadership generation.
 
-Registration fails if the member has no active local GC leadership generation. A generation's teardown removes and cancels only watchers registered in that generation under the same mutex used for registration and publication. It clears the active-generation marker and cache only if its captured generation is still current. A delayed teardown from an older generation therefore cannot cancel watchers or clear state belonging to a newer generation. A client reconnects to the newly advertised leader with `skip_loading_initial=false` and rebuilds its view according to the stream contract, subject to the documented cross-leader late-commit limitation.
+This mechanism does not fence GC-state write transactions across PD processes. In the rare case that a transaction accepted by an old leader commits after the new leader has read that keyspace's initial state, the new stream might miss the value until another effective safe-point change or reconnection. The per-stream non-regression guarantee still holds. Leadership-fenced GC-state transactions remain an out-of-scope follow-up.
 
 ## Removed-event integration
 
 The internal model, ordering logic, protobuf converter, and tests all accept `removed` changes, but the first PD implementation has no authoritative keyspace lifecycle hook that produces them. It also does not produce metadata-driven upserts for keyspace creation, enablement, or GC-mode changes. Adding only part of these producers would create misleading convergence guarantees, so production is deferred.
 
-A future lifecycle integration must publish removal and recreation events through the same manager-serialized live path as safe-point changes. It must also define how lifecycle ownership interacts with GC leadership. The implementation records this location with a targeted TODO so the limitation is discoverable without expanding the present scope.
+A future lifecycle integration must publish metadata-driven upserts and removals through the same manager-serialized live path as safe-point changes. The implementation records this integration point with a targeted TODO.
 
 ## Observability
 
@@ -198,7 +183,7 @@ Metrics are intentionally low-cardinality and focus on operational decisions rat
 - A counter reports watcher terminations with the bounded reason label values `client_cancel`, `leader_lost`, `slow_consumer`, and `init_error`.
 - A slow-consumer log records the watcher identifier, configured live capacity, and observed queue length.
 
-Watcher identifiers, keyspace identifiers, client addresses, and error strings are not metric labels. The four termination values describe watcher-domain lifecycle causes; a protobuf conversion bug is logged and returned at the transport layer instead of adding an `internal_error` label. The implementation does not add a per-send queue-length histogram because it would instrument the hot path without a demonstrated operational need.
+Watcher identifiers, keyspace identifiers, client addresses, and error strings are not metric labels. The four termination values describe watcher lifecycle causes; transport conversion errors are logged separately. The implementation does not add a per-send queue-length histogram because it would instrument the hot path without a demonstrated operational need.
 
 ## Test strategy
 
@@ -208,55 +193,47 @@ The watcher and service layers are tested separately, with focused integration c
 
 The domain tests cover:
 
-- Registration succeeds only in an active local leadership generation, and ending or superseding that generation terminates its watchers.
+- Registration succeeds only in an active local leadership generation; ending or superseding that generation terminates its watchers, while a delayed older teardown does not affect a newer generation.
 - `skip_loading_initial=false` returns initial and subsequent live states; `true` returns only post-registration live changes.
-- Successful effective state changes publish complete upserts from the shared internal mutation paths, while no-op and failed mutations do not.
-- Modern and legacy API entry points that reach the same internal mutation produce exactly one equivalent change.
+- Effective safe-point changes publish complete upserts exactly once from the shared modern and legacy mutation paths; no-op and failed mutations do not publish.
 - Current barrier-only mutations produce no change, while any operation that changes an effective safe point does.
-- An initial-first sequence emits `v1` followed by `v2`.
-- A deterministic paused-initial sequence emits `v2` and suppresses the later initial `v1`.
+- Initial-first delivery emits `v1` followed by `v2`; a deterministic paused-initial test emits `v2` and suppresses the later initial `v1`.
 - Filling watcher A's `liveCh` terminates A without delaying watcher B; A can reconnect and rebuild.
 - Initial iteration failure, caller cancellation, and concurrent deregistration terminate without goroutine or registry leaks.
 - A full `initCh` backpressures only that watcher's initial iterator and never waits on the channel while holding `GCStateManager.mu`.
 - Upsert and removed changes use the same per-scope dirty ordering rule.
 - Initial merge state remains active until a closed `initCh` is fully drained, and disabling the closed channel prevents select spinning.
-- A delayed teardown callback for an old local leadership generation does not cancel watchers in a newer generation.
 
 ### Server tests
 
 The transport tests cover:
 
-- Conversion of complete upsert and removed variants, including an empty barrier list.
-- Response splitting at a reduced test limit, with assertions based on the serialized protobuf size on both sides of the boundary.
-- A successful header appears in every split response, and the header contributes to the size boundary.
+- Conversion covers complete upserts with empty barriers, removals, and invalid internal changes.
+- Response batching covers exact protobuf size boundaries, successful headers, oversized single changes, and suppression of empty responses.
 - Cancellation between two responses derived from one `RecvBatch` prevents the remaining response from being sent.
-- An oversized single change is sent alone, dirty-only input does not produce an empty response, and an invalid internal change returns `Internal`.
 - A rate-limit capacity of one: the first active stream holds the token, the second is rejected, and a third succeeds after the first closes.
-- Request preflight covers cluster-ID mismatch, a non-serving member, and an unbootstrapped server.
-- Actual leader transfer terminates the old stream and permits a fresh initial stream on the new leader.
-- Client cancellation and send failure remove the watcher and release the rate-limit token.
-- Domain error causes map to the specified gRPC status codes.
-- The active-watcher gauge and each domain termination counter change exactly once across registration and cleanup.
+- Request preflight covers cluster-ID mismatch and unavailable members, and domain errors map to the specified gRPC status codes.
+- Leader transfer, client cancellation, and send failure terminate the stream, clean up the watcher, and release the rate-limit token.
+- Watcher metrics change exactly once across registration and cleanup.
 
 ## Dependency and rollout
 
 The root, `client`, `tools`, and `tests/integrations` Go modules are updated to a kvproto revision containing the merged `WatchGCStates` API from PR #1528. No compatibility wrapper or implementation is added for `WatchGCSafePointV2`.
 
-The API can be rolled out server-first because existing clients do not call the new RPC. New consumers use an initial stream to construct their materialized view and use the same path after any disconnect. The absence of lifecycle-produced removals remains an explicit limitation until the future integration is implemented.
+The API can be rolled out server-first because existing clients do not call the new RPC. New consumers use an initial stream to construct their materialized view and use the same path after any disconnect.
 
 ## Acceptance criteria
 
 The implementation is complete when all of the following are true:
 
-- `WatchGCStates` serves initial and local safe-point mutation changes with the documented `skip_loading_initial` behavior and metadata-change limitations.
+- `WatchGCStates` serves initial states and local effective safe-point changes with the documented `skip_loading_initial` behavior.
 - The deterministic ordering test proves that no older initial value follows a newer live value for the same scope on one stream.
 - A full live queue terminates only the affected watcher without blocking GC-state mutation.
-- Ending or superseding a local leadership generation terminates its active streams, and reconnecting with initial loading rebuilds the view subject to the documented cross-PD late-commit limitation.
+- Ending or superseding a local leadership generation terminates its active streams.
 - Response batches observe the 1 MiB target using exact protobuf size accounting, except for the defined oversized-single-change case.
 - Metric labels use only the bounded dimensions described above.
 - Targeted package and server tests pass with no failpoints left enabled.
 - The implementation contains no `WatchGCSafePointV2` compatibility path and no Go client work.
-- Cross-PD leadership fencing remains explicitly out of scope and is recorded as a follow-up TODO.
 
 ## Next steps
 
