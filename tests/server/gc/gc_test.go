@@ -248,7 +248,9 @@ func advanceWatchGCStatesTxnSafePoint(
 	target uint64,
 ) {
 	t.Helper()
-	response, err := client.AdvanceTxnSafePoint(context.Background(), &pdpb.AdvanceTxnSafePointRequest{
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	response, err := client.AdvanceTxnSafePoint(ctx, &pdpb.AdvanceTxnSafePointRequest{
 		Header:        header,
 		KeyspaceScope: makeKeyspaceScope(keyspaceID),
 		Target:        target,
@@ -1040,7 +1042,13 @@ func TestWatchGCStatesInitialAndSkipInitialRegistrationBoundary(t *testing.T) {
 	registration.disable(re)
 
 	advanceWatchGCStatesTxnSafePoint(t, client, header, ks.GetId(), 20)
-	firstAfterRegistration := recvWatchGCStateForKeyspace(t, skipInitialStream, ks.GetId())
+	firstResponse, err := skipInitialStream.Recv()
+	re.NoError(err)
+	re.NotNil(firstResponse.GetHeader())
+	re.Len(firstResponse.GetChanges(), 1)
+	firstAfterRegistration := firstResponse.GetChanges()[0].GetUpsert()
+	re.NotNil(firstAfterRegistration)
+	re.Equal(ks.GetId(), firstAfterRegistration.GetKeyspaceScope().GetKeyspaceId())
 	re.True(firstAfterRegistration.GetIsKeyspaceLevelGc())
 	re.Equal(uint64(20), firstAfterRegistration.GetTxnSafePoint())
 	re.Zero(firstAfterRegistration.GetGcSafePoint())
