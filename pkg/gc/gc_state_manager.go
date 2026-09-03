@@ -202,10 +202,10 @@ type GCStateManager struct {
 	allKeyspacesGCStatesSingleFlight                  *syncutil.OrderedSingleFlight[map[uint32]GCState]
 	allKeyspacesGCStatesExcludeGCBarriersSingleFlight *syncutil.OrderedSingleFlight[map[uint32]GCState]
 
-	// Note that nodeLeadership is a counter instead of a bool. Theoretically, it's possible that an
-	// OnNodeBecomesFollower invocation of the previous lease is later than the OnNodeBecomesLeader call of the new
-	// lease during PD leader changes. Making this a counter helps in guaranteeing the eventual consistency.
-	nodeLeadership atomic.Int32
+	watchers                   map[uint64]*GCStateWatcher
+	nextWatcherID              uint64
+	nextLeadershipGeneration   uint64
+	activeLeadershipGeneration atomic.Uint64
 }
 
 // NewGCStateManager creates a GCStateManager of GC and services.
@@ -215,6 +215,7 @@ func NewGCStateManager(store endpoint.GCStateProvider, cfg config.PDServerConfig
 		cfg:                              cfg,
 		keyspaceManager:                  keyspaceManager,
 		gcStateCache:                     newGCStateCache(),
+		watchers:                         make(map[uint64]*GCStateWatcher),
 		allKeyspacesGCStatesSingleFlight: syncutil.NewOrderedSingleFlight[map[uint32]GCState](),
 		allKeyspacesGCStatesExcludeGCBarriersSingleFlight: syncutil.NewOrderedSingleFlight[map[uint32]GCState](),
 	}
@@ -238,31 +239,30 @@ func getKeyspaceNameFromCtx(ctx context.Context) string {
 	return "<unknown>"
 }
 
-// OnNodeBecomesLeader marks the current PD node as leader for GC state watches.
-func (m *GCStateManager) OnNodeBecomesLeader() {
+// OnNodeBecomesLeader starts a local leadership generation and returns its teardown function.
+func (m *GCStateManager) OnNodeBecomesLeader() func() {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	m.nodeLeadership.Add(1)
-
-	// Also trigger cache invalidation even when transitioning from follower to leader, as a protection against
-	// potential inconsistent cache state left from the last leadership.
+	m.nextLeadershipGeneration++
+	generation := m.nextLeadershipGeneration
+	m.terminateAllGCStateWatchersLocked(errs.ErrNotLeader, watcherTerminationLeaderLost)
+	m.activeLeadershipGeneration.Store(generation)
 	m.gcStateCache.clearAll()
-}
+	m.mu.Unlock()
 
-// OnNodeBecomesFollower marks the current PD node as follower and closes all existing GC state watches.
-func (m *GCStateManager) OnNodeBecomesFollower() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	m.nodeLeadership.Add(-1)
-
-	// Invalidate the cache.
-	m.gcStateCache.clearAll()
+	return func() {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		if m.activeLeadershipGeneration.Load() != generation {
+			return
+		}
+		m.activeLeadershipGeneration.Store(0)
+		m.terminateAllGCStateWatchersLocked(errs.ErrNotLeader, watcherTerminationLeaderLost)
+		m.gcStateCache.clearAll()
+	}
 }
 
 func (m *GCStateManager) nodeIsLeader() bool {
-	return m.nodeLeadership.Load() > 0
+	return m.activeLeadershipGeneration.Load() != 0
 }
 
 // redirectKeyspace checks the given keyspaceID, and returns the actual keyspaceID to operate on.
