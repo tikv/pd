@@ -25,12 +25,15 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
+	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 	"github.com/tikv/pd/server/config"
@@ -48,6 +51,7 @@ const (
 	postGetGCStateCallFailpoint       = "github.com/tikv/pd/server/postGetGCStateCall"
 	getGCStateBeforeSlowPathFailpoint = "github.com/tikv/pd/pkg/gc/getGCStateBeforeSlowPath"
 	skipCampaignLeaderCheckFailpoint  = "github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"
+	watchGCStatesRegisteredFailpoint  = "github.com/tikv/pd/pkg/gc/watchGCStatesRegistered"
 )
 
 func makeKeyspaceScope(keyspaceID uint32) *pdpb.KeyspaceScope {
@@ -137,6 +141,122 @@ func (p *blockingFailpoint) releaseAndDisable(re *require.Assertions) {
 	p.disableOnce.Do(func() {
 		re.NoError(failpoint.Disable(p.name))
 	})
+}
+
+type watchGCStatesRegistrationPoint struct {
+	registered   chan struct{}
+	registerOnce sync.Once
+	disableOnce  sync.Once
+}
+
+func enableWatchGCStatesRegistrationPoint(t *testing.T) *watchGCStatesRegistrationPoint {
+	t.Helper()
+	re := require.New(t)
+	point := &watchGCStatesRegistrationPoint{registered: make(chan struct{})}
+	re.NoError(failpoint.EnableCall(watchGCStatesRegisteredFailpoint, func() {
+		point.registerOnce.Do(func() {
+			close(point.registered)
+		})
+	}))
+	t.Cleanup(func() {
+		point.disable(re)
+	})
+	return point
+}
+
+func (p *watchGCStatesRegistrationPoint) wait(t *testing.T) {
+	t.Helper()
+	select {
+	case <-p.registered:
+	case <-time.After(5 * time.Second):
+		require.FailNow(t, "WatchGCStates was not registered")
+	}
+}
+
+func (p *watchGCStatesRegistrationPoint) disable(re *require.Assertions) {
+	p.disableOnce.Do(func() {
+		re.NoError(failpoint.Disable(watchGCStatesRegisteredFailpoint))
+	})
+}
+
+func newWatchGCStatesCluster(t *testing.T, serverCount int, bootstrap bool) *tests.TestCluster {
+	t.Helper()
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cluster, err := tests.NewTestCluster(ctx, serverCount, func(conf *config.Config, _ string) {
+		conf.Keyspace.WaitRegionSplit = false
+	})
+	re.NoError(err)
+	t.Cleanup(func() {
+		cancel()
+		cluster.Destroy()
+	})
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+	if bootstrap {
+		re.NoError(cluster.GetLeaderServer().BootstrapCluster())
+	}
+	return cluster
+}
+
+func newWatchGCStatesClient(t *testing.T, addr string) pdpb.PDClient {
+	t.Helper()
+	re := require.New(t)
+	client, conn := testutil.MustNewGrpcClient(re, addr)
+	t.Cleanup(func() {
+		re.NoError(conn.Close())
+	})
+	return client
+}
+
+func openWatchGCStates(
+	t *testing.T,
+	client pdpb.PDClient,
+	header *pdpb.RequestHeader,
+	skipLoadingInitial bool,
+) (pdpb.PD_WatchGCStatesClient, context.CancelFunc) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	t.Cleanup(cancel)
+	stream, err := client.WatchGCStates(ctx, &pdpb.WatchGCStatesRequest{
+		Header:             header,
+		SkipLoadingInitial: skipLoadingInitial,
+	})
+	require.NoError(t, err)
+	return stream, cancel
+}
+
+func recvWatchGCStateForKeyspace(t *testing.T, stream pdpb.PD_WatchGCStatesClient, keyspaceID uint32) *pdpb.GCState {
+	t.Helper()
+	for {
+		response, err := stream.Recv()
+		require.NoError(t, err)
+		require.NotNil(t, response.GetHeader())
+		for _, change := range response.GetChanges() {
+			if state := change.GetUpsert(); state != nil && state.GetKeyspaceScope().GetKeyspaceId() == keyspaceID {
+				return state
+			}
+		}
+	}
+}
+
+func advanceWatchGCStatesTxnSafePoint(
+	t *testing.T,
+	client pdpb.PDClient,
+	header *pdpb.RequestHeader,
+	keyspaceID uint32,
+	target uint64,
+) {
+	t.Helper()
+	response, err := client.AdvanceTxnSafePoint(context.Background(), &pdpb.AdvanceTxnSafePointRequest{
+		Header:        header,
+		KeyspaceScope: makeKeyspaceScope(keyspaceID),
+		Target:        target,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, response.GetHeader())
+	require.Nil(t, response.GetHeader().GetError())
+	require.Equal(t, target, response.GetNewTxnSafePoint())
 }
 
 func TestGCOperations(t *testing.T) {
@@ -882,4 +1002,186 @@ func TestGetGCStateSlowPathReadsLatestStateIfLeaderLostBeforeRead(t *testing.T) 
 	re.NoError(res.err)
 	re.Nil(res.resp.GetHeader().GetError())
 	re.Equal(uint64(20), res.resp.GetGcState().GetTxnSafePoint())
+}
+
+func TestWatchGCStatesInitialAndSkipInitialRegistrationBoundary(t *testing.T) {
+	re := require.New(t)
+	cluster := newWatchGCStatesCluster(t, 1, true)
+	leaderServer := cluster.GetLeaderServer()
+	re.NotNil(leaderServer)
+
+	ks, err := leaderServer.GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+		Name:       "watch-gc-states",
+		Config:     map[string]string{keyspace.GCManagementType: keyspace.KeyspaceLevelGC},
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+
+	client := newWatchGCStatesClient(t, leaderServer.GetAddr())
+	header := testutil.NewRequestHeader(leaderServer.GetClusterID())
+	initialStream, cancelInitial := openWatchGCStates(t, client, header, false)
+	initial := recvWatchGCStateForKeyspace(t, initialStream, ks.GetId())
+	re.True(initial.GetIsKeyspaceLevelGc())
+	re.Zero(initial.GetTxnSafePoint())
+	re.Zero(initial.GetGcSafePoint())
+	re.Empty(initial.GetGcBarriers())
+
+	advanceWatchGCStatesTxnSafePoint(t, client, header, ks.GetId(), 10)
+	live := recvWatchGCStateForKeyspace(t, initialStream, ks.GetId())
+	re.True(live.GetIsKeyspaceLevelGc())
+	re.Equal(uint64(10), live.GetTxnSafePoint())
+	re.Zero(live.GetGcSafePoint())
+	re.Empty(live.GetGcBarriers())
+	cancelInitial()
+
+	registration := enableWatchGCStatesRegistrationPoint(t)
+	skipInitialStream, _ := openWatchGCStates(t, client, header, true)
+	registration.wait(t)
+	registration.disable(re)
+
+	advanceWatchGCStatesTxnSafePoint(t, client, header, ks.GetId(), 20)
+	firstAfterRegistration := recvWatchGCStateForKeyspace(t, skipInitialStream, ks.GetId())
+	re.True(firstAfterRegistration.GetIsKeyspaceLevelGc())
+	re.Equal(uint64(20), firstAfterRegistration.GetTxnSafePoint())
+	re.Zero(firstAfterRegistration.GetGcSafePoint())
+	re.Empty(firstAfterRegistration.GetGcBarriers())
+}
+
+func TestWatchGCStatesRequestPreflight(t *testing.T) {
+	tests := []struct {
+		name     string
+		setup    func(*testing.T) (string, *pdpb.RequestHeader)
+		wantCode codes.Code
+	}{
+		{
+			name: "wrong cluster ID",
+			setup: func(t *testing.T) (string, *pdpb.RequestHeader) {
+				cluster := newWatchGCStatesCluster(t, 1, true)
+				leader := cluster.GetLeaderServer()
+				return leader.GetAddr(), testutil.NewRequestHeader(leader.GetClusterID() + 1)
+			},
+			wantCode: codes.FailedPrecondition,
+		},
+		{
+			name: "direct follower",
+			setup: func(t *testing.T) (string, *pdpb.RequestHeader) {
+				cluster := newWatchGCStatesCluster(t, 2, true)
+				follower := cluster.GetServer(cluster.GetFollower())
+				require.NotNil(t, follower)
+				return follower.GetAddr(), testutil.NewRequestHeader(follower.GetClusterID())
+			},
+			wantCode: codes.Unavailable,
+		},
+		{
+			name: "unbootstrapped leader",
+			setup: func(t *testing.T) (string, *pdpb.RequestHeader) {
+				cluster := newWatchGCStatesCluster(t, 1, false)
+				leader := cluster.GetLeaderServer()
+				return leader.GetAddr(), testutil.NewRequestHeader(leader.GetClusterID())
+			},
+			wantCode: codes.Unavailable,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			addr, header := test.setup(t)
+			client := newWatchGCStatesClient(t, addr)
+			stream, _ := openWatchGCStates(t, client, header, true)
+			response, err := stream.Recv()
+			require.Nil(t, response)
+			require.Equal(t, test.wantCode, status.Code(err))
+		})
+	}
+}
+
+func TestWatchGCStatesHoldsRateLimitTokenForStreamLifetime(t *testing.T) {
+	re := require.New(t)
+	cluster := newWatchGCStatesCluster(t, 1, true)
+	leaderServer := cluster.GetLeaderServer()
+	re.NotNil(leaderServer)
+	server := leaderServer.GetServer()
+	options := server.GetServiceMiddlewarePersistOptions()
+	previousConfig := options.GetGRPCRateLimitConfig().Clone()
+	enabledConfig := previousConfig.Clone()
+	enabledConfig.EnableRateLimit = true
+	options.SetGRPCRateLimitConfig(enabledConfig)
+	limiter := server.GetGRPCRateLimiter()
+	limiter.Update("WatchGCStates", ratelimit.UpdateConcurrencyLimiter(1))
+	t.Cleanup(func() {
+		limiter.Update("WatchGCStates", ratelimit.UpdateConcurrencyLimiter(0))
+		options.SetGRPCRateLimitConfig(previousConfig)
+	})
+
+	client := newWatchGCStatesClient(t, leaderServer.GetAddr())
+	header := testutil.NewRequestHeader(leaderServer.GetClusterID())
+	firstRegistration := enableWatchGCStatesRegistrationPoint(t)
+	_, cancelFirst := openWatchGCStates(t, client, header, true)
+	firstRegistration.wait(t)
+	firstRegistration.disable(re)
+	limit, current := limiter.GetConcurrencyLimiterStatus("WatchGCStates")
+	re.Equal(uint64(1), limit)
+	re.Equal(uint64(1), current)
+
+	secondStream, _ := openWatchGCStates(t, client, header, true)
+	response, err := secondStream.Recv()
+	re.Nil(response)
+	re.Equal(codes.ResourceExhausted, status.Code(err))
+
+	cancelFirst()
+	testutil.Eventually(re, func() bool {
+		_, current := limiter.GetConcurrencyLimiterStatus("WatchGCStates")
+		return current == 0
+	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(10*time.Millisecond))
+
+	thirdRegistration := enableWatchGCStatesRegistrationPoint(t)
+	thirdStream, _ := openWatchGCStates(t, client, header, true)
+	thirdRegistration.wait(t)
+	thirdRegistration.disable(re)
+	advanceWatchGCStatesTxnSafePoint(t, client, header, constant.NullKeyspaceID, 10)
+	state := recvWatchGCStateForKeyspace(t, thirdStream, constant.NullKeyspaceID)
+	re.Equal(uint64(10), state.GetTxnSafePoint())
+}
+
+func TestWatchGCStatesTerminatesOnLeaderTransferAndReinitializes(t *testing.T) {
+	re := require.New(t)
+	cluster, req, cleanup := newGCStateLeaderTransitionCluster(t)
+	t.Cleanup(cleanup)
+
+	oldLeader := cluster.GetLeader()
+	re.NotEmpty(oldLeader)
+	oldLeaderServer := cluster.GetServer(oldLeader)
+	re.NotNil(oldLeaderServer)
+	oldClient := newWatchGCStatesClient(t, oldLeaderServer.GetAddr())
+	oldStream, _ := openWatchGCStates(t, oldClient, req.GetHeader(), false)
+	initial := recvWatchGCStateForKeyspace(t, oldStream, constant.NullKeyspaceID)
+	re.False(initial.GetIsKeyspaceLevelGc())
+	re.Zero(initial.GetTxnSafePoint())
+	re.Zero(initial.GetGcSafePoint())
+	re.Empty(initial.GetGcBarriers())
+
+	re.NoError(oldLeaderServer.ResignLeaderWithRetry())
+	newLeader := cluster.WaitLeader()
+	re.NotEmpty(newLeader)
+	re.NotEqual(oldLeader, newLeader)
+	for {
+		response, err := oldStream.Recv()
+		if err != nil {
+			re.Nil(response)
+			re.Equal(codes.Unavailable, status.Code(err))
+			break
+		}
+		re.NotNil(response)
+	}
+
+	newLeaderServer := cluster.GetServer(newLeader)
+	re.NotNil(newLeaderServer)
+	newClient := newWatchGCStatesClient(t, newLeaderServer.GetAddr())
+	advanceWatchGCStatesTxnSafePoint(t, newClient, req.GetHeader(), constant.NullKeyspaceID, 10)
+	newStream, _ := openWatchGCStates(t, newClient, req.GetHeader(), false)
+	reinitialized := recvWatchGCStateForKeyspace(t, newStream, constant.NullKeyspaceID)
+	re.False(reinitialized.GetIsKeyspaceLevelGc())
+	re.Equal(uint64(10), reinitialized.GetTxnSafePoint())
+	re.Zero(reinitialized.GetGcSafePoint())
+	re.Empty(reinitialized.GetGcBarriers())
 }
