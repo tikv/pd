@@ -310,7 +310,7 @@ func (s *buryAfterReadStoreSet) GetStore(id uint64) *core.StoreInfo {
 	store := s.StoresInfo.GetStore(id)
 	if id == s.target && !s.buried {
 		s.buried = true
-		s.StoresInfo.PutStore(store.Clone(
+		s.PutStore(store.Clone(
 			core.SetStoreState(metapb.StoreState_Tombstone),
 		))
 	}
