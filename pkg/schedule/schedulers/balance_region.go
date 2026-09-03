@@ -96,7 +96,7 @@ func (s *balanceRegionScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster
 // Schedule implements the Scheduler interface.
 func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	basePlan := plan.NewBalanceSchedulerPlan()
-	defer s.filterCounter.Flush()
+	defer s.filterCounter.Flush(cluster)
 	var collector *plan.Collector
 	if dryRun {
 		collector = plan.NewCollector(basePlan)

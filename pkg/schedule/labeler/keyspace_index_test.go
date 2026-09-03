@@ -151,6 +151,72 @@ func TestKeyspaceRuleIndexBoundaries(t *testing.T) {
 	re.Equal(expected, index.GetSplitKeys(nil, nil))
 }
 
+func TestKeyspaceRuleIndexMatchesIncompletePrefix(t *testing.T) {
+	re := require.New(t)
+	rule255 := makeKeyspaceRuleForTest(255, codec.TxnKeyspaceModePrefix)
+	rule256 := makeKeyspaceRuleForTest(256, codec.TxnKeyspaceModePrefix)
+	maxRule := makeKeyspaceRuleForTest(
+		constant.MaxValidKeyspaceID,
+		codec.RawKeyspaceModePrefix,
+		codec.TxnKeyspaceModePrefix,
+	)
+
+	var index keyspaceRuleIndex
+	for _, rule := range []*LabelRule{rule255, rule256, maxRule} {
+		re.NoError(rule.CheckAndAdjust())
+		re.True(index.Add(rule))
+	}
+
+	b256 := keyspaceBoundaryBytes(codec.TxnKeyspaceModePrefix, 256)
+	b257 := keyspaceBoundaryBytes(codec.TxnKeyspaceModePrefix, 257)
+	below256 := append([]byte(nil), b256...)
+	below256[len(below256)-1]--
+	above256Malformed := append([]byte(nil), b256...)
+	above256Malformed[4] = 1
+	above256Malformed[len(above256Malformed)-1]--
+	inside256 := codec.EncodeBytes([]byte{codec.TxnKeyspaceModePrefix, 0, 1, 0, 'a'})
+	rawFence := keyspaceBoundaryBytes(codec.RawKeyspaceModePrefix, constant.MaxValidKeyspaceID+1)
+	txnFirst := keyspaceBoundaryBytes(codec.TxnKeyspaceModePrefix, 0)
+	txnFence := keyspaceBoundaryBytes(codec.TxnKeyspaceModePrefix, constant.MaxValidKeyspaceID+1)
+
+	for _, testCase := range []struct {
+		name       string
+		start      []byte
+		end        []byte
+		want       *LabelRule
+		withinMode bool
+	}{
+		{name: "incomplete-marker-before-boundary", start: below256, end: b256, want: rule255, withinMode: true},
+		{name: "short-boundary-prefix", start: b256[:codec.KeyspacePrefixLen], end: b256, want: rule255, withinMode: true},
+		{name: "incomplete-prefix-crosses-boundary", start: below256, end: inside256},
+		{name: "malformed-marker-after-boundary", start: above256Malformed, end: b257, want: rule256, withinMode: true},
+		{name: "raw-fence-prefix", start: rawFence[:1], end: rawFence, want: maxRule, withinMode: true},
+		{name: "txn-fence-prefix", start: txnFence[:8], end: txnFence, want: maxRule, withinMode: true},
+		{name: "before-first-boundary", start: txnFirst[:codec.KeyspacePrefixLen], end: txnFirst},
+		{name: "at-fence", start: txnFence, end: []byte{'z'}},
+		{name: "unbounded-end", start: below256},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			got, withinMode := index.matchRule(testCase.start, testCase.end)
+			if testCase.want == nil {
+				re.Nil(got)
+			} else {
+				re.Same(testCase.want, got)
+			}
+			re.Equal(testCase.withinMode, withinMode)
+		})
+	}
+
+	allocs := testing.AllocsPerRun(100, func() {
+		got, withinMode := index.matchRule(below256, b256)
+		if got != rule255 || !withinMode {
+			panic("incomplete keyspace prefix did not match")
+		}
+	})
+	re.Zero(allocs)
+}
+
 func TestKeyspaceRuleIndexSparseGap(t *testing.T) {
 	re := require.New(t)
 	rule := makeKeyspaceRuleForTest(constant.MaxValidKeyspaceID, codec.TxnKeyspaceModePrefix)
@@ -336,7 +402,7 @@ func TestKeyspaceRuleIndexPreservesLegacyResults(t *testing.T) {
 	re.NoError(err)
 
 	var rules []*LabelRule
-	for _, id := range []uint32{0, 1, 63, 64, 1023, 1024, constant.MaxValidKeyspaceID} {
+	for _, id := range []uint32{0, 1, 63, 64, 255, 256, 1023, 1024, 65535, constant.MaxValidKeyspaceID} {
 		rule := makeKeyspaceRuleForTest(id, codec.RawKeyspaceModePrefix, codec.TxnKeyspaceModePrefix)
 		rules = append(rules, rule)
 		re.NoError(regionLabeler.SetLabelRule(rule))
@@ -378,6 +444,15 @@ func TestKeyspaceRuleIndexPreservesLegacyResults(t *testing.T) {
 			regions = append(regions, core.NewTestRegionInfo(2, 1, left.GetStartKey(), right.GetEndKey()))
 		}
 	}
+	b256 := keyspaceBoundaryBytes(codec.TxnKeyspaceModePrefix, 256)
+	incomplete256 := codec.EncodeBytes([]byte{codec.TxnKeyspaceModePrefix, 0, 1})
+	inside256 := codec.EncodeBytes([]byte{codec.TxnKeyspaceModePrefix, 0, 1, 0, 'a'})
+	txnFence := keyspaceBoundaryBytes(codec.TxnKeyspaceModePrefix, constant.MaxValidKeyspaceID+1)
+	regions = append(regions,
+		core.NewTestRegionInfo(3, 1, incomplete256, b256),
+		core.NewTestRegionInfo(4, 1, incomplete256, inside256),
+		core.NewTestRegionInfo(5, 1, txnFence[:1], txnFence),
+	)
 	for _, region := range regions {
 		want := getLegacyRegionLabels(legacy, region)
 		got := make(map[string]string)
