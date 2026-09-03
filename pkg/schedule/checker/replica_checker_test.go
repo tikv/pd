@@ -605,3 +605,31 @@ func (suite *replicaCheckerTestSuite) TestFixOfflinePeer() {
 	tc.SetIsolationLevel("zone")
 	re.Nil(rc.Check(region))
 }
+
+// TestRemoveExtraReplicaKeepsUnhealthySource guards against regionSource's
+// isUnhealthy condition leaking into ReplicaStrategy.SelectStoreToRemove: an
+// unhealthy voter must still be the one removed when a region has more
+// voters than max-replicas, not a healthy one. See the review discussion on
+// tikv/pd#11146.
+func (suite *replicaCheckerTestSuite) TestRemoveExtraReplicaKeepsUnhealthySource() {
+	re := suite.Require()
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(suite.ctx, opt)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+	rc := NewReplicaChecker(tc, tc.GetCheckerConfig(), cache.NewIDTTL(suite.ctx, time.Minute, 3*time.Minute))
+
+	tc.AddRegionStore(1, 1)
+	tc.AddRegionStore(2, 1)
+	tc.AddRegionStore(3, 1)
+	// Store 4 carries clearly more regions, so it's the natural pick by
+	// region score alone, independent of health.
+	tc.AddRegionStore(4, 10)
+	// Store 4 has missed heartbeats for 11 minutes (Unhealthy), but hasn't
+	// crossed max-store-down-time (Down, 30min default), so checkDownPeer
+	// won't touch it.
+	tc.SetStoreLastHeartbeatInterval(4, 11*time.Minute)
+
+	// Region has 4 voters, one more than max-replicas (3).
+	region := tc.AddLeaderRegion(1, 1, 2, 3, 4)
+	operatorutil.CheckRemovePeer(re, rc.Check(region), 4)
+}

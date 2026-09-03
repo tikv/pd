@@ -57,7 +57,39 @@ type OpStep interface {
 	fmt.Stringer
 	ConfVerChanged(region *core.RegionInfo) uint64
 	IsFinish(region *core.RegionInfo) bool
-	CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo) error
+	// CheckInProgress validates that the step is still safe to keep running.
+	// needStoreHealthCheck is an opt-in, per-operator permission (see
+	// Operator.SetStoreHealthCheck) to additionally reject a target that has
+	// gone Unhealthy mid-execution, on top of the unconditional Down check in
+	// validateStore. The caller (checkStaleOperator) already resolves *when*
+	// it's safe to ask for this: it forces the parameter to false once the
+	// current step's command has ever been dispatched (Operator.
+	// HasStepBeenDispatched), because a region heartbeat is only a snapshot
+	// of the target as of whenever it was generated -- once dispatched, TiKV
+	// may already be applying (or have applied) the conf change regardless
+	// of what the current heartbeat happens to show, and cancelling past
+	// that point can't undo it. A step implementation only has to decide
+	// *whether* it ever wants the check at all, based on whether its own
+	// conf change needs the target store to actively participate (be
+	// reachable) for raft to commit it:
+	//   - steps whose conf change is a pure role/metadata flip that the raft
+	//     group's current healthy majority can commit without the target's
+	//     participation (e.g. RemovePeer, BecomeWitness, DemoteVoter,
+	//     PromoteLearner) should ignore the parameter entirely: the change
+	//     will land whether or not the target is reachable right now, so
+	//     rejecting it provides no protection. It can also be actively
+	//     counterproductive: rejecting removal of a peer specifically
+	//     because its store is unhealthy is backwards (see #11146's
+	//     regionSource discussion), and a rejected promotion of an
+	//     already-caught-up learner is typically just silently redone by
+	//     another checker's operator that doesn't carry the flag, so the
+	//     rejection only fragments the original operator for no benefit.
+	//   - steps that need the target to actively receive something for the
+	//     step to complete (TransferLeader needs the target to actually
+	//     campaign and start serving as leader; AddPeer/AddLearner/
+	//     BecomeNonWitness need to stream a snapshot to the target) should
+	//     just pass the parameter straight through to validateStore.
+	CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo, needStoreHealthCheck bool) error
 	Influence(opInfluence *OpInfluence, region *core.RegionInfo)
 	Timeout(regionSize int64) time.Duration
 	GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *hbstream.Operation
@@ -91,7 +123,7 @@ func (tl TransferLeader) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (tl TransferLeader) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo) error {
+func (tl TransferLeader) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo, needStoreHealthCheck bool) error {
 	errList := make([]error, 0, len(tl.ToStores)+1)
 	for _, storeID := range append(tl.ToStores, tl.ToStore) {
 		peer := region.GetStorePeer(tl.ToStore)
@@ -103,7 +135,7 @@ func (tl TransferLeader) CheckInProgress(ci *core.BasicCluster, config config.Sh
 			errList = append(errList, errors.New("peer already is a learner"))
 			continue
 		}
-		if err := validateStore(ci, config, storeID); err != nil {
+		if err := validateStore(ci, config, storeID, needStoreHealthCheck); err != nil {
 			errList = append(errList, err)
 			continue
 		}
@@ -196,8 +228,8 @@ func (ap AddPeer) Influence(opInfluence *OpInfluence, region *core.RegionInfo) {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (ap AddPeer) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo) error {
-	if err := validateStore(ci, config, ap.ToStore); err != nil {
+func (ap AddPeer) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo, needStoreHealthCheck bool) error {
+	if err := validateStore(ci, config, ap.ToStore, needStoreHealthCheck); err != nil {
 		return err
 	}
 	peer := region.GetStorePeer(ap.ToStore)
@@ -250,8 +282,10 @@ func (bw BecomeWitness) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (bw BecomeWitness) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo) error {
-	if err := validateStore(ci, config, bw.StoreID); err != nil {
+func (bw BecomeWitness) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo, _ bool) error {
+	// BecomeWitness sheds data off the store rather than adding to it, so unlike
+	// AddPeer/AddLearner/BecomeNonWitness it never needs the extra health check.
+	if err := validateStore(ci, config, bw.StoreID, false); err != nil {
 		return err
 	}
 	peer := region.GetStorePeer(bw.StoreID)
@@ -312,8 +346,8 @@ func (bn BecomeNonWitness) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (bn BecomeNonWitness) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo) error {
-	if err := validateStore(ci, config, bn.StoreID); err != nil {
+func (bn BecomeNonWitness) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo, needStoreHealthCheck bool) error {
+	if err := validateStore(ci, config, bn.StoreID, needStoreHealthCheck); err != nil {
 		return err
 	}
 	peer := region.GetStorePeer(bn.StoreID)
@@ -398,14 +432,14 @@ func (bsw BatchSwitchWitness) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (bsw BatchSwitchWitness) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo) error {
+func (bsw BatchSwitchWitness) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo, needStoreHealthCheck bool) error {
 	for _, w := range bsw.ToWitnesses {
-		if err := w.CheckInProgress(ci, config, region); err != nil {
+		if err := w.CheckInProgress(ci, config, region, needStoreHealthCheck); err != nil {
 			return err
 		}
 	}
 	for _, nw := range bsw.ToNonWitnesses {
-		if err := nw.CheckInProgress(ci, config, region); err != nil {
+		if err := nw.CheckInProgress(ci, config, region, needStoreHealthCheck); err != nil {
 			return err
 		}
 	}
@@ -481,8 +515,8 @@ func (al AddLearner) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (al AddLearner) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo) error {
-	if err := validateStore(ci, config, al.ToStore); err != nil {
+func (al AddLearner) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo, needStoreHealthCheck bool) error {
+	if err := validateStore(ci, config, al.ToStore, needStoreHealthCheck); err != nil {
 		return err
 	}
 	peer := region.GetStorePeer(al.ToStore)
@@ -567,7 +601,7 @@ func (pl PromoteLearner) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (pl PromoteLearner) CheckInProgress(_ *core.BasicCluster, _ config.SharedConfigProvider, region *core.RegionInfo) error {
+func (pl PromoteLearner) CheckInProgress(_ *core.BasicCluster, _ config.SharedConfigProvider, region *core.RegionInfo, _ bool) error {
 	peer := region.GetStorePeer(pl.ToStore)
 	if peer.GetId() != pl.PeerID {
 		return errors.New("peer does not exist")
@@ -619,7 +653,7 @@ func (rp RemovePeer) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (rp RemovePeer) CheckInProgress(_ *core.BasicCluster, _ config.SharedConfigProvider, region *core.RegionInfo) error {
+func (rp RemovePeer) CheckInProgress(_ *core.BasicCluster, _ config.SharedConfigProvider, region *core.RegionInfo, _ bool) error {
 	if rp.FromStore == region.GetLeader().GetStoreId() {
 		return errors.New("cannot remove leader peer")
 	}
@@ -693,7 +727,7 @@ func (mr MergeRegion) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (MergeRegion) CheckInProgress(*core.BasicCluster, config.SharedConfigProvider, *core.RegionInfo) error {
+func (MergeRegion) CheckInProgress(*core.BasicCluster, config.SharedConfigProvider, *core.RegionInfo, bool) error {
 	return nil
 }
 
@@ -761,7 +795,7 @@ func (SplitRegion) Influence(opInfluence *OpInfluence, region *core.RegionInfo) 
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (SplitRegion) CheckInProgress(*core.BasicCluster, config.SharedConfigProvider, *core.RegionInfo) error {
+func (SplitRegion) CheckInProgress(*core.BasicCluster, config.SharedConfigProvider, *core.RegionInfo, bool) error {
 	return nil
 }
 
@@ -886,7 +920,7 @@ func (cpe ChangePeerV2Enter) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (cpe ChangePeerV2Enter) CheckInProgress(_ *core.BasicCluster, _ config.SharedConfigProvider, region *core.RegionInfo) error {
+func (cpe ChangePeerV2Enter) CheckInProgress(_ *core.BasicCluster, _ config.SharedConfigProvider, region *core.RegionInfo, _ bool) error {
 	inJointState, notInJointState := false, false
 	for _, pl := range cpe.PromoteLearners {
 		peer := region.GetStorePeer(pl.ToStore)
@@ -1015,7 +1049,7 @@ func (cpl ChangePeerV2Leave) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (cpl ChangePeerV2Leave) CheckInProgress(_ *core.BasicCluster, _ config.SharedConfigProvider, region *core.RegionInfo) error {
+func (cpl ChangePeerV2Leave) CheckInProgress(_ *core.BasicCluster, _ config.SharedConfigProvider, region *core.RegionInfo, _ bool) error {
 	inJointState, notInJointState, demoteLeader := false, false, false
 	leaderStoreID := region.GetLeader().GetStoreId()
 
@@ -1093,10 +1127,13 @@ func (ChangePeerV2Leave) GetCmd(_ *core.RegionInfo, useConfChangeV2 bool) *hbstr
 	}
 }
 
-func validateStore(ci *core.BasicCluster, config config.SharedConfigProvider, id uint64) error {
+func validateStore(ci *core.BasicCluster, config config.SharedConfigProvider, id uint64, needStoreHealthCheck bool) error {
 	store := ci.GetStore(id)
 	if store == nil {
 		return errors.New("target store does not exist")
+	}
+	if needStoreHealthCheck && store.IsUnhealthy() {
+		return errors.New("target store is unhealthy")
 	}
 	if store.DownTime() > config.GetMaxStoreDownTime() {
 		return errors.New("target store is down")

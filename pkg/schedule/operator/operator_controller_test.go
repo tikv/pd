@@ -220,9 +220,99 @@ func (suite *operatorControllerTestSuite) TestFastFailWithUnhealthyStore() {
 	steps := []OpStep{TransferLeader{ToStore: 2}}
 	op := NewTestOperator(1, region.GetRegionEpoch(), OpLeader, steps...)
 	oc.SetOperator(op)
-	re.False(oc.checkStaleOperator(op, steps[0], region))
+	re.False(oc.checkStaleOperator(op, steps[0], region, op.CurrentStepIndex()))
 	tc.SetStoreDown(2)
-	re.True(oc.checkStaleOperator(op, steps[0], region))
+	re.True(oc.checkStaleOperator(op, steps[0], region, op.CurrentStepIndex()))
+}
+
+// TestOperatorControllerStopsHealthCheckAfterDispatch guards against the
+// heartbeat-lag race raised in review on tikv/pd#11146: a region heartbeat
+// is only a snapshot of the target as of whenever it was generated, so
+// "the current heartbeat doesn't show the peer yet" is not proof that
+// AddLearner's command was never sent -- it may already be landing on TiKV
+// regardless of what this particular heartbeat happens to report. Once a
+// step's command has been dispatched once, checkStaleOperator must stop
+// using needStoreHealthCheck to cancel it, even if a later heartbeat still
+// shows a stale, peer-less snapshot.
+func (suite *operatorControllerTestSuite) TestOperatorControllerStopsHealthCheckAfterDispatch() {
+	re := suite.Require()
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(suite.ctx, opt)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc, false /* no need to run */)
+	oc := NewController(suite.ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
+	tc.AddLeaderStore(1, 1)
+	tc.AddLeaderStore(2, 1)
+	tc.AddLeaderStore(3, 1)
+	tc.AddLeaderStore(4, 0)
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	region := tc.GetRegion(1)
+
+	op := NewTestOperator(1, region.GetRegionEpoch(), OpRegion, AddLearner{ToStore: 4, PeerID: 4})
+	op.SetStoreHealthCheck(true)
+	re.True(op.Start())
+	oc.SetOperator(op)
+
+	// First heartbeat: store 4 is healthy and the peer doesn't exist yet.
+	// The operator survives, and its only step gets marked dispatched.
+	oc.Dispatch(region, DispatchFromHeartBeat, nil)
+	re.Equal(pdpb.OperatorStatus_RUNNING, oc.GetOperatorStatus(1).Status)
+	re.True(op.HasStepBeenDispatched(op.CurrentStepIndex()))
+
+	// Store 4 goes unhealthy, but the region snapshot PD holds is unchanged
+	// (still shows no peer on store 4) -- exactly what a lagging next
+	// heartbeat would look like. Because the step was already dispatched,
+	// this must NOT cancel the operator.
+	tc.SetStoreLastHeartbeatInterval(4, 11*time.Minute)
+	oc.Dispatch(region, DispatchFromHeartBeat, nil)
+	re.Equal(pdpb.OperatorStatus_RUNNING, oc.GetOperatorStatus(1).Status)
+	re.NotNil(oc.GetOperator(1))
+
+	// Contrast: a fresh operator whose step has never been dispatched still
+	// gets rejected on its first look, since nothing has been sent for it
+	// yet and cancelling is genuinely safe.
+	re.True(oc.RemoveOperator(op))
+	op2 := NewTestOperator(1, region.GetRegionEpoch(), OpRegion, AddLearner{ToStore: 4, PeerID: 4})
+	op2.SetStoreHealthCheck(true)
+	re.True(op2.Start())
+	oc.SetOperator(op2)
+	oc.Dispatch(region, DispatchFromHeartBeat, nil)
+	re.Equal(CANCELED, op2.Status())
+}
+
+// TestOperatorControllerMarksStepDispatchedOnCreate guards against a gap
+// raised in review on tikv/pd#11146: AddOperator's own first dispatch
+// (addOperatorInner, DispatchFromCreate) sends the step's command
+// immediately at creation time, without waiting for a heartbeat-driven
+// Dispatch() call. That first send must also be recorded via
+// MarkStepDispatched, or checkStaleOperator wrongly treats the step as
+// never-dispatched and cancels the operator the moment the target goes
+// unhealthy before the next heartbeat arrives.
+func (suite *operatorControllerTestSuite) TestOperatorControllerMarksStepDispatchedOnCreate() {
+	re := suite.Require()
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(suite.ctx, opt)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc, false /* no need to run */)
+	oc := NewController(suite.ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
+	tc.AddLeaderStore(1, 1)
+	tc.AddLeaderStore(2, 1)
+	tc.AddLeaderStore(3, 1)
+	tc.AddLeaderStore(4, 0)
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	region := tc.GetRegion(1)
+
+	op := NewTestOperator(1, region.GetRegionEpoch(), OpRegion, AddLearner{ToStore: 4, PeerID: 4})
+	op.SetStoreHealthCheck(true)
+	re.True(oc.AddOperator(op))
+	// AddOperator's own creation-time dispatch must already have marked the
+	// step, before any Dispatch() call runs.
+	re.True(op.HasStepBeenDispatched(op.CurrentStepIndex()))
+
+	// Store 4 goes unhealthy before the next heartbeat. Since the step's
+	// command was already sent at creation time, this must not cancel the
+	// operator.
+	tc.SetStoreLastHeartbeatInterval(4, 11*time.Minute)
+	oc.Dispatch(region, DispatchFromHeartBeat, nil)
+	re.Equal(pdpb.OperatorStatus_RUNNING, oc.GetOperatorStatus(1).Status)
 }
 
 func (suite *operatorControllerTestSuite) TestCheckAddUnexpectedStatus() {

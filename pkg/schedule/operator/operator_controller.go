@@ -158,12 +158,20 @@ func (oc *Controller) Dispatch(region *core.RegionInfo, source string, recordOpS
 		// The operator status should be STARTED.
 		// Check will call CheckSuccess and CheckTimeout.
 		step := op.Check(region)
+		currentStep := op.CurrentStepIndex()
 		switch op.Status() {
 		case STARTED:
 			operatorCounter.WithLabelValues(op.Desc(), "check").Inc()
-			if source == DispatchFromHeartBeat && oc.checkStaleOperator(op, step, region) {
+			if source == DispatchFromHeartBeat && oc.checkStaleOperator(op, step, region, currentStep) {
 				return
 			}
+			// Unconditional: SetStoreHealthCheck is documented as callable
+			// at any time after the operator is created, not just before
+			// its first dispatch, so this can't be gated on
+			// NeedStoreHealthCheck() without risking a step that was
+			// already dispatched while the flag was off being treated as
+			// "never dispatched" once the flag later turns on.
+			op.MarkStepDispatched(currentStep)
 			oc.SendScheduleCommand(region, step, source)
 		case SUCCESS:
 			if op.ContainNonWitnessStep() {
@@ -207,8 +215,15 @@ func (oc *Controller) Dispatch(region *core.RegionInfo, source string, recordOpS
 	}
 }
 
-func (oc *Controller) checkStaleOperator(op *Operator, step OpStep, region *core.RegionInfo) bool {
-	err := step.CheckInProgress(oc.cluster, oc.config, region)
+func (oc *Controller) checkStaleOperator(op *Operator, step OpStep, region *core.RegionInfo, currentStep int32) bool {
+	// Only ask the step to reject an Unhealthy target before its own command
+	// has ever been dispatched. A region heartbeat is just a snapshot as of
+	// whenever it was generated; once dispatched, TiKV may already be
+	// applying (or have applied) the conf change regardless of what the
+	// current heartbeat happens to show, so cancelling past that point can't
+	// undo it and would only orphan the target's peer.
+	needStoreHealthCheck := op.NeedStoreHealthCheck() && !op.HasStepBeenDispatched(currentStep)
+	err := step.CheckInProgress(oc.cluster, oc.config, region, needStoreHealthCheck)
 	if err != nil {
 		log.Info("operator is stale", zap.Uint64("region-id", op.RegionID()), errs.ZapError(err))
 		if oc.RemoveOperator(op, StaleStatus) {
@@ -604,6 +619,12 @@ func (oc *Controller) addOperatorInner(op *Operator) bool {
 	var step OpStep
 	if region := oc.cluster.GetRegion(op.RegionID()); region != nil {
 		if step = op.Check(region); step != nil {
+			// This is the operator's very first dispatch, before any
+			// heartbeat-driven Dispatch() call has a chance to run. Mark it
+			// the same way Dispatch() does, so checkStaleOperator's
+			// HasStepBeenDispatched check isn't blind to a command that was
+			// already sent here.
+			op.MarkStepDispatched(op.CurrentStepIndex())
 			oc.SendScheduleCommand(region, step, DispatchFromCreate)
 		}
 	}
