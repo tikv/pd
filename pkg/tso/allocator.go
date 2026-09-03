@@ -220,6 +220,15 @@ func (a *Allocator) primaryElectionLoop() {
 	defer logutil.LogPanic()
 	defer a.wg.Done()
 
+	// Tracks consecutive GetExpectedPrimaryFlag read failures across loop iterations,
+	// so a short run of failures retries the cheap read instead of immediately
+	// escalating to a full guarded campaign - see the read-failure branch below. This
+	// matters most here: a node runs one of these loops per TSO keyspace group (up to
+	// constant.MaxKeyspaceGroupCountInUse of them), so escalating on every failed read
+	// can turn a real etcd degradation into a fleet-wide write storm against the same
+	// already-struggling etcd.
+	readFailureStreak := 0
+
 	for {
 		select {
 		case <-a.ctx.Done():
@@ -246,16 +255,29 @@ func (a *Allocator) primaryElectionLoop() {
 			ServiceName: constant.TSOServiceName,
 			GroupID:     a.keyspaceGroupID,
 		})
-		readFailed := err != nil
-		if readFailed {
+		if err != nil {
+			readFailureStreak++
+			if readFailureStreak < constant.MinConsecutiveReadFailuresForCampaign {
+				// A short run of read failures is usually a transient blip; keep
+				// retrying the cheap read instead of immediately escalating to a full
+				// guarded campaign (lease grant + txn commit, heavier than the read
+				// that just failed).
+				log.Warn("failed to get expected primary flag, retrying the read before campaigning",
+					append(a.logFields, zap.Int("consecutive-failures", readFailureStreak), errs.ZapError(err))...)
+				time.Sleep(mcsutils.ReadFailureBackoff(readFailureStreak))
+				continue
+			}
 			// ExpectedPrimaryCmp("") still atomically requires the marker to be
 			// absent at commit time, so campaigning with an empty flag here cannot
 			// let this member win over a real transfer target - it can only fail
-			// closed if a marker actually exists. Skipping campaigning on every read
-			// failure would otherwise leave the service leaderless for as long as
-			// the reads keep failing, even when no transfer is in progress.
-			log.Warn("failed to get expected primary flag, campaign without affinity guard", append(a.logFields, errs.ZapError(err))...)
+			// closed if a marker actually exists. Skipping campaigning forever would
+			// otherwise leave the service leaderless for as long as the reads keep
+			// failing, even when no transfer is in progress.
+			log.Warn("expected primary flag read kept failing, campaign without affinity guard",
+				append(a.logFields, zap.Int("consecutive-failures", readFailureStreak), errs.ZapError(err))...)
 			expectedPrimary = ""
+		} else {
+			readFailureStreak = 0
 		}
 		// skip campaign the primary if the expected primary is not empty and not this member.
 		// expected primary ONLY SET BY `{service}/primary/transfer` API.
@@ -268,13 +290,13 @@ func (a *Allocator) primaryElectionLoop() {
 		}
 
 		a.campaignPrimary(expectedPrimary)
-		if readFailed {
+		if readFailureStreak >= constant.MinConsecutiveReadFailuresForCampaign {
 			// The read failure usually means etcd itself is degraded, and
 			// campaigning (lease grant + txn commit) is heavier than the read that
-			// just failed - keep the same backoff the old skip-and-retry path used
-			// so a run of failing reads cannot turn into a tight retry loop against
-			// an already struggling etcd.
-			time.Sleep(200 * time.Millisecond)
+			// just failed - back off with growing delay so a sustained run of
+			// failures does not turn into a tight, fixed-rate retry loop against an
+			// already struggling etcd.
+			time.Sleep(mcsutils.ReadFailureBackoff(readFailureStreak))
 		}
 	}
 }
@@ -311,10 +333,11 @@ func (a *Allocator) campaignPrimary(expectedPrimary string) {
 	//   2. load region could be slow. Based on lease we can recover TSO service faster.
 	ctx, cancel := context.WithCancel(a.ctx)
 	var resetPrimaryOnce sync.Once
-	defer resetPrimaryOnce.Do(func() {
+	resetPrimary := func() {
 		cancel()
 		a.member.Resign()
-	})
+	}
+	defer resetPrimaryOnce.Do(resetPrimary)
 
 	// maintain the leadership, after this, TSO can be service.
 	a.member.GetLeadership().Keep(ctx)
@@ -327,6 +350,14 @@ func (a *Allocator) campaignPrimary(expectedPrimary string) {
 	// the re-election routes leadership to that target.
 	if mcsutils.DeleteExpectedPrimaryFlag(a.member.Client(), msParam, expectedPrimary, m) {
 		log.Info("the expected primary has been changed to another member, stepping down", a.logFields...)
+		// Release the leader key now, before the backoff sleep, instead of leaving it to
+		// the deferred reset above: that defer only runs once this function actually
+		// returns, so without this the keepalive goroutine started by Keep(ctx) would
+		// keep renewing the leader key for the whole sleep, needlessly delaying the
+		// actual target's takeover. resetPrimaryOnce makes the deferred call below (and
+		// the later one guarding PromoteSelf, which this return never reaches) a no-op
+		// once this has run.
+		resetPrimaryOnce.Do(resetPrimary)
 		time.Sleep(200 * time.Millisecond)
 		return
 	}

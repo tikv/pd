@@ -17,6 +17,7 @@ package utils
 import (
 	"context"
 	"math/rand/v2"
+	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -47,6 +48,29 @@ func GetExpectedPrimaryFlag(client *clientv3.Client, msParam *keypath.MsParam) (
 	}
 
 	return string(primary), nil
+}
+
+// ReadFailureBackoff returns how long an election loop should sleep after the nth
+// (1-indexed) consecutive GetExpectedPrimaryFlag read failure. It doubles from
+// constant.InitialReadFailureBackoff and caps at constant.MaxReadFailureBackoff, so a
+// sustained run of failures backs off instead of retrying at a fixed rate against an
+// etcd that is already struggling. consecutiveFailures <= 1 returns the initial value.
+func ReadFailureBackoff(consecutiveFailures int) time.Duration {
+	shift := consecutiveFailures - 1
+	if shift < 0 {
+		shift = 0
+	}
+	// Cap the shift itself (not just the result) so the left shift below never
+	// overflows for a pathologically large streak.
+	const maxShift = 5 // constant.InitialReadFailureBackoff << 5 == constant.MaxReadFailureBackoff
+	if shift > maxShift {
+		shift = maxShift
+	}
+	backoff := constant.InitialReadFailureBackoff << shift
+	if backoff > constant.MaxReadFailureBackoff {
+		return constant.MaxReadFailureBackoff
+	}
+	return backoff
 }
 
 // primaryData is used to store the primary data.
@@ -194,6 +218,39 @@ func ExpectedPrimaryCmp(msParam *keypath.MsParam, expectedValue string) clientv3
 	return clientv3.Compare(clientv3.Value(path), "=", expectedValue)
 }
 
+// verifyLeaderKeyCleared checks whether the old leader key actually cleared after
+// Resign(). Resign() revokes the leader key's lease but is best-effort and swallows
+// its own error internally (see Leadership.Reset), so this is the only way the caller
+// can tell whether that revoke actually happened.
+//
+// The check compares CreateRevision, not mere presence: a leader key present with a
+// CreateRevision different from oldRevision means a fresh campaign already won it -
+// which can only be the transfer target, since the still-valid marker's
+// ExpectedPrimaryCmp guard makes any other candidate's campaign transaction fail
+// atomically alongside the very same CreateRevision(leaderKey)==0 check (see
+// ExpectedPrimaryCmp and Leadership.Campaign) - so that case is success, not failure.
+// Only a leader key present with the same CreateRevision means the revoke genuinely
+// failed and the old key is still there.
+//
+// This matters because the marker's own TTL clock starts at the lease Grant, before
+// Resign() even runs, while the old leader key - if its revoke fails - only starts
+// decaying towards its own natural expiry once Resign() cancels its keepalive; that
+// decay can take up to a full leader lease. A slow or failed revoke could therefore
+// let the marker expire before the old leader key does, silently losing the transfer's
+// affinity guarantee even though the caller already reported success.
+func verifyLeaderKeyCleared(client *clientv3.Client, leaderKeyPath string, oldRevision int64) error {
+	ctx, cancel := context.WithTimeout(client.Ctx(), etcdutil.DefaultRequestTimeout)
+	resp, err := client.Get(ctx, leaderKeyPath)
+	cancel()
+	if err != nil {
+		return errors.Annotate(err, "failed to verify the old leader key cleared after resign")
+	}
+	if len(resp.Kvs) > 0 && resp.Kvs[0].CreateRevision == oldRevision {
+		return errors.New("the old leader key did not clear after resign, etcd may be degraded; please retry the transfer")
+	}
+	return nil
+}
+
 // TransferPrimary transfers the primary of the specified service to a target member.
 //
 // It writes the expected primary flag pointing at the target (with a TTL of
@@ -296,7 +353,15 @@ func TransferPrimary(client *clientv3.Client, p *member.Participant, serviceName
 		leaderLease = constant.DefaultLease
 	}
 	expectedLease := constant.TransferPrimaryLeaseMultiplier * leaderLease
-	grantResp, err := client.Grant(client.Ctx(), expectedLease)
+	// Bound the grant: client.Ctx() is the shared etcd client's lifetime context, with
+	// no deadline of its own and not tied to this call. A hung Grant on an unbounded
+	// context would block for the client's whole lifetime instead of just failing this
+	// transfer - and since some callers (e.g. TSO's primaryPriorityCheckLoop) invoke
+	// TransferPrimary synchronously and are themselves waited on during shutdown, that
+	// hang can prevent the server from ever closing its etcd client.
+	grantCtx, grantCancel := context.WithTimeout(client.Ctx(), etcdutil.DefaultRequestTimeout)
+	grantResp, err := client.Grant(grantCtx, expectedLease)
+	grantCancel()
 	if err != nil {
 		return errors.Errorf("failed to grant lease for expected primary, err: %v", err)
 	}
@@ -327,6 +392,13 @@ func TransferPrimary(client *clientv3.Client, p *member.Participant, serviceName
 	// IsServing() flip to false immediately, so the primary election loop steps down
 	// and re-campaigns, where the affinity guard routes the leadership to the target.
 	p.Resign()
+
+	// Confirm the resign actually cleared the old leader key rather than trusting it
+	// silently - see verifyLeaderKeyCleared's doc comment for why this check exists and
+	// what it distinguishes.
+	if err := verifyLeaderKeyCleared(client, leaderKeyPath, leaderResp.Kvs[0].CreateRevision); err != nil {
+		return err
+	}
 
 	// Report success here without waiting for primaryID to actually win the campaign
 	// or finish initializing. This means the worst-case unavailability window this

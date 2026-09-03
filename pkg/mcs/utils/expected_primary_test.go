@@ -355,9 +355,72 @@ func TestMarkExpectedPrimaryFlagGuardFencesElectionTerm(t *testing.T) {
 	re.Len(getResp.Kvs, 1)
 }
 
+// TestVerifyLeaderKeyClearedDistinguishesFailureFromSupersede exercises the decision
+// table verifyLeaderKeyCleared uses after Resign(): the old leader key genuinely gone
+// (revoke succeeded), the old leader key rewritten with a fresh CreateRevision (a
+// competing campaign already won it), and the old leader key unchanged (the revoke
+// failed and the old key is still there).
+func TestVerifyLeaderKeyClearedDistinguishesFailureFromSupersede(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+
+	ctx := context.Background()
+	const leaderKeyPath = "/pd/test-transfer-primary/leader"
+
+	// No key at all (never existed) must never be mistaken for a failure to clear.
+	re.NoError(verifyLeaderKeyCleared(client, leaderKeyPath, 0))
+
+	// Install the "old" leader key and capture its CreateRevision, mirroring the
+	// revision TransferPrimary captures before Resign().
+	_, err := client.Put(ctx, leaderKeyPath, "old-primary")
+	re.NoError(err)
+	oldResp, err := client.Get(ctx, leaderKeyPath)
+	re.NoError(err)
+	re.Len(oldResp.Kvs, 1)
+	oldRevision := oldResp.Kvs[0].CreateRevision
+
+	// The revoke failed and the old key is untouched: must be reported as a failure.
+	re.Error(verifyLeaderKeyCleared(client, leaderKeyPath, oldRevision))
+
+	// The revoke succeeded and the key is now gone: success.
+	_, err = client.Delete(ctx, leaderKeyPath)
+	re.NoError(err)
+	re.NoError(verifyLeaderKeyCleared(client, leaderKeyPath, oldRevision))
+
+	// A fresh campaign already won and rewrote the key (necessarily the transfer
+	// target, since the still-valid marker guard blocks any other candidate's
+	// campaign transaction atomically alongside this same CreateRevision check - see
+	// ExpectedPrimaryCmp) - a different CreateRevision must be treated as success, not
+	// a failure to clear.
+	_, err = client.Put(ctx, leaderKeyPath, "new-primary")
+	re.NoError(err)
+	newResp, err := client.Get(ctx, leaderKeyPath)
+	re.NoError(err)
+	re.NotEqual(oldRevision, newResp.Kvs[0].CreateRevision)
+	re.NoError(verifyLeaderKeyCleared(client, leaderKeyPath, oldRevision))
+}
+
 // TestIsSamePrimary covers the matching used by TransferPrimary to skip a
 // self-transfer (#10970): a member matches by either its name or its service
 // address, and an empty target never matches.
+func TestReadFailureBackoff(t *testing.T) {
+	re := require.New(t)
+	// Non-positive streaks are treated like the first failure.
+	re.Equal(constant.InitialReadFailureBackoff, ReadFailureBackoff(0))
+	re.Equal(constant.InitialReadFailureBackoff, ReadFailureBackoff(-1))
+	re.Equal(constant.InitialReadFailureBackoff, ReadFailureBackoff(1))
+	// Doubles with each additional consecutive failure.
+	re.Equal(2*constant.InitialReadFailureBackoff, ReadFailureBackoff(2))
+	re.Equal(4*constant.InitialReadFailureBackoff, ReadFailureBackoff(3))
+	re.Equal(8*constant.InitialReadFailureBackoff, ReadFailureBackoff(4))
+	// Caps at the max instead of continuing to grow or overflowing, including for a
+	// pathologically large streak.
+	re.Equal(constant.MaxReadFailureBackoff, ReadFailureBackoff(6))
+	re.Equal(constant.MaxReadFailureBackoff, ReadFailureBackoff(7))
+	re.Equal(constant.MaxReadFailureBackoff, ReadFailureBackoff(1<<30))
+}
+
 func TestIsSamePrimary(t *testing.T) {
 	re := require.New(t)
 	entry := discovery.ServiceRegistryEntry{Name: "tso-1", ServiceAddr: "http://127.0.0.1:2379"}

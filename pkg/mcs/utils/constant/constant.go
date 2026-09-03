@@ -53,6 +53,23 @@ const (
 	// being unreachable everywhere else (losing its own leader lease), so there is no
 	// reason for a transfer-induced outage to be allowed to run longer than that.
 	TransferPrimaryLeaseMultiplier = int64(1)
+	// MinConsecutiveReadFailuresForCampaign is how many expected-primary-flag reads
+	// must fail in a row before an election loop falls back to campaigning without
+	// having read the marker. A short run of failures is usually a transient blip;
+	// requiring several in a row avoids escalating every glitch into a full guarded
+	// campaign (a lease grant plus a txn commit, heavier than the read that just
+	// failed) - this matters most where a node runs many independent election loops
+	// (one per TSO keyspace group, up to MaxKeyspaceGroupCountInUse of them), where
+	// escalating on every failed read can turn a real etcd degradation into a
+	// fleet-wide write storm against the same already-struggling etcd.
+	MinConsecutiveReadFailuresForCampaign = 3
+	// InitialReadFailureBackoff and MaxReadFailureBackoff bound the backoff an
+	// election loop sleeps after a run of expected-primary-flag read failures: it
+	// doubles from the initial value and caps at the max, so a sustained run of
+	// failures backs off instead of retrying at a fixed rate against an etcd that is
+	// already struggling.
+	InitialReadFailureBackoff = 200 * time.Millisecond
+	MaxReadFailureBackoff     = 6400 * time.Millisecond
 	// PrimaryTickInterval is the interval to check primary
 	PrimaryTickInterval = 50 * time.Millisecond
 	// LeaderTickInterval is the interval to check leader
