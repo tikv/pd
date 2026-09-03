@@ -483,7 +483,7 @@ trying to update GC safe point to a too large value that exceeds the txn safe po
 
 ["PD:gc:ErrGCStateWatcherSlowConsumer"]
 error = '''
-GC state watcher is too slow
+gc state watcher is too slow
 '''
 
 ["PD:gc:ErrGlobalGCBarrierTSBehindTxnSafePoint"]
