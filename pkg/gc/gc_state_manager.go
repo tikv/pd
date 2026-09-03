@@ -211,6 +211,9 @@ type GCStateManager struct {
 	activeGeneration atomic.Pointer[gcStateGeneration]
 	generation       *gcStateGeneration
 	etcdClient       *clientv3.Client
+
+	watchers      map[uint64]*GCStateWatcher
+	nextWatcherID uint64
 }
 
 // NewGCStateManager creates a GCStateManager of GC and services.
@@ -220,6 +223,7 @@ func NewGCStateManager(store endpoint.GCStateProvider, cfg config.PDServerConfig
 		cfg:                              cfg,
 		keyspaceManager:                  keyspaceManager,
 		gcStateCache:                     newGCStateCache(),
+		watchers:                         make(map[uint64]*GCStateWatcher),
 		allKeyspacesGCStatesSingleFlight: syncutil.NewOrderedSingleFlight[map[uint32]GCState](),
 		allKeyspacesGCStatesExcludeGCBarriersSingleFlight: syncutil.NewOrderedSingleFlight[map[uint32]GCState](),
 	}
