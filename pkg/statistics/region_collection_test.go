@@ -16,6 +16,7 @@ package statistics
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -40,11 +41,16 @@ func TestRegionStatsObserveIAKVSize(t *testing.T) {
 
 	stats := GetRegionStats([]*core.RegionInfo{region}, nil)
 	re.Equal(int64(100), stats.UserStorageSize)
-	re.Equal(int64(40), stats.GetUserIAStorageSize())
+	re.Equal(int64(40), stats.UserIAStorageSize)
+	data, err := json.Marshal(stats)
+	re.NoError(err)
+	var response map[string]any
+	re.NoError(json.Unmarshal(data, &response))
+	re.Equal(float64(40), response["user_ia_storage_size"])
 
 	region = region.Clone(core.SetApproximateIAKvSize(120))
 	stats = GetRegionStats([]*core.RegionInfo{region}, nil)
-	re.Equal(int64(100), stats.GetUserIAStorageSize())
+	re.Equal(int64(100), stats.UserIAStorageSize)
 }
 
 func TestRegionStatistics(t *testing.T) {

@@ -27,6 +27,7 @@ type RegionStats struct {
 	EmptyCount              int               `json:"empty_count"`
 	StorageSize             int64             `json:"storage_size"`
 	UserStorageSize         int64             `json:"user_storage_size"`
+	UserIAStorageSize       int64             `json:"user_ia_storage_size"`
 	UserColumnarStorageSize int64             `json:"user_columnar_storage_size"`
 	StorageKeys             int64             `json:"storage_keys"`
 	StoreLeaderCount        map[uint64]int    `json:"store_leader_count"`
@@ -45,13 +46,6 @@ type RegionStats struct {
 	StorePeerReadKeys       map[uint64]uint64 `json:"store_peer_read_keys,omitempty"`
 	StorePeerReadQuery      map[uint64]uint64 `json:"store_peer_read_query,omitempty"`
 	StoreEngine             map[uint64]string `json:"store_engine,omitempty"`
-	// userIAStorageSize is only used by storage metering and is not exposed by the region stats API.
-	userIAStorageSize int64
-}
-
-// GetUserIAStorageSize returns the IA subset of the user row-based storage size.
-func (s *RegionStats) GetUserIAStorageSize() int64 {
-	return s.userIAStorageSize
 }
 
 // GetRegionStatsOption is used to filter the peer statistics.
@@ -109,7 +103,7 @@ func (s *RegionStats) Observe(r *core.RegionInfo, cluster RegionStatInformer, op
 	}
 	s.StorageSize += approximateSize
 	s.UserStorageSize += approximateKvSize
-	s.userIAStorageSize += approximateIAKvSize
+	s.UserIAStorageSize += approximateIAKvSize
 	s.UserColumnarStorageSize += approximateColumnarKvSize
 	s.StorageKeys += approximateKeys
 	leader := r.GetLeader()
