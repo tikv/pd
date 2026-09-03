@@ -293,7 +293,7 @@ func (s *gcStateManagerTestSuite) TestGCStateWatchLeadershipGeneration() {
 
 func (s *gcStateManagerTestSuite) TestGCStateWatchLoadsInitialStatesIncrementally() {
 	re := s.Require()
-	w, err := s.manager.watchGCStates(context.Background(), false, gcStateWatchConfig{
+	w, err := s.manager.registerGCStateWatcher(context.Background(), false, gcStateWatchConfig{
 		initialBatchSize:    2,
 		initChannelCapacity: 1,
 		liveChannelCapacity: 1,
@@ -353,7 +353,7 @@ func (s *gcStateManagerTestSuite) TestGCStateWatchLiveSuppressesPausedInitial() 
 	defer func() { re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/gc/watchGCStatesInitialStateLoaded")) }()
 	defer releaseLoader()
 
-	w, err := s.manager.watchGCStates(context.Background(), false, gcStateWatchConfig{initialBatchSize: 1, initChannelCapacity: 16, liveChannelCapacity: 4})
+	w, err := s.manager.registerGCStateWatcher(context.Background(), false, gcStateWatchConfig{initialBatchSize: 1, initChannelCapacity: 16, liveChannelCapacity: 4})
 	re.NoError(err)
 	defer w.Close()
 	select {
@@ -408,7 +408,7 @@ func (s *gcStateManagerTestSuite) TestGCStateWatchInitialFailureTerminatesWatche
 func (s *gcStateManagerTestSuite) TestGCStateWatchFullInitChannelDoesNotHoldManagerMutex() {
 	re := s.Require()
 	stop := s.manager.OnNodeBecomesLeader()
-	w, err := s.manager.watchGCStates(context.Background(), false, gcStateWatchConfig{
+	w, err := s.manager.registerGCStateWatcher(context.Background(), false, gcStateWatchConfig{
 		initialBatchSize:    1,
 		initChannelCapacity: 1,
 		liveChannelCapacity: 1,

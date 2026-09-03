@@ -19,7 +19,6 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -80,9 +79,23 @@ func TestGCStateChangeToProto(t *testing.T) {
 				return
 			}
 			require.NoError(t, err)
-			require.True(t, proto.Equal(testCase.want, got), "expected %s, got %s", testCase.want, got)
-			if got.GetUpsert() != nil {
-				require.Empty(t, got.GetUpsert().GetGcBarriers())
+			switch want := testCase.want.GetChange().(type) {
+			case *pdpb.GCStateChange_Upsert:
+				upsert := got.GetUpsert()
+				require.NotNil(t, upsert)
+				require.Equal(t, want.Upsert.GetKeyspaceScope().GetKeyspaceId(), upsert.GetKeyspaceScope().GetKeyspaceId())
+				require.Equal(t, want.Upsert.GetIsKeyspaceLevelGc(), upsert.GetIsKeyspaceLevelGc())
+				require.Equal(t, want.Upsert.GetTxnSafePoint(), upsert.GetTxnSafePoint())
+				require.Equal(t, want.Upsert.GetGcSafePoint(), upsert.GetGcSafePoint())
+				require.Empty(t, upsert.GetGcBarriers())
+				require.Nil(t, got.GetRemoved())
+			case *pdpb.GCStateChange_Removed:
+				removed := got.GetRemoved()
+				require.NotNil(t, removed)
+				require.Equal(t, want.Removed.GetKeyspaceId(), removed.GetKeyspaceId())
+				require.Nil(t, got.GetUpsert())
+			default:
+				require.FailNow(t, "unexpected expected GC state change type")
 			}
 		})
 	}
@@ -94,24 +107,24 @@ func TestSplitWatchGCStatesResponses(t *testing.T) {
 		TxnSafePoint:  10,
 		GcSafePoint:   5,
 	}}}
-	base := proto.Size(&pdpb.WatchGCStatesResponse{Header: grpcutil.WrapHeader()})
-	delta := proto.Size(&pdpb.WatchGCStatesResponse{Changes: []*pdpb.GCStateChange{change}})
+	base := (&pdpb.WatchGCStatesResponse{Header: grpcutil.WrapHeader()}).Size()
+	delta := (&pdpb.WatchGCStatesResponse{Changes: []*pdpb.GCStateChange{change}}).Size()
 
 	exact := splitWatchGCStatesResponses([]*pdpb.GCStateChange{change, change}, base+2*delta)
 	require.Len(t, exact, 1)
-	require.LessOrEqual(t, proto.Size(exact[0]), base+2*delta)
+	require.LessOrEqual(t, exact[0].Size(), base+2*delta)
 
 	split := splitWatchGCStatesResponses([]*pdpb.GCStateChange{change, change}, base+2*delta-1)
 	require.Len(t, split, 2)
 	for _, response := range split {
 		require.NotNil(t, response.GetHeader())
 		require.NotEmpty(t, response.GetChanges())
-		require.LessOrEqual(t, proto.Size(response), base+2*delta-1)
+		require.LessOrEqual(t, response.Size(), base+2*delta-1)
 	}
 
 	oversized := splitWatchGCStatesResponses([]*pdpb.GCStateChange{change}, base+delta-1)
 	require.Len(t, oversized, 1)
-	require.Greater(t, proto.Size(oversized[0]), base+delta-1)
+	require.Greater(t, oversized[0].Size(), base+delta-1)
 	require.Empty(t, splitWatchGCStatesResponses(nil, base+delta))
 }
 
@@ -181,8 +194,8 @@ func TestServeWatchGCStatesRechecksTerminalCauseBeforeEverySend(t *testing.T) {
 		TxnSafePoint:  10,
 		GcSafePoint:   5,
 	}}}
-	maxSize := proto.Size(&pdpb.WatchGCStatesResponse{Header: grpcutil.WrapHeader()}) +
-		proto.Size(&pdpb.WatchGCStatesResponse{Changes: []*pdpb.GCStateChange{protoChange}})
+	maxSize := (&pdpb.WatchGCStatesResponse{Header: grpcutil.WrapHeader()}).Size() +
+		(&pdpb.WatchGCStatesResponse{Changes: []*pdpb.GCStateChange{protoChange}}).Size()
 
 	err := serveWatchGCStates(receiver, stream, maxSize)
 	require.ErrorIs(t, err, errs.ErrNotLeader)

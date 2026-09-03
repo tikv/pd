@@ -22,9 +22,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/failpoint"
 	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/failpoint"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/keypath"
@@ -236,10 +237,10 @@ func (s *gcStateManagerTestSuite) TestGCStateWatchDoesNotPublishBarrierOnlyChang
 func (s *gcStateManagerTestSuite) TestGCStateWatchSlowConsumerIsolation() {
 	re := s.Require()
 	const keyspaceID = uint32(2)
-	watcherA, err := s.manager.watchGCStates(context.Background(), true, gcStateWatchConfig{liveChannelCapacity: 1})
+	watcherA, err := s.manager.registerGCStateWatcher(context.Background(), true, gcStateWatchConfig{liveChannelCapacity: 1})
 	re.NoError(err)
 	defer watcherA.Close()
-	watcherB, err := s.manager.watchGCStates(context.Background(), true, gcStateWatchConfig{liveChannelCapacity: 4})
+	watcherB, err := s.manager.registerGCStateWatcher(context.Background(), true, gcStateWatchConfig{liveChannelCapacity: 4})
 	re.NoError(err)
 	defer watcherB.Close()
 
@@ -316,7 +317,7 @@ func (s *gcStateManagerTestSuite) TestGCStateWatcherMetrics() {
 	re.Equal(activeBefore, promtestutil.ToFloat64(gcStateWatcherGauge))
 	assertTerminationDeltas(1, 1, 0, 0)
 
-	slowConsumer, err := s.manager.watchGCStates(context.Background(), true, gcStateWatchConfig{liveChannelCapacity: 1})
+	slowConsumer, err := s.manager.registerGCStateWatcher(context.Background(), true, gcStateWatchConfig{liveChannelCapacity: 1})
 	re.NoError(err)
 	re.Equal(activeBefore+1, promtestutil.ToFloat64(gcStateWatcherGauge))
 	_, err = s.manager.AdvanceTxnSafePoint(2, 10, time.Now())
