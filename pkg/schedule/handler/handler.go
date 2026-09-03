@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule"
+	"github.com/tikv/pd/pkg/schedule/checker"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/labeler"
@@ -1290,23 +1291,76 @@ func (h *Handler) CheckRegionsReplicated(startKeyHex, endKeyHex string) (string,
 		return "", errs.ErrNotBootstrapped.GenWithStackByArgs()
 	}
 	regions := c.ScanRegions(startKey, endKey, -1)
+	if !regionsCoverRange(regions, startKey, endKey) {
+		return "INPROGRESS", nil
+	}
+	if c.GetSharedConfig().IsPlacementRulesEnabled() {
+		switch co.GetRuleChecker().GetRegionsPlacementState(regions) {
+		case checker.RegionPlacementStatePending:
+			return "PENDING", nil
+		case checker.RegionPlacementStateInProgress:
+			return "INPROGRESS", nil
+		}
+		if hasReplicaOperator(co.GetOperatorController(), regions) {
+			return "INPROGRESS", nil
+		}
+		return "REPLICATED", nil
+	}
+
 	state := "REPLICATED"
 	for _, region := range regions {
+		if region.GetLeader() == nil || len(region.GetPendingPeers()) > 0 {
+			state = "INPROGRESS"
+			continue
+		}
 		if !filter.IsRegionReplicated(c, region) {
 			state = "INPROGRESS"
-			if co.IsPendingRegion(region.GetID()) {
-				state = "PENDING"
-				break
-			}
 		}
 	}
-	failpoint.Inject("mockPending", func(val failpoint.Value) {
-		aok, ok := val.(bool)
-		if ok && aok {
-			state = "PENDING"
-		}
-	})
 	return state, nil
+}
+
+func hasReplicaOperator(controller *operator.Controller, regions []*core.RegionInfo) bool {
+	operators := controller.GetOperatorsOfKind(operator.OpReplica)
+	for _, op := range controller.GetWaitingOperators() {
+		if op.Kind()&operator.OpReplica != 0 {
+			operators = append(operators, op)
+		}
+	}
+	if len(operators) == 0 {
+		return false
+	}
+	operatorRegions := make(map[uint64]struct{}, len(operators))
+	for _, op := range operators {
+		operatorRegions[op.RegionID()] = struct{}{}
+	}
+	for _, region := range regions {
+		if _, ok := operatorRegions[region.GetID()]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func regionsCoverRange(regions []*core.RegionInfo, startKey, endKey []byte) bool {
+	if len(regions) == 0 {
+		return false
+	}
+	first := regions[0]
+	if bytes.Compare(first.GetStartKey(), startKey) > 0 ||
+		(len(first.GetEndKey()) > 0 && bytes.Compare(startKey, first.GetEndKey()) >= 0) {
+		return false
+	}
+	for i := 1; i < len(regions); i++ {
+		if !bytes.Equal(regions[i-1].GetEndKey(), regions[i].GetStartKey()) {
+			return false
+		}
+	}
+	lastEndKey := regions[len(regions)-1].GetEndKey()
+	if len(endKey) == 0 {
+		return len(lastEndKey) == 0
+	}
+	return len(lastEndKey) == 0 || bytes.Compare(lastEndKey, endKey) >= 0
 }
 
 // GetRuleManager returns the rule manager.
