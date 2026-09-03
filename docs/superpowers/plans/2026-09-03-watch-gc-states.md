@@ -44,20 +44,24 @@ The implementation uses focused files and avoids unrelated refactoring:
 
 ---
 
-### Task 1: Add the watcher change model and merge state
+### Task 1: Build the watcher core and local leadership lifecycle
 
-This task creates the transport-independent state machine that merges initial batches and individual live changes without regressing a keyspace.
+This task creates the transport-independent initial/live merge state, registers watchers with `GCStateManager`, incrementally loads initial state, and binds every watcher to one local leadership generation.
 
 **Files:**
 
 - Create: `pkg/gc/gc_state_watcher.go`
 - Create: `pkg/gc/gc_state_watcher_test.go`
+- Modify: `pkg/gc/gc_state_manager.go:188-266`
+- Modify: `pkg/gc/gc_state_manager_test.go:116-262`
+- Modify: `server/cluster/cluster.go:495-496`
 
 **Interfaces:**
 
 - Consumes: Existing `GCState` from `pkg/gc/gc_state_manager.go`.
 - Produces: `GCStateChange`, `NewGCStateUpsert`, `NewGCStateRemoved`, `GCStateChange.Upsert`, `GCStateChange.RemovedKeyspaceID`, `GCStateChange.KeyspaceID`, `GCStateWatcher.RecvBatch`, and `GCStateWatcher.Err`.
-- Produces for Task 2: `newGCStateWatcher`, `gcStateWatchConfig`, `GCStateWatcher.initCh`, `GCStateWatcher.liveCh`, and `GCStateWatcher.cancel`.
+- Produces: `newGCStateWatcher`, `gcStateWatchConfig`, `GCStateWatcher.initCh`, `GCStateWatcher.liveCh`, `GCStateWatcher.cancel`, `GCStateManager.WatchGCStates(ctx context.Context, skipLoadingInitial bool) (*GCStateWatcher, error)`, `GCStateWatcher.Close()`, and `GCStateManager.OnNodeBecomesLeader() func()`.
+- Produces for Task 2: `terminateGCStateWatcherLocked`, the watcher registry, watcher IDs, and bounded termination-reason constants.
 
 - [ ] **Step 1: Write failing tests for both observable delivery orders**
 
@@ -185,7 +189,7 @@ Expected: compilation fails because the watcher types and constructors do not ex
 
 - [ ] **Step 4: Implement the domain change type and test helper accessors**
 
-Use an unexported discriminator so the zero value remains structurally invalid for Task 5 converter tests.
+Use an unexported discriminator so the zero value remains structurally invalid for Task 3 converter tests.
 
 ```go
 type gcStateChangeKind uint8
@@ -328,36 +332,22 @@ make gotest GOTEST_ARGS='./pkg/gc -run ^TestGCStateWatcher -count=1'
 
 Expected: all watcher merge tests pass, including cancellation under `-count=1`.
 
-- [ ] **Step 7: Format and commit the watcher state machine**
+- [ ] **Step 7: Format and inspect the watcher state machine**
 
 Run:
 
 ```bash
 gofmt -w pkg/gc/gc_state_watcher.go pkg/gc/gc_state_watcher_test.go
 git diff --check
-git add pkg/gc/gc_state_watcher.go pkg/gc/gc_state_watcher_test.go
-git commit -s -m "gc: add GC state watcher merge model"
 ```
 
-### Task 2: Register watchers and bind them to local leadership
+Expected: formatting and whitespace checks pass before manager integration begins. Do not commit yet because the watcher isn't usable until the remaining steps connect it to `GCStateManager`.
 
-This task connects the watcher state machine to `GCStateManager`, starts incremental initial loading, and replaces the counter-style follower callback with a generation-aware teardown closure.
+#### Manager integration phase
 
-**Files:**
+This phase connects the tested merge state to the manager, starts incremental loading, and replaces the counter-style follower callback with a generation-aware teardown closure. It remains part of Task 1 because neither half is independently usable.
 
-- Modify: `pkg/gc/gc_state_watcher.go`
-- Modify: `pkg/gc/gc_state_watcher_test.go`
-- Modify: `pkg/gc/gc_state_manager.go:188-266`
-- Modify: `pkg/gc/gc_state_manager_test.go:116-262`
-- Modify: `server/cluster/cluster.go:495-496`
-
-**Interfaces:**
-
-- Consumes: Task 1's watcher channels, `RecvBatch`, and configuration seam; existing `iterateAllKeyspacesGCStates`.
-- Produces: `GCStateManager.WatchGCStates(ctx context.Context, skipLoadingInitial bool) (*GCStateWatcher, error)`, `GCStateWatcher.Close()`, and `GCStateManager.OnNodeBecomesLeader() func()`.
-- Produces for Tasks 3 and 4: `terminateGCStateWatcherLocked`, the watcher registry, watcher IDs, and bounded termination-reason constants.
-
-- [ ] **Step 1: Write failing tests for registration and generation-aware teardown**
+- [ ] **Step 8: Write failing tests for registration and generation-aware teardown**
 
 Add tests with these concrete sequences:
 
@@ -388,7 +378,7 @@ func (s *gcStateManagerTestSuite) TestGCStateWatchLeadershipGeneration() {
 
 Use the existing suite fixture rather than duplicating embedded-etcd setup. Construct the follower manager from the suite's provider, config, and keyspace manager so it has never received a leader callback.
 
-- [ ] **Step 2: Write failing tests for initial loading and cleanup**
+- [ ] **Step 9: Write failing tests for initial loading and cleanup**
 
 Add these exact tests:
 
@@ -458,7 +448,7 @@ func (s *gcStateManagerTestSuite) TestGCStateWatchLiveSuppressesPausedInitial() 
 
 Add two failpoint call sites to make timing deterministic: `watchGCStatesRegistered` immediately after registration releases `GCStateManager.mu`, and `watchGCStatesInitialStateLoaded` after one state is read but before its batch can be sent. Neither call site can execute while holding the manager mutex.
 
-- [ ] **Step 3: Run the focused lifecycle tests and confirm the red state**
+- [ ] **Step 10: Run the focused lifecycle tests and confirm the red state**
 
 Run:
 
@@ -468,7 +458,7 @@ make gotest GOTEST_ARGS='./pkg/gc -run "TestGCStateManager/TestGCStateWatch(Requ
 
 Expected: compilation fails because manager registration, teardown closures, and watcher cleanup do not exist.
 
-- [ ] **Step 4: Replace leadership counting with an active generation and teardown closure**
+- [ ] **Step 11: Replace leadership counting with an active generation and teardown closure**
 
 Keep lock-free leadership reads for existing cache fast paths while making generation creation manager-owned:
 
@@ -510,7 +500,7 @@ Initialize the watcher map in `NewGCStateManager`. Remove `OnNodeBecomesFollower
 c.stopGCStateManager = s.GetGCStateManager().OnNodeBecomesLeader()
 ```
 
-- [ ] **Step 5: Implement registration, idempotent removal, and initial loading**
+- [ ] **Step 12: Implement registration, idempotent removal, and initial loading**
 
 Use these exact public and test-only entry points:
 
@@ -531,7 +521,7 @@ func (m *GCStateManager) terminateAllGCStateWatchersLocked(cause error, reason g
 func (w *GCStateWatcher) Close()
 ```
 
-Add `manager *GCStateManager` and `id uint64` to `GCStateWatcher`. Define the bounded reasons now so Task 4 can attach metrics without changing lifecycle signatures:
+Add `manager *GCStateManager` and `id uint64` to `GCStateWatcher`. Define the bounded reasons now so the lifecycle metrics phase can attach metrics without changing lifecycle signatures:
 
 ```go
 type gcStateWatcherTerminationReason string
@@ -603,7 +593,7 @@ The local `stopped` flag is required because the iterator callback cannot return
 
 `terminateGCStateWatcherLocked` first verifies that the ID still maps to the same watcher, deletes it, and calls its `CancelCauseFunc` without invoking any callback that reacquires `GCStateManager.mu`. `Close` delegates to the manager with `context.Canceled` and `watcherTerminationClientCancel`.
 
-- [ ] **Step 6: Adapt existing manager tests to the teardown-returning callback**
+- [ ] **Step 13: Adapt existing manager tests to the teardown-returning callback**
 
 In `newGCStateManagerForTest`, retain the teardown and include it in the returned cleanup:
 
@@ -618,7 +608,7 @@ clean = func() {
 
 Keep `ensureMarkedLeader` compatible by registering the returned closure with `s.T().Cleanup` whenever it creates a new leadership generation. Replace the one test that temporarily writes `nodeLeadership` with a save/set/restore of `activeLeadershipGeneration`, and update read-only assertions to call `nodeIsLeader()`. Search for every remaining `OnNodeBecomesLeader`, `OnNodeBecomesFollower`, and `nodeLeadership` reference so no test silently loses the teardown for the generation it creates.
 
-- [ ] **Step 7: Run lifecycle and existing cache tests**
+- [ ] **Step 14: Run lifecycle and existing cache tests**
 
 Run:
 
@@ -629,7 +619,7 @@ go test ./server/cluster -run '^$'
 
 Expected: watcher lifecycle tests pass, existing leader-gated cache behavior remains green, and the cluster package compiles with the new callback.
 
-- [ ] **Step 8: Format and commit manager integration**
+- [ ] **Step 15: Format and commit the watcher core and lifecycle**
 
 Run:
 
@@ -637,12 +627,12 @@ Run:
 gofmt -w pkg/gc/gc_state_watcher.go pkg/gc/gc_state_watcher_test.go pkg/gc/gc_state_manager.go pkg/gc/gc_state_manager_test.go server/cluster/cluster.go
 git diff --check
 git add pkg/gc/gc_state_watcher.go pkg/gc/gc_state_watcher_test.go pkg/gc/gc_state_manager.go pkg/gc/gc_state_manager_test.go server/cluster/cluster.go
-git commit -s -m "gc: tie watchers to local leadership"
+git commit -s -m "gc: add GC state watcher lifecycle"
 ```
 
-### Task 3: Publish effective safe-point changes without blocking mutations
+### Task 2: Publish and observe effective safe-point changes
 
-This task attaches live publication exactly once to the successful shared mutation paths and proves that a full watcher queue affects only that watcher.
+This task attaches live publication exactly once to the successful shared mutation paths, isolates slow consumers, and records the resulting watcher lifecycle transitions with bounded metrics.
 
 **Files:**
 
@@ -650,13 +640,14 @@ This task attaches live publication exactly once to the successful shared mutati
 - Modify: `pkg/gc/gc_state_watcher_test.go`
 - Modify: `pkg/gc/gc_state_manager.go:350-413`
 - Modify: `pkg/gc/gc_state_manager.go:445-604`
+- Modify: `pkg/gc/metrics.go`
 - Modify: `pkg/errs/errno.go:551-554`
 - Modify: `errors.toml`
 
 **Interfaces:**
 
-- Consumes: Task 2's registry and termination helpers.
-- Produces: `publishGCStateChangeLocked`, `errs.ErrGCStateWatcherSlowConsumer`, and complete live upserts used by the server stream.
+- Consumes: Task 1's registry, watcher IDs, and termination helpers.
+- Produces: `publishGCStateChangeLocked`, `errs.ErrGCStateWatcherSlowConsumer`, complete live upserts used by the server stream, `pd_gc_watcher_count`, `pd_gc_watcher_termination_total{reason=...}`, and `recordGCStateWatcherTerminationMetrics`.
 
 - [ ] **Step 1: Write failing publication tests for modern, compatible, and barrier paths**
 
@@ -856,33 +847,22 @@ make gotest GOTEST_ARGS='./pkg/gc -run "TestGCStateManager/Test(GCStateWatch|Adv
 
 Expected: complete upserts arrive once, no-op and barrier-only calls emit nothing, and only the slow watcher terminates.
 
-- [ ] **Step 8: Format and commit live publication**
+- [ ] **Step 8: Format and inspect live publication**
 
 Run:
 
 ```bash
 gofmt -w pkg/gc/gc_state_watcher.go pkg/gc/gc_state_watcher_test.go pkg/gc/gc_state_manager.go pkg/errs/errno.go
 git diff --check
-git add pkg/gc/gc_state_watcher.go pkg/gc/gc_state_watcher_test.go pkg/gc/gc_state_manager.go pkg/errs/errno.go errors.toml
-git commit -s -m "gc: publish effective safe point changes"
 ```
 
-### Task 4: Instrument the watcher lifecycle
+Expected: formatting and whitespace checks pass before metrics are added. Do not commit yet because publication and its lifecycle accounting form one reviewable change.
 
-This task adds low-cardinality metrics at the manager-owned registration and termination points, with pre-bound counter handles for every reason.
+#### Lifecycle metrics phase
 
-**Files:**
+This phase adds low-cardinality metrics at the manager-owned registration and termination points, with pre-bound counter handles for every reason. It remains part of Task 2 because the metric increments must share the same idempotent publication and cleanup boundaries they describe.
 
-- Modify: `pkg/gc/metrics.go`
-- Modify: `pkg/gc/gc_state_watcher.go`
-- Modify: `pkg/gc/gc_state_watcher_test.go`
-
-**Interfaces:**
-
-- Consumes: Task 2's four termination-reason constants and the single idempotent termination helper.
-- Produces: `pd_gc_watcher_count`, `pd_gc_watcher_termination_total{reason=...}`, and `recordGCStateWatcherTerminationMetrics`.
-
-- [ ] **Step 1: Write failing metric-delta tests**
+- [ ] **Step 9: Write failing metric-delta tests**
 
 Use `prometheus/testutil.ToFloat64` and compare deltas so process-global counters do not make tests order-dependent:
 
@@ -910,7 +890,7 @@ func (s *gcStateManagerTestSuite) TestGCStateWatcherMetrics() {
 
 In the same test, record the three remaining counters before their triggers. For `client_cancel`, register one watcher and call `Close`. For `slow_consumer`, register with live capacity 1 and perform two successful `AdvanceTxnSafePoint` calls without reading the watcher, so both publications run through the production path while `GCStateManager.mu` is held. For `init_error`, enable `iterateAllKeyspacesGCStatesError`, register with initial loading, and call `RecvBatch`. After each trigger, assert that only its expected counter increased by one and the active gauge returned to `activeBefore`; never mutate a metric directly.
 
-- [ ] **Step 2: Run the metric test and confirm the red state**
+- [ ] **Step 10: Run the metric test and confirm the red state**
 
 Run:
 
@@ -920,7 +900,7 @@ make gotest GOTEST_ARGS='./pkg/gc -run TestGCStateManager/TestGCStateWatcherMetr
 
 Expected: compilation fails because the watcher metrics do not exist.
 
-- [ ] **Step 3: Define and pre-bind the metrics**
+- [ ] **Step 11: Define and pre-bind the metrics**
 
 Add these definitions to `pkg/gc/metrics.go`:
 
@@ -946,7 +926,7 @@ gcStateWatcherTerminationInitErrorCounter = gcStateWatcherTerminationCounter.Wit
 
 Register the gauge and vector with `prometheus.MustRegister`. Do not call `WithLabelValues` in registration, publication, or cleanup paths.
 
-- [ ] **Step 4: Record metrics at the single lifecycle boundaries**
+- [ ] **Step 12: Record metrics at the single lifecycle boundaries**
 
 Increment the gauge only after successful insertion into the registry. In `terminateGCStateWatcherLocked`, decrement the gauge and invoke this switch only after deletion succeeds:
 
@@ -969,7 +949,7 @@ func recordGCStateWatcherTerminationMetrics(reason gcStateWatcherTerminationReas
 
 No metric uses watcher IDs, keyspace IDs, client addresses, or error text as labels. The gauge has no labels, so teardown decrements it rather than deleting a label series.
 
-- [ ] **Step 5: Run metric and lifecycle tests**
+- [ ] **Step 13: Run metric and lifecycle tests**
 
 Run:
 
@@ -979,18 +959,18 @@ make gotest GOTEST_ARGS='./pkg/gc -run "TestGCStateManager/Test(GCStateWatcherMe
 
 Expected: each lifecycle increments exactly one reason counter and returns the active gauge to its baseline.
 
-- [ ] **Step 6: Format and commit observability**
+- [ ] **Step 14: Format and commit publication and observability**
 
 Run:
 
 ```bash
 gofmt -w pkg/gc/metrics.go pkg/gc/gc_state_watcher.go pkg/gc/gc_state_watcher_test.go
 git diff --check
-git add pkg/gc/metrics.go pkg/gc/gc_state_watcher.go pkg/gc/gc_state_watcher_test.go
-git commit -s -m "gc: add watcher lifecycle metrics"
+git add pkg/gc/metrics.go pkg/gc/gc_state_watcher.go pkg/gc/gc_state_watcher_test.go pkg/gc/gc_state_manager.go pkg/errs/errno.go errors.toml
+git commit -s -m "gc: publish and observe GC state changes"
 ```
 
-### Task 5: Implement the gRPC transport adapter and upgrade kvproto
+### Task 3: Implement the gRPC transport adapter and upgrade kvproto
 
 This task adopts the merged protobuf API, converts domain changes, batches by exact wire size, and implements the local server-streaming handler through a small test seam.
 
@@ -1009,7 +989,7 @@ This task adopts the merged protobuf API, converts domain changes, batches by ex
 
 **Interfaces:**
 
-- Consumes: Task 2's `GCStateManager.WatchGCStates` and `GCStateWatcher` API; Task 3's slow-consumer sentinel and domain changes; kvproto `WatchGCStatesRequest`, `WatchGCStatesResponse`, and `GCStateChange`.
+- Consumes: Task 1's `GCStateManager.WatchGCStates` and `GCStateWatcher` API; Task 2's slow-consumer sentinel and domain changes; kvproto `WatchGCStatesRequest`, `WatchGCStatesResponse`, and `GCStateChange`.
 - Produces: `GrpcServer.WatchGCStates`, `gcStateChangeToProto`, `splitWatchGCStatesResponses`, `watchGCStatesErrorToStatus`, and `serveWatchGCStates`.
 
 - [ ] **Step 1: Upgrade all four module scopes to the merged kvproto commit**
@@ -1228,7 +1208,7 @@ git add go.mod go.sum client/go.mod client/go.sum tools/go.mod tools/go.sum test
 git commit -s -m "server: implement WatchGCStates stream"
 ```
 
-### Task 6: Prove RPC behavior in a real PD cluster
+### Task 4: Prove RPC behavior in a real PD cluster
 
 This task covers the complete server stream, request preflight, lifetime rate limiting, and leader transfer through real generated gRPC clients.
 
@@ -1240,7 +1220,7 @@ This task covers the complete server stream, request preflight, lifetime rate li
 
 **Interfaces:**
 
-- Consumes: The generated `pdpb.PDClient.WatchGCStates` client and all production behavior from Tasks 1 through 5.
+- Consumes: The generated `pdpb.PDClient.WatchGCStates` client and all production behavior from Tasks 1 through 3.
 - Produces: End-to-end evidence for initial loading, skip-initial registration, validation, rate-limit token lifetime, and leadership reconnection.
 
 - [ ] **Step 1: Add deterministic stream helpers**
@@ -1336,13 +1316,13 @@ git commit -s -m "tests: cover WatchGCStates lifecycle"
 
 Omit unchanged production files from `git add`. If integration testing required no production correction, commit only `tests/server/gc/gc_test.go`.
 
-### Task 7: Run final verification
+## Final verification checklist
 
-This task verifies formatting, generated error documentation, module consistency, race safety, focused behavior, and the repository's required checks before handoff.
+This checklist verifies formatting, generated error documentation, module consistency, race safety, focused behavior, and the repository's required checks after all four implementation tasks are complete. It is a handoff gate rather than a separate implementation task or commit.
 
 **Files:**
 
-- Verify: all files changed in Tasks 1 through 6
+- Verify: all files changed in Tasks 1 through 4
 - Modify: none unless a verification command reports a concrete defect
 
 **Interfaces:**
@@ -1424,7 +1404,7 @@ Expected: the `rg` command finds no new compatibility reference in the touched W
 
 ## Execution handoff
 
-The plan is complete when this document is reviewed and committed. Execute it with one of the required workflows:
+The plan is complete when this document is reviewed and committed. Execute its four implementation tasks with one of the required workflows:
 
 1. **Subagent-driven:** Use `superpowers:subagent-driven-development`, dispatch a fresh worker for each task, and perform spec and code-quality review between tasks.
 2. **Inline execution:** Use `superpowers:executing-plans`, execute tasks in batches, and stop at its review checkpoints.
