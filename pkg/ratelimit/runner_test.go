@@ -21,6 +21,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/tikv/pd/pkg/errs"
 )
 
 func TestConcurrentRunner(t *testing.T) {
@@ -108,13 +110,124 @@ func TestConcurrentRunner(t *testing.T) {
 			time.Sleep(1 * time.Millisecond)
 		}
 
-		var updatedSubmitted time.Time
-		for _, task := range runner.pendingTasks {
-			if task.id == 6 {
-				updatedSubmitted = task.submittedAt
+		originalSubmitted, lastSubmitted := func() (time.Time, time.Time) {
+			runner.pendingMu.Lock()
+			defer runner.pendingMu.Unlock()
+			var originalSubmitted time.Time
+			for i := range runner.pendingTaskNum() {
+				task := runner.pendingTaskAt(i)
+				if task.id == 6 {
+					originalSubmitted = task.submittedAt
+				}
 			}
+			lastSubmitted := runner.pendingTaskAt(runner.pendingTaskNum() - 1).submittedAt
+			return originalSubmitted, lastSubmitted
+		}()
+		require.Less(t, originalSubmitted, lastSubmitted)
+	})
+
+	t.Run("DuplicatedTaskBeforeDispatch", func(t *testing.T) {
+		runner := NewConcurrentRunner("test", NewConcurrencyLimiter(1), time.Minute)
+		require.NoError(t, runner.RunTask(0, "test4", func(context.Context) {}))
+
+		oldCalls := 0
+		newCalls := 0
+		require.NoError(t, runner.RunTask(1, "test4", func(context.Context) { oldCalls++ }))
+
+		// Reproduce the state where the channel task has been consumed while
+		// another task with the duplicated ID is still pending.
+		<-runner.taskChan
+		require.NoError(t, runner.RunTask(1, "test4", func(context.Context) { newCalls++ }))
+
+		task := <-runner.taskChan
+		task.f(context.Background())
+		require.Zero(t, oldCalls)
+		require.Equal(t, 1, newCalls)
+		require.Zero(t, runner.pendingTaskNum())
+	})
+
+	t.Run("DuplicatedTaskKeepsQueueAge", func(t *testing.T) {
+		runner := NewConcurrentRunner("test", NewConcurrencyLimiter(1), time.Second)
+		require.NoError(t, runner.RunTask(1, "test4", func(context.Context) {}))
+		require.NoError(t, runner.RunTask(2, "test4", func(context.Context) {}))
+
+		originalSubmitted := time.Now().Add(-2 * time.Second)
+		runner.pendingTaskAt(0).submittedAt = originalSubmitted
+		require.NoError(t, runner.RunTask(2, "test4", func(context.Context) {}))
+		require.Equal(t, originalSubmitted, runner.pendingTaskAt(0).submittedAt)
+		require.ErrorIs(
+			t,
+			runner.RunTask(3, "test4", func(context.Context) {}),
+			errs.ErrMaxWaitingTasksExceeded,
+		)
+	})
+
+	t.Run("MaxPendingTasks", func(t *testing.T) {
+		runner := NewConcurrentRunner("test", NewConcurrencyLimiter(1), time.Minute)
+		runner.maxPendingTaskNum = 3
+		require.NoError(t, runner.RunTask(0, "test5", func(context.Context) {}))
+		for i := 1; i <= runner.maxPendingTaskNum; i++ {
+			require.NoError(t, runner.RunTask(uint64(i), "test5", func(context.Context) {}))
 		}
-		lastSubmitted := runner.pendingTasks[len(runner.pendingTasks)-1].submittedAt
-		require.Greater(t, updatedSubmitted, lastSubmitted)
+
+		require.Equal(t, runner.maxPendingTaskNum, runner.pendingTaskNum())
+		require.NoError(t, runner.RunTask(1, "test5", func(context.Context) {}))
+		require.ErrorIs(
+			t,
+			runner.RunTask(4, "test5", func(context.Context) {}, WithRetained(true)),
+			errs.ErrMaxWaitingTasksExceeded,
+		)
+		require.Equal(t, runner.maxPendingTaskNum, runner.pendingTaskNum())
+	})
+
+	t.Run("ReleasePendingStorage", func(t *testing.T) {
+		runner := NewConcurrentRunner("test", NewConcurrencyLimiter(1), time.Minute)
+		require.NoError(t, runner.RunTask(0, "test6", func(context.Context) {}))
+		for i := 1; i <= initialCapacity*2; i++ {
+			require.NoError(t, runner.RunTask(uint64(i), "test6", func(context.Context) {}))
+		}
+		require.Greater(t, cap(runner.pendingTasks), initialCapacity)
+
+		for runner.pendingTaskNum() > 0 {
+			<-runner.taskChan
+			runner.processPendingTasks()
+		}
+		<-runner.taskChan
+		require.Empty(t, runner.pendingTasks)
+		require.Equal(t, initialCapacity, cap(runner.pendingTasks))
+		require.Empty(t, runner.existTasks)
+	})
+
+	t.Run("ReusePendingStorage", func(t *testing.T) {
+		runner := NewConcurrentRunner("test", NewConcurrencyLimiter(1), time.Minute)
+		require.NoError(t, runner.RunTask(0, "test7", func(context.Context) {}))
+		for i := 1; i <= initialCapacity; i++ {
+			require.NoError(t, runner.RunTask(uint64(i), "test7", func(context.Context) {}))
+		}
+
+		storage := &runner.pendingTasks[0]
+		for range initialCapacity / 2 {
+			<-runner.taskChan
+			runner.processPendingTasks()
+		}
+		for i := initialCapacity + 1; i <= initialCapacity+initialCapacity/2; i++ {
+			require.NoError(t, runner.RunTask(uint64(i), "test7", func(context.Context) {}))
+		}
+
+		require.Equal(t, initialCapacity, runner.pendingTaskNum())
+		require.Equal(t, initialCapacity, cap(runner.pendingTasks))
+		require.Same(t, storage, &runner.pendingTasks[0])
+		require.Equal(t, uint64(initialCapacity/2+1), runner.pendingTaskAt(0).id)
+		require.Equal(t, uint64(initialCapacity+initialCapacity/2), runner.pendingTaskAt(runner.pendingTaskNum()-1).id)
+		require.Len(t, runner.existTasks, initialCapacity)
+
+		for id := initialCapacity / 2; id <= initialCapacity+initialCapacity/2; id++ {
+			task := <-runner.taskChan
+			require.Equal(t, uint64(id), task.id)
+			runner.processPendingTasks()
+		}
+		require.Zero(t, runner.pendingTaskNum())
+		require.Equal(t, initialCapacity, cap(runner.pendingTasks))
+		require.Empty(t, runner.existTasks)
 	})
 }
