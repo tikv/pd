@@ -38,8 +38,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
-	"github.com/tikv/pd/pkg/statistics"
-	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
@@ -66,6 +64,8 @@ var (
 	scatterOperatorRunningCounter      = scatterCounter.WithLabelValues("skip", "running")
 	scatterOperatorExistedCounter      = scatterCounter.WithLabelValues("fail", "other-existed")
 
+	// ErrRegionHot means scatter is skipped because the region is currently hot.
+	ErrRegionHot = errors.New("region is hot")
 	// ErrInternalScatterBalancedReadCPU means split-scatter is temporarily skipped
 	// because moving the selected leader would not reduce read CPU pressure enough.
 	ErrInternalScatterBalancedReadCPU = errors.New("internal split scatter skipped due to balanced read CPU")
@@ -122,10 +122,6 @@ func cloneDistribution(distribution map[uint64]uint64) map[uint64]uint64 {
 	return cloned
 }
 
-type storeLoadsProvider interface {
-	GetStoresLoads() map[uint64]statistics.StoreKindLoads
-}
-
 type storeConfigProvider interface {
 	GetStoreConfig() sc.StoreConfigProvider
 }
@@ -135,18 +131,19 @@ type storeReadCPURecentMaxProvider interface {
 }
 
 func splitScatterReadCPUByStore(
-	storesLoads map[uint64]statistics.StoreKindLoads,
+	stores []*core.StoreInfo,
 	recentMaxProvider storeReadCPURecentMaxProvider,
 ) map[uint64]float64 {
-	readCPUByStore := make(map[uint64]float64, len(storesLoads))
-	for storeID, loads := range storesLoads {
-		readCPU := loads[utils.StoreReadCPU]
-		if recentMaxProvider != nil {
-			if recentMax := recentMaxProvider.GetStoreReadCPURecentMax(storeID); recentMax > readCPU {
-				readCPU = recentMax
-			}
+	if recentMaxProvider == nil {
+		return nil
+	}
+	readCPUByStore := make(map[uint64]float64, len(stores))
+	for _, store := range stores {
+		if store == nil {
+			continue
 		}
-		if readCPU > 0 {
+		storeID := store.GetID()
+		if readCPU := recentMaxProvider.GetStoreReadCPURecentMax(storeID); readCPU > 0 {
 			readCPUByStore[storeID] = readCPU
 		}
 	}
@@ -636,10 +633,10 @@ func (r *RegionScatterer) scatterWithOptions(region *core.RegionInfo, group stri
 		return nil, nil
 	}
 
-	if !internalScatter && r.cluster.IsRegionHot(region) {
+	if r.cluster.IsRegionHot(region) {
 		scatterSkipHotRegionCounter.Inc()
 		log.Warn("region too hot during scatter", zap.Uint64("region-id", region.GetID()))
-		return nil, errors.Errorf("region %d is hot", region.GetID())
+		return nil, fmt.Errorf("region %d is hot: %w", region.GetID(), ErrRegionHot)
 	}
 
 	return r.scatterRegionWithType(region, group, skipStoreLimit, internalScatter, state)
@@ -752,15 +749,11 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 	readPoolThreadCount := uint64(0)
 	leaderBlockedByReadPoolPressure := false
 	if internalScatter {
-		var storesLoads map[uint64]statistics.StoreKindLoads
-		if provider, ok := r.cluster.(storeLoadsProvider); ok {
-			storesLoads = provider.GetStoresLoads()
-		}
 		var recentMaxProvider storeReadCPURecentMaxProvider
 		if provider, ok := r.cluster.(storeReadCPURecentMaxProvider); ok {
 			recentMaxProvider = provider
 		}
-		readCPUByStore = splitScatterReadCPUByStore(storesLoads, recentMaxProvider)
+		readCPUByStore = splitScatterReadCPUByStore(r.cluster.GetStores(), recentMaxProvider)
 		readPoolThreadCount = r.getReadPoolThreadCount()
 		leaderCandidateStores, leaderBlockedByReadPoolPressure = r.filterAllowedLeaderCandidateStores(region, targetPeers, leaderCandidateStores, readCPUByStore, readPoolThreadCount)
 	}

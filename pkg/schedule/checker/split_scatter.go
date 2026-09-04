@@ -394,12 +394,6 @@ func (c *splitScatterController) recordSplitScatterBatch(sourceRegionID, splitVe
 	if splitVersion == 0 {
 		splitVersion = 1
 	}
-	if sourceRegion := c.cluster.GetRegion(sourceRegionID); sourceRegion != nil {
-		cachedSplitVersion := splitScatterRegionVersion(sourceRegion) + 1
-		if cachedSplitVersion > splitVersion {
-			splitVersion = cachedSplitVersion
-		}
-	}
 	c.pendingMu.Lock()
 	defer c.pendingMu.Unlock()
 	attemptedExpiredCount, unattemptedExpiredCount := c.removeExpiredPendingSplitScatterLocked()
@@ -522,6 +516,16 @@ func (c *splitScatterController) dispatchSplitScatterRegions() {
 		}
 		op, err := c.regionScatterer.ScatterInternal(region, scatterGroup, rangeHint.startKey, rangeHint.endKey)
 		if err != nil {
+			if stderrors.Is(err, scatter.ErrRegionHot) {
+				splitScatterDispatchHotRegionCounter.Inc()
+				c.delayPendingSplitScatter(pending)
+				log.Info("dispatch internal split scatter delayed",
+					zap.Uint64("region-id", pending.regionID),
+					zap.String("batch-group", pending.group),
+					zap.String("scatter-group", scatterGroup),
+					zap.String("reason", "hot-region"))
+				continue
+			}
 			if stderrors.Is(err, scatter.ErrInternalScatterBalancedReadCPU) {
 				splitScatterDispatchBalancedReadCPUCounter.Inc()
 				c.delayPendingSplitScatter(pending)

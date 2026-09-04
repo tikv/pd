@@ -465,7 +465,7 @@ func (s *Service) AskBatchSplit(_ context.Context, request *schedulingpb.AskBatc
 		newRegionIDs := recordRegions[:len(recordRegions)-1]
 		c.GetCoordinator().GetCheckerController().RecordSplitScatterBatch(
 			reqRegion.GetId(),
-			// Use the post-split region version as this split-scatter batch identity.
+			// Wait until PD observes the source region version advanced by the split.
 			reqRegion.GetRegionEpoch().GetVersion()+1,
 			newRegionIDs,
 		)

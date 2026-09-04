@@ -182,6 +182,28 @@ func TestDispatchSplitScatterVersionLifecycle(t *testing.T) {
 	re.NotContains(pendingRegionIDSet(controller), uint64(100))
 }
 
+func TestRecordSplitScatterBatchDoesNotBumpPastRequestSplitVersion(t *testing.T) {
+	re := require.New(t)
+	controller, tc, oc, cleanup := newTestSplitScatterController(t)
+	defer cleanup()
+
+	// Cache is already newer than the request's expected split version.
+	// The recorded identity must stay at the request version so the child at
+	// that version can still be scattered.
+	tc.PutRegion(tc.GetRegion(100).Clone(core.SetRegionVersion(7)))
+	controller.RecordSplitScatterBatch(100, 6, []uint64{101})
+	re.Equal(uint64(6), splitScatterPending(t, controller, 100).splitVersion)
+	re.Equal(uint64(6), splitScatterPending(t, controller, 101).splitVersion)
+
+	putSplitScatterRegionWithVersion(tc, 101, "m", "", splitScatterReportedCPUUsage, 6)
+	transferSplitScatterLeader(t, tc, 101, 2)
+	controller.dispatchSplitScatterRegions()
+
+	re.NotNil(oc.GetOperator(101))
+	re.NotContains(pendingRegionIDSet(controller), uint64(100))
+	re.NotContains(pendingRegionIDSet(controller), uint64(101))
+}
+
 func TestDispatchSplitScatterRespectsScheduleLimit(t *testing.T) {
 	re := require.New(t)
 	controller, tc, oc, cleanup := newTestSplitScatterController(t)
@@ -784,6 +806,26 @@ func TestDispatchSplitScatterBacksOff(t *testing.T) {
 	}
 }
 
+func TestDispatchSplitScatterBacksOffWhenHot(t *testing.T) {
+	re := require.New(t)
+	controller, tc, _, cleanup := newTestSplitScatterController(t)
+	defer cleanup()
+
+	controller.RecordSplitScatterBatch(100, splitScatterTestSplitVersion, []uint64{101})
+	putSplitScatterRegion(tc, 101, "m", "")
+	markSplitScatterRegionHot(tc, 101)
+	advanceSplitScatterSourceVersion(t, tc)
+
+	hotBefore := promtestutil.ToFloat64(splitScatterDispatchHotRegionCounter)
+	failedBefore := promtestutil.ToFloat64(splitScatterDispatchScatterFailedCounter)
+	controller.dispatchSplitScatterRegions()
+
+	re.True(splitScatterPendingMaybe(controller, 101))
+	requireSplitScatterPendingDelayed(t, controller, 101)
+	re.Equal(float64(1), promtestutil.ToFloat64(splitScatterDispatchHotRegionCounter)-hotBefore)
+	re.Equal(float64(0), promtestutil.ToFloat64(splitScatterDispatchScatterFailedCounter)-failedBefore)
+}
+
 func TestDispatchSplitScatterIgnoresStalePendingSnapshot(t *testing.T) {
 	re := require.New(t)
 	controller, _, _, cleanup := newTestSplitScatterController(t)
@@ -996,6 +1038,24 @@ func setSplitScatterStoreReadCPU(tc *mockcluster.Cluster, storeID uint64, readCP
 			Value: readCPU,
 		}},
 	})
+}
+
+func markSplitScatterRegionHot(tc *mockcluster.Cluster, regionID uint64) {
+	tc.SetHotRegionCacheHitsThreshold(0)
+	region := tc.GetRegion(regionID)
+	if region == nil {
+		return
+	}
+	region = region.Clone(
+		core.SetReadBytes(512*1024*utils.StoreHeartBeatReportInterval),
+		core.SetReportInterval(0, utils.StoreHeartBeatReportInterval),
+	)
+	for range utils.DefaultAotSize {
+		for _, item := range tc.CheckRegionRead(region) {
+			tc.Update(item, utils.Read)
+		}
+	}
+	tc.PutRegion(region)
 }
 
 func fillSplitScatterPending(controller *Controller, expireAt time.Time) {

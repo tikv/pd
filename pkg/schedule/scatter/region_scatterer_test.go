@@ -1290,7 +1290,7 @@ func TestScatterWithAffinity(t *testing.T) {
 	re.Nil(op)
 }
 
-func TestScatterInternalSkipsHotOnlyForAdmin(t *testing.T) {
+func TestScatterSkipsHotRegion(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1320,14 +1320,12 @@ func TestScatterInternalSkipsHotOnlyForAdmin(t *testing.T) {
 	scatterer := NewRegionScatterer(ctx, tc, oc, tc.AddPendingProcessedRegions)
 
 	op, err := scatterer.Scatter(region, "", true)
-	re.ErrorContains(err, "is hot")
+	re.ErrorIs(err, ErrRegionHot)
 	re.Nil(op)
 
 	op, err = scatterer.ScatterInternal(region, "", region.GetStartKey(), region.GetEndKey())
-	re.NoError(err)
-	if op != nil {
-		re.Equal(InternalScatterOperatorDesc, op.Desc())
-	}
+	re.ErrorIs(err, ErrRegionHot)
+	re.Nil(op)
 }
 
 func TestInternalScatterPeerSelection(t *testing.T) {
@@ -1500,7 +1498,7 @@ func TestInternalScatterLeaderFiltersReadPoolPressure(t *testing.T) {
 		4: {StoreId: 4, Role: metapb.PeerRole_Voter},
 		5: {StoreId: 5, Role: metapb.PeerRole_Voter},
 	}
-	readCPUByStore := splitScatterReadCPUByStore(tc.GetStoresLoads(), tc)
+	readCPUByStore := splitScatterReadCPUByStore(tc.GetStores(), tc)
 	candidates, _ := scatterer.filterAllowedLeaderCandidateStores(region, targetPeers, []uint64{1, 4, 5}, readCPUByStore, tc.GetStoreConfig().GetUnifiedReadPoolMaxThreadCount())
 	re.NotContains(candidates, uint64(4))
 
