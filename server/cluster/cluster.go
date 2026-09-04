@@ -1525,11 +1525,24 @@ func (c *RaftCluster) DeleteStoreLabel(storeID uint64, labelKey string) error {
 
 // PutMetaStore puts a store.
 func (c *RaftCluster) PutMetaStore(store *metapb.Store) error {
+	// A tombstoned store's config entry is only ever cleared once, at bury time
+	// (RemoveStoreLimit); nothing sweeps it again afterward. The gRPC PutStore
+	// preflight isn't synchronized with BuryStore, so a request that observed
+	// an already-known store as live can still reach here after a concurrent
+	// bury tombstoned it and cleared its limit -- putStoreImpl won't resurrect
+	// the tombstone state for an existing store, but AddStoreLimit would
+	// recreate the entry unless skipped. Only guard that case: a store that
+	// was never registered before must still get a limit even if it's already
+	// tombstoned at first sight (e.g. state replayed from storage), since
+	// there's no prior entry to protect from resurrection.
+	wasKnown := c.GetStore(store.GetId()) != nil
 	if err := c.putStoreImpl(store, false); err != nil {
 		return err
 	}
 	c.OnStoreVersionChange()
-	c.AddStoreLimit(store)
+	if current := c.GetStore(store.GetId()); !wasKnown || current == nil || !current.IsRemoved() {
+		c.AddStoreLimit(store)
+	}
 	return nil
 }
 
@@ -2434,20 +2447,14 @@ func (c *RaftCluster) GetAllStoresLimit() map[uint64]sc.StoreLimitConfig {
 	return c.opt.GetAllStoresLimit()
 }
 
-// AddStoreLimit add a store limit for a given store ID.
+// AddStoreLimit add a store limit for a given store ID if it doesn't already
+// have one. It unconditionally (re)creates a default entry -- callers that
+// must not resurrect a deliberately-removed entry for an already-known store
+// (see PutMetaStore) are responsible for guarding that themselves; a store
+// that's genuinely new here, even if already tombstoned at first sight (e.g.
+// state replayed from storage), is still expected to get one.
 func (c *RaftCluster) AddStoreLimit(store *metapb.Store) {
 	storeID := store.GetId()
-	// A tombstoned store's config entry is only ever cleared once, at bury time
-	// (RemoveStoreLimit); nothing sweeps it again afterward. PutMetaStore calls
-	// AddStoreLimit unconditionally after putStoreImpl, which -- for a store
-	// that already exists -- never resurrects State/NodeState, so a PutStore
-	// whose preflight raced a concurrent BuryStore still leaves the store
-	// tombstoned here. The incoming `store` argument is the caller's request
-	// payload, not the authoritative post-putStoreImpl state, so it can't be
-	// used for this check; re-fetch instead.
-	if existing := c.GetStore(storeID); existing != nil && existing.IsRemoved() {
-		return
-	}
 	var err error
 	for range persistLimitRetryTimes {
 		added := false
