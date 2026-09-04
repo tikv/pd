@@ -43,21 +43,70 @@ type RegionRuleFitCacheManager struct {
 	mu           syncutil.RWMutex
 	regionCaches map[uint64]*regionRuleFitCache
 	storeCaches  map[uint64]*storeCache
+	// storesOfRegion is a reverse index from storeID to the IDs of cached
+	// regions whose fit references it. SetCache's existing-entry promotion
+	// path (the hitCount>=minHitCountToCacheHit branch) re-checks storeSet
+	// freshness through allStoresLive, but that read is not synchronized
+	// with a concurrent bury: allStoresLive/storeSet.GetStore reads
+	// StoresInfo's own lock, entirely independent of manager.mu, so a
+	// promotion can still land using a pre-bury snapshot after the bury
+	// completed. Unlike storeCaches, regionCaches has no other path that
+	// gets swept when a store is removed, so RemoveStoreCache uses this
+	// index to evict any region cache entry that referenced the removed
+	// store, closing that gap.
+	storesOfRegion map[uint64]map[uint64]struct{}
 }
 
 // NewRegionRuleFitCacheManager returns RegionRuleFitCacheManager
 func NewRegionRuleFitCacheManager() *RegionRuleFitCacheManager {
 	return &RegionRuleFitCacheManager{
-		regionCaches: make(map[uint64]*regionRuleFitCache),
-		storeCaches:  make(map[uint64]*storeCache),
+		regionCaches:   make(map[uint64]*regionRuleFitCache),
+		storeCaches:    make(map[uint64]*storeCache),
+		storesOfRegion: make(map[uint64]map[uint64]struct{}),
 	}
+}
+
+// RemoveStoreCache removes the store cache with a given store ID, and evicts
+// any region cache entry whose fit referenced it.
+func (manager *RegionRuleFitCacheManager) RemoveStoreCache(storeID uint64) {
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	delete(manager.storeCaches, storeID)
+	regionIDs := make([]uint64, 0, len(manager.storesOfRegion[storeID]))
+	for regionID := range manager.storesOfRegion[storeID] {
+		regionIDs = append(regionIDs, regionID)
+	}
+	for _, regionID := range regionIDs {
+		manager.removeRegionCacheLocked(regionID)
+	}
+	delete(manager.storesOfRegion, storeID)
 }
 
 // Invalid cache by regionID
 func (manager *RegionRuleFitCacheManager) Invalid(regionID uint64) {
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
+	manager.removeRegionCacheLocked(regionID)
+}
+
+// removeRegionCacheLocked deletes a region's cache entry and the
+// storesOfRegion index entries it registered. Callers must hold manager.mu.
+func (manager *RegionRuleFitCacheManager) removeRegionCacheLocked(regionID uint64) {
+	cache, ok := manager.regionCaches[regionID]
+	if !ok {
+		return
+	}
 	delete(manager.regionCaches, regionID)
+	for _, sc := range cache.regionStores {
+		regions, ok := manager.storesOfRegion[sc.storeID]
+		if !ok {
+			continue
+		}
+		delete(regions, regionID)
+		if len(regions) == 0 {
+			delete(manager.storesOfRegion, sc.storeID)
+		}
+	}
 }
 
 // CheckAndGetCache checks whether the region and rules are changed for the stored cache
@@ -79,7 +128,7 @@ func (manager *RegionRuleFitCacheManager) CheckAndGetCache(region *core.RegionIn
 }
 
 // SetCache stores RegionFit cache
-func (manager *RegionRuleFitCacheManager) SetCache(region *core.RegionInfo, fit *RegionFit) {
+func (manager *RegionRuleFitCacheManager) SetCache(storeSet StoreSet, region *core.RegionInfo, fit *RegionFit) {
 	if !ValidateRegion(region) || !ValidateFit(fit) || !ValidateStores(fit.regionStores) {
 		return
 	}
@@ -88,11 +137,40 @@ func (manager *RegionRuleFitCacheManager) SetCache(region *core.RegionInfo, fit 
 	if cache, ok := manager.regionCaches[region.GetID()]; ok {
 		cache.hitCount++
 		if cache.hitCount >= minHitCountToCacheHit {
+			if !allStoresLive(storeSet, fit.regionStores) {
+				// fit may have been computed from a stale, pre-bury snapshot
+				// held by an in-flight FitRegion call. Promoting it (or
+				// leaving the entry as-is for another in-flight caller with
+				// an equally stale snapshot to consume via CheckAndGetCache,
+				// which compares against this cache's own frozen
+				// regionStores rather than re-checking storeSet) would let a
+				// removed store's placement result leak into a real
+				// scheduling decision. Evict the entry instead, so the next
+				// caller recomputes and re-validates through the cacheable
+				// path below.
+				manager.removeRegionCacheLocked(region.GetID())
+				return
+			}
 			cache.bestFit = fit
 		}
 		return
 	}
-	manager.regionCaches[region.GetID()] = manager.toRegionRuleFitCache(region, fit)
+	newCache, cacheable := manager.toRegionRuleFitCache(storeSet, region, fit)
+	if !cacheable {
+		return
+	}
+	manager.regionCaches[region.GetID()] = newCache
+}
+
+// allStoresLive reports whether every store is currently known and not removed.
+func allStoresLive(storeSet StoreSet, stores []*core.StoreInfo) bool {
+	for _, s := range stores {
+		current := storeSet.GetStore(s.GetID())
+		if current == nil || current.IsRemoved() {
+			return false
+		}
+	}
+	return true
 }
 
 // regionRuleFitCache stores regions RegionFit result and involving variables
@@ -139,14 +217,26 @@ func storesEqual(a []*storeCache, b []*core.StoreInfo) bool {
 	})
 }
 
-func (manager *RegionRuleFitCacheManager) toRegionRuleFitCache(region *core.RegionInfo, fit *RegionFit) *regionRuleFitCache {
+func (manager *RegionRuleFitCacheManager) toRegionRuleFitCache(storeSet StoreSet, region *core.RegionInfo, fit *RegionFit) (*regionRuleFitCache, bool) {
+	storeCacheList, cacheable := manager.toStoreCacheList(storeSet, fit.regionStores)
+	if cacheable {
+		regionID := region.GetID()
+		for _, sc := range storeCacheList {
+			regions, ok := manager.storesOfRegion[sc.storeID]
+			if !ok {
+				regions = make(map[uint64]struct{})
+				manager.storesOfRegion[sc.storeID] = regions
+			}
+			regions[regionID] = struct{}{}
+		}
+	}
 	return &regionRuleFitCache{
 		region:       toRegionCache(region),
-		regionStores: manager.toStoreCacheList(fit.regionStores),
+		regionStores: storeCacheList,
 		rules:        toRuleCacheList(fit.rules),
 		bestFit:      nil,
 		hitCount:     0,
-	}
+	}, cacheable
 }
 
 type ruleCache struct {
@@ -190,8 +280,21 @@ func (s storeCache) storeEqual(store *core.StoreInfo) bool {
 		labelEqual(s.labels, store.GetLabels())
 }
 
-func (manager *RegionRuleFitCacheManager) toStoreCacheList(stores []*core.StoreInfo) (c []*storeCache) {
+func (manager *RegionRuleFitCacheManager) toStoreCacheList(storeSet StoreSet, stores []*core.StoreInfo) (c []*storeCache, cacheable bool) {
+	cacheable = true
 	for _, s := range stores {
+		// The stores slice can be a stale RegionInfo/FitRegion snapshot taken
+		// before a store was buried, so re-check the store fresh through
+		// storeSet rather than trusting s.IsRemoved(). If any current store is
+		// missing or removed, the caller must not persist a region-level cache
+		// entry either -- one built from this stale snapshot would otherwise
+		// look valid (region/rule/store-state comparisons all pass) and never
+		// get re-evaluated until an unrelated region-level change invalidates
+		// it.
+		current := storeSet.GetStore(s.GetID())
+		if current == nil || current.IsRemoved() {
+			cacheable = false
+		}
 		sCache, ok := manager.storeCaches[s.GetID()]
 		if !ok || !sCache.storeEqual(s) {
 			m := make(map[string]string)
@@ -203,11 +306,15 @@ func (manager *RegionRuleFitCacheManager) toStoreCacheList(stores []*core.StoreI
 				labels:  m,
 				state:   s.GetState(),
 			}
-			manager.storeCaches[s.GetID()] = sCache
+			// A removed store's entry is only ever cleared once, when it's
+			// buried or finally removed; nothing sweeps it again after that.
+			if current != nil && !current.IsRemoved() {
+				manager.storeCaches[s.GetID()] = sCache
+			}
 		}
 		c = append(c, sCache)
 	}
-	return c
+	return c, cacheable
 }
 
 func labelEqual(label1 map[string]string, label2 []*metapb.StoreLabel) bool {

@@ -585,7 +585,7 @@ func (s *evictSlowStoreScheduler) tryRecoverNetworkSlowStores(cluster sche.Sched
 			continue
 		}
 
-		networkSlowScores := filterNetworkSlowScores(store.GetNetworkSlowScores(), networkSlowStoreRecoverStartAts)
+		networkSlowScores := filterNetworkSlowScores(cluster, store.GetNetworkSlowScores(), networkSlowStoreRecoverStartAts)
 		avgScore := calculateAvgScore(networkSlowScores)
 
 		// Recover the slow store only if the recoveryGap time is
@@ -632,20 +632,46 @@ func (s *evictSlowStoreScheduler) activatePausedNetworkSlowStores(cluster sche.S
 // detectAndHandleNetworkSlowStores detects new network slow stores and handles them
 func (s *evictSlowStoreScheduler) detectAndHandleNetworkSlowStores(cluster sche.SchedulerCluster) {
 	stores := cluster.GetStores()
+	// A tombstoned store stops heartbeating, so its GetNetworkSlowScores() is
+	// frozen at its last reported value. Restrict candidate evaluation, the
+	// "who reports whom" map, and the denominator used to decide consensus to
+	// stores that are still actually part of the cluster: otherwise a
+	// tombstoned store's frozen score could get it added to
+	// networkSlowStoreRecoverStartAts directly (even though
+	// tryRecoverNetworkSlowStores would just undo that on the very next
+	// round), and its presence in the denominator can also mask a genuinely
+	// slow live store from ever being detected in the first place.
+	liveStores := make([]*core.StoreInfo, 0, len(stores))
+	for _, store := range stores {
+		if !store.IsRemoved() {
+			liveStores = append(liveStores, store)
+		}
+	}
 	networkSlowStoreRecoverStartAts := s.conf.networkSlowStoreRecoverStartAts
 	pausedNetworkSlowStores := s.conf.PausedNetworkSlowStores
 
 	// Build problematic network map
-	problematicNetwork := buildProblematicNetworkMap(stores, networkSlowStoreRecoverStartAts)
+	problematicNetwork := buildProblematicNetworkMap(cluster, liveStores, networkSlowStoreRecoverStartAts)
 
 	// Evaluate each store for network slowness
-	for _, store := range stores {
+	for _, store := range liveStores {
 		if shouldSkipStoreEvaluation(store, problematicNetwork, networkSlowStoreRecoverStartAts) {
 			continue
 		}
 
-		if isNetworkSlowStore(store, stores, problematicNetwork, networkSlowStoreRecoverStartAts) {
+		if isNetworkSlowStore(cluster, store, liveStores, problematicNetwork, networkSlowStoreRecoverStartAts) {
 			storeID := store.GetID()
+
+			// liveStores is a snapshot taken at the top of this function; the
+			// evaluation above can still run against a store's stale, frozen
+			// data if it was tombstoned after the snapshot but before this
+			// point. Re-check right before acting narrows, but doesn't
+			// eliminate, that window -- the next round's
+			// tryRecoverNetworkSlowStores would undo a slip-through, so any
+			// residual publication is bounded to one round.
+			if current := cluster.GetStore(storeID); current == nil || current.IsRemoved() {
+				continue
+			}
 
 			if len(pausedNetworkSlowStores) >= defaultMaxNetworkSlowStore {
 				failpoint.InjectCall("evictSlowStoreTriggerLimit")
@@ -661,6 +687,7 @@ func (s *evictSlowStoreScheduler) detectAndHandleNetworkSlowStores(cluster sche.
 
 // buildProblematicNetworkMap builds a map of stores with problematic network connections
 func buildProblematicNetworkMap(
+	cluster sche.SchedulerCluster,
 	stores []*core.StoreInfo,
 	networkSlowStoreRecoverStartAts map[uint64]*time.Time,
 ) map[uint64]map[uint64]struct{} {
@@ -672,7 +699,7 @@ func buildProblematicNetworkMap(
 			continue
 		}
 
-		networkSlowScores := filterNetworkSlowScores(store.GetNetworkSlowScores(), networkSlowStoreRecoverStartAts)
+		networkSlowScores := filterNetworkSlowScores(cluster, store.GetNetworkSlowScores(), networkSlowStoreRecoverStartAts)
 		if len(networkSlowScores) < 2 {
 			continue
 		}
@@ -712,21 +739,38 @@ func shouldSkipStoreEvaluation(
 
 // isNetworkSlowStore determines if a store should be considered a network slow store
 func isNetworkSlowStore(
+	cluster sche.SchedulerCluster,
 	store *core.StoreInfo,
 	allStores []*core.StoreInfo,
 	problematicNetwork map[uint64]map[uint64]struct{},
 	networkSlowStoreRecoverStartAts map[uint64]*time.Time,
 ) bool {
 	storeID := store.GetID()
-	networkSlowScores := filterNetworkSlowScores(store.GetNetworkSlowScores(), networkSlowStoreRecoverStartAts)
+	networkSlowScores := filterNetworkSlowScores(cluster, store.GetNetworkSlowScores(), networkSlowStoreRecoverStartAts)
 
 	// Can not detect slow stores with less than 3 scores
 	if len(networkSlowScores) <= 2 {
 		return false
 	}
 
-	// Check if all other stores report problems with this store
-	if len(problematicNetwork[storeID]) >= len(allStores)-1-len(networkSlowStoreRecoverStartAts) {
+	// Check if all other stores report problems with this store. Only count
+	// networkSlowStoreRecoverStartAts entries that are also part of allStores
+	// (the live population): a store already excluded from allStores (e.g.
+	// removed, or one whose rollback path in persistLocked left it in this
+	// map) would otherwise be subtracted a second time, shrinking the
+	// denominator below what the live population actually supports and
+	// making consensus easier to reach than it should be.
+	liveIDs := make(map[uint64]struct{}, len(allStores))
+	for _, s := range allStores {
+		liveIDs[s.GetID()] = struct{}{}
+	}
+	liveRecovering := 0
+	for id := range networkSlowStoreRecoverStartAts {
+		if _, ok := liveIDs[id]; ok {
+			liveRecovering++
+		}
+	}
+	if len(problematicNetwork[storeID]) >= len(allStores)-1-liveRecovering {
 		return true
 	}
 
@@ -748,13 +792,22 @@ func isNetworkSlowStore(
 	return fluctuationCount >= 2
 }
 
-// filterNetworkSlowScores removes already slow stores from network slow scores to avoid duplicate detection
+// filterNetworkSlowScores removes already slow stores, and stores confirmed
+// removed from the cluster, from network slow scores to avoid duplicate
+// detection and evaluating a target that can no longer be evicted. A target
+// missing from GetStore (nil) is ambiguous -- e.g. a store referenced only as
+// a NetworkSlowScores map key before it has ever registered -- so only a
+// store known to be removed is filtered; nil is kept.
 func filterNetworkSlowScores(
+	cluster sche.SchedulerCluster,
 	scores map[uint64]uint64,
 	networkSlowStoreRecoverStartAts map[uint64]*time.Time,
 ) map[uint64]uint64 {
 	filteredScores := make(map[uint64]uint64)
 	for storeID, score := range scores {
+		if target := cluster.GetStore(storeID); target != nil && target.IsRemoved() {
+			continue
+		}
 		if _, isSlowStore := networkSlowStoreRecoverStartAts[storeID]; !isSlowStore {
 			filteredScores[storeID] = score
 		}

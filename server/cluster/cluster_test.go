@@ -3547,6 +3547,147 @@ func TestInitSchedulersPreservesConcurrentScheduleUpdate(t *testing.T) {
 	re.Equal(float64(60), reloadedOpt.GetScheduleConfig().DefaultStoreLimit.AddPeer)
 }
 
+// TestSetAllStoresLimitDoesNotRestoreRemovedStoreLimit guards against
+// PersistOptions.GetStoreLimit's create-on-miss side effect leaking into
+// SetAllStoresLimit's refreshStoreRateLimit loop. A tombstoned store stays in
+// GetStoreIDs() until its final removal, so that loop still visits it after
+// RemoveStoreLimit has deliberately deleted its config entry; a mutating
+// lookup there would resurrect the entry. No concurrency is needed to trigger
+// this -- it's deterministic within a single goroutine.
+func TestSetAllStoresLimitDoesNotRestoreRemovedStoreLimit(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	backend := storage.NewStorageWithMemoryBackend()
+	rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, backend)
+
+	const storeID = uint64(1)
+	store := core.NewStoreInfo(&metapb.Store{Id: storeID, State: metapb.StoreState_Up})
+	rc.PutStore(store)
+	rc.AddStoreLimit(store.GetMeta())
+
+	rc.PutStore(store.Clone(core.SetStoreState(metapb.StoreState_Tombstone)))
+	rc.RemoveStoreLimit(storeID)
+	_, ok := opt.GetScheduleConfig().StoreLimit[storeID]
+	re.False(ok)
+
+	re.NoError(rc.SetAllStoresLimit(storelimit.AddPeer, 60))
+	_, ok = opt.GetScheduleConfig().StoreLimit[storeID]
+	re.False(ok)
+
+	re.NoError(opt.Persist(backend))
+	_, reloaded, err := newTestScheduleConfig()
+	re.NoError(err)
+	re.NoError(reloaded.Reload(backend))
+	_, ok = reloaded.GetScheduleConfig().StoreLimit[storeID]
+	re.False(ok)
+}
+
+// TestPutMetaStoreDoesNotRestoreRemovedStoreLimit guards against
+// AddStoreLimit recreating a StoreLimit entry for an already-tombstoned
+// store. PutMetaStore calls AddStoreLimit unconditionally after
+// putStoreImpl, and putStoreImpl never resurrects an existing store's
+// State/NodeState -- so a PutStore whose gRPC preflight raced a concurrent
+// BuryStore still lands on a store that's tombstoned by the time
+// AddStoreLimit runs. AddStoreLimit's own `store` argument is the caller's
+// request payload, not the authoritative post-putStoreImpl state, so it
+// can't be used to detect this; the fix re-fetches instead.
+func TestPutMetaStoreDoesNotRestoreRemovedStoreLimit(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	backend := storage.NewStorageWithMemoryBackend()
+	rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, backend)
+
+	store := newTestStores(1, "2.0.0")[0]
+	rc.PutStore(store)
+	rc.AddStoreLimit(store.GetMeta())
+	rc.PutStore(store.Clone(core.SetStoreState(metapb.StoreState_Offline, true)))
+	re.NoError(rc.BuryStore(store.GetID(), false))
+	_, ok := opt.GetScheduleConfig().StoreLimit[store.GetID()]
+	re.False(ok)
+
+	re.NoError(rc.PutMetaStore(store.GetMeta()))
+	re.True(rc.GetStore(store.GetID()).IsRemoved())
+	_, ok = opt.GetScheduleConfig().StoreLimit[store.GetID()]
+	re.False(ok)
+
+	_, reloaded, err := newTestScheduleConfig()
+	re.NoError(err)
+	re.NoError(reloaded.Reload(backend))
+	_, ok = reloaded.GetScheduleConfig().StoreLimit[store.GetID()]
+	re.False(ok)
+}
+
+// TestPutMetaStoreCannotRaceConcurrentRegistrationAndBury guards against
+// PutMetaStore's wasKnown snapshot going stale: a request that reads
+// wasKnown=false, then pauses before putStoreImpl, can't let a second,
+// fully-completed register-then-bury of the same store ID land in between --
+// storeStateLock must serialize the whole thing. Proven by showing a
+// concurrent BuryStore for the same ID cannot complete while PutMetaStore is
+// paused mid-call, not just by checking the eventual outcome (which the
+// no-guard code also happens to get right if the race doesn't actually
+// interleave).
+func TestPutMetaStoreCannotRaceConcurrentRegistrationAndBury(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	backend := storage.NewStorageWithMemoryBackend()
+	rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, backend)
+
+	const storeID = uint64(1)
+	meta := &metapb.Store{
+		Id:      storeID,
+		Address: "mock://tikv-1:1",
+		State:   metapb.StoreState_Up,
+		Version: "2.0.0",
+	}
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/putMetaStoreAfterStoreStateLock", "return(true)"))
+	defer failpoint.Disable("github.com/tikv/pd/server/cluster/putMetaStoreAfterStoreStateLock") //nolint:errcheck
+
+	putDone := make(chan error, 1)
+	go func() {
+		putDone <- rc.PutMetaStore(meta)
+	}()
+
+	// Give PutMetaStore time to acquire storeStateLock, read wasKnown (false,
+	// since the store doesn't exist yet), and reach the failpoint's sleep.
+	time.Sleep(50 * time.Millisecond)
+
+	// A full register-then-bury of the same ID must not be able to complete
+	// while PutMetaStore is paused holding storeStateLock for it.
+	buryDone := make(chan error, 1)
+	go func() {
+		store := core.NewStoreInfo(&metapb.Store{Id: storeID, State: metapb.StoreState_Up})
+		rc.PutStore(store)
+		rc.PutStore(store.Clone(core.SetStoreState(metapb.StoreState_Offline, true)))
+		buryDone <- rc.BuryStore(storeID, false)
+	}()
+
+	select {
+	case err := <-buryDone:
+		re.Fail("BuryStore returned before PutMetaStore released storeStateLock", "err: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	re.NoError(<-putDone)
+	re.NoError(<-buryDone)
+
+	re.True(rc.GetStore(storeID).IsRemoved())
+	_, ok := opt.GetScheduleConfig().StoreLimit[storeID]
+	re.False(ok, "the bury that ran after PutMetaStore released the lock must be the final word on this store's limit")
+}
+
 func TestPatrolRegionConcurrency(t *testing.T) {
 	re := require.New(t)
 

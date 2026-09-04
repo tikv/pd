@@ -544,10 +544,20 @@ func testStateAndLimit(re *require.Assertions, clusterID uint64, rc *cluster.Raf
 	// prepare
 	storeID := store.GetId()
 	oc := rc.GetOperatorController()
-	err := rc.SetStoreLimit(storeID, storelimit.AddPeer, 60)
-	re.NoError(err)
-	err = rc.SetStoreLimit(storeID, storelimit.RemovePeer, 60)
-	re.NoError(err)
+	// The store can be left tombstoned by a previous call to this helper (the
+	// tombstone beforeState block runs it twice on the same store). Production
+	// never un-tombstones a store, so don't fake that transition here either --
+	// these SetStoreLimit calls only exist to seed a limit before resetStoreState
+	// below establishes the state this specific case actually wants to test, and
+	// resetStoreState's own Tombstone branch clears any limit anyway, so seeding
+	// one is pointless (and rejected by SetStoreLimit) once the store is already
+	// tombstoned.
+	if store := rc.GetStore(storeID); store == nil || !store.IsRemoved() {
+		err := rc.SetStoreLimit(storeID, storelimit.AddPeer, 60)
+		re.NoError(err)
+		err = rc.SetStoreLimit(storeID, storelimit.RemovePeer, 60)
+		re.NoError(err)
+	}
 	op := operator.NewTestOperator(2, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: storeID, PeerID: 3})
 	oc.AddOperator(op)
 	op = operator.NewTestOperator(2, &metapb.RegionEpoch{}, operator.OpRegion, operator.RemovePeer{FromStore: storeID})
@@ -556,7 +566,7 @@ func testStateAndLimit(re *require.Assertions, clusterID uint64, rc *cluster.Raf
 	resetStoreState(re, rc, store.GetId(), beforeState)
 	_, isOKBefore := rc.GetAllStoresLimit()[storeID]
 	// run
-	err = run(rc)
+	err := run(rc)
 	// judge
 	_, isOKAfter := rc.GetAllStoresLimit()[storeID]
 	if len(expectStates) != 0 {
