@@ -27,9 +27,11 @@ import (
 func TestUnmarshalRemoteConfigMigratesDefaultStoreLimit(t *testing.T) {
 	oldAddPeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
 	oldRemovePeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer)
+	oldTransferLeaderIn := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.TransferLeaderIn)
 	t.Cleanup(func() {
 		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, oldAddPeer)
 		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, oldRemovePeer)
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.TransferLeaderIn, oldTransferLeaderIn)
 	})
 
 	testCases := []struct {
@@ -40,17 +42,22 @@ func TestUnmarshalRemoteConfigMigratesDefaultStoreLimit(t *testing.T) {
 		{
 			name:     "missing default uses process default",
 			data:     `{"schedule":{}}`,
-			expected: sc.StoreLimitConfig{AddPeer: 15, RemovePeer: 15},
+			expected: sc.StoreLimitConfig{AddPeer: 15, RemovePeer: 15, TransferLeaderIn: 25},
 		},
 		{
 			name:     "legacy rate backfills missing default",
 			data:     `{"schedule":{"store-balance-rate":60}}`,
-			expected: sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 60},
+			expected: sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 60, TransferLeaderIn: 25},
 		},
 		{
 			name:     "explicit zero remains unlimited",
 			data:     `{"schedule":{"store-balance-rate":60,"default-store-limit":{"add-peer":0,"remove-peer":0}}}`,
-			expected: sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 0},
+			expected: sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 0, TransferLeaderIn: 25},
+		},
+		{
+			name:     "explicit transfer leader zero remains unlimited",
+			data:     `{"schedule":{"default-store-limit":{"transfer-leader-in":0}}}`,
+			expected: sc.StoreLimitConfig{AddPeer: 15, RemovePeer: 15, TransferLeaderIn: 0},
 		},
 	}
 
@@ -58,6 +65,7 @@ func TestUnmarshalRemoteConfigMigratesDefaultStoreLimit(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, 15)
 			sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, 15)
+			sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.TransferLeaderIn, 25)
 
 			cfg, err := unmarshalRemoteConfig([]byte(testCase.data))
 			require.NoError(t, err)

@@ -121,6 +121,7 @@ func (tl TransferLeader) Influence(opInfluence *OpInfluence, region *core.Region
 	from.LeaderCount--
 	to.LeaderSize += region.GetApproximateSize()
 	to.LeaderCount++
+	to.AddStepCost(storelimit.TransferLeaderIn, storelimit.RegionInfluence[storelimit.TransferLeaderIn])
 }
 
 // Timeout returns duration that current step may take.

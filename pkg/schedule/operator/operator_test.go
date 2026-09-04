@@ -235,7 +235,10 @@ func (suite *operatorTestSuite) TestInfluence() {
 		LeaderCount: 1,
 		RegionSize:  50,
 		RegionCount: 1,
-		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
+		StepCost: map[storelimit.Type]int64{
+			storelimit.AddPeer:          1000,
+			storelimit.TransferLeaderIn: 1000,
+		},
 	}, *storeOpInfluence[2])
 
 	RemovePeer{FromStore: 1}.Influence(&opInfluence, region)
@@ -251,7 +254,10 @@ func (suite *operatorTestSuite) TestInfluence() {
 		LeaderCount: 1,
 		RegionSize:  50,
 		RegionCount: 1,
-		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
+		StepCost: map[storelimit.Type]int64{
+			storelimit.AddPeer:          1000,
+			storelimit.TransferLeaderIn: 1000,
+		},
 	}, *storeOpInfluence[2])
 
 	MergeRegion{IsPassive: false}.Influence(&opInfluence, region)
@@ -267,7 +273,10 @@ func (suite *operatorTestSuite) TestInfluence() {
 		LeaderCount: 1,
 		RegionSize:  50,
 		RegionCount: 1,
-		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
+		StepCost: map[storelimit.Type]int64{
+			storelimit.AddPeer:          1000,
+			storelimit.TransferLeaderIn: 1000,
+		},
 	}, *storeOpInfluence[2])
 
 	MergeRegion{IsPassive: true}.Influence(&opInfluence, region)
@@ -283,7 +292,10 @@ func (suite *operatorTestSuite) TestInfluence() {
 		LeaderCount: 1,
 		RegionSize:  50,
 		RegionCount: 0,
-		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
+		StepCost: map[storelimit.Type]int64{
+			storelimit.AddPeer:          1000,
+			storelimit.TransferLeaderIn: 1000,
+		},
 	}, *storeOpInfluence[2])
 }
 

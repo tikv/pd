@@ -36,9 +36,12 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/schedulingpb"
 
+	"github.com/tikv/pd/pkg/core"
+	coreconstant "github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/schedule/types"
@@ -869,6 +872,36 @@ func (suite *serverTestSuite) TestStoreLimit() {
 	}
 	op = operator.NewTestOperator(2, &metapb.RegionEpoch{}, operator.OpRegion, operator.RemovePeer{FromStore: 2})
 	checkOperatorFail(re, oc, op)
+
+	setTransferLeaderInLimit := func(rate float64) {
+		url := fmt.Sprintf("%s/pd/api/v1/store/2/limit", leaderServer.GetAddr())
+		body := fmt.Sprintf(`{"rate":%g,"type":"transfer-leader-in"}`, rate)
+		resp, err := tests.TestDialClient.Post(url, "application/json", strings.NewReader(body))
+		re.NoError(err)
+		defer resp.Body.Close()
+		re.Equal(http.StatusOK, resp.StatusCode)
+	}
+	setTransferLeaderInLimit(60)
+	waitSyncFinish(re, tc, storelimit.TransferLeaderIn, 60)
+	op = operator.NewTestOperator(2, &metapb.RegionEpoch{}, operator.OpLeader,
+		operator.TransferLeader{FromStore: 1, ToStore: 2})
+	checkOperatorSuccess(re, oc, op)
+	op = operator.NewTestOperator(2, &metapb.RegionEpoch{}, operator.OpLeader,
+		operator.TransferLeader{FromStore: 1, ToStore: 2})
+	checkOperatorFail(re, oc, op)
+
+	setTransferLeaderInLimit(0)
+	waitSyncFinish(re, tc, storelimit.TransferLeaderIn, 0)
+	targetStore := tc.GetPrimaryServer().GetCluster().GetStore(2)
+	re.NotNil(targetStore)
+	targetStore = targetStore.Clone(core.SetLastHeartbeatTS(time.Now()))
+	storeFilter := &filter.StoreStateFilter{TransferLeader: true, OperatorLevel: coreconstant.Medium}
+	re.True(storeFilter.Target(tc.GetPrimaryServer().GetCluster().GetSharedConfig(), targetStore).IsOK())
+	for range 3 {
+		op = operator.NewTestOperator(2, &metapb.RegionEpoch{}, operator.OpLeader,
+			operator.TransferLeader{FromStore: 1, ToStore: 2})
+		checkOperatorSuccess(re, oc, op)
+	}
 }
 
 func checkOperatorSuccess(re *require.Assertions, oc *operator.Controller, op *operator.Operator) {

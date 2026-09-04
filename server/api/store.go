@@ -16,6 +16,7 @@ package api
 
 import (
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -359,14 +360,9 @@ func (h *storeHandler) SetStoreLimit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rateVal, ok := input["rate"]
-	if !ok {
-		h.rd.JSON(w, http.StatusBadRequest, "rate unset")
-		return
-	}
-	ratePerMin, ok := rateVal.(float64)
-	if !ok || ratePerMin <= 0 {
-		h.rd.JSON(w, http.StatusBadRequest, "invalid rate which should be larger than 0")
+	ratePerMin, err := getStoreLimitRate(input)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -443,14 +439,9 @@ func (h *storesHandler) SetAllStoresLimit(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	rateVal, ok := input["rate"]
-	if !ok {
-		h.rd.JSON(w, http.StatusBadRequest, "rate unset")
-		return
-	}
-	ratePerMin, ok := rateVal.(float64)
-	if !ok || ratePerMin <= 0 {
-		h.rd.JSON(w, http.StatusBadRequest, "invalid rate which should be larger than 0")
+	ratePerMin, err := getStoreLimitRate(input)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -755,6 +746,25 @@ func getStoreLimitType(input map[string]any) ([]storelimit.Type, error) {
 	}
 
 	return []storelimit.Type{storelimit.AddPeer, storelimit.RemovePeer}, err
+}
+
+func getStoreLimitRate(input map[string]any) (float64, error) {
+	rateValue, ok := input["rate"]
+	if !ok {
+		return 0, errors.New("rate unset")
+	}
+	ratePerMin, ok := rateValue.(float64)
+	if !ok || math.IsNaN(ratePerMin) || math.IsInf(ratePerMin, 0) || ratePerMin < 0 {
+		return 0, errors.New("invalid rate which should be larger than 0")
+	}
+	if ratePerMin > 0 {
+		return ratePerMin, nil
+	}
+	typeName, ok := input["type"].(string)
+	if !ok || typeName != storelimit.TransferLeaderIn.String() {
+		return 0, errors.New("invalid rate which should be larger than 0")
+	}
+	return ratePerMin, nil
 }
 
 func parseStoreLimitType(typeName string) (storelimit.Type, error) {

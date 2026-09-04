@@ -16,6 +16,7 @@ package filter
 
 import (
 	"strconv"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -458,6 +459,29 @@ func (f *StoreStateFilter) exceedAddLimit(_ config.SharedConfigProvider, store *
 	return statusOK
 }
 
+func (f *StoreStateFilter) exceedTransferLeaderInLimit(conf config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
+	if f.AllowTemporaryStates || f.OperatorLevel == constant.Urgent {
+		f.Reason = storeStateOK
+		return statusOK
+	}
+	// In microservice mode, the persisted config may arrive before the in-memory
+	// limiter is refreshed. Let the operator controller synchronize and perform
+	// the final check instead of rejecting the store with a stale limiter.
+	if limit, ok := store.GetStoreLimit().(*storelimit.StoreRateLimit); ok {
+		ratePerSec := conf.GetStoreLimitByType(store.GetID(), storelimit.TransferLeaderIn) / time.Minute.Seconds()
+		if limit.Rate(storelimit.TransferLeaderIn) != ratePerSec {
+			f.Reason = storeStateOK
+			return statusOK
+		}
+	}
+	if !store.IsAvailable(storelimit.TransferLeaderIn, f.OperatorLevel) {
+		f.Reason = storeStateExceedTransferLeaderInLimit
+		return statusStoreTransferLeaderInLimit
+	}
+	f.Reason = storeStateOK
+	return statusOK
+}
+
 func (f *StoreStateFilter) tooManySnapshots(conf config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
 	if !f.AllowTemporaryStates && (uint64(store.GetSendingSnapCount()) > conf.GetMaxSnapshotCount() ||
 		uint64(store.GetReceivingSnapCount()) > conf.GetMaxSnapshotCount()) {
@@ -523,7 +547,8 @@ func (f *StoreStateFilter) anyConditionMatch(typ int, conf config.SharedConfigPr
 		funcs = []conditionFunc{f.isBusy}
 	case leaderTarget:
 		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.pauseLeaderTransferIn,
-			f.slowStoreEvicted, f.stoppingStoreEvicted, f.slowTrendEvicted, f.isDisconnected, f.isBusy, f.hasRejectLeaderProperty}
+			f.slowStoreEvicted, f.stoppingStoreEvicted, f.slowTrendEvicted, f.isDisconnected, f.isBusy,
+			f.hasRejectLeaderProperty, f.exceedTransferLeaderInLimit}
 	case regionTarget:
 		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.isDisconnected, f.isBusy,
 			f.exceedAddLimit, f.tooManySnapshots, f.tooManyPendingPeers}

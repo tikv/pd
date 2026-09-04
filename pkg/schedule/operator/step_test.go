@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 )
@@ -115,6 +116,20 @@ func (suite *operatorStepTestSuite) TestTransferLeader() {
 		},
 	}
 	suite.check(re, step, "transfer leader from store 1 to store 9", testCases)
+}
+
+func TestTransferLeaderInfluenceUsesFixedTargetCost(t *testing.T) {
+	step := TransferLeader{FromStore: 1, ToStore: 2}
+	for _, regionSize := range []int64{1, 1024} {
+		influence := NewOpInfluence()
+		region := core.NewTestRegionInfo(1, 1, nil, nil, core.SetApproximateSize(regionSize))
+
+		step.Influence(influence, region)
+
+		require.Zero(t, influence.GetStoreInfluence(1).GetStepCost(storelimit.TransferLeaderIn))
+		require.Equal(t, storelimit.RegionInfluence[storelimit.TransferLeaderIn],
+			influence.GetStoreInfluence(2).GetStepCost(storelimit.TransferLeaderIn))
+	}
 }
 
 func (suite *operatorStepTestSuite) TestAddPeer() {
