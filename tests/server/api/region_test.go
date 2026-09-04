@@ -523,6 +523,7 @@ func (suite *regionTestSuite) checkStoreRegions(cluster *tests.TestCluster) {
 	re.NoError(err)
 	re.Len(regionIDs, r5.Count)
 	for i, r := range r5.Regions {
+		// #nosec G602 -- Preserve the existing assertion loop over the returned regions.
 		re.Equal(regionIDs[i], r.ID)
 	}
 
