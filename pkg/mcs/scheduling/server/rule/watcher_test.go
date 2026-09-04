@@ -434,7 +434,7 @@ func TestReconcileRuleSnapshot(t *testing.T) {
 	re.Nil(ruleManager.GetRule("payload", "rule"))
 }
 
-func TestRuleWatcherReplaysFailedLiveRuleUpdate(t *testing.T) {
+func TestRuleWatcherReconcilesNewerSnapshotAfterFailedLiveRuleUpdate(t *testing.T) {
 	re := require.New(t)
 	ctx, client, clean := prepare(t, false)
 	defer clean()
@@ -481,11 +481,11 @@ func TestRuleWatcherReplaysFailedLiveRuleUpdate(t *testing.T) {
 
 	logFile := testutil.InitTempFileLogger("info")
 	defer os.RemoveAll(logFile)
-	updatedRule := ruleManager.GetRule("g", "r")
-	updatedRule.LabelConstraints[0].Values = []string{"z2"}
-	updatedValue, err := json.Marshal(updatedRule)
+	failedRule := ruleManager.GetRule("g", "r")
+	failedRule.LabelConstraints[0].Values = []string{"z2"}
+	failedValue, err := json.Marshal(failedRule)
 	re.NoError(err)
-	updated, err := client.Put(ctx, keypath.RuleKeyPath(updatedRule.StoreKey()), string(updatedValue))
+	_, err = client.Put(ctx, keypath.RuleKeyPath(failedRule.StoreKey()), string(failedValue))
 	re.NoError(err)
 
 	testutil.Eventually(re, func() bool {
@@ -496,11 +496,17 @@ func TestRuleWatcherReplaysFailedLiveRuleUpdate(t *testing.T) {
 	})
 	re.Equal([]string{"z1"}, ruleManager.GetRule("g", "r").LabelConstraints[0].Values)
 
-	cluster.SetStoreLabel(1, map[string]string{"zone": "z2"})
+	correctedRule := ruleManager.GetRule("g", "r")
+	correctedRule.Count = 2
+	correctedValue, err := json.Marshal(correctedRule)
+	re.NoError(err)
+	corrected, err := client.Put(ctx, keypath.RuleKeyPath(correctedRule.StoreKey()), string(correctedValue))
+	re.NoError(err)
+
 	testutil.Eventually(re, func() bool {
 		rule := ruleManager.GetRule("g", "r")
-		return rule != nil && len(rule.LabelConstraints) == 1 &&
-			len(rule.LabelConstraints[0].Values) == 1 && rule.LabelConstraints[0].Values[0] == "z2"
+		return rule != nil && rule.Count == 2 && len(rule.LabelConstraints) == 1 &&
+			len(rule.LabelConstraints[0].Values) == 1 && rule.LabelConstraints[0].Values[0] == "z1"
 	})
-	re.Equal(updated.Header.Revision, rw.ruleRevision)
+	re.Equal(corrected.Header.Revision, rw.ruleRevision)
 }

@@ -423,10 +423,12 @@ type LoopWatcher struct {
 	// snapshot without changing their externally visible event contract.
 	reloadOnCompaction bool
 	// compactionReloadFn replaces the default full-value reload for consumers
-	// that need a specialized reconciliation strategy.
+	// that need a specialized reconciliation strategy. When live event retries
+	// are enabled, it also reconciles an event batch that failed to apply.
 	compactionReloadFn func(context.Context) (int64, error)
-	// retryOnPostEventError keeps the watch revision unchanged when postEventsFn
-	// fails, so the same event batch is replayed after the watch is recreated.
+	// retryOnPostEventError recovers from a failed postEventsFn without advancing
+	// past unapplied data. It uses compactionReloadFn when available; otherwise,
+	// it recreates the watch from the unchanged revision to replay the batch.
 	retryOnPostEventError bool
 	// updateClientCh is used to update the etcd client.
 	// It's only used for testing.
@@ -701,9 +703,19 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 				log.Error("run post event failed in watch loop", zap.Error(err),
 					zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
 				if lw.retryOnPostEventError {
-					// Recreate the watch from the unadvanced revision so the
-					// consumer can apply the same event batch again.
-					return revision, err
+					if lw.compactionReloadFn == nil {
+						// Recreate the watch from the unadvanced revision so the
+						// consumer can apply the same event batch again.
+						return revision, err
+					}
+					// An event that remains invalid can otherwise block all newer
+					// revisions. Reconcile the latest authoritative snapshot instead.
+					loadedRevision, shouldContinue := lw.reloadWithRetry(ctx, lw.compactionReloadFn)
+					if !shouldContinue {
+						return max(revision, loadedRevision), nil
+					}
+					revision = loadedRevision
+					continue
 				}
 				if lw.atomicLoadCallbacks {
 					log.Warn("watch callback batch failed, reload from etcd in watch loop",
@@ -1059,16 +1071,20 @@ func (lw *LoopWatcher) SetReloadOnCompaction() {
 
 // SetCompactionReloadFn sets a consumer-specific compaction reload and enables
 // it. The callback must return the next revision to watch after reconciliation.
-// It must be called before StartWatchLoop.
+// When SetRetryOnPostEventError is also enabled, the callback reconciles a
+// failed live event batch from the latest authoritative snapshot. It must be
+// called before StartWatchLoop.
 func (lw *LoopWatcher) SetCompactionReloadFn(fn func(context.Context) (int64, error)) {
 	lw.compactionReloadFn = fn
 }
 
-// SetRetryOnPostEventError makes a failed postEventsFn call recreate the watch
-// from the unadvanced revision. It must be called before StartWatchLoop.
+// SetRetryOnPostEventError prevents a failed postEventsFn call from advancing
+// past unapplied data. When a custom compaction reload is configured, it
+// reconciles the latest authoritative snapshot; otherwise, it recreates the
+// watch from the unadvanced revision. It must be called before StartWatchLoop.
 // Callbacks must keep changes private until postEventsFn publishes them and
-// must tolerate replaying the same event batch. This behavior takes precedence
-// over the full reload enabled by SetAtomicLoadCallbacks.
+// tolerate replay. This behavior takes precedence over the full reload enabled
+// by SetAtomicLoadCallbacks.
 func (lw *LoopWatcher) SetRetryOnPostEventError() {
 	lw.retryOnPostEventError = true
 }
