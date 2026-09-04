@@ -235,20 +235,8 @@ func (m *MetaServiceGroupManager) updateAssignmentTxn(txn kv.Txn, oldGroupID, ne
 	// meta-service group lock, so reading the shared map here would race with
 	// UpdateGroupsSafely.
 	if oldGroupID != "" {
-		status, err := m.loadGroupStatus(txn, oldGroupID)
-		if err != nil {
+		if err := m.decrementAssignmentTxn(txn, oldGroupID, 1); err != nil {
 			return err
-		}
-		// Only persist a decrement when the group still has assignments. A deleted
-		// group's status key is already removed, so skipping avoids recreating a
-		// stale zero-value status; a count of 0 needs no change anyway. This also
-		// guards against underflow after a manual reset via PatchStatus, which
-		// would otherwise make findMinMetaGroup prefer the group.
-		if status.AssignmentCount > 0 {
-			status.AssignmentCount--
-			if err := m.store.SaveMetaServiceGroupStatus(txn, oldGroupID, status); err != nil {
-				return err
-			}
 		}
 	}
 	if newGroupID != "" {
@@ -262,6 +250,30 @@ func (m *MetaServiceGroupManager) updateAssignmentTxn(txn kv.Txn, oldGroupID, ne
 		}
 	}
 	return nil
+}
+
+// decrementAssignmentTxn decreases the persisted assignment count of one
+// meta-service group. Callers that remove multiple keyspaces should aggregate
+// their counts per group and invoke this method once per group. Besides using
+// fewer etcd transaction operations, this avoids scheduling duplicate writes
+// to the same key in one transaction.
+func (m *MetaServiceGroupManager) decrementAssignmentTxn(txn kv.Txn, groupID string, count int) error {
+	if groupID == "" || count <= 0 {
+		return nil
+	}
+	status, err := m.loadGroupStatus(txn, groupID)
+	if err != nil {
+		return err
+	}
+	// Only persist a decrement when the group still has assignments. A deleted
+	// group's status key is already removed, so skipping avoids recreating a
+	// stale zero-value status. Clamp the result at zero to guard against a stale
+	// or manually reset assignment count.
+	if status.AssignmentCount == 0 {
+		return nil
+	}
+	status.AssignmentCount = max(0, status.AssignmentCount-count)
+	return m.store.SaveMetaServiceGroupStatus(txn, groupID, status)
 }
 
 // loadGroupStatus loads the persisted status of a single meta-service group

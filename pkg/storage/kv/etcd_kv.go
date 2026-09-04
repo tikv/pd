@@ -47,6 +47,8 @@ type etcdKVBase struct {
 	client *clientv3.Client
 }
 
+var _ ConditionalTxnRunner = (*etcdKVBase)(nil)
+
 // NewEtcdKVBase creates a new etcd kv.
 func NewEtcdKVBase(client *clientv3.Client) *etcdKVBase {
 	return &etcdKVBase{client: client}
@@ -210,9 +212,20 @@ type etcdTxn struct {
 
 // RunInTxn runs user provided function f in a transaction.
 func (kv *etcdKVBase) RunInTxn(ctx context.Context, f func(txn Txn) error) error {
+	return kv.RunInTxnWithConditions(ctx, nil, f)
+}
+
+// RunInTxnWithConditions runs user provided function f in a transaction with
+// additional etcd comparisons.
+func (kv *etcdKVBase) RunInTxnWithConditions(
+	ctx context.Context,
+	conditions []clientv3.Cmp,
+	f func(txn Txn) error,
+) error {
 	txn := &etcdTxn{
-		kv:  kv,
-		ctx: ctx,
+		kv:         kv,
+		ctx:        ctx,
+		conditions: append([]clientv3.Cmp(nil), conditions...),
 	}
 	err := f(txn)
 	if err != nil {

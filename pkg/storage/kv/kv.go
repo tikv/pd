@@ -14,7 +14,11 @@
 
 package kv
 
-import "context"
+import (
+	"context"
+
+	clientv3 "go.etcd.io/etcd/client/v3"
+)
 
 // RawTxnCmpType represents the comparison type that is used in the condition of RawTxn.
 type RawTxnCmpType int
@@ -114,6 +118,12 @@ type BaseReadWrite interface {
 // It enables kv to atomically apply a set of updates.
 type Txn interface {
 	BaseReadWrite
+}
+
+// ConditionalTxnRunner runs a transaction with additional etcd comparisons.
+// The comparisons and the transaction operations are committed atomically.
+type ConditionalTxnRunner interface {
+	RunInTxnWithConditions(ctx context.Context, conditions []clientv3.Cmp, f func(txn Txn) error) error
 }
 
 // Base is an abstract interface for load/save pd cluster data.

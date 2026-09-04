@@ -820,7 +820,7 @@ const (
 // UpdateKeyspaceConfig changes target keyspace's config in the order specified in mutations.
 // It returns error if saving failed, operation not allowed, or if keyspace not exists.
 func (manager *Manager) UpdateKeyspaceConfig(name string, mutations []*Mutation) (*keyspacepb.KeyspaceMeta, error) {
-	return manager.updateKeyspaceConfigTxn(name, func(meta *keyspacepb.KeyspaceMeta) error {
+	return manager.updateKeyspaceConfigTxn(name, mutationsAffectKeyspaceGroupMembership(mutations), func(meta *keyspacepb.KeyspaceMeta) error {
 		return applyKeyspaceConfigMutations(meta.Config, mutations)
 	})
 }
@@ -834,12 +834,21 @@ func (manager *Manager) UpdateKeyspaceConfigWithPreconditions(name string, mutat
 	if len(preconditions) == 0 {
 		return manager.UpdateKeyspaceConfig(name, mutations)
 	}
-	return manager.updateKeyspaceConfigTxn(name, func(meta *keyspacepb.KeyspaceMeta) error {
+	return manager.updateKeyspaceConfigTxn(name, mutationsAffectKeyspaceGroupMembership(mutations), func(meta *keyspacepb.KeyspaceMeta) error {
 		if err := checkKeyspaceConfigPreconditions(meta.GetConfig(), preconditions); err != nil {
 			return err
 		}
 		return applyKeyspaceConfigMutations(meta.Config, mutations)
 	})
+}
+
+func mutationsAffectKeyspaceGroupMembership(mutations []*Mutation) bool {
+	for _, mutation := range mutations {
+		if mutation.Key == UserKindKey || mutation.Key == TSOKeyspaceGroupIDKey {
+			return true
+		}
+	}
+	return false
 }
 
 func checkKeyspaceConfigPreconditions(config map[string]string, preconditions map[string]*string) error {
@@ -888,7 +897,19 @@ func (manager *Manager) runTxnWithMetaGroupLock(f func(txn kv.Txn) error) error 
 	return manager.store.RunInTxn(manager.ctx, f)
 }
 
-func (manager *Manager) updateKeyspaceConfigTxn(name string, update func(meta *keyspacepb.KeyspaceMeta) error) (*keyspacepb.KeyspaceMeta, error) {
+func (manager *Manager) updateKeyspaceConfigTxn(
+	name string,
+	mayUpdateKeyspaceGroup bool,
+	update func(meta *keyspacepb.KeyspaceMeta) error,
+) (*keyspacepb.KeyspaceMeta, error) {
+	// Keep the lock order consistent with bulk keyspace removal, which holds the
+	// membership read lock before inspecting keyspace metadata. Only updates that
+	// can relocate a keyspace need to serialize with removal.
+	if mayUpdateKeyspaceGroup && manager.kgm != nil {
+		manager.kgm.membershipMutationLock.Lock()
+		defer manager.kgm.membershipMutationLock.Unlock()
+	}
+
 	var meta *keyspacepb.KeyspaceMeta
 	oldConfig := make(map[string]string)
 	txnFunc := func(txn kv.Txn) error {
@@ -946,15 +967,15 @@ func (manager *Manager) updateKeyspaceConfigTxn(name string, update func(meta *k
 		oldID := oldConfig[TSOKeyspaceGroupIDKey]
 		newID := newConfig[TSOKeyspaceGroupIDKey]
 		needUpdate := oldUserKind != newUserKind || oldID != newID
-		if needUpdate {
-			if err := manager.kgm.UpdateKeyspaceGroup(oldID, newID, oldUserKind, newUserKind, meta.GetId()); err != nil {
+		if needUpdate && manager.kgm != nil {
+			if err := manager.kgm.updateKeyspaceGroupWithMembershipLockHeld(oldID, newID, oldUserKind, newUserKind, meta.GetId()); err != nil {
 				return err
 			}
 		}
 		// Save the updated keyspace meta.
 		if err := manager.store.SaveKeyspaceMeta(txn, meta); err != nil {
-			if needUpdate {
-				if err := manager.kgm.UpdateKeyspaceGroup(newID, oldID, newUserKind, oldUserKind, meta.GetId()); err != nil {
+			if needUpdate && manager.kgm != nil {
+				if err := manager.kgm.updateKeyspaceGroupWithMembershipLockHeld(newID, oldID, newUserKind, oldUserKind, meta.GetId()); err != nil {
 					log.Error("failed to revert keyspace group", zap.Error(err))
 				}
 			}
@@ -1037,31 +1058,108 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 
 // RemoveKeyspace removes the keyspace specified by id if it's in proper state and not protected.
 func (manager *Manager) RemoveKeyspace(txn kv.Txn, id uint32) error {
+	if err := manager.removeKeyspacesMetadata(txn, []uint32{id}); err != nil {
+		return err
+	}
+	manager.evictKeyspacesFromCache([]uint32{id})
+	return nil
+}
+
+// removeKeyspacesMetadata schedules persistent metadata removal for the given
+// keyspaces in txn. It deliberately leaves cache eviction to the transaction
+// owner, which can perform it after a successful commit.
+func (manager *Manager) removeKeyspacesMetadata(txn kv.Txn, ids []uint32) error {
+	assignmentCounts := make(map[string]int)
+	for _, id := range ids {
+		groupID, err := manager.removeKeyspaceMetadata(txn, id)
+		if err != nil {
+			return err
+		}
+		if groupID != "" {
+			assignmentCounts[groupID]++
+		}
+	}
+	return manager.decrementMetaServiceGroupAssignmentsTxn(txn, assignmentCounts)
+}
+
+func (manager *Manager) decrementMetaServiceGroupAssignmentsTxn(txn kv.Txn, assignmentCounts map[string]int) error {
+	if manager.mgm == nil {
+		return nil
+	}
+	for groupID, count := range assignmentCounts {
+		if err := manager.mgm.decrementAssignmentTxn(txn, groupID, count); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (manager *Manager) removeKeyspaceMetadata(txn kv.Txn, id uint32) (string, error) {
+	groupID, _, _, err := manager.removeKeyspaceMetadataIfEligible(txn, id, false, nil)
+	return groupID, err
+}
+
+// tryRemoveKeyspaceMetadata removes id only when it is currently archived or
+// tombstoned and canRemove accepts its meta-service group. Missing, protected,
+// and non-removable keyspaces are skipped to preserve the bulk-removal API
+// semantics. deferred reports that an eligible keyspace should be retried in
+// the next transaction.
+func (manager *Manager) tryRemoveKeyspaceMetadata(
+	txn kv.Txn,
+	id uint32,
+	canRemove func(metaServiceGroupID string) bool,
+) (metaServiceGroupID string, removed, deferred bool, err error) {
+	return manager.removeKeyspaceMetadataIfEligible(txn, id, true, canRemove)
+}
+
+func (manager *Manager) removeKeyspaceMetadataIfEligible(
+	txn kv.Txn,
+	id uint32,
+	skipNonRemovable bool,
+	canRemove func(metaServiceGroupID string) bool,
+) (metaServiceGroupID string, removed, deferred bool, err error) {
 	manager.metaLock.Lock(id)
 	defer manager.metaLock.Unlock(id)
 	if isProtectedKeyspaceID(id) {
-		return newModifyProtectedKeyspaceError()
+		if skipNonRemovable {
+			return "", false, false, nil
+		}
+		return "", false, false, newModifyProtectedKeyspaceError()
 	}
 	meta, err := manager.store.LoadKeyspaceMeta(txn, id)
 	if err != nil {
-		return err
+		return "", false, false, err
 	}
 	if meta == nil {
-		return errs.ErrKeyspaceNotFound
+		if skipNonRemovable {
+			return "", false, false, nil
+		}
+		return "", false, false, errs.ErrKeyspaceNotFound
 	}
-	if meta.GetState() == keyspacepb.KeyspaceState_ENABLED || meta.GetState() == keyspacepb.KeyspaceState_DISABLED {
-		return errors.Errorf("cannot remove keyspace in state %s", meta.GetState().String())
+	state := meta.GetState()
+	if skipNonRemovable {
+		if state != keyspacepb.KeyspaceState_ARCHIVED && state != keyspacepb.KeyspaceState_TOMBSTONE {
+			return "", false, false, nil
+		}
+	} else if state == keyspacepb.KeyspaceState_ENABLED || state == keyspacepb.KeyspaceState_DISABLED {
+		return "", false, false, errors.Errorf("cannot remove keyspace in state %s", state.String())
+	}
+	metaServiceGroupID = meta.GetConfig()[MetaServiceGroupIDKey]
+	if canRemove != nil && !canRemove(metaServiceGroupID) {
+		return metaServiceGroupID, false, true, nil
 	}
 	err = manager.store.RemoveKeyspace(txn, id, meta.GetName())
 	if err != nil {
-		return err
+		return "", false, false, err
 	}
-	manager.keyspaceNameLookup.Delete(id)
-	manager.keyspaceStateLookup.Delete(id)
-	// Keep the meta-service group assignment accounting in sync within the same
-	// txn. Without this, removed keyspaces leak count and could permanently block
-	// deleting an otherwise-empty group.
-	return manager.unassignKeyspaceFromMetaServiceGroup(txn, meta)
+	return metaServiceGroupID, true, false, nil
+}
+
+func (manager *Manager) evictKeyspacesFromCache(ids []uint32) {
+	for _, id := range ids {
+		manager.keyspaceNameLookup.Delete(id)
+		manager.keyspaceStateLookup.Delete(id)
+	}
 }
 
 // UpdateKeyspaceStateByID updates target keyspace to the given state if it's not already in that state.
