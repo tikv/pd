@@ -1094,12 +1094,12 @@ func (suite *resourceManagerClientTestSuite) TestSwitchBurst() {
 				wreq := cas.tcs[i].makeWriteRequest()
 				rres := cas.tcs[i].makeReadResponse()
 				wres := cas.tcs[i].makeWriteResponse()
-				startTime := time.Now()
-				_, _, _, _, err := controller.OnRequestWait(suite.ctx, resourceGroupName, rreq)
+				_, _, waitDuration, _, err := controller.OnRequestWait(suite.ctx, resourceGroupName, rreq)
 				re.NoError(err)
-				_, _, _, _, err = controller.OnRequestWait(suite.ctx, resourceGroupName, wreq)
+				sum += waitDuration
+				_, _, waitDuration, _, err = controller.OnRequestWait(suite.ctx, resourceGroupName, wreq)
 				re.NoError(err)
-				sum += time.Since(startTime)
+				sum += waitDuration
 				_, err = controller.OnResponse(resourceGroupName, rreq, rres)
 				re.NoError(err)
 				_, err = controller.OnResponse(resourceGroupName, wreq, wres)
