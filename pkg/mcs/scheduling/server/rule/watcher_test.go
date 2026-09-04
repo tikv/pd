@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -476,7 +477,8 @@ func TestRuleWatcherReconcilesNewerSnapshotAfterFailedLiveRuleUpdate(t *testing.
 		ruleManager:         ruleManager,
 		checkerController:   checkerController,
 	}
-	defer rw.Close()
+	closeWatcher := sync.OnceFunc(rw.Close)
+	defer closeWatcher()
 	re.NoError(rw.initializeRuleWatcher())
 
 	logFile := testutil.InitTempFileLogger("info")
@@ -508,5 +510,6 @@ func TestRuleWatcherReconcilesNewerSnapshotAfterFailedLiveRuleUpdate(t *testing.
 		return rule != nil && rule.Count == 2 && len(rule.LabelConstraints) == 1 &&
 			len(rule.LabelConstraints[0].Values) == 1 && rule.LabelConstraints[0].Values[0] == "z1"
 	})
+	closeWatcher()
 	re.Equal(corrected.Header.Revision, rw.ruleRevision)
 }
