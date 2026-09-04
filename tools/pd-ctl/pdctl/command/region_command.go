@@ -537,11 +537,14 @@ func NewRegionWithKeyspaceCommand() *cobra.Command {
 		Use:   "keyspace <subcommand>",
 		Short: "show region information of the given keyspace",
 	}
-	r.AddCommand(&cobra.Command{
-		Use:   "id <keyspace_id> [table-id <table_id>] [<limit>]",
-		Short: "show region information for the given keyspace id, optionally filtered by table id",
-		Run:   showRegionWithKeyspaceCommandFunc,
-	})
+	idCommand := &cobra.Command{
+		Use:     "id <keyspace_id> [table-id <table_id>] [<limit>] [--batch <size>]",
+		Short:   "show region information for the given keyspace id, optionally filtered by table id",
+		Example: "pd-ctl region keyspace id 42 0 --batch 1024 > regions.json",
+		Run:     showRegionWithKeyspaceCommandFunc,
+	}
+	idCommand.Flags().Int("batch", 0, "server-side scan/write batch size; does not change the result limit or schema")
+	r.AddCommand(idCommand)
 	return r
 }
 
@@ -564,12 +567,13 @@ func showRegionWithKeyspaceCommandFunc(cmd *cobra.Command, args []string) {
 	}
 
 	prefix := regionsKeyspacePrefix + "/id/" + args[0]
+	query := make(url.Values)
 	if len(args) == 2 {
 		if _, err := strconv.Atoi(args[1]); err != nil {
 			cmd.Println("limit should be a number")
 			return
 		}
-		prefix += "?limit=" + args[1]
+		query.Set("limit", args[1])
 	} else if len(args) >= 3 {
 		if args[1] != "table-id" {
 			cmd.Println("the second argument should be table-id")
@@ -580,7 +584,6 @@ func showRegionWithKeyspaceCommandFunc(cmd *cobra.Command, args []string) {
 			cmd.Println("table-id should be a number")
 			return
 		}
-		query := make(url.Values)
 		startKey, endKey := makeTableRangeInKeyspace(keyspaceID, tableID)
 		query.Set("key", string(startKey))
 		query.Set("end_key", string(endKey))
@@ -591,7 +594,23 @@ func showRegionWithKeyspaceCommandFunc(cmd *cobra.Command, args []string) {
 			}
 			query.Set("limit", args[3])
 		}
-		prefix = regionsKeyPrefix + "?" + query.Encode()
+		prefix = regionsKeyPrefix
+	}
+
+	if flag := cmd.Flag("batch"); flag != nil && flag.Changed {
+		if len(args) >= 3 {
+			cmd.Println("--batch is not supported with table-id")
+			return
+		}
+		batch, err := cmd.Flags().GetInt("batch")
+		if err != nil || batch <= 0 {
+			cmd.Println("batch should be a positive number")
+			return
+		}
+		query.Set("batch", strconv.Itoa(batch))
+	}
+	if len(query) > 0 {
+		prefix += "?" + query.Encode()
 	}
 
 	r, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
