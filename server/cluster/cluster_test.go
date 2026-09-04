@@ -3579,6 +3579,45 @@ func TestSetAllStoresLimitDoesNotRestoreRemovedStoreLimit(t *testing.T) {
 	re.False(ok)
 }
 
+// TestPutMetaStoreDoesNotRestoreRemovedStoreLimit guards against
+// AddStoreLimit recreating a StoreLimit entry for an already-tombstoned
+// store. PutMetaStore calls AddStoreLimit unconditionally after
+// putStoreImpl, and putStoreImpl never resurrects an existing store's
+// State/NodeState -- so a PutStore whose gRPC preflight raced a concurrent
+// BuryStore still lands on a store that's tombstoned by the time
+// AddStoreLimit runs. AddStoreLimit's own `store` argument is the caller's
+// request payload, not the authoritative post-putStoreImpl state, so it
+// can't be used to detect this; the fix re-fetches instead.
+func TestPutMetaStoreDoesNotRestoreRemovedStoreLimit(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	backend := storage.NewStorageWithMemoryBackend()
+	rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, backend)
+
+	store := newTestStores(1, "2.0.0")[0]
+	rc.PutStore(store)
+	rc.AddStoreLimit(store.GetMeta())
+	rc.PutStore(store.Clone(core.SetStoreState(metapb.StoreState_Offline, true)))
+	re.NoError(rc.BuryStore(store.GetID(), false))
+	_, ok := opt.GetScheduleConfig().StoreLimit[store.GetID()]
+	re.False(ok)
+
+	re.NoError(rc.PutMetaStore(store.GetMeta()))
+	re.True(rc.GetStore(store.GetID()).IsRemoved())
+	_, ok = opt.GetScheduleConfig().StoreLimit[store.GetID()]
+	re.False(ok)
+
+	_, reloaded, err := newTestScheduleConfig()
+	re.NoError(err)
+	re.NoError(reloaded.Reload(backend))
+	_, ok = reloaded.GetScheduleConfig().StoreLimit[store.GetID()]
+	re.False(ok)
+}
+
 func TestPatrolRegionConcurrency(t *testing.T) {
 	re := require.New(t)
 

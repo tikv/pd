@@ -2437,6 +2437,17 @@ func (c *RaftCluster) GetAllStoresLimit() map[uint64]sc.StoreLimitConfig {
 // AddStoreLimit add a store limit for a given store ID.
 func (c *RaftCluster) AddStoreLimit(store *metapb.Store) {
 	storeID := store.GetId()
+	// A tombstoned store's config entry is only ever cleared once, at bury time
+	// (RemoveStoreLimit); nothing sweeps it again afterward. PutMetaStore calls
+	// AddStoreLimit unconditionally after putStoreImpl, which -- for a store
+	// that already exists -- never resurrects State/NodeState, so a PutStore
+	// whose preflight raced a concurrent BuryStore still leaves the store
+	// tombstoned here. The incoming `store` argument is the caller's request
+	// payload, not the authoritative post-putStoreImpl state, so it can't be
+	// used for this check; re-fetch instead.
+	if existing := c.GetStore(storeID); existing != nil && existing.IsRemoved() {
+		return
+	}
 	var err error
 	for range persistLimitRetryTimes {
 		added := false
