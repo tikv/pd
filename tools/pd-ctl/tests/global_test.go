@@ -51,6 +51,7 @@ func TestSendAndGetComponent(t *testing.T) {
 		mux.HandleFunc("/pd/api/v1/stores", func(w http.ResponseWriter, r *http.Request) {
 			callerID := apiutil.GetCallerIDOnHTTP(r)
 			re.Equal(command.PDControlCallerID, callerID)
+			// #nosec G705 -- require.Equal stops the test handler before echoing unexpected input.
 			fmt.Fprint(w, callerID)
 		})
 		info := apiutil.APIServiceGroup{

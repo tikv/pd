@@ -144,6 +144,7 @@ func (s *TSODispatcher) dispatch(
 			pendingTSOReqCount := len(tsoQueue.requestCh) + 1
 			requests[0] = first
 			for i := 1; i < pendingTSOReqCount; i++ {
+				// #nosec G602 -- len(requests) equals cap(requestCh)+1, which bounds pendingTSOReqCount.
 				requests[i] = <-tsoQueue.requestCh
 			}
 			done := make(chan struct{})

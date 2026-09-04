@@ -84,10 +84,12 @@ func getFromUT() string {
 		return ""
 	}
 
+	// #nosec G704 -- The URL is provided by the local test harness.
 	req, err := http.NewRequest(http.MethodGet, addr, nil)
 	if err != nil {
 		return ""
 	}
+	// #nosec G704 -- The URL is provided by the local test harness.
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil || resp.StatusCode != http.StatusOK {
 		return ""

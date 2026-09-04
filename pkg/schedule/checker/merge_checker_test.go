@@ -570,6 +570,7 @@ func (suite *mergeCheckerTestSuite) TestCache() {
 func makeKeyRanges(keys ...string) []any {
 	var res []any
 	for i := 0; i < len(keys); i += 2 {
+		// #nosec G602 -- Test inputs are start/end pairs; odd input intentionally panics.
 		res = append(res, map[string]any{"start_key": keys[i], "end_key": keys[i+1]})
 	}
 	return res
