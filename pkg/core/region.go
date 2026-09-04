@@ -720,7 +720,7 @@ func (r *RegionInfo) GetApproximateKvSize() int64 {
 	return r.approximateKvSize
 }
 
-// GetApproximateIAKvSize returns the approximate IA kv size of the region.
+// GetApproximateIAKvSize returns the approximate IA row-based logical KV size in MiB.
 func (r *RegionInfo) GetApproximateIAKvSize() int64 {
 	return r.approximateIAKvSize
 }
