@@ -662,6 +662,17 @@ func (s *evictSlowStoreScheduler) detectAndHandleNetworkSlowStores(cluster sche.
 		if isNetworkSlowStore(cluster, store, liveStores, problematicNetwork, networkSlowStoreRecoverStartAts) {
 			storeID := store.GetID()
 
+			// liveStores is a snapshot taken at the top of this function; the
+			// evaluation above can still run against a store's stale, frozen
+			// data if it was tombstoned after the snapshot but before this
+			// point. Re-check right before acting narrows, but doesn't
+			// eliminate, that window -- the next round's
+			// tryRecoverNetworkSlowStores would undo a slip-through, so any
+			// residual publication is bounded to one round.
+			if current := cluster.GetStore(storeID); current == nil || current.IsRemoved() {
+				continue
+			}
+
 			if len(pausedNetworkSlowStores) >= defaultMaxNetworkSlowStore {
 				failpoint.InjectCall("evictSlowStoreTriggerLimit")
 				slowStoreTriggerLimitGauge.WithLabelValues(strconv.FormatUint(storeID, 10), string(networkSlowStore)).Inc()

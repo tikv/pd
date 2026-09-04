@@ -1531,18 +1531,16 @@ func (c *RaftCluster) PutMetaStore(store *metapb.Store) error {
 	// an already-known store as live can still reach here after a concurrent
 	// bury tombstoned it and cleared its limit -- putStoreImpl won't resurrect
 	// the tombstone state for an existing store, but AddStoreLimit would
-	// recreate the entry unless skipped. Only guard that case: a store that
-	// was never registered before must still get a limit even if it's already
-	// tombstoned at first sight (e.g. state replayed from storage), since
-	// there's no prior entry to protect from resurrection.
+	// recreate the entry unless guarded. Only guard the "already known" case:
+	// a store that was never registered before must still get a limit even if
+	// it's already tombstoned at first sight (e.g. state replayed from
+	// storage), since there's no prior entry to protect from resurrection.
 	wasKnown := c.GetStore(store.GetId()) != nil
 	if err := c.putStoreImpl(store, false); err != nil {
 		return err
 	}
 	c.OnStoreVersionChange()
-	if current := c.GetStore(store.GetId()); !wasKnown || current == nil || !current.IsRemoved() {
-		c.AddStoreLimit(store)
-	}
+	c.addStoreLimit(store, wasKnown)
 	return nil
 }
 
@@ -2448,17 +2446,41 @@ func (c *RaftCluster) GetAllStoresLimit() map[uint64]sc.StoreLimitConfig {
 }
 
 // AddStoreLimit add a store limit for a given store ID if it doesn't already
-// have one. It unconditionally (re)creates a default entry -- callers that
-// must not resurrect a deliberately-removed entry for an already-known store
-// (see PutMetaStore) are responsible for guarding that themselves; a store
-// that's genuinely new here, even if already tombstoned at first sight (e.g.
-// state replayed from storage), is still expected to get one.
+// have one. It unconditionally (re)creates a default entry for a store that's
+// genuinely new here, even if already tombstoned at first sight (e.g. state
+// replayed from storage) -- there's no prior entry to protect from
+// resurrection in that case. Callers that must guard an already-known store
+// against resurrecting a deliberately-removed entry should use
+// addStoreLimit(store, true) instead (see PutMetaStore).
 func (c *RaftCluster) AddStoreLimit(store *metapb.Store) {
+	c.addStoreLimit(store, false)
+}
+
+// addStoreLimit is AddStoreLimit's implementation. When skipIfRemoved is
+// true, it re-checks the store's current tombstone state on every retry
+// attempt, from inside the same UpdateScheduleConfig closure that
+// RemoveStoreLimit's own deletion runs under -- not just once before the
+// loop. That closes the race completely, not just narrows it: persistMu
+// serializes the two closures, and RemoveStoreLimit always runs as part of
+// any bury, so whichever of the two closures runs first, the outcome is
+// still correct -- an entry this call adds just before a bury still gets
+// deleted by that same bury's (unconditional) RemoveStoreLimit call, and an
+// entry it would add after a bury already completed is skipped by the
+// recheck instead. A check done only once before entering the retry loop (as
+// PutMetaStore's guard originally did) doesn't have this property: a bury
+// landing during persistLimitWaitTime's sleep between failed attempts can
+// still race a later retry that never re-reads store state.
+func (c *RaftCluster) addStoreLimit(store *metapb.Store, skipIfRemoved bool) {
 	storeID := store.GetId()
 	var err error
 	for range persistLimitRetryTimes {
 		added := false
 		err = c.opt.UpdateScheduleConfig(c.storage, func(_ *sc.ScheduleConfig, cfg *sc.ScheduleConfig) (bool, error) {
+			if skipIfRemoved {
+				if existing := c.GetStore(storeID); existing == nil || existing.IsRemoved() {
+					return false, nil
+				}
+			}
 			if _, ok := cfg.StoreLimit[storeID]; ok {
 				return false, nil
 			}

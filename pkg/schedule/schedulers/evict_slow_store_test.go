@@ -32,6 +32,7 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
@@ -987,6 +988,57 @@ func TestRecoveryTime(t *testing.T) {
 	re.NoError(err)
 	re.Zero(persistValue.evictStore())
 	re.True(persistValue.readyForRecovery())
+}
+
+// buryAfterGetStoresCluster wraps a sche.SchedulerCluster and buries the
+// target store as a side effect of the first GetStores() call, but still
+// returns the pre-bury snapshot from that call -- modeling
+// detectAndHandleNetworkSlowStores's liveStores snapshot racing a concurrent
+// bury that completes before the store is actually acted on.
+type buryAfterGetStoresCluster struct {
+	sche.SchedulerCluster
+	tc     *mockcluster.Cluster
+	target uint64
+	buried bool
+}
+
+func (c *buryAfterGetStoresCluster) GetStores() []*core.StoreInfo {
+	stores := c.SchedulerCluster.GetStores()
+	if !c.buried {
+		c.buried = true
+		if target := c.tc.GetStore(c.target); target != nil {
+			c.tc.PutStore(target.Clone(core.SetStoreState(metapb.StoreState_Tombstone)))
+		}
+	}
+	return stores
+}
+
+func (suite *evictSlowStoreTestSuite) TestDetectAndHandleNetworkSlowStoresSkipsBuriedTarget() {
+	re := suite.Require()
+	es := suite.es.(*evictSlowStoreScheduler)
+
+	// storeID2/3/4 unanimously report storeID1 as problematic -- the same
+	// consensus setup as TestNetworkSlowStoreUsesOnlyLiveStores, enough to
+	// make isNetworkSlowStore return true for storeID1 via the "all others
+	// report problems" branch.
+	scores := map[uint64]map[uint64]uint64{
+		storeID1: {storeID2: 100, storeID3: 100, storeID4: 100},
+		storeID2: {storeID1: 100},
+		storeID3: {storeID1: 100},
+		storeID4: {storeID1: 100},
+	}
+	for storeID, networkScores := range scores {
+		store := suite.tc.GetStore(storeID)
+		suite.tc.PutStore(store.Clone(func(store *core.StoreInfo) {
+			store.GetStoreStats().NetworkSlowScores = networkScores
+		}))
+	}
+
+	wrapped := &buryAfterGetStoresCluster{SchedulerCluster: suite.tc, tc: suite.tc, target: storeID1}
+	es.detectAndHandleNetworkSlowStores(wrapped)
+
+	re.NotContains(es.conf.PausedNetworkSlowStores, uint64(storeID1))
+	re.NotContains(es.conf.networkSlowStoreRecoverStartAts, uint64(storeID1))
 }
 
 func TestCalculateAvgScore(t *testing.T) {
