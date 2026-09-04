@@ -438,47 +438,21 @@ func (o *PersistOptions) SetMaxMergeRegionKeys(maxMergeRegionKeys uint64) {
 // SetStoreLimit sets a store limit for a given type and rate.
 func (o *PersistOptions) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePerMin float64) {
 	o.mutateScheduleConfig(func(next *sc.ScheduleConfig) {
-		defaultStoreLimit := next.GetDefaultStoreLimit()
-		var slc sc.StoreLimitConfig
-		var rate float64
-		switch typ {
-		case storelimit.AddPeer:
-			if _, ok := next.StoreLimit[storeID]; !ok {
-				rate = defaultStoreLimit.RemovePeer
-			} else {
-				rate = next.StoreLimit[storeID].RemovePeer
-			}
-			slc = sc.StoreLimitConfig{AddPeer: ratePerMin, RemovePeer: rate}
-		case storelimit.RemovePeer:
-			if _, ok := next.StoreLimit[storeID]; !ok {
-				rate = defaultStoreLimit.AddPeer
-			} else {
-				rate = next.StoreLimit[storeID].AddPeer
-			}
-			slc = sc.StoreLimitConfig{AddPeer: rate, RemovePeer: ratePerMin}
+		limit, ok := next.StoreLimit[storeID]
+		if !ok {
+			limit = next.GetDefaultStoreLimit()
 		}
-		next.StoreLimit[storeID] = slc
+		next.StoreLimit[storeID] = limit.SetLimit(typ, ratePerMin)
 	})
 }
 
 // SetAllStoresLimit sets all store limit for a given type and rate.
 func (o *PersistOptions) SetAllStoresLimit(typ storelimit.Type, ratePerMin float64) {
 	o.mutateScheduleConfig(func(next *sc.ScheduleConfig) {
-		switch typ {
-		case storelimit.AddPeer:
-			next.DefaultStoreLimit.AddPeer = ratePerMin
-			sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, ratePerMin)
-			for storeID := range next.StoreLimit {
-				sc := sc.StoreLimitConfig{AddPeer: ratePerMin, RemovePeer: next.StoreLimit[storeID].RemovePeer}
-				next.StoreLimit[storeID] = sc
-			}
-		case storelimit.RemovePeer:
-			next.DefaultStoreLimit.RemovePeer = ratePerMin
-			sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, ratePerMin)
-			for storeID := range next.StoreLimit {
-				sc := sc.StoreLimitConfig{AddPeer: next.StoreLimit[storeID].AddPeer, RemovePeer: ratePerMin}
-				next.StoreLimit[storeID] = sc
-			}
+		next.DefaultStoreLimit = next.DefaultStoreLimit.SetLimit(typ, ratePerMin)
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(typ, ratePerMin)
+		for storeID, limit := range next.StoreLimit {
+			next.StoreLimit[storeID] = limit.SetLimit(typ, ratePerMin)
 		}
 	})
 }
@@ -562,6 +536,8 @@ func (o *PersistOptions) GetStoreLimitByType(storeID uint64, typ storelimit.Type
 		return limit.AddPeer
 	case storelimit.RemovePeer:
 		return limit.RemovePeer
+	case storelimit.TransferLeaderIn:
+		return limit.TransferLeaderIn
 	// todo: impl it in store limit v2.
 	case storelimit.SendSnapshot:
 		return 0.0

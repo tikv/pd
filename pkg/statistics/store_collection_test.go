@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -28,7 +29,9 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/statistics/utils"
 )
 
@@ -86,6 +89,25 @@ func TestStoreStatistics(t *testing.T) {
 	re.Equal([]uint64{1, 3, 5, 7}, stats.LabelCounter["host:h1"])
 	re.Len(stats.LabelCounter["host:h2"], 4)
 	re.Len(stats.LabelCounter["zone:unknown"], 2)
+}
+
+func TestStoreLimitMetricsIncludeTransferLeaderIn(t *testing.T) {
+	const storeID = "1"
+	StoreLimitGauge.DeleteLabelValues(storeID, storelimit.TransferLeaderIn.String())
+	t.Cleanup(func() {
+		StoreLimitGauge.DeleteLabelValues(storeID, storelimit.TransferLeaderIn.String())
+	})
+
+	opt := mockconfig.NewTestOptions()
+	config := opt.GetScheduleConfig().Clone()
+	config.StoreLimit[1] = sc.StoreLimitConfig{TransferLeaderIn: 30}
+	opt.SetScheduleConfig(config)
+	NewStoreStatisticsMap(opt).Collect()
+
+	require.Equal(t, float64(30), promtestutil.ToFloat64(
+		StoreLimitGauge.WithLabelValues(storeID, storelimit.TransferLeaderIn.String())))
+	ResetStoreStatistics(storeID)
+	require.False(t, StoreLimitGauge.DeleteLabelValues(storeID, storelimit.TransferLeaderIn.String()))
 }
 
 func TestSummaryStoreInfos(t *testing.T) {

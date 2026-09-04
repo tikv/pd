@@ -648,6 +648,22 @@ func (suite *operatorControllerTestSuite) TestStoreLimit() {
 	op = NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, RemovePeer{FromStore: 2})
 	re.False(oc.AddOperator(op))
 	re.False(oc.RemoveOperator(op))
+
+	tc.AddLeaderRegion(1001, 1, 2)
+	tc.SetStoreLimit(2, storelimit.TransferLeaderIn, 60)
+	op = NewTestOperator(1001, &metapb.RegionEpoch{}, OpLeader, TransferLeader{FromStore: 1, ToStore: 2})
+	re.True(oc.AddOperator(op))
+	checkRemoveOperatorSuccess(re, oc, op)
+	op = NewTestOperator(1001, &metapb.RegionEpoch{}, OpLeader, TransferLeader{FromStore: 1, ToStore: 2})
+	re.False(oc.AddOperator(op))
+	re.False(oc.RemoveOperator(op))
+
+	tc.SetStoreLimit(2, storelimit.TransferLeaderIn, 0)
+	for range 2 {
+		op = NewTestOperator(1001, &metapb.RegionEpoch{}, OpLeader, TransferLeader{FromStore: 1, ToStore: 2})
+		re.True(oc.AddOperator(op))
+		checkRemoveOperatorSuccess(re, oc, op)
+	}
 }
 
 // #1652

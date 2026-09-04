@@ -97,10 +97,10 @@ const (
 
 var (
 	defaultLocationLabels = []string{}
-	// DefaultStoreLimit is the default store limit of add peer and remove peer.
-	DefaultStoreLimit = StoreLimit{AddPeer: 15, RemovePeer: 15}
-	// DefaultTiFlashStoreLimit is the default TiFlash store limit of add peer and remove peer.
-	DefaultTiFlashStoreLimit = StoreLimit{AddPeer: 30, RemovePeer: 30}
+	// DefaultStoreLimit is the default store limit.
+	DefaultStoreLimit = StoreLimit{AddPeer: 15, RemovePeer: 15, TransferLeaderIn: 0}
+	// DefaultTiFlashStoreLimit is the default TiFlash store limit.
+	DefaultTiFlashStoreLimit = StoreLimit{AddPeer: 30, RemovePeer: 30, TransferLeaderIn: 0}
 )
 
 // The following consts are used to identify the config item that needs to set TTL.
@@ -131,13 +131,15 @@ const (
 	DefaultTTL        = 5 * time.Minute
 )
 
-// StoreLimit is the default limit of adding peer and removing peer when putting stores.
+// StoreLimit is the default limit for store operations when putting stores.
 type StoreLimit struct {
 	mu syncutil.RWMutex
 	// AddPeer is the default rate of adding peers for store limit (per minute).
 	AddPeer float64
 	// RemovePeer is the default rate of removing peers for store limit (per minute).
 	RemovePeer float64
+	// TransferLeaderIn is the default rate of transferring leaders into a store (per minute).
+	TransferLeaderIn float64
 }
 
 // SetDefaultStoreLimit sets the default store limit for a given type.
@@ -149,6 +151,8 @@ func (sl *StoreLimit) SetDefaultStoreLimit(typ storelimit.Type, ratePerMin float
 		sl.AddPeer = ratePerMin
 	case storelimit.RemovePeer:
 		sl.RemovePeer = ratePerMin
+	case storelimit.TransferLeaderIn:
+		sl.TransferLeaderIn = ratePerMin
 	}
 }
 
@@ -161,6 +165,8 @@ func (sl *StoreLimit) GetDefaultStoreLimit(typ storelimit.Type) float64 {
 		return sl.AddPeer
 	case storelimit.RemovePeer:
 		return sl.RemovePeer
+	case storelimit.TransferLeaderIn:
+		return sl.TransferLeaderIn
 	default:
 		panic("invalid type")
 	}
@@ -499,6 +505,9 @@ func (c *ScheduleConfig) adjustDefaultStoreLimit(meta *configutil.ConfigMetaData
 	if !meta.IsDefined("remove-peer") {
 		configutil.AdjustFloat64(&c.DefaultStoreLimit.RemovePeer, defaultStoreLimit.RemovePeer)
 	}
+	if !meta.IsDefined("transfer-leader-in") {
+		configutil.AdjustFloat64(&c.DefaultStoreLimit.TransferLeaderIn, defaultStoreLimit.TransferLeaderIn)
+	}
 }
 
 func (c *ScheduleConfig) migrateStoreBalanceRate(defaultStoreLimitMeta *configutil.ConfigMetaData) {
@@ -514,13 +523,15 @@ func (c *ScheduleConfig) migrateStoreBalanceRate(defaultStoreLimitMeta *configut
 	}
 	DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, c.DefaultStoreLimit.AddPeer)
 	DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, c.DefaultStoreLimit.RemovePeer)
+	DefaultStoreLimit.SetDefaultStoreLimit(storelimit.TransferLeaderIn, c.DefaultStoreLimit.TransferLeaderIn)
 	c.StoreBalanceRate = 0
 }
 
-func (c *ScheduleConfig) migratePersistedStoreLimit(addPeerDefined, removePeerDefined bool) {
+func (c *ScheduleConfig) migratePersistedStoreLimit(addPeerDefined, removePeerDefined, transferLeaderInDefined bool) {
 	defaultStoreLimit := DefaultStoreLimitConfig()
 	if c.StoreBalanceRate != 0 {
-		defaultStoreLimit = StoreLimitConfig{AddPeer: c.StoreBalanceRate, RemovePeer: c.StoreBalanceRate}
+		defaultStoreLimit.AddPeer = c.StoreBalanceRate
+		defaultStoreLimit.RemovePeer = c.StoreBalanceRate
 	}
 	if !addPeerDefined {
 		c.DefaultStoreLimit.AddPeer = defaultStoreLimit.AddPeer
@@ -528,8 +539,12 @@ func (c *ScheduleConfig) migratePersistedStoreLimit(addPeerDefined, removePeerDe
 	if !removePeerDefined {
 		c.DefaultStoreLimit.RemovePeer = defaultStoreLimit.RemovePeer
 	}
+	if !transferLeaderInDefined {
+		c.DefaultStoreLimit.TransferLeaderIn = defaultStoreLimit.TransferLeaderIn
+	}
 	DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, c.DefaultStoreLimit.AddPeer)
 	DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, c.DefaultStoreLimit.RemovePeer)
+	DefaultStoreLimit.SetDefaultStoreLimit(storelimit.TransferLeaderIn, c.DefaultStoreLimit.TransferLeaderIn)
 	c.StoreBalanceRate = 0
 }
 
@@ -579,7 +594,7 @@ func parseDeprecatedFlag(meta *configutil.ConfigMetaData, name string, old, new 
 
 // MigrateDeprecatedFlags updates new flags according to deprecated flags.
 func (c *ScheduleConfig) MigrateDeprecatedFlags() {
-	c.applyDeprecatedFlagMigration(true, true)
+	c.applyDeprecatedFlagMigration(true, true, true)
 }
 
 // MigrateDeprecatedFlagsFromJSON migrates a full persisted or remote schedule
@@ -595,13 +610,14 @@ func (c *ScheduleConfig) MigrateDeprecatedFlagsFromJSON(data []byte) error {
 	}
 	_, addPeerDefined := fields.DefaultStoreLimit["add-peer"]
 	_, removePeerDefined := fields.DefaultStoreLimit["remove-peer"]
-	c.applyDeprecatedFlagMigration(addPeerDefined, removePeerDefined)
+	_, transferLeaderInDefined := fields.DefaultStoreLimit["transfer-leader-in"]
+	c.applyDeprecatedFlagMigration(addPeerDefined, removePeerDefined, transferLeaderInDefined)
 	return nil
 }
 
-func (c *ScheduleConfig) applyDeprecatedFlagMigration(addPeerDefined, removePeerDefined bool) {
+func (c *ScheduleConfig) applyDeprecatedFlagMigration(addPeerDefined, removePeerDefined, transferLeaderInDefined bool) {
 	c.DisableLearner = false
-	c.migratePersistedStoreLimit(addPeerDefined, removePeerDefined)
+	c.migratePersistedStoreLimit(addPeerDefined, removePeerDefined, transferLeaderInDefined)
 	for _, b := range c.migrateConfigurationMap() {
 		// If old=false (previously disabled), set both old and new to false.
 		if *b[0] {
@@ -612,13 +628,19 @@ func (c *ScheduleConfig) applyDeprecatedFlagMigration(addPeerDefined, removePeer
 
 // Validate is used to validate if some scheduling configurations are right.
 func (c *ScheduleConfig) Validate() error {
-	if math.IsNaN(c.DefaultStoreLimit.AddPeer) || math.IsInf(c.DefaultStoreLimit.AddPeer, 0) ||
-		c.DefaultStoreLimit.AddPeer < 0 {
+	if !isStoreLimitRateValid(c.DefaultStoreLimit.AddPeer) {
 		return errors.New("default-store-limit.add-peer should be finite and non-negative")
 	}
-	if math.IsNaN(c.DefaultStoreLimit.RemovePeer) || math.IsInf(c.DefaultStoreLimit.RemovePeer, 0) ||
-		c.DefaultStoreLimit.RemovePeer < 0 {
+	if !isStoreLimitRateValid(c.DefaultStoreLimit.RemovePeer) {
 		return errors.New("default-store-limit.remove-peer should be finite and non-negative")
+	}
+	if !isStoreLimitRateValid(c.DefaultStoreLimit.TransferLeaderIn) {
+		return errors.New("default-store-limit.transfer-leader-in should be finite and non-negative")
+	}
+	for storeID, limit := range c.StoreLimit {
+		if !isStoreLimitRateValid(limit.TransferLeaderIn) {
+			return errors.Errorf("store-limit[%d].transfer-leader-in should be finite and non-negative", storeID)
+		}
 	}
 	if c.TolerantSizeRatio < 0 {
 		return errors.New("tolerant-size-ratio should be non-negative")
@@ -642,6 +664,10 @@ func (c *ScheduleConfig) Validate() error {
 		return errors.Errorf("patrol-region-worker-count should be between 1 and %d", maxPatrolRegionWorkerCount)
 	}
 	return nil
+}
+
+func isStoreLimitRateValid(rate float64) bool {
+	return !math.IsNaN(rate) && !math.IsInf(rate, 0) && rate >= 0
 }
 
 // Deprecated is used to find if there is an option has been deprecated.
@@ -672,15 +698,30 @@ func (c *ScheduleConfig) Deprecated() error {
 
 // StoreLimitConfig is a config about scheduling rate limit of different types for a store.
 type StoreLimitConfig struct {
-	AddPeer    float64 `toml:"add-peer" json:"add-peer"`
-	RemovePeer float64 `toml:"remove-peer" json:"remove-peer"`
+	AddPeer          float64 `toml:"add-peer" json:"add-peer"`
+	RemovePeer       float64 `toml:"remove-peer" json:"remove-peer"`
+	TransferLeaderIn float64 `toml:"transfer-leader-in" json:"transfer-leader-in"`
+}
+
+// SetLimit returns a copy with the specified store limit updated.
+func (c StoreLimitConfig) SetLimit(typ storelimit.Type, ratePerMin float64) StoreLimitConfig {
+	switch typ {
+	case storelimit.AddPeer:
+		c.AddPeer = ratePerMin
+	case storelimit.RemovePeer:
+		c.RemovePeer = ratePerMin
+	case storelimit.TransferLeaderIn:
+		c.TransferLeaderIn = ratePerMin
+	}
+	return c
 }
 
 // DefaultStoreLimitConfig returns the current process default store limit config.
 func DefaultStoreLimitConfig() StoreLimitConfig {
 	return StoreLimitConfig{
-		AddPeer:    DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
-		RemovePeer: DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
+		AddPeer:          DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
+		RemovePeer:       DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
+		TransferLeaderIn: DefaultStoreLimit.GetDefaultStoreLimit(storelimit.TransferLeaderIn),
 	}
 }
 

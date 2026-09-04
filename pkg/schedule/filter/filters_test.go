@@ -301,6 +301,37 @@ func TestStoreStateFilter(t *testing.T) {
 	check(store, testCases)
 }
 
+func TestStoreStateFilterRejectsTransferLeaderTargetAtLimit(t *testing.T) {
+	re := require.New(t)
+	const ratePerSec = 0.000001
+	limiter := storelimit.NewStoreRateLimit(ratePerSec)
+	re.True(limiter.Take(storelimit.RegionInfluence[storelimit.TransferLeaderIn],
+		storelimit.TransferLeaderIn, constant.Medium))
+	store := core.NewStoreInfoWithLabel(1, map[string]string{}).Clone(
+		core.SetLastHeartbeatTS(time.Now()),
+		core.SetStoreLimit(limiter),
+	)
+	filter := &StoreStateFilter{TransferLeader: true, OperatorLevel: constant.Medium}
+	opt := mockconfig.NewTestOptions()
+	opt.SetStoreLimit(store.GetID(), storelimit.TransferLeaderIn, ratePerSec*time.Minute.Seconds())
+
+	re.Equal(plan.StatusOK, filter.Source(opt, store).StatusCode)
+	re.Equal(plan.StatusCode(plan.StatusStoreTransferLeaderInLimitThrottled),
+		filter.Target(opt, store).StatusCode)
+	re.Equal("store-state-exceed-transfer-leader-in-limit-filter", filter.Reason.String())
+
+	filter.AllowTemporaryStates = true
+	re.Equal(plan.StatusOK, filter.Target(opt, store).StatusCode)
+
+	filter.AllowTemporaryStates = false
+	filter.OperatorLevel = constant.Urgent
+	re.Equal(plan.StatusOK, filter.Target(opt, store).StatusCode)
+
+	filter.OperatorLevel = constant.Medium
+	opt.SetStoreLimit(store.GetID(), storelimit.TransferLeaderIn, 0)
+	re.Equal(plan.StatusOK, filter.Target(opt, store).StatusCode)
+}
+
 func TestHotRegionEvictedTargetFilter(t *testing.T) {
 	re := require.New(t)
 	filter := NewHotRegionEvictedTargetFilter("")

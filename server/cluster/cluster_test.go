@@ -3318,46 +3318,48 @@ func TestCheckCache(t *testing.T) {
 }
 
 func TestStoreLimitChangeRefreshLimiter(t *testing.T) {
-	re := require.New(t)
+	for _, limitType := range []storelimit.Type{storelimit.AddPeer, storelimit.TransferLeaderIn} {
+		t.Run(limitType.String(), func(t *testing.T) {
+			re := require.New(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+			_, opt, err := newTestScheduleConfig()
+			re.NoError(err)
+			// StoreRateLimit (v1) participates in scheduler filters.
+			opt.GetScheduleConfig().StoreLimitVersion = storelimit.VersionV1
 
-	_, opt, err := newTestScheduleConfig()
-	re.NoError(err)
-	// StoreRateLimit (v1) is used for AddPeer/RemovePeer and participates in scheduler filters.
-	opt.GetScheduleConfig().StoreLimitVersion = storelimit.VersionV1
+			rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+			storeID := uint64(1)
+			store := core.NewStoreInfo(&metapb.Store{Id: storeID}, core.SetLastHeartbeatTS(time.Now()))
+			rc.PutStore(store)
 
-	rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+			// Simulate an exhausted limiter that would make scheduler filters throttle this store.
+			lowRatePerSec := float64(0.0001) / time.Minute.Seconds()
+			rc.ResetStoreLimit(storeID, limitType, lowRatePerSec)
+			store = rc.GetStore(storeID)
+			re.NotNil(store)
+			re.True(store.GetStoreLimit().Take(storelimit.RegionInfluence[limitType], limitType, constant.Low))
+			re.False(store.IsAvailable(limitType, constant.Low))
 
-	storeID := uint64(1)
-	store := core.NewStoreInfo(&metapb.Store{Id: storeID}, core.SetLastHeartbeatTS(time.Now()))
-	rc.PutStore(store)
-
-	// Simulate that the limiter has been set to an extremely low rate and already consumed,
-	// which would make scheduler filters throttle this store.
-	lowRatePerSec := float64(0.0001) / 60.0
-	rc.ResetStoreLimit(storeID, storelimit.AddPeer, lowRatePerSec)
-	store = rc.GetStore(storeID)
-	re.NotNil(store)
-	re.True(store.GetStoreLimit().Take(storelimit.RegionInfluence[storelimit.AddPeer], storelimit.AddPeer, constant.Low))
-	re.False(store.IsAvailable(storelimit.AddPeer, constant.Low))
-
-	// Increase store limit via config API. Without refreshing the in-memory limiter,
-	// the store would remain throttled and be filtered out.
-	re.NoError(rc.SetStoreLimit(storeID, storelimit.AddPeer, 30))
-	store = rc.GetStore(storeID)
-	re.NotNil(store)
-	re.True(store.IsAvailable(storelimit.AddPeer, constant.Low))
+			// Increasing the persisted limit must also refresh the in-memory limiter.
+			re.NoError(rc.SetStoreLimit(storeID, limitType, 30))
+			store = rc.GetStore(storeID)
+			re.NotNil(store)
+			re.True(store.IsAvailable(limitType, constant.Low))
+		})
+	}
 }
 
 func TestAddStoreLimitUsesPersistedDefaultStoreLimit(t *testing.T) {
 	re := require.New(t)
 	oldAddPeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
 	oldRemovePeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer)
+	oldTransferLeaderIn := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.TransferLeaderIn)
 	defer func() {
 		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, oldAddPeer)
 		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, oldRemovePeer)
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.TransferLeaderIn, oldTransferLeaderIn)
 	}()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -3367,17 +3369,19 @@ func TestAddStoreLimitUsesPersistedDefaultStoreLimit(t *testing.T) {
 	re.NoError(err)
 	rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
 	opt.SetAllStoresLimit(storelimit.AddPeer, 60)
+	opt.SetAllStoresLimit(storelimit.TransferLeaderIn, 90)
 
 	// Simulate a restarted process whose package-level default goes back to the built-in value.
 	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, 15)
 	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, 15)
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.TransferLeaderIn, 0)
 
 	rc.AddStoreLimit(&metapb.Store{Id: 1})
-	re.Equal(sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 15}, opt.GetScheduleConfig().StoreLimit[1])
+	re.Equal(sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 15, TransferLeaderIn: 90}, opt.GetScheduleConfig().StoreLimit[1])
 
 	opt.SetStoreLimit(2, storelimit.RemovePeer, 80)
 	rc.AddStoreLimit(&metapb.Store{Id: 2})
-	re.Equal(sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 80}, opt.GetScheduleConfig().StoreLimit[2])
+	re.Equal(sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 80, TransferLeaderIn: 90}, opt.GetScheduleConfig().StoreLimit[2])
 
 	rc.AddStoreLimit(&metapb.Store{
 		Id:     3,

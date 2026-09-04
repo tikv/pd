@@ -97,6 +97,66 @@ func (s *storeTestSuite) TestStore() {
 	s.env.RunTestInNonMicroserviceEnv(s.checkStore)
 }
 
+func (s *storeTestSuite) TestTransferLeaderInStoreLimit() {
+	s.env.RunTestInNonMicroserviceEnv(s.checkTransferLeaderInStoreLimit)
+}
+
+func (s *storeTestSuite) checkTransferLeaderInStoreLimit(cluster *pdTests.TestCluster) {
+	re := s.Require()
+	pdAddr := cluster.GetConfig().GetClientURL()
+	leaderServer := cluster.GetLeaderServer()
+	for _, storeID := range []uint64{1, 2} {
+		pdTests.MustPutStore(re, cluster, &metapb.Store{
+			Id:        storeID,
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
+		})
+	}
+
+	cmd := ctl.GetRootCmd()
+	args := []string{"-u", pdAddr, "store", "limit", "1", "30", "transfer-leader-in"}
+	_, err := tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Equal(float64(30), leaderServer.GetRaftCluster().GetStoreLimitByType(1, storelimit.TransferLeaderIn))
+
+	cmd = ctl.GetRootCmd()
+	args = []string{"-u", pdAddr, "store", "limit", "transfer-leader-in"}
+	output, err := tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	limits := make(map[string]map[string]float64)
+	re.NoError(json.Unmarshal(output, &limits))
+	re.Equal(float64(30), limits["1"]["transfer-leader-in"])
+
+	cmd = ctl.GetRootCmd()
+	args = []string{"-u", pdAddr, "store", "limit", "all", "20", "transfer-leader-in"}
+	_, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	for _, storeID := range []uint64{1, 2} {
+		re.Equal(float64(20), leaderServer.GetRaftCluster().GetStoreLimitByType(storeID, storelimit.TransferLeaderIn))
+	}
+
+	re.NoError(leaderServer.Stop())
+	re.NoError(leaderServer.Run())
+	re.NotEmpty(cluster.WaitLeader())
+	re.Equal(float64(20), leaderServer.GetRaftCluster().GetStoreLimitByType(1, storelimit.TransferLeaderIn))
+
+	cmd = ctl.GetRootCmd()
+	args = []string{"-u", pdAddr, "store", "limit", "1", "0", "transfer-leader-in"}
+	output, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.NotContains(string(output), "rate should be a number")
+	re.Equal(float64(0), leaderServer.GetRaftCluster().GetStoreLimitByType(1, storelimit.TransferLeaderIn))
+
+	cmd = ctl.GetRootCmd()
+	args = []string{"-u", pdAddr, "store", "limit", "all", "0", "transfer-leader-in"}
+	output, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.NotContains(string(output), "rate should be a number")
+	for _, storeID := range []uint64{1, 2} {
+		re.Equal(float64(0), leaderServer.GetRaftCluster().GetStoreLimitByType(storeID, storelimit.TransferLeaderIn))
+	}
+}
+
 func (s *storeTestSuite) checkStore(cluster *pdTests.TestCluster) {
 	re := s.Require()
 	pdAddr := cluster.GetConfig().GetClientURL()

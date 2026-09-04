@@ -82,6 +82,37 @@ func TestReloadConfig(t *testing.T) {
 	re.Equal(int64(512), newOpt.GetMaxMovableHotPeerSize())
 }
 
+func TestSetStoreLimitPreservesOtherTypes(t *testing.T) {
+	re := require.New(t)
+	oldRemovePeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer)
+	t.Cleanup(func() {
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, oldRemovePeer)
+	})
+	opt, err := newTestScheduleOption()
+	re.NoError(err)
+	cfg := opt.GetScheduleConfig().Clone()
+	cfg.StoreLimit[1] = sc.StoreLimitConfig{
+		AddPeer:          10,
+		RemovePeer:       20,
+		TransferLeaderIn: 30,
+	}
+	opt.SetScheduleConfig(cfg)
+
+	opt.SetStoreLimit(1, storelimit.AddPeer, 40)
+	re.Equal(sc.StoreLimitConfig{
+		AddPeer:          40,
+		RemovePeer:       20,
+		TransferLeaderIn: 30,
+	}, opt.GetStoreLimit(1))
+
+	opt.SetAllStoresLimit(storelimit.RemovePeer, 50)
+	re.Equal(sc.StoreLimitConfig{
+		AddPeer:          40,
+		RemovePeer:       50,
+		TransferLeaderIn: 30,
+	}, opt.GetStoreLimit(1))
+}
+
 func TestReloadDefaultStoreLimit(t *testing.T) {
 	re := require.New(t)
 	oldAddPeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
