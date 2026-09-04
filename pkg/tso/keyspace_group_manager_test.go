@@ -88,38 +88,6 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 func TestFinishSplitKeyspaceGroupDoesNotBlockStateReads(t *testing.T) {
 	re := require.New(t)
 
-	requestReceived := make(chan *http.Request, 1)
-	releaseResponse := make(chan struct{})
-	var closeReleaseResponse sync.Once
-	defer closeReleaseResponse.Do(func() { close(releaseResponse) })
-
-	client := &http.Client{
-		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			select {
-			case requestReceived <- req:
-			case <-req.Context().Done():
-				return nil, req.Context().Err()
-			}
-			select {
-			case <-releaseResponse:
-				return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody}, nil
-			case <-req.Context().Done():
-				return nil, req.Context().Err()
-			}
-		}),
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	kgm := &KeyspaceGroupManager{
-		ctx:        ctx,
-		httpClient: client,
-		cfg: &TestServiceConfig{
-			BackendEndpoints: "http://backend.test",
-		},
-		metrics: newKeyspaceGroupMetrics(),
-	}
-	kgm.initialize()
 	const (
 		groupID    = uint32(1)
 		keyspaceID = uint32(100)
@@ -132,51 +100,44 @@ func TestFinishSplitKeyspaceGroupDoesNotBlockStateReads(t *testing.T) {
 			SplitSource: constant.DefaultKeyspaceGroupID,
 		},
 	}
+	newerSplitGroup := *splitGroup
+	newerSplitGroup.SplitState = &endpoint.SplitState{SplitSource: groupID + 1}
+
+	var kgm *KeyspaceGroupManager
+	client := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			re.Equal(http.MethodDelete, req.Method)
+			re.Equal("/pd/api/v2/tso/keyspace-groups/1/split", req.URL.Path)
+
+			re.True(kgm.TryRLock(), "state lock should remain available while the finish request is in flight")
+			kgm.RUnlock()
+			_, _, currentGroupID, _, err := kgm.FindGroupByKeyspaceID(keyspaceID)
+			re.NoError(err)
+			re.Equal(groupID, currentGroupID)
+
+			kgm.Lock()
+			kgm.kgs[groupID] = &newerSplitGroup
+			kgm.Unlock()
+			return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody}, nil
+		}),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	kgm = &KeyspaceGroupManager{
+		ctx:        ctx,
+		httpClient: client,
+		cfg: &TestServiceConfig{
+			BackendEndpoints: "http://backend.test",
+		},
+		metrics: newKeyspaceGroupMetrics(),
+	}
+	kgm.initialize()
 	kgm.kgs[groupID] = splitGroup
 	kgm.allocators[groupID] = &Allocator{}
 	kgm.keyspaceLookupTable[keyspaceID] = groupID
 
-	done := make(chan error, 1)
-	go func() {
-		done <- kgm.finishSplitKeyspaceGroup(groupID)
-	}()
-
-	select {
-	case req := <-requestReceived:
-		re.Equal(http.MethodDelete, req.Method)
-		re.Equal("/pd/api/v2/tso/keyspace-groups/1/split", req.URL.Path)
-	case <-time.After(time.Second):
-		re.FailNow("timed out waiting for finish request")
-	}
-
-	readDone := make(chan error, 1)
-	go func() {
-		_, _, currentGroupID, _, err := kgm.FindGroupByKeyspaceID(keyspaceID)
-		if err == nil && currentGroupID != groupID {
-			err = fmt.Errorf("unexpected keyspace group ID %d", currentGroupID)
-		}
-		readDone <- err
-	}()
-	select {
-	case err := <-readDone:
-		re.NoError(err)
-	case <-time.After(200 * time.Millisecond):
-		re.FailNow("state read was blocked while finish request was in flight")
-	}
-
-	newerSplitGroup := *splitGroup
-	newerSplitGroup.SplitState = &endpoint.SplitState{SplitSource: groupID + 1}
-	kgm.Lock()
-	kgm.kgs[groupID] = &newerSplitGroup
-	kgm.Unlock()
-
-	closeReleaseResponse.Do(func() { close(releaseResponse) })
-	select {
-	case err := <-done:
-		re.NoError(err)
-	case <-time.After(time.Second):
-		re.FailNow("timed out waiting for finish request to complete")
-	}
+	re.NoError(kgm.finishSplitKeyspaceGroup(groupID))
 
 	kgm.RLock()
 	currentGroup := kgm.kgs[groupID]
