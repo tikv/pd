@@ -274,9 +274,18 @@ func (m *Member) WatchLeader(ctx context.Context, leader *pdpb.Member, revision 
 
 // Resign is used to reset the PD member's current leadership.
 // Basically it will reset the leader lease and unset leader info.
+//
+// unsetLeader runs first, and the order matters. It is a plain in-memory store,
+// while Reset revokes the lease against the local etcd and logs on failure - both
+// of which can block for an unbounded time when the volume holding the data
+// directory stops completing writes. Two paths report leadership without
+// consulting IsServing: GetMembers reads GetLeader directly, and the v1
+// redirector handles a request locally when `leader.GetName() == self`. Clearing
+// the identity before anything that can block is what keeps a member that is no
+// longer serving from still answering as the leader.
 func (m *Member) Resign() {
-	m.leadership.Reset()
 	m.unsetLeader()
+	m.leadership.Reset()
 }
 
 // CheckPriority checks whether the etcd leader should be moved according to the priority.
