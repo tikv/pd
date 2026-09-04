@@ -240,6 +240,50 @@ func TestSaveKeyspaceRegionLabelerTxnOpReloadsFromStorage(t *testing.T) {
 	re.Equal(newer.Labels, got.Labels)
 }
 
+// TestCheckKeyspaceRegionBoundRequiresEnabled verifies that
+// CheckKeyspaceRegionBound rejects a non-ENABLED keyspace regardless of
+// wait_region_split. wait_region_split defaults to "true" (see
+// KeyspaceConfig.adjust), so most keyspaces never take the
+// wait_region_split=="false" shortcut and would otherwise fall through to
+// hasKeyspaceRegionBound, which checks only the physical region boundary and
+// knows nothing about state - the state gate must cover that fallthrough
+// too, not just the shortcut. skipSplitRegion is enabled here specifically
+// so hasKeyspaceRegionBound (if reached) reports the region as bound
+// regardless of the manager's cluster/storage being unset, keeping this test
+// self-contained while still exercising the fallthrough path for real.
+func TestCheckKeyspaceRegionBoundRequiresEnabled(t *testing.T) {
+	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
+	}()
+	manager := &Manager{}
+
+	disabledWaitTrue := &keyspacepb.KeyspaceMeta{
+		State:  keyspacepb.KeyspaceState_DISABLED,
+		Config: map[string]string{WaitRegionSplitKey: "true"},
+	}
+	re.False(manager.CheckKeyspaceRegionBound(disabledWaitTrue))
+
+	disabledWaitFalse := &keyspacepb.KeyspaceMeta{
+		State:  keyspacepb.KeyspaceState_DISABLED,
+		Config: map[string]string{WaitRegionSplitKey: "false"},
+	}
+	re.False(manager.CheckKeyspaceRegionBound(disabledWaitFalse))
+
+	enabledWaitTrue := &keyspacepb.KeyspaceMeta{
+		State:  keyspacepb.KeyspaceState_ENABLED,
+		Config: map[string]string{WaitRegionSplitKey: "true"},
+	}
+	re.True(manager.CheckKeyspaceRegionBound(enabledWaitTrue))
+
+	enabledWaitFalse := &keyspacepb.KeyspaceMeta{
+		State:  keyspacepb.KeyspaceState_ENABLED,
+		Config: map[string]string{WaitRegionSplitKey: "false"},
+	}
+	re.True(manager.CheckKeyspaceRegionBound(enabledWaitFalse))
+}
+
 func (suite *keyspaceTestSuite) TestCreateSameKeyspaceTwice() {
 	re := suite.Require()
 	// A manager that waits for the region split during creation, so the

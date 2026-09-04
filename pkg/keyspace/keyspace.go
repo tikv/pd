@@ -945,28 +945,24 @@ func (manager *Manager) saveKeyspaceRegionLabelerTxnOp(id uint32, boundType regi
 		// the "keyspaces/<id>" namespace against the generic label-rule API)
 		// has already durably published a newer value or deleted it, and
 		// caching the stale snapshot would silently diverge from storage
-		// with no later reconciliation.
-		raw, loadErr := regionLabeler.GetRuleStorage().LoadRegionRule(keyspaceRule.ID)
-		if loadErr != nil {
+		// with no later reconciliation. ReloadRuleFromStorage does the read
+		// and the cache update under one lock hold, so this can't itself
+		// race a concurrent writer the way a separate read-then-write pair
+		// would.
+		found, reloadErr := regionLabeler.ReloadRuleFromStorage(keyspaceRule.ID)
+		if reloadErr != nil {
 			log.Error("failed to reload region label rule into cache after commit, cache may be stale",
-				zap.Uint32("keyspace-id", id), zap.String("rule-id", keyspaceRule.ID), errs.ZapError(loadErr))
+				zap.Uint32("keyspace-id", id), zap.String("rule-id", keyspaceRule.ID), errs.ZapError(reloadErr))
 			return
 		}
-		if raw == "" {
-			// Deleted by someone else after our commit landed.
-			regionLabeler.DeleteRuleWithoutTxn(keyspaceRule.ID)
+		if !found {
+			log.Warn("region label rule was deleted by a concurrent writer before it could be cached",
+				zap.Uint32("keyspace-id", id), zap.String("rule-id", keyspaceRule.ID))
 			return
 		}
-		fresh, decodeErr := labeler.NewLabelRuleFromJSON([]byte(raw))
-		if decodeErr != nil {
-			log.Error("failed to decode region label rule reloaded from storage, cache may be stale",
-				zap.Uint32("keyspace-id", id), zap.String("rule-id", keyspaceRule.ID), errs.ZapError(decodeErr))
-			return
-		}
-		regionLabeler.SaveRuleWithoutTxn(fresh)
 		log.Info("added region label for keyspace",
 			zap.Uint32("keyspace-id", id),
-			zap.Any("label-rule", fresh),
+			zap.Any("label-rule", keyspaceRule),
 			zap.Stringer("key-type", boundType),
 		)
 	}
@@ -1002,17 +998,24 @@ func (manager *Manager) waitKeyspaceRegionSplit(id uint32, boundType regionBound
 
 // CheckKeyspaceRegionBound checks whether the keyspace region has been split.
 func (manager *Manager) CheckKeyspaceRegionBound(meta *keyspacepb.KeyspaceMeta) bool {
+	// Only an ENABLED keyspace can be considered region-bound-ready: once the
+	// keyspace is DISABLED/ARCHIVED/TOMBSTONE - regardless of how it left
+	// ENABLED - state alone governs whether it is usable, and the sole
+	// caller (LoadKeyspace) relies on this to decide whether the keyspace
+	// should still be visible. This must gate both branches below, not just
+	// the wait_region_split shortcut: wait_region_split defaults to true (see
+	// KeyspaceConfig.adjust), so most keyspaces never take that shortcut and
+	// would otherwise fall through to hasKeyspaceRegionBound, which checks
+	// only the physical region boundary and knows nothing about state.
+	if meta.GetState() != keyspacepb.KeyspaceState_ENABLED {
+		return false
+	}
 	config := meta.GetConfig()
 	wait, ok := config[WaitRegionSplitKey]
-	// wait_region_split == "false" means the keyspace was created without ever
-	// needing to wait for a split, so as long as it is still ENABLED we can
-	// return true directly without checking actual bounds. Once the keyspace
-	// is DISABLED/ARCHIVED/TOMBSTONE - regardless of how it left ENABLED -
-	// this shortcut must not apply: state, not wait_region_split, then
-	// governs whether the keyspace is usable, and callers such as
-	// LoadKeyspace rely on this to decide whether it should still be
-	// visible.
-	if ok && wait == "false" && meta.GetState() == keyspacepb.KeyspaceState_ENABLED {
+	// wait_region_split == "false" means the keyspace was created without
+	// ever needing to wait for a split, so we can return true directly
+	// without checking actual bounds.
+	if ok && wait == "false" {
 		return true
 	}
 	val, ok := config[RegionBoundType]
