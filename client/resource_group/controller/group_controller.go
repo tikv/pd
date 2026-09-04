@@ -741,10 +741,9 @@ retryLoop:
 func (gc *groupCostController) onRequestWaitImpl(
 	ctx context.Context, info RequestInfo,
 ) (delta, penalty *rmpb.Consumption, waitDuration time.Duration, priority uint32, err error) {
+	collector, detail := newRUCalculationDetail(info)
 	delta = &rmpb.Consumption{}
-	for _, calc := range gc.calculators {
-		calc.BeforeKVRequest(delta, info)
-	}
+	calculateBeforeKVRequest(gc.calculators, delta, detail, info)
 	reportedDelta := reportedRequestConsumption(gc.calculators, info, delta)
 
 	gc.mu.Lock()
@@ -789,6 +788,7 @@ func (gc *groupCostController) onRequestWaitImpl(
 	*gc.mu.storeCounter[info.StoreID()] = *gc.mu.globalCounter
 	gc.mu.Unlock()
 	gc.metrics.addRequestSourceRUDelta(requestSource(info), reportedDelta)
+	collectRUCalculation(collector, detail, delta)
 
 	return delta, penalty, waitDuration, gc.getMeta().GetPriority(), nil
 }
@@ -796,17 +796,14 @@ func (gc *groupCostController) onRequestWaitImpl(
 func (gc *groupCostController) onResponseImpl(
 	req RequestInfo, resp ResponseInfo,
 ) (*rmpb.Consumption, error) {
+	collector, detail := newRUCalculationDetail(req)
 	delta := &rmpb.Consumption{}
-	for _, calc := range gc.calculators {
-		calc.AfterKVRequest(delta, req, resp)
-	}
+	calculateAfterKVRequest(gc.calculators, delta, detail, req, resp)
 	reportedDelta := reportedResponseConsumption(gc.calculators, req, delta)
 	// `count` is the full per-request consumption (BeforeKVRequest + AfterKVRequest).
 	count := &rmpb.Consumption{}
 	*count = *delta
-	for _, calc := range gc.calculators {
-		calc.BeforeKVRequest(count, req)
-	}
+	calculateBeforeKVRequest(gc.calculators, count, nil, req)
 	bytesForEst, isPagingRead := pagingReadEstimate(req)
 	if isPagingRead {
 		gc.metrics.observePagingResponse(bytesForEst, resp.ReadBytes())
@@ -828,6 +825,7 @@ func (gc *groupCostController) onResponseImpl(
 	gc.mu.Unlock()
 
 	gc.metrics.addRequestSourceRUDelta(requestSource(req), reportedDelta)
+	collectRUCalculation(collector, detail, delta)
 
 	return delta, nil
 }
@@ -835,17 +833,14 @@ func (gc *groupCostController) onResponseImpl(
 func (gc *groupCostController) onResponseWaitImpl(
 	ctx context.Context, req RequestInfo, resp ResponseInfo,
 ) (*rmpb.Consumption, time.Duration, error) {
+	collector, detail := newRUCalculationDetail(req)
 	delta := &rmpb.Consumption{}
-	for _, calc := range gc.calculators {
-		calc.AfterKVRequest(delta, req, resp)
-	}
+	calculateAfterKVRequest(gc.calculators, delta, detail, req, resp)
 	reportedDelta := reportedResponseConsumption(gc.calculators, req, delta)
 	// `count` is the full per-request consumption (BeforeKVRequest + AfterKVRequest).
 	count := &rmpb.Consumption{}
 	*count = *delta
-	for _, calc := range gc.calculators {
-		calc.BeforeKVRequest(count, req)
-	}
+	calculateBeforeKVRequest(gc.calculators, count, nil, req)
 	bytesForEst, isPagingRead := pagingReadEstimate(req)
 	var waitDuration time.Duration
 	if !gc.burstable.Load() {
@@ -890,8 +885,26 @@ func (gc *groupCostController) onResponseWaitImpl(
 	gc.mu.Unlock()
 
 	gc.metrics.addRequestSourceRUDelta(requestSource(req), reportedDelta)
+	collectRUCalculation(collector, detail, delta)
 
 	return delta, waitDuration, nil
+}
+
+func newRUCalculationDetail(req RequestInfo) (RUCalculationCollector, *RUCalculation) {
+	collector, ok := req.(RUCalculationCollector)
+	if !ok {
+		return nil, nil
+	}
+	return collector, &RUCalculation{}
+}
+
+func collectRUCalculation(collector RUCalculationCollector, detail *RUCalculation, consumption *rmpb.Consumption) {
+	if collector == nil {
+		return
+	}
+	detail.RRU = consumption.RRU
+	detail.WRU = consumption.WRU
+	collector.CollectRUCalculation(*detail)
 }
 
 func (gc *groupCostController) addRUConsumption(consumption *rmpb.Consumption) {
