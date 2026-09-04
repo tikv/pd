@@ -213,6 +213,50 @@ func TestRegisterRetriesUntilExistingLeaseExpires(t *testing.T) {
 	re.NoError(replacement.Deregister())
 }
 
+func TestRegisterRetriesAfterLeaderPromotion(t *testing.T) {
+	re := require.New(t)
+	// A leader promotion refreshes a lease's expiry (Lessor.Promote /
+	// Lease.refresh) to beyond its original GrantedTTL; the retry deadline
+	// must reflect that when it has already happened before the first
+	// measurement, not just the lease's unchanging granted duration.
+	servers, client, clean := etcdutil.NewTestEtcdCluster(t, 1, &etcdutil.TestEtcdClusterOptions{
+		ServerCfgModifier: func(cfg *embed.Config) {
+			cfg.TickMs = 100
+			cfg.ElectionMs = 10000
+		},
+	})
+	defer clean()
+
+	etcd, cfg := servers[0], servers[0].Config()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	old := NewServiceRegister(ctx, client, "test_service", "127.0.0.1:1", "old", DefaultLeaseInSeconds)
+	re.NoError(old.Register())
+	resp, err := client.Get(ctx, old.key)
+	re.NoError(err)
+	oldLease := clientv3.LeaseID(resp.Kvs[0].Lease)
+	old.cancel()
+
+	// Restarting the single-member cluster forces a new leader election,
+	// triggering Promote on the surviving lease.
+	etcd.Server.HardStop()
+	etcd.Close()
+	etcd, err = embed.StartEtcd(&cfg)
+	re.NoError(err)
+	defer etcd.Close()
+	<-etcd.Server.ReadyNotify()
+
+	ttl, err := client.TimeToLive(ctx, oldLease)
+	re.NoError(err)
+	// The promotion pushed the actual remaining TTL past GrantedTTL+margin.
+	re.Greater(ttl.TTL, ttl.GrantedTTL+int64(registerRetryMargin/time.Second))
+
+	replacement := NewServiceRegister(ctx, client, "test_service", "127.0.0.1:1", "replacement", DefaultLeaseInSeconds)
+	re.NoError(replacement.Register())
+	re.NoError(replacement.Deregister())
+}
+
 func getKeyAfterLeaseExpired(ctx context.Context, re *require.Assertions, client *clientv3.Client, key string) string {
 	time.Sleep(DefaultLeaseInSeconds * time.Second) // ensure that the lease is expired
 	time.Sleep(500 * time.Millisecond)              // wait for the etcd to clean up the expired keys

@@ -242,20 +242,23 @@ func (sr *ServiceRegister) putWithTTL() (clientv3.LeaseID, error) {
 // call against the same lease ID, so a lease kept alive by a genuinely live
 // owner does not push the retry deadline out indefinitely; only a change in
 // which lease is occupying the key (a new registration event) triggers a
-// fresh measurement. It uses GrantedTTL rather than the live, continuously
-// renewed TTL: GrantedTTL is fixed for the life of the lease and already
-// reflects etcd's own minimum-lease-TTL floor, so deriving the deadline from
-// it is correct for any configured election timeout without guessing.
+// fresh measurement. It uses the observed remaining TTL rather than
+// GrantedTTL (the lease's original, unchanging duration): TimeToLive's TTL
+// reflects time.Until(expiry), which already includes any etcd leader
+// promotion that refreshed this lease's expiry before this measurement, on
+// top of the minimum-lease-TTL floor. registerRetryMargin then only needs to
+// cover a promotion that happens after this measurement, not one already
+// baked into GrantedTTL's ignorance of expiry updates.
 func (sr *ServiceRegister) observeContendedLease(ctx context.Context, existingLease clientv3.LeaseID) {
 	if existingLease == clientv3.NoLease || existingLease == sr.contendedLease {
 		return
 	}
 	ttlResp, err := sr.cli.TimeToLive(ctx, existingLease)
-	if err != nil || ttlResp.GrantedTTL <= 0 {
+	if err != nil || ttlResp.TTL <= 0 {
 		return
 	}
 	sr.contendedLease = existingLease
-	sr.retryDeadline = time.Now().Add(time.Duration(ttlResp.GrantedTTL)*time.Second + registerRetryMargin)
+	sr.retryDeadline = time.Now().Add(time.Duration(ttlResp.TTL)*time.Second + registerRetryMargin)
 }
 
 // revokeLease revokes the lease in a best-effort manner to avoid leaking it
