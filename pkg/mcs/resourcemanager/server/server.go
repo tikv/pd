@@ -233,11 +233,14 @@ func (s *Server) campaignLeader(expectedPrimary string) bool {
 	// Start keepalive the leadership and enable Resource Manager service.
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	var resetLeaderOnce sync.Once
-	defer resetLeaderOnce.Do(func() {
+	// A named function rather than an inline defer because the step-down branch
+	// below calls it before it logs; see the comment there.
+	resetLeader := func() {
 		cancel()
 		s.participant.Resign()
 		member.ServiceMemberGauge.WithLabelValues(serviceName).Set(0)
-	})
+	}
+	defer resetLeaderOnce.Do(resetLeader)
 
 	// maintain the leadership, after this, Resource Manager could be ready to provide service.
 	s.participant.GetLeadership().Keep(ctx)
@@ -258,9 +261,12 @@ func (s *Server) campaignLeader(expectedPrimary string) bool {
 			return true
 		}
 	}
+	// The ready log is written before the promotion for the same reason as in
+	// PD's campaignLeader: between the promotion and the loop below nothing
+	// checks the lease, so nothing that can block may sit there.
+	log.Info("resource manager primary is ready to serve", zap.String("resource-manager-primary-name", s.participant.Name()))
 	s.participant.PromoteSelf()
 	member.ServiceMemberGauge.WithLabelValues(serviceName).Set(1)
-	log.Info("resource manager primary is ready to serve", zap.String("resource-manager-primary-name", s.participant.Name()))
 
 	leaderTicker := time.NewTicker(constant.LeaderTickInterval)
 	defer leaderTicker.Stop()
@@ -272,11 +278,19 @@ func (s *Server) campaignLeader(expectedPrimary string) bool {
 			// expiration and a `{service}/primary/transfer` API call, which resigns
 			// this primary by revoking its leader lease.
 			if !s.participant.IsServing() {
+				// Resign before logging, not in the deferred reset above. The
+				// log can block for an unbounded time on a stalled volume, and
+				// the primary is reported through GetServingUrls without
+				// consulting IsServing, so a primary that is still waiting on
+				// that log would keep being handed out.
+				resetLeaderOnce.Do(resetLeader)
 				log.Info("no longer a primary/leader because lease has expired or transferred, the resource manager primary/leader will step down")
 				return false
 			}
 		case <-ctx.Done():
-			// Server is closed and it should return nil.
+			// Server is closed. A shutdown log can block just as long as a
+			// step-down log, so the resign comes first here too.
+			resetLeaderOnce.Do(resetLeader)
 			log.Info("server is closed")
 			return false
 		}
