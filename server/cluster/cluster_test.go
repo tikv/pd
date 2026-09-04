@@ -3618,6 +3618,69 @@ func TestPutMetaStoreDoesNotRestoreRemovedStoreLimit(t *testing.T) {
 	re.False(ok)
 }
 
+// TestPutMetaStoreCannotRaceConcurrentRegistrationAndBury guards against
+// PutMetaStore's wasKnown snapshot going stale: a request that reads
+// wasKnown=false, then pauses before putStoreImpl, can't let a second,
+// fully-completed register-then-bury of the same store ID land in between --
+// storeStateLock must serialize the whole thing. Proven by showing a
+// concurrent BuryStore for the same ID cannot complete while PutMetaStore is
+// paused mid-call, not just by checking the eventual outcome (which the
+// no-guard code also happens to get right if the race doesn't actually
+// interleave).
+func TestPutMetaStoreCannotRaceConcurrentRegistrationAndBury(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	backend := storage.NewStorageWithMemoryBackend()
+	rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, backend)
+
+	const storeID = uint64(1)
+	meta := &metapb.Store{
+		Id:      storeID,
+		Address: "mock://tikv-1:1",
+		State:   metapb.StoreState_Up,
+		Version: "2.0.0",
+	}
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/putMetaStoreAfterStoreStateLock", "return(true)"))
+	defer failpoint.Disable("github.com/tikv/pd/server/cluster/putMetaStoreAfterStoreStateLock") //nolint:errcheck
+
+	putDone := make(chan error, 1)
+	go func() {
+		putDone <- rc.PutMetaStore(meta)
+	}()
+
+	// Give PutMetaStore time to acquire storeStateLock, read wasKnown (false,
+	// since the store doesn't exist yet), and reach the failpoint's sleep.
+	time.Sleep(50 * time.Millisecond)
+
+	// A full register-then-bury of the same ID must not be able to complete
+	// while PutMetaStore is paused holding storeStateLock for it.
+	buryDone := make(chan error, 1)
+	go func() {
+		store := core.NewStoreInfo(&metapb.Store{Id: storeID, State: metapb.StoreState_Up})
+		rc.PutStore(store)
+		rc.PutStore(store.Clone(core.SetStoreState(metapb.StoreState_Offline, true)))
+		buryDone <- rc.BuryStore(storeID, false)
+	}()
+
+	select {
+	case err := <-buryDone:
+		re.Fail("BuryStore returned before PutMetaStore released storeStateLock", "err: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	re.NoError(<-putDone)
+	re.NoError(<-buryDone)
+
+	re.True(rc.GetStore(storeID).IsRemoved())
+	_, ok := opt.GetScheduleConfig().StoreLimit[storeID]
+	re.False(ok, "the bury that ran after PutMetaStore released the lock must be the final word on this store's limit")
+}
+
 func TestPatrolRegionConcurrency(t *testing.T) {
 	re := require.New(t)
 

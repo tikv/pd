@@ -1525,17 +1525,33 @@ func (c *RaftCluster) DeleteStoreLabel(storeID uint64, labelKey string) error {
 
 // PutMetaStore puts a store.
 func (c *RaftCluster) PutMetaStore(store *metapb.Store) error {
+	storeID := store.GetId()
+	// wasKnown alone isn't enough to decide whether to guard addStoreLimit
+	// against resurrecting a removed entry: a plain pre-putStoreImpl snapshot
+	// can't distinguish a genuine first registration from one that raced a
+	// full concurrent register-then-bury of the same ID landing in between
+	// the snapshot and putStoreImpl actually running -- wasKnown would read
+	// false either way, incorrectly skipping the guard for the second case.
+	// storeStateLock (the same per-store lock RemoveStore/BuryStore/UpStore/
+	// checkStore hold) makes the whole snapshot-then-act sequence below
+	// atomic with respect to any of those for this store ID, closing that
+	// window. This is a plain top-level entry point (only called from the
+	// gRPC PutStore handler), never invoked while already holding
+	// storeStateLock, so acquiring it here can't deadlock against them.
+	c.storeStateLock.Lock(uint32(storeID))
+	defer c.storeStateLock.Unlock(uint32(storeID))
+
 	// A tombstoned store's config entry is only ever cleared once, at bury time
-	// (RemoveStoreLimit); nothing sweeps it again afterward. The gRPC PutStore
-	// preflight isn't synchronized with BuryStore, so a request that observed
-	// an already-known store as live can still reach here after a concurrent
-	// bury tombstoned it and cleared its limit -- putStoreImpl won't resurrect
-	// the tombstone state for an existing store, but AddStoreLimit would
-	// recreate the entry unless guarded. Only guard the "already known" case:
-	// a store that was never registered before must still get a limit even if
-	// it's already tombstoned at first sight (e.g. state replayed from
+	// (RemoveStoreLimit); nothing sweeps it again afterward. putStoreImpl won't
+	// resurrect the tombstone state for an existing store, but AddStoreLimit
+	// would recreate the entry unless guarded. Only guard the "already known"
+	// case: a store that was never registered before must still get a limit
+	// even if it's already tombstoned at first sight (e.g. state replayed from
 	// storage), since there's no prior entry to protect from resurrection.
-	wasKnown := c.GetStore(store.GetId()) != nil
+	wasKnown := c.GetStore(storeID) != nil
+	failpoint.Inject("putMetaStoreAfterStoreStateLock", func() {
+		time.Sleep(300 * time.Millisecond)
+	})
 	if err := c.putStoreImpl(store, false); err != nil {
 		return err
 	}
