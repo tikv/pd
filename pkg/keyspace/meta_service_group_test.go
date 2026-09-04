@@ -53,7 +53,7 @@ func (suite *metaServiceGroupTestSuite) TearDownTest() {
 	suite.cancel()
 }
 
-func (suite *metaServiceGroupTestSuite) TestGetAssignmentCountsInitialZero() {
+func (suite *metaServiceGroupTestSuite) TestGetStatusInitialZero() {
 	re := suite.Require()
 	statusMap, err := suite.manager.GetStatus(suite.ctx)
 	re.NoError(err)
@@ -64,50 +64,36 @@ func (suite *metaServiceGroupTestSuite) TestGetAssignmentCountsInitialZero() {
 		re.Equal(0, status.AssignmentCount, "expected initial count of %q to be 0", grp)
 		re.False(status.Enabled, "expected initial status of %q to be disabled", grp)
 	}
-
-	_, err = suite.manager.AssignToGroup(suite.ctx, 1)
-	re.Error(err)
 }
 
-func (suite *metaServiceGroupTestSuite) TestAssignToGroup() {
+func (suite *metaServiceGroupTestSuite) TestFindMinMetaGroupAndUpdateAssignment() {
 	re := suite.Require()
+	re.ErrorIs(suite.manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		_, err := suite.manager.findMinMetaGroup(txn)
+		return err
+	}), errNoAvailableMetaServiceGroups)
 	suite.enableAllGroups()
-	request := 5
-	assigned, err := suite.manager.AssignToGroup(suite.ctx, request)
-	re.NoError(err)
+	var assigned string
+	re.NoError(suite.manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		var err error
+		assigned, err = suite.manager.findMinMetaGroup(txn)
+		if err != nil {
+			return err
+		}
+		return suite.manager.updateAssignmentTxn(txn, "", assigned)
+	}))
 	re.NotEmpty(assigned, "expected some non-empty group name")
 
 	// Verify the returned group is one of the mockMetaServiceGroups keys.
 	_, isValid := mockMetaServiceGroups()[assigned]
 	re.True(isValid, "assigned group must be from mockMetaServiceGroups")
 
-	// Verify the chosen group's count increments by 'request'.
-	counts, err := suite.manager.GetAssignmentCounts(suite.ctx)
+	// Verify the chosen group's count increments.
+	counts, err := suite.assignmentCounts()
 	re.NoError(err)
-	re.Equal(request, counts[assigned], "chosen group's count should equal the requested increment")
+	re.Equal(1, counts[assigned], "chosen group's count should increment")
 
 	// All other groups must remain at 0.
-	for grp := range mockMetaServiceGroups() {
-		if grp == assigned {
-			continue
-		}
-		re.Equal(0, counts[grp], "other groups should remain at 0")
-	}
-}
-
-func (suite *metaServiceGroupTestSuite) TestPickGroup() {
-	re := suite.Require()
-	suite.enableAllGroups()
-	assigned, err := suite.manager.PickGroup(suite.ctx)
-	re.NoError(err)
-	re.NotEmpty(assigned, "expected PickGroup to return a non-empty group")
-
-	_, isValid := mockMetaServiceGroups()[assigned]
-	re.True(isValid, "picked group must be from mockMetaServiceGroups")
-
-	counts, err := suite.manager.GetAssignmentCounts(suite.ctx)
-	re.NoError(err)
-	re.Equal(1, counts[assigned], "picked group's count should be incremented once")
 	for grp := range mockMetaServiceGroups() {
 		if grp == assigned {
 			continue
@@ -170,10 +156,11 @@ func (suite *metaServiceGroupTestSuite) TestUpdateEndpointsAndUpdateAssignment()
 	re := suite.Require()
 	suite.enableAllGroups()
 	// Assign to some existing group
-	assigned, err := suite.manager.AssignToGroup(suite.ctx, 1)
-	re.NoError(err)
-	re.NotEmpty(assigned, "expected AssignToGroup to return a non-empty group")
-	counts, err := suite.manager.GetAssignmentCounts(suite.ctx)
+	assigned := "etcd-group-0"
+	re.NoError(suite.manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		return suite.manager.updateAssignmentTxn(txn, "", assigned)
+	}))
+	counts, err := suite.assignmentCounts()
 	re.NoError(err)
 	re.Equal(1, counts[assigned], "assigned group should have count 1")
 
@@ -190,7 +177,7 @@ func (suite *metaServiceGroupTestSuite) TestUpdateEndpointsAndUpdateAssignment()
 
 	// the original group should have decreased from 1 → 0
 	// "etcd-group-3" should have increased from 0 → 1
-	counts, err = suite.manager.GetAssignmentCounts(suite.ctx)
+	counts, err = suite.assignmentCounts()
 	re.NoError(err)
 	re.Equal(0, counts[assigned], "original group should have count 0 after moving assignment")
 	re.Equal(1, counts["etcd-group-3"], "new group should have count 1")
@@ -219,9 +206,9 @@ func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelyUsesAuthoritativeC
 
 	// Authoritative scanner reports the real assignments.
 	actual := map[string]int{}
-	suite.manager.SetKeyspaceAssignmentCounter(func(ids map[string]struct{}) (map[string]int, error) {
+	suite.manager.SetKeyspaceAssignmentCounter(func(ids []string) (map[string]int, error) {
 		res := make(map[string]int, len(ids))
-		for id := range ids {
+		for _, id := range ids {
 			res[id] = actual[id]
 		}
 		return res, nil
@@ -257,29 +244,23 @@ func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelyUsesAuthoritativeC
 	re.ErrorIs(err, ErrGroupHasAssignedKeyspaces)
 }
 
-func (suite *metaServiceGroupTestSuite) TestAssignToGroupRejectsNegativeCount() {
-	re := suite.Require()
-	_, err := suite.manager.AssignToGroup(suite.ctx, -1)
-	re.ErrorIs(err, ErrInvalidAssignmentCount)
-}
-
 func (suite *metaServiceGroupTestSuite) TestReassignRejectsDisabledGroup() {
 	re := suite.Require()
 	// Groups are disabled by default, so reassigning a keyspace into one must be
 	// rejected.
 	err := suite.manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
-		return suite.manager.reassignKeyspaceLocked(txn, "", "etcd-group-0")
+		return suite.manager.reAssignKeyspaceLocked(txn, "", "etcd-group-0")
 	})
 	re.ErrorIs(err, ErrMetaServiceGroupDisabled)
 	// An unknown group is still rejected as unknown.
 	err = suite.manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
-		return suite.manager.reassignKeyspaceLocked(txn, "", "nonexistent")
+		return suite.manager.reAssignKeyspaceLocked(txn, "", "nonexistent")
 	})
 	re.ErrorIs(err, ErrUnknownMetaServiceGroup)
 	// Once enabled, the reassignment succeeds.
 	suite.enableAllGroups()
 	err = suite.manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
-		return suite.manager.reassignKeyspaceLocked(txn, "", "etcd-group-0")
+		return suite.manager.reAssignKeyspaceLocked(txn, "", "etcd-group-0")
 	})
 	re.NoError(err)
 }
@@ -292,4 +273,16 @@ func (suite *metaServiceGroupTestSuite) enableAllGroups() {
 			Enabled: &enabled,
 		}))
 	}
+}
+
+func (suite *metaServiceGroupTestSuite) assignmentCounts() (map[string]int, error) {
+	statusMap, err := suite.manager.GetStatus(suite.ctx)
+	if err != nil {
+		return nil, err
+	}
+	counts := make(map[string]int, len(statusMap))
+	for id, status := range statusMap {
+		counts[id] = status.AssignmentCount
+	}
+	return counts, nil
 }

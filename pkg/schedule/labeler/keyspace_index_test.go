@@ -61,7 +61,7 @@ func makeRegionForKeyspace(id uint32, mode byte) *core.RegionInfo {
 func TestKeyspaceRuleIndex(t *testing.T) {
 	re := require.New(t)
 	rule := makeKeyspaceRuleForTest(42, codec.RawKeyspaceModePrefix, codec.TxnKeyspaceModePrefix)
-	re.NoError(rule.checkAndAdjust())
+	re.NoError(rule.CheckAndAdjust())
 
 	var index keyspaceRuleIndex
 	re.True(index.Add(rule))
@@ -87,10 +87,10 @@ func TestKeyspaceRuleIndex(t *testing.T) {
 	// A rejected multi-range add must not populate its free slot before it
 	// discovers a collision in another slot.
 	txnOwner := makeKeyspaceRuleForTest(43, codec.TxnKeyspaceModePrefix)
-	re.NoError(txnOwner.checkAndAdjust())
+	re.NoError(txnOwner.CheckAndAdjust())
 	re.True(index.Add(txnOwner))
 	collision := makeKeyspaceRuleForTest(43, codec.RawKeyspaceModePrefix, codec.TxnKeyspaceModePrefix)
-	re.NoError(collision.checkAndAdjust())
+	re.NoError(collision.CheckAndAdjust())
 	re.False(index.Add(collision))
 	re.True(index.Contains(txnOwner))
 	re.False(index.Contains(collision))
@@ -114,7 +114,7 @@ func TestKeyspaceRuleIndexRejectsNonCanonicalID(t *testing.T) {
 	rule := makeKeyspaceRuleForTest(1, codec.TxnKeyspaceModePrefix)
 	rule.ID = constant.RegionLabelIDPrefix + "01"
 	rule.Labels[0].Value = "01"
-	re.NoError(rule.checkAndAdjust())
+	re.NoError(rule.CheckAndAdjust())
 
 	var index keyspaceRuleIndex
 	re.False(index.Add(rule))
@@ -127,7 +127,7 @@ func TestKeyspaceRuleIndexBoundaries(t *testing.T) {
 	expectedByKey := make(map[string][]byte)
 	for _, id := range ids {
 		rule := makeKeyspaceRuleForTest(id, codec.TxnKeyspaceModePrefix)
-		re.NoError(rule.checkAndAdjust())
+		re.NoError(rule.CheckAndAdjust())
 		re.True(index.Add(rule))
 		for _, boundaryID := range []uint32{id, id + 1} {
 			key := keyspaceBoundaryBytes(codec.TxnKeyspaceModePrefix, boundaryID)
@@ -163,7 +163,7 @@ func TestKeyspaceRuleIndexMatchesIncompletePrefix(t *testing.T) {
 
 	var index keyspaceRuleIndex
 	for _, rule := range []*LabelRule{rule255, rule256, maxRule} {
-		re.NoError(rule.checkAndAdjust())
+		re.NoError(rule.CheckAndAdjust())
 		re.True(index.Add(rule))
 	}
 
@@ -220,7 +220,7 @@ func TestKeyspaceRuleIndexMatchesIncompletePrefix(t *testing.T) {
 func TestKeyspaceRuleIndexSparseGap(t *testing.T) {
 	re := require.New(t)
 	rule := makeKeyspaceRuleForTest(constant.MaxValidKeyspaceID, codec.TxnKeyspaceModePrefix)
-	re.NoError(rule.checkAndAdjust())
+	re.NoError(rule.CheckAndAdjust())
 
 	var index keyspaceRuleIndex
 	re.True(index.Add(rule))
@@ -342,8 +342,8 @@ func TestKeyspaceRuleIndexReplaceReusesSparseStorage(t *testing.T) {
 			re := require.New(t)
 			first := makeKeyspaceRuleForTest(id, codec.TxnKeyspaceModePrefix)
 			second := makeKeyspaceRuleForTest(id, codec.TxnKeyspaceModePrefix)
-			re.NoError(first.checkAndAdjust())
-			re.NoError(second.checkAndAdjust())
+			re.NoError(first.CheckAndAdjust())
+			re.NoError(second.CheckAndAdjust())
 
 			var index keyspaceRuleIndex
 			re.True(index.Add(first))
@@ -564,9 +564,9 @@ func TestRegionLabelerUpdatesMutatedKeyspaceRule(t *testing.T) {
 func TestNewLabelRuleIndexBuildsAuthoritativeSnapshot(t *testing.T) {
 	re := require.New(t)
 	rule := makeKeyspaceRuleForTest(42, codec.TxnKeyspaceModePrefix)
-	re.NoError(rule.checkAndAdjust())
+	re.NoError(rule.CheckAndAdjust())
 	stale := makeKeyspaceRuleForTest(41, codec.TxnKeyspaceModePrefix)
-	re.NoError(stale.checkAndAdjust())
+	re.NoError(stale.CheckAndAdjust())
 
 	index := newLabelRuleIndex(map[string]*LabelRule{stale.ID: stale})
 	re.True(index.keyspaces.Contains(stale))
@@ -586,7 +586,7 @@ func TestNewLabelRuleIndexBuildsAuthoritativeSnapshot(t *testing.T) {
 
 func BenchmarkKeyspaceRuleIndexSparse(b *testing.B) {
 	rule := makeKeyspaceRuleForTest(0, codec.TxnKeyspaceModePrefix)
-	require.NoError(b, rule.checkAndAdjust())
+	require.NoError(b, rule.CheckAndAdjust())
 
 	b.Run("add-one", func(b *testing.B) {
 		b.ReportAllocs()
@@ -612,7 +612,7 @@ func BenchmarkKeyspaceRuleIndexSparse(b *testing.B) {
 
 	b.Run("high-id-negative-split", func(b *testing.B) {
 		highRule := makeKeyspaceRuleForTest(constant.MaxValidKeyspaceID, codec.TxnKeyspaceModePrefix)
-		require.NoError(b, highRule.checkAndAdjust())
+		require.NoError(b, highRule.CheckAndAdjust())
 		var index keyspaceRuleIndex
 		require.True(b, index.Add(highRule))
 		start := keyspaceBoundaryBytes(codec.TxnKeyspaceModePrefix, 0)
@@ -671,7 +671,7 @@ func BenchmarkRegionLabelerKeyspaceIndex(b *testing.B) {
 				rules := make(map[string]*LabelRule, count)
 				for id := range count {
 					rule := makeKeyspaceRuleForTest(uint32(id), codec.TxnKeyspaceModePrefix)
-					require.NoError(b, rule.checkAndAdjust())
+					require.NoError(b, rule.CheckAndAdjust())
 					rules[rule.ID] = rule
 				}
 				_ = newLabelRuleIndex(rules)
@@ -683,7 +683,7 @@ func BenchmarkRegionLabelerKeyspaceIndex(b *testing.B) {
 			rules := make([]*LabelRule, 0, count)
 			for id := range count {
 				rule := makeKeyspaceRuleForTest(uint32(id), codec.TxnKeyspaceModePrefix)
-				require.NoError(b, rule.checkAndAdjust())
+				require.NoError(b, rule.CheckAndAdjust())
 				rulesByID[rule.ID] = rule
 				rules = append(rules, rule)
 			}
@@ -702,7 +702,7 @@ func BenchmarkRegionLabelerKeyspaceIndex(b *testing.B) {
 			rules := make(map[string]*LabelRule, count)
 			for id := range count {
 				rule := makeKeyspaceRuleForTest(uint32(id), codec.TxnKeyspaceModePrefix)
-				require.NoError(b, rule.checkAndAdjust())
+				require.NoError(b, rule.CheckAndAdjust())
 				rules[rule.ID] = rule
 			}
 			regionLabeler := &RegionLabeler{ruleIndex: newLabelRuleIndex(rules)}

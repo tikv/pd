@@ -415,7 +415,7 @@ func TestKeyspaceGroupOverwriteDoesNotRecreateDeletedGroup(t *testing.T) {
 	}
 	manager.groups[endpoint.Standard].Put(group)
 
-	err := manager.UpdateKeyspaceForGroup(endpoint.Standard, "1", 43, opAdd)
+	err := updateKeyspaceForGroupForTest(manager, "1", 43)
 	re.ErrorContains(err, errs.ErrKeyspaceGroupNotExists.FastGenByArgs(group.ID).Error())
 	stored, err := manager.GetKeyspaceGroupByID(group.ID)
 	re.NoError(err)
@@ -444,7 +444,7 @@ func TestKeyspaceGroupUpdatesRebaseOnStorage(t *testing.T) {
 			Keyspaces: []uint32{42},
 		})
 
-		re.NoError(manager.UpdateKeyspaceForGroup(endpoint.Standard, "1", 44, opAdd))
+		re.NoError(updateKeyspaceForGroupForTest(manager, "1", 44))
 		got, err := manager.GetKeyspaceGroupByID(storedGroup.ID)
 		re.NoError(err)
 		re.Equal([]uint32{42, 43, 44}, got.Keyspaces)
@@ -503,6 +503,21 @@ type keyspaceGroupTestSuite struct {
 	cancel context.CancelFunc
 	kgm    *GroupManager
 	kg     *Manager
+}
+
+func updateKeyspaceForGroupForTest(m *GroupManager, id string, keyspaceID uint32) error {
+	op, cb, err := m.updateKeyspaceForGroupTxnOp(endpoint.Standard, id, keyspaceID, opAdd)
+	if err != nil {
+		return err
+	}
+	if op == nil {
+		return nil
+	}
+	err = m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
+		return op(txn)
+	})
+	cb(err)
+	return err
 }
 
 func TestKeyspaceGroupTestSuite(t *testing.T) {
@@ -701,6 +716,44 @@ func (suite *keyspaceGroupTestSuite) TestUpdateKeyspace() {
 	re.Len(kg3.Keyspaces, 1)
 }
 
+func (suite *keyspaceGroupTestSuite) TestUpdateKeyspaceForGroupTxnOpUsesCommittedSnapshot() {
+	re := suite.Require()
+
+	err := suite.kgm.CreateKeyspaceGroups([]*endpoint.KeyspaceGroup{{
+		ID:        2,
+		UserKind:  endpoint.Standard.String(),
+		Keyspaces: []uint32{111},
+	}})
+	re.NoError(err)
+
+	addOp, addCb, err := suite.kgm.updateKeyspaceForGroupTxnOp(endpoint.Standard, "2", 222, opAdd)
+	re.NoError(err)
+	deleteOp, deleteCb, err := suite.kgm.updateKeyspaceForGroupTxnOp(endpoint.Standard, "2", 222, opDelete)
+	re.NoError(err)
+
+	err = suite.kgm.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		return addOp(txn)
+	})
+	re.NoError(err)
+	err = suite.kgm.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		return deleteOp(txn)
+	})
+	re.NoError(err)
+
+	deleteCb(nil)
+	addCb(nil)
+
+	stored, err := suite.kgm.GetKeyspaceGroupByID(2)
+	re.NoError(err)
+	re.Equal([]uint32{111}, stored.Keyspaces)
+
+	suite.kgm.RLock()
+	defer suite.kgm.RUnlock()
+	cached := suite.kgm.groups[endpoint.Standard].Get(2)
+	re.NotNil(cached)
+	re.Equal([]uint32{111}, cached.Keyspaces)
+}
+
 func (suite *keyspaceGroupTestSuite) TestUpdateKeyspaceGroupRollbackOnSaveError() {
 	re := suite.Require()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -848,9 +901,9 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupSplit() {
 	re.Nil(kg4)
 	re.ErrorContains(err, errs.ErrKeyspaceGroupInSplit.FastGenByArgs(4).Error())
 	// update the in-split keyspace group
-	err = suite.kg.kgm.UpdateKeyspaceForGroup(endpoint.Standard, "2", 444, opAdd)
+	err = updateKeyspaceForGroupForTest(suite.kg.kgm, "2", 444)
 	re.ErrorContains(err, errs.ErrKeyspaceGroupInSplit.FastGenByArgs(2).Error())
-	err = suite.kg.kgm.UpdateKeyspaceForGroup(endpoint.Standard, "4", 444, opAdd)
+	err = updateKeyspaceForGroupForTest(suite.kg.kgm, "4", 444)
 	re.ErrorContains(err, errs.ErrKeyspaceGroupInSplit.FastGenByArgs(4).Error())
 
 	// finish the split of keyspace group 4

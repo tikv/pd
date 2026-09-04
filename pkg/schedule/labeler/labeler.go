@@ -252,9 +252,62 @@ func (l *RegionLabeler) GetLabelRuleLocked(id string) *LabelRule {
 	return filterExpiredLabels(rule, time.Now())
 }
 
+// GetRuleStorage returns the RuleStorage of the RegionLabeler.
+func (l *RegionLabeler) GetRuleStorage() endpoint.RuleStorage {
+	return l.storage
+}
+
+// SaveRuleWithoutTxn updates the in-memory state for a LabelRule that has
+// already been durably persisted by the caller (e.g. as part of a larger
+// transaction), without writing to storage itself.
+func (l *RegionLabeler) SaveRuleWithoutTxn(rule *LabelRule) {
+	l.Lock()
+	defer l.Unlock()
+	l.ruleIndex.set(rule)
+}
+
+// DeleteRuleWithoutTxn updates the in-memory state for a LabelRule that has
+// already been durably removed by the caller (e.g. as part of a larger
+// transaction), without deleting from storage itself.
+func (l *RegionLabeler) DeleteRuleWithoutTxn(id string) {
+	l.Lock()
+	defer l.Unlock()
+	l.ruleIndex.delete(id)
+}
+
+// ReloadRuleFromStorage re-reads a rule from storage and republishes it into
+// the in-memory index, or removes it from the index if storage no longer has
+// it - found reports which of those happened. The read and the index update
+// happen under the same lock hold, so this is atomic with respect to any
+// concurrent SetLabelRule/DeleteLabelRule on the same id: whichever caller
+// acquires the lock last always reads what is currently durable and
+// publishes that, so the cache converges to storage regardless of call
+// ordering. Use this instead of a separate
+// GetRuleStorage-then-SaveRuleWithoutTxn/DeleteRuleWithoutTxn pair, which
+// would leave a window between the read and the write for another writer's
+// more recent update to be silently overwritten by a stale one.
+func (l *RegionLabeler) ReloadRuleFromStorage(id string) (found bool, err error) {
+	l.Lock()
+	defer l.Unlock()
+	raw, err := l.storage.LoadRegionRule(id)
+	if err != nil {
+		return false, err
+	}
+	if raw == "" {
+		l.ruleIndex.delete(id)
+		return false, nil
+	}
+	rule, err := NewLabelRuleFromJSON([]byte(raw))
+	if err != nil {
+		return false, err
+	}
+	l.ruleIndex.set(rule)
+	return true, nil
+}
+
 // SetLabelRule inserts or updates a LabelRule.
 func (l *RegionLabeler) SetLabelRule(rule *LabelRule) error {
-	if err := rule.checkAndAdjust(); err != nil {
+	if err := rule.CheckAndAdjust(); err != nil {
 		return err
 	}
 	if err := l.storage.RunInTxn(l.ctx, func(txn kv.Txn) error {
@@ -326,7 +379,7 @@ func (l *RegionLabeler) Patch(patch LabelRulePatch) error {
 	setRulesMap := make(map[string]*LabelRule)
 
 	for _, rule := range patch.SetRules {
-		if err := rule.checkAndAdjust(); err != nil {
+		if err := rule.CheckAndAdjust(); err != nil {
 			return err
 		}
 		setRulesMap[rule.ID] = rule
