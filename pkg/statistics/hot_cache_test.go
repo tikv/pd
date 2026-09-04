@@ -60,8 +60,29 @@ func TestRegionFlowTasksMatchOriginalForAnyPeerCount(t *testing.T) {
 		t.Run(fmt.Sprintf("%d-peers", peerCount), func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			originalCache := NewHotPeerCache(ctx, core.NewBasicCluster(), utils.Write)
-			compactCache := NewHotPeerCache(ctx, core.NewBasicCluster(), utils.Write)
+			previousRegion := newBenchmarkRegion(1, peerCount+1)
+			newCache := func() *HotPeerCache {
+				cluster := core.NewBasicCluster()
+				for _, peer := range previousRegion.GetPeers() {
+					cluster.PutStore(core.NewStoreInfo(&metapb.Store{Id: peer.GetStoreId()}))
+				}
+				return NewHotPeerCache(ctx, cluster, utils.Write)
+			}
+			originalCache := newCache()
+			compactCache := newCache()
+
+			_, seedWrite := newOriginalRegionFlowTasks(previousRegion)
+			seedWrite(originalCache)
+			seedWrite(compactCache)
+			originalStats := originalCache.GetHotPeerStats(0)
+			compactStats := compactCache.GetHotPeerStats(0)
+			require.Len(t, originalStats, peerCount+1)
+			require.Len(t, compactStats, peerCount+1)
+			for _, peer := range previousRegion.GetPeers() {
+				require.NotEmpty(t, originalStats[peer.GetStoreId()])
+				require.NotEmpty(t, compactStats[peer.GetStoreId()])
+			}
+
 			region := newBenchmarkRegion(1, peerCount)
 
 			originalExpired, originalWrite := newOriginalRegionFlowTasks(region)
@@ -71,9 +92,21 @@ func TestRegionFlowTasksMatchOriginalForAnyPeerCount(t *testing.T) {
 			compactExpired(compactCache)
 			compactWrite(compactCache)
 
-			require.Equal(t, originalCache.GetHotPeerStats(0), compactCache.GetHotPeerStats(0))
+			originalStats = originalCache.GetHotPeerStats(0)
+			compactStats = compactCache.GetHotPeerStats(0)
+			require.Equal(t, originalStats, compactStats)
 			require.Equal(t, originalCache.storesOfRegion, compactCache.storesOfRegion)
 			require.Equal(t, originalCache.regionsOfStore, compactCache.regionsOfStore)
+
+			expiredStoreID := uint64(peerCount + 1)
+			require.Empty(t, originalStats[expiredStoreID])
+			require.Empty(t, compactStats[expiredStoreID])
+			require.Nil(t, originalCache.getHotPeerStat(region.GetID(), expiredStoreID))
+			require.Nil(t, compactCache.getHotPeerStat(region.GetID(), expiredStoreID))
+			for _, peer := range region.GetPeers() {
+				require.NotEmpty(t, originalStats[peer.GetStoreId()])
+				require.NotEmpty(t, compactStats[peer.GetStoreId()])
+			}
 		})
 	}
 }
