@@ -994,7 +994,10 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 				return
 			}
 			if region.GetApproximateSize() != origin.GetApproximateSize() ||
-				region.GetApproximateKeys() != origin.GetApproximateKeys() {
+				region.GetApproximateKeys() != origin.GetApproximateKeys() ||
+				region.GetApproximateKvSize() != origin.GetApproximateKvSize() ||
+				region.GetApproximateIAKvSize() != origin.GetApproximateIAKvSize() ||
+				region.GetApproximateColumnarKvSize() != origin.GetApproximateColumnarKvSize() {
 				saveCache = true
 				return
 			}

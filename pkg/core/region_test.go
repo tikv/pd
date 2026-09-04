@@ -452,6 +452,45 @@ func TestNeedSync(t *testing.T) {
 	}
 }
 
+func TestRegionGuideLogicalStorageSizeChanged(t *testing.T) {
+	regionGuide := GenerateRegionGuideFunc(false)
+	origin := NewRegionInfo(&metapb.Region{Id: 1}, nil)
+	testCases := []struct {
+		name   string
+		update func(*RegionInfo)
+	}{
+		{
+			name: "row-based storage size",
+			update: func(region *RegionInfo) {
+				region.approximateKvSize = 1
+			},
+		},
+		{
+			name: "IA row-based storage size",
+			update: func(region *RegionInfo) {
+				region.approximateIAKvSize = 1
+			},
+		},
+		{
+			name: "columnar storage size",
+			update: func(region *RegionInfo) {
+				region.approximateColumnarKvSize = 1
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			region := origin.Clone()
+			testCase.update(region)
+			saveKV, saveCache, needSync, _ := regionGuide(ContextTODO(), region, origin)
+			require.False(t, saveKV)
+			require.True(t, saveCache)
+			require.False(t, needSync)
+		})
+	}
+}
+
 func TestRegionMap(t *testing.T) {
 	re := require.New(t)
 	rm := make(map[uint64]*regionItem)
