@@ -16,6 +16,7 @@ package command
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"io"
@@ -170,7 +171,7 @@ func doRequest(cmd *cobra.Command, prefix string, method string, customHeader ht
 
 	endpoints := getEndpoints(cmd)
 	err := tryURLs(cmd, endpoints, func(endpoint string) error {
-		return do(endpoint, prefix, method, &resp, header, b)
+		return do(cmd.Context(), endpoint, prefix, method, &resp, header, b)
 	})
 	return resp, err
 }
@@ -185,7 +186,7 @@ func doRequestSingleEndpoint(cmd *cobra.Command, endpoint, prefix, method string
 	header := buildNoProxyHeader(cmd, customHeader)
 
 	err := requestURL(cmd, endpoint, func(endpoint string) error {
-		return do(endpoint, prefix, method, &resp, header, b)
+		return do(cmd.Context(), endpoint, prefix, method, &resp, header, b)
 	})
 	return resp, err
 }
@@ -287,7 +288,7 @@ func requestJSON(cmd *cobra.Command, method, prefix string, input map[string]any
 		url := endpoint + "/" + prefix
 		switch method {
 		case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodGet:
-			req, err = http.NewRequest(method, url, bytes.NewBuffer(data))
+			req, err = http.NewRequestWithContext(cmd.Context(), method, url, bytes.NewBuffer(data))
 			if err != nil {
 				return err
 			}
@@ -327,7 +328,7 @@ func patchJSON(cmd *cobra.Command, prefix string, input map[string]any) {
 }
 
 // do send a request to server. Default is Get.
-func do(endpoint, prefix, method string, resp *string, customHeader http.Header, b *bodyOption) error {
+func do(ctx context.Context, endpoint, prefix, method string, resp *string, customHeader http.Header, b *bodyOption) error {
 	var err error
 	url := endpoint + "/" + prefix
 	if method == "" {
@@ -335,7 +336,7 @@ func do(endpoint, prefix, method string, resp *string, customHeader http.Header,
 	}
 	var req *http.Request
 
-	req, err = http.NewRequest(method, url, b.body)
+	req, err = http.NewRequestWithContext(ctx, method, url, b.body)
 	if err != nil {
 		return err
 	}

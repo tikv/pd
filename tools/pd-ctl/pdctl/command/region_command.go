@@ -80,6 +80,7 @@ func NewRegionCommand() *cobra.Command {
 	r.AddCommand(NewRegionsByKeysCommand())
 	r.AddCommand(NewRangesWithRangeHolesCommand())
 	r.AddCommand(NewInvalidTiFlashKeyCommand())
+	r.AddCommand(NewRegionMetaConsistencyCommand())
 
 	topRead := &cobra.Command{
 		Use:   `topread [byte|query] <limit> [--jq="<query string>"]`,
