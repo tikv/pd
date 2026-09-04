@@ -22,7 +22,7 @@ import (
 
 var (
 	// KernelType is the current kernel type, which is Next Generation in this case.
-	KernelType = "Next Generation"
+	KernelType = NextGen
 )
 
 // IsNextGen returns true if the current kernel type is Next Generation.

@@ -1,4 +1,4 @@
-// Copyright 2025 TiKV Project Authors.
+// Copyright 2026 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,25 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build !nextgen
-
 package kerneltype
 
 import (
-	"github.com/pingcap/failpoint"
+	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
-var (
-	// KernelType is the current kernel type, which is Classic in this case.
-	KernelType = Classic
-)
-
-// IsNextGen returns true if the current kernel type is NextGen.
-func IsNextGen() bool {
-	failpoint.Inject("mockNextGenBuildFlag", func(val failpoint.Value) {
-		if v, ok := val.(bool); ok {
-			failpoint.Return(v)
-		}
-	})
-	return false
+func TestKernelTypeWireNames(t *testing.T) {
+	require.Equal(t, "Classic", Classic)
+	require.Equal(t, "Next Generation", NextGen)
 }
