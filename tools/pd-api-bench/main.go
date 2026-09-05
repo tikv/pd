@@ -379,19 +379,22 @@ func newEtcdClient(cfg *config.Config) *clientv3.Client {
 // newPDClient returns a pd client.
 func newPDClient(ctx context.Context, cfg *config.Config) pd.Client {
 	addrs := []string{cfg.PDAddr}
-	pdCli, err := pd.NewClientWithContext(ctx, caller.TestComponent,
-		addrs, pd.SecurityOption{
-			CAPath:   cfg.CaPath,
-			CertPath: cfg.CertPath,
-			KeyPath:  cfg.KeyPath,
-		},
+	opts := []opt.ClientOption{
 		//nolint:staticcheck
 		opt.WithGRPCDialOptions(
 			grpc.WithKeepaliveParams(keepalive.ClientParameters{
 				Time:    keepaliveTime,
 				Timeout: keepaliveTimeout,
 			}),
-		))
+		),
+		opt.WithEnableRouterClient(cfg.EnableRouterClient),
+	}
+	pdCli, err := pd.NewClientWithContext(ctx, caller.TestComponent,
+		addrs, pd.SecurityOption{
+			CAPath:   cfg.CaPath,
+			CertPath: cfg.CertPath,
+			KeyPath:  cfg.KeyPath,
+		}, opts...)
 	if err != nil {
 		log.Fatal("fail to create pd client", zap.Error(err))
 	}
