@@ -698,8 +698,14 @@ func (c *ScheduleConfig) Deprecated() error {
 
 // StoreLimitConfig is a config about scheduling rate limit of different types for a store.
 type StoreLimitConfig struct {
-	AddPeer          float64 `toml:"add-peer" json:"add-peer"`
-	RemovePeer       float64 `toml:"remove-peer" json:"remove-peer"`
+	AddPeer    float64 `toml:"add-peer" json:"add-peer"`
+	RemovePeer float64 `toml:"remove-peer" json:"remove-peer"`
+	// TransferLeaderIn is the inbound leader limit per minute. Its zero default
+	// preserves unlimited transfers through the shared v1 limiter's zero-rate bypass.
+	//
+	// TODO: Use storelimit.Unlimited consistently in defaults and HTTP/PD Control,
+	// preserving compatibility with omitted fields and persisted zeros instead of
+	// adding type-specific zero-rate exceptions.
 	TransferLeaderIn float64 `toml:"transfer-leader-in" json:"transfer-leader-in"`
 }
 

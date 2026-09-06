@@ -622,6 +622,8 @@ func isStoreLimitRateValid(rate float64, typeName string) bool {
 	if math.IsNaN(rate) || math.IsInf(rate, 0) || rate < 0 {
 		return false
 	}
+	// Mirror the HTTP API's transfer-leader-in-only zero-as-unlimited exception.
+	// See the unlimited semantics TODO on StoreLimitConfig.TransferLeaderIn.
 	return rate > 0 || typeName == storelimit.TransferLeaderIn.String()
 }
 

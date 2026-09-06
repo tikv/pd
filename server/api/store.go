@@ -760,6 +760,9 @@ func getStoreLimitRate(input map[string]any) (float64, error) {
 	if ratePerMin > 0 {
 		return ratePerMin, nil
 	}
+	// Zero currently restores unlimited only for an explicit transfer-leader-in type;
+	// add-peer/remove-peer retain positive-only API validation. See the unlimited
+	// semantics TODO on StoreLimitConfig.TransferLeaderIn before adding more exceptions.
 	typeName, ok := input["type"].(string)
 	if !ok || typeName != storelimit.TransferLeaderIn.String() {
 		return 0, errors.New("invalid rate which should be larger than 0")
