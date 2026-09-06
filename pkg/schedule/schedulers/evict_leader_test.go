@@ -31,6 +31,8 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/types"
@@ -61,6 +63,43 @@ func TestEvictLeader(t *testing.T) {
 	operatorutil.CheckMultiTargetTransferLeader(re, ops[0], operator.OpLeader, 1, []uint64{2, 3})
 	re.False(ops[0].Step(0).(operator.TransferLeader).IsFinish(tc.MockRegionInfo(1, 1, []uint64{2, 3}, []uint64{}, &metapb.RegionEpoch{ConfVer: 0, Version: 0})))
 	re.True(ops[0].Step(0).(operator.TransferLeader).IsFinish(tc.MockRegionInfo(1, 2, []uint64{1, 3}, []uint64{}, &metapb.RegionEpoch{ConfVer: 0, Version: 0})))
+}
+
+func TestEvictLeaderWithExhaustedTransferLeaderInLimit(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest(false)
+	defer cancel()
+	for _, id := range []uint64{1, 2, 3} {
+		tc.AddLeaderStore(id, 0)
+	}
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	tc.AddLeaderRegion(2, 1, 2, 3)
+	// Keep the target buckets exhausted throughout the test without sleeping.
+	for _, id := range []uint64{2, 3} {
+		tc.SetStoreLimit(id, storelimit.TransferLeaderIn, 0.00006)
+		tc.ResetStoreLimit(id, storelimit.TransferLeaderIn, 0.000001)
+		limiter := tc.GetStore(id).GetStoreLimit()
+		re.True(limiter.Take(storelimit.RegionInfluence[storelimit.TransferLeaderIn], storelimit.TransferLeaderIn, constant.Medium))
+		re.False(tc.GetStore(id).IsAvailable(storelimit.TransferLeaderIn, constant.Medium))
+	}
+	scheduler, err := CreateScheduler(types.EvictLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.EvictLeaderScheduler, []string{"1"}), func(string) error { return nil })
+	re.NoError(err)
+	ops, _ := scheduler.Schedule(tc, false)
+	re.NotEmpty(ops)
+	re.Equal(constant.Urgent, ops[0].GetPriorityLevel())
+	re.False(oc.ExceedStoreLimit(ops[0]))
+	re.True(oc.AddOperator(ops[0]))
+
+	// Ordinary transfers may be built, but must still fail final admission.
+	regionID := uint64(1)
+	if ops[0].RegionID() == regionID {
+		regionID = 2
+	}
+	op, err := operator.CreateTransferLeaderOperator("test-transfer-leader", tc, tc.GetRegion(regionID), 2, nil, operator.OpLeader)
+	re.NoError(err)
+	re.Equal(constant.Medium, op.GetPriorityLevel())
+	re.True(oc.ExceedStoreLimit(op))
+	re.False(oc.AddOperator(op))
 }
 
 func TestEvictLeaderWithUnhealthyPeer(t *testing.T) {

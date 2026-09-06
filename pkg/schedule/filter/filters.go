@@ -326,6 +326,9 @@ type StoreStateFilter struct {
 	AllowFastFailover bool
 	// Set true if allows temporary states.
 	AllowTemporaryStates bool
+	// SkipTransferLeaderInLimit leaves admission to the operator controller when
+	// constructing an operator before its final priority is known.
+	SkipTransferLeaderInLimit bool
 	// Set the priority level of the filter, it should be same with the operator level.
 	// The priority level can be higher than the operator level in checker,
 	// the operator controller should check it again by using the actual operator level.
@@ -460,7 +463,7 @@ func (f *StoreStateFilter) exceedAddLimit(_ config.SharedConfigProvider, store *
 }
 
 func (f *StoreStateFilter) exceedTransferLeaderInLimit(conf config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
-	if f.AllowTemporaryStates || f.OperatorLevel == constant.Urgent {
+	if f.AllowTemporaryStates || f.SkipTransferLeaderInLimit || f.OperatorLevel == constant.Urgent {
 		f.Reason = storeStateOK
 		return statusOK
 	}

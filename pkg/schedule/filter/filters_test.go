@@ -320,6 +320,13 @@ func TestStoreStateFilterRejectsTransferLeaderTargetAtLimit(t *testing.T) {
 		filter.Target(opt, store).StatusCode)
 	re.Equal("store-state-exceed-transfer-leader-in-limit-filter", filter.Reason.String())
 
+	filter.SkipTransferLeaderInLimit = true
+	re.Equal(plan.StatusOK, filter.Target(opt, store).StatusCode)
+	disconnectedStore := store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-5 * time.Minute)))
+	re.Equal(plan.StatusCode(plan.StatusStoreDisconnected), filter.Target(opt, disconnectedStore).StatusCode)
+	filter.SkipTransferLeaderInLimit = false
+	re.Equal(plan.StatusCode(plan.StatusStoreTransferLeaderInLimitThrottled), filter.Target(opt, store).StatusCode)
+
 	filter.AllowTemporaryStates = true
 	re.Equal(plan.StatusOK, filter.Target(opt, store).StatusCode)
 
