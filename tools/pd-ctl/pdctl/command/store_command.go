@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"math"
 	"net/http"
 	"path"
 	"strconv"
@@ -30,7 +29,6 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 
-	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/response"
 )
 
@@ -137,7 +135,7 @@ func NewStoreLimitCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "limit [<store_id>|<all> [<key> <value>]... <limit> <type>]",
 		Short: "show or set a store's rate limit",
-		Long:  "show or set a store's rate limit, <type> can be 'add-peer'(default), 'remove-peer', or 'transfer-leader-in'",
+		Long:  "show or set a store's rate limit, <type> can be 'add-peer'(default) or 'remove-peer'",
 		Run:   storeLimitCommandFunc,
 	}
 	return c
@@ -203,7 +201,7 @@ func NewShowStoresCommand() *cobra.Command {
 func NewShowAllStoresLimitCommand() *cobra.Command {
 	sc := &cobra.Command{
 		Use:        "limit <type>",
-		Short:      "show all stores' limit, <type> can be 'add-peer'(default), 'remove-peer', or 'transfer-leader-in'",
+		Short:      "show all stores' limit, <type> can be 'add-peer'(default) or 'remove-peer'",
 		Deprecated: "use store limit instead",
 		Run:        showAllStoresLimitCommandFunc,
 	}
@@ -226,7 +224,7 @@ func NewSetAllLimitCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:        "limit <rate> <type>",
 		Short:      "set all store's rate limit",
-		Long:       "set all store's rate limit, <type> can be 'add-peer'(default), 'remove-peer', or 'transfer-leader-in'",
+		Long:       "set all store's rate limit, <type> can be 'add-peer'(default) or 'remove-peer'",
 		Deprecated: "use store limit all <rate> instead",
 		Run:        setAllLimitCommandFunc,
 	}
@@ -559,11 +557,7 @@ func storeLimitCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Println(r)
 	} else if argsCount <= 3 {
 		rate, err := strconv.ParseFloat(args[1], 64)
-		typeName := ""
-		if argsCount == 3 {
-			typeName = args[2]
-		}
-		if err != nil || !isStoreLimitRateValid(rate) {
+		if err != nil || rate <= 0 {
 			cmd.Println("rate should be a number that > 0.")
 			return
 		}
@@ -571,7 +565,7 @@ func storeLimitCommandFunc(cmd *cobra.Command, args []string) {
 		var prefix string
 		if args[0] == "all" {
 			prefix = storesLimitPrefix
-			if rate > maxStoreLimit && rate != storelimit.Unlimited {
+			if rate > maxStoreLimit {
 				cmd.Printf("rate should be less than %.1f for all\n", maxStoreLimit)
 				return
 			}
@@ -581,8 +575,8 @@ func storeLimitCommandFunc(cmd *cobra.Command, args []string) {
 		postInput := map[string]any{
 			"rate": rate,
 		}
-		if typeName != "" {
-			postInput["type"] = typeName
+		if argsCount == 3 {
+			postInput["type"] = args[2]
 		}
 		postJSON(cmd, prefix, postInput)
 	} else {
@@ -592,18 +586,16 @@ func storeLimitCommandFunc(cmd *cobra.Command, args []string) {
 			postInput := map[string]any{}
 			prefix := storesLimitPrefix
 			ratePos := argsCount - 1
-			typeName := ""
 			if argsCount%2 == 1 {
-				typeName = args[argsCount-1]
-				postInput["type"] = typeName
+				postInput["type"] = args[argsCount-1]
 				ratePos = argsCount - 2
 			}
 			rate, err := strconv.ParseFloat(args[ratePos], 64)
-			if err != nil || !isStoreLimitRateValid(rate) {
+			if err != nil || rate <= 0 {
 				cmd.Println("rate should be a number that > 0.")
 				return
 			}
-			if rate > maxStoreLimit && rate != storelimit.Unlimited {
+			if rate > maxStoreLimit {
 				cmd.Printf("rate should be less than %.1f for all\n", maxStoreLimit)
 				return
 			}
@@ -616,10 +608,6 @@ func storeLimitCommandFunc(cmd *cobra.Command, args []string) {
 			postJSON(cmd, prefix, postInput)
 		}
 	}
-}
-
-func isStoreLimitRateValid(rate float64) bool {
-	return !math.IsNaN(rate) && !math.IsInf(rate, 0) && rate > 0
 }
 
 func storeCheckCommandFunc(cmd *cobra.Command, args []string) {
@@ -691,11 +679,7 @@ func setAllLimitCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	rate, err := strconv.ParseFloat(args[0], 64)
-	typeName := ""
-	if len(args) == 2 {
-		typeName = args[1]
-	}
-	if err != nil || !isStoreLimitRateValid(rate) {
+	if err != nil || rate <= 0 {
 		cmd.Println("rate should be a number that > 0.")
 		return
 	}
@@ -703,8 +687,8 @@ func setAllLimitCommandFunc(cmd *cobra.Command, args []string) {
 	input := map[string]any{
 		"rate": rate,
 	}
-	if typeName != "" {
-		input["type"] = typeName
+	if len(args) == 2 {
+		input["type"] = args[1]
 	}
 	postJSON(cmd, prefix, input)
 }
