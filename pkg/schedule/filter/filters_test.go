@@ -301,45 +301,53 @@ func TestStoreStateFilter(t *testing.T) {
 	check(store, testCases)
 }
 
-func TestStoreStateFilterRejectsTransferLeaderTargetAtLimit(t *testing.T) {
+func TestStoreStateFilterTransferLeaderInLimit(t *testing.T) {
 	re := require.New(t)
 	const ratePerSec = 0.000001
 	limiter := storelimit.NewStoreRateLimit(ratePerSec)
-	re.True(limiter.Take(storelimit.RegionInfluence[storelimit.TransferLeaderIn],
-		storelimit.TransferLeaderIn, constant.Medium))
 	store := core.NewStoreInfoWithLabel(1, map[string]string{}).Clone(
 		core.SetLastHeartbeatTS(time.Now()),
 		core.SetStoreLimit(limiter),
 	)
-	filter := &StoreStateFilter{TransferLeader: true, OperatorLevel: constant.Medium}
+	filter := &StoreStateFilter{ActionScope: "test", TransferLeader: true, OperatorLevel: constant.Medium}
 	opt := mockconfig.NewTestOptions()
 	opt.SetStoreLimit(store.GetID(), storelimit.TransferLeaderIn, ratePerSec*time.Minute.Seconds())
 
+	re.Equal("test", filter.Scope())
+	// Selection only observes the budget; it must not consume it.
+	for range 2 {
+		re.Equal(plan.StatusOK, filter.Target(opt, store).StatusCode)
+	}
+	re.True(limiter.Take(storelimit.RegionInfluence[storelimit.TransferLeaderIn],
+		storelimit.TransferLeaderIn, constant.Medium))
 	re.Equal(plan.StatusOK, filter.Source(opt, store).StatusCode)
-	re.Equal(plan.StatusCode(plan.StatusStoreTransferLeaderInLimitThrottled),
-		filter.Target(opt, store).StatusCode)
-	re.Equal("store-state-exceed-transfer-leader-in-limit-filter", filter.Reason.String())
-
-	filter.SkipTransferLeaderInLimit = true
-	re.Equal(plan.StatusOK, filter.Target(opt, store).StatusCode)
+	for _, level := range []constant.PriorityLevel{constant.Low, constant.Medium, constant.High} {
+		re.Equal(plan.StatusCode(plan.StatusStoreTransferLeaderInLimitThrottled),
+			(&StoreStateFilter{TransferLeader: true, OperatorLevel: level}).Target(opt, store).StatusCode)
+	}
+	stateFilter := &StoreStateFilter{TransferLeader: true, OperatorLevel: constant.Urgent}
+	re.Equal(plan.StatusOK, stateFilter.Target(opt, store).StatusCode)
 	disconnectedStore := store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-5 * time.Minute)))
-	re.Equal(plan.StatusCode(plan.StatusStoreDisconnected), filter.Target(opt, disconnectedStore).StatusCode)
-	filter.SkipTransferLeaderInLimit = false
+	re.Equal(plan.StatusCode(plan.StatusStoreDisconnected), stateFilter.Target(opt, disconnectedStore).StatusCode)
+	re.Equal(plan.StatusOK, (&StoreStateFilter{TransferLeader: true, AllowTemporaryStates: true}).Target(opt, store).StatusCode)
 	re.Equal(plan.StatusCode(plan.StatusStoreTransferLeaderInLimitThrottled), filter.Target(opt, store).StatusCode)
+	re.Equal("store-state-exceed-transfer-leader-in-limit-filter", filter.Type().String())
 
-	filter.AllowTemporaryStates = true
-	re.Equal(plan.StatusOK, filter.Target(opt, store).StatusCode)
-
-	filter.AllowTemporaryStates = false
-	filter.OperatorLevel = constant.Urgent
-	re.Equal(plan.StatusOK, filter.Target(opt, store).StatusCode)
-
-	filter.OperatorLevel = constant.Medium
 	opt.SetStoreLimit(store.GetID(), storelimit.TransferLeaderIn, storelimit.Unlimited)
 	// A stale limiter defers the check to controller admission.
 	re.Equal(plan.StatusOK, filter.Target(opt, store).StatusCode)
 	// A synchronized limiter uses the configured unlimited rate.
 	limiter.Reset(storelimit.Unlimited/time.Minute.Seconds(), storelimit.TransferLeaderIn)
+	re.Equal(plan.StatusOK, filter.Target(opt, store).StatusCode)
+
+	// Lowering a limit also defers to the controller until the limiter is synchronized.
+	opt.SetStoreLimit(store.GetID(), storelimit.TransferLeaderIn, ratePerSec*time.Minute.Seconds())
+	re.Equal(plan.StatusOK, filter.Target(opt, store).StatusCode)
+	limiter.Reset(ratePerSec, storelimit.TransferLeaderIn)
+	re.True(limiter.Take(storelimit.RegionInfluence[storelimit.TransferLeaderIn], storelimit.TransferLeaderIn, constant.Medium))
+	re.Equal(plan.StatusCode(plan.StatusStoreTransferLeaderInLimitThrottled), filter.Target(opt, store).StatusCode)
+
+	store = store.Clone(core.SetStoreLimit(storelimit.NewSlidingWindows()))
 	re.Equal(plan.StatusOK, filter.Target(opt, store).StatusCode)
 }
 

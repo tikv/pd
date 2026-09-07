@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -1375,6 +1376,11 @@ func TestHotReadRegionScheduleSkipsLeaderEvictedMoveLeaderTarget(t *testing.T) {
 			testutil.Eventually(re, func() bool {
 				return tc.IsRegionHot(tc.GetRegion(1)) && !tc.IsRegionHot(tc.GetRegion(11))
 			})
+
+			exhaustTransferLeaderInLimit(t, tc, 1, 2, 3, 4, 5)
+			hb.prepareForBalance(toResourceType(utils.Read, transferLeader), tc)
+			re.Empty(newBalanceSolver(hb, tc, utils.Read, transferLeader).solve())
+			tc.SetStoreLimit(3, storelimit.TransferLeaderIn, storelimit.Unlimited)
 
 			ops, _ := hb.Schedule(tc, false)
 			re.Len(ops, 1)

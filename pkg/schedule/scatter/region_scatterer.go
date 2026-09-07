@@ -703,7 +703,7 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 		scatterWithSameEngine(peers, getSpecialEngineContext(engine), false)
 	}
 	if internalScatter {
-		leaderCandidateStores = r.filterAllowedLeaderCandidateStores(region, targetPeers, leaderCandidateStores)
+		leaderCandidateStores = r.filterAllowedLeaderCandidateStores(region, targetPeers, leaderCandidateStores, operatorPriorityLevel)
 	}
 	// FIXME: target leader only considers the ordinary stores, maybe we need to consider the
 	// special engine stores if the engine supports to become a leader. But now there is only
@@ -727,7 +727,7 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 	if internalScatter {
 		createScatterOperator = operator.CreateNonAdminScatterRegionOperator
 	}
-	op, err := createScatterOperator(desc, r.cluster, region, targetPeers, targetLeader, skipStoreLimit)
+	op, err := createScatterOperator(desc, r.cluster, region, targetPeers, targetLeader, skipStoreLimit, operator.WithPriorityLevel(operatorPriorityLevel))
 	if err != nil {
 		scatterFailCounter.Inc()
 		currentPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))
@@ -751,7 +751,6 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 		if !internalScatter {
 			op.SetAdditionalInfo("leader-picked-count", strconv.FormatUint(leaderStorePickedCount, 10))
 		}
-		op.SetPriorityLevel(operatorPriorityLevel)
 	}
 	return op, nil
 }
@@ -760,6 +759,7 @@ func (r *RegionScatterer) filterAllowedLeaderCandidateStores(
 	region *core.RegionInfo,
 	targetPeers map[uint64]*metapb.Peer,
 	candidateStores []uint64,
+	level constant.PriorityLevel,
 ) []uint64 {
 	if len(candidateStores) == 0 {
 		return candidateStores
@@ -783,7 +783,7 @@ func (r *RegionScatterer) filterAllowedLeaderCandidateStores(
 		if peer == nil {
 			continue
 		}
-		if operator.IsAllowedLeaderTarget(r.cluster, region, peer) {
+		if operator.IsAllowedLeaderTarget(r.cluster, region, peer, operator.WithPriorityLevel(level)) {
 			filtered = append(filtered, storeID)
 		}
 	}

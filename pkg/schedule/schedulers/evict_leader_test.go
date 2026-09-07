@@ -90,16 +90,14 @@ func TestEvictLeaderWithExhaustedTransferLeaderInLimit(t *testing.T) {
 	re.False(oc.ExceedStoreLimit(ops[0]))
 	re.True(oc.AddOperator(ops[0]))
 
-	// Ordinary transfers may be built, but must still fail final admission.
+	// Ordinary transfers must reject an exhausted target during construction.
 	regionID := uint64(1)
 	if ops[0].RegionID() == regionID {
 		regionID = 2
 	}
 	op, err := operator.CreateTransferLeaderOperator("test-transfer-leader", tc, tc.GetRegion(regionID), 2, nil, operator.OpLeader)
-	re.NoError(err)
-	re.Equal(constant.Medium, op.GetPriorityLevel())
-	re.True(oc.ExceedStoreLimit(op))
-	re.False(oc.AddOperator(op))
+	re.Error(err)
+	re.Nil(op)
 }
 
 func TestEvictLeaderWithUnhealthyPeer(t *testing.T) {

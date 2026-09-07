@@ -1412,11 +1412,37 @@ func TestInternalScatterLeaderFiltersRejectedTarget(t *testing.T) {
 		region,
 		targetPeers,
 		[]uint64{1, 4, 5},
+		constant.Medium,
 	)
 	re.NotContains(candidates, uint64(4))
 
 	leader, _ := scatterer.selectAvailableLeaderStore(group, region, candidates, state.ordinaryEngine.asSelectionContext(), true)
 	re.Equal(uint64(5), leader)
+}
+
+func TestInternalScatterLeaderTargetPriorityAndLimit(t *testing.T) {
+	re := require.New(t)
+	scatterer, _, region, _ := newInternalScatterSelectionTestFixture(t, nil)
+	tc := scatterer.cluster.(*mockcluster.Cluster)
+	targetPeers := map[uint64]*metapb.Peer{
+		1: region.GetStorePeer(1),
+		4: {StoreId: 4, Role: metapb.PeerRole_Voter},
+		5: {StoreId: 5, Role: metapb.PeerRole_Voter},
+	}
+	for _, id := range []uint64{1, 4, 5} {
+		tc.SetStoreLimit(id, storelimit.TransferLeaderIn, 0.00006)
+		tc.ResetStoreLimit(id, storelimit.TransferLeaderIn, 0.000001)
+		re.True(tc.GetStore(id).GetStoreLimit().Take(storelimit.RegionInfluence[storelimit.TransferLeaderIn], storelimit.TransferLeaderIn, constant.Medium))
+	}
+	for _, level := range []constant.PriorityLevel{constant.Low, constant.Medium, constant.High, constant.Urgent} {
+		candidates := scatterer.filterAllowedLeaderCandidateStores(region, targetPeers, []uint64{1, 4, 5}, level)
+		if level == constant.Urgent {
+			re.Equal([]uint64{1, 4, 5}, candidates)
+		} else {
+			// Keeping the current leader is not a transfer into that store.
+			re.Equal([]uint64{1}, candidates)
+		}
+	}
 }
 
 func TestInternalScatterLeaderKeepsOriginWhenSourcePausedOut(t *testing.T) {
@@ -1432,7 +1458,7 @@ func TestInternalScatterLeaderKeepsOriginWhenSourcePausedOut(t *testing.T) {
 		4: {StoreId: 4, Role: metapb.PeerRole_Voter},
 		5: {StoreId: 5, Role: metapb.PeerRole_Voter},
 	}
-	candidates := scatterer.filterAllowedLeaderCandidateStores(region, targetPeers, []uint64{1, 4, 5})
+	candidates := scatterer.filterAllowedLeaderCandidateStores(region, targetPeers, []uint64{1, 4, 5}, constant.Medium)
 	re.Equal([]uint64{1}, candidates)
 
 	leader, _ := scatterer.selectAvailableLeaderStore(group, region, candidates, state.ordinaryEngine.asSelectionContext(), true)

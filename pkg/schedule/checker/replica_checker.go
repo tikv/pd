@@ -77,17 +77,14 @@ func (c *ReplicaChecker) Check(region *core.RegionInfo) *operator.Operator {
 	}
 	if op := c.checkDownPeer(region); op != nil {
 		replicaCheckerNewOpCounter.Inc()
-		op.SetPriorityLevel(constant.High)
 		return op
 	}
 	if op := c.checkOfflinePeer(region); op != nil {
 		replicaCheckerNewOpCounter.Inc()
-		op.SetPriorityLevel(constant.High)
 		return op
 	}
 	if op := c.checkMakeUpReplica(region); op != nil {
 		replicaCheckerNewOpCounter.Inc()
-		op.SetPriorityLevel(constant.High)
 		return op
 	}
 	if op := c.checkRemoveExtraReplica(region); op != nil {
@@ -172,7 +169,7 @@ func (c *ReplicaChecker) checkMakeUpReplica(region *core.RegionInfo) *operator.O
 		return nil
 	}
 	newPeer := &metapb.Peer{StoreId: target}
-	op, err := operator.CreateAddPeerOperator("make-up-replica", c.cluster, region, newPeer, operator.OpReplica)
+	op, err := operator.CreateAddPeerOperator("make-up-replica", c.cluster, region, newPeer, operator.OpReplica, operator.WithPriorityLevel(constant.High))
 	if err != nil {
 		log.Debug("create make-up-replica operator fail", errs.ZapError(err))
 		return nil
@@ -237,7 +234,7 @@ func (c *ReplicaChecker) fixPeer(region *core.RegionInfo, storeID uint64, status
 	// Check the number of replicas first.
 	if len(region.GetVoters()) > c.conf.GetMaxReplicas() {
 		removeExtra := fmt.Sprintf("remove-extra-%s-replica", status)
-		op, err := operator.CreateRemovePeerOperator(removeExtra, c.cluster, operator.OpReplica, region, storeID)
+		op, err := operator.CreateRemovePeerOperator(removeExtra, c.cluster, operator.OpReplica, region, storeID, operator.WithPriorityLevel(constant.High))
 		if err != nil {
 			switch status {
 			case offlineStatus:
@@ -269,7 +266,7 @@ func (c *ReplicaChecker) fixPeer(region *core.RegionInfo, storeID uint64, status
 	}
 	newPeer := &metapb.Peer{StoreId: target}
 	replace := fmt.Sprintf("replace-%s-replica", status)
-	op, err := operator.CreateMovePeerOperator(replace, c.cluster, region, operator.OpReplica, storeID, newPeer)
+	op, err := operator.CreateMovePeerOperator(replace, c.cluster, region, operator.OpReplica, storeID, newPeer, operator.WithPriorityLevel(constant.High))
 	if err != nil {
 		switch status {
 		case offlineStatus:

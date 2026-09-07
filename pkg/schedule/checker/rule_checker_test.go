@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
@@ -408,6 +409,17 @@ func (suite *ruleCheckerTestSuite) TestFixRoleLeader() {
 	op := suite.rc.Check(suite.cluster.GetRegion(1))
 	re.NotNil(op)
 	re.Equal("fix-follower-role", op.Desc())
+	re.Equal(uint64(3), op.Step(0).(operator.TransferLeader).ToStore)
+
+	suite.cluster.SetStoreLimit(3, storelimit.TransferLeaderIn, 0.00006)
+	suite.cluster.ResetStoreLimit(3, storelimit.TransferLeaderIn, 0.000001)
+	limiter := suite.cluster.GetStore(3).GetStoreLimit()
+	re.True(limiter.Take(storelimit.RegionInfluence[storelimit.TransferLeaderIn], storelimit.TransferLeaderIn, constant.Medium))
+	re.Nil(suite.rc.Check(suite.cluster.GetRegion(1)))
+
+	suite.cluster.SetStoreLimit(3, storelimit.TransferLeaderIn, storelimit.Unlimited)
+	op = suite.rc.Check(suite.cluster.GetRegion(1))
+	re.NotNil(op)
 	re.Equal(uint64(3), op.Step(0).(operator.TransferLeader).ToStore)
 }
 
@@ -1495,6 +1507,38 @@ func (suite *ruleCheckerTestSuite) TestFixDownPeer() {
 	rule.IsolationLevel = "zone"
 	err = suite.ruleManager.SetRule(rule)
 	re.NoError(err)
+	re.Nil(suite.rc.Check(region))
+}
+
+func (suite *ruleCheckerTestSuite) TestFastFailoverLeaderTransferWithExhaustedLimit() {
+	re := suite.Require()
+	tc := suite.cluster
+	for _, id := range []uint64{1, 2, 3, 4} {
+		tc.AddLeaderStore(id, 1)
+	}
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	tc.SetStoreDown(1)
+	tc.PutStore(tc.GetStore(1).Clone(core.SetLastHeartbeatTS(time.Now().Add(-time.Hour))))
+	region := tc.GetRegion(1)
+	region = region.Clone(core.WithDownPeers([]*pdpb.PeerStats{{Peer: region.GetStorePeer(1), DownSeconds: 3600}}))
+	// Prefer a healthy follower over retaining the outgoing leader.
+	suite.rc.record.incOfflineLeaderCount(1)
+	for _, id := range []uint64{2, 3, 4} {
+		tc.SetStoreLimit(id, storelimit.TransferLeaderIn, 0.00006)
+		tc.ResetStoreLimit(id, storelimit.TransferLeaderIn, 0.000001)
+		re.True(tc.GetStore(id).GetStoreLimit().Take(storelimit.RegionInfluence[storelimit.TransferLeaderIn], storelimit.TransferLeaderIn, constant.Medium))
+	}
+	op := suite.rc.Check(region)
+	re.NotNil(op)
+	re.Equal(constant.Urgent, op.GetPriorityLevel())
+	re.Equal("replace-rule-down-leader-peer", op.Desc())
+	influence := operator.NewTotalOpInfluence([]*operator.Operator{op}, tc.GetBasicCluster())
+	re.Equal(storelimit.RegionInfluence[storelimit.TransferLeaderIn],
+		influence.GetStoreInfluence(2).GetStepCost(storelimit.TransferLeaderIn)+
+			influence.GetStoreInfluence(3).GetStepCost(storelimit.TransferLeaderIn))
+
+	// Without fast failover this remains a non-urgent repair and obeys the limit.
+	tc.SetEnableWitness(false)
 	re.Nil(suite.rc.Check(region))
 }
 

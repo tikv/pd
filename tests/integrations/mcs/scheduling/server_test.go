@@ -881,21 +881,25 @@ func (suite *serverTestSuite) TestStoreLimit() {
 		defer resp.Body.Close()
 		re.Equal(http.StatusOK, resp.StatusCode)
 	}
-	setTransferLeaderInLimit(60)
-	waitSyncFinish(re, tc, storelimit.TransferLeaderIn, 60)
+	setTransferLeaderInLimit(0.00006)
+	waitSyncFinish(re, tc, storelimit.TransferLeaderIn, 0.00006)
 	op = operator.NewTestOperator(2, &metapb.RegionEpoch{}, operator.OpLeader,
 		operator.TransferLeader{FromStore: 1, ToStore: 2})
 	checkOperatorSuccess(re, oc, op)
 	op = operator.NewTestOperator(2, &metapb.RegionEpoch{}, operator.OpLeader,
 		operator.TransferLeader{FromStore: 1, ToStore: 2})
 	checkOperatorFail(re, oc, op)
-
-	setTransferLeaderInLimit(storelimit.Unlimited)
-	waitSyncFinish(re, tc, storelimit.TransferLeaderIn, storelimit.Unlimited)
 	targetStore := tc.GetPrimaryServer().GetCluster().GetStore(2)
 	re.NotNil(targetStore)
 	targetStore = targetStore.Clone(core.SetLastHeartbeatTS(time.Now()))
-	storeFilter := &filter.StoreStateFilter{TransferLeader: true, OperatorLevel: coreconstant.Medium}
+	storeFilter := &filter.StoreStateFilter{ActionScope: "test", TransferLeader: true, OperatorLevel: coreconstant.Medium}
+	re.False(storeFilter.Target(tc.GetPrimaryServer().GetCluster().GetSharedConfig(), targetStore).IsOK())
+
+	setTransferLeaderInLimit(storelimit.Unlimited)
+	waitSyncFinish(re, tc, storelimit.TransferLeaderIn, storelimit.Unlimited)
+	targetStore = tc.GetPrimaryServer().GetCluster().GetStore(2)
+	re.NotNil(targetStore)
+	targetStore = targetStore.Clone(core.SetLastHeartbeatTS(time.Now()))
 	re.True(storeFilter.Target(tc.GetPrimaryServer().GetCluster().GetSharedConfig(), targetStore).IsOK())
 	for range 3 {
 		op = operator.NewTestOperator(2, &metapb.RegionEpoch{}, operator.OpLeader,

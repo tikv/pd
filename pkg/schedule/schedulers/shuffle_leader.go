@@ -89,12 +89,11 @@ func (s *shuffleLeaderScheduler) Schedule(cluster sche.SchedulerCluster, _ bool)
 		shuffleLeaderNoFollowerCounter.Inc()
 		return nil, nil
 	}
-	op, err := operator.CreateTransferLeaderOperator(s.GetName(), cluster, region, targetStore.GetID(), []uint64{}, operator.OpAdmin)
+	op, err := operator.CreateTransferLeaderOperator(s.GetName(), cluster, region, targetStore.GetID(), []uint64{}, operator.OpAdmin, operator.WithPriorityLevel(constant.Low))
 	if err != nil {
 		log.Debug("fail to create shuffle leader operator", errs.ZapError(err))
 		return nil, nil
 	}
-	op.SetPriorityLevel(constant.Low)
 	op.Counters = append(op.Counters, shuffleLeaderNewOperatorCounter)
 	return []*operator.Operator{op}, nil
 }
