@@ -649,12 +649,14 @@ func (suite *operatorControllerTestSuite) TestStoreLimit() {
 	re.False(oc.AddOperator(op))
 	re.False(oc.RemoveOperator(op))
 
-	tc.AddLeaderRegion(1001, 1, 2)
+	tc.AddLeaderStore(3, 0)
+	tc.AddLeaderRegion(1001, 1, 2, 3)
 	tc.SetStoreLimit(2, storelimit.TransferLeaderIn, 0.00006)
-	// Both operators pass target selection, but admission must reserve the budget.
-	op, err := CreateTransferLeaderOperator("test", tc, tc.GetRegion(1001), 2, nil, OpLeader)
+	tc.SetStoreLimit(3, storelimit.TransferLeaderIn, 0.00006)
+	// Admission reserves the budget of every candidate, including store 3.
+	op, err := CreateTransferLeaderOperator("test", tc, tc.GetRegion(1001), 2, []uint64{2, 3}, OpLeader)
 	re.NoError(err)
-	pending, err := CreateTransferLeaderOperator("test", tc, tc.GetRegion(1001), 2, nil, OpLeader)
+	pending, err := CreateTransferLeaderOperator("test", tc, tc.GetRegion(1001), 3, nil, OpLeader)
 	re.NoError(err)
 	re.True(oc.AddOperator(op))
 	checkRemoveOperatorSuccess(re, oc, op)

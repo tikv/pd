@@ -184,6 +184,18 @@ func (suite *operatorTestSuite) TestInfluence() {
 		resetInfluence()
 	}
 
+	for _, targets := range [][]uint64{{2, 3}, {3}, {2, 3, 3}} {
+		influence := NewOpInfluence()
+		TransferLeader{FromStore: 1, ToStore: 2, ToStores: targets}.Influence(influence, region)
+		re.Zero(influence.GetStoreInfluence(1).GetStepCost(storelimit.TransferLeaderIn))
+		for _, id := range []uint64{2, 3} {
+			re.Equal(storelimit.RegionInfluence[storelimit.TransferLeaderIn], influence.GetStoreInfluence(id).GetStepCost(storelimit.TransferLeaderIn))
+		}
+		re.Equal(int64(1), influence.GetStoreInfluence(2).LeaderCount)
+		re.Zero(influence.GetStoreInfluence(3).LeaderCount)
+		re.Zero(influence.GetStoreInfluence(3).LeaderSize)
+	}
+
 	AddLearner{ToStore: 2, PeerID: 2, SendStore: 1}.Influence(&opInfluence, region)
 	re.Equal(StoreInfluence{
 		LeaderSize:  0,
