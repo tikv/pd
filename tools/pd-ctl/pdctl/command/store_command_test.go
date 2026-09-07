@@ -144,7 +144,9 @@ func runStoreLimitTestCases(t *testing.T, newCommand func() *cobra.Command, test
 	}
 }
 
-func newStoreLimitTestServer(t *testing.T, kernelType string, statusCode int) (*httptest.Server, *int, *int) {
+func newStoreLimitTestServer(t *testing.T, kernelType string, statusCode int) (
+	testServer *httptest.Server, statusRequestCount *int, updateCount *int,
+) {
 	t.Helper()
 	statusRequests := 0
 	updates := 0
