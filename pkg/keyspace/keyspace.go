@@ -1058,28 +1058,17 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 
 // RemoveKeyspace removes the keyspace specified by id if it's in proper state and not protected.
 func (manager *Manager) RemoveKeyspace(txn kv.Txn, id uint32) error {
-	if err := manager.removeKeyspacesMetadata(txn, []uint32{id}); err != nil {
+	groupID, err := manager.removeKeyspaceMetadata(txn, id)
+	if err != nil {
 		return err
+	}
+	if manager.mgm != nil && groupID != "" {
+		if err := manager.mgm.decrementAssignmentTxn(txn, groupID, 1); err != nil {
+			return err
+		}
 	}
 	manager.evictKeyspacesFromCache([]uint32{id})
 	return nil
-}
-
-// removeKeyspacesMetadata schedules persistent metadata removal for the given
-// keyspaces in txn. It deliberately leaves cache eviction to the transaction
-// owner, which can perform it after a successful commit.
-func (manager *Manager) removeKeyspacesMetadata(txn kv.Txn, ids []uint32) error {
-	assignmentCounts := make(map[string]int)
-	for _, id := range ids {
-		groupID, err := manager.removeKeyspaceMetadata(txn, id)
-		if err != nil {
-			return err
-		}
-		if groupID != "" {
-			assignmentCounts[groupID]++
-		}
-	}
-	return manager.decrementMetaServiceGroupAssignmentsTxn(txn, assignmentCounts)
 }
 
 func (manager *Manager) decrementMetaServiceGroupAssignmentsTxn(txn kv.Txn, assignmentCounts map[string]int) error {
