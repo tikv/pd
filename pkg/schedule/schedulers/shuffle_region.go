@@ -96,12 +96,13 @@ func (s *shuffleRegionScheduler) Schedule(cluster sche.SchedulerCluster, _ bool)
 		return nil, nil
 	}
 
-	op, err := operator.CreateMovePeerOperator(s.GetName(), cluster, region, operator.OpRegion, oldPeer.GetStoreId(), newPeer, operator.WithPriorityLevel(constant.Low))
+	op, err := operator.CreateMovePeerOperator(s.GetName(), cluster, region, operator.OpRegion, oldPeer.GetStoreId(), newPeer)
 	if err != nil {
 		shuffleRegionCreateOperatorFailCounter.Inc()
 		return nil, nil
 	}
 	op.Counters = append(op.Counters, shuffleRegionNewOperatorCounter)
+	op.SetPriorityLevel(constant.Low)
 	return []*operator.Operator{op}, nil
 }
 

@@ -33,8 +33,8 @@ import (
 )
 
 // CreateAddPeerOperator creates an operator that adds a new peer.
-func CreateAddPeerOperator(desc string, ci sche.SharedCluster, region *core.RegionInfo, peer *metapb.Peer, kind OpKind, opts ...BuilderOption) (*Operator, error) {
-	return NewBuilder(desc, ci, region, opts...).
+func CreateAddPeerOperator(desc string, ci sche.SharedCluster, region *core.RegionInfo, peer *metapb.Peer, kind OpKind) (*Operator, error) {
+	return NewBuilder(desc, ci, region).
 		AddPeer(peer).
 		Build(kind)
 }
@@ -73,25 +73,23 @@ func CreateDemoteLearnerOperatorAndRemovePeer(desc string, ci sche.SharedCluster
 }
 
 // CreateRemovePeerOperator creates an operator that removes a peer from region.
-func CreateRemovePeerOperator(desc string, ci sche.SharedCluster, kind OpKind, region *core.RegionInfo, storeID uint64, opts ...BuilderOption) (*Operator, error) {
-	return NewBuilder(desc, ci, region, opts...).
+func CreateRemovePeerOperator(desc string, ci sche.SharedCluster, kind OpKind, region *core.RegionInfo, storeID uint64) (*Operator, error) {
+	return NewBuilder(desc, ci, region).
 		RemovePeer(storeID).
 		Build(kind)
 }
 
 // CreateTransferLeaderOperator creates an operator that transfers the leader from a source store to a target store.
-func CreateTransferLeaderOperator(desc string, ci sche.SharedCluster, region *core.RegionInfo, targetStoreID uint64, targetStoreIDs []uint64, kind OpKind, opts ...BuilderOption) (*Operator, error) {
-	opts = append([]BuilderOption{SkipOriginJointStateCheck}, opts...)
-	return NewBuilder(desc, ci, region, opts...).
+func CreateTransferLeaderOperator(desc string, ci sche.SharedCluster, region *core.RegionInfo, targetStoreID uint64, targetStoreIDs []uint64, kind OpKind) (*Operator, error) {
+	return NewBuilder(desc, ci, region, SkipOriginJointStateCheck).
 		SetLeader(targetStoreID).
 		SetLeaders(targetStoreIDs).
 		Build(kind)
 }
 
 // CreateForceTransferLeaderOperator creates an operator that transfers the leader from a source store to a target store forcible.
-func CreateForceTransferLeaderOperator(desc string, ci sche.SharedCluster, region *core.RegionInfo, targetStoreID uint64, kind OpKind, opts ...BuilderOption) (*Operator, error) {
-	opts = append([]BuilderOption{SkipOriginJointStateCheck, SkipPlacementRulesCheck}, opts...)
-	return NewBuilder(desc, ci, region, opts...).
+func CreateForceTransferLeaderOperator(desc string, ci sche.SharedCluster, region *core.RegionInfo, targetStoreID uint64, kind OpKind) (*Operator, error) {
+	return NewBuilder(desc, ci, region, SkipOriginJointStateCheck, SkipPlacementRulesCheck).
 		SetLeader(targetStoreID).
 		EnableForceTargetLeader().
 		Build(kind)
@@ -120,8 +118,8 @@ func CreateMoveRegionOperator(desc string, ci sche.SharedCluster, region *core.R
 }
 
 // CreateMovePeerOperator creates an operator that replaces an old peer with a new peer.
-func CreateMovePeerOperator(desc string, ci sche.SharedCluster, region *core.RegionInfo, kind OpKind, oldStore uint64, peer *metapb.Peer, opts ...BuilderOption) (*Operator, error) {
-	return NewBuilder(desc, ci, region, opts...).
+func CreateMovePeerOperator(desc string, ci sche.SharedCluster, region *core.RegionInfo, kind OpKind, oldStore uint64, peer *metapb.Peer) (*Operator, error) {
+	return NewBuilder(desc, ci, region).
 		RemovePeer(oldStore).
 		AddPeer(peer).
 		Build(kind)
@@ -136,8 +134,8 @@ func CreateMoveWitnessOperator(desc string, ci sche.SharedCluster, region *core.
 }
 
 // CreateReplaceLeaderPeerOperator creates an operator that replaces an old peer with a new peer, and move leader from old store firstly.
-func CreateReplaceLeaderPeerOperator(desc string, ci sche.SharedCluster, region *core.RegionInfo, kind OpKind, oldStore uint64, peer *metapb.Peer, leader *metapb.Peer, opts ...BuilderOption) (*Operator, error) {
-	return NewBuilder(desc, ci, region, opts...).
+func CreateReplaceLeaderPeerOperator(desc string, ci sche.SharedCluster, region *core.RegionInfo, kind OpKind, oldStore uint64, peer *metapb.Peer, leader *metapb.Peer) (*Operator, error) {
+	return NewBuilder(desc, ci, region).
 		RemovePeer(oldStore).
 		AddPeer(peer).
 		SetLeader(leader.GetStoreId()).
@@ -145,8 +143,8 @@ func CreateReplaceLeaderPeerOperator(desc string, ci sche.SharedCluster, region 
 }
 
 // CreateMoveLeaderOperator creates an operator that replaces an old leader with a new leader.
-func CreateMoveLeaderOperator(desc string, ci sche.SharedCluster, region *core.RegionInfo, kind OpKind, oldStore uint64, peer *metapb.Peer, opts ...BuilderOption) (*Operator, error) {
-	return NewBuilder(desc, ci, region, opts...).
+func CreateMoveLeaderOperator(desc string, ci sche.SharedCluster, region *core.RegionInfo, kind OpKind, oldStore uint64, peer *metapb.Peer) (*Operator, error) {
+	return NewBuilder(desc, ci, region).
 		RemovePeer(oldStore).
 		AddPeer(peer).
 		SetLeader(peer.GetStoreId()).
@@ -238,17 +236,17 @@ func isRegionMatch(a, b *core.RegionInfo) bool {
 }
 
 // CreateScatterRegionOperator creates an operator that scatters the specified region.
-func CreateScatterRegionOperator(desc string, ci sche.SharedCluster, origin *core.RegionInfo, targetPeers map[uint64]*metapb.Peer, targetLeader uint64, skipLimitCheck bool, opts ...BuilderOption) (*Operator, error) {
-	return newScatterRegionOperator(desc, ci, origin, targetPeers, targetLeader, skipLimitCheck, OpAdmin, opts...)
+func CreateScatterRegionOperator(desc string, ci sche.SharedCluster, origin *core.RegionInfo, targetPeers map[uint64]*metapb.Peer, targetLeader uint64, skipLimitCheck bool) (*Operator, error) {
+	return newScatterRegionOperator(desc, ci, origin, targetPeers, targetLeader, skipLimitCheck, OpAdmin)
 }
 
 // CreateNonAdminScatterRegionOperator creates a scatter operator for internal
 // split-scatter background flows.
-func CreateNonAdminScatterRegionOperator(desc string, ci sche.SharedCluster, origin *core.RegionInfo, targetPeers map[uint64]*metapb.Peer, targetLeader uint64, skipLimitCheck bool, opts ...BuilderOption) (*Operator, error) {
-	return newScatterRegionOperator(desc, ci, origin, targetPeers, targetLeader, skipLimitCheck, OpSplitScatter, opts...)
+func CreateNonAdminScatterRegionOperator(desc string, ci sche.SharedCluster, origin *core.RegionInfo, targetPeers map[uint64]*metapb.Peer, targetLeader uint64, skipLimitCheck bool) (*Operator, error) {
+	return newScatterRegionOperator(desc, ci, origin, targetPeers, targetLeader, skipLimitCheck, OpSplitScatter)
 }
 
-func newScatterRegionOperator(desc string, ci sche.SharedCluster, origin *core.RegionInfo, targetPeers map[uint64]*metapb.Peer, targetLeader uint64, skipLimitCheck bool, kind OpKind, opts ...BuilderOption) (*Operator, error) {
+func newScatterRegionOperator(desc string, ci sche.SharedCluster, origin *core.RegionInfo, targetPeers map[uint64]*metapb.Peer, targetLeader uint64, skipLimitCheck bool, kind OpKind) (*Operator, error) {
 	// randomly pick a leader.
 	var ids []uint64
 	for id, peer := range targetPeers {
@@ -264,7 +262,7 @@ func newScatterRegionOperator(desc string, ci sche.SharedCluster, origin *core.R
 		leader = targetLeader
 	}
 
-	builder := NewBuilder(desc, ci, origin, opts...)
+	builder := NewBuilder(desc, ci, origin)
 	if skipLimitCheck {
 		builder.SetRemoveLightPeer()
 	}
@@ -285,9 +283,8 @@ func newScatterRegionOperator(desc string, ci sche.SharedCluster, origin *core.R
 const OpDescLeaveJointState = "leave-joint-state"
 
 // CreateLeaveJointStateOperator creates an operator that let region leave joint state.
-func CreateLeaveJointStateOperator(desc string, ci sche.SharedCluster, origin *core.RegionInfo, opts ...BuilderOption) (*Operator, error) {
-	opts = append([]BuilderOption{SkipOriginJointStateCheck, SkipPlacementRulesCheck}, opts...)
-	b := NewBuilder(desc, ci, origin, opts...)
+func CreateLeaveJointStateOperator(desc string, ci sche.SharedCluster, origin *core.RegionInfo) (*Operator, error) {
+	b := NewBuilder(desc, ci, origin, SkipOriginJointStateCheck, SkipPlacementRulesCheck)
 
 	if b.err == nil && !core.IsInJointState(origin.GetPeers()...) {
 		b.err = errors.Errorf("cannot build leave joint state operator due to disabling using joint state")
@@ -342,9 +339,7 @@ func CreateLeaveJointStateOperator(desc string, ci sche.SharedCluster, origin *c
 	}
 
 	b.execChangePeerV2(false, true)
-	op := NewOperator(b.desc, brief, b.regionID, b.regionEpoch, kind, origin.GetApproximateSize(), b.steps...)
-	op.SetPriorityLevel(b.getPriorityLevel(kind))
-	return op, nil
+	return NewOperator(b.desc, brief, b.regionID, b.regionEpoch, kind, origin.GetApproximateSize(), b.steps...), nil
 }
 
 // CreateWitnessPeerOperator creates an operator that set a follower or learner peer with witness

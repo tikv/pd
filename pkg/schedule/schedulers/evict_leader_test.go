@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -73,31 +74,22 @@ func TestEvictLeaderWithExhaustedTransferLeaderInLimit(t *testing.T) {
 		tc.AddLeaderStore(id, 0)
 	}
 	tc.AddLeaderRegion(1, 1, 2, 3)
-	tc.AddLeaderRegion(2, 1, 2, 3)
-	// Keep the target buckets exhausted throughout the test without sleeping.
-	for _, id := range []uint64{2, 3} {
-		tc.SetStoreLimit(id, storelimit.TransferLeaderIn, 0.00006)
-		tc.ResetStoreLimit(id, storelimit.TransferLeaderIn, 0.000001)
-		limiter := tc.GetStore(id).GetStoreLimit()
-		re.True(limiter.Take(storelimit.RegionInfluence[storelimit.TransferLeaderIn], storelimit.TransferLeaderIn, constant.Medium))
-		re.False(tc.GetStore(id).IsAvailable(storelimit.TransferLeaderIn, constant.Medium))
-	}
+	exhaustTransferLeaderInLimit(t, tc, 2, 3)
 	scheduler, err := CreateScheduler(types.EvictLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.EvictLeaderScheduler, []string{"1"}), func(string) error { return nil })
 	re.NoError(err)
 	ops, _ := scheduler.Schedule(tc, false)
+	re.Empty(ops)
+
+	tc.SetStoreLimit(2, storelimit.TransferLeaderIn, storelimit.Unlimited)
+	tc.ResetStoreLimit(2, storelimit.TransferLeaderIn, storelimit.Unlimited/time.Minute.Seconds())
+	ops, _ = scheduler.Schedule(tc, false)
 	re.NotEmpty(ops)
 	re.Equal(constant.Urgent, ops[0].GetPriorityLevel())
+	step := ops[0].Step(0).(operator.TransferLeader)
+	re.Equal(uint64(2), step.ToStore)
+	re.Equal([]uint64{2}, step.ToStores)
 	re.False(oc.ExceedStoreLimit(ops[0]))
 	re.True(oc.AddOperator(ops[0]))
-
-	// Ordinary transfers must reject an exhausted target during construction.
-	regionID := uint64(1)
-	if ops[0].RegionID() == regionID {
-		regionID = 2
-	}
-	op, err := operator.CreateTransferLeaderOperator("test-transfer-leader", tc, tc.GetRegion(regionID), 2, nil, operator.OpLeader)
-	re.Error(err)
-	re.Nil(op)
 }
 
 func TestEvictLeaderWithUnhealthyPeer(t *testing.T) {

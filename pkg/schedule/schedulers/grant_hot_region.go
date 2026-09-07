@@ -323,13 +323,14 @@ func (s *grantHotRegionScheduler) transfer(cluster sche.SchedulerCluster, region
 	dstStore := &metapb.Peer{StoreId: destStoreIDs[i]}
 
 	if isLeader {
-		op, err = operator.CreateTransferLeaderOperator(s.GetName()+"-leader", cluster, srcRegion, dstStore.StoreId, []uint64{}, operator.OpLeader, operator.WithPriorityLevel(constant.High))
+		op, err = operator.CreateTransferLeaderOperator(s.GetName()+"-leader", cluster, srcRegion, dstStore.StoreId, []uint64{}, operator.OpLeader)
 	} else {
-		op, err = operator.CreateMovePeerOperator(s.GetName()+"-move", cluster, srcRegion, operator.OpRegion|operator.OpLeader, srcStore.GetID(), dstStore, operator.WithPriorityLevel(constant.High))
+		op, err = operator.CreateMovePeerOperator(s.GetName()+"-move", cluster, srcRegion, operator.OpRegion|operator.OpLeader, srcStore.GetID(), dstStore)
 	}
 	if err != nil {
 		log.Debug("fail to create grant hot leader operator", errs.ZapError(err))
 		return
 	}
+	op.SetPriorityLevel(constant.High)
 	return
 }

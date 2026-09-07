@@ -24,6 +24,7 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
@@ -48,6 +49,12 @@ func TestTransferWitnessLeader(t *testing.T) {
 	re.True(sl.IsScheduleAllowed(tc))
 	exhaustTransferLeaderInLimit(t, tc, 2, 3)
 	ops, _ := sl.Schedule(tc, false)
+	re.Empty(ops)
+	for _, id := range []uint64{2, 3} {
+		tc.SetStoreLimit(id, storelimit.TransferLeaderIn, storelimit.Unlimited)
+	}
+	RecvRegionInfo(sl) <- tc.GetRegion(1)
+	ops, _ = sl.Schedule(tc, false)
 	re.Len(ops, 1)
 	re.Equal(constant.Urgent, ops[0].GetPriorityLevel())
 	re.False(oc.ExceedStoreLimit(ops[0]))

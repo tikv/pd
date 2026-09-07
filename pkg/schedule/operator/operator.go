@@ -94,7 +94,10 @@ type Operator struct {
 
 // NewOperator creates a new operator.
 func NewOperator(desc, brief string, regionID uint64, regionEpoch *metapb.RegionEpoch, kind OpKind, approximateSize int64, steps ...OpStep) *Operator {
-	level := defaultPriorityLevel(kind)
+	level := constant.Medium
+	if kind&OpAdmin != 0 {
+		level = constant.Urgent
+	}
 	maxDuration := float64(0)
 	for _, v := range steps {
 		maxDuration += v.Timeout(approximateSize).Seconds()
@@ -115,13 +118,6 @@ func NewOperator(desc, brief string, regionID uint64, regionEpoch *metapb.Region
 		ApproximateSize: approximateSize,
 		timeout:         time.Duration(maxDuration) * time.Second,
 	}
-}
-
-func defaultPriorityLevel(kind OpKind) constant.PriorityLevel {
-	if kind&OpAdmin != 0 {
-		return constant.Urgent
-	}
-	return constant.Medium
 }
 
 // Sync some attribute with the given timeout.

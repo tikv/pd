@@ -74,6 +74,7 @@ batchLoop:
 				continue
 			}
 			if op != nil {
+				op.SetPriorityLevel(constant.Urgent)
 				op.Counters = append(op.Counters, transferWitnessLeaderNewOperatorCounter)
 				ops = append(ops, op)
 			}
@@ -108,7 +109,7 @@ func scheduleTransferWitnessLeader(name string, cluster sche.SchedulerCluster, r
 	for _, t := range targets {
 		targetIDs = append(targetIDs, t.GetID())
 	}
-	return operator.CreateTransferLeaderOperator(name, cluster, region, target.GetID(), targetIDs, operator.OpWitnessLeader, operator.WithPriorityLevel(constant.Urgent))
+	return operator.CreateTransferLeaderOperator(name, cluster, region, target.GetID(), targetIDs, operator.OpWitnessLeader)
 }
 
 // RecvRegionInfo receives a checked region from coordinator

@@ -1080,8 +1080,7 @@ func (bs *balanceSolver) createOperator(region *core.RegionInfo, srcStoreID, dst
 			region,
 			dstStoreID,
 			[]uint64{},
-			operator.OpHotRegion,
-			operator.WithPriorityLevel(constant.High))
+			operator.OpHotRegion)
 	} else {
 		srcPeer := region.GetStorePeer(srcStoreID) // checked in `filterHotPeers`
 		dstPeer := &metapb.Peer{StoreId: dstStoreID, Role: srcPeer.Role}
@@ -1093,8 +1092,7 @@ func (bs *balanceSolver) createOperator(region *core.RegionInfo, srcStoreID, dst
 				region,
 				operator.OpHotRegion,
 				srcStoreID,
-				dstPeer,
-				operator.WithPriorityLevel(constant.High))
+				dstPeer)
 		} else {
 			typ = "move-peer"
 			op, err = operator.CreateMovePeerOperator(
@@ -1103,14 +1101,14 @@ func (bs *balanceSolver) createOperator(region *core.RegionInfo, srcStoreID, dst
 				region,
 				operator.OpHotRegion,
 				srcStoreID,
-				dstPeer,
-				operator.WithPriorityLevel(constant.High))
+				dstPeer)
 		}
 	}
 	return
 }
 
 func (bs *balanceSolver) decorateOperator(op *operator.Operator, isRevert bool, sourceLabel, targetLabel, typ, dim string) {
+	op.SetPriorityLevel(constant.High)
 	op.FinishedCounters = append(op.FinishedCounters,
 		hotDirectionCounter.WithLabelValues(typ, bs.rwTy.String(), sourceLabel, "out", dim),
 		hotDirectionCounter.WithLabelValues(typ, bs.rwTy.String(), targetLabel, "in", dim),

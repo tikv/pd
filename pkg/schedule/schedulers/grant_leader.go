@@ -224,12 +224,13 @@ func (s *grantLeaderScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) (
 			continue
 		}
 
-		op, err := operator.CreateForceTransferLeaderOperator(s.GetName(), cluster, region, id, operator.OpLeader, operator.WithPriorityLevel(constant.High))
+		op, err := operator.CreateForceTransferLeaderOperator(s.GetName(), cluster, region, id, operator.OpLeader)
 		if err != nil {
 			log.Debug("fail to create grant leader operator", errs.ZapError(err))
 			continue
 		}
 		op.Counters = append(op.Counters, grantLeaderNewOperatorCounter)
+		op.SetPriorityLevel(constant.High)
 		ops = append(ops, op)
 	}
 

@@ -460,7 +460,11 @@ func (f *StoreStateFilter) exceedAddLimit(_ config.SharedConfigProvider, store *
 }
 
 func (f *StoreStateFilter) exceedTransferLeaderInLimit(conf config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
-	if f.AllowTemporaryStates || f.OperatorLevel == constant.Urgent {
+	// Target selection intentionally checks the budget regardless of operator priority,
+	// including when this filter is used by Builder. Controller admission retains its
+	// existing Urgent exemption; passing this filter does not reserve tokens.
+	// TODO: Reconcile leader-transfer priorities with store-limit admission semantics.
+	if f.AllowTemporaryStates {
 		f.Reason = storeStateOK
 		return statusOK
 	}

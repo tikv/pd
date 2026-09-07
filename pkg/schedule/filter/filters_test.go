@@ -321,12 +321,11 @@ func TestStoreStateFilterTransferLeaderInLimit(t *testing.T) {
 	re.True(limiter.Take(storelimit.RegionInfluence[storelimit.TransferLeaderIn],
 		storelimit.TransferLeaderIn, constant.Medium))
 	re.Equal(plan.StatusOK, filter.Source(opt, store).StatusCode)
-	for _, level := range []constant.PriorityLevel{constant.Low, constant.Medium, constant.High} {
+	for _, level := range []constant.PriorityLevel{constant.Low, constant.Medium, constant.High, constant.Urgent} {
 		re.Equal(plan.StatusCode(plan.StatusStoreTransferLeaderInLimitThrottled),
 			(&StoreStateFilter{TransferLeader: true, OperatorLevel: level}).Target(opt, store).StatusCode)
 	}
 	stateFilter := &StoreStateFilter{TransferLeader: true, OperatorLevel: constant.Urgent}
-	re.Equal(plan.StatusOK, stateFilter.Target(opt, store).StatusCode)
 	disconnectedStore := store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-5 * time.Minute)))
 	re.Equal(plan.StatusCode(plan.StatusStoreDisconnected), stateFilter.Target(opt, disconnectedStore).StatusCode)
 	re.Equal(plan.StatusOK, (&StoreStateFilter{TransferLeader: true, AllowTemporaryStates: true}).Target(opt, store).StatusCode)

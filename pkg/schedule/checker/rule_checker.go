@@ -256,7 +256,12 @@ func (c *RuleChecker) addRulePeerWithOptions(region *core.RegionInfo, fit *place
 		return nil, errs.ErrNoStoreToAdd
 	}
 	peer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole(), IsWitness: isWitness}
-	return operator.CreateAddPeerOperator("add-rule-peer", c.cluster, region, peer, operator.OpReplica, operator.WithPriorityLevel(constant.High))
+	op, err := operator.CreateAddPeerOperator("add-rule-peer", c.cluster, region, peer, operator.OpReplica)
+	if err != nil {
+		return nil, err
+	}
+	op.SetPriorityLevel(constant.High)
+	return op, nil
 }
 
 // The peer's store may in Offline or Down, need to be replace.
@@ -280,10 +285,6 @@ func (c *RuleChecker) replaceUnexpectedRulePeer(region *core.RegionInfo, rf *pla
 	} else {
 		fastFailover = false
 	}
-	level := constant.High
-	if fastFailover {
-		level = constant.Urgent
-	}
 	ruleStores := getRuleFitStores(c.cluster, rf)
 	storeID, filterByTempState := c.strategy(region, rf.Rule, fastFailover).SelectStoreToFix(ruleStores, peer.GetStoreId())
 	if storeID == 0 {
@@ -305,7 +306,7 @@ func (c *RuleChecker) replaceUnexpectedRulePeer(region *core.RegionInfo, rf *pla
 				if region.GetDownPeer(p.GetId()) != nil || region.GetPendingPeer(p.GetId()) != nil {
 					return false
 				}
-				return c.allowLeader(fit, p, level)
+				return c.allowLeader(fit, p)
 			}
 			if minCount > count && checkPeerHealth() {
 				minCount = count
@@ -316,7 +317,7 @@ func (c *RuleChecker) replaceUnexpectedRulePeer(region *core.RegionInfo, rf *pla
 
 	createOp := func() (*operator.Operator, error) {
 		if newLeader != nil && newLeader.GetId() != peer.GetId() {
-			return operator.CreateReplaceLeaderPeerOperator("replace-rule-"+status+"-leader-peer", c.cluster, region, operator.OpReplica, peer.StoreId, newPeer, newLeader, operator.WithPriorityLevel(level))
+			return operator.CreateReplaceLeaderPeerOperator("replace-rule-"+status+"-leader-peer", c.cluster, region, operator.OpReplica, peer.StoreId, newPeer, newLeader)
 		}
 		var desc string
 		if fastFailover {
@@ -324,7 +325,7 @@ func (c *RuleChecker) replaceUnexpectedRulePeer(region *core.RegionInfo, rf *pla
 		} else {
 			desc = "replace-rule-" + status + "-peer"
 		}
-		return operator.CreateMovePeerOperator(desc, c.cluster, region, operator.OpReplica, peer.StoreId, newPeer, operator.WithPriorityLevel(level))
+		return operator.CreateMovePeerOperator(desc, c.cluster, region, operator.OpReplica, peer.StoreId, newPeer)
 	}
 	op, err := createOp()
 	if err != nil {
@@ -332,6 +333,11 @@ func (c *RuleChecker) replaceUnexpectedRulePeer(region *core.RegionInfo, rf *pla
 	}
 	if newLeader != nil {
 		c.record.incOfflineLeaderCount(newLeader.GetStoreId())
+	}
+	if fastFailover {
+		op.SetPriorityLevel(constant.Urgent)
+	} else {
+		op.SetPriorityLevel(constant.High)
 	}
 	return op, nil
 }
@@ -343,7 +349,7 @@ func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.
 	}
 	if region.GetLeader().GetId() != peer.GetId() && rf.Rule.Role == placement.Leader {
 		ruleCheckerFixLeaderRoleCounter.Inc()
-		if c.allowLeader(fit, peer, constant.Medium) {
+		if c.allowLeader(fit, peer) {
 			return operator.CreateTransferLeaderOperator("fix-leader-role", c.cluster, region, peer.GetStoreId(), []uint64{}, 0)
 		}
 		ruleCheckerNotAllowLeaderCounter.Inc()
@@ -352,7 +358,7 @@ func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.
 	if region.GetLeader().GetId() == peer.GetId() && rf.Rule.Role == placement.Follower {
 		ruleCheckerFixFollowerRoleCounter.Inc()
 		for _, p := range region.GetPeers() {
-			if c.allowLeader(fit, p, constant.Medium) {
+			if c.allowLeader(fit, p) {
 				return operator.CreateTransferLeaderOperator("fix-follower-role", c.cluster, region, p.GetStoreId(), []uint64{}, 0)
 			}
 		}
@@ -393,7 +399,7 @@ func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.
 	return nil, nil
 }
 
-func (c *RuleChecker) allowLeader(fit *placement.RegionFit, peer *metapb.Peer, level constant.PriorityLevel) bool {
+func (c *RuleChecker) allowLeader(fit *placement.RegionFit, peer *metapb.Peer) bool {
 	if core.IsLearner(peer) || core.IsWitness(peer) {
 		return false
 	}
@@ -401,7 +407,7 @@ func (c *RuleChecker) allowLeader(fit *placement.RegionFit, peer *metapb.Peer, l
 	if s == nil {
 		return false
 	}
-	stateFilter := &filter.StoreStateFilter{ActionScope: "rule-checker", TransferLeader: true, OperatorLevel: level}
+	stateFilter := &filter.StoreStateFilter{ActionScope: "rule-checker", TransferLeader: true}
 	if !stateFilter.Target(c.cluster.GetCheckerConfig(), s).IsOK() {
 		return false
 	}

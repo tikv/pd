@@ -49,7 +49,6 @@ type Builder struct {
 	rules           []*placement.Rule
 	expectedRoles   map[uint64]placement.PeerRoleType
 	approximateSize int64
-	priorityLevel   *constant.PriorityLevel
 
 	// operation record
 	originPeers          peersMap
@@ -84,13 +83,6 @@ type Builder struct {
 
 // BuilderOption is used to create operator builder.
 type BuilderOption func(*Builder)
-
-// WithPriorityLevel sets the priority used for target validation and the resulting operator.
-func WithPriorityLevel(level constant.PriorityLevel) BuilderOption {
-	return func(b *Builder) {
-		b.priorityLevel = &level
-	}
-}
 
 // SkipOriginJointStateCheck lets the builder skip the joint state check for origin peers.
 func SkipOriginJointStateCheck(b *Builder) {
@@ -176,8 +168,8 @@ func NewBuilder(desc string, ci sche.SharedCluster, region *core.RegionInfo, opt
 
 // IsAllowedLeaderTarget checks whether the peer can be selected as a
 // non-forced target leader by the operator builder.
-func IsAllowedLeaderTarget(ci sche.SharedCluster, region *core.RegionInfo, peer *metapb.Peer, opts ...BuilderOption) bool {
-	b := NewBuilder("check-target-leader", ci, region, opts...)
+func IsAllowedLeaderTarget(ci sche.SharedCluster, region *core.RegionInfo, peer *metapb.Peer) bool {
+	b := NewBuilder("check-target-leader", ci, region)
 	if b.err != nil {
 		return false
 	}
@@ -418,10 +410,6 @@ func (b *Builder) Build(kind OpKind) (*Operator, error) {
 		return nil, b.err
 	}
 
-	// Resolve the priority before selecting or validating any target leader.
-	level := b.getPriorityLevel(kind)
-	b.priorityLevel = &level
-
 	if brief, b.err = b.prepareBuild(); b.err != nil {
 		return nil, b.err
 	}
@@ -434,16 +422,7 @@ func (b *Builder) Build(kind OpKind) (*Operator, error) {
 		return nil, b.err
 	}
 
-	op := NewOperator(b.desc, brief, b.regionID, b.regionEpoch, kind, b.approximateSize, b.steps...)
-	op.SetPriorityLevel(level)
-	return op, nil
-}
-
-func (b *Builder) getPriorityLevel(kind OpKind) constant.PriorityLevel {
-	if b.priorityLevel != nil {
-		return *b.priorityLevel
-	}
-	return defaultPriorityLevel(kind)
+	return NewOperator(b.desc, brief, b.regionID, b.regionEpoch, kind, b.approximateSize, b.steps...), nil
 }
 
 // Initialize intermediate states.
@@ -968,11 +947,7 @@ func (b *Builder) allowLeader(peer *metapb.Peer, ignoreClusterLimit bool) bool {
 		return true
 	}
 
-	stateFilter := &filter.StoreStateFilter{
-		ActionScope:    "operator-builder",
-		TransferLeader: true,
-		OperatorLevel:  b.getPriorityLevel(0),
-	}
+	stateFilter := &filter.StoreStateFilter{ActionScope: "operator-builder", TransferLeader: true}
 	// store state filter
 	if !stateFilter.Target(b.GetSharedConfig(), store).IsOK() {
 		return false

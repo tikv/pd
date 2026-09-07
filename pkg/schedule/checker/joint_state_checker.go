@@ -47,7 +47,7 @@ func (c *JointStateChecker) Check(region *core.RegionInfo) *operator.Operator {
 	if !core.IsInJointState(region.GetPeers()...) {
 		return nil
 	}
-	op, err := operator.CreateLeaveJointStateOperator(operator.OpDescLeaveJointState, c.cluster, region, operator.WithPriorityLevel(constant.High))
+	op, err := operator.CreateLeaveJointStateOperator(operator.OpDescLeaveJointState, c.cluster, region)
 	if err != nil {
 		jointCheckerFailedCounter.Inc()
 		log.Debug("fail to create leave joint state operator", errs.ZapError(err))
@@ -57,6 +57,7 @@ func (c *JointStateChecker) Check(region *core.RegionInfo) *operator.Operator {
 		if op.Len() > 1 {
 			jointCheckerTransferLeaderCounter.Inc()
 		}
+		op.SetPriorityLevel(constant.High)
 	}
 	return op
 }

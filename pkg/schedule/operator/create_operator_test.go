@@ -359,21 +359,14 @@ func (suite *createOperatorTestSuite) TestCreateMergeRegionOperator() {
 	}
 }
 
-func (suite *createOperatorTestSuite) TestTransferLeaderPriorityAndLimit() {
+func (suite *createOperatorTestSuite) TestTransferLeaderInLimit() {
 	for _, testCase := range []struct {
 		name  string
 		kind  OpKind
-		opts  []BuilderOption
 		level constant.PriorityLevel
 	}{
-		{"default", OpLeader, nil, constant.Medium},
-		{"admin", OpAdmin, nil, constant.Urgent},
-		{"low", OpLeader, []BuilderOption{WithPriorityLevel(constant.Low)}, constant.Low},
-		{"high", OpLeader, []BuilderOption{WithPriorityLevel(constant.High)}, constant.High},
-		{"urgent", OpLeader, []BuilderOption{WithPriorityLevel(constant.Urgent)}, constant.Urgent},
-		{"admin-low", OpAdmin, []BuilderOption{WithPriorityLevel(constant.Low)}, constant.Low},
-		{"admin-medium", OpAdmin, []BuilderOption{WithPriorityLevel(constant.Medium)}, constant.Medium},
-		{"admin-high", OpAdmin, []BuilderOption{WithPriorityLevel(constant.High)}, constant.High},
+		{"default", OpLeader, constant.Medium},
+		{"admin", OpAdmin, constant.Urgent},
 	} {
 		suite.Run(testCase.name, func() {
 			re := suite.Require()
@@ -384,7 +377,7 @@ func (suite *createOperatorTestSuite) TestTransferLeaderPriorityAndLimit() {
 			limiter := storelimit.NewStoreRateLimit(0.000001)
 			tc.PutStore(tc.GetStore(2).Clone(core.SetStoreLimit(limiter)))
 			build := func() (*Operator, error) {
-				return CreateTransferLeaderOperator("test", tc, region, 2, nil, testCase.kind, testCase.opts...)
+				return CreateTransferLeaderOperator("test", tc, region, 2, nil, testCase.kind)
 			}
 			// Building observes the budget without reserving it.
 			for range 2 {
@@ -396,13 +389,8 @@ func (suite *createOperatorTestSuite) TestTransferLeaderPriorityAndLimit() {
 			}
 			re.True(limiter.Take(storelimit.RegionInfluence[storelimit.TransferLeaderIn], storelimit.TransferLeaderIn, constant.Medium))
 			op, err := build()
-			if testCase.level == constant.Urgent {
-				re.NoError(err)
-				re.Equal(constant.Urgent, op.GetPriorityLevel())
-			} else {
-				re.ErrorContains(err, "target leader is not allowed")
-				re.Nil(op)
-			}
+			re.ErrorContains(err, "target leader is not allowed")
+			re.Nil(op)
 			re.False(tc.GetStore(2).IsAvailable(storelimit.TransferLeaderIn, constant.Medium))
 			tc.SetStoreLimit(2, storelimit.TransferLeaderIn, storelimit.Unlimited)
 			tc.ResetStoreLimit(2, storelimit.TransferLeaderIn, storelimit.Unlimited/time.Minute.Seconds())
@@ -413,13 +401,13 @@ func (suite *createOperatorTestSuite) TestTransferLeaderPriorityAndLimit() {
 	}
 }
 
-func (suite *createOperatorTestSuite) TestUrgentTransferLeaderChecksTarget() {
+func (suite *createOperatorTestSuite) TestAdminTransferLeaderChecksTarget() {
 	re := suite.Require()
 	tc := suite.cluster
 	tc.AddLeaderRegion(1, 1, 2, 3)
 	region := tc.GetRegion(1)
 	build := func(target uint64) (*Operator, error) {
-		return CreateTransferLeaderOperator("test", tc, region, target, nil, OpLeader, WithPriorityLevel(constant.Urgent))
+		return CreateTransferLeaderOperator("test", tc, region, target, nil, OpAdmin)
 	}
 	store := tc.GetStore(2)
 	tc.PutStore(store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-5 * time.Minute))))
@@ -460,16 +448,14 @@ func (suite *createOperatorTestSuite) TestCompositeOperatorLeaderLimit() {
 		op, err := CreateMoveLeaderOperator("test", tc, region, OpRegion, 1, peer)
 		re.Error(err)
 		re.Nil(op)
-		op, err = CreateMoveLeaderOperator("test", tc, region, OpRegion, 1, peer, WithPriorityLevel(constant.Urgent))
-		re.NoError(err)
-		re.Equal(constant.Urgent, op.GetPriorityLevel())
-		influence := NewTotalOpInfluence([]*Operator{op}, tc.GetBasicCluster())
-		re.Equal(storelimit.RegionInfluence[storelimit.TransferLeaderIn], influence.GetStoreInfluence(4).GetStepCost(storelimit.TransferLeaderIn))
+		op, err = CreateMoveLeaderOperator("test", tc, region, OpAdmin, 1, peer)
+		re.Error(err)
+		re.Nil(op)
 
 		// Peer-only changes do not spend the leader-transfer budget.
 		op, err = CreateAddPeerOperator("test", tc, region, peer, OpRegion)
 		re.NoError(err)
-		influence = NewTotalOpInfluence([]*Operator{op}, tc.GetBasicCluster())
+		influence := NewTotalOpInfluence([]*Operator{op}, tc.GetBasicCluster())
 		re.Zero(influence.GetStoreInfluence(4).GetStepCost(storelimit.TransferLeaderIn))
 
 		// Removing the leader can choose another follower with available budget.
@@ -478,6 +464,13 @@ func (suite *createOperatorTestSuite) TestCompositeOperatorLeaderLimit() {
 		influence = NewTotalOpInfluence([]*Operator{op}, tc.GetBasicCluster())
 		re.Zero(influence.GetStoreInfluence(2).GetStepCost(storelimit.TransferLeaderIn))
 		re.Equal(storelimit.RegionInfluence[storelimit.TransferLeaderIn], influence.GetStoreInfluence(3).GetStepCost(storelimit.TransferLeaderIn))
+
+		tc.SetStoreLimit(4, storelimit.TransferLeaderIn, storelimit.Unlimited)
+		op, err = CreateMoveLeaderOperator("test", tc, region, OpAdmin, 1, peer)
+		re.NoError(err)
+		re.Equal(constant.Urgent, op.GetPriorityLevel())
+		influence = NewTotalOpInfluence([]*Operator{op}, tc.GetBasicCluster())
+		re.Equal(storelimit.RegionInfluence[storelimit.TransferLeaderIn], influence.GetStoreInfluence(4).GetStepCost(storelimit.TransferLeaderIn))
 	}
 }
 

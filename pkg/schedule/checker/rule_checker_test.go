@@ -1529,15 +1529,20 @@ func (suite *ruleCheckerTestSuite) TestFastFailoverLeaderTransferWithExhaustedLi
 		re.True(tc.GetStore(id).GetStoreLimit().Take(storelimit.RegionInfluence[storelimit.TransferLeaderIn], storelimit.TransferLeaderIn, constant.Medium))
 	}
 	op := suite.rc.Check(region)
+	re.Nil(op)
+
+	// Fast failover keeps its priority but must select a target with budget.
+	tc.SetStoreLimit(2, storelimit.TransferLeaderIn, storelimit.Unlimited)
+	op = suite.rc.Check(region)
 	re.NotNil(op)
 	re.Equal(constant.Urgent, op.GetPriorityLevel())
 	re.Equal("replace-rule-down-leader-peer", op.Desc())
 	influence := operator.NewTotalOpInfluence([]*operator.Operator{op}, tc.GetBasicCluster())
-	re.Equal(storelimit.RegionInfluence[storelimit.TransferLeaderIn],
-		influence.GetStoreInfluence(2).GetStepCost(storelimit.TransferLeaderIn)+
-			influence.GetStoreInfluence(3).GetStepCost(storelimit.TransferLeaderIn))
+	re.Equal(storelimit.RegionInfluence[storelimit.TransferLeaderIn], influence.GetStoreInfluence(2).GetStepCost(storelimit.TransferLeaderIn))
+	re.Zero(influence.GetStoreInfluence(3).GetStepCost(storelimit.TransferLeaderIn))
 
-	// Without fast failover this remains a non-urgent repair and obeys the limit.
+	// Ordinary repair follows the same target check.
+	tc.SetStoreLimit(2, storelimit.TransferLeaderIn, 0.00006)
 	tc.SetEnableWitness(false)
 	re.Nil(suite.rc.Check(region))
 }

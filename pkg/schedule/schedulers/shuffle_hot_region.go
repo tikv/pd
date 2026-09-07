@@ -180,11 +180,12 @@ func (s *shuffleHotRegionScheduler) randomSchedule(cluster sche.SchedulerCluster
 			return nil
 		}
 		destPeer := &metapb.Peer{StoreId: destStoreID}
-		op, err := operator.CreateMoveLeaderOperator("random-move-hot-leader", cluster, srcRegion, operator.OpRegion|operator.OpLeader, srcStoreID, destPeer, operator.WithPriorityLevel(constant.Low))
+		op, err := operator.CreateMoveLeaderOperator("random-move-hot-leader", cluster, srcRegion, operator.OpRegion|operator.OpLeader, srcStoreID, destPeer)
 		if err != nil {
 			log.Debug("fail to create move leader operator", errs.ZapError(err))
 			return nil
 		}
+		op.SetPriorityLevel(constant.Low)
 		op.Counters = append(op.Counters, shuffleHotRegionNewOperatorCounter)
 		return []*operator.Operator{op}
 	}

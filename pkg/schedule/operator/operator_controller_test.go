@@ -658,6 +658,12 @@ func (suite *operatorControllerTestSuite) TestStoreLimit() {
 	re.False(oc.AddOperator(op))
 	re.False(oc.RemoveOperator(op))
 
+	// Direct admission retains the Urgent exemption, independently of Builder's
+	// priority-agnostic target filter.
+	op = NewTestOperator(1001, &metapb.RegionEpoch{}, OpAdmin, TransferLeader{FromStore: 1, ToStore: 2})
+	re.True(oc.AddOperator(op))
+	checkRemoveOperatorSuccess(re, oc, op)
+
 	tc.SetStoreLimit(2, storelimit.TransferLeaderIn, 0)
 	for range 2 {
 		op = NewTestOperator(1001, &metapb.RegionEpoch{}, OpLeader, TransferLeader{FromStore: 1, ToStore: 2})
