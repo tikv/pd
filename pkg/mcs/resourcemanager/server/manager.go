@@ -427,6 +427,10 @@ func cloneControllerConfig(cfg *ControllerConfig) *ControllerConfig {
 		return nil
 	}
 	cloned := *cfg
+	if cfg.RequestUnit.ReadCostPerByteRemote != nil {
+		remoteReadCost := *cfg.RequestUnit.ReadCostPerByteRemote
+		cloned.RequestUnit.ReadCostPerByteRemote = &remoteReadCost
+	}
 	cloned.RUVersionPolicy = cfg.RUVersionPolicy.Clone()
 	return &cloned
 }
