@@ -40,9 +40,9 @@ import (
 )
 
 const (
-	// Keep value loading and patch construction bounded independently from the
-	// larger keys-only etcd range responses.
-	ruleSnapshotLoadBatchSize = int64(10000)
+	// Bound the entries processed and values loaded per callback independently
+	// from the larger keys-only etcd range responses.
+	ruleSnapshotProcessBatchSize = int64(10000)
 
 	// Aim for 2-4 MiB keys-only responses. The initial batch matches the lower
 	// bound for the typical placement-rule key size and may grow up to 100k.
@@ -144,7 +144,7 @@ func (rw *Watcher) scanRuleSnapshotKeys(
 	revision int64,
 	fetchBatchSize int64,
 	processBatchSize int,
-	handlePage func([]*mvccpb.KeyValue, int64) error,
+	handleBatch func([]*mvccpb.KeyValue, int64) error,
 ) (int64, error) {
 	startKey := prefix
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
@@ -182,13 +182,13 @@ func (rw *Watcher) scanRuleSnapshotKeys(
 				startKey = string(append(page[len(page)-1].Key, 0))
 			}
 			if len(page) == 0 {
-				if err := handlePage(page, revision); err != nil {
+				if err := handleBatch(page, revision); err != nil {
 					return 0, err
 				}
 			} else {
 				for start := 0; start < len(page); start += processBatchSize {
 					end := min(start+processBatchSize, len(page))
-					if err := handlePage(page[start:end], revision); err != nil {
+					if err := handleBatch(page[start:end], revision); err != nil {
 						return 0, err
 					}
 				}
@@ -269,11 +269,11 @@ func (rw *Watcher) reconcileRuleSnapshot(ctx context.Context) (int64, error) {
 
 	groupPrefix := []byte(rw.ruleGroupPathPrefix)
 	snapshotRevision, err := rw.scanRuleSnapshotKeys(
-		ctx, rw.ruleGroupPathPrefix, nil, 0, ruleSnapshotScanBatchSize, int(ruleSnapshotLoadBatchSize),
-		func(page []*mvccpb.KeyValue, revision int64) error {
+		ctx, rw.ruleGroupPathPrefix, nil, 0, ruleSnapshotScanBatchSize, int(ruleSnapshotProcessBatchSize),
+		func(batch []*mvccpb.KeyValue, revision int64) error {
 			oldGroups := make([]*placement.RuleGroup, 0)
 			metadata := make([]*mvccpb.KeyValue, 0)
-			for _, item := range page {
+			for _, item := range batch {
 				if !bytes.HasPrefix(item.Key, groupPrefix) {
 					return fmt.Errorf("unexpected placement rule group key %q", item.Key)
 				}
@@ -340,11 +340,11 @@ func (rw *Watcher) reconcileRuleSnapshot(ctx context.Context) (int64, error) {
 	}
 	_, err = rw.scanRuleSnapshotKeys(
 		ctx, rw.rulesPathPrefix, ruleRangeEnds, snapshotRevision,
-		ruleSnapshotScanBatchSize, int(ruleSnapshotLoadBatchSize),
-		func(page []*mvccpb.KeyValue, revision int64) error {
+		ruleSnapshotScanBatchSize, int(ruleSnapshotProcessBatchSize),
+		func(batch []*mvccpb.KeyValue, revision int64) error {
 			oldRules := make([]*placement.Rule, 0)
 			metadata := make([]*mvccpb.KeyValue, 0)
-			for _, item := range page {
+			for _, item := range batch {
 				if !bytes.HasPrefix(item.Key, rulePrefix) {
 					return fmt.Errorf("unexpected placement rule key %q", item.Key)
 				}

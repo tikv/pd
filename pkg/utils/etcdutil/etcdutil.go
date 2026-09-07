@@ -702,6 +702,7 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 			if err := lw.postEventsFn(wresp.Events); err != nil {
 				log.Error("run post event failed in watch loop", zap.Error(err),
 					zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
+				var reloadFn func(context.Context) (int64, error)
 				if lw.retryOnPostEventError {
 					if lw.compactionReloadFn == nil {
 						// Recreate the watch from the unadvanced revision so the
@@ -710,18 +711,15 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 					}
 					// An event that remains invalid can otherwise block all newer
 					// revisions. Reconcile the latest authoritative snapshot instead.
-					loadedRevision, shouldContinue := lw.reloadWithRetry(ctx, lw.compactionReloadFn)
-					if !shouldContinue {
-						return max(revision, loadedRevision), nil
-					}
-					revision = loadedRevision
-					continue
-				}
-				if lw.atomicLoadCallbacks {
+					reloadFn = lw.compactionReloadFn
+				} else if lw.atomicLoadCallbacks {
 					log.Warn("watch callback batch failed, reload from etcd in watch loop",
 						zap.Int64("revision", revision), zap.String("name", lw.name),
 						zap.String("key", lw.key), zap.Error(err))
-					loadedRevision, shouldContinue := lw.reloadWithRetry(ctx, lw.load)
+					reloadFn = lw.load
+				}
+				if reloadFn != nil {
+					loadedRevision, shouldContinue := lw.reloadWithRetry(ctx, reloadFn)
 					if !shouldContinue {
 						return max(revision, loadedRevision), nil
 					}
@@ -744,7 +742,7 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 }
 
 // reloadAfterCompaction uses the consumer-specific compaction reconciliation
-// when configured. Other reloads always use the watcher's regular full load.
+// when configured and the watcher's regular full load otherwise.
 func (lw *LoopWatcher) reloadAfterCompaction(ctx context.Context) (int64, bool) {
 	loadFn := lw.load
 	if lw.compactionReloadFn != nil {

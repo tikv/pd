@@ -188,9 +188,9 @@ func BenchmarkRuleSnapshotKeyScan(b *testing.B) {
 			scanned := 0
 			revision, err := rw.scanRuleSnapshotKeys(
 				ctx, prefix, rangeEnds, snapshotRevision,
-				ruleSnapshotScanBatchSize, int(ruleSnapshotLoadBatchSize),
-				func(page []*mvccpb.KeyValue, _ int64) error {
-					scanned += len(page)
+				ruleSnapshotScanBatchSize, int(ruleSnapshotProcessBatchSize),
+				func(batch []*mvccpb.KeyValue, _ int64) error {
+					scanned += len(batch)
 					return nil
 				})
 			require.NoError(b, err)
@@ -224,7 +224,7 @@ func BenchmarkRuleSnapshotKeyScan(b *testing.B) {
 
 func TestAdjustRuleSnapshotScanBatchSize(t *testing.T) {
 	re := require.New(t)
-	minimum := ruleSnapshotLoadBatchSize
+	minimum := ruleSnapshotProcessBatchSize
 	re.Equal(int64(100000), adjustRuleSnapshotScanBatchSize(50000, minimum, 1024*1024))
 	re.Equal(int64(100000), adjustRuleSnapshotScanBatchSize(100000, minimum, 1024*1024))
 	re.Equal(int64(50000), adjustRuleSnapshotScanBatchSize(100000, minimum, 5*1024*1024))
@@ -258,9 +258,9 @@ func TestScanRuleSnapshotKeyRanges(t *testing.T) {
 	var loaded []string
 	callbackCount := 0
 	revision, err := rw.scanRuleSnapshotKeys(ctx, prefix, []string{prefix + "b"}, 0, 4, 2,
-		func(page []*mvccpb.KeyValue, _ int64) error {
-			re.LessOrEqual(len(page), 2)
-			for _, item := range page {
+		func(batch []*mvccpb.KeyValue, _ int64) error {
+			re.LessOrEqual(len(batch), 2)
+			for _, item := range batch {
 				loaded = append(loaded, string(item.Key))
 			}
 			if callbackCount == 0 {
@@ -305,17 +305,38 @@ func TestRuleWatcherAllowsEmptyInitialSnapshot(t *testing.T) {
 	re.Zero(ruleManager.GetRulesCount())
 }
 
-func TestReconcileRuleSnapshot(t *testing.T) {
-	re := require.New(t)
-	ctx, client, clean := prepare(t, false)
-	defer clean()
+type ruleWatcherTestFixture struct {
+	storage           *endpoint.StorageEndpoint
+	cluster           *mockcluster.Cluster
+	ruleManager       *placement.RuleManager
+	checkerController *checker.Controller
+}
 
+func newRuleWatcherTestFixture(t *testing.T, ctx context.Context) *ruleWatcherTestFixture {
+	re := require.New(t)
 	storage := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	conf := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, conf)
 	cluster.AddLabelsStore(1, 0, map[string]string{"zone": "z1"})
 	ruleManager := placement.NewRuleManager(ctx, storage, cluster, conf)
 	re.NoError(ruleManager.Initialize(3, nil, "", false))
+	cluster.RuleManager = ruleManager
+	opController := operator.NewController(ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), nil)
+	return &ruleWatcherTestFixture{
+		storage:           storage,
+		cluster:           cluster,
+		ruleManager:       ruleManager,
+		checkerController: checker.NewController(ctx, cluster, cluster.GetCheckerConfig(), opController),
+	}
+}
+
+func TestReconcileRuleSnapshot(t *testing.T) {
+	re := require.New(t)
+	ctx, client, clean := prepare(t, false)
+	defer clean()
+
+	fixture := newRuleWatcherTestFixture(t, ctx)
+	ruleManager := fixture.ruleManager
 	re.NoError(ruleManager.SetRuleGroup(&placement.RuleGroup{ID: "g", Index: 1}))
 	re.NoError(ruleManager.SetRules([]*placement.Rule{
 		{GroupID: "g", ID: "deleted", Role: placement.Learner, Count: 1},
@@ -326,10 +347,6 @@ func TestReconcileRuleSnapshot(t *testing.T) {
 			},
 		},
 	}))
-
-	cluster.RuleManager = ruleManager
-	opController := operator.NewController(ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), nil)
-	checkerController := checker.NewController(ctx, cluster, cluster.GetCheckerConfig(), opController)
 
 	ops := make([]clientv3.Op, 0, ruleManager.GetRulesCount()+1)
 	for _, rule := range ruleManager.GetAllRules() {
@@ -367,7 +384,7 @@ func TestReconcileRuleSnapshot(t *testing.T) {
 		ruleGroupPathPrefix: keypath.RuleGroupPathPrefix(),
 		etcdClient:          client,
 		ruleManager:         ruleManager,
-		checkerController:   checkerController,
+		checkerController:   fixture.checkerController,
 		ruleRevision:        initial.Header.Revision,
 	}
 	nextRevision, err := rw.reconcileRuleSnapshot(ctx)
@@ -404,7 +421,7 @@ func TestReconcileRuleSnapshot(t *testing.T) {
 	re.Equal(groupsDeleted.Header.Revision, rw.ruleRevision)
 	re.Equal([]string{"z1"}, ruleManager.GetRule("g", "unchanged").LabelConstraints[0].Values)
 
-	cluster.SetStoreLabel(1, map[string]string{"zone": "z2"})
+	fixture.cluster.SetStoreLabel(1, map[string]string{"zone": "z2"})
 	nextRevision, err = rw.reconcileRuleSnapshot(ctx)
 	re.NoError(err)
 	re.Equal(updatedRuleResp.Header.Revision+1, nextRevision)
@@ -440,12 +457,8 @@ func TestRuleWatcherReconcilesNewerSnapshotAfterFailedLiveRuleUpdate(t *testing.
 	ctx, client, clean := prepare(t, false)
 	defer clean()
 
-	storage := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	conf := mockconfig.NewTestOptions()
-	cluster := mockcluster.NewCluster(ctx, conf)
-	cluster.AddLabelsStore(1, 0, map[string]string{"zone": "z1"})
-	ruleManager := placement.NewRuleManager(ctx, storage, cluster, conf)
-	re.NoError(ruleManager.Initialize(3, nil, "", false))
+	fixture := newRuleWatcherTestFixture(t, ctx)
+	ruleManager := fixture.ruleManager
 	re.NoError(ruleManager.SetRule(&placement.Rule{
 		GroupID: "g",
 		ID:      "r",
@@ -455,10 +468,6 @@ func TestRuleWatcherReconcilesNewerSnapshotAfterFailedLiveRuleUpdate(t *testing.
 			{Key: "zone", Op: placement.In, Values: []string{"z1"}},
 		},
 	}))
-	cluster.RuleManager = ruleManager
-
-	opController := operator.NewController(ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), nil)
-	checkerController := checker.NewController(ctx, cluster, cluster.GetCheckerConfig(), opController)
 	for _, rule := range ruleManager.GetAllRules() {
 		value, err := json.Marshal(rule)
 		re.NoError(err)
@@ -473,9 +482,9 @@ func TestRuleWatcherReconcilesNewerSnapshotAfterFailedLiveRuleUpdate(t *testing.
 		rulesPathPrefix:     keypath.RulesPathPrefix(),
 		ruleGroupPathPrefix: keypath.RuleGroupPathPrefix(),
 		etcdClient:          client,
-		ruleStorage:         storage,
+		ruleStorage:         fixture.storage,
 		ruleManager:         ruleManager,
-		checkerController:   checkerController,
+		checkerController:   fixture.checkerController,
 	}
 	closeWatcher := sync.OnceFunc(rw.Close)
 	defer closeWatcher()
