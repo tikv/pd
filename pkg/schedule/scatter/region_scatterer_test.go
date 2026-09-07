@@ -792,7 +792,7 @@ func TestSeedGroupDistributionByRange(t *testing.T) {
 func TestInternalScatterAllowsWhenReadCPUIsBelowLowWatermark(t *testing.T) {
 	re := require.New(t)
 	scatterer, tc, region := newInternalScatterReadCPUTestFixture(t)
-	setUnifiedReadPoolThreadCount(tc, 12)
+	setUnifiedReadPoolThreadCount(tc)
 	setStoreReadCPU(tc, 1, 500)
 	setStoreReadCPU(tc, 4, 50)
 
@@ -806,7 +806,7 @@ func TestInternalScatterAllowsWhenReadCPUIsBelowLowWatermark(t *testing.T) {
 func TestInternalScatterSkipsWhenReadCPUIsBalanced(t *testing.T) {
 	re := require.New(t)
 	scatterer, tc, region := newInternalScatterReadCPUTestFixture(t)
-	setUnifiedReadPoolThreadCount(tc, 12)
+	setUnifiedReadPoolThreadCount(tc)
 	setStoreReadCPU(tc, 1, 500)
 	setStoreReadCPU(tc, 4, 450)
 
@@ -818,7 +818,7 @@ func TestInternalScatterSkipsWhenReadCPUIsBalanced(t *testing.T) {
 func TestInternalScatterAllowsWhenReadCPUIsImbalanced(t *testing.T) {
 	re := require.New(t)
 	scatterer, tc, region := newInternalScatterReadCPUTestFixture(t)
-	setUnifiedReadPoolThreadCount(tc, 12)
+	setUnifiedReadPoolThreadCount(tc)
 	setStoreReadCPU(tc, 1, 700)
 	setStoreReadCPU(tc, 4, 450)
 
@@ -832,7 +832,7 @@ func TestInternalScatterAllowsWhenReadCPUIsImbalanced(t *testing.T) {
 func TestInternalScatterBalancedReadCPUDoesNotBlockSameLeader(t *testing.T) {
 	re := require.New(t)
 	scatterer, tc, region := newInternalScatterReadCPUTestFixture(t)
-	setUnifiedReadPoolThreadCount(tc, 12)
+	setUnifiedReadPoolThreadCount(tc)
 	setStoreReadCPU(tc, 1, 500)
 
 	op, err := scatterer.ScatterInternal(region, "balanced-same-leader", []byte("t"), []byte("z"))
@@ -1602,9 +1602,9 @@ func newInternalScatterReadCPUTestFixture(t *testing.T) (*RegionScatterer, *mock
 	return scatterer, tc, region
 }
 
-func setUnifiedReadPoolThreadCount(tc *mockcluster.Cluster, threadCount uint64) {
+func setUnifiedReadPoolThreadCount(tc *mockcluster.Cluster) {
 	cfg := tc.PersistOptions.GetStoreConfig().Clone()
-	cfg.ReadPool.Unified.MaxThreadCount = threadCount
+	cfg.ReadPool.Unified.MaxThreadCount = 12
 	tc.SetStoreConfig(cfg)
 }
 
