@@ -1526,8 +1526,9 @@ func (c *RaftCluster) DeleteStoreLabel(storeID uint64, labelKey string) error {
 // PutMetaStore puts a store.
 func (c *RaftCluster) PutMetaStore(store *metapb.Store) error {
 	storeID := store.GetId()
-	// wasKnown alone isn't enough to decide whether to guard addStoreLimit
-	// against resurrecting a removed entry: a plain pre-putStoreImpl snapshot
+	// wasKnown alone isn't enough to decide whether to guard
+	// addStoreLimitInternal against resurrecting a removed entry: a plain
+	// pre-putStoreImpl snapshot
 	// can't distinguish a genuine first registration from one that raced a
 	// full concurrent register-then-bury of the same ID landing in between
 	// the snapshot and putStoreImpl actually running -- wasKnown would read
@@ -1556,7 +1557,7 @@ func (c *RaftCluster) PutMetaStore(store *metapb.Store) error {
 		return err
 	}
 	c.OnStoreVersionChange()
-	c.addStoreLimit(store, wasKnown)
+	c.addStoreLimitInternal(store, wasKnown)
 	return nil
 }
 
@@ -2467,12 +2468,12 @@ func (c *RaftCluster) GetAllStoresLimit() map[uint64]sc.StoreLimitConfig {
 // replayed from storage) -- there's no prior entry to protect from
 // resurrection in that case. Callers that must guard an already-known store
 // against resurrecting a deliberately-removed entry should use
-// addStoreLimit(store, true) instead (see PutMetaStore).
+// addStoreLimitInternal(store, true) instead (see PutMetaStore).
 func (c *RaftCluster) AddStoreLimit(store *metapb.Store) {
-	c.addStoreLimit(store, false)
+	c.addStoreLimitInternal(store, false)
 }
 
-// addStoreLimit is AddStoreLimit's implementation. When skipIfRemoved is
+// addStoreLimitInternal is AddStoreLimit's implementation. When skipIfRemoved is
 // true, it re-checks the store's current tombstone state on every retry
 // attempt, from inside the same UpdateScheduleConfig closure that
 // RemoveStoreLimit's own deletion runs under -- not just once before the
@@ -2486,7 +2487,7 @@ func (c *RaftCluster) AddStoreLimit(store *metapb.Store) {
 // PutMetaStore's guard originally did) doesn't have this property: a bury
 // landing during persistLimitWaitTime's sleep between failed attempts can
 // still race a later retry that never re-reads store state.
-func (c *RaftCluster) addStoreLimit(store *metapb.Store, skipIfRemoved bool) {
+func (c *RaftCluster) addStoreLimitInternal(store *metapb.Store, skipIfRemoved bool) {
 	storeID := store.GetId()
 	var err error
 	for range persistLimitRetryTimes {
