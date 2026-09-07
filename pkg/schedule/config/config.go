@@ -494,18 +494,7 @@ func (c *ScheduleConfig) Adjust(meta *configutil.ConfigMetaData, reloading bool)
 	if !meta.IsDefined("slow-store-evicting-affected-store-ratio-threshold") {
 		configutil.AdjustFloat64(&c.SlowStoreEvictingAffectedStoreRatioThreshold, defaultSlowStoreEvictingAffectedStoreRatioThreshold)
 	}
-	c.adjustTransferLeaderInLimit()
 	return c.Validate()
-}
-
-// adjustTransferLeaderInLimit replaces zero-valued leader-transfer limits with Unlimited.
-func (c *ScheduleConfig) adjustTransferLeaderInLimit() {
-	configutil.AdjustFloat64(&c.DefaultStoreLimit.TransferLeaderIn, storelimit.Unlimited)
-	for storeID, limit := range c.StoreLimit {
-		if limit.TransferLeaderIn == 0 {
-			c.StoreLimit[storeID] = limit.SetLimit(storelimit.TransferLeaderIn, storelimit.Unlimited)
-		}
-	}
 }
 
 func (c *ScheduleConfig) adjustDefaultStoreLimit(meta *configutil.ConfigMetaData) {
@@ -534,7 +523,6 @@ func (c *ScheduleConfig) migrateStoreBalanceRate(defaultStoreLimitMeta *configut
 	}
 	DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, c.DefaultStoreLimit.AddPeer)
 	DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, c.DefaultStoreLimit.RemovePeer)
-	DefaultStoreLimit.SetDefaultStoreLimit(storelimit.TransferLeaderIn, c.DefaultStoreLimit.TransferLeaderIn)
 	c.StoreBalanceRate = 0
 }
 
@@ -553,7 +541,6 @@ func (c *ScheduleConfig) migratePersistedStoreLimit(addPeerDefined, removePeerDe
 	if !transferLeaderInDefined {
 		c.DefaultStoreLimit.TransferLeaderIn = defaultStoreLimit.TransferLeaderIn
 	}
-	c.adjustTransferLeaderInLimit()
 	DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, c.DefaultStoreLimit.AddPeer)
 	DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, c.DefaultStoreLimit.RemovePeer)
 	DefaultStoreLimit.SetDefaultStoreLimit(storelimit.TransferLeaderIn, c.DefaultStoreLimit.TransferLeaderIn)
@@ -613,7 +600,8 @@ func (c *ScheduleConfig) MigrateDeprecatedFlags() {
 // configuration, using JSON field presence to preserve explicit zero peer limits.
 func (c *ScheduleConfig) MigrateDeprecatedFlagsFromJSON(data []byte) error {
 	var fields struct {
-		DefaultStoreLimit map[string]json.RawMessage `json:"default-store-limit"`
+		DefaultStoreLimit map[string]json.RawMessage            `json:"default-store-limit"`
+		StoreLimit        map[uint64]map[string]json.RawMessage `json:"store-limit"`
 	}
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
@@ -622,6 +610,11 @@ func (c *ScheduleConfig) MigrateDeprecatedFlagsFromJSON(data []byte) error {
 	_, removePeerDefined := fields.DefaultStoreLimit["remove-peer"]
 	_, transferLeaderInDefined := fields.DefaultStoreLimit["transfer-leader-in"]
 	c.applyDeprecatedFlagMigration(addPeerDefined, removePeerDefined, transferLeaderInDefined)
+	for storeID, limitFields := range fields.StoreLimit {
+		if _, defined := limitFields["transfer-leader-in"]; !defined {
+			c.StoreLimit[storeID] = c.StoreLimit[storeID].SetLimit(storelimit.TransferLeaderIn, c.DefaultStoreLimit.TransferLeaderIn)
+		}
+	}
 	return nil
 }
 

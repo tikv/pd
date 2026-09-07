@@ -55,9 +55,9 @@ func TestUnmarshalRemoteConfigMigratesDefaultStoreLimit(t *testing.T) {
 			expected: sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 0, TransferLeaderIn: 25},
 		},
 		{
-			name:     "zero transfer leader limit normalizes to unlimited",
+			name:     "explicit transfer leader limit is preserved",
 			data:     `{"schedule":{"default-store-limit":{"transfer-leader-in":0}}}`,
-			expected: sc.StoreLimitConfig{AddPeer: 15, RemovePeer: 15, TransferLeaderIn: storelimit.Unlimited},
+			expected: sc.StoreLimitConfig{AddPeer: 15, RemovePeer: 15, TransferLeaderIn: 0},
 		},
 	}
 

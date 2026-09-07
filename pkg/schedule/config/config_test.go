@@ -19,6 +19,7 @@ import (
 	"math"
 	"testing"
 
+	"github.com/BurntSushi/toml"
 	"github.com/stretchr/testify/require"
 
 	"github.com/tikv/pd/pkg/core/storelimit"
@@ -32,23 +33,29 @@ func TestTransferLeaderInLimitDefaults(t *testing.T) {
 		DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, previous.RemovePeer)
 		DefaultStoreLimit.SetDefaultStoreLimit(storelimit.TransferLeaderIn, previous.TransferLeaderIn)
 	})
-	for _, data := range []string{
-		`{"store-limit":{"1":{"add-peer":10,"remove-peer":20},"2":{"transfer-leader-in":30}}}`,
-		`{"default-store-limit":{"transfer-leader-in":0},"store-limit":{"1":{"add-peer":10,"remove-peer":20,"transfer-leader-in":0},"2":{"transfer-leader-in":30}}}`,
+	DefaultStoreLimit.SetDefaultStoreLimit(storelimit.TransferLeaderIn, storelimit.Unlimited)
+	data := []byte(`{"store-limit":{"1":{"add-peer":10,"remove-peer":20},"2":{"transfer-leader-in":30},"3":{"transfer-leader-in":0}}}`)
+	var cfg ScheduleConfig
+	require.NoError(t, json.Unmarshal(data, &cfg))
+	require.NoError(t, cfg.MigrateDeprecatedFlagsFromJSON(data))
+	require.Equal(t, storelimit.Unlimited, cfg.DefaultStoreLimit.TransferLeaderIn)
+	require.Equal(t, StoreLimitConfig{AddPeer: 10, RemovePeer: 20, TransferLeaderIn: storelimit.Unlimited}, cfg.StoreLimit[1])
+	require.Equal(t, float64(30), cfg.StoreLimit[2].TransferLeaderIn)
+	require.Zero(t, cfg.StoreLimit[3].TransferLeaderIn)
+
+	for _, tc := range []struct {
+		config   string
+		expected float64
+	}{
+		{"", storelimit.Unlimited},
+		{"[default-store-limit]\ntransfer-leader-in = 30", 30},
+		{"[default-store-limit]\ntransfer-leader-in = 0", 0},
 	} {
-		for _, persisted := range []bool{false, true} {
-			DefaultStoreLimit.SetDefaultStoreLimit(storelimit.TransferLeaderIn, storelimit.Unlimited)
-			var cfg ScheduleConfig
-			require.NoError(t, json.Unmarshal([]byte(data), &cfg))
-			if persisted {
-				require.NoError(t, cfg.MigrateDeprecatedFlagsFromJSON([]byte(data)))
-			} else {
-				require.NoError(t, cfg.Adjust(configutil.NewConfigMetadata(nil), false))
-			}
-			require.Equal(t, storelimit.Unlimited, cfg.DefaultStoreLimit.TransferLeaderIn)
-			require.Equal(t, StoreLimitConfig{AddPeer: 10, RemovePeer: 20, TransferLeaderIn: storelimit.Unlimited}, cfg.StoreLimit[1])
-			require.Equal(t, float64(30), cfg.StoreLimit[2].TransferLeaderIn)
-		}
+		var cfg ScheduleConfig
+		meta, err := toml.Decode(tc.config, &cfg)
+		require.NoError(t, err)
+		require.NoError(t, cfg.Adjust(configutil.NewConfigMetadata(&meta), false))
+		require.Equal(t, tc.expected, cfg.DefaultStoreLimit.TransferLeaderIn)
 	}
 }
 

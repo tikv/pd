@@ -244,14 +244,21 @@ func TestReloadLegacyStoreBalanceRate(t *testing.T) {
 	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, 15)
 
 	type legacyScheduleConfig struct {
-		StoreBalanceRate float64 `json:"store-balance-rate"`
+		StoreBalanceRate float64                       `json:"store-balance-rate"`
+		StoreLimit       map[uint64]map[string]float64 `json:"store-limit"`
 	}
 	type legacyConfig struct {
 		Schedule legacyScheduleConfig `json:"schedule"`
 	}
 	storage := storage.NewStorageWithMemoryBackend()
 	re.NoError(storage.SaveConfig(&legacyConfig{
-		Schedule: legacyScheduleConfig{StoreBalanceRate: 60},
+		Schedule: legacyScheduleConfig{
+			StoreBalanceRate: 60,
+			StoreLimit: map[uint64]map[string]float64{
+				1: {"add-peer": 10, "remove-peer": 20},
+				2: {"transfer-leader-in": 30},
+			},
+		},
 	}))
 
 	opt, err := newTestScheduleOption()
@@ -260,6 +267,8 @@ func TestReloadLegacyStoreBalanceRate(t *testing.T) {
 	expected := sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 60, TransferLeaderIn: storelimit.Unlimited}
 	re.Equal(expected, opt.GetScheduleConfig().DefaultStoreLimit)
 	re.Equal(expected, opt.GetStoreLimit(100))
+	re.Equal(sc.StoreLimitConfig{AddPeer: 10, RemovePeer: 20, TransferLeaderIn: storelimit.Unlimited}, opt.GetStoreLimit(1))
+	re.Equal(float64(30), opt.GetStoreLimit(2).TransferLeaderIn)
 	re.Zero(opt.GetScheduleConfig().StoreBalanceRate)
 }
 
