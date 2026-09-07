@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/failpoint"
 
 	"github.com/tikv/pd/pkg/schedule/labeler"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
 )
@@ -66,9 +67,9 @@ func (suite *regionLabelTestSuite) checkGetSet(cluster *tests.TestCluster) {
 	re.Empty(resp)
 
 	rules := []*labeler.LabelRule{
-		{ID: "rule1", Labels: []labeler.RegionLabel{{Key: "k1", Value: "v1"}}, RuleType: "key-range", Data: makeKeyRanges("1234", "5678")},
-		{ID: "rule2/a/b", Labels: []labeler.RegionLabel{{Key: "k2", Value: "v2"}}, RuleType: "key-range", Data: makeKeyRanges("ab12", "cd12")},
-		{ID: "rule3", Labels: []labeler.RegionLabel{{Key: "k3", Value: "v3"}}, RuleType: "key-range", Data: makeKeyRanges("abcd", "efef")},
+		{ID: "rule1", Labels: []labeler.RegionLabel{{Key: "k1", Value: "v1"}}, RuleType: "key-range", Data: keyutil.BuildKeyRangeMaps("1234", "5678")},
+		{ID: "rule2/a/b", Labels: []labeler.RegionLabel{{Key: "k2", Value: "v2"}}, RuleType: "key-range", Data: keyutil.BuildKeyRangeMaps("ab12", "cd12")},
+		{ID: "rule3", Labels: []labeler.RegionLabel{{Key: "k3", Value: "v3"}}, RuleType: "key-range", Data: keyutil.BuildKeyRangeMaps("abcd", "efef")},
 	}
 	ruleIDs := []string{"rule1", "rule2/a/b", "rule3"}
 	for _, rule := range rules {
@@ -98,7 +99,7 @@ func (suite *regionLabelTestSuite) checkGetSet(cluster *tests.TestCluster) {
 
 	patch := labeler.LabelRulePatch{
 		SetRules: []*labeler.LabelRule{
-			{ID: "rule2/a/b", Labels: []labeler.RegionLabel{{Key: "k2", Value: "v2"}}, RuleType: "key-range", Data: makeKeyRanges("ab12", "cd12")},
+			{ID: "rule2/a/b", Labels: []labeler.RegionLabel{{Key: "k2", Value: "v2"}}, RuleType: "key-range", Data: keyutil.BuildKeyRangeMaps("ab12", "cd12")},
 		},
 		DeleteRules: []string{"rule1"},
 	}
@@ -113,10 +114,4 @@ func (suite *regionLabelTestSuite) checkGetSet(cluster *tests.TestCluster) {
 
 	err = testutil.CheckDelete(tests.TestDialClient, urlPrefix+"/rule/no-exist", testutil.Status(re, http.StatusNotFound))
 	re.NoError(err)
-}
-
-func makeKeyRanges(startKey, endKey string) []any {
-	return []any{
-		map[string]any{"start_key": startKey, "end_key": endKey},
-	}
 }
