@@ -403,6 +403,10 @@ type LoopWatcher struct {
 	preEventsFn func([]*clientv3.Event) error
 	// initialLoadSuccessFn is called after the initial load succeeds and before watching starts.
 	initialLoadSuccessFn func()
+	// initialLoadRetryFn replaces the regular full load after the first initial
+	// load attempt fails. It lets consumers reconcile partially published state
+	// without changing the first-load fast path.
+	initialLoadRetryFn func(context.Context) (int64, error)
 	// forceLoadMu is used to ensure two force loads have minimal interval.
 	forceLoadMu syncutil.RWMutex
 	// lastTimeForceLoad is used to record the last time force loading data from etcd.
@@ -526,7 +530,11 @@ func (lw *LoopWatcher) initFromEtcd(ctx context.Context) int64 {
 				failpoint.Continue()
 			}
 		})
-		watchStartRevision, err = lw.load(ctx)
+		loadFn := lw.load
+		if i > 0 && lw.initialLoadRetryFn != nil {
+			loadFn = lw.initialLoadRetryFn
+		}
+		watchStartRevision, err = loadFn(ctx)
 		if err == nil && ctx.Err() == nil {
 			if lw.initialLoadSuccessFn != nil {
 				lw.initialLoadSuccessFn()
@@ -1055,6 +1063,14 @@ func (lw *LoopWatcher) SetAtomicLoadCallbacks() {
 // It must be called before StartWatchLoop.
 func (lw *LoopWatcher) SetInitialLoadSuccessFn(fn func()) {
 	lw.initialLoadSuccessFn = fn
+}
+
+// SetInitialLoadRetryFn sets a consumer-specific reconciliation callback for
+// retries after the first initial load attempt fails. The callback must return
+// the next revision to watch after reconciliation. It must be called before
+// StartWatchLoop.
+func (lw *LoopWatcher) SetInitialLoadRetryFn(fn func(context.Context) (int64, error)) {
+	lw.initialLoadRetryFn = fn
 }
 
 // SetReloadOnCompaction enables a full, revision-consistent snapshot reload

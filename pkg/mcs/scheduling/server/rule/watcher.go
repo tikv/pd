@@ -548,8 +548,9 @@ func (rw *Watcher) initializeRuleWatcher() error {
 	)
 	rw.ruleWatcher.SetConsistentLoad()
 	rw.ruleWatcher.SetInitialLoadSuccessFn(func() {
-		rw.ruleRevision = maxLoadedRevision
+		rw.ruleRevision = max(rw.ruleRevision, maxLoadedRevision)
 	})
+	rw.ruleWatcher.SetInitialLoadRetryFn(rw.reconcileRuleSnapshot)
 	rw.ruleWatcher.SetCompactionReloadFn(rw.reconcileRuleSnapshot)
 	rw.ruleWatcher.SetRetryOnPostEventError()
 	rw.ruleWatcher.StartWatchLoop()

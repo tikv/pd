@@ -30,6 +30,8 @@ import (
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/goleak"
 
+	"github.com/pingcap/failpoint"
+
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
@@ -303,6 +305,47 @@ func TestRuleWatcherAllowsEmptyInitialSnapshot(t *testing.T) {
 
 	re.NoError(rw.initializeRuleWatcher())
 	re.Zero(ruleManager.GetRulesCount())
+}
+
+func TestRuleWatcherReconcilesInitialLoadRetry(t *testing.T) {
+	re := require.New(t)
+	ctx, client, clean := prepare(t, false)
+	defer clean()
+
+	fixture := newRuleWatcherTestFixture(t, ctx)
+	staleRule := &placement.Rule{GroupID: "g", ID: "stale", Role: placement.Learner, Count: 1}
+	re.NoError(fixture.ruleManager.SetRule(staleRule))
+	defaultRule := fixture.ruleManager.GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
+	defaultValue, err := json.Marshal(defaultRule)
+	re.NoError(err)
+	_, err = client.Put(ctx, keypath.RuleKeyPath(defaultRule.StoreKey()), string(defaultValue))
+	re.NoError(err)
+	snapshot, err := client.Get(ctx, keypath.RuleCommonPathPrefix(), clientv3.WithPrefix())
+	re.NoError(err)
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/loadTemporaryFail", "return(1)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/loadTemporaryFail"))
+	}()
+
+	watchCtx, cancel := context.WithCancel(ctx)
+	rw := &Watcher{
+		ctx:                 watchCtx,
+		cancel:              cancel,
+		rulesPathPrefix:     keypath.RulesPathPrefix(),
+		ruleGroupPathPrefix: keypath.RuleGroupPathPrefix(),
+		etcdClient:          client,
+		ruleStorage:         fixture.storage,
+		ruleManager:         fixture.ruleManager,
+		checkerController:   fixture.checkerController,
+	}
+	closeWatcher := sync.OnceFunc(rw.Close)
+	defer closeWatcher()
+	re.NoError(rw.initializeRuleWatcher())
+	closeWatcher()
+
+	re.Nil(fixture.ruleManager.GetRule(staleRule.GroupID, staleRule.ID))
+	re.Equal(snapshot.Header.Revision, rw.ruleRevision)
 }
 
 type ruleWatcherTestFixture struct {
