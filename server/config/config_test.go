@@ -33,6 +33,7 @@ import (
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/configutil"
+	"github.com/tikv/pd/pkg/utils/jsonutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
@@ -140,12 +141,15 @@ func TestDefaultStoreLimitAdjust(t *testing.T) {
 	re := require.New(t)
 	oldAddPeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
 	oldRemovePeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer)
+	oldTransferLeaderIn := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.TransferLeaderIn)
 	defer func() {
 		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, oldAddPeer)
 		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, oldRemovePeer)
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.TransferLeaderIn, oldTransferLeaderIn)
 	}()
 	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, 15)
 	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, 15)
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.TransferLeaderIn, storelimit.Unlimited)
 
 	cases := []struct {
 		name   string
@@ -208,6 +212,43 @@ transfer-leader-in = 30
 	re.NoError(json.Unmarshal(data, schedule))
 	re.NoError(schedule.MigrateDeprecatedFlagsFromJSON(data))
 	re.Equal(sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 60, TransferLeaderIn: storelimit.Unlimited}, schedule.DefaultStoreLimit)
+
+	for _, testCase := range []struct {
+		name     string
+		limit    map[string]float64
+		expected float64
+	}{
+		{"omitted transfer limit", map[string]float64{"add-peer": 10, "remove-peer": 20}, 30},
+		{"explicit zero", map[string]float64{"add-peer": 10, "remove-peer": 20, "transfer-leader-in": 0}, 0},
+		{"explicit finite limit", map[string]float64{"add-peer": 10, "remove-peer": 20, "transfer-leader-in": 12}, 12},
+		{"explicit unlimited", map[string]float64{"add-peer": 10, "remove-peer": 20, "transfer-leader-in": storelimit.Unlimited}, storelimit.Unlimited},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			cfg := NewConfig()
+			re.NoError(cfg.Adjust(nil, false))
+			cfg.Schedule.DefaultStoreLimit.TransferLeaderIn = 30
+			cfg.Schedule.StoreLimit[2] = sc.StoreLimitConfig{AddPeer: 40, RemovePeer: 50, TransferLeaderIn: 60}
+			updated, found, err := jsonutil.AddKeyValue(&cfg.Schedule, "store-limit", map[uint64]map[string]float64{1: testCase.limit})
+			re.NoError(err)
+			re.True(updated)
+			re.True(found)
+			re.NoError(cfg.Schedule.Validate())
+			expected := sc.StoreLimitConfig{AddPeer: 10, RemovePeer: 20, TransferLeaderIn: testCase.expected}
+			re.Equal(expected, cfg.Schedule.StoreLimit[1])
+			re.Equal(sc.StoreLimitConfig{AddPeer: 40, RemovePeer: 50, TransferLeaderIn: 60}, cfg.Schedule.StoreLimit[2])
+
+			data, err := json.Marshal(map[string]any{
+				"default-store-limit": cfg.Schedule.DefaultStoreLimit,
+				"store-limit":         map[uint64]map[string]float64{1: testCase.limit},
+			})
+			re.NoError(err)
+			persisted := &sc.ScheduleConfig{}
+			re.NoError(json.Unmarshal(data, persisted))
+			re.NoError(persisted.MigrateDeprecatedFlagsFromJSON(data))
+			re.Equal(expected, persisted.StoreLimit[1])
+		})
+	}
 }
 
 func TestReloadLegacyStoreBalanceRate(t *testing.T) {

@@ -591,6 +591,31 @@ func parseDeprecatedFlag(meta *configutil.ConfigMetaData, name string, old, new 
 	return false, nil // unreachable.
 }
 
+// UnmarshalJSON fills omitted per-store leader transfer limits during both
+// configuration updates and persisted configuration loading.
+func (c *ScheduleConfig) UnmarshalJSON(data []byte) error {
+	type scheduleConfig ScheduleConfig
+	if err := json.Unmarshal(data, (*scheduleConfig)(c)); err != nil {
+		return err
+	}
+	return c.adjustStoreLimitsFromJSON(data)
+}
+
+func (c *ScheduleConfig) adjustStoreLimitsFromJSON(data []byte) error {
+	var fields struct {
+		StoreLimit map[uint64]map[string]json.RawMessage `json:"store-limit"`
+	}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	for storeID, limitFields := range fields.StoreLimit {
+		if _, defined := limitFields["transfer-leader-in"]; !defined {
+			c.StoreLimit[storeID] = c.StoreLimit[storeID].SetLimit(storelimit.TransferLeaderIn, c.DefaultStoreLimit.TransferLeaderIn)
+		}
+	}
+	return nil
+}
+
 // MigrateDeprecatedFlags updates new flags according to deprecated flags.
 func (c *ScheduleConfig) MigrateDeprecatedFlags() {
 	c.applyDeprecatedFlagMigration(true, true, true)
@@ -600,8 +625,7 @@ func (c *ScheduleConfig) MigrateDeprecatedFlags() {
 // configuration, using JSON field presence to preserve explicit zero peer limits.
 func (c *ScheduleConfig) MigrateDeprecatedFlagsFromJSON(data []byte) error {
 	var fields struct {
-		DefaultStoreLimit map[string]json.RawMessage            `json:"default-store-limit"`
-		StoreLimit        map[uint64]map[string]json.RawMessage `json:"store-limit"`
+		DefaultStoreLimit map[string]json.RawMessage `json:"default-store-limit"`
 	}
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
@@ -610,12 +634,8 @@ func (c *ScheduleConfig) MigrateDeprecatedFlagsFromJSON(data []byte) error {
 	_, removePeerDefined := fields.DefaultStoreLimit["remove-peer"]
 	_, transferLeaderInDefined := fields.DefaultStoreLimit["transfer-leader-in"]
 	c.applyDeprecatedFlagMigration(addPeerDefined, removePeerDefined, transferLeaderInDefined)
-	for storeID, limitFields := range fields.StoreLimit {
-		if _, defined := limitFields["transfer-leader-in"]; !defined {
-			c.StoreLimit[storeID] = c.StoreLimit[storeID].SetLimit(storelimit.TransferLeaderIn, c.DefaultStoreLimit.TransferLeaderIn)
-		}
-	}
-	return nil
+	// The migration may have changed the default used during JSON decoding.
+	return c.adjustStoreLimitsFromJSON(data)
 }
 
 func (c *ScheduleConfig) applyDeprecatedFlagMigration(addPeerDefined, removePeerDefined, transferLeaderInDefined bool) {
