@@ -264,7 +264,7 @@ func (a *Allocator) primaryElectionLoop() {
 				// that just failed).
 				log.Warn("failed to get expected primary flag, retrying the read before campaigning",
 					append(a.logFields, zap.Int("consecutive-failures", readFailureStreak), errs.ZapError(err))...)
-				time.Sleep(mcsutils.ReadFailureBackoff(readFailureStreak))
+				mcsutils.SleepUnlessDone(a.ctx, mcsutils.ReadFailureBackoff(readFailureStreak))
 				continue
 			}
 			// ExpectedPrimaryCmp("") still atomically requires the marker to be
@@ -285,7 +285,7 @@ func (a *Allocator) primaryElectionLoop() {
 			log.Info("skip campaigning of tso primary and check later", append(a.logFields,
 				zap.String("expected-primary-id", expectedPrimary),
 				zap.String("cur-member-value", m.ParticipantString()))...)
-			time.Sleep(200 * time.Millisecond)
+			mcsutils.SleepUnlessDone(a.ctx, 200*time.Millisecond)
 			continue
 		}
 
@@ -296,7 +296,7 @@ func (a *Allocator) primaryElectionLoop() {
 			// just failed - back off with growing delay so a sustained run of
 			// failures does not turn into a tight, fixed-rate retry loop against an
 			// already struggling etcd.
-			time.Sleep(mcsutils.ReadFailureBackoff(readFailureStreak))
+			mcsutils.SleepUnlessDone(a.ctx, mcsutils.ReadFailureBackoff(readFailureStreak))
 		}
 	}
 }
@@ -358,7 +358,7 @@ func (a *Allocator) campaignPrimary(expectedPrimary string) {
 		// the later one guarding PromoteSelf, which this return never reaches) a no-op
 		// once this has run.
 		resetPrimaryOnce.Do(resetPrimary)
-		time.Sleep(200 * time.Millisecond)
+		mcsutils.SleepUnlessDone(a.ctx, 200*time.Millisecond)
 		return
 	}
 

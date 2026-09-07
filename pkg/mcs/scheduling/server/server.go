@@ -272,7 +272,7 @@ func (s *Server) primaryElectionLoop() {
 				// that just failed).
 				log.Warn("failed to get expected primary flag, retrying the read before campaigning",
 					zap.Int("consecutive-failures", readFailureStreak), errs.ZapError(err))
-				time.Sleep(utils.ReadFailureBackoff(readFailureStreak))
+				utils.SleepUnlessDone(s.serverLoopCtx, utils.ReadFailureBackoff(readFailureStreak))
 				continue
 			}
 			// ExpectedPrimaryCmp("") still atomically requires the marker to be
@@ -295,7 +295,7 @@ func (s *Server) primaryElectionLoop() {
 				zap.String("expected-primary-id", expectedPrimary),
 				zap.Uint64("participant-id", s.participant.ID()),
 				zap.String("cur-participant-value", s.participant.ParticipantString()))
-			time.Sleep(200 * time.Millisecond)
+			utils.SleepUnlessDone(s.serverLoopCtx, 200*time.Millisecond)
 			continue
 		}
 
@@ -306,7 +306,7 @@ func (s *Server) primaryElectionLoop() {
 			// just failed - back off with growing delay so a sustained run of
 			// failures does not turn into a tight, fixed-rate retry loop against an
 			// already struggling etcd.
-			time.Sleep(utils.ReadFailureBackoff(readFailureStreak))
+			utils.SleepUnlessDone(s.serverLoopCtx, utils.ReadFailureBackoff(readFailureStreak))
 		}
 	}
 }
@@ -359,7 +359,7 @@ func (s *Server) campaignPrimary(expectedPrimary string) {
 		// actual target's takeover. resetPrimaryOnce makes the deferred call below a
 		// no-op once this has run.
 		resetPrimaryOnce.Do(resetPrimary)
-		time.Sleep(200 * time.Millisecond)
+		utils.SleepUnlessDone(s.serverLoopCtx, 200*time.Millisecond)
 		return
 	}
 

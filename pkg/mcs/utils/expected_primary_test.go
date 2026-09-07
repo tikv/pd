@@ -435,9 +435,26 @@ func TestVerifyLeaderKeyClearedPollsForConcurrentRevoke(t *testing.T) {
 	re.NoError(verifyLeaderKeyCleared(client, leaderKeyPath, oldRevision))
 }
 
-// TestIsSamePrimary covers the matching used by TransferPrimary to skip a
-// self-transfer (#10970): a member matches by either its name or its service
-// address, and an empty target never matches.
+// TestSleepUnlessDone verifies the two ways SleepUnlessDone can return: the full
+// duration when ctx is never canceled, and early - well before the duration elapses -
+// once ctx is canceled. Election loops rely on the early-return path to keep a bounded
+// backoff from delaying their own shutdown.
+func TestSleepUnlessDone(t *testing.T) {
+	re := require.New(t)
+
+	start := time.Now()
+	SleepUnlessDone(context.Background(), 20*time.Millisecond)
+	re.GreaterOrEqual(time.Since(start), 20*time.Millisecond)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	start = time.Now()
+	SleepUnlessDone(ctx, time.Minute)
+	re.Less(time.Since(start), time.Second, "an already-canceled ctx must return immediately, not wait out the full duration")
+}
+
+// TestReadFailureBackoff covers the backoff election loops use after a run of
+// consecutive expected-primary-flag read failures.
 func TestReadFailureBackoff(t *testing.T) {
 	re := require.New(t)
 	// Non-positive streaks are treated like the first failure.
@@ -455,6 +472,9 @@ func TestReadFailureBackoff(t *testing.T) {
 	re.Equal(constant.MaxReadFailureBackoff, ReadFailureBackoff(1<<30))
 }
 
+// TestIsSamePrimary covers the matching used by TransferPrimary to skip a
+// self-transfer (#10970): a member matches by either its name or its service
+// address, and an empty target never matches.
 func TestIsSamePrimary(t *testing.T) {
 	re := require.New(t)
 	entry := discovery.ServiceRegistryEntry{Name: "tso-1", ServiceAddr: "http://127.0.0.1:2379"}

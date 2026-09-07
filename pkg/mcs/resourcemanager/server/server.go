@@ -187,7 +187,7 @@ func (s *Server) primaryElectionLoop() {
 				// that just failed).
 				log.Warn("failed to get expected primary flag, retrying the read before campaigning",
 					zap.Int("consecutive-failures", readFailureStreak), errs.ZapError(err))
-				time.Sleep(utils.ReadFailureBackoff(readFailureStreak))
+				utils.SleepUnlessDone(s.serverLoopCtx, utils.ReadFailureBackoff(readFailureStreak))
 				continue
 			}
 			// ExpectedPrimaryCmp("") still atomically requires the marker to be
@@ -210,7 +210,7 @@ func (s *Server) primaryElectionLoop() {
 				zap.String("expected-primary-id", expectedPrimary),
 				zap.Uint64("participant-id", s.participant.ID()),
 				zap.String("cur-participant-value", s.participant.ParticipantString()))
-			time.Sleep(200 * time.Millisecond)
+			utils.SleepUnlessDone(s.serverLoopCtx, 200*time.Millisecond)
 			continue
 		}
 
@@ -221,18 +221,14 @@ func (s *Server) primaryElectionLoop() {
 			// just failed - back off with growing delay so a sustained run of
 			// failures does not turn into a tight, fixed-rate retry loop against an
 			// already struggling etcd.
-			time.Sleep(utils.ReadFailureBackoff(readFailureStreak))
+			utils.SleepUnlessDone(s.serverLoopCtx, utils.ReadFailureBackoff(readFailureStreak))
 		}
 		if won {
 			log.Warn("backing off before retrying resource manager primary campaign after callback failure",
 				zap.Duration("retry-after", primaryCallbackFailureRetryInterval))
-			timer := time.NewTimer(primaryCallbackFailureRetryInterval)
-			select {
-			case <-s.serverLoopCtx.Done():
-				timer.Stop()
-				return
-			case <-timer.C:
-			}
+			// Shutdown is caught on the next iteration's top-of-loop check
+			// (s.serverLoopCtx.Done()), so no separate early-return is needed here.
+			utils.SleepUnlessDone(s.serverLoopCtx, primaryCallbackFailureRetryInterval)
 		}
 	}
 }
@@ -287,7 +283,7 @@ func (s *Server) campaignLeader(expectedPrimary string) bool {
 		// actual target's takeover. resetLeaderOnce makes the deferred call below a
 		// no-op once this has run.
 		resetLeaderOnce.Do(resetLeader)
-		time.Sleep(200 * time.Millisecond)
+		utils.SleepUnlessDone(s.serverLoopCtx, 200*time.Millisecond)
 		return false
 	}
 

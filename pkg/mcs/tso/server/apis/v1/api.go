@@ -382,6 +382,8 @@ func transferPrimary(c *gin.Context) {
 
 	if err := utils.TransferPrimary(svr.GetClient(), participant,
 		mcs.TSOServiceName, svr.Name(), input.NewPrimary, keyspaceGroupID, memberMap); err != nil {
+		log.Warn("failed to transfer tso primary",
+			zap.Uint32("keyspace-group-id", keyspaceGroupID), zap.String("new-primary", input.NewPrimary), errs.ZapError(err))
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
 	}

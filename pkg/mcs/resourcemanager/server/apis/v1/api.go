@@ -21,6 +21,7 @@ import (
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 
 	"github.com/pingcap/log"
 
@@ -363,6 +364,8 @@ func transferPrimary(c *gin.Context) {
 
 	if err := utils.TransferPrimary(svr.GetClient(), svr.GetParticipant(),
 		constant.ResourceManagerServiceName, svr.Name(), newPrimary, 0, nil); err != nil {
+		log.Warn("failed to transfer resource manager primary",
+			zap.String("new-primary", newPrimary), errs.ZapError(err))
 		c.String(http.StatusInternalServerError, err.Error())
 		return
 	}

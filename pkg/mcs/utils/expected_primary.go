@@ -50,6 +50,21 @@ func GetExpectedPrimaryFlag(client *clientv3.Client, msParam *keypath.MsParam) (
 	return string(primary), nil
 }
 
+// SleepUnlessDone sleeps for d, returning early if ctx is canceled first, so a bounded
+// backoff can never delay the caller's own shutdown. Callers in an election loop must
+// pass the loop's own long-lived context (e.g. serverLoopCtx), not a per-campaign
+// context that a normal step-down (losing leadership, not shutting down) may already
+// have canceled - passing the wrong one would collapse an intended backoff into an
+// immediate return on every ordinary step-down.
+func SleepUnlessDone(ctx context.Context, d time.Duration) {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-ctx.Done():
+	}
+}
+
 // ReadFailureBackoff returns how long an election loop should sleep after the nth
 // (1-indexed) consecutive GetExpectedPrimaryFlag read failure. It doubles from
 // constant.InitialReadFailureBackoff and caps at constant.MaxReadFailureBackoff, so a
@@ -254,10 +269,25 @@ const (
 // decay can take up to a full leader lease. A slow or failed revoke could therefore
 // let the marker expire before the old leader key does, silently losing the transfer's
 // affinity guarantee even though the caller already reported success.
+//
+// Each Get is bounded by whatever remains of leaderKeyClearPollTimeout, not the full
+// etcdutil.DefaultRequestTimeout: without that, a single slow-but-not-failed Get could
+// itself outlast the poll budget, so its response - even a stale, correctly-linearized
+// one from before a concurrent revoke landed - would arrive after the deadline and get
+// reported as a failure without this ever making a fresh observation, silently
+// reintroducing the false failure this polling exists to avoid.
 func verifyLeaderKeyCleared(client *clientv3.Client, leaderKeyPath string, oldRevision int64) error {
 	deadline := time.Now().Add(leaderKeyClearPollTimeout)
 	for {
-		ctx, cancel := context.WithTimeout(client.Ctx(), etcdutil.DefaultRequestTimeout)
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return errors.New("the old leader key did not clear after resign, etcd may be degraded; please retry the transfer")
+		}
+		reqTimeout := remaining
+		if reqTimeout > etcdutil.DefaultRequestTimeout {
+			reqTimeout = etcdutil.DefaultRequestTimeout
+		}
+		ctx, cancel := context.WithTimeout(client.Ctx(), reqTimeout)
 		resp, err := client.Get(ctx, leaderKeyPath)
 		cancel()
 		if err != nil {
@@ -265,9 +295,6 @@ func verifyLeaderKeyCleared(client *clientv3.Client, leaderKeyPath string, oldRe
 		}
 		if len(resp.Kvs) == 0 || resp.Kvs[0].CreateRevision != oldRevision {
 			return nil
-		}
-		if time.Now().After(deadline) {
-			return errors.New("the old leader key did not clear after resign, etcd may be degraded; please retry the transfer")
 		}
 		time.Sleep(leaderKeyClearPollInterval)
 	}

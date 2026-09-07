@@ -30,6 +30,7 @@ import (
 	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
 	"github.com/unrolled/render"
+	"go.uber.org/zap"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
@@ -1648,6 +1649,8 @@ func transferPrimary(c *gin.Context) {
 
 	if err := mcsutils.TransferPrimary(svr.GetClient(), svr.GetParticipant(),
 		constant.SchedulingServiceName, svr.Name(), newPrimary, 0, nil); err != nil {
+		log.Warn("failed to transfer scheduling primary",
+			zap.String("new-primary", newPrimary), errs.ZapError(err))
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
 	}
