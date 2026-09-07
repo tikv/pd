@@ -120,6 +120,14 @@ type Txn interface {
 	BaseReadWrite
 }
 
+// RevisionTxn is a transaction that can guard a point read by the key's mod revision
+// instead of its value. It avoids copying a large value into the commit request and
+// detects same-value rewrites as conflicts.
+type RevisionTxn interface {
+	Txn
+	LoadWithRevision(key string) (string, error)
+}
+
 // ConditionalTxnRunner runs a transaction with additional etcd comparisons.
 // The comparisons and the transaction operations are committed atomically.
 type ConditionalTxnRunner interface {

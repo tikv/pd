@@ -252,6 +252,16 @@ func (txn *etcdTxn) Remove(key string) error {
 
 // Load loads the target value from etcd and puts a comparator into conditions.
 func (txn *etcdTxn) Load(key string) (string, error) {
+	return txn.loadValue(key, false)
+}
+
+// LoadWithRevision loads the target value from etcd and compares its mod revision
+// at commit time, keeping large values out of the transaction request.
+func (txn *etcdTxn) LoadWithRevision(key string) (string, error) {
+	return txn.loadValue(key, true)
+}
+
+func (txn *etcdTxn) loadValue(key string, compareRevision bool) (string, error) {
 	resp, err := etcdutil.EtcdKVGetWithContext(txn.ctx, txn.kv.client, key)
 	if err != nil {
 		return "", err
@@ -265,9 +275,13 @@ func (txn *etcdTxn) Load(key string) (string, error) {
 		value = ""
 		condition = clientv3.Compare(clientv3.CreateRevision(key), "=", 0)
 	case 1:
-		// If target key has value, must make sure it stays the same at the time of commit.
 		value = string(resp.Kvs[0].Value)
-		condition = clientv3.Compare(clientv3.Value(key), "=", value)
+		if compareRevision {
+			condition = clientv3.Compare(clientv3.ModRevision(key), "=", resp.Kvs[0].ModRevision)
+		} else {
+			// If target key has value, must make sure it stays the same at the time of commit.
+			condition = clientv3.Compare(clientv3.Value(key), "=", value)
+		}
 	default:
 		// If response contains multiple kvs, error occurred.
 		return "", errs.ErrEtcdKVGetResponse.GenWithStackByArgs(resp.Kvs)

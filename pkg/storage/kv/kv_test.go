@@ -43,6 +43,7 @@ func TestEtcd(t *testing.T) {
 	testRange(re, kv)
 	testSaveMultiple(re, kv, 20)
 	testLoadConflict(re, kv)
+	testRevisionLoadConflict(re, kv)
 	testRunInTxnWithConditions(re, kv)
 	testRawTxn(re, kv)
 
@@ -208,6 +209,29 @@ func testRunInTxnWithConditions(re *require.Assertions, kv *etcdKVBase) {
 	value, err = kv.Load(dataKey)
 	re.NoError(err)
 	re.Equal("committed", value)
+}
+
+func testRevisionLoadConflict(re *require.Assertions, kv *etcdKVBase) {
+	const (
+		key       = "revision-load-key"
+		resultKey = "revision-load-result"
+	)
+	re.NoError(kv.Save(key, "value"))
+	err := kv.RunInTxn(context.Background(), func(txn Txn) error {
+		value, err := txn.(RevisionTxn).LoadWithRevision(key)
+		if err != nil {
+			return err
+		}
+		re.Equal("value", value)
+		// Rewriting the same value changes only the revision. A revision-based
+		// comparison must still reject the stale transaction.
+		re.NoError(kv.Save(key, value))
+		return txn.Save(resultKey, "must-not-commit")
+	})
+	re.ErrorIs(err, errs.ErrEtcdTxnConflict)
+	value, err := kv.Load(resultKey)
+	re.NoError(err)
+	re.Empty(value)
 }
 
 // nolint:unparam
