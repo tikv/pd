@@ -15,6 +15,7 @@
 package handlers
 
 import (
+	goerrors "errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -611,6 +612,10 @@ func RemoveKeyspacesFromGroup(c *gin.Context) {
 	if err != nil {
 		if errs.ErrKeyspaceGroupNotExists.Equal(err) {
 			c.AbortWithStatusJSON(http.StatusNotFound, err.Error())
+			return
+		}
+		if goerrors.Is(err, errs.ErrEtcdTxnConflict) {
+			c.AbortWithStatusJSON(http.StatusConflict, err.Error())
 			return
 		}
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())

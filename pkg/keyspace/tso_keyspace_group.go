@@ -1161,11 +1161,15 @@ func (m *GroupManager) removeKeyspacesFromGroupSingleTxn(
 	}
 
 	err = m.runKeyspaceGroupRemovalTxn(ctx, leadershipConditions, runTxn)
+	// The commit result can be ambiguous (for example, a client-side timeout
+	// after etcd has committed), so conservatively invalidate every cache entry
+	// whose deletion was staged. If the transaction did not commit, the next
+	// lookup simply reloads the still-existing metadata from storage.
+	km.evictKeyspacesFromCache(removedIDs)
 	if err != nil {
 		return nil, err
 	}
 
-	km.evictKeyspacesFromCache(removedIDs)
 	m.putKeyspaceGroupToCacheLocked(kg)
 	return kg, nil
 }
@@ -1251,11 +1255,12 @@ func (m *GroupManager) removeKeyspacesFromGroupSmallBatch(
 	}
 
 	err = m.runKeyspaceGroupRemovalTxn(ctx, leadershipConditions, runTxn)
+	// Invalidate staged removals even when the commit result is ambiguous.
+	km.evictKeyspacesFromCache(removedIDs)
 	if err != nil {
 		return nil, nil, false, err
 	}
 
-	km.evictKeyspacesFromCache(removedIDs)
 	m.putKeyspaceGroupToCacheLocked(kg)
 	return kg, processedIDs, hasMore, nil
 }
@@ -1334,13 +1339,12 @@ func (m *GroupManager) removeKeyspacesFromGroupBatch(
 		return m.store.SaveKeyspaceGroup(txn, kg)
 	}
 	err = m.runKeyspaceGroupRemovalTxn(ctx, leadershipConditions, runBatch)
+	// Invalidate staged removals even when the commit result is ambiguous.
+	km.evictKeyspacesFromCache(removedIDs)
 	if err != nil {
 		return nil, nil, false, err
 	}
 
-	// Persistent metadata and the group membership are committed at this point,
-	// so it is now safe to evict the corresponding keyspace cache entries.
-	km.evictKeyspacesFromCache(removedIDs)
 	// Update the cache
 	m.putKeyspaceGroupToCacheLocked(kg)
 

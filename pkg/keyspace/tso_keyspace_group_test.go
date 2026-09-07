@@ -60,6 +60,11 @@ type countingKeyspaceGroupStorage struct {
 	runInTxnCount  atomic.Int32
 }
 
+type ambiguousCommitKeyspaceGroupStorage struct {
+	*endpoint.StorageEndpoint
+	failNextRun atomic.Bool
+}
+
 func (s *countingKeyspaceGroupStorage) LoadKeyspaceGroup(txn kv.Txn, id uint32) (*endpoint.KeyspaceGroup, error) {
 	s.loadCount++
 	if s.loadGroupErr != nil {
@@ -76,6 +81,16 @@ func (s *countingKeyspaceGroupStorage) SaveKeyspaceGroup(txn kv.Txn, kg *endpoin
 func (s *countingKeyspaceGroupStorage) RunInTxn(ctx context.Context, f func(txn kv.Txn) error) error {
 	s.runInTxnCount.Add(1)
 	return s.StorageEndpoint.RunInTxn(ctx, f)
+}
+
+func (s *ambiguousCommitKeyspaceGroupStorage) RunInTxn(ctx context.Context, f func(txn kv.Txn) error) error {
+	if err := s.StorageEndpoint.RunInTxn(ctx, f); err != nil {
+		return err
+	}
+	if s.failNextRun.CompareAndSwap(true, false) {
+		return context.DeadlineExceeded
+	}
+	return nil
 }
 
 func (s *errorKeyspaceGroupStorage) SaveKeyspaceGroup(txn kv.Txn, kg *endpoint.KeyspaceGroup) error {
@@ -746,6 +761,47 @@ func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupUsesBoundedTran
 		meta, err := suite.kg.LoadKeyspaceByID(keyspaceID)
 		re.NoError(err)
 		re.Equal(keyspacepb.KeyspaceState_ENABLED, meta.GetState())
+	}
+}
+
+func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupEvictsCacheAfterAmbiguousCommit() {
+	re := suite.Require()
+	keyspaceIDs := suite.createArchivedKeyspaces(maxKeyspaceRemovalBatchSize + 1)
+	for _, keyspaceID := range keyspaceIDs {
+		keyspaceName, err := suite.kg.GetKeyspaceNameByID(keyspaceID)
+		re.NoError(err)
+		re.NotEmpty(keyspaceName)
+	}
+
+	store, ok := suite.kgm.store.(*endpoint.StorageEndpoint)
+	re.True(ok)
+	ambiguousStore := &ambiguousCommitKeyspaceGroupStorage{StorageEndpoint: store}
+	ambiguousStore.failNextRun.Store(true)
+	suite.kgm.store = ambiguousStore
+
+	_, err := suite.kgm.removeKeyspacesFromGroupWithConditions(
+		suite.ctx, constant.DefaultKeyspaceGroupID, suite.kg, keyspaceIDs, nil)
+	re.ErrorIs(err, context.DeadlineExceeded)
+	removedCount := 0
+	for _, keyspaceID := range keyspaceIDs {
+		_, err = suite.kg.LoadKeyspaceByID(keyspaceID)
+		if errors.Is(err, errs.ErrKeyspaceNotFound) {
+			removedCount++
+			continue
+		}
+		re.NoError(err)
+	}
+	re.Equal(maxKeyspaceRemovalBatchSize, removedCount)
+
+	// A retry cannot rediscover the already-removed IDs from group membership,
+	// so the first ambiguous batch must have invalidated their warmed caches.
+	_, err = suite.kgm.removeKeyspacesFromGroupWithConditions(
+		suite.ctx, constant.DefaultKeyspaceGroupID, suite.kg, keyspaceIDs, nil)
+	re.NoError(err)
+	for _, keyspaceID := range keyspaceIDs {
+		name, err := suite.kg.GetKeyspaceNameByID(keyspaceID)
+		re.Empty(name)
+		re.ErrorIs(err, errs.ErrKeyspaceNotFound)
 	}
 }
 
