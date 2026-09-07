@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -144,16 +145,34 @@ func (s *storeTestSuite) checkTransferLeaderInStoreLimit(cluster *pdTests.TestCl
 	args = []string{"-u", pdAddr, "store", "limit", "1", "0", "transfer-leader-in"}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	re.NotContains(string(output), "rate should be a number")
-	re.Equal(float64(0), leaderServer.GetRaftCluster().GetStoreLimitByType(1, storelimit.TransferLeaderIn))
+	re.Contains(string(output), "rate should be a number")
+	re.Equal(float64(20), leaderServer.GetRaftCluster().GetStoreLimitByType(1, storelimit.TransferLeaderIn))
+
+	unlimited := strconv.FormatFloat(storelimit.Unlimited, 'f', -1, 64)
+	cmd = ctl.GetRootCmd()
+	args = []string{"-u", pdAddr, "store", "limit", "1", unlimited, "transfer-leader-in"}
+	output, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.NotContains(string(output), "rate should")
+	re.Equal(storelimit.Unlimited, leaderServer.GetRaftCluster().GetStoreLimitByType(1, storelimit.TransferLeaderIn))
 
 	cmd = ctl.GetRootCmd()
 	args = []string{"-u", pdAddr, "store", "limit", "all", "0", "transfer-leader-in"}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	re.NotContains(string(output), "rate should be a number")
+	re.Contains(string(output), "rate should be a number")
+	re.Equal(float64(20), leaderServer.GetRaftCluster().GetStoreLimitByType(2, storelimit.TransferLeaderIn))
+
+	cmd = ctl.GetRootCmd()
+	args = []string{"-u", pdAddr, "store", "limit", "all", unlimited, "transfer-leader-in"}
+	output, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.NotContains(string(output), "rate should")
+	re.NoError(leaderServer.Stop())
+	re.NoError(leaderServer.Run())
+	re.NotEmpty(cluster.WaitLeader())
 	for _, storeID := range []uint64{1, 2} {
-		re.Equal(float64(0), leaderServer.GetRaftCluster().GetStoreLimitByType(storeID, storelimit.TransferLeaderIn))
+		re.Equal(storelimit.Unlimited, leaderServer.GetRaftCluster().GetStoreLimitByType(storeID, storelimit.TransferLeaderIn))
 	}
 }
 

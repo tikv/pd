@@ -98,9 +98,9 @@ const (
 var (
 	defaultLocationLabels = []string{}
 	// DefaultStoreLimit is the default store limit.
-	DefaultStoreLimit = StoreLimit{AddPeer: 15, RemovePeer: 15, TransferLeaderIn: 0}
+	DefaultStoreLimit = StoreLimit{AddPeer: 15, RemovePeer: 15, TransferLeaderIn: storelimit.Unlimited}
 	// DefaultTiFlashStoreLimit is the default TiFlash store limit.
-	DefaultTiFlashStoreLimit = StoreLimit{AddPeer: 30, RemovePeer: 30, TransferLeaderIn: 0}
+	DefaultTiFlashStoreLimit = StoreLimit{AddPeer: 30, RemovePeer: 30, TransferLeaderIn: storelimit.Unlimited}
 )
 
 // The following consts are used to identify the config item that needs to set TTL.
@@ -494,7 +494,19 @@ func (c *ScheduleConfig) Adjust(meta *configutil.ConfigMetaData, reloading bool)
 	if !meta.IsDefined("slow-store-evicting-affected-store-ratio-threshold") {
 		configutil.AdjustFloat64(&c.SlowStoreEvictingAffectedStoreRatioThreshold, defaultSlowStoreEvictingAffectedStoreRatioThreshold)
 	}
+	c.migrateTransferLeaderInLimit()
 	return c.Validate()
+}
+
+// migrateTransferLeaderInLimit preserves unlimited transfers for older configs
+// with omitted fields or persisted zeros, using the existing unlimited sentinel.
+func (c *ScheduleConfig) migrateTransferLeaderInLimit() {
+	configutil.AdjustFloat64(&c.DefaultStoreLimit.TransferLeaderIn, storelimit.Unlimited)
+	for storeID, limit := range c.StoreLimit {
+		if limit.TransferLeaderIn == 0 {
+			c.StoreLimit[storeID] = limit.SetLimit(storelimit.TransferLeaderIn, storelimit.Unlimited)
+		}
+	}
 }
 
 func (c *ScheduleConfig) adjustDefaultStoreLimit(meta *configutil.ConfigMetaData) {
@@ -542,6 +554,7 @@ func (c *ScheduleConfig) migratePersistedStoreLimit(addPeerDefined, removePeerDe
 	if !transferLeaderInDefined {
 		c.DefaultStoreLimit.TransferLeaderIn = defaultStoreLimit.TransferLeaderIn
 	}
+	c.migrateTransferLeaderInLimit()
 	DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, c.DefaultStoreLimit.AddPeer)
 	DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, c.DefaultStoreLimit.RemovePeer)
 	DefaultStoreLimit.SetDefaultStoreLimit(storelimit.TransferLeaderIn, c.DefaultStoreLimit.TransferLeaderIn)
@@ -598,9 +611,9 @@ func (c *ScheduleConfig) MigrateDeprecatedFlags() {
 }
 
 // MigrateDeprecatedFlagsFromJSON migrates a full persisted or remote schedule
-// config while preserving the distinction between omitted values and explicit
-// zero values. The JSON presence is consumed at the decoding boundary and is
-// never retained in the runtime ScheduleConfig.
+// config while preserving explicit zero peer limits. Legacy zero leader-transfer
+// limits migrate to Unlimited. JSON presence is consumed at the decoding boundary
+// and is never retained in the runtime ScheduleConfig.
 func (c *ScheduleConfig) MigrateDeprecatedFlagsFromJSON(data []byte) error {
 	var fields struct {
 		DefaultStoreLimit map[string]json.RawMessage `json:"default-store-limit"`
@@ -700,12 +713,8 @@ func (c *ScheduleConfig) Deprecated() error {
 type StoreLimitConfig struct {
 	AddPeer    float64 `toml:"add-peer" json:"add-peer"`
 	RemovePeer float64 `toml:"remove-peer" json:"remove-peer"`
-	// TransferLeaderIn is the inbound leader limit per minute. Its zero default
-	// preserves unlimited transfers through the shared v1 limiter's zero-rate bypass.
-	//
-	// TODO: Use storelimit.Unlimited consistently in defaults and HTTP/PD Control,
-	// preserving compatibility with omitted fields and persisted zeros instead of
-	// adding type-specific zero-rate exceptions.
+	// TransferLeaderIn is the inbound leader limit per minute, defaulting to
+	// storelimit.Unlimited (a sufficiently large rate), like unlimited peer limits.
 	TransferLeaderIn float64 `toml:"transfer-leader-in" json:"transfer-leader-in"`
 }
 

@@ -15,6 +15,7 @@
 package api
 
 import (
+	"math"
 	"net/url"
 	"testing"
 	"time"
@@ -25,9 +26,26 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/response"
 	"github.com/tikv/pd/server/config"
 )
+
+func TestStoreLimitRateSemantics(t *testing.T) {
+	for _, typ := range []string{"", "add-peer", "remove-peer", "transfer-leader-in"} {
+		t.Run(typ, func(t *testing.T) {
+			for _, rate := range []float64{0, -1, math.NaN(), math.Inf(1), math.Inf(-1)} {
+				_, err := getStoreLimitRate(map[string]any{"rate": rate, "type": typ})
+				require.Error(t, err)
+			}
+			for _, rate := range []float64{30, storelimit.Unlimited} {
+				actual, err := getStoreLimitRate(map[string]any{"rate": rate, "type": typ})
+				require.NoError(t, err)
+				require.Equal(t, rate, actual)
+			}
+		})
+	}
+}
 
 func TestUrlStoreFilter(t *testing.T) {
 	stores := []*metapb.Store{

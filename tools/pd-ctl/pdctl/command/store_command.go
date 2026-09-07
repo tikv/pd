@@ -563,7 +563,7 @@ func storeLimitCommandFunc(cmd *cobra.Command, args []string) {
 		if argsCount == 3 {
 			typeName = args[2]
 		}
-		if err != nil || !isStoreLimitRateValid(rate, typeName) {
+		if err != nil || !isStoreLimitRateValid(rate) {
 			cmd.Println("rate should be a number that > 0.")
 			return
 		}
@@ -571,7 +571,7 @@ func storeLimitCommandFunc(cmd *cobra.Command, args []string) {
 		var prefix string
 		if args[0] == "all" {
 			prefix = storesLimitPrefix
-			if rate > maxStoreLimit {
+			if rate > maxStoreLimit && rate != storelimit.Unlimited {
 				cmd.Printf("rate should be less than %.1f for all\n", maxStoreLimit)
 				return
 			}
@@ -599,11 +599,11 @@ func storeLimitCommandFunc(cmd *cobra.Command, args []string) {
 				ratePos = argsCount - 2
 			}
 			rate, err := strconv.ParseFloat(args[ratePos], 64)
-			if err != nil || !isStoreLimitRateValid(rate, typeName) {
+			if err != nil || !isStoreLimitRateValid(rate) {
 				cmd.Println("rate should be a number that > 0.")
 				return
 			}
-			if rate > maxStoreLimit {
+			if rate > maxStoreLimit && rate != storelimit.Unlimited {
 				cmd.Printf("rate should be less than %.1f for all\n", maxStoreLimit)
 				return
 			}
@@ -618,13 +618,8 @@ func storeLimitCommandFunc(cmd *cobra.Command, args []string) {
 	}
 }
 
-func isStoreLimitRateValid(rate float64, typeName string) bool {
-	if math.IsNaN(rate) || math.IsInf(rate, 0) || rate < 0 {
-		return false
-	}
-	// Mirror the HTTP API's transfer-leader-in-only zero-as-unlimited exception.
-	// See the unlimited semantics TODO on StoreLimitConfig.TransferLeaderIn.
-	return rate > 0 || typeName == storelimit.TransferLeaderIn.String()
+func isStoreLimitRateValid(rate float64) bool {
+	return !math.IsNaN(rate) && !math.IsInf(rate, 0) && rate > 0
 }
 
 func storeCheckCommandFunc(cmd *cobra.Command, args []string) {
@@ -700,7 +695,7 @@ func setAllLimitCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) == 2 {
 		typeName = args[1]
 	}
-	if err != nil || !isStoreLimitRateValid(rate, typeName) {
+	if err != nil || !isStoreLimitRateValid(rate) {
 		cmd.Println("rate should be a number that > 0.")
 		return
 	}

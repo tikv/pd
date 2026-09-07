@@ -3374,7 +3374,7 @@ func TestAddStoreLimitUsesPersistedDefaultStoreLimit(t *testing.T) {
 	// Simulate a restarted process whose package-level default goes back to the built-in value.
 	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, 15)
 	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, 15)
-	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.TransferLeaderIn, 0)
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.TransferLeaderIn, storelimit.Unlimited)
 
 	rc.AddStoreLimit(&metapb.Store{Id: 1})
 	re.Equal(sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 15, TransferLeaderIn: 90}, opt.GetScheduleConfig().StoreLimit[1])
@@ -3387,7 +3387,7 @@ func TestAddStoreLimitUsesPersistedDefaultStoreLimit(t *testing.T) {
 		Id:     3,
 		Labels: []*metapb.StoreLabel{{Key: core.EngineKey, Value: core.EngineTiFlash}},
 	})
-	re.Equal(sc.StoreLimitConfig{AddPeer: 30, RemovePeer: 30}, opt.GetScheduleConfig().StoreLimit[3])
+	re.Equal(sc.StoreLimitConfig{AddPeer: 30, RemovePeer: 30, TransferLeaderIn: storelimit.Unlimited}, opt.GetScheduleConfig().StoreLimit[3])
 }
 
 type blockingSaveConfigStorage struct {

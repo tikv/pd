@@ -335,7 +335,11 @@ func TestStoreStateFilterRejectsTransferLeaderTargetAtLimit(t *testing.T) {
 	re.Equal(plan.StatusOK, filter.Target(opt, store).StatusCode)
 
 	filter.OperatorLevel = constant.Medium
-	opt.SetStoreLimit(store.GetID(), storelimit.TransferLeaderIn, 0)
+	opt.SetStoreLimit(store.GetID(), storelimit.TransferLeaderIn, storelimit.Unlimited)
+	// A stale limiter defers the check to controller admission.
+	re.Equal(plan.StatusOK, filter.Target(opt, store).StatusCode)
+	// Also check the synchronized unlimited path, not just the stale-rate bypass.
+	limiter.Reset(storelimit.Unlimited/time.Minute.Seconds(), storelimit.TransferLeaderIn)
 	re.Equal(plan.StatusOK, filter.Target(opt, store).StatusCode)
 }
 

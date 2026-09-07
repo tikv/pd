@@ -15,6 +15,7 @@
 package config
 
 import (
+	"encoding/json"
 	"math"
 	"testing"
 
@@ -23,6 +24,33 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/utils/configutil"
 )
+
+func TestTransferLeaderInLimitMigration(t *testing.T) {
+	previous := DefaultStoreLimitConfig()
+	t.Cleanup(func() {
+		DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, previous.AddPeer)
+		DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, previous.RemovePeer)
+		DefaultStoreLimit.SetDefaultStoreLimit(storelimit.TransferLeaderIn, previous.TransferLeaderIn)
+	})
+	for _, data := range []string{
+		`{"store-limit":{"1":{"add-peer":10,"remove-peer":20},"2":{"transfer-leader-in":30}}}`,
+		`{"default-store-limit":{"transfer-leader-in":0},"store-limit":{"1":{"add-peer":10,"remove-peer":20,"transfer-leader-in":0},"2":{"transfer-leader-in":30}}}`,
+	} {
+		for _, persisted := range []bool{false, true} {
+			DefaultStoreLimit.SetDefaultStoreLimit(storelimit.TransferLeaderIn, storelimit.Unlimited)
+			var cfg ScheduleConfig
+			require.NoError(t, json.Unmarshal([]byte(data), &cfg))
+			if persisted {
+				require.NoError(t, cfg.MigrateDeprecatedFlagsFromJSON([]byte(data)))
+			} else {
+				require.NoError(t, cfg.Adjust(configutil.NewConfigMetadata(nil), false))
+			}
+			require.Equal(t, storelimit.Unlimited, cfg.DefaultStoreLimit.TransferLeaderIn)
+			require.Equal(t, StoreLimitConfig{AddPeer: 10, RemovePeer: 20, TransferLeaderIn: storelimit.Unlimited}, cfg.StoreLimit[1])
+			require.Equal(t, float64(30), cfg.StoreLimit[2].TransferLeaderIn)
+		}
+	}
+}
 
 func TestStoreLimitConfigSetLimitPreservesOtherTypes(t *testing.T) {
 	limit := StoreLimitConfig{

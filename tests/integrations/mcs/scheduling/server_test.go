@@ -890,8 +890,8 @@ func (suite *serverTestSuite) TestStoreLimit() {
 		operator.TransferLeader{FromStore: 1, ToStore: 2})
 	checkOperatorFail(re, oc, op)
 
-	setTransferLeaderInLimit(0)
-	waitSyncFinish(re, tc, storelimit.TransferLeaderIn, 0)
+	setTransferLeaderInLimit(storelimit.Unlimited)
+	waitSyncFinish(re, tc, storelimit.TransferLeaderIn, storelimit.Unlimited)
 	targetStore := tc.GetPrimaryServer().GetCluster().GetStore(2)
 	re.NotNil(targetStore)
 	targetStore = targetStore.Clone(core.SetLastHeartbeatTS(time.Now()))
