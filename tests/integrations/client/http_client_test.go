@@ -27,6 +27,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
@@ -1144,6 +1145,7 @@ func (suite *httpClientTestSuite) TestGetHealthStatus() {
 }
 
 func (suite *httpClientTestSuite) TestRetryOnLeaderChange() {
+	as := assert.New(suite.T())
 	re := suite.Require()
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
@@ -1159,8 +1161,9 @@ func (suite *httpClientTestSuite) TestRetryOnLeaderChange() {
 			if err != nil && strings.Contains(err.Error(), "context canceled") {
 				return
 			}
-			re.NoError(err)
-			re.Len(healths, 2)
+			if !as.NoError(err) || !as.Len(healths, 2) {
+				return
+			}
 			select {
 			case <-ctx.Done():
 				return

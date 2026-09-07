@@ -26,6 +26,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -511,6 +512,7 @@ func (suite *PDServiceForward) checkAvailableTSO(re *require.Assertions) {
 }
 
 func TestForwardTsoConcurrently(t *testing.T) {
+	as := assert.New(t)
 	re := require.New(t)
 	suite := NewPDServiceForward(re)
 	defer suite.ShutDown()
@@ -530,8 +532,9 @@ func TestForwardTsoConcurrently(t *testing.T) {
 				caller.TestComponent,
 				[]string{suite.backendEndpoints},
 				pd.SecurityOption{})
-			re.NoError(err)
-			re.NotNil(pdClient)
+			if !as.NoError(err) || !as.NotNil(pdClient) {
+				return
+			}
 			defer pdClient.Close()
 			for range 10 {
 				testutil.Eventually(re, func() bool {
@@ -545,6 +548,7 @@ func TestForwardTsoConcurrently(t *testing.T) {
 }
 
 func BenchmarkForwardTsoConcurrently(b *testing.B) {
+	as := assert.New(b)
 	re := require.New(b)
 	suite := NewPDServiceForward(re)
 	defer suite.ShutDown()
@@ -580,8 +584,9 @@ func BenchmarkForwardTsoConcurrently(b *testing.B) {
 						defer wg.Done()
 						for range 1000 {
 							min, err := client.UpdateServiceGCSafePoint(context.Background(), fmt.Sprintf("service-%d", i), 1000, 1) //nolint:staticcheck
-							re.NoError(err)
-							re.Equal(uint64(0), min)
+							if !as.NoError(err) || !as.Equal(uint64(0), min) {
+								return
+							}
 						}
 					}()
 				}

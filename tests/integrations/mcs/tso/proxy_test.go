@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
@@ -116,14 +117,18 @@ func (s *tsoProxyTestSuite) TestTSOProxyWorksWithCancellation() {
 				streams, cleanupFuncs := createTSOStreams(s.ctx, re, s.backendEndpoints, 10)
 				for range 10 {
 					err := s.verifyTSOProxy(s.ctx, streams, cleanupFuncs, 10, true)
-					re.NoError(err)
+					if !s.NoError(err) {
+						return
+					}
 				}
 				cleanupGRPCStreams(cleanupFuncs)
 			}
 		}()
 		for range 10 {
 			err := s.verifyTSOProxy(s.ctx, s.streams, s.cleanupFuncs, 10, true)
-			re.NoError(err)
+			if !s.NoError(err) {
+				return
+			}
 		}
 	}()
 	wg.Wait()
@@ -315,7 +320,7 @@ func (s *tsoProxyTestSuite) verifyTSOProxy(
 	ctx context.Context, streams []pdpb.PD_TsoClient,
 	cleanupFuncs []testutil.CleanupFunc, requestsPerClient int, mustReliable bool,
 ) error {
-	re := s.Require()
+	as := assert.New(s.T())
 	reqs := s.generateRequests(requestsPerClient)
 
 	var respErr atomic.Value
@@ -344,20 +349,25 @@ func (s *tsoProxyTestSuite) verifyTSOProxy(
 					cleanupGRPCStream(streams, cleanupFuncs, i)
 					return
 				}
-				re.NoError(err)
+				if !as.NoError(err) {
+					return
+				}
 				resp, err := streams[i].Recv()
 				if err != nil && !mustReliable {
 					respErr.Store(err)
 					cleanupGRPCStream(streams, cleanupFuncs, i)
 					return
 				}
-				re.NoError(err)
-				re.Equal(req.GetCount(), resp.GetCount())
+				if !as.NoError(err) || !as.Equal(req.GetCount(), resp.GetCount()) {
+					return
+				}
 				ts := resp.GetTimestamp()
 				count := int64(resp.GetCount())
 				physical, largestLogic := ts.GetPhysical(), ts.GetLogical()
 				firstLogical := largestLogic - count + 1
-				re.False(tsoutil.TSLessEqual(physical, firstLogical, lastPhysical, lastLogical))
+				if !as.False(tsoutil.TSLessEqual(physical, firstLogical, lastPhysical, lastLogical)) {
+					return
+				}
 			}
 		}(i)
 	}

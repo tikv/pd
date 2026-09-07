@@ -880,7 +880,9 @@ func (suite *keyspaceGroupManagerTestSuite) runTestLoadKeyspaceGroupsAssignment(
 				err := addKeyspaceGroupAssignment(
 					suite.ctx, suite.etcdClient, uint32(j),
 					svcAddrs, []int{0}, []uint32{uint32(j)})
-				re.NoError(err)
+				if !suite.NoError(err) {
+					return
+				}
 			}
 		}(i)
 	}

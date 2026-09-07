@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
@@ -767,6 +768,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplitClient()
 func (suite *tsoKeyspaceGroupManagerTestSuite) dispatchClient(
 	re *require.Assertions, keyspaceID, keyspaceGroupID uint32,
 ) context.CancelFunc {
+	as := assert.New(suite.T())
 	// Make sure the primary of the keyspace group is elected.
 	primary, err := suite.tsoCluster.
 		WaitForPrimaryServing(re, keyspaceID, keyspaceGroupID).
@@ -805,12 +807,17 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) dispatchClient(
 					errors.Is(err, clierrs.ErrClientTSOStreamClosed) {
 					continue
 				}
-				re.FailNow(fmt.Sprintf("%+v", err))
+				as.Fail(fmt.Sprintf("%+v", err))
+				return
 			}
 			if physical == lastPhysical {
-				re.Greater(logical, lastLogical)
+				if !as.Greater(logical, lastLogical) {
+					return
+				}
 			} else {
-				re.Greater(physical, lastPhysical)
+				if !as.Greater(physical, lastPhysical) {
+					return
+				}
 			}
 			lastPhysical, lastLogical = physical, logical
 		}

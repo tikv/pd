@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc"
@@ -277,6 +278,7 @@ func (suite *routerClientSuite) TestGetRegionConcurrently() {
 }
 
 func (suite *routerClientSuite) dispatchConcurrentRequests(ctx context.Context, re *require.Assertions, wg *sync.WaitGroup) {
+	as := assert.New(suite.T())
 	regions := make([]*metapb.Region, 0, 2)
 	for i := range 2 {
 		regionID := regionIDAllocator.alloc()
@@ -325,7 +327,7 @@ func (suite *routerClientSuite) dispatchConcurrentRequests(ctx context.Context, 
 						if strings.Contains(err.Error(), "region not found") {
 							return false
 						}
-						re.ErrorContains(err, context.Canceled.Error())
+						as.Contains(err.Error(), context.Canceled.Error())
 					}
 					if r == nil {
 						return false
@@ -345,7 +347,7 @@ func (suite *routerClientSuite) dispatchConcurrentRequests(ctx context.Context, 
 						if strings.Contains(err.Error(), "region not found") {
 							return false
 						}
-						re.ErrorContains(err, context.Canceled.Error())
+						as.Contains(err.Error(), context.Canceled.Error())
 					}
 					if r == nil {
 						return false
@@ -366,7 +368,7 @@ func (suite *routerClientSuite) dispatchConcurrentRequests(ctx context.Context, 
 						if strings.Contains(err.Error(), "region not found") {
 							return false
 						}
-						re.ErrorContains(err, context.Canceled.Error())
+						as.Contains(err.Error(), context.Canceled.Error())
 					}
 					if r == nil {
 						return false

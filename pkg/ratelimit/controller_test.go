@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/time/rate"
 
@@ -43,7 +44,7 @@ type labelCase struct {
 }
 
 func runMulitLabelLimiter(t *testing.T, limiter *Controller, testCase []labelCase) {
-	re := require.New(t)
+	as := assert.New(t)
 	var caseWG sync.WaitGroup
 	for _, tempCas := range testCase {
 		caseWG.Add(1)
@@ -64,8 +65,9 @@ func runMulitLabelLimiter(t *testing.T, limiter *Controller, testCase []labelCas
 					}()
 				}
 				wg.Wait()
-				re.Equal(rd.fail, failedCount)
-				re.Equal(rd.success, successCount)
+				if !as.Equal(rd.fail, failedCount) || !as.Equal(rd.success, successCount) {
+					return
+				}
 				for range rd.release {
 					r.release()
 				}

@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc"
 
@@ -108,7 +109,13 @@ func (suite *tsoConsistencyTestSuite) TearDownSuite() {
 }
 
 func (suite *tsoConsistencyTestSuite) request(ctx context.Context, count uint32) *pdpb.Timestamp {
-	re := suite.Require()
+	as := assert.New(suite.T())
+	noError := func(err error) bool {
+		if err == nil {
+			return true
+		}
+		return as.Fail("Received unexpected error", "%+v", err)
+	}
 	clusterID := keypath.ClusterID()
 	if suite.legacy {
 		req := &pdpb.TsoRequest{
@@ -116,33 +123,43 @@ func (suite *tsoConsistencyTestSuite) request(ctx context.Context, count uint32)
 			Count:  count,
 		}
 		tsoClient, err := suite.pdClient.Tso(ctx)
-		re.NoError(err)
+		if !noError(err) {
+			return nil
+		}
 		defer func() {
 			err := tsoClient.CloseSend()
-			re.NoError(err)
+			noError(err)
 		}()
-		re.NoError(tsoClient.Send(req))
+		if !noError(tsoClient.Send(req)) {
+			return nil
+		}
 		resp, err := tsoClient.Recv()
-		re.NoError(err)
-		return checkAndReturnTimestampResponse(re, resp)
+		if !noError(err) {
+			return nil
+		}
+		return checkAndReturnTimestampResponse(as, resp)
 	}
 	req := &tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{ClusterId: clusterID},
 		Count:  count,
 	}
 	var resp *tsopb.TsoResponse
-	testutil.Eventually(re, func() bool {
+	as.Eventually(func() bool {
 		tsoClient, err := suite.tsoClient.Tso(ctx)
-		re.NoError(err)
+		if !noError(err) {
+			return false
+		}
 		defer func() {
 			err := tsoClient.CloseSend()
-			re.NoError(err)
+			noError(err)
 		}()
-		re.NoError(tsoClient.Send(req))
+		if !noError(tsoClient.Send(req)) {
+			return false
+		}
 		resp, err = tsoClient.Recv()
 		return err == nil && resp != nil
-	})
-	return checkAndReturnTimestampResponse(re, resp)
+	}, 20*time.Second, 100*time.Millisecond)
+	return checkAndReturnTimestampResponse(as, resp)
 }
 
 func (suite *tsoConsistencyTestSuite) TestRequestTSOConcurrently() {
@@ -154,7 +171,7 @@ func (suite *tsoConsistencyTestSuite) TestRequestTSOConcurrently() {
 }
 
 func (suite *tsoConsistencyTestSuite) requestTSOConcurrently() {
-	re := suite.Require()
+	as := assert.New(suite.T())
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
 
@@ -170,8 +187,13 @@ func (suite *tsoConsistencyTestSuite) requestTSOConcurrently() {
 			var ts *pdpb.Timestamp
 			for range tsoRequestRound {
 				ts = suite.request(ctx, tsoCount)
+				if !as.NotNil(ts) {
+					return
+				}
 				// Check whether the TSO fallbacks
-				re.Equal(1, tsoutil.CompareTimestamp(ts, last))
+				if !as.Equal(1, tsoutil.CompareTimestamp(ts, last)) {
+					return
+				}
 				last = ts
 				time.Sleep(10 * time.Millisecond)
 			}
@@ -181,6 +203,7 @@ func (suite *tsoConsistencyTestSuite) requestTSOConcurrently() {
 }
 
 func (suite *tsoConsistencyTestSuite) TestFallbackTSOConsistency() {
+	as := assert.New(suite.T())
 	re := suite.Require()
 
 	// Re-create the cluster to enable the failpoints.
@@ -210,7 +233,9 @@ func (suite *tsoConsistencyTestSuite) TestFallbackTSOConsistency() {
 			var ts *pdpb.Timestamp
 			for range tsoRequestRound {
 				ts = suite.request(ctx, tsoCount)
-				re.Equal(1, tsoutil.CompareTimestamp(ts, last))
+				if !as.NotNil(ts) || !as.Equal(1, tsoutil.CompareTimestamp(ts, last)) {
+					return
+				}
 				last = ts
 				time.Sleep(10 * time.Millisecond)
 			}

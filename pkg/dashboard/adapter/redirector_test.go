@@ -48,11 +48,10 @@ func TestRedirectorTestSuite(t *testing.T) {
 }
 
 func (suite *redirectorTestSuite) SetupSuite() {
-	re := suite.Require()
 	suite.tempText = "temp1"
 	suite.tempServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, err := io.WriteString(w, suite.tempText)
-		re.NoError(err)
+		suite.NoError(err)
 	}))
 
 	suite.testName = "test1"

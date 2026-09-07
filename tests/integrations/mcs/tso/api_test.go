@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
@@ -133,6 +134,7 @@ func mustGetKeyspaceGroupMembers(re *require.Assertions, server *tso.Server) map
 }
 
 func TestTSOServerStartFirst(t *testing.T) {
+	as := assert.New(t)
 	re := require.New(t)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayStartServerLoop", `return(true)`))
 	ctx, cancel := context.WithCancel(context.Background())
@@ -151,9 +153,9 @@ func TestTSOServerStartFirst(t *testing.T) {
 	defer close(clusterCh)
 	go func() {
 		tsoCluster, err := tests.NewTestTSOCluster(ctx, 2, addr)
-		re.NoError(err)
+		as.NoError(err)
 		primary := tsoCluster.WaitForDefaultPrimaryServing(re)
-		re.NotNil(primary)
+		as.NotNil(primary)
 		clusterCh <- tsoCluster
 		ch <- struct{}{}
 	}()

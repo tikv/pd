@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
@@ -111,13 +112,20 @@ func (suite *operatorControllerTestSuite) TestGetOpInfluence() {
 	re.True(op2.Start())
 	oc.SetOperator(op2)
 	go func(ctx context.Context) {
-		checkRemoveOperatorSuccess(re, oc, op1)
+		as := assert.New(suite.T())
+		if !as.True(oc.RemoveOperator(op1)) ||
+			!as.True(op1.IsEnd()) ||
+			!as.Equal(op1, oc.GetOperatorStatus(op1.RegionID()).Operator) {
+			return
+		}
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			default:
-				re.False(oc.RemoveOperator(op1))
+				if !as.False(oc.RemoveOperator(op1)) {
+					return
+				}
 			}
 		}
 	}(suite.ctx)
@@ -325,9 +333,8 @@ func (suite *operatorControllerTestSuite) TestConcurrentRemoveOperator() {
 	go func() {
 		time.Sleep(50 * time.Millisecond)
 		success := oc.AddOperator(op2)
-		// If the assert failed before wg.Done, the test will be blocked.
-		defer re.True(success)
 		wg.Done()
+		suite.True(success)
 	}()
 	wg.Wait()
 
@@ -521,12 +528,14 @@ func (suite *operatorControllerTestSuite) TestConcurrentMergeConflict() {
 			go func() {
 				defer wg.Done()
 				ops1, err := CreateMergeRegionOperator("merge-region", cluster, left, middle, OpMerge)
-				re.NoError(err)
-				re.Len(ops1, 2)
+				if !suite.NoError(err) || !suite.Len(ops1, 2) {
+					return
+				}
 				controller.AddWaitingOperator(ops1...)
 				ops2, err := CreateMergeRegionOperator("merge-region", cluster, middle, right, OpMerge)
-				re.NoError(err)
-				re.Len(ops2, 2)
+				if !suite.NoError(err) || !suite.Len(ops2, 2) {
+					return
+				}
 				controller.AddWaitingOperator(ops2...)
 			}()
 		}
@@ -1049,7 +1058,7 @@ func (suite *operatorControllerTestSuite) TestInvalidStoreId() {
 }
 
 func TestConcurrentAddOperatorAndSetStoreLimit(t *testing.T) {
-	re := require.New(t)
+	as := assert.New(t)
 	opt := mockconfig.NewTestOptions()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1077,7 +1086,9 @@ func TestConcurrentAddOperatorAndSetStoreLimit(t *testing.T) {
 			for j := 1; j < 10; j++ {
 				regionID := uint64(j) + i*100
 				op := NewTestOperator(regionID, tc.GetRegion(regionID).GetRegionEpoch(), OpRegion, AddPeer{ToStore: storeID, PeerID: regionID})
-				re.True(oc.AddOperator(op))
+				if !as.True(oc.AddOperator(op)) {
+					return
+				}
 				tc.SetStoreLimit(storeID, storelimit.AddPeer, limit-float64(j)) // every goroutine set a different limit
 			}
 		}(uint64(i))

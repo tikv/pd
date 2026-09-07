@@ -28,6 +28,7 @@ import (
 	"unsafe"
 
 	"github.com/docker/go-units"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pingcap/failpoint"
@@ -583,7 +584,7 @@ func TestSetRegionConcurrence(t *testing.T) {
 	region := NewTestRegionInfo(1, 1, []byte("a"), []byte("b"))
 	go func() {
 		_, err := regions.AtomicCheckAndPutRegion(ContextTODO(), region)
-		re.NoError(err)
+		assert.NoError(t, err)
 	}()
 	_, err := regions.AtomicCheckAndPutRegion(ContextTODO(), region)
 	re.NoError(err)
