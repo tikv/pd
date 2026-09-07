@@ -130,7 +130,7 @@ func (s *TSODispatcher) dispatch(
 	defer cancel()
 
 	// make(chan Request, maxMergeRequests+1) + 1
-	requests := make([]Request, maxMergeRequests+2)
+	requests := make([]Request, 0, maxMergeRequests+2)
 	needUpdateServicePrimaryAddr := len(tsoPrimaryWatchers) > 0 && tsoPrimaryWatchers[0] != nil
 	noProxyRequestsTimer := time.NewTimer(tsoProxyStreamIdleTimeout)
 	for {
@@ -142,10 +142,9 @@ func (s *TSODispatcher) dispatch(
 		select {
 		case first := <-tsoQueue.requestCh:
 			pendingTSOReqCount := len(tsoQueue.requestCh) + 1
-			requests[0] = first
+			requests = append(requests[:0], first)
 			for i := 1; i < pendingTSOReqCount; i++ {
-				// #nosec G602 -- len(requests) equals cap(requestCh)+1, which bounds pendingTSOReqCount.
-				requests[i] = <-tsoQueue.requestCh
+				requests = append(requests, <-tsoQueue.requestCh)
 			}
 			done := make(chan struct{})
 			dl := NewTSDeadline(DefaultTSOProxyTimeout, done, cancel)
@@ -154,7 +153,7 @@ func (s *TSODispatcher) dispatch(
 			case <-dispatcherCtx.Done():
 				return
 			}
-			err = s.processRequests(forwardStream, requests[:pendingTSOReqCount])
+			err = s.processRequests(forwardStream, requests)
 			close(done)
 			if err != nil {
 				log.Error("proxy forward tso error",
