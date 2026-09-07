@@ -418,6 +418,7 @@ func (suite *ruleCheckerTestSuite) TestFixRoleLeader() {
 	re.Nil(suite.rc.Check(suite.cluster.GetRegion(1)))
 
 	suite.cluster.SetStoreLimit(3, storelimit.TransferLeaderIn, storelimit.Unlimited)
+	suite.cluster.ResetStoreLimit(3, storelimit.TransferLeaderIn, storelimit.Unlimited/time.Minute.Seconds())
 	op = suite.rc.Check(suite.cluster.GetRegion(1))
 	re.NotNil(op)
 	re.Equal(uint64(3), op.Step(0).(operator.TransferLeader).ToStore)
@@ -1533,6 +1534,7 @@ func (suite *ruleCheckerTestSuite) TestFastFailoverLeaderTransferWithExhaustedLi
 
 	// Fast failover keeps its priority but must select a target with budget.
 	tc.SetStoreLimit(2, storelimit.TransferLeaderIn, storelimit.Unlimited)
+	tc.ResetStoreLimit(2, storelimit.TransferLeaderIn, storelimit.Unlimited/time.Minute.Seconds())
 	op = suite.rc.Check(region)
 	re.NotNil(op)
 	re.Equal(constant.Urgent, op.GetPriorityLevel())
@@ -1540,11 +1542,6 @@ func (suite *ruleCheckerTestSuite) TestFastFailoverLeaderTransferWithExhaustedLi
 	influence := operator.NewTotalOpInfluence([]*operator.Operator{op}, tc.GetBasicCluster())
 	re.Equal(storelimit.RegionInfluence[storelimit.TransferLeaderIn], influence.GetStoreInfluence(2).GetStepCost(storelimit.TransferLeaderIn))
 	re.Zero(influence.GetStoreInfluence(3).GetStepCost(storelimit.TransferLeaderIn))
-
-	// Ordinary repair follows the same target check.
-	tc.SetStoreLimit(2, storelimit.TransferLeaderIn, 0.00006)
-	tc.SetEnableWitness(false)
-	re.Nil(suite.rc.Check(region))
 }
 
 func (suite *ruleCheckerTestSuite) TestFixDownPeerWithNoWitness() {

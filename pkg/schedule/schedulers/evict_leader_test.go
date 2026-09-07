@@ -32,7 +32,6 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -64,32 +63,14 @@ func TestEvictLeader(t *testing.T) {
 	operatorutil.CheckMultiTargetTransferLeader(re, ops[0], operator.OpLeader, 1, []uint64{2, 3})
 	re.False(ops[0].Step(0).(operator.TransferLeader).IsFinish(tc.MockRegionInfo(1, 1, []uint64{2, 3}, []uint64{}, &metapb.RegionEpoch{ConfVer: 0, Version: 0})))
 	re.True(ops[0].Step(0).(operator.TransferLeader).IsFinish(tc.MockRegionInfo(1, 2, []uint64{1, 3}, []uint64{}, &metapb.RegionEpoch{ConfVer: 0, Version: 0})))
-}
-
-func TestEvictLeaderWithExhaustedTransferLeaderInLimit(t *testing.T) {
-	re := require.New(t)
-	cancel, _, tc, oc := prepareSchedulersTest(false)
-	defer cancel()
-	for _, id := range []uint64{1, 2, 3} {
-		tc.AddLeaderStore(id, 0)
-	}
-	tc.AddLeaderRegion(1, 1, 2, 3)
 	exhaustTransferLeaderInLimit(t, tc, 2, 3)
-	scheduler, err := CreateScheduler(types.EvictLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.EvictLeaderScheduler, []string{"1"}), func(string) error { return nil })
-	re.NoError(err)
-	ops, _ := scheduler.Schedule(tc, false)
+	ops, _ = sl.Schedule(tc, false)
 	re.Empty(ops)
-
 	tc.SetStoreLimit(2, storelimit.TransferLeaderIn, storelimit.Unlimited)
 	tc.ResetStoreLimit(2, storelimit.TransferLeaderIn, storelimit.Unlimited/time.Minute.Seconds())
-	ops, _ = scheduler.Schedule(tc, false)
-	re.NotEmpty(ops)
-	re.Equal(constant.Urgent, ops[0].GetPriorityLevel())
-	step := ops[0].Step(0).(operator.TransferLeader)
-	re.Equal(uint64(2), step.ToStore)
-	re.Equal([]uint64{2}, step.ToStores)
-	re.False(oc.ExceedStoreLimit(ops[0]))
-	re.True(oc.AddOperator(ops[0]))
+	ops, _ = sl.Schedule(tc, false)
+	re.Len(ops, 1)
+	operatorutil.CheckMultiTargetTransferLeader(re, ops[0], operator.OpLeader, 1, []uint64{2})
 }
 
 func TestEvictLeaderWithUnhealthyPeer(t *testing.T) {

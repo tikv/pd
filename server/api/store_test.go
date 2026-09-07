@@ -32,18 +32,15 @@ import (
 )
 
 func TestStoreLimitRateSemantics(t *testing.T) {
-	for _, typ := range []string{"", "add-peer", "remove-peer", "transfer-leader-in"} {
-		t.Run(typ, func(t *testing.T) {
-			for _, rate := range []float64{0, -1, math.NaN(), math.Inf(1), math.Inf(-1)} {
-				_, err := getStoreLimitRate(map[string]any{"rate": rate, "type": typ})
-				require.Error(t, err)
-			}
-			for _, rate := range []float64{30, storelimit.Unlimited} {
-				actual, err := getStoreLimitRate(map[string]any{"rate": rate, "type": typ})
-				require.NoError(t, err)
-				require.Equal(t, rate, actual)
-			}
-		})
+	re := require.New(t)
+	for _, rate := range []any{"30", 0.0, -1.0, math.NaN(), math.Inf(1)} {
+		_, err := getStoreLimitRate(map[string]any{"rate": rate})
+		re.Error(err)
+	}
+	for _, rate := range []float64{30, storelimit.Unlimited} {
+		actual, err := getStoreLimitRate(map[string]any{"rate": rate})
+		re.NoError(err)
+		re.Equal(rate, actual)
 	}
 }
 

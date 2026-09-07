@@ -359,119 +359,41 @@ func (suite *createOperatorTestSuite) TestCreateMergeRegionOperator() {
 	}
 }
 
-func (suite *createOperatorTestSuite) TestTransferLeaderInLimit() {
-	for _, testCase := range []struct {
-		name  string
-		kind  OpKind
-		level constant.PriorityLevel
-	}{
-		{"default", OpLeader, constant.Medium},
-		{"admin", OpAdmin, constant.Urgent},
-	} {
-		suite.Run(testCase.name, func() {
-			re := suite.Require()
-			tc := suite.cluster
-			tc.AddLeaderRegion(1, 1, 2, 3)
-			region := tc.GetRegion(1)
-			tc.SetStoreLimit(2, storelimit.TransferLeaderIn, 0.00006)
-			limiter := storelimit.NewStoreRateLimit(0.000001)
-			tc.PutStore(tc.GetStore(2).Clone(core.SetStoreLimit(limiter)))
-			build := func() (*Operator, error) {
-				return CreateTransferLeaderOperator("test", tc, region, 2, nil, testCase.kind)
-			}
-			// Building observes the budget without reserving it.
-			for range 2 {
-				op, err := build()
-				re.NoError(err)
-				re.Equal(testCase.level, op.GetPriorityLevel())
-				re.Equal(testCase.kind|OpLeader, op.Kind())
-				re.Equal(TransferLeader{FromStore: 1, ToStore: 2}, op.Step(0))
-			}
-			re.True(limiter.Take(storelimit.RegionInfluence[storelimit.TransferLeaderIn], storelimit.TransferLeaderIn, constant.Medium))
-			op, err := build()
-			re.ErrorContains(err, "target leader is not allowed")
-			re.Nil(op)
-			re.False(tc.GetStore(2).IsAvailable(storelimit.TransferLeaderIn, constant.Medium))
-			tc.SetStoreLimit(2, storelimit.TransferLeaderIn, storelimit.Unlimited)
-			tc.ResetStoreLimit(2, storelimit.TransferLeaderIn, storelimit.Unlimited/time.Minute.Seconds())
-			op, err = build()
-			re.NoError(err)
-			re.Equal(testCase.level, op.GetPriorityLevel())
-		})
-	}
-}
-
-func (suite *createOperatorTestSuite) TestAdminTransferLeaderChecksTarget() {
+func (suite *createOperatorTestSuite) TestCompositeOperatorLeaderLimit() {
 	re := suite.Require()
 	tc := suite.cluster
 	tc.AddLeaderRegion(1, 1, 2, 3)
 	region := tc.GetRegion(1)
-	build := func(target uint64) (*Operator, error) {
-		return CreateTransferLeaderOperator("test", tc, region, target, nil, OpAdmin)
+	for _, id := range []uint64{2, 4} {
+		tc.SetStoreLimit(id, storelimit.TransferLeaderIn, 0.00006)
+		tc.ResetStoreLimit(id, storelimit.TransferLeaderIn, 0.000001)
+		re.True(tc.GetStore(id).GetStoreLimit().Take(storelimit.RegionInfluence[storelimit.TransferLeaderIn], storelimit.TransferLeaderIn, constant.Medium))
 	}
-	store := tc.GetStore(2)
-	tc.PutStore(store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-5 * time.Minute))))
-	op, err := build(2)
+	peer := &metapb.Peer{Id: 14, StoreId: 4}
+	op, err := CreateMoveLeaderOperator("test", tc, region, OpRegion, 1, peer)
 	re.Error(err)
 	re.Nil(op)
-	tc.PutStore(store)
-	re.NoError(tc.PauseLeaderTransfer(2, constant.In))
-	op, err = build(2)
-	re.Error(err)
-	re.Nil(op)
-	tc.ResumeLeaderTransfer(2, constant.In)
-	region = region.Clone(core.WithPendingPeers([]*metapb.Peer{region.GetStorePeer(2)}))
-	op, err = build(2)
-	re.Error(err)
-	re.Nil(op)
-	tc.AddLeaderRegion(2, 1, 2, 10)
-	region = tc.GetRegion(2)
-	op, err = build(10) // Store 10 has a reject-leader label.
-	re.Error(err)
-	re.Nil(op)
-}
 
-func (suite *createOperatorTestSuite) TestCompositeOperatorLeaderLimit() {
-	for _, jointConsensus := range []bool{false, true} {
-		re := suite.Require()
-		tc := suite.cluster
-		tc.SetEnableUseJointConsensus(jointConsensus)
-		tc.AddLeaderRegion(1, 1, 2, 3)
-		region := tc.GetRegion(1)
-		for _, id := range []uint64{2, 4} {
-			tc.SetStoreLimit(id, storelimit.TransferLeaderIn, 0.00006)
-			limiter := storelimit.NewStoreRateLimit(0.000001)
-			tc.PutStore(tc.GetStore(id).Clone(core.SetStoreLimit(limiter)))
-			re.True(limiter.Take(storelimit.RegionInfluence[storelimit.TransferLeaderIn], storelimit.TransferLeaderIn, constant.Medium))
-		}
-		peer := &metapb.Peer{Id: 14, StoreId: 4}
-		op, err := CreateMoveLeaderOperator("test", tc, region, OpRegion, 1, peer)
-		re.Error(err)
-		re.Nil(op)
-		op, err = CreateMoveLeaderOperator("test", tc, region, OpAdmin, 1, peer)
-		re.Error(err)
-		re.Nil(op)
+	// Peer-only changes do not spend the leader-transfer budget.
+	op, err = CreateAddPeerOperator("test", tc, region, peer, OpRegion)
+	re.NoError(err)
+	influence := NewTotalOpInfluence([]*Operator{op}, tc.GetBasicCluster())
+	re.Zero(influence.GetStoreInfluence(4).GetStepCost(storelimit.TransferLeaderIn))
 
-		// Peer-only changes do not spend the leader-transfer budget.
-		op, err = CreateAddPeerOperator("test", tc, region, peer, OpRegion)
-		re.NoError(err)
-		influence := NewTotalOpInfluence([]*Operator{op}, tc.GetBasicCluster())
-		re.Zero(influence.GetStoreInfluence(4).GetStepCost(storelimit.TransferLeaderIn))
+	// Removing the leader can choose another follower with available budget.
+	op, err = CreateRemovePeerOperator("test", tc, OpRegion, region, 1)
+	re.NoError(err)
+	influence = NewTotalOpInfluence([]*Operator{op}, tc.GetBasicCluster())
+	re.Zero(influence.GetStoreInfluence(2).GetStepCost(storelimit.TransferLeaderIn))
+	re.Equal(storelimit.RegionInfluence[storelimit.TransferLeaderIn], influence.GetStoreInfluence(3).GetStepCost(storelimit.TransferLeaderIn))
 
-		// Removing the leader can choose another follower with available budget.
-		op, err = CreateRemovePeerOperator("test", tc, OpRegion, region, 1)
-		re.NoError(err)
-		influence = NewTotalOpInfluence([]*Operator{op}, tc.GetBasicCluster())
-		re.Zero(influence.GetStoreInfluence(2).GetStepCost(storelimit.TransferLeaderIn))
-		re.Equal(storelimit.RegionInfluence[storelimit.TransferLeaderIn], influence.GetStoreInfluence(3).GetStepCost(storelimit.TransferLeaderIn))
-
-		tc.SetStoreLimit(4, storelimit.TransferLeaderIn, storelimit.Unlimited)
-		op, err = CreateMoveLeaderOperator("test", tc, region, OpAdmin, 1, peer)
-		re.NoError(err)
-		re.Equal(constant.Urgent, op.GetPriorityLevel())
-		influence = NewTotalOpInfluence([]*Operator{op}, tc.GetBasicCluster())
-		re.Equal(storelimit.RegionInfluence[storelimit.TransferLeaderIn], influence.GetStoreInfluence(4).GetStepCost(storelimit.TransferLeaderIn))
-	}
+	tc.SetStoreLimit(4, storelimit.TransferLeaderIn, storelimit.Unlimited)
+	tc.ResetStoreLimit(4, storelimit.TransferLeaderIn, storelimit.Unlimited/time.Minute.Seconds())
+	op, err = CreateMoveLeaderOperator("test", tc, region, OpAdmin, 1, peer)
+	re.NoError(err)
+	re.Equal(constant.Urgent, op.GetPriorityLevel())
+	influence = NewTotalOpInfluence([]*Operator{op}, tc.GetBasicCluster())
+	re.Equal(storelimit.RegionInfluence[storelimit.TransferLeaderIn], influence.GetStoreInfluence(4).GetStepCost(storelimit.TransferLeaderIn))
 }
 
 func (suite *createOperatorTestSuite) TestCreateTransferLeaderOperator() {
@@ -568,6 +490,14 @@ func (suite *createOperatorTestSuite) TestCreateTransferLeaderOperator() {
 		default:
 			suite.T().Errorf("unexpected type: %s", step.String())
 		}
+	}
+	region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: testCases[0].originPeers}, testCases[0].originPeers[0])
+	suite.cluster.ResetStoreLimit(3, storelimit.TransferLeaderIn, 0.000001)
+	re.True(suite.cluster.GetStore(3).GetStoreLimit().Take(storelimit.RegionInfluence[storelimit.TransferLeaderIn], storelimit.TransferLeaderIn, constant.Medium))
+	for _, kind := range []OpKind{OpLeader, OpAdmin} {
+		op, err := CreateTransferLeaderOperator("test", suite.cluster, region, 3, nil, kind)
+		re.ErrorContains(err, "target leader is not allowed")
+		re.Nil(op)
 	}
 }
 

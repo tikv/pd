@@ -3362,6 +3362,10 @@ func TestAddStoreLimitUsesPersistedDefaultStoreLimit(t *testing.T) {
 		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.TransferLeaderIn, oldTransferLeaderIn)
 	}()
 
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, 15)
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, 15)
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.TransferLeaderIn, storelimit.Unlimited)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

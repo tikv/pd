@@ -16,7 +16,6 @@ package filter
 
 import (
 	"strconv"
-	"time"
 
 	"go.uber.org/zap"
 
@@ -459,26 +458,12 @@ func (f *StoreStateFilter) exceedAddLimit(_ config.SharedConfigProvider, store *
 	return statusOK
 }
 
-func (f *StoreStateFilter) exceedTransferLeaderInLimit(conf config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
+func (f *StoreStateFilter) exceedTransferLeaderInLimit(_ config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
 	// Target selection intentionally checks the budget regardless of operator priority,
 	// including when this filter is used by Builder. Controller admission retains its
 	// existing Urgent exemption; passing this filter does not reserve tokens.
 	// TODO: Reconcile leader-transfer priorities with store-limit admission semantics.
-	if f.AllowTemporaryStates {
-		f.Reason = storeStateOK
-		return statusOK
-	}
-	// In microservice mode, the persisted config may arrive before the in-memory
-	// limiter is refreshed. Let the operator controller synchronize and perform
-	// the final check instead of rejecting the store with a stale limiter.
-	if limit, ok := store.GetStoreLimit().(*storelimit.StoreRateLimit); ok {
-		ratePerSec := conf.GetStoreLimitByType(store.GetID(), storelimit.TransferLeaderIn) / time.Minute.Seconds()
-		if limit.Rate(storelimit.TransferLeaderIn) != ratePerSec {
-			f.Reason = storeStateOK
-			return statusOK
-		}
-	}
-	if !store.IsAvailable(storelimit.TransferLeaderIn, f.OperatorLevel) {
+	if !f.AllowTemporaryStates && !store.IsAvailable(storelimit.TransferLeaderIn, f.OperatorLevel) {
 		f.Reason = storeStateExceedTransferLeaderInLimit
 		return statusStoreTransferLeaderInLimit
 	}

@@ -246,6 +246,8 @@ func TestStoreStateFilter(t *testing.T) {
 		&StoreStateFilter{MoveRegion: true},
 		&StoreStateFilter{TransferLeader: true, MoveRegion: true},
 		&StoreStateFilter{MoveRegion: true, AllowTemporaryStates: true},
+		&StoreStateFilter{TransferLeader: true, AllowTemporaryStates: true},
+		&StoreStateFilter{TransferLeader: true, OperatorLevel: constant.Urgent},
 	}
 	opt := mockconfig.NewTestOptions()
 	store := core.NewStoreInfoWithLabel(1, map[string]string{})
@@ -268,6 +270,22 @@ func TestStoreStateFilter(t *testing.T) {
 		{2, plan.StatusOK, plan.StatusOK},
 	}
 	check(store, testCases)
+
+	limiter := storelimit.NewStoreRateLimit(0.000001)
+	limitedStore := store.Clone(core.SetStoreLimit(limiter))
+	// Selection observes the budget without reserving it.
+	for range 2 {
+		check(limitedStore, []testCase{{0, plan.StatusOK, plan.StatusOK}})
+	}
+	re.True(limiter.Take(storelimit.RegionInfluence[storelimit.TransferLeaderIn], storelimit.TransferLeaderIn, constant.Medium))
+	check(limitedStore, []testCase{
+		{0, plan.StatusOK, plan.StatusStoreTransferLeaderInLimitThrottled},
+		{1, plan.StatusOK, plan.StatusOK},
+		{2, plan.StatusOK, plan.StatusStoreTransferLeaderInLimitThrottled},
+		{4, plan.StatusOK, plan.StatusOK},
+		{5, plan.StatusOK, plan.StatusStoreTransferLeaderInLimitThrottled},
+	})
+	re.Equal("store-state-exceed-transfer-leader-in-limit-filter", filters[0].Type().String())
 
 	// Disconnected
 	store = store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-5 * time.Minute)))
@@ -299,55 +317,6 @@ func TestStoreStateFilter(t *testing.T) {
 		{3, plan.StatusOK, plan.StatusStoreRemoved},
 	}
 	check(store, testCases)
-}
-
-func TestStoreStateFilterTransferLeaderInLimit(t *testing.T) {
-	re := require.New(t)
-	const ratePerSec = 0.000001
-	limiter := storelimit.NewStoreRateLimit(ratePerSec)
-	store := core.NewStoreInfoWithLabel(1, map[string]string{}).Clone(
-		core.SetLastHeartbeatTS(time.Now()),
-		core.SetStoreLimit(limiter),
-	)
-	filter := &StoreStateFilter{ActionScope: "test", TransferLeader: true, OperatorLevel: constant.Medium}
-	opt := mockconfig.NewTestOptions()
-	opt.SetStoreLimit(store.GetID(), storelimit.TransferLeaderIn, ratePerSec*time.Minute.Seconds())
-
-	re.Equal("test", filter.Scope())
-	// Selection only observes the budget; it must not consume it.
-	for range 2 {
-		re.Equal(plan.StatusOK, filter.Target(opt, store).StatusCode)
-	}
-	re.True(limiter.Take(storelimit.RegionInfluence[storelimit.TransferLeaderIn],
-		storelimit.TransferLeaderIn, constant.Medium))
-	re.Equal(plan.StatusOK, filter.Source(opt, store).StatusCode)
-	for _, level := range []constant.PriorityLevel{constant.Low, constant.Medium, constant.High, constant.Urgent} {
-		re.Equal(plan.StatusCode(plan.StatusStoreTransferLeaderInLimitThrottled),
-			(&StoreStateFilter{TransferLeader: true, OperatorLevel: level}).Target(opt, store).StatusCode)
-	}
-	stateFilter := &StoreStateFilter{TransferLeader: true, OperatorLevel: constant.Urgent}
-	disconnectedStore := store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-5 * time.Minute)))
-	re.Equal(plan.StatusCode(plan.StatusStoreDisconnected), stateFilter.Target(opt, disconnectedStore).StatusCode)
-	re.Equal(plan.StatusOK, (&StoreStateFilter{TransferLeader: true, AllowTemporaryStates: true}).Target(opt, store).StatusCode)
-	re.Equal(plan.StatusCode(plan.StatusStoreTransferLeaderInLimitThrottled), filter.Target(opt, store).StatusCode)
-	re.Equal("store-state-exceed-transfer-leader-in-limit-filter", filter.Type().String())
-
-	opt.SetStoreLimit(store.GetID(), storelimit.TransferLeaderIn, storelimit.Unlimited)
-	// A stale limiter defers the check to controller admission.
-	re.Equal(plan.StatusOK, filter.Target(opt, store).StatusCode)
-	// A synchronized limiter uses the configured unlimited rate.
-	limiter.Reset(storelimit.Unlimited/time.Minute.Seconds(), storelimit.TransferLeaderIn)
-	re.Equal(plan.StatusOK, filter.Target(opt, store).StatusCode)
-
-	// Lowering a limit also defers to the controller until the limiter is synchronized.
-	opt.SetStoreLimit(store.GetID(), storelimit.TransferLeaderIn, ratePerSec*time.Minute.Seconds())
-	re.Equal(plan.StatusOK, filter.Target(opt, store).StatusCode)
-	limiter.Reset(ratePerSec, storelimit.TransferLeaderIn)
-	re.True(limiter.Take(storelimit.RegionInfluence[storelimit.TransferLeaderIn], storelimit.TransferLeaderIn, constant.Medium))
-	re.Equal(plan.StatusCode(plan.StatusStoreTransferLeaderInLimitThrottled), filter.Target(opt, store).StatusCode)
-
-	store = store.Clone(core.SetStoreLimit(storelimit.NewSlidingWindows()))
-	re.Equal(plan.StatusOK, filter.Target(opt, store).StatusCode)
 }
 
 func TestHotRegionEvictedTargetFilter(t *testing.T) {

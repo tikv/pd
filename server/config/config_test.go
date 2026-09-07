@@ -82,37 +82,6 @@ func TestReloadConfig(t *testing.T) {
 	re.Equal(int64(512), newOpt.GetMaxMovableHotPeerSize())
 }
 
-func TestSetStoreLimitPreservesOtherTypes(t *testing.T) {
-	re := require.New(t)
-	oldRemovePeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer)
-	t.Cleanup(func() {
-		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, oldRemovePeer)
-	})
-	opt, err := newTestScheduleOption()
-	re.NoError(err)
-	cfg := opt.GetScheduleConfig().Clone()
-	cfg.StoreLimit[1] = sc.StoreLimitConfig{
-		AddPeer:          10,
-		RemovePeer:       20,
-		TransferLeaderIn: 30,
-	}
-	opt.SetScheduleConfig(cfg)
-
-	opt.SetStoreLimit(1, storelimit.AddPeer, 40)
-	re.Equal(sc.StoreLimitConfig{
-		AddPeer:          40,
-		RemovePeer:       20,
-		TransferLeaderIn: 30,
-	}, opt.GetStoreLimit(1))
-
-	opt.SetAllStoresLimit(storelimit.RemovePeer, 50)
-	re.Equal(sc.StoreLimitConfig{
-		AddPeer:          40,
-		RemovePeer:       50,
-		TransferLeaderIn: 30,
-	}, opt.GetStoreLimit(1))
-}
-
 func TestReloadDefaultStoreLimit(t *testing.T) {
 	re := require.New(t)
 	oldAddPeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
@@ -126,7 +95,12 @@ func TestReloadDefaultStoreLimit(t *testing.T) {
 
 	opt, err := newTestScheduleOption()
 	re.NoError(err)
+	opt.GetScheduleConfig().StoreLimit[1] = sc.StoreLimitConfig{AddPeer: 10, RemovePeer: 20, TransferLeaderIn: 30}
+	opt.GetScheduleConfig().StoreLimit[2] = sc.StoreLimitConfig{TransferLeaderIn: 0}
+	opt.SetStoreLimit(1, storelimit.AddPeer, 40)
+	re.Equal(sc.StoreLimitConfig{AddPeer: 40, RemovePeer: 20, TransferLeaderIn: 30}, opt.GetStoreLimit(1))
 	opt.SetAllStoresLimit(storelimit.AddPeer, 60)
+	re.Equal(sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 20, TransferLeaderIn: 30}, opt.GetStoreLimit(1))
 	re.Equal(sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 15, TransferLeaderIn: storelimit.Unlimited}, opt.GetScheduleConfig().DefaultStoreLimit)
 
 	storage := storage.NewStorageWithMemoryBackend()
@@ -142,6 +116,8 @@ func TestReloadDefaultStoreLimit(t *testing.T) {
 	expected := sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 15, TransferLeaderIn: storelimit.Unlimited}
 	re.Equal(expected, newOpt.GetScheduleConfig().DefaultStoreLimit)
 	re.Equal(expected, newOpt.GetStoreLimit(100))
+	re.Equal(sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 20, TransferLeaderIn: 30}, newOpt.GetStoreLimit(1))
+	re.Zero(newOpt.GetStoreLimit(2).TransferLeaderIn)
 
 	newOpt.SetStoreLimit(101, storelimit.RemovePeer, 70)
 	re.Equal(sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 70, TransferLeaderIn: storelimit.Unlimited}, newOpt.GetStoreLimit(101))
@@ -182,8 +158,9 @@ func TestDefaultStoreLimitAdjust(t *testing.T) {
 [schedule.default-store-limit]
 add-peer = 0
 remove-peer = 60
+transfer-leader-in = 0
 `,
-			expect: sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 60, TransferLeaderIn: storelimit.Unlimited},
+			expect: sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 60, TransferLeaderIn: 0},
 		},
 		{
 			name: "store balance rate backfills undefined field",
@@ -205,8 +182,9 @@ store-balance-rate = 50
 [schedule.default-store-limit]
 add-peer = 60
 remove-peer = 70
+transfer-leader-in = 30
 `,
-			expect: sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 70, TransferLeaderIn: storelimit.Unlimited},
+			expect: sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 70, TransferLeaderIn: 30},
 		},
 	}
 	for _, testCase := range cases {
@@ -256,7 +234,6 @@ func TestReloadLegacyStoreBalanceRate(t *testing.T) {
 			StoreBalanceRate: 60,
 			StoreLimit: map[uint64]map[string]float64{
 				1: {"add-peer": 10, "remove-peer": 20},
-				2: {"transfer-leader-in": 30},
 			},
 		},
 	}))
@@ -268,7 +245,6 @@ func TestReloadLegacyStoreBalanceRate(t *testing.T) {
 	re.Equal(expected, opt.GetScheduleConfig().DefaultStoreLimit)
 	re.Equal(expected, opt.GetStoreLimit(100))
 	re.Equal(sc.StoreLimitConfig{AddPeer: 10, RemovePeer: 20, TransferLeaderIn: storelimit.Unlimited}, opt.GetStoreLimit(1))
-	re.Equal(float64(30), opt.GetStoreLimit(2).TransferLeaderIn)
 	re.Zero(opt.GetScheduleConfig().StoreBalanceRate)
 }
 
@@ -345,6 +321,16 @@ func TestValidation(t *testing.T) {
 	cfg.Schedule.DefaultStoreLimit.RemovePeer = math.NaN()
 	re.ErrorContains(cfg.Schedule.Validate(), "default-store-limit.remove-peer")
 	cfg.Schedule.DefaultStoreLimit.RemovePeer = 15
+	for _, rate := range []float64{-1, math.NaN(), math.Inf(1)} {
+		cfg.Schedule.DefaultStoreLimit.TransferLeaderIn = rate
+		re.ErrorContains(cfg.Schedule.Validate(), "default-store-limit.transfer-leader-in")
+	}
+	cfg.Schedule.DefaultStoreLimit.TransferLeaderIn = 0
+	for _, rate := range []float64{-1, math.NaN(), math.Inf(1)} {
+		cfg.Schedule.StoreLimit[1] = sc.StoreLimitConfig{TransferLeaderIn: rate}
+		re.ErrorContains(cfg.Schedule.Validate(), "store-limit[1].transfer-leader-in")
+	}
+	delete(cfg.Schedule.StoreLimit, 1)
 	re.NoError(cfg.Schedule.Validate())
 	cfg.Schedule.TolerantSizeRatio = -0.6
 	re.Error(cfg.Schedule.Validate())

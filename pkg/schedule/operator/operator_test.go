@@ -176,6 +176,14 @@ func (suite *operatorTestSuite) TestInfluence() {
 		storeOpInfluence[2] = &StoreInfluence{}
 	}
 
+	// Leader-transfer cost is independent of region size.
+	for _, size := range []int64{1, 1024} {
+		TransferLeader{FromStore: 1, ToStore: 2}.Influence(&opInfluence, region.Clone(core.SetApproximateSize(size)))
+		re.Zero(storeOpInfluence[1].GetStepCost(storelimit.TransferLeaderIn))
+		re.Equal(storelimit.RegionInfluence[storelimit.TransferLeaderIn], storeOpInfluence[2].GetStepCost(storelimit.TransferLeaderIn))
+		resetInfluence()
+	}
+
 	AddLearner{ToStore: 2, PeerID: 2, SendStore: 1}.Influence(&opInfluence, region)
 	re.Equal(StoreInfluence{
 		LeaderSize:  0,

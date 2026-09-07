@@ -238,6 +238,7 @@ func TestTIKVEngine(t *testing.T) {
 	re.Empty(ops)
 
 	tc.SetStoreLimit(3, storelimit.TransferLeaderIn, storelimit.Unlimited)
+	tc.ResetStoreLimit(3, storelimit.TransferLeaderIn, storelimit.Unlimited/time.Minute.Seconds())
 	re.True(scheduler.IsScheduleAllowed(tc))
 	ops, _ = scheduler.Schedule(tc, true)
 	re.NotEmpty(ops)

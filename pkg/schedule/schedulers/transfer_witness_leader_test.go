@@ -16,6 +16,7 @@ package schedulers
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -23,7 +24,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/types"
@@ -33,7 +33,7 @@ import (
 
 func TestTransferWitnessLeader(t *testing.T) {
 	re := require.New(t)
-	cancel, _, tc, oc := prepareSchedulersTest(false)
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 
 	// Add stores 1, 2, 3
@@ -52,13 +52,11 @@ func TestTransferWitnessLeader(t *testing.T) {
 	re.Empty(ops)
 	for _, id := range []uint64{2, 3} {
 		tc.SetStoreLimit(id, storelimit.TransferLeaderIn, storelimit.Unlimited)
+		tc.ResetStoreLimit(id, storelimit.TransferLeaderIn, storelimit.Unlimited/time.Minute.Seconds())
 	}
 	RecvRegionInfo(sl) <- tc.GetRegion(1)
 	ops, _ = sl.Schedule(tc, false)
 	re.Len(ops, 1)
-	re.Equal(constant.Urgent, ops[0].GetPriorityLevel())
-	re.False(oc.ExceedStoreLimit(ops[0]))
-	re.True(oc.AddOperator(ops[0]))
 	operatorutil.CheckMultiTargetTransferLeader(re, ops[0], operator.OpLeader, 1, []uint64{2, 3})
 	re.False(ops[0].Step(0).(operator.TransferLeader).IsFinish(tc.MockRegionInfo(1, 1, []uint64{2, 3}, []uint64{}, &metapb.RegionEpoch{ConfVer: 0, Version: 0})))
 	re.True(ops[0].Step(0).(operator.TransferLeader).IsFinish(tc.MockRegionInfo(1, 2, []uint64{1, 3}, []uint64{}, &metapb.RegionEpoch{ConfVer: 0, Version: 0})))

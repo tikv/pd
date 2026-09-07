@@ -31,7 +31,6 @@ import (
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
-	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/statistics/utils"
 )
 
@@ -92,22 +91,21 @@ func TestStoreStatistics(t *testing.T) {
 }
 
 func TestStoreLimitMetricsIncludeTransferLeaderIn(t *testing.T) {
+	re := require.New(t)
 	const storeID = "1"
 	StoreLimitGauge.DeleteLabelValues(storeID, storelimit.TransferLeaderIn.String())
 	t.Cleanup(func() {
-		StoreLimitGauge.DeleteLabelValues(storeID, storelimit.TransferLeaderIn.String())
+		ResetStoreStatistics(storeID)
 	})
 
 	opt := mockconfig.NewTestOptions()
-	config := opt.GetScheduleConfig().Clone()
-	config.StoreLimit[1] = sc.StoreLimitConfig{TransferLeaderIn: 30}
-	opt.SetScheduleConfig(config)
+	opt.SetStoreLimit(1, storelimit.TransferLeaderIn, 30)
 	NewStoreStatisticsMap(opt).Collect()
 
-	require.Equal(t, float64(30), promtestutil.ToFloat64(
+	re.Equal(float64(30), promtestutil.ToFloat64(
 		StoreLimitGauge.WithLabelValues(storeID, storelimit.TransferLeaderIn.String())))
 	ResetStoreStatistics(storeID)
-	require.False(t, StoreLimitGauge.DeleteLabelValues(storeID, storelimit.TransferLeaderIn.String()))
+	re.False(StoreLimitGauge.DeleteLabelValues(storeID, storelimit.TransferLeaderIn.String()))
 }
 
 func TestSummaryStoreInfos(t *testing.T) {
