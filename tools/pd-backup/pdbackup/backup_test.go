@@ -68,6 +68,7 @@ func TestBackupTestSuite(t *testing.T) {
 	defer clean()
 
 	server, serverConfig := setupServer()
+	defer server.Close()
 	testSuite := &backupTestSuite{
 		etcd:         servers[0],
 		etcdClient:   etcdClient,

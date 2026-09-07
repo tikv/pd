@@ -31,12 +31,11 @@ import (
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
-	"github.com/tikv/pd/client/pkg/utils/testutil"
 	"github.com/tikv/pd/client/pkg/utils/tsoutil"
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(m)
 }
 
 func TestTSLessEqual(t *testing.T) {

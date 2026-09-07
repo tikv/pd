@@ -16,17 +16,13 @@ package testutil
 
 import "go.uber.org/goleak"
 
-// LeakOptions is used to filter the goroutines.
+// LeakOptions is used to filter goroutines that cannot be synchronously
+// stopped by their owning dependencies.
 var LeakOptions = []goleak.Option{
+	// leveldb.DB.Close does not wait for mpoolDrain, which exits at most one
+	// second later after draining the memory pool.
 	goleak.IgnoreTopFunction("github.com/syndtr/goleveldb/leveldb.(*DB).mpoolDrain"),
-	goleak.IgnoreTopFunction("google.golang.org/grpc.(*ccBalancerWrapper).watcher"),
-	goleak.IgnoreTopFunction("google.golang.org/grpc.(*addrConn).resetTransportAndUnlock"),
-	goleak.IgnoreTopFunction("google.golang.org/grpc/internal/grpcsync.(*CallbackSerializer).run"),
-	goleak.IgnoreTopFunction("go.etcd.io/etcd/pkg/logutil.(*MergeLogger).outputLoop"),
-	goleak.IgnoreTopFunction("sync.runtime_notifyListWait"),
-	// TODO: remove the below options once we fixed the http connection leak problems
-	goleak.IgnoreTopFunction("internal/poll.runtime_pollWait"),
-	goleak.IgnoreTopFunction("net/http.(*persistConn).writeLoop"),
-	// natefinch/lumberjack#56, It's a goroutine leak bug. Another ignore option PR https://github.com/pingcap/tidb/pull/27405/
+	// lumberjack v2 never closes millCh, including from Logger.Close, so the
+	// rotation worker cannot be stopped by callers.
 	goleak.IgnoreTopFunction("gopkg.in/natefinch/lumberjack%2ev2.(*Logger).millRun"),
 }

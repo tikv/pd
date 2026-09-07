@@ -35,12 +35,11 @@ import (
 	"github.com/tikv/pd/client/opt"
 	cctx "github.com/tikv/pd/client/pkg/connectionctx"
 	"github.com/tikv/pd/client/pkg/retry"
-	"github.com/tikv/pd/client/pkg/utils/testutil"
 	sd "github.com/tikv/pd/client/servicediscovery"
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(m)
 }
 
 type mockTSOServiceProvider struct {

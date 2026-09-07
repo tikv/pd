@@ -19,12 +19,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
-
-	"github.com/tikv/pd/client/pkg/utils/testutil"
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(m)
 }
 
 func TestGetCallerID(t *testing.T) {
