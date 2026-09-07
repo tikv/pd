@@ -34,6 +34,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 
+	pdClient "github.com/tikv/pd/client"
 	pd "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/client/pkg/retry"
 	"github.com/tikv/pd/pkg/core"
@@ -57,12 +58,13 @@ type httpClientTestSuite struct {
 	suite.Suite
 	// 1. Using `NewClient` will create a `DefaultPDServiceDiscovery` internal.
 	// 2. Using `NewClientWithServiceDiscovery` will need a `PDServiceDiscovery` to be passed in.
-	withServiceDiscovery bool
-	ctx                  context.Context
-	cancelFunc           context.CancelFunc
-	cluster              *tests.TestCluster
-	endpoints            []string
-	client               pd.Client
+	withServiceDiscovery   bool
+	ctx                    context.Context
+	cancelFunc             context.CancelFunc
+	cluster                *tests.TestCluster
+	endpoints              []string
+	client                 pd.Client
+	serviceDiscoveryClient pdClient.Client
 }
 
 func TestHTTPClientTestSuite(t *testing.T) {
@@ -128,6 +130,7 @@ func (suite *httpClientTestSuite) SetupSuite() {
 	if suite.withServiceDiscovery {
 		// Run test with specific service discovery.
 		cli := setupCli(suite.ctx, re, suite.endpoints)
+		suite.serviceDiscoveryClient = cli
 		sd := cli.GetServiceDiscovery()
 		suite.client = pd.NewClientWithServiceDiscovery("pd-http-client-it-grpc", sd)
 	} else {
@@ -141,6 +144,9 @@ func (suite *httpClientTestSuite) TearDownSuite() {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
 	suite.cancelFunc()
 	suite.client.Close()
+	if suite.serviceDiscoveryClient != nil {
+		suite.serviceDiscoveryClient.Close()
+	}
 	suite.cluster.Destroy()
 }
 
