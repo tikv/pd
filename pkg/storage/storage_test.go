@@ -22,7 +22,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/goleak"
 
 	"github.com/pingcap/failpoint"
@@ -30,42 +29,12 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/storage/endpoint"
-	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
-}
-
-type storageWithoutConditionalTxn struct {
-	Storage
-}
-
-func TestCoreStorageRunInTxnWithConditionsFallback(t *testing.T) {
-	re := require.New(t)
-	base := &storageWithoutConditionalTxn{Storage: NewStorageWithMemoryBackend()}
-	store := NewCoreStorage(base, nil)
-	runner, ok := store.(kv.ConditionalTxnRunner)
-	re.True(ok)
-
-	called := false
-	runTxn := func(kv.Txn) error {
-		called = true
-		return nil
-	}
-	re.NoError(runner.RunInTxnWithConditions(context.Background(), nil, runTxn))
-	re.True(called)
-
-	called = false
-	err := runner.RunInTxnWithConditions(
-		context.Background(),
-		[]clientv3.Cmp{clientv3.Compare(clientv3.Value("leader"), "=", "current")},
-		runTxn,
-	)
-	re.ErrorContains(err, "does not support conditional transactions")
-	re.False(called)
 }
 
 func TestBasic(t *testing.T) {

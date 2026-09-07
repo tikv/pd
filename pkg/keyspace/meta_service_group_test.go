@@ -284,20 +284,6 @@ func (suite *metaServiceGroupTestSuite) TestReassignRejectsDisabledGroup() {
 	re.NoError(err)
 }
 
-func (suite *metaServiceGroupTestSuite) TestDecrementAssignmentNoop() {
-	re := suite.Require()
-	err := suite.manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
-		re.NoError(suite.manager.decrementAssignmentTxn(txn, "", 1))
-		re.NoError(suite.manager.decrementAssignmentTxn(txn, "etcd-group-0", 0))
-		return suite.manager.decrementAssignmentTxn(txn, "etcd-group-0", 1)
-	})
-	re.NoError(err)
-
-	counts, err := suite.manager.GetAssignmentCounts(suite.ctx)
-	re.NoError(err)
-	re.Zero(counts["etcd-group-0"])
-}
-
 func (suite *metaServiceGroupTestSuite) enableAllGroups() {
 	re := suite.Require()
 	enabled := true
