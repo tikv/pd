@@ -267,8 +267,8 @@ func createPDClient(ctx context.Context) (pd.Client, error) {
 		return nil, err
 	}
 
-	pdCli.UpdateOption(opt.MaxTSOBatchWaitInterval, *maxBatchWaitInterval)
-	pdCli.UpdateOption(opt.EnableTSOFollowerProxy, *enableTSOFollowerProxy)
+	_ = pdCli.UpdateOption(opt.MaxTSOBatchWaitInterval, *maxBatchWaitInterval)
+	_ = pdCli.UpdateOption(opt.EnableTSOFollowerProxy, *enableTSOFollowerProxy)
 	return pdCli, err
 }
 

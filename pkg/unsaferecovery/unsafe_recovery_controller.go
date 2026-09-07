@@ -429,7 +429,7 @@ func (u *Controller) generatePlan(newestRegionTree *regionTree, peersMap map[uin
 
 	stage := u.stage
 	reCheck := false
-	hasPlan := false
+	var hasPlan bool
 	var err error
 	for {
 		switch stage {

@@ -345,7 +345,7 @@ func (d *Driver) Start() error {
 		}
 	}
 
-	PutPDConfig(d.pdConfig)
+	_ = PutPDConfig(d.pdConfig)
 	return nil
 }
 

@@ -354,7 +354,7 @@ func decodeKey(text string) (string, error) {
 
 		switch n[0] {
 		case 'x':
-			fmt.Sscanf(string(r.Next(2)), "%02x", &c)
+			_, _ = fmt.Sscanf(string(r.Next(2)), "%02x", &c)
 			buf = append(buf, c)
 		default:
 			n = append(n, r.Next(2)...)

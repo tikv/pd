@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 
@@ -307,7 +308,8 @@ func (s *balanceWitnessScheduler) transferWitnessOut(solver *solver, collector *
 	finalFilters := s.filters
 	conf := solver.GetSchedulerConfig()
 	if witnessFilter := filter.NewPlacementWitnessSafeguard(s.GetName(), conf, solver.GetBasicCluster(), solver.GetRuleManager(), solver.Region, solver.Source, solver.fit); witnessFilter != nil {
-		finalFilters = append(s.filters, witnessFilter)
+		finalFilters = slices.Clone(s.filters)
+		finalFilters = append(finalFilters, witnessFilter)
 	}
 	targets = filter.SelectTargetStores(targets, finalFilters, conf, collector, s.filterCounter)
 	sort.Slice(targets, func(i, j int) bool {

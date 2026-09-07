@@ -17,6 +17,7 @@ package operator
 import (
 	"context"
 	"encoding/hex"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -316,7 +317,8 @@ func (suite *createOperatorTestSuite) TestCreateMergeRegionOperator() {
 		re.Equal(1, ops[1].Len())
 		re.Equal(MergeRegion{source.GetMeta(), target.GetMeta(), true}, ops[1].Step(0).(MergeRegion))
 
-		expectedSteps := append(testCase.prepareSteps, MergeRegion{source.GetMeta(), target.GetMeta(), false})
+		expectedSteps := slices.Clone(testCase.prepareSteps)
+		expectedSteps = append(expectedSteps, MergeRegion{source.GetMeta(), target.GetMeta(), false})
 		for i := range ops[0].Len() {
 			switch step := ops[0].Step(i).(type) {
 			case TransferLeader:

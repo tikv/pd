@@ -2428,13 +2428,13 @@ func (s *clientStatefulTestSuite) TestAdvanceGCSafePoint() {
 		s.checkGCSafePoint(re, keyspaceID, 5)
 
 		// Disallows going backward.
-		res, err = c.AdvanceGCSafePoint(ctx, 4)
+		_, err = c.AdvanceGCSafePoint(ctx, 4)
 		re.Error(err)
 		re.Contains(err.Error(), "ErrDecreasingGCSafePoint")
 		s.checkGCSafePoint(re, keyspaceID, 5)
 
 		// Disallows exceeding txn safe point.
-		res, err = c.AdvanceGCSafePoint(ctx, 11)
+		_, err = c.AdvanceGCSafePoint(ctx, 11)
 		re.Error(err)
 		re.Contains(err.Error(), "ErrGCSafePointExceedsTxnSafePoint")
 		// Do not change the current value in this case.

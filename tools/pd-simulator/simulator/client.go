@@ -347,7 +347,7 @@ func newRetryClient(node *Node) *retryClient {
 		retryCount: retryTimes,
 	}
 	// check leader url firstly
-	retryClient.requestWithRetry(func() (any, error) {
+	_, _ = retryClient.requestWithRetry(func() (any, error) {
 		return nil, errors.New("retry to create client")
 	})
 	// start heartbeat stream
@@ -557,7 +557,7 @@ func PutPDConfig(config *sc.PDConfig) error {
 // ChooseToHaltPDSchedule is used to choose whether to halt the PD schedule
 func ChooseToHaltPDSchedule(halt bool) {
 	haltSchedule.Store(halt)
-	PDHTTPClient.SetConfig(context.Background(), map[string]any{
+	_ = PDHTTPClient.SetConfig(context.Background(), map[string]any{
 		"schedule.halt-scheduling": strconv.FormatBool(halt),
 	})
 }

@@ -57,7 +57,7 @@ func newListMetaServiceGroupCommand() *cobra.Command {
 
 func listMetaServiceGroupFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 0 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	resp, err := doRequest(cmd, metaServiceGroupPrefix, http.MethodGet, http.Header{})
@@ -87,7 +87,7 @@ func newUpsertMetaServiceGroupFunc(cmd *cobra.Command, _ []string) {
 	}
 	if len(metaServiceGroups) == 0 {
 		cmd.PrintErrln("At least one --group must be specified")
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	patch := make(map[string]*string)

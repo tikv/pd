@@ -122,7 +122,7 @@ func main() {
 	pdClis := make([]pd.Client, cfg.Client)
 	for i := range cfg.Client {
 		pdClis[i] = newPDClient(ctx, cfg)
-		pdClis[i].UpdateOption(opt.EnableFollowerHandle, true)
+		_ = pdClis[i].UpdateOption(opt.EnableFollowerHandle, true)
 	}
 	etcdClis := make([]*clientv3.Client, cfg.Client)
 	for i := range cfg.Client {
@@ -146,7 +146,7 @@ func main() {
 		if len(name) == 0 {
 			continue
 		}
-		coordinator.SetHTTPCase(name, cfg)
+		_ = coordinator.SetHTTPCase(name, cfg)
 	}
 	gcaseStr := strings.Split(gRPCCases, ",")
 	for _, str := range gcaseStr {
@@ -154,7 +154,7 @@ func main() {
 		if len(name) == 0 {
 			continue
 		}
-		coordinator.SetGRPCCase(name, cfg)
+		_ = coordinator.SetGRPCCase(name, cfg)
 	}
 	cfg.InitCoordinator(coordinator)
 
@@ -186,11 +186,10 @@ func exit(code int) {
 func parseCaseNameAndConfig(str string) (string, *cases.Config) {
 	var err error
 	cfg := &cases.Config{}
-	name := ""
 	strs := strings.Split(str, "-")
 	// to get case name
 	strsa := strings.Split(strs[0], "+")
-	name = strsa[0]
+	name := strsa[0]
 	// to get case Burst
 	if len(strsa) > 1 {
 		cfg.Burst, err = strconv.ParseInt(strsa[1], 10, 64)
@@ -259,14 +258,14 @@ func runHTTPServer(cfg *config.Config, co *cases.Coordinator) {
 			return
 		}
 		for name, cfg := range input {
-			co.SetHTTPCase(name, &cfg)
+			_ = co.SetHTTPCase(name, &cfg)
 		}
 		c.String(http.StatusOK, "")
 	})
 	engine.POST("config/http/:name", func(c *gin.Context) {
 		name := c.Param("name")
 		cfg := getCfg(c)
-		co.SetHTTPCase(name, cfg)
+		_ = co.SetHTTPCase(name, cfg)
 		c.String(http.StatusOK, "")
 	})
 	engine.POST("config/grpc/all", func(c *gin.Context) {
@@ -276,14 +275,14 @@ func runHTTPServer(cfg *config.Config, co *cases.Coordinator) {
 			return
 		}
 		for name, cfg := range input {
-			co.SetGRPCCase(name, &cfg)
+			_ = co.SetGRPCCase(name, &cfg)
 		}
 		c.String(http.StatusOK, "")
 	})
 	engine.POST("config/grpc/:name", func(c *gin.Context) {
 		name := c.Param("name")
 		cfg := getCfg(c)
-		co.SetGRPCCase(name, cfg)
+		_ = co.SetGRPCCase(name, cfg)
 		c.String(http.StatusOK, "")
 	})
 	engine.POST("config/etcd/all", func(c *gin.Context) {
@@ -293,14 +292,14 @@ func runHTTPServer(cfg *config.Config, co *cases.Coordinator) {
 			return
 		}
 		for name, cfg := range input {
-			co.SetEtcdCase(name, &cfg)
+			_ = co.SetEtcdCase(name, &cfg)
 		}
 		c.String(http.StatusOK, "")
 	})
 	engine.POST("config/etcd/:name", func(c *gin.Context) {
 		name := c.Param("name")
 		cfg := getCfg(c)
-		co.SetEtcdCase(name, cfg)
+		_ = co.SetEtcdCase(name, cfg)
 		c.String(http.StatusOK, "")
 	})
 
@@ -343,7 +342,7 @@ func runHTTPServer(cfg *config.Config, co *cases.Coordinator) {
 		}
 		c.IndentedJSON(http.StatusOK, cfg)
 	})
-	engine.Run(cfg.StatusAddr)
+	_ = engine.Run(cfg.StatusAddr)
 }
 
 const (

@@ -93,22 +93,22 @@ func NewCompletionCommand() *cobra.Command {
 func RunCompletion(cmd *cobra.Command, args []string) {
 	if len(args) == 0 {
 		cmd.Println("Shell not specified.")
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	if len(args) > 1 {
 		cmd.Println("Too many arguments. Expected only the shell type.")
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	run, found := completionShells[args[0]]
 	if !found {
 		cmd.Printf("Unsupported shell type %q.\n", args[0])
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 
-	run(os.Stdout, cmd.Root())
+	_ = run(os.Stdout, cmd.Root())
 }
 
 func runCompletionBash(out io.Writer, cmd *cobra.Command) error {
