@@ -18,7 +18,6 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"slices"
 	"time"
 
 	"go.uber.org/zap"
@@ -227,10 +226,11 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 		for _, req := range request.Requests {
 			keyspaceID := ExtractKeyspaceID(req.GetKeyspaceId())
 			resourceGroupName := req.GetResourceGroupName()
-			requestFields := slices.Concat(logFields, []zap.Field{
+			requestFields := logFields
+			requestFields = append(requestFields,
 				zap.Uint32("keyspace-id", keyspaceID),
 				zap.String("resource-group", resourceGroupName),
-			})
+			)
 			// Get keyspace resource group manager to apply service limit later.
 			krgm, err := s.manager.accessKeyspaceResourceGroupManager(keyspaceID, resourceGroupName)
 			if krgm == nil {

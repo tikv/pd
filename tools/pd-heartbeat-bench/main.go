@@ -146,6 +146,7 @@ func bootstrap(ctx context.Context, cli pdpb.PDClient) {
 }
 
 func putStores(ctx context.Context, cfg *config.Config, cli pdpb.PDClient, stores *Stores) {
+	go stores.reportStoreHeartbeatFailures(ctx)
 	for i := uint64(1); i <= uint64(cfg.StoreCount); i++ {
 		store := &metapb.Store{
 			Id:      i,
@@ -206,6 +207,11 @@ func createHeartbeatStream(ctx context.Context, cfg *config.Config) (pdpb.PDClie
 // Stores contains store stats with lock.
 type Stores struct {
 	stat []atomic.Value
+
+	heartbeatFailureMu        sync.Mutex
+	failedStoreHeartbeatCount uint64
+	lastFailedStoreID         uint64
+	lastStoreHeartbeatError   string
 }
 
 func newStores(storeCount int) *Stores {
@@ -217,9 +223,48 @@ func newStores(storeCount int) *Stores {
 func (s *Stores) heartbeat(ctx context.Context, cli pdpb.PDClient, storeID uint64) {
 	cctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	_, err := cli.StoreHeartbeat(cctx, &pdpb.StoreHeartbeatRequest{Header: header(), Stats: s.stat[storeID].Load().(*pdpb.StoreStats)})
+	resp, err := cli.StoreHeartbeat(cctx, &pdpb.StoreHeartbeatRequest{Header: header(), Stats: s.stat[storeID].Load().(*pdpb.StoreStats)})
+	if err == nil && resp.GetHeader().GetError() != nil {
+		err = errors.New(resp.GetHeader().GetError().String())
+	}
 	if err != nil {
-		log.Error("store heartbeat failed", zap.Uint64("store-id", storeID), zap.Error(err))
+		s.heartbeatFailureMu.Lock()
+		s.failedStoreHeartbeatCount++
+		s.lastFailedStoreID = storeID
+		s.lastStoreHeartbeatError = err.Error()
+		s.heartbeatFailureMu.Unlock()
+	}
+}
+
+func (s *Stores) takeStoreHeartbeatFailures() (count, storeID uint64, err string) {
+	s.heartbeatFailureMu.Lock()
+	defer s.heartbeatFailureMu.Unlock()
+	count = s.failedStoreHeartbeatCount
+	s.failedStoreHeartbeatCount = 0
+	return count, s.lastFailedStoreID, s.lastStoreHeartbeatError
+}
+
+func (s *Stores) reportStoreHeartbeatFailures(ctx context.Context) {
+	reportTicker := time.NewTicker(time.Duration(storeReportInterval) * time.Second)
+	defer reportTicker.Stop()
+	report := func() {
+		count, storeID, err := s.takeStoreHeartbeatFailures()
+		if count == 0 {
+			return
+		}
+		log.Error("store heartbeats failed",
+			zap.Uint64("count", count),
+			zap.Uint64("last-store-id", storeID),
+			zap.String("last-error", err))
+	}
+	for {
+		select {
+		case <-reportTicker.C:
+			report()
+		case <-ctx.Done():
+			report()
+			return
+		}
 	}
 }
 

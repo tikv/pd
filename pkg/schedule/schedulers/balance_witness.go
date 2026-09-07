@@ -308,8 +308,7 @@ func (s *balanceWitnessScheduler) transferWitnessOut(solver *solver, collector *
 	finalFilters := s.filters
 	conf := solver.GetSchedulerConfig()
 	if witnessFilter := filter.NewPlacementWitnessSafeguard(s.GetName(), conf, solver.GetBasicCluster(), solver.GetRuleManager(), solver.Region, solver.Source, solver.fit); witnessFilter != nil {
-		finalFilters = slices.Clone(s.filters)
-		finalFilters = append(finalFilters, witnessFilter)
+		finalFilters = slices.Concat(s.filters, []filter.Filter{witnessFilter})
 	}
 	targets = filter.SelectTargetStores(targets, finalFilters, conf, collector, s.filterCounter)
 	sort.Slice(targets, func(i, j int) bool {

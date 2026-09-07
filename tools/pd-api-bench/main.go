@@ -227,6 +227,15 @@ func parseCaseNameAndConfig(str string) (string, *cases.Config) {
 	return name, cfg
 }
 
+func validateCaseNames[T any](input map[string]cases.Config, registered map[string]T, caseType string) error {
+	for name := range input {
+		if _, ok := registered[name]; !ok {
+			return errors.Errorf("%s case %s not implemented", caseType, name)
+		}
+	}
+	return nil
+}
+
 func runHTTPServer(cfg *config.Config, co *cases.Coordinator) {
 	gin.SetMode(gin.ReleaseMode)
 	engine := gin.New()
@@ -263,6 +272,10 @@ func runHTTPServer(cfg *config.Config, co *cases.Coordinator) {
 			c.String(http.StatusBadRequest, err.Error())
 			return
 		}
+		if err := validateCaseNames(input, cases.HTTPCaseFnMap, "HTTP"); err != nil {
+			c.String(http.StatusBadRequest, err.Error())
+			return
+		}
 		for name, cfg := range input {
 			if err := co.SetHTTPCase(name, &cfg); err != nil {
 				c.String(http.StatusBadRequest, err.Error())
@@ -286,6 +299,10 @@ func runHTTPServer(cfg *config.Config, co *cases.Coordinator) {
 			c.String(http.StatusBadRequest, err.Error())
 			return
 		}
+		if err := validateCaseNames(input, cases.GRPCCaseFnMap, "gRPC"); err != nil {
+			c.String(http.StatusBadRequest, err.Error())
+			return
+		}
 		for name, cfg := range input {
 			if err := co.SetGRPCCase(name, &cfg); err != nil {
 				c.String(http.StatusBadRequest, err.Error())
@@ -306,6 +323,10 @@ func runHTTPServer(cfg *config.Config, co *cases.Coordinator) {
 	engine.POST("config/etcd/all", func(c *gin.Context) {
 		var input map[string]cases.Config
 		if err := c.ShouldBindJSON(&input); err != nil {
+			c.String(http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := validateCaseNames(input, cases.EtcdCaseFnMap, "etcd"); err != nil {
 			c.String(http.StatusBadRequest, err.Error())
 			return
 		}

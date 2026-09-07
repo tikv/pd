@@ -354,15 +354,9 @@ func decodeKey(text string) (string, error) {
 
 		switch n[0] {
 		case 'x':
-			n = r.Next(2)
-			if len(n) != 2 {
-				return "", io.ErrUnexpectedEOF
-			}
-			decoded, err := hex.DecodeString(string(n))
-			if err != nil {
-				return "", errors.WithStack(err)
-			}
-			buf = append(buf, decoded[0])
+			// Keep accepting partial and malformed hexadecimal escapes for compatibility.
+			_, _ = fmt.Sscanf(string(r.Next(2)), "%02x", &c)
+			buf = append(buf, c)
 		default:
 			n = append(n, r.Next(2)...)
 			_, err := fmt.Sscanf(string(n), "%03o", &c)

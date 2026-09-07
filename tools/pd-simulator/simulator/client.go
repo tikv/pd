@@ -250,6 +250,9 @@ func (c *client) Close() {
 	c.cancel()
 	c.wg.Wait()
 
+	if c.clientConn == nil {
+		return
+	}
 	if err := c.clientConn.Close(); err != nil {
 		simutil.Logger.Error("failed to close grpc client connection", zap.String("tag", c.tag), zap.Error(err))
 	}

@@ -68,9 +68,11 @@ func TestDecodeKey(t *testing.T) {
 		{name: "octal", input: `\141`, expect: "a"},
 		{name: "escaped newline", input: `\n`, expect: "\n"},
 		{name: "plain", input: "abc", expect: "abc"},
-		{name: "missing hex digits", input: `\x`, wantErr: true},
-		{name: "short hex escape", input: `\x1`, wantErr: true},
-		{name: "invalid hex digit", input: `\x1g`, wantErr: true},
+		{name: "missing hex digits", input: `\x`, expect: `\`},
+		{name: "short hex escape", input: `\x1`, expect: string([]byte{1})},
+		{name: "partially invalid hex escape", input: `\x1g`, expect: string([]byte{1})},
+		{name: "invalid hex escape", input: `\xg1`, expect: `\`},
+		{name: "trailing escape", input: `abc\`, wantErr: true},
 	}
 
 	for _, tc := range testCases {
