@@ -17,12 +17,15 @@ package main
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+
+	"github.com/tikv/pd/tools/pd-heartbeat-bench/config"
 )
 
 type storeHeartbeatClient struct {
@@ -85,4 +88,22 @@ func TestStoreHeartbeatFailuresAreRecorded(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestStoreHeartbeatReporterFlushesBeforeDone(t *testing.T) {
+	stores := newStores(1)
+	stores.stat[1].Store(&pdpb.StoreStats{StoreId: 1})
+	stores.heartbeat(context.Background(), &storeHeartbeatClient{err: errors.New("transport failure")}, 1)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	reporterDone := putStores(ctx, &config.Config{}, nil, stores)
+	cancel()
+	select {
+	case <-reporterDone:
+	case <-time.After(time.Second):
+		t.Fatal("store heartbeat reporter did not stop")
+	}
+
+	count, _, _ := stores.takeStoreHeartbeatFailures()
+	require.Zero(t, count)
 }

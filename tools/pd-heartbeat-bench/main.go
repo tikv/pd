@@ -145,8 +145,12 @@ func bootstrap(ctx context.Context, cli pdpb.PDClient) {
 	log.Info("bootstrapped")
 }
 
-func putStores(ctx context.Context, cfg *config.Config, cli pdpb.PDClient, stores *Stores) {
-	go stores.reportStoreHeartbeatFailures(ctx)
+func putStores(ctx context.Context, cfg *config.Config, cli pdpb.PDClient, stores *Stores) <-chan struct{} {
+	reporterDone := make(chan struct{})
+	go func() {
+		defer close(reporterDone)
+		stores.reportStoreHeartbeatFailures(ctx)
+	}()
 	for i := uint64(1); i <= uint64(cfg.StoreCount); i++ {
 		store := &metapb.Store{
 			Id:      i,
@@ -175,6 +179,7 @@ func putStores(ctx context.Context, cfg *config.Config, cli pdpb.PDClient, store
 			}
 		}(ctx, i)
 	}
+	return reporterDone
 }
 
 func createHeartbeatStream(ctx context.Context, cfg *config.Config) (pdpb.PDClient, pdpb.PD_RegionHeartbeatClient) {
@@ -373,7 +378,7 @@ func main() {
 	stores := newStores(cfg.StoreCount)
 	stores.update(regions)
 	bootstrap(ctx, cli)
-	putStores(ctx, cfg, cli, stores)
+	heartbeatReporterDone := putStores(ctx, cfg, cli, stores)
 	log.Info("finish put stores")
 	clis := make(map[uint64]pdpb.PDClient, cfg.StoreCount)
 	httpCli := pdHttp.NewClient("tools-heartbeat-bench", []string{cfg.PDAddr}, pdHttp.WithTLSConfig(loadTLSConfig(cfg)))
@@ -394,6 +399,8 @@ func main() {
 		select {
 		case <-heartbeatTicker.C:
 			if cfg.Round != 0 && regions.UpdateRound > cfg.Round {
+				cancel()
+				<-heartbeatReporterDone
 				exit(0)
 			}
 			rep := newReport(cfg)
@@ -443,6 +450,7 @@ func main() {
 			wg.Wait()
 		case <-ctx.Done():
 			log.Info("got signal to exit")
+			<-heartbeatReporterDone
 			switch sig {
 			case syscall.SIGTERM:
 				exit(0)

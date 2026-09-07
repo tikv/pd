@@ -348,7 +348,7 @@ func newRetryClient(node *Node) (*retryClient, error) {
 		client:     client,
 		retryCount: retryTimes,
 	}
-	if err := retryClient.updateLeaderConnection(); err != nil {
+	if err := retryClient.updateLeaderConnection(node.ctx); err != nil {
 		client.Close()
 		return nil, errors.Annotate(err, "connect to PD leader failed")
 	}
@@ -359,23 +359,32 @@ func newRetryClient(node *Node) (*retryClient, error) {
 	return retryClient, nil
 }
 
-func (rc *retryClient) requestWithRetry(f func() (any, error)) (any, error) {
+func (rc *retryClient) requestWithRetry(ctx context.Context, f func() (any, error)) (any, error) {
 	// execute the function directly
 	if res, err := f(); err == nil {
 		return res, nil
 	}
-	if err := rc.updateLeaderConnection(); err != nil {
+	if err := rc.updateLeaderConnection(ctx); err != nil {
 		return nil, err
 	}
 	return f()
 }
 
-func (rc *retryClient) updateLeaderConnection() error {
+func (rc *retryClient) updateLeaderConnection(ctx context.Context) error {
+	retryTimer := time.NewTimer(100 * time.Millisecond)
+	defer retryTimer.Stop()
 	for range rc.retryCount {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		SD.ScheduleCheckMemberChanged()
-		time.Sleep(100 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-retryTimer.C:
+		}
 		if client := SD.GetServiceClient(); client != nil {
-			_, conn, err := getLeaderURL(context.Background(), client.GetClientConn())
+			_, conn, err := getLeaderURL(ctx, client.GetClientConn())
 			if err != nil {
 				simutil.Logger.Error("[retry] failed to get leader URL", zap.Error(err))
 				return err
@@ -386,6 +395,7 @@ func (rc *retryClient) updateLeaderConnection() error {
 			}
 			return nil
 		}
+		retryTimer.Reset(100 * time.Millisecond)
 	}
 	return errors.New("failed to retry")
 }
@@ -412,7 +422,7 @@ func getLeaderURL(ctx context.Context, conn *grpc.ClientConn) (string, *grpc.Cli
 }
 
 func (rc *retryClient) allocID(ctx context.Context) (uint64, error) {
-	res, err := rc.requestWithRetry(func() (any, error) {
+	res, err := rc.requestWithRetry(ctx, func() (any, error) {
 		id, err := rc.client.allocID(ctx)
 		return id, err
 	})
@@ -424,7 +434,7 @@ func (rc *retryClient) allocID(ctx context.Context) (uint64, error) {
 
 // PutStore sends PutStore to PD.
 func (rc *retryClient) PutStore(ctx context.Context, store *metapb.Store) error {
-	_, err := rc.requestWithRetry(func() (any, error) {
+	_, err := rc.requestWithRetry(ctx, func() (any, error) {
 		err := rc.client.PutStore(ctx, store)
 		return nil, err
 	})
@@ -433,7 +443,7 @@ func (rc *retryClient) PutStore(ctx context.Context, store *metapb.Store) error 
 
 // StoreHeartbeat sends a StoreHeartbeat to PD.
 func (rc *retryClient) StoreHeartbeat(ctx context.Context, newStats *pdpb.StoreStats) error {
-	_, err := rc.requestWithRetry(func() (any, error) {
+	_, err := rc.requestWithRetry(ctx, func() (any, error) {
 		err := rc.client.StoreHeartbeat(ctx, newStats)
 		return nil, err
 	})
@@ -442,7 +452,7 @@ func (rc *retryClient) StoreHeartbeat(ctx context.Context, newStats *pdpb.StoreS
 
 // RegionHeartbeat sends a RegionHeartbeat to PD.
 func (rc *retryClient) RegionHeartbeat(ctx context.Context, region *core.RegionInfo) error {
-	_, err := rc.requestWithRetry(func() (any, error) {
+	_, err := rc.requestWithRetry(ctx, func() (any, error) {
 		err := rc.client.RegionHeartbeat(ctx, region)
 		return nil, err
 	})
