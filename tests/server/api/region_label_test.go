@@ -115,11 +115,8 @@ func (suite *regionLabelTestSuite) checkGetSet(cluster *tests.TestCluster) {
 	re.NoError(err)
 }
 
-func makeKeyRanges(keys ...string) []any {
-	var res []any
-	for i := 0; i < len(keys); i += 2 {
-		// #nosec G602 -- Test inputs are start/end pairs; odd input intentionally panics.
-		res = append(res, map[string]any{"start_key": keys[i], "end_key": keys[i+1]})
+func makeKeyRanges(startKey, endKey string) []any {
+	return []any{
+		map[string]any{"start_key": startKey, "end_key": endKey},
 	}
-	return res
 }
