@@ -307,9 +307,11 @@ func (suite *operatorControllerTestSuite) TestOperatorControllerMarksStepDispatc
 	// step, before any Dispatch() call runs.
 	re.True(op.HasStepBeenDispatched(op.CurrentStepIndex()))
 
-	// Store 4 goes unhealthy before the next heartbeat. Since the step's
-	// command was already sent at creation time, this must not cancel the
-	// operator.
+	// Store 4 goes unhealthy after the step's command was already sent at
+	// creation time. Per the scope boundary in checkStaleOperator, an
+	// operator is not health-cancelled once its command is in flight (that
+	// case needs orphan-peer cleanup, tracked in #11143), so it stays
+	// RUNNING and falls back to the pre-existing Down-threshold check.
 	tc.SetStoreLastHeartbeatInterval(4, 11*time.Minute)
 	oc.Dispatch(region, DispatchFromHeartBeat, nil)
 	re.Equal(pdpb.OperatorStatus_RUNNING, oc.GetOperatorStatus(1).Status)

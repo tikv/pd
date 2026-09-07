@@ -222,6 +222,12 @@ func (oc *Controller) checkStaleOperator(op *Operator, step OpStep, region *core
 	// applying (or have applied) the conf change regardless of what the
 	// current heartbeat happens to show, so cancelling past that point can't
 	// undo it and would only orphan the target's peer.
+	//
+	// This is a deliberate scope boundary: an operator whose target goes
+	// Unhealthy *after* its command was dispatched (e.g. during snapshot
+	// streaming) is left to the pre-existing Down-threshold check. Failing
+	// such an in-flight operator safely needs an orphan-peer cleanup /
+	// replacement design that is out of scope here (see #11143).
 	needStoreHealthCheck := op.NeedStoreHealthCheck() && !op.HasStepBeenDispatched(currentStep)
 	err := step.CheckInProgress(oc.cluster, oc.config, region, needStoreHealthCheck)
 	if err != nil {
