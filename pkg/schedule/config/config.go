@@ -494,13 +494,12 @@ func (c *ScheduleConfig) Adjust(meta *configutil.ConfigMetaData, reloading bool)
 	if !meta.IsDefined("slow-store-evicting-affected-store-ratio-threshold") {
 		configutil.AdjustFloat64(&c.SlowStoreEvictingAffectedStoreRatioThreshold, defaultSlowStoreEvictingAffectedStoreRatioThreshold)
 	}
-	c.migrateTransferLeaderInLimit()
+	c.adjustTransferLeaderInLimit()
 	return c.Validate()
 }
 
-// migrateTransferLeaderInLimit preserves unlimited transfers for older configs
-// with omitted fields or persisted zeros, using the existing unlimited sentinel.
-func (c *ScheduleConfig) migrateTransferLeaderInLimit() {
+// adjustTransferLeaderInLimit replaces zero-valued leader-transfer limits with Unlimited.
+func (c *ScheduleConfig) adjustTransferLeaderInLimit() {
 	configutil.AdjustFloat64(&c.DefaultStoreLimit.TransferLeaderIn, storelimit.Unlimited)
 	for storeID, limit := range c.StoreLimit {
 		if limit.TransferLeaderIn == 0 {
@@ -554,7 +553,7 @@ func (c *ScheduleConfig) migratePersistedStoreLimit(addPeerDefined, removePeerDe
 	if !transferLeaderInDefined {
 		c.DefaultStoreLimit.TransferLeaderIn = defaultStoreLimit.TransferLeaderIn
 	}
-	c.migrateTransferLeaderInLimit()
+	c.adjustTransferLeaderInLimit()
 	DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, c.DefaultStoreLimit.AddPeer)
 	DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, c.DefaultStoreLimit.RemovePeer)
 	DefaultStoreLimit.SetDefaultStoreLimit(storelimit.TransferLeaderIn, c.DefaultStoreLimit.TransferLeaderIn)
@@ -610,10 +609,8 @@ func (c *ScheduleConfig) MigrateDeprecatedFlags() {
 	c.applyDeprecatedFlagMigration(true, true, true)
 }
 
-// MigrateDeprecatedFlagsFromJSON migrates a full persisted or remote schedule
-// config while preserving explicit zero peer limits. Legacy zero leader-transfer
-// limits migrate to Unlimited. JSON presence is consumed at the decoding boundary
-// and is never retained in the runtime ScheduleConfig.
+// MigrateDeprecatedFlagsFromJSON migrates persisted or remote scheduling
+// configuration, using JSON field presence to preserve explicit zero peer limits.
 func (c *ScheduleConfig) MigrateDeprecatedFlagsFromJSON(data []byte) error {
 	var fields struct {
 		DefaultStoreLimit map[string]json.RawMessage `json:"default-store-limit"`

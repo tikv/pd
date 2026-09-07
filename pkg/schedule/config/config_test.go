@@ -25,7 +25,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/configutil"
 )
 
-func TestTransferLeaderInLimitMigration(t *testing.T) {
+func TestTransferLeaderInLimitDefaults(t *testing.T) {
 	previous := DefaultStoreLimitConfig()
 	t.Cleanup(func() {
 		DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, previous.AddPeer)
