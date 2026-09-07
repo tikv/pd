@@ -122,7 +122,9 @@ func main() {
 	pdClis := make([]pd.Client, cfg.Client)
 	for i := range cfg.Client {
 		pdClis[i] = newPDClient(ctx, cfg)
-		_ = pdClis[i].UpdateOption(opt.EnableFollowerHandle, true)
+		if err := pdClis[i].UpdateOption(opt.EnableFollowerHandle, true); err != nil {
+			log.Fatal("enable follower handle failed", zap.Error(err))
+		}
 	}
 	etcdClis := make([]*clientv3.Client, cfg.Client)
 	for i := range cfg.Client {
@@ -146,7 +148,9 @@ func main() {
 		if len(name) == 0 {
 			continue
 		}
-		_ = coordinator.SetHTTPCase(name, cfg)
+		if err := coordinator.SetHTTPCase(name, cfg); err != nil {
+			log.Fatal("set HTTP case failed", zap.String("case", name), zap.Error(err))
+		}
 	}
 	gcaseStr := strings.Split(gRPCCases, ",")
 	for _, str := range gcaseStr {
@@ -154,7 +158,9 @@ func main() {
 		if len(name) == 0 {
 			continue
 		}
-		_ = coordinator.SetGRPCCase(name, cfg)
+		if err := coordinator.SetGRPCCase(name, cfg); err != nil {
+			log.Fatal("set gRPC case failed", zap.String("case", name), zap.Error(err))
+		}
 	}
 	cfg.InitCoordinator(coordinator)
 
@@ -258,14 +264,20 @@ func runHTTPServer(cfg *config.Config, co *cases.Coordinator) {
 			return
 		}
 		for name, cfg := range input {
-			_ = co.SetHTTPCase(name, &cfg)
+			if err := co.SetHTTPCase(name, &cfg); err != nil {
+				c.String(http.StatusBadRequest, err.Error())
+				return
+			}
 		}
 		c.String(http.StatusOK, "")
 	})
 	engine.POST("config/http/:name", func(c *gin.Context) {
 		name := c.Param("name")
 		cfg := getCfg(c)
-		_ = co.SetHTTPCase(name, cfg)
+		if err := co.SetHTTPCase(name, cfg); err != nil {
+			c.String(http.StatusBadRequest, err.Error())
+			return
+		}
 		c.String(http.StatusOK, "")
 	})
 	engine.POST("config/grpc/all", func(c *gin.Context) {
@@ -275,14 +287,20 @@ func runHTTPServer(cfg *config.Config, co *cases.Coordinator) {
 			return
 		}
 		for name, cfg := range input {
-			_ = co.SetGRPCCase(name, &cfg)
+			if err := co.SetGRPCCase(name, &cfg); err != nil {
+				c.String(http.StatusBadRequest, err.Error())
+				return
+			}
 		}
 		c.String(http.StatusOK, "")
 	})
 	engine.POST("config/grpc/:name", func(c *gin.Context) {
 		name := c.Param("name")
 		cfg := getCfg(c)
-		_ = co.SetGRPCCase(name, cfg)
+		if err := co.SetGRPCCase(name, cfg); err != nil {
+			c.String(http.StatusBadRequest, err.Error())
+			return
+		}
 		c.String(http.StatusOK, "")
 	})
 	engine.POST("config/etcd/all", func(c *gin.Context) {
@@ -292,14 +310,20 @@ func runHTTPServer(cfg *config.Config, co *cases.Coordinator) {
 			return
 		}
 		for name, cfg := range input {
-			_ = co.SetEtcdCase(name, &cfg)
+			if err := co.SetEtcdCase(name, &cfg); err != nil {
+				c.String(http.StatusBadRequest, err.Error())
+				return
+			}
 		}
 		c.String(http.StatusOK, "")
 	})
 	engine.POST("config/etcd/:name", func(c *gin.Context) {
 		name := c.Param("name")
 		cfg := getCfg(c)
-		_ = co.SetEtcdCase(name, cfg)
+		if err := co.SetEtcdCase(name, cfg); err != nil {
+			c.String(http.StatusBadRequest, err.Error())
+			return
+		}
 		c.String(http.StatusOK, "")
 	})
 
@@ -342,7 +366,9 @@ func runHTTPServer(cfg *config.Config, co *cases.Coordinator) {
 		}
 		c.IndentedJSON(http.StatusOK, cfg)
 	})
-	_ = engine.Run(cfg.StatusAddr)
+	if err := engine.Run(cfg.StatusAddr); err != nil {
+		log.Fatal("run status server failed", zap.Error(err))
+	}
 }
 
 const (

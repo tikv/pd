@@ -57,6 +57,35 @@ func TestCheckKey(t *testing.T) {
 	}
 }
 
+func TestDecodeKey(t *testing.T) {
+	testCases := []struct {
+		name    string
+		input   string
+		expect  string
+		wantErr bool
+	}{
+		{name: "hex", input: `\x61`, expect: "a"},
+		{name: "octal", input: `\141`, expect: "a"},
+		{name: "escaped newline", input: `\n`, expect: "\n"},
+		{name: "plain", input: "abc", expect: "abc"},
+		{name: "missing hex digits", input: `\x`, wantErr: true},
+		{name: "short hex escape", input: `\x1`, wantErr: true},
+		{name: "invalid hex digit", input: `\x1g`, wantErr: true},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			actual, err := decodeKey(tc.input)
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.expect, actual)
+		})
+	}
+}
+
 func TestExpandHexStackOverflow(t *testing.T) {
 	// This is a valid hex string
 	hexStr := "616263646566" // "abcdef" in hex

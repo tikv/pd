@@ -144,21 +144,21 @@ func (suite *tsoConsistencyTestSuite) request(ctx context.Context, count uint32)
 		Count:  count,
 	}
 	var resp *tsopb.TsoResponse
-	as.Eventually(func() bool {
+	if !as.Eventually(func() bool {
 		tsoClient, err := suite.tsoClient.Tso(ctx)
-		if !noError(err) {
+		if err != nil {
 			return false
 		}
-		defer func() {
-			err := tsoClient.CloseSend()
-			noError(err)
-		}()
-		if !noError(tsoClient.Send(req)) {
+		if err := tsoClient.Send(req); err != nil {
+			_ = tsoClient.CloseSend()
 			return false
 		}
 		resp, err = tsoClient.Recv()
-		return err == nil && resp != nil
-	}, 20*time.Second, 100*time.Millisecond)
+		closeErr := tsoClient.CloseSend()
+		return err == nil && closeErr == nil && resp != nil
+	}, 20*time.Second, 100*time.Millisecond) {
+		return nil
+	}
 	return checkAndReturnTimestampResponse(as, resp)
 }
 

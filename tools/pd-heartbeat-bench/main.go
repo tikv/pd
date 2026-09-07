@@ -217,7 +217,10 @@ func newStores(storeCount int) *Stores {
 func (s *Stores) heartbeat(ctx context.Context, cli pdpb.PDClient, storeID uint64) {
 	cctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	_, _ = cli.StoreHeartbeat(cctx, &pdpb.StoreHeartbeatRequest{Header: header(), Stats: s.stat[storeID].Load().(*pdpb.StoreStats)})
+	_, err := cli.StoreHeartbeat(cctx, &pdpb.StoreHeartbeatRequest{Header: header(), Stats: s.stat[storeID].Load().(*pdpb.StoreStats)})
+	if err != nil {
+		log.Error("store heartbeat failed", zap.Uint64("store-id", storeID), zap.Error(err))
+	}
 }
 
 func (s *Stores) update(rs *utils.Regions) {
@@ -488,7 +491,9 @@ func runHTTPServer(cfg *config.Config, options *config.Options) {
 		c.IndentedJSON(http.StatusOK, "Successfully collect metrics")
 	})
 
-	_ = engine.Run(cfg.StatusAddr)
+	if err := engine.Run(cfg.StatusAddr); err != nil {
+		log.Fatal("run status server failed", zap.Error(err))
+	}
 }
 
 func loadTLSConfig(cfg *config.Config) *tls.Config {

@@ -22,6 +22,7 @@ import (
 	mrand "math/rand/v2"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -582,12 +583,16 @@ func TestSetRegionConcurrence(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/core/UpdateSubTree", `return()`))
 	regions := NewRegionsInfo()
 	region := NewTestRegionInfo(1, 1, []byte("a"), []byte("b"))
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		_, err := regions.AtomicCheckAndPutRegion(ContextTODO(), region)
 		assert.NoError(t, err)
 	}()
 	_, err := regions.AtomicCheckAndPutRegion(ContextTODO(), region)
 	re.NoError(err)
+	wg.Wait()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/core/UpdateSubTree"))
 }
 

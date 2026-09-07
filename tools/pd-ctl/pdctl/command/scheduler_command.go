@@ -193,7 +193,9 @@ func checkSchedulerExist(cmd *cobra.Command, schedulerName string) (bool, error)
 		return false, err
 	}
 	var schedulerList []string
-	_ = json.Unmarshal([]byte(r), &schedulerList)
+	if err := json.Unmarshal([]byte(r), &schedulerList); err != nil {
+		return false, errors.WithStack(err)
+	}
 	for idx := range schedulerList {
 		if strings.Contains(schedulerList[idx], schedulerName) {
 			return true, nil

@@ -318,7 +318,7 @@ type retryClient struct {
 	retryCount int
 }
 
-func newRetryClient(node *Node) *retryClient {
+func newRetryClient(node *Node) (*retryClient, error) {
 	// Init PD client and putting it into node.
 	tag := fmt.Sprintf("store %d", node.Id)
 	var (
@@ -337,24 +337,23 @@ func newRetryClient(node *Node) *retryClient {
 	}
 
 	if err != nil {
-		simutil.Logger.Fatal("create client failed", zap.Error(err))
+		return nil, errors.Annotate(err, "create client failed")
 	}
-	node.client = client
 
 	// Init retryClient
 	retryClient := &retryClient{
 		client:     client,
 		retryCount: retryTimes,
 	}
-	// check leader url firstly
-	_, _ = retryClient.requestWithRetry(func() (any, error) {
-		return nil, errors.New("retry to create client")
-	})
+	if err := retryClient.updateLeaderConnection(); err != nil {
+		client.Close()
+		return nil, errors.Annotate(err, "connect to PD leader failed")
+	}
 	// start heartbeat stream
 	node.receiveRegionHeartbeatCh = receiveRegionHeartbeatCh
 	go client.heartbeatStreamLoop()
 
-	return retryClient
+	return retryClient, nil
 }
 
 func (rc *retryClient) requestWithRetry(f func() (any, error)) (any, error) {
@@ -362,7 +361,13 @@ func (rc *retryClient) requestWithRetry(f func() (any, error)) (any, error) {
 	if res, err := f(); err == nil {
 		return res, nil
 	}
-	// retry to get leader URL
+	if err := rc.updateLeaderConnection(); err != nil {
+		return nil, err
+	}
+	return f()
+}
+
+func (rc *retryClient) updateLeaderConnection() error {
 	for range rc.retryCount {
 		SD.ScheduleCheckMemberChanged()
 		time.Sleep(100 * time.Millisecond)
@@ -370,16 +375,16 @@ func (rc *retryClient) requestWithRetry(f func() (any, error)) (any, error) {
 			_, conn, err := getLeaderURL(context.Background(), client.GetClientConn())
 			if err != nil {
 				simutil.Logger.Error("[retry] failed to get leader URL", zap.Error(err))
-				return nil, err
+				return err
 			}
 			if err = rc.client.changeConn(conn); err != nil {
 				simutil.Logger.Error("failed to change connection", zap.Error(err))
-				return nil, err
+				return err
 			}
-			return f()
+			return nil
 		}
 	}
-	return nil, errors.New("failed to retry")
+	return errors.New("failed to retry")
 }
 
 func getLeaderURL(ctx context.Context, conn *grpc.ClientConn) (string, *grpc.ClientConn, error) {
@@ -554,10 +559,13 @@ func PutPDConfig(config *sc.PDConfig) error {
 	return nil
 }
 
-// ChooseToHaltPDSchedule is used to choose whether to halt the PD schedule
-func ChooseToHaltPDSchedule(halt bool) {
-	haltSchedule.Store(halt)
-	_ = PDHTTPClient.SetConfig(context.Background(), map[string]any{
+// ChooseToHaltPDSchedule is used to choose whether to halt the PD schedule.
+func ChooseToHaltPDSchedule(halt bool) error {
+	if err := PDHTTPClient.SetConfig(context.Background(), map[string]any{
 		"schedule.halt-scheduling": strconv.FormatBool(halt),
-	})
+	}); err != nil {
+		return err
+	}
+	haltSchedule.Store(halt)
+	return nil
 }

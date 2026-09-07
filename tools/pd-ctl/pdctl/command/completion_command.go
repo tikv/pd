@@ -82,33 +82,30 @@ func NewCompletionCommand() *cobra.Command {
 		Short:                 "Output shell completion code for the specified shell (bash)",
 		Long:                  completionLongDesc,
 		Example:               completionExample,
-		Run:                   RunCompletion,
+		RunE:                  RunCompletion,
 		ValidArgs:             shells,
 	}
 
 	return cmd
 }
 
-// RunCompletion wrapped the bash and zsh completion scripts
-func RunCompletion(cmd *cobra.Command, args []string) {
+// RunCompletion wraps the bash and zsh completion scripts.
+func RunCompletion(cmd *cobra.Command, args []string) error {
 	if len(args) == 0 {
 		cmd.Println("Shell not specified.")
-		_ = cmd.Usage()
-		return
+		return cmd.Usage()
 	}
 	if len(args) > 1 {
 		cmd.Println("Too many arguments. Expected only the shell type.")
-		_ = cmd.Usage()
-		return
+		return cmd.Usage()
 	}
 	run, found := completionShells[args[0]]
 	if !found {
 		cmd.Printf("Unsupported shell type %q.\n", args[0])
-		_ = cmd.Usage()
-		return
+		return cmd.Usage()
 	}
 
-	_ = run(os.Stdout, cmd.Root())
+	return run(os.Stdout, cmd.Root())
 }
 
 func runCompletionBash(out io.Writer, cmd *cobra.Command) error {

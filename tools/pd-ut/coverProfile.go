@@ -39,7 +39,10 @@ func collectCoverProfileFile() {
 	}
 	//nolint: errcheck
 	defer w.Close()
-	_, _ = w.WriteString("mode: atomic\n")
+	if _, err := w.WriteString("mode: atomic\n"); err != nil {
+		fmt.Println("write cover profile header error:", err)
+		os.Exit(-1)
+	}
 
 	result := make(map[string]*cover.Profile)
 	for _, file := range files {
