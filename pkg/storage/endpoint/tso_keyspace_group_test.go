@@ -19,11 +19,34 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 )
+
+func TestRunInTxnWithConditionsFallback(t *testing.T) {
+	re := require.New(t)
+	store := NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	called := false
+	runTxn := func(kv.Txn) error {
+		called = true
+		return nil
+	}
+
+	re.NoError(store.RunInTxnWithConditions(context.Background(), nil, runTxn))
+	re.True(called)
+
+	called = false
+	err := store.RunInTxnWithConditions(
+		context.Background(),
+		[]clientv3.Cmp{clientv3.Compare(clientv3.Value("leader"), "=", "current")},
+		runTxn,
+	)
+	re.ErrorContains(err, "does not support conditional transactions")
+	re.False(called)
+}
 
 func TestLoadKeyspaceGroupRevisionComparisonKeepsRequestBounded(t *testing.T) {
 	re := require.New(t)

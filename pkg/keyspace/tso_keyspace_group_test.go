@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
+	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
@@ -63,6 +64,10 @@ type countingKeyspaceGroupStorage struct {
 type ambiguousCommitKeyspaceGroupStorage struct {
 	*endpoint.StorageEndpoint
 	failNextRun atomic.Bool
+}
+
+type keyspaceGroupStorageWithoutConditionalTxn struct {
+	endpoint.KeyspaceGroupStorage
 }
 
 func (s *countingKeyspaceGroupStorage) LoadKeyspaceGroup(txn kv.Txn, id uint32) (*endpoint.KeyspaceGroup, error) {
@@ -667,6 +672,25 @@ func TestRemoveKeyspacesFromGroupIsFencedByLeadershipTerm(t *testing.T) {
 	re.Equal(maxKeyspaceRemovalBatchSize, removed)
 }
 
+func TestRemoveKeyspacesFromGroupRejectsInvalidExecutionContext(t *testing.T) {
+	re := require.New(t)
+	groupManager := &GroupManager{}
+
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := groupManager.RemoveKeyspacesFromGroup(canceledCtx, 0, nil, nil, nil)
+	re.ErrorIs(err, context.Canceled)
+	_, err = groupManager.removeKeyspacesFromGroupWithConditions(canceledCtx, 0, nil, nil, nil)
+	re.ErrorIs(err, context.Canceled)
+
+	_, err = groupManager.RemoveKeyspacesFromGroup(context.Background(), 0, nil, nil, nil)
+	re.ErrorContains(err, errs.NotLeaderErr)
+	uninitializedLeadership := election.NewLeadership(nil, "/uninitialized", "test", "test")
+	_, err = groupManager.RemoveKeyspacesFromGroup(
+		context.Background(), 0, nil, uninitializedLeadership, nil)
+	re.ErrorContains(err, errs.NotLeaderErr)
+}
+
 func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupUsesBoundedTransactions() {
 	re := suite.Require()
 	keyspaceCount := maxKeyspaceRemovalBatchSize*2 + 1
@@ -817,6 +841,88 @@ func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupKeepsSingleTran
 		suite.ctx, constant.DefaultKeyspaceGroupID, suite.kg, keyspaceIDs, nil)
 	re.NoError(err)
 	re.Equal(int32(1), countingStore.runInTxnCount.Load())
+}
+
+func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupFiltersProtectedAndDuplicateIDs() {
+	re := suite.Require()
+	archivedID := suite.createArchivedKeyspaces(1)[0]
+	bootstrapID := GetBootstrapKeyspaceID()
+
+	group, err := suite.kgm.removeKeyspacesFromGroupWithConditions(
+		suite.ctx,
+		constant.DefaultKeyspaceGroupID,
+		suite.kg,
+		[]uint32{bootstrapID, archivedID, archivedID},
+		nil,
+	)
+	re.NoError(err)
+	re.Contains(group.Keyspaces, bootstrapID)
+	re.NotContains(group.Keyspaces, archivedID)
+	_, err = suite.kg.LoadKeyspaceByID(archivedID)
+	re.ErrorIs(err, errs.ErrKeyspaceNotFound)
+}
+
+func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupRejectsTransitionalGroups() {
+	testCases := []struct {
+		name       string
+		group      *endpoint.KeyspaceGroup
+		isExpected func(error) bool
+	}{
+		{
+			name: "splitting",
+			group: &endpoint.KeyspaceGroup{
+				ID:         100,
+				UserKind:   endpoint.Standard.String(),
+				SplitState: &endpoint.SplitState{SplitSource: 100},
+			},
+			isExpected: errs.ErrKeyspaceGroupInSplit.Equal,
+		},
+		{
+			name: "merging",
+			group: &endpoint.KeyspaceGroup{
+				ID:         101,
+				UserKind:   endpoint.Standard.String(),
+				MergeState: &endpoint.MergeState{MergeList: []uint32{102}},
+			},
+			isExpected: errs.ErrKeyspaceGroupInMerging.Equal,
+		},
+	}
+	for _, testCase := range testCases {
+		suite.Run(testCase.name, func() {
+			re := suite.Require()
+			re.NoError(suite.kgm.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+				return suite.kgm.store.SaveKeyspaceGroup(txn, testCase.group)
+			}))
+			_, err := suite.kgm.removeKeyspacesFromGroupWithConditions(
+				suite.ctx, testCase.group.ID, suite.kg, []uint32{1000}, nil)
+			re.True(testCase.isExpected(err), err)
+		})
+	}
+}
+
+func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupPropagatesStorageFailures() {
+	re := suite.Require()
+	store, ok := suite.kg.store.(*endpoint.StorageEndpoint)
+	re.True(ok)
+
+	loadErr := errors.New("load keyspace group")
+	suite.kgm.store = &countingKeyspaceGroupStorage{
+		StorageEndpoint: store,
+		loadGroupErr:    loadErr,
+	}
+	_, err := suite.kgm.removeKeyspacesFromGroupWithConditions(
+		suite.ctx, constant.DefaultKeyspaceGroupID, suite.kg, []uint32{1000}, nil)
+	re.ErrorIs(err, loadErr)
+
+	suite.kgm.store = &keyspaceGroupStorageWithoutConditionalTxn{KeyspaceGroupStorage: store}
+	_, err = suite.kgm.removeKeyspacesFromGroupWithConditions(
+		suite.ctx,
+		constant.DefaultKeyspaceGroupID,
+		suite.kg,
+		[]uint32{1000},
+		[]clientv3.Cmp{clientv3.Compare(clientv3.Value("leader"), "=", "current")},
+	)
+	re.ErrorContains(err, "does not support conditional transactions")
 }
 
 func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupBoundsDistinctAssignmentUpdates() {
