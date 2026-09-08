@@ -25,23 +25,14 @@ import (
 	"github.com/tikv/pd/pkg/statistics"
 )
 
-// scatterRegionView projects accepted choices from the original peer identities.
-// Only completed choices belong here; reserving another existing peer's store
-// during re-selection does not move the source peer.
-func scatterRegionView(region *core.RegionInfo, accepted map[uint64]uint64) *core.RegionInfo {
-	peers := make([]*metapb.Peer, 0, len(region.GetPeers()))
-	var leader *metapb.Peer
-	for _, p := range region.GetPeers() {
-		peer := *p
-		if store, ok := accepted[p.GetStoreId()]; ok {
-			peer.StoreId = store
-		}
-		peers = append(peers, &peer)
-		if p.GetId() == region.GetLeader().GetId() {
-			leader = &peer
-		}
+// moveScatterPeer updates a request-owned clone after a completed selection.
+// Address peers by ID so updating one store cannot accidentally move another
+// peer in a chain of replacements. The standalone leader is a separate clone.
+func moveScatterPeer(view *core.RegionInfo, peerID, storeID uint64) {
+	view.GetPeer(peerID).StoreId = storeID
+	if view.GetLeader().GetId() == peerID {
+		view.GetLeader().StoreId = storeID
 	}
-	return region.Clone(core.SetPeers(peers), core.WithLeader(leader))
 }
 
 type scatterStoreSet map[uint64]*core.StoreInfo

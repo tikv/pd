@@ -619,7 +619,7 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 	specialPeers := make(map[string]map[uint64]*metapb.Peer)
 	oldFit := r.cluster.GetRuleManager().FitRegion(r.cluster, region)
 	view := region
-	accepted := make(map[uint64]uint64, len(region.GetPeers()))
+	viewFit := oldFit
 	// Group peers by the engine of their stores
 	for _, peer := range region.GetPeers() {
 		store := r.cluster.GetStore(peer.GetStoreId())
@@ -679,27 +679,34 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 				log.Error("failed to get the store", zap.Uint64("store-id", peer.GetStoreId()), errs.ZapError(errs.ErrGetSourceStore))
 				continue
 			}
-			var viewFit *placement.RegionFit
-			if r.cluster.GetSharedConfig().IsPlacementRulesEnabled() {
+			if r.cluster.GetSharedConfig().IsPlacementRulesEnabled() && viewFit == nil {
 				viewFit = r.cluster.GetRuleManager().FitRegionWithoutCache(r.cluster, view)
 			}
 			filters[filterLen-1] = filter.NewPlacementSafeguard(r.name, r.cluster.GetSharedConfig(), r.cluster.GetBasicCluster(), r.cluster.GetRuleManager(), view, sourceStore, viewFit)
 			for {
 				newPeer := r.selectNewPeer(context, group, peer, filters, internalScatter)
-				targetPeers[newPeer.GetStoreId()] = newPeer
 				selectedStores[newPeer.GetStoreId()] = struct{}{}
 				// If the selected peer is a peer other than origin peer in this region,
 				// it is considered that the selected peer select itself.
 				// This origin peer re-selects.
 				if _, ok := peers[newPeer.GetStoreId()]; !ok || peer.GetStoreId() == newPeer.GetStoreId() {
+					targetPeers[newPeer.GetStoreId()] = newPeer
 					selectedStores[peer.GetStoreId()] = struct{}{}
-					accepted[peer.GetStoreId()] = newPeer.GetStoreId()
-					view = scatterRegionView(region, accepted)
+					if peer.GetStoreId() != newPeer.GetStoreId() {
+						if view == region {
+							view = region.Clone()
+						}
+						moveScatterPeer(view, peer.GetId(), newPeer.GetStoreId())
+						viewFit = nil
+					}
 					if collectLeaderCandidates && allowLeader(oldFit, peer) {
 						leaderCandidateStores = append(leaderCandidateStores, newPeer.GetStoreId())
 					}
 					break
 				}
+				// Reserving another peer keeps that peer in place, including its
+				// role and witness state; the source still needs a new target.
+				targetPeers[newPeer.GetStoreId()] = peers[newPeer.GetStoreId()]
 			}
 		}
 	}
