@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -24,8 +25,6 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-
-	"github.com/tikv/pd/tools/pd-heartbeat-bench/config"
 )
 
 type storeHeartbeatClient struct {
@@ -93,11 +92,18 @@ func TestStoreHeartbeatFailuresAreRecorded(t *testing.T) {
 func TestStoreHeartbeatReporterFlushesBeforeDone(t *testing.T) {
 	stores := newStores(1)
 	stores.stat[1].Store(&pdpb.StoreStats{StoreId: 1})
-	stores.heartbeat(context.Background(), &storeHeartbeatClient{err: errors.New("transport failure")}, 1)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	reporterDone := putStores(ctx, &config.Config{}, nil, stores)
+	heartbeatWorkers := &sync.WaitGroup{}
+	heartbeatWorkers.Add(1)
+	reporterDone := make(chan struct{})
+	go func() {
+		defer close(reporterDone)
+		stores.reportStoreHeartbeatFailures(ctx, heartbeatWorkers)
+	}()
 	cancel()
+	stores.heartbeat(context.Background(), &storeHeartbeatClient{err: errors.New("transport failure")}, 1)
+	heartbeatWorkers.Done()
 	select {
 	case <-reporterDone:
 	case <-time.After(time.Second):

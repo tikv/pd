@@ -146,11 +146,7 @@ func bootstrap(ctx context.Context, cli pdpb.PDClient) {
 }
 
 func putStores(ctx context.Context, cfg *config.Config, cli pdpb.PDClient, stores *Stores) <-chan struct{} {
-	reporterDone := make(chan struct{})
-	go func() {
-		defer close(reporterDone)
-		stores.reportStoreHeartbeatFailures(ctx)
-	}()
+	heartbeatWorkers := &sync.WaitGroup{}
 	for i := uint64(1); i <= uint64(cfg.StoreCount); i++ {
 		store := &metapb.Store{
 			Id:      i,
@@ -166,7 +162,9 @@ func putStores(ctx context.Context, cfg *config.Config, cli pdpb.PDClient, store
 		if resp.GetHeader().GetError() != nil {
 			log.Fatal("failed to put store", zap.Uint64("store-id", i), zap.String("err", resp.GetHeader().GetError().String()))
 		}
+		heartbeatWorkers.Add(1)
 		go func(ctx context.Context, storeID uint64) {
+			defer heartbeatWorkers.Done()
 			heartbeatTicker := time.NewTicker(10 * time.Second)
 			defer heartbeatTicker.Stop()
 			for {
@@ -179,6 +177,11 @@ func putStores(ctx context.Context, cfg *config.Config, cli pdpb.PDClient, store
 			}
 		}(ctx, i)
 	}
+	reporterDone := make(chan struct{})
+	go func() {
+		defer close(reporterDone)
+		stores.reportStoreHeartbeatFailures(ctx, heartbeatWorkers)
+	}()
 	return reporterDone
 }
 
@@ -249,7 +252,7 @@ func (s *Stores) takeStoreHeartbeatFailures() (count, storeID uint64, err string
 	return count, s.lastFailedStoreID, s.lastStoreHeartbeatError
 }
 
-func (s *Stores) reportStoreHeartbeatFailures(ctx context.Context) {
+func (s *Stores) reportStoreHeartbeatFailures(ctx context.Context, heartbeatWorkers *sync.WaitGroup) {
 	reportTicker := time.NewTicker(time.Duration(storeReportInterval) * time.Second)
 	defer reportTicker.Stop()
 	report := func() {
@@ -267,6 +270,7 @@ func (s *Stores) reportStoreHeartbeatFailures(ctx context.Context) {
 		case <-reportTicker.C:
 			report()
 		case <-ctx.Done():
+			heartbeatWorkers.Wait()
 			report()
 			return
 		}

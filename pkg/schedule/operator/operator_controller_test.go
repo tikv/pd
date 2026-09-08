@@ -111,7 +111,11 @@ func (suite *operatorControllerTestSuite) TestGetOpInfluence() {
 	oc.SetOperator(op1)
 	re.True(op2.Start())
 	oc.SetOperator(op2)
+	ctx, cancel := context.WithCancel(suite.ctx)
+	var wg sync.WaitGroup
+	wg.Add(2)
 	go func(ctx context.Context) {
+		defer wg.Done()
 		as := assert.New(suite.T())
 		if !as.True(oc.RemoveOperator(op1)) ||
 			!as.True(op1.IsEnd()) ||
@@ -128,8 +132,9 @@ func (suite *operatorControllerTestSuite) TestGetOpInfluence() {
 				}
 			}
 		}
-	}(suite.ctx)
+	}(ctx)
 	go func(ctx context.Context) {
+		defer wg.Done()
 		for {
 			select {
 			case <-ctx.Done():
@@ -138,8 +143,10 @@ func (suite *operatorControllerTestSuite) TestGetOpInfluence() {
 				oc.GetOpInfluence(tc.GetBasicCluster())
 			}
 		}
-	}(suite.ctx)
+	}(ctx)
 	time.Sleep(time.Second)
+	cancel()
+	wg.Wait()
 	re.NotNil(oc.GetOperator(2))
 }
 
@@ -325,19 +332,20 @@ func (suite *operatorControllerTestSuite) TestConcurrentRemoveOperator() {
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/operator/concurrentRemoveOperator", "return(true)"))
 	var wg sync.WaitGroup
+	var success bool
 	wg.Add(2)
 	go func() {
+		defer wg.Done()
 		oc.Dispatch(region1, "test", nil)
-		wg.Done()
 	}()
 	go func() {
+		defer wg.Done()
 		time.Sleep(50 * time.Millisecond)
-		success := oc.AddOperator(op2)
-		wg.Done()
-		suite.True(success)
+		success = oc.AddOperator(op2)
 	}()
 	wg.Wait()
 
+	re.True(success)
 	re.Equal(op2, oc.GetOperator(1))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/operator/concurrentRemoveOperator"))
 }

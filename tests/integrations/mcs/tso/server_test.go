@@ -537,10 +537,12 @@ func TestForwardTsoConcurrently(t *testing.T) {
 			}
 			defer pdClient.Close()
 			for range 10 {
-				testutil.Eventually(re, func() bool {
+				if !testutil.EventuallyWithAssert(as, func() bool {
 					min, err := pdClient.UpdateServiceGCSafePoint(context.Background(), fmt.Sprintf("service-%d", i), 1000, 1) //nolint:staticcheck
 					return err == nil && min == 0
-				})
+				}) {
+					return
+				}
 			}
 		}()
 	}

@@ -436,12 +436,20 @@ func (suite *tsoClientTestSuite) TestRandomResignLeader() {
 				go func(keyspaceID uint32) {
 					defer wg.Done()
 					keyspaceGroupID := keyspaceGroups[keyspaceID]
-					suite.tsoCluster.WaitForPrimaryServing(re, keyspaceID, keyspaceGroupID)
+					if !testutil.EventuallyWithAssert(as, func() bool {
+						return suite.tsoCluster.GetPrimaryServer(keyspaceID, keyspaceGroupID) != nil
+					}, testutil.WithWaitFor(30*time.Second), testutil.WithTickInterval(100*time.Millisecond)) {
+						return
+					}
 					err := suite.tsoCluster.ResignPrimary(keyspaceID, keyspaceGroupID)
 					if !as.NoError(err) {
 						return
 					}
-					suite.tsoCluster.WaitForPrimaryServing(re, keyspaceID, keyspaceGroupID)
+					if !testutil.EventuallyWithAssert(as, func() bool {
+						return suite.tsoCluster.GetPrimaryServer(keyspaceID, keyspaceGroupID) != nil
+					}, testutil.WithWaitFor(30*time.Second), testutil.WithTickInterval(100*time.Millisecond)) {
+						return
+					}
 				}(keyspaceID)
 			}
 			wg.Wait()

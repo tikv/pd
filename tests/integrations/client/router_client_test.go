@@ -317,7 +317,7 @@ func (suite *routerClientSuite) dispatchConcurrentRequests(ctx context.Context, 
 			switch seed % 3 {
 			case 0:
 				region := regions[0]
-				testutil.Eventually(re, func() bool {
+				if !testutil.EventuallyWithAssert(as, func() bool {
 					if allowFollowerHandle {
 						r, err = suite.client.GetRegion(ctx, region.GetStartKey(), opt.WithAllowFollowerHandle())
 					} else {
@@ -335,9 +335,11 @@ func (suite *routerClientSuite) dispatchConcurrentRequests(ctx context.Context, 
 					return reflect.DeepEqual(region, r.Meta) &&
 						reflect.DeepEqual(peers[0], r.Leader) &&
 						r.Buckets == nil
-				})
+				}) {
+					return
+				}
 			case 1:
-				testutil.Eventually(re, func() bool {
+				if !testutil.EventuallyWithAssert(as, func() bool {
 					if allowFollowerHandle {
 						r, err = suite.client.GetPrevRegion(ctx, regions[1].GetStartKey(), opt.WithAllowFollowerHandle())
 					} else {
@@ -355,10 +357,12 @@ func (suite *routerClientSuite) dispatchConcurrentRequests(ctx context.Context, 
 					return reflect.DeepEqual(regions[0], r.Meta) &&
 						reflect.DeepEqual(peers[0], r.Leader) &&
 						r.Buckets == nil
-				})
+				}) {
+					return
+				}
 			case 2:
 				region := regions[0]
-				testutil.Eventually(re, func() bool {
+				if !testutil.EventuallyWithAssert(as, func() bool {
 					if allowFollowerHandle {
 						r, err = suite.client.GetRegionByID(ctx, region.GetId(), opt.WithAllowFollowerHandle())
 					} else {
@@ -376,7 +380,9 @@ func (suite *routerClientSuite) dispatchConcurrentRequests(ctx context.Context, 
 					return reflect.DeepEqual(region, r.Meta) &&
 						reflect.DeepEqual(peers[0], r.Leader) &&
 						r.Buckets == nil
-				})
+				}) {
+					return
+				}
 			}
 		}()
 	}

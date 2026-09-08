@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -56,8 +57,7 @@ func WithTickInterval(tickInterval time.Duration) WaitOption {
 	return func(op *WaitOp) { op.tickInterval = tickInterval }
 }
 
-// Eventually asserts that given condition will be met in a period of time.
-func Eventually(re *require.Assertions, condition func() bool, opts ...WaitOption) {
+func newWaitOp(opts ...WaitOption) *WaitOp {
 	option := &WaitOp{
 		waitFor:      defaultWaitFor,
 		tickInterval: defaultTickInterval,
@@ -65,7 +65,23 @@ func Eventually(re *require.Assertions, condition func() bool, opts ...WaitOptio
 	for _, opt := range opts {
 		opt(option)
 	}
+	return option
+}
+
+// Eventually asserts that given condition will be met in a period of time.
+func Eventually(re *require.Assertions, condition func() bool, opts ...WaitOption) {
+	option := newWaitOp(opts...)
 	re.Eventually(
+		condition,
+		option.waitFor,
+		option.tickInterval,
+	)
+}
+
+// EventuallyWithAssert checks that the condition is met without stopping the calling goroutine.
+func EventuallyWithAssert(as *assert.Assertions, condition func() bool, opts ...WaitOption) bool {
+	option := newWaitOp(opts...)
+	return as.Eventually(
 		condition,
 		option.waitFor,
 		option.tickInterval,
