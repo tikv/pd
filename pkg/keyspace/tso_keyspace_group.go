@@ -60,15 +60,14 @@ const (
 	allocNodesToKeyspaceGroupsInterval = 1 * time.Second
 	allocNodesTimeout                  = 1 * time.Second
 	allocNodesInterval                 = 10 * time.Millisecond
-	// etcd rejects a transaction branch with more than 128 operations by
-	// default. A removal uses two delete operations, and saving the keyspace
-	// group uses one. Keep the legacy single-transaction fast path for up to 63
-	// keyspaces without meta-service assignments. The batch builder also counts
-	// distinct meta-service group status updates and stops earlier when needed.
-	maxKeyspaceRemovalTxnOps    = 128
+	// A removal uses two delete operations, and saving the keyspace group uses
+	// one. Derive the batch bounds from the conservative transaction limit used
+	// throughout PD. The batch builder also counts distinct meta-service group
+	// status updates and stops earlier when needed.
+	maxKeyspaceRemovalTxnOps    = etcdutil.MaxEtcdTxnOps
 	maxKeyspaceRemovalBatchSize = (maxKeyspaceRemovalTxnOps - 1) / 2
 	// Even if every keyspace updates a distinct assignment, this many removals
-	// use at most 127 operations and need no dynamic batch bookkeeping.
+	// stay within the transaction limit and need no dynamic batch bookkeeping.
 	maxKeyspaceRemovalGuaranteedSingleTxnSize = (maxKeyspaceRemovalTxnOps - 1) / 3
 	// defaultKeyspaceCountSplitThreshold is the keyspace count threshold for auto-splitting
 	// a keyspace group. When a group's keyspace count exceeds this value, a new group will be split automatically.
@@ -1063,6 +1062,29 @@ func (m *GroupManager) runKeyspaceGroupRemovalTxn(
 	return conditionalStore.RunInTxnWithConditions(ctx, leadershipConditions, runTxn)
 }
 
+// refreshKeyspaceGroupCacheAfterRemovalErrorLocked reloads the authoritative
+// group after a transaction result that may be ambiguous. The caller holds m's
+// write lock. If storage is unavailable, removing the cached group prevents
+// stale membership and load information from being served.
+func (m *GroupManager) refreshKeyspaceGroupCacheAfterRemovalErrorLocked(groupID uint32) {
+	var kg *endpoint.KeyspaceGroup
+	err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
+		var err error
+		kg, err = m.store.LoadKeyspaceGroup(txn, groupID)
+		return err
+	})
+	if err != nil || kg == nil {
+		m.removeKeyspaceGroupFromCacheLocked(groupID)
+		if err != nil {
+			log.Warn("failed to refresh keyspace group cache after removal error",
+				zap.Uint32("keyspace-group-id", groupID),
+				zap.Error(err))
+		}
+		return
+	}
+	m.putKeyspaceGroupToCacheLocked(kg)
+}
+
 // keyspaceRemovalTxnCapacityCheck returns nil while the worst-case next removal
 // fits; otherwise it checks the candidate's actual assignment-update cost.
 func keyspaceRemovalTxnCapacityCheck(
@@ -1167,6 +1189,9 @@ func (m *GroupManager) removeKeyspacesFromGroupSingleTxn(
 	// lookup simply reloads the still-existing metadata from storage.
 	km.evictKeyspacesFromCache(removedIDs)
 	if err != nil {
+		if len(removedIDs) > 0 {
+			m.refreshKeyspaceGroupCacheAfterRemovalErrorLocked(groupID)
+		}
 		return nil, err
 	}
 
@@ -1258,6 +1283,9 @@ func (m *GroupManager) removeKeyspacesFromGroupSmallBatch(
 	// Invalidate staged removals even when the commit result is ambiguous.
 	km.evictKeyspacesFromCache(removedIDs)
 	if err != nil {
+		if len(removedIDs) > 0 {
+			m.refreshKeyspaceGroupCacheAfterRemovalErrorLocked(groupID)
+		}
 		return nil, nil, false, err
 	}
 
@@ -1279,7 +1307,9 @@ func (m *GroupManager) removeKeyspacesFromGroupBatch(
 		kg               *endpoint.KeyspaceGroup
 		batchCapacity    = min(len(requestedIDs), maxKeyspaceRemovalBatchSize)
 		processedIDs     = make([]uint32, 0, batchCapacity)
+		processedIDSet   = make(map[uint32]struct{}, batchCapacity)
 		removedIDs       = make([]uint32, 0, batchCapacity)
+		removedIDSet     = make(map[uint32]struct{}, batchCapacity)
 		assignmentCounts map[string]int
 		hasMore          bool
 		err              error
@@ -1295,6 +1325,15 @@ func (m *GroupManager) removeKeyspacesFromGroupBatch(
 		batchFull := false
 		for _, ks := range kg.Keyspaces {
 			if _, requested := requestedIDs[ks]; !requested {
+				newKeyspaces = append(newKeyspaces, ks)
+				continue
+			}
+			if _, removed := removedIDSet[ks]; removed {
+				// Remove every occurrence from group membership, but delete the
+				// metadata and update assignment accounting only once.
+				continue
+			}
+			if _, processed := processedIDSet[ks]; processed {
 				newKeyspaces = append(newKeyspaces, ks)
 				continue
 			}
@@ -1316,11 +1355,13 @@ func (m *GroupManager) removeKeyspacesFromGroupBatch(
 				continue
 			}
 			processedIDs = append(processedIDs, ks)
+			processedIDSet[ks] = struct{}{}
 			if !removed {
 				newKeyspaces = append(newKeyspaces, ks)
 				continue
 			}
 			removedIDs = append(removedIDs, ks)
+			removedIDSet[ks] = struct{}{}
 			if metaServiceGroupID != "" {
 				if assignmentCounts == nil {
 					assignmentCounts = make(map[string]int)
@@ -1342,6 +1383,9 @@ func (m *GroupManager) removeKeyspacesFromGroupBatch(
 	// Invalidate staged removals even when the commit result is ambiguous.
 	km.evictKeyspacesFromCache(removedIDs)
 	if err != nil {
+		if len(removedIDs) > 0 {
+			m.refreshKeyspaceGroupCacheAfterRemovalErrorLocked(groupID)
+		}
 		return nil, nil, false, err
 	}
 

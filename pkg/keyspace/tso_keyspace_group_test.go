@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -26,6 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
+	"go.etcd.io/etcd/server/v3/embed"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
@@ -684,6 +686,53 @@ func TestRemoveKeyspacesFromGroupRejectsInvalidExecutionContext(t *testing.T) {
 	re.ErrorContains(err, errs.NotLeaderErr)
 }
 
+func TestRemoveKeyspacesFromGroupStaysWithinEtcdLimits(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, &etcdutil.TestEtcdClusterOptions{
+		ServerCfgModifier: func(cfg *embed.Config) {
+			cfg.MaxTxnOps = etcdutil.MaxEtcdTxnOps
+		},
+	})
+	defer clean()
+
+	store := storage.NewCoreStorage(storage.NewStorageWithEtcdBackend(client), nil)
+	groupManager := NewKeyspaceGroupManager(ctx, store, nil)
+	defer groupManager.Close()
+	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	keyspaceManager := NewKeyspaceManager(
+		ctx, store, cluster, mockid.NewIDAllocator(), &mockConfig{}, groupManager, nil)
+	re.NoError(groupManager.Bootstrap(ctx))
+
+	largeConfigValue := strings.Repeat("x", 32*1024)
+	keyspaceIDs := make([]uint32, 0, maxKeyspaceRemovalBatchSize)
+	for i := range maxKeyspaceRemovalBatchSize {
+		meta, err := keyspaceManager.CreateKeyspace(&CreateKeyspaceRequest{
+			Name:       fmt.Sprintf("etcd-limit-%d", i),
+			Config:     map[string]string{"large": largeConfigValue},
+			CreateTime: time.Now().Unix(),
+		})
+		re.NoError(err)
+		_, err = keyspaceManager.UpdateKeyspaceStateByID(
+			meta.GetId(), keyspacepb.KeyspaceState_DISABLED, time.Now().Unix())
+		re.NoError(err)
+		_, err = keyspaceManager.UpdateKeyspaceStateByID(
+			meta.GetId(), keyspacepb.KeyspaceState_ARCHIVED, time.Now().Unix())
+		re.NoError(err)
+		keyspaceIDs = append(keyspaceIDs, meta.GetId())
+	}
+
+	group, err := groupManager.removeKeyspacesFromGroupWithConditions(
+		ctx, constant.DefaultKeyspaceGroupID, keyspaceManager, keyspaceIDs, nil)
+	re.NoError(err)
+	for _, keyspaceID := range keyspaceIDs {
+		re.NotContains(group.Keyspaces, keyspaceID)
+		_, err := keyspaceManager.LoadKeyspaceByID(keyspaceID)
+		re.ErrorIs(err, errs.ErrKeyspaceNotFound)
+	}
+}
+
 func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupUsesBoundedTransactions() {
 	re := suite.Require()
 	keyspaceCount := maxKeyspaceRemovalBatchSize*2 + 1
@@ -781,7 +830,7 @@ func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupUsesBoundedTran
 	}
 }
 
-func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupEvictsCacheAfterAmbiguousCommit() {
+func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupRefreshesCachesAfterAmbiguousCommit() {
 	re := suite.Require()
 	keyspaceIDs := suite.createArchivedKeyspaces(maxKeyspaceRemovalBatchSize + 1)
 	for _, keyspaceID := range keyspaceIDs {
@@ -789,6 +838,11 @@ func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupEvictsCacheAfte
 		re.NoError(err)
 		re.NotEmpty(keyspaceName)
 	}
+	re.NoError(suite.kgm.CreateKeyspaceGroups([]*endpoint.KeyspaceGroup{{
+		ID:        1,
+		UserKind:  endpoint.Basic.String(),
+		Keyspaces: []uint32{1_000_001, 1_000_002, 1_000_003},
+	}}))
 
 	store, ok := suite.kgm.store.(*endpoint.StorageEndpoint)
 	re.True(ok)
@@ -799,16 +853,23 @@ func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupEvictsCacheAfte
 	_, err := suite.kgm.removeKeyspacesFromGroupWithConditions(
 		suite.ctx, constant.DefaultKeyspaceGroupID, suite.kg, keyspaceIDs, nil)
 	re.ErrorIs(err, context.DeadlineExceeded)
-	removedCount := 0
+	removedIDs := make([]uint32, 0, maxKeyspaceRemovalBatchSize)
 	for _, keyspaceID := range keyspaceIDs {
 		_, err = suite.kg.LoadKeyspaceByID(keyspaceID)
 		if errors.Is(err, errs.ErrKeyspaceNotFound) {
-			removedCount++
+			removedIDs = append(removedIDs, keyspaceID)
 			continue
 		}
 		re.NoError(err)
 	}
-	re.Equal(maxKeyspaceRemovalBatchSize, removedCount)
+	re.Len(removedIDs, maxKeyspaceRemovalBatchSize)
+	for _, keyspaceID := range removedIDs {
+		_, err = suite.kgm.GetGroupByKeyspaceID(keyspaceID)
+		re.ErrorIs(err, errs.ErrKeyspaceNotInAnyKeyspaceGroup)
+	}
+	config, err := suite.kgm.GetKeyspaceConfigByKind(endpoint.Basic)
+	re.NoError(err)
+	re.Equal("0", config[TSOKeyspaceGroupIDKey])
 
 	// A retry cannot rediscover the already-removed IDs from group membership,
 	// so the first ambiguous batch must have invalidated their warmed caches.
@@ -1171,6 +1232,39 @@ func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupAggregatesMetaS
 	counts, err = mgm.GetAssignmentCounts(suite.ctx)
 	re.NoError(err)
 	re.Zero(counts["meta-group-1"])
+}
+
+func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupDoesNotDoubleDecrementDuplicateMember() {
+	re := suite.Require()
+	store, ok := suite.kg.store.(*endpoint.StorageEndpoint)
+	re.True(ok)
+	mgm := NewMetaServiceGroupManager(store, map[string]string{"meta-group-1": "127.0.0.1:12379"})
+	enabled := true
+	re.NoError(mgm.PatchStatus(suite.ctx, "meta-group-1", &MetaServiceGroupStatusPatch{Enabled: &enabled}))
+	suite.kg.mgm = mgm
+
+	keyspaceIDs := suite.createArchivedKeyspaces(maxKeyspaceRemovalBatchSize + 2)
+	counts, err := mgm.GetAssignmentCounts(suite.ctx)
+	re.NoError(err)
+	re.Equal(maxKeyspaceRemovalBatchSize+2, counts["meta-group-1"])
+
+	requestedIDs := keyspaceIDs[:maxKeyspaceRemovalBatchSize+1]
+	duplicateMembers := make([]uint32, 0, len(requestedIDs)+1)
+	duplicateMembers = append(duplicateMembers, requestedIDs[0])
+	duplicateMembers = append(duplicateMembers, requestedIDs...)
+	re.NoError(suite.kgm.CreateKeyspaceGroups([]*endpoint.KeyspaceGroup{{
+		ID:        1,
+		UserKind:  endpoint.Basic.String(),
+		Keyspaces: duplicateMembers,
+	}}))
+
+	group, err := suite.kgm.removeKeyspacesFromGroupWithConditions(
+		suite.ctx, 1, suite.kg, requestedIDs, nil)
+	re.NoError(err)
+	re.Empty(group.Keyspaces)
+	counts, err = mgm.GetAssignmentCounts(suite.ctx)
+	re.NoError(err)
+	re.Equal(1, counts["meta-group-1"])
 }
 
 func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupOperations() {
