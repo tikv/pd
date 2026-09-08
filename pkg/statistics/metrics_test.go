@@ -21,6 +21,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/mock/mockconfig"
+	"github.com/tikv/pd/pkg/schedule/config"
 )
 
 func TestDeleteClusterStatusMetrics(t *testing.T) {
@@ -38,4 +40,63 @@ func TestDeleteClusterStatusMetrics(t *testing.T) {
 	re.False(clusterStatusGauge.DeleteLabelValues(clusterStatusStoreTombstoneCount, id))
 	re.False(clusterStatusGauge.DeleteLabelValues(clusterStatusStorageSize, id))
 	re.True(clusterStatusGauge.DeleteLabelValues(clusterStatusStoreTombstoneCount, otherID))
+}
+
+type storeMetricsTestConfig struct {
+	config.ConfProvider
+	beforeObserve func()
+}
+
+func (c *storeMetricsTestConfig) GetLocationLabels() []string {
+	if c.beforeObserve != nil {
+		c.beforeObserve()
+		c.beforeObserve = nil
+	}
+	return c.ConfProvider.GetLocationLabels()
+}
+
+func TestObserveStoresAfterDeletion(t *testing.T) {
+	for _, duringCollection := range []bool{false, true} {
+		name := "after collection"
+		if duringCollection {
+			name = "after snapshot"
+		}
+		t.Run(name, func(t *testing.T) {
+			re := require.New(t)
+			cluster := core.NewBasicCluster()
+			store := core.NewStoreInfo(&metapb.Store{Id: 9876543210, NodeState: metapb.NodeState_Removed})
+			other := core.NewStoreInfo(&metapb.Store{Id: 9876543211, NodeState: metapb.NodeState_Removed})
+			cluster.PutStore(store)
+			cluster.PutStore(other)
+			t.Cleanup(func() {
+				for _, s := range []*core.StoreInfo{store, other} {
+					DeleteClusterStatusMetrics(s)
+					ResetStoreStatistics(s.GetAddress(), strconv.FormatUint(s.GetID(), 10))
+				}
+			})
+			opt := &storeMetricsTestConfig{ConfProvider: mockconfig.NewTestOptions()}
+			stats := NewStoresStats()
+			NewStoreStatisticsMap(opt).ObserveStores(cluster, stats)
+			remove := func() {
+				cluster.DeleteStore(store)
+				DeleteClusterStatusMetrics(store)
+			}
+			if duringCollection {
+				// GetLocationLabels runs inside Observe, after GetStores took its snapshot.
+				opt.beforeObserve = remove
+			}
+			NewStoreStatisticsMap(opt).ObserveStores(cluster, stats)
+			if !duringCollection {
+				remove()
+			}
+			re.Nil(cluster.GetStore(store.GetID()))
+			id := strconv.FormatUint(store.GetID(), 10)
+			otherID := strconv.FormatUint(other.GetID(), 10)
+			re.False(clusterStatusGauge.DeleteLabelValues(clusterStatusStoreTombstoneCount, id))
+			re.False(clusterStatusGauge.DeleteLabelValues(clusterStatusStorageSize, id))
+			// A tombstone that is still in the cluster must retain its metrics.
+			re.True(clusterStatusGauge.DeleteLabelValues(clusterStatusStoreTombstoneCount, otherID))
+			re.True(clusterStatusGauge.DeleteLabelValues(clusterStatusStorageSize, otherID))
+		})
+	}
 }

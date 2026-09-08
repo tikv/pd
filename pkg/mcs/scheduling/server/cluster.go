@@ -452,11 +452,7 @@ func (c *Cluster) runMetricsCollectionJob() {
 
 func (c *Cluster) collectMetrics() {
 	statsMap := statistics.NewStoreStatisticsMap(c.persistConfig)
-	stores := c.GetStores()
-	for _, s := range stores {
-		statsMap.Observe(s)
-		statsMap.ObserveHotStat(s, c.hotStat.StoresStats)
-	}
+	statsMap.ObserveStores(c.BasicCluster, c.hotStat.StoresStats)
 	statsMap.Collect()
 
 	c.coordinator.GetSchedulersController().CollectSchedulerMetrics()

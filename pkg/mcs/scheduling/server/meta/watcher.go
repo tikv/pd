@@ -93,8 +93,9 @@ func (w *Watcher) initializeStoreWatcher() error {
 		}
 		origin := w.basicCluster.GetStore(storeID)
 		if origin != nil {
-			statistics.DeleteClusterStatusMetrics(origin)
 			w.basicCluster.DeleteStore(origin)
+			// Let concurrent collectors detect the deletion before cleaning up metrics.
+			statistics.DeleteClusterStatusMetrics(origin)
 		}
 		return nil
 	}

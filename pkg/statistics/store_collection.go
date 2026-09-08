@@ -315,6 +315,19 @@ func (m *storeStatisticsMap) ObserveHotStat(store *core.StoreInfo, stats *Stores
 	m.stats.ObserveHotStat(store, stats)
 }
 
+// ObserveStores observes store metrics and cleans up writes from deleted stores.
+func (m *storeStatisticsMap) ObserveStores(cluster *core.BasicCluster, stats *StoresStats) {
+	for _, store := range cluster.GetStores() {
+		m.Observe(store)
+		m.ObserveHotStat(store, stats)
+		// A stale snapshot can recreate metrics after the deletion path cleaned
+		// them up. Check after writing; deletion must remove the store first.
+		if cluster.GetStore(store.GetID()) == nil {
+			DeleteClusterStatusMetrics(store)
+		}
+	}
+}
+
 func (m *storeStatisticsMap) Collect() {
 	m.stats.Collect()
 }
