@@ -64,7 +64,8 @@ type countingKeyspaceGroupStorage struct {
 
 type ambiguousCommitKeyspaceGroupStorage struct {
 	*endpoint.StorageEndpoint
-	failNextRun atomic.Bool
+	failNextRun     atomic.Bool
+	failNextRefresh atomic.Bool
 }
 
 func (s *countingKeyspaceGroupStorage) LoadKeyspaceGroup(txn kv.Txn, id uint32) (*endpoint.KeyspaceGroup, error) {
@@ -86,13 +87,16 @@ func (s *countingKeyspaceGroupStorage) RunInTxn(ctx context.Context, f func(txn 
 }
 
 func (s *ambiguousCommitKeyspaceGroupStorage) RunInTxn(ctx context.Context, f func(txn kv.Txn) error) error {
-	if err := s.StorageEndpoint.RunInTxn(ctx, f); err != nil {
-		return err
-	}
 	if s.failNextRun.CompareAndSwap(true, false) {
+		if err := s.StorageEndpoint.RunInTxn(ctx, f); err != nil {
+			return err
+		}
 		return context.DeadlineExceeded
 	}
-	return nil
+	if s.failNextRefresh.CompareAndSwap(true, false) {
+		return context.DeadlineExceeded
+	}
+	return s.StorageEndpoint.RunInTxn(ctx, f)
 }
 
 func (s *errorKeyspaceGroupStorage) SaveKeyspaceGroup(txn kv.Txn, kg *endpoint.KeyspaceGroup) error {
@@ -881,6 +885,38 @@ func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupRefreshesCaches
 		re.Empty(name)
 		re.ErrorIs(err, errs.ErrKeyspaceNotFound)
 	}
+}
+
+func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupRetainsCacheWhenRefreshFails() {
+	re := suite.Require()
+	keyspaceID := suite.createArchivedKeyspaces(1)[0]
+
+	store, ok := suite.kgm.store.(*endpoint.StorageEndpoint)
+	re.True(ok)
+	ambiguousStore := &ambiguousCommitKeyspaceGroupStorage{StorageEndpoint: store}
+	ambiguousStore.failNextRun.Store(true)
+	ambiguousStore.failNextRefresh.Store(true)
+	suite.kgm.store = ambiguousStore
+
+	_, err := suite.kgm.removeKeyspacesFromGroupWithConditions(
+		suite.ctx, constant.DefaultKeyspaceGroupID, suite.kg, []uint32{keyspaceID}, nil)
+	re.ErrorIs(err, context.DeadlineExceeded)
+
+	// The authoritative refresh also failed, so keep the previous cache usable
+	// until a later retry can reconcile it from storage.
+	groupID, err := suite.kgm.GetGroupByKeyspaceID(keyspaceID)
+	re.NoError(err)
+	re.Equal(constant.DefaultKeyspaceGroupID, groupID)
+	config, err := suite.kgm.GetKeyspaceConfigByKind(endpoint.Basic)
+	re.NoError(err)
+	re.Equal("0", config[TSOKeyspaceGroupIDKey])
+
+	group, err := suite.kgm.removeKeyspacesFromGroupWithConditions(
+		suite.ctx, constant.DefaultKeyspaceGroupID, suite.kg, []uint32{keyspaceID}, nil)
+	re.NoError(err)
+	re.NotContains(group.Keyspaces, keyspaceID)
+	_, err = suite.kgm.GetGroupByKeyspaceID(keyspaceID)
+	re.ErrorIs(err, errs.ErrKeyspaceNotInAnyKeyspaceGroup)
 }
 
 func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupKeepsSingleTransactionFastPath() {

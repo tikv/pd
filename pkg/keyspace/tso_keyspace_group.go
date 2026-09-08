@@ -1064,8 +1064,8 @@ func (m *GroupManager) runKeyspaceGroupRemovalTxn(
 
 // refreshKeyspaceGroupCacheAfterRemovalErrorLocked reloads the authoritative
 // group after a transaction result that may be ambiguous. The caller holds m's
-// write lock. If storage is unavailable, removing the cached group prevents
-// stale membership and load information from being served.
+// write lock. If storage is unavailable, retain the previous cache so routing
+// remains usable until a later removal retry can reconcile it.
 func (m *GroupManager) refreshKeyspaceGroupCacheAfterRemovalErrorLocked(groupID uint32) {
 	var kg *endpoint.KeyspaceGroup
 	err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
@@ -1073,13 +1073,14 @@ func (m *GroupManager) refreshKeyspaceGroupCacheAfterRemovalErrorLocked(groupID 
 		kg, err = m.store.LoadKeyspaceGroup(txn, groupID)
 		return err
 	})
-	if err != nil || kg == nil {
+	if err != nil {
+		log.Warn("failed to refresh keyspace group cache after removal error",
+			zap.Uint32("keyspace-group-id", groupID),
+			zap.Error(err))
+		return
+	}
+	if kg == nil {
 		m.removeKeyspaceGroupFromCacheLocked(groupID)
-		if err != nil {
-			log.Warn("failed to refresh keyspace group cache after removal error",
-				zap.Uint32("keyspace-group-id", groupID),
-				zap.Error(err))
-		}
 		return
 	}
 	m.putKeyspaceGroupToCacheLocked(kg)
