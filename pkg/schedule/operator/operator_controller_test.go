@@ -317,6 +317,41 @@ func (suite *operatorControllerTestSuite) TestOperatorControllerMarksStepDispatc
 	re.Equal(pdpb.OperatorStatus_RUNNING, oc.GetOperatorStatus(1).Status)
 }
 
+// TestOperatorControllerKeepsHealthCheckForTransferLeaderAfterDispatch guards
+// against a blocking point raised in review on tikv/pd#11146: the
+// post-dispatch boundary that stops AddPeer/AddLearner/BecomeNonWitness from
+// being health-cancelled once their command is in flight must not also apply
+// to TransferLeader. A leader transfer creates no peer and no irreversible
+// conf change, so if the target goes unhealthy after the request was sent
+// but before it becomes leader, cancelling is safe; keeping the operator
+// would only retry until the Down threshold while holding the scheduling
+// slot.
+func (suite *operatorControllerTestSuite) TestOperatorControllerKeepsHealthCheckForTransferLeaderAfterDispatch() {
+	re := suite.Require()
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(suite.ctx, opt)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc, false /* no need to run */)
+	oc := NewController(suite.ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
+	tc.AddLeaderStore(1, 1)
+	tc.AddLeaderStore(2, 1)
+	tc.AddLeaderStore(3, 1)
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	region := tc.GetRegion(1)
+
+	op := NewTestOperator(1, region.GetRegionEpoch(), OpLeader, TransferLeader{FromStore: 1, ToStore: 2})
+	op.SetStoreHealthCheck(true)
+	re.True(oc.AddOperator(op))
+	// AddOperator dispatches (and marks) the step at creation time.
+	re.True(op.HasStepBeenDispatched(op.CurrentStepIndex()))
+
+	// Store 2 goes unhealthy before it ever campaigns. TransferLeader is
+	// exempt from the post-dispatch boundary, so this still cancels the
+	// operator instead of leaving it to retry until the Down threshold.
+	tc.SetStoreLastHeartbeatInterval(2, 11*time.Minute)
+	oc.Dispatch(region, DispatchFromHeartBeat, nil)
+	re.Equal(CANCELED, op.Status())
+}
+
 func (suite *operatorControllerTestSuite) TestCheckAddUnexpectedStatus() {
 	re := suite.Require()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/operator/unexpectedOperator"))
