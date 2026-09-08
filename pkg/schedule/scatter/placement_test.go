@@ -226,6 +226,63 @@ func TestScatterFinalLeaderPlacement(t *testing.T) {
 	require.False(t, sc.scatterPlacementValid(region, placementTargets(4, 5, 6), 5))
 }
 
+func TestScatterRetriesLegalLeader(t *testing.T) {
+	for _, internal := range []bool{false, true} {
+		t.Run(strconv.FormatBool(internal), func(t *testing.T) {
+			sc, tc, region := newPlacementTestScatter(t, true, []string{"A", "B", "C", "D", "E", "F"})
+			rm := tc.GetRuleManager()
+			leaderRule := rm.GetRule("pd", "default").Clone()
+			leaderRule.Role = placement.Leader
+			leaderRule.Count = 1
+			leaderRule.LabelConstraints = []placement.LabelConstraint{{Key: "host", Op: placement.In, Values: []string{"A", "D"}}}
+			require.NoError(t, rm.SetRule(leaderRule))
+			voterRule := leaderRule.Clone()
+			voterRule.ID = "voters"
+			voterRule.Role = placement.Voter
+			voterRule.Count = 2
+			voterRule.LabelConstraints = []placement.LabelConstraint{{Key: "host", Op: placement.In, Values: []string{"B", "C", "E", "F"}}}
+			require.NoError(t, rm.SetRule(voterRule))
+			require.True(t, rm.FitRegion(tc, region).IsSatisfied())
+			for attempt := range 32 {
+				group := fmt.Sprintf("leader-retry-%d", attempt)
+				var state *scatterState
+				if internal {
+					state = sc.newScatterState()
+					state.ordinaryEngine.selectedPeer.InitGroupDistribution(group, map[uint64]uint64{1: 10, 2: 10, 3: 10})
+					state.ordinaryEngine.selectedLeader.InitGroupDistribution(group, map[uint64]uint64{4: 100})
+				} else {
+					for id := uint64(1); id <= 3; id++ {
+						for range 10 {
+							sc.ordinaryEngine.selectedPeer.Put(id, group)
+						}
+					}
+					for range 100 {
+						sc.ordinaryEngine.selectedLeader.Put(4, group)
+					}
+				}
+				// Lower-count voter targets are considered first, but only store 4
+				// can lead the final membership. Retry without changing the peers.
+				var op *operator.Operator
+				var err error
+				if internal {
+					op, err = sc.scatterRegionWithType(region, group, false, true, state)
+				} else {
+					op, err = sc.Scatter(region, group, true)
+				}
+				require.NoError(t, err)
+				require.NotNil(t, op)
+				targets, leader := scatterOperatorTargets(t, region, op)
+				require.Len(t, targets, 3)
+				for _, id := range []uint64{4, 5, 6} {
+					require.Contains(t, targets, id)
+				}
+				require.Equal(t, uint64(4), leader)
+				require.True(t, sc.scatterPlacementValid(region, targets, leader))
+			}
+		})
+	}
+}
+
 func TestScatterPlacementFailureAccounting(t *testing.T) {
 	for _, internal := range []bool{false, true} {
 		t.Run(strconv.FormatBool(internal), func(t *testing.T) {

@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -729,7 +730,15 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 		return nil, errs.ErrGetTargetStore.FastGenByArgs(fmt.Sprintf("no target leader store found, region: %v", region))
 	}
 
-	if !r.scatterPlacementValid(region, targetPeers, targetLeader) {
+	// A voter-rule peer can be a leader candidate without satisfying the final
+	// layout's leader rule. Try the remaining candidates in selection order.
+	for targetLeader != 0 && !r.scatterPlacementValid(region, targetPeers, targetLeader) {
+		leaderCandidateStores = slices.DeleteFunc(leaderCandidateStores, func(id uint64) bool {
+			return id == targetLeader
+		})
+		targetLeader, leaderStorePickedCount = r.selectAvailableLeaderStore(group, region, leaderCandidateStores, ordinaryContext, internalScatter)
+	}
+	if targetLeader == 0 {
 		scatterFailCounter.Inc()
 		if state == nil {
 			currentPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))
