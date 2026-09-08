@@ -367,9 +367,25 @@ func TestValidation(t *testing.T) {
 		re.ErrorContains(cfg.Schedule.Validate(), "default-store-limit.transfer-leader-in")
 	}
 	cfg.Schedule.DefaultStoreLimit.TransferLeaderIn = 0
-	for _, rate := range []float64{-1, math.NaN(), math.Inf(1)} {
-		cfg.Schedule.StoreLimit[1] = sc.StoreLimitConfig{TransferLeaderIn: rate}
-		re.ErrorContains(cfg.Schedule.Validate(), "store-limit[1].transfer-leader-in")
+	for _, rate := range []float64{-1, math.NaN(), math.Inf(1), math.Inf(-1), 0, 15, storelimit.Unlimited} {
+		for _, testCase := range []struct {
+			name  string
+			limit sc.StoreLimitConfig
+		}{
+			{"add-peer", sc.StoreLimitConfig{AddPeer: rate}},
+			{"remove-peer", sc.StoreLimitConfig{RemovePeer: rate}},
+			{"transfer-leader-in", sc.StoreLimitConfig{TransferLeaderIn: rate}},
+		} {
+			t.Run(fmt.Sprintf("store-limit/%s/%v", testCase.name, rate), func(t *testing.T) {
+				re := require.New(t)
+				cfg.Schedule.StoreLimit[1] = testCase.limit
+				if rate < 0 || math.IsNaN(rate) || math.IsInf(rate, 0) {
+					re.ErrorContains(cfg.Schedule.Validate(), "store-limit[1]."+testCase.name)
+				} else {
+					re.NoError(cfg.Schedule.Validate())
+				}
+			})
+		}
 	}
 	delete(cfg.Schedule.StoreLimit, 1)
 	re.NoError(cfg.Schedule.Validate())

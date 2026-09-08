@@ -661,6 +661,12 @@ func (c *ScheduleConfig) Validate() error {
 		return errors.New("default-store-limit.transfer-leader-in should be finite and non-negative")
 	}
 	for storeID, limit := range c.StoreLimit {
+		if !isStoreLimitRateValid(limit.AddPeer) {
+			return errors.Errorf("store-limit[%d].add-peer should be finite and non-negative", storeID)
+		}
+		if !isStoreLimitRateValid(limit.RemovePeer) {
+			return errors.Errorf("store-limit[%d].remove-peer should be finite and non-negative", storeID)
+		}
 		if !isStoreLimitRateValid(limit.TransferLeaderIn) {
 			return errors.Errorf("store-limit[%d].transfer-leader-in should be finite and non-negative", storeID)
 		}

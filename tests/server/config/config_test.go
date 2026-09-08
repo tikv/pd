@@ -319,6 +319,38 @@ func (suite *configTestSuite) checkConfigSchedule(cluster *tests.TestCluster) {
 		testutil.StringContain(re, "default-store-limit.add-peer should be finite and non-negative"))
 	re.NoError(err)
 	re.Equal(scheduleConfig.DefaultStoreLimit, leaderServer.GetPersistOptions().GetScheduleConfig().DefaultStoreLimit)
+
+	for _, endpoint := range []string{"config", "config/schedule"} {
+		addr := fmt.Sprintf("%s/pd/api/v1/%s", urlPrefix, endpoint)
+		postData = []byte(`{"store-limit":{"1":{"add-peer":0,"remove-peer":0,"transfer-leader-in":0},"2":{"add-peer":10,"remove-peer":20,"transfer-leader-in":30}}}`)
+		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, addr, postData, testutil.StatusOK(re)))
+		current := leaderServer.GetPersistOptions().GetScheduleConfig().Clone()
+		re.Equal(sc.StoreLimitConfig{}, current.StoreLimit[1])
+		re.Equal(sc.StoreLimitConfig{AddPeer: 10, RemovePeer: 20, TransferLeaderIn: 30}, current.StoreLimit[2])
+		re.Equal(scheduleConfig.DefaultStoreLimit, current.DefaultStoreLimit)
+		re.Equal(scheduleConfig.MaxStoreDownTime, current.MaxStoreDownTime)
+		persisted := &config.Config{}
+		exists, err := leaderServer.GetServer().GetStorage().LoadConfig(persisted)
+		re.NoError(err)
+		re.True(exists)
+		re.Equal(current.StoreLimit, persisted.Schedule.StoreLimit)
+
+		for _, field := range []string{"add-peer", "remove-peer", "transfer-leader-in"} {
+			postData, err = json.Marshal(map[string]any{
+				"store-limit": map[string]any{"1": map[string]float64{field: -1}},
+			})
+			re.NoError(err)
+			re.NoError(testutil.CheckPostJSON(tests.TestDialClient, addr, postData,
+				testutil.StatusNotOK(re),
+				testutil.StringContain(re, "store-limit[1]."+field+" should be finite and non-negative")))
+			re.Equal(current, leaderServer.GetPersistOptions().GetScheduleConfig())
+			after := &config.Config{}
+			exists, err = leaderServer.GetServer().GetStorage().LoadConfig(after)
+			re.NoError(err)
+			re.True(exists)
+			re.Equal(persisted.Schedule, after.Schedule)
+		}
+	}
 }
 
 func (suite *configTestSuite) TestConfigReplication() {
