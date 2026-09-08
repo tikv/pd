@@ -2171,17 +2171,15 @@ func (c *RaftCluster) deleteStore(store *core.StoreInfo) error {
 		}
 	}
 	c.core.DeleteStore(store)
+	// Let concurrent collectors detect the deletion before cleaning up metrics.
+	statistics.DeleteClusterStatusMetrics(store)
 	return nil
 }
 
 func (c *RaftCluster) collectMetrics() {
 	if !c.isAPIServiceMode {
 		statsMap := statistics.NewStoreStatisticsMap(c.opt)
-		stores := c.GetStores()
-		for _, s := range stores {
-			statsMap.Observe(s)
-			statsMap.ObserveHotStat(s, c.hotStat.StoresStats)
-		}
+		statsMap.ObserveStores(c.core, c.hotStat.StoresStats)
 		statsMap.Collect()
 		c.coordinator.GetSchedulersController().CollectSchedulerMetrics()
 		c.coordinator.CollectHotSpotMetrics()
