@@ -60,16 +60,18 @@ type ServiceRegister struct {
 	// Zero (clientv3.NoLease) until the first successful put, so a freshly
 	// started process can never match an existing key's lease by accident.
 	leaseID clientv3.LeaseID
-	// contendedLease and retryDeadline cache a one-time measurement of the
-	// lease currently occupying the key while Register is retrying: the
-	// first time a given lease ID is observed as occupying it, its actual
-	// GrantedTTL (which already reflects etcd's minimum-lease-TTL floor) is
-	// used to compute how long it could still take to expire, instead of
-	// guessing. They are deliberately not refreshed on every retry against
-	// the same lease ID, so a lease kept alive by a genuinely live owner
-	// does not push the deadline out indefinitely.
-	contendedLease clientv3.LeaseID
-	retryDeadline  time.Time
+	// contendedLease, lastObservedTerm, and retryDeadline cache a
+	// measurement of the lease currently occupying the key while Register
+	// is retrying: it is (re-)measured when a different lease starts
+	// occupying the key, or when the etcd raft term has advanced since the
+	// last measurement (an etcd leader change, which is exactly when
+	// (*lessor).Promote can refresh a lease's expiry beyond what was last
+	// observed). A lease kept alive purely by a genuinely live owner's
+	// keepalive never changes the raft term, so this does not push the
+	// retry deadline out indefinitely for that case.
+	contendedLease   clientv3.LeaseID
+	lastObservedTerm uint64
+	retryDeadline    time.Time
 }
 
 // NewServiceRegister creates a new ServiceRegister.
@@ -96,8 +98,9 @@ func (sr *ServiceRegister) Register() error {
 	// address will be removed automatically once its lease expires, so retry
 	// within the lease TTL before giving up. This starting deadline is a
 	// fallback for before putWithTTL has measured the actual contending
-	// lease; once it has, sr.retryDeadline (based on that lease's real
-	// GrantedTTL) takes over if it implies a later deadline.
+	// lease; once it has, sr.retryDeadline (based on that lease's observed
+	// remaining TTL, see observeContendedLease) takes over if it implies a
+	// later deadline.
 	deadline := time.Now().Add(time.Duration(sr.ttl)*time.Second + registerRetryMargin)
 	for {
 		id, err = sr.putWithTTL()
@@ -180,6 +183,25 @@ func (sr *ServiceRegister) renewKeepalive() <-chan *clientv3.LeaseKeepAliveRespo
 func (sr *ServiceRegister) putWithTTL() (clientv3.LeaseID, error) {
 	ctx, cancel := context.WithTimeout(sr.ctx, etcdutil.DefaultRequestTimeout)
 	defer cancel()
+
+	// Check first, without granting a lease: Grant and Revoke are both raft
+	// writes, so retrying every registerRetryInterval against a key that is
+	// still occupied by someone else would otherwise churn an unused lease
+	// through etcd on every single retry while waiting for it to expire.
+	// The actual claim below is still atomic, so a race between this check
+	// and that claim cannot cause incorrect behavior -- at worst it costs
+	// one wasted Grant/Revoke, exactly like every retry did before this
+	// check existed.
+	getResp, err := sr.cli.Get(ctx, sr.key)
+	if err != nil {
+		return 0, err
+	}
+	if len(getResp.Kvs) > 0 {
+		if owned, occupiedErr := sr.leaseOwnership(ctx, getResp.Kvs[0].Lease, getResp.Kvs[0].Value, getResp.Header.RaftTerm); !owned {
+			return 0, occupiedErr
+		}
+	}
+
 	grantResp, err := sr.cli.Grant(ctx, sr.ttl)
 	if err != nil {
 		return 0, err
@@ -208,14 +230,13 @@ func (sr *ServiceRegister) putWithTTL() (clientv3.LeaseID, error) {
 	// live instance (or a not-yet-expired entry from a prior process) and
 	// let the caller's retry loop wait for it to expire.
 	kvs := resp.Responses[0].GetResponseRange().Kvs
-	if len(kvs) == 0 || sr.leaseID == clientv3.NoLease || clientv3.LeaseID(kvs[0].Lease) != sr.leaseID {
-		existingValue := ""
-		if len(kvs) > 0 {
-			existingValue = string(kvs[0].Value)
-			sr.observeContendedLease(ctx, clientv3.LeaseID(kvs[0].Lease))
-		}
+	if len(kvs) == 0 {
 		sr.revokeLease(ctx, leaseID)
-		return 0, fmt.Errorf("key %s, existing value %s: %w", sr.key, existingValue, errServiceAddrOccupied)
+		return 0, fmt.Errorf("key %s, existing value : %w", sr.key, errServiceAddrOccupied)
+	}
+	if owned, occupiedErr := sr.leaseOwnership(ctx, kvs[0].Lease, kvs[0].Value, resp.Header.RaftTerm); !owned {
+		sr.revokeLease(ctx, leaseID)
+		return 0, occupiedErr
 	}
 	// Re-registering after a keepalive failure while the previous lease has
 	// not expired yet: take it over with the new lease.
@@ -236,21 +257,42 @@ func (sr *ServiceRegister) putWithTTL() (clientv3.LeaseID, error) {
 	return leaseID, nil
 }
 
+// leaseOwnership reports whether an existing key backed by lease (read at
+// raft term term) is still backed by the lease this instance itself
+// previously registered it with. When it is not, it records a fresh
+// contended-lease measurement and returns the occupied error to propagate
+// to the caller.
+func (sr *ServiceRegister) leaseOwnership(ctx context.Context, lease int64, value []byte, term uint64) (owned bool, err error) {
+	if sr.leaseID != clientv3.NoLease && clientv3.LeaseID(lease) == sr.leaseID {
+		return true, nil
+	}
+	sr.observeContendedLease(ctx, clientv3.LeaseID(lease), term)
+	return false, fmt.Errorf("key %s, existing value %s: %w", sr.key, string(value), errServiceAddrOccupied)
+}
+
 // observeContendedLease records how long the lease currently occupying the
-// key could still take to expire, the first time this specific lease ID is
-// observed as occupying it. It deliberately does not re-measure on every
-// call against the same lease ID, so a lease kept alive by a genuinely live
-// owner does not push the retry deadline out indefinitely; only a change in
-// which lease is occupying the key (a new registration event) triggers a
-// fresh measurement. It uses the observed remaining TTL rather than
-// GrantedTTL (the lease's original, unchanging duration): TimeToLive's TTL
-// reflects time.Until(expiry), which already includes any etcd leader
-// promotion that refreshed this lease's expiry before this measurement, on
-// top of the minimum-lease-TTL floor. registerRetryMargin then only needs to
-// cover a promotion that happens after this measurement, not one already
-// baked into GrantedTTL's ignorance of expiry updates.
-func (sr *ServiceRegister) observeContendedLease(ctx context.Context, existingLease clientv3.LeaseID) {
-	if existingLease == clientv3.NoLease || existingLease == sr.contendedLease {
+// key could still take to expire. It (re-)measures only when the key is now
+// occupied by a different lease than last observed, or when term (the raft
+// term seen on the response that reported this occupation) has advanced
+// since the last measurement: a raft term only advances on an etcd leader
+// election, which is exactly when (*lessor).Promote can refresh a lease's
+// expiry beyond what was last observed, so this catches every such refresh
+// regardless of how many occur while waiting. It uses the observed
+// remaining TTL rather than GrantedTTL (the lease's original, unchanging
+// duration): TimeToLive's TTL reflects time.Until(expiry), which already
+// includes any such refresh that happened before this measurement, on top
+// of the minimum-lease-TTL floor. registerRetryMargin then only needs to
+// cover a refresh that happens after this specific measurement, before the
+// next one.
+//
+// A lease kept alive purely by a genuinely live owner's keepalive traffic
+// never advances the raft term, so this does not re-measure — and cannot
+// push the retry deadline out indefinitely — for that case.
+func (sr *ServiceRegister) observeContendedLease(ctx context.Context, existingLease clientv3.LeaseID, term uint64) {
+	if existingLease == clientv3.NoLease {
+		return
+	}
+	if existingLease == sr.contendedLease && term <= sr.lastObservedTerm {
 		return
 	}
 	ttlResp, err := sr.cli.TimeToLive(ctx, existingLease)
@@ -258,6 +300,7 @@ func (sr *ServiceRegister) observeContendedLease(ctx context.Context, existingLe
 		return
 	}
 	sr.contendedLease = existingLease
+	sr.lastObservedTerm = term
 	sr.retryDeadline = time.Now().Add(time.Duration(ttlResp.TTL)*time.Second + registerRetryMargin)
 }
 
