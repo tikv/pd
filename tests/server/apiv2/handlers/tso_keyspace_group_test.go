@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/suite"
+	clientv3 "go.etcd.io/etcd/client/v3"
 
 	perrors "github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -494,12 +495,28 @@ func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupLeadershipConfl
 	leadership := suite.server.GetServer().GetMember().GetLeadership()
 	oldTerm, ok := leadership.CaptureTerm()
 	re.True(ok)
-	leadership.Reset()
-	re.NoError(leadership.Campaign(60, oldTerm.LeaderValue()))
-	newTerm, ok := leadership.CaptureTerm()
-	re.True(ok)
-	re.Equal(oldTerm.LeaderValue(), newTerm.LeaderValue())
-	re.NotEqual(oldTerm.LeaseID(), newTerm.LeaseID())
+	etcdClient := suite.server.GetEtcdClient()
+	newLease, err := etcdClient.Grant(suite.ctx, 60)
+	re.NoError(err)
+	re.NotEqual(oldTerm.LeaseID(), newLease.ID)
+	_, err = etcdClient.Put(
+		suite.ctx,
+		leadership.GetLeaderKey(),
+		oldTerm.LeaderValue(),
+		clientv3.WithLease(newLease.ID),
+	)
+	re.NoError(err)
+	defer func() {
+		_, err := etcdClient.Put(
+			suite.ctx,
+			leadership.GetLeaderKey(),
+			oldTerm.LeaderValue(),
+			clientv3.WithLease(oldTerm.LeaseID()),
+		)
+		re.NoError(err)
+		_, err = etcdClient.Revoke(suite.ctx, newLease.ID)
+		re.NoError(err)
+	}()
 	close(continueCh)
 
 	select {
