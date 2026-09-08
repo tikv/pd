@@ -785,6 +785,114 @@ func TestPlacementLoadScopePreservesExpectationGuards(t *testing.T) {
 	re.Equal(float64(10), targetScope.expect.Loads[utils.ByteDim])
 	re.Equal(float64(100), otherScope.expect.Loads[utils.ByteDim])
 	re.False(samePlacementLoadPopulation(targetScope, true, otherScope, true))
+	noMatchRule := &placement.Rule{LabelConstraints: []placement.LabelConstraint{
+		{Key: "pool", Op: placement.In, Values: []string{"missing"}},
+	}}
+	re.Nil(bs.getPlacementLoadScope([]*placement.Rule{noMatchRule}, true))
+}
+
+func TestPrepareForRegionFallsBackForStaleStoreLabels(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	scheduler, err := CreateScheduler(writeType, oc, storage.NewStorageWithMemoryBackend(), nil)
+	re.NoError(err)
+	scheduler.(*hotScheduler).conf.WriteLeaderPriorities = []string{utils.BytePriority, utils.KeyPriority}
+
+	peers := []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}}
+	region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers}, peers[0])
+	rule := &placement.Rule{
+		Role: placement.Voter,
+		LabelConstraints: []placement.LabelConstraint{
+			{Key: "pool", Op: placement.In, Values: []string{"new"}},
+		},
+	}
+	fit := &placement.RegionFit{RuleFits: []*placement.RuleFit{{Rule: rule, Peers: peers}}}
+	current := statistics.StoreLoad{
+		Loads:        statistics.Loads{20, 10},
+		HotPeerCount: 1,
+		HistoryLoads: statistics.HistoryLoads{{20}, {10}},
+	}
+	loadPred := current.ToLoadPred(utils.Write, nil)
+	loadPred.Expect = statistics.StoreLoad{
+		Loads:        statistics.Loads{10, 10},
+		HotPeerCount: 1,
+		HistoryLoads: statistics.HistoryLoads{{10}, {10}},
+	}
+	source := &statistics.StoreLoadDetail{
+		StoreSummaryInfo: &statistics.StoreSummaryInfo{
+			StoreInfo: core.NewStoreInfoWithLabel(1, map[string]string{"pool": "old"}),
+		},
+		LoadPred: loadPred,
+	}
+	bs := newBalanceSolver(scheduler.(*hotScheduler), tc, utils.Write, transferLeader)
+	bs.stLoadDetail = map[uint64]*statistics.StoreLoadDetail{
+		1: source,
+		2: {
+			StoreSummaryInfo: &statistics.StoreSummaryInfo{
+				StoreInfo: core.NewStoreInfoWithLabel(2, map[string]string{"pool": "old"}),
+			},
+			LoadPred: current.ToLoadPred(utils.Write, nil),
+		},
+	}
+
+	scope := bs.prepareForRegion(region, fit, source)
+	re.Nil(scope)
+	re.NotPanics(func() {
+		bs.sourceStoreFailure(source, scope)
+	})
+}
+
+func TestPrepareForRegionExcludesWitnessRules(t *testing.T) {
+	re := require.New(t)
+	peers := []*metapb.Peer{
+		{Id: 1, StoreId: 1},
+		{Id: 2, StoreId: 2},
+		{Id: 3, StoreId: 3, IsWitness: true},
+	}
+	region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers}, peers[0])
+	nonWitnessRule := &placement.Rule{
+		Role: placement.Voter,
+		LabelConstraints: []placement.LabelConstraint{
+			{Key: "pool", Op: placement.In, Values: []string{"regular"}},
+		},
+	}
+	witnessRule := &placement.Rule{
+		Role:      placement.Voter,
+		IsWitness: true,
+		LabelConstraints: []placement.LabelConstraint{
+			{Key: "pool", Op: placement.In, Values: []string{"witness"}},
+		},
+	}
+	fit := &placement.RegionFit{RuleFits: []*placement.RuleFit{
+		{Rule: nonWitnessRule, Peers: peers[:2]},
+		{Rule: witnessRule, Peers: peers[2:]},
+	}}
+	details := make(map[uint64]*statistics.StoreLoadDetail)
+	for id, load := range map[uint64]float64{1: 20, 2: 10, 3: 100, 4: 200} {
+		pool := "witness"
+		if id <= 2 {
+			pool = "regular"
+		}
+		current := statistics.StoreLoad{
+			Loads:        statistics.Loads{load, 10},
+			HotPeerCount: 1,
+			HistoryLoads: statistics.HistoryLoads{{load}, {10}},
+		}
+		details[id] = &statistics.StoreLoadDetail{
+			StoreSummaryInfo: &statistics.StoreSummaryInfo{
+				StoreInfo: core.NewStoreInfoWithLabel(id, map[string]string{"pool": pool}),
+			},
+			LoadPred: current.ToLoadPred(utils.Write, nil),
+		}
+	}
+	bs := &balanceSolver{opTy: transferLeader, stLoadDetail: details}
+
+	scope := bs.prepareForRegion(region, fit, details[1])
+	re.NotNil(scope)
+	re.Equal(float64(15), scope.expect.Loads[utils.ByteDim])
+	re.Equal([]float64{15}, scope.expect.HistoryLoads[utils.ByteDim])
+	re.Nil(bs.prepareForRegion(region, fit, details[3]))
 }
 
 func TestPlacementLoadPopulationHandlesStaleIndex(t *testing.T) {

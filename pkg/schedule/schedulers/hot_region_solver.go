@@ -965,7 +965,7 @@ func (bs *balanceSolver) enableExpectation() bool {
 }
 
 // prepareForRegion derives the stores that can legally carry the current load.
-// Leaders can move between different RuleFits with the same placement role.
+// Leaders can move between different non-witness RuleFits with the same placement role.
 func (bs *balanceSolver) prepareForRegion(region *core.RegionInfo, fit *placement.RegionFit, source *statistics.StoreLoadDetail) *placementLoadScope {
 	if fit == nil {
 		return nil
@@ -978,15 +978,26 @@ func (bs *balanceSolver) prepareForRegion(region *core.RegionInfo, fit *placemen
 	if sourceFit == nil {
 		return nil
 	}
+	if sourceFit.Rule.IsWitness {
+		return nil
+	}
 
 	rules := []*placement.Rule{sourceFit.Rule}
 	if bs.opTy == transferLeader {
 		rules = rules[:0]
 		for _, ruleFit := range fit.RuleFits {
-			if ruleFit.Rule.Role == sourceFit.Rule.Role {
+			if ruleFit.Rule.Role == sourceFit.Rule.Role && !ruleFit.Rule.IsWitness {
 				rules = append(rules, ruleFit.Rule)
 			}
 		}
+	}
+	// The region fit and store load details are collected independently. If a
+	// label change makes them disagree, use the engine-wide expectation until
+	// the load snapshot catches up.
+	if !slice.AnyOf(rules, func(i int) bool {
+		return placement.MatchLabelConstraints(source.StoreInfo, rules[i].LabelConstraints)
+	}) {
+		return nil
 	}
 	return bs.getPlacementLoadScope(rules, source.IsTiKV())
 }
@@ -1085,7 +1096,7 @@ func (bs *balanceSolver) getPlacementLoadScope(rules []*placement.Rule, isTiKV b
 			details = append(details, detail)
 			summary.Add(&detail.LoadPred.Current)
 		}
-		if len(details) < allCount {
+		if len(details) > 0 && len(details) < allCount {
 			expect, stddev := summary.Result(details)
 			scope = &placementLoadScope{
 				expect:     expect,
