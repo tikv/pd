@@ -554,10 +554,17 @@ func TestSetPDServerConfigWithDashboard(t *testing.T) {
 
 	leader := cluster.WaitLeader()
 	re.NotEmpty(leader)
-	svr := cluster.GetServer(leader).GetServer()
+	testServer := cluster.GetServer(leader)
+	svr := testServer.GetServer()
+
+	// Use a concrete member URL so the dashboard manager cannot asynchronously
+	// resolve "auto" between the update and the assertion.
+	cfg := svr.GetPDServerConfig()
+	cfg.DashboardAddress = testServer.GetConfig().AdvertiseClientUrls
+	re.NoError(svr.SetPDServerConfig(*cfg))
 
 	// Test updating config without changing dashboard address
-	cfg := svr.GetPDServerConfig()
+	cfg = svr.GetPDServerConfig()
 	originalDashboard := cfg.DashboardAddress
 	originalUseRegionStorage := cfg.UseRegionStorage
 
