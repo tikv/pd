@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -47,6 +48,13 @@ const registerRetryMargin = 5 * time.Second
 // address is already claimed by another live instance.
 var errServiceAddrOccupied = errors.New("service registry key is occupied by another live instance")
 
+// errServiceAddrOccupiedPermanently indicates the registry key is held by an
+// entry with no lease attached. Such an entry is never cleaned up by etcd on
+// its own, so it is deliberately not classified as errServiceAddrOccupied:
+// Register's retry loop only retries the latter, since retrying against a
+// leaseless entry can never succeed.
+var errServiceAddrOccupiedPermanently = errors.New("service registry key is occupied by an entry with no lease and will never expire")
+
 // ServiceRegister is used to register the service to etcd.
 type ServiceRegister struct {
 	ctx    context.Context
@@ -72,6 +80,12 @@ type ServiceRegister struct {
 	contendedLease   clientv3.LeaseID
 	lastObservedTerm uint64
 	retryDeadline    time.Time
+	// wg tracks the background keepalive-renewal goroutine started by
+	// Register, so Deregister can wait for it to fully exit before reading
+	// leaseID: leaseID is otherwise only ever touched by that single
+	// goroutine once it starts, and reading it from Deregister's caller
+	// without waiting would race with it.
+	wg sync.WaitGroup
 }
 
 // NewServiceRegister creates a new ServiceRegister.
@@ -131,8 +145,10 @@ func (sr *ServiceRegister) Register() error {
 		sr.cancel()
 		return fmt.Errorf("keepalive failed: %v", err)
 	}
+	sr.wg.Add(1)
 	go func() {
 		defer logutil.LogPanic()
+		defer sr.wg.Done()
 		for {
 			select {
 			case <-sr.ctx.Done():
@@ -259,12 +275,17 @@ func (sr *ServiceRegister) putWithTTL() (clientv3.LeaseID, error) {
 
 // leaseOwnership reports whether an existing key backed by lease (read at
 // raft term term) is still backed by the lease this instance itself
-// previously registered it with. When it is not, it records a fresh
-// contended-lease measurement and returns the occupied error to propagate
-// to the caller.
+// previously registered it with. When it is not, it returns the occupied
+// error to propagate to the caller: errServiceAddrOccupiedPermanently when
+// the key has no lease attached (it will never expire on its own, so
+// retrying is pointless), otherwise errServiceAddrOccupied after recording
+// a fresh contended-lease measurement.
 func (sr *ServiceRegister) leaseOwnership(ctx context.Context, lease int64, value []byte, term uint64) (owned bool, err error) {
 	if sr.leaseID != clientv3.NoLease && clientv3.LeaseID(lease) == sr.leaseID {
 		return true, nil
+	}
+	if clientv3.LeaseID(lease) == clientv3.NoLease {
+		return false, fmt.Errorf("key %s, existing value %s: %w", sr.key, string(value), errServiceAddrOccupiedPermanently)
 	}
 	sr.observeContendedLease(ctx, clientv3.LeaseID(lease), term)
 	return false, fmt.Errorf("key %s, existing value %s: %w", sr.key, string(value), errServiceAddrOccupied)
@@ -312,11 +333,26 @@ func (sr *ServiceRegister) revokeLease(ctx context.Context, leaseID clientv3.Lea
 	}
 }
 
-// Deregister deregisters the service from etcd.
+// Deregister deregisters the service from etcd. It only deletes the key
+// while it is still backed by the lease this instance itself registered it
+// with: if that lease already expired and a different instance has since
+// claimed the same address, this instance may be shutting down long after
+// losing ownership, and must not delete the replacement's live
+// registration.
 func (sr *ServiceRegister) Deregister() error {
 	sr.cancel()
+	// Wait for the background keepalive-renewal goroutine to fully exit
+	// before reading leaseID: it is the only other thing that ever writes
+	// leaseID, and only while running.
+	sr.wg.Wait()
+	if sr.leaseID == clientv3.NoLease {
+		return nil
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(sr.ttl)*time.Second)
 	defer cancel()
-	_, err := sr.cli.Delete(ctx, sr.key)
+	_, err := sr.cli.Txn(ctx).
+		If(clientv3.Compare(clientv3.LeaseValue(sr.key), "=", sr.leaseID)).
+		Then(clientv3.OpDelete(sr.key)).
+		Commit()
 	return err
 }

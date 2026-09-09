@@ -127,6 +127,38 @@ func TestRegisterConflict(t *testing.T) {
 	re.NoError(sr3.Deregister())
 }
 
+func TestDeregisterDoesNotDeleteReplacementRegistration(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sr1 := NewServiceRegister(ctx, client, "test_service", "127.0.0.1:1", "instance-1", 2)
+	re.NoError(sr1.Register())
+	// sr1 stops renewing (simulating a lost connection) without ever
+	// deregistering, leaving a stale-but-not-yet-expired entry.
+	sr1.cancel()
+
+	// A different instance later claims the same address once the stale
+	// lease naturally expires.
+	sr2 := NewServiceRegister(ctx, client, "test_service", "127.0.0.1:1", "instance-2", 2)
+	re.NoError(sr2.Register())
+
+	// sr1 has no way of knowing it lost ownership; deregistering it now
+	// (e.g. a delayed shutdown call arriving after the fact) must not
+	// delete sr2's live registration.
+	re.NoError(sr1.Deregister())
+
+	resp, err := client.Get(ctx, sr1.key)
+	re.NoError(err)
+	re.Len(resp.Kvs, 1)
+	re.Equal("instance-2", string(resp.Kvs[0].Value))
+
+	re.NoError(sr2.Deregister())
+}
+
 func TestRegisterConflictSameSerializedValue(t *testing.T) {
 	re := require.New(t)
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
@@ -170,7 +202,12 @@ func TestRegisterRejectsUnleasedExistingKey(t *testing.T) {
 	_, err := client.Put(ctx, sr.key, "some-value")
 	re.NoError(err)
 
+	start := time.Now()
 	err = sr.Register()
+	// An unleased key can never expire on its own, so this must fail
+	// immediately instead of retrying until the ttl+registerRetryMargin
+	// fallback deadline (7s here).
+	re.Less(time.Since(start), 2*time.Second)
 	re.Error(err)
 	re.Contains(err.Error(), "occupied")
 }
