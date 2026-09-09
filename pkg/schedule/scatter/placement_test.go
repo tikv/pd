@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -46,6 +47,8 @@ func newPlacementTestScatter(t testing.TB, rules bool, hosts []string) (*RegionS
 	tc.SetEnablePlacementRules(rules)
 	for i, host := range hosts {
 		tc.AddLabelsStore(uint64(i+1), 0, map[string]string{"host": host})
+		// Keep fixture stores connected during slow CI runs without heartbeats.
+		tc.SetStoreLastHeartbeatInterval(uint64(i+1), -10*time.Minute)
 	}
 	if rules {
 		rule := tc.GetRuleManager().GetRule("pd", "default").Clone()
