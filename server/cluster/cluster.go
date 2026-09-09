@@ -2172,7 +2172,7 @@ func (c *RaftCluster) deleteStore(store *core.StoreInfo) error {
 	}
 	c.core.DeleteStore(store)
 	// Let concurrent collectors detect the deletion before cleaning up metrics.
-	statistics.DeleteClusterStatusMetrics(store)
+	statistics.ResetStoreStatistics(store.GetAddress(), strconv.FormatUint(store.GetID(), 10))
 	return nil
 }
 

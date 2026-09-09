@@ -94,9 +94,51 @@ func TestObserveStoresAfterDeletion(t *testing.T) {
 			otherID := strconv.FormatUint(other.GetID(), 10)
 			re.False(clusterStatusGauge.DeleteLabelValues(clusterStatusStoreTombstoneCount, id))
 			re.False(clusterStatusGauge.DeleteLabelValues(clusterStatusStorageSize, id))
-			// A tombstone that is still in the cluster must retain its metrics.
+			// A known tombstone retains state metrics, but not storage metrics.
 			re.True(clusterStatusGauge.DeleteLabelValues(clusterStatusStoreTombstoneCount, otherID))
-			re.True(clusterStatusGauge.DeleteLabelValues(clusterStatusStorageSize, otherID))
+			re.False(clusterStatusGauge.DeleteLabelValues(clusterStatusStorageSize, otherID))
 		})
 	}
+}
+
+func TestTombstoneStoreMetricsLifecycle(t *testing.T) {
+	re := require.New(t)
+	store := core.NewStoreInfo(&metapb.Store{Id: 9876543220, Address: "old-address"})
+	id := strconv.FormatUint(store.GetID(), 10)
+	t.Cleanup(func() { ResetStoreStatistics(store.GetAddress(), id) })
+	stats := NewStoresStats()
+	stats.GetOrCreateRollingStoreStats(store.GetID())
+	m := NewStoreStatisticsMap(mockconfig.NewTestOptions())
+	m.Observe(store)
+	m.ObserveHotStat(store, stats)
+	re.True(storeStatusGauge.DeleteLabelValues(store.GetAddress(), id, "region_size"))
+	re.True(storeStatusGauge.DeleteLabelValues(store.GetAddress(), id, "store_cpu_usage"))
+	// Bury-time cleanup must also remove instant/disk metrics and old addresses.
+	ResetStoreStatistics("new-address", id)
+	tombstone := store.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
+	m.Observe(tombstone)
+	m.ObserveHotStat(tombstone, stats)
+	re.Zero(storeStatusGauge.DeletePartialMatch(map[string]string{"store": id}))
+	re.True(clusterStatusGauge.DeleteLabelValues(clusterStatusStoreTombstoneCount, id))
+	re.True(clusterStatusGauge.DeleteLabelValues(clusterStatusStoreRemovedCount, id))
+	re.False(clusterStatusGauge.DeleteLabelValues(clusterStatusStorageSize, id))
+}
+
+func TestObserveStoresCleansDeletedStoreSnapshot(t *testing.T) {
+	re := require.New(t)
+	cluster := core.NewBasicCluster()
+	store := core.NewStoreInfo(&metapb.Store{Id: 9876543230, Address: "store-address"})
+	id := strconv.FormatUint(store.GetID(), 10)
+	cluster.PutStore(store)
+	stats := NewStoresStats()
+	stats.GetOrCreateRollingStoreStats(store.GetID())
+	t.Cleanup(func() { ResetStoreStatistics(store.GetAddress(), id) })
+	opt := &storeMetricsTestConfig{ConfProvider: mockconfig.NewTestOptions()}
+	opt.beforeObserve = func() {
+		cluster.DeleteStore(store)
+		ResetStoreStatistics(store.GetAddress(), id)
+	}
+	NewStoreStatisticsMap(opt).ObserveStores(cluster, stats)
+	re.Zero(storeStatusGauge.DeletePartialMatch(map[string]string{"store": id}))
+	re.Zero(clusterStatusGauge.DeletePartialMatch(map[string]string{"store": id}))
 }

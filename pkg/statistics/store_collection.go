@@ -133,6 +133,9 @@ func (s *storeStatistics) Observe(store *core.StoreInfo) {
 	for statusType, value := range storeStatusStats {
 		clusterStatusGauge.WithLabelValues(statusType, id).Set(value)
 	}
+	if store.GetNodeState() == metapb.NodeState_Removed {
+		return
+	}
 
 	// Store stats.
 	clusterStatusGauge.WithLabelValues(clusterStatusStorageSize, id).Set(float64(store.StorageSize()))
@@ -173,6 +176,9 @@ func (s *storeStatistics) Observe(store *core.StoreInfo) {
 }
 
 func (s *storeStatistics) ObserveHotStat(store *core.StoreInfo, stats *StoresStats) {
+	if store.GetNodeState() == metapb.NodeState_Removed {
+		return
+	}
 	// Store flows.
 	storeAddress := store.GetAddress()
 	id := strconv.FormatUint(store.GetID(), 10)
@@ -263,34 +269,8 @@ func (s *storeStatistics) Collect() {
 
 // ResetStoreStatistics resets the metrics of store.
 func ResetStoreStatistics(storeAddress string, id string) {
-	metrics := []string{
-		"region_score",
-		"leader_score",
-		"region_size",
-		"region_count",
-		"leader_size",
-		"leader_count",
-		"witness_count",
-		"learner_count",
-		"store_available",
-		"store_used",
-		"store_capacity",
-		"store_write_rate_bytes",
-		"store_read_rate_bytes",
-		"store_write_rate_keys",
-		"store_read_rate_keys",
-		"store_write_query_rate",
-		"store_read_query_rate",
-		"store_regions_write_rate_bytes",
-		"store_regions_write_rate_keys",
-		"store_slow_trend_cause_value",
-		"store_slow_trend_cause_rate",
-		"store_slow_trend_result_value",
-		"store_slow_trend_result_rate",
-	}
-	for _, m := range metrics {
-		storeStatusGauge.DeleteLabelValues(storeAddress, id, m)
-	}
+	// Match the stable store ID, including series recorded under an old address.
+	storeStatusGauge.DeletePartialMatch(utils.SingleLabel("store", id))
 	clusterStatusGauge.DeletePartialMatch(utils.SingleLabel("store", id))
 }
 
@@ -323,7 +303,7 @@ func (m *storeStatisticsMap) ObserveStores(cluster *core.BasicCluster, stats *St
 		// A stale snapshot can recreate metrics after the deletion path cleaned
 		// them up. Check after writing; deletion must remove the store first.
 		if cluster.GetStore(store.GetID()) == nil {
-			DeleteClusterStatusMetrics(store)
+			ResetStoreStatistics(store.GetAddress(), strconv.FormatUint(store.GetID(), 10))
 		}
 	}
 }
