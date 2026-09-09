@@ -3618,9 +3618,32 @@ func TestPutMetaStoreDoesNotRestoreRemovedStoreLimit(t *testing.T) {
 	re.False(ok)
 }
 
+// enablePutMetaStoreAfterWasKnownReadBarrier registers a real callback for
+// PutMetaStore's putMetaStoreAfterWasKnownRead InjectCall, invoked
+// synchronously exactly once wasKnown has been read and before putStoreImpl
+// runs -- proof of reaching that point, not a guess based on timing (a fixed
+// sleep can't guarantee a goroutine has been scheduled far enough on a slow
+// or delayed CI worker, and pausing anywhere inside putStoreImpl fires after
+// it has already decided new-vs-existing-store, too late to model a request
+// that raced a full concurrent register-then-remove of the same ID). Returns
+// the entered and release channels and a cleanup to disable the callback.
+func enablePutMetaStoreAfterWasKnownReadBarrier(t *testing.T) (entered, release chan struct{}) {
+	entered = make(chan struct{})
+	release = make(chan struct{})
+	const fp = "github.com/tikv/pd/server/cluster/putMetaStoreAfterWasKnownRead"
+	require.NoError(t, failpoint.EnableCall(fp, func() {
+		close(entered)
+		<-release
+	}))
+	t.Cleanup(func() {
+		require.NoError(t, failpoint.Disable(fp))
+	})
+	return entered, release
+}
+
 // TestPutMetaStoreCannotRaceConcurrentRegistrationAndBury guards against
 // PutMetaStore's wasKnown snapshot going stale: a request that reads
-// wasKnown=false, then pauses before putStoreImpl, can't let a second,
+// wasKnown=false, then pauses before putStoreImpl runs, can't let a second,
 // fully-completed register-then-bury of the same store ID land in between --
 // storeStateLock must serialize the whole thing. Proven by showing a
 // concurrent BuryStore for the same ID cannot complete while PutMetaStore is
@@ -3645,17 +3668,21 @@ func TestPutMetaStoreCannotRaceConcurrentRegistrationAndBury(t *testing.T) {
 		Version: "2.0.0",
 	}
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/putMetaStoreAfterStoreStateLock", "return(true)"))
-	defer failpoint.Disable("github.com/tikv/pd/server/cluster/putMetaStoreAfterStoreStateLock") //nolint:errcheck
+	entered, release := enablePutMetaStoreAfterWasKnownReadBarrier(t)
 
 	putDone := make(chan error, 1)
 	go func() {
 		putDone <- rc.PutMetaStore(meta)
 	}()
 
-	// Give PutMetaStore time to acquire storeStateLock, read wasKnown (false,
-	// since the store doesn't exist yet), and reach the failpoint's sleep.
-	time.Sleep(50 * time.Millisecond)
+	// Wait for PutMetaStore to actually reach the point right after reading
+	// wasKnown -- proof it already holds storeStateLock, not a guess based on
+	// timing.
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("PutMetaStore did not reach the wasKnown-read barrier")
+	}
 
 	// A full register-then-bury of the same ID must not be able to complete
 	// while PutMetaStore is paused holding storeStateLock for it.
@@ -3673,12 +3700,82 @@ func TestPutMetaStoreCannotRaceConcurrentRegistrationAndBury(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 	}
 
+	close(release)
+
 	re.NoError(<-putDone)
 	re.NoError(<-buryDone)
 
 	re.True(rc.GetStore(storeID).IsRemoved())
 	_, ok := opt.GetScheduleConfig().StoreLimit[storeID]
 	re.False(ok, "the bury that ran after PutMetaStore released the lock must be the final word on this store's limit")
+}
+
+// TestPutMetaStoreCannotRaceConcurrentManualTombstoneRemoval guards against
+// RemoveTombStoneRecords' deleteStore call resurrecting a store PutMetaStore
+// is mid-flight on: without storeStateLock around it too, PutMetaStore could
+// read wasKnown=true for a store that's about to be (or just was) fully
+// deleted, then putStoreImpl's storage write and in-memory PutStore would
+// durably recreate both the store and its limit after the deletion already
+// ran. Proven the same way as the bury case: a concurrent
+// RemoveTombStoneRecords for the same store cannot complete while
+// PutMetaStore is paused mid-call.
+func TestPutMetaStoreCannotRaceConcurrentManualTombstoneRemoval(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	backend := storage.NewStorageWithMemoryBackend()
+	rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, backend)
+
+	const storeID = uint64(1)
+	store := newTestStores(1, "2.0.0")[0]
+	rc.PutStore(store)
+	rc.AddStoreLimit(store.GetMeta())
+	rc.PutStore(store.Clone(core.SetStoreState(metapb.StoreState_Offline, true)))
+	re.NoError(rc.BuryStore(storeID, false))
+	_, ok := opt.GetScheduleConfig().StoreLimit[storeID]
+	re.False(ok)
+
+	entered, release := enablePutMetaStoreAfterWasKnownReadBarrier(t)
+
+	// Models a request whose gRPC preflight saw this store as known (it still
+	// is -- tombstoned, but not yet manually removed).
+	putDone := make(chan error, 1)
+	go func() {
+		putDone <- rc.PutMetaStore(store.GetMeta())
+	}()
+
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("PutMetaStore did not reach the wasKnown-read barrier")
+	}
+
+	// A manual remove-tombstone for the same store must not be able to
+	// complete while PutMetaStore is paused holding storeStateLock for it.
+	removeDone := make(chan error, 1)
+	go func() {
+		removeDone <- rc.RemoveTombStoneRecords()
+	}()
+
+	select {
+	case err := <-removeDone:
+		re.Fail("RemoveTombStoneRecords returned before PutMetaStore released storeStateLock", "err: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(release)
+
+	re.NoError(<-putDone)
+	re.NoError(<-removeDone)
+
+	// The manual removal that ran after PutMetaStore released the lock must
+	// be the final word: the store is gone for good, not resurrected.
+	re.Nil(rc.GetStore(storeID))
+	_, ok = opt.GetScheduleConfig().StoreLimit[storeID]
+	re.False(ok)
 }
 
 func TestPatrolRegionConcurrency(t *testing.T) {
