@@ -232,7 +232,7 @@ def main(repo_arg, out_arg, package_args):
         )
     components.sort(key=lambda item: (item["module"], item["version"], item["license_evidence"]))
 
-    commit = command("git", "rev-parse", "HEAD", cwd=repo)
+    commit = os.environ.get("NOTICE_SOURCE_COMMIT") or command("git", "rev-parse", "HEAD", cwd=repo)
     root_module = command("go", "list", "-m", "-f", "{{.Path}}", cwd=repo, env=env)
     metadata = {
         "schema_version": 1,

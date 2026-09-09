@@ -127,8 +127,8 @@ def main(config_path, evidence_root, notice_path, components_path):
         f"{config['target']['goos']}/{config['target']['goarch']} from commit {commit}.",
         "",
         "The generator, profile definitions, first-party policy, audited overrides, and",
-        "component provenance are versioned under third_party/notice/. A release must use",
-        "the profiles applicable to its artifact and add any packaging-only components.",
+        "component provenance are versioned under third_party/notice/. This is a one-time",
+        "source-code notice update and is not generated as part of normal builds."
         "",
         "COVERED PROFILES",
         "",

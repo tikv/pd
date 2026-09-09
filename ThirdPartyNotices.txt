@@ -5,9 +5,8 @@ third_party/notice/scopes.json, with tests excluded. It is generated for
 linux/amd64 from commit c658147acc0e8925aef48bfec5da0fce957d26ab.
 
 The generator, profile definitions, first-party policy, audited overrides, and
-component provenance are versioned under third_party/notice/. A release must use
-the profiles applicable to its artifact and add any packaging-only components.
-
+component provenance are versioned under third_party/notice/. This is a one-time
+source-code notice update and is not generated as part of normal builds.
 COVERED PROFILES
 
 - pd-root: module .; packages ./...; default build tags

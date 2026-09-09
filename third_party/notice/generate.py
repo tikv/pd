@@ -33,6 +33,7 @@ def generate(directory):
                 "GOARCH": config["target"]["goarch"],
                 "FIRST_PARTY_PREFIXES": ",".join(config["target"]["first_party_prefixes"]),
                 "NOTICE_GENERATOR_IMAGE": config["generator"]["image"],
+                "NOTICE_SOURCE_COMMIT": config["source_commit"],
                 "NOTICE_OVERRIDES": str(NOTICE_DIR / "overrides.json"),
                 "GOFLAGS": "-tags=" + ",".join(profile["build_tags"]),
             }

@@ -22,6 +22,5 @@ contains the retained license texts and upstream notices. Do not add an
 unknown license or broaden an override without an exact-version evidence file
 and review.
 
-This is a source notice. Release packaging must select only the applicable
-profiles and append non-Go packaging components (for example base-image or
-system packages) without rescanning at CD time.
+This is a one-time, auditable source-code notice update. It is not generated
+as part of the normal build or CI workflow.
