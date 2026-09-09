@@ -229,5 +229,9 @@ func TestConcurrentRunner(t *testing.T) {
 		require.Zero(t, runner.pendingTaskNum())
 		require.Equal(t, initialCapacity, cap(runner.pendingTasks))
 		require.Empty(t, runner.existTasks)
+
+		require.NoError(t, runner.RunTask(initialCapacity*2, "test7", func(context.Context) {}))
+		require.NoError(t, runner.RunTask(initialCapacity*2+1, "test7", func(context.Context) {}))
+		require.Same(t, storage, &runner.pendingTasks[0])
 	})
 }

@@ -253,7 +253,11 @@ func (cr *ConcurrentRunner) popPendingTask() {
 // pendingMu held. capacity is kept small during normal operation and zero when
 // the runner stops.
 func (cr *ConcurrentRunner) resetPendingTasks(capacity int) {
-	cr.pendingTasks = make([]*Task, 0, capacity)
+	if cap(cr.pendingTasks) == capacity {
+		cr.pendingTasks = cr.pendingTasks[:0]
+	} else {
+		cr.pendingTasks = make([]*Task, 0, capacity)
+	}
 	cr.pendingHead = 0
 	cr.pendingLen = 0
 	cr.existTasks = make(map[taskID]*Task)
