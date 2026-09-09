@@ -232,15 +232,15 @@ func (s *Server) campaignLeader(expectedPrimary string) bool {
 
 	// Start keepalive the leadership and enable Resource Manager service.
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
-	var once sync.Once
-	resetLeaderOnce := func() {
-		once.Do(func() {
-			cancel()
-			s.participant.Resign()
-			member.ServiceMemberGauge.WithLabelValues(serviceName).Set(0)
-		})
+	var resetLeaderOnce sync.Once
+	// A named function rather than an inline defer because the step-down branch
+	// below calls it before it logs; see the comment there.
+	resetLeader := func() {
+		cancel()
+		s.participant.Resign()
+		member.ServiceMemberGauge.WithLabelValues(serviceName).Set(0)
 	}
-	defer resetLeaderOnce()
+	defer resetLeaderOnce.Do(resetLeader)
 
 	// maintain the leadership, after this, Resource Manager could be ready to provide service.
 	s.participant.GetLeadership().Keep(ctx)
@@ -283,14 +283,14 @@ func (s *Server) campaignLeader(expectedPrimary string) bool {
 				// the primary is reported through GetServingUrls without
 				// consulting IsServing, so a primary that is still waiting on
 				// that log would keep being handed out.
-				resetLeaderOnce()
+				resetLeaderOnce.Do(resetLeader)
 				log.Info("no longer a primary/leader because lease has expired or transferred, the resource manager primary/leader will step down")
 				return false
 			}
 		case <-ctx.Done():
 			// Server is closed. A shutdown log can block just as long as a
 			// step-down log, so the resign comes first here too.
-			resetLeaderOnce()
+			resetLeaderOnce.Do(resetLeader)
 			log.Info("server is closed")
 			return false
 		}

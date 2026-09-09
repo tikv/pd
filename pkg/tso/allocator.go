@@ -345,8 +345,8 @@ func (a *Allocator) campaignPrimary(expectedPrimary string) {
 	//   1. lease based approach is not affected by thread pause, slow runtime schedule, etc.
 	//   2. load region could be slow. Based on lease we can recover TSO service faster.
 	ctx, cancel := context.WithCancel(a.ctx)
-	var once sync.Once
-	defer once.Do(func() {
+	var resetPrimaryOnce sync.Once
+	defer resetPrimaryOnce.Do(func() {
 		cancel()
 		a.member.Resign()
 	})
@@ -366,7 +366,7 @@ func (a *Allocator) campaignPrimary(expectedPrimary string) {
 		return
 	}
 	defer func() {
-		// Primary will be reset by the deferred resignation.
+		// Primary will be reset in `resetPrimaryOnce` later.
 		a.Reset(false)
 	}()
 
@@ -378,14 +378,14 @@ func (a *Allocator) campaignPrimary(expectedPrimary string) {
 
 	tsoLabel := fmt.Sprintf("TSO Service Group %d", a.keyspaceGroupID)
 	member.ServiceMemberGauge.WithLabelValues(tsoLabel).Set(1)
-	resetPrimaryOnce := func() {
-		once.Do(func() {
-			cancel()
-			a.member.Resign()
-			member.ServiceMemberGauge.WithLabelValues(tsoLabel).Set(0)
-		})
+	// A named function rather than an inline defer because the step-down branch
+	// below calls it before it logs; see the comment there.
+	resetPrimary := func() {
+		cancel()
+		a.member.Resign()
+		member.ServiceMemberGauge.WithLabelValues(tsoLabel).Set(0)
 	}
-	defer resetPrimaryOnce()
+	defer resetPrimaryOnce.Do(resetPrimary)
 
 	primaryTicker := time.NewTicker(constant.PrimaryTickInterval)
 	defer primaryTicker.Stop()
@@ -402,14 +402,14 @@ func (a *Allocator) campaignPrimary(expectedPrimary string) {
 				// GetPrimaryAddr reports this member through GetServingUrls
 				// without consulting isServing, so a primary that is still
 				// waiting on that log would keep being handed out.
-				resetPrimaryOnce()
+				resetPrimaryOnce.Do(resetPrimary)
 				log.Info("no longer a primary because lease has expired or transferred, the tso primary will step down", a.logFields...)
 				return
 			}
 		case <-ctx.Done():
 			// Server is closed. A shutdown log can block just as long as a
 			// step-down log, so the resign comes first here too.
-			resetPrimaryOnce()
+			resetPrimaryOnce.Do(resetPrimary)
 			log.Info("exit primary campaign", a.logFields...)
 			return
 		}
