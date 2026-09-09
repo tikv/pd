@@ -391,16 +391,11 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	configutil.AdjustString(&c.InitialClusterToken, defaultInitialClusterToken)
 
 	// Join is a comma-separated list of endpoints (see the field comment and
-	// server/join, which splits it on ","), so it must be validated per
-	// endpoint. Handing the whole list to a single url.Parse never validated
-	// the multi-endpoint form: under Go 1.25 semantics it accepted the list as
-	// one malformed URL, with a host of "pd-0:2379,http:". Go 1.26 rejects a
-	// colon in that position, which turned the latent gap into a startup
-	// failure for any PD given multiple --join endpoints.
-	if len(c.Join) > 0 {
-		if _, err := parseUrls(c.Join); err != nil {
-			return errors.Errorf("failed to parse join addr:%s, err:%v", c.Join, err)
-		}
+	// server/join, which splits it on ","), so validate it per endpoint rather
+	// than passing the whole list to a single url.Parse, which accepts it as
+	// one malformed URL with a host of "pd-0:2379,http:".
+	if _, err := parseUrls(c.Join); err != nil {
+		return errors.Errorf("failed to parse join addr:%s, err:%v", c.Join, err)
 	}
 
 	configutil.AdjustInt(&c.MaxConcurrentTSOProxyStreamings, defaultMaxConcurrentTSOProxyStreamings)

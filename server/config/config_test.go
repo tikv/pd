@@ -83,7 +83,6 @@ func TestJoinAddr(t *testing.T) {
 			join: "http://pd-0.pd-peer:2379,https://pd-1.pd-peer:2379,http://[::1]:2379",
 		},
 		{
-			// The form TiDB Operator generates for PD recovery.
 			name: "peer service endpoints",
 			join: "http://demo-pd-0.demo-pd-peer.demo.svc:2380,http://demo-pd-1.demo-pd-peer.demo.svc:2380",
 		},
