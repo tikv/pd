@@ -464,13 +464,21 @@ type Checker interface {
 	KeyspaceExist(keyspaceID uint32) bool
 }
 
-// RegionSpansMultipleKeyspaces checks if a region spans across multiple keyspaces.
-// It returns true if the region crosses keyspace boundaries, false otherwise.
-// startKey is the region start key, endKey is the region end key (exclusive).
-// A region [startKey, endKey) spans multiple keyspaces if:
-// 1. startKey and endKey have different keyspace IDs, AND
-// 2. endKey is NOT exactly at the right bound of startKey's keyspace (i.e., not just at the boundary), AND
-// 3. At least two existing keyspaces are crossed (checked via checker)
+// RegionSpansMultipleKeyspaces checks whether the region [startKey, endKey)
+// (endKey exclusive) crosses a keyspace boundary. It returns false when nil
+// checker is passed.
+//
+// The decision, in order:
+//   - both keys carry no keyspace prefix (or endKey is absent): not spanning;
+//   - exactly one key carries no keyspace prefix: conservatively spanning, since
+//     the boundary cannot be determined;
+//   - same keyspace ID and same mode (raw/txn): not spanning;
+//   - raw startKey with txn endKey: spanning (crosses the raw/txn boundary);
+//   - endKey sits exactly on startKey's keyspace right bound: not spanning;
+//   - otherwise: spanning iff the start or the end keyspace still exists.
+//
+// The last rule only looks at the two end keyspaces; keyspaces that lie strictly
+// between them are not inspected.
 func RegionSpansMultipleKeyspaces(startKey, endKey []byte, checker Checker) bool {
 	if checker == nil {
 		return false
