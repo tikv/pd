@@ -474,11 +474,15 @@ type Checker interface {
 //     the boundary cannot be determined;
 //   - same keyspace ID and same mode (raw/txn): not spanning;
 //   - raw startKey with txn endKey: spanning (crosses the raw/txn boundary);
+//   - endKey absent (region runs past every later keyspace): spanning iff the
+//     start keyspace still exists;
 //   - endKey sits exactly on startKey's keyspace right bound: not spanning;
 //   - otherwise: spanning iff the start or the end keyspace still exists.
 //
 // The last rule only looks at the two end keyspaces; keyspaces that lie strictly
-// between them are not inspected.
+// between them are not inspected. An absent endKey is treated as +inf rather than
+// keyspace MaxValidKeyspaceID, so the result does not depend on the checker
+// implementation's handling of that sentinel ID.
 func RegionSpansMultipleKeyspaces(startKey, endKey []byte, checker Checker) bool {
 	if checker == nil {
 		return false
@@ -517,6 +521,13 @@ func RegionSpansMultipleKeyspaces(startKey, endKey []byte, checker Checker) bool
 	// such as this ['r200','x100'], it may cross keyspace (200, MaxValidKeyspaceID]
 	if startKT == KeyTypeRaw && endKT == KeyTypeTxn {
 		return true
+	}
+
+	// An absent endKey means the region runs past every later keyspace (+inf).
+	// There is no end keyspace to check, so it spans a boundary iff it starts
+	// inside an existing keyspace. Reaching here, startKey is a txn keyspace key.
+	if len(endKey) == 0 {
+		return checker.KeyspaceExist(startKeyspaceID)
 	}
 
 	// If end keyspace ID is exactly start keyspace + 1,
