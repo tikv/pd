@@ -190,6 +190,8 @@ func (s *schedulerSuite) TestRegionLabelDenyScheduler() {
 			re.ErrorContains(err, "scheduler not found")
 		}
 	}()
+	// Newly split regions can remain pending for close to a minute before the
+	// grant-leader scheduler can select them.
 	testutil.Eventually(re, func() bool {
 		regions, err := pdHTTPCli.GetRegions(ctx)
 		re.NoError(err)
@@ -202,7 +204,7 @@ func (s *schedulerSuite) TestRegionLabelDenyScheduler() {
 			}
 		}
 		return true
-	}, testutil.WithWaitFor(time.Minute))
+	}, testutil.WithWaitFor(2*time.Minute))
 
 	err = pdHTTPCli.PatchRegionLabelRules(ctx, &http.LabelRulePatch{DeleteRules: []string{labelRule.ID}})
 	re.NoError(err)
