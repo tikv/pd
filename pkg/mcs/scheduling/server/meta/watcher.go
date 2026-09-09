@@ -16,6 +16,7 @@ package meta
 
 import (
 	"context"
+	"strconv"
 	"sync"
 
 	"github.com/gogo/protobuf/proto"
@@ -95,7 +96,7 @@ func (w *Watcher) initializeStoreWatcher() error {
 		if origin != nil {
 			w.basicCluster.DeleteStore(origin)
 			// Let concurrent collectors detect the deletion before cleaning up metrics.
-			statistics.DeleteClusterStatusMetrics(origin)
+			statistics.ResetStoreStatistics(origin.GetAddress(), strconv.FormatUint(storeID, 10))
 		}
 		return nil
 	}
