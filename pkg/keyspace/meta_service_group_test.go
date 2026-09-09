@@ -22,6 +22,7 @@ import (
 
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	serverconfig "github.com/tikv/pd/server/config"
 )
 
@@ -256,6 +257,35 @@ func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelyUsesAuthoritativeC
 	err = suite.manager.UpdateGroupsSafely(suite.ctx, groups2, []string{"etcd-group-1"},
 		func() error { return nil }, nil)
 	re.ErrorIs(err, ErrGroupHasAssignedKeyspaces)
+}
+
+func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelyChecksNewGroupHealth() {
+	re := suite.Require()
+	servers, _, cleanup := etcdutil.NewTestEtcdCluster(suite.T(), 1, nil)
+	defer cleanup()
+	endpoint := servers[0].Config().ListenClientUrls[0].String()
+
+	groups := mockMetaServiceGroups()
+	groups["healthy"] = serverconfig.MetaServiceGroupConfig{Addresses: endpoint}
+	persisted := false
+	err := suite.manager.UpdateGroupsSafely(suite.ctx, groups, nil, func() error {
+		persisted = true
+		return nil
+	}, nil)
+	re.NoError(err)
+	re.True(persisted)
+	re.Equal(endpoint, suite.manager.GetGroups()["healthy"])
+
+	groups["unhealthy"] = serverconfig.MetaServiceGroupConfig{Addresses: endpoint + ",http://127.0.0.1:1"}
+	persisted = false
+	err = suite.manager.UpdateGroupsSafely(suite.ctx, groups, nil, func() error {
+		persisted = true
+		return nil
+	}, nil)
+	re.ErrorIs(err, ErrMetaServiceGroupUnhealthy)
+	re.False(persisted)
+	_, exists := suite.manager.GetGroups()["unhealthy"]
+	re.False(exists)
 }
 
 func (suite *metaServiceGroupTestSuite) TestAssignToGroupRejectsNegativeCount() {

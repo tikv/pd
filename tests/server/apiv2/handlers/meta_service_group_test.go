@@ -121,7 +121,7 @@ func (suite *metaServiceGroupTestSuite) TestUpdateMetaServiceGroupsViaConfigAPI(
 	re := suite.Require()
 	// Adding a new group through /config should succeed and be visible via v2 API.
 	added := mockMetaServiceGroupAddresses()
-	added["etcd-group-x"] = "etcd-group-x.example.local"
+	added["etcd-group-x"] = suite.cluster.GetEtcdClient().Endpoints()[0]
 	code, body := suite.setMetaServiceGroupsViaConfig(re, added)
 	re.Equal(http.StatusOK, code, body)
 	groups := mustLoadMetaServiceGroups(re, suite.server)
@@ -135,7 +135,7 @@ func (suite *metaServiceGroupTestSuite) TestUpdateMetaServiceGroupsViaConfigAPI(
 		}
 	}
 	re.NotNil(x, "etcd-group-x should be added via /config")
-	re.Equal("etcd-group-x.example.local", x.Addresses)
+	re.Equal(suite.cluster.GetEtcdClient().Endpoints()[0], x.Addresses)
 
 	// Updating an existing group's address through /config should also work.
 	added["etcd-group-x"] = "etcd-group-x-modified.example.local"
@@ -146,6 +146,18 @@ func (suite *metaServiceGroupTestSuite) TestUpdateMetaServiceGroupsViaConfigAPI(
 		if group.ID == "etcd-group-x" {
 			re.Equal("etcd-group-x-modified.example.local", group.Addresses)
 		}
+	}
+}
+
+func (suite *metaServiceGroupTestSuite) TestUpdateMetaServiceGroupsViaConfigAPIRejectsUnhealthyGroup() {
+	re := suite.Require()
+	groups := mockMetaServiceGroupAddresses()
+	groups["unhealthy"] = "http://127.0.0.1:1"
+	code, body := suite.setMetaServiceGroupsViaConfig(re, groups)
+	re.Equal(http.StatusBadRequest, code, body)
+	re.Contains(body, "meta-service group etcd server is unhealthy")
+	for _, group := range mustLoadMetaServiceGroups(re, suite.server) {
+		re.NotEqual("unhealthy", group.ID)
 	}
 }
 
@@ -187,8 +199,8 @@ func (suite *metaServiceGroupTestSuite) TestMetaServiceGroupOperations() {
 		re.InDelta(collectedStatus.Status.AssignmentCount, len(keyspaces)/len(groups), 1)
 	}
 	// Add two more meta-service groups.
-	addr4 := "etcd-group-4.tidb-serverless.cluster.svc.local"
-	addr5 := "etcd-group-5.tidb-serverless.cluster.svc.local"
+	addr4 := suite.cluster.GetEtcdClient().Endpoints()[0]
+	addr5 := suite.cluster.GetEtcdClient().Endpoints()[0]
 	patch := map[string]*string{
 		"etcd-group-4": &addr4,
 		"etcd-group-5": &addr5,
@@ -263,7 +275,7 @@ func (suite *metaServiceGroupTestSuite) TestMetaServiceGroupOperations() {
 	mustPatchMetaServiceGroupsFail(re, suite.server, normalizedDuplicatePatch)
 
 	// Delete a newly-added group with no assigned keyspaces.
-	unusedAddr := "etcd-group-unused.tidb-serverless.cluster.svc.local"
+	unusedAddr := suite.cluster.GetEtcdClient().Endpoints()[0]
 	groups = mustPatchMetaServiceGroups(re, suite.server, map[string]*string{
 		"etcd-group-unused": &unusedAddr,
 	})
