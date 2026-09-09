@@ -57,33 +57,29 @@ func TestKeyspaceGroupTestsuite(t *testing.T) {
 	suite.Run(t, new(keyspaceGroupTestSuite))
 }
 
-func (suite *keyspaceGroupTestSuite) TestShowKeyspaceGroupHidesKeyspacesByDefault() {
+func (suite *keyspaceGroupTestSuite) TestShowKeyspaceGroupShowsKeyspacesByDefault() {
 	re := suite.Require()
 	cmd := ctl.GetRootCmd()
 	defaultKeyspaceGroupID := strconv.FormatUint(uint64(constant.DefaultKeyspaceGroupID), 10)
 	args := []string{"-u", suite.pdAddr, "keyspace-group"}
 
-	output, err := tests.ExecuteCommand(cmd, append(args, defaultKeyspaceGroupID)...)
+	testutil.Eventually(re, func() bool {
+		output, err := tests.ExecuteCommand(cmd, append(args, defaultKeyspaceGroupID)...)
+		re.NoError(err)
+		re.Contains(string(output), "\"keyspaces\"")
+		var keyspaceGroup endpoint.KeyspaceGroup
+		err = json.Unmarshal(output, &keyspaceGroup)
+		re.NoError(err)
+		return slices.Contains(keyspaceGroup.Keyspaces, constant.DefaultKeyspaceID)
+	})
+
+	output, err := tests.ExecuteCommand(cmd, "-u", suite.pdAddr, "keyspace-group", "--show-keyspaces=false", defaultKeyspaceGroupID)
 	re.NoError(err)
 	re.NotContains(string(output), "\"keyspaces\"")
 	var raw map[string]any
 	re.NoError(json.Unmarshal(output, &raw))
 	_, ok := raw["keyspaces"]
 	re.False(ok)
-	var keyspaceGroup endpoint.KeyspaceGroup
-	re.NoError(json.Unmarshal(output, &keyspaceGroup))
-	re.Equal(constant.DefaultKeyspaceGroupID, keyspaceGroup.ID)
-
-	argsWithKeyspaces := []string{"-u", suite.pdAddr, "keyspace-group", "--show-keyspaces"}
-	testutil.Eventually(re, func() bool {
-		output, err = tests.ExecuteCommand(cmd, append(argsWithKeyspaces, defaultKeyspaceGroupID)...)
-		re.NoError(err)
-		re.Contains(string(output), "\"keyspaces\"")
-		keyspaceGroup = endpoint.KeyspaceGroup{}
-		err = json.Unmarshal(output, &keyspaceGroup)
-		re.NoError(err)
-		return slices.Contains(keyspaceGroup.Keyspaces, constant.DefaultKeyspaceID)
-	})
 }
 
 func (suite *keyspaceGroupTestSuite) SetupTest() {

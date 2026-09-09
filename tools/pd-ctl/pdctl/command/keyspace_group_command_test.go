@@ -21,7 +21,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestConvertToKeyspaceGroupHidesKeyspacesByDefault(t *testing.T) {
+func TestConvertToKeyspaceGroup(t *testing.T) {
 	re := require.New(t)
 	content := `{"id":1,"user-kind":"basic","members":[{"address":"http://127.0.0.1:3379","priority":0}],"keyspaces":[1,2,3]}`
 
@@ -34,7 +34,7 @@ func TestConvertToKeyspaceGroupHidesKeyspacesByDefault(t *testing.T) {
 	reJSONHasKeyspaces(re, output, []any{float64(1), float64(2), float64(3)})
 }
 
-func TestConvertToKeyspaceGroupsHidesKeyspacesByDefault(t *testing.T) {
+func TestConvertToKeyspaceGroups(t *testing.T) {
 	re := require.New(t)
 	content := `[{"id":1,"user-kind":"basic","members":[],"keyspaces":[1,2,3]},{"id":2,"user-kind":"standard","members":[],"keyspaces":[]}]`
 
@@ -53,6 +53,13 @@ func TestConvertToKeyspaceGroupsHidesKeyspacesByDefault(t *testing.T) {
 	re.NoError(json.Unmarshal([]byte(output), &groups))
 	re.Equal([]any{float64(1), float64(2), float64(3)}, groups[0]["keyspaces"])
 	re.Equal([]any{}, groups[1]["keyspaces"])
+}
+
+func TestNewKeyspaceGroupCommandShowsKeyspacesByDefault(t *testing.T) {
+	re := require.New(t)
+	flag := NewKeyspaceGroupCommand().Flags().Lookup(flagShowKGKeyspaces)
+	re.NotNil(flag)
+	re.Equal("true", flag.DefValue)
 }
 
 func reJSONHasNoKeyspaces(re *require.Assertions, output string) {

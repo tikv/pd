@@ -49,7 +49,7 @@ func NewKeyspaceGroupCommand() *cobra.Command {
 	cmd.AddCommand(newSetPriorityKeyspaceGroupCommand())
 	cmd.AddCommand(newShowKeyspaceGroupPrimaryCommand())
 	cmd.Flags().String("state", "", "state filter")
-	cmd.Flags().Bool(flagShowKGKeyspaces, false, "show keyspace list in keyspace group output")
+	cmd.Flags().Bool(flagShowKGKeyspaces, true, "show keyspace list in keyspace group output")
 	return cmd
 }
 
