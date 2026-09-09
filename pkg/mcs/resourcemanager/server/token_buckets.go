@@ -336,8 +336,15 @@ func (gtb *GroupTokenBucket) balanceSlotTokens(
 		}
 		return
 	}
-	// Service-limited burstable groups distribute capacity against the available
-	// service budget without changing the group refill rate or the loan algorithm.
+	// A negative configured burst limit allows bursting, but even the default group
+	// can be constrained by the keyspace Service Limit. A positive override burst
+	// limit is the capacity assigned to this group by Service Limit coordination.
+	// Use that result, capped by the effective fill rate, as the client allocation
+	// budget. Using a huge fill rate (e.g. the default group's UnlimitedRate) instead
+	// makes client demand negligible relative to the budget, so distributing the
+	// unused budget evenly produces nearly equal shares despite unequal demand.
+	// This only changes how shares are calculated; the group refill rate and loan
+	// algorithm remain unchanged.
 	if gtb.overrideBurstLimit > 0 && gtb.getBurstLimitSetting() < 0 {
 		allocationBudget = math.Min(allocationBudget, float64(gtb.overrideBurstLimit))
 		basicFillRate = allocationBudget * evenRatio
