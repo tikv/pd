@@ -2683,7 +2683,16 @@ func (c *RaftCluster) refreshStoreRateLimit(storeID uint64, limitType storelimit
 	if store == nil {
 		return
 	}
-	sc.SyncStoreLimit(store, c.opt, limitType)
+	limit, ok := store.GetStoreLimit().(*storelimit.StoreRateLimit)
+	if !ok {
+		return
+	}
+	// Schedule config stores the unit in rate-per-minute, but limiter uses rate-per-second.
+	const storeBalanceBaseTime = float64(60)
+	ratePerSec := c.opt.GetStoreLimitByType(storeID, limitType) / storeBalanceBaseTime
+	if limit.Rate(limitType) != ratePerSec {
+		c.ResetStoreLimit(storeID, limitType, ratePerSec)
+	}
 }
 
 // GetClusterVersion returns the current cluster version.

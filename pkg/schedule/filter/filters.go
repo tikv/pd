@@ -441,7 +441,13 @@ func (f *StoreStateFilter) isBusy(_ config.SharedConfigProvider, store *core.Sto
 }
 
 func (f *StoreStateFilter) isStoreLimitAvailable(conf config.SharedConfigProvider, store *core.StoreInfo, typ storelimit.Type) bool {
-	return config.IsStoreLimitAvailable(store, conf, typ, f.OperatorLevel)
+	limiter := store.GetStoreLimit()
+	cost := storelimit.RegionInfluence[typ]
+	if limit, ok := limiter.(*storelimit.StoreRateLimit); ok {
+		rate := conf.GetStoreLimitByType(store.GetID(), typ) / 60
+		return limit.AvailableWithRate(cost, typ, rate)
+	}
+	return limiter.Available(cost, typ, f.OperatorLevel)
 }
 
 func (f *StoreStateFilter) exceedRemoveLimit(conf config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {

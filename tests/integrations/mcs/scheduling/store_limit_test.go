@@ -55,6 +55,7 @@ func TestStoreLimitScheduleConfigSync(t *testing.T) {
 				// or consume the test's token budgets before selection is observed.
 				cfg.Schedule.HaltScheduling = true
 				cfg.Replication.EnablePlacementRules = false
+				cfg.Replication.MaxReplicas = 1
 				cfg.Schedule.DefaultStoreLimit.AddPeer = storelimit.Unlimited
 				cfg.Schedule.DefaultStoreLimit.RemovePeer = storelimit.Unlimited
 			})
@@ -78,25 +79,22 @@ func TestStoreLimitScheduleConfigSync(t *testing.T) {
 							for _, store := range cache.GetStores() {
 								cache.DeleteStore(store)
 							}
-							for id := uint64(11); id <= 14; id++ {
+							for id := uint64(1); id <= 2; id++ {
 								store := core.NewStoreInfo(&metapb.Store{Id: id},
 									core.SetLastHeartbeatTS(time.Now()),
 									core.SetStoreStats(&pdpb.StoreStats{Capacity: 100 * units.GiB, Available: 80 * units.GiB, UsedSize: 20 * units.GiB}))
-								if typ == storelimit.RemovePeer && (id == 12 || id == 13) {
-									store = store.Clone(core.SetRegionWeight(1000))
-								}
 								cache.PutStore(store)
 							}
 						}
-						peers := []*metapb.Peer{{Id: 111, StoreId: 11}, {Id: 112, StoreId: 12}, {Id: 113, StoreId: 13}}
+						peers := []*metapb.Peer{{Id: 111, StoreId: 1}}
 						for i := range 100 {
 							bc.PutRegion(core.NewRegionInfo(&metapb.Region{Id: uint64(100 + i), StartKey: []byte(fmt.Sprintf("%04d", i)), EndKey: []byte(fmt.Sprintf("%04d", i+1)), Peers: peers, RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1}}, peers[0], core.SetApproximateSize(96)))
 						}
 						bc.UpdateAllStoreStatus()
 						schedulerType := types.BalanceRegionScheduler
-						limitedStore := uint64(14)
+						limitedStore := uint64(2)
 						if typ == storelimit.RemovePeer {
-							limitedStore = 11
+							limitedStore = 1
 						}
 						// Initialize the exhausted-low-rate reproduction before any config
 						// updates; later updates must recover through Schedule alone.

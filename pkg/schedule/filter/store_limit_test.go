@@ -118,9 +118,11 @@ func TestStoreLimitConcurrentConfigSync(t *testing.T) {
 		conf.SetScheduleConfig(low)
 	}
 	wg.Wait()
-	conf.SetScheduleConfig(high)
+	final := high.Clone()
+	final.DefaultStoreLimit.AddPeer = 60
+	conf.SetScheduleConfig(final)
 	f := &filter.StoreStateFilter{MoveRegion: true}
 	re.True(f.Target(conf, store).IsOK())
-	re.Equal(0.5, store.GetStoreLimit().(*storelimit.StoreRateLimit).Rate(storelimit.AddPeer))
+	re.Equal(1.0, store.GetStoreLimit().(*storelimit.StoreRateLimit).Rate(storelimit.AddPeer))
 	re.Empty(conf.GetScheduleConfig().StoreLimit)
 }

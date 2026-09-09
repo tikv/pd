@@ -23,14 +23,11 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 
-	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/plan"
-	"github.com/tikv/pd/pkg/schedule/types"
-	"github.com/tikv/pd/pkg/storage"
 )
 
 var (
@@ -236,45 +233,5 @@ func BenchmarkTombStore(b *testing.B) {
 	b.ResetTimer()
 	for range b.N {
 		sc.Schedule(tc, false)
-	}
-}
-
-// BenchmarkStoreLimitSchedule measures selection and operator creation with
-// initialized limiters, 64 stores and 100 regions. Both versions must start with
-// the configured rates: otherwise the baseline's uninitialized, unlimited
-// limiters would avoid token checks and measure a different scheduling policy.
-func BenchmarkStoreLimitSchedule(b *testing.B) {
-	for _, typ := range []types.CheckerSchedulerType{types.BalanceRegionScheduler, types.BalanceLeaderScheduler} {
-		b.Run(typ.String(), func(b *testing.B) {
-			re := require.New(b)
-			cancel, _, tc, oc := prepareSchedulersTest()
-			defer cancel()
-			tc.SetPlacementRuleEnabled(false)
-			for id := uint64(1); id <= 64; id++ {
-				count := 0
-				if id <= 3 {
-					count = 100
-				}
-				tc.AddRegionStore(id, count)
-				for _, limitType := range []storelimit.Type{storelimit.AddPeer, storelimit.RemovePeer} {
-					tc.ResetStoreLimit(id, limitType, tc.GetStoreLimitByType(id, limitType)/60)
-				}
-			}
-			for id := uint64(100); id < 200; id++ {
-				tc.AddLeaderRegion(id, 1, 2, 3)
-			}
-			tc.UpdateAllStoreStatus()
-			scheduler, err := CreateScheduler(typ, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(typ, []string{"", ""}))
-			re.NoError(err)
-			ops, _ := scheduler.Schedule(tc, false)
-			re.NotEmpty(ops)
-			b.ReportAllocs()
-			b.ResetTimer()
-			for range b.N {
-				ops, _ = scheduler.Schedule(tc, false)
-			}
-			b.StopTimer()
-			re.NotEmpty(ops)
-		})
 	}
 }
