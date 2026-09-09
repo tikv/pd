@@ -55,10 +55,6 @@ type ConfigStore interface {
 	LookupKeyspaceServiceLimit(uint32) (any, bool)
 }
 
-// Resource groups are small configuration objects. Keep malformed or
-// malicious requests from consuming unbounded memory during JSON decoding.
-const maxResourceGroupRequestBytes int64 = 1 << 20
-
 // ManagerStore adapts rmserver.Manager to ConfigStore.
 type ManagerStore struct {
 	manager *rmserver.Manager
@@ -155,8 +151,8 @@ func (s *ConfigService) Register(configEndpoint *gin.RouterGroup) {
 // PostResourceGroup handles POST /config/group.
 func (s *ConfigService) PostResourceGroup(c *gin.Context) {
 	var group rmpb.ResourceGroup
-	if err := decodeResourceGroup(c, &group); err != nil {
-		respondResourceGroupDecodeError(c, err)
+	if err := decodeResourceGroup(c.Request.Body, &group); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
 	if err := s.configStore.AddResourceGroup(&group); err != nil {
@@ -169,8 +165,8 @@ func (s *ConfigService) PostResourceGroup(c *gin.Context) {
 // PutResourceGroup handles PUT /config/group.
 func (s *ConfigService) PutResourceGroup(c *gin.Context) {
 	var group rmpb.ResourceGroup
-	if err := decodeResourceGroup(c, &group); err != nil {
-		respondResourceGroupDecodeError(c, err)
+	if err := decodeResourceGroup(c.Request.Body, &group); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
 	if err := s.configStore.ModifyResourceGroup(&group); err != nil {
@@ -180,17 +176,7 @@ func (s *ConfigService) PutResourceGroup(c *gin.Context) {
 	c.String(http.StatusOK, "Success!")
 }
 
-func respondResourceGroupDecodeError(c *gin.Context, err error) {
-	status := http.StatusBadRequest
-	var maxBytesError *http.MaxBytesError
-	if errors.As(err, &maxBytesError) {
-		status = http.StatusRequestEntityTooLarge
-	}
-	c.String(status, err.Error())
-}
-
-func decodeResourceGroup(c *gin.Context, group *rmpb.ResourceGroup) error {
-	body := http.MaxBytesReader(c.Writer, c.Request.Body, maxResourceGroupRequestBytes)
+func decodeResourceGroup(body io.Reader, group *rmpb.ResourceGroup) error {
 	data, err := io.ReadAll(body)
 	if err != nil {
 		return err

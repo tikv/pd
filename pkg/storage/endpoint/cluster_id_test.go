@@ -30,6 +30,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestInitClusterID(t *testing.T) {
+	t.Cleanup(keypath.ResetClusterID)
 	re := require.New(t)
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()

@@ -16,6 +16,7 @@ package router
 
 import (
 	"context"
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -42,7 +43,7 @@ func newMockRegionResponse(id uint64) *pdpb.RegionResponse {
 
 // newTestRequest builds a *Request directly for finisher tests, mirroring the
 // invariants that the production newRequest guarantees: a non-nil options and a
-// buffered done channel. Callers set key/prevKey/id afterwards.
+// buffered done channel. Callers set key, prevKey, or id afterwards.
 func newTestRequest(ctx context.Context, opts ...opt.GetRegionOption) *Request {
 	req := &Request{
 		requestCtx: ctx,
@@ -147,4 +148,45 @@ func TestRequestFinisherClearsUnrequestedBuckets(t *testing.T) {
 	re.NotNil(reqWithBuckets.region.Buckets)
 	// The request that did not ask for buckets must not receive them.
 	re.Nil(reqWithoutBuckets.region.Buckets)
+}
+
+func TestRequestFinisherWithZeroRegionID(t *testing.T) {
+	re := require.New(t)
+	req := newTestRequest(context.Background())
+
+	finisher := requestFinisher(&pdpb.QueryRegionResponse{})
+	finisher(0, req, nil)
+
+	re.NoError(<-req.done)
+	re.Nil(req.region)
+}
+
+func TestBuildQueryRegionRequest(t *testing.T) {
+	re := require.New(t)
+	ctx := context.Background()
+	keyReq := newTestRequest(ctx)
+	keyReq.key = []byte{}
+	prevKeyReq := newTestRequest(ctx, opt.WithBuckets())
+	prevKeyReq.prevKey = []byte{}
+	zeroIDReq := newTestRequest(ctx)
+	zeroIDReq.id = 0
+	maxIDReq := newTestRequest(ctx)
+	maxIDReq.id = math.MaxUint64
+
+	queryReq := buildQueryRegionRequest(42, []*Request{
+		keyReq,
+		prevKeyReq,
+		zeroIDReq,
+		maxIDReq,
+	})
+
+	re.Equal(uint64(42), queryReq.GetHeader().GetClusterId())
+	re.Len(queryReq.GetKeys(), 1)
+	re.NotNil(queryReq.GetKeys()[0])
+	re.Empty(queryReq.GetKeys()[0])
+	re.Len(queryReq.GetPrevKeys(), 1)
+	re.NotNil(queryReq.GetPrevKeys()[0])
+	re.Empty(queryReq.GetPrevKeys()[0])
+	re.Equal([]uint64{0, math.MaxUint64}, queryReq.GetIds())
+	re.True(queryReq.GetNeedBuckets())
 }

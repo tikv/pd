@@ -54,12 +54,17 @@ func (bc *BasicCluster) GetLeaderStoreByRegionID(regionID uint64) *StoreInfo {
 func (bc *BasicCluster) getWriteRate(
 	f func(storeID uint64) (bytesRate, keysRate float64),
 ) (storeIDs []uint64, bytesRates, keysRates []float64) {
-	storeIDs = bc.GetStoreIDs()
-	count := len(storeIDs)
-	bytesRates = make([]float64, 0, count)
-	keysRates = make([]float64, 0, count)
-	for _, id := range storeIDs {
+	stores := bc.GetStores()
+	storeIDs = make([]uint64, 0, len(stores))
+	bytesRates = make([]float64, 0, len(stores))
+	keysRates = make([]float64, 0, len(stores))
+	for _, store := range stores {
+		if store.IsRemoved() {
+			continue
+		}
+		id := store.GetID()
 		bytesRate, keysRate := f(id)
+		storeIDs = append(storeIDs, id)
 		bytesRates = append(bytesRates, bytesRate)
 		keysRates = append(keysRates, keysRate)
 	}

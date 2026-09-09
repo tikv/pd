@@ -375,6 +375,30 @@ func (m *RuleManager) GetGroupsCount() int {
 	return len(m.ruleConfig.groups)
 }
 
+// GetRuleConfigForReconcile returns storage-key-ordered references to the
+// current rules and explicitly configured groups. Callers must not mutate them.
+func (m *RuleManager) GetRuleConfigForReconcile() ([]*Rule, []*RuleGroup) {
+	m.RLock()
+	rules := make([]*Rule, 0, len(m.ruleConfig.rules))
+	for _, rule := range m.ruleConfig.rules {
+		rules = append(rules, rule)
+	}
+	groups := make([]*RuleGroup, 0, len(m.ruleConfig.groups))
+	for _, group := range m.ruleConfig.groups {
+		if !group.isDefault() {
+			groups = append(groups, group)
+		}
+	}
+	m.RUnlock()
+
+	sort.Slice(rules, func(i, j int) bool {
+		return rules[i].GroupID < rules[j].GroupID ||
+			(rules[i].GroupID == rules[j].GroupID && rules[i].ID < rules[j].ID)
+	})
+	sort.Slice(groups, func(i, j int) bool { return groups[i].ID < groups[j].ID })
+	return rules, groups
+}
+
 // GetRulesByGroup returns sorted rules of a group.
 func (m *RuleManager) GetRulesByGroup(group string) []*Rule {
 	m.RLock()

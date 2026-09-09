@@ -17,6 +17,7 @@ package tests
 import (
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
@@ -56,6 +57,16 @@ func TestClassifyInitialServersError(t *testing.T) {
 	re.Equal(startServersRetryRecreate, classifyInitialServersError(errors.New("Etcd cluster ID mismatch")))
 	re.Equal(startServersNoRetry, classifyInitialServersError(errors.New("some other error")))
 	re.Equal(startServersNoRetry, classifyInitialServersError(nil))
+}
+
+func TestRunServerDoesNotBlockWithoutReceiver(t *testing.T) {
+	t.Parallel()
+
+	result := RunServer(&TestServer{state: Destroy})
+	require.Eventually(t, func() bool {
+		return len(result) == 1
+	}, time.Second, 10*time.Millisecond)
+	require.Error(t, <-result)
 }
 
 func TestRegenerateInitialServerURLsKeepsInitialClusterConsistent(t *testing.T) {

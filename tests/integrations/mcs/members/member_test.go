@@ -422,6 +422,137 @@ func (suite *memberTestSuite) TestEvictPrimary() {
 			return len(served) == len(groupIDs)
 		}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 	}
+
+	// Verify that eviction with an explicit new_primary transfers all groups to
+	// the designated node instead of picking a random member. src and dst are
+	// both picked from the default keyspace group's members so dst is guaranteed
+	// a valid transfer target even if src also happens to be the default group's
+	// primary: unlike the 12 groups created above, the default group only
+	// replicates on DefaultKeyspaceGroupReplicaCount (2) of the 3 tso nodes, so
+	// an arbitrary dst could otherwise get rejected as "not a member" for it.
+	// suite.tsoAvailMembers is captured once in SetupTest right after the nodes
+	// start, before default group allocation is guaranteed to have converged to
+	// its full replica count, so poll the current membership here instead of
+	// trusting that snapshot: check every node and use whichever one first
+	// reports the default group at its full replica count.
+	defaultGroupMemberAddrs := make(map[string]bool, mcs.DefaultKeyspaceGroupReplicaCount)
+	testutil.Eventually(re, func() bool {
+		for _, node := range nodeList {
+			g, ok := mustGetKeyspaceGroupMembers(re, node.(*tso.Server))[constant.DefaultKeyspaceGroupID]
+			if !ok || len(g.Group.Members) != mcs.DefaultKeyspaceGroupReplicaCount {
+				continue
+			}
+			for _, m := range g.Group.Members {
+				defaultGroupMemberAddrs[m.Address] = true
+			}
+			return true
+		}
+		return false
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(100*time.Millisecond))
+
+	var defaultGroupNodes []bs.Server
+	for _, node := range nodeList {
+		if defaultGroupMemberAddrs[node.GetAddr()] {
+			defaultGroupNodes = append(defaultGroupNodes, node)
+		}
+	}
+	re.Len(defaultGroupNodes, mcs.DefaultKeyspaceGroupReplicaCount)
+	src := defaultGroupNodes[0]
+	dst := defaultGroupNodes[1]
+
+	// A new_primary that identifies the node being evicted, whether by name or by
+	// service address, must be rejected outright instead of silently no-oping
+	// while reporting success.
+	for _, self := range []string{src.Name(), src.(*tso.Server).GetAdvertiseListenAddr()} {
+		selfEvictData, err := json.Marshal(map[string]any{"new_primary": self})
+		re.NoError(err)
+		resp, err := tests.TestDialClient.Post(src.GetAddr()+"/tso/api/v1/primary/evict",
+			"application/json", bytes.NewBuffer(selfEvictData))
+		re.NoError(err)
+		re.Equal(http.StatusBadRequest, resp.StatusCode, "new_primary=%q should be rejected", self)
+		re.NoError(resp.Body.Close())
+	}
+
+	// A request body over the endpoint's size cap must be rejected with 413
+	// instead of being buffered in full.
+	oversizedBody := bytes.Repeat([]byte("x"), 8<<10)
+	oversizedResp, err := tests.TestDialClient.Post(src.GetAddr()+"/tso/api/v1/primary/evict",
+		"application/json", bytes.NewBuffer(oversizedBody))
+	re.NoError(err)
+	re.Equal(http.StatusRequestEntityTooLarge, oversizedResp.StatusCode)
+	re.NoError(oversizedResp.Body.Close())
+
+	for _, id := range groupIDs {
+		transferData, err := json.Marshal(map[string]any{
+			"new_primary":       src.Name(),
+			"keyspace_group_id": id,
+		})
+		re.NoError(err)
+		testutil.Eventually(re, func() bool {
+			resp, err := tests.TestDialClient.Post(src.GetAddr()+"/tso/api/v1/primary/transfer",
+				"application/json", bytes.NewBuffer(transferData))
+			if err != nil {
+				return false
+			}
+			ok := resp.StatusCode == http.StatusOK
+			return resp.Body.Close() == nil && ok
+		}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+	}
+	testutil.Eventually(re, func() bool {
+		serving := mustGetKeyspaceGroupMembers(re, src.(*tso.Server))
+		for _, id := range groupIDs {
+			if serving[id] == nil || !serving[id].IsPrimary {
+				return false
+			}
+		}
+		return true
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+
+	evictData, err := json.Marshal(map[string]any{
+		"new_primary": dst.Name(),
+	})
+	re.NoError(err)
+	resp, err := tests.TestDialClient.Post(src.GetAddr()+"/tso/api/v1/primary/evict",
+		"application/json", bytes.NewBuffer(evictData))
+	re.NoError(err)
+	body, err := io.ReadAll(resp.Body)
+	re.NoError(err)
+	re.NoError(resp.Body.Close())
+	results := make(map[uint32]string)
+	re.NoError(json.Unmarshal(body, &results), string(body))
+	re.Equal(http.StatusOK, resp.StatusCode)
+	for _, id := range groupIDs {
+		re.Equalf("success", results[id], "group %d result: %q", id, results[id])
+	}
+	// All primaries must have moved to the designated node.
+	testutil.Eventually(re, func() bool {
+		serving := mustGetKeyspaceGroupMembers(re, dst.(*tso.Server))
+		for _, id := range groupIDs {
+			if serving[id] == nil || !serving[id].IsPrimary {
+				return false
+			}
+		}
+		return true
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+
+	// The remaining node (neither src nor dst) must not hold the primary of any of
+	// the groups this eviction covers. Restricted to groupIDs rather than every
+	// group the node serves: it may independently be the primary of the default
+	// keyspace group (untouched by this eviction, since src was never its
+	// primary), and that must not fail this assertion.
+	var other bs.Server
+	for _, node := range nodeList {
+		if node.GetAddr() != src.GetAddr() && node.GetAddr() != dst.GetAddr() {
+			other = node
+			break
+		}
+	}
+	re.NotNil(other)
+	serving := mustGetKeyspaceGroupMembers(re, other.(*tso.Server))
+	for _, id := range groupIDs {
+		m := serving[id]
+		re.False(m != nil && m.IsPrimary, "node %s should not hold primary of group %d", other.GetAddr(), id)
+	}
 }
 
 // TestEvictPrimaryRejectedWhileSplitting verifies that /primary/evict refuses to
@@ -536,6 +667,198 @@ func (suite *memberTestSuite) TestEvictPrimaryRejectedWhileSplitting() {
 	g, ok := mustGetKeyspaceGroupMembers(re, tsoTarget)[normalID]
 	re.True(ok)
 	re.True(g.IsPrimary)
+}
+
+// TestEvictPrimaryRejectedForInvalidCandidate verifies that /primary/evict
+// rejects the whole request, before transferring anything, when new_primary is
+// not a member of every candidate group. The candidate groups are iterated in
+// indeterminate map order in production, so a broken implementation that folds
+// the membership check into the transfer loop would still pass a single trial
+// whenever the restricted group happens to be visited first: with 3 normal
+// groups alongside the 1 restricted group, that is a 1-in-4 chance per trial.
+// Repeat the scenario with fresh group IDs so an undetected regression would
+// have to miss on every trial: trials independently reshuffle the map, so the
+// miss probability compounds to 0.25^trials.
+func (suite *memberTestSuite) TestEvictPrimaryRejectedForInvalidCandidate() {
+	re := suite.Require()
+	re.Len(suite.tsoNodes, 3)
+
+	// target must not be a default keyspace group member: that group's primary
+	// election is not controlled by this test, and if target ended up serving it,
+	// evictPrimary's pre-check would run against it too, on top of the groups
+	// created below. suite.tsoAvailMembers is captured once in SetupTest right
+	// after the nodes start, before default group allocation is guaranteed to
+	// have converged to its full replica count, so poll the current membership
+	// here instead of trusting that snapshot: check every node and use whichever
+	// one first reports the default group at its full replica count. Querying a
+	// single arbitrarily chosen node would not work here, since a node reports
+	// group 0 only if it is itself a member of it.
+	defaultGroupMemberAddrs := make(map[string]bool, mcs.DefaultKeyspaceGroupReplicaCount)
+	testutil.Eventually(re, func() bool {
+		for _, node := range suite.tsoNodes {
+			g, ok := mustGetKeyspaceGroupMembers(re, node.(*tso.Server))[constant.DefaultKeyspaceGroupID]
+			if !ok || len(g.Group.Members) != mcs.DefaultKeyspaceGroupReplicaCount {
+				continue
+			}
+			for _, m := range g.Group.Members {
+				defaultGroupMemberAddrs[m.Address] = true
+			}
+			return true
+		}
+		return false
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(100*time.Millisecond))
+
+	var target bs.Server
+	defaultGroupNodes := make([]bs.Server, 0, mcs.DefaultKeyspaceGroupReplicaCount)
+	for _, node := range suite.tsoNodes {
+		if defaultGroupMemberAddrs[node.GetAddr()] {
+			defaultGroupNodes = append(defaultGroupNodes, node)
+		} else {
+			target = node
+		}
+	}
+	re.NotNil(target)
+	re.Len(defaultGroupNodes, mcs.DefaultKeyspaceGroupReplicaCount)
+	other := defaultGroupNodes[0]
+	outsider := defaultGroupNodes[1]
+
+	nodeList := []bs.Server{target, other, outsider}
+	allMembers := make([]endpoint.KeyspaceGroupMember, 0, len(nodeList))
+	for _, node := range nodeList {
+		allMembers = append(allMembers, endpoint.KeyspaceGroupMember{
+			Address:  node.GetAddr(),
+			Priority: mcs.DefaultKeyspaceGroupReplicaPriority,
+		})
+	}
+	restrictedMembers := []endpoint.KeyspaceGroupMember{
+		{Address: target.GetAddr(), Priority: mcs.DefaultKeyspaceGroupReplicaPriority},
+		{Address: other.GetAddr(), Priority: mcs.DefaultKeyspaceGroupReplicaPriority},
+	}
+
+	const (
+		trials         = 5
+		normalPerTrial = 3
+	)
+	for trial := range trials {
+		base := uint32(trial*10) + 1
+		normalIDs := make([]uint32, normalPerTrial)
+		for i := range normalIDs {
+			normalIDs[i] = base + uint32(i)
+		}
+		restrictedID := base + normalPerTrial
+
+		// outsider is a member of each of these groups, so it passes their
+		// pre-check.
+		for i, id := range normalIDs {
+			handlersutil.MustCreateKeyspaceGroup(re, suite.server, &handlers.CreateKeyspaceGroupParams{
+				KeyspaceGroups: []*endpoint.KeyspaceGroup{
+					{
+						ID:        id,
+						UserKind:  endpoint.Standard.String(),
+						Members:   allMembers,
+						Keyspaces: []uint32{3000 + base + uint32(i)},
+					},
+				},
+			})
+		}
+		// outsider is not a member of this group, so evicting target with
+		// new_primary=outsider must be rejected for it.
+		handlersutil.MustCreateKeyspaceGroup(re, suite.server, &handlers.CreateKeyspaceGroupParams{
+			KeyspaceGroups: []*endpoint.KeyspaceGroup{
+				{
+					ID:        restrictedID,
+					UserKind:  endpoint.Standard.String(),
+					Members:   restrictedMembers,
+					Keyspaces: []uint32{3000 + base + normalPerTrial},
+				},
+			},
+		})
+
+		// Concentrate every group's primary on target.
+		allIDs := append(append([]uint32{}, normalIDs...), restrictedID)
+		for _, id := range allIDs {
+			transferData, err := json.Marshal(map[string]any{
+				"new_primary":       target.Name(),
+				"keyspace_group_id": id,
+			})
+			re.NoError(err)
+			testutil.Eventually(re, func() bool {
+				resp, err := tests.TestDialClient.Post(target.GetAddr()+"/tso/api/v1/primary/transfer",
+					"application/json", bytes.NewBuffer(transferData))
+				if err != nil {
+					return false
+				}
+				ok := resp.StatusCode == http.StatusOK
+				return resp.Body.Close() == nil && ok
+			}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+		}
+		testutil.Eventually(re, func() bool {
+			serving := mustGetKeyspaceGroupMembers(re, target.(*tso.Server))
+			for _, id := range allIDs {
+				if serving[id] == nil || !serving[id].IsPrimary {
+					return false
+				}
+			}
+			return true
+		}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+
+		// outsider is a valid candidate for every normal group but not for
+		// restrictedID.
+		evictData, err := json.Marshal(map[string]any{"new_primary": outsider.Name()})
+		re.NoError(err)
+		resp, err := tests.TestDialClient.Post(target.GetAddr()+"/tso/api/v1/primary/evict",
+			"application/json", bytes.NewBuffer(evictData))
+		re.NoError(err)
+		body, err := io.ReadAll(resp.Body)
+		re.NoError(err)
+		re.NoError(resp.Body.Close())
+		re.Equal(http.StatusBadRequest, resp.StatusCode, string(body))
+		re.Contains(string(body), fmt.Sprintf("keyspace group %d", restrictedID))
+
+		// The rejection must happen before any transfer, so every normal
+		// group's primary is still on target even though outsider would have
+		// been a valid destination for all of them. Primary movement is
+		// asynchronous (the successful-transfer checks above poll for it), so a
+		// broken handler that started a transfer for a normal group before
+		// rejecting restrictedID could still pass a single immediate snapshot.
+		// Hold the check across the same window used for those polls instead,
+		// failing as soon as any normal group's primary moves off target.
+		holdDeadline := time.Now().Add(10 * time.Second)
+		for {
+			serving := mustGetKeyspaceGroupMembers(re, target.(*tso.Server))
+			for _, id := range normalIDs {
+				g, ok := serving[id]
+				re.True(ok)
+				re.True(g.IsPrimary)
+			}
+			if time.Now().After(holdDeadline) {
+				break
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+
+		// Move every group's primary off target so the next trial's groups are
+		// the only ones evictPrimary considers: since this trial's eviction was
+		// rejected, target is still the primary of all of them, and leaving them
+		// there would make the next trial's error message reference this
+		// trial's restrictedID instead of its own.
+		for _, id := range allIDs {
+			transferData, err := json.Marshal(map[string]any{
+				"new_primary":       other.Name(),
+				"keyspace_group_id": id,
+			})
+			re.NoError(err)
+			testutil.Eventually(re, func() bool {
+				resp, err := tests.TestDialClient.Post(target.GetAddr()+"/tso/api/v1/primary/transfer",
+					"application/json", bytes.NewBuffer(transferData))
+				if err != nil {
+					return false
+				}
+				ok := resp.StatusCode == http.StatusOK
+				return resp.Body.Close() == nil && ok
+			}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+		}
+	}
 }
 
 func (suite *memberTestSuite) TestCampaignPrimaryAfterTransfer() {

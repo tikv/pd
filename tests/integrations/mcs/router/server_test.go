@@ -247,6 +247,9 @@ func (suite *serverTestSuite) checkRegionAPI(cli pd.Client) {
 		re.Equal(regionID, r1.Meta.Id)
 		return true
 	})
+	r0, err := cli.GetRegionByID(suite.ctx, 0, allowEnableRouterServiceOpt)
+	re.NoError(err)
+	re.Nil(r0)
 
 	// get region by key
 	r2, err := cli.GetRegion(suite.ctx, r1.Meta.GetStartKey(), allowEnableRouterServiceOpt)

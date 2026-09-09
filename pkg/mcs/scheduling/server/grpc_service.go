@@ -16,6 +16,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -149,6 +150,10 @@ func (s *Service) RegionHeartbeat(stream schedulingpb.Scheduling_RegionHeartbeat
 		if store == nil {
 			return errors.Errorf("invalid store ID %d, not found", storeID)
 		}
+		if store.IsRemoved() {
+			log.Debug("skip region heartbeat from tombstone store", zap.Uint64("store-id", storeID))
+			continue
+		}
 
 		storeAddress := store.GetAddress()
 		storeLabel := strconv.FormatUint(storeID, 10)
@@ -220,6 +225,8 @@ func (s *Service) RegionBuckets(stream schedulingpb.Scheduling_RegionBucketsServ
 			// As TiKV report buckets just after the region heartbeat, for new created region, PD may receive buckets report before the first region heartbeat is handled.
 			// So we should not return error here.
 			log.Debug("the store of the bucket in region is not found", zap.Uint64("region-id", buckets.GetRegionId()))
+		} else if store.IsRemoved() {
+			continue
 		} else {
 			storeLabel = strconv.FormatUint(store.GetID(), 10)
 			storeAddress = store.GetAddress()
@@ -257,17 +264,25 @@ func (s *Service) StoreHeartbeat(_ context.Context, request *schedulingpb.StoreH
 		return &schedulingpb.StoreHeartbeatResponse{Header: notBootstrappedHeader()}, nil
 	}
 
-	start := time.Now()
-	if c.GetStore(request.GetStats().GetStoreId()) == nil {
+	storeID := request.GetStats().GetStoreId()
+	if c.GetStore(storeID) == nil {
 		metaWatcher.GetStoreWatcher().ForceLoad()
 	}
 
-	storeID := request.GetStats().GetStoreId()
 	store := c.GetStore(storeID)
-	storeAddress := ""
-	if store != nil {
-		storeAddress = store.GetAddress()
+	if store == nil {
+		return &schedulingpb.StoreHeartbeatResponse{
+			Header: wrapErrorToHeader(schedulingpb.ErrorType_UNKNOWN, fmt.Sprintf("store %v not found", storeID)),
+		}, nil
 	}
+	if store.IsRemoved() {
+		return &schedulingpb.StoreHeartbeatResponse{
+			Header: wrapErrorToHeader(schedulingpb.ErrorType_UNKNOWN, fmt.Sprintf("store %v is tombstone", storeID)),
+		}, nil
+	}
+
+	start := time.Now()
+	storeAddress := store.GetAddress()
 	storeLabel := strconv.FormatUint(storeID, 10)
 	if err := c.HandleStoreHeartbeat(request); err != nil {
 		storeHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "error").Inc()
