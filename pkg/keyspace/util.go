@@ -73,9 +73,6 @@ var (
 	}
 	// Only keyspaces in the state specified by allowChangeConfig are allowed to change their config.
 	allowChangeConfig = []keyspacepb.KeyspaceState{keyspacepb.KeyspaceState_ENABLED, keyspacepb.KeyspaceState_DISABLED}
-
-	rawPrefix = []byte{'r'}
-	txnPrefix = []byte{'x'}
 )
 
 // validateID check if keyspace falls within the acceptable range.
@@ -429,43 +426,33 @@ const (
 )
 
 // ExtractKeyspaceID extracts the keyspace ID from a region key.
-// It returns the keyspace ID and a boolean indicating whether the key contains a valid keyspace ID.
-// The key format is: [mode_prefix][keyspace_id_3bytes][...], where mode_prefix is 'x' for txn and 'r' for raw.
-// if the key is empty, it means the key belongs the max txn keyspace.
+// It returns the keyspace ID and the key type. A key that is not a
+// memcomparable-encoded keyspace key (empty aside) is reported as
+// KeyTypeClassical.
+// The key format is: [mode_prefix][keyspace_id_3bytes][...], where mode_prefix
+// is 'x' for txn and 'r' for raw. An empty key belongs to the max txn keyspace.
 func ExtractKeyspaceID(key []byte) (uint32, KeyType) {
-	// Empty key represents the start of the entire key space (no keyspace)
+	// Empty key represents the start of the entire key space (no keyspace).
 	if len(key) == 0 {
 		return constant.MaxValidKeyspaceID, KeyTypeTxn
 	}
 
-	// Decode the key
 	_, decoded, err := codec.DecodeBytes(key)
 	if err != nil {
 		return 0, KeyTypeClassical
 	}
-
-	// Check if the key has a mode prefix and keyspace ID (at least 4 bytes: prefix + 3 bytes ID)
-	if len(decoded) < 4 {
+	mode, id, ok := codec.ParseKeyspacePrefix(decoded)
+	if !ok {
 		return 0, KeyTypeClassical
 	}
-
-	// Check the mod prefix.
-	prefix := decoded[0]
-	var kt KeyType
-	switch prefix {
-	case rawPrefix[0]:
-		kt = KeyTypeRaw
-	case txnPrefix[0]:
-		kt = KeyTypeTxn
+	switch mode {
+	case codec.RawKeyspaceModePrefix:
+		return id, KeyTypeRaw
+	case codec.TxnKeyspaceModePrefix:
+		return id, KeyTypeTxn
 	default:
 		return 0, KeyTypeClassical
 	}
-
-	// Extract keyspace ID (3 bytes after the prefix)
-	// Convert 3 bytes to uint32 by shifting and combining
-	keyspaceID := uint32(decoded[1])<<16 | uint32(decoded[2])<<8 | uint32(decoded[3])
-
-	return keyspaceID, kt
 }
 
 // Checker is an interface to check keyspace existence.
