@@ -56,15 +56,11 @@ func (r *RegionScatterer) scatterPlacementValid(region *core.RegionInfo, targets
 	if len(targets) != len(region.GetPeers()) {
 		return false
 	}
-	type peerKind struct {
-		role    metapb.PeerRole
-		witness bool
-	}
-	kinds := make(map[peerKind]int)
+	roles := make(map[metapb.PeerRole]int)
 	stores := make(scatterStoreSet, 2*len(targets))
 	originalStores := make([]*core.StoreInfo, 0, len(targets))
 	for _, peer := range region.GetPeers() {
-		kinds[peerKind{peer.GetRole(), peer.GetIsWitness()}]++
+		roles[peer.GetRole()]++
 		store := r.cluster.GetStore(peer.GetStoreId())
 		if store == nil {
 			return false
@@ -85,9 +81,9 @@ func (r *RegionScatterer) scatterPlacementValid(region *core.RegionInfo, targets
 		if p == nil || id != p.GetStoreId() {
 			return false
 		}
-		kind := peerKind{p.GetRole(), p.GetIsWitness()}
-		kinds[kind]--
-		if kinds[kind] < 0 {
+		role := p.GetRole()
+		roles[role]--
+		if roles[role] < 0 {
 			return false
 		}
 		store := stores[id]
@@ -107,12 +103,12 @@ func (r *RegionScatterer) scatterPlacementValid(region *core.RegionInfo, targets
 			leader = &peer
 		}
 	}
-	if leader == nil || leader.GetRole() != metapb.PeerRole_Voter || leader.GetIsWitness() {
+	if leader == nil || leader.GetRole() != metapb.PeerRole_Voter {
 		return false
 	}
 	target := region.Clone(core.SetPeers(peers), core.WithLeader(leader))
 	conf := r.cluster.GetSharedConfig()
-	rulesEnabled, witnessAllowed := conf.IsPlacementRulesEnabled(), conf.IsWitnessAllowed()
+	rulesEnabled := conf.IsPlacementRulesEnabled()
 	labels := slices.Clone(conf.GetLocationLabels())
 	var rules []*placement.Rule
 	if rulesEnabled {
@@ -143,7 +139,7 @@ func (r *RegionScatterer) scatterPlacementValid(region *core.RegionInfo, targets
 			return false
 		}
 	}
-	if rulesEnabled != conf.IsPlacementRulesEnabled() || witnessAllowed != conf.IsWitnessAllowed() || !slices.Equal(labels, conf.GetLocationLabels()) {
+	if rulesEnabled != conf.IsPlacementRulesEnabled() || !slices.Equal(labels, conf.GetLocationLabels()) {
 		return false
 	}
 	return !rulesEnabled || reflect.DeepEqual(rules, r.cluster.GetRuleManager().GetRulesForApplyRegion(region))

@@ -706,7 +706,7 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 					break
 				}
 				// Reserving another peer keeps that peer in place, including its
-				// role and witness state; the source still needs a new target.
+				// role; the source still needs a new target.
 				targetPeers[newPeer.GetStoreId()] = peers[newPeer.GetStoreId()]
 			}
 		}
@@ -905,9 +905,8 @@ func (r *RegionScatterer) selectNewPeer(context scatterSelectionContext, group s
 			continue
 		}
 		candidate := &metapb.Peer{
-			StoreId:   store.GetID(),
-			Role:      peer.GetRole(),
-			IsWitness: peer.GetIsWitness(),
+			StoreId: store.GetID(),
+			Role:    peer.GetRole(),
 		}
 		storeRegionCount := store.GetRegionCount()
 		if storeCount < minCount ||

@@ -144,9 +144,6 @@ func TestScatterPlacementValidation(t *testing.T) {
 			wrongRole := placementTargets(4, 7, 8)
 			wrongRole[7].Role = metapb.PeerRole_Learner
 			require.False(t, sc.scatterPlacementValid(region, wrongRole, 4))
-			wrongWitness := placementTargets(4, 7, 8)
-			wrongWitness[7].IsWitness = true
-			require.False(t, sc.scatterPlacementValid(region, wrongWitness, 4))
 			tc.SetStoreLabel(7, map[string]string{"host": "D"})
 			require.False(t, sc.scatterPlacementValid(region, placementTargets(4, 7, 8), 4))
 		})
@@ -314,24 +311,6 @@ func TestScatterPlacementFailureAccounting(t *testing.T) {
 	}
 }
 
-func TestScatterPreservesWitness(t *testing.T) {
-	sc, _, region := newPlacementTestScatter(t, false, []string{"A", "B", "C", "D", "E", "F"})
-	witness := *region.GetStorePeer(2)
-	witness.IsWitness = true
-	region = region.Clone(core.SetPeers([]*metapb.Peer{region.GetStorePeer(1), &witness, region.GetStorePeer(3)}))
-	view := region.Clone()
-	moveScatterPeer(view, region.GetStorePeer(2).GetId(), 5)
-	require.True(t, view.GetStorePeer(5).GetIsWitness())
-	sc.ordinaryEngine.selectedPeer.Put(2, "test")
-	candidate := sc.selectNewPeer(sc.ordinaryEngine.asSelectionContext(), "test", &witness, nil, false)
-	require.NotEqual(t, uint64(2), candidate.GetStoreId())
-	require.True(t, candidate.GetIsWitness())
-	targets := placementTargets(4, 5, 6)
-	targets[5].IsWitness = true
-	require.True(t, sc.scatterPlacementValid(region, targets, 4))
-	require.False(t, sc.scatterPlacementValid(region, targets, 5))
-}
-
 func BenchmarkScatterPlacementBatch(b *testing.B) {
 	for _, rules := range []bool{false, true} {
 		b.Run(strconv.FormatBool(rules), func(b *testing.B) {
@@ -412,9 +391,9 @@ func scatterOperatorTargets(t testing.TB, region *core.RegionInfo, op *operator.
 	for i := range op.Len() {
 		switch s := op.Step(i).(type) {
 		case operator.AddPeer:
-			targets[s.ToStore] = &metapb.Peer{Id: s.PeerID, StoreId: s.ToStore, IsWitness: s.IsWitness}
+			targets[s.ToStore] = &metapb.Peer{Id: s.PeerID, StoreId: s.ToStore}
 		case operator.AddLearner:
-			targets[s.ToStore] = &metapb.Peer{Id: s.PeerID, StoreId: s.ToStore, Role: metapb.PeerRole_Learner, IsWitness: s.IsWitness}
+			targets[s.ToStore] = &metapb.Peer{Id: s.PeerID, StoreId: s.ToStore, Role: metapb.PeerRole_Learner}
 		case operator.PromoteLearner:
 			targets[s.ToStore].Role = metapb.PeerRole_Voter
 		case operator.ChangePeerV2Enter:
@@ -437,66 +416,38 @@ func scatterOperatorTargets(t testing.TB, region *core.RegionInfo, op *operator.
 	return targets, leader
 }
 
-func TestScatterMixedLearnerAndWitness(t *testing.T) {
-	for _, witness := range []bool{false, true} {
-		t.Run(strconv.FormatBool(witness), func(t *testing.T) {
-			sc, tc, _ := newPlacementTestScatter(t, true, []string{"A", "B", "C", "A", "D", "E", "F", "D"})
-			tc.GetSharedConfig().SetEnableWitness(witness)
-			for _, id := range []uint64{4, 8} {
-				tc.SetStoreLabel(id, map[string]string{"host": "flash", "engine": "tiflash"})
-			}
-			rm := tc.GetRuleManager()
-			normal := rm.GetRule("pd", "default").Clone()
-			if witness {
-				normal.Count = 2
-				require.NoError(t, rm.SetRule(normal))
-				wr := normal.Clone()
-				wr.ID = "witness"
-				wr.Count = 1
-				wr.IsWitness = true
-				require.NoError(t, rm.SetRule(wr))
-			}
-			flash := normal.Clone()
-			flash.ID = "tiflash"
-			flash.Role = placement.Learner
-			flash.Count = 1
-			flash.LabelConstraints = []placement.LabelConstraint{{Key: "engine", Op: placement.In, Values: []string{"tiflash"}}}
-			require.NoError(t, rm.SetRule(flash))
-			region := tc.AddRegionWithLearner(101, 1, []uint64{2, 3}, []uint64{4})
-			if witness {
-				region = region.Clone(core.WithWitness(region.GetStorePeer(3).GetId()))
-				tc.PutRegion(region)
-			}
-			for id := uint64(1); id <= 3; id++ {
-				for range 10 {
-					sc.ordinaryEngine.selectedPeer.Put(id, "test")
-				}
-			}
-			for range 10 {
-				sc.getOrCreateSpecialEngineContext("tiflash").selectedPeer.Put(4, "test")
-			}
-			op, err := sc.Scatter(region, "test", true)
-			require.NoError(t, err)
-			require.NotNil(t, op)
-			targets, leader := scatterOperatorTargets(t, region, op)
-			require.Len(t, targets, 4)
-			require.True(t, sc.scatterPlacementValid(region, targets, leader))
-			require.Equal(t, metapb.PeerRole_Learner, targets[8].GetRole())
-			witnessCount := 0
-			for id, p := range targets {
-				require.Greater(t, id, uint64(4))
-				if p.GetIsWitness() {
-					witnessCount++
-				}
-			}
-			if witness {
-				require.Equal(t, 1, witnessCount)
-			} else {
-				require.Zero(t, witnessCount)
-			}
-			require.False(t, targets[leader].GetIsWitness())
-		})
+func TestScatterMixedLearner(t *testing.T) {
+	sc, tc, _ := newPlacementTestScatter(t, true, []string{"A", "B", "C", "A", "D", "E", "F", "D"})
+	for _, id := range []uint64{4, 8} {
+		tc.SetStoreLabel(id, map[string]string{"host": "flash", "engine": "tiflash"})
 	}
+	rm := tc.GetRuleManager()
+	flash := rm.GetRule("pd", "default").Clone()
+	flash.ID = "tiflash"
+	flash.Role = placement.Learner
+	flash.Count = 1
+	flash.LabelConstraints = []placement.LabelConstraint{{Key: "engine", Op: placement.In, Values: []string{"tiflash"}}}
+	require.NoError(t, rm.SetRule(flash))
+	region := tc.AddRegionWithLearner(101, 1, []uint64{2, 3}, []uint64{4})
+	for id := uint64(1); id <= 3; id++ {
+		for range 10 {
+			sc.ordinaryEngine.selectedPeer.Put(id, "test")
+		}
+	}
+	for range 10 {
+		sc.getOrCreateSpecialEngineContext("tiflash").selectedPeer.Put(4, "test")
+	}
+	op, err := sc.Scatter(region, "test", true)
+	require.NoError(t, err)
+	require.NotNil(t, op)
+	targets, leader := scatterOperatorTargets(t, region, op)
+	require.Len(t, targets, 4)
+	require.True(t, sc.scatterPlacementValid(region, targets, leader))
+	require.Equal(t, metapb.PeerRole_Learner, targets[8].GetRole())
+	for id := range targets {
+		require.Greater(t, id, uint64(4))
+	}
+	require.Equal(t, metapb.PeerRole_Voter, targets[leader].GetRole())
 }
 
 func TestScatterDegradedMultilevelIsolation(t *testing.T) {
@@ -649,23 +600,15 @@ func TestScatterConcurrentPlacementViews(t *testing.T) {
 }
 
 func TestScatterPlacementConfigChanges(t *testing.T) {
-	for _, witnessFlag := range []bool{false, true} {
-		t.Run(strconv.FormatBool(witnessFlag), func(t *testing.T) {
-			sc, tc, region := newPlacementTestScatter(t, true, []string{"A", "B", "C", "D", "E", "F"})
-			calls := 0
-			sc.cluster = &placementChangingCluster{SharedCluster: tc, onGetStore: func(_ uint64) {
-				calls++
-				if calls == 7 {
-					if witnessFlag {
-						tc.GetSharedConfig().SetEnableWitness(true)
-					} else {
-						tc.SetEnablePlacementRules(false)
-					}
-				}
-			}}
-			require.False(t, sc.scatterPlacementValid(region, placementTargets(4, 5, 6), 4))
-		})
-	}
+	sc, tc, region := newPlacementTestScatter(t, true, []string{"A", "B", "C", "D", "E", "F"})
+	calls := 0
+	sc.cluster = &placementChangingCluster{SharedCluster: tc, onGetStore: func(_ uint64) {
+		calls++
+		if calls == 7 {
+			tc.SetEnablePlacementRules(false)
+		}
+	}}
+	require.False(t, sc.scatterPlacementValid(region, placementTargets(4, 5, 6), 4))
 }
 
 func TestScatterBatchRequestAccounting(t *testing.T) {
@@ -688,45 +631,5 @@ func TestScatterBatchRequestAccounting(t *testing.T) {
 		require.NotNil(t, op)
 		peers, leader := scatterOperatorTargets(t, region, op)
 		require.True(t, sc.scatterPlacementValid(region, peers, leader))
-	}
-}
-
-func TestScatterRetainsReservedWitness(t *testing.T) {
-	sc, tc, region := newPlacementTestScatter(t, true, []string{"A", "B", "C", "D"})
-	tc.GetSharedConfig().SetEnableWitness(true)
-	rule := tc.GetRuleManager().GetRule("pd", "default").Clone()
-	rule.Count = 2
-	require.NoError(t, tc.GetRuleManager().SetRule(rule))
-	witness := rule.Clone()
-	witness.ID = "witness"
-	witness.Count = 1
-	witness.IsWitness = true
-	require.NoError(t, tc.GetRuleManager().SetRule(witness))
-	region = region.Clone(core.WithWitness(region.GetStorePeer(2).GetId()))
-	tc.PutRegion(region)
-	for _, internal := range []bool{false, true} {
-		// Go map iteration can visit the witness before or after a voter. Both
-		// orders must preserve the reserved peer's attributes.
-		for attempt := range 32 {
-			group := fmt.Sprintf("reserved-%t-%d", internal, attempt)
-			var state *scatterState
-			if internal {
-				state = sc.newScatterState()
-				state.ordinaryEngine.selectedPeer.InitGroupDistribution(group, map[uint64]uint64{1: 10, 3: 10, 4: 1})
-			} else {
-				for range 10 {
-					sc.ordinaryEngine.selectedPeer.Put(1, group)
-					sc.ordinaryEngine.selectedPeer.Put(3, group)
-				}
-				sc.ordinaryEngine.selectedPeer.Put(4, group)
-			}
-			op, err := sc.scatterRegionWithType(region, group, true, internal, state)
-			require.NoError(t, err)
-			require.NotNil(t, op)
-			targets, leader := scatterOperatorTargets(t, region, op)
-			require.True(t, targets[2].GetIsWitness())
-			require.Contains(t, targets, uint64(4))
-			require.True(t, sc.scatterPlacementValid(region, targets, leader))
-		}
 	}
 }
