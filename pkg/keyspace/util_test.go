@@ -629,6 +629,23 @@ func TestRegionSpansMultipleKeyspaces(t *testing.T) {
 			checker:        specificChecker, // both 100 and 101 exist
 			expectedResult: true,
 		},
+		{
+			// endKey absent: spans iff the start keyspace still exists. Not
+			// routed through KeyspaceExist(MaxValidKeyspaceID), so the result is
+			// the same for every checker implementation.
+			name:           "empty end key, start keyspace exists",
+			startKey:       MakeRegionBound(100).TxnLeftBound,
+			endKey:         []byte{},
+			checker:        specificChecker,
+			expectedResult: true,
+		},
+		{
+			name:           "empty end key, start keyspace deleted",
+			startKey:       MakeRegionBound(200).TxnLeftBound,
+			endKey:         []byte{},
+			checker:        specificChecker, // keyspace 200 does not exist
+			expectedResult: false,
+		},
 	}
 
 	for _, tc := range testCases {
