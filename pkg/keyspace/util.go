@@ -55,6 +55,9 @@ var (
 	// that still has keyspaces assigned to it. It is exported so HTTP handlers can
 	// map it to a 400 Bad Request via errors.Is.
 	ErrGroupHasAssignedKeyspaces = errors.New("cannot delete meta-service group with assigned keyspaces")
+	// ErrMetaServiceGroupUnhealthy is returned when a new meta-service group's
+	// etcd server cannot pass the health check.
+	ErrMetaServiceGroupUnhealthy = errors.New("meta-service group etcd server is unhealthy")
 
 	// stateTransitionTable lists all allowed next state for the given current state.
 	// Note that transit from any state to itself is allowed for idempotence.

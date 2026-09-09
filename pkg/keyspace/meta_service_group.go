@@ -17,15 +17,19 @@ package keyspace
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
+	"strings"
 
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/server/config"
@@ -392,11 +396,60 @@ func (m *MetaServiceGroupManager) UpdateGroupsSafely(
 	if err := config.AdjustMetaServiceGroups(metaServiceGroups); err != nil {
 		return err
 	}
+	if err := m.checkNewGroupsHealth(ctx, metaServiceGroups); err != nil {
+		return err
+	}
 	if err := m.persistGroupsLocked(ctx, metaServiceGroups, deletedGroups, persist); err != nil {
 		return err
 	}
 	if afterPersist != nil {
 		afterPersist()
+	}
+	return nil
+}
+
+// checkNewGroupsHealth verifies every configured endpoint before a group is
+// added. Existing groups are intentionally skipped so an address update does
+// not change the established update semantics.
+func (m *MetaServiceGroupManager) checkNewGroupsHealth(
+	ctx context.Context,
+	metaServiceGroups map[string]config.MetaServiceGroupConfig,
+) error {
+	groups := make(map[string]config.MetaServiceGroupConfig)
+	m.RLock()
+	for groupID, group := range metaServiceGroups {
+		if _, exists := m.metaServiceGroups[groupID]; exists {
+			continue
+		}
+		groups[groupID] = group
+	}
+	m.RUnlock()
+	for groupID, group := range groups {
+		for _, address := range strings.Split(group.Addresses, ",") {
+			if err := checkEtcdServerHealth(ctx, strings.TrimSpace(address)); err != nil {
+				return fmt.Errorf("%w: group %s endpoint %s: %v", ErrMetaServiceGroupUnhealthy, groupID, address, err)
+			}
+		}
+	}
+	return nil
+}
+
+func checkEtcdServerHealth(ctx context.Context, endpoint string) error {
+	client, err := clientv3.New(clientv3.Config{
+		Endpoints:   []string{endpoint},
+		DialTimeout: etcdutil.DefaultRequestTimeout,
+	})
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := client.Close(); err != nil {
+			log.Warn("[keyspace] failed to close meta-service group etcd client",
+				zap.String("endpoint", endpoint), zap.Error(err))
+		}
+	}()
+	if !etcdutil.IsHealthy(ctx, client) {
+		return errors.New("etcd health check failed")
 	}
 	return nil
 }
