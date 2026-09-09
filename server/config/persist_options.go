@@ -555,19 +555,8 @@ func (o *PersistOptions) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitCo
 }
 
 // GetStoreLimitByType returns the limit of a store with a given type.
-func (o *PersistOptions) GetStoreLimitByType(storeID uint64, typ storelimit.Type) (returned float64) {
-	limit := o.GetStoreLimit(storeID)
-	switch typ {
-	case storelimit.AddPeer:
-		return limit.AddPeer
-	case storelimit.RemovePeer:
-		return limit.RemovePeer
-	// todo: impl it in store limit v2.
-	case storelimit.SendSnapshot:
-		return 0.0
-	default:
-		panic("no such limit type")
-	}
+func (o *PersistOptions) GetStoreLimitByType(storeID uint64, typ storelimit.Type) float64 {
+	return o.GetScheduleConfig().GetStoreLimitByType(storeID, typ)
 }
 
 // GetAllStoresLimit returns the limit of all stores.

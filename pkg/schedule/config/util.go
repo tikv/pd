@@ -19,6 +19,10 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
+
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
+	"github.com/tikv/pd/pkg/core/storelimit"
 )
 
 const (
@@ -54,4 +58,30 @@ func ValidateLabels(labels []*metapb.StoreLabel) error {
 // ValidateLabelKey checks the legality of the label key.
 func ValidateLabelKey(key string) error {
 	return validateFormat(key, keyFormat)
+}
+
+// SyncStoreLimit applies the current configured rate to a v1 limiter and returns
+// the store's limiter. StoreInfo clones share the limiter, which owns its locks.
+// Configuration uses operations per minute; v1 limiters use operations per second.
+// Unchanged rates neither reset the token budget nor allocate a new bucket.
+func SyncStoreLimit(store *core.StoreInfo, conf SharedConfigProvider, typ storelimit.Type) storelimit.StoreLimit {
+	limiter := store.GetStoreLimit()
+	if limit, ok := limiter.(*storelimit.StoreRateLimit); ok {
+		rate := conf.GetStoreLimitByType(store.GetID(), typ) / 60
+		if limit.Rate(typ) != rate {
+			limit.Reset(rate, typ)
+		}
+	}
+	return limiter
+}
+
+// IsStoreLimitAvailable synchronizes a v1 limiter before checking its budget.
+// Other limiter versions keep their own availability semantics.
+func IsStoreLimitAvailable(store *core.StoreInfo, conf SharedConfigProvider, typ storelimit.Type, level constant.PriorityLevel) bool {
+	limiter := store.GetStoreLimit()
+	cost := storelimit.RegionInfluence[typ]
+	if limit, ok := limiter.(*storelimit.StoreRateLimit); ok {
+		return limit.AvailableWithRate(cost, typ, conf.GetStoreLimitByType(store.GetID(), typ)/60)
+	}
+	return limiter.Available(cost, typ, level)
 }

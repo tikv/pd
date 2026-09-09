@@ -1204,3 +1204,34 @@ func (suite *operatorControllerTestSuite) TestMergeOperatorsSynchronousCancellat
 		})
 	}
 }
+
+// BenchmarkExceedStoreLimit measures admission checks without consuming tokens.
+func BenchmarkExceedStoreLimit(b *testing.B) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tc := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	tc.AddRegionStore(1, 10)
+	tc.AddRegionStore(2, 10)
+	region := tc.AddLeaderRegion(1, 1)
+	oc := NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), nil)
+	for _, typ := range []storelimit.Type{storelimit.AddPeer, storelimit.RemovePeer} {
+		b.Run(typ.String(), func(b *testing.B) {
+			var step OpStep
+			switch typ {
+			case storelimit.AddPeer:
+				step = AddPeer{ToStore: 2, PeerID: 2}
+			case storelimit.RemovePeer:
+				step = RemovePeer{FromStore: 1, PeerID: 1}
+			}
+			op := NewTestOperator(1, region.GetRegionEpoch(), OpRegion, step)
+			oc.ExceedStoreLimit(op)
+			b.ReportAllocs()
+			b.ResetTimer()
+			b.RunParallel(func(pb *testing.PB) {
+				for pb.Next() {
+					oc.ExceedStoreLimit(op)
+				}
+			})
+		})
+	}
+}

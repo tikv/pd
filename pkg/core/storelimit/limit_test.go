@@ -17,6 +17,8 @@ package storelimit
 import (
 	"container/list"
 	"math/rand/v2"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -181,5 +183,31 @@ func TestFeedback(t *testing.T) {
 			return
 		}
 		s.Ack(stats.size, SendSnapshot)
+	}
+}
+
+func TestConcurrentStoreRateLimitRefresh(t *testing.T) {
+	for _, typ := range []Type{AddPeer, RemovePeer} {
+		t.Run(typ.String(), func(t *testing.T) {
+			re := require.New(t)
+			limit := NewStoreRateLimit(0).(*StoreRateLimit)
+			var taken atomic.Int64
+			var wg sync.WaitGroup
+			start := make(chan struct{})
+			for range 32 {
+				wg.Go(func() {
+					<-start
+					limit.AvailableWithRate(influence, typ, 0.0001/60)
+					if limit.Take(influence, typ, constant.Medium) {
+						taken.Add(1)
+					}
+				})
+			}
+			close(start)
+			wg.Wait()
+			// Concurrent observers of a new rate must share one initial burst.
+			re.EqualValues(1, taken.Load())
+			re.False(limit.AvailableWithRate(influence, typ, 0.0001/60))
+		})
 	}
 }
