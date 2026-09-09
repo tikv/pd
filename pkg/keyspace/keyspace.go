@@ -173,14 +173,6 @@ func NewKeyspaceManager(
 
 // Bootstrap saves default keyspace info.
 func (manager *Manager) Bootstrap() error {
-	// Warm up the in-memory keyspace cache from storage before it is relied upon
-	// for keyspace existence/range queries. Unlike keyspaceNameLookup and
-	// keyspaceStateLookup, the cache is otherwise only populated lazily as
-	// individual keyspaces are touched, so without this a fresh PD leader would
-	// report false negatives for any keyspace it hasn't queried yet.
-	if err := manager.loadCache(); err != nil {
-		return err
-	}
 	bootstrapKeyspaceID := GetBootstrapKeyspaceID()
 	bootstrapKeyspaceName := GetBootstrapKeyspaceName()
 	err := manager.initReserveKeyspace(bootstrapKeyspaceID, bootstrapKeyspaceName)
@@ -1232,36 +1224,6 @@ func (manager *Manager) KeyspaceExist(id uint32) bool {
 	}
 
 	return state != keyspacepb.KeyspaceState_TOMBSTONE
-}
-
-// loadCache scans all keyspaces from storage and populates the in-memory
-// keyspace cache. It is meant to be called once during startup so the cache
-// reflects every existing keyspace up front, rather than relying solely on
-// the lazy population that happens as individual keyspaces are created,
-// transitioned, or queried.
-func (manager *Manager) loadCache() error {
-	startID := constant.StartKeyspaceID
-	for {
-		var keyspaces []*keyspacepb.KeyspaceMeta
-		if err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
-			var err error
-			keyspaces, err = manager.store.LoadRangeKeyspace(txn, startID, etcdutil.MaxEtcdTxnOps)
-			return err
-		}); err != nil {
-			return err
-		}
-		for _, ks := range keyspaces {
-			if ks == nil {
-				continue
-			}
-			manager.cache.Save(ks.GetId(), ks.GetName(), ks.GetState())
-		}
-		if len(keyspaces) < etcdutil.MaxEtcdTxnOps {
-			break
-		}
-		startID = keyspaces[len(keyspaces)-1].GetId() + 1
-	}
-	return nil
 }
 
 // CountKeyspacesByMetaServiceGroup scans all keyspaces and counts how many are
