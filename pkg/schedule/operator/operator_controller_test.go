@@ -112,7 +112,7 @@ func (suite *operatorControllerTestSuite) TestGetOpInfluence() {
 	re.True(op2.Start())
 	oc.SetOperator(op2)
 	ctx, cancel := context.WithCancel(suite.ctx)
-	var wg sync.WaitGroup
+	wg := &sync.WaitGroup{}
 	wg.Add(2)
 	go func(ctx context.Context) {
 		defer wg.Done()

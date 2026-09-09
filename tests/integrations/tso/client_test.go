@@ -40,6 +40,7 @@ import (
 	"github.com/tikv/pd/client/pkg/caller"
 	sd "github.com/tikv/pd/client/servicediscovery"
 	bs "github.com/tikv/pd/pkg/basicserver"
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -418,7 +419,7 @@ func (suite *tsoClientTestSuite) TestRandomResignLeader() {
 		n := rand.IntN(2) + 3
 		time.Sleep(time.Duration(n) * time.Second)
 		if !suite.legacy {
-			wg := sync.WaitGroup{}
+			wg := &sync.WaitGroup{}
 			// Select the first keyspace from all keyspace groups. We need to make sure the selected
 			// keyspaces are from different keyspace groups, otherwise multiple goroutines below could
 			// try to resign the primary of the same keyspace group and cause race condition.
@@ -455,16 +456,19 @@ func (suite *tsoClientTestSuite) TestRandomResignLeader() {
 			wg.Wait()
 		} else {
 			err := suite.cluster.ResignLeader()
-			re.NoError(err)
+			if !as.NoError(err) { //nolint:testifylint // parallelAct runs in a worker goroutine, where require is unsafe.
+				return
+			}
 			suite.cluster.WaitLeader()
 		}
 		time.Sleep(time.Duration(n) * time.Second)
 	}
 
-	utils.CheckMultiKeyspacesTSO(suite.ctx, re, suite.clients, parallelAct)
+	utils.CheckMultiKeyspacesTSO(suite.ctx, as, suite.clients, parallelAct)
 }
 
 func (suite *tsoClientTestSuite) TestRandomShutdown() {
+	as := assert.New(suite.T())
 	re := suite.Require()
 	var closedTSOAddr string
 	if !suite.legacy {
@@ -478,11 +482,29 @@ func (suite *tsoClientTestSuite) TestRandomShutdown() {
 
 	parallelAct := func() {
 		if !suite.legacy {
-			primary := suite.tsoCluster.WaitForDefaultPrimaryServing(re)
+			keyspaceID := keyspace.GetBootstrapKeyspaceID()
+			primary := suite.tsoCluster.GetPrimaryServer(keyspaceID, constant.DefaultKeyspaceGroupID)
+			if !testutil.EventuallyWithAssert(as, func() bool {
+				primary = suite.tsoCluster.GetPrimaryServer(keyspaceID, constant.DefaultKeyspaceGroupID)
+				return primary != nil
+			}, testutil.WithWaitFor(30*time.Second), testutil.WithTickInterval(100*time.Millisecond)) {
+				return
+			}
 			closedTSOAddr = primary.GetAddr()
 			primary.Close()
-			suite.tsoCluster.WaitForDefaultPrimaryServing(re)
-			utils.WaitForAllTSOServiceAvailable(suite.ctx, re, suite.clients)
+			if !testutil.EventuallyWithAssert(as, func() bool {
+				return suite.tsoCluster.GetPrimaryServer(keyspaceID, constant.DefaultKeyspaceGroupID) != nil
+			}, testutil.WithWaitFor(30*time.Second), testutil.WithTickInterval(100*time.Millisecond)) {
+				return
+			}
+			for _, client := range suite.clients {
+				if !testutil.EventuallyWithAssert(as, func() bool {
+					_, _, err := client.GetTS(suite.ctx)
+					return err == nil
+				}) {
+					return
+				}
+			}
 		} else {
 			// After https://github.com/tikv/pd/issues/6376 is fixed, we can use a smaller number here.
 			// currently, the time to discover tso service is usually a little longer than 1s, compared
@@ -494,7 +516,7 @@ func (suite *tsoClientTestSuite) TestRandomShutdown() {
 		}
 	}
 
-	utils.CheckMultiKeyspacesTSO(suite.ctx, re, suite.clients, parallelAct)
+	utils.CheckMultiKeyspacesTSO(suite.ctx, as, suite.clients, parallelAct)
 	if !suite.legacy {
 		re.NotEmpty(closedTSOAddr)
 		return
