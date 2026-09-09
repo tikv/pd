@@ -427,11 +427,13 @@ func (td *tsoDispatcher) processRequests(
 	}()
 
 	var (
-		count              = int64(len(requests))
-		svcDiscovery       = td.provider.getServiceDiscovery()
-		clusterID          = svcDiscovery.GetClusterID()
-		keyspaceID         = svcDiscovery.GetKeyspaceID()
-		reqKeyspaceGroupID = svcDiscovery.GetKeyspaceGroupID()
+		count        = int64(len(requests))
+		svcDiscovery = td.provider.getServiceDiscovery()
+		metadata     = tsoRequestMetadata{
+			clusterID:       svcDiscovery.GetClusterID(),
+			keyspaceID:      svcDiscovery.GetKeyspaceID(),
+			keyspaceGroupID: svcDiscovery.GetKeyspaceGroupID(),
+		}
 	)
 
 	// Load latest allocated ts for monotonicity assertion.
@@ -465,7 +467,7 @@ func (td *tsoDispatcher) processRequests(
 	}
 
 	err := stream.processRequests(
-		clusterID, keyspaceID, reqKeyspaceGroupID,
+		metadata,
 		count, tbc.GetExtraBatchingStartTime(), cb)
 	if err != nil {
 		close(done)

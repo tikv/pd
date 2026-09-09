@@ -123,8 +123,14 @@ type tsoRequestResult struct {
 	respKeyspaceGroupID uint32
 }
 
+type tsoRequestMetadata struct {
+	clusterID       uint64
+	keyspaceID      uint32
+	keyspaceGroupID uint32
+}
+
 type grpcTSOStreamAdapter interface {
-	Send(clusterID uint64, keyspaceID, keyspaceGroupID uint32, count int64) error
+	Send(metadata tsoRequestMetadata, count int64) error
 	Recv() (tsoRequestResult, error)
 }
 
@@ -133,10 +139,10 @@ type pdTSOStreamAdapter struct {
 }
 
 // Send implements the grpcTSOStreamAdapter interface.
-func (s pdTSOStreamAdapter) Send(clusterID uint64, _, _ uint32, count int64) error {
+func (s pdTSOStreamAdapter) Send(metadata tsoRequestMetadata, count int64) error {
 	req := &pdpb.TsoRequest{
 		Header: &pdpb.RequestHeader{
-			ClusterId: clusterID,
+			ClusterId: metadata.clusterID,
 		},
 		Count: uint32(count),
 	}
@@ -163,14 +169,14 @@ type tsoTSOStreamAdapter struct {
 }
 
 // Send implements the grpcTSOStreamAdapter interface.
-func (s tsoTSOStreamAdapter) Send(clusterID uint64, keyspaceID, keyspaceGroupID uint32, count int64) error {
+func (s tsoTSOStreamAdapter) Send(metadata tsoRequestMetadata, count int64) error {
 	req := &tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{
-			ClusterId: clusterID,
+			ClusterId: metadata.clusterID,
 			Keyspace: &tsopb.RequestHeader_KeyspaceId{
-				KeyspaceId: keyspaceID,
+				KeyspaceId: metadata.keyspaceID,
 			},
-			KeyspaceGroupId: keyspaceGroupID,
+			KeyspaceGroupId: metadata.keyspaceGroupID,
 			CalleeId:        s.calleeID,
 		},
 		Count: uint32(count),
@@ -276,7 +282,7 @@ func (s *tsoStream) getServerURL() string {
 // It's guaranteed that the `callback` will be called, but when the request is failed to be scheduled, the callback
 // will be ignored.
 func (s *tsoStream) processRequests(
-	clusterID uint64, keyspaceID, keyspaceGroupID uint32, count int64, batchStartTime time.Time, callback onFinishedCallback,
+	metadata tsoRequestMetadata, count int64, batchStartTime time.Time, callback onFinishedCallback,
 ) error {
 	start := time.Now()
 
@@ -304,7 +310,7 @@ func (s *tsoStream) processRequests(
 	case s.pendingRequests <- batchedRequests{
 		startTime:          start,
 		count:              count,
-		reqKeyspaceGroupID: keyspaceGroupID,
+		reqKeyspaceGroupID: metadata.keyspaceGroupID,
 		callback:           callback,
 	}:
 	default:
@@ -314,7 +320,7 @@ func (s *tsoStream) processRequests(
 	s.state.Store(prevState)
 
 	failpoint.InjectCall("pauseAfterTSORequestAttachedToStream")
-	if err := s.stream.Send(clusterID, keyspaceID, keyspaceGroupID, count); err != nil {
+	if err := s.stream.Send(metadata, count); err != nil {
 		// As the request is already put into `pendingRequests`, the request should finally be canceled by the recvLoop.
 		// So skip returning error here to avoid
 		// if err == io.EOF {
