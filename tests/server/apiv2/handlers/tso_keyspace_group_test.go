@@ -141,6 +141,25 @@ func (suite *keyspaceGroupTestSuite) TestLoadKeyspaceGroup() {
 	re.Len(resp, 3)
 }
 
+func (suite *keyspaceGroupTestSuite) TestDeleteDefaultKeyspaceGroupReturnsBadRequest() {
+	re := suite.Require()
+	httpReq, err := http.NewRequest(
+		http.MethodDelete,
+		suite.server.GetAddr()+keyspaceGroupsPrefix+"/0",
+		http.NoBody,
+	)
+	re.NoError(err)
+	resp, err := tests.TestDialClient.Do(httpReq)
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusBadRequest, resp.StatusCode)
+
+	var errorMessage string
+	re.NoError(json.NewDecoder(resp.Body).Decode(&errorMessage))
+	re.Equal(errs.ErrModifyDefaultKeyspaceGroup.Error(), errorMessage)
+	re.NotNil(MustLoadKeyspaceGroupByID(re, suite.server, kgconstant.DefaultKeyspaceGroupID))
+}
+
 func (suite *keyspaceGroupTestSuite) TestSplitKeyspaceGroup() {
 	re := suite.Require()
 	kgs := &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{

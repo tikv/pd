@@ -74,6 +74,25 @@ type persistedConfig struct {
 	Store          sc.StoreConfig       `json:"store"`
 }
 
+// UnmarshalJSON consumes persisted schedule-field presence while decoding, so
+// decoder metadata never leaks into the runtime ScheduleConfig.
+func (c *persistedConfig) UnmarshalJSON(data []byte) error {
+	type plainPersistedConfig persistedConfig
+	if err := json.Unmarshal(data, (*plainPersistedConfig)(c)); err != nil {
+		return err
+	}
+	var fields struct {
+		Schedule json.RawMessage `json:"schedule"`
+	}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	if len(fields.Schedule) == 0 {
+		return nil
+	}
+	return c.Schedule.MigrateDeprecatedFlagsFromJSON(fields.Schedule)
+}
+
 // NewWatcher creates a new watcher to watch the config meta change from PD.
 func NewWatcher(
 	ctx context.Context,
@@ -124,7 +143,9 @@ func (cw *Watcher) getSchedulersController() *schedulers.Controller {
 
 func (cw *Watcher) initializeConfigWatcher() error {
 	putFn := func(kv *mvccpb.KeyValue) error {
-		cfg := &persistedConfig{}
+		cfg := &persistedConfig{
+			Schedule: sc.ScheduleConfig{DefaultStoreLimit: sc.DefaultStoreLimitConfig()},
+		}
 		if err := json.Unmarshal(kv.Value, cfg); err != nil {
 			log.Warn("failed to unmarshal scheduling config entry",
 				zap.String("event-kv-key", string(kv.Key)), zap.Error(err))
@@ -152,6 +173,7 @@ func (cw *Watcher) initializeConfigWatcher() error {
 		func([]*clientv3.Event) error { return nil },
 		false, /* withPrefix */
 	)
+	cw.configWatcher.SetReloadOnCompaction()
 	cw.configWatcher.StartWatchLoop()
 	return cw.configWatcher.WaitLoad()
 }
@@ -183,6 +205,7 @@ func (cw *Watcher) initializeTTLConfigWatcher() error {
 		func([]*clientv3.Event) error { return nil },
 		true, /* withPrefix */
 	)
+	cw.ttlConfigWatcher.SetReconcileDeletedKeys()
 	cw.ttlConfigWatcher.StartWatchLoop()
 	return cw.ttlConfigWatcher.WaitLoad()
 }
@@ -234,6 +257,7 @@ func (cw *Watcher) initializeSchedulerConfigWatcher() error {
 		func([]*clientv3.Event) error { return nil },
 		true, /* withPrefix */
 	)
+	cw.schedulerConfigWatcher.SetReconcileDeletedKeys()
 	cw.schedulerConfigWatcher.StartWatchLoop()
 	return cw.schedulerConfigWatcher.WaitLoad()
 }

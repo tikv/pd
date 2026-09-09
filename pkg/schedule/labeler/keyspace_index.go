@@ -344,19 +344,25 @@ func (i *keyspaceRuleIndex) matchRule(start, end []byte) (*LabelRule, bool) {
 		return nil, false
 	}
 	mode, id, ok := codec.DecodeKeyspaceKey(start)
+	hasCompletePrefix := ok
 	if !ok {
-		return nil, false
+		mode, id, ok = keyspaceIntervalForKey(start)
+		if !ok {
+			return nil, false
+		}
 	}
 	set := i.ruleSet(mode)
 	if set == nil {
 		return nil, false
 	}
 	rule := set.get(id)
-	if len(end) >= codec.KeyspacePrefixLen && bytes.Equal(start[:codec.KeyspacePrefixLen], end[:codec.KeyspacePrefixLen]) {
+	if hasCompletePrefix &&
+		len(end) >= codec.KeyspacePrefixLen &&
+		bytes.Equal(start[:codec.KeyspacePrefixLen], end[:codec.KeyspacePrefixLen]) {
 		return rule, true
 	}
 	right := keyspaceBoundary(mode, id+1)
-	// DecodeKeyspaceKey guarantees that start is not below this ID's boundary.
+	// Both decoding paths guarantee that start is not below this ID's boundary.
 	if bytes.Compare(end, right[:]) > 0 {
 		return nil, false
 	}
@@ -483,6 +489,18 @@ func keyspaceBoundary(mode byte, id uint32) [9]byte {
 func keyspaceBoundaryBytes(mode byte, id uint32) []byte {
 	key := keyspaceBoundary(mode, id)
 	return key[:]
+}
+
+// keyspaceIntervalForKey finds the canonical keyspace interval containing a
+// lexicographic key that does not carry a complete decodable prefix.
+func keyspaceIntervalForKey(key []byte) (byte, uint32, bool) {
+	for _, mode := range codec.KeyspaceModes() {
+		upper := keyspaceBoundaryBound(mode, key, true)
+		if upper > 0 && upper < keyspaceBoundaryCount {
+			return mode, uint32(upper - 1), true
+		}
+	}
+	return 0, 0, false
 }
 
 func keyspaceBoundaryRange(mode byte, start, end []byte) (lo, hi int) {

@@ -678,7 +678,9 @@ func restartTestCluster(
 
 // RunServer starts to run TestServer.
 func RunServer(server *TestServer) <-chan error {
-	resC := make(chan error)
+	// Buffer the one-shot result so the goroutine can exit even if the caller
+	// returns early after another concurrently started server fails.
+	resC := make(chan error, 1)
 	go func() { resC <- server.Run() }()
 	return resC
 }

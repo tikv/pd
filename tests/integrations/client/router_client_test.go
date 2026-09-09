@@ -127,6 +127,10 @@ func (suite *routerClientSuite) TestGetRegion() {
 			reflect.DeepEqual(peers[0], r.Leader) &&
 			r.Buckets == nil
 	})
+	r, err := suite.client.GetRegion(context.Background(), nil)
+	re.NoError(err)
+	re.NotNil(r)
+	re.Equal(regionID, r.Meta.GetId())
 	breq := &pdpb.ReportBucketsRequest{
 		Header: newHeader(),
 		Buckets: &metapb.Buckets{
@@ -243,6 +247,10 @@ func (suite *routerClientSuite) TestGetRegionByID() {
 		return reflect.DeepEqual(region, r.Meta) &&
 			reflect.DeepEqual(peers[0], r.Leader)
 	})
+
+	r, err := suite.client.GetRegionByID(context.Background(), 0)
+	re.NoError(err)
+	re.Nil(r)
 
 	// test WithCallerComponent
 	testutil.Eventually(re, func() bool {

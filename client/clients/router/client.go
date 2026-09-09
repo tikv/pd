@@ -290,7 +290,7 @@ func requestFinisher(resp *pdpb.QueryRegionResponse) batch.FinisherFunc[*Request
 		} else if req.prevKey != nil {
 			id = resp.PrevKeyIdMap[prevKeyIdx]
 			prevKeyIdx++
-		} else if req.id != 0 {
+		} else {
 			id = req.id
 		}
 		if regionResp, ok := resp.RegionsById[id]; ok {
@@ -728,6 +728,33 @@ func (c *Cli) sendToMs(ctx context.Context) (processFn, string) {
 type recvFn func() (*pdpb.QueryRegionResponse, error)
 type sendFn func(*pdpb.QueryRegionRequest) error
 
+// buildQueryRegionRequest converts the collected requests into one QueryRegion
+// request. A request with neither key nor prevKey is an ID query, so the entire
+// uint64 ID range, including zero, is preserved.
+func buildQueryRegionRequest(clusterID uint64, requests []*Request) *pdpb.QueryRegionRequest {
+	queryReq := &pdpb.QueryRegionRequest{
+		Header: &pdpb.RequestHeader{
+			ClusterId: clusterID,
+		},
+		Keys:     make([][]byte, 0, len(requests)),
+		PrevKeys: make([][]byte, 0, len(requests)),
+		Ids:      make([]uint64, 0, len(requests)),
+	}
+	for _, req := range requests {
+		if !queryReq.NeedBuckets && req.options.NeedBuckets {
+			queryReq.NeedBuckets = true
+		}
+		if req.key != nil {
+			queryReq.Keys = append(queryReq.Keys, req.key)
+		} else if req.prevKey != nil {
+			queryReq.PrevKeys = append(queryReq.PrevKeys, req.prevKey)
+		} else {
+			queryReq.Ids = append(queryReq.Ids, req.id)
+		}
+	}
+	return queryReq
+}
+
 func (c *Cli) processRequestsInner(send sendFn, recv recvFn) error {
 	var (
 		requests = c.batchController.GetCollectedRequests()
@@ -750,28 +777,7 @@ func (c *Cli) processRequestsInner(send sendFn, recv recvFn) error {
 		traceRegion.End()
 	}()
 
-	queryReq := &pdpb.QueryRegionRequest{
-		Header: &pdpb.RequestHeader{
-			ClusterId: c.svcDiscovery.GetClusterID(),
-		},
-		Keys:     make([][]byte, 0, len(requests)),
-		PrevKeys: make([][]byte, 0, len(requests)),
-		Ids:      make([]uint64, 0, len(requests)),
-	}
-	for _, req := range requests {
-		if !queryReq.NeedBuckets && req.options.NeedBuckets {
-			queryReq.NeedBuckets = true
-		}
-		if req.key != nil {
-			queryReq.Keys = append(queryReq.Keys, req.key)
-		} else if req.prevKey != nil {
-			queryReq.PrevKeys = append(queryReq.PrevKeys, req.prevKey)
-		} else if req.id != 0 {
-			queryReq.Ids = append(queryReq.Ids, req.id)
-		} else {
-			panic("invalid region query request received")
-		}
-	}
+	queryReq := buildQueryRegionRequest(c.svcDiscovery.GetClusterID(), requests)
 	start := time.Now()
 	err := send(queryReq)
 	if err != nil {

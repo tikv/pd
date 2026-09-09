@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -34,17 +35,20 @@ import (
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	tsoapi "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
 	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -767,6 +771,290 @@ func TestTSOServiceSwitch(t *testing.T) {
 	// Verify PD is now providing TSO service and timestamps are monotonically increasing
 	re.NoError(checkTSOMonotonic(ctx, pdClient, &globalLastTS, 10))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/fastUpdateServiceMode"))
+}
+
+const modeSwitchUserKeyspaceName = "mode_switch_user_ks"
+const modeSwitchPDModeKeyspaceName = "mode_switch_pd_ks"
+
+func TestPDModeSwitchBetweenMicroserviceAndMonolithMultipleTimes(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/skipKeyspaceRegionCheck", "return"))
+	t.Cleanup(func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/skipKeyspaceRegionCheck"))
+	})
+
+	tc, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(conf *config.Config, _ string) {
+		conf.Microservice.EnableTSODynamicSwitching = false
+		conf.Keyspace.WaitRegionSplit = false
+	})
+	re.NoError(err)
+	defer tc.Destroy()
+
+	re.NoError(tc.RunInitialServers())
+	pdServer := tc.GetServer(tc.WaitLeader())
+	re.NotNil(pdServer)
+	re.NoError(pdServer.BootstrapCluster())
+	userKeyspace, err := pdServer.GetServer().GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+		Name: modeSwitchUserKeyspaceName,
+	})
+	re.NoError(err)
+	userKeyspaceID := userKeyspace.GetId()
+	cleanupReached := make(chan struct{})
+	cleanupRelease := make(chan struct{})
+	var cleanupReachedOnce, cleanupReleaseOnce sync.Once
+	const cleanupBlockerName = "github.com/tikv/pd/server/beforeMicroserviceMetadataCleanupCommit"
+	re.NoError(failpoint.EnableCall(cleanupBlockerName, func() {
+		cleanupReachedOnce.Do(func() {
+			close(cleanupReached)
+		})
+		<-cleanupRelease
+	}))
+	defer func() {
+		cleanupReleaseOnce.Do(func() {
+			close(cleanupRelease)
+		})
+		re.NoError(failpoint.Disable(cleanupBlockerName))
+	}()
+
+	waitDefaultKeyspaceGroupReady(re, pdServer, userKeyspaceID)
+	tsoCluster, err := tests.NewTestTSOCluster(ctx, 1, pdServer.GetAddr())
+	re.NoError(err)
+	defer func() {
+		if tsoCluster != nil {
+			tsoCluster.Destroy()
+		}
+	}()
+
+	for _, tsoStartsBeforeCleanup := range []bool{true, false} {
+		waitDefaultKeyspaceGroupReady(re, pdServer, userKeyspaceID)
+		waitTSOServiceReady(re, tsoCluster)
+		waitDefaultKeyspaceGroupMembers(re, pdServer, tsoCluster.GetKeyspaceGroupMember())
+		checkMicroserviceTSOAvailable(ctx, re, pdServer)
+		checkKeyspaceTSOAvailable(ctx, re, pdServer, modeSwitchUserKeyspaceName)
+		tsoCluster.Destroy()
+		tsoCluster = nil
+		seedDefaultKeyspaceGroupMembers(ctx, re, pdServer, []endpoint.KeyspaceGroupMember{{
+			Address:  "http://127.0.0.1:1",
+			Priority: mcs.DefaultKeyspaceGroupReplicaPriority,
+		}})
+
+		if tsoStartsBeforeCleanup {
+			pdServer, err = startPDForServiceMode(ctx, tc, pdServer, nil)
+			re.NoError(err)
+			select {
+			case <-cleanupReached:
+			case <-time.After(10 * time.Second):
+				t.Fatal("normal-mode PD did not reach the cleanup commit hook")
+			}
+
+			re.True(pdServer.WaitLeader(), "normal-mode PD did not become ready while mode cleanup was pending")
+			checkPDLeaderAPIAvailable(ctx, re, pdServer)
+			checkPDTSOAvailable(ctx, re, pdServer)
+			checkKeyspaceTSOAvailable(ctx, re, pdServer, modeSwitchUserKeyspaceName)
+		} else {
+			pdServer, err = restartPDForServiceMode(ctx, tc, pdServer, nil)
+			re.NoError(err)
+			waitDefaultKeyspaceGroupMembers(re, pdServer, nil)
+		}
+		if tsoStartsBeforeCleanup {
+			// Create a keyspace while PD is running in normal mode.
+			_, err = pdServer.GetServer().GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+				Name: modeSwitchPDModeKeyspaceName,
+			})
+			re.NoError(err)
+		}
+
+		tsoCluster, err = tests.NewTestTSOCluster(ctx, 1, pdServer.GetAddr())
+		re.NoError(err)
+		if tsoStartsBeforeCleanup {
+			for _, server := range tsoCluster.GetServers() {
+				resp, err := tests.TestDialClient.Get(server.GetAddr() + tsoapi.APIPathPrefix + "/health")
+				re.NoError(err)
+				statusCode := resp.StatusCode
+				re.NoError(resp.Body.Close())
+				re.Equal(http.StatusNotFound, statusCode)
+			}
+			cleanupReleaseOnce.Do(func() {
+				close(cleanupRelease)
+			})
+		}
+		waitTSOServiceReady(re, tsoCluster)
+		checkPDTSOAvailable(ctx, re, pdServer)
+		checkKeyspaceTSOAvailable(ctx, re, pdServer, modeSwitchUserKeyspaceName)
+		waitDefaultKeyspaceGroupMembers(re, pdServer, nil)
+
+		pdServer, err = restartPDForServiceMode(ctx, tc, pdServer, []string{mcs.PDServiceName})
+		re.NoError(err)
+		if tsoStartsBeforeCleanup {
+			checkKeyspaceTSOAvailable(ctx, re, pdServer, modeSwitchPDModeKeyspaceName)
+		}
+	}
+
+	waitDefaultKeyspaceGroupReady(re, pdServer, userKeyspaceID)
+	waitTSOServiceReady(re, tsoCluster)
+	waitDefaultKeyspaceGroupMembers(re, pdServer, tsoCluster.GetKeyspaceGroupMember())
+	checkMicroserviceTSOAvailable(ctx, re, pdServer)
+	checkKeyspaceTSOAvailable(ctx, re, pdServer, modeSwitchUserKeyspaceName)
+}
+
+func restartPDForServiceMode(
+	ctx context.Context,
+	tc *tests.TestCluster,
+	oldServer *tests.TestServer,
+	services []string,
+) (*tests.TestServer, error) {
+	newServer, err := startPDForServiceMode(ctx, tc, oldServer, services)
+	if err != nil {
+		return nil, err
+	}
+	if !newServer.WaitLeader() {
+		return nil, fmt.Errorf("PD server %s did not become ready", newServer.GetConfig().Name)
+	}
+	return newServer, nil
+}
+
+func startPDForServiceMode(
+	ctx context.Context,
+	tc *tests.TestCluster,
+	oldServer *tests.TestServer,
+	services []string,
+) (*tests.TestServer, error) {
+	cfg := oldServer.GetConfig()
+	serverName := cfg.Name
+	if err := oldServer.Stop(); err != nil {
+		return nil, err
+	}
+
+	newServer, err := tests.NewTestServer(ctx, cfg, services)
+	if err != nil {
+		return nil, err
+	}
+	tc.GetServers()[serverName] = newServer
+	if err := newServer.Run(); err != nil {
+		return nil, err
+	}
+	return newServer, nil
+}
+
+func waitDefaultKeyspaceGroupReady(
+	re *require.Assertions,
+	pdServer *tests.TestServer,
+	userKeyspaceID uint32,
+) {
+	testutil.Eventually(re, func() bool {
+		group, err := loadDefaultKeyspaceGroup(pdServer)
+		return err == nil && slices.Contains(group.Keyspaces, userKeyspaceID)
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(100*time.Millisecond))
+}
+
+func seedDefaultKeyspaceGroupMembers(
+	ctx context.Context,
+	re *require.Assertions,
+	pdServer *tests.TestServer,
+	members []endpoint.KeyspaceGroupMember,
+) {
+	store := pdServer.GetServer().GetStorage()
+	re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error {
+		group, err := store.LoadKeyspaceGroup(txn, constant.DefaultKeyspaceGroupID)
+		if err != nil {
+			return err
+		}
+		group.Members = members
+		return store.SaveKeyspaceGroup(txn, group)
+	}))
+}
+
+func waitDefaultKeyspaceGroupMembers(
+	re *require.Assertions,
+	pdServer *tests.TestServer,
+	expected []endpoint.KeyspaceGroupMember,
+) {
+	testutil.Eventually(re, func() bool {
+		group, err := loadDefaultKeyspaceGroup(pdServer)
+		if err != nil || len(group.Members) != len(expected) {
+			return false
+		}
+		for _, expectedMember := range expected {
+			if !slices.ContainsFunc(group.Members, func(member endpoint.KeyspaceGroupMember) bool {
+				return member.IsAddressEquivalent(expectedMember.Address)
+			}) {
+				return false
+			}
+		}
+		return true
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(100*time.Millisecond))
+}
+
+func loadDefaultKeyspaceGroup(pdServer *tests.TestServer) (*endpoint.KeyspaceGroup, error) {
+	groups, err := pdServer.GetServer().GetStorage().LoadKeyspaceGroups(constant.DefaultKeyspaceGroupID, 1)
+	if err != nil {
+		return nil, err
+	}
+	if len(groups) != 1 || groups[0] == nil || groups[0].ID != constant.DefaultKeyspaceGroupID {
+		return nil, fmt.Errorf("default keyspace group %d does not exist", constant.DefaultKeyspaceGroupID)
+	}
+	return groups[0], nil
+}
+
+func waitTSOServiceReady(re *require.Assertions, tsoCluster *tests.TestTSOCluster) {
+	primary := tsoCluster.WaitForDefaultPrimaryServing(re)
+	testutil.Eventually(re, func() bool {
+		resp, err := tests.TestDialClient.Get(primary.GetAddr() + tsoapi.APIPathPrefix + "/health")
+		if err != nil {
+			return false
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode == http.StatusOK
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(100*time.Millisecond))
+}
+
+func checkPDTSOAvailable(ctx context.Context, re *require.Assertions, pdServer *tests.TestServer) {
+	cli := utils.SetupClientWithAPIContext(ctx, re, pd.NewAPIContextV1(), []string{pdServer.GetAddr()})
+	defer cli.Close()
+	physical, logical, err := cli.GetTS(ctx)
+	re.NoError(err)
+	re.NotZero(tsoutil.ComposeTS(physical, logical))
+}
+
+func checkPDLeaderAPIAvailable(ctx context.Context, re *require.Assertions, pdServer *tests.TestServer) {
+	cli := utils.SetupClientWithAPIContext(ctx, re, pd.NewAPIContextV1(), []string{pdServer.GetAddr()})
+	defer cli.Close()
+	_, err := cli.GetAllStores(ctx)
+	re.NoError(err)
+}
+
+func checkMicroserviceTSOAvailable(ctx context.Context, re *require.Assertions, pdServer *tests.TestServer) {
+	addr := strings.TrimPrefix(pdServer.GetAddr(), "http://")
+	conn, err := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials())) //nolint:staticcheck
+	re.NoError(err)
+	defer conn.Close()
+
+	resp, err := pdpb.NewPDClient(conn).GetClusterInfo(ctx, &pdpb.GetClusterInfoRequest{})
+	re.NoError(err)
+	re.Equal([]pdpb.ServiceMode{pdpb.ServiceMode_API_SVC_MODE}, resp.GetServiceModes())
+	re.NotEmpty(resp.GetTsoUrls())
+
+	checkPDTSOAvailable(ctx, re, pdServer)
+}
+
+func checkKeyspaceTSOAvailable(
+	ctx context.Context,
+	re *require.Assertions,
+	pdServer *tests.TestServer,
+	keyspaceName string,
+) {
+	cli := utils.SetupClientWithAPIContext(
+		ctx,
+		re,
+		pd.NewAPIContextV2(keyspaceName),
+		[]string{pdServer.GetAddr()},
+	)
+	defer cli.Close()
+	physical, logical, err := cli.GetTS(ctx)
+	re.NoError(err)
+	re.NotZero(tsoutil.ComposeTS(physical, logical))
 }
 
 func checkTSOMonotonic(ctx context.Context, pdClient pd.Client, globalLastTS *uint64, count int) error {

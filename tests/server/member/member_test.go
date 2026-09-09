@@ -21,11 +21,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/goleak"
 
 	"github.com/pingcap/errors"
@@ -425,4 +427,119 @@ func sendRequest(re *require.Assertions, wg *sync.WaitGroup, done <-chan bool, a
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+func TestElectionClientStaysOnLocalMember(t *testing.T) {
+	re := require.New(t)
+	// Speed up endpoint discovery.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick"))
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 3)
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+
+	for name, svr := range cluster.GetServers() {
+		s := svr.GetServer()
+		localURLs := strings.Split(s.GetConfig().AdvertiseClientUrls, ",")
+		// Confirm discovery is active before checking the election client.
+		testutil.Eventually(re, func() bool {
+			return len(s.GetClient().Endpoints()) > len(localURLs)
+		})
+		re.Equal(localURLs, s.GetMember().Client().Endpoints(), name)
+	}
+}
+
+func TestPDLeaderStepsDownWhenLeaseIsLostWithStaleEtcdLeaderView(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 3)
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+
+	oldLeaderName := cluster.WaitLeader()
+	re.NotEmpty(oldLeaderName)
+	oldLeaderServer := cluster.GetServer(oldLeaderName)
+	oldLeader := oldLeaderServer.GetServer()
+	var newEtcdLeaderServer *tests.TestServer
+	for name, svr := range cluster.GetServers() {
+		if name != oldLeaderName {
+			newEtcdLeaderServer = svr
+			break
+		}
+	}
+	re.NotNil(newEtcdLeaderServer)
+
+	// Keep the colocation check stale so lease loss is the only step-down signal.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/staleEtcdLeaderView",
+		fmt.Sprintf("return(\"%s\")", oldLeaderName)))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/staleEtcdLeaderView"))
+	}()
+	re.Equal(oldLeader.GetMember().ID(), oldLeader.GetMember().GetEtcdLeader())
+
+	// Move etcd leadership while the old member still observes itself as leader.
+	testutil.Eventually(re, func() bool {
+		return oldLeaderServer.MoveEtcdLeader(oldLeaderServer.GetServerID(), newEtcdLeaderServer.GetServerID()) == nil
+	})
+
+	// Negative control: a stale view alone must not end a term with a valid lease.
+	time.Sleep(2 * time.Second)
+	re.True(oldLeader.IsServing())
+	re.Equal(oldLeaderName, cluster.GetLeader())
+
+	lease := oldLeader.GetMember().GetLeadership().GetLease()
+	re.NotNil(lease)
+	leaseID := lease.GetID()
+	re.NotEqual(clientv3.NoLease, leaseID)
+	_, err = newEtcdLeaderServer.GetServer().GetClient().Revoke(ctx, leaseID)
+	re.NoError(err)
+
+	testutil.Eventually(re, func() bool {
+		return !oldLeader.IsServing() && oldLeader.GetRaftCluster() == nil
+	}, testutil.WithWaitFor(30*time.Second))
+	re.NotEqual(oldLeaderName, waitLeaderChange(re, cluster, oldLeaderName))
+}
+
+func TestPDLeaderStepsDownWhenRenewalsFail(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 3)
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+
+	oldLeaderName := cluster.WaitLeader()
+	re.NotEmpty(oldLeaderName)
+	oldLeaderServer := cluster.GetServer(oldLeaderName)
+	oldLeader := oldLeaderServer.GetServer()
+
+	// Disable the colocation signal.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/staleEtcdLeaderView",
+		fmt.Sprintf("return(\"%s\")", oldLeaderName)))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/staleEtcdLeaderView"))
+	}()
+	re.True(oldLeader.IsServing())
+
+	// Keep the etcd lease alive while only the old leader observes renewal failures.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/keepAliveFailed",
+		fmt.Sprintf("return(\"leader election@%s\")", oldLeaderName)))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/keepAliveFailed"))
+	}()
+
+	testutil.Eventually(re, func() bool {
+		return !oldLeader.IsServing()
+	}, testutil.WithWaitFor(30*time.Second))
+	re.NotEqual(oldLeaderName, waitLeaderChange(re, cluster, oldLeaderName))
 }

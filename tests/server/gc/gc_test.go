@@ -19,6 +19,7 @@ import (
 	"math"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -165,6 +166,37 @@ func TestGCOperations(t *testing.T) {
 	defer conn.Close()
 	clusterID := leaderServer.GetClusterID()
 	header := testutil.NewRequestHeader(clusterID)
+
+	// This hook is reached only after a successful combined state and global
+	// barrier read. It proves that the default RPC remains on its no-global-read
+	// path while a request that explicitly opts in executes the combined read.
+	var combinedReadCount atomic.Int64
+	combinedReadFailpoint := "github.com/tikv/pd/pkg/gc/" +
+		"getGCStateWithGlobalGCBarriersAfterRead"
+	re.NoError(failpoint.EnableCall(combinedReadFailpoint, func() {
+		combinedReadCount.Add(1)
+	}))
+	defer func() {
+		re.NoError(failpoint.Disable(combinedReadFailpoint))
+	}()
+
+	defaultResp, err := grpcPDClient.GetGCState(ctx, &pdpb.GetGCStateRequest{
+		Header:        header,
+		KeyspaceScope: makeKeyspaceScope(constant.NullKeyspaceID),
+	})
+	re.NoError(err)
+	re.Nil(defaultResp.GetGlobalGcBarriers())
+	re.Zero(combinedReadCount.Load())
+
+	optedInResp, err := grpcPDClient.GetGCState(ctx, &pdpb.GetGCStateRequest{
+		Header:                  header,
+		KeyspaceScope:           makeKeyspaceScope(constant.NullKeyspaceID),
+		IncludeGlobalGcBarriers: true,
+	})
+	re.NoError(err)
+	re.NotNil(optedInResp.GetGlobalGcBarriers())
+	re.Empty(optedInResp.GetGlobalGcBarriers().GetBarriers())
+	re.Equal(int64(1), combinedReadCount.Load())
 
 	testInKeyspace := func(keyspaceID uint32) {
 		{
@@ -435,6 +467,87 @@ func TestGCOperations(t *testing.T) {
 		re.Equal(math.MaxInt64, int(resp.GetNewBarrierInfo().GetTtlSeconds()))
 	}
 
+	for _, keyspaceID := range []uint32{constant.NullKeyspaceID, ks1.GetId()} {
+		resp, err := grpcPDClient.GetGCState(ctx, &pdpb.GetGCStateRequest{
+			Header:                  header,
+			KeyspaceScope:           makeKeyspaceScope(keyspaceID),
+			ExcludeGcBarriers:       true,
+			IncludeGlobalGcBarriers: true,
+		})
+		re.NoError(err)
+		re.Len(resp.GetGlobalGcBarriers().GetBarriers(), 2)
+		re.Empty(resp.GetGcState().GetGcBarriers())
+
+		barriers := append([]*pdpb.GlobalGCBarrierInfo(nil), resp.GetGlobalGcBarriers().GetBarriers()...)
+		slices.SortFunc(barriers, func(a, b *pdpb.GlobalGCBarrierInfo) int {
+			if a.GetBarrierId() < b.GetBarrierId() {
+				return -1
+			}
+			if a.GetBarrierId() > b.GetBarrierId() {
+				return 1
+			}
+			return 0
+		})
+		re.Equal("b1", barriers[0].GetBarrierId())
+		re.Equal(uint64(20), barriers[0].GetBarrierTs())
+		re.GreaterOrEqual(barriers[0].GetTtlSeconds(), int64(3595))
+		re.LessOrEqual(barriers[0].GetTtlSeconds(), int64(3600))
+		re.Equal("b2", barriers[1].GetBarrierId())
+		re.Equal(uint64(24), barriers[1].GetBarrierTs())
+		re.Equal(int64(math.MaxInt64), barriers[1].GetTtlSeconds())
+	}
+
+	localObserver, err := grpcPDClient.SetGCBarrier(ctx, &pdpb.SetGCBarrierRequest{
+		Header:        header,
+		KeyspaceScope: makeKeyspaceScope(constant.NullKeyspaceID),
+		BarrierId:     "local-observer",
+		BarrierTs:     26,
+		TtlSeconds:    math.MaxInt64,
+	})
+	re.NoError(err)
+	re.Nil(localObserver.GetHeader().GetError())
+	localAndGlobalResp, err := grpcPDClient.GetGCState(ctx, &pdpb.GetGCStateRequest{
+		Header:                  header,
+		KeyspaceScope:           makeKeyspaceScope(constant.NullKeyspaceID),
+		IncludeGlobalGcBarriers: true,
+	})
+	re.NoError(err)
+	re.Len(localAndGlobalResp.GetGlobalGcBarriers().GetBarriers(), 2)
+	re.Len(localAndGlobalResp.GetGcState().GetGcBarriers(), 1)
+	re.Equal("local-observer", localAndGlobalResp.GetGcState().GetGcBarriers()[0].GetBarrierId())
+
+	_, err = leaderServer.GetServer().GetGCStateManager().SetGlobalGCBarrier(
+		ctx,
+		"expired",
+		25,
+		time.Second,
+		time.Now().Add(-2*time.Second),
+	)
+	re.NoError(err)
+	expiredResp, err := grpcPDClient.GetGCState(ctx, &pdpb.GetGCStateRequest{
+		Header:                  header,
+		KeyspaceScope:           makeKeyspaceScope(constant.NullKeyspaceID),
+		ExcludeGcBarriers:       true,
+		IncludeGlobalGcBarriers: true,
+	})
+	re.NoError(err)
+	barriersWithExpired := append([]*pdpb.GlobalGCBarrierInfo(nil), expiredResp.GetGlobalGcBarriers().GetBarriers()...)
+	slices.SortFunc(barriersWithExpired, func(a, b *pdpb.GlobalGCBarrierInfo) int {
+		if a.GetBarrierId() < b.GetBarrierId() {
+			return -1
+		}
+		if a.GetBarrierId() > b.GetBarrierId() {
+			return 1
+		}
+		return 0
+	})
+	re.Len(barriersWithExpired, 3)
+	re.Equal("b1", barriersWithExpired[0].GetBarrierId())
+	re.Equal("b2", barriersWithExpired[1].GetBarrierId())
+	re.Equal("expired", barriersWithExpired[2].GetBarrierId())
+	re.Equal(uint64(25), barriersWithExpired[2].GetBarrierTs())
+	re.Zero(barriersWithExpired[2].GetTtlSeconds())
+
 	{
 		req := &pdpb.GetAllKeyspacesGCStatesRequest{
 			Header:                  header,
@@ -510,6 +623,63 @@ func TestGCOperations(t *testing.T) {
 		re.Equal(uint64(20), resp.GetOldTxnSafePoint())
 		re.Contains(resp.GetBlockerDescription(), "b2")
 	}
+}
+
+func TestGetGCStateGlobalBarriersReturnsReadSnapshot(t *testing.T) {
+	re := require.New(t)
+	cluster, req, cleanup := newGCStateLeaderTransitionCluster(t)
+	defer cleanup()
+
+	leaderServer := cluster.GetLeaderServer()
+	re.NotNil(leaderServer)
+	req.IncludeGlobalGcBarriers = true
+	manager := leaderServer.GetServer().GetGCStateManager()
+	_, err := manager.SetGlobalGCBarrier(
+		context.Background(),
+		"snapshot",
+		100,
+		time.Duration(math.MaxInt64),
+		time.Now(),
+	)
+	re.NoError(err)
+
+	point := enableBlockingFailpoint(re, postGetGCStateCallFailpoint)
+	defer point.releaseAndDisable(re)
+
+	type result struct {
+		resp *pdpb.GetGCStateResponse
+		err  error
+	}
+	resultCh := make(chan result, 1)
+	go func() {
+		resp, err := getGCStateFromAddr(context.Background(), re, leaderServer.GetAddr(), req)
+		resultCh <- result{resp: resp, err: err}
+	}()
+
+	point.wait(re, "after the combined GetGCState read and before response conversion")
+	_, err = manager.SetGlobalGCBarrier(
+		context.Background(),
+		"snapshot",
+		200,
+		time.Duration(math.MaxInt64),
+		time.Now(),
+	)
+	re.NoError(err)
+
+	point.releaseAndDisable(re)
+	select {
+	case res := <-resultCh:
+		re.NoError(res.err)
+		re.Len(res.resp.GetGlobalGcBarriers().GetBarriers(), 1)
+		re.Equal(uint64(100), res.resp.GetGlobalGcBarriers().GetBarriers()[0].GetBarrierTs())
+	case <-time.After(5 * time.Second):
+		re.FailNow("GetGCState did not return after releasing the failpoint")
+	}
+
+	freshResp, err := getGCStateFromAddr(context.Background(), re, leaderServer.GetAddr(), req)
+	re.NoError(err)
+	re.Len(freshResp.GetGlobalGcBarriers().GetBarriers(), 1)
+	re.Equal(uint64(200), freshResp.GetGlobalGcBarriers().GetBarriers()[0].GetBarrierTs())
 }
 
 func TestGetGCStateRejectsOldLeaderAfterTransfer(t *testing.T) {

@@ -190,6 +190,11 @@ func (suite *tsoConsistencyTestSuite) TestFallbackTSOConsistency() {
 	suite.SetupSuite()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fallBackSync"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fallBackUpdate"))
+	defer func() {
+		// Do not let the simulated future TSO affect the following test.
+		suite.TearDownSuite()
+		suite.SetupSuite()
+	}()
 
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()

@@ -44,8 +44,8 @@ func TestLeadership(t *testing.T) {
 	defer clean()
 
 	// Campaign the same leadership
-	leadership1 := NewLeadership(client, "/test_leader", "test_leader_1")
-	leadership2 := NewLeadership(client, "/test_leader", "test_leader_2")
+	leadership1 := NewLeadership(client, "/test_leader", "test_leader_1", "test_leader_1")
+	leadership2 := NewLeadership(client, "/test_leader", "test_leader_2", "test_leader_2")
 
 	// leadership1 starts first and get the leadership
 	err := leadership1.Campaign(defaultLeaseTimeout, "test_leader_1")
@@ -122,8 +122,8 @@ func TestDeleteLeaderKeyByRevisionDoesNotDeleteChangedLeader(t *testing.T) {
 	defer clean()
 
 	leaderKey := "/test_leader"
-	leadership1 := NewLeadership(client, leaderKey, "test_leader_1")
-	leadership2 := NewLeadership(client, leaderKey, "test_leader_2")
+	leadership1 := NewLeadership(client, leaderKey, "test_leader_1", "test_leader_1")
+	leadership2 := NewLeadership(client, leaderKey, "test_leader_2", "test_leader_2")
 
 	err := leadership1.Campaign(defaultLeaseTimeout, "test_leader_1")
 	re.NoError(err)
@@ -260,8 +260,8 @@ func checkExitWatch(t *testing.T, leaderKey string, injectFunc func(server *embe
 	re.NoError(err)
 	defer client2.Close()
 
-	leadership1 := NewLeadership(client1, leaderKey, "test_leader_1")
-	leadership2 := NewLeadership(client2, leaderKey, "test_leader_2")
+	leadership1 := NewLeadership(client1, leaderKey, "test_leader_1", "test_leader_1")
+	leadership2 := NewLeadership(client2, leaderKey, "test_leader_2", "test_leader_2")
 	err = leadership1.Campaign(defaultLeaseTimeout, "test_leader_1")
 	re.NoError(err)
 	resp, err := client2.Get(context.Background(), leaderKey)
@@ -297,8 +297,8 @@ func TestRequestProgress(t *testing.T) {
 		defer client2.Close()
 
 		leaderKey := "/test_leader"
-		leadership1 := NewLeadership(client1, leaderKey, "test_leader_1")
-		leadership2 := NewLeadership(client2, leaderKey, "test_leader_2")
+		leadership1 := NewLeadership(client1, leaderKey, "test_leader_1", "test_leader_1")
+		leadership2 := NewLeadership(client2, leaderKey, "test_leader_2", "test_leader_2")
 		err = leadership1.Campaign(defaultLeaseTimeout, "test_leader_1")
 		re.NoError(err)
 
@@ -336,7 +336,7 @@ func TestCampaignTimes(t *testing.T) {
 	re := require.New(t)
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
-	leadership := NewLeadership(client, "test_leader", "test_leader")
+	leadership := NewLeadership(client, "test_leader", "test_leader", "test_leader")
 
 	// all the campaign times are within the timeout.
 	campaignTimesRecordTimeout = 10 * time.Second

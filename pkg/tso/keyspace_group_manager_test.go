@@ -85,6 +85,67 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
 }
 
+func TestFinishSplitKeyspaceGroupDoesNotBlockStateReads(t *testing.T) {
+	re := require.New(t)
+
+	const (
+		groupID    = uint32(1)
+		keyspaceID = uint32(100)
+	)
+	splitGroup := &endpoint.KeyspaceGroup{
+		ID:                  groupID,
+		Keyspaces:           []uint32{keyspaceID},
+		KeyspaceLookupTable: map[uint32]struct{}{keyspaceID: {}},
+		SplitState: &endpoint.SplitState{
+			SplitSource: constant.DefaultKeyspaceGroupID,
+		},
+	}
+	newerSplitGroup := *splitGroup
+	newerSplitGroup.SplitState = &endpoint.SplitState{SplitSource: groupID + 1}
+
+	var kgm *KeyspaceGroupManager
+	client := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			re.Equal(http.MethodDelete, req.Method)
+			re.Equal("/pd/api/v2/tso/keyspace-groups/1/split", req.URL.Path)
+
+			re.True(kgm.TryRLock(), "state lock should remain available while the finish request is in flight")
+			kgm.RUnlock()
+			_, _, currentGroupID, _, err := kgm.FindGroupByKeyspaceID(keyspaceID)
+			re.NoError(err)
+			re.Equal(groupID, currentGroupID)
+
+			kgm.Lock()
+			kgm.kgs[groupID] = &newerSplitGroup
+			kgm.Unlock()
+			return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody}, nil
+		}),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	kgm = &KeyspaceGroupManager{
+		ctx:        ctx,
+		httpClient: client,
+		cfg: &TestServiceConfig{
+			BackendEndpoints: "http://backend.test",
+		},
+		metrics: newKeyspaceGroupMetrics(),
+	}
+	kgm.initialize()
+	kgm.kgs[groupID] = splitGroup
+	kgm.allocators[groupID] = &Allocator{}
+	kgm.keyspaceLookupTable[keyspaceID] = groupID
+
+	re.NoError(kgm.finishSplitKeyspaceGroup(groupID))
+
+	kgm.RLock()
+	currentGroup := kgm.kgs[groupID]
+	kgm.RUnlock()
+	re.Same(&newerSplitGroup, currentGroup)
+	re.Equal(groupID+1, currentGroup.SplitSource())
+}
+
 func (suite *keyspaceGroupManagerTestSuite) SetupSuite() {
 	t := suite.T()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
@@ -208,6 +269,34 @@ func (suite *keyspaceGroupManagerTestSuite) TestLoadKeyspaceGroupsAssignment() {
 	// In this case, the manager should only load/serve the first MaxKeyspaceGroupCountInUse keyspace
 	// groups and ignore the rest.
 	suite.runTestLoadKeyspaceGroupsAssignment(re, maxCountInUse+1, 0, 10)
+}
+
+func (suite *keyspaceGroupManagerTestSuite) TestInitialLoadSetsModRevision() {
+	re := suite.Require()
+	mgr := suite.newUniqueKeyspaceGroupManager(1)
+	defer mgr.Close()
+
+	const (
+		groupID    = uint32(1)
+		keyspaceID = uint32(101)
+	)
+	re.NoError(addKeyspaceGroupAssignment(
+		suite.ctx,
+		suite.etcdClient,
+		groupID,
+		[]string{mgr.tsoServiceID.ServiceAddr},
+		[]int{mcs.DefaultKeyspaceGroupReplicaPriority},
+		[]uint32{keyspaceID},
+	))
+	resp, err := suite.etcdClient.Get(suite.ctx, keypath.KeyspaceGroupIDPath(groupID))
+	re.NoError(err)
+	re.Len(resp.Kvs, 1)
+
+	re.NoError(mgr.Initialize())
+	_, _, loadedGroupID, loadedRevision, err := mgr.FindGroupByKeyspaceID(keyspaceID)
+	re.NoError(err)
+	re.Equal(groupID, loadedGroupID)
+	re.Equal(uint64(resp.Kvs[0].ModRevision), loadedRevision)
 }
 
 // TestLoadWithDifferentBatchSize tests the loading of the keyspace group assignment with the different batch size.

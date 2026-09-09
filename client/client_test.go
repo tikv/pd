@@ -26,6 +26,7 @@ import (
 	"go.uber.org/goleak"
 
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
@@ -102,6 +103,56 @@ func TestSaturatingStdDurationFromSeconds(t *testing.T) {
 	re.Equal(9223372036*time.Second, saturatingStdDurationFromSeconds(9223372036))
 	re.Equal(time.Duration(math.MaxInt64), saturatingStdDurationFromSeconds(9223372037))
 	re.Equal(time.Duration(math.MaxInt64), saturatingStdDurationFromSeconds(math.MaxInt64))
+}
+
+func TestPBToGCStateWithGlobalGCBarriers(t *testing.T) {
+	reqStartTime := time.Now()
+	base := &pdpb.GCState{
+		TxnSafePoint: 10,
+		GcSafePoint:  9,
+	}
+
+	absent := pbToGCStateWithGlobalGCBarriers(
+		base,
+		nil,
+		reqStartTime,
+		true,
+	)
+	require.False(t, absent.HasGlobalGCBarriers())
+	_, err := absent.GetGlobalGCBarriers()
+	require.Error(t, err)
+
+	empty := pbToGCStateWithGlobalGCBarriers(
+		base,
+		&pdpb.GlobalGCBarriersInfo{},
+		reqStartTime,
+		true,
+	)
+	require.True(t, empty.HasGlobalGCBarriers())
+	barriers, err := empty.GetGlobalGCBarriers()
+	require.NoError(t, err)
+	require.Empty(t, barriers)
+
+	nonEmpty := pbToGCStateWithGlobalGCBarriers(
+		base,
+		&pdpb.GlobalGCBarriersInfo{
+			Barriers: []*pdpb.GlobalGCBarrierInfo{
+				{
+					BarrierId:  "backup",
+					BarrierTs:  20,
+					TtlSeconds: 60,
+				},
+			},
+		},
+		reqStartTime,
+		true,
+	)
+	require.True(t, nonEmpty.HasGlobalGCBarriers())
+	barriers, err = nonEmpty.GetGlobalGCBarriers()
+	require.NoError(t, err)
+	require.Equal(t, "backup", barriers[0].BarrierID)
+	require.Equal(t, uint64(20), barriers[0].BarrierTS)
+	require.Equal(t, time.Minute, barriers[0].TTL)
 }
 
 func TestIsKeyspaceUsingKeyspaceLevelGC(t *testing.T) {
