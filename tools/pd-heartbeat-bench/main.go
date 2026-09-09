@@ -548,9 +548,7 @@ func runHTTPServer(cfg *config.Config, options *config.Options) {
 		c.IndentedJSON(http.StatusOK, "Successfully collect metrics")
 	})
 
-	if err := engine.Run(cfg.StatusAddr); err != nil {
-		log.Fatal("run status server failed", zap.Error(err))
-	}
+	_ = engine.Run(cfg.StatusAddr)
 }
 
 func loadTLSConfig(cfg *config.Config) *tls.Config {

@@ -122,9 +122,7 @@ func main() {
 	pdClis := make([]pd.Client, cfg.Client)
 	for i := range cfg.Client {
 		pdClis[i] = newPDClient(ctx, cfg)
-		if err := pdClis[i].UpdateOption(opt.EnableFollowerHandle, true); err != nil {
-			log.Fatal("enable follower handle failed", zap.Error(err))
-		}
+		_ = pdClis[i].UpdateOption(opt.EnableFollowerHandle, true)
 	}
 	etcdClis := make([]*clientv3.Client, cfg.Client)
 	for i := range cfg.Client {
@@ -148,9 +146,7 @@ func main() {
 		if len(name) == 0 {
 			continue
 		}
-		if err := coordinator.SetHTTPCase(name, cfg); err != nil {
-			log.Fatal("set HTTP case failed", zap.String("case", name), zap.Error(err))
-		}
+		_ = coordinator.SetHTTPCase(name, cfg)
 	}
 	gcaseStr := strings.Split(gRPCCases, ",")
 	for _, str := range gcaseStr {
@@ -158,9 +154,7 @@ func main() {
 		if len(name) == 0 {
 			continue
 		}
-		if err := coordinator.SetGRPCCase(name, cfg); err != nil {
-			log.Fatal("set gRPC case failed", zap.String("case", name), zap.Error(err))
-		}
+		_ = coordinator.SetGRPCCase(name, cfg)
 	}
 	cfg.InitCoordinator(coordinator)
 
@@ -387,9 +381,7 @@ func runHTTPServer(cfg *config.Config, co *cases.Coordinator) {
 		}
 		c.IndentedJSON(http.StatusOK, cfg)
 	})
-	if err := engine.Run(cfg.StatusAddr); err != nil {
-		log.Fatal("run status server failed", zap.Error(err))
-	}
+	_ = engine.Run(cfg.StatusAddr)
 }
 
 const (
