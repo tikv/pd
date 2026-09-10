@@ -262,9 +262,15 @@ func (p *Participant) WatchLeader(ctx context.Context, primary participant, revi
 
 // Resign is used to reset the participant's current leadership.
 // Basically it will reset the primary lease and unset primary info.
+//
+// unsetPrimary runs first for the same reason as in Member.Resign: it is a plain
+// in-memory store, while Reset can block for an unbounded time on a stalled
+// volume. The microservice redirector gates purely on IsServing and so has no
+// equivalent of the v1 self-serve branch, but keeping the two implementations in
+// the same order is what stops the difference from becoming load-bearing.
 func (p *Participant) Resign() {
-	p.leadership.Reset()
 	p.unsetPrimary()
+	p.leadership.Reset()
 }
 
 // isSamePrimary checks whether a server is the primary itself.
