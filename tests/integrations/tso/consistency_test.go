@@ -147,51 +147,62 @@ func (suite *tsoConsistencyTestSuite) request(ctx context.Context, count uint32)
 
 func (suite *tsoConsistencyTestSuite) TestRequestTSOConcurrently() {
 	re := suite.Require()
-	suite.requestTSOConcurrently()
+	lastTS := suite.requestTSOConcurrently(&pdpb.Timestamp{})
 	// Test TSO after the leader change
-	re.NoError(suite.pdLeaderServer.ResignLeader())
+	oldLeaderName := suite.pdLeaderServer.GetConfig().Name
+	suite.pdLeaderServer.GetServer().GetMember().Resign()
 	leaderName := suite.cluster.WaitLeader()
 	re.NotEmpty(leaderName)
 	leader := suite.cluster.GetServer(leaderName)
 	suite.pdLeaderServer = leader
 	if suite.legacy {
 		// The PD leader is published before its embedded TSO allocator becomes
-		// ready. Wait for that separate readiness condition, then reconnect the
-		// direct test client to the new leader before checking TSO consistency.
+		// ready. Wait for that separate readiness condition before checking TSO
+		// consistency. A direct gRPC client has no leader discovery, so reconnect
+		// it only when another PD becomes the leader.
 		testutil.Eventually(re, func() bool {
 			return leader.GetServer().GetTSOAllocator().IsInitialize()
 		})
-		re.NoError(suite.conn.Close())
-		suite.pdClient, suite.conn = testutil.MustNewGrpcClient(re, leader.GetAddr())
+		if leaderName != oldLeaderName {
+			re.NoError(suite.conn.Close())
+			suite.pdClient, suite.conn = testutil.MustNewGrpcClient(re, leader.GetAddr())
+		}
 	}
-	suite.requestTSOConcurrently()
+	suite.requestTSOConcurrently(lastTS)
 }
 
-func (suite *tsoConsistencyTestSuite) requestTSOConcurrently() {
+func (suite *tsoConsistencyTestSuite) requestTSOConcurrently(lowerBound *pdpb.Timestamp) *pdpb.Timestamp {
 	re := suite.Require()
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
 
-	var wg sync.WaitGroup
+	var (
+		wg      sync.WaitGroup
+		maxTS   = lowerBound
+		maxTSMu sync.Mutex
+	)
 	wg.Add(tsoRequestConcurrencyNumber)
 	for range tsoRequestConcurrencyNumber {
 		go func() {
 			defer wg.Done()
-			last := &pdpb.Timestamp{
-				Physical: 0,
-				Logical:  0,
-			}
+			last := lowerBound
 			var ts *pdpb.Timestamp
 			for range tsoRequestRound {
 				ts = suite.request(ctx, tsoCount)
 				// Check whether the TSO fallbacks
 				re.Equal(1, tsoutil.CompareTimestamp(ts, last))
 				last = ts
+				maxTSMu.Lock()
+				if tsoutil.CompareTimestamp(ts, maxTS) > 0 {
+					maxTS = ts
+				}
+				maxTSMu.Unlock()
 				time.Sleep(10 * time.Millisecond)
 			}
 		}()
 	}
 	wg.Wait()
+	return maxTS
 }
 
 func (suite *tsoConsistencyTestSuite) TestFallbackTSOConsistency() {
