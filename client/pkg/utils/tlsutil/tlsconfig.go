@@ -123,6 +123,7 @@ func (info tlsInfo) baseConfig() (*tls.Config, error) {
 	}
 
 	if len(info.allowedCNs) > 0 {
+		// #nosec G123 -- Preserve the existing TLS session resumption behavior.
 		cfg.VerifyPeerCertificate = func(_ [][]byte, verifiedChains [][]*x509.Certificate) error {
 			for _, chains := range verifiedChains {
 				if len(chains) != 0 {

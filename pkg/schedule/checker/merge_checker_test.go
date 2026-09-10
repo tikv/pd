@@ -36,6 +36,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -218,7 +219,7 @@ func (suite *mergeCheckerTestSuite) TestBasic() {
 		ID:       "test",
 		Labels:   []labeler.RegionLabel{{Key: mergeOptionLabel, Value: mergeOptionValueDeny}},
 		RuleType: labeler.KeyRange,
-		Data:     makeKeyRanges("", "74"),
+		Data:     keyutil.BuildKeyRangeMaps("", "74"),
 	})
 	re.NoError(err)
 	ops = suite.mc.Check(suite.regions[0])
@@ -565,14 +566,6 @@ func (suite *mergeCheckerTestSuite) TestCache() {
 	time.Sleep(time.Second)
 	ops = suite.mc.Check(suite.regions[1])
 	re.NotNil(ops)
-}
-
-func makeKeyRanges(keys ...string) []any {
-	var res []any
-	for i := 0; i < len(keys); i += 2 {
-		res = append(res, map[string]any{"start_key": keys[i], "end_key": keys[i+1]})
-	}
-	return res
 }
 
 func newRegionInfo(id uint64, startKey, endKey string, size, keys int64, leader []uint64, peers ...[]uint64) *core.RegionInfo {

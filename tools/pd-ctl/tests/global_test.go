@@ -51,7 +51,7 @@ func TestSendAndGetComponent(t *testing.T) {
 		mux.HandleFunc("/pd/api/v1/stores", func(w http.ResponseWriter, r *http.Request) {
 			callerID := apiutil.GetCallerIDOnHTTP(r)
 			re.Equal(command.PDControlCallerID, callerID)
-			fmt.Fprint(w, callerID)
+			fmt.Fprint(w, command.PDControlCallerID)
 		})
 		info := apiutil.APIServiceGroup{
 			IsCore: true,

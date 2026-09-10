@@ -189,6 +189,7 @@ func checkRules(t *testing.T, rules []*Rule, expect [][2]string) {
 	re := require.New(t)
 	re.Len(rules, len(expect))
 	for i := range rules {
+		// #nosec G602 -- require.Len above guarantees an expected key for every rule.
 		re.Equal(expect[i], rules[i].Key())
 	}
 }

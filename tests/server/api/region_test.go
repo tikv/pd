@@ -516,15 +516,13 @@ func (suite *regionTestSuite) checkStoreRegions(cluster *tests.TestCluster) {
 		re.Equal(regionIDs[i], r.ID)
 	}
 
-	regionIDs = []uint64{4}
 	url = fmt.Sprintf("%s/regions/store/%d", urlPrefix, 2)
 	r5 := &response.RegionsInfo{}
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, url, r5)
 	re.NoError(err)
-	re.Len(regionIDs, r5.Count)
-	for i, r := range r5.Regions {
-		re.Equal(regionIDs[i], r.ID)
-	}
+	re.Equal(1, r5.Count)
+	re.Len(r5.Regions, 1)
+	re.Equal(uint64(4), r5.Regions[0].ID)
 
 	regionIDs = []uint64{}
 	url = fmt.Sprintf("%s/regions/store/%d", urlPrefix, 3)
