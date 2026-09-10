@@ -38,6 +38,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/goleak"
+	"google.golang.org/grpc"
 
 	"github.com/pingcap/failpoint"
 
@@ -518,6 +519,65 @@ func (suite *loopWatcherTestSuite) TestInitialLoadFailsWhenContextCanceled() {
 	re.Error(watcher.WaitLoad())
 }
 
+func (suite *loopWatcherTestSuite) TestWatcherLoadCancelsInFlightRequest() {
+	re := suite.Require()
+	requestStarted := make(chan struct{}, 1)
+	client, err := CreateEtcdClient(nil, suite.config.ListenClientUrls, TestEtcdClientPurpose, false,
+		func(config *clientv3.Config) {
+			config.DialOptions = append(config.DialOptions, grpc.WithChainUnaryInterceptor(
+				func(
+					ctx context.Context, method string, req, reply any,
+					cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption,
+				) error {
+					if method != "/etcdserverpb.KV/Range" {
+						return invoker(ctx, method, req, reply, cc, opts...)
+					}
+					select {
+					case requestStarted <- struct{}{}:
+					default:
+					}
+					<-ctx.Done()
+					return ctx.Err()
+				},
+			))
+		})
+	re.NoError(err)
+	defer client.Close()
+
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+	watcher := NewLoopWatcher(
+		ctx,
+		&suite.wg,
+		client,
+		"test",
+		"TestWatcherLoadCancelsInFlightRequest",
+		func([]*clientv3.Event) error { return nil },
+		func(*mvccpb.KeyValue) error { return nil },
+		func(*mvccpb.KeyValue) error { return nil },
+		func([]*clientv3.Event) error { return nil },
+		false, /* withPrefix */
+	)
+	loadDone := make(chan error, 1)
+	go func() {
+		_, err := watcher.load(ctx)
+		loadDone <- err
+	}()
+
+	select {
+	case <-requestStarted:
+	case <-time.After(3 * time.Second):
+		suite.T().Fatal("watcher did not start loading from etcd")
+	}
+	cancel()
+	select {
+	case err := <-loadDone:
+		re.ErrorIs(err, context.Canceled)
+	case <-time.After(3 * time.Second):
+		suite.T().Fatal("watcher did not cancel the in-flight etcd request")
+	}
+}
+
 func (suite *loopWatcherTestSuite) TestWatcherLoadReturnsLifecycleErrors() {
 	suite.Run("pre callback", func() {
 		re := suite.Require()
@@ -917,6 +977,45 @@ func (suite *loopWatcherTestSuite) TestWatcherConsistentLoadUsesSingleRevision()
 	re.Equal("old", values[prefix+"c"])
 }
 
+func (suite *loopWatcherTestSuite) TestWatcherAtomicLoadCallbacksDiscardIncompleteLoad() {
+	re := suite.Require()
+	const prefix = "TestWatcherAtomicLoadCallbacksDiscardIncompleteLoad/"
+	for _, suffix := range []string{"a", "b", "c"} {
+		suite.put(re, prefix+suffix, "value")
+	}
+
+	ctx, cancel := context.WithCancel(suite.ctx)
+	staged := make(map[string]string)
+	published := false
+	watcher := NewLoopWatcher(
+		ctx,
+		&suite.wg,
+		suite.client,
+		"test",
+		prefix,
+		func([]*clientv3.Event) error { return nil },
+		func(kv *mvccpb.KeyValue) error {
+			staged[string(kv.Key)] = string(kv.Value)
+			cancel()
+			return nil
+		},
+		func(*mvccpb.KeyValue) error { return nil },
+		func([]*clientv3.Event) error {
+			published = true
+			return nil
+		},
+		true, /* withPrefix */
+	)
+	watcher.SetConsistentLoad()
+	watcher.SetAtomicLoadCallbacks()
+	watcher.SetLoadBatchSize(1)
+
+	_, err := watcher.load(ctx)
+	re.NoError(err)
+	re.NotEmpty(staged)
+	re.False(published)
+}
+
 func (suite *loopWatcherTestSuite) TestWatcherLoadKeepsDefaultPaginationAcrossCompaction() {
 	re := suite.Require()
 	const prefix = "TestWatcherLoadKeepsDefaultPaginationAcrossCompaction/"
@@ -1276,6 +1375,263 @@ func (suite *loopWatcherTestSuite) TestWatcherReloadsAfterCompactionWhenEnabled(
 	re.GreaterOrEqual(result.revision, updatedResp.Header.Revision+1)
 }
 
+func (suite *loopWatcherTestSuite) TestWatcherUsesCustomCompactionReload() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	const key = "TestWatcherUsesCustomCompactionReload"
+	initialResp, err := suite.client.Put(ctx, key, "before-compaction")
+	re.NoError(err)
+	updatedResp, err := suite.client.Put(ctx, key, "after-compaction")
+	re.NoError(err)
+	_, err = suite.etcd.Server.Compact(ctx, &etcdserverpb.CompactionRequest{Revision: updatedResp.Header.Revision})
+	re.NoError(err)
+
+	reloadValues := make(chan string, 1)
+	liveValues := make(chan string, 1)
+	watcher := NewLoopWatcher(
+		ctx,
+		&sync.WaitGroup{},
+		suite.client,
+		"test",
+		key,
+		func([]*clientv3.Event) error { return nil },
+		func(kv *mvccpb.KeyValue) error {
+			liveValues <- string(kv.Value)
+			cancel()
+			return nil
+		},
+		func(*mvccpb.KeyValue) error { return nil },
+		func([]*clientv3.Event) error { return nil },
+		false, /* withPrefix */
+	)
+	watcher.SetCompactionReloadFn(func(ctx context.Context) (int64, error) {
+		resp, err := EtcdKVGetWithContext(ctx, suite.client, key)
+		if err != nil {
+			return 0, err
+		}
+		if len(resp.Kvs) != 1 {
+			return 0, fmt.Errorf("expected one key, got %d", len(resp.Kvs))
+		}
+		reloadValues <- string(resp.Kvs[0].Value)
+		return resp.Header.Revision + 1, nil
+	})
+
+	watchDone := make(chan error, 1)
+	go func() {
+		_, watchErr := watcher.watch(ctx, initialResp.Header.Revision)
+		watchDone <- watchErr
+	}()
+
+	select {
+	case value := <-reloadValues:
+		re.Equal("after-compaction", value)
+	case <-time.After(3 * time.Second):
+		suite.T().Fatal("custom compaction reload was not called")
+	}
+	_, err = suite.client.Put(suite.ctx, key, "after-reload-live")
+	re.NoError(err)
+	select {
+	case value := <-liveValues:
+		re.Equal("after-reload-live", value)
+	case <-time.After(3 * time.Second):
+		suite.T().Fatal("watcher did not resume after custom compaction reload")
+	}
+	re.NoError(<-watchDone)
+}
+
+func (suite *loopWatcherTestSuite) TestWatcherDoesNotAdvanceAfterLivePostCallbackFailure() {
+	re := suite.Require()
+	ctx, cancel := context.WithTimeout(suite.ctx, 3*time.Second)
+	defer cancel()
+
+	const key = "TestWatcherDoesNotAdvanceAfterLivePostCallbackFailure"
+	initialResp, err := suite.client.Put(ctx, key, "initial")
+	re.NoError(err)
+
+	postErr := errors.New("post callback failed")
+	watcher := NewLoopWatcher(
+		ctx,
+		&sync.WaitGroup{},
+		suite.client,
+		"test",
+		key,
+		func([]*clientv3.Event) error { return nil },
+		func(*mvccpb.KeyValue) error { return nil },
+		func(*mvccpb.KeyValue) error { return nil },
+		func([]*clientv3.Event) error { return postErr },
+		false, /* withPrefix */
+	)
+	watcher.SetRetryOnPostEventError()
+
+	type watchResult struct {
+		revision int64
+		err      error
+	}
+	watchDone := make(chan watchResult, 1)
+	go func() {
+		nextRevision, watchErr := watcher.watch(ctx, initialResp.Header.Revision+1)
+		watchDone <- watchResult{revision: nextRevision, err: watchErr}
+	}()
+	_, err = suite.client.Put(suite.ctx, key, "updated")
+	re.NoError(err)
+
+	select {
+	case result := <-watchDone:
+		re.ErrorIs(result.err, postErr)
+		re.Equal(initialResp.Header.Revision+1, result.revision)
+	case <-time.After(3 * time.Second):
+		suite.T().Fatal("watcher advanced after the failed live event batch")
+	}
+}
+
+func (suite *loopWatcherTestSuite) TestCustomCompactionReloadDoesNotEnableLivePostRetry() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	var watcherWG sync.WaitGroup
+	defer func() {
+		cancel()
+		watcherWG.Wait()
+	}()
+
+	const key = "TestCustomCompactionReloadDoesNotEnableLivePostRetry"
+	_, err := suite.client.Put(ctx, key, "initial")
+	re.NoError(err)
+
+	postErr := errors.New("post callback failed")
+	observedValues := make(chan string, 3)
+	watcher := NewLoopWatcher(
+		ctx,
+		&watcherWG,
+		suite.client,
+		"test",
+		key,
+		func([]*clientv3.Event) error { return nil },
+		func(*mvccpb.KeyValue) error { return nil },
+		func(*mvccpb.KeyValue) error { return nil },
+		func(events []*clientv3.Event) error {
+			if len(events) == 0 {
+				return nil
+			}
+			value := string(events[0].Kv.Value)
+			observedValues <- value
+			if value == "first" {
+				return postErr
+			}
+			return nil
+		},
+		false, /* withPrefix */
+	)
+	watcher.SetCompactionReloadFn(func(context.Context) (int64, error) {
+		return 0, errors.New("unexpected compaction reload")
+	})
+	watcher.watchChangeRetryInterval = 10 * time.Millisecond
+	watcher.StartWatchLoop()
+	re.NoError(watcher.WaitLoad())
+
+	readObservedValue := func() string {
+		select {
+		case value := <-observedValues:
+			return value
+		case <-time.After(3 * time.Second):
+			suite.T().Fatal("watcher did not process the live event")
+			return ""
+		}
+	}
+
+	_, err = suite.client.Put(suite.ctx, key, "first")
+	re.NoError(err)
+	re.Equal("first", readObservedValue())
+
+	_, err = suite.client.Put(suite.ctx, key, "second")
+	re.NoError(err)
+	re.Equal("second", readObservedValue())
+}
+
+func (suite *loopWatcherTestSuite) TestWatcherRetriesLivePostCallbackFailure() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	var watcherWG sync.WaitGroup
+	defer func() {
+		cancel()
+		watcherWG.Wait()
+	}()
+
+	const key = "TestWatcherRetriesLivePostCallbackFailure"
+	_, err := suite.client.Put(ctx, key, "initial")
+	re.NoError(err)
+
+	state := struct {
+		sync.Mutex
+		committed    string
+		pending      string
+		failNext     bool
+		failureCount int
+	}{}
+	replayed := make(chan struct{}, 1)
+	postErr := errors.New("post callback failed")
+	watcher := NewLoopWatcher(
+		ctx,
+		&watcherWG,
+		suite.client,
+		"test",
+		key,
+		func([]*clientv3.Event) error {
+			state.Lock()
+			defer state.Unlock()
+			state.pending = state.committed
+			return nil
+		},
+		func(kv *mvccpb.KeyValue) error {
+			state.Lock()
+			defer state.Unlock()
+			state.pending = string(kv.Value)
+			return nil
+		},
+		func(*mvccpb.KeyValue) error { return nil },
+		func(events []*clientv3.Event) error {
+			state.Lock()
+			defer state.Unlock()
+			if len(events) > 0 && state.failNext {
+				state.failNext = false
+				state.failureCount++
+				return postErr
+			}
+			state.committed = state.pending
+			if len(events) > 0 && state.committed == "updated" {
+				select {
+				case replayed <- struct{}{}:
+				default:
+				}
+			}
+			return nil
+		},
+		false, /* withPrefix */
+	)
+	watcher.SetRetryOnPostEventError()
+	watcher.watchChangeRetryInterval = 10 * time.Millisecond
+	watcher.StartWatchLoop()
+	re.NoError(watcher.WaitLoad())
+
+	state.Lock()
+	re.Equal("initial", state.committed)
+	state.failNext = true
+	state.Unlock()
+	_, err = suite.client.Put(ctx, key, "updated")
+	re.NoError(err)
+
+	select {
+	case <-replayed:
+	case <-time.After(3 * time.Second):
+		suite.T().Fatal("watcher did not replay the failed live event batch")
+	}
+	state.Lock()
+	defer state.Unlock()
+	re.Equal("updated", state.committed)
+	re.Equal(1, state.failureCount)
+}
+
 func (suite *loopWatcherTestSuite) TestWatcherStopsCompactionReloadWhenContextCanceled() {
 	re := suite.Require()
 	const key = "TestWatcherStopsCompactionReloadWhenContextCanceled"
@@ -1490,6 +1846,106 @@ func (suite *loopWatcherTestSuite) TestWatcherRetriesWatchDeleteAfterPostCallbac
 	_, err = watcher.load(suite.ctx)
 	re.NoError(err)
 	re.Empty(cache)
+}
+
+func (suite *loopWatcherTestSuite) TestWatcherReloadsFailedAtomicWatchBatch() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	const prefix = "TestWatcherReloadsFailedAtomicWatchBatch/"
+	validKey := prefix + "valid"
+	invalidKey := prefix + "invalid"
+	initial, err := suite.client.Get(ctx, prefix, clientv3.WithPrefix())
+	re.NoError(err)
+
+	cache := make(map[string]string)
+	var pending map[string]string
+	invalidErr := errors.New("invalid watch value")
+	firstFailure := make(chan struct{})
+	published := make(chan struct{}, 1)
+	failed := false
+	watcher := NewLoopWatcher(
+		ctx,
+		&sync.WaitGroup{},
+		suite.client,
+		"test",
+		prefix,
+		func([]*clientv3.Event) error {
+			pending = maps.Clone(cache)
+			return nil
+		},
+		func(kv *mvccpb.KeyValue) error {
+			key := string(kv.Key)
+			if key == invalidKey {
+				if !failed {
+					failed = true
+					if _, err := suite.client.Delete(suite.ctx, invalidKey); err != nil {
+						return err
+					}
+					close(firstFailure)
+				}
+				return invalidErr
+			}
+			pending[key] = string(kv.Value)
+			return nil
+		},
+		func(kv *mvccpb.KeyValue) error {
+			delete(pending, string(kv.Key))
+			return nil
+		},
+		func(events []*clientv3.Event) error {
+			for _, event := range events {
+				if string(event.Kv.Key) == invalidKey {
+					return invalidErr
+				}
+			}
+			cache = pending
+			if cache[validKey] == "valid" {
+				select {
+				case published <- struct{}{}:
+				default:
+				}
+			}
+			return nil
+		},
+		true, /* withPrefix */
+	)
+	watcher.SetConsistentLoad()
+	watcher.SetAtomicLoadCallbacks()
+	watcher.SetReconcileDeletedKeys()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := watcher.watch(ctx, initial.Header.Revision+1)
+		done <- err
+	}()
+
+	_, err = suite.client.Txn(ctx).Then(
+		clientv3.OpPut(validKey, "valid"),
+		clientv3.OpPut(invalidKey, "invalid"),
+	).Commit()
+	re.NoError(err)
+
+	select {
+	case <-firstFailure:
+	case <-time.After(3 * time.Second):
+		suite.T().Fatal("watcher did not process the failed batch")
+	}
+	select {
+	case <-published:
+	case <-time.After(3 * time.Second):
+		suite.T().Fatal("watcher did not reload the valid event from the failed batch")
+	}
+	re.Equal(map[string]string{validKey: "valid"}, cache)
+
+	cancel()
+	select {
+	case err := <-done:
+		re.NoError(err)
+	case <-time.After(3 * time.Second):
+		suite.T().Fatal("watcher did not stop")
+	}
 }
 
 func (suite *loopWatcherTestSuite) TestWatcherRetriesFailedCompactionReloadWithBackoff() {

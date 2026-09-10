@@ -1198,6 +1198,13 @@ func TestRegionHeartbeat(t *testing.T) {
 		re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
 		checkRegions(re, cluster.BasicCluster, regions[:i+1])
 
+		// Change only the IA row-based logical storage size.
+		region = region.Clone(core.SetApproximateIAKvSize(40))
+		regions[i] = region
+		re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
+		re.Equal(int64(40), cluster.GetRegion(region.GetID()).GetApproximateIAKvSize())
+		checkRegions(re, cluster.BasicCluster, regions[:i+1])
+
 		// Change bytes written.
 		region = region.Clone(core.SetWrittenBytes(24000))
 		regions[i] = region

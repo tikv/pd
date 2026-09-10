@@ -148,7 +148,6 @@ func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 	// sourcesStore is sorted by region score desc, so we pick the first store as source store.
 	for sourceIndex, solver.Source = range sourceStores {
 		retryLimit := s.getLimit(solver.Source)
-		solver.sourceScore = solver.sourceStoreScore(s.GetName())
 		if sourceIndex == len(sourceStores)-1 {
 			break
 		}
@@ -196,6 +195,9 @@ func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 				continue
 			}
 			solver.Step++
+			// Now that the candidate region is known, its size can be folded
+			// into the source score the same way targetStoreScore folds it in.
+			solver.sourceScore = solver.sourceStoreScore(s.GetName())
 			// the replica filter will cache the last region fit and the select one will only pict the first one region that
 			// satisfy all the filters, so the region fit must belong the scheduled region.
 			solver.fit = replicaFilter.(*filter.RegionReplicatedFilter).GetFit()
