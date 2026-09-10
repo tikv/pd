@@ -15,6 +15,8 @@
 package storelimit
 
 import (
+	"sync/atomic"
+
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -102,6 +104,21 @@ func (l *StoreRateLimit) Available(cost int64, typ Type, _ constant.PriorityLeve
 	return l.limits[typ].Available(cost)
 }
 
+// AvailableWithRate synchronizes the configured rate before checking tokens.
+// The unchanged-rate path only loads the current bucket.
+func (l *StoreRateLimit) AvailableWithRate(cost int64, typ Type, ratePerSec float64) bool {
+	if typ == SendSnapshot {
+		return true
+	}
+	limit := l.limits[typ]
+	current := limit.state.Load()
+	if current.rate() != ratePerSec {
+		limit.Reset(ratePerSec)
+		current = limit.state.Load()
+	}
+	return current.available(cost)
+}
+
 // Rate returns the capacity of the store limit.
 func (l *StoreRateLimit) Rate(typ Type) float64 {
 	if l.limits[typ] == nil {
@@ -127,23 +144,43 @@ func (l *StoreRateLimit) Reset(rate float64, typ Type) {
 	l.limits[typ].Reset(rate)
 }
 
-// limit the operators of a store
+// limit serializes rate changes and atomically publishes the rate and bucket
+// together. Readers can finish using the previous bucket during a reset, just as
+// operators admitted before a configuration change can finish afterward.
+// The bucket itself synchronizes token consumption.
 type limit struct {
-	limiter         *ratelimit.RateLimiter
-	ratePerSecMutex syncutil.RWMutex
-	ratePerSec      float64
+	mu    syncutil.Mutex
+	state atomic.Pointer[rateLimitState]
 }
 
-// Reset resets the rate limit.
+type rateLimitState struct {
+	limiter    *ratelimit.RateLimiter
+	ratePerSec float64
+}
+
+func (s *rateLimitState) rate() float64 {
+	if s == nil {
+		return 0
+	}
+	return s.ratePerSec
+}
+
+func (s *rateLimitState) available(n int64) bool {
+	if s.rate() == 0 {
+		return true
+	}
+	return s.limiter.Available(int(n))
+}
+
+// Reset resets the rate limit. An unchanged rate preserves the existing budget.
 func (l *limit) Reset(ratePerSec float64) {
-	l.ratePerSecMutex.Lock()
-	defer l.ratePerSecMutex.Unlock()
-	if l.ratePerSec == ratePerSec {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.state.Load().rate() == ratePerSec {
 		return
 	}
 	capacity := int64(influence)
 	rate := ratePerSec
-	// unlimited
 	if rate >= Unlimited {
 		capacity = int64(Unlimited)
 	} else if ratePerSec > 1 {
@@ -152,35 +189,27 @@ func (l *limit) Reset(ratePerSec float64) {
 	} else {
 		ratePerSec *= float64(influence)
 	}
-	l.limiter = ratelimit.NewRateLimiter(ratePerSec, int(capacity))
-	l.ratePerSec = rate
+	l.state.Store(&rateLimitState{
+		limiter:    ratelimit.NewRateLimiter(ratePerSec, int(capacity)),
+		ratePerSec: rate,
+	})
 }
 
-// Available returns the number of available tokens
-// It returns true if the rate per second is zero.
+// Available returns whether there are enough tokens. A zero rate is unlimited.
 func (l *limit) Available(n int64) bool {
-	l.ratePerSecMutex.RLock()
-	defer l.ratePerSecMutex.RUnlock()
-	if l.ratePerSec == 0 {
-		return true
-	}
-	// Unlimited = 1e8, so can convert int64 to int
-	return l.limiter.Available(int(n))
+	return l.state.Load().available(n)
 }
 
 // Take takes count tokens from the bucket without blocking.
 func (l *limit) Take(count int64) bool {
-	l.ratePerSecMutex.RLock()
-	defer l.ratePerSecMutex.RUnlock()
-	if l.ratePerSec == 0 {
+	current := l.state.Load()
+	if current.rate() == 0 {
 		return true
 	}
-	return l.limiter.AllowN(int(count))
+	return current.limiter.AllowN(int(count))
 }
 
 // GetRatePerSec returns the rate per second.
 func (l *limit) GetRatePerSec() float64 {
-	l.ratePerSecMutex.RLock()
-	defer l.ratePerSecMutex.RUnlock()
-	return l.ratePerSec
+	return l.state.Load().rate()
 }

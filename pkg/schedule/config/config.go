@@ -357,6 +357,25 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 	return &cfg
 }
 
+// GetStoreLimitByType returns a store's configured limit, falling back to the
+// current default without inserting an entry into the configuration.
+func (c *ScheduleConfig) GetStoreLimitByType(storeID uint64, typ storelimit.Type) float64 {
+	limit, ok := c.StoreLimit[storeID]
+	if !ok {
+		limit = c.GetDefaultStoreLimit()
+	}
+	switch typ {
+	case storelimit.AddPeer:
+		return limit.AddPeer
+	case storelimit.RemovePeer:
+		return limit.RemovePeer
+	case storelimit.SendSnapshot:
+		return 0
+	default:
+		panic("no such limit type")
+	}
+}
+
 // Adjust adjusts the config.
 func (c *ScheduleConfig) Adjust(meta *configutil.ConfigMetaData, reloading bool) error {
 	if !meta.IsDefined("max-snapshot-count") {

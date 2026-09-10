@@ -440,8 +440,18 @@ func (f *StoreStateFilter) isBusy(_ config.SharedConfigProvider, store *core.Sto
 	return statusOK
 }
 
-func (f *StoreStateFilter) exceedRemoveLimit(_ config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
-	if !f.AllowTemporaryStates && !store.IsAvailable(storelimit.RemovePeer, f.OperatorLevel) {
+func (f *StoreStateFilter) isStoreLimitAvailable(conf config.SharedConfigProvider, store *core.StoreInfo, typ storelimit.Type) bool {
+	limiter := store.GetStoreLimit()
+	cost := storelimit.RegionInfluence[typ]
+	if limit, ok := limiter.(*storelimit.StoreRateLimit); ok {
+		rate := conf.GetStoreLimitByType(store.GetID(), typ) / 60
+		return limit.AvailableWithRate(cost, typ, rate)
+	}
+	return limiter.Available(cost, typ, f.OperatorLevel)
+}
+
+func (f *StoreStateFilter) exceedRemoveLimit(conf config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
+	if !f.AllowTemporaryStates && !f.isStoreLimitAvailable(conf, store, storelimit.RemovePeer) {
 		f.Reason = storeStateExceedRemoveLimit
 		return statusStoreRemoveLimit
 	}
@@ -449,8 +459,8 @@ func (f *StoreStateFilter) exceedRemoveLimit(_ config.SharedConfigProvider, stor
 	return statusOK
 }
 
-func (f *StoreStateFilter) exceedAddLimit(_ config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
-	if !f.AllowTemporaryStates && !store.IsAvailable(storelimit.AddPeer, f.OperatorLevel) {
+func (f *StoreStateFilter) exceedAddLimit(conf config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
+	if !f.AllowTemporaryStates && !f.isStoreLimitAvailable(conf, store, storelimit.AddPeer) {
 		f.Reason = storeStateExceedAddLimit
 		return statusStoreAddLimit
 	}
