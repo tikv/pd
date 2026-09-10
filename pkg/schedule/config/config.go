@@ -591,27 +591,49 @@ func parseDeprecatedFlag(meta *configutil.ConfigMetaData, name string, old, new 
 	return false, nil // unreachable.
 }
 
-// UnmarshalJSON fills omitted per-store leader transfer limits during both
-// configuration updates and persisted configuration loading.
+// UnmarshalJSON preserves omitted store limits on updates and initializes new
+// stores from the defaults in the same configuration snapshot.
 func (c *ScheduleConfig) UnmarshalJSON(data []byte) error {
 	type scheduleConfig ScheduleConfig
-	if err := json.Unmarshal(data, (*scheduleConfig)(c)); err != nil {
+	fields := struct {
+		*scheduleConfig
+		StoreLimit map[uint64]json.RawMessage `json:"store-limit"`
+	}{scheduleConfig: (*scheduleConfig)(c)}
+	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
 	}
-	return c.adjustStoreLimitsFromJSON(data)
+	if c.StoreLimit == nil {
+		c.StoreLimit = make(map[uint64]StoreLimitConfig, len(fields.StoreLimit))
+	}
+	for storeID, data := range fields.StoreLimit {
+		limit, ok := c.StoreLimit[storeID]
+		if !ok {
+			limit = c.DefaultStoreLimit
+		}
+		// Decoding into the existing value also preserves fields sent as null.
+		if err := json.Unmarshal(data, &limit); err != nil {
+			return err
+		}
+		c.StoreLimit[storeID] = limit
+	}
+	return nil
 }
 
 func (c *ScheduleConfig) adjustStoreLimitsFromJSON(data []byte) error {
 	var fields struct {
-		StoreLimit map[uint64]map[string]json.RawMessage `json:"store-limit"`
+		StoreLimit map[uint64]json.RawMessage `json:"store-limit"`
 	}
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
 	}
-	for storeID, limitFields := range fields.StoreLimit {
-		if _, defined := limitFields["transfer-leader-in"]; !defined {
-			c.StoreLimit[storeID] = c.StoreLimit[storeID].SetLimit(storelimit.TransferLeaderIn, c.DefaultStoreLimit.TransferLeaderIn)
+	for storeID, data := range fields.StoreLimit {
+		// Full legacy snapshots used zero for omitted peer limits. Only the new
+		// leader limit needs a migration default; API patches preserve all fields.
+		limit := StoreLimitConfig{TransferLeaderIn: c.DefaultStoreLimit.TransferLeaderIn}
+		if err := json.Unmarshal(data, &limit); err != nil {
+			return err
 		}
+		c.StoreLimit[storeID] = limit
 	}
 	return nil
 }
@@ -625,15 +647,17 @@ func (c *ScheduleConfig) MigrateDeprecatedFlags() {
 // configuration, using JSON field presence to preserve explicit zero peer limits.
 func (c *ScheduleConfig) MigrateDeprecatedFlagsFromJSON(data []byte) error {
 	var fields struct {
-		DefaultStoreLimit map[string]json.RawMessage `json:"default-store-limit"`
+		DefaultStoreLimit struct {
+			AddPeer          *float64 `json:"add-peer"`
+			RemovePeer       *float64 `json:"remove-peer"`
+			TransferLeaderIn *float64 `json:"transfer-leader-in"`
+		} `json:"default-store-limit"`
 	}
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
 	}
-	_, addPeerDefined := fields.DefaultStoreLimit["add-peer"]
-	_, removePeerDefined := fields.DefaultStoreLimit["remove-peer"]
-	_, transferLeaderInDefined := fields.DefaultStoreLimit["transfer-leader-in"]
-	c.applyDeprecatedFlagMigration(addPeerDefined, removePeerDefined, transferLeaderInDefined)
+	c.applyDeprecatedFlagMigration(fields.DefaultStoreLimit.AddPeer != nil,
+		fields.DefaultStoreLimit.RemovePeer != nil, fields.DefaultStoreLimit.TransferLeaderIn != nil)
 	// The migration may have changed the default used during JSON decoding.
 	return c.adjustStoreLimitsFromJSON(data)
 }

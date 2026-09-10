@@ -251,6 +251,63 @@ transfer-leader-in = 30
 	}
 }
 
+func TestStoreLimitPartialJSONUpdates(t *testing.T) {
+	for _, testCase := range []struct {
+		name     string
+		data     string
+		expected sc.StoreLimitConfig
+	}{
+		{"legacy peer update", `{"add-peer":30,"remove-peer":40}`, sc.StoreLimitConfig{AddPeer: 30, RemovePeer: 40, TransferLeaderIn: 300}},
+		{"leader update", `{"transfer-leader-in":120}`, sc.StoreLimitConfig{AddPeer: 10, RemovePeer: 20, TransferLeaderIn: 120}},
+		{"zero", `{"transfer-leader-in":0}`, sc.StoreLimitConfig{AddPeer: 10, RemovePeer: 20}},
+		{"unlimited", `{"transfer-leader-in":100000000}`, sc.StoreLimitConfig{AddPeer: 10, RemovePeer: 20, TransferLeaderIn: storelimit.Unlimited}},
+		{"case insensitive", `{"TRANSFER-LEADER-IN":120}`, sc.StoreLimitConfig{AddPeer: 10, RemovePeer: 20, TransferLeaderIn: 120}},
+		{"null field", `{"transfer-leader-in":null}`, sc.StoreLimitConfig{AddPeer: 10, RemovePeer: 20, TransferLeaderIn: 300}},
+		{"empty entry", `{}`, sc.StoreLimitConfig{AddPeer: 10, RemovePeer: 20, TransferLeaderIn: 300}},
+		{"null entry", `null`, sc.StoreLimitConfig{AddPeer: 10, RemovePeer: 20, TransferLeaderIn: 300}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			cfg := NewConfig()
+			re.NoError(cfg.Adjust(nil, false))
+			cfg.Schedule.StoreLimit[1] = sc.StoreLimitConfig{AddPeer: 10, RemovePeer: 20, TransferLeaderIn: 300}
+			cfg.Schedule.StoreLimit[2] = sc.StoreLimitConfig{AddPeer: 40, RemovePeer: 50, TransferLeaderIn: 600}
+			untouched := cfg.Schedule.StoreLimit[2]
+			defaults := cfg.Schedule.DefaultStoreLimit
+			re.NoError(json.Unmarshal([]byte(`{"store-limit":{"1":`+testCase.data+`}}`), &cfg.Schedule))
+			re.Equal(testCase.expected, cfg.Schedule.StoreLimit[1])
+			re.Equal(untouched, cfg.Schedule.StoreLimit[2])
+			re.Equal(defaults, cfg.Schedule.DefaultStoreLimit)
+
+			store := storage.NewStorageWithMemoryBackend()
+			re.NoError(NewPersistOptions(cfg).Persist(store))
+			reloaded := NewPersistOptions(NewConfig())
+			re.NoError(reloaded.Reload(store))
+			re.Equal(cfg.Schedule.StoreLimit, reloaded.GetScheduleConfig().StoreLimit)
+		})
+	}
+
+	for _, rate := range []float64{0, 300, storelimit.Unlimited} {
+		cfg := &sc.ScheduleConfig{
+			DefaultStoreLimit: sc.StoreLimitConfig{TransferLeaderIn: 120},
+			StoreLimit:        map[uint64]sc.StoreLimitConfig{1: {TransferLeaderIn: rate}},
+		}
+		require.NoError(t, json.Unmarshal([]byte(`{"store-limit":{"1":{"add-peer":10,"remove-peer":20}}}`), cfg))
+		require.Equal(t, rate, cfg.StoreLimit[1].TransferLeaderIn)
+	}
+	for _, data := range []string{
+		`{"default-store-limit":{"add-peer":60,"remove-peer":70,"transfer-leader-in":120},"store-limit":{"1":{"transfer-leader-in":300},"2":{}}}`,
+		`{"store-limit":{"1":{"transfer-leader-in":300},"2":null},"default-store-limit":{"add-peer":60,"remove-peer":70,"transfer-leader-in":120}}`,
+	} {
+		cfg := &sc.ScheduleConfig{}
+		require.NoError(t, json.Unmarshal([]byte(data), cfg))
+		require.Equal(t, sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 70, TransferLeaderIn: 300}, cfg.StoreLimit[1])
+		require.Equal(t, cfg.DefaultStoreLimit, cfg.StoreLimit[2])
+		require.NoError(t, json.Unmarshal([]byte(`{"store-limit":null}`), cfg))
+		require.Len(t, cfg.StoreLimit, 2)
+	}
+}
+
 func TestReloadLegacyStoreBalanceRate(t *testing.T) {
 	re := require.New(t)
 	oldAddPeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)

@@ -94,6 +94,37 @@ func TestPartialScheduleConfigUpdatesPreserveLatestFields(t *testing.T) {
 	re.Equal(current.StoreLimit[1], reloaded.GetStoreLimit(1))
 }
 
+func TestConcurrentStoreLimitPartialUpdates(t *testing.T) {
+	re := require.New(t)
+	cfg := config.NewConfig()
+	re.NoError(cfg.Adjust(nil, false))
+	cfg.Schedule.StoreLimit[1] = sc.StoreLimitConfig{}
+	store := storage.NewStorageWithMemoryBackend()
+	s := &Server{persistOptions: config.NewPersistOptions(cfg), storage: store}
+	patches := []string{
+		`{"store-limit":{"1":{"add-peer":10}}}`,
+		`{"store-limit":{"1":{"remove-peer":20}}}`,
+		`{"store-limit":{"1":{"transfer-leader-in":30}}}`,
+	}
+	start := make(chan struct{})
+	errs := make(chan error, len(patches))
+	for _, patch := range patches {
+		go func() {
+			<-start
+			errs <- s.PatchScheduleConfig([]byte(patch))
+		}()
+	}
+	close(start)
+	for range patches {
+		re.NoError(<-errs)
+	}
+	expected := sc.StoreLimitConfig{AddPeer: 10, RemovePeer: 20, TransferLeaderIn: 30}
+	re.Equal(expected, s.GetScheduleConfig().StoreLimit[1])
+	reloaded := config.NewPersistOptions(config.NewConfig())
+	re.NoError(reloaded.Reload(store))
+	re.Equal(expected, reloaded.GetStoreLimit(1))
+}
+
 func TestConcurrentPartialScheduleConfigUpdatesDoNotConflict(t *testing.T) {
 	re := require.New(t)
 	cfg := config.NewConfig()

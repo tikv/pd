@@ -155,9 +155,11 @@ func TestPersistConfigDefaultStoreLimit(t *testing.T) {
 func TestAdjustScheduleConfigDefaultStoreLimit(t *testing.T) {
 	oldAddPeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
 	oldRemovePeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer)
+	oldTransferLeaderIn := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.TransferLeaderIn)
 	defer func() {
 		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, oldAddPeer)
 		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, oldRemovePeer)
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.TransferLeaderIn, oldTransferLeaderIn)
 	}()
 
 	testCases := []struct {
@@ -166,6 +168,15 @@ func TestAdjustScheduleConfigDefaultStoreLimit(t *testing.T) {
 		expected sc.StoreLimitConfig
 		stores   map[uint64]sc.StoreLimitConfig
 	}{
+		{
+			name:     "case insensitive fields and null leader limit",
+			config:   `{"default-store-limit":{"ADD-PEER":0,"remove-peer":70,"TRANSFER-LEADER-IN":120},"store-limit":{"1":{"ADD-PEER":10,"REMOVE-PEER":20,"TRANSFER-LEADER-IN":300},"2":{"transfer-leader-in":null}}}`,
+			expected: sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 70, TransferLeaderIn: 120},
+			stores: map[uint64]sc.StoreLimitConfig{
+				1: {AddPeer: 10, RemovePeer: 20, TransferLeaderIn: 300},
+				2: {TransferLeaderIn: 120},
+			},
+		},
 		{
 			name:     "per-store leader limits",
 			config:   `{"store-limit":{"1":{"add-peer":10,"remove-peer":20},"2":{"transfer-leader-in":30}}}`,
@@ -201,6 +212,7 @@ func TestAdjustScheduleConfigDefaultStoreLimit(t *testing.T) {
 			re := require.New(t)
 			sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, 15)
 			sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, 15)
+			sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.TransferLeaderIn, storelimit.Unlimited)
 			watchedConfig := &persistedConfig{
 				Schedule: sc.ScheduleConfig{DefaultStoreLimit: sc.DefaultStoreLimitConfig()},
 			}

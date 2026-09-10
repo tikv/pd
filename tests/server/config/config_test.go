@@ -353,6 +353,82 @@ func (suite *configTestSuite) checkConfigSchedule(cluster *tests.TestCluster) {
 	}
 }
 
+func (suite *configTestSuite) TestStoreLimitPartialUpdates() {
+	suite.env.RunTest(suite.checkStoreLimitPartialUpdates)
+}
+
+func (suite *configTestSuite) checkStoreLimitPartialUpdates(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leader := cluster.GetLeaderServer()
+	for _, endpoint := range []string{"config", "config/schedule"} {
+		addr := leader.GetAddr() + "/pd/api/v1/" + endpoint
+		for _, testCase := range []struct {
+			patch    string
+			expected sc.StoreLimitConfig
+		}{
+			{`{"add-peer":30,"remove-peer":40}`, sc.StoreLimitConfig{AddPeer: 30, RemovePeer: 40, TransferLeaderIn: 300}},
+			{`{"transfer-leader-in":120}`, sc.StoreLimitConfig{AddPeer: 10, RemovePeer: 20, TransferLeaderIn: 120}},
+			{`{"transfer-leader-in":0}`, sc.StoreLimitConfig{AddPeer: 10, RemovePeer: 20}},
+			{`{"TRANSFER-LEADER-IN":120}`, sc.StoreLimitConfig{AddPeer: 10, RemovePeer: 20, TransferLeaderIn: 120}},
+			{`{"add-peer":null,"remove-peer":null,"transfer-leader-in":null}`, sc.StoreLimitConfig{AddPeer: 10, RemovePeer: 20, TransferLeaderIn: 300}},
+			{`{}`, sc.StoreLimitConfig{AddPeer: 10, RemovePeer: 20, TransferLeaderIn: 300}},
+			{`null`, sc.StoreLimitConfig{AddPeer: 10, RemovePeer: 20, TransferLeaderIn: 300}},
+		} {
+			seed := []byte(`{"store-limit":{"1":{"add-peer":10,"remove-peer":20,"transfer-leader-in":300}}}`)
+			re.NoError(testutil.CheckPostJSON(tests.TestDialClient, addr, seed, testutil.StatusOK(re)))
+			before := leader.GetPersistOptions().GetScheduleConfig().Clone()
+			patch := []byte(`{"store-limit":{"1":` + testCase.patch + `}}`)
+			re.NoError(testutil.CheckPostJSON(tests.TestDialClient, addr, patch, testutil.StatusOK(re)))
+			before.StoreLimit[1] = testCase.expected
+			re.Equal(before, leader.GetPersistOptions().GetScheduleConfig())
+			persisted := &config.Config{}
+			exists, err := leader.GetServer().GetStorage().LoadConfig(persisted)
+			re.NoError(err)
+			re.True(exists)
+			re.Equal(before.StoreLimit, persisted.Schedule.StoreLimit)
+		}
+
+		// Each request adds a fresh store so an earlier iteration cannot mask a
+		// default/store ordering bug. Exercise both legacy key spellings as well.
+		for i := range 20 {
+			prefix := ""
+			if endpoint == "config" && i%2 == 0 {
+				prefix = "schedule."
+			}
+			storeID := uint64(9000 + i)
+			if endpoint == "config/schedule" {
+				storeID += 1000
+			}
+			patch := fmt.Appendf(nil, `{"%sstore-limit":{"%d":{"transfer-leader-in":300},"%d":{}},"%sdefault-store-limit":{"add-peer":%d,"remove-peer":70,"transfer-leader-in":120}}`,
+				prefix, storeID, storeID+100, prefix, 60+i)
+			re.NoError(testutil.CheckPostJSON(tests.TestDialClient, addr, patch, testutil.StatusOK(re)))
+			current := leader.GetPersistOptions().GetScheduleConfig()
+			re.Equal(sc.StoreLimitConfig{AddPeer: float64(60 + i), RemovePeer: 70, TransferLeaderIn: 300}, current.StoreLimit[storeID])
+			re.Equal(current.DefaultStoreLimit, current.StoreLimit[storeID+100])
+		}
+		before := leader.GetPersistOptions().GetScheduleConfig().Clone()
+		invalidPatches := []string{
+			`{"default-store-limit":{"add-peer":99},"store-limit":{"1":{"transfer-leader-in":-1}}}`,
+			`{"default-store-limit":{"add-peer":99},"store-limit":{"1":{"transfer-leader-in":"invalid"}}}`,
+		}
+		if endpoint == "config" {
+			invalidPatches = append(invalidPatches,
+				`{"default-store-limit":{"add-peer":99},"schedule.unknown-option":1}`,
+				`{"default-store-limit":{"add-peer":99},"schedule.default-store-limit":{"add-peer":100}}`)
+		}
+		for _, patch := range invalidPatches {
+			re.NoError(testutil.CheckPostJSON(tests.TestDialClient, addr, []byte(patch), testutil.StatusNotOK(re)))
+			re.Equal(before, leader.GetPersistOptions().GetScheduleConfig())
+			persisted := &config.Config{}
+			exists, err := leader.GetServer().GetStorage().LoadConfig(persisted)
+			re.NoError(err)
+			re.True(exists)
+			re.Equal(before.StoreLimit, persisted.Schedule.StoreLimit)
+			re.Equal(before.DefaultStoreLimit, persisted.Schedule.DefaultStoreLimit)
+		}
+	}
+}
+
 func (suite *configTestSuite) TestConfigReplication() {
 	suite.env.RunTest(suite.checkConfigReplication)
 }
