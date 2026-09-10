@@ -18,7 +18,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
@@ -330,4 +332,149 @@ func TestMaxPerSecCostTracker(t *testing.T) {
 			re.Equal(tracker.rruSum, expectedSum[period])
 		}
 	}
+}
+
+func TestMetricsCleanupUsesCreationTimeKeyspaceName(t *testing.T) {
+	testCases := []struct {
+		name                 string
+		keyspaceID           uint32
+		creationKeyspaceName string
+		cleanupKeyspaceName  string
+		groupName            string
+	}{
+		{
+			name:                 "fallback name at creation",
+			keyspaceID:           123,
+			creationKeyspaceName: "keyspace-123",
+			cleanupKeyspaceName:  "tenant-a",
+			groupName:            "cleanup-fallback-name-group",
+		},
+		{
+			name:                 "same name at creation and cleanup",
+			keyspaceID:           124,
+			creationKeyspaceName: "tenant-b",
+			cleanupKeyspaceName:  "tenant-b",
+			groupName:            "cleanup-same-name-group",
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			cleanup := func(keyspaceName string) {
+				deleteLabelValues(keyspaceName, testCase.groupName, defaultTypeLabel)
+				readRequestUnitMaxPerSecCost.DeleteLabelValues(testCase.groupName, keyspaceName)
+				writeRequestUnitMaxPerSecCost.DeleteLabelValues(testCase.groupName, keyspaceName)
+			}
+			cleanup(testCase.creationKeyspaceName)
+			cleanup(testCase.cleanupKeyspaceName)
+			t.Cleanup(func() {
+				cleanup(testCase.creationKeyspaceName)
+				cleanup(testCase.cleanupKeyspaceName)
+			})
+
+			m := newMetrics()
+			m.getCounterMetrics(
+				testCase.keyspaceID,
+				testCase.creationKeyspaceName,
+				testCase.groupName,
+				defaultTypeLabel,
+			).add(&rmpb.Consumption{
+				RRU: 1,
+				WRU: 1,
+			}, nil, testCase.keyspaceID)
+
+			tracker := m.getMaxPerSecTracker(
+				testCase.keyspaceID,
+				testCase.creationKeyspaceName,
+				testCase.groupName,
+			)
+			for range defaultCollectIntervalSec + 1 {
+				tracker.collect(&rmpb.Consumption{RRU: 1, WRU: 1})
+				tracker.flushMetrics()
+			}
+
+			m.getGaugeMetrics(
+				testCase.keyspaceID,
+				testCase.creationKeyspaceName,
+				testCase.groupName,
+			)
+
+			counterLabels := map[string]string{
+				resourceGroupNameLabel:    testCase.groupName,
+				newResourceGroupNameLabel: testCase.groupName,
+				typeLabel:                 defaultTypeLabel,
+				keyspaceNameLabel:         testCase.creationKeyspaceName,
+			}
+			maxPerSecLabels := map[string]string{
+				newResourceGroupNameLabel: testCase.groupName,
+				keyspaceNameLabel:         testCase.creationKeyspaceName,
+			}
+			gaugeLabels := map[string]string{
+				resourceGroupNameLabel:    testCase.groupName,
+				newResourceGroupNameLabel: testCase.groupName,
+				keyspaceNameLabel:         testCase.creationKeyspaceName,
+			}
+
+			re.Greater(testutil.CollectAndCount(collectorWithLabels(readRequestUnitCost, counterLabels)), 0)
+			re.Greater(testutil.CollectAndCount(collectorWithLabels(readRequestUnitMaxPerSecCost, maxPerSecLabels)), 0)
+			re.Greater(testutil.CollectAndCount(collectorWithLabels(availableRUCounter, gaugeLabels)), 0)
+
+			m.cleanupAllMetrics(consumptionRecordKey{
+				keyspaceID: testCase.keyspaceID,
+				groupName:  testCase.groupName,
+				ruType:     defaultTypeLabel,
+			}, testCase.cleanupKeyspaceName)
+
+			re.Zero(testutil.CollectAndCount(collectorWithLabels(readRequestUnitCost, counterLabels)))
+			re.Zero(testutil.CollectAndCount(collectorWithLabels(readRequestUnitMaxPerSecCost, maxPerSecLabels)))
+			re.Zero(testutil.CollectAndCount(collectorWithLabels(availableRUCounter, gaugeLabels)))
+		})
+	}
+}
+
+func collectorWithLabels(collector prometheus.Collector, labels map[string]string) prometheus.Collector {
+	return labelFilterCollector{collector: collector, labels: labels}
+}
+
+type labelFilterCollector struct {
+	collector prometheus.Collector
+	labels    map[string]string
+}
+
+func (c labelFilterCollector) Describe(chan<- *prometheus.Desc) {}
+
+func (c labelFilterCollector) Collect(ch chan<- prometheus.Metric) {
+	metricCh := make(chan prometheus.Metric)
+	go func() {
+		c.collector.Collect(metricCh)
+		close(metricCh)
+	}()
+	for metric := range metricCh {
+		if metricHasLabels(metric, c.labels) {
+			ch <- metric
+		}
+	}
+}
+
+func metricHasLabels(metric prometheus.Metric, labels map[string]string) bool {
+	dtoMetric := &dto.Metric{}
+	if err := metric.Write(dtoMetric); err != nil {
+		return false
+	}
+	for name, value := range labels {
+		if !metricHasLabel(dtoMetric, name, value) {
+			return false
+		}
+	}
+	return true
+}
+
+func metricHasLabel(metric *dto.Metric, name, value string) bool {
+	for _, label := range metric.GetLabel() {
+		if label.GetName() == name && label.GetValue() == value {
+			return true
+		}
+	}
+	return false
 }
