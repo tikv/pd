@@ -602,7 +602,7 @@ func (c *ScheduleConfig) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
 	}
-	if c.StoreLimit == nil {
+	if c.StoreLimit == nil && fields.StoreLimit != nil {
 		c.StoreLimit = make(map[uint64]StoreLimitConfig, len(fields.StoreLimit))
 	}
 	for storeID, data := range fields.StoreLimit {

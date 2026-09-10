@@ -255,6 +255,29 @@ func TestStoreLimitPartialJSONUpdates(t *testing.T) {
 	for _, testCase := range []struct {
 		name     string
 		data     string
+		expected map[uint64]sc.StoreLimitConfig
+	}{
+		{"omitted store limits", `{"max-snapshot-count":64}`, nil},
+		{"null store limits", `{"max-snapshot-count":64,"store-limit":null}`, nil},
+		{"empty store limits", `{"max-snapshot-count":64,"store-limit":{}}`, map[uint64]sc.StoreLimitConfig{}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			// Tools decode into a zero-value config, without calling Adjust first.
+			cfg := &sc.ScheduleConfig{}
+			re.NoError(json.Unmarshal([]byte(testCase.data), cfg))
+			re.Equal(testCase.expected, cfg.StoreLimit)
+
+			existing := sc.StoreLimitConfig{AddPeer: 10, RemovePeer: 20, TransferLeaderIn: 300}
+			cfg.StoreLimit = map[uint64]sc.StoreLimitConfig{1: existing}
+			re.NoError(json.Unmarshal([]byte(testCase.data), cfg))
+			re.Equal(map[uint64]sc.StoreLimitConfig{1: existing}, cfg.StoreLimit)
+		})
+	}
+
+	for _, testCase := range []struct {
+		name     string
+		data     string
 		expected sc.StoreLimitConfig
 	}{
 		{"legacy peer update", `{"add-peer":30,"remove-peer":40}`, sc.StoreLimitConfig{AddPeer: 30, RemovePeer: 40, TransferLeaderIn: 300}},
