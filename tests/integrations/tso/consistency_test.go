@@ -146,10 +146,24 @@ func (suite *tsoConsistencyTestSuite) request(ctx context.Context, count uint32)
 }
 
 func (suite *tsoConsistencyTestSuite) TestRequestTSOConcurrently() {
+	re := suite.Require()
 	suite.requestTSOConcurrently()
 	// Test TSO after the leader change
-	suite.pdLeaderServer.GetServer().GetMember().Resign()
-	suite.cluster.WaitLeader()
+	re.NoError(suite.pdLeaderServer.ResignLeader())
+	leaderName := suite.cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	leader := suite.cluster.GetServer(leaderName)
+	suite.pdLeaderServer = leader
+	if suite.legacy {
+		// The PD leader is published before its embedded TSO allocator becomes
+		// ready. Wait for that separate readiness condition, then reconnect the
+		// direct test client to the new leader before checking TSO consistency.
+		testutil.Eventually(re, func() bool {
+			return leader.GetServer().GetTSOAllocator().IsInitialize()
+		})
+		re.NoError(suite.conn.Close())
+		suite.pdClient, suite.conn = testutil.MustNewGrpcClient(re, leader.GetAddr())
+	}
 	suite.requestTSOConcurrently()
 }
 
