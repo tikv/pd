@@ -39,7 +39,6 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/syncer"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
@@ -357,7 +356,7 @@ func (s *RegionSyncer) sync(ctx context.Context, leaderAddr string) {
 	}
 }
 
-func (s *RegionSyncer) syncRegion(ctx context.Context, conn *grpc.ClientConn) (syncer.ClientStream, error) {
+func (s *RegionSyncer) syncRegion(ctx context.Context, conn *grpc.ClientConn) (pdpb.PD_SyncRegionsClient, error) {
 	cli := pdpb.NewPDClient(conn)
 	syncStream, err := cli.SyncRegions(ctx)
 	if err != nil {

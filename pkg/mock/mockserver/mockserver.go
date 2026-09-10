@@ -28,6 +28,7 @@ import (
 type MockServer struct {
 	ctx            context.Context
 	member, leader *pdpb.Member
+	members        []*pdpb.Member
 	storage        storage.Storage
 	bc             *core.BasicCluster
 }
@@ -56,6 +57,16 @@ func (*MockServer) ClusterID() uint64 {
 // GetMemberInfo returns the member info of the server.
 func (s *MockServer) GetMemberInfo() *pdpb.Member {
 	return s.member
+}
+
+// GetMembers returns the members of the mock PD cluster.
+func (s *MockServer) GetMembers() ([]*pdpb.Member, error) {
+	return s.members, nil
+}
+
+// SetMembers sets the members of the mock PD cluster.
+func (s *MockServer) SetMembers(members []*pdpb.Member) {
+	s.members = members
 }
 
 // GetLeader returns the leader of the server.
