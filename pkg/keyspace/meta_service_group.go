@@ -16,6 +16,7 @@ package keyspace
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"math"
@@ -37,6 +38,7 @@ import (
 type MetaServiceGroupManager struct {
 	store endpoint.MetaServiceGroupStorage
 	syncutil.RWMutex
+	tlsConfig *tls.Config
 	// metaServiceGroups is the available external meta-service groups.
 	// The key is the meta-service group name, and the value is the corresponding endpoint.
 	metaServiceGroups map[string]string
@@ -58,10 +60,12 @@ func (m *MetaServiceGroupManager) SetKeyspaceAssignmentCounter(counter func(grou
 func NewMetaServiceGroupManager(
 	store endpoint.MetaServiceGroupStorage,
 	metaServiceGroups map[string]string,
+	tlsConfig *tls.Config,
 ) *MetaServiceGroupManager {
 	return &MetaServiceGroupManager{
 		store:             store,
-		metaServiceGroups: metaServiceGroups,
+		tlsConfig:         tlsConfig,
+		metaServiceGroups: cloneMetaServiceGroups(metaServiceGroups),
 	}
 }
 
@@ -340,7 +344,7 @@ func (m *MetaServiceGroupManager) checkNewGroupsHealth(ctx context.Context, meta
 	m.RUnlock()
 	for groupID, addresses := range groups {
 		for _, address := range strings.Split(addresses, ",") {
-			if err := checkEtcdServerHealth(ctx, strings.TrimSpace(address)); err != nil {
+			if err := checkEtcdServerHealth(ctx, strings.TrimSpace(address), m.tlsConfig); err != nil {
 				return fmt.Errorf("%w: group %s endpoint %s: %v", ErrMetaServiceGroupUnhealthy, groupID, address, err)
 			}
 		}
@@ -348,10 +352,11 @@ func (m *MetaServiceGroupManager) checkNewGroupsHealth(ctx context.Context, meta
 	return nil
 }
 
-func checkEtcdServerHealth(ctx context.Context, endpoint string) error {
+func checkEtcdServerHealth(ctx context.Context, endpoint string, tlsConfig *tls.Config) error {
 	client, err := clientv3.New(clientv3.Config{
 		Endpoints:   []string{endpoint},
 		DialTimeout: etcdutil.DefaultRequestTimeout,
+		TLS:         tlsConfig,
 	})
 	if err != nil {
 		return err
@@ -393,7 +398,7 @@ func (m *MetaServiceGroupManager) persistGroupsLocked(
 	if err := persist(); err != nil {
 		return err
 	}
-	m.metaServiceGroups = metaServiceGroups
+	m.metaServiceGroups = cloneMetaServiceGroups(metaServiceGroups)
 	// Clear the persisted status for deleted groups so re-adding a group with
 	// the same ID does not inherit a stale assignment count or enabled state,
 	// which would skew list output and PickGroup balancing. Best-effort: the
@@ -451,5 +456,16 @@ func (m *MetaServiceGroupManager) assignedKeyspaceCounts(ctx context.Context, gr
 func (m *MetaServiceGroupManager) updateGroups(metaServiceGroups map[string]string) {
 	m.Lock()
 	defer m.Unlock()
-	m.metaServiceGroups = metaServiceGroups
+	m.metaServiceGroups = cloneMetaServiceGroups(metaServiceGroups)
+}
+
+func cloneMetaServiceGroups(metaServiceGroups map[string]string) map[string]string {
+	if metaServiceGroups == nil {
+		return nil
+	}
+	cloned := make(map[string]string, len(metaServiceGroups))
+	for groupID, addresses := range metaServiceGroups {
+		cloned[groupID] = addresses
+	}
+	return cloned
 }
