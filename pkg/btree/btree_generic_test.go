@@ -818,6 +818,146 @@ func TestCloneConcurrentOperationsG(t *testing.T) {
 	}
 }
 
+// assertSizeInfo checks the per-node index bookkeeping that GetAt and
+// GetWithIndex rely on. A tree can be correctly ordered, so that Ascend returns
+// everything in the right sequence, while its indices are wrong; then GetAt and
+// GetWithIndex silently return the wrong item or the wrong rank.
+func assertSizeInfo(t *testing.T, desc string, tr *BTreeG[Int]) {
+	assertEq(t, desc+" root length", tr.getRootLength(), tr.Len())
+	if tr.Len() == 0 {
+		return
+	}
+	min, _ := tr.Min()
+	assertEq(t, desc+" min", tr.GetAt(0), min)
+	max, _ := tr.Max()
+	assertEq(t, desc+" max", tr.GetAt(tr.Len()-1), max)
+	// GetAt must agree with Ascend, and every item's own rank must round-trip.
+	i := 0
+	tr.Ascend(func(item Int) bool {
+		assertEq(t, desc+" get k-th", tr.GetAt(i), item)
+		got, rank := tr.GetWithIndex(item)
+		assertEq(t, desc+" get", got, item)
+		assertEq(t, desc+" rank", rank, i)
+		i++
+		return true
+	})
+	assertEq(t, desc+" ascend count", i, tr.Len())
+}
+
+// TestBTreeSizeInfoAfterCloneG checks that the index bookkeeping survives
+// copy-on-write cloning, on the clone and on the original.
+//
+// TestBTreeSizeInfo covers the indices but never clones, and
+// TestCloneConcurrentOperationsG clones but only compares Ascend order, so
+// nothing exercised mutableFor's copying of the indices array. Callers that then
+// read a clone through GetAt or GetWithIndex would get wrong answers with no
+// panic and no error.
+func TestBTreeSizeInfoAfterCloneG(t *testing.T) {
+	const treeSize = 2000
+	tr := NewG[Int](*btreeDegree)
+	clones := []*BTreeG[Int]{}
+	for i, item := range perm(treeSize) {
+		tr.ReplaceOrInsert(item)
+		if i%(treeSize/10) == 0 {
+			// Cloning makes every existing node foreign to tr's write context, so
+			// the following inserts have to copy each node they touch.
+			clones = append(clones, tr.Clone())
+			assertSizeInfo(t, "after clone original", tr)
+			assertSizeInfo(t, "after clone clone", clones[len(clones)-1])
+		}
+	}
+	assertSizeInfo(t, "filled original", tr)
+
+	// Deleting from the original must not disturb any clone, and both sides must
+	// keep consistent indices while nodes are being split, merged and freed.
+	lengths := make([]int, len(clones))
+	for i, clone := range clones {
+		lengths[i] = clone.Len()
+	}
+	for _, item := range perm(treeSize) {
+		if item%3 == 0 {
+			tr.Delete(item)
+		}
+	}
+	assertSizeInfo(t, "after delete original", tr)
+	for i, clone := range clones {
+		assertEq(t, "clone length unchanged", clone.Len(), lengths[i])
+		assertSizeInfo(t, "after delete clone", clone)
+	}
+}
+
+// TestCloneReadWhileWritingOriginalG reads a clone while the original is being
+// mutated, which is how PD uses Clone: one snapshot serving a scan while the
+// heartbeat path keeps writing. Run it with -race.
+func TestCloneReadWhileWritingOriginalG(t *testing.T) {
+	const treeSize = 5000
+	tr := NewG[Int](*btreeDegree)
+	for _, item := range perm(treeSize) {
+		tr.ReplaceOrInsert(item)
+	}
+	snap := tr.Clone()
+	want := rang(treeSize)
+
+	var writers, readers sync.WaitGroup
+	done := make(chan struct{})
+	// BTreeG does not support concurrent writes, so serialise them the way PD
+	// does, under one lock. Only the original tree is written; a clone is
+	// read-only by contract, and no lock is taken to read it.
+	var writeMu syncutil.Mutex
+
+	// Writers: keep inserting and deleting items outside the snapshot's range, and
+	// replacing items inside it, so nodes are copied, split and merged throughout.
+	for w := range 4 {
+		writers.Add(1)
+		go func() {
+			defer writers.Done()
+			for i := 0; ; i++ {
+				select {
+				case <-done:
+					return
+				default:
+				}
+				item := Int(treeSize + w*treeSize + i%treeSize)
+				writeMu.Lock()
+				tr.ReplaceOrInsert(item)
+				tr.ReplaceOrInsert(Int(i % treeSize))
+				tr.Delete(item)
+				writeMu.Unlock()
+			}
+		}()
+	}
+
+	// Readers: the snapshot must not change in any observable way.
+	for range 4 {
+		readers.Add(1)
+		go func() {
+			defer readers.Done()
+			for range 50 {
+				if got := snap.Len(); got != treeSize {
+					t.Errorf("snapshot length changed: got %d want %d", got, treeSize)
+					return
+				}
+				if got := all(snap); !reflect.DeepEqual(want, got) {
+					t.Errorf("snapshot contents changed: got %d items", len(got))
+					return
+				}
+				for k := range treeSize {
+					if got := snap.GetAt(k); got != Int(k) {
+						t.Errorf("snapshot GetAt(%d) = %v", k, got)
+						return
+					}
+				}
+			}
+		}()
+	}
+	readers.Wait()
+	close(done)
+	writers.Wait()
+
+	assertSizeInfo(t, "snapshot after concurrent writes", snap)
+	assertEq(t, "snapshot contents after concurrent writes", all(snap), want)
+}
+
 func BenchmarkDeleteAndRestore(b *testing.B) {
 	items := perm(16392)
 	b.ResetTimer()
