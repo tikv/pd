@@ -1483,7 +1483,7 @@ func splitRegions(c *gin.Context) {
 }
 
 // @Tags     region
-// @Summary  Check if regions in the given key ranges are replicated. Returns 'REPLICATED', 'INPROGRESS', or 'PENDING'. 'PENDING' means that there is at least one region pending for scheduling. Similarly, 'INPROGRESS' means there is at least one region in scheduling.
+// @Summary  Check if regions in the given key ranges are replicated. Returns 'REPLICATED', 'INPROGRESS', or 'PENDING'. 'PENDING' means that PD cannot currently make scheduling progress because the Store topology has no eligible placement. 'INPROGRESS' means that placement is incomplete but PD can continue or retry scheduling, including incomplete Region metadata in the requested range.
 // @Param    startKey  query  string  true  "Regions start key, hex encoded"
 // @Param    endKey    query  string  true  "Regions end key, hex encoded"
 // @Produce  plain

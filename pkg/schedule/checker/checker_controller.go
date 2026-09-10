@@ -266,6 +266,10 @@ func (c *Controller) checkPendingProcessedRegions() {
 	pendingProcessedRegionsGauge.Set(float64(len(ids)))
 	for _, id := range ids {
 		region := c.cluster.GetRegion(id)
+		if region == nil {
+			c.RemovePendingProcessedRegion(id)
+			continue
+		}
 		c.tryAddOperators(region)
 	}
 }

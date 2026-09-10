@@ -39,7 +39,7 @@ type bucket struct {
 
 // randBuckets is an implementation of waiting operators
 type randBuckets struct {
-	mu          syncutil.Mutex
+	mu          syncutil.RWMutex
 	totalWeight float64
 	buckets     []*bucket
 }
@@ -84,8 +84,8 @@ func (b *randBuckets) PutMergeOperators(ops []*Operator) {
 
 // ListOperator lists all operator in the random buckets.
 func (b *randBuckets) ListOperator() []*Operator {
-	b.mu.Lock()
-	defer b.mu.Unlock()
+	b.mu.RLock()
+	defer b.mu.RUnlock()
 	var ops []*Operator
 	for i := range b.buckets {
 		bucket := b.buckets[i]
