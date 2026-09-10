@@ -678,29 +678,33 @@ func TestGetKeyspaceSplitKeys(t *testing.T) {
 		name              string
 		startKey          []byte
 		endKey            []byte
+		keyType           coreconstant.KeyType
 		checker           *mockKeyspaceChecker
 		expectedSplitKeys [][]byte
 	}{
 		{
-			name:              "non-keyspace keys should not split 99",
+			name:              "classical start before first keyspace",
 			startKey:          []byte{'t', 1, 2, 4},
 			endKey:            MakeRegionBound(99).TxnLeftBound,
+			keyType:           coreconstant.Txn,
 			checker:           specificChecker,
 			expectedSplitKeys: nil,
 		},
 		{
-			name:     "non-keyspace keys should not split",
+			name:     "raw range into classical tail",
 			startKey: MakeRegionBound(102).RawLeftBound,
 			endKey:   []byte{'t', 1, 2, 4},
+			keyType:  coreconstant.Raw,
 			checker:  specificChecker,
 			expectedSplitKeys: [][]byte{
 				MakeRegionBound(103).RawLeftBound,
 			},
 		},
 		{
-			name:     "non-keyspace keys should not split",
+			name:     "classical start into txn keyspace",
 			startKey: []byte{'t', 1, 2, 4},
 			endKey:   MakeRegionBound(102).TxnLeftBound,
+			keyType:  coreconstant.Txn,
 			checker:  specificChecker,
 			expectedSplitKeys: [][]byte{
 				MakeRegionBound(100).TxnLeftBound,
@@ -711,6 +715,7 @@ func TestGetKeyspaceSplitKeys(t *testing.T) {
 			name:     "split keys with sparse existing keyspaces",
 			startKey: MakeRegionBound(99).RawLeftBound,
 			endKey:   []byte{'t', 1, 2, 4},
+			keyType:  coreconstant.Raw,
 			checker:  specificChecker,
 			expectedSplitKeys: [][]byte{
 				MakeRegionBound(100).RawLeftBound,
@@ -723,6 +728,7 @@ func TestGetKeyspaceSplitKeys(t *testing.T) {
 			name:     "span two keyspaces txn mode",
 			startKey: MakeRegionBound(100).TxnLeftBound,
 			endKey:   MakeRegionBound(101).TxnRightBound,
+			keyType:  coreconstant.Txn,
 			checker:  allExistChecker,
 			expectedSplitKeys: [][]byte{
 				MakeRegionBound(100).TxnRightBound,
@@ -732,6 +738,7 @@ func TestGetKeyspaceSplitKeys(t *testing.T) {
 			name:     "span two keyspaces raw mode",
 			startKey: MakeRegionBound(100).RawLeftBound,
 			endKey:   MakeRegionBound(101).RawRightBound,
+			keyType:  coreconstant.Raw,
 			checker:  allExistChecker,
 			expectedSplitKeys: [][]byte{
 				MakeRegionBound(100).RawRightBound,
@@ -741,6 +748,7 @@ func TestGetKeyspaceSplitKeys(t *testing.T) {
 			name:              "same keyspace txn mode",
 			startKey:          MakeRegionBound(100).TxnLeftBound,
 			endKey:            MakeRegionBound(100).TxnRightBound,
+			keyType:           coreconstant.Txn,
 			checker:           allExistChecker,
 			expectedSplitKeys: nil,
 		},
@@ -748,6 +756,7 @@ func TestGetKeyspaceSplitKeys(t *testing.T) {
 			name:              "same keyspace raw mode",
 			startKey:          MakeRegionBound(100).RawLeftBound,
 			endKey:            MakeRegionBound(100).RawRightBound,
+			keyType:           coreconstant.Raw,
 			checker:           allExistChecker,
 			expectedSplitKeys: nil,
 		},
@@ -755,33 +764,54 @@ func TestGetKeyspaceSplitKeys(t *testing.T) {
 			name:     "adjacent range with one keyspace",
 			startKey: MakeRegionBound(101).TxnLeftBound,
 			endKey:   MakeRegionBound(102).TxnRightBound,
+			keyType:  coreconstant.Txn,
 			checker:  oneExistChecker,
 			expectedSplitKeys: [][]byte{
 				MakeRegionBound(101).TxnRightBound,
 			},
 		},
 		{
-			name:     "empty start and end key with one exist",
+			name:     "empty start and end key, raw mode, one exist",
 			startKey: []byte{},
 			endKey:   []byte{},
+			keyType:  coreconstant.Raw,
 			checker:  oneExistChecker,
 			expectedSplitKeys: [][]byte{
 				MakeRegionBound(101).RawLeftBound,
 				MakeRegionBound(101).RawRightBound,
+			},
+		},
+		{
+			name:     "empty start and end key, txn mode, one exist",
+			startKey: []byte{},
+			endKey:   []byte{},
+			keyType:  coreconstant.Txn,
+			checker:  oneExistChecker,
+			expectedSplitKeys: [][]byte{
 				MakeRegionBound(101).TxnLeftBound,
 				MakeRegionBound(101).TxnRightBound,
 			},
 		},
 		{
-			name:     "empty start and end key with three exist",
+			name:     "empty start and end key, raw mode, three exist",
 			startKey: []byte{},
 			endKey:   []byte{},
+			keyType:  coreconstant.Raw,
 			checker:  specificChecker,
 			expectedSplitKeys: [][]byte{
 				MakeRegionBound(100).RawLeftBound,
 				MakeRegionBound(101).RawLeftBound,
 				MakeRegionBound(102).RawLeftBound,
 				MakeRegionBound(103).RawLeftBound,
+			},
+		},
+		{
+			name:     "empty start and end key, txn mode, three exist",
+			startKey: []byte{},
+			endKey:   []byte{},
+			keyType:  coreconstant.Txn,
+			checker:  specificChecker,
+			expectedSplitKeys: [][]byte{
 				MakeRegionBound(100).TxnLeftBound,
 				MakeRegionBound(101).TxnLeftBound,
 				MakeRegionBound(102).TxnLeftBound,
@@ -789,25 +819,10 @@ func TestGetKeyspaceSplitKeys(t *testing.T) {
 			},
 		},
 		{
-			name:              "not keys with no keyspace key",
+			name:              "no keyspace key on either side",
 			startKey:          []byte{'t', 1, 2, 3},
 			endKey:            []byte{'t', 1, 2, 4},
-			checker:           specificChecker,
-			expectedSplitKeys: nil,
-		},
-		{
-			name:     "span two keyspaces mix mode",
-			startKey: MakeRegionBound(102).RawLeftBound,
-			endKey:   MakeRegionBound(102).TxnLeftBound,
-			checker:  specificChecker,
-			expectedSplitKeys: [][]byte{
-				MakeRegionBound(103).RawLeftBound,
-			},
-		},
-		{
-			name:              "span two keyspaces mix mode with latest keyspace",
-			startKey:          MakeRegionBound(103).RawLeftBound,
-			endKey:            MakeRegionBound(103).TxnLeftBound,
+			keyType:           coreconstant.Txn,
 			checker:           specificChecker,
 			expectedSplitKeys: nil,
 		},
@@ -815,7 +830,7 @@ func TestGetKeyspaceSplitKeys(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(_ *testing.T) {
-			splitKeys := GetKeyspaceSplitKeys(tc.startKey, tc.endKey, tc.checker)
+			splitKeys := GetKeyspaceSplitKeys(tc.startKey, tc.endKey, tc.keyType, tc.checker)
 			re.Equal(tc.expectedSplitKeys, splitKeys, "test case: %s", tc.name)
 		})
 	}

@@ -149,6 +149,22 @@ func (t regionBoundType) String() string {
 	return "txn"
 }
 
+// matches reports whether the given key type belongs to this region bound's mode.
+func (t regionBoundType) matches(kt KeyType) bool {
+	if t == rawRegionBound {
+		return kt == KeyTypeRaw
+	}
+	return kt == KeyTypeTxn
+}
+
+// bounds returns the left and right boundary of the region bound in this mode.
+func (t regionBoundType) bounds(b *RegionBound) (lo, hi []byte) {
+	if t == rawRegionBound {
+		return b.RawLeftBound, b.RawRightBound
+	}
+	return b.TxnLeftBound, b.TxnRightBound
+}
+
 // keyTypeToRegionBoundType converts the key type to the corresponding region bound type.
 // ref rfc: https://github.com/tikv/rfcs/blob/master/text/0069-api-v2.md
 func keyTypeToRegionBoundType(keyType coreconstant.KeyType) regionBoundType {
@@ -550,81 +566,47 @@ func RegionSpansMultipleKeyspaces(startKey, endKey []byte, checker Checker) bool
 
 const scanLimit = 10
 
-// GetKeyspaceSplitKeys returns the split keys for a region that spans multiple keyspaces.
-// It returns a list of keys where the region should be split to separate keyspaces.
-// Only returns split keys for keyspaces that exist (checked via checker).
-func GetKeyspaceSplitKeys(startKey, endKey []byte, checker Checker) [][]byte {
-	// If checker is nil, cannot verify keyspace existence
+// GetKeyspaceSplitKeys returns the keys at which the region [startKey, endKey)
+// must be split so that no region spans more than one keyspace. keyType is the
+// cluster-wide keyspace API mode (raw or txn); only that mode's keyspace
+// boundaries are considered. It returns nil when no split is needed.
+func GetKeyspaceSplitKeys(startKey, endKey []byte, keyType coreconstant.KeyType, checker Checker) [][]byte {
 	if checker == nil {
 		return nil
 	}
+	boundType := keyTypeToRegionBoundType(keyType)
 
-	var startKeyspaceID uint32
-	var startKT KeyType
-	if len(startKey) == 0 {
-		startKeyspaceID, startKT = constant.StartKeyspaceID, KeyTypeRaw
-	} else {
-		startKeyspaceID, startKT = ExtractKeyspaceID(startKey)
-	}
-
-	endKeyspaceID, endKT := ExtractKeyspaceID(endKey)
-	// If either key has classical key type, we can ignore the keyspace check.
-	if startKT == KeyTypeClassical && endKT == KeyTypeClassical {
-		return nil
-	}
-	// If endKey is Classical, set the endKeyspaceID to the max valid keyspace ID to generate split keys for all keyspaces after startKeyspaceID.
-	if endKT == KeyTypeClassical {
-		endKeyspaceID = constant.MaxValidKeyspaceID
-	}
-
-	// If same keyspace and key type, no split needed
-	if startKeyspaceID == endKeyspaceID && startKT == endKT {
-		return nil
-	}
-	// If startKey is raw key and endKey is txn key, it must span multiple keyspaces, because raw key usually the rightmost key and the txn the smallest key.
-	// So we must set the end keyspace id as the max valid keyspace ID to generate split keys for all keyspaces after startKeyspaceID.
-	// such as this ['r200','x100'], we should generate split keys for keyspace (200, MaxValidKeyspaceID]
-	if startKT == KeyTypeRaw && endKT == KeyTypeTxn {
-		endKeyspaceID = constant.MaxValidKeyspaceID
-	}
-
-	// If endKey's keyspace ID is exactly startKeyspace ID + 1,
-	// check if endKey is at the exact boundary (right bound of startKeyspace)
-	// If yes, the region is [startKey, rightBound of startKeyspace) which is within one keyspace.
-	// Otherwise, continue to generate split keys.
-	if endKeyspaceID == startKeyspaceID+1 {
-		startBound := MakeRegionBound(startKeyspaceID)
-		// it means the region is [startKey, rightBound of startKeyspace)
-		// which is still within one keyspace
-		if string(endKey) == string(startBound.TxnRightBound) || string(endKey) == string(startBound.RawRightBound) {
-			return nil
+	// A start key that is empty or not a keyspace key of this mode means the
+	// region begins before any keyspace; an absent or foreign end key means it
+	// runs to the end of this mode's keyspace space.
+	startID := constant.StartKeyspaceID
+	if len(startKey) != 0 {
+		if id, kt := ExtractKeyspaceID(startKey); boundType.matches(kt) {
+			startID = id
 		}
 	}
+	endID := constant.MaxValidKeyspaceID
+	if len(endKey) != 0 {
+		if id, kt := ExtractKeyspaceID(endKey); boundType.matches(kt) {
+			endID = id
+		}
+	}
+	if startID >= endID {
+		return nil
+	}
 
-	// Generate split keys for each keyspace boundary between start and end.
-	// Iterate existing keyspaces in (startKeyspaceID, endKeyspaceID).
+	ids, ok := checker.GetKeyspaceIDInRange(startID, endID, scanLimit)
+	if !ok || len(ids) == 0 {
+		return nil
+	}
 	var splitKeys [][]byte
-
-	keyspaceList, ok := checker.GetKeyspaceIDInRange(startKeyspaceID, endKeyspaceID, scanLimit)
-	if !ok {
-		return nil
-	}
-	if keyspaceList == nil {
-		return nil
-	}
-	for _, nextID := range keyspaceList {
-		bound := MakeRegionBound(nextID)
-		if keyutil.Between(startKey, endKey, bound.RawLeftBound) {
-			splitKeys = append(splitKeys, bound.RawLeftBound)
+	for _, id := range ids {
+		lo, hi := boundType.bounds(MakeRegionBound(id))
+		if keyutil.Between(startKey, endKey, lo) {
+			splitKeys = append(splitKeys, lo)
 		}
-		if keyutil.Between(startKey, endKey, bound.RawRightBound) {
-			splitKeys = append(splitKeys, bound.RawRightBound)
-		}
-		if keyutil.Between(startKey, endKey, bound.TxnLeftBound) {
-			splitKeys = append(splitKeys, bound.TxnLeftBound)
-		}
-		if keyutil.Between(startKey, endKey, bound.TxnRightBound) {
-			splitKeys = append(splitKeys, bound.TxnRightBound)
+		if keyutil.Between(startKey, endKey, hi) {
+			splitKeys = append(splitKeys, hi)
 		}
 	}
 	if len(splitKeys) == 0 {
