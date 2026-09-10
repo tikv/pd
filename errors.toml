@@ -746,6 +746,11 @@ error = '''
 etcd leader not found
 '''
 
+["PD:member:ErrEtcdLeaderTransferTargetCheck"]
+error = '''
+etcd leader transfer target check failed: %s
+'''
+
 ["PD:member:ErrMarshalMember"]
 error = '''
 marshal member failed
