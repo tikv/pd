@@ -25,6 +25,7 @@ import (
 	perrors "github.com/pingcap/errors"
 
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/unsaferecovery"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -55,11 +56,16 @@ func newUnsafeOperationHandler(svr *server.Server, rd *render.Render) *unsafeOpe
 //
 // Success 200 {string} string "Request has been accepted."
 // Failure 400 {string} string "The input is invalid."
+// Failure 501 {string} string "Online unsafe recovery is not supported when scheduling service is enabled."
 // Failure 500 {string} string "PD server failed to proceed the request."
 //
 //	@Router		/admin/unsafe/remove-failed-stores [post]
 func (h *unsafeOperationHandler) RemoveFailedStores(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
+	if rc.IsServiceIndependent(constant.SchedulingServiceName) {
+		h.rd.JSON(w, http.StatusNotImplemented, "online unsafe recovery is not supported when scheduling service is enabled")
+		return
+	}
 	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())

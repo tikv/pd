@@ -272,6 +272,10 @@ func (c *Controller) checkPendingProcessedRegions() {
 
 // checkPriorityRegions checks priority regions
 func (c *Controller) checkPriorityRegions() {
+	generation := c.opController.GetOperatorGeneration()
+	if c.cluster.IsSchedulingHalted() {
+		return
+	}
 	items := c.GetPriorityRegions()
 	removes := make([]uint64, 0)
 	priorityListGauge.Set(float64(len(items)))
@@ -287,7 +291,7 @@ func (c *Controller) checkPriorityRegions() {
 			continue
 		}
 		if !c.opController.ExceedStoreLimit(ops...) {
-			c.opController.AddWaitingOperator(ops...)
+			c.opController.AddWaitingOperatorWithGeneration(generation, operator.SchedulingHalted, ops...)
 		}
 	}
 	for _, v := range removes {
@@ -398,6 +402,10 @@ func (c *Controller) tryAddOperators(region *core.RegionInfo) {
 		// the region could be recent split, continue to wait.
 		return
 	}
+	generation := c.opController.GetOperatorGeneration()
+	if c.cluster.IsSchedulingHalted() {
+		return
+	}
 	id := region.GetID()
 	if c.opController.GetOperator(id) != nil {
 		c.RemovePendingProcessedRegion(id)
@@ -409,7 +417,7 @@ func (c *Controller) tryAddOperators(region *core.RegionInfo) {
 	}
 
 	if !c.opController.ExceedStoreLimit(ops...) {
-		c.opController.AddWaitingOperator(ops...)
+		c.opController.AddWaitingOperatorWithGeneration(generation, operator.SchedulingHalted, ops...)
 		c.RemovePendingProcessedRegion(id)
 	} else {
 		c.AddPendingProcessedRegions(true, id)

@@ -156,7 +156,9 @@ func (s *waitingOperatorStatus) incCount(kind string) {
 func (s *waitingOperatorStatus) decCount(kind string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.ops[kind]--
+	if count := s.ops[kind]; count > 0 {
+		s.ops[kind] = count - 1
+	}
 }
 
 // getCount returns the count of the given operator kind.
@@ -164,4 +166,11 @@ func (s *waitingOperatorStatus) getCount(kind string) uint64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.ops[kind]
+}
+
+// reset clears all waiting operator status counters.
+func (s *waitingOperatorStatus) reset() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ops = make(map[string]uint64)
 }
