@@ -108,6 +108,36 @@ var (
 	queryRegionPrevKeysCount = queryRegionCount.WithLabelValues("prev-keys")
 	queryRegionIDsCount      = queryRegionCount.WithLabelValues("ids")
 
+	regionSizeTreeReadyGauge = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "core",
+			Name:      "region_size_tree_ready",
+			Help:      "Whether the eventually consistent Region size tree is ready for queries.",
+		})
+	regionSizeTreePendingGauge = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "core",
+			Name:      "region_size_tree_pending",
+			Help:      "Number of Region IDs queued or being reconciled by the Region size tree.",
+		})
+	regionSizeTreeOldestPendingDurationGauge = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "core",
+			Name:      "region_size_tree_oldest_pending_duration_seconds",
+			Help:      "Age in seconds of the oldest Region size tree update awaiting reconciliation.",
+		})
+	regionSizeTreeRebuildDuration = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "core",
+			Name:      "region_size_tree_rebuild_duration_seconds",
+			Help:      "Bucketed histogram of Region size tree rebuild attempt durations in seconds.",
+			Buckets:   prometheus.ExponentialBuckets(0.1, 2, 16),
+		})
+
 	bucketEventCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "pd",
@@ -133,7 +163,17 @@ func init() {
 	prometheus.MustRegister(AcquireRegionsLockWaitCount)
 	prometheus.MustRegister(queryRegionDuration)
 	prometheus.MustRegister(queryRegionCount)
+	prometheus.MustRegister(regionSizeTreeReadyGauge)
+	prometheus.MustRegister(regionSizeTreePendingGauge)
+	prometheus.MustRegister(regionSizeTreeOldestPendingDurationGauge)
+	prometheus.MustRegister(regionSizeTreeRebuildDuration)
 	prometheus.MustRegister(bucketEventCounter)
+}
+
+func resetRegionSizeTreeMetrics() {
+	regionSizeTreeReadyGauge.Set(0)
+	regionSizeTreePendingGauge.Set(0)
+	regionSizeTreeOldestPendingDurationGauge.Set(0)
 }
 
 var tracerPool = &sync.Pool{
