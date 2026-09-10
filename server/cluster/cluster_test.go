@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
@@ -1426,7 +1427,7 @@ func TestConcurrentReportBucket(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		_, err := cluster.processRegionBuckets(bucket1)
-		re.NoError(err)
+		assert.NoError(t, err)
 	}()
 	time.Sleep(100 * time.Millisecond)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/core/concurrentBucketHeartbeat"))
@@ -1466,7 +1467,7 @@ func TestConcurrentRegionHeartbeat(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		err := cluster.processRegionHeartbeat(core.ContextTODO(), source)
-		re.NoError(err)
+		assert.NoError(t, err)
 	}()
 	time.Sleep(100 * time.Millisecond)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/concurrentRegionHeartbeat"))
@@ -2945,7 +2946,9 @@ func TestCollectMetricsConcurrent(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			for range 1000 {
-				re.NoError(tc.addRegionStore(uint64(i%5), rand.IntN(200)))
+				if !assert.NoError(t, tc.addRegionStore(uint64(i%5), rand.IntN(200))) {
+					return
+				}
 			}
 		}(i)
 	}

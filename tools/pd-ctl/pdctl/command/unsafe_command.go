@@ -94,7 +94,7 @@ func removeFailedStoresCommandFunc(cmd *cobra.Command, args []string) {
 	} else {
 		if len(args) < 1 {
 			cmd.Println("Failed store ids are not specified")
-			cmd.Usage()
+			_ = cmd.Usage()
 			return
 		}
 

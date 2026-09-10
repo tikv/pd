@@ -27,6 +27,7 @@ import (
 
 	"github.com/coreos/go-semver/semver"
 	"github.com/docker/go-units"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 	"google.golang.org/grpc/codes"
@@ -784,7 +785,7 @@ func TestRaftClusterStartTSOJob(t *testing.T) {
 			err := leaderServer.BootstrapCluster()
 			if err != nil {
 				// If the error is ErrEtcdTxnConflict, it means there is a temporary failure.
-				re.ErrorContains(err, errs.ErrEtcdTxnConflict.GetMsg())
+				assert.ErrorContains(t, err, errs.ErrEtcdTxnConflict.GetMsg())
 			}
 		}()
 	}
@@ -882,8 +883,10 @@ func TestStoreVersionChange(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		resp, err := putStore(grpcPDClient, clusterID, store)
-		re.NoError(err)
-		re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
+		if !assert.NoError(t, err) {
+			return
+		}
+		assert.Equal(t, pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 	}()
 	time.Sleep(100 * time.Millisecond)
 	err = svr.SetClusterVersion("1.0.0")
@@ -964,7 +967,10 @@ func TestConcurrentHandleRegion(t *testing.T) {
 		go func(isReceiver bool) {
 			if isReceiver {
 				_, err := stream.Recv()
-				re.NoError(err)
+				if !assert.NoError(t, err) {
+					wg.Done()
+					return
+				}
 				wg.Done()
 			}
 			for {
@@ -974,7 +980,9 @@ func TestConcurrentHandleRegion(t *testing.T) {
 				default:
 					_, err = stream.Recv()
 					if err != nil {
-						re.ErrorContains(err, "code = Canceled")
+						if !assert.ErrorContains(t, err, "code = Canceled") {
+							return
+						}
 					}
 				}
 			}
@@ -1009,7 +1017,7 @@ func TestConcurrentHandleRegion(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			err := rc.HandleRegionHeartbeat(core.NewRegionInfo(region, region.Peers[0]))
-			re.NoError(err)
+			assert.NoError(t, err)
 		}()
 	}
 	wg.Wait()

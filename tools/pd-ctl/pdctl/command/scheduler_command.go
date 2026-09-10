@@ -65,12 +65,12 @@ func NewPauseSchedulerCommand() *cobra.Command {
 
 func pauseSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 2 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	delay, err := strconv.ParseInt(args[1], 10, 64)
 	if err != nil || delay <= 0 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	path := schedulersPrefix + "/" + getEscapedSchedulerName(args[0])
@@ -97,7 +97,7 @@ func NewResumeSchedulerCommand() *cobra.Command {
 
 func resumeSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	path := schedulersPrefix + "/" + getEscapedSchedulerName(args[0])
@@ -193,7 +193,9 @@ func checkSchedulerExist(cmd *cobra.Command, schedulerName string) (bool, error)
 		return false, err
 	}
 	var schedulerList []string
-	json.Unmarshal([]byte(r), &schedulerList)
+	if err := json.Unmarshal([]byte(r), &schedulerList); err != nil {
+		return false, errors.WithStack(err)
+	}
 	for idx := range schedulerList {
 		if strings.Contains(schedulerList[idx], schedulerName) {
 			return true, nil

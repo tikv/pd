@@ -322,7 +322,7 @@ func (s *storeTestSuite) checkStore(cluster *pdTests.TestCluster) {
 	re.NoError(err)
 
 	allAddPeerLimit := make(map[string]map[string]any)
-	json.Unmarshal(output, &allAddPeerLimit)
+	re.NoError(json.Unmarshal(output, &allAddPeerLimit))
 	re.Equal(float64(20), allAddPeerLimit["1"]["add-peer"].(float64))
 	re.Equal(float64(20), allAddPeerLimit["3"]["add-peer"].(float64))
 	_, ok := allAddPeerLimit["2"]["add-peer"]
@@ -333,7 +333,7 @@ func (s *storeTestSuite) checkStore(cluster *pdTests.TestCluster) {
 	re.NoError(err)
 
 	allRemovePeerLimit := make(map[string]map[string]any)
-	json.Unmarshal(output, &allRemovePeerLimit)
+	re.NoError(json.Unmarshal(output, &allRemovePeerLimit))
 	re.Equal(float64(20), allRemovePeerLimit["1"]["remove-peer"].(float64))
 	re.Equal(float64(25), allRemovePeerLimit["3"]["remove-peer"].(float64))
 	_, ok = allRemovePeerLimit["2"]["add-peer"]
@@ -512,7 +512,7 @@ func (s *storeTestSuite) checkStore(cluster *pdTests.TestCluster) {
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	allRemovePeerLimit = make(map[string]map[string]any)
-	json.Unmarshal(output, &allRemovePeerLimit)
+	re.NoError(json.Unmarshal(output, &allRemovePeerLimit))
 	re.Equal(float64(21), allRemovePeerLimit["1"]["remove-peer"].(float64))
 	re.Equal(float64(21), allRemovePeerLimit["3"]["remove-peer"].(float64))
 }

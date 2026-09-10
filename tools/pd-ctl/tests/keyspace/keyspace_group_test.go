@@ -86,7 +86,8 @@ func (suite *keyspaceGroupTestSuite) SetupTest() {
 	re.NoError(err)
 	suite.tsoAddrs = suite.tsoCluster.GetAddrs()
 
-	suite.idAllocator.Alloc(1) // keyspace group 0 is reserved
+	_, _, err = suite.idAllocator.Alloc(1) // keyspace group 0 is reserved
+	re.NoError(err)
 }
 
 func (suite *keyspaceGroupTestSuite) TearDownTest() {
@@ -440,7 +441,9 @@ func (suite *keyspaceGroupTestSuite) TestShowKeyspaceGroupPrimary() {
 		output, err := tests.ExecuteCommand(cmd, args...)
 		re.NoError(err)
 		var resp handlers.GetKeyspaceGroupPrimaryResponse
-		json.Unmarshal(output, &resp)
+		if err := json.Unmarshal(output, &resp); err != nil {
+			return false
+		}
 		return suite.tsoAddrs[0] == resp.Primary || suite.tsoAddrs[1] == resp.Primary
 	})
 
@@ -476,7 +479,9 @@ func (suite *keyspaceGroupTestSuite) TestShowKeyspaceGroupPrimary() {
 		output, err := tests.ExecuteCommand(cmd, args...)
 		re.NoError(err)
 		var resp handlers.GetKeyspaceGroupPrimaryResponse
-		json.Unmarshal(output, &resp)
+		if err := json.Unmarshal(output, &resp); err != nil {
+			return false
+		}
 		return suite.tsoAddrs[0] == resp.Primary || suite.tsoAddrs[1] == resp.Primary
 	})
 
