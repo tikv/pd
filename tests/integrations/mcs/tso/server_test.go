@@ -108,7 +108,7 @@ func (suite *tsoServerTestSuite) TestTSOServerStartAndStopNormally() {
 	}()
 
 	re := suite.Require()
-	s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+	s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, "")
 
 	defer cleanup()
 	testutil.Eventually(re, func() bool {
@@ -139,7 +139,7 @@ func (suite *tsoServerTestSuite) TestParticipantStartWithAdvertiseListenAddr() {
 
 	cfg := tso.NewConfig()
 	cfg.BackendEndpoints = suite.backendEndpoints
-	cfg.ListenAddr = tempurl.Alloc()
+	cfg.ListenAddr = "http://127.0.0.1:0"
 	cfg.AdvertiseListenAddr = tempurl.Alloc()
 	cfg, err := tso.GenerateConfig(cfg)
 	re.NoError(err)
@@ -200,7 +200,7 @@ func checkTSOPath(re *require.Assertions, isKeyspaceGroupEnabled bool) {
 		re.Equal(1, getEtcdTimestampKeyNum(re, client))
 	}
 
-	_, cleanup := tests.StartSingleTSOTestServer(ctx, re, backendEndpoints, tempurl.Alloc())
+	_, cleanup := tests.StartSingleTSOTestServer(ctx, re, backendEndpoints, "")
 	defer cleanup()
 
 	if !kerneltype.IsNextGen() {

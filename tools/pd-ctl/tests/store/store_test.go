@@ -35,6 +35,7 @@ import (
 	"github.com/tikv/pd/pkg/response"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
 	pdTests "github.com/tikv/pd/tests"
 	ctl "github.com/tikv/pd/tools/pd-ctl/pdctl"
@@ -285,9 +286,11 @@ func (s *storeTestSuite) checkStore(cluster *pdTests.TestCluster) {
 	re.NoError(leaderServer.Run())
 
 	re.NotEmpty(cluster.WaitLeader())
-	storesLimit := leaderServer.GetPersistOptions().GetAllStoresLimit()
-	re.Equal(float64(20), storesLimit[1].AddPeer)
-	re.Equal(float64(20), storesLimit[1].RemovePeer)
+	testutil.Eventually(re, func() bool {
+		storesLimit := leaderServer.GetPersistOptions().GetAllStoresLimit()
+		limit, ok := storesLimit[1]
+		return ok && limit.AddPeer == float64(20) && limit.RemovePeer == float64(20)
+	})
 
 	// store limit all <rate> <type>
 	args = []string{"-u", pdAddr, "store", "limit", "all", "25", "remove-peer"}

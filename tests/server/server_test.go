@@ -27,7 +27,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	etcdtypes "go.etcd.io/etcd/client/pkg/v3/types"
-	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/goleak"
 
 	"github.com/pingcap/failpoint"
@@ -469,6 +468,7 @@ func TestCheckClusterID(t *testing.T) {
 
 	leaderA := clusterA.WaitLeader()
 	re.NotEmpty(leaderA)
+	clusterAID := clusterA.GetServer(leaderA).GetServer().GetMember().Etcd().Server.Cluster().ID()
 
 	// Close cluster A
 	err = clusterA.StopAll()
@@ -487,27 +487,16 @@ func TestCheckClusterID(t *testing.T) {
 
 	// Now try to check if cluster A's cluster ID matches cluster B
 	// This should fail because they have different cluster IDs
-	cfgA := clusterA.GetServer(leaderA).GetConfig()
 	cfgB := clusterB.GetServer(leaderB).GetConfig()
-
-	mockHandler := createMockHandler(re, "127.0.0.1")
-	svr, err := server.CreateServer(ctx, cfgA, nil, mockHandler)
-	re.NoError(err)
-
-	etcdCfg, err := svr.GetConfig().GenEmbedEtcdConfig()
-	re.NoError(err)
-	etcd, err := embed.StartEtcd(etcdCfg)
-	re.NoError(err)
-	defer etcd.Close()
 
 	// Try to check cluster A's ID against cluster B's URLs
 	// This should fail because the cluster IDs don't match
 	urlsMap, err := etcdtypes.NewURLsMap(cfgB.InitialCluster)
 	re.NoError(err)
-	tlsConfig, err := svr.GetConfig().Security.ToClientTLSConfig()
+	tlsConfig, err := cfgB.Security.ToClientTLSConfig()
 	re.NoError(err)
-	err = etcdutil.CheckClusterID(etcd.Server.Cluster().ID(), urlsMap, tlsConfig)
-	re.Error(err)
+	err = etcdutil.CheckClusterID(clusterAID, urlsMap, tlsConfig)
+	re.ErrorContains(err, "Etcd cluster ID mismatch")
 }
 
 func TestMeteringWriter(t *testing.T) {

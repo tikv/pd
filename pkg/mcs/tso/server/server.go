@@ -165,6 +165,21 @@ func (s *Server) Run() (err error) {
 	if err = utils.InitClient(s); err != nil {
 		return err
 	}
+	if err = s.initListenerAndUpdateConfig(); err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil && s.serviceRegister != nil {
+			if deregisterErr := s.serviceRegister.Deregister(); deregisterErr != nil {
+				log.Warn("failed to deregister the service", errs.ZapError(deregisterErr))
+			}
+		}
+		if err != nil && s.GetListener() != nil {
+			if closeErr := s.GetListener().Close(); closeErr != nil {
+				log.Warn("failed to close listener", errs.ZapError(closeErr))
+			}
+		}
+	}()
 
 	if s.serviceID, s.serviceRegister, err = utils.Register(s, mcs.TSOServiceName); err != nil {
 		return err
@@ -347,6 +362,24 @@ func (s *Server) GetTLSConfig() *grpcutil.TLSConfig {
 	return &s.cfg.Security.TLSConfig
 }
 
+func (s *Server) initListenerAndUpdateConfig() error {
+	oldListenAddr := s.cfg.ListenAddr
+	if err := s.InitListener(s.GetTLSConfig(), s.cfg.ListenAddr); err != nil {
+		return err
+	}
+	actualListenAddr := s.GetActualListenAddr()
+	if actualListenAddr == "" {
+		return nil
+	}
+	s.cfg.ListenAddr = server.ResolveListenAddr(s.cfg.ListenAddr, actualListenAddr)
+	s.cfg.AdvertiseListenAddr = server.ResolveAdvertiseListenAddr(s.cfg.AdvertiseListenAddr, actualListenAddr)
+	if s.cfg.Name == "" || s.cfg.Name == oldListenAddr {
+		s.cfg.Name = s.cfg.AdvertiseListenAddr
+	}
+	s.advertiseListenHost = parseAdvertiseListenHost(s.cfg.AdvertiseListenAddr)
+	return nil
+}
+
 func (s *Server) startServer() (err error) {
 	clusterID := keypath.ClusterID()
 	// It may lose accuracy if use float64 to store uint64. So we store the cluster id in label.
@@ -368,10 +401,6 @@ func (s *Server) startServer() (err error) {
 	s.tsoProtoFactory = &tsoutil.TSOProtoFactory{}
 	s.service = &Service{Server: s}
 
-	if err := s.InitListener(s.GetTLSConfig(), s.cfg.ListenAddr); err != nil {
-		return err
-	}
-
 	serverReadyChan := make(chan struct{})
 	defer close(serverReadyChan)
 	s.serverLoopWg.Add(1)
@@ -390,22 +419,7 @@ func (s *Server) startServer() (err error) {
 
 // CreateServer creates the Server
 func CreateServer(ctx context.Context, cfg *Config) *Server {
-	addr := cfg.GetAdvertiseListenAddr()
-	parsed, err := url.Parse(addr)
-	advertiseListenHost := ""
-	if err != nil {
-		if _, _, splitErr := net.SplitHostPort(addr); splitErr != nil {
-			panic(fmt.Sprintf("invalid advertise listen address: %s", addr))
-		}
-		advertiseListenHost = addr
-	} else {
-		advertiseListenHost = parsed.Host
-		if advertiseListenHost == "" {
-			if _, _, splitErr := net.SplitHostPort(addr); splitErr == nil {
-				advertiseListenHost = addr
-			}
-		}
-	}
+	advertiseListenHost := parseAdvertiseListenHost(cfg.GetAdvertiseListenAddr())
 	svr := &Server{
 		BaseServer:          server.NewBaseServer(ctx),
 		DiagnosticsServer:   sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
@@ -413,6 +427,23 @@ func CreateServer(ctx context.Context, cfg *Config) *Server {
 		advertiseListenHost: advertiseListenHost,
 	}
 	return svr
+}
+
+func parseAdvertiseListenHost(addr string) string {
+	parsed, err := url.Parse(addr)
+	if err != nil {
+		if _, _, splitErr := net.SplitHostPort(addr); splitErr != nil {
+			panic(fmt.Sprintf("invalid advertise listen address: %s", addr))
+		}
+		return addr
+	}
+	advertiseListenHost := parsed.Host
+	if advertiseListenHost == "" {
+		if _, _, splitErr := net.SplitHostPort(addr); splitErr == nil {
+			advertiseListenHost = addr
+		}
+	}
+	return advertiseListenHost
 }
 
 // CreateServerWrapper encapsulates the configuration/log/metrics initialization and create the server
