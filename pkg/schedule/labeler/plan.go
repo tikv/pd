@@ -43,7 +43,7 @@ func (p *Plan) SetLabelRule(rule *LabelRule) error {
 	if p.err != nil {
 		return p.err
 	}
-	if err := rule.checkAndAdjust(); err != nil {
+	if err := rule.CheckAndAdjust(); err != nil {
 		p.err = err
 		return err
 	}

@@ -164,7 +164,7 @@ func LoadKeyspace(c *gin.Context) {
 			return
 		}
 		// keyspace has been checked in LoadKeyspace, so no need to check again.
-		groupID, err := groupManager.GetGroupByKeyspaceID(meta.GetId())
+		groupID, _, err := groupManager.GetGroupByKeyspaceID(meta.GetId())
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 			return
@@ -356,6 +356,14 @@ func UpdateKeyspaceConfig(c *gin.Context) {
 		}
 		if mutation.Key == keyspace.RegionBoundType {
 			err = errs.ErrUnsupportedOperationInKeyspace.FastGen("region bound type")
+			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+			return
+		}
+		if mutation.Key == keyspace.WaitRegionSplitKey {
+			// Set once at creation time and read by CheckKeyspaceRegionBound to
+			// decide whether the keyspace is safe to use yet; letting a PATCH
+			// flip it to "false" mid-creation would defeat that check.
+			err = errs.ErrUnsupportedOperationInKeyspace.FastGen("wait region split")
 			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 			return
 		}

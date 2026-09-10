@@ -847,6 +847,52 @@ func (m *GroupManager) DeleteKeyspaceGroupByID(id uint32) (*endpoint.KeyspaceGro
 	return kg, nil
 }
 
+// saveKeyspaceGroupTxnOp will try to save the given keyspace group into the storage.
+func (m *GroupManager) saveKeyspaceGroupTxnOp(groupID uint32, keyspaceID uint32, mutation int) txnOp {
+	return func(txn kv.Txn) error {
+		// Check if keyspace group has already existed.
+		oldKG, err := m.store.LoadKeyspaceGroup(txn, groupID)
+		if err != nil {
+			return err
+		}
+		if oldKG == nil {
+			return errs.ErrKeyspaceGroupNotExists.FastGenByArgs(groupID)
+		}
+		failpoint.Inject("saveKeyspaceGroupsTxnOpFailed", func() {
+			failpoint.Return(errs.ErrKeyspaceGroupExists)
+		})
+		if oldKG.IsSplitting() {
+			return errs.ErrKeyspaceGroupInSplit.FastGenByArgs(groupID)
+		}
+		if oldKG.IsMerging() {
+			return errs.ErrKeyspaceGroupInMerging.FastGenByArgs(groupID)
+		}
+		changed := false
+		switch mutation {
+		case opAdd:
+			if !slice.Contains(oldKG.Keyspaces, keyspaceID) {
+				oldKG.Keyspaces = append(oldKG.Keyspaces, keyspaceID)
+				changed = true
+			}
+		case opDelete:
+			oldSize := len(oldKG.Keyspaces)
+			oldKG.Keyspaces = slice.Remove(oldKG.Keyspaces, keyspaceID)
+			if len(oldKG.Keyspaces) != oldSize {
+				changed = true
+			}
+		}
+		if !changed {
+			return nil
+		}
+
+		err = m.store.SaveKeyspaceGroup(txn, oldKG)
+		if err != nil {
+			return err
+		}
+		return nil
+	}
+}
+
 // saveKeyspaceGroups will try to save the given keyspace groups into the storage.
 // If any keyspace group already exists, it will return ErrKeyspaceGroupExists.
 func (m *GroupManager) saveKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceGroup) error {
@@ -912,18 +958,22 @@ func (m *GroupManager) getKeyspaceConfigByKindLocked(userKind endpoint.UserKind)
 	return config, nil
 }
 
-// GetGroupByKeyspaceID returns the keyspace group ID for the given keyspace ID.
-func (m *GroupManager) GetGroupByKeyspaceID(id uint32) (uint32, error) {
+// GetGroupByKeyspaceID returns the keyspace group ID and its user kind for the
+// given keyspace ID. The user kind is needed alongside the group ID by
+// anything that then looks the group up in the per-user-kind cache
+// (m.groups[userKind]) - assuming a caller-supplied user kind there can miss
+// a group that legitimately lives under a different one.
+func (m *GroupManager) GetGroupByKeyspaceID(id uint32) (uint32, endpoint.UserKind, error) {
 	m.RLock()
 	defer m.RUnlock()
-	for _, groups := range m.groups {
+	for userKind, groups := range m.groups {
 		for _, group := range groups.GetAll() {
 			if slice.Contains(group.Keyspaces, id) {
-				return group.ID, nil
+				return group.ID, userKind, nil
 			}
 		}
 	}
-	return 0, errs.ErrKeyspaceNotInAnyKeyspaceGroup
+	return 0, 0, errs.ErrKeyspaceNotInAnyKeyspaceGroup
 }
 
 // RemoveKeyspacesFromGroup removes the specified keyspaces from the given keyspace group.
@@ -934,8 +984,9 @@ func (m *GroupManager) RemoveKeyspacesFromGroup(groupID uint32, km *Manager, key
 	defer m.Unlock()
 
 	var (
-		kg  *endpoint.KeyspaceGroup
-		err error
+		kg      *endpoint.KeyspaceGroup
+		err     error
+		removed []uint32
 	)
 
 	if err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
@@ -982,6 +1033,7 @@ func (m *GroupManager) RemoveKeyspacesFromGroup(groupID uint32, km *Manager, key
 				if err != nil {
 					return err
 				}
+				removed = append(removed, ks)
 			}
 		}
 		kg.Keyspaces = newKeyspaces
@@ -994,22 +1046,30 @@ func (m *GroupManager) RemoveKeyspacesFromGroup(groupID uint32, km *Manager, key
 
 	// Update the cache
 	m.putKeyspaceGroupToCacheLocked(kg)
+	// Only now that the transaction has actually committed is it safe to
+	// refresh each removed keyspace's cache - see RemoveKeyspace and
+	// refreshKeyspaceMetaCache.
+	for _, id := range removed {
+		km.refreshKeyspaceMetaCache(id)
+	}
 
 	return kg, nil
 }
 
 var failpointOnce sync.Once
 
-// UpdateKeyspaceForGroup updates the keyspace field for the keyspace group.
-func (m *GroupManager) UpdateKeyspaceForGroup(userKind endpoint.UserKind, groupID string, keyspaceID uint32, mutation int) error {
+// updateKeyspaceForGroupTxnOp returns a txn op (and a post-commit callback) that
+// adds/removes the keyspace to/from the keyspace group within the keyspace
+// creation transaction, so the group membership is committed atomically with the
+// keyspace meta.
+func (m *GroupManager) updateKeyspaceForGroupTxnOp(userKind endpoint.UserKind, id string, keyspaceID uint32, mutation int) (txnOp, txnCb, error) {
 	if m == nil {
-		return nil
+		return nil, nil, nil
 	}
-	id, err := strconv.ParseUint(groupID, 10, 64)
+	groupID, err := strconv.ParseUint(id, 10, 32)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
-
 	failpoint.Inject("externalAllocNode", func(val failpoint.Value) {
 		failpointOnce.Do(func() {
 			addrs := val.(string)
@@ -1017,49 +1077,76 @@ func (m *GroupManager) UpdateKeyspaceForGroup(userKind endpoint.UserKind, groupI
 		})
 	})
 	m.Lock()
-	defer m.Unlock()
-	return m.updateKeyspaceForGroupLocked(userKind, id, keyspaceID, mutation)
-}
+	kg := m.groups[userKind].Get(uint32(groupID))
 
-func (m *GroupManager) updateKeyspaceForGroupLocked(userKind endpoint.UserKind, groupID uint64, keyspaceID uint32, mutation int) error {
-	var kg *endpoint.KeyspaceGroup
-	if err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
-		var err error
-		kg, err = m.store.LoadKeyspaceGroup(txn, uint32(groupID))
-		if err != nil {
-			return err
-		}
-		if kg == nil || endpoint.StringUserKind(kg.UserKind) != userKind {
-			return errs.ErrKeyspaceGroupNotExists.FastGenByArgs(uint32(groupID))
-		}
-		if kg.IsSplitting() {
-			return errs.ErrKeyspaceGroupInSplit.FastGenByArgs(uint32(groupID))
-		}
-		if kg.IsMerging() {
-			return errs.ErrKeyspaceGroupInMerging.FastGenByArgs(uint32(groupID))
-		}
-
-		changed := false
-		switch mutation {
-		case opAdd:
-			if !slice.Contains(kg.Keyspaces, keyspaceID) {
-				kg.Keyspaces = append(kg.Keyspaces, keyspaceID)
-				changed = true
-			}
-		case opDelete:
-			lenOfKeyspaces := len(kg.Keyspaces)
-			kg.Keyspaces = slice.Remove(kg.Keyspaces, keyspaceID)
-			changed = lenOfKeyspaces != len(kg.Keyspaces)
-		}
-		if !changed {
-			return nil
-		}
-		return m.store.SaveKeyspaceGroup(txn, kg)
-	}); err != nil {
-		return err
+	if kg == nil {
+		m.Unlock()
+		return nil, nil, errs.ErrKeyspaceGroupNotExists.FastGenByArgs(uint32(groupID))
 	}
-	m.putKeyspaceGroupToCacheLocked(kg)
-	return nil
+	if kg.IsSplitting() {
+		m.Unlock()
+		return nil, nil, errs.ErrKeyspaceGroupInSplit.FastGenByArgs(uint32(groupID))
+	}
+	if kg.IsMerging() {
+		m.Unlock()
+		return nil, nil, errs.ErrKeyspaceGroupInMerging.FastGenByArgs(uint32(groupID))
+	}
+	m.Unlock()
+	cb := func(err error) {
+		if err != nil {
+			return
+		}
+		// Retry (with backoff) outside the lock so a transient load failure
+		// doesn't hold up other groups' callbacks.
+		var kg *endpoint.KeyspaceGroup
+		var loadErr error
+		for i := range 3 {
+			loadErr = m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
+				var err error
+				kg, err = m.store.LoadKeyspaceGroup(txn, uint32(groupID))
+				return err
+			})
+			if loadErr == nil && kg != nil {
+				break
+			}
+			if i < 2 {
+				time.Sleep(time.Second)
+			}
+		}
+		if loadErr != nil || kg == nil {
+			log.Error("failed to reload keyspace group into cache after commit, cache may be stale",
+				zap.Uint64("group-id", groupID), zap.Error(loadErr))
+			return
+		}
+		m.Lock()
+		defer m.Unlock()
+		// Re-read once more under the lock instead of Put-ing the snapshot
+		// loaded above: this callback can be delayed behind a later commit
+		// whose own callback already ran and cached a newer membership, and
+		// Put-ing the stale outer snapshot would clobber it. Re-reading here
+		// means whichever callback's Put runs last always reads what is
+		// currently durable, so the cache converges to storage regardless of
+		// callback ordering.
+		var fresh *endpoint.KeyspaceGroup
+		loadErr = m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
+			var err error
+			fresh, err = m.store.LoadKeyspaceGroup(txn, uint32(groupID))
+			return err
+		})
+		if loadErr != nil || fresh == nil {
+			log.Error("failed to re-validate keyspace group before caching, cache may be stale",
+				zap.Uint64("group-id", groupID), zap.Error(loadErr))
+			return
+		}
+		// Use the userKind-bucket-safe helper rather than Put-ing directly
+		// into m.groups[userKind]: fresh carries its own current UserKind,
+		// which may differ from the userKind captured above if a concurrent
+		// UpdateKeyspaceGroup reassignment landed first, and this keeps the
+		// cache from holding a duplicate copy under the wrong bucket.
+		m.putKeyspaceGroupToCacheLocked(fresh)
+	}
+	op := m.saveKeyspaceGroupTxnOp(uint32(groupID), keyspaceID, mutation)
+	return op, cb, nil
 }
 
 // UpdateKeyspaceGroup updates the keyspace group.
