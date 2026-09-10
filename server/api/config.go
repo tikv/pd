@@ -253,9 +253,8 @@ func (h *confHandler) updateMetaServiceGroups(oldCfg, newCfg *config.KeyspaceCon
 		return errors.New("meta-service groups manager is not initialized")
 	}
 	// Use newCfg.MetaServiceGroups directly (not a GetMetaServiceGroups copy) so
-	// the map persisted via newCfg and the map applied to the manager are the
-	// same reference. newCfg is a locally owned clone, so there is no aliasing
-	// with the live config.
+	// the map persisted via newCfg and the map passed to the manager have the
+	// same normalized contents. The manager takes ownership of its own copy.
 	newGroups := newCfg.MetaServiceGroups
 	// Normalize (trim/dedup) before computing deletedGroups. Otherwise a
 	// whitespace-padded ID (e.g. " g ") for an existing group g would not match
