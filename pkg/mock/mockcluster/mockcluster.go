@@ -176,6 +176,11 @@ func (mc *Cluster) GetHotPeerStats(rw utils.RWType) map[uint64][]*statistics.Hot
 	return mc.HotCache.GetHotPeerStats(rw, mc.GetHotRegionCacheHitsThreshold())
 }
 
+// GetHotPeerStatsForStores returns hot peer stats for the specified stores.
+func (mc *Cluster) GetHotPeerStatsForStores(rw utils.RWType, storeIDs []uint64) map[uint64][]*statistics.HotPeerStat {
+	return mc.HotCache.GetHotPeerStatsForStores(rw, storeIDs, mc.GetHotRegionCacheHitsThreshold())
+}
+
 // HotRegionsFromStore picks hot regions in specify store.
 func (mc *Cluster) HotRegionsFromStore(store uint64, kind utils.RWType) []*core.RegionInfo {
 	stats := hotRegionsFromStore(mc.HotCache, store, kind, mc.GetHotRegionCacheHitsThreshold())
