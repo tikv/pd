@@ -121,7 +121,9 @@ func prepareWithEtcdConfig(
 		cleanupOnce.Do(func() {
 			cancel()
 			if client != nil {
-				client.Close()
+				if err := client.Close(); err != nil {
+					t.Errorf("close etcd client: %v", err)
+				}
 			}
 			etcd.Close()
 		})

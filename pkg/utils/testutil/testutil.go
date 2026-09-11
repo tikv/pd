@@ -119,9 +119,7 @@ func InitTempFileLogger(t testing.TB, level string) (fname string) {
 	f, err := os.CreateTemp(t.TempDir(), "pd_tests")
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		if err := f.Close(); err != nil {
-			t.Errorf("close temporary file logger: %v", err)
-		}
+		assert.NoError(t, f.Close(), "close temporary file logger")
 	})
 	fname = f.Name()
 	cfg.File.Filename = fname
@@ -132,9 +130,7 @@ func InitTempFileLogger(t testing.TB, level string) (fname string) {
 	restoreLogger := log.ReplaceGlobals(lg, p)
 	t.Cleanup(func() {
 		restoreLogger()
-		if err := lg.Sync(); err != nil {
-			t.Errorf("sync temporary file logger: %v", err)
-		}
+		assert.NoError(t, lg.Sync(), "sync temporary file logger")
 	})
 	return fname
 }
