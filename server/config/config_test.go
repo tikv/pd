@@ -33,12 +33,13 @@ import (
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/configutil"
+	"github.com/tikv/pd/pkg/utils/jsonutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 func TestSecurity(t *testing.T) {
@@ -95,8 +96,13 @@ func TestReloadDefaultStoreLimit(t *testing.T) {
 
 	opt, err := newTestScheduleOption()
 	re.NoError(err)
+	opt.GetScheduleConfig().StoreLimit[1] = sc.StoreLimitConfig{AddPeer: 10, RemovePeer: 20, TransferLeaderIn: 30}
+	opt.GetScheduleConfig().StoreLimit[2] = sc.StoreLimitConfig{TransferLeaderIn: 0}
+	opt.SetStoreLimit(1, storelimit.AddPeer, 40)
+	re.Equal(sc.StoreLimitConfig{AddPeer: 40, RemovePeer: 20, TransferLeaderIn: 30}, opt.GetStoreLimit(1))
 	opt.SetAllStoresLimit(storelimit.AddPeer, 60)
-	re.Equal(sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 15}, opt.GetScheduleConfig().DefaultStoreLimit)
+	re.Equal(sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 20, TransferLeaderIn: 30}, opt.GetStoreLimit(1))
+	re.Equal(sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 15, TransferLeaderIn: storelimit.Unlimited}, opt.GetScheduleConfig().DefaultStoreLimit)
 
 	storage := storage.NewStorageWithMemoryBackend()
 	re.NoError(opt.Persist(storage))
@@ -108,12 +114,14 @@ func TestReloadDefaultStoreLimit(t *testing.T) {
 	re.NoError(err)
 	re.NoError(newOpt.Reload(storage))
 
-	expected := sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 15}
+	expected := sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 15, TransferLeaderIn: storelimit.Unlimited}
 	re.Equal(expected, newOpt.GetScheduleConfig().DefaultStoreLimit)
 	re.Equal(expected, newOpt.GetStoreLimit(100))
+	re.Equal(sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 20, TransferLeaderIn: 30}, newOpt.GetStoreLimit(1))
+	re.Zero(newOpt.GetStoreLimit(2).TransferLeaderIn)
 
 	newOpt.SetStoreLimit(101, storelimit.RemovePeer, 70)
-	re.Equal(sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 70}, newOpt.GetStoreLimit(101))
+	re.Equal(sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 70, TransferLeaderIn: storelimit.Unlimited}, newOpt.GetStoreLimit(101))
 
 	cfg := newOpt.GetScheduleConfig().Clone()
 	cfg.DefaultStoreLimit.AddPeer = 0
@@ -125,20 +133,23 @@ func TestReloadDefaultStoreLimit(t *testing.T) {
 	reloadedOpt, err := newTestScheduleOption()
 	re.NoError(err)
 	re.NoError(reloadedOpt.Reload(storage))
-	re.Equal(sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 15}, reloadedOpt.GetScheduleConfig().DefaultStoreLimit)
-	re.Equal(sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 15}, reloadedOpt.GetStoreLimit(102))
+	re.Equal(sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 15, TransferLeaderIn: storelimit.Unlimited}, reloadedOpt.GetScheduleConfig().DefaultStoreLimit)
+	re.Equal(sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 15, TransferLeaderIn: storelimit.Unlimited}, reloadedOpt.GetStoreLimit(102))
 }
 
 func TestDefaultStoreLimitAdjust(t *testing.T) {
 	re := require.New(t)
 	oldAddPeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
 	oldRemovePeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer)
+	oldTransferLeaderIn := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.TransferLeaderIn)
 	defer func() {
 		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, oldAddPeer)
 		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, oldRemovePeer)
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.TransferLeaderIn, oldTransferLeaderIn)
 	}()
 	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, 15)
 	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, 15)
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.TransferLeaderIn, storelimit.Unlimited)
 
 	cases := []struct {
 		name   string
@@ -151,8 +162,9 @@ func TestDefaultStoreLimitAdjust(t *testing.T) {
 [schedule.default-store-limit]
 add-peer = 0
 remove-peer = 60
+transfer-leader-in = 0
 `,
-			expect: sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 60},
+			expect: sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 60, TransferLeaderIn: 0},
 		},
 		{
 			name: "store balance rate backfills undefined field",
@@ -163,7 +175,7 @@ store-balance-rate = 50
 [schedule.default-store-limit]
 add-peer = 0
 `,
-			expect: sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 50},
+			expect: sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 50, TransferLeaderIn: storelimit.Unlimited},
 		},
 		{
 			name: "explicit default store limit wins over store balance rate",
@@ -174,8 +186,9 @@ store-balance-rate = 50
 [schedule.default-store-limit]
 add-peer = 60
 remove-peer = 70
+transfer-leader-in = 30
 `,
-			expect: sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 70},
+			expect: sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 70, TransferLeaderIn: 30},
 		},
 	}
 	for _, testCase := range cases {
@@ -192,13 +205,130 @@ remove-peer = 70
 	data := []byte(`{"store-balance-rate":50}`)
 	re.NoError(json.Unmarshal(data, schedule))
 	re.NoError(schedule.MigrateDeprecatedFlagsFromJSON(data))
-	re.Equal(sc.StoreLimitConfig{AddPeer: 50, RemovePeer: 50}, schedule.DefaultStoreLimit)
+	re.Equal(sc.StoreLimitConfig{AddPeer: 50, RemovePeer: 50, TransferLeaderIn: storelimit.Unlimited}, schedule.DefaultStoreLimit)
 
 	schedule = &sc.ScheduleConfig{}
 	data = []byte(`{"store-balance-rate":50,"default-store-limit":{"add-peer":0,"remove-peer":60}}`)
 	re.NoError(json.Unmarshal(data, schedule))
 	re.NoError(schedule.MigrateDeprecatedFlagsFromJSON(data))
-	re.Equal(sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 60}, schedule.DefaultStoreLimit)
+	re.Equal(sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 60, TransferLeaderIn: storelimit.Unlimited}, schedule.DefaultStoreLimit)
+
+	for _, testCase := range []struct {
+		name     string
+		limit    map[string]float64
+		expected float64
+	}{
+		{"omitted transfer limit", map[string]float64{"add-peer": 10, "remove-peer": 20}, 30},
+		{"explicit zero", map[string]float64{"add-peer": 10, "remove-peer": 20, "transfer-leader-in": 0}, 0},
+		{"explicit finite limit", map[string]float64{"add-peer": 10, "remove-peer": 20, "transfer-leader-in": 12}, 12},
+		{"explicit unlimited", map[string]float64{"add-peer": 10, "remove-peer": 20, "transfer-leader-in": storelimit.Unlimited}, storelimit.Unlimited},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			cfg := NewConfig()
+			re.NoError(cfg.Adjust(nil, false))
+			cfg.Schedule.DefaultStoreLimit.TransferLeaderIn = 30
+			cfg.Schedule.StoreLimit[2] = sc.StoreLimitConfig{AddPeer: 40, RemovePeer: 50, TransferLeaderIn: 60}
+			updated, found, err := jsonutil.AddKeyValue(&cfg.Schedule, "store-limit", map[uint64]map[string]float64{1: testCase.limit})
+			re.NoError(err)
+			re.True(updated)
+			re.True(found)
+			re.NoError(cfg.Schedule.Validate())
+			expected := sc.StoreLimitConfig{AddPeer: 10, RemovePeer: 20, TransferLeaderIn: testCase.expected}
+			re.Equal(expected, cfg.Schedule.StoreLimit[1])
+			re.Equal(sc.StoreLimitConfig{AddPeer: 40, RemovePeer: 50, TransferLeaderIn: 60}, cfg.Schedule.StoreLimit[2])
+
+			data, err := json.Marshal(map[string]any{
+				"default-store-limit": cfg.Schedule.DefaultStoreLimit,
+				"store-limit":         map[uint64]map[string]float64{1: testCase.limit},
+			})
+			re.NoError(err)
+			persisted := &sc.ScheduleConfig{}
+			re.NoError(json.Unmarshal(data, persisted))
+			re.NoError(persisted.MigrateDeprecatedFlagsFromJSON(data))
+			re.Equal(expected, persisted.StoreLimit[1])
+		})
+	}
+}
+
+func TestStoreLimitPartialJSONUpdates(t *testing.T) {
+	for _, testCase := range []struct {
+		name     string
+		data     string
+		expected map[uint64]sc.StoreLimitConfig
+	}{
+		{"omitted store limits", `{"max-snapshot-count":64}`, nil},
+		{"null store limits", `{"max-snapshot-count":64,"store-limit":null}`, nil},
+		{"empty store limits", `{"max-snapshot-count":64,"store-limit":{}}`, map[uint64]sc.StoreLimitConfig{}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			// Tools decode into a zero-value config, without calling Adjust first.
+			cfg := &sc.ScheduleConfig{}
+			re.NoError(json.Unmarshal([]byte(testCase.data), cfg))
+			re.Equal(testCase.expected, cfg.StoreLimit)
+
+			existing := sc.StoreLimitConfig{AddPeer: 10, RemovePeer: 20, TransferLeaderIn: 300}
+			cfg.StoreLimit = map[uint64]sc.StoreLimitConfig{1: existing}
+			re.NoError(json.Unmarshal([]byte(testCase.data), cfg))
+			re.Equal(map[uint64]sc.StoreLimitConfig{1: existing}, cfg.StoreLimit)
+		})
+	}
+
+	for _, testCase := range []struct {
+		name     string
+		data     string
+		expected sc.StoreLimitConfig
+	}{
+		{"legacy peer update", `{"add-peer":30,"remove-peer":40}`, sc.StoreLimitConfig{AddPeer: 30, RemovePeer: 40, TransferLeaderIn: 300}},
+		{"leader update", `{"transfer-leader-in":120}`, sc.StoreLimitConfig{AddPeer: 10, RemovePeer: 20, TransferLeaderIn: 120}},
+		{"zero", `{"transfer-leader-in":0}`, sc.StoreLimitConfig{AddPeer: 10, RemovePeer: 20}},
+		{"unlimited", `{"transfer-leader-in":100000000}`, sc.StoreLimitConfig{AddPeer: 10, RemovePeer: 20, TransferLeaderIn: storelimit.Unlimited}},
+		{"case insensitive", `{"TRANSFER-LEADER-IN":120}`, sc.StoreLimitConfig{AddPeer: 10, RemovePeer: 20, TransferLeaderIn: 120}},
+		{"null field", `{"transfer-leader-in":null}`, sc.StoreLimitConfig{AddPeer: 10, RemovePeer: 20, TransferLeaderIn: 300}},
+		{"empty entry", `{}`, sc.StoreLimitConfig{AddPeer: 10, RemovePeer: 20, TransferLeaderIn: 300}},
+		{"null entry", `null`, sc.StoreLimitConfig{AddPeer: 10, RemovePeer: 20, TransferLeaderIn: 300}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			cfg := NewConfig()
+			re.NoError(cfg.Adjust(nil, false))
+			cfg.Schedule.StoreLimit[1] = sc.StoreLimitConfig{AddPeer: 10, RemovePeer: 20, TransferLeaderIn: 300}
+			cfg.Schedule.StoreLimit[2] = sc.StoreLimitConfig{AddPeer: 40, RemovePeer: 50, TransferLeaderIn: 600}
+			untouched := cfg.Schedule.StoreLimit[2]
+			defaults := cfg.Schedule.DefaultStoreLimit
+			re.NoError(json.Unmarshal([]byte(`{"store-limit":{"1":`+testCase.data+`}}`), &cfg.Schedule))
+			re.Equal(testCase.expected, cfg.Schedule.StoreLimit[1])
+			re.Equal(untouched, cfg.Schedule.StoreLimit[2])
+			re.Equal(defaults, cfg.Schedule.DefaultStoreLimit)
+
+			store := storage.NewStorageWithMemoryBackend()
+			re.NoError(NewPersistOptions(cfg).Persist(store))
+			reloaded := NewPersistOptions(NewConfig())
+			re.NoError(reloaded.Reload(store))
+			re.Equal(cfg.Schedule.StoreLimit, reloaded.GetScheduleConfig().StoreLimit)
+		})
+	}
+
+	for _, rate := range []float64{0, 300, storelimit.Unlimited} {
+		cfg := &sc.ScheduleConfig{
+			DefaultStoreLimit: sc.StoreLimitConfig{TransferLeaderIn: 120},
+			StoreLimit:        map[uint64]sc.StoreLimitConfig{1: {TransferLeaderIn: rate}},
+		}
+		require.NoError(t, json.Unmarshal([]byte(`{"store-limit":{"1":{"add-peer":10,"remove-peer":20}}}`), cfg))
+		require.Equal(t, rate, cfg.StoreLimit[1].TransferLeaderIn)
+	}
+	for _, data := range []string{
+		`{"default-store-limit":{"add-peer":60,"remove-peer":70,"transfer-leader-in":120},"store-limit":{"1":{"transfer-leader-in":300},"2":{}}}`,
+		`{"store-limit":{"1":{"transfer-leader-in":300},"2":null},"default-store-limit":{"add-peer":60,"remove-peer":70,"transfer-leader-in":120}}`,
+	} {
+		cfg := &sc.ScheduleConfig{}
+		require.NoError(t, json.Unmarshal([]byte(data), cfg))
+		require.Equal(t, sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 70, TransferLeaderIn: 300}, cfg.StoreLimit[1])
+		require.Equal(t, cfg.DefaultStoreLimit, cfg.StoreLimit[2])
+		require.NoError(t, json.Unmarshal([]byte(`{"store-limit":null}`), cfg))
+		require.Len(t, cfg.StoreLimit, 2)
+	}
 }
 
 func TestReloadLegacyStoreBalanceRate(t *testing.T) {
@@ -213,22 +343,29 @@ func TestReloadLegacyStoreBalanceRate(t *testing.T) {
 	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, 15)
 
 	type legacyScheduleConfig struct {
-		StoreBalanceRate float64 `json:"store-balance-rate"`
+		StoreBalanceRate float64                       `json:"store-balance-rate"`
+		StoreLimit       map[uint64]map[string]float64 `json:"store-limit"`
 	}
 	type legacyConfig struct {
 		Schedule legacyScheduleConfig `json:"schedule"`
 	}
 	storage := storage.NewStorageWithMemoryBackend()
 	re.NoError(storage.SaveConfig(&legacyConfig{
-		Schedule: legacyScheduleConfig{StoreBalanceRate: 60},
+		Schedule: legacyScheduleConfig{
+			StoreBalanceRate: 60,
+			StoreLimit: map[uint64]map[string]float64{
+				1: {"add-peer": 10, "remove-peer": 20},
+			},
+		},
 	}))
 
 	opt, err := newTestScheduleOption()
 	re.NoError(err)
 	re.NoError(opt.Reload(storage))
-	expected := sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 60}
+	expected := sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 60, TransferLeaderIn: storelimit.Unlimited}
 	re.Equal(expected, opt.GetScheduleConfig().DefaultStoreLimit)
 	re.Equal(expected, opt.GetStoreLimit(100))
+	re.Equal(sc.StoreLimitConfig{AddPeer: 10, RemovePeer: 20, TransferLeaderIn: storelimit.Unlimited}, opt.GetStoreLimit(1))
 	re.Zero(opt.GetScheduleConfig().StoreBalanceRate)
 }
 
@@ -305,6 +442,32 @@ func TestValidation(t *testing.T) {
 	cfg.Schedule.DefaultStoreLimit.RemovePeer = math.NaN()
 	re.ErrorContains(cfg.Schedule.Validate(), "default-store-limit.remove-peer")
 	cfg.Schedule.DefaultStoreLimit.RemovePeer = 15
+	for _, rate := range []float64{-1, math.NaN(), math.Inf(1)} {
+		cfg.Schedule.DefaultStoreLimit.TransferLeaderIn = rate
+		re.ErrorContains(cfg.Schedule.Validate(), "default-store-limit.transfer-leader-in")
+	}
+	cfg.Schedule.DefaultStoreLimit.TransferLeaderIn = 0
+	for _, rate := range []float64{-1, math.NaN(), math.Inf(1), math.Inf(-1), 0, 15, storelimit.Unlimited} {
+		for _, testCase := range []struct {
+			name  string
+			limit sc.StoreLimitConfig
+		}{
+			{"add-peer", sc.StoreLimitConfig{AddPeer: rate}},
+			{"remove-peer", sc.StoreLimitConfig{RemovePeer: rate}},
+			{"transfer-leader-in", sc.StoreLimitConfig{TransferLeaderIn: rate}},
+		} {
+			t.Run(fmt.Sprintf("store-limit/%s/%v", testCase.name, rate), func(t *testing.T) {
+				re := require.New(t)
+				cfg.Schedule.StoreLimit[1] = testCase.limit
+				if rate < 0 || math.IsNaN(rate) || math.IsInf(rate, 0) {
+					re.ErrorContains(cfg.Schedule.Validate(), "store-limit[1]."+testCase.name)
+				} else {
+					re.NoError(cfg.Schedule.Validate())
+				}
+			})
+		}
+	}
+	delete(cfg.Schedule.StoreLimit, 1)
 	re.NoError(cfg.Schedule.Validate())
 	cfg.Schedule.TolerantSizeRatio = -0.6
 	re.Error(cfg.Schedule.Validate())

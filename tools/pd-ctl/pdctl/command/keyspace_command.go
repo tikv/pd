@@ -86,7 +86,7 @@ func newShowKeyspaceCommand() *cobra.Command {
 
 func showKeyspaceIDCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	resp, err := doRequest(cmd, fmt.Sprintf("%s/id/%s", keyspacePrefix, args[0]), http.MethodGet, http.Header{})
@@ -99,7 +99,7 @@ func showKeyspaceIDCommandFunc(cmd *cobra.Command, args []string) {
 
 func showKeyspaceNameCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	refreshGroupID, err := cmd.Flags().GetBool(nmForceRefreshGroupID)
@@ -137,7 +137,7 @@ func newCreateKeyspaceCommand() *cobra.Command {
 
 func createKeyspaceCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 
@@ -198,7 +198,7 @@ func newUpdateKeyspaceConfigCommand() *cobra.Command {
 
 func updateKeyspaceConfigCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	configPatch := map[string]*string{}
@@ -301,7 +301,7 @@ func newUpdateKeyspaceStateCommand() *cobra.Command {
 
 func updateKeyspaceStateCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 2 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	params := handlers.UpdateStateParam{
@@ -334,7 +334,7 @@ func newListKeyspaceCommand() *cobra.Command {
 
 func listKeyspaceCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 0 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 
@@ -395,7 +395,7 @@ func newShowKeyspaceRangeCommand() *cobra.Command {
 
 func showKeyspaceRangeByIDCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 
@@ -444,7 +444,7 @@ func showKeyspaceRangeByIDCommandFunc(cmd *cobra.Command, args []string) {
 
 func showKeyspaceRangeByNameCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 
@@ -512,7 +512,7 @@ func newSetPlacementCommand() *cobra.Command {
 
 func setPlacementCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) < 2 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 
@@ -614,7 +614,7 @@ func newRevertPlacementCommand() *cobra.Command {
 
 func revertPlacementCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 

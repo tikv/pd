@@ -28,6 +28,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -54,7 +55,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 type gcStateManagerTestSuite struct {
@@ -654,6 +655,7 @@ func (s *gcStateManagerTestSuite) TestCompatibleGCSafePointUpdateConcurrently() 
 
 func (s *gcStateManagerTestSuite) TestCompatibleServiceGCSafePointUpdateNullKeyspace() {
 	keyspaceID := constant.NullKeyspaceID
+	as := assert.New(s.T())
 	re := s.Require()
 	gcWorkerServiceID := "gc_worker"
 	cdcServiceID := "cdc"
@@ -670,20 +672,22 @@ func (s *gcStateManagerTestSuite) TestCompatibleServiceGCSafePointUpdateNullKeys
 	go func() {
 		defer wg.Done()
 		min, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint(keyspaceID, cdcServiceID, cdcServiceSafePoint, 10000, time.Now())
-		re.NoError(err)
-		re.True(updated)
+		if !as.NoError(err) || !as.True(updated) || !as.NotNil(min) {
+			return
+		}
 		// The service will init the service safepoint to 0(<10 for cdc) for gc_worker.
-		re.Equal(gcWorkerServiceID, min.ServiceID)
+		as.Equal(gcWorkerServiceID, min.ServiceID)
 	}()
 
 	// Updating the service safe point for br to 15 should success
 	go func() {
 		defer wg.Done()
 		min, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint(keyspaceID, brServiceID, brSafePoint, 10000, time.Now())
-		re.NoError(err)
-		re.True(updated)
+		if !as.NoError(err) || !as.True(updated) || !as.NotNil(min) {
+			return
+		}
 		// the service will init the service safepoint to 0(<10 for cdc) for gc_worker.
-		re.Equal(gcWorkerServiceID, min.ServiceID)
+		as.Equal(gcWorkerServiceID, min.ServiceID)
 	}()
 
 	// Updating the service safe point to 8 for gc_worker should be success
@@ -691,11 +695,12 @@ func (s *gcStateManagerTestSuite) TestCompatibleServiceGCSafePointUpdateNullKeys
 		defer wg.Done()
 		// update with valid ttl for gc_worker should be success.
 		min, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint(keyspaceID, gcWorkerServiceID, gcWorkerSafePoint, math.MaxInt64, time.Now())
-		re.NoError(err)
-		re.True(updated)
+		if !as.NoError(err) || !as.True(updated) || !as.NotNil(min) {
+			return
+		}
 		// the current min safepoint should be 8 for gc_worker(cdc 10)
-		re.Equal(gcWorkerSafePoint, min.SafePoint)
-		re.Equal(gcWorkerServiceID, min.ServiceID)
+		as.Equal(gcWorkerSafePoint, min.SafePoint)
+		as.Equal(gcWorkerServiceID, min.ServiceID)
 	}()
 
 	// Updating the service safe point to 14 for native_br should succeed
@@ -703,18 +708,21 @@ func (s *gcStateManagerTestSuite) TestCompatibleServiceGCSafePointUpdateNullKeys
 		defer wg.Done()
 		// update with valid ttl for native_br should succeed
 		min, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint(keyspaceID, nativeBRServiceID, nativeBRSafePoint, math.MaxInt64, time.Now())
-		re.NoError(err)
-		re.True(updated)
+		if !as.NoError(err) || !as.True(updated) || !as.NotNil(min) {
+			return
+		}
 		// the current min safepoint should be 8 for gc_worker(cdc 10)
-		re.Equal(gcWorkerServiceID, min.ServiceID)
+		as.Equal(gcWorkerServiceID, min.ServiceID)
 	}()
 
 	go func() {
 		defer wg.Done()
 		// Updating the service safe point of gc_worker's service with ttl not infinity should be failed.
 		_, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint(keyspaceID, gcWorkerServiceID, 10000, 10, time.Now())
-		re.Error(err)
-		re.False(updated)
+		if !as.Error(err) {
+			return
+		}
+		as.False(updated)
 	}()
 
 	// Updating the service safe point with negative ttl should be failed.
@@ -722,8 +730,10 @@ func (s *gcStateManagerTestSuite) TestCompatibleServiceGCSafePointUpdateNullKeys
 		defer wg.Done()
 		brTTL := int64(-100)
 		_, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint(keyspaceID, brServiceID, uint64(10000), brTTL, time.Now())
-		re.NoError(err)
-		re.False(updated)
+		if !as.NoError(err) {
+			return
+		}
+		as.False(updated)
 	}()
 
 	wg.Wait()
@@ -3265,7 +3275,8 @@ func benchmarkGetGCStateImpl(b *testing.B, excludeGCBarriers bool, keyspacesCoun
 					if errors.ErrorEqual(err, errs.ErrDecreasingTxnSafePoint) {
 						continue
 					}
-					re.NoError(err)
+					b.Error(err)
+					return
 				}
 			}
 		}()

@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pingcap/errors"
@@ -48,6 +49,7 @@ func mustGetResult[T any](re *require.Assertions, ch chan T) T {
 }
 
 func TestOrderedSingleFlight(t *testing.T) {
+	as := assert.New(t)
 	re := require.New(t)
 
 	ctx := context.Background()
@@ -78,7 +80,7 @@ func TestOrderedSingleFlight(t *testing.T) {
 	// Start the first call
 	go func() {
 		res, err := s.Do(ctx, f)
-		re.NoError(err)
+		as.NoError(err)
 		outCh <- res
 	}()
 
@@ -94,7 +96,7 @@ func TestOrderedSingleFlight(t *testing.T) {
 				res, err := s.Do(ctx, func(context.Context) (int, error) {
 					return <-inCh, nil
 				})
-				re.NoError(err)
+				as.NoError(err)
 				outCh <- res
 			})
 		}()
@@ -520,7 +522,7 @@ func TestOrderedSingleFlightCancellationWithCancellableFunction(t *testing.T) {
 }
 
 func TestOrderedSingleFightRandom(t *testing.T) {
-	re := require.New(t)
+	as := assert.New(t)
 
 	const concurrency = 10
 	const testTime = time.Second * 10
@@ -607,21 +609,27 @@ func TestOrderedSingleFightRandom(t *testing.T) {
 					if shouldCancel {
 						// It might finish before the cancel takes effect.
 						if r.err != nil {
-							re.ErrorIs(r.err, context.Canceled)
+							if !as.ErrorIs(r.err, context.Canceled) {
+								return
+							}
 						}
 					} else {
-						re.NoError(r.err)
+						if !as.NoError(r.err) {
+							return
+						}
 					}
 
 					// Check the strong order if the invocation is successful
 					if r.err == nil {
-						re.GreaterOrEqual(r.v, beforeValue)
-						re.LessOrEqual(r.v, afterValue)
+						if !as.GreaterOrEqual(r.v, beforeValue) || !as.LessOrEqual(r.v, afterValue) {
+							return
+						}
 					}
 
 				case <-time.After(testTime * 2):
 					innerCancel()
-					re.FailNow("result blocked for too long")
+					as.Fail("result blocked for too long")
+					return
 				}
 			}
 		}()

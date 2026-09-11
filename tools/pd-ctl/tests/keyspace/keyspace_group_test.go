@@ -86,7 +86,8 @@ func (suite *keyspaceGroupTestSuite) SetupTest() {
 	re.NoError(err)
 	suite.tsoAddrs = suite.tsoCluster.GetAddrs()
 
-	suite.idAllocator.Alloc(1) // keyspace group 0 is reserved
+	_, _, err = suite.idAllocator.Alloc(1) // keyspace group 0 is reserved
+	re.NoError(err)
 }
 
 func (suite *keyspaceGroupTestSuite) TearDownTest() {
@@ -414,22 +415,33 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupState() {
 func (suite *keyspaceGroupTestSuite) TestShowKeyspaceGroupPrimary() {
 	re := suite.Require()
 	cmd := ctl.GetRootCmd()
+	waitKeyspaceGroup := func(id uint32) endpoint.KeyspaceGroup {
+		var keyspaceGroup endpoint.KeyspaceGroup
+		testutil.Eventually(re, func() bool {
+			args := []string{"-u", suite.pdAddr, "keyspace-group", strconv.FormatUint(uint64(id), 10)}
+			output, err := tests.ExecuteCommand(cmd, args...)
+			if err != nil {
+				return false
+			}
+			var current endpoint.KeyspaceGroup
+			if err := json.Unmarshal(output, &current); err != nil {
+				return false
+			}
+			if current.ID != id || len(current.Members) != 2 {
+				return false
+			}
+			keyspaceGroup = current
+			return true
+		})
+		return keyspaceGroup
+	}
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller", `return(true)`))
 
 	defaultKeyspaceGroupID := strconv.FormatUint(uint64(constant.DefaultKeyspaceGroupID), 10)
 
 	// check keyspace group 0 information.
-	var keyspaceGroup endpoint.KeyspaceGroup
-	testutil.Eventually(re, func() bool {
-		args := []string{"-u", suite.pdAddr, "keyspace-group"}
-		output, err := tests.ExecuteCommand(cmd, append(args, defaultKeyspaceGroupID)...)
-		re.NoError(err)
-		err = json.Unmarshal(output, &keyspaceGroup)
-		re.NoError(err)
-		re.Equal(constant.DefaultKeyspaceGroupID, keyspaceGroup.ID)
-		return len(keyspaceGroup.Members) == 2
-	})
+	keyspaceGroup := waitKeyspaceGroup(constant.DefaultKeyspaceGroupID)
 	for _, member := range keyspaceGroup.Members {
 		re.Contains(suite.tsoAddrs, member.Address)
 	}
@@ -440,7 +452,9 @@ func (suite *keyspaceGroupTestSuite) TestShowKeyspaceGroupPrimary() {
 		output, err := tests.ExecuteCommand(cmd, args...)
 		re.NoError(err)
 		var resp handlers.GetKeyspaceGroupPrimaryResponse
-		json.Unmarshal(output, &resp)
+		if err := json.Unmarshal(output, &resp); err != nil {
+			return false
+		}
 		return suite.tsoAddrs[0] == resp.Primary || suite.tsoAddrs[1] == resp.Primary
 	})
 
@@ -453,19 +467,7 @@ func (suite *keyspaceGroupTestSuite) TestShowKeyspaceGroupPrimary() {
 	})
 
 	// check keyspace group 1 information.
-	testutil.Eventually(re, func() bool {
-		args := []string{"-u", suite.pdAddr, "keyspace-group"}
-		output, err := tests.ExecuteCommand(cmd, append(args, "1")...)
-		re.NoError(err)
-		if strings.Contains(string(output), "Failed") {
-			// If the error is ErrEtcdTxnConflict, it means there is a temporary failure.
-			re.Contains(string(output), "ErrEtcdTxnConflict", "output: %s", string(output))
-			return false
-		}
-		err = json.Unmarshal(output, &keyspaceGroup)
-		re.NoError(err)
-		return len(keyspaceGroup.Members) == 2
-	})
+	keyspaceGroup = waitKeyspaceGroup(1)
 	for _, member := range keyspaceGroup.Members {
 		re.Contains(suite.tsoAddrs, member.Address)
 	}
@@ -476,7 +478,9 @@ func (suite *keyspaceGroupTestSuite) TestShowKeyspaceGroupPrimary() {
 		output, err := tests.ExecuteCommand(cmd, args...)
 		re.NoError(err)
 		var resp handlers.GetKeyspaceGroupPrimaryResponse
-		json.Unmarshal(output, &resp)
+		if err := json.Unmarshal(output, &resp); err != nil {
+			return false
+		}
 		return suite.tsoAddrs[0] == resp.Primary || suite.tsoAddrs[1] == resp.Primary
 	})
 

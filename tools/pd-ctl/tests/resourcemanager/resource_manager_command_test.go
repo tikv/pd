@@ -47,7 +47,7 @@ func (s *testResourceManagerSuite) SetupSuite() {
 	cluster, err := pdTests.NewTestCluster(s.ctx, 1)
 	re.NoError(err)
 	s.cluster = cluster
-	s.cluster.RunInitialServers()
+	re.NoError(s.cluster.RunInitialServers())
 	re.NotEmpty(cluster.WaitLeader())
 	s.pdAddr = cluster.GetConfig().GetClientURL()
 }
@@ -60,7 +60,7 @@ func (s *testResourceManagerSuite) TearDownSuite() {
 func (s *testResourceManagerSuite) TestConfigController() {
 	re := s.Require()
 	expectCfg := server.Config{}
-	expectCfg.Adjust(nil)
+	re.NoError(expectCfg.Adjust(nil))
 	// Show controller config
 	checkShow := func() {
 		args := []string{"-u", s.pdAddr, "resource-manager", "config", "controller", "show"}

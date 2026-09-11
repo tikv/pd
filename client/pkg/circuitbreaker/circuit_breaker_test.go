@@ -19,15 +19,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
 	"github.com/tikv/pd/client/errs"
-	"github.com/tikv/pd/client/pkg/utils/testutil"
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(m)
 }
 
 // advance emulate the state machine clock moves forward by the given duration
@@ -159,7 +159,7 @@ func TestCircuitBreakerHalfOpenFailOverPendingCount(t *testing.T) {
 				<-wait
 				return No, nil
 			})
-			re.NoError(err)
+			assert.NoError(t, err)
 		}()
 	}
 	// make sure all requests are started
@@ -198,7 +198,7 @@ func TestCircuitBreakerCountOnlyRequestsInSameWindow(t *testing.T) {
 			<-wait
 			return No, nil
 		})
-		re.NoError(err)
+		assert.NoError(t, err)
 	}()
 	<-start // make sure the request is started
 	// assert running request is not counted

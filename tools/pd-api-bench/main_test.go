@@ -12,37 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package versioninfo
+package main
 
 import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/goleak"
 
-	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/tools/pd-api-bench/cases"
 )
 
-func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
-}
-
-func TestIsHotScheduleWithCPUSupported(t *testing.T) {
-	re := require.New(t)
-	re.False(IsHotScheduleWithCPUSupported(nil))
-
-	tests := []struct {
-		version string
-		expect  bool
-	}{
-		{"8.5.5", false},
-		{"8.5.6", false},
-		{"8.5.7", true},
-		{"9.0.0-beta.1", true},
-		{"9.0.0", true},
-		{"9.1.0", true},
-	}
-	for _, test := range tests {
-		re.Equal(test.expect, IsHotScheduleWithCPUSupported(MustParseVersion(test.version)), test.version)
-	}
+func TestValidateCaseNames(t *testing.T) {
+	registered := map[string]struct{}{"valid": {}}
+	require.NoError(t, validateCaseNames(map[string]cases.Config{"valid": {}}, registered, "test"))
+	require.EqualError(t,
+		validateCaseNames(map[string]cases.Config{"valid": {}, "invalid": {}}, registered, "test"),
+		"test case invalid not implemented")
 }

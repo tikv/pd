@@ -127,7 +127,7 @@ func newShowKeyspaceGroupPrimaryCommand() *cobra.Command {
 func showKeyspaceGroupsCommandFunc(cmd *cobra.Command, args []string) {
 	prefix := keyspaceGroupsPrefix
 	if len(args) > 1 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	cFunc := convertToKeyspaceGroups
@@ -171,7 +171,7 @@ func showKeyspaceGroupsCommandFunc(cmd *cobra.Command, args []string) {
 
 func splitKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) < 3 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	_, err := strconv.ParseUint(args[0], 10, 32)
@@ -201,7 +201,7 @@ func splitKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
 
 func splitRangeKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) < 4 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	_, err := strconv.ParseUint(args[0], 10, 32)
@@ -233,7 +233,7 @@ func splitRangeKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
 
 func finishSplitKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) < 1 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	_, err := strconv.ParseUint(args[0], 10, 32)
@@ -291,7 +291,7 @@ func mergeKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
 		params["merge-list"] = groups
 	} else {
 		cmd.Println("Must specify the source keyspace group ID(s) or the merge all flag")
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	// TODO: implement the retry mechanism under merge all flag.
@@ -300,7 +300,7 @@ func mergeKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
 
 func finishMergeKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) < 1 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	_, err := strconv.ParseUint(args[0], 10, 32)
@@ -318,7 +318,7 @@ func finishMergeKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
 
 func setNodesKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) < 2 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	_, err := strconv.ParseUint(args[0], 10, 32)
@@ -342,7 +342,7 @@ func setNodesKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
 
 func setPriorityKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) < 3 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	_, err := strconv.ParseUint(args[0], 10, 32)
@@ -377,7 +377,7 @@ func setPriorityKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
 
 func showKeyspaceGroupPrimaryCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) < 1 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	_, err := strconv.ParseUint(args[0], 10, 32)

@@ -22,6 +22,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -34,23 +35,30 @@ import (
 )
 
 func TestSendAndGetComponent(t *testing.T) {
+	as := assert.New(t)
 	re := require.New(t)
 	handler := func(context.Context, *server.Server) (http.Handler, apiutil.APIServiceGroup, error) {
 		mux := http.NewServeMux()
 		// check pd http sdk api
 		mux.HandleFunc("/pd/api/v1/cluster", func(w http.ResponseWriter, r *http.Request) {
 			callerID := apiutil.GetCallerIDOnHTTP(r)
-			re.Equal(command.PDControlCallerID, callerID)
+			if !as.Equal(command.PDControlCallerID, callerID) {
+				return
+			}
 			cluster := &metapb.Cluster{Id: 1}
 			clusterBytes, err := json.Marshal(cluster)
-			re.NoError(err)
+			if !as.NoError(err) {
+				return
+			}
 			w.Write(clusterBytes)
 		})
 		// check http client api
 		// TODO: remove this comment after replacing dialClient with the PD HTTP client completely.
 		mux.HandleFunc("/pd/api/v1/stores", func(w http.ResponseWriter, r *http.Request) {
 			callerID := apiutil.GetCallerIDOnHTTP(r)
-			re.Equal(command.PDControlCallerID, callerID)
+			if !as.Equal(command.PDControlCallerID, callerID) {
+				return
+			}
 			fmt.Fprint(w, callerID)
 		})
 		info := apiutil.APIServiceGroup{

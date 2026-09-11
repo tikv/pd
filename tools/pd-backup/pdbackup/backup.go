@@ -97,7 +97,6 @@ func GetBackupInfo(client *clientv3.Client, pdAddr string) (*BackupInfo, error) 
 // OutputToFile output the backupInfo to the file.
 func OutputToFile(backInfo *BackupInfo, f *os.File) error {
 	w := bufio.NewWriter(f)
-	defer w.Flush()
 	backBytes, err := json.Marshal(backInfo)
 	if err != nil {
 		return err
@@ -107,8 +106,10 @@ func OutputToFile(backInfo *BackupInfo, f *os.File) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintln(w, formatBuffer.String())
-	return nil
+	if _, err := fmt.Fprintln(w, formatBuffer.String()); err != nil {
+		return err
+	}
+	return w.Flush()
 }
 
 func getConfig(pdAddr string) (*config.Config, error) {

@@ -12,37 +12,34 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package versioninfo
+package simulator
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/goleak"
+	"go.uber.org/zap"
 
-	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 )
 
-func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
+func TestCloseBeforeConnectionInitialized(t *testing.T) {
+	previousLogger := simutil.Logger
+	simutil.Logger = zap.NewNop()
+	t.Cleanup(func() {
+		simutil.Logger = previousLogger
+	})
+
+	client, _, err := NewClient("test")
+	require.NoError(t, err)
+	require.NotPanics(t, client.Close)
 }
 
-func TestIsHotScheduleWithCPUSupported(t *testing.T) {
-	re := require.New(t)
-	re.False(IsHotScheduleWithCPUSupported(nil))
+func TestUpdateLeaderConnectionRespectsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
 
-	tests := []struct {
-		version string
-		expect  bool
-	}{
-		{"8.5.5", false},
-		{"8.5.6", false},
-		{"8.5.7", true},
-		{"9.0.0-beta.1", true},
-		{"9.0.0", true},
-		{"9.1.0", true},
-	}
-	for _, test := range tests {
-		re.Equal(test.expect, IsHotScheduleWithCPUSupported(MustParseVersion(test.version)), test.version)
-	}
+	err := (&retryClient{retryCount: 1}).updateLeaderConnection(ctx)
+	require.ErrorIs(t, err, context.Canceled)
 }

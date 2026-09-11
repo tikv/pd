@@ -551,6 +551,8 @@ func (o *PersistConfig) GetStoreLimitByType(storeID uint64, typ storelimit.Type)
 		return limit.AddPeer
 	case storelimit.RemovePeer:
 		return limit.RemovePeer
+	case storelimit.TransferLeaderIn:
+		return limit.TransferLeaderIn
 	// todo: impl it in store limit v2.
 	case storelimit.SendSnapshot:
 		return 0.0
@@ -612,21 +614,10 @@ func (o *PersistConfig) IsTikvRegionSplitEnabled() bool {
 // SetAllStoresLimit sets all store limit for a given type and rate.
 func (o *PersistConfig) SetAllStoresLimit(typ storelimit.Type, ratePerMin float64) {
 	v := o.GetScheduleConfig().Clone()
-	switch typ {
-	case storelimit.AddPeer:
-		v.DefaultStoreLimit.AddPeer = ratePerMin
-		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, ratePerMin)
-		for storeID := range v.StoreLimit {
-			sc := sc.StoreLimitConfig{AddPeer: ratePerMin, RemovePeer: v.StoreLimit[storeID].RemovePeer}
-			v.StoreLimit[storeID] = sc
-		}
-	case storelimit.RemovePeer:
-		v.DefaultStoreLimit.RemovePeer = ratePerMin
-		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, ratePerMin)
-		for storeID := range v.StoreLimit {
-			sc := sc.StoreLimitConfig{AddPeer: v.StoreLimit[storeID].AddPeer, RemovePeer: ratePerMin}
-			v.StoreLimit[storeID] = sc
-		}
+	v.DefaultStoreLimit = v.DefaultStoreLimit.SetLimit(typ, ratePerMin)
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(typ, ratePerMin)
+	for storeID, limit := range v.StoreLimit {
+		v.StoreLimit[storeID] = limit.SetLimit(typ, ratePerMin)
 	}
 
 	o.SetScheduleConfig(v)

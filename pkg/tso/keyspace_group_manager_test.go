@@ -54,7 +54,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 type keyspaceGroupManagerTestSuite struct {
@@ -880,7 +880,9 @@ func (suite *keyspaceGroupManagerTestSuite) runTestLoadKeyspaceGroupsAssignment(
 				err := addKeyspaceGroupAssignment(
 					suite.ctx, suite.etcdClient, uint32(j),
 					svcAddrs, []int{0}, []uint32{uint32(j)})
-				re.NoError(err)
+				if !suite.NoError(err) {
+					return
+				}
 			}
 		}(i)
 	}

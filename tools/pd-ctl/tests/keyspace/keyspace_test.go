@@ -666,7 +666,7 @@ func (suite *keyspaceTestSuite) TestSetPlacementWithTiFlash() {
 		},
 		peers[0],
 	)
-	leaderServer.GetRaftCluster().HandleRegionHeartbeat(region)
+	re.NoError(leaderServer.GetRaftCluster().HandleRegionHeartbeat(region))
 
 	// Wait for bundles to apply and ensure both rules match the region
 	testutil.Eventually(re, func() bool {

@@ -16,6 +16,7 @@ package kv
 
 import (
 	"context"
+	"slices"
 	"sort"
 	"strconv"
 	"testing"
@@ -29,7 +30,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 func TestEtcd(t *testing.T) {
@@ -100,7 +101,7 @@ func testRange(re *require.Assertions, kv Base) {
 		err := kv.Save(k, k)
 		re.NoError(err)
 	}
-	sortedKeys := append(keys[:0:0], keys...)
+	sortedKeys := slices.Clone(keys)
 	sort.Strings(sortedKeys)
 
 	testCases := []struct {

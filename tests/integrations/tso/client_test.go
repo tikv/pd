@@ -26,6 +26,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
@@ -39,6 +40,7 @@ import (
 	"github.com/tikv/pd/client/pkg/caller"
 	sd "github.com/tikv/pd/client/servicediscovery"
 	bs "github.com/tikv/pd/pkg/basicserver"
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -53,7 +55,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 type tsoClientTestSuite struct {
@@ -223,7 +225,7 @@ func (suite *tsoClientTestSuite) TearDownSuite() {
 }
 
 func (suite *tsoClientTestSuite) TestGetTS() {
-	re := suite.Require()
+	as := assert.New(suite.T())
 	var wg sync.WaitGroup
 	wg.Add(tsoRequestConcurrencyNumber * len(suite.clients))
 	for range tsoRequestConcurrencyNumber {
@@ -233,9 +235,13 @@ func (suite *tsoClientTestSuite) TestGetTS() {
 				var lastTS uint64
 				for range tsoRequestRound {
 					physical, logical, err := client.GetTS(suite.ctx)
-					re.NoError(err)
+					if !as.NoError(err) {
+						return
+					}
 					ts := tsoutil.ComposeTS(physical, logical)
-					re.Less(lastTS, ts)
+					if !as.Less(lastTS, ts) {
+						return
+					}
 					lastTS = ts
 				}
 			}(client)
@@ -245,7 +251,7 @@ func (suite *tsoClientTestSuite) TestGetTS() {
 }
 
 func (suite *tsoClientTestSuite) TestGetTSAsync() {
-	re := suite.Require()
+	as := assert.New(suite.T())
 	var wg sync.WaitGroup
 	wg.Add(tsoRequestConcurrencyNumber * len(suite.clients))
 	for range tsoRequestConcurrencyNumber {
@@ -259,9 +265,13 @@ func (suite *tsoClientTestSuite) TestGetTSAsync() {
 				var lastTS uint64 = math.MaxUint64
 				for j := len(tsFutures) - 1; j >= 0; j-- {
 					physical, logical, err := tsFutures[j].Wait()
-					re.NoError(err)
+					if !as.NoError(err) {
+						return
+					}
 					ts := tsoutil.ComposeTS(physical, logical)
-					re.Greater(lastTS, ts)
+					if !as.Greater(lastTS, ts) {
+						return
+					}
 					lastTS = ts
 				}
 			}(client)
@@ -302,6 +312,7 @@ func (suite *tsoClientTestSuite) TestDiscoverTSOServiceWithLegacyPath() {
 
 // TestGetMinTS tests the correctness of GetMinTS.
 func (suite *tsoClientTestSuite) TestGetMinTS() {
+	as := assert.New(suite.T())
 	re := suite.Require()
 	var wg sync.WaitGroup
 	wg.Add(tsoRequestConcurrencyNumber * len(suite.clients))
@@ -312,9 +323,13 @@ func (suite *tsoClientTestSuite) TestGetMinTS() {
 				var lastMinTS uint64
 				for range tsoRequestRound {
 					physical, logical, err := client.GetMinTS(suite.ctx)
-					re.NoError(err)
+					if !as.NoError(err) {
+						return
+					}
 					minTS := tsoutil.ComposeTS(physical, logical)
-					re.Less(lastMinTS, minTS)
+					if !as.Less(lastMinTS, minTS) {
+						return
+					}
 					lastMinTS = minTS
 
 					// Now we check whether the returned ts is the minimum one
@@ -322,9 +337,13 @@ func (suite *tsoClientTestSuite) TestGetMinTS() {
 					// less than the new timestamps of all keyspace groups.
 					for _, client := range suite.clients {
 						physical, logical, err := client.GetTS(suite.ctx)
-						re.NoError(err)
+						if !as.NoError(err) {
+							return
+						}
 						ts := tsoutil.ComposeTS(physical, logical)
-						re.Less(minTS, ts)
+						if !as.Less(minTS, ts) {
+							return
+						}
 					}
 				}
 			}(client)
@@ -386,6 +405,7 @@ func (suite *tsoClientTestSuite) TestUpdateAfterResetTSO() {
 }
 
 func (suite *tsoClientTestSuite) TestRandomResignLeader() {
+	as := assert.New(suite.T())
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
 	defer func() {
@@ -399,7 +419,7 @@ func (suite *tsoClientTestSuite) TestRandomResignLeader() {
 		n := rand.IntN(2) + 3
 		time.Sleep(time.Duration(n) * time.Second)
 		if !suite.legacy {
-			wg := sync.WaitGroup{}
+			wg := &sync.WaitGroup{}
 			// Select the first keyspace from all keyspace groups. We need to make sure the selected
 			// keyspaces are from different keyspace groups, otherwise multiple goroutines below could
 			// try to resign the primary of the same keyspace group and cause race condition.
@@ -417,25 +437,38 @@ func (suite *tsoClientTestSuite) TestRandomResignLeader() {
 				go func(keyspaceID uint32) {
 					defer wg.Done()
 					keyspaceGroupID := keyspaceGroups[keyspaceID]
-					suite.tsoCluster.WaitForPrimaryServing(re, keyspaceID, keyspaceGroupID)
+					if !testutil.EventuallyWithAssert(as, func() bool {
+						return suite.tsoCluster.GetPrimaryServer(keyspaceID, keyspaceGroupID) != nil
+					}, testutil.WithWaitFor(30*time.Second), testutil.WithTickInterval(100*time.Millisecond)) {
+						return
+					}
 					err := suite.tsoCluster.ResignPrimary(keyspaceID, keyspaceGroupID)
-					re.NoError(err)
-					suite.tsoCluster.WaitForPrimaryServing(re, keyspaceID, keyspaceGroupID)
+					if !as.NoError(err) {
+						return
+					}
+					if !testutil.EventuallyWithAssert(as, func() bool {
+						return suite.tsoCluster.GetPrimaryServer(keyspaceID, keyspaceGroupID) != nil
+					}, testutil.WithWaitFor(30*time.Second), testutil.WithTickInterval(100*time.Millisecond)) {
+						return
+					}
 				}(keyspaceID)
 			}
 			wg.Wait()
 		} else {
 			err := suite.cluster.ResignLeader()
-			re.NoError(err)
+			if !as.NoError(err) { //nolint:testifylint // parallelAct runs in a worker goroutine, where require is unsafe.
+				return
+			}
 			suite.cluster.WaitLeader()
 		}
 		time.Sleep(time.Duration(n) * time.Second)
 	}
 
-	utils.CheckMultiKeyspacesTSO(suite.ctx, re, suite.clients, parallelAct)
+	utils.CheckMultiKeyspacesTSO(suite.ctx, as, suite.clients, parallelAct)
 }
 
 func (suite *tsoClientTestSuite) TestRandomShutdown() {
+	as := assert.New(suite.T())
 	re := suite.Require()
 	var closedTSOAddr string
 	if !suite.legacy {
@@ -449,11 +482,29 @@ func (suite *tsoClientTestSuite) TestRandomShutdown() {
 
 	parallelAct := func() {
 		if !suite.legacy {
-			primary := suite.tsoCluster.WaitForDefaultPrimaryServing(re)
+			keyspaceID := keyspace.GetBootstrapKeyspaceID()
+			primary := suite.tsoCluster.GetPrimaryServer(keyspaceID, constant.DefaultKeyspaceGroupID)
+			if !testutil.EventuallyWithAssert(as, func() bool {
+				primary = suite.tsoCluster.GetPrimaryServer(keyspaceID, constant.DefaultKeyspaceGroupID)
+				return primary != nil
+			}, testutil.WithWaitFor(30*time.Second), testutil.WithTickInterval(100*time.Millisecond)) {
+				return
+			}
 			closedTSOAddr = primary.GetAddr()
 			primary.Close()
-			suite.tsoCluster.WaitForDefaultPrimaryServing(re)
-			utils.WaitForAllTSOServiceAvailable(suite.ctx, re, suite.clients)
+			if !testutil.EventuallyWithAssert(as, func() bool {
+				return suite.tsoCluster.GetPrimaryServer(keyspaceID, constant.DefaultKeyspaceGroupID) != nil
+			}, testutil.WithWaitFor(30*time.Second), testutil.WithTickInterval(100*time.Millisecond)) {
+				return
+			}
+			for _, client := range suite.clients {
+				if !testutil.EventuallyWithAssert(as, func() bool {
+					_, _, err := client.GetTS(suite.ctx)
+					return err == nil
+				}) {
+					return
+				}
+			}
 		} else {
 			// After https://github.com/tikv/pd/issues/6376 is fixed, we can use a smaller number here.
 			// currently, the time to discover tso service is usually a little longer than 1s, compared
@@ -465,7 +516,7 @@ func (suite *tsoClientTestSuite) TestRandomShutdown() {
 		}
 	}
 
-	utils.CheckMultiKeyspacesTSO(suite.ctx, re, suite.clients, parallelAct)
+	utils.CheckMultiKeyspacesTSO(suite.ctx, as, suite.clients, parallelAct)
 	if !suite.legacy {
 		re.NotEmpty(closedTSOAddr)
 		return
@@ -475,6 +526,7 @@ func (suite *tsoClientTestSuite) TestRandomShutdown() {
 }
 
 func (suite *tsoClientTestSuite) TestGetTSWhileResettingTSOClient() {
+	as := assert.New(suite.T())
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/clients/tso/delayDispatchTSORequest", "return(true)"))
 	var (
@@ -491,10 +543,14 @@ func (suite *tsoClientTestSuite) TestGetTSWhileResettingTSOClient() {
 				for !stopSignal.Load() {
 					physical, logical, err := client.GetTS(suite.ctx)
 					if err != nil {
-						re.ErrorContains(err, context.Canceled.Error())
+						if !as.ErrorContains(err, context.Canceled.Error()) {
+							return
+						}
 					} else {
 						ts := tsoutil.ComposeTS(physical, logical)
-						re.Less(lastTS, ts)
+						if !as.Less(lastTS, ts) {
+							return
+						}
 						lastTS = ts
 					}
 				}
@@ -591,6 +647,7 @@ func (suite *tsoClientTestSuite) TestTSONotLeaderWhenRebaseErr() {
 }
 
 func (suite *tsoClientTestSuite) TestRetryGetTSNotLeader() {
+	as := assert.New(suite.T())
 	re := suite.Require()
 	pdClient := suite.clients[0]
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/mockMaxTSORetryTimes", "return(2000)"))
@@ -614,11 +671,15 @@ func (suite *tsoClientTestSuite) TestRetryGetTSNotLeader() {
 			}
 			physical, logical, err := client.GetTS(ctx1)
 			if err != nil {
-				re.ErrorContains(err, context.Canceled.Error())
+				if !as.ErrorContains(err, context.Canceled.Error()) {
+					return
+				}
 				continue
 			}
 			ts := tsoutil.ComposeTS(physical, logical)
-			re.Less(lastTS, ts)
+			if !as.Less(lastTS, ts) {
+				return
+			}
 			lastTS = ts
 		}
 	}(pdClient)
