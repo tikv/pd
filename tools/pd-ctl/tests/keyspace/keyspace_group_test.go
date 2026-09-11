@@ -57,6 +57,36 @@ func TestKeyspaceGroupTestsuite(t *testing.T) {
 	suite.Run(t, new(keyspaceGroupTestSuite))
 }
 
+func (suite *keyspaceGroupTestSuite) TestShowKeyspaceGroupShowsKeyspacesByDefault() {
+	re := suite.Require()
+	cmd := ctl.GetRootCmd()
+	defaultKeyspaceGroupID := strconv.FormatUint(uint64(constant.DefaultKeyspaceGroupID), 10)
+	args := []string{"-u", suite.pdAddr, "keyspace-group"}
+
+	testutil.Eventually(re, func() bool {
+		output, err := tests.ExecuteCommand(cmd, append(args, defaultKeyspaceGroupID)...)
+		if err != nil {
+			return false
+		}
+		var keyspaceGroup endpoint.KeyspaceGroup
+		if err := json.Unmarshal(output, &keyspaceGroup); err != nil {
+			return false
+		}
+		if keyspaceGroup.ID != constant.DefaultKeyspaceGroupID {
+			return false
+		}
+		return slices.Contains(keyspaceGroup.Keyspaces, constant.DefaultKeyspaceID)
+	})
+
+	output, err := tests.ExecuteCommand(cmd, "-u", suite.pdAddr, "keyspace-group", "--hide-keyspaces", defaultKeyspaceGroupID)
+	re.NoError(err)
+	re.NotContains(string(output), "\"keyspaces\"")
+	var raw map[string]any
+	re.NoError(json.Unmarshal(output, &raw))
+	_, ok := raw["keyspaces"]
+	re.False(ok)
+}
+
 func (suite *keyspaceGroupTestSuite) SetupTest() {
 	re := suite.Require()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())

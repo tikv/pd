@@ -28,7 +28,10 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 )
 
-const keyspaceGroupsPrefix = "pd/api/v2/tso/keyspace-groups"
+const (
+	keyspaceGroupsPrefix = "pd/api/v2/tso/keyspace-groups"
+	flagHideKGKeyspaces  = "hide-keyspaces"
+)
 
 // NewKeyspaceGroupCommand return a keyspace group subcommand of rootCmd
 func NewKeyspaceGroupCommand() *cobra.Command {
@@ -46,6 +49,7 @@ func NewKeyspaceGroupCommand() *cobra.Command {
 	cmd.AddCommand(newSetPriorityKeyspaceGroupCommand())
 	cmd.AddCommand(newShowKeyspaceGroupPrimaryCommand())
 	cmd.Flags().String("state", "", "state filter")
+	cmd.Flags().Bool(flagHideKGKeyspaces, false, "hide keyspace list in keyspace group output")
 	return cmd
 }
 
@@ -130,16 +134,25 @@ func showKeyspaceGroupsCommandFunc(cmd *cobra.Command, args []string) {
 		_ = cmd.Usage()
 		return
 	}
-	cFunc := convertToKeyspaceGroups
+	flags := cmd.Flags()
+	hideKeyspaces, err := flags.GetBool(flagHideKGKeyspaces)
+	if err != nil {
+		cmd.Printf("Failed to get %s: %s\n", flagHideKGKeyspaces, err)
+		return
+	}
+	cFunc := func(content string) string {
+		return convertToKeyspaceGroups(content, !hideKeyspaces)
+	}
 	if len(args) == 1 {
 		if _, err := strconv.Atoi(args[0]); err != nil {
 			cmd.Println("keyspace_group_id should be a number")
 			return
 		}
 		prefix = fmt.Sprintf("%s/%s", keyspaceGroupsPrefix, args[0])
-		cFunc = convertToKeyspaceGroup
+		cFunc = func(content string) string {
+			return convertToKeyspaceGroup(content, !hideKeyspaces)
+		}
 	} else {
-		flags := cmd.Flags()
 		state, err := flags.GetString("state")
 		if err != nil {
 			cmd.Printf("Failed to get state: %s\n", err)
@@ -393,26 +406,56 @@ func showKeyspaceGroupPrimaryCommandFunc(cmd *cobra.Command, args []string) {
 	cmd.Println(r)
 }
 
-func convertToKeyspaceGroup(content string) string {
+type keyspaceGroupOutput struct {
+	ID         uint32                         `json:"id"`
+	UserKind   string                         `json:"user-kind"`
+	SplitState *endpoint.SplitState           `json:"split-state,omitempty"`
+	MergeState *endpoint.MergeState           `json:"merge-state,omitempty"`
+	Members    []endpoint.KeyspaceGroupMember `json:"members"`
+	Keyspaces  *[]uint32                      `json:"keyspaces,omitempty"`
+}
+
+func newKeyspaceGroupOutput(kg *endpoint.KeyspaceGroup, showKeyspaces bool) *keyspaceGroupOutput {
+	if kg == nil {
+		return nil
+	}
+	output := &keyspaceGroupOutput{
+		ID:         kg.ID,
+		UserKind:   kg.UserKind,
+		SplitState: kg.SplitState,
+		MergeState: kg.MergeState,
+		Members:    kg.Members,
+	}
+	if showKeyspaces {
+		output.Keyspaces = &kg.Keyspaces
+	}
+	return output
+}
+
+func convertToKeyspaceGroup(content string, showKeyspaces bool) string {
 	kg := endpoint.KeyspaceGroup{}
 	err := json.Unmarshal([]byte(content), &kg)
 	if err != nil {
 		return content
 	}
-	byteArr, err := json.MarshalIndent(kg, "", "  ")
+	byteArr, err := json.MarshalIndent(newKeyspaceGroupOutput(&kg, showKeyspaces), "", "  ")
 	if err != nil {
 		return content
 	}
 	return string(byteArr)
 }
 
-func convertToKeyspaceGroups(content string) string {
+func convertToKeyspaceGroups(content string, showKeyspaces bool) string {
 	kgs := []*endpoint.KeyspaceGroup{}
 	err := json.Unmarshal([]byte(content), &kgs)
 	if err != nil {
 		return content
 	}
-	byteArr, err := json.MarshalIndent(kgs, "", "  ")
+	output := make([]*keyspaceGroupOutput, 0, len(kgs))
+	for _, kg := range kgs {
+		output = append(output, newKeyspaceGroupOutput(kg, showKeyspaces))
+	}
+	byteArr, err := json.MarshalIndent(output, "", "  ")
 	if err != nil {
 		return content
 	}
