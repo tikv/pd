@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -56,7 +57,8 @@ var (
 	scatterSkipNotReplicatedCounter = scatterCounter.WithLabelValues("skip", "not-replicated")
 	scatterSkipAffinityCounter      = scatterCounter.WithLabelValues("skip", "affinity")
 	scatterUnnecessaryCounter       = scatterCounter.WithLabelValues("unnecessary", "")
-	scatterFailCounter              = scatterCounter.WithLabelValues("fail", "")
+	scatterPlacementFailedCounter   = scatterCounter.WithLabelValues("fail", "placement-validation-failed")
+	scatterOperatorFailedCounter    = scatterCounter.WithLabelValues("fail", "operator-creation-failed")
 	scatterSuccessCounter           = scatterCounter.WithLabelValues("success", "")
 	scatterOperatorRunningCounter   = scatterCounter.WithLabelValues("skip", "running")
 	scatterOperatorExistedCounter   = scatterCounter.WithLabelValues("fail", "other-existed")
@@ -618,6 +620,14 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 	ordinaryPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))
 	specialPeers := make(map[string]map[uint64]*metapb.Peer)
 	oldFit := r.cluster.GetRuleManager().FitRegion(r.cluster, region)
+	view := region
+	viewFit := oldFit
+	var hostRules []*placement.Rule
+	if r.cluster.GetSharedConfig().IsPlacementRulesEnabled() {
+		hostRules = oldFit.GetRules()
+	}
+	hostLabels := scatterHostLabels(r.cluster.GetSharedConfig().GetLocationLabels(), hostRules)
+
 	// Group peers by the engine of their stores
 	for _, peer := range region.GetPeers() {
 		store := r.cluster.GetStore(peer.GetStoreId())
@@ -677,21 +687,44 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 				log.Error("failed to get the store", zap.Uint64("store-id", peer.GetStoreId()), errs.ZapError(errs.ErrGetSourceStore))
 				continue
 			}
-			filters[filterLen-1] = filter.NewPlacementSafeguard(r.name, r.cluster.GetSharedConfig(), r.cluster.GetBasicCluster(), r.cluster.GetRuleManager(), region, sourceStore, oldFit)
+			if r.cluster.GetSharedConfig().IsPlacementRulesEnabled() && viewFit == nil {
+				viewFit = r.cluster.GetRuleManager().FitRegionWithoutCache(r.cluster, view)
+			}
+			filters[filterLen-1] = filter.NewPlacementSafeguard(r.name, r.cluster.GetSharedConfig(), r.cluster.GetBasicCluster(), r.cluster.GetRuleManager(), view, sourceStore, viewFit)
+			var hosts []scatterHostPlacement
+			if !core.IsLearner(peer) && len(view.GetVoters()) > 1 && len(hostLabels) > 0 {
+				voters := make([]*core.StoreInfo, 0, len(view.GetVoters()))
+				for _, voter := range view.GetVoters() {
+					voters = append(voters, r.cluster.GetStore(voter.GetStoreId()))
+				}
+				for _, labels := range hostLabels {
+					hosts = append(hosts, newScatterHostPlacement(labels, voters))
+				}
+			}
 			for {
-				newPeer := r.selectNewPeer(context, group, peer, filters, internalScatter)
-				targetPeers[newPeer.GetStoreId()] = newPeer
+				newPeer := r.selectNewPeer(context, group, peer, filters, hosts, internalScatter)
 				selectedStores[newPeer.GetStoreId()] = struct{}{}
 				// If the selected peer is a peer other than origin peer in this region,
 				// it is considered that the selected peer select itself.
 				// This origin peer re-selects.
 				if _, ok := peers[newPeer.GetStoreId()]; !ok || peer.GetStoreId() == newPeer.GetStoreId() {
+					targetPeers[newPeer.GetStoreId()] = newPeer
 					selectedStores[peer.GetStoreId()] = struct{}{}
+					if peer.GetStoreId() != newPeer.GetStoreId() {
+						if view == region {
+							view = region.Clone()
+						}
+						moveScatterPeer(view, peer.GetId(), newPeer.GetStoreId())
+						viewFit = nil
+					}
 					if collectLeaderCandidates && allowLeader(oldFit, peer) {
 						leaderCandidateStores = append(leaderCandidateStores, newPeer.GetStoreId())
 					}
 					break
 				}
+				// Reserving another peer keeps that peer in place, including its
+				// role; the source still needs a new target.
+				targetPeers[newPeer.GetStoreId()] = peers[newPeer.GetStoreId()]
 			}
 		}
 	}
@@ -714,6 +747,26 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 		return nil, errs.ErrGetTargetStore.FastGenByArgs(fmt.Sprintf("no target leader store found, region: %v", region))
 	}
 
+	// A voter-rule peer can be a leader candidate without satisfying the final
+	// layout's leader rule. Try the remaining candidates in selection order.
+	for targetLeader != 0 && !r.scatterPlacementValid(region, targetPeers, targetLeader) {
+		leaderCandidateStores = slices.DeleteFunc(leaderCandidateStores, func(id uint64) bool {
+			return id == targetLeader
+		})
+		targetLeader, leaderStorePickedCount = r.selectAvailableLeaderStore(group, region, leaderCandidateStores, ordinaryContext, internalScatter)
+	}
+	if targetLeader == 0 {
+		scatterPlacementFailedCounter.Inc()
+		if state == nil {
+			currentPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))
+			for _, peer := range region.GetPeers() {
+				currentPeers[peer.GetStoreId()] = peer
+			}
+			r.Put(currentPeers, region.GetLeader().GetStoreId(), group)
+		}
+		return nil, errs.ErrCreateOperator.FastGenByArgs(fmt.Sprintf("scatter placement validation failed for region %v", region.GetID()))
+	}
+
 	if isSameDistribution(region, targetPeers, targetLeader) {
 		scatterUnnecessaryCounter.Inc()
 		if state != nil {
@@ -729,7 +782,7 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 	}
 	op, err := createScatterOperator(desc, r.cluster, region, targetPeers, targetLeader, skipStoreLimit)
 	if err != nil {
-		scatterFailCounter.Inc()
+		scatterOperatorFailedCounter.Inc()
 		currentPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))
 		for _, peer := range region.GetPeers() {
 			currentPeers[peer.GetStoreId()] = peer
@@ -836,7 +889,7 @@ func isSameDistribution(region *core.RegionInfo, targetPeers map[uint64]*metapb.
 // 1. found the max pick count and the min pick count.
 // 2. if max pick count equals min pick count, it means all store picked count are some, return the origin peer.
 // 3. otherwise, select the store which pick count is the min pick count and pass all filter.
-func (r *RegionScatterer) selectNewPeer(context scatterSelectionContext, group string, peer *metapb.Peer, filters []filter.Filter, internalScatter bool) *metapb.Peer {
+func (r *RegionScatterer) selectNewPeer(context scatterSelectionContext, group string, peer *metapb.Peer, filters []filter.Filter, hosts []scatterHostPlacement, internalScatter bool) *metapb.Peer {
 	stores := r.cluster.GetStores()
 	maxStoreTotalCount := uint64(0)
 	minStoreTotalCount := uint64(math.MaxUint64)
@@ -866,6 +919,11 @@ func (r *RegionScatterer) selectNewPeer(context scatterSelectionContext, group s
 			continue
 		}
 		if !filter.Target(r.cluster.GetSharedConfig(), store, filters) {
+			continue
+		}
+		if !core.IsLearner(peer) && slices.ContainsFunc(hosts, func(p scatterHostPlacement) bool {
+			return !p.allowsMove(peer.GetStoreId(), store)
+		}) {
 			continue
 		}
 		candidate := &metapb.Peer{

@@ -919,11 +919,9 @@ func TestCreateScatterRegionOperatorFailureAccountsCurrentPlacement(t *testing.T
 
 	tc.AddLeaderRegionWithRange(1, "a", "j", 1, 2, 3)
 	region := tc.GetRegion(1)
-	region = region.Clone(core.WithRole(region.GetPeers()[1].GetId(), metapb.PeerRole_IncomingVoter))
-	tc.PutRegion(region)
-	region = tc.GetRegion(1)
 
 	scatterer := NewRegionScatterer(ctx, tc, oc, tc.AddPendingProcessedRegions)
+	scatterer.cluster = &scatterAllocFailureCluster{SharedCluster: tc}
 	group := "create-fail"
 	state := newTestScatterState(scatterer)
 	for _, storeID := range []uint64{1, 2, 3} {
@@ -1325,11 +1323,11 @@ func TestInternalScatterPeerSelection(t *testing.T) {
 			filters := newTestExcludedStoreFilter(testCase.excludedStores...)
 
 			if testCase.checkAdmin {
-				adminPeer := scatterer.selectNewPeer(scatterer.ordinaryEngine.asSelectionContext(), group, peer, filters, false)
+				adminPeer := scatterer.selectNewPeer(scatterer.ordinaryEngine.asSelectionContext(), group, peer, filters, nil, false)
 				re.Equal(testCase.wantAdmin, adminPeer.GetStoreId())
 			}
 
-			internalPeer := scatterer.selectNewPeer(state.ordinaryEngine.asSelectionContext(), group, peer, filters, true)
+			internalPeer := scatterer.selectNewPeer(state.ordinaryEngine.asSelectionContext(), group, peer, filters, nil, true)
 			if len(testCase.wantAny) > 0 {
 				re.Contains(testCase.wantAny, internalPeer.GetStoreId())
 			} else {
