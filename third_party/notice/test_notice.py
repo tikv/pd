@@ -50,16 +50,16 @@ class NoticeTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "repo"
             root.mkdir()
-            subprocess.run(["git", "init", "-q", str(root)], check=True)
-            subprocess.run(["git", "-C", str(root), "config", "user.name", "Test"], check=True)
-            subprocess.run(["git", "-C", str(root), "config", "user.email", "test@example.com"], check=True)
+            subprocess.run(["git", "init", "-q", str(root)], check=True)  # noqa: S603, S607
+            subprocess.run(["git", "-C", str(root), "config", "user.name", "Test"], check=True)  # noqa: S603, S607
+            subprocess.run(["git", "-C", str(root), "config", "user.email", "test@example.com"], check=True)  # noqa: S603, S607
             source = root / "source.txt"
             source.write_text("pinned")
-            subprocess.run(["git", "-C", str(root), "add", "source.txt"], check=True)
-            subprocess.run(["git", "-C", str(root), "commit", "-qm", "pinned"], check=True)
-            commit = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
+            subprocess.run(["git", "-C", str(root), "add", "source.txt"], check=True)  # noqa: S603, S607
+            subprocess.run(["git", "-C", str(root), "commit", "-qm", "pinned"], check=True)  # noqa: S603, S607
+            commit = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()  # noqa: S603, S607
             source.write_text("current")
-            subprocess.run(["git", "-C", str(root), "commit", "-am", "current", "-q"], check=True)
+            subprocess.run(["git", "-C", str(root), "commit", "-am", "current", "-q"], check=True)  # noqa: S603, S607
 
             output = Path(temporary) / "output"
             output.mkdir()
