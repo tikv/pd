@@ -60,15 +60,13 @@ func newRequestInfoMiddleware(s *server.Server) negroni.Handler {
 }
 
 func (rm *requestInfoMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
-	auditEnabled := rm.svr.GetServiceMiddlewarePersistOptions().IsAuditEnabled()
-	if !auditEnabled && !rm.svr.GetServiceMiddlewarePersistOptions().IsRateLimitEnabled() {
+	if !rm.svr.GetServiceMiddlewarePersistOptions().IsAuditEnabled() &&
+		!rm.svr.GetServiceMiddlewarePersistOptions().IsRateLimitEnabled() {
 		next(w, r)
 		return
 	}
 
 	requestInfo := requestutil.GetRequestInfoWithoutBody(r)
-	labels := rm.svr.GetServiceAuditBackendLabels(requestInfo.ServiceLabel)
-	captureRequestBodyForAudit(r, &requestInfo, auditEnabled, labels)
 	r = r.WithContext(requestutil.WithRequestInfo(r.Context(), requestInfo))
 
 	failpoint.Inject("addRequestInfoMiddleware", func() {
@@ -86,16 +84,33 @@ func (rm *requestInfoMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Reques
 func captureRequestBodyForAudit(
 	r *http.Request,
 	requestInfo *requestutil.RequestInfo,
-	auditEnabled bool,
 	labels *audit.BackendLabels,
-) {
-	if auditEnabled && auditNeedsRequestBody(labels) {
-		requestInfo.CaptureBody(r)
+) bool {
+	if requestInfo.BodyParam != "" || !auditNeedsRequestBody(labels) {
+		return false
 	}
+	requestInfo.CaptureBody(r)
+	return true
 }
 
 func auditNeedsRequestBody(labels *audit.BackendLabels) bool {
 	return labels != nil && slices.Contains(labels.Labels, audit.LocalLogLabel)
+}
+
+func prepareRequestForAudit(
+	r *http.Request,
+	requestInfo requestutil.RequestInfo,
+	hasRequestInfo bool,
+	labels *audit.BackendLabels,
+) *http.Request {
+	contextNeedsUpdate := !hasRequestInfo
+	if captureRequestBodyForAudit(r, &requestInfo, labels) {
+		contextNeedsUpdate = true
+	}
+	if contextNeedsUpdate {
+		return r.WithContext(requestutil.WithRequestInfo(r.Context(), requestInfo))
+	}
+	return r
 }
 
 type clusterMiddleware struct {
@@ -203,20 +218,15 @@ func (s *auditMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next
 	}
 
 	requestInfo, ok := requestutil.RequestInfoFrom(r.Context())
-	serviceLabel := requestInfo.ServiceLabel
 	if !ok {
-		serviceLabel = apiutil.GetRouteName(r)
+		requestInfo = requestutil.GetRequestInfoWithoutBody(r)
 	}
-	labels := s.svr.GetServiceAuditBackendLabels(serviceLabel)
+	labels := s.svr.GetServiceAuditBackendLabels(requestInfo.ServiceLabel)
 	if labels == nil {
 		next(w, r)
 		return
 	}
-	if !ok {
-		requestInfo = requestutil.GetRequestInfoWithoutBody(r)
-		captureRequestBodyForAudit(r, &requestInfo, true, labels)
-		r = r.WithContext(requestutil.WithRequestInfo(r.Context(), requestInfo))
-	}
+	r = prepareRequestForAudit(r, requestInfo, ok, labels)
 
 	beforeNextBackends := make([]audit.Backend, 0)
 	afterNextBackends := make([]audit.Backend, 0)
