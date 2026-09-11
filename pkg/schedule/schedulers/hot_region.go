@@ -25,6 +25,7 @@ import (
 
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -204,6 +205,11 @@ type hotScheduler struct {
 	// config of hot scheduler
 	conf                *hotRegionSchedulerConfig
 	searchRevertRegions [resourceTypeLen]bool // Whether to search revert regions.
+	placementLabels     placementLoadState
+	placementLabelsVer  uint64
+	placementLabelsInit bool
+	placementPopulation *placementPopulationIndex
+	placementPopVer     uint64
 }
 
 func newHotScheduler(opController *operator.Controller, conf *hotRegionSchedulerConfig) *hotScheduler {
@@ -347,10 +353,64 @@ func (s *hotScheduler) tryAddPendingInfluence(op *operator.Operator, srcStore []
 	return true
 }
 
+func (s *hotScheduler) getPlacementLoadState(cluster sche.SchedulerCluster, rankFormulaVersion string) placementLoadState {
+	if !cluster.GetSchedulerConfig().IsPlacementRulesEnabled() || rankFormulaVersion != "v2" {
+		return placementLoadState{}
+	}
+
+	state := placementLoadState{canRestrict: [2]bool{
+		cluster.GetRuleManager().MayRestrictStoreLoad(true),
+		cluster.GetRuleManager().MayRestrictStoreLoad(false),
+	}}
+	labelsVersion := cluster.GetBasicCluster().GetStoresLabelsVersion()
+	var stores []*core.StoreInfo
+	if !s.placementLabelsInit || s.placementLabelsVer != labelsVersion {
+		s.placementLabels = placementLoadState{}
+		stores = cluster.GetStores()
+		for _, store := range stores {
+			recordStorePlacementRestriction(&s.placementLabels.canRestrict, store)
+		}
+		s.placementLabelsVer = labelsVersion
+		s.placementLabelsInit = true
+	}
+	for i := range state.canRestrict {
+		state.canRestrict[i] = state.canRestrict[i] || s.placementLabels.canRestrict[i]
+		state.enabled = state.enabled || state.canRestrict[i]
+	}
+	if state.enabled {
+		if s.placementPopulation == nil || s.placementPopVer != labelsVersion {
+			if stores == nil {
+				stores = cluster.GetStores()
+			}
+			population := &placementPopulationIndex{
+				stores:    make(map[uint64]uint, len(stores)),
+				wordCount: (len(stores) + 63) / 64,
+			}
+			for position, store := range stores {
+				population.stores[store.GetID()] = uint(position)
+			}
+			s.placementPopulation = population
+			s.placementPopVer = labelsVersion
+		}
+		state.populationIndex = s.placementPopulation
+	}
+	return state
+}
+
+func newBalanceReadSolvers(s *hotScheduler, cluster sche.SchedulerCluster) (leaderSolver, peerSolver *balanceSolver) {
+	leaderSolver = newBalanceSolver(s, cluster, utils.Read, transferLeader)
+	placementState := &placementLoadState{
+		enabled:         leaderSolver.placementV2Enabled,
+		canRestrict:     leaderSolver.placementCanRestrict,
+		populationIndex: leaderSolver.placementPopulationIndex,
+	}
+	peerSolver = newBalanceSolverWithPlacementState(s, cluster, utils.Read, movePeer, placementState)
+	return leaderSolver, peerSolver
+}
+
 func (s *hotScheduler) balanceHotReadRegions(cluster sche.SchedulerCluster) []*operator.Operator {
-	leaderSolver := newBalanceSolver(s, cluster, utils.Read, transferLeader)
+	leaderSolver, peerSolver := newBalanceReadSolvers(s, cluster)
 	leaderOps := leaderSolver.solve()
-	peerSolver := newBalanceSolver(s, cluster, utils.Read, movePeer)
 	peerOps := peerSolver.solve()
 	if len(leaderOps) == 0 && len(peerOps) == 0 {
 		return nil

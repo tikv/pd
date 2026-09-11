@@ -18,12 +18,15 @@ import (
 	"bytes"
 	"encoding/json"
 	"time"
+
+	"github.com/tikv/pd/pkg/core"
 )
 
 // ruleConfig contains rule and rule group configurations.
 type ruleConfig struct {
-	rules  map[[2]string]*Rule   // {group, id} => Rule
-	groups map[string]*RuleGroup // id => RuleGroup
+	rules                map[[2]string]*Rule   // {group, id} => Rule
+	groups               map[string]*RuleGroup // id => RuleGroup
+	mayRestrictStoreLoad [2]bool               // TiKV at index 0, TiFlash at index 1.
 }
 
 func newRuleConfig() *ruleConfig {
@@ -35,6 +38,7 @@ func newRuleConfig() *ruleConfig {
 
 // adjust configs for `buildRuleList` and API use.
 func (c *ruleConfig) adjust() {
+	c.mayRestrictStoreLoad = [2]bool{}
 	// remove all default group configurations.
 	// if there are rules belong to the group, it will be re-add later.
 	for id, g := range c.groups {
@@ -43,6 +47,10 @@ func (c *ruleConfig) adjust() {
 		}
 	}
 	for _, r := range c.rules {
+		if len(r.LabelConstraints) > 0 {
+			c.mayRestrictStoreLoad[0] = c.mayRestrictStoreLoad[0] || ruleMayRestrictEngine(r, "", core.EngineTiKV)
+			c.mayRestrictStoreLoad[1] = c.mayRestrictStoreLoad[1] || ruleMayRestrictEngine(r, core.EngineTiFlash)
+		}
 		g := c.groups[r.GroupID]
 		if g == nil {
 			// create default group configurations.
@@ -52,6 +60,41 @@ func (c *ruleConfig) adjust() {
 		// setup group for `buildRuleList`
 		r.group = g
 	}
+}
+
+// ruleMayRestrictEngine treats an empty value as a store without an engine label.
+// It reports restriction for non-engine constraints or a partial engine match.
+func ruleMayRestrictEngine(rule *Rule, values ...string) bool {
+	hasOtherConstraint := false
+	for i := range rule.LabelConstraints {
+		if rule.LabelConstraints[i].Key != core.EngineKey {
+			hasOtherConstraint = true
+			break
+		}
+	}
+
+	matched := 0
+	for _, value := range values {
+		hasEngineConstraint, matchesValue := false, true
+		for i := range rule.LabelConstraints {
+			constraint := &rule.LabelConstraints[i]
+			if constraint.Key != core.EngineKey {
+				continue
+			}
+			hasEngineConstraint = true
+			if !constraint.matchValue(value) {
+				matchesValue = false
+				break
+			}
+		}
+		if value != "" && !hasEngineConstraint {
+			matchesValue = false
+		}
+		if matchesValue {
+			matched++
+		}
+	}
+	return matched > 0 && (hasOtherConstraint || matched < len(values))
 }
 
 func (c *ruleConfig) getRule(key [2]string) *Rule {
