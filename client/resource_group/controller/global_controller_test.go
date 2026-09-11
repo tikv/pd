@@ -139,6 +139,9 @@ func TestControllerWithTwoGroupRequestConcurrency(t *testing.T) {
 	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, constants.NullKeyspaceID)
 	re.NoError(err)
 	controller.Start(ctx)
+	defer func() {
+		re.NoError(controller.Stop())
+	}()
 
 	defaultResourceGroup := &rmpb.ResourceGroup{Name: defaultResourceGroupName, Mode: rmpb.GroupMode_RUMode, RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 1000000}}}}
 	testResourceGroup := &rmpb.ResourceGroup{Name: "test-group", Mode: rmpb.GroupMode_RUMode, RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 1000000}}}}
@@ -254,6 +257,9 @@ func TestTryGetController(t *testing.T) {
 	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, constants.NullKeyspaceID)
 	re.NoError(err)
 	controller.Start(ctx)
+	defer func() {
+		re.NoError(controller.Stop())
+	}()
 
 	defaultResourceGroup := &rmpb.ResourceGroup{Name: defaultResourceGroupName, Mode: rmpb.GroupMode_RUMode, RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 1000000}}}}
 	testResourceGroup := &rmpb.ResourceGroup{Name: "test-group", Mode: rmpb.GroupMode_RUMode, RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 1000000}}}}
@@ -342,6 +348,9 @@ func TestGetResourceGroup(t *testing.T) {
 		re := require.New(t)
 		controller, err := NewResourceGroupController(ctx, 1, provider, nil, constants.NullKeyspaceID, opts...)
 		re.NoError(err)
+		t.Cleanup(func() {
+			re.NoError(controller.Stop())
+		})
 		return controller
 	}
 
@@ -620,6 +629,9 @@ func TestTokenBucketsRequestWithKeyspaceID(t *testing.T) {
 		controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, keyspaceID)
 		re.NoError(err)
 		controller.Start(ctx)
+		defer func() {
+			re.NoError(controller.Stop())
+		}()
 
 		testResourceGroup := &rmpb.ResourceGroup{
 			Name: "test-group",
@@ -667,6 +679,9 @@ func TestGetRUVersionDefault(t *testing.T) {
 	mockProvider := newMockResourceGroupProvider()
 	gc, err := NewResourceGroupController(context.Background(), 1, mockProvider, nil, 1)
 	re.NoError(err)
+	defer func() {
+		re.NoError(gc.Stop())
+	}()
 
 	// Default should return 1 (v1) when no policy is set.
 	re.Equal(int32(1), gc.GetRUVersion())
@@ -677,6 +692,9 @@ func TestGetRUVersionAfterSet(t *testing.T) {
 	mockProvider := newMockResourceGroupProvider()
 	gc, err := NewResourceGroupController(context.Background(), 1, mockProvider, nil, 1)
 	re.NoError(err)
+	defer func() {
+		re.NoError(gc.Stop())
+	}()
 
 	// Simulate ru_version update via atomic store.
 	gc.ruVersion.Store(3)
@@ -697,6 +715,9 @@ func TestRUVersionFromControllerConfig(t *testing.T) {
 	// keyspaceID = 42
 	gc, err := NewResourceGroupController(context.Background(), 1, mockProvider, nil, 42)
 	re.NoError(err)
+	defer func() {
+		re.NoError(gc.Stop())
+	}()
 
 	// Simulate a controller config with RUVersionPolicy containing an override for keyspace 42.
 	config := DefaultConfig()
@@ -714,6 +735,9 @@ func TestRUVersionOverrideFromControllerConfig(t *testing.T) {
 	// keyspaceID = 42
 	gc, err := NewResourceGroupController(context.Background(), 1, mockProvider, nil, 42)
 	re.NoError(err)
+	defer func() {
+		re.NoError(gc.Stop())
+	}()
 
 	// Override takes precedence over default.
 	config := DefaultConfig()
@@ -731,6 +755,9 @@ func TestRUVersionDefaultFallback(t *testing.T) {
 	// keyspaceID = 42, no override for 42
 	gc, err := NewResourceGroupController(context.Background(), 1, mockProvider, nil, 42)
 	re.NoError(err)
+	defer func() {
+		re.NoError(gc.Stop())
+	}()
 
 	config := DefaultConfig()
 	config.RUVersionPolicy = &RUVersionPolicy{
@@ -747,6 +774,9 @@ func TestRUVersionNilPolicy(t *testing.T) {
 	mockProvider := newMockResourceGroupProvider()
 	gc, err := NewResourceGroupController(context.Background(), 1, mockProvider, nil, 42)
 	re.NoError(err)
+	defer func() {
+		re.NoError(gc.Stop())
+	}()
 
 	// Set a non-default version first.
 	gc.ruVersion.Store(5)
@@ -786,6 +816,9 @@ func TestRUVersionFromInitialControllerConfig(t *testing.T) {
 
 	gc, err := NewResourceGroupController(context.Background(), 1, mockProvider, nil, 42)
 	re.NoError(err)
+	defer func() {
+		re.NoError(gc.Stop())
+	}()
 	// The initial load should set ruVersion from the policy.
 	re.Equal(int32(3), gc.GetRUVersion())
 }
@@ -808,6 +841,9 @@ func TestRUVersionWatchViaControllerConfig(t *testing.T) {
 	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, 42)
 	re.NoError(err)
 	controller.Start(ctx)
+	defer func() {
+		re.NoError(controller.Stop())
+	}()
 
 	// Case 1: Config with RUVersionPolicy containing override for keyspace 42
 	configWithPolicy := &Config{
