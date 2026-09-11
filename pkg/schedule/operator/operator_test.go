@@ -177,6 +177,26 @@ func (suite *operatorTestSuite) TestInfluence() {
 		storeOpInfluence[2] = &StoreInfluence{}
 	}
 
+	// Leader-transfer cost is independent of region size.
+	for _, size := range []int64{1, 1024} {
+		TransferLeader{FromStore: 1, ToStore: 2}.Influence(&opInfluence, region.Clone(core.SetApproximateSize(size)))
+		re.Zero(storeOpInfluence[1].GetStepCost(storelimit.TransferLeaderIn))
+		re.Equal(storelimit.RegionInfluence[storelimit.TransferLeaderIn], storeOpInfluence[2].GetStepCost(storelimit.TransferLeaderIn))
+		resetInfluence()
+	}
+
+	for _, targets := range [][]uint64{{2, 3}, {3}, {2, 3, 3}} {
+		influence := NewOpInfluence()
+		TransferLeader{FromStore: 1, ToStore: 2, ToStores: targets}.Influence(influence, region)
+		re.Zero(influence.GetStoreInfluence(1).GetStepCost(storelimit.TransferLeaderIn))
+		for _, id := range []uint64{2, 3} {
+			re.Equal(storelimit.RegionInfluence[storelimit.TransferLeaderIn], influence.GetStoreInfluence(id).GetStepCost(storelimit.TransferLeaderIn))
+		}
+		re.Equal(int64(1), influence.GetStoreInfluence(2).LeaderCount)
+		re.Zero(influence.GetStoreInfluence(3).LeaderCount)
+		re.Zero(influence.GetStoreInfluence(3).LeaderSize)
+	}
+
 	AddLearner{ToStore: 2, PeerID: 2, SendStore: 1}.Influence(&opInfluence, region)
 	re.Equal(StoreInfluence{
 		LeaderSize:  0,
@@ -236,7 +256,10 @@ func (suite *operatorTestSuite) TestInfluence() {
 		LeaderCount: 1,
 		RegionSize:  50,
 		RegionCount: 1,
-		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
+		StepCost: map[storelimit.Type]int64{
+			storelimit.AddPeer:          1000,
+			storelimit.TransferLeaderIn: 1000,
+		},
 	}, *storeOpInfluence[2])
 
 	RemovePeer{FromStore: 1}.Influence(&opInfluence, region)
@@ -252,7 +275,10 @@ func (suite *operatorTestSuite) TestInfluence() {
 		LeaderCount: 1,
 		RegionSize:  50,
 		RegionCount: 1,
-		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
+		StepCost: map[storelimit.Type]int64{
+			storelimit.AddPeer:          1000,
+			storelimit.TransferLeaderIn: 1000,
+		},
 	}, *storeOpInfluence[2])
 
 	MergeRegion{IsPassive: false}.Influence(&opInfluence, region)
@@ -268,7 +294,10 @@ func (suite *operatorTestSuite) TestInfluence() {
 		LeaderCount: 1,
 		RegionSize:  50,
 		RegionCount: 1,
-		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
+		StepCost: map[storelimit.Type]int64{
+			storelimit.AddPeer:          1000,
+			storelimit.TransferLeaderIn: 1000,
+		},
 	}, *storeOpInfluence[2])
 
 	MergeRegion{IsPassive: true}.Influence(&opInfluence, region)
@@ -284,7 +313,10 @@ func (suite *operatorTestSuite) TestInfluence() {
 		LeaderCount: 1,
 		RegionSize:  50,
 		RegionCount: 0,
-		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
+		StepCost: map[storelimit.Type]int64{
+			storelimit.AddPeer:          1000,
+			storelimit.TransferLeaderIn: 1000,
+		},
 	}, *storeOpInfluence[2])
 }
 

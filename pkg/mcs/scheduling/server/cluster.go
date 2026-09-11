@@ -773,6 +773,7 @@ func (c *Cluster) collectMetrics() {
 			id := strconv.FormatUint(s.GetID(), 10)
 			statistics.StoreLimitGauge.DeleteLabelValues(id, "add-peer")
 			statistics.StoreLimitGauge.DeleteLabelValues(id, "remove-peer")
+			statistics.StoreLimitGauge.DeleteLabelValues(id, "transfer-leader-in")
 		}
 	}
 

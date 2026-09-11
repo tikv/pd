@@ -1225,7 +1225,7 @@ func TestTiFlashWithPlacementRules(t *testing.T) {
 	re.NoError(err)
 	re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 	// test TiFlash store limit
-	expect := map[uint64]sc.StoreLimitConfig{11: {AddPeer: 30, RemovePeer: 30}}
+	expect := map[uint64]sc.StoreLimitConfig{11: {AddPeer: 30, RemovePeer: 30, TransferLeaderIn: storelimit.Unlimited}}
 	re.Equal(expect, svr.GetScheduleConfig().StoreLimit)
 
 	// cannot disable placement rules with TiFlash nodes
