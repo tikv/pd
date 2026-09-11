@@ -584,6 +584,17 @@ func (f *HotPeerCache) gc() {
 		}
 	}
 	for storeID := range removed {
+		// regionsOfStore[storeID] is the exact set of regions this store is still
+		// referenced from in storesOfRegion; read it before deleting so the reverse
+		// index doesn't keep a stale storeID around for regions that are still active.
+		for regionID := range f.regionsOfStore[storeID] {
+			if stores, ok := f.storesOfRegion[regionID]; ok {
+				delete(stores, storeID)
+				if len(stores) == 0 {
+					delete(f.storesOfRegion, regionID)
+				}
+			}
+		}
 		delete(f.peersOfStore, storeID)
 		delete(f.regionsOfStore, storeID)
 		delete(f.thresholdsOfStore, storeID)

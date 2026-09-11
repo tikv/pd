@@ -482,7 +482,7 @@ func TestCacheManager(t *testing.T) {
 	}
 	region := core.NewRegionInfo(regionMeta, regionMeta.Peers[0])
 	fit := manager.FitRegion(stores, region)
-	manager.SetRegionFitCache(region, fit)
+	manager.SetRegionFitCache(stores, region, fit)
 	// bestFit is not stored when the total number of hits is insufficient.
 	for i := 1; i < minHitCountToCacheHit/2; i++ {
 		manager.FitRegion(stores, region)

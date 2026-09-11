@@ -195,7 +195,14 @@ func summaryStoresLoadByEngine(
 					allStoreHistoryLoadSum[i][j] += historyLoad
 				}
 			}
-			storesHistoryLoads.Add(id, rwTy, kind, currentLoads)
+			// GC(stores) runs earlier in the same prepareForBalance call and
+			// clears a removed store's entry; without this check, this write
+			// -- unconditional on the collector's own filter, which doesn't
+			// reject removed stores for RegionKind -- recreates it in the
+			// same call, making that GC a no-op for this store.
+			if !store.IsRemoved() {
+				storesHistoryLoads.Add(id, rwTy, kind, currentLoads)
+			}
 		}
 
 		for i := range allStoreLoadSum {

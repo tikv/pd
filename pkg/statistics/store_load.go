@@ -303,6 +303,27 @@ func (s *StoreHistoryLoads) Add(storeID uint64, rwTp utils.RWType, kind constant
 	load.add(pointLoad)
 }
 
+// GC removes history load entries for stores that are no longer alive, so a
+// store that's gone doesn't keep its entry for the scheduler's entire
+// lifetime (there's otherwise no periodic sweep of this cache at all).
+func (s *StoreHistoryLoads) GC(stores []*core.StoreInfo) {
+	alive := make(map[uint64]struct{}, len(stores))
+	for _, store := range stores {
+		if !store.IsRemoved() {
+			alive[store.GetID()] = struct{}{}
+		}
+	}
+	for i := range s.loads {
+		for j := range s.loads[i] {
+			for storeID := range s.loads[i][j] {
+				if _, ok := alive[storeID]; !ok {
+					delete(s.loads[i][j], storeID)
+				}
+			}
+		}
+	}
+}
+
 // Get returns the store loads from the history, not one time point.
 // In another word, the result is [dim][time].
 func (s *StoreHistoryLoads) Get(storeID uint64, rwTp utils.RWType, kind constant.ResourceKind) HistoryLoads {

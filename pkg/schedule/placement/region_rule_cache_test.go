@@ -216,10 +216,151 @@ func TestPublicStoreCaches(t *testing.T) {
 	}
 }
 
+func TestToStoreCacheListDoesNotReinsertStaleStore(t *testing.T) {
+	re := require.New(t)
+	manager := NewRegionRuleFitCacheManager()
+	live := core.NewStoreInfo(&metapb.Store{
+		Id:        1,
+		NodeState: metapb.NodeState_Serving,
+	})
+	// storeSet reflects the live, current cluster state; the stores slice
+	// passed to toStoreCacheList simulates a FitRegion call still holding an
+	// older StoreInfo snapshot taken before the store was buried.
+	storeSet := core.NewStoresInfo()
+	storeSet.PutStore(live)
+
+	manager.toStoreCacheList(storeSet, []*core.StoreInfo{live})
+	manager.RemoveStoreCache(1)
+
+	removed := live.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
+	storeSet.PutStore(removed)
+	manager.toStoreCacheList(storeSet, []*core.StoreInfo{live}) // stale FitRegion snapshot
+
+	_, ok := manager.storeCaches[1]
+	re.False(ok)
+}
+
+func TestToStoreCacheListReturnsUncacheableForRemovedStore(t *testing.T) {
+	re := require.New(t)
+	manager := NewRegionRuleFitCacheManager()
+	live := core.NewStoreInfo(&metapb.Store{
+		Id:        1,
+		NodeState: metapb.NodeState_Serving,
+	})
+	storeSet := core.NewStoresInfo()
+	storeSet.PutStore(live)
+
+	_, cacheable := manager.toStoreCacheList(storeSet, []*core.StoreInfo{live})
+	re.True(cacheable)
+
+	// storeSet now shows the store removed while the stores slice still holds
+	// the stale (pre-bury) snapshot -- SetCache must not persist a
+	// region-level cache built from this call, or it would look valid
+	// (region/rule/store-state comparisons all pass against the same stale
+	// snapshot) and never get re-evaluated until an unrelated region-level
+	// change invalidates it.
+	removed := live.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
+	storeSet.PutStore(removed)
+	_, cacheable = manager.toStoreCacheList(storeSet, []*core.StoreInfo{live})
+	re.False(cacheable)
+}
+
+func TestSetCacheDoesNotPromoteStaleFitAfterStoreRemoval(t *testing.T) {
+	re := require.New(t)
+	manager := NewRegionRuleFitCacheManager()
+
+	stores := mockStores(3)
+	storeSet := core.NewStoresInfo()
+	for _, store := range stores {
+		storeSet.PutStore(store)
+	}
+	region := mockRegion(3, 0)
+	rules := addExtraRules(0)
+	fit := fitRegion(stores, region, rules, false)
+	fit.regionStores = stores
+	fit.rules = rules
+
+	manager.SetCache(storeSet, region, fit)
+	cache := manager.regionCaches[region.GetID()]
+	re.NotNil(cache)
+	cache.hitCount = minHitCountToCacheHit - 1
+
+	manager.RemoveStoreCache(stores[0].GetID())
+	storeSet.PutStore(stores[0].Clone(
+		core.SetStoreState(metapb.StoreState_Tombstone),
+	))
+
+	manager.SetCache(storeSet, region, fit) // stale pre-bury fit
+	cache, ok := manager.regionCaches[region.GetID()]
+	re.False(ok && cache.bestFit != nil)
+}
+
+// buryAfterReadStoreSet wraps a *core.StoresInfo and buries the target store
+// as a side effect of the first GetStore(target) call, but still returns the
+// pre-bury snapshot from that same call -- modeling allStoresLive's read
+// racing a concurrent bury that completes between its read and SetCache
+// using the result, since the two are not synchronized by manager.mu.
+type buryAfterReadStoreSet struct {
+	*core.StoresInfo
+	target uint64
+	buried bool
+}
+
+func (s *buryAfterReadStoreSet) GetStore(id uint64) *core.StoreInfo {
+	store := s.StoresInfo.GetStore(id)
+	if id == s.target && !s.buried {
+		s.buried = true
+		s.PutStore(store.Clone(
+			core.SetStoreState(metapb.StoreState_Tombstone),
+		))
+	}
+	return store
+}
+
+func TestSetCachePromotionCannotRaceStoreRemoval(t *testing.T) {
+	re := require.New(t)
+	manager := NewRegionRuleFitCacheManager()
+
+	stores := mockStores(3)
+	storeSet := core.NewStoresInfo()
+	for _, store := range stores {
+		storeSet.PutStore(store)
+	}
+	region := mockRegion(3, 0)
+	rules := addExtraRules(0)
+	fit := fitRegion(stores, region, rules, false)
+	fit.regionStores = stores
+	fit.rules = rules
+
+	manager.SetCache(storeSet, region, fit)
+	cache := manager.regionCaches[region.GetID()]
+	re.NotNil(cache)
+	cache.hitCount = minHitCountToCacheHit - 1
+
+	// allStoresLive reads the last store as still live (the pre-bury
+	// snapshot), then the bury completes as a side effect of that same read;
+	// the promotion below still goes through and writes cache.bestFit.
+	target := stores[len(stores)-1].GetID()
+	racingStoreSet := &buryAfterReadStoreSet{StoresInfo: storeSet, target: target}
+	manager.SetCache(racingStoreSet, region, fit)
+
+	// The cleanup that would normally run right after the bury completes.
+	manager.RemoveStoreCache(target)
+
+	hit, cachedFit := manager.CheckAndGetCache(region, rules, stores)
+	re.False(hit)
+	re.Nil(cachedFit)
+}
+
 func (manager *RegionRuleFitCacheManager) mockRegionRuleFitCache(region *core.RegionInfo, rules []*Rule, regionStores []*core.StoreInfo) *regionRuleFitCache {
+	storeSet := core.NewStoresInfo()
+	for _, s := range regionStores {
+		storeSet.PutStore(s)
+	}
+	storeCacheList, _ := manager.toStoreCacheList(storeSet, regionStores)
 	return &regionRuleFitCache{
 		region:       toRegionCache(region),
-		regionStores: manager.toStoreCacheList(regionStores),
+		regionStores: storeCacheList,
 		rules:        toRuleCacheList(rules),
 		bestFit: &RegionFit{
 			regionStores: regionStores,

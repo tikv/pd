@@ -27,10 +27,12 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
@@ -373,6 +375,153 @@ func (suite *evictSlowStoreTestSuite) TestNetworkSlowStore() {
 		checkNetworkSlowStore(re, es, suite.tc, storeID1, tc.expectedSlow, tc.expectedSlow, tc.recovery)
 	}
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap"))
+}
+
+func (suite *evictSlowStoreTestSuite) TestNetworkSlowStoreSkipsRemovedStore() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap"))
+	}()
+
+	es, ok := suite.es.(*evictSlowStoreScheduler)
+	re.True(ok)
+
+	storeInfo := suite.tc.GetStore(storeID1)
+	// This score pattern is the same "definitely slow" case already proven to
+	// trigger detection when the store is live (see the third case in
+	// TestNetworkSlowStore).
+	slow := storeInfo.Clone(func(store *core.StoreInfo) {
+		store.GetStoreStats().NetworkSlowScores = map[uint64]uint64{
+			storeID2: 10,
+			storeID3: 10,
+			storeID4: 100,
+		}
+	})
+	removed := slow.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
+	suite.tc.PutStore(removed)
+
+	// A tombstoned store stops heartbeating, so its NetworkSlowScores are
+	// frozen at this still-qualifying-as-slow value. Without the guard, the
+	// very first scheduleNetworkSlowStore call -- before
+	// tryRecoverNetworkSlowStores ever gets a chance to clean it up on a
+	// later round -- would add it to networkSlowStoreRecoverStartAts and
+	// publish evictedSlowStoreStatusGauge for it.
+	es.scheduleNetworkSlowStore(suite.tc)
+
+	_, ok = es.conf.networkSlowStoreRecoverStartAts[storeID1]
+	re.False(ok)
+}
+
+func (suite *evictSlowStoreTestSuite) TestNetworkSlowStoreIgnoresKnownRemovedTargets() {
+	re := suite.Require()
+
+	// storeID4 is buried (known removed); the unregistered ID 99 is only
+	// ambiguous, not proof of removal -- it must stay included (see
+	// TestNetworkSlowStoreReachLimit's scale-out storeID5 case, which relies
+	// on an unregistered target staying included too).
+	suite.tc.PutStore(suite.tc.GetStore(storeID4).Clone(
+		core.SetStoreState(metapb.StoreState_Tombstone),
+	))
+
+	scores := map[uint64]uint64{
+		storeID2: 10,
+		storeID3: 10,
+		storeID4: 100,
+		99:       100,
+	}
+	filtered := filterNetworkSlowScores(suite.tc, scores, nil)
+
+	re.NotContains(filtered, uint64(storeID4))
+	re.Contains(filtered, uint64(99))
+	re.Contains(filtered, uint64(storeID2))
+	re.Contains(filtered, uint64(storeID3))
+}
+
+func (suite *evictSlowStoreTestSuite) TestNetworkSlowDenominatorIgnoresRemovedRecoveryEntries() {
+	re := suite.Require()
+
+	// storeID4 was already removed, but a concurrent tryRecoverNetworkSlowStores
+	// round hasn't cleaned up its recovery-map entry yet.
+	suite.tc.PutStore(suite.tc.GetStore(storeID4).Clone(
+		core.SetStoreState(metapb.StoreState_Tombstone),
+	))
+	networkSlowStoreRecoverStartAts := map[uint64]*time.Time{
+		storeID4: nil,
+	}
+
+	allStores := []*core.StoreInfo{
+		suite.tc.GetStore(storeID1),
+		suite.tc.GetStore(storeID2),
+		suite.tc.GetStore(storeID3),
+	}
+	// Only storeID2 actually reports storeID1 as problematic; storeID3 does
+	// not, so consensus (all live peers, excluding this store and any live
+	// recovering peer) is not reached.
+	problematicNetwork := map[uint64]map[uint64]struct{}{
+		storeID1: {storeID2: {}},
+	}
+
+	store := suite.tc.GetStore(storeID1).Clone(func(s *core.StoreInfo) {
+		s.GetStoreStats().NetworkSlowScores = map[uint64]uint64{
+			storeID2: 10,
+			// Kept below networkSlowStoreFluctuationThreshold so the
+			// fallback fluctuation check can't independently return true --
+			// this test isolates the "all others report problems" branch.
+			storeID3: 5,
+			99:       5,
+		}
+	})
+
+	re.False(isNetworkSlowStore(suite.tc, store, allStores, problematicNetwork, networkSlowStoreRecoverStartAts))
+}
+
+func (suite *evictSlowStoreTestSuite) TestNetworkSlowStoreUsesOnlyLiveStores() {
+	re := suite.Require()
+	es := suite.es.(*evictSlowStoreScheduler)
+
+	suite.tc.AddLeaderStore(storeID5, 0)
+	scores := map[uint64]map[uint64]uint64{
+		storeID1: {
+			storeID2: 100,
+			storeID3: 100,
+			storeID4: 100,
+		},
+		storeID2: {
+			storeID1: 100,
+			storeID3: 1,
+		},
+		storeID3: {
+			storeID1: 100,
+			storeID2: 1,
+		},
+		storeID4: {
+			storeID1: 100,
+			storeID2: 1,
+		},
+		storeID5: {
+			storeID1: 1,
+			storeID2: 1,
+		},
+	}
+
+	for storeID, networkScores := range scores {
+		store := suite.tc.GetStore(storeID)
+		suite.tc.PutStore(store.Clone(func(store *core.StoreInfo) {
+			store.GetStoreStats().NetworkSlowScores = networkScores
+		}))
+	}
+	// storeID5 is tombstoned after seeding scores above, so its own report is
+	// stale data, and it must not count toward the denominator that decides
+	// whether the three live peers reporting storeID1 as problematic (2, 3,
+	// 4) form a large-enough majority.
+	suite.tc.PutStore(suite.tc.GetStore(storeID5).Clone(
+		core.SetStoreState(metapb.StoreState_Tombstone),
+	))
+
+	es.scheduleNetworkSlowStore(suite.tc)
+
+	re.Contains(es.conf.networkSlowStoreRecoverStartAts, uint64(storeID1))
 }
 
 func (suite *evictSlowStoreTestSuite) TestNetworkSlowStoreReachLimit() {
@@ -839,6 +988,57 @@ func TestRecoveryTime(t *testing.T) {
 	re.NoError(err)
 	re.Zero(persistValue.evictStore())
 	re.True(persistValue.readyForRecovery())
+}
+
+// buryAfterGetStoresCluster wraps a sche.SchedulerCluster and buries the
+// target store as a side effect of the first GetStores() call, but still
+// returns the pre-bury snapshot from that call -- modeling
+// detectAndHandleNetworkSlowStores's liveStores snapshot racing a concurrent
+// bury that completes before the store is actually acted on.
+type buryAfterGetStoresCluster struct {
+	sche.SchedulerCluster
+	tc     *mockcluster.Cluster
+	target uint64
+	buried bool
+}
+
+func (c *buryAfterGetStoresCluster) GetStores() []*core.StoreInfo {
+	stores := c.SchedulerCluster.GetStores()
+	if !c.buried {
+		c.buried = true
+		if target := c.tc.GetStore(c.target); target != nil {
+			c.tc.PutStore(target.Clone(core.SetStoreState(metapb.StoreState_Tombstone)))
+		}
+	}
+	return stores
+}
+
+func (suite *evictSlowStoreTestSuite) TestDetectAndHandleNetworkSlowStoresSkipsBuriedTarget() {
+	re := suite.Require()
+	es := suite.es.(*evictSlowStoreScheduler)
+
+	// storeID2/3/4 unanimously report storeID1 as problematic -- the same
+	// consensus setup as TestNetworkSlowStoreUsesOnlyLiveStores, enough to
+	// make isNetworkSlowStore return true for storeID1 via the "all others
+	// report problems" branch.
+	scores := map[uint64]map[uint64]uint64{
+		storeID1: {storeID2: 100, storeID3: 100, storeID4: 100},
+		storeID2: {storeID1: 100},
+		storeID3: {storeID1: 100},
+		storeID4: {storeID1: 100},
+	}
+	for storeID, networkScores := range scores {
+		store := suite.tc.GetStore(storeID)
+		suite.tc.PutStore(store.Clone(func(store *core.StoreInfo) {
+			store.GetStoreStats().NetworkSlowScores = networkScores
+		}))
+	}
+
+	wrapped := &buryAfterGetStoresCluster{SchedulerCluster: suite.tc, tc: suite.tc, target: storeID1}
+	es.detectAndHandleNetworkSlowStores(wrapped)
+
+	re.NotContains(es.conf.PausedNetworkSlowStores, uint64(storeID1))
+	re.NotContains(es.conf.networkSlowStoreRecoverStartAts, uint64(storeID1))
 }
 
 func TestCalculateAvgScore(t *testing.T) {

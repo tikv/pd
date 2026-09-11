@@ -557,6 +557,28 @@ func (o *PersistOptions) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitCo
 // GetStoreLimitByType returns the limit of a store with a given type.
 func (o *PersistOptions) GetStoreLimitByType(storeID uint64, typ storelimit.Type) (returned float64) {
 	limit := o.GetStoreLimit(storeID)
+	return storeLimitByType(limit, typ)
+}
+
+// PeekStoreLimitByType returns the limit of a store with a given type without
+// the create-on-miss side effect GetStoreLimitByType has: it never adds a
+// StoreLimit entry for storeID, falling back to the config's default in
+// memory only. Callers that refresh in-memory rate limiters for every
+// currently-known store (as opposed to looking up one specific store the
+// caller is about to act on) must use this -- GetStoreLimitByType would
+// otherwise resurrect an entry a concurrent-or-prior RemoveStoreLimit
+// deliberately removed, since a tombstoned store stays in that "known store"
+// set until its final removal.
+func (o *PersistOptions) PeekStoreLimitByType(storeID uint64, typ storelimit.Type) float64 {
+	cfg := o.GetScheduleConfig()
+	limit, ok := cfg.StoreLimit[storeID]
+	if !ok {
+		limit = cfg.GetDefaultStoreLimit()
+	}
+	return storeLimitByType(limit, typ)
+}
+
+func storeLimitByType(limit sc.StoreLimitConfig, typ storelimit.Type) float64 {
 	switch typ {
 	case storelimit.AddPeer:
 		return limit.AddPeer

@@ -20,6 +20,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
+
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/statistics/utils"
 )
@@ -60,4 +63,36 @@ func TestHistoryLoads(t *testing.T) {
 	historyLoads = NewStoreHistoryLoads(0, 0)
 	historyLoads.Add(1, rwTp, kind, loads)
 	re.Empty(historyLoads.Get(1, rwTp, kind)[0])
+}
+
+func TestHistoryGCDoesNotReaddRemovedStore(t *testing.T) {
+	re := require.New(t)
+	history := NewStoreHistoryLoads(time.Minute, 0)
+	rw := utils.Read
+	kind := constant.RegionKind
+	storeID := uint64(1)
+
+	live := core.NewStoreInfo(&metapb.Store{
+		Id:        storeID,
+		NodeState: metapb.NodeState_Serving,
+	})
+	infos := map[uint64]*StoreSummaryInfo{
+		storeID: {StoreInfo: live},
+	}
+	loads := map[uint64]StoreKindLoads{
+		storeID: {1, 0, 0, 0, 0},
+	}
+
+	SummaryStoresLoad(infos, loads, history, nil, false, rw, kind)
+	re.NotEmpty(history.Get(storeID, rw, kind)[0])
+
+	removed := live.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
+	history.GC([]*core.StoreInfo{removed})
+	re.Empty(history.Get(storeID, rw, kind)[0])
+
+	SummaryStoresLoad(
+		map[uint64]*StoreSummaryInfo{storeID: {StoreInfo: removed}},
+		loads, history, nil, false, rw, kind,
+	)
+	re.Empty(history.Get(storeID, rw, kind)[0])
 }
