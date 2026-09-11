@@ -92,7 +92,7 @@ func TestPrepareRequestForAuditCapturesBodyForExistingRequestInfo(t *testing.T) 
 	requestInfo, ok = requestutil.RequestInfoFrom(req.Context())
 	re.True(ok)
 	re.Equal("request-body", requestInfo.BodyParam)
-	re.Greater(body.reads, 0)
+	re.Positive(body.reads)
 	re.True(body.closed)
 
 	data, err := io.ReadAll(req.Body)
