@@ -375,7 +375,7 @@ func TestConcurrencyGetPutConfig(t *testing.T) {
 			defer wg.Done()
 			for j := range 100 {
 				storeID := peer.GetStoreId()
-				client, conn, err := testutil.NewGrpcClient(leaderServer.GetAddr())
+				client, conn, err := testutil.NewGRPCClient(ctx, leaderServer.GetAddr())
 				if !as.NoError(err) {
 					return
 				}

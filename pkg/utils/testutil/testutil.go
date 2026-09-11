@@ -15,6 +15,7 @@
 package testutil
 
 import (
+	"context"
 	"os"
 	"runtime"
 	"strings"
@@ -95,11 +96,11 @@ func NewRequestHeader(clusterID uint64) *pdpb.RequestHeader {
 	}
 }
 
-// NewGrpcClient creates a new PD grpc client.
-func NewGrpcClient(addr string) (pdpb.PDClient, *grpc.ClientConn, error) {
-	// TODO: use grpc.NewClient instead of grpc.Dial.
+// NewGRPCClient creates a new PD gRPC client.
+func NewGRPCClient(ctx context.Context, addr string) (pdpb.PDClient, *grpc.ClientConn, error) {
+	// TODO: use grpc.NewClient instead of grpc.DialContext.
 	//nolint:staticcheck
-	conn, err := grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.DialContext(ctx, strings.TrimPrefix(addr, "http://"), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -108,9 +109,11 @@ func NewGrpcClient(addr string) (pdpb.PDClient, *grpc.ClientConn, error) {
 
 // MustNewGrpcClient must create a new PD grpc client.
 func MustNewGrpcClient(re *require.Assertions, addr string) (pdpb.PDClient, *grpc.ClientConn) {
-	client, conn, err := NewGrpcClient(addr)
+	// TODO: use grpc.NewClient instead of grpc.Dial.
+	//nolint:staticcheck
+	conn, err := grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	re.NoError(err)
-	return client, conn
+	return pdpb.NewPDClient(conn), conn
 }
 
 // CleanServer is used to clean data directory.

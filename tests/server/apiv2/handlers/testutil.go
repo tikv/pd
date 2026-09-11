@@ -16,6 +16,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -155,17 +156,17 @@ func mustUpdateKeyspaceConfig(re *require.Assertions, server *tests.TestServer, 
 }
 
 func tryUpdateKeyspaceConfig(re *require.Assertions, server *tests.TestServer, name string, request *handlers.UpdateConfigParams) (int, string, *keyspacepb.KeyspaceMeta) {
-	status, body, meta, err := updateKeyspaceConfig(server, name, request)
+	status, body, meta, err := updateKeyspaceConfig(context.Background(), server, name, request)
 	re.NoError(err)
 	return status, body, meta
 }
 
-func updateKeyspaceConfig(server *tests.TestServer, name string, request *handlers.UpdateConfigParams) (int, string, *keyspacepb.KeyspaceMeta, error) {
+func updateKeyspaceConfig(ctx context.Context, server *tests.TestServer, name string, request *handlers.UpdateConfigParams) (int, string, *keyspacepb.KeyspaceMeta, error) {
 	data, err := json.Marshal(request)
 	if err != nil {
 		return 0, "", nil, err
 	}
-	httpReq, err := http.NewRequest(http.MethodPatch, server.GetAddr()+keyspacesPrefix+"/"+name+"/config", bytes.NewBuffer(data))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPatch, server.GetAddr()+keyspacesPrefix+"/"+name+"/config", bytes.NewBuffer(data))
 	if err != nil {
 		return 0, "", nil, err
 	}

@@ -197,6 +197,8 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfigPreconditionsConcurrentS
 	re.NotNil(created)
 
 	nextKey := "next_file_id"
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 	start := make(chan struct{})
 	type updateResult struct {
 		status int
@@ -207,7 +209,7 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfigPreconditionsConcurrentS
 
 	update := func(next string) {
 		<-start
-		status, body, _, err := updateKeyspaceConfig(suite.server, created.Name, &handlers.UpdateConfigParams{
+		status, body, _, err := updateKeyspaceConfig(ctx, suite.server, created.Name, &handlers.UpdateConfigParams{
 			Config: map[string]*string{
 				nextKey: &next,
 			},
