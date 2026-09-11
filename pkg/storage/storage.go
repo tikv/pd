@@ -20,6 +20,7 @@ import (
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
@@ -103,6 +104,22 @@ func NewCoreStorage(defaultStorage Storage, regionStorage endpoint.RegionStorage
 		regionStorage: regionStorage,
 		regionLoaded:  unloaded,
 	}
+}
+
+// RunInTxnWithConditions forwards a conditional transaction to the default storage.
+func (ps *coreStorage) RunInTxnWithConditions(
+	ctx context.Context,
+	conditions []clientv3.Cmp,
+	f func(txn kv.Txn) error,
+) error {
+	if len(conditions) == 0 {
+		return ps.RunInTxn(ctx, f)
+	}
+	runner, ok := ps.Storage.(kv.ConditionalTxnRunner)
+	if !ok {
+		return errors.New("storage backend does not support conditional transactions")
+	}
+	return runner.RunInTxnWithConditions(ctx, conditions, f)
 }
 
 // RetrieveRegionStorage retrieve the region storage from the given storage.

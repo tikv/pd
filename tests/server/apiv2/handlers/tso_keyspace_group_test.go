@@ -18,10 +18,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
+	clientv3 "go.etcd.io/etcd/client/v3"
 
 	perrors "github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -414,4 +418,113 @@ func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromMissingGroupReturnsN
 
 	FailRemoveKeyspacesFromGroupWithCode(re, suite.server, 999,
 		[]uint32{99999}, http.StatusNotFound)
+}
+
+func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupLeadershipConflictReturnsConflict() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
+	}()
+
+	keyspaceManager := suite.server.GetKeyspaceManager()
+	const keyspaceCount = 64 // One more than a full removal batch.
+	keyspaceIDs := make([]uint32, 0, keyspaceCount)
+	for i := range keyspaceCount {
+		meta, err := keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+			Name: fmt.Sprintf("conflict_%d", i),
+		})
+		re.NoError(err)
+		_, err = keyspaceManager.UpdateKeyspaceStateByID(meta.GetId(), keyspacepb.KeyspaceState_DISABLED, 0)
+		re.NoError(err)
+		_, err = keyspaceManager.UpdateKeyspaceStateByID(meta.GetId(), keyspacepb.KeyspaceState_ARCHIVED, 0)
+		re.NoError(err)
+		keyspaceIDs = append(keyspaceIDs, meta.GetId())
+	}
+
+	batchBoundaryCh := make(chan struct{}, 1)
+	continueCh := make(chan struct{})
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/keyspace/afterRemoveKeyspacesFromGroupBatch", func() {
+		batchBoundaryCh <- struct{}{}
+		select {
+		case <-continueCh:
+		case <-suite.ctx.Done():
+		}
+	}))
+	defer func() {
+		select {
+		case <-continueCh:
+		default:
+			close(continueCh)
+		}
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/afterRemoveKeyspacesFromGroupBatch"))
+	}()
+
+	params := &handlers.RemoveKeyspacesFromGroupParams{Keyspaces: keyspaceIDs}
+	data, err := json.Marshal(params)
+	re.NoError(err)
+	httpReq, err := http.NewRequest(
+		http.MethodDelete,
+		suite.server.GetAddr()+keyspaceGroupsPrefix+"/0/keyspaces",
+		bytes.NewBuffer(data),
+	)
+	re.NoError(err)
+	type responseResult struct {
+		statusCode int
+		body       string
+		err        error
+	}
+	resultCh := make(chan responseResult, 1)
+	go func() {
+		resp, err := tests.TestDialClient.Do(httpReq)
+		if err != nil {
+			resultCh <- responseResult{err: err}
+			return
+		}
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		resultCh <- responseResult{statusCode: resp.StatusCode, body: string(body), err: err}
+	}()
+
+	select {
+	case <-batchBoundaryCh:
+	case <-time.After(5 * time.Second):
+		re.FailNow("timed out waiting for a keyspace removal batch boundary")
+	}
+
+	leadership := suite.server.GetServer().GetMember().GetLeadership()
+	oldTerm, ok := leadership.CaptureTerm()
+	re.True(ok)
+	etcdClient := suite.server.GetEtcdClient()
+	newLease, err := etcdClient.Grant(suite.ctx, 60)
+	re.NoError(err)
+	re.NotEqual(oldTerm.LeaseID(), newLease.ID)
+	_, err = etcdClient.Put(
+		suite.ctx,
+		leadership.GetLeaderKey(),
+		oldTerm.LeaderValue(),
+		clientv3.WithLease(newLease.ID),
+	)
+	re.NoError(err)
+	defer func() {
+		_, err := etcdClient.Put(
+			suite.ctx,
+			leadership.GetLeaderKey(),
+			oldTerm.LeaderValue(),
+			clientv3.WithLease(oldTerm.LeaseID()),
+		)
+		re.NoError(err)
+		_, err = etcdClient.Revoke(suite.ctx, newLease.ID)
+		re.NoError(err)
+	}()
+	close(continueCh)
+
+	select {
+	case result := <-resultCh:
+		re.NoError(result.err)
+		re.Equal(http.StatusConflict, result.statusCode, result.body)
+		re.Contains(result.body, errs.ErrEtcdTxnConflict.Error())
+	case <-time.After(5 * time.Second):
+		re.FailNow("timed out waiting for keyspace removal response")
+	}
 }
