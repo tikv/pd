@@ -190,6 +190,10 @@ func decodeResourceGroup(body io.Reader, group *rmpb.ResourceGroup) error {
 	// Keep the legacy encoding/json behavior for all existing ResourceGroup
 	// fields. In particular, it matches JSON field names case-insensitively.
 	if err := json.Unmarshal(data, &legacyGroup); err != nil {
+		var keyspaceIDErr *resourceGroupKeyspaceIDError
+		if errors.As(err, &keyspaceIDErr) {
+			return keyspaceIDErr
+		}
 		// The updated ResourceGroup contains a protobuf oneof, so clients may
 		// serialize the whole message as protobuf JSON. Retry strictly to
 		// accept enum names and quoted 64-bit integers without silently
@@ -229,16 +233,22 @@ type resourceGroupKeyspaceIDField struct {
 	value *resourceGroupKeyspaceIDJSON
 }
 
+// UnmarshalJSON records and normalizes a ResourceGroup keyspace ID without
+// making a second copy of the rest of the request body.
 func (f *resourceGroupKeyspaceIDField) UnmarshalJSON(data []byte) error {
 	if f.value.raw != nil {
-		return errors.New("keyspace_id must be set only once")
+		return &resourceGroupKeyspaceIDError{errors.New("keyspace_id must be set only once")}
 	}
 	raw, err := normalizeKeyspaceIDJSON(data)
 	if err != nil {
-		return err
+		return &resourceGroupKeyspaceIDError{err}
 	}
 	f.value.raw = raw
 	return nil
+}
+
+type resourceGroupKeyspaceIDError struct {
+	error
 }
 
 type jsonObjectField struct {
