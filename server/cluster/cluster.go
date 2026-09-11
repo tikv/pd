@@ -1212,8 +1212,8 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 	resp.State = store.GetNodeState()
 	c.PutStore(newStore, opts...)
 	var (
-		regions  map[uint64]*core.RegionInfo
-		interval uint64
+		reportedRegions map[uint64]struct{}
+		interval        uint64
 	)
 	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
 		c.hotStat.Observe(storeID, newStore.GetStoreStats())
@@ -1222,11 +1222,11 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 		reportInterval := stats.GetInterval()
 		interval = reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
 
-		regions = make(map[uint64]*core.RegionInfo, len(stats.GetPeerStats()))
+		reportedRegions = make(map[uint64]struct{}, len(stats.GetPeerStats()))
 		for _, peerStat := range stats.GetPeerStats() {
 			regionID := peerStat.GetRegionId()
 			region := c.GetRegion(regionID)
-			regions[regionID] = region
+			reportedRegions[regionID] = struct{}{}
 			if region == nil {
 				log.Warn("discard hot peer stat for unknown region",
 					zap.Uint64("region-id", regionID),
@@ -1252,13 +1252,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 				utils.RegionReadCPU:       regionReadCPU * float64(interval),
 				utils.RegionWriteCPU:      0,
 			}
-			checkReadPeerTask := func(cache *statistics.HotPeerCache) {
-				stats := cache.CheckPeerFlow(region, []*metapb.Peer{peer}, loads, interval)
-				for _, stat := range stats {
-					cache.UpdateStat(stat)
-				}
-			}
-			c.hotStat.CheckReadAsync(checkReadPeerTask)
+			c.hotStat.CheckReadPeerAsync(region, peer, loads, interval)
 		}
 	}
 	for _, stat := range stats.GetSnapshotStats() {
@@ -1281,13 +1275,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 	}
 	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
 		// Here we will compare the reported regions with the previous hot peers to decide if it is still hot.
-		collectUnReportedPeerTask := func(cache *statistics.HotPeerCache) {
-			stats := cache.CheckColdPeer(storeID, regions, interval)
-			for _, stat := range stats {
-				cache.UpdateStat(stat)
-			}
-		}
-		c.hotStat.CheckReadAsync(collectUnReportedPeerTask)
+		c.hotStat.CheckColdPeerAsync(storeID, reportedRegions, interval)
 	}
 	c.adjustNetworkSlowStore(storeID)
 	return nil

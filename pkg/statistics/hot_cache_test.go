@@ -16,10 +16,14 @@ package statistics
 
 import (
 	"context"
+	"fmt"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/statistics/utils"
@@ -49,4 +53,148 @@ func TestIsHot(t *testing.T) {
 			re.True(cache.IsRegionHot(region, 1))
 		}
 	}
+}
+
+func TestRegionFlowTasksMatchOriginalForAnyPeerCount(t *testing.T) {
+	for _, peerCount := range []int{0, 1, 2, 3, 5, 9} {
+		t.Run(fmt.Sprintf("%d-peers", peerCount), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			previousRegion := newBenchmarkRegion(1, peerCount+1)
+			newCache := func() *HotPeerCache {
+				cluster := core.NewBasicCluster()
+				for _, peer := range previousRegion.GetPeers() {
+					cluster.PutStore(core.NewStoreInfo(&metapb.Store{Id: peer.GetStoreId()}))
+				}
+				return NewHotPeerCache(ctx, cluster, utils.Write)
+			}
+			originalCache := newCache()
+			compactCache := newCache()
+
+			_, seedWrite := newOriginalRegionFlowTasks(previousRegion)
+			seedWrite(originalCache)
+			seedWrite(compactCache)
+			originalStats := originalCache.GetHotPeerStats(0)
+			compactStats := compactCache.GetHotPeerStats(0)
+			require.Len(t, originalStats, peerCount+1)
+			require.Len(t, compactStats, peerCount+1)
+			for _, peer := range previousRegion.GetPeers() {
+				require.NotEmpty(t, originalStats[peer.GetStoreId()])
+				require.NotEmpty(t, compactStats[peer.GetStoreId()])
+			}
+
+			region := newBenchmarkRegion(1, peerCount)
+
+			originalExpired, originalWrite := newOriginalRegionFlowTasks(region)
+			compactExpired, compactWrite := newRegionFlowTasks(region)
+			originalExpired(originalCache)
+			originalWrite(originalCache)
+			compactExpired(compactCache)
+			compactWrite(compactCache)
+
+			originalStats = originalCache.GetHotPeerStats(0)
+			compactStats = compactCache.GetHotPeerStats(0)
+			require.Equal(t, originalStats, compactStats)
+			require.Equal(t, originalCache.storesOfRegion, compactCache.storesOfRegion)
+			require.Equal(t, originalCache.regionsOfStore, compactCache.regionsOfStore)
+
+			expiredStoreID := uint64(peerCount + 1)
+			require.Empty(t, originalStats[expiredStoreID])
+			require.Empty(t, compactStats[expiredStoreID])
+			require.Nil(t, originalCache.getHotPeerStat(region.GetID(), expiredStoreID))
+			require.Nil(t, compactCache.getHotPeerStat(region.GetID(), expiredStoreID))
+			for _, peer := range region.GetPeers() {
+				require.NotEmpty(t, originalStats[peer.GetStoreId()])
+				require.NotEmpty(t, compactStats[peer.GetStoreId()])
+			}
+		})
+	}
+}
+
+func BenchmarkPendingRegionHeartbeatTasks(b *testing.B) {
+	for _, peerCount := range []int{1, 3, 5} {
+		b.Run(fmt.Sprintf("%d-peers", peerCount), func(b *testing.B) {
+			b.Run("retain-region-info", func(b *testing.B) {
+				runPendingRegionHeartbeatTaskBenchmark(b, peerCount, newOriginalRegionFlowTasks)
+			})
+			b.Run("retain-region-meta", func(b *testing.B) {
+				runPendingRegionHeartbeatTaskBenchmark(b, peerCount, newRegionFlowTasks)
+			})
+		})
+	}
+}
+
+func runPendingRegionHeartbeatTaskBenchmark(
+	b *testing.B,
+	peerCount int,
+	newTasks func(*core.RegionInfo) (func(*HotPeerCache), func(*HotPeerCache)),
+) {
+	const maxPendingHeartbeats = 16 * 1024
+	pending := make([][3]func(*HotPeerCache), min(b.N, maxPendingHeartbeats))
+	runtime.GC()
+	var before runtime.MemStats
+	runtime.ReadMemStats(&before)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := range b.N {
+		region := newBenchmarkRegion(uint64(i+1), peerCount)
+		checkExpiredTask, checkWritePeerTask := newTasks(region)
+		pending[i%len(pending)] = [3]func(*HotPeerCache){
+			checkExpiredTask,
+			checkExpiredTask,
+			checkWritePeerTask,
+		}
+	}
+	b.StopTimer()
+
+	runtime.GC()
+	var after runtime.MemStats
+	runtime.ReadMemStats(&after)
+	retainedBytes := max(int64(after.HeapAlloc)-int64(before.HeapAlloc), 0)
+	b.ReportMetric(float64(retainedBytes)/float64(len(pending)), "retained-B/heartbeat")
+	b.ReportMetric(float64(retainedBytes)/float64(len(pending)*3), "retained-B/task")
+	runtime.KeepAlive(pending)
+}
+
+func newOriginalRegionFlowTasks(region *core.RegionInfo) (checkExpiredTask, checkWritePeerTask func(*HotPeerCache)) {
+	checkExpiredTask = func(cache *HotPeerCache) {
+		expiredStats := cache.CollectExpiredItems(region)
+		for _, stat := range expiredStats {
+			cache.UpdateStat(stat)
+		}
+	}
+	checkWritePeerTask = func(cache *HotPeerCache) {
+		reportInterval := region.GetInterval()
+		interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
+		stats := cache.CheckPeerFlow(region, region.GetPeers(), region.GetWriteLoads(), interval)
+		for _, stat := range stats {
+			cache.UpdateStat(stat)
+		}
+	}
+	return checkExpiredTask, checkWritePeerTask
+}
+
+func newBenchmarkRegion(regionID uint64, peerCount int) *core.RegionInfo {
+	peers := make([]*metapb.Peer, peerCount)
+	for i := range peerCount {
+		peers[i] = &metapb.Peer{Id: regionID*10 + uint64(i+1), StoreId: uint64(i + 1)}
+	}
+	var leader *metapb.Peer
+	if len(peers) > 0 {
+		leader = peers[0]
+	}
+	return core.NewRegionInfo(
+		&metapb.Region{
+			Id:          regionID,
+			StartKey:    make([]byte, 32),
+			EndKey:      make([]byte, 32),
+			RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
+			Peers:       peers,
+		},
+		leader,
+		core.SetWrittenBytes(1<<20),
+		core.SetWrittenKeys(1024),
+		core.SetReportInterval(0, utils.RegionHeartBeatReportInterval),
+	)
 }
