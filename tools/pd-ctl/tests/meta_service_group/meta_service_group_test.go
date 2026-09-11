@@ -93,10 +93,11 @@ func (suite *metaServiceGroupCLITestSuite) TestListMetaServiceGroups() {
 func (suite *metaServiceGroupCLITestSuite) TestUpsertMetaServiceGroup() {
 	re := suite.Require()
 	cmd := ctl.GetRootCmd()
+	endpoint := suite.cluster.GetEtcdClient().Endpoints()[0]
 
 	// Add a new group.
 	output, err := tests.ExecuteCommand(cmd, "-u", suite.pdAddr, "meta-service-group", "upsert",
-		"--group", "group-2=addr2.example.com")
+		"--group", "group-2="+endpoint)
 	re.NoError(err)
 	var groups []*handlers.MetaServiceGroupStatus
 	re.NoError(json.Unmarshal(output, &groups))
@@ -105,7 +106,7 @@ func (suite *metaServiceGroupCLITestSuite) TestUpsertMetaServiceGroup() {
 	for _, g := range groups {
 		if g.ID == "group-2" {
 			found = true
-			re.Equal("addr2.example.com", g.Addresses)
+			re.Equal(endpoint, g.Addresses)
 		}
 	}
 	re.True(found)
@@ -123,8 +124,8 @@ func (suite *metaServiceGroupCLITestSuite) TestUpsertMetaServiceGroup() {
 
 	// Upsert multiple groups at once.
 	output, err = tests.ExecuteCommand(cmd, "-u", suite.pdAddr, "meta-service-group", "upsert",
-		"--group", "group-3=addr3.example.com",
-		"--group", "group-4=addr4.example.com")
+		"--group", "group-3="+endpoint,
+		"--group", "group-4="+endpoint)
 	re.NoError(err)
 	re.NoError(json.Unmarshal(output, &groups))
 	re.Len(groups, 5)
@@ -249,7 +250,7 @@ func (suite *metaServiceGroupCLITestSuite) TestSetStatusEscapesSpecialCharID() {
 	re := suite.Require()
 	specialID := "group a?b#c%d"
 	_, err := tests.ExecuteCommand(ctl.GetRootCmd(), "-u", suite.pdAddr, "meta-service-group", "upsert",
-		"--group", specialID+"=addr-special.example.com")
+		"--group", specialID+"="+suite.cluster.GetEtcdClient().Endpoints()[0])
 	re.NoError(err)
 
 	output, err := tests.ExecuteCommand(ctl.GetRootCmd(), "-u", suite.pdAddr, "meta-service-group", "set-enabled", specialID, "true")

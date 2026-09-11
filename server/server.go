@@ -541,7 +541,15 @@ func (s *Server) startServer(ctx context.Context) error {
 	if s.IsKeyspaceGroupEnabled() {
 		s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage, s.client)
 	}
-	s.metaServiceGroupManager = keyspace.NewMetaServiceGroupManager(s.storage, s.cfg.Keyspace.GetMetaServiceGroups())
+	tlsConfig, err := s.cfg.Security.ToClientTLSConfig()
+	if err != nil {
+		return err
+	}
+	s.metaServiceGroupManager = keyspace.NewMetaServiceGroupManager(
+		s.storage,
+		s.cfg.Keyspace.GetMetaServiceGroups(),
+		tlsConfig,
+	)
 	s.keyspaceManager = keyspace.NewKeyspaceManager(
 		s.ctx,
 		s.storage,
