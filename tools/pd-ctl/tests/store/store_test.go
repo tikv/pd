@@ -491,17 +491,17 @@ func (s *storeTestSuite) checkStore(cluster *pdTests.TestCluster) {
 	re.NoError(err)
 	re.NotContains(string(output), "PANIC")
 
-	// store limit all 201 is invalid for all
+	// store limit all 201 is invalid for all on Classic PD.
 	args = []string{"-u", pdAddr, "store", "limit", "all", "201"}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	re.Contains(string(output), "rate should be less than")
+	re.Contains(string(output), "rate should be at most 200.0 for all")
 
-	// store limit all 201 is invalid for label
+	// store limit all 201 is invalid for label filtering on Classic PD.
 	args = []string{"-u", pdAddr, "store", "limit", "all", "engine", "key", "201", "add-peer"}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	re.Contains(string(output), "rate should be less than")
+	re.Contains(string(output), "rate should be at most 200.0 for all")
 
 	// store limit all engine tikv 21 remove peer for tikv stores
 	args = []string{"-u", pdAddr, "store", "limit", "all", "engine", "tikv", "21", "remove-peer"}

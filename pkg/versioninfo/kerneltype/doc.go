@@ -34,3 +34,10 @@
 // for the data plane, typically using object storage solutions like Amazon S3 as
 // the single source of truth for data storage.
 package kerneltype
+
+const (
+	// Classic is the canonical name of the Classic kernel.
+	Classic = "Classic"
+	// NextGen is the canonical name of the Next Generation kernel.
+	NextGen = "Next Generation"
+)
