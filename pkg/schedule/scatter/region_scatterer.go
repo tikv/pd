@@ -621,6 +621,12 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 	oldFit := r.cluster.GetRuleManager().FitRegion(r.cluster, region)
 	view := region
 	viewFit := oldFit
+	var hostRules []*placement.Rule
+	if r.cluster.GetSharedConfig().IsPlacementRulesEnabled() {
+		hostRules = oldFit.GetRules()
+	}
+	hostLabels := scatterHostLabels(r.cluster.GetSharedConfig().GetLocationLabels(), hostRules)
+
 	// Group peers by the engine of their stores
 	for _, peer := range region.GetPeers() {
 		store := r.cluster.GetStore(peer.GetStoreId())
@@ -684,8 +690,18 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 				viewFit = r.cluster.GetRuleManager().FitRegionWithoutCache(r.cluster, view)
 			}
 			filters[filterLen-1] = filter.NewPlacementSafeguard(r.name, r.cluster.GetSharedConfig(), r.cluster.GetBasicCluster(), r.cluster.GetRuleManager(), view, sourceStore, viewFit)
+			var hosts []scatterHostPlacement
+			if !core.IsLearner(peer) && len(view.GetVoters()) > 1 && len(hostLabels) > 0 {
+				voters := make([]*core.StoreInfo, 0, len(view.GetVoters()))
+				for _, voter := range view.GetVoters() {
+					voters = append(voters, r.cluster.GetStore(voter.GetStoreId()))
+				}
+				for _, labels := range hostLabels {
+					hosts = append(hosts, newScatterHostPlacement(labels, voters))
+				}
+			}
 			for {
-				newPeer := r.selectNewPeer(context, group, peer, filters, internalScatter)
+				newPeer := r.selectNewPeer(context, group, peer, filters, hosts, internalScatter)
 				selectedStores[newPeer.GetStoreId()] = struct{}{}
 				// If the selected peer is a peer other than origin peer in this region,
 				// it is considered that the selected peer select itself.
@@ -872,7 +888,7 @@ func isSameDistribution(region *core.RegionInfo, targetPeers map[uint64]*metapb.
 // 1. found the max pick count and the min pick count.
 // 2. if max pick count equals min pick count, it means all store picked count are some, return the origin peer.
 // 3. otherwise, select the store which pick count is the min pick count and pass all filter.
-func (r *RegionScatterer) selectNewPeer(context scatterSelectionContext, group string, peer *metapb.Peer, filters []filter.Filter, internalScatter bool) *metapb.Peer {
+func (r *RegionScatterer) selectNewPeer(context scatterSelectionContext, group string, peer *metapb.Peer, filters []filter.Filter, hosts []scatterHostPlacement, internalScatter bool) *metapb.Peer {
 	stores := r.cluster.GetStores()
 	maxStoreTotalCount := uint64(0)
 	minStoreTotalCount := uint64(math.MaxUint64)
@@ -902,6 +918,11 @@ func (r *RegionScatterer) selectNewPeer(context scatterSelectionContext, group s
 			continue
 		}
 		if !filter.Target(r.cluster.GetSharedConfig(), store, filters) {
+			continue
+		}
+		if !core.IsLearner(peer) && slices.ContainsFunc(hosts, func(p scatterHostPlacement) bool {
+			return !p.allowsMove(peer.GetStoreId(), store)
+		}) {
 			continue
 		}
 		candidate := &metapb.Peer{
