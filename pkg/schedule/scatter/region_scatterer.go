@@ -57,7 +57,8 @@ var (
 	scatterSkipNotReplicatedCounter = scatterCounter.WithLabelValues("skip", "not-replicated")
 	scatterSkipAffinityCounter      = scatterCounter.WithLabelValues("skip", "affinity")
 	scatterUnnecessaryCounter       = scatterCounter.WithLabelValues("unnecessary", "")
-	scatterFailCounter              = scatterCounter.WithLabelValues("fail", "")
+	scatterPlacementFailedCounter   = scatterCounter.WithLabelValues("fail", "placement-validation-failed")
+	scatterOperatorFailedCounter    = scatterCounter.WithLabelValues("fail", "operator-creation-failed")
 	scatterSuccessCounter           = scatterCounter.WithLabelValues("success", "")
 	scatterOperatorRunningCounter   = scatterCounter.WithLabelValues("skip", "running")
 	scatterOperatorExistedCounter   = scatterCounter.WithLabelValues("fail", "other-existed")
@@ -755,7 +756,7 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 		targetLeader, leaderStorePickedCount = r.selectAvailableLeaderStore(group, region, leaderCandidateStores, ordinaryContext, internalScatter)
 	}
 	if targetLeader == 0 {
-		scatterFailCounter.Inc()
+		scatterPlacementFailedCounter.Inc()
 		if state == nil {
 			currentPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))
 			for _, peer := range region.GetPeers() {
@@ -781,7 +782,7 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 	}
 	op, err := createScatterOperator(desc, r.cluster, region, targetPeers, targetLeader, skipStoreLimit)
 	if err != nil {
-		scatterFailCounter.Inc()
+		scatterOperatorFailedCounter.Inc()
 		currentPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))
 		for _, peer := range region.GetPeers() {
 			currentPeers[peer.GetStoreId()] = peer

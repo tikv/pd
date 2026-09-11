@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	promtest "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pingcap/errors"
@@ -260,6 +261,7 @@ func TestScatterRetriesLegalLeader(t *testing.T) {
 						sc.ordinaryEngine.selectedLeader.Put(4, group)
 					}
 				}
+				placementFailures := promtest.ToFloat64(scatterPlacementFailedCounter)
 				// Lower-count voter targets are considered first, but only store 4
 				// can lead the final membership. Retry without changing the peers.
 				var op *operator.Operator
@@ -277,6 +279,7 @@ func TestScatterRetriesLegalLeader(t *testing.T) {
 					require.Contains(t, targets, id)
 				}
 				require.Equal(t, uint64(4), leader)
+				require.Equal(t, placementFailures, promtest.ToFloat64(scatterPlacementFailedCounter))
 				require.True(t, sc.scatterPlacementValid(region, targets, leader))
 			}
 		})
@@ -801,6 +804,43 @@ func TestScatterHostLearner(t *testing.T) {
 	targets, _ = scatterOperatorTargets(t, region, op)
 	require.Contains(t, targets, uint64(4))
 	require.Equal(t, metapb.PeerRole_Learner, targets[4].GetRole())
+}
+
+func TestScatterFailureMetrics(t *testing.T) {
+	for _, internal := range []bool{false, true} {
+		for _, placementFailure := range []bool{false, true} {
+			t.Run(fmt.Sprintf("internal=%v/placement=%v", internal, placementFailure), func(t *testing.T) {
+				sc, tc, region := newPlacementTestScatter(t, true, []string{"A", "B", "C", "D"})
+				if placementFailure {
+					// All leader candidates fail the final rule-count check.
+					region = region.Clone(core.WithRemoveStorePeer(3))
+				} else {
+					sc.cluster = &scatterAllocFailureCluster{SharedCluster: tc}
+				}
+				var state *scatterState
+				if internal {
+					state = sc.newScatterState()
+					state.ordinaryEngine.selectedPeer.InitGroupDistribution("metrics", map[uint64]uint64{1: 10})
+				} else {
+					for range 10 {
+						sc.ordinaryEngine.selectedPeer.Put(1, "metrics")
+					}
+				}
+				placementBefore := promtest.ToFloat64(scatterPlacementFailedCounter)
+				operatorBefore := promtest.ToFloat64(scatterOperatorFailedCounter)
+				op, err := sc.scatterRegionWithType(region, "metrics", true, internal, state)
+				require.Error(t, err)
+				require.Nil(t, op)
+				if placementFailure {
+					require.Equal(t, placementBefore+1, promtest.ToFloat64(scatterPlacementFailedCounter))
+					require.Equal(t, operatorBefore, promtest.ToFloat64(scatterOperatorFailedCounter))
+				} else {
+					require.Equal(t, placementBefore, promtest.ToFloat64(scatterPlacementFailedCounter))
+					require.Equal(t, operatorBefore+1, promtest.ToFloat64(scatterOperatorFailedCounter))
+				}
+			})
+		}
+	}
 }
 
 func BenchmarkScatterHostHierarchy(b *testing.B) {
