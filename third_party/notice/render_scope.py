@@ -5,7 +5,6 @@ import csv
 import hashlib
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -16,6 +15,17 @@ from pathlib import Path
 
 def command(*args, cwd=None, env=None):
     return subprocess.check_output(args, cwd=cwd, env=env, text=True).strip()
+
+
+def repository_url(repo):
+    try:
+        url = command("git", "config", "--get", "remote.origin.url", cwd=repo)
+    except subprocess.CalledProcessError:
+        return ""
+    parsed = urlparse(url)
+    if parsed.username is None:
+        return url
+    return parsed._replace(netloc=parsed.netloc.rsplit("@", 1)[-1]).geturl()
 
 
 def json_stream(text):
@@ -35,16 +45,10 @@ def sha256(path):
 
 
 def rendered_text(path, encoding="utf-8"):
-    lines = []
-    for line in path.read_text(encoding=encoding).splitlines():
-        line = line.expandtabs(8).rstrip()
-        # A line of seven or more '=' characters is a Git conflict marker even
-        # when it is an upstream document heading. Preserve its structure while
-        # avoiding a generated notice that fails `git diff --check`.
-        if re.fullmatch(r"={7,}", line):
-            line = "-" * len(line)
-        lines.append(line)
-    return "\n".join(lines).rstrip()
+    return "\n".join(
+        line.expandtabs(8).rstrip()
+        for line in path.read_text(encoding=encoding).splitlines()
+    ).rstrip()
 
 
 def license_file(evidence_dir):
@@ -236,7 +240,7 @@ def main(repo_arg, out_arg, package_args):
     root_module = command("go", "list", "-m", "-f", "{{.Path}}", cwd=repo, env=env)
     metadata = {
         "schema_version": 1,
-        "repository": command("git", "config", "--get", "remote.origin.url", cwd=repo),
+        "repository": repository_url(repo),
         "commit": commit,
         "scope": {
             "description": "Go source packages resolved by go list -deps; tests are excluded.",

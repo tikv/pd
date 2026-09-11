@@ -5,8 +5,9 @@ in [`scopes.json`](scopes.json). The profile list includes the root module, the
 nested `tools` and `client` modules, and the supported `SWAGGER=1` build.
 Tests are intentionally excluded.
 
-The pinned image contains Go 1.25.12 and `go-licenses` 1.6.0. Run generation
-from the repository root:
+The pinned image contains Go 1.25.12 and `go-licenses` 1.6.0. Generation
+collects from a detached worktree at `source_commit`, so that commit must be
+available in the local Git repository. Run generation from the repository root:
 
 ```bash
 docker run --rm -v "$PWD:/workspace" -w /workspace \

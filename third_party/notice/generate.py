@@ -3,6 +3,7 @@
 
 import argparse
 import json
+from contextlib import contextmanager
 import os
 import shutil
 import subprocess
@@ -22,31 +23,42 @@ def run(command, env):
     subprocess.run(command, cwd=ROOT, env=env, check=True)
 
 
+@contextmanager
+def source_checkout(directory, commit):
+    checkout = directory / "source"
+    run(["git", "worktree", "add", "--detach", str(checkout), commit], os.environ.copy())
+    try:
+        yield checkout
+    finally:
+        run(["git", "worktree", "remove", "--force", str(checkout)], os.environ.copy())
+
+
 def generate(directory):
     config = json.loads(CONFIG.read_text())
     evidence = directory / "evidence"
-    for profile in config["profiles"]:
-        env = os.environ.copy()
-        env.update(
-            {
-                "GOOS": config["target"]["goos"],
-                "GOARCH": config["target"]["goarch"],
-                "FIRST_PARTY_PREFIXES": ",".join(config["target"]["first_party_prefixes"]),
-                "NOTICE_GENERATOR_IMAGE": config["generator"]["image"],
-                "NOTICE_SOURCE_COMMIT": config["source_commit"],
-                "NOTICE_OVERRIDES": str(NOTICE_DIR / "overrides.json"),
-                "GOFLAGS": "-tags=" + ",".join(profile["build_tags"]),
-            }
-        )
-        if not profile["build_tags"]:
-            env.pop("GOFLAGS")
-        output = evidence / profile["id"]
-        run([str(COLLECTOR), str(ROOT / profile["module"]), str(output), *profile["packages"]], env)
-        version = (output / "go.version.txt").read_text().splitlines()[0]
-        if config["generator"]["go_version"] not in version:
-            raise RuntimeError(
-                f"{profile['id']} used {version}, expected {config['generator']['go_version']}"
+    with source_checkout(directory, config["source_commit"]) as source:
+        for profile in config["profiles"]:
+            env = os.environ.copy()
+            env.update(
+                {
+                    "GOOS": config["target"]["goos"],
+                    "GOARCH": config["target"]["goarch"],
+                    "FIRST_PARTY_PREFIXES": ",".join(config["target"]["first_party_prefixes"]),
+                    "NOTICE_GENERATOR_IMAGE": config["generator"]["image"],
+                    "NOTICE_SOURCE_COMMIT": config["source_commit"],
+                    "NOTICE_OVERRIDES": str(NOTICE_DIR / "overrides.json"),
+                    "GOFLAGS": "-tags=" + ",".join(profile["build_tags"]),
+                }
             )
+            if not profile["build_tags"]:
+                env.pop("GOFLAGS")
+            output = evidence / profile["id"]
+            run([str(COLLECTOR), str(source / profile["module"]), str(output), *profile["packages"]], env)
+            version = (output / "go.version.txt").read_text().splitlines()[0]
+            if config["generator"]["go_version"] not in version:
+                raise RuntimeError(
+                    f"{profile['id']} used {version}, expected {config['generator']['go_version']}"
+                )
 
     notice = directory / "ThirdPartyNotices.txt"
     components = directory / "components.json"

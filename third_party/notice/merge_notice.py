@@ -3,7 +3,6 @@
 
 import hashlib
 import json
-import re
 import sys
 from pathlib import Path
 
@@ -13,13 +12,10 @@ def digest(path):
 
 
 def rendered_text(path, encoding="utf-8"):
-    lines = []
-    for line in path.read_text(encoding=encoding).splitlines():
-        line = line.expandtabs(8).rstrip()
-        if re.fullmatch(r"={7,}", line):
-            line = "-" * len(line)
-        lines.append(line)
-    return "\n".join(lines).rstrip()
+    return "\n".join(
+        line.expandtabs(8).rstrip()
+        for line in path.read_text(encoding=encoding).splitlines()
+    ).rstrip()
 
 
 def component_key(component):
