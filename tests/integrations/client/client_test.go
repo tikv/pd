@@ -2035,8 +2035,7 @@ func TestCircuitBreakerHalfOpenAndChangeSettings(t *testing.T) {
 	re.Error(err)
 	re.Contains(err.Error(), "circuit breaker is open")
 
-	fname := testutil.InitTempFileLogger("info")
-	defer os.RemoveAll(fname)
+	fname := testutil.InitTempFileLogger(t, "info")
 	// wait for cooldown
 	time.Sleep(time.Second)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker"))

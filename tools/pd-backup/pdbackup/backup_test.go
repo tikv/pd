@@ -168,9 +168,11 @@ func (s *backupTestSuite) TestGetBackupInfo() {
 	}
 	re.Equal(expected, actual)
 
-	tmpFile, err := os.CreateTemp("", "pd_tests")
+	tmpFile, err := os.CreateTemp(s.T().TempDir(), "pd_tests")
 	re.NoError(err)
-	defer os.RemoveAll(tmpFile.Name())
+	s.T().Cleanup(func() {
+		re.NoError(tmpFile.Close())
+	})
 
 	re.NoError(OutputToFile(actual, tmpFile))
 	_, err = tmpFile.Seek(0, 0)

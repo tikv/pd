@@ -620,7 +620,7 @@ func (n *numa) runTestCase(pkg string, fn string) testResult {
 		cmd.Stderr = &buf
 
 		start = time.Now()
-		err = cmd.Run()
+		err = runCommandWithTempDir(cmd)
 		if err != nil {
 			var exitError *exec.ExitError
 			if errors.As(err, &exitError) {
@@ -652,6 +652,25 @@ func (n *numa) runTestCase(pkg string, fn string) testResult {
 	res.d = time.Since(start)
 	res.Time = formatDurationAsSeconds(res.d)
 	return res
+}
+
+func runCommandWithTempDir(cmd *exec.Cmd) (err error) {
+	tempDir, err := os.MkdirTemp("", "pd-ut-test-")
+	if err != nil {
+		return fmt.Errorf("create test command temp directory: %w", err)
+	}
+	defer func() {
+		if cleanupErr := os.RemoveAll(tempDir); cleanupErr != nil {
+			err = errors.Join(err, fmt.Errorf("remove test command temp directory: %w", cleanupErr))
+		}
+	}()
+
+	cmd.Env = append(cmd.Environ(),
+		"TMPDIR="+tempDir,
+		"TMP="+tempDir,
+		"TEMP="+tempDir,
+	)
+	return cmd.Run()
 }
 
 func collectTestResults(workers []numa) JUnitTestSuites {

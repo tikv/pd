@@ -19,10 +19,12 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
@@ -111,15 +113,29 @@ func CleanServer(dataDir string) {
 }
 
 // InitTempFileLogger initializes the logger and redirects the log output to a temporary file.
-func InitTempFileLogger(level string) (fname string) {
+func InitTempFileLogger(t testing.TB, level string) (fname string) {
+	t.Helper()
 	cfg := &log.Config{}
-	f, _ := os.CreateTemp("", "pd_tests")
+	f, err := os.CreateTemp(t.TempDir(), "pd_tests")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		if err := f.Close(); err != nil {
+			t.Errorf("close temporary file logger: %v", err)
+		}
+	})
 	fname = f.Name()
-	f.Close()
 	cfg.File.Filename = fname
 	cfg.Level = level
-	lg, p, _ := log.InitLogger(cfg)
-	log.ReplaceGlobals(lg, p)
+	output := zapcore.AddSync(f)
+	lg, p, err := log.InitLoggerWithWriteSyncer(cfg, output, output)
+	require.NoError(t, err)
+	restoreLogger := log.ReplaceGlobals(lg, p)
+	t.Cleanup(func() {
+		restoreLogger()
+		if err := lg.Sync(); err != nil {
+			t.Errorf("sync temporary file logger: %v", err)
+		}
+	})
 	return fname
 }
 
