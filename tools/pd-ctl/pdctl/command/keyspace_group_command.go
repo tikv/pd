@@ -30,7 +30,7 @@ import (
 
 const (
 	keyspaceGroupsPrefix = "pd/api/v2/tso/keyspace-groups"
-	flagShowKGKeyspaces  = "show-keyspaces"
+	flagHideKGKeyspaces  = "hide-keyspaces"
 )
 
 // NewKeyspaceGroupCommand return a keyspace group subcommand of rootCmd
@@ -49,7 +49,7 @@ func NewKeyspaceGroupCommand() *cobra.Command {
 	cmd.AddCommand(newSetPriorityKeyspaceGroupCommand())
 	cmd.AddCommand(newShowKeyspaceGroupPrimaryCommand())
 	cmd.Flags().String("state", "", "state filter")
-	cmd.Flags().Bool(flagShowKGKeyspaces, true, "show keyspace list in keyspace group output")
+	cmd.Flags().Bool(flagHideKGKeyspaces, false, "hide keyspace list in keyspace group output")
 	return cmd
 }
 
@@ -135,13 +135,13 @@ func showKeyspaceGroupsCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	flags := cmd.Flags()
-	showKeyspaces, err := flags.GetBool(flagShowKGKeyspaces)
+	hideKeyspaces, err := flags.GetBool(flagHideKGKeyspaces)
 	if err != nil {
-		cmd.Printf("Failed to get %s: %s\n", flagShowKGKeyspaces, err)
+		cmd.Printf("Failed to get %s: %s\n", flagHideKGKeyspaces, err)
 		return
 	}
 	cFunc := func(content string) string {
-		return convertToKeyspaceGroups(content, showKeyspaces)
+		return convertToKeyspaceGroups(content, !hideKeyspaces)
 	}
 	if len(args) == 1 {
 		if _, err := strconv.Atoi(args[0]); err != nil {
@@ -150,7 +150,7 @@ func showKeyspaceGroupsCommandFunc(cmd *cobra.Command, args []string) {
 		}
 		prefix = fmt.Sprintf("%s/%s", keyspaceGroupsPrefix, args[0])
 		cFunc = func(content string) string {
-			return convertToKeyspaceGroup(content, showKeyspaces)
+			return convertToKeyspaceGroup(content, !hideKeyspaces)
 		}
 	} else {
 		state, err := flags.GetString("state")

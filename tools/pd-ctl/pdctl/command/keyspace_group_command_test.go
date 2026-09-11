@@ -55,11 +55,11 @@ func TestConvertToKeyspaceGroups(t *testing.T) {
 	re.Equal([]any{}, groups[1]["keyspaces"])
 }
 
-func TestNewKeyspaceGroupCommandShowsKeyspacesByDefault(t *testing.T) {
+func TestNewKeyspaceGroupCommandDoesNotHideKeyspacesByDefault(t *testing.T) {
 	re := require.New(t)
-	flag := NewKeyspaceGroupCommand().Flags().Lookup(flagShowKGKeyspaces)
+	flag := NewKeyspaceGroupCommand().Flags().Lookup(flagHideKGKeyspaces)
 	re.NotNil(flag)
-	re.Equal("true", flag.DefValue)
+	re.Equal("false", flag.DefValue)
 }
 
 func reJSONHasNoKeyspaces(re *require.Assertions, output string) {
