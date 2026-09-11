@@ -114,6 +114,7 @@ func GetRegionByID(rc *core.BasicCluster, request *pdpb.GetRegionByIDRequest, is
 }
 
 // ScanRegions implements gRPC PDServer.
+//
 // Deprecated: use BatchScanRegions instead.
 func ScanRegions(rc *core.BasicCluster, request *pdpb.ScanRegionsRequest, isFollower bool) (resp *pdpb.ScanRegionsResponse, err error) {
 	if rc == nil {

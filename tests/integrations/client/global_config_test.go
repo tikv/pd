@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -41,7 +41,7 @@ import (
 const globalConfigPath = "/global/config/"
 
 type testReceiver struct {
-	re  *require.Assertions
+	as  *assert.Assertions
 	ctx context.Context
 	grpc.ServerStream
 }
@@ -49,7 +49,7 @@ type testReceiver struct {
 func (s testReceiver) Send(m *pdpb.WatchGlobalConfigResponse) error {
 	log.Info("received", zap.Any("received", m.GetChanges()))
 	for _, change := range m.GetChanges() {
-		s.re.Contains(change.Name, globalConfigPath+string(change.Payload))
+		s.as.Contains(change.Name, globalConfigPath+string(change.Payload))
 	}
 	return nil
 }
@@ -174,7 +174,7 @@ func (suite *globalConfigTestSuite) TestRejectInvalidConfigPath() {
 
 		err = suite.server.WatchGlobalConfig(&pdpb.WatchGlobalConfigRequest{
 			ConfigPath: configPath,
-		}, testReceiver{re: re, ctx: suite.server.Context()})
+		}, testReceiver{as: assert.New(suite.T()), ctx: suite.server.Context()})
 		re.Equal(codes.InvalidArgument, status.Code(err), configPath)
 	}
 }
@@ -265,7 +265,7 @@ func (suite *globalConfigTestSuite) TestResourceGroupControllerPrefixLoadCompati
 
 	err = suite.server.WatchGlobalConfig(&pdpb.WatchGlobalConfigRequest{
 		ConfigPath: controllerPath,
-	}, testReceiver{re: re, ctx: suite.server.Context()})
+	}, testReceiver{as: assert.New(suite.T()), ctx: suite.server.Context()})
 	re.Equal(codes.InvalidArgument, status.Code(err))
 }
 
@@ -455,14 +455,20 @@ func (suite *globalConfigTestSuite) TestWatch() {
 		}
 	}()
 	ctx, cancel := context.WithCancel(suite.server.Context())
-	defer cancel()
-	server := testReceiver{re: suite.Require(), ctx: ctx}
+	as := assert.New(suite.T())
+	server := testReceiver{as: as, ctx: ctx}
+	watchDone := make(chan struct{})
 	go func() {
+		defer close(watchDone)
 		err := suite.server.WatchGlobalConfig(&pdpb.WatchGlobalConfigRequest{
 			ConfigPath: globalConfigPath,
 			Revision:   0,
 		}, server)
-		re.NoError(err)
+		as.NoError(err)
+	}()
+	defer func() {
+		cancel()
+		<-watchDone
 	}()
 	for i := range 6 {
 		_, err := suite.server.GetClient().Put(suite.server.Context(), getEtcdPath(strconv.Itoa(i)), strconv.Itoa(i))

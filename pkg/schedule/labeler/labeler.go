@@ -141,6 +141,7 @@ func (l *RegionLabeler) loadRules() error {
 }
 
 // BuildRangeListLocked publishes pending derived rule-index updates.
+//
 // Deprecated: Unlock publishes them automatically.
 func (l *RegionLabeler) BuildRangeListLocked() {
 	l.ruleIndex.buildRanges()

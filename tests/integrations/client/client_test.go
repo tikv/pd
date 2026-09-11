@@ -531,7 +531,7 @@ func (suite *followerForwardAndHandleTestSuite) SetupSuite() {
 	suite.endpoints = runServer(re, cluster)
 	re.NotEmpty(cluster.WaitLeader())
 	leader := cluster.GetLeaderServer()
-	grpcPDClient, conn := testutil.MustNewGrpcClient(re, leader.GetAddr())
+	grpcPDClient, conn := testutil.MustNewGRPCClient(suite.ctx, re, leader.GetAddr())
 	defer conn.Close()
 	suite.regionID = regionIDAllocator.alloc()
 	testutil.Eventually(re, func() bool {
@@ -1106,7 +1106,7 @@ func (suite *clientTestSuiteImpl) setup() {
 	leaderName := suite.cluster.WaitLeader()
 	re.NotEmpty(leaderName)
 	suite.srv = suite.cluster.GetLeaderServer().GetServer()
-	suite.grpcPDClient, suite.conn = testutil.MustNewGrpcClient(re, suite.srv.GetAddr())
+	suite.grpcPDClient, suite.conn = testutil.MustNewGRPCClient(suite.ctx, re, suite.srv.GetAddr())
 	suite.grpcSvr = &server.GrpcServer{Server: suite.srv}
 
 	tests.MustWaitLeader(re, []*server.Server{suite.srv})
