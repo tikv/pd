@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"testing"
 	"time"
 
@@ -32,6 +33,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/response"
@@ -153,6 +155,83 @@ func (suite *storeTestSuite) checkStoresList(cluster *tests.TestCluster) {
 func (suite *storeTestSuite) TestStores() {
 	suite.env.RunTestInNonMicroserviceEnv(suite.checkGetAllLimit)
 	suite.env.RunTestInNonMicroserviceEnv(suite.checkStoreLabel)
+}
+
+func (suite *storeTestSuite) TestStoreLimitLabels() {
+	suite.env.RunTest(suite.checkStoreLimitLabels)
+}
+
+func (suite *storeTestSuite) checkStoreLimitLabels(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leader := cluster.GetLeaderServer()
+	url := leader.GetAddr() + "/pd/api/v1/stores/limit"
+	stores := initStores()[:2]
+	for i, store := range stores {
+		store.Labels = []*metapb.StoreLabel{{Key: "zone", Value: strconv.Itoa(i)}}
+		tests.MustPutStore(re, cluster, store)
+		for typ, rate := range map[storelimit.Type]float64{
+			storelimit.AddPeer: 31, storelimit.RemovePeer: 37, storelimit.TransferLeaderIn: 41,
+		} {
+			re.NoError(leader.GetRaftCluster().SetStoreLimit(store.Id, typ, rate))
+		}
+	}
+
+	for i, limitType := range []string{"add-peer", "remove-peer", "", "transfer-leader-in"} {
+		rate := float64(25 + i)
+		input := map[string]any{"rate": rate}
+		if limitType != "" {
+			input["type"] = limitType
+		}
+		before := leader.GetPersistOptions().GetScheduleConfig().Clone()
+		for _, labels := range []string{
+			`null`, `[]`, `"zone"`, `1`, `true`,
+			`{"zone":null}`, `{"zone":[]}`, `{"zone":1}`, `{"zone":true}`, `{"zone":{}}`,
+			`{"zone":"0","rack":1}`,
+		} {
+			suite.Run(fmt.Sprintf("%s/labels=%s", limitType, labels), func() {
+				re := suite.Require()
+				input["labels"] = json.RawMessage(labels)
+				body, err := json.Marshal(input)
+				re.NoError(err)
+				re.NoError(testutil.CheckPostJSON(tests.TestDialClient, url, body,
+					testutil.Status(re, http.StatusBadRequest), testutil.ExtractJSON(re, new(string))))
+				cfg := leader.GetPersistOptions().GetScheduleConfig()
+				re.Equal(before.StoreLimit, cfg.StoreLimit)
+				re.Equal(before.DefaultStoreLimit, cfg.DefaultStoreLimit)
+			})
+		}
+
+		// An empty selector and a nonmatching selector must remain successful no-ops.
+		for _, labels := range []string{`{}`, `{"zone":"missing"}`} {
+			input["labels"] = json.RawMessage(labels)
+			body, err := json.Marshal(input)
+			re.NoError(err)
+			re.NoError(testutil.CheckPostJSON(tests.TestDialClient, url, body, testutil.StatusOK(re)))
+			cfg := leader.GetPersistOptions().GetScheduleConfig()
+			re.Equal(before.StoreLimit, cfg.StoreLimit)
+			re.Equal(before.DefaultStoreLimit, cfg.DefaultStoreLimit)
+		}
+
+		input["labels"] = map[string]string{"zone": "0"}
+		body, err := json.Marshal(input)
+		re.NoError(err)
+		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, url, body, testutil.StatusOK(re)))
+		expected := before.StoreLimit[stores[0].Id]
+		switch limitType {
+		case "add-peer":
+			expected.AddPeer = rate
+		case "remove-peer":
+			expected.RemovePeer = rate
+		case "transfer-leader-in":
+			expected.TransferLeaderIn = rate
+		default:
+			expected.AddPeer, expected.RemovePeer = rate, rate
+		}
+		before.StoreLimit[stores[0].Id] = expected
+		cfg := leader.GetPersistOptions().GetScheduleConfig()
+		re.Equal(before.StoreLimit, cfg.StoreLimit)
+		re.Equal(before.DefaultStoreLimit, cfg.DefaultStoreLimit)
+	}
 }
 
 func (suite *storeTestSuite) TestStoreLimitRemainsAvailableDuringRollingUpgrade() {

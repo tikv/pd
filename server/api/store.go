@@ -468,12 +468,21 @@ func (h *storesHandler) SetAllStoresLimit(w http.ResponseWriter, r *http.Request
 			}
 		}
 	} else {
-		labelMap := input["labels"].(map[string]any)
+		labelMap, ok := input["labels"].(map[string]any)
+		if !ok {
+			h.rd.JSON(w, http.StatusBadRequest, "invalid labels which should be an object")
+			return
+		}
 		labels := make([]*metapb.StoreLabel, 0, len(input))
 		for k, v := range labelMap {
+			value, ok := v.(string)
+			if !ok {
+				h.rd.JSON(w, http.StatusBadRequest, "invalid label value which should be a string")
+				return
+			}
 			labels = append(labels, &metapb.StoreLabel{
 				Key:   k,
-				Value: v.(string),
+				Value: value,
 			})
 		}
 
