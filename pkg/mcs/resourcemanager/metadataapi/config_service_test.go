@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -161,6 +162,22 @@ func TestConfigServiceGroupCRUDAndErrorCodes(t *testing.T) {
 		re.Equal(uint64(789), storedGroup.RUSettings.RU.Settings.FillRate)
 		re.Equal(int64(987), storedGroup.RUSettings.RU.Settings.BurstLimit)
 	}
+
+	largeJobType := strings.Repeat("x", 1<<20)
+	largeResourceGroupBody, err := json.Marshal(&rmpb.ResourceGroup{
+		Name: "large_resource_group",
+		BackgroundSettings: &rmpb.BackgroundSettings{
+			JobTypes: []string{largeJobType},
+		},
+	})
+	re.NoError(err)
+	re.Greater(len(largeResourceGroupBody), 1<<20)
+	for _, method := range []string{http.MethodPost, http.MethodPut} {
+		resp = doRawResourceGroupRequest(handler, method, largeResourceGroupBody)
+		re.Equal(http.StatusOK, resp.Code, resp.Body.String())
+	}
+	largeResourceGroup := store.groups[groupKey(constant.NullKeyspaceID, "large_resource_group")]
+	re.Equal(largeJobType, largeResourceGroup.Background.JobTypes[0])
 
 	store.addErr = errors.New("add failed")
 	resp = doJSONRequest(re, handler, http.MethodPost, "/resource-manager/api/v1/config/group", group)
