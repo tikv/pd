@@ -875,6 +875,17 @@ func (c *TestCluster) GetLeaderServer() *TestServer {
 // WaitLeader is used to get leader.
 // If it exceeds the maximum number of loops, it will return an empty string.
 func (c *TestCluster) WaitLeader(ops ...WaitOption) string {
+	return c.waitLeaderExcept("", ops...)
+}
+
+// WaitLeaderChange waits until all running servers agree on a leader that is
+// different from oldLeader. If it exceeds the maximum number of loops, it will
+// return an empty string.
+func (c *TestCluster) WaitLeaderChange(oldLeader string, ops ...WaitOption) string {
+	return c.waitLeaderExcept(oldLeader, ops...)
+}
+
+func (c *TestCluster) waitLeaderExcept(oldLeader string, ops ...WaitOption) string {
 	option := &WaitOp{
 		retryTimes:   WaitLeaderRetryTimes,
 		waitInterval: WaitLeaderCheckInterval,
@@ -897,7 +908,7 @@ func (c *TestCluster) WaitLeader(ops ...WaitOption) string {
 			}
 		}
 		for name, num := range counter {
-			if num == running && c.GetServer(name).IsLeader() {
+			if name != oldLeader && num == running && c.GetServer(name).IsLeader() {
 				time.Sleep(WaitLeaderReturnDelay)
 				return name
 			}

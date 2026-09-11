@@ -201,10 +201,10 @@ func TestLeaderTransferAndMoveCluster(t *testing.T) {
 	// Transfer leader.
 	for range 3 {
 		oldLeaderName := cluster.WaitLeader()
-		err := cluster.GetServer(oldLeaderName).ResignLeader()
+		err := cluster.GetServer(oldLeaderName).ResignLeaderWithRetry()
 		re.NoError(err)
-		newLeaderName := cluster.WaitLeader()
-		re.NotEqual(oldLeaderName, newLeaderName)
+		newLeaderName := cluster.WaitLeaderChange(oldLeaderName)
+		re.NotEmpty(newLeaderName)
 	}
 
 	// ABC->ABCDEF
@@ -252,11 +252,10 @@ func TestGetTSAfterTransferLeader(t *testing.T) {
 		leaderSwitched.Store(true)
 		return nil
 	})
-	err = cluster.GetServer(leader).ResignLeader()
+	err = cluster.GetServer(leader).ResignLeaderWithRetry()
 	re.NoError(err)
-	newLeader := cluster.WaitLeader()
+	newLeader := cluster.WaitLeaderChange(leader)
 	re.NotEmpty(newLeader)
-	re.NotEqual(leader, newLeader)
 	leader = cluster.WaitLeader()
 	re.NotEmpty(leader)
 	err = cli.GetServiceDiscovery().CheckMemberChanged()
@@ -643,8 +642,9 @@ func (suite *followerForwardAndHandleTestSuite) TestGetTsoByFollowerForwarding2(
 	})
 
 	lastTS = checkTS(re, cli, lastTS)
-	re.NoError(suite.cluster.GetLeaderServer().ResignLeader())
-	re.NotEmpty(suite.cluster.WaitLeader())
+	oldLeaderName := suite.cluster.WaitLeader()
+	re.NoError(suite.cluster.GetServer(oldLeaderName).ResignLeaderWithRetry())
+	re.NotEmpty(suite.cluster.WaitLeaderChange(oldLeaderName))
 	lastTS = checkTS(re, cli, lastTS)
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/clients/tso/unreachableNetwork"))
@@ -984,9 +984,8 @@ func TestConfigTTLAfterTransferLeader(t *testing.T) {
 			!options.IsLocationReplacementEnabled()
 	})
 	re.NoError(cluster.GetServer(leaderName).ResignLeaderWithRetry())
-	newLeaderName := cluster.WaitLeader()
+	newLeaderName := cluster.WaitLeaderChange(leaderName)
 	re.NotEmpty(newLeaderName)
-	re.NotEqual(leaderName, newLeaderName)
 	leader = cluster.GetServer(newLeaderName)
 	re.NotNil(leader)
 	testutil.Eventually(re, func() bool {
