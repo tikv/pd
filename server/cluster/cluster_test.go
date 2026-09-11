@@ -2558,7 +2558,7 @@ func newTestRaftCluster(
 		storage:        s,
 		storeStateLock: syncutil.NewLockGroup(syncutil.WithRemoveEntryOnUnlock(true)),
 	}
-	err := rc.InitCluster(id, opt, nil, nil)
+	err := rc.InitCluster(ctx, id, opt, nil, nil)
 	if err != nil {
 		panic(err)
 	}
@@ -4715,15 +4715,19 @@ func TestStopDoesNotHoldClusterLockWhileWaitingSchedulingJobs(t *testing.T) {
 	re.NoError(err)
 
 	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	// Detach the scheduling jobs from the cluster context, so that only the
+	// stopSchedulingJobs call inside Stop - not the Cancel that now precedes
+	// the lock - can wake the stand-in job below.
+	cluster.schedulingController = newSchedulingController(cluster.serverCtx, cluster.BasicCluster, cluster.opt, cluster.ruleManager)
 	cluster.heartbeatRunner = ratelimit.NewSyncRunner()
 	cluster.miscRunner = ratelimit.NewSyncRunner()
 	cluster.logRunner = ratelimit.NewSyncRunner()
 	cluster.syncRegionRunner = ratelimit.NewSyncRunner()
 	cluster.tsoAllocator = nil
-	cluster.running = true
+	cluster.started = true
 
 	cluster.coordinator = schedule.NewCoordinator(cluster.ctx, cluster, nil)
-	cluster.schedulingController.running = true
+	cluster.running = true
 
 	blockedOnClusterLock := make(chan struct{})
 	cluster.schedulingController.wg.Add(1)
@@ -4752,6 +4756,109 @@ func TestStopDoesNotHoldClusterLockWhileWaitingSchedulingJobs(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("raft cluster stop blocked on scheduling jobs while holding cluster lock")
 	}
+}
+
+// TestCancelIsLockFreeAndStopReclaims pins the two properties the split of Stop
+// rests on: Cancel returns while another goroutine holds the cluster lock, and
+// a Stop after Cancel still tears everything down.
+func TestCancelIsLockFreeAndStopReclaims(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	cluster.heartbeatRunner = ratelimit.NewSyncRunner()
+	cluster.miscRunner = ratelimit.NewSyncRunner()
+	cluster.logRunner = ratelimit.NewSyncRunner()
+	cluster.syncRegionRunner = ratelimit.NewSyncRunner()
+	cluster.tsoAllocator = nil
+	cluster.started = true
+	cluster.coordinator = schedule.NewCoordinator(cluster.ctx, cluster, nil)
+	cluster.running = true
+
+	// Stand in for a background job holding the read lock, as
+	// runServiceCheckJob does across checkTSOService.
+	cluster.RLock()
+	cancelled := make(chan struct{})
+	go func() {
+		cluster.Cancel()
+		close(cancelled)
+	}()
+	select {
+	case <-cancelled:
+	case <-time.After(time.Second):
+		cluster.RUnlock()
+		t.Fatal("Cancel blocked behind a held read lock")
+	}
+	re.False(cluster.isRunningLocked())
+	re.Error(cluster.ctx.Err())
+	re.True(cluster.started)
+	cluster.RUnlock()
+
+	// Cancel is idempotent, and Stop after it still reclaims everything.
+	cluster.Cancel()
+	stopped := make(chan struct{})
+	go func() {
+		cluster.Stop()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stop did not return after Cancel")
+	}
+	re.False(cluster.started)
+	re.False(cluster.IsRunning())
+	re.False(cluster.IsSchedulingControllerRunning())
+}
+
+func TestStopCancelsContextInstalledWhileWaiting(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	cluster.tsoAllocator = nil
+
+	cancelled := make(chan struct{})
+	const afterCancel = "github.com/tikv/pd/server/cluster/stopClusterAfterCancel"
+	re.NoError(failpoint.EnableCall(afterCancel, func() { close(cancelled) }))
+	defer func() { re.NoError(failpoint.Disable(afterCancel)) }()
+	// Hold the same lock as Start while Stop cancels the previous context.
+	cluster.Lock()
+	unlock := sync.OnceFunc(cluster.Unlock)
+	defer unlock()
+	stopped := make(chan struct{})
+	go func() {
+		cluster.Stop()
+		close(stopped)
+	}()
+	select {
+	case <-cancelled:
+	case <-time.After(time.Second):
+		t.Fatal("Stop did not reach cancellation")
+	}
+	// Finish publishing a new context after Stop's first cancellation.
+	re.NoError(cluster.InitCluster(ctx, mockid.NewIDAllocator(), opt, nil, nil))
+	cluster.started = true
+	jobCtx := cluster.ctx
+	cluster.wg.Add(1)
+	go func() {
+		defer cluster.wg.Done()
+		<-jobCtx.Done()
+	}()
+	unlock()
+	select {
+	case <-stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stop missed the context installed while waiting for the lock")
+	}
+	re.ErrorIs(jobCtx.Err(), context.Canceled)
+	re.False(cluster.IsRunning())
 }
 
 func BenchmarkHandleStatsAsync(b *testing.B) {

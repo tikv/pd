@@ -1456,7 +1456,7 @@ func TestSendApiWhenRestartRaftCluster(t *testing.T) {
 	output := sendRequest(re, leader.GetAddr()+"/pd/api/v1/min-resolved-ts", http.MethodGet, http.StatusInternalServerError)
 	re.Contains(string(output), "TiKV cluster not bootstrapped, please start TiKV first")
 
-	err = rc.Start(leader.GetServer(), false)
+	err = rc.Start(ctx, leader.GetServer(), false)
 	re.NoError(err)
 	rc = leader.GetRaftCluster()
 	re.NotNil(rc)
