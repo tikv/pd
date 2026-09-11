@@ -14,30 +14,29 @@
 
 ROOT_PATH := $(shell pwd)/..
 GO_TOOLS_BIN_PATH := $(ROOT_PATH)/.tools/bin
-TEST_RUNNER := $(ROOT_PATH)/scripts/run-test-with-cleanup.sh
 PATH := $(GO_TOOLS_BIN_PATH):$(PATH)
 SHELL := env PATH='$(PATH)' GOBIN='$(GO_TOOLS_BIN_PATH)' $(shell which bash)
 
 default: static tidy test
 
 test: failpoint-enable
-	$(TEST_RUNNER) env CGO_ENABLED=1 go test ./... -v -tags deadlock -race -cover || { $(MAKE) failpoint-disable && exit 1; }
+	CGO_ENABLED=1 go test ./... -v -tags deadlock -race -cover || { $(MAKE) failpoint-disable && exit 1; }
 	$(MAKE) failpoint-disable
 
 basic-test: failpoint-enable
-	$(TEST_RUNNER) env CGO_ENABLED=1 go test ./... || { $(MAKE) failpoint-disable && exit 1; }
+	CGO_ENABLED=1 go test ./... || { $(MAKE) failpoint-disable && exit 1; }
 	$(MAKE) failpoint-disable
 
 # gotest runs a targeted go test with failpoints automatically enabled/disabled.
 # Usage: make gotest GOTEST_ARGS='./... -run TestFoo -count=1'
 GOTEST_ARGS ?= ./...
 gotest: failpoint-enable
-	$(TEST_RUNNER) go test $(GOTEST_ARGS) || { $(MAKE) failpoint-disable && exit 1; }
+	go test $(GOTEST_ARGS) || { $(MAKE) failpoint-disable && exit 1; }
 	$(MAKE) failpoint-disable
 
 ci-test-job:
 	if [ -f covprofile ]; then rm covprofile; fi
-	$(TEST_RUNNER) env CGO_ENABLED=1 go test ./... -tags deadlock -race -cover -covermode=atomic -coverprofile=covprofile -coverpkg=../...
+	CGO_ENABLED=1 go test ./... -tags deadlock -race -cover -covermode=atomic -coverprofile=covprofile -coverpkg=../...
 
 failpoint-enable:
 	cd $(ROOT_PATH) && $(MAKE) failpoint-enable

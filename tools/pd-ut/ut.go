@@ -33,8 +33,6 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/tikv/pd/tools/pd-ut/alloc"
 
 	// Set the correct value when it runs inside docker.
@@ -136,7 +134,7 @@ func main() {
 	os.Exit(run())
 }
 
-func run() int {
+func run() (exitCode int) {
 	// Initialize tags
 	initTags()
 
@@ -180,7 +178,8 @@ func run() int {
 	srv := alloc.RunHTTPServer()
 	defer func() {
 		if err := srv.Shutdown(context.Background()); err != nil {
-			log.Fatal("server shutdown error", zap.Error(err))
+			log.Printf("server shutdown error: %v", err)
+			exitCode = 1
 		}
 	}()
 
@@ -409,7 +408,10 @@ func cmdRun(args ...string) bool {
 	}
 
 	if coverProfile != "" {
-		collectCoverProfileFile()
+		if err := collectCoverProfileFile(); err != nil {
+			fmt.Println("collect cover profile error:", err)
+			return false
+		}
 	}
 
 	return success
