@@ -1530,16 +1530,21 @@ func (c *RaftCluster) PutMetaStore(store *metapb.Store) error {
 	// addStoreLimitInternal against resurrecting a removed entry: a plain
 	// pre-putStoreImpl snapshot can't distinguish a genuine first
 	// registration from one that raced a full concurrent register-then-bury
-	// (or manual tombstone removal, see RemoveTombStoneRecords) of the same
-	// ID landing in between the snapshot and putStoreImpl actually running --
-	// wasKnown would read false either way, incorrectly skipping the guard
-	// for the second case. storeStateLock (the same per-store lock
-	// RemoveStore/BuryStore/UpStore/checkStore/RemoveTombStoneRecords hold)
-	// makes the whole snapshot-then-act sequence below atomic with respect to
-	// any of those for this store ID, closing that window. This is a plain
+	// of the same ID landing in between the snapshot and putStoreImpl
+	// actually running -- wasKnown would read false either way, incorrectly
+	// skipping the guard for the second case. storeStateLock (the same
+	// per-store lock RemoveStore/BuryStore/UpStore/checkStore hold) makes the
+	// whole snapshot-then-act sequence below atomic with respect to any of
+	// those for this store ID, closing that window. This is a plain
 	// top-level entry point (only called from the gRPC PutStore handler),
 	// never invoked while already holding storeStateLock, so acquiring it
 	// here can't deadlock against them.
+	//
+	// This does NOT close the gRPC preflight gap: the PutStore handler's
+	// checkStore runs before this call, so a store fully removed (by bury +
+	// RemoveTombStoneRecords) between that check and here reads as absent,
+	// not tombstoned, and is indistinguishable from a genuine new
+	// registration -- see the PR's Known limitations.
 	c.storeStateLock.Lock(uint32(storeID))
 	defer c.storeStateLock.Unlock(uint32(storeID))
 
@@ -2197,28 +2202,13 @@ func (c *RaftCluster) RemoveTombStoneRecords() error {
 	var failedStores []uint64
 	for _, store := range c.GetStores() {
 		if store.IsRemoved() {
-			storeID := store.GetID()
-			if c.GetStoreRegionCount(storeID) > 0 {
+			if c.GetStoreRegionCount(store.GetID()) > 0 {
 				log.Warn("skip removing tombstone", zap.Stringer("store", store.GetMeta()))
-				failedStores = append(failedStores, storeID)
+				failedStores = append(failedStores, store.GetID())
 				continue
 			}
 			// the store has already been tombstone
-			//
-			// deleteStore's other caller (checkStore) already holds
-			// storeStateLock for this ID; PutMetaStore also holds it for its
-			// whole snapshot-then-act sequence (see its comment). Without
-			// this lock here too, a PutMetaStore call whose gRPC preflight
-			// observed this store as known-but-live before this deletion
-			// completes could still read a stale wasKnown=true and reach
-			// putStoreImpl after the store is fully gone -- putStoreImpl
-			// would then take the brand-new-store path and durably recreate
-			// both the store and its limit.
-			err := func() error {
-				c.storeStateLock.Lock(uint32(storeID))
-				defer c.storeStateLock.Unlock(uint32(storeID))
-				return c.deleteStore(store)
-			}()
+			err := c.deleteStore(store)
 			if err != nil {
 				log.Error("delete store failed",
 					zap.Stringer("store", store.GetMeta()),
