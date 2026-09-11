@@ -16,7 +16,9 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/pmezard/go-difflib/difflib"
@@ -69,6 +71,52 @@ func TestCollectCoverProfileFileReturnsError(t *testing.T) {
 	coverFileTempDir = filepath.Join(t.TempDir(), "missing")
 	coverProfile = filepath.Join(t.TempDir(), "coverage.out")
 	require.Error(t, collectCoverProfileFile())
+}
+
+func TestRunCommandWithTempDirCleansUp(t *testing.T) {
+	for _, exitCode := range []string{"0", "1"} {
+		t.Run("exit-code-"+exitCode, func(t *testing.T) {
+			marker := filepath.Join(t.TempDir(), "child-temp-dir")
+			//nolint:gosec // The helper must re-execute the current test binary.
+			cmd := exec.Command(os.Args[0], "-test.run=^TestRunCommandWithTempDirHelperProcess$", "--", marker)
+			cmd.Env = append(os.Environ(),
+				"PD_UT_TEMP_DIR_HELPER=1",
+				"PD_UT_TEMP_DIR_HELPER_EXIT_CODE="+exitCode,
+			)
+
+			err := runCommandWithTempDir(cmd)
+			if exitCode == "0" {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+			}
+
+			content, err := os.ReadFile(marker)
+			require.NoError(t, err)
+			childTempDir := strings.TrimSpace(string(content))
+			require.NotEmpty(t, childTempDir)
+			_, err = os.Stat(childTempDir)
+			require.ErrorIs(t, err, os.ErrNotExist)
+		})
+	}
+}
+
+func TestRunCommandWithTempDirHelperProcess(_ *testing.T) {
+	if os.Getenv("PD_UT_TEMP_DIR_HELPER") != "1" {
+		return
+	}
+
+	marker := os.Args[len(os.Args)-1]
+	tempDir := os.TempDir()
+	if err := os.WriteFile(filepath.Join(tempDir, "leftover"), []byte("test"), 0600); err != nil {
+		os.Exit(2)
+	}
+	if err := os.WriteFile(marker, []byte(tempDir), 0600); err != nil {
+		os.Exit(2)
+	}
+	if os.Getenv("PD_UT_TEMP_DIR_HELPER_EXIT_CODE") == "1" {
+		os.Exit(1)
+	}
 }
 
 func TestCheckDiff(t *testing.T) {

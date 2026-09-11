@@ -304,26 +304,31 @@ func TestLabelRuleBeforeGroup(t *testing.T) {
 	})
 }
 
-func prepare(t require.TestingT) (context.Context, *clientv3.Client, func()) {
+func prepare(t testing.TB) (context.Context, *clientv3.Client, func()) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cfg := etcdutil.NewTestEtcdConfig()
-	var err error
-	cfg.Dir, err = os.MkdirTemp("", "pd_affinity_watcher_tests")
-	re.NoError(err)
-	os.RemoveAll(cfg.Dir)
+	cfg.Dir = t.TempDir()
+	re.NoError(os.RemoveAll(cfg.Dir))
 	etcd, err := embed.StartEtcd(cfg)
 	re.NoError(err)
-	client, err := etcdutil.CreateEtcdClient(nil, cfg.ListenClientUrls, etcdutil.TestEtcdClientPurpose, true)
+	var client *clientv3.Client
+	var cleanupOnce sync.Once
+	cleanup := func() {
+		cleanupOnce.Do(func() {
+			cancel()
+			if client != nil {
+				client.Close()
+			}
+			etcd.Close()
+		})
+	}
+	t.Cleanup(cleanup)
+	client, err = etcdutil.CreateEtcdClient(nil, cfg.ListenClientUrls, etcdutil.TestEtcdClientPurpose, true)
 	re.NoError(err)
 	<-etcd.Server.ReadyNotify()
 
-	return ctx, client, func() {
-		cancel()
-		etcd.Close()
-		client.Close()
-		os.RemoveAll(cfg.Dir)
-	}
+	return ctx, client, cleanup
 }
 
 // setupAffinityManager creates and initializes an affinity manager and watcher.
