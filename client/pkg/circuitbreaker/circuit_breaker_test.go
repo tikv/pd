@@ -16,6 +16,8 @@ package circuitbreaker
 
 import (
 	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -244,6 +246,38 @@ func TestCircuitBreakerEnabled(t *testing.T) {
 		config.ErrorRateThresholdPct = settings.ErrorRateThresholdPct
 	})
 	re.True(cb.IsEnabled())
+}
+
+func TestCircuitBreakerMetricsInitializationIsConcurrentSafe(t *testing.T) {
+	breaker := NewCircuitBreaker("test_cb_concurrent_metrics", AlwaysClosedSettings)
+	before := breaker.metrics.Load()
+	const producerCount = 32
+	var (
+		ready sync.WaitGroup
+		wg    sync.WaitGroup
+		stop  atomic.Bool
+	)
+	ready.Add(producerCount)
+	wg.Add(producerCount)
+	for range producerCount {
+		go func() {
+			defer wg.Done()
+			_ = breaker.Execute(func() (Overloading, error) {
+				return No, nil
+			})
+			ready.Done()
+			for !stop.Load() {
+				_ = breaker.Execute(func() (Overloading, error) {
+					return No, nil
+				})
+			}
+		}()
+	}
+	ready.Wait()
+	breaker.initMetrics()
+	stop.Store(true)
+	wg.Wait()
+	require.NotSame(t, before, breaker.metrics.Load())
 }
 
 func newCircuitBreakerMovedToHalfOpenState(re *require.Assertions) *CircuitBreaker {
