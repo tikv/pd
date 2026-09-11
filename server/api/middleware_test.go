@@ -26,52 +26,76 @@ import (
 	"github.com/tikv/pd/pkg/utils/requestutil"
 )
 
-func TestCaptureRequestBodyForAuditReadsBodyOnlyForLocalLog(t *testing.T) {
+func TestCaptureRequestBodyForAuditReadsBodyOnlyWhenNeeded(t *testing.T) {
 	testCases := []struct {
-		name         string
-		auditEnabled bool
-		labels       *audit.BackendLabels
-		expectBody   bool
+		name       string
+		labels     *audit.BackendLabels
+		bodyParam  string
+		expectBody string
+		expectRead bool
 	}{
 		{
-			name:         "audit-disabled",
-			auditEnabled: false,
-			labels:       &audit.BackendLabels{Labels: []string{audit.LocalLogLabel}},
+			name:   "prometheus-only",
+			labels: &audit.BackendLabels{Labels: []string{audit.PrometheusHistogram}},
 		},
 		{
-			name:         "prometheus-only",
-			auditEnabled: true,
-			labels:       &audit.BackendLabels{Labels: []string{audit.PrometheusHistogram}},
+			name: "no-audit-backend",
 		},
 		{
-			name:         "no-audit-backend",
-			auditEnabled: true,
+			name:       "local-log",
+			labels:     &audit.BackendLabels{Labels: []string{audit.LocalLogLabel, audit.PrometheusHistogram}},
+			expectBody: "request-body",
+			expectRead: true,
 		},
 		{
-			name:         "local-log",
-			auditEnabled: true,
-			labels:       &audit.BackendLabels{Labels: []string{audit.LocalLogLabel, audit.PrometheusHistogram}},
-			expectBody:   true,
+			name:       "already-captured",
+			labels:     &audit.BackendLabels{Labels: []string{audit.LocalLogLabel}},
+			bodyParam:  "captured-body",
+			expectBody: "captured-body",
 		},
 	}
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
 			re := require.New(t)
-			req, err := http.NewRequest(http.MethodPost, "http://127.0.0.1/test", strings.NewReader("request-body"))
+			body := &trackingReadCloser{Reader: strings.NewReader("request-body")}
+			req, err := http.NewRequest(http.MethodPost, "http://127.0.0.1/test", body)
 			re.NoError(err)
 
 			info := requestutil.GetRequestInfoWithoutBody(req)
-			captureRequestBodyForAudit(req, &info, testCase.auditEnabled, testCase.labels)
-			if testCase.expectBody {
-				re.Equal("request-body", info.BodyParam)
-			} else {
-				re.Empty(info.BodyParam)
-			}
+			info.BodyParam = testCase.bodyParam
+			re.Equal(testCase.expectRead, captureRequestBodyForAudit(req, &info, testCase.labels))
+			re.Equal(testCase.expectBody, info.BodyParam)
+			re.Equal(testCase.expectRead, body.reads > 0)
+			re.Equal(testCase.expectRead, body.closed)
 
 			data, err := io.ReadAll(req.Body)
 			re.NoError(err)
 			re.Equal("request-body", string(data))
 		})
 	}
+}
+
+func TestPrepareRequestForAuditCapturesBodyForExistingRequestInfo(t *testing.T) {
+	re := require.New(t)
+	body := &trackingReadCloser{Reader: strings.NewReader("request-body")}
+	req, err := http.NewRequest(http.MethodPost, "http://127.0.0.1/test", body)
+	re.NoError(err)
+
+	requestInfo := requestutil.GetRequestInfoWithoutBody(req)
+	req = req.WithContext(requestutil.WithRequestInfo(req.Context(), requestInfo))
+	requestInfo, ok := requestutil.RequestInfoFrom(req.Context())
+	re.True(ok)
+
+	labels := &audit.BackendLabels{Labels: []string{audit.LocalLogLabel}}
+	req = prepareRequestForAudit(req, requestInfo, ok, labels)
+	requestInfo, ok = requestutil.RequestInfoFrom(req.Context())
+	re.True(ok)
+	re.Equal("request-body", requestInfo.BodyParam)
+	re.Greater(body.reads, 0)
+	re.True(body.closed)
+
+	data, err := io.ReadAll(req.Body)
+	re.NoError(err)
+	re.Equal("request-body", string(data))
 }
