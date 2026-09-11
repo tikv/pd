@@ -17,6 +17,7 @@ package cluster
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -186,6 +187,12 @@ func (sc *schedulingController) collectSchedulingMetrics() {
 		statistics.ObserveHotStat(s, sc.hotStat.StoresStats)
 	}
 	statsMap.Collect()
+	// Remove transfer-in limit metrics recreated from a stale store snapshot.
+	for _, s := range stores {
+		if store := sc.GetStore(s.GetID()); store == nil || store.IsRemoved() {
+			statistics.StoreLimitGauge.DeleteLabelValues(strconv.FormatUint(s.GetID(), 10), "transfer-leader-in")
+		}
+	}
 	sc.coordinator.GetSchedulersController().CollectSchedulerMetrics()
 	sc.coordinator.CollectHotSpotMetrics()
 	if sc.regionStats == nil {

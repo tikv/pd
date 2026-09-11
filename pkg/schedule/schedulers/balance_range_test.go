@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/failpoint"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/types"
@@ -221,11 +222,18 @@ func TestTIKVEngine(t *testing.T) {
 	tc.AddLeaderRegionWithRange(3, "120", "140", 1, 2, 3)
 	tc.AddLeaderRegionWithRange(4, "140", "160", 2, 1, 3)
 	tc.AddLeaderRegionWithRange(5, "160", "180", 2, 1, 3)
+	exhaustTransferLeaderInLimit(t, tc, 1, 2, 3)
 	// case1: transfer leader from store 1 to store 3
 	scheduler, err = CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(),
 		ConfigSliceDecoder(types.BalanceRangeScheduler,
 			[]string{"leader-scatter", "tikv", "1h", "test", "100", "300"}))
 	re.NoError(err)
+	re.True(scheduler.IsScheduleAllowed(tc))
+	ops, _ = scheduler.Schedule(tc, true)
+	re.Empty(ops)
+
+	tc.SetStoreLimit(3, storelimit.TransferLeaderIn, storelimit.Unlimited)
+	tc.ResetStoreLimit(3, storelimit.TransferLeaderIn, storelimit.Unlimited/time.Minute.Seconds())
 	re.True(scheduler.IsScheduleAllowed(tc))
 	ops, _ = scheduler.Schedule(tc, true)
 	re.NotEmpty(ops)

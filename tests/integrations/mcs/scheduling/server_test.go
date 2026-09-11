@@ -869,6 +869,29 @@ func (suite *serverTestSuite) TestStoreLimit() {
 	}
 	op = operator.NewTestOperator(2, &metapb.RegionEpoch{}, operator.OpRegion, operator.RemovePeer{FromStore: 2})
 	checkOperatorFail(re, oc, op)
+
+	setTransferLeaderInLimit := func(rate float64) {
+		url := fmt.Sprintf("%s/pd/api/v1/store/2/limit", leaderServer.GetAddr())
+		body := fmt.Sprintf(`{"rate":%g,"type":"transfer-leader-in"}`, rate)
+		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, url, []byte(body), testutil.StatusOK(re)))
+	}
+	setTransferLeaderInLimit(0.00006)
+	waitSyncFinish(re, tc, storelimit.TransferLeaderIn, 0.00006)
+	op = operator.NewTestOperator(2, &metapb.RegionEpoch{}, operator.OpLeader,
+		operator.TransferLeader{FromStore: 1, ToStore: 2})
+	checkOperatorSuccess(re, oc, op)
+	op = operator.NewTestOperator(2, &metapb.RegionEpoch{}, operator.OpLeader,
+		operator.TransferLeader{FromStore: 1, ToStore: 2})
+	checkOperatorFail(re, oc, op)
+
+	setTransferLeaderInLimit(storelimit.Unlimited)
+	waitSyncFinish(re, tc, storelimit.TransferLeaderIn, storelimit.Unlimited)
+	// Controller admission refreshes the in-memory limiter from the synchronized configuration.
+	for range 2 {
+		op = operator.NewTestOperator(2, &metapb.RegionEpoch{}, operator.OpLeader,
+			operator.TransferLeader{FromStore: 1, ToStore: 2})
+		checkOperatorSuccess(re, oc, op)
+	}
 }
 
 func checkOperatorSuccess(re *require.Assertions, oc *operator.Controller, op *operator.Operator) {
