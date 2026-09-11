@@ -555,7 +555,7 @@ func (suite *serverTestSuite) TestForwardRegionHeartbeat() {
 		re.Empty(resp.GetHeader().GetError())
 	}
 
-	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	grpcPDClient, conn := testutil.MustNewGRPCClient(suite.ctx, re, suite.pdLeader.GetServer().GetAddr())
 	defer conn.Close()
 	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
@@ -640,7 +640,7 @@ func (suite *serverTestSuite) TestForwardReportBuckets() {
 		re.Empty(resp.GetHeader().GetError())
 	}
 
-	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	grpcPDClient, conn := testutil.MustNewGRPCClient(suite.ctx, re, suite.pdLeader.GetServer().GetAddr())
 	defer conn.Close()
 
 	// First create a region via region heartbeat
@@ -766,7 +766,7 @@ func (suite *serverTestSuite) TestStoreLimit() {
 	conf.MaxReplicas = 1
 	err = leaderServer.SetReplicationConfig(*conf)
 	re.NoError(err)
-	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	grpcPDClient, conn := testutil.MustNewGRPCClient(suite.ctx, re, suite.pdLeader.GetServer().GetAddr())
 	defer conn.Close()
 	for i := uint64(1); i <= 2; i++ {
 		resp, err := grpcPDClient.PutStore(
@@ -1023,7 +1023,7 @@ func (suite *serverTestSuite) TestPrepareChecker() {
 	}
 
 	// Send enough regions to satisfy the prepare checker in the initial cluster
-	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	grpcPDClient, conn := testutil.MustNewGRPCClient(suite.ctx, re, suite.pdLeader.GetServer().GetAddr())
 	defer conn.Close()
 	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
@@ -1244,7 +1244,7 @@ func (suite *serverTestSuite) TestBatchSplit() {
 		re.NoError(err)
 		re.Empty(resp.GetHeader().GetError())
 	}
-	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	grpcPDClient, conn := testutil.MustNewGRPCClient(suite.ctx, re, suite.pdLeader.GetServer().GetAddr())
 	defer conn.Close()
 	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
@@ -1325,7 +1325,7 @@ func (suite *serverTestSuite) TestBatchSplitCompatibility() {
 		re.NoError(err)
 		re.Empty(resp.GetHeader().GetError())
 	}
-	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	grpcPDClient, conn := testutil.MustNewGRPCClient(suite.ctx, re, suite.pdLeader.GetServer().GetAddr())
 	defer conn.Close()
 	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
@@ -1472,7 +1472,7 @@ func (suite *serverTestSuite) TestConcurrentBatchSplit() {
 		re.NoError(err)
 		re.Empty(resp.GetHeader().GetError())
 	}
-	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	grpcPDClient, conn := testutil.MustNewGRPCClient(suite.ctx, re, suite.pdLeader.GetServer().GetAddr())
 	defer conn.Close()
 	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
@@ -1609,7 +1609,7 @@ func (suite *serverTestSuite) TestForwardSplitRegion() {
 	}
 
 	// Create a region via region heartbeat
-	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	grpcPDClient, conn := testutil.MustNewGRPCClient(suite.ctx, re, suite.pdLeader.GetServer().GetAddr())
 	defer conn.Close()
 	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
