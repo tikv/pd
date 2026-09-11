@@ -28,6 +28,8 @@ const (
 	RemovePeer
 	// SendSnapshot indicates the type of sending snapshot.
 	SendSnapshot
+	// TransferLeaderIn indicates the limit for leaders transferred into a store.
+	TransferLeaderIn
 
 	storeLimitTypeLen
 )

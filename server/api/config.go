@@ -165,20 +165,45 @@ func (h *confHandler) SetConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	schedulePatch := make(map[string]any)
 	for k, v := range conf {
-		if s := strings.Split(k, "."); len(s) > 1 {
-			if err := h.updateConfig(cfg, k, v); err != nil {
-				h.rd.JSON(w, http.StatusBadRequest, err.Error())
-				return
-			}
-			continue
+		key := k
+		if !strings.Contains(k, ".") {
+			key = reflectutil.FindJSONFullTagByChildTag(reflect.TypeOf(config.Config{}), k)
 		}
-		key := reflectutil.FindJSONFullTagByChildTag(reflect.TypeOf(config.Config{}), k)
 		if key == "" {
 			h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("config item %s not found", k))
 			return
 		}
+		if strings.HasPrefix(key, "schedule.") {
+			if h.svr.IsTTLConfigExist(key) {
+				h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("need to clean up TTL first for %s", key))
+				return
+			}
+			name := key[strings.LastIndex(key, ".")+1:]
+			if !reflectutil.FindSameFieldByJSON(&cfg.Schedule, map[string]any{name: v}) {
+				h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("config item %s not found", name))
+				return
+			}
+			if _, exists := schedulePatch[name]; exists {
+				h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("config item %s specified more than once", name))
+				return
+			}
+			schedulePatch[name] = v
+			continue
+		}
 		if err := h.updateConfig(cfg, key, v); err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	if len(schedulePatch) > 0 {
+		// Apply related schedule fields together, so new stores see the new defaults.
+		data, err := json.Marshal(schedulePatch)
+		if err == nil {
+			err = h.svr.PatchScheduleConfig(data)
+		}
+		if err != nil {
 			h.rd.JSON(w, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -254,20 +279,8 @@ func (h *confHandler) updateMicroserviceConfig(config *config.Config, key string
 	return err
 }
 
-func (h *confHandler) updateSchedule(config *config.Config, key string, value any) error {
-	updated, found, err := jsonutil.AddKeyValue(&config.Schedule, key, value)
-	if err != nil {
-		return err
-	}
-
-	if !found {
-		return errors.Errorf("config item %s not found", key)
-	}
-
-	if updated {
-		err = h.svr.SetScheduleConfig(config.Schedule)
-	}
-	return err
+func (h *confHandler) updateSchedule(_ *config.Config, key string, value any) error {
+	return h.svr.SetScheduleConfigItem(key, value)
 }
 
 func (h *confHandler) updateReplication(config *config.Config, key string, value any) error {
@@ -417,21 +430,14 @@ func (h *confHandler) SetScheduleConfig(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	config := h.svr.GetScheduleConfig()
-	err = json.Unmarshal(data, &config)
-	if err != nil {
+	if err := h.svr.PatchScheduleConfig(data); err != nil {
 		var errCode errcode.ErrorCode
-		err = apiutil.TagJSONError(err)
-		if jsonErr, ok := errors.Cause(err).(apiutil.JSONError); ok {
+		taggedErr := apiutil.TagJSONError(err)
+		if jsonErr, ok := errors.Cause(taggedErr).(apiutil.JSONError); ok {
 			errCode = errcode.NewInvalidInputErr(jsonErr.Err)
-		} else {
-			errCode = errcode.NewInternalErr(err)
+			apiutil.ErrorResp(h.rd, w, errCode)
+			return
 		}
-		apiutil.ErrorResp(h.rd, w, errCode)
-		return
-	}
-
-	if err := h.svr.SetScheduleConfig(*config); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -637,9 +643,7 @@ func (h *confHandler) getLeaderConfig() (*config.Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	var leaderConfig config.Config
-	err = json.Unmarshal(b, &leaderConfig)
-	return &leaderConfig, err
+	return unmarshalRemoteConfig(b)
 }
 
 func (h *confHandler) getSchedulingServerConfig() (*config.Config, error) {
@@ -660,12 +664,26 @@ func (h *confHandler) getSchedulingServerConfig() (*config.Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	var schedulingServerConfig config.Config
-	err = json.Unmarshal(b, &schedulingServerConfig)
-	if err != nil {
+	return unmarshalRemoteConfig(b)
+}
+
+func unmarshalRemoteConfig(data []byte) (*config.Config, error) {
+	var cfg config.Config
+	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}
-	return &schedulingServerConfig, nil
+	var fields struct {
+		Schedule json.RawMessage `json:"schedule"`
+	}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return nil, err
+	}
+	if len(fields.Schedule) != 0 {
+		if err := cfg.Schedule.MigrateDeprecatedFlagsFromJSON(fields.Schedule); err != nil {
+			return nil, err
+		}
+	}
+	return &cfg, nil
 }
 
 func (h *confHandler) updateControllerConfig(key string, value any) error {

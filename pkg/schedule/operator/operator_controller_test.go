@@ -648,6 +648,33 @@ func (suite *operatorControllerTestSuite) TestStoreLimit() {
 	op = NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, RemovePeer{FromStore: 2})
 	re.False(oc.AddOperator(op))
 	re.False(oc.RemoveOperator(op))
+
+	tc.AddLeaderStore(3, 0)
+	tc.AddLeaderRegion(1001, 1, 2, 3)
+	tc.SetStoreLimit(2, storelimit.TransferLeaderIn, 0.00006)
+	tc.SetStoreLimit(3, storelimit.TransferLeaderIn, 0.00006)
+	// Admission reserves the budget of every candidate, including store 3.
+	op, err := CreateTransferLeaderOperator("test", tc, tc.GetRegion(1001), 2, []uint64{2, 3}, OpLeader)
+	re.NoError(err)
+	pending, err := CreateTransferLeaderOperator("test", tc, tc.GetRegion(1001), 3, nil, OpLeader)
+	re.NoError(err)
+	re.True(oc.AddOperator(op))
+	checkRemoveOperatorSuccess(re, oc, op)
+	re.False(oc.AddOperator(pending))
+	re.False(oc.RemoveOperator(pending))
+
+	// Direct admission retains the Urgent exemption, independently of Builder's
+	// priority-agnostic target filter.
+	op = NewTestOperator(1001, &metapb.RegionEpoch{}, OpAdmin, TransferLeader{FromStore: 1, ToStore: 2})
+	re.True(oc.AddOperator(op))
+	checkRemoveOperatorSuccess(re, oc, op)
+
+	tc.SetStoreLimit(2, storelimit.TransferLeaderIn, storelimit.Unlimited)
+	for range 2 {
+		op = NewTestOperator(1001, &metapb.RegionEpoch{}, OpLeader, TransferLeader{FromStore: 1, ToStore: 2})
+		re.True(oc.AddOperator(op))
+		checkRemoveOperatorSuccess(re, oc, op)
+	}
 }
 
 // #1652

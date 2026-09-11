@@ -15,6 +15,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -31,7 +32,10 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/mcs/discovery"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/response"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -149,6 +153,44 @@ func (suite *storeTestSuite) checkStoresList(cluster *tests.TestCluster) {
 func (suite *storeTestSuite) TestStores() {
 	suite.env.RunTestInNonMicroserviceEnv(suite.checkGetAllLimit)
 	suite.env.RunTestInNonMicroserviceEnv(suite.checkStoreLabel)
+}
+
+func (suite *storeTestSuite) TestStoreLimitRemainsAvailableDuringRollingUpgrade() {
+	suite.env.RunTest(suite.checkStoreLimitRemainsAvailableDuringRollingUpgrade)
+}
+
+func (suite *storeTestSuite) checkStoreLimitRemainsAvailableDuringRollingUpgrade(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leader := cluster.GetLeaderServer()
+	url := leader.GetAddr() + "/pd/api/v1/stores/limit"
+	currentDefault := leader.GetPersistOptions().GetScheduleConfig().DefaultStoreLimit.AddPeer
+	newDefault := currentDefault + 45
+	body := []byte(fmt.Sprintf(`{"rate":%v,"type":"add-peer"}`, newDefault))
+
+	if schedulingServer := cluster.GetSchedulingPrimaryServer(); schedulingServer != nil {
+		entry := &discovery.ServiceRegistryEntry{
+			Name:        "pre-feature-scheduling",
+			ServiceAddr: "http://127.0.0.1:1",
+			Version:     versioninfo.PDReleaseVersion,
+		}
+		serializedEntry, err := entry.Serialize()
+		re.NoError(err)
+		registryPath := keypath.RegistryPath(constant.SchedulingServiceName, entry.ServiceAddr)
+		_, err = cluster.GetEtcdClient().Put(context.Background(), registryPath, serializedEntry)
+		re.NoError(err)
+		// /stores/limit existed before default persistence. Keep it available
+		// during rolling upgrades without synchronously depending on every
+		// registered Scheduling Service member.
+		err = testutil.CheckPostJSON(tests.TestDialClient, url, body, testutil.StatusOK(re))
+		re.NoError(err)
+		re.Equal(newDefault, leader.GetPersistOptions().GetScheduleConfig().DefaultStoreLimit.AddPeer)
+		_, err = cluster.GetEtcdClient().Delete(context.Background(), registryPath)
+		re.NoError(err)
+		return
+	}
+	err := testutil.CheckPostJSON(tests.TestDialClient, url, body, testutil.StatusOK(re))
+	re.NoError(err)
+	re.Equal(newDefault, leader.GetPersistOptions().GetScheduleConfig().DefaultStoreLimit.AddPeer)
 }
 
 func (suite *storeTestSuite) checkGetAllLimit(cluster *tests.TestCluster) {

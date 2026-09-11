@@ -88,9 +88,13 @@ func TestSlidingWindow(t *testing.T) {
 	s.Ack(capacity-minSnapSize, SendSnapshot)
 	re.Equal([]int64{capacity - minSnapSize, 0, 0, 0}, s.GetUsed())
 
-	// case 3: skip the type is not the SendSnapshot
-	for range 10 {
-		re.True(s.Take(capacity, AddPeer, constant.Low))
+	// case 3: non-snapshot types bypass the window without changing its usage.
+	used := s.GetUsed()
+	for _, typ := range []Type{AddPeer, RemovePeer, TransferLeaderIn} {
+		re.True(s.Available(capacity, typ, constant.Low))
+		re.True(s.Take(capacity, typ, constant.Low))
+		s.Ack(capacity, typ)
+		re.Equal(used, s.GetUsed())
 	}
 }
 

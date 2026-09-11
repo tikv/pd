@@ -21,6 +21,7 @@ import (
 	"io"
 	"net/http"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -726,6 +727,12 @@ func (c *Cluster) collectMetrics() {
 		statistics.ObserveHotStat(s, c.hotStat.StoresStats)
 	}
 	statsMap.Collect()
+	// Remove transfer-in limit metrics recreated from a stale store snapshot.
+	for _, s := range stores {
+		if store := c.GetStore(s.GetID()); store == nil || store.IsRemoved() {
+			statistics.StoreLimitGauge.DeleteLabelValues(strconv.FormatUint(s.GetID(), 10), "transfer-leader-in")
+		}
+	}
 
 	c.coordinator.GetSchedulersController().CollectSchedulerMetrics()
 	c.coordinator.CollectHotSpotMetrics()
