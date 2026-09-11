@@ -15,6 +15,7 @@
 package tests
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -111,8 +112,7 @@ func newClusterConfig(n int) (*clusterConfig, error) {
 	for range n {
 		serverConfig, err := newServerConfig(cc.nextServerName(), cc, false)
 		if err != nil {
-			_ = cc.cleanup()
-			return nil, err
+			return nil, errors.Join(err, cc.cleanup())
 		}
 		cc.InitialServers = append(cc.InitialServers, serverConfig)
 	}

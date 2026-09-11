@@ -784,7 +784,7 @@ func generateBuildCache() error {
 }
 
 // buildTestBinaryMulti is much faster than build the test packages one by one.
-func buildTestBinaryMulti(pkgs []string) ([]byte, error) {
+func buildTestBinaryMulti(pkgs []string) (_ []byte, err error) {
 	// staged build, generate the build cache for all the tests first, then generate the test binary.
 	// This way is faster than generating test binaries directly, because the cache can be used.
 	if err := generateBuildCache(); err != nil {
@@ -821,8 +821,11 @@ func buildTestBinaryMulti(pkgs []string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer os.Remove(outputFile.Name())
-	defer outputFile.Close()
+	defer func() {
+		closeErr := outputFile.Close()
+		removeErr := os.Remove(outputFile.Name())
+		err = errors.Join(err, closeErr, removeErr)
+	}()
 	cmd.Stdout = outputFile
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {

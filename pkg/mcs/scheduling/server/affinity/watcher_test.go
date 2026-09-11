@@ -318,7 +318,9 @@ func prepare(t testing.TB) (context.Context, *clientv3.Client, func()) {
 		cleanupOnce.Do(func() {
 			cancel()
 			if client != nil {
-				client.Close()
+				if err := client.Close(); err != nil {
+					t.Errorf("close etcd client: %v", err)
+				}
 			}
 			etcd.Close()
 		})

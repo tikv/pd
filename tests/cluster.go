@@ -1068,7 +1068,7 @@ func (c *TestCluster) Destroy() {
 	}
 	if c.config != nil {
 		if err := c.config.cleanup(); err != nil {
-			log.Error("failed to clean test cluster data directories", errs.ZapError(err))
+			log.Warn("failed to clean test cluster data directories", errs.ZapError(err))
 		}
 	}
 }
