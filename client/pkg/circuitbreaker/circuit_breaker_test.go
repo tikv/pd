@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
@@ -159,7 +160,7 @@ func TestCircuitBreakerHalfOpenFailOverPendingCount(t *testing.T) {
 				<-wait
 				return No, nil
 			})
-			re.NoError(err)
+			assert.NoError(t, err)
 		}()
 	}
 	// make sure all requests are started
@@ -198,7 +199,7 @@ func TestCircuitBreakerCountOnlyRequestsInSameWindow(t *testing.T) {
 			<-wait
 			return No, nil
 		})
-		re.NoError(err)
+		assert.NoError(t, err)
 	}()
 	<-start // make sure the request is started
 	// assert running request is not counted

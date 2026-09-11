@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc"
@@ -277,6 +278,7 @@ func (suite *routerClientSuite) TestGetRegionConcurrently() {
 }
 
 func (suite *routerClientSuite) dispatchConcurrentRequests(ctx context.Context, re *require.Assertions, wg *sync.WaitGroup) {
+	as := assert.New(suite.T())
 	regions := make([]*metapb.Region, 0, 2)
 	for i := range 2 {
 		regionID := regionIDAllocator.alloc()
@@ -315,7 +317,7 @@ func (suite *routerClientSuite) dispatchConcurrentRequests(ctx context.Context, 
 			switch seed % 3 {
 			case 0:
 				region := regions[0]
-				testutil.Eventually(re, func() bool {
+				if !testutil.EventuallyWithAssert(as, func() bool {
 					if allowFollowerHandle {
 						r, err = suite.client.GetRegion(ctx, region.GetStartKey(), opt.WithAllowFollowerHandle())
 					} else {
@@ -325,7 +327,7 @@ func (suite *routerClientSuite) dispatchConcurrentRequests(ctx context.Context, 
 						if strings.Contains(err.Error(), "region not found") {
 							return false
 						}
-						re.ErrorContains(err, context.Canceled.Error())
+						as.Contains(err.Error(), context.Canceled.Error())
 					}
 					if r == nil {
 						return false
@@ -333,9 +335,11 @@ func (suite *routerClientSuite) dispatchConcurrentRequests(ctx context.Context, 
 					return reflect.DeepEqual(region, r.Meta) &&
 						reflect.DeepEqual(peers[0], r.Leader) &&
 						r.Buckets == nil
-				})
+				}) {
+					return
+				}
 			case 1:
-				testutil.Eventually(re, func() bool {
+				if !testutil.EventuallyWithAssert(as, func() bool {
 					if allowFollowerHandle {
 						r, err = suite.client.GetPrevRegion(ctx, regions[1].GetStartKey(), opt.WithAllowFollowerHandle())
 					} else {
@@ -345,7 +349,7 @@ func (suite *routerClientSuite) dispatchConcurrentRequests(ctx context.Context, 
 						if strings.Contains(err.Error(), "region not found") {
 							return false
 						}
-						re.ErrorContains(err, context.Canceled.Error())
+						as.Contains(err.Error(), context.Canceled.Error())
 					}
 					if r == nil {
 						return false
@@ -353,10 +357,12 @@ func (suite *routerClientSuite) dispatchConcurrentRequests(ctx context.Context, 
 					return reflect.DeepEqual(regions[0], r.Meta) &&
 						reflect.DeepEqual(peers[0], r.Leader) &&
 						r.Buckets == nil
-				})
+				}) {
+					return
+				}
 			case 2:
 				region := regions[0]
-				testutil.Eventually(re, func() bool {
+				if !testutil.EventuallyWithAssert(as, func() bool {
 					if allowFollowerHandle {
 						r, err = suite.client.GetRegionByID(ctx, region.GetId(), opt.WithAllowFollowerHandle())
 					} else {
@@ -366,7 +372,7 @@ func (suite *routerClientSuite) dispatchConcurrentRequests(ctx context.Context, 
 						if strings.Contains(err.Error(), "region not found") {
 							return false
 						}
-						re.ErrorContains(err, context.Canceled.Error())
+						as.Contains(err.Error(), context.Canceled.Error())
 					}
 					if r == nil {
 						return false
@@ -374,7 +380,9 @@ func (suite *routerClientSuite) dispatchConcurrentRequests(ctx context.Context, 
 					return reflect.DeepEqual(region, r.Meta) &&
 						reflect.DeepEqual(peers[0], r.Leader) &&
 						r.Buckets == nil
-				})
+				}) {
+					return
+				}
 			}
 		}()
 	}

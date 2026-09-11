@@ -29,6 +29,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
@@ -76,6 +77,15 @@ func TestBackupTestSuite(t *testing.T) {
 	}
 
 	suite.Run(t, testSuite)
+}
+
+func TestOutputToFileReturnsFlushError(t *testing.T) {
+	tmpFile, err := os.CreateTemp(t.TempDir(), "pd-backup")
+	require.NoError(t, err)
+	require.NoError(t, tmpFile.Close())
+
+	err = OutputToFile(&BackupInfo{}, tmpFile)
+	require.Error(t, err)
 }
 
 func setupServer() (*httptest.Server, *config.Config) {

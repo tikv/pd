@@ -697,8 +697,10 @@ func (suite *redirectorTestSuite) TestRedirect() {
 	// Test redirect during leader election.
 	leader = suite.cluster.GetLeaderServer()
 	re.NotNil(leader)
-	err := leader.ResignLeaderWithRetry()
-	re.NoError(err)
+	// Reset only PD leadership. ResignLeaderWithRetry also transfers etcd
+	// leadership, which can race with the leader loop campaigning again and
+	// leave the test cluster without a stable leader.
+	leader.ResetPDLeader()
 	for _, svr := range suite.cluster.GetServers() {
 		url := fmt.Sprintf("%s/pd/api/v1/members", svr.GetServer().GetAddr())
 		testutil.Eventually(re, func() bool {

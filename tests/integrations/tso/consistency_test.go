@@ -17,9 +17,11 @@ package tso
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc"
 
@@ -108,7 +110,13 @@ func (suite *tsoConsistencyTestSuite) TearDownSuite() {
 }
 
 func (suite *tsoConsistencyTestSuite) request(ctx context.Context, count uint32) *pdpb.Timestamp {
-	re := suite.Require()
+	as := assert.New(suite.T())
+	noError := func(err error) bool {
+		if err == nil {
+			return true
+		}
+		return as.Fail("Received unexpected error", "%+v", err)
+	}
 	clusterID := keypath.ClusterID()
 	if suite.legacy {
 		req := &pdpb.TsoRequest{
@@ -116,33 +124,43 @@ func (suite *tsoConsistencyTestSuite) request(ctx context.Context, count uint32)
 			Count:  count,
 		}
 		tsoClient, err := suite.pdClient.Tso(ctx)
-		re.NoError(err)
+		if !noError(err) {
+			return nil
+		}
 		defer func() {
 			err := tsoClient.CloseSend()
-			re.NoError(err)
+			noError(err)
 		}()
-		re.NoError(tsoClient.Send(req))
+		if !noError(tsoClient.Send(req)) {
+			return nil
+		}
 		resp, err := tsoClient.Recv()
-		re.NoError(err)
-		return checkAndReturnTimestampResponse(re, resp)
+		if !noError(err) {
+			return nil
+		}
+		return checkAndReturnTimestampResponse(as, resp)
 	}
 	req := &tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{ClusterId: clusterID},
 		Count:  count,
 	}
 	var resp *tsopb.TsoResponse
-	testutil.Eventually(re, func() bool {
+	if !as.Eventually(func() bool {
 		tsoClient, err := suite.tsoClient.Tso(ctx)
-		re.NoError(err)
-		defer func() {
-			err := tsoClient.CloseSend()
-			re.NoError(err)
-		}()
-		re.NoError(tsoClient.Send(req))
+		if err != nil {
+			return false
+		}
+		if err := tsoClient.Send(req); err != nil {
+			_ = tsoClient.CloseSend()
+			return false
+		}
 		resp, err = tsoClient.Recv()
-		return err == nil && resp != nil
-	})
-	return checkAndReturnTimestampResponse(re, resp)
+		closeErr := tsoClient.CloseSend()
+		return err == nil && closeErr == nil && resp != nil
+	}, 20*time.Second, 100*time.Millisecond) {
+		return nil
+	}
+	return checkAndReturnTimestampResponse(as, resp)
 }
 
 func (suite *tsoConsistencyTestSuite) TestRequestTSOConcurrently() {
@@ -172,15 +190,15 @@ func (suite *tsoConsistencyTestSuite) TestRequestTSOConcurrently() {
 }
 
 func (suite *tsoConsistencyTestSuite) requestTSOConcurrently(lowerBound *pdpb.Timestamp) *pdpb.Timestamp {
-	re := suite.Require()
+	as := assert.New(suite.T())
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
 
 	var (
-		wg      sync.WaitGroup
-		maxTS   = lowerBound
-		maxTSMu sync.Mutex
+		wg    sync.WaitGroup
+		maxTS atomic.Pointer[pdpb.Timestamp]
 	)
+	maxTS.Store(lowerBound)
 	wg.Add(tsoRequestConcurrencyNumber)
 	for range tsoRequestConcurrencyNumber {
 		go func() {
@@ -189,23 +207,29 @@ func (suite *tsoConsistencyTestSuite) requestTSOConcurrently(lowerBound *pdpb.Ti
 			var ts *pdpb.Timestamp
 			for range tsoRequestRound {
 				ts = suite.request(ctx, tsoCount)
-				// Check whether the TSO fallbacks
-				re.Equal(1, tsoutil.CompareTimestamp(ts, last))
-				last = ts
-				maxTSMu.Lock()
-				if tsoutil.CompareTimestamp(ts, maxTS) > 0 {
-					maxTS = ts
+				if !as.NotNil(ts) {
+					return
 				}
-				maxTSMu.Unlock()
+				// Check whether the TSO fallbacks
+				if !as.Equal(1, tsoutil.CompareTimestamp(ts, last)) {
+					return
+				}
+				last = ts
+				for current := maxTS.Load(); tsoutil.CompareTimestamp(ts, current) > 0; current = maxTS.Load() {
+					if maxTS.CompareAndSwap(current, ts) {
+						break
+					}
+				}
 				time.Sleep(10 * time.Millisecond)
 			}
 		}()
 	}
 	wg.Wait()
-	return maxTS
+	return maxTS.Load()
 }
 
 func (suite *tsoConsistencyTestSuite) TestFallbackTSOConsistency() {
+	as := assert.New(suite.T())
 	re := suite.Require()
 
 	// Re-create the cluster to enable the failpoints.
@@ -235,7 +259,9 @@ func (suite *tsoConsistencyTestSuite) TestFallbackTSOConsistency() {
 			var ts *pdpb.Timestamp
 			for range tsoRequestRound {
 				ts = suite.request(ctx, tsoCount)
-				re.Equal(1, tsoutil.CompareTimestamp(ts, last))
+				if !as.NotNil(ts) || !as.Equal(1, tsoutil.CompareTimestamp(ts, last)) {
+					return
+				}
 				last = ts
 				time.Sleep(10 * time.Millisecond)
 			}

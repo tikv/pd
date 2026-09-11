@@ -268,7 +268,7 @@ func convertToStoresInfo(content string) string {
 func showStoreCommandFunc(cmd *cobra.Command, args []string) {
 	prefix := storesPrefix
 	if len(args) > 1 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	cFunc := convertToStoresInfo
@@ -313,7 +313,7 @@ func showStoreCommandFunc(cmd *cobra.Command, args []string) {
 
 func deleteStoreCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	if _, err := strconv.Atoi(args[0]); err != nil {
@@ -346,7 +346,7 @@ func deleteStoreCommandByAddrFunc(cmd *cobra.Command, args []string) error {
 
 func cancelDeleteStoreCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	if _, err := strconv.Atoi(args[0]); err != nil {
@@ -407,7 +407,7 @@ func cancelDeleteStoreCommandByAddrFunc(cmd *cobra.Command, args []string) {
 func getStoreID(cmd *cobra.Command, args []string, isCancel bool) (id int) {
 	id = -1
 	if len(args) != 1 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	addr := args[0]
@@ -458,7 +458,7 @@ func labelStoreCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	if len(args) <= 1 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	if _, err := strconv.Atoi(args[0]); err != nil {
@@ -522,7 +522,7 @@ func labelStoreCommandFunc(cmd *cobra.Command, args []string) {
 
 func setStoreWeightCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 3 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	leader, err := strconv.ParseFloat(args[1], 64)
@@ -612,7 +612,7 @@ func storeLimitCommandFunc(cmd *cobra.Command, args []string) {
 
 func storeCheckCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 
@@ -643,7 +643,7 @@ func showStoresCommandFunc(cmd *cobra.Command, _ []string) {
 
 func showAllStoresLimitCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) > 1 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	prefix := storesLimitPrefix
@@ -660,7 +660,7 @@ func showAllStoresLimitCommandFunc(cmd *cobra.Command, args []string) {
 
 func removeTombStoneCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 0 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	prefix := path.Join(storesPrefix, "remove-tombstone")
@@ -675,7 +675,7 @@ func removeTombStoneCommandFunc(cmd *cobra.Command, args []string) {
 func setAllLimitCommandFunc(cmd *cobra.Command, args []string) {
 	argsCount := len(args)
 	if argsCount != 1 && argsCount != 2 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	rate, err := strconv.ParseFloat(args[0], 64)

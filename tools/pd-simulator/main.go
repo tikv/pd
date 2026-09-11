@@ -153,7 +153,9 @@ func simStart(pdAddr, statusAddress string, simCase string, simConfig *sc.SimCon
 	defer tick.Stop()
 	sc := make(chan os.Signal, 1)
 	// halt scheduling
-	simulator.ChooseToHaltPDSchedule(true)
+	if err := simulator.ChooseToHaltPDSchedule(true); err != nil {
+		simutil.Logger.Fatal("halt PD scheduling failed", zap.Error(err))
+	}
 	signal.Notify(sc,
 		syscall.SIGHUP,
 		syscall.SIGINT,

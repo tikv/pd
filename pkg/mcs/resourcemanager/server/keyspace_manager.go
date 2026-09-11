@@ -775,13 +775,11 @@ func (krgm *keyspaceResourceGroupManager) calculateDemandInfo(queue []*ResourceG
 		di.totalBasicRUDemand += basicRUDemand
 		di.basicRUDemandMap[group.Name] = basicRUDemand
 		// Calculate the burst RU demand of the resource group.
-		burstRUDemand := 0.0
+		var burstRUDemand float64
 		// If the burst limit setting is within the range of [0, fillRateSetting],
 		// it means the resource group is not allowed to consume extra tokens,
 		// so the burst RU demand should always be 0.
-		if 0 <= burstLimitSetting && burstLimitSetting <= fillRateSetting {
-			burstRUDemand = 0
-		} else {
+		if !(0 <= burstLimitSetting && burstLimitSetting <= fillRateSetting) {
 			burstRUDemand = math.Max(0, ruPerSec-fillRateSetting)
 		}
 		di.totalBurstRUDemand += burstRUDemand

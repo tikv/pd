@@ -19,6 +19,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
@@ -63,6 +64,7 @@ func (s *idAllocatorTestSuite) TestID() {
 }
 
 func (s *idAllocatorTestSuite) checkID(cluster *tests.TestCluster) {
+	as := assert.New(s.T())
 	re := s.Require()
 	leaderServer := cluster.GetLeaderServer()
 	var last uint64
@@ -82,12 +84,16 @@ func (s *idAllocatorTestSuite) checkID(cluster *tests.TestCluster) {
 			defer wg.Done()
 			for range 200 {
 				id, _, err := leaderServer.GetAllocator().Alloc(1)
-				re.NoError(err)
+				if !as.NoError(err) {
+					return
+				}
 				m.Lock()
 				_, ok := ids[id]
 				ids[id] = struct{}{}
 				m.Unlock()
-				re.False(ok)
+				if !as.False(ok) {
+					return
+				}
 			}
 		}()
 	}
@@ -148,6 +154,7 @@ func (s *idAllocatorTestSuite) TestBatchAllocID() {
 }
 
 func (s *idAllocatorTestSuite) checkBatchAllocID(cluster *tests.TestCluster) {
+	as := assert.New(s.T())
 	re := s.Require()
 
 	leaderServer := cluster.GetLeaderServer()
@@ -169,13 +176,18 @@ func (s *idAllocatorTestSuite) checkBatchAllocID(cluster *tests.TestCluster) {
 			for range 200 {
 				id, count, err := leaderServer.GetAllocator().Alloc(10)
 				curID := id - uint64(count)
-				re.NoError(err)
+				if !as.NoError(err) {
+					return
+				}
 				m.Lock()
 				for range count {
 					_, ok := ids[curID]
 					ids[curID] = struct{}{}
 					curID++
-					re.False(ok, curID)
+					if !as.False(ok, curID) {
+						m.Unlock()
+						return
+					}
 				}
 				m.Unlock()
 			}

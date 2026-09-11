@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
@@ -637,7 +638,7 @@ func TestOperatorCheckConcurrently(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			re.Nil(op.Check(region))
+			assert.Nil(t, op.Check(region))
 		}()
 	}
 	wg.Wait()

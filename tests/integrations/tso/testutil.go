@@ -15,7 +15,7 @@
 package tso
 
 import (
-	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/assert"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
@@ -32,10 +32,16 @@ type tsoResponse interface {
 	GetTimestamp() *pdpb.Timestamp
 }
 
-func checkAndReturnTimestampResponse[T tsoResponse](re *require.Assertions, resp T) *pdpb.Timestamp {
-	re.Equal(uint32(tsoCount), resp.GetCount())
+func checkAndReturnTimestampResponse[T tsoResponse](as *assert.Assertions, resp T) *pdpb.Timestamp {
+	if !as.NotNil(resp) {
+		return nil
+	}
+	as.Equal(uint32(tsoCount), resp.GetCount())
 	timestamp := resp.GetTimestamp()
-	re.Positive(timestamp.GetPhysical())
-	re.GreaterOrEqual(uint32(timestamp.GetLogical()), uint32(tsoCount))
+	if !as.NotNil(timestamp) {
+		return nil
+	}
+	as.Positive(timestamp.GetPhysical())
+	as.GreaterOrEqual(uint32(timestamp.GetLogical()), uint32(tsoCount))
 	return timestamp
 }
