@@ -15,6 +15,7 @@
 package tests
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -36,8 +37,11 @@ type serverConfig struct {
 	Join                bool
 }
 
-func newServerConfig(name string, cc *clusterConfig, join bool) *serverConfig {
-	tempDir, _ := os.MkdirTemp("", "pd_tests")
+func newServerConfig(name string, cc *clusterConfig, join bool) (*serverConfig, error) {
+	tempDir, err := os.MkdirTemp("", "pd_tests")
+	if err != nil {
+		return nil, fmt.Errorf("create test server data directory: %w", err)
+	}
 	return &serverConfig{
 		Name:          name,
 		DataDir:       tempDir,
@@ -45,7 +49,7 @@ func newServerConfig(name string, cc *clusterConfig, join bool) *serverConfig {
 		PeerURLs:      tempurl.Alloc(),
 		ClusterConfig: cc,
 		Join:          join,
-	}
+	}, nil
 }
 
 // Generate generates a config for the server.
@@ -103,19 +107,31 @@ type clusterConfig struct {
 	JoinServers    []*serverConfig
 }
 
-func newClusterConfig(n int) *clusterConfig {
-	var cc clusterConfig
+func newClusterConfig(n int) (*clusterConfig, error) {
+	cc := &clusterConfig{}
 	for range n {
-		c := newServerConfig(cc.nextServerName(), &cc, false)
-		cc.InitialServers = append(cc.InitialServers, c)
+		serverConfig, err := newServerConfig(cc.nextServerName(), cc, false)
+		if err != nil {
+			return nil, errors.Join(err, cc.cleanup())
+		}
+		cc.InitialServers = append(cc.InitialServers, serverConfig)
 	}
-	return &cc
+	return cc, nil
 }
 
-func (c *clusterConfig) join() *serverConfig {
-	sc := newServerConfig(c.nextServerName(), c, true)
-	c.JoinServers = append(c.JoinServers, sc)
-	return sc
+func (c *clusterConfig) join() (*serverConfig, error) {
+	return newServerConfig(c.nextServerName(), c, true)
+}
+
+func (c *clusterConfig) cleanup() error {
+	var cleanupErr error
+	servers := append(append([]*serverConfig{}, c.InitialServers...), c.JoinServers...)
+	for _, server := range servers {
+		if err := os.RemoveAll(server.DataDir); err != nil && cleanupErr == nil {
+			cleanupErr = fmt.Errorf("remove test server data directory %s: %w", server.DataDir, err)
+		}
+	}
+	return cleanupErr
 }
 
 func (c *clusterConfig) regenerateInitialServerURLs() {

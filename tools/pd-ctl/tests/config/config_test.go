@@ -360,11 +360,10 @@ func (suite *configTestSuite) checkConfigForwardControl(cluster *pdTests.TestClu
 	leaderServer := cluster.GetLeaderServer()
 	pdAddr := leaderServer.GetAddr()
 
-	f, err := os.CreateTemp("", "pd_tests")
+	f, err := os.CreateTemp(suite.T().TempDir(), "pd_tests")
 	re.NoError(err)
 	fname := f.Name()
-	f.Close()
-	defer os.RemoveAll(fname)
+	re.NoError(f.Close())
 
 	checkScheduleConfig := func(scheduleCfg *sc.ScheduleConfig, isFromPDService bool) {
 		if schedulingServer := cluster.GetSchedulingPrimaryServer(); schedulingServer != nil {
@@ -587,11 +586,10 @@ func (suite *configTestSuite) checkPlacementRules(cluster *pdTests.TestCluster) 
 	// test show
 	checkShowRuleKey(re, pdAddr, [][2]string{{placement.DefaultGroupID, placement.DefaultRuleID}})
 
-	f, err := os.CreateTemp("", "pd_tests")
+	f, err := os.CreateTemp(suite.T().TempDir(), "pd_tests")
 	re.NoError(err)
 	fname := f.Name()
-	f.Close()
-	defer os.RemoveAll(fname)
+	re.NoError(f.Close())
 
 	// test load
 	rules := checkLoadRule(re, pdAddr, fname, [][2]string{{placement.DefaultGroupID, placement.DefaultRuleID}})
@@ -738,11 +736,10 @@ func (suite *configTestSuite) checkPlacementRuleBundle(cluster *pdTests.TestClus
 	expect.Rules[0].Version = bundle.Rules[0].Version                 // skip version
 	re.Equal(expect, bundle)
 
-	f, err := os.CreateTemp("", "pd_tests")
+	f, err := os.CreateTemp(suite.T().TempDir(), "pd_tests")
 	re.NoError(err)
 	fname := f.Name()
-	f.Close()
-	defer os.RemoveAll(fname)
+	re.NoError(f.Close())
 
 	// test load
 	checkLoadRuleBundle(re, pdAddr, fname, []placement.GroupBundle{

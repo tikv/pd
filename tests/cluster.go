@@ -121,18 +121,25 @@ type TestServer struct {
 var zapLogOnce sync.Once
 
 // NewTestServer creates a new TestServer.
-func NewTestServer(ctx context.Context, cfg *config.Config, services []string, handlers ...server.HandlerBuilder) (*TestServer, error) {
+func NewTestServer(ctx context.Context, cfg *config.Config, services []string, handlers ...server.HandlerBuilder) (_ *TestServer, err error) {
 	// use temp dir to ensure test isolation.
 	if cfg.DataDir == "" || strings.HasPrefix(cfg.DataDir, "default.") {
-		tempDir, err := os.MkdirTemp("", "pd_tests")
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to create safeguard temp data dir for test server")
+		tempDir, mkdirErr := os.MkdirTemp("", "pd_tests")
+		if mkdirErr != nil {
+			return nil, errors.Wrap(mkdirErr, "failed to create safeguard temp data dir for test server")
 		}
 		cfg.DataDir = tempDir
+		defer func() {
+			if err != nil {
+				if cleanupErr := os.RemoveAll(tempDir); cleanupErr != nil {
+					log.Warn("failed to clean test server data directory", zap.Error(cleanupErr))
+				}
+			}
+		}()
 	}
 	// disable the heartbeat async runner in test
 	cfg.Schedule.EnableHeartbeatConcurrentRunner = false
-	err := logutil.SetupLogger(&cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
+	err = logutil.SetupLogger(&cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
 	if err != nil {
 		return nil, err
 	}
@@ -579,24 +586,14 @@ func NewTestClusterWithKeyspaceGroup(ctx context.Context, initialServerCount int
 
 func createTestCluster(ctx context.Context, initialServerCount int, services []string, handlers []server.HandlerBuilder, opts ...ConfigOption) (*TestCluster, error) {
 	schedulers.Register()
-	config := newClusterConfig(initialServerCount)
-	servers := make(map[string]*TestServer)
-	for _, cfg := range config.InitialServers {
-		allOpts := append([]ConfigOption{WithGCTuner(false)}, opts...)
-		serverConf, err := cfg.Generate(allOpts...)
-		if err != nil {
-			return nil, err
-		}
-		s, err := NewTestServer(ctx, serverConf, services, handlers...)
-		if err != nil {
-			return nil, err
-		}
-		servers[cfg.Name] = s
+	config, err := newClusterConfig(initialServerCount)
+	if err != nil {
+		return nil, err
 	}
-	return &TestCluster{
+	testCluster := &TestCluster{
 		ctx:      ctx,
 		config:   config,
-		servers:  servers,
+		servers:  make(map[string]*TestServer),
 		services: services,
 		opts:     opts,
 		tsPool: struct {
@@ -605,7 +602,22 @@ func createTestCluster(ctx context.Context, initialServerCount int, services []s
 		}{
 			pool: make(map[uint64]struct{}),
 		},
-	}, nil
+	}
+	for _, cfg := range config.InitialServers {
+		allOpts := append([]ConfigOption{WithGCTuner(false)}, opts...)
+		serverConf, err := cfg.Generate(allOpts...)
+		if err != nil {
+			testCluster.Destroy()
+			return nil, err
+		}
+		s, err := NewTestServer(ctx, serverConf, services, handlers...)
+		if err != nil {
+			testCluster.Destroy()
+			return nil, err
+		}
+		testCluster.servers[cfg.Name] = s
+	}
+	return testCluster, nil
 }
 
 // RestartTestPDCluster restarts the PD test cluster.
@@ -986,7 +998,19 @@ func (c *TestCluster) HandleRegionBuckets(b *metapb.Buckets) error {
 
 // Join is used to add a new TestServer into the cluster.
 func (c *TestCluster) Join(ctx context.Context, opts ...ConfigOption) (*TestServer, error) {
-	conf, err := c.config.join().Generate(opts...)
+	serverConfig, err := c.config.join()
+	if err != nil {
+		return nil, err
+	}
+	cleanupConfig := true
+	defer func() {
+		if cleanupConfig {
+			if cleanupErr := os.RemoveAll(serverConfig.DataDir); cleanupErr != nil {
+				log.Warn("failed to clean joined test server data directory", zap.Error(cleanupErr))
+			}
+		}
+	}()
+	conf, err := serverConfig.Generate(opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -994,13 +1018,27 @@ func (c *TestCluster) Join(ctx context.Context, opts ...ConfigOption) (*TestServ
 	if err != nil {
 		return nil, err
 	}
+	c.config.JoinServers = append(c.config.JoinServers, serverConfig)
 	c.servers[conf.Name] = s
+	cleanupConfig = false
 	return s, nil
 }
 
 // JoinWithKeyspaceGroup is used to add a new TestServer into the cluster with keyspace group enabled.
 func (c *TestCluster) JoinWithKeyspaceGroup(ctx context.Context, opts ...ConfigOption) (*TestServer, error) {
-	conf, err := c.config.join().Generate(opts...)
+	serverConfig, err := c.config.join()
+	if err != nil {
+		return nil, err
+	}
+	cleanupConfig := true
+	defer func() {
+		if cleanupConfig {
+			if cleanupErr := os.RemoveAll(serverConfig.DataDir); cleanupErr != nil {
+				log.Warn("failed to clean joined test server data directory", zap.Error(cleanupErr))
+			}
+		}
+	}()
+	conf, err := serverConfig.Generate(opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1008,7 +1046,9 @@ func (c *TestCluster) JoinWithKeyspaceGroup(ctx context.Context, opts ...ConfigO
 	if err != nil {
 		return nil, err
 	}
+	c.config.JoinServers = append(c.config.JoinServers, serverConfig)
 	c.servers[conf.Name] = s
+	cleanupConfig = false
 	return s, nil
 }
 
@@ -1025,6 +1065,11 @@ func (c *TestCluster) Destroy() {
 	}
 	if c.tsoCluster != nil {
 		c.tsoCluster.Destroy()
+	}
+	if c.config != nil {
+		if err := c.config.cleanup(); err != nil {
+			log.Warn("failed to clean test cluster data directories", errs.ZapError(err))
+		}
 	}
 }
 

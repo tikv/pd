@@ -17,7 +17,6 @@ package store_test
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -579,23 +578,11 @@ func TestStoreTLS(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	certPath := filepath.Join("..", "cert")
+	certPath := t.TempDir()
 	certScript := filepath.Join("..", "cert_opt.sh")
-	// generate certs
-	if err := os.Mkdir(certPath, 0755); err != nil {
-		t.Fatal(err)
-	}
 	if err := exec.Command(certScript, "generate", certPath).Run(); err != nil {
 		t.Fatal(err)
 	}
-	defer func() {
-		if err := exec.Command(certScript, "cleanup", certPath).Run(); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.RemoveAll(certPath); err != nil {
-			t.Fatal(err)
-		}
-	}()
 
 	tlsInfo := transport.TLSInfo{
 		KeyFile:       filepath.Join(certPath, "pd-server-key.pem"),
@@ -656,9 +643,9 @@ func TestStoreTLS(t *testing.T) {
 	pdAddr = strings.ReplaceAll(pdAddr, "http", "https")
 	// store command
 	args := []string{"-u", pdAddr, "store",
-		"--cacert=" + filepath.Join("..", "cert", "ca.pem"),
-		"--cert=" + filepath.Join("..", "cert", "client.pem"),
-		"--key=" + filepath.Join("..", "cert", "client-key.pem")}
+		"--cacert=" + filepath.Join(certPath, "ca.pem"),
+		"--cert=" + filepath.Join(certPath, "client.pem"),
+		"--key=" + filepath.Join(certPath, "client-key.pem")}
 	output, err := tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	storesInfo := new(response.StoresInfo)
