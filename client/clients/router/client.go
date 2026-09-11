@@ -29,6 +29,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/routerpb"
@@ -264,48 +265,93 @@ func (c *Cli) newRequest(ctx context.Context, opts ...opt.GetRegionOption) *Requ
 	return req
 }
 
-func requestFinisher(resp *pdpb.QueryRegionResponse) batch.FinisherFunc[*Request] {
-	var keyIdx, prevKeyIdx int
-	return func(_ int, req *Request, err error) {
-		requestCtx := req.requestCtx
-		defer trace.StartRegion(requestCtx, "pdclient.regionReqDone").End()
+type regionResponseCursor struct {
+	resp               *pdpb.QueryRegionResponse
+	keyIdx, prevKeyIdx int
+}
 
-		// If there's an error, pass it to the request
+func (c *regionResponseCursor) next(req *Request) (*pdpb.RegionResponse, bool) {
+	if c.resp == nil {
+		return nil, false
+	}
+	var id uint64
+	if req.key != nil {
+		if c.keyIdx >= len(c.resp.GetKeyIdMap()) {
+			return nil, false
+		}
+		id = c.resp.GetKeyIdMap()[c.keyIdx]
+		c.keyIdx++
+	} else if req.prevKey != nil {
+		if c.prevKeyIdx >= len(c.resp.GetPrevKeyIdMap()) {
+			return nil, false
+		}
+		id = c.resp.GetPrevKeyIdMap()[c.prevKeyIdx]
+		c.prevKeyIdx++
+	} else {
+		id = req.id
+	}
+	if id == 0 {
+		return nil, false
+	}
+	regionResp, ok := c.resp.GetRegionsById()[id]
+	return regionResp, ok && regionResp != nil && regionResp.GetRegion() != nil
+}
+
+func finishRegionRequest(req *Request, regionResp *pdpb.RegionResponse, err error) {
+	defer trace.StartRegion(req.requestCtx, "pdclient.regionReqDone").End()
+	if err != nil {
+		req.tryDone(err)
+		return
+	}
+	if regionResp != nil {
+		// Since the region results may be modified by the requester,
+		// we need to ensure each region result returned is unique.
+		req.region = convertToRegionCopy(regionResp)
+		// NeedBuckets is a batch-wide flag in the QueryRegion request, so the
+		// response may carry buckets for a region even when this particular
+		// request did not ask for them. Drop them here to match the
+		// per-request semantics of the unary GetRegion path.
+		if req.region != nil && !req.options.NeedBuckets {
+			req.region.Buckets = nil
+		}
+	}
+	req.tryDone(nil)
+}
+
+func requestFinisher(resp *pdpb.QueryRegionResponse) batch.FinisherFunc[*Request] {
+	cursor := regionResponseCursor{resp: resp}
+	return func(_ int, req *Request, err error) {
 		if err != nil {
-			req.tryDone(err)
+			finishRegionRequest(req, nil, err)
 			return
 		}
-
 		// If resp is nil but no error was provided, it means an abnormal situation occurred
 		// (e.g., timeout, connection issue). We should pass an error to indicate this.
 		if resp == nil {
-			req.tryDone(errs.ErrClientRouterConnectionTimeout)
+			finishRegionRequest(req, nil, errs.ErrClientRouterConnectionTimeout)
 			return
 		}
+		regionResp, _ := cursor.next(req)
+		finishRegionRequest(req, regionResp, nil)
+	}
+}
 
-		var id uint64
-		if req.key != nil {
-			id = resp.KeyIdMap[keyIdx]
-			keyIdx++
-		} else if req.prevKey != nil {
-			id = resp.PrevKeyIdMap[prevKeyIdx]
-			prevKeyIdx++
-		} else {
-			id = req.id
+func partialResponseFinisher(
+	resp *pdpb.QueryRegionResponse,
+	missingRequests *[]*Request,
+) batch.FinisherFunc[*Request] {
+	cursor := regionResponseCursor{resp: resp}
+	return func(_ int, req *Request, err error) {
+		if err != nil {
+			finishRegionRequest(req, nil, err)
+			return
 		}
-		if regionResp, ok := resp.RegionsById[id]; ok {
-			// Since the region results may be modified by the requester,
-			// we need to ensure each region result returned is unique.
-			req.region = convertToRegionCopy(regionResp)
-			// NeedBuckets is a batch-wide flag in the QueryRegion request, so the
-			// response may carry buckets for a region even when this particular
-			// request did not ask for them. Drop them here to match the
-			// per-request semantics of the unary GetRegion path.
-			if req.region != nil && !req.options.NeedBuckets {
-				req.region.Buckets = nil
-			}
+		regionResp, found := cursor.next(req)
+		if !found {
+			*missingRequests = append(*missingRequests, req)
+			return
 		}
-		req.tryDone(nil)
+		finishRegionRequest(req, regionResp, nil)
 	}
 }
 
@@ -570,6 +616,7 @@ func (c *Cli) dispatcher() {
 	defer c.wg.Done()
 
 	var (
+		leaderRetryCh     chan *Request
 		streamURL         string
 		timeoutTimer      *time.Timer
 		resetTimeoutTimer = func() {
@@ -589,6 +636,10 @@ func (c *Cli) dispatcher() {
 		if timeoutTimer != nil {
 			timeoutTimer.Stop()
 		}
+		cancelErr := ctx.Err()
+		for len(leaderRetryCh) > 0 {
+			finishRegionRequest(<-leaderRetryCh, nil, cancelErr)
+		}
 		log.Info("[router] dispatcher exited")
 	}()
 batchLoop:
@@ -599,8 +650,15 @@ batchLoop:
 		default:
 		}
 
-		// Step 1: Fetch the pending router requests in batch.
-		err := c.batchController.FetchPendingRequests(ctx, c.requestCh, nil, 0)
+		// Step 1: Fetch the pending router requests in batch. Requests missed by a
+		// follower are prioritized in the next standalone batch. Fresh requests retain
+		// their own routing and retry semantics.
+		isLeaderRetryBatch := len(leaderRetryCh) > 0
+		batchRequestCh := c.requestCh
+		if isLeaderRetryBatch {
+			batchRequestCh = leaderRetryCh
+		}
+		err := c.batchController.FetchPendingRequests(ctx, batchRequestCh, nil, 0)
 		if err != nil {
 			if err == context.Canceled {
 				log.Info("[router] stop fetching the pending router requests due to context canceled")
@@ -629,9 +687,13 @@ batchLoop:
 				continue batchLoop
 			default:
 			}
-			processQueryFunc, streamURL = c.sendToMs(ctx)
-			if processQueryFunc == nil {
-				processQueryFunc, streamURL, retry = c.sendToPD(ctx)
+			if isLeaderRetryBatch {
+				processQueryFunc, streamURL, retry = c.sendToPD(ctx, true)
+			} else {
+				processQueryFunc, streamURL = c.sendToMs(ctx)
+				if processQueryFunc == nil {
+					processQueryFunc, streamURL, retry = c.sendToPD(ctx, false)
+				}
 			}
 			if retry {
 				continue connectionCtxChoosingLoop
@@ -641,15 +703,24 @@ batchLoop:
 
 		// Step 3: Dispatch the router requests to the stream connection.
 		// TODO: timeout handling if the stream takes too long to process the requests.
-		err = processQueryFunc()
-		if err != nil && !c.handleProcessRequestError(ctx, streamURL, err) {
-			return
+		retryRequests, err := processQueryFunc()
+		if err != nil {
+			if !c.handleProcessRequestError(ctx, streamURL, err) {
+				return
+			}
+			continue
+		}
+		if len(retryRequests) > 0 && leaderRetryCh == nil {
+			leaderRetryCh = make(chan *Request, defaultMaxRouterRequestBatchSize)
+		}
+		for _, req := range retryRequests {
+			leaderRetryCh <- req
 		}
 	}
 }
 
-func (c *Cli) sendToPD(ctx context.Context) (processFn, string, bool) {
-	allowFollowerHandle := c.option.GetEnableFollowerHandle()
+func (c *Cli) sendToPD(ctx context.Context, forceLeader bool) (processFn, string, bool) {
+	allowFollowerHandle := !forceLeader && c.option.GetEnableFollowerHandle()
 	// Check whether allow the follower to handle this batch of requests.
 	if allowFollowerHandle {
 		// We need to ensure all requests in a same batch allow to be handled by the follower.
@@ -666,6 +737,11 @@ func (c *Cli) sendToPD(ctx context.Context) (processFn, string, bool) {
 	var connectionCtx *cctx.ConnectionCtx[pdpb.PD_QueryRegionClient]
 	if allowFollowerHandle {
 		connectionCtx = c.conCtxMgr.RandomlyPick()
+		failpoint.Inject("forceUseFollower", func(val failpoint.Value) {
+			if url, ok := val.(string); ok {
+				connectionCtx = c.conCtxMgr.GetConnectionCtx(url)
+			}
+		})
 	} else {
 		connectionCtx = c.conCtxMgr.GetConnectionCtx(c.getLeaderURL())
 	}
@@ -682,12 +758,18 @@ func (c *Cli) sendToPD(ctx context.Context) (processFn, string, bool) {
 		return nil, "", true
 	default:
 	}
-	return func() error {
-		return c.processRequestsInner(connectionCtx.Stream.Send, connectionCtx.Stream.Recv)
+	isFollower := connectionCtx.StreamURL != c.getLeaderURL()
+	return func() ([]*Request, error) {
+		return c.processRequestsInner(
+			connectionCtx.Stream.Send,
+			connectionCtx.Stream.Recv,
+			isFollower,
+			forceLeader,
+		)
 	}, connectionCtx.StreamURL, false
 }
 
-type processFn func() error
+type processFn func() ([]*Request, error)
 
 // sendToMs returns the stream function, stream url
 func (c *Cli) sendToMs(ctx context.Context) (processFn, string) {
@@ -720,8 +802,8 @@ func (c *Cli) sendToMs(ctx context.Context) (processFn, string) {
 		return nil, ""
 	default:
 	}
-	return func() error {
-		return c.processRequestsInner(stream.Send, stream.Recv)
+	return func() ([]*Request, error) {
+		return c.processRequestsInner(stream.Send, stream.Recv, false, false)
 	}, streamURL
 }
 
@@ -755,7 +837,47 @@ func buildQueryRegionRequest(clusterID uint64, requests []*Request) *pdpb.QueryR
 	return queryReq
 }
 
-func (c *Cli) processRequestsInner(send sendFn, recv recvFn) error {
+func (c *Cli) queryRegion(
+	send sendFn,
+	recv recvFn,
+	requests []*Request,
+) (*pdpb.QueryRegionResponse, error) {
+	queryReq := buildQueryRegionRequest(c.svcDiscovery.GetClusterID(), requests)
+	start := time.Now()
+	if err := send(queryReq); err != nil {
+		metrics.RequestFailedDurationQueryRegion.Observe(time.Since(start).Seconds())
+		return nil, err
+	}
+	metrics.QueryRegionBatchSendLatency.Observe(
+		time.Since(c.batchController.GetExtraBatchingStartTime()).Seconds(),
+	)
+	resp, err := recv()
+	if err != nil {
+		metrics.RequestFailedDurationQueryRegion.Observe(time.Since(start).Seconds())
+		return nil, err
+	}
+	metrics.RequestDurationQueryRegion.Observe(time.Since(start).Seconds())
+	metrics.QueryRegionBatchSizeTotal.Observe(float64(len(requests)))
+	if resp.GetHeader().GetError() == nil {
+		if keysLen := len(queryReq.Keys); keysLen > 0 {
+			metrics.QueryRegionBatchSizeByKeys.Observe(float64(keysLen))
+		}
+		if prevKeysLen := len(queryReq.PrevKeys); prevKeysLen > 0 {
+			metrics.QueryRegionBatchSizeByPrevKeys.Observe(float64(prevKeysLen))
+		}
+		if idsLen := len(queryReq.Ids); idsLen > 0 {
+			metrics.QueryRegionBatchSizeByIDs.Observe(float64(idsLen))
+		}
+	}
+	return resp, nil
+}
+
+func (c *Cli) processRequestsInner(
+	send sendFn,
+	recv recvFn,
+	isFollower bool,
+	isLeaderRetryBatch bool,
+) ([]*Request, error) {
 	var (
 		requests = c.batchController.GetCollectedRequests()
 		spans    = make([]opentracing.Span, 0, len(requests))
@@ -777,41 +899,36 @@ func (c *Cli) processRequestsInner(send sendFn, recv recvFn) error {
 		traceRegion.End()
 	}()
 
-	queryReq := buildQueryRegionRequest(c.svcDiscovery.GetClusterID(), requests)
-	start := time.Now()
-	err := send(queryReq)
+	resp, err := c.queryRegion(send, recv, requests)
 	if err != nil {
-		metrics.RequestFailedDurationQueryRegion.Observe(time.Since(start).Seconds())
-		return err
+		return nil, err
 	}
-	metrics.QueryRegionBatchSendLatency.Observe(
-		time.Since(
-			c.batchController.GetExtraBatchingStartTime(),
-		).Seconds(),
-	)
-	resp, err := recv()
-	if err != nil {
-		metrics.RequestFailedDurationQueryRegion.Observe(time.Since(start).Seconds())
-		return err
+	headerErr := resp.GetHeader().GetError()
+	retryOnLeader := !isLeaderRetryBatch && (isFollower ||
+		(headerErr != nil && headerErr.GetType() == pdpb.ErrorType_REGION_NOT_FOUND))
+	if headerErr != nil && !retryOnLeader {
+		return nil, errors.New(headerErr.String())
 	}
-	metrics.RequestDurationQueryRegion.Observe(time.Since(start).Seconds())
-	metrics.QueryRegionBatchSizeTotal.Observe(float64(len(requests)))
-	// Currently, header errors can occur due to an unready PD leader or follower,
-	// resulting in either a `NOT_BOOTSTRAPPED` or `REGION_NOT_FOUND` error.
-	if headerErr := resp.GetHeader().GetError(); headerErr != nil {
-		return errors.New(headerErr.String())
-	}
-	if keysLen := len(queryReq.Keys); keysLen > 0 {
-		metrics.QueryRegionBatchSizeByKeys.Observe(float64(keysLen))
-	}
-	if prevKeysLen := len(queryReq.PrevKeys); prevKeysLen > 0 {
-		metrics.QueryRegionBatchSizeByPrevKeys.Observe(float64(prevKeysLen))
-	}
-	if idsLen := len(queryReq.Ids); idsLen > 0 {
-		metrics.QueryRegionBatchSizeByIDs.Observe(float64(idsLen))
+	if retryOnLeader {
+		// A successful follower response may contain both hits and misses, so
+		// only the missing requests need to be retried. A header error invalidates
+		// the entire response, matching the unary retry behavior.
+		responseForFinisher := resp
+		if headerErr != nil {
+			responseForFinisher = nil
+		}
+		var missingRequests []*Request
+		if responseForFinisher == nil {
+			missingRequests = make([]*Request, 0, len(requests))
+		}
+		c.batchController.FinishCollectedRequests(
+			partialResponseFinisher(responseForFinisher, &missingRequests),
+			nil,
+		)
+		return missingRequests, nil
 	}
 	c.doneCollectedRequests(resp)
-	return nil
+	return nil, nil
 }
 
 func (c *Cli) handleProcessRequestError(
