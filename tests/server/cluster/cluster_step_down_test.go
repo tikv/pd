@@ -17,6 +17,7 @@ package cluster_test
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -33,9 +34,8 @@ import (
 // inside the step-down path that concerns the RaftCluster: its background jobs
 // are told to stop before anything that can block for an unbounded time.
 //
-// The jobs hang off the server context rather than the term, so the campaign
-// context's cancel does not reach them, and RaftCluster.Stop used to be the
-// first thing that did - from a defer that runs after the lease teardown in
+// Previously the jobs used the server context, and RaftCluster.Stop was the
+// first operation to cancel them, from a defer after the lease teardown in
 // Member.Resign. Five of those jobs write to etcd with no leader guard through
 // the health-checked client, so a member whose step-down was blocked kept
 // writing into the healthy quorum for as long as the block lasted.
@@ -132,5 +132,121 @@ func TestPDLeaderCancelsClusterJobsBeforeBlockingCleanup(t *testing.T) {
 	case <-exited:
 	case <-time.After(5 * time.Second):
 		re.FailNow("background jobs still running while the step-down is blocked")
+	}
+}
+
+// TestBootstrapOverlapsStepDown exercises the Bootstrap RPC and real campaign
+// teardown, both before Start and while Start holds the cluster lock.
+func TestBootstrapOverlapsStepDown(t *testing.T) {
+	for _, beforeStart := range []bool{true, false} {
+		name := "during-start"
+		pausePoint := "github.com/tikv/pd/server/cluster/bootstrapBeforeClusterStarted"
+		if beforeStart {
+			name = "before-start"
+			pausePoint = "github.com/tikv/pd/server/bootstrapBeforeClusterStart"
+		}
+		t.Run(name, func(t *testing.T) {
+			re := require.New(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			tc, err := tests.NewTestCluster(ctx, 1)
+			re.NoError(err)
+			defer tc.Destroy()
+			re.NoError(tc.RunInitialServers())
+			leaderName := tc.WaitLeader()
+			re.NotEmpty(leaderName)
+			ts := tc.GetServer(leaderName)
+			s := ts.GetServer()
+			rc := s.DirectlyGetRaftCluster()
+			re.False(rc.IsRunning())
+
+			paused := make(chan context.Context, 1)
+			resume := make(chan struct{})
+			stopEntered := make(chan struct{})
+			stopped := make(chan struct{})
+			finishStop := make(chan struct{})
+			var pauseOnce, stopOnce, stoppedOnce sync.Once
+			resumeStart := sync.OnceFunc(func() { close(resume) })
+			resumeStop := sync.OnceFunc(func() { close(finishStop) })
+			// Release paused goroutines and cancel their parent even on failure.
+			defer func() {
+				cancel()
+				resumeStart()
+				resumeStop()
+			}()
+			enableHook := func(name string, fn any) {
+				re.NoError(failpoint.EnableCall(name, fn))
+				t.Cleanup(func() { re.NoError(failpoint.Disable(name)) })
+			}
+			enableHook(pausePoint, func(jobCtx context.Context) {
+				pauseOnce.Do(func() {
+					paused <- jobCtx
+					<-resume
+				})
+			})
+			enableHook("github.com/tikv/pd/server/cluster/stopClusterAfterCancel", func() {
+				stopOnce.Do(func() { close(stopEntered) })
+			})
+			enableHook("github.com/tikv/pd/server/raftClusterStopped", func() {
+				stoppedOnce.Do(func() {
+					close(stopped)
+					<-finishStop
+				})
+			})
+			bootstrapDone := make(chan error, 1)
+			go func() { bootstrapDone <- ts.BootstrapCluster() }()
+			var jobCtx context.Context
+			select {
+			case jobCtx = <-paused:
+			case <-time.After(20 * time.Second):
+				t.Fatal("bootstrap did not reach the pause point")
+			}
+			const exitCampaign = "github.com/tikv/pd/server/exitCampaignLeader"
+			re.NoError(failpoint.Enable(exitCampaign, fmt.Sprintf("return(\"%d\")", s.GetMember().ID())))
+			t.Cleanup(func() { re.NoError(failpoint.Disable(exitCampaign)) })
+			select {
+			case <-stopEntered:
+			case <-time.After(20 * time.Second):
+				t.Fatal("step-down did not reach Stop")
+			}
+			// Cancellation must reach even an unpublished cluster while Start
+			// still holds the lock. Waiting for Stop's lock is too late.
+			re.ErrorIs(jobCtx.Err(), context.Canceled)
+			if !beforeStart {
+				resumeStart()
+			}
+			select {
+			case <-stopped:
+			case <-time.After(20 * time.Second):
+				t.Fatal("Stop did not finish reclaiming cluster jobs")
+			}
+			re.False(s.IsServing())
+			re.False(rc.IsRunning())
+			re.Nil(rc.Context())
+			re.False(rc.IsSchedulingControllerRunning())
+			re.False(s.GetTSOAllocator().IsInitialize())
+
+			// The next campaign loads the metadata already persisted by the
+			// bootstrap request and must get a fresh, usable context.
+			re.NoError(failpoint.Disable(exitCampaign))
+			resumeStop()
+			re.Equal(leaderName, tc.WaitLeader())
+			testutil.Eventually(re, rc.IsRunning)
+			newCtx := rc.Context()
+			re.NotNil(newCtx)
+			re.NoError(newCtx.Err())
+			// A request delayed across the whole step-down must still use its
+			// old, cancelled term rather than restart or cancel the new term.
+			resumeStart()
+			select {
+			case err := <-bootstrapDone:
+				re.ErrorContains(err, context.Canceled.Error())
+			case <-time.After(20 * time.Second):
+				t.Fatal("bootstrap did not return after its term ended")
+			}
+			re.Equal(newCtx, rc.Context())
+			re.NoError(newCtx.Err())
+			re.True(rc.IsRunning())
+		})
 	}
 }

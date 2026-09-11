@@ -2558,7 +2558,7 @@ func newTestRaftCluster(
 		storage:        s,
 		storeStateLock: syncutil.NewLockGroup(syncutil.WithRemoveEntryOnUnlock(true)),
 	}
-	err := rc.InitCluster(id, opt, nil, nil)
+	err := rc.InitCluster(ctx, id, opt, nil, nil)
 	if err != nil {
 		panic(err)
 	}
@@ -4725,10 +4725,9 @@ func TestStopDoesNotHoldClusterLockWhileWaitingSchedulingJobs(t *testing.T) {
 	cluster.syncRegionRunner = ratelimit.NewSyncRunner()
 	cluster.tsoAllocator = nil
 	cluster.started = true
-	cluster.running.Store(true)
 
 	cluster.coordinator = schedule.NewCoordinator(cluster.ctx, cluster, nil)
-	cluster.schedulingController.running = true
+	cluster.running = true
 
 	blockedOnClusterLock := make(chan struct{})
 	cluster.schedulingController.wg.Add(1)
@@ -4777,9 +4776,8 @@ func TestCancelIsLockFreeAndStopReclaims(t *testing.T) {
 	cluster.syncRegionRunner = ratelimit.NewSyncRunner()
 	cluster.tsoAllocator = nil
 	cluster.started = true
-	cluster.running.Store(true)
 	cluster.coordinator = schedule.NewCoordinator(cluster.ctx, cluster, nil)
-	cluster.schedulingController.running = true
+	cluster.running = true
 
 	// Stand in for a background job holding the read lock, as
 	// runServiceCheckJob does across checkTSOService.
@@ -4795,7 +4793,7 @@ func TestCancelIsLockFreeAndStopReclaims(t *testing.T) {
 		cluster.RUnlock()
 		t.Fatal("Cancel blocked behind a held read lock")
 	}
-	re.False(cluster.running.Load())
+	re.False(cluster.isRunningLocked())
 	re.Error(cluster.ctx.Err())
 	re.True(cluster.started)
 	cluster.RUnlock()
@@ -4815,6 +4813,52 @@ func TestCancelIsLockFreeAndStopReclaims(t *testing.T) {
 	re.False(cluster.started)
 	re.False(cluster.IsRunning())
 	re.False(cluster.IsSchedulingControllerRunning())
+}
+
+func TestStopCancelsContextInstalledWhileWaiting(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	cluster.tsoAllocator = nil
+
+	cancelled := make(chan struct{})
+	const afterCancel = "github.com/tikv/pd/server/cluster/stopClusterAfterCancel"
+	re.NoError(failpoint.EnableCall(afterCancel, func() { close(cancelled) }))
+	defer func() { re.NoError(failpoint.Disable(afterCancel)) }()
+	// Hold the same lock as Start while Stop cancels the previous context.
+	cluster.Lock()
+	unlock := sync.OnceFunc(cluster.Unlock)
+	defer unlock()
+	stopped := make(chan struct{})
+	go func() {
+		cluster.Stop()
+		close(stopped)
+	}()
+	select {
+	case <-cancelled:
+	case <-time.After(time.Second):
+		t.Fatal("Stop did not reach cancellation")
+	}
+	// Finish publishing a new context after Stop's first cancellation.
+	re.NoError(cluster.InitCluster(ctx, mockid.NewIDAllocator(), opt, nil, nil))
+	cluster.started = true
+	jobCtx := cluster.ctx
+	cluster.wg.Add(1)
+	go func() {
+		defer cluster.wg.Done()
+		<-jobCtx.Done()
+	}()
+	unlock()
+	select {
+	case <-stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stop missed the context installed while waiting for the lock")
+	}
+	re.ErrorIs(jobCtx.Err(), context.Canceled)
+	re.False(cluster.IsRunning())
 }
 
 func BenchmarkHandleStatsAsync(b *testing.B) {
