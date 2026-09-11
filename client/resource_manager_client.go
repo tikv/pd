@@ -312,6 +312,12 @@ type tokenDispatcher struct {
 	tokenBatchController *tokenBatchController
 }
 
+func (c *innerClient) setTokenConnectionCancel(cancel context.CancelFunc) {
+	c.tokenConnectionMu.Lock()
+	c.tokenConnectionCancel = cancel
+	c.tokenConnectionMu.Unlock()
+}
+
 type resourceManagerConnectionContext struct {
 	stream rmpb.ResourceManager_AcquireTokenBucketsClient
 	ctx    context.Context
@@ -352,6 +358,8 @@ func (c *innerClient) handleResourceTokenDispatcher(dispatcherCtx context.Contex
 	)
 	if err = c.tryResourceManagerConnect(dispatcherCtx, &connection); err != nil {
 		log.Warn("[resource_manager] get token stream error", zap.Error(err))
+	} else {
+		c.setTokenConnectionCancel(connection.cancel)
 	}
 	for {
 		// Fetch the request from the channel.
@@ -370,9 +378,12 @@ func (c *innerClient) handleResourceTokenDispatcher(dispatcherCtx context.Contex
 		}
 		// If the stream is nil or the leader has changed, try to reconnect.
 		if toReconnect {
+			c.setTokenConnectionCancel(nil)
 			connection.reset()
 			if err := c.tryResourceManagerConnect(dispatcherCtx, &connection); err != nil {
 				log.Error("[resource_manager] try to connect token leader failed", errs.ZapError(err))
+			} else {
+				c.setTokenConnectionCancel(connection.cancel)
 			}
 			log.Info("[resource_manager] token leader may change, try to reconnect the stream")
 			stream, streamCtx = connection.stream, connection.ctx
@@ -386,6 +397,7 @@ func (c *innerClient) handleResourceTokenDispatcher(dispatcherCtx context.Contex
 		}
 		select {
 		case <-streamCtx.Done():
+			c.setTokenConnectionCancel(nil)
 			connection.reset()
 			log.Info("[resource_manager] token stream is canceled")
 			continue
@@ -393,6 +405,7 @@ func (c *innerClient) handleResourceTokenDispatcher(dispatcherCtx context.Contex
 		}
 		if err = c.processTokenRequests(stream, firstRequest); err != nil {
 			c.serviceDiscovery.ScheduleCheckMemberChanged()
+			c.setTokenConnectionCancel(nil)
 			connection.reset()
 			log.Info("[resource_manager] token request error", zap.Error(err))
 		}

@@ -55,6 +55,8 @@ type innerClient struct {
 
 	// For internal usage.
 	updateTokenConnectionCh chan struct{}
+	tokenConnectionMu       sync.Mutex
+	tokenConnectionCancel   context.CancelFunc
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -231,6 +233,13 @@ func (c *innerClient) getResourceManagerDiscovery() *sd.ResourceManagerDiscovery
 }
 
 func (c *innerClient) scheduleUpdateTokenConnection(string) error {
+	// Interrupt an in-flight request so the dispatcher can reconnect to the
+	// newly discovered endpoint instead of waiting on the stale stream.
+	c.tokenConnectionMu.Lock()
+	if c.tokenConnectionCancel != nil {
+		c.tokenConnectionCancel()
+	}
+	c.tokenConnectionMu.Unlock()
 	select {
 	case c.updateTokenConnectionCh <- struct{}{}:
 	default:
