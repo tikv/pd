@@ -37,6 +37,40 @@ func TestBuildTestBinaryMultiCleansTempFileOnFailure(t *testing.T) {
 	require.Empty(t, tempFiles)
 }
 
+func TestRunCleansCoverTempDirOnFailure(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("TMPDIR", tempDir)
+
+	originalArgs := os.Args
+	originalCoverFileTempDir := coverFileTempDir
+	originalCoverProfile := coverProfile
+	defer func() {
+		os.Args = originalArgs
+		coverFileTempDir = originalCoverFileTempDir
+		coverProfile = originalCoverProfile
+	}()
+
+	os.Args = []string{"pd-ut", "--parallel", "invalid", "--coverprofile", filepath.Join(tempDir, "coverage.out")}
+	require.Equal(t, 1, run())
+
+	tempFiles, err := filepath.Glob(filepath.Join(tempDir, "cov*"))
+	require.NoError(t, err)
+	require.Empty(t, tempFiles)
+}
+
+func TestCollectCoverProfileFileReturnsError(t *testing.T) {
+	originalCoverFileTempDir := coverFileTempDir
+	originalCoverProfile := coverProfile
+	defer func() {
+		coverFileTempDir = originalCoverFileTempDir
+		coverProfile = originalCoverProfile
+	}()
+
+	coverFileTempDir = filepath.Join(t.TempDir(), "missing")
+	coverProfile = filepath.Join(t.TempDir(), "coverage.out")
+	require.Error(t, collectCoverProfileFile())
+}
+
 func TestCheckDiff(t *testing.T) {
 	re := require.New(t)
 	a := `# pkg/storage TestTimestampTxn
