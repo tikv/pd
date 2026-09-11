@@ -361,6 +361,7 @@ func (c *innerClient) handleResourceTokenDispatcher(dispatcherCtx context.Contex
 	} else {
 		c.setTokenConnectionCancel(connection.cancel)
 	}
+tokenRequestLoop:
 	for {
 		// Fetch the request from the channel.
 		select {
@@ -368,40 +369,49 @@ func (c *innerClient) handleResourceTokenDispatcher(dispatcherCtx context.Contex
 			return
 		case firstRequest = <-tbc.tokenRequestCh:
 		}
-		// Try to get a stream connection.
-		stream, streamCtx = connection.stream, connection.ctx
-		select {
-		case <-c.updateTokenConnectionCh:
-			toReconnect = true
-		default:
-			toReconnect = stream == nil
-		}
-		// If the stream is nil or the leader has changed, try to reconnect.
-		if toReconnect {
-			c.setTokenConnectionCancel(nil)
-			connection.reset()
-			if err := c.tryResourceManagerConnect(dispatcherCtx, &connection); err != nil {
-				log.Error("[resource_manager] try to connect token leader failed", errs.ZapError(err))
-			} else {
-				c.setTokenConnectionCancel(connection.cancel)
-			}
-			log.Info("[resource_manager] token leader may change, try to reconnect the stream")
+		for {
+			// Try to get a stream connection.
 			stream, streamCtx = connection.stream, connection.ctx
-		}
-		// If the stream is still nil, return an error.
-		if stream == nil {
-			firstRequest.done <- errors.Errorf("failed to get the stream connection")
-			c.serviceDiscovery.ScheduleCheckMemberChanged()
-			connection.reset()
-			continue
-		}
-		select {
-		case <-streamCtx.Done():
-			c.setTokenConnectionCancel(nil)
-			connection.reset()
-			log.Info("[resource_manager] token stream is canceled")
-			continue
-		default:
+			select {
+			case <-c.updateTokenConnectionCh:
+				toReconnect = true
+			default:
+				toReconnect = stream == nil
+			}
+			// If the stream is nil or the leader has changed, try to reconnect.
+			if toReconnect {
+				c.setTokenConnectionCancel(nil)
+				connection.reset()
+				if err := c.tryResourceManagerConnect(dispatcherCtx, &connection); err != nil {
+					log.Error("[resource_manager] try to connect token leader failed", errs.ZapError(err))
+				} else {
+					c.setTokenConnectionCancel(connection.cancel)
+				}
+				log.Info("[resource_manager] token leader may change, try to reconnect the stream")
+				stream, streamCtx = connection.stream, connection.ctx
+				if stream != nil {
+					continue
+				}
+			}
+			// If the stream is still nil, return an error.
+			if stream == nil {
+				firstRequest.done <- errors.Errorf("failed to get the stream connection")
+				c.serviceDiscovery.ScheduleCheckMemberChanged()
+				connection.reset()
+				continue tokenRequestLoop
+			}
+			select {
+			case <-streamCtx.Done():
+				c.setTokenConnectionCancel(nil)
+				connection.reset()
+				log.Info("[resource_manager] token stream is canceled")
+				if dispatcherCtx.Err() != nil {
+					return
+				}
+				continue
+			default:
+			}
+			break
 		}
 		if err = c.processTokenRequests(stream, firstRequest); err != nil {
 			c.serviceDiscovery.ScheduleCheckMemberChanged()

@@ -236,10 +236,10 @@ func (c *innerClient) scheduleUpdateTokenConnection(string) error {
 	// Interrupt an in-flight request so the dispatcher can reconnect to the
 	// newly discovered endpoint instead of waiting on the stale stream.
 	c.tokenConnectionMu.Lock()
+	defer c.tokenConnectionMu.Unlock()
 	if c.tokenConnectionCancel != nil {
 		c.tokenConnectionCancel()
 	}
-	c.tokenConnectionMu.Unlock()
 	select {
 	case c.updateTokenConnectionCh <- struct{}{}:
 	default:

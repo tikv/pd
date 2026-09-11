@@ -44,6 +44,9 @@ type testServiceDiscovery struct {
 	servingURL  string
 	keyspaceID  uint32
 	clientConns sync.Map
+
+	getOrCreateHookMu sync.RWMutex
+	getOrCreateHook   func()
 }
 
 func newTestServiceDiscovery(servingURL string, conn *grpc.ClientConn) *testServiceDiscovery {
@@ -75,11 +78,22 @@ func (*testServiceDiscovery) GetServiceClient() sd.ServiceClient                
 func (*testServiceDiscovery) GetServiceClientByKind(sd.APIKind) sd.ServiceClient { return nil }
 func (*testServiceDiscovery) GetAllServiceClients() []sd.ServiceClient           { return nil }
 func (t *testServiceDiscovery) GetOrCreateGRPCConn(url string) (*grpc.ClientConn, error) {
+	t.getOrCreateHookMu.RLock()
+	hook := t.getOrCreateHook
+	t.getOrCreateHookMu.RUnlock()
+	if hook != nil {
+		hook()
+	}
 	conn, ok := t.clientConns.Load(url)
 	if !ok {
 		return nil, errors.New("unexpected URL")
 	}
 	return conn.(*grpc.ClientConn), nil
+}
+func (t *testServiceDiscovery) setGetOrCreateHook(hook func()) {
+	t.getOrCreateHookMu.Lock()
+	t.getOrCreateHook = hook
+	t.getOrCreateHookMu.Unlock()
 }
 func (t *testServiceDiscovery) RemoveClientConn(url string) {
 	t.clientConns.Delete(url)
@@ -480,6 +494,95 @@ func TestTokenDispatcherReconnectsWhenRMEndpointChanges(t *testing.T) {
 		Requests: []*rmpb.TokenBucketRequest{{ResourceGroupName: "test-group"}},
 	})
 	require.NoError(t, err)
+	require.EqualValues(t, 1, pdServer.tokenCount.Load())
+	require.EqualValues(t, 1, rmServer.tokenCount.Load())
+}
+
+func TestTokenDispatcherRechecksEndpointUpdatesAfterReconnect(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	pdRequestReceived := make(chan struct{}, 1)
+	pdAddr, pdServer, pdCleanup := startTestRMServer(t, "pd", func(server *testRMServer) {
+		server.blockTokenResponse = true
+		server.tokenRequestReceived = pdRequestReceived
+	})
+	t.Cleanup(pdCleanup)
+	rmAddr, rmServer, rmCleanup := startTestRMServer(t, "rm")
+	t.Cleanup(rmCleanup)
+	discovery := newTestResourceManagerDiscovery(t, ctx, rmAddr)
+	t.Cleanup(discovery.Close)
+
+	inner := newInnerClientForRMRouteTest(t, ctx, pdAddr)
+	inner.createTokenDispatcher()
+	t.Cleanup(func() {
+		inner.tokenDispatcher.dispatcherCancel()
+		inner.wg.Wait()
+	})
+	cli := &client{inner: inner}
+
+	firstRequestDone := make(chan error, 1)
+	go func() {
+		_, err := cli.AcquireTokenBuckets(ctx, &rmpb.TokenBucketsRequest{
+			Requests: []*rmpb.TokenBucketRequest{{ResourceGroupName: "first-request"}},
+		})
+		firstRequestDone <- err
+	}()
+	select {
+	case <-pdRequestReceived:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for the first token request to reach PD")
+	}
+
+	reconnectStarted := make(chan struct{})
+	allowReconnect := make(chan struct{})
+	var hookOnce, releaseOnce sync.Once
+	releaseReconnect := func() {
+		releaseOnce.Do(func() {
+			close(allowReconnect)
+		})
+	}
+	t.Cleanup(releaseReconnect)
+	testDiscovery := inner.serviceDiscovery.(*testServiceDiscovery)
+	testDiscovery.setGetOrCreateHook(func() {
+		hookOnce.Do(func() {
+			close(reconnectStarted)
+			<-allowReconnect
+		})
+	})
+	require.NoError(t, inner.scheduleUpdateTokenConnection(""))
+	select {
+	case err := <-firstRequestDone:
+		require.Error(t, err)
+		require.Equal(t, codes.Canceled, status.Code(err))
+	case <-time.After(3 * time.Second):
+		t.Fatal("stale token request was not canceled")
+	}
+
+	secondRequestDone := make(chan error, 1)
+	go func() {
+		_, err := cli.AcquireTokenBuckets(ctx, &rmpb.TokenBucketsRequest{
+			Requests: []*rmpb.TokenBucketRequest{{ResourceGroupName: "second-request"}},
+		})
+		secondRequestDone <- err
+	}()
+	select {
+	case <-reconnectStarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for the token dispatcher to start reconnecting")
+	}
+	inner.Lock()
+	inner.resourceManagerDiscovery = discovery
+	inner.Unlock()
+	require.NoError(t, inner.scheduleUpdateTokenConnection(""))
+	releaseReconnect()
+
+	select {
+	case err := <-secondRequestDone:
+		require.NoError(t, err)
+	case <-time.After(3 * time.Second):
+		t.Fatal("token request was not preserved across reconnects")
+	}
 	require.EqualValues(t, 1, pdServer.tokenCount.Load())
 	require.EqualValues(t, 1, rmServer.tokenCount.Load())
 }
