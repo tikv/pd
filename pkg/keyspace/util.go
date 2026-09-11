@@ -15,11 +15,16 @@
 package keyspace
 
 import (
+	"bytes"
 	"container/heap"
 	"encoding/hex"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/gogo/protobuf/proto"
+	"github.com/google/btree"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
@@ -30,6 +35,8 @@ import (
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/keyutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
@@ -127,37 +134,6 @@ type RegionBound struct {
 	TxnRightBound []byte
 }
 
-type regionBoundType int
-
-const (
-	txnRegionBound regionBoundType = iota
-	rawRegionBound
-)
-
-// String returns the string representation of the regionBoundType.
-func (t regionBoundType) String() string {
-	if t == rawRegionBound {
-		return "raw"
-	}
-	return "txn"
-}
-
-// keyTypeToRegionBoundType converts the key type to the corresponding region bound type.
-// ref rfc: https://github.com/tikv/rfcs/blob/master/text/0069-api-v2.md
-func keyTypeToRegionBoundType(keyType coreconstant.KeyType) regionBoundType {
-	if keyType == coreconstant.Raw {
-		return rawRegionBound
-	}
-	return txnRegionBound
-}
-
-func keyTypeStringToRegionBoundType(keyType string) regionBoundType {
-	if keyType == coreconstant.Raw.String() {
-		return rawRegionBound
-	}
-	return txnRegionBound
-}
-
 // MakeRegionBound constructs the correct region boundaries of the given keyspace.
 func MakeRegionBound(id uint32) *RegionBound {
 	rawLeftBound := codec.EncodeKeyspaceBoundary(codec.RawKeyspaceModePrefix, id)
@@ -176,14 +152,14 @@ func MakeRegionBound(id uint32) *RegionBound {
 // region bound. Used by tests and pd-ctl.
 func MakeKeyRanges(id uint32, keyType string) []any {
 	if keyType == coreconstant.Raw.String() {
-		return buildKeyRanges(id, rawRegionBound)
+		return buildKeyRanges(id, KeyTypeRaw)
 	}
-	return buildKeyRanges(id, txnRegionBound)
+	return buildKeyRanges(id, KeyTypeTxn)
 }
 
-func buildKeyRanges(id uint32, boundType regionBoundType) []any {
+func buildKeyRanges(id uint32, boundType KeyType) []any {
 	regionBound := MakeRegionBound(id)
-	if boundType == txnRegionBound {
+	if boundType == KeyTypeTxn {
 		return []any{
 			map[string]any{
 				"start_key": hex.EncodeToString(regionBound.TxnLeftBound),
@@ -206,10 +182,10 @@ func getRegionLabelID(id uint32) string {
 
 // MakeTxnLabelRule makes the label rule for the given keyspace id, only for test
 func MakeTxnLabelRule(id uint32) *labeler.LabelRule {
-	return buildLabelRule(id, txnRegionBound)
+	return buildLabelRule(id, KeyTypeTxn)
 }
 
-func buildLabelRule(id uint32, boundType regionBoundType) *labeler.LabelRule {
+func buildLabelRule(id uint32, boundType KeyType) *labeler.LabelRule {
 	return &labeler.LabelRule{
 		ID:    getRegionLabelID(id),
 		Index: 0,
@@ -404,6 +380,328 @@ func isProtectedKeyspaceName(name string) bool {
 		return name == constant.SystemKeyspaceName
 	}
 	return name == constant.DefaultKeyspaceName
+}
+
+// KeyType represents the type of the key, which can be raw key or txn key.
+type KeyType int
+
+const (
+	// KeyTypeRaw represents the raw keyspace, which is used for KV operations without transaction.
+	KeyTypeRaw KeyType = iota
+	// KeyTypeTxn represents the txn keyspace, which is used for KV operations with transaction.
+	KeyTypeTxn
+	// KeyTypeClassical represents the classical key, the key is not part of the new keyspace system.
+	KeyTypeClassical
+)
+
+// String returns the string representation of the KeyType.
+func (t KeyType) String() string {
+	switch t {
+	case KeyTypeRaw:
+		return "raw"
+	case KeyTypeTxn:
+		return "txn"
+	default:
+		return "classical"
+	}
+}
+
+// bounds returns the left and right boundary of the given RegionBound for this key type.
+func (t KeyType) bounds(b *RegionBound) (lo, hi []byte) {
+	if t == KeyTypeRaw {
+		return b.RawLeftBound, b.RawRightBound
+	}
+	return b.TxnLeftBound, b.TxnRightBound
+}
+
+// keyTypeToRegionBoundType converts the cluster's key type to the corresponding
+// keyspace key type (raw or txn).
+// ref rfc: https://github.com/tikv/rfcs/blob/master/text/0069-api-v2.md
+func keyTypeToRegionBoundType(keyType coreconstant.KeyType) KeyType {
+	if keyType == coreconstant.Raw {
+		return KeyTypeRaw
+	}
+	return KeyTypeTxn
+}
+
+func keyTypeStringToRegionBoundType(keyType string) KeyType {
+	if keyType == coreconstant.Raw.String() {
+		return KeyTypeRaw
+	}
+	return KeyTypeTxn
+}
+
+// ExtractKeyspaceID extracts the keyspace ID from a region key.
+// It returns the keyspace ID and the key type. A key that is not a
+// memcomparable-encoded keyspace key (empty aside) is reported as
+// KeyTypeClassical.
+// The key format is: [mode_prefix][keyspace_id_3bytes][...], where mode_prefix
+// is 'x' for txn and 'r' for raw. An empty key belongs to the max txn keyspace.
+func ExtractKeyspaceID(key []byte) (uint32, KeyType) {
+	// Empty key represents the start of the entire key space (no keyspace).
+	if len(key) == 0 {
+		return constant.MaxValidKeyspaceID, KeyTypeTxn
+	}
+
+	_, decoded, err := codec.DecodeBytes(key)
+	if err != nil {
+		return 0, KeyTypeClassical
+	}
+	mode, id, ok := codec.ParseKeyspacePrefix(decoded)
+	if !ok {
+		return 0, KeyTypeClassical
+	}
+	switch mode {
+	case codec.RawKeyspaceModePrefix:
+		return id, KeyTypeRaw
+	case codec.TxnKeyspaceModePrefix:
+		return id, KeyTypeTxn
+	default:
+		return 0, KeyTypeClassical
+	}
+}
+
+// Checker is an interface to check keyspace existence.
+type Checker interface {
+	// GetKeyspaceIDInRange returns the keyspace IDs in the range [start, end].
+	// It returns the keyspace IDs by desc and a boolean indicating whether there is any keyspace in the range.
+	GetKeyspaceIDInRange(start, end uint32, limit int) ([]uint32, bool)
+	// ExistKeyspaceID returns whether the keyspace ID exists.
+	KeyspaceExist(keyspaceID uint32) bool
+}
+
+// RegionSpansMultipleKeyspaces checks whether the region [startKey, endKey)
+// (endKey exclusive) crosses a keyspace boundary. It returns false when nil
+// checker is passed.
+//
+// The decision, in order:
+//   - both keys carry no keyspace prefix (or endKey is absent): not spanning;
+//   - exactly one key carries no keyspace prefix: conservatively spanning, since
+//     the boundary cannot be determined;
+//   - same keyspace ID and same mode (raw/txn): not spanning;
+//   - raw startKey with txn endKey: spanning (crosses the raw/txn boundary);
+//   - endKey absent (region runs past every later keyspace): spanning iff the
+//     start keyspace still exists;
+//   - endKey sits exactly on startKey's keyspace right bound: not spanning;
+//   - otherwise: spanning iff the start or the end keyspace still exists.
+//
+// The last rule only looks at the two end keyspaces; keyspaces that lie strictly
+// between them are not inspected. An absent endKey is treated as +inf rather than
+// keyspace MaxValidKeyspaceID, so the result does not depend on the checker
+// implementation's handling of that sentinel ID.
+func RegionSpansMultipleKeyspaces(startKey, endKey []byte, checker Checker) bool {
+	if checker == nil {
+		return false
+	}
+	var startKeyspaceID uint32
+	var startKT KeyType
+	if len(startKey) == 0 {
+		startKeyspaceID, startKT = constant.StartKeyspaceID, KeyTypeRaw
+	} else {
+		startKeyspaceID, startKT = ExtractKeyspaceID(startKey)
+	}
+
+	endKeyspaceID, endKT := ExtractKeyspaceID(endKey)
+
+	// If both keys have no recognizable keyspace ID (or the end key is simply
+	// absent), the region carries no keyspace boundary information at all, so it
+	// does not span multiple keyspaces.
+	if startKT == KeyTypeClassical && (endKT == KeyTypeClassical || len(endKey) == 0) {
+		return false
+	}
+
+	// If exactly one side has an unknown key type, conservatively consider it spans multiple keyspaces to avoid potential data corruption.
+	// This can happen when the key is not in the expected format, or when there is a hole in keyspace allocation.
+	// For example, if startKey has valid keyspace ID but endKey is invalid, we cannot determine the keyspace boundary,
+	// thus we consider it spans multiple keyspaces to be safe.
+	if startKT == KeyTypeClassical || endKT == KeyTypeClassical {
+		return true
+	}
+
+	// If the keyspace ids are same and key types are same, it does not span multiple keyspaces even if the key is invalid.
+	if startKeyspaceID == endKeyspaceID && startKT == endKT {
+		return false
+	}
+	// If startKey is raw key and endKey is txn key, it must span multiple keyspaces, because raw key usually the rightmost key and the txn the smallest key.
+	// So it must cross the boundary between raw keyspace and txn keyspace, which means it spans multiple keyspaces.
+	// such as this ['r200','x100'], it may cross keyspace (200, MaxValidKeyspaceID]
+	if startKT == KeyTypeRaw && endKT == KeyTypeTxn {
+		return true
+	}
+
+	// An absent endKey means the region runs past every later keyspace (+inf).
+	// There is no end keyspace to check, so it spans a boundary iff it starts
+	// inside an existing keyspace. Reaching here, startKey is a txn keyspace key.
+	if len(endKey) == 0 {
+		return checker.KeyspaceExist(startKeyspaceID)
+	}
+
+	// If end keyspace ID is exactly start keyspace + 1,
+	// check if endKey is at the exact boundary (right bound of startKeyspace)
+	// If yes, the region is [startKey, rightBound of startKeyspace) which is within one keyspace.
+	if endKeyspaceID == startKeyspaceID+1 {
+		startBound := MakeRegionBound(startKeyspaceID)
+		// it means the region is [startKey, rightBound of startKeyspace)
+		// which is still within one keyspace
+		if string(endKey) == string(startBound.TxnRightBound) || string(endKey) == string(startBound.RawRightBound) {
+			return false
+		}
+	}
+	// Check the keyspace existence of startKeyspaceID and endKeyspaceID.
+	//  If both of them do not exist, we consider it does not span multiple keyspaces.
+	startExist := checker.KeyspaceExist(startKeyspaceID)
+	endExist := checker.KeyspaceExist(endKeyspaceID)
+	return startExist || endExist
+}
+
+const scanLimit = 10
+
+// GetKeyspaceSplitKeys returns the keys at which the region [startKey, endKey)
+// must be split so that no region spans more than one keyspace. keyType is the
+// cluster-wide keyspace API mode (raw or txn); only that mode's keyspace
+// boundaries are considered. It returns nil when no split is needed.
+func GetKeyspaceSplitKeys(startKey, endKey []byte, keyType coreconstant.KeyType, checker Checker) [][]byte {
+	if checker == nil {
+		return nil
+	}
+	boundType := keyTypeToRegionBoundType(keyType)
+
+	// A start key that is empty or not a keyspace key of this mode means the
+	// region begins before any keyspace; an absent or foreign end key means it
+	// runs to the end of this mode's keyspace space.
+	startID := constant.StartKeyspaceID
+	if len(startKey) != 0 {
+		if id, kt := ExtractKeyspaceID(startKey); kt == boundType {
+			startID = id
+		}
+	}
+	endID := constant.MaxValidKeyspaceID
+	if len(endKey) != 0 {
+		if id, kt := ExtractKeyspaceID(endKey); kt == boundType {
+			endID = id
+		}
+	}
+	if startID >= endID {
+		return nil
+	}
+
+	ids, ok := checker.GetKeyspaceIDInRange(startID, endID, scanLimit)
+	if !ok || len(ids) == 0 {
+		return nil
+	}
+	var splitKeys [][]byte
+	for _, id := range ids {
+		lo, hi := boundType.bounds(MakeRegionBound(id))
+		if keyutil.Between(startKey, endKey, lo) {
+			splitKeys = append(splitKeys, lo)
+		}
+		if keyutil.Between(startKey, endKey, hi) {
+			splitKeys = append(splitKeys, hi)
+		}
+	}
+	if len(splitKeys) == 0 {
+		return nil
+	}
+	slices.SortFunc(splitKeys, bytes.Compare)
+	return slices.CompactFunc(splitKeys, bytes.Equal)
+}
+
+type keyspaceItem struct {
+	keyspaceID uint32
+	name       string
+	state      keyspacepb.KeyspaceState
+}
+
+// Less compares two keyspaceItem.
+func (s *keyspaceItem) Less(than keyspaceItem) bool {
+	return s.keyspaceID < than.keyspaceID
+}
+
+// Cache is a cache for keyspace information, which is used to quickly determine keyspace existence and get keyspace name by ID.
+type Cache struct {
+	syncutil.RWMutex
+	tree *btree.BTreeG[keyspaceItem]
+}
+
+// NewCache creates a new Cache.
+func NewCache() *Cache {
+	return &Cache{
+		tree: btree.NewG(2, func(i, j keyspaceItem) bool {
+			return i.Less(j)
+		}),
+	}
+}
+
+func (s *Cache) getKeyspaceByID(keyspaceID uint32) (keyspaceItem, bool) {
+	s.RLock()
+	defer s.RUnlock()
+	item, found := s.tree.Get(keyspaceItem{keyspaceID: keyspaceID})
+	return item, found
+}
+
+// Save saves the keyspace information to the cache. It will replace the old information if the keyspace ID already exists.
+func (s *Cache) Save(keyspaceID uint32, name string, state keyspacepb.KeyspaceState) {
+	s.Lock()
+	defer s.Unlock()
+	item := keyspaceItem{keyspaceID: keyspaceID, name: name, state: state}
+	s.tree.ReplaceOrInsert(item)
+}
+
+// DeleteKeyspace deletes a keyspace by ID.
+func (s *Cache) DeleteKeyspace(keyspaceID uint32) {
+	s.Lock()
+	defer s.Unlock()
+	s.tree.Delete(keyspaceItem{keyspaceID: keyspaceID})
+}
+
+func (s *Cache) scanAllKeyspaces(f func(keyspaceID uint32, name string) bool) {
+	s.RLock()
+	defer s.RUnlock()
+	s.tree.Ascend(func(i keyspaceItem) bool {
+		return f(i.keyspaceID, i.name)
+	})
+}
+
+// KeyspaceExist checks if a keyspace exists by ID.
+func (s *Cache) KeyspaceExist(id uint32) bool {
+	s.RLock()
+	defer s.RUnlock()
+	item, found := s.tree.Get(keyspaceItem{keyspaceID: id})
+	if found && item.state == keyspacepb.KeyspaceState_TOMBSTONE {
+		return false
+	}
+	return found
+}
+
+// GetKeyspaceIDInRange returns the keyspace IDs in the range [start, end].
+func (s *Cache) GetKeyspaceIDInRange(start, end uint32, limit int) ([]uint32, bool) {
+	s.RLock()
+	defer s.RUnlock()
+	ret := make([]uint32, 0)
+	found := false
+	s.tree.DescendLessOrEqual(keyspaceItem{keyspaceID: end}, func(item keyspaceItem) bool {
+		if item.state == keyspacepb.KeyspaceState_TOMBSTONE {
+			return true
+		}
+		if item.keyspaceID >= start {
+			ret = append(ret, item.keyspaceID)
+			found = true
+			if limit > 0 && len(ret) >= limit {
+				return false
+			}
+		}
+		return true
+	})
+	return ret, found
+}
+
+// NewKeyspaceMeta creates a KeyspaceMeta from the given json string.
+func NewKeyspaceMeta(data string) (*keyspacepb.KeyspaceMeta, error) {
+	meta := &keyspacepb.KeyspaceMeta{}
+	if err := proto.Unmarshal([]byte(data), meta); err != nil {
+		return nil, errs.ErrProtoUnmarshal.Wrap(err).GenWithStackByCause()
+	}
+	return meta, nil
 }
 
 // IgnoreMetaServiceGroup removes the meta-service-group fields from the config.

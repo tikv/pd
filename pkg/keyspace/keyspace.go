@@ -107,8 +107,10 @@ type Manager struct {
 	// nextPatrolStartID is the next start id of keyspace assignment patrol.
 	nextPatrolStartID uint32
 	// cached keyspace meta info for each keyspace ID.
+	// TODO: Remove this two maps after the cache fully takes effect and is verified to be stable.
 	keyspaceNameLookup  sync.Map // store as ID(uint32) -> name(string)
 	keyspaceStateLookup sync.Map // store as ID(uint32) -> state(keyspacepb.KeyspaceState)
+	cache               *Cache
 }
 
 // CreateKeyspaceRequest represents necessary arguments to create a keyspace.
@@ -159,6 +161,7 @@ func NewKeyspaceManager(
 		kgm:               kgm,
 		mgm:               mgm,
 		nextPatrolStartID: constant.StartKeyspaceID,
+		cache:             NewCache(),
 	}
 	// Let the meta-service group manager validate group deletion against actual
 	// keyspace assignments instead of the drift-prone persisted counter.
@@ -564,6 +567,7 @@ func (manager *Manager) saveNewKeyspace(keyspace *keyspacepb.KeyspaceMeta) error
 	if err == nil {
 		// Update the keyspace name cache only after the transaction commits.
 		manager.keyspaceNameLookup.Store(keyspace.GetId(), keyspace.Name)
+		manager.cache.Save(keyspace.GetId(), keyspace.Name, keyspace.State)
 	}
 	return err
 }
@@ -631,7 +635,7 @@ func (manager *Manager) assignGroupAndSaveKeyspace(assign bool, config *map[stri
 
 // splitKeyspaceRegion add keyspace's boundaries to region label. The corresponding
 // region will then be split by Coordinator's patrolRegion.
-func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool, boundType regionBoundType) (err error) {
+func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool, boundType KeyType) (err error) {
 	failpoint.Inject("skipSplitRegion", func() {
 		failpoint.Return(nil)
 	})
@@ -681,7 +685,7 @@ func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool, bou
 	return nil
 }
 
-func (manager *Manager) waitKeyspaceRegionSplit(id uint32, boundType regionBoundType) error {
+func (manager *Manager) waitKeyspaceRegionSplit(id uint32, boundType KeyType) error {
 	ticker := time.NewTicker(manager.config.GetCheckRegionSplitInterval())
 	timer := time.NewTimer(manager.config.GetWaitRegionSplitTimeout())
 	defer func() {
@@ -718,18 +722,18 @@ func (manager *Manager) CheckKeyspaceRegionBound(meta *keyspacepb.KeyspaceMeta) 
 	return manager.hasKeyspaceRegionBound(meta.GetId(), typ)
 }
 
-func (manager *Manager) hasKeyspaceRegionBound(id uint32, boundType regionBoundType) bool {
+func (manager *Manager) hasKeyspaceRegionBound(id uint32, boundType KeyType) bool {
 	regionBound := MakeRegionBound(id)
-	if boundType == txnRegionBound {
+	if boundType == KeyTypeTxn {
 		return manager.checkBound(regionBound.TxnLeftBound) &&
 			manager.checkBound(regionBound.TxnRightBound)
 	}
 	return manager.checkBound(regionBound.RawLeftBound) && manager.checkBound(regionBound.RawRightBound)
 }
 
-func (manager *Manager) getRegionBoundType() regionBoundType {
+func (manager *Manager) getRegionBoundType() KeyType {
 	if manager.cluster == nil || manager.cluster.GetSharedConfig() == nil {
-		return txnRegionBound
+		return KeyTypeTxn
 	}
 	return keyTypeToRegionBoundType(manager.cluster.GetSharedConfig().GetKeyType())
 }
@@ -1058,6 +1062,7 @@ func (manager *Manager) RemoveKeyspace(txn kv.Txn, id uint32) error {
 	}
 	manager.keyspaceNameLookup.Delete(id)
 	manager.keyspaceStateLookup.Delete(id)
+	manager.cache.DeleteKeyspace(id)
 	// Keep the meta-service group assignment accounting in sync within the same
 	// txn. Without this, removed keyspaces leak count and could permanently block
 	// deleting an otherwise-empty group.
@@ -1162,6 +1167,7 @@ func (manager *Manager) transformKeyspaceState(txn kv.Txn, meta *keyspacepb.Keys
 	meta.StateChangedAt = now
 	// Update the keyspace state to the cache.
 	manager.keyspaceStateLookup.Store(meta.GetId(), newState)
+	manager.cache.Save(meta.GetId(), meta.GetName(), newState)
 	return nil
 }
 
@@ -1191,6 +1197,33 @@ func (manager *Manager) LoadRangeKeyspace(startID uint32, limit int) ([]*keyspac
 		}
 	}
 	return keyspaces, nil
+}
+
+// GetKeyspaceIDInRange returns one existing keyspace ID in [start, end].
+func (manager *Manager) GetKeyspaceIDInRange(start, end uint32, limit int) ([]uint32, bool) {
+	if manager == nil {
+		return []uint32{start}, true
+	}
+	return manager.cache.GetKeyspaceIDInRange(start, end, limit)
+}
+
+// KeyspaceExist checks if a keyspace exists by ID.
+func (manager *Manager) KeyspaceExist(id uint32) bool {
+	if id == constant.NullKeyspaceID {
+		return true
+	}
+	if id == constant.MaxValidKeyspaceID {
+		return true
+	}
+	if manager == nil {
+		return true
+	}
+	state, err := manager.GetKeyspaceStateByID(id)
+	if err != nil {
+		return false
+	}
+
+	return state != keyspacepb.KeyspaceState_TOMBSTONE
 }
 
 // CountKeyspacesByMetaServiceGroup scans all keyspaces and counts how many are
@@ -1259,6 +1292,7 @@ func (manager *Manager) GetKeyspaceNameByID(id uint32) (string, error) {
 	}
 	// Load or store the keyspace name to the cache.
 	actual, _ := manager.keyspaceNameLookup.LoadOrStore(id, loadedName)
+	manager.cache.Save(id, loadedName, meta.GetState())
 	return actual.(string), nil
 }
 
@@ -1282,6 +1316,7 @@ func (manager *Manager) GetKeyspaceStateByID(id uint32) (keyspacepb.KeyspaceStat
 	loadedState = meta.GetState()
 	// Load or store the keyspace state to the cache.
 	actual, _ := manager.keyspaceStateLookup.LoadOrStore(id, loadedState)
+	manager.cache.Save(meta.GetId(), meta.GetName(), loadedState)
 	return actual.(keyspacepb.KeyspaceState), nil
 }
 
