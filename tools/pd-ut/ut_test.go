@@ -15,11 +15,27 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/pmezard/go-difflib/difflib"
 	"github.com/stretchr/testify/require"
 )
+
+func TestBuildTestBinaryMultiCleansTempFileOnFailure(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("TMPDIR", tempDir)
+	t.Setenv("PATH", "")
+	require.Equal(t, tempDir, os.TempDir())
+
+	_, err := buildTestBinaryMulti(nil)
+	require.Error(t, err)
+
+	tempFiles, err := filepath.Glob(filepath.Join(tempDir, "pd_tests*"))
+	require.NoError(t, err)
+	require.Empty(t, tempFiles)
+}
 
 func TestCheckDiff(t *testing.T) {
 	re := require.New(t)

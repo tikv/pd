@@ -133,6 +133,10 @@ var (
 )
 
 func main() {
+	os.Exit(run())
+}
+
+func run() int {
 	// Initialize tags
 	initTags()
 
@@ -148,7 +152,7 @@ func main() {
 		coverFileTempDir, err = os.MkdirTemp("", "cov")
 		if err != nil {
 			fmt.Println("create temp dir fail", coverFileTempDir)
-			os.Exit(1)
+			return 1
 		}
 		defer os.RemoveAll(coverFileTempDir)
 	}
@@ -162,7 +166,7 @@ func main() {
 		parallel, err = strconv.Atoi(parallelStr)
 		if err != nil {
 			fmt.Println("parse parallel error", err)
-			return
+			return 1
 		}
 		if parallel > procs {
 			fmt.Printf("Recommend to set parallel be same as the GOMAXPROCS=%d\n", procs)
@@ -213,8 +217,9 @@ func main() {
 		}
 	}
 	if !isSucceed {
-		os.Exit(1)
+		return 1
 	}
+	return 0
 }
 
 func cmdList(args ...string) bool {
@@ -795,6 +800,8 @@ func buildTestBinaryMulti(pkgs []string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer os.Remove(outputFile.Name())
+	defer outputFile.Close()
 	cmd.Stdout = outputFile
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -806,7 +813,6 @@ func buildTestBinaryMulti(pkgs []string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer outputFile.Close()
 
 	return content, nil
 }

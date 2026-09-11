@@ -87,6 +87,8 @@ endif
 
 ROOT_PATH := $(shell pwd)
 BUILD_BIN_PATH := $(ROOT_PATH)/bin
+# Isolate temporary files from each test run and remove them on every exit path.
+TEST_RUNNER := $(ROOT_PATH)/scripts/run-test-with-cleanup.sh
 
 build: pd-server pd-ctl pd-recover
 
@@ -256,7 +258,7 @@ failpoint-disable: install-tools
 ut: pd-ut
 	@$(FAILPOINT_ENABLE)
 	# only run unit tests
-	./bin/pd-ut run --ignore tests --race --junitfile ./junitfile
+	$(TEST_RUNNER) ./bin/pd-ut run --ignore tests --race --junitfile ./junitfile
 	@$(CLEAN_UT_BINARY)
 	@$(FAILPOINT_DISABLE)
 
@@ -271,13 +273,13 @@ SUBMODULES := $(filter $(shell find . -iname "go.mod" -exec dirname {} \;),\
 test: install-tools
 	# testing all pkgs...
 	@$(FAILPOINT_ENABLE)
-	CGO_ENABLED=1 go test -tags deadlock -timeout 20m -race -cover $(TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
+	$(TEST_RUNNER) env CGO_ENABLED=1 go test -tags deadlock -timeout 20m -race -cover $(TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
 basic-test: install-tools
 	# testing basic pkgs...
 	@$(FAILPOINT_ENABLE)
-	go test $(BASIC_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
+	$(TEST_RUNNER) go test $(BASIC_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
 # gotest runs a targeted go test with failpoints automatically enabled/disabled.
@@ -285,12 +287,12 @@ basic-test: install-tools
 GOTEST_ARGS ?= ./...
 gotest: install-tools
 	@$(FAILPOINT_ENABLE)
-	go test $(GOTEST_ARGS) || { $(FAILPOINT_DISABLE); exit 1; }
+	$(TEST_RUNNER) go test $(GOTEST_ARGS) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
 ci-test-job: install-tools dashboard-ui pd-ut
 	@$(FAILPOINT_ENABLE)
-	./scripts/ci-subtask.sh $(JOB_INDEX) || { $(FAILPOINT_DISABLE); exit 1; }
+	$(TEST_RUNNER) ./scripts/ci-subtask.sh $(JOB_INDEX) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
 TSO_FUNCTION_TEST_PKGS := $(PD_PKG)/tests/server/tso
@@ -298,7 +300,7 @@ TSO_FUNCTION_TEST_PKGS := $(PD_PKG)/tests/server/tso
 test-tso-function: install-tools
 	# testing TSO function...
 	@$(FAILPOINT_ENABLE)
-	CGO_ENABLED=1 go test -race -tags without_dashboard,deadlock $(TSO_FUNCTION_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
+	$(TEST_RUNNER) env CGO_ENABLED=1 go test -race -tags without_dashboard,deadlock $(TSO_FUNCTION_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
 REAL_CLUSTER_TEST_PATH := $(ROOT_PATH)/tests/integrations/realcluster
@@ -320,7 +322,7 @@ TASK_ID=1
 test-with-cover-parallel: install-tools dashboard-ui split
 	@$(FAILPOINT_ENABLE)
 	set -euo pipefail;\
-	CGO_ENABLED=1 GO111MODULE=on gotestsum --junitfile report.xml -- -v --race -covermode=atomic -coverprofile=coverage $(shell cat package.list)  2>&1 || { $(FAILPOINT_DISABLE); }; \
+	$(TEST_RUNNER) env CGO_ENABLED=1 GO111MODULE=on gotestsum --junitfile report.xml -- -v --race -covermode=atomic -coverprofile=coverage $(shell cat package.list)  2>&1 || { $(FAILPOINT_DISABLE); }; \
 	gocov convert coverage | gocov-xml >> coverage.xml;\
 	@$(FAILPOINT_DISABLE)
 
@@ -339,7 +341,7 @@ CLEAN_UT_BINARY := find . -name '*.test.bin'| xargs rm -f
 
 clean-test:
 	# Cleaning test tmp...
-	rm -rf /tmp/pd_tests*
+	find "$${TMPDIR:-/tmp}" -maxdepth 1 -name 'pd_tests*' -exec rm -rf -- {} +
 	rm -f $(REAL_CLUSTER_TEST_PATH)/playground.log
 	go clean -testcache
 	@$(CLEAN_UT_BINARY)
