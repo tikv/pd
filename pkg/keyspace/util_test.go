@@ -194,12 +194,12 @@ func TestMakeLabelRule(t *testing.T) {
 	re := require.New(t)
 	testCases := []struct {
 		id                uint32
-		boundType         regionBoundType
+		boundType         KeyType
 		expectedLabelRule *labeler.LabelRule
 	}{
 		{
 			id:        0,
-			boundType: txnRegionBound,
+			boundType: KeyTypeTxn,
 			expectedLabelRule: &labeler.LabelRule{
 				ID:    "keyspaces/0",
 				Index: 0,
@@ -220,7 +220,7 @@ func TestMakeLabelRule(t *testing.T) {
 		},
 		{
 			id:        4242,
-			boundType: txnRegionBound,
+			boundType: KeyTypeTxn,
 			expectedLabelRule: &labeler.LabelRule{
 				ID:    "keyspaces/4242",
 				Index: 0,
@@ -241,7 +241,7 @@ func TestMakeLabelRule(t *testing.T) {
 		},
 		{
 			id:        4242,
-			boundType: rawRegionBound,
+			boundType: KeyTypeRaw,
 			expectedLabelRule: &labeler.LabelRule{
 				ID:    "keyspaces/4242",
 				Index: 0,
@@ -268,9 +268,9 @@ func TestMakeLabelRule(t *testing.T) {
 
 func TestKeyTypeToRegionBoundType(t *testing.T) {
 	re := require.New(t)
-	re.Equal(rawRegionBound, keyTypeToRegionBoundType(coreconstant.Raw))
-	re.Equal(txnRegionBound, keyTypeToRegionBoundType(coreconstant.Table))
-	re.Equal(txnRegionBound, keyTypeToRegionBoundType(coreconstant.Txn))
+	re.Equal(KeyTypeRaw, keyTypeToRegionBoundType(coreconstant.Raw))
+	re.Equal(KeyTypeTxn, keyTypeToRegionBoundType(coreconstant.Table))
+	re.Equal(KeyTypeTxn, keyTypeToRegionBoundType(coreconstant.Txn))
 }
 
 func TestParseKeyspaceIDFromLabelRule(t *testing.T) {

@@ -134,53 +134,6 @@ type RegionBound struct {
 	TxnRightBound []byte
 }
 
-type regionBoundType int
-
-const (
-	txnRegionBound regionBoundType = iota
-	rawRegionBound
-)
-
-// String returns the string representation of the regionBoundType.
-func (t regionBoundType) String() string {
-	if t == rawRegionBound {
-		return "raw"
-	}
-	return "txn"
-}
-
-// matches reports whether the given key type belongs to this region bound's mode.
-func (t regionBoundType) matches(kt KeyType) bool {
-	if t == rawRegionBound {
-		return kt == KeyTypeRaw
-	}
-	return kt == KeyTypeTxn
-}
-
-// bounds returns the left and right boundary of the region bound in this mode.
-func (t regionBoundType) bounds(b *RegionBound) (lo, hi []byte) {
-	if t == rawRegionBound {
-		return b.RawLeftBound, b.RawRightBound
-	}
-	return b.TxnLeftBound, b.TxnRightBound
-}
-
-// keyTypeToRegionBoundType converts the key type to the corresponding region bound type.
-// ref rfc: https://github.com/tikv/rfcs/blob/master/text/0069-api-v2.md
-func keyTypeToRegionBoundType(keyType coreconstant.KeyType) regionBoundType {
-	if keyType == coreconstant.Raw {
-		return rawRegionBound
-	}
-	return txnRegionBound
-}
-
-func keyTypeStringToRegionBoundType(keyType string) regionBoundType {
-	if keyType == coreconstant.Raw.String() {
-		return rawRegionBound
-	}
-	return txnRegionBound
-}
-
 // MakeRegionBound constructs the correct region boundaries of the given keyspace.
 func MakeRegionBound(id uint32) *RegionBound {
 	rawLeftBound := codec.EncodeKeyspaceBoundary(codec.RawKeyspaceModePrefix, id)
@@ -199,14 +152,14 @@ func MakeRegionBound(id uint32) *RegionBound {
 // region bound. Used by tests and pd-ctl.
 func MakeKeyRanges(id uint32, keyType string) []any {
 	if keyType == coreconstant.Raw.String() {
-		return buildKeyRanges(id, rawRegionBound)
+		return buildKeyRanges(id, KeyTypeRaw)
 	}
-	return buildKeyRanges(id, txnRegionBound)
+	return buildKeyRanges(id, KeyTypeTxn)
 }
 
-func buildKeyRanges(id uint32, boundType regionBoundType) []any {
+func buildKeyRanges(id uint32, boundType KeyType) []any {
 	regionBound := MakeRegionBound(id)
-	if boundType == txnRegionBound {
+	if boundType == KeyTypeTxn {
 		return []any{
 			map[string]any{
 				"start_key": hex.EncodeToString(regionBound.TxnLeftBound),
@@ -229,10 +182,10 @@ func getRegionLabelID(id uint32) string {
 
 // MakeTxnLabelRule makes the label rule for the given keyspace id, only for test
 func MakeTxnLabelRule(id uint32) *labeler.LabelRule {
-	return buildLabelRule(id, txnRegionBound)
+	return buildLabelRule(id, KeyTypeTxn)
 }
 
-func buildLabelRule(id uint32, boundType regionBoundType) *labeler.LabelRule {
+func buildLabelRule(id uint32, boundType KeyType) *labeler.LabelRule {
 	return &labeler.LabelRule{
 		ID:    getRegionLabelID(id),
 		Index: 0,
@@ -441,6 +394,43 @@ const (
 	KeyTypeClassical
 )
 
+// String returns the string representation of the KeyType.
+func (t KeyType) String() string {
+	switch t {
+	case KeyTypeRaw:
+		return "raw"
+	case KeyTypeTxn:
+		return "txn"
+	default:
+		return "classical"
+	}
+}
+
+// bounds returns the left and right boundary of the given RegionBound for this key type.
+func (t KeyType) bounds(b *RegionBound) (lo, hi []byte) {
+	if t == KeyTypeRaw {
+		return b.RawLeftBound, b.RawRightBound
+	}
+	return b.TxnLeftBound, b.TxnRightBound
+}
+
+// keyTypeToRegionBoundType converts the cluster's key type to the corresponding
+// keyspace key type (raw or txn).
+// ref rfc: https://github.com/tikv/rfcs/blob/master/text/0069-api-v2.md
+func keyTypeToRegionBoundType(keyType coreconstant.KeyType) KeyType {
+	if keyType == coreconstant.Raw {
+		return KeyTypeRaw
+	}
+	return KeyTypeTxn
+}
+
+func keyTypeStringToRegionBoundType(keyType string) KeyType {
+	if keyType == coreconstant.Raw.String() {
+		return KeyTypeRaw
+	}
+	return KeyTypeTxn
+}
+
 // ExtractKeyspaceID extracts the keyspace ID from a region key.
 // It returns the keyspace ID and the key type. A key that is not a
 // memcomparable-encoded keyspace key (empty aside) is reported as
@@ -581,13 +571,13 @@ func GetKeyspaceSplitKeys(startKey, endKey []byte, keyType coreconstant.KeyType,
 	// runs to the end of this mode's keyspace space.
 	startID := constant.StartKeyspaceID
 	if len(startKey) != 0 {
-		if id, kt := ExtractKeyspaceID(startKey); boundType.matches(kt) {
+		if id, kt := ExtractKeyspaceID(startKey); kt == boundType {
 			startID = id
 		}
 	}
 	endID := constant.MaxValidKeyspaceID
 	if len(endKey) != 0 {
-		if id, kt := ExtractKeyspaceID(endKey); boundType.matches(kt) {
+		if id, kt := ExtractKeyspaceID(endKey); kt == boundType {
 			endID = id
 		}
 	}

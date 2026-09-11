@@ -635,7 +635,7 @@ func (manager *Manager) assignGroupAndSaveKeyspace(assign bool, config *map[stri
 
 // splitKeyspaceRegion add keyspace's boundaries to region label. The corresponding
 // region will then be split by Coordinator's patrolRegion.
-func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool, boundType regionBoundType) (err error) {
+func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool, boundType KeyType) (err error) {
 	failpoint.Inject("skipSplitRegion", func() {
 		failpoint.Return(nil)
 	})
@@ -685,7 +685,7 @@ func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool, bou
 	return nil
 }
 
-func (manager *Manager) waitKeyspaceRegionSplit(id uint32, boundType regionBoundType) error {
+func (manager *Manager) waitKeyspaceRegionSplit(id uint32, boundType KeyType) error {
 	ticker := time.NewTicker(manager.config.GetCheckRegionSplitInterval())
 	timer := time.NewTimer(manager.config.GetWaitRegionSplitTimeout())
 	defer func() {
@@ -722,18 +722,18 @@ func (manager *Manager) CheckKeyspaceRegionBound(meta *keyspacepb.KeyspaceMeta) 
 	return manager.hasKeyspaceRegionBound(meta.GetId(), typ)
 }
 
-func (manager *Manager) hasKeyspaceRegionBound(id uint32, boundType regionBoundType) bool {
+func (manager *Manager) hasKeyspaceRegionBound(id uint32, boundType KeyType) bool {
 	regionBound := MakeRegionBound(id)
-	if boundType == txnRegionBound {
+	if boundType == KeyTypeTxn {
 		return manager.checkBound(regionBound.TxnLeftBound) &&
 			manager.checkBound(regionBound.TxnRightBound)
 	}
 	return manager.checkBound(regionBound.RawLeftBound) && manager.checkBound(regionBound.RawRightBound)
 }
 
-func (manager *Manager) getRegionBoundType() regionBoundType {
+func (manager *Manager) getRegionBoundType() KeyType {
 	if manager.cluster == nil || manager.cluster.GetSharedConfig() == nil {
-		return txnRegionBound
+		return KeyTypeTxn
 	}
 	return keyTypeToRegionBoundType(manager.cluster.GetSharedConfig().GetKeyType())
 }
