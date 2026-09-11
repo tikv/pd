@@ -101,6 +101,10 @@ func TestReconnect(t *testing.T) {
 	// Request will fail with no leader.
 	for name, s := range cluster.GetServers() {
 		if name != leader && name != newLeader {
+			// Once quorum is lost, etcd may not deliver the leader-key deletion
+			// before the stopped leader becomes unreachable. Clear the cached
+			// leader so this test exercises the no-leader response deterministically.
+			s.ResetPDLeader()
 			testutil.Eventually(re, func() bool {
 				res, err := tests.TestDialClient.Get(s.GetConfig().AdvertiseClientUrls + "/pd/api/v1/members")
 				re.NoError(err)
