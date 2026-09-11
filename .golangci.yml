@@ -50,10 +50,8 @@ linters:
         - (github.com/tikv/pd/pkg/ratelimit.Runner).RunTask
     gocritic:
       disabled-checks:
-        - regexpMust
         - exitAfterDefer
         - ifElseChain
-        - deprecatedComment
     # govet:
     #   disable:
     #     - buildtag
