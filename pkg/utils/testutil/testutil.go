@@ -95,13 +95,22 @@ func NewRequestHeader(clusterID uint64) *pdpb.RequestHeader {
 	}
 }
 
-// MustNewGrpcClient must create a new PD grpc client.
-func MustNewGrpcClient(re *require.Assertions, addr string) (pdpb.PDClient, *grpc.ClientConn) {
+// NewGrpcClient creates a new PD grpc client.
+func NewGrpcClient(addr string) (pdpb.PDClient, *grpc.ClientConn, error) {
 	// TODO: use grpc.NewClient instead of grpc.Dial.
 	//nolint:staticcheck
 	conn, err := grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return nil, nil, err
+	}
+	return pdpb.NewPDClient(conn), conn, nil
+}
+
+// MustNewGrpcClient must create a new PD grpc client.
+func MustNewGrpcClient(re *require.Assertions, addr string) (pdpb.PDClient, *grpc.ClientConn) {
+	client, conn, err := NewGrpcClient(addr)
 	re.NoError(err)
-	return pdpb.NewPDClient(conn), conn
+	return client, conn
 }
 
 // CleanServer is used to clean data directory.

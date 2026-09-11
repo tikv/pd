@@ -17,6 +17,7 @@ package config_test
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
@@ -524,7 +525,7 @@ func (suite *configTestSuite) checkConfigForwardControl(cluster *pdTests.TestClu
 	// inject different rule to scheduling server
 	if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
 		ruleManager := sche.GetCluster().GetRuleManager()
-		ruleManager.SetAllGroupBundles([]placement.GroupBundle{{
+		re.NoError(ruleManager.SetAllGroupBundles([]placement.GroupBundle{{
 			ID:       placement.DefaultGroupID,
 			Index:    233,
 			Override: true,
@@ -544,11 +545,11 @@ func (suite *configTestSuite) checkConfigForwardControl(cluster *pdTests.TestClu
 					Count:   3,
 				},
 			},
-		}}, true)
+		}}, true))
 		re.Len(ruleManager.GetAllRules(), 2)
 		defer func() {
 			bundles := leaderServer.GetRaftCluster().GetRuleManager().GetAllGroupBundles()
-			ruleManager.SetAllGroupBundles(bundles, true)
+			re.NoError(ruleManager.SetAllGroupBundles(bundles, true))
 		}()
 	}
 
@@ -610,7 +611,7 @@ func (suite *configTestSuite) checkPlacementRules(cluster *pdTests.TestCluster) 
 	})
 	b, err := json.Marshal(rules)
 	re.NoError(err)
-	os.WriteFile(fname, b, 0600)
+	re.NoError(os.WriteFile(fname, b, 0600))
 	_, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "save", "--in="+fname)
 	re.NoError(err)
 
@@ -626,7 +627,7 @@ func (suite *configTestSuite) checkPlacementRules(cluster *pdTests.TestCluster) 
 	rules[0].Count = 0
 	b, err = json.Marshal(rules)
 	re.NoError(err)
-	os.WriteFile(fname, b, 0600)
+	re.NoError(os.WriteFile(fname, b, 0600))
 	_, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "save", "--in="+fname)
 	re.NoError(err)
 	checkShowRuleKey(re, pdAddr, [][2]string{{placement.DefaultGroupID, "test1"}}, "--group=pd")
@@ -1178,7 +1179,7 @@ func (suite *configTestSuite) checkUpdateDefaultReplicaConfig(cluster *pdTests.T
 	checkRuleIsolationLevel("host")
 
 	// update unsuccessfully when many rule exists.
-	fname := suite.T().TempDir()
+	fname := filepath.Join(suite.T().TempDir(), "rules.json")
 	rules := []placement.Rule{
 		{
 			GroupID: placement.DefaultGroupID,
@@ -1189,7 +1190,7 @@ func (suite *configTestSuite) checkUpdateDefaultReplicaConfig(cluster *pdTests.T
 	}
 	b, err := json.Marshal(rules)
 	re.NoError(err)
-	os.WriteFile(fname, b, 0600)
+	re.NoError(os.WriteFile(fname, b, 0600))
 	_, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "save", "--in="+fname)
 	re.NoError(err)
 	checkMaxReplicas(3)

@@ -344,6 +344,7 @@ func TestStaleRegion(t *testing.T) {
 
 // Ref https://github.com/tikv/pd/issues/9221
 func TestConcurrencyGetPutConfig(t *testing.T) {
+	as := assert.New(t)
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -367,16 +368,28 @@ func TestConcurrencyGetPutConfig(t *testing.T) {
 	re.Len(region.GetPeers(), 1)
 	peer := region.GetPeers()[0]
 
-	wg := sync.WaitGroup{}
+	wg := &sync.WaitGroup{}
 	for i := range 10 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for j := range 100 {
 				storeID := peer.GetStoreId()
-				client, conn := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+				client, conn, err := testutil.NewGrpcClient(leaderServer.GetAddr())
+				if !as.NoError(err) {
+					return
+				}
 				defer conn.Close()
-				store := getStore(re, clusterID, client, storeID)
+				resp, err := client.GetStore(context.Background(), &pdpb.GetStoreRequest{
+					Header:  testutil.NewRequestHeader(clusterID),
+					StoreId: storeID,
+				})
+				if !as.NoError(err) ||
+					!as.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType()) ||
+					!as.Equal(storeID, resp.GetStore().GetId()) {
+					return
+				}
+				store := resp.GetStore()
 				store.Address = "mock://tikv-1:1"
 				store.Labels = []*metapb.StoreLabel{
 					{
@@ -384,8 +397,10 @@ func TestConcurrencyGetPutConfig(t *testing.T) {
 						Value: "testValue_" + strconv.Itoa(i) + "_" + strconv.Itoa(j),
 					},
 				}
-				_, err := putStore(grpcPDClient, clusterID, store)
-				re.NoError(err)
+				_, err = putStore(grpcPDClient, clusterID, store)
+				if !as.NoError(err) {
+					return
+				}
 			}
 		}()
 	}

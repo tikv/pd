@@ -27,6 +27,7 @@ linters:
     - testifylint
     - unconvert
     - unparam
+    - wastedassign
     - whitespace
   settings:
     depguard:
@@ -50,7 +51,6 @@ linters:
     gocritic:
       disabled-checks:
         - regexpMust
-        - appendAssign
         - exitAfterDefer
         - ifElseChain
         - deprecatedComment
@@ -270,6 +270,7 @@ linters:
         - error-nil
         - expected-actual
         - formatter
+        - go-require
         - len
         - negative-positive
         - require-error
@@ -279,7 +280,6 @@ linters:
         - useless-assert
       disable:
         - float-compare
-        - go-require
   exclusions:
     generated: lax
     presets:
@@ -290,9 +290,6 @@ linters:
       - linters:
           - errcheck
         path: (pkg/mock/.*\.go)
-      - linters:
-          - errcheck
-        path: (pd-analysis|pd-api-bench|pd-backup|pd-ctl|pd-heartbeat-bench|pd-recover|pd-simulator|pd-tso-bench|pd-ut|regions-dump|stores-dump)
       - linters:
           - recvcheck
         path: pkg/response/region.go

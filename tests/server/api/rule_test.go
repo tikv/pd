@@ -26,6 +26,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
@@ -1179,6 +1180,7 @@ func (suite *ruleTestSuite) checkConcurrency(cluster *tests.TestCluster) {
 func (suite *ruleTestSuite) checkConcurrencyWith(cluster *tests.TestCluster,
 	genBundle func(int) []placement.GroupBundle,
 	checkBundle func([]placement.GroupBundle, int) bool) {
+	as := assert.New(suite.T())
 	re := suite.Require()
 	leaderServer := cluster.GetLeaderServer()
 	pdAddr := leaderServer.GetAddr()
@@ -1187,7 +1189,7 @@ func (suite *ruleTestSuite) checkConcurrencyWith(cluster *tests.TestCluster,
 		syncutil.RWMutex
 		val int
 	}{}
-	wg := sync.WaitGroup{}
+	wg := &sync.WaitGroup{}
 
 	for i := 1; i <= 10; i++ {
 		wg.Add(1)
@@ -1195,13 +1197,23 @@ func (suite *ruleTestSuite) checkConcurrencyWith(cluster *tests.TestCluster,
 			defer wg.Done()
 			bundle := genBundle(i)
 			data, err := json.Marshal(bundle)
-			re.NoError(err)
+			if !as.NoError(err) {
+				return
+			}
 			for range 10 {
 				expectResult.Lock()
-				err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/config/placement-rule", data, testutil.StatusOK(re))
-				re.NoError(err)
-				expectResult.val = i
+				statusOK := false
+				err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/config/placement-rule", data,
+					func(resp []byte, statusCode int, _ http.Header) {
+						statusOK = as.Equal(http.StatusOK, statusCode, "resp: "+string(resp))
+					})
+				if err == nil && statusOK {
+					expectResult.val = i
+				}
 				expectResult.Unlock()
+				if !as.NoError(err) || !statusOK {
+					return
+				}
 			}
 		}(i)
 	}

@@ -155,21 +155,37 @@ func mustUpdateKeyspaceConfig(re *require.Assertions, server *tests.TestServer, 
 }
 
 func tryUpdateKeyspaceConfig(re *require.Assertions, server *tests.TestServer, name string, request *handlers.UpdateConfigParams) (int, string, *keyspacepb.KeyspaceMeta) {
+	status, body, meta, err := updateKeyspaceConfig(server, name, request)
+	re.NoError(err)
+	return status, body, meta
+}
+
+func updateKeyspaceConfig(server *tests.TestServer, name string, request *handlers.UpdateConfigParams) (int, string, *keyspacepb.KeyspaceMeta, error) {
 	data, err := json.Marshal(request)
-	re.NoError(err)
+	if err != nil {
+		return 0, "", nil, err
+	}
 	httpReq, err := http.NewRequest(http.MethodPatch, server.GetAddr()+keyspacesPrefix+"/"+name+"/config", bytes.NewBuffer(data))
-	re.NoError(err)
+	if err != nil {
+		return 0, "", nil, err
+	}
 	resp, err := tests.TestDialClient.Do(httpReq)
-	re.NoError(err)
+	if err != nil {
+		return 0, "", nil, err
+	}
 	defer resp.Body.Close()
 	data, err = io.ReadAll(resp.Body)
-	re.NoError(err)
+	if err != nil {
+		return 0, "", nil, err
+	}
 	if resp.StatusCode != http.StatusOK {
-		return resp.StatusCode, string(data), nil
+		return resp.StatusCode, string(data), nil, nil
 	}
 	meta := &handlers.KeyspaceMeta{}
-	re.NoError(json.Unmarshal(data, meta))
-	return resp.StatusCode, string(data), meta.KeyspaceMeta
+	if err := json.Unmarshal(data, meta); err != nil {
+		return 0, "", nil, err
+	}
+	return resp.StatusCode, string(data), meta.KeyspaceMeta, nil
 }
 
 func mustLoadKeyspaces(re *require.Assertions, server *tests.TestServer, name string) *keyspacepb.KeyspaceMeta {
