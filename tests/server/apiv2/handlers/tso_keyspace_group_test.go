@@ -197,6 +197,9 @@ func (suite *keyspaceGroupTestSuite) TestSplitKeyspaceGroup() {
 	re.Equal(kg1.Members, kg2.Members)
 	// Finish the split and check the split state.
 	MustFinishSplitKeyspaceGroup(re, suite.server, 2)
+	// A TSO server may finish the split before the helper's request arrives.
+	// Calling it again covers that already-finished race.
+	MustFinishSplitKeyspaceGroup(re, suite.server, 2)
 	kg1 = MustLoadKeyspaceGroupByID(re, suite.server, 1)
 	re.False(kg1.IsSplitting())
 	kg2 = MustLoadKeyspaceGroupByID(re, suite.server, 2)
