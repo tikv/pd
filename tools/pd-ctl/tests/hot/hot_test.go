@@ -555,4 +555,5 @@ func (suite *hotTestSuite) checkBuckets(cluster *pdTests.TestCluster) {
 	// Drain async hot peer updates before TearDownTest resets the hot cache directly.
 	re.NotNil(hotStat.GetHotPeerStats(utils.Write, 0))
 	re.NotNil(hotStat.GetHotPeerStats(utils.Read, 0))
+	re.NotNil(hotStat.GetHotPeerStats(utils.Write, 0))
 }
