@@ -128,45 +128,48 @@ func (s *hotRegionStorageTestSuite) checkHotRegionStorage(cluster *tests.TestClu
 		err := leaderServer.GetRaftCluster().HandleStoreHeartbeat(&pdpb.StoreHeartbeatRequest{Stats: storeStats}, &pdpb.StoreHeartbeatResponse{})
 		re.NoError(err)
 	}
-	var (
-		iter storage.HotRegionStorageIterator
-		next *storage.HistoryHotRegion
-		err  error
-	)
 	hotRegionStorage := leaderServer.GetServer().GetHistoryHotRegionStorage()
+	var writeRegions, readRegions []*storage.HistoryHotRegion
 	testutil.Eventually(re, func() bool { // wait for the history hot region to be written to the storage
-		iter = hotRegionStorage.NewIterator([]string{utils.Write.String()}, startTime*1000, time.Now().UnixMilli())
-		next, err = iter.Next()
-		return err == nil && next != nil
+		var err error
+		writeRegions, err = loadHistoryHotRegions(hotRegionStorage, utils.Write.String(), startTime*1000)
+		if err != nil || len(writeRegions) != 2 {
+			return false
+		}
+		readRegions, err = loadHistoryHotRegions(hotRegionStorage, utils.Read.String(), startTime*1000)
+		return err == nil && len(readRegions) == 2
 	})
-	re.Equal(uint64(1), next.RegionID)
-	re.Equal(uint64(1), next.StoreID)
-	re.Equal(utils.Write.String(), next.HotRegionType)
-	next, err = iter.Next()
-	re.NoError(err)
-	re.NotNil(next)
-	re.Equal(uint64(2), next.RegionID)
-	re.Equal(uint64(2), next.StoreID)
-	re.Equal(utils.Write.String(), next.HotRegionType)
-	next, err = iter.Next()
-	re.NoError(err)
-	re.Nil(next)
-	iter = hotRegionStorage.NewIterator([]string{utils.Read.String()}, startTime*1000, time.Now().UnixMilli())
-	next, err = iter.Next()
-	re.NoError(err)
-	re.NotNil(next)
-	re.Equal(uint64(3), next.RegionID)
-	re.Equal(uint64(1), next.StoreID)
-	re.Equal(utils.Read.String(), next.HotRegionType)
-	next, err = iter.Next()
-	re.NoError(err)
-	re.NotNil(next)
-	re.Equal(uint64(4), next.RegionID)
-	re.Equal(uint64(2), next.StoreID)
-	re.Equal(utils.Read.String(), next.HotRegionType)
-	next, err = iter.Next()
-	re.NoError(err)
-	re.Nil(next)
+	re.Equal(uint64(1), writeRegions[0].RegionID)
+	re.Equal(uint64(1), writeRegions[0].StoreID)
+	re.Equal(utils.Write.String(), writeRegions[0].HotRegionType)
+	re.Equal(uint64(2), writeRegions[1].RegionID)
+	re.Equal(uint64(2), writeRegions[1].StoreID)
+	re.Equal(utils.Write.String(), writeRegions[1].HotRegionType)
+	re.Equal(uint64(3), readRegions[0].RegionID)
+	re.Equal(uint64(1), readRegions[0].StoreID)
+	re.Equal(utils.Read.String(), readRegions[0].HotRegionType)
+	re.Equal(uint64(4), readRegions[1].RegionID)
+	re.Equal(uint64(2), readRegions[1].StoreID)
+	re.Equal(utils.Read.String(), readRegions[1].HotRegionType)
+}
+
+func loadHistoryHotRegions(
+	hotRegionStorage *storage.HotRegionStorage,
+	hotRegionType string,
+	startTime int64,
+) ([]*storage.HistoryHotRegion, error) {
+	iter := hotRegionStorage.NewIterator([]string{hotRegionType}, startTime, time.Now().UnixMilli())
+	regions := make([]*storage.HistoryHotRegion, 0)
+	for {
+		next, err := iter.Next()
+		if err != nil {
+			return nil, err
+		}
+		if next == nil {
+			return regions, nil
+		}
+		regions = append(regions, next)
+	}
 }
 
 func (s *hotRegionStorageTestSuite) TestHotRegionStorageReservedDayConfigChange() {
