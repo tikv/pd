@@ -363,6 +363,13 @@ func (s *storeTestSuite) checkStore(cluster *pdTests.TestCluster) {
 	limit = leaderServer.GetRaftCluster().GetStoreLimitByType(1, storelimit.AddPeer)
 	re.Equal(float64(10), limit)
 
+	// Omitting the type must preserve both custom and default leader limits.
+	defaultLeaderLimit := leaderServer.GetPersistOptions().GetScheduleConfig().DefaultStoreLimit.TransferLeaderIn
+	args = []string{"-u", pdAddr, "store", "limit", "1", "37", "transfer-leader-in"}
+	output, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
+
 	// store limit all <rate>
 	args = []string{"-u", pdAddr, "store", "limit", "all", "20"}
 	_, err = tests.ExecuteCommand(cmd, args...)
@@ -379,6 +386,8 @@ func (s *storeTestSuite) checkStore(cluster *pdTests.TestCluster) {
 	re.Equal(float64(20), limit1)
 	re.Equal(float64(20), limit2)
 	re.Equal(float64(20), limit3)
+	re.Equal(float64(37), leaderServer.GetRaftCluster().GetStoreLimitByType(1, storelimit.TransferLeaderIn))
+	re.Equal(defaultLeaderLimit, leaderServer.GetPersistOptions().GetScheduleConfig().DefaultStoreLimit.TransferLeaderIn)
 
 	re.NoError(leaderServer.Stop())
 	re.NoError(leaderServer.Run())
@@ -387,6 +396,8 @@ func (s *storeTestSuite) checkStore(cluster *pdTests.TestCluster) {
 	storesLimit := leaderServer.GetPersistOptions().GetAllStoresLimit()
 	re.Equal(float64(20), storesLimit[1].AddPeer)
 	re.Equal(float64(20), storesLimit[1].RemovePeer)
+	re.Equal(float64(37), storesLimit[1].TransferLeaderIn)
+	re.Equal(defaultLeaderLimit, leaderServer.GetPersistOptions().GetScheduleConfig().DefaultStoreLimit.TransferLeaderIn)
 
 	// store limit all <rate> <type>
 	args = []string{"-u", pdAddr, "store", "limit", "all", "25", "remove-peer"}
