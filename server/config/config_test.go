@@ -63,6 +63,51 @@ func TestBadFormatJoinAddr(t *testing.T) {
 	re.Error(cfg.Adjust(nil, false))
 }
 
+// TestJoinAddr covers that --join accepts the comma-separated endpoint list it
+// is documented to take, and still rejects a list containing a bad endpoint.
+func TestJoinAddr(t *testing.T) {
+	testCases := []struct {
+		name    string
+		join    string
+		wantErr bool
+	}{
+		{
+			name: "single endpoint",
+			join: "http://127.0.0.1:2379",
+		},
+		{
+			name: "two endpoints",
+			join: "http://127.0.0.1:2379,http://127.0.0.1:2381",
+		},
+		{
+			name: "three endpoints with mixed schemes",
+			join: "http://pd-0.pd-peer:2379,https://pd-1.pd-peer:2379,http://[::1]:2379",
+		},
+		{
+			name: "peer service endpoints",
+			join: "http://demo-pd-0.demo-pd-peer.demo.svc:2380,http://demo-pd-1.demo-pd-peer.demo.svc:2380",
+		},
+		{
+			name:    "second endpoint has no scheme",
+			join:    "http://127.0.0.1:2379,127.0.0.1:2381",
+			wantErr: true,
+		},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			cfg := NewConfig()
+			cfg.Join = testCase.join
+			err := cfg.Adjust(nil, false)
+			if testCase.wantErr {
+				re.Error(err)
+				return
+			}
+			re.NoError(err)
+		})
+	}
+}
+
 func TestReloadConfig(t *testing.T) {
 	re := require.New(t)
 	opt, err := newTestScheduleOption()
