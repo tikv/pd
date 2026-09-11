@@ -51,7 +51,7 @@ var (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 type backupTestSuite struct {
@@ -69,6 +69,7 @@ func TestBackupTestSuite(t *testing.T) {
 	defer clean()
 
 	server, serverConfig := setupServer()
+	defer server.Close()
 	testSuite := &backupTestSuite{
 		etcd:         servers[0],
 		etcdClient:   etcdClient,

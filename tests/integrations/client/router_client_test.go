@@ -472,6 +472,7 @@ func TestRouterClientHeaderError(t *testing.T) {
 	srv := cluster.GetLeaderServer().GetServer()
 
 	client := setupCli(ctx, re, srv.GetEndpoints(), opt.WithEnableRouterClient(true))
+	defer client.Close()
 
 	r, err := client.GetRegion(ctx, []byte("a"))
 	re.ErrorContains(err, pdpb.ErrorType_NOT_BOOTSTRAPPED.String())

@@ -208,7 +208,9 @@ func GetOrCreateGRPCConn(ctx context.Context, clientConns *sync.Map, url string,
 	cc, err := GetClientConn(dCtx, url, tlsCfg, opt...)
 	failpoint.Inject("unreachableNetwork2", func(val failpoint.Value) {
 		if val, ok := val.(string); ok && val == url {
-			cc = nil
+			if cc != nil {
+				_ = cc.Close()
+			}
 			err = errors.Errorf("unreachable network")
 		}
 	})

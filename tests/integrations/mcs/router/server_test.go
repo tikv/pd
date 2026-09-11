@@ -42,7 +42,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 type serverTestSuite struct {
@@ -305,14 +305,17 @@ func (suite *serverTestSuite) TestBasicSync() {
 	})
 
 	// test for http api and metrics
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	httpClient := &http.Client{Transport: transport}
+	defer transport.CloseIdleConnections()
 	url := suite.routerServer.GetAddr() + "/status"
-	resp, err := http.DefaultClient.Get(url)
+	resp, err := httpClient.Get(url)
 	re.NoError(err)
 	re.NoError(resp.Body.Close())
 	re.Equal(http.StatusOK, resp.StatusCode)
 
 	url = suite.routerServer.GetAddr() + "/metrics"
-	resp, err = http.DefaultClient.Get(url)
+	resp, err = httpClient.Get(url)
 	re.NoError(err)
 	re.Equal(http.StatusOK, resp.StatusCode)
 	defer func() { re.NoError(resp.Body.Close()) }()

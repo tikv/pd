@@ -24,11 +24,10 @@ import (
 	"go.uber.org/goleak"
 
 	"github.com/tikv/pd/client/errs"
-	"github.com/tikv/pd/client/pkg/utils/testutil"
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(m)
 }
 
 // advance emulate the state machine clock moves forward by the given duration

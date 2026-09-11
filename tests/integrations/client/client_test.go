@@ -79,7 +79,7 @@ const (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 func TestClientLeaderChange(t *testing.T) {
@@ -563,8 +563,8 @@ func (suite *followerForwardAndHandleTestSuite) SetupSuite() {
 }
 
 func (suite *followerForwardAndHandleTestSuite) TearDownSuite() {
-	suite.cluster.Destroy()
 	suite.clean()
+	suite.cluster.Destroy()
 }
 
 func (suite *followerForwardAndHandleTestSuite) TestGetRegionByFollowerForwarding() {
