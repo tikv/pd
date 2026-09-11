@@ -29,6 +29,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/response"
 )
 
@@ -135,7 +136,7 @@ func NewStoreLimitCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "limit [<store_id>|<all> [<key> <value>]... <limit> <type>]",
 		Short: "show or set a store's rate limit",
-		Long:  "show or set a store's rate limit, <type> can be 'add-peer'(default) or 'remove-peer'",
+		Long:  "show or set a store's rate limit, <type> can be 'add-peer'(default), 'remove-peer', or 'transfer-leader-in'",
 		Run:   storeLimitCommandFunc,
 	}
 	return c
@@ -201,7 +202,7 @@ func NewShowStoresCommand() *cobra.Command {
 func NewShowAllStoresLimitCommand() *cobra.Command {
 	sc := &cobra.Command{
 		Use:        "limit <type>",
-		Short:      "show all stores' limit, <type> can be 'add-peer'(default) or 'remove-peer'",
+		Short:      "show all stores' limit, <type> can be 'add-peer'(default), 'remove-peer', or 'transfer-leader-in'",
 		Deprecated: "use store limit instead",
 		Run:        showAllStoresLimitCommandFunc,
 	}
@@ -224,7 +225,7 @@ func NewSetAllLimitCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:        "limit <rate> <type>",
 		Short:      "set all store's rate limit",
-		Long:       "set all store's rate limit, <type> can be 'add-peer'(default) or 'remove-peer'",
+		Long:       "set all store's rate limit, <type> can be 'add-peer'(default), 'remove-peer', or 'transfer-leader-in'",
 		Deprecated: "use store limit all <rate> instead",
 		Run:        setAllLimitCommandFunc,
 	}
@@ -565,7 +566,7 @@ func storeLimitCommandFunc(cmd *cobra.Command, args []string) {
 		var prefix string
 		if args[0] == "all" {
 			prefix = storesLimitPrefix
-			if rate > maxStoreLimit {
+			if rate > maxStoreLimit && rate != storelimit.Unlimited {
 				cmd.Printf("rate should be less than %.1f for all\n", maxStoreLimit)
 				return
 			}
@@ -595,7 +596,7 @@ func storeLimitCommandFunc(cmd *cobra.Command, args []string) {
 				cmd.Println("rate should be a number that > 0.")
 				return
 			}
-			if rate > maxStoreLimit {
+			if rate > maxStoreLimit && rate != storelimit.Unlimited {
 				cmd.Printf("rate should be less than %.1f for all\n", maxStoreLimit)
 				return
 			}
