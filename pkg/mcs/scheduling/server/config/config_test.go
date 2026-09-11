@@ -32,23 +32,50 @@ func TestMain(m *testing.M) {
 
 func TestPersistConfigDefaultStoreLimit(t *testing.T) {
 	re := require.New(t)
-	oldAddPeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
-	oldRemovePeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer)
-	defer func() {
-		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, oldAddPeer)
-		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, oldRemovePeer)
-	}()
+	previous := sc.DefaultStoreLimitConfig()
+	t.Cleanup(func() {
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, previous.AddPeer)
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, previous.RemovePeer)
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.TransferLeaderIn, previous.TransferLeaderIn)
+	})
 	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, 15)
-	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, 15)
-
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, 25)
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.TransferLeaderIn, 35)
 	cfg := NewConfig()
 	re.NoError(cfg.adjust(nil))
 	persistConfig := NewPersistConfig(cfg, nil)
-	persistConfig.GetScheduleConfig().StoreLimit[1] = sc.StoreLimitConfig{AddPeer: 10, RemovePeer: 20}
+	persistConfig.GetScheduleConfig().StoreLimit[1] = sc.StoreLimitConfig{AddPeer: 10, RemovePeer: 20, TransferLeaderIn: 30}
 
-	persistConfig.SetAllStoresLimit(storelimit.AddPeer, 60)
-	re.Equal(sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 15}, persistConfig.GetScheduleConfig().DefaultStoreLimit)
-	re.Equal(sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 20}, persistConfig.GetStoreLimit(1))
+	// Each update must preserve the other types in both store and default limits.
+	for _, testCase := range []struct {
+		typ             storelimit.Type
+		rate            float64
+		store, defaults sc.StoreLimitConfig
+	}{
+		{
+			typ:      storelimit.AddPeer,
+			rate:     40,
+			store:    sc.StoreLimitConfig{AddPeer: 40, RemovePeer: 20, TransferLeaderIn: 30},
+			defaults: sc.StoreLimitConfig{AddPeer: 40, RemovePeer: 25, TransferLeaderIn: 35},
+		},
+		{
+			typ:      storelimit.RemovePeer,
+			rate:     50,
+			store:    sc.StoreLimitConfig{AddPeer: 40, RemovePeer: 50, TransferLeaderIn: 30},
+			defaults: sc.StoreLimitConfig{AddPeer: 40, RemovePeer: 50, TransferLeaderIn: 35},
+		},
+		{
+			typ:      storelimit.TransferLeaderIn,
+			rate:     60,
+			store:    sc.StoreLimitConfig{AddPeer: 40, RemovePeer: 50, TransferLeaderIn: 60},
+			defaults: sc.StoreLimitConfig{AddPeer: 40, RemovePeer: 50, TransferLeaderIn: 60},
+		},
+	} {
+		persistConfig.SetAllStoresLimit(testCase.typ, testCase.rate)
+		re.Equal(testCase.store, persistConfig.GetStoreLimit(1), testCase.typ.String())
+		re.Equal(testCase.defaults, persistConfig.GetScheduleConfig().DefaultStoreLimit, testCase.typ.String())
+		re.Equal(testCase.defaults, sc.DefaultStoreLimitConfig(), testCase.typ.String())
+	}
 
 	data, err := json.Marshal(persistConfig.GetScheduleConfig())
 	re.NoError(err)
@@ -60,41 +87,63 @@ func TestPersistConfigDefaultStoreLimit(t *testing.T) {
 
 	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, 15)
 	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, 25)
-	re.Equal(sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 15}, restartedPersistConfig.GetStoreLimit(2))
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.TransferLeaderIn, 35)
+	re.Equal(sc.StoreLimitConfig{AddPeer: 40, RemovePeer: 50, TransferLeaderIn: 60}, restartedPersistConfig.GetStoreLimit(2))
 }
 
 func TestAdjustScheduleConfigDefaultStoreLimit(t *testing.T) {
 	oldAddPeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
 	oldRemovePeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer)
+	oldTransferLeaderIn := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.TransferLeaderIn)
 	defer func() {
 		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, oldAddPeer)
 		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, oldRemovePeer)
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.TransferLeaderIn, oldTransferLeaderIn)
 	}()
 
 	testCases := []struct {
 		name     string
 		config   string
 		expected sc.StoreLimitConfig
+		stores   map[uint64]sc.StoreLimitConfig
 	}{
+		{
+			name:     "case insensitive fields and null leader limit",
+			config:   `{"default-store-limit":{"ADD-PEER":0,"remove-peer":70,"TRANSFER-LEADER-IN":120},"store-limit":{"1":{"ADD-PEER":10,"REMOVE-PEER":20,"TRANSFER-LEADER-IN":300},"2":{"transfer-leader-in":null}}}`,
+			expected: sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 70, TransferLeaderIn: 120},
+			stores: map[uint64]sc.StoreLimitConfig{
+				1: {AddPeer: 10, RemovePeer: 20, TransferLeaderIn: 300},
+				2: {TransferLeaderIn: 120},
+			},
+		},
+		{
+			name:     "per-store leader limits",
+			config:   `{"store-limit":{"1":{"add-peer":10,"remove-peer":20},"2":{"transfer-leader-in":30}}}`,
+			expected: sc.StoreLimitConfig{AddPeer: 15, RemovePeer: 15, TransferLeaderIn: storelimit.Unlimited},
+			stores: map[uint64]sc.StoreLimitConfig{
+				1: {AddPeer: 10, RemovePeer: 20, TransferLeaderIn: storelimit.Unlimited},
+				2: {TransferLeaderIn: 30},
+			},
+		},
 		{
 			name:     "legacy config without store limit default",
 			config:   `{"store-limit":{}}`,
-			expected: sc.StoreLimitConfig{AddPeer: 15, RemovePeer: 15},
+			expected: sc.StoreLimitConfig{AddPeer: 15, RemovePeer: 15, TransferLeaderIn: storelimit.Unlimited},
 		},
 		{
 			name:     "legacy store balance rate",
 			config:   `{"store-balance-rate":60,"store-limit":{}}`,
-			expected: sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 60},
+			expected: sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 60, TransferLeaderIn: storelimit.Unlimited},
 		},
 		{
 			name:     "explicit zero wins over legacy store balance rate",
 			config:   `{"store-balance-rate":60,"default-store-limit":{"add-peer":0,"remove-peer":0},"store-limit":{}}`,
-			expected: sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 0},
+			expected: sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 0, TransferLeaderIn: storelimit.Unlimited},
 		},
 		{
 			name:     "legacy store balance rate backfills an omitted field",
 			config:   `{"store-balance-rate":60,"default-store-limit":{"add-peer":0},"store-limit":{}}`,
-			expected: sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 60},
+			expected: sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 60, TransferLeaderIn: storelimit.Unlimited},
 		},
 	}
 	for _, testCase := range testCases {
@@ -102,6 +151,7 @@ func TestAdjustScheduleConfigDefaultStoreLimit(t *testing.T) {
 			re := require.New(t)
 			sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, 15)
 			sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, 15)
+			sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.TransferLeaderIn, storelimit.Unlimited)
 			watchedConfig := &persistedConfig{
 				Schedule: sc.ScheduleConfig{DefaultStoreLimit: sc.DefaultStoreLimitConfig()},
 			}
@@ -114,6 +164,10 @@ func TestAdjustScheduleConfigDefaultStoreLimit(t *testing.T) {
 			cfg.Schedule = watchedConfig.Schedule
 			persistConfig := NewPersistConfig(cfg, nil)
 			re.Equal(testCase.expected, persistConfig.GetStoreLimit(100))
+			for id, expected := range testCase.stores {
+				re.Equal(expected, persistConfig.GetStoreLimit(id))
+				re.Equal(expected.TransferLeaderIn, persistConfig.GetStoreLimitByType(id, storelimit.TransferLeaderIn))
+			}
 		})
 	}
 }
