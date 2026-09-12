@@ -90,6 +90,56 @@ type Operator struct {
 	ApproximateSize  int64
 	timeout          time.Duration
 	influence        *OpInfluence
+	// needStoreHealthCheck marks whether the in-progress check should also
+	// reject a target store that has become unhealthy mid-execution. It is
+	// not set at creation time; callers opt in after the operator is built
+	// (see SetStoreHealthCheck), similar to additionalInfos.
+	needStoreHealthCheck atomic.Bool
+	// stepDispatched[i] records whether step i's schedule command has ever
+	// been sent to its target. A region heartbeat only reflects a snapshot
+	// of the target's state as of whenever that heartbeat was generated,
+	// which can lag behind TiKV actually having applied a conf change PD
+	// already dispatched — so once a step's command has been sent at least
+	// once, checkStaleOperator stops using needStoreHealthCheck against it:
+	// TiKV may have already committed the change regardless of what the
+	// next heartbeat happens to show, and cancelling then can't undo it.
+	stepDispatched []atomic.Bool
+}
+
+// SetStoreHealthCheck marks whether the operator's in-progress steps should
+// additionally reject a target store that has become unhealthy. It can be
+// called at any time after the operator is created.
+func (o *Operator) SetStoreHealthCheck(need bool) {
+	o.needStoreHealthCheck.Store(need)
+}
+
+// NeedStoreHealthCheck returns whether the operator's in-progress steps
+// should additionally reject a target store that has become unhealthy.
+func (o *Operator) NeedStoreHealthCheck() bool {
+	return o.needStoreHealthCheck.Load()
+}
+
+// CurrentStepIndex returns the index of the step currently being executed.
+func (o *Operator) CurrentStepIndex() int32 {
+	return atomic.LoadInt32(&o.currentStep)
+}
+
+// HasStepBeenDispatched reports whether the schedule command for the given
+// step index has ever been sent to its target.
+func (o *Operator) HasStepBeenDispatched(step int32) bool {
+	if step < 0 || int(step) >= len(o.stepDispatched) {
+		return false
+	}
+	return o.stepDispatched[step].Load()
+}
+
+// MarkStepDispatched records that the schedule command for the given step
+// index has been sent at least once.
+func (o *Operator) MarkStepDispatched(step int32) {
+	if step < 0 || int(step) >= len(o.stepDispatched) {
+		return
+	}
+	o.stepDispatched[step].Store(true)
 }
 
 // NewOperator creates a new operator.
@@ -103,15 +153,16 @@ func NewOperator(desc, brief string, regionID uint64, regionEpoch *metapb.Region
 		maxDuration += v.Timeout(approximateSize).Seconds()
 	}
 	return &Operator{
-		desc:        desc,
-		brief:       brief,
-		regionID:    regionID,
-		regionEpoch: regionEpoch,
-		kind:        kind,
-		steps:       steps,
-		stepsTime:   make([]int64, len(steps)),
-		status:      NewOpStatusTracker(),
-		level:       level,
+		desc:           desc,
+		brief:          brief,
+		regionID:       regionID,
+		regionEpoch:    regionEpoch,
+		kind:           kind,
+		steps:          steps,
+		stepsTime:      make([]int64, len(steps)),
+		stepDispatched: make([]atomic.Bool, len(steps)),
+		status:         NewOpStatusTracker(),
+		level:          level,
 		additionalInfos: opAdditionalInfo{
 			value: make(map[string]string),
 		},
