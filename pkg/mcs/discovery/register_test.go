@@ -93,6 +93,263 @@ func TestRegister(t *testing.T) {
 	etcd.Close()
 }
 
+func TestRegisterConflict(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// Register the first instance.
+	sr1 := NewServiceRegister(ctx, client, "test_service", "127.0.0.1:1", "instance-1", 2)
+	re.NoError(sr1.Register())
+	// A second live instance with the same advertised address must not
+	// overwrite the registry entry of the first one.
+	sr2 := NewServiceRegister(ctx, client, "test_service", "127.0.0.1:1", "instance-2", 2)
+	err := sr2.Register()
+	re.Error(err)
+	re.Contains(err.Error(), "occupied")
+	resp, err := client.Get(ctx, sr1.key)
+	re.NoError(err)
+	re.Len(resp.Kvs, 1)
+	re.Equal("instance-1", string(resp.Kvs[0].Value))
+
+	// After the first instance stops the keepalive (simulating a crash), the
+	// stale entry expires with its lease and a new instance with the same
+	// address can register within the retry window.
+	sr1.cancel()
+	sr3 := NewServiceRegister(ctx, client, "test_service", "127.0.0.1:1", "instance-3", 2)
+	re.NoError(sr3.Register())
+	resp, err = client.Get(ctx, sr3.key)
+	re.NoError(err)
+	re.Len(resp.Kvs, 1)
+	re.Equal("instance-3", string(resp.Kvs[0].Value))
+	re.NoError(sr3.Deregister())
+}
+
+func TestDeregisterDoesNotDeleteReplacementRegistration(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sr1 := NewServiceRegister(ctx, client, "test_service", "127.0.0.1:1", "instance-1", 2)
+	re.NoError(sr1.Register())
+	// sr1 stops renewing (simulating a lost connection) without ever
+	// deregistering, leaving a stale-but-not-yet-expired entry.
+	sr1.cancel()
+
+	// A different instance later claims the same address once the stale
+	// lease naturally expires.
+	sr2 := NewServiceRegister(ctx, client, "test_service", "127.0.0.1:1", "instance-2", 2)
+	re.NoError(sr2.Register())
+
+	// sr1 has no way of knowing it lost ownership; deregistering it now
+	// (e.g. a delayed shutdown call arriving after the fact) must not
+	// delete sr2's live registration.
+	re.NoError(sr1.Deregister())
+
+	resp, err := client.Get(ctx, sr1.key)
+	re.NoError(err)
+	re.Len(resp.Kvs, 1)
+	re.Equal("instance-2", string(resp.Kvs[0].Value))
+
+	re.NoError(sr2.Deregister())
+}
+
+func TestRegisterConflictSameSerializedValue(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// Two distinct instances that happen to serialize an identical registry
+	// entry (e.g. same address, started within the same StartTimestamp
+	// second) must not be able to take over each other's live registration:
+	// ownership must be proven by the lease actually held, not by value
+	// equality alone.
+	sr1 := NewServiceRegister(ctx, client, "test_service", "127.0.0.1:1", "same-value", 2)
+	re.NoError(sr1.Register())
+	sr2 := NewServiceRegister(ctx, client, "test_service", "127.0.0.1:1", "same-value", 2)
+	err := sr2.Register()
+	re.Error(err)
+	re.Contains(err.Error(), "occupied")
+
+	resp, err := client.Get(ctx, sr1.key)
+	re.NoError(err)
+	re.Len(resp.Kvs, 1)
+	re.Equal("same-value", string(resp.Kvs[0].Value))
+	re.Equal(int64(sr1.leaseID), resp.Kvs[0].Lease)
+
+	re.NoError(sr1.Deregister())
+}
+
+func TestRegisterRejectsUnleasedExistingKey(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sr := NewServiceRegister(ctx, client, "test_service", "127.0.0.1:1", "some-value", 2)
+	// Simulate a pre-existing registry key written without a lease. A fresh
+	// instance's leaseID is also the zero value (clientv3.NoLease), so
+	// comparing lease IDs alone could mistake this for its own prior
+	// registration and let it overwrite the key.
+	_, err := client.Put(ctx, sr.key, "some-value")
+	re.NoError(err)
+
+	start := time.Now()
+	err = sr.Register()
+	// An unleased key can never expire on its own, so this must fail
+	// immediately instead of retrying until the ttl+registerRetryMargin
+	// fallback deadline (7s here).
+	re.Less(time.Since(start), 2*time.Second)
+	re.Error(err)
+	re.Contains(err.Error(), "occupied")
+}
+
+// newLongElectionTestEtcdCluster starts a single-member test cluster whose
+// election timeout (10s) is longer than DefaultLeaseInSeconds, so etcd's
+// minimum-lease-TTL floor (roughly 1.5x the election timeout) and
+// leader-promotion lease refreshes are both exercised by the caller's test.
+func newLongElectionTestEtcdCluster(t *testing.T) ([]*embed.Etcd, *clientv3.Client, func()) {
+	return etcdutil.NewTestEtcdCluster(t, 1, &etcdutil.TestEtcdClusterOptions{
+		ServerCfgModifier: func(cfg *embed.Config) {
+			cfg.TickMs = 100
+			cfg.ElectionMs = 10000
+		},
+	})
+}
+
+// registerStaleEntry registers "old" at addr and then stops it without
+// deregistering (simulating a crash), leaving behind a stale-but-not-yet-
+// expired registry entry. It returns that entry's lease ID.
+func registerStaleEntry(ctx context.Context, re *require.Assertions, client *clientv3.Client, addr string) clientv3.LeaseID {
+	old := NewServiceRegister(ctx, client, "test_service", addr, "old", DefaultLeaseInSeconds)
+	re.NoError(old.Register())
+	resp, err := client.Get(ctx, old.key)
+	re.NoError(err)
+	re.Len(resp.Kvs, 1)
+	old.cancel()
+	return clientv3.LeaseID(resp.Kvs[0].Lease)
+}
+
+// restartSingleMemberEtcd forces a new leader election on a single-member
+// test cluster by hard-stopping and restarting it, triggering
+// (*lessor).Promote on any surviving leases.
+func restartSingleMemberEtcd(re *require.Assertions, etcd *embed.Etcd, cfg embed.Config) *embed.Etcd {
+	etcd.Server.HardStop()
+	etcd.Close()
+	etcd, err := embed.StartEtcd(&cfg)
+	re.NoError(err)
+	<-etcd.Server.ReadyNotify()
+	return etcd
+}
+
+func TestRegisterRetriesUntilExistingLeaseExpires(t *testing.T) {
+	re := require.New(t)
+	// A larger election timeout than the registry TTL raises etcd's
+	// minimum-lease-TTL floor above the requested TTL, so the stale key's
+	// actual lease outlives a retry deadline computed from the raw TTL alone.
+	_, client, clean := newLongElectionTestEtcdCluster(t)
+	defer clean()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	oldLease := registerStaleEntry(ctx, re, client, "127.0.0.1:1")
+
+	ttl, err := client.TimeToLive(ctx, oldLease)
+	re.NoError(err)
+	// The actual stale lease outlives the fixed 5s+5s deadline this
+	// regression guards against.
+	re.Greater(ttl.TTL, int64(10))
+
+	replacement := NewServiceRegister(ctx, client, "test_service", "127.0.0.1:1", "replacement", DefaultLeaseInSeconds)
+	re.NoError(replacement.Register())
+	resp, err := client.Get(ctx, replacement.key)
+	re.NoError(err)
+	re.Len(resp.Kvs, 1)
+	re.Equal("replacement", string(resp.Kvs[0].Value))
+	re.NoError(replacement.Deregister())
+}
+
+func TestRegisterRetriesAfterLeaderPromotion(t *testing.T) {
+	re := require.New(t)
+	// A leader promotion refreshes a lease's expiry (Lessor.Promote /
+	// Lease.refresh) to beyond its original GrantedTTL; the retry deadline
+	// must reflect that when it has already happened before the first
+	// measurement, not just the lease's unchanging granted duration.
+	servers, client, clean := newLongElectionTestEtcdCluster(t)
+	defer clean()
+
+	etcd, cfg := servers[0], servers[0].Config()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	oldLease := registerStaleEntry(ctx, re, client, "127.0.0.1:1")
+
+	// Restarting the single-member cluster forces a new leader election,
+	// triggering Promote on the surviving lease.
+	etcd = restartSingleMemberEtcd(re, etcd, cfg)
+	defer etcd.Close()
+
+	ttl, err := client.TimeToLive(ctx, oldLease)
+	re.NoError(err)
+	// The promotion pushed the actual remaining TTL past GrantedTTL+margin.
+	re.Greater(ttl.TTL, ttl.GrantedTTL+int64(registerRetryMargin/time.Second))
+
+	replacement := NewServiceRegister(ctx, client, "test_service", "127.0.0.1:1", "replacement", DefaultLeaseInSeconds)
+	re.NoError(replacement.Register())
+	re.NoError(replacement.Deregister())
+}
+
+func TestRegisterRetriesAfterPromotionFollowingTTLObservation(t *testing.T) {
+	re := require.New(t)
+	// A leader promotion that happens *after* the first TTL measurement of a
+	// contended lease must still be picked up: the retry deadline is a
+	// snapshot taken at measurement time, so without re-measuring on a
+	// later raft term change, a promotion occurring after that snapshot
+	// would otherwise stay invisible for the rest of the retry loop.
+	servers, client, clean := newLongElectionTestEtcdCluster(t)
+	defer clean()
+
+	etcd, cfg := servers[0], servers[0].Config()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	oldLease := registerStaleEntry(ctx, re, client, "127.0.0.1:1")
+
+	// Take the first measurement of the contended lease before any leader
+	// change has happened.
+	replacement := NewServiceRegister(ctx, client, "test_service", "127.0.0.1:1", "replacement", DefaultLeaseInSeconds)
+	_, err := replacement.putWithTTL()
+	re.Error(err)
+	re.Equal(oldLease, replacement.contendedLease)
+	cachedDeadline := replacement.retryDeadline
+	re.False(cachedDeadline.IsZero())
+	termAtFirstMeasurement := replacement.lastObservedTerm
+
+	// Restarting the single-member cluster forces a new leader election (a
+	// higher raft term), triggering Promote on the surviving lease -- after
+	// replacement's first measurement above.
+	etcd = restartSingleMemberEtcd(re, etcd, cfg)
+	defer etcd.Close()
+
+	ttl, err := client.TimeToLive(ctx, oldLease)
+	re.NoError(err)
+	// The promotion pushed the actual remaining TTL past the cached deadline.
+	re.Greater(ttl.TTL, int64(time.Until(cachedDeadline)/time.Second))
+
+	re.NoError(replacement.Register())
+	// A fresh measurement was taken, keyed off the advanced raft term.
+	re.Greater(replacement.lastObservedTerm, termAtFirstMeasurement)
+	re.NoError(replacement.Deregister())
+}
+
 func getKeyAfterLeaseExpired(ctx context.Context, re *require.Assertions, client *clientv3.Client, key string) string {
 	time.Sleep(DefaultLeaseInSeconds * time.Second) // ensure that the lease is expired
 	time.Sleep(500 * time.Millisecond)              // wait for the etcd to clean up the expired keys
