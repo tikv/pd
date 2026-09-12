@@ -2123,13 +2123,9 @@ func (r *RegionsInfo) GetRegionCount(startKey, endKey []byte) int {
 	return r.tree.GetCountByRange(startKey, endKey)
 }
 
-// ScanRegions scans regions intersecting [start key, end key), returns at most
-// `limit` regions. limit <= 0 means no limit.
-func (r *RegionsInfo) ScanRegions(startKey, endKey []byte, limit int) []*RegionInfo {
-	r.t.RLock()
-	defer r.t.RUnlock()
+func scanRegions(tree *regionTree, startKey, endKey []byte, limit int) []*RegionInfo {
 	var res []*RegionInfo
-	r.tree.scanRange(startKey, func(region *RegionInfo) bool {
+	tree.scanRange(startKey, func(region *RegionInfo) bool {
 		if len(endKey) > 0 && bytes.Compare(region.GetStartKey(), endKey) >= 0 {
 			return false
 		}
@@ -2140,6 +2136,35 @@ func (r *RegionsInfo) ScanRegions(startKey, endKey []byte, limit int) []*RegionI
 		return true
 	})
 	return res
+}
+
+// ScanRegions scans regions intersecting [start key, end key), returns at most
+// `limit` regions. limit <= 0 means no limit.
+func (r *RegionsInfo) ScanRegions(startKey, endKey []byte, limit int) []*RegionInfo {
+	r.t.RLock()
+	defer r.t.RUnlock()
+	return scanRegions(r.tree, startKey, endKey, limit)
+}
+
+// RegionTreeSnapshot is an immutable, lazy copy-on-write view of the Region tree.
+type RegionTreeSnapshot struct {
+	tree *regionTree
+}
+
+// GetRegionTreeSnapshot returns a snapshot that can be scanned concurrently
+// with updates to the source RegionsInfo.
+func (r *RegionsInfo) GetRegionTreeSnapshot() *RegionTreeSnapshot {
+	// btree.Clone updates the source tree's copy-on-write context, so clone it
+	// under the exclusive tree lock. The clone itself is O(1).
+	r.t.Lock()
+	defer r.t.Unlock()
+	return &RegionTreeSnapshot{tree: r.tree.clone()}
+}
+
+// ScanRegions scans the snapshot for Regions intersecting [startKey, endKey),
+// returning at most limit Regions. limit <= 0 means no limit.
+func (s *RegionTreeSnapshot) ScanRegions(startKey, endKey []byte, limit int) []*RegionInfo {
+	return scanRegions(s.tree, startKey, endKey, limit)
 }
 
 // BatchScanRegions scans regions in given key pairs, returns at most `limit` regions.

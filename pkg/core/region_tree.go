@@ -92,6 +92,12 @@ func newRegionTreeWithCountRef() *regionTree {
 	}
 }
 
+func (t *regionTree) clone() *regionTree {
+	clone := *t
+	clone.tree = t.tree.Clone()
+	return &clone
+}
+
 // GetCountByRange returns the number of regions in the range [startKey, endKey).
 func (t *regionTree) GetCountByRange(startKey, endKey []byte) int {
 	start := &regionItem{&RegionInfo{meta: &metapb.Region{StartKey: startKey}}}
