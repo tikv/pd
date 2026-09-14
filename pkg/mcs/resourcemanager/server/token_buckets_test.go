@@ -335,6 +335,33 @@ func TestGroupTokenBucketRequestLoop(t *testing.T) {
 	}
 }
 
+func TestGroupTokenBucketSlotEventCounters(t *testing.T) {
+	re := require.New(t)
+	tbSetting := &rmpb.TokenBucket{
+		Tokens: 200000,
+		Settings: &rmpb.TokenLimitSettings{
+			FillRate:   2000,
+			BurstLimit: 20000000,
+		},
+	}
+
+	gtb := NewGroupTokenBucket(testResourceGroupName, tbSetting)
+	now := time.Now()
+	clientUniqueID := uint64(100)
+
+	gtb.request(now, 1000, uint64(time.Second)*10/uint64(time.Millisecond), clientUniqueID)
+	re.Equal(uint64(1), gtb.slotsCreated)
+
+	gtb.request(now, 0, uint64(time.Second)*10/uint64(time.Millisecond), clientUniqueID)
+	re.Equal(uint64(1), gtb.slotsDeleted)
+
+	gtb.request(now, 1000, uint64(time.Second)*10/uint64(time.Millisecond), clientUniqueID)
+	re.Equal(uint64(2), gtb.slotsCreated)
+	gtb.tokenSlots[clientUniqueID].lastReqTime = now.Add(-(slotExpireTimeout + time.Second))
+	gtb.request(now.Add(2*time.Second), 1000, uint64(time.Second)*10/uint64(time.Millisecond), clientUniqueID+1)
+	re.Equal(uint64(1), gtb.slotsExpired)
+}
+
 func TestBalanceSlotTokensFillRateAllocation(t *testing.T) {
 	re := require.New(t)
 
