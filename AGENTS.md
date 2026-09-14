@@ -140,6 +140,7 @@
 - Run `make fmt`/gofmt; ensure gci/goimports ordering.
 - Clean with `make clean` (removes failpoints, tmp tests, bin, `.tools/bin`).
 - Avoid committing generated artifacts (junitfile, coverage, dashboard caches) unless required.
+- When CI workflows, test matrix, or test organization change (e.g. `.github/workflows/`, Makefile test targets), update `.agents/skills/fix-ci/references/` accordingly to keep agent skill references accurate.
 
 ## PRs & Commits
 - Follow `.github/pull_request_template.md`; include `Issue Number: close|ref #...` line.
