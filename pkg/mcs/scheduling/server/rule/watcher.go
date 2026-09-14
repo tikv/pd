@@ -28,7 +28,6 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
-	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/schedule/checker"
@@ -516,9 +515,6 @@ func (rw *Watcher) initializeRuleWatcher() error {
 	}
 	postEventsFn := func(events []*clientv3.Event) error {
 		defer rw.ruleManager.Unlock()
-		failpoint.Inject("skipRuleCommit", func() {
-			failpoint.Return(nil)
-		})
 		if applyFailed {
 			return errors.New("failed to apply placement rule events")
 		}

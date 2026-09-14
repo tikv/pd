@@ -586,11 +586,8 @@ func (s *Server) startCluster(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	keyspaceWatcher, err = keyspace_meta.NewWatcher(ctx, s.GetClient(),
-		cluster.GetCoordinator().GetCheckerController(), cluster.GetKeyspaceCache())
-	if err != nil {
-		return err
-	}
+	// keyspaceWatcher is not started yet: nothing consumes cluster.GetKeyspaceCache()
+	// for merge/split decisions. A follow-up PR wires it up and starts it here.
 
 	cluster.SetRuntimeResources(metaWatcher, configWatcher, ruleWatcher, affinityWatcher, keyspaceWatcher)
 	// Set watchers to nil to avoid being closed in defer when cluster initialization is successful,

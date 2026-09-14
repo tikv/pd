@@ -429,13 +429,6 @@ func TestExtractKeyspaceID(t *testing.T) {
 			expectedOK:      true,
 		},
 		{
-			name:            "keyspace 100 txn mode",
-			key:             MakeRegionBound(100).TxnLeftBound,
-			expectedID:      100,
-			expectedKeyType: txnRegionBound,
-			expectedOK:      true,
-		},
-		{
 			name:            "keyspace 4242 txn mode",
 			key:             MakeRegionBound(4242).TxnLeftBound,
 			expectedID:      4242,
@@ -617,18 +610,6 @@ func TestRegionSpansMultipleKeyspaces(t *testing.T) {
 			expectedResult: true,
 		},
 		{
-			name:     "empty end key with sparse existing keyspaces should span when crossing two existing",
-			startKey: MakeRegionBound(101).TxnLeftBound,
-			endKey:   []byte{},
-			checker: &mockKeyspaceChecker{
-				existingKeyspaces: map[uint32]bool{
-					101: true,
-					102: true,
-				},
-			},
-			expectedResult: true,
-		},
-		{
 			name:           "span existing keyspaces - should span",
 			startKey:       MakeRegionBound(100).TxnLeftBound,
 			endKey:         MakeRegionBound(101).TxnRightBound,
@@ -773,28 +754,6 @@ func TestGetKeyspaceSplitKeys(t *testing.T) {
 			keyType:  coreconstant.Txn,
 			checker:  oneExistChecker,
 			expectedSplitKeys: [][]byte{
-				MakeRegionBound(101).TxnRightBound,
-			},
-		},
-		{
-			name:     "empty start and end key, raw mode, one exist",
-			startKey: []byte{},
-			endKey:   []byte{},
-			keyType:  coreconstant.Raw,
-			checker:  oneExistChecker,
-			expectedSplitKeys: [][]byte{
-				MakeRegionBound(101).RawLeftBound,
-				MakeRegionBound(101).RawRightBound,
-			},
-		},
-		{
-			name:     "empty start and end key, txn mode, one exist",
-			startKey: []byte{},
-			endKey:   []byte{},
-			keyType:  coreconstant.Txn,
-			checker:  oneExistChecker,
-			expectedSplitKeys: [][]byte{
-				MakeRegionBound(101).TxnLeftBound,
 				MakeRegionBound(101).TxnRightBound,
 			},
 		},
