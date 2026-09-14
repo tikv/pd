@@ -182,6 +182,28 @@ func TestDispatchSplitScatterVersionLifecycle(t *testing.T) {
 	re.NotContains(pendingRegionIDSet(controller), uint64(100))
 }
 
+func TestDispatchSplitScatterMatchesTiKVBatchSplitVersion(t *testing.T) {
+	re := require.New(t)
+	controller, tc, oc, cleanup := newTestSplitScatterController(t)
+	defer cleanup()
+
+	const oldVersion uint64 = 4
+	newRegionIDs := []uint64{101, 102}
+	splitVersion := oldVersion + uint64(len(newRegionIDs))
+
+	tc.PutRegion(tc.GetRegion(100).Clone(core.SetRegionVersion(oldVersion)))
+	controller.RecordSplitScatterBatch(100, oldVersion+1, newRegionIDs)
+	putSplitScatterRegionWithVersion(tc, 101, "m", "t", splitScatterReportedCPUUsage, splitVersion)
+	putSplitScatterRegionWithVersion(tc, 102, "t", "", splitScatterReportedCPUUsage, splitVersion)
+	tc.PutRegion(tc.GetRegion(100).Clone(core.SetRegionVersion(splitVersion)))
+	controller.dispatchSplitScatterRegions()
+	re.Empty(oc.GetOperators())
+	re.Equal(0, splitScatterPendingCount(controller))
+
+	controller.RecordSplitScatterBatch(100, splitVersion, newRegionIDs)
+	re.ElementsMatch([]uint64{100, 101, 102}, pendingRegionIDs(controller.collectTopPendingSplitScatter(3)))
+}
+
 func TestRecordSplitScatterBatchDoesNotBumpPastRequestSplitVersion(t *testing.T) {
 	re := require.New(t)
 	controller, tc, oc, cleanup := newTestSplitScatterController(t)

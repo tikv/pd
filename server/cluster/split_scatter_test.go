@@ -60,9 +60,10 @@ func TestHandleAskBatchSplitSchedulesSplitScatterInPatrol(t *testing.T) {
 		resp.GetIds()[0].GetNewRegionId(),
 		resp.GetIds()[1].GetNewRegionId(),
 	}
-	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), newSplitScatterRegion(100, []byte(""), []byte("m"), splitScatterNoCPUUsage).Clone(core.WithIncVersion())))
-	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), newSplitScatterRegion(splitRegionIDs[0], []byte("m"), []byte("t"), splitScatterReportedCPUUsage).Clone(core.WithIncVersion())))
-	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), newSplitScatterRegion(splitRegionIDs[1], []byte("t"), []byte(""), splitScatterReportedCPUUsage).Clone(core.WithIncVersion())))
+	// TiKV sets source and both children to oldVersion+2.
+	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), newSplitScatterRegion(100, []byte(""), []byte("m"), splitScatterNoCPUUsage).Clone(core.SetRegionVersion(3))))
+	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), newSplitScatterRegion(splitRegionIDs[0], []byte("m"), []byte("t"), splitScatterReportedCPUUsage).Clone(core.SetRegionVersion(3))))
+	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), newSplitScatterRegion(splitRegionIDs[1], []byte("t"), []byte(""), splitScatterReportedCPUUsage).Clone(core.SetRegionVersion(3))))
 
 	dispatchSplitScatterInPatrol(t, cluster, cancelPatrol, func() bool {
 		return cluster.GetOperatorController().GetOperator(splitRegionIDs[0]) != nil &&
