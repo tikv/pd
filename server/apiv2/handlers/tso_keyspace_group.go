@@ -101,7 +101,7 @@ func CreateKeyspaceGroups(c *gin.Context) {
 // GetKeyspaceGroups gets keyspace groups from the start ID with limit.
 // If limit is 0, it will load all keyspace groups from the start ID.
 //
-//	@Tags		tso-keyspace-groups
+//	@Tags		swagger,tso-keyspace-groups
 //	@Summary	Get keyspace groups.
 //	@Param		page_token		query	string	false	"The keyspace group ID to start scanning from."
 //	@Param		limit			query	string	false	"The maximum number of keyspace groups to return."
@@ -164,7 +164,7 @@ type GetKeyspaceGroupPrimaryResponse struct {
 
 // GetKeyspaceGroupByID gets keyspace group by ID.
 //
-//	@Tags		tso-keyspace-groups
+//	@Tags		swagger,tso-keyspace-groups
 //	@Summary	Get a keyspace group by ID.
 //	@Param		id				path	uint32	true	"Keyspace group ID."
 //	@Param		hide_keyspaces	query	bool	false	"Whether to omit the keyspace IDs from the response."	default(false)
