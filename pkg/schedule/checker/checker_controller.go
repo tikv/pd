@@ -26,6 +26,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/cache"
@@ -318,18 +319,31 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 
 	// A rolling upgrade can still receive heartbeats for peers created by an
 	// older PD. Convert them one at a time before any normal replica scheduling.
+	// If any conversion cannot make progress, let replica checkers repair the
+	// unavailable peer first.
+	var legacyWitness *metapb.Peer
 	for _, peer := range region.GetPeers() {
-		if !peer.GetIsWitness() || region.GetLeader() == nil {
+		if !peer.GetIsWitness() {
 			continue
 		}
+		store := c.cluster.GetStore(peer.GetStoreId())
+		if store == nil || store.DownTime() >= c.conf.GetMaxStoreDownTime() {
+			legacyWitness = nil
+			break
+		}
+		if legacyWitness == nil {
+			legacyWitness = peer
+		}
+	}
+	if legacyWitness != nil && region.GetLeader() != nil {
 		if opController.OperatorCount(operator.OpReplica) >= c.conf.GetReplicaScheduleLimit() {
 			operator.IncOperatorLimitCounter(types.ReplicaChecker, operator.OpReplica)
 			c.pendingProcessedRegions.Put(region.GetID(), nil)
 			return nil
 		}
-		op, err := operator.CreateNonWitnessPeerOperator("migrate-deprecated-witness-peer", c.cluster, region, peer)
+		op, err := operator.CreateNonWitnessPeerOperator("migrate-deprecated-witness-peer", c.cluster, region, legacyWitness)
 		if err != nil {
-			log.Debug("cannot convert deprecated witness peer", zap.Uint64("region-id", region.GetID()), zap.Uint64("peer-id", peer.GetId()), errs.ZapError(err))
+			log.Debug("cannot convert deprecated witness peer", zap.Uint64("region-id", region.GetID()), zap.Uint64("peer-id", legacyWitness.GetId()), errs.ZapError(err))
 			return nil
 		}
 		op.SetPriorityLevel(constant.High)

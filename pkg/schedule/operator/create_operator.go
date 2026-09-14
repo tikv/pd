@@ -166,6 +166,13 @@ func CreateMergeRegionOperator(desc string, ci sche.SharedCluster, source *core.
 	if core.IsInJointState(source.GetPeers()...) || core.IsInJointState(target.GetPeers()...) {
 		return nil, errors.Errorf("cannot merge regions which are in joint state")
 	}
+	for _, region := range []*core.RegionInfo{source, target} {
+		for _, peer := range region.GetPeers() {
+			if peer.GetIsWitness() {
+				return nil, errors.Errorf("cannot merge region %d: legacy witness peer must be converted first", region.GetID())
+			}
+		}
+	}
 
 	var steps []OpStep
 	if !isRegionMatch(source, target) {

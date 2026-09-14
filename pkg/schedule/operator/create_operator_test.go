@@ -252,6 +252,32 @@ func (suite *createOperatorTestSuite) TestCreateMergeRegionOperator() {
 			true,
 			nil,
 		},
+		{
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+			},
+			[]*metapb.Peer{
+				{Id: 3, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 4, StoreId: 2, Role: metapb.PeerRole_Voter, IsWitness: true},
+			},
+			0,
+			true,
+			nil,
+		},
+		{
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter, IsWitness: true},
+			},
+			[]*metapb.Peer{
+				{Id: 3, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 4, StoreId: 2, Role: metapb.PeerRole_Voter},
+			},
+			0,
+			true,
+			nil,
+		},
 	}
 
 	for _, testCase := range testCases {
@@ -1326,10 +1352,9 @@ func (suite *createOperatorTestSuite) TestCreateNonWitnessPeerOperator() {
 		for i := range op.Len() {
 			switch step := op.Step(i).(type) {
 			case ChangePeerV2Enter:
-				re.Len(step.DemoteVoters, len(expectedSteps[i].(ChangePeerV2Enter).DemoteVoters))
-				for j, d := range expectedSteps[i].(ChangePeerV2Enter).DemoteVoters {
-					re.Equal(d.ToStore, step.DemoteVoters[j].ToStore)
-				}
+				expected := expectedSteps[i].(ChangePeerV2Enter)
+				re.Equal(expected.PromoteLearners, step.PromoteLearners)
+				re.Equal(expected.DemoteVoters, step.DemoteVoters)
 			case BecomeNonWitness:
 				re.Equal(step.StoreID, expectedSteps[i].(BecomeNonWitness).StoreID)
 				re.Equal(step.PeerID, expectedSteps[i].(BecomeNonWitness).PeerID)

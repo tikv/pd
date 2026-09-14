@@ -20,6 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
@@ -57,4 +58,26 @@ func TestCheckRegionMigratesLegacyWitnessPeer(t *testing.T) {
 		return
 	}
 	require.Fail(t, "migration operator has no conversion step")
+}
+
+func TestCheckRegionRepairsDownLegacyWitnessPeer(t *testing.T) {
+	controller, tc, _, cleanup := newTestSplitScatterController(t)
+	defer cleanup()
+	tc.SetEnablePlacementRules(false)
+
+	peers := []*metapb.Peer{
+		{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+		{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter, IsWitness: true},
+		{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
+	}
+	region := core.NewRegionInfo(&metapb.Region{Id: 901, Peers: peers}, peers[0], core.WithDownPeers([]*pdpb.PeerStats{{
+		Peer:        peers[1],
+		DownSeconds: 24 * 60 * 60,
+	}}))
+	tc.PutRegion(region)
+	tc.SetStoreDown(2)
+
+	ops := controller.CheckRegion(region)
+	require.Len(t, ops, 1)
+	require.Equal(t, "replace-down-replica", ops[0].Desc())
 }
