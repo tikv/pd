@@ -15,10 +15,16 @@
 package utils
 
 import (
+	"context"
+	"io"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/docker/go-units"
 	"github.com/stretchr/testify/require"
+	"go.etcd.io/etcd/pkg/v3/report"
+	"google.golang.org/grpc"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
@@ -60,7 +66,7 @@ func TestRegionUpdateRatiosUseTotalRegionCount(t *testing.T) {
 	reportedIndexes := make(map[int]struct{}, 100)
 	for _, index := range rs.reportOrder[:100] {
 		reportedIndexes[index] = struct{}{}
-		require.Greater(t, rs.Regions[index].GetInterval().GetEndTimestamp(), initialIntervalEnds[index])
+		require.Equal(t, initialIntervalEnds[index], rs.Regions[index].GetInterval().GetEndTimestamp())
 	}
 	for _, indexes := range [][]int{rs.updateLeader, rs.updateEpoch, rs.updateSpace, rs.updateFlow} {
 		for _, index := range indexes {
@@ -71,9 +77,81 @@ func TestRegionUpdateRatiosUseTotalRegionCount(t *testing.T) {
 		require.Equal(t, initialIntervalEnds[index], rs.Regions[index].GetInterval().GetEndTimestamp())
 	}
 
+	reportTime := time.Unix(int64(initialIntervalEnds[0]+regionReportInterval), 0)
+	rs.PrepareReportIntervals(reportTime)
+	for index := range reportedIndexes {
+		require.Equal(t, initialIntervalEnds[index], rs.Regions[index].GetInterval().GetStartTimestamp())
+		require.Equal(t, uint64(reportTime.Unix()), rs.Regions[index].GetInterval().GetEndTimestamp())
+	}
+	for _, index := range rs.reportOrder[100:] {
+		require.Equal(t, initialIntervalEnds[index], rs.Regions[index].GetInterval().GetEndTimestamp())
+	}
+
 	firstReportedIDs := regionIDs(rs.ReportedRegions())
 	rs.Update(heartbeatconfig.NewOptions(cfg))
 	require.Equal(t, firstReportedIDs, regionIDs(rs.ReportedRegions()))
+	for index := range reportedIndexes {
+		require.Equal(t, uint64(reportTime.Unix()), rs.Regions[index].GetInterval().GetEndTimestamp())
+	}
+}
+
+func TestPrepareInitialReportIntervalsUsesRoundStart(t *testing.T) {
+	rs := NewRegions(3, 1, 1, &pdpb.RequestHeader{})
+	reportTime := time.Unix(1_000, 0)
+	rs.PrepareReportIntervals(reportTime)
+
+	for _, region := range rs.Regions {
+		require.Equal(t, uint64(940), region.GetInterval().GetStartTimestamp())
+		require.Equal(t, uint64(1_000), region.GetInterval().GetEndTimestamp())
+	}
+}
+
+func TestHotReadFlowCoversRegionReportInterval(t *testing.T) {
+	rs := NewRegions(1, 1, 1, &pdpb.RequestHeader{}, WithRandomSeed(42))
+	cfg := &heartbeatconfig.Config{
+		HotStoreCount:   1,
+		ReportRatio:     1,
+		FlowUpdateRatio: 1,
+	}
+	rs.Update(heartbeatconfig.NewOptions(cfg))
+	region := rs.ReportedRegions()[0]
+
+	require.GreaterOrEqual(t, region.GetBytesRead(), uint64(hotByteUnit*regionReportInterval))
+	require.GreaterOrEqual(t, region.GetKeysRead(), uint64(hotKeysUint*regionReportInterval))
+	require.GreaterOrEqual(t, region.GetQueryStats().GetGet(), uint64(hotQueryUnit*regionReportInterval))
+}
+
+type cancelingRegionHeartbeatClient struct {
+	grpc.ClientStream
+	cancel context.CancelFunc
+	sends  int
+}
+
+func (c *cancelingRegionHeartbeatClient) Send(*pdpb.RegionHeartbeatRequest) error {
+	c.sends++
+	c.cancel()
+	return nil
+}
+
+func (*cancelingRegionHeartbeatClient) Recv() (*pdpb.RegionHeartbeatResponse, error) {
+	return nil, io.EOF
+}
+
+func TestHandleRegionHeartbeatChecksCancellationBeforeEachSend(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	client := &cancelingRegionHeartbeatClient{cancel: cancel}
+	rep := report.NewReport("%.4f")
+	statsCh := rep.Stats()
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
+
+	(&Regions{}).HandleRegionHeartbeat(ctx, wg, client, 1, []*pdpb.RegionHeartbeatRequest{{}, {}}, rep)
+	wg.Wait()
+	close(rep.Results())
+	stats := <-statsCh
+
+	require.Equal(t, 1, client.sends)
+	require.Len(t, stats.Lats, 1)
 }
 
 func TestGroupReportedRegionsByLeader(t *testing.T) {

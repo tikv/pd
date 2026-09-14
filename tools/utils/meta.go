@@ -114,8 +114,8 @@ func PutStores(ctx context.Context, cli pdpb.PDClient, header *pdpb.RequestHeade
 }
 
 const (
-	defaultRegionSize    = 96 * units.MiB
-	defaultRegionKeys    = 960000
+	defaultRegionSize    = 256 * units.MiB
+	defaultRegionKeys    = 2560000
 	coldByteUnit         = 128
 	coldKeyUnit          = 8
 	queryUnit            = 8
@@ -307,13 +307,13 @@ func (rs *Regions) Update(options *config.Options) {
 	for _, i := range rs.updateFlow {
 		region := rs.Regions[i]
 		if region.Leader.StoreId <= uint64(workload.HotStoreCount) {
-			region.BytesWritten = uint64(hotByteUnit * (1 + rs.rng.Float64()) * 60)
-			region.BytesRead = uint64(hotByteUnit * (1 + rs.rng.Float64()) * 10)
-			region.KeysWritten = uint64(hotKeysUint * (1 + rs.rng.Float64()) * 60)
-			region.KeysRead = uint64(hotKeysUint * (1 + rs.rng.Float64()) * 10)
+			region.BytesWritten = uint64(hotByteUnit * (1 + rs.rng.Float64()) * regionReportInterval)
+			region.BytesRead = uint64(hotByteUnit * (1 + rs.rng.Float64()) * regionReportInterval)
+			region.KeysWritten = uint64(hotKeysUint * (1 + rs.rng.Float64()) * regionReportInterval)
+			region.KeysRead = uint64(hotKeysUint * (1 + rs.rng.Float64()) * regionReportInterval)
 			region.QueryStats = &pdpb.QueryStats{
-				Get: uint64(hotQueryUnit * (1 + rs.rng.Float64()) * 10),
-				Put: uint64(hotQueryUnit * (1 + rs.rng.Float64()) * 60),
+				Get: uint64(hotQueryUnit * (1 + rs.rng.Float64()) * regionReportInterval),
+				Put: uint64(hotQueryUnit * (1 + rs.rng.Float64()) * regionReportInterval),
 			}
 		} else {
 			region.BytesWritten = uint64(coldByteUnit * rs.rng.Float64())
@@ -326,14 +326,6 @@ func (rs *Regions) Update(options *config.Options) {
 			}
 		}
 		updatedStatisticsMap[i] = region
-	}
-	// Only advance the interval of reporting Regions. A Region that wakes up
-	// after several silent rounds reports the entire silent interval.
-	nextReportTimestamp := uint64(time.Now().Add(regionReportInterval * time.Second).Unix())
-	for _, i := range reportRegions {
-		region := rs.Regions[i]
-		region.Interval.StartTimestamp = region.Interval.EndTimestamp
-		region.Interval.EndTimestamp = max(nextReportTimestamp, region.Interval.StartTimestamp+regionReportInterval)
 	}
 	for _, i := range reportRegions {
 		region := rs.Regions[i]
@@ -349,6 +341,22 @@ func (rs *Regions) Update(options *config.Options) {
 	}
 
 	rs.AwakenRegions.Store(awakenRegions)
+}
+
+// PrepareReportIntervals updates reporting Regions with the actual round start
+// time. A Region that wakes up after silent rounds reports the whole interval
+// since its previous heartbeat.
+func (rs *Regions) PrepareReportIntervals(reportTime time.Time) {
+	endTimestamp := uint64(reportTime.Unix())
+	for _, region := range rs.ReportedRegions() {
+		if rs.UpdateRound == 0 {
+			region.Interval.StartTimestamp = endTimestamp - min(endTimestamp, uint64(regionReportInterval))
+			region.Interval.EndTimestamp = endTimestamp
+			continue
+		}
+		region.Interval.StartTimestamp = min(region.Interval.EndTimestamp, endTimestamp)
+		region.Interval.EndTimestamp = endTimestamp
+	}
 }
 
 func ratioCount(total int, ratio float64) int {
@@ -405,6 +413,7 @@ func (rs *Regions) MaxVersion() uint64 {
 // duration is client-side stream send/backpressure time, not PD processing
 // latency. Use PD's server-side metrics for processing latency.
 func (*Regions) HandleRegionHeartbeat(
+	ctx context.Context,
 	wg *sync.WaitGroup,
 	stream pdpb.PD_RegionHeartbeatClient,
 	storeID uint64,
@@ -415,6 +424,9 @@ func (*Regions) HandleRegionHeartbeat(
 	batchStart := time.Now()
 	var err error
 	for _, region := range regions {
+		if ctx.Err() != nil {
+			return
+		}
 		start := time.Now()
 		err = stream.Send(region)
 		rep.Results() <- report.Result{Start: start, End: time.Now(), Err: err}

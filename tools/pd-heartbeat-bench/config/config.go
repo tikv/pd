@@ -15,6 +15,7 @@
 package config
 
 import (
+	"math"
 	"sync/atomic"
 
 	"github.com/BurntSushi/toml"
@@ -42,10 +43,10 @@ const (
 	defaultRound             = 0
 	defaultSample            = false
 	defaultInitialVersion    = 1
-	defaultRegionKeys        = 960000
+	defaultRegionKeys        = 2560000
 	defaultRandomSeed        = 1
-	defaultRegionSize        = typeutil.ByteSize(96 * units.MiB)
-	defaultStoreCapacity     = typeutil.ByteSize(8 * units.TiB)
+	defaultRegionSize        = typeutil.ByteSize(256 * units.MiB)
+	defaultStoreCapacity     = typeutil.ByteSize(20 * units.TiB)
 
 	defaultLogFormat = "text"
 )
@@ -222,6 +223,20 @@ func (c *Config) Validate() error {
 	}
 	if c.HotStoreCount < 0 || c.HotStoreCount > c.StoreCount {
 		return errors.Errorf("hot-store-count must be in [0, store-count]")
+	}
+	for _, ratio := range []struct {
+		name  string
+		value float64
+	}{
+		{"report-ratio", c.ReportRatio},
+		{"leader-update-ratio", c.LeaderUpdateRatio},
+		{"epoch-update-ratio", c.EpochUpdateRatio},
+		{"space-update-ratio", c.SpaceUpdateRatio},
+		{"flow-update-ratio", c.FlowUpdateRatio},
+	} {
+		if math.IsNaN(ratio.value) || math.IsInf(ratio.value, 0) {
+			return errors.Errorf("%s must be finite", ratio.name)
+		}
 	}
 	if c.ReportRatio < 0 || c.ReportRatio > 1 {
 		return errors.Errorf("report-ratio must be in [0, 1]")

@@ -242,11 +242,28 @@ func formatMetrics(ms []metric) string {
 
 // CollectRegionAndStoreStats collects the region and store stats
 func CollectRegionAndStoreStats(regionStats *report.Stats, storeTime *float64) {
-	if regionStats != nil && storeTime != nil {
-		collectMu.Lock()
-		defer collectMu.Unlock()
-		collect(*regionStats, *storeTime)
+	if regionStats == nil || storeTime == nil || !isFinite(*storeTime) || !regionStatsAreFinite(*regionStats) {
+		return
 	}
+	collectMu.Lock()
+	defer collectMu.Unlock()
+	collect(*regionStats, *storeTime)
+}
+
+func isFinite(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0)
+}
+
+func regionStatsAreFinite(stats report.Stats) bool {
+	return isFinite(stats.Average) && isFinite(stats.Stddev) &&
+		isFinite(stats.Fastest) && isFinite(stats.Slowest) && isFinite(stats.RPS)
+}
+
+func finiteOrZero(value float64) float64 {
+	if !isFinite(value) {
+		return 0
+	}
+	return value
 }
 
 func collect(regionStats report.Stats, storeTime float64) {
@@ -283,10 +300,10 @@ func OutputConclusion() {
 func RegionFields(stats report.Stats, fields ...zap.Field) []zap.Field {
 	return append([]zap.Field{
 		zap.String("total", fmt.Sprintf("%.4fs", stats.Total.Seconds())),
-		zap.String("slowest", fmt.Sprintf("%.4fs", stats.Slowest)),
-		zap.String("fastest", fmt.Sprintf("%.4fs", stats.Fastest)),
-		zap.String("average", fmt.Sprintf("%.4fs", stats.Average)),
-		zap.String("stddev", fmt.Sprintf("%.4fs", stats.Stddev)),
-		zap.String("rps", fmt.Sprintf("%.4f", stats.RPS)),
+		zap.String("slowest", fmt.Sprintf("%.4fs", finiteOrZero(stats.Slowest))),
+		zap.String("fastest", fmt.Sprintf("%.4fs", finiteOrZero(stats.Fastest))),
+		zap.String("average", fmt.Sprintf("%.4fs", finiteOrZero(stats.Average))),
+		zap.String("stddev", fmt.Sprintf("%.4fs", finiteOrZero(stats.Stddev))),
+		zap.String("rps", fmt.Sprintf("%.4f", finiteOrZero(stats.RPS))),
 	}, fields...)
 }

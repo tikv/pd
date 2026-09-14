@@ -15,6 +15,7 @@
 package main
 
 import (
+	"container/heap"
 	"context"
 	"crypto/tls"
 	"fmt"
@@ -52,9 +53,16 @@ import (
 )
 
 const (
-	regionReportInterval = 60 // 60s
-	storeReportInterval  = 10 // 10s
-	storeRequestTimeout  = 5 * time.Second
+	regionReportInterval              = 60 // 60s
+	storeReportInterval               = 10 // 10s
+	storeHeartbeatsPerRegionHeartbeat = regionReportInterval / storeReportInterval
+	// Match TiKV's hot-peer thresholds and per-dimension report capacity.
+	hotPeerByteReportThreshold  uint64 = 8 * 1024 * storeReportInterval
+	hotPeerKeyReportThreshold   uint64 = 128 * storeReportInterval
+	hotPeerQueryReportThreshold uint64 = 128 * storeReportInterval
+	hotPeerReportCapacity              = 1000
+	hotPeerReportMetricCount           = 3
+	storeRequestTimeout                = 5 * time.Second
 )
 
 var clusterID uint64
@@ -305,7 +313,6 @@ func (s *Stores) update(rs *utils.Regions) {
 	// Region heartbeat flow values cover a 60-second interval. StoreHeartbeat
 	// reports every 10 seconds, so report one sixth on each tick. Only awake
 	// Regions contribute flow; a silent Region has no new activity by definition.
-	const storeHeartbeatsPerRegionHeartbeat = regionReportInterval / storeReportInterval
 	for _, region := range rs.ReportedRegions() {
 		store := stats[region.Leader.StoreId]
 		if hasRegionFlow(region) {
@@ -315,7 +322,7 @@ func (s *Stores) update(rs *utils.Regions) {
 			store.KeysRead += region.KeysRead / storeHeartbeatsPerRegionHeartbeat
 			store.QueryStats.Get += region.QueryStats.Get / storeHeartbeatsPerRegionHeartbeat
 			store.QueryStats.Put += region.QueryStats.Put / storeHeartbeatsPerRegionHeartbeat
-			store.PeerStats = append(store.PeerStats, &pdpb.PeerStat{
+			peerStat := &pdpb.PeerStat{
 				RegionId:     region.Region.Id,
 				ReadKeys:     region.KeysRead / storeHeartbeatsPerRegionHeartbeat,
 				ReadBytes:    region.BytesRead / storeHeartbeatsPerRegionHeartbeat,
@@ -325,12 +332,112 @@ func (s *Stores) update(rs *utils.Regions) {
 					Get: region.QueryStats.Get / storeHeartbeatsPerRegionHeartbeat,
 					Put: region.QueryStats.Put / storeHeartbeatsPerRegionHeartbeat,
 				},
-			})
+			}
+			if shouldReportReadPeerStat(peerStat) {
+				store.PeerStats = append(store.PeerStats, peerStat)
+			}
 		}
 	}
 	for i := 1; i < len(stats); i++ {
+		stats[i].PeerStats = selectHotPeerStats(stats[i].PeerStats)
 		s.stat[i].Store(stats[i])
 	}
+}
+
+func shouldReportReadPeerStat(peerStat *pdpb.PeerStat) bool {
+	return peerStat.GetReadBytes() >= hotPeerByteReportThreshold ||
+		peerStat.GetReadKeys() >= hotPeerKeyReportThreshold ||
+		readPeerQueryCount(peerStat) >= hotPeerQueryReportThreshold
+}
+
+func readPeerQueryCount(peerStat *pdpb.PeerStat) uint64 {
+	queryStats := peerStat.GetQueryStats()
+	return queryStats.GetGet() + queryStats.GetCoprocessor() + queryStats.GetScan()
+}
+
+type rankedPeerStat struct {
+	peerStat *pdpb.PeerStat
+	value    uint64
+}
+
+type rankedPeerStatHeap []rankedPeerStat
+
+func (h rankedPeerStatHeap) Len() int { return len(h) }
+
+func (h rankedPeerStatHeap) Less(i, j int) bool {
+	if h[i].value != h[j].value {
+		return h[i].value < h[j].value
+	}
+	return h[i].peerStat.GetRegionId() > h[j].peerStat.GetRegionId()
+}
+
+func (h rankedPeerStatHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
+
+func (h *rankedPeerStatHeap) Push(value any) {
+	*h = append(*h, value.(rankedPeerStat))
+}
+
+func (h *rankedPeerStatHeap) Pop() any {
+	old := *h
+	last := len(old) - 1
+	value := old[last]
+	*h = old[:last]
+	return value
+}
+
+func isBetterRankedPeerStat(candidate, current rankedPeerStat) bool {
+	return candidate.value > current.value ||
+		(candidate.value == current.value && candidate.peerStat.GetRegionId() < current.peerStat.GetRegionId())
+}
+
+func addTopPeerStats(
+	selected map[uint64]struct{},
+	peerStats []*pdpb.PeerStat,
+	value func(*pdpb.PeerStat) uint64,
+) {
+	top := make(rankedPeerStatHeap, 0, hotPeerReportCapacity)
+	heap.Init(&top)
+	for _, peerStat := range peerStats {
+		candidate := rankedPeerStat{peerStat: peerStat, value: value(peerStat)}
+		if top.Len() < hotPeerReportCapacity {
+			heap.Push(&top, candidate)
+			continue
+		}
+		if isBetterRankedPeerStat(candidate, top[0]) {
+			heap.Pop(&top)
+			heap.Push(&top, candidate)
+		}
+	}
+	for _, ranked := range top {
+		selected[ranked.peerStat.GetRegionId()] = struct{}{}
+	}
+}
+
+func selectHotPeerStats(peerStats []*pdpb.PeerStat) []*pdpb.PeerStat {
+	// TiKV reports the union of a bounded Top-N set for each generated read
+	// dimension. Per-Region CPU is not simulated by this benchmark.
+	if len(peerStats) < hotPeerReportCapacity*hotPeerReportMetricCount {
+		return peerStats
+	}
+
+	selected := make(map[uint64]struct{}, hotPeerReportCapacity*hotPeerReportMetricCount)
+	addTopPeerStats(selected, peerStats, func(peerStat *pdpb.PeerStat) uint64 {
+		return peerStat.GetReadKeys()
+	})
+	addTopPeerStats(selected, peerStats, func(peerStat *pdpb.PeerStat) uint64 {
+		return peerStat.GetReadBytes()
+	})
+	addTopPeerStats(selected, peerStats, func(peerStat *pdpb.PeerStat) uint64 {
+		return readPeerQueryCount(peerStat)
+	})
+
+	result := make([]*pdpb.PeerStat, 0, len(selected))
+	for _, peerStat := range peerStats {
+		if _, ok := selected[peerStat.GetRegionId()]; ok {
+			result = append(result, peerStat)
+		}
+	}
+	return result
 }
 
 func hasRegionFlow(region *pdpb.RegionHeartbeatRequest) bool {
@@ -487,12 +594,13 @@ func main() {
 			r := rep.Stats()
 
 			startTime := time.Now()
+			regions.PrepareReportIntervals(startTime)
 			wg := &sync.WaitGroup{}
 			regionsByLeader := regions.GroupReportedRegionsByLeader(cfg.StoreCount)
 			for i := 1; i <= cfg.StoreCount; i++ {
 				id := uint64(i)
 				wg.Add(1)
-				go regions.HandleRegionHeartbeat(wg, streams[id], id, regionsByLeader[id], rep)
+				go regions.HandleRegionHeartbeat(ctx, wg, streams[id], id, regionsByLeader[id], rep)
 			}
 			metricDone := make(chan struct{})
 			if withMetric {

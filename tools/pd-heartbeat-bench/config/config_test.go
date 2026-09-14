@@ -15,6 +15,8 @@
 package config
 
 import (
+	"math"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -29,6 +31,7 @@ func TestParseWithoutConfigUsesDefaults(t *testing.T) {
 	require.Equal(t, defaultRegionCount, cfg.RegionCount)
 	require.Equal(t, defaultReplica, cfg.Replica)
 	require.Equal(t, uint64(defaultRegionSize), uint64(cfg.RegionSize))
+	require.Equal(t, defaultRegionKeys, cfg.RegionKeys)
 	require.Equal(t, uint64(defaultStoreCapacity), uint64(cfg.StoreCapacity))
 }
 
@@ -36,11 +39,50 @@ func TestParseConfigTemplate(t *testing.T) {
 	cfg := NewConfig()
 	require.NoError(t, cfg.Parse([]string{"--config", filepath.Join("..", "config-template.toml")}))
 	require.Equal(t, 2_000_000, cfg.RegionCount)
-	require.Equal(t, uint64(96*units.MiB), uint64(cfg.RegionSize))
-	require.Equal(t, uint64(8*units.TiB), uint64(cfg.StoreCapacity))
+	require.Equal(t, uint64(256*units.MiB), uint64(cfg.RegionSize))
+	require.Equal(t, uint64(2_560_000), cfg.RegionKeys)
+	require.Equal(t, uint64(20*units.TiB), uint64(cfg.StoreCapacity))
+	usedSizePerStore := uint64(cfg.RegionCount*cfg.Replica) * uint64(cfg.RegionSize) / uint64(cfg.StoreCount)
+	require.Less(t, usedSizePerStore*5, uint64(cfg.StoreCapacity)*4)
 	require.Equal(t, 1.0, cfg.ReportRatio)
 	require.Equal(t, 0.35, cfg.FlowUpdateRatio)
 	require.False(t, cfg.DeleteOperators)
+}
+
+func TestParseRejectsNaNRatio(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nan.toml")
+	require.NoError(t, os.WriteFile(path, []byte("report-ratio = nan\n"), 0o600))
+
+	cfg := NewConfig()
+	require.ErrorContains(t, cfg.Parse([]string{"--config", path}), "report-ratio must be finite")
+}
+
+func TestValidateRejectsNaNUpdateRatios(t *testing.T) {
+	testCases := []struct {
+		name string
+		set  func(*Config)
+	}{
+		{"leader-update-ratio", func(cfg *Config) { cfg.LeaderUpdateRatio = math.NaN() }},
+		{"epoch-update-ratio", func(cfg *Config) { cfg.EpochUpdateRatio = math.NaN() }},
+		{"space-update-ratio", func(cfg *Config) { cfg.SpaceUpdateRatio = math.NaN() }},
+		{"flow-update-ratio", func(cfg *Config) { cfg.FlowUpdateRatio = math.NaN() }},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &Config{
+				InitEpochVer:  1,
+				StoreCount:    1,
+				RegionCount:   1,
+				Replica:       1,
+				RegionSize:    1,
+				RegionKeys:    1,
+				StoreCapacity: 1,
+				ReportRatio:   1,
+			}
+			tc.set(cfg)
+			require.ErrorContains(t, cfg.Validate(), tc.name+" must be finite")
+		})
+	}
 }
 
 func TestValidateUpdateRatiosUseTotalRegionCount(t *testing.T) {

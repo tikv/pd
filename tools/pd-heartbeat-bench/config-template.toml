@@ -3,9 +3,10 @@ round = 0
 store-count = 100
 hot-store-count = 10
 region-count = 2000000
-region-size = "96MiB"
-region-keys = 960000
-store-capacity = "8TiB"
+region-size = "256MiB"
+region-keys = 2560000
+# Keep the synthetic store above PD's low-space threshold at this Region count.
+store-capacity = "20TiB"
 random-seed = 1
 
 replica = 3

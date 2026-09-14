@@ -25,6 +25,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	heartbeatconfig "github.com/tikv/pd/tools/pd-heartbeat-bench/config"
@@ -150,6 +151,11 @@ func TestStoreStatsIncludeSilentRegions(t *testing.T) {
 		totalUsedSize += stats.GetUsedSize()
 		totalPeerStats += uint64(len(stats.GetPeerStats()))
 		totalBytesWritten += stats.GetBytesWritten()
+		for _, peerStat := range stats.GetPeerStats() {
+			require.GreaterOrEqual(t, peerStat.GetReadBytes(), hotPeerByteReportThreshold)
+			require.GreaterOrEqual(t, peerStat.GetReadKeys(), hotPeerKeyReportThreshold)
+			require.GreaterOrEqual(t, peerStat.GetQueryStats().GetGet(), hotPeerQueryReportThreshold)
+		}
 	}
 	require.Equal(t, uint64(regionCount*replicaCount), totalRegionCount)
 	require.Equal(t, uint64(regionCount*replicaCount*regionSize), totalUsedSize)
@@ -160,4 +166,50 @@ func TestStoreStatsIncludeSilentRegions(t *testing.T) {
 func TestHasRegionFlowIncludesReadOnlyTraffic(t *testing.T) {
 	require.True(t, hasRegionFlow(&pdpb.RegionHeartbeatRequest{BytesRead: 1}))
 	require.False(t, hasRegionFlow(&pdpb.RegionHeartbeatRequest{QueryStats: &pdpb.QueryStats{}}))
+}
+
+func TestStoreStatsFilterAndBoundPeerStats(t *testing.T) {
+	const groupSize = hotPeerReportCapacity + 1
+	regions := make([]*pdpb.RegionHeartbeatRequest, 0, groupSize*hotPeerReportMetricCount+1)
+	addRegion := func(id, readBytes, readKeys, readQueries uint64) {
+		regions = append(regions, &pdpb.RegionHeartbeatRequest{
+			Region:    &metapb.Region{Id: id, Peers: []*metapb.Peer{{Id: id, StoreId: 1}}},
+			Leader:    &metapb.Peer{Id: id, StoreId: 1},
+			BytesRead: readBytes * storeHeartbeatsPerRegionHeartbeat,
+			KeysRead:  readKeys * storeHeartbeatsPerRegionHeartbeat,
+			QueryStats: &pdpb.QueryStats{
+				Get: readQueries * storeHeartbeatsPerRegionHeartbeat,
+			},
+		})
+	}
+	for i := range groupSize {
+		addRegion(uint64(i+1), hotPeerByteReportThreshold+uint64(i), 0, 0)
+		addRegion(uint64(groupSize+i+1), 0, hotPeerKeyReportThreshold+uint64(i), 0)
+		addRegion(uint64(2*groupSize+i+1), 0, 0, hotPeerQueryReportThreshold+uint64(i))
+	}
+	coldRegionID := uint64(groupSize*hotPeerReportMetricCount + 1)
+	addRegion(
+		coldRegionID,
+		hotPeerByteReportThreshold-1,
+		hotPeerKeyReportThreshold-1,
+		hotPeerQueryReportThreshold-1,
+	)
+
+	rs := &utils.Regions{Regions: regions}
+	stores := newStores(1, 1<<60)
+	stores.update(rs)
+	peerStats := stores.stat[1].Load().(*pdpb.StoreStats).GetPeerStats()
+	require.Len(t, peerStats, hotPeerReportCapacity*hotPeerReportMetricCount)
+
+	reported := make(map[uint64]struct{}, len(peerStats))
+	for _, peerStat := range peerStats {
+		reported[peerStat.GetRegionId()] = struct{}{}
+	}
+	require.NotContains(t, reported, uint64(1))
+	require.NotContains(t, reported, uint64(groupSize+1))
+	require.NotContains(t, reported, uint64(2*groupSize+1))
+	require.NotContains(t, reported, coldRegionID)
+	require.Contains(t, reported, uint64(groupSize))
+	require.Contains(t, reported, uint64(2*groupSize))
+	require.Contains(t, reported, uint64(3*groupSize))
 }

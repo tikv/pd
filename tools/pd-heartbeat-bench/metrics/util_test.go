@@ -15,6 +15,7 @@
 package metrics
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -35,6 +36,28 @@ func TestCollectUsesIndependentWorkloadRoundCount(t *testing.T) {
 	require.Equal(t, 200.0, avgRegionStats.RPS)
 	require.Equal(t, 20.0, avgStoreTime)
 	require.Equal(t, 2, workloadStatsRounds)
+}
+
+func TestCollectSkipsEmptyReportStats(t *testing.T) {
+	avgRegionStats = report.Stats{}
+	avgStoreTime = 0
+	workloadStatsRounds = 0
+
+	rep := report.NewReport("%.4f")
+	statsCh := rep.Stats()
+	close(rep.Results())
+	stats := <-statsCh
+	require.True(t, math.IsNaN(stats.Average))
+
+	storeTime := 1.0
+	CollectRegionAndStoreStats(&stats, &storeTime)
+	require.Equal(t, 0, workloadStatsRounds)
+	require.Equal(t, report.Stats{}, avgRegionStats)
+	require.Zero(t, avgStoreTime)
+
+	fields := RegionFields(stats)
+	require.Equal(t, "0.0000s", fields[3].String)
+	require.Equal(t, "0.0000s", fields[4].String)
 }
 
 func TestPrometheusLatencyQueriesReturnMilliseconds(t *testing.T) {
