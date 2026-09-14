@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/stretchr/testify/require"
 
@@ -309,6 +310,9 @@ func MustFinishSplitKeyspaceGroup(re *require.Assertions, server *tests.TestServ
 			return false
 		}
 		if resp.StatusCode == http.StatusInternalServerError {
+			if !strings.Contains(string(data), "ErrKeyspaceGroupNotInSplit") {
+				return false
+			}
 			// A TSO server can finish the split after this test observes that the
 			// target group is ready but before this request reaches PD. Treat that
 			// race as success only after verifying the intended final state.
