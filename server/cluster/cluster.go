@@ -1530,12 +1530,13 @@ func (c *RaftCluster) PutMetaStore(store *metapb.Store) error {
 	// addStoreLimitInternal against resurrecting a removed entry: a plain
 	// pre-putStoreImpl snapshot can't distinguish a genuine first
 	// registration from one that raced a full concurrent register-then-bury
-	// of the same ID landing in between the snapshot and putStoreImpl
-	// actually running -- wasKnown would read false either way, incorrectly
-	// skipping the guard for the second case. storeStateLock (the same
-	// per-store lock RemoveStore/BuryStore/UpStore/checkStore hold) makes the
-	// whole snapshot-then-act sequence below atomic with respect to any of
-	// those for this store ID, closing that window. This is a plain
+	// (or manual tombstone removal, see RemoveTombStoneRecords) of the same
+	// ID landing in between the snapshot and putStoreImpl actually running --
+	// wasKnown would read false either way, incorrectly skipping the guard
+	// for the second case. storeStateLock (the same per-store lock
+	// RemoveStore/BuryStore/UpStore/checkStore/RemoveTombStoneRecords hold)
+	// makes the whole snapshot-then-act sequence below atomic with respect to
+	// any of those for this store ID, closing that window. This is a plain
 	// top-level entry point (only called from the gRPC PutStore handler),
 	// never invoked while already holding storeStateLock, so acquiring it
 	// here can't deadlock against them.
@@ -1783,6 +1784,7 @@ func (c *RaftCluster) getUpTikvStores() []uint64 {
 func (c *RaftCluster) BuryStore(storeID uint64, forceBury bool) error {
 	c.storeStateLock.Lock(uint32(storeID))
 	defer c.storeStateLock.Unlock(uint32(storeID))
+	failpoint.InjectCall("buryStoreAfterStateLock")
 	return c.BuryStoreLocked(storeID, forceBury)
 }
 
@@ -2208,7 +2210,27 @@ func (c *RaftCluster) RemoveTombStoneRecords() error {
 				continue
 			}
 			// the store has already been tombstone
-			err := c.deleteStore(store)
+			//
+			// deleteStore's other caller (checkStore) already holds
+			// storeStateLock for this ID; PutMetaStore holds it for its
+			// whole wasKnown-read-through-addStoreLimitInternal sequence
+			// (see its comment). Without this lock here too, this call could
+			// still run concurrently inside that window: PutMetaStore would
+			// correctly read wasKnown=true (the store is still tombstoned at
+			// that instant), but if this delete then completes before
+			// PutMetaStore reaches putStoreImpl, putStoreImpl observes nil
+			// and takes the brand-new-store path, durably recreating both
+			// the store and its limit despite wasKnown having been read
+			// correctly. This closes that overlap; it does not close the
+			// separate case where this call (and any prior bury) completes
+			// entirely before PutMetaStore's gRPC preflight-to-execution
+			// sequence even begins -- see the PR's Known limitations.
+			err := func() error {
+				c.storeStateLock.Lock(uint32(store.GetID()))
+				defer c.storeStateLock.Unlock(uint32(store.GetID()))
+				failpoint.InjectCall("removeTombStoneRecordsAfterStateLock")
+				return c.deleteStore(store)
+			}()
 			if err != nil {
 				log.Error("delete store failed",
 					zap.Stringer("store", store.GetMeta()),
@@ -2903,8 +2925,28 @@ func (c *RaftCluster) adjustNetworkSlowStore(storeID uint64) {
 		return
 	}
 	if c.GetAvgNetworkSlowScore(storeID) >= networkSlowStoreEvictThreshold {
+		// TriggerNetworkSlowEvict is already a no-op for a gone store (it
+		// guards on the store still being present internally), but the
+		// metric write below has no such guard. The check above isn't
+		// atomic with it: if bury and final deletion both complete in
+		// between, deleteStore's own DeleteLabelValues call -- the backstop
+		// this whole function's opening comment relies on -- has already
+		// run, and nothing else will ever call this function again for a
+		// store with no more heartbeats coming. Re-check right after the
+		// write instead of trusting that backstop to still be in the
+		// future: deleteStore always removes the store from StoresInfo
+		// before it calls DeleteLabelValues, so any read here that observes
+		// the store as gone is guaranteed (by that same ordering, and
+		// StoresInfo's shared lock) to also mean deleteStore's cleanup has
+		// either already run or is guaranteed to run and find nothing left
+		// to do -- either way this closes the window completely, not just
+		// narrows it.
+		failpoint.InjectCall("adjustNetworkSlowStoreBeforeWrite")
 		c.TriggerNetworkSlowEvict(storeID)
 		storeTriggerNetworkSlowEvict.WithLabelValues(strconv.FormatUint(storeID, 10)).Inc()
+		if store := c.GetStore(storeID); store == nil || store.IsRemoved() {
+			storeTriggerNetworkSlowEvict.DeleteLabelValues(strconv.FormatUint(storeID, 10))
+		}
 	}
 	// Note: Currently, only one network slow store needs to be considered.
 	// If multiple network slow stores need to be considered, the scores
