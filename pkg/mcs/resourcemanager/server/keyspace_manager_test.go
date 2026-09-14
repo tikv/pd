@@ -1108,3 +1108,54 @@ func TestConciliateFillRate(t *testing.T) {
 		}
 	}
 }
+
+func TestRUTrackerPreservesPositiveFractionalDemand(t *testing.T) {
+	re := require.New(t)
+	rt := newRUTracker(defaultRUTrackerTimeConstant)
+	now := time.Now()
+	rt.sample(0, now, 0)
+	rt.sample(0, now.Add(5*time.Second), 0)
+	re.True(rt.isInitialized())
+	re.Zero(rt.getRUPerSec())
+	rt.sample(0, now.Add(10*time.Second), 1)
+	re.InDelta(0.1, rt.getRUPerSec(), 1e-12)
+	// Preserve the existing cleanup of negligible demand on a zero sample.
+	rt.sample(0, now.Add(15*time.Second), 0)
+	re.Zero(rt.getRUPerSec())
+	re.True(rt.isInitialized())
+}
+
+func TestConciliateFractionalDemand(t *testing.T) {
+	re := require.New(t)
+	krgm := newKeyspaceResourceGroupManager(1, storage.NewStorageWithMemoryBackend())
+	krgm.setServiceLimit(50)
+	now := time.Now()
+	for _, name := range []string{"cold", "hot"} {
+		re.NoError(krgm.addResourceGroup(newTestResourceGroup(name, 8, 100, 100)))
+		grt := krgm.getOrCreateGroupRUTracker(name)
+		grt.sample(1, now, 0)
+		grt.sample(1, now.Add(5*time.Second), 0)
+		tokens := 1.0
+		if name == "hot" {
+			tokens = 800
+		}
+		grt.sample(1, now.Add(10*time.Second), tokens)
+	}
+	krgm.conciliateFillRates()
+	cold := krgm.getMutableResourceGroup("cold")
+	re.InDelta(0.1, cold.getOverrideFillRate(), 1e-12)
+	re.InDelta(50.0, cold.getOverrideFillRate()+krgm.getMutableResourceGroup("hot").getOverrideFillRate(), 1e-12)
+	// The fractional group allocation must remain usable by one or multiple slots.
+	for _, clientID := range []uint64{1, 2} {
+		result := cold.RequestRU(now.Add(10*time.Second), 0.1, 5000, clientID,
+			krgm.getGroupRUTracker("cold"), krgm.getServiceLimiter())
+		re.NotNil(result)
+		re.Greater(result.GrantedTokens.Tokens, 0.0)
+		re.LessOrEqual(result.GrantedTokens.Tokens, 0.1)
+	}
+	var sum float64
+	for _, slot := range cold.RUSettings.RU.tokenSlots {
+		sum += slot.fillRate
+	}
+	re.InDelta(0.1, sum, 1e-12)
+}
