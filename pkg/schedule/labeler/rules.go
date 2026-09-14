@@ -105,7 +105,7 @@ func NewLabelRuleFromJSON(data []byte) (*LabelRule, error) {
 	if err := json.Unmarshal(data, lr); err != nil {
 		return nil, err
 	}
-	if err := lr.checkAndAdjust(); err != nil {
+	if err := lr.CheckAndAdjust(); err != nil {
 		return nil, err
 	}
 	return lr, nil
@@ -202,7 +202,8 @@ func (rule *LabelRule) checkAndRemoveExpireLabels(now time.Time) bool {
 	return true
 }
 
-func (rule *LabelRule) checkAndAdjust() error {
+// CheckAndAdjust checks the validity of the LabelRule and adjusts it if necessary. It returns an error if the rule is invalid.
+func (rule *LabelRule) CheckAndAdjust() error {
 	if rule.ID == "" {
 		return errs.ErrRegionRuleContent.FastGenByArgs("empty rule id")
 	}

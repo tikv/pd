@@ -29,6 +29,7 @@ type RuleStorage interface {
 	LoadRules(f func(k, v string)) error
 	LoadRuleGroups(f func(k, v string)) error
 	LoadRegionRules(f func(k, v string)) error
+	LoadRegionRule(ruleKey string) (string, error)
 
 	// We need to use txn to avoid concurrent modification.
 	// And it is helpful for the scheduling server to watch the rule.
@@ -72,6 +73,12 @@ func (*StorageEndpoint) DeleteRuleGroup(txn kv.Txn, groupID string) error {
 // LoadRegionRules loads region rules from storage.
 func (se *StorageEndpoint) LoadRegionRules(f func(k, v string)) error {
 	return se.loadRangeByPrefix(keypath.RegionLabelPathPrefix(), f)
+}
+
+// LoadRegionRule loads a single region rule from storage. It returns an empty
+// string and a nil error if the rule does not exist.
+func (se *StorageEndpoint) LoadRegionRule(ruleKey string) (string, error) {
+	return se.Load(keypath.RegionLabelKeyPath(ruleKey))
 }
 
 // SaveRegionRule saves a region rule to the storage.
