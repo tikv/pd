@@ -143,9 +143,14 @@ func applyRecoveryPlan(re *require.Assertions, storeID uint64, storeReports map[
 						}
 					}
 					for _, failedVoter := range demote.GetFailedVoters() {
-						for _, peer := range region.GetPeers() {
+						for i, peer := range region.GetPeers() {
 							if failedVoter.GetId() == peer.GetId() {
-								peer.Role = metapb.PeerRole_Learner
+								if peer.Role == metapb.PeerRole_Learner {
+									// Remove learner peers
+									region.Peers = append(region.Peers[:i], region.Peers[i+1:]...)
+								} else {
+									peer.Role = metapb.PeerRole_Learner
+								}
 								break
 							}
 						}
@@ -815,7 +820,6 @@ func TestTiflashLearnerPeer(t *testing.T) {
 						RegionEpoch: &metapb.RegionEpoch{ConfVer: 8, Version: 10},
 						Peers: []*metapb.Peer{
 							{Id: 11, StoreId: 1},
-							{Id: 12, StoreId: 3, Role: metapb.PeerRole_Learner},
 							{Id: 13, StoreId: 5, Role: metapb.PeerRole_Learner},
 						}}}},
 		}},
@@ -1533,7 +1537,7 @@ func TestRangeOverlap1(t *testing.T) {
 						RegionEpoch: &metapb.RegionEpoch{ConfVer: 7, Version: 10},
 						Peers: []*metapb.Peer{
 							{Id: 11, StoreId: 1}, {Id: 12, StoreId: 4}, {Id: 13, StoreId: 5}}}}},
-		}},
+		}, Step: 1},
 		2: {PeerReports: []*pdpb.PeerReport{
 			{
 				RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
@@ -1544,8 +1548,8 @@ func TestRangeOverlap1(t *testing.T) {
 						EndKey:      []byte(""),
 						RegionEpoch: &metapb.RegionEpoch{ConfVer: 5, Version: 8},
 						Peers: []*metapb.Peer{
-							{Id: 21, StoreId: 1}, {Id: 22, StoreId: 4}, {Id: 23, StoreId: 5}}}}},
-		}},
+							{Id: 21, StoreId: 2}, {Id: 22, StoreId: 4}, {Id: 23, StoreId: 5}}}}},
+		}, Step: 1},
 		3: {PeerReports: []*pdpb.PeerReport{
 			{
 				RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
@@ -1556,8 +1560,8 @@ func TestRangeOverlap1(t *testing.T) {
 						EndKey:      []byte(""),
 						RegionEpoch: &metapb.RegionEpoch{ConfVer: 4, Version: 6},
 						Peers: []*metapb.Peer{
-							{Id: 31, StoreId: 1}, {Id: 32, StoreId: 4}, {Id: 33, StoreId: 5}}}}},
-		}},
+							{Id: 31, StoreId: 3}, {Id: 32, StoreId: 4}, {Id: 33, StoreId: 5}}}}},
+		}, Step: 1},
 	}
 
 	advanceUntilFinished(re, recoveryController, reports)
@@ -1585,7 +1589,7 @@ func TestRangeOverlap1(t *testing.T) {
 						EndKey:      []byte(""),
 						RegionEpoch: &metapb.RegionEpoch{ConfVer: 5, Version: 6},
 						Peers: []*metapb.Peer{
-							{Id: 31, StoreId: 1}, {Id: 32, StoreId: 4, Role: metapb.PeerRole_Learner}, {Id: 33, StoreId: 5, Role: metapb.PeerRole_Learner}}}}},
+							{Id: 31, StoreId: 3}, {Id: 32, StoreId: 4, Role: metapb.PeerRole_Learner}, {Id: 33, StoreId: 5, Role: metapb.PeerRole_Learner}}}}},
 		}},
 	}
 
@@ -1856,3 +1860,234 @@ func newTestStores(n uint64, version string) []*core.StoreInfo {
 func getTestDeployPath(storeID uint64) string {
 	return fmt.Sprintf("test/store%d", storeID)
 }
+<<<<<<< HEAD
+=======
+
+func TestTiFlashOrphanedPeerDemote(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
+	coordinator.Run()
+	for _, store := range newTestStores(4, "6.0.0") {
+		if store.GetID() == 3 {
+			store.GetMeta().Labels = []*metapb.StoreLabel{{Key: "engine", Value: "tiflash"}}
+		}
+		cluster.PutStore(store)
+	}
+	recoveryController := NewController(cluster)
+	// Mark stores 2 and 4 as failed (2 voters down)
+	re.NoError(recoveryController.RemoveFailedStores(map[uint64]struct{}{
+		2: {},
+		4: {},
+	}, 60, false))
+
+	reports := map[uint64]*pdpb.StoreReport{
+		// Store 1: voter with older data than TiFlash learner (last index 10) - only live voter
+		1: {PeerReports: []*pdpb.PeerReport{
+			{
+				RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
+				RegionState: &raft_serverpb.RegionLocalState{
+					Region: &metapb.Region{
+						Id:          1001,
+						StartKey:    []byte(""),
+						EndKey:      []byte("x"),
+						RegionEpoch: &metapb.RegionEpoch{ConfVer: 7, Version: 10},
+						Peers: []*metapb.Peer{
+							{Id: 11, StoreId: 1, Role: metapb.PeerRole_Voter},
+							{Id: 12, StoreId: 2, Role: metapb.PeerRole_Voter},
+							{Id: 13, StoreId: 3, Role: metapb.PeerRole_Learner},
+							{Id: 14, StoreId: 4, Role: metapb.PeerRole_Voter},
+						}}}},
+		}},
+		// Store 3: TiFlash learner with newer data (last index 12)
+		3: {PeerReports: []*pdpb.PeerReport{
+			{
+				RaftState: &raft_serverpb.RaftLocalState{LastIndex: 12, HardState: &eraftpb.HardState{Term: 1, Commit: 12}},
+				RegionState: &raft_serverpb.RegionLocalState{
+					Region: &metapb.Region{
+						Id:          1001,
+						StartKey:    []byte(""),
+						EndKey:      []byte("x"),
+						RegionEpoch: &metapb.RegionEpoch{ConfVer: 7, Version: 10},
+						Peers: []*metapb.Peer{
+							{Id: 11, StoreId: 1, Role: metapb.PeerRole_Voter},
+							{Id: 12, StoreId: 2, Role: metapb.PeerRole_Voter},
+							{Id: 13, StoreId: 3, Role: metapb.PeerRole_Learner},
+							{Id: 14, StoreId: 4, Role: metapb.PeerRole_Voter},
+						}}}},
+		}},
+	}
+
+	retry := 0
+	forcedLeaderFound := false
+	tombstoneFound := false
+	demoteStageFound := false
+
+	for {
+		for storeID, report := range reports {
+			req := newStoreHeartbeat(storeID, report)
+			req.StoreReport = report
+			resp := &pdpb.StoreHeartbeatResponse{}
+			recoveryController.HandleStoreHeartbeat(req, resp)
+
+			plan := resp.GetRecoveryPlan()
+			if plan != nil {
+				stage := recoveryController.GetStage()
+
+				if stage == TombstoneTiFlashLearner && len(plan.GetTombstones()) > 0 {
+					tombstoneFound = true
+					re.Contains(plan.GetTombstones(), uint64(1001))
+					re.Equal(uint64(3), storeID)
+				}
+
+				if stage == ForceLeader && plan.GetForceLeader() != nil && len(plan.GetForceLeader().GetEnterForceLeaders()) > 0 {
+					forcedLeaderFound = true
+					re.Contains(plan.GetForceLeader().GetEnterForceLeaders(), uint64(1001))
+					// Only store 1 should get force leader (the only live voter)
+					re.Equal(uint64(1), storeID)
+				}
+
+				if stage == DemoteFailedVoter && len(plan.GetDemotes()) > 0 {
+					demoteStageFound = true
+					found := false
+					for _, demote := range plan.GetDemotes() {
+						if demote.GetRegionId() == 1001 {
+							found = true
+							re.NotEmpty(demote.GetFailedVoters())
+							// Should include failed voters (stores 2, 4) and orphaned TiFlash peer (store 3)
+							failedStoreIDs := make(map[uint64]bool)
+							for _, peer := range demote.GetFailedVoters() {
+								failedStoreIDs[peer.GetStoreId()] = true
+							}
+							re.True(failedStoreIDs[2], "Failed voter store 2 should be demoted")
+							re.True(failedStoreIDs[4], "Failed voter store 4 should be demoted")
+							re.True(failedStoreIDs[3], "Orphaned TiFlash peer store 3 should be demoted")
+						}
+					}
+					re.True(found)
+				}
+			}
+
+			applyRecoveryPlan(re, storeID, reports, resp)
+		}
+		if recoveryController.GetStage() == Finished {
+			break
+		} else if recoveryController.GetStage() == Failed {
+			panic("Failed to recovery")
+		} else if retry >= 15 {
+			panic("retry timeout")
+		}
+		retry += 1
+	}
+
+	re.True(tombstoneFound, "TiFlash learner should be tombstoned")
+	re.True(forcedLeaderFound, "Another peer should be forced as leader")
+	re.True(demoteStageFound, "Demote stage should include the orphaned TiFlash peer")
+}
+
+func TestSelectLeader(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
+	coordinator.Run()
+	stores := newTestStores(6, "6.0.0")
+	labels := []*metapb.StoreLabel{
+		{
+			Key:   core.EngineKey,
+			Value: core.EngineTiFlash,
+		},
+	}
+	stores[5].IsTiFlash()
+	core.SetStoreLabels(labels)(stores[5])
+	for _, store := range stores {
+		cluster.PutStore(store)
+	}
+	recoveryController := NewController(cluster)
+
+	cases := []struct {
+		peers    []*regionItem
+		leaderID uint64
+	}{
+		{
+			peers: []*regionItem{
+				newPeer(1, 1, 10, 5, 4),
+				newPeer(2, 2, 9, 9, 8),
+			},
+			leaderID: 2,
+		},
+		{
+			peers: []*regionItem{
+				newPeer(1, 1, 10, 10, 9),
+				newPeer(2, 1, 8, 8, 15),
+				newPeer(3, 1, 12, 11, 11),
+			},
+			leaderID: 2,
+		},
+		{
+			peers: []*regionItem{
+				newPeer(1, 1, 9, 9, 11),
+				newPeer(2, 1, 10, 8, 7),
+				newPeer(3, 1, 11, 7, 6),
+			},
+			leaderID: 3,
+		},
+		{
+			peers: []*regionItem{
+				newPeer(1, 1, 11, 11, 8),
+				newPeer(2, 1, 11, 10, 10),
+				newPeer(3, 1, 11, 9, 8),
+			},
+			leaderID: 1,
+		},
+		{
+			peers: []*regionItem{
+				newPeer(6, 1, 11, 11, 9),
+				newPeer(1, 1, 11, 11, 8),
+				newPeer(2, 1, 11, 10, 10),
+				newPeer(3, 1, 11, 9, 8),
+			},
+			leaderID: 1,
+		},
+	}
+
+	for i, c := range cases {
+		peersMap := map[uint64][]*regionItem{
+			1: c.peers,
+		}
+		region := &metapb.Region{
+			Id: 1,
+		}
+		leader := recoveryController.selectLeader(peersMap, region)
+		re.Equal(leader.region().Id, c.leaderID, "case: %d", i)
+	}
+}
+
+func newPeer(storeID, term, lastIndex, committedIndex, appliedIndex uint64) *regionItem {
+	return &regionItem{
+		storeID: storeID,
+		report: &pdpb.PeerReport{
+			RaftState: &raft_serverpb.RaftLocalState{
+				HardState: &eraftpb.HardState{
+					Term:   term,
+					Commit: committedIndex,
+				},
+				LastIndex: lastIndex,
+			},
+			RegionState: &raft_serverpb.RegionLocalState{
+				Region: &metapb.Region{
+					Id: storeID,
+				},
+			},
+			AppliedIndex: appliedIndex,
+		},
+	}
+}
+>>>>>>> 402569546 (Unsafe Recovery: Add tombstoned tiflash learners into DemoteFailedVoters (#9554))
