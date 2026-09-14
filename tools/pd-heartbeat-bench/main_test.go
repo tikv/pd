@@ -20,11 +20,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/docker/go-units"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+
+	heartbeatconfig "github.com/tikv/pd/tools/pd-heartbeat-bench/config"
+	"github.com/tikv/pd/tools/utils"
 )
 
 type storeHeartbeatClient struct {
@@ -76,7 +80,7 @@ func TestStoreHeartbeatFailuresAreRecorded(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			stores := newStores(1)
+			stores := newStores(1, 1<<40)
 			stores.stat[1].Store(&pdpb.StoreStats{StoreId: 1})
 			stores.heartbeat(context.Background(), tc.client, 1)
 			count, storeID, err := stores.takeStoreHeartbeatFailures()
@@ -90,7 +94,7 @@ func TestStoreHeartbeatFailuresAreRecorded(t *testing.T) {
 }
 
 func TestStoreHeartbeatReporterFlushesBeforeDone(t *testing.T) {
-	stores := newStores(1)
+	stores := newStores(1, 1<<40)
 	stores.stat[1].Store(&pdpb.StoreStats{StoreId: 1})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -112,4 +116,48 @@ func TestStoreHeartbeatReporterFlushesBeforeDone(t *testing.T) {
 
 	count, _, _ := stores.takeStoreHeartbeatFailures()
 	require.Zero(t, count)
+}
+
+func TestStoreStatsIncludeSilentRegions(t *testing.T) {
+	const (
+		regionCount  = 100
+		replicaCount = 3
+		storeCount   = 10
+		regionSize   = 96 * units.MiB
+	)
+	rs := utils.NewRegions(
+		regionCount,
+		replicaCount,
+		storeCount,
+		&pdpb.RequestHeader{},
+		utils.WithRegionSize(regionSize),
+		utils.WithRandomSeed(9),
+	)
+	cfg := &heartbeatconfig.Config{
+		HotStoreCount:   storeCount,
+		ReportRatio:     0.1,
+		FlowUpdateRatio: 0.05,
+	}
+	rs.Update(heartbeatconfig.NewOptions(cfg))
+
+	stores := newStores(storeCount, 1<<60)
+	stores.update(rs)
+
+	var totalRegionCount, totalUsedSize, totalPeerStats, totalBytesWritten uint64
+	for storeID := 1; storeID <= storeCount; storeID++ {
+		stats := stores.stat[storeID].Load().(*pdpb.StoreStats)
+		totalRegionCount += uint64(stats.GetRegionCount())
+		totalUsedSize += stats.GetUsedSize()
+		totalPeerStats += uint64(len(stats.GetPeerStats()))
+		totalBytesWritten += stats.GetBytesWritten()
+	}
+	require.Equal(t, uint64(regionCount*replicaCount), totalRegionCount)
+	require.Equal(t, uint64(regionCount*replicaCount*regionSize), totalUsedSize)
+	require.Equal(t, uint64(5), totalPeerStats)
+	require.Positive(t, totalBytesWritten)
+}
+
+func TestHasRegionFlowIncludesReadOnlyTraffic(t *testing.T) {
+	require.True(t, hasRegionFlow(&pdpb.RegionHeartbeatRequest{BytesRead: 1}))
+	require.False(t, hasRegionFlow(&pdpb.RegionHeartbeatRequest{QueryStats: &pdpb.QueryStats{}}))
 }

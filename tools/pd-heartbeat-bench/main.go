@@ -18,7 +18,6 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"math/rand/v2"
 	"net/http"
 	"os"
 	"os/signal"
@@ -28,7 +27,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/docker/go-units"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-contrib/pprof"
@@ -46,8 +44,8 @@ import (
 	"github.com/tikv/pd/client/pkg/utils/grpcutil"
 	"github.com/tikv/pd/client/pkg/utils/tlsutil"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
-	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/tools/pd-heartbeat-bench/config"
 	"github.com/tikv/pd/tools/pd-heartbeat-bench/metrics"
 	"github.com/tikv/pd/tools/utils"
@@ -56,13 +54,10 @@ import (
 const (
 	regionReportInterval = 60 // 60s
 	storeReportInterval  = 10 // 10s
-	capacity             = 4 * units.TiB
+	storeRequestTimeout  = 5 * time.Second
 )
 
-var (
-	clusterID  uint64
-	maxVersion uint64 = 1
-)
+var clusterID uint64
 
 func newClient(ctx context.Context, cfg *config.Config) (pdpb.PDClient, error) {
 	tlsConfig, err := cfg.Security.ToClientTLSConfig()
@@ -120,7 +115,7 @@ func bootstrap(ctx context.Context, cli pdpb.PDClient) {
 
 	store := &metapb.Store{
 		Id:      1,
-		Address: fmt.Sprintf("mock://tikv-1:%d", 2),
+		Address: "mock://tikv-1:1",
 		Version: "9.0.0-alpha.1",
 	}
 	region := &metapb.Region{
@@ -145,8 +140,7 @@ func bootstrap(ctx context.Context, cli pdpb.PDClient) {
 	log.Info("bootstrapped")
 }
 
-func putStores(ctx context.Context, cfg *config.Config, cli pdpb.PDClient, stores *Stores) <-chan struct{} {
-	heartbeatWorkers := &sync.WaitGroup{}
+func putStores(ctx context.Context, cfg *config.Config, cli pdpb.PDClient) {
 	for i := uint64(1); i <= uint64(cfg.StoreCount); i++ {
 		store := &metapb.Store{
 			Id:      i,
@@ -162,30 +156,15 @@ func putStores(ctx context.Context, cfg *config.Config, cli pdpb.PDClient, store
 		if resp.GetHeader().GetError() != nil {
 			log.Fatal("failed to put store", zap.Uint64("store-id", i), zap.String("err", resp.GetHeader().GetError().String()))
 		}
-		heartbeatWorkers.Add(1)
-		go func(ctx context.Context, storeID uint64) {
-			defer heartbeatWorkers.Done()
-			heartbeatTicker := time.NewTicker(10 * time.Second)
-			defer heartbeatTicker.Stop()
-			for {
-				select {
-				case <-heartbeatTicker.C:
-					stores.heartbeat(ctx, cli, storeID)
-				case <-ctx.Done():
-					return
-				}
-			}
-		}(ctx, i)
 	}
-	reporterDone := make(chan struct{})
-	go func() {
-		defer close(reporterDone)
-		stores.reportStoreHeartbeatFailures(ctx, heartbeatWorkers)
-	}()
-	return reporterDone
 }
 
-func createHeartbeatStream(ctx context.Context, cfg *config.Config) (pdpb.PDClient, pdpb.PD_RegionHeartbeatClient) {
+func createHeartbeatStream(
+	ctx context.Context,
+	cfg *config.Config,
+	storeID uint64,
+	streamErrCh chan<- error,
+) (pdpb.PDClient, pdpb.PD_RegionHeartbeatClient) {
 	cli, err := newClient(ctx, cfg)
 	if err != nil {
 		log.Fatal("create client error", zap.Error(err))
@@ -196,16 +175,19 @@ func createHeartbeatStream(ctx context.Context, cfg *config.Config) (pdpb.PDClie
 	}
 
 	go func() {
-		failedRequest := 0
 		for {
 			resp, err := stream.Recv()
 			if err != nil {
-				log.Error("receive error", zap.Error(err), zap.Int("failed-request", failedRequest))
-				failedRequest++
+				select {
+				case streamErrCh <- errors.Annotatef(err, "store %d region heartbeat stream failed", storeID):
+				case <-ctx.Done():
+				}
+				return
 			}
 			if resp.GetHeader().GetError() != nil {
-				log.Error("receive error", zap.String("err", resp.GetHeader().GetError().String()), zap.Int("failed-request", failedRequest))
-				failedRequest++
+				log.Error("region heartbeat response error",
+					zap.Uint64("store-id", storeID),
+					zap.String("error", resp.GetHeader().GetError().String()))
 			}
 		}
 	}()
@@ -214,24 +196,43 @@ func createHeartbeatStream(ctx context.Context, cfg *config.Config) (pdpb.PDClie
 
 // Stores contains store stats with lock.
 type Stores struct {
-	stat []atomic.Value
-
+	stat                      []atomic.Value
+	lastHeartbeat             []atomic.Uint64
+	capacity                  uint64
 	heartbeatFailureMu        sync.Mutex
 	failedStoreHeartbeatCount uint64
 	lastFailedStoreID         uint64
 	lastStoreHeartbeatError   string
 }
 
-func newStores(storeCount int) *Stores {
-	return &Stores{
-		stat: make([]atomic.Value, storeCount+1),
+func newStores(storeCount int, capacity uint64) *Stores {
+	stores := &Stores{
+		stat:          make([]atomic.Value, storeCount+1),
+		lastHeartbeat: make([]atomic.Uint64, storeCount+1),
+		capacity:      capacity,
 	}
+	now := uint64(time.Now().Unix())
+	for storeID := 1; storeID <= storeCount; storeID++ {
+		stores.lastHeartbeat[storeID].Store(now)
+	}
+	return stores
 }
 
 func (s *Stores) heartbeat(ctx context.Context, cli pdpb.PDClient, storeID uint64) {
-	cctx, cancel := context.WithCancel(ctx)
+	template := s.stat[storeID].Load()
+	if template == nil {
+		log.Error("store heartbeat stats are not initialized", zap.Uint64("store-id", storeID))
+		return
+	}
+	stats := *template.(*pdpb.StoreStats)
+	now := uint64(time.Now().Unix())
+	stats.Interval = &pdpb.TimeInterval{
+		StartTimestamp: s.lastHeartbeat[storeID].Swap(now),
+		EndTimestamp:   now,
+	}
+	cctx, cancel := context.WithTimeout(ctx, storeRequestTimeout)
 	defer cancel()
-	resp, err := cli.StoreHeartbeat(cctx, &pdpb.StoreHeartbeatRequest{Header: header(), Stats: s.stat[storeID].Load().(*pdpb.StoreStats)})
+	resp, err := cli.StoreHeartbeat(cctx, &pdpb.StoreHeartbeatRequest{Header: header(), Stats: &stats})
 	if err == nil && resp.GetHeader().GetError() != nil {
 		err = errors.New(resp.GetHeader().GetError().String())
 	}
@@ -279,60 +280,125 @@ func (s *Stores) reportStoreHeartbeatFailures(ctx context.Context, heartbeatWork
 
 func (s *Stores) update(rs *utils.Regions) {
 	stats := make([]*pdpb.StoreStats, len(s.stat))
-	now := uint64(time.Now().Unix())
-	for i := range stats {
+	for i := 1; i < len(stats); i++ {
 		stats[i] = &pdpb.StoreStats{
 			StoreId:    uint64(i),
-			Capacity:   capacity,
-			Available:  capacity,
+			Capacity:   s.capacity,
+			Available:  s.capacity,
 			QueryStats: &pdpb.QueryStats{},
 			PeerStats:  make([]*pdpb.PeerStat, 0),
-			Interval: &pdpb.TimeInterval{
-				StartTimestamp: now - storeReportInterval,
-				EndTimestamp:   now,
-			},
 		}
 	}
-	var toUpdate []*pdpb.RegionHeartbeatRequest
-	updatedRegions := rs.AwakenRegions.Load()
-	if updatedRegions == nil {
-		toUpdate = rs.Regions
-	} else {
-		toUpdate = updatedRegions.([]*pdpb.RegionHeartbeatRequest)
-	}
-	for _, region := range toUpdate {
+	// Silent Regions still occupy space and count toward the store's complete
+	// Region inventory.
+	for _, region := range rs.Regions {
 		for _, peer := range region.Region.Peers {
 			store := stats[peer.StoreId]
 			store.UsedSize += region.ApproximateSize
-			store.Available -= region.ApproximateSize
 			store.RegionCount += 1
 		}
+	}
+	for i := 1; i < len(stats); i++ {
+		stats[i].Available = s.capacity - min(s.capacity, stats[i].UsedSize)
+	}
+
+	// Region heartbeat flow values cover a 60-second interval. StoreHeartbeat
+	// reports every 10 seconds, so report one sixth on each tick. Only awake
+	// Regions contribute flow; a silent Region has no new activity by definition.
+	const storeHeartbeatsPerRegionHeartbeat = regionReportInterval / storeReportInterval
+	for _, region := range rs.ReportedRegions() {
 		store := stats[region.Leader.StoreId]
-		if region.BytesWritten != 0 {
-			store.BytesWritten += region.BytesWritten
-			store.BytesRead += region.BytesRead
-			store.KeysWritten += region.KeysWritten
-			store.KeysRead += region.KeysRead
-			store.QueryStats.Get += region.QueryStats.Get
-			store.QueryStats.Put += region.QueryStats.Put
+		if hasRegionFlow(region) {
+			store.BytesWritten += region.BytesWritten / storeHeartbeatsPerRegionHeartbeat
+			store.BytesRead += region.BytesRead / storeHeartbeatsPerRegionHeartbeat
+			store.KeysWritten += region.KeysWritten / storeHeartbeatsPerRegionHeartbeat
+			store.KeysRead += region.KeysRead / storeHeartbeatsPerRegionHeartbeat
+			store.QueryStats.Get += region.QueryStats.Get / storeHeartbeatsPerRegionHeartbeat
+			store.QueryStats.Put += region.QueryStats.Put / storeHeartbeatsPerRegionHeartbeat
 			store.PeerStats = append(store.PeerStats, &pdpb.PeerStat{
 				RegionId:     region.Region.Id,
-				ReadKeys:     region.KeysRead,
-				ReadBytes:    region.BytesRead,
-				WrittenKeys:  region.KeysWritten,
-				WrittenBytes: region.BytesWritten,
-				QueryStats:   region.QueryStats,
+				ReadKeys:     region.KeysRead / storeHeartbeatsPerRegionHeartbeat,
+				ReadBytes:    region.BytesRead / storeHeartbeatsPerRegionHeartbeat,
+				WrittenKeys:  region.KeysWritten / storeHeartbeatsPerRegionHeartbeat,
+				WrittenBytes: region.BytesWritten / storeHeartbeatsPerRegionHeartbeat,
+				QueryStats: &pdpb.QueryStats{
+					Get: region.QueryStats.Get / storeHeartbeatsPerRegionHeartbeat,
+					Put: region.QueryStats.Put / storeHeartbeatsPerRegionHeartbeat,
+				},
 			})
 		}
 	}
-	for i := range stats {
+	for i := 1; i < len(stats); i++ {
 		s.stat[i].Store(stats[i])
 	}
 }
 
+func hasRegionFlow(region *pdpb.RegionHeartbeatRequest) bool {
+	return region.GetBytesWritten() != 0 || region.GetBytesRead() != 0 ||
+		region.GetKeysWritten() != 0 || region.GetKeysRead() != 0 ||
+		region.GetQueryStats().GetGet() != 0 || region.GetQueryStats().GetPut() != 0
+}
+
+func startStoreHeartbeats(ctx context.Context, clis map[uint64]pdpb.PDClient, stores *Stores) <-chan struct{} {
+	heartbeatWorkers := &sync.WaitGroup{}
+	for storeID, cli := range clis {
+		heartbeatWorkers.Add(1)
+		go func(storeID uint64, cli pdpb.PDClient) {
+			defer heartbeatWorkers.Done()
+			ticker := time.NewTicker(storeReportInterval * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					stores.heartbeat(ctx, cli, storeID)
+				case <-ctx.Done():
+					return
+				}
+			}
+		}(storeID, cli)
+	}
+	reporterDone := make(chan struct{})
+	go func() {
+		defer close(reporterDone)
+		stores.reportStoreHeartbeatFailures(ctx, heartbeatWorkers)
+	}()
+	return reporterDone
+}
+
+func startMinResolvedTSReports(ctx context.Context, clis map[uint64]pdpb.PDClient) {
+	requestHeader := &pdpb.RequestHeader{ClusterId: clusterID}
+	for storeID, cli := range clis {
+		go func(storeID uint64, cli pdpb.PDClient) {
+			ticker := time.NewTicker(time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					cctx, cancel := context.WithTimeout(ctx, storeRequestTimeout)
+					resp, err := cli.ReportMinResolvedTS(cctx, &pdpb.ReportMinResolvedTsRequest{
+						Header:        requestHeader,
+						StoreId:       storeID,
+						MinResolvedTs: tsoutil.TimeToTS(time.Now()),
+					})
+					cancel()
+					if err != nil {
+						log.Error("failed to report minimum resolved TS", zap.Uint64("store-id", storeID), zap.Error(err))
+						continue
+					}
+					if resp.GetHeader().GetError() != nil {
+						log.Error("minimum resolved TS response error",
+							zap.Uint64("store-id", storeID),
+							zap.String("error", resp.GetHeader().GetError().String()))
+					}
+				case <-ctx.Done():
+					return
+				}
+			}
+		}(storeID, cli)
+	}
+}
+
 func main() {
-	rand.New(rand.NewPCG(0, 0)) // Ensure consistent behavior multiple times
-	statistics.DisableDenoising()
 	cfg := config.NewConfig()
 	err := cfg.Parse(os.Args[1:])
 	defer logutil.LogPanic()
@@ -353,7 +419,6 @@ func main() {
 		log.Fatal("initialize logger error", zap.Error(err))
 	}
 
-	maxVersion = cfg.InitEpochVer
 	options := config.NewOptions(cfg)
 	// let PD have enough time to start
 	time.Sleep(5 * time.Second)
@@ -377,31 +442,42 @@ func main() {
 
 	initClusterID(ctx, cli)
 	go runHTTPServer(cfg, options)
-	regions := utils.NewRegions(cfg.RegionCount, cfg.Replica, cfg.StoreCount, header())
+	regions := utils.NewRegions(
+		cfg.RegionCount,
+		cfg.Replica,
+		cfg.StoreCount,
+		header(),
+		utils.WithInitialVersion(cfg.InitEpochVer),
+		utils.WithRegionSize(uint64(cfg.RegionSize)),
+		utils.WithRegionKeys(cfg.RegionKeys),
+		utils.WithRandomSeed(cfg.RandomSeed),
+	)
 	log.Info("finish init regions")
-	stores := newStores(cfg.StoreCount)
+	stores := newStores(cfg.StoreCount, uint64(cfg.StoreCapacity))
 	stores.update(regions)
 	bootstrap(ctx, cli)
-	heartbeatReporterDone := putStores(ctx, cfg, cli, stores)
+	putStores(ctx, cfg, cli)
 	log.Info("finish put stores")
 	clis := make(map[uint64]pdpb.PDClient, cfg.StoreCount)
-	httpCli := pdHttp.NewClient("tools-heartbeat-bench", []string{cfg.PDAddr}, pdHttp.WithTLSConfig(loadTLSConfig(cfg)))
-	go deleteOperators(ctx, httpCli)
+	if cfg.DeleteOperators {
+		log.Warn("periodic operator deletion is enabled; this creates a synthetic scheduler workload")
+		httpCli := pdHttp.NewClient("tools-heartbeat-bench", []string{cfg.PDAddr}, pdHttp.WithTLSConfig(loadTLSConfig(cfg)))
+		go deleteOperators(ctx, httpCli)
+	}
 	streams := make(map[uint64]pdpb.PD_RegionHeartbeatClient, cfg.StoreCount)
+	streamErrCh := make(chan error, cfg.StoreCount)
 	for i := 1; i <= cfg.StoreCount; i++ {
-		clis[uint64(i)], streams[uint64(i)] = createHeartbeatStream(ctx, cfg)
+		storeID := uint64(i)
+		clis[storeID], streams[storeID] = createHeartbeatStream(ctx, cfg, storeID, streamErrCh)
 	}
-	header := &pdpb.RequestHeader{
-		ClusterId: clusterID,
-	}
-	heartbeatTicker := time.NewTicker(regionReportInterval * time.Second)
-	defer heartbeatTicker.Stop()
-	resolvedTSTicker := time.NewTicker(time.Second)
-	defer resolvedTSTicker.Stop()
+	heartbeatReporterDone := startStoreHeartbeats(ctx, clis, stores)
+	startMinResolvedTSReports(ctx, clis)
+	heartbeatTimer := time.NewTimer(0)
+	defer heartbeatTimer.Stop()
 	withMetric := metrics.InitMetric2Collect(cfg.MetricsAddr)
 	for {
 		select {
-		case <-heartbeatTicker.C:
+		case <-heartbeatTimer.C:
 			if cfg.Round != 0 && regions.UpdateRound > cfg.Round {
 				cancel()
 				<-heartbeatReporterDone
@@ -412,46 +488,48 @@ func main() {
 
 			startTime := time.Now()
 			wg := &sync.WaitGroup{}
+			regionsByLeader := regions.GroupReportedRegionsByLeader(cfg.StoreCount)
 			for i := 1; i <= cfg.StoreCount; i++ {
 				id := uint64(i)
 				wg.Add(1)
-				go regions.HandleRegionHeartbeat(wg, streams[id], id, rep)
+				go regions.HandleRegionHeartbeat(wg, streams[id], id, regionsByLeader[id], rep)
 			}
+			metricDone := make(chan struct{})
 			if withMetric {
-				metrics.CollectMetrics(regions.UpdateRound, time.Second)
+				go func() {
+					metrics.CollectMetrics(regions.UpdateRound, time.Second)
+					close(metricDone)
+				}()
+			} else {
+				close(metricDone)
 			}
 			wg.Wait()
 
 			since := time.Since(startTime).Seconds()
 			close(rep.Results())
-			regions.Result(cfg.RegionCount, since)
+			regions.Result(since)
 			stats := <-r
-			log.Info("region heartbeat stats",
-				metrics.RegionFields(stats, zap.Uint64("max-epoch-version", maxVersion))...)
-			log.Info("store heartbeat stats", zap.String("max", fmt.Sprintf("%.4fs", since)))
-			metrics.CollectRegionAndStoreStats(&stats, &since)
-			regions.Update(cfg.RegionCount, cfg.Replica, options)
-			go stores.update(regions) // update stores in background, unusually region heartbeat is slower than store update.
-		case <-resolvedTSTicker.C:
-			wg := &sync.WaitGroup{}
-			for i := 1; i <= cfg.StoreCount; i++ {
-				id := uint64(i)
-				wg.Add(1)
-				go func(wg *sync.WaitGroup, id uint64) {
-					defer wg.Done()
-					cli := clis[id]
-					_, err := cli.ReportMinResolvedTS(ctx, &pdpb.ReportMinResolvedTsRequest{
-						Header:        header,
-						StoreId:       id,
-						MinResolvedTs: uint64(time.Now().Unix()),
-					})
-					if err != nil {
-						log.Error("send resolved TS error", zap.Uint64("store-id", id), zap.Error(err))
-						return
-					}
-				}(wg, id)
+			log.Info("region heartbeat client send stats",
+				metrics.RegionFields(stats, zap.Uint64("max-epoch-version", regions.MaxVersion()))...)
+			log.Info("region heartbeat round stats", zap.String("duration", fmt.Sprintf("%.4fs", since)))
+			if regions.UpdateRound >= metrics.WarmUpRound {
+				metrics.CollectRegionAndStoreStats(&stats, &since)
 			}
-			wg.Wait()
+			regions.Update(options)
+			stores.update(regions)
+			<-metricDone
+			if cfg.Round != 0 && regions.UpdateRound > cfg.Round {
+				cancel()
+				<-heartbeatReporterDone
+				exit(0)
+			}
+			delay := regionReportInterval*time.Second - time.Since(startTime)
+			heartbeatTimer.Reset(max(delay, 0))
+		case err := <-streamErrCh:
+			log.Error("region heartbeat stream stopped", zap.Error(err))
+			cancel()
+			<-heartbeatReporterDone
+			exit(1)
 		case <-ctx.Done():
 			log.Info("got signal to exit")
 			<-heartbeatReporterDone
@@ -505,12 +583,7 @@ func runHTTPServer(cfg *config.Config, options *config.Options) {
 	pprof.Register(engine)
 	engine.PUT("config", func(c *gin.Context) {
 		newCfg := cfg.Clone()
-		newCfg.HotStoreCount = options.GetHotStoreCount()
-		newCfg.FlowUpdateRatio = options.GetFlowUpdateRatio()
-		newCfg.LeaderUpdateRatio = options.GetLeaderUpdateRatio()
-		newCfg.EpochUpdateRatio = options.GetEpochUpdateRatio()
-		newCfg.SpaceUpdateRatio = options.GetSpaceUpdateRatio()
-		newCfg.ReportRatio = options.GetReportRatio()
+		applyWorkloadOptions(newCfg, options.Snapshot())
 		if err := c.BindJSON(&newCfg); err != nil {
 			c.String(http.StatusBadRequest, err.Error())
 			return
@@ -524,12 +597,7 @@ func runHTTPServer(cfg *config.Config, options *config.Options) {
 	})
 	engine.GET("config", func(c *gin.Context) {
 		output := cfg.Clone()
-		output.HotStoreCount = options.GetHotStoreCount()
-		output.FlowUpdateRatio = options.GetFlowUpdateRatio()
-		output.LeaderUpdateRatio = options.GetLeaderUpdateRatio()
-		output.EpochUpdateRatio = options.GetEpochUpdateRatio()
-		output.SpaceUpdateRatio = options.GetSpaceUpdateRatio()
-		output.ReportRatio = options.GetReportRatio()
+		applyWorkloadOptions(output, options.Snapshot())
 
 		c.IndentedJSON(http.StatusOK, output)
 	})
@@ -540,7 +608,7 @@ func runHTTPServer(cfg *config.Config, options *config.Options) {
 			return
 		}
 		secondInt, err := strconv.Atoi(second)
-		if err != nil {
+		if err != nil || secondInt <= 0 {
 			c.String(http.StatusBadRequest, "invalid second")
 			return
 		}
@@ -548,7 +616,18 @@ func runHTTPServer(cfg *config.Config, options *config.Options) {
 		c.IndentedJSON(http.StatusOK, "Successfully collect metrics")
 	})
 
-	_ = engine.Run(cfg.StatusAddr)
+	if err := engine.Run(cfg.StatusAddr); err != nil && !errors.ErrorEqual(err, http.ErrServerClosed) {
+		log.Error("heartbeat bench HTTP server stopped", zap.Error(err))
+	}
+}
+
+func applyWorkloadOptions(cfg *config.Config, options config.WorkloadOptions) {
+	cfg.HotStoreCount = options.HotStoreCount
+	cfg.ReportRatio = options.ReportRatio
+	cfg.LeaderUpdateRatio = options.LeaderUpdateRatio
+	cfg.EpochUpdateRatio = options.EpochUpdateRatio
+	cfg.SpaceUpdateRatio = options.SpaceUpdateRatio
+	cfg.FlowUpdateRatio = options.FlowUpdateRatio
 }
 
 func loadTLSConfig(cfg *config.Config) *tls.Config {
