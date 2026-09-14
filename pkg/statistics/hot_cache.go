@@ -98,6 +98,32 @@ func (w *HotCache) GetHotPeerStats(kind utils.RWType, minHotDegree int) map[uint
 	}
 }
 
+// GetHotPeerStatsForStores returns hot peer stats for the specified kind and stores.
+// It returns a map where the keys are store IDs and the values are slices of HotPeerStat.
+func (w *HotCache) GetHotPeerStatsForStores(kind utils.RWType, storeIDs []uint64, minHotDegree int) map[uint64][]*HotPeerStat {
+	ret := make(chan map[uint64][]*HotPeerStat, 1)
+	requested := append([]uint64(nil), storeIDs...)
+	collectRegionStatsTask := func(cache *HotPeerCache) {
+		ret <- cache.GetHotPeerStatsForStores(requested, minHotDegree)
+	}
+	var succ bool
+	switch kind {
+	case utils.Write:
+		succ = w.CheckWriteAsync(collectRegionStatsTask)
+	case utils.Read:
+		succ = w.CheckReadAsync(collectRegionStatsTask)
+	}
+	if !succ {
+		return nil
+	}
+	select {
+	case <-w.ctx.Done():
+		return nil
+	case result := <-ret:
+		return result
+	}
+}
+
 // IsRegionHot checks if the region is hot.
 func (w *HotCache) IsRegionHot(region *core.RegionInfo, minHotDegree int) bool {
 	retWrite := make(chan bool, 1)

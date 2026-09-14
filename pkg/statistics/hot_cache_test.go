@@ -50,3 +50,40 @@ func TestIsHot(t *testing.T) {
 		}
 	}
 }
+
+func TestHotCacheGetHotPeerStatsForStores(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	cache := NewHotCache(ctx, core.NewBasicCluster())
+
+	for _, kind := range []utils.RWType{utils.Read, utils.Write} {
+		peerCache := cache.readCache
+		if kind == utils.Write {
+			peerCache = cache.writeCache
+		}
+		antiCount := kind.DefaultAntiCount()
+		putTestHotPeer(peerCache, 1, 11, 3, antiCount, false)
+		putTestHotPeer(peerCache, 2, 21, 3, antiCount, false)
+		putTestHotPeer(peerCache, 3, 31, 3, antiCount, false)
+
+		stats := cache.GetHotPeerStatsForStores(kind, []uint64{1, 3}, 1)
+		re.NotNil(stats)
+		re.Equal([]uint64{11}, hotPeerRegionIDs(stats[1]))
+		re.Equal([]uint64{31}, hotPeerRegionIDs(stats[3]))
+		re.NotContains(stats, uint64(2))
+
+		stats = cache.GetHotPeerStatsForStores(kind, []uint64{99}, 1)
+		re.NotNil(stats)
+		re.Empty(stats)
+	}
+
+	canceledCtx, cancelImmediately := context.WithCancel(context.Background())
+	cancelImmediately()
+	canceledCache := &HotCache{
+		ctx:        canceledCtx,
+		readCache:  NewHotPeerCache(canceledCtx, core.NewBasicCluster(), utils.Read),
+		writeCache: NewHotPeerCache(canceledCtx, core.NewBasicCluster(), utils.Write),
+	}
+	re.Nil(canceledCache.GetHotPeerStatsForStores(utils.Read, []uint64{1}, 1))
+}
