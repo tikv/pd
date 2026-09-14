@@ -18,6 +18,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"time"
@@ -30,13 +31,20 @@ import (
 	"github.com/tikv/pd/pkg/utils/tempurl"
 )
 
-var statusAddress = flag.String("status-addr", "0.0.0.0:0", "status address")
+var statusAddress = flag.String("status-addr", "127.0.0.1:0", "status address")
 
 // RunHTTPServer runs a HTTP server to provide alloc address.
 func RunHTTPServer() *http.Server {
-	err := os.Setenv(tempurl.AllocURLFromUT, fmt.Sprintf("http://%s/alloc", *statusAddress))
+	// Bind before publishing the allocator URL so child test processes always
+	// receive the actual port and can connect as soon as they start.
+	listener, err := net.Listen("tcp", *statusAddress)
 	if err != nil {
-		fmt.Println(err)
+		log.Fatal("allocator server listen error", zap.Error(err))
+	}
+	addr := listener.Addr().String()
+	if err := os.Setenv(tempurl.AllocURLFromUT, fmt.Sprintf("http://%s/alloc", addr)); err != nil {
+		_ = listener.Close()
+		log.Fatal("set allocator URL failed", zap.Error(err))
 	}
 
 	gin.SetMode(gin.ReleaseMode)
@@ -48,9 +56,9 @@ func RunHTTPServer() *http.Server {
 		c.String(http.StatusOK, addr)
 	})
 
-	srv := &http.Server{Addr: *statusAddress, Handler: engine.Handler(), ReadHeaderTimeout: 3 * time.Second}
+	srv := &http.Server{Addr: addr, Handler: engine.Handler(), ReadHeaderTimeout: 3 * time.Second}
 	go func() {
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := srv.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatal("server listen error", zap.Error(err))
 		}
 	}()
