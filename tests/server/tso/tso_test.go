@@ -171,6 +171,12 @@ func (s *tsoTestSuite) TestLogicalOverflow() {
 
 func (s *tsoTestSuite) checkLogicalOverflow(cluster *tests.TestCluster) {
 	re := s.Require()
+	// Keep periodic updates from following wall-clock time so the physical advance below is caused by logical pressure.
+	const systemTimeSlowFailpoint = "github.com/tikv/pd/pkg/tso/systemTimeSlow"
+	re.NoError(failpoint.Enable(systemTimeSlowFailpoint, "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable(systemTimeSlowFailpoint))
+	}()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -189,14 +195,13 @@ func (s *tsoTestSuite) checkLogicalOverflow(cluster *tests.TestCluster) {
 	}()
 
 	var (
-		maxDuration   time.Duration
+		firstPhysical int64
 		lastTimestamp *pdpb.Timestamp
 	)
-	// Since the max logical count is 2 << 18 (262144), we request 20 times with 26214 count each time.
-	// This ensures that the logical part will definitely overflow once within the `updateInterval`.
+	// Since the max logical count is 1 << 18 (262144), request 20 times with 26214 count each time.
+	// This ensures that the logical part overflows and advances the physical part at least once.
 	count := (1 << 18) / 10
 	for range 20 {
-		begin := time.Now()
 		req := &pdpb.TsoRequest{
 			Header: testutil.NewRequestHeader(clusterID),
 			Count:  uint32(count),
@@ -204,15 +209,12 @@ func (s *tsoTestSuite) checkLogicalOverflow(cluster *tests.TestCluster) {
 		re.NoError(tsoClient.Send(req))
 		resp, err := tsoClient.Recv()
 		re.NoError(err)
-		// Record the max duration to validate whether the overflow is triggered later.
-		duration := time.Since(begin)
-		if duration > maxDuration {
-			maxDuration = duration
-		}
 		// Check the monotonicity of the timestamp.
 		timestamp := checkAndReturnTimestampResponse(re, req, resp)
 		re.NotNil(timestamp)
-		if lastTimestamp != nil {
+		if lastTimestamp == nil {
+			firstPhysical = timestamp.GetPhysical()
+		} else {
 			lastPhysical, curPhysical := lastTimestamp.GetPhysical(), timestamp.GetPhysical()
 			re.GreaterOrEqual(curPhysical, lastPhysical)
 			// If the physical time is the same, the logical time must be strictly increasing.
@@ -222,6 +224,5 @@ func (s *tsoTestSuite) checkLogicalOverflow(cluster *tests.TestCluster) {
 		}
 		lastTimestamp = timestamp
 	}
-	// Due to the overflow triggered, there at least one request duration greater than the `updateInterval`.
-	re.Greater(maxDuration, s.updateInterval)
+	re.Greater(lastTimestamp.GetPhysical(), firstPhysical)
 }
