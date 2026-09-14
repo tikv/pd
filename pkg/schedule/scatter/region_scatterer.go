@@ -143,9 +143,7 @@ func splitScatterReadCPUByStore(
 			continue
 		}
 		storeID := store.GetID()
-		if readCPU := recentMaxProvider.GetStoreReadCPURecentMax(storeID); readCPU > 0 {
-			readCPUByStore[storeID] = readCPU
-		}
+		readCPUByStore[storeID] = recentMaxProvider.GetStoreReadCPURecentMax(storeID)
 	}
 	return readCPUByStore
 }

@@ -803,6 +803,24 @@ func TestInternalScatterAllowsWhenReadCPUIsBelowLowWatermark(t *testing.T) {
 	re.Equal(uint64(4), targetLeader)
 }
 
+func TestInternalScatterSkipsWhenIdleTargetHasZeroReadCPU(t *testing.T) {
+	re := require.New(t)
+	scatterer, tc, region := newInternalScatterReadCPUTestFixture(t)
+	setUnifiedReadPoolThreadCount(tc)
+	setStoreReadCPU(tc, 1, 500)
+	setStoreReadCPU(tc, 4, 0)
+	region = core.RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{
+		Region:   region.GetMeta(),
+		Leader:   region.GetLeader(),
+		CpuStats: &pdpb.CPUStats{UnifiedRead: 400},
+	}, 0)
+	tc.PutRegion(region)
+
+	op, err := scatterer.ScatterInternal(region, "idle-zero-read-cpu", []byte("a"), []byte("z"))
+	re.ErrorIs(err, ErrInternalScatterBalancedReadCPU)
+	re.Nil(op)
+}
+
 func TestInternalScatterSkipsWhenReadCPUIsBalanced(t *testing.T) {
 	re := require.New(t)
 	scatterer, tc, region := newInternalScatterReadCPUTestFixture(t)
