@@ -117,7 +117,9 @@ func prepareWithEtcdConfig(
 	os.RemoveAll(cfg.Dir)
 	etcd, err := embed.StartEtcd(cfg)
 	re.NoError(err)
-	client, err := etcdutil.CreateEtcdClient(nil, cfg.ListenClientUrls, etcdutil.TestEtcdClientPurpose, true)
+	// These tests exercise the watchers directly and do not need endpoint health
+	// checks, whose auxiliary clients are closed asynchronously.
+	client, err := etcdutil.CreateEtcdClient(nil, cfg.ListenClientUrls, etcdutil.TestEtcdClientPurpose, false)
 	re.NoError(err)
 	<-etcd.Server.ReadyNotify()
 
