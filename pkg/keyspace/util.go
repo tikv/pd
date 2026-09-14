@@ -684,7 +684,7 @@ func (s *Cache) GetKeyspaceIDInRange(start, end uint32, limit int) ([]uint32, bo
 		}
 		ret = append(ret, item.keyspaceID)
 		found = true
-		return !(limit > 0 && len(ret) >= limit)
+		return limit <= 0 || len(ret) < limit
 	})
 	return ret, found
 }
