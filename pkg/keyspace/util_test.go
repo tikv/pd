@@ -194,12 +194,12 @@ func TestMakeLabelRule(t *testing.T) {
 	re := require.New(t)
 	testCases := []struct {
 		id                uint32
-		boundType         KeyType
+		boundType         regionBoundType
 		expectedLabelRule *labeler.LabelRule
 	}{
 		{
 			id:        0,
-			boundType: KeyTypeTxn,
+			boundType: txnRegionBound,
 			expectedLabelRule: &labeler.LabelRule{
 				ID:    "keyspaces/0",
 				Index: 0,
@@ -220,7 +220,7 @@ func TestMakeLabelRule(t *testing.T) {
 		},
 		{
 			id:        4242,
-			boundType: KeyTypeTxn,
+			boundType: txnRegionBound,
 			expectedLabelRule: &labeler.LabelRule{
 				ID:    "keyspaces/4242",
 				Index: 0,
@@ -241,7 +241,7 @@ func TestMakeLabelRule(t *testing.T) {
 		},
 		{
 			id:        4242,
-			boundType: KeyTypeRaw,
+			boundType: rawRegionBound,
 			expectedLabelRule: &labeler.LabelRule{
 				ID:    "keyspaces/4242",
 				Index: 0,
@@ -268,9 +268,9 @@ func TestMakeLabelRule(t *testing.T) {
 
 func TestKeyTypeToRegionBoundType(t *testing.T) {
 	re := require.New(t)
-	re.Equal(KeyTypeRaw, keyTypeToRegionBoundType(coreconstant.Raw))
-	re.Equal(KeyTypeTxn, keyTypeToRegionBoundType(coreconstant.Table))
-	re.Equal(KeyTypeTxn, keyTypeToRegionBoundType(coreconstant.Txn))
+	re.Equal(rawRegionBound, keyTypeToRegionBoundType(coreconstant.Raw))
+	re.Equal(txnRegionBound, keyTypeToRegionBoundType(coreconstant.Table))
+	re.Equal(txnRegionBound, keyTypeToRegionBoundType(coreconstant.Txn))
 }
 
 func TestParseKeyspaceIDFromLabelRule(t *testing.T) {
@@ -411,63 +411,69 @@ func TestExtractKeyspaceID(t *testing.T) {
 		name            string
 		key             []byte
 		expectedID      uint32
-		expectedKeyType KeyType
+		expectedKeyType regionBoundType
+		expectedOK      bool
 	}{
 		{
 			name:            "empty key",
 			key:             []byte{},
 			expectedID:      constant.MaxValidKeyspaceID,
-			expectedKeyType: KeyTypeTxn,
+			expectedKeyType: txnRegionBound,
+			expectedOK:      true,
 		},
 		{
 			name:            "keyspace 0 txn mode",
 			key:             MakeRegionBound(0).TxnLeftBound,
 			expectedID:      0,
-			expectedKeyType: KeyTypeTxn,
+			expectedKeyType: txnRegionBound,
+			expectedOK:      true,
 		},
 		{
 			name:            "keyspace 100 txn mode",
 			key:             MakeRegionBound(100).TxnLeftBound,
 			expectedID:      100,
-			expectedKeyType: KeyTypeTxn,
+			expectedKeyType: txnRegionBound,
+			expectedOK:      true,
 		},
 		{
 			name:            "keyspace 4242 txn mode",
 			key:             MakeRegionBound(4242).TxnLeftBound,
 			expectedID:      4242,
-			expectedKeyType: KeyTypeTxn,
+			expectedKeyType: txnRegionBound,
+			expectedOK:      true,
 		},
 		{
 			name:            "keyspace 0 raw mode ",
 			key:             MakeRegionBound(0).RawLeftBound,
 			expectedID:      0,
-			expectedKeyType: KeyTypeRaw,
+			expectedKeyType: rawRegionBound,
+			expectedOK:      true,
 		},
 		{
 			name:            "keyspace 100 raw mode (not supported)",
 			key:             MakeRegionBound(100).RawLeftBound,
 			expectedID:      100,
-			expectedKeyType: KeyTypeRaw,
+			expectedKeyType: rawRegionBound,
+			expectedOK:      true,
 		},
 		{
-			name:            "non-keyspace key (table key)",
-			key:             codec.EncodeBytes([]byte{'t', 1, 2, 3}),
-			expectedID:      0,
-			expectedKeyType: KeyTypeClassical,
+			name:       "non-keyspace key (table key)",
+			key:        codec.EncodeBytes([]byte{'t', 1, 2, 3}),
+			expectedOK: false,
 		},
 		{
-			name:            "short key",
-			key:             codec.EncodeBytes([]byte{'x'}),
-			expectedID:      0,
-			expectedKeyType: KeyTypeClassical,
+			name:       "short key",
+			key:        codec.EncodeBytes([]byte{'x'}),
+			expectedOK: false,
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(_ *testing.T) {
-			id, kt := ExtractKeyspaceID(tc.key)
-			re.Equal(tc.expectedKeyType, kt, "test case: %s", tc.name)
-			if tc.expectedKeyType != KeyTypeClassical {
+			id, kt, ok := ExtractKeyspaceID(tc.key)
+			re.Equal(tc.expectedOK, ok, "test case: %s", tc.name)
+			if tc.expectedOK {
+				re.Equal(tc.expectedKeyType, kt, "test case: %s", tc.name)
 				re.Equal(tc.expectedID, id, "test case: %s", tc.name)
 			}
 		})

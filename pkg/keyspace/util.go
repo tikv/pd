@@ -152,14 +152,14 @@ func MakeRegionBound(id uint32) *RegionBound {
 // region bound. Used by tests and pd-ctl.
 func MakeKeyRanges(id uint32, keyType string) []any {
 	if keyType == coreconstant.Raw.String() {
-		return buildKeyRanges(id, KeyTypeRaw)
+		return buildKeyRanges(id, rawRegionBound)
 	}
-	return buildKeyRanges(id, KeyTypeTxn)
+	return buildKeyRanges(id, txnRegionBound)
 }
 
-func buildKeyRanges(id uint32, boundType KeyType) []any {
+func buildKeyRanges(id uint32, boundType regionBoundType) []any {
 	regionBound := MakeRegionBound(id)
-	if boundType == KeyTypeTxn {
+	if boundType == txnRegionBound {
 		return []any{
 			map[string]any{
 				"start_key": hex.EncodeToString(regionBound.TxnLeftBound),
@@ -182,10 +182,10 @@ func getRegionLabelID(id uint32) string {
 
 // MakeTxnLabelRule makes the label rule for the given keyspace id, only for test
 func MakeTxnLabelRule(id uint32) *labeler.LabelRule {
-	return buildLabelRule(id, KeyTypeTxn)
+	return buildLabelRule(id, txnRegionBound)
 }
 
-func buildLabelRule(id uint32, boundType KeyType) *labeler.LabelRule {
+func buildLabelRule(id uint32, boundType regionBoundType) *labeler.LabelRule {
 	return &labeler.LabelRule{
 		ID:    getRegionLabelID(id),
 		Index: 0,
@@ -382,33 +382,27 @@ func isProtectedKeyspaceName(name string) bool {
 	return name == constant.DefaultKeyspaceName
 }
 
-// KeyType represents the type of the key, which can be raw key or txn key.
-type KeyType int
+// regionBoundType represents a keyspace region boundary's mode, raw or txn.
+type regionBoundType int
 
 const (
-	// KeyTypeRaw represents the raw keyspace, which is used for KV operations without transaction.
-	KeyTypeRaw KeyType = iota
-	// KeyTypeTxn represents the txn keyspace, which is used for KV operations with transaction.
-	KeyTypeTxn
-	// KeyTypeClassical represents the classical key, the key is not part of the new keyspace system.
-	KeyTypeClassical
+	// rawRegionBound represents the raw keyspace, which is used for KV operations without transaction.
+	rawRegionBound regionBoundType = iota
+	// txnRegionBound represents the txn keyspace, which is used for KV operations with transaction.
+	txnRegionBound
 )
 
-// String returns the string representation of the KeyType.
-func (t KeyType) String() string {
-	switch t {
-	case KeyTypeRaw:
+// String returns the string representation of the regionBoundType.
+func (t regionBoundType) String() string {
+	if t == rawRegionBound {
 		return "raw"
-	case KeyTypeTxn:
-		return "txn"
-	default:
-		return "classical"
 	}
+	return "txn"
 }
 
 // bounds returns the left and right boundary of the given RegionBound for this key type.
-func (t KeyType) bounds(b *RegionBound) (lo, hi []byte) {
-	if t == KeyTypeRaw {
+func (t regionBoundType) bounds(b *RegionBound) (lo, hi []byte) {
+	if t == rawRegionBound {
 		return b.RawLeftBound, b.RawRightBound
 	}
 	return b.TxnLeftBound, b.TxnRightBound
@@ -417,47 +411,46 @@ func (t KeyType) bounds(b *RegionBound) (lo, hi []byte) {
 // keyTypeToRegionBoundType converts the cluster's key type to the corresponding
 // keyspace key type (raw or txn).
 // ref rfc: https://github.com/tikv/rfcs/blob/master/text/0069-api-v2.md
-func keyTypeToRegionBoundType(keyType coreconstant.KeyType) KeyType {
+func keyTypeToRegionBoundType(keyType coreconstant.KeyType) regionBoundType {
 	if keyType == coreconstant.Raw {
-		return KeyTypeRaw
+		return rawRegionBound
 	}
-	return KeyTypeTxn
+	return txnRegionBound
 }
 
-func keyTypeStringToRegionBoundType(keyType string) KeyType {
+func keyTypeStringToRegionBoundType(keyType string) regionBoundType {
 	if keyType == coreconstant.Raw.String() {
-		return KeyTypeRaw
+		return rawRegionBound
 	}
-	return KeyTypeTxn
+	return txnRegionBound
 }
 
-// ExtractKeyspaceID extracts the keyspace ID from a region key.
-// It returns the keyspace ID and the key type. A key that is not a
-// memcomparable-encoded keyspace key (empty aside) is reported as
-// KeyTypeClassical.
+// ExtractKeyspaceID extracts the keyspace ID and region bound type (raw or
+// txn) from a region key. ok is false when key is not a memcomparable-encoded
+// keyspace key, in which case id and bound are left at their zero value.
 // The key format is: [mode_prefix][keyspace_id_3bytes][...], where mode_prefix
 // is 'x' for txn and 'r' for raw. An empty key belongs to the max txn keyspace.
-func ExtractKeyspaceID(key []byte) (uint32, KeyType) {
+func ExtractKeyspaceID(key []byte) (id uint32, bound regionBoundType, ok bool) {
 	// Empty key represents the start of the entire key space (no keyspace).
 	if len(key) == 0 {
-		return constant.MaxValidKeyspaceID, KeyTypeTxn
+		return constant.MaxValidKeyspaceID, txnRegionBound, true
 	}
 
 	_, decoded, err := codec.DecodeBytes(key)
 	if err != nil {
-		return 0, KeyTypeClassical
+		return 0, 0, false
 	}
-	mode, id, ok := codec.ParseKeyspacePrefix(decoded)
-	if !ok {
-		return 0, KeyTypeClassical
+	mode, id, parsed := codec.ParseKeyspacePrefix(decoded)
+	if !parsed {
+		return 0, 0, false
 	}
 	switch mode {
 	case codec.RawKeyspaceModePrefix:
-		return id, KeyTypeRaw
+		return id, rawRegionBound, true
 	case codec.TxnKeyspaceModePrefix:
-		return id, KeyTypeTxn
+		return id, txnRegionBound, true
 	default:
-		return 0, KeyTypeClassical
+		return 0, 0, false
 	}
 }
 
@@ -494,19 +487,20 @@ func RegionSpansMultipleKeyspaces(startKey, endKey []byte, checker Checker) bool
 		return false
 	}
 	var startKeyspaceID uint32
-	var startKT KeyType
+	var startKT regionBoundType
+	var startOK bool
 	if len(startKey) == 0 {
-		startKeyspaceID, startKT = constant.StartKeyspaceID, KeyTypeRaw
+		startKeyspaceID, startKT, startOK = constant.StartKeyspaceID, rawRegionBound, true
 	} else {
-		startKeyspaceID, startKT = ExtractKeyspaceID(startKey)
+		startKeyspaceID, startKT, startOK = ExtractKeyspaceID(startKey)
 	}
 
-	endKeyspaceID, endKT := ExtractKeyspaceID(endKey)
+	endKeyspaceID, endKT, endOK := ExtractKeyspaceID(endKey)
 
 	// If both keys have no recognizable keyspace ID (or the end key is simply
 	// absent), the region carries no keyspace boundary information at all, so it
 	// does not span multiple keyspaces.
-	if startKT == KeyTypeClassical && (endKT == KeyTypeClassical || len(endKey) == 0) {
+	if !startOK && (!endOK || len(endKey) == 0) {
 		return false
 	}
 
@@ -514,7 +508,7 @@ func RegionSpansMultipleKeyspaces(startKey, endKey []byte, checker Checker) bool
 	// This can happen when the key is not in the expected format, or when there is a hole in keyspace allocation.
 	// For example, if startKey has valid keyspace ID but endKey is invalid, we cannot determine the keyspace boundary,
 	// thus we consider it spans multiple keyspaces to be safe.
-	if startKT == KeyTypeClassical || endKT == KeyTypeClassical {
+	if !startOK || !endOK {
 		return true
 	}
 
@@ -525,7 +519,7 @@ func RegionSpansMultipleKeyspaces(startKey, endKey []byte, checker Checker) bool
 	// If startKey is raw key and endKey is txn key, it must span multiple keyspaces, because raw key usually the rightmost key and the txn the smallest key.
 	// So it must cross the boundary between raw keyspace and txn keyspace, which means it spans multiple keyspaces.
 	// such as this ['r200','x100'], it may cross keyspace (200, MaxValidKeyspaceID]
-	if startKT == KeyTypeRaw && endKT == KeyTypeTxn {
+	if startKT == rawRegionBound && endKT == txnRegionBound {
 		return true
 	}
 
@@ -571,13 +565,13 @@ func GetKeyspaceSplitKeys(startKey, endKey []byte, keyType coreconstant.KeyType,
 	// runs to the end of this mode's keyspace space.
 	startID := constant.StartKeyspaceID
 	if len(startKey) != 0 {
-		if id, kt := ExtractKeyspaceID(startKey); kt == boundType {
+		if id, kt, ok := ExtractKeyspaceID(startKey); ok && kt == boundType {
 			startID = id
 		}
 	}
 	endID := constant.MaxValidKeyspaceID
 	if len(endKey) != 0 {
-		if id, kt := ExtractKeyspaceID(endKey); kt == boundType {
+		if id, kt, ok := ExtractKeyspaceID(endKey); ok && kt == boundType {
 			endID = id
 		}
 	}
