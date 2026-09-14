@@ -100,6 +100,18 @@ func CreateKeyspaceGroups(c *gin.Context) {
 
 // GetKeyspaceGroups gets keyspace groups from the start ID with limit.
 // If limit is 0, it will load all keyspace groups from the start ID.
+//
+//	@Tags		tso-keyspace-groups
+//	@Summary	Get keyspace groups.
+//	@Param		page_token		query	string	false	"The keyspace group ID to start scanning from."
+//	@Param		limit			query	string	false	"The maximum number of keyspace groups to return."
+//	@Param		state			query	string	false	"Filter keyspace groups by state: merge or split."
+//	@Param		hide_keyspaces	query	bool	false	"Whether to omit the keyspace IDs from the response."	default(false)
+//	@Produce	json
+//	@Success	200	{array}		endpoint.KeyspaceGroup
+//	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/tso/keyspace-groups [get]
 func GetKeyspaceGroups(c *gin.Context) {
 	scanStart, scanLimit, err := parseLoadAllQuery(c)
 	if err != nil {
@@ -151,6 +163,16 @@ type GetKeyspaceGroupPrimaryResponse struct {
 }
 
 // GetKeyspaceGroupByID gets keyspace group by ID.
+//
+//	@Tags		tso-keyspace-groups
+//	@Summary	Get a keyspace group by ID.
+//	@Param		id				path	uint32	true	"Keyspace group ID."
+//	@Param		hide_keyspaces	query	bool	false	"Whether to omit the keyspace IDs from the response."	default(false)
+//	@Produce	json
+//	@Success	200	{object}	endpoint.KeyspaceGroup
+//	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/tso/keyspace-groups/{id} [get]
 func GetKeyspaceGroupByID(c *gin.Context) {
 	id, err := validateKeyspaceGroupID(c)
 	if err != nil {
@@ -222,7 +244,7 @@ func newKeyspaceGroupResponse(kg *endpoint.KeyspaceGroup, hideKeyspaces bool) *k
 }
 
 func hideKeyspaces(c *gin.Context) bool {
-	return c.Query(hideKeyspacesQueryName) == "true"
+	return strings.ToLower(c.Query(hideKeyspacesQueryName)) == "true"
 }
 
 // DeleteKeyspaceGroupByID deletes keyspace group by ID.
