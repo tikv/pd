@@ -334,6 +334,52 @@ func TestRangeGap(t *testing.T) {
 	re.Error(err)
 }
 
+func TestGetIsolationPrefix(t *testing.T) {
+	re := require.New(t)
+
+	rule := func(group, id, isolationLevel string, locationLabels ...string) *Rule {
+		return &Rule{
+			GroupID:        group,
+			ID:             id,
+			Role:           Voter,
+			Count:          3,
+			LocationLabels: locationLabels,
+			IsolationLevel: isolationLevel,
+		}
+	}
+
+	// The default rule carries no isolation level, so nothing is isolated yet.
+	_, manager := newTestManager(t, false)
+	_, ok := manager.GetIsolationPrefix()
+	re.False(ok)
+
+	// A single rule yields the prefix up to its isolation level.
+	re.NoError(manager.SetRule(rule(DefaultGroupID, DefaultRuleID, "rack", "zone", "rack", "host")))
+	labels, ok := manager.GetIsolationPrefix()
+	re.True(ok)
+	re.Equal([]string{"zone", "rack"}, labels)
+
+	// A second rule that disagrees vetoes the result.
+	re.NoError(manager.SetRule(rule(DefaultGroupID, "conflict", "zone", "zone", "rack", "host")))
+	_, ok = manager.GetIsolationPrefix()
+	re.False(ok)
+
+	// The same conflicting rule stays persisted but is overridden by a higher-index group,
+	// so it no longer applies to any range and must not affect the prefix.
+	re.NoError(manager.SetRuleGroup(&RuleGroup{ID: "override", Index: 100, Override: true}))
+	re.NoError(manager.SetRule(rule("override", "1", "rack", "zone", "rack", "host")))
+	re.NotNil(manager.GetRule(DefaultGroupID, "conflict"))
+	labels, ok = manager.GetIsolationPrefix()
+	re.True(ok)
+	re.Equal([]string{"zone", "rack"}, labels)
+
+	// Mutating the returned slice must not corrupt the rule it was derived from.
+	labels[0] = "mutated"
+	labels, ok = manager.GetIsolationPrefix()
+	re.True(ok)
+	re.Equal([]string{"zone", "rack"}, labels)
+}
+
 func TestGroupConfig(t *testing.T) {
 	re := require.New(t)
 	_, manager := newTestManager(t, false)
