@@ -16,15 +16,20 @@ package keyspace
 
 import (
 	"context"
+	"crypto/tls"
+	"errors"
 	"fmt"
 	"math"
+	"strings"
 
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/server/config"
 )
@@ -33,6 +38,7 @@ import (
 type MetaServiceGroupManager struct {
 	store endpoint.MetaServiceGroupStorage
 	syncutil.RWMutex
+	tlsConfig *tls.Config
 	// metaServiceGroups is the available external meta-service groups.
 	// The key is the meta-service group name, and the value is the corresponding endpoint.
 	metaServiceGroups map[string]string
@@ -54,10 +60,12 @@ func (m *MetaServiceGroupManager) SetKeyspaceAssignmentCounter(counter func(grou
 func NewMetaServiceGroupManager(
 	store endpoint.MetaServiceGroupStorage,
 	metaServiceGroups map[string]string,
+	tlsConfig *tls.Config,
 ) *MetaServiceGroupManager {
 	return &MetaServiceGroupManager{
 		store:             store,
-		metaServiceGroups: metaServiceGroups,
+		tlsConfig:         tlsConfig,
+		metaServiceGroups: cloneMetaServiceGroups(metaServiceGroups),
 	}
 }
 
@@ -310,11 +318,57 @@ func (m *MetaServiceGroupManager) UpdateGroupsSafely(
 	if err := config.AdjustMetaServiceGroups(metaServiceGroups); err != nil {
 		return err
 	}
+	if err := m.checkNewGroupsHealth(ctx, metaServiceGroups); err != nil {
+		return err
+	}
 	if err := m.persistGroupsLocked(ctx, metaServiceGroups, deletedGroups, persist); err != nil {
 		return err
 	}
 	if afterPersist != nil {
 		afterPersist()
+	}
+	return nil
+}
+
+// checkNewGroupsHealth verifies every configured endpoint before a group is
+// added. Existing groups are intentionally skipped so an address update does
+// not change the established update semantics.
+func (m *MetaServiceGroupManager) checkNewGroupsHealth(ctx context.Context, metaServiceGroups map[string]string) error {
+	groups := make(map[string]string)
+	m.RLock()
+	for groupID, addresses := range metaServiceGroups {
+		if _, exists := m.metaServiceGroups[groupID]; !exists {
+			groups[groupID] = addresses
+		}
+	}
+	m.RUnlock()
+	for groupID, addresses := range groups {
+		for _, address := range strings.Split(addresses, ",") {
+			if err := checkEtcdServerHealth(ctx, strings.TrimSpace(address), m.tlsConfig); err != nil {
+				return fmt.Errorf("%w: group %s endpoint %s: %v", ErrMetaServiceGroupUnhealthy, groupID, address, err)
+			}
+		}
+	}
+	return nil
+}
+
+func checkEtcdServerHealth(ctx context.Context, endpoint string, tlsConfig *tls.Config) error {
+	client, err := clientv3.New(clientv3.Config{
+		Endpoints:   []string{endpoint},
+		DialTimeout: etcdutil.DefaultRequestTimeout,
+		TLS:         tlsConfig,
+	})
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := client.Close(); err != nil {
+			log.Warn("[keyspace] failed to close meta-service group etcd client",
+				zap.String("endpoint", endpoint), zap.Error(err))
+		}
+	}()
+	if !etcdutil.IsHealthy(ctx, client) {
+		return errors.New("etcd health check failed")
 	}
 	return nil
 }
@@ -344,7 +398,7 @@ func (m *MetaServiceGroupManager) persistGroupsLocked(
 	if err := persist(); err != nil {
 		return err
 	}
-	m.metaServiceGroups = metaServiceGroups
+	m.metaServiceGroups = cloneMetaServiceGroups(metaServiceGroups)
 	// Clear the persisted status for deleted groups so re-adding a group with
 	// the same ID does not inherit a stale assignment count or enabled state,
 	// which would skew list output and PickGroup balancing. Best-effort: the
@@ -402,5 +456,16 @@ func (m *MetaServiceGroupManager) assignedKeyspaceCounts(ctx context.Context, gr
 func (m *MetaServiceGroupManager) updateGroups(metaServiceGroups map[string]string) {
 	m.Lock()
 	defer m.Unlock()
-	m.metaServiceGroups = metaServiceGroups
+	m.metaServiceGroups = cloneMetaServiceGroups(metaServiceGroups)
+}
+
+func cloneMetaServiceGroups(metaServiceGroups map[string]string) map[string]string {
+	if metaServiceGroups == nil {
+		return nil
+	}
+	cloned := make(map[string]string, len(metaServiceGroups))
+	for groupID, addresses := range metaServiceGroups {
+		cloned[groupID] = addresses
+	}
+	return cloned
 }
