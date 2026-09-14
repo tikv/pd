@@ -34,8 +34,11 @@ import (
 	"github.com/tikv/pd/server/apiv2/middlewares"
 )
 
-// GroupManagerUninitializedErr is the error message for uninitialized keyspace group manager.
-const GroupManagerUninitializedErr = "keyspace group manager is not initialized"
+const (
+	// GroupManagerUninitializedErr is the error message for uninitialized keyspace group manager.
+	GroupManagerUninitializedErr = "keyspace group manager is not initialized"
+	hideKeyspacesQueryName       = "hide_keyspaces"
+)
 
 // RegisterTSOKeyspaceGroup registers keyspace group handlers to the server.
 func RegisterTSOKeyspaceGroup(r *gin.RouterGroup) {
@@ -138,7 +141,7 @@ func GetKeyspaceGroups(c *gin.Context) {
 		kgs = keyspaceGroups
 	}
 
-	c.IndentedJSON(http.StatusOK, kgs)
+	c.IndentedJSON(http.StatusOK, newKeyspaceGroupsResponse(kgs, hideKeyspaces(c)))
 }
 
 // GetKeyspaceGroupPrimaryResponse defines the response for getting primary node of keyspace group.
@@ -181,7 +184,45 @@ func GetKeyspaceGroupByID(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.IndentedJSON(http.StatusOK, kg)
+	c.IndentedJSON(http.StatusOK, newKeyspaceGroupResponse(kg, hideKeyspaces(c)))
+}
+
+type keyspaceGroupResponse struct {
+	ID         uint32                         `json:"id"`
+	UserKind   string                         `json:"user-kind"`
+	SplitState *endpoint.SplitState           `json:"split-state,omitempty"`
+	MergeState *endpoint.MergeState           `json:"merge-state,omitempty"`
+	Members    []endpoint.KeyspaceGroupMember `json:"members"`
+	Keyspaces  *[]uint32                      `json:"keyspaces,omitempty"`
+}
+
+func newKeyspaceGroupsResponse(kgs []*endpoint.KeyspaceGroup, hideKeyspaces bool) []*keyspaceGroupResponse {
+	resp := make([]*keyspaceGroupResponse, 0, len(kgs))
+	for _, kg := range kgs {
+		resp = append(resp, newKeyspaceGroupResponse(kg, hideKeyspaces))
+	}
+	return resp
+}
+
+func newKeyspaceGroupResponse(kg *endpoint.KeyspaceGroup, hideKeyspaces bool) *keyspaceGroupResponse {
+	if kg == nil {
+		return nil
+	}
+	resp := &keyspaceGroupResponse{
+		ID:         kg.ID,
+		UserKind:   kg.UserKind,
+		SplitState: kg.SplitState,
+		MergeState: kg.MergeState,
+		Members:    kg.Members,
+	}
+	if !hideKeyspaces {
+		resp.Keyspaces = &kg.Keyspaces
+	}
+	return resp
+}
+
+func hideKeyspaces(c *gin.Context) bool {
+	return c.Query(hideKeyspacesQueryName) == "true"
 }
 
 // DeleteKeyspaceGroupByID deletes keyspace group by ID.

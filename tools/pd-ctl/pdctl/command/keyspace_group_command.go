@@ -15,7 +15,6 @@
 package command
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -25,7 +24,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tikv/pd/pkg/keyspace/constant"
-	"github.com/tikv/pd/pkg/storage/endpoint"
 )
 
 const (
@@ -140,8 +138,9 @@ func showKeyspaceGroupsCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Printf("Failed to get %s: %s\n", flagHideKGKeyspaces, err)
 		return
 	}
-	cFunc := func(content string) string {
-		return convertToKeyspaceGroups(content, !hideKeyspaces)
+	query := make(url.Values)
+	if hideKeyspaces {
+		query.Set("hide_keyspaces", "true")
 	}
 	if len(args) == 1 {
 		if _, err := strconv.Atoi(args[0]); err != nil {
@@ -149,36 +148,30 @@ func showKeyspaceGroupsCommandFunc(cmd *cobra.Command, args []string) {
 			return
 		}
 		prefix = fmt.Sprintf("%s/%s", keyspaceGroupsPrefix, args[0])
-		cFunc = func(content string) string {
-			return convertToKeyspaceGroup(content, !hideKeyspaces)
-		}
 	} else {
 		state, err := flags.GetString("state")
 		if err != nil {
 			cmd.Printf("Failed to get state: %s\n", err)
 		}
-		stateValue := ""
 		if len(state) != 0 {
 			state = strings.ToLower(state)
 			switch state {
 			case "merge", "split":
-				stateValue = fmt.Sprintf("state=%v", state)
+				query.Set("state", state)
 			default:
 				cmd.Println("Unknown state: " + state)
 				return
 			}
 		}
-
-		if len(stateValue) != 0 {
-			prefix = fmt.Sprintf("%v?%v", keyspaceGroupsPrefix, stateValue)
-		}
+	}
+	if len(query) > 0 {
+		prefix += "?" + query.Encode()
 	}
 	r, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get the keyspace groups information: %s\n", err)
 		return
 	}
-	r = cFunc(r)
 	cmd.Println(r)
 }
 
@@ -404,60 +397,4 @@ func showKeyspaceGroupPrimaryCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	cmd.Println(r)
-}
-
-type keyspaceGroupOutput struct {
-	ID         uint32                         `json:"id"`
-	UserKind   string                         `json:"user-kind"`
-	SplitState *endpoint.SplitState           `json:"split-state,omitempty"`
-	MergeState *endpoint.MergeState           `json:"merge-state,omitempty"`
-	Members    []endpoint.KeyspaceGroupMember `json:"members"`
-	Keyspaces  *[]uint32                      `json:"keyspaces,omitempty"`
-}
-
-func newKeyspaceGroupOutput(kg *endpoint.KeyspaceGroup, showKeyspaces bool) *keyspaceGroupOutput {
-	if kg == nil {
-		return nil
-	}
-	output := &keyspaceGroupOutput{
-		ID:         kg.ID,
-		UserKind:   kg.UserKind,
-		SplitState: kg.SplitState,
-		MergeState: kg.MergeState,
-		Members:    kg.Members,
-	}
-	if showKeyspaces {
-		output.Keyspaces = &kg.Keyspaces
-	}
-	return output
-}
-
-func convertToKeyspaceGroup(content string, showKeyspaces bool) string {
-	kg := endpoint.KeyspaceGroup{}
-	err := json.Unmarshal([]byte(content), &kg)
-	if err != nil {
-		return content
-	}
-	byteArr, err := json.MarshalIndent(newKeyspaceGroupOutput(&kg, showKeyspaces), "", "  ")
-	if err != nil {
-		return content
-	}
-	return string(byteArr)
-}
-
-func convertToKeyspaceGroups(content string, showKeyspaces bool) string {
-	kgs := []*endpoint.KeyspaceGroup{}
-	err := json.Unmarshal([]byte(content), &kgs)
-	if err != nil {
-		return content
-	}
-	output := make([]*keyspaceGroupOutput, 0, len(kgs))
-	for _, kg := range kgs {
-		output = append(output, newKeyspaceGroupOutput(kg, showKeyspaces))
-	}
-	byteArr, err := json.MarshalIndent(output, "", "  ")
-	if err != nil {
-		return content
-	}
-	return string(byteArr)
 }
