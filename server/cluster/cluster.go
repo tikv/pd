@@ -2509,8 +2509,9 @@ func (c *RaftCluster) addStoreLimitInternal(store *metapb.Store, skipIfRemoved b
 			slc := cfg.GetDefaultStoreLimit()
 			if core.IsStoreContainLabel(store, core.EngineKey, core.EngineTiFlash) {
 				slc = sc.StoreLimitConfig{
-					AddPeer:    sc.DefaultTiFlashStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
-					RemovePeer: sc.DefaultTiFlashStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
+					AddPeer:          sc.DefaultTiFlashStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
+					RemovePeer:       sc.DefaultTiFlashStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
+					TransferLeaderIn: sc.DefaultTiFlashStoreLimit.GetDefaultStoreLimit(storelimit.TransferLeaderIn),
 				}
 			}
 			cfg.StoreLimit[storeID] = slc
@@ -2544,6 +2545,7 @@ func (c *RaftCluster) RemoveStoreLimit(storeID uint64) {
 			id := strconv.FormatUint(storeID, 10)
 			statistics.StoreLimitGauge.DeleteLabelValues(id, "add-peer")
 			statistics.StoreLimitGauge.DeleteLabelValues(id, "remove-peer")
+			statistics.StoreLimitGauge.DeleteLabelValues(id, "transfer-leader-in")
 			return
 		}
 		time.Sleep(persistLimitWaitTime)
@@ -2708,13 +2710,7 @@ func (c *RaftCluster) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePer
 		if !ok {
 			slc = cfg.GetDefaultStoreLimit()
 		}
-		switch typ {
-		case storelimit.AddPeer:
-			slc.AddPeer = ratePerMin
-		case storelimit.RemovePeer:
-			slc.RemovePeer = ratePerMin
-		}
-		cfg.StoreLimit[storeID] = slc
+		cfg.StoreLimit[storeID] = slc.SetLimit(typ, ratePerMin)
 		return true, nil
 	})
 	if err != nil {
@@ -2729,19 +2725,9 @@ func (c *RaftCluster) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePer
 // SetAllStoresLimit sets all store limit for a given type and rate.
 func (c *RaftCluster) SetAllStoresLimit(typ storelimit.Type, ratePerMin float64) error {
 	err := c.opt.UpdateScheduleConfig(c.storage, func(_ *sc.ScheduleConfig, cfg *sc.ScheduleConfig) (bool, error) {
-		switch typ {
-		case storelimit.AddPeer:
-			cfg.DefaultStoreLimit.AddPeer = ratePerMin
-			for storeID, limit := range cfg.StoreLimit {
-				limit.AddPeer = ratePerMin
-				cfg.StoreLimit[storeID] = limit
-			}
-		case storelimit.RemovePeer:
-			cfg.DefaultStoreLimit.RemovePeer = ratePerMin
-			for storeID, limit := range cfg.StoreLimit {
-				limit.RemovePeer = ratePerMin
-				cfg.StoreLimit[storeID] = limit
-			}
+		cfg.DefaultStoreLimit = cfg.DefaultStoreLimit.SetLimit(typ, ratePerMin)
+		for storeID, limit := range cfg.StoreLimit {
+			cfg.StoreLimit[storeID] = limit.SetLimit(typ, ratePerMin)
 		}
 		return true, nil
 	})
@@ -2998,6 +2984,7 @@ func (c *RaftCluster) collectStorageSize(
 			keyspaceName: keyspaceName,
 			// Use the user storage size to record the logical storage size.
 			rowBasedStorageSize:    uint64(regionStats.UserStorageSize),
+			rowBasedIAStorageSize:  uint64(regionStats.UserIAStorageSize),
 			columnBasedStorageSize: uint64(regionStats.UserColumnarStorageSize),
 		})
 	}

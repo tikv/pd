@@ -38,7 +38,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 // #nosec G101
@@ -77,7 +77,7 @@ func newTestKeyFile(t *testing.T, re *require.Assertions, key ...string) (keyFil
 }
 
 func newTestLeader(re *require.Assertions, client *clientv3.Client) *election.Leadership {
-	leader := election.NewLeadership(client, "test_leader", "test")
+	leader := election.NewLeadership(client, "test_leader", "test", "test_member")
 	timeout := int64(30000000) // about a year.
 	err := leader.Campaign(timeout, "")
 	re.NoError(err)

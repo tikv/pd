@@ -17,6 +17,7 @@ package operator
 import (
 	"bytes"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -121,6 +122,15 @@ func (tl TransferLeader) Influence(opInfluence *OpInfluence, region *core.Region
 	from.LeaderCount--
 	to.LeaderSize += region.GetApproximateSize()
 	to.LeaderCount++
+
+	// TiKV chooses the receiver, so reserve a full cost for every possible target.
+	to.AddStepCost(storelimit.TransferLeaderIn, storelimit.RegionInfluence[storelimit.TransferLeaderIn])
+	for i, storeID := range tl.ToStores {
+		if storeID == tl.ToStore || slices.Contains(tl.ToStores[:i], storeID) {
+			continue
+		}
+		opInfluence.GetStoreInfluence(storeID).AddStepCost(storelimit.TransferLeaderIn, storelimit.RegionInfluence[storelimit.TransferLeaderIn])
+	}
 }
 
 // Timeout returns duration that current step may take.

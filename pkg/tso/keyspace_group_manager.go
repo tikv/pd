@@ -388,6 +388,8 @@ type KeyspaceGroupManager struct {
 
 	// mergeCheckerCancelMap is the cancel function map for the merge checker of each keyspace group.
 	mergeCheckerCancelMap sync.Map // GroupID -> context.CancelFunc
+	// finishSplitMu serializes split finish requests without blocking state readers.
+	finishSplitMu sync.Mutex
 
 	primaryPriorityCheckInterval time.Duration
 
@@ -1370,20 +1372,19 @@ func (kgm *KeyspaceGroupManager) sendDeleteRequestToKeyspaceGroupsAPI(suffix str
 	return nil, errs.ErrURLParse.FastGenByArgs("no valid backend endpoint configured")
 }
 
-// Put the code below into the critical section to prevent from sending too many HTTP requests.
 func (kgm *KeyspaceGroupManager) finishSplitKeyspaceGroup(id uint32) error {
 	start := time.Now()
-	kgm.Lock()
-	defer kgm.Unlock()
-	// Check if the keyspace group is in split state.
+	kgm.finishSplitMu.Lock()
+	defer kgm.finishSplitMu.Unlock()
+
+	kgm.RLock()
 	splitGroup := kgm.kgs[id]
-	if !splitGroup.IsSplitTarget() {
+	canFinish := splitGroup.IsSplitTarget() && kgm.httpClient != nil
+	kgm.RUnlock()
+	if !canFinish {
 		return nil
 	}
-	// Check if the HTTP client is initialized.
-	if kgm.httpClient == nil {
-		return nil
-	}
+
 	startRequest := time.Now()
 	resp, err := kgm.sendDeleteRequestToKeyspaceGroupsAPI(fmt.Sprintf("/%d/split", id))
 	if err != nil {
@@ -1401,9 +1402,15 @@ func (kgm *KeyspaceGroupManager) finishSplitKeyspaceGroup(id uint32) error {
 	// Note: to avoid data race with state read APIs, we always replace the group in memory as a whole.
 	// For now, we only have scenarios to update split state/merge state, and the other fields are always
 	// loaded from etcd without any modification, so we can simply copy the group and replace the state.
-	newSplitGroup := *splitGroup
-	newSplitGroup.SplitState = nil
-	kgm.kgs[id] = &newSplitGroup
+	kgm.Lock()
+	// A watcher update can replace the group while the HTTP request is in flight. Only
+	// complete the split state observed before the request, never a newer transition.
+	if currentGroup := kgm.kgs[id]; currentGroup == splitGroup && currentGroup.IsSplitTarget() {
+		newSplitGroup := *currentGroup
+		newSplitGroup.SplitState = nil
+		kgm.kgs[id] = &newSplitGroup
+	}
+	kgm.Unlock()
 	kgm.metrics.finishSplitDuration.Observe(time.Since(start).Seconds())
 	return nil
 }

@@ -30,6 +30,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -1269,6 +1270,14 @@ func TestHotReadRegionScheduleByteRateOnly(t *testing.T) {
 		for _, s := range ss {
 			re.Less(500.0*units.KiB, s.GetLoad(utils.ByteDim))
 		}
+	}
+
+	exhaustTransferLeaderInLimit(t, tc, 1, 2, 3, 4, 5)
+	hb.prepareForBalance(toResourceType(utils.Read, transferLeader), tc)
+	re.Empty(newBalanceSolver(hb, tc, utils.Read, transferLeader).solve())
+	for _, id := range []uint64{1, 2, 3, 4, 5} {
+		tc.SetStoreLimit(id, storelimit.TransferLeaderIn, storelimit.Unlimited)
+		tc.ResetStoreLimit(id, storelimit.TransferLeaderIn, storelimit.Unlimited/time.Minute.Seconds())
 	}
 
 	ops, _ := hb.Schedule(tc, false)

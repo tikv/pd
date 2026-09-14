@@ -903,7 +903,7 @@ func mightExec(re *require.Assertions, cmd *cobra.Command, args []string, v any)
 	if v == nil {
 		return
 	}
-	json.Unmarshal(output, v)
+	re.NoError(json.Unmarshal(output, v))
 }
 
 func checkSchedulerCommand(re *require.Assertions, cmd *cobra.Command, pdAddr string, args []string, expected map[string]bool) {
