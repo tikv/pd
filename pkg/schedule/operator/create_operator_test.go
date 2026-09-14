@@ -1331,11 +1331,13 @@ func (suite *createOperatorTestSuite) TestCreateNonWitnessPeerOperator() {
 			false,
 			[]OpStep{
 				ChangePeerV2Enter{
-					DemoteVoters: []DemoteVoter{{ToStore: 2, PeerID: 2, IsWitness: true}},
+					PromoteLearners: []PromoteLearner{},
+					DemoteVoters:    []DemoteVoter{{ToStore: 2, PeerID: 2, IsWitness: true}},
 				},
 				BecomeNonWitness{StoreID: 2, PeerID: 2},
 				ChangePeerV2Enter{
 					PromoteLearners: []PromoteLearner{{ToStore: 2, PeerID: 2}},
+					DemoteVoters:    []DemoteVoter{},
 				},
 			},
 		},

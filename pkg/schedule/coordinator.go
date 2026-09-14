@@ -297,7 +297,7 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 			// These scheduler implementations were removed. Delete their
 			// independent configs so an upgraded cluster converges cleanly.
 			if err := c.cluster.GetStorage().RemoveSchedulerConfig(name); err != nil {
-				log.Error("cannot remove deprecated scheduler config", zap.String("scheduler-name", name), errs.ZapError(err))
+				log.Warn("cannot remove deprecated scheduler config", zap.String("scheduler-name", name), errs.ZapError(err))
 			}
 			continue
 		}
