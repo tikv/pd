@@ -69,9 +69,10 @@ type Leadership struct {
 	leaderKey   string
 	leaderValue atomic.Value // Stored as string
 
-	keepAliveCtx            context.Context
-	keepAliveCancelFunc     context.CancelFunc
-	keepAliveCancelFuncLock syncutil.Mutex
+	// mu protects publication and reset of the in-memory leadership state.
+	// Never hold it while closing a lease, which can block on etcd.
+	mu                  syncutil.Mutex
+	keepAliveCancelFunc context.CancelFunc
 	// campaignTimes is used to record the campaign times of the leader within `campaignTimesRecordTimeout`.
 	// It is ordered by time to prevent the leader from campaigning too frequently.
 	campaignTimes []time.Time
@@ -101,6 +102,8 @@ func (ls *Leadership) GetLease() *Lease {
 
 // SetLease sets the lease of leadership.
 func (ls *Leadership) SetLease(lease *Lease) {
+	ls.mu.Lock()
+	defer ls.mu.Unlock()
 	ls.lease.Store(lease)
 }
 
@@ -168,10 +171,12 @@ func (ls *Leadership) AddCampaignTimes() {
 
 // Campaign is used to campaign with given lease and returns a leadership
 func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...clientv3.Cmp) error {
-	ls.leaderValue.Store(leaderData)
 	// Create a new lease to campaign
 	newLease := NewLease(ls.client, ls.purpose, ls.name)
-	ls.SetLease(newLease)
+	ls.mu.Lock()
+	ls.leaderValue.Store(leaderData)
+	ls.lease.Store(newLease)
+	ls.mu.Unlock()
 
 	failpoint.Inject("skipGrantLeader", func(val failpoint.Value) {
 		name, ok := val.(string)
@@ -216,10 +221,12 @@ func (ls *Leadership) Keep(ctx context.Context) {
 	if ls == nil {
 		return
 	}
-	ls.keepAliveCancelFuncLock.Lock()
-	ls.keepAliveCtx, ls.keepAliveCancelFunc = context.WithCancel(ctx)
-	ls.keepAliveCancelFuncLock.Unlock()
-	go ls.GetLease().KeepAlive(ls.keepAliveCtx)
+	ls.mu.Lock()
+	keepAliveCtx, cancel := context.WithCancel(ctx)
+	ls.keepAliveCancelFunc = cancel
+	lease := ls.GetLease()
+	ls.mu.Unlock()
+	go lease.KeepAlive(keepAliveCtx)
 }
 
 // Check returns whether the leadership is still available.
@@ -420,17 +427,26 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 
 // Reset does some defer jobs such as closing lease, resetting lease etc.
 func (ls *Leadership) Reset() {
-	if ls == nil || ls.GetLease() == nil {
+	if ls == nil {
 		return
 	}
-	ls.keepAliveCancelFuncLock.Lock()
+	ls.mu.Lock()
+	lease := ls.GetLease()
+	if lease == nil {
+		ls.mu.Unlock()
+		return
+	}
 	if ls.keepAliveCancelFunc != nil {
 		ls.keepAliveCancelFunc()
+		ls.keepAliveCancelFunc = nil
 	}
-	ls.keepAliveCancelFuncLock.Unlock()
-	err := ls.GetLease().Close()
+	// A concurrent Reset can finish closing this lease and start a new campaign
+	// before Close returns. Clear the old value now and only close the captured
+	// lease, so this reset cannot overwrite or close the new leadership later.
+	ls.leaderValue.Store("")
+	ls.mu.Unlock()
+	err := lease.Close()
 	if err != nil {
 		log.Error("close lease failed", zap.String("purpose", ls.purpose), errs.ZapError(err))
 	}
-	ls.leaderValue.Store("")
 }

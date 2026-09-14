@@ -171,6 +171,7 @@ func (l *Lease) Close() error {
 			zap.Int64("lease-id", int64(leaseID)),
 			errs.ZapError(err))
 	}
+	failpoint.InjectCall("afterRevokeLease", l)
 	return l.lease.Close()
 }
 
