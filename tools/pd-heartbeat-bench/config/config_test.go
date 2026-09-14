@@ -31,7 +31,7 @@ func TestParseWithoutConfigUsesDefaults(t *testing.T) {
 	require.Equal(t, defaultRegionCount, cfg.RegionCount)
 	require.Equal(t, defaultReplica, cfg.Replica)
 	require.Equal(t, uint64(defaultRegionSize), uint64(cfg.RegionSize))
-	require.Equal(t, defaultRegionKeys, cfg.RegionKeys)
+	require.Equal(t, uint64(defaultRegionKeys), cfg.RegionKeys)
 	require.Equal(t, uint64(defaultStoreCapacity), uint64(cfg.StoreCapacity))
 }
 

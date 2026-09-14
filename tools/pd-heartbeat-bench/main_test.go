@@ -213,3 +213,23 @@ func TestStoreStatsFilterAndBoundPeerStats(t *testing.T) {
 	require.Contains(t, reported, uint64(2*groupSize))
 	require.Contains(t, reported, uint64(3*groupSize))
 }
+
+func TestSelectHotPeerStatsKeepsExactCapacity(t *testing.T) {
+	peerStats := make([]*pdpb.PeerStat, hotPeerReportCapacity*hotPeerReportMetricCount)
+	for i := range peerStats {
+		peerStats[i] = &pdpb.PeerStat{
+			RegionId:  uint64(i + 1),
+			ReadBytes: uint64(i + 1),
+			ReadKeys:  uint64(i + 1),
+			QueryStats: &pdpb.QueryStats{
+				Get: uint64(i + 1),
+			},
+		}
+	}
+
+	selected := selectHotPeerStats(peerStats)
+	require.Len(t, selected, len(peerStats))
+	for i := range peerStats {
+		require.Same(t, peerStats[i], selected[i])
+	}
+}

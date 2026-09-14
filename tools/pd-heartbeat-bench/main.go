@@ -362,16 +362,16 @@ type rankedPeerStat struct {
 
 type rankedPeerStatHeap []rankedPeerStat
 
-func (h rankedPeerStatHeap) Len() int { return len(h) }
+func (h *rankedPeerStatHeap) Len() int { return len(*h) }
 
-func (h rankedPeerStatHeap) Less(i, j int) bool {
-	if h[i].value != h[j].value {
-		return h[i].value < h[j].value
+func (h *rankedPeerStatHeap) Less(i, j int) bool {
+	if (*h)[i].value != (*h)[j].value {
+		return (*h)[i].value < (*h)[j].value
 	}
-	return h[i].peerStat.GetRegionId() > h[j].peerStat.GetRegionId()
+	return (*h)[i].peerStat.GetRegionId() > (*h)[j].peerStat.GetRegionId()
 }
 
-func (h rankedPeerStatHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
+func (h *rankedPeerStatHeap) Swap(i, j int) { (*h)[i], (*h)[j] = (*h)[j], (*h)[i] }
 
 func (h *rankedPeerStatHeap) Push(value any) {
 	*h = append(*h, value.(rankedPeerStat))
@@ -416,7 +416,7 @@ func addTopPeerStats(
 func selectHotPeerStats(peerStats []*pdpb.PeerStat) []*pdpb.PeerStat {
 	// TiKV reports the union of a bounded Top-N set for each generated read
 	// dimension. Per-Region CPU is not simulated by this benchmark.
-	if len(peerStats) < hotPeerReportCapacity*hotPeerReportMetricCount {
+	if len(peerStats) <= hotPeerReportCapacity*hotPeerReportMetricCount {
 		return peerStats
 	}
 
@@ -427,9 +427,7 @@ func selectHotPeerStats(peerStats []*pdpb.PeerStat) []*pdpb.PeerStat {
 	addTopPeerStats(selected, peerStats, func(peerStat *pdpb.PeerStat) uint64 {
 		return peerStat.GetReadBytes()
 	})
-	addTopPeerStats(selected, peerStats, func(peerStat *pdpb.PeerStat) uint64 {
-		return readPeerQueryCount(peerStat)
-	})
+	addTopPeerStats(selected, peerStats, readPeerQueryCount)
 
 	result := make([]*pdpb.PeerStat, 0, len(selected))
 	for _, peerStat := range peerStats {
