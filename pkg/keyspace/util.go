@@ -459,7 +459,7 @@ type Checker interface {
 	// GetKeyspaceIDInRange returns the keyspace IDs in the range [start, end].
 	// It returns the keyspace IDs by desc and a boolean indicating whether there is any keyspace in the range.
 	GetKeyspaceIDInRange(start, end uint32, limit int) ([]uint32, bool)
-	// ExistKeyspaceID returns whether the keyspace ID exists.
+	// KeyspaceExist returns whether the keyspace ID exists.
 	KeyspaceExist(keyspaceID uint32) bool
 }
 
@@ -671,25 +671,25 @@ func (s *Cache) KeyspaceExist(id uint32) bool {
 func (s *Cache) GetKeyspaceIDInRange(start, end uint32, limit int) ([]uint32, bool) {
 	s.RLock()
 	defer s.RUnlock()
-	ret := make([]uint32, 0)
+	ret := make([]uint32, 0, max(limit, 0))
 	found := false
 	s.tree.DescendLessOrEqual(keyspaceItem{keyspaceID: end}, func(item keyspaceItem) bool {
+		// The tree is scanned in descending order, so once an item falls below
+		// start, every later item does too; nothing further can match.
+		if item.keyspaceID < start {
+			return false
+		}
 		if item.state == keyspacepb.KeyspaceState_TOMBSTONE {
 			return true
 		}
-		if item.keyspaceID >= start {
-			ret = append(ret, item.keyspaceID)
-			found = true
-			if limit > 0 && len(ret) >= limit {
-				return false
-			}
-		}
-		return true
+		ret = append(ret, item.keyspaceID)
+		found = true
+		return !(limit > 0 && len(ret) >= limit)
 	})
 	return ret, found
 }
 
-// NewKeyspaceMeta creates a KeyspaceMeta from the given json string.
+// NewKeyspaceMeta creates a KeyspaceMeta from the given marshaled protobuf data.
 func NewKeyspaceMeta(data string) (*keyspacepb.KeyspaceMeta, error) {
 	meta := &keyspacepb.KeyspaceMeta{}
 	if err := proto.Unmarshal([]byte(data), meta); err != nil {

@@ -87,7 +87,6 @@ func (rw *Watcher) initializeKeyspaceMetaWatcher() error {
 		return nil
 	}
 	putFn := func(kv *mvccpb.KeyValue) error {
-		log.Info("update keyspace meta", zap.String("key", string(kv.Key)), zap.String("value", string(kv.Value)))
 		keyspaceID, err := rw.extractKeyspaceIDFromMetaKey(string(kv.Key))
 		if err != nil {
 			return err
@@ -100,6 +99,10 @@ func (rw *Watcher) initializeKeyspaceMetaWatcher() error {
 			if meta.GetId() != keyspaceID {
 				return fmt.Errorf("keyspace ID in meta does not match the one in key, meta Id: %d, keyspace ID: %d", meta.GetId(), keyspaceID)
 			}
+			log.Debug("update keyspace meta",
+				zap.Uint32("keyspace-id", meta.GetId()),
+				zap.String("name", meta.GetName()),
+				zap.Stringer("state", meta.GetState()))
 			rw.keyspaceCache.Save(meta.GetId(), meta.GetName(), meta.GetState())
 		}
 		bound := keyspace.MakeRegionBound(keyspaceID)
@@ -108,7 +111,7 @@ func (rw *Watcher) initializeKeyspaceMetaWatcher() error {
 		return nil
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
-		log.Info("delete keyspace meta", zap.String("key", string(kv.Key)))
+		log.Debug("delete keyspace meta", zap.String("key", string(kv.Key)))
 		keyspaceID, err := rw.extractKeyspaceIDFromMetaKey(string(kv.Key))
 		if err != nil {
 			return err
