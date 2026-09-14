@@ -55,14 +55,6 @@ var (
 			Help:      "Store status for schedule",
 		}, []string{"scheduler"})
 
-	balanceWitnessCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: "pd",
-			Subsystem: "scheduler",
-			Name:      "balance_witness",
-			Help:      "Counter of balance witness scheduler.",
-		}, []string{"type", "store"})
-
 	// TODO: pre-allocate gauge metrics
 	hotSchedulerResultCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -192,7 +184,6 @@ func init() {
 	prometheus.MustRegister(ruleStatusGauge)
 	prometheus.MustRegister(regionLabelStatusGauge)
 	prometheus.MustRegister(schedulerCounter)
-	prometheus.MustRegister(balanceWitnessCounter)
 	prometheus.MustRegister(hotSchedulerResultCounter)
 	prometheus.MustRegister(hotDirectionCounter)
 	prometheus.MustRegister(balanceDirectionCounter)
@@ -213,8 +204,6 @@ func init() {
 // DeleteStoreMetrics deletes the per-store scheduler metrics of a store.
 func DeleteStoreMetrics(storeID string) {
 	opInfluenceStatus.DeletePartialMatch(prometheus.Labels{"store": storeID})
-	balanceWitnessCounter.DeleteLabelValues("move-witness", storeID+"-out")
-	balanceWitnessCounter.DeleteLabelValues("move-witness", storeID+"-in")
 	hotSchedulerResultCounter.DeletePartialMatch(prometheus.Labels{"store": storeID})
 	balanceDirectionCounter.DeletePartialMatch(prometheus.Labels{"store": storeID})
 	hotDirectionCounter.DeletePartialMatch(prometheus.Labels{"store": storeID})
@@ -272,10 +261,6 @@ func shuffleLeaderCounterWithEvent(event string) prometheus.Counter {
 
 func shuffleRegionCounterWithEvent(event string) prometheus.Counter {
 	return schedulerCounter.WithLabelValues(types.ShuffleRegionScheduler.String(), event)
-}
-
-func transferWitnessLeaderCounterWithEvent(event string) prometheus.Counter {
-	return schedulerCounter.WithLabelValues(types.TransferWitnessLeaderScheduler.String(), event)
 }
 
 func balanceRangeCounterWithEvent(event string) prometheus.Counter {
@@ -390,10 +375,6 @@ var (
 	shuffleRegionNoNewPeerCounter          = shuffleRegionCounterWithEvent("no-new-peer")
 	shuffleRegionCreateOperatorFailCounter = shuffleRegionCounterWithEvent("create-operator-fail")
 	shuffleRegionNoSourceStoreCounter      = shuffleRegionCounterWithEvent("no-source-store")
-
-	transferWitnessLeaderCounter              = transferWitnessLeaderCounterWithEvent("schedule")
-	transferWitnessLeaderNewOperatorCounter   = transferWitnessLeaderCounterWithEvent("new-operator")
-	transferWitnessLeaderNoTargetStoreCounter = transferWitnessLeaderCounterWithEvent("no-target-store")
 
 	balanceRangeCounter              = balanceRangeCounterWithEvent("schedule")
 	balanceRangeNewOperatorCounter   = balanceRangeCounterWithEvent("new-operator")

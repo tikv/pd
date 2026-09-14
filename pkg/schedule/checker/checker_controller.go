@@ -30,11 +30,13 @@ import (
 
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 )
@@ -108,7 +110,7 @@ func NewController(ctx context.Context, cluster sche.CheckerCluster, conf config
 		opController:            opController,
 		learnerChecker:          NewLearnerChecker(cluster),
 		replicaChecker:          NewReplicaChecker(cluster, conf, pendingProcessedRegions),
-		ruleChecker:             NewRuleChecker(ctx, cluster, ruleManager, pendingProcessedRegions),
+		ruleChecker:             NewRuleChecker(cluster, ruleManager, pendingProcessedRegions),
 		splitChecker:            NewSplitChecker(cluster, ruleManager, cluster.GetRegionLabeler()),
 		mergeChecker:            NewMergeChecker(ctx, cluster, conf),
 		affinityChecker:         NewAffinityChecker(ctx, cluster, conf),
@@ -312,6 +314,26 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 		return []*operator.Operator{c.splitChecker.Check(region)}
 	}); len(ops) > 0 {
 		return ops
+	}
+
+	// A rolling upgrade can still receive heartbeats for peers created by an
+	// older PD. Convert them one at a time before any normal replica scheduling.
+	for _, peer := range region.GetPeers() {
+		if !peer.GetIsWitness() || region.GetLeader() == nil {
+			continue
+		}
+		if opController.OperatorCount(operator.OpReplica) >= c.conf.GetReplicaScheduleLimit() {
+			operator.IncOperatorLimitCounter(types.ReplicaChecker, operator.OpReplica)
+			c.pendingProcessedRegions.Put(region.GetID(), nil)
+			return nil
+		}
+		op, err := operator.CreateNonWitnessPeerOperator("migrate-deprecated-witness-peer", c.cluster, region, peer)
+		if err != nil {
+			log.Debug("cannot convert deprecated witness peer", zap.Uint64("region-id", region.GetID()), zap.Uint64("peer-id", peer.GetId()), errs.ZapError(err))
+			return nil
+		}
+		op.SetPriorityLevel(constant.High)
+		return []*operator.Operator{op}
 	}
 
 	if c.conf.IsPlacementRulesEnabled() {

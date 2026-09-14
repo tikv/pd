@@ -23,7 +23,8 @@ func IsLearner(peer *metapb.Peer) bool {
 	return peer.GetRole() == metapb.PeerRole_Learner
 }
 
-// IsWitness judges whether the peer is a witness peer.
+// IsWitness reports whether a peer was created with the removed witness role.
+// Deprecated: retained only to migrate legacy peers during rolling upgrades.
 func IsWitness(peer *metapb.Peer) bool {
 	return peer.IsWitness
 }

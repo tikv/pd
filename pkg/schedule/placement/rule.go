@@ -55,16 +55,18 @@ func (s PeerRoleType) MetaPeerRole() metapb.PeerRole {
 //
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type Rule struct {
-	GroupID          string            `json:"group_id"`                    // mark the source that add the rule
-	ID               string            `json:"id"`                          // unique ID within a group
-	Index            int               `json:"index,omitempty"`             // rule apply order in a group, rule with less ID is applied first when indexes are equal
-	Override         bool              `json:"override,omitempty"`          // when it is true, all rules with less indexes are disabled
-	StartKey         []byte            `json:"-"`                           // range start key
-	StartKeyHex      string            `json:"start_key"`                   // hex format start key, for marshal/unmarshal
-	EndKey           []byte            `json:"-"`                           // range end key
-	EndKeyHex        string            `json:"end_key"`                     // hex format end key, for marshal/unmarshal
-	Role             PeerRoleType      `json:"role"`                        // expected role of the peers
-	IsWitness        bool              `json:"is_witness"`                  // when it is true, it means the role is also a witness
+	GroupID     string       `json:"group_id"`           // mark the source that add the rule
+	ID          string       `json:"id"`                 // unique ID within a group
+	Index       int          `json:"index,omitempty"`    // rule apply order in a group, rule with less ID is applied first when indexes are equal
+	Override    bool         `json:"override,omitempty"` // when it is true, all rules with less indexes are disabled
+	StartKey    []byte       `json:"-"`                  // range start key
+	StartKeyHex string       `json:"start_key"`          // hex format start key, for marshal/unmarshal
+	EndKey      []byte       `json:"-"`                  // range end key
+	EndKeyHex   string       `json:"end_key"`            // hex format end key, for marshal/unmarshal
+	Role        PeerRoleType `json:"role"`               // expected role of the peers
+	// IsWitness is kept for placement-rule API and storage compatibility.
+	// Deprecated: witness peers are no longer supported; true is treated as false.
+	IsWitness        bool              `json:"is_witness"`
 	Count            int               `json:"count"`                       // expected count of the peers
 	LabelConstraints []LabelConstraint `json:"label_constraints,omitempty"` // used to select stores to place peers
 	LocationLabels   []string          `json:"location_labels,omitempty"`   // used to make peers isolated physically

@@ -98,20 +98,12 @@ func CreateForceTransferLeaderOperator(desc string, ci sche.SharedCluster, regio
 // CreateMoveRegionOperator creates an operator that moves a region to specified stores.
 func CreateMoveRegionOperator(desc string, ci sche.SharedCluster, region *core.RegionInfo, kind OpKind, roles map[uint64]placement.PeerRoleType) (*Operator, error) {
 	// construct the peers from roles
-	oldPeers := region.GetPeers()
 	peers := make(map[uint64]*metapb.Peer)
-	i := 0
 	for storeID, role := range roles {
-		isWitness := false
-		if i < len(oldPeers) {
-			isWitness = oldPeers[i].GetIsWitness()
-		}
 		peers[storeID] = &metapb.Peer{
-			StoreId:   storeID,
-			Role:      role.MetaPeerRole(),
-			IsWitness: isWitness,
+			StoreId: storeID,
+			Role:    role.MetaPeerRole(),
 		}
-		i += 1
 	}
 	builder := NewBuilder(desc, ci, region).SetPeers(peers).SetExpectedRoles(roles)
 	return builder.Build(kind)
@@ -123,14 +115,6 @@ func CreateMovePeerOperator(desc string, ci sche.SharedCluster, region *core.Reg
 		RemovePeer(oldStore).
 		AddPeer(peer).
 		Build(kind)
-}
-
-// CreateMoveWitnessOperator creates an operator that replaces an old witness with a new witness.
-func CreateMoveWitnessOperator(desc string, ci sche.SharedCluster, region *core.RegionInfo, sourceStoreID uint64, targetStoreID uint64) (*Operator, error) {
-	return NewBuilder(desc, ci, region).
-		BecomeNonWitness(sourceStoreID).
-		BecomeWitness(targetStoreID).
-		Build(OpWitness)
 }
 
 // CreateReplaceLeaderPeerOperator creates an operator that replaces an old peer with a new peer, and move leader from old store firstly.
@@ -188,9 +172,8 @@ func CreateMergeRegionOperator(desc string, ci sche.SharedCluster, source *core.
 		peers := make(map[uint64]*metapb.Peer)
 		for _, p := range target.GetPeers() {
 			peers[p.GetStoreId()] = &metapb.Peer{
-				StoreId:   p.GetStoreId(),
-				Role:      p.GetRole(),
-				IsWitness: p.GetIsWitness(),
+				StoreId: p.GetStoreId(),
+				Role:    p.GetRole(),
 			}
 		}
 		matchOp, err := NewBuilder("", ci, source).
@@ -342,16 +325,10 @@ func CreateLeaveJointStateOperator(desc string, ci sche.SharedCluster, origin *c
 	return NewOperator(b.desc, brief, b.regionID, b.regionEpoch, kind, origin.GetApproximateSize(), b.steps...), nil
 }
 
-// CreateWitnessPeerOperator creates an operator that set a follower or learner peer with witness
-func CreateWitnessPeerOperator(desc string, ci sche.SharedCluster, region *core.RegionInfo, peer *metapb.Peer) (*Operator, error) {
-	return NewBuilder(desc, ci, region).
-		BecomeWitness(peer.GetStoreId()).
-		Build(OpWitness)
-}
-
-// CreateNonWitnessPeerOperator creates an operator that set a peer with non-witness
+// CreateNonWitnessPeerOperator converts a legacy witness peer to a regular
+// peer. It is retained only for rolling-upgrade compatibility.
 func CreateNonWitnessPeerOperator(desc string, ci sche.SharedCluster, region *core.RegionInfo, peer *metapb.Peer) (*Operator, error) {
 	return NewBuilder(desc, ci, region).
 		BecomeNonWitness(peer.GetStoreId()).
-		Build(OpWitness)
+		Build(OpReplica)
 }

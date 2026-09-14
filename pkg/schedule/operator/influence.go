@@ -50,12 +50,11 @@ func (m *OpInfluence) getAllInfluenceCopy() map[uint64]*StoreInfluence {
 	ret := make(map[uint64]*StoreInfluence, len(m.StoresInfluence))
 	for id, v := range m.StoresInfluence {
 		ret[id] = &StoreInfluence{
-			RegionSize:   v.RegionSize,
-			RegionCount:  v.RegionCount,
-			LeaderSize:   v.LeaderSize,
-			LeaderCount:  v.LeaderCount,
-			WitnessCount: v.WitnessCount,
-			StepCost:     v.StepCost,
+			RegionSize:  v.RegionSize,
+			RegionCount: v.RegionCount,
+			LeaderSize:  v.LeaderSize,
+			LeaderCount: v.LeaderCount,
+			StepCost:    v.StepCost,
 		}
 	}
 	return ret
@@ -79,12 +78,11 @@ func (m *OpInfluence) GetStoreInfluence(id uint64) *StoreInfluence {
 
 // StoreInfluence records influences that pending operators will make.
 type StoreInfluence struct {
-	RegionSize   int64
-	RegionCount  int64
-	LeaderSize   int64
-	LeaderCount  int64
-	WitnessCount int64
-	StepCost     map[storelimit.Type]int64
+	RegionSize  int64
+	RegionCount int64
+	LeaderSize  int64
+	LeaderCount int64
+	StepCost    map[storelimit.Type]int64
 }
 
 func (s *StoreInfluence) add(other *StoreInfluence) {
@@ -92,7 +90,6 @@ func (s *StoreInfluence) add(other *StoreInfluence) {
 	s.RegionSize += other.RegionSize
 	s.LeaderSize += other.LeaderSize
 	s.LeaderCount += other.LeaderCount
-	s.WitnessCount += other.WitnessCount
 	for _, v := range storelimit.TypeNameValue {
 		s.AddStepCost(v, other.GetStepCost(v))
 	}
@@ -118,8 +115,6 @@ func (s *StoreInfluence) ResourceProperty(kind constant.ScheduleKind) int64 {
 			return s.RegionSize
 		}
 
-	case constant.WitnessKind:
-		return s.WitnessCount
 	default:
 		return 0
 	}

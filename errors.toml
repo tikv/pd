@@ -116,11 +116,6 @@ error = '''
 peer cannot be leader
 '''
 
-["PD:checker:ErrPeerCannotBeWitness"]
-error = '''
-peer cannot be witness
-'''
-
 ["PD:checker:ErrRegionNoLeader"]
 error = '''
 region no leader
@@ -1170,4 +1165,3 @@ parse url error
 error = '''
 feature not existed
 '''
-

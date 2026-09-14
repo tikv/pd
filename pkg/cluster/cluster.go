@@ -38,7 +38,6 @@ type Cluster interface {
 // HandleStatsAsync handles the flow asynchronously.
 func HandleStatsAsync(c Cluster, region *core.RegionInfo) {
 	c.GetHotStat().CheckRegionFlowAsync(region)
-	c.GetCoordinator().GetSchedulersController().CheckTransferWitnessLeader(region)
 }
 
 // HandleOverlaps handles the overlap regions.

@@ -67,7 +67,6 @@ func errRegionIsStale(region *metapb.Region, origin *metapb.Region) error {
 type RegionInfo struct {
 	meta         *metapb.Region
 	learners     []*metapb.Peer
-	witnesses    []*metapb.Peer
 	voters       []*metapb.Peer
 	leader       *metapb.Peer
 	downPeers    []*pdpb.PeerStats
@@ -156,20 +155,15 @@ func NewRegionInfo(region *metapb.Region, leader *metapb.Peer, opts ...RegionCre
 func classifyVoterAndLearner(region *RegionInfo) {
 	region.learners = make([]*metapb.Peer, 0, 1)
 	region.voters = make([]*metapb.Peer, 0, len(region.meta.Peers))
-	region.witnesses = make([]*metapb.Peer, 0, 1)
 	for _, p := range region.meta.Peers {
 		if IsLearner(p) {
 			region.learners = append(region.learners, p)
 		} else {
 			region.voters = append(region.voters, p)
 		}
-		if IsWitness(p) {
-			region.witnesses = append(region.witnesses, p)
-		}
 	}
 	sort.Sort(peerSlice(region.learners))
 	sort.Sort(peerSlice(region.voters))
-	sort.Sort(peerSlice(region.witnesses))
 }
 
 // peersEqualTo returns true when the peers are not changed, which may caused by: the region leader not changed,
@@ -178,7 +172,6 @@ func (r *RegionInfo) peersEqualTo(region *RegionInfo) bool {
 	return r.leader.GetId() == region.leader.GetId() &&
 		SortedPeersEqual(r.GetVoters(), region.GetVoters()) &&
 		SortedPeersEqual(r.GetLearners(), region.GetLearners()) &&
-		SortedPeersEqual(r.GetWitnesses(), region.GetWitnesses()) &&
 		SortedPeersEqual(r.GetPendingPeers(), region.GetPendingPeers())
 }
 
@@ -379,11 +372,6 @@ func (r *RegionInfo) GetVoters() []*metapb.Peer {
 	return r.voters
 }
 
-// GetWitnesses returns the witnesses.
-func (r *RegionInfo) GetWitnesses() []*metapb.Peer {
-	return r.witnesses
-}
-
 // GetPeer returns the peer with specified peer id.
 func (r *RegionInfo) GetPeer(peerID uint64) *metapb.Peer {
 	for _, peer := range r.meta.GetPeers() {
@@ -404,7 +392,7 @@ const (
 	PeerScatter
 	// LearnerScatter is the learner of the region.
 	LearnerScatter
-	// Unknown is the unknown rule of the region include witness.
+	// Unknown is an unknown scatter rule.
 	Unknown
 )
 
@@ -547,16 +535,6 @@ func (r *RegionInfo) GetStoreLearner(storeID uint64) *metapb.Peer {
 	return nil
 }
 
-// GetStoreWitness returns the witness peer in specified store.
-func (r *RegionInfo) GetStoreWitness(storeID uint64) *metapb.Peer {
-	for _, peer := range r.witnesses {
-		if peer.GetStoreId() == storeID {
-			return peer
-		}
-	}
-	return nil
-}
-
 // GetStoreIDs returns a map indicate the region distributed.
 func (r *RegionInfo) GetStoreIDs() map[uint64]struct{} {
 	peers := r.meta.GetPeers()
@@ -577,18 +555,6 @@ func (r *RegionInfo) GetFollowers() map[uint64]*metapb.Peer {
 		}
 	}
 	return followers
-}
-
-// GetNonWitnessVoters returns a map indicate the non-witness voter peers distributed.
-func (r *RegionInfo) GetNonWitnessVoters() map[uint64]*metapb.Peer {
-	peers := r.GetVoters()
-	nonWitnesses := make(map[uint64]*metapb.Peer, len(peers))
-	for _, peer := range peers {
-		if !peer.IsWitness {
-			nonWitnesses[peer.GetStoreId()] = peer
-		}
-	}
-	return nonWitnesses
 }
 
 // GetDiffFollowers returns the followers which is not located in the same
@@ -1066,7 +1032,6 @@ type RegionsInfo struct {
 	leaders      map[uint64]*regionTree // storeID -> sub regionTree
 	followers    map[uint64]*regionTree // storeID -> sub regionTree
 	learners     map[uint64]*regionTree // storeID -> sub regionTree
-	witnesses    map[uint64]*regionTree // storeID -> sub regionTree
 	pendingPeers map[uint64]*regionTree // storeID -> sub regionTree
 	// This tree is used to check the overlaps among all the subtrees.
 	overlapTree *regionTree
@@ -1081,7 +1046,6 @@ func NewRegionsInfo() *RegionsInfo {
 		leaders:      make(map[uint64]*regionTree),
 		followers:    make(map[uint64]*regionTree),
 		learners:     make(map[uint64]*regionTree),
-		witnesses:    make(map[uint64]*regionTree),
 		pendingPeers: make(map[uint64]*regionTree),
 		overlapTree:  newRegionTreeWithCountRef(),
 	}
@@ -1308,7 +1272,6 @@ func (r *RegionsInfo) updateSubTreeLocked(rangeChanged bool, overlaps []*RegionI
 		}
 	}
 	setPeers(r.learners, region.GetLearners())
-	setPeers(r.witnesses, region.GetWitnesses())
 	setPeers(r.pendingPeers, region.GetPendingPeers())
 }
 
@@ -1445,7 +1408,6 @@ func (r *RegionsInfo) updateSubTreeStat(origin *RegionInfo, region *RegionInfo) 
 		}
 	}
 	updatePeersStat(r.learners, region.GetLearners())
-	updatePeersStat(r.witnesses, region.GetWitnesses())
 	updatePeersStat(r.pendingPeers, region.GetPendingPeers())
 }
 
@@ -1484,7 +1446,6 @@ func (r *RegionsInfo) ResetRegionCache() {
 	r.leaders = make(map[uint64]*regionTree)
 	r.followers = make(map[uint64]*regionTree)
 	r.learners = make(map[uint64]*regionTree)
-	r.witnesses = make(map[uint64]*regionTree)
 	r.pendingPeers = make(map[uint64]*regionTree)
 	r.overlapTree = newRegionTreeWithCountRef()
 }
@@ -1504,7 +1465,6 @@ func (r *RegionsInfo) removeRegionFromSubTreeLocked(region *RegionInfo) {
 		r.leaders[storeID].remove(region)
 		r.followers[storeID].remove(region)
 		r.learners[storeID].remove(region)
-		r.witnesses[storeID].remove(region)
 		r.pendingPeers[storeID].remove(region)
 	}
 	r.overlapTree.remove(region)
@@ -1538,7 +1498,8 @@ func SortedPeersEqual(peersA, peersB []*metapb.Peer) bool {
 	}
 	for i, peerA := range peersA {
 		peerB := peersB[i]
-		if peerA.GetStoreId() != peerB.GetStoreId() || peerA.GetId() != peerB.GetId() {
+		if peerA.GetStoreId() != peerB.GetStoreId() || peerA.GetId() != peerB.GetId() ||
+			peerA.GetIsWitness() != peerB.GetIsWitness() {
 			return false
 		}
 	}
@@ -1611,7 +1572,6 @@ func (r *RegionsInfo) GetStoreRegions(storeID uint64) []*RegionInfo {
 	if learners, ok := r.learners[storeID]; ok {
 		regions = append(regions, learners.scanRanges()...)
 	}
-	// no need to consider witness, as it is already included in leaders, followers and learners
 	return regions
 }
 
@@ -1766,8 +1726,6 @@ const (
 	FollowerInSubTree SubTreeRegionType = "follower"
 	// LearnerInSubTree is the learner sub tree.
 	LearnerInSubTree SubTreeRegionType = "learner"
-	// WitnessInSubTree is the witness sub tree.
-	WitnessInSubTree SubTreeRegionType = "witness"
 	// PendingPeerInSubTree is the pending peer sub tree.
 	PendingPeerInSubTree SubTreeRegionType = "pending"
 )
@@ -1788,10 +1746,6 @@ func (r *RegionsInfo) GetStoreRegionsByTypeInSubTree(storeID uint64, typ SubTree
 	case LearnerInSubTree:
 		if learners, ok := r.learners[storeID]; ok {
 			regions = learners.scanRanges()
-		}
-	case WitnessInSubTree:
-		if witnesses, ok := r.witnesses[storeID]; ok {
-			regions = witnesses.scanRanges()
 		}
 	case PendingPeerInSubTree:
 		if pendingPeers, ok := r.pendingPeers[storeID]; ok {
@@ -1901,10 +1855,10 @@ func (r *RegionsInfo) GetMetaRegions() []*metapb.Region {
 }
 
 // GetStoreStats returns the store stats.
-func (r *RegionsInfo) GetStoreStats(storeID uint64) (leader, region, witness, learner, pending int, leaderSize, regionSize int64) {
+func (r *RegionsInfo) GetStoreStats(storeID uint64) (leader, region, learner, pending int, leaderSize, regionSize int64) {
 	r.st.RLock()
 	defer r.st.RUnlock()
-	return r.leaders[storeID].length(), r.getStoreRegionCountLocked(storeID), r.witnesses[storeID].length(),
+	return r.leaders[storeID].length(), r.getStoreRegionCountLocked(storeID),
 		r.learners[storeID].length(), r.pendingPeers[storeID].length(), r.leaders[storeID].TotalSize(), r.getStoreRegionSizeLocked(storeID)
 }
 
@@ -1955,13 +1909,6 @@ func (r *RegionsInfo) GetStoreLearnerCount(storeID uint64) int {
 	return r.learners[storeID].length()
 }
 
-// GetStoreWitnessCount get the total count of a store's witness RegionInfo
-func (r *RegionsInfo) GetStoreWitnessCount(storeID uint64) int {
-	r.st.RLock()
-	defer r.st.RUnlock()
-	return r.witnesses[storeID].length()
-}
-
 // RandPendingRegions randomly gets a store's n regions with a pending peer.
 func (r *RegionsInfo) RandPendingRegions(storeID uint64, ranges []keyutil.KeyRange) []*RegionInfo {
 	r.st.RLock()
@@ -1995,13 +1942,6 @@ func (r *RegionsInfo) RandLearnerRegions(storeID uint64, ranges []keyutil.KeyRan
 	r.st.RLock()
 	defer r.st.RUnlock()
 	return r.learners[storeID].RandomRegions(randomRegionMaxRetry, ranges)
-}
-
-// RandWitnessRegions randomly gets a store's n witness regions.
-func (r *RegionsInfo) RandWitnessRegions(storeID uint64, ranges []keyutil.KeyRange) []*RegionInfo {
-	r.st.RLock()
-	defer r.st.RUnlock()
-	return r.witnesses[storeID].RandomRegions(randomRegionMaxRetry, ranges)
 }
 
 // GetLeader returns leader RegionInfo by storeID and regionID (now only used in test)
@@ -2508,14 +2448,6 @@ func (h HexRegionsMeta) String() string {
 		b.WriteString(proto.CompactTextString(meta))
 	}
 	return strings.TrimSpace(b.String())
-}
-
-// NeedTransferWitnessLeader is used to judge if the region's leader is a witness
-func NeedTransferWitnessLeader(region *RegionInfo) bool {
-	if region == nil || region.GetLeader() == nil {
-		return false
-	}
-	return region.GetLeader().IsWitness
 }
 
 // SplitRegions split a set of RegionInfo by the middle of regionKey. Only for test purpose.
