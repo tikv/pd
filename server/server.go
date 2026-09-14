@@ -17,6 +17,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"math/rand/v2"
@@ -205,6 +206,8 @@ type Server struct {
 	// Store as map[string]*grpc.ClientConn
 	clientConns sync.Map
 
+	followerRegionResetMu sync.Mutex
+
 	tsoClientPool struct {
 		syncutil.RWMutex
 		clients map[string]*streamWrapper
@@ -240,6 +243,7 @@ type Server struct {
 	resourceManagerPrimaryWatcher    *etcdutil.LoopWatcher
 	resourceGroupMetadataManager     *rm_server.Manager
 	resourceGroupMetadataManagerOnce sync.Once
+	membersCache                     *membersCache
 
 	// Cgroup Monitor
 	cgMonitor cgroup.Monitor
@@ -272,6 +276,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 		startTimestamp:                  time.Now().Unix(),
 		DiagnosticsServer:               sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
 		isKeyspaceGroupEnabled:          isKeyspaceGroupEnabled,
+		membersCache:                    newMembersCache(membersCacheTTL),
 		tsoClientPool: struct {
 			syncutil.RWMutex
 			clients map[string]*streamWrapper
@@ -437,7 +442,9 @@ func (s *Server) startClient() error {
 	if err != nil {
 		return errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
 	}
-	// This etcd client will only be used to read and write the election-related data, such as leader key.
+	// Keep this client pinned to local etcd. Local lease renewal verifies this
+	// member's etcd leadership, preventing a stalled member from renewing through
+	// a healthy peer (tikv/pd#10671).
 	s.electionClient, err = etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.AdvertiseClientUrls, etcdutil.ElectionEtcdClientPurpose, false)
 	if err != nil {
 		return errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
@@ -521,6 +528,10 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.tsoAllocator = tso.NewAllocator(s.ctx, constant.DefaultKeyspaceGroupID, s.member, tsoStorage, s)
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetMember(), s.GetBasicCluster(), s.GetStorage(), syncer.NewRegionSyncer(s), s.client, s.httpClient, s.tsoAllocator)
+	// This package's own heartbeat/bucket-report metrics can't be cleaned up from
+	// within RaftCluster's bury path without an import cycle, so RaftCluster invokes
+	// this callback instead.
+	s.cluster.SetOnStoreBuried(DeleteStoreMetrics)
 	keyspaceIDAllocator := id.NewAllocator(&id.AllocatorParams{
 		Client: s.client,
 		Label:  id.KeyspaceLabel,
@@ -942,6 +953,155 @@ func (s *Server) GetBasicCluster() *core.BasicCluster {
 	return s.basicCluster
 }
 
+// ResetFollowerRegionCache resets follower local region cache and restarts
+// region sync from the leader.
+func (s *Server) ResetFollowerRegionCache(regionIDs ...uint64) error {
+	if !s.persistOptions.IsUseRegionStorage() {
+		return errors.New("region storage is disabled")
+	}
+	s.followerRegionResetMu.Lock()
+	defer s.followerRegionResetMu.Unlock()
+
+	leader := s.GetLeader()
+	if leader == nil {
+		return errs.ErrLeaderNil.FastGenByArgs()
+	}
+	leaderURLs := leader.GetClientUrls()
+	if len(leaderURLs) == 0 {
+		return errors.New("pd leader has no client url")
+	}
+
+	syncer := s.cluster.GetRegionSyncer()
+	syncer.StopSyncWithLeader()
+	// Keep the follower connected even when the reset returns an error.
+	defer syncer.StartSyncWithLeader(leaderURLs[0])
+
+	var resetErr error
+	if err := s.storage.Flush(); err != nil {
+		resetErr = errors.Wrap(err, "flush follower region storage")
+	}
+	if len(regionIDs) == 0 {
+		if err := s.deleteFollowerRegionStorage(); resetErr == nil && err != nil {
+			resetErr = err
+		}
+		s.basicCluster.ResetRegionCache()
+	} else {
+		for _, regionID := range regionIDs {
+			if err := s.deleteFollowerRegion(regionID); resetErr == nil && err != nil {
+				resetErr = err
+			}
+		}
+	}
+	if err := s.storage.Flush(); err != nil && resetErr == nil {
+		resetErr = errors.Wrap(err, "flush follower region storage")
+	}
+	// Force a full sync after the local reset attempt so the follower can
+	// rebuild any cache entries that were removed before an error happened.
+	syncer.ResetHistoryIndex(0)
+
+	log.Info("reset follower region cache and restart region syncer",
+		zap.String("server", s.Name()),
+		zap.String("leader", leader.GetName()),
+		zap.Int("region-count", len(regionIDs)))
+	return resetErr
+}
+
+func (s *Server) deleteFollowerRegion(regionID uint64) error {
+	region := s.basicCluster.GetRegion(regionID)
+	if region == nil {
+		meta := &metapb.Region{}
+		ok, err := s.storage.LoadRegion(regionID, meta)
+		if err != nil {
+			return errors.Wrap(err, "load follower region from local storage")
+		}
+		if ok {
+			region = core.NewRegionInfo(meta, nil, core.SetSource(core.Storage))
+		}
+	}
+	if region != nil {
+		if err := s.deleteFollowerRegionMeta(region.GetMeta()); err != nil {
+			return err
+		}
+	}
+	s.basicCluster.RemoveRegionIfExist(regionID)
+	return nil
+}
+
+func (s *Server) deleteFollowerRegionStorage() error {
+	regionStorage := storage.RetrieveRegionStorage(s.storage)
+	regionKV, ok := regionStorage.(kv.Base)
+	if !ok {
+		return errors.New("region storage does not support range scan")
+	}
+
+	startID := uint64(0)
+	endKey := keypath.RegionPath(math.MaxUint64)
+	for {
+		select {
+		case <-s.ctx.Done():
+			return s.ctx.Err()
+		default:
+		}
+
+		keys, _, err := regionKV.LoadRange(keypath.RegionPath(startID), endKey, endpoint.MaxKVRangeLimit)
+		if err != nil {
+			return errors.Wrap(err, "load follower regions from local storage")
+		}
+		var lastRegionID uint64
+		for _, key := range keys {
+			regionID, err := parseRegionIDFromStorageKey(key)
+			if err != nil {
+				return err
+			}
+			lastRegionID = regionID
+		}
+		if err := deleteFollowerRegionStorageKeys(s.ctx, regionKV, keys); err != nil {
+			return errors.Wrap(err, "delete follower regions from local storage")
+		}
+		if len(keys) < endpoint.MaxKVRangeLimit {
+			return nil
+		}
+		if lastRegionID == math.MaxUint64 {
+			return nil
+		}
+		startID = lastRegionID + 1
+	}
+}
+
+func deleteFollowerRegionStorageKeys(ctx context.Context, regionKV kv.Base, keys []string) error {
+	return regionKV.RunInTxn(ctx, func(txn kv.Txn) error {
+		for _, key := range keys {
+			if err := txn.Remove(key); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (s *Server) deleteFollowerRegionMeta(region *metapb.Region) error {
+	if err := s.storage.DeleteRegion(region); err != nil {
+		log.Warn("failed to delete follower region from local storage",
+			zap.String("server", s.Name()),
+			zap.Uint64("region-id", region.GetId()),
+			errs.ZapError(err))
+		return errors.Wrap(err, "delete follower region from local storage")
+	}
+	return nil
+}
+
+func parseRegionIDFromStorageKey(key string) (uint64, error) {
+	idx := strings.LastIndexByte(key, '/')
+	if idx < 0 || idx == len(key)-1 {
+		return 0, errors.Errorf("invalid region storage key %q", key)
+	}
+	regionID, err := strconv.ParseUint(key[idx+1:], 10, 64)
+	if err != nil {
+		return 0, errors.Wrap(err, "parse region storage key")
+	}
+	return regionID, nil
+}
+
 // GetPersistOptions returns the schedule option.
 func (s *Server) GetPersistOptions() *config.PersistOptions {
 	return s.persistOptions
@@ -1011,8 +1171,22 @@ func (s *Server) StartTimestamp() int64 {
 
 // GetMembers returns PD server list.
 func (s *Server) GetMembers() ([]*pdpb.Member, error) {
+	return s.loadMembers(false)
+}
+
+// ReloadMembers reloads PD server list and updates the cache.
+func (s *Server) ReloadMembers() ([]*pdpb.Member, error) {
+	return s.loadMembers(true)
+}
+
+func (s *Server) loadMembers(forceRefresh bool) ([]*pdpb.Member, error) {
 	if s.IsClosed() {
 		return nil, errs.ErrServerNotStarted.FastGenByArgs()
+	}
+	if s.membersCache != nil {
+		return s.membersCache.get(forceRefresh, func() ([]*pdpb.Member, error) {
+			return cluster.GetMembers(s.GetClient())
+		})
 	}
 	return cluster.GetMembers(s.GetClient())
 }
@@ -1047,6 +1221,20 @@ func (s *Server) GetKeyspaceConfig() *config.KeyspaceConfig {
 
 // SetKeyspaceConfig sets the keyspace config information.
 func (s *Server) SetKeyspaceConfig(oldCfg, newCfg *config.KeyspaceConfig) error {
+	return s.setKeyspaceConfigInner(oldCfg, newCfg, true)
+}
+
+// SetKeyspaceConfigWithoutKeyspaceManagerUpdate sets keyspace config without updating the keyspace manager.
+func (s *Server) SetKeyspaceConfigWithoutKeyspaceManagerUpdate(oldCfg, newCfg *config.KeyspaceConfig) error {
+	return s.setKeyspaceConfigInner(oldCfg, newCfg, false)
+}
+
+// UpdateKeyspaceConfig updates keyspace manager's keyspace config.
+func (s *Server) UpdateKeyspaceConfig(newCfg *config.KeyspaceConfig) {
+	s.keyspaceManager.UpdateConfig(newCfg)
+}
+
+func (s *Server) setKeyspaceConfigInner(oldCfg, newCfg *config.KeyspaceConfig, updateKeyspaceManager bool) error {
 	if err := newCfg.Validate(); err != nil {
 		return err
 	}
@@ -1062,7 +1250,9 @@ func (s *Server) SetKeyspaceConfig(oldCfg, newCfg *config.KeyspaceConfig) error 
 			errs.ZapError(err))
 		return err
 	}
-	s.keyspaceManager.UpdateConfig(newCfg)
+	if updateKeyspaceManager {
+		s.keyspaceManager.UpdateConfig(newCfg)
+	}
 
 	log.Info("keyspace config is updated", zap.Reflect("new", newCfg), zap.Reflect("old", oldCfg))
 	return nil
@@ -1095,27 +1285,72 @@ func (s *Server) GetScheduleConfig() *sc.ScheduleConfig {
 }
 
 // SetScheduleConfig sets the balance config information.
-// This function is exported to be used by the API.
 func (s *Server) SetScheduleConfig(cfg sc.ScheduleConfig) error {
-	if err := cfg.Validate(); err != nil {
-		return err
-	}
-	if err := cfg.Deprecated(); err != nil {
-		return err
-	}
-	old := s.persistOptions.GetScheduleConfig()
-	s.persistOptions.SetScheduleConfig(&cfg)
-	if err := s.persistOptions.Persist(s.storage); err != nil {
-		s.persistOptions.SetScheduleConfig(old)
+	return s.updateScheduleConfig(func(_ *sc.ScheduleConfig, next *sc.ScheduleConfig) (bool, error) {
+		*next = *cfg.Clone()
+		return true, nil
+	})
+}
+
+// PatchScheduleConfig applies a partial JSON update to the latest schedule
+// config inside the schedule persistence transaction.
+func (s *Server) PatchScheduleConfig(data []byte) error {
+	return s.updateScheduleConfig(func(_ *sc.ScheduleConfig, next *sc.ScheduleConfig) (bool, error) {
+		if err := json.Unmarshal(data, next); err != nil {
+			return false, err
+		}
+		return true, nil
+	})
+}
+
+// SetScheduleConfigItem applies one legacy /config schedule item to the latest
+// schedule config inside the schedule persistence transaction.
+func (s *Server) SetScheduleConfigItem(key string, value any) error {
+	return s.updateScheduleConfig(func(_ *sc.ScheduleConfig, next *sc.ScheduleConfig) (bool, error) {
+		updated, found, err := jsonutil.AddKeyValue(next, key, value)
+		if err != nil {
+			return false, err
+		}
+		if !found {
+			return false, errors.Errorf("config item %s not found", key)
+		}
+		return updated, nil
+	})
+}
+
+func (s *Server) updateScheduleConfig(
+	update func(current, next *sc.ScheduleConfig) (changed bool, err error),
+) error {
+	var oldCfg, newCfg *sc.ScheduleConfig
+	var applied bool
+	err := s.persistOptions.UpdateScheduleConfig(s.storage, func(current, next *sc.ScheduleConfig) (bool, error) {
+		changed, err := update(current, next)
+		oldCfg, newCfg = current, next
+		if err != nil || !changed {
+			return changed, err
+		}
+		if err := next.Validate(); err != nil {
+			return false, err
+		}
+		if err := next.Deprecated(); err != nil {
+			return false, err
+		}
+		applied = true
+		return true, nil
+	})
+	if err != nil {
 		log.Error("failed to update schedule config",
-			zap.Reflect("new", cfg),
-			zap.Reflect("old", old),
+			zap.Reflect("new", newCfg),
+			zap.Reflect("old", oldCfg),
 			errs.ZapError(err))
 		return err
 	}
+	if !applied {
+		return nil
+	}
 	// Update the scheduling halt status at the same time.
-	s.persistOptions.SetSchedulingAllowanceStatus(cfg.HaltScheduling, "manually")
-	log.Info("schedule config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
+	s.persistOptions.SetSchedulingAllowanceStatus(newCfg.HaltScheduling, "manually")
+	log.Info("schedule config is updated", zap.Reflect("new", newCfg), zap.Reflect("old", oldCfg))
 	return nil
 }
 
@@ -1680,6 +1915,23 @@ func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context) erro
 	s.leaderCallbacks = append(s.leaderCallbacks, callbacks...)
 }
 
+func memberFailpointEnabled(val failpoint.Value, memberID uint64) bool {
+	if enabled, ok := val.(bool); ok {
+		return enabled
+	}
+	memberString, ok := val.(string)
+	if !ok {
+		return false
+	}
+	for _, memberIDString := range strings.Split(memberString, ",") {
+		id, err := strconv.ParseUint(strings.TrimSpace(memberIDString), 10, 64)
+		if err == nil && id == memberID {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) leaderLoop() {
 	defer logutil.LogPanic()
 	defer s.serverLoopWg.Done()
@@ -1693,9 +1945,7 @@ func (s *Server) leaderLoop() {
 		leader, checkAgain := s.member.CheckLeader()
 		// add failpoint to test leader check go to stuck.
 		failpoint.Inject("leaderLoopCheckAgain", func(val failpoint.Value) {
-			memberString := val.(string)
-			memberID, _ := strconv.ParseUint(memberString, 10, 64)
-			if s.member.ID() == memberID {
+			if memberFailpointEnabled(val, s.member.ID()) {
 				checkAgain = true
 			}
 		})
@@ -1710,12 +1960,16 @@ func (s *Server) leaderLoop() {
 			}
 			syncer := s.cluster.GetRegionSyncer()
 			if s.persistOptions.IsUseRegionStorage() {
+				s.followerRegionResetMu.Lock()
 				syncer.StartSyncWithLeader(leader.GetListenUrls()[0])
+				s.followerRegionResetMu.Unlock()
 			}
 			log.Info("start to watch pd leader", zap.Stringer("pd-leader", leader))
 			// WatchLeader will keep looping and never return unless the PD leader has changed.
 			leader.Watch(s.serverLoopCtx)
+			s.followerRegionResetMu.Lock()
 			syncer.StopSyncWithLeader()
+			s.followerRegionResetMu.Unlock()
 			log.Info("pd leader has changed, try to re-campaign a pd leader")
 		}
 
@@ -1727,9 +1981,11 @@ func (s *Server) leaderLoop() {
 				// use random timeout to avoid leader campaigning storm.
 				randomTimeout := time.Duration(rand.IntN(lostPDLeaderMaxTimeoutSecs))*time.Second + lostPDLeaderMaxTimeoutSecs*time.Second + lostPDLeaderReElectionFactor*s.cfg.ElectionInterval.Duration
 				// add failpoint to test the campaign leader logic.
-				failpoint.Inject("timeoutWaitPDLeader", func() {
-					log.Info("timeoutWaitPDLeader is injected, skip wait other etcd leader be etcd leader")
-					randomTimeout = time.Duration(rand.IntN(10))*time.Millisecond + 100*time.Millisecond
+				failpoint.Inject("timeoutWaitPDLeader", func(val failpoint.Value) {
+					if memberFailpointEnabled(val, s.member.ID()) {
+						log.Info("timeoutWaitPDLeader is injected, skip wait other etcd leader be etcd leader")
+						randomTimeout = time.Duration(rand.IntN(10))*time.Millisecond + 100*time.Millisecond
+					}
 				})
 				if lastUpdated.Add(randomTimeout).Before(time.Now()) && !lastUpdated.IsZero() && etcdLeader != 0 {
 					log.Info("the pd leader is lost for a long time, try to re-campaign a pd leader with resign etcd leader",
@@ -1777,10 +2033,32 @@ func (s *Server) campaignLeader() {
 	//   2. load region could be slow. Based on lease we can recover TSO service faster.
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	var resetLeaderOnce sync.Once
-	defer resetLeaderOnce.Do(func() {
+	// As soon as the leadership keepalive is cancelled, another member has a
+	// chance to become the new leader.
+	//
+	// This is a named function rather than an inline defer because the step-down
+	// branches below call it before they log. Logging writes to a file that may
+	// share a volume with the data directory, so on a stalled volume it can block
+	// for an unbounded time - long enough that a deferred resign would never run
+	// and the member would keep answering as the leader through the paths that do
+	// not consult IsServing. Resigning first bounds that to the in-memory stores
+	// at the top of Member.Resign.
+	resetLeader := func() {
 		cancel()
 		s.member.Resign()
-	})
+		member.ServiceMemberGauge.WithLabelValues(PD).Set(0)
+	}
+	defer resetLeaderOnce.Do(resetLeader)
+
+	// stepDownAndLog gives the leadership up before it writes down the reason.
+	// Every exit from the loop below goes through it, so that the ordering is a
+	// property of this function rather than something each branch has to
+	// remember: separating the two again would reintroduce the bug this exists
+	// to prevent.
+	stepDownAndLog := func(msg string, fields ...zap.Field) {
+		resetLeaderOnce.Do(resetLeader)
+		log.Info(msg, fields...)
+	}
 
 	// maintain the PD leadership, after this, TSO can be service.
 	log.Info("start to keep leader lease")
@@ -1833,8 +2111,10 @@ func (s *Server) campaignLeader() {
 	createRaftClusterDuration := time.Since(createRaftClusterStart)
 	log.Info("create raft cluster completed", zap.Duration("cost", createRaftClusterDuration))
 	defer s.stopRaftCluster()
-	failpoint.Inject("rebaseErr", func() {
-		failpoint.Return()
+	failpoint.Inject("rebaseErr", func(val failpoint.Value) {
+		if memberFailpointEnabled(val, s.member.ID()) {
+			failpoint.Return()
+		}
 	})
 	rebaseStart := time.Now()
 	if err := s.idAllocator.Rebase(); err != nil {
@@ -1843,25 +2123,38 @@ func (s *Server) campaignLeader() {
 	}
 	rebaseDuration := time.Since(rebaseStart)
 	log.Info("sync id from etcd completed", zap.Duration("cost", rebaseDuration))
-	// PromoteSelf to accept the remaining service, such as GetStore, GetRegion.
-	enableLeaderStart := time.Now()
-	s.member.PromoteSelf()
-	enableLeaderDuration := time.Since(enableLeaderStart)
-	member.ServiceMemberGauge.WithLabelValues(PD).Set(1)
-	totalDuration := time.Since(leaderReadyStart)
-	defer resetLeaderOnce.Do(func() {
-		// as soon as cancel the leadership keepalive, then other member have chance
-		// to be new leader.
-		cancel()
-		s.member.Resign()
-		member.ServiceMemberGauge.WithLabelValues(PD).Set(0)
-	})
-
 	CheckPDVersionWithClusterVersion(s.persistOptions)
+	totalDuration := time.Since(leaderReadyStart)
+	// The ready log is written before the promotion on purpose. It is a
+	// synchronous file write, and between the promotion and the loop below
+	// nothing checks the lease - a member that promoted first and then blocked
+	// on this log would keep reporting itself as the leader for as long as a
+	// stalled volume holds the write, with no step-down path running yet. The
+	// failpoint stands in for that blocked write; the pause is bounded for the
+	// same reason as in Lease.Close.
+	failpoint.Inject("blockReadyToServe", func(val failpoint.Value) {
+		if memberFailpointEnabled(val, s.member.ID()) {
+			time.Sleep(10 * time.Second)
+		}
+	})
 	log.Info("PD leader is ready to serve",
 		zap.String("leader-name", s.Name()),
-		zap.Duration("total-cost", totalDuration),
-		zap.Duration("cost", enableLeaderDuration))
+		zap.Duration("total-cost", totalDuration))
+	// Capturing the cleanup term needs only the leadership and its lease, both
+	// in place since Campaign, so this may run ahead of the promotion.
+	s.scheduleMicroserviceMetadataCleanup(ctx)
+	// PromoteSelf to accept the remaining service, such as GetStore, GetRegion.
+	// It is the last step of stepping up: from here on only the loop below
+	// notices an expired lease, so nothing that can block may sit between it
+	// and the loop.
+	s.member.PromoteSelf()
+	member.ServiceMemberGauge.WithLabelValues(PD).Set(1)
+	// Registered a second time on purpose, and it is not dead code: deferred
+	// calls run last in first out, so this one runs before the stopRaftCluster
+	// defer above, which waits on background jobs that can take an unbounded
+	// time. The leadership has to be gone before that wait starts.
+	// `resetLeaderOnce` is what makes the duplicate invocation harmless.
+	defer resetLeaderOnce.Do(resetLeader)
 	leaderTicker := time.NewTicker(mcs.LeaderTickInterval)
 	defer leaderTicker.Stop()
 
@@ -1869,27 +2162,28 @@ func (s *Server) campaignLeader() {
 		select {
 		case <-leaderTicker.C:
 			if !s.member.IsServing() {
-				log.Info("no longer a leader because lease has expired, PD leader will step down")
+				stepDownAndLog("no longer a leader because lease has expired, PD leader will step down")
 				return
 			}
 			// add failpoint to test exit leader, failpoint judge the member is the give value, then break
 			failpoint.Inject("exitCampaignLeader", func(val failpoint.Value) {
-				memberString := val.(string)
-				memberID, _ := strconv.ParseUint(memberString, 10, 64)
-				if s.member.ID() == memberID {
-					log.Info("exit PD leader")
+				if memberFailpointEnabled(val, s.member.ID()) {
+					stepDownAndLog("exit PD leader")
 					failpoint.Return()
 				}
 			})
 
 			etcdLeader := s.member.GetEtcdLeader()
 			if etcdLeader != s.member.ID() {
-				log.Info("etcd leader changed, resigns pd leadership", zap.String("old-pd-leader-name", s.Name()))
+				stepDownAndLog("etcd leader changed, resigns pd leadership", zap.String("old-pd-leader-name", s.Name()))
 				return
 			}
 		case <-ctx.Done():
-			// Server is closed and it should return nil.
-			log.Info("server is closed")
+			// Server is closed and it should return nil. This is a shutdown
+			// rather than a step-down, but it reaches the same deferred resign
+			// through a log call that can block just as long, so it gives the
+			// leadership up first for the same reason.
+			stepDownAndLog("server is closed")
 			return
 		}
 	}
@@ -2187,7 +2481,7 @@ func (s *Server) initServicePrimaryWatcher(serviceName string, primaryKey string
 		return nil
 	}
 	name := fmt.Sprintf("%s-primary-watcher", serviceName)
-	return etcdutil.NewLoopWatcher(
+	w := etcdutil.NewLoopWatcher(
 		s.serverLoopCtx,
 		&s.serverLoopWg,
 		s.client,
@@ -2199,6 +2493,8 @@ func (s *Server) initServicePrimaryWatcher(serviceName string, primaryKey string
 		func([]*clientv3.Event) error { return nil },
 		false, /* withPrefix */
 	)
+	w.SetReconcileDeletedKeys()
+	return w
 }
 
 // RecoverAllocID recover alloc id. set current base id to input id

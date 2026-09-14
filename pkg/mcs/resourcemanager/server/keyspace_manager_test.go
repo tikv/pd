@@ -672,7 +672,7 @@ func TestPersistAndReloadIntegrity(t *testing.T) {
 			err = proto.Unmarshal([]byte(rawValue), groupSetting)
 			re.NoError(err)
 			re.NotNil(groupSetting.KeyspaceId)
-			re.Equal(keyspaceID, groupSetting.KeyspaceId.Value)
+			re.Equal(keyspaceID, groupSetting.KeyspaceId.GetValue())
 			re.Equal(uint64(500), groupSetting.RUSettings.RU.Settings.FillRate)
 		}
 	})

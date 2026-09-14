@@ -300,6 +300,7 @@ func (s *grantHotRegionScheduler) transfer(cluster sche.SchedulerCluster, region
 		candidate = []uint64{s.conf.getStoreLeaderID()}
 	} else {
 		filters = append(filters, &filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true, OperatorLevel: constant.High},
+			filter.NewHotRegionEvictedTargetFilter(s.GetName()),
 			filter.NewExcludedFilter(s.GetName(), srcRegion.GetStoreIDs(), srcRegion.GetStoreIDs()))
 		candidate = storeIDs
 	}

@@ -86,7 +86,7 @@ func newShowKeyspaceCommand() *cobra.Command {
 
 func showKeyspaceIDCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	resp, err := doRequest(cmd, fmt.Sprintf("%s/id/%s", keyspacePrefix, args[0]), http.MethodGet, http.Header{})
@@ -99,7 +99,7 @@ func showKeyspaceIDCommandFunc(cmd *cobra.Command, args []string) {
 
 func showKeyspaceNameCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	refreshGroupID, err := cmd.Flags().GetBool(nmForceRefreshGroupID)
@@ -137,7 +137,7 @@ func newCreateKeyspaceCommand() *cobra.Command {
 
 func createKeyspaceCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 
@@ -198,7 +198,7 @@ func newUpdateKeyspaceConfigCommand() *cobra.Command {
 
 func updateKeyspaceConfigCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	configPatch := map[string]*string{}
@@ -301,7 +301,7 @@ func newUpdateKeyspaceStateCommand() *cobra.Command {
 
 func updateKeyspaceStateCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 2 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	params := handlers.UpdateStateParam{
@@ -334,7 +334,7 @@ func newListKeyspaceCommand() *cobra.Command {
 
 func listKeyspaceCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 0 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 
@@ -395,7 +395,7 @@ func newShowKeyspaceRangeCommand() *cobra.Command {
 
 func showKeyspaceRangeByIDCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 
@@ -444,7 +444,7 @@ func showKeyspaceRangeByIDCommandFunc(cmd *cobra.Command, args []string) {
 
 func showKeyspaceRangeByNameCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 
@@ -471,7 +471,7 @@ func showKeyspaceRangeByNameCommandFunc(cmd *cobra.Command, args []string) {
 
 	// Generate key ranges based on raw flag
 	var ranges map[string]string
-	bound := keyspace.MakeRegionBound(keyspaceMeta.Id)
+	bound := keyspace.MakeRegionBound(keyspaceMeta.GetId())
 	if raw {
 		ranges = map[string]string{
 			"start_key": hex.EncodeToString(bound.RawLeftBound),
@@ -498,18 +498,21 @@ func newSetPlacementCommand() *cobra.Command {
 		Use:   "set-placement <keyspace-id> <label-key>=<label-value> [<label-key>=<label-value>...]",
 		Short: "set keyspace placement rules with store label constraints",
 		Long: "Set placement rules for all regions of a keyspace to stores matching the specified labels.\n" +
+			"By default the txn region bound is used; pass --raw to use the raw region bound instead.\n" +
 			"This creates a placement rule bundle that places the keyspace's regions on stores matching all the label constraints.\n" +
 			"Examples:\n" +
 			"  pd-ctl keyspace set-placement 1 zone=east\n" +
-			"  pd-ctl keyspace set-placement 1 zone=east disk=ssd",
+			"  pd-ctl keyspace set-placement 1 zone=east disk=ssd\n" +
+			"  pd-ctl keyspace set-placement 1 zone=east --raw",
 		Run: setPlacementCommandFunc,
 	}
+	r.Flags().Bool("raw", false, "use raw key range instead of the default txn key range")
 	return r
 }
 
 func setPlacementCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) < 2 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 
@@ -550,9 +553,19 @@ func setPlacementCommandFunc(cmd *cobra.Command, args []string) {
 		})
 	}
 
-	// Generate key ranges for the keyspace
-	keyRanges := keyspace.MakeKeyRanges(keyspaceID32)
+	raw, err := cmd.Flags().GetBool("raw")
+	if err != nil {
+		cmd.PrintErrf("Failed to get raw flag: %v\n", err)
+		return
+	}
 
+	// Generate key ranges for the keyspace. Use the raw region bound when --raw
+	// is set, otherwise the txn region bound.
+	boundName := "txn"
+	if raw {
+		boundName = "raw"
+	}
+	keyRanges := keyspace.MakeKeyRanges(keyspaceID32, boundName)
 	// Create placement rule bundle
 	groupID := fmt.Sprintf("keyspace-%d", keyspaceID)
 	bundle := &pd.GroupBundle{
@@ -562,22 +575,12 @@ func setPlacementCommandFunc(cmd *cobra.Command, args []string) {
 		Rules: []*pd.Rule{
 			{
 				GroupID: groupID,
-				ID:      fmt.Sprintf("keyspace-%d-rule", keyspaceID),
+				ID:      fmt.Sprintf("keyspace-%d-rule-%s", keyspaceID, boundName),
 				Role:    pd.Voter,
 				// TODO: make replica count configurable
 				Count:            3,
 				StartKeyHex:      keyRanges[0].(map[string]any)["start_key"].(string),
 				EndKeyHex:        keyRanges[0].(map[string]any)["end_key"].(string),
-				LabelConstraints: labelConstraints,
-			},
-			{
-				GroupID: groupID,
-				ID:      fmt.Sprintf("keyspace-%d-rule-txn", keyspaceID),
-				Role:    pd.Voter,
-				// TODO: make replica count configurable
-				Count:            3,
-				StartKeyHex:      keyRanges[1].(map[string]any)["start_key"].(string),
-				EndKeyHex:        keyRanges[1].(map[string]any)["end_key"].(string),
 				LabelConstraints: labelConstraints,
 			},
 		},
@@ -611,7 +614,7 @@ func newRevertPlacementCommand() *cobra.Command {
 
 func revertPlacementCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 

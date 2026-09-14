@@ -20,9 +20,16 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/unrolled/render"
+
+	"github.com/tikv/pd/pkg/core/storelimit"
+	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/operatorutil"
 )
 
 func TestGrantHotRegionUpdateConfigWithInvalidLeaderIDType(t *testing.T) {
@@ -42,4 +49,28 @@ func TestGrantHotRegionUpdateConfigWithInvalidLeaderIDType(t *testing.T) {
 		handler.updateConfig(resp, req)
 	})
 	re.Equal(http.StatusBadRequest, resp.Code)
+}
+
+func TestGrantHotRegionTransferLeaderInLimit(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	for _, id := range []uint64{1, 2, 3} {
+		tc.AddLeaderStore(id, 0)
+	}
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	scheduler, err := CreateScheduler(types.GrantHotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigSliceDecoder(types.GrantHotRegionScheduler, []string{"2", "1,2,3"}))
+	re.NoError(err)
+	grant := scheduler.(*grantHotRegionScheduler)
+	exhaustTransferLeaderInLimit(t, tc, 2)
+	op, err := grant.transfer(tc, 1, 1, true)
+	re.Error(err)
+	re.Nil(op)
+
+	tc.SetStoreLimit(2, storelimit.TransferLeaderIn, storelimit.Unlimited)
+	tc.ResetStoreLimit(2, storelimit.TransferLeaderIn, storelimit.Unlimited/time.Minute.Seconds())
+	op, err = grant.transfer(tc, 1, 1, true)
+	re.NoError(err)
+	operatorutil.CheckTransferLeader(re, op, operator.OpLeader, 1, 2)
 }

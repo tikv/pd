@@ -206,12 +206,12 @@ func scanRegionCommandFunc(cmd *cobra.Command, _ []string) {
 			return
 		}
 
-		lastEndKey := regions.Regions[len(regions.Regions)-1].EndKey
-		if lastEndKey == "" {
+		lastEndKeyHex := regions.Regions[len(regions.Regions)-1].EndKey
+		if lastEndKeyHex == "" {
 			return
 		}
 
-		key, err = hex.DecodeString(lastEndKey)
+		key, err = hex.DecodeString(lastEndKeyHex)
 		if err != nil {
 			cmd.Println("Bad format region key: ", key)
 			return
@@ -354,7 +354,8 @@ func decodeKey(text string) (string, error) {
 
 		switch n[0] {
 		case 'x':
-			fmt.Sscanf(string(r.Next(2)), "%02x", &c)
+			// Keep accepting partial and malformed hexadecimal escapes for compatibility.
+			_, _ = fmt.Sscanf(string(r.Next(2)), "%02x", &c)
 			buf = append(buf, c)
 		default:
 			n = append(n, r.Next(2)...)

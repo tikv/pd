@@ -16,10 +16,6 @@ package server
 
 import (
 	"github.com/prometheus/client_golang/prometheus"
-
-	"github.com/pingcap/kvproto/pkg/pdpb"
-
-	"github.com/tikv/pd/pkg/utils/grpcutil"
 )
 
 var (
@@ -208,8 +204,6 @@ var (
 			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
 		})
 
-	grpcStreamSendDuration = grpcutil.NewGRPCStreamSendDuration("pd", "server")
-
 	regionRequestCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "pd",
@@ -242,33 +236,21 @@ func init() {
 	prometheus.MustRegister(apiConcurrencyGauge)
 	prometheus.MustRegister(forwardFailCounter)
 	prometheus.MustRegister(forwardTsoDuration)
-	prometheus.MustRegister(grpcStreamSendDuration)
 	prometheus.MustRegister(regionRequestCounter)
 }
 
-func newTsoMetricsStream(stream pdpb.PD_TsoServer) pdpb.PD_TsoServer {
-	return grpcutil.NewMetricsStream(stream, stream.Send, stream.Recv, grpcStreamSendDuration, "tso")
-}
-
-func newRegionHeartbeatMetricsStream(stream pdpb.PD_RegionHeartbeatServer) pdpb.PD_RegionHeartbeatServer {
-	return grpcutil.NewMetricsStream(stream, stream.Send, stream.Recv, grpcStreamSendDuration, "region-heartbeat")
-}
-
-func newReportBucketsMetricsStream(stream pdpb.PD_ReportBucketsServer) pdpb.PD_ReportBucketsServer {
-	return grpcutil.NewMetricsStream(stream, stream.SendAndClose, stream.Recv, grpcStreamSendDuration, "report-buckets")
-}
-
-func newQueryRegionMetricsStream(stream pdpb.PD_QueryRegionServer) pdpb.PD_QueryRegionServer {
-	return grpcutil.NewMetricsStream(stream, stream.Send, stream.Recv, grpcStreamSendDuration, "query-region")
-}
-
-func newSyncRegionsMetricsStream(stream pdpb.PD_SyncRegionsServer) pdpb.PD_SyncRegionsServer {
-	return grpcutil.NewMetricsStream(stream, stream.Send, stream.Recv, grpcStreamSendDuration, "sync-regions")
-}
-
-func newWatchGlobalConfigMetricsStream(stream pdpb.PD_WatchGlobalConfigServer) pdpb.PD_WatchGlobalConfigServer {
-	if stream == nil {
-		return stream
-	}
-	return grpcutil.NewMetricsStream[*pdpb.WatchGlobalConfigResponse, any](stream, stream.Send, nil, grpcStreamSendDuration, "watch-global-config")
+// DeleteStoreMetrics deletes the per-store heartbeat/bucket-report metrics of a store.
+// Matches on the store label alone, not address: PD allows an existing store ID to
+// change address (e.g. after a TiKV restart with a new IP), so requiring the current
+// address to match as well would permanently leak any series recorded under a
+// previous address.
+func DeleteStoreMetrics(id string) {
+	labels := prometheus.Labels{"store": id}
+	regionHeartbeatCounter.DeletePartialMatch(labels)
+	regionHeartbeatLatency.DeletePartialMatch(labels)
+	regionHeartbeatHandleDuration.DeletePartialMatch(labels)
+	storeHeartbeatHandleDuration.DeletePartialMatch(labels)
+	bucketReportCounter.DeletePartialMatch(labels)
+	bucketReportLatency.DeletePartialMatch(labels)
+	bucketReportInterval.DeletePartialMatch(labels)
 }

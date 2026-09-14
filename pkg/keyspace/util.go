@@ -16,7 +16,6 @@ package keyspace
 
 import (
 	"container/heap"
-	"encoding/binary"
 	"encoding/hex"
 	"regexp"
 	"strconv"
@@ -26,6 +25,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
 	"github.com/tikv/pd/pkg/codec"
+	coreconstant "github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/schedule/labeler"
@@ -41,18 +41,20 @@ const (
 	namePattern = "^[-A-Za-z0-9_]{1,20}$"
 )
 
-const (
-	// RawKeyspaceModePrefix is the raw keyspace prefix mode byte.
-	RawKeyspaceModePrefix = byte('r')
-	// TxnKeyspaceModePrefix is the txn keyspace prefix mode byte.
-	TxnKeyspaceModePrefix = byte('x')
-	// KeyspacePrefixLen is the raw keyspace prefix length before memcomparable encoding.
-	KeyspacePrefixLen = 4
-)
-
 var (
 	errNoAvailableMetaServiceGroups = errors.New("no available meta-service groups")
-	errUnknownMetaServiceGroup      = errors.New("unknown meta-service group")
+
+	// ErrUnknownMetaServiceGroup is returned when the specified meta-service group does not exist.
+	ErrUnknownMetaServiceGroup = errors.New("unknown meta-service group")
+	// ErrInvalidAssignmentCount is returned when the patched assignment count is negative.
+	ErrInvalidAssignmentCount = errors.New("assignment count must be non-negative")
+	// ErrMetaServiceGroupDisabled is returned when assigning a keyspace to a
+	// disabled meta-service group, which is not eligible for assignment.
+	ErrMetaServiceGroupDisabled = errors.New("meta-service group is disabled")
+	// ErrGroupHasAssignedKeyspaces is returned when deleting a meta-service group
+	// that still has keyspaces assigned to it. It is exported so HTTP handlers can
+	// map it to a 400 Bad Request via errors.Is.
+	ErrGroupHasAssignedKeyspaces = errors.New("cannot delete meta-service group with assigned keyspaces")
 
 	// stateTransitionTable lists all allowed next state for the given current state.
 	// Note that transit from any state to itself is allowed for idempotence.
@@ -105,30 +107,6 @@ func MaskKeyspaceID(id uint32) uint32 {
 	return id & 0xFF
 }
 
-// MakeKeyspacePrefix constructs the raw keyspace prefix for the given mode and keyspace ID.
-// Keyspace keys encode the lower 24 bits of the keyspace ID after the mode byte.
-func MakeKeyspacePrefix(mode byte, id uint32) []byte {
-	prefix := make([]byte, KeyspacePrefixLen)
-	binary.BigEndian.PutUint32(prefix, id)
-	prefix[0] = mode
-	return prefix
-}
-
-// ParseKeyspacePrefix parses a raw keyspace prefix from key.
-// It returns false for keys that do not start with a known keyspace mode byte.
-func ParseKeyspacePrefix(key []byte) (mode byte, id uint32, ok bool) {
-	if len(key) < KeyspacePrefixLen {
-		return 0, 0, false
-	}
-	mode = key[0]
-	if mode != RawKeyspaceModePrefix && mode != TxnKeyspaceModePrefix {
-		return 0, 0, false
-	}
-	idBytes := [KeyspacePrefixLen]byte{0, key[1], key[2], key[3]}
-	id = binary.BigEndian.Uint32(idBytes[:])
-	return mode, id, true
-}
-
 // RegionBound represents the region boundary of the given keyspace.
 // For a keyspace with id ['a', 'b', 'c'], it has four boundaries:
 //
@@ -149,58 +127,100 @@ type RegionBound struct {
 	TxnRightBound []byte
 }
 
+type regionBoundType int
+
+const (
+	txnRegionBound regionBoundType = iota
+	rawRegionBound
+)
+
+// String returns the string representation of the regionBoundType.
+func (t regionBoundType) String() string {
+	if t == rawRegionBound {
+		return "raw"
+	}
+	return "txn"
+}
+
+// keyTypeToRegionBoundType converts the key type to the corresponding region bound type.
+// ref rfc: https://github.com/tikv/rfcs/blob/master/text/0069-api-v2.md
+func keyTypeToRegionBoundType(keyType coreconstant.KeyType) regionBoundType {
+	if keyType == coreconstant.Raw {
+		return rawRegionBound
+	}
+	return txnRegionBound
+}
+
+func keyTypeStringToRegionBoundType(keyType string) regionBoundType {
+	if keyType == coreconstant.Raw.String() {
+		return rawRegionBound
+	}
+	return txnRegionBound
+}
+
 // MakeRegionBound constructs the correct region boundaries of the given keyspace.
 func MakeRegionBound(id uint32) *RegionBound {
-	rawLeftBound := MakeKeyspacePrefix(RawKeyspaceModePrefix, id)
-	rawRightBound := MakeKeyspacePrefix(RawKeyspaceModePrefix, id+1)
-	txnLeftBound := MakeKeyspacePrefix(TxnKeyspaceModePrefix, id)
-	txnRightBound := MakeKeyspacePrefix(TxnKeyspaceModePrefix, id+1)
-	if id == constant.MaxValidKeyspaceID {
-		// The right bound is an exclusive fencepost, not a real keyspace prefix.
-		rawRightBound = []byte{'s', 0, 0, 0}
-		txnRightBound = []byte{'y', 0, 0, 0}
-	}
+	rawLeftBound := codec.EncodeKeyspaceBoundary(codec.RawKeyspaceModePrefix, id)
+	rawRightBound := codec.EncodeKeyspaceBoundary(codec.RawKeyspaceModePrefix, id+1)
+	txnLeftBound := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, id)
+	txnRightBound := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, id+1)
 	return &RegionBound{
-		RawLeftBound:  codec.EncodeBytes(rawLeftBound),
-		RawRightBound: codec.EncodeBytes(rawRightBound),
-		TxnLeftBound:  codec.EncodeBytes(txnLeftBound),
-		TxnRightBound: codec.EncodeBytes(txnRightBound),
+		RawLeftBound:  rawLeftBound[:],
+		RawRightBound: rawRightBound[:],
+		TxnLeftBound:  txnLeftBound[:],
+		TxnRightBound: txnRightBound[:],
 	}
 }
 
-// MakeKeyRanges encodes keyspace ID to correct LabelRule data.
-func MakeKeyRanges(id uint32) []any {
+// MakeKeyRanges encodes keyspace ID to correct LabelRule data with the specified
+// region bound. Used by tests and pd-ctl.
+func MakeKeyRanges(id uint32, keyType string) []any {
+	if keyType == coreconstant.Raw.String() {
+		return buildKeyRanges(id, rawRegionBound)
+	}
+	return buildKeyRanges(id, txnRegionBound)
+}
+
+func buildKeyRanges(id uint32, boundType regionBoundType) []any {
 	regionBound := MakeRegionBound(id)
+	if boundType == txnRegionBound {
+		return []any{
+			map[string]any{
+				"start_key": hex.EncodeToString(regionBound.TxnLeftBound),
+				"end_key":   hex.EncodeToString(regionBound.TxnRightBound),
+			},
+		}
+	}
 	return []any{
 		map[string]any{
 			"start_key": hex.EncodeToString(regionBound.RawLeftBound),
 			"end_key":   hex.EncodeToString(regionBound.RawRightBound),
-		},
-		map[string]any{
-			"start_key": hex.EncodeToString(regionBound.TxnLeftBound),
-			"end_key":   hex.EncodeToString(regionBound.TxnRightBound),
 		},
 	}
 }
 
 // getRegionLabelID returns the region label id of the target keyspace.
 func getRegionLabelID(id uint32) string {
-	return regionLabelIDPrefix + strconv.FormatUint(uint64(id), endpoint.SpaceIDBase)
+	return constant.RegionLabelIDPrefix + strconv.FormatUint(uint64(id), endpoint.SpaceIDBase)
 }
 
-// MakeLabelRule makes the label rule for the given keyspace id.
-func MakeLabelRule(id uint32) *labeler.LabelRule {
+// MakeTxnLabelRule makes the label rule for the given keyspace id, only for test
+func MakeTxnLabelRule(id uint32) *labeler.LabelRule {
+	return buildLabelRule(id, txnRegionBound)
+}
+
+func buildLabelRule(id uint32, boundType regionBoundType) *labeler.LabelRule {
 	return &labeler.LabelRule{
 		ID:    getRegionLabelID(id),
 		Index: 0,
 		Labels: []labeler.RegionLabel{
 			{
-				Key:   regionLabelKey,
+				Key:   constant.RegionLabelKey,
 				Value: strconv.FormatUint(uint64(id), endpoint.SpaceIDBase),
 			},
 		},
 		RuleType: labeler.KeyRange,
-		Data:     MakeKeyRanges(id),
+		Data:     buildKeyRanges(id, boundType),
 	}
 }
 
@@ -209,21 +229,30 @@ func MakeLabelRule(id uint32) *labeler.LabelRule {
 // rule is a keyspace label rule.
 func ParseKeyspaceIDFromLabelRule(rule *labeler.LabelRule) (uint32, bool) {
 	// Validate the ID matches the expected format "keyspaces/<id>".
-	if rule == nil || !strings.HasPrefix(rule.ID, regionLabelIDPrefix) {
+	if rule == nil {
+		return 0, false
+	}
+	idText, ok := strings.CutPrefix(rule.ID, constant.RegionLabelIDPrefix)
+	if !ok {
 		return 0, false
 	}
 	// Retrieve the keyspace ID.
 	keyspaceID, err := strconv.ParseUint(
-		strings.TrimPrefix(rule.ID, regionLabelIDPrefix),
+		idText,
 		endpoint.SpaceIDBase, 32,
 	)
-	if err != nil {
+	hasLeadingZero := len(idText) > 1 && idText[0] == '0'
+	if err != nil || keyspaceID > uint64(constant.MaxValidKeyspaceID) || hasLeadingZero {
 		return 0, false
 	}
 	// Double check the keyspace ID from the label rule.
-	var idFromLabel uint64
+	var (
+		idFromLabel  uint64
+		foundIDLabel bool
+	)
 	for _, label := range rule.Labels {
-		if label.Key == regionLabelKey {
+		if label.Key == constant.RegionLabelKey {
+			foundIDLabel = true
 			idFromLabel, err = strconv.ParseUint(label.Value, endpoint.SpaceIDBase, 32)
 			if err != nil {
 				return 0, false
@@ -231,7 +260,7 @@ func ParseKeyspaceIDFromLabelRule(rule *labeler.LabelRule) (uint32, bool) {
 			break
 		}
 	}
-	if keyspaceID != idFromLabel {
+	if !foundIDLabel || keyspaceID != idFromLabel {
 		return 0, false
 	}
 	return uint32(keyspaceID), true

@@ -115,6 +115,9 @@ func (suite *serviceGCSafepointTestSuite) checkServiceGCSafepoint(cluster *tests
 	re.NoError(err)
 	re.Equal(list, listResp)
 
+	// The following delete bypasses GCStateManager and writes storage directly.
+	// Subsequent reads through both the manager and the public HTTP endpoint
+	// should still reflect the deletion.
 	err = testutil.CheckDelete(tests.TestDialClient, sspURL+"/a", testutil.StatusOK(re))
 	re.NoError(err)
 
@@ -127,4 +130,18 @@ func (suite *serviceGCSafepointTestSuite) checkServiceGCSafepoint(cluster *tests
 	}
 	// Exclude the gc_worker as it's not included in GetGCState's result.
 	re.Equal(list.ServiceGCSafepoints[1:3], leftSsps)
+
+	resAfterDelete, err := tests.TestDialClient.Get(sspURL)
+	re.NoError(err)
+	defer resAfterDelete.Body.Close()
+	listRespAfterDelete := &api.ListServiceGCSafepoint{}
+	err = apiutil.ReadJSON(resAfterDelete.Body, listRespAfterDelete)
+	re.NoError(err)
+	// Also verify the public HTTP view, not only the direct GCStateManager read.
+	expectedAfterDelete := &api.ListServiceGCSafepoint{
+		ServiceGCSafepoints:   list.ServiceGCSafepoints[1:],
+		GCSafePoint:           list.GCSafePoint,
+		MinServiceGcSafepoint: list.MinServiceGcSafepoint,
+	}
+	re.Equal(expectedAfterDelete, listRespAfterDelete)
 }

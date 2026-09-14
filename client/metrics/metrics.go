@@ -275,6 +275,7 @@ var (
 	CmdDurationSplitRegions             prometheus.Observer
 	CmdDurationSplitAndScatterRegions   prometheus.Observer
 	CmdDurationLoadKeyspace             prometheus.Observer
+	CmdDurationLoadKeyspaceByID         prometheus.Observer
 	CmdDurationUpdateKeyspaceState      prometheus.Observer
 	CmdDurationGetAllKeyspaces          prometheus.Observer
 	CmdDurationGet                      prometheus.Observer
@@ -306,6 +307,7 @@ var (
 	CmdFailedDurationUpdateGCSafePoint        prometheus.Observer
 	CmdFailedDurationUpdateServiceGCSafePoint prometheus.Observer
 	CmdFailedDurationLoadKeyspace             prometheus.Observer
+	CmdFailedDurationLoadKeyspaceByID         prometheus.Observer
 	CmdFailedDurationUpdateKeyspaceState      prometheus.Observer
 	CmdFailedDurationGet                      prometheus.Observer
 	CmdFailedDurationPut                      prometheus.Observer
@@ -365,6 +367,7 @@ func initLabelValues() {
 	CmdDurationSplitRegions = cmdDuration.WithLabelValues("split_regions")
 	CmdDurationSplitAndScatterRegions = cmdDuration.WithLabelValues("split_and_scatter_regions")
 	CmdDurationLoadKeyspace = cmdDuration.WithLabelValues("load_keyspace")
+	CmdDurationLoadKeyspaceByID = cmdDuration.WithLabelValues("load_keyspace_by_id")
 	CmdDurationUpdateKeyspaceState = cmdDuration.WithLabelValues("update_keyspace_state")
 	CmdDurationGetAllKeyspaces = cmdDuration.WithLabelValues("get_all_keyspaces")
 	CmdDurationGet = cmdDuration.WithLabelValues("get")
@@ -396,6 +399,7 @@ func initLabelValues() {
 	CmdFailedDurationUpdateGCSafePoint = cmdFailedDuration.WithLabelValues("update_gc_safe_point")
 	CmdFailedDurationUpdateServiceGCSafePoint = cmdFailedDuration.WithLabelValues("update_service_gc_safe_point")
 	CmdFailedDurationLoadKeyspace = cmdFailedDuration.WithLabelValues("load_keyspace")
+	CmdFailedDurationLoadKeyspaceByID = cmdFailedDuration.WithLabelValues("load_keyspace_by_id")
 	CmdFailedDurationUpdateKeyspaceState = cmdFailedDuration.WithLabelValues("update_keyspace_state")
 	CmdFailedDurationGet = cmdFailedDuration.WithLabelValues("get")
 	CmdFailedDurationPut = cmdFailedDuration.WithLabelValues("put")

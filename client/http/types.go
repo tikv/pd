@@ -17,6 +17,7 @@ package http
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
@@ -72,8 +73,8 @@ var NewKeyRange = pd.NewKeyRange
 // RegionInfo stores the information of one region.
 type RegionInfo struct {
 	ID                int64            `json:"id"`
-	StartKey          string           `json:"start_key"`
-	EndKey            string           `json:"end_key"`
+	StartKey          string           `json:"start_key"` // hex-encoded
+	EndKey            string           `json:"end_key"`   // hex-encoded
 	Epoch             RegionEpoch      `json:"epoch"`
 	Peers             []RegionPeer     `json:"peers"`
 	Leader            RegionPeer       `json:"leader"`
@@ -405,8 +406,8 @@ func (r *Rule) String() string {
 func (r *Rule) Clone() *Rule {
 	var clone Rule
 	_ = json.Unmarshal([]byte(r.String()), &clone)
-	clone.StartKey = append(r.StartKey[:0:0], r.StartKey...)
-	clone.EndKey = append(r.EndKey[:0:0], r.EndKey...)
+	clone.StartKey = slices.Clone(r.StartKey)
+	clone.EndKey = slices.Clone(r.EndKey)
 	return &clone
 }
 
@@ -704,7 +705,7 @@ func (meta *tempKeyspaceMeta) toPB() (*keyspacepb.KeyspaceMeta, error) {
 
 	return &keyspacepb.KeyspaceMeta{
 		Name:           meta.Name,
-		Id:             meta.ID,
+		Keyspace:       &keyspacepb.KeyspaceMeta_Id{Id: meta.ID},
 		Config:         meta.Config,
 		CreatedAt:      meta.CreatedAt,
 		StateChangedAt: meta.StateChangedAt,

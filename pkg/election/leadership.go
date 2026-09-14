@@ -60,6 +60,8 @@ func GetLeader(c *clientv3.Client, leaderPath string) (*pdpb.Member, int64, erro
 type Leadership struct {
 	// purpose is used to show what this election for
 	purpose string
+	// name scopes test failpoints to one member.
+	name string
 	// The lease which is used to get this leadership
 	lease  atomic.Value // stored as *lease
 	client *clientv3.Client
@@ -73,15 +75,13 @@ type Leadership struct {
 	// campaignTimes is used to record the campaign times of the leader within `campaignTimesRecordTimeout`.
 	// It is ordered by time to prevent the leader from campaigning too frequently.
 	campaignTimes []time.Time
-	// primaryWatch is for the primary watch only,
-	// which is used to reuse `Watch` interface in `Leadership`.
-	primaryWatch atomic.Bool
 }
 
-// NewLeadership creates a new Leadership.
-func NewLeadership(client *clientv3.Client, leaderKey, purpose string) *Leadership {
+// NewLeadership creates a new Leadership for the named member.
+func NewLeadership(client *clientv3.Client, leaderKey, purpose, name string) *Leadership {
 	leadership := &Leadership{
 		purpose:       purpose,
+		name:          name,
 		client:        client,
 		leaderKey:     leaderKey,
 		campaignTimes: make([]time.Time, 0, defaultCampaignTimesSlot),
@@ -132,16 +132,6 @@ func (ls *Leadership) GetLeaderValue() string {
 	return leaderValue.(string)
 }
 
-// SetPrimaryWatch sets the primary watch flag.
-func (ls *Leadership) SetPrimaryWatch(val bool) {
-	ls.primaryWatch.Store(val)
-}
-
-// IsPrimary gets the primary watch flag.
-func (ls *Leadership) IsPrimary() bool {
-	return ls.primaryWatch.Load()
-}
-
 // GetCampaignTimesNum is used to get the campaign times of the leader within `campaignTimesRecordTimeout`.
 // Need to make sure `AddCampaignTimes` is called before this function.
 func (ls *Leadership) GetCampaignTimesNum() int {
@@ -180,7 +170,7 @@ func (ls *Leadership) AddCampaignTimes() {
 func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...clientv3.Cmp) error {
 	ls.leaderValue.Store(leaderData)
 	// Create a new lease to campaign
-	newLease := NewLease(ls.client, ls.purpose)
+	newLease := NewLease(ls.client, ls.purpose, ls.name)
 	ls.SetLease(newLease)
 
 	failpoint.Inject("skipGrantLeader", func(val failpoint.Value) {
@@ -421,13 +411,6 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 						zap.Int64("revision", wresp.Header.Revision), zap.String("leader-key", ls.leaderKey), zap.String("purpose", ls.purpose))
 					return
 				}
-				// ONLY `{service}/primary/transfer` API update primary will meet this condition.
-				if ev.Type == mvccpb.PUT && ls.IsPrimary() {
-					log.Info("current leadership is updated", zap.Int64("revision", wresp.Header.Revision),
-						zap.String("leader-key", ls.leaderKey), zap.ByteString("cur-value", ev.Kv.Value),
-						zap.String("purpose", ls.purpose))
-					return
-				}
 			}
 			revision = wresp.Header.Revision + 1
 		}
@@ -449,6 +432,5 @@ func (ls *Leadership) Reset() {
 	if err != nil {
 		log.Error("close lease failed", zap.String("purpose", ls.purpose), errs.ZapError(err))
 	}
-	ls.SetPrimaryWatch(false)
 	ls.leaderValue.Store("")
 }
