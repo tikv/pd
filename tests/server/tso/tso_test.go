@@ -39,8 +39,7 @@ func TestMain(m *testing.M) {
 
 type tsoTestSuite struct {
 	suite.Suite
-	env            *tests.SchedulingTestEnvironment
-	updateInterval time.Duration
+	env *tests.SchedulingTestEnvironment
 }
 
 func TestTSOSuite(t *testing.T) {
@@ -48,10 +47,9 @@ func TestTSOSuite(t *testing.T) {
 }
 
 func (s *tsoTestSuite) SetupSuite() {
-	// Set to max update interval so we can drain the logical part easily later.
-	s.updateInterval = config.MaxTSOUpdatePhysicalInterval
+	// Keep periodic updates infrequent while testing consecutive requests at the logical boundary.
 	s.env = tests.NewSchedulingTestEnvironment(s.T(), func(conf *config.Config, _ string) {
-		conf.TSOUpdatePhysicalInterval = typeutil.Duration{Duration: s.updateInterval}
+		conf.TSOUpdatePhysicalInterval = typeutil.Duration{Duration: config.MaxTSOUpdatePhysicalInterval}
 	})
 	s.env.PDCount = 2
 }
@@ -188,36 +186,26 @@ func (s *tsoTestSuite) checkLogicalOverflow(cluster *tests.TestCluster) {
 		re.NoError(err)
 	}()
 
-	var (
-		physicalAdvanced bool
-		lastTimestamp    *pdpb.Timestamp
-	)
-	// Since the max logical count is 1 << 18 (262144), we request 20 times with 26214 count each time.
-	// This ensures that the logical part will definitely overflow once within the `updateInterval`.
-	count := (1 << 18) / 10
-	for range 20 {
+	const maxLogical = 1 << 18
+	counts := []uint32{maxLogical - 1, 2}
+	timestamps := make([]*pdpb.Timestamp, 0, len(counts))
+	for _, count := range counts {
 		req := &pdpb.TsoRequest{
 			Header: testutil.NewRequestHeader(clusterID),
-			Count:  uint32(count),
+			Count:  count,
 		}
 		re.NoError(tsoClient.Send(req))
 		resp, err := tsoClient.Recv()
 		re.NoError(err)
-		// Check the monotonicity of the timestamp.
 		timestamp := checkAndReturnTimestampResponse(re, req, resp)
 		re.NotNil(timestamp)
-		if lastTimestamp != nil {
-			lastPhysical, curPhysical := lastTimestamp.GetPhysical(), timestamp.GetPhysical()
-			re.GreaterOrEqual(curPhysical, lastPhysical)
-			// If the physical time is the same, the logical time must be strictly increasing.
-			if curPhysical == lastPhysical {
-				re.Greater(timestamp.GetLogical(), lastTimestamp.GetLogical())
-			} else {
-				physicalAdvanced = true
-			}
-		}
-		lastTimestamp = timestamp
+		timestamps = append(timestamps, timestamp)
 	}
-	// The requests exceed the logical limit within the update interval, so overflow must advance physical time.
-	re.True(physicalAdvanced)
+
+	// The first response ends at the last valid logical value. The next response must
+	// start in a later physical millisecond with its logical count. The request-path
+	// overflow update itself is tested without a background updater in pkg/tso.
+	re.Equal(int64(maxLogical-1), timestamps[0].GetLogical())
+	re.Greater(timestamps[1].GetPhysical(), timestamps[0].GetPhysical())
+	re.Equal(int64(counts[1]), timestamps[1].GetLogical())
 }
