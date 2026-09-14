@@ -20,12 +20,14 @@ import (
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/stretchr/testify/require"
 
 	clientmetrics "github.com/tikv/pd/client/metrics"
 )
 
 func TestServiceDiscoveryMetricsInitializationIsConcurrentSafe(t *testing.T) {
 	const producerCount = 32
+	before := loadServiceDiscoveryMetrics()
 	var (
 		ready sync.WaitGroup
 		wg    sync.WaitGroup
@@ -54,5 +56,6 @@ func TestServiceDiscoveryMetricsInitializationIsConcurrentSafe(t *testing.T) {
 	stop.Store(true)
 	wg.Wait()
 
+	require.NotSame(t, before, loadServiceDiscoveryMetrics())
 	loadServiceDiscoveryMetrics().getMembers.Observe(0)
 }

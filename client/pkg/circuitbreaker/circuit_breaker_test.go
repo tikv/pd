@@ -21,11 +21,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
 	"github.com/tikv/pd/client/errs"
+	m "github.com/tikv/pd/client/metrics"
 )
 
 func TestMain(m *testing.M) {
@@ -251,11 +253,16 @@ func TestCircuitBreakerEnabled(t *testing.T) {
 func TestCircuitBreakerMetricsInitializationIsConcurrentSafe(t *testing.T) {
 	breaker := NewCircuitBreaker("test_cb_concurrent_metrics", AlwaysClosedSettings)
 	before := breaker.metrics.Load()
-	const producerCount = 32
+	const (
+		producerCount     = 32
+		registrationCount = 32
+	)
 	var (
-		ready sync.WaitGroup
-		wg    sync.WaitGroup
-		stop  atomic.Bool
+		ready             sync.WaitGroup
+		wg                sync.WaitGroup
+		registrationReady sync.WaitGroup
+		registrationWG    sync.WaitGroup
+		stop              atomic.Bool
 	)
 	ready.Add(producerCount)
 	wg.Add(producerCount)
@@ -273,8 +280,22 @@ func TestCircuitBreakerMetricsInitializationIsConcurrentSafe(t *testing.T) {
 			}
 		}()
 	}
+	registrationStart := make(chan struct{})
+	registrationReady.Add(registrationCount)
+	registrationWG.Add(registrationCount)
+	for range registrationCount {
+		go func() {
+			defer registrationWG.Done()
+			registrationReady.Done()
+			<-registrationStart
+			NewCircuitBreaker("test_cb_concurrent_registration", AlwaysClosedSettings)
+		}()
+	}
 	ready.Wait()
-	breaker.initMetrics()
+	registrationReady.Wait()
+	close(registrationStart)
+	m.InitAndRegisterMetrics(prometheus.Labels{"instance": "test"})
+	registrationWG.Wait()
 	stop.Store(true)
 	wg.Wait()
 	require.NotSame(t, before, breaker.metrics.Load())
