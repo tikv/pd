@@ -22,6 +22,8 @@ import (
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -48,21 +50,32 @@ func (dummyRestService) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	w.Write([]byte("not implemented"))
 }
 
+type grpcMetadataWriteRejectProvider interface {
+	ShouldRejectMetadataWritesViaGRPC() bool
+}
+
 // Service is the gRPC service for resource manager.
 type Service struct {
 	ctx context.Context
 	*Server
 	manager *Manager
+	// rejectMetadataWritesViaGRPC controls whether metadata writes via RM gRPC APIs are rejected.
+	rejectMetadataWritesViaGRPC bool
 	// settings
 }
 
 // NewService creates a new resource manager service.
 func NewService[T factoryProvider](svr bs.Server) registry.RegistrableService {
 	manager := NewManager[T](svr)
+	rejectMetadataWritesViaGRPC := false
+	if provider, ok := any(svr).(grpcMetadataWriteRejectProvider); ok {
+		rejectMetadataWritesViaGRPC = provider.ShouldRejectMetadataWritesViaGRPC()
+	}
 
 	return &Service{
-		ctx:     svr.Context(),
-		manager: manager,
+		ctx:                         svr.Context(),
+		manager:                     manager,
+		rejectMetadataWritesViaGRPC: rejectMetadataWritesViaGRPC,
 	}
 }
 
@@ -133,6 +146,9 @@ func (s *Service) AddResourceGroup(_ context.Context, req *rmpb.PutResourceGroup
 	if err := s.checkServing(); err != nil {
 		return nil, err
 	}
+	if s.rejectMetadataWritesViaGRPC {
+		return nil, status.Error(codes.FailedPrecondition, "resource group metadata writes must be handled by PD")
+	}
 	err := s.manager.AddResourceGroup(req.GetGroup())
 	if err != nil {
 		return nil, err
@@ -144,6 +160,9 @@ func (s *Service) AddResourceGroup(_ context.Context, req *rmpb.PutResourceGroup
 func (s *Service) DeleteResourceGroup(_ context.Context, req *rmpb.DeleteResourceGroupRequest) (*rmpb.DeleteResourceGroupResponse, error) {
 	if err := s.checkServing(); err != nil {
 		return nil, err
+	}
+	if s.rejectMetadataWritesViaGRPC {
+		return nil, status.Error(codes.FailedPrecondition, "resource group metadata writes must be handled by PD")
 	}
 	err := s.manager.DeleteResourceGroup(ExtractKeyspaceID(req.GetKeyspaceId()), req.ResourceGroupName)
 	if err != nil {
@@ -157,6 +176,9 @@ func (s *Service) ModifyResourceGroup(_ context.Context, req *rmpb.PutResourceGr
 	if err := s.checkServing(); err != nil {
 		return nil, err
 	}
+	if s.rejectMetadataWritesViaGRPC {
+		return nil, status.Error(codes.FailedPrecondition, "resource group metadata writes must be handled by PD")
+	}
 	err := s.manager.ModifyResourceGroup(req.GetGroup())
 	if err != nil {
 		return nil, err
@@ -166,7 +188,6 @@ func (s *Service) ModifyResourceGroup(_ context.Context, req *rmpb.PutResourceGr
 
 // AcquireTokenBuckets implements ResourceManagerServer.AcquireTokenBuckets.
 func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBucketsServer) error {
-	stream = newAcquireTokenBucketsMetricsStream(stream)
 	for {
 		select {
 		case <-s.ctx.Done():
@@ -205,7 +226,8 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 		for _, req := range request.Requests {
 			keyspaceID := ExtractKeyspaceID(req.GetKeyspaceId())
 			resourceGroupName := req.GetResourceGroupName()
-			requestFields := append(logFields,
+			requestFields := logFields
+			requestFields = append(requestFields,
 				zap.Uint32("keyspace-id", keyspaceID),
 				zap.String("resource-group", resourceGroupName),
 			)
@@ -232,7 +254,7 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 			now := time.Now()
 			resp := &rmpb.TokenBucketResponse{
 				ResourceGroupName: rg.Name,
-				KeyspaceId:        &rmpb.KeyspaceIDValue{Value: keyspaceID},
+				KeyspaceId:        &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: keyspaceID}},
 			}
 			switch rg.Mode {
 			case rmpb.GroupMode_RUMode:

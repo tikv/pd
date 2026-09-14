@@ -34,7 +34,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 type mockCollector struct {
@@ -111,6 +111,81 @@ func TestConfigValidate(t *testing.T) {
 	}
 	err = validateMeteringConfig(c)
 	re.Error(err)
+
+	// Test Azure config - valid
+	c = &config.MeteringConfig{
+		Type:   storage.ProviderTypeAzure,
+		Region: "eastus",
+		Bucket: "metering-container",
+	}
+	err = validateMeteringConfig(c)
+	re.NoError(err)
+
+	c = &config.MeteringConfig{
+		Type:   storage.ProviderTypeAzure,
+		Bucket: "metering-container",
+	}
+	err = validateMeteringConfig(c)
+	re.NoError(err)
+
+	// Test Azure config without Bucket - should return error
+	c = &config.MeteringConfig{
+		Type:   storage.ProviderTypeAzure,
+		Region: "eastus",
+	}
+	err = validateMeteringConfig(c)
+	re.Error(err)
+	re.Contains(err.Error(), "bucket")
+
+	// Test COS config - valid.
+	c = &config.MeteringConfig{
+		Type:   storage.ProviderTypeCOS,
+		Region: "ap-beijing",
+		Bucket: "metering-123456",
+	}
+	err = validateMeteringConfig(c)
+	re.NoError(err)
+
+	// Test COS config with a custom endpoint - valid without Region.
+	c = &config.MeteringConfig{
+		Type:     storage.ProviderTypeCOS,
+		Bucket:   "metering-123456",
+		Endpoint: "https://metering-123456.cos.ap-beijing.myqcloud.com",
+	}
+	err = validateMeteringConfig(c)
+	re.NoError(err)
+
+	// Test COS config without Region or Endpoint - should return error.
+	c = &config.MeteringConfig{
+		Type:   storage.ProviderTypeCOS,
+		Bucket: "metering-123456",
+	}
+	err = validateMeteringConfig(c)
+	re.Error(err)
+	re.Contains(err.Error(), "region")
+
+	// Test COS config without Bucket - should return error.
+	c = &config.MeteringConfig{
+		Type:   storage.ProviderTypeCOS,
+		Region: "ap-beijing",
+	}
+	err = validateMeteringConfig(c)
+	re.Error(err)
+	re.Contains(err.Error(), "bucket")
+}
+
+func TestNewWriterWithCOSConfig(t *testing.T) {
+	c := config.NewMeteringConfig().
+		WithCOS("ap-beijing", "metering-123456").
+		WithCOSConfig(&config.MeteringCOSConfig{
+			AccessKey:       "test-access-key",
+			SecretAccessKey: "test-secret-access-key",
+		})
+
+	writer, err := NewWriter(context.Background(), c, "testcoswriter")
+	require.NoError(t, err)
+	require.NotNil(t, writer)
+	writer.Stop()
 }
 
 func TestRegisterCollector(t *testing.T) {

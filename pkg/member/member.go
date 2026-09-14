@@ -249,7 +249,7 @@ func (m *Member) CheckLeader() (*Leader, bool) {
 		// in previous Campaign. We should delete the leadership and campaign again.
 		log.Warn("the pd leader has not changed, delete and campaign again", zap.Stringer("old-pd-leader", leader))
 		// Delete the leader itself and let others start a new election again.
-		if err = m.leadership.DeleteLeaderKey(); err != nil {
+		if err = m.leadership.DeleteLeaderKeyByRevision(revision); err != nil {
 			log.Error("deleting pd leader key meets error", errs.ZapError(err))
 			time.Sleep(checkFailBackoffDuration)
 			return nil, true
@@ -274,20 +274,32 @@ func (m *Member) WatchLeader(ctx context.Context, leader *pdpb.Member, revision 
 
 // Resign is used to reset the PD member's current leadership.
 // Basically it will reset the leader lease and unset leader info.
+//
+// unsetLeader runs first, and the order matters. It is a plain in-memory store,
+// while Reset revokes the lease against the local etcd and logs on failure - both
+// of which can block for an unbounded time when the volume holding the data
+// directory stops completing writes. Two paths report leadership without
+// consulting IsServing: GetMembers reads GetLeader directly, and the v1
+// redirector handles a request locally when `leader.GetName() == self`. Clearing
+// the identity before anything that can block is what keeps a member that is no
+// longer serving from still answering as the leader.
 func (m *Member) Resign() {
-	m.leadership.Reset()
 	m.unsetLeader()
+	m.leadership.Reset()
 }
 
 // CheckPriority checks whether the etcd leader should be moved according to the priority.
 func (m *Member) CheckPriority(ctx context.Context) {
-	etcdLeader := m.GetEtcdLeader()
-	if etcdLeader == m.ID() || etcdLeader == 0 {
-		return
-	}
 	myPriority, err := m.GetMemberLeaderPriority(m.ID())
 	if err != nil {
 		log.Error("failed to load leader priority", errs.ZapError(err))
+		return
+	}
+	// Record leader priority for current instance.
+	memberLeaderPriorityGauge.WithLabelValues().Set(float64(myPriority))
+
+	etcdLeader := m.GetEtcdLeader()
+	if etcdLeader == m.ID() || etcdLeader == 0 {
 		return
 	}
 	leaderPriority, err := m.GetMemberLeaderPriority(etcdLeader)
@@ -318,8 +330,16 @@ func (m *Member) MoveEtcdLeader(ctx context.Context, old, new uint64) error {
 	return nil
 }
 
-// GetEtcdLeader returns the etcd leader ID.
+// GetEtcdLeader returns the embedded etcd server's cached leader ID, or 0.
+// The value can remain stale while the Ready loop is blocked on storage, so it
+// must not be used alone to decide whether this member may serve (tikv/pd#7780).
 func (m *Member) GetEtcdLeader() uint64 {
+	failpoint.Inject("staleEtcdLeaderView", func(val failpoint.Value) {
+		// Simulate a stale local leader view.
+		if name, ok := val.(string); ok && name == m.Name() {
+			failpoint.Return(m.ID())
+		}
+	})
 	return m.etcd.Server.Lead()
 }
 
@@ -344,7 +364,7 @@ func (m *Member) InitMemberInfo(advertiseClientUrls, advertisePeerUrls, name str
 	}
 	m.member = member
 	m.memberValue = string(data)
-	m.leadership = election.NewLeadership(m.client, m.GetElectionPath(), "leader election")
+	m.leadership = election.NewLeadership(m.client, m.GetElectionPath(), "leader election", member.GetName())
 	log.Info("member joining election", zap.Stringer("member-info", m.member))
 }
 

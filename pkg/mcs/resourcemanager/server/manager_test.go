@@ -16,10 +16,16 @@ package server
 
 import (
 	"context"
+	"errors"
+	"net/http"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/gogo/protobuf/proto"
 	"github.com/stretchr/testify/require"
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/goleak"
 
 	"github.com/pingcap/failpoint"
@@ -28,14 +34,17 @@ import (
 
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/keyspace/constant"
+	mcsserver "github.com/tikv/pd/pkg/mcs/server"
 	"github.com/tikv/pd/pkg/metering"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 type mockConfigProvider struct{ bs.Server }
@@ -67,11 +76,291 @@ func (*mockRoleConfigProvider) AddStartCallback(...func()) {}
 
 func (*mockRoleConfigProvider) AddServiceReadyCallback(...func(context.Context) error) {}
 
+type testBasicServer struct{}
+
+func (*testBasicServer) Name() string { return "test-rm" }
+
+func (*testBasicServer) GetAddr() string { return "" }
+
+func (*testBasicServer) Context() context.Context { return context.Background() }
+
+func (*testBasicServer) Run() error { return nil }
+
+func (*testBasicServer) Close() {}
+
+func (*testBasicServer) GetServingUrls() []string { return nil }
+
+func (*testBasicServer) GetClient() *clientv3.Client { return nil }
+
+func (*testBasicServer) GetHTTPClient() *http.Client { return nil }
+
+func (*testBasicServer) AddStartCallback(...func()) {}
+
+func (*testBasicServer) IsServing() bool { return true }
+
+func (*testBasicServer) AddServiceReadyCallback(...func(context.Context) error) {}
+
+type fakeMetadataLoopWatcher struct {
+	startWatchLoopFn func()
+	waitLoadFn       func() error
+}
+
+func (w *fakeMetadataLoopWatcher) StartWatchLoop() {
+	if w.startWatchLoopFn != nil {
+		w.startWatchLoopFn()
+	}
+}
+
+func (w *fakeMetadataLoopWatcher) WaitLoad() error {
+	if w.waitLoadFn != nil {
+		return w.waitLoadFn()
+	}
+	return nil
+}
+
+type failingControllerConfigStorage struct {
+	storage.Storage
+	err error
+}
+
+func (s failingControllerConfigStorage) SaveControllerConfig(any) error {
+	return s.err
+}
+
+type testMetadataLoopWatcherFactory func(
+	ctx context.Context,
+	wg *sync.WaitGroup,
+	client *clientv3.Client,
+	name, key string,
+	preEventsFn func([]*clientv3.Event) error,
+	putFn, deleteFn func(*mvccpb.KeyValue) error,
+	postEventsFn func([]*clientv3.Event) error,
+	isWithPrefix bool,
+) metadataLoopWatcher
+
 func prepareManager() *Manager {
 	storage := storage.NewStorageWithMemoryBackend()
 	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
 	m.storage = storage
 	return m
+}
+
+func prepareMetadataWatcherManager() *Manager {
+	m := prepareManager()
+	m.enableMetadataWatcher = true
+	m.srv = &testBasicServer{}
+	return m
+}
+
+func withMetadataLoopWatcherFactory(t *testing.T, factory testMetadataLoopWatcherFactory) {
+	t.Helper()
+	originalFactory := newMetadataLoopWatcher
+	newMetadataLoopWatcher = factory
+	t.Cleanup(func() {
+		newMetadataLoopWatcher = originalFactory
+	})
+}
+
+func TestManagerMetadataWatcherLifecycle(t *testing.T) {
+	t.Run("enables_metadata_watcher_for_rm_service_server", func(t *testing.T) {
+		re := require.New(t)
+		m := NewManager[*Server](&Server{
+			BaseServer: &mcsserver.BaseServer{},
+			cfg:        &Config{},
+		})
+		re.True(m.enableMetadataWatcher)
+	})
+
+	t.Run("cancels_metadata_watcher_context_on_init_error", func(t *testing.T) {
+		re := require.New(t)
+		m := prepareMetadataWatcherManager()
+
+		parentCtx, parentCancel := context.WithCancel(context.Background())
+		defer parentCancel()
+
+		watcherErr := errors.New("watcher load failed")
+		var capturedCtx context.Context
+		withMetadataLoopWatcherFactory(t, func(
+			ctx context.Context,
+			_ *sync.WaitGroup,
+			_ *clientv3.Client,
+			_, _ string,
+			_ func([]*clientv3.Event) error,
+			_, _ func(*mvccpb.KeyValue) error,
+			_ func([]*clientv3.Event) error,
+			_ bool,
+		) metadataLoopWatcher {
+			capturedCtx = ctx
+			return &fakeMetadataLoopWatcher{
+				waitLoadFn: func() error { return watcherErr },
+			}
+		})
+
+		err := m.Init(parentCtx)
+		re.ErrorIs(err, watcherErr)
+		re.NotNil(m.cancel)
+		re.NotNil(capturedCtx)
+		re.NotEqual(parentCtx.Done(), capturedCtx.Done())
+		re.NoError(parentCtx.Err())
+		re.ErrorIs(capturedCtx.Err(), context.Canceled)
+	})
+
+	t.Run("cancels_metadata_watcher_context_on_close", func(t *testing.T) {
+		re := require.New(t)
+		m := prepareMetadataWatcherManager()
+
+		parentCtx, parentCancel := context.WithCancel(context.Background())
+		defer parentCancel()
+
+		var capturedCtx context.Context
+		withMetadataLoopWatcherFactory(t, func(
+			ctx context.Context,
+			_ *sync.WaitGroup,
+			_ *clientv3.Client,
+			_, _ string,
+			_ func([]*clientv3.Event) error,
+			_, _ func(*mvccpb.KeyValue) error,
+			_ func([]*clientv3.Event) error,
+			_ bool,
+		) metadataLoopWatcher {
+			capturedCtx = ctx
+			return &fakeMetadataLoopWatcher{}
+		})
+
+		re.NoError(m.Init(parentCtx))
+		re.NotNil(capturedCtx)
+		re.NotEqual(parentCtx.Done(), capturedCtx.Done())
+		re.NoError(capturedCtx.Err())
+
+		m.close()
+
+		re.ErrorIs(capturedCtx.Err(), context.Canceled)
+	})
+}
+
+func TestLoadKeyspaceResourceGroupsRejectsMismatchedPayloadName(t *testing.T) {
+	re := require.New(t)
+
+	memStorage := storage.NewStorageWithMemoryBackend()
+	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
+	m.storage = memStorage
+
+	group := &rmpb.ResourceGroup{
+		Name:       "payload-group",
+		Mode:       rmpb.GroupMode_RUMode,
+		KeyspaceId: &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: 42}},
+	}
+	rawGroup, err := proto.Marshal(group)
+	re.NoError(err)
+	re.NoError(memStorage.Save(keypath.KeyspaceResourceGroupSettingPath(42, "key-group"), string(rawGroup)))
+
+	re.NoError(m.loadKeyspaceResourceGroups())
+	krgm := m.getKeyspaceResourceGroupManager(42)
+	re.NotNil(krgm)
+	re.Nil(krgm.getResourceGroup("payload-group", false))
+	re.Nil(krgm.getResourceGroup("key-group", false))
+	re.NotNil(krgm.getResourceGroup(DefaultResourceGroupName, false))
+}
+
+func TestManagerControllerConfigSnapshots(t *testing.T) {
+	t.Run("returns_snapshot", func(t *testing.T) {
+		re := require.New(t)
+
+		m := prepareManager()
+		m.controllerConfig = &ControllerConfig{
+			RequestUnit: RequestUnitConfig{
+				ReadBaseCost: 0.5,
+			},
+		}
+
+		snapshot := m.GetControllerConfig()
+		snapshot.RequestUnit.ReadBaseCost = 1.5
+
+		re.InDelta(0.5, m.controllerConfig.RequestUnit.ReadBaseCost, 0.00001)
+	})
+
+	t.Run("publishes_new_snapshot_after_successful_update", func(t *testing.T) {
+		re := require.New(t)
+
+		m := prepareManager()
+		m.controllerConfig = &ControllerConfig{
+			RequestUnit: RequestUnitConfig{
+				ReadBaseCost: 0.5,
+			},
+		}
+
+		previous := m.controllerConfig
+		re.NoError(m.UpdateControllerConfigItem("request-unit.read-base-cost", 1.5))
+		re.NotSame(previous, m.controllerConfig)
+		re.InDelta(0.5, previous.RequestUnit.ReadBaseCost, 0.00001)
+		re.InDelta(1.5, m.controllerConfig.RequestUnit.ReadBaseCost, 0.00001)
+	})
+
+	t.Run("does_not_publish_unsaved_snapshot", func(t *testing.T) {
+		re := require.New(t)
+
+		expectedErr := errors.New("save controller config failed")
+		m := prepareManager()
+		m.storage = failingControllerConfigStorage{
+			Storage: storage.NewStorageWithMemoryBackend(),
+			err:     expectedErr,
+		}
+		m.controllerConfig = &ControllerConfig{
+			RequestUnit: RequestUnitConfig{
+				ReadBaseCost: 0.5,
+			},
+		}
+
+		previous := m.controllerConfig
+		err := m.UpdateControllerConfigItem("request-unit.read-base-cost", 1.5)
+		re.ErrorIs(err, expectedErr)
+		re.Same(previous, m.controllerConfig)
+		re.InDelta(0.5, m.controllerConfig.RequestUnit.ReadBaseCost, 0.00001)
+	})
+}
+
+func TestPushMetricsConfig(t *testing.T) {
+	re := require.New(t)
+
+	re.Equal(pushMetricsConfig{}, getPushMetricsConfig(nil))
+	re.Equal(pushMetricsConfig{}, getPushMetricsConfig(&ControllerConfig{
+		PushMetricsAddress: "127.0.0.1:9091",
+	}))
+	re.Equal(pushMetricsConfig{
+		address:  "127.0.0.1:9091",
+		interval: time.Second,
+	}, getPushMetricsConfig(&ControllerConfig{
+		PushMetricsAddress: "127.0.0.1:9091",
+		PushMetricsInterval: typeutil.Duration{
+			Duration: time.Second,
+		},
+	}))
+}
+
+func TestSyncPushMetricsTicker(t *testing.T) {
+	re := require.New(t)
+
+	current := pushMetricsConfig{}
+	ticker := current.syncPushMetricsTicker(pushMetricsConfig{
+		address:  "127.0.0.1:9091",
+		interval: time.Second,
+	}, nil)
+	defer func() {
+		if ticker != nil {
+			ticker.Stop()
+		}
+	}()
+	re.NotNil(ticker)
+	re.NotNil(ticker.C)
+	re.NotEqual(pushMetricsConfig{address: "127.0.0.1:9090", interval: time.Second}, current)
+
+	sameTicker := current.syncPushMetricsTicker(current, ticker)
+	re.Same(ticker, sameTicker)
+	re.Equal(pushMetricsConfig{address: "127.0.0.1:9091", interval: time.Second}, current)
+
+	ticker = current.syncPushMetricsTicker(pushMetricsConfig{}, ticker)
+	re.Nil(ticker)
+	re.Equal(pushMetricsConfig{}, current)
 }
 
 func TestInitManager(t *testing.T) {
@@ -94,14 +383,14 @@ func TestInitManager(t *testing.T) {
 		Name:       "test_group",
 		Mode:       rmpb.GroupMode_RUMode,
 		Priority:   5,
-		KeyspaceId: &rmpb.KeyspaceIDValue{Value: keyspaceID},
+		KeyspaceId: &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: keyspaceID}},
 	}
 	err = m.AddResourceGroup(group)
 	re.NoError(err)
 	// Adding a new keyspace resource group should create a new keyspace resource group manager.
 	krgm = m.getKeyspaceResourceGroupManager(1)
 	re.NotNil(krgm)
-	re.Equal(group.KeyspaceId.Value, krgm.keyspaceID)
+	re.Equal(group.KeyspaceId.GetValue(), krgm.keyspaceID)
 	re.Equal(group.Name, krgm.getMutableResourceGroup(group.Name).Name)
 	// A default resource group should be created for the keyspace as well.
 	defaultGroup := krgm.getMutableResourceGroup(DefaultResourceGroupName)
@@ -138,7 +427,7 @@ func TestBackgroundMetricsFlush(t *testing.T) {
 	// Test without keyspace ID
 	checkBackgroundMetricsFlush(ctx, re, m, nil)
 	// Test with keyspace ID
-	checkBackgroundMetricsFlush(ctx, re, m, &rmpb.KeyspaceIDValue{Value: 1})
+	checkBackgroundMetricsFlush(ctx, re, m, &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: 1}})
 }
 
 func checkBackgroundMetricsFlush(ctx context.Context, re *require.Assertions, manager *Manager, keyspaceIDValue *rmpb.KeyspaceIDValue) {
@@ -185,18 +474,40 @@ func checkBackgroundMetricsFlush(ctx context.Context, re *require.Assertions, ma
 	})
 }
 
+func TestDispatchConsumptionIncludesOnlyConsumption(t *testing.T) {
+	re := require.New(t)
+	m := newManagerBase(&ControllerConfig{}, ResourceGroupWriteRoleLegacyAll)
+	req := &rmpb.TokenBucketRequest{
+		ResourceGroupName: "test_group",
+		ConsumptionSinceLastRequest: &rmpb.Consumption{
+			RRU:        12,
+			WRU:        8,
+			WriteBytes: 1024,
+		},
+		KeyspaceId: &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: 42}},
+	}
+
+	err := m.dispatchConsumption(req)
+	re.NoError(err)
+
+	item := <-m.consumptionDispatcher
+	re.Equal(uint32(42), item.keyspaceID)
+	re.Equal(req.GetResourceGroupName(), item.resourceGroupName)
+	re.Equal(req.GetConsumptionSinceLastRequest(), item.Consumption)
+}
+
 // Put a keyspace meta into the storage.
 func prepareKeyspaceName(ctx context.Context, re *require.Assertions, manager *Manager, keyspaceIDValue *rmpb.KeyspaceIDValue, keyspaceName string) {
 	keyspaceMeta := &keyspacepb.KeyspaceMeta{
-		Id:   ExtractKeyspaceID(keyspaceIDValue),
-		Name: keyspaceName,
+		Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: ExtractKeyspaceID(keyspaceIDValue)},
+		Name:     keyspaceName,
 	}
 	err := manager.storage.RunInTxn(ctx, func(txn kv.Txn) error {
 		err := manager.storage.SaveKeyspaceMeta(txn, keyspaceMeta)
 		if err != nil {
 			return err
 		}
-		return manager.storage.SaveKeyspaceID(txn, keyspaceMeta.Id, keyspaceMeta.Name)
+		return manager.storage.SaveKeyspaceID(txn, keyspaceMeta.GetId(), keyspaceMeta.Name)
 	})
 	re.NoError(err)
 }
@@ -216,7 +527,7 @@ func TestAddAndModifyResourceGroup(t *testing.T) {
 	// Test without keyspace ID
 	checkAddAndModifyResourceGroup(re, m, nil)
 	// Test with keyspace ID
-	checkAddAndModifyResourceGroup(re, m, &rmpb.KeyspaceIDValue{Value: 1})
+	checkAddAndModifyResourceGroup(re, m, &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: 1}})
 }
 
 func checkAddAndModifyResourceGroup(re *require.Assertions, manager *Manager, keyspaceIDValue *rmpb.KeyspaceIDValue) {
@@ -260,7 +571,7 @@ func TestCleanUpTicker(t *testing.T) {
 	defer cancel()
 	// Put a keyspace meta.
 	keyspaceID := uint32(1)
-	prepareKeyspaceName(ctx, re, m, &rmpb.KeyspaceIDValue{Value: keyspaceID}, "test_keyspace")
+	prepareKeyspaceName(ctx, re, m, &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: keyspaceID}}, "test_keyspace")
 	// Insert two consumption records manually.
 	m.metrics.consumptionRecordMap[consumptionRecordKey{
 		keyspaceID: keyspaceID,
@@ -323,10 +634,10 @@ func TestKeyspaceServiceLimit(t *testing.T) {
 				},
 			},
 		},
-		KeyspaceId: &rmpb.KeyspaceIDValue{Value: 1},
+		KeyspaceId: &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: 1}},
 	}
 	// Test the limiter of the non-existing keyspace is nil.
-	limiter = m.GetKeyspaceServiceLimiter(group.KeyspaceId.Value)
+	limiter = m.GetKeyspaceServiceLimiter(group.KeyspaceId.GetValue())
 	re.Nil(limiter)
 	// Test the limiter of the newly created keyspace is 0.0.
 	err = m.AddResourceGroup(group)
@@ -365,7 +676,7 @@ func TestKeyspaceNameLookup(t *testing.T) {
 	idValue, err := m.GetKeyspaceIDByName(ctx, "")
 	re.NoError(err)
 	re.NotNil(idValue)
-	re.Equal(constant.NullKeyspaceID, idValue.Value)
+	re.Equal(constant.NullKeyspaceID, idValue.GetValue())
 	// Get the non-existing keyspace ID by name.
 	idValue, err = m.GetKeyspaceIDByName(ctx, "non-existing-keyspace")
 	re.Error(err)
@@ -379,23 +690,23 @@ func TestKeyspaceNameLookup(t *testing.T) {
 	re.Error(err)
 	re.Empty(name)
 	// Get the keyspace ID by name first, then get the keyspace name by ID.
-	prepareKeyspaceName(ctx, re, m, &rmpb.KeyspaceIDValue{Value: 1}, "test_keyspace")
+	prepareKeyspaceName(ctx, re, m, &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: 1}}, "test_keyspace")
 	idValue, err = m.GetKeyspaceIDByName(ctx, "test_keyspace")
 	re.NoError(err)
 	re.NotNil(idValue)
-	re.Equal(uint32(1), idValue.Value)
+	re.Equal(uint32(1), idValue.GetValue())
 	name, err = m.getKeyspaceNameByID(ctx, 1)
 	re.NoError(err)
 	re.Equal("test_keyspace", name)
 	// Get the keyspace name by ID first, then get the keyspace ID by name.
-	prepareKeyspaceName(ctx, re, m, &rmpb.KeyspaceIDValue{Value: 2}, "test_keyspace_2")
+	prepareKeyspaceName(ctx, re, m, &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: 2}}, "test_keyspace_2")
 	name, err = m.getKeyspaceNameByID(ctx, 2)
 	re.NoError(err)
 	re.Equal("test_keyspace_2", name)
 	idValue, err = m.GetKeyspaceIDByName(ctx, "test_keyspace_2")
 	re.NoError(err)
 	re.NotNil(idValue)
-	re.Equal(uint32(2), idValue.Value)
+	re.Equal(uint32(2), idValue.GetValue())
 }
 
 func TestResourceGroupPersistence(t *testing.T) {
@@ -407,7 +718,7 @@ func TestResourceGroupPersistence(t *testing.T) {
 		Name:       "test_group",
 		Mode:       rmpb.GroupMode_RUMode,
 		Priority:   5,
-		KeyspaceId: &rmpb.KeyspaceIDValue{Value: 1},
+		KeyspaceId: &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: 1}},
 	}
 	err := m.AddResourceGroup(group)
 	re.NoError(err)

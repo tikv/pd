@@ -22,7 +22,27 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 )
+
+func TestLoadExpireTime(t *testing.T) {
+	re := require.New(t)
+
+	var nilLease *Lease
+	re.Equal(typeutil.ZeroTime, nilLease.loadExpireTime())
+
+	emptyLease := &Lease{}
+	re.Equal(typeutil.ZeroTime, emptyLease.loadExpireTime())
+
+	invalidLease := &Lease{}
+	invalidLease.expireTime.Store("invalid expire time")
+	re.Equal(typeutil.ZeroTime, invalidLease.loadExpireTime())
+
+	expireTime := time.Now()
+	validLease := &Lease{}
+	validLease.expireTime.Store(expireTime)
+	re.Equal(expireTime, validLease.loadExpireTime())
+}
 
 func TestLease(t *testing.T) {
 	re := require.New(t)
@@ -30,8 +50,8 @@ func TestLease(t *testing.T) {
 	defer clean()
 
 	// Create the lease.
-	lease1 := NewLease(client, "test_lease_1")
-	lease2 := NewLease(client, "test_lease_2")
+	lease1 := NewLease(client, "test_lease_1", "test_lease_1")
+	lease2 := NewLease(client, "test_lease_2", "test_lease_2")
 	re.True(lease1.IsExpired())
 	re.True(lease2.IsExpired())
 	re.NoError(lease1.Close())
@@ -89,7 +109,7 @@ func TestLeaseKeepAlive(t *testing.T) {
 	defer clean()
 
 	// Create the lease.
-	lease := NewLease(client, "test_lease")
+	lease := NewLease(client, "test_lease", "test_lease")
 
 	re.NoError(lease.Grant(defaultLeaseTimeout))
 	ch := lease.keepAliveWorker(ctx, 2*time.Second)

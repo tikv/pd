@@ -15,11 +15,16 @@
 package schedulers
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/rand/v2"
+	"net/http"
+	"net/http/httptest"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/docker/go-units"
 	"github.com/stretchr/testify/require"
@@ -30,6 +35,7 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -43,7 +49,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 func TestBalanceLeaderSchedulerConfigClone(t *testing.T) {
@@ -65,6 +71,31 @@ func TestBalanceLeaderSchedulerConfigClone(t *testing.T) {
 	// update conf2
 	conf2.Ranges[1] = keyRanges2[1]
 	re.NotEqual(conf.Ranges, conf2.Ranges)
+}
+
+func TestBalanceLeaderBatchLimit(t *testing.T) {
+	re := require.New(t)
+	cancel, _, _, oc := prepareSchedulersTest()
+	defer cancel()
+
+	lb, err := CreateScheduler(types.BalanceLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceLeaderScheduler, []string{"", ""}))
+	re.NoError(err)
+
+	body, err := json.Marshal(map[string]any{"batch": MaxBalanceLeaderBatchSize})
+	re.NoError(err)
+	req := httptest.NewRequest(http.MethodPost, "/config", bytes.NewReader(body))
+	resp := httptest.NewRecorder()
+	lb.ServeHTTP(resp, req)
+	re.Equal(http.StatusOK, resp.Code)
+	re.Equal(MaxBalanceLeaderBatchSize, lb.(*balanceLeaderScheduler).conf.getBatch())
+
+	body, err = json.Marshal(map[string]any{"batch": MaxBalanceLeaderBatchSize + 1})
+	re.NoError(err)
+	req = httptest.NewRequest(http.MethodPost, "/config", bytes.NewReader(body))
+	resp = httptest.NewRecorder()
+	lb.ServeHTTP(resp, req)
+	re.Equal(http.StatusBadRequest, resp.Code)
+	re.Equal(MaxBalanceLeaderBatchSize, lb.(*balanceLeaderScheduler).conf.getBatch())
 }
 
 type balanceLeaderSchedulerTestSuite struct {
@@ -140,6 +171,13 @@ func (suite *balanceLeaderSchedulerTestSuite) TestBalanceLimit() {
 	// Region1:    F    F    F    L
 	suite.tc.UpdateLeaderCount(4, 16)
 	re.NotEmpty(suite.schedule())
+	exhaustTransferLeaderInLimit(suite.T(), suite.tc, 1, 2, 3, 4)
+	re.Empty(suite.schedule())
+	suite.tc.SetStoreLimit(2, storelimit.TransferLeaderIn, storelimit.Unlimited)
+	suite.tc.ResetStoreLimit(2, storelimit.TransferLeaderIn, storelimit.Unlimited/time.Minute.Seconds())
+	ops := suite.schedule()
+	re.Len(ops, 1)
+	operatorutil.CheckTransferLeader(re, ops[0], operator.OpLeader, 4, 2)
 }
 
 func (suite *balanceLeaderSchedulerTestSuite) TestBalanceLeaderSchedulePolicy() {
@@ -539,6 +577,28 @@ func (suite *balanceLeaderRangeSchedulerTestSuite) TestBatchBalance() {
 		regions[op.RegionID()] = struct{}{}
 	}
 	re.Len(regions, 4)
+}
+
+func TestBalanceLeaderMaxBatchSchedule(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	tc.AddLeaderStore(1, MaxBalanceLeaderBatchSize*10)
+	tc.AddLeaderStore(2, 0)
+	tc.AddLeaderStore(3, 0)
+	for i := 1; i <= MaxBalanceLeaderBatchSize*20; i++ {
+		tc.AddLeaderRegion(uint64(i), 1, 2, 3)
+	}
+
+	lb, err := CreateScheduler(types.BalanceLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceLeaderScheduler, []string{"", ""}))
+	re.NoError(err)
+	lb.(*balanceLeaderScheduler).conf.Batch = MaxBalanceLeaderBatchSize
+
+	testutil.Eventually(re, func() bool {
+		ops, _ := lb.Schedule(tc, false)
+		return len(ops) == MaxBalanceLeaderBatchSize
+	})
 }
 
 func (suite *balanceLeaderRangeSchedulerTestSuite) TestReSortStores() {

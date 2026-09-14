@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
+	coreconstant "github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -34,7 +35,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 type keyspaceTestSuite struct {
@@ -170,20 +171,22 @@ func (suite *keyspaceTestSuite) TestKeyspaceRegionSplit() {
 		name     string
 		key      []byte
 		expected uint32
-		kt       keyspace.KeyType
+		wantOK   bool
+		wantMode string
 	}{
-		{"keyspace 1 txn", keyspace.MakeRegionBound(1).TxnLeftBound, 1, keyspace.KeyTypeTxn},
-		{"keyspace 2 txn", keyspace.MakeRegionBound(2).TxnLeftBound, 2, keyspace.KeyTypeTxn},
-		{"keyspace 100 txn", keyspace.MakeRegionBound(100).TxnLeftBound, 100, keyspace.KeyTypeTxn},
-		{"empty key", []byte{}, constant.MaxValidKeyspaceID, keyspace.KeyTypeTxn},
-		{"short key", []byte{'t', 0}, 0, keyspace.KeyTypeUnknown},
+		{"keyspace 1 txn", keyspace.MakeRegionBound(1).TxnLeftBound, 1, true, "txn"},
+		{"keyspace 2 txn", keyspace.MakeRegionBound(2).TxnLeftBound, 2, true, "txn"},
+		{"keyspace 100 txn", keyspace.MakeRegionBound(100).TxnLeftBound, 100, true, "txn"},
+		{"empty key", []byte{}, constant.MaxValidKeyspaceID, true, "txn"},
+		{"short key", []byte{'t', 0}, 0, false, ""},
 	}
 
 	for _, tc := range testCases {
-		id, kt := keyspace.ExtractKeyspaceID(tc.key)
-		re.Equal(tc.kt, kt, "test case: %s", tc.name)
-		if kt != keyspace.KeyTypeUnknown {
+		id, bound, ok := keyspace.ExtractKeyspaceID(tc.key)
+		re.Equal(tc.wantOK, ok, "test case: %s", tc.name)
+		if ok {
 			re.Equal(tc.expected, id, "test case: %s", tc.name)
+			re.Equal(tc.wantMode, bound.String(), "test case: %s", tc.name)
 		}
 	}
 
@@ -234,7 +237,7 @@ func (suite *keyspaceTestSuite) TestKeyspaceRegionSplit() {
 
 	startKey := keyspace.MakeRegionBound(1).TxnLeftBound
 	endKey := keyspace.MakeRegionBound(3).TxnRightBound
-	splitKeys := keyspace.GetKeyspaceSplitKeys(startKey, endKey, manager)
+	splitKeys := keyspace.GetKeyspaceSplitKeys(startKey, endKey, coreconstant.Txn, manager)
 	re.NotNil(splitKeys)
 	re.GreaterOrEqual(len(splitKeys), 1, "Should generate at least one split key")
 

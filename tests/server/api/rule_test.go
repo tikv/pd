@@ -34,6 +34,7 @@ import (
 
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/checker"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -1433,4 +1434,32 @@ func (suite *regionRuleTestSuite) checkRegionPlacementRule(cluster *tests.TestCl
 	re.NoError(err)
 	re.Empty(fit.RuleFits)
 	re.Len(fit.OrphanPeers, 2)
+
+	u = fmt.Sprintf("%s/config/rules/region/%d/detail", urlPrefix, 4)
+	err = testutil.CheckGetJSON(tests.TestDialClient, u, nil, testutil.Status(re, http.StatusNotFound), testutil.StringContain(
+		re, "region 4 not found"))
+	re.NoError(err)
+
+	u = fmt.Sprintf("%s/config/rules/region/%s/detail", urlPrefix, "id")
+	err = testutil.CheckGetJSON(tests.TestDialClient, u, nil, testutil.Status(re, http.StatusBadRequest), testutil.StringContain(
+		re, errs.ErrRegionInvalidID.Error()))
+	re.NoError(err)
+
+	data := make(map[string]any)
+	data["enable-placement-rules"] = "false"
+	reqData, e := json.Marshal(data)
+	re.NoError(e)
+	u = fmt.Sprintf("%s/config", urlPrefix)
+	err = testutil.CheckPostJSON(tests.TestDialClient, u, reqData, testutil.StatusOK(re))
+	re.NoError(err)
+	if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
+		// wait for the scheduling server to update the config
+		testutil.Eventually(re, func() bool {
+			return !sche.GetCluster().GetCheckerConfig().IsPlacementRulesEnabled()
+		})
+	}
+	u = fmt.Sprintf("%s/config/rules/region/%d/detail", urlPrefix, 1)
+	err = testutil.CheckGetJSON(tests.TestDialClient, u, nil, testutil.Status(re, http.StatusPreconditionFailed), testutil.StringContain(
+		re, "placement rules feature is disabled"))
+	re.NoError(err)
 }

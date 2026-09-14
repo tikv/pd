@@ -23,6 +23,8 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -82,6 +84,101 @@ func TestCache(t *testing.T) {
 		}
 		cancel()
 	}
+}
+
+func TestCheckPeerFlowWithMoreExplicitPeersThanRegionPeers(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster := core.NewBasicCluster()
+	cache := NewHotPeerCache(ctx, cluster, utils.Write)
+	region, err := buildRegion(cluster, utils.Write, 3, 60)
+	re.NoError(err)
+
+	peerID, _, err := getIDAllocator().Alloc(1)
+	re.NoError(err)
+	storeID, _, err := getIDAllocator().Alloc(1)
+	re.NoError(err)
+	re.Nil(region.GetStorePeer(storeID))
+	peers := append([]*metapb.Peer{}, region.GetPeers()...)
+	peers = append(peers, &metapb.Peer{Id: peerID, StoreId: storeID})
+	stats := cache.CheckPeerFlow(region, peers, region.GetLoads(), 60)
+	re.Len(stats, len(peers))
+	re.Equal(storeID, stats[len(stats)-1].StoreID)
+}
+
+func TestFindOldHotPeerStatForInheritance(t *testing.T) {
+	const regionID uint64 = 100
+	newCache := func() *HotPeerCache {
+		return &HotPeerCache{
+			peersOfStore:   make(map[uint64]*utils.TopN),
+			storesOfRegion: make(map[uint64]map[uint64]struct{}),
+		}
+	}
+	putPeer := func(cache *HotPeerCache, storeID uint64, allowInherited bool) *HotPeerStat {
+		stat := &HotPeerStat{
+			StoreID:        storeID,
+			RegionID:       regionID,
+			Loads:          make([]float64, utils.DimLen),
+			allowInherited: allowInherited,
+		}
+		peers := utils.NewTopN(utils.DimLen, TopNN, time.Minute)
+		peers.Put(stat)
+		cache.peersOfStore[storeID] = peers
+		return stat
+	}
+	newRegion := func(storeIDs ...uint64) *hotRegionInfo {
+		peers := make([]*metapb.Peer, len(storeIDs))
+		for i, storeID := range storeIDs {
+			peers[i] = &metapb.Peer{StoreId: storeID}
+		}
+		return &hotRegionInfo{meta: &metapb.Region{Id: regionID, Peers: peers}}
+	}
+
+	t.Run("inherit-from-old-store", func(t *testing.T) {
+		cache := newCache()
+		want := putPeer(cache, 1, true)
+		cache.storesOfRegion[regionID] = map[uint64]struct{}{1: {}}
+		got, source := cache.findOldHotPeerStatForInheritance(newRegion(2))
+		require.Same(t, want, got)
+		require.Equal(t, utils.Inherit, source)
+	})
+
+	t.Run("inherit-from-new-store", func(t *testing.T) {
+		cache := newCache()
+		putPeer(cache, 1, false)
+		want := putPeer(cache, 2, true)
+		cache.storesOfRegion[regionID] = map[uint64]struct{}{1: {}}
+		got, source := cache.findOldHotPeerStatForInheritance(newRegion(2))
+		require.Same(t, want, got)
+		require.Equal(t, utils.Inherit, source)
+	})
+
+	t.Run("preserve-last-direct-item", func(t *testing.T) {
+		cache := newCache()
+		want := putPeer(cache, 1, false)
+		cache.storesOfRegion[regionID] = map[uint64]struct{}{1: {}}
+		got, source := cache.findOldHotPeerStatForInheritance(newRegion(1))
+		require.Same(t, want, got)
+		require.Equal(t, utils.Direct, source)
+	})
+
+	t.Run("preserve-final-miss", func(t *testing.T) {
+		cache := newCache()
+		putPeer(cache, 1, false)
+		cache.storesOfRegion[regionID] = map[uint64]struct{}{1: {}}
+		got, source := cache.findOldHotPeerStatForInheritance(newRegion(2))
+		require.Nil(t, got)
+		require.Equal(t, utils.Direct, source)
+	})
+
+	t.Run("deduplicate-new-stores", func(t *testing.T) {
+		cache := newCache()
+		putPeer(cache, 2, false)
+		got, source := cache.findOldHotPeerStatForInheritance(newRegion(2, 3, 2))
+		require.Nil(t, got)
+		require.Equal(t, utils.Direct, source)
+	})
 }
 
 func orderingPeers(cache *HotPeerCache, region *core.RegionInfo) []*metapb.Peer {
@@ -330,10 +427,17 @@ func TestUpdateHotPeerStat(t *testing.T) {
 	defer func() {
 		ThresholdsUpdateInterval = 8 * time.Second
 	}()
+	makeReadDeltaLoads := func(bytes, keys, query float64) []float64 {
+		loads := make([]float64, utils.RegionStatCount)
+		loads[utils.RegionReadBytes] = bytes
+		loads[utils.RegionReadKeys] = keys
+		loads[utils.RegionReadQueryNum] = query
+		return loads
+	}
 
 	// skip interval=0
 	interval := uint64(0)
-	deltaLoads := []float64{0.0, 0.0, 0.0}
+	deltaLoads := makeReadDeltaLoads(0.0, 0.0, 0.0)
 	utils.MinHotThresholds[utils.RegionReadBytes] = 0.0
 	utils.MinHotThresholds[utils.RegionReadKeys] = 0.0
 	utils.MinHotThresholds[utils.RegionReadQueryNum] = 0.0
@@ -343,7 +447,7 @@ func TestUpdateHotPeerStat(t *testing.T) {
 
 	// new peer, interval is larger than report interval, but no hot
 	interval = 10
-	deltaLoads = []float64{0.0, 0.0, 0.0}
+	deltaLoads = makeReadDeltaLoads(0.0, 0.0, 0.0)
 	utils.MinHotThresholds[utils.RegionReadBytes] = 1.0
 	utils.MinHotThresholds[utils.RegionReadKeys] = 1.0
 	utils.MinHotThresholds[utils.RegionReadQueryNum] = 1.0
@@ -352,7 +456,7 @@ func TestUpdateHotPeerStat(t *testing.T) {
 
 	// new peer, interval is less than report interval
 	interval = 4
-	deltaLoads = []float64{60.0, 60.0, 60.0}
+	deltaLoads = makeReadDeltaLoads(60.0, 60.0, 60.0)
 	utils.MinHotThresholds[utils.RegionReadBytes] = 0.0
 	utils.MinHotThresholds[utils.RegionReadKeys] = 0.0
 	utils.MinHotThresholds[utils.RegionReadQueryNum] = 0.0
@@ -361,7 +465,7 @@ func TestUpdateHotPeerStat(t *testing.T) {
 	re.Equal(0, newItem[0].HotDegree)
 	re.Equal(0, newItem[0].AntiCount)
 	// sum of interval is less than report interval
-	deltaLoads = []float64{60.0, 60.0, 60.0}
+	deltaLoads = makeReadDeltaLoads(60.0, 60.0, 60.0)
 	cache.UpdateStat(newItem[0])
 	newItem = cache.CheckPeerFlow(region, []*metapb.Peer{peer}, deltaLoads, interval)
 	re.Equal(0, newItem[0].HotDegree)
@@ -414,6 +518,45 @@ func TestThresholdWithUpdateHotPeerStat(t *testing.T) {
 	testMetrics(ctx, re, 1., byteRate, expectThreshold)
 }
 
+func TestHotPeerStatIsHotUsesCPULastAverage(t *testing.T) {
+	re := require.New(t)
+	interval := time.Duration(utils.StoreHeartBeatReportInterval) * time.Second
+	threshold := 10.0
+	highDelta := threshold * interval.Seconds()
+
+	// CPU dim uses isLastAverageHot, same as other dims.
+	cpuStat := newDimStat(interval)
+	cpuStat.add(highDelta, interval)
+	re.True(cpuStat.isLastAverageHot(threshold))
+
+	lowStat := newDimStat(interval)
+	lowStat.add(0, interval)
+
+	stat := &HotPeerStat{
+		rollingLoads: []*dimStat{
+			lowStat,
+			lowStat.clone(),
+			lowStat.clone(),
+			cpuStat,
+		},
+	}
+	thresholds := []float64{threshold, threshold, threshold, threshold}
+	re.True(stat.isHot(thresholds))
+
+	// When CPU last average is below threshold, it should not be hot.
+	coldCPU := newDimStat(interval)
+	coldCPU.add(0, interval)
+	stat2 := &HotPeerStat{
+		rollingLoads: []*dimStat{
+			lowStat.clone(),
+			lowStat.clone(),
+			lowStat.clone(),
+			coldCPU,
+		},
+	}
+	re.False(stat2.isHot(thresholds))
+}
+
 func testMetrics(ctx context.Context, re *require.Assertions, interval, byteRate, expectThreshold float64) {
 	cluster := core.NewBasicCluster()
 	cache := NewHotPeerCache(ctx, cluster, utils.Read)
@@ -441,7 +584,8 @@ func testMetrics(ctx context.Context, re *require.Assertions, interval, byteRate
 			if oldItem != nil && oldItem.rollingLoads[utils.ByteDim].isHot(thresholds[utils.ByteDim]) == true {
 				break
 			}
-			loads := []float64{byteRate * interval, 0.0, 0.0}
+			loads := make([]float64, utils.RegionStatCount)
+			loads[utils.RegionReadBytes] = byteRate * interval
 			if oldItem == nil {
 				item = cache.updateNewHotPeerStat(newItem, loads, time.Duration(interval)*time.Second)
 			} else {
@@ -775,16 +919,28 @@ func TestRemoveExpireItems(t *testing.T) {
 	re.NotEmpty(cache.storesOfRegion[region2.GetID()])
 	time.Sleep(cache.topNTTL)
 	// case2: remove items when the store is not exist
-	re.NotNil(cache.peersOfStore[region1.GetLeader().GetStoreId()])
-	re.NotNil(cache.peersOfStore[region2.GetLeader().GetStoreId()])
+	store1ID := region1.GetLeader().GetStoreId()
+	store2ID := region2.GetLeader().GetStoreId()
+	re.NotNil(cache.peersOfStore[store1ID])
+	re.NotNil(cache.peersOfStore[store2ID])
+	// the hotcache status gauge should be populated for the removed stores before gc.
+	re.NotZero(testutil.ToFloat64(hotCacheStatusGauge.WithLabelValues("add_item", storeTag(store1ID), cache.kind.String())))
+	re.NotZero(testutil.ToFloat64(hotCacheStatusGauge.WithLabelValues("add_item", storeTag(store2ID), cache.kind.String())))
 	cluster.ResetStores()
 	re.Empty(cluster.GetStores())
 	region3, err := buildRegion(cluster, utils.Write, 3, 10)
 	re.NoError(err)
 	checkAndUpdate(re, cache, region3)
-	re.Nil(cache.peersOfStore[region1.GetLeader().GetStoreId()])
-	re.Nil(cache.peersOfStore[region2.GetLeader().GetStoreId()])
+	re.Nil(cache.peersOfStore[store1ID])
+	re.Nil(cache.peersOfStore[store2ID])
 	re.NotEmpty(cache.regionsOfStore[region3.GetLeader().GetStoreId()])
+	// gc should also delete the hotcache status gauge series of the removed stores, not
+	// just the in-memory map entries. DeletePartialMatch returns how many series it
+	// found and removed, so a zero return proves nothing is left -- unlike checking
+	// WithLabelValues' value, which would recreate a fresh (zero-valued) series on
+	// every call regardless of whether gc() actually deleted the old one.
+	re.Zero(hotCacheStatusGauge.DeletePartialMatch(prometheus.Labels{"store": storeTag(store1ID), "type": cache.kind.String()}))
+	re.Zero(hotCacheStatusGauge.DeletePartialMatch(prometheus.Labels{"store": storeTag(store2ID), "type": cache.kind.String()}))
 }
 
 func TestDifferentReportInterval(t *testing.T) {

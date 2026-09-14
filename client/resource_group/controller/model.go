@@ -45,6 +45,9 @@ const (
 
 // RequestInfo is the interface of the request information provider. A request should be
 // able to tell whether it's a write request and if so, the written bytes would also be provided.
+// Implementations may additionally provide RequestSource(), PredictedReadBytes(), and IsCop()
+// methods to opt into request-source metrics and paging pre-charge accounting. Missing methods
+// are treated as an empty request source, no prediction hint, and non-cop.
 type RequestInfo interface {
 	IsWrite() bool
 	WriteBytes() uint64
@@ -52,6 +55,70 @@ type RequestInfo interface {
 	StoreID() uint64
 	RequestSize() uint64
 	AccessLocationType() AccessLocationType
+}
+
+type requestSourceProvider interface {
+	// RequestSource returns the source of the request for RU attribution.
+	RequestSource() string
+}
+
+type predictedReadBytesProvider interface {
+	// PredictedReadBytes returns the caller-supplied read-bytes hint. The
+	// controller only uses it for coprocessor reads; non-cop hints are
+	// ignored by paging accounting.
+	PredictedReadBytes() uint64
+}
+
+type copRequestInfo interface {
+	// IsCop reports whether this request targets the coprocessor endpoint
+	// (CmdCop / CmdCopStream). Only coprocessor reads participate in paging
+	// pre-charge, settlement, and metrics; point gets, batch gets, scans and
+	// other bounded-size reads bypass paging even when they carry a
+	// PredictedReadBytes hint.
+	IsCop() bool
+}
+
+func predictedReadBytes(req RequestInfo) uint64 {
+	provider, ok := req.(predictedReadBytesProvider)
+	if !ok {
+		return 0
+	}
+	return provider.PredictedReadBytes()
+}
+
+func isCopRequest(req RequestInfo) bool {
+	copReq, ok := req.(copRequestInfo)
+	return ok && copReq.IsCop()
+}
+
+func requestSource(req RequestInfo) string {
+	provider, ok := req.(requestSourceProvider)
+	if !ok {
+		return ""
+	}
+	return provider.RequestSource()
+}
+
+// pagingReadEstimate returns the predicted read-bytes hint for coprocessor
+// read requests. The boolean reports whether the request participates in
+// cop-read pre-charge accounting at all; a true result with 0 bytes means
+// the cop read did not carry a usable pre-charge hint.
+func pagingReadEstimate(req RequestInfo) (uint64, bool) {
+	if req.IsWrite() || !isCopRequest(req) {
+		return 0, false
+	}
+	return predictedReadBytes(req), true
+}
+
+// estimatedReadBytes returns the predicted read-bytes hint for coprocessor
+// read requests. Writes and non-coprocessor reads always return 0 so cop-read
+// pre-charge and settlement stay gated to coprocessor RPCs.
+func estimatedReadBytes(req RequestInfo) uint64 {
+	bytesForEst, ok := pagingReadEstimate(req)
+	if !ok {
+		return 0
+	}
+	return bytesForEst
 }
 
 // ResponseInfo is the interface of the response information provider. A response should be
@@ -63,6 +130,72 @@ type ResponseInfo interface {
 	// If not, we need to pay back the WRU cost of the request.
 	Succeed() bool
 	ResponseSize() uint64
+}
+
+// RUFactorSnapshot contains the effective RU v1 factors used by a calculation.
+type RUFactorSnapshot struct {
+	ReadBaseCost          float64
+	ReadPerBatchBaseCost  float64
+	ReadBytesCost         float64
+	WriteBaseCost         float64
+	WritePerBatchBaseCost float64
+	WriteBytesCost        float64
+	CPUMsCost             float64
+	BatchProportion       float64
+}
+
+// RUCalculationInputs contains the inputs used by an RU v1 calculation.
+//
+// The write RU calculation is:
+//
+//	ReplicaWeightedWriteRPCCount * (WriteBaseCost + WritePerBatchBaseCost * BatchProportion)
+//	+ ReplicaWeightedWriteBytes * WriteBytesCost
+//	- FailedWriteBaseCostRefundCount * WriteBaseCost
+//	- FailedWriteRefundBytes * WriteBytesCost
+//
+// A failed write refunds neither the per-batch cost nor the replica-weighted
+// portion of the original charge.
+type RUCalculationInputs struct {
+	ReadRPCCount                 float64
+	ReadBytes                    float64
+	KVCPUTimeMs                  float64
+	ReplicaWeightedWriteRPCCount float64
+	ReplicaWeightedWriteBytes    float64
+	// FailedWriteBaseCostRefundCount is the number of unweighted write base-cost refunds.
+	FailedWriteBaseCostRefundCount float64
+	// FailedWriteRefundBytes is the unweighted byte input refunded using WriteBytesCost.
+	FailedWriteRefundBytes float64
+}
+
+// RUCalculation contains the factors and inputs needed to show an RU v1 formula.
+type RUCalculation struct {
+	Factors RUFactorSnapshot
+	Inputs  RUCalculationInputs
+	// RRU and WRU are the actual consumption produced by KVCalculator for Inputs.
+	RRU float64
+	WRU float64
+}
+
+// RUCalculationCollector is optionally implemented by requests that need the
+// RU v1 calculation inputs used during request admission and settlement.
+type RUCalculationCollector interface {
+	CollectRUCalculation(RUCalculation)
+}
+
+// Add adds another calculation delta with the same factors to c.
+func (c *RUCalculation) Add(other RUCalculation) {
+	if c.Factors == (RUFactorSnapshot{}) {
+		c.Factors = other.Factors
+	}
+	c.Inputs.ReadRPCCount += other.Inputs.ReadRPCCount
+	c.Inputs.ReadBytes += other.Inputs.ReadBytes
+	c.Inputs.KVCPUTimeMs += other.Inputs.KVCPUTimeMs
+	c.Inputs.ReplicaWeightedWriteRPCCount += other.Inputs.ReplicaWeightedWriteRPCCount
+	c.Inputs.ReplicaWeightedWriteBytes += other.Inputs.ReplicaWeightedWriteBytes
+	c.Inputs.FailedWriteBaseCostRefundCount += other.Inputs.FailedWriteBaseCostRefundCount
+	c.Inputs.FailedWriteRefundBytes += other.Inputs.FailedWriteRefundBytes
+	c.RRU += other.RRU
+	c.WRU += other.WRU
 }
 
 // ResourceCalculator is used to calculate the resource consumption of a request.
@@ -79,6 +212,26 @@ type ResourceCalculator interface {
 	AfterKVRequest(*rmpb.Consumption, RequestInfo, ResponseInfo)
 }
 
+func calculateBeforeKVRequest(calculators []ResourceCalculator, consumption *rmpb.Consumption, detail *RUCalculation, req RequestInfo) {
+	for _, calc := range calculators {
+		if kvCalc, ok := calc.(*KVCalculator); ok && detail != nil {
+			kvCalc.beforeKVRequestWithDetail(consumption, detail, req)
+			continue
+		}
+		calc.BeforeKVRequest(consumption, req)
+	}
+}
+
+func calculateAfterKVRequest(calculators []ResourceCalculator, consumption *rmpb.Consumption, detail *RUCalculation, req RequestInfo, resp ResponseInfo) {
+	for _, calc := range calculators {
+		if kvCalc, ok := calc.(*KVCalculator); ok && detail != nil {
+			kvCalc.afterKVRequestWithDetail(consumption, detail, req, resp)
+			continue
+		}
+		calc.AfterKVRequest(consumption, req, resp)
+	}
+}
+
 // KVCalculator is used to calculate the KV-side consumption.
 type KVCalculator struct {
 	*RUConfig
@@ -90,20 +243,50 @@ func newKVCalculator(cfg *RUConfig) *KVCalculator {
 	return &KVCalculator{RUConfig: cfg}
 }
 
+func (kc *KVCalculator) initCalculation(detail *RUCalculation) {
+	if detail != nil {
+		detail.Factors = RUFactorSnapshot{
+			ReadBaseCost:          float64(kc.ReadBaseCost),
+			ReadPerBatchBaseCost:  float64(kc.ReadPerBatchBaseCost),
+			ReadBytesCost:         float64(kc.ReadBytesCost),
+			WriteBaseCost:         float64(kc.WriteBaseCost),
+			WritePerBatchBaseCost: float64(kc.WritePerBatchBaseCost),
+			WriteBytesCost:        float64(kc.WriteBytesCost),
+			CPUMsCost:             float64(kc.CPUMsCost),
+			BatchProportion:       defaultAvgBatchProportion,
+		}
+	}
+}
+
 // Trickle ...
 func (*KVCalculator) Trickle(*rmpb.Consumption) {}
 
 // BeforeKVRequest ...
 func (kc *KVCalculator) BeforeKVRequest(consumption *rmpb.Consumption, req RequestInfo) {
+	kc.beforeKVRequestWithDetail(consumption, nil, req)
+}
+
+func (kc *KVCalculator) beforeKVRequestWithDetail(consumption *rmpb.Consumption, detail *RUCalculation, req RequestInfo) {
+	kc.initCalculation(detail)
 	if req.IsWrite() {
 		consumption.KvWriteRpcCount += 1
 		// Write bytes are knowable in advance, so we can calculate the WRU cost here.
-		kc.calculateWriteCost(consumption, req)
+		kc.calculateWriteCostWithDetail(consumption, detail, req)
 	} else {
 		consumption.KvReadRpcCount += 1
 		// Read bytes could not be known before the request is executed,
 		// so we only add the base cost here.
 		consumption.RRU += float64(kc.ReadBaseCost) + float64(kc.ReadPerBatchBaseCost)*defaultAvgBatchProportion
+		if detail != nil {
+			detail.Inputs.ReadRPCCount++
+		}
+		// Paging pre-charge
+		if bytesForEst := estimatedReadBytes(req); bytesForEst > 0 {
+			consumption.RRU += float64(kc.ReadBytesCost) * float64(bytesForEst)
+			if detail != nil {
+				detail.Inputs.ReadBytes += float64(bytesForEst)
+			}
+		}
 	}
 	if req.AccessLocationType() == AccessCrossZone {
 		if req.IsWrite() {
@@ -114,7 +297,7 @@ func (kc *KVCalculator) BeforeKVRequest(consumption *rmpb.Consumption, req Reque
 	}
 }
 
-func (kc *KVCalculator) calculateWriteCost(consumption *rmpb.Consumption, req RequestInfo) {
+func (kc *KVCalculator) calculateWriteCostWithDetail(consumption *rmpb.Consumption, detail *RUCalculation, req RequestInfo) {
 	writeBytes := float64(req.WriteBytes())
 	consumption.WriteBytes += writeBytes
 	// write request cost need consider the replicas, due to write data will be replicate to all replicas.
@@ -122,7 +305,12 @@ func (kc *KVCalculator) calculateWriteCost(consumption *rmpb.Consumption, req Re
 	if replicaNums == 0 {
 		replicaNums = 1
 	}
-	consumption.WRU += (float64(kc.WriteBaseCost) + float64(kc.WritePerBatchBaseCost)*defaultAvgBatchProportion + float64(kc.WriteBytesCost)*writeBytes) * float64(replicaNums)
+	replicas := float64(replicaNums)
+	consumption.WRU += (float64(kc.WriteBaseCost) + float64(kc.WritePerBatchBaseCost)*defaultAvgBatchProportion + float64(kc.WriteBytesCost)*writeBytes) * replicas
+	if detail != nil {
+		detail.Inputs.ReplicaWeightedWriteRPCCount += replicas
+		detail.Inputs.ReplicaWeightedWriteBytes += writeBytes * replicas
+	}
 	// TODO: for a raft group with N replicas, we assume the cross AZ network traffic for raft replication
 	// is: writeBytes * (N - 1). This is not accurate, but the deviation should be small enough.
 	//
@@ -135,35 +323,53 @@ func (kc *KVCalculator) calculateWriteCost(consumption *rmpb.Consumption, req Re
 
 // AfterKVRequest ...
 func (kc *KVCalculator) AfterKVRequest(consumption *rmpb.Consumption, req RequestInfo, res ResponseInfo) {
+	kc.afterKVRequestWithDetail(consumption, nil, req, res)
+}
+
+func (kc *KVCalculator) afterKVRequestWithDetail(consumption *rmpb.Consumption, detail *RUCalculation, req RequestInfo, res ResponseInfo) {
+	kc.initCalculation(detail)
 	if !req.IsWrite() {
 		// For now, we can only collect the KV CPU cost for a read request.
-		kc.calculateCPUCost(consumption, res)
+		kc.calculateCPUCostWithDetail(consumption, detail, res)
+		// Paging settlement
+		if bytesForEst := estimatedReadBytes(req); bytesForEst > 0 {
+			consumption.RRU -= float64(kc.ReadBytesCost) * float64(bytesForEst)
+			if detail != nil {
+				detail.Inputs.ReadBytes -= float64(bytesForEst)
+			}
+		}
 	} else if !res.Succeed() {
 		// If the write request is not successfully returned, we need to pay back the WRU cost.
-		kc.payBackWriteCost(consumption, req)
+		kc.payBackWriteCostWithDetail(consumption, detail, req)
 	}
 	// A write request may also read data, which should be counted into the RRU cost.
 	// This part should be counted even if the request does not succeed.
-	kc.calculateReadCost(consumption, res)
+	kc.calculateReadCostWithDetail(consumption, detail, res)
 	calculateCrossAZTraffic(consumption, req, res)
 }
 
-func (kc *KVCalculator) calculateReadCost(consumption *rmpb.Consumption, res ResponseInfo) {
+func (kc *KVCalculator) calculateReadCostWithDetail(consumption *rmpb.Consumption, detail *RUCalculation, res ResponseInfo) {
 	if consumption == nil {
 		return
 	}
 	readBytes := float64(res.ReadBytes())
 	consumption.ReadBytes += readBytes
 	consumption.RRU += float64(kc.ReadBytesCost) * readBytes
+	if detail != nil {
+		detail.Inputs.ReadBytes += readBytes
+	}
 }
 
-func (kc *KVCalculator) calculateCPUCost(consumption *rmpb.Consumption, res ResponseInfo) {
+func (kc *KVCalculator) calculateCPUCostWithDetail(consumption *rmpb.Consumption, detail *RUCalculation, res ResponseInfo) {
 	if consumption == nil {
 		return
 	}
 	kvCPUMs := float64(res.KVCPU().Nanoseconds()) / 1000000.0
 	consumption.TotalCpuTimeMs += kvCPUMs
 	consumption.RRU += float64(kc.CPUMsCost) * kvCPUMs
+	if detail != nil {
+		detail.Inputs.KVCPUTimeMs += kvCPUMs
+	}
 }
 
 func calculateCrossAZTraffic(consumption *rmpb.Consumption, req RequestInfo, res ResponseInfo) {
@@ -176,13 +382,64 @@ func calculateCrossAZTraffic(consumption *rmpb.Consumption, req RequestInfo, res
 	}
 }
 
-func (kc *KVCalculator) payBackWriteCost(consumption *rmpb.Consumption, req RequestInfo) {
+func (kc *KVCalculator) payBackWriteCostWithDetail(consumption *rmpb.Consumption, detail *RUCalculation, req RequestInfo) {
 	if consumption == nil {
 		return
 	}
 	writeBytes := float64(req.WriteBytes())
 	consumption.WriteBytes -= writeBytes
 	consumption.WRU -= float64(kc.WriteBaseCost) + float64(kc.WriteBytesCost)*writeBytes
+	if detail != nil {
+		detail.Inputs.FailedWriteBaseCostRefundCount++
+		detail.Inputs.FailedWriteRefundBytes += writeBytes
+	}
+}
+
+func cloneConsumption(consumption *rmpb.Consumption) *rmpb.Consumption {
+	if consumption == nil {
+		return &rmpb.Consumption{}
+	}
+	cloned := *consumption
+	return &cloned
+}
+
+func (kc *KVCalculator) pagingPrechargeRRU(req RequestInfo) float64 {
+	bytesForEst := estimatedReadBytes(req)
+	if bytesForEst == 0 {
+		return 0
+	}
+	return float64(kc.ReadBytesCost) * float64(bytesForEst)
+}
+
+func adjustPagingPrechargeRRU(calculators []ResourceCalculator, consumption *rmpb.Consumption, req RequestInfo, sign float64) {
+	if consumption == nil {
+		return
+	}
+	for _, calc := range calculators {
+		kvCalc, ok := calc.(*KVCalculator)
+		if !ok {
+			continue
+		}
+		consumption.RRU += sign * kvCalc.pagingPrechargeRRU(req)
+	}
+}
+
+func reportedRequestConsumption(calculators []ResourceCalculator, req RequestInfo, tokenDelta *rmpb.Consumption) *rmpb.Consumption {
+	if estimatedReadBytes(req) == 0 {
+		return tokenDelta
+	}
+	reported := cloneConsumption(tokenDelta)
+	adjustPagingPrechargeRRU(calculators, reported, req, -1)
+	return reported
+}
+
+func reportedResponseConsumption(calculators []ResourceCalculator, req RequestInfo, tokenDelta *rmpb.Consumption) *rmpb.Consumption {
+	if estimatedReadBytes(req) == 0 {
+		return tokenDelta
+	}
+	reported := cloneConsumption(tokenDelta)
+	adjustPagingPrechargeRRU(calculators, reported, req, 1)
+	return reported
 }
 
 // SQLCalculator is used to calculate the SQL-side consumption.
@@ -235,6 +492,9 @@ func add(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
 	custom1.KvWriteRpcCount += custom2.KvWriteRpcCount
 	custom1.ReadCrossAzTrafficBytes += custom2.ReadCrossAzTrafficBytes
 	custom1.WriteCrossAzTrafficBytes += custom2.WriteCrossAzTrafficBytes
+	custom1.TikvRUV2 += custom2.TikvRUV2
+	custom1.TidbRUV2 += custom2.TidbRUV2
+	custom1.TiflashRUV2 += custom2.TiflashRUV2
 }
 
 func updateDeltaConsumption(last *rmpb.Consumption, now *rmpb.Consumption) *rmpb.Consumption {
@@ -279,6 +539,18 @@ func updateDeltaConsumption(last *rmpb.Consumption, now *rmpb.Consumption) *rmpb
 		delta.WriteCrossAzTrafficBytes = now.WriteCrossAzTrafficBytes - last.WriteCrossAzTrafficBytes
 		last.WriteCrossAzTrafficBytes = now.WriteCrossAzTrafficBytes
 	}
+	if now.TikvRUV2 > last.TikvRUV2 {
+		delta.TikvRUV2 = now.TikvRUV2 - last.TikvRUV2
+		last.TikvRUV2 = now.TikvRUV2
+	}
+	if now.TidbRUV2 > last.TidbRUV2 {
+		delta.TidbRUV2 = now.TidbRUV2 - last.TidbRUV2
+		last.TidbRUV2 = now.TidbRUV2
+	}
+	if now.TiflashRUV2 > last.TiflashRUV2 {
+		delta.TiflashRUV2 = now.TiflashRUV2 - last.TiflashRUV2
+		last.TiflashRUV2 = now.TiflashRUV2
+	}
 	return delta
 }
 
@@ -296,10 +568,17 @@ func sub(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
 	custom1.KvWriteRpcCount -= custom2.KvWriteRpcCount
 	custom1.ReadCrossAzTrafficBytes -= custom2.ReadCrossAzTrafficBytes
 	custom1.WriteCrossAzTrafficBytes -= custom2.WriteCrossAzTrafficBytes
+	custom1.TikvRUV2 -= custom2.TikvRUV2
+	custom1.TidbRUV2 -= custom2.TidbRUV2
+	custom1.TiflashRUV2 -= custom2.TiflashRUV2
 }
 
 func equalRU(custom1 rmpb.Consumption, custom2 rmpb.Consumption) bool {
-	return custom1.RRU == custom2.RRU && custom1.WRU == custom2.WRU
+	return custom1.RRU == custom2.RRU &&
+		custom1.WRU == custom2.WRU &&
+		custom1.TikvRUV2 == custom2.TikvRUV2 &&
+		custom1.TidbRUV2 == custom2.TidbRUV2 &&
+		custom1.TiflashRUV2 == custom2.TiflashRUV2
 }
 
 // getSQLProcessCPUTime returns the cumulative user+system time (in ms) since the process start.

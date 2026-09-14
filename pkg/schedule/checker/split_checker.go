@@ -82,7 +82,7 @@ func (c *SplitChecker) Check(region *core.RegionInfo) *operator.Operator {
 
 		if keyspace.RegionSpansMultipleKeyspaces(start, end, checker) {
 			desc = "keyspace-split-region"
-			keys = keyspace.GetKeyspaceSplitKeys(start, end, checker)
+			keys = keyspace.GetKeyspaceSplitKeys(start, end, c.cluster.GetSharedConfig().GetKeyType(), checker)
 			if len(keys) > 0 {
 				op, err := operator.CreateSplitRegionOperator(desc, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, keys)
 				if err != nil {

@@ -74,6 +74,26 @@ func (suite *microServiceSuite) TestMicroService() {
 		v := make([]any, 0)
 		tests.MustExec(re, cmd, []string{"-u", pdAddr, "microservice", "tso", "members"}, &v)
 		re.Len(v, 2)
+
+		// PD rejects an unknown node before forwarding anything.
+		errRes := tests.MustExec(re, cmd, []string{"-u", pdAddr, "microservice", "tso", "evict-primary", "http://127.0.0.1:1"}, nil)
+		re.Contains(errRes, "is not a tso node")
+
+		// Evict all keyspace group primaries on the current tso primary node. The
+		// request goes to PD, which forwards it to that node. The node address is
+		// passed without a scheme to exercise the address normalization on the PD
+		// side. Retry until the default keyspace group has a second replica to
+		// receive the transfer; a failed eviction transfers nothing, so retrying
+		// is safe. Keep this last: it moves the tso primary away.
+		testutil.Eventually(re, func() bool {
+			primary := cluster.GetDefaultTSOPrimaryServer()
+			if primary == nil {
+				return false
+			}
+			node := strings.TrimPrefix(primary.GetAddr(), "http://")
+			out, err := tests.ExecuteCommand(cmd, "-u", pdAddr, "microservice", "tso", "evict-primary", node)
+			return err == nil && strings.Contains(string(out), "success")
+		})
 	}
 }
 

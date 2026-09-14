@@ -33,9 +33,9 @@ func TestExtractKeyspaceID(t *testing.T) {
 		expected        uint32
 	}{
 		{nil, constant.NullKeyspaceID},
-		{&rmpb.KeyspaceIDValue{Value: 0}, 0},
-		{&rmpb.KeyspaceIDValue{Value: 1}, 1},
-		{&rmpb.KeyspaceIDValue{Value: math.MaxUint32}, math.MaxUint32},
+		{&rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: 0}}, 0},
+		{&rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: 1}}, 1},
+		{&rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: math.MaxUint32}}, math.MaxUint32},
 	}
 	for _, tc := range testCases {
 		re.Equal(tc.expected, ExtractKeyspaceID(tc.keyspaceIDValue))

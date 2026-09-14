@@ -21,6 +21,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	coreconstant "github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
@@ -132,6 +133,6 @@ func TestKeyspaceSplitMixRange(t *testing.T) {
 	sc := NewSplitChecker(cluster, ruleManager, regionLabeler)
 
 	re.True(keyspace.RegionSpansMultipleKeyspaces(startkey, endKey, sc.cluster.(checkGetter)))
-	keys := keyspace.GetKeyspaceSplitKeys(startkey, endKey, sc.cluster.(checkGetter))
+	keys := keyspace.GetKeyspaceSplitKeys(startkey, endKey, coreconstant.Raw, sc.cluster.(checkGetter))
 	re.NotEmpty(keys)
 }

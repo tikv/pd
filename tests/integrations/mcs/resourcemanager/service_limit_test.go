@@ -87,6 +87,8 @@ func (suite *serviceLimitTestSuite) SetupTest() {
 }
 
 func (suite *serviceLimitTestSuite) TearDownTest() {
+	suite.Require().NoError(suite.controller.Stop())
+	suite.client.Close()
 	suite.cancel()
 	suite.cluster.Destroy()
 }
@@ -114,9 +116,7 @@ func (suite *serviceLimitTestSuite) TestKeyspaceServiceLimit() {
 				ConsumptionSinceLastRequest: &rmpb.Consumption{
 					RRU: requestRU,
 				},
-				KeyspaceId: &rmpb.KeyspaceIDValue{
-					Value: suite.keyspaceID,
-				},
+				KeyspaceId: &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: suite.keyspaceID}},
 			},
 		},
 		TargetRequestPeriodMs: 1000,

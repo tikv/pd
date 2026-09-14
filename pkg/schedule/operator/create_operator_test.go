@@ -17,7 +17,9 @@ package operator
 import (
 	"context"
 	"encoding/hex"
+	"slices"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -27,6 +29,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/config"
@@ -316,7 +320,8 @@ func (suite *createOperatorTestSuite) TestCreateMergeRegionOperator() {
 		re.Equal(1, ops[1].Len())
 		re.Equal(MergeRegion{source.GetMeta(), target.GetMeta(), true}, ops[1].Step(0).(MergeRegion))
 
-		expectedSteps := append(testCase.prepareSteps, MergeRegion{source.GetMeta(), target.GetMeta(), false})
+		expectedSteps := slices.Clone(testCase.prepareSteps)
+		expectedSteps = append(expectedSteps, MergeRegion{source.GetMeta(), target.GetMeta(), false})
 		for i := range ops[0].Len() {
 			switch step := ops[0].Step(i).(type) {
 			case TransferLeader:
@@ -354,6 +359,43 @@ func (suite *createOperatorTestSuite) TestCreateMergeRegionOperator() {
 			}
 		}
 	}
+}
+
+func (suite *createOperatorTestSuite) TestCompositeOperatorLeaderLimit() {
+	re := suite.Require()
+	tc := suite.cluster
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	region := tc.GetRegion(1)
+	for _, id := range []uint64{2, 4} {
+		tc.SetStoreLimit(id, storelimit.TransferLeaderIn, 0.00006)
+		tc.ResetStoreLimit(id, storelimit.TransferLeaderIn, 0.000001)
+		re.True(tc.GetStore(id).GetStoreLimit().Take(storelimit.RegionInfluence[storelimit.TransferLeaderIn], storelimit.TransferLeaderIn, constant.Medium))
+	}
+	peer := &metapb.Peer{Id: 14, StoreId: 4}
+	op, err := CreateMoveLeaderOperator("test", tc, region, OpRegion, 1, peer)
+	re.Error(err)
+	re.Nil(op)
+
+	// Peer-only changes do not spend the leader-transfer budget.
+	op, err = CreateAddPeerOperator("test", tc, region, peer, OpRegion)
+	re.NoError(err)
+	influence := NewTotalOpInfluence([]*Operator{op}, tc.GetBasicCluster())
+	re.Zero(influence.GetStoreInfluence(4).GetStepCost(storelimit.TransferLeaderIn))
+
+	// Removing the leader can choose another follower with available budget.
+	op, err = CreateRemovePeerOperator("test", tc, OpRegion, region, 1)
+	re.NoError(err)
+	influence = NewTotalOpInfluence([]*Operator{op}, tc.GetBasicCluster())
+	re.Zero(influence.GetStoreInfluence(2).GetStepCost(storelimit.TransferLeaderIn))
+	re.Equal(storelimit.RegionInfluence[storelimit.TransferLeaderIn], influence.GetStoreInfluence(3).GetStepCost(storelimit.TransferLeaderIn))
+
+	tc.SetStoreLimit(4, storelimit.TransferLeaderIn, storelimit.Unlimited)
+	tc.ResetStoreLimit(4, storelimit.TransferLeaderIn, storelimit.Unlimited/time.Minute.Seconds())
+	op, err = CreateMoveLeaderOperator("test", tc, region, OpAdmin, 1, peer)
+	re.NoError(err)
+	re.Equal(constant.Urgent, op.GetPriorityLevel())
+	influence = NewTotalOpInfluence([]*Operator{op}, tc.GetBasicCluster())
+	re.Equal(storelimit.RegionInfluence[storelimit.TransferLeaderIn], influence.GetStoreInfluence(4).GetStepCost(storelimit.TransferLeaderIn))
 }
 
 func (suite *createOperatorTestSuite) TestCreateTransferLeaderOperator() {
@@ -450,6 +492,14 @@ func (suite *createOperatorTestSuite) TestCreateTransferLeaderOperator() {
 		default:
 			suite.T().Errorf("unexpected type: %s", step.String())
 		}
+	}
+	region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: testCases[0].originPeers}, testCases[0].originPeers[0])
+	suite.cluster.ResetStoreLimit(3, storelimit.TransferLeaderIn, 0.000001)
+	re.True(suite.cluster.GetStore(3).GetStoreLimit().Take(storelimit.RegionInfluence[storelimit.TransferLeaderIn], storelimit.TransferLeaderIn, constant.Medium))
+	for _, kind := range []OpKind{OpLeader, OpAdmin} {
+		op, err := CreateTransferLeaderOperator("test", suite.cluster, region, 3, nil, kind)
+		re.ErrorContains(err, "target leader is not allowed")
+		re.Nil(op)
 	}
 }
 
@@ -1187,6 +1237,38 @@ func (suite *createOperatorTestSuite) TestMoveRegionWithoutJointConsensus() {
 			}
 		}
 	}
+}
+
+func (suite *createOperatorTestSuite) TestNonAdminScatterDoesNotForceTargetLeader() {
+	re := suite.Require()
+	peers := []*metapb.Peer{
+		{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+		{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+		{Id: 10, StoreId: 10, Role: metapb.PeerRole_Voter},
+	}
+	region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers}, peers[0])
+	targetPeers := map[uint64]*metapb.Peer{
+		1:  peers[0],
+		2:  peers[1],
+		10: peers[2],
+	}
+
+	adminOp, err := CreateScatterRegionOperator("admin-scatter", suite.cluster, region, targetPeers, 10, false)
+	re.NoError(err)
+	re.NotNil(adminOp)
+	re.Equal(OpAdmin, adminOp.SchedulerKind())
+	re.Zero(adminOp.Kind() & OpSplitScatter)
+
+	nonAdminOp, err := CreateNonAdminScatterRegionOperator("internal-scatter", suite.cluster, region, targetPeers, 2, false)
+	re.NoError(err)
+	re.NotNil(nonAdminOp)
+	re.Equal(OpSplitScatter, nonAdminOp.SchedulerKind())
+	re.NotZero(nonAdminOp.Kind() & OpSplitScatter)
+
+	nonAdminOp, err = CreateNonAdminScatterRegionOperator("internal-scatter", suite.cluster, region, targetPeers, 10, false)
+	re.Error(err)
+	re.Nil(nonAdminOp)
+	re.Contains(err.Error(), "target leader is not allowed")
 }
 
 // Ref https://github.com/tikv/pd/issues/5401

@@ -15,8 +15,12 @@
 package keyspace
 
 import (
+	"context"
+	"encoding/hex"
 	"math"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -24,7 +28,11 @@ import (
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
 	"github.com/tikv/pd/pkg/codec"
+	coreconstant "github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/keyspace/constant"
+	"github.com/tikv/pd/pkg/schedule/labeler"
+	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
@@ -58,6 +66,49 @@ func TestValidateID(t *testing.T) {
 	for _, testCase := range testCases {
 		re.Equal(testCase.hasErr, validateID(testCase.id) != nil)
 	}
+}
+
+func TestMakeRegionBound(t *testing.T) {
+	re := require.New(t)
+	encodeKey := func(key []byte) []byte {
+		return []byte(codec.EncodeBytes(key))
+	}
+
+	regionBound := MakeRegionBound(0x010203)
+	re.Equal(encodeKey([]byte{'r', 0x01, 0x02, 0x03}), regionBound.RawLeftBound)
+	re.Equal(encodeKey([]byte{'r', 0x01, 0x02, 0x04}), regionBound.RawRightBound)
+	re.Equal(encodeKey([]byte{'x', 0x01, 0x02, 0x03}), regionBound.TxnLeftBound)
+	re.Equal(encodeKey([]byte{'x', 0x01, 0x02, 0x04}), regionBound.TxnRightBound)
+
+	carryRegionBound := MakeRegionBound(0x0102ff)
+	re.Equal(encodeKey([]byte{'r', 0x01, 0x03, 0x00}), carryRegionBound.RawRightBound)
+	re.Equal(encodeKey([]byte{'x', 0x01, 0x03, 0x00}), carryRegionBound.TxnRightBound)
+
+	maxRegionBound := MakeRegionBound(constant.MaxValidKeyspaceID)
+	re.Equal(encodeKey([]byte{'r', 0xff, 0xff, 0xff}), maxRegionBound.RawLeftBound)
+	re.Equal(encodeKey([]byte{'s', 0x00, 0x00, 0x00}), maxRegionBound.RawRightBound)
+	re.Equal(encodeKey([]byte{'x', 0xff, 0xff, 0xff}), maxRegionBound.TxnLeftBound)
+	re.Equal(encodeKey([]byte{'y', 0x00, 0x00, 0x00}), maxRegionBound.TxnRightBound)
+}
+
+func TestMaxKeyspaceLabelRuleSplitKeys(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil), time.Hour)
+	re.NoError(err)
+
+	re.NoError(regionLabeler.SetLabelRule(MakeTxnLabelRule(constant.MaxValidKeyspaceID)))
+	encodeKey := func(key []byte) []byte {
+		return []byte(codec.EncodeBytes(key))
+	}
+	re.Equal(
+		[][]byte{
+			encodeKey([]byte{'x', 0xff, 0xff, 0xff}),
+			encodeKey([]byte{'y', 0x00, 0x00, 0x00}),
+		},
+		regionLabeler.GetSplitKeys(nil, nil),
+	)
 }
 
 func TestValidateName(t *testing.T) {
@@ -139,69 +190,283 @@ func TestProtectedKeyspaceValidation(t *testing.T) {
 	}
 }
 
+func TestMakeLabelRule(t *testing.T) {
+	re := require.New(t)
+	testCases := []struct {
+		id                uint32
+		boundType         regionBoundType
+		expectedLabelRule *labeler.LabelRule
+	}{
+		{
+			id:        0,
+			boundType: txnRegionBound,
+			expectedLabelRule: &labeler.LabelRule{
+				ID:    "keyspaces/0",
+				Index: 0,
+				Labels: []labeler.RegionLabel{
+					{
+						Key:   "id",
+						Value: "0",
+					},
+				},
+				RuleType: "key-range",
+				Data: []any{
+					map[string]any{
+						"start_key": hex.EncodeToString(codec.EncodeBytes([]byte{'x', 0, 0, 0})),
+						"end_key":   hex.EncodeToString(codec.EncodeBytes([]byte{'x', 0, 0, 1})),
+					},
+				},
+			},
+		},
+		{
+			id:        4242,
+			boundType: txnRegionBound,
+			expectedLabelRule: &labeler.LabelRule{
+				ID:    "keyspaces/4242",
+				Index: 0,
+				Labels: []labeler.RegionLabel{
+					{
+						Key:   "id",
+						Value: "4242",
+					},
+				},
+				RuleType: "key-range",
+				Data: []any{
+					map[string]any{
+						"start_key": hex.EncodeToString(codec.EncodeBytes([]byte{'x', 0, 0x10, 0x92})),
+						"end_key":   hex.EncodeToString(codec.EncodeBytes([]byte{'x', 0, 0x10, 0x93})),
+					},
+				},
+			},
+		},
+		{
+			id:        4242,
+			boundType: rawRegionBound,
+			expectedLabelRule: &labeler.LabelRule{
+				ID:    "keyspaces/4242",
+				Index: 0,
+				Labels: []labeler.RegionLabel{
+					{
+						Key:   "id",
+						Value: "4242",
+					},
+				},
+				RuleType: "key-range",
+				Data: []any{
+					map[string]any{
+						"start_key": hex.EncodeToString(codec.EncodeBytes([]byte{'r', 0, 0x10, 0x92})),
+						"end_key":   hex.EncodeToString(codec.EncodeBytes([]byte{'r', 0, 0x10, 0x93})),
+					},
+				},
+			},
+		},
+	}
+	for _, testCase := range testCases {
+		re.Equal(testCase.expectedLabelRule, buildLabelRule(testCase.id, testCase.boundType))
+	}
+}
+
+func TestKeyTypeToRegionBoundType(t *testing.T) {
+	re := require.New(t)
+	re.Equal(rawRegionBound, keyTypeToRegionBoundType(coreconstant.Raw))
+	re.Equal(txnRegionBound, keyTypeToRegionBoundType(coreconstant.Table))
+	re.Equal(txnRegionBound, keyTypeToRegionBoundType(coreconstant.Txn))
+}
+
+func TestParseKeyspaceIDFromLabelRule(t *testing.T) {
+	re := require.New(t)
+	testCases := []struct {
+		labelRule  *labeler.LabelRule
+		expectedID uint32
+		expectedOK bool
+	}{
+		// Valid keyspace label rule.
+		{
+			labelRule:  MakeTxnLabelRule(1),
+			expectedID: 1,
+			expectedOK: true,
+		},
+		// Invalid keyspace label ID - unmatched prefix.
+		{
+			labelRule: &labeler.LabelRule{
+				ID:    "not-keyspaces/1",
+				Index: 0,
+				Labels: []labeler.RegionLabel{
+					{
+						Key:   constant.RegionLabelKey,
+						Value: "1",
+					},
+				},
+			},
+			expectedID: 0,
+			expectedOK: false,
+		},
+		// Invalid keyspace label ID - invalid keyspace ID.
+		{
+			labelRule: &labeler.LabelRule{
+				ID:    "keyspaces/id1",
+				Index: 0,
+				Labels: []labeler.RegionLabel{
+					{
+						Key:   constant.RegionLabelKey,
+						Value: "1",
+					},
+				},
+			},
+			expectedID: 0,
+			expectedOK: false,
+		},
+		{
+			labelRule: &labeler.LabelRule{
+				ID:    "keyspaces/1id",
+				Index: 0,
+				Labels: []labeler.RegionLabel{
+					{
+						Key:   constant.RegionLabelKey,
+						Value: "1",
+					},
+				},
+			},
+			expectedID: 0,
+			expectedOK: false,
+		},
+		// Invalid keyspace label ID - non-canonical keyspace ID.
+		{
+			labelRule: &labeler.LabelRule{
+				ID:     "keyspaces/01",
+				Labels: []labeler.RegionLabel{{Key: constant.RegionLabelKey, Value: "01"}},
+			},
+			expectedID: 0,
+			expectedOK: false,
+		},
+		// Invalid keyspace label ID - out of valid keyspace range.
+		{
+			labelRule: &labeler.LabelRule{
+				ID: "keyspaces/" + strconv.FormatUint(uint64(constant.MaxValidKeyspaceID)+1, 10),
+				Labels: []labeler.RegionLabel{
+					{
+						Key:   constant.RegionLabelKey,
+						Value: strconv.FormatUint(uint64(constant.MaxValidKeyspaceID)+1, 10),
+					},
+				},
+			},
+			expectedID: 0,
+			expectedOK: false,
+		},
+		// Invalid keyspace label ID - invalid keyspace ID label rule.
+		{
+			labelRule: &labeler.LabelRule{
+				ID:    getRegionLabelID(1),
+				Index: 0,
+				Labels: []labeler.RegionLabel{
+					{
+						Key:   "not-id",
+						Value: "1",
+					},
+				},
+			},
+			expectedID: 0,
+			expectedOK: false,
+		},
+		// Invalid keyspace zero label rule - missing keyspace ID label.
+		{
+			labelRule: &labeler.LabelRule{
+				ID: getRegionLabelID(0),
+				Labels: []labeler.RegionLabel{
+					{
+						Key:   "not-id",
+						Value: "0",
+					},
+				},
+			},
+			expectedID: 0,
+			expectedOK: false,
+		},
+		// Invalid keyspace label ID - unmatched keyspace ID with label rule.
+		{
+			labelRule: &labeler.LabelRule{
+				ID:    getRegionLabelID(1),
+				Index: 0,
+				Labels: []labeler.RegionLabel{
+					{
+						Key:   "id",
+						Value: "2",
+					},
+				},
+			},
+			expectedID: 0,
+			expectedOK: false,
+		},
+	}
+	for _, testCase := range testCases {
+		id, ok := ParseKeyspaceIDFromLabelRule(testCase.labelRule)
+		re.Equal(testCase.expectedID, id)
+		re.Equal(testCase.expectedOK, ok)
+	}
+}
+
 func TestExtractKeyspaceID(t *testing.T) {
 	re := require.New(t)
 	testCases := []struct {
 		name            string
 		key             []byte
 		expectedID      uint32
-		expectedKeyType KeyType
+		expectedKeyType regionBoundType
+		expectedOK      bool
 	}{
 		{
 			name:            "empty key",
 			key:             []byte{},
 			expectedID:      constant.MaxValidKeyspaceID,
-			expectedKeyType: KeyTypeTxn,
+			expectedKeyType: txnRegionBound,
+			expectedOK:      true,
 		},
 		{
 			name:            "keyspace 0 txn mode",
 			key:             MakeRegionBound(0).TxnLeftBound,
 			expectedID:      0,
-			expectedKeyType: KeyTypeTxn,
-		},
-		{
-			name:            "keyspace 100 txn mode",
-			key:             MakeRegionBound(100).TxnLeftBound,
-			expectedID:      100,
-			expectedKeyType: KeyTypeTxn,
+			expectedKeyType: txnRegionBound,
+			expectedOK:      true,
 		},
 		{
 			name:            "keyspace 4242 txn mode",
 			key:             MakeRegionBound(4242).TxnLeftBound,
 			expectedID:      4242,
-			expectedKeyType: KeyTypeTxn,
+			expectedKeyType: txnRegionBound,
+			expectedOK:      true,
 		},
 		{
 			name:            "keyspace 0 raw mode ",
 			key:             MakeRegionBound(0).RawLeftBound,
 			expectedID:      0,
-			expectedKeyType: KeyTypeRaw,
+			expectedKeyType: rawRegionBound,
+			expectedOK:      true,
 		},
 		{
 			name:            "keyspace 100 raw mode (not supported)",
 			key:             MakeRegionBound(100).RawLeftBound,
 			expectedID:      100,
-			expectedKeyType: KeyTypeRaw,
+			expectedKeyType: rawRegionBound,
+			expectedOK:      true,
 		},
 		{
-			name:            "non-keyspace key (table key)",
-			key:             codec.EncodeBytes([]byte{'t', 1, 2, 3}),
-			expectedID:      0,
-			expectedKeyType: KeyTypeUnknown,
+			name:       "non-keyspace key (table key)",
+			key:        codec.EncodeBytes([]byte{'t', 1, 2, 3}),
+			expectedOK: false,
 		},
 		{
-			name:            "short key",
-			key:             codec.EncodeBytes([]byte{'x'}),
-			expectedID:      0,
-			expectedKeyType: KeyTypeUnknown,
+			name:       "short key",
+			key:        codec.EncodeBytes([]byte{'x'}),
+			expectedOK: false,
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(_ *testing.T) {
-			id, kt := ExtractKeyspaceID(tc.key)
-			re.Equal(tc.expectedKeyType, kt, "test case: %s", tc.name)
-			if tc.expectedKeyType != KeyTypeUnknown {
+			id, kt, ok := ExtractKeyspaceID(tc.key)
+			re.Equal(tc.expectedOK, ok, "test case: %s", tc.name)
+			if tc.expectedOK {
+				re.Equal(tc.expectedKeyType, kt, "test case: %s", tc.name)
 				re.Equal(tc.expectedID, id, "test case: %s", tc.name)
 			}
 		})
@@ -324,22 +589,24 @@ func TestRegionSpansMultipleKeyspaces(t *testing.T) {
 			expectedResult: false,
 		},
 		{
+			name:           "start key is classical, end key has a valid keyspace id - ambiguous, should span",
+			startKey:       codec.EncodeBytes([]byte{'t', 1, 2, 3}),
+			endKey:         MakeRegionBound(100).TxnLeftBound,
+			checker:        allExistChecker,
+			expectedResult: true,
+		},
+		{
+			name:           "start key has a valid keyspace id, end key is classical - ambiguous, should span",
+			startKey:       MakeRegionBound(100).TxnLeftBound,
+			endKey:         codec.EncodeBytes([]byte{'t', 1, 2, 3}),
+			checker:        allExistChecker,
+			expectedResult: true,
+		},
+		{
 			name:           "span deleted keyspace but still cross two existing keyspaces - should span",
 			startKey:       MakeRegionBound(100).TxnLeftBound,
 			endKey:         MakeRegionBound(102).TxnRightBound,
 			checker:        specificChecker, // keyspace 102 doesn't exist
-			expectedResult: true,
-		},
-		{
-			name:     "empty end key with sparse existing keyspaces should span when crossing two existing",
-			startKey: MakeRegionBound(101).TxnLeftBound,
-			endKey:   []byte{},
-			checker: &mockKeyspaceChecker{
-				existingKeyspaces: map[uint32]bool{
-					101: true,
-					102: true,
-				},
-			},
 			expectedResult: true,
 		},
 		{
@@ -348,6 +615,23 @@ func TestRegionSpansMultipleKeyspaces(t *testing.T) {
 			endKey:         MakeRegionBound(101).TxnRightBound,
 			checker:        specificChecker, // both 100 and 101 exist
 			expectedResult: true,
+		},
+		{
+			// endKey absent: spans iff the start keyspace still exists. Not
+			// routed through KeyspaceExist(MaxValidKeyspaceID), so the result is
+			// the same for every checker implementation.
+			name:           "empty end key, start keyspace exists",
+			startKey:       MakeRegionBound(100).TxnLeftBound,
+			endKey:         []byte{},
+			checker:        specificChecker,
+			expectedResult: true,
+		},
+		{
+			name:           "empty end key, start keyspace deleted",
+			startKey:       MakeRegionBound(200).TxnLeftBound,
+			endKey:         []byte{},
+			checker:        specificChecker, // keyspace 200 does not exist
+			expectedResult: false,
 		},
 	}
 
@@ -381,29 +665,33 @@ func TestGetKeyspaceSplitKeys(t *testing.T) {
 		name              string
 		startKey          []byte
 		endKey            []byte
+		keyType           coreconstant.KeyType
 		checker           *mockKeyspaceChecker
 		expectedSplitKeys [][]byte
 	}{
 		{
-			name:              "non-keyspace keys should not split 99",
+			name:              "classical start before first keyspace",
 			startKey:          []byte{'t', 1, 2, 4},
 			endKey:            MakeRegionBound(99).TxnLeftBound,
+			keyType:           coreconstant.Txn,
 			checker:           specificChecker,
 			expectedSplitKeys: nil,
 		},
 		{
-			name:     "non-keyspace keys should not split",
+			name:     "raw range into classical tail",
 			startKey: MakeRegionBound(102).RawLeftBound,
 			endKey:   []byte{'t', 1, 2, 4},
+			keyType:  coreconstant.Raw,
 			checker:  specificChecker,
 			expectedSplitKeys: [][]byte{
 				MakeRegionBound(103).RawLeftBound,
 			},
 		},
 		{
-			name:     "non-keyspace keys should not split",
+			name:     "classical start into txn keyspace",
 			startKey: []byte{'t', 1, 2, 4},
 			endKey:   MakeRegionBound(102).TxnLeftBound,
+			keyType:  coreconstant.Txn,
 			checker:  specificChecker,
 			expectedSplitKeys: [][]byte{
 				MakeRegionBound(100).TxnLeftBound,
@@ -414,6 +702,7 @@ func TestGetKeyspaceSplitKeys(t *testing.T) {
 			name:     "split keys with sparse existing keyspaces",
 			startKey: MakeRegionBound(99).RawLeftBound,
 			endKey:   []byte{'t', 1, 2, 4},
+			keyType:  coreconstant.Raw,
 			checker:  specificChecker,
 			expectedSplitKeys: [][]byte{
 				MakeRegionBound(100).RawLeftBound,
@@ -426,6 +715,7 @@ func TestGetKeyspaceSplitKeys(t *testing.T) {
 			name:     "span two keyspaces txn mode",
 			startKey: MakeRegionBound(100).TxnLeftBound,
 			endKey:   MakeRegionBound(101).TxnRightBound,
+			keyType:  coreconstant.Txn,
 			checker:  allExistChecker,
 			expectedSplitKeys: [][]byte{
 				MakeRegionBound(100).TxnRightBound,
@@ -435,6 +725,7 @@ func TestGetKeyspaceSplitKeys(t *testing.T) {
 			name:     "span two keyspaces raw mode",
 			startKey: MakeRegionBound(100).RawLeftBound,
 			endKey:   MakeRegionBound(101).RawRightBound,
+			keyType:  coreconstant.Raw,
 			checker:  allExistChecker,
 			expectedSplitKeys: [][]byte{
 				MakeRegionBound(100).RawRightBound,
@@ -444,6 +735,7 @@ func TestGetKeyspaceSplitKeys(t *testing.T) {
 			name:              "same keyspace txn mode",
 			startKey:          MakeRegionBound(100).TxnLeftBound,
 			endKey:            MakeRegionBound(100).TxnRightBound,
+			keyType:           coreconstant.Txn,
 			checker:           allExistChecker,
 			expectedSplitKeys: nil,
 		},
@@ -451,6 +743,7 @@ func TestGetKeyspaceSplitKeys(t *testing.T) {
 			name:              "same keyspace raw mode",
 			startKey:          MakeRegionBound(100).RawLeftBound,
 			endKey:            MakeRegionBound(100).RawRightBound,
+			keyType:           coreconstant.Raw,
 			checker:           allExistChecker,
 			expectedSplitKeys: nil,
 		},
@@ -458,33 +751,32 @@ func TestGetKeyspaceSplitKeys(t *testing.T) {
 			name:     "adjacent range with one keyspace",
 			startKey: MakeRegionBound(101).TxnLeftBound,
 			endKey:   MakeRegionBound(102).TxnRightBound,
+			keyType:  coreconstant.Txn,
 			checker:  oneExistChecker,
 			expectedSplitKeys: [][]byte{
 				MakeRegionBound(101).TxnRightBound,
 			},
 		},
 		{
-			name:     "empty start and end key with one exist",
+			name:     "empty start and end key, raw mode, three exist",
 			startKey: []byte{},
 			endKey:   []byte{},
-			checker:  oneExistChecker,
-			expectedSplitKeys: [][]byte{
-				MakeRegionBound(101).RawLeftBound,
-				MakeRegionBound(101).RawRightBound,
-				MakeRegionBound(101).TxnLeftBound,
-				MakeRegionBound(101).TxnRightBound,
-			},
-		},
-		{
-			name:     "empty start and end key with three exist",
-			startKey: []byte{},
-			endKey:   []byte{},
+			keyType:  coreconstant.Raw,
 			checker:  specificChecker,
 			expectedSplitKeys: [][]byte{
 				MakeRegionBound(100).RawLeftBound,
 				MakeRegionBound(101).RawLeftBound,
 				MakeRegionBound(102).RawLeftBound,
 				MakeRegionBound(103).RawLeftBound,
+			},
+		},
+		{
+			name:     "empty start and end key, txn mode, three exist",
+			startKey: []byte{},
+			endKey:   []byte{},
+			keyType:  coreconstant.Txn,
+			checker:  specificChecker,
+			expectedSplitKeys: [][]byte{
 				MakeRegionBound(100).TxnLeftBound,
 				MakeRegionBound(101).TxnLeftBound,
 				MakeRegionBound(102).TxnLeftBound,
@@ -492,25 +784,10 @@ func TestGetKeyspaceSplitKeys(t *testing.T) {
 			},
 		},
 		{
-			name:              "not keys with no keyspace key",
+			name:              "no keyspace key on either side",
 			startKey:          []byte{'t', 1, 2, 3},
 			endKey:            []byte{'t', 1, 2, 4},
-			checker:           specificChecker,
-			expectedSplitKeys: nil,
-		},
-		{
-			name:     "span two keyspaces mix mode",
-			startKey: MakeRegionBound(102).RawLeftBound,
-			endKey:   MakeRegionBound(102).TxnLeftBound,
-			checker:  specificChecker,
-			expectedSplitKeys: [][]byte{
-				MakeRegionBound(103).RawLeftBound,
-			},
-		},
-		{
-			name:              "span two keyspaces mix mode with latest keyspace",
-			startKey:          MakeRegionBound(103).RawLeftBound,
-			endKey:            MakeRegionBound(103).TxnLeftBound,
+			keyType:           coreconstant.Txn,
 			checker:           specificChecker,
 			expectedSplitKeys: nil,
 		},
@@ -518,20 +795,35 @@ func TestGetKeyspaceSplitKeys(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(_ *testing.T) {
-			splitKeys := GetKeyspaceSplitKeys(tc.startKey, tc.endKey, tc.checker)
+			splitKeys := GetKeyspaceSplitKeys(tc.startKey, tc.endKey, tc.keyType, tc.checker)
 			re.Equal(tc.expectedSplitKeys, splitKeys, "test case: %s", tc.name)
 		})
 	}
 }
 
-func TestKeyspaceCache(t *testing.T) {
+func TestKeyspaceExists(t *testing.T) {
 	re := require.New(t)
 	cache := NewCache()
 
 	cache.Save(100, "ks-100", keyspacepb.KeyspaceState_ENABLED)
 	cache.Save(101, "ks-101", keyspacepb.KeyspaceState_ARCHIVED)
 	cache.Save(102, "ks-102", keyspacepb.KeyspaceState_DISABLED)
-	cache.Save(103, "ks-102", keyspacepb.KeyspaceState_TOMBSTONE)
+	cache.Save(103, "ks-103", keyspacepb.KeyspaceState_TOMBSTONE)
+
+	re.True(cache.KeyspaceExist(100))
+	re.True(cache.KeyspaceExist(101))
+	re.True(cache.KeyspaceExist(102))
+	re.False(cache.KeyspaceExist(103))
+}
+
+func TestGetKeyspaceIDInRange(t *testing.T) {
+	re := require.New(t)
+	cache := NewCache()
+
+	cache.Save(100, "ks-100", keyspacepb.KeyspaceState_ENABLED)
+	cache.Save(101, "ks-101", keyspacepb.KeyspaceState_ARCHIVED)
+	cache.Save(102, "ks-102", keyspacepb.KeyspaceState_DISABLED)
+	cache.Save(103, "ks-103", keyspacepb.KeyspaceState_TOMBSTONE)
 
 	item, ok := cache.getKeyspaceByID(101)
 	re.True(ok)
@@ -552,6 +844,7 @@ func TestKeyspaceCache(t *testing.T) {
 	}
 	re.Equal([]uint32{100, 101, 102, 103}, all())
 
+	// 103 is tombstone, so it should not be returned.
 	ids, ok := cache.GetKeyspaceIDInRange(100, 103, 1)
 	re.True(ok)
 	re.Equal([]uint32{102}, ids)
@@ -560,15 +853,18 @@ func TestKeyspaceCache(t *testing.T) {
 	re.True(ok)
 	re.Equal([]uint32{102}, ids)
 
+	// 102 is tombstone, so it returns nothings.
 	ids, ok = cache.GetKeyspaceIDInRange(103, 104, 1)
 	re.False(ok)
 	re.Empty(ids)
 
+	// Delete 101 and check the cache again.
 	cache.DeleteKeyspace(101)
 	_, ok = cache.getKeyspaceByID(101)
 	re.False(ok)
 	re.Equal([]uint32{100, 102, 103}, all())
 
+	// the order of returned keyspace IDs should be descending.
 	ids, ok = cache.GetKeyspaceIDInRange(100, 103, 5)
 	re.True(ok)
 	re.Len(ids, 2)

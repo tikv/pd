@@ -27,11 +27,10 @@ import (
 
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/pkg/retry"
-	"github.com/tikv/pd/client/pkg/utils/testutil"
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(m)
 }
 
 func TestPDAllowFollowerHandleHeader(t *testing.T) {

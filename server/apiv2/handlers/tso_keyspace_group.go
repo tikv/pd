@@ -22,6 +22,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
@@ -33,8 +34,11 @@ import (
 	"github.com/tikv/pd/server/apiv2/middlewares"
 )
 
-// GroupManagerUninitializedErr is the error message for uninitialized keyspace group manager.
-const GroupManagerUninitializedErr = "keyspace group manager is not initialized"
+const (
+	// GroupManagerUninitializedErr is the error message for uninitialized keyspace group manager.
+	GroupManagerUninitializedErr = "keyspace group manager is not initialized"
+	hideKeyspacesQueryName       = "hide_keyspaces"
+)
 
 // RegisterTSOKeyspaceGroup registers keyspace group handlers to the server.
 func RegisterTSOKeyspaceGroup(r *gin.RouterGroup) {
@@ -51,6 +55,7 @@ func RegisterTSOKeyspaceGroup(r *gin.RouterGroup) {
 	router.DELETE("/:id/split", FinishSplitKeyspaceByID)
 	router.POST("/:id/merge", MergeKeyspaceGroups)
 	router.DELETE("/:id/merge", FinishMergeKeyspaceByID)
+	router.DELETE("/:id/keyspaces", RemoveKeyspacesFromGroup)
 }
 
 // CreateKeyspaceGroupParams defines the params for creating keyspace groups.
@@ -95,6 +100,18 @@ func CreateKeyspaceGroups(c *gin.Context) {
 
 // GetKeyspaceGroups gets keyspace groups from the start ID with limit.
 // If limit is 0, it will load all keyspace groups from the start ID.
+//
+//	@Tags		swagger,tso-keyspace-groups
+//	@Summary	Get keyspace groups.
+//	@Param		page_token		query	string	false	"The keyspace group ID to start scanning from."
+//	@Param		limit			query	string	false	"The maximum number of keyspace groups to return."
+//	@Param		state			query	string	false	"Filter keyspace groups by state: merge or split."
+//	@Param		hide_keyspaces	query	bool	false	"Whether to omit the keyspace IDs from the response."	default(false)
+//	@Produce	json
+//	@Success	200	{array}		endpoint.KeyspaceGroup
+//	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/tso/keyspace-groups [get]
 func GetKeyspaceGroups(c *gin.Context) {
 	scanStart, scanLimit, err := parseLoadAllQuery(c)
 	if err != nil {
@@ -136,7 +153,7 @@ func GetKeyspaceGroups(c *gin.Context) {
 		kgs = keyspaceGroups
 	}
 
-	c.IndentedJSON(http.StatusOK, kgs)
+	c.IndentedJSON(http.StatusOK, newKeyspaceGroupsResponse(kgs, hideKeyspaces(c)))
 }
 
 // GetKeyspaceGroupPrimaryResponse defines the response for getting primary node of keyspace group.
@@ -146,6 +163,16 @@ type GetKeyspaceGroupPrimaryResponse struct {
 }
 
 // GetKeyspaceGroupByID gets keyspace group by ID.
+//
+//	@Tags		swagger,tso-keyspace-groups
+//	@Summary	Get a keyspace group by ID.
+//	@Param		id				path	uint32	true	"Keyspace group ID."
+//	@Param		hide_keyspaces	query	bool	false	"Whether to omit the keyspace IDs from the response."	default(false)
+//	@Produce	json
+//	@Success	200	{object}	endpoint.KeyspaceGroup
+//	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/tso/keyspace-groups/{id} [get]
 func GetKeyspaceGroupByID(c *gin.Context) {
 	id, err := validateKeyspaceGroupID(c)
 	if err != nil {
@@ -179,7 +206,45 @@ func GetKeyspaceGroupByID(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.IndentedJSON(http.StatusOK, kg)
+	c.IndentedJSON(http.StatusOK, newKeyspaceGroupResponse(kg, hideKeyspaces(c)))
+}
+
+type keyspaceGroupResponse struct {
+	ID         uint32                         `json:"id"`
+	UserKind   string                         `json:"user-kind"`
+	SplitState *endpoint.SplitState           `json:"split-state,omitempty"`
+	MergeState *endpoint.MergeState           `json:"merge-state,omitempty"`
+	Members    []endpoint.KeyspaceGroupMember `json:"members"`
+	Keyspaces  *[]uint32                      `json:"keyspaces,omitempty"`
+}
+
+func newKeyspaceGroupsResponse(kgs []*endpoint.KeyspaceGroup, hideKeyspaces bool) []*keyspaceGroupResponse {
+	resp := make([]*keyspaceGroupResponse, 0, len(kgs))
+	for _, kg := range kgs {
+		resp = append(resp, newKeyspaceGroupResponse(kg, hideKeyspaces))
+	}
+	return resp
+}
+
+func newKeyspaceGroupResponse(kg *endpoint.KeyspaceGroup, hideKeyspaces bool) *keyspaceGroupResponse {
+	if kg == nil {
+		return nil
+	}
+	resp := &keyspaceGroupResponse{
+		ID:         kg.ID,
+		UserKind:   kg.UserKind,
+		SplitState: kg.SplitState,
+		MergeState: kg.MergeState,
+		Members:    kg.Members,
+	}
+	if !hideKeyspaces {
+		resp.Keyspaces = &kg.Keyspaces
+	}
+	return resp
+}
+
+func hideKeyspaces(c *gin.Context) bool {
+	return strings.ToLower(c.Query(hideKeyspacesQueryName)) == "true"
 }
 
 // DeleteKeyspaceGroupByID deletes keyspace group by ID.
@@ -198,6 +263,10 @@ func DeleteKeyspaceGroupByID(c *gin.Context) {
 	}
 	kg, err := manager.DeleteKeyspaceGroupByID(id)
 	if err != nil {
+		if errs.ErrModifyDefaultKeyspaceGroup.Equal(err) {
+			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
+			return
+		}
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -557,4 +626,94 @@ func parseNodeAddress(c *gin.Context) (string, error) {
 
 func isValid(id uint32) bool {
 	return id >= constant.DefaultKeyspaceGroupID && id <= mcs.MaxKeyspaceGroupCountInUse
+}
+
+// RemoveKeyspacesFromGroupParams defines the params for removing keyspaces from a keyspace group.
+type RemoveKeyspacesFromGroupParams struct {
+	Keyspaces []uint32 `json:"keyspaces"`
+}
+
+// RemoveKeyspacesFromGroup removes the specified keyspaces from the given keyspace group.
+// Keyspaces in archived or tombstone state will be removed. Keyspaces not in the group will be skipped.
+func RemoveKeyspacesFromGroup(c *gin.Context) {
+	// Parse and validate group ID
+	groupID, err := validateKeyspaceGroupID(c)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid keyspace group id")
+		return
+	}
+
+	// Parse request body
+	var params RemoveKeyspacesFromGroupParams
+	if err := c.BindJSON(&params); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
+		return
+	}
+
+	if len(params.Keyspaces) == 0 {
+		c.AbortWithStatusJSON(http.StatusBadRequest, "keyspaces list cannot be empty")
+		return
+	}
+
+	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
+	keyspaceManager := svr.GetKeyspaceManager()
+	if keyspaceManager == nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, managerUninitializedErr)
+		return
+	}
+
+	groupManager := svr.GetKeyspaceGroupManager()
+	if groupManager == nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, GroupManagerUninitializedErr)
+		return
+	}
+
+	// Filter keyspaces: only keep those in ARCHIVED or TOMBSTONE state
+	var validKeyspaces []uint32
+	for _, keyspaceID := range params.Keyspaces {
+		// Load the keyspace meta to check its state
+		keyspaceMeta, err := keyspaceManager.LoadKeyspaceByID(keyspaceID)
+		if err != nil {
+			// Skip if keyspace doesn't exist
+			if errors.ErrorEqual(err, errs.ErrKeyspaceNotFound) {
+				continue
+			}
+			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		// Check if the keyspace is in archived or tombstone state
+		state := keyspaceMeta.GetState()
+		if state == keyspacepb.KeyspaceState_ARCHIVED || state == keyspacepb.KeyspaceState_TOMBSTONE {
+			validKeyspaces = append(validKeyspaces, keyspaceID)
+		}
+	}
+
+	// If no valid keyspaces to remove, load and return the group without modification
+	if len(validKeyspaces) == 0 {
+		kg, err := groupManager.GetKeyspaceGroupByID(groupID)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+			return
+		}
+		if kg == nil {
+			c.AbortWithStatusJSON(http.StatusNotFound, errs.ErrKeyspaceGroupNotExists.FastGenByArgs(groupID).Error())
+			return
+		}
+		c.IndentedJSON(http.StatusOK, kg)
+		return
+	}
+
+	// Remove the keyspaces from the keyspace group
+	kg, err := groupManager.RemoveKeyspacesFromGroup(groupID, keyspaceManager, validKeyspaces)
+	if err != nil {
+		if errs.ErrKeyspaceGroupNotExists.Equal(err) {
+			c.AbortWithStatusJSON(http.StatusNotFound, err.Error())
+			return
+		}
+		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	c.IndentedJSON(http.StatusOK, kg)
 }

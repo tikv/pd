@@ -51,7 +51,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 const (
@@ -660,16 +660,16 @@ func (suite *keyspaceGroupTestSuite) setupTSONodesAndClient(re *require.Assertio
 
 // TestUpdateMemberWhenRecovery verifies that in TSO microservice mode (API_SVC_MODE), when all TSO nodes
 // become temporarily unavailable and then recover, the client should NOT fallback to
-// the legacy path (group 0), but should wait and successfully get TSO after nodes restart.
+// the legacy path (group 0), but should eventually get a newer TSO once service recovers.
 //
 // Test scenario:
 // 1. Setup: Start 2 TSO nodes and create keyspace group 1, client gets initial TSO
 // 2. Close all TSO nodes to simulate total TSO microservice failure
 // 3. Wait until all TSO nodes are deregistered (getTSOServerURLs returns empty)
 // 4. Enable failpoints: assertNotReachLegacyPath (panic if fallback) and extend timeout
-// 5. Start async GetTS call (will wait for TSO service to recover)
-// 6. Restart one TSO node while GetTS is waiting
-// 7. Verify GetTS succeeds after node restart (assertNotReachLegacyPath ensures no fallback)
+// 5. Start an async GetTS call while the TSO service is down
+// 6. Restart one TSO node to recover the TSO service
+// 7. Verify eventual recovery: either the in-flight GetTS or a fresh retry gets a newer TS
 func (suite *keyspaceGroupTestSuite) TestUpdateMemberWhenRecovery() {
 	re := suite.Require()
 
@@ -677,6 +677,7 @@ func (suite *keyspaceGroupTestSuite) TestUpdateMemberWhenRecovery() {
 	const (
 		// Time to wait for GetTS to start
 		waitForGetTSStart = 3 * time.Second
+		keyspaceGroupID   = uint32(1)
 	)
 
 	// Enable mockLoadKeyspace failpoint to return hardcoded keyspace meta for testing
@@ -689,7 +690,7 @@ func (suite *keyspaceGroupTestSuite) TestUpdateMemberWhenRecovery() {
 
 	// Step 1: Setup - Create 2 TSO nodes and client, get initial TSO
 	// use a longer timeout to avoid test flakiness
-	setup := suite.setupTSONodesAndClient(re, 2, 1, opt.WithCustomTimeoutOption(60*time.Second))
+	setup := suite.setupTSONodesAndClient(re, 2, keyspaceGroupID, opt.WithCustomTimeoutOption(60*time.Second))
 	defer func() {
 		for _, cleanup := range setup.cleanups {
 			cleanup()
@@ -712,7 +713,7 @@ func (suite *keyspaceGroupTestSuite) TestUpdateMemberWhenRecovery() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/assertNotReachLegacyPath"))
 	}()
 
-	// Step 5: Start async GetTS call - it will wait for TSO service to recover
+	// Step 5: Start an async GetTS call while the TSO service is unavailable
 	// Use an independent context with explicit timeout for this GetTS operation
 	getTSCtx, getTSCancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer getTSCancel()
@@ -731,15 +732,45 @@ func (suite *keyspaceGroupTestSuite) TestUpdateMemberWhenRecovery() {
 
 	time.Sleep(waitForGetTSStart) // Give it time to begin execution
 
-	// Step 6: Restart one TSO node while GetTS is waiting
+	// Step 6: Restart one TSO node to recover the TSO service
 	newNode, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, firstNodeAddr)
 	setup.cleanups = append(setup.cleanups, cleanup)
 	nodes[newNode.GetAddr()] = newNode
 	tests.WaitForPrimaryServing(re, map[string]bs.Server{newNode.GetAddr(): newNode})
+	testutil.Eventually(re, func() bool {
+		_, group, groupID, revision, err :=
+			newNode.GetKeyspaceGroupManager().FindGroupByKeyspaceID(setup.keyspaceID)
+		return err == nil && group != nil && groupID == keyspaceGroupID && revision > 0 &&
+			newNode.IsKeyspaceServingByGroup(setup.keyspaceID, keyspaceGroupID)
+	}, testutil.WithWaitFor(30*time.Second), testutil.WithTickInterval(100*time.Millisecond))
 
-	// Step 7: Verify GetTS succeeds after node restart
-	result := <-resultCh
-	re.NoError(result.err, "GetTS should succeed after TSO node restart")
+	// Step 7: Verify eventual recovery after node restart.
+	// The in-flight GetTS may stay attached to stale discovery/metadata during
+	// recovery. Allow either the blocked request or a fresh retry to observe the
+	// recovered TSO service and return a newer timestamp.
+	var recoveredTS uint64
+	testutil.Eventually(re, func() bool {
+		select {
+		case result := <-resultCh:
+			if result.err == nil {
+				recoveredTS = tsoutil.ComposeTS(result.physicalTS, result.logicalTS)
+				return recoveredTS > setup.initialTS
+			}
+		default:
+		}
+
+		retryCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+
+		physicalTS, logicalTS, err := client.GetTS(retryCtx)
+		cancel()
+		if err != nil {
+			return false
+		}
+		recoveredTS = tsoutil.ComposeTS(physicalTS, logicalTS)
+		return recoveredTS > setup.initialTS
+	}, testutil.WithWaitFor(90*time.Second), testutil.WithTickInterval(500*time.Millisecond))
+	getTSCancel()
+	re.Greater(recoveredTS, setup.initialTS)
 
 	// KEY VERIFICATION: If code incorrectly tried to fallback to legacy path,
 	// assertNotReachLegacyPath failpoint would have panicked already

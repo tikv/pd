@@ -19,17 +19,20 @@ import (
 	"fmt"
 	"math"
 	"math/rand/v2"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/log"
 
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/clients/tso"
@@ -37,6 +40,7 @@ import (
 	"github.com/tikv/pd/client/pkg/caller"
 	sd "github.com/tikv/pd/client/servicediscovery"
 	bs "github.com/tikv/pd/pkg/basicserver"
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -51,7 +55,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 type tsoClientTestSuite struct {
@@ -221,7 +225,7 @@ func (suite *tsoClientTestSuite) TearDownSuite() {
 }
 
 func (suite *tsoClientTestSuite) TestGetTS() {
-	re := suite.Require()
+	as := assert.New(suite.T())
 	var wg sync.WaitGroup
 	wg.Add(tsoRequestConcurrencyNumber * len(suite.clients))
 	for range tsoRequestConcurrencyNumber {
@@ -231,9 +235,13 @@ func (suite *tsoClientTestSuite) TestGetTS() {
 				var lastTS uint64
 				for range tsoRequestRound {
 					physical, logical, err := client.GetTS(suite.ctx)
-					re.NoError(err)
+					if !as.NoError(err) {
+						return
+					}
 					ts := tsoutil.ComposeTS(physical, logical)
-					re.Less(lastTS, ts)
+					if !as.Less(lastTS, ts) {
+						return
+					}
 					lastTS = ts
 				}
 			}(client)
@@ -243,7 +251,7 @@ func (suite *tsoClientTestSuite) TestGetTS() {
 }
 
 func (suite *tsoClientTestSuite) TestGetTSAsync() {
-	re := suite.Require()
+	as := assert.New(suite.T())
 	var wg sync.WaitGroup
 	wg.Add(tsoRequestConcurrencyNumber * len(suite.clients))
 	for range tsoRequestConcurrencyNumber {
@@ -257,9 +265,13 @@ func (suite *tsoClientTestSuite) TestGetTSAsync() {
 				var lastTS uint64 = math.MaxUint64
 				for j := len(tsFutures) - 1; j >= 0; j-- {
 					physical, logical, err := tsFutures[j].Wait()
-					re.NoError(err)
+					if !as.NoError(err) {
+						return
+					}
 					ts := tsoutil.ComposeTS(physical, logical)
-					re.Greater(lastTS, ts)
+					if !as.Greater(lastTS, ts) {
+						return
+					}
 					lastTS = ts
 				}
 			}(client)
@@ -300,6 +312,7 @@ func (suite *tsoClientTestSuite) TestDiscoverTSOServiceWithLegacyPath() {
 
 // TestGetMinTS tests the correctness of GetMinTS.
 func (suite *tsoClientTestSuite) TestGetMinTS() {
+	as := assert.New(suite.T())
 	re := suite.Require()
 	var wg sync.WaitGroup
 	wg.Add(tsoRequestConcurrencyNumber * len(suite.clients))
@@ -310,9 +323,13 @@ func (suite *tsoClientTestSuite) TestGetMinTS() {
 				var lastMinTS uint64
 				for range tsoRequestRound {
 					physical, logical, err := client.GetMinTS(suite.ctx)
-					re.NoError(err)
+					if !as.NoError(err) {
+						return
+					}
 					minTS := tsoutil.ComposeTS(physical, logical)
-					re.Less(lastMinTS, minTS)
+					if !as.Less(lastMinTS, minTS) {
+						return
+					}
 					lastMinTS = minTS
 
 					// Now we check whether the returned ts is the minimum one
@@ -320,9 +337,13 @@ func (suite *tsoClientTestSuite) TestGetMinTS() {
 					// less than the new timestamps of all keyspace groups.
 					for _, client := range suite.clients {
 						physical, logical, err := client.GetTS(suite.ctx)
-						re.NoError(err)
+						if !as.NoError(err) {
+							return
+						}
 						ts := tsoutil.ComposeTS(physical, logical)
-						re.Less(minTS, ts)
+						if !as.Less(minTS, ts) {
+							return
+						}
 					}
 				}
 			}(client)
@@ -384,6 +405,7 @@ func (suite *tsoClientTestSuite) TestUpdateAfterResetTSO() {
 }
 
 func (suite *tsoClientTestSuite) TestRandomResignLeader() {
+	as := assert.New(suite.T())
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
 	defer func() {
@@ -397,7 +419,7 @@ func (suite *tsoClientTestSuite) TestRandomResignLeader() {
 		n := rand.IntN(2) + 3
 		time.Sleep(time.Duration(n) * time.Second)
 		if !suite.legacy {
-			wg := sync.WaitGroup{}
+			wg := &sync.WaitGroup{}
 			// Select the first keyspace from all keyspace groups. We need to make sure the selected
 			// keyspaces are from different keyspace groups, otherwise multiple goroutines below could
 			// try to resign the primary of the same keyspace group and cause race condition.
@@ -415,47 +437,96 @@ func (suite *tsoClientTestSuite) TestRandomResignLeader() {
 				go func(keyspaceID uint32) {
 					defer wg.Done()
 					keyspaceGroupID := keyspaceGroups[keyspaceID]
-					suite.tsoCluster.WaitForPrimaryServing(re, keyspaceID, keyspaceGroupID)
+					if !testutil.EventuallyWithAssert(as, func() bool {
+						return suite.tsoCluster.GetPrimaryServer(keyspaceID, keyspaceGroupID) != nil
+					}, testutil.WithWaitFor(30*time.Second), testutil.WithTickInterval(100*time.Millisecond)) {
+						return
+					}
 					err := suite.tsoCluster.ResignPrimary(keyspaceID, keyspaceGroupID)
-					re.NoError(err)
-					suite.tsoCluster.WaitForPrimaryServing(re, keyspaceID, keyspaceGroupID)
+					if !as.NoError(err) {
+						return
+					}
+					if !testutil.EventuallyWithAssert(as, func() bool {
+						return suite.tsoCluster.GetPrimaryServer(keyspaceID, keyspaceGroupID) != nil
+					}, testutil.WithWaitFor(30*time.Second), testutil.WithTickInterval(100*time.Millisecond)) {
+						return
+					}
 				}(keyspaceID)
 			}
 			wg.Wait()
 		} else {
 			err := suite.cluster.ResignLeader()
-			re.NoError(err)
+			if !as.NoError(err) { //nolint:testifylint // parallelAct runs in a worker goroutine, where require is unsafe.
+				return
+			}
 			suite.cluster.WaitLeader()
 		}
 		time.Sleep(time.Duration(n) * time.Second)
 	}
 
-	utils.CheckMultiKeyspacesTSO(suite.ctx, re, suite.clients, parallelAct)
+	utils.CheckMultiKeyspacesTSO(suite.ctx, as, suite.clients, parallelAct)
 }
 
 func (suite *tsoClientTestSuite) TestRandomShutdown() {
+	as := assert.New(suite.T())
 	re := suite.Require()
-
-	parallelAct := func() {
-		// After https://github.com/tikv/pd/issues/6376 is fixed, we can use a smaller number here.
-		// currently, the time to discover tso service is usually a little longer than 1s, compared
-		// to the previous time taken < 1s.
-		n := rand.IntN(2) + 3
-		time.Sleep(time.Duration(n) * time.Second)
-		if !suite.legacy {
-			suite.tsoCluster.WaitForDefaultPrimaryServing(re).Close()
-		} else {
-			suite.cluster.GetLeaderServer().GetServer().Close()
-		}
-		time.Sleep(time.Duration(n) * time.Second)
+	var closedTSOAddr string
+	if !suite.legacy {
+		defer func() {
+			if closedTSOAddr == "" {
+				return
+			}
+			re.NoError(suite.tsoCluster.AddServer(closedTSOAddr))
+		}()
 	}
 
-	utils.CheckMultiKeyspacesTSO(suite.ctx, re, suite.clients, parallelAct)
+	parallelAct := func() {
+		if !suite.legacy {
+			keyspaceID := keyspace.GetBootstrapKeyspaceID()
+			primary := suite.tsoCluster.GetPrimaryServer(keyspaceID, constant.DefaultKeyspaceGroupID)
+			if !testutil.EventuallyWithAssert(as, func() bool {
+				primary = suite.tsoCluster.GetPrimaryServer(keyspaceID, constant.DefaultKeyspaceGroupID)
+				return primary != nil
+			}, testutil.WithWaitFor(30*time.Second), testutil.WithTickInterval(100*time.Millisecond)) {
+				return
+			}
+			closedTSOAddr = primary.GetAddr()
+			primary.Close()
+			if !testutil.EventuallyWithAssert(as, func() bool {
+				return suite.tsoCluster.GetPrimaryServer(keyspaceID, constant.DefaultKeyspaceGroupID) != nil
+			}, testutil.WithWaitFor(30*time.Second), testutil.WithTickInterval(100*time.Millisecond)) {
+				return
+			}
+			for _, client := range suite.clients {
+				if !testutil.EventuallyWithAssert(as, func() bool {
+					_, _, err := client.GetTS(suite.ctx)
+					return err == nil
+				}) {
+					return
+				}
+			}
+		} else {
+			// After https://github.com/tikv/pd/issues/6376 is fixed, we can use a smaller number here.
+			// currently, the time to discover tso service is usually a little longer than 1s, compared
+			// to the previous time taken < 1s.
+			n := rand.IntN(2) + 3
+			time.Sleep(time.Duration(n) * time.Second)
+			suite.cluster.GetLeaderServer().GetServer().Close()
+			time.Sleep(time.Duration(n) * time.Second)
+		}
+	}
+
+	utils.CheckMultiKeyspacesTSO(suite.ctx, as, suite.clients, parallelAct)
+	if !suite.legacy {
+		re.NotEmpty(closedTSOAddr)
+		return
+	}
 	suite.TearDownSuite()
 	suite.SetupSuite()
 }
 
 func (suite *tsoClientTestSuite) TestGetTSWhileResettingTSOClient() {
+	as := assert.New(suite.T())
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/clients/tso/delayDispatchTSORequest", "return(true)"))
 	var (
@@ -472,10 +543,14 @@ func (suite *tsoClientTestSuite) TestGetTSWhileResettingTSOClient() {
 				for !stopSignal.Load() {
 					physical, logical, err := client.GetTS(suite.ctx)
 					if err != nil {
-						re.ErrorContains(err, context.Canceled.Error())
+						if !as.ErrorContains(err, context.Canceled.Error()) {
+							return
+						}
 					} else {
 						ts := tsoutil.ComposeTS(physical, logical)
-						re.Less(lastTS, ts)
+						if !as.Less(lastTS, ts) {
+							return
+						}
 						lastTS = ts
 					}
 				}
@@ -499,26 +574,80 @@ func (suite *tsoClientTestSuite) TestTSONotLeaderWhenRebaseErr() {
 		suite.T().Skip("skipping test in microservice mode")
 	}
 	re := suite.Require()
-	pdClient := suite.clients[0]
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/rebaseErr", "return(true)"))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/skipRetry", "return(true)"))
-	// Resign the leader to trigger the rebase error.
-	err := suite.pdLeaderServer.ResignLeaderWithRetry()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 2)
 	re.NoError(err)
+	defer cluster.Destroy()
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+	leaderName := cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	pdLeader := cluster.GetServer(leaderName)
+	re.NoError(pdLeader.BootstrapCluster())
+	memberID := pdLeader.GetLeader().GetMemberId()
+	pdClient, err := pd.NewClientWithContext(ctx,
+		caller.TestComponent,
+		[]string{pdLeader.GetAddr()}, pd.SecurityOption{})
+	re.NoError(err)
+	defer pdClient.Close()
+	memberIDs := make([]string, 0, len(cluster.GetServers()))
+	for _, server := range cluster.GetServers() {
+		memberIDs = append(memberIDs, strconv.FormatUint(server.GetServerID(), 10))
+	}
+	memberIDList := strings.Join(memberIDs, ",")
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/rebaseErr", fmt.Sprintf("return(\"%s\")", memberIDList)))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/skipRetry", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/leaderLoopCheckAgain", fmt.Sprintf("return(\"%d\")", memberID)))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/exitCampaignLeader", fmt.Sprintf("return(\"%d\")", memberID)))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/timeoutWaitPDLeader", fmt.Sprintf("return(\"%s\")", memberIDList)))
+	leaderFailpointsDisabled := false
+	disableLeaderFailpoints := func() {
+		if leaderFailpointsDisabled {
+			return
+		}
+		leaderFailpointsDisabled = true
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/leaderLoopCheckAgain"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/exitCampaignLeader"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/timeoutWaitPDLeader"))
+	}
+	failpointsDisabled := false
+	disableFailpoints := func() {
+		if failpointsDisabled {
+			return
+		}
+		failpointsDisabled = true
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/skipRetry"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/rebaseErr"))
+		disableLeaderFailpoints()
+	}
+	defer disableFailpoints()
+	// Exit the PD leader loop to trigger the rebase error without directly transferring etcd leadership.
 	// Trying to get TSO should fail with "not leader" error.
-	_, _, err = pdClient.GetTS(suite.ctx)
-	re.ErrorContains(err, "not leader")
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/skipRetry"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/rebaseErr"))
+	getTSError := func() error {
+		_, _, err := pdClient.GetTS(ctx)
+		return err
+	}
+	testutil.Eventually(re, func() bool {
+		err := getTSError()
+		return err != nil && strings.Contains(err.Error(), "not leader")
+	}, testutil.WithWaitFor(3*time.Second), testutil.WithTickInterval(20*time.Millisecond))
+	disableLeaderFailpoints()
+	for range 10 {
+		re.ErrorContains(getTSError(), "not leader")
+	}
+	disableFailpoints()
 	// The TSO should be eventually available.
 	testutil.Eventually(re, func() bool {
-		_, _, err := pdClient.GetTS(suite.ctx)
+		_, _, err := pdClient.GetTS(ctx)
 		return err == nil
-	})
+	}, testutil.WithWaitFor(30*time.Second), testutil.WithTickInterval(100*time.Millisecond))
 }
 
 func (suite *tsoClientTestSuite) TestRetryGetTSNotLeader() {
+	as := assert.New(suite.T())
 	re := suite.Require()
 	pdClient := suite.clients[0]
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/mockMaxTSORetryTimes", "return(2000)"))
@@ -542,11 +671,15 @@ func (suite *tsoClientTestSuite) TestRetryGetTSNotLeader() {
 			}
 			physical, logical, err := client.GetTS(ctx1)
 			if err != nil {
-				re.ErrorContains(err, context.Canceled.Error())
+				if !as.ErrorContains(err, context.Canceled.Error()) {
+					return
+				}
 				continue
 			}
 			ts := tsoutil.ComposeTS(physical, logical)
-			re.Less(lastTS, ts)
+			if !as.Less(lastTS, ts) {
+				return
+			}
 			lastTS = ts
 		}
 	}(pdClient)
@@ -666,6 +799,9 @@ func TestUpgradingPDAndTSOClusters(t *testing.T) {
 
 	// Create a PD client in microservice env to let the PD leader to forward requests to the TSO cluster.
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/usePDServiceMode", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/usePDServiceMode"))
+	}()
 	pdClient, err := pd.NewClientWithContext(ctx,
 		caller.TestComponent,
 		[]string{backendEndpoints}, pd.SecurityOption{}, opt.WithMaxErrorRetry(1))
@@ -675,6 +811,11 @@ func TestUpgradingPDAndTSOClusters(t *testing.T) {
 	// Create a TSO cluster which has 2 servers
 	tsoCluster, err := tests.NewTestTSOCluster(ctx, 2, backendEndpoints)
 	re.NoError(err)
+	defer func() {
+		if tsoCluster != nil {
+			tsoCluster.Destroy()
+		}
+	}()
 	tsoCluster.WaitForDefaultPrimaryServing(re)
 	// The TSO service should be eventually healthy
 	utils.WaitForTSOServiceAvailable(ctx, re, pdClient)
@@ -688,11 +829,9 @@ func TestUpgradingPDAndTSOClusters(t *testing.T) {
 	// Restart the TSO cluster
 	tsoCluster, err = tests.RestartTestTSOCluster(ctx, tsoCluster)
 	re.NoError(err)
-	defer tsoCluster.Destroy()
+	tsoCluster.WaitForDefaultPrimaryServing(re)
 	// The TSO service should be eventually healthy
 	utils.WaitForTSOServiceAvailable(ctx, re, pdClient)
-
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/usePDServiceMode"))
 }
 
 func checkTSO(
@@ -736,5 +875,112 @@ func checkServiceDiscovery(re *require.Assertions, client pd.Client, urlsLen int
 			urls := tsoDiscovery.(interface{ GetURLs() []string }).GetURLs()
 			re.Len(urls, urlsLen)
 		}
+	}
+}
+
+// Race condition test between TSO request dispatcher and background connection updater
+
+// Connection updater view:
+// 1.1. Builds a stream A for TSO primary upon initialization.
+// 1.2. Store the stream A into connection context manager.
+
+// Request dispatcher view:
+// 2.1. Upon no stream ready, builds a stream B for TSO primary.
+// 2.2. Process the requests via stream B.
+
+// Race timeline:
+// 1.1. Creates stream A but haven't registered it.
+// 2.1. Creates stream B and registers it to the connection context manager.
+// 1.2. Registered stream A and cancelled the context of stream B.
+// 2.2. Observes canceled context of stream B.
+func (suite *tsoClientTestSuite) TestTSOStreamSetupRace() {
+	if !suite.legacy {
+		suite.T().Skip("race is in tryConnectToTSO, which is the non-proxy path")
+	}
+	re := suite.Require()
+
+	const tsoFailpointPrefix = "github.com/tikv/pd/client/clients/tso/"
+
+	backgroundBeforeStore := make(chan struct{})
+	releaseBackgroundStore := make(chan struct{})
+
+	re.NoError(failpoint.EnableCall(tsoFailpointPrefix+"pauseBeforeBackgroundStoreTSOLeaderStream", func() {
+		log.Info("[tso race] 1.1.1 pause background goroutine before CleanAllAndStore")
+		close(backgroundBeforeStore)
+		<-releaseBackgroundStore
+		log.Info("[tso race] 1.2.1 released pause for CleanAllAndStore")
+	}))
+	defer func() {
+		re.NoError(failpoint.Disable(tsoFailpointPrefix + "pauseBeforeBackgroundStoreTSOLeaderStream"))
+	}()
+
+	ctx, cancel := context.WithCancel(suite.ctx)
+	pdClient, err := pd.NewClientWithContext(ctx, caller.TestComponent, suite.getBackendEndpoints(), pd.SecurityOption{})
+	re.NoError(err)
+
+	safeClose := func(ch chan struct{}) {
+		select {
+		case <-ch:
+		default:
+			close(ch)
+		}
+	}
+	defer func() {
+		safeClose(releaseBackgroundStore)
+		pdClient.Close()
+		cancel()
+	}()
+
+	waitFor := func(ch <-chan struct{}, desc string) {
+		select {
+		case <-ch:
+			log.Info("[tso race] " + desc)
+		case <-time.After(30 * time.Second):
+			re.Failf("timed out", "timed out waiting for: %s", desc)
+		}
+	}
+	waitFor(backgroundBeforeStore, "1.1.2 background goroutine reaching CleanAllAndStore")
+
+	re.NoError(failpoint.Disable(tsoFailpointPrefix + "pauseBeforeBackgroundStoreTSOLeaderStream"))
+
+	requestAttachedToStream := make(chan struct{})
+	releaseRequest := make(chan struct{})
+	defer func() {
+		safeClose(releaseRequest)
+	}()
+
+	re.NoError(failpoint.EnableCall(tsoFailpointPrefix+"pauseAfterTSORequestAttachedToStream", func() {
+		log.Info("[tso race] 2.1.1 pausing tso request after attached to stream")
+		close(requestAttachedToStream)
+		<-releaseRequest
+		log.Info("[tso race] 2.2.2 tso request released")
+	}))
+	defer func() {
+		re.NoError(failpoint.Disable(tsoFailpointPrefix + "pauseAfterTSORequestAttachedToStream"))
+	}()
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, _, err := pdClient.GetTS(context.Background())
+		errCh <- err
+	}()
+
+	waitFor(requestAttachedToStream, "2.1.2 request attached to dispatcher's stream")
+
+	re.NoError(failpoint.EnableCall(tsoFailpointPrefix+"notifyAfterBackgroundStoreTSOLeaderStream", func() {
+		log.Info("[tso race] 1.2.2 background goroutine finished CleanAllAndStore")
+		close(releaseRequest)
+		log.Info("[tso race] 2.2.1 releasing pause for TSO request")
+	}))
+	defer func() {
+		re.NoError(failpoint.Disable(tsoFailpointPrefix + "notifyAfterBackgroundStoreTSOLeaderStream"))
+	}()
+
+	close(releaseBackgroundStore)
+	select {
+	case err := <-errCh:
+		re.NoError(err)
+	case <-time.After(30 * time.Second):
+		re.Failf("timed out", "GetTS has not returned")
 	}
 }

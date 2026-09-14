@@ -67,6 +67,23 @@ var storeStatuses = []string{
 	clusterStatusStoreRemovedCount,
 }
 
+// storeStats are the clusterStatusGauge sub-metrics that observe() stops
+// refreshing once a store is tombstoned (it returns before reaching them), so
+// they'd otherwise keep showing their last pre-tombstone value indefinitely.
+// storeStatuses above is deliberately not included here: those are refreshed
+// unconditionally on every observe() regardless of tombstone state, and
+// deleting store_tombstone_count/store_removed_count at bury time would only
+// make them vanish from dashboards until the next collection tick -- ops
+// needs to see how many stores are currently tombstoned without that gap.
+var storeStats = []string{
+	clusterStatusRegionCount,
+	clusterStatusLeaderCount,
+	clusterStatusWitnessCount,
+	clusterStatusLearnerCount,
+	clusterStatusStorageSize,
+	clusterStatusStorageCapacity,
+}
+
 type storeStatistics struct {
 	opt          config.ConfProvider
 	LabelCounter map[string][]uint64
@@ -208,6 +225,7 @@ func ObserveHotStat(store *core.StoreInfo, stats *StoresStats) {
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_rate_keys").Set(storeFlowStats.GetLoad(utils.StoreReadKeys))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_write_query_rate").Set(storeFlowStats.GetLoad(utils.StoreWriteQuery))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_query_rate").Set(storeFlowStats.GetLoad(utils.StoreReadQuery))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_cpu_usage").Set(storeFlowStats.GetLoad(utils.StoreReadCPU))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_cpu_usage").Set(storeFlowStats.GetLoad(utils.StoreCPUUsage))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_disk_read_rate").Set(storeFlowStats.GetLoad(utils.StoreDiskReadRate))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_disk_write_rate").Set(storeFlowStats.GetLoad(utils.StoreDiskWriteRate))
@@ -220,6 +238,7 @@ func ObserveHotStat(store *core.StoreInfo, stats *StoresStats) {
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_rate_keys_instant").Set(storeFlowStats.GetInstantLoad(utils.StoreReadKeys))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_write_query_rate_instant").Set(storeFlowStats.GetInstantLoad(utils.StoreWriteQuery))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_query_rate_instant").Set(storeFlowStats.GetInstantLoad(utils.StoreReadQuery))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_cpu_usage_instant").Set(storeFlowStats.GetInstantLoad(utils.StoreReadCPU))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_regions_write_rate_bytes_instant").Set(storeFlowStats.GetInstantLoad(utils.StoreRegionsWriteBytes))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_regions_write_rate_keys_instant").Set(storeFlowStats.GetInstantLoad(utils.StoreRegionsWriteKeys))
 }
@@ -234,6 +253,7 @@ func (s *storeStatistics) collect() {
 	configs["merge-schedule-limit"] = float64(s.opt.GetMergeScheduleLimit())
 	configs["replica-schedule-limit"] = float64(s.opt.GetReplicaScheduleLimit())
 	configs["affinity-schedule-limit"] = float64(s.opt.GetAffinityScheduleLimit())
+	configs["split-scatter-schedule-limit"] = float64(s.opt.GetSplitScatterScheduleLimit())
 	configs["max-replicas"] = float64(s.opt.GetMaxReplicas())
 	configs["high-space-ratio"] = s.opt.GetHighSpaceRatio()
 	configs["low-space-ratio"] = s.opt.GetLowSpaceRatio()
@@ -283,40 +303,34 @@ func (s *storeStatistics) collect() {
 		id := strconv.FormatUint(storeID, 10)
 		StoreLimitGauge.WithLabelValues(id, "add-peer").Set(limit.AddPeer)
 		StoreLimitGauge.WithLabelValues(id, "remove-peer").Set(limit.RemovePeer)
+		StoreLimitGauge.WithLabelValues(id, "transfer-leader-in").Set(limit.TransferLeaderIn)
 	}
 }
 
 // ResetStoreStatistics resets the metrics of store.
-func ResetStoreStatistics(storeAddress string, id string) {
-	metrics := []string{
-		"region_score",
-		"leader_score",
-		"region_size",
-		"region_count",
-		"leader_size",
-		"leader_count",
-		"witness_count",
-		"learner_count",
-		"store_available",
-		"store_used",
-		"store_capacity",
-		"store_write_rate_bytes",
-		"store_read_rate_bytes",
-		"store_write_rate_keys",
-		"store_read_rate_keys",
-		"store_write_query_rate",
-		"store_read_query_rate",
-		"store_regions_write_rate_bytes",
-		"store_regions_write_rate_keys",
-		"store_slow_trend_cause_value",
-		"store_slow_trend_cause_rate",
-		"store_slow_trend_result_value",
-		"store_slow_trend_result_rate",
+// Matches on the store label alone, not address: PD allows an existing store ID to
+// change address (e.g. after a TiKV restart with a new IP), so requiring the current
+// address to match as well would permanently leak any series recorded under a
+// previous address.
+func ResetStoreStatistics(id string) {
+	storeStatusGauge.DeletePartialMatch(utils.SingleLabel("store", id))
+	// clusterStatusGauge's complete label tuples are bounded by the two
+	// possible core.StoreInfo.Engine() outputs, so an exact DeleteLabelValues
+	// per (type, engine) is enough to cover every series for this store --
+	// unlike DeletePartialMatch, it doesn't lock and scan the whole vector,
+	// which matters when many stores are tombstoned around the same time.
+	for _, m := range storeStats {
+		clusterStatusGauge.DeleteLabelValues(m, core.EngineTiKV, id)
+		clusterStatusGauge.DeleteLabelValues(m, core.EngineTiFlash, id)
 	}
-	for _, m := range metrics {
-		storeStatusGauge.DeleteLabelValues(storeAddress, id, m)
-	}
-	clusterStatusGauge.DeletePartialMatch(utils.SingleLabel("store", id))
+	// mcs never cleaned StoreLimitGauge on its own: unlike the classic path's
+	// RemoveStoreLimit, the mcs scheduling service has no store-limit config
+	// of its own to persist a removal for. Deleting it here, alongside
+	// everything else this function already covers, closes that gap for
+	// both classic (redundant with RemoveStoreLimit, harmless) and mcs.
+	StoreLimitGauge.DeleteLabelValues(id, "add-peer")
+	StoreLimitGauge.DeleteLabelValues(id, "remove-peer")
+	StoreLimitGauge.DeleteLabelValues(id, "transfer-leader-in")
 }
 
 type storeStatisticsMap struct {
