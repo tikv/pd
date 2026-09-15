@@ -17,6 +17,7 @@ package tso
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -163,27 +164,46 @@ func (suite *tsoConsistencyTestSuite) request(ctx context.Context, count uint32)
 }
 
 func (suite *tsoConsistencyTestSuite) TestRequestTSOConcurrently() {
-	suite.requestTSOConcurrently()
+	re := suite.Require()
+	lastTS := suite.requestTSOConcurrently(&pdpb.Timestamp{})
 	// Test TSO after the leader change
+	oldLeaderName := suite.pdLeaderServer.GetConfig().Name
 	suite.pdLeaderServer.GetServer().GetMember().Resign()
-	suite.cluster.WaitLeader()
-	suite.requestTSOConcurrently()
+	leaderName := suite.cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	leader := suite.cluster.GetServer(leaderName)
+	suite.pdLeaderServer = leader
+	if suite.legacy {
+		// The PD leader is published before its embedded TSO allocator becomes
+		// ready. Wait for that separate readiness condition before checking TSO
+		// consistency. A direct gRPC client has no leader discovery, so reconnect
+		// it only when another PD becomes the leader.
+		testutil.Eventually(re, func() bool {
+			return leader.GetServer().GetTSOAllocator().IsInitialize()
+		})
+		if leaderName != oldLeaderName {
+			re.NoError(suite.conn.Close())
+			suite.pdClient, suite.conn = testutil.MustNewGrpcClient(re, leader.GetAddr())
+		}
+	}
+	suite.requestTSOConcurrently(lastTS)
 }
 
-func (suite *tsoConsistencyTestSuite) requestTSOConcurrently() {
+func (suite *tsoConsistencyTestSuite) requestTSOConcurrently(lowerBound *pdpb.Timestamp) *pdpb.Timestamp {
 	as := assert.New(suite.T())
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
 
-	var wg sync.WaitGroup
+	var (
+		wg    sync.WaitGroup
+		maxTS atomic.Pointer[pdpb.Timestamp]
+	)
+	maxTS.Store(lowerBound)
 	wg.Add(tsoRequestConcurrencyNumber)
 	for range tsoRequestConcurrencyNumber {
 		go func() {
 			defer wg.Done()
-			last := &pdpb.Timestamp{
-				Physical: 0,
-				Logical:  0,
-			}
+			last := lowerBound
 			var ts *pdpb.Timestamp
 			for range tsoRequestRound {
 				ts = suite.request(ctx, tsoCount)
@@ -195,11 +215,17 @@ func (suite *tsoConsistencyTestSuite) requestTSOConcurrently() {
 					return
 				}
 				last = ts
+				for current := maxTS.Load(); tsoutil.CompareTimestamp(ts, current) > 0; current = maxTS.Load() {
+					if maxTS.CompareAndSwap(current, ts) {
+						break
+					}
+				}
 				time.Sleep(10 * time.Millisecond)
 			}
 		}()
 	}
 	wg.Wait()
+	return maxTS.Load()
 }
 
 func (suite *tsoConsistencyTestSuite) TestFallbackTSOConsistency() {
