@@ -305,6 +305,23 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 	// Don't check isRaftLearnerEnabled cause it maybe disable learner feature but there are still some learners to promote.
 	opController := c.opController
 
+	// A legacy witness can win an election after a regular leader fails, but
+	// cannot serve reads or writes. Recover leadership independently of replica
+	// and snapshot limits, including while a joint-state change is unfinished.
+	if region.GetLeader().GetIsWitness() {
+		for _, peer := range region.GetPeers() {
+			if peer.GetIsWitness() || core.IsLearner(peer) {
+				continue
+			}
+			op, err := operator.CreateTransferLeaderOperator("transfer-deprecated-witness-leader", c.cluster, region, peer.GetStoreId(), nil, operator.OpLeader)
+			if err == nil {
+				op.SetPriorityLevel(constant.Urgent)
+				return []*operator.Operator{op}
+			}
+		}
+		return nil
+	}
+
 	if ops := measureChecker(c.metrics.checkRegionHistograms[jointStateChecker], func() []*operator.Operator {
 		return []*operator.Operator{c.jointStateChecker.Check(region)}
 	}); len(ops) > 0 {
@@ -315,39 +332,6 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 		return []*operator.Operator{c.splitChecker.Check(region)}
 	}); len(ops) > 0 {
 		return ops
-	}
-
-	// A rolling upgrade can still receive heartbeats for peers created by an
-	// older PD. Convert them one at a time before any normal replica scheduling.
-	// If any conversion cannot make progress, let replica checkers repair the
-	// unavailable peer first.
-	var legacyWitness *metapb.Peer
-	for _, peer := range region.GetPeers() {
-		if !peer.GetIsWitness() {
-			continue
-		}
-		store := c.cluster.GetStore(peer.GetStoreId())
-		if store == nil || store.DownTime() >= c.conf.GetMaxStoreDownTime() {
-			legacyWitness = nil
-			break
-		}
-		if legacyWitness == nil {
-			legacyWitness = peer
-		}
-	}
-	if legacyWitness != nil && region.GetLeader() != nil {
-		if opController.OperatorCount(operator.OpReplica) >= c.conf.GetReplicaScheduleLimit() {
-			operator.IncOperatorLimitCounter(types.ReplicaChecker, operator.OpReplica)
-			c.pendingProcessedRegions.Put(region.GetID(), nil)
-			return nil
-		}
-		op, err := operator.CreateNonWitnessPeerOperator("migrate-deprecated-witness-peer", c.cluster, region, legacyWitness)
-		if err != nil {
-			log.Debug("cannot convert deprecated witness peer", zap.Uint64("region-id", region.GetID()), zap.Uint64("peer-id", legacyWitness.GetId()), errs.ZapError(err))
-			return nil
-		}
-		op.SetPriorityLevel(constant.High)
-		return []*operator.Operator{op}
 	}
 
 	if c.conf.IsPlacementRulesEnabled() {
@@ -395,6 +379,39 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 			return ops
 		}
 	}
+	// Repair unavailable or missing replicas before demoting a legacy witness.
+	// A down regular voter can otherwise make the demotion lose quorum and
+	// repeatedly block the repair operator. Pending peers must catch up first.
+	if region.GetLeader() != nil && len(region.GetDownPeers()) == 0 && len(region.GetPendingPeers()) == 0 {
+		var legacyWitness *metapb.Peer
+		for _, peer := range region.GetPeers() {
+			if peer.GetIsWitness() {
+				legacyWitness = peer
+				break
+			}
+		}
+		if legacyWitness != nil {
+			for _, peer := range region.GetPeers() {
+				store := c.cluster.GetStore(peer.GetStoreId())
+				if store == nil || !store.IsUp() || store.IsDisconnected() {
+					return nil
+				}
+			}
+			if opController.OperatorCount(operator.OpReplica) >= c.conf.GetReplicaScheduleLimit() {
+				operator.IncOperatorLimitCounter(types.ReplicaChecker, operator.OpReplica)
+				c.pendingProcessedRegions.Put(region.GetID(), nil)
+				return nil
+			}
+			op, err := operator.CreateNonWitnessPeerOperator("migrate-deprecated-witness-peer", c.cluster, region, legacyWitness)
+			if err != nil {
+				log.Debug("cannot convert deprecated witness peer", zap.Uint64("region-id", region.GetID()), zap.Uint64("peer-id", legacyWitness.GetId()), errs.ZapError(err))
+				return nil
+			}
+			op.SetPriorityLevel(constant.High)
+			return []*operator.Operator{op}
+		}
+	}
+
 	// skip the joint checker, split checker and rule checker when region label is set to "schedule=deny".
 	// those checkers are help to make region health, it's necessary to skip them when region is set to deny.
 	l := c.cluster.GetRegionLabeler()
@@ -435,7 +452,7 @@ func (c *Controller) tryAddOperators(region *core.RegionInfo) {
 		return
 	}
 	id := region.GetID()
-	if c.opController.GetOperator(id) != nil {
+	if op := c.opController.GetOperator(id); op != nil && (!region.GetLeader().GetIsWitness() || op.GetPriorityLevel() == constant.Urgent) {
 		c.RemovePendingProcessedRegion(id)
 		return
 	}
