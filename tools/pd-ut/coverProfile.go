@@ -24,24 +24,21 @@ import (
 	"golang.org/x/tools/cover"
 )
 
-func collectCoverProfileFile() {
+func collectCoverProfileFile() error {
 	// Combine all the cover file of single test function into a whole.
 	files, err := os.ReadDir(coverFileTempDir)
 	if err != nil {
-		fmt.Println("collect cover file error:", err)
-		os.Exit(-1)
+		return fmt.Errorf("read temporary cover files: %w", err)
 	}
 
 	w, err := os.Create(coverProfile)
 	if err != nil {
-		fmt.Println("create cover file error:", err)
-		os.Exit(-1)
+		return fmt.Errorf("create cover file: %w", err)
 	}
 	//nolint: errcheck
 	defer w.Close()
 	if _, err := w.WriteString("mode: atomic\n"); err != nil {
-		fmt.Println("write cover profile header error:", err)
-		os.Exit(-1)
+		return fmt.Errorf("write cover profile header: %w", err)
 	}
 
 	result := make(map[string]*cover.Profile)
@@ -49,13 +46,15 @@ func collectCoverProfileFile() {
 		if file.IsDir() {
 			continue
 		}
-		collectOneCoverProfileFile(result, file)
+		if err := collectOneCoverProfileFile(result, file); err != nil {
+			return err
+		}
 	}
 
 	w1 := bufio.NewWriter(w)
 	for _, prof := range result {
 		for _, block := range prof.Blocks {
-			fmt.Fprintf(w1, "%s:%d.%d,%d.%d %d %d\n",
+			if _, err := fmt.Fprintf(w1, "%s:%d.%d,%d.%d %d %d\n",
 				prof.FileName,
 				block.StartLine,
 				block.StartCol,
@@ -63,30 +62,31 @@ func collectCoverProfileFile() {
 				block.EndCol,
 				block.NumStmt,
 				block.Count,
-			)
-		}
-		if err := w1.Flush(); err != nil {
-			fmt.Println("flush data to cover profile file error:", err)
-			os.Exit(-1)
+			); err != nil {
+				return fmt.Errorf("write cover profile: %w", err)
+			}
 		}
 	}
+	if err := w1.Flush(); err != nil {
+		return fmt.Errorf("flush data to cover profile file: %w", err)
+	}
+	return nil
 }
 
-func collectOneCoverProfileFile(result map[string]*cover.Profile, file os.DirEntry) {
+func collectOneCoverProfileFile(result map[string]*cover.Profile, file os.DirEntry) error {
 	f, err := os.Open(filepath.Join(coverFileTempDir, file.Name()))
 	if err != nil {
-		fmt.Println("open temp cover file error:", err)
-		os.Exit(-1)
+		return fmt.Errorf("open temporary cover file %s: %w", file.Name(), err)
 	}
 	//nolint: errcheck
 	defer f.Close()
 
 	profs, err := cover.ParseProfilesFromReader(f)
 	if err != nil {
-		fmt.Println("parse cover profile file error:", err)
-		os.Exit(-1)
+		return fmt.Errorf("parse temporary cover file %s: %w", file.Name(), err)
 	}
 	mergeProfile(result, profs)
+	return nil
 }
 
 func mergeProfile(m map[string]*cover.Profile, profs []*cover.Profile) {

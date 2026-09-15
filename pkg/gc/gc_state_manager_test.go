@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"math"
 	"math/rand/v2"
-	"os"
 	"slices"
 	"strconv"
 	"sync"
@@ -3098,8 +3097,7 @@ func TestGetMaxTxnSafePointAmongAllKeyspacesOnTooManyKeyspaces(t *testing.T) {
 
 func benchmarkGetAllKeyspacesGCStatesImpl(b *testing.B, excludeGCBarriers bool, keyspacesCount int, parallelism int) {
 	re := require.New(b)
-	fname := testutil.InitTempFileLogger("info")
-	defer os.Remove(fname)
+	fname := testutil.InitTempFileLogger(b, "info")
 
 	opt := newGCStateManagerForTestOptions{
 		specifyInitialKeyspaces: make([]*keyspace.CreateKeyspaceByIDRequest, 0, keyspacesCount),
@@ -3222,8 +3220,7 @@ func BenchmarkGetAllKeyspacesGCStates_ExcludeGCBarriers_KS100_P128(b *testing.B)
 func benchmarkGetGCStateImpl(b *testing.B, excludeGCBarriers bool, keyspacesCount int, parallelism int, concurrentWriteThreads int) {
 	re := require.New(b)
 
-	fname := testutil.InitTempFileLogger("info")
-	defer os.Remove(fname)
+	fname := testutil.InitTempFileLogger(b, "info")
 
 	opt := newGCStateManagerForTestOptions{
 		specifyInitialKeyspaces: make([]*keyspace.CreateKeyspaceByIDRequest, 0, keyspacesCount),

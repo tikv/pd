@@ -15,7 +15,6 @@
 package command
 
 import (
-	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
@@ -32,27 +31,15 @@ func TestParseTLSConfig(t *testing.T) {
 		Short:         "Placement Driver control",
 		SilenceErrors: true,
 	}
-	certPath := filepath.Join("..", "..", "tests", "cert")
+	certPath := t.TempDir()
 	rootCmd.Flags().String("cacert", filepath.Join(certPath, "ca.pem"), "path of file that contains list of trusted SSL CAs")
 	rootCmd.Flags().String("cert", filepath.Join(certPath, "client.pem"), "path of file that contains X509 certificate in PEM format")
 	rootCmd.Flags().String("key", filepath.Join(certPath, "client-key.pem"), "path of file that contains X509 key in PEM format")
 
-	// generate certs
-	if err := os.Mkdir(certPath, 0755); err != nil {
-		t.Fatal(err)
-	}
 	certScript := filepath.Join("..", "..", "tests", "cert_opt.sh")
 	if err := exec.Command(certScript, "generate", certPath).Run(); err != nil {
 		t.Fatal(err)
 	}
-	defer func() {
-		if err := exec.Command(certScript, "cleanup", certPath).Run(); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.RemoveAll(certPath); err != nil {
-			t.Fatal(err)
-		}
-	}()
 
 	tlsConfig, err := parseTLSConfig(rootCmd)
 	re.NoError(err)
