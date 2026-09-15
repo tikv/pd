@@ -42,10 +42,33 @@ func SetStoreAddress(address, statusAddress, peerAddress string) StoreCreateOpti
 // SetStoreLabels sets the labels for the store.
 func SetStoreLabels(labels []*metapb.StoreLabel) StoreCreateOption {
 	return func(store *StoreInfo) {
+		labelsChanged := !storeLabelsEqual(store.meta.GetLabels(), labels)
 		meta := typeutil.DeepClone(store.meta, StoreFactory)
 		meta.Labels = labels
 		store.meta = meta
+		if labelsChanged {
+			store.labelsVersion = storeLabelsVersion.Add(1)
+		}
 	}
+}
+
+func storeLabelsEqual(lhs, rhs []*metapb.StoreLabel) bool {
+	if len(lhs) != len(rhs) {
+		return false
+	}
+	for _, label := range lhs {
+		found := false
+		for _, candidate := range rhs {
+			if candidate.GetKey() == label.GetKey() && candidate.GetValue() == label.GetValue() {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
 }
 
 // SetStoreStartTime sets the start timestamp for the store.
@@ -321,6 +344,7 @@ func SetNetworkSlowTriggers(networkSlowTriggers uint64) StoreCreateOption {
 // NOTICE: LastHeartbeat is not persisted each time, so it is not set by this function. Please use SetLastHeartbeatTS instead.
 func SetStoreMeta(newMeta *metapb.Store) StoreCreateOption {
 	return func(store *StoreInfo) {
+		labelsChanged := !storeLabelsEqual(store.meta.GetLabels(), newMeta.GetLabels())
 		meta := typeutil.DeepClone(store.meta, StoreFactory)
 		meta.Version = newMeta.GetVersion()
 		meta.GitHash = newMeta.GetGitHash()
@@ -334,5 +358,8 @@ func SetStoreMeta(newMeta *metapb.Store) StoreCreateOption {
 		meta.NodeState = newMeta.GetNodeState()
 		meta.PhysicallyDestroyed = newMeta.GetPhysicallyDestroyed()
 		store.meta = meta
+		if labelsChanged {
+			store.labelsVersion = storeLabelsVersion.Add(1)
+		}
 	}
 }
