@@ -1351,7 +1351,9 @@ func (suite *createOperatorTestSuite) TestCreateNonWitnessPeerOperator() {
 		re.Equal(testCase.kind, op.kind)
 
 		expectedSteps := testCase.prepareSteps
+		re.Len(op.steps, len(expectedSteps))
 		for i := range op.Len() {
+			re.IsType(expectedSteps[i], op.Step(i))
 			switch step := op.Step(i).(type) {
 			case ChangePeerV2Enter:
 				expected := expectedSteps[i].(ChangePeerV2Enter)

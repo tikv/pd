@@ -1491,7 +1491,9 @@ func (s peerSlice) Less(i, j int) bool {
 	return s[i].GetId() < s[j].GetId()
 }
 
-// SortedPeersEqual judges whether two sorted `peerSlice` are equal
+// SortedPeersEqual judges whether two sorted `peerSlice` are equal.
+// Witness conversion keeps peer IDs unchanged but must refresh the per-store
+// region trees and their size accounting, so compare the legacy flag too.
 func SortedPeersEqual(peersA, peersB []*metapb.Peer) bool {
 	if len(peersA) != len(peersB) {
 		return false
