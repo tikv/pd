@@ -208,7 +208,9 @@ func (s *resourceGroupProxyServer) AcquireTokenBuckets(stream resource_manager.R
 	if err != nil {
 		return err
 	}
-	delegateStream, err := delegateClient.AcquireTokenBuckets(stream.Context())
+	delegateCtx, cancel := context.WithCancel(stream.Context())
+	defer cancel()
+	delegateStream, err := delegateClient.AcquireTokenBuckets(delegateCtx)
 	if err != nil {
 		s.closeClient(stream.Context())
 		return err
@@ -217,20 +219,18 @@ func (s *resourceGroupProxyServer) AcquireTokenBuckets(stream resource_manager.R
 	errCh := make(chan error, 1)
 	var reportOnce sync.Once
 	reportErr := func(err error) {
-		if err != nil {
-			s.closeClient(stream.Context())
-		}
 		reportOnce.Do(func() {
+			if err != nil {
+				cancel()
+				s.closeClient(stream.Context())
+			}
 			errCh <- err
 		})
 	}
-	var wg sync.WaitGroup
-	wg.Add(1)
 
 	// client -> server
 	go func() {
 		defer logutil.LogPanic()
-		defer wg.Done()
 		defer func() { _ = delegateStream.CloseSend() }()
 		for {
 			in, err := stream.Recv()
@@ -266,7 +266,8 @@ func (s *resourceGroupProxyServer) AcquireTokenBuckets(stream resource_manager.R
 		}
 	}
 
-	wg.Wait()
+	// Returning cancels the incoming stream and releases its Recv goroutine.
+	// Waiting for it here deadlocks if the client is waiting for our response.
 	reportErr(nil)
 
 	return <-errCh
