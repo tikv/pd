@@ -36,6 +36,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/config"
@@ -546,6 +547,28 @@ func TestPDLeaderStepsDownWhenRenewalsFail(t *testing.T) {
 	re.NotEqual(oldLeaderName, waitLeaderChange(re, cluster, oldLeaderName))
 }
 
+func pauseLeaseClose(t *testing.T, lease *election.Lease) (wait, resume func()) {
+	t.Helper()
+	const hook = "github.com/tikv/pd/pkg/election/beforeRevokeLease"
+	reached := make(chan struct{})
+	release := make(chan struct{})
+	require.NoError(t, failpoint.EnableCall(hook, func(closingLease *election.Lease) {
+		if closingLease == lease {
+			close(reached)
+			<-release
+		}
+	}))
+	t.Cleanup(func() { require.NoError(t, failpoint.Disable(hook)) })
+	return func() {
+		t.Helper()
+		select {
+		case <-reached:
+		case <-time.After(30 * time.Second):
+			t.Fatal("lease cleanup did not reach the revoke checkpoint")
+		}
+	}, sync.OnceFunc(func() { close(release) })
+}
+
 // TestPDLeaderClearsIdentityBeforeBlockingCleanup asserts the ordering inside the
 // step-down path: the in-memory leader identity is dropped before anything that
 // can block for an unbounded time.
@@ -571,21 +594,15 @@ func TestPDLeaderClearsIdentityBeforeBlockingCleanup(t *testing.T) {
 	leaderServer := cluster.GetServer(leaderName).GetServer()
 	re.True(leaderServer.IsServing())
 
-	// The lease this member currently holds. Its ID is what pins the assertion
-	// below to the term being given up here; see the comment on the conjunction.
+	// Pin the cleanup checkpoint to the term being given up.
 	oldLease := leaderServer.GetMember().GetLeadership().GetLease()
 	re.NotNil(oldLease)
 	oldLeaseID := oldLease.GetID()
 	re.NotEqual(clientv3.NoLease, oldLeaseID)
 
-	// Stand in for the part of the cleanup that can block. Everything in
-	// Lease.Close past this point either talks to the local etcd or logs, and on
-	// a stalled volume neither of those returns.
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/blockLeaseClose",
-		fmt.Sprintf("return(\"leader election@%s\")", leaderName)))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/blockLeaseClose"))
-	}()
+	waitClose, resumeClose := pauseLeaseClose(t, oldLease)
+	// Release the checkpoint before the deferred cluster shutdown waits for it.
+	defer resumeClose()
 	// Fail renewals so the local deadline is what ends the term.
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/keepAliveFailed",
 		fmt.Sprintf("return(\"leader election@%s\")", leaderName)))
@@ -593,39 +610,15 @@ func TestPDLeaderClearsIdentityBeforeBlockingCleanup(t *testing.T) {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/keepAliveFailed"))
 	}()
 
-	// All four have to hold at the same instant, and that conjunction is the
-	// whole point of the test:
-	//
-	//   - the leader is already nil;
-	//   - the leader value is still set, which Leadership.Reset clears only after
-	//     Lease.Close returns, so the cleanup is provably still blocked;
-	//   - the lease reads as expired, so this is a term being given up rather
-	//     than one being campaigned for;
-	//   - and it is still the *same* lease, which is what makes the previous two
-	//     mean what they appear to mean.
-	//
-	// That last conjunct is what makes the first three mean what they appear to.
-	// Leadership.Campaign stores a non-empty leader value and installs a fresh
-	// lease before it grants that lease, and a fresh lease has no expire time and
-	// so reads as expired - so the first three are also satisfied while a
-	// campaign is in flight, and go on being satisfied indefinitely after one
-	// fails, since campaignLeader returns on a failed Campaign before it sets up
-	// the resign at all. Neither case arises in this one-member cluster, where
-	// Campaign does not fail and the in-flight window is a single local Grant
-	// wide, so the lease ID is not what makes the test fail today under a
-	// reversed Member.Resign. It is what keeps the assertion honest if the test
-	// grows back to several members, and what stops the failed-campaign state
-	// from ever standing in for a step-down. Reset never replaces the lease and
-	// Close never clears its ID, so the ID stays put through the blocked close,
-	// while every campaign installs a lease whose ID is either zero or newly
-	// assigned by etcd.
-	testutil.Eventually(re, func() bool {
-		m := leaderServer.GetMember()
-		return m.GetLeader() == nil &&
-			m.GetLeadership().GetLeaderValue() != "" &&
-			!m.GetLeadership().Check() &&
-			m.GetLeadership().GetLease().GetID() == oldLeaseID
-	}, testutil.WithWaitFor(30*time.Second))
+	// Observe the actual cleanup checkpoint: leaderValue is cleared before
+	// Close and cannot be used as a marker that cleanup is still blocked.
+	waitClose()
+	m := leaderServer.GetMember()
+	re.Nil(m.GetLeader())
+	re.Empty(m.GetLeadership().GetLeaderValue())
+	re.False(m.GetLeadership().Check())
+	re.Same(oldLease, m.GetLeadership().GetLease())
+	re.Equal(oldLeaseID, m.GetLeadership().GetLease().GetID())
 }
 
 // TestPDLeaderResignsBeforeLoggingStepDown covers the other half of the same
@@ -675,14 +668,9 @@ func TestPDLeaderResignsBeforeLoggingStepDown(t *testing.T) {
 		os.RemoveAll(fname)
 	}()
 
-	// Hold the step-down open inside Lease.Close, so that there is a window in
-	// which the resign has started but has not finished. Without it the log line
-	// would follow the resign too closely to observe either way.
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/blockLeaseClose",
-		fmt.Sprintf("return(\"leader election@%s\")", leaderName)))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/blockLeaseClose"))
-	}()
+	// Hold the step-down open until the identity and log assertions complete.
+	waitClose, resumeClose := pauseLeaseClose(t, oldLease)
+	defer resumeClose()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/keepAliveFailed",
 		fmt.Sprintf("return(\"leader election@%s\")", leaderName)))
 	defer func() {
@@ -691,15 +679,13 @@ func TestPDLeaderResignsBeforeLoggingStepDown(t *testing.T) {
 
 	const stepDownMsg = "no longer a leader because lease has expired"
 
-	// Wait for the member to be inside the blocked close of the term it started
-	// with, exactly as in the test above.
-	testutil.Eventually(re, func() bool {
-		m := leaderServer.GetMember()
-		return m.GetLeader() == nil &&
-			m.GetLeadership().GetLeaderValue() != "" &&
-			!m.GetLeadership().Check() &&
-			m.GetLeadership().GetLease().GetID() == oldLeaseID
-	}, testutil.WithWaitFor(30*time.Second))
+	waitClose()
+	m := leaderServer.GetMember()
+	re.Nil(m.GetLeader())
+	re.Empty(m.GetLeadership().GetLeaderValue())
+	re.False(m.GetLeadership().Check())
+	re.Same(oldLease, m.GetLeadership().GetLease())
+	re.Equal(oldLeaseID, m.GetLeadership().GetLease().GetID())
 
 	// The identity is gone, and the reason has not been written yet. Reverse the
 	// two in campaignLeader and the line is already there by the time the resign
@@ -711,6 +697,7 @@ func TestPDLeaderResignsBeforeLoggingStepDown(t *testing.T) {
 	// And the line does arrive once the blocked close finishes. This is what
 	// keeps the assertion above from passing merely because nothing was ever
 	// captured.
+	resumeClose()
 	testutil.Eventually(re, func() bool {
 		content, err := os.ReadFile(fname)
 		re.NoError(err)
