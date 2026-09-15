@@ -688,6 +688,10 @@ func (s *Server) RunWithStartupContext(ctx context.Context) error {
 	defer stop()
 	defer cancel()
 
+	onTimeJumpBack := func() {
+		log.Error("system time jumps backward", errs.ZapError(errs.ErrIncorrectSystemTime))
+		timeJumpBackCounter.Inc()
+	}
 	if err := s.startEtcd(startupCtx); err != nil {
 		return err
 	}
@@ -696,10 +700,7 @@ func (s *Server) RunWithStartupContext(ctx context.Context) error {
 		return err
 	}
 
-	go systimemon.StartMonitor(s.ctx, time.Now, func() {
-		log.Error("system time jumps backward", errs.ZapError(errs.ErrIncorrectSystemTime))
-		timeJumpBackCounter.Inc()
-	})
+	go systimemon.StartMonitor(s.ctx, time.Now, onTimeJumpBack)
 	s.cgMonitor.StartMonitor(s.ctx)
 
 	failpoint.Inject("delayStartServerLoop", func() {
