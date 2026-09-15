@@ -3558,6 +3558,316 @@ func TestInitSchedulersPreservesConcurrentScheduleUpdate(t *testing.T) {
 	re.Equal(float64(60), reloadedOpt.GetScheduleConfig().DefaultStoreLimit.AddPeer)
 }
 
+// TestSetAllStoresLimitDoesNotRestoreRemovedStoreLimit guards against
+// PersistOptions.GetStoreLimit's create-on-miss side effect leaking into
+// SetAllStoresLimit's refreshStoreRateLimit loop. A tombstoned store stays in
+// GetStoreIDs() until its final removal, so that loop still visits it after
+// RemoveStoreLimit has deliberately deleted its config entry; a mutating
+// lookup there would resurrect the entry. No concurrency is needed to trigger
+// this -- it's deterministic within a single goroutine.
+func TestSetAllStoresLimitDoesNotRestoreRemovedStoreLimit(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	backend := storage.NewStorageWithMemoryBackend()
+	rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, backend)
+
+	const storeID = uint64(1)
+	store := core.NewStoreInfo(&metapb.Store{Id: storeID, State: metapb.StoreState_Up})
+	rc.PutStore(store)
+	rc.AddStoreLimit(store.GetMeta())
+
+	rc.PutStore(store.Clone(core.SetStoreState(metapb.StoreState_Tombstone)))
+	rc.RemoveStoreLimit(storeID)
+	_, ok := opt.GetScheduleConfig().StoreLimit[storeID]
+	re.False(ok)
+
+	re.NoError(rc.SetAllStoresLimit(storelimit.AddPeer, 60))
+	_, ok = opt.GetScheduleConfig().StoreLimit[storeID]
+	re.False(ok)
+
+	re.NoError(opt.Persist(backend))
+	_, reloaded, err := newTestScheduleConfig()
+	re.NoError(err)
+	re.NoError(reloaded.Reload(backend))
+	_, ok = reloaded.GetScheduleConfig().StoreLimit[storeID]
+	re.False(ok)
+}
+
+// TestPutMetaStoreDoesNotRestoreRemovedStoreLimit guards against
+// AddStoreLimit recreating a StoreLimit entry for an already-tombstoned
+// store. PutMetaStore calls AddStoreLimit unconditionally after
+// putStoreImpl, and putStoreImpl never resurrects an existing store's
+// State/NodeState -- so a PutStore whose gRPC preflight raced a concurrent
+// BuryStore still lands on a store that's tombstoned by the time
+// AddStoreLimit runs. AddStoreLimit's own `store` argument is the caller's
+// request payload, not the authoritative post-putStoreImpl state, so it
+// can't be used to detect this; the fix re-fetches instead.
+func TestPutMetaStoreDoesNotRestoreRemovedStoreLimit(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	backend := storage.NewStorageWithMemoryBackend()
+	rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, backend)
+
+	store := newTestStores(1, "2.0.0")[0]
+	rc.PutStore(store)
+	rc.AddStoreLimit(store.GetMeta())
+	rc.PutStore(store.Clone(core.SetStoreState(metapb.StoreState_Offline, true)))
+	re.NoError(rc.BuryStore(store.GetID(), false))
+	_, ok := opt.GetScheduleConfig().StoreLimit[store.GetID()]
+	re.False(ok)
+
+	re.NoError(rc.PutMetaStore(store.GetMeta()))
+	re.True(rc.GetStore(store.GetID()).IsRemoved())
+	_, ok = opt.GetScheduleConfig().StoreLimit[store.GetID()]
+	re.False(ok)
+
+	_, reloaded, err := newTestScheduleConfig()
+	re.NoError(err)
+	re.NoError(reloaded.Reload(backend))
+	_, ok = reloaded.GetScheduleConfig().StoreLimit[store.GetID()]
+	re.False(ok)
+}
+
+// assertBlockedThenReleased proves that contend (run in its own goroutine)
+// cannot pass the point instrumented by acquiredFP until release is closed,
+// using only channel ordering -- never wall-clock duration math, which a
+// slow or delayed CI worker can throw off in either direction (see the
+// PutMetaStore/BuryStore race test's history). An earlier version added an
+// intermediate "goroutine has started" signal before this check, but that
+// only proves the goroutine ran its first statement -- it can still be
+// descheduled immediately afterward, before reaching contend's actual lock
+// attempt, reintroducing the same "blocked vs. not-yet-scheduled" ambiguity
+// one step later. There's no channel-based way to prove a goroutine is
+// blocked rather than merely slow, so instead this ties the wait directly to
+// acquiredFP itself with a generous window, matching this package's own
+// established precedent for the same problem
+// (TestScheduleConfigPersistenceIsSerialized's saveStarted wait): any
+// goroutine+channel+timeout test on a preemptible scheduler has some
+// irreducible residual risk, and the accepted way to make it negligible is a
+// generous wait tied to the exact signal of interest, not more intermediate
+// proxy signals. Returns the channel contend's result will arrive on.
+func assertBlockedThenReleased(t *testing.T, re *require.Assertions, acquiredFP string, release chan struct{}, contend func() error) <-chan error {
+	t.Helper()
+	acquired := make(chan struct{})
+	re.NoError(failpoint.EnableCall(acquiredFP, func() { close(acquired) }))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(acquiredFP)) })
+
+	done := make(chan error, 1)
+	go func() {
+		done <- contend()
+	}()
+
+	select {
+	case <-acquired:
+		re.Fail(acquiredFP + " fired before storeStateLock should have been available")
+	case <-time.After(2 * time.Second):
+	}
+
+	close(release)
+
+	select {
+	case <-acquired:
+	case <-time.After(2 * time.Second):
+		t.Fatal(acquiredFP + " did not fire after release")
+	}
+
+	return done
+}
+
+// TestPutMetaStoreCannotRaceConcurrentRegistrationAndBury guards against
+// PutMetaStore's wasKnown snapshot going stale: a request that reads
+// wasKnown=false, then pauses before putStoreImpl runs, can't let a second,
+// fully-completed register-then-bury of the same store ID land in between --
+// storeStateLock must serialize the whole thing.
+func TestPutMetaStoreCannotRaceConcurrentRegistrationAndBury(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	backend := storage.NewStorageWithMemoryBackend()
+	rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, backend)
+
+	const storeID = uint64(1)
+	meta := &metapb.Store{
+		Id:      storeID,
+		Address: "mock://tikv-1:1",
+		State:   metapb.StoreState_Up,
+		Version: "2.0.0",
+	}
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	const putFP = "github.com/tikv/pd/server/cluster/putMetaStoreAfterWasKnownRead"
+	re.NoError(failpoint.EnableCall(putFP, func() {
+		close(entered)
+		<-release
+	}))
+	defer func() { re.NoError(failpoint.Disable(putFP)) }()
+
+	putDone := make(chan error, 1)
+	go func() {
+		putDone <- rc.PutMetaStore(meta)
+	}()
+
+	// Wait for PutMetaStore to reach the point right after reading wasKnown --
+	// proof it already holds storeStateLock.
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("PutMetaStore did not reach the wasKnown-read barrier")
+	}
+
+	// A full register-then-bury of the same ID must not be able to acquire
+	// storeStateLock while PutMetaStore holds it.
+	const buryFP = "github.com/tikv/pd/server/cluster/buryStoreAfterStateLock"
+	buryDone := assertBlockedThenReleased(t, re, buryFP, release, func() error {
+		store := core.NewStoreInfo(&metapb.Store{Id: storeID, State: metapb.StoreState_Up})
+		rc.PutStore(store)
+		rc.PutStore(store.Clone(core.SetStoreState(metapb.StoreState_Offline, true)))
+		return rc.BuryStore(storeID, false)
+	})
+
+	re.NoError(<-putDone)
+	re.NoError(<-buryDone)
+
+	re.True(rc.GetStore(storeID).IsRemoved())
+	_, ok := opt.GetScheduleConfig().StoreLimit[storeID]
+	re.False(ok, "the bury that ran after PutMetaStore released the lock must be the final word on this store's limit")
+}
+
+// TestPutMetaStoreCannotRaceConcurrentManualTombstoneRemoval guards against
+// RemoveTombStoneRecords' deleteStore call resurrecting a store PutMetaStore
+// is mid-flight on: PutMetaStore can correctly read wasKnown=true (the store
+// is still tombstoned at that instant), but if RemoveTombStoneRecords then
+// deletes it before PutMetaStore reaches putStoreImpl, putStoreImpl observes
+// nil and takes the brand-new-store path anyway, durably recreating both the
+// store and its limit despite wasKnown having been read correctly.
+// storeStateLock must serialize the whole thing.
+func TestPutMetaStoreCannotRaceConcurrentManualTombstoneRemoval(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	backend := storage.NewStorageWithMemoryBackend()
+	rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, backend)
+
+	store := newTestStores(1, "2.0.0")[0]
+	rc.PutStore(store)
+	rc.AddStoreLimit(store.GetMeta())
+	rc.PutStore(store.Clone(core.SetStoreState(metapb.StoreState_Offline, true)))
+	re.NoError(rc.BuryStore(store.GetID(), false))
+	_, ok := opt.GetScheduleConfig().StoreLimit[store.GetID()]
+	re.False(ok)
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	const putFP = "github.com/tikv/pd/server/cluster/putMetaStoreAfterWasKnownRead"
+	re.NoError(failpoint.EnableCall(putFP, func() {
+		close(entered)
+		<-release
+	}))
+	defer func() { re.NoError(failpoint.Disable(putFP)) }()
+
+	// Models a request whose gRPC preflight saw this store as known (it still
+	// is -- tombstoned, but not yet manually removed).
+	putDone := make(chan error, 1)
+	go func() {
+		putDone <- rc.PutMetaStore(store.GetMeta())
+	}()
+
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("PutMetaStore did not reach the wasKnown-read barrier")
+	}
+
+	// A manual remove-tombstone for the same store must not be able to
+	// acquire storeStateLock while PutMetaStore holds it.
+	const removeFP = "github.com/tikv/pd/server/cluster/removeTombStoneRecordsAfterStateLock"
+	removeDone := assertBlockedThenReleased(t, re, removeFP, release, rc.RemoveTombStoneRecords)
+
+	re.NoError(<-putDone)
+	re.NoError(<-removeDone)
+
+	// The manual removal that ran after PutMetaStore released the lock must
+	// be the final word: the store is gone for good, not resurrected.
+	re.Nil(rc.GetStore(store.GetID()))
+	_, ok = opt.GetScheduleConfig().StoreLimit[store.GetID()]
+	re.False(ok)
+}
+
+// TestAdjustNetworkSlowStoreCannotRepublishAfterBury guards against
+// adjustNetworkSlowStore's metric write resurrecting storeTriggerNetworkSlowEvict
+// after a bury that lands between the pre-write removed-store check and the
+// write. This must model a bury that is *not* followed by final deletion in
+// the same call: GetAvgNetworkSlowScore already happens to fall back to 0
+// (and so trips the pre-existing "recovering" branch's own cleanup a few
+// lines down) once a store is fully gone from StoresInfo, which would mask
+// this test from ever exercising the fix under test -- confirmed by running
+// this test with the fix reverted using a bury+delete scenario instead: it
+// still passed, because that unrelated branch cleaned up the series on its
+// own. A tombstoned-but-not-yet-deleted store keeps reporting its last
+// (frozen) score, which stays above the recovery threshold, so nothing else
+// cleans up the write; only the fix's own post-write recheck (which keys off
+// IsRemoved(), not mere absence) does.
+func TestAdjustNetworkSlowStoreCannotRepublishAfterBury(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	defer storeTriggerNetworkSlowEvict.Reset()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	backend := storage.NewStorageWithMemoryBackend()
+	rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, backend)
+
+	stores := newTestStores(2, "2.0.0")
+	for _, s := range stores {
+		rc.PutStore(s)
+	}
+	targetID := stores[0].GetID()
+	// The only other store reports targetID's network as fully problematic,
+	// so its average score alone clears the evict threshold.
+	rc.PutStore(stores[0].Clone(func(s *core.StoreInfo) {
+		s.GetStoreStats().NetworkSlowScores = map[uint64]uint64{stores[1].GetID(): 100}
+	}))
+	re.GreaterOrEqual(rc.GetAvgNetworkSlowScore(targetID), uint64(networkSlowStoreEvictThreshold))
+	rc.PutStore(rc.GetStore(targetID).Clone(core.SetStoreState(metapb.StoreState_Offline, true)))
+
+	const fp = "github.com/tikv/pd/server/cluster/adjustNetworkSlowStoreBeforeWrite"
+	re.NoError(failpoint.EnableCall(fp, func() {
+		// Bury completes entirely within this window, between the pre-write
+		// removed-store check and the write, but final deletion does not --
+		// the store stays in StoresInfo, tombstoned, still reporting its
+		// frozen (high) score.
+		re.NoError(rc.BuryStore(targetID, false))
+	}))
+	defer func() { re.NoError(failpoint.Disable(fp)) }()
+
+	rc.adjustNetworkSlowStore(targetID)
+
+	re.True(rc.GetStore(targetID).IsRemoved())
+	re.GreaterOrEqual(rc.GetAvgNetworkSlowScore(targetID), uint64(networkSlowStoreEvictThreshold),
+		"the store's frozen score must still be high -- otherwise this test isn't exercising the fix, see the unrelated recovering-branch note above")
+	// DeleteLabelValues returns whether it found and removed a series, so a
+	// false return here proves no series exists -- unlike checking
+	// WithLabelValues' value, which would recreate a fresh (zero-valued)
+	// series regardless of whether the old one was ever cleaned up.
+	re.False(storeTriggerNetworkSlowEvict.DeleteLabelValues(strconv.FormatUint(targetID, 10)))
+}
+
 func TestPatrolRegionConcurrency(t *testing.T) {
 	re := require.New(t)
 
