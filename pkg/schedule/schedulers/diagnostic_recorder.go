@@ -93,6 +93,11 @@ func (d *DiagnosticRecorder) GetLastResult() *DiagnosticResult {
 		if result == nil {
 			return ok, ""
 		}
+		// Reaching the limit and failing to select stores are both pending,
+		// but their summaries must not be combined across a transition.
+		if result.Status == Pending && len(result.StoreStatus) == 0 {
+			return ok, Pending + "-limit"
+		}
 		return ok, result.Status
 	})
 	length := len(items)
