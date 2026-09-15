@@ -29,6 +29,7 @@ import (
 	pd "github.com/tikv/pd/client"
 	pdHttp "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/pkg/codec"
 )
 
 var (
@@ -40,7 +41,7 @@ var (
 	storesID    []uint64
 )
 
-const defaultKeyLen = 56
+const defaultSimulatorReplica = 3
 
 // InitCluster initializes the cluster.
 func InitCluster(ctx context.Context, cli pd.Client, httpCli pdHttp.Client) error {
@@ -151,6 +152,8 @@ type GRPCCreateFn func() GRPCCase
 var GRPCCaseFnMap = map[string]GRPCCreateFn{
 	"GetRegion":                newGetRegion(),
 	"GetRegionEnableFollower":  newGetRegionEnableFollower(),
+	"GetPrevRegion":            newGetPrevRegion(),
+	"GetRegionByID":            newGetRegionByID(),
 	"GetStore":                 newGetStore(),
 	"GetStores":                newGetStores(),
 	"ScanRegions":              newScanRegions(),
@@ -223,8 +226,8 @@ func (c *regionsStats) do(ctx context.Context, cli pdHttp.Client) error {
 		upperBound = 1
 	}
 	random := rand.IntN(upperBound)
-	startID := c.regionSample*random*4 + 1
-	endID := c.regionSample*(random+1)*4 + 1
+	startID := c.regionSample * random
+	endID := c.regionSample * (random + 1)
 	regionStats, err := cli.GetRegionStatusByKeyRange(ctx,
 		pdHttp.NewKeyRange(generateKeyForSimulator(startID), generateKeyForSimulator(endID)), false)
 	if Debug {
@@ -303,8 +306,8 @@ func newGetRegion() func() GRPCCase {
 }
 
 func (*getRegion) unary(ctx context.Context, cli pd.Client) error {
-	id := rand.IntN(totalRegion)*4 + 1
-	_, err := cli.GetRegion(ctx, generateKeyForSimulator(id))
+	index := rand.IntN(totalRegion)
+	_, err := cli.GetRegion(ctx, generateKeyForSimulator(index))
 	if err != nil {
 		return err
 	}
@@ -327,8 +330,59 @@ func newGetRegionEnableFollower() func() GRPCCase {
 }
 
 func (*getRegionEnableFollower) unary(ctx context.Context, cli pd.Client) error {
-	id := rand.IntN(totalRegion)*4 + 1
-	_, err := cli.GetRegion(ctx, generateKeyForSimulator(id), opt.WithAllowFollowerHandle())
+	index := rand.IntN(totalRegion)
+	_, err := cli.GetRegion(ctx, generateKeyForSimulator(index), opt.WithAllowFollowerHandle())
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+type getPrevRegion struct {
+	*baseCase
+}
+
+func newGetPrevRegion() func() GRPCCase {
+	return func() GRPCCase {
+		return &getPrevRegion{
+			baseCase: &baseCase{
+				name: "GetPrevRegion",
+				cfg:  newConfig(),
+			},
+		}
+	}
+}
+
+func (*getPrevRegion) unary(ctx context.Context, cli pd.Client) error {
+	index := 0
+	if totalRegion > 1 {
+		index = rand.IntN(totalRegion-1) + 1
+	}
+	_, err := cli.GetPrevRegion(ctx, generateKeyForSimulator(index))
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+type getRegionByID struct {
+	*baseCase
+}
+
+func newGetRegionByID() func() GRPCCase {
+	return func() GRPCCase {
+		return &getRegionByID{
+			baseCase: &baseCase{
+				name: "GetRegionByID",
+				cfg:  newConfig(),
+			},
+		}
+	}
+}
+
+func (*getRegionByID) unary(ctx context.Context, cli pd.Client) error {
+	id := generateRegionIDForSimulator(rand.IntN(totalRegion))
+	_, err := cli.GetRegionByID(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -354,9 +408,12 @@ func newScanRegions() func() GRPCCase {
 
 func (c *scanRegions) unary(ctx context.Context, cli pd.Client) error {
 	upperBound := totalRegion / c.regionSample
+	if upperBound < 1 {
+		upperBound = 1
+	}
 	random := rand.IntN(upperBound)
-	startID := c.regionSample*random*4 + 1
-	endID := c.regionSample*(random+1)*4 + 1
+	startID := c.regionSample * random
+	endID := c.regionSample * (random + 1)
 	//nolint:staticcheck
 	_, err := cli.ScanRegions(ctx, generateKeyForSimulator(startID), generateKeyForSimulator(endID), c.regionSample)
 	if err != nil {
@@ -436,9 +493,11 @@ func (*getStores) unary(ctx context.Context, cli pd.Client) error {
 }
 
 func generateKeyForSimulator(id int) []byte {
-	k := make([]byte, defaultKeyLen)
-	copy(k, fmt.Sprintf("%010d", id))
-	return k
+	return codec.GenerateTableKey(int64(id))
+}
+
+func generateRegionIDForSimulator(index int) uint64 {
+	return uint64(index*(defaultSimulatorReplica+1) + 1)
 }
 
 type getKV struct {
