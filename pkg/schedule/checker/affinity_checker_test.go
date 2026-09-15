@@ -2223,7 +2223,7 @@ func TestAffinityBestLocationFilteredByTemporarySourceState(t *testing.T) {
 	re.NotNil(fit)
 	re.True(fit.IsSatisfied())
 	re.NotEmpty(fit.RuleFits)
-	strategy := checker.strategy(region, fit.RuleFits[0].Rule, false)
+	strategy := checker.strategy(region, fit.RuleFits[0].Rule)
 	oldStoreID, newStoreID, filterByTempState := strategy.getBetterLocation(tc, region, fit, fit.RuleFits[0])
 	re.NotZero(oldStoreID)
 	re.NotZero(newStoreID)

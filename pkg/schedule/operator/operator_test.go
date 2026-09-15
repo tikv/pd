@@ -217,12 +217,11 @@ func (suite *operatorTestSuite) TestInfluence() {
 
 	BecomeNonWitness{SendStore: 2, PeerID: 2, StoreID: 1}.Influence(&opInfluence, region)
 	re.Equal(StoreInfluence{
-		LeaderSize:   0,
-		LeaderCount:  0,
-		RegionSize:   50,
-		RegionCount:  0,
-		WitnessCount: -1,
-		StepCost:     map[storelimit.Type]int64{storelimit.AddPeer: 1000},
+		LeaderSize:  0,
+		LeaderCount: 0,
+		RegionSize:  50,
+		RegionCount: 0,
+		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
 	}, *storeOpInfluence[1])
 
 	re.Equal(StoreInfluence{
@@ -551,8 +550,6 @@ func (suite *operatorTestSuite) TestOpKindValues() {
 		{"hot-region", OpHotRegion, 1 << 6},
 		{"region", OpRegion, 1 << 7},
 		{"leader", OpLeader, 1 << 8},
-		{"witness-leader", OpWitnessLeader, 1 << 9},
-		{"witness", OpWitness, 1 << 10},
 		{"split-scatter", OpSplitScatter, 1 << 11},
 	}
 	for _, testCase := range testCases {

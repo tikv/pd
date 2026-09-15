@@ -354,14 +354,12 @@ func (s *Server) startEtcd(ctx context.Context) (retErr error) {
 		return errs.ErrStartEtcd.Wrap(err).GenWithStackByCause()
 	}
 	cleanup := func() {
-		// NOTE: `embed.Etcd.Close()` can block for a long time in some failure paths
-		// (e.g. when starting a removed member that can never become ready). Avoid
-		// blocking the caller (tests may wait for the start error) by stopping the
-		// server synchronously and closing the embedded etcd asynchronously.
+		// Stop first to release client-serving goroutines waiting for readiness,
+		// then join the embedded server before callers retry or remove its data.
 		if etcd.Server != nil {
 			etcd.Server.Stop()
 		}
-		go etcd.Close()
+		etcd.Close()
 		if s.client != nil {
 			if cerr := s.client.Close(); cerr != nil {
 				log.Error("close etcd client meet error", errs.ZapError(errs.ErrCloseEtcdClient, cerr))
@@ -678,11 +676,23 @@ func (s *Server) IsClosed() bool {
 
 // Run runs the pd server.
 func (s *Server) Run() error {
-	go systimemon.StartMonitor(s.ctx, time.Now, func() {
+	return s.RunWithStartupContext(s.ctx)
+}
+
+// RunWithStartupContext runs the server, allowing etcd startup to be canceled
+// without canceling the server's lifetime context. This lets a group of servers
+// abort a failed startup attempt and retry using the same server instances.
+func (s *Server) RunWithStartupContext(ctx context.Context) error {
+	startupCtx, cancel := context.WithCancel(s.ctx)
+	stop := context.AfterFunc(ctx, cancel)
+	defer stop()
+	defer cancel()
+
+	onTimeJumpBack := func() {
 		log.Error("system time jumps backward", errs.ZapError(errs.ErrIncorrectSystemTime))
 		timeJumpBackCounter.Inc()
-	})
-	if err := s.startEtcd(s.ctx); err != nil {
+	}
+	if err := s.startEtcd(startupCtx); err != nil {
 		return err
 	}
 
@@ -690,6 +700,7 @@ func (s *Server) Run() error {
 		return err
 	}
 
+	go systimemon.StartMonitor(s.ctx, time.Now, onTimeJumpBack)
 	s.cgMonitor.StartMonitor(s.ctx)
 
 	failpoint.Inject("delayStartServerLoop", func() {

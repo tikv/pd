@@ -30,8 +30,8 @@ echo '+ Clean up existing asset file'
 rm -f ASSET_DEST_PATH
 
 echo '+ Fetch TiDB Dashboard Go module'
-go mod download
-go mod tidy
+"${DIR}/retry.sh" go mod download
+"${DIR}/retry.sh" go mod tidy
 DASHBOARD_DIR=$(go list -f "{{.Dir}}" -m github.com/pingcap/tidb-dashboard)
 echo "  - TiDB Dashboard directory: ${DASHBOARD_DIR}"
 
@@ -55,7 +55,7 @@ function download_embed_asset {
     DOWNLOAD_URL="https://github.com/pingcap/tidb-dashboard/releases/download/v${DASHBOARD_RELEASE_VERSION}/embedded-assets-golang.zip"
     DOWNLOAD_FILE=${CACHE_DIR}/embedded-assets-golang.zip
     echo "  - Download ${DOWNLOAD_URL}"
-    if ! curl -L "${DOWNLOAD_URL}" --fail --output "${DOWNLOAD_FILE}"; then
+    if ! curl -L "${DOWNLOAD_URL}" --fail --retry 3 --retry-delay 2 --connect-timeout 15 --max-time 300 --retry-max-time 180 --output "${DOWNLOAD_FILE}"; then
       echo
       echo -e "${RED}Error: Failed to download assets of TiDB Dashboard release version ${DASHBOARD_RELEASE_VERSION}.${NC}"
       if [ "${DASHBOARD_RELEASE_VERSION}" == "nightly" ]; then
@@ -113,7 +113,7 @@ function compile_asset {
     DOWNLOAD_URL="https://github.com/pingcap/tidb-dashboard/archive/${DASHBOARD_SHA}.zip"
     DOWNLOAD_FILE=${CACHE_DIR}/tidb-dashboard.zip
     echo "  - Download ${DOWNLOAD_URL}"
-    if ! curl -L "${DOWNLOAD_URL}" --fail --output "${DOWNLOAD_FILE}"; then
+    if ! curl -L "${DOWNLOAD_URL}" --fail --retry 3 --retry-delay 2 --connect-timeout 15 --max-time 300 --retry-max-time 180 --output "${DOWNLOAD_FILE}"; then
       echo
       echo -e "${RED}Error: Failed to download TiDB Dashboard source code archive.${NC}"
       exit 1

@@ -171,12 +171,16 @@ func NewTestServer(ctx context.Context, cfg *config.Config, services []string, h
 
 // Run starts to run a TestServer.
 func (s *TestServer) Run() error {
+	return s.runWithStartupContext(context.Background())
+}
+
+func (s *TestServer) runWithStartupContext(ctx context.Context) error {
 	s.Lock()
 	defer s.Unlock()
 	if s.state != Initial && s.state != Stop {
 		return errors.Errorf("server(state%d) cannot run", s.state)
 	}
-	if err := s.server.Run(); err != nil {
+	if err := s.server.RunWithStartupContext(ctx); err != nil {
 		return err
 	}
 	s.state = Running
@@ -220,7 +224,8 @@ func (s *TestServer) ResetPDLeader() {
 func (s *TestServer) ResignLeader() error {
 	s.Lock()
 	defer s.Unlock()
-	s.server.GetMember().Resign()
+	// Let the campaign loop resign the PD term after etcd leadership moves.
+	// Resetting it here races with that loop and can revoke a later term.
 	return s.server.GetMember().ResignEtcdLeader(s.server.Context(), s.server.Name(), "")
 }
 
@@ -687,16 +692,22 @@ func RunServer(server *TestServer) <-chan error {
 
 // RunServers starts to run multiple TestServer.
 func RunServers(servers []*TestServer) error {
-	res := make([]<-chan error, len(servers))
-	for i, s := range servers {
-		res[i] = RunServer(s)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	results := make(chan error, len(servers))
+	for _, s := range servers {
+		go func() { results <- s.runWithStartupContext(ctx) }()
 	}
-	for _, c := range res {
-		if err := <-c; err != nil {
-			return errors.WithStack(err)
+	var firstErr error
+	for range servers {
+		if err := <-results; err != nil && firstErr == nil {
+			firstErr = errors.WithStack(err)
+			// A sibling may be waiting for this failed member to join etcd.
+			// Cancel and join every startup before cleanup takes server locks.
+			cancel()
 		}
 	}
-	return nil
+	return firstErr
 }
 
 // RunInitialServers starts to run servers in InitialServers.
@@ -704,8 +715,8 @@ func (c *TestCluster) RunInitialServers() error {
 	return c.runInitialServersWithRetry(defaultMaxRetryTimes)
 }
 
-func (c *TestCluster) regenerateInitialServerConfigs() ([]*config.Config, error) {
-	c.config.regenerateInitialServerURLs()
+func (c *TestCluster) regenerateInitialServerConfigs(preservePeerURLs bool) ([]*config.Config, error) {
+	c.config.regenerateInitialServerURLs(preservePeerURLs)
 
 	serverConfs := make([]*config.Config, 0, len(c.config.InitialServers))
 	allOpts := append([]ConfigOption{WithGCTuner(false)}, c.opts...)
@@ -723,6 +734,13 @@ func (c *TestCluster) regenerateInitialServerConfigs() ([]*config.Config, error)
 func (c *TestCluster) runInitialServersWithRetry(maxRetries int) error {
 	if maxRetries <= 0 {
 		maxRetries = 1
+	}
+	restarting := false
+	for _, conf := range c.config.InitialServers {
+		if c.GetServer(conf.Name).State() == Stop {
+			restarting = true
+			break
+		}
 	}
 	var lastErr error
 	for i := range maxRetries {
@@ -746,17 +764,20 @@ func (c *TestCluster) runInitialServersWithRetry(maxRetries int) error {
 				zap.Int("maxRetries", maxRetries),
 				zap.Error(lastErr))
 
-			// Stop and destroy all servers
+			// A restart must retain its data and persisted peer membership. Only
+			// client URLs can be replaced without changing that membership.
 			for _, s := range servers {
 				if s.State() == Running {
 					_ = s.Stop()
 				}
-				_ = s.Destroy()
+				if !restarting {
+					_ = s.Destroy()
+				}
 			}
 
-			// Regenerate all ports before building any server configs. Generate reads
-			// every initial server's peer URL when composing the initial cluster.
-			serverConfs, err := c.regenerateInitialServerConfigs()
+			// Update URLs before building any server configs so their initial
+			// cluster definitions all describe the same peers.
+			serverConfs, err := c.regenerateInitialServerConfigs(restarting)
 			if err != nil {
 				return err
 			}

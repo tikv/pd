@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
@@ -188,15 +189,31 @@ func (s *tsoTestSuite) checkLogicalOverflow(cluster *tests.TestCluster) {
 		re.NoError(err)
 	}()
 
-	var (
-		maxDuration   time.Duration
-		lastTimestamp *pdpb.Timestamp
-	)
-	// Since the max logical count is 2 << 18 (262144), we request 20 times with 26214 count each time.
-	// This ensures that the logical part will definitely overflow once within the `updateInterval`.
-	count := (1 << 18) / 10
+	overflowCount := func() float64 {
+		metrics, err := prometheus.DefaultGatherer.Gather()
+		re.NoError(err)
+		var count float64
+		for _, family := range metrics {
+			if family.GetName() != "pd_tso_events" {
+				continue
+			}
+			for _, metric := range family.GetMetric() {
+				for _, label := range metric.GetLabel() {
+					if label.GetName() == "type" && label.GetValue() == "logical_overflow" {
+						count += metric.GetCounter().GetValue()
+					}
+				}
+			}
+		}
+		return count
+	}
+	overflowsBefore := overflowCount()
+	var lastTimestamp *pdpb.Timestamp
+	// Request more than one physical timestamp's logical range, then verify that
+	// the allocator actually handled an overflow rather than a periodic update.
+	const maxLogical = 1 << 18
+	count := maxLogical / 10
 	for range 20 {
-		begin := time.Now()
 		req := &pdpb.TsoRequest{
 			Header: testutil.NewRequestHeader(clusterID),
 			Count:  uint32(count),
@@ -204,14 +221,10 @@ func (s *tsoTestSuite) checkLogicalOverflow(cluster *tests.TestCluster) {
 		re.NoError(tsoClient.Send(req))
 		resp, err := tsoClient.Recv()
 		re.NoError(err)
-		// Record the max duration to validate whether the overflow is triggered later.
-		duration := time.Since(begin)
-		if duration > maxDuration {
-			maxDuration = duration
-		}
 		// Check the monotonicity of the timestamp.
 		timestamp := checkAndReturnTimestampResponse(re, req, resp)
 		re.NotNil(timestamp)
+		re.Less(timestamp.GetLogical(), int64(maxLogical))
 		if lastTimestamp != nil {
 			lastPhysical, curPhysical := lastTimestamp.GetPhysical(), timestamp.GetPhysical()
 			re.GreaterOrEqual(curPhysical, lastPhysical)
@@ -222,6 +235,7 @@ func (s *tsoTestSuite) checkLogicalOverflow(cluster *tests.TestCluster) {
 		}
 		lastTimestamp = timestamp
 	}
-	// Due to the overflow triggered, there at least one request duration greater than the `updateInterval`.
-	re.Greater(maxDuration, s.updateInterval)
+	// An overflow can advance physical time immediately inside the saved window;
+	// it only waits for the update interval when that window is exhausted.
+	re.Greater(overflowCount(), overflowsBefore)
 }

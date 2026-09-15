@@ -427,6 +427,11 @@ func (checker *healthChecker) initClient(ep string, opts ...CreateEtcdClientOpt)
 		return
 	}
 	checker.storeClient(ep, client, time.Now())
+	// The inspector may have already closed its snapshot while this client
+	// was being created. A late client must not outlive the guarded client.
+	if checker.client.Ctx().Err() != nil {
+		client.Close()
+	}
 }
 
 func (checker *healthChecker) storeClient(ep string, client *clientv3.Client, lastHealth time.Time) {

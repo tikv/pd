@@ -886,6 +886,9 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 			RU: &rmpb.TokenBucket{
 				Settings: &rmpb.TokenLimitSettings{
 					FillRate: 10000,
+					// Retain the initial token buffer for the bursts below. A zero
+					// burst limit uses rate-controlled loans and ignores Tokens.
+					BurstLimit: 100000,
 				},
 				Tokens: 100000,
 			},

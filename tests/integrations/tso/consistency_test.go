@@ -168,8 +168,10 @@ func (suite *tsoConsistencyTestSuite) TestRequestTSOConcurrently() {
 	lastTS := suite.requestTSOConcurrently(&pdpb.Timestamp{})
 	// Test TSO after the leader change
 	oldLeaderName := suite.pdLeaderServer.GetConfig().Name
-	suite.pdLeaderServer.GetServer().GetMember().Resign()
-	leaderName := suite.cluster.WaitLeader()
+	// Transfer leadership through the same path as the leader resignation API.
+	// Resetting the member directly races with its campaign loop.
+	re.NoError(suite.pdLeaderServer.GetServer().GetMember().ResignEtcdLeader(suite.ctx, oldLeaderName, ""))
+	leaderName := suite.cluster.WaitLeaderChange(oldLeaderName)
 	re.NotEmpty(leaderName)
 	leader := suite.cluster.GetServer(leaderName)
 	suite.pdLeaderServer = leader
@@ -177,14 +179,12 @@ func (suite *tsoConsistencyTestSuite) TestRequestTSOConcurrently() {
 		// The PD leader is published before its embedded TSO allocator becomes
 		// ready. Wait for that separate readiness condition before checking TSO
 		// consistency. A direct gRPC client has no leader discovery, so reconnect
-		// it only when another PD becomes the leader.
+		// it to the new PD leader.
 		testutil.Eventually(re, func() bool {
 			return leader.GetServer().GetTSOAllocator().IsInitialize()
 		})
-		if leaderName != oldLeaderName {
-			re.NoError(suite.conn.Close())
-			suite.pdClient, suite.conn = testutil.MustNewGrpcClient(re, leader.GetAddr())
-		}
+		re.NoError(suite.conn.Close())
+		suite.pdClient, suite.conn = testutil.MustNewGrpcClient(re, leader.GetAddr())
 	}
 	suite.requestTSOConcurrently(lastTS)
 }

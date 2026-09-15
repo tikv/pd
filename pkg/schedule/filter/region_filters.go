@@ -156,29 +156,13 @@ func isEmptyRegionAllowBalance(cluster sche.SharedCluster, region *core.RegionIn
 	return region.GetApproximateSize() > core.EmptyRegionApproximateSize || cluster.GetTotalRegionCount() < core.InitClusterRegionThreshold
 }
 
-type regionWitnessFilter struct {
-	storeID uint64
-}
-
-// NewRegionWitnessFilter returns creates a RegionFilter that filters regions with witness peer on the specific store.
-func NewRegionWitnessFilter(storeID uint64) RegionFilter {
-	return &regionWitnessFilter{storeID: storeID}
-}
-
-// Select implements the RegionFilter interface.
-func (f *regionWitnessFilter) Select(region *core.RegionInfo) *plan.Status {
-	if region.GetStoreWitness(f.storeID) != nil {
-		return statusRegionWitnessPeer
-	}
-	return statusOK
-}
-
 // SnapshotSenderFilter filer the region who's leader store reaches the limit.
 type SnapshotSenderFilter struct {
 	senders map[uint64]struct{}
 }
 
-// NewSnapshotSendFilter returns creates a RegionFilter that filters regions with witness peer on the specific store.
+// NewSnapshotSendFilter returns a RegionFilter that filters regions whose
+// leader store cannot send a snapshot.
 // level should be set as same with the operator priority level.
 func NewSnapshotSendFilter(stores []*core.StoreInfo, level constant.PriorityLevel) RegionFilter {
 	senders := make(map[uint64]struct{})

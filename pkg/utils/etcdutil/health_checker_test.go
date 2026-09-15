@@ -15,11 +15,65 @@
 package etcdutil
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
+
+func TestHealthCheckerCloseDuringClientCreation(t *testing.T) {
+	re := require.New(t)
+	_, client, cleanup := NewTestEtcdCluster(t, 1, nil)
+	defer cleanup()
+	ctx := client.Ctx()
+	creating, resume := make(chan struct{}), make(chan struct{})
+	checker := &healthChecker{
+		client:         client,
+		source:         string(TestEtcdClientPurpose),
+		tickerInterval: time.Hour,
+		clientOpts: []CreateEtcdClientOpt{func(*clientv3.Config) {
+			close(creating)
+			<-resume
+		}},
+	}
+	defer checker.close()
+	wait := func(done <-chan struct{}) {
+		t.Helper()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("health checker did not reach the expected lifecycle state")
+		}
+	}
+	syncDone, inspectDone := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(syncDone)
+		checker.syncer(ctx)
+	}()
+	go func() {
+		defer close(inspectDone)
+		checker.inspector(ctx)
+	}()
+	defer func() {
+		_ = client.Close()
+		close(resume)
+		wait(syncDone)
+		wait(inspectDone)
+	}()
+
+	wait(creating)
+	re.NoError(client.Close())
+	wait(inspectDone)
+	// Let the in-flight endpoint update publish its connection after the
+	// inspector has exited. The syncer must still close that connection.
+	resume <- struct{}{}
+	wait(syncDone)
+	healthy := checker.loadClient(client.Endpoints()[0])
+	re.NotNil(healthy)
+	re.ErrorIs(healthy.Ctx().Err(), context.Canceled)
+}
 
 type testCase struct {
 	healthProbes       []healthProbe
