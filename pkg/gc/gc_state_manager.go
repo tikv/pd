@@ -767,6 +767,25 @@ func (m *GCStateManager) DeleteGCBarrier(keyspaceID uint32, barrierID string) (*
 	return m.deleteGCBarrierImpl(ctx, keyspaceID, barrierID)
 }
 
+// ForceDeleteServiceGCSafePoint deletes a NullKeyspace service safe point for the legacy HTTP API.
+// It bypasses the normal GC barrier constraints, including the reserved gc_worker ID.
+// Deleting an absent service is successful.
+func (m *GCStateManager) ForceDeleteServiceGCSafePoint(serviceID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+		return wb.DeleteGCBarrier(constant.NullKeyspaceID, serviceID)
+	})
+	if err != nil {
+		return err
+	}
+	// Serialize cleanup with advancement so a pre-deletion barrier load cannot
+	// publish its observation after this successful deletion.
+	m.barrierMetrics.deleteMetrics(barrierMetricScope{keyspaceID: constant.NullKeyspaceID}, serviceID)
+	return nil
+}
+
 func (m *GCStateManager) deleteGCBarrierImpl(ctx context.Context, keyspaceID uint32, barrierID string) (*endpoint.GCBarrier, error) {
 	// The barrier ID (or service ID of the service safe points) is reserved for keeping backward compatibility.
 	if barrierID == keypath.GCWorkerServiceSafePointID {

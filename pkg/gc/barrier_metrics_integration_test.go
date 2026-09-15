@@ -30,6 +30,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -365,6 +366,79 @@ func (s *gcStateManagerTestSuite) TestBarrierMetricsWarningCommitAndTTL() {
 	_, err = m.SetGlobalGCBarrier(context.Background(), "global", uint64(now.UnixMilli())<<18, time.Hour, now)
 	re.NoError(err)
 	re.Empty(gatherBarrierMetrics(s.T(), registry))
+}
+
+func (s *gcStateManagerTestSuite) TestBarrierMetricsForceDeleteServiceGCSafePoint() {
+	re := s.Require()
+	now := time.Unix(2_000_000_000, 0)
+	m := s.manager
+	m.barrierMetrics.now = func() time.Time { return now }
+	registry := prometheus.NewRegistry()
+	registry.MustRegister(m.barrierMetrics)
+	ts := uint64(now.Add(-80*time.Hour).UnixMilli()) << 18
+	core, logs := observer.New(zapcore.WarnLevel)
+	restore := log.ReplaceGlobals(zap.New(core), nil)
+	defer restore()
+	_, err := m.SetGCBarrier(constant.NullKeyspaceID, "force-delete", ts, time.Duration(math.MaxInt64), now)
+	re.NoError(err)
+	_, err = m.AdvanceTxnSafePoint(constant.NullKeyspaceID, ts, now)
+	re.NoError(err)
+	expected := map[string]float64{"keyspace/4294967295/force-delete": 1_999_712_000}
+	re.Equal(expected, gatherBarrierMetrics(s.T(), registry))
+	re.Len(logs.FilterMessage("GC barrier timestamp is too old").All(), 1)
+
+	counted := &barrierMetricsTestKV{Base: s.storage.Base, fail: true}
+	m.gcMetaStorage = endpoint.NewStorageEndpoint(counted, nil).GetGCStateProvider()
+	re.Error(m.ForceDeleteServiceGCSafePoint("force-delete"))
+	re.Equal(expected, gatherBarrierMetrics(s.T(), registry), "failed commit must retain the observation")
+	counted.fail = false
+	_, err = m.AdvanceTxnSafePoint(constant.NullKeyspaceID, ts, now)
+	re.NoError(err)
+	re.Len(logs.FilterMessage("GC barrier timestamp is too old").All(), 1, "failed deletion must retain warning suppression")
+
+	beforeLoads, beforeRanges := counted.loads, counted.ranges
+	re.NoError(m.ForceDeleteServiceGCSafePoint("force-delete"))
+	re.Empty(gatherBarrierMetrics(s.T(), registry))
+	re.Equal(beforeLoads+1, counted.loads, "force deletion only reads the transaction revision")
+	re.Equal(beforeRanges, counted.ranges)
+	re.NoError(m.ForceDeleteServiceGCSafePoint("force-delete"), "deleting an absent service is idempotent")
+	re.Nil(s.getGCBarrier(constant.NullKeyspaceID, "force-delete"))
+
+	_, err = m.SetGCBarrier(constant.NullKeyspaceID, "force-delete", ts, time.Duration(math.MaxInt64), now)
+	re.NoError(err)
+	re.Empty(gatherBarrierMetrics(s.T(), registry), "recreation alone must not discover the barrier")
+	_, err = m.AdvanceTxnSafePoint(constant.NullKeyspaceID, ts, now)
+	re.NoError(err)
+	re.Equal(expected, gatherBarrierMetrics(s.T(), registry))
+	re.Len(logs.FilterMessage("GC barrier timestamp is too old").All(), 2, "successful deletion must reset warning suppression")
+
+	// Cleanup must also succeed when storage no longer contains an observed barrier.
+	re.NoError(s.provider.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+		return wb.DeleteGCBarrier(constant.NullKeyspaceID, "force-delete")
+	}))
+	re.NoError(m.ForceDeleteServiceGCSafePoint("force-delete"))
+	re.Empty(gatherBarrierMetrics(s.T(), registry))
+}
+
+func (s *gcStateManagerTestSuite) TestForceDeleteServiceGCSafePointCompatibility() {
+	re := s.Require()
+	const barrierID = keypath.GCWorkerServiceSafePointID
+	barrier := endpoint.NewGCBarrier(barrierID, 100, nil)
+	re.NoError(s.provider.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+		return wb.SetGCBarrier(constant.NullKeyspaceID, barrier)
+	}))
+	_, err := s.manager.DeleteGCBarrier(constant.NullKeyspaceID, barrierID)
+	re.ErrorIs(err, errs.ErrReservedGCBarrierID)
+	stored, err := s.provider.LoadGCBarrier(constant.NullKeyspaceID, barrierID)
+	re.NoError(err)
+	re.Equal(barrier, stored)
+	_, err = s.manager.DeleteGCBarrier(constant.NullKeyspaceID, "")
+	re.ErrorIs(err, errs.ErrInvalidArgument)
+	re.NoError(s.manager.ForceDeleteServiceGCSafePoint(barrierID))
+	stored, err = s.provider.LoadGCBarrier(constant.NullKeyspaceID, barrierID)
+	re.NoError(err)
+	re.Nil(stored)
+	re.NoError(s.manager.ForceDeleteServiceGCSafePoint(barrierID))
 }
 
 func (s *gcStateManagerTestSuite) TestBarrierMetricsStateUpdatesPreserveObservations() {
