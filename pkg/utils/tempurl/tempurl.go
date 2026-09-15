@@ -50,8 +50,10 @@ func Alloc() string {
 }
 
 func tryAllocTestURL() string {
-	if url := getFromUT(); url != "" {
-		return url
+	if os.Getenv(AllocURLFromUT) != "" {
+		// The shared allocator coordinates ports across test subprocesses. A local
+		// fallback would create a second allocation domain and allow duplicates.
+		return getFromUT()
 	}
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -88,11 +90,17 @@ func getFromUT() string {
 	if err != nil {
 		return ""
 	}
+	// The allocator outlives test subprocesses, so do not leave idle connection
+	// goroutines running when a subprocess checks for leaks.
+	req.Close = true
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil || resp.StatusCode != http.StatusOK {
+	if err != nil {
 		return ""
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return ""
+	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return ""
