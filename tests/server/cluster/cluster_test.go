@@ -1313,6 +1313,234 @@ func getStore(re *require.Assertions, clusterID uint64, grpcPDClient pdpb.PDClie
 	return resp.GetStore()
 }
 
+func getAllStores(ctx context.Context, re *require.Assertions, clusterID uint64, grpcPDClient pdpb.PDClient) []*metapb.Store {
+	resp, err := grpcPDClient.GetAllStores(ctx, &pdpb.GetAllStoresRequest{
+		Header:                 testutil.NewRequestHeader(clusterID),
+		ExcludeTombstoneStores: true,
+	})
+	re.NoError(err)
+	re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
+	return resp.GetStores()
+}
+
+// requireTxnProtocolVersionRange asserts the txn protocol version range returned
+// by the in-memory cache, GetStore and GetAllStores.
+func requireTxnProtocolVersionRange(
+	ctx context.Context,
+	re *require.Assertions,
+	rc *cluster.RaftCluster,
+	clusterID uint64,
+	grpcPDClient pdpb.PDClient,
+	storeID uint64,
+	expected *metapb.TxnProtocolVersionRange,
+) int {
+	re.NotNil(rc)
+	check := func(store *metapb.Store) {
+		actual := store.GetTxnProtocolVersionRange()
+		if expected == nil {
+			re.Nil(actual)
+			return
+		}
+		re.NotNil(actual)
+		re.Equal(expected.GetMin(), actual.GetMin())
+		re.Equal(expected.GetMax(), actual.GetMax())
+	}
+	// The in-memory cache of the PD leader.
+	store := rc.GetStore(storeID)
+	re.NotNil(store)
+	check(store.GetMeta())
+	// GetStore.
+	check(getStore(re, clusterID, grpcPDClient, storeID))
+	// GetAllStores. The range must be carried by the same entry which is returned
+	// for the store, so only one match is accepted.
+	stored := getAllStores(ctx, re, clusterID, grpcPDClient)
+	matches := 0
+	for _, s := range stored {
+		if s.GetId() != storeID {
+			continue
+		}
+		matches++
+		check(s)
+	}
+	re.Equal(1, matches)
+	return len(stored)
+}
+
+func newTxnProtocolVersionRangeStore(storeID uint64, addr string, versionRange *metapb.TxnProtocolVersionRange) *metapb.Store {
+	store := newMetaStore(storeID, addr, "6.5.0", metapb.StoreState_Up, getTestDeployPath(storeID))
+	store.TxnProtocolVersionRange = versionRange
+	return store
+}
+
+// TestStoreTxnProtocolVersionRange verifies that the txn protocol version range
+// reported through PutStore is persisted, returned by the query APIs and
+// restored after a PD restart.
+//
+// The stores use addresses which must not collide with the bootstrapped store
+// ("mock://tikv-1:1"), so all of them are derived from the store ID.
+func TestStoreTxnProtocolVersionRange(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	dashboard.SetCheckInterval(30 * time.Minute)
+	tc, err := tests.NewTestCluster(ctx, 1)
+	defer tc.Destroy()
+	re.NoError(err)
+
+	const (
+		// Pre-existing stores loaded through LoadStores.
+		nilRangeStoreID    uint64 = 2
+		emptyRangeStoreID  uint64 = 3
+		futureRangeStoreID uint64 = 4
+		// The store of which the range is updated through PutStore.
+		updateStoreID uint64 = 5
+		// The range is cleared on it, and it must stay cleared after the restart.
+		clearedStoreID uint64 = 6
+		// Stores which are registered through PutStore for the first time.
+		newNilRangeStoreID     uint64 = 7
+		newEmptyRangeStoreID   uint64 = 8
+		newNonZeroRangeStoreID uint64 = 9
+	)
+	storeAddr := func(storeID uint64) string {
+		return fmt.Sprintf("mock://tikv-txn-%d:1", storeID)
+	}
+	// A non-zero range which is beyond any protocol version known by PD must be
+	// stored as is.
+	futureRange := &metapb.TxnProtocolVersionRange{Min: 3, Max: 4}
+	seeded := map[uint64]*metapb.TxnProtocolVersionRange{
+		nilRangeStoreID:    nil,
+		emptyRangeStoreID:  {},
+		futureRangeStoreID: futureRange,
+	}
+	re.NoError(tc.RunInitialServers())
+	tc.WaitLeader()
+	leaderServer := tc.GetLeaderServer()
+	// The stores are seeded before the cluster is bootstrapped so that they are
+	// loaded through LoadStores when the leader starts the RaftCluster.
+	storage := leaderServer.GetServer().GetStorage()
+	for storeID, versionRange := range seeded {
+		re.NoError(storage.SaveStoreMeta(newTxnProtocolVersionRangeStore(storeID, storeAddr(storeID), versionRange)))
+	}
+
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	defer conn.Close()
+	clusterID := leaderServer.GetClusterID()
+	bootstrapCluster(re, clusterID, grpcPDClient)
+	rc := leaderServer.GetRaftCluster()
+	re.NotNil(rc)
+
+	// The seeded stores are loaded from the storage.
+	for storeID, versionRange := range seeded {
+		requireTxnProtocolVersionRange(ctx, re, rc, clusterID, grpcPDClient, storeID, versionRange)
+	}
+
+	// Registering a store which does not exist yet must carry the reported range
+	// as well.
+	registerAndCheck := func(storeID uint64, versionRange *metapb.TxnProtocolVersionRange) {
+		resp, err := putStore(grpcPDClient, clusterID, newTxnProtocolVersionRangeStore(storeID, storeAddr(storeID), versionRange))
+		re.NoError(err)
+		re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
+		requireTxnProtocolVersionRange(ctx, re, rc, clusterID, grpcPDClient, storeID, versionRange)
+	}
+	registerAndCheck(newNilRangeStoreID, nil)
+	registerAndCheck(newEmptyRangeStoreID, &metapb.TxnProtocolVersionRange{})
+	registerAndCheck(newNonZeroRangeStoreID, &metapb.TxnProtocolVersionRange{Min: 1, Max: 2})
+
+	// The range of an existing store follows the last successful PutStore
+	// registration. The binary version and the other fields stay unchanged, so
+	// the updates below cannot be attributed to a semver change.
+	// The ranges which are expected after the updates below, keyed by the store ID.
+	expected := make(map[uint64]*metapb.TxnProtocolVersionRange)
+	putAndCheck := func(storeID uint64, versionRange *metapb.TxnProtocolVersionRange) {
+		store := newTxnProtocolVersionRangeStore(storeID, storeAddr(storeID), versionRange)
+		resp, err := putStore(grpcPDClient, clusterID, store)
+		re.NoError(err)
+		re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
+		expected[storeID] = versionRange
+		requireTxnProtocolVersionRange(ctx, re, rc, clusterID, grpcPDClient, storeID, versionRange)
+	}
+	putAndCheck(updateStoreID, &metapb.TxnProtocolVersionRange{Min: 0, Max: 1})
+	putAndCheck(updateStoreID, &metapb.TxnProtocolVersionRange{Min: 0, Max: 2})
+	// The upper bound is allowed to be lowered to reflect a rollback.
+	putAndCheck(updateStoreID, &metapb.TxnProtocolVersionRange{Min: 0, Max: 1})
+	// Reporting the same value again is idempotent.
+	putAndCheck(updateStoreID, &metapb.TxnProtocolVersionRange{Min: 0, Max: 1})
+	// An explicit empty range keeps its presence.
+	putAndCheck(updateStoreID, &metapb.TxnProtocolVersionRange{})
+	// A missing range clears the previously stored value.
+	putAndCheck(updateStoreID, nil)
+	// A malformed range is stored as is instead of being normalized.
+	putAndCheck(updateStoreID, &metapb.TxnProtocolVersionRange{Min: 2, Max: 1})
+
+	// Cleared ranges must stay cleared, so keep one store untouched afterwards.
+	putAndCheck(clearedStoreID, &metapb.TxnProtocolVersionRange{Min: 0, Max: 2})
+	putAndCheck(clearedStoreID, nil)
+
+	// The label APIs, which do not carry the range in their own data, must keep
+	// the stored range because they clone the whole old metadata.
+	putAndCheck(updateStoreID, &metapb.TxnProtocolVersionRange{Min: 0, Max: 2})
+	labeledStore := newTxnProtocolVersionRangeStore(updateStoreID, storeAddr(updateStoreID), &metapb.TxnProtocolVersionRange{Min: 0, Max: 2})
+	labeledStore.Labels = []*metapb.StoreLabel{{Key: "zone", Value: "z2"}, {Key: "host", Value: "h1"}}
+	resp, err := putStore(grpcPDClient, clusterID, labeledStore)
+	re.NoError(err)
+	re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
+
+	// The labels are merged with the existing ones, so "host" is kept.
+	re.NoError(rc.UpdateStoreLabels(updateStoreID, []*metapb.StoreLabel{{Key: "zone", Value: "z3"}}, false))
+	got := getStore(re, clusterID, grpcPDClient, updateStoreID)
+	re.Len(got.GetLabels(), 2)
+	re.Equal("z3", got.GetLabels()[0].GetValue())
+	re.Equal("h1", got.GetLabels()[1].GetValue())
+	requireTxnProtocolVersionRange(ctx, re, rc, clusterID, grpcPDClient, updateStoreID, &metapb.TxnProtocolVersionRange{Min: 0, Max: 2})
+
+	re.NoError(rc.DeleteStoreLabel(updateStoreID, "zone"))
+	got = getStore(re, clusterID, grpcPDClient, updateStoreID)
+	re.Len(got.GetLabels(), 1)
+	re.Equal("h1", got.GetLabels()[0].GetValue())
+	// All the stores of this test are registered by now, so the count reported by
+	// GetAllStores can be captured for the restart check below.
+	storeCount := requireTxnProtocolVersionRange(ctx, re, rc, clusterID, grpcPDClient, updateStoreID, &metapb.TxnProtocolVersionRange{Min: 0, Max: 2})
+	// The bootstrapped store plus the eight stores created above.
+	re.Equal(9, storeCount)
+
+	// Restart the same PD server with its data directory kept.
+	re.NoError(leaderServer.Stop())
+	re.NoError(leaderServer.Run())
+	re.NotEmpty(tc.WaitLeader())
+	leaderServer = tc.GetLeaderServer()
+	grpcPDClient, conn = testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	defer conn.Close()
+	clusterID = leaderServer.GetClusterID()
+	// The RaftCluster is rebuilt asynchronously once the server becomes leader.
+	var restartedRC *cluster.RaftCluster
+	testutil.Eventually(re, func() bool {
+		restartedRC = leaderServer.GetRaftCluster()
+		return restartedRC != nil && restartedRC.GetStore(clearedStoreID) != nil
+	})
+	// Check the store of which the range was cleared first, so that a failed
+	// persistence is reported on the missing range instead of on the map lookup.
+	// The loop below covers it as well, because its last accepted range was nil.
+	requireTxnProtocolVersionRange(ctx, re, restartedRC, clusterID, grpcPDClient, clearedStoreID, nil)
+	// The updated store keeps its range.
+	for storeID, versionRange := range expected {
+		requireTxnProtocolVersionRange(ctx, re, restartedRC, clusterID, grpcPDClient, storeID, versionRange)
+	}
+	// The stores which are not in the expected map are restored as they were.
+	for storeID, versionRange := range seeded {
+		if _, ok := expected[storeID]; ok {
+			continue
+		}
+		requireTxnProtocolVersionRange(ctx, re, restartedRC, clusterID, grpcPDClient, storeID, versionRange)
+	}
+	// The stores which have been registered through PutStore keep the presence
+	// and the value which were accepted before the restart.
+	requireTxnProtocolVersionRange(ctx, re, restartedRC, clusterID, grpcPDClient, newNilRangeStoreID, nil)
+	lastCount := requireTxnProtocolVersionRange(ctx, re, restartedRC, clusterID, grpcPDClient, newEmptyRangeStoreID, &metapb.TxnProtocolVersionRange{})
+	requireTxnProtocolVersionRange(ctx, re, restartedRC, clusterID, grpcPDClient, newNonZeroRangeStoreID, &metapb.TxnProtocolVersionRange{Min: 1, Max: 2})
+	// No store is lost by the restart.
+	re.Equal(storeCount, lastCount)
+}
+
 func getRegion(re *require.Assertions, clusterID uint64, grpcPDClient pdpb.PDClient, regionKey []byte) *metapb.Region {
 	resp, err := grpcPDClient.GetRegion(context.Background(), &pdpb.GetRegionRequest{
 		Header:    testutil.NewRequestHeader(clusterID),

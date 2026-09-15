@@ -76,6 +76,20 @@ func SetStoreDeployPath(deployPath string) StoreCreateOption {
 	}
 }
 
+// SetStoreTxnProtocolVersionRange sets the txn protocol version range for the store.
+// The range reported by the last successful PutStore replaces the previous one entirely:
+// a nil range clears the stored value, while a non-nil one (including an empty
+// [0, 0] message) is copied to keep its presence.
+func SetStoreTxnProtocolVersionRange(versionRange *metapb.TxnProtocolVersionRange) StoreCreateOption {
+	return func(store *StoreInfo) {
+		meta := typeutil.DeepClone(store.meta, StoreFactory)
+		meta.TxnProtocolVersionRange = typeutil.DeepClone(versionRange, func() *metapb.TxnProtocolVersionRange {
+			return &metapb.TxnProtocolVersionRange{}
+		})
+		store.meta = meta
+	}
+}
+
 // SetStoreState sets the state for the store.
 func SetStoreState(state metapb.StoreState, physicallyDestroyed ...bool) StoreCreateOption {
 	return func(store *StoreInfo) {
@@ -333,6 +347,9 @@ func SetStoreMeta(newMeta *metapb.Store) StoreCreateOption {
 		meta.Labels = newMeta.GetLabels()
 		meta.NodeState = newMeta.GetNodeState()
 		meta.PhysicallyDestroyed = newMeta.GetPhysicallyDestroyed()
+		meta.TxnProtocolVersionRange = typeutil.DeepClone(newMeta.GetTxnProtocolVersionRange(), func() *metapb.TxnProtocolVersionRange {
+			return &metapb.TxnProtocolVersionRange{}
+		})
 		store.meta = meta
 	}
 }

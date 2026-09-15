@@ -97,6 +97,114 @@ func TestCloneMetaStore(t *testing.T) {
 	re.NotEqual(store2.Labels, store.Labels)
 }
 
+// requireTxnProtocolVersionRange asserts the presence and the value of the txn
+// protocol version range carried by the given store.
+func requireTxnProtocolVersionRange(re *require.Assertions, store *StoreInfo, expected *metapb.TxnProtocolVersionRange) {
+	actual := store.GetMeta().GetTxnProtocolVersionRange()
+	if expected == nil {
+		re.Nil(actual)
+		return
+	}
+	re.NotNil(actual)
+	re.Equal(expected.GetMin(), actual.GetMin())
+	re.Equal(expected.GetMax(), actual.GetMax())
+}
+
+func TestStoreTxnProtocolVersionRange(t *testing.T) {
+	re := require.New(t)
+	meta := &metapb.Store{Id: 1, Address: "mock://tikv-1:1", Version: "6.5.0"}
+	store := NewStoreInfo(meta)
+	re.Nil(store.GetMeta().GetTxnProtocolVersionRange())
+
+	// Set, replace and lower the range by the dedicated option.
+	store = store.Clone(SetStoreTxnProtocolVersionRange(&metapb.TxnProtocolVersionRange{Min: 0, Max: 2}))
+	requireTxnProtocolVersionRange(re, store, &metapb.TxnProtocolVersionRange{Min: 0, Max: 2})
+	store = store.Clone(SetStoreTxnProtocolVersionRange(&metapb.TxnProtocolVersionRange{Min: 0, Max: 1}))
+	requireTxnProtocolVersionRange(re, store, &metapb.TxnProtocolVersionRange{Min: 0, Max: 1})
+
+	// An explicit empty range keeps its presence.
+	store = store.Clone(SetStoreTxnProtocolVersionRange(&metapb.TxnProtocolVersionRange{}))
+	re.NotNil(store.GetMeta().GetTxnProtocolVersionRange())
+	requireTxnProtocolVersionRange(re, store, &metapb.TxnProtocolVersionRange{})
+
+	// A missing range clears the stored one.
+	store = store.Clone(SetStoreTxnProtocolVersionRange(nil))
+	re.Nil(store.GetMeta().GetTxnProtocolVersionRange())
+}
+
+func TestStoreTxnProtocolVersionRangePresenceAndSnapshotIsolation(t *testing.T) {
+	re := require.New(t)
+	store := NewStoreInfo(&metapb.Store{Id: 1, Address: "mock://tikv-1:1"})
+	re.Nil(store.GetMeta().GetTxnProtocolVersionRange())
+
+	// An explicit empty range survives the round trip of a full store clone.
+	emptyRange := store.Clone(SetStoreTxnProtocolVersionRange(&metapb.TxnProtocolVersionRange{}))
+	re.NotNil(emptyRange.GetMeta().GetTxnProtocolVersionRange())
+	re.Zero(emptyRange.GetMeta().GetTxnProtocolVersionRange().GetMin())
+	re.Zero(emptyRange.GetMeta().GetTxnProtocolVersionRange().GetMax())
+	re.NotNil(typeutil.DeepClone(emptyRange.GetMeta(), StoreFactory).GetTxnProtocolVersionRange())
+
+	// Mutating the input range does not affect the generated snapshot.
+	input := &metapb.TxnProtocolVersionRange{Min: 0, Max: 1}
+	withRange := store.Clone(SetStoreTxnProtocolVersionRange(input))
+	requireTxnProtocolVersionRange(re, withRange, &metapb.TxnProtocolVersionRange{Min: 0, Max: 1})
+	input.Min, input.Max = 3, 4
+	requireTxnProtocolVersionRange(re, withRange, &metapb.TxnProtocolVersionRange{Min: 0, Max: 1})
+
+	// Applying the option does not modify the previous snapshot.
+	requireTxnProtocolVersionRange(re, store, nil)
+	cleared := withRange.Clone(SetStoreTxnProtocolVersionRange(nil))
+	re.Nil(cleared.GetMeta().GetTxnProtocolVersionRange())
+	requireTxnProtocolVersionRange(re, withRange, &metapb.TxnProtocolVersionRange{Min: 0, Max: 1})
+
+	// ShallowClone keeps the meta as is until the option is applied.
+	shallow := withRange.ShallowClone(SetStoreTxnProtocolVersionRange(&metapb.TxnProtocolVersionRange{Min: 1, Max: 2}))
+	requireTxnProtocolVersionRange(re, shallow, &metapb.TxnProtocolVersionRange{Min: 1, Max: 2})
+	requireTxnProtocolVersionRange(re, withRange, &metapb.TxnProtocolVersionRange{Min: 0, Max: 1})
+
+	// The range keeps the same presence and value when it is written back to the cache.
+	storesInfo := NewStoresInfo()
+	storesInfo.PutStore(withRange)
+	opts := []StoreCreateOption{SetStoreTxnProtocolVersionRange(&metapb.TxnProtocolVersionRange{Min: 3, Max: 4})}
+	storesInfo.PutStore(withRange.Clone(opts...), opts...)
+	requireTxnProtocolVersionRange(re, storesInfo.GetStore(1), &metapb.TxnProtocolVersionRange{Min: 3, Max: 4})
+}
+
+func TestSetStoreMetaTxnProtocolVersionRange(t *testing.T) {
+	re := require.New(t)
+	newMeta := func(versionRange *metapb.TxnProtocolVersionRange) *metapb.Store {
+		return &metapb.Store{
+			Id:                      1,
+			Address:                 "mock://tikv-1:2",
+			Version:                 "6.6.0",
+			DeployPath:              "test/store1-new",
+			TxnProtocolVersionRange: versionRange,
+		}
+	}
+
+	store := NewStoreInfo(&metapb.Store{Id: 1, Address: "mock://tikv-1:1", Version: "6.5.0", NodeState: metapb.NodeState_Serving})
+	heartbeat := time.Now().Add(-time.Minute)
+	store = store.Clone(SetLastHeartbeatTS(heartbeat))
+
+	// SetStoreMeta copies the range reported by the new meta.
+	updated := store.Clone(SetStoreMeta(newMeta(&metapb.TxnProtocolVersionRange{Min: 0, Max: 2})))
+	requireTxnProtocolVersionRange(re, updated, &metapb.TxnProtocolVersionRange{Min: 0, Max: 2})
+	re.Equal("mock://tikv-1:2", updated.GetMeta().GetAddress())
+	re.Equal("test/store1-new", updated.GetMeta().GetDeployPath())
+
+	// An explicit empty range keeps its presence.
+	emptyRange := store.Clone(SetStoreMeta(newMeta(&metapb.TxnProtocolVersionRange{})))
+	re.NotNil(emptyRange.GetMeta().GetTxnProtocolVersionRange())
+	requireTxnProtocolVersionRange(re, emptyRange, &metapb.TxnProtocolVersionRange{})
+
+	// A missing range clears the stored one without touching LastHeartbeat nor
+	// the other fields which are not maintained by SetStoreMeta.
+	cleared := updated.Clone(SetStoreMeta(newMeta(nil)))
+	re.Nil(cleared.GetMeta().GetTxnProtocolVersionRange())
+	re.Equal(heartbeat.UnixNano(), cleared.GetMeta().GetLastHeartbeat())
+	re.Equal(updated.GetMeta().GetNodeState(), cleared.GetMeta().GetNodeState())
+}
+
 func BenchmarkStoreClone(b *testing.B) {
 	meta := &metapb.Store{Id: 1,
 		Address: "mock://tikv-1:1",

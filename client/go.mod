@@ -44,3 +44,7 @@ require (
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+// TODO: Remove this replace directive after https://github.com/pingcap/kvproto/pull/1534 is merged
+// and the dependency is updated to a merged version.
+replace github.com/pingcap/kvproto => github.com/zyguan/kvproto v0.0.0-20260915101029-a933797cff4c
