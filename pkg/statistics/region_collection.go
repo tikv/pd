@@ -15,6 +15,7 @@
 package statistics
 
 import (
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -486,7 +487,7 @@ func notIsolatedStoresWithLabel(stores []*core.StoreInfo, label string) [][]*cor
 	valueStoresMap := make(map[string][]*core.StoreInfo)
 
 	for _, s := range stores {
-		labelValue := s.GetLabelValue(label)
+		labelValue := strings.ToLower(s.GetLabelValue(label))
 		if labelValue == "" {
 			emptyValueStores = append(emptyValueStores, s)
 		} else {

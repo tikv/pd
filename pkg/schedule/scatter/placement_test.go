@@ -685,6 +685,8 @@ func TestScatterHostProtection(t *testing.T) {
 		{"missing-target-label", []string{"zone", "host"}, [][]string{{"A", "a"}, {"A", "b"}, {"A", "c"}, {"B", ""}}, 3, 1},
 		{"missing-source-label", []string{"zone", "host"}, [][]string{{"A", "a"}, {"A", ""}, {"A", "c"}, {"B", "d"}}, 3, 1},
 		{"case-insensitive-host", []string{"zone", "host"}, [][]string{{"A", "a"}, {"A", "b"}, {"A", "c"}, {"B", "d"}, {"b", "D"}}, 4, 1},
+		{"case-insensitive-existing-collision", []string{"host"}, [][]string{{"a"}, {"A"}, {"B"}, {"A"}}, 3, 4},
+		{"case-insensitive-existing-hierarchy", []string{"zone", "host"}, [][]string{{"A", "a"}, {"a", "A"}, {"B", "b"}, {"a", "a"}}, 3, 4},
 		{"single-voter", []string{"host"}, [][]string{{""}, {"a"}}, 1, 2},
 		{"no-host-level", []string{"zone"}, [][]string{{"A"}, {"A"}, {"A"}, {"B"}}, 3, 4},
 	}
