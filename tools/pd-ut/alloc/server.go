@@ -15,6 +15,7 @@
 package alloc
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -34,10 +35,11 @@ import (
 var statusAddress = flag.String("status-addr", "127.0.0.1:0", "status address")
 
 // RunHTTPServer runs a HTTP server to provide alloc address.
-func RunHTTPServer() *http.Server {
+func RunHTTPServer(ctx context.Context) *http.Server {
 	// Bind before publishing the allocator URL so child test processes always
 	// receive the actual port and can connect as soon as they start.
-	listener, err := net.Listen("tcp", *statusAddress)
+	var lc net.ListenConfig
+	listener, err := lc.Listen(ctx, "tcp", *statusAddress)
 	if err != nil {
 		log.Fatal("allocator server listen error", zap.Error(err))
 	}
