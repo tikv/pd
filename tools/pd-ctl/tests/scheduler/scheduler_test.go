@@ -829,6 +829,12 @@ func (suite *schedulerTestSuite) checkSchedulerDiagnostic(cluster *pdTests.TestC
 	re.Contains(echo, "Success!")
 	echo = tests.MustExec(re, cmd, []string{"-u", pdAddr, "config", "set", "region-schedule-limit", "0"}, nil)
 	re.Contains(echo, "Success!")
+	// Recreate the scheduler after setting the limit so diagnostic results and
+	// scheduling backoff from earlier tests do not affect the reach-limit check.
+	echo = tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", "balance-region-scheduler"}, nil)
+	re.Contains(echo, "Success!")
+	echo = tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-region-scheduler"}, nil)
+	re.Contains(echo, "Success!")
 	checkSchedulerDescribeCommand("balance-region-scheduler", "pending", "balance-region-scheduler reach limit")
 
 	// scheduler delete command
