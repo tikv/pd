@@ -398,7 +398,7 @@ func TestGetLeader(t *testing.T) {
 	re.NotNil(leaderServer)
 
 	// Send requests after server has started.
-	go sendRequest(re, wg, done, leaderServer.GetAddr())
+	go sendRequest(ctx, re, wg, done, leaderServer.GetAddr())
 	time.Sleep(100 * time.Millisecond)
 
 	re.NotNil(leaderServer.GetLeader())
@@ -407,7 +407,7 @@ func TestGetLeader(t *testing.T) {
 	wg.Wait()
 }
 
-func sendRequest(re *require.Assertions, wg *sync.WaitGroup, done <-chan bool, addr string) {
+func sendRequest(ctx context.Context, re *require.Assertions, wg *sync.WaitGroup, done <-chan bool, addr string) {
 	defer wg.Done()
 
 	req := &pdpb.AllocIDRequest{Header: testutil.NewRequestHeader(0)}
@@ -419,9 +419,9 @@ func sendRequest(re *require.Assertions, wg *sync.WaitGroup, done <-chan bool, a
 		default:
 			// We don't need to check the response and error,
 			// just make sure the server will not panic.
-			grpcPDClient, conn := testutil.MustNewGrpcClient(re, addr)
+			grpcPDClient, conn := testutil.MustNewGRPCClient(ctx, re, addr)
 			if grpcPDClient != nil {
-				_, _ = grpcPDClient.AllocID(context.Background(), req)
+				_, _ = grpcPDClient.AllocID(ctx, req)
 			}
 			if conn != nil {
 				conn.Close()

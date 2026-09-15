@@ -74,7 +74,7 @@ func (suite *routerClientSuite) SetupSuite() {
 
 	re.NotEmpty(suite.cluster.WaitLeader())
 	leader := suite.cluster.GetLeaderServer()
-	suite.grpcPDClient, suite.conn = testutil.MustNewGrpcClient(re, leader.GetAddr())
+	suite.grpcPDClient, suite.conn = testutil.MustNewGRPCClient(suite.ctx, re, leader.GetAddr())
 	suite.client = setupCli(suite.ctx, re, endpoints,
 		opt.WithEnableRouterClient(suite.routerClientEnabled),
 		opt.WithEnableFollowerHandle(true))

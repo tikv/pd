@@ -76,7 +76,7 @@ func (s *tsoProxyTestSuite) SetupTest() {
 		}
 	}
 
-	s.pdClient, s.conn = testutil.MustNewGrpcClient(re, s.follower.GetAddr())
+	s.pdClient, s.conn = testutil.MustNewGRPCClient(s.T().Context(), re, s.follower.GetAddr())
 	clusterID := s.leader.GetClusterID()
 	s.defaultReq = &pdpb.TsoRequest{
 		Header: testutil.NewRequestHeader(clusterID),
@@ -145,7 +145,7 @@ func (s *tsoProxyTestSuite) verifyProxyIsHealthyWith(client pdpb.PD_TsoClient) {
 
 func (s *tsoProxyTestSuite) TestRejectFollowerForwardedHost() {
 	re := s.Require()
-	client, conn := testutil.MustNewGrpcClient(re, s.leader.GetAddr())
+	client, conn := testutil.MustNewGRPCClient(s.T().Context(), re, s.leader.GetAddr())
 	defer conn.Close()
 
 	s.verifyForwardedHostRejected(client, s.follower.GetAddr())

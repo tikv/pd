@@ -87,7 +87,7 @@ func newGCStateLeaderTransitionCluster(t *testing.T) (*tests.TestCluster, *pdpb.
 }
 
 func getGCStateFromAddr(ctx context.Context, re *require.Assertions, addr string, req *pdpb.GetGCStateRequest) (*pdpb.GetGCStateResponse, error) {
-	grpcPDClient, conn := testutil.MustNewGrpcClient(re, addr)
+	grpcPDClient, conn := testutil.MustNewGRPCClient(ctx, re, addr)
 	defer conn.Close()
 	return grpcPDClient.GetGCState(ctx, req)
 }
@@ -162,7 +162,7 @@ func TestGCOperations(t *testing.T) {
 	})
 	re.NoError(err)
 
-	grpcPDClient, conn := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	grpcPDClient, conn := testutil.MustNewGRPCClient(t.Context(), re, leaderServer.GetAddr())
 	defer conn.Close()
 	clusterID := leaderServer.GetClusterID()
 	header := testutil.NewRequestHeader(clusterID)
@@ -725,7 +725,7 @@ func TestGetGCStateReturnsCachedStateIfLeaderLostBeforeReply(t *testing.T) {
 	point := enableBlockingFailpoint(re, postGetGCStateCallFailpoint)
 	defer point.releaseAndDisable(re)
 
-	grpcPDClient, conn := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	grpcPDClient, conn := testutil.MustNewGRPCClient(t.Context(), re, leaderServer.GetAddr())
 	defer conn.Close()
 
 	type result struct {
@@ -791,7 +791,7 @@ func TestGetGCStateReturnsCachedStateAfterLeadershipRecovery(t *testing.T) {
 	point := enableBlockingFailpoint(re, postGetGCStateCallFailpoint)
 	defer point.releaseAndDisable(re)
 
-	grpcPDClient, conn := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	grpcPDClient, conn := testutil.MustNewGRPCClient(t.Context(), re, leaderServer.GetAddr())
 	defer conn.Close()
 
 	type result struct {
@@ -850,7 +850,7 @@ func TestGetGCStateSlowPathReadsLatestStateIfLeaderLostBeforeRead(t *testing.T) 
 	point := enableBlockingFailpoint(re, getGCStateBeforeSlowPathFailpoint)
 	defer point.releaseAndDisable(re)
 
-	grpcPDClient, conn := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	grpcPDClient, conn := testutil.MustNewGRPCClient(t.Context(), re, leaderServer.GetAddr())
 	defer conn.Close()
 
 	type result struct {

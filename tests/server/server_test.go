@@ -159,7 +159,7 @@ func TestGRPCRateLimit(t *testing.T) {
 	leaderServer := cluster.GetServer(leader)
 	clusterID := leaderServer.GetClusterID()
 	addr := leaderServer.GetAddr()
-	grpcPDClient, conn := testutil.MustNewGrpcClient(re, addr)
+	grpcPDClient, conn := testutil.MustNewGRPCClient(t.Context(), re, addr)
 	defer conn.Close()
 	err = leaderServer.BootstrapCluster()
 	re.NoError(err)
@@ -240,7 +240,7 @@ func TestGRPCRateLimit(t *testing.T) {
 		}
 	}()
 
-	grpcPDClient1, conn1 := testutil.MustNewGrpcClient(re, addr)
+	grpcPDClient1, conn1 := testutil.MustNewGRPCClient(t.Context(), re, addr)
 	defer conn1.Close()
 	go func() {
 		defer wg.Done()
