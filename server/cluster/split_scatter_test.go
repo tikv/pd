@@ -60,9 +60,10 @@ func TestHandleAskBatchSplitSchedulesSplitScatterInPatrol(t *testing.T) {
 		resp.GetIds()[0].GetNewRegionId(),
 		resp.GetIds()[1].GetNewRegionId(),
 	}
-	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), newSplitScatterRegion(100, []byte(""), []byte("m"), splitScatterNoCPUUsage).Clone(core.WithIncVersion())))
-	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), newSplitScatterRegion(splitRegionIDs[0], []byte("m"), []byte("t"), splitScatterReportedCPUUsage)))
-	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), newSplitScatterRegion(splitRegionIDs[1], []byte("t"), []byte(""), splitScatterReportedCPUUsage)))
+	// TiKV sets source and both children to oldVersion+2.
+	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), newSplitScatterRegion(100, []byte(""), []byte("m"), splitScatterNoCPUUsage).Clone(core.SetRegionVersion(3))))
+	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), newSplitScatterRegion(splitRegionIDs[0], []byte("m"), []byte("t"), splitScatterReportedCPUUsage).Clone(core.SetRegionVersion(3))))
+	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), newSplitScatterRegion(splitRegionIDs[1], []byte("t"), []byte(""), splitScatterReportedCPUUsage).Clone(core.SetRegionVersion(3))))
 
 	dispatchSplitScatterInPatrol(t, cluster, cancelPatrol, func() bool {
 		return cluster.GetOperatorController().GetOperator(splitRegionIDs[0]) != nil &&
@@ -107,7 +108,7 @@ func TestHandleAskBatchSplitSeedsIndexBaselineForFirstSplitRegion(t *testing.T) 
 	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), newSplitScatterRegion(100, newSplitScatterIndexKey("w"), newSplitScatterIndexKey("z"), splitScatterNoCPUUsage).Clone(core.WithIncVersion())))
 	re.NoError(cluster.processRegionHeartbeat(
 		core.ContextTODO(),
-		newSplitScatterRegion(splitRegionID, newSplitScatterIndexKey("t"), newSplitScatterIndexKey("w"), splitScatterReportedCPUUsage),
+		newSplitScatterRegion(splitRegionID, newSplitScatterIndexKey("t"), newSplitScatterIndexKey("w"), splitScatterReportedCPUUsage).Clone(core.WithIncVersion()),
 	))
 
 	dispatchSplitScatterInPatrol(t, cluster, cancelPatrol, func() bool {
@@ -220,11 +221,11 @@ func newSplitScatterRegionWithStores(regionID uint64, start, end []byte, cpuUsag
 			Version: 1,
 		},
 	}
-	return core.NewRegionInfo(
-		region,
-		peers[0],
-		core.SetCPUUsage(cpuUsage),
-	)
+	return core.RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{
+		Region:   region,
+		Leader:   peers[0],
+		CpuStats: &pdpb.CPUStats{UnifiedRead: cpuUsage},
+	}, 0)
 }
 
 func newSplitScatterIndexKey(suffix string) []byte {

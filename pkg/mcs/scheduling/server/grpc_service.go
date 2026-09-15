@@ -478,8 +478,8 @@ func (s *Service) AskBatchSplit(_ context.Context, request *schedulingpb.AskBatc
 		newRegionIDs := recordRegions[:len(recordRegions)-1]
 		c.GetCoordinator().GetCheckerController().RecordSplitScatterBatch(
 			reqRegion.GetId(),
-			// Wait until PD observes the source region version advanced by the split.
-			reqRegion.GetRegionEpoch().GetVersion()+1,
+			// TiKV assigns every result region oldVersion+len(split requests).
+			reqRegion.GetRegionEpoch().GetVersion()+uint64(len(newRegionIDs)),
 			newRegionIDs,
 		)
 	}
