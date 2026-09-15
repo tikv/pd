@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/server"
 	serverconfig "github.com/tikv/pd/server/config"
 )
 
@@ -132,6 +133,11 @@ func cleanupClusterConfig(t *testing.T, config *clusterConfig) {
 
 func TestRunInitialServersRetriesPortConflict(t *testing.T) {
 	re := require.New(t)
+	// Keep the fallback timeout above the cancellation assertion so a broken
+	// cancellation path cannot pass by waiting for the etcd startup timeout.
+	oldTimeout := server.EtcdStartTimeout
+	server.EtcdStartTimeout = 30 * time.Second
+	t.Cleanup(func() { server.EtcdStartTimeout = oldTimeout })
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cluster, err := NewTestCluster(ctx, 2)
