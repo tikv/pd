@@ -15,6 +15,9 @@
 package tests
 
 import (
+	"context"
+	"net"
+	"net/url"
 	"os"
 	"testing"
 	"time"
@@ -122,4 +125,44 @@ func cleanupClusterConfig(t *testing.T, config *clusterConfig) {
 			require.NoError(t, os.RemoveAll(dataDir))
 		})
 	}
+}
+
+func TestRunInitialServersRetriesPortConflict(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := NewTestCluster(ctx, 2)
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	// Fail the second member while the first waits for quorum. Startup must
+	// observe the error out of order, cancel the first member, and join both
+	// goroutines before destroying their data and retrying with new ports.
+	conf := cluster.config.InitialServers[1]
+	peerURL, err := url.Parse(conf.PeerURLs)
+	re.NoError(err)
+	listener, err := net.Listen("tcp", peerURL.Host)
+	re.NoError(err)
+	defer listener.Close()
+	conflictingURL := conf.PeerURLs
+
+	result := make(chan error, 1)
+	go func() { result <- cluster.RunInitialServers() }()
+	select {
+	case err := <-result:
+		re.NoError(err)
+	case <-time.After(20 * time.Second):
+		cancel()
+		<-result
+		t.Fatal("startup did not cancel the sibling waiting for quorum")
+	}
+	re.NotEqual(conflictingURL, conf.PeerURLs)
+	for _, s := range cluster.servers {
+		re.Equal(Running, s.State())
+	}
+	// The successful attempt must outlive the startup context.
+	re.NotEmpty(cluster.WaitLeader())
+	re.NoError(cluster.StopAll())
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
 }
