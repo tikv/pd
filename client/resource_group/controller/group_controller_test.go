@@ -120,6 +120,32 @@ func TestCalcAvgSkipsNonPositiveDeltaDuration(t *testing.T) {
 	re.Positive(counter.avgRUPerSec)
 }
 
+func TestUpdateAvgRequestResourcePerSecFeedsRUMaxPerSec(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+	// Swap in a tracker with a unique name so the shared gauge children never
+	// collide with the other tests built on the "test" group.
+	name := "test-ru-max-per-sec-wiring"
+	gc.metrics.ruMaxPerSec = newRUMaxPerSecTracker(name)
+	defer gc.metrics.ruMaxPerSec.deleteLabels(name)
+	gauge := func(ruType string) float64 {
+		return gaugeValue(re, metrics.RUMaxPerSecGauge.WithLabelValues(name, ruType))
+	}
+
+	// Same tick as `initRunState`: calcAvg rejects the sample, so the tracker
+	// must not be fed either.
+	gc.run.consumption.RRU, gc.run.consumption.WRU = 40, 60
+	gc.updateAvgRequestResourcePerSec()
+	re.Zero(gauge(ruTypeTotal), "tracker must be skipped when calcAvg rejects the sample")
+
+	// One second later the state-update tick feeds the tracker.
+	gc.run.now = gc.run.now.Add(time.Second)
+	gc.updateAvgRequestResourcePerSec()
+	re.InDelta(40, gauge(requestSourceRUTypeRRU), 1e-9)
+	re.InDelta(60, gauge(requestSourceRUTypeWRU), 1e-9)
+	re.InDelta(100, gauge(ruTypeTotal), 1e-9)
+}
+
 func TestSmallPositiveConsumptionDoesNotBypassThreshold(t *testing.T) {
 	re := require.New(t)
 	gc := createTestGroupCostController(re)
@@ -1355,8 +1381,8 @@ func TestRUMaxPerSecTracker(t *testing.T) {
 		wru      float64
 		duration time.Duration
 	}
-	// rampTicks returns n consecutive 1s ticks that each add step RRU, starting
-	// from the given cumulative value.
+	// rampTicks returns n consecutive 1s ticks that each add step RRU (negative
+	// for refunds), starting from the given cumulative value.
 	rampTicks := func(n int, from, step float64) []tick {
 		ticks := make([]tick, 0, n)
 		for range n {
@@ -1382,6 +1408,12 @@ func TestRUMaxPerSecTracker(t *testing.T) {
 		{
 			name:        "refund alone clamps to zero instead of going negative",
 			ticks:       []tick{{rru: -50, duration: time.Second}},
+			expectedRRU: 0,
+			expectedRU:  0,
+		},
+		{
+			name:        "refunds filling the whole window still clamp to zero",
+			ticks:       rampTicks(ruMaxPerSecWindowSize, 0, -10),
 			expectedRRU: 0,
 			expectedRU:  0,
 		},
