@@ -501,6 +501,9 @@ func (c *Config) String() string {
 // PDServerConfig is the configuration for pd server.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type PDServerConfig struct {
+	// GCBarrierWarningAge is the minimum timestamp age for request-driven GC
+	// barrier warnings. It must be at least the fixed 24-hour reporting threshold.
+	GCBarrierWarningAge typeutil.Duration `toml:"gc-barrier-warning-age" json:"gc-barrier-warning-age"`
 	// UseRegionStorage enables the independent region storage.
 	UseRegionStorage bool `toml:"use-region-storage" json:"use-region-storage,string"`
 	// MaxResetTSGap is the max gap to reset the TSO.
@@ -532,6 +535,9 @@ type PDServerConfig struct {
 }
 
 func (c *PDServerConfig) adjust(meta *configutil.ConfigMetaData) error {
+	if !meta.IsDefined("gc-barrier-warning-age") {
+		configutil.AdjustDuration(&c.GCBarrierWarningAge, 72*time.Hour)
+	}
 	configutil.AdjustDuration(&c.MaxResetTSGap, defaultMaxResetTSGap)
 	if !meta.IsDefined("use-region-storage") {
 		c.UseRegionStorage = defaultUseRegionStorage
@@ -605,6 +611,9 @@ func (c *PDServerConfig) Clone() *PDServerConfig {
 
 // Validate is used to validate if some pd-server configurations are right.
 func (c *PDServerConfig) Validate() error {
+	if c.GCBarrierWarningAge.Duration < 24*time.Hour {
+		return errors.New("gc-barrier-warning-age must be at least 24h")
+	}
 	switch c.DashboardAddress {
 	case "auto":
 	case "none":

@@ -14,10 +14,31 @@
 
 package gc
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"sync/atomic"
+
+	"github.com/prometheus/client_golang/prometheus"
+)
+
+// The registry owns one forwarding collector, never a list of GC managers.
+// Its pointer is attached only while a production manager is leader.
+type activeBarrierMetrics struct {
+	current atomic.Pointer[barrierMetrics]
+}
+
+// Describe implements prometheus.Collector.
+func (*activeBarrierMetrics) Describe(ch chan<- *prometheus.Desc) { ch <- barrierTimestampDesc }
+
+// Collect forwards to the currently active leader without retaining old managers.
+func (c *activeBarrierMetrics) Collect(ch chan<- prometheus.Metric) {
+	if current := c.current.Load(); current != nil {
+		current.Collect(ch)
+	}
+}
 
 var (
-	gcSafePointGauge = prometheus.NewGaugeVec(
+	productionBarrierMetrics = &activeBarrierMetrics{}
+	gcSafePointGauge         = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
 			Subsystem: "gc",
@@ -38,6 +59,7 @@ var (
 )
 
 func init() {
+	prometheus.MustRegister(productionBarrierMetrics)
 	prometheus.MustRegister(gcSafePointGauge)
 	prometheus.MustRegister(gcStateCacheAccessCounter)
 }
