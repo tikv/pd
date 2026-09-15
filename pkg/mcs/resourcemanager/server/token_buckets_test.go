@@ -429,3 +429,71 @@ func TestBalanceSlotTokensFillRateAllocation(t *testing.T) {
 		}
 	}
 }
+
+func TestServiceLimitedClientAllocation(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		fillRate      uint64
+		burstLimit    int64
+		overrideFill  float64
+		overrideBurst int64
+		wantHot       int64
+		wantCold      int64
+	}{
+		{"unlimited group", UnlimitedRate, -1, -1, 160000, 92500, 67500},
+		{"lower service budget", UnlimitedRate, -1, -1, 120000, 72500, 47500},
+		{"hot demand above equal share", UnlimitedRate, -1, -1, 80000, 55000, 25000},
+		{"both demands above equal share", UnlimitedRate, -1, -1, 40000, 20000, 20000},
+		{"moderated group", UnlimitedRate, -2, -1, 160000, 92500, 67500},
+		{"finite refill below budget", 100000, -1, -1, 160000, 100000, 60000},
+		{"overridden refill", UnlimitedRate, -1, 100000, 100000, 62500, 37500},
+		{"explicit burst", UnlimitedRate, 160000, -1, 120000, 60000, 59999},
+		{"rate controlled", UnlimitedRate, 0, -1, 120000, 60000, 59999},
+		{"service disabled", UnlimitedRate, -1, -1, -1, -1, -1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			gtb := NewGroupTokenBucket(testResourceGroupName, &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{FillRate: tc.fillRate, BurstLimit: tc.burstLimit},
+			})
+			gtb.overrideFillRate = tc.overrideFill
+			gtb.overrideBurstLimit = tc.overrideBurst
+			gtb.grt = newGroupRUTracker()
+			now := time.Now()
+			for i, demand := range []float64{50000, 25000} {
+				id := uint64(i + 1)
+				gtb.tokenSlots[id] = newTokenSlot(id, now)
+				rt := gtb.grt.getOrCreateRUTracker(id)
+				rt.initialized = true
+				rt.lastSampleTime = now
+				rt.lastEMA = demand
+			}
+			fillRate := gtb.getFillRate()
+			const tokensForBalance = 10000.0
+			gtb.balanceSlotTokens(now, 1, 1, tokensForBalance)
+			re.Equal(fillRate, gtb.getFillRate())
+			re.Equal(tc.fillRate, gtb.Settings.FillRate)
+			re.Equal(tc.burstLimit, gtb.Settings.BurstLimit)
+			re.Equal(tc.wantHot, gtb.tokenSlots[1].burstLimit)
+			re.Equal(tc.wantCold, gtb.tokenSlots[2].burstLimit)
+			re.InDelta(fillRate, float64(gtb.tokenSlots[1].fillRate)+float64(gtb.tokenSlots[2].fillRate), 2)
+			if tc.overrideBurst > 0 {
+				for _, slot := range gtb.tokenSlots {
+					// Refill and newly assigned tokens must use the same share as capacity.
+					ratio := float64(slot.burstLimit) / float64(tc.overrideBurst)
+					re.InDelta(ratio, float64(slot.fillRate)/fillRate, 1/float64(tc.overrideBurst))
+					re.InDelta(ratio, slot.curTokenCapacity/tokensForBalance, 1/float64(tc.overrideBurst))
+					re.Equal(slot.curTokenCapacity, slot.lastTokenCapacity)
+				}
+				re.InDelta(tokensForBalance, gtb.tokenSlots[1].curTokenCapacity+gtb.tokenSlots[2].curTokenCapacity, 1e-7)
+				// Removing the other client restores the whole group allocation.
+				gtb.Tokens = tokensForBalance
+				gtb.balanceSlotTokens(now, 2, 0, 0)
+				re.Len(gtb.tokenSlots, 1)
+				re.Equal(uint64(fillRate), gtb.tokenSlots[1].fillRate)
+				re.Equal(tc.overrideBurst, gtb.tokenSlots[1].burstLimit)
+				re.Equal(tokensForBalance, gtb.tokenSlots[1].curTokenCapacity)
+			}
+		})
+	}
+}
