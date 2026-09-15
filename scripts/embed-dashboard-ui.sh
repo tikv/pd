@@ -55,7 +55,7 @@ function download_embed_asset {
     DOWNLOAD_URL="https://github.com/pingcap/tidb-dashboard/releases/download/v${DASHBOARD_RELEASE_VERSION}/embedded-assets-golang.zip"
     DOWNLOAD_FILE=${CACHE_DIR}/embedded-assets-golang.zip
     echo "  - Download ${DOWNLOAD_URL}"
-    if ! curl -L "${DOWNLOAD_URL}" --fail --retry 3 --retry-connrefused --retry-delay 2 --connect-timeout 15 --max-time 300 --retry-max-time 180 --output "${DOWNLOAD_FILE}"; then
+    if ! curl -L "${DOWNLOAD_URL}" --fail --retry 3 --retry-delay 2 --connect-timeout 15 --max-time 300 --retry-max-time 180 --output "${DOWNLOAD_FILE}"; then
       echo
       echo -e "${RED}Error: Failed to download assets of TiDB Dashboard release version ${DASHBOARD_RELEASE_VERSION}.${NC}"
       if [ "${DASHBOARD_RELEASE_VERSION}" == "nightly" ]; then
@@ -113,7 +113,7 @@ function compile_asset {
     DOWNLOAD_URL="https://github.com/pingcap/tidb-dashboard/archive/${DASHBOARD_SHA}.zip"
     DOWNLOAD_FILE=${CACHE_DIR}/tidb-dashboard.zip
     echo "  - Download ${DOWNLOAD_URL}"
-    if ! curl -L "${DOWNLOAD_URL}" --fail --retry 3 --retry-connrefused --retry-delay 2 --connect-timeout 15 --max-time 300 --retry-max-time 180 --output "${DOWNLOAD_FILE}"; then
+    if ! curl -L "${DOWNLOAD_URL}" --fail --retry 3 --retry-delay 2 --connect-timeout 15 --max-time 300 --retry-max-time 180 --output "${DOWNLOAD_FILE}"; then
       echo
       echo -e "${RED}Error: Failed to download TiDB Dashboard source code archive.${NC}"
       exit 1
