@@ -752,6 +752,86 @@ func (suite *keyspaceTestSuite) TestLoadRangeKeyspace() {
 	re.Error(err)
 }
 
+// TestLoadKeyspacePopulatesCache verifies that LoadKeyspace and LoadKeyspaceByID
+// warm the in-memory cache as a side effect, so a freshly constructed Manager
+// (simulating a process restart) does not need a separate query to make a
+// previously created keyspace visible to cache-only lookups such as
+// GetKeyspaceIDInRange.
+func TestLoadKeyspacePopulatesCache(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	allocator := mockid.NewIDAllocator()
+	kgm := NewKeyspaceGroupManager(ctx, store, nil)
+	manager := NewKeyspaceManager(ctx, store, nil, allocator, &mockConfig{}, kgm, nil)
+	re.NoError(kgm.Bootstrap(ctx))
+	re.NoError(manager.Bootstrap())
+
+	id := uint32(150)
+	_, err := manager.CreateKeyspaceByID(&CreateKeyspaceByIDRequest{
+		ID:         &id,
+		Name:       "ks150",
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+
+	// A fresh Manager sharing the same storage starts with an empty cache,
+	// simulating a process restart.
+	fresh := NewKeyspaceManager(ctx, store, nil, allocator, &mockConfig{}, kgm, nil)
+	_, ok := fresh.cache.getKeyspaceByID(id)
+	re.False(ok, "freshly constructed Manager should start with an empty cache")
+
+	_, err = fresh.LoadKeyspaceByID(id)
+	re.NoError(err)
+	item, ok := fresh.cache.getKeyspaceByID(id)
+	re.True(ok, "LoadKeyspaceByID should populate the cache")
+	re.Equal(id, item.keyspaceID)
+
+	fresh2 := NewKeyspaceManager(ctx, store, nil, allocator, &mockConfig{}, kgm, nil)
+	_, err = fresh2.LoadKeyspace("ks150")
+	re.NoError(err)
+	item, ok = fresh2.cache.getKeyspaceByID(id)
+	re.True(ok, "LoadKeyspace should populate the cache")
+	re.Equal(id, item.keyspaceID)
+}
+
+func (suite *keyspaceTestSuite) TestGetKeyspaceIDInRange() {
+	re := suite.Require()
+	manager := suite.manager
+	requests := makeCreateKeyspaceByIDRequests(5)
+	for _, request := range requests {
+		_, err := manager.CreateKeyspaceByID(request)
+		re.NoError(err)
+	}
+
+	ids, ok := manager.GetKeyspaceIDInRange(2, 5, 1)
+	re.True(ok)
+	re.Equal([]uint32{5}, ids)
+
+	ids, ok = manager.GetKeyspaceIDInRange(1, 4, 1)
+	re.True(ok)
+	re.Equal([]uint32{4}, ids)
+
+	ids, ok = manager.GetKeyspaceIDInRange(1, 6, 1)
+	re.True(ok)
+	re.Equal([]uint32{5}, ids)
+
+	ids, ok = manager.GetKeyspaceIDInRange(6, 10, 1)
+	re.False(ok)
+	re.Empty(ids)
+
+	// limit > 1 should return multiple IDs in descending order.
+	ids, ok = manager.GetKeyspaceIDInRange(1, 5, 3)
+	re.True(ok)
+	re.Equal([]uint32{5, 4, 3}, ids)
+
+	// limit larger than the number of matches should return all of them.
+	ids, ok = manager.GetKeyspaceIDInRange(1, 5, 10)
+	re.True(ok)
+	re.Equal([]uint32{5, 4, 3, 2, 1}, ids)
+}
+
 // TestUpdateMultipleKeyspace checks that updating multiple keyspace's config simultaneously
 // will be successful.
 func (suite *keyspaceTestSuite) TestUpdateMultipleKeyspace() {

@@ -73,7 +73,7 @@ func TestCollectStorageSize(t *testing.T) {
 	)
 	re.NoError(tc.putRegion(meteredRegion))
 
-	storageSizeInfoList := tc.collectStorageSize(tc.regionLabeler, keyspaceManager)
+	storageSizeInfoList := tc.collectStorageSize(keyspaceManager)
 	re.Len(storageSizeInfoList, 10)
 	// Sort the storage size info list by the keyspace name.
 	sort.Slice(storageSizeInfoList, func(i, j int) bool {
