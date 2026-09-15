@@ -35,7 +35,7 @@ func TestRunHTTPServerPublishesReachableAddress(t *testing.T) {
 	*statusAddress = "127.0.0.1:0"
 	t.Cleanup(func() { *statusAddress = originalAddress })
 
-	srv := RunHTTPServer()
+	srv := RunHTTPServer(t.Context())
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -47,7 +47,9 @@ func TestRunHTTPServerPublishesReachableAddress(t *testing.T) {
 	re.NoError(err)
 	re.NotEqual("0", parsedAllocatorURL.Port())
 
-	req, err := http.NewRequest(http.MethodGet, allocatorURL, nil)
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, allocatorURL, nil)
 	re.NoError(err)
 	resp, err := http.DefaultClient.Do(req)
 	re.NoError(err)

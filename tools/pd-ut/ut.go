@@ -173,7 +173,7 @@ func main() {
 		fmt.Println("os.Getwd() error", err)
 	}
 
-	srv := alloc.RunHTTPServer()
+	srv := alloc.RunHTTPServer(context.Background())
 	defer func() {
 		if err := srv.Shutdown(context.Background()); err != nil {
 			log.Fatal("server shutdown error", zap.Error(err))
