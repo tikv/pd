@@ -8284,7 +8284,7 @@
               "expr": "rate(pd_schedule_scatter_operators_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"fail\"}[1m])*60",
               "format": "time_series",
               "intervalFactor": 2,
-              "legendFormat": "fail",
+              "legendFormat": "fail-{{event}}",
               "refId": "B"
             },
             {
