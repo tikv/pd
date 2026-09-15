@@ -1033,3 +1033,31 @@ func TestAdjustMetaServiceGroups(t *testing.T) {
 		})
 	}
 }
+
+func TestGCBarrierWarningAgeConfig(t *testing.T) {
+	for _, tc := range []struct {
+		value   string
+		want    time.Duration
+		invalid bool
+	}{
+		{"", 72 * time.Hour, false}, {"24h", 24 * time.Hour, false}, {"96h", 96 * time.Hour, false},
+		{"23h59m59.999s", 0, true}, {"0s", 0, true}, {"-1h", 0, true},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			cfg := NewConfig()
+			text := ""
+			if tc.value != "" {
+				text = "[pd-server]\ngc-barrier-warning-age = \"" + tc.value + "\"\n"
+			}
+			meta, err := toml.Decode(text, cfg)
+			require.NoError(t, err)
+			err = cfg.Adjust(&meta, false)
+			if tc.invalid {
+				require.ErrorContains(t, err, "gc-barrier-warning-age must be at least 24h")
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.want, cfg.PDServerCfg.GCBarrierWarningAge.Duration)
+		})
+	}
+}
