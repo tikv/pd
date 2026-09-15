@@ -151,9 +151,10 @@ func CollectMetrics(curRound int, wait time.Duration) {
 		metrics2Collect[i].value = 0
 		metrics2Collect[i].samples = 0
 	}
-	// retry 5 times to get average value
+	// Sample five times, preserving maxima for resource metrics.
 	res := make([]struct {
 		sum   float64
+		max   float64
 		count int
 	}, len(metrics2Collect))
 	for sample := range 5 {
@@ -163,6 +164,9 @@ func CollectMetrics(curRound int, wait time.Duration) {
 				log.Error("get metric error", zap.String("name", m.name), zap.String("prom sql", m.promSQL), zap.Error(err))
 			} else if len(r) > 0 {
 				res[j].sum += r[0]
+				if res[j].count == 0 || r[0] > res[j].max {
+					res[j].max = r[0]
+				}
 				res[j].count += 1
 			}
 		}
@@ -173,6 +177,9 @@ func CollectMetrics(curRound int, wait time.Duration) {
 	getRes := func(index int) float64 {
 		if res[index].count == 0 {
 			return 0
+		}
+		if metrics2Collect[index].max {
+			return res[index].max
 		}
 		return res[index].sum / float64(res[index].count)
 	}

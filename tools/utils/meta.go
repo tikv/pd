@@ -165,13 +165,14 @@ func WithRandomSeed(seed uint64) RegionOption {
 
 // Regions simulates all regions to heartbeat.
 type Regions struct {
-	regionCount  int
-	replicaCount int
-	maxVersion   uint64
-	regionSize   uint64
-	regionKeys   uint64
-	reportOrder  []int
-	rng          *rand.Rand
+	regionCount         int
+	replicaCount        int
+	maxVersion          uint64
+	regionSize          uint64
+	regionKeys          uint64
+	reportOrder         []int
+	rng                 *rand.Rand
+	lastReportTimestamp uint64
 	// Regions is the list of all regions to heartbeat.
 	Regions []*pdpb.RegionHeartbeatRequest
 	// AwakenRegions contains the Regions that report in the current round.
@@ -197,16 +198,18 @@ func NewRegions(regionCount, replicaCount, storeCount int, header *pdpb.RequestH
 		opt(&options)
 	}
 	rng := rand.New(rand.NewPCG(options.randomSeed, options.randomSeed^0x9e3779b97f4a7c15))
+	now := uint64(time.Now().Unix())
 	rs := &Regions{
-		regionCount:  regionCount,
-		replicaCount: replicaCount,
-		Regions:      make([]*pdpb.RegionHeartbeatRequest, 0, regionCount),
-		UpdateRound:  0,
-		maxVersion:   options.initialVersion,
-		regionSize:   options.regionSize,
-		regionKeys:   options.regionKeys,
-		reportOrder:  make([]int, regionCount),
-		rng:          rng,
+		regionCount:         regionCount,
+		replicaCount:        replicaCount,
+		Regions:             make([]*pdpb.RegionHeartbeatRequest, 0, regionCount),
+		UpdateRound:         0,
+		maxVersion:          options.initialVersion,
+		regionSize:          options.regionSize,
+		regionKeys:          options.regionKeys,
+		reportOrder:         make([]int, regionCount),
+		rng:                 rng,
+		lastReportTimestamp: now,
 	}
 	for i := range rs.reportOrder {
 		rs.reportOrder[i] = i
@@ -219,7 +222,6 @@ func NewRegions(regionCount, replicaCount, storeCount int, header *pdpb.RequestH
 
 	// Generate regions
 	id := uint64(1)
-	now := uint64(time.Now().Unix())
 
 	for i := range regionCount {
 		region := &pdpb.RegionHeartbeatRequest{
@@ -343,11 +345,14 @@ func (rs *Regions) Update(options *config.Options) {
 	rs.AwakenRegions.Store(awakenRegions)
 }
 
-// PrepareReportIntervals updates reporting Regions with the actual round start
-// time. A Region that wakes up after silent rounds reports the whole interval
-// since its previous heartbeat.
+// PrepareReportIntervals prepares Region heartbeat payloads for the actual round
+// start time. Update generates nominal 60-second flow counters; store statistics
+// must consume them before this method scales them to the elapsed active round.
+// A waking Region's interval includes its silent rounds, without adding traffic
+// for that silent time.
 func (rs *Regions) PrepareReportIntervals(reportTime time.Time) {
 	endTimestamp := uint64(reportTime.Unix())
+	elapsed := endTimestamp - min(rs.lastReportTimestamp, endTimestamp)
 	for _, region := range rs.ReportedRegions() {
 		if rs.UpdateRound == 0 {
 			region.Interval.StartTimestamp = endTimestamp - min(endTimestamp, uint64(regionReportInterval))
@@ -356,7 +361,14 @@ func (rs *Regions) PrepareReportIntervals(reportTime time.Time) {
 		}
 		region.Interval.StartTimestamp = min(region.Interval.EndTimestamp, endTimestamp)
 		region.Interval.EndTimestamp = endTimestamp
+		region.BytesWritten = region.BytesWritten * elapsed / regionReportInterval
+		region.BytesRead = region.BytesRead * elapsed / regionReportInterval
+		region.KeysWritten = region.KeysWritten * elapsed / regionReportInterval
+		region.KeysRead = region.KeysRead * elapsed / regionReportInterval
+		region.QueryStats.Get = region.QueryStats.Get * elapsed / regionReportInterval
+		region.QueryStats.Put = region.QueryStats.Put * elapsed / regionReportInterval
 	}
+	rs.lastReportTimestamp = endTimestamp
 }
 
 func ratioCount(total int, ratio float64) int {

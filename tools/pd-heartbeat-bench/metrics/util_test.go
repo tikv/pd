@@ -15,7 +15,12 @@
 package metrics
 
 import (
+	"fmt"
 	"math"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"sync"
 	"testing"
 	"time"
 
@@ -66,4 +71,50 @@ func TestPrometheusLatencyQueriesReturnMilliseconds(t *testing.T) {
 	breakdown := hbBreakdownMetricByName("RegionGuide")
 	require.Contains(t, breakdown, "_count")
 	require.Contains(t, breakdown, "* 1000")
+}
+
+func TestCollectMetricsPreservesPeaks(t *testing.T) {
+	var mu sync.Mutex
+	requests := make(map[string]int)
+	values := []float64{1, 5, 1, 1, 1, 2, 8, 2, 2, 2}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		query := r.FormValue("query")
+		w.Header().Set("Content-Type", "application/json")
+		if query == "missing" {
+			_, _ = fmt.Fprint(w, `{"status":"success","data":{"resultType":"vector","result":[]}}`)
+			return
+		}
+		value := values[requests[query]]
+		requests[query]++
+		_, _ = fmt.Fprintf(w, `{"status":"success","data":{"resultType":"vector","result":[{"metric":{},"value":[1,"%.1f"]}]}}`, value)
+	}))
+	defer server.Close()
+	endpoint, err := url.Parse(server.URL)
+	require.NoError(t, err)
+	client, err := newPrometheusClient(*endpoint)
+	require.NoError(t, err)
+
+	oldClient, oldMetrics, oldFinal, oldRounds := prometheusCli, metrics2Collect, finalMetrics2Collect, metricCollectRounds
+	t.Cleanup(func() {
+		prometheusCli, metrics2Collect, finalMetrics2Collect, metricCollectRounds = oldClient, oldMetrics, oldFinal, oldRounds
+	})
+	prometheusCli = client
+	metrics2Collect = []metric{
+		{promSQL: "peak", max: true},
+		{promSQL: "average"},
+		{promSQL: "missing", max: true},
+	}
+	finalMetrics2Collect = append([]metric(nil), metrics2Collect...)
+	metricCollectRounds = 0
+
+	CollectMetrics(WarmUpRound, 0)
+	require.Equal(t, 5.0, finalMetrics2Collect[0].value)
+	require.InDelta(t, 1.8, finalMetrics2Collect[1].value, 1e-10)
+	CollectMetrics(WarmUpRound+1, 0)
+	require.Equal(t, 8.0, finalMetrics2Collect[0].value)
+	require.InDelta(t, 2.5, finalMetrics2Collect[1].value, 1e-10)
+	require.Equal(t, 2, finalMetrics2Collect[0].samples)
+	require.Zero(t, finalMetrics2Collect[2].samples)
 }

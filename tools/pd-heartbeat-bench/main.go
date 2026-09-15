@@ -316,12 +316,12 @@ func (s *Stores) update(rs *utils.Regions) {
 	for _, region := range rs.ReportedRegions() {
 		store := stats[region.Leader.StoreId]
 		if hasRegionFlow(region) {
-			store.BytesWritten += region.BytesWritten / storeHeartbeatsPerRegionHeartbeat
-			store.BytesRead += region.BytesRead / storeHeartbeatsPerRegionHeartbeat
-			store.KeysWritten += region.KeysWritten / storeHeartbeatsPerRegionHeartbeat
-			store.KeysRead += region.KeysRead / storeHeartbeatsPerRegionHeartbeat
-			store.QueryStats.Get += region.QueryStats.Get / storeHeartbeatsPerRegionHeartbeat
-			store.QueryStats.Put += region.QueryStats.Put / storeHeartbeatsPerRegionHeartbeat
+			store.BytesWritten += region.BytesWritten
+			store.BytesRead += region.BytesRead
+			store.KeysWritten += region.KeysWritten
+			store.KeysRead += region.KeysRead
+			store.QueryStats.Get += region.QueryStats.Get
+			store.QueryStats.Put += region.QueryStats.Put
 			peerStat := &pdpb.PeerStat{
 				RegionId:     region.Region.Id,
 				ReadKeys:     region.KeysRead / storeHeartbeatsPerRegionHeartbeat,
@@ -339,6 +339,13 @@ func (s *Stores) update(rs *utils.Regions) {
 		}
 	}
 	for i := 1; i < len(stats); i++ {
+		// Convert only after aggregation so small per-Region counts contribute.
+		stats[i].BytesWritten /= storeHeartbeatsPerRegionHeartbeat
+		stats[i].BytesRead /= storeHeartbeatsPerRegionHeartbeat
+		stats[i].KeysWritten /= storeHeartbeatsPerRegionHeartbeat
+		stats[i].KeysRead /= storeHeartbeatsPerRegionHeartbeat
+		stats[i].QueryStats.Get /= storeHeartbeatsPerRegionHeartbeat
+		stats[i].QueryStats.Put /= storeHeartbeatsPerRegionHeartbeat
 		stats[i].PeerStats = selectHotPeerStats(stats[i].PeerStats)
 		s.stat[i].Store(stats[i])
 	}
@@ -602,10 +609,10 @@ func main() {
 			}
 			metricDone := make(chan struct{})
 			if withMetric {
-				go func() {
-					metrics.CollectMetrics(regions.UpdateRound, time.Second)
+				go func(round int) {
+					metrics.CollectMetrics(round, time.Second)
 					close(metricDone)
-				}()
+				}(regions.UpdateRound)
 			} else {
 				close(metricDone)
 			}
@@ -622,6 +629,7 @@ func main() {
 				metrics.CollectRegionAndStoreStats(&stats, &since)
 			}
 			regions.Update(options)
+			// Snapshot nominal flow before the next round prepares wire counters.
 			stores.update(regions)
 			<-metricDone
 			if cfg.Round != 0 && regions.UpdateRound > cfg.Round {

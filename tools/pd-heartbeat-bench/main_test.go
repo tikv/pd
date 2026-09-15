@@ -168,6 +168,28 @@ func TestHasRegionFlowIncludesReadOnlyTraffic(t *testing.T) {
 	require.False(t, hasRegionFlow(&pdpb.RegionHeartbeatRequest{QueryStats: &pdpb.QueryStats{}}))
 }
 
+func TestStoreStatsAggregateColdFlowBeforeConversion(t *testing.T) {
+	rs := utils.NewRegions(6, 1, 1, &pdpb.RequestHeader{})
+	for _, region := range rs.Regions {
+		region.BytesWritten = 1
+		region.BytesRead = 2
+		region.KeysWritten = 3
+		region.KeysRead = 4
+		region.QueryStats.Get = 5
+		region.QueryStats.Put = 1
+	}
+	stores := newStores(1, 1<<40)
+	stores.update(rs)
+	stats := stores.stat[1].Load().(*pdpb.StoreStats)
+	require.Equal(t, uint64(1), stats.BytesWritten)
+	require.Equal(t, uint64(2), stats.BytesRead)
+	require.Equal(t, uint64(3), stats.KeysWritten)
+	require.Equal(t, uint64(4), stats.KeysRead)
+	require.Equal(t, uint64(5), stats.QueryStats.Get)
+	require.Equal(t, uint64(1), stats.QueryStats.Put)
+	require.Empty(t, stats.PeerStats)
+}
+
 func TestStoreStatsFilterAndBoundPeerStats(t *testing.T) {
 	const groupSize = hotPeerReportCapacity + 1
 	regions := make([]*pdpb.RegionHeartbeatRequest, 0, groupSize*hotPeerReportMetricCount+1)

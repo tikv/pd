@@ -121,6 +121,50 @@ func TestHotReadFlowCoversRegionReportInterval(t *testing.T) {
 	require.GreaterOrEqual(t, region.GetQueryStats().GetGet(), uint64(hotQueryUnit*regionReportInterval))
 }
 
+func TestPrepareReportIntervalsScalesFlowWithElapsedRound(t *testing.T) {
+	rs := NewRegions(1, 1, 1, &pdpb.RequestHeader{}, WithRandomSeed(42))
+	reportTime := time.Unix(1_000, 0)
+	rs.PrepareReportIntervals(reportTime)
+	options := heartbeatconfig.NewOptions(&heartbeatconfig.Config{
+		HotStoreCount:   1,
+		ReportRatio:     1,
+		FlowUpdateRatio: 1,
+	})
+	for _, seconds := range []uint64{60, 120, 90} {
+		rs.Update(options)
+		region := rs.ReportedRegions()[0]
+		nominal := []uint64{
+			region.BytesWritten, region.BytesRead, region.KeysWritten,
+			region.KeysRead, region.QueryStats.Get, region.QueryStats.Put,
+		}
+		reportTime = reportTime.Add(time.Duration(seconds) * time.Second)
+		rs.PrepareReportIntervals(reportTime)
+		require.Equal(t, seconds, region.Interval.EndTimestamp-region.Interval.StartTimestamp)
+		actual := []uint64{
+			region.BytesWritten, region.BytesRead, region.KeysWritten,
+			region.KeysRead, region.QueryStats.Get, region.QueryStats.Put,
+		}
+		for i := range actual {
+			require.InDelta(t, float64(nominal[i])/60, float64(actual[i])/float64(seconds), 1/float64(seconds))
+		}
+	}
+
+	// Waking up must not invent activity during the silent rounds.
+	silent := heartbeatconfig.NewOptions(&heartbeatconfig.Config{})
+	for range 2 {
+		rs.Update(silent)
+		reportTime = reportTime.Add(time.Minute)
+		rs.PrepareReportIntervals(reportTime)
+	}
+	rs.Update(options)
+	region := rs.ReportedRegions()[0]
+	activeBytes := region.BytesWritten
+	reportTime = reportTime.Add(time.Minute)
+	rs.PrepareReportIntervals(reportTime)
+	require.Equal(t, uint64(180), region.Interval.EndTimestamp-region.Interval.StartTimestamp)
+	require.Equal(t, activeBytes, region.BytesWritten)
+}
+
 type cancelingRegionHeartbeatClient struct {
 	grpc.ClientStream
 	cancel context.CancelFunc
