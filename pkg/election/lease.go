@@ -149,6 +149,7 @@ func (l *Lease) Close() error {
 	localTTLRemaining.unregister(l)
 	// Reset expire time.
 	l.expireTime.Store(typeutil.ZeroTime)
+	failpoint.InjectCall("beforeRevokeLease", l)
 	// Everything below here talks to etcd or logs, so it can block for an
 	// unbounded time when the volume holding the data directory stops completing
 	// writes. This failpoint stands in for that, so a test can assert that the
