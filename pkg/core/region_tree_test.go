@@ -15,6 +15,7 @@
 package core
 
 import (
+	"bytes"
 	"fmt"
 	"math/rand/v2"
 	"testing"
@@ -99,21 +100,21 @@ func TestRegionInfo(t *testing.T) {
 
 func TestRegionItem(t *testing.T) {
 	re := require.New(t)
-	item := newRegionItem([]byte("b"), []byte{})
+	item := newRegionItemFromRange([]byte("b"), []byte{})
 
-	re.False(item.Less(newRegionItem([]byte("a"), []byte{})))
-	re.False(item.Less(newRegionItem([]byte("b"), []byte{})))
-	re.True(item.Less(newRegionItem([]byte("c"), []byte{})))
+	re.False(item.Less(newRegionItemFromRange([]byte("a"), []byte{})))
+	re.False(item.Less(newRegionItemFromRange([]byte("b"), []byte{})))
+	re.True(item.Less(newRegionItemFromRange([]byte("c"), []byte{})))
 
-	re.False(item.contain([]byte("a")))
-	re.True(item.contain([]byte("b")))
-	re.True(item.contain([]byte("c")))
+	re.False(item.getRegion().contain([]byte("a")))
+	re.True(item.getRegion().contain([]byte("b")))
+	re.True(item.getRegion().contain([]byte("c")))
 
-	item = newRegionItem([]byte("b"), []byte("d"))
-	re.False(item.contain([]byte("a")))
-	re.True(item.contain([]byte("b")))
-	re.True(item.contain([]byte("c")))
-	re.False(item.contain([]byte("d")))
+	item = newRegionItemFromRange([]byte("b"), []byte("d"))
+	re.False(item.getRegion().contain([]byte("a")))
+	re.True(item.getRegion().contain([]byte("b")))
+	re.True(item.getRegion().contain([]byte("c")))
+	re.False(item.getRegion().contain([]byte("d")))
 }
 
 func newRegionWithStat(start, end string, size, keys int64) *RegionInfo {
@@ -161,9 +162,9 @@ func TestRegionTree(t *testing.T) {
 
 	updateNewItem(tree, regionA)
 	updateNewItem(tree, regionC)
-	re.Nil(tree.overlaps(newRegionItem([]byte("b"), []byte("c"))))
-	re.Equal(regionC, tree.overlaps(newRegionItem([]byte("c"), []byte("d")))[0])
-	re.Equal(regionC, tree.overlaps(newRegionItem([]byte("a"), []byte("cc")))[1])
+	re.Nil(tree.overlaps(newRegionItemFromRange([]byte("b"), []byte("c"))))
+	re.Equal(regionC, tree.overlaps(newRegionItemFromRange([]byte("c"), []byte("d")))[0])
+	re.Equal(regionC, tree.overlaps(newRegionItemFromRange([]byte("a"), []byte("cc")))[1])
 	re.Nil(tree.search([]byte{}))
 	re.Equal(regionA, tree.search([]byte("a")))
 	re.Nil(tree.search([]byte("b")))
@@ -191,28 +192,28 @@ func TestRegionTree(t *testing.T) {
 	// check get adjacent regions
 	prev, next := tree.getAdjacentRegions(regionA)
 	re.Nil(prev)
-	re.Equal(regionB, next.RegionInfo)
+	re.Equal(regionB, next.getRegion())
 	prev, next = tree.getAdjacentRegions(regionB)
-	re.Equal(regionA, prev.RegionInfo)
-	re.Equal(regionD, next.RegionInfo)
+	re.Equal(regionA, prev.getRegion())
+	re.Equal(regionD, next.getRegion())
 	prev, next = tree.getAdjacentRegions(regionC)
-	re.Equal(regionB, prev.RegionInfo)
-	re.Equal(regionD, next.RegionInfo)
+	re.Equal(regionB, prev.getRegion())
+	re.Equal(regionD, next.getRegion())
 	prev, next = tree.getAdjacentRegions(regionD)
-	re.Equal(regionB, prev.RegionInfo)
+	re.Equal(regionB, prev.getRegion())
 	re.Nil(next)
 
 	// region with the same range and different region id will not be delete.
-	region0 := newRegionItem([]byte{}, []byte("a")).RegionInfo
+	region0 := newRegionItemFromRange([]byte{}, []byte("a")).getRegion()
 	updateNewItem(tree, region0)
 	re.Equal(region0, tree.search([]byte{}))
-	anotherRegion0 := newRegionItem([]byte{}, []byte("a")).RegionInfo
+	anotherRegion0 := newRegionItemFromRange([]byte{}, []byte("a")).getRegion()
 	anotherRegion0.meta.Id = 123
 	tree.remove(anotherRegion0)
 	re.Equal(region0, tree.search([]byte{}))
 
 	// overlaps with 0, A, B, C.
-	region0D := newRegionItem([]byte(""), []byte("d")).RegionInfo
+	region0D := newRegionItemFromRange([]byte(""), []byte("d")).getRegion()
 	updateNewItem(tree, region0D)
 	re.Equal(region0D, tree.search([]byte{}))
 	re.Equal(region0D, tree.search([]byte("a")))
@@ -221,7 +222,7 @@ func TestRegionTree(t *testing.T) {
 	re.Equal(regionD, tree.search([]byte("d")))
 
 	// overlaps with D.
-	regionE := newRegionItem([]byte("e"), []byte{}).RegionInfo
+	regionE := newRegionItemFromRange([]byte("e"), []byte{}).getRegion()
 	updateNewItem(tree, regionE)
 	re.Equal(region0D, tree.search([]byte{}))
 	re.Equal(region0D, tree.search([]byte("a")))
@@ -243,10 +244,156 @@ func updateRegions(re *require.Assertions, tree *regionTree, regions []*RegionIn
 	}
 }
 
+// snapshotRanges returns the key ranges a snapshot reports, in iteration order.
+func snapshotRanges(snap *rootRangeSnapshot) [][2]string {
+	var got [][2]string
+	snap.scanRange([]byte(""), func(r *RegionInfo) bool {
+		got = append(got, [2]string{string(r.GetStartKey()), string(r.GetEndKey())})
+		return true
+	})
+	return got
+}
+
+// treeRanges returns the key ranges a live tree reports, in iteration order.
+func treeRanges(regions *RegionsInfo) [][2]string {
+	var got [][2]string
+	regions.tree.scanRange([]byte(""), func(r *RegionInfo) bool {
+		got = append(got, [2]string{string(r.GetStartKey()), string(r.GetEndKey())})
+		return true
+	})
+	return got
+}
+
+// TestRootRangeSnapshotIsolation checks the contract documented on
+// rootRangeSnapshot: the shape is frozen, the values are not.
+//
+// It applies all three mutation classes after taking the snapshot -- a same-range
+// update, a split, and a removal -- and asserts that the snapshot still reports
+// the original key ranges in the original order while the live tree reports the
+// new ones.
+func TestRootRangeSnapshotIsolation(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+	put := func(id uint64, start, end string, opts ...RegionCreateOption) {
+		region := NewTestRegionInfo(id, 1, []byte(start), []byte(end), opts...)
+		_, err := regions.AtomicCheckAndPutRegion(ContextTODO(), region)
+		re.NoError(err)
+	}
+
+	put(1, "a", "b", SetApproximateSize(10))
+	put(2, "b", "c", SetApproximateSize(10))
+	put(3, "c", "d", SetApproximateSize(10))
+	re.Equal(int64(30), regions.GetRegionSizeByRange([]byte("a"), []byte("d")))
+
+	snap := regions.snapshotRootTree()
+	original := [][2]string{{"a", "b"}, {"b", "c"}, {"c", "d"}}
+	re.Equal(original, snapshotRanges(snap))
+
+	// 1. Same range, new value.
+	put(2, "b", "c", SetApproximateSize(99), SetRegionVersion(2))
+	// 2. Split [c, d) into [c, cc) and [cc, d).
+	put(3, "c", "cc", SetRegionVersion(2))
+	put(4, "cc", "d", SetRegionVersion(2))
+	// 3. Remove [a, b).
+	regions.RemoveRegionIfExist(1)
+
+	// The shape is frozen: same items, same ranges, same order, same length.
+	re.Equal(3, snap.length())
+	re.Equal(original, snapshotRanges(snap))
+
+	// The value is not frozen. The same-range update has completed and the item is
+	// shared with the live tree, so the snapshot now reports the new size. This is
+	// the documented latitude, not a bug.
+	var sizeOfB int64
+	snap.scanRange([]byte("b"), func(r *RegionInfo) bool {
+		sizeOfB = r.GetApproximateSize()
+		return false
+	})
+	re.Equal(int64(99), sizeOfB)
+
+	// The live tree has moved on.
+	re.Equal([][2]string{{"b", "c"}, {"c", "cc"}, {"cc", "d"}}, treeRanges(regions))
+}
+
+// TestRegionItemRangeImmutability is the direct guard for the invariant
+// documented on regionItem: an item that is in the root tree never changes its
+// key range.
+//
+// It holds one snapshot for the whole test and, after every update, checks the
+// ordering of both the live tree and that snapshot. An in-place range change
+// anywhere on the root path shows up here as a snapshot whose start keys stop
+// increasing, which is the state that makes a clone return wrong answers.
+func TestRegionItemRangeImmutability(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+	const count = 50
+	for i := range count {
+		region := NewTestRegionInfo(uint64(i+1), 1,
+			[]byte(fmt.Sprintf("%04d", i*10)), []byte(fmt.Sprintf("%04d", (i+1)*10)))
+		_, err := regions.AtomicCheckAndPutRegion(ContextTODO(), region)
+		re.NoError(err)
+	}
+
+	snap := regions.snapshotRootTree()
+	snapLen := snap.length()
+
+	checkOrdered := func(desc string, scan func(func(*RegionInfo) bool)) int {
+		var prev []byte
+		n := 0
+		scan(func(r *RegionInfo) bool {
+			if n > 0 {
+				re.Negative(bytes.Compare(prev, r.GetStartKey()),
+					"%s: start keys not increasing at %q after %q", desc, r.GetStartKey(), prev)
+			}
+			prev = r.GetStartKey()
+			n++
+			return true
+		})
+		return n
+	}
+
+	version := uint64(1)
+	for i := range 1000 {
+		id := uint64(i%count + 1)
+		origin := regions.GetRegion(id)
+		re.NotNil(origin)
+		version++
+		var region *RegionInfo
+		if i%2 == 0 {
+			// Same range, new value.
+			region = origin.Clone(SetApproximateSize(int64(i)), SetRegionVersion(version))
+		} else {
+			// Range change: toggle the end key between its original value and a
+			// shorter one. Appending to the start key keeps the new end key strictly
+			// inside the region, so this never overlaps a neighbour and never
+			// deletes one.
+			fullEnd := []byte(fmt.Sprintf("%04d", int(id)*10))
+			shrunkEnd := append(append([]byte{}, origin.GetStartKey()...), '5')
+			endKey := shrunkEnd
+			if !bytes.Equal(origin.GetEndKey(), fullEnd) {
+				endKey = fullEnd
+			}
+			region = origin.Clone(WithEndKey(endKey), SetRegionVersion(version))
+		}
+		_, err := regions.AtomicCheckAndPutRegion(ContextTODO(), region)
+		re.NoError(err)
+
+		checkOrdered("live tree", func(f func(*RegionInfo) bool) {
+			regions.tree.scanRange([]byte(""), f)
+		})
+		n := checkOrdered("snapshot", func(f func(*RegionInfo) bool) {
+			snap.scanRange([]byte(""), f)
+		})
+		// The snapshot's shape is frozen, so its length cannot drift either.
+		re.Equal(snapLen, n)
+		re.Equal(snapLen, snap.length())
+	}
+}
+
 func TestRegionTreeSplitAndMerge(t *testing.T) {
 	re := require.New(t)
 	tree := newRegionTree()
-	regions := []*RegionInfo{newRegionItem([]byte{}, []byte{}).RegionInfo}
+	regions := []*RegionInfo{newRegionItemFromRange([]byte{}, []byte{}).getRegion()}
 
 	// Byte will underflow/overflow if n > 7.
 	n := 7
@@ -408,7 +555,7 @@ func TestStoreRegionCount(t *testing.T) {
 }
 
 func updateNewItem(tree *regionTree, region *RegionInfo) {
-	item := &regionItem{RegionInfo: region}
+	item := newRegionItem(region)
 	tree.update(item, false)
 }
 
@@ -431,8 +578,8 @@ func checkRandomRegion(re *require.Assertions, tree *regionTree, regions []*Regi
 	re.Len(keys, len(regions))
 }
 
-func newRegionItem(start, end []byte) *regionItem {
-	return &regionItem{RegionInfo: NewTestRegionInfo(1, 1, start, end)}
+func newRegionItemFromRange(start, end []byte) *regionItem {
+	return newRegionItem(NewTestRegionInfo(1, 1, start, end))
 }
 
 type mockRegionTreeData struct {
@@ -519,7 +666,7 @@ func BenchmarkRegionTreeSequentialLookUpRegion(b *testing.B) {
 	b.ResetTimer()
 	for i := range b.N {
 		index := i % MaxCount
-		data.tree.find(&regionItem{RegionInfo: data.items[index]})
+		data.tree.find(newRegionItem(data.items[index]))
 	}
 }
 
@@ -528,7 +675,7 @@ func BenchmarkRegionTreeRandomLookUpRegion(b *testing.B) {
 	b.ResetTimer()
 	for i := range b.N {
 		index := i % MaxCount
-		data.tree.find(&regionItem{RegionInfo: data.items[index]})
+		data.tree.find(newRegionItem(data.items[index]))
 	}
 }
 
