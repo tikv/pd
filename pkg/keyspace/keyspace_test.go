@@ -776,6 +776,16 @@ func (suite *keyspaceTestSuite) TestGetKeyspaceIDInRange() {
 	ids, ok = manager.GetKeyspaceIDInRange(6, 10, 1)
 	re.False(ok)
 	re.Empty(ids)
+
+	// limit > 1 should return multiple IDs in descending order.
+	ids, ok = manager.GetKeyspaceIDInRange(1, 5, 3)
+	re.True(ok)
+	re.Equal([]uint32{5, 4, 3}, ids)
+
+	// limit larger than the number of matches should return all of them.
+	ids, ok = manager.GetKeyspaceIDInRange(1, 5, 10)
+	re.True(ok)
+	re.Equal([]uint32{5, 4, 3, 2, 1}, ids)
 }
 
 // TestUpdateMultipleKeyspace checks that updating multiple keyspace's config simultaneously
