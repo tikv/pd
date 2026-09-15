@@ -130,6 +130,10 @@ type streamWrapper struct {
 	syncutil.Mutex
 }
 
+type leaderTerm struct {
+	ctx context.Context
+}
+
 // Server is the pd server. It implements bs.Server
 type Server struct {
 	diagnosticspb.DiagnosticsServer
@@ -155,6 +159,8 @@ type Server struct {
 
 	// for PD leader election.
 	member *member.Member
+	// Published before serving; bootstrap captures this term before starting work.
+	leaderTerm atomic.Pointer[leaderTerm]
 	// etcd client
 	client *clientv3.Client
 	// electionClient is used for leader election.
@@ -775,7 +781,7 @@ func (s *Server) collectEtcdStateMetrics() {
 	etcdCommittedIndexGauge.Set(float64(s.member.Etcd().Server.CommittedIndex()))
 }
 
-func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapResponse, error) {
+func (s *Server) bootstrapCluster(ctx context.Context, req *pdpb.BootstrapRequest) (*pdpb.BootstrapResponse, error) {
 	clusterID := keypath.ClusterID()
 
 	log.Info("try to bootstrap raft cluster",
@@ -843,7 +849,8 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 		log.Warn("flush the bootstrap region failed", errs.ZapError(err))
 	}
 
-	if err := s.cluster.Start(s, true); err != nil {
+	failpoint.InjectCall("bootstrapBeforeClusterStart", ctx)
+	if err := s.cluster.Start(ctx, s, true); err != nil {
 		return nil, err
 	}
 
@@ -856,17 +863,18 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	}, nil
 }
 
-func (s *Server) createRaftCluster() error {
+func (s *Server) createRaftCluster(ctx context.Context) error {
 	if s.cluster.IsRunning() {
 		return nil
 	}
 
-	return s.cluster.Start(s, false)
+	return s.cluster.Start(ctx, s, false)
 }
 
 func (s *Server) stopRaftCluster() {
 	failpoint.Inject("raftclusterIsBusy", func() {})
 	s.cluster.Stop()
+	failpoint.InjectCall("raftClusterStopped")
 }
 
 // IsKeyspaceGroupEnabled return whether the server is in PD.
@@ -2033,6 +2041,7 @@ func (s *Server) campaignLeader() {
 	//   2. load region could be slow. Based on lease we can recover TSO service faster.
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	var resetLeaderOnce sync.Once
+	s.leaderTerm.Store(&leaderTerm{ctx: ctx})
 	// As soon as the leadership keepalive is cancelled, another member has a
 	// chance to become the new leader.
 	//
@@ -2043,8 +2052,14 @@ func (s *Server) campaignLeader() {
 	// and the member would keep answering as the leader through the paths that do
 	// not consult IsServing. Resigning first bounds that to the in-memory stores
 	// at the top of Member.Resign.
+	//
+	// The RaftCluster is cancelled before the resign for the same reason: its
+	// jobs share this term's context, including a concurrent bootstrap. Cancel
+	// also covers direct cluster starts. The wait for the jobs stays in the
+	// stopRaftCluster defer below.
 	resetLeader := func() {
 		cancel()
+		s.cluster.Cancel()
 		s.member.Resign()
 		member.ServiceMemberGauge.WithLabelValues(PD).Set(0)
 	}
@@ -2103,14 +2118,14 @@ func (s *Server) campaignLeader() {
 	log.Info("trigger leader callback functions completed", zap.Duration("cost", callbacksDuration))
 
 	// Try to create raft cluster.
+	defer s.stopRaftCluster()
 	createRaftClusterStart := time.Now()
-	if err := s.createRaftCluster(); err != nil {
+	if err := s.createRaftCluster(ctx); err != nil {
 		log.Warn("failed to create raft cluster", errs.ZapError(err), zap.Duration("cost", time.Since(createRaftClusterStart)))
 		return
 	}
 	createRaftClusterDuration := time.Since(createRaftClusterStart)
 	log.Info("create raft cluster completed", zap.Duration("cost", createRaftClusterDuration))
-	defer s.stopRaftCluster()
 	failpoint.Inject("rebaseErr", func(val failpoint.Value) {
 		if memberFailpointEnabled(val, s.member.ID()) {
 			failpoint.Return()
@@ -2152,8 +2167,9 @@ func (s *Server) campaignLeader() {
 	// Registered a second time on purpose, and it is not dead code: deferred
 	// calls run last in first out, so this one runs before the stopRaftCluster
 	// defer above, which waits on background jobs that can take an unbounded
-	// time. The leadership has to be gone before that wait starts.
-	// `resetLeaderOnce` is what makes the duplicate invocation harmless.
+	// time. The leadership has to be gone, and the jobs told to stop, before
+	// that wait starts. `resetLeaderOnce` is what makes the duplicate
+	// invocation harmless.
 	defer resetLeaderOnce.Do(resetLeader)
 	leaderTicker := time.NewTicker(mcs.LeaderTickInterval)
 	defer leaderTicker.Stop()
