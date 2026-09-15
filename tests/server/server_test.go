@@ -93,6 +93,10 @@ func TestUpdateAdvertiseUrls(t *testing.T) {
 }
 
 func TestClusterID(t *testing.T) {
+	// Each test creates a separate etcd cluster. Do not reuse an ID cached by
+	// an earlier cluster, or the first startup can skip persisting its own ID.
+	keypath.ResetClusterID()
+	t.Cleanup(keypath.ResetClusterID)
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
