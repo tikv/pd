@@ -16,6 +16,7 @@ package tests
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/url"
 	"os"
@@ -26,7 +27,9 @@ import (
 	"go.uber.org/goleak"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	serverconfig "github.com/tikv/pd/server/config"
@@ -102,7 +105,7 @@ func TestRegenerateInitialServerURLsKeepsInitialClusterConsistent(t *testing.T) 
 	re.NoError(err)
 	re.NotEqual(firstConf.InitialCluster, secondConf.InitialCluster)
 
-	serverConfs, err := cluster.regenerateInitialServerConfigs()
+	serverConfs, err := cluster.regenerateInitialServerConfigs(false)
 	re.NoError(err)
 	re.Len(serverConfs, len(config.InitialServers))
 
@@ -165,4 +168,64 @@ func TestRunInitialServersRetriesPortConflict(t *testing.T) {
 	re.NoError(cluster.StopAll())
 	re.NoError(cluster.RunInitialServers())
 	re.NotEmpty(cluster.WaitLeader())
+}
+
+func TestRestartPreservesDataOnClientPortConflict(t *testing.T) {
+	re := require.New(t)
+	keypath.ResetClusterID()
+	t.Cleanup(keypath.ResetClusterID)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := NewTestCluster(ctx, 2)
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+	clusterID := keypath.ClusterID()
+	const markerKey = "/test/restart-port-conflict"
+	before, err := cluster.GetEtcdClient().Put(ctx, markerKey, "preserved")
+	re.NoError(err)
+	re.NoError(cluster.StopAll())
+	keypath.ResetClusterID()
+
+	conf := cluster.config.InitialServers[1]
+	clientURL, err := url.Parse(conf.ClientURLs)
+	re.NoError(err)
+	listener, err := net.Listen("tcp", clientURL.Host)
+	re.NoError(err)
+	defer listener.Close()
+	oldClientURL, oldPeerURL := conf.ClientURLs, conf.PeerURLs
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+	re.NotEqual(oldClientURL, conf.ClientURLs)
+	after, err := cluster.GetEtcdClient().Get(ctx, markerKey)
+	re.NoError(err)
+	re.Len(after.Kvs, 1)
+	re.Equal("preserved", string(after.Kvs[0].Value))
+	re.Equal(before.Header.ClusterId, after.Header.ClusterId)
+	re.Equal(clusterID, keypath.ClusterID())
+	re.Equal(oldPeerURL, conf.PeerURLs)
+}
+
+func TestResignLeaderDoesNotResetLeaseInCaller(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := NewTestCluster(ctx, 3)
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+	oldLeader := cluster.WaitLeader()
+	re.NotEmpty(oldLeader)
+	leader := cluster.GetServer(oldLeader)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/blockLeaseClose",
+		fmt.Sprintf("return(%q)", "leader election@"+oldLeader)))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/blockLeaseClose"))
+	}()
+	start := time.Now()
+	re.NoError(leader.ResignLeader())
+	// The transfer API must not wait for the injected ten-second lease close.
+	re.Less(time.Since(start), 10*time.Second)
+	re.NotEmpty(cluster.WaitLeaderChange(oldLeader))
 }

@@ -118,12 +118,14 @@ func (c *clusterConfig) join() *serverConfig {
 	return sc
 }
 
-func (c *clusterConfig) regenerateInitialServerURLs() {
+func (c *clusterConfig) regenerateInitialServerURLs(preservePeerURLs bool) {
 	for _, s := range c.InitialServers {
 		s.ClientURLs = tempurl.Alloc()
-		s.PeerURLs = tempurl.Alloc()
 		s.AdvertiseClientURLs = s.ClientURLs
-		s.AdvertisePeerURLs = s.PeerURLs
+		if !preservePeerURLs {
+			s.PeerURLs = tempurl.Alloc()
+			s.AdvertisePeerURLs = s.PeerURLs
+		}
 	}
 }
 

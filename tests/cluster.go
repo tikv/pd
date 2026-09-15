@@ -224,7 +224,8 @@ func (s *TestServer) ResetPDLeader() {
 func (s *TestServer) ResignLeader() error {
 	s.Lock()
 	defer s.Unlock()
-	s.server.GetMember().Resign()
+	// Let the campaign loop resign the PD term after etcd leadership moves.
+	// Resetting it here races with that loop and can revoke a later term.
 	return s.server.GetMember().ResignEtcdLeader(s.server.Context(), s.server.Name(), "")
 }
 
@@ -714,8 +715,8 @@ func (c *TestCluster) RunInitialServers() error {
 	return c.runInitialServersWithRetry(defaultMaxRetryTimes)
 }
 
-func (c *TestCluster) regenerateInitialServerConfigs() ([]*config.Config, error) {
-	c.config.regenerateInitialServerURLs()
+func (c *TestCluster) regenerateInitialServerConfigs(preservePeerURLs bool) ([]*config.Config, error) {
+	c.config.regenerateInitialServerURLs(preservePeerURLs)
 
 	serverConfs := make([]*config.Config, 0, len(c.config.InitialServers))
 	allOpts := append([]ConfigOption{WithGCTuner(false)}, c.opts...)
@@ -733,6 +734,13 @@ func (c *TestCluster) regenerateInitialServerConfigs() ([]*config.Config, error)
 func (c *TestCluster) runInitialServersWithRetry(maxRetries int) error {
 	if maxRetries <= 0 {
 		maxRetries = 1
+	}
+	restarting := false
+	for _, conf := range c.config.InitialServers {
+		if c.GetServer(conf.Name).State() == Stop {
+			restarting = true
+			break
+		}
 	}
 	var lastErr error
 	for i := range maxRetries {
@@ -756,17 +764,20 @@ func (c *TestCluster) runInitialServersWithRetry(maxRetries int) error {
 				zap.Int("maxRetries", maxRetries),
 				zap.Error(lastErr))
 
-			// Stop and destroy all servers
+			// A restart must retain its data and persisted peer membership. Only
+			// client URLs can be replaced without changing that membership.
 			for _, s := range servers {
 				if s.State() == Running {
 					_ = s.Stop()
 				}
-				_ = s.Destroy()
+				if !restarting {
+					_ = s.Destroy()
+				}
 			}
 
-			// Regenerate all ports before building any server configs. Generate reads
-			// every initial server's peer URL when composing the initial cluster.
-			serverConfs, err := c.regenerateInitialServerConfigs()
+			// Update URLs before building any server configs so their initial
+			// cluster definitions all describe the same peers.
+			serverConfs, err := c.regenerateInitialServerConfigs(restarting)
 			if err != nil {
 				return err
 			}
