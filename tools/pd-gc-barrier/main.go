@@ -212,15 +212,41 @@ func newCommand(connect connectFunc) *cobra.Command {
 	if err := set.MarkFlagRequired("ttl"); err != nil {
 		panic(err)
 	}
+	var execute bool
 	deleteCmd := &cobra.Command{
-		Use:   "delete <barrier-id>",
-		Short: "Delete a barrier; verify the replacement barrier before removing an old one",
+		Use:   "delete <barrier-id> [--execute]",
+		Short: "Preview a barrier deletion; use --execute to delete it",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := validateBarrierID(args[0]); err != nil {
 				return err
 			}
 			return withClient(cmd, func(ctx context.Context, client gc.GCStatesClient, state gc.GCState) (any, error) {
+				if !execute {
+					var current *barrierOutput
+					for _, b := range state.GCBarriers {
+						if b.BarrierID == args[0] {
+							current = formatBarrier(b)
+							break
+						}
+					}
+					if current == nil {
+						cmd.PrintErrln("Barrier not found. No changes were made.")
+					} else {
+						cmd.PrintErrln("Dry run: no changes were made. Add --execute to delete this barrier.")
+					}
+					return struct {
+						DryRun         bool            `json:"dry_run"`
+						Operation      string          `json:"operation"`
+						PD             []string        `json:"pd"`
+						KeyspaceID     uint32          `json:"keyspace_id"`
+						BarrierID      string          `json:"barrier_id"`
+						TxnSafePoint   timestampOutput `json:"txn_safe_point"`
+						GCSafePoint    timestampOutput `json:"gc_safe_point"`
+						CurrentBarrier *barrierOutput  `json:"current_barrier"`
+					}{true, "delete", opts.addresses, state.KeyspaceID, args[0],
+						formatTimestamp(state.TxnSafePoint), formatTimestamp(state.GCSafePoint), current}, nil
+				}
 				b, err := client.DeleteGCBarrier(ctx, args[0])
 				if err != nil {
 					return nil, fmt.Errorf("delete barrier: %w; query state before retrying because the write may have succeeded", err)
@@ -232,6 +258,7 @@ func newCommand(connect connectFunc) *cobra.Command {
 			})
 		},
 	}
+	deleteCmd.Flags().BoolVar(&execute, "execute", false, "Delete the barrier instead of only previewing the operation")
 	root.AddCommand(show, set, deleteCmd)
 	return root
 }

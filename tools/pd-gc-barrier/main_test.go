@@ -68,6 +68,8 @@ func TestInvalidArgumentsDoNotConnect(t *testing.T) {
 		{"--pd=p:2379", "--keyspace-id=1", "delete", "gc_worker"},
 		{"--pd=p:2379", "--keyspace-id=1", "delete", ""},
 		{"--pd=p:2379", "--keyspace-id=1", "show", "extra"},
+		{"--pd=p:2379", "--keyspace-id=1", "show", "--execute"},
+		{"--pd=p:2379", "--keyspace-id=1", "set", "recovery", "100", "--ttl=never", "--execute"},
 		{"--pd=p:2379", "--keyspace-id=1", "--cert=client.pem", "show"},
 		{"--pd=p:2379", "--keyspace-id=1", "--cacert=ca.pem", "show"},
 		{"--pd=https://p:2379", "--keyspace-id=1", "show"},
@@ -87,6 +89,49 @@ func TestInvalidArgumentsDoNotConnect(t *testing.T) {
 	}
 }
 
+func TestDeleteDryRun(t *testing.T) {
+	for _, ttl := range []time.Duration{gc.TTLNeverExpire, 2 * time.Hour} {
+		for _, target := range []string{"recovery", "missing"} {
+			t.Run(ttl.String()+"/"+target, func(t *testing.T) {
+				barrier := gc.NewGCBarrierInfo("recovery", 524288000, ttl, time.Now())
+				client := &memoryGCClient{state: gc.GCState{
+					KeyspaceID: 42, TxnSafePoint: 262144000, GCSafePoint: 131072000,
+					GCBarriers: []*gc.GCBarrierInfo{barrier},
+				}}
+				cmd := newCommand(func(_ context.Context, opts options) (gc.GCStatesClient, func(), error) {
+					require.Equal(t, []string{"http://p:2379", "http://q:2379"}, opts.addresses)
+					return client, func() {}, nil
+				})
+				var out, diagnostics bytes.Buffer
+				cmd.SetOut(&out)
+				cmd.SetErr(&diagnostics)
+				cmd.SetArgs([]string{"--pd= http://p:2379 , http://q:2379 ", "--keyspace-id=42", "delete", target})
+				require.NoError(t, cmd.Execute())
+				require.Zero(t, client.mutations)
+				require.Equal(t, []*gc.GCBarrierInfo{barrier}, client.state.GCBarriers)
+				var current *barrierOutput
+				if target == "recovery" {
+					ttlText := "never"
+					if ttl != gc.TTLNeverExpire {
+						ttlText = "2h0m0s"
+					}
+					current = &barrierOutput{"recovery", timestampOutput{"524288000", "1970-01-01T00:00:02Z"}, ttlText}
+					require.Equal(t, "Dry run: no changes were made. Add --execute to delete this barrier.\n", diagnostics.String())
+				} else {
+					require.Equal(t, "Barrier not found. No changes were made.\n", diagnostics.String())
+				}
+				require.JSONEq(t, string(mustJSON(t, map[string]any{
+					"dry_run": true, "operation": "delete", "pd": []string{"http://p:2379", "http://q:2379"},
+					"keyspace_id": 42, "barrier_id": target,
+					"txn_safe_point":  timestampOutput{"262144000", "1970-01-01T00:00:01Z"},
+					"gc_safe_point":   timestampOutput{"131072000", "1970-01-01T00:00:00.5Z"},
+					"current_barrier": current,
+				})), out.String())
+			})
+		}
+	}
+}
+
 func TestManualBarrierLifecycle(t *testing.T) {
 	client := &memoryGCClient{state: gc.GCState{KeyspaceID: 42, TxnSafePoint: 100, GCSafePoint: 80}}
 	client.state.GCBarriers = []*gc.GCBarrierInfo{gc.NewGCBarrierInfo("ticdc-old", 100, gc.TTLNeverExpire, time.Now())}
@@ -100,7 +145,7 @@ func TestManualBarrierLifecycle(t *testing.T) {
 	require.Equal(t, uint64(262144001), client.state.GCBarriers[1].BarrierTS)
 	require.Equal(t, gc.TTLNeverExpire, client.state.GCBarriers[1].TTL)
 
-	_, err = executeTestCommand(t, client, "delete", "ticdc-old")
+	_, err = executeTestCommand(t, client, "delete", "ticdc-old", "--execute")
 	require.NoError(t, err)
 	require.Len(t, client.state.GCBarriers, 1)
 	require.Equal(t, "recovery", client.state.GCBarriers[0].BarrierID)
@@ -120,16 +165,16 @@ func TestManualBarrierLifecycle(t *testing.T) {
 	require.Contains(t, out, `"gc_safe_point"`)
 	require.Contains(t, out, "recovery")
 
-	_, err = executeTestCommand(t, client, "delete", "recovery")
+	_, err = executeTestCommand(t, client, "delete", "recovery", "--execute")
 	require.NoError(t, err)
 	require.Empty(t, client.state.GCBarriers)
-	out, err = executeTestCommand(t, client, "delete", "recovery")
+	out, err = executeTestCommand(t, client, "delete", "recovery", "--execute")
 	require.NoError(t, err)
 	require.Contains(t, out, `"deleted_barrier": null`)
 }
 
 func TestPreflightAndRPCErrors(t *testing.T) {
-	for _, action := range [][]string{{"show"}, {"set", "recovery", "200", "--ttl=never"}, {"delete", "old"}} {
+	for _, action := range [][]string{{"show"}, {"set", "recovery", "200", "--ttl=never"}, {"delete", "old"}, {"delete", "old", "--execute"}} {
 		client := &memoryGCClient{state: gc.GCState{KeyspaceID: 4294967295}}
 		_, err := executeTestCommand(t, client, action...)
 		require.ErrorContains(t, err, "scope")
@@ -146,7 +191,7 @@ func TestPreflightAndRPCErrors(t *testing.T) {
 	require.Zero(t, client.mutations)
 	client.state.TxnSafePoint = 100
 	client.writeErr = errors.New("write unavailable")
-	for _, action := range [][]string{{"set", "recovery", "200", "--ttl=never"}, {"delete", "old"}} {
+	for _, action := range [][]string{{"set", "recovery", "200", "--ttl=never"}, {"delete", "old", "--execute"}} {
 		out, err := executeTestCommand(t, client, action...)
 		require.ErrorContains(t, err, "write unavailable")
 		require.Empty(t, out)

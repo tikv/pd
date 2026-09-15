@@ -21,7 +21,7 @@ Use Go 1.25 or newer for the repository's development environment. Set `GOOS` an
 ```text
 pd-gc-barrier --pd <endpoints> --keyspace-id <id> show
 pd-gc-barrier --pd <endpoints> --keyspace-id <id> set <barrier-id> <tso-or-rfc3339-time> --ttl <duration|never>
-pd-gc-barrier --pd <endpoints> --keyspace-id <id> delete <barrier-id>
+pd-gc-barrier --pd <endpoints> --keyspace-id <id> delete <barrier-id> [--execute]
 ```
 
 Both `--pd` and `--keyspace-id` are required for every command. The examples below use placeholder values; replace them with the actual endpoints, an existing keyspace ID, and an appropriate target timestamp.
@@ -69,7 +69,17 @@ A finite TTL must be positive, such as `30m` or `2h`. PD rounds it up to whole s
 ./bin/pd-gc-barrier --pd "$PD" --keyspace-id "$KEYSPACE_ID" delete "$BARRIER_ID"
 ```
 
-Returns the deleted barrier's information. Deleting an ID that does not exist succeeds with `deleted_barrier: null`.
+By default, `delete` only reads and validates the current GC state. It does not send a deletion request. The JSON preview includes `dry_run: true`, `operation: "delete"`, the PD endpoints in `pd`, `keyspace_id`, `barrier_id`, `txn_safe_point`, `gc_safe_point`, and `current_barrier`. The current barrier includes its ID, timestamp, and remaining TTL (`never` for no expiration), or is `null` if the ID does not exist. The tool prints a reminder to stderr to add `--execute`; if the barrier does not exist, it reports that no changes were made.
+
+After checking the preview, explicitly execute the deletion:
+
+```sh
+./bin/pd-gc-barrier --pd "$PD" --keyspace-id "$KEYSPACE_ID" delete "$BARRIER_ID" --execute
+```
+
+`--execute` reads and validates the current GC state again, then returns the deleted barrier's information. Deleting an ID that does not exist succeeds with `deleted_barrier: null`.
+
+A preview does not lock the barrier or reserve its state: it can change before execution, and the API does not support conditional deletion. `--execute` applies only to `delete`; `set` continues to write immediately.
 
 Deleting or expiring a barrier removes its retention constraint. Increasing its timestamp can also permit GC to advance. Neither operation reverses GC that has already occurred. The tool performs the requested operation without automatically installing a replacement barrier.
 
@@ -115,4 +125,4 @@ This version of the PD client requires a client certificate and private key to e
 
 Successful commands write JSON to stdout. Diagnostics go to stderr, and failures return a nonzero exit status. Timestamp objects contain a decimal `tso` string and a UTC `time` string. Keeping the TSO as a string avoids precision loss in JSON consumers that use floating-point numbers.
 
-If `set` or `delete` times out or loses its connection, the write may already have succeeded. Run `show` to inspect the actual state before retrying. Exiting the tool does not delete a barrier or reset its TTL.
+If `set` or `delete --execute` times out or loses its connection, the write may already have succeeded. Run `show` to inspect the actual state before retrying. Exiting the tool does not delete a barrier or reset its TTL.
