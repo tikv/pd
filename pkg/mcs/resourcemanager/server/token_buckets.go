@@ -475,7 +475,8 @@ func (gtb *GroupTokenBucket) updateTokens(now time.Time, burstLimit int64, clien
 	var tokensForBalance float64
 	if !gtb.Initialized {
 		gtb.init(now)
-	} else if burst := float64(burstLimit); burst > 0 {
+	} else if burst := float64(burstLimit); burst >= 0 && gtb.getBurstableMode() == limited {
+		// A zero-capacity service-limit override must still replenish tokens to repay loans.
 		if delta := now.Sub(*gtb.LastUpdate); delta > 0 {
 			totalNewTokens := gtb.getFillRate()*delta.Seconds() + gtb.reservedBurstTokens + gtb.reservedServiceTokens
 			gtb.reservedBurstTokens = 0

@@ -103,11 +103,13 @@ func TestGroupTokenBucketZeroFillRateGuard(t *testing.T) {
 
 	now := time.Now()
 	targetPeriodMs := uint64((5 * time.Second) / time.Millisecond)
-	for _, clientID := range []uint64{1, 2} {
-		tb, trickle := gtb.request(now, 1000, targetPeriodMs, clientID)
-		re.NotNil(tb)
-		re.Equal(0.0, tb.Tokens)
-		re.Equal(int64(targetPeriodMs), trickle)
+	for _, elapsed := range []time.Duration{0, 5 * time.Second} {
+		for _, clientID := range []uint64{1, 2} {
+			tb, trickle := gtb.request(now.Add(elapsed), 1000, targetPeriodMs, clientID)
+			re.NotNil(tb)
+			re.Equal(0.0, tb.Tokens)
+			re.Equal(int64(targetPeriodMs), trickle)
+		}
 	}
 	for _, slot := range gtb.tokenSlots {
 		re.False(math.IsInf(slot.curTokenCapacity, 0))
