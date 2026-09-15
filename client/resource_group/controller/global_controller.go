@@ -738,6 +738,7 @@ func (c *ResourceGroupsController) cleanUpResourceGroup() {
 				c.groupsController.Delete(resourceGroupName)
 				metrics.ResourceGroupStatusGauge.DeleteLabelValues(resourceGroupName, resourceGroupName)
 				gc.metrics.deletePagingLabels(resourceGroupName)
+				gc.metrics.ruMaxPerSec.deleteLabels(resourceGroupName)
 				return true
 			}
 			gc.inactive = true
