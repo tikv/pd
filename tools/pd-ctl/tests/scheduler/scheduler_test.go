@@ -827,6 +827,21 @@ func (suite *schedulerTestSuite) checkSchedulerDiagnostic(cluster *pdTests.TestC
 
 	echo := tests.MustExec(re, cmd, []string{"-u", pdAddr, "config", "set", "enable-diagnostic", "true"}, nil)
 	re.Contains(echo, "Success!")
+	suite.checkDefaultSchedulers(cmd, pdAddr)
+	// Recreate the scheduler before changing its limit to discard diagnostic
+	// history and scheduling backoff from earlier tests.
+	echo = tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", "balance-region-scheduler"}, nil)
+	re.Contains(echo, "Success!")
+	echo = tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-region-scheduler"}, nil)
+	re.Contains(echo, "Success!")
+	// Ensure this instance has run with a nonzero limit before testing the
+	// diagnostic transition caused by a live configuration change.
+	rc := cluster.GetLeaderServer().GetRaftCluster()
+	regionScheduler := rc.GetCoordinator().GetSchedulersController().GetScheduler("balance-region-scheduler")
+	re.NotNil(regionScheduler)
+	testutil.Eventually(re, func() bool {
+		return regionScheduler.IsScheduleAllowed(rc) && regionScheduler.GetDiagnosticRecorder().GetLastResult() != nil
+	})
 	echo = tests.MustExec(re, cmd, []string{"-u", pdAddr, "config", "set", "region-schedule-limit", "0"}, nil)
 	re.Contains(echo, "Success!")
 	checkSchedulerDescribeCommand("balance-region-scheduler", "pending", "balance-region-scheduler reach limit")
