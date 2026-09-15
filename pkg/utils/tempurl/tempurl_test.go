@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 )
 
 func TestTryAllocTestURLUsesConfiguredAllocator(t *testing.T) {
@@ -30,6 +31,9 @@ func TestTryAllocTestURLUsesConfiguredAllocator(t *testing.T) {
 	t.Cleanup(server.Close)
 	t.Setenv(AllocURLFromUT, server.URL)
 
+	// Check connection cleanup while the allocator is still running, as it is
+	// when pd-ut subprocesses finish their tests.
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 	require.Equal(t, expected, tryAllocTestURL())
 }
 
@@ -40,5 +44,6 @@ func TestTryAllocTestURLDoesNotFallBackFromConfiguredAllocator(t *testing.T) {
 	t.Cleanup(server.Close)
 	t.Setenv(AllocURLFromUT, server.URL)
 
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 	require.Empty(t, tryAllocTestURL())
 }
