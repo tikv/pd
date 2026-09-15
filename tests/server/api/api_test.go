@@ -179,7 +179,7 @@ func (suite *middlewareTestSuite) TestRequestInfoMiddleware() {
 
 	re.Equal("Profile", resp.Header.Get("service-label"))
 	re.JSONEq("{\"seconds\":[\"1\"]}", resp.Header.Get("url-param"))
-	re.JSONEq("{\"testkey\":\"testvalue\"}", resp.Header.Get("body-param"))
+	re.Empty(resp.Header.Get("body-param"))
 	re.Equal("HTTP/1.1/POST:/pd/api/v1/debug/pprof/profile", resp.Header.Get("method"))
 	re.Equal("anonymous", resp.Header.Get("caller-id"))
 	re.Equal("127.0.0.1", resp.Header.Get("ip"))
