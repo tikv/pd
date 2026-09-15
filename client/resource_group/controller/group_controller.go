@@ -17,6 +17,7 @@ package controller
 import (
 	"context"
 	"math"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -106,6 +107,7 @@ type groupMetricsCollection struct {
 	runningKVRequestCounter           prometheus.Gauge
 	consumeTokenHistogram             prometheus.Observer
 	sourceState                       *requestSourceMetricsState
+	ruMaxPerSec                       *ruMaxPerSecTracker
 
 	// Paging pre-charge observers, cached per-RG to avoid WithLabelValues
 	// on the hot path.
@@ -119,6 +121,7 @@ type groupMetricsCollection struct {
 const (
 	requestSourceRUTypeRRU = "rru"
 	requestSourceRUTypeWRU = "wru"
+	ruTypeTotal            = "ru"
 
 	requestSourceDirectionConsume = "consume"
 	requestSourceDirectionRefund  = "refund"
@@ -181,6 +184,7 @@ func initMetrics(oldName, name string, sourceState *requestSourceMetricsState) *
 		runningKVRequestCounter:           metrics.GroupRunningKVRequestCounter.WithLabelValues(name),
 		consumeTokenHistogram:             metrics.TokenConsumedHistogram.WithLabelValues(name),
 		sourceState:                       sourceState,
+		ruMaxPerSec:                       newRUMaxPerSecTracker(name),
 
 		prechargeCounter:        metrics.CopReadPrechargeCounter.WithLabelValues(name),
 		prechargeBytesCounter:   metrics.PagingPrechargeBytesCounter.WithLabelValues(name),
@@ -286,6 +290,71 @@ func (mc *groupMetricsCollection) observePagingResponse(bytesForEst, actual uint
 	}
 	mc.actualBytesCounter.Add(float64(actual))
 	mc.predictionResidualBytes.Observe(float64(actual) - float64(bytesForEst))
+}
+
+// ruMaxPerSecWindowSize is the number of 1s samples kept per RU type. The
+// window slides on every sample so any scrape interval up to the window length
+// observes every sampled second's peak.
+const ruMaxPerSecWindowSize = 60
+
+type ruMaxPerSecSeries struct {
+	ruType string
+	value  func(*rmpb.Consumption) float64
+	gauge  prometheus.Gauge
+	// prev is the cumulative value read at the previous sample.
+	prev  float64
+	rates [ruMaxPerSecWindowSize]float64
+}
+
+// ruMaxPerSecTracker turns the cumulative consumption snapshot into a per-second
+// rate on every group state update tick and exports the maximum rate seen within
+// the sliding window.
+type ruMaxPerSecTracker struct {
+	pos    int
+	series []*ruMaxPerSecSeries
+}
+
+func newRUMaxPerSecTracker(name string) *ruMaxPerSecTracker {
+	newSeries := func(ruType string, value func(*rmpb.Consumption) float64) *ruMaxPerSecSeries {
+		return &ruMaxPerSecSeries{
+			ruType: ruType,
+			value:  value,
+			gauge:  metrics.RUMaxPerSecGauge.WithLabelValues(name, ruType),
+		}
+	}
+	return &ruMaxPerSecTracker{
+		series: []*ruMaxPerSecSeries{
+			newSeries(requestSourceRUTypeRRU, func(c *rmpb.Consumption) float64 { return c.GetRRU() }),
+			newSeries(requestSourceRUTypeWRU, func(c *rmpb.Consumption) float64 { return c.GetWRU() }),
+			newSeries(ruTypeTotal, getRUValueFromConsumption),
+		},
+	}
+}
+
+// observe records one sample of the per-second rate for each RU type and
+// republishes the sliding-window maximum. deltaDuration is the elapsed time
+// covered by this sample, so a stretched tick is normalised correctly.
+func (t *ruMaxPerSecTracker) observe(consumption *rmpb.Consumption, deltaDuration time.Duration) {
+	if deltaDuration <= 0 {
+		return
+	}
+	seconds := deltaDuration.Seconds()
+	for _, s := range t.series {
+		cur := s.value(consumption)
+		// Refunds can make the cumulative value shrink; a negative delta is not a peak.
+		s.rates[t.pos] = math.Max(0, cur-s.prev) / seconds
+		s.prev = cur
+		s.gauge.Set(slices.Max(s.rates[:]))
+	}
+	t.pos = (t.pos + 1) % ruMaxPerSecWindowSize
+}
+
+// deleteLabels removes this group's ru_max_per_sec series. Called from the group
+// cleanup path alongside the other per-group metric children.
+func (t *ruMaxPerSecTracker) deleteLabels(name string) {
+	for _, s := range t.series {
+		metrics.RUMaxPerSecGauge.DeleteLabelValues(name, s.ruType)
+	}
 }
 
 type tokenCounter struct {
@@ -435,9 +504,11 @@ func (gc *groupCostController) updateAvgRequestResourcePerSec() {
 		isBurstable = false
 	}
 	gc.burstable.Store(isBurstable)
-	if !gc.calcAvg(counter, getRUValueFromConsumption(gc.run.consumption)) {
+	deltaDuration, ok := gc.calcAvg(counter, getRUValueFromConsumption(gc.run.consumption))
+	if !ok {
 		return
 	}
+	gc.metrics.ruMaxPerSec.observe(gc.run.consumption, deltaDuration)
 	logControllerTrace("[resource group controller] update avg ru per sec", zap.String("name", gc.name), zap.Float64("avg-ru-per-sec", counter.avgRUPerSec), zap.Bool("is-throttled", gc.isThrottled.Load()))
 }
 
@@ -475,7 +546,7 @@ func (gc *groupCostController) handleTokenBucketUpdateEvent(ctx context.Context)
 	}
 }
 
-func (gc *groupCostController) calcAvg(counter *tokenCounter, new float64) bool {
+func (gc *groupCostController) calcAvg(counter *tokenCounter, new float64) (time.Duration, bool) {
 	deltaDuration := gc.run.now.Sub(counter.avgLastTime)
 	failpoint.Inject("acceleratedReportingPeriod", func() {
 		deltaDuration = 100 * time.Millisecond
@@ -486,7 +557,7 @@ func (gc *groupCostController) calcAvg(counter *tokenCounter, new float64) bool 
 	// division below would be 0/0 = NaN, permanently poisoning `avgRUPerSec`.
 	// Skip the sample until the run state actually advances.
 	if deltaDuration <= 0 {
-		return false
+		return 0, false
 	}
 	delta := (new - counter.avgRUPerSecLastRU) / deltaDuration.Seconds()
 	counter.avgRUPerSec = movingAvgFactor*counter.avgRUPerSec + (1-movingAvgFactor)*delta
@@ -499,7 +570,7 @@ func (gc *groupCostController) calcAvg(counter *tokenCounter, new float64) bool 
 	})
 	counter.avgLastTime = gc.run.now
 	counter.avgRUPerSecLastRU = new
-	return true
+	return deltaDuration, true
 }
 
 func (gc *groupCostController) shouldReportConsumption() bool {

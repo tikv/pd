@@ -38,6 +38,12 @@ func counterValue(re *require.Assertions, c interface{ Write(*dto.Metric) error 
 	return m.GetCounter().GetValue()
 }
 
+func gaugeValue(re *require.Assertions, g prometheus.Gauge) float64 {
+	var m dto.Metric
+	re.NoError(g.Write(&m))
+	return m.GetGauge().GetValue()
+}
+
 func histogramSampleCount(re *require.Assertions, h prometheus.Observer) uint64 {
 	metric, ok := h.(prometheus.Metric)
 	re.True(ok)
@@ -1339,4 +1345,114 @@ func TestAcquireTokensCancelKeepsLastMonotonic(t *testing.T) {
 	}
 
 	re.False(counter.limiter.last.Before(tMid), "stale CancelAt rewound lim.last")
+}
+
+func TestRUMaxPerSecTracker(t *testing.T) {
+	// Cumulative RRU/WRU snapshot observed at one tick, plus the elapsed time
+	// that tick covers.
+	type tick struct {
+		rru      float64
+		wru      float64
+		duration time.Duration
+	}
+	// rampTicks returns n consecutive 1s ticks that each add step RRU, starting
+	// from the given cumulative value.
+	rampTicks := func(n int, from, step float64) []tick {
+		ticks := make([]tick, 0, n)
+		for range n {
+			from += step
+			ticks = append(ticks, tick{rru: from, duration: time.Second})
+		}
+		return ticks
+	}
+
+	testCases := []struct {
+		name        string
+		ticks       []tick
+		expectedRRU float64
+		expectedWRU float64
+		expectedRU  float64
+	}{
+		{
+			name:        "rate is normalised by the elapsed duration",
+			ticks:       []tick{{rru: 100, duration: 2 * time.Second}},
+			expectedRRU: 50,
+			expectedRU:  50,
+		},
+		{
+			name:        "refund alone clamps to zero instead of going negative",
+			ticks:       []tick{{rru: -50, duration: time.Second}},
+			expectedRRU: 0,
+			expectedRU:  0,
+		},
+		{
+			name:        "refund after a peak does not lower the peak",
+			ticks:       []tick{{rru: 100, duration: time.Second}, {rru: 60, duration: time.Second}},
+			expectedRRU: 100,
+			expectedRU:  100,
+		},
+		{
+			name:        "peak is still visible on the last sample inside the window",
+			ticks:       append([]tick{{rru: 600, duration: time.Second}}, rampTicks(ruMaxPerSecWindowSize-1, 600, 10)...),
+			expectedRRU: 600,
+			expectedRU:  600,
+		},
+		{
+			name:        "peak decays once it slides out of the window",
+			ticks:       append([]tick{{rru: 600, duration: time.Second}}, rampTicks(ruMaxPerSecWindowSize, 600, 10)...),
+			expectedRRU: 10,
+			expectedRU:  10,
+		},
+		{
+			name: "total series is the max total rate, not the sum of per-type maxima",
+			ticks: []tick{
+				{rru: 100, wru: 0, duration: time.Second},
+				{rru: 100, wru: 80, duration: time.Second},
+			},
+			expectedRRU: 100,
+			expectedWRU: 80,
+			expectedRU:  100,
+		},
+	}
+
+	for i, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			// Unique name per case so the gauge children never collide.
+			name := fmt.Sprintf("test-ru-max-per-sec-%d", i)
+			tracker := newRUMaxPerSecTracker(name)
+			for _, tk := range testCase.ticks {
+				tracker.observe(&rmpb.Consumption{RRU: tk.rru, WRU: tk.wru}, tk.duration)
+			}
+
+			peaks := map[string]float64{}
+			for _, series := range tracker.series {
+				value := gaugeValue(re, series.gauge)
+				re.GreaterOrEqual(value, float64(0), "%s peak must never be negative", series.ruType)
+				peaks[series.ruType] = value
+			}
+			re.InDelta(testCase.expectedRRU, peaks[requestSourceRUTypeRRU], 1e-9)
+			re.InDelta(testCase.expectedWRU, peaks[requestSourceRUTypeWRU], 1e-9)
+			re.InDelta(testCase.expectedRU, peaks[ruTypeTotal], 1e-9)
+
+			tracker.deleteLabels(name)
+			for _, ruType := range []string{requestSourceRUTypeRRU, requestSourceRUTypeWRU, ruTypeTotal} {
+				re.Zero(gaugeValue(re, metrics.RUMaxPerSecGauge.WithLabelValues(name, ruType)),
+					"ru_max_per_sec series for %q/%q should be cleared by deleteLabels", name, ruType)
+			}
+		})
+	}
+}
+
+func TestRUMaxPerSecTrackerSkipsNonPositiveDuration(t *testing.T) {
+	re := require.New(t)
+	name := "test-ru-max-per-sec-zero-duration"
+	tracker := newRUMaxPerSecTracker(name)
+	defer tracker.deleteLabels(name)
+
+	tracker.observe(&rmpb.Consumption{RRU: 100}, 0)
+	for _, series := range tracker.series {
+		re.Zero(gaugeValue(re, series.gauge))
+		re.Zero(series.prev, "a skipped sample must not advance the cumulative baseline")
+	}
 }
