@@ -752,6 +752,50 @@ func (suite *keyspaceTestSuite) TestLoadRangeKeyspace() {
 	re.Error(err)
 }
 
+// TestLoadKeyspacePopulatesCache verifies that LoadKeyspace and LoadKeyspaceByID
+// warm the in-memory cache as a side effect, so a freshly constructed Manager
+// (simulating a process restart) does not need a separate query to make a
+// previously created keyspace visible to cache-only lookups such as
+// GetKeyspaceIDInRange.
+func TestLoadKeyspacePopulatesCache(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	allocator := mockid.NewIDAllocator()
+	kgm := NewKeyspaceGroupManager(ctx, store, nil)
+	manager := NewKeyspaceManager(ctx, store, nil, allocator, &mockConfig{}, kgm, nil)
+	re.NoError(kgm.Bootstrap(ctx))
+	re.NoError(manager.Bootstrap())
+
+	id := uint32(150)
+	_, err := manager.CreateKeyspaceByID(&CreateKeyspaceByIDRequest{
+		ID:         &id,
+		Name:       "ks150",
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+
+	// A fresh Manager sharing the same storage starts with an empty cache,
+	// simulating a process restart.
+	fresh := NewKeyspaceManager(ctx, store, nil, allocator, &mockConfig{}, kgm, nil)
+	_, ok := fresh.cache.getKeyspaceByID(id)
+	re.False(ok, "freshly constructed Manager should start with an empty cache")
+
+	_, err = fresh.LoadKeyspaceByID(id)
+	re.NoError(err)
+	item, ok := fresh.cache.getKeyspaceByID(id)
+	re.True(ok, "LoadKeyspaceByID should populate the cache")
+	re.Equal(id, item.keyspaceID)
+
+	fresh2 := NewKeyspaceManager(ctx, store, nil, allocator, &mockConfig{}, kgm, nil)
+	_, err = fresh2.LoadKeyspace("ks150")
+	re.NoError(err)
+	item, ok = fresh2.cache.getKeyspaceByID(id)
+	re.True(ok, "LoadKeyspace should populate the cache")
+	re.Equal(id, item.keyspaceID)
+}
+
 func (suite *keyspaceTestSuite) TestGetKeyspaceIDInRange() {
 	re := suite.Require()
 	manager := suite.manager

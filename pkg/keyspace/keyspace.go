@@ -738,6 +738,9 @@ func (manager *Manager) LoadKeyspace(name string) (*keyspacepb.KeyspaceMeta, err
 		}
 		return nil
 	})
+	if err == nil {
+		manager.cache.Save(meta.GetId(), meta.GetName(), meta.GetState())
+	}
 	if manager.mgm != nil && meta != nil {
 		manager.mgm.AttachEndpoints(meta.GetConfig())
 	}
@@ -761,6 +764,9 @@ func (manager *Manager) LoadKeyspaceByID(spaceID uint32) (*keyspacepb.KeyspaceMe
 		}
 		return nil
 	})
+	if err == nil {
+		manager.cache.Save(meta.GetId(), meta.GetName(), meta.GetState())
+	}
 	if manager.mgm != nil && meta != nil {
 		manager.mgm.AttachEndpoints(meta.GetConfig())
 	}
