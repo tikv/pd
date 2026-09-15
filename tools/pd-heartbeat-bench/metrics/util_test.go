@@ -83,12 +83,16 @@ func TestCollectMetricsPreservesPeaks(t *testing.T) {
 		query := r.FormValue("query")
 		w.Header().Set("Content-Type", "application/json")
 		if query == "missing" {
-			_, _ = fmt.Fprint(w, `{"status":"success","data":{"resultType":"vector","result":[]}}`)
+			if _, err := fmt.Fprint(w, `{"status":"success","data":{"resultType":"vector","result":[]}}`); err != nil {
+				t.Errorf("write missing response: %v", err)
+			}
 			return
 		}
 		value := values[requests[query]]
 		requests[query]++
-		_, _ = fmt.Fprintf(w, `{"status":"success","data":{"resultType":"vector","result":[{"metric":{},"value":[1,"%.1f"]}]}}`, value)
+		if _, err := fmt.Fprintf(w, `{"status":"success","data":{"resultType":"vector","result":[{"metric":{},"value":[1,"%.1f"]}]}}`, value); err != nil {
+			t.Errorf("write metric response: %v", err)
+		}
 	}))
 	defer server.Close()
 	endpoint, err := url.Parse(server.URL)
