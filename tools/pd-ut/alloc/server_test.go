@@ -47,7 +47,9 @@ func TestRunHTTPServerPublishesReachableAddress(t *testing.T) {
 	re.NoError(err)
 	re.NotEqual("0", parsedAllocatorURL.Port())
 
-	resp, err := http.Get(allocatorURL)
+	req, err := http.NewRequest(http.MethodGet, allocatorURL, nil)
+	re.NoError(err)
+	resp, err := http.DefaultClient.Do(req)
 	re.NoError(err)
 	defer func() { re.NoError(resp.Body.Close()) }()
 	re.Equal(http.StatusOK, resp.StatusCode)

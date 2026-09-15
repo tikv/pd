@@ -90,6 +90,9 @@ func getFromUT() string {
 	if err != nil {
 		return ""
 	}
+	// The allocator outlives test subprocesses, so do not leave idle connection
+	// goroutines running when a subprocess checks for leaks.
+	req.Close = true
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return ""
