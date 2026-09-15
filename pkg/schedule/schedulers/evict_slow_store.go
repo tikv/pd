@@ -666,9 +666,13 @@ func (s *evictSlowStoreScheduler) detectAndHandleNetworkSlowStores(cluster sche.
 			// evaluation above can still run against a store's stale, frozen
 			// data if it was tombstoned after the snapshot but before this
 			// point. Re-check right before acting narrows, but doesn't
-			// eliminate, that window -- the next round's
-			// tryRecoverNetworkSlowStores would undo a slip-through, so any
-			// residual publication is bounded to one round.
+			// eliminate, that window. The residual differs by branch below:
+			// for addNetworkSlowStoreLocked, the next round's
+			// tryRecoverNetworkSlowStores would undo a slip-through, so it's
+			// bounded to one round; slowStoreTriggerLimitGauge has no such
+			// per-round cleanup (only deleteStore's DeleteStoreMetrics call,
+			// on final removal), so that branch needs its own post-write
+			// recheck instead, mirroring adjustNetworkSlowStore's pattern.
 			if current := cluster.GetStore(storeID); current == nil || current.IsRemoved() {
 				continue
 			}
@@ -676,6 +680,9 @@ func (s *evictSlowStoreScheduler) detectAndHandleNetworkSlowStores(cluster sche.
 			if len(pausedNetworkSlowStores) >= defaultMaxNetworkSlowStore {
 				failpoint.InjectCall("evictSlowStoreTriggerLimit")
 				slowStoreTriggerLimitGauge.WithLabelValues(strconv.FormatUint(storeID, 10), string(networkSlowStore)).Inc()
+				if current := cluster.GetStore(storeID); current == nil || current.IsRemoved() {
+					slowStoreTriggerLimitGauge.DeleteLabelValues(strconv.FormatUint(storeID, 10), string(networkSlowStore))
+				}
 				s.conf.networkSlowStoreRecoverStartAts[storeID] = nil
 				continue
 			}

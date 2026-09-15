@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 
@@ -681,6 +682,44 @@ func (suite *evictSlowStoreTestSuite) TestNetworkSlowStoreReachLimit() {
 		}
 	}
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap"))
+}
+
+// TestNetworkSlowStoreLimitGaugeCannotRepublishAfterBury guards against
+// detectAndHandleNetworkSlowStores' "reached limit" branch resurrecting
+// slowStoreTriggerLimitGauge after a bury that lands between its pre-write
+// removed-store check and the metric write. Unlike the sibling
+// addNetworkSlowStoreLocked branch, nothing else sweeps this metric on a
+// later round -- only deleteStore's final-removal cleanup does, which a mere
+// tombstone (no full deletion) never reaches -- so only the fix's own
+// post-write recheck can catch it.
+func (suite *evictSlowStoreTestSuite) TestNetworkSlowStoreLimitGaugeCannotRepublishAfterBury() {
+	re := suite.Require()
+	defer slowStoreTriggerLimitGauge.Reset()
+
+	es, ok := suite.es.(*evictSlowStoreScheduler)
+	re.True(ok)
+	// Simulate the paused-store slot already being occupied so storeID1 below
+	// is routed into the "reached limit" branch instead of being evicted.
+	es.conf.PausedNetworkSlowStores = []uint64{storeID4}
+
+	suite.tc.PutStore(suite.tc.GetStore(storeID1).Clone(func(store *core.StoreInfo) {
+		store.GetStoreStats().NetworkSlowScores = map[uint64]uint64{
+			storeID2: 10,
+			storeID3: 10,
+			storeID4: 100,
+		}
+	}))
+
+	const fp = "github.com/tikv/pd/pkg/schedule/schedulers/evictSlowStoreTriggerLimit"
+	re.NoError(failpoint.EnableCall(fp, func() {
+		suite.tc.PutStore(suite.tc.GetStore(storeID1).Clone(core.SetStoreState(metapb.StoreState_Tombstone)))
+	}))
+	defer func() { re.NoError(failpoint.Disable(fp)) }()
+
+	es.detectAndHandleNetworkSlowStores(suite.tc)
+
+	re.True(suite.tc.GetStore(storeID1).IsRemoved())
+	re.False(slowStoreTriggerLimitGauge.DeleteLabelValues(strconv.FormatUint(storeID1, 10), string(networkSlowStore)))
 }
 
 func (suite *evictSlowStoreTestSuite) TestNetworkSlowStoreSwitchEnableToDisable() {

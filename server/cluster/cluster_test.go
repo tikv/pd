@@ -3640,37 +3640,35 @@ func TestPutMetaStoreDoesNotRestoreRemovedStoreLimit(t *testing.T) {
 // cannot pass the point instrumented by acquiredFP until release is closed,
 // using only channel ordering -- never wall-clock duration math, which a
 // slow or delayed CI worker can throw off in either direction (see the
-// PutMetaStore/BuryStore race test's history). It first waits for contend to
-// confirm it has actually started running, eliminating any ambiguity about
-// whether a lack of signal means "blocked on the lock" or "not yet
-// scheduled"; only once that's confirmed does it check, with a generous
-// window, that acquiredFP's callback hasn't fired -- by that point the only
-// work left before contend reaches the locked operation is whatever it does
-// on its own, which must be cheap. Returns the channel contend's result will
-// arrive on.
+// PutMetaStore/BuryStore race test's history). An earlier version added an
+// intermediate "goroutine has started" signal before this check, but that
+// only proves the goroutine ran its first statement -- it can still be
+// descheduled immediately afterward, before reaching contend's actual lock
+// attempt, reintroducing the same "blocked vs. not-yet-scheduled" ambiguity
+// one step later. There's no channel-based way to prove a goroutine is
+// blocked rather than merely slow, so instead this ties the wait directly to
+// acquiredFP itself with a generous window, matching this package's own
+// established precedent for the same problem
+// (TestScheduleConfigPersistenceIsSerialized's saveStarted wait): any
+// goroutine+channel+timeout test on a preemptible scheduler has some
+// irreducible residual risk, and the accepted way to make it negligible is a
+// generous wait tied to the exact signal of interest, not more intermediate
+// proxy signals. Returns the channel contend's result will arrive on.
 func assertBlockedThenReleased(t *testing.T, re *require.Assertions, acquiredFP string, release chan struct{}, contend func() error) <-chan error {
 	t.Helper()
 	acquired := make(chan struct{})
 	re.NoError(failpoint.EnableCall(acquiredFP, func() { close(acquired) }))
 	t.Cleanup(func() { re.NoError(failpoint.Disable(acquiredFP)) })
 
-	started := make(chan struct{})
 	done := make(chan error, 1)
 	go func() {
-		close(started)
 		done <- contend()
 	}()
 
 	select {
-	case <-started:
-	case <-time.After(2 * time.Second):
-		t.Fatal("contender goroutine did not start")
-	}
-
-	select {
 	case <-acquired:
 		re.Fail(acquiredFP + " fired before storeStateLock should have been available")
-	case <-time.After(200 * time.Millisecond):
+	case <-time.After(2 * time.Second):
 	}
 
 	close(release)
