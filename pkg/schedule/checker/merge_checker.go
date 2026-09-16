@@ -26,6 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
@@ -229,6 +230,11 @@ func (c *MergeChecker) checkTarget(region, adjacent *core.RegionInfo) bool {
 	return true
 }
 
+type checkGetter interface {
+	GetKeyspaceIDInRange(start, end uint32, limit int) ([]uint32, bool)
+	KeyspaceExist(keyspaceID uint32) bool
+}
+
 // AllowMerge returns true if two regions can be merged according to the key type.
 func AllowMerge(cluster sche.SharedCluster, region, adjacent *core.RegionInfo) bool {
 	var start, end []byte
@@ -238,6 +244,14 @@ func AllowMerge(cluster sche.SharedCluster, region, adjacent *core.RegionInfo) b
 		start, end = adjacent.GetStartKey(), region.GetEndKey()
 	} else {
 		return false
+	}
+
+	// Check if merging these regions would span multiple keyspaces
+	// This ensures one region corresponds to one keyspace
+	if checker, ok := cluster.(checkGetter); ok {
+		if keyspace.RegionSpansMultipleKeyspaces(start, end, checker) {
+			return false
+		}
 	}
 
 	// The interface probe is used here to get the rule manager and region

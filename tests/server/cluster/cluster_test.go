@@ -1112,7 +1112,7 @@ func TestLoadClusterInfo(t *testing.T) {
 	rc := cluster.NewRaftCluster(ctx, svr.GetMember(), svr.GetBasicCluster(), svr.GetStorage(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient(), svr.GetTSOAllocator())
 
 	// Cluster is not bootstrapped.
-	err = rc.InitCluster(svr.GetAllocator(), svr.GetPersistOptions(), svr.GetHBStreams(), svr.GetKeyspaceGroupManager())
+	err = rc.InitCluster(svr.GetAllocator(), svr.GetPersistOptions(), svr.GetHBStreams(), svr.GetKeyspaceManager(), svr.GetKeyspaceGroupManager())
 	re.NoError(err)
 	raftCluster, err := rc.LoadClusterInfo()
 	re.NoError(err)
@@ -1152,7 +1152,7 @@ func TestLoadClusterInfo(t *testing.T) {
 
 	raftCluster = cluster.NewRaftCluster(ctx, svr.GetMember(), basicCluster,
 		testStorage, syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient(), svr.GetTSOAllocator())
-	err = raftCluster.InitCluster(mockid.NewIDAllocator(), svr.GetPersistOptions(), svr.GetHBStreams(), svr.GetKeyspaceGroupManager())
+	err = raftCluster.InitCluster(mockid.NewIDAllocator(), svr.GetPersistOptions(), svr.GetHBStreams(), svr.GetKeyspaceManager(), svr.GetKeyspaceGroupManager())
 	re.NoError(err)
 	raftCluster, err = raftCluster.LoadClusterInfo()
 	re.NoError(err)
@@ -1899,7 +1899,7 @@ func TestTransferLeaderBack(t *testing.T) {
 	rc := cluster.NewRaftCluster(ctx, svr.GetMember(), svr.GetBasicCluster(),
 		svr.GetStorage(), syncer.NewRegionSyncer(svr), svr.GetClient(),
 		svr.GetHTTPClient(), svr.GetTSOAllocator())
-	err = rc.InitCluster(svr.GetAllocator(), svr.GetPersistOptions(), svr.GetHBStreams(), svr.GetKeyspaceGroupManager())
+	err = rc.InitCluster(svr.GetAllocator(), svr.GetPersistOptions(), svr.GetHBStreams(), svr.GetKeyspaceManager(), svr.GetKeyspaceGroupManager())
 	re.NoError(err)
 	storage := rc.GetStorage()
 	meta := &metapb.Cluster{Id: 123}

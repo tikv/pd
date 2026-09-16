@@ -801,6 +801,173 @@ func TestGetKeyspaceSplitKeys(t *testing.T) {
 	}
 }
 
+// existOnlyChecker only answers KeyspaceExist; it panics if GetKeyspaceIDInRange
+// is called, so it can assert a code path never falls back to a range scan.
+type existOnlyChecker struct {
+	existing map[uint32]bool
+}
+
+func (c *existOnlyChecker) KeyspaceExist(id uint32) bool {
+	return c.existing[id]
+}
+
+func (*existOnlyChecker) GetKeyspaceIDInRange(uint32, uint32, int) ([]uint32, bool) {
+	panic("GetKeyspaceIDInRange should not be called when the ID window can hold no keyspace of its own")
+}
+
+func TestGetKeyspaceSplitKeysForeignModeKeys(t *testing.T) {
+	re := require.New(t)
+
+	specificChecker := &mockKeyspaceChecker{
+		existingKeyspaces: map[uint32]bool{
+			100: true,
+			101: true,
+			102: true,
+		},
+	}
+
+	testCases := []struct {
+		name              string
+		startKey          []byte
+		endKey            []byte
+		keyType           coreconstant.KeyType
+		checker           Checker
+		expectedSplitKeys [][]byte
+	}{
+		{
+			// Both ends sort before the txn block ('r' < 'x'), so neither
+			// carries any information about the txn keyspace space at all.
+			name:              "raw start and classical end, txn mode - both before the txn block",
+			startKey:          MakeRegionBound(100).RawLeftBound,
+			endKey:            []byte{'t', 1, 2, 4},
+			keyType:           coreconstant.Txn,
+			checker:           specificChecker,
+			expectedSplitKeys: nil,
+		},
+		{
+			// Both ends sort at or after the raw block ('t' and 'x' both > 'r'),
+			// so neither carries any information about the raw keyspace space.
+			name:              "classical start and txn end, raw mode - both after the raw block",
+			startKey:          []byte{'t', 1, 2, 4},
+			endKey:            MakeRegionBound(100).TxnLeftBound,
+			keyType:           coreconstant.Raw,
+			checker:           specificChecker,
+			expectedSplitKeys: nil,
+		},
+		{
+			// startKey is a real raw keyspace key; under txn mode it is
+			// classified as "before the txn block", i.e. startID=0 - the same
+			// window a plain classical/empty start key would produce.
+			name:     "raw start key under txn mode is treated like an empty start",
+			startKey: MakeRegionBound(200).RawLeftBound,
+			endKey:   MakeRegionBound(101).TxnLeftBound,
+			keyType:  coreconstant.Txn,
+			checker:  specificChecker,
+			expectedSplitKeys: [][]byte{
+				MakeRegionBound(100).TxnLeftBound,
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(_ *testing.T) {
+			splitKeys := GetKeyspaceSplitKeys(tc.startKey, tc.endKey, tc.keyType, tc.checker)
+			re.Equal(tc.expectedSplitKeys, splitKeys, "test case: %s", tc.name)
+		})
+	}
+}
+
+// deeperTxnKey builds a real memcomparable txn-mode key that sits strictly
+// inside keyspace id's key range (as opposed to MakeRegionBound's bare left
+// bound, which sits exactly at the keyspace's first byte).
+func deeperTxnKey(id uint32, suffix ...byte) []byte {
+	payload := append(codec.MakeKeyspacePrefix(codec.TxnKeyspaceModePrefix, id), suffix...)
+	return codec.EncodeBytes(payload)
+}
+
+func TestGetKeyspaceSplitKeysAdjacentIDsSkipsRangeScan(t *testing.T) {
+	re := require.New(t)
+
+	// startKey sits inside keyspace 100 and endKey sits inside keyspace 101,
+	// so [startID, endID] = [100, 101] and the only possible split point is
+	// the boundary they share.
+	startKey := deeperTxnKey(100, 5, 5)
+	endKey := deeperTxnKey(101, 5, 5)
+	boundary := MakeRegionBound(100).TxnRightBound
+	re.Equal(boundary, MakeRegionBound(101).TxnLeftBound, "sanity check: keyspace 100's right bound must equal keyspace 101's left bound")
+
+	testCases := []struct {
+		name              string
+		startKey          []byte
+		endKey            []byte
+		checker           *existOnlyChecker
+		expectedSplitKeys [][]byte
+	}{
+		{
+			name:              "boundary between existing adjacent keyspaces is split",
+			startKey:          startKey,
+			endKey:            endKey,
+			checker:           &existOnlyChecker{existing: map[uint32]bool{100: true, 101: true}},
+			expectedSplitKeys: [][]byte{boundary},
+		},
+		{
+			name:              "only the lower keyspace exists",
+			startKey:          startKey,
+			endKey:            endKey,
+			checker:           &existOnlyChecker{existing: map[uint32]bool{100: true}},
+			expectedSplitKeys: [][]byte{boundary},
+		},
+		{
+			name:              "neither adjacent keyspace exists",
+			startKey:          startKey,
+			endKey:            endKey,
+			checker:           &existOnlyChecker{},
+			expectedSplitKeys: nil,
+		},
+		{
+			name:              "boundary coincides with the region's own end key, so it is excluded",
+			startKey:          MakeRegionBound(100).TxnLeftBound,
+			endKey:            MakeRegionBound(100).TxnRightBound,
+			checker:           &existOnlyChecker{existing: map[uint32]bool{100: true, 101: true}},
+			expectedSplitKeys: nil,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(_ *testing.T) {
+			re.NotPanics(func() {
+				splitKeys := GetKeyspaceSplitKeys(tc.startKey, tc.endKey, coreconstant.Txn, tc.checker)
+				re.Equal(tc.expectedSplitKeys, splitKeys, "test case: %s", tc.name)
+			})
+		})
+	}
+}
+
+// TestGetKeyspaceSplitKeysAdjacentIDsIgnoreMaxSentinelExistence verifies that
+// the adjacent-ID shortcut's result does not depend on how a Checker
+// implementation answers KeyspaceExist(MaxValidKeyspaceID). endID lands on
+// that sentinel whenever the end key is empty or classified as sorting past
+// the target mode's key block - it is never a real keyspace ID any Checker
+// was asked to track - so a Checker (like the real MCS scheduling-server
+// implementation) that answers false for it must not change the outcome
+// compared to one (like the real Manager implementation) that hardcodes true.
+func TestGetKeyspaceSplitKeysAdjacentIDsIgnoreMaxSentinelExistence(t *testing.T) {
+	re := require.New(t)
+
+	// startID resolves to MaxValidKeyspaceID-1 and, since endKey is empty,
+	// endID defaults to the MaxValidKeyspaceID sentinel: adjacent IDs.
+	startKey := deeperTxnKey(constant.MaxValidKeyspaceID-1, 5, 5)
+	boundary := MakeRegionBound(constant.MaxValidKeyspaceID - 1).TxnRightBound
+
+	// The checker does not know about the start keyspace and, like the real
+	// MCS Checker, has no entry for the MaxValidKeyspaceID sentinel either.
+	checker := &existOnlyChecker{}
+
+	splitKeys := GetKeyspaceSplitKeys(startKey, []byte{}, coreconstant.Txn, checker)
+	re.Equal([][]byte{boundary}, splitKeys,
+		"the split point must not be dropped just because the checker doesn't recognize the MaxValidKeyspaceID sentinel as existing")
+}
+
 func TestKeyspaceExists(t *testing.T) {
 	re := require.New(t)
 	cache := NewCache()
@@ -836,7 +1003,7 @@ func TestGetKeyspaceIDInRange(t *testing.T) {
 
 	all := func() []uint32 {
 		var ret []uint32
-		cache.scanAllKeyspaces(func(keyspaceID uint32, _ string) bool {
+		cache.scanAllKeyspaces(func(keyspaceID uint32, _ string, _ keyspacepb.KeyspaceState) bool {
 			ret = append(ret, keyspaceID)
 			return true
 		})
