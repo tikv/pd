@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
@@ -42,6 +43,7 @@ import (
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/utils/testutil"
+	"github.com/tikv/pd/client/resource_group/controller/metrics"
 )
 
 func TestMain(m *testing.M) {
@@ -887,12 +889,16 @@ func TestRUMaxPerSecTombstoneLifecycle(t *testing.T) {
 			gc, err := c.tryGetResourceGroupController(ctx, group.Name, false)
 			re.NoError(err)
 			t.Cleanup(func() {
-				gc.metrics.deleteLabels(group.Name)
-				gc.metrics.deleteLabels(defaultResourceGroupName)
+				gc.metrics.deletePagingLabels(group.Name)
+				gc.metrics.deletePagingLabels(defaultResourceGroupName)
 				c.cleanupRequestSourceMetricsState(group.Name)
 				c.cleanupRequestSourceMetricsState(defaultResourceGroupName)
 			})
-			gc.metrics.ruMaxPerSec.observe(100, 0, gc.metrics.ruMaxPerSec.last.Add(time.Second))
+			re.Empty(gatherRUMaxPerSec(t, group.Name), "construction must not create peak series")
+			sampler := make(ruMaxPerSecSampler)
+			t.Cleanup(sampler.clear)
+			sampler.sample(c)
+			sampler[group.Name].tracker.observe(100, 0, gc.createdAt.Add(sampler[group.Name].tracker.last+time.Second))
 			def := *group
 			def.Name = defaultResourceGroupName
 			if path == "default missing" {
@@ -901,12 +907,14 @@ func TestRUMaxPerSecTombstoneLifecycle(t *testing.T) {
 				provider.On("GetResourceGroup", mock.Anything, defaultResourceGroupName, mock.Anything).Return(&def, nil)
 				defaultGC, err := c.tryGetResourceGroupController(ctx, defaultResourceGroupName, false)
 				re.NoError(err)
-				defaultGC.metrics.ruMaxPerSec.observe(42, 0, defaultGC.metrics.ruMaxPerSec.last.Add(time.Second))
+				sampler.sample(c)
+				sampler[defaultResourceGroupName].tracker.observe(42, 0, defaultGC.createdAt.Add(sampler[defaultResourceGroupName].tracker.last+time.Second))
 				if path == "default invalid" {
 					def.Mode = rmpb.GroupMode_RawMode
 				}
 			}
 			c.tombstoneGroupCostController(group.Name)
+			sampler.sample(c)
 			if path != "replace and recreate" {
 				_, ok := c.loadGroupController(group.Name)
 				re.False(ok)
@@ -917,28 +925,30 @@ func TestRUMaxPerSecTombstoneLifecycle(t *testing.T) {
 			re.True(ok)
 			re.True(tombstone.tombstone.Load())
 			re.Equal(defaultResourceGroupName, tombstone.name)
-			tombstone.sampleRUMaxPerSecMetrics()
 			re.Zero(gatherRUMaxPerSec(t, group.Name)[ruTypeTotal])
 			re.InDelta(42, gatherRUMaxPerSec(t, defaultResourceGroupName)[ruTypeTotal], 1e-9)
 
 			// A replacement uses its own cumulative baseline and window. Constructing
 			// it must not reset the live series before it wins the cache replacement.
-			tombstone.metrics.ruMaxPerSec.observe(200, 0, tombstone.metrics.ruMaxPerSec.last.Add(time.Second))
+			sampler[group.Name].tracker.observe(200, 0, tombstone.createdAt.Add(sampler[group.Name].tracker.last+time.Second))
 			revived, err := newGroupCostController(group, c.ruConfig, c.lowTokenNotifyChan, c.tokenBucketUpdateChan, c.getOrCreateRequestSourceMetricsState(group.Name))
 			re.NoError(err)
 			re.InDelta(200, gatherRUMaxPerSec(t, group.Name)[ruTypeTotal], 1e-9)
 			re.True(c.groupsController.CompareAndSwap(group.Name, tombstone, revived))
-			revived.sampleRUMaxPerSecMetrics()
+			sampler.sample(c)
 			re.Zero(gatherRUMaxPerSec(t, group.Name)[ruTypeTotal])
 			revived.inactive = true
+			oldGauge := sampler[group.Name].tracker.ruGauge
 			c.cleanUpResourceGroup()
+			sampler.sample(c)
 			re.Empty(gatherRUMaxPerSec(t, group.Name))
 
 			fresh, err := c.tryGetResourceGroupController(ctx, group.Name, false)
 			re.NoError(err)
-			fresh.metrics.ruMaxPerSec.observe(7, 3, fresh.metrics.ruMaxPerSec.last.Add(time.Second))
+			sampler.sample(c)
+			sampler[group.Name].tracker.observe(7, 3, fresh.createdAt.Add(sampler[group.Name].tracker.last+time.Second))
 			// Cached children from deleted controllers must remain detached.
-			revived.metrics.ruMaxPerSec.ruGauge.Set(999)
+			oldGauge.Set(999)
 			got := gatherRUMaxPerSec(t, group.Name)
 			re.Len(got, 3)
 			re.InDelta(10, got[ruTypeTotal], 1e-9)
@@ -961,7 +971,7 @@ func TestRUMaxPerSecControllerLoop(t *testing.T) {
 	re.NoError(err)
 	gc, err := c.tryGetResourceGroupController(ctx, group.Name, false)
 	re.NoError(err)
-	start := gc.metrics.ruMaxPerSec.last
+	start := gc.createdAt
 	// Complete requests before the first tick to exercise initialization too.
 	for _, isWrite := range []bool{true, false} {
 		for range 50 {
@@ -992,11 +1002,207 @@ func TestRUMaxPerSecControllerLoop(t *testing.T) {
 	re.Equal(peak, gatherRUMaxPerSec(t, group.Name))
 	re.NoError(c.Stop())
 	re.Empty(gatherRUMaxPerSec(t, group.Name))
-	// Read loop-owned timestamps only after Stop joins the goroutine.
-	re.Len(gc.metrics.ruMaxPerSec.samples, 1)
-	seconds := gc.metrics.ruMaxPerSec.samples[0].at.Sub(start).Seconds()
-	re.InDelta(rru/seconds, peak[requestSourceRUTypeRRU], 1e-6)
+	// The first interval starts at construction. Independently bound its duration
+	// by wall time and check the read/write ratio from the actual charged RUs.
+	seconds := rru / peak[requestSourceRUTypeRRU]
+	re.GreaterOrEqual(seconds, defaultGroupStateUpdateInterval.Seconds())
+	re.LessOrEqual(seconds, time.Since(start).Seconds())
 	re.InDelta(wru/seconds, peak[requestSourceRUTypeWRU], 1e-6)
 	re.InDelta((rru+wru)/seconds, peak[ruTypeTotal], 1e-6)
 	t.Logf("charged RRU=%f WRU=%f; interval=%fs; peak=%v", rru, wru, seconds, peak)
+}
+
+// Recreate between cache removal and old-controller metric cleanup. The new
+// owner must keep exporting even when it reuses the same live Gauge children.
+func TestRUMaxPerSecRecreateDuringCleanup(t *testing.T) {
+	re := require.New(t)
+	c := &ResourceGroupsController{}
+	old := createTestGroupCostController(re)
+	name := t.Name()
+	c.groupsController.Store(name, old)
+	sampler := make(ruMaxPerSecSampler)
+	defer sampler.clear()
+	sampler.sample(c)
+	sampler[name].tracker.observe(100, 0, old.createdAt.Add(time.Second))
+	c.groupsController.Delete(name)
+	fresh := createTestGroupCostController(re)
+	c.groupsController.Store(name, fresh)
+	fresh.mu.consumption.RRU = 7
+	fresh.mu.consumption.WRU = 3
+	sampler.sample(c)
+	old.metrics.deletePagingLabels(name)
+	got := gatherRUMaxPerSec(t, name)
+	re.Len(got, 3)
+	seconds := sampler[name].tracker.last.Seconds()
+	re.InDelta(10/seconds, got[ruTypeTotal], 1e-6)
+	re.Equal(fresh, sampler[name].gc)
+	re.Len(sampler[name].tracker.samples, 1)
+	c.groupsController.Delete(name)
+	sampler.sample(c)
+	re.Empty(gatherRUMaxPerSec(t, name))
+	re.Empty(sampler)
+}
+
+func TestRUMaxPerSecSamplingIsIndependentOfStateUpdates(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+	// Simulate a controller created well before the sampler first sees it.
+	gc.createdAt = gc.createdAt.Add(-time.Second)
+	c := &ResourceGroupsController{}
+	c.groupsController.Store(t.Name(), gc)
+	sampler := make(ruMaxPerSecSampler)
+	defer sampler.clear()
+	gc.burstable.Store(true)
+	req := NewTestRequestInfo(true, 4096, 1, AccessCrossZone)
+	_, _, _, _, err := gc.onRequestWaitImpl(context.Background(), req)
+	re.NoError(err)
+	_, err = gc.onResponseImpl(req, NewTestResponseInfo(0, time.Millisecond, true))
+	re.NoError(err)
+	for range 100 {
+		gc.updateRunState()
+		gc.updateAvgRequestResourcePerSec()
+	}
+	re.Empty(gatherRUMaxPerSec(t, t.Name()))
+	minimum := time.Since(gc.createdAt).Seconds()
+	sampler.sample(c)
+	maximum := time.Since(gc.createdAt).Seconds()
+	tracker := &sampler[t.Name()].tracker
+	seconds := tracker.last.Seconds()
+	re.GreaterOrEqual(seconds, minimum)
+	re.LessOrEqual(seconds, maximum)
+	re.Positive(gc.mu.consumption.WRU)
+	re.InDelta(gc.mu.consumption.WRU/seconds, gaugeValue(re, tracker.wruGauge), 1e-6)
+	before := tracker.last
+	for range 100 {
+		gc.updateRunState()
+		gc.updateAvgRequestResourcePerSec()
+	}
+	re.Equal(before, tracker.last)
+}
+
+func TestRUMaxPerSecSlowCollectDoesNotBlockController(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	provider := newMockResourceGroupProvider()
+	provider.On("AcquireTokenBuckets", mock.Anything, mock.Anything).Return([]*rmpb.TokenBucketResponse{}, nil)
+	c, err := NewResourceGroupController(ctx, 1, provider, nil, constants.NullKeyspaceID)
+	re.NoError(err)
+	c.tokenResponseChan = make(chan []*rmpb.TokenBucketResponse)
+	// An unbuffered Collect holds the family's read lock while waiting for its
+	// remaining children to be drained. New peak children must wait for it.
+	seed := newRUMaxPerSecTracker(t.Name()+"/seed", time.Now())
+	t.Cleanup(func() { deleteRUMaxPerSecMetricLabels(t.Name() + "/seed") })
+	seed.observe(1, 0, seed.base.Add(time.Second))
+	ch := make(chan prometheus.Metric)
+	go func() {
+		metrics.RUMaxPerSecGauge.Collect(ch)
+		close(ch)
+	}()
+	<-ch
+	// Always release Collect before stopping a sampler that could be waiting
+	// for it, including when an assertion fails.
+	t.Cleanup(func() {
+		drained := 0
+		for range ch {
+			drained++
+		}
+		re.Positive(drained, "Collect must have held its read lock waiting for more children")
+		if c.loopCancel != nil {
+			re.NoError(c.Stop())
+		}
+	})
+	group := &rmpb.ResourceGroup{
+		Name: t.Name(), Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 1000000, BurstLimit: -1}}},
+	}
+	provider.On("GetResourceGroup", mock.Anything, group.Name, mock.Anything).Return(group, nil)
+	created := make(chan error, 1)
+	go func() {
+		_, err := c.tryGetResourceGroupController(ctx, group.Name, false)
+		created <- err
+	}()
+	select {
+	case err := <-created:
+		re.NoError(err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("peak collection blocked controller construction")
+	}
+	c.Start(ctx)
+	// Continue through multiple real ticks while the sampler cannot create
+	// children. Unbuffered sends acknowledge that the main loop is running.
+	deadline := time.NewTimer(2 * defaultGroupStateUpdateInterval)
+	defer deadline.Stop()
+	events := time.NewTicker(10 * time.Millisecond)
+	defer events.Stop()
+	for {
+		select {
+		case <-deadline.C:
+			return
+		case <-events.C:
+			select {
+			case c.tokenResponseChan <- nil:
+			case <-time.After(5 * time.Second):
+				t.Fatal("peak collection blocked token responses")
+			}
+		}
+	}
+}
+
+func TestRUMaxPerSecConcurrentRecreation(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	provider := newMockResourceGroupProvider()
+	provider.On("AcquireTokenBuckets", mock.Anything, mock.Anything).Return([]*rmpb.TokenBucketResponse{}, nil)
+	group := &rmpb.ResourceGroup{
+		Name: t.Name(), Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 1000000, BurstLimit: -1}}},
+	}
+	provider.On("GetResourceGroup", mock.Anything, group.Name, mock.Anything).Return(group, nil)
+	c, err := NewResourceGroupController(ctx, 1, provider, nil, constants.NullKeyspaceID)
+	re.NoError(err)
+	c.Start(ctx)
+	registry := prometheus.NewRegistry()
+	re.NoError(registry.Register(metrics.RUMaxPerSecGauge))
+	done := make(chan error, 1)
+	go func() {
+		req := NewTestRequestInfo(true, 64, 1, AccessCrossZone)
+		for ctx.Err() == nil {
+			if _, _, _, _, err := c.OnRequestWait(ctx, group.Name, req); err != nil {
+				if ctx.Err() != nil {
+					break
+				}
+				done <- err
+				return
+			}
+			if _, err := c.OnResponse(group.Name, req, NewTestResponseInfo(64, time.Millisecond, true)); err != nil {
+				done <- err
+				return
+			}
+			if _, err := registry.Gather(); err != nil {
+				done <- err
+				return
+			}
+		}
+		done <- nil
+	}()
+	t.Cleanup(func() {
+		cancel()
+		re.NoError(<-done)
+		re.NoError(c.Stop())
+		re.Empty(gatherRUMaxPerSec(t, group.Name))
+	})
+	// Exercise requests, scraping and sampling across cache deletion/recreation.
+	// The last generation remains present long enough to be reconciled.
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for range 220 {
+		<-ticker.C
+		c.groupsController.Delete(group.Name)
+		_, err := c.tryGetResourceGroupController(ctx, group.Name, false)
+		re.NoError(err)
+	}
+	re.Eventually(func() bool {
+		return gatherRUMaxPerSec(t, group.Name)[ruTypeTotal] > 0
+	}, 5*time.Second, 10*time.Millisecond)
 }

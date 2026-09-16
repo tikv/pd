@@ -302,6 +302,8 @@ const (
 func (c *ResourceGroupsController) Start(ctx context.Context) {
 	c.loopCtx, c.loopCancel = context.WithCancel(ctx)
 	c.wg.Add(1)
+	go c.runRUMaxPerSecMetrics(c.loopCtx)
+	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()
 		if c.ruConfig.DegradedModeWaitDuration > 0 {
@@ -362,7 +364,6 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			case <-stateUpdateTicker.C:
 				c.executeOnAllGroups((*groupCostController).updateRunState)
 				c.executeOnAllGroups((*groupCostController).updateAvgRequestResourcePerSec)
-				c.executeOnAllGroups((*groupCostController).sampleRUMaxPerSecMetrics)
 				if len(c.run.currentRequests) == 0 {
 					c.collectTokenBucketRequests(c.loopCtx, FromPeriodReport, periodicReport /* select resource groups which should be reported periodically */, notifyMsg{})
 				}
@@ -391,9 +392,8 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			/* channels */
 			case <-c.loopCtx.Done():
 				metrics.ResourceGroupStatusGauge.Reset()
-				c.requestSourceStates.Range(func(k, v any) bool {
+				c.requestSourceStates.Range(func(_, v any) bool {
 					v.(*requestSourceMetricsState).cleanup()
-					deleteRUMaxPerSecMetricLabels(k.(string))
 					return true
 				})
 				return
@@ -699,7 +699,7 @@ func (c *ResourceGroupsController) tombstoneGroupCostController(name string) {
 			zap.String("name", name), zap.Error(err))
 		// Directly delete the resource group controller if the default group is not available.
 		c.cleanupRequestSourceMetricsState(name)
-		oldGC.metrics.deleteLabels(name)
+		oldGC.metrics.deletePagingLabels(name)
 		c.groupsController.Delete(name)
 		return
 	}
@@ -716,7 +716,7 @@ func (c *ResourceGroupsController) tombstoneGroupCostController(name string) {
 			zap.String("name", name), zap.Error(err))
 		// Directly delete the resource group controller if the default group controller cannot be created.
 		c.cleanupRequestSourceMetricsState(name)
-		oldGC.metrics.deleteLabels(name)
+		oldGC.metrics.deletePagingLabels(name)
 		c.groupsController.Delete(name)
 		return
 	}
@@ -741,7 +741,7 @@ func (c *ResourceGroupsController) cleanUpResourceGroup() {
 				c.cleanupRequestSourceMetricsState(resourceGroupName)
 				c.groupsController.Delete(resourceGroupName)
 				metrics.ResourceGroupStatusGauge.DeleteLabelValues(resourceGroupName, resourceGroupName)
-				gc.metrics.deleteLabels(resourceGroupName)
+				gc.metrics.deletePagingLabels(resourceGroupName)
 				return true
 			}
 			gc.inactive = true

@@ -699,11 +699,7 @@ func TestStopCleansUpRequestSourceMetricsState(t *testing.T) {
 	ms := v.(*requestSourceMetricsState)
 	beforeCount := collectorMetricCount(controllerMetrics.RequestSourceRUCounter)
 
-	gc.metrics.ruMaxPerSec.ruGauge.Set(42)
-	re.Len(gatherRUMaxPerSec(t, group.Name), 3)
-
 	re.NoError(c.Stop())
-	re.Empty(gatherRUMaxPerSec(t, group.Name))
 
 	// cleanup() runs asynchronously on the background loop goroutine.
 	re.Eventually(func() bool {

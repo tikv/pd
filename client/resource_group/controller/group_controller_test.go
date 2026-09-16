@@ -946,7 +946,7 @@ func TestNonCopPredictedReadBytesResponseIgnoresPagingAccounting(t *testing.T) {
 	re.InDelta(noPrechargeBefore, counterValue(re, gc.metrics.noPrechargeCounter), 1e-9)
 }
 
-func TestDeleteLabelsResetsSeries(t *testing.T) {
+func TestDeletePagingLabelsResetsSeries(t *testing.T) {
 	re := require.New(t)
 	// Use a name no other test reuses so we measure only our own series.
 	name := "test-paging-cleanup-rg"
@@ -958,21 +958,18 @@ func TestDeleteLabelsResetsSeries(t *testing.T) {
 	gmc.observePagingResponse(100, 80)
 	gmc.observePagingRequest(0)
 	gmc.observePagingResponse(0, 200)
-	// Publish a peak before deleting the gauge series.
-	gmc.ruMaxPerSec.observe(100, 0, gmc.ruMaxPerSec.last.Add(time.Second))
 
 	// Sanity: cached counters are non-zero before cleanup.
 	re.Positive(counterValue(re, gmc.prechargeCounter))
 	re.Positive(counterValue(re, gmc.actualBytesCounter))
 	re.Positive(counterValue(re, gmc.noPrechargeCounter))
 	re.Positive(histogramSampleCount(re, gmc.predictionResidualBytes))
-	re.Positive(gaugeValue(re, metrics.RUMaxPerSecGauge.WithLabelValues(name, ruTypeTotal)))
 
-	gmc.deleteLabels(name)
+	gmc.deletePagingLabels(name)
 
 	// After cleanup, refetching each Vec with the same label must yield a
 	// fresh zero-valued series. Covers every counter declared in
-	// initMetrics so a forgotten DeleteLabelValues in deleteLabels
+	// initMetrics so a forgotten DeleteLabelValues in deletePagingLabels
 	// surfaces here.
 	for _, vec := range []*prometheus.CounterVec{
 		metrics.CopReadPrechargeCounter,
@@ -981,15 +978,14 @@ func TestDeleteLabelsResetsSeries(t *testing.T) {
 		metrics.PagingActualBytesCounter,
 	} {
 		re.Zero(counterValue(re, vec.WithLabelValues(name)),
-			"paging counter series for %q should be cleared by deleteLabels", name)
+			"paging counter series for %q should be cleared by deletePagingLabels", name)
 	}
 	for _, vec := range []*prometheus.HistogramVec{
 		metrics.PagingPredictionResidualBytes,
 	} {
 		re.Zero(histogramSampleCount(re, vec.WithLabelValues(name)),
-			"paging histogram series for %q should be cleared by deleteLabels", name)
+			"paging histogram series for %q should be cleared by deletePagingLabels", name)
 	}
-	re.Empty(gatherRUMaxPerSec(t, name))
 }
 
 func TestCopReadNoPrechargeGatedByIsCop(t *testing.T) {
@@ -1459,32 +1455,4 @@ func TestRUMaxPerSecTrackerFrequentSamples(t *testing.T) {
 		}
 		re.InDelta(want, gaugeValue(re, tracker.ruGauge), 1e-9, "sample %d", i)
 	}
-}
-
-func TestRUMaxPerSecSamplingIsIndependentOfStateUpdates(t *testing.T) {
-	re := require.New(t)
-	gc := createTestGroupCostController(re)
-	t.Cleanup(func() { deleteRUMaxPerSecMetricLabels(gc.name) })
-	tracker := gc.metrics.ruMaxPerSec
-	start := tracker.last
-	re.False(start.IsZero())
-	gc.burstable.Store(true)
-	req := NewTestRequestInfo(true, 4096, 1, AccessCrossZone)
-	_, _, _, _, err := gc.onRequestWaitImpl(context.Background(), req)
-	re.NoError(err)
-	_, err = gc.onResponseImpl(req, NewTestResponseInfo(0, time.Millisecond, true))
-	re.NoError(err)
-	before := gaugeValue(re, tracker.ruGauge)
-	for range 100 {
-		gc.updateRunState()
-		gc.updateAvgRequestResourcePerSec()
-	}
-	re.Equal(start, tracker.last)
-	re.InDelta(before, gaugeValue(re, tracker.ruGauge), 1e-9)
-	gc.sampleRUMaxPerSecMetrics()
-	seconds := tracker.last.Sub(start).Seconds()
-	re.Positive(seconds)
-	re.Positive(gc.mu.consumption.WRU)
-	re.InDelta(gc.mu.consumption.WRU/seconds, gaugeValue(re, tracker.wruGauge), 1e-6)
-	re.InDelta(getRUValueFromConsumption(gc.mu.consumption)/seconds, gaugeValue(re, tracker.ruGauge), 1e-6)
 }

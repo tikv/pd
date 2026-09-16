@@ -37,6 +37,8 @@ type groupCostController struct {
 	name    string
 	mode    rmpb.GroupMode
 	mainCfg *RUConfig
+	// createdAt is the immutable zero-consumption baseline for peak sampling.
+	createdAt time.Time
 	// meta info
 	meta     *rmpb.ResourceGroup
 	metaLock sync.RWMutex
@@ -106,7 +108,6 @@ type groupMetricsCollection struct {
 	runningKVRequestCounter           prometheus.Gauge
 	consumeTokenHistogram             prometheus.Observer
 	sourceState                       *requestSourceMetricsState
-	ruMaxPerSec                       *ruMaxPerSecTracker
 
 	// Paging pre-charge observers, cached per-RG to avoid WithLabelValues
 	// on the hot path.
@@ -183,7 +184,6 @@ func initMetrics(oldName, name string, sourceState *requestSourceMetricsState) *
 		runningKVRequestCounter:           metrics.GroupRunningKVRequestCounter.WithLabelValues(name),
 		consumeTokenHistogram:             metrics.TokenConsumedHistogram.WithLabelValues(name),
 		sourceState:                       sourceState,
-		ruMaxPerSec:                       newRUMaxPerSecTracker(sourceState.resourceGroupName, time.Now()),
 
 		prechargeCounter:        metrics.CopReadPrechargeCounter.WithLabelValues(name),
 		prechargeBytesCounter:   metrics.PagingPrechargeBytesCounter.WithLabelValues(name),
@@ -255,14 +255,13 @@ func (mc *groupMetricsCollection) addRequestSourceRUValue(requestSource, ruType 
 	}
 }
 
-// deleteLabels removes the per-group paging and RU peak series.
-func (*groupMetricsCollection) deleteLabels(name string) {
+// deletePagingLabels removes the per-group paging series.
+func (*groupMetricsCollection) deletePagingLabels(name string) {
 	metrics.CopReadPrechargeCounter.DeleteLabelValues(name)
 	metrics.CopReadNoPrechargeCounter.DeleteLabelValues(name)
 	metrics.PagingPrechargeBytesCounter.DeleteLabelValues(name)
 	metrics.PagingActualBytesCounter.DeleteLabelValues(name)
 	metrics.PagingPredictionResidualBytes.DeleteLabelValues(name)
-	deleteRUMaxPerSecMetricLabels(name)
 }
 
 // observePagingRequest records request-boundary cop read pre-charge counters.
@@ -286,72 +285,6 @@ func (mc *groupMetricsCollection) observePagingResponse(bytesForEst, actual uint
 	}
 	mc.actualBytesCounter.Add(float64(actual))
 	mc.predictionResidualBytes.Observe(float64(actual) - float64(bytesForEst))
-}
-
-const ruMaxPerSecWindow = 60 * time.Second
-
-type ruRateSample struct {
-	at       time.Time
-	rru, wru float64
-}
-
-// ruMaxPerSecTracker publishes the maximum sampled rate whose sampling interval
-// ended within the last 60 seconds. Only the controller's periodic tick samples
-// it; low-token notifications and token responses must not change its cadence.
-// Its baseline starts at construction so requests before the first tick count.
-type ruMaxPerSecTracker struct {
-	rruGauge, wruGauge, ruGauge prometheus.Gauge
-	last                        time.Time
-	prevRRU, prevWRU            float64
-	samples                     []ruRateSample
-}
-
-func newRUMaxPerSecTracker(name string, now time.Time) *ruMaxPerSecTracker {
-	return &ruMaxPerSecTracker{
-		rruGauge: metrics.RUMaxPerSecGauge.WithLabelValues(name, requestSourceRUTypeRRU),
-		wruGauge: metrics.RUMaxPerSecGauge.WithLabelValues(name, requestSourceRUTypeWRU),
-		ruGauge:  metrics.RUMaxPerSecGauge.WithLabelValues(name, ruTypeTotal),
-		last:     now,
-	}
-}
-
-func (t *ruMaxPerSecTracker) observe(curRRU, curWRU float64, now time.Time) {
-	duration := now.Sub(t.last)
-	if duration <= 0 {
-		return
-	}
-	// Failed requests can roll back consumption. Clamp each type before summing
-	// so a negative net increment cannot cancel the other type's consumption.
-	rru := math.Max(0, curRRU-t.prevRRU) / duration.Seconds()
-	wru := math.Max(0, curWRU-t.prevWRU) / duration.Seconds()
-	t.last, t.prevRRU, t.prevWRU = now, curRRU, curWRU
-
-	maxRRU, maxWRU, maxRU := rru, wru, rru+wru
-	kept := t.samples[:0]
-	for _, sample := range t.samples {
-		if now.Sub(sample.at) >= ruMaxPerSecWindow {
-			continue
-		}
-		kept = append(kept, sample)
-		maxRRU = math.Max(maxRRU, sample.rru)
-		maxWRU = math.Max(maxWRU, sample.wru)
-		maxRU = math.Max(maxRU, sample.rru+sample.wru)
-	}
-	// Zero samples cannot raise a maximum, but idle ticks still expire samples
-	// and publish zero once the window empties. Reuse the storage across ticks.
-	if rru > 0 || wru > 0 {
-		kept = append(kept, ruRateSample{at: now, rru: rru, wru: wru})
-	}
-	t.samples = kept
-	t.rruGauge.Set(maxRRU)
-	t.wruGauge.Set(maxWRU)
-	t.ruGauge.Set(maxRU)
-}
-
-func deleteRUMaxPerSecMetricLabels(name string) {
-	metrics.RUMaxPerSecGauge.DeleteLabelValues(name, requestSourceRUTypeRRU)
-	metrics.RUMaxPerSecGauge.DeleteLabelValues(name, requestSourceRUTypeWRU)
-	metrics.RUMaxPerSecGauge.DeleteLabelValues(name, ruTypeTotal)
 }
 
 type tokenCounter struct {
@@ -399,11 +332,12 @@ func newGroupCostController(
 	}
 	ms := initMetrics(group.Name, group.Name, sourceState)
 	gc := &groupCostController{
-		meta:    group,
-		name:    group.Name,
-		mainCfg: mainCfg,
-		mode:    group.GetMode(),
-		metrics: ms,
+		meta:      group,
+		name:      group.Name,
+		mainCfg:   mainCfg,
+		mode:      group.GetMode(),
+		metrics:   ms,
+		createdAt: time.Now(),
 		calculators: []ResourceCalculator{
 			newKVCalculator(mainCfg),
 			newSQLCalculator(mainCfg),
@@ -492,17 +426,6 @@ func (gc *groupCostController) updateRunState() {
 	gc.mu.Unlock()
 	logControllerTrace("[resource group controller] update run state", zap.String("name", gc.name), zap.Any("request-unit-consumption", gc.run.consumption), zap.Bool("is-throttled", gc.isThrottled.Load()))
 	gc.run.now = newTime
-}
-
-// sampleRUMaxPerSecMetrics takes a timed consumption snapshot only on the
-// periodic tick. Keep time and consumption in the same critical section so
-// waiting for the lock cannot skew the interval used to normalize the delta.
-func (gc *groupCostController) sampleRUMaxPerSecMetrics() {
-	gc.mu.Lock()
-	now := time.Now()
-	rru, wru := gc.mu.consumption.RRU, gc.mu.consumption.WRU
-	gc.mu.Unlock()
-	gc.metrics.ruMaxPerSec.observe(rru, wru, now)
 }
 
 func (gc *groupCostController) updateAvgRequestResourcePerSec() {
