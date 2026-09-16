@@ -47,7 +47,9 @@ type Scheduler interface {
 	GetNextInterval(interval time.Duration) time.Duration
 	PrepareConfig(cluster sche.SchedulerCluster) error
 	CleanConfig(cluster sche.SchedulerCluster)
-	Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan)
+	// Schedule returns executable operators. collectDiagnostics only enables plan
+	// collection; it does not make the returned operators a dry run.
+	Schedule(cluster sche.SchedulerCluster, collectDiagnostics bool) ([]*operator.Operator, []plan.Plan)
 	IsScheduleAllowed(cluster sche.SchedulerCluster) bool
 	// IsDisable returns if the scheduler is disabled, it only works for default schedulers.
 	// - BalanceRegionScheduler
