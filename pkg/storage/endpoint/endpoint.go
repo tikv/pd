@@ -32,7 +32,12 @@ import (
 type StorageEndpoint struct {
 	kv.Base
 	encryptionKeyManager *encryption.Manager
-	// nextRegionID is the next region ID to be reloaded
+	*regionLoadState
+}
+
+// regionLoadState is shared by endpoints that use the same region cache.
+// As with LoadRegions, access is serialized by the owning storage/cluster.
+type regionLoadState struct {
 	nextRegionID uint64
 }
 
@@ -45,8 +50,14 @@ func NewStorageEndpoint(
 	return &StorageEndpoint{
 		kvBase,
 		encryptionKeyManager,
-		0,
+		&regionLoadState{},
 	}
+}
+
+// WithKVBase returns an endpoint with a different KV backend, preserving the
+// encryption manager and region loading progress of the original endpoint.
+func (se *StorageEndpoint) WithKVBase(base kv.Base) *StorageEndpoint {
+	return &StorageEndpoint{base, se.encryptionKeyManager, se.regionLoadState}
 }
 
 func (se *StorageEndpoint) createRawTxn() (kv.RawTxn, error) {

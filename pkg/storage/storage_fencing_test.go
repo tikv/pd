@@ -72,3 +72,38 @@ func TestLeaderLeaseStorageView(t *testing.T) {
 	_, err = WithLeaderLease(base, leaderKey, clientv3.NoLease)
 	re.ErrorIs(err, errs.ErrEtcdTxnConflict)
 }
+
+func TestLeaderLeaseStoragePreservesRegionLoadProgress(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	ctx := context.Background()
+	lease, err := client.Grant(ctx, 60)
+	re.NoError(err)
+	_, err = client.Put(ctx, "/qa-leader", "member-a", clientv3.WithLease(lease.ID))
+	re.NoError(err)
+	base := NewStorageWithEtcdBackend(client)
+	for _, id := range []uint64{1, 2, 3} {
+		re.NoError(base.SaveRegion(&metapb.Region{Id: id}))
+	}
+	load := func(s Storage) int {
+		n := 0
+		re.NoError(s.LoadRegions(ctx, func(*core.RegionInfo) []*core.RegionInfo {
+			n++
+			return nil
+		}))
+		return n
+	}
+	re.Equal(3, load(base))
+	re.Zero(load(base))
+	view1, err := WithLeaderLease(base, "/qa-leader", lease.ID)
+	re.NoError(err)
+	first, repeated := load(view1), load(view1)
+	view2, err := WithLeaderLease(base, "/qa-leader", lease.ID)
+	re.NoError(err)
+	recreated := load(view2)
+	t.Logf("unchanged view first=%d repeated=%d; recreated view with same lease=%d", first, repeated, recreated)
+	re.Zero(first)
+	re.Zero(repeated)
+	re.Zero(recreated)
+}

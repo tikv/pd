@@ -100,8 +100,10 @@ func (kv *etcdKVBase) Save(key, value string) error {
 		failpoint.Return(errors.New("save failed"))
 	})
 
-	txn := NewSlowLogTxn(kv.client).If(kv.writeConditions...)
+	// Pause before starting the request deadline so leadership-transition tests
+	// exercise the lease comparison even on slow machines.
 	failpoint.InjectCall("beforeSaveCommit", kv.client, key, value)
+	txn := NewSlowLogTxn(kv.client).If(kv.writeConditions...)
 	resp, err := txn.Then(clientv3.OpPut(key, value)).Commit()
 	failpoint.InjectCall("afterSaveCommit", kv.client, key, value, resp, &err)
 	if err != nil {
@@ -340,7 +342,11 @@ func (l *rawTxnWrapper) If(conditions ...RawTxnCondition) RawTxn {
 			cmpList = append(cmpList, clientv3.Compare(clientv3.Value(c.Key), cmpOp, c.Value))
 		}
 	}
-	l.conditions = cmpList
+	if len(l.writeConditions) == 0 {
+		l.inner = l.inner.If(cmpList...)
+	} else {
+		l.conditions = cmpList
+	}
 	return l
 }
 
@@ -370,14 +376,24 @@ func convertOps(ops []RawTxnOp) []clientv3.Op {
 // Then implements RawTxn interface for adding operations that need to be executed when the condition passes to
 // the transaction.
 func (l *rawTxnWrapper) Then(ops ...RawTxnOp) RawTxn {
-	l.thenOps = convertOps(ops)
+	convertedOps := convertOps(ops)
+	if len(l.writeConditions) == 0 {
+		l.inner = l.inner.Then(convertedOps...)
+	} else {
+		l.thenOps = convertedOps
+	}
 	return l
 }
 
 // Else implements RawTxn interface for adding operations that need to be executed when the condition doesn't pass
 // to the transaction.
 func (l *rawTxnWrapper) Else(ops ...RawTxnOp) RawTxn {
-	l.elseOps = convertOps(ops)
+	convertedOps := convertOps(ops)
+	if len(l.writeConditions) == 0 {
+		l.inner = l.inner.Else(convertedOps...)
+	} else {
+		l.elseOps = convertedOps
+	}
 	return l
 }
 
@@ -387,8 +403,6 @@ func (l *rawTxnWrapper) Commit() (RawTxnResponse, error) {
 	// to the user's If would allow a stale leader to execute a writing Else.
 	if len(l.writeConditions) > 0 {
 		l.inner.If(l.writeConditions...).Then(clientv3.OpTxn(l.conditions, l.thenOps, l.elseOps))
-	} else {
-		l.inner.If(l.conditions...).Then(l.thenOps...).Else(l.elseOps...)
 	}
 	resp, err := l.inner.Commit()
 	if err != nil {

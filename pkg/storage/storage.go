@@ -120,8 +120,12 @@ func WithLeaderLease(s Storage, leaderKey string, leaseID clientv3.LeaseID) (Sto
 	}
 	switch backend := s.(type) {
 	case *etcdBackend:
-		return newEtcdBackend(backend.client,
-			clientv3.Compare(clientv3.LeaseValue(leaderKey), "=", int64(leaseID))), nil
+		base := kv.NewEtcdKVBase(backend.client,
+			clientv3.Compare(clientv3.LeaseValue(leaderKey), "=", int64(leaseID)))
+		return &etcdBackend{
+			StorageEndpoint: backend.WithKVBase(base),
+			client:          backend.client,
+		}, nil
 	case *coreStorage:
 		defaultStorage, err := WithLeaderLease(backend.Storage, leaderKey, leaseID)
 		if err != nil {

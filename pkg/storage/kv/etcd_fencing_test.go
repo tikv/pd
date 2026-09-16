@@ -25,6 +25,27 @@ import (
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 )
 
+func TestEtcdUnguardedRawTxnBuilder(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	txn := NewEtcdKVBase(client).CreateRawTxn()
+	// Keep the etcd builder's immediate validation for ordinary transactions.
+	txn.If(RawTxnCondition{Key: "value", CmpType: RawTxnCmpNotExists})
+	re.Panics(func() { txn.If() })
+	txn.Then(RawTxnOp{OpType: RawTxnOpPut, Key: "value", Value: "new"})
+	re.Panics(func() { txn.Then() })
+	txn.Else()
+	re.Panics(func() { txn.Else() })
+	resp, err := txn.Commit()
+	re.NoError(err)
+	re.True(resp.Succeeded)
+	// The original builder also permits committing the same transaction again.
+	resp, err = txn.Commit()
+	re.NoError(err)
+	re.False(resp.Succeeded)
+}
+
 func TestEtcdWriteConditions(t *testing.T) {
 	re := require.New(t)
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)

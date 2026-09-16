@@ -157,35 +157,59 @@ type Server interface {
 // store 1 -> /1/raft/s/1, value is metapb.Store
 // region 1 -> /1/raft/r/1, value is metapb.Region
 type RaftCluster struct {
+	*raftClusterState
+	*raftClusterRun
+}
+
+// raftClusterState holds the shared cache and lifecycle state. It is never
+// copied when creating a handle for a new term.
+type raftClusterState struct {
 	syncutil.RWMutex
 	storeStateLock *syncutil.LockGroup
 	wg             sync.WaitGroup
+	owner          *RaftCluster
+	runningCluster *RaftCluster // protected by RWMutex
 
 	serverCtx context.Context
-	ctx       context.Context
-	cancel    context.CancelFunc
-
-	*core.BasicCluster // cached cluster info
-	member             *member.Member
-
+	*core.BasicCluster
+	member     *member.Member
 	etcdClient *clientv3.Client
 	httpClient *http.Client
 
 	running                  bool
 	isKeyspaceGroupEnabled   bool
 	tsoDynamicSwitchingState atomic.Int32
-	meta                     *metapb.Cluster
 	storage                  storage.Storage
-	leaderStorage            atomic.Pointer[leaderStorage]
 	minResolvedTS            atomic.Value // Store as uint64
 	externalTS               atomic.Value // Store as uint64
 
 	// Keep the previous store limit settings when removing a store.
 	prevStoreLimit sync.Map // map[uint64]map[storelimit.Type]float64
 
-	// This below fields are all read-only, we cannot update itself after the raft cluster starts.
-	id  id.Allocator
-	opt *config.PersistOptions
+	id                   id.Allocator
+	opt                  *config.PersistOptions
+	regionSyncer         *syncer.RegionSyncer
+	keyspaceGroupManager *keyspace.GroupManager
+	independentServices  sync.Map
+	hbstreams            *hbstream.HeartbeatStreams
+	tsoAllocator         *tso.Allocator
+
+	// Callback used by the server to clean up a buried store's metrics.
+	onStoreBuried atomic.Pointer[func(storeID string)]
+}
+
+// raftClusterRun belongs to one Start. Its storage and managers retain that
+// term's lease even when requests or runner task bodies outlive Stop. The
+// lifecycle owner updates its run pointer under RWMutex; published handles
+// keep their original run pointer.
+type raftClusterRun struct {
+	ctx         context.Context
+	cancel      context.CancelFunc
+	termStorage storage.Storage
+	// A delayed setter in an old run must not block setters in the new run.
+	externalTSMu sync.Mutex
+	meta         *metapb.Cluster
+
 	*schedulingController
 	ruleManager              *placement.RuleManager
 	keyRangeManager          *keyrange.Manager
@@ -194,31 +218,14 @@ type RaftCluster struct {
 	replicationMode          *replication.ModeManager
 	unsafeRecoveryController *unsaferecovery.Controller
 	progressManager          *progress.Manager
-	regionSyncer             *syncer.RegionSyncer
 	changedRegions           chan *core.RegionInfo
-	keyspaceGroupManager     *keyspace.GroupManager
-	independentServices      sync.Map
-	hbstreams                *hbstream.HeartbeatStreams
-	tsoAllocator             *tso.Allocator
 
-	// heartbeatRunner is used to process the subtree update task asynchronously.
-	heartbeatRunner ratelimit.Runner
-	// miscRunner is used to process the statistics and persistent tasks asynchronously.
-	miscRunner ratelimit.Runner
-	// logRunner is used to process the log asynchronously.
-	logRunner ratelimit.Runner
-	// syncRegionRunner is used to sync region asynchronously.
+	heartbeatRunner  ratelimit.Runner
+	miscRunner       ratelimit.Runner
+	logRunner        ratelimit.Runner
 	syncRegionRunner ratelimit.Runner
 
 	stopGCStateManager func()
-
-	// onStoreBuried is an optional callback invoked (at least once) with a store's
-	// ID right after it's buried, for cleanup that only the owning package can do
-	// without an import cycle -- e.g. the server package's own heartbeat/bucket
-	// metrics, which server/cluster cannot import directly. Set via
-	// SetOnStoreBuried; read through an atomic pointer since BuryStoreLocked can run
-	// before the owner has had a chance to install it.
-	onStoreBuried atomic.Pointer[func(storeID string)]
 }
 
 // SetOnStoreBuried sets the callback invoked when a store is buried.
@@ -236,12 +243,6 @@ type Status struct {
 	ReplicationStatus string    `json:"replication_status"`
 }
 
-// leaderStorage holds the immutable storage view of one RaftCluster run.
-// Cluster jobs are drained before the member campaigns for a new lease.
-type leaderStorage struct {
-	storage.Storage
-}
-
 // NewRaftCluster create a new cluster.
 func NewRaftCluster(
 	ctx context.Context,
@@ -253,16 +254,26 @@ func NewRaftCluster(
 	httpClient *http.Client,
 	tsoAllocator *tso.Allocator,
 ) *RaftCluster {
-	return &RaftCluster{
-		serverCtx:      ctx,
-		storeStateLock: syncutil.NewLockGroup(syncutil.WithRemoveEntryOnUnlock(true)),
-		member:         member,
-		regionSyncer:   regionSyncer,
-		httpClient:     httpClient,
-		etcdClient:     etcdClient,
-		BasicCluster:   basicCluster,
-		storage:        storage,
-		tsoAllocator:   tsoAllocator,
+	c := &RaftCluster{
+		raftClusterState: &raftClusterState{
+			serverCtx:      ctx,
+			storeStateLock: syncutil.NewLockGroup(syncutil.WithRemoveEntryOnUnlock(true)),
+			member:         member,
+			regionSyncer:   regionSyncer,
+			httpClient:     httpClient,
+			etcdClient:     etcdClient,
+			BasicCluster:   basicCluster,
+			storage:        storage,
+			tsoAllocator:   tsoAllocator,
+		},
+		raftClusterRun: newRaftClusterRun(),
+	}
+	c.owner = c
+	return c
+}
+
+func newRaftClusterRun() *raftClusterRun {
+	return &raftClusterRun{
 		heartbeatRunner: ratelimit.NewConcurrentRunner(heartbeatTaskRunner,
 			ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
 		miscRunner: ratelimit.NewConcurrentRunner(miscTaskRunner,
@@ -305,8 +316,8 @@ func (c *RaftCluster) LoadClusterStatus() (*Status, error) {
 		isInitialized = c.isInitialized()
 	}
 	var replicationStatus string
-	if c.replicationMode != nil {
-		replicationStatus = c.replicationMode.GetReplicationStatus().String()
+	if replicationMode := c.GetReplicationMode(); replicationMode != nil {
+		replicationStatus = replicationMode.GetReplicationStatus().String()
 	}
 	return &Status{
 		RaftBootstrapTime: bootstrapTime,
@@ -362,6 +373,7 @@ func (c *RaftCluster) InitCluster(
 
 // Start starts a cluster.
 func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
+	c = c.owner
 	start := time.Now()
 	defer func() {
 		startType := "non-bootstrap"
@@ -378,14 +390,21 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 		log.Warn("raft cluster has already been started")
 		return nil
 	}
+	view := c.storage
 	if c.member != nil {
 		leadership := c.member.GetLeadership()
-		view, err := storage.WithLeaderLease(c.storage, leadership.GetLeaderKey(), leadership.GetLease().GetID())
+		var err error
+		view, err = storage.WithLeaderLease(c.storage, leadership.GetLeaderKey(), leadership.GetLease().GetID())
 		if err != nil {
 			return err
 		}
-		c.leaderStorage.Store(&leaderStorage{Storage: view})
 	}
+	// All managers and jobs started below keep this immutable storage handle.
+	// Stop drains the cluster loops, but RPCs and runner task bodies may outlive it.
+	c.raftClusterRun = newRaftClusterRun()
+	c.termStorage = view
+	c = &RaftCluster{raftClusterState: c.raftClusterState, raftClusterRun: c.raftClusterRun}
+	c.runningCluster = c
 	c.isKeyspaceGroupEnabled = s.IsKeyspaceGroupEnabled()
 	initClusterStart := time.Now()
 	err = c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetHBStreams(), s.GetKeyspaceGroupManager())
@@ -1000,6 +1019,7 @@ func (c *RaftCluster) runReplicationMode() {
 
 // Stop stops the cluster.
 func (c *RaftCluster) Stop() {
+	c = c.owner
 	var (
 		cancel             context.CancelFunc
 		stopSchedulingJobs bool
@@ -1021,6 +1041,7 @@ func (c *RaftCluster) Stop() {
 		c.Unlock()
 		return
 	}
+	c = c.runningCluster
 	c.running = false
 	cancel = c.cancel
 	stopSchedulingJobs = !c.IsServiceIndependent(constant.SchedulingServiceName)
@@ -1038,6 +1059,11 @@ func (c *RaftCluster) Stop() {
 	}
 	if stopSchedulingJobs {
 		c.stopSchedulingJobs()
+	} else {
+		// Handler-only coordinators do not run the normal shutdown loop.
+		coordinator := c.GetCoordinator()
+		coordinator.Stop()
+		coordinator.GetSchedulersController().Wait()
 	}
 	if heartbeatRunner != nil {
 		heartbeatRunner.Stop()
@@ -1065,7 +1091,18 @@ func (c *RaftCluster) Wait() {
 func (c *RaftCluster) IsRunning() bool {
 	c.RLock()
 	defer c.RUnlock()
-	return c.running
+	return c.running && (c == c.owner || c == c.runningCluster)
+}
+
+// RunningCluster returns a handle bound to the current run, or nil if stopped.
+// Callers must retain the returned handle for the whole operation.
+func (c *RaftCluster) RunningCluster() *RaftCluster {
+	c.RLock()
+	defer c.RUnlock()
+	if !c.running {
+		return nil
+	}
+	return c.runningCluster
 }
 
 // Context returns the context of RaftCluster.
@@ -1100,33 +1137,56 @@ func (c *RaftCluster) GetRegionSyncer() *syncer.RegionSyncer {
 
 // GetReplicationMode returns the ReplicationMode.
 func (c *RaftCluster) GetReplicationMode() *replication.ModeManager {
+	if c == c.owner {
+		c.RLock()
+		defer c.RUnlock()
+	}
 	return c.replicationMode
 }
 
 // GetRuleManager returns the rule manager reference.
 func (c *RaftCluster) GetRuleManager() *placement.RuleManager {
+	if c == c.owner {
+		c.RLock()
+		defer c.RUnlock()
+	}
 	return c.ruleManager
 }
 
 // GetKeyRangeManager returns the key range manager reference
 func (c *RaftCluster) GetKeyRangeManager() *keyrange.Manager {
+	if c == c.owner {
+		c.RLock()
+		defer c.RUnlock()
+	}
 	return c.keyRangeManager
 }
 
 // GetRegionLabeler returns the region labeler.
 func (c *RaftCluster) GetRegionLabeler() *labeler.RegionLabeler {
+	if c == c.owner {
+		c.RLock()
+		defer c.RUnlock()
+	}
 	return c.regionLabeler
 }
 
 // GetAffinityManager returns the affinity manager reference.
 func (c *RaftCluster) GetAffinityManager() *affinity.Manager {
+	if c == c.owner {
+		c.RLock()
+		defer c.RUnlock()
+	}
 	return c.affinityManager
 }
 
 // GetStorage returns the storage.
 func (c *RaftCluster) GetStorage() storage.Storage {
-	if view := c.leaderStorage.Load(); view != nil {
-		return view.Storage
+	if c == c.owner {
+		return c.storage
+	}
+	if c.termStorage != nil {
+		return c.termStorage
 	}
 	return c.storage
 }
@@ -1228,7 +1288,9 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 	// more conveniently, such as avoiding calling `remove_peer` redundantly under
 	// NodeState_Removing.
 	resp.State = store.GetNodeState()
-	c.PutStore(newStore, opts...)
+	if err := c.publishStore(newStore, opts...); err != nil {
+		return err
+	}
 	var (
 		reportedRegions map[uint64]struct{}
 		interval        uint64
@@ -1441,6 +1503,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 				regionID,
 				ratelimit.SaveRegionToKV,
 				func(context.Context) {
+					failpoint.InjectCall("beforePersistRegion", c.etcdClient, region.GetMeta())
 					// If there are concurrent heartbeats from the same region, the last write will win even if
 					// writes to storage in the critical area. So don't use mutex to protect it.
 					// Not successfully saved to storage is not fatal, it only leads to longer warm-up
@@ -1936,15 +1999,32 @@ func (c *RaftCluster) SetStoreWeight(storeID uint64, leaderWeight, regionWeight 
 
 // The meta of StoreInfo should be the latest.
 func (c *RaftCluster) setStore(store *core.StoreInfo, opts ...core.StoreCreateOption) error {
+	failpoint.InjectCall("beforePersistStore", c.etcdClient, store.GetMeta())
 	if c.GetStorage() != nil {
 		if err := c.GetStorage().SaveStoreMeta(store.GetMeta()); err != nil {
 			return err
 		}
 	}
-	c.PutStore(store, opts...)
+	if err := c.publishStore(store, opts...); err != nil {
+		return err
+	}
 	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
 		c.updateStoreStatistics(store.GetID(), store.IsSlow())
 	}
+	return nil
+}
+
+// publishStore serializes cache publication with Start. A write can commit
+// before lease loss and return after the next run has reloaded the cache.
+func (c *RaftCluster) publishStore(store *core.StoreInfo, opts ...core.StoreCreateOption) error {
+	if c != c.owner {
+		c.RLock()
+		defer c.RUnlock()
+		if !c.running || c != c.runningCluster {
+			return errs.ErrEtcdTxnConflict.FastGenByArgs()
+		}
+	}
+	c.PutStore(store, opts...)
 	return nil
 }
 
@@ -2210,6 +2290,13 @@ func (c *RaftCluster) deleteStore(store *core.StoreInfo) error {
 			return err
 		}
 	}
+	if c != c.owner {
+		c.RLock()
+		defer c.RUnlock()
+		if !c.running || c != c.runningCluster {
+			return errs.ErrEtcdTxnConflict.FastGenByArgs()
+		}
+	}
 	// Remove the store before the metric cleanup below, not after: a metrics
 	// collection tick observing this store concurrently re-checks GetStore
 	// right after it writes and undoes its own write if the store is already
@@ -2285,8 +2372,16 @@ func (c *RaftCluster) OnStoreVersionChange() {
 		return
 	}
 
-	if !c.opt.CASClusterVersion(clusterVersion, minVersion) {
+	c.RLock()
+	if c != c.owner && (!c.running || c != c.runningCluster) {
+		c.RUnlock()
+		return
+	}
+	updated := c.opt.CASClusterVersion(clusterVersion, minVersion)
+	c.RUnlock()
+	if !updated {
 		log.Error("cluster version changed by API at the same time")
+		return
 	}
 	err := c.opt.Persist(c.GetStorage())
 	if err != nil {
@@ -2498,8 +2593,7 @@ func (c *RaftCluster) SetMinResolvedTS(storeID, minResolvedTS uint64) error {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
 	}
 
-	c.PutStore(store, core.SetMinResolvedTS(minResolvedTS))
-	return nil
+	return c.publishStore(store, core.SetMinResolvedTS(minResolvedTS))
 }
 
 // CheckAndUpdateMinResolvedTS checks and updates the min resolved ts of the cluster.
@@ -2615,8 +2709,28 @@ func (c *RaftCluster) GetExternalTS() uint64 {
 
 // SetExternalTS sets the external timestamp.
 func (c *RaftCluster) SetExternalTS(timestamp uint64) error {
+	if c != c.owner && !c.IsRunning() {
+		return errs.ErrEtcdTxnConflict.FastGenByArgs()
+	}
+	c.externalTSMu.Lock()
+	defer c.externalTSMu.Unlock()
+	// The server's check may precede another concurrent setter. Recheck while
+	// serializing persistence and publication for this run.
+	if current := c.externalTS.Load(); current != nil && timestamp <= current.(uint64) {
+		return errors.New("the external timestamp should be larger than current external timestamp")
+	}
+	if err := c.GetStorage().SaveExternalTS(timestamp); err != nil {
+		return err
+	}
+	if c != c.owner {
+		c.RLock()
+		defer c.RUnlock()
+		if !c.running || c != c.runningCluster {
+			return errs.ErrEtcdTxnConflict.FastGenByArgs()
+		}
+	}
 	c.externalTS.Store(timestamp)
-	return c.GetStorage().SaveExternalTS(timestamp)
+	return nil
 }
 
 func (c *RaftCluster) loadExternalTS() {
