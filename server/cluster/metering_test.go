@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/stretchr/testify/require"
 
 	"github.com/tikv/pd/pkg/core"
@@ -105,4 +106,39 @@ func TestCollectStorageSize(t *testing.T) {
 		re.Equal(metering.NewBytesValue(storageSizeInfo.rowBasedIAStorageSize*units.MiB), record[meteringDataRowBasedIAStorageSizeField])
 		re.Equal(metering.NewBytesValue(storageSizeInfo.columnBasedStorageSize*units.MiB), record[meteringDataColumnBasedStorageSizeField])
 	}
+}
+
+// TestCollectStorageSizeExcludesNonEnabledKeyspace verifies that a keyspace
+// which is no longer ENABLED (e.g. DISABLED, ARCHIVED, or TOMBSTONE) is
+// excluded from the metering pass, even though it can still linger in
+// Manager.cache until it is fully removed via RemoveKeyspace.
+func TestCollectStorageSizeExcludesNonEnabledKeyspace(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	tc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+
+	keyspaceGroupManager := keyspace.NewKeyspaceGroupManager(ctx, tc.storage, tc.etcdClient)
+	re.NoError(keyspaceGroupManager.Bootstrap(ctx))
+	keyspaceManager := keyspace.NewKeyspaceManager(ctx, tc.storage, tc, mockid.NewIDAllocator(), &config.KeyspaceConfig{}, keyspaceGroupManager, nil)
+
+	enabled, err := keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+		Name:       "still-enabled",
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+	disabled, err := keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+		Name:       "no-longer-enabled",
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+	_, err = keyspaceManager.UpdateKeyspaceState(disabled.GetName(), keyspacepb.KeyspaceState_DISABLED, time.Now().Unix())
+	re.NoError(err)
+
+	storageSizeInfoList := tc.collectStorageSize(keyspaceManager)
+	re.Len(storageSizeInfoList, 1)
+	re.Equal(enabled.GetName(), storageSizeInfoList[0].keyspaceName)
 }

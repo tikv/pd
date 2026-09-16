@@ -728,11 +728,11 @@ func (s *Cache) clearAll() {
 	})
 }
 
-func (s *Cache) scanAllKeyspaces(f func(keyspaceID uint32, name string) bool) {
+func (s *Cache) scanAllKeyspaces(f func(keyspaceID uint32, name string, state keyspacepb.KeyspaceState) bool) {
 	s.RLock()
 	defer s.RUnlock()
 	s.tree.Ascend(func(i keyspaceItem) bool {
-		return f(i.keyspaceID, i.name)
+		return f(i.keyspaceID, i.name, i.state)
 	})
 }
 

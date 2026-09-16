@@ -1416,7 +1416,7 @@ func (manager *Manager) DeleteKeyspaceMetaFromCache(id uint32) {
 }
 
 // ScanAllKeyspace scans all keyspaces in the cache and applies the given function to each keyspace.
-func (manager *Manager) ScanAllKeyspace(fn func(keyspaceID uint32, name string) bool) {
+func (manager *Manager) ScanAllKeyspace(fn func(keyspaceID uint32, name string, state keyspacepb.KeyspaceState) bool) {
 	manager.cache.scanAllKeyspaces(fn)
 }
 

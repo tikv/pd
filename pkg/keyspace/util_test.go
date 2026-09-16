@@ -1003,7 +1003,7 @@ func TestGetKeyspaceIDInRange(t *testing.T) {
 
 	all := func() []uint32 {
 		var ret []uint32
-		cache.scanAllKeyspaces(func(keyspaceID uint32, _ string) bool {
+		cache.scanAllKeyspaces(func(keyspaceID uint32, _ string, _ keyspacepb.KeyspaceState) bool {
 			ret = append(ret, keyspaceID)
 			return true
 		})
