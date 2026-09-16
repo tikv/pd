@@ -35,9 +35,29 @@ var (
 	gcStateCacheAccessHitCounter     = gcStateCacheAccessCounter.WithLabelValues("hit")
 	gcStateCacheAccessSlowHitCounter = gcStateCacheAccessCounter.WithLabelValues("slow_hit")
 	gcStateCacheAccessMissCounter    = gcStateCacheAccessCounter.WithLabelValues("miss")
+
+	gcStateWatcherGauge = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: "pd",
+		Subsystem: "gc",
+		Name:      "watcher_count",
+		Help:      "Current number of active GC state watchers.",
+	})
+	gcStateWatcherTerminationCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "pd",
+		Subsystem: "gc",
+		Name:      "watcher_termination_total",
+		Help:      "Total number of GC state watcher terminations by reason.",
+	}, []string{"reason"})
+
+	gcStateWatcherTerminationClientCancelCounter = gcStateWatcherTerminationCounter.WithLabelValues("client_cancel")
+	gcStateWatcherTerminationLeaderLostCounter   = gcStateWatcherTerminationCounter.WithLabelValues("leader_lost")
+	gcStateWatcherTerminationSlowConsumerCounter = gcStateWatcherTerminationCounter.WithLabelValues("slow_consumer")
+	gcStateWatcherTerminationInitErrorCounter    = gcStateWatcherTerminationCounter.WithLabelValues("init_error")
 )
 
 func init() {
 	prometheus.MustRegister(gcSafePointGauge)
 	prometheus.MustRegister(gcStateCacheAccessCounter)
+	prometheus.MustRegister(gcStateWatcherGauge)
+	prometheus.MustRegister(gcStateWatcherTerminationCounter)
 }
