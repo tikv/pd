@@ -75,7 +75,7 @@ The watcher exposes a receive operation that returns at most a requested number 
 
 ### GC service
 
-`server/gc_service.go` remains a thin adapter. Its public `WatchGCStates` method performs the rate-limit check directly, validates the request locally, registers a watcher, converts internal changes to protobuf, splits changes into wire-size-bounded responses, sends them, and closes the watcher on every return path. The handler does not proxy the long-lived stream: a non-serving or unbootstrapped member returns `Unavailable`, and existing header and cluster-ID validation semantics remain unchanged.
+`server/gc_service.go` remains a thin adapter. Its public `WatchGCStates` method performs the rate-limit check directly, validates the request locally, registers a watcher, supervises streaming, and closes the watcher on every return path. One worker goroutine per RPC receives changes, converts them to protobuf, splits them into wire-size-bounded responses, and sends them sequentially. A result channel with capacity one lets the worker finish even after the handler returns. The supervisor selects between that result and the watcher’s `Done` notification, preferring an already-recorded watcher cause when processing a worker result. The handler does not proxy the long-lived stream: a non-serving or unbootstrapped member returns `Unavailable`, and existing header and cluster-ID validation semantics remain unchanged.
 
 Keeping `rateLimitCheck` in the public handler preserves the externally visible method name `WatchGCStates` in the caller-derived rate-limit label. The rate-limit token is held for the lifetime of the stream and released when the handler returns. Every successful `WatchGCStatesResponse` contains `grpcutil.WrapHeader()`; a structurally invalid internal change is logged and returned as gRPC `Internal`.
 
@@ -152,7 +152,11 @@ The lifecycle cases are:
 
 The `pkg/gc` layer returns domain errors and does not depend on gRPC status codes. The service maps not-leader and storage/initialization failures to `Unavailable`, and a slow consumer to `ResourceExhausted`. Existing request-validation and rate-limit paths retain their current status semantics.
 
-The receive path checks the terminal cause before returning buffered work after cancellation. Because one `RecvBatch` can be split into multiple protobuf responses, the handler checks the same terminal cause again immediately before every `Send`. This prevents an already-cancelled watcher from deliberately draining stale queued data; only an RPC send already in progress when leadership changes cannot be recalled. Clients treat any terminated stream as requiring reconnection and reinitialization.
+The receive path checks the terminal cause before returning buffered work after cancellation. Because one `RecvBatch` can be split into multiple protobuf responses, the worker checks the same terminal cause again immediately before every `Send`. This prevents an already-cancelled watcher from deliberately draining stale queued data.
+
+A response send already in progress cannot be recalled. Watcher termination nevertheless causes the RPC handler to return without waiting for that send. Handler return initiates gRPC transport teardown, which interrupts blocked sending; the worker then exits. The handler retains ownership of watcher cleanup and rate-limit token release. A client that is not reading may observe the terminal status only after draining already queued responses.
+
+The handler must not join the worker before returning: transport teardown depends on that return to unblock `Send`. The worker retains its response until sending finishes and publishes its result without waiting for a reader. There is at most one send in progress, with no additional response queue or per-send goroutine. Clients treat any terminated stream as requiring reconnection and reinitialization.
 
 ## Protobuf conversion and response batching
 
