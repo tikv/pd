@@ -20,6 +20,9 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/client/resource_group/controller/metrics"
 )
@@ -39,13 +42,22 @@ type ruMaxGroup struct {
 
 func (c *ResourceGroupsController) runRUMaxSampler(ctx context.Context) {
 	defer c.wg.Done()
+	logger := log.L().With(zap.Uint64("client-id", c.clientUniqueID), zap.Uint32("keyspace-id", c.keyspaceID))
 	sampler := make(ruMaxSampler)
-	defer sampler.clear()
+	defer func() {
+		start := time.Now()
+		sampler.clear()
+		logger.Info("[resource group controller] RU max sampler stopped", zap.Duration("cleanup-duration", time.Since(start)))
+	}()
 	ticker := time.NewTicker(defaultGroupStateUpdateInterval)
 	defer ticker.Stop()
+	logger.Info("[resource group controller] RU max sampler started",
+		zap.Duration("sample-interval", defaultGroupStateUpdateInterval), zap.Duration("window", ruMaxWindow))
 	for {
 		select {
 		case <-ctx.Done():
+			logger.Info("[resource group controller] RU max sampler stopping",
+				zap.Error(ctx.Err()), zap.Int("tracked-groups", len(sampler)))
 			return
 		case <-ticker.C:
 			sampler.sample(c)
