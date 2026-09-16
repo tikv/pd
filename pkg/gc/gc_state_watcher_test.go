@@ -61,6 +61,140 @@ func TestGCStateWatcherLiveSuppressesOlderInitial(t *testing.T) {
 	require.True(t, w.initDone)
 }
 
+func TestGCStateWatcherQueuedLivePrecedesNewerInitial(t *testing.T) {
+	for _, maxChanges := range []int{1, 2, 4} {
+		t.Run(fmt.Sprintf("batch-size-%d", maxChanges), func(t *testing.T) {
+			w := newGCStateWatcher(context.Background(), gcStateWatchConfig{initChannelCapacity: 2, liveChannelCapacity: 2}, false)
+			t.Cleanup(w.Close)
+			w.initCh <- []GCStateChange{
+				NewGCStateUpsert(GCState{KeyspaceID: 7, TxnSafePoint: 20}),
+				NewGCStateUpsert(GCState{KeyspaceID: 8, TxnSafePoint: 1}),
+			}
+			w.initCh <- []GCStateChange{
+				NewGCStateUpsert(GCState{KeyspaceID: 7, TxnSafePoint: 20}),
+				NewGCStateUpsert(GCState{KeyspaceID: 9, TxnSafePoint: 1}),
+			}
+			close(w.initCh)
+			queueLiveWhenInitialReceived(t, w,
+				NewGCStateUpsert(GCState{KeyspaceID: 7, TxnSafePoint: 10}),
+				NewGCStateUpsert(GCState{KeyspaceID: 7, TxnSafePoint: 20}),
+			)
+
+			want := []GCState{
+				{KeyspaceID: 7, TxnSafePoint: 10},
+				{KeyspaceID: 7, TxnSafePoint: 20},
+				{KeyspaceID: 8, TxnSafePoint: 1},
+				{KeyspaceID: 9, TxnSafePoint: 1},
+			}
+			for offset := 0; offset < len(want); {
+				got, err := w.RecvBatch(maxChanges)
+				require.NoError(t, err)
+				require.Len(t, got, min(maxChanges, len(want)-offset))
+				for _, change := range got {
+					require.Equal(t, want[offset], mustUpsert(t, change))
+					offset++
+				}
+			}
+			_, ok, err := w.receiveOne(false)
+			require.NoError(t, err)
+			require.False(t, ok, "initial duplicates must remain suppressed through the closed channel's buffered batches")
+		})
+	}
+}
+
+func TestGCStateWatcherLaterLiveDoesNotPostponePendingInitial(t *testing.T) {
+	w := newGCStateWatcher(context.Background(), gcStateWatchConfig{initChannelCapacity: 1, liveChannelCapacity: 4}, false)
+	t.Cleanup(w.Close)
+	w.initCh <- []GCStateChange{
+		NewGCStateUpsert(GCState{KeyspaceID: 7, TxnSafePoint: 20}),
+		NewGCStateUpsert(GCState{KeyspaceID: 8, TxnSafePoint: 1}),
+		NewGCStateUpsert(GCState{KeyspaceID: 9, TxnSafePoint: 1}),
+	}
+	close(w.initCh)
+	queueLiveWhenInitialReceived(t, w,
+		NewGCStateUpsert(GCState{KeyspaceID: 7, TxnSafePoint: 10}),
+		NewGCStateUpsert(GCState{KeyspaceID: 7, TxnSafePoint: 20}),
+	)
+
+	for i, want := range []GCState{
+		{KeyspaceID: 7, TxnSafePoint: 10},
+		{KeyspaceID: 7, TxnSafePoint: 20},
+		{KeyspaceID: 8, TxnSafePoint: 1},
+		{KeyspaceID: 9, TxnSafePoint: 1},
+	} {
+		got, err := w.RecvBatch(1)
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		require.Equal(t, want, mustUpsert(t, got[0]))
+		// Keep the live queue nonempty after the first receive. These arrivals
+		// must not postpone the unrelated states in the acquired initial batch.
+		w.liveCh <- NewGCStateUpsert(GCState{KeyspaceID: 7, TxnSafePoint: uint64(30 + i*10)})
+	}
+	got, err := w.RecvBatch(4)
+	require.NoError(t, err)
+	require.Len(t, got, 4)
+	for i, want := range []uint64{30, 40, 50, 60} {
+		require.Equal(t, GCState{KeyspaceID: 7, TxnSafePoint: want}, mustUpsert(t, got[i]))
+	}
+}
+
+func TestGCStateWatcherQueuedRemovalSuppressesInitial(t *testing.T) {
+	w := newGCStateWatcher(context.Background(), gcStateWatchConfig{initChannelCapacity: 1, liveChannelCapacity: 2}, false)
+	t.Cleanup(w.Close)
+	w.initCh <- []GCStateChange{
+		NewGCStateUpsert(GCState{KeyspaceID: 7, TxnSafePoint: 10}),
+		NewGCStateUpsert(GCState{KeyspaceID: 8, TxnSafePoint: 1}),
+	}
+	close(w.initCh)
+	queueLiveWhenInitialReceived(t, w, NewGCStateRemoved(7))
+
+	got, err := w.RecvBatch(3)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	removed, ok := got[0].RemovedKeyspaceID()
+	require.True(t, ok)
+	require.Equal(t, uint32(7), removed)
+	require.Equal(t, GCState{KeyspaceID: 8, TxnSafePoint: 1}, mustUpsert(t, got[1]))
+}
+
+func TestGCStateWatcherCancellationDiscardsPendingLivePrefix(t *testing.T) {
+	w := newGCStateWatcher(context.Background(), gcStateWatchConfig{initChannelCapacity: 1, liveChannelCapacity: 2}, false)
+	t.Cleanup(w.Close)
+	w.initCh <- []GCStateChange{
+		NewGCStateUpsert(GCState{KeyspaceID: 7, TxnSafePoint: 20}),
+		NewGCStateUpsert(GCState{KeyspaceID: 8, TxnSafePoint: 1}),
+	}
+	close(w.initCh)
+	queueLiveWhenInitialReceived(t, w,
+		NewGCStateUpsert(GCState{KeyspaceID: 7, TxnSafePoint: 10}),
+		NewGCStateUpsert(GCState{KeyspaceID: 7, TxnSafePoint: 20}),
+	)
+	got, err := w.RecvBatch(1)
+	require.NoError(t, err)
+	require.Equal(t, GCState{KeyspaceID: 7, TxnSafePoint: 10}, mustUpsert(t, got[0]))
+
+	want := errors.New("watch terminated with pending initial and live changes")
+	w.cancel(want)
+	got, err = w.RecvBatch(3)
+	require.ErrorIs(t, err, want)
+	require.Nil(t, got)
+}
+
+func queueLiveWhenInitialReceived(t *testing.T, w *GCStateWatcher, changes ...GCStateChange) {
+	t.Helper()
+	const name = "github.com/tikv/pd/pkg/gc/watchGCStatesInitialBatchReceived"
+	// Recreate the reachable merge state after select picks an initial batch
+	// while older live changes are queued. Enqueue in the hook only to force
+	// that branch deterministically, without depending on select randomness.
+	require.NoError(t, failpoint.EnableCall(name, func() {
+		for _, change := range changes {
+			w.liveCh <- change
+		}
+		changes = nil
+	}))
+	t.Cleanup(func() { require.NoError(t, failpoint.Disable(name)) })
+}
+
 func TestGCStateWatcherRemovedSuppressesInitial(t *testing.T) {
 	w := newGCStateWatcher(context.Background(), gcStateWatchConfig{initChannelCapacity: 1, liveChannelCapacity: 2}, false)
 	w.liveCh <- NewGCStateRemoved(7)
@@ -350,4 +484,28 @@ func mustUpsert(t testing.TB, change GCStateChange) GCState {
 	state, ok := change.Upsert()
 	require.True(t, ok)
 	return state
+}
+
+func TestGCStateWatcherDonePublishesFirstCause(t *testing.T) {
+	ctx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(context.Canceled)
+	w := newGCStateWatcher(ctx, gcStateWatchConfig{initChannelCapacity: 1, liveChannelCapacity: 1}, true)
+	defer w.Close()
+	done := w.Done()
+	require.Equal(t, done, w.Done())
+	select {
+	case <-done:
+		require.FailNow(t, "watcher terminated before cancellation")
+	default:
+	}
+	cancel(errs.ErrNotLeader)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		require.FailNow(t, "watcher termination was not notified")
+	}
+	require.ErrorIs(t, w.Err(), errs.ErrNotLeader)
+	w.Close()
+	require.ErrorIs(t, w.Err(), errs.ErrNotLeader)
+	require.Equal(t, done, w.Done())
 }
