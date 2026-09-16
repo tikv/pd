@@ -1169,17 +1169,7 @@ func TestWatchGCStatesSendFailureCleansUpPublicHandler(t *testing.T) {
 	re.NotNil(leaderServer)
 	pdServer := leaderServer.GetServer()
 
-	options := pdServer.GetServiceMiddlewarePersistOptions()
-	previousConfig := options.GetGRPCRateLimitConfig().Clone()
-	enabledConfig := previousConfig.Clone()
-	enabledConfig.EnableRateLimit = true
-	options.SetGRPCRateLimitConfig(enabledConfig)
-	limiter := pdServer.GetGRPCRateLimiter()
-	limiter.Update("WatchGCStates", ratelimit.UpdateConcurrencyLimiter(1))
-	t.Cleanup(func() {
-		limiter.Update("WatchGCStates", ratelimit.UpdateConcurrencyLimiter(0))
-		options.SetGRPCRateLimitConfig(previousConfig)
-	})
+	limiter := limitWatchGCStatesConcurrency(t, pdServer)
 
 	activeBefore := prometheusMetricValue(t, "pd_gc_watcher_count", nil)
 	clientCancelBefore := prometheusMetricValue(t, "pd_gc_watcher_termination_total", map[string]string{"reason": "client_cancel"})
@@ -1307,4 +1297,142 @@ func TestWatchGCStatesTerminatesOnLeaderTransferAndReinitializes(t *testing.T) {
 	re.Equal(uint64(10), reinitialized.GetTxnSafePoint())
 	re.Zero(reinitialized.GetGcSafePoint())
 	re.Empty(reinitialized.GetGcBarriers())
+}
+
+func limitWatchGCStatesConcurrency(t *testing.T, pdServer *server.Server) *ratelimit.Controller {
+	t.Helper()
+	options := pdServer.GetServiceMiddlewarePersistOptions()
+	previousConfig := options.GetGRPCRateLimitConfig().Clone()
+	enabledConfig := previousConfig.Clone()
+	enabledConfig.EnableRateLimit = true
+	options.SetGRPCRateLimitConfig(enabledConfig)
+	limiter := pdServer.GetGRPCRateLimiter()
+	limiter.Update("WatchGCStates", ratelimit.UpdateConcurrencyLimiter(1))
+	t.Cleanup(func() {
+		limiter.Update("WatchGCStates", ratelimit.UpdateConcurrencyLimiter(0))
+		options.SetGRPCRateLimitConfig(previousConfig)
+	})
+	return limiter
+}
+
+type blockedWatchGCStatesServer struct {
+	failingWatchGCStatesServer
+	sendStarted chan struct{}
+	sendExited  chan struct{}
+}
+
+func (s *blockedWatchGCStatesServer) Send(*pdpb.WatchGCStatesResponse) error {
+	close(s.sendStarted)
+	defer close(s.sendExited)
+	<-s.ctx.Done()
+	return s.ctx.Err()
+}
+
+func waitWatchGCStatesSignal(t *testing.T, signal <-chan struct{}, message string) {
+	t.Helper()
+	select {
+	case <-signal:
+	case <-time.After(5 * time.Second):
+		require.FailNow(t, message)
+	}
+}
+
+func TestWatchGCStatesBlockedSendCleansUpPublicHandler(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		reason string
+		code   codes.Code
+	}{
+		{"leader loss", "leader_lost", codes.Unavailable},
+		{"slow consumer", "slow_consumer", codes.ResourceExhausted},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			cluster := newWatchGCStatesCluster(t, 1, true)
+			leaderServer := cluster.GetLeaderServer()
+			re.NotNil(leaderServer)
+			pdServer := leaderServer.GetServer()
+			manager := pdServer.GetGCStateManager()
+			limiter := limitWatchGCStatesConcurrency(t, pdServer)
+			activeBefore := prometheusMetricValue(t, "pd_gc_watcher_count", nil)
+			labels := map[string]string{"reason": tc.reason}
+			terminatedBefore := prometheusMetricValue(t, "pd_gc_watcher_termination_total", labels)
+			registration := enableWatchGCStatesRegistrationPoint(t)
+			streamCtx, cancelStream := context.WithTimeout(context.Background(), 30*time.Second)
+			stream := &blockedWatchGCStatesServer{
+				failingWatchGCStatesServer: failingWatchGCStatesServer{ctx: streamCtx},
+				sendStarted:                make(chan struct{}), sendExited: make(chan struct{}),
+			}
+			handlerDone := make(chan struct{})
+			var handlerErr error
+			t.Cleanup(func() {
+				cancelStream()
+				waitWatchGCStatesSignal(t, handlerDone, "public handler did not clean up")
+				select {
+				case <-stream.sendStarted:
+					waitWatchGCStatesSignal(t, stream.sendExited, "send did not clean up")
+				default:
+				}
+			})
+			go func() {
+				defer close(handlerDone)
+				handlerErr = (&server.GrpcServer{Server: pdServer}).WatchGCStates(&pdpb.WatchGCStatesRequest{
+					Header: testutil.NewRequestHeader(leaderServer.GetClusterID()), SkipLoadingInitial: true,
+				}, stream)
+			}()
+			registration.wait(t)
+			registration.disable(re)
+			re.Equal(activeBefore+1, prometheusMetricValue(t, "pd_gc_watcher_count", nil))
+			_, current := limiter.GetConcurrencyLimiterStatus("WatchGCStates")
+			re.Equal(uint64(1), current)
+			res, err := manager.AdvanceTxnSafePoint(constant.NullKeyspaceID, 10, time.Now())
+			re.NoError(err)
+			re.Equal(uint64(10), res.NewTxnSafePoint)
+			waitWatchGCStatesSignal(t, stream.sendStarted, "send did not start")
+			if tc.reason == "leader_lost" {
+				stop := manager.OnNodeBecomesLeader()
+				t.Cleanup(stop)
+			} else {
+				// The sending worker cannot receive these 1025 updates, overflowing
+				// the default live queue's 1024 slots.
+				for target := uint64(11); target <= 1035; target++ {
+					res, err := manager.AdvanceTxnSafePoint(constant.NullKeyspaceID, target, time.Now())
+					re.NoError(err)
+					re.Equal(target, res.NewTxnSafePoint)
+				}
+			}
+			waitWatchGCStatesSignal(t, handlerDone, "public handler did not return while send was blocked")
+			re.Equal(tc.code, status.Code(handlerErr))
+			re.NoError(streamCtx.Err())
+			select {
+			case <-stream.sendExited:
+				re.FailNow("send exited before transport teardown")
+			default:
+			}
+			re.Equal(activeBefore, prometheusMetricValue(t, "pd_gc_watcher_count", nil))
+			re.Equal(terminatedBefore+1, prometheusMetricValue(t, "pd_gc_watcher_termination_total", labels))
+			_, current = limiter.GetConcurrencyLimiterStatus("WatchGCStates")
+			re.Zero(current)
+
+			// Admission while the old send is still blocked proves the public
+			// handler released its token independently of transport progress.
+			nextRegistration := enableWatchGCStatesRegistrationPoint(t)
+			client := newWatchGCStatesClient(t, leaderServer.GetAddr())
+			nextStream, cancelNext := openWatchGCStates(t, client, testutil.NewRequestHeader(leaderServer.GetClusterID()), true)
+			nextRegistration.wait(t)
+			nextRegistration.disable(re)
+			_, current = limiter.GetConcurrencyLimiterStatus("WatchGCStates")
+			re.Equal(uint64(1), current)
+			cancelStream()
+			waitWatchGCStatesSignal(t, stream.sendExited, "send did not exit after transport teardown")
+			cancelNext()
+			_, err = nextStream.Recv()
+			re.Equal(codes.Canceled, status.Code(err))
+			testutil.Eventually(re, func() bool {
+				_, current := limiter.GetConcurrencyLimiterStatus("WatchGCStates")
+				return current == 0 && prometheusMetricValue(t, "pd_gc_watcher_count", nil) == activeBefore
+			})
+			re.Equal(terminatedBefore+1, prometheusMetricValue(t, "pd_gc_watcher_termination_total", labels))
+		})
+	}
 }
