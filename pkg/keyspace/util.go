@@ -648,6 +648,17 @@ func (s *Cache) DeleteKeyspace(keyspaceID uint32) {
 	s.tree.Delete(keyspaceItem{keyspaceID: keyspaceID})
 }
 
+// clearAll empties the cache in place. It must be used instead of replacing
+// the *Cache pointer held by a caller, since the pointer itself may be read
+// concurrently without synchronization.
+func (s *Cache) clearAll() {
+	s.Lock()
+	defer s.Unlock()
+	s.tree = btree.NewG(2, func(i, j keyspaceItem) bool {
+		return i.Less(j)
+	})
+}
+
 func (s *Cache) scanAllKeyspaces(f func(keyspaceID uint32, name string) bool) {
 	s.RLock()
 	defer s.RUnlock()

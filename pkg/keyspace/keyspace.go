@@ -106,6 +106,15 @@ type Manager struct {
 	nextPatrolStartID uint32
 	// cached keyspace meta info for each keyspace ID.
 	cache *Cache
+	// keyspaceIDRangeMu guards keyspaceIDVerifiedUpTo and the backfill that advances it.
+	keyspaceIDRangeMu syncutil.Mutex
+	// keyspaceIDVerifiedUpTo records that keyspace IDs in [0, keyspaceIDVerifiedUpTo)
+	// have been synced from storage into cache, so GetKeyspaceIDInRange can answer
+	// queries entirely within that prefix from cache alone. It only advances via
+	// backfillKeyspaceIDRange and is reset to 0 by ClearCache. Keyspaces created,
+	// updated, or removed through this Manager keep the cache in sync directly and
+	// do not depend on this watermark.
+	keyspaceIDVerifiedUpTo uint32
 }
 
 // CreateKeyspaceRequest represents necessary arguments to create a keyspace.
@@ -1174,7 +1183,65 @@ func (manager *Manager) GetKeyspaceIDInRange(start, end uint32, limit int) ([]ui
 	if manager == nil {
 		return []uint32{start}, true
 	}
+	manager.backfillKeyspaceIDRange(end)
 	return manager.cache.GetKeyspaceIDInRange(start, end, limit)
+}
+
+// keyspaceIDRangeBackfillBatchSize bounds how many keyspaces backfillKeyspaceIDRange
+// loads from storage in a single call, independent of any caller's own limit or of
+// how wide the range being queried is. A query far ahead of what's cached converges
+// over multiple calls instead of forcing one unbounded load.
+const keyspaceIDRangeBackfillBatchSize = 1024
+
+// backfillKeyspaceIDRange advances keyspaceIDVerifiedUpTo toward end by loading at
+// most keyspaceIDRangeBackfillBatchSize keyspaces from storage into cache, so a
+// GetKeyspaceIDInRange call whose cache lookup would otherwise miss a keyspace that
+// existed before this Manager's cache started tracking it (e.g. right after a PD
+// leader change) gets backfilled. Keyspaces created, updated, or removed through
+// this Manager are kept in cache directly by their own call sites and do not rely
+// on this backfill to be discovered.
+func (manager *Manager) backfillKeyspaceIDRange(end uint32) {
+	manager.keyspaceIDRangeMu.Lock()
+	defer manager.keyspaceIDRangeMu.Unlock()
+	// Re-check after acquiring the lock: another caller may have already advanced
+	// past end while this call was waiting.
+	if end < manager.keyspaceIDVerifiedUpTo || manager.keyspaceIDVerifiedUpTo > constant.MaxValidKeyspaceID {
+		return
+	}
+	batchSize := keyspaceIDRangeBackfillBatchSize
+	failpoint.Inject("keyspaceIDRangeBackfillBatchSize", func(val failpoint.Value) {
+		batchSize = val.(int)
+	})
+	keyspaces, err := manager.LoadRangeKeyspace(manager.keyspaceIDVerifiedUpTo, batchSize)
+	if err != nil {
+		log.Warn("[keyspace] failed to backfill keyspace ID range cache",
+			zap.Uint32("start-id", manager.keyspaceIDVerifiedUpTo), errs.ZapError(err))
+		return
+	}
+	for _, meta := range keyspaces {
+		manager.cache.Save(meta.GetId(), meta.GetName(), meta.GetState())
+	}
+	if len(keyspaces) < batchSize {
+		// Storage has nothing left beyond this batch.
+		manager.keyspaceIDVerifiedUpTo = constant.MaxValidKeyspaceID + 1
+	} else {
+		manager.keyspaceIDVerifiedUpTo = keyspaces[len(keyspaces)-1].GetId() + 1
+	}
+}
+
+// ClearCache empties the keyspace cache and resets the backfill watermark. It must
+// be called whenever this Manager stops being able to trust that its cache reflects
+// every write (e.g. when the owning RaftCluster loses leadership): creates, updates,
+// and deletes are only ever applied on the leader, so a Manager that was not leader
+// for a while cannot tell whether entries it cached earlier (including ones warmed
+// by serving a read while a follower) are still accurate. Clearing both the cache
+// contents and the watermark together avoids leaving the cache trusted-but-empty for
+// a range GetKeyspaceIDInRange would otherwise skip re-verifying.
+func (manager *Manager) ClearCache() {
+	manager.keyspaceIDRangeMu.Lock()
+	defer manager.keyspaceIDRangeMu.Unlock()
+	manager.cache.clearAll()
+	manager.keyspaceIDVerifiedUpTo = 0
 }
 
 // KeyspaceExist checks if a keyspace exists by ID.

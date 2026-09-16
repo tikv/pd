@@ -1041,6 +1041,14 @@ func (c *RaftCluster) Stop() {
 	}
 
 	c.wg.Wait()
+	// The keyspace cache is only kept in sync with storage while this node is
+	// leader (creates/updates/deletes are leader-only), so it can no longer be
+	// trusted once leadership is lost. Clear it now that every goroutine that
+	// could read or backfill it has stopped, so the next time this node becomes
+	// leader it rebuilds from a known-empty state instead of risking stale data.
+	if c.keyspaceManager != nil {
+		c.keyspaceManager.ClearCache()
+	}
 	log.Info("raft cluster is stopped")
 }
 

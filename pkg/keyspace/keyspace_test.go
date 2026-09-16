@@ -796,6 +796,134 @@ func TestLoadKeyspacePopulatesCache(t *testing.T) {
 	re.Equal(id, item.keyspaceID)
 }
 
+// TestGetKeyspaceIDInRangeBackfillsFromStorage verifies that a freshly
+// constructed Manager (simulating a PD leader change, where the new leader's
+// cache starts empty) can still answer GetKeyspaceIDInRange correctly for
+// keyspaces it has never individually been asked about, by backfilling from
+// storage rather than only trusting whatever happens to already be cached.
+func TestGetKeyspaceIDInRangeBackfillsFromStorage(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	allocator := mockid.NewIDAllocator()
+	kgm := NewKeyspaceGroupManager(ctx, store, nil)
+	manager := NewKeyspaceManager(ctx, store, nil, allocator, &mockConfig{}, kgm, nil)
+	re.NoError(kgm.Bootstrap(ctx))
+	re.NoError(manager.Bootstrap())
+
+	for _, id := range []uint32{10, 11, 12} {
+		id := id
+		_, err := manager.CreateKeyspaceByID(&CreateKeyspaceByIDRequest{
+			ID:         &id,
+			Name:       fmt.Sprintf("ks%d", id),
+			CreateTime: time.Now().Unix(),
+		})
+		re.NoError(err)
+	}
+
+	// A fresh Manager sharing the same storage starts with an empty cache and
+	// no verified range, simulating a process restart or a PD leader change to
+	// a different node. Nothing has queried these keyspaces individually.
+	fresh := NewKeyspaceManager(ctx, store, nil, allocator, &mockConfig{}, kgm, nil)
+	for _, id := range []uint32{10, 11, 12} {
+		_, ok := fresh.cache.getKeyspaceByID(id)
+		re.False(ok, "freshly constructed Manager should start with an empty cache")
+	}
+
+	ids, ok := fresh.GetKeyspaceIDInRange(10, 12, 10)
+	re.True(ok)
+	re.ElementsMatch([]uint32{10, 11, 12}, ids)
+}
+
+// TestGetKeyspaceIDInRangeBackfillIsBounded verifies that backfilling from
+// storage advances in bounded batches rather than loading everything up to
+// the queried end in one call, and that repeated calls converge to a
+// complete answer.
+func TestGetKeyspaceIDInRangeBackfillIsBounded(t *testing.T) {
+	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/keyspaceIDRangeBackfillBatchSize", "return(2)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/keyspaceIDRangeBackfillBatchSize"))
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	allocator := mockid.NewIDAllocator()
+	kgm := NewKeyspaceGroupManager(ctx, store, nil)
+	manager := NewKeyspaceManager(ctx, store, nil, allocator, &mockConfig{}, kgm, nil)
+	re.NoError(kgm.Bootstrap(ctx))
+	re.NoError(manager.Bootstrap())
+
+	for i := range 5 {
+		id := uint32(20 + i)
+		_, err := manager.CreateKeyspaceByID(&CreateKeyspaceByIDRequest{
+			ID:         &id,
+			Name:       fmt.Sprintf("ks%d", id),
+			CreateTime: time.Now().Unix(),
+		})
+		re.NoError(err)
+	}
+
+	fresh := NewKeyspaceManager(ctx, store, nil, allocator, &mockConfig{}, kgm, nil)
+
+	// With a batch size of 2, a single call cannot possibly have backfilled
+	// all 5 keyspaces plus the default keyspace it starts scanning from.
+	ids, ok := fresh.GetKeyspaceIDInRange(20, 24, 10)
+	re.True(len(ids) < 5 || !ok, "first call should not already have the full answer with a small backfill batch")
+
+	// Repeated calls (mirroring repeated checker patrol passes) should
+	// eventually converge on the complete, correct answer.
+	testutil.Eventually(re, func() bool {
+		ids, ok := fresh.GetKeyspaceIDInRange(20, 24, 10)
+		return ok && len(ids) == 5
+	})
+	ids, ok = fresh.GetKeyspaceIDInRange(20, 24, 10)
+	re.True(ok)
+	re.ElementsMatch([]uint32{20, 21, 22, 23, 24}, ids)
+}
+
+// TestManagerClearCache verifies that ClearCache empties the cache and resets
+// the backfill watermark together, and that GetKeyspaceIDInRange still works
+// correctly (by re-backfilling) afterward.
+func TestManagerClearCache(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	allocator := mockid.NewIDAllocator()
+	kgm := NewKeyspaceGroupManager(ctx, store, nil)
+	manager := NewKeyspaceManager(ctx, store, nil, allocator, &mockConfig{}, kgm, nil)
+	re.NoError(kgm.Bootstrap(ctx))
+	re.NoError(manager.Bootstrap())
+
+	id := uint32(30)
+	_, err := manager.CreateKeyspaceByID(&CreateKeyspaceByIDRequest{
+		ID:         &id,
+		Name:       "ks30",
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+
+	ids, ok := manager.GetKeyspaceIDInRange(30, 30, 10)
+	re.True(ok)
+	re.Equal([]uint32{30}, ids)
+	re.Positive(manager.keyspaceIDVerifiedUpTo)
+
+	manager.ClearCache()
+	_, ok = manager.cache.getKeyspaceByID(id)
+	re.False(ok, "ClearCache should empty the cache")
+	re.Zero(manager.keyspaceIDVerifiedUpTo, "ClearCache should reset the backfill watermark")
+
+	// GetKeyspaceIDInRange must still work correctly after the cache is
+	// cleared, by re-backfilling from storage rather than trusting a stale
+	// watermark over an empty cache.
+	ids, ok = manager.GetKeyspaceIDInRange(30, 30, 10)
+	re.True(ok)
+	re.Equal([]uint32{30}, ids)
+}
+
 func (suite *keyspaceTestSuite) TestGetKeyspaceIDInRange() {
 	re := suite.Require()
 	manager := suite.manager
