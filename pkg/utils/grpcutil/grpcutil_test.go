@@ -37,10 +37,7 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
-var (
-	certPath   = filepath.Join("..", "..", "..", "tests", "integrations", "client") + string(filepath.Separator)
-	certScript = filepath.Join("..", "..", "..", "tests", "integrations", "client", "cert_opt.sh")
-)
+var certScript = filepath.Join("..", "..", "..", "tests", "integrations", "client", "cert_opt.sh")
 
 func loadTLSContent(re *require.Assertions, caPath, certPath, keyPath string) (caData, certData, keyData []byte) {
 	var err error
@@ -53,9 +50,8 @@ func loadTLSContent(re *require.Assertions, caPath, certPath, keyPath string) (c
 	return
 }
 
-func TestToClientTLSConfig(t *testing.T) {
-	re := require.New(t)
-
+func generateTestCertificates(t *testing.T) string {
+	t.Helper()
 	// Check if the certificate script exists before running it
 	if _, err := os.Stat(certScript); os.IsNotExist(err) {
 		t.Skipf("Certificate script not found: %s", certScript)
@@ -66,19 +62,19 @@ func TestToClientTLSConfig(t *testing.T) {
 		t.Fatalf("Failed to make script executable: %v", err)
 	}
 
+	certPath := t.TempDir()
 	// Capture output for better debugging
 	cmd := exec.Command(certScript, "generate", certPath)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("Certificate generation failed: %v\nOutput: %s", err, string(output))
 	}
+	return certPath
+}
 
-	defer func() {
-		cmd := exec.Command(certScript, "cleanup", certPath)
-		if output, err := cmd.CombinedOutput(); err != nil {
-			t.Logf("Certificate cleanup failed: %v\nOutput: %s", err, string(output))
-		}
-	}()
+func TestToClientTLSConfig(t *testing.T) {
+	re := require.New(t)
+	certPath := generateTestCertificates(t)
 
 	tlsConfig := TLSConfig{
 		KeyPath:  filepath.Join(certPath, "pd-server-key.pem"),
@@ -94,7 +90,7 @@ func TestToClientTLSConfig(t *testing.T) {
 	}
 
 	// test without bytes
-	_, err = tlsConfig.ToClientTLSConfig()
+	_, err := tlsConfig.ToClientTLSConfig()
 	re.NoError(err)
 
 	// test with bytes
@@ -119,30 +115,7 @@ func TestToClientTLSConfig(t *testing.T) {
 
 func TestToServerTLSConfig(t *testing.T) {
 	re := require.New(t)
-
-	// Check if the certificate script exists before running it
-	if _, err := os.Stat(certScript); os.IsNotExist(err) {
-		t.Skipf("Certificate script not found: %s", certScript)
-	}
-
-	// Make the script executable if it isn't already
-	if err := os.Chmod(certScript, 0755); err != nil {
-		t.Fatalf("Failed to make script executable: %v", err)
-	}
-
-	// Capture output for better debugging
-	cmd := exec.Command(certScript, "generate", certPath)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("Certificate generation failed: %v\nOutput: %s", err, string(output))
-	}
-
-	defer func() {
-		cmd := exec.Command(certScript, "cleanup", certPath)
-		if output, err := cmd.CombinedOutput(); err != nil {
-			t.Logf("Certificate cleanup failed: %v\nOutput: %s", err, string(output))
-		}
-	}()
+	certPath := generateTestCertificates(t)
 
 	testCases := []struct {
 		name          string
