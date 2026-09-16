@@ -25,14 +25,16 @@ import (
 // which is mainly used by the PD server.
 type etcdBackend struct {
 	*endpoint.StorageEndpoint
+	client *clientv3.Client
 }
 
 // newEtcdBackend is used to create a new etcd backend.
-func newEtcdBackend(client *clientv3.Client) *etcdBackend {
+func newEtcdBackend(client *clientv3.Client, writeConditions ...clientv3.Cmp) *etcdBackend {
 	return &etcdBackend{
-		endpoint.NewStorageEndpoint(
-			kv.NewEtcdKVBase(client),
+		StorageEndpoint: endpoint.NewStorageEndpoint(
+			kv.NewEtcdKVBase(client, writeConditions...),
 			nil,
 		),
+		client: client,
 	}
 }
