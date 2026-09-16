@@ -176,6 +176,7 @@ type RaftCluster struct {
 	tsoDynamicSwitchingState atomic.Int32
 	meta                     *metapb.Cluster
 	storage                  storage.Storage
+	leaderStorage            atomic.Pointer[leaderStorage]
 	minResolvedTS            atomic.Value // Store as uint64
 	externalTS               atomic.Value // Store as uint64
 
@@ -233,6 +234,12 @@ type Status struct {
 	RaftBootstrapTime time.Time `json:"raft_bootstrap_time,omitempty"`
 	IsInitialized     bool      `json:"is_initialized"`
 	ReplicationStatus string    `json:"replication_status"`
+}
+
+// leaderStorage holds the immutable storage view of one RaftCluster run.
+// Cluster jobs are drained before the member campaigns for a new lease.
+type leaderStorage struct {
+	storage.Storage
 }
 
 // NewRaftCluster create a new cluster.
@@ -322,7 +329,7 @@ func (c *RaftCluster) isInitialized() bool {
 // value of time.Time when there is error or the cluster is not bootstrapped yet.
 func (c *RaftCluster) loadBootstrapTime() (time.Time, error) {
 	var t time.Time
-	data, err := c.storage.Load(keypath.ClusterBootstrapTimePath())
+	data, err := c.GetStorage().Load(keypath.ClusterBootstrapTimePath())
 	if err != nil {
 		return t, err
 	}
@@ -347,7 +354,7 @@ func (c *RaftCluster) InitCluster(
 	c.unsafeRecoveryController = unsaferecovery.NewController(c)
 	c.keyspaceGroupManager = keyspaceGroupManager
 	c.hbstreams = hbstreams
-	c.ruleManager = placement.NewRuleManager(c.ctx, c.storage, c, c.GetOpts())
+	c.ruleManager = placement.NewRuleManager(c.ctx, c.GetStorage(), c, c.GetOpts())
 	c.keyRangeManager = keyrange.NewManager()
 	c.schedulingController = newSchedulingController(c.ctx, c.BasicCluster, c.opt, c.ruleManager)
 	return nil
@@ -370,6 +377,14 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	if c.running {
 		log.Warn("raft cluster has already been started")
 		return nil
+	}
+	if c.member != nil {
+		leadership := c.member.GetLeadership()
+		view, err := storage.WithLeaderLease(c.storage, leadership.GetLeaderKey(), leadership.GetLease().GetID())
+		if err != nil {
+			return err
+		}
+		c.leaderStorage.Store(&leaderStorage{Storage: view})
 	}
 	c.isKeyspaceGroupEnabled = s.IsKeyspaceGroupEnabled()
 	initClusterStart := time.Now()
@@ -425,7 +440,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	loadClusterInfoDuration := time.Since(loadClusterInfoStart)
 	log.Info("load cluster info completed", zap.Duration("cost", loadClusterInfoDuration))
 	labelerStart := time.Now()
-	c.regionLabeler, err = labeler.NewRegionLabeler(c.ctx, c.storage, regionLabelGCInterval)
+	c.regionLabeler, err = labeler.NewRegionLabeler(c.ctx, c.GetStorage(), regionLabelGCInterval)
 	labelerDuration := time.Since(labelerStart)
 	if err != nil {
 		log.Warn("region labeler creation failed", zap.Error(err), zap.Duration("cost", labelerDuration))
@@ -434,7 +449,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	log.Info("region labeler created", zap.Duration("cost", labelerDuration))
 
 	// create affinity manager with region labeler for key range validation and rebuild
-	c.affinityManager, err = affinity.NewManager(c.ctx, c.storage, c, c.GetOpts(), c.regionLabeler)
+	c.affinityManager, err = affinity.NewManager(c.ctx, c.GetStorage(), c, c.GetOpts(), c.regionLabeler)
 	if err != nil {
 		return err
 	}
@@ -448,7 +463,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 		log.Info("observe slow store status completed", zap.Duration("cost", time.Since(observeSlowStoreStart)))
 	}
 	replicationModeStart := time.Now()
-	c.replicationMode, err = replication.NewReplicationModeManager(s.GetConfig().ReplicationMode, c.storage, cluster, s)
+	c.replicationMode, err = replication.NewReplicationModeManager(s.GetConfig().ReplicationMode, c.GetStorage(), cluster, s)
 	if err != nil {
 		log.Warn("failed to create replication mode manager", errs.ZapError(err), zap.Duration("cost", time.Since(replicationModeStart)))
 		return err
@@ -746,7 +761,7 @@ func (c *RaftCluster) runStoreConfigSync() {
 			stores = c.GetStores()
 		}
 		if needPersist {
-			if err := c.opt.Persist(c.storage); err != nil {
+			if err := c.opt.Persist(c.GetStorage()); err != nil {
 				log.Warn("store config persisted failed", zap.Error(err))
 			}
 			log.Info("store config is updated")
@@ -873,7 +888,7 @@ func (c *RaftCluster) fetchStoreConfigFromTiKV(ctx context.Context, statusAddres
 // LoadClusterInfo loads cluster related info.
 func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 	c.meta = &metapb.Cluster{}
-	ok, err := c.storage.LoadMeta(c.meta)
+	ok, err := c.GetStorage().LoadMeta(c.meta)
 	if err != nil {
 		return nil, err
 	}
@@ -883,7 +898,7 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 
 	c.ResetStores()
 	start := time.Now()
-	if err := c.storage.LoadStores(c.PutStore); err != nil {
+	if err := c.GetStorage().LoadStores(c.PutStore); err != nil {
 		return nil, err
 	}
 	log.Info("load stores",
@@ -894,7 +909,7 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 	start = time.Now()
 
 	// used to load region from kv storage to cache storage.
-	if err = storage.TryLoadRegionsOnce(c.ctx, c.storage, c.CheckAndPutRegion); err != nil {
+	if err = storage.TryLoadRegionsOnce(c.ctx, c.GetStorage(), c.CheckAndPutRegion); err != nil {
 		return nil, err
 	}
 	log.Info("load regions",
@@ -1110,6 +1125,9 @@ func (c *RaftCluster) GetAffinityManager() *affinity.Manager {
 
 // GetStorage returns the storage.
 func (c *RaftCluster) GetStorage() storage.Storage {
+	if view := c.leaderStorage.Load(); view != nil {
+		return view.Storage
+	}
 	return c.storage
 }
 
@@ -1199,8 +1217,8 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 			zap.Uint64("capacity", newStore.GetCapacity()),
 			zap.Uint64("available", newStore.GetAvailable()))
 	}
-	if newStore.NeedPersist() && c.storage != nil {
-		if err := c.storage.SaveStoreMeta(newStore.GetMeta()); err != nil {
+	if newStore.NeedPersist() && c.GetStorage() != nil {
+		if err := c.GetStorage().SaveStoreMeta(newStore.GetMeta()); err != nil {
 			log.Error("failed to persist store", zap.Uint64("store-id", storeID), errs.ZapError(err))
 		} else {
 			opts = append(opts, core.SetLastPersistTime(nowTime))
@@ -1417,7 +1435,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 	}
 
 	tracer.OnCollectRegionStatsFinished()
-	if c.storage != nil {
+	if c.GetStorage() != nil {
 		if saveKV {
 			ctx.MiscRunner.RunTask(
 				regionID,
@@ -1428,14 +1446,14 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 					// Not successfully saved to storage is not fatal, it only leads to longer warm-up
 					// after restart. Here we only log the error then go on updating cache.
 					for _, item := range overlaps {
-						if err := c.storage.DeleteRegion(item.GetMeta()); err != nil {
+						if err := c.GetStorage().DeleteRegion(item.GetMeta()); err != nil {
 							log.Error("failed to delete region from storage",
 								zap.Uint64("region-id", item.GetID()),
 								logutil.ZapRedactStringer("region-meta", core.RegionToHexMeta(item.GetMeta())),
 								errs.ZapError(err))
 						}
 					}
-					if err := c.storage.SaveRegion(region.GetMeta()); err != nil {
+					if err := c.GetStorage().SaveRegion(region.GetMeta()); err != nil {
 						log.Error("failed to save region to storage",
 							zap.Uint64("region-id", region.GetID()),
 							logutil.ZapRedactStringer("region-meta", core.RegionToHexMeta(region.GetMeta())),
@@ -1461,8 +1479,8 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 }
 
 func (c *RaftCluster) putMetaLocked(meta *metapb.Cluster) error {
-	if c.storage != nil {
-		if err := c.storage.SaveMeta(meta); err != nil {
+	if c.GetStorage() != nil {
+		if err := c.GetStorage().SaveMeta(meta); err != nil {
 			return err
 		}
 	}
@@ -1906,7 +1924,7 @@ func (c *RaftCluster) SetStoreWeight(storeID uint64, leaderWeight, regionWeight 
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
 	}
 
-	if err := c.storage.SaveStoreWeight(storeID, leaderWeight, regionWeight); err != nil {
+	if err := c.GetStorage().SaveStoreWeight(storeID, leaderWeight, regionWeight); err != nil {
 		return err
 	}
 
@@ -1918,8 +1936,8 @@ func (c *RaftCluster) SetStoreWeight(storeID uint64, leaderWeight, regionWeight 
 
 // The meta of StoreInfo should be the latest.
 func (c *RaftCluster) setStore(store *core.StoreInfo, opts ...core.StoreCreateOption) error {
-	if c.storage != nil {
-		if err := c.storage.SaveStoreMeta(store.GetMeta()); err != nil {
+	if c.GetStorage() != nil {
+		if err := c.GetStorage().SaveStoreMeta(store.GetMeta()); err != nil {
 			return err
 		}
 	}
@@ -2187,8 +2205,8 @@ func (c *RaftCluster) RemoveTombStoneRecords() error {
 
 // deleteStore deletes the store from the cluster. it's concurrent safe.
 func (c *RaftCluster) deleteStore(store *core.StoreInfo) error {
-	if c.storage != nil {
-		if err := c.storage.DeleteStoreMeta(store.GetMeta()); err != nil {
+	if c.GetStorage() != nil {
+		if err := c.GetStorage().DeleteStoreMeta(store.GetMeta()); err != nil {
 			return err
 		}
 	}
@@ -2270,7 +2288,7 @@ func (c *RaftCluster) OnStoreVersionChange() {
 	if !c.opt.CASClusterVersion(clusterVersion, minVersion) {
 		log.Error("cluster version changed by API at the same time")
 	}
-	err := c.opt.Persist(c.storage)
+	err := c.opt.Persist(c.GetStorage())
 	if err != nil {
 		log.Error("persist cluster version meet error", errs.ZapError(err))
 	}
@@ -2396,8 +2414,8 @@ func (c *RaftCluster) GetRegionStatsCount(startKey, endKey []byte) *statistics.R
 // TODO: remove me.
 // only used in test.
 func (c *RaftCluster) putRegion(region *core.RegionInfo) error {
-	if c.storage != nil {
-		if err := c.storage.SaveRegion(region.GetMeta()); err != nil {
+	if c.GetStorage() != nil {
+		if err := c.GetStorage().SaveRegion(region.GetMeta()); err != nil {
 			return err
 		}
 	}
@@ -2421,7 +2439,7 @@ func (c *RaftCluster) AddStoreLimit(store *metapb.Store) {
 	var err error
 	for range persistLimitRetryTimes {
 		added := false
-		err = c.opt.UpdateScheduleConfig(c.storage, func(_ *sc.ScheduleConfig, cfg *sc.ScheduleConfig) (bool, error) {
+		err = c.opt.UpdateScheduleConfig(c.GetStorage(), func(_ *sc.ScheduleConfig, cfg *sc.ScheduleConfig) (bool, error) {
 			if _, ok := cfg.StoreLimit[storeID]; ok {
 				return false, nil
 			}
@@ -2456,7 +2474,7 @@ func (c *RaftCluster) RemoveStoreLimit(storeID uint64) {
 	}
 	var err error
 	for range persistLimitRetryTimes {
-		err = c.opt.UpdateScheduleConfig(c.storage, func(_ *sc.ScheduleConfig, cfg *sc.ScheduleConfig) (bool, error) {
+		err = c.opt.UpdateScheduleConfig(c.GetStorage(), func(_ *sc.ScheduleConfig, cfg *sc.ScheduleConfig) (bool, error) {
 			delete(cfg.StoreLimit, storeID)
 			return true, nil
 		})
@@ -2529,7 +2547,7 @@ func (c *RaftCluster) runMinResolvedTSJob() {
 			interval = c.opt.GetMinResolvedTSPersistenceInterval()
 			if interval != 0 {
 				if current, needPersist := c.CheckAndUpdateMinResolvedTS(); needPersist {
-					if err := c.storage.SaveMinResolvedTS(current); err != nil {
+					if err := c.GetStorage().SaveMinResolvedTS(current); err != nil {
 						log.Error("persist min resolved ts meet error", errs.ZapError(err))
 					}
 				}
@@ -2598,7 +2616,7 @@ func (c *RaftCluster) GetExternalTS() uint64 {
 // SetExternalTS sets the external timestamp.
 func (c *RaftCluster) SetExternalTS(timestamp uint64) error {
 	c.externalTS.Store(timestamp)
-	return c.storage.SaveExternalTS(timestamp)
+	return c.GetStorage().SaveExternalTS(timestamp)
 }
 
 func (c *RaftCluster) loadExternalTS() {
@@ -2613,7 +2631,7 @@ func (c *RaftCluster) loadExternalTS() {
 
 // SetStoreLimit sets a store limit for a given type and rate.
 func (c *RaftCluster) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePerMin float64) error {
-	err := c.opt.UpdateScheduleConfig(c.storage, func(_ *sc.ScheduleConfig, cfg *sc.ScheduleConfig) (bool, error) {
+	err := c.opt.UpdateScheduleConfig(c.GetStorage(), func(_ *sc.ScheduleConfig, cfg *sc.ScheduleConfig) (bool, error) {
 		slc, ok := cfg.StoreLimit[storeID]
 		if !ok {
 			slc = cfg.GetDefaultStoreLimit()
@@ -2632,7 +2650,7 @@ func (c *RaftCluster) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePer
 
 // SetAllStoresLimit sets all store limit for a given type and rate.
 func (c *RaftCluster) SetAllStoresLimit(typ storelimit.Type, ratePerMin float64) error {
-	err := c.opt.UpdateScheduleConfig(c.storage, func(_ *sc.ScheduleConfig, cfg *sc.ScheduleConfig) (bool, error) {
+	err := c.opt.UpdateScheduleConfig(c.GetStorage(), func(_ *sc.ScheduleConfig, cfg *sc.ScheduleConfig) (bool, error) {
 		cfg.DefaultStoreLimit = cfg.DefaultStoreLimit.SetLimit(typ, ratePerMin)
 		for storeID, limit := range cfg.StoreLimit {
 			cfg.StoreLimit[storeID] = limit.SetLimit(typ, ratePerMin)
