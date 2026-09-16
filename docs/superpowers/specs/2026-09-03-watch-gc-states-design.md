@@ -37,7 +37,7 @@ The first implementation intentionally excludes adjacent features that are not n
 
 The stream is a sequence of self-contained changes. An `upsert` replaces the consumer's entire state for its scope, and a `removed` change deletes that scope from the consumer's materialized view. Upserts do not contain GC barriers; barrier-only mutations do not directly produce changes.
 
-For `skip_loading_initial=false`, PD registers the live listener before starting the initial scan. Initial and live changes may be interleaved, and the initial scan is not a cross-keyspace transaction. For each individual keyspace, however, the server suppresses an initial value if a post-registration live value for the same scope has already been emitted. The stream therefore cannot regress from a live value `v2` to an older initial value `v1`.
+For `skip_loading_initial=false`, PD registers the live listener before starting the initial scan. Initial and live changes may be interleaved, and the initial scan is not a cross-keyspace transaction. Before emitting a newly acquired initial batch, the server drains the live changes already queued when it acquired that batch. For each individual keyspace, it suppresses an initial value if a post-registration live value for the same scope has already been emitted. These rules prevent regression both from a newer initial value to an older queued live value and from a newer live value to an older initial value.
 
 For `skip_loading_initial=true`, PD sends only effective safe-point changes produced after registration. This mode does not provide continuity with an earlier stream and is unsuitable for constructing a complete view on its own. A client establishing its first complete view or recovering from a disconnected stream uses `skip_loading_initial=false`.
 
@@ -67,7 +67,7 @@ Watcher mechanics live in a focused file such as `pkg/gc/gc_state_watcher.go`. E
 - `liveCh`, a bounded channel of individual live changes.
 - `initDone`, which is owned by the merge consumer and becomes true when initial loading was skipped or after the closed `initCh` has been fully drained.
 - A cause-aware cancellation mechanism used for both cleanup and error reporting.
-- Merge state, including the set of scopes made dirty by live delivery while initial loading is active.
+- Merge state, including the pending initial batch, the remaining count of live changes that must precede it, and the set of scopes made dirty by live delivery while initial loading is active.
 
 Only the initial loader writes to and closes `initCh`. Publishers write to `liveCh` only while holding the manager mutex, but `liveCh` is not closed; watcher cancellation is the termination signal. This ownership rule avoids send-versus-close races.
 
@@ -113,15 +113,18 @@ Publication to each `liveCh` is non-blocking. If a watcher's channel is full, th
 
 A single consumer merges `initCh` and `liveCh`. While initial loading is active, it maintains `dirtyDuringInit`, a set keyed by keyspace scope:
 
+- After receiving an initial batch, the consumer snapshots `len(liveCh)` and drains exactly that queued FIFO prefix before emitting any change from the batch. The remaining prefix count persists across `RecvBatch` calls. Live changes arriving after the snapshot do not extend the prefix, so they cannot indefinitely postpone unrelated states in the pending initial batch.
 - When the consumer emits a live change, it marks that scope dirty.
 - When it encounters an initial upsert whose scope is already dirty, it drops the initial upsert.
-- After `initCh` is closed and all of its buffered batches are consumed, the consumer releases the dirty set and disables the closed channel because every later change is live and already ordered by `liveCh`.
+- After `initCh` is closed and all of its buffered batches, the pending batch, and its live prefix are consumed, the consumer releases the dirty set and disables the closed channel because every later change is live and already ordered by `liveCh`.
 
 There are two possible observations for an initial value `v1` and a later live value `v2`. If the consumer receives `v1` first, it emits `v1` followed by `v2`. If it receives `v2` first, it marks the scope dirty and suppresses `v1`. In neither case can it emit `v2` followed by `v1`.
 
+The initial scan can also read a newer value than an already queued live change. For example, live values `10` and `20` can be queued before the loader reads initial `20`. If the merge selects that initial batch first, draining the captured live prefix emits `10, 20` and suppresses the initial duplicate, preventing `20, 10, 20`. Mutation cache updates and publication are serialized by `GCStateManager.mu`: every strictly older live change has been published before the loader can observe the newer cache value. That newer value's own live publication may still follow its cache store, which is safe because it cannot regress the initial value. Taking the queue-length snapshot after acquiring the batch therefore covers every older live change that has not already been consumed, without adding locks or another queue.
+
 The same rule supports the future `removed` producer: a live removal marks the scope dirty, preventing an older initial upsert from recreating it. Live changes retain FIFO order because mutation publication is serialized by the manager mutex and each watcher has a single live channel and a single consumer.
 
-The implementation must explain this timing guarantee next to the merge logic, including the registration boundary and both possible delivery orders. A deterministic test pauses initial loading after reading `v1` but before placing it on `initCh`, advances the same keyspace to `v2`, observes `v2`, resumes initial loading, and verifies that `v1` is never emitted afterward.
+The implementation must explain these timing guarantees next to the merge logic, including the registration boundary and both directions of initial/live overlap. A deterministic test pauses initial loading after reading `v1` but before placing it on `initCh`, advances the same keyspace to `v2`, observes `v2`, resumes initial loading, and verifies that `v1` is never emitted afterward. Receiver tests also force initial-batch acquisition with older live changes queued, verify prefix ordering across response boundaries, and keep adding live changes to verify that the pending initial batch still makes progress.
 
 ## Capacity and backpressure
 
@@ -198,6 +201,7 @@ The domain tests cover:
 - Effective safe-point changes publish complete upserts exactly once from the shared modern and legacy mutation paths; no-op and failed mutations do not publish.
 - Current barrier-only mutations produce no change, while any operation that changes an effective safe point does.
 - Initial-first delivery emits `v1` followed by `v2`; a deterministic paused-initial test emits `v2` and suppresses the later initial `v1`.
+- Acquiring a newer initial batch drains the already queued live prefix first, retains prefix progress across `RecvBatch` calls, and does not let later live arrivals postpone the pending initial batch.
 - Filling watcher A's `liveCh` terminates A without delaying watcher B; A can reconnect and rebuild.
 - Initial iteration failure, caller cancellation, and concurrent deregistration terminate without goroutine or registry leaks.
 - A full `initCh` backpressures only that watcher's initial iterator and never waits on the channel while holding `GCStateManager.mu`.
@@ -227,7 +231,7 @@ The API can be rolled out server-first because existing clients do not call the 
 The implementation is complete when all of the following are true:
 
 - `WatchGCStates` serves initial states and local effective safe-point changes with the documented `skip_loading_initial` behavior.
-- The deterministic ordering test proves that no older initial value follows a newer live value for the same scope on one stream.
+- Deterministic ordering tests prove that neither an older initial value follows a newer live value nor an older queued live value follows a newer initial value for the same scope on one stream.
 - A full live queue terminates only the affected watcher without blocking GC-state mutation.
 - Ending or superseding a local leadership generation terminates its active streams.
 - Response batches observe the 1 MiB target using exact protobuf size accounting, except for the defined oversized-single-change case.
