@@ -302,7 +302,7 @@ const (
 func (c *ResourceGroupsController) Start(ctx context.Context) {
 	c.loopCtx, c.loopCancel = context.WithCancel(ctx)
 	c.wg.Add(1)
-	go c.runRUMaxPerSecMetrics(c.loopCtx)
+	go c.runRUMaxSampler(c.loopCtx)
 	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()

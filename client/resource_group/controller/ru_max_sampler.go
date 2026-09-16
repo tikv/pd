@@ -24,22 +24,22 @@ import (
 	"github.com/tikv/pd/client/resource_group/controller/metrics"
 )
 
-// ruMaxPerSecSampler owns both the sampling state and all peak GaugeVec
+// ruMaxSampler owns both the sampling state and all peak GaugeVec
 // operations. No peak metric lookup or deletion runs on the request or token
 // loop paths, where a concurrent Prometheus collection could block it.
 // Like the other controller metrics, the labels assume one active controller
 // per process.
-type ruMaxPerSecSampler map[string]*ruMaxPerSecGroup
+type ruMaxSampler map[string]*ruMaxGroup
 
-type ruMaxPerSecGroup struct {
+type ruMaxGroup struct {
 	gc      *groupCostController
-	tracker ruMaxPerSecTracker
+	tracker ruMaxTracker
 	seen    bool
 }
 
-func (c *ResourceGroupsController) runRUMaxPerSecMetrics(ctx context.Context) {
+func (c *ResourceGroupsController) runRUMaxSampler(ctx context.Context) {
 	defer c.wg.Done()
-	sampler := make(ruMaxPerSecSampler)
+	sampler := make(ruMaxSampler)
 	defer sampler.clear()
 	ticker := time.NewTicker(defaultGroupStateUpdateInterval)
 	defer ticker.Stop()
@@ -53,14 +53,14 @@ func (c *ResourceGroupsController) runRUMaxPerSecMetrics(ctx context.Context) {
 	}
 }
 
-func (s ruMaxPerSecSampler) sample(c *ResourceGroupsController) {
+func (s ruMaxSampler) sample(c *ResourceGroupsController) {
 	c.groupsController.Range(func(key, value any) bool {
 		// Use the cache key: a tombstone uses default's config but still belongs
 		// to the original resource group.
 		name, gc := key.(string), value.(*groupCostController)
 		state := s[name]
 		if state == nil {
-			state = &ruMaxPerSecGroup{gc: gc, tracker: newRUMaxPerSecTracker(name, gc.createdAt)}
+			state = &ruMaxGroup{gc: gc, tracker: newRUMaxTracker(name, gc.createdAt)}
 			s[name] = state
 		} else if state.gc != gc {
 			// Reuse the live gauges, but start a new window and zero consumption
@@ -85,7 +85,7 @@ func (s ruMaxPerSecSampler) sample(c *ResourceGroupsController) {
 	// sweeps; runtime deletion is asynchronous, with no fixed latency bound.
 	for name, state := range s {
 		if !state.seen {
-			deleteRUMaxPerSecMetricLabels(name)
+			deleteRUMaxMetricLabels(name)
 			delete(s, name)
 		} else {
 			state.seen = false
@@ -93,24 +93,24 @@ func (s ruMaxPerSecSampler) sample(c *ResourceGroupsController) {
 	}
 }
 
-func (s ruMaxPerSecSampler) clear() {
+func (s ruMaxSampler) clear() {
 	for name := range s {
-		deleteRUMaxPerSecMetricLabels(name)
+		deleteRUMaxMetricLabels(name)
 		delete(s, name)
 	}
 }
 
-const ruMaxPerSecWindow = 60 * time.Second
+const ruMaxWindow = 60 * time.Second
 
 type ruRateSample struct {
 	at       time.Duration
 	rru, wru float64
 }
 
-// ruMaxPerSecTracker publishes the maximum sampled rate whose sampling interval
+// ruMaxTracker publishes the maximum sampled rate whose sampling interval
 // ended within the last 60 seconds. All times are relative to the controller
 // creation time, preserving the monotonic clock while keeping samples compact.
-type ruMaxPerSecTracker struct {
+type ruMaxTracker struct {
 	rruGauge, wruGauge, ruGauge prometheus.Gauge
 	base                        time.Time
 	last                        time.Duration
@@ -118,8 +118,8 @@ type ruMaxPerSecTracker struct {
 	samples                     []ruRateSample
 }
 
-func newRUMaxPerSecTracker(name string, now time.Time) ruMaxPerSecTracker {
-	return ruMaxPerSecTracker{
+func newRUMaxTracker(name string, now time.Time) ruMaxTracker {
+	return ruMaxTracker{
 		rruGauge: metrics.RUMaxPerSecGauge.WithLabelValues(name, requestSourceRUTypeRRU),
 		wruGauge: metrics.RUMaxPerSecGauge.WithLabelValues(name, requestSourceRUTypeWRU),
 		ruGauge:  metrics.RUMaxPerSecGauge.WithLabelValues(name, ruTypeTotal),
@@ -127,7 +127,7 @@ func newRUMaxPerSecTracker(name string, now time.Time) ruMaxPerSecTracker {
 	}
 }
 
-func (t *ruMaxPerSecTracker) observe(curRRU, curWRU float64, now time.Time) {
+func (t *ruMaxTracker) observe(curRRU, curWRU float64, now time.Time) {
 	elapsed := now.Sub(t.base)
 	duration := elapsed - t.last
 	if duration <= 0 {
@@ -142,7 +142,7 @@ func (t *ruMaxPerSecTracker) observe(curRRU, curWRU float64, now time.Time) {
 	maxRRU, maxWRU, maxRU := rru, wru, rru+wru
 	kept := t.samples[:0]
 	for _, sample := range t.samples {
-		if elapsed-sample.at >= ruMaxPerSecWindow {
+		if elapsed-sample.at >= ruMaxWindow {
 			continue
 		}
 		kept = append(kept, sample)
@@ -161,7 +161,7 @@ func (t *ruMaxPerSecTracker) observe(curRRU, curWRU float64, now time.Time) {
 	t.ruGauge.Set(maxRU)
 }
 
-func deleteRUMaxPerSecMetricLabels(name string) {
+func deleteRUMaxMetricLabels(name string) {
 	metrics.RUMaxPerSecGauge.DeleteLabelValues(name, requestSourceRUTypeRRU)
 	metrics.RUMaxPerSecGauge.DeleteLabelValues(name, requestSourceRUTypeWRU)
 	metrics.RUMaxPerSecGauge.DeleteLabelValues(name, ruTypeTotal)
