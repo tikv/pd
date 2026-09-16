@@ -362,6 +362,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			case <-stateUpdateTicker.C:
 				c.executeOnAllGroups((*groupCostController).updateRunState)
 				c.executeOnAllGroups((*groupCostController).updateAvgRequestResourcePerSec)
+				c.executeOnAllGroups((*groupCostController).sampleRUMaxPerSecMetrics)
 				if len(c.run.currentRequests) == 0 {
 					c.collectTokenBucketRequests(c.loopCtx, FromPeriodReport, periodicReport /* select resource groups which should be reported periodically */, notifyMsg{})
 				}
@@ -390,8 +391,9 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			/* channels */
 			case <-c.loopCtx.Done():
 				metrics.ResourceGroupStatusGauge.Reset()
-				c.requestSourceStates.Range(func(_, v any) bool {
+				c.requestSourceStates.Range(func(k, v any) bool {
 					v.(*requestSourceMetricsState).cleanup()
+					deleteRUMaxPerSecMetricLabels(k.(string))
 					return true
 				})
 				return
@@ -718,9 +720,6 @@ func (c *ResourceGroupsController) tombstoneGroupCostController(name string) {
 		c.groupsController.Delete(name)
 		return
 	}
-	// The tombstone controller runs on the default group's meta, but its metric
-	// series belong to the deleted group, like the request-source state above.
-	gc.metrics.ruMaxPerSec = newRUMaxPerSecTracker(name)
 	gc.tombstone.Store(true)
 	c.groupsController.Store(name, gc)
 	// Its metrics will be deleted in the cleanup process.

@@ -867,3 +867,136 @@ func TestRUVersionWatchViaControllerConfig(t *testing.T) {
 		return controller.GetRUVersion() == 1 // Reset to default
 	})
 }
+
+func TestRUMaxPerSecTombstoneLifecycle(t *testing.T) {
+	for _, path := range []string{"replace and recreate", "default missing", "default invalid"} {
+		t.Run(path, func(t *testing.T) {
+			re := require.New(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			provider := newMockResourceGroupProvider()
+			c, err := NewResourceGroupController(ctx, 1, provider, nil, constants.NullKeyspaceID)
+			re.NoError(err)
+			// Exercise the event handlers synchronously; the loop test covers scheduling.
+			c.loopCtx = ctx
+			group := &rmpb.ResourceGroup{
+				Name: t.Name(), Mode: rmpb.GroupMode_RUMode,
+				RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 10000, BurstLimit: -1}}},
+			}
+			provider.On("GetResourceGroup", mock.Anything, group.Name, mock.Anything).Return(group, nil)
+			gc, err := c.tryGetResourceGroupController(ctx, group.Name, false)
+			re.NoError(err)
+			t.Cleanup(func() {
+				gc.metrics.deleteLabels(group.Name)
+				gc.metrics.deleteLabels(defaultResourceGroupName)
+				c.cleanupRequestSourceMetricsState(group.Name)
+				c.cleanupRequestSourceMetricsState(defaultResourceGroupName)
+			})
+			gc.metrics.ruMaxPerSec.observe(100, 0, gc.metrics.ruMaxPerSec.last.Add(time.Second))
+			def := *group
+			def.Name = defaultResourceGroupName
+			if path == "default missing" {
+				provider.On("GetResourceGroup", mock.Anything, defaultResourceGroupName, mock.Anything).Return((*rmpb.ResourceGroup)(nil), nil)
+			} else {
+				provider.On("GetResourceGroup", mock.Anything, defaultResourceGroupName, mock.Anything).Return(&def, nil)
+				defaultGC, err := c.tryGetResourceGroupController(ctx, defaultResourceGroupName, false)
+				re.NoError(err)
+				defaultGC.metrics.ruMaxPerSec.observe(42, 0, defaultGC.metrics.ruMaxPerSec.last.Add(time.Second))
+				if path == "default invalid" {
+					def.Mode = rmpb.GroupMode_RawMode
+				}
+			}
+			c.tombstoneGroupCostController(group.Name)
+			if path != "replace and recreate" {
+				_, ok := c.loadGroupController(group.Name)
+				re.False(ok)
+				re.Empty(gatherRUMaxPerSec(t, group.Name))
+				return
+			}
+			tombstone, ok := c.loadGroupController(group.Name)
+			re.True(ok)
+			re.True(tombstone.tombstone.Load())
+			re.Equal(defaultResourceGroupName, tombstone.name)
+			tombstone.sampleRUMaxPerSecMetrics()
+			re.Zero(gatherRUMaxPerSec(t, group.Name)[ruTypeTotal])
+			re.InDelta(42, gatherRUMaxPerSec(t, defaultResourceGroupName)[ruTypeTotal], 1e-9)
+
+			// A replacement uses its own cumulative baseline and window. Constructing
+			// it must not reset the live series before it wins the cache replacement.
+			tombstone.metrics.ruMaxPerSec.observe(200, 0, tombstone.metrics.ruMaxPerSec.last.Add(time.Second))
+			revived, err := newGroupCostController(group, c.ruConfig, c.lowTokenNotifyChan, c.tokenBucketUpdateChan, c.getOrCreateRequestSourceMetricsState(group.Name))
+			re.NoError(err)
+			re.InDelta(200, gatherRUMaxPerSec(t, group.Name)[ruTypeTotal], 1e-9)
+			re.True(c.groupsController.CompareAndSwap(group.Name, tombstone, revived))
+			revived.sampleRUMaxPerSecMetrics()
+			re.Zero(gatherRUMaxPerSec(t, group.Name)[ruTypeTotal])
+			revived.inactive = true
+			c.cleanUpResourceGroup()
+			re.Empty(gatherRUMaxPerSec(t, group.Name))
+
+			fresh, err := c.tryGetResourceGroupController(ctx, group.Name, false)
+			re.NoError(err)
+			fresh.metrics.ruMaxPerSec.observe(7, 3, fresh.metrics.ruMaxPerSec.last.Add(time.Second))
+			// Cached children from deleted controllers must remain detached.
+			revived.metrics.ruMaxPerSec.ruGauge.Set(999)
+			got := gatherRUMaxPerSec(t, group.Name)
+			re.Len(got, 3)
+			re.InDelta(10, got[ruTypeTotal], 1e-9)
+		})
+	}
+}
+
+func TestRUMaxPerSecControllerLoop(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	provider := newMockResourceGroupProvider()
+	provider.On("AcquireTokenBuckets", mock.Anything, mock.Anything).Return([]*rmpb.TokenBucketResponse{}, nil)
+	group := &rmpb.ResourceGroup{
+		Name: t.Name(), Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 1000000, BurstLimit: -1}}},
+	}
+	provider.On("GetResourceGroup", mock.Anything, group.Name, mock.Anything).Return(group, nil)
+	c, err := NewResourceGroupController(ctx, 1, provider, nil, constants.NullKeyspaceID)
+	re.NoError(err)
+	gc, err := c.tryGetResourceGroupController(ctx, group.Name, false)
+	re.NoError(err)
+	start := gc.metrics.ruMaxPerSec.last
+	// Complete requests before the first tick to exercise initialization too.
+	for _, isWrite := range []bool{true, false} {
+		for range 50 {
+			req := NewTestRequestInfo(isWrite, 4096, 1, AccessCrossZone)
+			_, _, _, _, err := c.OnRequestWait(ctx, group.Name, req)
+			re.NoError(err)
+			_, err = c.OnResponse(group.Name, req, NewTestResponseInfo(8192, time.Millisecond, true))
+			re.NoError(err)
+		}
+	}
+	rru, wru := gc.mu.consumption.RRU, gc.mu.consumption.WRU
+	re.Positive(rru)
+	re.Positive(wru)
+	c.Start(ctx)
+	t.Cleanup(func() { re.NoError(c.Stop()) })
+	re.Eventually(func() bool {
+		return gatherRUMaxPerSec(t, group.Name)[ruTypeTotal] > 0
+	}, 5*time.Second, 10*time.Millisecond)
+	peak := gatherRUMaxPerSec(t, group.Name)
+	// Exercise the actual notification branch, not just its helper functions.
+	for range 100 {
+		select {
+		case c.lowTokenNotifyChan <- notifyMsg{}:
+		case <-time.After(5 * time.Second):
+			t.Fatal("controller did not process low-token notifications")
+		}
+	}
+	re.Equal(peak, gatherRUMaxPerSec(t, group.Name))
+	re.NoError(c.Stop())
+	re.Empty(gatherRUMaxPerSec(t, group.Name))
+	// Read loop-owned timestamps only after Stop joins the goroutine.
+	re.Len(gc.metrics.ruMaxPerSec.samples, 1)
+	seconds := gc.metrics.ruMaxPerSec.samples[0].at.Sub(start).Seconds()
+	re.InDelta(rru/seconds, peak[requestSourceRUTypeRRU], 1e-6)
+	re.InDelta(wru/seconds, peak[requestSourceRUTypeWRU], 1e-6)
+	re.InDelta((rru+wru)/seconds, peak[ruTypeTotal], 1e-6)
+	t.Logf("charged RRU=%f WRU=%f; interval=%fs; peak=%v", rru, wru, seconds, peak)
+}
