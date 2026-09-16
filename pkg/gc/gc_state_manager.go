@@ -220,11 +220,7 @@ func NewGCStateManager(store endpoint.GCStateProvider, cfg config.PDServerConfig
 		allKeyspacesGCStatesSingleFlight: syncutil.NewOrderedSingleFlight[map[uint32]GCState](),
 		allKeyspacesGCStatesExcludeGCBarriersSingleFlight: syncutil.NewOrderedSingleFlight[map[uint32]GCState](),
 	}
-	warningAge := cfg.GCBarrierWarningAge.Duration
-	if warningAge == 0 {
-		warningAge = 72 * time.Hour
-	}
-	m.barrierMetrics = newBarrierMetrics(time.Now, func() time.Duration { return warningAge })
+	m.barrierMetrics = newBarrierMetrics(time.Now)
 	if keyspaceManager != nil {
 		keyspaceManager.SetGCBarrierInvalidator(m.barrierMetrics.invalidateKeyspaceMetrics)
 	}

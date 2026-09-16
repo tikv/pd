@@ -25,7 +25,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tikv/pd/pkg/storage/endpoint"
-	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/config"
 )
 
@@ -37,14 +36,14 @@ func TestBarrierMetricsAgeBoundaries(t *testing.T) {
 	}{
 		{24*time.Hour - time.Millisecond, false, false},
 		{24 * time.Hour, false, false},
-		{24*time.Hour + time.Millisecond, true, false},
-		{72 * time.Hour, true, false},
+		{24*time.Hour + time.Millisecond, true, true},
+		{48 * time.Hour, true, true},
 		{72*time.Hour + time.Millisecond, true, true},
 		{-time.Hour, false, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.age.String(), func(t *testing.T) {
-			m := newBarrierMetrics(func() time.Time { return now }, func() time.Duration { return 72 * time.Hour })
+			m := newBarrierMetrics(func() time.Time { return now })
 			registry := prometheus.NewRegistry()
 			registry.MustRegister(m)
 			ts := uint64(now.Add(-tc.age).UnixMilli())<<18 | 123
@@ -80,7 +79,7 @@ func boolCount(value bool) int {
 
 func TestBarrierMetricsNameRefreshPreservesIdentityAndWarnings(t *testing.T) {
 	now := time.Unix(2_000_000_000, 0)
-	m := newBarrierMetrics(func() time.Time { return now }, func() time.Duration { return 72 * time.Hour })
+	m := newBarrierMetrics(func() time.Time { return now })
 	registry := prometheus.NewRegistry()
 	registry.MustRegister(m)
 	ts := uint64(now.Add(-80*time.Hour).UnixMilli()) << 18
@@ -106,7 +105,7 @@ func TestBarrierMetricsNameRefreshPreservesIdentityAndWarnings(t *testing.T) {
 
 func TestBarrierMetricsRenewalExpiryAndRecovery(t *testing.T) {
 	now := time.Unix(2_000_000_000, 0)
-	m := newBarrierMetrics(func() time.Time { return now }, func() time.Duration { return 72 * time.Hour })
+	m := newBarrierMetrics(func() time.Time { return now })
 	registry := prometheus.NewRegistry()
 	registry.MustRegister(m)
 	oldTS := uint64(now.Add(-80*time.Hour).UnixMilli()) << 18
@@ -125,6 +124,10 @@ func TestBarrierMetricsRenewalExpiryAndRecovery(t *testing.T) {
 	barrier = endpoint.NewGCBarrier("backup", uint64(now.Add(-48*time.Hour).UnixMilli())<<18, nil)
 	m.updateMetrics(barrierMetricScope{keyspaceID: 42}, barrier, now)
 	require.Empty(t, observe())
+	barrier = endpoint.NewGCBarrier("backup", uint64(now.Add(-12*time.Hour).UnixMilli())<<18, nil)
+	m.updateMetrics(barrierMetricScope{keyspaceID: 42}, barrier, now)
+	require.Empty(t, observe())
+	require.Empty(t, gatherBarrierMetrics(t, registry), "a recovered barrier clears both metrics and warning suppression")
 	barrier = endpoint.NewGCBarrier("backup", oldTS, &expiry)
 	require.Len(t, observe(), 1)
 	now = expiry
@@ -146,14 +149,14 @@ func TestBarrierMetricsRenewalExpiryAndRecovery(t *testing.T) {
 
 func TestBarrierMetricsHealthySetAndGlobalIdentity(t *testing.T) {
 	now := time.Unix(2_000_000_000, 0)
-	m := newBarrierMetrics(func() time.Time { return now }, func() time.Duration { return 72 * time.Hour })
+	m := newBarrierMetrics(func() time.Time { return now })
 	barriers := make([]*endpoint.GCBarrier, 10000)
 	for i := range barriers {
 		barriers[i] = endpoint.NewGCBarrier(strconv.Itoa(i), uint64(now.UnixMilli())<<18, nil)
 	}
 	require.Empty(t, m.observeMetrics(m.generation(), 42, "tenant-a", barriers, nil, now))
 	require.Empty(t, m.entries)
-	global := []*endpoint.GlobalGCBarrier{endpoint.NewGlobalGCBarrier("br", uint64(now.Add(-80*time.Hour).UnixMilli())<<18, nil)}
+	global := []*endpoint.GlobalGCBarrier{endpoint.NewGlobalGCBarrier("br", uint64(now.Add(-48*time.Hour).UnixMilli())<<18, nil)}
 	require.Len(t, m.observeMetrics(m.generation(), 42, "tenant-a", barriers, global, now), 1)
 	require.Empty(t, m.observeMetrics(m.generation(), 43, "tenant-b", nil, global, now))
 	registry := prometheus.NewRegistry()
@@ -169,18 +172,16 @@ func TestBarrierMetricsHealthySetAndGlobalIdentity(t *testing.T) {
 	require.Equal(t, map[string]string{"scope": "global", "keyspace_id": "", "keyspace_name": "", "barrier_id": "br"}, labels)
 }
 
-func TestBarrierMetricsRegistrationAndLiveWarningAge(t *testing.T) {
+func TestBarrierMetricsRegistrationAndLeadership(t *testing.T) {
 	now := time.Unix(2_000_000_000, 0)
 	cfg := config.NewConfig()
 	require.NoError(t, cfg.Adjust(nil, false))
-	options := config.NewPersistOptions(cfg)
 	first := NewGCStateManager(endpoint.GCStateProvider{}, cfg.PDServerCfg, nil)
 	second := NewGCStateManager(endpoint.GCStateProvider{}, cfg.PDServerCfg, nil)
 	first.barrierMetrics.now = func() time.Time { return now }
 	second.barrierMetrics.now = func() time.Time { return now }
-	age := func() time.Duration { return options.GetPDServerConfig().GCBarrierWarningAge.Duration }
-	first.EnableBarrierMetrics(age)
-	second.EnableBarrierMetrics(age)
+	first.EnableBarrierMetrics()
+	second.EnableBarrierMetrics()
 	t.Cleanup(first.DisableBarrierMetrics)
 	t.Cleanup(second.DisableBarrierMetrics)
 	barriers := []*endpoint.GCBarrier{endpoint.NewGCBarrier("old", uint64(now.Add(-80*time.Hour).UnixMilli())<<18, nil)}
@@ -190,15 +191,6 @@ func TestBarrierMetricsRegistrationAndLiveWarningAge(t *testing.T) {
 	first.OnNodeBecomesLeader()
 	require.Len(t, observe(first, 42), 1)
 	require.Contains(t, gatherBarrierMetrics(t, prometheus.DefaultGatherer), "keyspace/42/old")
-	updated := options.GetPDServerConfig().Clone()
-	updated.GCBarrierWarningAge = typeutil.NewDuration(96 * time.Hour)
-	options.SetPDServerConfig(updated)
-	now = now.Add(10 * time.Minute)
-	require.Empty(t, observe(first, 42))
-	updated = updated.Clone()
-	updated.GCBarrierWarningAge = typeutil.NewDuration(72 * time.Hour)
-	options.SetPDServerConfig(updated)
-	require.Len(t, observe(first, 42), 1, "live age reduction sees reset warning state")
 	generation := first.barrierMetrics.generation()
 	first.OnNodeBecomesLeader()
 	require.Empty(t, gatherBarrierMetrics(t, prometheus.DefaultGatherer))
@@ -218,7 +210,7 @@ func TestBarrierMetricsRegistrationAndLiveWarningAge(t *testing.T) {
 
 func TestBarrierMetricsConcurrentLifecycleAndScrapes(t *testing.T) {
 	now := time.Unix(2_000_000_000, 0)
-	m := newBarrierMetrics(func() time.Time { return now }, func() time.Duration { return 72 * time.Hour })
+	m := newBarrierMetrics(func() time.Time { return now })
 	registry := prometheus.NewRegistry()
 	registry.MustRegister(m)
 	barriers := []*endpoint.GCBarrier{endpoint.NewGCBarrier("old", uint64(now.Add(-80*time.Hour).UnixMilli())<<18, nil)}
@@ -247,16 +239,16 @@ func TestBarrierMetricsConcurrentLifecycleAndScrapes(t *testing.T) {
 	require.Empty(t, gatherBarrierMetrics(t, registry))
 }
 
-func TestBarrierMetricsManagerDefaultWarningAge(t *testing.T) {
+func TestBarrierMetricsManagerFixedWarningAge(t *testing.T) {
 	now := time.Unix(2_000_000_000, 0)
 	m := NewGCStateManager(endpoint.GCStateProvider{}, config.PDServerConfig{}, nil)
 	barriers := []*endpoint.GCBarrier{endpoint.NewGCBarrier("old", uint64(now.Add(-48*time.Hour).UnixMilli())<<18, nil)}
-	require.Empty(t, m.barrierMetrics.observeMetrics(m.barrierMetrics.generation(), 42, "tenant-a", barriers, nil, now), "zero constructor config uses the 72-hour default")
+	require.Len(t, m.barrierMetrics.observeMetrics(m.barrierMetrics.generation(), 42, "tenant-a", barriers, nil, now), 1, "barriers older than 24 hours must warn without configuration")
 }
 
 func TestBarrierMetricsScrapeUnlocksBeforeSending(t *testing.T) {
 	now := time.Unix(2_000_000_000, 0)
-	m := newBarrierMetrics(func() time.Time { return now }, func() time.Duration { return 72 * time.Hour })
+	m := newBarrierMetrics(func() time.Time { return now })
 	ts := uint64(now.Add(-80*time.Hour).UnixMilli()) << 18
 	m.observeMetrics(m.generation(), 42, "tenant-a", []*endpoint.GCBarrier{endpoint.NewGCBarrier("one", ts, nil), endpoint.NewGCBarrier("two", ts, nil)}, nil, now)
 	samples := make(chan prometheus.Metric)
@@ -274,7 +266,7 @@ func TestBarrierMetricsScrapeUnlocksBeforeSending(t *testing.T) {
 
 func BenchmarkBarrierMetricsHealthy(b *testing.B) {
 	now := time.Unix(2_000_000_000, 0)
-	m := newBarrierMetrics(func() time.Time { return now }, func() time.Duration { return 72 * time.Hour })
+	m := newBarrierMetrics(func() time.Time { return now })
 	barriers := make([]*endpoint.GCBarrier, 10000)
 	for i := range barriers {
 		barriers[i] = endpoint.NewGCBarrier(strconv.Itoa(i), uint64(now.UnixMilli())<<18, nil)

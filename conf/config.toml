@@ -102,10 +102,6 @@
 # max-backups = 0
 
 [pd-server]
-## Warn when an observed GC barrier timestamp is older than this duration.
-## Minimum: 24h, because metrics are only reported for barriers older than 24h.
-## Default: 72h.
-# gc-barrier-warning-age = "72h"
 ## The metric storage is the cluster metric storage. This is use for query metric data.
 ## Currently we use prometheus as metric storage, we may use PD/TiKV as metric storage later.
 ## Set it to a reachable Prometheus address, for example: http://prometheus.example.com:9090

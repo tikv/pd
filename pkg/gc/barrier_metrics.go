@@ -31,8 +31,9 @@ import (
 )
 
 const (
-	barrierMetricMinimumAge = 24 * time.Hour
-	barrierWarningInterval  = 10 * time.Minute
+	// Metrics and warnings share the same minimum barrier timestamp age.
+	barrierObservationMinimumAge = 24 * time.Hour
+	barrierWarningInterval       = 10 * time.Minute
 )
 
 var barrierTimestampDesc = prometheus.NewDesc(
@@ -66,15 +67,14 @@ type barrierMetricEntry struct {
 // after removal. An unrelated keyspace removal may defer an observation until
 // the next successful advancement request.
 type barrierMetrics struct {
-	mu         syncutil.Mutex
-	epoch      uint64
-	entries    map[barrierMetricScope]map[string]barrierMetricEntry
-	now        func() time.Time
-	warningAge func() time.Duration
+	mu      syncutil.Mutex
+	epoch   uint64
+	entries map[barrierMetricScope]map[string]barrierMetricEntry
+	now     func() time.Time
 }
 
-func newBarrierMetrics(now func() time.Time, warningAge func() time.Duration) *barrierMetrics {
-	return &barrierMetrics{entries: make(map[barrierMetricScope]map[string]barrierMetricEntry), now: now, warningAge: warningAge}
+func newBarrierMetrics(now func() time.Time) *barrierMetrics {
+	return &barrierMetrics{entries: make(map[barrierMetricScope]map[string]barrierMetricEntry), now: now}
 }
 
 func (m *barrierMetrics) generation() uint64 {
@@ -143,16 +143,16 @@ func (w barrierWarning) log() {
 		zap.Time("barrier-time", physical), zap.Duration("lag", w.now.Sub(physical)), zap.String("expiration-time", expiration))
 }
 
-func (m *barrierMetrics) entryMetrics(scope barrierMetricScope, keyspaceName string, barrier *endpoint.GCBarrier, previous barrierMetricEntry, now time.Time) (barrierMetricEntry, bool) {
+func (*barrierMetrics) entryMetrics(scope barrierMetricScope, keyspaceName string, barrier *endpoint.GCBarrier, previous barrierMetricEntry, now time.Time) (barrierMetricEntry, bool) {
 	physical, _ := tsoutil.ParseTS(barrier.BarrierTS)
-	if (!scope.global && barrier.BarrierID == keypath.GCWorkerServiceSafePointID) || barrier.IsExpired(now) || now.Sub(physical) <= barrierMetricMinimumAge {
+	if (!scope.global && barrier.BarrierID == keypath.GCWorkerServiceSafePointID) || barrier.IsExpired(now) || now.Sub(physical) <= barrierObservationMinimumAge {
 		return barrierMetricEntry{}, false
 	}
 	if scope.global || scope.keyspaceID == constant.NullKeyspaceID {
 		keyspaceName = ""
 	}
 	entry := barrierMetricEntry{keyspaceName: keyspaceName, barrier: *barrier, lastWarning: previous.lastWarning}
-	if previous.barrier.IsExpired(now) || now.Sub(physical) <= m.warningAge() {
+	if previous.barrier.IsExpired(now) {
 		entry.lastWarning = time.Time{}
 	}
 	if barrier.ExpirationTime != nil {
@@ -179,8 +179,7 @@ func (m *barrierMetrics) observeMetrics(generation uint64, keyspaceID uint32, ke
 			if !ok {
 				return
 			}
-			physical, _ := tsoutil.ParseTS(barrier.BarrierTS)
-			if now.Sub(physical) > m.warningAge() && (entry.lastWarning.IsZero() || now.Sub(entry.lastWarning) >= barrierWarningInterval) {
+			if entry.lastWarning.IsZero() || now.Sub(entry.lastWarning) >= barrierWarningInterval {
 				entry.lastWarning = now
 				warnings = append(warnings, barrierWarning{scope: scope, barrier: entry.barrier, now: now})
 			}
@@ -254,15 +253,11 @@ func (o *barrierObservation) logWarnings() {
 	}
 }
 
-// EnableBarrierMetrics enables production collection while this manager is
-// leader. warningAge reads the current validated configuration on each request.
+// EnableBarrierMetrics enables production collection while this manager is leader.
 // Managers created for isolated tests need not enable production collection.
-func (m *GCStateManager) EnableBarrierMetrics(warningAge func() time.Duration) {
+func (m *GCStateManager) EnableBarrierMetrics() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.barrierMetrics.mu.Lock()
-	m.barrierMetrics.warningAge = warningAge
-	m.barrierMetrics.mu.Unlock()
 	m.barrierMetricsEnabled = true
 	if m.nodeIsLeader() {
 		productionBarrierMetrics.current.Store(m.barrierMetrics)
