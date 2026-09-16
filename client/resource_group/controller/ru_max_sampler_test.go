@@ -77,6 +77,20 @@ func TestRUMaxTracker(t *testing.T) {
 		{"first sample includes initial consumption", []observation{
 			{time.Second, 100, 50, [3]float64{100, 50, 150}},
 		}},
+		{"partial first interval preserves subsequent actual intervals", []observation{
+			{5 * time.Millisecond, 100, 50, [3]float64{100, 50, 150}},
+			{505 * time.Millisecond, 200, 100, [3]float64{200, 100, 300}},
+			{1505 * time.Millisecond, 500, 250, [3]float64{300, 150, 450}},
+		}},
+		{"partial first interval expires at its actual timestamp", []observation{
+			{5 * time.Millisecond, 100, 50, [3]float64{100, 50, 150}},
+			{60005*time.Millisecond - time.Nanosecond, 100, 50, [3]float64{100, 50, 150}},
+			{60005 * time.Millisecond, 100, 50, [3]float64{}},
+		}},
+		{"idle first sample does not extend normalization to later samples", []observation{
+			{5 * time.Millisecond, 0, 0, [3]float64{}},
+			{505 * time.Millisecond, 100, 50, [3]float64{200, 100, 300}},
+		}},
 		{"actual interval normalization", []observation{
 			{3 * time.Second, 300, 150, [3]float64{100, 50, 150}},
 			{3500 * time.Millisecond, 400, 200, [3]float64{200, 100, 300}},
@@ -309,8 +323,9 @@ func TestRUMaxSamplerRecreateDuringCleanup(t *testing.T) {
 	old.metrics.deletePagingLabels(name)
 	got := gatherRUMaxMetrics(t, name)
 	re.Len(got, 3)
-	seconds := sampler[name].tracker.last.Seconds()
-	re.InDelta(10/seconds, got[ruTypeTotal], 1e-6)
+	// A replacement starts a new first interval, while retaining live gauges.
+	re.Less(sampler[name].tracker.last, defaultGroupStateUpdateInterval)
+	re.InDelta(10, got[ruTypeTotal], 1e-9)
 	re.Equal(fresh, sampler[name].gc)
 	re.Len(sampler[name].tracker.samples, 1)
 	c.groupsController.Delete(name)

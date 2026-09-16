@@ -190,7 +190,7 @@ func initMetrics(constLabels prometheus.Labels) {
 			Namespace:   namespace,
 			Subsystem:   requestSubsystem,
 			Name:        "ru_max_per_sec",
-			Help:        "Maximum sampled RU rate for this resource group on this client over the preceding 60 seconds. Samples use actual elapsed time.",
+			Help:        "Maximum sampled RU rate for this resource group on this client over the preceding 60 seconds. Samples use actual elapsed time, with a minimum of one second for the first sample of each controller generation.",
 			ConstLabels: constLabels,
 		}, []string{newResourceGroupNameLabel, typeLabel})
 

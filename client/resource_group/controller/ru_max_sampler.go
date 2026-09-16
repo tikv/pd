@@ -133,6 +133,12 @@ func (t *ruMaxTracker) observe(curRRU, curWRU float64, now time.Time) {
 	if duration <= 0 {
 		return
 	}
+	// Creation can fall just before a tick. Normalize the first sample over at
+	// least one sampling interval so its peak does not depend on that phase.
+	// Keep the actual timestamp below for subsequent deltas and window expiry.
+	if t.last == 0 && duration < defaultGroupStateUpdateInterval {
+		duration = defaultGroupStateUpdateInterval
+	}
 	// Failed requests can roll back consumption. Clamp each type before summing
 	// so a negative net increment cannot cancel the other type's consumption.
 	rru := math.Max(0, curRRU-t.prevRRU) / duration.Seconds()
