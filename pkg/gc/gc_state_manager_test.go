@@ -209,7 +209,12 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 		}
 	}
 
-	gcStateManager.OnNodeBecomesLeader()
+	stopGCStateManager := gcStateManager.OnNodeBecomesLeader()
+	originalClean := clean
+	clean = func() {
+		stopGCStateManager()
+		originalClean()
+	}
 
 	return s, s.GetGCStateProvider(), gcStateManager, clean, cancel
 }
@@ -258,8 +263,240 @@ type gcStateCacheAccessCounterSnapshot struct {
 
 func (s *gcStateManagerTestSuite) ensureMarkedLeader() {
 	if !s.manager.nodeIsLeader() {
-		s.manager.OnNodeBecomesLeader()
+		stopGCStateManager := s.manager.OnNodeBecomesLeader()
+		s.T().Cleanup(stopGCStateManager)
 	}
+}
+
+func (s *gcStateManagerTestSuite) TestGCStateWatchRequiresActiveLeadership() {
+	follower := NewGCStateManager(s.provider, s.manager.cfg, s.manager.keyspaceManager)
+	_, err := follower.WatchGCStates(context.Background(), true)
+	s.Require().ErrorIs(err, errs.ErrNotLeader)
+}
+
+func (s *gcStateManagerTestSuite) TestGCStateWatchLeadershipGeneration() {
+	re := s.Require()
+	stopFirst := s.manager.OnNodeBecomesLeader()
+	first, err := s.manager.WatchGCStates(context.Background(), true)
+	re.NoError(err)
+
+	stopSecond := s.manager.OnNodeBecomesLeader()
+	re.ErrorIs(first.Err(), errs.ErrNotLeader)
+	second, err := s.manager.WatchGCStates(context.Background(), true)
+	re.NoError(err)
+
+	stopFirst()
+	re.NoError(second.Err())
+	stopSecond()
+	re.ErrorIs(second.Err(), errs.ErrNotLeader)
+}
+
+func (s *gcStateManagerTestSuite) TestGCStateWatchLoadsInitialStatesIncrementally() {
+	re := s.Require()
+	w, err := s.manager.registerGCStateWatcher(context.Background(), false, gcStateWatchConfig{
+		initialBatchSize:    2,
+		initChannelCapacity: 1,
+		liveChannelCapacity: 1,
+	})
+	re.NoError(err)
+	defer w.Close()
+
+	want := make(map[uint32]struct{}, len(s.keyspacePresets.all))
+	for _, keyspaceID := range s.keyspacePresets.all {
+		want[keyspaceID] = struct{}{}
+	}
+	got := make(map[uint32]struct{}, len(want))
+	var batchSizes []int
+	for len(got) < len(want) {
+		changes, err := w.RecvBatch(2)
+		re.NoError(err)
+		batchSizes = append(batchSizes, len(changes))
+		for _, change := range changes {
+			state := mustUpsert(s.T(), change)
+			re.Nil(state.GCBarriers)
+			got[state.KeyspaceID] = struct{}{}
+		}
+	}
+	re.Equal([]int{2, 2, 1}, batchSizes)
+	re.Equal(want, got)
+}
+
+func (s *gcStateManagerTestSuite) TestGCStateWatchSkipsInitialLoading() {
+	re := s.Require()
+	w, err := s.manager.WatchGCStates(context.Background(), true)
+	re.NoError(err)
+	defer w.Close()
+	re.True(w.initDone)
+	select {
+	case batch := <-w.initCh:
+		re.Fail("initial channel was used", "batch: %+v", batch)
+	default:
+	}
+}
+
+func (s *gcStateManagerTestSuite) TestGCStateWatchCanceledBeforeInitialLoaderDoesNotIterate() {
+	re := s.Require()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var iterationStarted atomic.Bool
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/gc/onGetAllKeyspacesGCStatesStart", func() {
+		iterationStarted.Store(true)
+	}))
+	defer func() { re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/gc/onGetAllKeyspacesGCStatesStart")) }()
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/gc/watchGCStatesRegistered", cancel))
+	defer func() { re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/gc/watchGCStatesRegistered")) }()
+
+	// Suppress the automatic loader so this test can model a loader goroutine that
+	// starts only after registration has synchronously canceled its watcher.
+	w, err := s.manager.registerGCStateWatcher(ctx, true, gcStateWatchConfig{initialBatchSize: 1, liveChannelCapacity: 1})
+	re.NoError(err)
+	defer w.Close()
+	re.ErrorIs(w.Err(), context.Canceled)
+
+	s.manager.loadInitialGCStates(w, 1)
+	re.False(iterationStarted.Load())
+}
+
+func (s *gcStateManagerTestSuite) TestGCStateWatchLiveSuppressesPausedInitial() {
+	re := s.Require()
+	const keyspaceID = uint32(2)
+	_, err := s.manager.AdvanceTxnSafePoint(keyspaceID, 10, time.Now())
+	re.NoError(err)
+
+	reached := make(chan struct{})
+	release := make(chan struct{})
+	var reachedOnce, releaseOnce sync.Once
+	releaseLoader := func() { releaseOnce.Do(func() { close(release) }) }
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/gc/watchGCStatesInitialStateLoaded", func(id uint32) {
+		if id == keyspaceID {
+			reachedOnce.Do(func() { close(reached) })
+			<-release
+		}
+	}))
+	defer func() { re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/gc/watchGCStatesInitialStateLoaded")) }()
+	defer releaseLoader()
+
+	w, err := s.manager.registerGCStateWatcher(context.Background(), false, gcStateWatchConfig{initialBatchSize: 1, initChannelCapacity: 16, liveChannelCapacity: 4})
+	re.NoError(err)
+	defer w.Close()
+	select {
+	case <-reached:
+	case <-time.After(5 * time.Second):
+		re.FailNow("initial loader did not reach keyspace 2")
+	}
+
+	_, err = s.manager.AdvanceTxnSafePoint(keyspaceID, 20, time.Now())
+	re.NoError(err)
+	for {
+		changes, err := w.RecvBatch(1)
+		re.NoError(err)
+		state, ok := changes[0].Upsert()
+		if ok && state.KeyspaceID == keyspaceID && state.TxnSafePoint == 20 {
+			break
+		}
+	}
+	releaseLoader()
+
+	re.Eventually(func() bool {
+		for {
+			change, ok, err := w.receiveOne(false)
+			re.NoError(err)
+			if !ok {
+				return w.initDone
+			}
+			state, upsert := change.Upsert()
+			re.False(upsert && state.KeyspaceID == keyspaceID && state.TxnSafePoint == 10)
+		}
+	}, 5*time.Second, 10*time.Millisecond)
+}
+
+func (s *gcStateManagerTestSuite) TestGCStateWatchInitialFailureTerminatesWatcher() {
+	re := s.Require()
+	const errorMessage = "injected initial watch failure"
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/gc/iterateAllKeyspacesGCStatesError", fmt.Sprintf(`return(%q)`, errorMessage)))
+	defer func() { re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/gc/iterateAllKeyspacesGCStatesError")) }()
+
+	w, err := s.manager.WatchGCStates(context.Background(), false)
+	re.NoError(err)
+	_, err = w.RecvBatch(1)
+	re.ErrorContains(err, errorMessage)
+	re.Eventually(func() bool {
+		s.manager.mu.RLock()
+		defer s.manager.mu.RUnlock()
+		_, ok := s.manager.watchers[w.id]
+		return !ok
+	}, 5*time.Second, 10*time.Millisecond)
+}
+
+func (s *gcStateManagerTestSuite) TestGCStateWatchFullInitChannelDoesNotHoldManagerMutex() {
+	re := s.Require()
+	stop := s.manager.OnNodeBecomesLeader()
+	w, err := s.manager.registerGCStateWatcher(context.Background(), false, gcStateWatchConfig{
+		initialBatchSize:    1,
+		initChannelCapacity: 1,
+		liveChannelCapacity: 1,
+	})
+	re.NoError(err)
+	re.Eventually(func() bool { return len(w.initCh) == cap(w.initCh) }, 5*time.Second, 10*time.Millisecond)
+
+	mutationDone := make(chan error, 1)
+	go func() {
+		_, err := s.manager.AdvanceTxnSafePoint(2, 1, time.Now())
+		mutationDone <- err
+	}()
+	select {
+	case err := <-mutationDone:
+		re.NoError(err)
+	case <-time.After(5 * time.Second):
+		re.FailNow("manager mutation blocked behind the initial state loader")
+	}
+
+	teardownDone := make(chan struct{})
+	go func() {
+		stop()
+		close(teardownDone)
+	}()
+	select {
+	case <-teardownDone:
+	case <-time.After(5 * time.Second):
+		re.FailNow("leadership teardown blocked behind the initial state loader")
+	}
+	w.Close()
+	re.Eventually(func() bool {
+		s.manager.mu.RLock()
+		defer s.manager.mu.RUnlock()
+		_, ok := s.manager.watchers[w.id]
+		return !ok
+	}, 5*time.Second, 10*time.Millisecond)
+}
+
+func (s *gcStateManagerTestSuite) TestGCStateWatchConcurrentCloseIsIdempotent() {
+	re := s.Require()
+	stop := s.manager.OnNodeBecomesLeader()
+	w, err := s.manager.WatchGCStates(context.Background(), false)
+	re.NoError(err)
+
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		w.Close()
+	}()
+	go func() {
+		defer wg.Done()
+		s.manager.terminateGCStateWatcher(w, errors.New("initial load failed"), watcherTerminationInitError)
+	}()
+	go func() {
+		defer wg.Done()
+		stop()
+	}()
+	wg.Wait()
+	re.Error(w.Err())
+	s.manager.mu.RLock()
+	_, ok := s.manager.watchers[w.id]
+	s.manager.mu.RUnlock()
+	re.False(ok)
 }
 
 func (s *gcStateManagerTestSuite) trackGCStateCacheAccessCounters() *gcStateCacheAccessCounters {
@@ -570,9 +807,9 @@ func (s *gcStateManagerTestSuite) TestCompatibleUpdateGCSafePointSequentiallyWit
 		return wb.SetGCSafePoint(keyspaceID, 101)
 	})
 	re.NoError(err)
-	oldLeadership := s.manager.nodeLeadership.Load()
-	s.manager.nodeLeadership.Store(0)
-	defer s.manager.nodeLeadership.Store(oldLeadership)
+	oldLeadership := s.manager.activeLeadershipGeneration.Load()
+	s.manager.activeLeadershipGeneration.Store(0)
+	defer s.manager.activeLeadershipGeneration.Store(oldLeadership)
 
 	gcSafePoint, err = s.manager.CompatibleLoadGCSafePoint(keyspaceID)
 	re.NoError(err)
@@ -2076,7 +2313,8 @@ func (s *gcStateManagerTestSuite) TestGetGCStateWithGlobalGCBarriersRejectsRevis
 		s.manager.cfg,
 		s.manager.keyspaceManager,
 	)
-	otherManager.OnNodeBecomesLeader()
+	stopOtherManager := otherManager.OnNodeBecomesLeader()
+	defer stopOtherManager()
 	_, err = otherManager.SetGlobalGCBarrier(
 		ctx,
 		"snapshot",
