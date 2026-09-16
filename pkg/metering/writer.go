@@ -22,6 +22,7 @@ package metering
 import (
 	"context"
 	"math"
+	"slices"
 	"sync"
 	"time"
 
@@ -103,6 +104,13 @@ func validateMeteringConfig(c *config.MeteringConfig) error {
 	case storage.ProviderTypeOSS:
 		if len(c.Region) == 0 {
 			return errors.New("region is required for the metering config")
+		}
+		if len(c.Bucket) == 0 {
+			return errors.New("bucket is required for the metering config")
+		}
+	case storage.ProviderTypeCOS:
+		if len(c.Region) == 0 && len(c.Endpoint) == 0 {
+			return errors.New("region is required for the metering config when endpoint is not set")
 		}
 		if len(c.Bucket) == 0 {
 			return errors.New("bucket is required for the metering config")
@@ -287,10 +295,10 @@ func (mw *Writer) flushMeteringData(ctx context.Context, ts int64) {
 			}
 		}
 		cost := time.Since(start)
-		logFields := append(baseLogFields,
+		logFields := slices.Concat(baseLogFields, []zap.Field{
 			zap.Int("attempts", attempt),
 			zap.Duration("cost", cost),
-		)
+		})
 		if err != nil {
 			log.Error("failed to write metering data to underlying storage",
 				append(logFields, zap.Error(err))...)

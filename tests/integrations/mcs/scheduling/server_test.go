@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
@@ -48,7 +49,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 type serverTestSuite struct {
@@ -869,6 +870,29 @@ func (suite *serverTestSuite) TestStoreLimit() {
 	}
 	op = operator.NewTestOperator(2, &metapb.RegionEpoch{}, operator.OpRegion, operator.RemovePeer{FromStore: 2})
 	checkOperatorFail(re, oc, op)
+
+	setTransferLeaderInLimit := func(rate float64) {
+		url := fmt.Sprintf("%s/pd/api/v1/store/2/limit", leaderServer.GetAddr())
+		body := fmt.Sprintf(`{"rate":%g,"type":"transfer-leader-in"}`, rate)
+		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, url, []byte(body), testutil.StatusOK(re)))
+	}
+	setTransferLeaderInLimit(0.00006)
+	waitSyncFinish(re, tc, storelimit.TransferLeaderIn, 0.00006)
+	op = operator.NewTestOperator(2, &metapb.RegionEpoch{}, operator.OpLeader,
+		operator.TransferLeader{FromStore: 1, ToStore: 2})
+	checkOperatorSuccess(re, oc, op)
+	op = operator.NewTestOperator(2, &metapb.RegionEpoch{}, operator.OpLeader,
+		operator.TransferLeader{FromStore: 1, ToStore: 2})
+	checkOperatorFail(re, oc, op)
+
+	setTransferLeaderInLimit(storelimit.Unlimited)
+	waitSyncFinish(re, tc, storelimit.TransferLeaderIn, storelimit.Unlimited)
+	// Controller admission refreshes the in-memory limiter from the synchronized configuration.
+	for range 2 {
+		op = operator.NewTestOperator(2, &metapb.RegionEpoch{}, operator.OpLeader,
+			operator.TransferLeader{FromStore: 1, ToStore: 2})
+		checkOperatorSuccess(re, oc, op)
+	}
 }
 
 func checkOperatorSuccess(re *require.Assertions, oc *operator.Controller, op *operator.Operator) {
@@ -1543,6 +1567,7 @@ func (suite *serverTestSuite) TestConcurrentBatchSplit() {
 }
 
 func (suite *serverTestSuite) checkConcurrentAllocatedID(re *require.Assertions, req *pdpb.AskBatchSplitRequest, grpcPDClient pdpb.PDClient) {
+	as := assert.New(suite.T())
 	var wg sync.WaitGroup
 	var allocatedIDs sync.Map
 	for range 100 {
@@ -1550,15 +1575,20 @@ func (suite *serverTestSuite) checkConcurrentAllocatedID(re *require.Assertions,
 		go func() {
 			defer wg.Done()
 			resp, err := grpcPDClient.AskBatchSplit(suite.ctx, req)
-			re.NoError(err)
-			re.Empty(resp.GetHeader().GetError())
+			if !as.NoError(err) || !as.Empty(resp.GetHeader().GetError()) {
+				return
+			}
 			for _, id := range resp.GetIds() {
 				_, ok := allocatedIDs.Load(id.NewRegionId)
-				re.False(ok)
+				if !as.False(ok) {
+					return
+				}
 				allocatedIDs.Store(id.NewRegionId, struct{}{})
 				for _, peer := range id.NewPeerIds {
 					_, ok := allocatedIDs.Load(peer)
-					re.False(ok)
+					if !as.False(ok) {
+						return
+					}
 					allocatedIDs.Store(peer, struct{}{})
 				}
 			}
@@ -1574,6 +1604,7 @@ func (suite *serverTestSuite) checkConcurrentAllocatedID(re *require.Assertions,
 }
 
 func (suite *serverTestSuite) TestForwardSplitRegion() {
+	as := assert.New(suite.T())
 	re := suite.Require()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
 	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
@@ -1664,7 +1695,9 @@ func (suite *serverTestSuite) TestForwardSplitRegion() {
 			ApproximateSize: 100 * units.MiB,
 			ApproximateKeys: 1000,
 		}
-		re.NoError(stream.Send(regionReq))
+		if !as.NoError(stream.Send(regionReq)) {
+			return
+		}
 		regionReq = &pdpb.RegionHeartbeatRequest{
 			Header: testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
 			Region: &metapb.Region{
@@ -1680,7 +1713,7 @@ func (suite *serverTestSuite) TestForwardSplitRegion() {
 			ApproximateSize: 100 * units.MiB,
 			ApproximateKeys: 1000,
 		}
-		re.NoError(stream.Send(regionReq))
+		as.NoError(stream.Send(regionReq))
 	}()
 
 	// Forward SplitRegions request through PD to scheduling service

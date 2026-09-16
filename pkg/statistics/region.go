@@ -23,10 +23,13 @@ import (
 
 // RegionStats records a list of regions' statistics and distribution status.
 type RegionStats struct {
-	Count                   int               `json:"count"`
-	EmptyCount              int               `json:"empty_count"`
-	StorageSize             int64             `json:"storage_size"`
-	UserStorageSize         int64             `json:"user_storage_size"`
+	Count           int   `json:"count"`
+	EmptyCount      int   `json:"empty_count"`
+	StorageSize     int64 `json:"storage_size"`
+	UserStorageSize int64 `json:"user_storage_size"`
+	// UserIAStorageSize is the approximate IA row-based logical KV size in MiB,
+	// bounded by UserStorageSize.
+	UserIAStorageSize       int64             `json:"user_ia_storage_size"`
 	UserColumnarStorageSize int64             `json:"user_columnar_storage_size"`
 	StorageKeys             int64             `json:"storage_keys"`
 	StoreLeaderCount        map[uint64]int    `json:"store_leader_count"`
@@ -95,12 +98,14 @@ func (s *RegionStats) Observe(r *core.RegionInfo, cluster RegionStatInformer, op
 	approximateKeys := r.GetApproximateKeys()
 	approximateSize := r.GetApproximateSize()
 	approximateKvSize := r.GetApproximateKvSize()
+	approximateIAKvSize := min(r.GetApproximateIAKvSize(), approximateKvSize)
 	approximateColumnarKvSize := r.GetApproximateColumnarKvSize()
 	if approximateSize <= core.EmptyRegionApproximateSize {
 		s.EmptyCount++
 	}
 	s.StorageSize += approximateSize
 	s.UserStorageSize += approximateKvSize
+	s.UserIAStorageSize += approximateIAKvSize
 	s.UserColumnarStorageSize += approximateColumnarKvSize
 	s.StorageKeys += approximateKeys
 	leader := r.GetLeader()

@@ -62,7 +62,11 @@ func (s *resourceGroupProxyServer) closeClient(ctx context.Context) {
 
 func (s *resourceGroupProxyServer) getPDMetadataWriteDelegateClient(ctx context.Context) (resource_manager.ResourceManagerClient, string, error) {
 	forwardedHost := grpcutil.GetForwardedHost(ctx)
-	if forwardedHost == "" {
+	if forwardedHost != "" {
+		if err := s.validatePDForwardedHost(forwardedHost); err != nil {
+			return nil, "", err
+		}
+	} else {
 		leader := s.GetLeader()
 		if leader == nil || len(leader.GetClientUrls()) == 0 {
 			return nil, "", status.Error(codes.Unavailable, "pd leader is not available")

@@ -25,7 +25,6 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule/rangelist"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -36,14 +35,15 @@ import (
 type RegionLabeler struct {
 	storage endpoint.RuleStorage
 	syncutil.RWMutex
-	labelRules      map[string]*LabelRule
-	genericRules    map[string]*LabelRule
-	keyspaceRules   keyspaceRuleIndex
-	rangeList       rangelist.List // sorted generic LabelRules of the type `KeyRange`
-	rangeListDirty  bool
-	rangeIndexReady bool
-	ctx             context.Context
-	minExpire       *time.Time
+	ruleIndex labelRuleIndex
+	ctx       context.Context
+}
+
+// Unlock publishes all derived rule-index updates before releasing the write
+// lock. This keeps a dirty index private to the write-side critical section.
+func (l *RegionLabeler) Unlock() {
+	defer l.RWMutex.Unlock()
+	l.ruleIndex.buildRanges()
 }
 
 // NewRegionLabeler creates a Labeler instance.
@@ -54,18 +54,14 @@ func NewRegionLabeler(ctx context.Context, storage endpoint.RuleStorage, gcInter
 	}()
 
 	l := &RegionLabeler{
-		storage:        storage,
-		labelRules:     make(map[string]*LabelRule),
-		genericRules:   make(map[string]*LabelRule),
-		rangeListDirty: true,
-		ctx:            ctx,
-		minExpire:      nil,
+		storage: storage,
+		ctx:     ctx,
 	}
 
 	if err := l.loadRules(); err != nil {
 		return nil, err
 	}
-	log.Info("new region labeler created", zap.Int("label-rules-count", len(l.labelRules)))
+	log.Info("new region labeler created", zap.Int("label-rules-count", len(l.ruleIndex.rules)))
 	go l.doGC(gcInterval)
 	return l, nil
 }
@@ -92,21 +88,17 @@ func (l *RegionLabeler) checkAndClearExpiredLabels() {
 	l.Lock()
 	defer l.Unlock()
 
-	if l.minExpire == nil || l.minExpire.After(now) {
+	if l.ruleIndex.minExpire == nil || l.ruleIndex.minExpire.After(now) {
 		return
 	}
 	var err error
-	deleted := false
 
-	for key, rule := range l.labelRules {
-		if !rule.checkAndRemoveExpireLabels(now) {
+	for key, rule := range l.ruleIndex.rules {
+		if !l.ruleIndex.removeExpiredLabels(rule, now) {
 			continue
 		}
 		if len(rule.Labels) == 0 {
 			err = l.DeleteLabelRuleLocked(key)
-			if err == nil {
-				deleted = true
-			}
 		} else {
 			err = l.storage.RunInTxn(l.ctx, func(txn kv.Txn) error {
 				return l.storage.SaveRegionRule(txn, rule.ID, rule)
@@ -116,13 +108,11 @@ func (l *RegionLabeler) checkAndClearExpiredLabels() {
 			log.Error("failed to save rule expired label rule", zap.String("rule-key", key), zap.Error(err))
 		}
 	}
-	if deleted {
-		l.BuildRangeListLocked()
-	}
 }
 
 func (l *RegionLabeler) loadRules() error {
 	var toDelete []string
+	loadedRules := make(map[string]*LabelRule)
 	err := l.storage.LoadRegionRules(func(k, v string) {
 		r, err := NewLabelRuleFromJSON([]byte(v))
 		if err != nil {
@@ -134,7 +124,7 @@ func (l *RegionLabeler) loadRules() error {
 			toDelete = append(toDelete, k)
 			return
 		}
-		l.labelRules[r.ID] = r
+		loadedRules[r.ID] = r
 	})
 	if err != nil {
 		return err
@@ -146,51 +136,21 @@ func (l *RegionLabeler) loadRules() error {
 			return err
 		}
 	}
-	l.BuildRangeListLocked()
+	l.ruleIndex = newLabelRuleIndex(loadedRules)
 	return nil
 }
 
-// BuildRangeListLocked builds the generic range list when necessary. Canonical
-// keyspace rules are indexed separately and updated incrementally.
+// BuildRangeListLocked publishes pending derived rule-index updates.
+// Deprecated: Unlock publishes them automatically.
 func (l *RegionLabeler) BuildRangeListLocked() {
-	if !l.rangeIndexReady {
-		for _, rule := range l.labelRules {
-			if !l.keyspaceRules.Add(rule) {
-				l.genericRules[rule.ID] = rule
-			}
-		}
-		l.rangeIndexReady = true
-		l.rangeListDirty = true
-	}
-	if !l.rangeListDirty {
-		return
-	}
-
-	builder := rangelist.NewBuilder()
-	l.minExpire = nil
-	for _, rule := range l.genericRules {
-		if l.minExpire == nil || rule.expireBefore(*l.minExpire) {
-			l.minExpire = rule.minExpire
-		}
-		if rule.RuleType == KeyRange {
-			rs := rule.Data.([]*KeyRangeRule)
-			for _, r := range rs {
-				builder.AddItem(r.StartKey, r.EndKey, rule)
-			}
-		}
-	}
-	l.rangeList = builder.Build()
-	l.rangeListDirty = false
+	l.ruleIndex.buildRanges()
 }
 
 // GetSplitKeys returns all split keys in the range (start, end).
 func (l *RegionLabeler) GetSplitKeys(start, end []byte) [][]byte {
 	l.RLock()
 	defer l.RUnlock()
-	return mergeSplitKeys(
-		l.rangeList.GetSplitKeys(start, end),
-		l.keyspaceRules.GetSplitKeys(start, end),
-	)
+	return l.ruleIndex.getSplitKeys(start, end)
 }
 
 func filterExpiredLabels(rule *LabelRule, now time.Time) *LabelRule {
@@ -233,8 +193,8 @@ func (l *RegionLabeler) GetAllLabelRules() []*LabelRule {
 	defer l.RUnlock()
 
 	now := time.Now()
-	rules := make([]*LabelRule, 0, len(l.labelRules))
-	for _, rule := range l.labelRules {
+	rules := make([]*LabelRule, 0, len(l.ruleIndex.rules))
+	for _, rule := range l.ruleIndex.rules {
 		if filteredRule := filterExpiredLabels(rule, now); filteredRule != nil {
 			rules = append(rules, filteredRule)
 		}
@@ -248,7 +208,7 @@ func (l *RegionLabeler) GetRuleAndKeyRangeCounts() (ruleCount, keyRangeCount int
 	defer l.RUnlock()
 
 	now := time.Now()
-	for _, rule := range l.labelRules {
+	for _, rule := range l.ruleIndex.rules {
 		filteredRule := filterExpiredLabels(rule, now)
 		if filteredRule == nil {
 			continue
@@ -267,7 +227,7 @@ func (l *RegionLabeler) GetLabelRules(ids []string) ([]*LabelRule, error) {
 	now := time.Now()
 	rules := make([]*LabelRule, 0, len(ids))
 	for _, id := range ids {
-		if rule, ok := l.labelRules[id]; ok {
+		if rule, ok := l.ruleIndex.rules[id]; ok {
 			if filteredRule := filterExpiredLabels(rule, now); filteredRule != nil {
 				rules = append(rules, filteredRule)
 			}
@@ -285,7 +245,7 @@ func (l *RegionLabeler) GetLabelRule(id string) *LabelRule {
 
 // GetLabelRuleLocked returns the Rule with the same ID.
 func (l *RegionLabeler) GetLabelRuleLocked(id string) *LabelRule {
-	rule, ok := l.labelRules[id]
+	rule, ok := l.ruleIndex.rules[id]
 	if !ok {
 		return nil
 	}
@@ -306,12 +266,12 @@ func (l *RegionLabeler) SetLabelRule(rule *LabelRule) error {
 	// only Lock for in-memory update
 	l.Lock()
 	defer l.Unlock()
-	l.setLabelRuleInMemoryLocked(rule)
-	l.BuildRangeListLocked()
+	l.ruleIndex.set(rule)
 	return nil
 }
 
-// SetLabelRuleLocked inserts or updates a LabelRule but not buildRangeList.
+// SetLabelRuleLocked inserts or updates a LabelRule. The enclosing Unlock
+// publishes derived index updates.
 // It updates the in-memory states and storage at the same time.
 // Callers must have already validated/adjusted the rule (checkAndAdjust or
 // NewLabelRuleFromJSON), because this method does not re-validate.
@@ -322,7 +282,7 @@ func (l *RegionLabeler) SetLabelRuleLocked(rule *LabelRule) error {
 	}); err != nil {
 		return err
 	}
-	l.setLabelRuleInMemoryLocked(rule)
+	l.ruleIndex.set(rule)
 	return nil
 }
 
@@ -337,15 +297,15 @@ func (l *RegionLabeler) DeleteLabelRule(id string) error {
 	// only Lock for in-memory update
 	l.Lock()
 	defer l.Unlock()
-	if _, ok := l.labelRules[id]; !ok {
+	if _, ok := l.ruleIndex.rules[id]; !ok {
 		return errs.ErrRegionRuleNotFound.FastGenByArgs(id)
 	}
-	l.deleteLabelRuleInMemoryLocked(id)
-	l.BuildRangeListLocked()
+	l.ruleIndex.delete(id)
 	return nil
 }
 
-// DeleteLabelRuleLocked removes a LabelRule but not buildRangeList.
+// DeleteLabelRuleLocked removes a LabelRule. The enclosing Unlock publishes
+// derived index updates.
 // It updates the in-memory states and storage at the same time.
 // It should be used in watcher.
 func (l *RegionLabeler) DeleteLabelRuleLocked(id string) error {
@@ -354,38 +314,8 @@ func (l *RegionLabeler) DeleteLabelRuleLocked(id string) error {
 	}); err != nil {
 		return err
 	}
-	l.deleteLabelRuleInMemoryLocked(id)
+	l.ruleIndex.delete(id)
 	return nil
-}
-
-func (l *RegionLabeler) setLabelRuleInMemoryLocked(rule *LabelRule) {
-	if old, ok := l.labelRules[rule.ID]; ok {
-		if l.keyspaceRules.Replace(old, rule) {
-			l.labelRules[rule.ID] = rule
-			return
-		}
-		if !l.keyspaceRules.Remove(rule.ID, old) {
-			delete(l.genericRules, old.ID)
-			l.rangeListDirty = true
-		}
-	}
-	l.labelRules[rule.ID] = rule
-	if !l.keyspaceRules.Add(rule) {
-		l.genericRules[rule.ID] = rule
-		l.rangeListDirty = true
-	}
-}
-
-func (l *RegionLabeler) deleteLabelRuleInMemoryLocked(id string) {
-	rule, ok := l.labelRules[id]
-	if !ok {
-		return
-	}
-	if !l.keyspaceRules.Remove(id, rule) {
-		delete(l.genericRules, id)
-		l.rangeListDirty = true
-	}
-	delete(l.labelRules, id)
 }
 
 // Patch updates multiple region rules in a batch.
@@ -428,12 +358,11 @@ func (l *RegionLabeler) Patch(patch LabelRulePatch) error {
 	defer l.Unlock()
 
 	for _, key := range patch.DeleteRules {
-		l.deleteLabelRuleInMemoryLocked(key)
+		l.ruleIndex.delete(key)
 	}
 	for _, rule := range setRulesMap {
-		l.setLabelRuleInMemoryLocked(rule)
+		l.ruleIndex.set(rule)
 	}
-	l.BuildRangeListLocked()
 	return nil
 }
 
@@ -445,7 +374,7 @@ func (l *RegionLabeler) GetRegionLabel(region *core.RegionInfo, key string) stri
 	now := time.Now()
 	value, index := "", -1
 	// search ranges
-	rules, keyspaceRule, ok := l.getRangeRulesLocked(region.GetStartKey(), region.GetEndKey())
+	rules, keyspaceRule, ok := l.ruleIndex.getRangeRules(region.GetStartKey(), region.GetEndKey())
 	if !ok {
 		return ""
 	}
@@ -489,7 +418,7 @@ func (l *RegionLabeler) GetRegionLabels(region *core.RegionInfo) []*RegionLabel 
 	labels := make(map[string]valueIndex)
 	now := time.Now()
 	// search ranges
-	rules, keyspaceRule, ok := l.getRangeRulesLocked(region.GetStartKey(), region.GetEndKey())
+	rules, keyspaceRule, ok := l.ruleIndex.getRangeRules(region.GetStartKey(), region.GetEndKey())
 	if ok {
 		applyRule := func(r *LabelRule) {
 			for _, label := range r.Labels {
@@ -518,18 +447,6 @@ func (l *RegionLabeler) GetRegionLabels(region *core.RegionInfo) []*RegionLabel 
 	return result
 }
 
-func (l *RegionLabeler) getRangeRulesLocked(start, end []byte) ([]any, *LabelRule, bool) {
-	rules, ok := l.rangeList.GetDataByRange(start, end)
-	if !ok {
-		return nil, nil, false
-	}
-	keyspaceRule := l.keyspaceRules.GetRule(start, end)
-	if keyspaceRule == nil && l.keyspaceRules.HasSplitKey(start, end) {
-		return nil, nil, false
-	}
-	return rules, keyspaceRule, true
-}
-
 // MakeKeyRanges is a helper function to make key ranges.
 func MakeKeyRanges(keys ...string) []any {
 	var res []any
@@ -543,7 +460,7 @@ func MakeKeyRanges(keys ...string) []any {
 func (l *RegionLabeler) IterateLabelRules(iterator func(rule *LabelRule) bool) {
 	l.RLock()
 	defer l.RUnlock()
-	for _, rule := range l.labelRules {
+	for _, rule := range l.ruleIndex.rules {
 		if !iterator(rule) {
 			return
 		}

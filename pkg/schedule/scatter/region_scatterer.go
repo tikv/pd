@@ -1014,25 +1014,35 @@ func (r *RegionScatterer) Put(peers map[uint64]*metapb.Peer, leaderStoreID uint6
 		}
 		if engineFilter.Target(r.cluster.GetSharedConfig(), store).IsOK() {
 			r.ordinaryEngine.selectedPeer.Put(storeID, group)
-			scatterDistributionCounter.WithLabelValues(
-				strconv.FormatUint(storeID, 10),
-				strconv.FormatBool(false),
-				core.EngineTiKV).Inc()
+			// A force-buried store can still show up in a region's existing
+			// placement; skip the metric so DeleteStoreMetrics' one-shot
+			// cleanup at bury time isn't undone by a later scatter that keeps
+			// or falls back to that placement.
+			if !store.IsRemoved() {
+				scatterDistributionCounter.WithLabelValues(
+					strconv.FormatUint(storeID, 10),
+					strconv.FormatBool(false),
+					core.EngineTiKV).Inc()
+			}
 			continue
 		}
 		engine := store.GetLabelValue(core.EngineKey)
 		ctx := r.getOrCreateSpecialEngineContext(engine)
 		ctx.selectedPeer.Put(storeID, group)
-		scatterDistributionCounter.WithLabelValues(
-			strconv.FormatUint(storeID, 10),
-			strconv.FormatBool(false),
-			engine).Inc()
+		if !store.IsRemoved() {
+			scatterDistributionCounter.WithLabelValues(
+				strconv.FormatUint(storeID, 10),
+				strconv.FormatBool(false),
+				engine).Inc()
+		}
 	}
 	r.ordinaryEngine.selectedLeader.Put(leaderStoreID, group)
-	scatterDistributionCounter.WithLabelValues(
-		strconv.FormatUint(leaderStoreID, 10),
-		strconv.FormatBool(true),
-		core.EngineTiKV).Inc()
+	if leaderStore := r.cluster.GetStore(leaderStoreID); leaderStore != nil && !leaderStore.IsRemoved() {
+		scatterDistributionCounter.WithLabelValues(
+			strconv.FormatUint(leaderStoreID, 10),
+			strconv.FormatBool(true),
+			core.EngineTiKV).Inc()
+	}
 }
 
 // applyScatterStateDelta records a local scatter state change after scattering a
@@ -1068,11 +1078,16 @@ func (r *RegionScatterer) applyScatterStateDelta(state *scatterState, region *co
 	for _, peer := range targetPeers {
 		storeID := peer.GetStoreId()
 		engine := classifyStore(storeID, &ordinaryNewStores, specialNewStores)
+		// Same as Put: don't let a force-buried store still present in the
+		// target placement recreate a series DeleteStoreMetrics already
+		// deleted at bury time.
 		if recordMetrics && engine != "" {
-			scatterDistributionCounter.WithLabelValues(
-				strconv.FormatUint(storeID, 10),
-				strconv.FormatBool(false),
-				engine).Inc()
+			if store := r.cluster.GetStore(storeID); store != nil && !store.IsRemoved() {
+				scatterDistributionCounter.WithLabelValues(
+					strconv.FormatUint(storeID, 10),
+					strconv.FormatBool(false),
+					engine).Inc()
+			}
 		}
 	}
 
@@ -1092,9 +1107,11 @@ func (r *RegionScatterer) applyScatterStateDelta(state *scatterState, region *co
 	oldLeaderStoreID := region.GetLeader().GetStoreId()
 	state.ordinaryEngine.selectedLeader.Update(group, []uint64{oldLeaderStoreID}, []uint64{targetLeader})
 	if recordMetrics {
-		scatterDistributionCounter.WithLabelValues(
-			strconv.FormatUint(targetLeader, 10),
-			strconv.FormatBool(true),
-			core.EngineTiKV).Inc()
+		if store := r.cluster.GetStore(targetLeader); store != nil && !store.IsRemoved() {
+			scatterDistributionCounter.WithLabelValues(
+				strconv.FormatUint(targetLeader, 10),
+				strconv.FormatBool(true),
+				core.EngineTiKV).Inc()
+		}
 	}
 }

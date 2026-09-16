@@ -28,6 +28,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -54,7 +55,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 type gcStateManagerTestSuite struct {
@@ -654,6 +655,7 @@ func (s *gcStateManagerTestSuite) TestCompatibleGCSafePointUpdateConcurrently() 
 
 func (s *gcStateManagerTestSuite) TestCompatibleServiceGCSafePointUpdateNullKeyspace() {
 	keyspaceID := constant.NullKeyspaceID
+	as := assert.New(s.T())
 	re := s.Require()
 	gcWorkerServiceID := "gc_worker"
 	cdcServiceID := "cdc"
@@ -670,20 +672,22 @@ func (s *gcStateManagerTestSuite) TestCompatibleServiceGCSafePointUpdateNullKeys
 	go func() {
 		defer wg.Done()
 		min, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint(keyspaceID, cdcServiceID, cdcServiceSafePoint, 10000, time.Now())
-		re.NoError(err)
-		re.True(updated)
+		if !as.NoError(err) || !as.True(updated) || !as.NotNil(min) {
+			return
+		}
 		// The service will init the service safepoint to 0(<10 for cdc) for gc_worker.
-		re.Equal(gcWorkerServiceID, min.ServiceID)
+		as.Equal(gcWorkerServiceID, min.ServiceID)
 	}()
 
 	// Updating the service safe point for br to 15 should success
 	go func() {
 		defer wg.Done()
 		min, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint(keyspaceID, brServiceID, brSafePoint, 10000, time.Now())
-		re.NoError(err)
-		re.True(updated)
+		if !as.NoError(err) || !as.True(updated) || !as.NotNil(min) {
+			return
+		}
 		// the service will init the service safepoint to 0(<10 for cdc) for gc_worker.
-		re.Equal(gcWorkerServiceID, min.ServiceID)
+		as.Equal(gcWorkerServiceID, min.ServiceID)
 	}()
 
 	// Updating the service safe point to 8 for gc_worker should be success
@@ -691,11 +695,12 @@ func (s *gcStateManagerTestSuite) TestCompatibleServiceGCSafePointUpdateNullKeys
 		defer wg.Done()
 		// update with valid ttl for gc_worker should be success.
 		min, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint(keyspaceID, gcWorkerServiceID, gcWorkerSafePoint, math.MaxInt64, time.Now())
-		re.NoError(err)
-		re.True(updated)
+		if !as.NoError(err) || !as.True(updated) || !as.NotNil(min) {
+			return
+		}
 		// the current min safepoint should be 8 for gc_worker(cdc 10)
-		re.Equal(gcWorkerSafePoint, min.SafePoint)
-		re.Equal(gcWorkerServiceID, min.ServiceID)
+		as.Equal(gcWorkerSafePoint, min.SafePoint)
+		as.Equal(gcWorkerServiceID, min.ServiceID)
 	}()
 
 	// Updating the service safe point to 14 for native_br should succeed
@@ -703,18 +708,21 @@ func (s *gcStateManagerTestSuite) TestCompatibleServiceGCSafePointUpdateNullKeys
 		defer wg.Done()
 		// update with valid ttl for native_br should succeed
 		min, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint(keyspaceID, nativeBRServiceID, nativeBRSafePoint, math.MaxInt64, time.Now())
-		re.NoError(err)
-		re.True(updated)
+		if !as.NoError(err) || !as.True(updated) || !as.NotNil(min) {
+			return
+		}
 		// the current min safepoint should be 8 for gc_worker(cdc 10)
-		re.Equal(gcWorkerServiceID, min.ServiceID)
+		as.Equal(gcWorkerServiceID, min.ServiceID)
 	}()
 
 	go func() {
 		defer wg.Done()
 		// Updating the service safe point of gc_worker's service with ttl not infinity should be failed.
 		_, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint(keyspaceID, gcWorkerServiceID, 10000, 10, time.Now())
-		re.Error(err)
-		re.False(updated)
+		if !as.Error(err) {
+			return
+		}
+		as.False(updated)
 	}()
 
 	// Updating the service safe point with negative ttl should be failed.
@@ -722,8 +730,10 @@ func (s *gcStateManagerTestSuite) TestCompatibleServiceGCSafePointUpdateNullKeys
 		defer wg.Done()
 		brTTL := int64(-100)
 		_, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint(keyspaceID, brServiceID, uint64(10000), brTTL, time.Now())
-		re.NoError(err)
-		re.False(updated)
+		if !as.NoError(err) {
+			return
+		}
+		as.False(updated)
 	}()
 
 	wg.Wait()
@@ -1879,6 +1889,227 @@ func (s *gcStateManagerTestSuite) TestRedirectKeyspace() {
 			re.NoError(err)
 		}
 	}
+}
+
+func globalGCBarrierIDs(barriers []*endpoint.GlobalGCBarrier) []string {
+	ids := make([]string, 0, len(barriers))
+	for _, barrier := range barriers {
+		ids = append(ids, barrier.BarrierID)
+	}
+	return ids
+}
+
+func (s *gcStateManagerTestSuite) TestGetGCStateWithGlobalGCBarriers() {
+	re := s.Require()
+	ctx := context.Background()
+	now := time.Now().Truncate(time.Second)
+
+	state, barriers, err := s.manager.GetGCStateWithGlobalGCBarriers(
+		constant.NullKeyspaceID,
+		true,
+	)
+	re.NoError(err)
+	re.Equal(constant.NullKeyspaceID, state.KeyspaceID)
+	re.Zero(state.TxnSafePoint)
+	re.Zero(state.GCSafePoint)
+	re.Empty(state.GCBarriers)
+	re.Empty(barriers)
+
+	_, err = s.manager.SetGlobalGCBarrier(
+		ctx,
+		"active",
+		20,
+		time.Hour,
+		now,
+	)
+	re.NoError(err)
+	_, err = s.manager.SetGlobalGCBarrier(
+		ctx,
+		"expired",
+		15,
+		time.Second,
+		now.Add(-2*time.Second),
+	)
+	re.NoError(err)
+	_, err = s.manager.SetGCBarrier(
+		constant.NullKeyspaceID,
+		"local",
+		25,
+		time.Hour,
+		now,
+	)
+	re.NoError(err)
+
+	state, barriers, err = s.manager.GetGCStateWithGlobalGCBarriers(
+		constant.NullKeyspaceID,
+		true,
+	)
+	re.NoError(err)
+	re.Empty(state.GCBarriers)
+	re.ElementsMatch(
+		[]string{"active", "expired"},
+		globalGCBarrierIDs(barriers),
+	)
+
+	state, barriers, err = s.manager.GetGCStateWithGlobalGCBarriers(
+		constant.NullKeyspaceID,
+		false,
+	)
+	re.NoError(err)
+	re.Len(state.GCBarriers, 1)
+	re.Equal("local", state.GCBarriers[0].BarrierID)
+	re.ElementsMatch(
+		[]string{"active", "expired"},
+		globalGCBarrierIDs(barriers),
+	)
+
+	if !kerneltype.IsNextGen() {
+		state, barriers, err =
+			s.manager.GetGCStateWithGlobalGCBarriers(1, true)
+		re.NoError(err)
+		re.Equal(constant.NullKeyspaceID, state.KeyspaceID)
+		re.ElementsMatch(
+			[]string{"active", "expired"},
+			globalGCBarrierIDs(barriers),
+		)
+	}
+
+	s.manager.gcStateCache.remove(constant.NullKeyspaceID)
+	tracker := s.trackGCStateCacheAccessCounters()
+	_, _, err = s.manager.GetGCStateWithGlobalGCBarriers(
+		constant.NullKeyspaceID,
+		true,
+	)
+	re.NoError(err)
+	re.Equal(gcStateCacheAccessCounterSnapshot{}, tracker.snapshot())
+
+	_, err = s.manager.GetGCState(constant.NullKeyspaceID, true)
+	re.NoError(err)
+	re.Equal(1, tracker.snapshot().hit)
+	re.Zero(tracker.snapshot().miss)
+}
+
+func (s *gcStateManagerTestSuite) TestGetGCStateWithGlobalGCBarriersReturnsNoPartialResult() {
+	re := s.Require()
+	re.NoError(s.storage.Save(
+		keypath.GlobalGCBarrierPath("corrupt"),
+		"{",
+	))
+
+	state, barriers, err :=
+		s.manager.GetGCStateWithGlobalGCBarriers(
+			constant.NullKeyspaceID,
+			true,
+		)
+	re.Error(err)
+	re.Equal(GCState{}, state)
+	re.Nil(barriers)
+}
+
+func (s *gcStateManagerTestSuite) TestGetGCStateWithGlobalGCBarriersRejectsRevisionConflict() {
+	re := s.Require()
+	ctx := context.Background()
+	now := time.Now().Truncate(time.Second)
+	_, err := s.manager.SetGlobalGCBarrier(
+		ctx,
+		"snapshot",
+		100,
+		time.Hour,
+		now,
+	)
+	re.NoError(err)
+
+	failpointName :=
+		"github.com/tikv/pd/pkg/gc/" +
+			"getGCStateWithGlobalGCBarriersAfterRead"
+	readDone := make(chan struct{})
+	continueRead := make(chan struct{})
+	var (
+		readDoneOnce sync.Once
+		releaseOnce  sync.Once
+		enabled      = true
+	)
+	re.NoError(failpoint.EnableCall(failpointName, func() {
+		readDoneOnce.Do(func() {
+			close(readDone)
+		})
+		<-continueRead
+	}))
+	defer func() {
+		releaseOnce.Do(func() {
+			close(continueRead)
+		})
+		if enabled {
+			re.NoError(failpoint.Disable(failpointName))
+		}
+	}()
+
+	type result struct {
+		state    GCState
+		barriers []*endpoint.GlobalGCBarrier
+		err      error
+	}
+	resultCh := make(chan result, 1)
+	go func() {
+		state, barriers, err :=
+			s.manager.GetGCStateWithGlobalGCBarriers(
+				constant.NullKeyspaceID,
+				true,
+			)
+		resultCh <- result{
+			state:    state,
+			barriers: barriers,
+			err:      err,
+		}
+	}()
+
+	select {
+	case <-readDone:
+	case <-time.After(5 * time.Second):
+		re.FailNow(
+			"combined GC state read did not reach the failpoint",
+		)
+	}
+
+	otherManager := NewGCStateManager(
+		s.provider,
+		s.manager.cfg,
+		s.manager.keyspaceManager,
+	)
+	otherManager.OnNodeBecomesLeader()
+	_, err = otherManager.SetGlobalGCBarrier(
+		ctx,
+		"snapshot",
+		200,
+		time.Hour,
+		now,
+	)
+	re.NoError(err)
+
+	releaseOnce.Do(func() {
+		close(continueRead)
+	})
+	var first result
+	select {
+	case first = <-resultCh:
+	case <-time.After(5 * time.Second):
+		re.FailNow("combined GC state read did not return")
+	}
+	re.True(errors.ErrorEqual(first.err, errs.ErrEtcdTxnConflict))
+	re.Equal(GCState{}, first.state)
+	re.Nil(first.barriers)
+
+	re.NoError(failpoint.Disable(failpointName))
+	enabled = false
+
+	_, barriers, err :=
+		s.manager.GetGCStateWithGlobalGCBarriers(
+			constant.NullKeyspaceID,
+			true,
+		)
+	re.NoError(err)
+	re.Len(barriers, 1)
+	re.Equal(uint64(200), barriers[0].BarrierTS)
 }
 
 func (s *gcStateManagerTestSuite) TestGetGCState() {
@@ -3044,7 +3275,8 @@ func benchmarkGetGCStateImpl(b *testing.B, excludeGCBarriers bool, keyspacesCoun
 					if errors.ErrorEqual(err, errs.ErrDecreasingTxnSafePoint) {
 						continue
 					}
-					re.NoError(err)
+					b.Error(err)
+					return
 				}
 			}
 		}()

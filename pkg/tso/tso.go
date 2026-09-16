@@ -343,6 +343,9 @@ func (t *timestampOracle) updateTimestamp(purpose updatePurpose) (bool, error) {
 	}
 	prevPhysical, prevLogical := t.getTSO()
 
+	failpoint.Inject("failedToUpdateTimestamp", func() {
+		failpoint.Return(false, errs.ErrEtcdTxnInternal)
+	})
 	now := time.Now()
 	failpoint.Inject("fallBackUpdate", func() {
 		now = now.Add(time.Hour)

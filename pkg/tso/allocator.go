@@ -61,6 +61,11 @@ type Allocator struct {
 	// for election use
 	member          member.Election
 	timestampOracle *timestampOracle
+	// timestampStateMu serializes timestamp initialization and reset.
+	// timestampStateID changes after each successful initialization and every reset,
+	// so an UpdateTSO failure can only reset the state it started with.
+	timestampStateMu sync.Mutex
+	timestampStateID uint64
 
 	// observability
 	tsoAllocatorRoleGauge prometheus.Gauge
@@ -126,12 +131,9 @@ func (a *Allocator) allocatorUpdater() {
 			if !a.isServing() || !a.IsInitialize() {
 				continue
 			}
+			stateIDBeforeUpdate := a.captureTimestampStateID()
 			if err := a.UpdateTSO(); err != nil {
-				log.Warn("failed to update allocator's timestamp, resetting the TSO allocator with leadership resignation",
-					append(a.logFields, errs.ZapError(err))...)
-				a.Reset(true)
-				// To wait for the allocator to be re-initialized next time.
-				continue
+				a.handleTSOUpdateFailure(stateIDBeforeUpdate, err)
 			}
 		case <-a.ctx.Done():
 			a.Reset(false)
@@ -152,8 +154,14 @@ func (a *Allocator) Close() {
 
 // Initialize will initialize the created TSO allocator.
 func (a *Allocator) Initialize() error {
+	a.timestampStateMu.Lock()
+	defer a.timestampStateMu.Unlock()
 	a.tsoAllocatorRoleGauge.Set(1)
-	return a.timestampOracle.syncTimestamp()
+	if err := a.timestampOracle.syncTimestamp(); err != nil {
+		return err
+	}
+	a.timestampStateID++
+	return nil
 }
 
 // IsInitialize is used to indicates whether this allocator is initialized.
@@ -179,6 +187,30 @@ func (a *Allocator) UpdateTSO() (err error) {
 	return err
 }
 
+func (a *Allocator) captureTimestampStateID() uint64 {
+	a.timestampStateMu.Lock()
+	defer a.timestampStateMu.Unlock()
+	return a.timestampStateID
+}
+
+func (a *Allocator) handleTSOUpdateFailure(stateIDBeforeUpdate uint64, err error) {
+	a.timestampStateMu.Lock()
+	defer a.timestampStateMu.Unlock()
+
+	if stateIDBeforeUpdate != a.timestampStateID {
+		log.Warn("ignored a stale allocator update failure because the timestamp state has changed",
+			append(a.logFields, errs.ZapError(err))...)
+		return
+	}
+	// Reset before logging, for the same reason the step-down branches in
+	// campaignLeader do: the reset gives the leadership up, and on a stalled
+	// volume the log below can block for an unbounded time, leaving a member
+	// that no longer serves still answering as the primary.
+	a.resetAllocatorLocked(true)
+	log.Warn("failed to update allocator's timestamp, resetting the TSO allocator with leadership resignation",
+		append(a.logFields, errs.ZapError(err))...)
+}
+
 // SetTSO sets the physical part with given TSO.
 func (a *Allocator) SetTSO(tso uint64, ignoreSmaller, skipUpperBoundCheck bool) error {
 	return a.timestampOracle.resetUserTimestamp(tso, ignoreSmaller, skipUpperBoundCheck)
@@ -198,12 +230,24 @@ func (a *Allocator) GenerateTSO(ctx context.Context, count uint32) (pdpb.Timesta
 
 // Reset is used to reset the TSO allocator, it will also reset the leadership if the `resetLeadership` flag is true.
 func (a *Allocator) Reset(resetLeadership bool) {
-	a.tsoAllocatorRoleGauge.Set(0)
-	a.timestampOracle.resetTimestamp()
-	// Reset if it still has the leadership. Otherwise the data race may occur because of the re-campaigning.
+	a.timestampStateMu.Lock()
+	defer a.timestampStateMu.Unlock()
+	a.resetAllocatorLocked(resetLeadership)
+}
+
+// resetAllocatorLocked resets the allocator. The caller must hold timestampStateMu.
+func (a *Allocator) resetAllocatorLocked(resetLeadership bool) {
+	// Resign first if it still has the leadership. (Only then - otherwise the
+	// data race may occur because of the re-campaigning.) Resign clears the
+	// in-memory identity before anything else it does, while resetTimestamp
+	// below logs synchronously, so the other order leaves a blocked log sink
+	// holding the identity up.
 	if resetLeadership && a.isServing() {
 		a.member.Resign()
 	}
+	a.timestampStateID++
+	a.tsoAllocatorRoleGauge.Set(0)
+	a.timestampOracle.resetTimestamp()
 }
 
 // The PD server will conduct its own leadership election independently of the TSO allocator,
@@ -326,17 +370,22 @@ func (a *Allocator) campaignPrimary(expectedPrimary string) {
 		a.Reset(false)
 	}()
 
+	// The ready log is written before the promotion for the same reason as in
+	// campaignLeader: between the promotion and the loop below nothing checks
+	// the lease, so nothing that can block may sit there.
+	log.Info("tso primary is ready to serve", a.logFields...)
 	a.member.PromoteSelf()
 
 	tsoLabel := fmt.Sprintf("TSO Service Group %d", a.keyspaceGroupID)
 	member.ServiceMemberGauge.WithLabelValues(tsoLabel).Set(1)
-	defer resetPrimaryOnce.Do(func() {
+	// A named function rather than an inline defer because the step-down branch
+	// below calls it before it logs; see the comment there.
+	resetPrimary := func() {
 		cancel()
 		a.member.Resign()
 		member.ServiceMemberGauge.WithLabelValues(tsoLabel).Set(0)
-	})
-
-	log.Info("tso primary is ready to serve", a.logFields...)
+	}
+	defer resetPrimaryOnce.Do(resetPrimary)
 
 	primaryTicker := time.NewTicker(constant.PrimaryTickInterval)
 	defer primaryTicker.Stop()
@@ -348,11 +397,19 @@ func (a *Allocator) campaignPrimary(expectedPrimary string) {
 			// expiration and a `{service}/primary/transfer` API call, which resigns
 			// this primary by revoking its leader lease.
 			if !a.isServing() {
+				// Resign before logging, not in the deferred reset below. The
+				// log can block for an unbounded time on a stalled volume, and
+				// GetPrimaryAddr reports this member through GetServingUrls
+				// without consulting isServing, so a primary that is still
+				// waiting on that log would keep being handed out.
+				resetPrimaryOnce.Do(resetPrimary)
 				log.Info("no longer a primary because lease has expired or transferred, the tso primary will step down", a.logFields...)
 				return
 			}
 		case <-ctx.Done():
-			// Server is closed and it should return nil.
+			// Server is closed. A shutdown log can block just as long as a
+			// step-down log, so the resign comes first here too.
+			resetPrimaryOnce.Do(resetPrimary)
 			log.Info("exit primary campaign", a.logFields...)
 			return
 		}

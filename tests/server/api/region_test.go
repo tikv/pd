@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
@@ -598,6 +599,7 @@ func (suite *regionTestSuite) TestRegionsWithKillRequest() {
 }
 
 func (suite *regionTestSuite) checkRegionsWithKillRequest(cluster *tests.TestCluster) {
+	as := assert.New(suite.T())
 	re := suite.Require()
 	leader := cluster.GetLeaderServer()
 	urlPrefix := leader.GetAddr() + "/pd/api/v1"
@@ -624,9 +626,13 @@ func (suite *regionTestSuite) checkRegionsWithKillRequest(cluster *tests.TestClu
 				resp.Body.Close()
 			}
 		}()
-		re.Error(err)
-		re.Contains(err.Error(), "context canceled")
-		re.Nil(resp)
+		if err == nil {
+			as.Fail("An error is expected but got nil")
+			doneCh <- struct{}{}
+			return
+		}
+		as.Contains(err.Error(), "context canceled")
+		as.Nil(resp)
 		doneCh <- struct{}{}
 	}()
 	time.Sleep(100 * time.Millisecond) // wait for the request to be sent

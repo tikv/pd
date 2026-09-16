@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 
@@ -332,7 +333,7 @@ func (s *balanceLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 	if dryRun {
 		collector = plan.NewCollector(basePlan)
 	}
-	defer s.filterCounter.Flush()
+	defer s.filterCounter.Flush(cluster)
 	batch := s.conf.getBatch()
 	balanceLeaderScheduleCounter.Inc()
 
@@ -460,7 +461,7 @@ func (s *balanceLeaderScheduler) transferLeaderOut(solver *solver, collector *pl
 	finalFilters := s.filters
 	conf := solver.GetSchedulerConfig()
 	if leaderFilter := filter.NewPlacementLeaderSafeguard(s.GetName(), conf, solver.GetBasicCluster(), solver.GetRuleManager(), solver.Region, solver.Source, false /*allowMoveLeader*/); leaderFilter != nil {
-		finalFilters = append(s.filters, leaderFilter)
+		finalFilters = slices.Concat(s.filters, []filter.Filter{leaderFilter})
 	}
 	targets = filter.SelectTargetStores(targets, finalFilters, conf, collector, s.filterCounter)
 	leaderSchedulePolicy := conf.GetLeaderSchedulePolicy()
@@ -525,7 +526,7 @@ func (s *balanceLeaderScheduler) transferLeaderIn(solver *solver, collector *pla
 	// Check if the target store is available as a target.
 	finalFilters := s.filters
 	if leaderFilter := filter.NewPlacementLeaderSafeguard(s.GetName(), conf, solver.GetBasicCluster(), solver.GetRuleManager(), solver.Region, solver.Source, false /*allowMoveLeader*/); leaderFilter != nil {
-		finalFilters = append(s.filters, leaderFilter)
+		finalFilters = slices.Concat(s.filters, []filter.Filter{leaderFilter})
 	}
 	target := filter.NewCandidates([]*core.StoreInfo{solver.Target}).
 		FilterTarget(conf, nil, s.filterCounter, finalFilters...).

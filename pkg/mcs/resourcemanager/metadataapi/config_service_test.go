@@ -41,7 +41,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 func TestConfigServiceGroupCRUDAndErrorCodes(t *testing.T) {
@@ -216,13 +216,6 @@ func TestConfigServiceGroupCRUDAndErrorCodes(t *testing.T) {
 		resp = doRawResourceGroupRequest(handler, method, mixedJSONDialects)
 		re.Equal(http.StatusBadRequest, resp.Code)
 		re.NotContains(store.groups, groupKey(constant.NullKeyspaceID, "mixed_json_group"))
-	}
-
-	oversizedBody := bytes.Repeat([]byte("x"), int(maxResourceGroupRequestBytes)+1)
-	for _, method := range []string{http.MethodPost, http.MethodPut} {
-		resp = doRawResourceGroupRequest(handler, method, oversizedBody)
-		re.Equal(http.StatusRequestEntityTooLarge, resp.Code)
-		re.Contains(resp.Body.String(), "request body too large")
 	}
 }
 

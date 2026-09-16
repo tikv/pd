@@ -388,6 +388,8 @@ type KeyspaceGroupManager struct {
 
 	// mergeCheckerCancelMap is the cancel function map for the merge checker of each keyspace group.
 	mergeCheckerCancelMap sync.Map // GroupID -> context.CancelFunc
+	// finishSplitMu serializes split finish requests without blocking state readers.
+	finishSplitMu sync.Mutex
 
 	primaryPriorityCheckInterval time.Duration
 
@@ -521,6 +523,7 @@ func (kgm *KeyspaceGroupManager) InitializeTSOServerWatchLoop() error {
 		func([]*clientv3.Event) error { return nil },
 		true, /* withPrefix */
 	)
+	kgm.tsoNodesWatcher.SetReconcileDeletedKeys()
 	kgm.tsoNodesWatcher.StartWatchLoop()
 	if err := kgm.tsoNodesWatcher.WaitLoad(); err != nil {
 		log.Error("failed to load the registered tso servers", errs.ZapError(err))
@@ -536,6 +539,7 @@ func (kgm *KeyspaceGroupManager) InitializeTSOServerWatchLoop() error {
 // Value: endpoint.KeyspaceGroup
 func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 	defaultKGConfigured := false
+	maxLoadedModRevision := uint64(0)
 	putFn := func(kv *mvccpb.KeyValue) error {
 		group := &endpoint.KeyspaceGroup{}
 		if err := json.Unmarshal(kv.Value, group); err != nil {
@@ -547,6 +551,7 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 				failpoint.Return(nil)
 			}
 		})
+		maxLoadedModRevision = max(maxLoadedModRevision, uint64(kv.ModRevision))
 		kgm.updateKeyspaceGroup(group)
 		if group.ID == constant.DefaultKeyspaceGroupID {
 			defaultKGConfigured = true
@@ -591,12 +596,21 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		"keyspace-watcher",
 		// To keep the consistency with the previous code, we should trim the suffix `/`.
 		strings.TrimSuffix(keypath.KeyspaceGroupIDPrefix(), "/"),
-		func([]*clientv3.Event) error { return nil },
+		func([]*clientv3.Event) error {
+			maxLoadedModRevision = 0
+			return nil
+		},
 		putFn,
 		deleteFn,
 		postEventsFn,
 		true, /* withPrefix */
 	)
+	kgm.groupWatcher.SetConsistentLoad()
+	kgm.groupWatcher.SetInitialLoadSuccessFn(func() {
+		if maxLoadedModRevision > 0 {
+			kgm.SetModRevision(maxLoadedModRevision)
+		}
+	})
 	if kgm.loadFromEtcdMaxRetryTimes > 0 {
 		kgm.groupWatcher.SetLoadRetryTimes(kgm.loadFromEtcdMaxRetryTimes)
 	}
@@ -1358,20 +1372,19 @@ func (kgm *KeyspaceGroupManager) sendDeleteRequestToKeyspaceGroupsAPI(suffix str
 	return nil, errs.ErrURLParse.FastGenByArgs("no valid backend endpoint configured")
 }
 
-// Put the code below into the critical section to prevent from sending too many HTTP requests.
 func (kgm *KeyspaceGroupManager) finishSplitKeyspaceGroup(id uint32) error {
 	start := time.Now()
-	kgm.Lock()
-	defer kgm.Unlock()
-	// Check if the keyspace group is in split state.
+	kgm.finishSplitMu.Lock()
+	defer kgm.finishSplitMu.Unlock()
+
+	kgm.RLock()
 	splitGroup := kgm.kgs[id]
-	if !splitGroup.IsSplitTarget() {
+	canFinish := splitGroup.IsSplitTarget() && kgm.httpClient != nil
+	kgm.RUnlock()
+	if !canFinish {
 		return nil
 	}
-	// Check if the HTTP client is initialized.
-	if kgm.httpClient == nil {
-		return nil
-	}
+
 	startRequest := time.Now()
 	resp, err := kgm.sendDeleteRequestToKeyspaceGroupsAPI(fmt.Sprintf("/%d/split", id))
 	if err != nil {
@@ -1389,9 +1402,15 @@ func (kgm *KeyspaceGroupManager) finishSplitKeyspaceGroup(id uint32) error {
 	// Note: to avoid data race with state read APIs, we always replace the group in memory as a whole.
 	// For now, we only have scenarios to update split state/merge state, and the other fields are always
 	// loaded from etcd without any modification, so we can simply copy the group and replace the state.
-	newSplitGroup := *splitGroup
-	newSplitGroup.SplitState = nil
-	kgm.kgs[id] = &newSplitGroup
+	kgm.Lock()
+	// A watcher update can replace the group while the HTTP request is in flight. Only
+	// complete the split state observed before the request, never a newer transition.
+	if currentGroup := kgm.kgs[id]; currentGroup == splitGroup && currentGroup.IsSplitTarget() {
+		newSplitGroup := *currentGroup
+		newSplitGroup.SplitState = nil
+		kgm.kgs[id] = &newSplitGroup
+	}
+	kgm.Unlock()
 	kgm.metrics.finishSplitDuration.Observe(time.Since(start).Seconds())
 	return nil
 }
