@@ -120,32 +120,6 @@ func TestCalcAvgSkipsNonPositiveDeltaDuration(t *testing.T) {
 	re.Positive(counter.avgRUPerSec)
 }
 
-func TestUpdateAvgRequestResourcePerSecFeedsRUMaxPerSec(t *testing.T) {
-	re := require.New(t)
-	gc := createTestGroupCostController(re)
-	// Swap in a tracker with a unique name so the shared gauge children never
-	// collide with the other tests built on the "test" group.
-	name := "test-ru-max-per-sec-wiring"
-	gc.metrics.ruMaxPerSec = newRUMaxPerSecTracker(name)
-	defer gc.metrics.ruMaxPerSec.deleteLabels(name)
-	gauge := func(ruType string) float64 {
-		return gaugeValue(re, metrics.RUMaxPerSecGauge.WithLabelValues(name, ruType))
-	}
-
-	// Same tick as `initRunState`: calcAvg rejects the sample, so the tracker
-	// must not be fed either.
-	gc.run.consumption.RRU, gc.run.consumption.WRU = 40, 60
-	gc.updateAvgRequestResourcePerSec()
-	re.Zero(gauge(ruTypeTotal), "tracker must be skipped when calcAvg rejects the sample")
-
-	// One second later the state-update tick feeds the tracker.
-	gc.run.now = gc.run.now.Add(time.Second)
-	gc.updateAvgRequestResourcePerSec()
-	re.InDelta(40, gauge(requestSourceRUTypeRRU), 1e-9)
-	re.InDelta(60, gauge(requestSourceRUTypeWRU), 1e-9)
-	re.InDelta(100, gauge(ruTypeTotal), 1e-9)
-}
-
 func TestSmallPositiveConsumptionDoesNotBypassThreshold(t *testing.T) {
 	re := require.New(t)
 	gc := createTestGroupCostController(re)
@@ -972,7 +946,7 @@ func TestNonCopPredictedReadBytesResponseIgnoresPagingAccounting(t *testing.T) {
 	re.InDelta(noPrechargeBefore, counterValue(re, gc.metrics.noPrechargeCounter), 1e-9)
 }
 
-func TestDeletePagingLabelsResetsSeries(t *testing.T) {
+func TestDeleteLabelsResetsSeries(t *testing.T) {
 	re := require.New(t)
 	// Use a name no other test reuses so we measure only our own series.
 	name := "test-paging-cleanup-rg"
@@ -984,18 +958,23 @@ func TestDeletePagingLabelsResetsSeries(t *testing.T) {
 	gmc.observePagingResponse(100, 80)
 	gmc.observePagingRequest(0)
 	gmc.observePagingResponse(0, 200)
+	// Do the same for the ru_max_per_sec gauges: the first observation only sets
+	// the baseline, the second publishes a peak.
+	gmc.ruMaxPerSec.observe(&rmpb.Consumption{}, time.Now())
+	gmc.ruMaxPerSec.observe(&rmpb.Consumption{RRU: 100}, time.Now().Add(time.Second))
 
 	// Sanity: cached counters are non-zero before cleanup.
 	re.Positive(counterValue(re, gmc.prechargeCounter))
 	re.Positive(counterValue(re, gmc.actualBytesCounter))
 	re.Positive(counterValue(re, gmc.noPrechargeCounter))
 	re.Positive(histogramSampleCount(re, gmc.predictionResidualBytes))
+	re.Positive(gaugeValue(re, metrics.RUMaxPerSecGauge.WithLabelValues(name, ruTypeTotal)))
 
-	gmc.deletePagingLabels(name)
+	gmc.deleteLabels(name)
 
 	// After cleanup, refetching each Vec with the same label must yield a
 	// fresh zero-valued series. Covers every counter declared in
-	// initMetrics so a forgotten DeleteLabelValues in deletePagingLabels
+	// initMetrics so a forgotten DeleteLabelValues in deleteLabels
 	// surfaces here.
 	for _, vec := range []*prometheus.CounterVec{
 		metrics.CopReadPrechargeCounter,
@@ -1004,13 +983,17 @@ func TestDeletePagingLabelsResetsSeries(t *testing.T) {
 		metrics.PagingActualBytesCounter,
 	} {
 		re.Zero(counterValue(re, vec.WithLabelValues(name)),
-			"paging counter series for %q should be cleared by deletePagingLabels", name)
+			"paging counter series for %q should be cleared by deleteLabels", name)
 	}
 	for _, vec := range []*prometheus.HistogramVec{
 		metrics.PagingPredictionResidualBytes,
 	} {
 		re.Zero(histogramSampleCount(re, vec.WithLabelValues(name)),
-			"paging histogram series for %q should be cleared by deletePagingLabels", name)
+			"paging histogram series for %q should be cleared by deleteLabels", name)
+	}
+	for _, ruType := range []string{requestSourceRUTypeRRU, requestSourceRUTypeWRU, ruTypeTotal} {
+		re.Zero(gaugeValue(re, metrics.RUMaxPerSecGauge.WithLabelValues(name, ruType)),
+			"ru_max_per_sec series for %q/%q should be cleared by deleteLabels", name, ruType)
 	}
 }
 
@@ -1374,76 +1357,116 @@ func TestAcquireTokensCancelKeepsLastMonotonic(t *testing.T) {
 }
 
 func TestRUMaxPerSecTracker(t *testing.T) {
-	// Cumulative RRU/WRU snapshot observed at one tick, plus the elapsed time
-	// that tick covers.
-	type tick struct {
-		rru      float64
-		wru      float64
-		duration time.Duration
+	// One cumulative RRU/WRU snapshot plus the wall-clock instant it was taken
+	// at, relative to base.
+	type observation struct {
+		rru, wru float64
+		at       time.Duration
 	}
-	// rampTicks returns n consecutive 1s ticks that each add step RRU (negative
-	// for refunds), starting from the given cumulative value.
-	rampTicks := func(n int, from, step float64) []tick {
-		ticks := make([]tick, 0, n)
-		for range n {
-			from += step
-			ticks = append(ticks, tick{rru: from, duration: time.Second})
+	type want struct{ rru, wru, ru float64 }
+
+	base := time.Unix(1_700_000_000, 0)
+
+	// peakThenRamp returns the observations of "600 RRU in the first second,
+	// then +10 RRU every second": the baseline, the peak, and one observation
+	// per second up to and including second ruMaxPerSecWindowSize.
+	peakThenRamp := func() []observation {
+		observations := []observation{{at: 0}, {rru: 600, at: time.Second}}
+		for s := 2; s <= ruMaxPerSecWindowSize; s++ {
+			observations = append(observations, observation{rru: 600 + 10*float64(s-1), at: time.Duration(s) * time.Second})
 		}
-		return ticks
+		return observations
 	}
 
 	testCases := []struct {
-		name        string
-		ticks       []tick
-		expectedRRU float64
-		expectedWRU float64
-		expectedRU  float64
+		name         string
+		observations []observation
+		expected     want
+		// midAt pins the gauges after the observation taken at that instant, so a
+		// case can assert both sides of a boundary in one observation sequence.
+		midAt       time.Duration
+		midExpected *want
 	}{
 		{
-			name:        "rate is normalised by the elapsed duration",
-			ticks:       []tick{{rru: 100, duration: 2 * time.Second}},
-			expectedRRU: 50,
-			expectedRU:  50,
+			name:         "a single observation only sets the baseline",
+			observations: []observation{{rru: 100, wru: 50, at: 0}},
+			expected:     want{},
 		},
 		{
-			name:        "refund alone clamps to zero instead of going negative",
-			ticks:       []tick{{rru: -50, duration: time.Second}},
-			expectedRRU: 0,
-			expectedRU:  0,
+			name:         "+100 RRU over one second is 100 RRU in that second",
+			observations: []observation{{at: 0}, {rru: 100, at: time.Second}},
+			expected:     want{rru: 100, ru: 100},
 		},
 		{
-			name:        "refunds filling the whole window still clamp to zero",
-			ticks:       rampTicks(ruMaxPerSecWindowSize, 0, -10),
-			expectedRRU: 0,
-			expectedRU:  0,
-		},
-		{
-			name:        "refund after a peak does not lower the peak",
-			ticks:       []tick{{rru: 100, duration: time.Second}, {rru: 60, duration: time.Second}},
-			expectedRRU: 100,
-			expectedRU:  100,
-		},
-		{
-			name:        "peak is still visible on the last sample inside the window",
-			ticks:       append([]tick{{rru: 600, duration: time.Second}}, rampTicks(ruMaxPerSecWindowSize-1, 600, 10)...),
-			expectedRRU: 600,
-			expectedRU:  600,
-		},
-		{
-			name:        "peak decays once it slides out of the window",
-			ticks:       append([]tick{{rru: 600, duration: time.Second}}, rampTicks(ruMaxPerSecWindowSize, 600, 10)...),
-			expectedRRU: 10,
-			expectedRU:  10,
-		},
-		{
-			name: "total series is the max total rate, not the sum of per-type maxima",
-			ticks: []tick{
-				{rru: 100, wru: 0, duration: time.Second},
-				{rru: 100, wru: 80, duration: time.Second},
+			// The baseline observation must sit in the same second as the first
+			// delta, otherwise the +40 would fall into the preceding second and
+			// the peak would be 60 instead of the merged 100.
+			name: "+40 and +60 inside the same wall-clock second merge",
+			observations: []observation{
+				{rru: 0, at: time.Second},
+				{rru: 40, at: time.Second},
+				{rru: 100, at: time.Second + 300*time.Millisecond},
 			},
-			expectedRRU: 100,
-			expectedWRU: 80,
-			expectedRU:  100,
+			expected: want{rru: 100, ru: 100},
+		},
+		{
+			name: "+300 RRU spanning three seconds spreads to 100 per second",
+			observations: []observation{
+				{at: time.Second},
+				{rru: 300, at: 4 * time.Second},
+			},
+			expected: want{rru: 100, ru: 100},
+		},
+		{
+			name: "+100 RRU straddling two seconds spreads to 50 per second",
+			observations: []observation{
+				{at: 1500 * time.Millisecond},
+				{rru: 100, at: 2500 * time.Millisecond},
+			},
+			expected: want{rru: 50, ru: 50},
+		},
+		{
+			name: "a refund of one RU type does not cancel the other type",
+			observations: []observation{
+				{at: time.Second},
+				{rru: -20, wru: 50, at: 2 * time.Second},
+			},
+			expected: want{rru: 0, wru: 50, ru: 50},
+		},
+		{
+			name:         "a refund alone clamps to zero instead of going negative",
+			observations: []observation{{at: 0}, {rru: -50, at: time.Second}},
+			expected:     want{},
+		},
+		{
+			name: "the total is the max per-second sum, not the sum of the per-type maxima",
+			observations: []observation{
+				{at: 0},
+				{rru: 100, at: time.Second},
+				{rru: 100, wru: 80, at: 2 * time.Second},
+			},
+			expected: want{rru: 100, wru: 80, ru: 100},
+		},
+		{
+			name:         "a peak is still visible at 59s and expires at 60s",
+			observations: peakThenRamp(),
+			midAt:        time.Duration(ruMaxPerSecWindowSize-1) * time.Second,
+			midExpected:  &want{rru: 600, ru: 600},
+			expected:     want{rru: 10, ru: 10},
+		},
+		{
+			name:         "an idle gap of a whole window drops the peak",
+			observations: []observation{{at: 0}, {rru: 10, at: 70 * time.Second}},
+			expected:     want{rru: 10, ru: 10},
+		},
+		{
+			name: "a repeated timestamp still attributes the delta to the current second",
+			observations: []observation{
+				{at: 0},
+				{rru: 40, at: time.Second},
+				{rru: 100, at: time.Second},
+			},
+			expected: want{rru: 60, ru: 60},
 		},
 	}
 
@@ -1453,19 +1476,26 @@ func TestRUMaxPerSecTracker(t *testing.T) {
 			// Unique name per case so the gauge children never collide.
 			name := fmt.Sprintf("test-ru-max-per-sec-%d", i)
 			tracker := newRUMaxPerSecTracker(name)
-			for _, tk := range testCase.ticks {
-				tracker.observe(&rmpb.Consumption{RRU: tk.rru, WRU: tk.wru}, tk.duration)
+			defer tracker.deleteLabels(name)
+			read := func(ruType string) float64 {
+				return gaugeValue(re, metrics.RUMaxPerSecGauge.WithLabelValues(name, ruType))
+			}
+			check := func(want want, msg string) {
+				for _, value := range []float64{read(requestSourceRUTypeRRU), read(requestSourceRUTypeWRU), read(ruTypeTotal)} {
+					re.GreaterOrEqual(value, float64(0), "a peak must never be negative %s", msg)
+				}
+				re.InDelta(want.rru, read(requestSourceRUTypeRRU), 1e-9, "rru %s", msg)
+				re.InDelta(want.wru, read(requestSourceRUTypeWRU), 1e-9, "wru %s", msg)
+				re.InDelta(want.ru, read(ruTypeTotal), 1e-9, "ru %s", msg)
 			}
 
-			peaks := map[string]float64{}
-			for _, series := range tracker.series {
-				value := gaugeValue(re, series.gauge)
-				re.GreaterOrEqual(value, float64(0), "%s peak must never be negative", series.ruType)
-				peaks[series.ruType] = value
+			for _, o := range testCase.observations {
+				tracker.observe(&rmpb.Consumption{RRU: o.rru, WRU: o.wru}, base.Add(o.at))
+				if testCase.midExpected != nil && o.at == testCase.midAt {
+					check(*testCase.midExpected, "at the intermediate checkpoint")
+				}
 			}
-			re.InDelta(testCase.expectedRRU, peaks[requestSourceRUTypeRRU], 1e-9)
-			re.InDelta(testCase.expectedWRU, peaks[requestSourceRUTypeWRU], 1e-9)
-			re.InDelta(testCase.expectedRU, peaks[ruTypeTotal], 1e-9)
+			check(testCase.expected, "after the last observation")
 
 			tracker.deleteLabels(name)
 			for _, ruType := range []string{requestSourceRUTypeRRU, requestSourceRUTypeWRU, ruTypeTotal} {
@@ -1476,15 +1506,36 @@ func TestRUMaxPerSecTracker(t *testing.T) {
 	}
 }
 
-func TestRUMaxPerSecTrackerSkipsNonPositiveDuration(t *testing.T) {
+func TestUpdateRunStateFeedsRUMaxPerSec(t *testing.T) {
 	re := require.New(t)
-	name := "test-ru-max-per-sec-zero-duration"
-	tracker := newRUMaxPerSecTracker(name)
-	defer tracker.deleteLabels(name)
-
-	tracker.observe(&rmpb.Consumption{RRU: 100}, 0)
-	for _, series := range tracker.series {
-		re.Zero(gaugeValue(re, series.gauge))
-		re.Zero(series.prev, "a skipped sample must not advance the cumulative baseline")
+	gc := createTestGroupCostController(re)
+	// Swap in a tracker with a unique name so the shared gauge children never
+	// collide with the other tests built on the "test" group.
+	name := "test-ru-max-per-sec-run-state"
+	gc.metrics.ruMaxPerSec = newRUMaxPerSecTracker(name)
+	defer gc.metrics.ruMaxPerSec.deleteLabels(name)
+	gauge := func(ruType string) float64 {
+		return gaugeValue(re, metrics.RUMaxPerSecGauge.WithLabelValues(name, ruType))
 	}
+
+	// The first state update has nothing to attribute yet: it only establishes
+	// the cumulative baseline.
+	gc.updateRunState()
+	re.Zero(gauge(ruTypeTotal), "the baseline observation must not publish a peak")
+	re.Zero(gauge(requestSourceRUTypeRRU))
+	re.Zero(gauge(requestSourceRUTypeWRU))
+
+	gc.mu.Lock()
+	add(gc.mu.consumption, &rmpb.Consumption{RRU: 40, WRU: 60})
+	gc.mu.Unlock()
+	gc.updateRunState()
+
+	re.Positive(gauge(ruTypeTotal), "a state update that advances the consumption must feed the tracker")
+	// The two calls may straddle a wall-clock second, so the delta can be split
+	// across two seconds and the gauges can only be bounded, not pinned.
+	re.LessOrEqual(gauge(ruTypeTotal), 100+1e-9)
+	re.LessOrEqual(gauge(requestSourceRUTypeRRU), 40+1e-9)
+	re.LessOrEqual(gauge(requestSourceRUTypeWRU), 60+1e-9)
+	re.Positive(gauge(requestSourceRUTypeRRU))
+	re.Positive(gauge(requestSourceRUTypeWRU))
 }

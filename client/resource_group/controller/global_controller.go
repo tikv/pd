@@ -682,7 +682,7 @@ func (c *ResourceGroupsController) tryGetResourceGroupController(
 // Do not delete the resource group immediately to prevent from interrupting the ongoing request,
 // mark it as tombstone and create a default resource group controller for it.
 func (c *ResourceGroupsController) tombstoneGroupCostController(name string) {
-	_, ok := c.loadGroupController(name)
+	oldGC, ok := c.loadGroupController(name)
 	if !ok {
 		return
 	}
@@ -697,6 +697,7 @@ func (c *ResourceGroupsController) tombstoneGroupCostController(name string) {
 			zap.String("name", name), zap.Error(err))
 		// Directly delete the resource group controller if the default group is not available.
 		c.cleanupRequestSourceMetricsState(name)
+		oldGC.metrics.deleteLabels(name)
 		c.groupsController.Delete(name)
 		return
 	}
@@ -713,9 +714,13 @@ func (c *ResourceGroupsController) tombstoneGroupCostController(name string) {
 			zap.String("name", name), zap.Error(err))
 		// Directly delete the resource group controller if the default group controller cannot be created.
 		c.cleanupRequestSourceMetricsState(name)
+		oldGC.metrics.deleteLabels(name)
 		c.groupsController.Delete(name)
 		return
 	}
+	// The tombstone controller runs on the default group's meta, but its metric
+	// series belong to the deleted group, like the request-source state above.
+	gc.metrics.ruMaxPerSec = newRUMaxPerSecTracker(name)
 	gc.tombstone.Store(true)
 	c.groupsController.Store(name, gc)
 	// Its metrics will be deleted in the cleanup process.
@@ -737,8 +742,7 @@ func (c *ResourceGroupsController) cleanUpResourceGroup() {
 				c.cleanupRequestSourceMetricsState(resourceGroupName)
 				c.groupsController.Delete(resourceGroupName)
 				metrics.ResourceGroupStatusGauge.DeleteLabelValues(resourceGroupName, resourceGroupName)
-				gc.metrics.deletePagingLabels(resourceGroupName)
-				gc.metrics.ruMaxPerSec.deleteLabels(resourceGroupName)
+				gc.metrics.deleteLabels(resourceGroupName)
 				return true
 			}
 			gc.inactive = true

@@ -54,7 +54,7 @@ var (
 	// RequestSourceRUCounter comments placeholder
 	RequestSourceRUCounter *prometheus.CounterVec
 	// RUMaxPerSecGauge reports the peak per-second RU consumption observed by this
-	// client instance over a sliding window, split by RU type.
+	// client instance over the last 60 wall-clock seconds, split by RU type.
 	RUMaxPerSecGauge *prometheus.GaugeVec
 	// FailedTokenRequestDuration comments placeholder, WithLabelValues is a heavy operation, define variable to avoid call it every time.
 	FailedTokenRequestDuration prometheus.Observer
@@ -190,7 +190,7 @@ func initMetrics(constLabels prometheus.Labels) {
 			Namespace:   namespace,
 			Subsystem:   requestSubsystem,
 			Name:        "ru_max_per_sec",
-			Help:        "Maximum RU per second observed in any single state-update sample over the last 60 samples (about 60s at the 1s tick).",
+			Help:        "Peak RU per second of the resource group on this client over the last 60 wall-clock seconds, at one-second resolution.",
 			ConstLabels: constLabels,
 		}, []string{newResourceGroupNameLabel, typeLabel})
 
