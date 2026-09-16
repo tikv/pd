@@ -910,11 +910,14 @@ func TestManagerClearCache(t *testing.T) {
 	re.True(ok)
 	re.Equal([]uint32{30}, ids)
 	re.Positive(manager.keyspaceIDVerifiedUpTo)
+	re.EqualValues(30, manager.maxAllocatedKeyspaceID)
 
 	manager.ClearCache()
 	_, ok = manager.cache.getKeyspaceByID(id)
 	re.False(ok, "ClearCache should empty the cache")
 	re.Zero(manager.keyspaceIDVerifiedUpTo, "ClearCache should reset the backfill watermark")
+	re.EqualValues(-1, manager.maxAllocatedKeyspaceID,
+		"ClearCache should reset the allocated-ID ceiling, since this Manager is no longer the exclusive creator")
 
 	// GetKeyspaceIDInRange must still work correctly after the cache is
 	// cleared, by re-backfilling from storage rather than trusting a stale
@@ -922,6 +925,99 @@ func TestManagerClearCache(t *testing.T) {
 	ids, ok = manager.GetKeyspaceIDInRange(30, 30, 10)
 	re.True(ok)
 	re.Equal([]uint32{30}, ids)
+}
+
+// TestRecordAllocatedKeyspaceIDDoesNotResurrectAfterClearCache verifies that a
+// saveNewKeyspace call whose storage write already succeeded before a
+// concurrent ClearCache cannot, by applying its maxAllocatedKeyspaceID
+// bookkeeping late, re-set a non-negative ceiling right after ClearCache
+// reset it to -1 for a leadership change.
+func TestRecordAllocatedKeyspaceIDDoesNotResurrectAfterClearCache(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	allocator := mockid.NewIDAllocator()
+	kgm := NewKeyspaceGroupManager(ctx, store, nil)
+	manager := NewKeyspaceManager(ctx, store, nil, allocator, &mockConfig{}, kgm, nil)
+	re.NoError(kgm.Bootstrap(ctx))
+	// Bootstrap creates the default keyspace before the failpoint below is
+	// armed, so it does not itself get caught by it.
+	re.NoError(manager.Bootstrap())
+
+	reachedFailpoint := make(chan struct{})
+	clearCacheDone := make(chan struct{})
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/keyspace/saveNewKeyspaceBeforeRecordAllocatedID", func() {
+		close(reachedFailpoint)
+		<-clearCacheDone
+	}))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/saveNewKeyspaceBeforeRecordAllocatedID"))
+	}()
+
+	createDone := make(chan struct{})
+	go func() {
+		defer close(createDone)
+		id := uint32(50)
+		_, err := manager.CreateKeyspaceByID(&CreateKeyspaceByIDRequest{
+			ID:         &id,
+			Name:       "ks50",
+			CreateTime: time.Now().Unix(),
+		})
+		re.NoError(err)
+	}()
+
+	// The storage write for keyspace 50 has already succeeded by the time the
+	// failpoint is reached; simulate a leadership loss right at that point,
+	// before the pending call gets to apply its bookkeeping.
+	<-reachedFailpoint
+	manager.ClearCache()
+	re.EqualValues(-1, manager.maxAllocatedKeyspaceID)
+	close(clearCacheDone)
+	<-createDone
+
+	re.EqualValues(-1, manager.maxAllocatedKeyspaceID,
+		"a creation from before ClearCache must not resurrect a ceiling for the term ClearCache started")
+}
+
+// TestGetKeyspaceIDInRangeSkipsConfirmingScanAtOwnCeiling verifies that once
+// backfillKeyspaceIDRange has verified up through the highest keyspace ID this
+// Manager has itself created, it declares itself fully caught up immediately
+// instead of needing one more (otherwise redundant) storage call that returns
+// nothing just to confirm completeness.
+func TestGetKeyspaceIDInRangeSkipsConfirmingScanAtOwnCeiling(t *testing.T) {
+	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/keyspaceIDRangeBackfillBatchSize", "return(2)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/keyspaceIDRangeBackfillBatchSize"))
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	allocator := mockid.NewIDAllocator()
+	kgm := NewKeyspaceGroupManager(ctx, store, nil)
+	manager := NewKeyspaceManager(ctx, store, nil, allocator, &mockConfig{}, kgm, nil)
+	re.NoError(kgm.Bootstrap(ctx))
+	re.NoError(manager.Bootstrap())
+
+	// Only the default keyspace (ID 0, from Bootstrap) and this one exist, so
+	// a batch size of 2 backfills both of them (0 and 50) in a single, full
+	// batch — the exact case that would otherwise need a second, empty call
+	// to confirm there is nothing more.
+	id := uint32(50)
+	_, err := manager.CreateKeyspaceByID(&CreateKeyspaceByIDRequest{
+		ID:         &id,
+		Name:       "ks50",
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+
+	ids, ok := manager.GetKeyspaceIDInRange(0, 50, 10)
+	re.True(ok)
+	re.Equal([]uint32{50, 0}, ids)
+	re.Equal(constant.MaxValidKeyspaceID+1, manager.keyspaceIDVerifiedUpTo,
+		"a single call should reach full completion via the allocated-ID ceiling, without a second confirming scan")
 }
 
 func (suite *keyspaceTestSuite) TestGetKeyspaceIDInRange() {
