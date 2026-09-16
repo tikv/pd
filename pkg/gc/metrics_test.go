@@ -280,10 +280,8 @@ func TestBarrierMetricsRegistrationAndLeadership(t *testing.T) {
 	second := NewGCStateManager(endpoint.GCStateProvider{}, cfg.PDServerCfg, nil)
 	first.barrierMetrics.now = func() time.Time { return now }
 	second.barrierMetrics.now = func() time.Time { return now }
-	first.EnableBarrierMetrics()
-	second.EnableBarrierMetrics()
-	t.Cleanup(first.DisableBarrierMetrics)
-	t.Cleanup(second.DisableBarrierMetrics)
+	t.Cleanup(first.CloseBarrierMetrics)
+	t.Cleanup(second.CloseBarrierMetrics)
 	barriers := []*endpoint.GCBarrier{endpoint.NewGCBarrier("old", uint64(now.Add(-80*time.Hour).UnixMilli())<<18, nil)}
 	observe := func(m *GCStateManager, id uint32) []barrierWarning {
 		return m.barrierMetrics.observeMetrics(m.barrierMetrics.generation(), id, "tenant", barriers, nil, now)
@@ -301,7 +299,7 @@ func TestBarrierMetricsRegistrationAndLeadership(t *testing.T) {
 	require.Contains(t, gatherBarrierMetrics(t, prometheus.DefaultGatherer), "keyspace/42/old")
 	second.OnNodeBecomesLeader()
 	require.Len(t, observe(second, 43), 1)
-	first.DisableBarrierMetrics()
+	first.CloseBarrierMetrics()
 	require.Equal(t, map[string]float64{"keyspace/43/old": 1_999_712_000}, gatherBarrierMetrics(t, prometheus.DefaultGatherer), "old owner cleanup must preserve replacement")
 	second.OnNodeBecomesFollower()
 	require.Empty(t, gatherBarrierMetrics(t, prometheus.DefaultGatherer))

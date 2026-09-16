@@ -297,23 +297,12 @@ func (o *barrierObservation) logWarnings() {
 	}
 }
 
-// EnableBarrierMetrics enables production collection while this manager is leader.
-// Managers created for isolated tests need not enable production collection.
-func (m *GCStateManager) EnableBarrierMetrics() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.barrierMetricsEnabled = true
-	if m.nodeIsLeader() {
-		productionBarrierMetrics.current.Store(m.barrierMetrics)
-	}
-}
-
-// DisableBarrierMetrics releases production collection during server shutdown.
+// CloseBarrierMetrics releases production collection during server shutdown.
+// Call it after leadership callbacks have stopped.
 // Cleanup of an old manager cannot detach a replacement leader's collector.
-func (m *GCStateManager) DisableBarrierMetrics() {
+func (m *GCStateManager) CloseBarrierMetrics() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.barrierMetricsEnabled = false
 	productionBarrierMetrics.current.CompareAndSwap(m.barrierMetrics, nil)
 	m.barrierMetrics.clearMetrics()
 }

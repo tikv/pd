@@ -563,7 +563,6 @@ func (s *Server) startServer(ctx context.Context) error {
 		log.Info("no metering config provided, the metering writer will not be started")
 	}
 	s.gcStateManager = gc.NewGCStateManager(s.storage.GetGCStateProvider(), s.cfg.PDServerCfg, s.keyspaceManager)
-	s.gcStateManager.EnableBarrierMetrics()
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, "", s.cluster)
 	// initial hot_region_storage in here.
 
@@ -612,7 +611,7 @@ func (s *Server) Close() {
 
 	s.stopServerLoop()
 	if s.gcStateManager != nil {
-		s.gcStateManager.DisableBarrierMetrics()
+		s.gcStateManager.CloseBarrierMetrics()
 	}
 	if s.IsKeyspaceGroupEnabled() {
 		s.keyspaceGroupManager.Close()

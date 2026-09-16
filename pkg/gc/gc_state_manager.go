@@ -190,12 +190,11 @@ type GCStateManager struct {
 	// concurrent operations happen on a single PD leader) it doesn't need to cause conflicts in etcd transactions
 	// layer. It can be more efficient and avoid failures due to transaction conflict in most cases.
 	// The etcd transactions is still necessary considering the possibility of rare cases like PD leader changes.
-	mu                    syncutil.RWMutex
-	gcMetaStorage         endpoint.GCStateProvider
-	cfg                   config.PDServerConfig
-	keyspaceManager       *keyspace.Manager
-	barrierMetrics        *barrierMetrics
-	barrierMetricsEnabled bool
+	mu              syncutil.RWMutex
+	gcMetaStorage   endpoint.GCStateProvider
+	cfg             config.PDServerConfig
+	keyspaceManager *keyspace.Manager
+	barrierMetrics  *barrierMetrics
 
 	// A read/write - update cache procedure must be done while holding the outer mutex `GCStateManager.mu`.
 	// A read-only operation can be done on gcStateCache directly without locking `GCStateManager.mu`.
@@ -256,9 +255,7 @@ func (m *GCStateManager) OnNodeBecomesLeader() {
 	// potential inconsistent cache state left from the last leadership.
 	m.gcStateCache.clearAll()
 	m.barrierMetrics.clearMetrics()
-	if m.barrierMetricsEnabled {
-		productionBarrierMetrics.current.Store(m.barrierMetrics)
-	}
+	productionBarrierMetrics.current.Store(m.barrierMetrics)
 }
 
 // OnNodeBecomesFollower marks the current PD node as follower and closes all existing GC state watches.
