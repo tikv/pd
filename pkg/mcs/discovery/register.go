@@ -138,12 +138,13 @@ func (sr *ServiceRegister) Register() error {
 	}
 	if err != nil {
 		sr.cancel()
-		return fmt.Errorf("put the key with lease %s failed: %v", sr.key, err)
+		return fmt.Errorf("put the key with lease %s failed: %w", sr.key, err)
 	}
 	kresp, err := sr.cli.KeepAlive(sr.ctx, id)
 	if err != nil {
+		sr.revokeLease(sr.ctx, id)
 		sr.cancel()
-		return fmt.Errorf("keepalive failed: %v", err)
+		return fmt.Errorf("keepalive failed: %w", err)
 	}
 	sr.wg.Add(1)
 	go func() {
@@ -177,6 +178,16 @@ func (sr *ServiceRegister) renewKeepalive() <-chan *clientv3.LeaseKeepAliveRespo
 		case <-t.C:
 			id, err := sr.putWithTTL()
 			if err != nil {
+				if errors.Is(err, errServiceAddrOccupied) {
+					// This instance's own lease already expired (e.g. a
+					// prolonged connectivity loss) and another instance has
+					// since claimed the address; it cannot be reclaimed.
+					// The process keeps running but is no longer visible in
+					// service discovery under this address.
+					log.Warn("lost registry ownership to another instance",
+						zap.String("key", sr.key), zap.Error(err))
+					continue
+				}
 				log.Error("put the key with lease failed", zap.String("key", sr.key), zap.Error(err))
 				continue
 			}
@@ -245,11 +256,10 @@ func (sr *ServiceRegister) putWithTTL() (clientv3.LeaseID, error) {
 	// itself previously registered; otherwise treat it as claimed by another
 	// live instance (or a not-yet-expired entry from a prior process) and
 	// let the caller's retry loop wait for it to expire.
+	//
+	// Else(OpGet) runs inside the same atomic transaction as the If that
+	// just proved the key exists, so kvs is guaranteed non-empty here.
 	kvs := resp.Responses[0].GetResponseRange().Kvs
-	if len(kvs) == 0 {
-		sr.revokeLease(ctx, leaseID)
-		return 0, fmt.Errorf("key %s, existing value : %w", sr.key, errServiceAddrOccupied)
-	}
 	if owned, occupiedErr := sr.leaseOwnership(ctx, kvs[0].Lease, kvs[0].Value, resp.Header.RaftTerm); !owned {
 		sr.revokeLease(ctx, leaseID)
 		return 0, occupiedErr
@@ -317,7 +327,12 @@ func (sr *ServiceRegister) observeContendedLease(ctx context.Context, existingLe
 		return
 	}
 	ttlResp, err := sr.cli.TimeToLive(ctx, existingLease)
-	if err != nil || ttlResp.TTL <= 0 {
+	if err != nil {
+		log.Warn("failed to measure the contended lease's TTL, falling back to the current retry deadline",
+			zap.String("key", sr.key), zap.Error(err))
+		return
+	}
+	if ttlResp.TTL <= 0 {
 		return
 	}
 	sr.contendedLease = existingLease

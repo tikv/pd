@@ -103,12 +103,18 @@ func TestRegisterConflict(t *testing.T) {
 	// Register the first instance.
 	sr1 := NewServiceRegister(ctx, client, "test_service", "127.0.0.1:1", "instance-1", 2)
 	re.NoError(sr1.Register())
+	leasesBefore, err := client.Leases(ctx)
+	re.NoError(err)
 	// A second live instance with the same advertised address must not
 	// overwrite the registry entry of the first one.
 	sr2 := NewServiceRegister(ctx, client, "test_service", "127.0.0.1:1", "instance-2", 2)
-	err := sr2.Register()
+	err = sr2.Register()
 	re.Error(err)
-	re.Contains(err.Error(), "occupied")
+	re.ErrorIs(err, errServiceAddrOccupied)
+	// The losing instance must not leak a lease across its failed attempts.
+	leasesAfter, err := client.Leases(ctx)
+	re.NoError(err)
+	re.Len(leasesAfter.Leases, len(leasesBefore.Leases))
 	resp, err := client.Get(ctx, sr1.key)
 	re.NoError(err)
 	re.Len(resp.Kvs, 1)
@@ -176,7 +182,7 @@ func TestRegisterConflictSameSerializedValue(t *testing.T) {
 	sr2 := NewServiceRegister(ctx, client, "test_service", "127.0.0.1:1", "same-value", 2)
 	err := sr2.Register()
 	re.Error(err)
-	re.Contains(err.Error(), "occupied")
+	re.ErrorIs(err, errServiceAddrOccupied)
 
 	resp, err := client.Get(ctx, sr1.key)
 	re.NoError(err)
@@ -209,7 +215,7 @@ func TestRegisterRejectsUnleasedExistingKey(t *testing.T) {
 	// fallback deadline (7s here).
 	re.Less(time.Since(start), 2*time.Second)
 	re.Error(err)
-	re.Contains(err.Error(), "occupied")
+	re.ErrorIs(err, errServiceAddrOccupiedPermanently)
 }
 
 // newLongElectionTestEtcdCluster starts a single-member test cluster whose
