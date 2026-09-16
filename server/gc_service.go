@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
@@ -45,6 +46,7 @@ const (
 
 type gcStateChangeReceiver interface {
 	RecvBatch(maxChanges int) ([]gc.GCStateChange, error)
+	Done() <-chan struct{}
 	Err() error
 }
 
@@ -610,6 +612,28 @@ func watchGCStatesErrorToStatus(err error) error {
 }
 
 func serveWatchGCStates(receiver gcStateChangeReceiver, stream pdpb.PD_WatchGCStatesServer, maxResponseSize int) error {
+	if err := receiver.Err(); err != nil {
+		return watchGCStatesErrorToStatus(err)
+	}
+	resultCh := make(chan error, 1)
+	go func() {
+		defer logutil.LogPanic()
+		resultCh <- sendWatchGCStates(receiver, stream, maxResponseSize)
+	}()
+	// Do not join the worker here: returning lets gRPC tear down the transport
+	// stream, which interrupts a Send blocked on flow control.
+	select {
+	case err := <-resultCh:
+		if cause := receiver.Err(); cause != nil {
+			return watchGCStatesErrorToStatus(cause)
+		}
+		return err
+	case <-receiver.Done():
+		return watchGCStatesErrorToStatus(receiver.Err())
+	}
+}
+
+func sendWatchGCStates(receiver gcStateChangeReceiver, stream pdpb.PD_WatchGCStatesServer, maxResponseSize int) error {
 	for {
 		changes, err := receiver.RecvBatch(watchGCStatesRecvBatchSize)
 		if err != nil {

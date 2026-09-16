@@ -94,21 +94,22 @@ const (
 
 // GCStateWatcher merges ordered initial batches and live GC state changes for one stream.
 // The initial scan is not globally atomic and may interleave with live delivery. For each
-// keyspace, the merge prevents an older initial state from following a newer live state.
+// keyspace, the merge prevents initial and live delivery from regressing to an older state.
 //
 // A watcher supports one receiving goroutine. Close may be called concurrently with
 // receiving and with manager-owned lifecycle operations.
 // nolint:revive // Keep GC in the name to match the established GCState domain API.
 type GCStateWatcher struct {
-	ctx             context.Context
-	cancel          context.CancelCauseFunc
-	manager         *GCStateManager
-	id              uint64
-	initCh          chan []GCStateChange
-	liveCh          chan GCStateChange
-	initDone        bool
-	pendingInit     []GCStateChange
-	dirtyDuringInit map[uint32]struct{}
+	ctx              context.Context
+	cancel           context.CancelCauseFunc
+	manager          *GCStateManager
+	id               uint64
+	initCh           chan []GCStateChange
+	liveCh           chan GCStateChange
+	initDone         bool
+	pendingInit      []GCStateChange
+	pendingLiveCount int
+	dirtyDuringInit  map[uint32]struct{}
 }
 
 func newGCStateWatcher(parent context.Context, cfg gcStateWatchConfig, skipLoadingInitial bool) *GCStateWatcher {
@@ -130,6 +131,17 @@ func (w *GCStateWatcher) receiveOne(block bool) (GCStateChange, bool, error) {
 	for {
 		if err := w.Err(); err != nil {
 			return GCStateChange{}, false, err
+		}
+
+		if w.pendingLiveCount > 0 {
+			// This watcher has one receiver, so every change counted when the
+			// initial batch was acquired is still queued until we consume it.
+			change := <-w.liveCh
+			w.pendingLiveCount--
+			if keyspaceID, valid := change.KeyspaceID(); valid {
+				w.dirtyDuringInit[keyspaceID] = struct{}{}
+			}
+			return change, true, nil
 		}
 
 		for len(w.pendingInit) > 0 {
@@ -206,8 +218,23 @@ func (w *GCStateWatcher) receiveOne(block bool) (GCStateChange, bool, error) {
 			w.dirtyDuringInit = nil
 			continue
 		}
+		failpoint.InjectCall("watchGCStatesInitialBatchReceived")
 		w.pendingInit = batch
+		// Snapshot only after acquiring the initial batch. Registration precedes
+		// its scan, and mutations publish under the manager mutex before the next
+		// mutation can update the cache. Thus any live state older than this batch's
+		// initial state is already queued or consumed. The initial state's own live
+		// publication may still follow its cache store, but cannot cause regression.
+		// Drain this FIFO prefix first and suppress initial scopes it makes dirty.
+		// Keep the remaining count across RecvBatch calls; later arrivals must not
+		// extend the prefix and indefinitely postpone unrelated initial states.
+		w.pendingLiveCount = len(w.liveCh)
 	}
+}
+
+// Done returns a channel that is closed when the watcher terminates.
+func (w *GCStateWatcher) Done() <-chan struct{} {
+	return w.ctx.Done()
 }
 
 // Err returns the first cause that terminated the watcher.
