@@ -35,6 +35,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -2870,7 +2871,14 @@ func (c *RaftCluster) runStorageSizeCollector(
 
 func (c *RaftCluster) collectStorageSize(keyspaceManager *keyspace.Manager) []*storageSizeInfo {
 	regionBoundsMap := make(map[string]*keyspace.RegionBound)
-	keyspaceManager.ScanAllKeyspace(func(keyspaceID uint32, name string) bool {
+	keyspaceManager.ScanAllKeyspace(func(keyspaceID uint32, name string, state keyspacepb.KeyspaceState) bool {
+		// Only meter keyspaces currently in active use, matching the
+		// pre-cache-backed behavior of skipping a keyspace once it is no
+		// longer ENABLED (e.g. ARCHIVED or TOMBSTONE), which can otherwise
+		// linger in the cache until it is fully deleted.
+		if state != keyspacepb.KeyspaceState_ENABLED {
+			return true
+		}
 		regionBoundsMap[name] = keyspace.MakeRegionBound(keyspaceID)
 		return true
 	})
