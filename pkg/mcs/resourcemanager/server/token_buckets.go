@@ -544,8 +544,11 @@ func (gtb *GroupTokenBucket) request(
 	slot, ok := gtb.tokenSlots[clientUniqueID]
 	if !ok {
 		return &rmpb.TokenBucket{
-			Settings: &rmpb.TokenLimitSettings{BurstLimit: burstLimit},
-			Tokens:   0.0,
+			Settings: &rmpb.TokenLimitSettings{
+				BurstLimit: burstLimit,
+				FillRate:   uint64(gtb.getFillRate()),
+			},
+			Tokens: 0.0,
 		}, 0
 	}
 	if requiredToken > 0 && slot.fillRate == 0 {
@@ -589,6 +592,7 @@ func (ts *tokenSlot) assignSlotTokens(requiredToken float64, targetPeriodMs uint
 	}
 	// FillRate is used for the token server unavailable in abnormal situation.
 	if requiredToken <= 0 {
+		res.Settings.FillRate = ts.fillRate
 		return res, 0
 	}
 	if ts.fillRate == 0 {
@@ -602,6 +606,7 @@ func (ts *tokenSlot) assignSlotTokens(requiredToken float64, targetPeriodMs uint
 		ts.curTokenCapacity -= requiredToken
 		// granted the total request tokens
 		res.Tokens = requiredToken
+		res.Settings.FillRate = ts.fillRate
 		return res, 0
 	}
 
