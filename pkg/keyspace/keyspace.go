@@ -115,6 +115,27 @@ type Manager struct {
 	// updated, or removed through this Manager keep the cache in sync directly and
 	// do not depend on this watermark.
 	keyspaceIDVerifiedUpTo uint32
+	// maxAllocatedKeyspaceID records the highest keyspace ID this Manager has
+	// itself created since construction or the last ClearCache, or -1 if it
+	// has not created any keyspace yet (0 is itself a valid keyspace ID, so it
+	// cannot double as the "unset" sentinel). Only the current PD leader can
+	// create keyspaces, so once backfillKeyspaceIDRange has verified up
+	// through this ID, nothing higher can exist without this field having
+	// moved too — letting it treat that as fully caught up without an extra,
+	// otherwise-redundant confirming storage read. Guarded by
+	// keyspaceIDRangeMu, along with keyspaceIDRangeGeneration below.
+	maxAllocatedKeyspaceID int64
+	// keyspaceIDRangeGeneration counts how many times ClearCache has run. A
+	// saveNewKeyspace call can be preempted for an arbitrarily long time
+	// between its storage write succeeding and recordAllocatedKeyspaceID
+	// applying its bookkeeping - long enough for a concurrent leadership loss
+	// to run ClearCache in between, which locking alone does not order
+	// against real-world events. recordAllocatedKeyspaceID captures this
+	// generation before the storage write and discards its update if the
+	// generation has since moved on, so a creation from a leadership term
+	// that has already been cleared can never resurrect a stale ceiling for
+	// a later one.
+	keyspaceIDRangeGeneration uint64
 }
 
 // CreateKeyspaceRequest represents necessary arguments to create a keyspace.
@@ -157,15 +178,16 @@ func NewKeyspaceManager(
 		// and non-consecutive large key space scenarios. One of scenarios for
 		// last use case is keyspace group split loads non-consecutive keyspace meta
 		// in batches and lock all loaded keyspace meta within a batch at the same time.
-		metaLock:          syncutil.NewLockGroup(syncutil.WithRemoveEntryOnUnlock(true)),
-		idAllocator:       idAllocator,
-		store:             store,
-		cluster:           cluster,
-		config:            config,
-		kgm:               kgm,
-		mgm:               mgm,
-		nextPatrolStartID: constant.StartKeyspaceID,
-		cache:             NewCache(),
+		metaLock:               syncutil.NewLockGroup(syncutil.WithRemoveEntryOnUnlock(true)),
+		idAllocator:            idAllocator,
+		store:                  store,
+		cluster:                cluster,
+		config:                 config,
+		kgm:                    kgm,
+		mgm:                    mgm,
+		nextPatrolStartID:      constant.StartKeyspaceID,
+		cache:                  NewCache(),
+		maxAllocatedKeyspaceID: -1,
 	}
 	// Let the meta-service group manager validate group deletion against actual
 	// keyspace assignments instead of the drift-prone persisted counter.
@@ -543,6 +565,11 @@ func (manager *Manager) saveNewKeyspace(keyspace *keyspacepb.KeyspaceMeta) error
 	manager.metaLock.Lock(keyspace.GetId())
 	defer manager.metaLock.Unlock(keyspace.GetId())
 
+	// Captured before the write so that a ClearCache landing anywhere between
+	// here and recordAllocatedKeyspaceID below - however this call ends up
+	// being scheduled - is detected as having superseded this creation.
+	generation := manager.currentKeyspaceIDRangeGeneration()
+
 	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
 		// Save keyspace ID.
 		// Check if keyspace with that name already exists.
@@ -570,8 +597,35 @@ func (manager *Manager) saveNewKeyspace(keyspace *keyspacepb.KeyspaceMeta) error
 	})
 	if err == nil {
 		manager.cache.Save(keyspace.GetId(), keyspace.Name, keyspace.State)
+		failpoint.InjectCall("saveNewKeyspaceBeforeRecordAllocatedID")
+		manager.recordAllocatedKeyspaceID(keyspace.GetId(), generation)
 	}
 	return err
+}
+
+// currentKeyspaceIDRangeGeneration returns the current value of
+// keyspaceIDRangeGeneration for a caller to later pass to
+// recordAllocatedKeyspaceID.
+func (manager *Manager) currentKeyspaceIDRangeGeneration() uint64 {
+	manager.keyspaceIDRangeMu.Lock()
+	defer manager.keyspaceIDRangeMu.Unlock()
+	return manager.keyspaceIDRangeGeneration
+}
+
+// recordAllocatedKeyspaceID advances maxAllocatedKeyspaceID to id if id is
+// higher than the current value, unless ClearCache has run (advancing
+// keyspaceIDRangeGeneration) since generation was captured - in which case
+// this creation belongs to an already-cleared term and must not resurrect a
+// ceiling for whatever term is current now.
+func (manager *Manager) recordAllocatedKeyspaceID(id uint32, generation uint64) {
+	manager.keyspaceIDRangeMu.Lock()
+	defer manager.keyspaceIDRangeMu.Unlock()
+	if generation != manager.keyspaceIDRangeGeneration {
+		return
+	}
+	if newVal := int64(id); newVal > manager.maxAllocatedKeyspaceID {
+		manager.maxAllocatedKeyspaceID = newVal
+	}
 }
 
 // rollbackMetaServiceGroupAssignment decrements the assignment count that
@@ -1224,8 +1278,17 @@ func (manager *Manager) backfillKeyspaceIDRange(end uint32) {
 	if len(keyspaces) < batchSize {
 		// Storage has nothing left beyond this batch.
 		manager.keyspaceIDVerifiedUpTo = constant.MaxValidKeyspaceID + 1
-	} else {
-		manager.keyspaceIDVerifiedUpTo = keyspaces[len(keyspaces)-1].GetId() + 1
+		return
+	}
+	manager.keyspaceIDVerifiedUpTo = keyspaces[len(keyspaces)-1].GetId() + 1
+	// A negative ceiling means this Manager has not created any keyspace since
+	// the last ClearCache, so it has no basis for the shortcut below.
+	if ceiling := manager.maxAllocatedKeyspaceID; ceiling >= 0 && int64(manager.keyspaceIDVerifiedUpTo) > ceiling {
+		// Nothing beyond this batch can exist yet: only this Manager, as the
+		// current leader, can create new keyspaces, and it has not created
+		// anything past what has just been verified. No need for another
+		// (otherwise redundant) scan just to confirm storage has nothing more.
+		manager.keyspaceIDVerifiedUpTo = constant.MaxValidKeyspaceID + 1
 	}
 }
 
@@ -1242,6 +1305,11 @@ func (manager *Manager) ClearCache() {
 	defer manager.keyspaceIDRangeMu.Unlock()
 	manager.cache.clearAll()
 	manager.keyspaceIDVerifiedUpTo = 0
+	// Losing leadership means this Manager is no longer the exclusive creator
+	// of new keyspaces, so its record of the highest ID it created can no
+	// longer be trusted as a ceiling on what exists.
+	manager.maxAllocatedKeyspaceID = -1
+	manager.keyspaceIDRangeGeneration++
 }
 
 // KeyspaceExist checks if a keyspace exists by ID.
