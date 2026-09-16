@@ -16,8 +16,15 @@ package gc
 
 import (
 	"sync/atomic"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+)
+
+const (
+	// Metrics and warnings share the same minimum barrier timestamp age.
+	barrierObservationMinimumAge = 24 * time.Hour
+	barrierWarningInterval       = 10 * time.Minute
 )
 
 // The registry owns one forwarding collector, never a list of GC managers.
@@ -37,6 +44,11 @@ func (c *activeBarrierMetrics) Collect(ch chan<- prometheus.Metric) {
 }
 
 var (
+	barrierTimestampDesc = prometheus.NewDesc(
+		"pd_gc_barrier_timestamp_seconds",
+		"Physical Unix timestamp of a valid GC barrier more than 24 hours old, observed by successful transaction safe point advancement.",
+		[]string{"scope", "keyspace_id", "keyspace_name", "barrier_id"}, nil,
+	)
 	productionBarrierMetrics = &activeBarrierMetrics{}
 	gcSafePointGauge         = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
