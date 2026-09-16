@@ -33,6 +33,8 @@ import (
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
+	"github.com/tikv/pd/pkg/mock/mockcluster"
+	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
@@ -102,7 +104,8 @@ func (suite *keyspaceTestSuite) SetupTest() {
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	allocator := mockid.NewIDAllocator()
 	kgm := NewKeyspaceGroupManager(suite.ctx, store, nil)
-	suite.manager = NewKeyspaceManager(suite.ctx, store, nil, allocator, &mockConfig{}, kgm, nil)
+	cluster := mockcluster.NewCluster(suite.ctx, mockconfig.NewTestOptions())
+	suite.manager = NewKeyspaceManager(suite.ctx, store, cluster, allocator, &mockConfig{}, kgm, nil)
 	re.NoError(kgm.Bootstrap(suite.ctx))
 	re.NoError(suite.manager.Bootstrap())
 }
@@ -250,28 +253,21 @@ func (suite *keyspaceTestSuite) TestGCManagementTypeDefaultValue() {
 	manager := suite.manager
 
 	now := time.Now().Unix()
-	const classic = `return(false)`
-	const nextGen = `return(true)`
-
 	type testCase struct {
-		nextGenFlag      string
 		gcManagementType string
 		expect           string
 	}
 
-	cases := []testCase{
-		{classic, "", ""},
-		{classic, UnifiedGC, UnifiedGC},
-		{classic, KeyspaceLevelGC, KeyspaceLevelGC},
-		{nextGen, "", KeyspaceLevelGC},
-		{nextGen, UnifiedGC, UnifiedGC},
-		{classic, KeyspaceLevelGC, KeyspaceLevelGC},
+	defaultGCManagementType := ""
+	if kerneltype.IsNextGen() {
+		defaultGCManagementType = KeyspaceLevelGC
 	}
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"))
-	}()
+	cases := []testCase{
+		{"", defaultGCManagementType},
+		{UnifiedGC, UnifiedGC},
+		{KeyspaceLevelGC, KeyspaceLevelGC},
+	}
 	for idx, tc := range cases {
-		re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag", tc.nextGenFlag))
 		cfg := make(map[string]string)
 		if tc.gcManagementType != "" {
 			cfg[GCManagementType] = tc.gcManagementType
@@ -958,7 +954,8 @@ func TestIterateKeyspaces(t *testing.T) {
 		store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 		allocator := mockid.NewIDAllocator()
 		kgm := NewKeyspaceGroupManager(ctx, store, nil)
-		manager := NewKeyspaceManager(ctx, store, nil, allocator, &mockConfig{}, kgm, nil)
+		cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+		manager := NewKeyspaceManager(ctx, store, cluster, allocator, &mockConfig{}, kgm, nil)
 
 		re.NoError(kgm.Bootstrap(ctx))
 		re.NoError(manager.Bootstrap())
@@ -987,12 +984,8 @@ func TestIterateKeyspaces(t *testing.T) {
 		}
 
 		loadRangeCounter := 0
-		re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/keyspace/keyspaceIteratorOnLoadRange", func() {
-			loadRangeCounter++
-		}))
-		defer func() {
-			re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/keyspaceIteratorOnLoadRange"))
-		}()
+		iteratorOnLoadRange = func() { loadRangeCounter++ }
+		defer func() { iteratorOnLoadRange = nil }()
 
 		it := manager.IterateKeyspaces()
 		i := 0
@@ -1023,7 +1016,9 @@ func TestIterateKeyspaces(t *testing.T) {
 		testWithKeyspaces(keyspaceIDs, keyspaceNames, expectedLoadRangeCount)
 	}
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/keyspaceIteratorLoadingBatchSize", "return(5)"))
+	prevIteratorLoadingBatchSize := iteratorLoadingBatchSize
+	iteratorLoadingBatchSize = 5
+	defer func() { iteratorLoadingBatchSize = prevIteratorLoadingBatchSize }()
 
 	testWithKeyspaces([]uint32{}, []string{}, 2)
 	testWithKeyspaces([]uint32{1, 2}, []string{"ks1", "ks2"}, 2)
@@ -1033,7 +1028,7 @@ func TestIterateKeyspaces(t *testing.T) {
 	testWithNKeyspaces(1, 19, 2, 5)
 	testWithNKeyspaces(100, 20, 2, 6)
 
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/keyspaceIteratorLoadingBatchSize"))
+	iteratorLoadingBatchSize = IteratorLoadingBatchSize
 
 	testWithNKeyspaces(1, 999, 1, 11)
 	testWithNKeyspaces(1, 1000, 10, 12)
