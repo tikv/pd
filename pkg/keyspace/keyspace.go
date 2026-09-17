@@ -692,12 +692,49 @@ func (manager *Manager) assignGroupAndSaveKeyspace(assign bool, config *map[stri
 // splitKeyspaceRegion waits for the region at keyspace boundaries to be split.
 // The actual splitting is now handled by the SplitChecker which detects keyspace
 // boundaries by parsing region keys, rather than using label rules.
+//
+// It also still writes the keyspaces/{id} region label rule, purely as a
+// rolling-upgrade compatibility fallback: a scheduling-server primary that
+// predates the keyspace-meta watcher has no other way to learn about a
+// keyspace created while it is primary (see the PR description's rolling
+// upgrade note). An up-to-date primary ignores it, having already learned
+// about the keyspace directly. This is deliberately best-effort - a failure
+// here must not fail keyspace creation, since an up-to-date primary does not
+// depend on it at all. TODO: remove once no supported scheduling-server
+// version predates the watcher.
 func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool, boundType regionBoundType) (err error) {
 	failpoint.Inject("skipSplitRegion", func() {
 		failpoint.Return(nil)
 	})
 
 	start := time.Now()
+	if manager.cluster != nil {
+		if regionLabeler := manager.cluster.GetRegionLabeler(); regionLabeler != nil {
+			keyspaceRule := buildLabelRule(id, boundType)
+			if labelErr := regionLabeler.SetLabelRule(keyspaceRule); labelErr != nil {
+				log.Warn("[keyspace] failed to add compatibility region label for keyspace",
+					zap.Uint32("keyspace-id", id),
+					zap.Error(labelErr),
+				)
+			} else {
+				// If this call ends up failing (e.g. waitKeyspaceRegionSplit
+				// times out below), the caller rolls the keyspace's storage
+				// entries back; the label rule just written must not outlive
+				// that rollback as an orphan pointing at an ID that no
+				// longer exists.
+				defer func() {
+					if err != nil {
+						if delErr := regionLabeler.DeleteLabelRule(keyspaceRule.ID); delErr != nil {
+							log.Warn("[keyspace] failed to delete compatibility region label for keyspace",
+								zap.Uint32("keyspace-id", id),
+								zap.Error(delErr),
+							)
+						}
+					}
+				}()
+			}
+		}
+	}
 	if waitRegionSplit {
 		err = manager.waitKeyspaceRegionSplit(id, boundType)
 		if err != nil {
