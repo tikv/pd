@@ -302,6 +302,8 @@ const (
 func (c *ResourceGroupsController) Start(ctx context.Context) {
 	c.loopCtx, c.loopCancel = context.WithCancel(ctx)
 	c.wg.Add(1)
+	go c.runRUMaxSampler(c.loopCtx)
+	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()
 		if c.ruConfig.DegradedModeWaitDuration > 0 {
@@ -682,7 +684,7 @@ func (c *ResourceGroupsController) tryGetResourceGroupController(
 // Do not delete the resource group immediately to prevent from interrupting the ongoing request,
 // mark it as tombstone and create a default resource group controller for it.
 func (c *ResourceGroupsController) tombstoneGroupCostController(name string) {
-	_, ok := c.loadGroupController(name)
+	oldGC, ok := c.loadGroupController(name)
 	if !ok {
 		return
 	}
@@ -697,6 +699,7 @@ func (c *ResourceGroupsController) tombstoneGroupCostController(name string) {
 			zap.String("name", name), zap.Error(err))
 		// Directly delete the resource group controller if the default group is not available.
 		c.cleanupRequestSourceMetricsState(name)
+		oldGC.metrics.deletePagingLabels(name)
 		c.groupsController.Delete(name)
 		return
 	}
@@ -713,6 +716,7 @@ func (c *ResourceGroupsController) tombstoneGroupCostController(name string) {
 			zap.String("name", name), zap.Error(err))
 		// Directly delete the resource group controller if the default group controller cannot be created.
 		c.cleanupRequestSourceMetricsState(name)
+		oldGC.metrics.deletePagingLabels(name)
 		c.groupsController.Delete(name)
 		return
 	}

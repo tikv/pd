@@ -37,6 +37,8 @@ type groupCostController struct {
 	name    string
 	mode    rmpb.GroupMode
 	mainCfg *RUConfig
+	// createdAt is the immutable zero-consumption baseline for peak sampling.
+	createdAt time.Time
 	// meta info
 	meta     *rmpb.ResourceGroup
 	metaLock sync.RWMutex
@@ -119,6 +121,7 @@ type groupMetricsCollection struct {
 const (
 	requestSourceRUTypeRRU = "rru"
 	requestSourceRUTypeWRU = "wru"
+	ruTypeTotal            = "ru"
 
 	requestSourceDirectionConsume = "consume"
 	requestSourceDirectionRefund  = "refund"
@@ -252,11 +255,7 @@ func (mc *groupMetricsCollection) addRequestSourceRUValue(requestSource, ruType 
 	}
 }
 
-// deletePagingLabels removes the per-resource-group paging_* metric series
-// when the group is being deleted or tombstoned, so stale label series do
-// not linger in Prometheus until the process restarts. Keep this list in
-// sync with initMetrics — adding a paging metric there must be paired
-// with a deletion here.
+// deletePagingLabels removes the per-group paging series.
 func (*groupMetricsCollection) deletePagingLabels(name string) {
 	metrics.CopReadPrechargeCounter.DeleteLabelValues(name)
 	metrics.CopReadNoPrechargeCounter.DeleteLabelValues(name)
@@ -333,11 +332,12 @@ func newGroupCostController(
 	}
 	ms := initMetrics(group.Name, group.Name, sourceState)
 	gc := &groupCostController{
-		meta:    group,
-		name:    group.Name,
-		mainCfg: mainCfg,
-		mode:    group.GetMode(),
-		metrics: ms,
+		meta:      group,
+		name:      group.Name,
+		mainCfg:   mainCfg,
+		mode:      group.GetMode(),
+		metrics:   ms,
+		createdAt: time.Now(),
 		calculators: []ResourceCalculator{
 			newKVCalculator(mainCfg),
 			newSQLCalculator(mainCfg),

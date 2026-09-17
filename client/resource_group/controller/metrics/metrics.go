@@ -53,6 +53,9 @@ var (
 	TokenConsumedHistogram *prometheus.HistogramVec
 	// RequestSourceRUCounter comments placeholder
 	RequestSourceRUCounter *prometheus.CounterVec
+	// RUMaxPerSecGauge reports the maximum sampled RU rate on this client over
+	// the preceding 60 seconds, split by RU type.
+	RUMaxPerSecGauge *prometheus.GaugeVec
 	// FailedTokenRequestDuration comments placeholder, WithLabelValues is a heavy operation, define variable to avoid call it every time.
 	FailedTokenRequestDuration prometheus.Observer
 	// SuccessfulTokenRequestDuration comments placeholder, WithLabelValues is a heavy operation, define variable to avoid call it every time.
@@ -182,6 +185,15 @@ func initMetrics(constLabels prometheus.Labels) {
 			ConstLabels: constLabels,
 		}, []string{newResourceGroupNameLabel, requestSourceLabel, typeLabel, directionLabel})
 
+	RUMaxPerSecGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace:   namespace,
+			Subsystem:   requestSubsystem,
+			Name:        "ru_max_per_sec",
+			Help:        "Maximum sampled RU rate for this resource group on this client over the preceding 60 seconds. Samples use actual elapsed time, with a minimum of one second for the first sample of each controller generation.",
+			ConstLabels: constLabels,
+		}, []string{newResourceGroupNameLabel, typeLabel})
+
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
 	FailedTokenRequestDuration = TokenRequestDuration.WithLabelValues("fail")
 	SuccessfulTokenRequestDuration = TokenRequestDuration.WithLabelValues("success")
@@ -251,6 +263,7 @@ func InitAndRegisterMetrics(constLabels prometheus.Labels) {
 	prometheus.MustRegister(LowTokenRequestNotifyCounter)
 	prometheus.MustRegister(TokenConsumedHistogram)
 	prometheus.MustRegister(RequestSourceRUCounter)
+	prometheus.MustRegister(RUMaxPerSecGauge)
 	prometheus.MustRegister(CopReadPrechargeCounter)
 	prometheus.MustRegister(CopReadNoPrechargeCounter)
 	prometheus.MustRegister(PagingPrechargeBytesCounter)
