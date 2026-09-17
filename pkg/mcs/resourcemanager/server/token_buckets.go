@@ -362,7 +362,12 @@ func (gtb *GroupTokenBucket) balanceSlotTokens(
 
 	var (
 		totalFillRate, totalBurstLimit = gtb.getFillRateAndBurstLimit()
+<<<<<<< HEAD
 		basicFillRate                  = float64(totalFillRate) * evenRatio
+=======
+		allocationBudget               = totalFillRate
+		basicFillRate                  = allocationBudget * evenRatio
+>>>>>>> 4f4e1fc20d (resourcemanager: fix client allocation under service limits (#11213))
 		allocatedFillRate              = 0.0
 		allocationMap                  = make(map[uint64]float64, len(gtb.tokenSlots))
 		extraDemandSlots               = make(map[uint64]float64, len(gtb.tokenSlots))
@@ -388,6 +393,19 @@ func (gtb *GroupTokenBucket) balanceSlotTokens(
 		}
 		return
 	}
+	// A negative configured burst limit allows bursting, but even the default group
+	// can be constrained by the keyspace Service Limit. A positive override burst
+	// limit is the capacity assigned to this group by Service Limit coordination.
+	// Use that result, capped by the effective fill rate, as the client allocation
+	// budget. Using a huge fill rate (e.g. the default group's UnlimitedRate) instead
+	// makes client demand negligible relative to the budget, so distributing the
+	// unused budget evenly produces nearly equal shares despite unequal demand.
+	// This only changes how shares are calculated; the group refill rate and loan
+	// algorithm remain unchanged.
+	if gtb.overrideBurstLimit > 0 && gtb.getBurstLimitSetting() < 0 {
+		allocationBudget = math.Min(allocationBudget, float64(gtb.overrideBurstLimit))
+		basicFillRate = allocationBudget * evenRatio
+	}
 	if gtb.grt == nil {
 		gtb.grt = newGroupRUTracker()
 	}
@@ -410,7 +428,11 @@ func (gtb *GroupTokenBucket) balanceSlotTokens(
 		allocationMap[clientUniqueID] = allocation
 		allocatedFillRate += allocation
 	}
+<<<<<<< HEAD
 	remainingFillRate := float64(totalFillRate) - allocatedFillRate
+=======
+	remainingFillRate := allocationBudget - allocatedFillRate
+>>>>>>> 4f4e1fc20d (resourcemanager: fix client allocation under service limits (#11213))
 	// For the remaining fill rate, allocate it proportionally to the high demand slots.
 	if remainingFillRate > 0 && len(extraDemandSlots) > 0 {
 		for clientUniqueID, extraDemand := range extraDemandSlots {
@@ -428,7 +450,11 @@ func (gtb *GroupTokenBucket) balanceSlotTokens(
 		// Distribute the fill rate.
 		fillRate := allocationMap[clientUniqueID]
 		// Distribute the burst limit and assign tokens based on the allocation ratio.
+<<<<<<< HEAD
 		ratio := fillRate / float64(totalFillRate)
+=======
+		ratio := fillRate / allocationBudget
+>>>>>>> 4f4e1fc20d (resourcemanager: fix client allocation under service limits (#11213))
 		burstLimit := float64(totalBurstLimit) * ratio
 		assignTokens := tokensForBalance * ratio
 		// Need to reserve burst limit to next balance.
@@ -442,7 +468,14 @@ func (gtb *GroupTokenBucket) balanceSlotTokens(
 		gtb.addSlotTokenCapacity(slot, assignTokens)
 		slot.lastTokenCapacity += assignTokens
 		// Update the slot fill rate and burst limit.
+<<<<<<< HEAD
 		slot.fillRate = uint64(fillRate)
+=======
+		slot.fillRate = fillRate
+		if allocationBudget != totalFillRate {
+			slot.fillRate = totalFillRate * ratio
+		}
+>>>>>>> 4f4e1fc20d (resourcemanager: fix client allocation under service limits (#11213))
 		slot.burstLimit = int64(burstLimit)
 	}
 }
