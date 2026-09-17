@@ -1803,6 +1803,9 @@ func (s *Server) campaignLeader() {
 		log.Error("failed to sync id from etcd", errs.ZapError(err))
 		return
 	}
+	s.gcStateManager.OnNodeBecomesLeader()
+	defer s.gcStateManager.OnNodeBecomesFollower()
+
 	// PromoteSelf to accept the remaining service, such as GetStore, GetRegion.
 	s.member.PromoteSelf()
 	member.ServiceMemberGauge.WithLabelValues(PD).Set(1)

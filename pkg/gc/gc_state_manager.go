@@ -118,6 +118,8 @@ type GCStateManager struct {
 	cfg             config.PDServerConfig
 	keyspaceManager *keyspace.Manager
 	barrierMetrics  *barrierMetrics
+	// nodeLeadership counts active leadership callbacks under mu.
+	nodeLeadership int
 
 	allKeyspacesGCStatesSingleFlight *syncutil.OrderedSingleFlight[map[uint32]GCState]
 }
@@ -131,9 +133,6 @@ func NewGCStateManager(store endpoint.GCStateProvider, cfg config.PDServerConfig
 		allKeyspacesGCStatesSingleFlight: syncutil.NewOrderedSingleFlight[map[uint32]GCState](),
 	}
 	m.barrierMetrics = newBarrierMetrics(time.Now)
-	if keyspaceManager != nil {
-		keyspaceManager.SetGCBarrierInvalidator(m.barrierMetrics.invalidateKeyspaceMetrics)
-	}
 	return m
 }
 
@@ -155,42 +154,30 @@ func getKeyspaceNameFromCtx(ctx context.Context) string {
 	return "<unknown>"
 }
 
-<<<<<<< HEAD
-=======
-// OnNodeBecomesLeader marks the current PD node as leader for GC state watches.
+// OnNodeBecomesLeader activates GC barrier collection for the current leader.
 func (m *GCStateManager) OnNodeBecomesLeader() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.nodeLeadership.Add(1)
+	m.nodeLeadership++
 
-	// Also trigger cache invalidation even when transitioning from follower to leader, as a protection against
-	// potential inconsistent cache state left from the last leadership.
-	m.gcStateCache.clearAll()
 	m.barrierMetrics.clearMetrics()
 	productionBarrierMetrics.current.Store(m.barrierMetrics)
 }
 
-// OnNodeBecomesFollower marks the current PD node as follower and closes all existing GC state watches.
+// OnNodeBecomesFollower clears GC barrier observations when leadership ends.
 func (m *GCStateManager) OnNodeBecomesFollower() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.nodeLeadership.Add(-1)
+	m.nodeLeadership--
 
-	// Invalidate the cache.
-	m.gcStateCache.clearAll()
 	m.barrierMetrics.clearMetrics()
-	if !m.nodeIsLeader() {
+	if m.nodeLeadership <= 0 {
 		productionBarrierMetrics.current.CompareAndSwap(m.barrierMetrics, nil)
 	}
 }
 
-func (m *GCStateManager) nodeIsLeader() bool {
-	return m.nodeLeadership.Load() > 0
-}
-
->>>>>>> a3f0b17749 (gc: expose old GC barriers through metrics and warnings (#11259))
 // redirectKeyspace checks the given keyspaceID, and returns the actual keyspaceID to operate on.
 //
 // This function also returns the target keyspace name for diagnostic purpose. But note that it returns a user-friendly
@@ -373,12 +360,8 @@ func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID
 		blockingBarrier         *endpoint.GCBarrier
 		blockingGlobalBarrier   *endpoint.GlobalGCBarrier
 		blockingMinStartTSOwner *string
-<<<<<<< HEAD
-=======
-		gcSafePoint             uint64
 		observedBarriers        []*endpoint.GCBarrier
 		observedGlobals         []*endpoint.GlobalGCBarrier
->>>>>>> a3f0b17749 (gc: expose old GC barriers through metrics and warnings (#11259))
 	)
 
 	err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
@@ -476,19 +459,10 @@ func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID
 		return AdvanceTxnSafePointResult{}, err
 	}
 
-<<<<<<< HEAD
-=======
 	if observation, ok := ctx.Value(barrierObservationKey{}).(*barrierObservation); ok {
 		observation.warnings = m.barrierMetrics.observeMetrics(observation.generation, keyspaceID, getKeyspaceNameFromCtx(ctx), observedBarriers, observedGlobals, now)
 	}
 
-	// Update cache.
-	m.gcStateCache.store(keyspaceID, gcStateCacheEntry{
-		TxnSafePoint: newTxnSafePoint,
-		GCSafePoint:  gcSafePoint,
-	})
-
->>>>>>> a3f0b17749 (gc: expose old GC barriers through metrics and warnings (#11259))
 	blockerDesc := ""
 	simulatedServiceID := ""
 	// Note the order of check blockingGlobalBarrier/blockingMinStartTSOwner/blockingBarrier

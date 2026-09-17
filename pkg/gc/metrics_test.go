@@ -102,7 +102,7 @@ func (s *barrierMetricsTestKV) LoadRange(key, end string, limit int) (keys, valu
 	return s.Base.LoadRange(key, end, limit)
 }
 func (s *barrierMetricsTestKV) CreateRawTxn() kv.RawTxn {
-	return &barrierMetricsTestTxn{RawTxn: s.Base.(kv.RawTxnCapable).CreateRawTxn(), store: s}
+	return &barrierMetricsTestTxn{RawTxn: s.Base.CreateRawTxn(), store: s}
 }
 
 type barrierMetricsTestTxn struct {
@@ -451,7 +451,7 @@ func (s *gcStateManagerTestSuite) TestBarrierMetricsAdvancementAndWrites() {
 	re.Equal(globalTS, result.NewTxnSafePoint)
 	expected := map[string]float64{"global//global": float64(globalTS>>18) / 1000, "keyspace/2/oldest": float64(oldTS>>18) / 1000, "keyspace/2/hidden": float64(newerTS>>18) / 1000}
 	re.Equal(expected, gatherBarrierMetrics(s.T(), registry))
-	re.Equal(3, counted.loads, "revision and two safe points only")
+	re.Equal(2, counted.loads, "revision and transaction safe point only")
 	re.Equal(3, counted.ranges, "local barriers, min start TS and global barriers only")
 	_, err = s.manager.AdvanceTxnSafePoint(2, globalTS, now)
 	re.NoError(err)
@@ -807,10 +807,11 @@ func (s *gcStateManagerTestSuite) TestBarrierMetricsRejectedRequestsDoNotDiscove
 	re.Zero(counted.ranges)
 }
 
-func (s *gcStateManagerTestSuite) TestBarrierMetricsRemovalFencesInflightPublication() {
+func (s *gcStateManagerTestSuite) TestBarrierMetricsMetadataStatesAndLeadership() {
 	re := s.Require()
 	now := time.Unix(2_000_000_000, 0)
 	m := s.manager
+	m.OnNodeBecomesLeader()
 	m.barrierMetrics.now = func() time.Time { return now }
 	registry := prometheus.NewRegistry()
 	registry.MustRegister(m.barrierMetrics)
@@ -834,26 +835,5 @@ func (s *gcStateManagerTestSuite) TestBarrierMetricsRemovalFencesInflightPublica
 	m.OnNodeBecomesLeader()
 	re.Empty(gatherBarrierMetrics(s.T(), registry))
 	advance()
-	groupManager := keyspace.NewKeyspaceGroupManager(context.Background(), s.storage, nil)
-	defer groupManager.Close()
-	re.NoError(groupManager.CreateKeyspaceGroups([]*endpoint.KeyspaceGroup{{ID: 101, UserKind: endpoint.Standard.String(), Keyspaces: []uint32{2}}}))
-	counted := &barrierMetricsTestKV{Base: s.storage.Base}
-	m.gcMetaStorage = endpoint.NewStorageEndpoint(counted, nil).GetGCStateProvider()
-	// Remove metadata after it was resolved and the GC transaction loaded its
-	// barriers. The successful GC commit must not restore the removed sample.
-	counted.beforeCommit = func() {
-		_, err := groupManager.RemoveKeyspacesFromGroup(101, m.keyspaceManager, []uint32{2})
-		re.NoError(err)
-		re.Equal(map[string]float64{"global//global": 1_999_712_000}, gatherBarrierMetrics(s.T(), registry))
-	}
-	core, logs := observer.New(zapcore.WarnLevel)
-	restore := log.ReplaceGlobals(zap.New(core), nil)
-	defer restore()
-	now = now.Add(10 * time.Minute)
-	advance()
-	re.Equal(map[string]float64{"global//global": 1_999_712_000}, gatherBarrierMetrics(s.T(), registry))
-	re.Empty(logs.FilterMessage("GC barrier timestamp is too old").All())
-	counted.beforeCommit = nil
-	_, err = m.AdvanceTxnSafePoint(2, ts, now)
-	re.Error(err)
+	re.Equal(expected, gatherBarrierMetrics(s.T(), registry))
 }
