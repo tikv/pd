@@ -848,3 +848,220 @@ func benchmarkPatrolKeyspaceAssignmentN(
 	suite.TearDownTest()
 	suite.TearDownSuite()
 }
+<<<<<<< HEAD
+=======
+
+func (suite *keyspaceTestSuite) TestChecker() {
+	re := suite.Require()
+	meta := &keyspacepb.KeyspaceMeta{
+		Keyspace:       &keyspacepb.KeyspaceMeta_Id{Id: 10000},
+		Name:           "1",
+		State:          keyspacepb.KeyspaceState_ENABLED,
+		CreatedAt:      time.Now().Unix(),
+		StateChangedAt: time.Now().Unix(),
+	}
+	re.NoError(suite.manager.saveNewKeyspace(meta))
+
+	meta = &keyspacepb.KeyspaceMeta{
+		Keyspace:       &keyspacepb.KeyspaceMeta_Id{Id: 10001},
+		Name:           "2",
+		State:          keyspacepb.KeyspaceState_TOMBSTONE,
+		CreatedAt:      time.Now().Unix(),
+		StateChangedAt: time.Now().Unix(),
+	}
+	re.NoError(suite.manager.saveNewKeyspace(meta))
+
+	// keyspace exist check.
+	re.True(suite.manager.KeyspaceExist(10000))
+	re.False(suite.manager.KeyspaceExist(10001))
+	re.False(suite.manager.KeyspaceExist(10002))
+
+	// keyspace id in range check.
+	arr, exist := suite.manager.GetKeyspaceIDInRange(10000, 10010, 1)
+	re.True(exist)
+	re.Equal([]uint32{10000}, arr)
+	arr, exist = suite.manager.GetKeyspaceIDInRange(10005, 10010, 1)
+	re.False(exist)
+	re.Empty(arr)
+}
+
+func (suite *keyspaceTestSuite) TestGCBarrierRemovalInvalidationAfterCommit() {
+	re := suite.Require()
+	m := suite.manager
+	meta := &keyspacepb.KeyspaceMeta{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 20000}, Name: "barrier-remove", State: keyspacepb.KeyspaceState_TOMBSTONE}
+	re.NoError(m.saveNewKeyspace(meta))
+	re.NoError(m.kgm.CreateKeyspaceGroups([]*endpoint.KeyspaceGroup{{ID: 101, UserKind: endpoint.Standard.String(), Keyspaces: []uint32{20000}}}))
+	calls := 0
+	m.SetGCBarrierInvalidator(func(id uint32) {
+		calls++
+		m.metaLock.Lock(id)
+		defer m.metaLock.Unlock(id)
+		_, err := m.LoadKeyspaceByID(id)
+		re.Error(err)
+		// A group operation takes the group lock, detecting lock-order regression.
+		_, err = m.kgm.GetKeyspaceGroups(101, 1)
+		re.NoError(err)
+	})
+	base := m.kgm.store
+	m.kgm.store = &errorKeyspaceGroupStorage{StorageEndpoint: m.store.(*endpoint.StorageEndpoint), failOnSaveID: 101}
+	_, err := m.kgm.RemoveKeyspacesFromGroup(101, m, []uint32{20000})
+	re.Error(err)
+	re.Zero(calls)
+	m.kgm.store = base
+	_, err = m.kgm.RemoveKeyspacesFromGroup(101, m, []uint32{20000})
+	re.NoError(err)
+	re.Equal(1, calls)
+}
+
+// TestRemoveKeyspaceCleansCache verifies that RemoveKeyspace deletes the
+// keyspace's entry from the in-memory cache, not just from the legacy
+// keyspaceNameLookup/keyspaceStateLookup maps, so a fully removed keyspace
+// does not leak a stale cache entry forever.
+func (suite *keyspaceTestSuite) TestRemoveKeyspaceCleansCache() {
+	re := suite.Require()
+	meta := &keyspacepb.KeyspaceMeta{
+		Keyspace:       &keyspacepb.KeyspaceMeta_Id{Id: 20000},
+		Name:           "to-be-removed",
+		State:          keyspacepb.KeyspaceState_TOMBSTONE,
+		CreatedAt:      time.Now().Unix(),
+		StateChangedAt: time.Now().Unix(),
+	}
+	re.NoError(suite.manager.saveNewKeyspace(meta))
+	_, found := suite.manager.cache.getKeyspaceByID(meta.GetId())
+	re.True(found)
+
+	re.NoError(suite.manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		return suite.manager.RemoveKeyspace(txn, meta.GetId())
+	}))
+	_, found = suite.manager.cache.getKeyspaceByID(meta.GetId())
+	re.False(found)
+}
+
+// TestAssignGroupAndSaveKeyspace verifies that keyspace creation tolerates a
+// stale pre-lock group check: if all meta-service groups are gone by the time
+// the lock is held, the keyspace is created without an assignment instead of
+// failing, while a present group is still assigned normally.
+func TestAssignGroupAndSaveKeyspace(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	kgm := NewKeyspaceGroupManager(ctx, store, nil)
+
+	// No groups available: assign=true (stale pre-check) must not fail creation.
+	emptyMgm := NewMetaServiceGroupManager(store, map[string]string{})
+	managerNoGroup := NewKeyspaceManager(ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{}, kgm, emptyMgm)
+	cfg := map[string]string{}
+	ks := &keyspacepb.KeyspaceMeta{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 100}, Name: "ks-stale-precheck", Config: cfg}
+	re.NoError(managerNoGroup.assignGroupAndSaveKeyspace(true, &cfg, ks))
+	re.NotContains(ks.GetConfig(), MetaServiceGroupIDKey)
+	loaded, err := managerNoGroup.LoadKeyspace("ks-stale-precheck")
+	re.NoError(err)
+	re.Empty(loaded.GetConfig()[MetaServiceGroupIDKey])
+
+	// A present, enabled group is still assigned. Groups are disabled by
+	// default, so it must be enabled before it is eligible for assignment.
+	mgm := NewMetaServiceGroupManager(store, map[string]string{"g1": "addr1"})
+	enabled := true
+	re.NoError(mgm.PatchStatus(ctx, "g1", &MetaServiceGroupStatusPatch{Enabled: &enabled}))
+	managerWithGroup := NewKeyspaceManager(ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{}, kgm, mgm)
+	cfg2 := map[string]string{}
+	ks2 := &keyspacepb.KeyspaceMeta{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 101}, Name: "ks-with-group", Config: cfg2}
+	re.NoError(managerWithGroup.assignGroupAndSaveKeyspace(true, &cfg2, ks2))
+	re.Equal("g1", ks2.GetConfig()[MetaServiceGroupIDKey])
+
+	// A group that exists but is disabled must not fail creation: the keyspace is
+	// created without a meta-service group assignment instead.
+	disabledMgm := NewMetaServiceGroupManager(store, map[string]string{"g2": "addr2"})
+	managerDisabled := NewKeyspaceManager(ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{}, kgm, disabledMgm)
+	cfg3 := map[string]string{}
+	ks3 := &keyspacepb.KeyspaceMeta{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 102}, Name: "ks-disabled-group", Config: cfg3}
+	re.NoError(managerDisabled.assignGroupAndSaveKeyspace(true, &cfg3, ks3))
+	re.NotContains(ks3.GetConfig(), MetaServiceGroupIDKey)
+}
+
+func (suite *keyspaceTestSuite) TestTombstoneKeyspaceUnassignsMetaServiceGroup() {
+	re := suite.Require()
+	manager := suite.manager
+	groupID := "etcd-group-0"
+	groupEndpoint := "etcd-group-0.tidb-serverless.cluster.svc.local"
+	metaServiceGroupStore, ok := manager.store.(endpoint.MetaServiceGroupStorage)
+	re.True(ok)
+	// Start without any group so creation never auto-assigns: meta-service groups
+	// are disabled by default, and this keeps the test independent of that.
+	manager.mgm = NewMetaServiceGroupManager(metaServiceGroupStore, map[string]string{})
+	manager.mgm.SetKeyspaceAssignmentCounter(manager.CountKeyspacesByMetaServiceGroup)
+
+	created, err := manager.CreateKeyspace(&CreateKeyspaceRequest{
+		Name:       "test_ks_msg",
+		Config:     map[string]string{},
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+	re.NotContains(created.GetConfig(), MetaServiceGroupIDKey)
+
+	// Make the group available and assign the keyspace to it explicitly, mirroring
+	// what a meta-service-group-enabled cluster persists.
+	assignKeyspaceToGroup := func(id uint32) {
+		re.NoError(manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+			meta, err := manager.store.LoadKeyspaceMeta(txn, id)
+			if err != nil {
+				return err
+			}
+			if meta.Config == nil {
+				meta.Config = map[string]string{}
+			}
+			meta.Config[MetaServiceGroupIDKey] = groupID
+			if err := manager.store.SaveKeyspaceMeta(txn, meta); err != nil {
+				return err
+			}
+			return manager.mgm.updateAssignmentTxn(txn, "", groupID)
+		}))
+	}
+	manager.mgm.updateGroups(map[string]string{groupID: groupEndpoint})
+	assignKeyspaceToGroup(created.GetId())
+
+	counts, err := manager.mgm.GetAssignmentCounts(suite.ctx)
+	re.NoError(err)
+	re.Equal(1, counts[groupID])
+
+	_, err = manager.UpdateKeyspaceState(created.GetName(), keyspacepb.KeyspaceState_DISABLED, time.Now().Unix())
+	re.NoError(err)
+	_, err = manager.UpdateKeyspaceState(created.GetName(), keyspacepb.KeyspaceState_ARCHIVED, time.Now().Unix())
+	re.NoError(err)
+	updated, err := manager.UpdateKeyspaceState(created.GetName(), keyspacepb.KeyspaceState_TOMBSTONE, time.Now().Unix())
+	re.NoError(err)
+	re.NotContains(updated.GetConfig(), MetaServiceGroupIDKey)
+
+	loaded, err := manager.LoadKeyspace(created.GetName())
+	re.NoError(err)
+	re.NotContains(loaded.GetConfig(), MetaServiceGroupIDKey)
+	counts, err = manager.mgm.GetAssignmentCounts(suite.ctx)
+	re.NoError(err)
+	re.Equal(0, counts[groupID])
+
+	// A keyspace tombstoned before this cleanup existed still carries the group
+	// binding and an inflated counter. Re-applying the TOMBSTONE state (a
+	// same-state update) must repair it rather than being skipped.
+	assignKeyspaceToGroup(updated.GetId())
+	counts, err = manager.mgm.GetAssignmentCounts(suite.ctx)
+	re.NoError(err)
+	re.Equal(1, counts[groupID])
+	repaired, err := manager.UpdateKeyspaceState(created.GetName(), keyspacepb.KeyspaceState_TOMBSTONE, time.Now().Unix())
+	re.NoError(err)
+	re.NotContains(repaired.GetConfig(), MetaServiceGroupIDKey)
+	counts, err = manager.mgm.GetAssignmentCounts(suite.ctx)
+	re.NoError(err)
+	re.Equal(0, counts[groupID])
+
+	// Removing the already-tombstoned keyspace must not decrement the counter
+	// again: the group binding was cleared and persisted during the tombstone
+	// transition, so unassignment is a no-op and the count stays at zero.
+	re.NoError(manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		return manager.RemoveKeyspace(txn, updated.GetId())
+	}))
+	counts, err = manager.mgm.GetAssignmentCounts(suite.ctx)
+	re.NoError(err)
+	re.Equal(0, counts[groupID])
+}
+>>>>>>> a3f0b17749 (gc: expose old GC barriers through metrics and warnings (#11259))
