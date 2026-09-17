@@ -16,6 +16,7 @@ package tso_test
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -171,6 +172,34 @@ func (s *tsoTestSuite) TestLogicalOverflow() {
 
 func (s *tsoTestSuite) checkLogicalOverflow(cluster *tests.TestCluster) {
 	re := s.Require()
+	const (
+		maxLogical = 1 << 18
+		count      = maxLogical / 10
+	)
+	var (
+		overflowPhysical atomic.Int64
+		overflowed       atomic.Bool
+	)
+	// Exhaust logical capacity on the first matching request while holding the
+	// allocation lock, so a periodic update cannot clear it before allocation.
+	const beforeGenerateTSOFailpoint = "github.com/tikv/pd/pkg/tso/beforeGenerateTSO"
+	re.NoError(failpoint.EnableCall(beforeGenerateTSOFailpoint, func(physical int64, logical *int64, batchCount int64) {
+		if batchCount == count && overflowPhysical.CompareAndSwap(0, physical) {
+			*logical = maxLogical - 1
+		}
+	}))
+	defer func() {
+		re.NoError(failpoint.Disable(beforeGenerateTSOFailpoint))
+	}()
+	const onLogicalOverflowFailpoint = "github.com/tikv/pd/pkg/tso/onLogicalOverflow"
+	re.NoError(failpoint.EnableCall(onLogicalOverflowFailpoint, func(batchCount uint32) {
+		if batchCount == count {
+			overflowed.Store(true)
+		}
+	}))
+	defer func() {
+		re.NoError(failpoint.Disable(onLogicalOverflowFailpoint))
+	}()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -189,14 +218,11 @@ func (s *tsoTestSuite) checkLogicalOverflow(cluster *tests.TestCluster) {
 	}()
 
 	var (
-		maxDuration   time.Duration
+		firstPhysical int64
 		lastTimestamp *pdpb.Timestamp
 	)
-	// Since the max logical count is 2 << 18 (262144), we request 20 times with 26214 count each time.
-	// This ensures that the logical part will definitely overflow once within the `updateInterval`.
-	count := (1 << 18) / 10
+	// Keep allocating after the forced overflow to check recovery and monotonicity.
 	for range 20 {
-		begin := time.Now()
 		req := &pdpb.TsoRequest{
 			Header: testutil.NewRequestHeader(clusterID),
 			Count:  uint32(count),
@@ -204,15 +230,13 @@ func (s *tsoTestSuite) checkLogicalOverflow(cluster *tests.TestCluster) {
 		re.NoError(tsoClient.Send(req))
 		resp, err := tsoClient.Recv()
 		re.NoError(err)
-		// Record the max duration to validate whether the overflow is triggered later.
-		duration := time.Since(begin)
-		if duration > maxDuration {
-			maxDuration = duration
-		}
 		// Check the monotonicity of the timestamp.
 		timestamp := checkAndReturnTimestampResponse(re, req, resp)
 		re.NotNil(timestamp)
-		if lastTimestamp != nil {
+		re.Less(timestamp.GetLogical(), int64(maxLogical))
+		if lastTimestamp == nil {
+			firstPhysical = timestamp.GetPhysical()
+		} else {
 			lastPhysical, curPhysical := lastTimestamp.GetPhysical(), timestamp.GetPhysical()
 			re.GreaterOrEqual(curPhysical, lastPhysical)
 			// If the physical time is the same, the logical time must be strictly increasing.
@@ -222,6 +246,7 @@ func (s *tsoTestSuite) checkLogicalOverflow(cluster *tests.TestCluster) {
 		}
 		lastTimestamp = timestamp
 	}
-	// Due to the overflow triggered, there at least one request duration greater than the `updateInterval`.
-	re.Greater(maxDuration, s.updateInterval)
+	re.Positive(overflowPhysical.Load(), "the logical capacity must be exhausted")
+	re.True(overflowed.Load(), "the logical overflow branch must be reached")
+	re.Greater(firstPhysical, overflowPhysical.Load())
 }
