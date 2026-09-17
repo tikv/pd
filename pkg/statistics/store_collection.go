@@ -303,6 +303,7 @@ func (s *storeStatistics) collect() {
 		id := strconv.FormatUint(storeID, 10)
 		StoreLimitGauge.WithLabelValues(id, "add-peer").Set(limit.AddPeer)
 		StoreLimitGauge.WithLabelValues(id, "remove-peer").Set(limit.RemovePeer)
+		StoreLimitGauge.WithLabelValues(id, "transfer-leader-in").Set(limit.TransferLeaderIn)
 	}
 }
 
@@ -329,6 +330,7 @@ func ResetStoreStatistics(id string) {
 	// both classic (redundant with RemoveStoreLimit, harmless) and mcs.
 	StoreLimitGauge.DeleteLabelValues(id, "add-peer")
 	StoreLimitGauge.DeleteLabelValues(id, "remove-peer")
+	StoreLimitGauge.DeleteLabelValues(id, "transfer-leader-in")
 }
 
 type storeStatisticsMap struct {

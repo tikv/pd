@@ -40,7 +40,7 @@ func TestBackup(t *testing.T) {
 	re.NoError(err)
 	re.NotEmpty(cluster.WaitLeader())
 	leaderServer := cluster.GetLeaderServer()
-	leaderServer.BootstrapCluster()
+	re.NoError(leaderServer.BootstrapCluster())
 	pdAddr := cluster.GetConfig().GetClientURL()
 	urls := strings.Split(pdAddr, ",")
 	client, err := clientv3.New(clientv3.Config{

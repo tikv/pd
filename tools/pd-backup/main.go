@@ -68,7 +68,7 @@ func main() {
 
 	backInfo, err := pdbackup.GetBackupInfo(client, *pdAddr)
 	checkErr(err)
-	pdbackup.OutputToFile(backInfo, f)
+	checkErr(pdbackup.OutputToFile(backInfo, f))
 	fmt.Println("pd backup successful! dump file is:", *filePath)
 }
 

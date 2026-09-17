@@ -15,6 +15,7 @@
 package server
 
 import (
+	"fmt"
 	"math"
 	"testing"
 	"time"
@@ -102,11 +103,13 @@ func TestGroupTokenBucketZeroFillRateGuard(t *testing.T) {
 
 	now := time.Now()
 	targetPeriodMs := uint64((5 * time.Second) / time.Millisecond)
-	for _, clientID := range []uint64{1, 2} {
-		tb, trickle := gtb.request(now, 1000, targetPeriodMs, clientID)
-		re.NotNil(tb)
-		re.Equal(0.0, tb.Tokens)
-		re.Equal(int64(targetPeriodMs), trickle)
+	for _, elapsed := range []time.Duration{0, 5 * time.Second} {
+		for _, clientID := range []uint64{1, 2} {
+			tb, trickle := gtb.request(now.Add(elapsed), 1000, targetPeriodMs, clientID)
+			re.NotNil(tb)
+			re.Equal(0.0, tb.Tokens)
+			re.Equal(int64(targetPeriodMs), trickle)
+		}
 	}
 	for _, slot := range gtb.tokenSlots {
 		re.False(math.IsInf(slot.curTokenCapacity, 0))
@@ -144,7 +147,7 @@ func TestGroupTokenBucketZeroFillRateGuard(t *testing.T) {
 
 		// The new slot must get the basic fill rate instead of 0.
 		re.Contains(gtb.tokenSlots, newClientID)
-		re.Equal(uint64(50), gtb.tokenSlots[newClientID].fillRate)
+		re.Equal(50.0, gtb.tokenSlots[newClientID].fillRate)
 	})
 }
 
@@ -199,7 +202,7 @@ func TestGroupTokenBucketRequestBurstLimit(t *testing.T) {
 		// it should not be able to change group settings
 		groupSetting := gtb.tokenSlots[clientUniqueID]
 		re.Equal(expectedBurstLimit, groupSetting.burstLimit)
-		re.Equal(uint64(expectedFillRate), groupSetting.fillRate)
+		re.Equal(float64(expectedFillRate), groupSetting.fillRate)
 		// it should not be able to change gtb settings
 		re.Equal(float64(tbSetting.GetSettings().FillRate), gtb.getFillRate())
 		re.Equal(tbSetting.GetSettings().BurstLimit, gtb.getBurstLimitSetting())
@@ -425,7 +428,79 @@ func TestBalanceSlotTokensFillRateAllocation(t *testing.T) {
 		gtb.balanceSlotTokens(now, 1, 1, 0)
 		// Check the fill rate of each slot.
 		for clientID, expected := range tc.expectedFill {
-			re.Equal(expected, gtb.tokenSlots[clientID].fillRate, "%s - client %d", tc.name, clientID)
+			re.InDelta(float64(expected), gtb.tokenSlots[clientID].fillRate, 1e-12, "%s - client %d", tc.name, clientID)
 		}
 	}
+}
+
+func TestFractionalDemandAfterSlotRecreation(t *testing.T) {
+	for _, required := range []float64{0.1, 1, 5} {
+		t.Run(fmt.Sprintf("request-%g", required), func(t *testing.T) {
+			re := require.New(t)
+			gtb := NewGroupTokenBucket(testResourceGroupName, &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{FillRate: 100, BurstLimit: 100},
+			})
+			gtb.grt = newGroupRUTracker()
+			now := time.Now()
+			request := func(second int, id uint64, tokens float64) *rmpb.TokenBucket {
+				at := now.Add(time.Duration(second) * time.Second)
+				// Match AcquireTokenBuckets: sample the request before allocating.
+				gtb.grt.sample(id, at, tokens)
+				result, _ := gtb.request(at, tokens, 5000, id)
+				return result
+			}
+			request(0, 1, 400)
+			request(1, 2, 10)
+			request(5, 1, 400)
+			request(6, 2, 10)
+			request(26, 1, 1680)
+			request(26, 2, 0)
+			re.NotContains(gtb.tokenSlots, uint64(2))
+			re.True(gtb.grt.getOrCreateRUTracker(2).isInitialized())
+			re.Zero(gtb.grt.getOrCreateRUTracker(2).getRUPerSec())
+			for second := 31; second <= 76; second += 5 {
+				request(second, 1, 400)
+				result := request(second, 2, required)
+				re.NotNil(result)
+				re.Greater(result.Tokens, 0.0)
+				re.LessOrEqual(result.Tokens, required)
+				re.InDelta(100.0, gtb.tokenSlots[1].fillRate+gtb.tokenSlots[2].fillRate, 1e-12)
+			}
+		})
+	}
+}
+
+func TestFractionalSlotBorrowing(t *testing.T) {
+	for _, capacity := range []float64{0, -10} {
+		t.Run(fmt.Sprintf("capacity-%g", capacity), func(t *testing.T) {
+			re := require.New(t)
+			slot := tokenSlot{fillRate: 0.2, curTokenCapacity: capacity}
+			result, trickle := slot.assignSlotTokens(1, 5000)
+			re.Greater(result.Tokens, 0.0)
+			re.LessOrEqual(result.Tokens, 1.0)
+			re.Equal(int64(5000), trickle)
+			re.InDelta(capacity-result.Tokens, slot.curTokenCapacity, 1e-12)
+		})
+	}
+}
+
+func TestFractionalAllocationWithinSmallGroupBudget(t *testing.T) {
+	re := require.New(t)
+	gtb := NewGroupTokenBucket(testResourceGroupName, &rmpb.TokenBucket{
+		Settings: &rmpb.TokenLimitSettings{FillRate: 1, BurstLimit: 1},
+	})
+	gtb.grt = newGroupRUTracker()
+	now := time.Now()
+	for id := uint64(1); id <= 3; id++ {
+		gtb.tokenSlots[id] = newTokenSlot(id, now)
+	}
+	gtb.balanceSlotTokens(now, 1, 0.1, 0)
+	var sum float64
+	for _, slot := range gtb.tokenSlots {
+		re.InDelta(1.0/3, slot.fillRate, 1e-12)
+		sum += slot.fillRate
+		result, _ := slot.assignSlotTokens(0.1, 5000)
+		re.InDelta(0.1, result.Tokens, 1e-12)
+	}
+	re.InDelta(1.0, sum, 1e-12)
 }

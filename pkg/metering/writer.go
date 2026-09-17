@@ -22,6 +22,7 @@ package metering
 import (
 	"context"
 	"math"
+	"slices"
 	"sync"
 	"time"
 
@@ -285,10 +286,10 @@ func (mw *Writer) flushMeteringData(ctx context.Context, ts int64) {
 			}
 		}
 		cost := time.Since(start)
-		logFields := append(baseLogFields,
+		logFields := slices.Concat(baseLogFields, []zap.Field{
 			zap.Int("attempts", attempt),
 			zap.Duration("cost", cost),
-		)
+		})
 		if err != nil {
 			log.Error("failed to write metering data to underlying storage",
 				append(logFields, zap.Error(err))...)

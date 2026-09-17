@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -78,7 +79,7 @@ const (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 func TestClientLeaderChange(t *testing.T) {
@@ -144,6 +145,7 @@ func TestClientLeaderChange(t *testing.T) {
 }
 
 func TestLeaderTransferAndMoveCluster(t *testing.T) {
+	as := assert.New(t)
 	re := require.New(t)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
 	defer func() {
@@ -187,8 +189,9 @@ func TestLeaderTransferAndMoveCluster(t *testing.T) {
 			physical, logical, err := cli.GetTS(context.TODO())
 			if err == nil {
 				ts := tsoutil.ComposeTS(physical, logical)
-				re.True(cluster.CheckTSOUnique(ts))
-				re.Less(lastTS, ts)
+				if !as.True(cluster.CheckTSOUnique(ts)) || !as.Less(lastTS, ts) {
+					return
+				}
 				lastTS = ts
 			}
 			time.Sleep(time.Millisecond)
@@ -198,10 +201,10 @@ func TestLeaderTransferAndMoveCluster(t *testing.T) {
 	// Transfer leader.
 	for range 3 {
 		oldLeaderName := cluster.WaitLeader()
-		err := cluster.GetServer(oldLeaderName).ResignLeader()
+		err := cluster.GetServer(oldLeaderName).ResignLeaderWithRetry()
 		re.NoError(err)
-		newLeaderName := cluster.WaitLeader()
-		re.NotEqual(oldLeaderName, newLeaderName)
+		newLeaderName := cluster.WaitLeaderChange(oldLeaderName)
+		re.NotEmpty(newLeaderName)
 	}
 
 	// ABC->ABCDEF
@@ -249,11 +252,10 @@ func TestGetTSAfterTransferLeader(t *testing.T) {
 		leaderSwitched.Store(true)
 		return nil
 	})
-	err = cluster.GetServer(leader).ResignLeader()
+	err = cluster.GetServer(leader).ResignLeaderWithRetry()
 	re.NoError(err)
-	newLeader := cluster.WaitLeader()
+	newLeader := cluster.WaitLeaderChange(leader)
 	re.NotEmpty(newLeader)
-	re.NotEqual(leader, newLeader)
 	leader = cluster.WaitLeader()
 	re.NotEmpty(leader)
 	err = cli.GetServiceDiscovery().CheckMemberChanged()
@@ -266,6 +268,7 @@ func TestGetTSAfterTransferLeader(t *testing.T) {
 }
 
 func TestTSOFollowerProxy(t *testing.T) {
+	as := assert.New(t)
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -290,15 +293,23 @@ func TestTSOFollowerProxy(t *testing.T) {
 			var lastTS uint64
 			for range tsoRequestRound {
 				physical, logical, err := cli2.GetTS(context.Background())
-				re.NoError(err)
+				if !as.NoError(err) {
+					return
+				}
 				ts := tsoutil.ComposeTS(physical, logical)
-				re.Less(lastTS, ts)
+				if !as.Less(lastTS, ts) {
+					return
+				}
 				lastTS = ts
 				// After requesting with the follower proxy, request with the leader directly.
 				physical, logical, err = cli1.GetTS(context.Background())
-				re.NoError(err)
+				if !as.NoError(err) {
+					return
+				}
 				ts = tsoutil.ComposeTS(physical, logical)
-				re.Less(lastTS, ts)
+				if !as.Less(lastTS, ts) {
+					return
+				}
 				lastTS = ts
 			}
 		}()
@@ -316,7 +327,7 @@ func TestTSOFollowerProxy(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		re.NoError(followerServer.Run())
+		as.NoError(followerServer.Run())
 	}()
 	re.Eventually(func() bool {
 		_, _, err := cli2.GetTS(context.Background())
@@ -343,22 +354,32 @@ func TestTSOFollowerProxy(t *testing.T) {
 				physical, logical, err := cli2.GetTS(context.Background())
 				if err != nil {
 					// It can only be the context canceled error caused by the stale stream cleanup.
-					re.ErrorContains(err, "context canceled")
+					if !as.ErrorContains(err, "context canceled") {
+						return
+					}
 					continue
 				}
-				re.NoError(err)
+				if !as.NoError(err) {
+					return
+				}
 				ts := tsoutil.ComposeTS(physical, logical)
-				re.Less(lastTS, ts)
+				if !as.Less(lastTS, ts) {
+					return
+				}
 				lastTS = ts
 				// After requesting with the follower proxy, request with the leader directly.
 				physical, logical, err = cli1.GetTS(context.Background())
-				re.NoError(err)
+				if !as.NoError(err) {
+					return
+				}
 				ts = tsoutil.ComposeTS(physical, logical)
-				re.Less(lastTS, ts)
+				if !as.Less(lastTS, ts) {
+					return
+				}
 				lastTS = ts
 			}
 			// Ensure at least one request is successful.
-			re.NotEmpty(lastTS)
+			as.NotEmpty(lastTS)
 		}()
 	}
 	wg.Wait()
@@ -393,6 +414,7 @@ func TestTSOFollowerProxyWithTSOService(t *testing.T) {
 
 // TestUnavailableTimeAfterLeaderIsReady is used to test https://github.com/tikv/pd/issues/5207
 func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
+	as := assert.New(t)
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -416,8 +438,9 @@ func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
 				maxUnavailableTime = time.Now()
 				continue
 			}
-			re.NoError(err)
-			re.Less(lastTS, ts)
+			if !as.Less(lastTS, ts) {
+				return
+			}
 			lastTS = ts
 		}
 	}
@@ -429,11 +452,12 @@ func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
 		defer wg.Done()
 		leader := cluster.GetLeaderServer()
 		err := leader.Stop()
-		re.NoError(err)
-		re.NotEmpty(cluster.WaitLeader())
+		if !as.NoError(err) || !as.NotEmpty(cluster.WaitLeader()) {
+			return
+		}
 		leaderReadyTime = time.Now()
 		err = tests.RunServers([]*tests.TestServer{leader})
-		re.NoError(err)
+		as.NoError(err)
 	}()
 	wg.Wait()
 	re.Less(maxUnavailableTime.UnixMilli(), leaderReadyTime.Add(1*time.Second).UnixMilli())
@@ -445,11 +469,16 @@ func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		leader := cluster.GetLeaderServer()
-		re.NoError(failpoint.Enable("github.com/tikv/pd/client/clients/tso/unreachableNetwork", "return(true)"))
+		if !as.NoError(failpoint.Enable("github.com/tikv/pd/client/clients/tso/unreachableNetwork", "return(true)")) {
+			return
+		}
 		err := leader.Stop()
-		re.NoError(err)
-		re.NotEmpty(cluster.WaitLeader())
-		re.NoError(failpoint.Disable("github.com/tikv/pd/client/clients/tso/unreachableNetwork"))
+		if !as.NoError(err) || !as.NotEmpty(cluster.WaitLeader()) {
+			return
+		}
+		if !as.NoError(failpoint.Disable("github.com/tikv/pd/client/clients/tso/unreachableNetwork")) {
+			return
+		}
 		leaderReadyTime = time.Now()
 	}()
 	wg.Wait()
@@ -533,8 +562,8 @@ func (suite *followerForwardAndHandleTestSuite) SetupSuite() {
 }
 
 func (suite *followerForwardAndHandleTestSuite) TearDownSuite() {
-	suite.cluster.Destroy()
 	suite.clean()
+	suite.cluster.Destroy()
 }
 
 func (suite *followerForwardAndHandleTestSuite) TestGetRegionByFollowerForwarding() {
@@ -613,8 +642,9 @@ func (suite *followerForwardAndHandleTestSuite) TestGetTsoByFollowerForwarding2(
 	})
 
 	lastTS = checkTS(re, cli, lastTS)
-	re.NoError(suite.cluster.GetLeaderServer().ResignLeader())
-	re.NotEmpty(suite.cluster.WaitLeader())
+	oldLeaderName := suite.cluster.WaitLeader()
+	re.NoError(suite.cluster.GetServer(oldLeaderName).ResignLeaderWithRetry())
+	re.NotEmpty(suite.cluster.WaitLeaderChange(oldLeaderName))
 	lastTS = checkTS(re, cli, lastTS)
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/clients/tso/unreachableNetwork"))
@@ -954,9 +984,8 @@ func TestConfigTTLAfterTransferLeader(t *testing.T) {
 			!options.IsLocationReplacementEnabled()
 	})
 	re.NoError(cluster.GetServer(leaderName).ResignLeaderWithRetry())
-	newLeaderName := cluster.WaitLeader()
+	newLeaderName := cluster.WaitLeaderChange(leaderName)
 	re.NotEmpty(newLeaderName)
-	re.NotEqual(leaderName, newLeaderName)
 	leader = cluster.GetServer(newLeaderName)
 	re.NotNil(leader)
 	testutil.Eventually(re, func() bool {
@@ -1424,6 +1453,7 @@ func (suite *clientStatelessTestSuite) TestScatterRegion() {
 }
 
 func TestWatch(t *testing.T) {
+	as := assert.New(t)
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1449,11 +1479,15 @@ func TestWatch(t *testing.T) {
 				break
 			}
 		}
-		re.Equal(meta_storagepb.Event_PUT, events[0].GetType())
-		re.Equal("1", string(events[0].GetKv().GetValue()))
-		re.Equal(meta_storagepb.Event_PUT, events[1].GetType())
-		re.Equal("2", string(events[1].GetKv().GetValue()))
-		re.Equal(meta_storagepb.Event_DELETE, events[2].GetType())
+		if !as.Len(events, 3) {
+			exit <- struct{}{}
+			return
+		}
+		as.Equal(meta_storagepb.Event_PUT, events[0].GetType())
+		as.Equal("1", string(events[0].GetKv().GetValue()))
+		as.Equal(meta_storagepb.Event_PUT, events[1].GetType())
+		as.Equal("2", string(events[1].GetKv().GetValue()))
+		as.Equal(meta_storagepb.Event_DELETE, events[2].GetType())
 		exit <- struct{}{}
 	}()
 
@@ -2428,13 +2462,13 @@ func (s *clientStatefulTestSuite) TestAdvanceGCSafePoint() {
 		s.checkGCSafePoint(re, keyspaceID, 5)
 
 		// Disallows going backward.
-		res, err = c.AdvanceGCSafePoint(ctx, 4)
+		_, err = c.AdvanceGCSafePoint(ctx, 4)
 		re.Error(err)
 		re.Contains(err.Error(), "ErrDecreasingGCSafePoint")
 		s.checkGCSafePoint(re, keyspaceID, 5)
 
 		// Disallows exceeding txn safe point.
-		res, err = c.AdvanceGCSafePoint(ctx, 11)
+		_, err = c.AdvanceGCSafePoint(ctx, 11)
 		re.Error(err)
 		re.Contains(err.Error(), "ErrGCSafePointExceedsTxnSafePoint")
 		// Do not change the current value in this case.

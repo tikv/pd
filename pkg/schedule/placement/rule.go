@@ -17,6 +17,7 @@ package placement
 import (
 	"encoding/hex"
 	"encoding/json"
+	"slices"
 	"sort"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -91,8 +92,8 @@ func (r *Rule) String() string {
 func (r *Rule) Clone() *Rule {
 	var clone Rule
 	_ = json.Unmarshal([]byte(r.String()), &clone)
-	clone.StartKey = append(r.StartKey[:0:0], r.StartKey...)
-	clone.EndKey = append(r.EndKey[:0:0], r.EndKey...)
+	clone.StartKey = slices.Clone(r.StartKey)
+	clone.EndKey = slices.Clone(r.EndKey)
 	return &clone
 }
 

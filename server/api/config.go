@@ -165,20 +165,45 @@ func (h *confHandler) SetConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	schedulePatch := make(map[string]any)
 	for k, v := range conf {
-		if s := strings.Split(k, "."); len(s) > 1 {
-			if err := h.updateConfig(cfg, k, v); err != nil {
-				h.rd.JSON(w, http.StatusBadRequest, err.Error())
-				return
-			}
-			continue
+		key := k
+		if !strings.Contains(k, ".") {
+			key = reflectutil.FindJSONFullTagByChildTag(reflect.TypeOf(config.Config{}), k)
 		}
-		key := reflectutil.FindJSONFullTagByChildTag(reflect.TypeOf(config.Config{}), k)
 		if key == "" {
 			h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("config item %s not found", k))
 			return
 		}
+		if strings.HasPrefix(key, "schedule.") {
+			if h.svr.IsTTLConfigExist(key) {
+				h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("need to clean up TTL first for %s", key))
+				return
+			}
+			name := key[strings.LastIndex(key, ".")+1:]
+			if !reflectutil.FindSameFieldByJSON(&cfg.Schedule, map[string]any{name: v}) {
+				h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("config item %s not found", name))
+				return
+			}
+			if _, exists := schedulePatch[name]; exists {
+				h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("config item %s specified more than once", name))
+				return
+			}
+			schedulePatch[name] = v
+			continue
+		}
 		if err := h.updateConfig(cfg, key, v); err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	if len(schedulePatch) > 0 {
+		// Apply related schedule fields together, so new stores see the new defaults.
+		data, err := json.Marshal(schedulePatch)
+		if err == nil {
+			err = h.svr.PatchScheduleConfig(data)
+		}
+		if err != nil {
 			h.rd.JSON(w, http.StatusBadRequest, err.Error())
 			return
 		}

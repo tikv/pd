@@ -18,6 +18,7 @@ import (
 	"context"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/docker/go-units"
 	"github.com/stretchr/testify/require"
@@ -25,6 +26,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/config"
@@ -60,6 +63,18 @@ func prepareSchedulersTest(needToRunStream ...bool) (func(), config.SchedulerCon
 	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSchedulerConfig(), stream)
 	tc.SetHotRegionCacheHitsThreshold(1)
 	return clean, opt, tc, oc
+}
+
+func exhaustTransferLeaderInLimit(t *testing.T, cluster *mockcluster.Cluster, storeIDs ...uint64) {
+	t.Helper()
+	// One token takes long enough to refill that no sleeps or timing assertions are needed.
+	for _, id := range storeIDs {
+		cluster.SetStoreLimit(id, storelimit.TransferLeaderIn, 0.00006)
+		cluster.ResetStoreLimit(id, storelimit.TransferLeaderIn, 0.000001)
+		limiter := cluster.GetStore(id).GetStoreLimit()
+		require.True(t, limiter.Take(storelimit.RegionInfluence[storelimit.TransferLeaderIn], storelimit.TransferLeaderIn, constant.Medium))
+		require.False(t, cluster.GetStore(id).IsAvailable(storelimit.TransferLeaderIn, constant.Medium))
+	}
 }
 
 func TestReloadSchedulerConfigWithoutSchedulerDoesNotPanic(t *testing.T) {
@@ -101,6 +116,14 @@ func TestShuffleLeader(t *testing.T) {
 		re.NotEmpty(ops)
 		re.Equal(operator.OpLeader|operator.OpAdmin, ops[0].Kind())
 	}
+	exhaustTransferLeaderInLimit(t, tc, 1, 2, 3, 4)
+	ops, _ = sl.Schedule(tc, false)
+	re.Empty(ops)
+	tc.SetStoreLimit(2, storelimit.TransferLeaderIn, storelimit.Unlimited)
+	tc.ResetStoreLimit(2, storelimit.TransferLeaderIn, storelimit.Unlimited/time.Minute.Seconds())
+	ops, _ = sl.Schedule(tc, false)
+	re.Len(ops, 1)
+	re.Equal(uint64(2), ops[0].Step(0).(operator.TransferLeader).ToStore)
 }
 
 func TestRejectLeader(t *testing.T) {
@@ -154,6 +177,14 @@ func TestRejectLeader(t *testing.T) {
 	tc.UpdateSubTree(region, origin, overlaps, rangeChanged)
 	ops, _ = sl.Schedule(tc, false)
 	operatorutil.CheckTransferLeader(re, ops[0], operator.OpLeader, 1, 2)
+	exhaustTransferLeaderInLimit(t, tc, 1, 2, 3)
+	ops, _ = sl.Schedule(tc, false)
+	re.Empty(ops)
+	tc.SetStoreLimit(2, storelimit.TransferLeaderIn, storelimit.Unlimited)
+	tc.ResetStoreLimit(2, storelimit.TransferLeaderIn, storelimit.Unlimited/time.Minute.Seconds())
+	ops, _ = sl.Schedule(tc, false)
+	re.Len(ops, 1)
+	re.Equal(uint64(2), ops[0].Step(0).(operator.TransferLeader).ToStore)
 }
 
 func TestRemoveRejectLeader(t *testing.T) {
