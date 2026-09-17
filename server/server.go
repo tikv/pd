@@ -608,6 +608,9 @@ func (s *Server) Close() {
 	s.cgMonitor.StopMonitor()
 
 	s.stopServerLoop()
+	if s.gcStateManager != nil {
+		s.gcStateManager.CloseBarrierMetrics()
+	}
 	if s.IsKeyspaceGroupEnabled() {
 		s.keyspaceGroupManager.Close()
 	}

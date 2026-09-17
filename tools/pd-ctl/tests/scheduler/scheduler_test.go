@@ -315,6 +315,15 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 	re.Contains(echo, "Success!")
 	echo = tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-leader-scheduler", "1"}, nil)
 	re.Equal("Success! The scheduler is created.\n", echo)
+	// Wait for the scheduler to be synced to the scheduling server before updating its config.
+	checkSchedulerCommand(re, cmd, pdAddr, nil, map[string]bool{
+		"balance-region-scheduler":       true,
+		"balance-leader-scheduler":       true,
+		"balance-hot-region-scheduler":   true,
+		"evict-leader-scheduler":         true,
+		"evict-slow-store-scheduler":     true,
+		"evict-stopping-store-scheduler": true,
+	})
 	echo = tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-leader-scheduler", "2"}, nil)
 	re.Equal("Success! The scheduler has been applied to the store.\n", echo)
 	echo = tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", "evict-leader-scheduler-1"}, nil)

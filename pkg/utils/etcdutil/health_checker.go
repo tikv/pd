@@ -85,10 +85,14 @@ func initHealthChecker(
 	}
 	// A health checker has the same lifetime with the given etcd client.
 	ctx := client.Ctx()
+	syncerDone := make(chan struct{})
 	// Sync etcd endpoints and check the last health time of each endpoint periodically.
-	go healthChecker.syncer(ctx)
+	go func() {
+		defer close(syncerDone)
+		healthChecker.syncer(ctx)
+	}()
 	// Inspect the health of each endpoint by reading the health key periodically.
-	go healthChecker.inspector(ctx)
+	go healthChecker.inspector(ctx, syncerDone)
 }
 
 func (checker *healthChecker) syncer(ctx context.Context) {
@@ -108,7 +112,7 @@ func (checker *healthChecker) syncer(ctx context.Context) {
 	}
 }
 
-func (checker *healthChecker) inspector(ctx context.Context) {
+func (checker *healthChecker) inspector(ctx context.Context, syncerDone <-chan struct{}) {
 	defer logutil.LogPanic()
 	ticker := time.NewTicker(checker.tickerInterval)
 	defer ticker.Stop()
@@ -118,6 +122,9 @@ func (checker *healthChecker) inspector(ctx context.Context) {
 		case <-ctx.Done():
 			log.Info("etcd client is closed, exit the health inspector goroutine",
 				zap.String("source", checker.source))
+			// The syncer may still be creating a healthy client after the context is
+			// canceled. Wait for it to stop so every client it created is closed.
+			<-syncerDone
 			checker.close()
 			return
 		case <-ticker.C:
@@ -427,16 +434,6 @@ func (checker *healthChecker) initClient(ep string, opts ...CreateEtcdClientOpt)
 		return
 	}
 	checker.storeClient(ep, client, time.Now())
-	// The inspector may have already closed its snapshot while this client
-	// was being created. A late client must not outlive the guarded client.
-	if checker.client.Ctx().Err() != nil {
-		if err := client.Close(); err != nil {
-			log.Error("failed to close etcd healthy client",
-				zap.String("endpoint", ep),
-				zap.String("source", checker.source),
-				zap.Error(err))
-		}
-	}
 }
 
 func (checker *healthChecker) storeClient(ep string, client *clientv3.Client, lastHealth time.Time) {

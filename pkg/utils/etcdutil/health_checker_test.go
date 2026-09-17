@@ -17,62 +17,39 @@ package etcdutil
 import (
 	"context"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
-	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
-func TestHealthCheckerCloseDuringClientCreation(t *testing.T) {
-	re := require.New(t)
-	_, client, cleanup := NewTestEtcdCluster(t, 1, nil)
-	defer cleanup()
-	ctx := client.Ctx()
-	creating, resume := make(chan struct{}), make(chan struct{})
-	checker := &healthChecker{
-		client:         client,
-		source:         string(TestEtcdClientPurpose),
-		tickerInterval: time.Hour,
-		clientOpts: []CreateEtcdClientOpt{func(*clientv3.Config) {
-			close(creating)
-			<-resume
-		}},
-	}
-	defer checker.close()
-	wait := func(done <-chan struct{}) {
-		t.Helper()
-		select {
-		case <-done:
-		case <-time.After(5 * time.Second):
-			t.Fatal("health checker did not reach the expected lifecycle state")
-		}
-	}
-	syncDone, inspectDone := make(chan struct{}), make(chan struct{})
-	go func() {
-		defer close(syncDone)
-		checker.syncer(ctx)
-	}()
-	go func() {
-		defer close(inspectDone)
-		checker.inspector(ctx)
-	}()
-	defer func() {
-		_ = client.Close()
-		close(resume)
-		wait(syncDone)
-		wait(inspectDone)
-	}()
+func TestHealthCheckerInspectorWaitsForSyncerOnClose(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		syncerDone := make(chan struct{})
+		inspectorDone := make(chan struct{})
+		checker := &healthChecker{tickerInterval: time.Hour}
+		go func() {
+			checker.inspector(ctx, syncerDone)
+			close(inspectorDone)
+		}()
 
-	wait(creating)
-	re.NoError(client.Close())
-	wait(inspectDone)
-	// Let the in-flight endpoint update publish its connection after the
-	// inspector has exited. The syncer must still close that connection.
-	resume <- struct{}{}
-	wait(syncDone)
-	healthy := checker.loadClient(client.Endpoints()[0])
-	re.NotNil(healthy)
-	re.ErrorIs(healthy.Ctx().Err(), context.Canceled)
+		cancel()
+		synctest.Wait()
+		select {
+		case <-inspectorDone:
+			t.Fatal("health checker inspector exited before the syncer")
+		default:
+		}
+
+		close(syncerDone)
+		synctest.Wait()
+		select {
+		case <-inspectorDone:
+		default:
+			t.Fatal("health checker inspector did not exit after the syncer")
+		}
+	})
 }
 
 type testCase struct {
