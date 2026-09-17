@@ -834,13 +834,14 @@ func (suite *schedulerTestSuite) checkSchedulerDiagnostic(cluster *pdTests.TestC
 	re.Contains(echo, "Success!")
 	echo = tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-region-scheduler"}, nil)
 	re.Contains(echo, "Success!")
-	// Ensure this instance has run with a nonzero limit before testing the
-	// diagnostic transition caused by a live configuration change.
+	// Ensure this instance produces a non-pending diagnostic with a nonzero
+	// limit before testing the transition caused by a live configuration change.
 	rc := cluster.GetLeaderServer().GetRaftCluster()
 	regionScheduler := rc.GetCoordinator().GetSchedulersController().GetScheduler("balance-region-scheduler")
 	re.NotNil(regionScheduler)
 	testutil.Eventually(re, func() bool {
-		return regionScheduler.IsScheduleAllowed(rc) && regionScheduler.GetDiagnosticRecorder().GetLastResult() != nil
+		result := regionScheduler.GetDiagnosticRecorder().GetLastResult()
+		return regionScheduler.IsScheduleAllowed(rc) && result != nil && result.Status != "pending"
 	})
 	echo = tests.MustExec(re, cmd, []string{"-u", pdAddr, "config", "set", "region-schedule-limit", "0"}, nil)
 	re.Contains(echo, "Success!")
