@@ -31,12 +31,11 @@ import (
 	"github.com/tikv/pd/pkg/storage/kv"
 )
 
-func newTestManager(t *testing.T, enableWitness bool) (endpoint.RuleStorage, *RuleManager) {
+func newTestManager(t *testing.T) (endpoint.RuleStorage, *RuleManager) {
 	re := require.New(t)
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	var err error
 	manager := NewRuleManager(context.Background(), store, nil, mockconfig.NewTestOptions())
-	manager.conf.SetEnableWitness(enableWitness)
 	err = manager.Initialize(3, []string{"zone", "rack", "host"}, "", false)
 	re.NoError(err)
 	return store, manager
@@ -44,7 +43,7 @@ func newTestManager(t *testing.T, enableWitness bool) (endpoint.RuleStorage, *Ru
 
 func TestDefault(t *testing.T) {
 	re := require.New(t)
-	_, manager := newTestManager(t, false)
+	_, manager := newTestManager(t)
 	rules := manager.GetAllRules()
 	re.Len(rules, 1)
 	re.Equal(DefaultGroupID, rules[0].GroupID)
@@ -56,31 +55,9 @@ func TestDefault(t *testing.T) {
 	re.Equal([]string{"zone", "rack", "host"}, rules[0].LocationLabels)
 }
 
-func TestDefault2(t *testing.T) {
-	re := require.New(t)
-	_, manager := newTestManager(t, true)
-	rules := manager.GetAllRules()
-	re.Len(rules, 2)
-	re.Equal(DefaultGroupID, rules[0].GroupID)
-	re.Equal(DefaultRuleID, rules[0].ID)
-	re.Equal(0, rules[0].Index)
-	re.Empty(rules[0].StartKey)
-	re.Empty(rules[0].EndKey)
-	re.Equal(Voter, rules[0].Role)
-	re.Equal([]string{"zone", "rack", "host"}, rules[0].LocationLabels)
-	re.Equal(DefaultGroupID, rules[1].GroupID)
-	re.Equal(defaultWitnessRuleID, rules[1].ID)
-	re.Equal(0, rules[1].Index)
-	re.Empty(rules[1].StartKey)
-	re.Empty(rules[1].EndKey)
-	re.Equal(Voter, rules[1].Role)
-	re.True(rules[1].IsWitness)
-	re.Equal([]string{"zone", "rack", "host"}, rules[1].LocationLabels)
-}
-
 func TestAdjustRule(t *testing.T) {
 	re := require.New(t)
-	_, manager := newTestManager(t, false)
+	_, manager := newTestManager(t)
 	rules := []Rule{
 		{GroupID: "group", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: Voter, Count: 3},
 		{GroupID: "", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: Voter, Count: 3},
@@ -118,7 +95,7 @@ func TestAdjustRule(t *testing.T) {
 		Count:       3,
 	}, "group"))
 
-	re.Error(manager.AdjustRule(&Rule{
+	deprecatedRule := &Rule{
 		GroupID:          "tiflash",
 		ID:               "id",
 		StartKeyHex:      hex.EncodeToString(codec.EncodeBytes([]byte{0})),
@@ -127,12 +104,14 @@ func TestAdjustRule(t *testing.T) {
 		Count:            1,
 		IsWitness:        true,
 		LabelConstraints: []LabelConstraint{{Key: "engine", Op: "in", Values: []string{"tiflash"}}},
-	}, "tiflash"))
+	}
+	re.NoError(manager.AdjustRule(deprecatedRule, "tiflash"))
+	re.False(deprecatedRule.IsWitness)
 }
 
 func TestLeaderCheck(t *testing.T) {
 	re := require.New(t)
-	_, manager := newTestManager(t, false)
+	_, manager := newTestManager(t)
 	re.Regexp(".*needs at least one leader or voter.*", manager.SetRule(&Rule{GroupID: DefaultGroupID, ID: DefaultRuleID, Role: Learner, Count: 3}).Error())
 	re.Regexp(".*define multiple leaders by count 2.*", manager.SetRule(&Rule{GroupID: "g2", ID: "33", Role: Leader, Count: 2}).Error())
 	re.Regexp(".*multiple leader replicas.*", manager.Batch([]RuleOp{
@@ -149,7 +128,7 @@ func TestLeaderCheck(t *testing.T) {
 
 func TestSaveLoad(t *testing.T) {
 	re := require.New(t)
-	store, manager := newTestManager(t, false)
+	store, manager := newTestManager(t)
 	rules := []*Rule{
 		{GroupID: DefaultGroupID, ID: DefaultRuleID, Role: Voter, Count: 5},
 		{GroupID: "foo", ID: "baz", StartKeyHex: "", EndKeyHex: "abcd", Role: Voter, Count: 1},
@@ -172,7 +151,7 @@ func TestSaveLoad(t *testing.T) {
 
 func TestSetAfterGet(t *testing.T) {
 	re := require.New(t)
-	store, manager := newTestManager(t, false)
+	store, manager := newTestManager(t)
 	rule := manager.GetRule(DefaultGroupID, DefaultRuleID)
 	rule.Count = 1
 	err := manager.SetRule(rule)
@@ -187,15 +166,16 @@ func TestSetAfterGet(t *testing.T) {
 
 func checkRules(t *testing.T, rules []*Rule, expect [][2]string) {
 	re := require.New(t)
-	re.Len(rules, len(expect))
-	for i := range rules {
-		re.Equal(expect[i], rules[i].Key())
+	actual := make([][2]string, 0, len(rules))
+	for _, rule := range rules {
+		actual = append(actual, rule.Key())
 	}
+	re.Equal(expect, actual)
 }
 
 func TestKeys(t *testing.T) {
 	re := require.New(t)
-	_, manager := newTestManager(t, false)
+	_, manager := newTestManager(t)
 	rules := []*Rule{
 		{GroupID: "1", ID: "1", Role: Voter, Count: 1, StartKeyHex: "", EndKeyHex: ""},
 		{GroupID: "2", ID: "2", Role: Voter, Count: 1, StartKeyHex: "11", EndKeyHex: "ff"},
@@ -289,7 +269,7 @@ func TestKeys(t *testing.T) {
 
 func TestDeleteByIDPrefix(t *testing.T) {
 	re := require.New(t)
-	_, manager := newTestManager(t, false)
+	_, manager := newTestManager(t)
 	err := manager.SetRules([]*Rule{
 		{GroupID: "g1", ID: "foo1", Role: Voter, Count: 1},
 		{GroupID: "g2", ID: "foo1", Role: Voter, Count: 1},
@@ -313,7 +293,7 @@ func TestDeleteByIDPrefix(t *testing.T) {
 
 func TestRangeGap(t *testing.T) {
 	re := require.New(t)
-	_, manager := newTestManager(t, false)
+	_, manager := newTestManager(t)
 	err := manager.DeleteRule(DefaultGroupID, DefaultRuleID)
 	re.Error(err)
 
@@ -336,7 +316,7 @@ func TestRangeGap(t *testing.T) {
 
 func TestGroupConfig(t *testing.T) {
 	re := require.New(t)
-	_, manager := newTestManager(t, false)
+	_, manager := newTestManager(t)
 	pd1 := &RuleGroup{ID: DefaultGroupID}
 	re.Equal(pd1, manager.GetRuleGroup(DefaultGroupID))
 
@@ -372,7 +352,7 @@ func TestGroupConfig(t *testing.T) {
 
 func TestRuleVersion(t *testing.T) {
 	re := require.New(t)
-	_, manager := newTestManager(t, false)
+	_, manager := newTestManager(t)
 	rule1 := manager.GetRule(DefaultGroupID, DefaultRuleID)
 	re.Equal(uint64(0), rule1.Version)
 	// create new rule
@@ -463,7 +443,7 @@ func TestCheckApplyRules(t *testing.T) {
 
 func TestCacheManager(t *testing.T) {
 	re := require.New(t)
-	_, manager := newTestManager(t, false)
+	_, manager := newTestManager(t)
 	manager.conf.SetPlacementRulesCacheEnabled(true)
 	rules := addExtraRules(0)
 	re.NoError(manager.SetRules(rules))

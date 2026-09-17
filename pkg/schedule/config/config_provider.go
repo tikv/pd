@@ -54,7 +54,6 @@ type SchedulerConfigProvider interface {
 	GetRegionScheduleLimit() uint64
 	GetLeaderScheduleLimit() uint64
 	GetHotRegionScheduleLimit() uint64
-	GetWitnessScheduleLimit() uint64
 
 	GetHotRegionCacheHitsThreshold() int
 	GetMaxMovableHotPeerSize() int64
@@ -77,7 +76,6 @@ type CheckerConfigProvider interface {
 	SharedConfigProvider
 	StoreConfigProvider
 
-	GetSwitchWitnessInterval() time.Duration
 	IsRemoveExtraReplicaEnabled() bool
 	IsRemoveDownReplicaEnabled() bool
 	IsReplaceOfflineReplicaEnabled() bool
@@ -116,7 +114,6 @@ type SharedConfigProvider interface {
 	GetRegionScoreFormulaVersion() string
 	GetSchedulerMaxWaitingOperator() uint64
 	GetStoreLimitByType(uint64, storelimit.Type) float64
-	IsWitnessAllowed() bool
 	IsPlacementRulesCacheEnabled() bool
 	SetHaltScheduling(bool, string)
 	GetHotRegionCacheHitsThreshold() int
@@ -124,7 +121,6 @@ type SharedConfigProvider interface {
 	// for test purpose
 	SetPlacementRuleEnabled(bool)
 	SetPlacementRulesCacheEnabled(bool)
-	SetEnableWitness(bool)
 }
 
 // ConfProvider is the interface that wraps the ConfProvider related methods.

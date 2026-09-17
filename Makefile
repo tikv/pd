@@ -179,17 +179,18 @@ PACKAGES := $(shell go list ./...)
 
 GO_TOOLS_BIN_PATH := $(ROOT_PATH)/.tools/bin
 PATH := $(GO_TOOLS_BIN_PATH):$(PATH)
+RETRY := $(ROOT_PATH)/scripts/retry.sh
 SHELL := env PATH='$(PATH)' GOBIN='$(GO_TOOLS_BIN_PATH)' $(shell which bash)
 
 install-tools:
 	@mkdir -p $(GO_TOOLS_BIN_PATH)
-	@which golangci-lint >/dev/null 2>&1 || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GO_TOOLS_BIN_PATH) v2.6.0
+	@which golangci-lint >/dev/null 2>&1 || $(RETRY) bash -o pipefail -c 'curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/v2.6.0/install.sh | sh -s -- -b "$$1" v2.6.0' _ "$(GO_TOOLS_BIN_PATH)"
 	@which promtool >/dev/null 2>&1 || { \
-		GOWORK=off go mod download github.com/prometheus/prometheus@v0.310.0; \
+		GOWORK=off $(RETRY) go mod download github.com/prometheus/prometheus@v0.310.0 || exit $$?; \
 		prom_dir=$$(go env GOMODCACHE)/github.com/prometheus/prometheus@v0.310.0; \
-		(cd $$prom_dir && GOWORK=off go install ./cmd/promtool); \
+		(cd $$prom_dir && GOWORK=off $(RETRY) go install ./cmd/promtool); \
 	}
-	@grep '_' tools.go | sed 's/"//g' | awk '{print $$2}' | xargs go install
+	@grep '_' tools.go | sed 's/"//g' | awk '{print $$2}' | xargs $(RETRY) go install
 
 .PHONY: install-tools
 

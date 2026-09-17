@@ -15,6 +15,10 @@
 package tests
 
 import (
+	"context"
+	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"testing"
 	"time"
@@ -23,9 +27,12 @@ import (
 	"go.uber.org/goleak"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/server"
 	serverconfig "github.com/tikv/pd/server/config"
 )
 
@@ -99,7 +106,7 @@ func TestRegenerateInitialServerURLsKeepsInitialClusterConsistent(t *testing.T) 
 	re.NoError(err)
 	re.NotEqual(firstConf.InitialCluster, secondConf.InitialCluster)
 
-	serverConfs, err := cluster.regenerateInitialServerConfigs()
+	serverConfs, err := cluster.regenerateInitialServerConfigs(false)
 	re.NoError(err)
 	re.Len(serverConfs, len(config.InitialServers))
 
@@ -122,4 +129,109 @@ func cleanupClusterConfig(t *testing.T, config *clusterConfig) {
 			require.NoError(t, os.RemoveAll(dataDir))
 		})
 	}
+}
+
+func TestRunInitialServersRetriesPortConflict(t *testing.T) {
+	re := require.New(t)
+	// Bound the etcd fallback below the outer test deadline so the result wait
+	// cannot leave startup goroutines running during cleanup.
+	oldTimeout := server.EtcdStartTimeout
+	server.EtcdStartTimeout = 10 * time.Second
+	t.Cleanup(func() { server.EtcdStartTimeout = oldTimeout })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := NewTestCluster(ctx, 2)
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	// Fail the second member while the first waits for quorum. Startup must
+	// observe the error out of order, cancel the first member, and join both
+	// goroutines before destroying their data and retrying with new ports.
+	conf := cluster.config.InitialServers[1]
+	peerURL, err := url.Parse(conf.PeerURLs)
+	re.NoError(err)
+	listener, err := net.Listen("tcp", peerURL.Host)
+	re.NoError(err)
+	defer listener.Close()
+	conflictingURL := conf.PeerURLs
+
+	result := make(chan error, 1)
+	go func() { result <- cluster.RunInitialServers() }()
+	select {
+	case err := <-result:
+		re.NoError(err)
+	case <-time.After(20 * time.Second):
+		cancel()
+		<-result
+		t.Fatal("startup did not cancel the sibling waiting for quorum")
+	}
+	re.NotEqual(conflictingURL, conf.PeerURLs)
+	for _, s := range cluster.servers {
+		re.Equal(Running, s.State())
+	}
+	// The successful attempt must outlive the startup context.
+	re.NotEmpty(cluster.WaitLeader())
+	re.NoError(cluster.StopAll())
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+}
+
+func TestRestartPreservesDataOnClientPortConflict(t *testing.T) {
+	re := require.New(t)
+	keypath.ResetClusterID()
+	t.Cleanup(keypath.ResetClusterID)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := NewTestCluster(ctx, 2)
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+	clusterID := keypath.ClusterID()
+	const markerKey = "/test/restart-port-conflict"
+	before, err := cluster.GetEtcdClient().Put(ctx, markerKey, "preserved")
+	re.NoError(err)
+	re.NoError(cluster.StopAll())
+	keypath.ResetClusterID()
+
+	conf := cluster.config.InitialServers[1]
+	clientURL, err := url.Parse(conf.ClientURLs)
+	re.NoError(err)
+	listener, err := net.Listen("tcp", clientURL.Host)
+	re.NoError(err)
+	defer listener.Close()
+	oldClientURL, oldPeerURL := conf.ClientURLs, conf.PeerURLs
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+	re.NotEqual(oldClientURL, conf.ClientURLs)
+	after, err := cluster.GetEtcdClient().Get(ctx, markerKey)
+	re.NoError(err)
+	re.Len(after.Kvs, 1)
+	re.Equal("preserved", string(after.Kvs[0].Value))
+	re.Equal(before.Header.ClusterId, after.Header.ClusterId)
+	re.Equal(clusterID, keypath.ClusterID())
+	re.Equal(oldPeerURL, conf.PeerURLs)
+}
+
+func TestResignLeaderDoesNotResetLeaseInCaller(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := NewTestCluster(ctx, 3)
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+	oldLeader := cluster.WaitLeader()
+	re.NotEmpty(oldLeader)
+	leader := cluster.GetServer(oldLeader)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/blockLeaseClose",
+		fmt.Sprintf("return(%q)", "leader election@"+oldLeader)))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/blockLeaseClose"))
+	}()
+	start := time.Now()
+	re.NoError(leader.ResignLeader())
+	// The transfer API must not wait for the injected ten-second lease close.
+	re.Less(time.Since(start), 10*time.Second)
+	re.NotEmpty(cluster.WaitLeaderChange(oldLeader))
 }

@@ -32,13 +32,11 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
-	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
-	"github.com/tikv/pd/pkg/versioninfo"
 )
 
 func TestRuleCheckerTestSuite(t *testing.T) {
@@ -59,12 +57,10 @@ func (suite *ruleCheckerTestSuite) SetupTest() {
 	cfg := mockconfig.NewTestOptions()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.cluster = mockcluster.NewCluster(suite.ctx, cfg)
-	suite.cluster.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.SwitchWitness))
 	suite.cluster.SetEnablePlacementRules(true)
-	suite.cluster.SetEnableWitness(true)
 	suite.cluster.SetEnableUseJointConsensus(false)
 	suite.ruleManager = suite.cluster.RuleManager
-	suite.rc = NewRuleChecker(suite.ctx, suite.cluster, suite.ruleManager, cache.NewIDTTL(suite.ctx, time.Minute, 3*time.Minute))
+	suite.rc = NewRuleChecker(suite.cluster, suite.ruleManager, cache.NewIDTTL(suite.ctx, time.Minute, 3*time.Minute))
 }
 
 func (suite *ruleCheckerTestSuite) TearDownTest() {
@@ -174,8 +170,8 @@ func (suite *ruleCheckerTestSuite) TestFixPeer() {
 	r = r.Clone(core.WithDownPeers([]*pdpb.PeerStats{{Peer: r.GetStorePeer(2), DownSeconds: 60000}}))
 	op = suite.rc.Check(r)
 	re.NotNil(op)
-	re.Equal("fast-replace-rule-down-peer", op.Desc())
-	re.Equal(constant.Urgent, op.GetPriorityLevel())
+	re.Equal("replace-rule-down-peer", op.Desc())
+	re.Equal(constant.High, op.GetPriorityLevel())
 	var add operator.AddLearner
 	re.IsType(add, op.Step(0))
 	suite.cluster.SetStoreUp(2)
@@ -497,224 +493,6 @@ func (suite *ruleCheckerTestSuite) TestFixLeaderRoleWithUnhealthyRegion() {
 	r := suite.cluster.GetRegion(1)
 	op := suite.rc.Check(r)
 	re.Nil(op)
-}
-
-func (suite *ruleCheckerTestSuite) TestFixRuleWitness() {
-	re := suite.Require()
-	suite.cluster.AddLabelsStore(1, 1, map[string]string{"A": "leader"})
-	suite.cluster.AddLabelsStore(2, 1, map[string]string{"B": "follower"})
-	suite.cluster.AddLabelsStore(3, 1, map[string]string{"C": "voter"})
-	suite.cluster.AddLeaderRegion(1, 1)
-
-	err := suite.ruleManager.SetRule(&placement.Rule{
-		GroupID:   placement.DefaultGroupID,
-		ID:        "r1",
-		Index:     100,
-		Override:  true,
-		Role:      placement.Voter,
-		Count:     1,
-		IsWitness: true,
-		LabelConstraints: []placement.LabelConstraint{
-			{Key: "C", Op: "in", Values: []string{"voter"}},
-		},
-	})
-	re.NoError(err)
-	op := suite.rc.Check(suite.cluster.GetRegion(1))
-	re.NotNil(op)
-	re.Equal("add-rule-peer", op.Desc())
-	re.Equal(uint64(3), op.Step(0).(operator.AddLearner).ToStore)
-	re.True(op.Step(0).(operator.AddLearner).IsWitness)
-}
-
-func (suite *ruleCheckerTestSuite) TestFixRuleWitness2() {
-	re := suite.Require()
-	suite.cluster.AddLabelsStore(1, 1, map[string]string{"A": "leader"})
-	suite.cluster.AddLabelsStore(2, 1, map[string]string{"B": "voter"})
-	suite.cluster.AddLabelsStore(3, 1, map[string]string{"C": "voter"})
-	suite.cluster.AddLabelsStore(4, 1, map[string]string{"D": "voter"})
-	suite.cluster.AddLeaderRegion(1, 1, 2, 3, 4)
-
-	err := suite.ruleManager.SetRule(&placement.Rule{
-		GroupID:   placement.DefaultGroupID,
-		ID:        "r1",
-		Index:     100,
-		Override:  false,
-		Role:      placement.Voter,
-		Count:     1,
-		IsWitness: true,
-		LabelConstraints: []placement.LabelConstraint{
-			{Key: "D", Op: "in", Values: []string{"voter"}},
-		},
-	})
-	re.NoError(err)
-	op := suite.rc.Check(suite.cluster.GetRegion(1))
-	re.NotNil(op)
-	re.Equal("fix-witness-peer", op.Desc())
-	re.Equal(uint64(4), op.Step(0).(operator.BecomeWitness).StoreID)
-}
-
-func (suite *ruleCheckerTestSuite) TestFixRuleWitness3() {
-	re := suite.Require()
-	suite.cluster.AddLabelsStore(1, 1, map[string]string{"A": "leader"})
-	suite.cluster.AddLabelsStore(2, 1, map[string]string{"B": "voter"})
-	suite.cluster.AddLabelsStore(3, 1, map[string]string{"C": "voter"})
-	suite.cluster.AddLeaderRegion(1, 1, 2, 3)
-
-	r := suite.cluster.GetRegion(1)
-	// set peer3 to witness
-	r = r.Clone(core.WithWitnesses([]*metapb.Peer{r.GetPeer(3)}))
-	suite.cluster.PutRegion(r)
-	op := suite.rc.Check(r)
-	re.NotNil(op)
-	re.Equal("fix-non-witness-peer", op.Desc())
-	re.Equal(uint64(3), op.Step(0).(operator.RemovePeer).FromStore)
-	re.Equal(uint64(3), op.Step(1).(operator.AddLearner).ToStore)
-}
-
-func (suite *ruleCheckerTestSuite) TestFixRuleWitness4() {
-	re := suite.Require()
-	suite.cluster.AddLabelsStore(1, 1, map[string]string{"A": "leader"})
-	suite.cluster.AddLabelsStore(2, 1, map[string]string{"B": "voter"})
-	suite.cluster.AddLabelsStore(3, 1, map[string]string{"C": "learner"})
-	suite.cluster.AddLeaderRegion(1, 1, 2, 3)
-
-	r := suite.cluster.GetRegion(1)
-	// set peer3 to witness learner
-	r = r.Clone(core.WithLearners([]*metapb.Peer{r.GetPeer(3)}))
-	r = r.Clone(core.WithWitnesses([]*metapb.Peer{r.GetPeer(3)}))
-
-	err := suite.ruleManager.SetRules([]*placement.Rule{
-		{
-			GroupID:   placement.DefaultGroupID,
-			ID:        placement.DefaultRuleID,
-			Index:     100,
-			Override:  true,
-			Role:      placement.Voter,
-			Count:     2,
-			IsWitness: false,
-		},
-		{
-			GroupID:   placement.DefaultGroupID,
-			ID:        "r1",
-			Index:     100,
-			Override:  false,
-			Role:      placement.Learner,
-			Count:     1,
-			IsWitness: false,
-			LabelConstraints: []placement.LabelConstraint{
-				{Key: "C", Op: "in", Values: []string{"learner"}},
-			},
-		},
-	})
-	re.NoError(err)
-
-	op := suite.rc.Check(r)
-	re.NotNil(op)
-	re.Equal("fix-non-witness-peer", op.Desc())
-	re.Equal(uint64(3), op.Step(0).(operator.BecomeNonWitness).StoreID)
-}
-
-func (suite *ruleCheckerTestSuite) TestFixRuleWitness5() {
-	re := suite.Require()
-	suite.cluster.AddLabelsStore(1, 1, map[string]string{"A": "leader"})
-	suite.cluster.AddLabelsStore(2, 1, map[string]string{"B": "voter"})
-	suite.cluster.AddLabelsStore(3, 1, map[string]string{"C": "voter"})
-	suite.cluster.AddLeaderRegion(1, 1, 2, 3)
-
-	err := suite.ruleManager.SetRule(&placement.Rule{
-		GroupID:   placement.DefaultGroupID,
-		ID:        "r1",
-		Index:     100,
-		Override:  true,
-		Role:      placement.Voter,
-		Count:     2,
-		IsWitness: true,
-		LabelConstraints: []placement.LabelConstraint{
-			{Key: "A", Op: "In", Values: []string{"leader"}},
-		},
-	})
-	re.Error(err)
-	re.Equal(errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("define too many witness by count %d", 2)).Error(), err.Error())
-}
-
-func (suite *ruleCheckerTestSuite) TestFixRuleWitness6() {
-	re := suite.Require()
-	suite.cluster.AddLabelsStore(1, 1, map[string]string{"A": "leader"})
-	suite.cluster.AddLabelsStore(2, 1, map[string]string{"B": "voter"})
-	suite.cluster.AddLabelsStore(3, 1, map[string]string{"C": "voter"})
-	suite.cluster.AddLeaderRegion(1, 1, 2, 3)
-
-	err := suite.ruleManager.SetRules([]*placement.Rule{
-		{
-			GroupID:   placement.DefaultGroupID,
-			ID:        placement.DefaultRuleID,
-			Index:     100,
-			Role:      placement.Voter,
-			IsWitness: false,
-			Count:     2,
-		},
-		{
-			GroupID:   placement.DefaultGroupID,
-			ID:        "r1",
-			Index:     100,
-			Role:      placement.Voter,
-			Count:     1,
-			IsWitness: true,
-			LabelConstraints: []placement.LabelConstraint{
-				{Key: "C", Op: "in", Values: []string{"voter"}},
-			},
-		},
-	})
-	re.NoError(err)
-
-	suite.rc.RecordRegionPromoteToNonWitness(1)
-	op := suite.rc.Check(suite.cluster.GetRegion(1))
-	re.Nil(op)
-
-	suite.rc.switchWitnessCache.Remove(1)
-	op = suite.rc.Check(suite.cluster.GetRegion(1))
-	re.NotNil(op)
-}
-
-func (suite *ruleCheckerTestSuite) TestDisableWitness() {
-	re := suite.Require()
-	suite.cluster.AddLabelsStore(1, 1, map[string]string{"A": "leader"})
-	suite.cluster.AddLabelsStore(2, 1, map[string]string{"B": "voter"})
-	suite.cluster.AddLabelsStore(3, 1, map[string]string{"C": "voter"})
-	suite.cluster.AddLeaderRegion(1, 1, 2, 3)
-
-	err := suite.ruleManager.SetRules([]*placement.Rule{
-		{
-			GroupID:   placement.DefaultGroupID,
-			ID:        placement.DefaultRuleID,
-			Index:     100,
-			Role:      placement.Voter,
-			IsWitness: false,
-			Count:     2,
-		},
-		{
-			GroupID:   placement.DefaultGroupID,
-			ID:        "r1",
-			Index:     100,
-			Role:      placement.Voter,
-			Count:     1,
-			IsWitness: true,
-			LabelConstraints: []placement.LabelConstraint{
-				{Key: "C", Op: "in", Values: []string{"voter"}},
-			},
-		},
-	})
-	re.NoError(err)
-
-	r := suite.cluster.GetRegion(1)
-	r = r.Clone(core.WithWitnesses([]*metapb.Peer{r.GetPeer(3)}))
-
-	op := suite.rc.Check(r)
-	re.Nil(op)
-
-	suite.cluster.SetEnableWitness(false)
-	op = suite.rc.Check(r)
-	re.NotNil(op)
 }
 
 func (suite *ruleCheckerTestSuite) TestBetterReplacement() {
@@ -1122,22 +900,20 @@ func (suite *ruleCheckerTestSuite) TestFixOrphanPeerWithDisconnectedStoreAndRule
 				suite.cluster.AddLeaderRegionWithRange(1, "", "", leader, voterFollowers...)
 				err := suite.ruleManager.SetRules([]*placement.Rule{
 					{
-						GroupID:   placement.DefaultGroupID,
-						ID:        placement.DefaultRuleID,
-						Index:     100,
-						Override:  true,
-						Role:      placement.Voter,
-						Count:     5,
-						IsWitness: false,
+						GroupID:  placement.DefaultGroupID,
+						ID:       placement.DefaultRuleID,
+						Index:    100,
+						Override: true,
+						Role:     placement.Voter,
+						Count:    5,
 					},
 					{
-						GroupID:   placement.DefaultGroupID,
-						ID:        "r1",
-						Index:     100,
-						Override:  false,
-						Role:      placement.Learner,
-						Count:     1,
-						IsWitness: false,
+						GroupID:  placement.DefaultGroupID,
+						ID:       "r1",
+						Index:    100,
+						Override: false,
+						Role:     placement.Learner,
+						Count:    1,
 						LabelConstraints: []placement.LabelConstraint{
 							{Key: "host", Op: "in", Values: []string{"host" + strconv.FormatUint(learnerStore, 10)}},
 						},
@@ -1337,7 +1113,7 @@ func (suite *ruleCheckerTestSuite) TestPriorityFitHealthPeersAndTiFlash() {
 	suite.cluster.AddLabelsStore(5, 1, map[string]string{"host": "host5"})
 	op = suite.rc.Check(suite.cluster.GetRegion(1))
 	re.NotNil(op)
-	re.Equal("fast-replace-rule-down-peer", op.Desc())
+	re.Equal("replace-rule-down-peer", op.Desc())
 }
 
 func (suite *ruleCheckerTestSuite) TestIssue3293() {
@@ -1511,40 +1287,7 @@ func (suite *ruleCheckerTestSuite) TestFixDownPeer() {
 	re.Nil(suite.rc.Check(region))
 }
 
-func (suite *ruleCheckerTestSuite) TestFastFailoverLeaderTransferWithExhaustedLimit() {
-	re := suite.Require()
-	tc := suite.cluster
-	for _, id := range []uint64{1, 2, 3, 4} {
-		tc.AddLeaderStore(id, 1)
-	}
-	tc.AddLeaderRegion(1, 1, 2, 3)
-	tc.SetStoreDown(1)
-	tc.PutStore(tc.GetStore(1).Clone(core.SetLastHeartbeatTS(time.Now().Add(-time.Hour))))
-	region := tc.GetRegion(1)
-	region = region.Clone(core.WithDownPeers([]*pdpb.PeerStats{{Peer: region.GetStorePeer(1), DownSeconds: 3600}}))
-	// Prefer a healthy follower over retaining the outgoing leader.
-	suite.rc.record.incOfflineLeaderCount(1)
-	for _, id := range []uint64{2, 3, 4} {
-		tc.SetStoreLimit(id, storelimit.TransferLeaderIn, 0.00006)
-		tc.ResetStoreLimit(id, storelimit.TransferLeaderIn, 0.000001)
-		re.True(tc.GetStore(id).GetStoreLimit().Take(storelimit.RegionInfluence[storelimit.TransferLeaderIn], storelimit.TransferLeaderIn, constant.Medium))
-	}
-	op := suite.rc.Check(region)
-	re.Nil(op)
-
-	// Fast failover keeps its priority but must select a target with budget.
-	tc.SetStoreLimit(2, storelimit.TransferLeaderIn, storelimit.Unlimited)
-	tc.ResetStoreLimit(2, storelimit.TransferLeaderIn, storelimit.Unlimited/time.Minute.Seconds())
-	op = suite.rc.Check(region)
-	re.NotNil(op)
-	re.Equal(constant.Urgent, op.GetPriorityLevel())
-	re.Equal("replace-rule-down-leader-peer", op.Desc())
-	influence := operator.NewTotalOpInfluence([]*operator.Operator{op}, tc.GetBasicCluster())
-	re.Equal(storelimit.RegionInfluence[storelimit.TransferLeaderIn], influence.GetStoreInfluence(2).GetStepCost(storelimit.TransferLeaderIn))
-	re.Zero(influence.GetStoreInfluence(3).GetStepCost(storelimit.TransferLeaderIn))
-}
-
-func (suite *ruleCheckerTestSuite) TestFixDownPeerWithNoWitness() {
+func (suite *ruleCheckerTestSuite) TestFixDownPeerWithoutReplacementStore() {
 	re := suite.Require()
 	suite.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
 	suite.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z2"})
@@ -1559,187 +1302,6 @@ func (suite *ruleCheckerTestSuite) TestFixDownPeerWithNoWitness() {
 	re.Nil(suite.rc.Check(r))
 }
 
-func (suite *ruleCheckerTestSuite) TestFixDownWitnessPeer() {
-	re := suite.Require()
-	suite.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
-	suite.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z2"})
-	suite.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z3"})
-	suite.cluster.AddLeaderRegion(1, 1, 2, 3)
-
-	suite.cluster.SetStoreDown(2)
-	suite.cluster.GetStore(2).GetMeta().LastHeartbeat = time.Now().Add(-11 * time.Minute).UnixNano()
-	r := suite.cluster.GetRegion(1)
-	// set peer2 to down
-	r = r.Clone(core.WithDownPeers([]*pdpb.PeerStats{{Peer: r.GetStorePeer(2), DownSeconds: 600}}))
-	// set peer2 to witness
-	r = r.Clone(core.WithWitnesses([]*metapb.Peer{r.GetPeer(2)}))
-
-	err := suite.ruleManager.SetRule(&placement.Rule{
-		GroupID: placement.DefaultGroupID,
-		ID:      placement.DefaultRuleID,
-		Role:    placement.Voter,
-		Count:   2,
-	})
-	re.NoError(err)
-	err = suite.ruleManager.SetRule(&placement.Rule{
-		GroupID:   placement.DefaultGroupID,
-		ID:        "r1",
-		Role:      placement.Voter,
-		Count:     1,
-		IsWitness: true,
-	})
-	re.NoError(err)
-	re.Nil(suite.rc.Check(r))
-
-	suite.cluster.GetStore(2).GetMeta().LastHeartbeat = time.Now().Add(-31 * time.Minute).UnixNano()
-	re.Nil(suite.rc.Check(r))
-}
-
-func (suite *ruleCheckerTestSuite) TestFixDownPeerWithAvailableWitness() {
-	re := suite.Require()
-	suite.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
-	suite.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z2"})
-	suite.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z3"})
-	suite.cluster.AddLeaderRegion(1, 1, 2, 3)
-
-	suite.cluster.SetStoreDown(2)
-	suite.cluster.GetStore(2).GetMeta().LastHeartbeat = time.Now().Add(-11 * time.Minute).UnixNano()
-	r := suite.cluster.GetRegion(1)
-	// set peer2 to down
-	r = r.Clone(core.WithDownPeers([]*pdpb.PeerStats{{Peer: r.GetStorePeer(2), DownSeconds: 600}}))
-	// set peer3 to witness
-	r = r.Clone(core.WithWitnesses([]*metapb.Peer{r.GetPeer(3)}))
-
-	err := suite.ruleManager.SetRule(&placement.Rule{
-		GroupID: placement.DefaultGroupID,
-		ID:      placement.DefaultRuleID,
-		Role:    placement.Voter,
-		Count:   2,
-	})
-	re.NoError(err)
-	err = suite.ruleManager.SetRule(&placement.Rule{
-		GroupID:   placement.DefaultGroupID,
-		ID:        "r1",
-		Role:      placement.Voter,
-		Count:     1,
-		IsWitness: true,
-	})
-	re.NoError(err)
-
-	op := suite.rc.Check(r)
-
-	re.NotNil(op)
-	re.Equal("promote-witness-for-down", op.Desc())
-	re.Equal(uint64(3), op.Step(0).(operator.RemovePeer).FromStore)
-	re.Equal(uint64(3), op.Step(1).(operator.AddLearner).ToStore)
-	re.Equal(uint64(3), op.Step(2).(operator.BecomeNonWitness).StoreID)
-	re.Equal(uint64(3), op.Step(3).(operator.PromoteLearner).ToStore)
-}
-
-func (suite *ruleCheckerTestSuite) TestFixDownPeerWithAvailableWitness2() {
-	re := suite.Require()
-	suite.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
-	suite.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z2"})
-	suite.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z3"})
-	suite.cluster.AddLeaderRegion(1, 1, 2, 3)
-
-	suite.cluster.SetStoreDown(2)
-	suite.cluster.GetStore(2).GetMeta().LastHeartbeat = time.Now().Add(-31 * time.Minute).UnixNano()
-	r := suite.cluster.GetRegion(1)
-	// set peer2 to down
-	r = r.Clone(core.WithDownPeers([]*pdpb.PeerStats{{Peer: r.GetStorePeer(2), DownSeconds: 6000}}))
-	// set peer3 to witness
-	r = r.Clone(core.WithWitnesses([]*metapb.Peer{r.GetPeer(3)}))
-
-	err := suite.ruleManager.SetRule(&placement.Rule{
-		GroupID: placement.DefaultGroupID,
-		ID:      placement.DefaultRuleID,
-		Role:    placement.Voter,
-		Count:   2,
-	})
-	re.NoError(err)
-	err = suite.ruleManager.SetRule(&placement.Rule{
-		GroupID:   placement.DefaultGroupID,
-		ID:        "r1",
-		Role:      placement.Voter,
-		Count:     1,
-		IsWitness: true,
-	})
-	re.NoError(err)
-
-	op := suite.rc.Check(r)
-	re.Nil(op)
-}
-
-func (suite *ruleCheckerTestSuite) TestFixDownPeerWithAvailableWitness3() {
-	re := suite.Require()
-	suite.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
-	suite.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z2"})
-	suite.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z3"})
-	suite.cluster.AddLabelsStore(4, 1, map[string]string{"zone": "z3"})
-	suite.cluster.AddLeaderRegion(1, 1, 2, 3)
-
-	suite.cluster.SetStoreDown(2)
-	suite.cluster.GetStore(2).GetMeta().LastHeartbeat = time.Now().Add(-31 * time.Minute).UnixNano()
-	r := suite.cluster.GetRegion(1)
-	// set peer2 to down
-	r = r.Clone(core.WithDownPeers([]*pdpb.PeerStats{{Peer: r.GetStorePeer(2), DownSeconds: 6000}}))
-	// set peer3 to witness
-	r = r.Clone(core.WithWitnesses([]*metapb.Peer{r.GetPeer(3)}))
-
-	err := suite.ruleManager.SetRule(&placement.Rule{
-		GroupID: placement.DefaultGroupID,
-		ID:      placement.DefaultRuleID,
-		Role:    placement.Voter,
-		Count:   2,
-	})
-	re.NoError(err)
-	err = suite.ruleManager.SetRule(&placement.Rule{
-		GroupID:   placement.DefaultGroupID,
-		ID:        "r1",
-		Role:      placement.Voter,
-		Count:     1,
-		IsWitness: true,
-	})
-	re.NoError(err)
-
-	op := suite.rc.Check(r)
-
-	re.NotNil(op)
-	re.Equal("fast-replace-rule-down-peer", op.Desc())
-	re.Equal(uint64(4), op.Step(0).(operator.AddLearner).ToStore)
-	re.True(op.Step(0).(operator.AddLearner).IsWitness)
-	re.Equal(uint64(4), op.Step(1).(operator.PromoteLearner).ToStore)
-	re.True(op.Step(1).(operator.PromoteLearner).IsWitness)
-	re.Equal(uint64(2), op.Step(2).(operator.RemovePeer).FromStore)
-}
-
-func (suite *ruleCheckerTestSuite) TestFixDownPeerWithAvailableWitness4() {
-	re := suite.Require()
-	suite.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
-	suite.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z2"})
-	suite.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z3"})
-	suite.cluster.AddLabelsStore(4, 1, map[string]string{"zone": "z3"})
-	suite.cluster.AddLeaderRegion(1, 1, 2, 3)
-
-	suite.cluster.SetStoreDown(2)
-	suite.cluster.GetStore(2).GetMeta().LastHeartbeat = time.Now().Add(-31 * time.Minute).UnixNano()
-	r := suite.cluster.GetRegion(1)
-	// set peer2 to down
-	r = r.Clone(core.WithDownPeers([]*pdpb.PeerStats{{Peer: r.GetStorePeer(2), DownSeconds: 6000}}))
-
-	op := suite.rc.Check(r)
-
-	re.NotNil(op)
-	re.Equal("fast-replace-rule-down-peer", op.Desc())
-	re.Equal(uint64(4), op.Step(0).(operator.AddLearner).ToStore)
-	re.True(op.Step(0).(operator.AddLearner).IsWitness)
-	re.Equal(uint64(4), op.Step(1).(operator.PromoteLearner).ToStore)
-	re.True(op.Step(1).(operator.PromoteLearner).IsWitness)
-	re.Equal(uint64(2), op.Step(2).(operator.RemovePeer).FromStore)
-}
-
-// See issue: https://github.com/tikv/pd/issues/3705
 func (suite *ruleCheckerTestSuite) TestFixOfflinePeer() {
 	re := suite.Require()
 	suite.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
@@ -1790,8 +1352,6 @@ func (suite *ruleCheckerTestSuite) TestPreferAddTiFlashLearnerOverOfflinePeer() 
 		Count:   3,
 	})
 	re.NoError(err)
-	err = suite.ruleManager.DeleteRule(placement.DefaultGroupID, "witness")
-	re.NoError(err)
 	err = suite.ruleManager.SetRule(&placement.Rule{
 		GroupID: "tiflash",
 		ID:      "learner",
@@ -1840,8 +1400,6 @@ func (suite *ruleCheckerTestSuite) TestDoNotPreferTiFlashSwapFitOverOfflinePeer(
 		Count:   3,
 	})
 	re.NoError(err)
-	err = suite.ruleManager.DeleteRule(placement.DefaultGroupID, "witness")
-	re.NoError(err)
 	err = suite.ruleManager.SetRule(&placement.Rule{
 		GroupID: placement.DefaultGroupID,
 		ID:      "generic-learner",
@@ -1888,8 +1446,6 @@ func (suite *ruleCheckerTestSuite) TestDoNotPreferWideEngineLearnerRuleOverOffli
 		Count:   3,
 	})
 	re.NoError(err)
-	err = suite.ruleManager.DeleteRule(placement.DefaultGroupID, "witness")
-	re.NoError(err)
 	err = suite.ruleManager.SetRule(&placement.Rule{
 		GroupID: "wide-engine",
 		ID:      "learner",
@@ -1927,8 +1483,6 @@ func (suite *ruleCheckerTestSuite) TestDoNotPreferTiFlashComputeLearnerRuleOverO
 		Role:    placement.Voter,
 		Count:   3,
 	})
-	re.NoError(err)
-	err = suite.ruleManager.DeleteRule(placement.DefaultGroupID, "witness")
 	re.NoError(err)
 	err = suite.ruleManager.SetRule(&placement.Rule{
 		GroupID: "tiflash-compute",
@@ -1968,8 +1522,6 @@ func (suite *ruleCheckerTestSuite) TestDoNotPreferTiFlashLearnerOverDownPeer() {
 		Count:   3,
 	})
 	re.NoError(err)
-	err = suite.ruleManager.DeleteRule(placement.DefaultGroupID, "witness")
-	re.NoError(err)
 	err = suite.ruleManager.SetRule(&placement.Rule{
 		GroupID: "tiflash",
 		ID:      "learner",
@@ -1993,41 +1545,7 @@ func (suite *ruleCheckerTestSuite) TestDoNotPreferTiFlashLearnerOverDownPeer() {
 	suite.cluster.PutRegion(region)
 	op := suite.rc.Check(suite.cluster.GetRegion(1))
 	re.NotNil(op)
-	re.Equal("fast-replace-rule-down-peer", op.Desc())
-}
-
-func (suite *ruleCheckerTestSuite) TestFixOfflinePeerWithAvailableWitness() {
-	re := suite.Require()
-	suite.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
-	suite.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z1"})
-	suite.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z2"})
-	suite.cluster.AddLabelsStore(4, 1, map[string]string{"zone": "z3"})
-	suite.cluster.AddLabelsStore(5, 1, map[string]string{"zone": "z3"})
-	suite.cluster.AddLeaderRegion(1, 1, 3, 4)
-
-	r := suite.cluster.GetRegion(1)
-	r = r.Clone(core.WithWitnesses([]*metapb.Peer{r.GetPeer(2)}))
-	err := suite.ruleManager.SetRule(&placement.Rule{
-		GroupID: placement.DefaultGroupID,
-		ID:      placement.DefaultRuleID,
-		Role:    placement.Voter,
-		Count:   2,
-	})
-	re.NoError(err)
-	err = suite.ruleManager.SetRule(&placement.Rule{
-		GroupID:   placement.DefaultGroupID,
-		ID:        "r1",
-		Role:      placement.Voter,
-		Count:     1,
-		IsWitness: true,
-	})
-	re.NoError(err)
-	re.Nil(suite.rc.Check(r))
-
-	suite.cluster.SetStoreOffline(4)
-	op := suite.rc.Check(r)
-	re.NotNil(op)
-	re.Equal("replace-rule-offline-peer", op.Desc())
+	re.Equal("replace-rule-down-peer", op.Desc())
 }
 
 func (suite *ruleCheckerTestSuite) TestRuleCache() {
@@ -2250,7 +1768,7 @@ func (suite *ruleCheckerTestSuite) TestOfflineAndDownStore() {
 	region = region.Clone(core.WithDownPeers([]*pdpb.PeerStats{{Peer: region.GetStorePeer(2), DownSeconds: 60000}}))
 	op = suite.rc.Check(region)
 	re.NotNil(op)
-	re.Equal("fast-replace-rule-down-peer", op.Desc())
+	re.Equal("replace-rule-down-peer", op.Desc())
 }
 
 func (suite *ruleCheckerTestSuite) TestPendingList() {
@@ -2387,12 +1905,10 @@ func (suite *ruleCheckerTestAdvancedSuite) SetupTest() {
 	cfg := mockconfig.NewTestOptions()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.cluster = mockcluster.NewCluster(suite.ctx, cfg)
-	suite.cluster.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.SwitchWitness))
 	suite.cluster.SetEnablePlacementRules(true)
-	suite.cluster.SetEnableWitness(true)
 	suite.cluster.SetEnableUseJointConsensus(true)
 	suite.ruleManager = suite.cluster.RuleManager
-	suite.rc = NewRuleChecker(suite.ctx, suite.cluster, suite.ruleManager, cache.NewIDTTL(suite.ctx, time.Minute, 3*time.Minute))
+	suite.rc = NewRuleChecker(suite.cluster, suite.ruleManager, cache.NewIDTTL(suite.ctx, time.Minute, 3*time.Minute))
 }
 
 func (suite *ruleCheckerTestAdvancedSuite) TearDownTest() {
@@ -2621,7 +2137,7 @@ func (suite *ruleCheckerTestSuite) TestIssue7808() {
 	suite.cluster.PutRegion(region)
 	op := suite.rc.Check(suite.cluster.GetRegion(1))
 	re.NotNil(op)
-	re.Equal("fast-replace-rule-down-peer", op.Desc())
+	re.Equal("replace-rule-down-peer", op.Desc())
 	re.Contains(op.Brief(), "mv peer: store [1] to [2]")
 }
 
