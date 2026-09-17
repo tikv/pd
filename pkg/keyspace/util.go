@@ -160,9 +160,19 @@ func MakeKeyRanges(id uint32, keyType string) []any {
 func buildKeyRanges(id uint32, boundType regionBoundType) []any {
 	regionBound := MakeRegionBound(id)
 	if boundType == txnRegionBound {
-		return keyutil.BuildKeyRangeMaps(hex.EncodeToString(regionBound.TxnLeftBound), hex.EncodeToString(regionBound.TxnRightBound))
+		return []any{
+			map[string]any{
+				"start_key": hex.EncodeToString(regionBound.TxnLeftBound),
+				"end_key":   hex.EncodeToString(regionBound.TxnRightBound),
+			},
+		}
 	}
-	return keyutil.BuildKeyRangeMaps(hex.EncodeToString(regionBound.RawLeftBound), hex.EncodeToString(regionBound.RawRightBound))
+	return []any{
+		map[string]any{
+			"start_key": hex.EncodeToString(regionBound.RawLeftBound),
+			"end_key":   hex.EncodeToString(regionBound.RawRightBound),
+		},
+	}
 }
 
 // getRegionLabelID returns the region label id of the target keyspace.
