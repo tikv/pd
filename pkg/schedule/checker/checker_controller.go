@@ -308,7 +308,8 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 	// A legacy witness can win an election after a regular leader fails, but
 	// cannot serve reads or writes. Recover leadership independently of replica
 	// and snapshot limits, including while a joint-state change is unfinished.
-	if region.GetLeader().GetIsWitness() {
+	witnessLeader := region.GetLeader().GetIsWitness()
+	if witnessLeader {
 		for _, peer := range region.GetPeers() {
 			if peer.GetIsWitness() || core.IsLearner(peer) {
 				continue
@@ -319,13 +320,18 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 				return []*operator.Operator{op}
 			}
 		}
-		return nil
 	}
 
 	if ops := measureChecker(c.metrics.checkRegionHistograms[jointStateChecker], func() []*operator.Operator {
 		return []*operator.Operator{c.jointStateChecker.Check(region)}
 	}); len(ops) > 0 {
 		return ops
+	}
+	// A witness leader without a safe transfer target cannot make progress on
+	// ordinary scheduling, but an unfinished joint-state change can still be
+	// completed above.
+	if witnessLeader {
+		return nil
 	}
 
 	if ops := measureChecker(c.metrics.checkRegionHistograms[splitChecker], func() []*operator.Operator {

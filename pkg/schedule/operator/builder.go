@@ -18,8 +18,6 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/gogo/protobuf/proto"
-
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 
@@ -324,22 +322,22 @@ func (b *Builder) SetPeers(peers map[uint64]*metapb.Peer) *Builder {
 		return b
 	}
 
-	normalizedPeers := make(map[uint64]*metapb.Peer, len(peers))
 	for key, peer := range peers {
 		if peer == nil || key == 0 || peer.GetStoreId() != key || core.IsInJointState(peer) {
 			b.err = errors.Errorf("setPeers with mismatch peers: %v", peers)
 			return b
 		}
-		normalizedPeer := proto.Clone(peer).(*metapb.Peer)
-		normalizedPeer.IsWitness = false
-		normalizedPeers[key] = normalizedPeer
+		if peer.GetIsWitness() {
+			b.err = errors.Errorf("cannot set peer %s: witness peers are no longer supported", peer)
+			return b
+		}
 	}
 
 	if _, ok := peers[b.targetLeaderStoreID]; !ok {
 		b.targetLeaderStoreID = 0
 	}
 
-	b.targetPeers = peersMap(normalizedPeers)
+	b.targetPeers = peersMap(peers)
 	return b
 }
 
@@ -536,34 +534,38 @@ func (b *Builder) prepareBuild() (string, error) {
 
 // generate brief description of the operator.
 func (b *Builder) brief() string {
+	var brief string
 	switch {
 	case len(b.toAdd) > 0 && len(b.toRemove) > 0:
 		op := "mv peer"
 		if b.addLightPeer && b.removeLightPeer {
 			op = "mv light peer"
 		}
-		return fmt.Sprintf("%s: store %s to %s", op, b.toRemove, b.toAdd)
+		brief = fmt.Sprintf("%s: store %s to %s", op, b.toRemove, b.toAdd)
 	case len(b.toAdd) > 0:
-		return fmt.Sprintf("add peer: store %s", b.toAdd)
+		brief = fmt.Sprintf("add peer: store %s", b.toAdd)
 	case len(b.toRemove) > 0 && len(b.toPromote) > 0:
-		return fmt.Sprintf("promote peer: store %s, rm peer: store %s", b.toRemove, b.toPromote)
+		brief = fmt.Sprintf("promote peer: store %s, rm peer: store %s", b.toRemove, b.toPromote)
 	case len(b.toRemove) > 0 && len(b.toDemote) > 0:
-		return fmt.Sprintf("demote peer: store %s, rm peer: store %s", b.toDemote, b.toRemove)
+		brief = fmt.Sprintf("demote peer: store %s, rm peer: store %s", b.toDemote, b.toRemove)
 	case len(b.toRemove) > 0:
-		return fmt.Sprintf("rm peer: store %s", b.toRemove)
+		brief = fmt.Sprintf("rm peer: store %s", b.toRemove)
 	case len(b.toPromote) > 0:
-		return fmt.Sprintf("promote peer: store %s", b.toPromote)
+		brief = fmt.Sprintf("promote peer: store %s", b.toPromote)
 	case len(b.toDemote) > 0:
-		return fmt.Sprintf("demote peer: store %s", b.toDemote)
-	case len(b.toNonWitness) > 0:
-		return fmt.Sprintf("switch peer: store %s to non-witness", b.toNonWitness)
+		brief = fmt.Sprintf("demote peer: store %s", b.toDemote)
 	case len(b.targetLeaderStoreIDs) != 0:
-		return fmt.Sprintf("evict leader: from store %d to one in %v, or to %d (for compatibility)", b.originLeaderStoreID, b.targetLeaderStoreIDs, b.targetLeaderStoreID)
+		brief = fmt.Sprintf("evict leader: from store %d to one in %v, or to %d (for compatibility)", b.originLeaderStoreID, b.targetLeaderStoreIDs, b.targetLeaderStoreID)
 	case b.originLeaderStoreID != b.targetLeaderStoreID:
-		return fmt.Sprintf("transfer leader: store %d to %d", b.originLeaderStoreID, b.targetLeaderStoreID)
-	default:
-		return ""
+		brief = fmt.Sprintf("transfer leader: store %d to %d", b.originLeaderStoreID, b.targetLeaderStoreID)
 	}
+	if len(b.toNonWitness) > 0 {
+		if brief != "" {
+			brief += ", "
+		}
+		brief += fmt.Sprintf("switch peer: store %s to non-witness", b.toNonWitness)
+	}
+	return brief
 }
 
 // Using Joint Consensus can ensure the replica safety and reduce the number of steps.

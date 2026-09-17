@@ -133,10 +133,10 @@ func cleanupClusterConfig(t *testing.T, config *clusterConfig) {
 
 func TestRunInitialServersRetriesPortConflict(t *testing.T) {
 	re := require.New(t)
-	// Keep the fallback timeout above the cancellation assertion so a broken
-	// cancellation path cannot pass by waiting for the etcd startup timeout.
+	// Bound the etcd fallback below the outer test deadline so the result wait
+	// cannot leave startup goroutines running during cleanup.
 	oldTimeout := server.EtcdStartTimeout
-	server.EtcdStartTimeout = 30 * time.Second
+	server.EtcdStartTimeout = 10 * time.Second
 	t.Cleanup(func() { server.EtcdStartTimeout = oldTimeout })
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

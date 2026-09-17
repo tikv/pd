@@ -133,8 +133,26 @@ func (suite *operatorBuilderTestSuite) TestRecord() {
 	legacyBuilder = suite.newBuilder().SetPeers(map[uint64]*metapb.Peer{
 		4: {StoreId: 4, IsWitness: true},
 	})
-	re.NoError(legacyBuilder.err)
-	re.False(legacyBuilder.targetPeers[4].GetIsWitness())
+	re.Error(legacyBuilder.err)
+}
+
+func (suite *operatorBuilderTestSuite) TestLegacyWitnessConversionIsExplicit() {
+	re := suite.Require()
+	peers := []*metapb.Peer{
+		{Id: 11, StoreId: 1},
+		{Id: 12, StoreId: 2, IsWitness: true},
+		{Id: 13, StoreId: 3},
+	}
+	region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers}, peers[0])
+	targetPeers := map[uint64]*metapb.Peer{
+		1: {StoreId: 1},
+		2: {StoreId: 2},
+		3: {StoreId: 3},
+	}
+
+	op, err := NewBuilder("test", suite.cluster, region).SetPeers(targetPeers).Build(0)
+	re.NoError(err)
+	re.Contains(op.Brief(), "switch peer: store [2] to non-witness")
 }
 
 func (suite *operatorBuilderTestSuite) TestPrepareBuild() {

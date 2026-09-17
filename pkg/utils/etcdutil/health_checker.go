@@ -430,7 +430,12 @@ func (checker *healthChecker) initClient(ep string, opts ...CreateEtcdClientOpt)
 	// The inspector may have already closed its snapshot while this client
 	// was being created. A late client must not outlive the guarded client.
 	if checker.client.Ctx().Err() != nil {
-		client.Close()
+		if err := client.Close(); err != nil {
+			log.Error("failed to close etcd healthy client",
+				zap.String("endpoint", ep),
+				zap.String("source", checker.source),
+				zap.Error(err))
+		}
 	}
 }
 

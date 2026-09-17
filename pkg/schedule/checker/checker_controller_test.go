@@ -205,6 +205,25 @@ func TestCheckRegionWitnessLeaderRejectsUnsafeTargets(t *testing.T) {
 	}
 }
 
+func TestCheckRegionWitnessLeaderFallsBackToJointStateRepair(t *testing.T) {
+	c, tc, _, cleanup := newTestSplitScatterController(t)
+	defer cleanup()
+	tc.SetEnablePlacementRules(false)
+	peers := []*metapb.Peer{
+		{Id: 1, StoreId: 1, IsWitness: true},
+		{Id: 2, StoreId: 2, Role: metapb.PeerRole_DemotingVoter},
+		{Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner},
+	}
+	region := core.NewRegionInfo(&metapb.Region{Id: 906, Peers: peers}, peers[0])
+
+	ops := c.CheckRegion(region)
+	require.Len(t, ops, 1)
+	require.Equal(t, operator.OpDescLeaveJointState, ops[0].Desc())
+	require.Equal(t, constant.High, ops[0].GetPriorityLevel())
+	require.Equal(t, 1, ops[0].Len())
+	require.IsType(t, operator.ChangePeerV2Leave{}, ops[0].Step(0))
+}
+
 func TestCheckRegionCompletesLegacyWitnessMigration(t *testing.T) {
 	for _, placementRules := range []bool{false, true} {
 		for _, role := range []metapb.PeerRole{metapb.PeerRole_Voter, metapb.PeerRole_Learner} {
