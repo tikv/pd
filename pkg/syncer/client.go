@@ -63,6 +63,7 @@ func (s *RegionSyncer) reset() {
 		s.mu.clientCancel()
 	}
 	s.mu.clientCancel, s.mu.clientCtx = nil, nil
+	setRegionSyncerClientReadyMetrics(false)
 }
 
 // ResetHistoryIndex resets and persists the next region sync history index.
@@ -100,6 +101,7 @@ func (s *RegionSyncer) handleRegionSyncResponse(
 	nextFullSyncing = fullSyncing
 	if syncErr := resp.GetHeader().GetError(); syncErr != nil {
 		s.streamingRunning.Store(false)
+		setRegionSyncerClientReadyMetrics(false)
 		log.Warn("region sync with leader received error response",
 			zap.String("server", s.server.Name()),
 			zap.String("error-type", syncErr.GetType().String()),
@@ -126,6 +128,10 @@ func (s *RegionSyncer) handleRegionSyncResponse(
 	}
 	hasStats := len(stats) == len(regions)
 	hasBuckets := len(buckets) == len(regions)
+	var historyRecords []*core.RegionInfo
+	if !inFullSync {
+		historyRecords = make([]*core.RegionInfo, 0, len(regions))
+	}
 	for i, r := range regions {
 		var (
 			region       *core.RegionInfo
@@ -165,16 +171,18 @@ func (s *RegionSyncer) handleRegionSyncResponse(
 			err = regionStorage.SaveRegion(r)
 		}
 		if err == nil && !inFullSync {
-			s.history.record(region)
+			historyRecords = append(historyRecords, region)
 		}
 		for _, old := range overlaps {
 			_ = regionStorage.DeleteRegion(old.GetMeta())
 		}
 	}
+	s.history.record(historyRecords...)
 	nextFullSyncing = inFullSync && len(regions) > 0
 	if !nextFullSyncing {
 		// mark the client as running status when it finished the first history region sync.
 		s.streamingRunning.Store(true)
+		setRegionSyncerClientReadyMetrics(true)
 	}
 	return true, nextFullSyncing
 }
@@ -192,11 +200,15 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 	defer s.mu.Unlock()
 	s.mu.clientCtx, s.mu.clientCancel = context.WithCancel(s.server.LoopContext())
 	ctx := s.mu.clientCtx
+	setRegionSyncerClientReadyMetrics(false)
 
 	go func() {
 		defer logutil.LogPanic()
 		defer s.wg.Done()
-		defer s.streamingRunning.Store(false)
+		defer func() {
+			s.streamingRunning.Store(false)
+			setRegionSyncerClientReadyMetrics(false)
+		}()
 		// used to load region from kv storage to cache storage.
 		bc := s.server.GetBasicCluster()
 		regionStorage := s.server.GetStorage()
@@ -271,6 +283,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 				}
 				if err != nil {
 					s.streamingRunning.Store(false)
+					setRegionSyncerClientReadyMetrics(false)
 					log.Warn("region sync with leader meet error", errs.ZapError(errs.ErrGRPCRecv, err))
 					if err = stream.CloseSend(); err != nil {
 						log.Warn("failed to terminate client stream", errs.ZapError(errs.ErrGRPCCloseSend, err))
