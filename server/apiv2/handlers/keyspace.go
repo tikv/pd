@@ -359,14 +359,6 @@ func UpdateKeyspaceConfig(c *gin.Context) {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 			return
 		}
-		if mutation.Key == keyspace.WaitRegionSplitKey {
-			// Set once at creation time and read by CheckKeyspaceRegionBound to
-			// decide whether the keyspace is safe to use yet; letting a PATCH
-			// flip it to "false" mid-creation would defeat that check.
-			err = errs.ErrUnsupportedOperationInKeyspace.FastGen("wait region split")
-			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
-			return
-		}
 	}
 
 	meta, err := manager.UpdateKeyspaceConfigWithPreconditions(name, mutations, configParams.Preconditions)

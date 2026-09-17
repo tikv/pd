@@ -271,6 +271,10 @@ func TestCheckKeyspaceRegionBoundRequiresEnabled(t *testing.T) {
 	}
 	re.False(manager.CheckKeyspaceRegionBound(disabledWaitFalse))
 
+	// With the region actually bound (simulated here via skipSplitRegion),
+	// wait_region_split's value must not matter - an ENABLED keyspace with
+	// its bound satisfied is ready regardless of whether it waited for
+	// split at creation time.
 	enabledWaitTrue := &keyspacepb.KeyspaceMeta{
 		State:  keyspacepb.KeyspaceState_ENABLED,
 		Config: map[string]string{WaitRegionSplitKey: "true"},
@@ -282,6 +286,32 @@ func TestCheckKeyspaceRegionBoundRequiresEnabled(t *testing.T) {
 		Config: map[string]string{WaitRegionSplitKey: "false"},
 	}
 	re.True(manager.CheckKeyspaceRegionBound(enabledWaitFalse))
+}
+
+// TestCheckKeyspaceRegionBoundIgnoresWaitRegionSplit verifies that
+// wait_region_split=="false" never shortcuts CheckKeyspaceRegionBound past
+// the real bound check. wait_region_split only controls whether creation
+// blocks waiting for the split synchronously - it says nothing about
+// whether the region has actually been split yet, since the split still
+// happens asynchronously via the Coordinator's patrolRegion. A keyspace
+// created with wait_region_split "false" is ENABLED immediately but its
+// region may not be split for a while; TestCreateClientWithKeyspaceCheck
+// (tests/integrations/client) reproduces the resulting bug under the
+// nextgen tag, where the auto-created system keyspace has wait_region_split
+// "false" and is reported ready before its region is actually split. This
+// test exercises the same invariant without needing a real cluster: with no
+// failpoint forcing the bound check to succeed and no cluster to satisfy
+// it, an ENABLED, wait_region_split=="false" keyspace must still report
+// unbound.
+func TestCheckKeyspaceRegionBoundIgnoresWaitRegionSplit(t *testing.T) {
+	re := require.New(t)
+	manager := &Manager{}
+	enabledWaitFalseUnbound := &keyspacepb.KeyspaceMeta{
+		Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 1},
+		State:    keyspacepb.KeyspaceState_ENABLED,
+		Config:   map[string]string{WaitRegionSplitKey: "false"},
+	}
+	re.False(manager.CheckKeyspaceRegionBound(enabledWaitFalseUnbound))
 }
 
 func (suite *keyspaceTestSuite) TestCreateSameKeyspaceTwice() {
@@ -408,6 +438,264 @@ func (suite *keyspaceTestSuite) TestWaitSplitFailureRollsBackCrossSubsystemState
 	status, err := manager.mgm.GetStatus(ctx)
 	re.NoError(err)
 	re.Equal(0, status["meta-1"].AssignmentCount)
+}
+
+// TestRollbackCreateKeyspaceDoesNotDeleteReusedID verifies that
+// rollbackCreateKeyspace checks the original keyspace's name, not just its
+// id, before deleting anything. id alone does not identify the keyspace a
+// rollback is for: if the original keyspace is archived and removed while
+// its create call is still waiting on region split, CreateKeyspaceByID can
+// reuse that id for an unrelated keyspace. If the replacement also happens
+// to be DISABLED, a rollback that checks only id and state would adopt the
+// replacement's identity and delete it instead of correctly finding nothing
+// to do.
+func TestRollbackCreateKeyspaceDoesNotDeleteReusedID(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
+	}()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	kgm := NewKeyspaceGroupManager(ctx, store, nil)
+	re.NoError(kgm.Bootstrap(ctx))
+	manager := NewKeyspaceManager(ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{}, kgm, nil)
+	re.NoError(manager.Bootstrap())
+
+	original, err := manager.CreateKeyspace(&CreateKeyspaceRequest{
+		Name:       "rollback_original",
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+	original, err = manager.UpdateKeyspaceStateByID(
+		original.GetId(), keyspacepb.KeyspaceState_DISABLED, time.Now().Unix(),
+	)
+	re.NoError(err)
+	groupID, _, err := kgm.GetGroupByKeyspaceID(original.GetId())
+	re.NoError(err)
+	_, err = manager.UpdateKeyspaceStateByID(
+		original.GetId(), keyspacepb.KeyspaceState_ARCHIVED, time.Now().Unix(),
+	)
+	re.NoError(err)
+	_, err = kgm.RemoveKeyspacesFromGroup(groupID, manager, []uint32{original.GetId()})
+	re.NoError(err)
+
+	// The id is now free. A brand new keyspace, created under the same id
+	// but a different name, simulates that reuse.
+	id := original.GetId()
+	replacement, err := manager.CreateKeyspaceByID(&CreateKeyspaceByIDRequest{
+		ID:         &id,
+		Name:       "rollback_reused",
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+	replacement, err = manager.UpdateKeyspaceStateByID(
+		replacement.GetId(), keyspacepb.KeyspaceState_DISABLED, time.Now().Unix(),
+	)
+	re.NoError(err)
+
+	// Rollback for the ORIGINAL (now-stale) keyspace object must not touch
+	// the replacement that now lives under the same id.
+	re.NoError(manager.rollbackCreateKeyspace(original))
+
+	loaded, err := manager.LoadKeyspace(replacement.GetName())
+	re.NoError(err)
+	re.Equal(replacement.GetId(), loaded.GetId())
+	re.Equal(keyspacepb.KeyspaceState_DISABLED, loaded.GetState())
+	reusedGroupID, _, err := kgm.GetGroupByKeyspaceID(replacement.GetId())
+	re.NoError(err)
+	re.Equal(groupID, reusedGroupID)
+}
+
+// TestRollbackCreateKeyspaceGroupMoveAfterMembershipLookup verifies that
+// undoTSOKeyspaceGroupMembership does not treat a delete that silently no-op'd
+// as success. saveKeyspaceGroupTxnOp's delete only removes keyspaceID from
+// whatever group the op was built against; if keyspaceID moved to a
+// different group between that group being decided (here, the sealed
+// keyspace's own Config[TSOKeyspaceGroupIDKey] - the fast path tryGroup
+// attempt in undoTSOKeyspaceGroupMembership; the same applies to a group
+// GetGroupByKeyspaceID resolved in the fallback loop) and the delete's
+// transaction committing, the delete commits without error but removes
+// nothing - the identityCheckOp embedded in the same transaction only
+// guards the keyspace's own identity, not which group currently lists it.
+// Without a post-delete re-check, rollback would then proceed to delete
+// the keyspace's metadata while its (now-stale) group still lists it as a
+// member.
+//
+// sealKeyspaceForRollback (which runs before this) transitions the keyspace
+// to TOMBSTONE, and allowChangeConfig excludes TOMBSTONE, so a config PATCH
+// can no longer be the thing that moves it - this test simulates a TSO
+// keyspace-group split/merge instead (which moves keyspaces between groups'
+// own Keyspaces lists without consulting the keyspace's own state at all,
+// so TOMBSTONE does not block it), by writing the move directly the same
+// way saveKeyspaceGroupTxnOp itself would.
+func TestRollbackCreateKeyspaceGroupMoveAfterMembershipLookup(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
+	}()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	kgm := NewKeyspaceGroupManager(ctx, store, nil)
+	re.NoError(kgm.Bootstrap(ctx))
+	manager := NewKeyspaceManager(ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{}, kgm, nil)
+	re.NoError(manager.Bootstrap())
+
+	created, err := manager.CreateKeyspace(&CreateKeyspaceRequest{
+		Name:       "rollback_move",
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+	oldGroupID, userKind, err := kgm.GetGroupByKeyspaceID(created.GetId())
+	re.NoError(err)
+	re.Equal(constant.DefaultKeyspaceGroupID, oldGroupID)
+	re.Equal(endpoint.Basic, userKind)
+	re.NoError(kgm.CreateKeyspaceGroups([]*endpoint.KeyspaceGroup{{
+		ID:       1,
+		UserKind: endpoint.Basic.String(),
+	}}))
+	created, err = manager.UpdateKeyspaceStateByID(
+		created.GetId(), keyspacepb.KeyspaceState_DISABLED, time.Now().Unix(),
+	)
+	re.NoError(err)
+
+	lookupDone := make(chan struct{})
+	continueRollback := make(chan struct{})
+	var lookupDoneOnce sync.Once
+	failpointName := "github.com/tikv/pd/pkg/keyspace/undoTSOKeyspaceGroupMembershipAfterLookup"
+	re.NoError(failpoint.EnableCall(failpointName, func() {
+		lookupDoneOnce.Do(func() { close(lookupDone) })
+		<-continueRollback
+	}))
+	defer func() {
+		select {
+		case <-continueRollback:
+		default:
+			close(continueRollback)
+		}
+		re.NoError(failpoint.Disable(failpointName))
+	}()
+
+	rollbackResult := make(chan error, 1)
+	go func() {
+		rollbackResult <- manager.rollbackCreateKeyspace(created)
+	}()
+	select {
+	case <-lookupDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("rollback did not reach the post-membership-lookup hook")
+	}
+
+	// Move the (by now sealed, TOMBSTONE) keyspace to group 1 while rollback
+	// is suspended right after it resolved group 0 - the same storage
+	// change a real split/merge would make, without going through any
+	// state check.
+	re.NoError(kgm.store.RunInTxn(ctx, func(txn kv.Txn) error {
+		if err := kgm.saveKeyspaceGroupTxnOp(constant.DefaultKeyspaceGroupID, created.GetId(), opDelete)(txn); err != nil {
+			return err
+		}
+		return kgm.saveKeyspaceGroupTxnOp(1, created.GetId(), opAdd)(txn)
+	}))
+	oldGroup, err := kgm.GetKeyspaceGroupByID(constant.DefaultKeyspaceGroupID)
+	re.NoError(err)
+	newGroupAfterMove, err := kgm.GetKeyspaceGroupByID(1)
+	re.NoError(err)
+	kgm.Lock()
+	kgm.putKeyspaceGroupToCacheLocked(oldGroup)
+	kgm.putKeyspaceGroupToCacheLocked(newGroupAfterMove)
+	kgm.Unlock()
+	close(continueRollback)
+	re.NoError(<-rollbackResult)
+
+	_, err = manager.LoadKeyspace(created.GetName())
+	re.ErrorIs(err, errs.ErrKeyspaceNotFound)
+	newGroup, err := kgm.GetKeyspaceGroupByID(1)
+	re.NoError(err)
+	re.NotContains(newGroup.Keyspaces, created.GetId())
+	_, _, err = kgm.GetGroupByKeyspaceID(created.GetId())
+	re.ErrorIs(err, errs.ErrKeyspaceNotInAnyKeyspaceGroup)
+}
+
+// TestRollbackCreateKeyspaceSealBlocksConcurrentEnable verifies that once
+// sealKeyspaceForRollback has transitioned the keyspace to TOMBSTONE, a
+// concurrent UpdateKeyspaceStateByID(ENABLED) can no longer succeed -
+// closing, at the root, the race where a legitimate external re-enable
+// landing between undoing TSO group membership and deleting the meta used
+// to leave an ENABLED keyspace with no TSO group membership at all.
+func TestRollbackCreateKeyspaceSealBlocksConcurrentEnable(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
+	}()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	kgm := NewKeyspaceGroupManager(ctx, store, nil)
+	re.NoError(kgm.Bootstrap(ctx))
+	manager := NewKeyspaceManager(ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{}, kgm, nil)
+	re.NoError(manager.Bootstrap())
+
+	created, err := manager.CreateKeyspace(&CreateKeyspaceRequest{
+		Name:       "rollback_seal_block",
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+	created, err = manager.UpdateKeyspaceStateByID(
+		created.GetId(), keyspacepb.KeyspaceState_DISABLED, time.Now().Unix(),
+	)
+	re.NoError(err)
+
+	// undoTSOKeyspaceGroupMembershipAfterLookup fires during step 3 (group
+	// cleanup), which by construction only runs after step 2 (the seal) has
+	// already committed - so by the time this hook fires, the keyspace is
+	// already TOMBSTONE.
+	lookupDone := make(chan struct{})
+	continueRollback := make(chan struct{})
+	var lookupDoneOnce sync.Once
+	failpointName := "github.com/tikv/pd/pkg/keyspace/undoTSOKeyspaceGroupMembershipAfterLookup"
+	re.NoError(failpoint.EnableCall(failpointName, func() {
+		lookupDoneOnce.Do(func() { close(lookupDone) })
+		<-continueRollback
+	}))
+	defer func() {
+		select {
+		case <-continueRollback:
+		default:
+			close(continueRollback)
+		}
+		re.NoError(failpoint.Disable(failpointName))
+	}()
+
+	rollbackResult := make(chan error, 1)
+	go func() {
+		rollbackResult <- manager.rollbackCreateKeyspace(created)
+	}()
+	select {
+	case <-lookupDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("rollback did not reach the post-membership-lookup hook")
+	}
+
+	// The keyspace is already sealed as TOMBSTONE at this point - a
+	// legitimate-looking re-enable must now be rejected outright, not
+	// silently race with the rest of rollback.
+	_, enableErr := manager.UpdateKeyspaceStateByID(
+		created.GetId(), keyspacepb.KeyspaceState_ENABLED, time.Now().Unix(),
+	)
+	re.Error(enableErr)
+	re.Contains(enableErr.Error(), "cannot change keyspace state")
+
+	close(continueRollback)
+	re.NoError(<-rollbackResult)
+
+	_, err = manager.LoadKeyspace(created.GetName())
+	re.ErrorIs(err, errs.ErrKeyspaceNotFound)
+	_, _, err = kgm.GetGroupByKeyspaceID(created.GetId())
+	re.ErrorIs(err, errs.ErrKeyspaceNotInAnyKeyspaceGroup)
 }
 
 // TestWaitSplitSuccessEnablesKeyspacePersistently verifies that once the
