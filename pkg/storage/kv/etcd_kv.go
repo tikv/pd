@@ -17,6 +17,7 @@ package kv
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -44,12 +45,14 @@ var (
 )
 
 type etcdKVBase struct {
-	client *clientv3.Client
+	client          *clientv3.Client
+	writeConditions []clientv3.Cmp
 }
 
-// NewEtcdKVBase creates a new etcd kv.
-func NewEtcdKVBase(client *clientv3.Client) *etcdKVBase {
-	return &etcdKVBase{client: client}
+// NewEtcdKVBase creates a new etcd kv. Optional conditions fence every write,
+// including both branches of raw transactions. The conditions are immutable.
+func NewEtcdKVBase(client *clientv3.Client, writeConditions ...clientv3.Cmp) *etcdKVBase {
+	return &etcdKVBase{client: client, writeConditions: slices.Clone(writeConditions)}
 }
 
 // Load loads the value of the key from etcd.
@@ -97,8 +100,12 @@ func (kv *etcdKVBase) Save(key, value string) error {
 		failpoint.Return(errors.New("save failed"))
 	})
 
-	txn := NewSlowLogTxn(kv.client)
+	// Pause before starting the request deadline so leadership-transition tests
+	// exercise the lease comparison even on slow machines.
+	failpoint.InjectCall("beforeSaveCommit", kv.client, key, value)
+	txn := NewSlowLogTxn(kv.client).If(kv.writeConditions...)
 	resp, err := txn.Then(clientv3.OpPut(key, value)).Commit()
+	failpoint.InjectCall("afterSaveCommit", kv.client, key, value, resp, &err)
 	if err != nil {
 		e := errs.ErrEtcdKVPut.Wrap(err).GenWithStackByCause()
 		log.Error("save to etcd meet error", zap.String("key", key), zap.String("value", value), errs.ZapError(e))
@@ -112,7 +119,7 @@ func (kv *etcdKVBase) Save(key, value string) error {
 
 // Remove removes the key from etcd.
 func (kv *etcdKVBase) Remove(key string) error {
-	txn := NewSlowLogTxn(kv.client)
+	txn := NewSlowLogTxn(kv.client).If(kv.writeConditions...)
 	resp, err := txn.Then(clientv3.OpDelete(key)).Commit()
 	if err != nil {
 		err = errs.ErrEtcdKVDelete.Wrap(err).GenWithStackByCause()
@@ -128,7 +135,8 @@ func (kv *etcdKVBase) Remove(key string) error {
 // CreateRawTxn creates a transaction that provides interface in if-then-else pattern.
 func (kv *etcdKVBase) CreateRawTxn() RawTxn {
 	return &rawTxnWrapper{
-		inner: NewSlowLogTxn(kv.client),
+		inner:           NewSlowLogTxn(kv.client),
+		writeConditions: kv.writeConditions,
 	}
 }
 
@@ -211,8 +219,9 @@ type etcdTxn struct {
 // RunInTxn runs user provided function f in a transaction.
 func (kv *etcdKVBase) RunInTxn(ctx context.Context, f func(txn Txn) error) error {
 	txn := &etcdTxn{
-		kv:  kv,
-		ctx: ctx,
+		kv:         kv,
+		ctx:        ctx,
+		conditions: slices.Clone(kv.writeConditions),
 	}
 	err := f(txn)
 	if err != nil {
@@ -300,7 +309,11 @@ func (txn *etcdTxn) commit() error {
 }
 
 type rawTxnWrapper struct {
-	inner clientv3.Txn
+	inner           clientv3.Txn
+	writeConditions []clientv3.Cmp
+	conditions      []clientv3.Cmp
+	thenOps         []clientv3.Op
+	elseOps         []clientv3.Op
 }
 
 // If implements RawTxn interface for adding conditions to the transaction.
@@ -329,7 +342,11 @@ func (l *rawTxnWrapper) If(conditions ...RawTxnCondition) RawTxn {
 			cmpList = append(cmpList, clientv3.Compare(clientv3.Value(c.Key), cmpOp, c.Value))
 		}
 	}
-	l.inner = l.inner.If(cmpList...)
+	if len(l.writeConditions) == 0 {
+		l.inner = l.inner.If(cmpList...)
+	} else {
+		l.conditions = cmpList
+	}
 	return l
 }
 
@@ -360,7 +377,11 @@ func convertOps(ops []RawTxnOp) []clientv3.Op {
 // the transaction.
 func (l *rawTxnWrapper) Then(ops ...RawTxnOp) RawTxn {
 	convertedOps := convertOps(ops)
-	l.inner = l.inner.Then(convertedOps...)
+	if len(l.writeConditions) == 0 {
+		l.inner = l.inner.Then(convertedOps...)
+	} else {
+		l.thenOps = convertedOps
+	}
 	return l
 }
 
@@ -368,15 +389,30 @@ func (l *rawTxnWrapper) Then(ops ...RawTxnOp) RawTxn {
 // to the transaction.
 func (l *rawTxnWrapper) Else(ops ...RawTxnOp) RawTxn {
 	convertedOps := convertOps(ops)
-	l.inner = l.inner.Else(convertedOps...)
+	if len(l.writeConditions) == 0 {
+		l.inner = l.inner.Else(convertedOps...)
+	} else {
+		l.elseOps = convertedOps
+	}
 	return l
 }
 
 // Commit implements RawTxn interface for committing the transaction.
 func (l *rawTxnWrapper) Commit() (RawTxnResponse, error) {
+	// The lease guard must enclose the entire conditional transaction. Adding it
+	// to the user's If would allow a stale leader to execute a writing Else.
+	if len(l.writeConditions) > 0 {
+		l.inner.If(l.writeConditions...).Then(clientv3.OpTxn(l.conditions, l.thenOps, l.elseOps))
+	}
 	resp, err := l.inner.Commit()
 	if err != nil {
 		return RawTxnResponse{}, err
+	}
+	if len(l.writeConditions) > 0 {
+		if !resp.Succeeded {
+			return RawTxnResponse{}, errs.ErrEtcdTxnConflict.FastGenByArgs()
+		}
+		resp = (*clientv3.TxnResponse)(resp.Responses[0].GetResponseTxn())
 	}
 	items := make([]RawTxnResponseItem, 0, len(resp.Responses))
 	for i, rpcRespItem := range resp.Responses {

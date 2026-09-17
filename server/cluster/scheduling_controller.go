@@ -114,6 +114,12 @@ func (sc *schedulingController) initCoordinator(ctx context.Context, cluster sch
 }
 
 func (sc *schedulingController) initCoordinatorLocked(ctx context.Context, cluster sche.ClusterInformer, hbstreams *hbstream.HeartbeatStreams) {
+	// A handler-only coordinator has no RunUntilStop goroutine to drain it.
+	// Close its mutation boundary before replacing it during fallback.
+	if sc.coordinator != nil {
+		sc.coordinator.Stop()
+		sc.coordinator.GetSchedulersController().Wait()
+	}
 	sc.ctx, sc.cancel = context.WithCancel(ctx)
 	sc.coordinator = schedule.NewCoordinator(sc.ctx, cluster, hbstreams)
 }

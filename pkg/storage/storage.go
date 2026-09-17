@@ -20,10 +20,12 @@ import (
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/encryption"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keypath"
@@ -86,6 +88,11 @@ const (
 
 type coreStorage struct {
 	Storage
+	*regionStorageState
+}
+
+// Region storage selection and load state are shared by all leader-term views.
+type regionStorageState struct {
 	regionStorage endpoint.RegionStorage
 
 	useRegionStorage atomic.Bool
@@ -99,9 +106,37 @@ type coreStorage struct {
 // the region info, and all other storage interfaces will use the defaultStorage.
 func NewCoreStorage(defaultStorage Storage, regionStorage endpoint.RegionStorage) Storage {
 	return &coreStorage{
-		Storage:       defaultStorage,
-		regionStorage: regionStorage,
-		regionLoaded:  unloaded,
+		Storage:            defaultStorage,
+		regionStorageState: &regionStorageState{regionStorage: regionStorage},
+	}
+}
+
+// WithLeaderLease returns a storage view whose etcd writes require the captured
+// lease on leaderKey. A retained view never adopts a later leader term, even if
+// the same member is elected again. Direct reads and local region storage are unchanged.
+func WithLeaderLease(s Storage, leaderKey string, leaseID clientv3.LeaseID) (Storage, error) {
+	if leaseID == clientv3.NoLease {
+		return nil, errs.ErrEtcdTxnConflict.FastGenByArgs()
+	}
+	switch backend := s.(type) {
+	case *etcdBackend:
+		base := kv.NewEtcdKVBase(backend.client,
+			clientv3.Compare(clientv3.LeaseValue(leaderKey), "=", int64(leaseID)))
+		return &etcdBackend{
+			StorageEndpoint: backend.WithKVBase(base),
+			client:          backend.client,
+		}, nil
+	case *coreStorage:
+		defaultStorage, err := WithLeaderLease(backend.Storage, leaderKey, leaseID)
+		if err != nil {
+			return nil, err
+		}
+		return &coreStorage{Storage: defaultStorage, regionStorageState: backend.regionStorageState}, nil
+	case *memoryStorage:
+		// In-memory test storage has no distributed ownership to fence.
+		return s, nil
+	default:
+		return nil, errors.Errorf("unsupported leader storage type %T", s)
 	}
 }
 
