@@ -771,7 +771,9 @@ func (c *TestCluster) runInitialServersWithRetry(maxRetries int) error {
 					_ = s.Stop()
 				}
 				if !restarting {
-					_ = s.Destroy()
+					if err := s.Destroy(); err != nil {
+						return errors.Wrap(err, "failed to destroy server before retry")
+					}
 				}
 			}
 

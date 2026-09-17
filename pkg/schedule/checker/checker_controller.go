@@ -385,9 +385,10 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 			return ops
 		}
 	}
-	// Repair unavailable or missing replicas before demoting a legacy witness.
-	// A down regular voter can otherwise make the demotion lose quorum and
-	// repeatedly block the repair operator. Pending peers must catch up first.
+	// Migrate legacy witnesses here so the compatibility path applies with and
+	// without placement rules. Run it after the rule/replica checker: unavailable
+	// or missing replicas must be repaired first, since demoting a witness while
+	// a regular voter is down can lose quorum. Pending peers must catch up first.
 	if region.GetLeader() != nil && len(region.GetDownPeers()) == 0 && len(region.GetPendingPeers()) == 0 {
 		var legacyWitness *metapb.Peer
 		for _, peer := range region.GetPeers() {

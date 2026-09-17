@@ -337,7 +337,7 @@ func (b *Builder) SetPeers(peers map[uint64]*metapb.Peer) *Builder {
 		b.targetLeaderStoreID = 0
 	}
 
-	b.targetPeers = peersMap(peers)
+	b.targetPeers = peersMap(peers).copy()
 	return b
 }
 

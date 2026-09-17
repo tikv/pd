@@ -155,6 +155,24 @@ func (suite *operatorBuilderTestSuite) TestLegacyWitnessConversionIsExplicit() {
 	re.Contains(op.Brief(), "switch peer: store [2] to non-witness")
 }
 
+func (suite *operatorBuilderTestSuite) TestSetPeersDoesNotMutateCallerMap() {
+	re := suite.Require()
+	targetPeers := map[uint64]*metapb.Peer{
+		1: {StoreId: 1},
+		2: {StoreId: 2},
+		3: {StoreId: 3, Role: metapb.PeerRole_Learner},
+	}
+
+	builder := suite.newBuilder().SetPeers(targetPeers)
+	re.NoError(builder.err)
+	builder.AddPeer(&metapb.Peer{StoreId: 4})
+	re.NoError(builder.err)
+	re.NotContains(targetPeers, uint64(4))
+	builder.RemovePeer(2)
+	re.NoError(builder.err)
+	re.Contains(targetPeers, uint64(2))
+}
+
 func (suite *operatorBuilderTestSuite) TestPrepareBuild() {
 	re := suite.Require()
 	// no voter.
