@@ -114,6 +114,31 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfig() {
 	}
 }
 
+func (suite *keyspaceTestSuite) TestGCManagementTypeImmutable() {
+	re := suite.Require()
+	created := MustCreateKeyspace(re, suite.server, &handlers.CreateKeyspaceParams{
+		Name:   "immutable_gc",
+		Config: map[string]string{keyspace.GCManagementType: keyspace.KeyspaceLevelGC},
+	})
+	gcType := keyspace.KeyspaceLevelGC
+	other := "updated"
+	status, body, meta := tryUpdateKeyspaceConfig(re, suite.server, created.Name, &handlers.UpdateConfigParams{
+		Config: map[string]*string{keyspace.GCManagementType: &gcType, "other": &other},
+	})
+	re.Equal(http.StatusOK, status, body)
+	re.Equal(other, meta.Config["other"])
+	unified := keyspace.UnifiedGC
+	for _, value := range []*string{nil, new(string), &unified} {
+		status, body, _ = tryUpdateKeyspaceConfig(re, suite.server, created.Name, &handlers.UpdateConfigParams{
+			Config: map[string]*string{keyspace.GCManagementType: value, "other": nil},
+		})
+		re.Equal(http.StatusBadRequest, status, body)
+		re.Contains(body, "gc management type cannot be changed")
+		loaded := mustLoadKeyspaces(re, suite.server, created.Name)
+		re.Equal(meta.Config, loaded.Config)
+	}
+}
+
 func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfigPreconditions() {
 	re := suite.Require()
 	created := MustCreateKeyspace(re, suite.server, &handlers.CreateKeyspaceParams{

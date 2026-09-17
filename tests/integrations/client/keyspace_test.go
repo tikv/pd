@@ -226,8 +226,12 @@ func (s *clientStatefulTestSuite) TestIsKeyspaceUsingKeyspaceLevelGC() {
 		},
 		CreateTime: time.Now().Unix(),
 	})
-	re.NoError(err)
-	re.False(pd.IsKeyspaceUsingKeyspaceLevelGC(meta))
+	if kerneltype.IsNextGen() {
+		re.ErrorContains(err, "nextgen only supports keyspace_level gc")
+	} else {
+		re.NoError(err)
+		re.False(pd.IsKeyspaceUsingKeyspaceLevelGC(meta))
+	}
 
 	meta, err = s.srv.GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{
 		Name: "ks4",
@@ -236,10 +240,12 @@ func (s *clientStatefulTestSuite) TestIsKeyspaceUsingKeyspaceLevelGC() {
 		},
 		CreateTime: time.Now().Unix(),
 	})
-	re.NoError(err)
-	// In NextGen build, empty gc_management_type is automatically set to "keyspace_level"
-	// In Classic build, empty gc_management_type remains empty and returns false
-	re.Equal(kerneltype.IsNextGen(), pd.IsKeyspaceUsingKeyspaceLevelGC(meta))
+	if kerneltype.IsNextGen() {
+		re.ErrorContains(err, "nextgen only supports keyspace_level gc")
+	} else {
+		re.NoError(err)
+		re.False(pd.IsKeyspaceUsingKeyspaceLevelGC(meta))
+	}
 }
 
 func TestProtectedKeyspace(t *testing.T) {

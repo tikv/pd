@@ -146,26 +146,28 @@ func TestGCState(t *testing.T) {
 
 	manager := leaderServer.GetServer().GetGCStateManager()
 	now := time.Now()
-	_, err = manager.AdvanceTxnSafePoint(constant.NullKeyspaceID, 100, now)
-	re.NoError(err)
-	_, _, err = manager.AdvanceGCSafePoint(constant.NullKeyspaceID, 90)
-	re.NoError(err)
-	_, err = manager.SetGCBarrier(
-		constant.NullKeyspaceID,
-		"z-null",
-		120,
-		time.Hour,
-		now,
-	)
-	re.NoError(err)
-	_, err = manager.SetGCBarrier(
-		constant.NullKeyspaceID,
-		"a-null",
-		110,
-		time.Duration(math.MaxInt64),
-		now,
-	)
-	re.NoError(err)
+	if !kerneltype.IsNextGen() {
+		_, err = manager.AdvanceTxnSafePoint(constant.NullKeyspaceID, 100, now)
+		re.NoError(err)
+		_, _, err = manager.AdvanceGCSafePoint(constant.NullKeyspaceID, 90)
+		re.NoError(err)
+		_, err = manager.SetGCBarrier(
+			constant.NullKeyspaceID,
+			"z-null",
+			120,
+			time.Hour,
+			now,
+		)
+		re.NoError(err)
+		_, err = manager.SetGCBarrier(
+			constant.NullKeyspaceID,
+			"a-null",
+			110,
+			time.Duration(math.MaxInt64),
+			now,
+		)
+		re.NoError(err)
+	}
 
 	_, err = manager.AdvanceTxnSafePoint(keyspaceLevelID, 200, now)
 	re.NoError(err)
@@ -327,26 +329,30 @@ func TestGCState(t *testing.T) {
 	output, err = tests.ExecuteCommand(
 		ctl.GetRootCmd(), "-u", pdAddr, "gc-state", "keyspace", "4294967295",
 	)
-	re.NoError(err)
-	var nullKeyspaceResponse gcStateCommandSingle
-	re.NoError(json.Unmarshal(output, &nullKeyspaceResponse), string(output))
-	re.Equal(constant.NullKeyspaceID, nullKeyspaceResponse.RequestedKeyspaceID)
-	re.Equal(constant.NullKeyspaceID, nullKeyspaceResponse.EffectiveKeyspaceID)
-	re.False(nullKeyspaceResponse.IsKeyspaceLevelGC)
-	re.Equal(uint64(100), nullKeyspaceResponse.TxnSafePoint)
-	re.Equal(uint64(90), nullKeyspaceResponse.GCSafePoint)
-	requireGCStateCommandBarriers(re, nullKeyspaceResponse.GCBarriers, []expectedGCStateCommandBarrier{
-		{barrierID: "a-null", barrierTS: 110},
-		{barrierID: "z-null", barrierTS: 120, expires: true},
-	})
-	requireGCStateCommandBarriers(
-		re,
-		nullKeyspaceResponse.GlobalGCBarriers,
-		[]expectedGCStateCommandBarrier{
-			{barrierID: "a-global", barrierTS: 310},
-			{barrierID: "z-global", barrierTS: 320},
-		},
-	)
+	if kerneltype.IsNextGen() {
+		re.ErrorContains(err, "unified gc is not supported in nextgen")
+	} else {
+		re.NoError(err)
+		var nullKeyspaceResponse gcStateCommandSingle
+		re.NoError(json.Unmarshal(output, &nullKeyspaceResponse), string(output))
+		re.Equal(constant.NullKeyspaceID, nullKeyspaceResponse.RequestedKeyspaceID)
+		re.Equal(constant.NullKeyspaceID, nullKeyspaceResponse.EffectiveKeyspaceID)
+		re.False(nullKeyspaceResponse.IsKeyspaceLevelGC)
+		re.Equal(uint64(100), nullKeyspaceResponse.TxnSafePoint)
+		re.Equal(uint64(90), nullKeyspaceResponse.GCSafePoint)
+		requireGCStateCommandBarriers(re, nullKeyspaceResponse.GCBarriers, []expectedGCStateCommandBarrier{
+			{barrierID: "a-null", barrierTS: 110},
+			{barrierID: "z-null", barrierTS: 120, expires: true},
+		})
+		requireGCStateCommandBarriers(
+			re,
+			nullKeyspaceResponse.GlobalGCBarriers,
+			[]expectedGCStateCommandBarrier{
+				{barrierID: "a-global", barrierTS: 310},
+				{barrierID: "z-global", barrierTS: 320},
+			},
+		)
+	}
 
 	_, err = tests.ExecuteCommand(
 		ctl.GetRootCmd(), "-u", pdAddr, "gc-state", "keyspace", "16770000",
@@ -368,14 +374,18 @@ func TestGCState(t *testing.T) {
 	}
 
 	nullState, ok := statesByID[constant.NullKeyspaceID]
-	re.True(ok)
-	re.False(nullState.IsKeyspaceLevelGC)
-	re.Equal(uint64(100), nullState.TxnSafePoint)
-	re.Equal(uint64(90), nullState.GCSafePoint)
-	requireGCStateCommandBarriers(re, nullState.GCBarriers, []expectedGCStateCommandBarrier{
-		{barrierID: "a-null", barrierTS: 110},
-		{barrierID: "z-null", barrierTS: 120, expires: true},
-	})
+	if kerneltype.IsNextGen() {
+		re.False(ok)
+	} else {
+		re.True(ok)
+		re.False(nullState.IsKeyspaceLevelGC)
+		re.Equal(uint64(100), nullState.TxnSafePoint)
+		re.Equal(uint64(90), nullState.GCSafePoint)
+		requireGCStateCommandBarriers(re, nullState.GCBarriers, []expectedGCStateCommandBarrier{
+			{barrierID: "a-null", barrierTS: 110},
+			{barrierID: "z-null", barrierTS: 120, expires: true},
+		})
+	}
 
 	keyspaceLevelState, ok := statesByID[keyspaceLevelID]
 	re.True(ok)
@@ -433,17 +443,20 @@ func TestGCState(t *testing.T) {
 	for _, state := range excludedAll.GCStates {
 		excludedStatesByID[state.KeyspaceID] = state
 	}
-	excludedNullState, ok := excludedStatesByID[constant.NullKeyspaceID]
-	re.True(ok)
-	requireGCStateCommandState(
-		re,
-		excludedNullState,
-		nullState,
-		[]expectedGCStateCommandBarrier{
-			{barrierID: "a-null", barrierTS: 110},
-			{barrierID: "z-null", barrierTS: 120, expires: true},
-		},
-	)
+	if !kerneltype.IsNextGen() {
+		excludedNullState, ok := excludedStatesByID[constant.NullKeyspaceID]
+		re.True(ok)
+		requireGCStateCommandState(
+			re,
+			excludedNullState,
+			nullState,
+			[]expectedGCStateCommandBarrier{
+				{barrierID: "a-null", barrierTS: 110},
+				{barrierID: "z-null", barrierTS: 120, expires: true},
+			},
+		)
+	}
+
 	excludedKeyspaceLevelState, ok := excludedStatesByID[keyspaceLevelID]
 	re.True(ok)
 	requireGCStateCommandState(
@@ -479,17 +492,20 @@ func TestGCState(t *testing.T) {
 	for _, state := range excludedAllWithExpired.GCStates {
 		excludedStatesByIDWithExpired[state.KeyspaceID] = state
 	}
-	excludedNullStateWithExpired, ok := excludedStatesByIDWithExpired[constant.NullKeyspaceID]
-	re.True(ok)
-	requireGCStateCommandState(
-		re,
-		excludedNullStateWithExpired,
-		nullState,
-		[]expectedGCStateCommandBarrier{
-			{barrierID: "a-null", barrierTS: 110},
-			{barrierID: "z-null", barrierTS: 120, expires: true},
-		},
-	)
+	if !kerneltype.IsNextGen() {
+		excludedNullStateWithExpired, ok := excludedStatesByIDWithExpired[constant.NullKeyspaceID]
+		re.True(ok)
+		requireGCStateCommandState(
+			re,
+			excludedNullStateWithExpired,
+			nullState,
+			[]expectedGCStateCommandBarrier{
+				{barrierID: "a-null", barrierTS: 110},
+				{barrierID: "z-null", barrierTS: 120, expires: true},
+			},
+		)
+	}
+
 	excludedKeyspaceLevelStateWithExpired, ok := excludedStatesByIDWithExpired[keyspaceLevelID]
 	re.True(ok)
 	requireGCStateCommandState(
@@ -538,5 +554,9 @@ func TestGCState(t *testing.T) {
 
 	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), "-u", pdAddr, "service-gc-safepoint")
 	re.NoError(err)
-	re.True(json.Valid(output), string(output))
+	if kerneltype.IsNextGen() {
+		re.Contains(string(output), "unified gc is not supported in nextgen")
+	} else {
+		re.True(json.Valid(output), string(output))
+	}
 }

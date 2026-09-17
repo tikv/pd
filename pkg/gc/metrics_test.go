@@ -38,6 +38,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 	"github.com/tikv/pd/server/config"
 )
 
@@ -399,6 +400,10 @@ func (s *gcStateManagerTestSuite) TestBarrierMetricsKeyspaceNames() {
 		s.Run(tc.name, func() {
 			re := s.Require()
 			_, err := m.SetGCBarrier(tc.keyspaceID, "named", ts, time.Hour, now)
+			if kerneltype.IsNextGen() && tc.keyspaceID == constant.NullKeyspaceID {
+				re.ErrorIs(err, errs.ErrGCOnInvalidKeyspace)
+				return
+			}
 			re.NoError(err)
 			if tc.compat {
 				_, _, err = m.CompatibleUpdateServiceGCSafePoint(tc.keyspaceID, "gc_worker", ts, math.MaxInt64, now)
@@ -586,7 +591,7 @@ func (s *gcStateManagerTestSuite) TestBarrierMetricsWarningCommitAndTTL() {
 			re.Equal(now.Add(time.Hour).UTC().Format(time.RFC3339Nano), fields["expiration-time"])
 		}
 	}
-	_, err = m.AdvanceTxnSafePoint(constant.NullKeyspaceID, ts, now)
+	_, err = m.AdvanceTxnSafePoint(s.keyspacePresets.manageable[0], ts, now)
 	re.NoError(err)
 	re.Len(logs.FilterMessage("GC barrier timestamp is too old").All(), 2, "global warning limiter is independent of request keyspace")
 	now = now.Add(time.Minute)
@@ -620,6 +625,9 @@ func (s *gcStateManagerTestSuite) TestBarrierMetricsWarningCommitAndTTL() {
 }
 
 func (s *gcStateManagerTestSuite) TestBarrierMetricsForceDeleteServiceGCSafePoint() {
+	if kerneltype.IsNextGen() {
+		s.T().Skip("unified GC is not supported in NextGen")
+	}
 	re := s.Require()
 	now := time.Unix(2_000_000_000, 0)
 	m := s.manager
@@ -678,6 +686,13 @@ func (s *gcStateManagerTestSuite) TestForceDeleteServiceGCSafePointCompatibility
 	re.NoError(s.provider.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 		return wb.SetGCBarrier(constant.NullKeyspaceID, barrier)
 	}))
+	if kerneltype.IsNextGen() {
+		re.ErrorIs(s.manager.ForceDeleteServiceGCSafePoint(barrierID), errs.ErrGCOnInvalidKeyspace)
+		stored, err := s.provider.LoadGCBarrier(constant.NullKeyspaceID, barrierID)
+		re.NoError(err)
+		re.Equal(barrier, stored)
+		return
+	}
 	_, err := s.manager.DeleteGCBarrier(constant.NullKeyspaceID, barrierID)
 	re.ErrorIs(err, errs.ErrReservedGCBarrierID)
 	stored, err := s.provider.LoadGCBarrier(constant.NullKeyspaceID, barrierID)

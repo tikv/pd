@@ -121,3 +121,15 @@ func TestWithTargetURL(t *testing.T) {
 	_, err = c.WithTargetURL("http://127.0.0.2").GetStatus(ctx)
 	re.ErrorContains(err, "connect: connection refused")
 }
+
+func TestUpdateKeyspaceGCManagementTypeDeprecated(t *testing.T) {
+	requests := 0
+	c := newClientWithMockServiceDiscovery("deprecated-gc-mode", []string{"http://127.0.0.1"}, WithHTTPClient(NewHTTPClientWithRequestChecker(func(*http.Request) error {
+		requests++
+		return nil
+	})))
+	defer c.Close()
+	err := c.UpdateKeyspaceGCManagementType(context.Background(), "ks1", &KeyspaceGCManagementTypeConfig{Config: KeyspaceGCManagementType{GCManagementType: "keyspace_level"}})
+	require.ErrorContains(t, err, "gc management type cannot be changed")
+	require.Zero(t, requests)
+}
