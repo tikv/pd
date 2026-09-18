@@ -335,13 +335,12 @@ func (m *MetaServiceGroupManager) UpdateGroupsSafely(
 }
 
 // checkNewGroupsHealth verifies every configured endpoint before a group is
-// added. Existing groups are intentionally skipped so an address update does
-// not change the established update semantics.
+// added or its endpoint is changed.
 func (m *MetaServiceGroupManager) checkNewGroupsHealth(ctx context.Context, metaServiceGroups map[string]string) error {
 	groups := make(map[string]string)
 	m.RLock()
 	for groupID, addresses := range metaServiceGroups {
-		if _, exists := m.metaServiceGroups[groupID]; !exists {
+		if currentAddresses, exists := m.metaServiceGroups[groupID]; !exists || currentAddresses != addresses {
 			groups[groupID] = addresses
 		}
 	}

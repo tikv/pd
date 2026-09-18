@@ -294,6 +294,16 @@ func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelyChecksNewGroupHeal
 	re.False(persisted)
 	_, exists := suite.manager.GetGroups()["unhealthy"]
 	re.False(exists)
+
+	updatedGroups["healthy"] = endpoint + ",http://127.0.0.1:1"
+	persisted = false
+	err = suite.manager.UpdateGroupsSafely(suite.ctx, updatedGroups, nil, func() error {
+		persisted = true
+		return nil
+	}, nil)
+	re.ErrorIs(err, ErrMetaServiceGroupUnhealthy)
+	re.False(persisted)
+	re.Equal(endpoint, suite.manager.GetGroups()["healthy"])
 }
 
 func (suite *metaServiceGroupTestSuite) TestPatchStatusInitializesNewGroupStatus() {
@@ -326,12 +336,11 @@ func (suite *metaServiceGroupTestSuite) TestGroupMapsAreCopiedAtOwnershipBoundar
 	re.Contains(groups, "etcd-group-1")
 
 	updated := mockMetaServiceGroups()
-	updated["etcd-group-0"] = "updated"
 	re.NoError(manager.UpdateGroupsSafely(suite.ctx, updated, nil, func() error {
 		return nil
 	}, nil))
 	updated["etcd-group-0"] = "mutated after update"
-	re.Equal("updated", manager.GetGroups()["etcd-group-0"])
+	re.Equal("etcd-group-0.tidb-serverless.cluster.svc.local", manager.GetGroups()["etcd-group-0"])
 
 	replacement := mockMetaServiceGroups()
 	manager.updateGroups(replacement)

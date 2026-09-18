@@ -126,14 +126,15 @@ func (suite *metaServiceGroupTestSuite) TestUpdateMetaServiceGroupsViaConfigAPI(
 	re.NotNil(x, "etcd-group-x should be added via /config")
 	re.Equal(suite.cluster.GetEtcdClient().Endpoints()[0], x.Addresses)
 
-	// Updating an existing group's address through /config should also work.
-	added["etcd-group-x"] = "etcd-group-x-modified.example.local"
+	// Updating an existing group to an unhealthy endpoint should be rejected.
+	added["etcd-group-x"] = "http://127.0.0.1:1"
 	code, body = suite.setMetaServiceGroupsViaConfig(re, added)
-	re.Equal(http.StatusOK, code, body)
+	re.Equal(http.StatusBadRequest, code, body)
+	re.Contains(body, "meta-service group etcd server is unhealthy")
 	groups = mustLoadMetaServiceGroups(re, suite.server)
 	for _, group := range groups {
 		if group.ID == "etcd-group-x" {
-			re.Equal("etcd-group-x-modified.example.local", group.Addresses)
+			re.Equal(suite.cluster.GetEtcdClient().Endpoints()[0], group.Addresses)
 		}
 	}
 }
@@ -220,7 +221,7 @@ func (suite *metaServiceGroupTestSuite) TestMetaServiceGroupOperations() {
 		re.InDelta(collectedStatus.Status.AssignmentCount, len(keyspaces)/len(groups), 1)
 	}
 	// Modify address of etcd-group-1
-	newAddr := "etcd-group-1-modified.tidb-serverless.cluster.svc.local"
+	newAddr := suite.cluster.GetEtcdClient().Endpoints()[0]
 	modifyPatch := map[string]*string{
 		"etcd-group-1": &newAddr,
 	}
