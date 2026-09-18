@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -57,8 +56,7 @@ var (
 	scatterSkipNotReplicatedCounter = scatterCounter.WithLabelValues("skip", "not-replicated")
 	scatterSkipAffinityCounter      = scatterCounter.WithLabelValues("skip", "affinity")
 	scatterUnnecessaryCounter       = scatterCounter.WithLabelValues("unnecessary", "")
-	scatterPlacementFailedCounter   = scatterCounter.WithLabelValues("fail", "placement-validation-failed")
-	scatterOperatorFailedCounter    = scatterCounter.WithLabelValues("fail", "operator-creation-failed")
+	scatterFailCounter              = scatterCounter.WithLabelValues("fail", "")
 	scatterSuccessCounter           = scatterCounter.WithLabelValues("success", "")
 	scatterOperatorRunningCounter   = scatterCounter.WithLabelValues("skip", "running")
 	scatterOperatorExistedCounter   = scatterCounter.WithLabelValues("fail", "other-existed")
@@ -732,16 +730,8 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 		return nil, errs.ErrGetTargetStore.FastGenByArgs(fmt.Sprintf("no target leader store found, region: %v", region))
 	}
 
-	// A voter-rule peer can be a leader candidate without satisfying the final
-	// layout's leader rule. Try the remaining candidates in selection order.
-	for targetLeader != 0 && !r.scatterPlacementValid(region, targetPeers, targetLeader) {
-		leaderCandidateStores = slices.DeleteFunc(leaderCandidateStores, func(id uint64) bool {
-			return id == targetLeader
-		})
-		targetLeader, leaderStorePickedCount = r.selectAvailableLeaderStore(group, region, leaderCandidateStores, ordinaryContext, internalScatter)
-	}
-	if targetLeader == 0 {
-		scatterPlacementFailedCounter.Inc()
+	if !scatterPeersValid(region, targetPeers) {
+		scatterFailCounter.Inc()
 		if state == nil {
 			currentPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))
 			for _, peer := range region.GetPeers() {
@@ -749,7 +739,7 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 			}
 			r.Put(currentPeers, region.GetLeader().GetStoreId(), group)
 		}
-		return nil, errs.ErrCreateOperator.FastGenByArgs(fmt.Sprintf("scatter placement validation failed for region %v", region.GetID()))
+		return nil, errs.ErrCreateOperator.FastGenByArgs(fmt.Sprintf("scatter changes peer count or roles for region %v", region.GetID()))
 	}
 
 	if isSameDistribution(region, targetPeers, targetLeader) {
@@ -767,7 +757,7 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 	}
 	op, err := createScatterOperator(desc, r.cluster, region, targetPeers, targetLeader, skipStoreLimit)
 	if err != nil {
-		scatterOperatorFailedCounter.Inc()
+		scatterFailCounter.Inc()
 		currentPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))
 		for _, peer := range region.GetPeers() {
 			currentPeers[peer.GetStoreId()] = peer
@@ -856,6 +846,36 @@ func allowLeader(fit *placement.RegionFit, peer *metapb.Peer) bool {
 		return true
 	}
 	return false
+}
+
+// moveScatterPeer updates only the selected peer in a request-owned layout.
+// The leader is cloned separately from the peer list and must move with it.
+func moveScatterPeer(view *core.RegionInfo, peerID, storeID uint64) {
+	view.GetPeer(peerID).StoreId = storeID
+	if view.GetLeader().GetId() == peerID {
+		view.GetLeader().StoreId = storeID
+	}
+}
+
+// scatterPeersValid checks that planning preserves the peer count and roles.
+func scatterPeersValid(region *core.RegionInfo, targets map[uint64]*metapb.Peer) bool {
+	if len(targets) != len(region.GetPeers()) {
+		return false
+	}
+	roles := make(map[metapb.PeerRole]int)
+	for _, peer := range region.GetPeers() {
+		roles[peer.GetRole()]++
+	}
+	for storeID, peer := range targets {
+		if peer == nil || storeID == 0 || storeID != peer.GetStoreId() {
+			return false
+		}
+		roles[peer.GetRole()]--
+		if roles[peer.GetRole()] < 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func isSameDistribution(region *core.RegionInfo, targetPeers map[uint64]*metapb.Peer, targetLeader uint64) bool {

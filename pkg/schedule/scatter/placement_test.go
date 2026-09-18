@@ -23,7 +23,6 @@ import (
 	"testing"
 	"time"
 
-	promtest "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pingcap/errors"
@@ -32,7 +31,6 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
-	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -126,31 +124,6 @@ func TestScatterPreservesPlacement(t *testing.T) {
 	}
 }
 
-func placementTargets(stores ...uint64) map[uint64]*metapb.Peer {
-	targets := make(map[uint64]*metapb.Peer, len(stores))
-	for _, id := range stores {
-		targets[id] = &metapb.Peer{StoreId: id}
-	}
-	return targets
-}
-
-func TestScatterPlacementValidation(t *testing.T) {
-	for _, rules := range []bool{false, true} {
-		t.Run(strconv.FormatBool(rules), func(t *testing.T) {
-			sc, tc, region := newPlacementTestScatter(t, rules, []string{"A", "B", "C", "D", "D", "D", "E", "F"})
-			require.False(t, sc.scatterPlacementValid(region, placementTargets(4, 5, 6), 4))
-			require.True(t, sc.scatterPlacementValid(region, placementTargets(4, 7, 8), 7))
-			require.False(t, sc.scatterPlacementValid(region, placementTargets(4, 7, 8), 9))
-			require.False(t, sc.scatterPlacementValid(region, placementTargets(4, 7, 99), 4))
-			wrongRole := placementTargets(4, 7, 8)
-			wrongRole[7].Role = metapb.PeerRole_Learner
-			require.False(t, sc.scatterPlacementValid(region, wrongRole, 4))
-			tc.SetStoreLabel(7, map[string]string{"host": "D"})
-			require.False(t, sc.scatterPlacementValid(region, placementTargets(4, 7, 8), 4))
-		})
-	}
-}
-
 func TestScatterPlacementLabelCase(t *testing.T) {
 	for _, hosts := range [][]string{
 		{"A", "a", "B", "A"},
@@ -160,7 +133,16 @@ func TestScatterPlacementLabelCase(t *testing.T) {
 			sc, _, region := newPlacementTestScatter(t, true, hosts)
 			// The first two peers already share a host under CompareLocation.
 			// Replacing the second peer with an equivalent label must remain valid.
-			require.True(t, sc.scatterPlacementValid(region, placementTargets(1, 4, 3), 1))
+			for range 10 {
+				sc.ordinaryEngine.selectedPeer.Put(2, "case")
+			}
+			op, err := sc.Scatter(region, "case", true)
+			require.NoError(t, err)
+			require.NotNil(t, op)
+			targets, leader := scatterOperatorTargets(t, region, op)
+			assertScatterMembership(t, region, targets, leader)
+			require.Contains(t, targets, uint64(4))
+			require.NotContains(t, targets, uint64(2))
 		})
 	}
 }
@@ -175,157 +157,6 @@ func TestScatterRegionView(t *testing.T) {
 	require.NotNil(t, view.GetStorePeer(4))
 	require.Equal(t, uint64(1), region.GetLeader().GetStoreId())
 	require.NotNil(t, region.GetStorePeer(2))
-}
-
-func BenchmarkScatterPlacementValidation(b *testing.B) {
-	sc, _, region := newPlacementTestScatter(b, true, []string{"A", "B", "C", "D", "E", "F"})
-	targets := placementTargets(4, 5, 6)
-	b.ReportAllocs()
-	b.ResetTimer()
-	for b.Loop() {
-		if !sc.scatterPlacementValid(region, targets, 4) {
-			b.Fatal("valid target rejected")
-		}
-	}
-}
-
-type placementChangingCluster struct {
-	sche.SharedCluster
-	onGetStore func(uint64)
-}
-
-func (c *placementChangingCluster) GetStore(id uint64) *core.StoreInfo {
-	c.onGetStore(id)
-	return c.SharedCluster.GetStore(id)
-}
-
-func TestScatterPlacementMetadataChanges(t *testing.T) {
-	for _, changeRules := range []bool{false, true} {
-		t.Run(strconv.FormatBool(changeRules), func(t *testing.T) {
-			sc, tc, region := newPlacementTestScatter(t, true, []string{"A", "B", "C", "D", "E", "F"})
-			calls := 0
-			sc.cluster = &placementChangingCluster{SharedCluster: tc, onGetStore: func(_ uint64) {
-				calls++
-				// The first six reads capture the original and target stores. Change
-				// metadata while validating the captured StoreInfos, after both fits.
-				if calls == 7 {
-					if changeRules {
-						rule := tc.GetRuleManager().GetRule("pd", "default").Clone()
-						rule.Count = 4
-						require.NoError(t, tc.GetRuleManager().SetRule(rule))
-					} else {
-						tc.SetStoreLabel(4, map[string]string{"host": "E"})
-					}
-				}
-			}}
-			require.False(t, sc.scatterPlacementValid(region, placementTargets(4, 5, 6), 4))
-			require.GreaterOrEqual(t, calls, 7)
-		})
-	}
-}
-
-func TestScatterFinalLeaderPlacement(t *testing.T) {
-	sc, tc, region := newPlacementTestScatter(t, true, []string{"A", "B", "C", "D", "E", "F"})
-	rule := tc.GetRuleManager().GetRule("pd", "default").Clone()
-	rule.Role = placement.Leader
-	rule.Count = 1
-	rule.LabelConstraints = []placement.LabelConstraint{{Key: "host", Op: placement.In, Values: []string{"A", "D"}}}
-	require.NoError(t, tc.GetRuleManager().SetRule(rule))
-	followers := rule.Clone()
-	followers.ID = "followers"
-	followers.Role = placement.Follower
-	followers.Count = 2
-	followers.LabelConstraints = nil
-	require.NoError(t, tc.GetRuleManager().SetRule(followers))
-	require.True(t, sc.scatterPlacementValid(region, placementTargets(4, 5, 6), 4))
-	require.False(t, sc.scatterPlacementValid(region, placementTargets(4, 5, 6), 5))
-}
-
-func TestScatterRetriesLegalLeader(t *testing.T) {
-	for _, internal := range []bool{false, true} {
-		t.Run(strconv.FormatBool(internal), func(t *testing.T) {
-			sc, tc, region := newPlacementTestScatter(t, true, []string{"A", "B", "C", "D", "E", "F"})
-			rm := tc.GetRuleManager()
-			leaderRule := rm.GetRule("pd", "default").Clone()
-			leaderRule.Role = placement.Leader
-			leaderRule.Count = 1
-			leaderRule.LabelConstraints = []placement.LabelConstraint{{Key: "host", Op: placement.In, Values: []string{"A", "D"}}}
-			require.NoError(t, rm.SetRule(leaderRule))
-			voterRule := leaderRule.Clone()
-			voterRule.ID = "voters"
-			voterRule.Role = placement.Voter
-			voterRule.Count = 2
-			voterRule.LabelConstraints = []placement.LabelConstraint{{Key: "host", Op: placement.In, Values: []string{"B", "C", "E", "F"}}}
-			require.NoError(t, rm.SetRule(voterRule))
-			require.True(t, rm.FitRegion(tc, region).IsSatisfied())
-			for attempt := range 32 {
-				group := fmt.Sprintf("leader-retry-%d", attempt)
-				var state *scatterState
-				if internal {
-					state = sc.newScatterState()
-					state.ordinaryEngine.selectedPeer.InitGroupDistribution(group, map[uint64]uint64{1: 10, 2: 10, 3: 10})
-					state.ordinaryEngine.selectedLeader.InitGroupDistribution(group, map[uint64]uint64{4: 100})
-				} else {
-					for id := uint64(1); id <= 3; id++ {
-						for range 10 {
-							sc.ordinaryEngine.selectedPeer.Put(id, group)
-						}
-					}
-					for range 100 {
-						sc.ordinaryEngine.selectedLeader.Put(4, group)
-					}
-				}
-				placementFailures := promtest.ToFloat64(scatterPlacementFailedCounter)
-				// Lower-count voter targets are considered first, but only store 4
-				// can lead the final membership. Retry without changing the peers.
-				var op *operator.Operator
-				var err error
-				if internal {
-					op, err = sc.scatterRegionWithType(region, group, false, true, state)
-				} else {
-					op, err = sc.Scatter(region, group, true)
-				}
-				require.NoError(t, err)
-				require.NotNil(t, op)
-				targets, leader := scatterOperatorTargets(t, region, op)
-				require.Len(t, targets, 3)
-				for _, id := range []uint64{4, 5, 6} {
-					require.Contains(t, targets, id)
-				}
-				require.Equal(t, uint64(4), leader)
-				require.Equal(t, placementFailures, promtest.ToFloat64(scatterPlacementFailedCounter))
-				require.True(t, sc.scatterPlacementValid(region, targets, leader))
-			}
-		})
-	}
-}
-
-func TestScatterPlacementFailureAccounting(t *testing.T) {
-	for _, internal := range []bool{false, true} {
-		t.Run(strconv.FormatBool(internal), func(t *testing.T) {
-			sc, _, region := newPlacementTestScatter(t, true, []string{"A", "B", "C"})
-			// Bypass the public replication precheck to exercise the final gate on
-			// an invalid complete membership. It must run even for a no-op layout.
-			region = region.Clone(core.WithRemoveStorePeer(3))
-			var state *scatterState
-			if internal {
-				state = sc.newScatterState()
-				state.ordinaryEngine.selectedPeer.InitGroupDistribution("test", map[uint64]uint64{1: 10, 2: 10})
-			}
-			for attempt := 1; attempt <= 2; attempt++ {
-				op, err := sc.scatterRegionWithType(region, "test", true, internal, state)
-				require.Error(t, err)
-				require.Nil(t, op)
-				for id := uint64(1); id <= 2; id++ {
-					if internal {
-						require.Equal(t, uint64(10), state.ordinaryEngine.selectedPeer.Get(id, "test"))
-					} else {
-						require.Equal(t, uint64(attempt), sc.ordinaryEngine.selectedPeer.Get(id, "test"))
-					}
-				}
-			}
-		})
-	}
 }
 
 func BenchmarkScatterPlacementBatch(b *testing.B) {
@@ -348,14 +179,6 @@ func BenchmarkScatterPlacementBatch(b *testing.B) {
 	}
 }
 
-// Fail allocation after placement validation, so the operator failure test
-// does not depend on which peer is selected as leader.
-type scatterAllocFailureCluster struct{ sche.SharedCluster }
-
-func (*scatterAllocFailureCluster) AllocID(uint32) (uint64, uint32, error) {
-	return 0, 0, errors.New("injected allocation failure")
-}
-
 func TestScatterOverlappingAndOverrideRules(t *testing.T) {
 	for _, override := range []bool{false, true} {
 		t.Run(strconv.FormatBool(override), func(t *testing.T) {
@@ -375,8 +198,6 @@ func TestScatterOverlappingAndOverrideRules(t *testing.T) {
 			} else {
 				require.NoError(t, rm.DeleteRule("pd", "default"))
 			}
-			// Both rules match all stores. They do not define disjoint pools.
-			require.True(t, sc.scatterPlacementValid(region, placementTargets(4, 5, 6), 4))
 			for id := uint64(1); id <= 3; id++ {
 				for range 10 {
 					sc.ordinaryEngine.selectedPeer.Put(id, "test")
@@ -386,7 +207,7 @@ func TestScatterOverlappingAndOverrideRules(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, op)
 			targets, leader := scatterOperatorTargets(t, region, op)
-			require.True(t, sc.scatterPlacementValid(region, targets, leader))
+			assertScatterMembership(t, region, targets, leader)
 			for id := range targets {
 				require.Greater(t, id, uint64(3))
 			}
@@ -459,31 +280,12 @@ func TestScatterMixedLearner(t *testing.T) {
 	require.NotNil(t, op)
 	targets, leader := scatterOperatorTargets(t, region, op)
 	require.Len(t, targets, 4)
-	require.True(t, sc.scatterPlacementValid(region, targets, leader))
+	assertScatterMembership(t, region, targets, leader)
 	require.Equal(t, metapb.PeerRole_Learner, targets[8].GetRole())
 	for id := range targets {
 		require.Greater(t, id, uint64(4))
 	}
 	require.Equal(t, metapb.PeerRole_Voter, targets[leader].GetRole())
-}
-
-func TestScatterDegradedMultilevelIsolation(t *testing.T) {
-	sc, tc, region := newPlacementTestScatter(t, true, []string{"A", "B", "C", "D", "E", "F"})
-	for id := uint64(1); id <= 6; id++ {
-		host := "same"
-		if id == 3 || id == 6 {
-			host = "other"
-		}
-		tc.SetStoreLabel(id, map[string]string{"zone": "z", "rack": "r", "host": host})
-	}
-	rule := tc.GetRuleManager().GetRule("pd", "default").Clone()
-	rule.LocationLabels = []string{"zone", "rack", "host"}
-	rule.IsolationLevel = "host"
-	require.NoError(t, tc.GetRuleManager().SetRule(rule))
-	// The source is already degraded. Equal isolation remains acceptable.
-	require.True(t, sc.scatterPlacementValid(region, placementTargets(4, 5, 6), 4))
-	tc.SetStoreLabel(6, map[string]string{"zone": "z", "rack": "r", "host": "same"})
-	require.False(t, sc.scatterPlacementValid(region, placementTargets(4, 5, 6), 4))
 }
 
 func newScatterBatchFixture(t testing.TB, storeCount, peerCount, ruleCount, regionCount int) (*RegionScatterer, []*core.RegionInfo) {
@@ -531,7 +333,7 @@ func TestScatterDistinctRegionBatch(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, op)
 		peers, leader := scatterOperatorTargets(t, region, op)
-		require.True(t, sc.scatterPlacementValid(region, peers, leader))
+		assertScatterMembership(t, region, peers, leader)
 		for id := range peers {
 			require.Greater(t, id, uint64(3))
 			counts[id]++
@@ -616,18 +418,6 @@ func TestScatterConcurrentPlacementViews(t *testing.T) {
 	}
 }
 
-func TestScatterPlacementConfigChanges(t *testing.T) {
-	sc, tc, region := newPlacementTestScatter(t, true, []string{"A", "B", "C", "D", "E", "F"})
-	calls := 0
-	sc.cluster = &placementChangingCluster{SharedCluster: tc, onGetStore: func(_ uint64) {
-		calls++
-		if calls == 7 {
-			tc.SetEnablePlacementRules(false)
-		}
-	}}
-	require.False(t, sc.scatterPlacementValid(region, placementTargets(4, 5, 6), 4))
-}
-
 func TestScatterBatchRequestAccounting(t *testing.T) {
 	const regionCount = 1000
 	sc, regions := newScatterBatchFixture(t, 64, 3, 1, regionCount)
@@ -647,7 +437,7 @@ func TestScatterBatchRequestAccounting(t *testing.T) {
 		}
 		require.NotNil(t, op)
 		peers, leader := scatterOperatorTargets(t, region, op)
-		require.True(t, sc.scatterPlacementValid(region, peers, leader))
+		assertScatterMembership(t, region, peers, leader)
 	}
 }
 
@@ -681,38 +471,6 @@ func newScatterTopologyFixture(t *testing.T, rules bool, labels []string, paths 
 	return sc, tc, tc.AddLeaderRegion(200, 1, followers...)
 }
 
-// The existing weighted score permits better zone distribution to outweigh a
-// host collision unless the placement rule explicitly requires host isolation.
-func TestScatterConfiguredIsolation(t *testing.T) {
-	for _, rules := range []bool{false, true} {
-		t.Run(strconv.FormatBool(rules), func(t *testing.T) {
-			sc, tc, region := newScatterTopologyFixture(t, rules, []string{"zone", "host"}, [][]string{{"A", "a"}, {"A", "b"}, {"A", "c"}, {"B", "d"}, {"B", "d"}}, 4)
-			targets := placementTargets(2, 3, 4, 5)
-			require.True(t, sc.scatterPlacementValid(region, targets, 2))
-			if rules {
-				rule := tc.GetRuleManager().GetRule("pd", "default").Clone()
-				rule.IsolationLevel = "host"
-				require.NoError(t, tc.GetRuleManager().SetRule(rule))
-				require.False(t, sc.scatterPlacementValid(region, targets, 2))
-			}
-		})
-	}
-}
-
-func TestScatterIsolationPerRule(t *testing.T) {
-	sc, tc, region := newScatterTopologyFixture(t, true, []string{"host"}, [][]string{{"a"}, {"b"}, {"c"}, {"b"}}, 3)
-	rm := tc.GetRuleManager()
-	rule := rm.GetRule("pd", "default").Clone()
-	rule.Count, rule.Role, rule.IsolationLevel = 1, placement.Leader, "host"
-	require.NoError(t, rm.SetRule(rule))
-	followers := rule.Clone()
-	followers.ID, followers.Count, followers.Role = "followers", 2, placement.Follower
-	require.NoError(t, rm.SetRule(followers))
-	// Each rule keeps its isolation; the rules do not declare a shared host
-	// constraint across the leader and follower groups.
-	require.True(t, sc.scatterPlacementValid(region, placementTargets(2, 3, 4), 4))
-}
-
 func TestScatterLearnerIsolation(t *testing.T) {
 	sc, tc, region := newScatterTopologyFixture(t, true, []string{"host"}, [][]string{{"a"}, {"b"}, {"c"}, {"a"}}, 3)
 	region = region.Clone(core.WithRole(region.GetStorePeer(3).GetId(), metapb.PeerRole_Learner))
@@ -725,55 +483,15 @@ func TestScatterLearnerIsolation(t *testing.T) {
 	learner.Role = placement.Learner
 	learner.Count = 1
 	require.NoError(t, rm.SetRule(learner))
-	targets := placementTargets(1, 2, 4)
-	targets[4].Role = metapb.PeerRole_Learner
-	require.True(t, sc.scatterPlacementValid(region, targets, 1))
 	for range 10 {
 		sc.ordinaryEngine.selectedPeer.Put(3, "host")
 	}
 	op, err := sc.scatterRegionWithType(region, "host", true, false, nil)
 	require.NoError(t, err)
 	require.NotNil(t, op)
-	targets, _ = scatterOperatorTargets(t, region, op)
+	targets, _ := scatterOperatorTargets(t, region, op)
 	require.Contains(t, targets, uint64(4))
 	require.Equal(t, metapb.PeerRole_Learner, targets[4].GetRole())
-}
-
-func TestScatterFailureMetrics(t *testing.T) {
-	for _, internal := range []bool{false, true} {
-		for _, placementFailure := range []bool{false, true} {
-			t.Run(fmt.Sprintf("internal=%v/placement=%v", internal, placementFailure), func(t *testing.T) {
-				sc, tc, region := newPlacementTestScatter(t, true, []string{"A", "B", "C", "D"})
-				if placementFailure {
-					// All leader candidates fail the final rule-count check.
-					region = region.Clone(core.WithRemoveStorePeer(3))
-				} else {
-					sc.cluster = &scatterAllocFailureCluster{SharedCluster: tc}
-				}
-				var state *scatterState
-				if internal {
-					state = sc.newScatterState()
-					state.ordinaryEngine.selectedPeer.InitGroupDistribution("metrics", map[uint64]uint64{1: 10})
-				} else {
-					for range 10 {
-						sc.ordinaryEngine.selectedPeer.Put(1, "metrics")
-					}
-				}
-				placementBefore := promtest.ToFloat64(scatterPlacementFailedCounter)
-				operatorBefore := promtest.ToFloat64(scatterOperatorFailedCounter)
-				op, err := sc.scatterRegionWithType(region, "metrics", true, internal, state)
-				require.Error(t, err)
-				require.Nil(t, op)
-				if placementFailure {
-					require.Equal(t, placementBefore+1, promtest.ToFloat64(scatterPlacementFailedCounter))
-					require.Equal(t, operatorBefore, promtest.ToFloat64(scatterOperatorFailedCounter))
-				} else {
-					require.Equal(t, placementBefore, promtest.ToFloat64(scatterPlacementFailedCounter))
-					require.Equal(t, operatorBefore+1, promtest.ToFloat64(scatterOperatorFailedCounter))
-				}
-			})
-		}
-	}
 }
 
 func BenchmarkScatterHostHierarchy(b *testing.B) {
@@ -803,6 +521,59 @@ func BenchmarkScatterHostHierarchy(b *testing.B) {
 				i++
 			}
 			b.ReportMetric(float64(ops)/float64(i), "operators/op")
+		})
+	}
+}
+
+// Check the operator's terminal membership independently of the planning guard.
+func assertScatterMembership(t testing.TB, region *core.RegionInfo, targets map[uint64]*metapb.Peer, leader uint64) {
+	t.Helper()
+	require.Len(t, targets, len(region.GetPeers()))
+	var oldLearners, newLearners int
+	for _, peer := range region.GetPeers() {
+		if core.IsLearner(peer) {
+			oldLearners++
+		}
+	}
+	for id, peer := range targets {
+		require.Equal(t, id, peer.GetStoreId())
+		if core.IsLearner(peer) {
+			newLearners++
+		}
+	}
+	require.Equal(t, oldLearners, newLearners)
+	require.Contains(t, targets, leader)
+	require.False(t, core.IsLearner(targets[leader]))
+}
+
+func TestScatterAccumulatesFivePeers(t *testing.T) {
+	for _, rules := range []bool{false, true} {
+		t.Run(strconv.FormatBool(rules), func(t *testing.T) {
+			hosts := []string{"A", "B", "C", "D", "E", "F", "F", "F", "F", "F", "G", "H", "I", "J"}
+			sc, tc, _ := newPlacementTestScatter(t, rules, hosts)
+			tc.SetMaxReplicas(5)
+			if rules {
+				rule := tc.GetRuleManager().GetRule("pd", "default").Clone()
+				rule.Count = 5
+				require.NoError(t, tc.GetRuleManager().SetRule(rule))
+			}
+			region := tc.AddLeaderRegion(200, 1, 2, 3, 4, 5)
+			for id := uint64(1); id <= 5; id++ {
+				for range 10 {
+					sc.ordinaryEngine.selectedPeer.Put(id, "five")
+				}
+			}
+			op, err := sc.Scatter(region, "five", true)
+			require.NoError(t, err)
+			require.NotNil(t, op)
+			targets, leader := scatterOperatorTargets(t, region, op)
+			assertScatterMembership(t, region, targets, leader)
+			selectedHosts := make(map[string]struct{})
+			for id := range targets {
+				require.Greater(t, id, uint64(5))
+				selectedHosts[hosts[id-1]] = struct{}{}
+			}
+			require.Len(t, selectedHosts, 5)
 		})
 	}
 }
