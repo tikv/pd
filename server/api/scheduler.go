@@ -225,7 +225,8 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 		// batched); any remaining stores are then added to it in one batched
 		// config-update call instead of one call per store.
 		toUpdate := storeIDs
-		if !exist {
+		justCreated := !exist
+		if justCreated {
 			collector(strconv.FormatUint(uint64(storeIDs[0]), 10))
 			if err := h.AddScheduler(tp, args...); err != nil {
 				h.r.JSON(w, http.StatusBadRequest, err.Error())
@@ -235,6 +236,15 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 		}
 		if len(toUpdate) > 0 {
 			if err := h.RedirectSchedulerUpdateBatch(name, toUpdate); err != nil {
+				if justCreated {
+					// Roll back the scheduler we just created so the whole
+					// "create with N stores" request is atomic: either every
+					// requested store ends up evicted, or none of them do.
+					if rmErr := h.RemoveScheduler(name); rmErr != nil {
+						log.Error("failed to roll back partially created evict-leader-scheduler",
+							zap.String("scheduler-name", name), errs.ZapError(rmErr))
+					}
+				}
 				h.r.JSON(w, http.StatusInternalServerError, err.Error())
 				return
 			}

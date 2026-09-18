@@ -251,6 +251,45 @@ func (suite *scheduleTestSuite) checkEvictLeaderSchedulerMultiStore(cluster *tes
 	assertNoScheduler(re, urlPrefix, "evict-leader-scheduler")
 }
 
+func (suite *scheduleTestSuite) TestEvictLeaderSchedulerMultiStoreAtomicCreate() {
+	suite.te.RunTest(suite.checkEvictLeaderSchedulerMultiStoreAtomicCreate)
+}
+
+// checkEvictLeaderSchedulerMultiStoreAtomicCreate verifies that creating
+// evict-leader-scheduler with multiple store ids is all-or-nothing: if the
+// batched step that adds the stores beyond the first one fails, the
+// just-created scheduler is rolled back entirely rather than left evicting
+// only part of the requested stores.
+func (suite *scheduleTestSuite) checkEvictLeaderSchedulerMultiStoreAtomicCreate(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leaderAddr := cluster.GetLeaderServer().GetAddr()
+	urlPrefix := fmt.Sprintf("%s/pd/api/v1/schedulers", leaderAddr)
+	for i := 1; i <= 2; i++ {
+		store := &metapb.Store{
+			Id:        uint64(i),
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
+		}
+		tests.MustPutStore(re, cluster, store)
+	}
+
+	// persistFail only breaks the config-save path used to add the second
+	// (and later) store, not the initial scheduler-creation save, so this
+	// reproduces "first store created, batch-add the rest fails".
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/persistFail", "return(true)"))
+	input := map[string]any{"name": "evict-leader-scheduler", "store_ids": []int{1, 2}}
+	body, err := json.Marshal(input)
+	re.NoError(err)
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, urlPrefix, body,
+		testutil.Status(re, http.StatusInternalServerError)),
+	)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/persistFail"))
+
+	// the whole scheduler must be rolled back, not left running with only
+	// the first store evicted.
+	assertNoScheduler(re, urlPrefix, "evict-leader-scheduler")
+}
+
 func (suite *scheduleTestSuite) TestAPI() {
 	suite.te.RunTest(suite.checkAPI)
 }
