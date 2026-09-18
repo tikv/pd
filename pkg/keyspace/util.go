@@ -51,11 +51,15 @@ const (
 var (
 	errNoAvailableMetaServiceGroups = errors.New("no available meta-service groups")
 
-	// Keep these aliases for callers that historically imported the keyspace package.
-	ErrUnknownMetaServiceGroup   = errs.ErrUnknownMetaServiceGroup
-	ErrInvalidAssignmentCount    = errs.ErrInvalidAssignmentCount
-	ErrMetaServiceGroupDisabled  = errs.ErrMetaServiceGroupDisabled
+	// ErrUnknownMetaServiceGroup is kept for callers that historically imported the keyspace package.
+	ErrUnknownMetaServiceGroup = errs.ErrUnknownMetaServiceGroup
+	// ErrInvalidAssignmentCount is kept for callers that historically imported the keyspace package.
+	ErrInvalidAssignmentCount = errs.ErrInvalidAssignmentCount
+	// ErrMetaServiceGroupDisabled is kept for callers that historically imported the keyspace package.
+	ErrMetaServiceGroupDisabled = errs.ErrMetaServiceGroupDisabled
+	// ErrGroupHasAssignedKeyspaces is kept for callers that historically imported the keyspace package.
 	ErrGroupHasAssignedKeyspaces = errs.ErrGroupHasAssignedKeyspaces
+	// ErrMetaServiceGroupUnhealthy is kept for callers that historically imported the keyspace package.
 	ErrMetaServiceGroupUnhealthy = errs.ErrMetaServiceGroupUnhealthy
 
 	// stateTransitionTable lists all allowed next state for the given current state.

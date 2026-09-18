@@ -17,6 +17,7 @@ package keyspace
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 
@@ -51,7 +52,41 @@ func (suite *metaServiceGroupTestSuite) SetupTest() {
 }
 
 func (suite *metaServiceGroupTestSuite) TearDownTest() {
+	suite.manager.Close()
 	suite.cancel()
+}
+
+func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelySerializesUpdates() {
+	re := suite.Require()
+	firstPersistStarted := make(chan struct{})
+	releaseFirstPersist := make(chan struct{})
+	firstDone := make(chan error, 1)
+	secondDone := make(chan error, 1)
+
+	go func() {
+		firstDone <- suite.manager.UpdateGroupsSafely(suite.ctx, map[string]string{}, nil, func() error {
+			close(firstPersistStarted)
+			<-releaseFirstPersist
+			return nil
+		}, nil)
+	}()
+
+	<-firstPersistStarted
+	go func() {
+		secondDone <- suite.manager.UpdateGroupsSafely(suite.ctx, map[string]string{}, nil, func() error {
+			return nil
+		}, nil)
+	}()
+
+	select {
+	case err := <-secondDone:
+		re.Failf("concurrent update completed before the first update was released", "error: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(releaseFirstPersist)
+	re.NoError(<-firstDone)
+	re.NoError(<-secondDone)
 }
 
 func (suite *metaServiceGroupTestSuite) TestGetAssignmentCountsInitialZero() {
