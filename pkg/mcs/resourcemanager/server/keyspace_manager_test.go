@@ -1154,8 +1154,8 @@ func TestConciliateFractionalDemand(t *testing.T) {
 				at := now.Add(time.Duration(10+5*round) * time.Second)
 				for clientID := uint64(1); clientID <= clients; clientID++ {
 					requested := 0.5 / float64(clients)
-					result := cold.RequestRU(at, requested, 5000, clientID,
-						krgm.getGroupRUTracker("cold"), krgm.getServiceLimiter())
+					result := cold.RequestRU(at, requested, 5000, clientID, "",
+						krgm.getGroupRUTracker("cold"), krgm.getServiceLimiter(), nil)
 					re.NotNil(result)
 					re.InDelta(requested, result.GrantedTokens.Tokens, 1e-12, "round %d", round)
 				}

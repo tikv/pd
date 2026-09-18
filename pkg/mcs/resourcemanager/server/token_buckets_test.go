@@ -572,8 +572,10 @@ func TestFractionalSlotBorrowing(t *testing.T) {
 	for _, capacity := range []float64{0, -10} {
 		t.Run(fmt.Sprintf("capacity-%g", capacity), func(t *testing.T) {
 			re := require.New(t)
-			slot := tokenSlot{fillRate: 0.2, curTokenCapacity: capacity}
-			result, trickle := slot.assignSlotTokens(1, 5000)
+			gtb := &GroupTokenBucket{}
+			slot := tokenSlot{fillRate: 0.2}
+			gtb.setSlotTokenCapacity(&slot, capacity)
+			result, trickle := gtb.assignSlotTokens(&slot, 1, 5000)
 			re.Greater(result.Tokens, 0.0)
 			re.LessOrEqual(result.Tokens, 1.0)
 			re.Equal(int64(5000), trickle)
@@ -597,7 +599,7 @@ func TestFractionalAllocationWithinSmallGroupBudget(t *testing.T) {
 	for _, slot := range gtb.tokenSlots {
 		re.InDelta(1.0/3, slot.fillRate, 1e-12)
 		sum += slot.fillRate
-		result, _ := slot.assignSlotTokens(0.1, 5000)
+		result, _ := gtb.assignSlotTokens(slot, 0.1, 5000)
 		re.InDelta(0.1, result.Tokens, 1e-12)
 	}
 	re.InDelta(1.0, sum, 1e-12)

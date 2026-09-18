@@ -743,15 +743,9 @@ func (gtb *GroupTokenBucket) assignSlotTokens(ts *tokenSlot, requiredToken float
 			}
 		}
 	}
-<<<<<<< HEAD
-	if requiredToken > 0 && grantedTokens < defaultReserveRatio*float64(fillRate)*targetPeriodTimeSec {
-		reservedTokens := math.Min(requiredToken+grantedTokens, defaultReserveRatio*float64(fillRate)*targetPeriodTimeSec)
-		gtb.addSlotTokenCapacity(ts, -(reservedTokens - grantedTokens))
-=======
 	if requiredToken > 0 && grantedTokens < defaultReserveRatio*fillRate*targetPeriodTimeSec {
 		reservedTokens := math.Min(requiredToken+grantedTokens, defaultReserveRatio*fillRate*targetPeriodTimeSec)
-		ts.curTokenCapacity -= reservedTokens - grantedTokens
->>>>>>> 6d022ad13f (resourcemanager: preserve fractional RU demand and fill rates (#11244))
+		gtb.addSlotTokenCapacity(ts, -(reservedTokens - grantedTokens))
 		grantedTokens = reservedTokens
 	}
 	res.Tokens = grantedTokens
