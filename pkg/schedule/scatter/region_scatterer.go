@@ -618,6 +618,13 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 	ordinaryPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))
 	specialPeers := make(map[string]map[uint64]*metapb.Peer)
 	oldFit := r.cluster.GetRuleManager().FitRegion(r.cluster, region)
+	// view tracks the planned peer layout, including moves selected so far.
+	view := region
+	// viewFit records how the peers in view match placement rules.
+	// After selecting A -> D for {A, B, C}, match {D, B, C} against the
+	// placement rules before checking the next candidate.
+	viewFit := oldFit
+
 	// Group peers by the engine of their stores
 	for _, peer := range region.GetPeers() {
 		store := r.cluster.GetStore(peer.GetStoreId())
@@ -665,6 +672,7 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 		}
 		filters[filterLen-2] = filter.NewExcludedFilter(r.name, nil, selectedStores)
 		for _, peer := range peers {
+			failpoint.InjectCall("scatterPeerOrder", &peer)
 			if _, ok := selectedStores[peer.GetStoreId()]; ok {
 				if collectLeaderCandidates && allowLeader(oldFit, peer) {
 					leaderCandidateStores = append(leaderCandidateStores, peer.GetStoreId())
@@ -677,21 +685,34 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 				log.Error("failed to get the store", zap.Uint64("store-id", peer.GetStoreId()), errs.ZapError(errs.ErrGetSourceStore))
 				continue
 			}
-			filters[filterLen-1] = filter.NewPlacementSafeguard(r.name, r.cluster.GetSharedConfig(), r.cluster.GetBasicCluster(), r.cluster.GetRuleManager(), region, sourceStore, oldFit)
+			if r.cluster.GetSharedConfig().IsPlacementRulesEnabled() && viewFit == nil {
+				viewFit = r.cluster.GetRuleManager().FitRegionWithoutCache(r.cluster, view)
+			}
+			filters[filterLen-1] = filter.NewPlacementSafeguard(r.name, r.cluster.GetSharedConfig(), r.cluster.GetBasicCluster(), r.cluster.GetRuleManager(), view, sourceStore, viewFit)
 			for {
 				newPeer := r.selectNewPeer(context, group, peer, filters, internalScatter)
-				targetPeers[newPeer.GetStoreId()] = newPeer
 				selectedStores[newPeer.GetStoreId()] = struct{}{}
 				// If the selected peer is a peer other than origin peer in this region,
 				// it is considered that the selected peer select itself.
 				// This origin peer re-selects.
 				if _, ok := peers[newPeer.GetStoreId()]; !ok || peer.GetStoreId() == newPeer.GetStoreId() {
+					targetPeers[newPeer.GetStoreId()] = newPeer
 					selectedStores[peer.GetStoreId()] = struct{}{}
+					if peer.GetStoreId() != newPeer.GetStoreId() {
+						if view == region {
+							view = region.Clone()
+						}
+						moveScatterPeer(view, peer.GetId(), newPeer.GetStoreId())
+						viewFit = nil
+					}
 					if collectLeaderCandidates && allowLeader(oldFit, peer) {
 						leaderCandidateStores = append(leaderCandidateStores, newPeer.GetStoreId())
 					}
 					break
 				}
+				// Reserving another peer keeps that peer in place, including its
+				// role; the source still needs a new target.
+				targetPeers[newPeer.GetStoreId()] = peers[newPeer.GetStoreId()]
 			}
 		}
 	}
@@ -712,6 +733,18 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 	if targetLeader == 0 {
 		scatterSkipNoLeaderCounter.Inc()
 		return nil, errs.ErrGetTargetStore.FastGenByArgs(fmt.Sprintf("no target leader store found, region: %v", region))
+	}
+
+	if !scatterPeersValid(region, targetPeers) {
+		scatterFailCounter.Inc()
+		if state == nil {
+			currentPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))
+			for _, peer := range region.GetPeers() {
+				currentPeers[peer.GetStoreId()] = peer
+			}
+			r.Put(currentPeers, region.GetLeader().GetStoreId(), group)
+		}
+		return nil, errs.ErrCreateOperator.FastGenByArgs(fmt.Sprintf("scatter changes peer count or roles for region %v", region.GetID()))
 	}
 
 	if isSameDistribution(region, targetPeers, targetLeader) {
@@ -818,6 +851,36 @@ func allowLeader(fit *placement.RegionFit, peer *metapb.Peer) bool {
 		return true
 	}
 	return false
+}
+
+// moveScatterPeer updates only the selected peer in a request-owned layout.
+// The leader is cloned separately from the peer list and must move with it.
+func moveScatterPeer(view *core.RegionInfo, peerID, storeID uint64) {
+	view.GetPeer(peerID).StoreId = storeID
+	if view.GetLeader().GetId() == peerID {
+		view.GetLeader().StoreId = storeID
+	}
+}
+
+// scatterPeersValid checks that planning preserves the peer count and roles.
+func scatterPeersValid(region *core.RegionInfo, targets map[uint64]*metapb.Peer) bool {
+	if len(targets) != len(region.GetPeers()) {
+		return false
+	}
+	roles := make(map[metapb.PeerRole]int)
+	for _, peer := range region.GetPeers() {
+		roles[peer.GetRole()]++
+	}
+	for storeID, peer := range targets {
+		if peer == nil || storeID == 0 || storeID != peer.GetStoreId() {
+			return false
+		}
+		roles[peer.GetRole()]--
+		if roles[peer.GetRole()] < 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func isSameDistribution(region *core.RegionInfo, targetPeers map[uint64]*metapb.Peer, targetLeader uint64) bool {
