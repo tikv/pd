@@ -701,3 +701,38 @@ func newRegionInfoWithBytes(id uint64, startKey, endKey []byte) *core.RegionInfo
 		peer,
 	)
 }
+
+func TestMergePreservesConfiguredIsolation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tc := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	tc.SetEnablePlacementRules(true)
+	tc.SetKeyType("raw")
+	tc.SetSplitMergeInterval(0)
+	tc.SetMaxMergeRegionSize(2)
+	tc.SetMaxMergeRegionKeys(2)
+	for i, host := range []string{"a", "b", "c", "d", "d", "d"} {
+		tc.AddLabelsStore(uint64(i+1), 0, map[string]string{"host": host})
+	}
+	source := tc.AddLeaderRegion(1, 1, 2, 3).Clone(core.WithStartKey([]byte("a")), core.WithEndKey([]byte("m")), core.SetApproximateSize(1), core.SetApproximateKeys(1))
+	target := tc.AddLeaderRegion(2, 4, 5, 6).Clone(core.WithStartKey([]byte("m")), core.WithEndKey([]byte("z")), core.SetApproximateSize(1), core.SetApproximateKeys(1))
+	tc.PutRegion(source)
+	tc.PutRegion(target)
+	rm := tc.GetRuleManager()
+	rule := rm.GetRule("pd", "default").Clone()
+	rule.LocationLabels = []string{"host"}
+	for _, level := range []string{"", "host"} {
+		rule.IsolationLevel = level
+		require.NoError(t, rm.SetRule(rule))
+		require.True(t, rm.FitRegionWithoutCache(tc, target).IsSatisfied())
+		require.Equal(t, level == "", AllowMerge(tc, source, target))
+		mc := NewMergeChecker(ctx, tc, tc.GetCheckerConfig())
+		if level == "" {
+			require.Len(t, mc.Check(source), 2)
+		} else {
+			require.Empty(t, mc.Check(source))
+		}
+	}
+	// A degraded source can merge into an isolated target.
+	require.True(t, AllowMerge(tc, target, source))
+}
