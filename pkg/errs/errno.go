@@ -94,6 +94,17 @@ var (
 	ErrGetTargetStore      = errors.Normalize("failed to get the target store", errors.RFCCodeText("PD:common:ErrGetTargetStore"))
 	ErrIncorrectSystemTime = errors.Normalize("incorrect system time", errors.RFCCodeText("PD:common:ErrIncorrectSystemTime"))
 	ErrInvalidArgument     = errors.Normalize("invalid argument for %s: %v", errors.RFCCodeText("PD:common:ErrInvalidArgument"))
+
+	// ErrUnknownMetaServiceGroup indicates that the specified meta-service group does not exist.
+	ErrUnknownMetaServiceGroup = errors.New("unknown meta-service group")
+	// ErrInvalidAssignmentCount indicates that an assignment count is negative.
+	ErrInvalidAssignmentCount = errors.New("assignment count must be non-negative")
+	// ErrMetaServiceGroupDisabled indicates that a meta-service group is disabled.
+	ErrMetaServiceGroupDisabled = errors.New("meta-service group is disabled")
+	// ErrGroupHasAssignedKeyspaces indicates that a group with assigned keyspaces cannot be deleted.
+	ErrGroupHasAssignedKeyspaces = errors.New("cannot delete meta-service group with assigned keyspaces")
+	// ErrMetaServiceGroupUnhealthy indicates that a group's etcd server failed the health check.
+	ErrMetaServiceGroupUnhealthy = errors.New("meta-service group etcd server is unhealthy")
 )
 
 // tso errors

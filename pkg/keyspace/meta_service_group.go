@@ -38,7 +38,8 @@ import (
 type MetaServiceGroupManager struct {
 	store endpoint.MetaServiceGroupStorage
 	syncutil.RWMutex
-	tlsConfig *tls.Config
+	tlsConfig     *tls.Config
+	healthClients map[string]*clientv3.Client
 	// metaServiceGroups is the available external meta-service groups.
 	// The key is the meta-service group name, and the value is the corresponding endpoint.
 	metaServiceGroups map[string]string
@@ -65,6 +66,7 @@ func NewMetaServiceGroupManager(
 	return &MetaServiceGroupManager{
 		store:             store,
 		tlsConfig:         tlsConfig,
+		healthClients:     make(map[string]*clientv3.Client),
 		metaServiceGroups: cloneMetaServiceGroups(metaServiceGroups),
 	}
 }
@@ -347,7 +349,7 @@ func (m *MetaServiceGroupManager) checkNewGroupsHealth(ctx context.Context, meta
 	m.RUnlock()
 	for groupID, addresses := range groups {
 		for _, address := range strings.Split(addresses, ",") {
-			if err := checkEtcdServerHealth(ctx, strings.TrimSpace(address), m.tlsConfig); err != nil {
+			if err := m.checkEtcdServerHealth(ctx, strings.TrimSpace(address)); err != nil {
 				return fmt.Errorf("%w: group %s endpoint %s: %v", ErrMetaServiceGroupUnhealthy, groupID, address, err)
 			}
 		}
@@ -355,21 +357,23 @@ func (m *MetaServiceGroupManager) checkNewGroupsHealth(ctx context.Context, meta
 	return nil
 }
 
-func checkEtcdServerHealth(ctx context.Context, endpoint string, tlsConfig *tls.Config) error {
-	client, err := clientv3.New(clientv3.Config{
-		Endpoints:   []string{endpoint},
-		DialTimeout: etcdutil.DefaultRequestTimeout,
-		TLS:         tlsConfig,
-	})
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err := client.Close(); err != nil {
-			log.Warn("[keyspace] failed to close meta-service group etcd client",
-				zap.String("endpoint", endpoint), zap.Error(err))
+func (m *MetaServiceGroupManager) checkEtcdServerHealth(ctx context.Context, endpoint string) error {
+	m.Lock()
+	client := m.healthClients[endpoint]
+	if client == nil {
+		var err error
+		client, err = clientv3.New(clientv3.Config{
+			Endpoints:   []string{endpoint},
+			DialTimeout: etcdutil.DefaultRequestTimeout,
+			TLS:         m.tlsConfig,
+		})
+		if err != nil {
+			m.Unlock()
+			return err
 		}
-	}()
+		m.healthClients[endpoint] = client
+	}
+	m.Unlock()
 	if !etcdutil.IsHealthy(ctx, client) {
 		return errors.New("etcd health check failed")
 	}
