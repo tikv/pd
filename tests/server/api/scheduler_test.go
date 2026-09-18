@@ -203,6 +203,28 @@ func (suite *scheduleTestSuite) checkEvictLeaderSchedulerMultiStore(cluster *tes
 	re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))
 	re.Len(resp["store-id-ranges"], 2)
 
+	// the config endpoint (used to batch-add the remaining stores) rejects
+	// mixing store_id and store_ids too, and validates the batch size without
+	// touching the existing store-id-ranges on failure.
+	configURL := fmt.Sprintf("%s%s/%s/config", leaderAddr, server.SchedulerConfigHandlerPath, "evict-leader-scheduler")
+	input = map[string]any{"name": "evict-leader-scheduler", "store_id": 3, "store_ids": []int{4}}
+	body, err = json.Marshal(input)
+	re.NoError(err)
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, configURL, body,
+		testutil.Status(re, http.StatusBadRequest),
+		testutil.StringEqual(re, "only one of store_id and store_ids can be set")),
+	)
+	input = map[string]any{"name": "evict-leader-scheduler", "store_ids": []int{3, 4}, "batch": 1000}
+	body, err = json.Marshal(input)
+	re.NoError(err)
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, configURL, body,
+		testutil.Status(re, http.StatusBadRequest),
+		testutil.StringEqual(re, "batch must be an integer in [1, 100]")),
+	)
+	resp = make(map[string]any)
+	re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))
+	re.Len(resp["store-id-ranges"], 2)
+
 	// adding more stores to an already-existing scheduler with store_ids
 	// appends them alongside the existing ones.
 	input = map[string]any{"name": "evict-leader-scheduler", "store_ids": []int{3, 4}}

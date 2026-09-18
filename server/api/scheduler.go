@@ -220,9 +220,10 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 			return
 		}
 
-		// The scheduler is created with the first store ID; the rest are added
-		// to it one at a time through the same config-update path used for an
-		// already-existing scheduler.
+		// The scheduler is created with the first store ID (the persisted
+		// creation args only ever hold a single store, so this part can't be
+		// batched); any remaining stores are then added to it in one batched
+		// config-update call instead of one call per store.
 		toUpdate := storeIDs
 		if !exist {
 			collector(strconv.FormatUint(uint64(storeIDs[0]), 10))
@@ -232,12 +233,12 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 			}
 			toUpdate = storeIDs[1:]
 		}
-		for _, storeID := range toUpdate {
-			if err := h.RedirectSchedulerUpdate(name, storeID); err != nil {
+		if len(toUpdate) > 0 {
+			if err := h.RedirectSchedulerUpdateBatch(name, toUpdate); err != nil {
 				h.r.JSON(w, http.StatusInternalServerError, err.Error())
 				return
 			}
-			log.Info("update scheduler", zap.String("scheduler-name", name), zap.Uint64("store-id", uint64(storeID)))
+			log.Info("update scheduler", zap.String("scheduler-name", name), zap.Any("store-ids", toUpdate))
 		}
 		if exist {
 			h.r.JSON(w, http.StatusOK, "The scheduler has been applied to the store.")

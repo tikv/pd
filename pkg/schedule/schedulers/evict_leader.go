@@ -213,6 +213,24 @@ func (conf *evictLeaderSchedulerConfig) update(id uint64, newRanges []keyutil.Ke
 	return err
 }
 
+// updateBatch applies the same ranges and batch size to every store in ids,
+// persisting the change with a single save instead of one save per store.
+func (conf *evictLeaderSchedulerConfig) updateBatch(ids []uint64, newRanges []keyutil.KeyRange, batch int) error {
+	conf.Lock()
+	defer conf.Unlock()
+	for _, id := range ids {
+		conf.StoreIDWithRanges[id] = newRanges
+	}
+	conf.Batch = batch
+	err := conf.save()
+	if err != nil {
+		for _, id := range ids {
+			_, _ = conf.removeStoreLocked(id)
+		}
+	}
+	return err
+}
+
 func (conf *evictLeaderSchedulerConfig) delete(id uint64) (any, error) {
 	conf.Lock()
 	var resp any
@@ -412,6 +430,12 @@ func (handler *evictLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 	if err := apiutil.ReadJSONRespondError(handler.rd, w, r.Body, &input); err != nil {
 		return
 	}
+
+	if _, hasStoreIDs := input["store_ids"]; hasStoreIDs {
+		handler.updateConfigBatch(w, input)
+		return
+	}
+
 	var (
 		exist                bool
 		err                  error
@@ -467,6 +491,96 @@ func (handler *evictLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 	// StoreIDWithRanges is only changed in update function.
 	err = handler.config.update(id, newRanges, batch)
 	if err != nil {
+		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	handler.rd.JSON(w, http.StatusOK, "The scheduler has been applied to the store.")
+}
+
+// updateConfigBatch is the "store_ids" counterpart of updateConfig: it applies
+// the same ranges and batch size to every listed store in a single call and a
+// single persisted save, instead of requiring one request per store. Unlike
+// updateConfig's single-id path, it does not fall back to a store's existing
+// ranges when ranges are omitted — every listed store gets the same ranges
+// (the whole key space by default), which matches its intended use of adding
+// several new stores at once.
+func (handler *evictLeaderHandler) updateConfigBatch(w http.ResponseWriter, input map[string]any) {
+	if _, hasStoreID := input["store_id"]; hasStoreID {
+		handler.rd.JSON(w, http.StatusBadRequest, "only one of store_id and store_ids can be set")
+		return
+	}
+
+	rawIDs, ok := input["store_ids"].([]any)
+	if !ok || len(rawIDs) == 0 {
+		handler.rd.JSON(w, http.StatusBadRequest, "please input a right store id")
+		return
+	}
+	ids := make([]uint64, 0, len(rawIDs))
+	seen := make(map[uint64]struct{}, len(rawIDs))
+	for _, v := range rawIDs {
+		idFloat, ok := v.(float64)
+		if !ok {
+			handler.rd.JSON(w, http.StatusBadRequest, "please input a right store id")
+			return
+		}
+		id := uint64(idFloat)
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+
+	paused := make([]bool, len(ids))
+	for i, id := range ids {
+		exist, err := handler.config.pauseLeaderTransferIfStoreNotExist(id)
+		if err != nil {
+			for j := range i {
+				handler.config.resumeLeaderTransferIfPaused(ids[j], paused[j])
+			}
+			handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		paused[i] = !exist
+	}
+	resumeAll := func() {
+		for i, id := range ids {
+			handler.config.resumeLeaderTransferIfPaused(id, paused[i])
+		}
+	}
+
+	batch := handler.config.getBatch()
+	batchFloat, inputBatch := input["batch"].(float64)
+	if input["batch"] != nil && !inputBatch {
+		resumeAll()
+		handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("invalid argument for 'batch': expected a number, got %T", input["batch"]))
+		return
+	}
+	if inputBatch {
+		if !isValidEvictLeaderBatchSize(batchFloat) {
+			resumeAll()
+			handler.rd.JSON(w, http.StatusBadRequest, invalidEvictLeaderBatchSizeMsg)
+			return
+		}
+		batch = (int)(batchFloat)
+	}
+
+	ranges, ok := (input["ranges"]).([]string)
+	if !ok && input["ranges"] != nil {
+		resumeAll()
+		handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("invalid argument for 'ranges': expected an array of strings, got %T", input["ranges"]))
+		return
+	}
+	newRanges, err := getKeyRanges(ranges)
+	if err != nil {
+		resumeAll()
+		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// updateBatch rolls back (including resuming leader transfer) on its own
+	// save failure, the same way update() does for the single-id path.
+	if err := handler.config.updateBatch(ids, newRanges, batch); err != nil {
 		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}

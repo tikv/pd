@@ -716,8 +716,19 @@ func addStoreToSchedulerConfig(cmd *cobra.Command, schedulerName string, args []
 		cmd.Println(err)
 		return
 	}
-	// The config handler only accepts a single store per request, so add
-	// each store with its own call.
+
+	// evict-leader-scheduler's config handler can add several stores in a
+	// single, batched call. Other schedulers reusing this helper (namely
+	// grant-leader-scheduler) only take one store per request, and a lone
+	// store id always goes through the single-value field for compatibility
+	// with an older pd-server.
+	if schedulerName == evictLeaderSchedulerName && len(storeIDs) > 1 {
+		input := make(map[string]any)
+		input["name"] = schedulerName
+		input["store_ids"] = storeIDs
+		postJSON(cmd, path.Join(schedulerConfigPrefix, schedulerName, "config"), input)
+		return
+	}
 	for _, storeID := range storeIDs {
 		input := make(map[string]any)
 		input["name"] = schedulerName
