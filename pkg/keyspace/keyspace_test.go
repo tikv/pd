@@ -683,6 +683,73 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceState() {
 	}
 }
 
+func (suite *keyspaceTestSuite) TestEnableKeyspaceGCManagementType() {
+	for _, nextGen := range []bool{false, true} {
+		for _, byID := range []bool{false, true} {
+			for idx, gcType := range []string{"absent", "", UnifiedGC, "invalid", KeyspaceLevelGC} {
+				suite.Run(fmt.Sprintf("nextgen=%t/byID=%t/type=%s", nextGen, byID, gcType), func() {
+					re := suite.Require()
+					re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag", fmt.Sprintf("return(%t)", nextGen)))
+					defer func() {
+						re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"))
+					}()
+					manager := suite.manager
+					meta, err := manager.CreateKeyspace(&CreateKeyspaceRequest{
+						Name:   fmt.Sprintf("gc_%t_%t_%d", nextGen, byID, idx),
+						Config: map[string]string{GCManagementType: KeyspaceLevelGC},
+					})
+					re.NoError(err)
+					// Model metadata persisted before GC mode validation was introduced.
+					re.NoError(manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+						if gcType == "absent" {
+							delete(meta.Config, GCManagementType)
+						} else {
+							meta.Config[GCManagementType] = gcType
+						}
+						return manager.store.SaveKeyspaceMeta(txn, meta)
+					}))
+					update := func(state keyspacepb.KeyspaceState) (*keyspacepb.KeyspaceMeta, error) {
+						if byID {
+							return manager.UpdateKeyspaceStateByID(meta.GetId(), state, 100)
+						}
+						return manager.UpdateKeyspaceState(meta.Name, state, 100)
+					}
+					for _, state := range []keyspacepb.KeyspaceState{keyspacepb.KeyspaceState_ENABLED, keyspacepb.KeyspaceState_DISABLED} {
+						if state == keyspacepb.KeyspaceState_DISABLED {
+							_, err = update(state)
+							re.NoError(err, "invalid GC metadata must not prevent disabling")
+						}
+						before, err := manager.LoadKeyspace(meta.Name)
+						re.NoError(err)
+						cached, err := manager.GetKeyspaceStateByID(meta.GetId())
+						re.NoError(err)
+						re.Equal(state, cached)
+						_, err = update(keyspacepb.KeyspaceState_ENABLED)
+						if nextGen && gcType != KeyspaceLevelGC {
+							re.ErrorIs(err, errs.ErrUnsupportedOperationInKeyspace)
+							after, err := manager.LoadKeyspace(meta.Name)
+							re.NoError(err)
+							re.Equal(before, after)
+							cached, err = manager.GetKeyspaceStateByID(meta.GetId())
+							re.NoError(err)
+							re.Equal(state, cached)
+						} else {
+							re.NoError(err)
+							after, err := manager.LoadKeyspace(meta.Name)
+							re.NoError(err)
+							re.Equal(keyspacepb.KeyspaceState_ENABLED, after.State)
+						}
+					}
+					for _, state := range []keyspacepb.KeyspaceState{keyspacepb.KeyspaceState_DISABLED, keyspacepb.KeyspaceState_ARCHIVED, keyspacepb.KeyspaceState_TOMBSTONE} {
+						_, err = update(state)
+						re.NoError(err, "invalid GC metadata must not prevent cleanup")
+					}
+				})
+			}
+		}
+	}
+}
+
 func (suite *keyspaceTestSuite) TestLoadRangeKeyspace() {
 	re := suite.Require()
 	manager := suite.manager

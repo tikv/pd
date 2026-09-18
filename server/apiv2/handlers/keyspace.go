@@ -443,6 +443,10 @@ func UpdateKeyspaceState(c *gin.Context) {
 	}
 	meta, err := manager.UpdateKeyspaceState(name, keyspacepb.KeyspaceState(targetState), time.Now().Unix())
 	if err != nil {
+		if goerrors.Is(err, errs.ErrUnsupportedOperationInKeyspace) {
+			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
+			return
+		}
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
 	}
