@@ -15,8 +15,6 @@
 package statistics
 
 import (
-	"math"
-
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/statistics/utils"
@@ -155,13 +153,8 @@ func summaryStoresLoadByEngine(
 	kind constant.ResourceKind,
 	collector storeCollector,
 ) []*StoreLoadDetail {
-	var (
-		loadDetail             = make([]*StoreLoadDetail, 0, len(storeInfos))
-		allStoreLoadSum        Loads
-		allStoreHistoryLoadSum HistoryLoads
-		allStoreCount          = 0
-		allHotPeersCount       = 0
-	)
+	loadDetail := make([]*StoreLoadDetail, 0, len(storeInfos))
+	var summary StoreLoadSummary
 
 	for _, info := range storeInfos {
 		store := info.StoreInfo
@@ -186,30 +179,19 @@ func summaryStoresLoadByEngine(
 		var historyLoads HistoryLoads
 		if storesHistoryLoads != nil {
 			historyLoads = storesHistoryLoads.Get(id, rwTy, kind)
-
-			for i, loads := range historyLoads {
-				if allStoreHistoryLoadSum[i] == nil || len(allStoreHistoryLoadSum[i]) < len(loads) {
-					allStoreHistoryLoadSum[i] = make([]float64, len(loads))
-				}
-				for j, historyLoad := range loads {
-					allStoreHistoryLoadSum[i][j] += historyLoad
-				}
-			}
-			storesHistoryLoads.Add(id, rwTy, kind, currentLoads)
 		}
-
-		for i := range allStoreLoadSum {
-			allStoreLoadSum[i] += currentLoads[i]
-		}
-		allStoreCount += 1
-		allHotPeersCount += len(hotPeers)
 
 		// Build store load prediction from current load and pending influence.
-		stLoadPred := (&StoreLoad{
+		currentLoad := StoreLoad{
 			Loads:        currentLoads,
 			HotPeerCount: float64(len(hotPeers)),
 			HistoryLoads: historyLoads,
-		}).ToLoadPred(rwTy, info.PendingSum)
+		}
+		summary.Add(&currentLoad)
+		if storesHistoryLoads != nil {
+			storesHistoryLoads.Add(id, rwTy, kind, currentLoads)
+		}
+		stLoadPred := currentLoad.ToLoadPred(rwTy, info.PendingSum)
 
 		// Construct store load info.
 		loadDetail = append(loadDetail, &StoreLoadDetail{
@@ -219,73 +201,32 @@ func summaryStoresLoadByEngine(
 		})
 	}
 
-	if allStoreCount == 0 {
+	if len(loadDetail) == 0 {
 		return loadDetail
 	}
-
-	var (
-		expectCount = float64(allHotPeersCount) / float64(allStoreCount)
-		expectLoads Loads
-		// TODO: remove some the max value or min value to avoid the effect of extreme value.
-		expectHistoryLoads HistoryLoads
-		stddevLoads        Loads
-	)
-	for i := range utils.DimLen {
-		expectLoads[i] = allStoreLoadSum[i] / float64(allStoreCount)
-	}
-
-	for dim := range allStoreHistoryLoadSum {
-		expectHistoryLoads[dim] = make([]float64, len(allStoreHistoryLoadSum[dim]))
-		for j := range allStoreHistoryLoadSum[dim] {
-			expectHistoryLoads[dim][j] = allStoreHistoryLoadSum[dim][j] / float64(allStoreCount)
-		}
-	}
-	if allHotPeersCount != 0 {
-		for _, detail := range loadDetail {
-			for i := range expectLoads {
-				stddevLoads[i] += math.Pow(detail.LoadPred.Current.Loads[i]-expectLoads[i], 2) //nolint:staticcheck
-			}
-		}
-		for i := range stddevLoads {
-			stddevLoads[i] = math.Sqrt(stddevLoads[i] / float64(allStoreCount))
-			if expectLoads[i] == 0 {
-				stddevLoads[i] = 0
-				continue
-			}
-			stddevLoads[i] /= expectLoads[i]
-		}
-	}
+	expect, stddev := summary.Result(loadDetail)
 
 	{
 		// Metric for debug.
 		engine := collector.engine()
 		ty := "exp-byte-rate-" + rwTy.String() + "-" + kind.String()
-		hotPeerSummary.WithLabelValues(ty, engine).Set(expectLoads[utils.ByteDim])
+		hotPeerSummary.WithLabelValues(ty, engine).Set(expect.Loads[utils.ByteDim])
 		ty = "exp-key-rate-" + rwTy.String() + "-" + kind.String()
-		hotPeerSummary.WithLabelValues(ty, engine).Set(expectLoads[utils.KeyDim])
+		hotPeerSummary.WithLabelValues(ty, engine).Set(expect.Loads[utils.KeyDim])
 		ty = "exp-query-rate-" + rwTy.String() + "-" + kind.String()
-		hotPeerSummary.WithLabelValues(ty, engine).Set(expectLoads[utils.QueryDim])
+		hotPeerSummary.WithLabelValues(ty, engine).Set(expect.Loads[utils.QueryDim])
 		ty = "exp-cpu-rate-" + rwTy.String() + "-" + kind.String()
-		hotPeerSummary.WithLabelValues(ty, engine).Set(expectLoads[utils.CPUDim])
+		hotPeerSummary.WithLabelValues(ty, engine).Set(expect.Loads[utils.CPUDim])
 		ty = "exp-count-rate-" + rwTy.String() + "-" + kind.String()
-		hotPeerSummary.WithLabelValues(ty, engine).Set(expectCount)
+		hotPeerSummary.WithLabelValues(ty, engine).Set(expect.HotPeerCount)
 		ty = "stddev-byte-rate-" + rwTy.String() + "-" + kind.String()
-		hotPeerSummary.WithLabelValues(ty, engine).Set(stddevLoads[utils.ByteDim])
+		hotPeerSummary.WithLabelValues(ty, engine).Set(stddev.Loads[utils.ByteDim])
 		ty = "stddev-key-rate-" + rwTy.String() + "-" + kind.String()
-		hotPeerSummary.WithLabelValues(ty, engine).Set(stddevLoads[utils.KeyDim])
+		hotPeerSummary.WithLabelValues(ty, engine).Set(stddev.Loads[utils.KeyDim])
 		ty = "stddev-query-rate-" + rwTy.String() + "-" + kind.String()
-		hotPeerSummary.WithLabelValues(ty, engine).Set(stddevLoads[utils.QueryDim])
+		hotPeerSummary.WithLabelValues(ty, engine).Set(stddev.Loads[utils.QueryDim])
 		ty = "stddev-cpu-rate-" + rwTy.String() + "-" + kind.String()
-		hotPeerSummary.WithLabelValues(ty, engine).Set(stddevLoads[utils.CPUDim])
-	}
-	expect := StoreLoad{
-		Loads:        expectLoads,
-		HotPeerCount: expectCount,
-		HistoryLoads: expectHistoryLoads,
-	}
-	stddev := StoreLoad{
-		Loads:        stddevLoads,
-		HotPeerCount: expectCount,
+		hotPeerSummary.WithLabelValues(ty, engine).Set(stddev.Loads[utils.CPUDim])
 	}
 	for _, detail := range loadDetail {
 		detail.LoadPred.Expect = expect
