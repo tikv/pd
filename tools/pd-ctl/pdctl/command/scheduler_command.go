@@ -179,8 +179,8 @@ func NewGrantLeaderSchedulerCommand() *cobra.Command {
 // NewEvictLeaderSchedulerCommand returns a command to add a evict-leader-scheduler.
 func NewEvictLeaderSchedulerCommand() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "evict-leader-scheduler <store_id>",
-		Short: "add a scheduler to evict leader from a store",
+		Use:   "evict-leader-scheduler <store_id> [store_id...]",
+		Short: "add a scheduler to evict leader from one or more stores",
 		Run:   addSchedulerForStoreCommandFunc,
 	}
 	return c
@@ -205,7 +205,8 @@ func checkSchedulerExist(cmd *cobra.Command, schedulerName string) (bool, error)
 }
 
 func addSchedulerForStoreCommandFunc(cmd *cobra.Command, args []string) {
-	if len(args) != 1 {
+	// Only evict-leader-scheduler accepts more than one store id.
+	if len(args) < 1 || (cmd.Name() != evictLeaderSchedulerName && len(args) != 1) {
 		cmd.Println(cmd.UsageString())
 		return
 	}
@@ -223,7 +224,7 @@ func addSchedulerForStoreCommandFunc(cmd *cobra.Command, args []string) {
 		}
 		fallthrough
 	default:
-		storeID, err := strconv.ParseUint(args[0], 10, 64)
+		storeIDs, err := parseStoreIDs(args)
 		if err != nil {
 			cmd.Println(err)
 			return
@@ -231,7 +232,15 @@ func addSchedulerForStoreCommandFunc(cmd *cobra.Command, args []string) {
 
 		input := make(map[string]any)
 		input["name"] = cmd.Name()
-		input["store_id"] = storeID
+		// Keep sending the single-value "store_id" field whenever possible so
+		// that a new pd-ctl still talks to an older pd-server for the common,
+		// single-store case; only use "store_ids" when adding multiple stores
+		// at once, which is a new capability that requires a new server too.
+		if len(storeIDs) == 1 {
+			input["store_id"] = storeIDs[0]
+		} else {
+			input["store_ids"] = storeIDs
+		}
 		postJSON(cmd, schedulersPrefix, input)
 	}
 }
@@ -688,7 +697,7 @@ func newConfigShuffleRegionCommand() *cobra.Command {
 }
 
 func addStoreToSchedulerConfig(cmd *cobra.Command, schedulerName string, args []string) {
-	if len(args) != 1 {
+	if len(args) < 1 {
 		cmd.Println(cmd.UsageString())
 		return
 	}
@@ -702,16 +711,33 @@ func addStoreToSchedulerConfig(cmd *cobra.Command, schedulerName string, args []
 		return
 	}
 
-	storeID, err := strconv.ParseUint(args[0], 10, 64)
+	storeIDs, err := parseStoreIDs(args)
 	if err != nil {
 		cmd.Println(err)
 		return
 	}
-	input := make(map[string]any)
-	input["name"] = schedulerName
-	input["store_id"] = storeID
+	// The config handler only accepts a single store per request, so add
+	// each store with its own call.
+	for _, storeID := range storeIDs {
+		input := make(map[string]any)
+		input["name"] = schedulerName
+		input["store_id"] = storeID
 
-	postJSON(cmd, path.Join(schedulerConfigPrefix, schedulerName, "config"), input)
+		postJSON(cmd, path.Join(schedulerConfigPrefix, schedulerName, "config"), input)
+	}
+}
+
+// parseStoreIDs converts a list of store id strings into uint64s.
+func parseStoreIDs(args []string) ([]uint64, error) {
+	storeIDs := make([]uint64, 0, len(args))
+	for _, arg := range args {
+		storeID, err := strconv.ParseUint(arg, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		storeIDs = append(storeIDs, storeID)
+	}
+	return storeIDs, nil
 }
 
 var hiddenHotConfig = []string{

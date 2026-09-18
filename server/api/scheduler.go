@@ -177,7 +177,7 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case types.GrantLeaderScheduler, types.EvictLeaderScheduler:
+	case types.GrantLeaderScheduler:
 		_, ok := input["store_id"]
 		if !ok {
 			h.r.JSON(w, http.StatusBadRequest, "missing store id")
@@ -207,6 +207,44 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 		}
 
 		collector(strconv.FormatUint(uint64(storeID), 10))
+	case types.EvictLeaderScheduler:
+		storeIDs, err := collectEvictLeaderStoreIDs(input)
+		if err != nil {
+			h.r.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		exist, err := h.IsSchedulerExisted(name)
+		if err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		// The scheduler is created with the first store ID; the rest are added
+		// to it one at a time through the same config-update path used for an
+		// already-existing scheduler.
+		toUpdate := storeIDs
+		if !exist {
+			collector(strconv.FormatUint(uint64(storeIDs[0]), 10))
+			if err := h.AddScheduler(tp, args...); err != nil {
+				h.r.JSON(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			toUpdate = storeIDs[1:]
+		}
+		for _, storeID := range toUpdate {
+			if err := h.RedirectSchedulerUpdate(name, storeID); err != nil {
+				h.r.JSON(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			log.Info("update scheduler", zap.String("scheduler-name", name), zap.Uint64("store-id", uint64(storeID)))
+		}
+		if exist {
+			h.r.JSON(w, http.StatusOK, "The scheduler has been applied to the store.")
+		} else {
+			h.r.JSON(w, http.StatusOK, "The scheduler is created.")
+		}
+		return
 	case types.ShuffleHotRegionScheduler:
 		limit := uint64(1)
 		l, ok := input["limit"].(float64)
@@ -254,6 +292,45 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 	}
 
 	h.r.JSON(w, http.StatusOK, "The scheduler is created.")
+}
+
+// collectEvictLeaderStoreIDs reads the target store IDs for evict-leader-scheduler
+// from the request body. It accepts either a single "store_id" (backward compatible
+// with existing clients) or a "store_ids" array to add multiple stores in one call.
+func collectEvictLeaderStoreIDs(input map[string]any) ([]float64, error) {
+	_, hasStoreID := input["store_id"]
+	rawStoreIDs, hasStoreIDs := input["store_ids"]
+	switch {
+	case hasStoreID && hasStoreIDs:
+		return nil, errors.New("only one of store_id and store_ids can be set")
+	case hasStoreIDs:
+		arr, ok := rawStoreIDs.([]any)
+		if !ok || len(arr) == 0 {
+			return nil, errors.New("please input a right store id")
+		}
+		storeIDs := make([]float64, 0, len(arr))
+		seen := make(map[float64]struct{}, len(arr))
+		for _, v := range arr {
+			id, ok := v.(float64)
+			if !ok {
+				return nil, errors.New("please input a right store id")
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			storeIDs = append(storeIDs, id)
+		}
+		return storeIDs, nil
+	case hasStoreID:
+		storeID, ok := input["store_id"].(float64)
+		if !ok {
+			return nil, errors.New("please input a right store id")
+		}
+		return []float64{storeID}, nil
+	default:
+		return nil, errors.New("missing store id")
+	}
 }
 
 // DeleteScheduler deletes a scheduler.
