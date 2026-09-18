@@ -233,10 +233,10 @@ func (f *HotPeerCache) checkPeerFlowForRegion(region *hotRegionInfo, peerStoreID
 	stats := make([]*HotPeerStat, 0, peerCount)
 	for i := range peerCount {
 		var storeID uint64
-		if peerStoreIDs == nil {
-			storeID = region.storeID(i)
-		} else {
+		if i < len(peerStoreIDs) {
 			storeID = peerStoreIDs[i]
+		} else {
+			storeID = region.storeID(i)
 		}
 		// A tombstoned store can still show up as a peer here: the leader reporting
 		// this region may not have caught up with a raft config change removing it
