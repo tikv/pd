@@ -51,17 +51,16 @@ const (
 var (
 	errNoAvailableMetaServiceGroups = errors.New("no available meta-service groups")
 
-	// ErrUnknownMetaServiceGroup is returned when the specified meta-service group does not exist.
-	ErrUnknownMetaServiceGroup = errors.New("unknown meta-service group")
-	// ErrInvalidAssignmentCount is returned when the patched assignment count is negative.
-	ErrInvalidAssignmentCount = errors.New("assignment count must be non-negative")
-	// ErrMetaServiceGroupDisabled is returned when assigning a keyspace to a
-	// disabled meta-service group, which is not eligible for assignment.
-	ErrMetaServiceGroupDisabled = errors.New("meta-service group is disabled")
-	// ErrGroupHasAssignedKeyspaces is returned when deleting a meta-service group
-	// that still has keyspaces assigned to it. It is exported so HTTP handlers can
-	// map it to a 400 Bad Request via errors.Is.
-	ErrGroupHasAssignedKeyspaces = errors.New("cannot delete meta-service group with assigned keyspaces")
+	// ErrUnknownMetaServiceGroup is kept for callers that historically imported the keyspace package.
+	ErrUnknownMetaServiceGroup = errs.ErrUnknownMetaServiceGroup
+	// ErrInvalidAssignmentCount is kept for callers that historically imported the keyspace package.
+	ErrInvalidAssignmentCount = errs.ErrInvalidAssignmentCount
+	// ErrMetaServiceGroupDisabled is kept for callers that historically imported the keyspace package.
+	ErrMetaServiceGroupDisabled = errs.ErrMetaServiceGroupDisabled
+	// ErrGroupHasAssignedKeyspaces is kept for callers that historically imported the keyspace package.
+	ErrGroupHasAssignedKeyspaces = errs.ErrGroupHasAssignedKeyspaces
+	// ErrMetaServiceGroupUnhealthy is kept for callers that historically imported the keyspace package.
+	ErrMetaServiceGroupUnhealthy = errs.ErrMetaServiceGroupUnhealthy
 
 	// stateTransitionTable lists all allowed next state for the given current state.
 	// Note that transit from any state to itself is allowed for idempotence.

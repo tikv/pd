@@ -17,11 +17,13 @@ package keyspace
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 )
 
 type metaServiceGroupTestSuite struct {
@@ -46,11 +48,45 @@ func mockMetaServiceGroups() map[string]string {
 func (suite *metaServiceGroupTestSuite) SetupTest() {
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	suite.manager = NewMetaServiceGroupManager(store, mockMetaServiceGroups())
+	suite.manager = NewMetaServiceGroupManager(store, mockMetaServiceGroups(), nil)
 }
 
 func (suite *metaServiceGroupTestSuite) TearDownTest() {
+	suite.manager.Close()
 	suite.cancel()
+}
+
+func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelySerializesUpdates() {
+	re := suite.Require()
+	firstPersistStarted := make(chan struct{})
+	releaseFirstPersist := make(chan struct{})
+	firstDone := make(chan error, 1)
+	secondDone := make(chan error, 1)
+
+	go func() {
+		firstDone <- suite.manager.UpdateGroupsSafely(suite.ctx, map[string]string{}, nil, func() error {
+			close(firstPersistStarted)
+			<-releaseFirstPersist
+			return nil
+		}, nil)
+	}()
+
+	<-firstPersistStarted
+	go func() {
+		secondDone <- suite.manager.UpdateGroupsSafely(suite.ctx, map[string]string{}, nil, func() error {
+			return nil
+		}, nil)
+	}()
+
+	select {
+	case err := <-secondDone:
+		re.Failf("concurrent update completed before the first update was released", "error: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(releaseFirstPersist)
+	re.NoError(<-firstDone)
+	re.NoError(<-secondDone)
 }
 
 func (suite *metaServiceGroupTestSuite) TestGetAssignmentCountsInitialZero() {
@@ -255,6 +291,113 @@ func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelyUsesAuthoritativeC
 	err = suite.manager.UpdateGroupsSafely(suite.ctx, groups2, []string{"etcd-group-1"},
 		func() error { return nil }, nil)
 	re.ErrorIs(err, ErrGroupHasAssignedKeyspaces)
+}
+
+func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelyChecksNewGroupHealth() {
+	re := suite.Require()
+	servers, _, cleanup := etcdutil.NewTestEtcdCluster(suite.T(), 1, nil)
+	defer cleanup()
+	endpoint := servers[0].Config().ListenClientUrls[0].String()
+
+	groups := mockMetaServiceGroups()
+	groups["healthy"] = endpoint
+	persisted := false
+	err := suite.manager.UpdateGroupsSafely(suite.ctx, groups, nil, func() error {
+		persisted = true
+		return nil
+	}, nil)
+	re.NoError(err)
+	re.True(persisted)
+	re.Equal(endpoint, suite.manager.GetGroups()["healthy"])
+	re.Contains(suite.manager.healthClients, "healthy")
+	enabled := true
+	re.NoError(suite.manager.PatchStatus(suite.ctx, "healthy", &MetaServiceGroupStatusPatch{Enabled: &enabled}))
+	status, err := suite.manager.GetStatus(suite.ctx)
+	re.NoError(err)
+	re.True(status["healthy"].Enabled)
+
+	updatedGroups := make(map[string]string, len(groups)+1)
+	for groupID, addresses := range groups {
+		updatedGroups[groupID] = addresses
+	}
+	updatedGroups["unhealthy"] = endpoint + ",http://127.0.0.1:1"
+	persisted = false
+	err = suite.manager.UpdateGroupsSafely(suite.ctx, updatedGroups, nil, func() error {
+		persisted = true
+		return nil
+	}, nil)
+	re.ErrorIs(err, ErrMetaServiceGroupUnhealthy)
+	re.False(persisted)
+	_, exists := suite.manager.GetGroups()["unhealthy"]
+	re.False(exists)
+
+	updatedGroups["healthy"] = endpoint + ",http://127.0.0.1:1"
+	persisted = false
+	err = suite.manager.UpdateGroupsSafely(suite.ctx, updatedGroups, nil, func() error {
+		persisted = true
+		return nil
+	}, nil)
+	re.ErrorIs(err, ErrMetaServiceGroupUnhealthy)
+	re.False(persisted)
+	re.Equal(endpoint, suite.manager.GetGroups()["healthy"])
+}
+
+func (suite *metaServiceGroupTestSuite) TestCloseHealthClients() {
+	re := suite.Require()
+	servers, _, cleanup := etcdutil.NewTestEtcdCluster(suite.T(), 1, nil)
+	defer cleanup()
+	groups := mockMetaServiceGroups()
+	groups["healthy"] = servers[0].Config().ListenClientUrls[0].String()
+	re.NoError(suite.manager.UpdateGroupsSafely(suite.ctx, groups, nil, func() error {
+		return nil
+	}, nil))
+	re.Contains(suite.manager.healthClients, "healthy")
+
+	suite.manager.Close()
+	re.Empty(suite.manager.healthClients)
+	suite.manager.Close()
+}
+
+func (suite *metaServiceGroupTestSuite) TestPatchStatusInitializesNewGroupStatus() {
+	re := suite.Require()
+	enabled := true
+	groups := mockMetaServiceGroups()
+	groups["new-group"] = "new-group.tidb-serverless.cluster.svc.local"
+	suite.manager.updateGroups(groups)
+
+	re.NoError(suite.manager.PatchStatus(suite.ctx, "new-group", &MetaServiceGroupStatusPatch{
+		Enabled: &enabled,
+	}))
+
+	status, err := suite.manager.GetStatus(suite.ctx)
+	re.NoError(err)
+	re.True(status["new-group"].Enabled)
+	re.Zero(status["new-group"].AssignmentCount)
+}
+
+func (suite *metaServiceGroupTestSuite) TestGroupMapsAreCopiedAtOwnershipBoundaries() {
+	re := suite.Require()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	initial := mockMetaServiceGroups()
+	manager := NewMetaServiceGroupManager(store, initial, nil)
+
+	initial["etcd-group-0"] = "mutated"
+	delete(initial, "etcd-group-1")
+	groups := manager.GetGroups()
+	re.Equal("etcd-group-0.tidb-serverless.cluster.svc.local", groups["etcd-group-0"])
+	re.Contains(groups, "etcd-group-1")
+
+	updated := mockMetaServiceGroups()
+	re.NoError(manager.UpdateGroupsSafely(suite.ctx, updated, nil, func() error {
+		return nil
+	}, nil))
+	updated["etcd-group-0"] = "mutated after update"
+	re.Equal("etcd-group-0.tidb-serverless.cluster.svc.local", manager.GetGroups()["etcd-group-0"])
+
+	replacement := mockMetaServiceGroups()
+	manager.updateGroups(replacement)
+	replacement["etcd-group-0"] = "mutated after replacement"
+	re.Equal("etcd-group-0.tidb-serverless.cluster.svc.local", manager.GetGroups()["etcd-group-0"])
 }
 
 func (suite *metaServiceGroupTestSuite) TestAssignToGroupRejectsNegativeCount() {
