@@ -1573,7 +1573,8 @@ func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool) error {
 			core.SetStoreVersion(store.GitHash, store.Version),
 			core.SetStoreLabels(labels),
 			core.SetStoreStartTime(store.StartTimestamp),
-			core.SetStoreDeployPath(store.DeployPath))
+			core.SetStoreDeployPath(store.DeployPath),
+			core.SetStoreTxnProtocolVersionRange(store.TxnProtocolVersionRange))
 		// Update an existed store.
 		s = s.Clone(opts...)
 	}
