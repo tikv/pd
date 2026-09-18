@@ -697,7 +697,11 @@ func newConfigShuffleRegionCommand() *cobra.Command {
 }
 
 func addStoreToSchedulerConfig(cmd *cobra.Command, schedulerName string, args []string) {
-	if len(args) < 1 {
+	// Only evict-leader-scheduler accepts more than one store id; this
+	// function is also reachable directly from other schedulers' own
+	// "config <name> add-store" subcommand (e.g. grant-leader-scheduler),
+	// which must keep requiring exactly one.
+	if len(args) < 1 || (schedulerName != evictLeaderSchedulerName && len(args) != 1) {
 		cmd.Println(cmd.UsageString())
 		return
 	}

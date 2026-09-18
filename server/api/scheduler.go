@@ -17,7 +17,9 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"path"
@@ -240,9 +242,16 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 					// Roll back the scheduler we just created so the whole
 					// "create with N stores" request is atomic: either every
 					// requested store ends up evicted, or none of them do.
-					if rmErr := h.RemoveScheduler(name); rmErr != nil {
+					if rmErr := h.RemoveScheduler(name); rmErr != nil && !errors.ErrorEqual(rmErr, errs.ErrSchedulerNotFound.FastGenByArgs()) {
+						// The scheduler may still be active with only the
+						// first store evicted; surface both failures instead
+						// of silently reporting just the original one.
 						log.Error("failed to roll back partially created evict-leader-scheduler",
 							zap.String("scheduler-name", name), errs.ZapError(rmErr))
+						h.r.JSON(w, http.StatusInternalServerError, fmt.Sprintf(
+							"failed to add stores %v: %s; additionally failed to roll back the partially created scheduler: %s (it may still be running with only store %d evicted, please check and remove it manually if needed)",
+							toUpdate, err.Error(), rmErr.Error(), uint64(storeIDs[0])))
+						return
 					}
 				}
 				h.r.JSON(w, http.StatusInternalServerError, err.Error())
@@ -323,7 +332,7 @@ func collectEvictLeaderStoreIDs(input map[string]any) ([]float64, error) {
 		seen := make(map[float64]struct{}, len(arr))
 		for _, v := range arr {
 			id, ok := v.(float64)
-			if !ok {
+			if !ok || !isIntegerStoreID(id) {
 				return nil, errors.New("please input a right store id")
 			}
 			if _, ok := seen[id]; ok {
@@ -335,13 +344,20 @@ func collectEvictLeaderStoreIDs(input map[string]any) ([]float64, error) {
 		return storeIDs, nil
 	case hasStoreID:
 		storeID, ok := input["store_id"].(float64)
-		if !ok {
+		if !ok || !isIntegerStoreID(storeID) {
 			return nil, errors.New("please input a right store id")
 		}
 		return []float64{storeID}, nil
 	default:
 		return nil, errors.New("missing store id")
 	}
+}
+
+// isIntegerStoreID reports whether f is a non-negative integer that fits in
+// a uint64, rejecting fractional values like 1.5 that would otherwise be
+// silently truncated by a later uint64 conversion.
+func isIntegerStoreID(f float64) bool {
+	return f >= 0 && f <= float64(math.MaxUint64) && f == math.Trunc(f)
 }
 
 // DeleteScheduler deletes a scheduler.

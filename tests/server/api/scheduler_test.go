@@ -277,13 +277,15 @@ func (suite *scheduleTestSuite) checkEvictLeaderSchedulerMultiStoreAtomicCreate(
 	// (and later) store, not the initial scheduler-creation save, so this
 	// reproduces "first store created, batch-add the rest fails".
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/persistFail", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/persistFail"))
+	}()
 	input := map[string]any{"name": "evict-leader-scheduler", "store_ids": []int{1, 2}}
 	body, err := json.Marshal(input)
 	re.NoError(err)
 	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, urlPrefix, body,
 		testutil.Status(re, http.StatusInternalServerError)),
 	)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/persistFail"))
 
 	// the whole scheduler must be rolled back, not left running with only
 	// the first store evicted.
