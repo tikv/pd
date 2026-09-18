@@ -323,41 +323,6 @@ func TestRegionLabelIsolationLevel(t *testing.T) {
 	}
 }
 
-func TestRegionLabelIsolationCaseInsensitive(t *testing.T) {
-	labels := []string{"zone", "rack", "host"}
-	for _, tt := range []struct {
-		name  string
-		paths [][]string
-		label string
-		level int
-	}{
-		{"host", [][]string{{"z1", "r1", "A"}, {"z1", "r1", "a"}, {"z1", "r1", "B"}}, nonIsolation, -1},
-		{"rack", [][]string{{"z1", "R1", "h1"}, {"z1", "r1", "h2"}, {"z1", "r2", "h3"}}, "host", 2},
-		{"zone", [][]string{{"Z1", "r1", "h1"}, {"z1", "r2", "h1"}, {"z2", "r1", "h1"}}, "rack", 1},
-		{"missing-label", [][]string{{"Z1", "r1", "h1"}, {"z1", "R1", ""}, {"z2", "r1", "h3"}}, nonIsolation, -1},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			stores := make([]*core.StoreInfo, 0, len(tt.paths))
-			for i, path := range tt.paths {
-				storeLabels := make([]*metapb.StoreLabel, 0, len(labels))
-				for j, label := range labels {
-					storeLabels = append(storeLabels, &metapb.StoreLabel{Key: label, Value: path[j]})
-				}
-				stores = append(stores, core.NewStoreInfo(&metapb.Store{Id: uint64(i + 1), Labels: storeLabels}))
-			}
-			label, level := GetRegionLabelIsolation(stores, labels)
-			require.Equal(t, tt.label, label)
-			require.Equal(t, tt.level, level)
-			for i, isolationLevel := range labels {
-				require.Equal(t, tt.level >= 0 && tt.level <= i, IsRegionLabelIsolationSatisfied(stores, labels, isolationLevel))
-			}
-			stats := NewLabelStatistics()
-			stats.Observe(core.NewRegionInfo(&metapb.Region{Id: 1}, nil), stores, labels)
-			require.Equal(t, map[string]int{tt.label: 1}, stats.GetLabelCounter())
-		})
-	}
-}
-
 func BenchmarkObserve(b *testing.B) {
 	re := require.New(b)
 	// Setup

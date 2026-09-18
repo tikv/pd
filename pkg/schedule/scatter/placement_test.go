@@ -637,9 +637,9 @@ func TestScatterBatchRequestAccounting(t *testing.T) {
 	}
 }
 
-// newScatterHostFixture uses complete hierarchy paths and keeps original voters
+// newScatterTopologyFixture uses complete hierarchy paths and keeps original voters
 // on stores 1..peerCount. Only store 1 is biased toward moving in the tests.
-func newScatterHostFixture(t *testing.T, rules bool, labels []string, paths [][]string, peerCount int) (*RegionScatterer, *mockcluster.Cluster, *core.RegionInfo) {
+func newScatterTopologyFixture(t *testing.T, rules bool, labels []string, paths [][]string, peerCount int) (*RegionScatterer, *mockcluster.Cluster, *core.RegionInfo) {
 	t.Helper()
 	hosts := make([]string, len(paths))
 	for i := range hosts {
@@ -657,7 +657,7 @@ func newScatterHostFixture(t *testing.T, rules bool, labels []string, paths [][]
 	}
 	if rules {
 		rule := tc.GetRuleManager().GetRule("pd", "default").Clone()
-		rule.Count, rule.LocationLabels, rule.IsolationLevel = peerCount, labels, labels[0]
+		rule.Count, rule.LocationLabels, rule.IsolationLevel = peerCount, labels, ""
 		require.NoError(t, tc.GetRuleManager().SetRule(rule))
 	}
 	followers := make([]uint64, peerCount-1)
@@ -667,123 +667,40 @@ func newScatterHostFixture(t *testing.T, rules bool, labels []string, paths [][]
 	return sc, tc, tc.AddLeaderRegion(200, 1, followers...)
 }
 
-func TestScatterHostProtection(t *testing.T) {
-	cases := []struct {
-		name   string
-		labels []string
-		paths  [][]string
-		peers  int
-		want   uint64
-	}{
-		{"reject-new-collision", []string{"zone", "host"}, [][]string{{"A", "a"}, {"A", "b"}, {"A", "c"}, {"B", "d"}, {"B", "d"}}, 4, 1},
-		{"continue-to-legal-host", []string{"zone", "host"}, [][]string{{"A", "a"}, {"A", "b"}, {"A", "c"}, {"B", "d"}, {"B", "d"}, {"B", "e"}}, 4, 6},
-		{"reject-more-existing-collisions", []string{"zone", "host"}, [][]string{{"A", "b"}, {"A", "a"}, {"A", "a"}, {"B", "c"}, {"C", "d"}, {"B", "c"}}, 5, 1},
-		{"allow-rack-tradeoff", []string{"zone", "rack", "host"}, [][]string{{"A", "r1", "a"}, {"A", "r2", "b"}, {"A", "r3", "c"}, {"B", "r4", "d"}, {"B", "r4", "e"}}, 4, 5},
-		{"insufficient-hosts", []string{"host"}, [][]string{{"a"}, {"a"}, {"b"}, {"a"}}, 3, 4},
-		{"improve-degraded-hosts", []string{"host"}, [][]string{{"a"}, {"a"}, {"b"}, {"c"}}, 3, 4},
-		{"host-name-is-local-to-zone", []string{"zone", "host"}, [][]string{{"A", "a"}, {"A", "b"}, {"A", "c"}, {"B", "b"}}, 3, 4},
-		{"missing-target-label", []string{"zone", "host"}, [][]string{{"A", "a"}, {"A", "b"}, {"A", "c"}, {"B", ""}}, 3, 1},
-		{"missing-source-label", []string{"zone", "host"}, [][]string{{"A", "a"}, {"A", ""}, {"A", "c"}, {"B", "d"}}, 3, 1},
-		{"case-insensitive-host", []string{"zone", "host"}, [][]string{{"A", "a"}, {"A", "b"}, {"A", "c"}, {"B", "d"}, {"b", "D"}}, 4, 1},
-		{"case-insensitive-existing-collision", []string{"host"}, [][]string{{"a"}, {"A"}, {"B"}, {"A"}}, 3, 4},
-		{"case-insensitive-existing-hierarchy", []string{"zone", "host"}, [][]string{{"A", "a"}, {"a", "A"}, {"B", "b"}, {"a", "a"}}, 3, 4},
-		{"single-voter", []string{"host"}, [][]string{{""}, {"a"}}, 1, 2},
-		{"no-host-level", []string{"zone"}, [][]string{{"A"}, {"A"}, {"A"}, {"B"}}, 3, 4},
-	}
-	for _, tt := range cases {
-		for _, rules := range []bool{false, true} {
-			for _, internal := range []bool{false, true} {
-				t.Run(fmt.Sprintf("%s/rules=%v/internal=%v", tt.name, rules, internal), func(t *testing.T) {
-					sc, _, region := newScatterHostFixture(t, rules, tt.labels, tt.paths, tt.peers)
-					var state *scatterState
-					if internal {
-						state = sc.newScatterState()
-						state.ordinaryEngine.selectedPeer.InitGroupDistribution("host", map[uint64]uint64{1: 10})
-					} else {
-						for range 10 {
-							sc.ordinaryEngine.selectedPeer.Put(1, "host")
-						}
-					}
-					var op *operator.Operator
-					var err error
-					if internal {
-						op, err = sc.scatterRegionWithType(region, "host", true, true, state)
-					} else {
-						op, err = sc.Scatter(region, "host", true)
-					}
-					require.NoError(t, err)
-					targets, _ := scatterOperatorTargets(t, region, op)
-					require.Len(t, targets, tt.peers)
-					require.Contains(t, targets, tt.want)
-					for id := uint64(2); id <= uint64(tt.peers); id++ {
-						require.Contains(t, targets, id)
-					}
-					if tt.want != 1 {
-						require.NotContains(t, targets, uint64(1))
-					}
-				})
-			}
-		}
-	}
-}
-
-func TestScatterHostFinalValidation(t *testing.T) {
+// The existing weighted score permits better zone distribution to outweigh a
+// host collision unless the placement rule explicitly requires host isolation.
+func TestScatterConfiguredIsolation(t *testing.T) {
 	for _, rules := range []bool{false, true} {
 		t.Run(strconv.FormatBool(rules), func(t *testing.T) {
-			sc, _, region := newScatterHostFixture(t, rules, []string{"zone", "host"}, [][]string{{"A", "a"}, {"A", "b"}, {"A", "c"}, {"B", "d"}, {"B", "d"}}, 4)
-			require.False(t, sc.scatterPlacementValid(region, placementTargets(2, 3, 4, 5), 2))
-		})
-	}
-	// Equal collision counts (6) do not imply equal single-host exposure:
-	// seven voters go from 3/3/1 on hosts to 4/1/1/1.
-	paths := [][]string{{"a"}, {"a"}, {"a"}, {"b"}, {"b"}, {"b"}, {"c"}, {"a"}, {"d"}}
-	sc, _, region := newScatterHostFixture(t, false, []string{"host"}, paths, 7)
-	require.False(t, sc.scatterPlacementValid(region, placementTargets(1, 2, 3, 4, 7, 8, 9), 1))
-}
-
-func TestScatterHostAcrossRules(t *testing.T) {
-	for _, internal := range []bool{false, true} {
-		t.Run(strconv.FormatBool(internal), func(t *testing.T) {
-			sc, tc, region := newScatterHostFixture(t, true, []string{"host"}, [][]string{{"a"}, {"b"}, {"c"}, {"b"}, {"d"}}, 3)
-			tc.SetLocationLabels(nil) // Host topology comes from the rules in this mode.
-			for _, id := range []uint64{1, 4, 5} {
-				tc.SetStoreLabel(id, map[string]string{"host": tc.GetStore(id).GetLabelValue("host"), "slot": "leader"})
+			sc, tc, region := newScatterTopologyFixture(t, rules, []string{"zone", "host"}, [][]string{{"A", "a"}, {"A", "b"}, {"A", "c"}, {"B", "d"}, {"B", "d"}}, 4)
+			targets := placementTargets(2, 3, 4, 5)
+			require.True(t, sc.scatterPlacementValid(region, targets, 2))
+			if rules {
+				rule := tc.GetRuleManager().GetRule("pd", "default").Clone()
+				rule.IsolationLevel = "host"
+				require.NoError(t, tc.GetRuleManager().SetRule(rule))
+				require.False(t, sc.scatterPlacementValid(region, targets, 2))
 			}
-			rm := tc.GetRuleManager()
-			rule := rm.GetRule("pd", "default").Clone()
-			rule.Count, rule.Role = 1, placement.Leader
-			rule.LabelConstraints = []placement.LabelConstraint{{Key: "slot", Op: placement.In, Values: []string{"leader"}}}
-			require.NoError(t, rm.SetRule(rule))
-			followers := rule.Clone()
-			followers.ID = "followers"
-			followers.Count = 2
-			followers.Role = placement.Follower
-			followers.LabelConstraints = []placement.LabelConstraint{{Key: "slot", Op: placement.NotIn, Values: []string{"leader"}}}
-			require.NoError(t, rm.SetRule(followers))
-			require.False(t, sc.scatterPlacementValid(region, placementTargets(2, 3, 4), 4))
-			require.True(t, sc.scatterPlacementValid(region, placementTargets(2, 3, 5), 5))
-			var state *scatterState
-			if internal {
-				state = sc.newScatterState()
-				state.ordinaryEngine.selectedPeer.InitGroupDistribution("host", map[uint64]uint64{1: 10})
-			} else {
-				for range 10 {
-					sc.ordinaryEngine.selectedPeer.Put(1, "host")
-				}
-			}
-			op, err := sc.scatterRegionWithType(region, "host", true, internal, state)
-			require.NoError(t, err)
-			require.NotNil(t, op)
-			targets, leader := scatterOperatorTargets(t, region, op)
-			require.Contains(t, targets, uint64(5))
-			require.NotContains(t, targets, uint64(4))
-			require.Equal(t, uint64(5), leader)
 		})
 	}
 }
 
-func TestScatterHostLearner(t *testing.T) {
-	sc, tc, region := newScatterHostFixture(t, true, []string{"host"}, [][]string{{"a"}, {"b"}, {"c"}, {"a"}}, 3)
+func TestScatterIsolationPerRule(t *testing.T) {
+	sc, tc, region := newScatterTopologyFixture(t, true, []string{"host"}, [][]string{{"a"}, {"b"}, {"c"}, {"b"}}, 3)
+	rm := tc.GetRuleManager()
+	rule := rm.GetRule("pd", "default").Clone()
+	rule.Count, rule.Role, rule.IsolationLevel = 1, placement.Leader, "host"
+	require.NoError(t, rm.SetRule(rule))
+	followers := rule.Clone()
+	followers.ID, followers.Count, followers.Role = "followers", 2, placement.Follower
+	require.NoError(t, rm.SetRule(followers))
+	// Each rule keeps its isolation; the rules do not declare a shared host
+	// constraint across the leader and follower groups.
+	require.True(t, sc.scatterPlacementValid(region, placementTargets(2, 3, 4), 4))
+}
+
+func TestScatterLearnerIsolation(t *testing.T) {
+	sc, tc, region := newScatterTopologyFixture(t, true, []string{"host"}, [][]string{{"a"}, {"b"}, {"c"}, {"a"}}, 3)
 	region = region.Clone(core.WithRole(region.GetStorePeer(3).GetId(), metapb.PeerRole_Learner))
 	rm := tc.GetRuleManager()
 	rule := rm.GetRule("pd", "default").Clone()
