@@ -664,7 +664,10 @@ func (s *StoresInfo) GetStore(storeID uint64) *StoreInfo {
 }
 
 // SetStore sets a StoreInfo with storeID.
-func (s *StoresInfo) SetStore(store *StoreInfo) {
+func (s *StoresInfo) SetStore(store *StoreInfo, opts ...StoreCreateOption) {
+	if len(opts) > 0 {
+		store = s.stores[store.GetID()].Clone(opts...)
+	}
 	s.stores[store.GetID()] = store
 }
 
