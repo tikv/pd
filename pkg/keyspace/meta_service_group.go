@@ -279,7 +279,11 @@ func (m *MetaServiceGroupManager) loadGroupStatus(txn kv.Txn, groupID string) (*
 	if err != nil {
 		return nil, err
 	}
-	return statusMap[groupID], nil
+	status := statusMap[groupID]
+	if status == nil {
+		return &endpoint.MetaServiceGroupStatus{}, nil
+	}
+	return status, nil
 }
 
 // AttachEndpoints append potential meta-service group endpoint to the given keyspace config map.
