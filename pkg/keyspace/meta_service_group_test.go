@@ -296,6 +296,23 @@ func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelyChecksNewGroupHeal
 	re.False(exists)
 }
 
+func (suite *metaServiceGroupTestSuite) TestPatchStatusInitializesNewGroupStatus() {
+	re := suite.Require()
+	enabled := true
+	groups := mockMetaServiceGroups()
+	groups["new-group"] = "new-group.tidb-serverless.cluster.svc.local"
+	suite.manager.updateGroups(groups)
+
+	re.NoError(suite.manager.PatchStatus(suite.ctx, "new-group", &MetaServiceGroupStatusPatch{
+		Enabled: &enabled,
+	}))
+
+	status, err := suite.manager.GetStatus(suite.ctx)
+	re.NoError(err)
+	re.True(status["new-group"].Enabled)
+	re.Zero(status["new-group"].AssignmentCount)
+}
+
 func (suite *metaServiceGroupTestSuite) TestGroupMapsAreCopiedAtOwnershipBoundaries() {
 	re := suite.Require()
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
