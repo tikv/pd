@@ -151,6 +151,20 @@ func TestScatterPlacementValidation(t *testing.T) {
 	}
 }
 
+func TestScatterPlacementLabelCase(t *testing.T) {
+	for _, hosts := range [][]string{
+		{"A", "a", "B", "A"},
+		{"Σ", "ς", "B", "Σ"},
+	} {
+		t.Run(hosts[1], func(t *testing.T) {
+			sc, _, region := newPlacementTestScatter(t, true, hosts)
+			// The first two peers already share a host under CompareLocation.
+			// Replacing the second peer with an equivalent label must remain valid.
+			require.True(t, sc.scatterPlacementValid(region, placementTargets(1, 4, 3), 1))
+		})
+	}
+}
+
 func TestScatterRegionView(t *testing.T) {
 	_, _, region := newPlacementTestScatter(t, true, []string{"A", "B", "C"})
 	view := region.Clone()
