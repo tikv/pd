@@ -794,8 +794,11 @@ func TestRaftClusterStartTSOJob(t *testing.T) {
 		allocator := leaderServer.GetServer().GetTSOAllocator()
 		return allocator.IsInitialize()
 	})
-	re.NoError(tc.ResignLeader())
-	re.NotEmpty(tc.WaitLeader())
+	// The campaign loop can transfer leadership to a different peer concurrently,
+	// causing this request to time out even though the old leader has stepped down.
+	// Check the completed leader change before checking the old TSO allocator.
+	err = leaderServer.ResignLeader()
+	re.NotEmpty(tc.WaitLeaderChange(name), "resign leader returned: %v", err)
 	testutil.Eventually(re, func() bool {
 		allocator := tc.GetServer(name).GetServer().GetTSOAllocator()
 		return !allocator.IsInitialize()
