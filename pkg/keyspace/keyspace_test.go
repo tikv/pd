@@ -246,46 +246,98 @@ func (suite *keyspaceTestSuite) TestCreateKeyspaceMetrics() {
 }
 
 func (suite *keyspaceTestSuite) TestGCManagementTypeDefaultValue() {
-	re := suite.Require()
-	manager := suite.manager
-
-	now := time.Now().Unix()
-	const classic = `return(false)`
-	const nextGen = `return(true)`
-
-	type testCase struct {
-		nextGenFlag      string
-		gcManagementType string
-		expect           string
-	}
-
-	cases := []testCase{
-		{classic, "", ""},
-		{classic, UnifiedGC, UnifiedGC},
-		{classic, KeyspaceLevelGC, KeyspaceLevelGC},
-		{nextGen, "", KeyspaceLevelGC},
-		{nextGen, UnifiedGC, UnifiedGC},
-		{classic, KeyspaceLevelGC, KeyspaceLevelGC},
-	}
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"))
-	}()
-	for idx, tc := range cases {
-		re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag", tc.nextGenFlag))
-		cfg := make(map[string]string)
-		if tc.gcManagementType != "" {
-			cfg[GCManagementType] = tc.gcManagementType
+	for _, nextGen := range []bool{false, true} {
+		for _, byID := range []bool{false, true} {
+			for idx, value := range []string{"absent", "", UnifiedGC, KeyspaceLevelGC, "invalid"} {
+				suite.Run(fmt.Sprintf("nextgen=%t/byID=%t/value=%s", nextGen, byID, value), func() {
+					re := suite.Require()
+					re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag", fmt.Sprintf("return(%t)", nextGen)))
+					defer func() {
+						re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"))
+					}()
+					cfg := make(map[string]string)
+					if value != "absent" {
+						cfg[GCManagementType] = value
+					}
+					name := fmt.Sprintf("gc_%t_%t_%d", nextGen, byID, idx)
+					var meta *keyspacepb.KeyspaceMeta
+					var err error
+					if byID {
+						id, allocErr := suite.manager.allocID()
+						re.NoError(allocErr)
+						meta, err = suite.manager.CreateKeyspaceByID(&CreateKeyspaceByIDRequest{ID: &id, Name: name, Config: cfg})
+					} else {
+						meta, err = suite.manager.CreateKeyspace(&CreateKeyspaceRequest{Name: name, Config: cfg})
+					}
+					if nextGen && value != "absent" && value != KeyspaceLevelGC {
+						re.ErrorContains(err, "nextgen only supports keyspace_level gc")
+						_, err = suite.manager.LoadKeyspace(name)
+						re.ErrorIs(err, errs.ErrKeyspaceNotFound)
+						return
+					}
+					re.NoError(err)
+					loaded, err := suite.manager.LoadKeyspaceByID(meta.GetId())
+					re.NoError(err)
+					expected := value
+					if nextGen {
+						expected = KeyspaceLevelGC
+					} else if value == "absent" {
+						expected = ""
+					}
+					re.Equal(expected, loaded.Config[GCManagementType])
+				})
+			}
 		}
-		req := &CreateKeyspaceRequest{
-			Name:       fmt.Sprintf("gc_mgmt_type_%d", idx),
-			CreateTime: now,
-			Config:     cfg,
+	}
+}
+
+func (suite *keyspaceTestSuite) TestGCManagementTypeImmutable() {
+	for _, nextGen := range []bool{false, true} {
+		for idx, initial := range []string{"absent", UnifiedGC, KeyspaceLevelGC} {
+			if nextGen && initial != KeyspaceLevelGC {
+				continue
+			}
+			suite.Run(fmt.Sprintf("nextgen=%t/initial=%s", nextGen, initial), func() {
+				re := suite.Require()
+				re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag", fmt.Sprintf("return(%t)", nextGen)))
+				defer func() {
+					re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"))
+				}()
+				cfg := map[string]string{testConfig1: "original"}
+				if initial != "absent" {
+					cfg[GCManagementType] = initial
+				}
+				name := fmt.Sprintf("immutable_%t_%d", nextGen, idx)
+				meta, err := suite.manager.CreateKeyspace(&CreateKeyspaceRequest{Name: name, Config: cfg})
+				re.NoError(err)
+				for _, conditional := range []bool{false, true} {
+					for _, value := range []string{"delete", "", UnifiedGC, KeyspaceLevelGC, "invalid"} {
+						mutation := &Mutation{Op: OpPut, Key: GCManagementType, Value: value}
+						if value == "delete" {
+							mutation.Op = OpDel
+						}
+						mutations := []*Mutation{{Op: OpPut, Key: testConfig1, Value: "changed"}, mutation}
+						var updated *keyspacepb.KeyspaceMeta
+						if conditional {
+							expected := meta.Config[testConfig1]
+							updated, err = suite.manager.UpdateKeyspaceConfigWithPreconditions(name, mutations, map[string]*string{testConfig1: &expected})
+						} else {
+							updated, err = suite.manager.UpdateKeyspaceConfig(name, mutations)
+						}
+						if value == initial || (value == "delete" && initial == "absent") {
+							re.NoError(err)
+							re.Equal("changed", updated.Config[testConfig1])
+							meta = updated
+						} else {
+							re.ErrorContains(err, "gc management type cannot be changed")
+						}
+						loaded, loadErr := suite.manager.LoadKeyspace(name)
+						re.NoError(loadErr)
+						re.Equal(meta.Config, loaded.Config)
+					}
+				}
+			})
 		}
-		created, err := manager.CreateKeyspace(req)
-		re.NoError(err)
-		loaded, err := manager.LoadKeyspaceByID(created.GetId())
-		re.NoError(err)
-		re.Equal(tc.expect, loaded.Config[GCManagementType])
 	}
 }
 
@@ -628,6 +680,73 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceState() {
 		name, err = manager.GetEnabledKeyspaceNameByID(id)
 		re.NoError(err)
 		re.Equal(bootstrapKeyspaceName, name)
+	}
+}
+
+func (suite *keyspaceTestSuite) TestEnableKeyspaceGCManagementType() {
+	for _, nextGen := range []bool{false, true} {
+		for _, byID := range []bool{false, true} {
+			for idx, gcType := range []string{"absent", "", UnifiedGC, "invalid", KeyspaceLevelGC} {
+				suite.Run(fmt.Sprintf("nextgen=%t/byID=%t/type=%s", nextGen, byID, gcType), func() {
+					re := suite.Require()
+					re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag", fmt.Sprintf("return(%t)", nextGen)))
+					defer func() {
+						re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"))
+					}()
+					manager := suite.manager
+					meta, err := manager.CreateKeyspace(&CreateKeyspaceRequest{
+						Name:   fmt.Sprintf("gc_%t_%t_%d", nextGen, byID, idx),
+						Config: map[string]string{GCManagementType: KeyspaceLevelGC},
+					})
+					re.NoError(err)
+					// Model metadata persisted before GC mode validation was introduced.
+					re.NoError(manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+						if gcType == "absent" {
+							delete(meta.Config, GCManagementType)
+						} else {
+							meta.Config[GCManagementType] = gcType
+						}
+						return manager.store.SaveKeyspaceMeta(txn, meta)
+					}))
+					update := func(state keyspacepb.KeyspaceState) (*keyspacepb.KeyspaceMeta, error) {
+						if byID {
+							return manager.UpdateKeyspaceStateByID(meta.GetId(), state, 100)
+						}
+						return manager.UpdateKeyspaceState(meta.Name, state, 100)
+					}
+					for _, state := range []keyspacepb.KeyspaceState{keyspacepb.KeyspaceState_ENABLED, keyspacepb.KeyspaceState_DISABLED} {
+						if state == keyspacepb.KeyspaceState_DISABLED {
+							_, err = update(state)
+							re.NoError(err, "invalid GC metadata must not prevent disabling")
+						}
+						before, err := manager.LoadKeyspace(meta.Name)
+						re.NoError(err)
+						cached, err := manager.GetKeyspaceStateByID(meta.GetId())
+						re.NoError(err)
+						re.Equal(state, cached)
+						_, err = update(keyspacepb.KeyspaceState_ENABLED)
+						if nextGen && gcType != KeyspaceLevelGC {
+							re.ErrorIs(err, errs.ErrUnsupportedOperationInKeyspace)
+							after, err := manager.LoadKeyspace(meta.Name)
+							re.NoError(err)
+							re.Equal(before, after)
+							cached, err = manager.GetKeyspaceStateByID(meta.GetId())
+							re.NoError(err)
+							re.Equal(state, cached)
+						} else {
+							re.NoError(err)
+							after, err := manager.LoadKeyspace(meta.Name)
+							re.NoError(err)
+							re.Equal(keyspacepb.KeyspaceState_ENABLED, after.State)
+						}
+					}
+					for _, state := range []keyspacepb.KeyspaceState{keyspacepb.KeyspaceState_DISABLED, keyspacepb.KeyspaceState_ARCHIVED, keyspacepb.KeyspaceState_TOMBSTONE} {
+						_, err = update(state)
+						re.NoError(err, "invalid GC metadata must not prevent cleanup")
+					}
+				})
+			}
+		}
 	}
 }
 

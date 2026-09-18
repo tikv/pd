@@ -85,6 +85,10 @@ func CreateKeyspace(c *gin.Context) {
 	}
 	meta, err := manager.CreateKeyspace(req)
 	if err != nil {
+		if goerrors.Is(err, errs.ErrUnsupportedOperationInKeyspace) {
+			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
+			return
+		}
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -129,6 +133,10 @@ func CreateKeyspaceByID(c *gin.Context) {
 	}
 	meta, err := manager.CreateKeyspaceByID(req)
 	if err != nil {
+		if goerrors.Is(err, errs.ErrUnsupportedOperationInKeyspace) {
+			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
+			return
+		}
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -349,11 +357,6 @@ func UpdateKeyspaceConfig(c *gin.Context) {
 
 	// Check if the update is supported.
 	for _, mutation := range mutations {
-		if mutation.Key == keyspace.GCManagementType && mutation.Value == keyspace.KeyspaceLevelGC {
-			err = errs.ErrUnsupportedOperationInKeyspace.FastGen("keyspace level GC")
-			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
-			return
-		}
 		if mutation.Key == keyspace.RegionBoundType {
 			err = errs.ErrUnsupportedOperationInKeyspace.FastGen("region bound type")
 			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
@@ -371,7 +374,7 @@ func UpdateKeyspaceConfig(c *gin.Context) {
 			c.AbortWithStatusJSON(http.StatusConflict, err.Error())
 			return
 		}
-		if goerrors.Is(err, keyspace.ErrUnknownMetaServiceGroup) || goerrors.Is(err, keyspace.ErrMetaServiceGroupDisabled) {
+		if goerrors.Is(err, keyspace.ErrUnknownMetaServiceGroup) || goerrors.Is(err, keyspace.ErrMetaServiceGroupDisabled) || goerrors.Is(err, errs.ErrUnsupportedOperationInKeyspace) {
 			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
 			return
 		}
@@ -440,6 +443,10 @@ func UpdateKeyspaceState(c *gin.Context) {
 	}
 	meta, err := manager.UpdateKeyspaceState(name, keyspacepb.KeyspaceState(targetState), time.Now().Unix())
 	if err != nil {
+		if goerrors.Is(err, errs.ErrUnsupportedOperationInKeyspace) {
+			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
+			return
+		}
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
 	}

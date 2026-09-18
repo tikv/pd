@@ -2193,7 +2193,7 @@ func (s *clientStatefulTestSuite) testUpdateGCSafePointImpl(keyspaceID uint32) {
 
 func (s *clientStatefulTestSuite) TestUpdateGCSafePoint() {
 	s.prepareKeyspacesForGCTest()
-	for _, keyspaceID := range []uint32{constants.NullKeyspaceID, 1, 2} {
+	for _, keyspaceID := range gcTestKeyspaceIDs() {
 		s.testUpdateGCSafePointImpl(keyspaceID)
 	}
 }
@@ -2367,9 +2367,16 @@ func (s *clientStatefulTestSuite) testUpdateServiceGCSafePointImpl(keyspaceID ui
 func (s *clientStatefulTestSuite) TestUpdateServiceGCSafePoint() {
 	s.prepareKeyspacesForGCTest()
 
-	for _, keyspaceID := range []uint32{constants.NullKeyspaceID, 1, 2} {
+	for _, keyspaceID := range gcTestKeyspaceIDs() {
 		s.testUpdateServiceGCSafePointImpl(keyspaceID)
 	}
+}
+
+func gcTestKeyspaceIDs() []uint32 {
+	if kerneltype.IsNextGen() {
+		return []uint32{1, 2}
+	}
+	return []uint32{constants.NullKeyspaceID, 1, 2}
 }
 
 func (s *clientStatefulTestSuite) prepareKeyspacesForGCTest() {
@@ -2396,7 +2403,7 @@ func (s *clientStatefulTestSuite) TestAdvanceTxnSafePointBasic() {
 	re := s.Require()
 	ctx := context.Background()
 
-	for _, keyspaceID := range []uint32{constants.NullKeyspaceID, 1, 2} {
+	for _, keyspaceID := range gcTestKeyspaceIDs() {
 		s.checkTxnSafePoint(re, keyspaceID, 0)
 		c := s.client.GetGCInternalController(keyspaceID)
 
@@ -2438,7 +2445,7 @@ func (s *clientStatefulTestSuite) TestAdvanceGCSafePoint() {
 	re := s.Require()
 	ctx := context.Background()
 
-	for _, keyspaceID := range []uint32{constants.NullKeyspaceID, 1, 2} {
+	for _, keyspaceID := range gcTestKeyspaceIDs() {
 		s.checkGCSafePoint(re, keyspaceID, 0)
 		c := s.client.GetGCInternalController(keyspaceID)
 
@@ -2489,7 +2496,7 @@ func (s *clientStatefulTestSuite) TestGCBarriers() {
 	re := s.Require()
 	ctx := context.Background()
 
-	for _, keyspaceID := range []uint32{constants.NullKeyspaceID, 1, 2} {
+	for _, keyspaceID := range gcTestKeyspaceIDs() {
 		cli := s.client.GetGCStatesClient(keyspaceID)
 		c := s.client.GetGCInternalController(keyspaceID)
 		s.checkGCBarrier(re, keyspaceID, "b1", 0)
@@ -2624,7 +2631,7 @@ func (s *clientStatefulTestSuite) TestGlobalGCBarriers() {
 	}
 
 	var clients []gc.GCStatesClient
-	for _, keyspaceID := range []uint32{constants.NullKeyspaceID, 1, 2} {
+	for _, keyspaceID := range gcTestKeyspaceIDs() {
 		cli := s.client.GetGCStatesClient(keyspaceID)
 		s.checkGlobalGCBarrier(re, "b1", 0)
 		clients = append(clients, cli)
@@ -2682,7 +2689,7 @@ func (s *clientStatefulTestSuite) TestGlobalGCBarriers() {
 	s.checkGlobalGCBarrier(re, "b1", 10)
 
 	// Allows advancing to a value below the global GC barrier.
-	for _, keyspaceID := range []uint32{constants.NullKeyspaceID, 1, 2} {
+	for _, keyspaceID := range gcTestKeyspaceIDs() {
 		c := s.client.GetGCInternalController(keyspaceID)
 		res, err := c.AdvanceTxnSafePoint(ctx, 5)
 		re.NoError(err)
@@ -2708,7 +2715,7 @@ func (s *clientStatefulTestSuite) TestGlobalGCBarriers() {
 	re.Equal(int64(math.MaxInt64), int64(b.TTL))
 	s.checkGlobalGCBarrier(re, "b1", 0)
 
-	for _, keyspaceID := range []uint32{constants.NullKeyspaceID, 1, 2} {
+	for _, keyspaceID := range gcTestKeyspaceIDs() {
 		c := s.client.GetGCInternalController(keyspaceID)
 		res, err := c.AdvanceTxnSafePoint(ctx, 11)
 		re.NoError(err)
@@ -2724,7 +2731,7 @@ func (s *clientStatefulTestSuite) TestGlobalGCBarriers() {
 	re.Equal(int64(math.MaxInt64), int64(b.TTL))
 
 	// Allows advancing to exactly the same value as the global GC barrier, without reporting the blocker.
-	for _, keyspaceID := range []uint32{constants.NullKeyspaceID, 1, 2} {
+	for _, keyspaceID := range gcTestKeyspaceIDs() {
 		c := s.client.GetGCInternalController(keyspaceID)
 		res, err := c.AdvanceTxnSafePoint(ctx, 15)
 		re.NoError(err)
@@ -2785,7 +2792,7 @@ func (s *clientStatefulTestSuite) TestGlobalGCBarriers() {
 	re.NoError(err)
 	re.Equal(expectedBarriers, sortedBarrierIDsAndTS(globalBarriers))
 
-	for _, keyspaceID := range []uint32{constants.NullKeyspaceID, 1, 2} {
+	for _, keyspaceID := range gcTestKeyspaceIDs() {
 		c := s.client.GetGCInternalController(keyspaceID)
 		res, err := c.AdvanceTxnSafePoint(ctx, 25)
 		re.NoError(err)
@@ -2812,7 +2819,7 @@ func (s *clientStatefulTestSuite) TestGlobalGCBarriers() {
 	// behavior. Wait another 1 second.
 	time.Sleep(time.Second)
 
-	for _, keyspaceID := range []uint32{constants.NullKeyspaceID, 1, 2} {
+	for _, keyspaceID := range gcTestKeyspaceIDs() {
 		c := s.client.GetGCInternalController(keyspaceID)
 		res, err := c.AdvanceTxnSafePoint(ctx, 25)
 		re.NoError(err)
@@ -2844,9 +2851,13 @@ func (s *clientStatefulTestSuite) TestGetAllKeyspaceGCStates() {
 	re := s.Require()
 	ctx := context.Background()
 	s.prepareKeyspacesForGCTest()
+	gcType := keyspace.UnifiedGC
+	if kerneltype.IsNextGen() {
+		gcType = keyspace.KeyspaceLevelGC
+	}
 	ks3, err := s.srv.GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{
 		Name:       "ks3",
-		Config:     map[string]string{keyspace.GCManagementType: keyspace.UnifiedGC},
+		Config:     map[string]string{keyspace.GCManagementType: gcType},
 		CreateTime: time.Now().Unix(),
 	})
 	re.NoError(err)
@@ -2918,7 +2929,7 @@ func (s *clientStatefulTestSuite) TestGetAllKeyspaceGCStates() {
 	re.True(state2.IsKeyspaceLevelGC)
 	state3, ok := res.GCStates[3]
 	re.True(ok)
-	re.False(state3.IsKeyspaceLevelGC)
+	re.Equal(kerneltype.IsNextGen(), state3.IsKeyspaceLevelGC)
 	gcBarriers, err = state2.GetGCBarriers()
 	re.NoError(err)
 	re.Equal("b4", gcBarriers[0].BarrierID)

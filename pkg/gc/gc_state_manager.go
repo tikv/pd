@@ -36,6 +36,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 	"github.com/tikv/pd/server/config"
 )
 
@@ -64,7 +65,8 @@ import (
 //     be deprecated and replaced with GC barriers, but for compatibility, if there are such keys, it's still functional
 //     to block the txn safe point from advancing.
 //
-// GC management may differ between different keyspaces. There are two kinds of GC management, each of which has
+// NextGen only supports keyspace-level GC. GC management is immutable after keyspace creation.
+// In Classic, GC management may differ between different keyspaces. There are two kinds of GC management, each of which has
 // a different path to write its metadata in etcd:
 //
 //   - Keyspace-level: A keyspace manages its GC by itself, and have independent GC states from other keyspaces.
@@ -283,9 +285,12 @@ func (m *GCStateManager) nodeIsLeader() bool {
 // string only for diagnostic purposes (it returns "<null_keyspace>" for NullKeyspaceID). DO NOT use it as the key for
 // identifying a keyspace.
 func (m *GCStateManager) redirectKeyspace(keyspaceID uint32, isUserAPI bool) (uint32, string, error) {
-	// Regard it as NullKeyspaceID if the given one is invalid (exceeds the valid range of keyspace id), no matter
-	// whether it exactly matches the NullKeyspaceID.
+	// Classic treats IDs outside the valid keyspace range as NullKeyspace, including NullKeyspaceID itself.
+	// NextGen rejects all such IDs because it only supports keyspace-level GC.
 	if keyspaceID & ^constant.ValidKeyspaceIDMask != 0 {
+		if kerneltype.IsNextGen() {
+			return 0, "", errs.ErrGCOnInvalidKeyspace.FastGen("unified gc is not supported in nextgen")
+		}
 		return constant.NullKeyspaceID, "<null_keyspace>", nil
 	}
 
@@ -294,7 +299,7 @@ func (m *GCStateManager) redirectKeyspace(keyspaceID uint32, isUserAPI bool) (ui
 		return 0, "", err
 	}
 	if keyspaceMeta.Config[keyspace.GCManagementType] != keyspace.KeyspaceLevelGC {
-		if isUserAPI {
+		if isUserAPI && !kerneltype.IsNextGen() {
 			// The user API is expected to always work. Operate on the state of unified GC instead.
 			return constant.NullKeyspaceID, "<null_keyspace>", nil
 		}
@@ -661,8 +666,8 @@ func (*GCStateManager) logAdvancingTxnSafePoint(ctx context.Context, keyspaceID 
 // new GC barrier.
 //
 // A GC barrier is uniquely identified by the given barrierID in the keyspace scope for NullKeyspace or keyspaces
-// with keyspace-level GC enabled. When this method is called on keyspaces without keyspace-level GC enabled, it will
-// be equivalent to calling it on the NullKeyspace.
+// with keyspace-level GC enabled. In Classic, calling it on a unified-GC keyspace is equivalent to calling it on
+// NullKeyspace. NextGen rejects NullKeyspace and keyspaces without keyspace-level GC enabled.
 //
 // Once a GC barrier is set, it will block the txn safe point from being advanced over the barrierTS, until the GC
 // barrier is expired (defined by ttl) or manually deleted (by calling DeleteGCBarrier).
@@ -745,8 +750,8 @@ func (m *GCStateManager) setGCBarrierImpl(ctx context.Context, keyspaceID uint32
 // DeleteGCBarrier deletes a GC barrier by the given barrierID. Returns the information of the deleted GC barrier, or
 // nil if the barrier does not exist.
 //
-// When this method is called on a keyspace without keyspace-level GC enabled, it will be equivalent to calling it on
-// the NullKeyspace.
+// In Classic, calling this method on a unified-GC keyspace is equivalent to calling it on NullKeyspace.
+// NextGen rejects NullKeyspace and keyspaces without keyspace-level GC enabled.
 func (m *GCStateManager) DeleteGCBarrier(keyspaceID uint32, barrierID string) (*endpoint.GCBarrier, error) {
 	keyspaceID, keyspaceNameForDiag, err := m.redirectKeyspace(keyspaceID, true)
 	if err != nil {
@@ -762,8 +767,12 @@ func (m *GCStateManager) DeleteGCBarrier(keyspaceID uint32, barrierID string) (*
 
 // ForceDeleteServiceGCSafePoint deletes a NullKeyspace service safe point for the legacy HTTP API.
 // It bypasses the normal GC barrier constraints, including the reserved gc_worker ID.
-// Deleting an absent service is successful.
+// Deleting an absent service is successful. NextGen does not support this unified-GC API.
 func (m *GCStateManager) ForceDeleteServiceGCSafePoint(serviceID string) error {
+	if _, _, err := m.redirectKeyspace(constant.NullKeyspaceID, true); err != nil {
+		return err
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -935,8 +944,8 @@ func (m *GCStateManager) getGCStateInTransaction(keyspaceID uint32, excludeGCBar
 
 // GetGCState returns the GC state of the given keyspace.
 //
-// When this method is called on a keyspace without keyspace-level GC enabled, it will be equivalent to calling it on
-// the NullKeyspace.
+// In Classic, calling this method on a unified-GC keyspace is equivalent to calling it on NullKeyspace.
+// NextGen rejects NullKeyspace and keyspaces without keyspace-level GC enabled.
 func (m *GCStateManager) GetGCState(keyspaceID uint32, excludeGCBarriers bool) (GCState, error) {
 	keyspaceID, keyspaceName, err := m.redirectKeyspace(keyspaceID, true)
 	if err != nil {
@@ -1000,7 +1009,8 @@ func (m *GCStateManager) GetGCStateWithGlobalGCBarriers(keyspaceID uint32, exclu
 }
 
 // GetAllKeyspacesGCStates returns the GC state of all keyspaces.
-// Returns a map from keyspaceID to GCState. Keyspaces without keyspace-level GC enabled will not be included.
+// Returns a map from keyspaceID to GCState. Classic includes NullKeyspace and placeholders for unified-GC keyspaces.
+// NextGen excludes NullKeyspace and rejects keyspaces without keyspace-level GC enabled.
 // The result contains only the GC states of active keyspace. If a keyspace is in DISABLE/ARCHIVED/TOMBSTONE state,
 // it will be filtered out.
 //
@@ -1072,7 +1082,8 @@ func (m *GCStateManager) GetAllKeyspacesGCStates(ctx context.Context, excludeGCB
 // `keyspacePred` will be used to filter keyspaces to be handled, including the null keyspace.
 // For unfiltered keyspaces, its GCState will be loaded and passed to `cb`; for keyspaces filtered by `keyspacePred`,
 // its keyspace meta (or nil for null keyspace) will be passed to `filteredKeyspaceCb`.
-// Keyspaces not in ENABLED state or keyspaces with keyspace-level GC disabled won't be used to call either callback.
+// Keyspaces not in ENABLED state are skipped. Classic unified-GC keyspaces are returned as placeholders.
+// NextGen rejects unsupported GC modes before applying keyspacePred, including cached keyspaces.
 func (m *GCStateManager) iterateAllKeyspacesGCStates(
 	ctx context.Context,
 	excludeGCBarriers bool,
@@ -1090,14 +1101,16 @@ func (m *GCStateManager) iterateAllKeyspacesGCStates(
 
 	keyspaceIterator := m.keyspaceManager.IterateKeyspaces()
 
-	if keyspacePred(constant.NullKeyspaceID) {
-		nullKeyspaceGCState, err := m.getGCStateImpl(constant.NullKeyspaceID, excludeGCBarriers)
-		if err != nil {
-			return err
+	if !kerneltype.IsNextGen() {
+		if keyspacePred(constant.NullKeyspaceID) {
+			nullKeyspaceGCState, err := m.getGCStateImpl(constant.NullKeyspaceID, excludeGCBarriers)
+			if err != nil {
+				return err
+			}
+			cb(nullKeyspaceGCState)
+		} else if filteredKeyspaceCb != nil {
+			filteredKeyspaceCb(nil)
 		}
-		cb(nullKeyspaceGCState)
-	} else if filteredKeyspaceCb != nil {
-		filteredKeyspaceCb(nil)
 	}
 
 	for {
@@ -1119,23 +1132,18 @@ func (m *GCStateManager) iterateAllKeyspacesGCStates(
 			continue
 		}
 
-		// Workaround: Check unified GC before checking `keyspacePred`. This breaks the semantics of
-		// the function, but it makes sure keyspaces that changed from keyspace-level GC to unified GC, the invalidated
-		// cached GC states (if any) are always overwritten by the unified GC ones.
-
-		if keyspaceMeta.Config[keyspace.GCManagementType] != keyspace.KeyspaceLevelGC {
-			gcState := GCState{
-				KeyspaceID:      keyspaceMeta.GetId(),
-				IsKeyspaceLevel: false,
-			}
-			cb(gcState)
-			continue
+		isKeyspaceLevel := keyspaceMeta.Config[keyspace.GCManagementType] == keyspace.KeyspaceLevelGC
+		if kerneltype.IsNextGen() && !isKeyspaceLevel {
+			return errs.ErrGCOnInvalidKeyspace.GenWithStackByArgs(keyspaceMeta.GetName(), keyspaceMeta.GetId())
 		}
-
 		if !keyspacePred(keyspaceMeta.GetId()) {
 			if filteredKeyspaceCb != nil {
 				filteredKeyspaceCb(keyspaceMeta)
 			}
+			continue
+		}
+		if !isKeyspaceLevel {
+			cb(GCState{KeyspaceID: keyspaceMeta.GetId()})
 			continue
 		}
 
@@ -1191,9 +1199,15 @@ func (m *GCStateManager) LoadAllGlobalGCBarriers() ([]*endpoint.GlobalGCBarrier,
 func (m *GCStateManager) CompatibleUpdateServiceGCSafePoint(keyspaceID uint32, serviceID string, newServiceSafePoint uint64, ttl int64, now time.Time) (minServiceSafePoint *endpoint.ServiceSafePoint, updated bool, err error) {
 	observation := &barrierObservation{generation: m.barrierMetrics.generation()}
 	defer observation.logWarnings()
-	keyspaceID, keyspaceNameForDiag, err := m.redirectKeyspace(keyspaceID, true)
-	if err != nil {
-		return nil, false, err
+	keyspaceNameForDiag := "<null_keyspace>"
+	if serviceID == keypath.NativeBRServiceSafePointID && keyspaceID & ^constant.ValidKeyspaceIDMask != 0 {
+		// This legacy request manages a global barrier, not unified GC.
+		keyspaceID = constant.NullKeyspaceID
+	} else {
+		keyspaceID, keyspaceNameForDiag, err = m.redirectKeyspace(keyspaceID, true)
+		if err != nil {
+			return nil, false, err
+		}
 	}
 	ctx := addKeyspaceNameToCtx(context.Background(), keyspaceNameForDiag)
 	ctx = context.WithValue(ctx, barrierObservationKey{}, observation)
@@ -1357,6 +1371,10 @@ func (m *GCStateManager) getMaxTxnSafePointAmongAllKeyspaces(_ *endpoint.GCState
 		if keyspaceMeta.State != keyspacepb.KeyspaceState_ENABLED {
 			continue
 		}
+		if kerneltype.IsNextGen() && keyspaceMeta.Config[keyspace.GCManagementType] != keyspace.KeyspaceLevelGC {
+			err = errs.ErrGCOnInvalidKeyspace.GenWithStackByArgs(keyspaceMeta.GetName(), keyspaceMeta.GetId())
+			return
+		}
 		txnSafePoint, err2 := m.gcMetaStorage.LoadTxnSafePoint(keyspaceMeta.GetId())
 		if err2 != nil {
 			err = err2
@@ -1367,6 +1385,9 @@ func (m *GCStateManager) getMaxTxnSafePointAmongAllKeyspaces(_ *endpoint.GCState
 			keyspaceName = keyspaceMeta.Name
 			keyspaceID = keyspaceMeta.GetId()
 		}
+	}
+	if kerneltype.IsNextGen() {
+		return
 	}
 	// NOTE, allKeyspaces by LoadRangeKeyspace() do not contain the null keyspace!
 	txnSafePoint, err3 := m.gcMetaStorage.LoadTxnSafePoint(constant.NullKeyspaceID)
