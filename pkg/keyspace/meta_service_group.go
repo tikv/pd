@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"sync"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -37,6 +38,7 @@ import (
 type MetaServiceGroupManager struct {
 	store endpoint.MetaServiceGroupStorage
 	syncutil.RWMutex
+	updateMu  sync.Mutex
 	tlsConfig *tls.Config
 	// healthClients is keyed by meta-service group ID. Each value contains one
 	// cached client per endpoint so every endpoint can be checked independently.
@@ -342,6 +344,9 @@ func (m *MetaServiceGroupManager) UpdateGroupsSafely(
 	persist func() error,
 	afterPersist func(),
 ) error {
+	m.updateMu.Lock()
+	defer m.updateMu.Unlock()
+
 	if err := config.AdjustMetaServiceGroups(metaServiceGroups); err != nil {
 		return err
 	}
