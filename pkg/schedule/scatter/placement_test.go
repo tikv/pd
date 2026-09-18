@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
@@ -492,6 +493,64 @@ func TestScatterLearnerIsolation(t *testing.T) {
 	targets, _ := scatterOperatorTargets(t, region, op)
 	require.Contains(t, targets, uint64(4))
 	require.Equal(t, metapb.PeerRole_Learner, targets[4].GetRole())
+}
+
+func TestScatterReservesPeerRole(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		source   uint64
+		reserved uint64
+	}{
+		{"voter-reserves-learner", 2, 3},
+		{"learner-reserves-voter", 3, 2},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			sc, tc, region := newScatterTopologyFixture(t, true, []string{"host"}, [][]string{{"a"}, {"b"}, {"c"}, {"d"}}, 3)
+			region = region.Clone(core.WithRole(region.GetStorePeer(3).GetId(), metapb.PeerRole_Learner))
+			original := region.Clone()
+			rm := tc.GetRuleManager()
+			rule := rm.GetRule("pd", "default").Clone()
+			rule.Count = 2
+			require.NoError(t, rm.SetRule(rule))
+			learner := rule.Clone()
+			learner.ID, learner.Role, learner.Count = "learner", placement.Learner, 1
+			require.NoError(t, rm.SetRule(learner))
+
+			// Process the moving peer first, independently of map iteration order.
+			order := []uint64{tt.source, tt.reserved, 1}
+			next := 0
+			const fp = "github.com/tikv/pd/pkg/schedule/scatter/scatterPeerOrder"
+			require.NoError(t, failpoint.EnableCall(fp, func(peer **metapb.Peer) {
+				require.Less(t, next, len(order))
+				*peer = region.GetStorePeer(order[next])
+				next++
+			}))
+			t.Cleanup(func() { require.NoError(t, failpoint.Disable(fp)) })
+
+			// Unique counts force the source to reserve the other role's store,
+			// then the leader's store, before finding the free store 4.
+			for storeID, count := range map[uint64]int{tt.source: 30, 1: 10, 4: 20} {
+				for range count {
+					sc.ordinaryEngine.selectedPeer.Put(storeID, "reservation")
+				}
+			}
+			op, err := sc.Scatter(region, "reservation", true)
+			require.NoError(t, err)
+			require.NotNil(t, op)
+			require.Equal(t, len(order), next)
+			targets, leader := scatterOperatorTargets(t, region, op)
+			assertScatterMembership(t, region, targets, leader)
+			require.NotContains(t, targets, tt.source)
+			require.Contains(t, targets, tt.reserved)
+			require.Contains(t, targets, uint64(1))
+			require.Contains(t, targets, uint64(4))
+			require.Equal(t, region.GetStorePeer(tt.reserved), targets[tt.reserved])
+			require.Equal(t, region.GetStorePeer(1), targets[1])
+			require.Equal(t, region.GetStorePeer(tt.source).GetRole(), targets[4].GetRole())
+			require.Equal(t, original.GetMeta(), region.GetMeta())
+			require.Equal(t, original.GetLeader(), region.GetLeader())
+		})
+	}
 }
 
 func BenchmarkScatterHostHierarchy(b *testing.B) {
