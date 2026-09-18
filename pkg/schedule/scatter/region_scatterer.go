@@ -619,8 +619,9 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 	specialPeers := make(map[string]map[uint64]*metapb.Peer)
 	oldFit := r.cluster.GetRuleManager().FitRegion(r.cluster, region)
 	view := region
-	// viewFit matches the planned peer layout in view. An accepted move
-	// invalidates it; the next rule check refits view without the shared cache.
+	// viewFit records how the peers in view match placement rules.
+	// After selecting A -> D for {A, B, C}, match {D, B, C} against the
+	// placement rules before checking the next candidate.
 	viewFit := oldFit
 
 	// Group peers by the engine of their stores
