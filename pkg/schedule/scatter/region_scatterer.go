@@ -619,6 +619,8 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 	specialPeers := make(map[string]map[uint64]*metapb.Peer)
 	oldFit := r.cluster.GetRuleManager().FitRegion(r.cluster, region)
 	view := region
+	// viewFit matches the planned peer layout in view. An accepted move
+	// invalidates it; the next rule check refits view without the shared cache.
 	viewFit := oldFit
 
 	// Group peers by the engine of their stores
