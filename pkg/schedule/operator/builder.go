@@ -16,6 +16,7 @@ package operator
 
 import (
 	"fmt"
+	"maps"
 	"sort"
 
 	"github.com/pingcap/errors"
@@ -43,12 +44,14 @@ import (
 type Builder struct {
 	// basic info
 	sche.SharedCluster
-	desc            string
-	regionID        uint64
-	regionEpoch     *metapb.RegionEpoch
-	rules           []*placement.Rule
-	expectedRoles   map[uint64]placement.PeerRoleType
-	approximateSize int64
+	desc             string
+	regionID         uint64
+	regionEpoch      *metapb.RegionEpoch
+	region           *core.RegionInfo
+	checkTargetRules bool
+	rules            []*placement.Rule
+	expectedRoles    map[uint64]placement.PeerRoleType
+	approximateSize  int64
 
 	// operation record
 	originPeers          peersMap
@@ -100,6 +103,7 @@ func NewBuilder(desc string, ci sche.SharedCluster, region *core.RegionInfo, opt
 		desc:            desc,
 		SharedCluster:   ci,
 		regionID:        region.GetID(),
+		region:          region,
 		regionEpoch:     region.GetRegionEpoch(),
 		approximateSize: region.GetApproximateSize(),
 	}
@@ -140,6 +144,7 @@ func NewBuilder(desc string, ci sche.SharedCluster, region *core.RegionInfo, opt
 	var rules []*placement.Rule
 	if err == nil && !b.skipPlacementRulesCheck && b.GetSharedConfig().IsPlacementRulesEnabled() {
 		fit := b.GetRuleManager().FitRegion(b.GetBasicCluster(), region)
+		b.checkTargetRules = fit.IsSatisfied()
 		for _, rf := range fit.RuleFits {
 			rules = append(rules, rf.Rule)
 		}
@@ -174,7 +179,7 @@ func IsAllowedLeaderTarget(ci sche.SharedCluster, region *core.RegionInfo, peer 
 		return false
 	}
 	b.currentPeers, b.currentLeaderStoreID = b.originPeers.copy(), b.originLeaderStoreID
-	return b.allowLeader(peer, false)
+	return b.allowTargetLeader(peer)
 }
 
 // AddPeer records an add Peer operation in Builder. If peer.Id is 0, the builder
@@ -422,6 +427,10 @@ func (b *Builder) Build(kind OpKind) (*Operator, error) {
 		return nil, b.err
 	}
 
+	if !b.allowTargetLeader(b.targetPeers[b.currentLeaderStoreID]) {
+		return nil, errors.New("cannot create operator: final leader is not allowed")
+	}
+
 	return NewOperator(b.desc, brief, b.regionID, b.regionEpoch, kind, b.approximateSize, b.steps...), nil
 }
 
@@ -527,7 +536,7 @@ func (b *Builder) prepareBuild() (string, error) {
 
 	if b.targetLeaderStoreID != 0 {
 		targetLeader := b.targetPeers[b.targetLeaderStoreID]
-		if !b.allowLeader(targetLeader, b.forceTargetLeader) {
+		if !b.allowTargetLeader(targetLeader) {
 			return "", errors.New("cannot create operator: target leader is not allowed")
 		}
 	}
@@ -674,7 +683,7 @@ func (b *Builder) setTargetLeaderIfNotExist() {
 
 	for _, candidateStoreID := range b.targetPeers.IDs() {
 		peer := b.targetPeers[candidateStoreID]
-		if !b.allowLeader(peer, b.forceTargetLeader) {
+		if !b.allowTargetLeader(peer) {
 			continue
 		}
 		// if role info is given, store having role follower should not be target leader.
@@ -920,6 +929,47 @@ func (b *Builder) execBatchSwitchWitnesses() {
 	b.toNonWitness = newPeersMap()
 
 	b.steps = append(b.steps, step)
+}
+
+// allowTargetLeader checks the final membership, separately from temporary
+// leaders used while adding, promoting or removing peers. The initial scope is
+// role-preserving scheduling from a satisfied layout; repair and explicit force
+// operations retain their existing contracts.
+func (b *Builder) allowTargetLeader(peer *metapb.Peer) bool {
+	if peer == nil || !b.allowLeader(peer, b.forceTargetLeader) {
+		return false
+	}
+	if !b.checkTargetRules || b.skipPlacementRulesCheck || b.forceTargetLeader {
+		return true
+	}
+	type peerRole struct {
+		role    metapb.PeerRole
+		witness bool
+	}
+	countRoles := func(peers peersMap) map[peerRole]int {
+		counts := make(map[peerRole]int)
+		for _, p := range peers {
+			counts[peerRole{p.GetRole(), p.GetIsWitness()}]++
+		}
+		return counts
+	}
+	if !maps.Equal(countRoles(b.originPeers), countRoles(b.targetPeers)) {
+		return true
+	}
+	peers := make([]*metapb.Peer, 0, len(b.targetPeers))
+	var leader *metapb.Peer
+	for _, id := range b.targetPeers.IDs() {
+		p := *b.targetPeers[id]
+		// New peers may not have allocated IDs yet. Matching identifies the
+		// leader by peer ID, so use unique IDs local to this check.
+		p.Id = uint64(len(peers) + 1)
+		peers = append(peers, &p)
+		if id == peer.GetStoreId() {
+			leader = &p
+		}
+	}
+	target := b.region.Clone(core.SetPeers(peers), core.WithLeader(leader))
+	return b.GetRuleManager().FitRegionWithoutCache(b.GetBasicCluster(), target).IsSatisfied()
 }
 
 // check if the peer is allowed to become the leader.

@@ -769,10 +769,23 @@ func (f *ruleLeaderFitFilter) Target(_ config.SharedConfigProvider, store *core.
 	if targetPeer != nil && targetPeer.IsWitness {
 		return statusStoreNotMatchRule
 	}
-	if f.oldFit.Replace(f.srcLeaderStoreID, store) {
-		return statusOK
+	if !f.oldFit.Replace(f.srcLeaderStoreID, store) {
+		return statusStoreNotMatchRule
 	}
-	return statusStoreNotMatchRule
+	// Preserve complete role matching for a previously satisfied layout.
+	// Unfinished repairs retain the existing incremental checks.
+	if f.oldFit.IsSatisfied() {
+		var target *core.RegionInfo
+		if targetPeer == nil {
+			target = f.region.Clone(core.WithReplacePeerStore(f.srcLeaderStoreID, targetStoreID), core.WithReplaceLeaderStore(targetStoreID))
+		} else {
+			target = f.region.Clone(core.WithLeader(targetPeer))
+		}
+		if !f.ruleManager.FitRegionWithoutCache(f.cluster, target).IsSatisfied() {
+			return statusStoreNotMatchRule
+		}
+	}
+	return statusOK
 }
 
 type ruleWitnessFitFilter struct {
