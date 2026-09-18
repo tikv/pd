@@ -16,6 +16,7 @@ package tso_test
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -171,6 +172,34 @@ func (s *tsoTestSuite) TestLogicalOverflow() {
 
 func (s *tsoTestSuite) checkLogicalOverflow(cluster *tests.TestCluster) {
 	re := s.Require()
+	const (
+		maxLogical = 1 << 18
+		count      = maxLogical / 10
+	)
+	var (
+		overflowPhysical atomic.Int64
+		overflowed       atomic.Bool
+	)
+	// Exhaust logical capacity on the first matching request while holding the
+	// allocation lock, so a periodic update cannot clear it before allocation.
+	const beforeGenerateTSOFailpoint = "github.com/tikv/pd/pkg/tso/beforeGenerateTSO"
+	re.NoError(failpoint.EnableCall(beforeGenerateTSOFailpoint, func(physical int64, logical *int64, batchCount int64) {
+		if batchCount == count && overflowPhysical.CompareAndSwap(0, physical) {
+			*logical = maxLogical - 1
+		}
+	}))
+	defer func() {
+		re.NoError(failpoint.Disable(beforeGenerateTSOFailpoint))
+	}()
+	const onLogicalOverflowFailpoint = "github.com/tikv/pd/pkg/tso/onLogicalOverflow"
+	re.NoError(failpoint.EnableCall(onLogicalOverflowFailpoint, func(batchCount uint32) {
+		if batchCount == count {
+			overflowed.Store(true)
+		}
+	}))
+	defer func() {
+		re.NoError(failpoint.Disable(onLogicalOverflowFailpoint))
+	}()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -192,10 +221,7 @@ func (s *tsoTestSuite) checkLogicalOverflow(cluster *tests.TestCluster) {
 		firstPhysical int64
 		lastTimestamp *pdpb.Timestamp
 	)
-	// Allocate more than one physical timestamp's logical capacity. Physical time
-	// can advance directly on overflow or through the periodic update.
-	const maxLogical = 1 << 18
-	count := maxLogical / 10
+	// Keep allocating after the forced overflow to check recovery and monotonicity.
 	for range 20 {
 		req := &pdpb.TsoRequest{
 			Header: testutil.NewRequestHeader(clusterID),
@@ -213,13 +239,14 @@ func (s *tsoTestSuite) checkLogicalOverflow(cluster *tests.TestCluster) {
 		} else {
 			lastPhysical, curPhysical := lastTimestamp.GetPhysical(), timestamp.GetPhysical()
 			re.GreaterOrEqual(curPhysical, lastPhysical)
-			// Batches with the same physical time must not overlap.
+			// If the physical time is the same, the logical time must be strictly increasing.
 			if curPhysical == lastPhysical {
-				re.GreaterOrEqual(timestamp.GetLogical()-int64(count), lastTimestamp.GetLogical())
+				re.Greater(timestamp.GetLogical(), lastTimestamp.GetLogical())
 			}
 		}
 		lastTimestamp = timestamp
 	}
-	// Serving more than one logical interval requires physical time to advance.
-	re.Greater(lastTimestamp.GetPhysical(), firstPhysical)
+	re.Positive(overflowPhysical.Load(), "the logical capacity must be exhausted")
+	re.True(overflowed.Load(), "the logical overflow branch must be reached")
+	re.Greater(firstPhysical, overflowPhysical.Load())
 }
