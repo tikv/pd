@@ -189,14 +189,14 @@ func (s *tsoTestSuite) checkLogicalOverflow(cluster *tests.TestCluster) {
 	}()
 
 	var (
-		maxDuration   time.Duration
+		firstPhysical int64
 		lastTimestamp *pdpb.Timestamp
 	)
-	// Since the max logical count is 2 << 18 (262144), we request 20 times with 26214 count each time.
-	// This ensures that the logical part will definitely overflow once within the `updateInterval`.
-	count := (1 << 18) / 10
+	// Allocate more than one physical timestamp's logical capacity. Physical time
+	// can advance directly on overflow or through the periodic update.
+	const maxLogical = 1 << 18
+	count := maxLogical / 10
 	for range 20 {
-		begin := time.Now()
 		req := &pdpb.TsoRequest{
 			Header: testutil.NewRequestHeader(clusterID),
 			Count:  uint32(count),
@@ -204,24 +204,22 @@ func (s *tsoTestSuite) checkLogicalOverflow(cluster *tests.TestCluster) {
 		re.NoError(tsoClient.Send(req))
 		resp, err := tsoClient.Recv()
 		re.NoError(err)
-		// Record the max duration to validate whether the overflow is triggered later.
-		duration := time.Since(begin)
-		if duration > maxDuration {
-			maxDuration = duration
-		}
 		// Check the monotonicity of the timestamp.
 		timestamp := checkAndReturnTimestampResponse(re, req, resp)
 		re.NotNil(timestamp)
-		if lastTimestamp != nil {
+		re.Less(timestamp.GetLogical(), int64(maxLogical))
+		if lastTimestamp == nil {
+			firstPhysical = timestamp.GetPhysical()
+		} else {
 			lastPhysical, curPhysical := lastTimestamp.GetPhysical(), timestamp.GetPhysical()
 			re.GreaterOrEqual(curPhysical, lastPhysical)
-			// If the physical time is the same, the logical time must be strictly increasing.
+			// Batches with the same physical time must not overlap.
 			if curPhysical == lastPhysical {
-				re.Greater(timestamp.GetLogical(), lastTimestamp.GetLogical())
+				re.GreaterOrEqual(timestamp.GetLogical()-int64(count), lastTimestamp.GetLogical())
 			}
 		}
 		lastTimestamp = timestamp
 	}
-	// Due to the overflow triggered, there at least one request duration greater than the `updateInterval`.
-	re.Greater(maxDuration, s.updateInterval)
+	// Serving more than one logical interval requires physical time to advance.
+	re.Greater(lastTimestamp.GetPhysical(), firstPhysical)
 }
