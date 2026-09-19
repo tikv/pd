@@ -237,7 +237,7 @@ func (h *regionsHandler) ScanRegions(w http.ResponseWriter, r *http.Request) {
 //	@Router		/regions/count [get]
 func (h *regionsHandler) GetRegionCount(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
-	count := rc.GetTotalRegionCount()
+	count := rc.GetTotalRegionCountAtomic()
 	h.rd.JSON(w, http.StatusOK, &response.RegionsInfo{Count: count})
 }
 
