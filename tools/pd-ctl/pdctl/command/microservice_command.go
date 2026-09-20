@@ -20,6 +20,8 @@ import (
 	"net/url"
 
 	"github.com/spf13/cobra"
+
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 )
 
 var (
@@ -41,6 +43,7 @@ func NewMicroServicesCommand() *cobra.Command {
 	m.AddCommand(newMSTsoCommand())
 	m.AddCommand(newMSSchedulingCommand())
 	m.AddCommand(newMSRouterCommand())
+	m.AddCommand(newMSResourceManagerCommand())
 	return m
 }
 
@@ -102,12 +105,40 @@ func newMSRouterCommand() *cobra.Command {
 	return c
 }
 
+// newMSResourceManagerCommand's CLI name ("resource-manager") differs from the
+// service's discovery key (constant.ResourceManagerServiceName, "resource_manager"),
+// so it cannot derive the URI from cmd.Parent().Name() like the other subcommands do.
+func newMSResourceManagerCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "resource-manager <primary|members>",
+		Short: "resource manager microservice commands",
+	}
+	c.AddCommand(&cobra.Command{
+		Use:   "primary",
+		Short: "show the resource manager primary member status",
+		Run: func(cmd *cobra.Command, _ []string) {
+			getPrimary(cmd, constant.ResourceManagerServiceName)
+		},
+	})
+	c.AddCommand(&cobra.Command{
+		Use:   "members",
+		Short: "show the resource manager members status",
+		Run: func(cmd *cobra.Command, _ []string) {
+			getMembers(cmd, constant.ResourceManagerServiceName)
+		},
+	})
+	return c
+}
+
 func getMembersCommandFunc(cmd *cobra.Command, _ []string) {
-	parent := cmd.Parent().Name()
-	uri := fmt.Sprintf(msMembersPrefix, parent)
+	getMembers(cmd, cmd.Parent().Name())
+}
+
+func getMembers(cmd *cobra.Command, serviceName string) {
+	uri := fmt.Sprintf(msMembersPrefix, serviceName)
 	r, err := doRequest(cmd, uri, http.MethodGet, http.Header{})
 	if err != nil {
-		cmd.Printf("Failed to get the %s microservice members: %s\n", parent, err)
+		cmd.Printf("Failed to get the %s microservice members: %s\n", serviceName, err)
 		return
 	}
 	cmd.Println(r)
@@ -130,11 +161,14 @@ func evictTSOPrimaryCommandFunc(cmd *cobra.Command, args []string) {
 }
 
 func getPrimaryCommandFunc(cmd *cobra.Command, _ []string) {
-	parent := cmd.Parent().Name()
-	uri := fmt.Sprintf(msPrimaryPrefix, parent)
+	getPrimary(cmd, cmd.Parent().Name())
+}
+
+func getPrimary(cmd *cobra.Command, serviceName string) {
+	uri := fmt.Sprintf(msPrimaryPrefix, serviceName)
 	r, err := doRequest(cmd, uri, http.MethodGet, http.Header{})
 	if err != nil {
-		cmd.Printf("Failed to get the %s microservice primary: %s\n", parent, err)
+		cmd.Printf("Failed to get the %s microservice primary: %s\n", serviceName, err)
 		return
 	}
 	cmd.Println(r)

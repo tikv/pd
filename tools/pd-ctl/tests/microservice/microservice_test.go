@@ -31,8 +31,9 @@ import (
 // microServiceSuite is a test suite for microservice related tests.
 type microServiceSuite struct {
 	suite.Suite
-	cluster *pdTests.TestCluster
-	cancels []testutil.CleanupFunc
+	cluster   *pdTests.TestCluster
+	rmCluster *pdTests.TestResourceManagerCluster
+	cancels   []testutil.CleanupFunc
 }
 
 func TestMicroServiceSuite(t *testing.T) {
@@ -47,6 +48,7 @@ func (suite *microServiceSuite) TearDownSuite() {
 	for _, fn := range suite.cancels {
 		fn()
 	}
+	suite.rmCluster.Destroy()
 	suite.cluster.Destroy()
 }
 
@@ -95,6 +97,16 @@ func (suite *microServiceSuite) TestMicroService() {
 			return err == nil && strings.Contains(string(out), "success")
 		})
 	}
+
+	primaryServer := suite.rmCluster.WaitForPrimaryServing(re)
+	address := primaryServer.GetAddr()
+	res := tests.MustExec(re, cmd, []string{"-u", pdAddr, "microservice", "resource-manager", "primary"}, nil)
+	primaryAddress := strings.Trim(res, "\"\n")
+	suite.Equal(address, primaryAddress)
+
+	v := make([]any, 0)
+	tests.MustExec(re, cmd, []string{"-u", pdAddr, "microservice", "resource-manager", "members"}, &v)
+	re.Len(v, 2)
 }
 
 func (suite *microServiceSuite) startCluster() {
@@ -127,4 +139,8 @@ func (suite *microServiceSuite) startCluster() {
 	re.NoError(err)
 	cluster.SetTSOCluster(ts)
 	suite.cluster = cluster
+	// start resource manager cluster
+	rmCluster, err := pdTests.NewTestResourceManagerCluster(ctx, 2, leaderServer.GetAddr())
+	re.NoError(err)
+	suite.rmCluster = rmCluster
 }
