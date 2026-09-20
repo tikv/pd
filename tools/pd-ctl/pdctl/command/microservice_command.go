@@ -37,7 +37,7 @@ var (
 // NewMicroServicesCommand return a microservice subcommand of rootCmd
 func NewMicroServicesCommand() *cobra.Command {
 	m := &cobra.Command{
-		Use:   "microservice <tso|scheduling>",
+		Use:   "microservice <tso|scheduling|router|resource-manager>",
 		Short: "microservice commands",
 	}
 	m.AddCommand(newMSTsoCommand())
