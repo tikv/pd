@@ -39,21 +39,6 @@ func TestMain(m *testing.M) {
 
 var certScript = filepath.Join("..", "..", "..", "tests", "integrations", "client", "cert_opt.sh")
 
-func generateTestCerts(t *testing.T) string {
-	t.Helper()
-	if _, err := os.Stat(certScript); os.IsNotExist(err) {
-		t.Skipf("certificate script not found: %s", certScript)
-	}
-
-	certPath := t.TempDir()
-	cmd := exec.Command(certScript, "generate", certPath)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("certificate generation failed: %v\nOutput: %s", err, string(output))
-	}
-	return certPath
-}
-
 func loadTLSContent(re *require.Assertions, caPath, certPath, keyPath string) (caData, certData, keyData []byte) {
 	var err error
 	caData, err = os.ReadFile(caPath)
@@ -65,9 +50,31 @@ func loadTLSContent(re *require.Assertions, caPath, certPath, keyPath string) (c
 	return
 }
 
+func generateTestCertificates(t *testing.T) string {
+	t.Helper()
+	// Check if the certificate script exists before running it
+	if _, err := os.Stat(certScript); os.IsNotExist(err) {
+		t.Skipf("Certificate script not found: %s", certScript)
+	}
+
+	// Make the script executable if it isn't already
+	if err := os.Chmod(certScript, 0755); err != nil {
+		t.Fatalf("Failed to make script executable: %v", err)
+	}
+
+	certPath := t.TempDir()
+	// Capture output for better debugging
+	cmd := exec.Command(certScript, "generate", certPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Certificate generation failed: %v\nOutput: %s", err, string(output))
+	}
+	return certPath
+}
+
 func TestToClientTLSConfig(t *testing.T) {
 	re := require.New(t)
-	certPath := generateTestCerts(t)
+	certPath := generateTestCertificates(t)
 
 	tlsConfig := TLSConfig{
 		KeyPath:  filepath.Join(certPath, "pd-server-key.pem"),
@@ -108,7 +115,7 @@ func TestToClientTLSConfig(t *testing.T) {
 
 func TestToServerTLSConfig(t *testing.T) {
 	re := require.New(t)
-	certPath := generateTestCerts(t)
+	certPath := generateTestCertificates(t)
 
 	testCases := []struct {
 		name          string
