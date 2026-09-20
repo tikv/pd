@@ -122,7 +122,7 @@ func EnablePyroscope() {
 			ApplicationName:   "pd",
 			ServerAddress:     os.Getenv("PYROSCOPE_SERVER_ADDRESS"),
 			Logger:            pyroscope.StandardLogger,
-			AuthToken:         os.Getenv("PYROSCOPE_AUTH_TOKEN"),
+			AuthToken:         os.Getenv("PYROSCOPE_AUTH_TOKEN"), //nolint:staticcheck // Preserve token authentication for existing deployments.
 			TenantID:          os.Getenv("PYROSCOPE_TENANT_ID"),
 			BasicAuthUser:     os.Getenv("PYROSCOPE_BASIC_AUTH_USER"),
 			BasicAuthPassword: os.Getenv("PYROSCOPE_BASIC_AUTH_PASSWORD"),
