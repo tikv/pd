@@ -125,8 +125,17 @@ func (tl TransferLeader) IsFinish(region *core.RegionInfo) bool {
 // CheckInProgress checks if the step is in the progress of advancing.
 func (tl TransferLeader) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo, needStoreHealthCheck bool) error {
 	errList := make([]error, 0, len(tl.ToStores)+1)
-	for _, storeID := range append(tl.ToStores, tl.ToStore) {
-		peer := region.GetStorePeer(tl.ToStore)
+	// Build candidates into a freshly allocated slice rather than
+	// append(tl.ToStores, tl.ToStore): ToStores is typically constructed by
+	// repeated append (see Builder.targetLeaderStoreIDs), which usually
+	// leaves it with spare capacity, so appending directly onto it here
+	// would write into (and alias) the caller's backing array across every
+	// call to this step's CheckInProgress.
+	candidates := make([]uint64, 0, len(tl.ToStores)+1)
+	candidates = append(candidates, tl.ToStores...)
+	candidates = append(candidates, tl.ToStore)
+	for _, storeID := range candidates {
+		peer := region.GetStorePeer(storeID)
 		if peer == nil {
 			errList = append(errList, errors.New("peer does not existed"))
 			continue

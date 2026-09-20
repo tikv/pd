@@ -118,6 +118,43 @@ func (suite *operatorStepTestSuite) TestTransferLeader() {
 		},
 	}
 	suite.check(re, step, "transfer leader from store 1 to store 9", testCases)
+
+	// Multi-target: the primary ToStore has no peer, but a ToStores
+	// candidate does and is healthy -- CheckInProgress must succeed via
+	// that candidate instead of rejecting on the primary's missing peer.
+	step = TransferLeader{FromStore: 1, ToStore: 4, ToStores: []uint64{2}}
+	testCases = []testCase{
+		{
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
+			},
+			0,
+			false,
+			re.NoError,
+		},
+	}
+	suite.checkWithHealthCheck(re, step, "transfer leader from store 1 to store 4", testCases, true)
+
+	// Multi-target: the primary ToStore has a peer but is unhealthy, and a
+	// ToStores candidate is healthy but has no peer -- neither candidate is
+	// both peered and healthy, so CheckInProgress must fail rather than
+	// pairing the primary's peer with the candidate's health.
+	step = TransferLeader{FromStore: 1, ToStore: 11, ToStores: []uint64{5}}
+	testCases = []testCase{
+		{
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 11, StoreId: 11, Role: metapb.PeerRole_Voter},
+			},
+			0,
+			false,
+			re.Error,
+		},
+	}
+	suite.checkWithHealthCheck(re, step, "transfer leader from store 1 to store 11", testCases, true)
 }
 
 func (suite *operatorStepTestSuite) TestAddPeer() {
