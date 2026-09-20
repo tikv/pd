@@ -3654,8 +3654,29 @@ func TestPutMetaStoreDoesNotRestoreRemovedStoreLimit(t *testing.T) {
 // irreducible residual risk, and the accepted way to make it negligible is a
 // generous wait tied to the exact signal of interest, not more intermediate
 // proxy signals. Returns the channel contend's result will arrive on.
-func assertBlockedThenReleased(t *testing.T, re *require.Assertions, acquiredFP string, release chan struct{}, contend func() error) <-chan error {
+// assertBlockedThenReleased proves that contend (run in its own goroutine)
+// cannot pass the point instrumented by acquiredFP until release is closed,
+// using only channel ordering -- never wall-clock duration math, which a
+// slow or delayed CI worker can throw off in either direction (see the
+// PutMetaStore/BuryStore race test's history). A prior version tied the
+// "is it blocked" check to a generous wait on acquiredFP alone: sound in
+// principle, but the wait had to cover contend's own setup code (e.g. this
+// package's PutStore calls before BuryStore is even entered) as well as
+// ordinary scheduling delay, leaving a wide window where "not yet acquired"
+// could mean "not yet scheduled" rather than "genuinely blocked".
+// beforeLockFP -- a failpoint placed in production code immediately before
+// the storeStateLock.Lock() call itself, with no test-side setup code
+// between the two -- absorbs all of that setup/scheduling uncertainty: once
+// it fires, the only thing separating the goroutine from attempting the lock
+// is the Lock() call itself, so the subsequent "acquiredFP hasn't fired"
+// check only needs a short window, not one sized to cover arbitrary contend
+// setup work. Returns the channel contend's result will arrive on.
+func assertBlockedThenReleased(t *testing.T, re *require.Assertions, beforeLockFP, acquiredFP string, release chan struct{}, contend func() error) <-chan error {
 	t.Helper()
+	beforeLock := make(chan struct{})
+	re.NoError(failpoint.EnableCall(beforeLockFP, func() { close(beforeLock) }))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(beforeLockFP)) })
+
 	acquired := make(chan struct{})
 	re.NoError(failpoint.EnableCall(acquiredFP, func() { close(acquired) }))
 	t.Cleanup(func() { re.NoError(failpoint.Disable(acquiredFP)) })
@@ -3666,9 +3687,15 @@ func assertBlockedThenReleased(t *testing.T, re *require.Assertions, acquiredFP 
 	}()
 
 	select {
+	case <-beforeLock:
+	case <-time.After(2 * time.Second):
+		t.Fatal(beforeLockFP + " did not fire -- contender did not reach its lock attempt")
+	}
+
+	select {
 	case <-acquired:
 		re.Fail(acquiredFP + " fired before storeStateLock should have been available")
-	case <-time.After(2 * time.Second):
+	case <-time.After(200 * time.Millisecond):
 	}
 
 	close(release)
@@ -3729,8 +3756,9 @@ func TestPutMetaStoreCannotRaceConcurrentRegistrationAndBury(t *testing.T) {
 
 	// A full register-then-bury of the same ID must not be able to acquire
 	// storeStateLock while PutMetaStore holds it.
+	const buryBeforeLockFP = "github.com/tikv/pd/server/cluster/buryStoreBeforeStateLock"
 	const buryFP = "github.com/tikv/pd/server/cluster/buryStoreAfterStateLock"
-	buryDone := assertBlockedThenReleased(t, re, buryFP, release, func() error {
+	buryDone := assertBlockedThenReleased(t, re, buryBeforeLockFP, buryFP, release, func() error {
 		store := core.NewStoreInfo(&metapb.Store{Id: storeID, State: metapb.StoreState_Up})
 		rc.PutStore(store)
 		rc.PutStore(store.Clone(core.SetStoreState(metapb.StoreState_Offline, true)))
@@ -3795,8 +3823,9 @@ func TestPutMetaStoreCannotRaceConcurrentManualTombstoneRemoval(t *testing.T) {
 
 	// A manual remove-tombstone for the same store must not be able to
 	// acquire storeStateLock while PutMetaStore holds it.
+	const removeBeforeLockFP = "github.com/tikv/pd/server/cluster/removeTombStoneRecordsBeforeStateLock"
 	const removeFP = "github.com/tikv/pd/server/cluster/removeTombStoneRecordsAfterStateLock"
-	removeDone := assertBlockedThenReleased(t, re, removeFP, release, rc.RemoveTombStoneRecords)
+	removeDone := assertBlockedThenReleased(t, re, removeBeforeLockFP, removeFP, release, rc.RemoveTombStoneRecords)
 
 	re.NoError(<-putDone)
 	re.NoError(<-removeDone)

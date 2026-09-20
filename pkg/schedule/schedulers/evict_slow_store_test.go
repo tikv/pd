@@ -722,6 +722,44 @@ func (suite *evictSlowStoreTestSuite) TestNetworkSlowStoreLimitGaugeCannotRepubl
 	re.False(slowStoreTriggerLimitGauge.DeleteLabelValues(strconv.FormatUint(storeID1, 10), string(networkSlowStore)))
 }
 
+// TestAddNetworkSlowStoreLockedSkipsGaugeOnPersistFailure guards against
+// addNetworkSlowStoreLocked publishing evictedSlowStoreStatusGauge when the
+// persist that's supposed to back it failed and was rolled back -- the pause
+// never actually took effect (PauseLeaderTransfer is undone and
+// networkSlowStoreRecoverStartAts doesn't get the entry), so publishing the
+// gauge anyway would misreport an unpaused store as evicted, with nothing to
+// ever clean it up: tryRecoverNetworkSlowStores only iterates
+// networkSlowStoreRecoverStartAts, which this store was never added to.
+func (suite *evictSlowStoreTestSuite) TestAddNetworkSlowStoreLockedSkipsGaugeOnPersistFailure() {
+	re := suite.Require()
+	defer evictedSlowStoreStatusGauge.Reset()
+
+	es, ok := suite.es.(*evictSlowStoreScheduler)
+	re.True(ok)
+
+	suite.tc.PutStore(suite.tc.GetStore(storeID1).Clone(func(store *core.StoreInfo) {
+		store.GetStoreStats().NetworkSlowScores = map[uint64]uint64{
+			storeID2: 10,
+			storeID3: 10,
+			storeID4: 100,
+		}
+	}))
+
+	const persistFailFP = "github.com/tikv/pd/pkg/schedule/schedulers/persistFail"
+	re.NoError(failpoint.Enable(persistFailFP, "return(true)"))
+	es.detectAndHandleNetworkSlowStores(suite.tc)
+	re.NoError(failpoint.Disable(persistFailFP))
+
+	re.NotContains(es.conf.networkSlowStoreRecoverStartAts, uint64(storeID1))
+	re.False(evictedSlowStoreStatusGauge.DeleteLabelValues(strconv.FormatUint(storeID1, 10), string(networkSlowStore)))
+
+	// Retrying once persistence works must succeed normally.
+	es.detectAndHandleNetworkSlowStores(suite.tc)
+	re.Contains(es.conf.networkSlowStoreRecoverStartAts, uint64(storeID1))
+	re.True(evictedSlowStoreStatusGauge.DeleteLabelValues(strconv.FormatUint(storeID1, 10), string(networkSlowStore)),
+		"the gauge must exist by now, so DeleteLabelValues should find and remove it")
+}
+
 func (suite *evictSlowStoreTestSuite) TestNetworkSlowStoreSwitchEnableToDisable() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap", "return(true)"))

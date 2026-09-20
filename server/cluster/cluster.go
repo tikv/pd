@@ -1782,6 +1782,7 @@ func (c *RaftCluster) getUpTikvStores() []uint64 {
 // BuryStore marks a store as tombstone in cluster.
 // It is used by unsafe recovery or other special cases.
 func (c *RaftCluster) BuryStore(storeID uint64, forceBury bool) error {
+	failpoint.InjectCall("buryStoreBeforeStateLock")
 	c.storeStateLock.Lock(uint32(storeID))
 	defer c.storeStateLock.Unlock(uint32(storeID))
 	failpoint.InjectCall("buryStoreAfterStateLock")
@@ -2226,6 +2227,7 @@ func (c *RaftCluster) RemoveTombStoneRecords() error {
 			// entirely before PutMetaStore's gRPC preflight-to-execution
 			// sequence even begins -- see the PR's Known limitations.
 			err := func() error {
+				failpoint.InjectCall("removeTombStoneRecordsBeforeStateLock")
 				c.storeStateLock.Lock(uint32(store.GetID()))
 				defer c.storeStateLock.Unlock(uint32(store.GetID()))
 				failpoint.InjectCall("removeTombStoneRecordsAfterStateLock")
