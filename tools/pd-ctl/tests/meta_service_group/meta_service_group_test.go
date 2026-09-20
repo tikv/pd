@@ -113,12 +113,12 @@ func (suite *metaServiceGroupCLITestSuite) TestUpsertMetaServiceGroup() {
 
 	// Update an existing group address.
 	output, err = tests.ExecuteCommand(cmd, "-u", suite.pdAddr, "meta-service-group", "upsert",
-		"--group", "group-0=new-addr0.example.com")
+		"--group", "group-0="+endpoint)
 	re.NoError(err)
 	re.NoError(json.Unmarshal(output, &groups))
 	for _, g := range groups {
 		if g.ID == "group-0" {
-			re.Equal("new-addr0.example.com", g.Addresses)
+			re.Equal(endpoint, g.Addresses)
 		}
 	}
 
