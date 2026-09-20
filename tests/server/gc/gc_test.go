@@ -1213,18 +1213,7 @@ func TestWatchGCStatesHoldsRateLimitTokenForStreamLifetime(t *testing.T) {
 	cluster := newWatchGCStatesCluster(t, 1, true)
 	leaderServer := cluster.GetLeaderServer()
 	re.NotNil(leaderServer)
-	server := leaderServer.GetServer()
-	options := server.GetServiceMiddlewarePersistOptions()
-	previousConfig := options.GetGRPCRateLimitConfig().Clone()
-	enabledConfig := previousConfig.Clone()
-	enabledConfig.EnableRateLimit = true
-	options.SetGRPCRateLimitConfig(enabledConfig)
-	limiter := server.GetGRPCRateLimiter()
-	limiter.Update("WatchGCStates", ratelimit.UpdateConcurrencyLimiter(1))
-	t.Cleanup(func() {
-		limiter.Update("WatchGCStates", ratelimit.UpdateConcurrencyLimiter(0))
-		options.SetGRPCRateLimitConfig(previousConfig)
-	})
+	limiter := limitWatchGCStatesConcurrency(t, leaderServer.GetServer())
 
 	client := newWatchGCStatesClient(t, leaderServer.GetAddr())
 	header := testutil.NewRequestHeader(leaderServer.GetClusterID())
