@@ -214,6 +214,24 @@ func TestStoreHeartbeat(t *testing.T) {
 	re.Equal(uint64(1), storeStats[1][0].RegionID)
 }
 
+func TestStoreMutationsRejectTombstoneStore(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	store := newTestStores(1, "2.0.0")[0].Clone(core.SetStoreState(metapb.StoreState_Tombstone))
+	rc.PutStore(store)
+
+	request := &pdpb.StoreHeartbeatRequest{
+		Stats: &pdpb.StoreStats{StoreId: store.GetID()},
+	}
+	re.Error(rc.HandleStoreHeartbeat(request, &pdpb.StoreHeartbeatResponse{}))
+	re.Error(rc.SetMinResolvedTS(store.GetID(), 1))
+}
+
 func TestFilterUnhealthyStore(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -3402,6 +3420,117 @@ func TestAddStoreLimitUsesPersistedDefaultStoreLimit(t *testing.T) {
 		Labels: []*metapb.StoreLabel{{Key: core.EngineKey, Value: core.EngineTiFlash}},
 	})
 	re.Equal(sc.StoreLimitConfig{AddPeer: 30, RemovePeer: 30, TransferLeaderIn: storelimit.Unlimited}, opt.GetScheduleConfig().StoreLimit[3])
+}
+
+func TestRemoveTombstoneRecordsKeepsStoreWhenLimitRemovalFails(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	storeStorage := storage.NewStorageWithMemoryBackend()
+	rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storeStorage)
+	store := newTestStores(1, "2.0.0")[0]
+	re.NoError(rc.setStore(store))
+	rc.AddStoreLimit(store.GetMeta())
+	tombstone := store.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
+	re.NoError(rc.setStore(tombstone))
+
+	rc.storage = &failingSaveConfigStorage{Storage: storeStorage}
+
+	re.Error(rc.RemoveTombStoneRecords())
+	re.NotNil(rc.GetStore(store.GetID()))
+	_, ok := opt.GetScheduleConfig().StoreLimit[store.GetID()]
+	re.True(ok)
+	loaded := &metapb.Store{}
+	loadedOK, err := storeStorage.LoadStoreMeta(store.GetID(), loaded)
+	re.NoError(err)
+	re.True(loadedOK)
+	re.Equal(metapb.StoreState_Tombstone, loaded.GetState())
+
+	rc.storage = storeStorage
+	re.NoError(rc.RemoveTombStoneRecords())
+	re.Nil(rc.GetStore(store.GetID()))
+	_, ok = opt.GetScheduleConfig().StoreLimit[store.GetID()]
+	re.False(ok)
+	loadedOK, err = storeStorage.LoadStoreMeta(store.GetID(), loaded)
+	re.NoError(err)
+	re.False(loadedOK)
+}
+
+func TestSetStoreLimitCannotRaceStoreDeletion(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	storeStorage := storage.NewStorageWithMemoryBackend()
+	rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storeStorage)
+	store := newTestStores(1, "2.0.0")[0]
+	re.NoError(rc.setStore(store))
+	rc.AddStoreLimit(store.GetMeta())
+	tombstone := store.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
+	re.NoError(rc.setStore(tombstone))
+
+	deleteStarted := make(chan struct{})
+	releaseDelete := make(chan struct{})
+	rc.storage = &blockingDeleteStoreMetaStorage{
+		Storage:       storeStorage,
+		deleteStarted: deleteStarted,
+		releaseDelete: releaseDelete,
+	}
+
+	storeID := store.GetID()
+	rc.storeStateLock.Lock(uint32(storeID))
+	deleteDone := make(chan error, 1)
+	go func() {
+		deleteDone <- rc.deleteStore(tombstone)
+	}()
+
+	select {
+	case <-deleteStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("deleteStore did not reach store metadata deletion")
+	}
+
+	setLimitDone := make(chan error, 1)
+	go func() {
+		setLimitDone <- rc.SetStoreLimit(storeID, storelimit.AddPeer, 60)
+	}()
+	select {
+	case err := <-setLimitDone:
+		t.Fatalf("setting a deleted store limit completed before deletion: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(releaseDelete)
+	rc.storeStateLock.Unlock(uint32(storeID))
+	re.NoError(<-deleteDone)
+	re.Error(<-setLimitDone)
+	_, ok := opt.GetScheduleConfig().StoreLimit[storeID]
+	re.False(ok)
+}
+
+type failingSaveConfigStorage struct {
+	storage.Storage
+}
+
+func (*failingSaveConfigStorage) SaveConfig(any) error {
+	return errors.New("save config failed")
+}
+
+type blockingDeleteStoreMetaStorage struct {
+	storage.Storage
+	deleteStarted chan struct{}
+	releaseDelete chan struct{}
+}
+
+func (s *blockingDeleteStoreMetaStorage) DeleteStoreMeta(store *metapb.Store) error {
+	close(s.deleteStarted)
+	<-s.releaseDelete
+	return s.Storage.DeleteStoreMeta(store)
 }
 
 type blockingSaveConfigStorage struct {

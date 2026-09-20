@@ -103,8 +103,8 @@ const (
 	gcTombstoneInterval            = 30 * 24 * time.Hour
 	schedulingServiceCheckInterval = 10 * time.Second
 	tsoServiceCheckInterval        = 100 * time.Millisecond
-	// persistLimitRetryTimes is used to reduce the probability of the persistent error
-	// since the once the store is added or removed, we shouldn't return an error even if the store limit is failed to persist.
+	// persistLimitRetryTimes reduces the probability of a transient persistence
+	// error when a store is added or removed.
 	persistLimitRetryTimes  = 5
 	persistLimitWaitTime    = 100 * time.Millisecond
 	gcTunerCheckCfgInterval = 10 * time.Second
@@ -181,6 +181,10 @@ type RaftCluster struct {
 
 	// Keep the previous store limit settings when removing a store.
 	prevStoreLimit sync.Map // map[uint64]map[storelimit.Type]float64
+	// removedStoreIDs prevents a delayed limit update from recreating a limit
+	// after the store has been removed. It is cleared if the ID is registered
+	// again.
+	removedStoreIDs sync.Map // map[uint64]struct{}
 
 	// This below fields are all read-only, we cannot update itself after the raft cluster starts.
 	id  id.Allocator
@@ -1161,9 +1165,15 @@ func (c *RaftCluster) GetUnsafeRecoveryController() *unsaferecovery.Controller {
 func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest, resp *pdpb.StoreHeartbeatResponse) error {
 	stats := heartbeat.GetStats()
 	storeID := stats.GetStoreId()
+	c.storeStateLock.Lock(uint32(storeID))
+	defer c.storeStateLock.Unlock(uint32(storeID))
+
 	store := c.GetStore(storeID)
 	if store == nil {
 		return errors.Errorf("store %v not found", storeID)
+	}
+	if store.IsRemoved() {
+		return errs.ErrStoreRemoved.FastGenByArgs(storeID)
 	}
 
 	limit := store.GetStoreLimit()
@@ -1490,9 +1500,15 @@ func (c *RaftCluster) GetBasicCluster() *core.BasicCluster {
 // UpdateStoreLabels updates a store's location labels
 // If 'force' is true, the origin labels will be overwritten with the new one forcibly.
 func (c *RaftCluster) UpdateStoreLabels(storeID uint64, labels []*metapb.StoreLabel, force bool) error {
+	c.storeStateLock.Lock(uint32(storeID))
+	defer c.storeStateLock.Unlock(uint32(storeID))
+
 	store := c.GetStore(storeID)
 	if store == nil {
 		return errs.ErrInvalidStoreID.FastGenByArgs(storeID)
+	}
+	if store.IsRemoved() {
+		return errs.ErrStoreRemoved.FastGenByArgs(storeID)
 	}
 	newStore := typeutil.DeepClone(store.GetMeta(), core.StoreFactory)
 	newStore.Labels = labels
@@ -1501,9 +1517,15 @@ func (c *RaftCluster) UpdateStoreLabels(storeID uint64, labels []*metapb.StoreLa
 
 // DeleteStoreLabel updates a store's location labels
 func (c *RaftCluster) DeleteStoreLabel(storeID uint64, labelKey string) error {
+	c.storeStateLock.Lock(uint32(storeID))
+	defer c.storeStateLock.Unlock(uint32(storeID))
+
 	store := c.GetStore(storeID)
 	if store == nil {
 		return errs.ErrInvalidStoreID.FastGenByArgs(storeID)
+	}
+	if store.IsRemoved() {
+		return errs.ErrStoreRemoved.FastGenByArgs(storeID)
 	}
 	if len(store.GetLabels()) == 0 {
 		return errors.Errorf("the label key %s does not exist", labelKey)
@@ -1563,6 +1585,7 @@ func (c *RaftCluster) PutMetaStore(store *metapb.Store) error {
 	}
 	c.OnStoreVersionChange()
 	c.addStoreLimitInternal(store, wasKnown)
+	c.removedStoreIDs.Delete(store.GetId())
 	return nil
 }
 
@@ -1714,7 +1737,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 	})
 	// TODO: if the persist operation encounters error, the "Unlimited" will be rollback.
 	// And considering the store state has changed, RemoveStore is actually successful.
-	_ = c.SetStoreLimit(storeID, storelimit.RemovePeer, storelimit.Unlimited)
+	_ = c.setStoreLimit(storeID, storelimit.RemovePeer, storelimit.Unlimited)
 	return nil
 }
 
@@ -1824,7 +1847,11 @@ func (c *RaftCluster) BuryStoreLocked(storeID uint64, forceBury bool) error {
 	if err == nil {
 		// clean up the residual information.
 		c.prevStoreLimit.Delete(storeID)
-		c.RemoveStoreLimit(storeID)
+		if err := c.RemoveStoreLimit(storeID); err != nil {
+			log.Error("remove store limit failed",
+				zap.Uint64("store-id", storeID),
+				errs.ZapError(err))
+		}
 		c.ruleManager.RemoveStoreCache(storeID)
 		storeIDStr := strconv.FormatUint(storeID, 10)
 		statistics.ResetStoreStatistics(storeIDStr)
@@ -1914,8 +1941,8 @@ func (c *RaftCluster) UpStore(storeID uint64) error {
 	}
 	if exist {
 		// persist the store limit
-		_ = c.SetStoreLimit(storeID, storelimit.AddPeer, limiter[storelimit.AddPeer])
-		_ = c.SetStoreLimit(storeID, storelimit.RemovePeer, limiter[storelimit.RemovePeer])
+		_ = c.setStoreLimit(storeID, storelimit.AddPeer, limiter[storelimit.AddPeer])
+		_ = c.setStoreLimit(storeID, storelimit.RemovePeer, limiter[storelimit.RemovePeer])
 	}
 	return nil
 }
@@ -1949,9 +1976,15 @@ func (c *RaftCluster) ReadyToServeLocked(storeID uint64) error {
 
 // SetStoreWeight sets up a store's leader/region balance weight.
 func (c *RaftCluster) SetStoreWeight(storeID uint64, leaderWeight, regionWeight float64) error {
+	c.storeStateLock.Lock(uint32(storeID))
+	defer c.storeStateLock.Unlock(uint32(storeID))
+
 	store := c.GetStore(storeID)
 	if store == nil {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
+	}
+	if store.IsRemoved() {
+		return errs.ErrStoreRemoved.FastGenByArgs(storeID)
 	}
 
 	if err := c.storage.SaveStoreWeight(storeID, leaderWeight, regionWeight); err != nil {
@@ -2253,8 +2286,12 @@ func (c *RaftCluster) RemoveTombStoneRecords() error {
 	return nil
 }
 
-// deleteStore deletes the store from the cluster. it's concurrent safe.
+// deleteStore deletes the store from the cluster. Callers must hold
+// storeStateLock for the store ID.
 func (c *RaftCluster) deleteStore(store *core.StoreInfo) error {
+	if err := c.RemoveStoreLimit(store.GetID()); err != nil {
+		return err
+	}
 	if c.storage != nil {
 		if err := c.storage.DeleteStoreMeta(store.GetMeta()); err != nil {
 			return err
@@ -2269,12 +2306,7 @@ func (c *RaftCluster) deleteStore(store *core.StoreInfo) error {
 	// find and remove it again.
 	c.DeleteStore(store)
 	c.ruleManager.RemoveStoreCache(store.GetID())
-	// The auto-GC path (checkStores' NodeState_Removed branch) only ever calls
-	// deleteStore, never RemoveTombStoneRecords, so the store-limit config entry
-	// needs to be cleared here rather than by the manual remove-tombstone caller
-	// alone -- otherwise a store reclaimed purely by the 30-day auto-GC timer
-	// never gets this cleanup at all.
-	c.RemoveStoreLimit(store.GetID())
+	c.removedStoreIDs.Store(store.GetID(), struct{}{})
 	storeIDStr := strconv.FormatUint(store.GetID(), 10)
 	statistics.DeleteClusterStatusMetrics(store)
 	statistics.ResetStoreStatistics(storeIDStr)
@@ -2553,35 +2585,45 @@ func (c *RaftCluster) addStoreLimitInternal(store *metapb.Store, skipIfRemoved b
 	log.Error("persist store limit meet error", errs.ZapError(err))
 }
 
-// RemoveStoreLimit remove a store limit for a given store ID.
-func (c *RaftCluster) RemoveStoreLimit(storeID uint64) {
-	for _, limitType := range storelimit.TypeNameValue {
-		c.ResetStoreLimit(storeID, limitType)
-	}
+// RemoveStoreLimit removes a store limit for a given store ID.
+func (c *RaftCluster) RemoveStoreLimit(storeID uint64) error {
 	var err error
 	for range persistLimitRetryTimes {
 		err = c.opt.UpdateScheduleConfig(c.storage, func(_ *sc.ScheduleConfig, cfg *sc.ScheduleConfig) (bool, error) {
+			if _, ok := cfg.StoreLimit[storeID]; !ok {
+				return false, nil
+			}
 			delete(cfg.StoreLimit, storeID)
 			return true, nil
 		})
 		if err == nil {
+			for _, limitType := range storelimit.TypeNameValue {
+				c.ResetStoreLimit(storeID, limitType)
+			}
 			log.Info("store limit removed", zap.Uint64("store-id", storeID))
 			id := strconv.FormatUint(storeID, 10)
 			statistics.StoreLimitGauge.DeleteLabelValues(id, "add-peer")
 			statistics.StoreLimitGauge.DeleteLabelValues(id, "remove-peer")
 			statistics.StoreLimitGauge.DeleteLabelValues(id, "transfer-leader-in")
-			return
+			return nil
 		}
 		time.Sleep(persistLimitWaitTime)
 	}
 	log.Error("persist store limit meet error", errs.ZapError(err))
+	return err
 }
 
 // SetMinResolvedTS sets up a store with min resolved ts.
 func (c *RaftCluster) SetMinResolvedTS(storeID, minResolvedTS uint64) error {
+	c.storeStateLock.Lock(uint32(storeID))
+	defer c.storeStateLock.Unlock(uint32(storeID))
+
 	store := c.GetStore(storeID)
 	if store == nil {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
+	}
+	if store.IsRemoved() {
+		return errs.ErrStoreRemoved.FastGenByArgs(storeID)
 	}
 
 	c.PutStore(store, core.SetMinResolvedTS(minResolvedTS))
@@ -2717,18 +2759,16 @@ func (c *RaftCluster) loadExternalTS() {
 
 // SetStoreLimit sets a store limit for a given type and rate.
 func (c *RaftCluster) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePerMin float64) error {
-	// A tombstoned store's config entry is only ever cleared once, at bury time
-	// (RemoveStoreLimit); nothing sweeps it again afterward. Without this check,
-	// setting a limit for an already-tombstoned store re-adds it, and
-	// StoreLimitGauge stays republished for it until final removal.
-	//
-	// GetStore returning nil is deliberately NOT treated the same as removed
-	// here: callers legitimately set a store's limit before the store itself
-	// is registered (see testCluster.addRegionStore), so nil just means
-	// "not created yet," not "already gone."
-	if store := c.GetStore(storeID); store != nil && store.IsRemoved() {
+	c.storeStateLock.Lock(uint32(storeID))
+	defer c.storeStateLock.Unlock(uint32(storeID))
+
+	if store := c.GetStore(storeID); (store != nil && store.IsRemoved()) || c.isStoreRemoved(storeID) {
 		return errs.ErrStoreRemoved.FastGenByArgs(storeID)
 	}
+	return c.setStoreLimit(storeID, typ, ratePerMin)
+}
+
+func (c *RaftCluster) setStoreLimit(storeID uint64, typ storelimit.Type, ratePerMin float64) error {
 	err := c.opt.UpdateScheduleConfig(c.storage, func(_ *sc.ScheduleConfig, cfg *sc.ScheduleConfig) (bool, error) {
 		slc, ok := cfg.StoreLimit[storeID]
 		if !ok {
@@ -2744,6 +2784,11 @@ func (c *RaftCluster) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePer
 	c.refreshStoreRateLimit(storeID, typ)
 	log.Info("store limit changed", zap.Uint64("store-id", storeID), zap.String("type", typ.String()), zap.Float64("rate-per-min", ratePerMin))
 	return nil
+}
+
+func (c *RaftCluster) isStoreRemoved(storeID uint64) bool {
+	_, ok := c.removedStoreIDs.Load(storeID)
+	return ok
 }
 
 // SetAllStoresLimit sets all store limit for a given type and rate.

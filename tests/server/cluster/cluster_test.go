@@ -536,7 +536,7 @@ func resetStoreState(re *require.Assertions, rc *cluster.RaftCluster, storeID ui
 		err := rc.SetStoreLimit(storeID, storelimit.RemovePeer, storelimit.Unlimited)
 		re.NoError(err)
 	case metapb.StoreState_Tombstone:
-		rc.RemoveStoreLimit(storeID)
+		re.NoError(rc.RemoveStoreLimit(storeID))
 	default:
 	}
 }
