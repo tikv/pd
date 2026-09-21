@@ -968,7 +968,7 @@ func (suite *schedulerTestSuite) checkEvictLeaderSchedulerMultiStore(cluster *pd
 		output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-leader-scheduler", "add-store", "3", "4"}...)
 		return err == nil && strings.Contains(string(output), "Success!")
 	})
-	for _, storeID := range []string{"3", "4"} {
+	for _, storeID := range []string{"1", "3", "4"} {
 		testutil.Eventually(re, func() bool {
 			output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "store", storeID}...)
 			re.NoError(err)

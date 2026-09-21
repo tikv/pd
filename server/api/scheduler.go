@@ -249,8 +249,10 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 						log.Error("failed to roll back partially created evict-leader-scheduler",
 							zap.String("scheduler-name", name), errs.ZapError(rmErr))
 						h.r.JSON(w, http.StatusInternalServerError, fmt.Sprintf(
-							"failed to add stores %v: %s; additionally failed to roll back the partially created scheduler: %s (it may still be running with only store %d evicted, please check and remove it manually if needed)",
-							toUpdate, err.Error(), rmErr.Error(), uint64(storeIDs[0])))
+							"failed to add stores %v to %s: %s; rolling back the scheduler also failed: %s "+
+								"(store %d may still be evicted; resolve the rollback error above, then retry "+
+								"removing the scheduler)",
+							toUpdate, name, err.Error(), rmErr.Error(), uint64(storeIDs[0])))
 						return
 					}
 				}
