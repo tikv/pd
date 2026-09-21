@@ -339,49 +339,71 @@ func TestProcessRequestsRetriesOnlyMissingRegions(t *testing.T) {
 	}
 }
 
-func TestProcessRequestsRetriesInvalidResponseOnLeader(t *testing.T) {
+func TestProcessRequestsHeaderErrorRetryMatchesUnary(t *testing.T) {
+	// Unary Region APIs use ServiceClient.NeedRetry only for the first
+	// attempt: any follower header error retries, no leader header error does.
+	// Even if discovery changes the selected role, a fallback is final.
 	testCases := []struct {
-		name       string
-		headerErr  *pdpb.Error
-		isFollower bool
+		name               string
+		isFollower         bool
+		isLeaderRetryBatch bool
+		wantRetry          bool
 	}{
-		{
-			name:      "region not found",
-			headerErr: &pdpb.Error{Type: pdpb.ErrorType_REGION_NOT_FOUND},
-		},
-		{
-			name:       "other follower error",
-			headerErr:  &pdpb.Error{Type: pdpb.ErrorType_NOT_BOOTSTRAPPED},
-			isFollower: true,
-		},
+		{name: "PD leader"},
+		{name: "follower", isFollower: true, wantRetry: true},
+		{name: "leader fallback", isLeaderRetryBatch: true},
+		{name: "fallback after role change", isFollower: true, isLeaderRetryBatch: true},
 	}
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			re := require.New(t)
-			found := newTestRequest(context.Background())
-			found.id = 1
-			missing := newTestRequest(context.Background())
-			missing.id = 2
-			stream := &queryRegionTestStream{
-				response: &pdpb.QueryRegionResponse{
-					Header: &pdpb.ResponseHeader{Error: testCase.headerErr},
-					RegionsById: map[uint64]*pdpb.RegionResponse{
-						1: newMockRegionResponse(1),
-					},
-				},
-			}
-			client := newQueryRegionTestClient(t, []*Request{found, missing})
+			for _, errorType := range []pdpb.ErrorType{
+				pdpb.ErrorType_REGION_NOT_FOUND,
+				pdpb.ErrorType_NOT_BOOTSTRAPPED,
+				pdpb.ErrorType_UNKNOWN,
+			} {
+				t.Run(errorType.String(), func(t *testing.T) {
+					re := require.New(t)
+					headerErr := &pdpb.Error{Type: errorType}
+					found := newTestRequest(context.Background())
+					found.id = 1
+					missing := newTestRequest(context.Background())
+					missing.id = 2
+					stream := &queryRegionTestStream{
+						response: &pdpb.QueryRegionResponse{
+							Header: &pdpb.ResponseHeader{Error: headerErr},
+							RegionsById: map[uint64]*pdpb.RegionResponse{
+								1: newMockRegionResponse(1),
+							},
+						},
+					}
+					client := newQueryRegionTestClient(t, []*Request{found, missing})
 
-			retryRequests, err := client.processRequestsInner(
-				stream.Send,
-				stream.Recv,
-				testCase.isFollower,
-				false,
-			)
-			re.NoError(err)
-			re.Equal([]*Request{found, missing}, retryRequests)
-			re.Empty(found.done)
-			re.Empty(missing.done)
+					retryRequests, err := client.processRequestsInner(
+						stream.Send,
+						stream.Recv,
+						testCase.isFollower,
+						testCase.isLeaderRetryBatch,
+					)
+					re.Len(stream.requests, 1)
+					if testCase.wantRetry {
+						re.NoError(err)
+						re.Equal([]*Request{found, missing}, retryRequests)
+						re.Empty(found.done)
+						re.Empty(missing.done)
+						return
+					}
+					re.EqualError(err, headerErr.String())
+					re.Empty(retryRequests)
+					// The dispatcher completes every request with the original error;
+					// data in an error response must not be exposed as a successful hit.
+					client.cancelCollectedRequests(err)
+					for _, req := range []*Request{found, missing} {
+						re.Len(req.done, 1)
+						re.ErrorIs(<-req.done, err)
+						re.Nil(req.region)
+					}
+				})
+			}
 		})
 	}
 }
