@@ -60,18 +60,11 @@ type OpStep interface {
 	// CheckInProgress validates that the step is still safe to keep running.
 	// needStoreHealthCheck is an opt-in, per-operator permission (see
 	// Operator.SetStoreHealthCheck) to additionally reject a target that has
-	// gone Unhealthy mid-execution, on top of the unconditional Down check in
-	// validateStore. The caller (checkStaleOperator) already resolves *when*
-	// it's safe to ask for this: it forces the parameter to false once the
-	// current step's command has ever been dispatched (Operator.
-	// HasStepBeenDispatched), because a region heartbeat is only a snapshot
-	// of the target as of whenever it was generated -- once dispatched, TiKV
-	// may already be applying (or have applied) the conf change regardless
-	// of what the current heartbeat happens to show, and cancelling past
-	// that point can't undo it. A step implementation only has to decide
-	// *whether* it ever wants the check at all, based on whether its own
-	// conf change needs the target store to actively participate (be
-	// reachable) for raft to commit it:
+	// gone Unhealthy, on top of the unconditional Down check in
+	// validateStore. A step implementation decides *whether* it ever wants
+	// the check at all, based on whether its own conf change needs the
+	// target store to actively participate (be reachable) for raft to
+	// commit it:
 	//   - steps whose conf change is a pure role/metadata flip that the raft
 	//     group's current healthy majority can commit without the target's
 	//     participation (e.g. RemovePeer, BecomeWitness, DemoteVoter,
@@ -84,11 +77,21 @@ type OpStep interface {
 	//     already-caught-up learner is typically just silently redone by
 	//     another checker's operator that doesn't carry the flag, so the
 	//     rejection only fragments the original operator for no benefit.
-	//   - steps that need the target to actively receive something for the
-	//     step to complete (TransferLeader needs the target to actually
-	//     campaign and start serving as leader; AddPeer/AddLearner/
-	//     BecomeNonWitness need to stream a snapshot to the target) should
-	//     just pass the parameter straight through to validateStore.
+	//   - TransferLeader needs the target to actually campaign and start
+	//     serving as leader, and creates no peer and no irreversible conf
+	//     change, so rejecting it on an Unhealthy target is always safe: it
+	//     passes the parameter straight through to validateStore, and the
+	//     caller (checkStaleOperator) currently only ever asks for the check
+	//     when the step is TransferLeader.
+	//   - AddPeer/AddLearner/BecomeNonWitness need to stream a snapshot to
+	//     the target, and their command is dispatched synchronously at
+	//     operator creation, before any heartbeat-driven check can run -- so
+	//     rejecting them on an Unhealthy target can't undo a conf change
+	//     that may already be landing and would only orphan the peer. They
+	//     still pass the parameter straight through to validateStore, but
+	//     checkStaleOperator never asks them for the check today; safely
+	//     extending it to them needs an orphan-cleanup / replacement design
+	//     that is a follow-up to #11143.
 	CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo, needStoreHealthCheck bool) error
 	Influence(opInfluence *OpInfluence, region *core.RegionInfo)
 	Timeout(regionSize int64) time.Duration

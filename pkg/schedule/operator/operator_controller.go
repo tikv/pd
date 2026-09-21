@@ -158,20 +158,12 @@ func (oc *Controller) Dispatch(region *core.RegionInfo, source string, recordOpS
 		// The operator status should be STARTED.
 		// Check will call CheckSuccess and CheckTimeout.
 		step := op.Check(region)
-		currentStep := op.CurrentStepIndex()
 		switch op.Status() {
 		case STARTED:
 			operatorCounter.WithLabelValues(op.Desc(), "check").Inc()
-			if source == DispatchFromHeartBeat && oc.checkStaleOperator(op, step, region, currentStep) {
+			if source == DispatchFromHeartBeat && oc.checkStaleOperator(op, step, region) {
 				return
 			}
-			// Unconditional: SetStoreHealthCheck is documented as callable
-			// at any time after the operator is created, not just before
-			// its first dispatch, so this can't be gated on
-			// NeedStoreHealthCheck() without risking a step that was
-			// already dispatched while the flag was off being treated as
-			// "never dispatched" once the flag later turns on.
-			op.MarkStepDispatched(currentStep)
 			oc.SendScheduleCommand(region, step, source)
 		case SUCCESS:
 			if op.ContainNonWitnessStep() {
@@ -215,31 +207,20 @@ func (oc *Controller) Dispatch(region *core.RegionInfo, source string, recordOpS
 	}
 }
 
-func (oc *Controller) checkStaleOperator(op *Operator, step OpStep, region *core.RegionInfo, currentStep int32) bool {
+func (oc *Controller) checkStaleOperator(op *Operator, step OpStep, region *core.RegionInfo) bool {
 	// needStoreHealthCheck is the operator's opt-in permission to also reject
-	// a target that has gone Unhealthy mid-execution (on top of the
-	// unconditional Down check).
-	//
-	// For AddPeer/AddLearner/BecomeNonWitness we only honor it before the
-	// step's own command has ever been dispatched: a region heartbeat is
-	// just a snapshot as of whenever it was generated, so once dispatched
-	// TiKV may already be applying (or have applied) the conf change
-	// regardless of what the current heartbeat shows, and cancelling past
-	// that point can't undo it and would only orphan the target's peer.
-	// Failing such an in-flight operator safely needs an orphan-peer cleanup
-	// / replacement design that is out of scope here (see #11143).
-	//
-	// TransferLeader is exempt from that boundary: it creates no peer and no
-	// irreversible conf change, so if the target goes Unhealthy before it
-	// campaigns, cancelling is safe -- and keeping the operator would only
-	// retry the request until the Down threshold while holding the
-	// scheduling slot. It stays checked even after dispatch.
-	needStoreHealthCheck := op.NeedStoreHealthCheck()
-	if needStoreHealthCheck && op.HasStepBeenDispatched(currentStep) {
-		if _, isTransferLeader := step.(TransferLeader); !isTransferLeader {
-			needStoreHealthCheck = false
-		}
-	}
+	// a target that has gone Unhealthy, on top of the unconditional Down
+	// check. Only TransferLeader is ever asked for it: it creates no peer
+	// and no irreversible conf change, so rejecting it on an Unhealthy
+	// target is always safe. AddPeer/AddLearner/BecomeNonWitness stream a
+	// snapshot to the target, and their command is dispatched synchronously
+	// at operator creation -- before any heartbeat-driven check can run --
+	// so by the time this runs, rejecting them on an Unhealthy target can't
+	// undo a conf change that may already be landing and would only orphan
+	// the peer. Safely extending the check to them needs an orphan-cleanup
+	// / replacement design that is a follow-up to #11143.
+	_, isTransferLeader := step.(TransferLeader)
+	needStoreHealthCheck := op.NeedStoreHealthCheck() && isTransferLeader
 	err := step.CheckInProgress(oc.cluster, oc.config, region, needStoreHealthCheck)
 	if err != nil {
 		log.Info("operator is stale", zap.Uint64("region-id", op.RegionID()), errs.ZapError(err))
@@ -636,12 +617,6 @@ func (oc *Controller) addOperatorInner(op *Operator) bool {
 	var step OpStep
 	if region := oc.cluster.GetRegion(op.RegionID()); region != nil {
 		if step = op.Check(region); step != nil {
-			// This is the operator's very first dispatch, before any
-			// heartbeat-driven Dispatch() call has a chance to run. Mark it
-			// the same way Dispatch() does, so checkStaleOperator's
-			// HasStepBeenDispatched check isn't blind to a command that was
-			// already sent here.
-			op.MarkStepDispatched(op.CurrentStepIndex())
 			oc.SendScheduleCommand(region, step, DispatchFromCreate)
 		}
 	}
