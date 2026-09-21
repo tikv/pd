@@ -166,14 +166,6 @@ func CreateMergeRegionOperator(desc string, ci sche.SharedCluster, source *core.
 	if core.IsInJointState(source.GetPeers()...) || core.IsInJointState(target.GetPeers()...) {
 		return nil, errors.Errorf("cannot merge regions which are in joint state")
 	}
-	for _, region := range []*core.RegionInfo{source, target} {
-		for _, peer := range region.GetPeers() {
-			if peer.GetIsWitness() {
-				return nil, errors.Errorf("cannot merge region %d: legacy witness peer must be converted first", region.GetID())
-			}
-		}
-	}
-
 	var steps []OpStep
 	if !isRegionMatch(source, target) {
 		peers := make(map[uint64]*metapb.Peer)
@@ -218,7 +210,7 @@ func isRegionMatch(a, b *core.RegionInfo) bool {
 	}
 	for _, pa := range a.GetPeers() {
 		pb := b.GetStorePeer(pa.GetStoreId())
-		if pb == nil || core.IsLearner(pb) != core.IsLearner(pa) || core.IsWitness(pb) != core.IsWitness(pa) {
+		if pb == nil || core.IsLearner(pb) != core.IsLearner(pa) {
 			return false
 		}
 	}
@@ -330,12 +322,4 @@ func CreateLeaveJointStateOperator(desc string, ci sche.SharedCluster, origin *c
 
 	b.execChangePeerV2(false, true)
 	return NewOperator(b.desc, brief, b.regionID, b.regionEpoch, kind, origin.GetApproximateSize(), b.steps...), nil
-}
-
-// CreateNonWitnessPeerOperator converts a legacy witness peer to a regular
-// peer. It is retained only for rolling-upgrade compatibility.
-func CreateNonWitnessPeerOperator(desc string, ci sche.SharedCluster, region *core.RegionInfo, peer *metapb.Peer) (*Operator, error) {
-	return NewBuilder(desc, ci, region).
-		BecomeNonWitness(peer.GetStoreId()).
-		Build(OpReplica)
 }

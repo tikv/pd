@@ -26,7 +26,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/pingcap/failpoint"
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/cache"
@@ -37,7 +36,6 @@ import (
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
-	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 )
@@ -385,40 +383,6 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 			return ops
 		}
 	}
-	// Migrate legacy witnesses here so the compatibility path applies with and
-	// without placement rules. Run it after the rule/replica checker: unavailable
-	// or missing replicas must be repaired first, since demoting a witness while
-	// a regular voter is down can lose quorum. Pending peers must catch up first.
-	if region.GetLeader() != nil && len(region.GetDownPeers()) == 0 && len(region.GetPendingPeers()) == 0 {
-		var legacyWitness *metapb.Peer
-		for _, peer := range region.GetPeers() {
-			if peer.GetIsWitness() {
-				legacyWitness = peer
-				break
-			}
-		}
-		if legacyWitness != nil {
-			for _, peer := range region.GetPeers() {
-				store := c.cluster.GetStore(peer.GetStoreId())
-				if store == nil || !store.IsUp() || store.IsDisconnected() {
-					return nil
-				}
-			}
-			if opController.OperatorCount(operator.OpReplica) >= c.conf.GetReplicaScheduleLimit() {
-				operator.IncOperatorLimitCounter(types.ReplicaChecker, operator.OpReplica)
-				c.pendingProcessedRegions.Put(region.GetID(), nil)
-				return nil
-			}
-			op, err := operator.CreateNonWitnessPeerOperator("migrate-deprecated-witness-peer", c.cluster, region, legacyWitness)
-			if err != nil {
-				log.Debug("cannot convert deprecated witness peer", zap.Uint64("region-id", region.GetID()), zap.Uint64("peer-id", legacyWitness.GetId()), errs.ZapError(err))
-				return nil
-			}
-			op.SetPriorityLevel(constant.High)
-			return []*operator.Operator{op}
-		}
-	}
-
 	// skip the joint checker, split checker and rule checker when region label is set to "schedule=deny".
 	// those checkers are help to make region health, it's necessary to skip them when region is set to deny.
 	l := c.cluster.GetRegionLabeler()

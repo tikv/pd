@@ -252,32 +252,6 @@ func (suite *createOperatorTestSuite) TestCreateMergeRegionOperator() {
 			true,
 			nil,
 		},
-		{
-			[]*metapb.Peer{
-				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
-				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
-			},
-			[]*metapb.Peer{
-				{Id: 3, StoreId: 1, Role: metapb.PeerRole_Voter},
-				{Id: 4, StoreId: 2, Role: metapb.PeerRole_Voter, IsWitness: true},
-			},
-			0,
-			true,
-			nil,
-		},
-		{
-			[]*metapb.Peer{
-				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
-				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter, IsWitness: true},
-			},
-			[]*metapb.Peer{
-				{Id: 3, StoreId: 1, Role: metapb.PeerRole_Voter},
-				{Id: 4, StoreId: 2, Role: metapb.PeerRole_Voter},
-			},
-			0,
-			true,
-			nil,
-		},
 	}
 
 	for _, testCase := range testCases {
@@ -1302,67 +1276,3 @@ func TestCreateLeaveJointStateOperatorWithoutFitRules(t *testing.T) {
 	re.Equal(uint64(3), step1.DemoteVoters[0].ToStore)
 }
 
-func (suite *createOperatorTestSuite) TestCreateNonWitnessPeerOperator() {
-	re := suite.Require()
-	type testCase struct {
-		originPeers   []*metapb.Peer // first is leader
-		kind          OpKind
-		expectedError bool
-		prepareSteps  []OpStep
-	}
-	testCases := []testCase{
-		{
-			[]*metapb.Peer{
-				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
-				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner, IsWitness: true},
-			},
-			OpRegion | OpReplica,
-			false,
-			[]OpStep{
-				BecomeNonWitness{StoreID: 2, PeerID: 2},
-			},
-		},
-		{
-			[]*metapb.Peer{
-				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
-				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter, IsWitness: true},
-			},
-			OpRegion | OpReplica,
-			false,
-			[]OpStep{
-				ChangePeerV2Enter{
-					PromoteLearners: []PromoteLearner{},
-					DemoteVoters:    []DemoteVoter{{ToStore: 2, PeerID: 2, IsWitness: true}},
-				},
-				BecomeNonWitness{StoreID: 2, PeerID: 2},
-				ChangePeerV2Enter{
-					PromoteLearners: []PromoteLearner{{ToStore: 2, PeerID: 2}},
-					DemoteVoters:    []DemoteVoter{},
-				},
-			},
-		},
-	}
-
-	for _, testCase := range testCases {
-		region := core.NewRegionInfo(&metapb.Region{Id: 68, Peers: testCase.originPeers}, testCase.originPeers[0])
-		op, err := CreateNonWitnessPeerOperator("test", suite.cluster, region, testCase.originPeers[1])
-		re.NoError(err)
-		re.NotNil(op)
-		re.Equal(testCase.kind, op.kind)
-
-		expectedSteps := testCase.prepareSteps
-		re.Len(op.steps, len(expectedSteps))
-		for i := range op.Len() {
-			re.IsType(expectedSteps[i], op.Step(i))
-			switch step := op.Step(i).(type) {
-			case ChangePeerV2Enter:
-				expected := expectedSteps[i].(ChangePeerV2Enter)
-				re.Equal(expected.PromoteLearners, step.PromoteLearners)
-				re.Equal(expected.DemoteVoters, step.DemoteVoters)
-			case BecomeNonWitness:
-				re.Equal(step.StoreID, expectedSteps[i].(BecomeNonWitness).StoreID)
-				re.Equal(step.PeerID, expectedSteps[i].(BecomeNonWitness).PeerID)
-			}
-		}
-	}
-}

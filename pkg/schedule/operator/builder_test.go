@@ -102,12 +102,8 @@ func (suite *operatorBuilderTestSuite) TestRecord() {
 	re := suite.Require()
 	re.Error(suite.newBuilder().AddPeer(&metapb.Peer{StoreId: 1}).err)
 	re.NoError(suite.newBuilder().AddPeer(&metapb.Peer{StoreId: 4}).err)
-	re.Error(suite.newBuilder().AddPeer(&metapb.Peer{StoreId: 4, IsWitness: true}).err)
 	re.Error(suite.newBuilder().PromoteLearner(1).err)
 	re.NoError(suite.newBuilder().PromoteLearner(3).err)
-	legacyBuilder := suite.newBuilder()
-	legacyBuilder.targetPeers[3].IsWitness = true
-	re.Error(legacyBuilder.PromoteLearner(3).err)
 	re.NoError(suite.newBuilder().SetLeader(1).SetLeader(2).err)
 	re.Error(suite.newBuilder().SetLeader(3).err)
 	re.Error(suite.newBuilder().RemovePeer(4).err)
@@ -129,30 +125,6 @@ func (suite *operatorBuilderTestSuite) TestRecord() {
 	re.Equal(m[4], builder.targetPeers[4])
 	re.Equal(uint64(0), builder.targetLeaderStoreID)
 	re.True(builder.addLightPeer)
-
-	legacyBuilder = suite.newBuilder().SetPeers(map[uint64]*metapb.Peer{
-		4: {StoreId: 4, IsWitness: true},
-	})
-	re.Error(legacyBuilder.err)
-}
-
-func (suite *operatorBuilderTestSuite) TestLegacyWitnessConversionIsExplicit() {
-	re := suite.Require()
-	peers := []*metapb.Peer{
-		{Id: 11, StoreId: 1},
-		{Id: 12, StoreId: 2, IsWitness: true},
-		{Id: 13, StoreId: 3},
-	}
-	region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers}, peers[0])
-	targetPeers := map[uint64]*metapb.Peer{
-		1: {StoreId: 1},
-		2: {StoreId: 2},
-		3: {StoreId: 3},
-	}
-
-	op, err := NewBuilder("test", suite.cluster, region).SetPeers(targetPeers).Build(0)
-	re.NoError(err)
-	re.Contains(op.Brief(), "switch peer: store [2] to non-witness")
 }
 
 func (suite *operatorBuilderTestSuite) TestSetPeersDoesNotMutateCallerMap() {
