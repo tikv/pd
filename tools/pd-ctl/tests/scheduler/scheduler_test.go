@@ -88,17 +88,6 @@ func (suite *schedulerTestSuite) SetupTest() {
 
 		// note: because pdqsort is an unstable sort algorithm, set ApproximateSize for this region.
 		pdTests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetApproximateSize(10))
-		// Finish loading persisted schedulers before testing runtime changes.
-		// Otherwise startup can recreate a scheduler that a test just removed.
-		testutil.Eventually(re, func() bool {
-			if !cluster.GetLeaderServer().GetRaftCluster().GetCoordinator().AreSchedulersInitialized() {
-				return false
-			}
-			if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
-				return sche.GetCoordinator().AreSchedulersInitialized()
-			}
-			return true
-		})
 	})
 }
 

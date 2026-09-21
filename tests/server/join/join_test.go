@@ -81,8 +81,6 @@ func TestFailedAndDeletedPDJoinsPreviousCluster(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	originalTimeout := server.EtcdStartTimeout
-	t.Cleanup(func() { server.EtcdStartTimeout = originalTimeout })
 	server.EtcdStartTimeout = 10 * time.Second
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	defer cluster.Destroy()
@@ -116,8 +114,6 @@ func TestDeletedPDJoinsPreviousCluster(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	originalTimeout := server.EtcdStartTimeout
-	t.Cleanup(func() { server.EtcdStartTimeout = originalTimeout })
 	server.EtcdStartTimeout = 10 * time.Second
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	defer cluster.Destroy()
