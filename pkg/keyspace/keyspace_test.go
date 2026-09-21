@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
@@ -70,6 +71,18 @@ type mockConfig struct {
 	CheckRegionSplitInterval typeutil.Duration
 	// MetaServiceGroups is used to mock the meta-service groups for keyspace assignment.
 	MetaServiceGroups map[string]string
+}
+
+type failingKeyspaceStorage struct {
+	*endpoint.StorageEndpoint
+	failSaveKeyspaceMeta bool
+}
+
+func (s *failingKeyspaceStorage) SaveKeyspaceMeta(txn kv.Txn, meta *keyspacepb.KeyspaceMeta) error {
+	if s.failSaveKeyspaceMeta {
+		return errors.New("injected SaveKeyspaceMeta failure")
+	}
+	return s.StorageEndpoint.SaveKeyspaceMeta(txn, meta)
 }
 
 func (m *mockConfig) GetPreAlloc() []string {
@@ -813,7 +826,6 @@ func TestGetKeyspaceIDInRangeBackfillsFromStorage(t *testing.T) {
 	re.NoError(manager.Bootstrap())
 
 	for _, id := range []uint32{10, 11, 12} {
-		id := id
 		_, err := manager.CreateKeyspaceByID(&CreateKeyspaceByIDRequest{
 			ID:         &id,
 			Name:       fmt.Sprintf("ks%d", id),
@@ -1443,16 +1455,16 @@ func (suite *keyspaceTestSuite) TestGCBarrierRemovalInvalidationAfterCommit() {
 	_, err := m.kgm.RemoveKeyspacesFromGroup(101, m, []uint32{20000})
 	re.Error(err)
 	re.Zero(calls)
+	_, found := m.cache.getKeyspaceByID(20000)
+	re.True(found, "a rolled-back removal must not delete the cache entry")
 	m.kgm.store = base
 	_, err = m.kgm.RemoveKeyspacesFromGroup(101, m, []uint32{20000})
 	re.NoError(err)
 	re.Equal(1, calls)
 }
 
-// TestRemoveKeyspaceCleansCache verifies that RemoveKeyspace deletes the
-// keyspace's entry from the in-memory cache, not just from the legacy
-// keyspaceNameLookup/keyspaceStateLookup maps, so a fully removed keyspace
-// does not leak a stale cache entry forever.
+// TestRemoveKeyspaceCleansCache verifies that a committed keyspace removal
+// deletes the keyspace's entry from the in-memory cache.
 func (suite *keyspaceTestSuite) TestRemoveKeyspaceCleansCache() {
 	re := suite.Require()
 	meta := &keyspacepb.KeyspaceMeta{
@@ -1465,12 +1477,41 @@ func (suite *keyspaceTestSuite) TestRemoveKeyspaceCleansCache() {
 	re.NoError(suite.manager.saveNewKeyspace(meta))
 	_, found := suite.manager.cache.getKeyspaceByID(meta.GetId())
 	re.True(found)
+	re.NoError(suite.manager.kgm.CreateKeyspaceGroups([]*endpoint.KeyspaceGroup{{ID: 101, Keyspaces: []uint32{meta.GetId()}}}))
 
-	re.NoError(suite.manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
-		return suite.manager.RemoveKeyspace(txn, meta.GetId())
-	}))
+	_, err := suite.manager.kgm.RemoveKeyspacesFromGroup(101, suite.manager, []uint32{meta.GetId()})
+	re.NoError(err)
 	_, found = suite.manager.cache.getKeyspaceByID(meta.GetId())
 	re.False(found)
+}
+
+func TestUpdateKeyspaceStateDoesNotUpdateCacheBeforeCommit(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	kgm := NewKeyspaceGroupManager(ctx, store, nil)
+	manager := NewKeyspaceManager(ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{}, kgm, nil)
+	re.NoError(kgm.Bootstrap(ctx))
+	re.NoError(manager.Bootstrap())
+
+	id := uint32(20000)
+	_, err := manager.CreateKeyspaceByID(&CreateKeyspaceByIDRequest{
+		ID:         &id,
+		Name:       "cache-commit",
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+
+	manager.store = &failingKeyspaceStorage{
+		StorageEndpoint:      store,
+		failSaveKeyspaceMeta: true,
+	}
+	_, err = manager.UpdateKeyspaceStateByID(id, keyspacepb.KeyspaceState_DISABLED, time.Now().Unix())
+	re.Error(err)
+	item, ok := manager.cache.getKeyspaceByID(id)
+	re.True(ok)
+	re.Equal(keyspacepb.KeyspaceState_ENABLED, item.state)
 }
 
 // TestAssignGroupAndSaveKeyspace verifies that keyspace creation tolerates a

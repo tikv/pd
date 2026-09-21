@@ -22,8 +22,9 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
-	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/keyspace"
@@ -65,6 +66,7 @@ func TestCollectStorageSize(t *testing.T) {
 			meteredKeyspaceID = created.GetId()
 		}
 	}
+	keyspaceManager = keyspace.NewKeyspaceManager(ctx, tc.storage, tc, mockid.NewIDAllocator(), &config.KeyspaceConfig{}, keyspaceGroupManager, nil)
 	regionBounds := keyspace.MakeRegionBound(meteredKeyspaceID)
 	meteredRegion := regions[0].Clone(
 		core.WithStartKey(regionBounds.TxnLeftBound),
@@ -137,6 +139,7 @@ func TestCollectStorageSizeExcludesNonEnabledKeyspace(t *testing.T) {
 	re.NoError(err)
 	_, err = keyspaceManager.UpdateKeyspaceState(disabled.GetName(), keyspacepb.KeyspaceState_DISABLED, time.Now().Unix())
 	re.NoError(err)
+	keyspaceManager = keyspace.NewKeyspaceManager(ctx, tc.storage, tc, mockid.NewIDAllocator(), &config.KeyspaceConfig{}, keyspaceGroupManager, nil)
 
 	storageSizeInfoList := tc.collectStorageSize(keyspaceManager)
 	re.Len(storageSizeInfoList, 1)

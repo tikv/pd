@@ -19,7 +19,6 @@ import (
 	"context"
 	goerrors "errors"
 	"strconv"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -107,9 +106,6 @@ type Manager struct {
 	// nextPatrolStartID is the next start id of keyspace assignment patrol.
 	nextPatrolStartID uint32
 	// cached keyspace meta info for each keyspace ID.
-	// TODO: Remove this two maps after the cache fully takes effect and is verified to be stable.
-	keyspaceNameLookup   sync.Map // store as ID(uint32) -> name(string)
-	keyspaceStateLookup  sync.Map // store as ID(uint32) -> state(keyspacepb.KeyspaceState)
 	cache                *Cache
 	gcBarrierInvalidator atomic.Pointer[func(uint32)]
 	// keyspaceIDRangeMu guards keyspaceIDVerifiedUpTo and the backfill that advances it.
@@ -1067,6 +1063,7 @@ func (manager *Manager) updateKeyspaceConfigTxn(name string, update func(meta *k
 		)
 		return nil, err
 	}
+	manager.cache.Save(meta.GetId(), meta.GetName(), meta.GetState())
 	if manager.mgm != nil {
 		manager.mgm.AttachEndpoints(meta.GetConfig())
 	}
@@ -1120,6 +1117,7 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 		)
 		return nil, err
 	}
+	manager.cache.Save(meta.GetId(), meta.GetName(), meta.GetState())
 	if manager.mgm != nil {
 		manager.mgm.AttachEndpoints(meta.GetConfig())
 	}
@@ -1152,7 +1150,6 @@ func (manager *Manager) RemoveKeyspace(txn kv.Txn, id uint32) error {
 	if err != nil {
 		return err
 	}
-	manager.cache.DeleteKeyspace(id)
 	// Keep the meta-service group assignment accounting in sync within the same
 	// txn. Without this, removed keyspaces leak count and could permanently block
 	// deleting an otherwise-empty group.
@@ -1194,6 +1191,7 @@ func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.K
 		)
 		return nil, err
 	}
+	manager.cache.Save(meta.GetId(), meta.GetName(), meta.GetState())
 	log.Info("[keyspace] keyspace state updated",
 		zap.Uint32("keyspace-id", meta.GetId()),
 		zap.String("name", meta.GetName()),
@@ -1255,8 +1253,6 @@ func (manager *Manager) transformKeyspaceState(txn kv.Txn, meta *keyspacepb.Keys
 	// If the operation is legal, update keyspace state and change time.
 	meta.State = newState
 	meta.StateChangedAt = now
-	// Update the keyspace state to the cache.
-	manager.cache.Save(meta.GetId(), meta.GetName(), newState)
 	return nil
 }
 
@@ -1471,9 +1467,23 @@ func (manager *Manager) DeleteKeyspaceMetaFromCache(id uint32) {
 	manager.cache.DeleteKeyspace(id)
 }
 
-// ScanAllKeyspace scans all keyspaces in the cache and applies the given function to each keyspace.
+// ScanAllKeyspace loads all keyspaces from storage and applies the given function to each keyspace.
 func (manager *Manager) ScanAllKeyspace(fn func(keyspaceID uint32, name string, state keyspacepb.KeyspaceState) bool) {
-	manager.cache.scanAllKeyspaces(fn)
+	iterator := manager.IterateKeyspaces()
+	for {
+		meta, ok, err := iterator.Next()
+		if err != nil {
+			log.Warn("[keyspace] failed to scan keyspaces", errs.ZapError(err))
+			return
+		}
+		if !ok {
+			return
+		}
+		manager.cache.Save(meta.GetId(), meta.GetName(), meta.GetState())
+		if !fn(meta.GetId(), meta.GetName(), meta.GetState()) {
+			return
+		}
+	}
 }
 
 // GetKeyspaceStateByID gets the keyspace state by ID, which will try to get it from the cache first.

@@ -1002,6 +1002,9 @@ func (m *GroupManager) RemoveKeyspacesFromGroup(groupID uint32, km *Manager, key
 	}
 
 	removed = pendingRemoved
+	for _, id := range removed {
+		km.DeleteKeyspaceMetaFromCache(id)
+	}
 
 	// Update the cache
 	m.putKeyspaceGroupToCacheLocked(kg)
