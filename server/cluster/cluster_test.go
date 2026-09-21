@@ -4815,6 +4815,28 @@ func TestCancelIsLockFreeAndStopReclaims(t *testing.T) {
 	re.False(cluster.IsSchedulingControllerRunning())
 }
 
+func TestCancelBeforeClusterContextPublished(t *testing.T) {
+	for _, published := range []bool{false, true} {
+		t.Run(fmt.Sprintf("previous-context-%t", published), func(t *testing.T) {
+			re := require.New(t)
+			_, opt, err := newTestScheduleConfig()
+			re.NoError(err)
+			cluster := newTestRaftCluster(t.Context(), mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+			if !published {
+				cluster.cancel.Store(nil)
+			}
+			termCtx, cancel := context.WithCancel(t.Context())
+			// Start has checked termCtx but has not published its new context.
+			// resetLeader must cancel that parent before its lock-free Cancel.
+			re.NoError(termCtx.Err())
+			cancel()
+			cluster.Cancel()
+			re.NoError(cluster.InitCluster(termCtx, mockid.NewIDAllocator(), opt, nil, nil))
+			re.ErrorIs(cluster.ctx.Err(), context.Canceled)
+		})
+	}
+}
+
 func TestStopCancelsContextInstalledWhileWaiting(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())

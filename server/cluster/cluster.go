@@ -996,19 +996,20 @@ func (c *RaftCluster) runReplicationMode() {
 	c.replicationMode.Run(c.ctx)
 }
 
-// Cancel is the half of Stop that does not wait: it takes the cluster out of
-// service and cancels the context every background job and runner is built on,
-// so that none of them starts another round. Stop still has to run afterwards
-// to reclaim them, and must run before the cluster can be started again.
+// Cancel cancels the currently published cluster context without waiting for
+// jobs to exit. Cancellation is cooperative. Stop must still run afterwards
+// to reclaim the jobs before the cluster can be started again.
 //
-// The server calls it the moment a term ends, ahead of Member.Resign, whose
-// tail can block on a stalled volume. Ref: https://github.com/tikv/pd/issues/11106
+// When racing with Start, the caller must first cancel Start's parent term:
+// Start may not have published its cancel function yet. The server cancels
+// that parent before calling Cancel and Member.Resign, whose tail can block
+// on a stalled volume. Ref: https://github.com/tikv/pd/issues/11106
 //
 // It takes no lock on purpose: runServiceCheckJob holds the read lock across
 // checkTSOService, which can sit in an etcd request on the pinned election
 // client for the whole request timeout, and a pending Lock would queue behind
 // it and block every other reader with it. The cancel function is loaded atomically
-// and is safe to call concurrently, including while Start is initializing jobs.
+// and is safe to call concurrently.
 func (c *RaftCluster) Cancel() {
 	if cancel := c.cancel.Load(); cancel != nil {
 		(*cancel)()

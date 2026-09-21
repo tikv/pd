@@ -868,7 +868,17 @@ func (s *Server) createRaftCluster(ctx context.Context) error {
 		return nil
 	}
 
-	return s.cluster.Start(ctx, s, false)
+	if err := s.cluster.Start(ctx, s, false); err != nil {
+		return err
+	}
+	if !s.cluster.IsRunning() {
+		// A new cluster still needs its first Bootstrap request.
+		return nil
+	}
+	// Bootstrap may have committed the cluster metadata before its leader
+	// term ended, leaving keyspace initialization unfinished. The new leader
+	// must finish it without depending on the cancelled Bootstrap request.
+	return s.GetKeyspaceManager().Bootstrap()
 }
 
 func (s *Server) stopRaftCluster() {

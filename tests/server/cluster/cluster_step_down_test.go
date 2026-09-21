@@ -26,7 +26,9 @@ import (
 
 	"github.com/pingcap/failpoint"
 
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
 
@@ -138,18 +140,25 @@ func TestPDLeaderCancelsClusterJobsBeforeBlockingCleanup(t *testing.T) {
 // TestBootstrapOverlapsStepDown exercises the Bootstrap RPC and real campaign
 // teardown, both before Start and while Start holds the cluster lock.
 func TestBootstrapOverlapsStepDown(t *testing.T) {
-	for _, beforeStart := range []bool{true, false} {
+	for _, testCase := range []struct {
+		members     int
+		beforeStart bool
+	}{{1, true}, {1, false}, {3, true}, {3, false}} {
+		beforeStart := testCase.beforeStart
 		name := "during-start"
 		pausePoint := "github.com/tikv/pd/server/cluster/bootstrapBeforeClusterStarted"
 		if beforeStart {
 			name = "before-start"
 			pausePoint = "github.com/tikv/pd/server/bootstrapBeforeClusterStart"
 		}
-		t.Run(name, func(t *testing.T) {
+		t.Run(fmt.Sprintf("%d-members/%s", testCase.members, name), func(t *testing.T) {
 			re := require.New(t)
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			tc, err := tests.NewTestCluster(ctx, 1)
+			tc, err := tests.NewTestCluster(ctx, testCase.members, func(cfg *config.Config, _ string) {
+				cfg.Keyspace.PreAlloc = []string{"bootstrap-prealloc"}
+				cfg.Keyspace.WaitRegionSplit = false
+			})
 			re.NoError(err)
 			defer tc.Destroy()
 			re.NoError(tc.RunInitialServers())
@@ -228,11 +237,23 @@ func TestBootstrapOverlapsStepDown(t *testing.T) {
 
 			// The next campaign loads the metadata already persisted by the
 			// bootstrap request and must get a fresh, usable context.
+			nextLeader := leaderName
+			if testCase.members > 1 {
+				for candidate := range tc.GetServers() {
+					if candidate != leaderName {
+						nextLeader = candidate
+						break
+					}
+				}
+				re.NoError(s.GetMember().MoveEtcdLeader(ctx, s.GetMember().GetEtcdLeader(), tc.GetServer(nextLeader).GetServer().GetMember().ID()))
+			}
 			re.NoError(failpoint.Disable(exitCampaign))
 			resumeStop()
-			re.Equal(leaderName, tc.WaitLeader())
-			testutil.Eventually(re, rc.IsRunning)
-			newCtx := rc.Context()
+			re.Equal(nextLeader, tc.WaitLeader())
+			newServer := tc.GetServer(nextLeader).GetServer()
+			newCluster := newServer.DirectlyGetRaftCluster()
+			testutil.Eventually(re, newCluster.IsRunning)
+			newCtx := newCluster.Context()
 			re.NotNil(newCtx)
 			re.NoError(newCtx.Err())
 			// A request delayed across the whole step-down must still use its
@@ -244,9 +265,19 @@ func TestBootstrapOverlapsStepDown(t *testing.T) {
 			case <-time.After(20 * time.Second):
 				t.Fatal("bootstrap did not return after its term ended")
 			}
-			re.Equal(newCtx, rc.Context())
+			re.Equal(newCtx, newCluster.Context())
 			re.NoError(newCtx.Err())
-			re.True(rc.IsRunning())
+			re.True(newCluster.IsRunning())
+			re.ErrorContains(tc.GetServer(nextLeader).BootstrapCluster(), "ALREADY_BOOTSTRAPPED")
+			// Task liveness alone is insufficient: the persisted initialization
+			// must be complete even though the old Bootstrap RPC was cancelled.
+			reserved, err := newServer.GetKeyspaceManager().LoadKeyspace(keyspace.GetBootstrapKeyspaceName())
+			re.NoError(err)
+			re.Equal(keyspace.GetBootstrapKeyspaceID(), reserved.GetId())
+			testutil.Eventually(re, func() bool {
+				_, err := newServer.GetKeyspaceManager().LoadKeyspace("bootstrap-prealloc")
+				return err == nil
+			})
 		})
 	}
 }
