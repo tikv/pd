@@ -1161,14 +1161,27 @@ func (c *RaftCluster) GetUnsafeRecoveryController() *unsaferecovery.Controller {
 func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest, resp *pdpb.StoreHeartbeatResponse) error {
 	stats := heartbeat.GetStats()
 	storeID := stats.GetStoreId()
+	// storeStateLock only needs to cover this initial read: it makes the
+	// IsRemoved() check atomic with checkStore/BuryStore's own state
+	// transitions for this store, and putStoreLocked (below, via PutStore)
+	// tolerates a store that's since been fully removed by skipping the
+	// write instead of dereferencing a missing entry -- so there's no need
+	// to hold the lock through the rest of this handler (in particular,
+	// SaveStoreMeta's etcd round trip, which would otherwise make
+	// checkStore/BuryStore for this store wait out a write this path
+	// already paid for before the lock existed). The tradeoff: a
+	// concurrent full removal landing after this unlock and before
+	// SaveStoreMeta runs can still let a stale heartbeat re-persist this
+	// store's metadata, with nothing left to clean it up afterward -- a
+	// narrow, known residual of the same shape as SetStoreLimit's.
 	c.storeStateLock.Lock(uint32(storeID))
-	defer c.storeStateLock.Unlock(uint32(storeID))
-
 	store := c.GetStore(storeID)
 	if store == nil {
+		c.storeStateLock.Unlock(uint32(storeID))
 		return errors.Errorf("store %v not found", storeID)
 	}
 	if store.IsRemoved() {
+		c.storeStateLock.Unlock(uint32(storeID))
 		// A tombstoned store's heartbeat is routine, not a rejected request:
 		// master has no IsRemoved() check here at all, and this contract is
 		// relied on elsewhere (TestFilterUnhealthyStore expects NoError).
@@ -1182,6 +1195,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 		}
 		return nil
 	}
+	c.storeStateLock.Unlock(uint32(storeID))
 
 	limit := store.GetStoreLimit()
 	version := c.opt.GetStoreLimitVersion()
