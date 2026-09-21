@@ -488,7 +488,7 @@ func notIsolatedStoresWithLabel(stores []*core.StoreInfo, label string) [][]*cor
 	valueStoresMap := make(map[string][]*core.StoreInfo)
 
 	for _, s := range stores {
-		// Use the same Unicode equivalence as StoreInfo.CompareLocation.
+		// Fold case-equivalent label values into the same grouping key.
 		labelValue := strings.Map(func(r rune) rune {
 			canonical := r
 			for next := unicode.SimpleFold(r); next != r; next = unicode.SimpleFold(next) {
