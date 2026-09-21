@@ -1639,6 +1639,77 @@ func BenchmarkScatterPlacementBatch(b *testing.B) {
 	}
 }
 
+func TestScatterInternalPlanningFailureAccounting(t *testing.T) {
+	for _, seeded := range []bool{false, true} {
+		t.Run(fmt.Sprintf("seeded=%t", seeded), func(t *testing.T) {
+			sc, tc, _ := newPlacementTestScatter(t, true, []string{"A", "B", "C", "D"})
+			tc.AddLeaderRegionWithRange(100, "a", "m", 1, 2, 3)
+			tc.AddLeaderRegionWithRange(101, "m", "z", 1, 2, 3)
+			region := tc.GetRegion(100)
+			const group = "accounting"
+			var startKey, endKey []byte
+			if seeded {
+				startKey, endKey = []byte("a"), []byte("z")
+			}
+			state := sc.newInternalScatterState(group, startKey, endKey)
+			require.Equal(t, seeded, state.ordinaryEngine.selectedPeer.isSeededGroup(group))
+			snapshot := func(state *scatterState) []uint64 {
+				counts := make([]uint64, 0, 8)
+				for id := uint64(1); id <= 4; id++ {
+					counts = append(counts, state.ordinaryEngine.selectedPeer.Get(id, group),
+						state.ordinaryEngine.selectedLeader.Get(id, group))
+				}
+				return counts
+			}
+			before := snapshot(state)
+			if seeded {
+				require.Equal(t, []uint64{2, 2, 2, 0, 2, 0, 0, 0}, before)
+			} else {
+				require.Equal(t, make([]uint64, 8), before)
+			}
+
+			const fp = "github.com/tikv/pd/pkg/schedule/scatter/scatterPeerOrder"
+			calls := 0
+			require.NoError(t, failpoint.EnableCall(fp, func(peer **metapb.Peer) {
+				calls++
+				if calls == 1 {
+					*peer = region.GetStorePeer(1)
+				} else {
+					*peer = &metapb.Peer{Id: 999, StoreId: 999}
+				}
+			}))
+			t.Cleanup(func() { require.NoError(t, failpoint.Disable(fp)) })
+			op, err := sc.scatterWithOptions(region, group, false, true, state)
+			require.ErrorContains(t, err, "scatter changes peer count or roles")
+			require.Nil(t, op)
+			require.Equal(t, 3, calls)
+			require.Equal(t, before, snapshot(state))
+
+			// Compare with the accounting used after operator creation fails.
+			currentPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))
+			for _, peer := range region.GetPeers() {
+				currentPeers[peer.GetStoreId()] = peer
+			}
+			sc.applyScatterStateDelta(state, region, currentPeers, region.GetLeader().GetStoreId(), group, false)
+			if seeded {
+				require.Equal(t, before, snapshot(state))
+			} else {
+				require.Equal(t, []uint64{1, 1, 1, 0, 1, 0, 0, 0}, snapshot(state))
+			}
+
+			// The public entry creates a fresh state for each region.
+			calls = 0
+			op, err = sc.ScatterInternal(region, group, startKey, endKey)
+			require.ErrorContains(t, err, "scatter changes peer count or roles")
+			require.Nil(t, op)
+			require.Equal(t, 3, calls)
+			require.Empty(t, sc.opController.GetOperators())
+			nextState := sc.newInternalScatterState(group, startKey, endKey)
+			require.Equal(t, before, snapshot(nextState))
+		})
+	}
+}
+
 func TestScatterOverlappingAndOverrideRules(t *testing.T) {
 	for _, sameHost := range []bool{false, true} {
 		for _, override := range []bool{false, true} {
