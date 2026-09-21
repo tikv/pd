@@ -516,6 +516,10 @@ func (suite *routerClientSuite) TestQueryRegionFollowerFallbackMatchesUnarySeman
 
 	follower := suite.cluster.GetServer(suite.cluster.GetFollower())
 	re.NotNil(follower)
+	// Query a running syncer so the follower returns a successful cache miss.
+	testutil.Eventually(re, func() bool {
+		return follower.GetServer().DirectlyGetRaftCluster().GetRegionSyncer().IsRunning()
+	})
 	re.NoError(failpoint.Enable(
 		"github.com/tikv/pd/client/clients/router/forceUseFollower",
 		fmt.Sprintf("return(%q)", follower.GetAddr()),
