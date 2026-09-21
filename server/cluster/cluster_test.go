@@ -3732,7 +3732,7 @@ func TestSetAllStoresLimitDoesNotRestoreRemovedStoreLimit(t *testing.T) {
 	rc.AddStoreLimit(store.GetMeta())
 
 	rc.PutStore(store.Clone(core.SetStoreState(metapb.StoreState_Tombstone)))
-	rc.RemoveStoreLimit(storeID)
+	re.NoError(rc.RemoveStoreLimit(storeID))
 	_, ok := opt.GetScheduleConfig().StoreLimit[storeID]
 	re.False(ok)
 

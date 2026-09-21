@@ -261,7 +261,7 @@ func (suite *storeTestSuite) checkSetLabelStoresLimitSkipsRemovedStore(cluster *
 
 	leader := cluster.GetLeaderServer()
 	rc := leader.GetRaftCluster()
-	rc.RemoveStoreLimit(7)
+	re.NoError(rc.RemoveStoreLimit(7))
 
 	// Store 7 is tombstoned with no engine label, so IsTiKV() still
 	// classifies it as TiKV -- without skipping removed stores up front,

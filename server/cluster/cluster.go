@@ -1743,7 +1743,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 	})
 	// TODO: if the persist operation encounters error, the "Unlimited" will be rollback.
 	// And considering the store state has changed, RemoveStore is actually successful.
-	_ = c.setStoreLimit(storeID, storelimit.RemovePeer, storelimit.Unlimited)
+	_ = c.setStoreLimitLocked(storeID, storelimit.RemovePeer, storelimit.Unlimited)
 	return nil
 }
 
@@ -1947,8 +1947,8 @@ func (c *RaftCluster) UpStore(storeID uint64) error {
 	}
 	if exist {
 		// persist the store limit
-		_ = c.setStoreLimit(storeID, storelimit.AddPeer, limiter[storelimit.AddPeer])
-		_ = c.setStoreLimit(storeID, storelimit.RemovePeer, limiter[storelimit.RemovePeer])
+		_ = c.setStoreLimitLocked(storeID, storelimit.AddPeer, limiter[storelimit.AddPeer])
+		_ = c.setStoreLimitLocked(storeID, storelimit.RemovePeer, limiter[storelimit.RemovePeer])
 	}
 	return nil
 }
@@ -2785,10 +2785,12 @@ func (c *RaftCluster) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePer
 	if store := c.GetStore(storeID); store != nil && store.IsRemoved() {
 		return errs.ErrStoreRemoved.FastGenByArgs(storeID)
 	}
-	return c.setStoreLimit(storeID, typ, ratePerMin)
+	return c.setStoreLimitLocked(storeID, typ, ratePerMin)
 }
 
-func (c *RaftCluster) setStoreLimit(storeID uint64, typ storelimit.Type, ratePerMin float64) error {
+// setStoreLimitLocked is SetStoreLimit's unlocked implementation, for callers
+// that already hold storeStateLock for this store ID (RemoveStore, UpStore).
+func (c *RaftCluster) setStoreLimitLocked(storeID uint64, typ storelimit.Type, ratePerMin float64) error {
 	err := c.opt.UpdateScheduleConfig(c.storage, func(_ *sc.ScheduleConfig, cfg *sc.ScheduleConfig) (bool, error) {
 		slc, ok := cfg.StoreLimit[storeID]
 		if !ok {
