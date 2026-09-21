@@ -48,7 +48,6 @@ func (suite *microServiceSuite) TearDownSuite() {
 	for _, fn := range suite.cancels {
 		fn()
 	}
-	suite.rmCluster.Destroy()
 	suite.cluster.Destroy()
 }
 
@@ -107,6 +106,20 @@ func (suite *microServiceSuite) TestMicroService() {
 	v := make([]any, 0)
 	tests.MustExec(re, cmd, []string{"-u", pdAddr, "microservice", "resource-manager", "members"}, &v)
 	re.Len(v, 2)
+	wantAddrs := make(map[string]struct{}, len(suite.rmCluster.GetServers()))
+	for _, srv := range suite.rmCluster.GetServers() {
+		wantAddrs[srv.GetAddr()] = struct{}{}
+	}
+	gotAddrs := make(map[string]struct{}, len(v))
+	for _, member := range v {
+		entry, ok := member.(map[string]any)
+		re.True(ok)
+		addr, ok := entry["service-addr"].(string)
+		re.True(ok)
+		gotAddrs[addr] = struct{}{}
+	}
+	suite.Equal(wantAddrs, gotAddrs)
+	suite.Contains(gotAddrs, primaryAddress)
 }
 
 func (suite *microServiceSuite) startCluster() {
@@ -142,5 +155,6 @@ func (suite *microServiceSuite) startCluster() {
 	// start resource manager cluster
 	rmCluster, err := pdTests.NewTestResourceManagerCluster(ctx, 2, leaderServer.GetAddr())
 	re.NoError(err)
+	suite.T().Cleanup(rmCluster.Destroy)
 	suite.rmCluster = rmCluster
 }
