@@ -225,7 +225,7 @@ func NewClient(
 		requestCh: make(chan *Request, defaultMaxRouterRequestBatchSize*2),
 		batchController: batch.NewController(
 			defaultMaxRouterRequestBatchSize,
-			requestFinisher(nil),
+			requestFinisher(nil, nil),
 			metrics.QueryRegionBestBatchSize,
 		),
 	}
@@ -265,38 +265,6 @@ func (c *Cli) newRequest(ctx context.Context, opts ...opt.GetRegionOption) *Requ
 	return req
 }
 
-type regionResponseCursor struct {
-	resp               *pdpb.QueryRegionResponse
-	keyIdx, prevKeyIdx int
-}
-
-func (c *regionResponseCursor) next(req *Request) (*pdpb.RegionResponse, bool) {
-	if c.resp == nil {
-		return nil, false
-	}
-	var id uint64
-	if req.key != nil {
-		if c.keyIdx >= len(c.resp.GetKeyIdMap()) {
-			return nil, false
-		}
-		id = c.resp.GetKeyIdMap()[c.keyIdx]
-		c.keyIdx++
-	} else if req.prevKey != nil {
-		if c.prevKeyIdx >= len(c.resp.GetPrevKeyIdMap()) {
-			return nil, false
-		}
-		id = c.resp.GetPrevKeyIdMap()[c.prevKeyIdx]
-		c.prevKeyIdx++
-	} else {
-		id = req.id
-	}
-	if id == 0 {
-		return nil, false
-	}
-	regionResp, ok := c.resp.GetRegionsById()[id]
-	return regionResp, ok && regionResp != nil && regionResp.GetRegion() != nil
-}
-
 func finishRegionRequest(req *Request, regionResp *pdpb.RegionResponse, err error) {
 	defer trace.StartRegion(req.requestCtx, "pdclient.regionReqDone").End()
 	if err != nil {
@@ -318,36 +286,42 @@ func finishRegionRequest(req *Request, regionResp *pdpb.RegionResponse, err erro
 	req.tryDone(nil)
 }
 
-func requestFinisher(resp *pdpb.QueryRegionResponse) batch.FinisherFunc[*Request] {
-	cursor := regionResponseCursor{resp: resp}
+// requestFinisher completes requests, or collects misses for a leader retry when
+// missingRequests is non-nil. In that case, a nil response retries the whole batch.
+func requestFinisher(resp *pdpb.QueryRegionResponse, missingRequests *[]*Request) batch.FinisherFunc[*Request] {
+	var cursor struct {
+		keyIdx, prevKeyIdx int
+	}
 	return func(_ int, req *Request, err error) {
 		if err != nil {
 			finishRegionRequest(req, nil, err)
 			return
 		}
-		// If resp is nil but no error was provided, it means an abnormal situation occurred
-		// (e.g., timeout, connection issue). We should pass an error to indicate this.
-		if resp == nil {
+		// Without a retry collector, a nil response without an error indicates
+		// an abnormal situation (e.g., timeout or connection issue).
+		if resp == nil && missingRequests == nil {
 			finishRegionRequest(req, nil, errs.ErrClientRouterConnectionTimeout)
 			return
 		}
-		regionResp, _ := cursor.next(req)
-		finishRegionRequest(req, regionResp, nil)
-	}
-}
-
-func partialResponseFinisher(
-	resp *pdpb.QueryRegionResponse,
-	missingRequests *[]*Request,
-) batch.FinisherFunc[*Request] {
-	cursor := regionResponseCursor{resp: resp}
-	return func(_ int, req *Request, err error) {
-		if err != nil {
-			finishRegionRequest(req, nil, err)
-			return
+		var id uint64
+		if req.key != nil {
+			if cursor.keyIdx < len(resp.GetKeyIdMap()) {
+				id = resp.GetKeyIdMap()[cursor.keyIdx]
+				cursor.keyIdx++
+			}
+		} else if req.prevKey != nil {
+			if cursor.prevKeyIdx < len(resp.GetPrevKeyIdMap()) {
+				id = resp.GetPrevKeyIdMap()[cursor.prevKeyIdx]
+				cursor.prevKeyIdx++
+			}
+		} else {
+			id = req.id
 		}
-		regionResp, found := cursor.next(req)
-		if !found {
+		var regionResp *pdpb.RegionResponse
+		if id != 0 {
+			regionResp = resp.GetRegionsById()[id]
+		}
+		if missingRequests != nil && regionResp.GetRegion() == nil {
 			*missingRequests = append(*missingRequests, req)
 			return
 		}
@@ -356,11 +330,11 @@ func partialResponseFinisher(
 }
 
 func (c *Cli) cancelCollectedRequests(err error) {
-	c.batchController.FinishCollectedRequests(requestFinisher(nil), err)
+	c.batchController.FinishCollectedRequests(requestFinisher(nil, nil), err)
 }
 
 func (c *Cli) doneCollectedRequests(resp *pdpb.QueryRegionResponse) {
-	c.batchController.FinishCollectedRequests(requestFinisher(resp), nil)
+	c.batchController.FinishCollectedRequests(requestFinisher(resp, nil), nil)
 }
 
 // Close closes the router client.
@@ -683,7 +657,7 @@ batchLoop:
 			case <-timeoutTimer.C:
 				log.Error("[router] router stream connection is not ready until timeout, abort the batch")
 				c.svcDiscovery.ScheduleCheckMemberChanged()
-				c.batchController.FinishCollectedRequests(requestFinisher(nil), errs.ErrClientRouterConnectionTimeout)
+				c.batchController.FinishCollectedRequests(requestFinisher(nil, nil), errs.ErrClientRouterConnectionTimeout)
 				continue batchLoop
 			default:
 			}
@@ -837,41 +811,6 @@ func buildQueryRegionRequest(clusterID uint64, requests []*Request) *pdpb.QueryR
 	return queryReq
 }
 
-func (c *Cli) queryRegion(
-	send sendFn,
-	recv recvFn,
-	requests []*Request,
-) (*pdpb.QueryRegionResponse, error) {
-	queryReq := buildQueryRegionRequest(c.svcDiscovery.GetClusterID(), requests)
-	start := time.Now()
-	if err := send(queryReq); err != nil {
-		metrics.RequestFailedDurationQueryRegion.Observe(time.Since(start).Seconds())
-		return nil, err
-	}
-	metrics.QueryRegionBatchSendLatency.Observe(
-		time.Since(c.batchController.GetExtraBatchingStartTime()).Seconds(),
-	)
-	resp, err := recv()
-	if err != nil {
-		metrics.RequestFailedDurationQueryRegion.Observe(time.Since(start).Seconds())
-		return nil, err
-	}
-	metrics.RequestDurationQueryRegion.Observe(time.Since(start).Seconds())
-	metrics.QueryRegionBatchSizeTotal.Observe(float64(len(requests)))
-	if resp.GetHeader().GetError() == nil {
-		if keysLen := len(queryReq.Keys); keysLen > 0 {
-			metrics.QueryRegionBatchSizeByKeys.Observe(float64(keysLen))
-		}
-		if prevKeysLen := len(queryReq.PrevKeys); prevKeysLen > 0 {
-			metrics.QueryRegionBatchSizeByPrevKeys.Observe(float64(prevKeysLen))
-		}
-		if idsLen := len(queryReq.Ids); idsLen > 0 {
-			metrics.QueryRegionBatchSizeByIDs.Observe(float64(idsLen))
-		}
-	}
-	return resp, nil
-}
-
 func (c *Cli) processRequestsInner(
 	send sendFn,
 	recv recvFn,
@@ -899,11 +838,34 @@ func (c *Cli) processRequestsInner(
 		traceRegion.End()
 	}()
 
-	resp, err := c.queryRegion(send, recv, requests)
-	if err != nil {
+	queryReq := buildQueryRegionRequest(c.svcDiscovery.GetClusterID(), requests)
+	start := time.Now()
+	if err := send(queryReq); err != nil {
+		metrics.RequestFailedDurationQueryRegion.Observe(time.Since(start).Seconds())
 		return nil, err
 	}
+	metrics.QueryRegionBatchSendLatency.Observe(
+		time.Since(c.batchController.GetExtraBatchingStartTime()).Seconds(),
+	)
+	resp, err := recv()
+	if err != nil {
+		metrics.RequestFailedDurationQueryRegion.Observe(time.Since(start).Seconds())
+		return nil, err
+	}
+	metrics.RequestDurationQueryRegion.Observe(time.Since(start).Seconds())
+	metrics.QueryRegionBatchSizeTotal.Observe(float64(len(requests)))
 	headerErr := resp.GetHeader().GetError()
+	if headerErr == nil {
+		if keysLen := len(queryReq.Keys); keysLen > 0 {
+			metrics.QueryRegionBatchSizeByKeys.Observe(float64(keysLen))
+		}
+		if prevKeysLen := len(queryReq.PrevKeys); prevKeysLen > 0 {
+			metrics.QueryRegionBatchSizeByPrevKeys.Observe(float64(prevKeysLen))
+		}
+		if idsLen := len(queryReq.Ids); idsLen > 0 {
+			metrics.QueryRegionBatchSizeByIDs.Observe(float64(idsLen))
+		}
+	}
 	retryOnLeader := !isLeaderRetryBatch && (isFollower ||
 		(headerErr != nil && headerErr.GetType() == pdpb.ErrorType_REGION_NOT_FOUND))
 	if headerErr != nil && !retryOnLeader {
@@ -922,7 +884,7 @@ func (c *Cli) processRequestsInner(
 			missingRequests = make([]*Request, 0, len(requests))
 		}
 		c.batchController.FinishCollectedRequests(
-			partialResponseFinisher(responseForFinisher, &missingRequests),
+			requestFinisher(responseForFinisher, &missingRequests),
 			nil,
 		)
 		return missingRequests, nil
