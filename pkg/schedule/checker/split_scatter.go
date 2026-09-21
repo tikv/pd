@@ -294,6 +294,26 @@ func (c *splitScatterController) delayPendingSplitScatter(expected splitScatterP
 	c.pending[expected.regionID] = pending
 }
 
+func (c *splitScatterController) delayPendingSplitScatterRetryLater(
+	expected splitScatterPendingItem,
+	scatterGroup, reason string,
+) {
+	switch reason {
+	case scatter.InternalScatterRetryHotRegion:
+		splitScatterDispatchHotRegionCounter.Inc()
+	case scatter.InternalScatterRetryBalancedReadCPU:
+		splitScatterDispatchBalancedReadCPUCounter.Inc()
+	default:
+		splitScatterDispatchScatterFailedCounter.Inc()
+	}
+	c.delayPendingSplitScatter(expected)
+	log.Info("dispatch internal split scatter delayed",
+		zap.Uint64("region-id", expected.regionID),
+		zap.String("batch-group", expected.group),
+		zap.String("scatter-group", scatterGroup),
+		zap.String("reason", reason))
+}
+
 func (c *splitScatterController) deletePendingSplitScatter(expected splitScatterPendingItem) {
 	c.pendingMu.Lock()
 	defer c.pendingMu.Unlock()
@@ -516,24 +536,9 @@ func (c *splitScatterController) dispatchSplitScatterRegions() {
 		}
 		op, err := c.regionScatterer.ScatterInternal(region, scatterGroup, rangeHint.startKey, rangeHint.endKey)
 		if err != nil {
-			if stderrors.Is(err, scatter.ErrRegionHot) {
-				splitScatterDispatchHotRegionCounter.Inc()
-				c.delayPendingSplitScatter(pending)
-				log.Info("dispatch internal split scatter delayed",
-					zap.Uint64("region-id", pending.regionID),
-					zap.String("batch-group", pending.group),
-					zap.String("scatter-group", scatterGroup),
-					zap.String("reason", "hot-region"))
-				continue
-			}
-			if stderrors.Is(err, scatter.ErrInternalScatterBalancedReadCPU) {
-				splitScatterDispatchBalancedReadCPUCounter.Inc()
-				c.delayPendingSplitScatter(pending)
-				log.Info("dispatch internal split scatter delayed",
-					zap.Uint64("region-id", pending.regionID),
-					zap.String("batch-group", pending.group),
-					zap.String("scatter-group", scatterGroup),
-					zap.String("reason", "balanced-read-cpu"))
+			var retryLater *scatter.InternalScatterRetryLater
+			if stderrors.As(err, &retryLater) {
+				c.delayPendingSplitScatterRetryLater(pending, scatterGroup, retryLater.Reason)
 				continue
 			}
 			splitScatterDispatchScatterFailedCounter.Inc()

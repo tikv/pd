@@ -71,7 +71,37 @@ var (
 	ErrInternalScatterBalancedReadCPU = errors.New("internal split scatter skipped due to balanced read CPU")
 )
 
+// InternalScatterRetryLater means internal split-scatter should keep the pending
+// entry and retry later. Reason is for metrics and logs; Unwrap preserves the
+// underlying sentinel for errors.Is.
+type InternalScatterRetryLater struct {
+	Reason string
+	Err    error
+}
+
+// Error implements the error interface.
+func (e *InternalScatterRetryLater) Error() string {
+	if e.Err != nil {
+		return fmt.Sprintf("internal split scatter retry later (%s): %v", e.Reason, e.Err)
+	}
+	return fmt.Sprintf("internal split scatter retry later (%s)", e.Reason)
+}
+
+// Unwrap returns the underlying sentinel for errors.Is.
+func (e *InternalScatterRetryLater) Unwrap() error {
+	return e.Err
+}
+
+func retryInternalScatterLater(reason string, err error) error {
+	return &InternalScatterRetryLater{Reason: reason, Err: err}
+}
+
 const (
+	// InternalScatterRetryHotRegion is the retry-later reason when the region is hot.
+	InternalScatterRetryHotRegion = "hot-region"
+	// InternalScatterRetryBalancedReadCPU is the retry-later reason when a leader
+	// move would not reduce read CPU pressure enough.
+	InternalScatterRetryBalancedReadCPU   = "balanced-read-cpu"
 	maxSleepDuration                      = time.Minute
 	initialSleepDuration                  = 100 * time.Millisecond
 	maxRetryLimit                         = 30
@@ -634,7 +664,11 @@ func (r *RegionScatterer) scatterWithOptions(region *core.RegionInfo, group stri
 	if r.cluster.IsRegionHot(region) {
 		scatterSkipHotRegionCounter.Inc()
 		log.Warn("region too hot during scatter", zap.Uint64("region-id", region.GetID()))
-		return nil, fmt.Errorf("region %d is hot: %w", region.GetID(), ErrRegionHot)
+		err := fmt.Errorf("region %d is hot: %w", region.GetID(), ErrRegionHot)
+		if internalScatter {
+			return nil, retryInternalScatterLater(InternalScatterRetryHotRegion, err)
+		}
+		return nil, err
 	}
 
 	return r.scatterRegionWithType(region, group, skipStoreLimit, internalScatter, state)
@@ -765,7 +799,7 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 	}
 	if internalScatter && shouldSkipInternalScatterByBalancedReadCPU(region, targetLeader, readCPUByStore, readPoolThreadCount) {
 		scatterSkipBalancedReadCPUCounter.Inc()
-		return nil, ErrInternalScatterBalancedReadCPU
+		return nil, retryInternalScatterLater(InternalScatterRetryBalancedReadCPU, ErrInternalScatterBalancedReadCPU)
 	}
 
 	if isSameDistribution(region, targetPeers, targetLeader) {

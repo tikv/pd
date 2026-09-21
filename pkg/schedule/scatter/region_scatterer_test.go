@@ -16,6 +16,7 @@ package scatter
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -830,6 +831,9 @@ func TestInternalScatterSkipsWhenReadCPUIsBalanced(t *testing.T) {
 
 	op, err := scatterer.ScatterInternal(region, "balanced-read-cpu", []byte("a"), []byte("z"))
 	re.ErrorIs(err, ErrInternalScatterBalancedReadCPU)
+	var retryLater *InternalScatterRetryLater
+	re.ErrorAs(err, &retryLater)
+	re.Equal(InternalScatterRetryBalancedReadCPU, retryLater.Reason)
 	re.Nil(op)
 }
 
@@ -1340,9 +1344,13 @@ func TestScatterSkipsHotRegion(t *testing.T) {
 	op, err := scatterer.Scatter(region, "", true)
 	re.ErrorIs(err, ErrRegionHot)
 	re.Nil(op)
+	var retryLater *InternalScatterRetryLater
+	re.False(errors.As(err, &retryLater))
 
 	op, err = scatterer.ScatterInternal(region, "", region.GetStartKey(), region.GetEndKey())
 	re.ErrorIs(err, ErrRegionHot)
+	re.ErrorAs(err, &retryLater)
+	re.Equal(InternalScatterRetryHotRegion, retryLater.Reason)
 	re.Nil(op)
 }
 
