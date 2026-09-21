@@ -862,21 +862,25 @@ func moveScatterPeer(view *core.RegionInfo, peerID, storeID uint64) {
 	}
 }
 
-// scatterPeersValid checks that planning preserves the peer count and roles.
+// scatterPeersValid checks that planning preserves peer counts by role and witness status.
 func scatterPeersValid(region *core.RegionInfo, targets map[uint64]*metapb.Peer) bool {
 	if len(targets) != len(region.GetPeers()) {
 		return false
 	}
-	roles := make(map[metapb.PeerRole]int)
+	type peerKind struct {
+		role    metapb.PeerRole
+		witness bool
+	}
+	roles := make(map[peerKind]int)
 	for _, peer := range region.GetPeers() {
-		roles[peer.GetRole()]++
+		roles[peerKind{peer.GetRole(), peer.GetIsWitness()}]++
 	}
 	for storeID, peer := range targets {
 		if peer == nil || storeID == 0 || storeID != peer.GetStoreId() {
 			return false
 		}
-		roles[peer.GetRole()]--
-		if roles[peer.GetRole()] < 0 {
+		roles[peerKind{peer.GetRole(), peer.GetIsWitness()}]--
+		if roles[peerKind{peer.GetRole(), peer.GetIsWitness()}] < 0 {
 			return false
 		}
 	}
@@ -932,8 +936,9 @@ func (r *RegionScatterer) selectNewPeer(context scatterSelectionContext, group s
 			continue
 		}
 		candidate := &metapb.Peer{
-			StoreId: store.GetID(),
-			Role:    peer.GetRole(),
+			StoreId:   store.GetID(),
+			Role:      peer.GetRole(),
+			IsWitness: peer.GetIsWitness(),
 		}
 		storeRegionCount := store.GetRegionCount()
 		if storeCount < minCount ||
