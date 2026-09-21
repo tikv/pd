@@ -311,6 +311,65 @@ func TestEvictLeaderUpdateConfigBatchPreservesExistingRanges(t *testing.T) {
 	re.Equal([]keyutil.KeyRange{keyutil.NewKeyRange("", "")}, conf.StoreIDWithRanges[2])
 }
 
+func TestEvictLeaderUpdateConfigBatchCopiesExplicitRangesPerStore(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	tc.AddLeaderStore(1, 0)
+	tc.AddLeaderStore(2, 0)
+
+	sl, err := CreateScheduler(types.EvictLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigSliceDecoder(types.EvictLeaderScheduler, []string{"1"}), func(string) error { return nil })
+	re.NoError(err)
+	conf := sl.(*evictLeaderScheduler).conf
+
+	body, err := json.Marshal(map[string]any{"store_ids": []int{1, 2}, "ranges": []string{"c", "d"}})
+	re.NoError(err)
+	req := httptest.NewRequest(http.MethodPost, "/config", bytes.NewReader(body))
+	resp := httptest.NewRecorder()
+	sl.ServeHTTP(resp, req)
+	re.Equal(http.StatusOK, resp.Code)
+
+	expected := []keyutil.KeyRange{keyutil.NewKeyRange("c", "d")}
+	re.Equal(expected, conf.StoreIDWithRanges[1])
+	re.Equal(expected, conf.StoreIDWithRanges[2])
+
+	// Each store must own an independent backing array: mutating one
+	// store's range must not affect the other.
+	conf.StoreIDWithRanges[1][0].StartKey = []byte("zzz")
+	re.Equal([]byte("c"), conf.StoreIDWithRanges[2][0].StartKey)
+}
+
+func TestEvictLeaderUpdateConfigEmptyRangesPreservesExisting(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	tc.AddLeaderStore(1, 0)
+	tc.AddLeaderStore(2, 0)
+
+	sl, err := CreateScheduler(types.EvictLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigSliceDecoder(types.EvictLeaderScheduler, []string{"1", "a", "b"}), func(string) error { return nil })
+	re.NoError(err)
+	conf := sl.(*evictLeaderScheduler).conf
+	customRanges := conf.StoreIDWithRanges[1]
+	re.Equal([]keyutil.KeyRange{keyutil.NewKeyRange("a", "b")}, customRanges)
+
+	// An empty "ranges" array carries no range pairs; it must be treated
+	// like an omitted field rather than resetting existing stores to the
+	// whole key space.
+	body, err := json.Marshal(map[string]any{"store_ids": []int{1, 2}, "ranges": []string{}})
+	re.NoError(err)
+	req := httptest.NewRequest(http.MethodPost, "/config", bytes.NewReader(body))
+	resp := httptest.NewRecorder()
+	sl.ServeHTTP(resp, req)
+	re.Equal(http.StatusOK, resp.Code)
+
+	re.Equal(customRanges, conf.StoreIDWithRanges[1])
+	re.Equal([]keyutil.KeyRange{keyutil.NewKeyRange("", "")}, conf.StoreIDWithRanges[2])
+}
+
 func TestEvictLeaderUpdateConfigBatchRollbackPreservesExisting(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()

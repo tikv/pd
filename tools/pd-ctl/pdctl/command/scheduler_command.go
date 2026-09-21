@@ -645,7 +645,7 @@ func newConfigEvictLeaderCommand() *cobra.Command {
 		Run:   listSchedulerConfigCommandFunc,
 	}
 	c.AddCommand(&cobra.Command{
-		Use:   "add-store <store-id>",
+		Use:   "add-store <store_id> [store_id...]",
 		Short: "add a store to evict leader list",
 		Run:   func(cmd *cobra.Command, args []string) { addStoreToSchedulerConfig(cmd, c.Name(), args) },
 	}, &cobra.Command{

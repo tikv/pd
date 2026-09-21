@@ -223,7 +223,7 @@ func (conf *evictLeaderSchedulerConfig) applyStoreIDs(ids []uint64, explicitRang
 			}
 			pausedIDs = append(pausedIDs, id)
 			if hasExplicitRanges {
-				conf.StoreIDWithRanges[id] = explicitRanges
+				conf.StoreIDWithRanges[id] = append([]keyutil.KeyRange(nil), explicitRanges...)
 			} else {
 				conf.StoreIDWithRanges[id] = []keyutil.KeyRange{keyutil.NewKeyRange("", "")}
 			}
@@ -234,7 +234,7 @@ func (conf *evictLeaderSchedulerConfig) applyStoreIDs(ids []uint64, explicitRang
 			continue
 		}
 		prevRanges[id] = old
-		conf.StoreIDWithRanges[id] = explicitRanges
+		conf.StoreIDWithRanges[id] = append([]keyutil.KeyRange(nil), explicitRanges...)
 	}
 	conf.Batch = batch
 
@@ -483,10 +483,18 @@ func (handler *evictLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 			handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("invalid argument for 'ranges': expected an array of strings, got %T", rawRanges))
 			return
 		}
-		explicitRanges, err = getKeyRanges(strs)
-		if err != nil {
-			handler.rd.JSON(w, http.StatusBadRequest, err.Error())
-			return
+		// An empty "ranges" array carries no range pairs to apply; treat it
+		// the same as an omitted field instead of letting getKeyRanges
+		// default it to the whole key space and overwrite existing stores'
+		// custom ranges.
+		if len(strs) > 0 {
+			explicitRanges, err = getKeyRanges(strs)
+			if err != nil {
+				handler.rd.JSON(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		} else {
+			hasRanges = false
 		}
 	}
 
