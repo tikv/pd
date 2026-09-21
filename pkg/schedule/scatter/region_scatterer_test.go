@@ -1640,38 +1640,66 @@ func BenchmarkScatterPlacementBatch(b *testing.B) {
 }
 
 func TestScatterOverlappingAndOverrideRules(t *testing.T) {
-	for _, override := range []bool{false, true} {
-		t.Run(strconv.FormatBool(override), func(t *testing.T) {
-			sc, tc, region := newPlacementTestScatter(t, true, []string{"A", "B", "C", "D", "E", "F"})
-			rm := tc.GetRuleManager()
-			first := rm.GetRule("pd", "default").Clone()
-			first.GroupID = "overlap"
-			first.ID = "first"
-			first.Count = 2
-			second := first.Clone()
-			second.ID = "second"
-			second.Count = 1
-			require.NoError(t, rm.SetRule(first))
-			require.NoError(t, rm.SetRule(second))
-			if override {
-				require.NoError(t, rm.SetRuleGroup(&placement.RuleGroup{ID: "overlap", Index: 10, Override: true}))
-			} else {
-				require.NoError(t, rm.DeleteRule("pd", "default"))
-			}
-			for id := uint64(1); id <= 3; id++ {
-				for range 10 {
-					sc.ordinaryEngine.selectedPeer.Put(id, "test")
+	for _, sameHost := range []bool{false, true} {
+		for _, override := range []bool{false, true} {
+			t.Run(fmt.Sprintf("same-host=%t/override=%t", sameHost, override), func(t *testing.T) {
+				hosts := []string{"A", "B", "C", "D", "E", "F"}
+				if sameHost {
+					hosts = []string{"A", "B", "C", "D", "D", "D"}
 				}
-			}
-			op, err := sc.Scatter(region, "test", true)
-			require.NoError(t, err)
-			require.NotNil(t, op)
-			targets, leader := scatterOperatorTargets(t, region, op)
-			assertScatterMembership(t, region, targets, leader)
-			for id := range targets {
-				require.Greater(t, id, uint64(3))
-			}
-		})
+				sc, tc, region := newPlacementTestScatter(t, true, hosts)
+				rm := tc.GetRuleManager()
+				first := rm.GetRule("pd", "default").Clone()
+				first.GroupID = "overlap"
+				first.ID = "first"
+				first.Count = 2
+				second := first.Clone()
+				second.ID = "second"
+				second.Count = 1
+				require.NoError(t, rm.SetRule(first))
+				require.NoError(t, rm.SetRule(second))
+				if override {
+					require.NoError(t, rm.SetRuleGroup(&placement.RuleGroup{ID: "overlap", Index: 10, Override: true}))
+				} else {
+					require.NoError(t, rm.DeleteRule("pd", "default"))
+				}
+				for id := uint64(1); id <= 3; id++ {
+					for range 10 {
+						sc.ordinaryEngine.selectedPeer.Put(id, "test")
+					}
+				}
+				op, err := sc.Scatter(region, "test", true)
+				require.NoError(t, err)
+				require.NotNil(t, op)
+				targets, leader := scatterOperatorTargets(t, region, op)
+				assertScatterMembership(t, region, targets, leader)
+				peers := make([]*metapb.Peer, 0, len(targets))
+				targetHosts := make(map[string]struct{})
+				for id, peer := range targets {
+					peers = append(peers, peer)
+					targetHosts[tc.GetStore(id).GetLabelValue("host")] = struct{}{}
+					if !sameHost {
+						require.Greater(t, id, uint64(3))
+					}
+				}
+				finalRegion := region.Clone(core.SetPeers(peers), core.WithLeader(targets[leader]))
+				fit := rm.FitRegionWithoutCache(tc, finalRegion)
+				require.True(t, fit.IsSatisfied())
+				require.Len(t, fit.RuleFits, 2)
+				for _, ruleFit := range fit.RuleFits {
+					ruleHosts := make(map[string]struct{})
+					for _, peer := range ruleFit.Peers {
+						ruleHosts[tc.GetStore(peer.GetStoreId()).GetLabelValue("host")] = struct{}{}
+					}
+					require.Len(t, ruleHosts, ruleFit.Rule.Count)
+				}
+				if sameHost {
+					// Host isolation applies within each rule; peers assigned to
+					// different rules can share a host.
+					require.Len(t, targetHosts, 2)
+				}
+			})
+		}
 	}
 }
 
