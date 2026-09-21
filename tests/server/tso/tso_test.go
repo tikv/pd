@@ -16,10 +16,10 @@ package tso_test
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
@@ -172,6 +172,34 @@ func (s *tsoTestSuite) TestLogicalOverflow() {
 
 func (s *tsoTestSuite) checkLogicalOverflow(cluster *tests.TestCluster) {
 	re := s.Require()
+	const (
+		maxLogical = 1 << 18
+		count      = maxLogical / 10
+	)
+	var (
+		overflowPhysical atomic.Int64
+		overflowed       atomic.Bool
+	)
+	// Exhaust logical capacity on the first matching request while holding the
+	// allocation lock, so a periodic update cannot clear it before allocation.
+	const beforeGenerateTSOFailpoint = "github.com/tikv/pd/pkg/tso/beforeGenerateTSO"
+	re.NoError(failpoint.EnableCall(beforeGenerateTSOFailpoint, func(physical int64, logical *int64, batchCount int64) {
+		if batchCount == count && overflowPhysical.CompareAndSwap(0, physical) {
+			*logical = maxLogical - 1
+		}
+	}))
+	defer func() {
+		re.NoError(failpoint.Disable(beforeGenerateTSOFailpoint))
+	}()
+	const onLogicalOverflowFailpoint = "github.com/tikv/pd/pkg/tso/onLogicalOverflow"
+	re.NoError(failpoint.EnableCall(onLogicalOverflowFailpoint, func(batchCount uint32) {
+		if batchCount == count {
+			overflowed.Store(true)
+		}
+	}))
+	defer func() {
+		re.NoError(failpoint.Disable(onLogicalOverflowFailpoint))
+	}()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -189,30 +217,11 @@ func (s *tsoTestSuite) checkLogicalOverflow(cluster *tests.TestCluster) {
 		re.NoError(err)
 	}()
 
-	overflowCount := func() float64 {
-		metrics, err := prometheus.DefaultGatherer.Gather()
-		re.NoError(err)
-		var count float64
-		for _, family := range metrics {
-			if family.GetName() != "pd_tso_events" {
-				continue
-			}
-			for _, metric := range family.GetMetric() {
-				for _, label := range metric.GetLabel() {
-					if label.GetName() == "type" && label.GetValue() == "logical_overflow" {
-						count += metric.GetCounter().GetValue()
-					}
-				}
-			}
-		}
-		return count
-	}
-	overflowsBefore := overflowCount()
-	var lastTimestamp *pdpb.Timestamp
-	// Request more than one physical timestamp's logical range, then verify that
-	// the allocator actually handled an overflow rather than a periodic update.
-	const maxLogical = 1 << 18
-	count := maxLogical / 10
+	var (
+		firstPhysical int64
+		lastTimestamp *pdpb.Timestamp
+	)
+	// Keep allocating after the forced overflow to check recovery and monotonicity.
 	for range 20 {
 		req := &pdpb.TsoRequest{
 			Header: testutil.NewRequestHeader(clusterID),
@@ -225,7 +234,9 @@ func (s *tsoTestSuite) checkLogicalOverflow(cluster *tests.TestCluster) {
 		timestamp := checkAndReturnTimestampResponse(re, req, resp)
 		re.NotNil(timestamp)
 		re.Less(timestamp.GetLogical(), int64(maxLogical))
-		if lastTimestamp != nil {
+		if lastTimestamp == nil {
+			firstPhysical = timestamp.GetPhysical()
+		} else {
 			lastPhysical, curPhysical := lastTimestamp.GetPhysical(), timestamp.GetPhysical()
 			re.GreaterOrEqual(curPhysical, lastPhysical)
 			// If the physical time is the same, the logical time must be strictly increasing.
@@ -235,7 +246,7 @@ func (s *tsoTestSuite) checkLogicalOverflow(cluster *tests.TestCluster) {
 		}
 		lastTimestamp = timestamp
 	}
-	// An overflow can advance physical time immediately inside the saved window;
-	// it only waits for the update interval when that window is exhausted.
-	re.Greater(overflowCount(), overflowsBefore)
+	re.Positive(overflowPhysical.Load(), "the logical capacity must be exhausted")
+	re.True(overflowed.Load(), "the logical overflow branch must be reached")
+	re.Greater(firstPhysical, overflowPhysical.Load())
 }

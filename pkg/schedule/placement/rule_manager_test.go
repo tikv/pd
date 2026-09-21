@@ -166,11 +166,11 @@ func TestSetAfterGet(t *testing.T) {
 
 func checkRules(t *testing.T, rules []*Rule, expect [][2]string) {
 	re := require.New(t)
-	actual := make([][2]string, 0, len(rules))
-	for _, rule := range rules {
-		actual = append(actual, rule.Key())
+	re.Len(rules, len(expect))
+	for i := range rules {
+		// #nosec G602 -- require.Len above guarantees an expected key for every rule.
+		re.Equal(expect[i], rules[i].Key())
 	}
-	re.Equal(expect, actual)
 }
 
 func TestKeys(t *testing.T) {

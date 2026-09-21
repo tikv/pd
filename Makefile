@@ -178,13 +178,18 @@ PD_PKG := github.com/tikv/pd
 PACKAGES := $(shell go list ./...)
 
 GO_TOOLS_BIN_PATH := $(ROOT_PATH)/.tools/bin
+GOLANGCI_LINT_VERSION := 2.13.2
 PATH := $(GO_TOOLS_BIN_PATH):$(PATH)
 RETRY := $(ROOT_PATH)/scripts/retry.sh
 SHELL := env PATH='$(PATH)' GOBIN='$(GO_TOOLS_BIN_PATH)' $(shell which bash)
 
 install-tools:
 	@mkdir -p $(GO_TOOLS_BIN_PATH)
-	@which golangci-lint >/dev/null 2>&1 || $(RETRY) bash -o pipefail -c 'curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/v2.6.0/install.sh | sh -s -- -b "$$1" v2.6.0' _ "$(GO_TOOLS_BIN_PATH)"
+	@set -o pipefail; \
+	if ! $(GO_TOOLS_BIN_PATH)/golangci-lint version 2>/dev/null | grep -Fq 'version $(GOLANGCI_LINT_VERSION) '; then \
+		$(RETRY) curl -sSfL https://golangci-lint.run/install.sh | \
+			sh -s -- -b $(GO_TOOLS_BIN_PATH) v$(GOLANGCI_LINT_VERSION); \
+	fi
 	@which promtool >/dev/null 2>&1 || { \
 		GOWORK=off $(RETRY) go mod download github.com/prometheus/prometheus@v0.310.0 || exit $$?; \
 		prom_dir=$$(go env GOMODCACHE)/github.com/prometheus/prometheus@v0.310.0; \
