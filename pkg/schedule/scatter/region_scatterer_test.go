@@ -16,7 +16,6 @@ package scatter
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -1345,7 +1344,7 @@ func TestScatterSkipsHotRegion(t *testing.T) {
 	re.ErrorIs(err, ErrRegionHot)
 	re.Nil(op)
 	var retryLater *InternalScatterRetryLater
-	re.False(errors.As(err, &retryLater))
+	re.NotErrorAs(err, &retryLater)
 
 	op, err = scatterer.ScatterInternal(region, "", region.GetStartKey(), region.GetEndKey())
 	re.ErrorIs(err, ErrRegionHot)
