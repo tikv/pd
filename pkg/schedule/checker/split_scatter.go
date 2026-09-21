@@ -42,10 +42,11 @@ const (
 	// is only the minimum interval to avoid retrying the same pending item too
 	// frequently when checker ticks are fast.
 	splitScatterRetryBackoff = 10 * time.Second
-	// Keep the pending TTL longer than a single slow operator step. Split-scatter
-	// can be blocked by several consecutive gates, including running operators,
-	// store limits, replication, scheduling labels, and balanced read CPU.
-	splitScatterPendingTTL = 3 * operator.SlowStepWaitTime
+	// Keep pending long enough to ride out several consecutive gates
+	// (running operators, store limits, replication, labels, read CPU).
+	// Independent of operator.SlowStepWaitTime so other timeout tunings
+	// do not silently shrink this window.
+	splitScatterPendingTTL = 30 * time.Minute
 )
 
 type splitScatterPendingItem struct {
