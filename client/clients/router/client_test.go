@@ -49,7 +49,7 @@ func newMockRegionResponse(id uint64) *pdpb.RegionResponse {
 
 // newTestRequest builds a *Request directly for finisher tests, mirroring the
 // invariants that the production newRequest guarantees: a non-nil options and a
-// buffered done channel. Callers set key/prevKey/id afterwards.
+// buffered done channel. Callers set key, prevKey, or id afterwards.
 func newTestRequest(ctx context.Context, opts ...opt.GetRegionOption) *Request {
 	req := &Request{
 		requestCtx: ctx,
@@ -104,7 +104,7 @@ func TestRequestFinisherNoDataRace(t *testing.T) {
 	}
 
 	// Get the finisher function.
-	finisher := requestFinisher(resp)
+	finisher := requestFinisher(resp, nil)
 
 	// Simulate finishing the batch – call the finisher for each request.
 	for idx, req := range requests {
@@ -144,7 +144,7 @@ func TestRequestFinisherClearsUnrequestedBuckets(t *testing.T) {
 	reqWithoutBuckets := newTestRequest(ctx)
 	reqWithoutBuckets.id = 2
 
-	finisher := requestFinisher(resp)
+	finisher := requestFinisher(resp, nil)
 	finisher(0, reqWithBuckets, nil)
 	re.NoError(<-reqWithBuckets.done)
 	finisher(1, reqWithoutBuckets, nil)
@@ -160,7 +160,7 @@ func TestRequestFinisherWithZeroRegionID(t *testing.T) {
 	re := require.New(t)
 	req := newTestRequest(context.Background())
 
-	finisher := requestFinisher(&pdpb.QueryRegionResponse{})
+	finisher := requestFinisher(&pdpb.QueryRegionResponse{}, nil)
 	finisher(0, req, nil)
 
 	re.NoError(<-req.done)
@@ -225,7 +225,7 @@ func newQueryRegionTestClient(
 	requests []*Request,
 ) *Cli {
 	t.Helper()
-	controller := batch.NewController[*Request](len(requests), requestFinisher(nil), nil)
+	controller := batch.NewController[*Request](len(requests), requestFinisher(nil, nil), nil)
 	requestCh := make(chan *Request, len(requests))
 	for _, req := range requests {
 		requestCh <- req
@@ -441,7 +441,7 @@ func TestDispatcherIsolatesLeaderRetryBatch(t *testing.T) {
 		conCtxMgr:       cctx.NewManager[pdpb.PD_QueryRegionClient](),
 		msConCtxMgr:     cctx.NewManager[routerpb.Router_QueryRegionClient](),
 		requestCh:       make(chan *Request, 3),
-		batchController: batch.NewController[*Request](3, requestFinisher(nil), nil),
+		batchController: batch.NewController[*Request](3, requestFinisher(nil, nil), nil),
 	}
 	client.leaderURL.Store(queryRegionTestLeaderURL)
 
