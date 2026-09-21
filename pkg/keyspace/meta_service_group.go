@@ -38,8 +38,8 @@ import (
 type MetaServiceGroupManager struct {
 	store endpoint.MetaServiceGroupStorage
 	syncutil.RWMutex
-	updateMu  sync.Mutex
-	tlsConfig *tls.Config
+	updateMu        sync.Mutex
+	tlsConfigLoader func() (*tls.Config, error)
 	// healthClients is keyed by meta-service group ID. Each value contains one
 	// cached client per endpoint so every endpoint can be checked independently.
 	healthClients map[string]*metaServiceGroupClient
@@ -68,11 +68,11 @@ func (m *MetaServiceGroupManager) SetKeyspaceAssignmentCounter(counter func(grou
 func NewMetaServiceGroupManager(
 	store endpoint.MetaServiceGroupStorage,
 	metaServiceGroups map[string]string,
-	tlsConfig *tls.Config,
+	tlsConfigLoader func() (*tls.Config, error),
 ) *MetaServiceGroupManager {
 	return &MetaServiceGroupManager{
 		store:             store,
-		tlsConfig:         tlsConfig,
+		tlsConfigLoader:   tlsConfigLoader,
 		healthClients:     make(map[string]*metaServiceGroupClient),
 		metaServiceGroups: cloneMetaServiceGroups(metaServiceGroups),
 	}
@@ -381,10 +381,21 @@ func (m *MetaServiceGroupManager) checkNewGroupsHealth(ctx context.Context, meta
 		endpoints := splitMetaServiceGroupEndpoints(addresses)
 		clients := make([]*clientv3.Client, 0, len(endpoints))
 		for _, endpoint := range endpoints {
+			var tlsConfig *tls.Config
+			if m.tlsConfigLoader != nil {
+				var err error
+				tlsConfig, err = m.tlsConfigLoader()
+				if err != nil {
+					closeMetaServiceGroupClients(newClients)
+					closeMetaServiceGroupClientList(clients)
+					return nil, fmt.Errorf("%w: group %s endpoint %s: failed to load TLS config: %v",
+						ErrMetaServiceGroupUnhealthy, groupID, endpoint, err)
+				}
+			}
 			client, err := clientv3.New(clientv3.Config{
 				Endpoints:   []string{endpoint},
 				DialTimeout: etcdutil.DefaultRequestTimeout,
-				TLS:         m.tlsConfig,
+				TLS:         tlsConfig,
 			})
 			if err != nil {
 				closeMetaServiceGroupClients(newClients)

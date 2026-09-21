@@ -17,6 +17,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -541,14 +542,12 @@ func (s *Server) startServer(ctx context.Context) error {
 	if s.IsKeyspaceGroupEnabled() {
 		s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage, s.client)
 	}
-	tlsConfig, err := s.cfg.Security.ToClientTLSConfig()
-	if err != nil {
-		return err
-	}
 	s.metaServiceGroupManager = keyspace.NewMetaServiceGroupManager(
 		s.storage,
 		s.cfg.Keyspace.GetMetaServiceGroups(),
-		tlsConfig,
+		func() (*tls.Config, error) {
+			return s.cfg.Security.ToClientTLSConfig()
+		},
 	)
 	s.keyspaceManager = keyspace.NewKeyspaceManager(
 		s.ctx,

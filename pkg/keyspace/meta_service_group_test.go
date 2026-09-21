@@ -16,6 +16,8 @@ package keyspace
 
 import (
 	"context"
+	"crypto/tls"
+	"errors"
 	"testing"
 	"time"
 
@@ -340,6 +342,41 @@ func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelyChecksNewGroupHeal
 	re.ErrorIs(err, ErrMetaServiceGroupUnhealthy)
 	re.False(persisted)
 	re.Equal(endpoint, suite.manager.GetGroups()["healthy"])
+}
+
+func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelyRefreshesTLSConfig() {
+	re := suite.Require()
+	servers, _, cleanup := etcdutil.NewTestEtcdCluster(suite.T(), 1, nil)
+	defer cleanup()
+	groupEndpoint := servers[0].Config().ListenClientUrls[0].String()
+
+	loads := 0
+	manager := NewMetaServiceGroupManager(
+		endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil),
+		nil,
+		func() (*tls.Config, error) {
+			loads++
+			if loads > 1 {
+				return nil, errors.New("tls config reload failed")
+			}
+			return nil, nil
+		},
+	)
+	defer manager.Close()
+
+	groups := map[string]string{"healthy": groupEndpoint}
+	re.NoError(manager.UpdateGroupsSafely(suite.ctx, groups, nil, func() error {
+		return nil
+	}, nil))
+	re.Equal(1, loads)
+
+	groups["healthy-2"] = groupEndpoint
+	err := manager.UpdateGroupsSafely(suite.ctx, groups, nil, func() error {
+		return nil
+	}, nil)
+	re.ErrorIs(err, ErrMetaServiceGroupUnhealthy)
+	re.Contains(err.Error(), "tls config reload failed")
+	re.Equal(2, loads)
 }
 
 func (suite *metaServiceGroupTestSuite) TestCloseHealthClients() {
