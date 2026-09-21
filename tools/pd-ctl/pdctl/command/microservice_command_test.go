@@ -36,9 +36,9 @@ func TestMicroServicesCommandUsageListsAllServices(t *testing.T) {
 func TestResourceManagerCommandUsesDiscoveryServiceName(t *testing.T) {
 	re := require.New(t)
 	run := func(args ...string) string {
-		var gotPath string
+		pathCh := make(chan string, 1)
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			gotPath = r.URL.Path
+			pathCh <- r.URL.Path
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`[]`))
 		}))
@@ -50,7 +50,7 @@ func TestResourceManagerCommandUsesDiscoveryServiceName(t *testing.T) {
 		root.AddCommand(NewMicroServicesCommand())
 		root.SetArgs(append([]string{"-u", server.URL}, args...))
 		re.NoError(root.Execute())
-		return gotPath
+		return <-pathCh
 	}
 
 	re.Equal("/pd/api/v2/ms/members/resource_manager", run("microservice", "resource-manager", "members"))
