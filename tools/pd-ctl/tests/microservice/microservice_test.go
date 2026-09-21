@@ -48,6 +48,11 @@ func (suite *microServiceSuite) TearDownSuite() {
 	for _, fn := range suite.cancels {
 		fn()
 	}
+	// Destroy the resource manager cluster before the PD cluster it's registered
+	// against: t.Cleanup (registered in startCluster as a SetupSuite-failure
+	// fallback) only fires after this function returns, so it can't be relied on
+	// as the primary teardown on the success path.
+	suite.rmCluster.Destroy()
 	suite.cluster.Destroy()
 }
 
