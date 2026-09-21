@@ -181,10 +181,6 @@ type RaftCluster struct {
 
 	// Keep the previous store limit settings when removing a store.
 	prevStoreLimit sync.Map // map[uint64]map[storelimit.Type]float64
-	// removedStoreIDs prevents a delayed limit update from recreating a limit
-	// after the store has been removed. It is cleared if the ID is registered
-	// again.
-	removedStoreIDs sync.Map // map[uint64]struct{}
 
 	// This below fields are all read-only, we cannot update itself after the raft cluster starts.
 	id  id.Allocator
@@ -1173,7 +1169,18 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 		return errors.Errorf("store %v not found", storeID)
 	}
 	if store.IsRemoved() {
-		return errs.ErrStoreRemoved.FastGenByArgs(storeID)
+		// A tombstoned store's heartbeat is routine, not a rejected request:
+		// master has no IsRemoved() check here at all, and this contract is
+		// relied on elsewhere (TestFilterUnhealthyStore expects NoError).
+		// Still run FilterUnhealthyStore so this store's own now-stale rolling
+		// stats entry gets swept here -- skipping the rest (limiter refresh,
+		// PutStore, hotStat.Observe, hot-peer processing,
+		// adjustNetworkSlowStore) closes the republish gap at the source
+		// instead of relying on each of those to guard itself.
+		if !c.IsServiceIndependent(constant.SchedulingServiceName) {
+			c.hotStat.FilterUnhealthyStore(c)
+		}
+		return nil
 	}
 
 	limit := store.GetStoreLimit()
@@ -1585,7 +1592,6 @@ func (c *RaftCluster) PutMetaStore(store *metapb.Store) error {
 	}
 	c.OnStoreVersionChange()
 	c.addStoreLimitInternal(store, wasKnown)
-	c.removedStoreIDs.Delete(store.GetId())
 	return nil
 }
 
@@ -2306,7 +2312,6 @@ func (c *RaftCluster) deleteStore(store *core.StoreInfo) error {
 	// find and remove it again.
 	c.DeleteStore(store)
 	c.ruleManager.RemoveStoreCache(store.GetID())
-	c.removedStoreIDs.Store(store.GetID(), struct{}{})
 	storeIDStr := strconv.FormatUint(store.GetID(), 10)
 	statistics.DeleteClusterStatusMetrics(store)
 	statistics.ResetStoreStatistics(storeIDStr)
@@ -2759,10 +2764,25 @@ func (c *RaftCluster) loadExternalTS() {
 
 // SetStoreLimit sets a store limit for a given type and rate.
 func (c *RaftCluster) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePerMin float64) error {
+	failpoint.InjectCall("setStoreLimitBeforeStateLock")
 	c.storeStateLock.Lock(uint32(storeID))
 	defer c.storeStateLock.Unlock(uint32(storeID))
 
-	if store := c.GetStore(storeID); (store != nil && store.IsRemoved()) || c.isStoreRemoved(storeID) {
+	// A tombstoned store's config entry is only ever cleared once, at bury time
+	// (RemoveStoreLimit); nothing sweeps it again afterward. Without this check,
+	// setting a limit for an already-tombstoned store re-adds it, and
+	// StoreLimitGauge stays republished for it until final removal. storeStateLock
+	// makes this check atomic with BuryStoreLocked (the same per-store lock
+	// RemoveStore/BuryStore/UpStore/checkStore/RemoveTombStoneRecords/PutMetaStore
+	// hold), closing that race for any concurrent overlap; it does not close the
+	// separate, sequential case where the store is already fully deleted by the
+	// time this runs -- see the PR's Known limitations.
+	//
+	// GetStore returning nil is deliberately NOT treated the same as removed
+	// here: callers legitimately set a store's limit before the store itself
+	// is registered (see testCluster.addRegionStore), so nil just means
+	// "not created yet," not "already gone."
+	if store := c.GetStore(storeID); store != nil && store.IsRemoved() {
 		return errs.ErrStoreRemoved.FastGenByArgs(storeID)
 	}
 	return c.setStoreLimit(storeID, typ, ratePerMin)
@@ -2784,11 +2804,6 @@ func (c *RaftCluster) setStoreLimit(storeID uint64, typ storelimit.Type, ratePer
 	c.refreshStoreRateLimit(storeID, typ)
 	log.Info("store limit changed", zap.Uint64("store-id", storeID), zap.String("type", typ.String()), zap.Float64("rate-per-min", ratePerMin))
 	return nil
-}
-
-func (c *RaftCluster) isStoreRemoved(storeID uint64) bool {
-	_, ok := c.removedStoreIDs.Load(storeID)
-	return ok
 }
 
 // SetAllStoresLimit sets all store limit for a given type and rate.

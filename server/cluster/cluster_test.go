@@ -225,10 +225,14 @@ func TestStoreMutationsRejectTombstoneStore(t *testing.T) {
 	store := newTestStores(1, "2.0.0")[0].Clone(core.SetStoreState(metapb.StoreState_Tombstone))
 	rc.PutStore(store)
 
+	// Unlike the mutation methods below, a heartbeat isn't a request a caller
+	// can retry or react to an error from -- TiKV just keeps sending them.
+	// Matching master's long-standing contract, it's treated as routine and
+	// silently no-op'd rather than rejected (see TestFilterUnhealthyStore).
 	request := &pdpb.StoreHeartbeatRequest{
 		Stats: &pdpb.StoreStats{StoreId: store.GetID()},
 	}
-	re.Error(rc.HandleStoreHeartbeat(request, &pdpb.StoreHeartbeatResponse{}))
+	re.NoError(rc.HandleStoreHeartbeat(request, &pdpb.StoreHeartbeatResponse{}))
 	re.Error(rc.SetMinResolvedTS(store.GetID(), 1))
 }
 
@@ -3495,10 +3499,28 @@ func TestSetStoreLimitCannotRaceStoreDeletion(t *testing.T) {
 		t.Fatal("deleteStore did not reach store metadata deletion")
 	}
 
+	// SetStoreLimit's own storeStateLock.Lock() is the very next statement
+	// after this failpoint, with no test-side setup code in between, so
+	// waiting for it first absorbs all scheduling uncertainty -- the
+	// subsequent short window only needs to rule out "blocked on the lock",
+	// not "not yet scheduled" (see assertBlockedThenReleased's doc comment
+	// for the same reasoning).
+	beforeLock := make(chan struct{})
+	const beforeLockFP = "github.com/tikv/pd/server/cluster/setStoreLimitBeforeStateLock"
+	re.NoError(failpoint.EnableCall(beforeLockFP, func() { close(beforeLock) }))
+	defer func() { re.NoError(failpoint.Disable(beforeLockFP)) }()
+
 	setLimitDone := make(chan error, 1)
 	go func() {
 		setLimitDone <- rc.SetStoreLimit(storeID, storelimit.AddPeer, 60)
 	}()
+
+	select {
+	case <-beforeLock:
+	case <-time.After(2 * time.Second):
+		t.Fatal("SetStoreLimit did not reach its lock attempt")
+	}
+
 	select {
 	case err := <-setLimitDone:
 		t.Fatalf("setting a deleted store limit completed before deletion: %v", err)
