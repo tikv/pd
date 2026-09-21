@@ -17,7 +17,9 @@ package client_test
 import (
 	"context"
 	"fmt"
+	"math"
 	"math/rand/v2"
+	"net/url"
 	"reflect"
 	"strings"
 	"sync"
@@ -28,6 +30,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -518,7 +522,9 @@ func (suite *routerClientSuite) TestQueryRegionFollowerFallbackMatchesUnarySeman
 	re.NotNil(follower)
 	// Query a running syncer so the follower returns a successful cache miss.
 	testutil.Eventually(re, func() bool {
-		return follower.GetServer().DirectlyGetRaftCluster().GetRegionSyncer().IsRunning()
+		cluster := follower.GetServer().DirectlyGetRaftCluster()
+		return cluster.GetRegionSyncer().IsRunning() &&
+			cluster.GetRegion(regionID) != nil && cluster.GetRegion(nextRegion.GetId()) != nil
 	})
 	re.NoError(failpoint.Enable(
 		"github.com/tikv/pd/client/clients/router/forceUseFollower",
@@ -527,11 +533,6 @@ func (suite *routerClientSuite) TestQueryRegionFollowerFallbackMatchesUnarySeman
 	defer func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/client/clients/router/forceUseFollower"))
 	}()
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/queryRegionFollowerCacheMiss", "return(true)"))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/server/queryRegionFollowerCacheMiss"))
-	}()
-
 	getRegion := func(client pd.Client, options ...opt.GetRegionOption) (*router.Region, error) {
 		return client.GetRegion(context.Background(), region.GetStartKey(), options...)
 	}
@@ -542,31 +543,152 @@ func (suite *routerClientSuite) TestQueryRegionFollowerFallbackMatchesUnarySeman
 		return client.GetRegionByID(context.Background(), region.GetId(), options...)
 	}
 	queries := []struct {
-		name        string
-		get         func(pd.Client, ...opt.GetRegionOption) (*router.Region, error)
-		withBuckets bool
+		name string
+		get  func(pd.Client, ...opt.GetRegionOption) (*router.Region, error)
 	}{
-		{name: "GetRegion", get: getRegion, withBuckets: true},
+		{name: "GetRegion", get: getRegion},
 		{name: "GetPrevRegion", get: getPrevRegion},
 		{name: "GetRegionByID", get: getRegionByID},
 	}
-	for _, query := range queries {
-		unaryOptions := []opt.GetRegionOption{opt.WithAllowPDLeaderOnly()}
-		queryRegionOptions := []opt.GetRegionOption{opt.WithAllowFollowerHandle()}
-		if query.withBuckets {
-			unaryOptions = append(unaryOptions, opt.WithBuckets())
-			queryRegionOptions = append(queryRegionOptions, opt.WithBuckets())
+	leaderURL, err := url.Parse(suite.cluster.GetLeaderServer().GetAddr())
+	re.NoError(err)
+	followerURL, err := url.Parse(follower.GetAddr())
+	re.NoError(err)
+	notFound := &pdpb.Error{Type: pdpb.ErrorType_REGION_NOT_FOUND}
+	notBootstrapped := &pdpb.Error{Type: pdpb.ErrorType_NOT_BOOTSTRAPPED}
+	unknown := &pdpb.Error{Type: pdpb.ErrorType_UNKNOWN}
+	for _, scenario := range []struct {
+		name                           string
+		allowFollower                  bool
+		followerMissing, leaderMissing bool
+		followerError, leaderError     *pdpb.Error
+		leaderTransportError           bool
+		wantAttempts                   []bool
+	}{
+		{name: "leader hit", wantAttempts: []bool{true}},
+		{name: "follower hit", allowFollower: true, wantAttempts: []bool{false}},
+		{name: "follower miss", allowFollower: true, followerMissing: true, wantAttempts: []bool{false, true}},
+		{name: "leader miss", leaderMissing: true, wantAttempts: []bool{true}},
+		{name: "both miss", allowFollower: true, followerMissing: true, leaderMissing: true, wantAttempts: []bool{false, true}},
+		{name: "leader region not found", leaderError: notFound, wantAttempts: []bool{true}},
+		{name: "leader not bootstrapped", leaderError: notBootstrapped, wantAttempts: []bool{true}},
+		{name: "follower region not found", allowFollower: true, followerError: notFound, wantAttempts: []bool{false, true}},
+		{name: "follower not bootstrapped", allowFollower: true, followerError: notBootstrapped, wantAttempts: []bool{false, true}},
+		{name: "follower unknown error", allowFollower: true, followerError: unknown, wantAttempts: []bool{false, true}},
+		{name: "miss then leader region not found", allowFollower: true, followerMissing: true, leaderError: notFound, wantAttempts: []bool{false, true}},
+		{name: "miss then leader not bootstrapped", allowFollower: true, followerMissing: true, leaderError: notBootstrapped, wantAttempts: []bool{false, true}},
+		{name: "both header errors", allowFollower: true, followerError: notFound, leaderError: unknown, wantAttempts: []bool{false, true}},
+		{name: "leader transport error", leaderTransportError: true, wantAttempts: []bool{true}},
+		{name: "miss then leader transport error", allowFollower: true, followerMissing: true, leaderTransportError: true, wantAttempts: []bool{false, true}},
+	} {
+		for _, query := range queries {
+			for _, withBuckets := range []bool{false, true} {
+				suite.Run(fmt.Sprintf("%s/%s/buckets=%t", scenario.name, query.name, withBuckets), func() {
+					re := suite.Require()
+					var unaryRegion *router.Region
+					var unaryErr error
+					for _, enabled := range []bool{false, true} {
+						recorder := &regionRPCRecorder{
+							leaderTarget: leaderURL.Host, followerTarget: followerURL.Host,
+							followerOnly: scenario.allowFollower && !enabled,
+							fault: func(isLeader bool, method string, request, response any) error {
+								missing, headerErr := scenario.followerMissing, scenario.followerError
+								if isLeader {
+									missing, headerErr = scenario.leaderMissing, scenario.leaderError
+									if scenario.leaderTransportError {
+										return status.Error(codes.Unavailable, "injected leader receive error")
+									}
+								}
+								replaceRegionResponse(method, request, response, isLeader, missing, headerErr)
+								return nil
+							},
+						}
+						client := setupCli(suite.ctx, re, suite.cluster.GetLeaderServer().GetServer().GetEndpoints(),
+							opt.WithEnableRouterClient(enabled), opt.WithEnableFollowerHandle(true), opt.WithForwardingOption(false),
+							opt.WithGRPCDialOptions(grpc.WithUnaryInterceptor(recorder.unary), grpc.WithStreamInterceptor(recorder.stream)))
+						suite.T().Cleanup(client.Close)
+						if recorder.followerOnly {
+							testutil.Eventually(re, func() bool {
+								clients := client.GetServiceDiscovery().GetAllServiceClients()
+								if len(clients) != 3 {
+									return false
+								}
+								for _, candidate := range clients {
+									if candidate.Available() != (candidate.GetURL() == follower.GetAddr()) {
+										return false
+									}
+								}
+								return true
+							})
+						}
+						options := []opt.GetRegionOption{opt.WithAllowPDLeaderOnly()}
+						if scenario.allowFollower {
+							options = []opt.GetRegionOption{opt.WithAllowFollowerHandle()}
+						}
+						if withBuckets {
+							options = append(options, opt.WithBuckets())
+						}
+						got, err := query.get(client, options...)
+						re.Equal(scenario.wantAttempts, recorder.attempts(), "router enabled=%t", enabled)
+						switch {
+						case scenario.leaderTransportError:
+							re.Equal(codes.Unavailable, status.Code(err))
+							re.Nil(got)
+						case scenario.leaderError != nil:
+							re.ErrorContains(err, scenario.leaderError.String())
+							re.Nil(got)
+						default:
+							re.NoError(err)
+							if scenario.leaderMissing {
+								re.Nil(got)
+							} else {
+								re.NotNil(got)
+								re.Equal(region, got.Meta)
+								if withBuckets && scenario.wantAttempts[len(scenario.wantAttempts)-1] {
+									re.Equal(buckets, got.Buckets)
+								} else {
+									re.Nil(got.Buckets)
+								}
+							}
+						}
+						if !enabled {
+							unaryRegion, unaryErr = got, err
+						} else {
+							re.Equal(unaryRegion, got)
+							if unaryErr != nil {
+								re.EqualError(err, unaryErr.Error())
+							}
+						}
+					}
+				})
+			}
 		}
-		unaryRegion, err := query.get(unaryClient, unaryOptions...)
+	}
+	// Also exercise the real server's successful sparse-response path, without
+	// client-side response replacement, against the authoritative unary result.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/queryRegionFollowerCacheMiss", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/queryRegionFollowerCacheMiss"))
+	}()
+	for _, query := range queries {
+		unaryRegion, err := query.get(unaryClient, opt.WithAllowPDLeaderOnly(), opt.WithBuckets())
 		re.NoError(err, query.name)
-		queryRegion, err := query.get(suite.client, queryRegionOptions...)
+		queryRegion, err := query.get(suite.client, opt.WithAllowFollowerHandle(), opt.WithBuckets())
 		re.NoError(err, query.name)
 		re.Equal(unaryRegion, queryRegion, query.name)
 		re.NotNil(queryRegion, query.name)
 		re.Equal(region, queryRegion.Meta, query.name)
-		if query.withBuckets {
-			re.Equal(buckets, queryRegion.Buckets, query.name)
-		}
+		re.Equal(buckets, queryRegion.Buckets, query.name)
+	}
+	// A follower miss is inconclusive, but a leader miss must remain a
+	// successful nil result, including ID zero, just like the unary APIs.
+	for _, id := range []uint64{0, regionIDAllocator.alloc(), math.MaxUint64} {
+		unaryRegion, err := unaryClient.GetRegionByID(suite.ctx, id, opt.WithAllowPDLeaderOnly())
+		re.NoError(err)
+		re.Nil(unaryRegion)
+		queryRegion, err := suite.client.GetRegionByID(suite.ctx, id, opt.WithAllowFollowerHandle())
+		re.NoError(err)
+		re.Equal(unaryRegion, queryRegion)
 	}
 }
 
@@ -586,10 +708,21 @@ func TestRouterClientHeaderError(t *testing.T) {
 	re.NotEmpty(leaderName)
 	srv := cluster.GetLeaderServer().GetServer()
 
-	client := setupCli(ctx, re, srv.GetEndpoints(), opt.WithEnableRouterClient(true))
-	defer client.Close()
+	for _, enabled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("router=%t", enabled), func(t *testing.T) {
+			re := require.New(t)
+			client := setupCli(ctx, re, srv.GetEndpoints(), opt.WithEnableRouterClient(enabled))
+			defer client.Close()
 
-	r, err := client.GetRegion(ctx, []byte("a"))
-	re.ErrorContains(err, pdpb.ErrorType_NOT_BOOTSTRAPPED.String())
-	re.Nil(r)
+			r, err := client.GetRegion(ctx, []byte("a"))
+			re.ErrorContains(err, pdpb.ErrorType_NOT_BOOTSTRAPPED.String())
+			re.Nil(r)
+			r, err = client.GetPrevRegion(ctx, []byte("a"))
+			re.ErrorContains(err, pdpb.ErrorType_NOT_BOOTSTRAPPED.String())
+			re.Nil(r)
+			r, err = client.GetRegionByID(ctx, 0)
+			re.ErrorContains(err, pdpb.ErrorType_NOT_BOOTSTRAPPED.String())
+			re.Nil(r)
+		})
+	}
 }

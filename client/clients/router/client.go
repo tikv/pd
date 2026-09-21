@@ -866,8 +866,9 @@ func (c *Cli) processRequestsInner(
 			metrics.QueryRegionBatchSizeByIDs.Observe(float64(idsLen))
 		}
 	}
-	retryOnLeader := !isLeaderRetryBatch && (isFollower ||
-		(headerErr != nil && headerErr.GetType() == pdpb.ErrorType_REGION_NOT_FOUND))
+	// Like unary ServiceClient.NeedRetry, use the selected role rather than
+	// the error type. A leader fallback is final even if discovery changes.
+	retryOnLeader := isFollower && !isLeaderRetryBatch
 	if headerErr != nil && !retryOnLeader {
 		return nil, errors.New(headerErr.String())
 	}
