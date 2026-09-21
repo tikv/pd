@@ -1421,6 +1421,34 @@ func (suite *keyspaceTestSuite) TestChecker() {
 	re.Empty(arr)
 }
 
+func (suite *keyspaceTestSuite) TestGCBarrierRemovalInvalidationAfterCommit() {
+	re := suite.Require()
+	m := suite.manager
+	meta := &keyspacepb.KeyspaceMeta{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 20000}, Name: "barrier-remove", State: keyspacepb.KeyspaceState_TOMBSTONE}
+	re.NoError(m.saveNewKeyspace(meta))
+	re.NoError(m.kgm.CreateKeyspaceGroups([]*endpoint.KeyspaceGroup{{ID: 101, UserKind: endpoint.Standard.String(), Keyspaces: []uint32{20000}}}))
+	calls := 0
+	m.SetGCBarrierInvalidator(func(id uint32) {
+		calls++
+		m.metaLock.Lock(id)
+		defer m.metaLock.Unlock(id)
+		_, err := m.LoadKeyspaceByID(id)
+		re.Error(err)
+		// A group operation takes the group lock, detecting lock-order regression.
+		_, err = m.kgm.GetKeyspaceGroups(101, 1)
+		re.NoError(err)
+	})
+	base := m.kgm.store
+	m.kgm.store = &errorKeyspaceGroupStorage{StorageEndpoint: m.store.(*endpoint.StorageEndpoint), failOnSaveID: 101}
+	_, err := m.kgm.RemoveKeyspacesFromGroup(101, m, []uint32{20000})
+	re.Error(err)
+	re.Zero(calls)
+	m.kgm.store = base
+	_, err = m.kgm.RemoveKeyspacesFromGroup(101, m, []uint32{20000})
+	re.NoError(err)
+	re.Equal(1, calls)
+}
+
 // TestRemoveKeyspaceCleansCache verifies that RemoveKeyspace deletes the
 // keyspace's entry from the in-memory cache, not just from the legacy
 // keyspaceNameLookup/keyspaceStateLookup maps, so a fully removed keyspace

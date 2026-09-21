@@ -1230,6 +1230,40 @@ func (suite *httpClientTestSuite) TestGetGCSafePoint() {
 	msg, err = client.DeleteGCSafePoint(ctx, "non_exist")
 	re.NoError(err)
 	re.Equal("Delete service GC safepoint successfully.", msg)
+
+	suite.Run("force-delete-observation", func() {
+		re := suite.Require()
+		const serviceID = "http-force-delete-observed"
+		now := time.Now()
+		ts := uint64(now.Add(-80*time.Hour).UnixMilli()) << 18
+		_, err := gcStateManager.SetGCBarrier(constant.NullKeyspaceID, serviceID, ts, time.Duration(math.MaxInt64), now)
+		re.NoError(err)
+		_, err = gcStateManager.AdvanceTxnSafePoint(constant.NullKeyspaceID, ts, now)
+		re.NoError(err)
+		gather := func() []*dto.Metric {
+			families, err := prometheus.DefaultGatherer.Gather()
+			re.NoError(err)
+			var samples []*dto.Metric
+			for _, family := range families {
+				if family.GetName() != "pd_gc_barrier_timestamp_seconds" {
+					continue
+				}
+				for _, metric := range family.GetMetric() {
+					for _, label := range metric.GetLabel() {
+						if label.GetName() == "barrier_id" && label.GetValue() == serviceID {
+							samples = append(samples, metric)
+						}
+					}
+				}
+			}
+			return samples
+		}
+		re.Len(gather(), 1, "successful advancement publishes the nonexpiring barrier")
+		msg, err := client.DeleteGCSafePoint(ctx, serviceID)
+		re.NoError(err)
+		re.Equal("Delete service GC safepoint successfully.", msg)
+		re.Empty(gather(), "successful HTTP deletion must remove the sample without another advancement")
+	})
 }
 
 func (suite *httpClientTestSuite) TestGetSiblingsRegions() {

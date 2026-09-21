@@ -976,16 +976,18 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 	group, err := rgsController.GetResourceGroup(rg.Name)
 	re.NoError(err)
 	re.Equal(rg, group)
+	expectedErr := controller.NewResourceGroupNotExistErr(rg.Name)
+	isDeleted := func() bool {
+		gc, err := rgsController.GetResourceGroup(rg.Name)
+		return err != nil && err.Error() == expectedErr.Error() && gc == nil
+	}
+	re.False(isDeleted())
 	// Delete the resource group and make sure it is tombstone.
 	resp, err = cli.DeleteResourceGroup(suite.ctx, rg.Name)
 	re.NoError(err)
 	re.Contains(resp, "Success!")
 	// Make sure the resource group is watched by the controller and marked as tombstone.
-	expectedErr := controller.NewResourceGroupNotExistErr(rg.Name)
-	testutil.Eventually(re, func() bool {
-		gc, err := rgsController.GetResourceGroup(rg.Name)
-		return err.Error() == expectedErr.Error() && gc == nil
-	}, testutil.WithTickInterval(50*time.Millisecond))
+	testutil.Eventually(re, isDeleted, testutil.WithTickInterval(50*time.Millisecond))
 	// Add the resource group again.
 	resp, err = cli.AddResourceGroup(suite.ctx, rg)
 	re.NoError(err)

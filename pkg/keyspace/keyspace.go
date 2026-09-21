@@ -19,6 +19,8 @@ import (
 	"context"
 	goerrors "errors"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -105,7 +107,11 @@ type Manager struct {
 	// nextPatrolStartID is the next start id of keyspace assignment patrol.
 	nextPatrolStartID uint32
 	// cached keyspace meta info for each keyspace ID.
-	cache *Cache
+	// TODO: Remove this two maps after the cache fully takes effect and is verified to be stable.
+	keyspaceNameLookup   sync.Map // store as ID(uint32) -> name(string)
+	keyspaceStateLookup  sync.Map // store as ID(uint32) -> state(keyspacepb.KeyspaceState)
+	cache                *Cache
+	gcBarrierInvalidator atomic.Pointer[func(uint32)]
 	// keyspaceIDRangeMu guards keyspaceIDVerifiedUpTo and the backfill that advances it.
 	keyspaceIDRangeMu syncutil.Mutex
 	// keyspaceIDVerifiedUpTo records that keyspace IDs in [0, keyspaceIDVerifiedUpTo)
@@ -136,6 +142,19 @@ type Manager struct {
 	// that has already been cleared can never resurrect a stale ceiling for
 	// a later one.
 	keyspaceIDRangeGeneration uint64
+}
+
+// SetGCBarrierInvalidator installs the GC observation lifecycle callback.
+// The callback runs after a metadata removal transaction commits, outside keyspace
+// locks. It must not perform storage IO or modify keyspace metadata.
+func (manager *Manager) SetGCBarrierInvalidator(invalidate func(uint32)) {
+	manager.gcBarrierInvalidator.Store(&invalidate)
+}
+
+func (manager *Manager) invalidateGCBarrierMetrics(id uint32) {
+	if invalidate := manager.gcBarrierInvalidator.Load(); invalidate != nil && *invalidate != nil {
+		(*invalidate)(id)
+	}
 }
 
 // CreateKeyspaceRequest represents necessary arguments to create a keyspace.

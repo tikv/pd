@@ -18,7 +18,6 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -391,8 +390,12 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	configutil.AdjustString(&c.InitialClusterState, defaultInitialClusterState)
 	configutil.AdjustString(&c.InitialClusterToken, defaultInitialClusterToken)
 
+	// Join is a comma-separated list of endpoints (see the field comment and
+	// server/join, which splits it on ","), so validate it per endpoint rather
+	// than passing the whole list to a single url.Parse, which accepts it as
+	// one malformed URL with a host of "pd-0:2379,http:".
 	if len(c.Join) > 0 {
-		if _, err := url.Parse(c.Join); err != nil {
+		if _, err := parseUrls(c.Join); err != nil {
 			return errors.Errorf("failed to parse join addr:%s, err:%v", c.Join, err)
 		}
 	}

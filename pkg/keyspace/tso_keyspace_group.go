@@ -930,6 +930,14 @@ func (m *GroupManager) GetGroupByKeyspaceID(id uint32) (uint32, error) {
 // If a keyspace is not in the group, it will be skipped (no error).
 // It returns the updated keyspace group and any error encountered.
 func (m *GroupManager) RemoveKeyspacesFromGroup(groupID uint32, km *Manager, keyspaceIDs []uint32) (*endpoint.KeyspaceGroup, error) {
+	var removed, pendingRemoved []uint32
+	// Defer ordering releases the group lock before notifying GC, and failed
+	// transactions leave removed empty.
+	defer func() {
+		for _, id := range removed {
+			km.invalidateGCBarrierMetrics(id)
+		}
+	}()
 	m.Lock()
 	defer m.Unlock()
 
@@ -978,6 +986,7 @@ func (m *GroupManager) RemoveKeyspacesFromGroup(groupID uint32, km *Manager, key
 			if _, shouldRemove := toRemove[ks]; !shouldRemove {
 				newKeyspaces = append(newKeyspaces, ks)
 			} else {
+				pendingRemoved = append(pendingRemoved, ks)
 				err = km.RemoveKeyspace(txn, ks)
 				if err != nil {
 					return err
@@ -991,6 +1000,8 @@ func (m *GroupManager) RemoveKeyspacesFromGroup(groupID uint32, km *Manager, key
 	}); err != nil {
 		return nil, err
 	}
+
+	removed = pendingRemoved
 
 	// Update the cache
 	m.putKeyspaceGroupToCacheLocked(kg)

@@ -46,38 +46,38 @@ func (a *mockAllocator) freeAll() {
 	runtime.GC()
 }
 
-func TestGlobalMemoryTuner(t *testing.T) {
+func TestMemoryLimitTuner(t *testing.T) {
 	require.NoError(t, failpoint.Enable("github.com/tikv/pd/pkg/gctuner/testMemoryLimitTuner", "return(true)"))
 	defer func() {
 		require.NoError(t, failpoint.Disable("github.com/tikv/pd/pkg/gctuner/testMemoryLimitTuner"))
 	}()
 	// Close GOGCTuner
-	gogcTuner := EnableGOGCTuner.Load()
-	EnableGOGCTuner.Store(false)
+	gogcTuner := EnableGOGCTuner.Swap(false)
 	defer EnableGOGCTuner.Store(gogcTuner)
 
-	memory.ServerMemoryLimit.Store(1 << 30)   // 1GB
-	GlobalMemoryLimitTuner.SetPercentage(0.8) // 1GB * 80% = 800MB
-	GlobalMemoryLimitTuner.UpdateMemoryLimit()
-	require.True(t, GlobalMemoryLimitTuner.isTuning.Load())
+	oldMemoryLimit := memory.ServerMemoryLimit.Swap(1 << 30) // 1GB
+	oldRuntimeLimit := debug.SetMemoryLimit(-1)
 	defer func() {
-		// If test.count > 1, wait tuning finished.
-		require.Eventually(t, func() bool {
-			//nolint: all_revive
-			return GlobalMemoryLimitTuner.isTuning.Load()
-		}, 5*time.Second, 100*time.Millisecond)
-		require.Eventually(t, func() bool {
-			//nolint: all_revive
-			return !GlobalMemoryLimitTuner.waitingReset.Load()
-		}, 5*time.Second, 100*time.Millisecond)
-		require.Eventually(t, func() bool {
-			//nolint: all_revive
-			return !GlobalMemoryLimitTuner.nextGCTriggeredByMemoryLimit.Load()
-		}, 5*time.Second, 100*time.Millisecond)
+		memory.ServerMemoryLimit.Store(oldMemoryLimit)
+		debug.SetMemoryLimit(oldRuntimeLimit)
 	}()
 
+	// Own the finalizer so later tests cannot reactivate this test's tuner.
+	tuner := &memoryLimitTuner{}
+	tuner.SetPercentage(0.8) // 1GB * 80% = 800MB
+	tuner.Start()
+	defer tuner.Stop()
+	tuner.UpdateMemoryLimit()
+	require.True(t, tuner.isTuning.Load())
+
 	allocator := &mockAllocator{}
-	defer allocator.freeAll()
+	defer func() {
+		allocator.freeAll()
+		// Drain the reset while the short test interval is still enabled.
+		require.Eventually(t, func() bool {
+			return !tuner.waitingReset.Load() && !tuner.nextGCTriggeredByMemoryLimit.Load()
+		}, 5*time.Second, 100*time.Millisecond)
+	}()
 	r := &runtime.MemStats{}
 	getNowGCNum := func() uint32 {
 		runtime.ReadMemStats(r)
@@ -86,7 +86,7 @@ func TestGlobalMemoryTuner(t *testing.T) {
 	checkNextGCEqualMemoryLimit := func() {
 		runtime.ReadMemStats(r)
 		nextGC := r.NextGC
-		memoryLimit := GlobalMemoryLimitTuner.calcMemoryLimit(GlobalMemoryLimitTuner.GetPercentage())
+		memoryLimit := tuner.calcMemoryLimit(tuner.GetPercentage())
 		// In golang source, nextGC = memoryLimit - three parts memory.
 		require.Less(t, nextGC, uint64(memoryLimit))
 	}
@@ -96,11 +96,11 @@ func TestGlobalMemoryTuner(t *testing.T) {
 
 	memory210mb := allocator.alloc(210 << 20)
 	require.Eventually(t, func() bool {
-		return GlobalMemoryLimitTuner.waitingReset.Load() && gcNum < getNowGCNum()
+		return tuner.waitingReset.Load() && gcNum < getNowGCNum()
 	}, 5*time.Second, 100*time.Millisecond)
 	// Test waiting for reset
 	require.Eventually(t, func() bool {
-		return GlobalMemoryLimitTuner.calcMemoryLimit(fallbackPercentage) == debug.SetMemoryLimit(-1)
+		return tuner.calcMemoryLimit(fallbackPercentage) == debug.SetMemoryLimit(-1)
 	}, 5*time.Second, 100*time.Millisecond)
 	gcNum = getNowGCNum()
 	memory100mb := allocator.alloc(100 << 20)
@@ -113,7 +113,7 @@ func TestGlobalMemoryTuner(t *testing.T) {
 	runtime.GC()
 	// Trigger GC in 80% again
 	require.Eventually(t, func() bool {
-		return GlobalMemoryLimitTuner.calcMemoryLimit(GlobalMemoryLimitTuner.GetPercentage()) == debug.SetMemoryLimit(-1)
+		return tuner.calcMemoryLimit(tuner.GetPercentage()) == debug.SetMemoryLimit(-1)
 	}, 5*time.Second, 100*time.Millisecond)
 	time.Sleep(100 * time.Millisecond)
 	gcNum = getNowGCNum()
