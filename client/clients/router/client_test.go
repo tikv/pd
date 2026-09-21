@@ -32,12 +32,11 @@ import (
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/batch"
 	cctx "github.com/tikv/pd/client/pkg/connectionctx"
-	"github.com/tikv/pd/client/pkg/utils/testutil"
 	sd "github.com/tikv/pd/client/servicediscovery"
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(m)
 }
 
 func newMockRegionResponse(id uint64) *pdpb.RegionResponse {

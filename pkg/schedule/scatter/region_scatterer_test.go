@@ -47,7 +47,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 type sequencer struct {
@@ -1417,6 +1417,14 @@ func TestInternalScatterLeaderFiltersRejectedTarget(t *testing.T) {
 
 	leader, _ := scatterer.selectAvailableLeaderStore(group, region, candidates, state.ordinaryEngine.asSelectionContext(), true)
 	re.Equal(uint64(5), leader)
+
+	for _, id := range []uint64{1, 5} {
+		tc.ResetStoreLimit(id, storelimit.TransferLeaderIn, 0.000001)
+		re.True(tc.GetStore(id).GetStoreLimit().Take(storelimit.RegionInfluence[storelimit.TransferLeaderIn], storelimit.TransferLeaderIn, constant.Medium))
+	}
+	candidates = scatterer.filterAllowedLeaderCandidateStores(region, targetPeers, []uint64{1, 4, 5})
+	// Keeping the current leader does not require transfer-in budget.
+	re.Equal([]uint64{1}, candidates)
 }
 
 func TestInternalScatterLeaderKeepsOriginWhenSourcePausedOut(t *testing.T) {

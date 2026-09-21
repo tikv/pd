@@ -45,7 +45,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(m)
 }
 
 // MockResourceGroupProvider is a mock implementation of the ResourceGroupProvider interface.
@@ -121,6 +121,31 @@ func (m *MockResourceGroupProvider) Get(ctx context.Context, key []byte, opts ..
 func (m *MockResourceGroupProvider) Put(ctx context.Context, key []byte, value []byte, opts ...opt.MetaStorageOption) (*meta_storagepb.PutResponse, error) {
 	args := m.Called(ctx, key, value, opts)
 	return args.Get(0).(*meta_storagepb.PutResponse), args.Error(1)
+}
+
+func TestSendTokenBucketRequestsStopsWhenContextIsCanceled(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	mockProvider := newMockResourceGroupProvider()
+	called := make(chan struct{})
+	var response []*rmpb.TokenBucketResponse
+	mockProvider.On("AcquireTokenBuckets", mock.Anything, mock.Anything).
+		Run(func(mock.Arguments) { close(called) }).
+		Return(response, context.Canceled).
+		Once()
+	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, constants.NullKeyspaceID)
+	require.NoError(t, err)
+	// Make a plain send block so the canceled context is the only exit path.
+	controller.tokenResponseChan <- nil
+	controller.sendTokenBucketRequests(ctx, nil, FromLowRU, notifyMsg{})
+	select {
+	case <-called:
+	case <-time.After(time.Second):
+		t.Fatal("AcquireTokenBuckets was not called")
+	}
 }
 
 func TestControllerWithTwoGroupRequestConcurrency(t *testing.T) {

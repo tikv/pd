@@ -458,6 +458,19 @@ func (f *StoreStateFilter) exceedAddLimit(_ config.SharedConfigProvider, store *
 	return statusOK
 }
 
+func (f *StoreStateFilter) exceedTransferLeaderInLimit(_ config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
+	// Target selection intentionally checks the budget regardless of operator priority,
+	// including when this filter is used by Builder. Controller admission retains its
+	// existing Urgent exemption; passing this filter does not reserve tokens.
+	// TODO: Reconcile leader-transfer priorities with store-limit admission semantics.
+	if !f.AllowTemporaryStates && !store.IsAvailable(storelimit.TransferLeaderIn, f.OperatorLevel) {
+		f.Reason = storeStateExceedTransferLeaderInLimit
+		return statusStoreTransferLeaderInLimit
+	}
+	f.Reason = storeStateOK
+	return statusOK
+}
+
 func (f *StoreStateFilter) tooManySnapshots(conf config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
 	if !f.AllowTemporaryStates && (uint64(store.GetSendingSnapCount()) > conf.GetMaxSnapshotCount() ||
 		uint64(store.GetReceivingSnapCount()) > conf.GetMaxSnapshotCount()) {
@@ -523,7 +536,8 @@ func (f *StoreStateFilter) anyConditionMatch(typ int, conf config.SharedConfigPr
 		funcs = []conditionFunc{f.isBusy}
 	case leaderTarget:
 		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.pauseLeaderTransferIn,
-			f.slowStoreEvicted, f.stoppingStoreEvicted, f.slowTrendEvicted, f.isDisconnected, f.isBusy, f.hasRejectLeaderProperty}
+			f.slowStoreEvicted, f.stoppingStoreEvicted, f.slowTrendEvicted, f.isDisconnected, f.isBusy,
+			f.hasRejectLeaderProperty, f.exceedTransferLeaderInLimit}
 	case regionTarget:
 		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.isDisconnected, f.isBusy,
 			f.exceedAddLimit, f.tooManySnapshots, f.tooManyPendingPeers}

@@ -21,16 +21,26 @@ import (
 
 	"github.com/docker/go-units"
 	"github.com/stretchr/testify/require"
+
+	"github.com/tikv/pd/pkg/gogc"
 )
 
 var testHeap []byte
 
 func TestTuner(t *testing.T) {
 	re := require.New(t)
-	EnableGOGCTuner.Store(true)
+	wasEnabled := EnableGOGCTuner.Swap(true)
+	oldGCPercent := gogc.GetGCPercent()
 	memLimit := uint64(1000 * units.MiB) // 1000 MB
 	threshold := memLimit / 2
 	tn := newTuner(threshold)
+	defer func() {
+		tn.stop()
+		testHeap = nil
+		runtime.GC()
+		gogc.SetGCPercent(oldGCPercent)
+		EnableGOGCTuner.Store(wasEnabled)
+	}()
 	re.Equal(threshold, tn.threshold.Load())
 	re.Equal(defaultGCPercent, tn.getGCPercent())
 

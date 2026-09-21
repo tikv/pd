@@ -43,7 +43,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 const (
@@ -1081,6 +1081,92 @@ func benchmarkPatrolKeyspaceAssignmentN(
 	b.StopTimer()
 	suite.TearDownTest()
 	suite.TearDownSuite()
+}
+
+func (suite *keyspaceTestSuite) TestChecker() {
+	re := suite.Require()
+	meta := &keyspacepb.KeyspaceMeta{
+		Keyspace:       &keyspacepb.KeyspaceMeta_Id{Id: 10000},
+		Name:           "1",
+		State:          keyspacepb.KeyspaceState_ENABLED,
+		CreatedAt:      time.Now().Unix(),
+		StateChangedAt: time.Now().Unix(),
+	}
+	re.NoError(suite.manager.saveNewKeyspace(meta))
+
+	meta = &keyspacepb.KeyspaceMeta{
+		Keyspace:       &keyspacepb.KeyspaceMeta_Id{Id: 10001},
+		Name:           "2",
+		State:          keyspacepb.KeyspaceState_TOMBSTONE,
+		CreatedAt:      time.Now().Unix(),
+		StateChangedAt: time.Now().Unix(),
+	}
+	re.NoError(suite.manager.saveNewKeyspace(meta))
+
+	// keyspace exist check.
+	re.True(suite.manager.KeyspaceExist(10000))
+	re.False(suite.manager.KeyspaceExist(10001))
+	re.False(suite.manager.KeyspaceExist(10002))
+
+	// keyspace id in range check.
+	arr, exist := suite.manager.GetKeyspaceIDInRange(10000, 10010, 1)
+	re.True(exist)
+	re.Equal([]uint32{10000}, arr)
+	arr, exist = suite.manager.GetKeyspaceIDInRange(10005, 10010, 1)
+	re.False(exist)
+	re.Empty(arr)
+}
+
+func (suite *keyspaceTestSuite) TestGCBarrierRemovalInvalidationAfterCommit() {
+	re := suite.Require()
+	m := suite.manager
+	meta := &keyspacepb.KeyspaceMeta{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 20000}, Name: "barrier-remove", State: keyspacepb.KeyspaceState_TOMBSTONE}
+	re.NoError(m.saveNewKeyspace(meta))
+	re.NoError(m.kgm.CreateKeyspaceGroups([]*endpoint.KeyspaceGroup{{ID: 101, UserKind: endpoint.Standard.String(), Keyspaces: []uint32{20000}}}))
+	calls := 0
+	m.SetGCBarrierInvalidator(func(id uint32) {
+		calls++
+		m.metaLock.Lock(id)
+		defer m.metaLock.Unlock(id)
+		_, err := m.LoadKeyspaceByID(id)
+		re.Error(err)
+		// A group operation takes the group lock, detecting lock-order regression.
+		_, err = m.kgm.GetKeyspaceGroups(101, 1)
+		re.NoError(err)
+	})
+	base := m.kgm.store
+	m.kgm.store = &errorKeyspaceGroupStorage{StorageEndpoint: m.store.(*endpoint.StorageEndpoint), failOnSaveID: 101}
+	_, err := m.kgm.RemoveKeyspacesFromGroup(101, m, []uint32{20000})
+	re.Error(err)
+	re.Zero(calls)
+	m.kgm.store = base
+	_, err = m.kgm.RemoveKeyspacesFromGroup(101, m, []uint32{20000})
+	re.NoError(err)
+	re.Equal(1, calls)
+}
+
+// TestRemoveKeyspaceCleansCache verifies that RemoveKeyspace deletes the
+// keyspace's entry from the in-memory cache, not just from the legacy
+// keyspaceNameLookup/keyspaceStateLookup maps, so a fully removed keyspace
+// does not leak a stale cache entry forever.
+func (suite *keyspaceTestSuite) TestRemoveKeyspaceCleansCache() {
+	re := suite.Require()
+	meta := &keyspacepb.KeyspaceMeta{
+		Keyspace:       &keyspacepb.KeyspaceMeta_Id{Id: 20000},
+		Name:           "to-be-removed",
+		State:          keyspacepb.KeyspaceState_TOMBSTONE,
+		CreatedAt:      time.Now().Unix(),
+		StateChangedAt: time.Now().Unix(),
+	}
+	re.NoError(suite.manager.saveNewKeyspace(meta))
+	_, found := suite.manager.cache.getKeyspaceByID(meta.GetId())
+	re.True(found)
+
+	re.NoError(suite.manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		return suite.manager.RemoveKeyspace(txn, meta.GetId())
+	}))
+	_, found = suite.manager.cache.getKeyspaceByID(meta.GetId())
+	re.False(found)
 }
 
 // TestAssignGroupAndSaveKeyspace verifies that keyspace creation tolerates a

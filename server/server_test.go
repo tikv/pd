@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/member"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/storage"
@@ -53,6 +54,12 @@ func TestResetFollowerRegionCacheRequiresRegionStorage(t *testing.T) {
 
 func TestPartialScheduleConfigUpdatesPreserveLatestFields(t *testing.T) {
 	re := require.New(t)
+	oldDefaultStoreLimit := sc.DefaultStoreLimitConfig()
+	t.Cleanup(func() {
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, oldDefaultStoreLimit.AddPeer)
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, oldDefaultStoreLimit.RemovePeer)
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.TransferLeaderIn, oldDefaultStoreLimit.TransferLeaderIn)
+	})
 	cfg := config.NewConfig()
 	re.NoError(cfg.Adjust(nil, false))
 	store := storage.NewStorageWithMemoryBackend()
@@ -68,17 +75,54 @@ func TestPartialScheduleConfigUpdatesPreserveLatestFields(t *testing.T) {
 	}))
 	re.NoError(s.PatchScheduleConfig([]byte(`{"max-snapshot-count":99}`)))
 	re.NoError(s.SetScheduleConfigItem("max-pending-peer-count", float64(88)))
+	re.NoError(s.SetScheduleConfigItem("default-store-limit", map[string]float64{"transfer-leader-in": 30}))
+	re.NoError(s.SetScheduleConfigItem("store-limit", map[uint64]map[string]float64{
+		1: {"add-peer": 10, "remove-peer": 20},
+	}))
 
 	current := s.GetScheduleConfig()
 	re.Equal(defaultLimit, current.DefaultStoreLimit.AddPeer)
 	re.Equal(uint64(99), current.MaxSnapshotCount)
 	re.Equal(uint64(88), current.MaxPendingPeerCount)
+	re.Equal(sc.StoreLimitConfig{AddPeer: 10, RemovePeer: 20, TransferLeaderIn: 30}, current.StoreLimit[1])
 
 	reloaded := config.NewPersistOptions(config.NewConfig())
 	re.NoError(reloaded.Reload(store))
 	re.Equal(defaultLimit, reloaded.GetScheduleConfig().DefaultStoreLimit.AddPeer)
 	re.Equal(uint64(99), reloaded.GetScheduleConfig().MaxSnapshotCount)
 	re.Equal(uint64(88), reloaded.GetScheduleConfig().MaxPendingPeerCount)
+	re.Equal(current.StoreLimit[1], reloaded.GetStoreLimit(1))
+}
+
+func TestConcurrentStoreLimitPartialUpdates(t *testing.T) {
+	re := require.New(t)
+	cfg := config.NewConfig()
+	re.NoError(cfg.Adjust(nil, false))
+	cfg.Schedule.StoreLimit[1] = sc.StoreLimitConfig{}
+	store := storage.NewStorageWithMemoryBackend()
+	s := &Server{persistOptions: config.NewPersistOptions(cfg), storage: store}
+	patches := []string{
+		`{"store-limit":{"1":{"add-peer":10}}}`,
+		`{"store-limit":{"1":{"remove-peer":20}}}`,
+		`{"store-limit":{"1":{"transfer-leader-in":30}}}`,
+	}
+	start := make(chan struct{})
+	errs := make(chan error, len(patches))
+	for _, patch := range patches {
+		go func() {
+			<-start
+			errs <- s.PatchScheduleConfig([]byte(patch))
+		}()
+	}
+	close(start)
+	for range patches {
+		re.NoError(<-errs)
+	}
+	expected := sc.StoreLimitConfig{AddPeer: 10, RemovePeer: 20, TransferLeaderIn: 30}
+	re.Equal(expected, s.GetScheduleConfig().StoreLimit[1])
+	reloaded := config.NewPersistOptions(config.NewConfig())
+	re.NoError(reloaded.Reload(store))
+	re.Equal(expected, reloaded.GetStoreLimit(1))
 }
 
 func TestConcurrentPartialScheduleConfigUpdatesDoNotConflict(t *testing.T) {

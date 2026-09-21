@@ -96,6 +96,14 @@ type KeyRanges struct {
 	krs []*KeyRange
 }
 
+// Clean clears the KeyRanges.
+func (rs *KeyRanges) Clean() {
+	for i := range rs.krs {
+		rs.krs[i] = nil // avoid memory leak
+	}
+	rs.krs = rs.krs[:0]
+}
+
 // NewKeyRanges creates a KeyRanges.
 func NewKeyRanges(ranges []KeyRange) *KeyRanges {
 	krs := make([]*KeyRange, 0, len(ranges))
