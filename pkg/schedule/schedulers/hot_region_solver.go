@@ -88,9 +88,7 @@ type balanceSolver struct {
 }
 
 type placementScopeKey struct {
-	rule      *placement.Rule
 	ruleScope string
-	version   uint64
 	isTiKV    bool
 }
 
@@ -111,7 +109,7 @@ type placementLoadState struct {
 	populationIndex *placementPopulationIndex
 }
 
-func (bs *balanceSolver) init(placementState *placementLoadState) {
+func (bs *balanceSolver) init() {
 	// Load the configuration items of the scheduler.
 	bs.resourceTy = toResourceType(bs.rwTy, bs.opTy)
 	bs.maxPeerNum = bs.sche.conf.getMaxPeerNumber()
@@ -160,16 +158,10 @@ func (bs *balanceSolver) init(placementState *placementLoadState) {
 		Loads:        stepLoads,
 		HotPeerCount: maxCur.HotPeerCount * bs.sche.conf.getCountRankStepRatio(),
 	}
-	if placementState == nil {
-		state := bs.sche.getPlacementLoadState(bs.SchedulerCluster, rankFormulaVersion)
-		bs.placementV2Enabled = state.enabled
-		bs.placementCanRestrict = state.canRestrict
-		bs.placementPopulationIndex = state.populationIndex
-	} else {
-		bs.placementV2Enabled = placementState.enabled
-		bs.placementCanRestrict = placementState.canRestrict
-		bs.placementPopulationIndex = placementState.populationIndex
-	}
+	state := bs.sche.getPlacementLoadState(bs.SchedulerCluster, rankFormulaVersion)
+	bs.placementV2Enabled = state.enabled
+	bs.placementCanRestrict = state.canRestrict
+	bs.placementPopulationIndex = state.populationIndex
 }
 
 func (bs *balanceSolver) isSelectedDim(dim int) bool {
@@ -194,23 +186,13 @@ func (bs *balanceSolver) getPriorities() []string {
 }
 
 func newBalanceSolver(sche *hotScheduler, cluster sche.SchedulerCluster, rwTy utils.RWType, opTy opType) *balanceSolver {
-	return newBalanceSolverWithPlacementState(sche, cluster, rwTy, opTy, nil)
-}
-
-func newBalanceSolverWithPlacementState(
-	sche *hotScheduler,
-	cluster sche.SchedulerCluster,
-	rwTy utils.RWType,
-	opTy opType,
-	placementState *placementLoadState,
-) *balanceSolver {
 	bs := &balanceSolver{
 		SchedulerCluster: cluster,
 		sche:             sche,
 		rwTy:             rwTy,
 		opTy:             opTy,
 	}
-	bs.init(placementState)
+	bs.init()
 	return bs
 }
 
@@ -997,11 +979,25 @@ func (bs *balanceSolver) prepareForRegion(region *core.RegionInfo, fit *placemen
 	if !slice.AnyOf(rules, func(i int) bool {
 		return placement.MatchLabelConstraints(source.StoreInfo, rules[i].LabelConstraints)
 	}) {
+		hotSchedulerPlacementScopeFallbackCounter.Inc()
 		return nil
 	}
-	return bs.getPlacementLoadScope(rules, source.IsTiKV())
+	scope := bs.getPlacementLoadScope(rules, source.IsTiKV())
+	if scope == nil {
+		// The rules do not narrow the engine population; keep the global stats.
+		hotSchedulerPlacementScopeFallbackCounter.Inc()
+	}
+	return scope
 }
 
+// recordStorePlacementRestriction marks an engine as "may restrict" when any
+// store of that engine does not satisfy the default (unconstrained) ruleset.
+// For TiKV this is an over-approximation: a store carrying an exclusive label
+// that no rule constrains is treated as restrictable even if no rule actually
+// restricts its load population. This is intentional — it keeps the scoped
+// statistics path active until every store of the engine matches the default
+// rules — so that a newly-restrictive rule is detected without re-scanning
+// the rule set on the hot path.
 func recordStorePlacementRestriction(canRestrict *[2]bool, store *core.StoreInfo) {
 	isTiKV := store.IsTiKV()
 	engine := 0
@@ -1052,14 +1048,8 @@ func (bs *balanceSolver) getPlacementLoadScope(rules []*placement.Rule, isTiKV b
 		return nil
 	}
 
-	var ruleKey placementScopeKey
-	if len(rules) == 1 {
-		ruleKey = placementScopeKey{rule: rules[0], version: rules[0].Version, isTiKV: isTiKV}
-		if scope, ok := bs.placementScopeCache[ruleKey]; ok {
-			return scope
-		}
-	}
-
+	// Build a value-derived scope key from the rule constraints so the cache
+	// stays valid across RuleManager commits that re-allocate the Rule structs.
 	var builder strings.Builder
 	builder.WriteString(strconv.Itoa(len(rules)))
 	builder.WriteByte(':')
@@ -1108,9 +1098,6 @@ func (bs *balanceSolver) getPlacementLoadScope(rules []*placement.Rule, isTiKV b
 			bs.placementScopeCache = make(map[placementScopeKey]*placementLoadScope)
 		}
 		bs.placementScopeCache[key] = scope
-	}
-	if len(rules) == 1 {
-		bs.placementScopeCache[ruleKey] = scope
 	}
 	return scope
 }

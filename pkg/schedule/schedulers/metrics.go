@@ -314,6 +314,8 @@ var (
 	hotSchedulerCreateOperatorFailedCounter = hotRegionCounterWithEvent("create_operator_failed")
 	hotSchedulerNewOperatorCounter          = hotRegionCounterWithEvent("new_operator")
 	hotSchedulerSnapshotSenderLimitCounter  = hotRegionCounterWithEvent("snapshot_sender_limit")
+	// Fallback to engine-wide expectation when a scoped load snapshot is stale.
+	hotSchedulerPlacementScopeFallbackCounter = hotRegionCounterWithEvent("placement_scope_fallback")
 	// hot region counter related with the split region
 	hotSchedulerNotFoundSplitKeysCounter          = hotRegionCounterWithEvent("not_found_split_keys")
 	hotSchedulerRegionBucketsNotHotCounter        = hotRegionCounterWithEvent("region_buckets_not_hot")

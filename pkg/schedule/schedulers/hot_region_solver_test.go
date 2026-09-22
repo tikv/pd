@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -760,10 +761,12 @@ func TestPlacementLoadScopePreservesExpectationGuards(t *testing.T) {
 	otherRule := &placement.Rule{GroupID: "pd", ID: "other", LabelConstraints: []placement.LabelConstraint{
 		{Key: "pool", Op: placement.In, Values: []string{"other"}},
 	}}
-	updatedRule := &placement.Rule{GroupID: "pd", ID: "updated", Version: 1, LabelConstraints: rule.LabelConstraints}
+	// The scope cache is keyed on the value-derived rule constraints, not on
+	// Rule pointer identity: a different *Rule with the same constraints and
+	// engine still hits the same cached scope.
+	updatedRule := &placement.Rule{GroupID: "pd", ID: "updated", LabelConstraints: rule.LabelConstraints}
 	re.Same(scope, bs.getPlacementLoadScope([]*placement.Rule{updatedRule}, true))
 	updatedRule.LabelConstraints = otherRule.LabelConstraints
-	updatedRule.Version++
 	re.Equal(float64(100), bs.getPlacementLoadScope([]*placement.Rule{updatedRule}, true).expect.Loads[utils.ByteDim])
 
 	rules := []*placement.Rule{rule, otherRule}
@@ -925,6 +928,34 @@ func TestBeginSourcePlacementClearsPreviousEngineScope(t *testing.T) {
 
 	require.False(t, bs.beginSourcePlacement(false))
 	require.Nil(t, bs.curScope)
+}
+
+func TestPrepareForRegionCountsEngineFallback(t *testing.T) {
+	re := require.New(t)
+	peers := []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}}
+	region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers}, peers[0])
+	rule := &placement.Rule{Role: placement.Voter, LabelConstraints: []placement.LabelConstraint{
+		{Key: "pool", Op: placement.In, Values: []string{"missing"}},
+	}}
+	fit := &placement.RegionFit{RuleFits: []*placement.RuleFit{{Rule: rule, Peers: peers}}}
+	current := statistics.StoreLoad{
+		Loads:        statistics.Loads{20, 10},
+		HotPeerCount: 1,
+		HistoryLoads: statistics.HistoryLoads{{20}, {10}},
+	}
+	source := &statistics.StoreLoadDetail{
+		StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: core.NewStoreInfoWithLabel(1, map[string]string{"pool": "old"})},
+		LoadPred:         current.ToLoadPred(utils.Write, nil),
+	}
+	bs := &balanceSolver{
+		opTy:               transferLeader,
+		stLoadDetail:       map[uint64]*statistics.StoreLoadDetail{1: source, 2: {StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: core.NewStoreInfoWithLabel(2, map[string]string{"pool": "old"})}, LoadPred: current.ToLoadPred(utils.Write, nil)}},
+		placementV2Enabled: true,
+	}
+
+	before := promtestutil.ToFloat64(hotSchedulerPlacementScopeFallbackCounter)
+	re.Nil(bs.prepareForRegion(region, fit, source))
+	re.Greater(promtestutil.ToFloat64(hotSchedulerPlacementScopeFallbackCounter), before)
 }
 
 func TestRevertRegionPlacementSafeguard(t *testing.T) {
