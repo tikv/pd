@@ -217,9 +217,10 @@ func (c *innerClient) resetResourceManagerDiscoveryLocked(mode pdpb.ServiceMode)
 		}
 		c.resourceManagerDiscovery.Store(nil)
 	case pdpb.ServiceMode_API_SVC_MODE:
-		c.resourceManagerDiscovery.Store(sd.NewResourceManagerDiscovery(
-			c.ctx, c.serviceDiscovery.GetClusterID(), c, c.tlsCfg, c.option, c.scheduleUpdateTokenConnection))
-		c.resourceManagerDiscovery.Load().Init()
+		rmDiscovery := sd.NewResourceManagerDiscovery(
+			c.ctx, c.serviceDiscovery.GetClusterID(), c, c.tlsCfg, c.option, c.scheduleUpdateTokenConnection)
+		c.resourceManagerDiscovery.Store(rmDiscovery)
+		rmDiscovery.Init()
 	case pdpb.ServiceMode_UNKNOWN_SVC_MODE:
 		log.Warn("[pd] intend to switch to unknown service mode, just return")
 		return
