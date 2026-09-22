@@ -184,6 +184,8 @@ func (b *Builder) AddPeer(peer *metapb.Peer) *Builder {
 	}
 	if peer == nil || peer.GetStoreId() == 0 {
 		b.err = errors.Errorf("cannot add nil peer")
+	} else if peer.GetIsWitness() {
+		b.err = errors.Errorf("cannot add peer %s: witness peers are no longer supported", peer)
 	} else if core.IsInJointState(peer) {
 		b.err = errors.Errorf("cannot add peer %s: is in joint state", peer)
 	} else if old, ok := b.targetPeers[peer.GetStoreId()]; ok {
@@ -218,13 +220,15 @@ func (b *Builder) PromoteLearner(storeID uint64) *Builder {
 		b.err = errors.Errorf("cannot promote peer %d: not found", storeID)
 	} else if !core.IsLearner(peer) {
 		b.err = errors.Errorf("cannot promote peer %d: is not learner", storeID)
+	} else if core.IsWitness(peer) {
+		b.err = errors.Errorf("cannot promote peer %d: witness peers are no longer supported", storeID)
 	} else if _, ok := b.unhealthyPeers[storeID]; ok {
 		b.err = errors.Errorf("cannot promote peer %d: unhealthy", storeID)
 	} else {
 		b.targetPeers.set(&metapb.Peer{
-			Id:        peer.GetId(),
-			StoreId:   peer.GetStoreId(),
-			Role:      metapb.PeerRole_Voter,
+			Id:      peer.GetId(),
+			StoreId: peer.GetStoreId(),
+			Role:    metapb.PeerRole_Voter,
 		})
 	}
 	return b
@@ -241,9 +245,9 @@ func (b *Builder) DemoteVoter(storeID uint64) *Builder {
 		b.err = errors.Errorf("cannot demote voter %d: is already learner", storeID)
 	} else {
 		b.targetPeers.set(&metapb.Peer{
-			Id:        peer.GetId(),
-			StoreId:   peer.GetStoreId(),
-			Role:      metapb.PeerRole_Learner,
+			Id:      peer.GetId(),
+			StoreId: peer.GetStoreId(),
+			Role:    metapb.PeerRole_Learner,
 		})
 	}
 	return b
@@ -297,6 +301,10 @@ func (b *Builder) SetPeers(peers map[uint64]*metapb.Peer) *Builder {
 	for key, peer := range peers {
 		if peer == nil || key == 0 || peer.GetStoreId() != key || core.IsInJointState(peer) {
 			b.err = errors.Errorf("setPeers with mismatch peers: %v", peers)
+			return b
+		}
+		if peer.GetIsWitness() {
+			b.err = errors.Errorf("cannot set peer %s: witness peers are no longer supported", peer)
 			return b
 		}
 	}
@@ -412,9 +420,9 @@ func (b *Builder) prepareBuild() (string, error) {
 		// modify it to the peer id of the origin.
 		if o.GetId() != n.GetId() {
 			n = &metapb.Peer{
-				Id:        o.GetId(),
-				StoreId:   o.GetStoreId(),
-				Role:      n.GetRole(),
+				Id:      o.GetId(),
+				StoreId: o.GetStoreId(),
+				Role:    n.GetRole(),
 			}
 		}
 
@@ -469,8 +477,8 @@ func (b *Builder) prepareBuild() (string, error) {
 		}
 	}
 
-		if len(b.toAdd)+len(b.toRemove)+len(b.toPromote) <= 1 &&
-			len(b.toDemote) == 0 && (len(b.toRemove) != 1 || len(b.targetPeers) != 1) {
+	if len(b.toAdd)+len(b.toRemove)+len(b.toPromote) <= 1 &&
+		len(b.toDemote) == 0 && (len(b.toRemove) != 1 || len(b.targetPeers) != 1) {
 		// If only one peer changed and the change type is not demote, joint consensus is not used.
 		// Unless the changed is 2 voters to 1 voter, see https://github.com/tikv/pd/issues/4411 .
 		b.useJointConsensus = false
@@ -796,6 +804,10 @@ func (b *Builder) allowLeader(peer *metapb.Peer, ignoreClusterLimit bool) bool {
 	// these peer roles are not allowed to become leader.
 	switch peer.GetRole() {
 	case metapb.PeerRole_Learner, metapb.PeerRole_DemotingVoter:
+		return false
+	}
+
+	if peer.GetIsWitness() {
 		return false
 	}
 

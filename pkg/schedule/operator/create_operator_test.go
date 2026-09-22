@@ -1275,4 +1275,3 @@ func TestCreateLeaveJointStateOperatorWithoutFitRules(t *testing.T) {
 	re.Equal(uint64(4), step1.PromoteLearners[0].ToStore)
 	re.Equal(uint64(3), step1.DemoteVoters[0].ToStore)
 }
-

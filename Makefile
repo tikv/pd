@@ -187,8 +187,7 @@ install-tools:
 	@mkdir -p $(GO_TOOLS_BIN_PATH)
 	@set -o pipefail; \
 	if ! $(GO_TOOLS_BIN_PATH)/golangci-lint version 2>/dev/null | grep -Fq 'version $(GOLANGCI_LINT_VERSION) '; then \
-		$(RETRY) curl -sSfL https://golangci-lint.run/install.sh | \
-			sh -s -- -b $(GO_TOOLS_BIN_PATH) v$(GOLANGCI_LINT_VERSION); \
+		$(RETRY) bash -c 'set -o pipefail; curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b $$1 v$$2' _ "$(GO_TOOLS_BIN_PATH)" v"$(GOLANGCI_LINT_VERSION)"; \
 	fi
 	@which promtool >/dev/null 2>&1 || { \
 		GOWORK=off $(RETRY) go mod download github.com/prometheus/prometheus@v0.310.0 || exit $$?; \
