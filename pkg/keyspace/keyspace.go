@@ -512,86 +512,71 @@ func (manager *Manager) createKeyspaceWithoutCheck(tracer *createKeyspaceTracer,
 	return keyspace, nil
 }
 
-// rollbackCreateKeyspace undoes what createKeyspaceWithoutCheck committed.
-// The keyspace object passed in reflects a snapshot from when the create
-// transaction committed; by the time wait-split fails, an independent
-// operation (a state change, a config PATCH, or a TSO keyspace-group
-// split/merge) can have moved things on:
+// rollbackCreateKeyspace undoes what createKeyspaceWithoutCheck committed,
+// when the wait-split step after it fails. It does this as a single
+// compensating transaction - identity check, meta deletion, TSO
+// keyspace-group membership deletion, and region label rule deletion all
+// committing together or not at all - rather than through any intermediate
+// state, so there is never a window in which part of the compensation has
+// applied and part has not.
 //
-//   - The state API can transition this keyspace out of DISABLED (e.g. to
-//     ENABLED) while wait-split is still running elsewhere - nothing tracks
-//     "a create is in flight" as distinct from "is currently DISABLED". If
-//     that happened, this keyspace's lifecycle is no longer this failed
-//     create's to manage, and deleting it would destroy something another
-//     operation has legitimately taken over.
-//   - A TSO keyspace-group split/merge moves a keyspace between groups by
-//     rewriting the groups' own Keyspaces lists; it never touches the
-//     keyspace's own Config[TSOKeyspaceGroupIDKey]. So even a keyspace still
-//     correctly DISABLED can have that field pointing at a group it no
-//     longer belongs to.
-//   - Once the meta is deleted, this keyspace's id is free to be reused by
-//     an unrelated CreateKeyspaceByID call. If TSO group cleanup ran after
-//     that, resolving membership by id could hit the new keyspace's group
-//     instead and strip it.
+// An earlier version of this used a permanent TOMBSTONE seal as an internal
+// lock, transitioning the keyspace to it as soon as its identity was
+// confirmed and only then separately cleaning up TSO group membership and
+// the meta. That had its own problem: if the seal committed but the later
+// meta deletion never did (e.g. persistent storage trouble), the keyspace
+// was stuck in TOMBSTONE forever - a terminal state with no legal way out -
+// which is worse than simply leaving it DISABLED. See #10461's own
+// suggested fix: "make intermediate states explicit and safely recoverable"
+// is listed as an alternative to compensation/rollback, not something
+// rollback needs to add a new mid-cleanup state to satisfy. This version
+// avoids that by never introducing an intermediate state at all - identity
+// is checked against durable state (id, still DISABLED, still named
+// expectedName) inside the very same transaction that deletes the meta,
+// TSO group membership, and label rule, not as a separate check beforehand
+// that something else could invalidate before the deletes commit. If every
+// retry fails - most likely the target TSO keyspace group being
+// persistently mid split/merge - nothing has been committed by any of them
+// (each attempt is all-or-nothing), so this simply gives up and leaves the
+// keyspace exactly as createKeyspaceWithoutCheck left it: DISABLED, with
+// its meta, TSO group membership, and label rule all intact and
+// self-consistent - the same explicit, recoverable state #10461 already
+// accepts as a valid outcome, never a half-deleted one.
 //
-// To stay correct under all of these, rollback re-derives the truth from
-// durable state right before acting, and - rather than trying to keep
-// re-checking a moving target through the rest of the function - permanently
-// seals the keyspace against further mutation as early as possible:
+// Known limitation: (id, name, DISABLED) is still not a fully unique
+// identity for this rollback. If the original keyspace this call is for is
+// archived and removed while wait-split is still running (e.g. by an
+// operator, through the normal RemoveKeyspacesFromGroup/RemoveKeyspace
+// path), and a CreateKeyspaceByID call then reuses the same id *and* the
+// same name before this stale rollback runs, this will adopt the
+// replacement and delete it instead of silently doing nothing - the
+// replacement is otherwise indistinguishable from the keyspace this
+// rollback actually created. This requires two independent, unlikely
+// events to line up (the original being manually archived+removed while
+// its own create call is still in flight, and the id+name both being
+// reused before rollback gets to run) and is accepted rather than guarded
+// against - see this PR's description for the trade-off. The far more
+// common id-reuse case, a different name, is not affected: the name check
+// above already rejects it.
 //
-//  1. Reload the keyspace under metaLock. If it's gone, there's nothing to
-//     roll back. If it's no longer DISABLED, skip rollback entirely rather
-//     than deleting a keyspace something else has taken over. This is a
-//     cheap early exit; step 2 below re-verifies the same thing atomically
-//     with its own write, so this step's result is not load-bearing.
-//  2. Seal the keyspace by transitioning it straight to TOMBSTONE, under
-//     metaLock, with an identity check (id, still DISABLED, expected name)
-//     folded into the same transaction as the write - see
-//     sealKeyspaceForRollback. TOMBSTONE is a terminal state:
-//     stateTransitionTable only allows TOMBSTONE -> TOMBSTONE, and
-//     allowChangeConfig does not include it either, so once this commits,
-//     no concurrent UpdateKeyspaceState(ByID) can ever move it back to
-//     ENABLED and no concurrent config PATCH can touch it - permanently and
-//     unconditionally, not just for a narrow window. That closes the state-
-//     takeover and PATCH-driven group-reassignment races at the root,
-//     rather than needing metaLock held across the rest of this function to
-//     keep re-checking for them.
-//  3. Best-effort undo of the TSO keyspace-group membership. The meta still
-//     exists (step 2 changed its state, not removed it), so the id can't be
-//     reused out from under this step. TOMBSTONE blocks state/config-driven
-//     group changes, but not a TSO keyspace-group split/merge, which moves
-//     keyspaces between groups without consulting the keyspace's own state
-//     at all - so this first tries the group named by the sealed keyspace's
-//     own Config[TSOKeyspaceGroupIDKey] (current as of the reload inside
-//     sealKeyspaceForRollback), storage-verified within the delete's own
-//     transaction, before falling back to GetGroupByKeyspaceID - the
-//     GroupManager's cache of current membership, which can briefly lag
-//     storage behind a concurrent creation or rollback's own group-op
-//     commit - re-read on every retry attempt and re-verified after a
-//     successful-looking delete (see undoTSOKeyspaceGroupMembership). The
-//     group may be mid split/merge and reject this for a while (bounded, so
-//     a short retry usually clears it); if it still fails after retrying,
-//     step 4 below still runs unconditionally, so this only leaves a stale
-//     membership entry in the group - logged for follow-up - instead of
-//     blocking the rollback.
-//  4. Remove the meta, undo the meta-service group assignment count, and
-//     remove the region label rule, all in one transaction, retried a few
-//     times since a transient failure here must not strand the keyspace
-//     name permanently. Unconditional on step 3's outcome: the alternative
-//     failure mode - meta present but with no TSO group membership -
-//     reproduces exactly the inconsistent state this PR exists to eliminate
-//     (see #10461), and would also leave the keyspace name stuck. A stale
-//     group membership entry with no backing meta (step 3 exhausting its
-//     retries) is comparatively harmless.
-//
-// metaLock is held for steps 1, 2, and 4, but released for step 3:
-// updateKeyspaceForGroupTxnOp (and the callback it returns) briefly takes
-// GroupManager.Lock, while RemoveKeyspacesFromGroup takes GroupManager.Lock
-// first and then metaLock (via Manager.RemoveKeyspace) — holding metaLock
-// across step 3 would invert that order and can deadlock against a
-// concurrent RemoveKeyspacesFromGroup. Steps 1, 2, and 4 never touch
-// GroupManager.Lock, so holding metaLock for each of them (independently,
-// not across step 3) carries no such risk.
+// The TSO keyspace group to delete membership from is resolved via
+// GetGroupByKeyspaceID (the GroupManager's cache of current membership) on
+// every attempt, not from this keyspace's own Config[TSOKeyspaceGroupIDKey]:
+// a TSO keyspace-group split/merge moves keyspaces between groups by
+// rewriting the groups' own Keyspaces lists without ever touching that
+// field (see the comment on TSOKeyspaceGroupIDKey), so it can be
+// permanently wrong, not just transiently stale. GetGroupByKeyspaceID
+// itself is accurate with respect to split/merge specifically - those hold
+// GroupManager.Lock for their whole duration and update storage and cache
+// under it together - but can still lag storage briefly behind a concurrent
+// creation's or another rollback's own group-membership commit, both of
+// which stage their change in their own transaction and update the cache
+// afterward in a separate callback (see updateKeyspaceForGroupTxnOp). The
+// delete built from it is therefore storage-verified within the same
+// transaction it commits in (buildRollbackGroupDeleteOp), so a stale or
+// since-changed cache read only ever fails that attempt (triggering a
+// retry, which re-resolves the group fresh) rather than silently
+// committing a delete that did not actually apply.
 func (manager *Manager) rollbackCreateKeyspace(keyspace *keyspacepb.KeyspaceMeta) error {
 	var regionLabeler *labeler.RegionLabeler
 	var ruleID string
@@ -600,78 +585,86 @@ func (manager *Manager) rollbackCreateKeyspace(keyspace *keyspacepb.KeyspaceMeta
 		ruleID = getRegionLabelID(keyspace.GetId())
 	}
 	id := keyspace.GetId()
-
-	// Step 1: cheap early exit against durable storage instead of trusting
-	// the snapshot - see the function comment for why. expectedName is
-	// fixed here, before any reload, and never re-derived from a later
-	// snapshot: see reloadKeyspaceIfStillDisabled for why that matters.
 	expectedName := keyspace.GetName()
-	verified, err := manager.reloadKeyspaceIfStillDisabled(id, expectedName)
-	if err != nil {
-		return err
-	}
-	if verified == nil {
-		return nil
-	}
 
-	// Step 2: seal the keyspace as TOMBSTONE - see the function comment for
-	// why this closes the remaining races permanently instead of narrowing
-	// them.
-	sealed, err := manager.sealKeyspaceForRollback(id, expectedName)
-	if err != nil {
-		return err
-	}
-	if sealed == nil {
-		return nil
-	}
-	// sealKeyspaceForRollback cannot do this itself - see its function
-	// comment - since it's still holding metaLock when it returns.
-	manager.refreshKeyspaceMetaCache(id)
-	keyspace = sealed
-
-	// Step 3: best-effort, tolerating a group mid split/merge - see the
-	// function comment. knownGroupID/knownUserKind come from the sealed
-	// keyspace's own config, current as of sealKeyspaceForRollback's reload.
-	knownGroupID := keyspace.GetConfig()[TSOKeyspaceGroupIDKey]
-	knownUserKind := endpoint.StringUserKind(keyspace.GetConfig()[UserKindKey])
-	if err := manager.undoTSOKeyspaceGroupMembership(id, expectedName, knownGroupID, knownUserKind); err != nil {
-		log.Error("[keyspace] rollback could not undo TSO keyspace-group membership; "+
-			"the group may still list a keyspace whose metadata is about to be removed",
-			zap.Uint32("keyspace-id", id),
-			errs.ZapError(err),
-		)
-	}
-
-	// Step 4: remove the meta and the region label rule, in one transaction,
-	// retried a few times since the create transaction has already
-	// committed and a transient failure here must not strand the keyspace
-	// name permanently. The meta-service group assignment count was already
-	// unassigned as part of sealing the keyspace in step 2, so this step
-	// only needs to touch the meta and the label rule.
-	manager.metaLock.Lock(id)
-	metaTxnOps := []txnOp{func(txn kv.Txn) error {
-		if err := manager.store.RemoveKeyspace(txn, keyspace.GetId(), keyspace.GetName()); err != nil {
+	metaOp := func(txn kv.Txn) error {
+		current, err := manager.store.LoadKeyspaceMeta(txn, id)
+		if err != nil {
+			return err
+		}
+		if current == nil || current.GetState() != keyspacepb.KeyspaceState_DISABLED || current.GetName() != expectedName {
+			return errRollbackTargetChanged
+		}
+		if err := manager.unassignKeyspaceFromMetaServiceGroup(txn, current); err != nil {
+			return err
+		}
+		if err := manager.store.RemoveKeyspace(txn, id, expectedName); err != nil {
 			return err
 		}
 		if regionLabeler == nil {
 			return nil
 		}
 		return regionLabeler.GetRuleStorage().DeleteRegionRule(txn, ruleID)
-	}}
+	}
+
+	manager.metaLock.Lock(id)
+	var groupCb txnCb
+	var committed, targetChanged bool
+	var err error
+	backoff := time.Second
+retryLoop:
 	for i := range 3 {
-		err = manager.RunTxn(0, metaTxnOps)
+		var groupOp txnOp
+		var groupID uint32
+		groupOp, groupID, groupCb, err = manager.buildRollbackGroupDeleteOp(id)
 		if err == nil {
-			break
+			ops := []txnOp{metaOp}
+			if groupOp != nil {
+				ops = append(ops, groupOp)
+			}
+			err = manager.RunTxn(groupID, ops)
+			if err == nil {
+				committed = true
+				break retryLoop
+			}
+			if err == errRollbackTargetChanged { //nolint:errorlint // fixed sentinel, never wrapped
+				targetChanged = true
+				break retryLoop
+			}
 		}
 		if i < 2 {
-			time.Sleep(time.Second)
+			// manager.ctx, not the caller's request context: this cleanup
+			// must run to completion even if the original CreateKeyspace
+			// call's context is cancelled (e.g. the client disconnected),
+			// but should stop promptly on server shutdown instead of
+			// blocking it for the rest of the backoff.
+			select {
+			case <-time.After(backoff):
+			case <-manager.ctx.Done():
+				err = manager.ctx.Err()
+				break retryLoop
+			}
+			backoff *= 2
 		}
 	}
+	// Released before any post-commit side effect below: refreshKeyspaceMetaCache
+	// takes metaLock itself, and syncutil.LockGroup is not reentrant, so calling
+	// it (or anything else that does) while still holding the lock would
+	// self-deadlock.
 	manager.metaLock.Unlock(id)
-	if err != nil {
+
+	if targetChanged {
+		return nil
+	}
+	if !committed {
+		log.Warn("[keyspace] rollback could not clean up failed create after retrying; leaving keyspace as DISABLED for manual handling",
+			zap.Uint32("keyspace-id", id), zap.String("keyspace-name", expectedName), errs.ZapError(err))
 		return err
 	}
 
+	if groupCb != nil {
+		groupCb(nil)
+	}
 	manager.refreshKeyspaceMetaCache(id)
 	if regionLabeler != nil {
 		// Re-read from storage rather than unconditionally deleting the
@@ -695,284 +688,89 @@ func (manager *Manager) rollbackCreateKeyspace(keyspace *keyspacepb.KeyspaceMeta
 	return nil
 }
 
-// reloadKeyspaceIfStillDisabled reloads the keyspace under metaLock and
-// returns it only if it still exists, is still DISABLED, and still has
-// expectedName. The name check matters because id alone does not identify
-// the keyspace this rollback is for: if the original keyspace was archived
-// and removed while its create call was still waiting on region split,
-// CreateKeyspaceByID could have reused id for an unrelated keyspace by the
-// time rollback runs - checking only id and state would then adopt that
-// replacement's identity and let rollback delete it instead of silently
-// doing nothing. A nil meta and nil error together mean the caller should
-// stop: either the keyspace is gone, its identity no longer matches, or
-// something else has taken over its lifecycle since it was created (logged
-// here either way).
-func (manager *Manager) reloadKeyspaceIfStillDisabled(id uint32, expectedName string) (*keyspacepb.KeyspaceMeta, error) {
-	manager.metaLock.Lock(id)
-	defer manager.metaLock.Unlock(id)
-	var current *keyspacepb.KeyspaceMeta
-	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
-		var err error
-		current, err = manager.store.LoadKeyspaceMeta(txn, id)
-		return err
-	})
-	if err != nil {
-		return nil, err
-	}
-	if current == nil {
-		return nil, nil
-	}
-	if current.GetName() != expectedName {
-		log.Warn("[keyspace] skipping create rollback: id now identifies a different keyspace",
-			zap.Uint32("keyspace-id", id),
-			zap.String("expected-name", expectedName),
-			zap.String("current-name", current.GetName()),
-		)
-		return nil, nil
-	}
-	if current.GetState() != keyspacepb.KeyspaceState_DISABLED {
-		log.Warn("[keyspace] skipping create rollback: keyspace was taken over externally during creation",
-			zap.Uint32("keyspace-id", id),
-			zap.String("state", current.GetState().String()),
-		)
-		return nil, nil
-	}
-	return current, nil
-}
+// errRollbackTargetChanged means the record at id is no longer the keyspace
+// this rollback is cleaning up (identified by id, name, and create token
+// together, since id and name alone are not unique - see the function
+// comment on rollbackCreateKeyspace) by the time the compensating
+// transaction was about to commit. Not a transient failure: retrying cannot
+// succeed, since something else has legitimately taken over this identity
+// (a state change, or - once this keyspace is gone - an unrelated
+// CreateKeyspaceByID reusing its id and name).
+var errRollbackTargetChanged = errors.New("keyspace no longer identifies the same failed create, not rolling it back")
 
-// sealKeyspaceForRollback marks the keyspace TOMBSTONE, closing the state-
-// takeover and PATCH-driven group-reassignment races permanently rather
-// than narrowing them - see the function comment on rollbackCreateKeyspace.
-// The identity check (id, still DISABLED, expectedName) and the write are
-// folded into the same transaction, the same reasoning as
-// undoTSOKeyspaceGroupMembership's identityCheckOp: the two either commit
-// together or not at all.
-//
-// This writes the target state directly rather than going through
-// transformKeyspaceState: that function's stateTransitionTable does not
-// allow DISABLED -> TOMBSTONE (only ARCHIVED -> TOMBSTONE, the normal
-// user-driven lifecycle) - but this is not a normal lifecycle transition,
-// it's rollback's own internal-only way of permanently disabling further
-// mutation of a keyspace whose creation failed.
-// unassignKeyspaceFromMetaServiceGroup is still called directly here,
-// matching what transformKeyspaceState itself does for a TOMBSTONE
-// transition, so the assignment count doesn't need to wait for step 4 to
-// unwind it.
-//
-// Returns nil, nil (not an error) if the keyspace is gone or no longer
-// matches (id, DISABLED, expectedName): there is nothing to roll back,
-// logged here either way. A non-nil error means the transaction itself
-// could not be committed after retrying - the keyspace is left DISABLED,
-// and the caller should propagate the error rather than proceed. On success
-// the caller is responsible for refreshing the cache (see
-// refreshKeyspaceMetaCache) once this call returns - this function cannot
-// do that itself, since that helper takes metaLock and this function is
-// still holding it (via defer) until it returns.
-func (manager *Manager) sealKeyspaceForRollback(id uint32, expectedName string) (*keyspacepb.KeyspaceMeta, error) {
-	manager.metaLock.Lock(id)
-	defer manager.metaLock.Unlock(id)
-	var sealed *keyspacepb.KeyspaceMeta
-	sealOp := func(txn kv.Txn) error {
-		current, err := manager.store.LoadKeyspaceMeta(txn, id)
-		if err != nil {
-			return err
-		}
-		if current == nil || current.GetState() != keyspacepb.KeyspaceState_DISABLED || current.GetName() != expectedName {
-			// Not an error: retrying cannot help an identity mismatch, so
-			// this deliberately lets the loop below stop immediately
-			// (RunTxn still returns nil) with sealed left unset.
-			return nil
-		}
-		current.State = keyspacepb.KeyspaceState_TOMBSTONE
-		current.StateChangedAt = time.Now().Unix()
-		if err := manager.unassignKeyspaceFromMetaServiceGroup(txn, current); err != nil {
-			return err
-		}
-		if err := manager.store.SaveKeyspaceMeta(txn, current); err != nil {
-			return err
-		}
-		sealed = current
-		return nil
-	}
-	var err error
-	for i := range 3 {
-		err = manager.RunTxn(0, []txnOp{sealOp})
-		if err == nil {
-			break
-		}
-		if i < 2 {
-			time.Sleep(time.Second)
-		}
-	}
-	if err != nil {
-		return nil, err
-	}
-	if sealed == nil {
-		log.Warn("[keyspace] skipping create rollback: keyspace is gone, was taken over externally during creation, or now identifies a different keyspace",
-			zap.Uint32("keyspace-id", id),
-			zap.String("expected-name", expectedName),
-		)
-		return nil, nil
-	}
-	// The caller refreshes the cache once metaLock above is released:
-	// refreshKeyspaceMetaCache takes metaLock itself, and syncutil.LockGroup
-	// is not reentrant, so calling it here while still holding the lock
-	// (deferred above) would self-deadlock.
-	return sealed, nil
-}
+// errRollbackGroupMembershipMoved means buildRollbackGroupDeleteOp's delete
+// found keyspaceID was not (or no longer) a member of the group
+// GetGroupByKeyspaceID had just resolved, by the time the compensating
+// transaction was about to commit - see the function comment on
+// rollbackCreateKeyspace for why GetGroupByKeyspaceID can still be wrong in
+// that narrow way. The keyspace's own identity is unaffected; the caller
+// should simply retry the whole compensating transaction, which re-resolves
+// the group fresh.
+var errRollbackGroupMembershipMoved = errors.New("keyspace group membership moved before the compensating transaction committed")
 
-// errRollbackTargetChanged means the keyspace this rollback is cleaning up
-// (identified by id and expectedName together, since an id alone can be
-// reused by an unrelated keyspace) is no longer the TOMBSTONE keyspace
-// sealKeyspaceForRollback sealed under that same identity, by the time the
-// TSO group membership delete was about to commit. Not a transient failure:
-// retrying it cannot succeed, since something else has changed this
-// keyspace's identity (or reused its id) - TOMBSTONE itself cannot be
-// changed away from by any normal path, so in practice this only fires if
-// the id has already been reused, which step 4 of rollbackCreateKeyspace
-// running after this guards against by construction (the meta this checks
-// against still exists until step 4 deletes it).
-var errRollbackTargetChanged = errors.New("keyspace no longer identifies the same sealed keyspace, not rolling back its TSO group membership")
-
-// errRollbackGroupMembershipMoved means a delete attempt committed without
-// error but keyspaceID was still found in a group afterward: the delete had
-// already become a no-op by commit time because keyspaceID had moved to a
-// different group (e.g. via a TSO keyspace-group split/merge, the only kind
-// of group change a sealed TOMBSTONE keyspace remains subject to - see the
-// function comment on rollbackCreateKeyspace). Not the same as
-// errRollbackTargetChanged: the keyspace's own identity is still intact,
-// only its group membership moved, so retrying against the freshly-resolved
-// group can still succeed.
-var errRollbackGroupMembershipMoved = errors.New("keyspace group membership moved before the delete committed, retrying against its current group")
-
-// undoTSOKeyspaceGroupMembership removes keyspaceID from whatever TSO
-// keyspace group it currently belongs to.
+// buildRollbackGroupDeleteOp resolves which TSO keyspace group keyspaceID
+// currently belongs to (via GetGroupByKeyspaceID) and returns a txnOp that
+// deletes it - meant to be committed as part of the same transaction as
+// rollbackCreateKeyspace's meta deletion, not a separate one, so the two can
+// never partially apply.
 //
-// It first tries knownGroupID/knownUserKind - the group the sealed
-// keyspace's own Config[TSOKeyspaceGroupIDKey] named as of
-// sealKeyspaceForRollback's reload. tryGroup's delete loads that one group
-// fresh from storage as part of its own transaction, so this attempt needs
-// no cache lookup to decide whether the delete should happen: a knownGroupID
-// no-op is storage-proven, not a cache guess, meaning the keyspace has
-// genuinely moved groups since sealing (only a TSO keyspace-group
-// split/merge can still do that - see the function comment on
-// rollbackCreateKeyspace). Only then does this fall back to
-// GetGroupByKeyspaceID - the GroupManager's cache of current membership,
-// which can lag storage briefly behind a concurrent creation or another
-// rollback's own group-op commit (both stage their group-membership change
-// in the caller's transaction and update the cache in a separate callback
-// afterward - see updateKeyspaceForGroupTxnOp) - re-read on every retry
-// attempt and re-verified after a successful-looking delete, since that
-// same staleness can just as well make a delete attempt here a silent
-// no-op - see errRollbackGroupMembershipMoved. Returns nil if the keyspace
-// isn't (or is no longer) in any group.
+// This does not reuse updateKeyspaceForGroupTxnOp's own delete op: that one
+// silently no-ops (returns success) when keyspaceID is no longer where
+// GetGroupByKeyspaceID said it was by commit time, which is exactly right
+// for its other caller (a best-effort cleanup that must not block on a
+// moving target) but wrong here - it would let the whole compensating
+// transaction commit having deleted the meta without having actually
+// removed the group membership. The op built here fails the transaction
+// instead (errRollbackGroupMembershipMoved), so the caller retries against a
+// freshly-resolved group rather than losing track of a membership it never
+// actually cleaned up. updateKeyspaceForGroupTxnOp is still called for its
+// pre-check (group exists, not mid split/merge) and its post-commit
+// cache-refresh callback, both reused as-is.
 //
-// Every delete only ever commits alongside a same-transaction check that
-// keyspaceID still identifies the sealed TOMBSTONE keyspace named
-// expectedName - see sealKeyspaceForRollback, which the caller must run
-// first. That seal already forecloses a state-driven or config-PATCH-driven
-// identity change; this check exists for the one thing sealing does not
-// prevent, an unrelated keyspace reusing this id after step 4 of
-// rollbackCreateKeyspace deletes the meta - and for defense in depth against
-// any future caller of this function that does not seal first.
-func (manager *Manager) undoTSOKeyspaceGroupMembership(keyspaceID uint32, expectedName, knownGroupID string, knownUserKind endpoint.UserKind) error {
+// Returns a nil op and a nil callback (with a nil error) if keyspaceID
+// currently is not in any group, or if manager.kgm is nil (classic mode):
+// there is nothing to delete, so rollbackCreateKeyspace's transaction only
+// needs its meta op.
+func (manager *Manager) buildRollbackGroupDeleteOp(keyspaceID uint32) (op txnOp, groupID uint32, cb txnCb, err error) {
 	if manager.kgm == nil {
-		return nil
+		return nil, 0, nil, nil
 	}
-	identityCheckOp := func(txn kv.Txn) error {
-		current, err := manager.store.LoadKeyspaceMeta(txn, keyspaceID)
+	groupID, userKind, err := manager.kgm.GetGroupByKeyspaceID(keyspaceID)
+	if err != nil {
+		// Not currently in any group - nothing to delete.
+		return nil, 0, nil, nil
+	}
+	_, cb, err = manager.kgm.updateKeyspaceForGroupTxnOp(userKind, strconv.FormatUint(uint64(groupID), 10), keyspaceID, opDelete)
+	if err != nil {
+		return nil, 0, nil, err
+	}
+	if cb == nil {
+		// manager.kgm is nil (classic mode): nothing to delete.
+		return nil, 0, nil, nil
+	}
+	// The candidate group has been decided; pause here for tests exercising
+	// what a concurrent group move (or state change, observed by metaOp
+	// inside the same transaction as this op) does to an in-flight retry
+	// attempt.
+	failpoint.InjectCall("rollbackGroupDeleteOpAfterLookup")
+	op = func(txn kv.Txn) error {
+		kg, err := manager.kgm.store.LoadKeyspaceGroup(txn, groupID)
 		if err != nil {
 			return err
 		}
-		if current == nil || current.GetState() != keyspacepb.KeyspaceState_TOMBSTONE || current.GetName() != expectedName {
-			return errRollbackTargetChanged
+		if kg == nil || !slice.Contains(kg.Keyspaces, keyspaceID) {
+			return errRollbackGroupMembershipMoved
 		}
-		return nil
+		if kg.IsSplitting() {
+			return errs.ErrKeyspaceGroupInSplit.FastGenByArgs(groupID)
+		}
+		if kg.IsMerging() {
+			return errs.ErrKeyspaceGroupInMerging.FastGenByArgs(groupID)
+		}
+		kg.Keyspaces = slice.Remove(kg.Keyspaces, keyspaceID)
+		return manager.kgm.store.SaveKeyspaceGroup(txn, kg)
 	}
-	// tryGroup attempts to delete keyspaceID's membership from exactly the
-	// group gid, storage-verified within the delete's own transaction.
-	// done=true means there is nothing more for the caller to do (either the
-	// delete actually removed membership, or a same-transaction check
-	// proved there was nothing to remove); done=false with a nil error means
-	// the delete committed but a post-check found keyspaceID still
-	// somewhere, i.e. gid was not (or no longer) where it lives - the caller
-	// should look elsewhere, not retry the same gid.
-	tryGroup := func(gid uint32, userKind endpoint.UserKind) (done bool, err error) {
-		op, cb, err := manager.kgm.updateKeyspaceForGroupTxnOp(userKind, strconv.FormatUint(uint64(gid), 10), keyspaceID, opDelete)
-		if err != nil {
-			return false, err
-		}
-		if op == nil {
-			// manager.kgm is nil (classic mode): nothing to undo.
-			return true, nil
-		}
-		// The group to target has been decided; pause here for tests
-		// exercising what a concurrent caller can/cannot do to the sealed
-		// keyspace or its group membership while this commit is pending.
-		failpoint.InjectCall("undoTSOKeyspaceGroupMembershipAfterLookup")
-		if err := manager.RunTxn(gid, []txnOp{identityCheckOp, op}); err != nil {
-			if err == errRollbackTargetChanged { //nolint:errorlint // fixed sentinel, never wrapped
-				return true, nil
-			}
-			return false, err
-		}
-		cb(nil)
-		// A nil commit error does not yet prove keyspaceID's membership was
-		// actually removed: the delete is a silent no-op when keyspaceID
-		// was no longer a member of gid by commit time (identityCheckOp
-		// only guards the keyspace's own identity, not which group
-		// currently lists it as a member), so this could have just
-		// "successfully" deleted nothing from a group it had already left.
-		// Re-resolve to confirm before declaring success.
-		if _, _, checkErr := manager.kgm.GetGroupByKeyspaceID(keyspaceID); checkErr != nil {
-			return true, nil
-		}
-		return false, nil
-	}
-
-	if knownGroupID != "" {
-		if gid, parseErr := strconv.ParseUint(knownGroupID, 10, 32); parseErr == nil {
-			if done, err := tryGroup(uint32(gid), knownUserKind); err == nil && done {
-				return nil
-			}
-			// Either an unexpected error (e.g. the known group is mid
-			// split/merge) or a storage-proven no-op: either way, fall
-			// through to the cache-based search below rather than retrying
-			// a group already shown not to have it.
-		}
-	}
-
-	var err error
-	backoff := time.Second
-	for i := range 3 {
-		var groupID uint32
-		var userKind endpoint.UserKind
-		if groupID, userKind, err = manager.kgm.GetGroupByKeyspaceID(keyspaceID); err != nil {
-			// Not currently in any group - nothing to undo.
-			return nil
-		}
-		var done bool
-		if done, err = tryGroup(groupID, userKind); err == nil {
-			if done {
-				return nil
-			}
-			err = errRollbackGroupMembershipMoved
-		}
-		if i < 2 {
-			// manager.ctx, not the caller's request context: this cleanup
-			// must run to completion even if the original CreateKeyspace
-			// call's context is cancelled (e.g. the client disconnected),
-			// but should stop promptly on server shutdown instead of
-			// blocking it for the rest of the backoff.
-			select {
-			case <-time.After(backoff):
-			case <-manager.ctx.Done():
-				return manager.ctx.Err()
-			}
-			backoff *= 2
-		}
-	}
-	return err
+	return op, groupID, cb, nil
 }
 
 // runCreateKeyspaceTxn runs the keyspace creation operations in a single
