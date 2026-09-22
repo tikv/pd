@@ -2324,6 +2324,7 @@ func (c *RaftCluster) deleteStore(store *core.StoreInfo) error {
 	// (already fully cleaned) tombstone entry and skip its own cleanup,
 	// leaving a series this cleanup just deleted with no later event able to
 	// find and remove it again.
+	failpoint.InjectCall("deleteStoreBeforeRemoveFromMap")
 	c.DeleteStore(store)
 	c.ruleManager.RemoveStoreCache(store.GetID())
 	storeIDStr := strconv.FormatUint(store.GetID(), 10)

@@ -3463,6 +3463,18 @@ func TestRemoveTombstoneRecordsKeepsStoreWhenLimitRemovalFails(t *testing.T) {
 	re.False(loadedOK)
 }
 
+// TestSetStoreLimitCannotRaceStoreDeletion guards against SetStoreLimit
+// racing deleteStore for the same store: pins deleteStore right after the
+// store's durable metadata and config-limit entries are gone but before it's
+// removed from StoresInfo, the exact window in which SetStoreLimit's guard
+// (store != nil && store.IsRemoved()) can still correctly reject it. This
+// deliberately never lets the race reach full removal (GetStore returning
+// nil) -- that's a separate, already-documented gap (the guard can't tell
+// "never registered" from "already gone" once nil), not what storeStateLock
+// closes here. Racing all the way to nil would make this test flaky in
+// exactly the way it's meant to rule out: the outcome would depend on
+// whether SetStoreLimit's check happens to run before or after
+// c.DeleteStore(store) actually executes.
 func TestSetStoreLimitCannotRaceStoreDeletion(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -3478,25 +3490,27 @@ func TestSetStoreLimitCannotRaceStoreDeletion(t *testing.T) {
 	tombstone := store.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
 	re.NoError(rc.setStore(tombstone))
 
-	deleteStarted := make(chan struct{})
-	releaseDelete := make(chan struct{})
-	rc.storage = &blockingDeleteStoreMetaStorage{
-		Storage:       storeStorage,
-		deleteStarted: deleteStarted,
-		releaseDelete: releaseDelete,
-	}
-
 	storeID := store.GetID()
 	rc.storeStateLock.Lock(uint32(storeID))
+
+	beforeRemove := make(chan struct{})
+	releaseRemove := make(chan struct{})
+	const beforeRemoveFP = "github.com/tikv/pd/server/cluster/deleteStoreBeforeRemoveFromMap"
+	re.NoError(failpoint.EnableCall(beforeRemoveFP, func() {
+		close(beforeRemove)
+		<-releaseRemove
+	}))
+	defer func() { re.NoError(failpoint.Disable(beforeRemoveFP)) }()
+
 	deleteDone := make(chan error, 1)
 	go func() {
 		deleteDone <- rc.deleteStore(tombstone)
 	}()
 
 	select {
-	case <-deleteStarted:
+	case <-beforeRemove:
 	case <-time.After(2 * time.Second):
-		t.Fatal("deleteStore did not reach store metadata deletion")
+		t.Fatal("deleteStore did not reach the pre-removal barrier")
 	}
 
 	// SetStoreLimit's own storeStateLock.Lock() is the very next statement
@@ -3523,14 +3537,20 @@ func TestSetStoreLimitCannotRaceStoreDeletion(t *testing.T) {
 
 	select {
 	case err := <-setLimitDone:
-		t.Fatalf("setting a deleted store limit completed before deletion: %v", err)
+		t.Fatalf("setting a store limit completed before storeStateLock should have been available: %v", err)
 	case <-time.After(100 * time.Millisecond):
 	}
 
-	close(releaseDelete)
+	// deleteStore is still parked at the barrier here (releaseRemove isn't
+	// closed yet), so the store is guaranteed to still be tombstoned-but-
+	// present in StoresInfo when SetStoreLimit's guard runs below -- not a
+	// race against when c.DeleteStore(store) happens to execute.
 	rc.storeStateLock.Unlock(uint32(storeID))
-	re.NoError(<-deleteDone)
 	re.Error(<-setLimitDone)
+
+	close(releaseRemove)
+	re.NoError(<-deleteDone)
+
 	_, ok := opt.GetScheduleConfig().StoreLimit[storeID]
 	re.False(ok)
 }
@@ -3541,18 +3561,6 @@ type failingSaveConfigStorage struct {
 
 func (*failingSaveConfigStorage) SaveConfig(any) error {
 	return errors.New("save config failed")
-}
-
-type blockingDeleteStoreMetaStorage struct {
-	storage.Storage
-	deleteStarted chan struct{}
-	releaseDelete chan struct{}
-}
-
-func (s *blockingDeleteStoreMetaStorage) DeleteStoreMeta(store *metapb.Store) error {
-	close(s.deleteStarted)
-	<-s.releaseDelete
-	return s.Storage.DeleteStoreMeta(store)
 }
 
 type blockingSaveConfigStorage struct {
