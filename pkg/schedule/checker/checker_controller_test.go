@@ -141,4 +141,3 @@ func TestCheckRegionWitnessLeaderFallsBackToJointStateRepair(t *testing.T) {
 	require.Equal(t, 1, ops[0].Len())
 	require.IsType(t, operator.ChangePeerV2Leave{}, ops[0].Step(0))
 }
-
