@@ -31,6 +31,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/kvproto/pkg/meta_storagepb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 
 	"github.com/tikv/pd/client/clients/metastorage"
@@ -704,4 +705,65 @@ func runRMTokenHoldTest(t *testing.T, simulatePDLeaderChange bool) {
 	}
 	require.EqualValues(t, 0, pdServer.tokenCount.Load())
 	require.EqualValues(t, 2, rmServer.tokenCount.Load())
+}
+
+// A membership check that observes a new PD leader synchronously while a
+// service-mode switch is in progress must not deadlock: the registered
+// leader callback reads the lock-free RM discovery pointer instead of
+// reentering the mode-switch write lock it is running under.
+type manualServiceDiscovery struct{ sd.ServiceDiscovery }
+
+func (*manualServiceDiscovery) Init() error { return nil }
+
+type testMembersServer struct {
+	pdpb.UnimplementedPDServer
+	leader atomic.Pointer[pdpb.Member]
+}
+
+func (s *testMembersServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.GetMembersResponse, error) {
+	m := s.leader.Load()
+	return &pdpb.GetMembersResponse{Header: &pdpb.ResponseHeader{}, Members: []*pdpb.Member{m}, Leader: m}, nil
+}
+
+func TestLeaderChangeDuringServiceModeSwitch(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	server := grpc.NewServer()
+	t.Cleanup(server.Stop)
+	members := &testMembersServer{}
+	oldURL := "http://" + listener.Addr().String()
+	_, port, err := net.SplitHostPort(listener.Addr().String())
+	require.NoError(t, err)
+	members.leader.Store(&pdpb.Member{MemberId: 1, ClientUrls: []string{oldURL}})
+	pdpb.RegisterPDServer(server, members)
+	rmpb.RegisterResourceManagerServer(server, &testRMServer{id: "pd"})
+	go func() { _ = server.Serve(listener) }()
+
+	discovery := sd.NewDefaultServiceDiscovery(ctx, cancel, []string{oldURL}, nil)
+	t.Cleanup(discovery.Close)
+	require.NoError(t, discovery.CheckMemberChanged())
+
+	inner := newInnerClientForRMRouteTest(t, ctx, oldURL)
+	inner.serviceDiscovery = &manualServiceDiscovery{ServiceDiscovery: discovery}
+	require.NoError(t, inner.setup())
+	t.Cleanup(func() {
+		inner.tokenDispatcher.dispatcherCancel()
+		inner.wg.Wait()
+	})
+
+	inner.Lock()
+	inner.serviceMode = pdpb.ServiceMode_API_SVC_MODE
+	inner.Unlock()
+	members.leader.Store(&pdpb.Member{MemberId: 2, ClientUrls: []string{"http://localhost:" + port}})
+	inner.setServiceMode(pdpb.ServiceMode_PD_SVC_MODE)
+	t.Cleanup(func() {
+		if inner.tsoClient != nil {
+			inner.tsoClient.Close()
+		}
+	})
+	inner.RLock()
+	require.EqualValues(t, pdpb.ServiceMode_PD_SVC_MODE, inner.serviceMode)
+	inner.RUnlock()
 }
