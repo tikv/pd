@@ -44,6 +44,7 @@ var (
 type StoreConfig struct {
 	Coprocessor `json:"coprocessor"`
 	Storage     `json:"storage"`
+	ReadPool    ReadPool `json:"readpool"`
 
 	RegionMaxSizeMB    uint64 `json:"-"`
 	RegionSplitSizeMB  uint64 `json:"-"`
@@ -53,6 +54,16 @@ type StoreConfig struct {
 // Storage is the config for the tikv storage.
 type Storage struct {
 	Engine string `json:"engine"`
+}
+
+// ReadPool is the config for TiKV read pools.
+type ReadPool struct {
+	Unified UnifiedReadPool `json:"unified"`
+}
+
+// UnifiedReadPool is the config for TiKV unified read pool.
+type UnifiedReadPool struct {
+	MaxThreadCount uint64 `json:"max-thread-count"`
 }
 
 // Coprocessor is the config of coprocessor.
@@ -81,7 +92,9 @@ func (c *StoreConfig) Adjust() {
 
 // Equal returns true if the two configs are equal.
 func (c *StoreConfig) Equal(other *StoreConfig) bool {
-	return reflect.DeepEqual(c.Coprocessor, other.Coprocessor) && reflect.DeepEqual(c.Storage, other.Storage)
+	return reflect.DeepEqual(c.Coprocessor, other.Coprocessor) &&
+		reflect.DeepEqual(c.Storage, other.Storage) &&
+		reflect.DeepEqual(c.ReadPool, other.ReadPool)
 }
 
 // String implements fmt.Stringer interface.
@@ -139,6 +152,14 @@ func (c *StoreConfig) IsRaftKV2() bool {
 		return false
 	}
 	return c.Storage.Engine == RaftstoreV2
+}
+
+// GetUnifiedReadPoolMaxThreadCount returns TiKV unified read pool max thread count.
+func (c *StoreConfig) GetUnifiedReadPoolMaxThreadCount() uint64 {
+	if c == nil {
+		return 0
+	}
+	return c.ReadPool.Unified.MaxThreadCount
 }
 
 // SetRegionBucketEnabled sets if the region bucket is enabled.
