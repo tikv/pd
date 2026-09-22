@@ -656,8 +656,9 @@ func runRMTokenHoldTest(t *testing.T, simulatePDLeaderChange bool) {
 	}
 
 	if simulatePDLeaderChange {
-		// The registered PD leader callback must not cancel the in-flight
-		// RM stream even while its Recv is blocked.
+		// The registered PD leader callback must neither cancel the in-flight
+		// RM stream nor schedule a reconnect, so it returns without touching
+		// the dispatcher.
 		require.NoError(t, inner.onPDLeaderChanged(""))
 	} else {
 		releaseHold()
@@ -673,4 +674,34 @@ func runRMTokenHoldTest(t *testing.T, simulatePDLeaderChange bool) {
 	}
 	require.EqualValues(t, 0, pdServer.tokenCount.Load())
 	require.EqualValues(t, 1, rmServer.tokenCount.Load())
+
+	if !simulatePDLeaderChange {
+		return
+	}
+	// A PD leader switch must not have scheduled a reconnect, so the next
+	// request reuses the same held RM stream rather than opening a fresh one.
+	secondRequest := &rmpb.TokenBucketsRequest{
+		Requests: []*rmpb.TokenBucketRequest{{ResourceGroupName: "rm-request-2"}},
+	}
+	select {
+	case <-cli.inner.updateTokenConnectionCh:
+		t.Fatal("PD leader change scheduled an unnecessary RM token stream reconnect")
+	default:
+	}
+	secondDone := make(chan error, 1)
+	go func() {
+		_, err := cli.AcquireTokenBuckets(ctx, secondRequest)
+		secondDone <- err
+	}()
+	// With the hold still active the second request is also kept on the RM
+	// stream and survives; release it so the dispatcher can complete.
+	releaseHold()
+	select {
+	case err := <-secondDone:
+		require.NoError(t, err, "PD leader change should not break later RM token requests")
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for the second RM token response")
+	}
+	require.EqualValues(t, 0, pdServer.tokenCount.Load())
+	require.EqualValues(t, 2, rmServer.tokenCount.Load())
 }

@@ -245,15 +245,20 @@ func (c *innerClient) scheduleUpdateTokenConnection(string) error {
 	return nil
 }
 
-// onPDLeaderChanged is the PD service-discovery leader callback. Only when
-// the client falls back to PD-provided resource manager (no standalone RM
-// connection) does a leader switch move the token target, so only then is
-// the in-flight stream canceled; otherwise the notification alone is enough
-// for the dispatcher to keep its RM stream.
+// onPDLeaderChanged is the PD service-discovery leader callback. A leader
+// switch only moves the token target while the client serves token streams
+// from the PD-provided resource manager; when a standalone resource-manager
+// connection is in use the endpoint is unchanged, so no reconnect is needed
+// and a queued notification would only force a needless RM stream reset on
+// the next request.
 func (c *innerClient) onPDLeaderChanged(string) error {
-	if c.getResourceManagerDiscovery() == nil {
-		c.cancelTokenConnection()
+	c.RLock()
+	rmConnSet := c.resourceManagerDiscovery != nil && c.resourceManagerDiscovery.GetConn() != nil
+	c.RUnlock()
+	if rmConnSet {
+		return nil
 	}
+	c.cancelTokenConnection()
 	select {
 	case c.updateTokenConnectionCh <- struct{}{}:
 	default:

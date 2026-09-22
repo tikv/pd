@@ -349,12 +349,12 @@ func (c *innerClient) handleResourceTokenDispatcher(dispatcherCtx context.Contex
 		c.wg.Done()
 	}()
 	var (
-		connection   resourceManagerConnectionContext
-		firstRequest *tokenRequest
-		stream       rmpb.ResourceManager_AcquireTokenBucketsClient
-		streamCtx    context.Context
-		toReconnect  bool
-		err          error
+		connection     resourceManagerConnectionContext
+		currentRequest *tokenRequest
+		stream         rmpb.ResourceManager_AcquireTokenBucketsClient
+		streamCtx      context.Context
+		toReconnect    bool
+		err            error
 	)
 	if err = c.tryResourceManagerConnect(dispatcherCtx, &connection); err != nil {
 		log.Warn("[resource_manager] get token stream error", zap.Error(err))
@@ -367,7 +367,7 @@ tokenRequestLoop:
 		select {
 		case <-dispatcherCtx.Done():
 			return
-		case firstRequest = <-tbc.tokenRequestCh:
+		case currentRequest = <-tbc.tokenRequestCh:
 		}
 		for {
 			// Try to get a stream connection.
@@ -395,7 +395,7 @@ tokenRequestLoop:
 			}
 			// If the stream is still nil, return an error.
 			if stream == nil {
-				firstRequest.done <- errors.Errorf("failed to get the stream connection")
+				currentRequest.done <- errors.Errorf("failed to get the stream connection")
 				c.serviceDiscovery.ScheduleCheckMemberChanged()
 				connection.reset()
 				continue tokenRequestLoop
@@ -413,7 +413,7 @@ tokenRequestLoop:
 			}
 			break
 		}
-		if err = c.processTokenRequests(stream, firstRequest); err != nil {
+		if err = c.processTokenRequests(stream, currentRequest); err != nil {
 			c.serviceDiscovery.ScheduleCheckMemberChanged()
 			c.setTokenConnectionCancel(nil)
 			connection.reset()
