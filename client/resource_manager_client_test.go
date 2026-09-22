@@ -150,6 +150,7 @@ type testRMServer struct {
 	getErr      error
 
 	blockTokenResponse   bool
+	holdTokenResponse    chan struct{}
 	tokenRequestReceived chan struct{}
 }
 
@@ -208,6 +209,13 @@ func (s *testRMServer) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTo
 		if s.blockTokenResponse {
 			<-stream.Context().Done()
 			return stream.Context().Err()
+		}
+		if s.holdTokenResponse != nil {
+			select {
+			case <-s.holdTokenResponse:
+			case <-stream.Context().Done():
+				return stream.Context().Err()
+			}
 		}
 		resp := &rmpb.TokenBucketsResponse{
 			Responses: make([]*rmpb.TokenBucketResponse, 0, len(req.GetRequests())),
@@ -584,5 +592,85 @@ func TestTokenDispatcherRechecksEndpointUpdatesAfterReconnect(t *testing.T) {
 		t.Fatal("token request was not preserved across reconnects")
 	}
 	require.EqualValues(t, 1, pdServer.tokenCount.Load())
+	require.EqualValues(t, 1, rmServer.tokenCount.Load())
+}
+
+// A PD leader switch must not interrupt an in-flight token request that is
+// being served by a standalone resource-manager connection.
+func TestTokenDispatcherKeepsRMStreamOnPDLeaderChange(t *testing.T) {
+	t.Run("hold-release-without-pd-leader-change", func(t *testing.T) {
+		runRMTokenHoldTest(t, false)
+	})
+	t.Run("pd-leader-change-while-rm-recv-blocked", func(t *testing.T) {
+		runRMTokenHoldTest(t, true)
+	})
+}
+
+func runRMTokenHoldTest(t *testing.T, simulatePDLeaderChange bool) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	holdTokenResponse := make(chan struct{})
+	releaseHold := func() {
+		select {
+		case <-holdTokenResponse:
+		default:
+			close(holdTokenResponse)
+		}
+	}
+	if !simulatePDLeaderChange {
+		t.Cleanup(releaseHold)
+	}
+
+	rmRequestReceived := make(chan struct{}, 1)
+	pdAddr, pdServer, pdCleanup := startTestRMServer(t, "pd")
+	t.Cleanup(pdCleanup)
+	rmAddr, rmServer, rmCleanup := startTestRMServer(t, "rm", func(server *testRMServer) {
+		server.holdTokenResponse = holdTokenResponse
+		server.tokenRequestReceived = rmRequestReceived
+	})
+	t.Cleanup(rmCleanup)
+
+	inner := newInnerClientForRMRouteTest(t, ctx, pdAddr)
+	inner.resourceManagerDiscovery = newTestResourceManagerDiscovery(t, ctx, rmAddr)
+	t.Cleanup(inner.resourceManagerDiscovery.Close)
+	inner.createTokenDispatcher()
+	t.Cleanup(func() {
+		inner.tokenDispatcher.dispatcherCancel()
+		inner.wg.Wait()
+	})
+	cli := &client{inner: inner}
+
+	requestDone := make(chan error, 1)
+	go func() {
+		_, err := cli.AcquireTokenBuckets(ctx, &rmpb.TokenBucketsRequest{
+			Requests: []*rmpb.TokenBucketRequest{{ResourceGroupName: "rm-request"}},
+		})
+		requestDone <- err
+	}()
+	select {
+	case <-rmRequestReceived:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for the token request to reach RM")
+	}
+
+	if simulatePDLeaderChange {
+		// The registered PD leader callback must not cancel the in-flight
+		// RM stream even while its Recv is blocked.
+		require.NoError(t, inner.onPDLeaderChanged(""))
+	} else {
+		releaseHold()
+	}
+
+	select {
+	case err := <-requestDone:
+		require.NoError(t, err, "PD leader change should not cancel an in-flight RM token stream")
+	case <-time.After(3 * time.Second):
+		if !simulatePDLeaderChange {
+			t.Fatal("timed out waiting for the RM token response")
+		}
+	}
+	require.EqualValues(t, 0, pdServer.tokenCount.Load())
 	require.EqualValues(t, 1, rmServer.tokenCount.Load())
 }

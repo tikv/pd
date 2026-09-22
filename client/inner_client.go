@@ -232,19 +232,43 @@ func (c *innerClient) getResourceManagerDiscovery() *sd.ResourceManagerDiscovery
 	return c.resourceManagerDiscovery
 }
 
+// scheduleUpdateTokenConnection asks the token dispatcher to reconnect to
+// the current endpoint. It is used by the RM discovery reset path, which
+// has already repointed (or cleared) the RM connection, so the active
+// stream must be interrupted; the dispatcher then re-resolves the endpoint.
 func (c *innerClient) scheduleUpdateTokenConnection(string) error {
-	// Interrupt an in-flight request so the dispatcher can reconnect to the
-	// newly discovered endpoint instead of waiting on the stale stream.
-	c.tokenConnectionMu.Lock()
-	defer c.tokenConnectionMu.Unlock()
-	if c.tokenConnectionCancel != nil {
-		c.tokenConnectionCancel()
+	c.cancelTokenConnection()
+	select {
+	case c.updateTokenConnectionCh <- struct{}{}:
+	default:
+	}
+	return nil
+}
+
+// onPDLeaderChanged is the PD service-discovery leader callback. Only when
+// the client falls back to PD-provided resource manager (no standalone RM
+// connection) does a leader switch move the token target, so only then is
+// the in-flight stream canceled; otherwise the notification alone is enough
+// for the dispatcher to keep its RM stream.
+func (c *innerClient) onPDLeaderChanged(string) error {
+	if c.getResourceManagerDiscovery() == nil {
+		c.cancelTokenConnection()
 	}
 	select {
 	case c.updateTokenConnectionCh <- struct{}{}:
 	default:
 	}
 	return nil
+}
+
+func (c *innerClient) cancelTokenConnection() {
+	// Interrupt an in-flight request so the dispatcher can reconnect to the
+	// current endpoint instead of waiting on the stale stream.
+	c.tokenConnectionMu.Lock()
+	if c.tokenConnectionCancel != nil {
+		c.tokenConnectionCancel()
+	}
+	c.tokenConnectionMu.Unlock()
 }
 
 type tsoProvider int
@@ -296,7 +320,7 @@ func (c *innerClient) setup() error {
 	}
 
 	// Register callbacks
-	c.serviceDiscovery.AddLeaderSwitchedCallback(c.scheduleUpdateTokenConnection)
+	c.serviceDiscovery.AddLeaderSwitchedCallback(c.onPDLeaderChanged)
 
 	// Create dispatchers
 	c.createTokenDispatcher()
