@@ -278,7 +278,7 @@ func (bw BecomeWitness) Influence(opInfluence *OpInfluence, region *core.RegionI
 	regionSize := region.GetApproximateSize()
 	to.WitnessCount += 1
 	to.RegionSize -= regionSize
-	to.adjustStepCostBySize(storelimit.RemovePeer, regionSize)
+	to.AdjustStepCost(storelimit.RemovePeer, regionSize, region.GetApproximateKeys())
 }
 
 // Timeout returns duration that current step may take.
@@ -340,7 +340,7 @@ func (bn BecomeNonWitness) Influence(opInfluence *OpInfluence, region *core.Regi
 	regionSize := region.GetApproximateSize()
 	to.WitnessCount -= 1
 	to.RegionSize += regionSize
-	to.adjustStepCostBySize(storelimit.AddPeer, regionSize)
+	to.AdjustStepCost(storelimit.AddPeer, regionSize, region.GetApproximateKeys())
 
 	if bn.SendStore == 0 {
 		return
