@@ -700,7 +700,6 @@ func (b *Builder) buildStepsWithoutJointConsensus(kind OpKind) (OpKind, error) {
 			b.execRemovePeer(plan.remove)
 			kind |= OpRegion
 		}
-
 	}
 
 	b.setTargetLeaderIfNotExist()
