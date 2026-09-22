@@ -86,7 +86,11 @@ func TestPeerInfluenceUsesRegionKeys(t *testing.T) {
 
 	witnessInfluence := NewOpInfluence()
 	BecomeWitness{StoreID: 1, PeerID: 1}.Influence(witnessInfluence, region)
-	require.Zero(t, witnessInfluence.GetStoreInfluence(1).GetStepCost(storelimit.RemovePeer))
+	require.Equal(t, storelimit.SmallRegionInfluence[storelimit.RemovePeer], witnessInfluence.GetStoreInfluence(1).GetStepCost(storelimit.RemovePeer))
+
+	nonWitnessInfluence := NewOpInfluence()
+	BecomeNonWitness{StoreID: 1, PeerID: 1}.Influence(nonWitnessInfluence, region)
+	require.Equal(t, storelimit.SmallRegionInfluence[storelimit.AddPeer], nonWitnessInfluence.GetStoreInfluence(1).GetStepCost(storelimit.AddPeer))
 }
 
 func (suite *operatorTestSuite) SetupTest() {
