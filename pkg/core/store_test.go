@@ -287,6 +287,29 @@ func TestPutStore(t *testing.T) {
 	re.Equal(store, storesInfo.GetStore(store.GetID()))
 }
 
+// TestPutStoreSkipsPatchForRemovedStore guards against a nil-pointer panic in
+// putStoreLocked: an opts-passing PutStore call always treats its store
+// argument as a patch onto whatever's currently in the map (see the
+// len(opts) > 0 branch), never as an insert, so a caller racing a concurrent
+// full removal (e.g. HandleStoreHeartbeat racing RemoveTombStoneRecords for
+// the same store) must not crash just because the entry it meant to patch is
+// already gone.
+func TestPutStoreSkipsPatchForRemovedStore(t *testing.T) {
+	re := require.New(t)
+	store := newStoreInfoWithAvailable(1, 20*units.GiB, 100*units.GiB, 1.4)
+	storesInfo := NewStoresInfo()
+	storesInfo.PutStore(store)
+	re.NotNil(storesInfo.GetStore(store.GetID()))
+
+	storesInfo.DeleteStore(store)
+	re.Nil(storesInfo.GetStore(store.GetID()))
+
+	re.NotPanics(func() {
+		storesInfo.PutStore(store, SetLastHeartbeatTS(time.Now()))
+	})
+	re.Nil(storesInfo.GetStore(store.GetID()))
+}
+
 func TestStoreInfoIsTiFlash(t *testing.T) {
 	re := require.New(t)
 
