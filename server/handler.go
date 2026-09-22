@@ -461,6 +461,20 @@ func (h *Handler) RedirectSchedulerUpdate(name string, storeID float64) error {
 	input := make(map[string]any)
 	input["name"] = name
 	input["store_id"] = storeID
+	return h.redirectSchedulerConfigUpdate(name, input)
+}
+
+// RedirectSchedulerUpdateBatch applies the same store_ids config update as
+// RedirectSchedulerUpdate, but for several stores in a single request instead
+// of one request per store.
+func (h *Handler) RedirectSchedulerUpdateBatch(name string, storeIDs []float64) error {
+	input := make(map[string]any)
+	input["name"] = name
+	input["store_ids"] = storeIDs
+	return h.redirectSchedulerConfigUpdate(name, input)
+}
+
+func (h *Handler) redirectSchedulerConfigUpdate(name string, input map[string]any) error {
 	updateURL, err := url.JoinPath(h.GetAddr(), SchedulerConfigHandlerPath, name, "config")
 	if err != nil {
 		return err
