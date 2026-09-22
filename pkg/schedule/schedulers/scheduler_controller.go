@@ -167,7 +167,9 @@ func (c *Controller) AddSchedulerHandler(scheduler Scheduler, args ...string) er
 		return errs.ErrSchedulerExisted.FastGenByArgs()
 	}
 
-	c.schedulerHandlers[name] = scheduler
+	// Run every step that can fail before registering the scheduler, so a
+	// failure here never leaves it visible (e.g. via IsSchedulerExisted)
+	// without having actually been persisted and prepared.
 	if err := scheduler.SetDisable(false); err != nil {
 		log.Error("can not update scheduler status", zap.String("scheduler-name", name),
 			errs.ZapError(err))
@@ -177,8 +179,12 @@ func (c *Controller) AddSchedulerHandler(scheduler Scheduler, args ...string) er
 		log.Error("can not save HTTP scheduler config", zap.String("scheduler-name", scheduler.GetName()), errs.ZapError(err))
 		return err
 	}
+	if err := scheduler.PrepareConfig(c.cluster); err != nil {
+		return err
+	}
+	c.schedulerHandlers[name] = scheduler
 	c.cluster.GetSchedulerConfig().AddSchedulerCfg(scheduler.GetType(), args)
-	return scheduler.PrepareConfig(c.cluster)
+	return nil
 }
 
 // RemoveSchedulerHandler removes the HTTP handler for a scheduler.
@@ -226,13 +232,12 @@ func (c *Controller) AddScheduler(scheduler Scheduler, args ...string) error {
 	}
 
 	s := NewScheduleController(c.ctx, c.cluster, c.opController, scheduler)
+	// Run every step that can fail before registering and starting the
+	// scheduler, so a failure here never leaves a scheduler running (or
+	// visible via IsSchedulerExisted) without having actually been persisted.
 	if err := s.PrepareConfig(c.cluster); err != nil {
 		return err
 	}
-
-	c.wg.Add(1)
-	go c.runScheduler(s)
-	c.schedulers[s.GetName()] = s
 	if err := scheduler.SetDisable(false); err != nil {
 		log.Error("can not update scheduler status", zap.String("scheduler-name", name),
 			errs.ZapError(err))
@@ -242,6 +247,9 @@ func (c *Controller) AddScheduler(scheduler Scheduler, args ...string) error {
 		log.Error("can not save scheduler config", zap.String("scheduler-name", scheduler.GetName()), errs.ZapError(err))
 		return err
 	}
+	c.wg.Add(1)
+	go c.runScheduler(s)
+	c.schedulers[s.GetName()] = s
 	c.cluster.GetSchedulerConfig().AddSchedulerCfg(s.GetType(), args)
 	return nil
 }

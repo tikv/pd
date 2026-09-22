@@ -564,6 +564,43 @@ func TestEvictLeaderSchedulerCompatibility(t *testing.T) {
 	re.NotEmpty(es.(*evictLeaderScheduler).conf.StoreIDWithRanges[1])
 }
 
+func TestEvictLeaderMultiStoreCreationArgs(t *testing.T) {
+	re := require.New(t)
+	cancel, _, _, oc := prepareSchedulersTest()
+	defer cancel()
+
+	// EvictLeaderMultiStoreArgs' output decodes to every store, each
+	// defaulted to the whole key space, and the plain single-store-id
+	// decode path is left untouched.
+	sl, err := CreateScheduler(types.EvictLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigSliceDecoder(types.EvictLeaderScheduler, []string{EvictLeaderMultiStoreArgs([]uint64{1, 2, 3})}),
+		func(string) error { return nil })
+	re.NoError(err)
+	conf := sl.(*evictLeaderScheduler).conf
+	re.Len(conf.StoreIDWithRanges, 3)
+	for _, id := range []uint64{1, 2, 3} {
+		re.Equal([]keyutil.KeyRange{keyutil.NewKeyRange("", "")}, conf.StoreIDWithRanges[id])
+	}
+
+	// A single store ID still decodes on the old, single-store path (no
+	// comma), not the multi-store one.
+	sl, err = CreateScheduler(types.EvictLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigSliceDecoder(types.EvictLeaderScheduler, []string{"1"}), func(string) error { return nil })
+	re.NoError(err)
+	conf = sl.(*evictLeaderScheduler).conf
+	re.Equal(map[uint64][]keyutil.KeyRange{1: {keyutil.NewKeyRange("", "")}}, conf.StoreIDWithRanges)
+
+	// An invalid ID inside the list is rejected, same as a single invalid ID.
+	_, err = CreateScheduler(types.EvictLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigSliceDecoder(types.EvictLeaderScheduler, []string{"1,x,3"}), func(string) error { return nil })
+	re.Error(err)
+
+	// Ranges aren't supported alongside a multi-store arg list.
+	_, err = CreateScheduler(types.EvictLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigSliceDecoder(types.EvictLeaderScheduler, []string{"1,2", "a", "b"}), func(string) error { return nil })
+	re.Error(err)
+}
+
 func TestEvictLeaderDeleteWithFailedCallback(t *testing.T) {
 	re := require.New(t)
 

@@ -203,9 +203,9 @@ func (suite *scheduleTestSuite) checkEvictLeaderSchedulerMultiStore(cluster *tes
 	re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))
 	re.Len(resp["store-id-ranges"], 2)
 
-	// the config endpoint (used to batch-add the remaining stores) rejects
-	// mixing store_id and store_ids too, and validates the batch size without
-	// touching the existing store-id-ranges on failure.
+	// the config endpoint (used to add more stores to an existing scheduler)
+	// rejects mixing store_id and store_ids too, and validates the batch
+	// size without touching the existing store-id-ranges on failure.
 	configURL := fmt.Sprintf("%s%s/%s/config", leaderAddr, server.SchedulerConfigHandlerPath, "evict-leader-scheduler")
 	input = map[string]any{"name": "evict-leader-scheduler", "store_id": 3, "store_ids": []int{4}}
 	body, err = json.Marshal(input)
@@ -256,39 +256,34 @@ func (suite *scheduleTestSuite) TestEvictLeaderSchedulerMultiStoreAtomicCreate()
 }
 
 // checkEvictLeaderSchedulerMultiStoreAtomicCreate verifies that creating
-// evict-leader-scheduler with multiple store ids is all-or-nothing: if the
-// batched step that adds the stores beyond the first one fails, the
-// just-created scheduler is rolled back entirely rather than left evicting
-// only part of the requested stores.
+// evict-leader-scheduler with multiple store ids in one call is all-or-nothing:
+// every requested store is encoded into a single persisted creation arg (see
+// schedulers.EvictLeaderMultiStoreArgs), so if any requested store can't
+// actually be evicted (e.g. it doesn't exist), the whole create request
+// fails and no scheduler is left behind evicting only some of the requested
+// stores.
 func (suite *scheduleTestSuite) checkEvictLeaderSchedulerMultiStoreAtomicCreate(cluster *tests.TestCluster) {
 	re := suite.Require()
 	leaderAddr := cluster.GetLeaderServer().GetAddr()
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1/schedulers", leaderAddr)
-	for i := 1; i <= 2; i++ {
-		store := &metapb.Store{
-			Id:        uint64(i),
-			State:     metapb.StoreState_Up,
-			NodeState: metapb.NodeState_Serving,
-		}
-		tests.MustPutStore(re, cluster, store)
+	store := &metapb.Store{
+		Id:        1,
+		State:     metapb.StoreState_Up,
+		NodeState: metapb.NodeState_Serving,
 	}
+	tests.MustPutStore(re, cluster, store)
 
-	// persistFail only breaks the config-save path used to add the second
-	// (and later) store, not the initial scheduler-creation save, so this
-	// reproduces "first store created, batch-add the rest fails".
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/persistFail", "return(true)"))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/persistFail"))
-	}()
-	input := map[string]any{"name": "evict-leader-scheduler", "store_ids": []int{1, 2}}
+	// store 999 doesn't exist, so pausing its leader transfer during
+	// creation fails and the whole request is rejected.
+	input := map[string]any{"name": "evict-leader-scheduler", "store_ids": []int{1, 999}}
 	body, err := json.Marshal(input)
 	re.NoError(err)
 	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, urlPrefix, body,
-		testutil.Status(re, http.StatusInternalServerError)),
+		testutil.Status(re, http.StatusBadRequest)),
 	)
 
-	// the whole scheduler must be rolled back, not left running with only
-	// the first store evicted.
+	// the scheduler must not exist at all, not left running with only
+	// store 1 evicted.
 	assertNoScheduler(re, urlPrefix, "evict-leader-scheduler")
 }
 
