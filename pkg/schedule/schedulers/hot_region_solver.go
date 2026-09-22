@@ -158,7 +158,7 @@ func (bs *balanceSolver) init() {
 		Loads:        stepLoads,
 		HotPeerCount: maxCur.HotPeerCount * bs.sche.conf.getCountRankStepRatio(),
 	}
-	state := bs.sche.getPlacementLoadState(bs.SchedulerCluster, rankFormulaVersion)
+	state := getPlacementLoadState(bs.SchedulerCluster, rankFormulaVersion)
 	bs.placementV2Enabled = state.enabled
 	bs.placementCanRestrict = state.canRestrict
 	bs.placementPopulationIndex = state.populationIndex

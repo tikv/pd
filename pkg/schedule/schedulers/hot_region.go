@@ -347,7 +347,7 @@ func (s *hotScheduler) tryAddPendingInfluence(op *operator.Operator, srcStore []
 	return true
 }
 
-func (s *hotScheduler) getPlacementLoadState(cluster sche.SchedulerCluster, rankFormulaVersion string) placementLoadState {
+func getPlacementLoadState(cluster sche.SchedulerCluster, rankFormulaVersion string) placementLoadState {
 	if !cluster.GetSchedulerConfig().IsPlacementRulesEnabled() || rankFormulaVersion != "v2" {
 		return placementLoadState{}
 	}

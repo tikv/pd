@@ -465,18 +465,17 @@ func TestMayUsePlacementScopeIgnoresEngineSeparation(t *testing.T) {
 func TestPlacementLoadStateTracksLabelAndRuleChanges(t *testing.T) {
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
-	scheduler, err := CreateScheduler(types.BalanceHotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(),
+	_, err := CreateScheduler(types.BalanceHotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(),
 		ConfigSliceDecoder(types.BalanceHotRegionScheduler, nil))
 	require.NoError(t, err)
-	hot := scheduler.(*hotScheduler)
 
 	tc.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
-	state := hot.getPlacementLoadState(tc, "v2")
+	state := getPlacementLoadState(tc, "v2")
 	require.False(t, state.enabled)
 	require.Nil(t, state.populationIndex)
 
 	tc.AddLabelsStore(2, 1, map[string]string{"$group": "other"})
-	state = hot.getPlacementLoadState(tc, "v2")
+	state = getPlacementLoadState(tc, "v2")
 	require.True(t, state.enabled)
 	require.True(t, state.canRestrict[0])
 	require.NotNil(t, state.populationIndex)
@@ -484,7 +483,7 @@ func TestPlacementLoadStateTracksLabelAndRuleChanges(t *testing.T) {
 	previousPopulation := state.populationIndex
 
 	tc.SetStoreLabel(2, map[string]string{"zone": "z1"})
-	state = hot.getPlacementLoadState(tc, "v2")
+	state = getPlacementLoadState(tc, "v2")
 	require.False(t, state.enabled)
 	require.Nil(t, state.populationIndex)
 
@@ -497,12 +496,12 @@ func TestPlacementLoadStateTracksLabelAndRuleChanges(t *testing.T) {
 			{Key: "zone", Op: placement.In, Values: []string{"z1"}},
 		},
 	}))
-	state = hot.getPlacementLoadState(tc, "v2")
+	state = getPlacementLoadState(tc, "v2")
 	require.True(t, state.enabled)
 	require.True(t, state.canRestrict[0])
 	require.NotSame(t, previousPopulation, state.populationIndex)
 	require.Len(t, state.populationIndex.stores, 2)
-	require.False(t, hot.getPlacementLoadState(tc, "v1").enabled)
+	require.False(t, getPlacementLoadState(tc, "v1").enabled)
 }
 
 func TestHotWriteRegionScheduleWithPlacementScope(t *testing.T) {

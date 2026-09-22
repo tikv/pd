@@ -203,7 +203,7 @@ func TestHotWriteRegionScheduleWithRevertRegionsAndPlacementRulesV2(t *testing.T
 					GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID,
 					Role: placement.Voter, Count: 3, LocationLabels: []string{"zone"},
 				}))
-				re.False(hb.getPlacementLoadState(tc, "v2").enabled)
+				re.False(getPlacementLoadState(tc, "v2").enabled)
 			} else {
 				re.NoError(tc.SetRule(&placement.Rule{
 					GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID,
