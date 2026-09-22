@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sync"
 	"testing"
 	"time"
 
@@ -133,10 +134,14 @@ func TestDirectReportConsumptionReportsOnlyConsumption(t *testing.T) {
 	gc := createTestGroupCostController(re)
 
 	gc.addRUConsumption(&rmpb.Consumption{
-		RRU:        7,
-		WRU:        3,
-		WriteBytes: 1024,
+		RRU:         7,
+		WRU:         3,
+		WriteBytes:  1024,
+		TikvRUV2:    7,
+		TidbRUV2:    11,
+		TiflashRUV2: 13,
 	})
+	gc.addRUV2Consumption(2, 3, 5)
 	gc.updateRunState()
 
 	report := gc.collectRequestAndConsumption(periodicReport)
@@ -144,6 +149,134 @@ func TestDirectReportConsumptionReportsOnlyConsumption(t *testing.T) {
 	re.Equal(float64(7), report.GetConsumptionSinceLastRequest().GetRRU())
 	re.Equal(float64(3), report.GetConsumptionSinceLastRequest().GetWRU())
 	re.Equal(float64(1024), report.GetConsumptionSinceLastRequest().GetWriteBytes())
+	re.Equal(float64(9), report.GetConsumptionSinceLastRequest().GetTikvRUV2())
+	re.Equal(float64(14), report.GetConsumptionSinceLastRequest().GetTidbRUV2())
+	re.Equal(float64(18), report.GetConsumptionSinceLastRequest().GetTiflashRUV2())
+}
+
+func TestRUV2ConsumptionCoherentSnapshots(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+	const iterations = 1000
+	const writers = 4
+	mixed := &rmpb.Consumption{RRU: 1, TidbRUV2: 1, TiflashRUV2: 1}
+	var wg sync.WaitGroup
+	for range writers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range iterations {
+				gc.addRUV2Consumption(1, 1, 0)
+				gc.addRUConsumption(mixed)
+			}
+		}()
+	}
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	checkSnapshot := func(consumption rmpb.Consumption) {
+		// Direct updates increment TiKV and TiDB together; mixed updates must
+		// expose RRU, TiDB and TiFlash together even though they use two locks.
+		re.Equal(consumption.RRU, consumption.TiflashRUV2)
+		re.Equal(consumption.TikvRUV2+consumption.RRU, consumption.TidbRUV2)
+	}
+	for {
+		checkSnapshot(gc.consumptionSnapshot())
+		gc.updateRunState()
+		checkSnapshot(*gc.run.consumption)
+		select {
+		case <-done:
+			consumption := gc.consumptionSnapshot()
+			re.Equal(float64(writers*iterations), consumption.RRU)
+			re.Equal(float64(writers*iterations), consumption.TikvRUV2)
+			re.Equal(float64(2*writers*iterations), consumption.TidbRUV2)
+			re.Equal(float64(writers*iterations), consumption.TiflashRUV2)
+			return
+		default:
+		}
+	}
+}
+
+type ruv2TestCalculator struct {
+	before  *rmpb.Consumption
+	after   *rmpb.Consumption
+	trickle func(*rmpb.Consumption)
+}
+
+func (calc ruv2TestCalculator) BeforeKVRequest(consumption *rmpb.Consumption, _ RequestInfo) {
+	add(consumption, calc.before)
+}
+
+func (calc ruv2TestCalculator) AfterKVRequest(consumption *rmpb.Consumption, _ RequestInfo, _ ResponseInfo) {
+	add(consumption, calc.after)
+}
+
+func (calc ruv2TestCalculator) Trickle(consumption *rmpb.Consumption) {
+	if calc.trickle != nil {
+		calc.trickle(consumption)
+	}
+}
+
+func TestRUV2ConsumptionCustomCalculator(t *testing.T) {
+	for _, responseWait := range []bool{false, true} {
+		t.Run(fmt.Sprintf("response-wait=%v", responseWait), func(t *testing.T) {
+			re := require.New(t)
+			gc := createTestGroupCostController(re)
+			gc.burstable.Store(true)
+			before := &rmpb.Consumption{RRU: 1, WRU: 2, TikvRUV2: 3, TidbRUV2: 5, TiflashRUV2: 7}
+			after := &rmpb.Consumption{RRU: 11, WRU: 13, TikvRUV2: 17, TidbRUV2: 19, TiflashRUV2: 23}
+			gc.calculators = []ResourceCalculator{ruv2TestCalculator{
+				before: before,
+				after:  after,
+				trickle: func(consumption *rmpb.Consumption) {
+					// Trickle must read and update the full accumulated RUv2 value.
+					re.Equal(float64(20), consumption.TikvRUV2)
+					re.Equal(float64(24), consumption.TidbRUV2)
+					consumption.TikvRUV2 += consumption.TidbRUV2
+				},
+			}}
+			req := &TestRequestInfo{storeID: 1}
+			resp := &TestResponseInfo{succeed: true}
+			delta, _, _, _, err := gc.onRequestWaitImpl(context.Background(), req)
+			re.NoError(err)
+			re.Equal(before, delta)
+			if responseWait {
+				delta, _, err = gc.onResponseWaitImpl(context.Background(), req, resp)
+			} else {
+				delta, err = gc.onResponseImpl(req, resp)
+			}
+			re.NoError(err)
+			re.Equal(after, delta)
+			gc.updateRunState()
+			expected := rmpb.Consumption{RRU: 12, WRU: 15, TikvRUV2: 44, TidbRUV2: 24, TiflashRUV2: 30}
+			re.Equal(expected, *gc.run.consumption)
+			re.Equal(expected, gc.consumptionSnapshot())
+			report := gc.collectRequestAndConsumption(periodicReport)
+			re.NotNil(report)
+			re.Equal(&expected, report.GetConsumptionSinceLastRequest())
+		})
+	}
+}
+
+func TestRUV2ConsumptionRequestRollback(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+	gc.run.requestUnitTokens.limiter.Reconfigure(time.Now(), tokenBucketReconfigureArgs{
+		newTokens: 0, newFillRate: 0, newBurst: 0,
+	})
+	gc.calculators = []ResourceCalculator{ruv2TestCalculator{
+		before: &rmpb.Consumption{RRU: 10000, TikvRUV2: 3, TidbRUV2: 5, TiflashRUV2: 7},
+	}}
+	gc.addRUV2Consumption(41, 43, 47)
+	gc.addRUConsumption(&rmpb.Consumption{WRU: 11})
+	before := gc.consumptionSnapshot()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, _, _, _, err := gc.onRequestWaitImpl(ctx, &TestRequestInfo{storeID: 1})
+	re.Error(err)
+	re.Equal(before, gc.consumptionSnapshot(), "rollback must remove both legacy and RUv2 request deltas")
 }
 
 func TestRequestAndResponseConsumption(t *testing.T) {
