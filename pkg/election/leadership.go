@@ -70,8 +70,9 @@ type Leadership struct {
 
 	// mu protects the in-memory leadership state: lease, leaderValue and
 	// keepAliveCancelFunc are read and written only while holding it.
+	// Getters take RLock; write paths (Campaign, Keep, Reset) take Lock.
 	// Never hold it while closing a lease, which can block on etcd.
-	mu                  syncutil.Mutex
+	mu                  syncutil.RWMutex
 	keepAliveCancelFunc context.CancelFunc
 	// campaignTimes is used to record the campaign times of the leader within `campaignTimesRecordTimeout`.
 	// It is ordered by time to prevent the leader from campaigning too frequently.
@@ -96,8 +97,8 @@ func (ls *Leadership) GetLease() *Lease {
 	if ls == nil {
 		return nil
 	}
-	ls.mu.Lock()
-	defer ls.mu.Unlock()
+	ls.mu.RLock()
+	defer ls.mu.RUnlock()
 	return ls.lease
 }
 
@@ -132,8 +133,8 @@ func (ls *Leadership) GetLeaderValue() string {
 	if ls == nil {
 		return ""
 	}
-	ls.mu.Lock()
-	defer ls.mu.Unlock()
+	ls.mu.RLock()
+	defer ls.mu.RUnlock()
 	return ls.leaderValue
 }
 
