@@ -20,6 +20,8 @@ import (
 	"errors"
 	"net/url"
 	"runtime/trace"
+	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -38,6 +40,7 @@ import (
 	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/batch"
+	"github.com/tikv/pd/client/pkg/caller"
 	cctx "github.com/tikv/pd/client/pkg/connectionctx"
 	"github.com/tikv/pd/client/pkg/retry"
 	sd "github.com/tikv/pd/client/servicediscovery"
@@ -246,6 +249,7 @@ func (c *Cli) newRequest(ctx context.Context, opts ...opt.GetRegionOption) *Requ
 	req := c.reqPool.Get().(*Request)
 	req.requestCtx = ctx
 	req.clientCtx = c.ctx
+	req.callerComponent = caller.ComponentFromContext(ctx)
 	// Reset the request fields before using it.
 	req.key = nil
 	req.prevKey = nil
@@ -311,10 +315,6 @@ func requestFinisher(resp *pdpb.QueryRegionResponse) batch.FinisherFunc[*Request
 
 func (c *Cli) cancelCollectedRequests(err error) {
 	c.batchController.FinishCollectedRequests(requestFinisher(nil), err)
-}
-
-func (c *Cli) doneCollectedRequests(resp *pdpb.QueryRegionResponse) {
-	c.batchController.FinishCollectedRequests(requestFinisher(resp), nil)
 }
 
 // Close closes the router client.
@@ -735,10 +735,14 @@ func buildQueryRegionRequest(clusterID uint64, requests []*Request) *pdpb.QueryR
 	queryReq := &pdpb.QueryRegionRequest{
 		Header: &pdpb.RequestHeader{
 			ClusterId: clusterID,
+			CallerId:  string(caller.GetCallerID()),
 		},
 		Keys:     make([][]byte, 0, len(requests)),
 		PrevKeys: make([][]byte, 0, len(requests)),
 		Ids:      make([]uint64, 0, len(requests)),
+	}
+	if len(requests) > 0 {
+		queryReq.Header.CallerComponent = string(requests[0].callerComponent)
 	}
 	for _, req := range requests {
 		if !queryReq.NeedBuckets && req.options.NeedBuckets {
@@ -756,10 +760,60 @@ func buildQueryRegionRequest(clusterID uint64, requests []*Request) *pdpb.QueryR
 }
 
 func (c *Cli) processRequestsInner(send sendFn, recv recvFn) error {
-	var (
-		requests = c.batchController.GetCollectedRequests()
-		spans    = make([]opentracing.Span, 0, len(requests))
-	)
+	requests := c.batchController.GetCollectedRequests()
+	end := 0
+	for end < len(requests) && requests[end].callerComponent == requests[0].callerComponent {
+		end++
+	}
+	if end == len(requests) {
+		resp, err := c.processRequestBatch(requests, send, recv)
+		c.batchController.FinishCollectedRequests(requestFinisher(resp), err)
+		return err
+	}
+	// A QueryRegion message has one header. Keep requests from each component
+	// together, preserving their relative order for response matching.
+	slices.SortStableFunc(requests, func(a, b *Request) int {
+		return strings.Compare(string(a.callerComponent), string(b.callerComponent))
+	})
+	type completedBatch struct {
+		end    int
+		finish batch.FinisherFunc[*Request]
+	}
+	completed := make([]completedBatch, 0, 1)
+	var err error
+	for start := 0; start < len(requests); {
+		end := start + 1
+		for end < len(requests) && requests[end].callerComponent == requests[start].callerComponent {
+			end++
+		}
+		var resp *pdpb.QueryRegionResponse
+		resp, err = c.processRequestBatch(requests[start:end], send, recv)
+		if err != nil {
+			break
+		}
+		completed = append(completed, completedBatch{end: end, finish: requestFinisher(resp)})
+		start = end
+	}
+	// Finish only after all batches have been processed. A waiter can recycle
+	// its request immediately, so neither grouping nor error cleanup may read
+	// requests that have already been finished.
+	failed := requestFinisher(nil)
+	batchIndex := 0
+	c.batchController.FinishCollectedRequests(func(i int, req *Request, err error) {
+		if batchIndex < len(completed) && i >= completed[batchIndex].end {
+			batchIndex++
+		}
+		if batchIndex < len(completed) {
+			completed[batchIndex].finish(i, req, nil)
+		} else {
+			failed(i, req, err)
+		}
+	}, err)
+	return err
+}
+
+func (c *Cli) processRequestBatch(requests []*Request, send sendFn, recv recvFn) (*pdpb.QueryRegionResponse, error) {
+	spans := make([]opentracing.Span, 0, len(requests))
 	traceCtx := context.Background()
 	if len(requests) > 0 {
 		traceCtx = requests[0].requestCtx
@@ -782,7 +836,7 @@ func (c *Cli) processRequestsInner(send sendFn, recv recvFn) error {
 	err := send(queryReq)
 	if err != nil {
 		metrics.RequestFailedDurationQueryRegion.Observe(time.Since(start).Seconds())
-		return err
+		return nil, err
 	}
 	metrics.QueryRegionBatchSendLatency.Observe(
 		time.Since(
@@ -792,14 +846,14 @@ func (c *Cli) processRequestsInner(send sendFn, recv recvFn) error {
 	resp, err := recv()
 	if err != nil {
 		metrics.RequestFailedDurationQueryRegion.Observe(time.Since(start).Seconds())
-		return err
+		return nil, err
 	}
 	metrics.RequestDurationQueryRegion.Observe(time.Since(start).Seconds())
 	metrics.QueryRegionBatchSizeTotal.Observe(float64(len(requests)))
 	// Currently, header errors can occur due to an unready PD leader or follower,
 	// resulting in either a `NOT_BOOTSTRAPPED` or `REGION_NOT_FOUND` error.
 	if headerErr := resp.GetHeader().GetError(); headerErr != nil {
-		return errors.New(headerErr.String())
+		return nil, errors.New(headerErr.String())
 	}
 	if keysLen := len(queryReq.Keys); keysLen > 0 {
 		metrics.QueryRegionBatchSizeByKeys.Observe(float64(keysLen))
@@ -810,8 +864,7 @@ func (c *Cli) processRequestsInner(send sendFn, recv recvFn) error {
 	if idsLen := len(queryReq.Ids); idsLen > 0 {
 		metrics.QueryRegionBatchSizeByIDs.Observe(float64(idsLen))
 	}
-	c.doneCollectedRequests(resp)
-	return nil
+	return resp, nil
 }
 
 func (c *Cli) handleProcessRequestError(

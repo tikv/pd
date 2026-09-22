@@ -16,7 +16,9 @@ package router
 
 import (
 	"context"
+	"errors"
 	"math"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -26,6 +28,9 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/pkg/batch"
+	"github.com/tikv/pd/client/pkg/caller"
+	sd "github.com/tikv/pd/client/servicediscovery"
 )
 
 func TestMain(m *testing.M) {
@@ -188,4 +193,124 @@ func TestBuildQueryRegionRequest(t *testing.T) {
 	re.Empty(queryReq.GetPrevKeys()[0])
 	re.Equal([]uint64{0, math.MaxUint64}, queryReq.GetIds())
 	re.True(queryReq.GetNeedBuckets())
+}
+
+func TestProcessRequestsCallerAttribution(t *testing.T) {
+	for _, failure := range []string{"none", "same-component", "send", "recv", "header"} {
+		t.Run(failure, func(t *testing.T) {
+			re := require.New(t)
+			ctx := context.Background()
+			c := &Cli{
+				ctx:             ctx,
+				svcDiscovery:    sd.NewMockServiceDiscovery(nil, nil),
+				reqPool:         &sync.Pool{New: func() any { return &Request{done: make(chan error, 1)} }},
+				batchController: batch.NewController(20, requestFinisher(nil), nil),
+			}
+			// Interleave components and query kinds; each component must still
+			// produce one batch, with responses matched to the original requests.
+			components := []caller.Component{"b", "a", "c", "a", "b", "c", "b", "a", "c"}
+			if failure == "same-component" {
+				for i := range components {
+					components[i] = "a"
+				}
+			}
+			shouldFail := failure != "none" && failure != "same-component"
+			requests := make([]*Request, 0, len(components))
+			requestCh := make(chan *Request, len(components))
+			for i, component := range components {
+				req := c.newRequest(caller.WithComponent(ctx, component))
+				id := uint64(i + 1)
+				switch i / 3 {
+				case 0:
+					req.key = []byte{byte(id)}
+				case 1:
+					req.prevKey = []byte{byte(id)}
+				default:
+					req.id = id
+				}
+				req.options.NeedBuckets = i%2 == 0
+				requests = append(requests, req)
+				requestCh <- req
+			}
+			re.NoError(c.batchController.FetchPendingRequests(ctx, requestCh, nil, 0))
+			injected := errors.New("batch failed")
+			var current *pdpb.QueryRegionRequest
+			var sent []string
+			send := func(req *pdpb.QueryRegionRequest) error {
+				current = req
+				component := req.GetHeader().GetCallerComponent()
+				sent = append(sent, component)
+				re.Equal(string(caller.GetCallerID()), req.GetHeader().GetCallerId())
+				re.Equal(uint64(0), req.GetHeader().GetClusterId())
+				ids := append([]uint64{}, req.GetIds()...)
+				for _, key := range req.GetKeys() {
+					ids = append(ids, uint64(key[0]))
+				}
+				for _, key := range req.GetPrevKeys() {
+					ids = append(ids, uint64(key[0]))
+				}
+				if failure == "same-component" {
+					re.Len(ids, len(components))
+				} else {
+					re.Len(ids, 3)
+				}
+				for _, id := range ids {
+					re.Equal(string(components[id-1]), component)
+				}
+				if component == "b" && failure == "send" {
+					return injected
+				}
+				return nil
+			}
+			recv := func() (*pdpb.QueryRegionResponse, error) {
+				if current.GetHeader().GetCallerComponent() == "b" {
+					switch failure {
+					case "recv":
+						return nil, injected
+					case "header":
+						return &pdpb.QueryRegionResponse{Header: &pdpb.ResponseHeader{Error: &pdpb.Error{Type: pdpb.ErrorType_NOT_BOOTSTRAPPED}}}, nil
+					}
+				}
+				resp := &pdpb.QueryRegionResponse{RegionsById: make(map[uint64]*pdpb.RegionResponse)}
+				for _, key := range current.GetKeys() {
+					resp.KeyIdMap = append(resp.KeyIdMap, uint64(key[0]))
+				}
+				for _, key := range current.GetPrevKeys() {
+					resp.PrevKeyIdMap = append(resp.PrevKeyIdMap, uint64(key[0]))
+				}
+				for i := range components {
+					resp.RegionsById[uint64(i+1)] = newMockRegionResponse(uint64(i + 1))
+				}
+				return resp, nil
+			}
+			err := c.processRequestsInner(send, recv)
+			if !shouldFail {
+				re.NoError(err)
+				if failure == "same-component" {
+					re.Equal([]string{"a"}, sent)
+				} else {
+					re.Equal([]string{"a", "b", "c"}, sent)
+				}
+			} else {
+				re.Error(err)
+				re.Equal([]string{"a", "b"}, sent)
+			}
+			re.Zero(c.batchController.GetCollectedRequestCount())
+			// Dispatcher error cleanup must not finish successful requests again.
+			c.cancelCollectedRequests(injected)
+			for i, req := range requests {
+				result, waitErr := req.wait()
+				if shouldFail && components[i] != "a" {
+					re.Error(waitErr)
+					re.Nil(result)
+				} else {
+					re.NoError(waitErr)
+					re.Equal(uint64(i+1), result.Meta.GetId())
+					re.Equal(i%2 == 0, result.Buckets != nil)
+				}
+			}
+			// Pooled requests must not retain a previous caller component.
+			re.Empty(c.newRequest(ctx).callerComponent)
+		})
+	}
 }
