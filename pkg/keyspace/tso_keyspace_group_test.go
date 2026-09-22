@@ -682,8 +682,6 @@ func TestRemoveKeyspacesFromGroupRejectsInvalidExecutionContext(t *testing.T) {
 	_, err := groupManager.RemoveKeyspacesFromGroup(canceledCtx, 0, nil, nil, nil)
 	re.ErrorIs(err, context.Canceled)
 
-	_, err = groupManager.RemoveKeyspacesFromGroup(context.Background(), 0, nil, nil, nil)
-	re.ErrorContains(err, errs.NotLeaderErr)
 	uninitializedLeadership := election.NewLeadership(nil, "/uninitialized", "test", "test")
 	_, err = groupManager.RemoveKeyspacesFromGroup(
 		context.Background(), 0, nil, uninitializedLeadership, nil)

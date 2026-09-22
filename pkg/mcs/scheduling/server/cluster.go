@@ -39,8 +39,10 @@ import (
 	"github.com/tikv/pd/pkg/cluster"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace"
 	mcsaffinity "github.com/tikv/pd/pkg/mcs/scheduling/server/affinity"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server/keyspace_meta"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/meta"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/rule"
 	"github.com/tikv/pd/pkg/ratelimit"
@@ -90,6 +92,8 @@ type Cluster struct {
 	configWatcher     *config.Watcher
 	ruleWatcher       *rule.Watcher
 	affinityWatcher   *mcsaffinity.Watcher
+	keyspaceWatcher   *keyspace_meta.Watcher
+	keyspaceCache     *keyspace.Cache
 	coordinator       *schedule.Coordinator
 	checkMembershipCh chan struct{}
 	pdLeader          atomic.Value
@@ -160,6 +164,7 @@ func NewCluster(
 		regionStats:       statistics.NewRegionStatistics(basicCluster, persistConfig, ruleManager),
 		storage:           storage,
 		hbStreams:         hbStreams,
+		keyspaceCache:     keyspace.NewCache(),
 		checkMembershipCh: checkMembershipCh,
 		httpClient:        httpClient,
 		backendAddress:    backendAddress,
@@ -239,6 +244,11 @@ func (c *Cluster) GetAffinityManager() *affinity.Manager {
 	return c.affinityManager
 }
 
+// GetKeyspaceCache returns the keyspace cache.
+func (c *Cluster) GetKeyspaceCache() *keyspace.Cache {
+	return c.keyspaceCache
+}
+
 // GetRegionSplitter returns the region splitter.
 func (c *Cluster) GetRegionSplitter() *splitter.RegionSplitter {
 	return c.coordinator.GetRegionSplitter()
@@ -252,6 +262,11 @@ func (c *Cluster) GetRegionScatterer() *scatter.RegionScatterer {
 // GetStoresLoads returns load stats of all stores.
 func (c *Cluster) GetStoresLoads() map[uint64]statistics.StoreKindLoads {
 	return c.hotStat.GetStoresLoads()
+}
+
+// GetStoreReadCPURecentMax returns the recent max read CPU usage of a store.
+func (c *Cluster) GetStoreReadCPURecentMax(storeID uint64) float64 {
+	return c.hotStat.GetStoreReadCPURecentMax(storeID)
 }
 
 // IsRegionHot checks if a region is in hot state.
@@ -319,6 +334,7 @@ func (c *Cluster) SetRuntimeResources(
 	configWatcher *config.Watcher,
 	ruleWatcher *rule.Watcher,
 	affinityWatcher *mcsaffinity.Watcher,
+	keyspaceWatcher *keyspace_meta.Watcher,
 ) {
 	c.runtimeMu.Lock()
 	defer c.runtimeMu.Unlock()
@@ -326,6 +342,7 @@ func (c *Cluster) SetRuntimeResources(
 	c.configWatcher = configWatcher
 	c.ruleWatcher = ruleWatcher
 	c.affinityWatcher = affinityWatcher
+	c.keyspaceWatcher = keyspaceWatcher
 	metaWatcher.SetOnStoreTombstoned(func(storeID uint64) {
 		c.hotStat.RemoveRollingStoreStats(storeID)
 		DeleteStoreMetrics(strconv.FormatUint(storeID, 10))
@@ -343,12 +360,14 @@ func (c *Cluster) cleanupRuntimeResources() {
 	ruleWatcher := c.ruleWatcher
 	metaWatcher := c.metaWatcher
 	configWatcher := c.configWatcher
+	keyspaceWatcher := c.keyspaceWatcher
 	hbStreams := c.hbStreams
 	storage := c.storage
 	c.affinityWatcher = nil
 	c.ruleWatcher = nil
 	c.metaWatcher = nil
 	c.configWatcher = nil
+	c.keyspaceWatcher = nil
 	c.hbStreams = nil
 	c.storage = nil
 	c.runtimeMu.Unlock()
@@ -365,6 +384,9 @@ func (c *Cluster) cleanupRuntimeResources() {
 	}
 	if configWatcher != nil {
 		configWatcher.Close()
+	}
+	if keyspaceWatcher != nil {
+		keyspaceWatcher.Close()
 	}
 	if storage != nil {
 		storage.Close()
@@ -593,11 +615,11 @@ func (c *Cluster) HandleStoreHeartbeat(heartbeat *schedulingpb.StoreHeartbeatReq
 	reportInterval := stats.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
 
-	regions := make(map[uint64]*core.RegionInfo, len(stats.GetPeerStats()))
+	reportedRegions := make(map[uint64]struct{}, len(stats.GetPeerStats()))
 	for _, peerStat := range stats.GetPeerStats() {
 		regionID := peerStat.GetRegionId()
 		region := c.GetRegion(regionID)
-		regions[regionID] = region
+		reportedRegions[regionID] = struct{}{}
 		if region == nil {
 			log.Warn("discard hot peer stat for unknown region",
 				zap.Uint64("region-id", regionID),
@@ -623,23 +645,11 @@ func (c *Cluster) HandleStoreHeartbeat(heartbeat *schedulingpb.StoreHeartbeatReq
 			utils.RegionReadCPU:       regionReadCPU * float64(interval),
 			utils.RegionWriteCPU:      0,
 		}
-		checkReadPeerTask := func(cache *statistics.HotPeerCache) {
-			stats := cache.CheckPeerFlow(region, []*metapb.Peer{peer}, loads, interval)
-			for _, stat := range stats {
-				cache.UpdateStat(stat)
-			}
-		}
-		c.hotStat.CheckReadAsync(checkReadPeerTask)
+		c.hotStat.CheckReadPeerAsync(region, peer, loads, interval)
 	}
 
 	// Here we will compare the reported regions with the previous hot peers to decide if it is still hot.
-	collectUnReportedPeerTask := func(cache *statistics.HotPeerCache) {
-		stats := cache.CheckColdPeer(storeID, regions, interval)
-		for _, stat := range stats {
-			cache.UpdateStat(stat)
-		}
-	}
-	c.hotStat.CheckReadAsync(collectUnReportedPeerTask)
+	c.hotStat.CheckColdPeerAsync(storeID, reportedRegions, interval)
 	return nil
 }
 
@@ -773,6 +783,7 @@ func (c *Cluster) collectMetrics() {
 			id := strconv.FormatUint(s.GetID(), 10)
 			statistics.StoreLimitGauge.DeleteLabelValues(id, "add-peer")
 			statistics.StoreLimitGauge.DeleteLabelValues(id, "remove-peer")
+			statistics.StoreLimitGauge.DeleteLabelValues(id, "transfer-leader-in")
 		}
 	}
 

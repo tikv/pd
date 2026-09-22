@@ -82,6 +82,11 @@ linters:
         - G115
     perfsprint:
       string-format: false
+    recvcheck:
+      exclusions:
+        # Serialization callbacks intentionally require mixed receiver types.
+        - "Duration.MarshalText"
+        - "RedactInfoLogType.UnmarshalTOML"
     revive:
       confidence: 0.8
       severity: error

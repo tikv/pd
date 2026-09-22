@@ -78,7 +78,6 @@ func (cfg *pushMetricsConfig) syncPushMetricsTicker(
 	*cfg = newCfg
 	if ticker != nil {
 		ticker.Stop()
-		ticker = nil
 	}
 	if newCfg.address == "" {
 		return nil

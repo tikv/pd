@@ -959,6 +959,9 @@ func (m *GroupManager) RemoveKeyspacesFromGroup(
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if leadership == nil {
+		return m.removeKeyspacesFromGroupWithConditions(ctx, groupID, km, keyspaceIDs, nil)
+	}
 	term, ok := leadership.CaptureTerm()
 	if !ok {
 		return nil, errors.Errorf("%s because leadership term is unavailable", errs.NotLeaderErr)
@@ -1196,6 +1199,12 @@ func (m *GroupManager) removeKeyspacesFromGroupSingleTxn(
 		return nil, err
 	}
 
+	// Notify the GC barrier metrics after a confirmed commit, outside the group
+	// lock, matching the legacy RemoveKeyspacesFromGroup ordering.
+	for _, id := range removedIDs {
+		km.invalidateGCBarrierMetrics(id)
+	}
+
 	m.putKeyspaceGroupToCacheLocked(kg)
 	return kg, nil
 }
@@ -1288,6 +1297,10 @@ func (m *GroupManager) removeKeyspacesFromGroupSmallBatch(
 			m.refreshKeyspaceGroupCacheAfterRemovalErrorLocked(groupID)
 		}
 		return nil, nil, false, err
+	}
+
+	for _, id := range removedIDs {
+		km.invalidateGCBarrierMetrics(id)
 	}
 
 	m.putKeyspaceGroupToCacheLocked(kg)
@@ -1388,6 +1401,12 @@ func (m *GroupManager) removeKeyspacesFromGroupBatch(
 			m.refreshKeyspaceGroupCacheAfterRemovalErrorLocked(groupID)
 		}
 		return nil, nil, false, err
+	}
+
+	// Notify the GC barrier metrics outside the group lock; the caller's defer
+	// releases m before this callback runs for the error path.
+	for _, id := range removedIDs {
+		km.invalidateGCBarrierMetrics(id)
 	}
 
 	// Update the cache

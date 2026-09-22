@@ -1212,8 +1212,8 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 	resp.State = store.GetNodeState()
 	c.PutStore(newStore, opts...)
 	var (
-		regions  map[uint64]*core.RegionInfo
-		interval uint64
+		reportedRegions map[uint64]struct{}
+		interval        uint64
 	)
 	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
 		c.hotStat.Observe(storeID, newStore.GetStoreStats())
@@ -1222,11 +1222,11 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 		reportInterval := stats.GetInterval()
 		interval = reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
 
-		regions = make(map[uint64]*core.RegionInfo, len(stats.GetPeerStats()))
+		reportedRegions = make(map[uint64]struct{}, len(stats.GetPeerStats()))
 		for _, peerStat := range stats.GetPeerStats() {
 			regionID := peerStat.GetRegionId()
 			region := c.GetRegion(regionID)
-			regions[regionID] = region
+			reportedRegions[regionID] = struct{}{}
 			if region == nil {
 				log.Warn("discard hot peer stat for unknown region",
 					zap.Uint64("region-id", regionID),
@@ -1252,13 +1252,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 				utils.RegionReadCPU:       regionReadCPU * float64(interval),
 				utils.RegionWriteCPU:      0,
 			}
-			checkReadPeerTask := func(cache *statistics.HotPeerCache) {
-				stats := cache.CheckPeerFlow(region, []*metapb.Peer{peer}, loads, interval)
-				for _, stat := range stats {
-					cache.UpdateStat(stat)
-				}
-			}
-			c.hotStat.CheckReadAsync(checkReadPeerTask)
+			c.hotStat.CheckReadPeerAsync(region, peer, loads, interval)
 		}
 	}
 	for _, stat := range stats.GetSnapshotStats() {
@@ -1281,13 +1275,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 	}
 	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
 		// Here we will compare the reported regions with the previous hot peers to decide if it is still hot.
-		collectUnReportedPeerTask := func(cache *statistics.HotPeerCache) {
-			stats := cache.CheckColdPeer(storeID, regions, interval)
-			for _, stat := range stats {
-				cache.UpdateStat(stat)
-			}
-		}
-		c.hotStat.CheckReadAsync(collectUnReportedPeerTask)
+		c.hotStat.CheckColdPeerAsync(storeID, reportedRegions, interval)
 	}
 	c.adjustNetworkSlowStore(storeID)
 	return nil
@@ -2441,8 +2429,9 @@ func (c *RaftCluster) AddStoreLimit(store *metapb.Store) {
 			slc := cfg.GetDefaultStoreLimit()
 			if core.IsStoreContainLabel(store, core.EngineKey, core.EngineTiFlash) {
 				slc = sc.StoreLimitConfig{
-					AddPeer:    sc.DefaultTiFlashStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
-					RemovePeer: sc.DefaultTiFlashStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
+					AddPeer:          sc.DefaultTiFlashStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
+					RemovePeer:       sc.DefaultTiFlashStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
+					TransferLeaderIn: sc.DefaultTiFlashStoreLimit.GetDefaultStoreLimit(storelimit.TransferLeaderIn),
 				}
 			}
 			cfg.StoreLimit[storeID] = slc
@@ -2476,6 +2465,7 @@ func (c *RaftCluster) RemoveStoreLimit(storeID uint64) {
 			id := strconv.FormatUint(storeID, 10)
 			statistics.StoreLimitGauge.DeleteLabelValues(id, "add-peer")
 			statistics.StoreLimitGauge.DeleteLabelValues(id, "remove-peer")
+			statistics.StoreLimitGauge.DeleteLabelValues(id, "transfer-leader-in")
 			return
 		}
 		time.Sleep(persistLimitWaitTime)
@@ -2628,13 +2618,7 @@ func (c *RaftCluster) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePer
 		if !ok {
 			slc = cfg.GetDefaultStoreLimit()
 		}
-		switch typ {
-		case storelimit.AddPeer:
-			slc.AddPeer = ratePerMin
-		case storelimit.RemovePeer:
-			slc.RemovePeer = ratePerMin
-		}
-		cfg.StoreLimit[storeID] = slc
+		cfg.StoreLimit[storeID] = slc.SetLimit(typ, ratePerMin)
 		return true, nil
 	})
 	if err != nil {
@@ -2649,19 +2633,9 @@ func (c *RaftCluster) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePer
 // SetAllStoresLimit sets all store limit for a given type and rate.
 func (c *RaftCluster) SetAllStoresLimit(typ storelimit.Type, ratePerMin float64) error {
 	err := c.opt.UpdateScheduleConfig(c.storage, func(_ *sc.ScheduleConfig, cfg *sc.ScheduleConfig) (bool, error) {
-		switch typ {
-		case storelimit.AddPeer:
-			cfg.DefaultStoreLimit.AddPeer = ratePerMin
-			for storeID, limit := range cfg.StoreLimit {
-				limit.AddPeer = ratePerMin
-				cfg.StoreLimit[storeID] = limit
-			}
-		case storelimit.RemovePeer:
-			cfg.DefaultStoreLimit.RemovePeer = ratePerMin
-			for storeID, limit := range cfg.StoreLimit {
-				limit.RemovePeer = ratePerMin
-				cfg.StoreLimit[storeID] = limit
-			}
+		cfg.DefaultStoreLimit = cfg.DefaultStoreLimit.SetLimit(typ, ratePerMin)
+		for storeID, limit := range cfg.StoreLimit {
+			cfg.StoreLimit[storeID] = limit.SetLimit(typ, ratePerMin)
 		}
 		return true, nil
 	})
@@ -2904,6 +2878,7 @@ func (c *RaftCluster) collectStorageSize(
 			keyspaceName: keyspaceName,
 			// Use the user storage size to record the logical storage size.
 			rowBasedStorageSize:    uint64(regionStats.UserStorageSize),
+			rowBasedIAStorageSize:  uint64(regionStats.UserIAStorageSize),
 			columnBasedStorageSize: uint64(regionStats.UserColumnarStorageSize),
 		})
 	}

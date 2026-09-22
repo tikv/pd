@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
@@ -516,15 +517,13 @@ func (suite *regionTestSuite) checkStoreRegions(cluster *tests.TestCluster) {
 		re.Equal(regionIDs[i], r.ID)
 	}
 
-	regionIDs = []uint64{4}
 	url = fmt.Sprintf("%s/regions/store/%d", urlPrefix, 2)
 	r5 := &response.RegionsInfo{}
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, url, r5)
 	re.NoError(err)
-	re.Len(regionIDs, r5.Count)
-	for i, r := range r5.Regions {
-		re.Equal(regionIDs[i], r.ID)
-	}
+	re.Equal(1, r5.Count)
+	re.Len(r5.Regions, 1)
+	re.Equal(uint64(4), r5.Regions[0].ID)
 
 	regionIDs = []uint64{}
 	url = fmt.Sprintf("%s/regions/store/%d", urlPrefix, 3)
@@ -598,6 +597,7 @@ func (suite *regionTestSuite) TestRegionsWithKillRequest() {
 }
 
 func (suite *regionTestSuite) checkRegionsWithKillRequest(cluster *tests.TestCluster) {
+	as := assert.New(suite.T())
 	re := suite.Require()
 	leader := cluster.GetLeaderServer()
 	urlPrefix := leader.GetAddr() + "/pd/api/v1"
@@ -624,9 +624,13 @@ func (suite *regionTestSuite) checkRegionsWithKillRequest(cluster *tests.TestClu
 				resp.Body.Close()
 			}
 		}()
-		re.Error(err)
-		re.Contains(err.Error(), "context canceled")
-		re.Nil(resp)
+		if err == nil {
+			as.Fail("An error is expected but got nil")
+			doneCh <- struct{}{}
+			return
+		}
+		as.Contains(err.Error(), "context canceled")
+		as.Nil(resp)
 		doneCh <- struct{}{}
 	}()
 	time.Sleep(100 * time.Millisecond) // wait for the request to be sent

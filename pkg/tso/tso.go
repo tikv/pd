@@ -149,6 +149,7 @@ func (t *timestampOracle) generateTSO(ctx context.Context, count int64) (physica
 		return 0, 0
 	}
 	physical = t.tsoMux.physical.UnixNano() / int64(time.Millisecond)
+	failpoint.InjectCall("beforeGenerateTSO", physical, &t.tsoMux.logical, count)
 	t.tsoMux.logical += count
 	logical = t.tsoMux.logical
 	return physical, logical
@@ -343,6 +344,9 @@ func (t *timestampOracle) updateTimestamp(purpose updatePurpose) (bool, error) {
 	}
 	prevPhysical, prevLogical := t.getTSO()
 
+	failpoint.Inject("failedToUpdateTimestamp", func() {
+		failpoint.Return(false, errs.ErrEtcdTxnInternal)
+	})
 	now := time.Now()
 	failpoint.Inject("fallBackUpdate", func() {
 		now = now.Add(time.Hour)
@@ -448,6 +452,7 @@ func (t *timestampOracle) getTS(ctx context.Context, count uint32) (pdpb.Timesta
 			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory has been reset")
 		}
 		if overflowedLogical(resp.GetLogical()) {
+			failpoint.InjectCall("onLogicalOverflow", count)
 			log.Warn("logical part outside of max logical interval, please check ntp time, or adjust config item `tso-update-physical-interval`",
 				logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
 				zap.Reflect("response", resp),

@@ -24,7 +24,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 func TestMergeCheck(t *testing.T) {
@@ -79,4 +79,14 @@ func TestMergeCheck(t *testing.T) {
 	config.Adjust()
 	re.Empty(config.GetRegionSplitSize())
 	re.NoError(config.CheckRegionSize(defaultRegionMaxSize, 50))
+}
+
+func TestStoreConfigEqualChecksReadPool(t *testing.T) {
+	re := require.New(t)
+	left := &StoreConfig{}
+	right := &StoreConfig{}
+	re.True(left.Equal(right))
+
+	right.ReadPool.Unified.MaxThreadCount = 12
+	re.False(left.Equal(right))
 }

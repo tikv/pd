@@ -33,7 +33,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 func TestRegionSyncer(t *testing.T) {
@@ -405,10 +405,14 @@ func TestPrepareCheckerWithTransferLeader(t *testing.T) {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
 	}()
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))
 	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) { conf.PDServerCfg.UseRegionStorage = true })
-	defer cluster.Destroy()
+	defer func() {
+		cancel()
+		if cluster != nil {
+			cluster.Destroy()
+		}
+	}()
 	re.NoError(err)
 
 	err = cluster.RunInitialServers()

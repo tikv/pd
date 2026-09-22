@@ -16,6 +16,7 @@ package schedulers
 
 import (
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 
@@ -180,37 +181,69 @@ func (conf *evictLeaderSchedulerConfig) resumeLeaderTransfer(cluster sche.Schedu
 	}
 }
 
-func (conf *evictLeaderSchedulerConfig) pauseLeaderTransferIfStoreNotExist(id uint64) (bool, error) {
-	conf.RLock()
-	defer conf.RUnlock()
-	if _, exist := conf.StoreIDWithRanges[id]; !exist {
-		if err := conf.cluster.PauseLeaderTransfer(id, constant.In); err != nil {
-			return exist, err
-		}
-		return false, nil
-	}
-	return true, nil
-}
-
-func (conf *evictLeaderSchedulerConfig) resumeLeaderTransferIfPaused(id uint64, paused bool) {
-	if !paused {
-		return
-	}
-	conf.cluster.ResumeLeaderTransfer(id, constant.In)
-}
-
-func (conf *evictLeaderSchedulerConfig) update(id uint64, newRanges []keyutil.KeyRange, batch int) error {
+// applyStoreIDs pauses leader transfer for any newly added store, resolves
+// each store's target ranges, and persists everything with a single save —
+// all under one lock, so the whole call is atomic with respect to concurrent
+// config updates on this scheduler. ids may be a single store (a store_id
+// request), several (a store_ids batch), or empty (a batch-size-only
+// update). When hasExplicitRanges is false, a store that already existed
+// keeps its current ranges untouched; a brand-new store defaults to the
+// whole key space. On failure, previously existing stores are restored to
+// their prior ranges and newly added stores (and their leader-transfer
+// pause) are rolled back entirely; Batch is restored too.
+func (conf *evictLeaderSchedulerConfig) applyStoreIDs(ids []uint64, explicitRanges []keyutil.KeyRange, hasExplicitRanges bool, batch int) error {
 	conf.Lock()
 	defer conf.Unlock()
-	if id != 0 {
-		conf.StoreIDWithRanges[id] = newRanges
+
+	prevBatch := conf.Batch
+	prevRanges := make(map[uint64][]keyutil.KeyRange)
+	var pausedIDs []uint64
+
+	// rollback undoes everything applied to StoreIDWithRanges so far in this
+	// call: newly added stores are removed (and un-paused), and previously
+	// existing stores get their old ranges back. It's shared by both failure
+	// points below so a mid-batch pause failure rolls back exactly as
+	// completely as a later save failure does.
+	rollback := func() {
+		for _, id := range pausedIDs {
+			delete(conf.StoreIDWithRanges, id)
+			conf.cluster.ResumeLeaderTransfer(id, constant.In)
+		}
+		for id, ranges := range prevRanges {
+			conf.StoreIDWithRanges[id] = ranges
+		}
+	}
+
+	for _, id := range ids {
+		old, existed := conf.StoreIDWithRanges[id]
+		if !existed {
+			if err := conf.cluster.PauseLeaderTransfer(id, constant.In); err != nil {
+				rollback()
+				return err
+			}
+			pausedIDs = append(pausedIDs, id)
+			if hasExplicitRanges {
+				conf.StoreIDWithRanges[id] = append([]keyutil.KeyRange(nil), explicitRanges...)
+			} else {
+				conf.StoreIDWithRanges[id] = []keyutil.KeyRange{keyutil.NewKeyRange("", "")}
+			}
+			continue
+		}
+		if !hasExplicitRanges {
+			// Keep the existing store's current ranges untouched.
+			continue
+		}
+		prevRanges[id] = old
+		conf.StoreIDWithRanges[id] = append([]keyutil.KeyRange(nil), explicitRanges...)
 	}
 	conf.Batch = batch
-	err := conf.save()
-	if err != nil && id != 0 {
-		_, _ = conf.removeStoreLocked(id)
+
+	if err := conf.save(); err != nil {
+		conf.Batch = prevBatch
+		rollback()
+		return err
 	}
-	return err
+	return nil
 }
 
 func (conf *evictLeaderSchedulerConfig) delete(id uint64) (any, error) {
@@ -407,70 +440,145 @@ type evictLeaderHandler struct {
 	config *evictLeaderSchedulerConfig
 }
 
+// updateConfig handles both a single "store_id" (backward compatible) and a
+// "store_ids" array (batch) the same way: it resolves the target store list
+// first, then calls applyStoreIDs once. No leader-transfer pausing happens
+// until that single call, so an early validation failure (bad batch, bad
+// ranges) never needs to roll anything back — nothing has been touched yet.
 func (handler *evictLeaderHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
 	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(handler.rd, w, r.Body, &input); err != nil {
 		return
 	}
-	var (
-		exist                bool
-		err                  error
-		id                   uint64
-		leaderTransferPaused bool
-		newRanges            []keyutil.KeyRange
-	)
-	idFloat, inputHasStoreID := input["store_id"].(float64)
-	if inputHasStoreID {
-		id = (uint64)(idFloat)
-		exist, err = handler.config.pauseLeaderTransferIfStoreNotExist(id)
-		if err != nil {
-			handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		leaderTransferPaused = !exist
+
+	ids, err := parseUpdateStoreIDs(input)
+	if err != nil {
+		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
 	}
 
 	batch := handler.config.getBatch()
 	batchFloat, inputBatch := input["batch"].(float64)
 	if input["batch"] != nil && !inputBatch {
-		handler.config.resumeLeaderTransferIfPaused(id, leaderTransferPaused)
 		handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("invalid argument for 'batch': expected a number, got %T", input["batch"]))
 		return
 	}
 	if inputBatch {
 		if !isValidEvictLeaderBatchSize(batchFloat) {
-			handler.config.resumeLeaderTransferIfPaused(id, leaderTransferPaused)
 			handler.rd.JSON(w, http.StatusBadRequest, invalidEvictLeaderBatchSizeMsg)
 			return
 		}
 		batch = (int)(batchFloat)
 	}
 
-	ranges, ok := (input["ranges"]).([]string)
-	if ok {
-		if !inputHasStoreID {
-			handler.config.resumeLeaderTransferIfPaused(id, leaderTransferPaused)
+	rawRanges, hasRanges := input["ranges"]
+	var explicitRanges []keyutil.KeyRange
+	if hasRanges {
+		if len(ids) == 0 {
 			handler.rd.JSON(w, http.StatusBadRequest, errs.ErrSchedulerConfig.FastGenByArgs("id"))
 			return
 		}
-	} else if exist {
-		ranges = handler.config.getRanges(id)
+		strs, ok := decodeStringSlice(rawRanges)
+		if !ok {
+			handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("invalid argument for 'ranges': expected an array of strings, got %T", rawRanges))
+			return
+		}
+		// An empty "ranges" array carries no range pairs to apply; treat it
+		// the same as an omitted field instead of letting getKeyRanges
+		// default it to the whole key space and overwrite existing stores'
+		// custom ranges.
+		if len(strs) > 0 {
+			explicitRanges, err = getKeyRanges(strs)
+			if err != nil {
+				handler.rd.JSON(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		} else {
+			hasRanges = false
+		}
 	}
 
-	newRanges, err = getKeyRanges(ranges)
-	if err != nil {
-		handler.config.resumeLeaderTransferIfPaused(id, leaderTransferPaused)
-		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	// StoreIDWithRanges is only changed in update function.
-	err = handler.config.update(id, newRanges, batch)
-	if err != nil {
+	if err := handler.config.applyStoreIDs(ids, explicitRanges, hasRanges, batch); err != nil {
 		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	handler.rd.JSON(w, http.StatusOK, "The scheduler has been applied to the store.")
+}
+
+// parseUpdateStoreIDs reads the target store IDs for a config update from the
+// request body. It accepts a single "store_id" (backward compatible with
+// existing clients), a "store_ids" array to update several stores in one
+// call, or neither (a batch-size-only update).
+func parseUpdateStoreIDs(input map[string]any) ([]uint64, error) {
+	_, hasStoreID := input["store_id"]
+	rawStoreIDs, hasStoreIDs := input["store_ids"]
+	switch {
+	case hasStoreID && hasStoreIDs:
+		return nil, errors.New("only one of store_id and store_ids can be set")
+	case hasStoreIDs:
+		arr, ok := rawStoreIDs.([]any)
+		if !ok || len(arr) == 0 {
+			return nil, errors.New("please input a right store id")
+		}
+		ids := make([]uint64, 0, len(arr))
+		seen := make(map[uint64]struct{}, len(arr))
+		for _, v := range arr {
+			f, ok := v.(float64)
+			if !ok {
+				return nil, errors.New("please input a right store id")
+			}
+			id, ok := storeIDFromFloat(f)
+			if !ok {
+				return nil, errors.New("please input a right store id")
+			}
+			if _, dup := seen[id]; dup {
+				continue
+			}
+			seen[id] = struct{}{}
+			ids = append(ids, id)
+		}
+		return ids, nil
+	case hasStoreID:
+		f, ok := input["store_id"].(float64)
+		if !ok {
+			return nil, errors.New("please input a right store id")
+		}
+		id, ok := storeIDFromFloat(f)
+		if !ok {
+			return nil, errors.New("please input a right store id")
+		}
+		return []uint64{id}, nil
+	default:
+		return nil, nil
+	}
+}
+
+// storeIDFromFloat converts a JSON-decoded number into a store ID, rejecting
+// fractional, negative, or out-of-range values.
+func storeIDFromFloat(f float64) (uint64, bool) {
+	if f < 0 || f != math.Trunc(f) || f > float64(math.MaxUint64) {
+		return 0, false
+	}
+	return uint64(f), true
+}
+
+// decodeStringSlice converts a JSON-decoded value into []string. A JSON
+// array always decodes as []any (never []string), so this checks the
+// element types explicitly instead of relying on a direct type assertion.
+func decodeStringSlice(v any) ([]string, bool) {
+	arr, ok := v.([]any)
+	if !ok {
+		return nil, false
+	}
+	strs := make([]string, 0, len(arr))
+	for _, item := range arr {
+		s, ok := item.(string)
+		if !ok {
+			return nil, false
+		}
+		strs = append(strs, s)
+	}
+	return strs, true
 }
 
 func (handler *evictLeaderHandler) listConfig(w http.ResponseWriter, _ *http.Request) {

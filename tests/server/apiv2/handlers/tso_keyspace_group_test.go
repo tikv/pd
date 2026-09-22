@@ -131,8 +131,9 @@ func (suite *keyspaceGroupTestSuite) TestLoadKeyspaceGroup() {
 	re := suite.Require()
 	kgs := &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
 		{
-			ID:       uint32(1),
-			UserKind: endpoint.Standard.String(),
+			ID:        uint32(1),
+			UserKind:  endpoint.Standard.String(),
+			Keyspaces: []uint32{111, 222},
 		},
 		{
 			ID:       uint32(2),
@@ -143,6 +144,40 @@ func (suite *keyspaceGroupTestSuite) TestLoadKeyspaceGroup() {
 	MustCreateKeyspaceGroup(re, suite.server, kgs)
 	resp := MustLoadKeyspaceGroups(re, suite.server, "0", "0")
 	re.Len(resp, 3)
+	re.Equal([]uint32{111, 222}, resp[1].Keyspaces)
+
+	for _, hideValue := range []string{"true", "TRUE", "True"} {
+		httpReq, err := http.NewRequest(
+			http.MethodGet,
+			suite.server.GetAddr()+keyspaceGroupsPrefix+"?hide_keyspaces="+hideValue,
+			http.NoBody,
+		)
+		re.NoError(err)
+		httpResp, err := tests.TestDialClient.Do(httpReq)
+		re.NoError(err)
+		re.Equal(http.StatusOK, httpResp.StatusCode)
+		var hiddenGroups []map[string]any
+		re.NoError(json.NewDecoder(httpResp.Body).Decode(&hiddenGroups))
+		re.NoError(httpResp.Body.Close())
+		re.Len(hiddenGroups, 3)
+		_, ok := hiddenGroups[1]["keyspaces"]
+		re.False(ok)
+	}
+
+	httpReq, err := http.NewRequest(
+		http.MethodGet,
+		suite.server.GetAddr()+keyspaceGroupsPrefix+"/1?hide_keyspaces=true",
+		http.NoBody,
+	)
+	re.NoError(err)
+	httpResp, err := tests.TestDialClient.Do(httpReq)
+	re.NoError(err)
+	defer httpResp.Body.Close()
+	re.Equal(http.StatusOK, httpResp.StatusCode)
+	var hiddenGroup map[string]any
+	re.NoError(json.NewDecoder(httpResp.Body).Decode(&hiddenGroup))
+	_, ok := hiddenGroup["keyspaces"]
+	re.False(ok)
 }
 
 func (suite *keyspaceGroupTestSuite) TestDeleteDefaultKeyspaceGroupReturnsBadRequest() {
