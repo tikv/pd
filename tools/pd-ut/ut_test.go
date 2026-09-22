@@ -94,7 +94,15 @@ func TestRunCommandWithTempDirCleansUp(t *testing.T) {
 			content, err := os.ReadFile(marker)
 			require.NoError(t, err)
 			childTempDir := strings.TrimSpace(string(content))
-			require.NotEmpty(t, childTempDir)
+			// Restrict the path conveyed by the helper process to the
+			// system temp directory that created it.
+			require.True(t, filepath.IsAbs(childTempDir),
+				"child temp dir %q is not absolute", childTempDir)
+			rel, err := filepath.Rel(os.TempDir(), childTempDir)
+			require.NoError(t, err)
+			require.False(t, strings.HasPrefix(rel, ".."),
+				"child temp dir %q escapes %q", childTempDir, os.TempDir())
+			//nolint:gosec // The path is restricted to the system temp dir above.
 			_, err = os.Stat(childTempDir)
 			require.ErrorIs(t, err, os.ErrNotExist)
 		})
@@ -108,9 +116,12 @@ func TestRunCommandWithTempDirHelperProcess(_ *testing.T) {
 
 	marker := os.Args[len(os.Args)-1]
 	tempDir := os.TempDir()
+	// The marker only conveys this process's temp dir to the parent;
+	// it is not user-controlled input.
 	if err := os.WriteFile(filepath.Join(tempDir, "leftover"), []byte("test"), 0600); err != nil {
 		os.Exit(2)
 	}
+	//nolint:gosec // Test-only path marker written by the helper process.
 	if err := os.WriteFile(marker, []byte(tempDir), 0600); err != nil {
 		os.Exit(2)
 	}
