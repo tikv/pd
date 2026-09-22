@@ -330,8 +330,8 @@ func TestResourceManagerWritesUsePDAndReadsUseRM(t *testing.T) {
 	t.Cleanup(rmCleanup)
 
 	inner := newInnerClientForRMRouteTest(t, ctx, pdAddr)
-	inner.resourceManagerDiscovery = newTestResourceManagerDiscovery(t, ctx, rmAddr)
-	t.Cleanup(inner.resourceManagerDiscovery.Close)
+	inner.resourceManagerDiscovery.Store(newTestResourceManagerDiscovery(t, ctx, rmAddr))
+	t.Cleanup(inner.resourceManagerDiscovery.Load().Close)
 
 	cli := &client{inner: inner}
 
@@ -369,8 +369,8 @@ func TestGetResourceGroupPreservesContextErrors(t *testing.T) {
 	t.Cleanup(rmCleanup)
 
 	inner := newInnerClientForRMRouteTest(t, ctx, pdAddr)
-	inner.resourceManagerDiscovery = newTestResourceManagerDiscovery(t, ctx, rmAddr)
-	t.Cleanup(inner.resourceManagerDiscovery.Close)
+	inner.resourceManagerDiscovery.Store(newTestResourceManagerDiscovery(t, ctx, rmAddr))
+	t.Cleanup(inner.resourceManagerDiscovery.Load().Close)
 
 	cli := &client{inner: inner}
 
@@ -401,8 +401,8 @@ func TestTryResourceManagerConnectUsesRMForTokenAndFallbackToPD(t *testing.T) {
 		t.Cleanup(rmCleanup)
 
 		inner := newInnerClientForRMRouteTest(t, ctx, pdAddr)
-		inner.resourceManagerDiscovery = newTestResourceManagerDiscovery(t, ctx, rmAddr)
-		t.Cleanup(inner.resourceManagerDiscovery.Close)
+		inner.resourceManagerDiscovery.Store(newTestResourceManagerDiscovery(t, ctx, rmAddr))
+		t.Cleanup(inner.resourceManagerDiscovery.Load().Close)
 
 		connection := &resourceManagerConnectionContext{}
 		err := inner.tryResourceManagerConnect(ctx, connection)
@@ -484,7 +484,7 @@ func TestTokenDispatcherReconnectsWhenRMEndpointChanges(t *testing.T) {
 	discovery := newTestResourceManagerDiscovery(t, ctx, rmAddr)
 	t.Cleanup(discovery.Close)
 	inner.Lock()
-	inner.resourceManagerDiscovery = discovery
+	inner.resourceManagerDiscovery.Store(discovery)
 	inner.Unlock()
 	require.NoError(t, inner.scheduleUpdateTokenConnection(""))
 
@@ -580,7 +580,7 @@ func TestTokenDispatcherRechecksEndpointUpdatesAfterReconnect(t *testing.T) {
 		t.Fatal("timed out waiting for the token dispatcher to start reconnecting")
 	}
 	inner.Lock()
-	inner.resourceManagerDiscovery = discovery
+	inner.resourceManagerDiscovery.Store(discovery)
 	inner.Unlock()
 	require.NoError(t, inner.scheduleUpdateTokenConnection(""))
 	releaseReconnect()
@@ -633,8 +633,8 @@ func runRMTokenHoldTest(t *testing.T, simulatePDLeaderChange bool) {
 	t.Cleanup(rmCleanup)
 
 	inner := newInnerClientForRMRouteTest(t, ctx, pdAddr)
-	inner.resourceManagerDiscovery = newTestResourceManagerDiscovery(t, ctx, rmAddr)
-	t.Cleanup(inner.resourceManagerDiscovery.Close)
+	inner.resourceManagerDiscovery.Store(newTestResourceManagerDiscovery(t, ctx, rmAddr))
+	t.Cleanup(inner.resourceManagerDiscovery.Load().Close)
 	inner.createTokenDispatcher()
 	t.Cleanup(func() {
 		inner.tokenDispatcher.dispatcherCancel()
