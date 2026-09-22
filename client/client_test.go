@@ -194,7 +194,7 @@ func TestIsKeyspaceUsingKeyspaceLevelGC(t *testing.T) {
 	}
 }
 
-// attributionServer checks the actual QueryRegion wire header against the
+// attributionServer checks the actual QueryRegion wire metadata against the
 // component encoded in each test query, including batches of different kinds.
 type attributionServer struct {
 	pdpb.UnimplementedPDServer
@@ -214,19 +214,34 @@ func (*attributionServer) QueryRegion(stream pdpb.PD_QueryRegionServer) error {
 		}
 		component := req.GetHeader().GetCallerComponent()
 		resp := &pdpb.QueryRegionResponse{RegionsById: make(map[uint64]*pdpb.RegionResponse)}
-		for _, keys := range [][][]byte{req.GetKeys(), req.GetPrevKeys()} {
-			for _, key := range keys {
-				if string(key) != component {
+		for selector, keys := range [][][]byte{req.GetKeys(), req.GetPrevKeys()} {
+			components := [][]string{req.GetKeyCallerComponents(), req.GetPrevKeyCallerComponents()}[selector]
+			for i, key := range keys {
+				actual := component
+				if len(components) > 0 {
+					if len(components) != len(keys) {
+						return errors.New("incorrect key query component count")
+					}
+					actual = components[i]
+				}
+				if string(key) != actual {
 					return errors.New("incorrect key query component")
 				}
 			}
 		}
-		for _, id := range req.GetIds() {
+		for i, id := range req.GetIds() {
+			actual := component
+			if components := req.GetIdCallerComponents(); len(components) > 0 {
+				if len(components) != len(req.GetIds()) {
+					return errors.New("incorrect ID query component count")
+				}
+				actual = components[i]
+			}
 			expected := strconv.FormatUint(id, 10)
 			if id == 0 {
 				expected = ""
 			}
-			if component != expected {
+			if actual != expected {
 				return errors.New("incorrect ID query component")
 			}
 		}

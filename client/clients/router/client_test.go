@@ -206,9 +206,9 @@ func TestProcessRequestsCallerAttribution(t *testing.T) {
 				reqPool:         &sync.Pool{New: func() any { return &Request{done: make(chan error, 1)} }},
 				batchController: batch.NewController(20, requestFinisher(nil), nil),
 			}
-			// Interleave components and query kinds; each component must still
-			// produce one batch, with responses matched to the original requests.
-			components := []caller.Component{"b", "a", "c", "a", "b", "c", "b", "a", "c"}
+			// Interleave components and query kinds; attribution must preserve
+			// one batch and the original response mapping.
+			components := []caller.Component{"b", "", "c", "", "b", "c", "b", "", "c"}
 			if failure == "same-component" {
 				for i := range components {
 					components[i] = "a"
@@ -249,27 +249,29 @@ func TestProcessRequestsCallerAttribution(t *testing.T) {
 				for _, key := range req.GetPrevKeys() {
 					ids = append(ids, uint64(key[0]))
 				}
+				re.Len(ids, len(components))
 				if failure == "same-component" {
-					re.Len(ids, len(components))
+					re.Equal("a", component)
+					re.Empty(req.GetKeyCallerComponents())
+					re.Empty(req.GetPrevKeyCallerComponents())
+					re.Empty(req.GetIdCallerComponents())
 				} else {
-					re.Len(ids, 3)
+					re.Empty(component)
+					re.Equal([]string{"b", "", "c"}, req.GetKeyCallerComponents())
+					re.Equal([]string{"", "b", "c"}, req.GetPrevKeyCallerComponents())
+					re.Equal([]string{"b", "", "c"}, req.GetIdCallerComponents())
 				}
-				for _, id := range ids {
-					re.Equal(string(components[id-1]), component)
-				}
-				if component == "b" && failure == "send" {
+				if failure == "send" {
 					return injected
 				}
 				return nil
 			}
 			recv := func() (*pdpb.QueryRegionResponse, error) {
-				if current.GetHeader().GetCallerComponent() == "b" {
-					switch failure {
-					case "recv":
-						return nil, injected
-					case "header":
-						return &pdpb.QueryRegionResponse{Header: &pdpb.ResponseHeader{Error: &pdpb.Error{Type: pdpb.ErrorType_NOT_BOOTSTRAPPED}}}, nil
-					}
+				switch failure {
+				case "recv":
+					return nil, injected
+				case "header":
+					return &pdpb.QueryRegionResponse{Header: &pdpb.ResponseHeader{Error: &pdpb.Error{Type: pdpb.ErrorType_NOT_BOOTSTRAPPED}}}, nil
 				}
 				resp := &pdpb.QueryRegionResponse{RegionsById: make(map[uint64]*pdpb.RegionResponse)}
 				for _, key := range current.GetKeys() {
@@ -283,24 +285,20 @@ func TestProcessRequestsCallerAttribution(t *testing.T) {
 				}
 				return resp, nil
 			}
+			// The dispatcher cancels the entire batch after Send/Recv/header errors.
 			err := c.processRequestsInner(send, recv)
-			if !shouldFail {
-				re.NoError(err)
-				if failure == "same-component" {
-					re.Equal([]string{"a"}, sent)
-				} else {
-					re.Equal([]string{"a", "b", "c"}, sent)
-				}
-			} else {
+			re.Len(sent, 1)
+			if shouldFail {
 				re.Error(err)
-				re.Equal([]string{"a", "b"}, sent)
+				c.cancelCollectedRequests(err)
+			} else {
+				re.NoError(err)
 			}
 			re.Zero(c.batchController.GetCollectedRequestCount())
-			// Dispatcher error cleanup must not finish successful requests again.
 			c.cancelCollectedRequests(injected)
 			for i, req := range requests {
 				result, waitErr := req.wait()
-				if shouldFail && components[i] != "a" {
+				if shouldFail {
 					re.Error(waitErr)
 					re.Nil(result)
 				} else {
