@@ -120,6 +120,10 @@ func (r *ResourceManagerDiscovery) initAndUpdateLoop() {
 func (r *ResourceManagerDiscovery) resetConn(url string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	// An unchanged empty URL still means PD fallback, not a leader change.
+	if r.serviceURL == url {
+		return
+	}
 	if len(url) == 0 {
 		if r.conn != nil {
 			r.conn.Close()
@@ -127,9 +131,6 @@ func (r *ResourceManagerDiscovery) resetConn(url string) {
 		}
 		r.serviceURL = ""
 		_ = r.onLeaderChanged("")
-		return
-	}
-	if r.serviceURL == url {
 		return
 	}
 	newConn, err := grpcutil.GetClientConn(r.ctx, url, r.tlsCfg, r.option.GRPCDialOptions...)
