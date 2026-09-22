@@ -463,10 +463,20 @@ func resetStoreState(re *require.Assertions, rc *cluster.RaftCluster, storeID ui
 	}
 
 	rc.GetBasicCluster().PutStore(newStore)
+<<<<<<< HEAD
 	if state == metapb.StoreState_Offline {
 		rc.SetStoreLimit(storeID, storelimit.RemovePeer, storelimit.Unlimited)
 	} else if state == metapb.StoreState_Tombstone {
 		rc.RemoveStoreLimit(storeID)
+=======
+	switch state {
+	case metapb.StoreState_Offline:
+		err := rc.SetStoreLimit(storeID, storelimit.RemovePeer, storelimit.Unlimited)
+		re.NoError(err)
+	case metapb.StoreState_Tombstone:
+		re.NoError(rc.RemoveStoreLimit(storeID))
+	default:
+>>>>>>> 05d2376711 (statistics, schedule: stop republishing metrics for a known-tombstoned store (#11166))
 	}
 }
 
@@ -474,8 +484,25 @@ func testStateAndLimit(re *require.Assertions, clusterID uint64, rc *cluster.Raf
 	// prepare
 	storeID := store.GetId()
 	oc := rc.GetOperatorController()
+<<<<<<< HEAD
 	rc.SetStoreLimit(storeID, storelimit.AddPeer, 60)
 	rc.SetStoreLimit(storeID, storelimit.RemovePeer, 60)
+=======
+	// The store can be left tombstoned by a previous call to this helper (the
+	// tombstone beforeState block runs it twice on the same store). Production
+	// never un-tombstones a store, so don't fake that transition here either --
+	// these SetStoreLimit calls only exist to seed a limit before resetStoreState
+	// below establishes the state this specific case actually wants to test, and
+	// resetStoreState's own Tombstone branch clears any limit anyway, so seeding
+	// one is pointless (and rejected by SetStoreLimit) once the store is already
+	// tombstoned.
+	if store := rc.GetStore(storeID); store == nil || !store.IsRemoved() {
+		err := rc.SetStoreLimit(storeID, storelimit.AddPeer, 60)
+		re.NoError(err)
+		err = rc.SetStoreLimit(storeID, storelimit.RemovePeer, 60)
+		re.NoError(err)
+	}
+>>>>>>> 05d2376711 (statistics, schedule: stop republishing metrics for a known-tombstoned store (#11166))
 	op := operator.NewTestOperator(2, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: storeID, PeerID: 3})
 	oc.AddOperator(op)
 	op = operator.NewTestOperator(2, &metapb.RegionEpoch{}, operator.OpRegion, operator.RemovePeer{FromStore: storeID})

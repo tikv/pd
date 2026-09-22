@@ -575,6 +575,32 @@ func (f *HotPeerCache) gc() {
 			delete(f.metrics, storeID)
 		}
 	}
+<<<<<<< HEAD
+=======
+	for storeID := range f.thresholdsOfStore {
+		if _, ok := stores[storeID]; !ok {
+			removed[storeID] = struct{}{}
+		}
+	}
+	for storeID := range removed {
+		// regionsOfStore[storeID] is the exact set of regions this store is still
+		// referenced from in storesOfRegion; read it before deleting so the reverse
+		// index doesn't keep a stale storeID around for regions that are still active.
+		for regionID := range f.regionsOfStore[storeID] {
+			if stores, ok := f.storesOfRegion[regionID]; ok {
+				delete(stores, storeID)
+				if len(stores) == 0 {
+					delete(f.storesOfRegion, regionID)
+				}
+			}
+		}
+		delete(f.peersOfStore, storeID)
+		delete(f.regionsOfStore, storeID)
+		delete(f.thresholdsOfStore, storeID)
+		delete(f.metrics, storeID)
+		hotCacheStatusGauge.DeletePartialMatch(prometheus.Labels{"store": storeTag(storeID), "type": f.kind.String()})
+	}
+>>>>>>> 05d2376711 (statistics, schedule: stop republishing metrics for a known-tombstoned store (#11166))
 	// remove expired items
 	for _, peers := range f.peersOfStore {
 		regions := peers.RemoveExpired()

@@ -235,6 +235,101 @@ func (c *Cluster) GetStorage() storage.Storage {
 	return c.storage
 }
 
+<<<<<<< HEAD
+=======
+// GetHeartbeatStreams returns the heartbeat streams.
+func (c *Cluster) GetHeartbeatStreams() *hbstream.HeartbeatStreams {
+	if c == nil {
+		return nil
+	}
+	c.runtimeMu.RLock()
+	defer c.runtimeMu.RUnlock()
+	return c.hbStreams
+}
+
+// GetMetaWatcher returns the meta watcher.
+func (c *Cluster) GetMetaWatcher() *meta.Watcher {
+	if c == nil {
+		return nil
+	}
+	c.runtimeMu.RLock()
+	defer c.runtimeMu.RUnlock()
+	return c.metaWatcher
+}
+
+// SetRuntimeResources installs the cluster-scoped runtime resources after they are created.
+func (c *Cluster) SetRuntimeResources(
+	metaWatcher *meta.Watcher,
+	configWatcher *config.Watcher,
+	ruleWatcher *rule.Watcher,
+	affinityWatcher *mcsaffinity.Watcher,
+	keyspaceWatcher *keyspace_meta.Watcher,
+) {
+	c.runtimeMu.Lock()
+	defer c.runtimeMu.Unlock()
+	c.metaWatcher = metaWatcher
+	c.configWatcher = configWatcher
+	c.ruleWatcher = ruleWatcher
+	c.affinityWatcher = affinityWatcher
+	c.keyspaceWatcher = keyspaceWatcher
+	metaWatcher.SetOnStoreTombstoned(func(storeID uint64) {
+		c.hotStat.RemoveRollingStoreStats(storeID)
+		c.ruleManager.RemoveStoreCache(storeID)
+		DeleteStoreMetrics(strconv.FormatUint(storeID, 10))
+	})
+}
+
+func (c *Cluster) stopCluster() {
+	c.StopBackgroundJobs()
+	c.cleanupRuntimeResources()
+}
+
+func (c *Cluster) cleanupRuntimeResources() {
+	c.runtimeMu.Lock()
+	affinityWatcher := c.affinityWatcher
+	ruleWatcher := c.ruleWatcher
+	metaWatcher := c.metaWatcher
+	configWatcher := c.configWatcher
+	keyspaceWatcher := c.keyspaceWatcher
+	hbStreams := c.hbStreams
+	storage := c.storage
+	c.affinityWatcher = nil
+	c.ruleWatcher = nil
+	c.metaWatcher = nil
+	c.configWatcher = nil
+	c.keyspaceWatcher = nil
+	c.hbStreams = nil
+	c.storage = nil
+	c.runtimeMu.Unlock()
+
+	now := time.Now()
+	if affinityWatcher != nil {
+		affinityWatcher.Close()
+	}
+	if ruleWatcher != nil {
+		ruleWatcher.Close()
+	}
+	if metaWatcher != nil {
+		metaWatcher.Close()
+	}
+	if configWatcher != nil {
+		configWatcher.Close()
+	}
+	if keyspaceWatcher != nil {
+		keyspaceWatcher.Close()
+	}
+	if storage != nil {
+		storage.Close()
+	}
+	if hbStreams != nil {
+		start := time.Now()
+		hbStreams.Close()
+		log.Info("close stream takes", zap.Duration("cost", time.Since(start)))
+	}
+	log.Info("clean up runtime resources takes", zap.Duration("cost", time.Since(now)))
+}
+
+>>>>>>> 05d2376711 (statistics, schedule: stop republishing metrics for a known-tombstoned store (#11166))
 // GetCheckerConfig returns the checker config.
 func (c *Cluster) GetCheckerConfig() sc.CheckerConfigProvider { return c.persistConfig }
 

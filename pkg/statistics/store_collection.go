@@ -199,6 +199,15 @@ func (s *storeStatistics) observe(store *core.StoreInfo) {
 
 // ObserveHotStat records the hot region metrics for the store.
 func ObserveHotStat(store *core.StoreInfo, stats *StoresStats) {
+	// A store's RollingStoreStats can be recreated after bury by a StoreHeartbeat
+	// that was already in flight (HandleStoreHeartbeat only rejects a fully
+	// unknown store, not a tombstoned one). Without this check, that would make
+	// this function keep republishing storeStatusGauge every collection tick for
+	// as long as the entry exists, up to 30 days until final removal, instead of
+	// stopping once the store is known tombstoned like observe() already does.
+	if store.IsRemoved() {
+		return
+	}
 	// Store flows.
 	storeAddress := store.GetAddress()
 	id := strconv.FormatUint(store.GetID(), 10)
@@ -294,6 +303,7 @@ func (s *storeStatistics) collect() {
 }
 
 // ResetStoreStatistics resets the metrics of store.
+<<<<<<< HEAD
 func ResetStoreStatistics(storeAddress string, id string) {
 	metrics := []string{
 		"region_score",
@@ -321,6 +331,27 @@ func ResetStoreStatistics(storeAddress string, id string) {
 		"store_slow_trend_cause_rate",
 		"store_slow_trend_result_value",
 		"store_slow_trend_result_rate",
+=======
+// Matches on the store label alone, not address: PD allows an existing store ID to
+// change address (e.g. after a TiKV restart with a new IP), so requiring the current
+// address to match as well would permanently leak any series recorded under a
+// previous address.
+func ResetStoreStatistics(id string) {
+	storeStatusGauge.DeletePartialMatch(utils.SingleLabel("store", id))
+	// placementStatusGauge's "name" label is an arbitrary, unbounded label-rule
+	// name (unlike clusterStatusGauge's small, fixed engine set below), so an
+	// exact DeleteLabelValues per combination isn't feasible here either --
+	// same tradeoff as storeStatusGauge above.
+	placementStatusGauge.DeletePartialMatch(utils.SingleLabel("store", id))
+	// clusterStatusGauge's complete label tuples are bounded by the two
+	// possible core.StoreInfo.Engine() outputs, so an exact DeleteLabelValues
+	// per (type, engine) is enough to cover every series for this store --
+	// unlike DeletePartialMatch, it doesn't lock and scan the whole vector,
+	// which matters when many stores are tombstoned around the same time.
+	for _, m := range storeStats {
+		clusterStatusGauge.DeleteLabelValues(m, core.EngineTiKV, id)
+		clusterStatusGauge.DeleteLabelValues(m, core.EngineTiFlash, id)
+>>>>>>> 05d2376711 (statistics, schedule: stop republishing metrics for a known-tombstoned store (#11166))
 	}
 	for _, m := range metrics {
 		storeStatusGauge.DeleteLabelValues(storeAddress, id, m)
@@ -357,6 +388,7 @@ func Reset() {
 	clusterStatusGauge.Reset()
 	placementStatusGauge.Reset()
 	clusterStatusGauge.Reset()
+	StoreLimitGauge.Reset()
 	ResetRegionStatsMetrics()
 	ResetLabelStatsMetrics()
 	ResetHotCacheStatusMetrics()

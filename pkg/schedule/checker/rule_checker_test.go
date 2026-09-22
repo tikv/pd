@@ -23,6 +23,12 @@ import (
 	"testing"
 	"time"
 
+<<<<<<< HEAD
+=======
+	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
+
+>>>>>>> 05d2376711 (statistics, schedule: stop republishing metrics for a known-tombstoned store (#11166))
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -2340,4 +2346,25 @@ func (suite *ruleCheckerTestSuite) TestFixBetterLocationEngineConstraint() {
 	region2 := suite.cluster.GetRegion(2)
 	op = suite.rc.Check(region2)
 	re.Empty(op)
+}
+
+func TestRecorderRefreshLooksUpStoreIDNotCount(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	// Store 5 exists and is live -- it's the counter *value* below, not a
+	// store ID. Store 999, the counter's real key, is never registered.
+	cluster.AddRegionStore(5, 0)
+
+	rec := newRecord()
+	rec.offlineLeaderCounter[999] = 5
+	rec.lastUpdateTime = time.Now().Add(-offlineCounterTTL - time.Minute)
+
+	// If refresh's loop bound its range variable to the map value instead of
+	// the key, it would look up store 5 (found, live) instead of store 999
+	// (not found) and wrongly conclude nothing needs cleaning.
+	rec.refresh(cluster)
+
+	re.Empty(rec.offlineLeaderCounter)
 }
