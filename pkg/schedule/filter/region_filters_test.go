@@ -112,6 +112,9 @@ func TestRegionEmptyFilter(t *testing.T) {
 		}, &metapb.Peer{StoreId: i + 1, Id: i + 1}))
 	}
 	re.Equal(filter.Select(region), statusRegionEmpty)
+
+	region = region.Clone(core.SetApproximateSize(1), core.SetApproximateKeys(2))
+	re.Equal(filter.Select(region), statusRegionEmpty)
 }
 
 func TestRegionWitnessFilter(t *testing.T) {

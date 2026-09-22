@@ -161,7 +161,7 @@ func (suite *regionTestSuite) checkRegion(cluster *pdTests.TestCluster) {
 		// region check learner-peer command
 		{[]string{"region", "check", "learner-peer"}, []*core.RegionInfo{r3}},
 		// region check empty-region command
-		{[]string{"region", "check", "empty-region"}, []*core.RegionInfo{r1}},
+		{[]string{"region", "check", "empty-region"}, []*core.RegionInfo{}},
 		// region check undersized-region command
 		{[]string{"region", "check", "undersized-region"}, []*core.RegionInfo{r1, r3, r4}},
 		// region check oversized-region command
