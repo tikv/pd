@@ -837,9 +837,14 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	}
 
 	log.Info("bootstrap cluster ok", zap.Uint64("cluster-id", clusterID))
-	err = s.storage.SaveRegion(req.GetRegion())
-	if err != nil {
-		log.Warn("save the bootstrap region failed", errs.ZapError(err))
+	// The bootstrap transaction already saved the region to etcd. Only the
+	// local region backend needs this second write; repeating the etcd write
+	// could overwrite a later leader's metadata after a delayed bootstrap.
+	if s.persistOptions.IsUseRegionStorage() {
+		err = storage.RetrieveRegionStorage(s.storage).SaveRegion(req.GetRegion())
+		if err != nil {
+			log.Warn("save the bootstrap region failed", errs.ZapError(err))
+		}
 	}
 	err = s.storage.Flush()
 	if err != nil {
@@ -1367,9 +1372,9 @@ func (s *Server) SetReplicationConfig(cfg sc.ReplicationConfig) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
+	rc := s.GetRaftCluster()
 	old := s.persistOptions.GetReplicationConfig()
 	if cfg.EnablePlacementRules != old.EnablePlacementRules {
-		rc := s.GetRaftCluster()
 		if rc == nil {
 			return errs.ErrNotBootstrapped.GenWithStackByArgs()
 		}
@@ -1390,7 +1395,6 @@ func (s *Server) SetReplicationConfig(cfg sc.ReplicationConfig) error {
 
 	var rule *placement.Rule
 	if cfg.EnablePlacementRules {
-		rc := s.GetRaftCluster()
 		if rc == nil {
 			return errs.ErrNotBootstrapped.GenWithStackByArgs()
 		}
@@ -1422,7 +1426,6 @@ func (s *Server) SetReplicationConfig(cfg sc.ReplicationConfig) error {
 		rule.Count = int(cfg.MaxReplicas)
 		rule.LocationLabels = cfg.LocationLabels
 		rule.IsolationLevel = cfg.IsolationLevel
-		rc := s.GetRaftCluster()
 		if rc == nil {
 			return errs.ErrNotBootstrapped.GenWithStackByArgs()
 		}
@@ -1438,7 +1441,6 @@ func (s *Server) SetReplicationConfig(cfg sc.ReplicationConfig) error {
 		s.persistOptions.SetReplicationConfig(old)
 		if rule != nil {
 			rule.Count = int(old.MaxReplicas)
-			rc := s.GetRaftCluster()
 			if rc == nil {
 				return errs.ErrNotBootstrapped.GenWithStackByArgs()
 			}
@@ -1711,10 +1713,10 @@ func (s *Server) GetControllerConfig() *rm_server.ControllerConfig {
 // GetRaftCluster gets Raft cluster.
 // If cluster has not been bootstrapped, return nil.
 func (s *Server) GetRaftCluster() *cluster.RaftCluster {
-	if s.IsClosed() || !s.cluster.IsRunning() {
+	if s.IsClosed() {
 		return nil
 	}
-	return s.cluster
+	return s.cluster.RunningCluster()
 }
 
 // IsServiceIndependent returns whether the service is independent.

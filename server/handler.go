@@ -201,7 +201,7 @@ func (h *Handler) AddScheduler(tp types.CheckerSchedulerType, args ...string) er
 	} else {
 		removeSchedulerCb = c.GetCoordinator().GetSchedulersController().RemoveScheduler
 	}
-	s, err := schedulers.CreateScheduler(tp, c.GetOperatorController(), h.s.storage, schedulers.ConfigSliceDecoder(tp, args), removeSchedulerCb)
+	s, err := schedulers.CreateScheduler(tp, c.GetOperatorController(), c.GetStorage(), schedulers.ConfigSliceDecoder(tp, args), removeSchedulerCb)
 	if err != nil {
 		return err
 	}

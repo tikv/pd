@@ -2552,12 +2552,14 @@ func newTestRaftCluster(
 	s storage.Storage,
 ) *RaftCluster {
 	opt.GetScheduleConfig().EnableHeartbeatConcurrentRunner = false
-	rc := &RaftCluster{
+	rc := &RaftCluster{raftClusterState: &raftClusterState{
 		serverCtx:      ctx,
 		BasicCluster:   core.NewBasicCluster(),
 		storage:        s,
 		storeStateLock: syncutil.NewLockGroup(syncutil.WithRemoveEntryOnUnlock(true)),
-	}
+	}, raftClusterRun: &raftClusterRun{}}
+	rc.owner = rc
+	rc.runningCluster = rc
 	err := rc.InitCluster(id, opt, nil, nil)
 	if err != nil {
 		panic(err)
@@ -3938,7 +3940,8 @@ func TestPersistScheduler(t *testing.T) {
 	re.NoError(err)
 	shuffle, err := schedulers.CreateScheduler(types.ShuffleRegionScheduler, oc, storage, schedulers.ConfigJSONDecoder([]byte("null")))
 	re.NoError(err)
-	re.NoError(controller.AddScheduler(shuffle))
+	// Persist the new scheduler config before simulating the next startup.
+	re.NoError(schedulers.SaveSchedulerConfig(storage, shuffle))
 	// suppose we add a new default enable scheduler
 	sc.DefaultSchedulers = append(sc.DefaultSchedulers, sc.SchedulerConfig{
 		Type: types.SchedulerTypeCompatibleMap[types.ShuffleRegionScheduler],
@@ -4847,5 +4850,68 @@ func BenchmarkHandleRegionHeartbeat(b *testing.B) {
 		region := core.RegionFromHeartbeat(requests[i], flowRoundDivisor)
 		err := c.HandleRegionHeartbeat(region)
 		re.NoError(err)
+	}
+}
+
+// delayedExternalTSStorage pauses the response after a successful write.
+type delayedExternalTSStorage struct {
+	storage.Storage
+	delayTS uint64
+	paused  chan struct{}
+	resume  chan struct{}
+}
+
+func (s *delayedExternalTSStorage) SaveExternalTS(ts uint64) error {
+	if err := s.Storage.SaveExternalTS(ts); err != nil {
+		return err
+	}
+	if ts == s.delayTS {
+		close(s.paused)
+		<-s.resume
+	}
+	return nil
+}
+
+func TestExternalTSConcurrentPublication(t *testing.T) {
+	for _, first := range []uint64{10, 20} {
+		t.Run(fmt.Sprintf("first=%d", first), func(t *testing.T) {
+			re := require.New(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			_, opt, err := newTestScheduleConfig()
+			re.NoError(err)
+			backend := &delayedExternalTSStorage{
+				Storage: storage.NewStorageWithMemoryBackend(), delayTS: first,
+				paused: make(chan struct{}), resume: make(chan struct{}),
+			}
+			release := sync.OnceFunc(func() { close(backend.resume) })
+			defer release()
+			cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, backend)
+			cluster.externalTS.Store(uint64(0))
+			firstDone, secondDone := make(chan error, 1), make(chan error, 1)
+			go func() { firstDone <- cluster.SetExternalTS(first) }()
+			<-backend.paused
+			second := uint64(30) - first
+			go func() { secondDone <- cluster.SetExternalTS(second) }()
+			// An out-of-order successful response must not publish a lower cache
+			// value or let a smaller concurrent request overwrite a larger value.
+			select {
+			case err := <-secondDone:
+				t.Fatalf("concurrent setter bypassed the pending publication: %v", err)
+			case <-time.After(100 * time.Millisecond):
+			}
+			release()
+			re.NoError(<-firstDone)
+			if second > first {
+				re.NoError(<-secondDone)
+			} else {
+				re.Error(<-secondDone)
+			}
+			re.Equal(uint64(20), cluster.externalTS.Load().(uint64))
+			persisted, err := backend.LoadExternalTS()
+			re.NoError(err)
+			re.Equal(uint64(20), persisted)
+			re.Error(cluster.SetExternalTS(15))
+		})
 	}
 }

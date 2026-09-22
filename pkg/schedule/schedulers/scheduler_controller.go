@@ -161,6 +161,11 @@ func ResetSchedulerMetrics() {
 func (c *Controller) AddSchedulerHandler(scheduler Scheduler, args ...string) error {
 	c.Lock()
 	defer c.Unlock()
+	// Wait uses this lock after cancellation, so no config mutation from
+	// this controller can start after its shutdown barrier has completed.
+	if err := c.ctx.Err(); err != nil {
+		return err
+	}
 
 	name := scheduler.GetName()
 	if _, ok := c.schedulerHandlers[name]; ok {
@@ -185,6 +190,11 @@ func (c *Controller) AddSchedulerHandler(scheduler Scheduler, args ...string) er
 func (c *Controller) RemoveSchedulerHandler(name string) error {
 	c.Lock()
 	defer c.Unlock()
+	// Wait uses this lock after cancellation, so no config mutation from
+	// this controller can start after its shutdown barrier has completed.
+	if err := c.ctx.Err(); err != nil {
+		return err
+	}
 	if c.cluster == nil {
 		return errs.ErrNotBootstrapped.FastGenByArgs()
 	}
@@ -219,6 +229,11 @@ func (c *Controller) RemoveSchedulerHandler(name string) error {
 func (c *Controller) AddScheduler(scheduler Scheduler, args ...string) error {
 	c.Lock()
 	defer c.Unlock()
+	// Wait uses this lock after cancellation, so no config mutation from
+	// this controller can start after its shutdown barrier has completed.
+	if err := c.ctx.Err(); err != nil {
+		return err
+	}
 
 	name := scheduler.GetName()
 	if _, ok := c.schedulers[name]; ok {
@@ -250,6 +265,11 @@ func (c *Controller) AddScheduler(scheduler Scheduler, args ...string) error {
 func (c *Controller) RemoveScheduler(name string) error {
 	c.Lock()
 	defer c.Unlock()
+	// Wait uses this lock after cancellation, so no config mutation from
+	// this controller can start after its shutdown barrier has completed.
+	if err := c.ctx.Err(); err != nil {
+		return err
+	}
 	if c.cluster == nil {
 		return errs.ErrNotBootstrapped.FastGenByArgs()
 	}

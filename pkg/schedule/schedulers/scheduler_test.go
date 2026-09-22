@@ -90,6 +90,38 @@ func TestReloadSchedulerConfigWithoutSchedulerDoesNotPanic(t *testing.T) {
 	})
 }
 
+func TestCanceledControllerRejectsConfigMutations(t *testing.T) {
+	for _, handlerOnly := range []bool{false, true} {
+		name := "scheduler"
+		if handlerOnly {
+			name = "handler"
+		}
+		t.Run(name, func(t *testing.T) {
+			re := require.New(t)
+			cleanup, _, cluster, oc := prepareSchedulersTest()
+			defer cleanup()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			backend := storage.NewStorageWithMemoryBackend()
+			controller := NewController(ctx, cluster, backend, oc)
+			scheduler, err := CreateScheduler(types.ShuffleLeaderScheduler, oc, backend,
+				ConfigSliceDecoder(types.ShuffleLeaderScheduler, []string{"", ""}))
+			re.NoError(err)
+			add, remove := controller.AddScheduler, controller.RemoveScheduler
+			if handlerOnly {
+				add, remove = controller.AddSchedulerHandler, controller.RemoveSchedulerHandler
+			}
+			re.NoError(add(scheduler))
+			before := cluster.GetSchedulerConfig().GetScheduleConfig().Clone().Schedulers
+			cancel()
+			controller.Wait()
+			re.ErrorIs(remove(scheduler.GetName()), context.Canceled)
+			re.ErrorIs(add(scheduler), context.Canceled)
+			re.Equal(before, cluster.GetSchedulerConfig().GetScheduleConfig().Schedulers)
+		})
+	}
+}
+
 func TestShuffleLeader(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()

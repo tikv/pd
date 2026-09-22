@@ -36,6 +36,7 @@ import (
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
+	"github.com/tikv/pd/pkg/errs"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/slice"
@@ -119,9 +120,13 @@ func (o *PersistOptions) UpdateScheduleConfig(
 	if err != nil || !changed {
 		return err
 	}
-	o.SetScheduleConfig(next)
+	// Reload can publish a newer leader's configuration without persistMu.
+	// Neither a delayed update nor its rollback may overwrite that snapshot.
+	if !o.schedule.CompareAndSwap(current, next) {
+		return errs.ErrEtcdTxnConflict.FastGenByArgs()
+	}
 	if err := o.persistLocked(storage); err != nil {
-		o.SetScheduleConfig(current)
+		o.schedule.CompareAndSwap(next, current)
 		return err
 	}
 	return nil
