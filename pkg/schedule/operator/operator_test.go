@@ -54,7 +54,8 @@ func TestAdjustStepCostUsesRegionKeys(t *testing.T) {
 		keys int64
 		cost int64
 	}{
-		{size: 1, keys: 1, cost: 0},
+		{size: 1, keys: 0, cost: 0},
+		{size: 1, keys: 1, cost: storelimit.SmallRegionInfluence[storelimit.AddPeer]},
 		{size: 1, keys: 2, cost: storelimit.SmallRegionInfluence[storelimit.AddPeer]},
 		{size: 2, keys: 1, cost: storelimit.SmallRegionInfluence[storelimit.AddPeer]},
 		{size: 21, keys: 2, cost: storelimit.RegionInfluence[storelimit.AddPeer]},

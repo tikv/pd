@@ -192,7 +192,7 @@ const (
 	// (heartbeat size <= 1MB).
 	EmptyRegionApproximateSize = 1
 	// EmptyRegionApproximateKeys is the approximate key count of an empty region.
-	EmptyRegionApproximateKeys = 1
+	EmptyRegionApproximateKeys = 0
 	// ImpossibleFlowSize is an impossible flow size (such as written_bytes, read_keys, etc.)
 	// It may be caused by overflow, refer to https://github.com/tikv/pd/issues/3379.
 	// They need to be filtered so as not to affect downstream.
@@ -207,7 +207,7 @@ const (
 
 // IsEmptyRegion returns whether a region has no meaningful data according to its approximate size and keys.
 func IsEmptyRegion(size, keys int64) bool {
-	return size <= EmptyRegionApproximateSize && keys <= EmptyRegionApproximateKeys
+	return size <= EmptyRegionApproximateSize && keys == EmptyRegionApproximateKeys
 }
 
 // RegionHeartbeatResponse is the interface for region heartbeat response.
@@ -302,8 +302,8 @@ func (r *RegionInfo) Inherit(origin *RegionInfo, bucketEnable bool) {
 	//
 	// To distinguish between "truly empty region" and "uninitialized statistics", TiKV uses:
 	// - size=0, keys=0: Uninitialized (need to inherit from previous values)
-	// - size=1, keys<=1: Truly empty region
-	// - size=1, keys>1 or size>1: Region has data
+	// - size=1, keys=0: Truly empty region
+	// - size=1, keys>0 or size>1: Region has data
 	// Ref: https://github.com/tikv/tikv/pull/19181
 	if r.GetApproximateSize() == 0 {
 		if origin != nil {

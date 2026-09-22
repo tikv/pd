@@ -83,7 +83,8 @@ func TestIsEmptyRegion(t *testing.T) {
 		keys  int64
 		empty bool
 	}{
-		{size: 1, keys: 1, empty: true},
+		{size: 1, keys: 0, empty: true},
+		{size: 1, keys: 1, empty: false},
 		{size: 1, keys: 2, empty: false},
 		{size: 2, keys: 1, empty: false},
 		{size: 0, keys: 0, empty: true},
