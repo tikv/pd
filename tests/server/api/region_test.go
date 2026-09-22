@@ -401,7 +401,7 @@ func (suite *regionTestSuite) checkRegionCheck(cluster *tests.TestCluster) {
 	tests.MustPutRegionInfo(re, cluster, r)
 	url = fmt.Sprintf("%s/regions/check/%s", urlPrefix, "empty-region")
 	r5 := &response.RegionsInfo{}
-	expected = &response.RegionsInfo{Count: 1, Regions: []response.RegionInfo{*response.NewAPIRegionInfo(r)}}
+	expected = &response.RegionsInfo{Count: 0, Regions: []response.RegionInfo{}}
 	testutil.Eventually(re, func() bool {
 		if err := testutil.ReadGetJSON(re, tests.TestDialClient, url, r5); err != nil {
 			return false

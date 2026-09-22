@@ -202,7 +202,7 @@ func (ap AddPeer) Influence(opInfluence *OpInfluence, region *core.RegionInfo) {
 	if ap.IsLightWeight || ap.IsWitness {
 		return
 	}
-	to.AdjustStepCost(storelimit.AddPeer, regionSize)
+	to.AdjustStepCost(storelimit.AddPeer, regionSize, region.GetApproximateKeys())
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
@@ -278,7 +278,7 @@ func (bw BecomeWitness) Influence(opInfluence *OpInfluence, region *core.RegionI
 	regionSize := region.GetApproximateSize()
 	to.WitnessCount += 1
 	to.RegionSize -= regionSize
-	to.AdjustStepCost(storelimit.RemovePeer, regionSize)
+	to.adjustStepCostBySize(storelimit.RemovePeer, regionSize)
 }
 
 // Timeout returns duration that current step may take.
@@ -340,7 +340,7 @@ func (bn BecomeNonWitness) Influence(opInfluence *OpInfluence, region *core.Regi
 	regionSize := region.GetApproximateSize()
 	to.WitnessCount -= 1
 	to.RegionSize += regionSize
-	to.AdjustStepCost(storelimit.AddPeer, regionSize)
+	to.adjustStepCostBySize(storelimit.AddPeer, regionSize)
 
 	if bn.SendStore == 0 {
 		return
@@ -521,7 +521,7 @@ func (al AddLearner) Influence(opInfluence *OpInfluence, region *core.RegionInfo
 	if al.IsLightWeight || al.IsWitness {
 		return
 	}
-	to.AdjustStepCost(storelimit.AddPeer, regionSize)
+	to.AdjustStepCost(storelimit.AddPeer, regionSize, region.GetApproximateKeys())
 	if al.SendStore == 0 {
 		return
 	}
@@ -656,7 +656,7 @@ func (rp RemovePeer) Influence(opInfluence *OpInfluence, region *core.RegionInfo
 	if rp.IsDownStore && regionSize > storelimit.SmallRegionThreshold {
 		regionSize = storelimit.SmallRegionThreshold
 	}
-	from.AdjustStepCost(storelimit.RemovePeer, regionSize)
+	from.AdjustStepCost(storelimit.RemovePeer, regionSize, region.GetStorePeerApproximateKeys(rp.FromStore))
 }
 
 // Timeout returns duration that current step may take.
