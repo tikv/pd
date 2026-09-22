@@ -572,14 +572,12 @@ func storeIDFromFloat(f float64) (uint64, bool) {
 const multiStoreIDsArgSeparator = ","
 
 // parseMultiStoreIDsArg parses a comma-joined list of store IDs, as produced
-// by EvictLeaderMultiStoreArgs. It never matches a plain single store ID: a
-// valid uint64 never contains a comma, so this and the single-store-id parse
-// are mutually exclusive by construction.
+// by EvictLeaderMultiStoreArgs. Callers only reach this after arg has
+// already failed to parse as a single store ID, so a comma-free arg (a
+// single element after Split) fails here too: it's the same string that
+// already failed once.
 func parseMultiStoreIDsArg(arg string) ([]uint64, bool) {
 	parts := strings.Split(arg, multiStoreIDsArgSeparator)
-	if len(parts) < 2 {
-		return nil, false
-	}
 	ids := make([]uint64, 0, len(parts))
 	for _, part := range parts {
 		id, err := strconv.ParseUint(part, 10, 64)
