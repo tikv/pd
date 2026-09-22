@@ -114,7 +114,7 @@ func TestRegionEmptyFilter(t *testing.T) {
 	re.Equal(filter.Select(region), statusRegionEmpty)
 
 	region = region.Clone(core.SetApproximateSize(1), core.SetApproximateKeys(2))
-	re.Equal(filter.Select(region), statusRegionEmpty)
+	re.Equal(filter.Select(region), statusOK)
 }
 
 func TestRegionWitnessFilter(t *testing.T) {
