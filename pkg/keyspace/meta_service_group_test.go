@@ -23,6 +23,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -291,7 +292,7 @@ func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelyUsesAuthoritativeC
 	delete(groups2, "etcd-group-2")
 	err = suite.manager.UpdateGroupsSafely(suite.ctx, groups2, []string{"etcd-group-1"},
 		func() error { return nil }, nil)
-	re.ErrorIs(err, ErrGroupHasAssignedKeyspaces)
+	re.ErrorIs(err, errs.ErrGroupHasAssignedKeyspaces)
 }
 
 func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelyChecksNewGroupHealth() {
@@ -326,7 +327,7 @@ func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelyChecksNewGroupHeal
 		persisted = true
 		return nil
 	}, nil)
-	re.ErrorIs(err, ErrMetaServiceGroupUnhealthy)
+	re.ErrorIs(err, errs.ErrMetaServiceGroupUnhealthy)
 	re.False(persisted)
 	_, exists := suite.manager.GetGroups()["unhealthy"]
 	re.False(exists)
@@ -337,7 +338,7 @@ func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelyChecksNewGroupHeal
 		persisted = true
 		return nil
 	}, nil)
-	re.ErrorIs(err, ErrMetaServiceGroupUnhealthy)
+	re.ErrorIs(err, errs.ErrMetaServiceGroupUnhealthy)
 	re.False(persisted)
 	re.Equal(endpoint, suite.manager.GetGroups()["healthy"])
 }
@@ -370,7 +371,7 @@ func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelyRefreshesTLSConfig
 	err := manager.UpdateGroupsSafely(suite.ctx, groups, nil, func() error {
 		return nil
 	}, nil)
-	re.ErrorIs(err, ErrMetaServiceGroupUnhealthy)
+	re.ErrorIs(err, errs.ErrMetaServiceGroupUnhealthy)
 	re.Contains(err.Error(), "tls config reload failed")
 	re.Equal(2, loads)
 }
@@ -420,7 +421,7 @@ func (suite *metaServiceGroupTestSuite) TestGroupMapsAreCopiedAtOwnershipBoundar
 func (suite *metaServiceGroupTestSuite) TestAssignToGroupRejectsNegativeCount() {
 	re := suite.Require()
 	_, err := suite.manager.AssignToGroup(suite.ctx, -1)
-	re.ErrorIs(err, ErrInvalidAssignmentCount)
+	re.ErrorIs(err, errs.ErrInvalidAssignmentCount)
 }
 
 func (suite *metaServiceGroupTestSuite) TestReassignRejectsDisabledGroup() {
@@ -430,12 +431,12 @@ func (suite *metaServiceGroupTestSuite) TestReassignRejectsDisabledGroup() {
 	err := suite.manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
 		return suite.manager.reassignKeyspaceLocked(txn, "", "etcd-group-0")
 	})
-	re.ErrorIs(err, ErrMetaServiceGroupDisabled)
+	re.ErrorIs(err, errs.ErrMetaServiceGroupDisabled)
 	// An unknown group is still rejected as unknown.
 	err = suite.manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
 		return suite.manager.reassignKeyspaceLocked(txn, "", "nonexistent")
 	})
-	re.ErrorIs(err, ErrUnknownMetaServiceGroup)
+	re.ErrorIs(err, errs.ErrUnknownMetaServiceGroup)
 	// Once enabled, the reassignment succeeds.
 	suite.enableAllGroups()
 	err = suite.manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {

@@ -27,6 +27,7 @@ import (
 
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -109,7 +110,7 @@ type MetaServiceGroupStatusPatch struct {
 // PatchStatus applies a patch to the status of a meta-service group.
 func (m *MetaServiceGroupManager) PatchStatus(ctx context.Context, groupID string, patch *MetaServiceGroupStatusPatch) error {
 	if patch.AssignmentCount != nil && *patch.AssignmentCount < 0 {
-		return ErrInvalidAssignmentCount
+		return errs.ErrInvalidAssignmentCount
 	}
 	m.RLock()
 	defer m.RUnlock()
@@ -118,7 +119,7 @@ func (m *MetaServiceGroupManager) PatchStatus(ctx context.Context, groupID strin
 	// widen the etcd compare set so an unrelated concurrent assignment could make
 	// this patch fail with a spurious txn conflict.
 	if _, ok := m.metaServiceGroups[groupID]; !ok {
-		return ErrUnknownMetaServiceGroup
+		return errs.ErrUnknownMetaServiceGroup
 	}
 	return m.store.RunInTxn(ctx, func(txn kv.Txn) error {
 		status, err := m.loadGroupStatus(txn, groupID)
@@ -191,7 +192,7 @@ func (m *MetaServiceGroupManager) pickGroupLocked(ctx context.Context) (string, 
 // only used for testing now, as it doesn't guarantee the atomicity of select and update. UpdateAssignment should be used in production code instead.
 func (m *MetaServiceGroupManager) AssignToGroup(ctx context.Context, count int) (string, error) {
 	if count < 0 {
-		return "", ErrInvalidAssignmentCount
+		return "", errs.ErrInvalidAssignmentCount
 	}
 	m.RLock()
 	defer m.RUnlock()
@@ -223,7 +224,7 @@ func (m *MetaServiceGroupManager) AssignToGroup(ctx context.Context, count int) 
 func (m *MetaServiceGroupManager) reassignKeyspaceLocked(txn kv.Txn, oldGroupID, newGroupID string) error {
 	if newGroupID != "" {
 		if _, ok := m.metaServiceGroups[newGroupID]; !ok {
-			return ErrUnknownMetaServiceGroup
+			return errs.ErrUnknownMetaServiceGroup
 		}
 		// Disabled groups are skipped by automatic assignment, so reject moving a
 		// keyspace into one to keep manual reassignment consistent with it.
@@ -232,7 +233,7 @@ func (m *MetaServiceGroupManager) reassignKeyspaceLocked(txn kv.Txn, oldGroupID,
 			return err
 		}
 		if status := statusMap[newGroupID]; status == nil || !status.Enabled {
-			return ErrMetaServiceGroupDisabled
+			return errs.ErrMetaServiceGroupDisabled
 		}
 	}
 	return m.updateAssignmentTxn(txn, oldGroupID, newGroupID)
@@ -359,7 +360,7 @@ func (m *MetaServiceGroupManager) checkNewGroupsHealth(ctx context.Context, meta
 				tlsConfig, err = m.tlsConfigLoader()
 				if err != nil {
 					return fmt.Errorf("%w: group %s endpoint %s: failed to load TLS config: %v",
-						ErrMetaServiceGroupUnhealthy, groupID, endpoint, err)
+						errs.ErrMetaServiceGroupUnhealthy, groupID, endpoint, err)
 				}
 			}
 			client, err := clientv3.New(clientv3.Config{
@@ -368,13 +369,13 @@ func (m *MetaServiceGroupManager) checkNewGroupsHealth(ctx context.Context, meta
 				TLS:         tlsConfig,
 			})
 			if err != nil {
-				return fmt.Errorf("%w: group %s endpoint %s: %v", ErrMetaServiceGroupUnhealthy, groupID, endpoint, err)
+				return fmt.Errorf("%w: group %s endpoint %s: %v", errs.ErrMetaServiceGroupUnhealthy, groupID, endpoint, err)
 			}
 			healthy := etcdutil.IsHealthy(ctx, client)
 			_ = client.Close()
 			if !healthy {
 				return fmt.Errorf("%w: group %s endpoint %s: etcd health check failed",
-					ErrMetaServiceGroupUnhealthy, groupID, endpoint)
+					errs.ErrMetaServiceGroupUnhealthy, groupID, endpoint)
 			}
 		}
 	}
@@ -408,7 +409,7 @@ func (m *MetaServiceGroupManager) persistGroupsLocked(
 		}
 		for _, id := range deletedGroups {
 			if counts[id] > 0 {
-				return fmt.Errorf("%w: %s", ErrGroupHasAssignedKeyspaces, id)
+				return fmt.Errorf("%w: %s", errs.ErrGroupHasAssignedKeyspaces, id)
 			}
 		}
 	}

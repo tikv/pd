@@ -51,17 +51,6 @@ const (
 var (
 	errNoAvailableMetaServiceGroups = errors.New("no available meta-service groups")
 
-	// ErrUnknownMetaServiceGroup is kept for callers that historically imported the keyspace package.
-	ErrUnknownMetaServiceGroup = errs.ErrUnknownMetaServiceGroup
-	// ErrInvalidAssignmentCount is kept for callers that historically imported the keyspace package.
-	ErrInvalidAssignmentCount = errs.ErrInvalidAssignmentCount
-	// ErrMetaServiceGroupDisabled is kept for callers that historically imported the keyspace package.
-	ErrMetaServiceGroupDisabled = errs.ErrMetaServiceGroupDisabled
-	// ErrGroupHasAssignedKeyspaces is kept for callers that historically imported the keyspace package.
-	ErrGroupHasAssignedKeyspaces = errs.ErrGroupHasAssignedKeyspaces
-	// ErrMetaServiceGroupUnhealthy is kept for callers that historically imported the keyspace package.
-	ErrMetaServiceGroupUnhealthy = errs.ErrMetaServiceGroupUnhealthy
-
 	// stateTransitionTable lists all allowed next state for the given current state.
 	// Note that transit from any state to itself is allowed for idempotence.
 	stateTransitionTable = map[keyspacepb.KeyspaceState][]keyspacepb.KeyspaceState{
