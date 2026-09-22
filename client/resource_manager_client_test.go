@@ -764,6 +764,6 @@ func TestLeaderChangeDuringServiceModeSwitch(t *testing.T) {
 		}
 	})
 	inner.RLock()
-	require.EqualValues(t, pdpb.ServiceMode_PD_SVC_MODE, inner.serviceMode)
+	require.Equal(t, pdpb.ServiceMode_PD_SVC_MODE, inner.serviceMode)
 	inner.RUnlock()
 }
