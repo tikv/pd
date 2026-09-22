@@ -54,7 +54,6 @@ func (suite *metaServiceGroupTestSuite) SetupTest() {
 }
 
 func (suite *metaServiceGroupTestSuite) TearDownTest() {
-	suite.manager.Close()
 	suite.cancel()
 }
 
@@ -311,7 +310,6 @@ func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelyChecksNewGroupHeal
 	re.NoError(err)
 	re.True(persisted)
 	re.Equal(endpoint, suite.manager.GetGroups()["healthy"])
-	re.Contains(suite.manager.healthClients, "healthy")
 	enabled := true
 	re.NoError(suite.manager.PatchStatus(suite.ctx, "healthy", &MetaServiceGroupStatusPatch{Enabled: &enabled}))
 	status, err := suite.manager.GetStatus(suite.ctx)
@@ -362,8 +360,6 @@ func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelyRefreshesTLSConfig
 			return nil, nil
 		},
 	)
-	defer manager.Close()
-
 	groups := map[string]string{"healthy": groupEndpoint}
 	re.NoError(manager.UpdateGroupsSafely(suite.ctx, groups, nil, func() error {
 		return nil
@@ -377,22 +373,6 @@ func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelyRefreshesTLSConfig
 	re.ErrorIs(err, ErrMetaServiceGroupUnhealthy)
 	re.Contains(err.Error(), "tls config reload failed")
 	re.Equal(2, loads)
-}
-
-func (suite *metaServiceGroupTestSuite) TestCloseHealthClients() {
-	re := suite.Require()
-	servers, _, cleanup := etcdutil.NewTestEtcdCluster(suite.T(), 1, nil)
-	defer cleanup()
-	groups := mockMetaServiceGroups()
-	groups["healthy"] = servers[0].Config().ListenClientUrls[0].String()
-	re.NoError(suite.manager.UpdateGroupsSafely(suite.ctx, groups, nil, func() error {
-		return nil
-	}, nil))
-	re.Contains(suite.manager.healthClients, "healthy")
-
-	suite.manager.Close()
-	re.Empty(suite.manager.healthClients)
-	suite.manager.Close()
 }
 
 func (suite *metaServiceGroupTestSuite) TestPatchStatusInitializesNewGroupStatus() {

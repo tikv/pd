@@ -40,9 +40,6 @@ type MetaServiceGroupManager struct {
 	syncutil.RWMutex
 	updateMu        sync.Mutex
 	tlsConfigLoader func() (*tls.Config, error)
-	// healthClients is keyed by meta-service group ID. Each value contains one
-	// cached client per endpoint so every endpoint can be checked independently.
-	healthClients map[string]*metaServiceGroupClient
 	// metaServiceGroups is the available external meta-service groups.
 	// The key is the meta-service group name, and the value is the corresponding endpoint.
 	metaServiceGroups map[string]string
@@ -51,10 +48,6 @@ type MetaServiceGroupManager struct {
 	// the authoritative source for the delete guard so a stale persisted counter
 	// cannot permanently block removing an actually-empty group.
 	keyspaceAssignmentCounter func(groupIDs map[string]struct{}) (map[string]int, error)
-}
-
-type metaServiceGroupClient struct {
-	clients []*clientv3.Client
 }
 
 // SetKeyspaceAssignmentCounter sets the authoritative keyspace assignment
@@ -73,24 +66,7 @@ func NewMetaServiceGroupManager(
 	return &MetaServiceGroupManager{
 		store:             store,
 		tlsConfigLoader:   tlsConfigLoader,
-		healthClients:     make(map[string]*metaServiceGroupClient),
 		metaServiceGroups: cloneMetaServiceGroups(metaServiceGroups),
-	}
-}
-
-// Close closes all cached etcd clients.
-func (m *MetaServiceGroupManager) Close() {
-	m.Lock()
-	clients := make([]*clientv3.Client, 0)
-	for groupID, cached := range m.healthClients {
-		clients = append(clients, cached.clients...)
-		delete(m.healthClients, groupID)
-	}
-	m.Unlock()
-	for _, client := range clients {
-		if err := client.Close(); err != nil {
-			log.Warn("[keyspace] failed to close meta-service group etcd client", zap.Error(err))
-		}
 	}
 }
 
@@ -350,15 +326,13 @@ func (m *MetaServiceGroupManager) UpdateGroupsSafely(
 	if err := config.AdjustMetaServiceGroups(metaServiceGroups); err != nil {
 		return err
 	}
-	newClients, err := m.checkNewGroupsHealth(ctx, metaServiceGroups)
+	err := m.checkNewGroupsHealth(ctx, metaServiceGroups)
 	if err != nil {
 		return err
 	}
 	if err := m.persistGroupsLocked(ctx, metaServiceGroups, deletedGroups, persist); err != nil {
-		closeMetaServiceGroupClients(newClients)
 		return err
 	}
-	m.replaceHealthClients(metaServiceGroups, deletedGroups, newClients)
 	if afterPersist != nil {
 		afterPersist()
 	}
@@ -367,9 +341,8 @@ func (m *MetaServiceGroupManager) UpdateGroupsSafely(
 
 // checkNewGroupsHealth verifies every configured endpoint before a group is
 // added or its endpoint is changed.
-func (m *MetaServiceGroupManager) checkNewGroupsHealth(ctx context.Context, metaServiceGroups map[string]string) (map[string]*metaServiceGroupClient, error) {
+func (m *MetaServiceGroupManager) checkNewGroupsHealth(ctx context.Context, metaServiceGroups map[string]string) error {
 	groups := make(map[string]string)
-	newClients := make(map[string]*metaServiceGroupClient)
 	m.RLock()
 	for groupID, addresses := range metaServiceGroups {
 		if currentAddresses, exists := m.metaServiceGroups[groupID]; !exists || currentAddresses != addresses {
@@ -379,16 +352,13 @@ func (m *MetaServiceGroupManager) checkNewGroupsHealth(ctx context.Context, meta
 	m.RUnlock()
 	for groupID, addresses := range groups {
 		endpoints := splitMetaServiceGroupEndpoints(addresses)
-		clients := make([]*clientv3.Client, 0, len(endpoints))
 		for _, endpoint := range endpoints {
 			var tlsConfig *tls.Config
 			if m.tlsConfigLoader != nil {
 				var err error
 				tlsConfig, err = m.tlsConfigLoader()
 				if err != nil {
-					closeMetaServiceGroupClients(newClients)
-					closeMetaServiceGroupClientList(clients)
-					return nil, fmt.Errorf("%w: group %s endpoint %s: failed to load TLS config: %v",
+					return fmt.Errorf("%w: group %s endpoint %s: failed to load TLS config: %v",
 						ErrMetaServiceGroupUnhealthy, groupID, endpoint, err)
 				}
 			}
@@ -398,22 +368,17 @@ func (m *MetaServiceGroupManager) checkNewGroupsHealth(ctx context.Context, meta
 				TLS:         tlsConfig,
 			})
 			if err != nil {
-				closeMetaServiceGroupClients(newClients)
-				closeMetaServiceGroupClientList(clients)
-				return nil, fmt.Errorf("%w: group %s endpoint %s: %v", ErrMetaServiceGroupUnhealthy, groupID, endpoint, err)
+				return fmt.Errorf("%w: group %s endpoint %s: %v", ErrMetaServiceGroupUnhealthy, groupID, endpoint, err)
 			}
-			clients = append(clients, client)
-			if !etcdutil.IsHealthy(ctx, client) {
-				_ = client.Close()
-				closeMetaServiceGroupClients(newClients)
-				closeMetaServiceGroupClientList(clients[:len(clients)-1])
-				return nil, fmt.Errorf("%w: group %s endpoint %s: etcd health check failed",
+			healthy := etcdutil.IsHealthy(ctx, client)
+			_ = client.Close()
+			if !healthy {
+				return fmt.Errorf("%w: group %s endpoint %s: etcd health check failed",
 					ErrMetaServiceGroupUnhealthy, groupID, endpoint)
 			}
 		}
-		newClients[groupID] = &metaServiceGroupClient{clients: clients}
 	}
-	return newClients, nil
+	return nil
 }
 
 func splitMetaServiceGroupEndpoints(addresses string) []string {
@@ -423,46 +388,6 @@ func splitMetaServiceGroupEndpoints(addresses string) []string {
 		endpoints = append(endpoints, strings.TrimSpace(endpoint))
 	}
 	return endpoints
-}
-
-func (m *MetaServiceGroupManager) replaceHealthClients(
-	metaServiceGroups map[string]string,
-	deletedGroups []string,
-	newClients map[string]*metaServiceGroupClient,
-) {
-	m.Lock()
-	oldClients := make([]*clientv3.Client, 0)
-	for groupID, cached := range newClients {
-		if old := m.healthClients[groupID]; old != nil {
-			oldClients = append(oldClients, old.clients...)
-		}
-		m.healthClients[groupID] = cached
-	}
-	for _, groupID := range deletedGroups {
-		if _, exists := metaServiceGroups[groupID]; exists {
-			continue
-		}
-		if old := m.healthClients[groupID]; old != nil {
-			oldClients = append(oldClients, old.clients...)
-			delete(m.healthClients, groupID)
-		}
-	}
-	m.Unlock()
-	for _, client := range oldClients {
-		_ = client.Close()
-	}
-}
-
-func closeMetaServiceGroupClients(clients map[string]*metaServiceGroupClient) {
-	for _, cached := range clients {
-		closeMetaServiceGroupClientList(cached.clients)
-	}
-}
-
-func closeMetaServiceGroupClientList(clients []*clientv3.Client) {
-	for _, client := range clients {
-		_ = client.Close()
-	}
 }
 
 // persistGroupsLocked performs the delete-guard check and persists the new

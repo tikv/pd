@@ -629,10 +629,6 @@ func (s *Server) Close() {
 	if s.meteringWriter != nil {
 		s.meteringWriter.Stop()
 	}
-	if s.metaServiceGroupManager != nil {
-		s.metaServiceGroupManager.Close()
-	}
-
 	if s.client != nil {
 		if err := s.client.Close(); err != nil {
 			log.Error("close etcd client meet error", errs.ZapError(errs.ErrCloseEtcdClient, err))
