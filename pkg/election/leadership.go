@@ -16,7 +16,6 @@ package election
 
 import (
 	"context"
-	"sync/atomic"
 	"time"
 
 	"go.etcd.io/etcd/api/v3/mvccpb"
@@ -63,13 +62,14 @@ type Leadership struct {
 	// name scopes test failpoints to one member.
 	name string
 	// The lease which is used to get this leadership
-	lease  atomic.Value // stored as *lease
+	lease  *Lease
 	client *clientv3.Client
 	// leaderKey and leaderValue are key-value pair in etcd
 	leaderKey   string
-	leaderValue atomic.Value // Stored as string
+	leaderValue string
 
-	// mu protects publication and reset of the in-memory leadership state.
+	// mu protects the in-memory leadership state: lease, leaderValue and
+	// keepAliveCancelFunc are read and written only while holding it.
 	// Never hold it while closing a lease, which can block on etcd.
 	mu                  syncutil.Mutex
 	keepAliveCancelFunc context.CancelFunc
@@ -93,18 +93,22 @@ func NewLeadership(client *clientv3.Client, leaderKey, purpose, name string) *Le
 // GetLease gets the lease of leadership, only if leadership is valid,
 // i.e. the owner is a true leader, the lease is not nil.
 func (ls *Leadership) GetLease() *Lease {
-	l := ls.lease.Load()
-	if l == nil {
+	if ls == nil {
 		return nil
 	}
-	return l.(*Lease)
+	ls.mu.Lock()
+	defer ls.mu.Unlock()
+	return ls.lease
 }
 
 // SetLease sets the lease of leadership.
 func (ls *Leadership) SetLease(lease *Lease) {
+	if ls == nil {
+		return
+	}
 	ls.mu.Lock()
 	defer ls.mu.Unlock()
-	ls.lease.Store(lease)
+	ls.lease = lease
 }
 
 // GetClient is used to get the etcd client.
@@ -128,11 +132,9 @@ func (ls *Leadership) GetLeaderValue() string {
 	if ls == nil {
 		return ""
 	}
-	leaderValue := ls.leaderValue.Load()
-	if leaderValue == nil {
-		return ""
-	}
-	return leaderValue.(string)
+	ls.mu.Lock()
+	defer ls.mu.Unlock()
+	return ls.leaderValue
 }
 
 // GetCampaignTimesNum is used to get the campaign times of the leader within `campaignTimesRecordTimeout`.
@@ -174,8 +176,8 @@ func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...cl
 	// Create a new lease to campaign
 	newLease := NewLease(ls.client, ls.purpose, ls.name)
 	ls.mu.Lock()
-	ls.leaderValue.Store(leaderData)
-	ls.lease.Store(newLease)
+	ls.leaderValue = leaderData
+	ls.lease = newLease
 	ls.mu.Unlock()
 
 	failpoint.Inject("skipGrantLeader", func(val failpoint.Value) {
@@ -224,7 +226,7 @@ func (ls *Leadership) Keep(ctx context.Context) {
 	ls.mu.Lock()
 	keepAliveCtx, cancel := context.WithCancel(ctx)
 	ls.keepAliveCancelFunc = cancel
-	lease := ls.GetLease()
+	lease := ls.lease
 	ls.mu.Unlock()
 	go lease.KeepAlive(keepAliveCtx)
 }
@@ -431,7 +433,7 @@ func (ls *Leadership) Reset() {
 		return
 	}
 	ls.mu.Lock()
-	lease := ls.GetLease()
+	lease := ls.lease
 	if lease == nil {
 		ls.mu.Unlock()
 		return
@@ -443,7 +445,7 @@ func (ls *Leadership) Reset() {
 	// A concurrent Reset can finish closing this lease and start a new campaign
 	// before Close returns. Clear the old value now and only close the captured
 	// lease, so this reset cannot overwrite or close the new leadership later.
-	ls.leaderValue.Store("")
+	ls.leaderValue = ""
 	ls.mu.Unlock()
 	err := lease.Close()
 	if err != nil {
