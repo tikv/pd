@@ -90,6 +90,22 @@ func TestStoreStatistics(t *testing.T) {
 	re.Len(stats.LabelCounter["zone:unknown"], 2)
 }
 
+func TestResetStoreStatisticsClearsPlacementStatusGauge(t *testing.T) {
+	re := require.New(t)
+	defer placementStatusGauge.Reset()
+
+	metric := placementStatusGauge.WithLabelValues("label-type", "label-name", "1")
+	metric.Set(1)
+	re.NotZero(promtestutil.ToFloat64(metric))
+
+	ResetStoreStatistics("1")
+	// DeletePartialMatch returns how many series it found and removed, so a
+	// zero return here proves ResetStoreStatistics already deleted it --
+	// unlike checking WithLabelValues' value, which would recreate a fresh
+	// (zero-valued) series regardless of whether the old one was cleaned up.
+	re.Zero(placementStatusGauge.DeletePartialMatch(utils.SingleLabel("store", "1")))
+}
+
 func TestStoreLimitMetricsIncludeTransferLeaderIn(t *testing.T) {
 	re := require.New(t)
 	const storeID = "1"

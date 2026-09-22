@@ -265,6 +265,14 @@ func (h *Handler) SetLabelStoresLimit(ratePerMin float64, limitType storelimit.T
 		return err
 	}
 	for _, store := range c.GetStores() {
+		if store.IsRemoved() {
+			// A tombstoned store with no engine label is still classified
+			// TiKV by IsTiKV(), and SetStoreLimit now rejects it. Skip it
+			// here instead of letting that rejection abort the whole batch
+			// below (the engine=tikv branch returns err on the first
+			// failure).
+			continue
+		}
 		for _, label := range labels {
 			// set limit for tikv stores
 			if label.Key == core.EngineKey && label.Value == core.EngineTiKV {
