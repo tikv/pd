@@ -57,10 +57,10 @@ func TestRegionStatsEmptyCountUsesKeys(t *testing.T) {
 	regions := []*core.RegionInfo{
 		core.NewRegionInfo(&metapb.Region{Id: 1}, nil,
 			core.SetApproximateSize(1),
-			core.SetApproximateKeys(1)),
+			core.SetApproximateKeys(0)),
 		core.NewRegionInfo(&metapb.Region{Id: 2}, nil,
 			core.SetApproximateSize(1),
-			core.SetApproximateKeys(2)),
+			core.SetApproximateKeys(1)),
 	}
 
 	require.Equal(t, 1, GetRegionStats(regions, nil).EmptyCount)
