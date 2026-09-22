@@ -288,8 +288,7 @@ func checkExitWatch(t *testing.T, leaderKey string, injectFunc func(server *embe
 func TestRequestProgress(t *testing.T) {
 	checkWatcherRequestProgress := func(injectWatchChanBlock bool) {
 		re := require.New(t)
-		fname := testutil.InitTempFileLogger("debug")
-		defer os.RemoveAll(fname)
+		fname := testutil.InitTempFileLogger(t, "debug")
 		servers, client1, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 		defer clean()
 		client2, err := etcdutil.CreateEtcdClient(nil, servers[0].Config().ListenClientUrls, etcdutil.TestEtcdClientPurpose, true)

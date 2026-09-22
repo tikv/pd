@@ -96,12 +96,12 @@ func runWatcherLoadLabelRule(ctx context.Context, re *require.Assertions, client
 	cancel()
 }
 
-func prepare(t require.TestingT, loadLabelRules bool) (context.Context, *clientv3.Client, func()) {
+func prepare(t testing.TB, loadLabelRules bool) (context.Context, *clientv3.Client, func()) {
 	return prepareWithEtcdConfig(t, loadLabelRules, nil)
 }
 
 func prepareWithEtcdConfig(
-	t require.TestingT,
+	t testing.TB,
 	loadLabelRules bool,
 	configure func(*embed.Config),
 ) (context.Context, *clientv3.Client, func()) {
@@ -111,13 +111,25 @@ func prepareWithEtcdConfig(
 	if configure != nil {
 		configure(cfg)
 	}
-	var err error
-	cfg.Dir, err = os.MkdirTemp("", "pd_tests")
-	re.NoError(err)
-	os.RemoveAll(cfg.Dir)
+	cfg.Dir = t.TempDir()
+	re.NoError(os.RemoveAll(cfg.Dir))
 	etcd, err := embed.StartEtcd(cfg)
 	re.NoError(err)
-	client, err := etcdutil.CreateEtcdClient(nil, cfg.ListenClientUrls, etcdutil.TestEtcdClientPurpose, true)
+	var client *clientv3.Client
+	var cleanupOnce sync.Once
+	cleanup := func() {
+		cleanupOnce.Do(func() {
+			cancel()
+			if client != nil {
+				if err := client.Close(); err != nil {
+					t.Errorf("close etcd client: %v", err)
+				}
+			}
+			etcd.Close()
+		})
+	}
+	t.Cleanup(cleanup)
+	client, err = etcdutil.CreateEtcdClient(nil, cfg.ListenClientUrls, etcdutil.TestEtcdClientPurpose, true)
 	re.NoError(err)
 	<-etcd.Server.ReadyNotify()
 
@@ -141,12 +153,7 @@ func prepareWithEtcdConfig(
 		}
 	}
 
-	return ctx, client, func() {
-		cancel()
-		client.Close()
-		etcd.Close()
-		os.RemoveAll(cfg.Dir)
-	}
+	return ctx, client, cleanup
 }
 
 // BenchmarkRuleSnapshotKeyScan compares the current paginated scan with and
@@ -533,8 +540,7 @@ func TestRuleWatcherReconcilesNewerSnapshotAfterFailedLiveRuleUpdate(t *testing.
 	defer closeWatcher()
 	re.NoError(rw.initializeRuleWatcher())
 
-	logFile := testutil.InitTempFileLogger("info")
-	defer os.RemoveAll(logFile)
+	logFile := testutil.InitTempFileLogger(t, "info")
 	failedRule := ruleManager.GetRule("g", "r")
 	failedRule.LabelConstraints[0].Values = []string{"z2"}
 	failedValue, err := json.Marshal(failedRule)

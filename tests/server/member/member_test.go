@@ -34,7 +34,6 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -658,22 +657,9 @@ func TestPDLeaderResignsBeforeLoggingStepDown(t *testing.T) {
 	re.NotEqual(clientv3.NoLease, oldLeaseID)
 
 	// Capture the log after the cluster is up, so that this replacement is the
-	// one that sticks, and put the previous global logger back afterwards: the
-	// file is deleted when this test returns, and anything still writing to the
-	// replacement would be writing into a deleted file.
-	logCfg := &log.Config{Level: "info"}
-	logFile, err := os.CreateTemp("", "pd_tests")
-	re.NoError(err)
-	fname := logFile.Name()
-	re.NoError(logFile.Close())
-	logCfg.File.Filename = fname
-	lg, props, err := log.InitLogger(logCfg)
-	re.NoError(err)
-	restoreLogger := log.ReplaceGlobals(lg, props)
-	defer func() {
-		restoreLogger()
-		os.RemoveAll(fname)
-	}()
+	// one that sticks. The test helper restores the previous global logger,
+	// closes the file, and removes its temporary directory during cleanup.
+	fname := testutil.InitTempFileLogger(t, "info")
 
 	// Hold the step-down open inside Lease.Close, so that there is a window in
 	// which the resign has started but has not finished. Without it the log line
@@ -801,19 +787,7 @@ func TestTSOAllocatorResignsBeforeBlockingReset(t *testing.T) {
 
 	// Capture the log the same way TestPDLeaderResignsBeforeLoggingStepDown
 	// does, and for the same reasons.
-	logCfg := &log.Config{Level: "info"}
-	logFile, err := os.CreateTemp("", "pd_tests")
-	re.NoError(err)
-	fname := logFile.Name()
-	re.NoError(logFile.Close())
-	logCfg.File.Filename = fname
-	lg, props, err := log.InitLogger(logCfg)
-	re.NoError(err)
-	restoreLogger := log.ReplaceGlobals(lg, props)
-	defer func() {
-		restoreLogger()
-		os.RemoveAll(fname)
-	}()
+	fname := testutil.InitTempFileLogger(t, "info")
 
 	const resetMsg = "reset the timestamp in memory"
 

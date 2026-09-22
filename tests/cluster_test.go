@@ -15,7 +15,9 @@
 package tests
 
 import (
+	"context"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -69,11 +71,49 @@ func TestRunServerDoesNotBlockWithoutReceiver(t *testing.T) {
 	require.Error(t, <-result)
 }
 
+func TestNewTestServerCleansOwnedDataDirOnSetupFailure(t *testing.T) {
+	tempRoot := t.TempDir()
+	t.Setenv("TMPDIR", tempRoot)
+	invalidLogPath := filepath.Join(tempRoot, "log-directory")
+	require.NoError(t, os.Mkdir(invalidLogPath, 0755))
+
+	cfg := serverconfig.NewConfig()
+	cfg.DataDir = ""
+	cfg.Log.File.Filename = invalidLogPath
+	server, err := NewTestServer(context.Background(), cfg, nil)
+	require.Error(t, err)
+	require.Nil(t, server)
+
+	tempDirs, err := filepath.Glob(filepath.Join(tempRoot, "pd_tests*"))
+	require.NoError(t, err)
+	require.Empty(t, tempDirs)
+}
+
+func TestNewTestClusterCleansDataDirsOnSetupFailure(t *testing.T) {
+	tempRoot := t.TempDir()
+	t.Setenv("TMPDIR", tempRoot)
+	invalidLogPath := filepath.Join(tempRoot, "log-directory")
+	require.NoError(t, os.Mkdir(invalidLogPath, 0755))
+
+	var dataDir string
+	cluster, err := NewTestCluster(context.Background(), 1, func(conf *serverconfig.Config, _ string) {
+		dataDir = conf.DataDir
+		conf.Log.File.Filename = invalidLogPath
+	})
+	require.Error(t, err)
+	require.Nil(t, cluster)
+	require.NotEmpty(t, dataDir)
+
+	_, err = os.Stat(dataDir)
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
 func TestRegenerateInitialServerURLsKeepsInitialClusterConsistent(t *testing.T) {
 	t.Parallel()
 
 	re := require.New(t)
-	config := newClusterConfig(3)
+	config, err := newClusterConfig(3)
+	re.NoError(err)
 	cleanupClusterConfig(t, config)
 	cluster := &TestCluster{
 		config: config,
