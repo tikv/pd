@@ -759,7 +759,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 	m.metricsLoopMu.Lock()
 	defer m.metricsLoopMu.Unlock()
 	// The RU timeline belongs to one leadership term.
-	defer func() { m.metrics.ruTimeline.reset(time.Now()) }()
+	defer m.metrics.ruTimeline.reset()
 	cleanUpTicker := time.NewTicker(metricsCleanupInterval)
 	defer cleanUpTicker.Stop()
 	metricsTicker := time.NewTicker(tickPerSecond)

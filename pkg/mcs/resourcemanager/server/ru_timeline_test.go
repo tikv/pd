@@ -45,7 +45,7 @@ func timelineReport(client uint64, start int64, values [][2]float64) *consumptio
 func newWarmTimeline(clients ...uint64) (*ruSummaryCollector, *ruTimeline) {
 	const start = testTimelineStart
 	c := newRUSummaryCollector()
-	t := newRUTimeline(c, time.Unix(start-60, 0))
+	t := newRUTimeline(c)
 	for _, client := range clients {
 		t.record(timelineReport(client, start-60, make([][2]float64, 1)), time.Unix(start-59, 0))
 	}
@@ -184,6 +184,34 @@ func TestRUTimelineToleratesClockSkew(t *testing.T) {
 	re.True(c.results[testTimelineKey].summary.available)
 }
 
+func TestRUTimelineServerClockStep(t *testing.T) {
+	re := require.New(t)
+	const start = testTimelineStart
+	c, timeline := newWarmTimeline(1)
+	values := make([][2]float64, 60)
+	values[10] = [2]float64{10, 20}
+	timeline.record(timelineReport(1, start, values), time.Unix(start+65, 0))
+	timeline.flush(time.Unix(start+90, 0))
+	published := c.results[testTimelineKey].summary
+	re.True(published.available)
+
+	// After a backward step, the published window stays put, and seconds from
+	// the client's future are rejected rather than merged early.
+	timeline.record(timelineReport(1, start+60, make([][2]float64, 60)), time.Unix(start+30, 0))
+	timeline.flush(time.Unix(start+30, 0))
+	re.Equal(published, c.results[testTimelineKey].summary)
+	// Once the clock catches up, later windows are published without a reset.
+	timeline.record(timelineReport(1, start+60, make([][2]float64, 60)), time.Unix(start+125, 0))
+	timeline.flush(time.Unix(start+150, 0))
+	re.Equal(ruWindowSummary{end: start + 120, peakAt: start + 60, available: true}, c.results[testTimelineKey].summary)
+
+	// After a forward step, a new source only withholds the windows it could
+	// replay, however far the clock jumped.
+	future := start + 365*86400
+	timeline.record(timelineReport(2, future-5, make([][2]float64, 5)), time.Unix(future, 0))
+	re.LessOrEqual(len(timeline.groups[testTimelineKey].invalid), ruTimelineSeconds/ruWindowSeconds+1)
+}
+
 func TestRUTimelineResetWarmup(t *testing.T) {
 	re := require.New(t)
 	const start = testTimelineStart
@@ -192,7 +220,7 @@ func TestRUTimelineResetWarmup(t *testing.T) {
 	timeline.flush(time.Unix(start+90, 0))
 	re.NotEmpty(c.results)
 
-	timeline.reset(time.Unix(start+120, 0))
+	timeline.reset()
 	re.Empty(c.results)
 	// Even complete replay cannot establish coverage before the first report
 	// after a reset, because other sources may not have reported yet.

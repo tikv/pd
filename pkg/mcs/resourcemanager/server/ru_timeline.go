@@ -31,8 +31,11 @@ const (
 	ruTimelineClockSkew = 5
 	// ruWindowSeconds is the aligned window summarized from the timeline.
 	ruWindowSeconds = 60
-	// ruWindowDelay is how long a closed window waits for regular reports.
-	ruWindowDelay        = 30
+	// ruWindowDelay is how long a closed window waits for regular reports. It
+	// covers both the report interval and any lag of the client clock.
+	ruWindowDelay = 30
+	// ruTimelineMaxSources bounds the retained sources, which hold nearly all
+	// of the timeline's memory.
 	ruTimelineMaxSources = 10000
 )
 
@@ -109,7 +112,6 @@ var (
 	ruTimelineConflict = ruTimelineQualityEvents.WithLabelValues("conflict")
 	ruTimelineLate     = ruTimelineQualityEvents.WithLabelValues("late")
 	ruTimelineCapacity = ruTimelineQualityEvents.WithLabelValues("capacity")
-	ruTimelineClock    = ruTimelineQualityEvents.WithLabelValues("clock")
 )
 
 func init() { prometheus.MustRegister(ruSummaryMetrics, ruTimelineQualityEvents) }
@@ -140,16 +142,18 @@ type ruTimelineGroup struct {
 // per-group timelines and publishes a summary for each closed window.
 // All state belongs to backgroundMetricsFlush. Only immutable summaries cross
 // into the scrape goroutines under the collector lock.
+// The resource manager clock only schedules windows, while values come from
+// client seconds. A server clock step therefore delays or withholds windows,
+// and each group's windows still only move forward.
 type ruTimeline struct {
 	collector   *ruSummaryCollector
 	groups      map[trackerKey]*ruTimelineGroup
 	sourceCount int
-	last        time.Time
 }
 
-func newRUTimeline(c *ruSummaryCollector, now time.Time) *ruTimeline {
+func newRUTimeline(c *ruSummaryCollector) *ruTimeline {
 	t := &ruTimeline{collector: c}
-	t.reset(now)
+	t.reset()
 	return t
 }
 
@@ -157,13 +161,12 @@ func windowStart(second int64) int64 {
 	return second / ruWindowSeconds * ruWindowSeconds
 }
 
-func (t *ruTimeline) reset(now time.Time) {
+func (t *ruTimeline) reset() {
 	t.collector.mu.Lock()
 	clear(t.collector.results)
 	t.collector.mu.Unlock()
 	t.groups = make(map[trackerKey]*ruTimelineGroup)
 	t.sourceCount = 0
-	t.last = now
 }
 
 func (t *ruTimeline) remove(key trackerKey) {
@@ -182,20 +185,7 @@ func (g *ruTimelineGroup) invalidate(start, end int64) {
 	}
 }
 
-// advance resets the timeline after a server clock discontinuity.
-func (t *ruTimeline) advance(now time.Time) {
-	if !t.last.IsZero() {
-		wall := float64(now.UnixNano()-t.last.UnixNano()) / 1e9
-		if now.Unix() < t.last.Unix() || math.Abs(wall-now.Sub(t.last).Seconds()) >= 1 {
-			ruTimelineClock.Inc()
-			t.reset(now)
-		}
-	}
-	t.last = now
-}
-
 func (t *ruTimeline) record(item *consumptionItem, now time.Time) {
-	t.advance(now)
 	sec := now.Unix()
 	key := trackerKey{item.keyspaceID, item.resourceGroupName}
 	g := t.groups[key]
@@ -268,10 +258,10 @@ func (t *ruTimeline) record(item *consumptionItem, now time.Time) {
 		*old = ruSecondBucket{second: second, rru: b.Rru, wru: b.Wru}
 	}
 	if created {
-		// The first report may lack the source's earliest seconds, for example
-		// after a client trims its backlog, so the minutes before its first
-		// second cannot be known to be complete.
-		g.invalidate(g.nextWindow, source.first-1)
+		// The first report may lack the source's earliest replayable seconds,
+		// for example after a client trims its backlog, so the minutes before
+		// its first second cannot be known to be complete.
+		g.invalidate(source.first-ruTimelineSeconds, source.first-1)
 	}
 }
 
@@ -309,10 +299,10 @@ func (g *ruTimelineGroup) summarize(start int64) ruWindowSummary {
 }
 
 func (t *ruTimeline) flush(now time.Time) {
-	t.advance(now)
 	sec := now.Unix()
 	for key, g := range t.groups {
-		// Windows beyond retention cannot be verified; skip them after a stall.
+		// Windows beyond retention cannot be verified; skip them after a stall
+		// or a forward clock step.
 		if oldest := windowStart(sec - ruTimelineSeconds); g.nextWindow < oldest {
 			g.nextWindow = oldest
 			maps.DeleteFunc(g.invalid, func(w int64, _ bool) bool { return w < oldest })

@@ -274,7 +274,7 @@ func init() {
 
 func newMetrics() *metrics {
 	return &metrics{
-		ruTimeline:           newRUTimeline(ruSummaryMetrics, time.Now()),
+		ruTimeline:           newRUTimeline(ruSummaryMetrics),
 		consumptionRecordMap: make(map[consumptionRecordKey]time.Time),
 		maxPerSecTrackerMap:  make(map[trackerKey]*maxPerSecCostTracker),
 		counterMetricsMap:    make(map[metricsKey]*counterMetrics),
