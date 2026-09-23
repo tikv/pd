@@ -34,7 +34,6 @@ const (
 	// ruWindowDelay is how long a closed window waits for regular reports.
 	ruWindowDelay        = 30
 	ruTimelineMaxSources = 10000
-	ruTimelineMaxGroups  = 4096
 )
 
 // ruWindowSummary describes the busiest second of a closed window.
@@ -201,10 +200,6 @@ func (t *ruTimeline) record(item *consumptionItem, now time.Time) {
 	key := trackerKey{item.keyspaceID, item.resourceGroupName}
 	g := t.groups[key]
 	if g == nil {
-		if len(t.groups) >= ruTimelineMaxGroups {
-			ruTimelineCapacity.Inc()
-			return
-		}
 		g = &ruTimelineGroup{keyspaceName: item.keyspaceName, sources: make(map[ruSourceKey]*ruSource), nextWindow: windowStart(sec), invalid: make(map[int64]bool)}
 		t.groups[key] = g
 		// A newly observed group cannot establish coverage before its first report.
