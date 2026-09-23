@@ -93,6 +93,8 @@ type groupCostController struct {
 	initialRequestCompleted atomic.Bool
 	// tombstone is set to true when the resource group is deleted.
 	tombstone atomic.Bool
+	// inactive is set to true when the resource group has not been updated for a long time.
+	inactive bool
 	// ruTimelineOwner is set for a tombstone. A tombstone requests tokens as
 	// the default group, so it shares that group's RU timeline: a client must
 	// report a single timeline per group.

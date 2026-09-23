@@ -732,21 +732,21 @@ func (c *ResourceGroupsController) cleanUpResourceGroup() {
 	c.groupsController.Range(func(key, value any) bool {
 		resourceGroupName := key.(string)
 		gc := value.(*groupCostController)
-		// Keep idle controllers reporting a zero RU timeline. Their lifetime is
-		// bounded by the resource group; deleting an idle controller would
-		// silently end its timeline without a final report.
-		if !gc.tombstone.Load() {
-			return true
-		}
-		// Remove tombstones once their consumption stops changing.
+		// Check for stale resource groups, which will be deleted when consumption is continuously unchanged.
 		gc.mu.Lock()
 		latestConsumption := *gc.mu.consumption
 		gc.mu.Unlock()
 		if equalRU(latestConsumption, *gc.run.consumption) {
-			c.cleanupRequestSourceMetricsState(resourceGroupName)
-			c.groupsController.Delete(resourceGroupName)
-			metrics.ResourceGroupStatusGauge.DeleteLabelValues(resourceGroupName, resourceGroupName)
-			gc.metrics.deletePagingLabels(resourceGroupName)
+			if gc.inactive || gc.tombstone.Load() {
+				c.cleanupRequestSourceMetricsState(resourceGroupName)
+				c.groupsController.Delete(resourceGroupName)
+				metrics.ResourceGroupStatusGauge.DeleteLabelValues(resourceGroupName, resourceGroupName)
+				gc.metrics.deletePagingLabels(resourceGroupName)
+				return true
+			}
+			gc.inactive = true
+		} else {
+			gc.inactive = false
 		}
 		return true
 	})

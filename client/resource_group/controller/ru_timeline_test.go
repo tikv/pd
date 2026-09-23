@@ -241,19 +241,3 @@ func TestTokenRequestCarriesRUTimeline(t *testing.T) {
 	re.NotNil(report)
 	re.NotNil(report.ConsumptionSinceLastRequest.RuBySecond)
 }
-
-func TestCleanupKeepsIdleResourceGroup(t *testing.T) {
-	re := require.New(t)
-	gc := createTestGroupCostController(re)
-	c := &ResourceGroupsController{ruConfig: DefaultRUConfig()}
-	c.groupsController.Store(gc.name, gc)
-	for range 2 {
-		c.cleanUpResourceGroup()
-		_, found := c.groupsController.Load(gc.name)
-		re.True(found, "idle controllers must keep reporting zero seconds")
-	}
-	gc.tombstone.Store(true)
-	c.cleanUpResourceGroup()
-	_, found := c.groupsController.Load(gc.name)
-	re.False(found)
-}

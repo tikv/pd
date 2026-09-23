@@ -225,7 +225,7 @@ func TestCleanupResourceGroupRemovesRequestSourceMetrics(t *testing.T) {
 	gc.mu.Lock()
 	*gc.run.consumption = *gc.mu.consumption
 	gc.mu.Unlock()
-	gc.tombstone.Store(true)
+	gc.inactive = true
 
 	re.Greater(collectorMetricCount(controllerMetrics.RequestSourceRUCounter), beforeCount)
 
@@ -284,7 +284,7 @@ func TestCleanupDoesNotReexportExistingCachedHandle(t *testing.T) {
 	gc.mu.Lock()
 	*gc.run.consumption = *gc.mu.consumption
 	gc.mu.Unlock()
-	gc.tombstone.Store(true)
+	gc.inactive = true
 
 	controller.cleanUpResourceGroup()
 
@@ -340,7 +340,7 @@ func TestCleanupPreventsRecreateRequestSourceMetrics(t *testing.T) {
 	gc.mu.Lock()
 	*gc.run.consumption = *gc.mu.consumption
 	gc.mu.Unlock()
-	gc.tombstone.Store(true)
+	gc.inactive = true
 
 	controller.cleanUpResourceGroup()
 
@@ -485,7 +485,7 @@ func TestRevivedResourceGroupCleanupRemovesExistingRequestSourceMetrics(t *testi
 	revivedGC.mu.Lock()
 	*revivedGC.run.consumption = *revivedGC.mu.consumption
 	revivedGC.mu.Unlock()
-	revivedGC.tombstone.Store(true)
+	revivedGC.inactive = true
 
 	controller.cleanUpResourceGroup()
 
@@ -539,7 +539,7 @@ func TestGetOrCreateAfterCleanupReturnsFreshState(t *testing.T) {
 	gc.mu.Lock()
 	*gc.run.consumption = *gc.mu.consumption
 	gc.mu.Unlock()
-	gc.tombstone.Store(true)
+	gc.inactive = true
 	controller.cleanUpResourceGroup()
 
 	_, loaded := controller.loadGroupController(group.Name)
@@ -624,7 +624,7 @@ func TestCleanupThenRecreateViaFullPath(t *testing.T) {
 	gc.mu.Lock()
 	*gc.run.consumption = *gc.mu.consumption
 	gc.mu.Unlock()
-	gc.tombstone.Store(true)
+	gc.inactive = true
 	controller.cleanUpResourceGroup()
 
 	_, loaded := controller.loadGroupController(group.Name)
