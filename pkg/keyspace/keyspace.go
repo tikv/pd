@@ -55,6 +55,7 @@ const (
 	// It will not update the keyspace group id when merging or splitting.
 	TSOKeyspaceGroupIDKey = "tso_keyspace_group_id"
 	// GCManagementType is the key for gc_management_type in keyspace config.
+	// It is immutable after keyspace creation. NextGen only supports KeyspaceLevelGC.
 	// If `gc_management_type` is `unified`, it means the current keyspace requires a tidb without 'keyspace-name'
 	// configured to run a unified GC worker to calculate a unified GC state.
 	// If `gc_management_type` is `keyspace_level` it means the current keyspace can calculate GC states by its own.
@@ -321,13 +322,16 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 		request.Config[RegionBoundType] = boundType.String()
 	}
 
-	// Set default value of GCManagementType to KeyspaceLevelGC for NextGen
+	// NextGen keyspaces must use keyspace-level GC from creation.
 	if kerneltype.IsNextGen() {
 		if request.Config == nil {
 			request.Config = make(map[string]string)
 		}
-		if v, ok := request.Config[GCManagementType]; !ok || len(v) == 0 {
+		if _, ok := request.Config[GCManagementType]; !ok {
 			request.Config[GCManagementType] = KeyspaceLevelGC
+		}
+		if err := validateGCManagementType(request.Config); err != nil {
+			return nil, err
 		}
 	}
 	tracer.OnGetConfigFinished()
@@ -470,13 +474,16 @@ func (manager *Manager) CreateKeyspaceByID(request *CreateKeyspaceByIDRequest) (
 		}
 		request.Config[RegionBoundType] = boundType.String()
 	}
-	// Set default value of GCManagementType to KeyspaceLevelGC for NextGen
+	// NextGen keyspaces must use keyspace-level GC from creation.
 	if kerneltype.IsNextGen() {
 		if request.Config == nil {
 			request.Config = make(map[string]string)
 		}
-		if v, ok := request.Config[GCManagementType]; !ok || len(v) == 0 {
+		if _, ok := request.Config[GCManagementType]; !ok {
 			request.Config[GCManagementType] = KeyspaceLevelGC
+		}
+		if err := validateGCManagementType(request.Config); err != nil {
+			return nil, err
 		}
 	}
 	// Create a disabled keyspace meta for tikv-server to get the config on keyspace split.
@@ -836,7 +843,16 @@ const (
 	OpDel
 )
 
+// validateGCManagementType rejects unsupported persisted or explicitly configured NextGen GC modes.
+func validateGCManagementType(config map[string]string) error {
+	if kerneltype.IsNextGen() && config[GCManagementType] != KeyspaceLevelGC {
+		return errs.ErrUnsupportedOperationInKeyspace.FastGen("nextgen only supports keyspace_level gc")
+	}
+	return nil
+}
+
 // UpdateKeyspaceConfig changes target keyspace's config in the order specified in mutations.
+// GC management type is immutable after creation; same-value updates are allowed.
 // It returns error if saving failed, operation not allowed, or if keyspace not exists.
 func (manager *Manager) UpdateKeyspaceConfig(name string, mutations []*Mutation) (*keyspacepb.KeyspaceMeta, error) {
 	return manager.updateKeyspaceConfigTxn(name, func(meta *keyspacepb.KeyspaceMeta) error {
@@ -940,12 +956,20 @@ func (manager *Manager) updateKeyspaceConfigTxn(name string, update func(meta *k
 		for k, v := range meta.GetConfig() {
 			oldConfig[k] = v
 		}
+		if err := validateGCManagementType(oldConfig); err != nil {
+			return err
+		}
 		// Update keyspace config.
 		if err := update(meta); err != nil {
 			return err
 		}
 		delete(meta.Config, MetaServiceGroupAddressesKey)
 		newConfig := meta.GetConfig()
+		oldGCType, oldGCTypeExists := oldConfig[GCManagementType]
+		newGCType, newGCTypeExists := newConfig[GCManagementType]
+		if oldGCType != newGCType || oldGCTypeExists != newGCTypeExists {
+			return errs.ErrUnsupportedOperationInKeyspace.FastGen("gc management type cannot be changed after keyspace creation")
+		}
 		// Reassign the meta-service group before moving the TSO keyspace group.
 		// reassignKeyspaceLocked only stages its changes in txn (discarded if the
 		// txn doesn't commit), while UpdateKeyspaceGroup persists immediately. Doing
@@ -1158,6 +1182,11 @@ func (manager *Manager) unassignKeyspaceFromMetaServiceGroup(txn kv.Txn, meta *k
 
 // transformKeyspaceState transforms the keyspace state to the target state and record the update time.
 func (manager *Manager) transformKeyspaceState(txn kv.Txn, meta *keyspacepb.KeyspaceMeta, newState keyspacepb.KeyspaceState, now int64) error {
+	if newState == keyspacepb.KeyspaceState_ENABLED {
+		if err := validateGCManagementType(meta.GetConfig()); err != nil {
+			return err
+		}
+	}
 	// If already in the target state, do nothing and return. A TOMBSTONE keyspace
 	// still carrying a meta-service group binding (e.g. one tombstoned before this
 	// cleanup existed) is repaired here by re-applying the TOMBSTONE update; the

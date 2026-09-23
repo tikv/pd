@@ -33,6 +33,7 @@ import (
 
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/tests"
@@ -111,6 +112,31 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfig() {
 		}
 		updated := mustUpdateKeyspaceConfig(re, suite.server, created.Name, updateRequest)
 		checkUpdateRequest(re, updateRequest, created.Config, updated.Config)
+	}
+}
+
+func (suite *keyspaceTestSuite) TestGCManagementTypeImmutable() {
+	re := suite.Require()
+	created := MustCreateKeyspace(re, suite.server, &handlers.CreateKeyspaceParams{
+		Name:   "immutable_gc",
+		Config: map[string]string{keyspace.GCManagementType: keyspace.KeyspaceLevelGC},
+	})
+	gcType := keyspace.KeyspaceLevelGC
+	other := "updated"
+	status, body, meta := tryUpdateKeyspaceConfig(re, suite.server, created.Name, &handlers.UpdateConfigParams{
+		Config: map[string]*string{keyspace.GCManagementType: &gcType, "other": &other},
+	})
+	re.Equal(http.StatusOK, status, body)
+	re.Equal(other, meta.Config["other"])
+	unified := keyspace.UnifiedGC
+	for _, value := range []*string{nil, new(string), &unified} {
+		status, body, _ = tryUpdateKeyspaceConfig(re, suite.server, created.Name, &handlers.UpdateConfigParams{
+			Config: map[string]*string{keyspace.GCManagementType: value, "other": nil},
+		})
+		re.Equal(http.StatusBadRequest, status, body)
+		re.Contains(body, "gc management type cannot be changed")
+		loaded := mustLoadKeyspaces(re, suite.server, created.Name)
+		re.Equal(meta.Config, loaded.Config)
 	}
 }
 
@@ -273,6 +299,30 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceState() {
 	// Changing default keyspace's state is NOT allowed.
 	success, _ := sendUpdateStateRequest(re, suite.server, constant.DefaultKeyspaceName, &handlers.UpdateStateParam{State: "disabled"})
 	re.False(success)
+}
+
+func (suite *keyspaceTestSuite) TestEnableKeyspaceRejectsLegacyGCMode() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"))
+	}()
+	created := MustCreateKeyspace(re, suite.server, &handlers.CreateKeyspaceParams{Name: "legacy_gc"})
+	success, disabled := sendUpdateStateRequest(re, suite.server, created.Name, &handlers.UpdateStateParam{State: "disabled"})
+	re.True(success)
+	storage := suite.server.GetServer().GetStorage()
+	re.NoError(storage.RunInTxn(context.Background(), func(txn kv.Txn) error {
+		disabled.Config[keyspace.GCManagementType] = keyspace.UnifiedGC
+		return storage.SaveKeyspaceMeta(txn, disabled)
+	}))
+	request, err := http.NewRequest(http.MethodPut, suite.server.GetAddr()+keyspacesPrefix+"/"+created.Name+"/state", bytes.NewBufferString(`{"state":"enabled"}`))
+	re.NoError(err)
+	response, err := tests.TestDialClient.Do(request)
+	re.NoError(err)
+	defer response.Body.Close()
+	re.Equal(http.StatusBadRequest, response.StatusCode)
+	loaded := mustLoadKeyspaces(re, suite.server, created.Name)
+	re.Equal(disabled, loaded)
 }
 
 func (suite *keyspaceTestSuite) TestLoadRangeKeyspace() {

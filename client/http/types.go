@@ -663,15 +663,16 @@ type MicroserviceMember struct {
 	StartTimestamp int64  `json:"start-timestamp"`
 }
 
-// KeyspaceGCManagementType represents parameters needed to modify the gc management type.
-// If `gc_management_type` is `global_gc`, it means the current keyspace requires a tidb without 'keyspace-name'
-// configured to run a global gc worker to calculate a global gc safe point.
-// If `gc_management_type` is `keyspace_level_gc` it means the current keyspace can calculate gc safe point by its own.
+// KeyspaceGCManagementType represents a GC management type configuration.
+//
+// Deprecated: GC management type is immutable after keyspace creation.
 type KeyspaceGCManagementType struct {
 	GCManagementType string `json:"gc_management_type,omitempty"`
 }
 
-// KeyspaceGCManagementTypeConfig represents parameters needed to modify target keyspace's configs.
+// KeyspaceGCManagementTypeConfig represents the former GC management type update request.
+//
+// Deprecated: GC management type is immutable after keyspace creation.
 type KeyspaceGCManagementTypeConfig struct {
 	Config KeyspaceGCManagementType `json:"config"`
 }

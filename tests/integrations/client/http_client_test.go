@@ -1001,43 +1001,19 @@ func (suite *httpClientTestSuite) TestRedirectWithMetrics() {
 
 func (suite *httpClientTestSuite) TestUpdateKeyspaceGCManagementType() {
 	re := suite.Require()
-	client := suite.client
-	ctx, cancel := context.WithCancel(suite.ctx)
-	defer cancel()
-
-	// Use the correct bootstrap keyspace name based on build type
-	var keyspaceName string
-	if kerneltype.IsNextGen() {
-		keyspaceName = constant.SystemKeyspaceName
-	} else {
-		keyspaceName = constant.DefaultKeyspaceName
-	}
-	expectGCManagementType := "test-type"
-
-	keyspaceSafePointVersionConfig := pd.KeyspaceGCManagementTypeConfig{
-		Config: pd.KeyspaceGCManagementType{
-			GCManagementType: expectGCManagementType,
-		},
-	}
-	err := client.UpdateKeyspaceGCManagementType(ctx, keyspaceName, &keyspaceSafePointVersionConfig)
+	name := keyspace.GetBootstrapKeyspaceName()
+	before, err := suite.client.GetKeyspaceMetaByName(suite.ctx, name)
 	re.NoError(err)
-
-	keyspaceMetaRes, err := client.GetKeyspaceMetaByName(ctx, keyspaceName)
-	re.NoError(err)
-	val, ok := keyspaceMetaRes.Config[keyspace.GCManagementType]
-
-	// Check it can get expect key and value in keyspace meta config.
-	re.True(ok)
-	re.Equal(expectGCManagementType, val)
-
-	// Check it doesn't support update config to keyspace.KeyspaceLevelGC now.
-	keyspaceSafePointVersionConfig = pd.KeyspaceGCManagementTypeConfig{
-		Config: pd.KeyspaceGCManagementType{
-			GCManagementType: keyspace.KeyspaceLevelGC,
-		},
+	for _, value := range []string{keyspace.UnifiedGC, keyspace.KeyspaceLevelGC, ""} {
+		//nolint:staticcheck // Verify the deprecated method always fails.
+		err = suite.client.UpdateKeyspaceGCManagementType(suite.ctx, name, &pd.KeyspaceGCManagementTypeConfig{
+			Config: pd.KeyspaceGCManagementType{GCManagementType: value},
+		})
+		re.ErrorContains(err, "gc management type cannot be changed")
 	}
-	err = client.UpdateKeyspaceGCManagementType(suite.ctx, keyspaceName, &keyspaceSafePointVersionConfig)
-	re.Error(err)
+	after, err := suite.client.GetKeyspaceMetaByName(suite.ctx, name)
+	re.NoError(err)
+	re.Equal(before.Config, after.Config)
 }
 
 func (suite *httpClientTestSuite) TestUpdateKeyspaceConfig() {
