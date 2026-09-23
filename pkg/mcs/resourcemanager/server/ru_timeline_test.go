@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
@@ -103,7 +104,7 @@ func TestRUTimelineMergesSources(t *testing.T) {
 
 func TestRUTimelineUnavailable(t *testing.T) {
 	const start = testTimelineStart
-	for _, scenario := range []string{"gap", "overflow", "conflict", "legacy", "nan", "open-second", "oversized", "new-source", "source-kind", "capacity"} {
+	for _, scenario := range []string{"gap", "overflow", "conflict", "legacy", "nan", "future-second", "oversized", "new-source", "late-joiner", "source-kind", "capacity"} {
 		t.Run(scenario, func(t *testing.T) {
 			re := require.New(t)
 			c, timeline := newWarmTimeline(1)
@@ -129,12 +130,16 @@ func TestRUTimelineUnavailable(t *testing.T) {
 				next.RuBySecond = nil
 			case "nan":
 				next = timelineReport(1, start+60, [][2]float64{{math.NaN(), 0}})
-			case "open-second":
-				next = timelineReport(1, start, slices.Concat(values, make([][2]float64, 7)))
+			case "future-second":
+				// Beyond the tolerated clock skew of the client.
+				next = timelineReport(1, start, slices.Concat(values, make([][2]float64, 6+ruTimelineClockSkew+1)))
 			case "oversized":
 				next = timelineReport(1, start-121, slices.Concat(make([][2]float64, 121), values))
 			case "new-source":
 				next = timelineReport(2, start+15, values[15:])
+			case "late-joiner":
+				// A first report trimmed to the next minute hides this one.
+				next = timelineReport(2, start+60, make([][2]float64, 6))
 			case "source-kind":
 				next = timelineReport(1, start+15, values[15:])
 				next.isBackground = true
@@ -142,8 +147,13 @@ func TestRUTimelineUnavailable(t *testing.T) {
 				timeline.sourceCount = ruTimelineMaxSources
 				next = timelineReport(2, start, values)
 			}
+			missing, invalid := testutil.ToFloat64(ruTimelineMissing), testutil.ToFloat64(ruTimelineInvalid)
 			if next != nil {
 				timeline.record(next, time.Unix(start+66, 0))
+			}
+			if scenario == "legacy" {
+				re.Equal(missing+1, testutil.ToFloat64(ruTimelineMissing))
+				re.Equal(invalid, testutil.ToFloat64(ruTimelineInvalid))
 			}
 			timeline.flush(time.Unix(start+90, 0))
 
@@ -157,6 +167,17 @@ func TestRUTimelineUnavailable(t *testing.T) {
 			re.Equal((start+60)*1000, families[0].GetMetric()[0].GetTimestampMs())
 		})
 	}
+}
+
+func TestRUTimelineToleratesClockSkew(t *testing.T) {
+	re := require.New(t)
+	const start = testTimelineStart
+	c, timeline := newWarmTimeline(1)
+	// The client clock runs one second ahead: its last closed second is the
+	// resource manager's current second.
+	timeline.record(timelineReport(1, start, make([][2]float64, 66)), time.Unix(start+65, 0))
+	timeline.flush(time.Unix(start+90, 0))
+	re.True(c.results[testTimelineKey].summary.available)
 }
 
 func TestRUTimelineResetWarmup(t *testing.T) {

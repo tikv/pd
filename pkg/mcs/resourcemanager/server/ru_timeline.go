@@ -26,6 +26,9 @@ import (
 const (
 	// ruTimelineSeconds is the number of seconds each source can replay.
 	ruTimelineSeconds = 180
+	// ruTimelineClockSkew is how far, in seconds, a client clock may run ahead
+	// of the resource manager before its reported seconds are rejected.
+	ruTimelineClockSkew = 5
 	// ruWindowSeconds is the aligned window summarized from the timeline.
 	ruWindowSeconds = 60
 	// ruWindowDelay is how long a closed window waits for regular reports.
@@ -102,6 +105,7 @@ var (
 		Namespace: "resource_manager", Subsystem: "resource_unit", Name: "peak_quality_events_total",
 		Help: "RU timeline data quality events, including violations discovered after publication.",
 	}, []string{"reason"})
+	ruTimelineMissing  = ruTimelineQualityEvents.WithLabelValues("missing_payload")
 	ruTimelineInvalid  = ruTimelineQualityEvents.WithLabelValues("invalid_payload")
 	ruTimelineConflict = ruTimelineQualityEvents.WithLabelValues("conflict")
 	ruTimelineLate     = ruTimelineQualityEvents.WithLabelValues("late")
@@ -208,7 +212,8 @@ func (t *ruTimeline) record(item *consumptionItem, now time.Time) {
 	}
 	sourceKey := ruSourceKey{item.clientUniqueID, item.isBackground, item.isTiFlash}
 	source := g.sources[sourceKey]
-	if source == nil {
+	created := source == nil
+	if created {
 		if t.sourceCount >= ruTimelineMaxSources {
 			// The rejected source replays up to a full retained window.
 			ruTimelineCapacity.Inc()
@@ -221,10 +226,17 @@ func (t *ruTimeline) record(item *consumptionItem, now time.Time) {
 	}
 	source.lastSeen = sec
 	payload := item.GetRuBySecond()
+	if payload == nil {
+		// A legacy or quarantined client cannot attribute its consumption.
+		ruTimelineMissing.Inc()
+		g.invalidate(sec-ruTimelineSeconds, sec)
+		return
+	}
 	// Validate atomically: a malformed suffix must not leave a usable prefix.
-	// Buckets must be closed seconds; those older than retention are skipped below.
-	valid := payload != nil && item.clientUniqueID != 0 && len(payload.Buckets) <= ruTimelineSeconds &&
-		int64(len(payload.Buckets)) <= sec-payload.StartUnixSec
+	// Buckets must be closed seconds of the client, allowing for a small clock
+	// skew; those older than retention are skipped below.
+	valid := item.clientUniqueID != 0 && len(payload.Buckets) <= ruTimelineSeconds &&
+		int64(len(payload.Buckets)) <= sec+ruTimelineClockSkew-payload.StartUnixSec
 	if valid {
 		for _, b := range payload.Buckets {
 			if b == nil || math.IsNaN(b.Rru) || math.IsInf(b.Rru, 0) || math.IsNaN(b.Wru) || math.IsInf(b.Wru, 0) {
@@ -258,6 +270,12 @@ func (t *ruTimeline) record(item *consumptionItem, now time.Time) {
 			continue
 		}
 		*old = ruSecondBucket{second: second, rru: b.Rru, wru: b.Wru}
+	}
+	if created {
+		// The first report may lack the source's earliest seconds, for example
+		// after a client trims its backlog, so the minutes before its first
+		// second cannot be known to be complete.
+		g.invalidate(g.nextWindow, source.first-1)
 	}
 }
 
