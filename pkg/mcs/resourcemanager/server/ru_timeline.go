@@ -149,6 +149,9 @@ type ruTimeline struct {
 	collector   *ruSummaryCollector
 	groups      map[trackerKey]*ruTimelineGroup
 	sourceCount int
+	// since is the first second observed in this term, or an earlier one
+	// after the clock steps back.
+	since int64
 }
 
 func newRUTimeline(c *ruSummaryCollector) *ruTimeline {
@@ -167,6 +170,7 @@ func (t *ruTimeline) reset() {
 	t.collector.mu.Unlock()
 	t.groups = make(map[trackerKey]*ruTimelineGroup)
 	t.sourceCount = 0
+	t.since = 0
 }
 
 func (t *ruTimeline) remove(key trackerKey) {
@@ -187,13 +191,19 @@ func (g *ruTimelineGroup) invalidate(start, end int64) {
 
 func (t *ruTimeline) record(item *consumptionItem, now time.Time) {
 	sec := now.Unix()
+	if t.since == 0 || sec < t.since {
+		t.since = sec
+	}
 	key := trackerKey{item.keyspaceID, item.resourceGroupName}
 	g := t.groups[key]
 	if g == nil {
 		g = &ruTimelineGroup{keyspaceName: item.keyspaceName, sources: make(map[ruSourceKey]*ruSource), nextWindow: windowStart(sec), invalid: make(map[int64]bool)}
 		t.groups[key] = g
-		// A newly observed group cannot establish coverage before its first report.
-		g.invalid[g.nextWindow] = true
+		// A newly observed group cannot establish coverage before its first
+		// report. Early in a term, it also cannot know the sources that have
+		// not reported yet, so it withholds windows until any of them would
+		// have expired, as a source seen earlier would have.
+		g.invalidate(sec, max(sec, t.since+ruTimelineSeconds))
 	}
 	sourceKey := ruSourceKey{item.clientUniqueID, item.isBackground, item.isTiFlash}
 	source := g.sources[sourceKey]

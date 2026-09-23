@@ -46,6 +46,8 @@ func newWarmTimeline(clients ...uint64) (*ruSummaryCollector, *ruTimeline) {
 	const start = testTimelineStart
 	c := newRUSummaryCollector()
 	t := newRUTimeline(c)
+	// The term began early enough that no unseen source can still replay.
+	t.since = start - ruWindowSeconds - ruTimelineSeconds
 	for _, client := range clients {
 		t.record(timelineReport(client, start-60, make([][2]float64, 1)), time.Unix(start-59, 0))
 	}
@@ -210,6 +212,13 @@ func TestRUTimelineServerClockStep(t *testing.T) {
 	future := start + 365*86400
 	timeline.record(timelineReport(2, future-5, make([][2]float64, 5)), time.Unix(future, 0))
 	re.LessOrEqual(len(timeline.groups[testTimelineKey].invalid), ruTimelineSeconds/ruWindowSeconds+1)
+	// After a backward step, a new group withholds no more windows than early
+	// in a term.
+	past := start - 365*86400
+	report := timelineReport(3, past-5, make([][2]float64, 5))
+	report.resourceGroupName = "other"
+	timeline.record(report, time.Unix(past, 0))
+	re.LessOrEqual(len(timeline.groups[trackerKey{0, "other"}].invalid), ruTimelineSeconds/ruWindowSeconds+1)
 }
 
 func TestRUTimelineResetWarmup(t *testing.T) {
@@ -222,18 +231,15 @@ func TestRUTimelineResetWarmup(t *testing.T) {
 
 	timeline.reset()
 	re.Empty(c.results)
-	// Even complete replay cannot establish coverage before the first report
-	// after a reset, because other sources may not have reported yet.
+	// A new term does not know the sources that stayed silent across the
+	// reset, so even complete replay withholds windows until any such source
+	// would have expired.
 	timeline.record(timelineReport(1, start, make([][2]float64, 120)), time.Unix(start+120, 0))
-	timeline.record(timelineReport(1, start+120, make([][2]float64, 60)), time.Unix(start+185, 0))
-	timeline.flush(time.Unix(start+210, 0))
-	got := c.results[testTimelineKey].summary
-	re.Equal(start+180, got.end)
-	re.False(got.available)
-
-	timeline.record(timelineReport(1, start+180, make([][2]float64, 60)), time.Unix(start+245, 0))
-	timeline.flush(time.Unix(start+270, 0))
-	re.Equal(ruWindowSummary{end: start + 240, peakAt: start + 180, available: true}, c.results[testTimelineKey].summary)
+	for w := start + 120; w <= start+360; w += ruWindowSeconds {
+		timeline.record(timelineReport(1, w, make([][2]float64, 60)), time.Unix(w+65, 0))
+		timeline.flush(time.Unix(w+90, 0))
+		re.Equal(ruWindowSummary{end: w + 60, peakAt: w, available: w > start+ruTimelineSeconds+120}, c.results[testTimelineKey].summary)
+	}
 }
 
 func TestRUTimelineIdleAndRetention(t *testing.T) {
