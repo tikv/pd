@@ -35,7 +35,8 @@ type ruSecondBucket struct {
 	rru, wru float64
 }
 
-// ruTimeline records RRU and WRU by natural second. It is owned by gc.mu.
+// ruTimeline records RRU and WRU by natural second. It is guarded by the mu
+// of the controller returned by timelineController.
 // Each report carries the closed seconds that the resource manager has not
 // acknowledged, bounded by the retained window. A failed report is resent
 // from the same second and the receiver deduplicates the overlap.
