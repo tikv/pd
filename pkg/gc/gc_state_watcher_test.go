@@ -545,6 +545,93 @@ func TestGCStateWatcherUsesEnabledMetadataIndex(t *testing.T) {
 	}
 }
 
+func TestGCStateWatcherWaitsForCommittedMetadataRevision(t *testing.T) {
+	var client *clientv3.Client
+	_, _, manager, clean, cancel := newGCStateManagerForTest(t, newGCStateManagerForTestOptions{
+		beforeLeader: func(c *clientv3.Client) { client = c },
+	})
+	defer clean()
+	defer cancel()
+	ctx, stop := context.WithTimeout(context.Background(), 10*time.Second)
+	defer stop()
+
+	// Give this generation an index whose real etcd watch cannot
+	// start until this test releases it. Its initial snapshot is ready, but
+	// the subsequent metadata commit remains unapplied at registration.
+	watchStarted := make(chan struct{}, 16)
+	releaseWatch := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseWatch) }) }
+	defer release()
+	generation := manager.activeGeneration.Load()
+	index := newEnabledKeyspaceIndex(client, keypath.KeyspaceMetaPrefix())
+	index.watcherFactory = func(client *clientv3.Client) clientv3.Watcher {
+		return &pauseBeforeWatch{
+			Watcher: clientv3.NewWatcher(client),
+			started: watchStarted,
+			release: releaseWatch,
+		}
+	}
+	generation.index = index
+	generation.workDone = make(chan struct{})
+	go func() {
+		defer close(generation.workDone)
+		index.run(generation.ctx, enabledKeyspaceLoadHooks{})
+	}()
+	require.NoError(t, index.waitReady(ctx))
+	select {
+	case <-watchStarted:
+	case <-ctx.Done():
+		t.Fatal("index did not reach the watch")
+	}
+
+	id := uint32(19)
+	_, err := manager.keyspaceManager.CreateKeyspaceByID(&keyspace.CreateKeyspaceByIDRequest{
+		ID: &id, Name: "watch-cache-lagged", Config: map[string]string{keyspace.GCManagementType: keyspace.KeyspaceLevelGC}, CreateTime: time.Now().Unix(),
+	})
+	require.NoError(t, err)
+	commit, err := client.Get(ctx, keypath.KeyspaceMetaPath(id))
+	require.NoError(t, err)
+	require.Less(t, index.appliedRevision(), commit.Header.Revision)
+
+	probed := make(chan int64, 1)
+	const hook = "github.com/tikv/pd/pkg/gc/watchGCStatesTargetRevisionProbed"
+	require.NoError(t, failpoint.EnableCall(hook, func(revision int64) { probed <- revision }))
+	defer func() { require.NoError(t, failpoint.Disable(hook)) }()
+	w, err := manager.WatchGCStates(ctx, false)
+	require.NoError(t, err)
+	defer w.Close()
+	select {
+	case target := <-probed:
+		require.GreaterOrEqual(t, target, commit.Header.Revision)
+	case <-ctx.Done():
+		t.Fatal("watcher did not probe the target revision")
+	}
+	received := make(chan error, 1)
+	go func() {
+		_, err := w.RecvBatch(1)
+		received <- err
+	}()
+	select {
+	case err := <-received:
+		t.Fatalf("initial state arrived before the metadata watch resumed: %v", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	release()
+	require.NoError(t, <-received)
+	for {
+		changes, err := w.RecvBatch(16)
+		require.NoError(t, err)
+		for _, change := range changes {
+			if state := mustUpsert(t, change); state.KeyspaceID == id {
+				require.True(t, state.IsKeyspaceLevel)
+				return
+			}
+		}
+	}
+}
+
 func TestGCStateWatcherWaitReadyStopsOnCancelAndLeaderLoss(t *testing.T) {
 	_, _, manager, clean, cancel := newGCStateManagerForTest(t, newGCStateManagerForTestOptions{
 		useEnabledKeyspaceIndex: true,
