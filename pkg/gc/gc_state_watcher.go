@@ -16,6 +16,8 @@ package gc
 
 import (
 	"context"
+	"fmt"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -24,6 +26,9 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/keyspace/constant"
+	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
 type gcStateChangeKind uint8
@@ -75,6 +80,7 @@ const (
 	defaultGCStateWatchInitialBatchSize    = 1024
 	defaultGCStateWatchInitChannelCapacity = 1
 	defaultGCStateWatchLiveChannelCapacity = 1024
+	gcStateWatchMetadataWaitTimeout        = 5 * time.Minute
 )
 
 type gcStateWatchConfig struct {
@@ -110,6 +116,7 @@ type GCStateWatcher struct {
 	pendingInit      []GCStateChange
 	pendingLiveCount int
 	dirtyDuringInit  map[uint32]struct{}
+	enabledKeyspaces *enabledKeyspaceCache
 }
 
 func newGCStateWatcher(parent context.Context, cfg gcStateWatchConfig, skipLoadingInitial bool) *GCStateWatcher {
@@ -295,9 +302,34 @@ func (m *GCStateManager) registerGCStateWatcher(
 	cfg gcStateWatchConfig,
 ) (*GCStateWatcher, error) {
 	watcher := newGCStateWatcher(ctx, cfg, skipLoadingInitial)
+	var cache *enabledKeyspaceCache
+	var generation uint64
+	if !skipLoadingInitial {
+		m.mu.RLock()
+		generation = m.activeLeadershipGeneration.Load()
+		cache = m.enabledKeyspaces
+		m.mu.RUnlock()
+		if generation == 0 {
+			watcher.cancel(errs.ErrNotLeader)
+			return nil, errs.ErrNotLeader
+		}
+		if cache != nil {
+			failpoint.InjectCall("watchGCStatesBeforeCacheReady")
+			waitCtx, cancel := context.WithTimeout(ctx, gcStateWatchMetadataWaitTimeout)
+			err := cache.waitReady(waitCtx)
+			cancel()
+			if err != nil {
+				if ctx.Err() == nil && cache.termCtx.Err() != nil {
+					err = errs.ErrNotLeader
+				}
+				watcher.cancel(err)
+				return nil, err
+			}
+		}
+	}
 
 	m.mu.Lock()
-	if m.activeLeadershipGeneration.Load() == 0 {
+	if m.activeLeadershipGeneration.Load() == 0 || (generation != 0 && m.activeLeadershipGeneration.Load() != generation) {
 		m.mu.Unlock()
 		watcher.cancel(errs.ErrNotLeader)
 		return nil, errs.ErrNotLeader
@@ -305,6 +337,7 @@ func (m *GCStateManager) registerGCStateWatcher(
 	m.nextWatcherID++
 	watcher.manager = m
 	watcher.id = m.nextWatcherID
+	watcher.enabledKeyspaces = cache
 	m.watchers[watcher.id] = watcher
 	gcStateWatcherGauge.Inc()
 	m.mu.Unlock()
@@ -337,26 +370,26 @@ func (m *GCStateManager) loadInitialGCStates(watcher *GCStateWatcher, batchSize 
 		}
 	}
 
-	err := m.iterateAllKeyspacesGCStates(
-		watcher.ctx,
-		true,
-		func(uint32) bool { return true },
-		func(state GCState) {
-			if stopped {
-				return
-			}
-			failpoint.InjectCall("watchGCStatesInitialStateLoaded", state.KeyspaceID)
-			if watcher.Err() != nil {
-				stopped = true
-				return
-			}
-			batch = append(batch, NewGCStateUpsert(state))
-			if len(batch) == batchSize {
-				stopped = !flush()
-			}
-		},
-		nil,
-	)
+	addState := func(state GCState) {
+		if stopped {
+			return
+		}
+		failpoint.InjectCall("watchGCStatesInitialStateLoaded", state.KeyspaceID)
+		if watcher.Err() != nil {
+			stopped = true
+			return
+		}
+		batch = append(batch, NewGCStateUpsert(state))
+		if len(batch) == batchSize {
+			stopped = !flush()
+		}
+	}
+	var err error
+	if watcher.enabledKeyspaces != nil {
+		err = m.iterateEnabledKeyspacesGCStates(watcher.ctx, watcher.enabledKeyspaces, addState)
+	} else {
+		err = m.iterateAllKeyspacesGCStates(watcher.ctx, true, func(uint32) bool { return true }, addState, nil)
+	}
 
 	if stopped || watcher.Err() != nil {
 		return
@@ -369,6 +402,48 @@ func (m *GCStateManager) loadInitialGCStates(watcher *GCStateWatcher, batchSize 
 		return
 	}
 	close(watcher.initCh)
+}
+
+func (m *GCStateManager) iterateEnabledKeyspacesGCStates(
+	ctx context.Context,
+	cache *enabledKeyspaceCache,
+	cb func(GCState),
+) error {
+	// The default Get is linearizable. This exact key supplies only the global
+	// revision; metadata membership comes from the shared index.
+	probeCtx, cancel := context.WithTimeout(ctx, enabledKeyspaceRequestTimeout)
+	resp, err := cache.client.Get(probeCtx, keypath.KeyspaceMetaPrefix())
+	cancel()
+	if err != nil {
+		return fmt.Errorf("probe keyspace metadata revision: %w", err)
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, gcStateWatchMetadataWaitTimeout)
+	entries, _, err := cache.snapshotAtLeast(waitCtx, resp.Header.Revision)
+	cancel()
+	if err != nil {
+		return fmt.Errorf("wait for keyspace metadata revision %d: %w", resp.Header.Revision, err)
+	}
+
+	nullState, err := m.getGCStateImpl(constant.NullKeyspaceID, true)
+	if err != nil {
+		return err
+	}
+	cb(nullState)
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if entry.gcManagementType != keyspace.KeyspaceLevelGC {
+			cb(GCState{KeyspaceID: entry.id, IsKeyspaceLevel: false})
+			continue
+		}
+		state, err := m.getGCStateImpl(entry.id, true)
+		if err != nil {
+			return err
+		}
+		cb(state)
+	}
+	return nil
 }
 
 func (m *GCStateManager) terminateGCStateWatcher(

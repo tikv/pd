@@ -19,15 +19,18 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sync"
 	"testing"
 	"time"
 
 	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
+	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/pingcap/failpoint"
 
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
@@ -508,4 +511,155 @@ func TestGCStateWatcherDonePublishesFirstCause(t *testing.T) {
 	w.Close()
 	require.ErrorIs(t, w.Err(), errs.ErrNotLeader)
 	require.Equal(t, done, w.Done())
+}
+
+func TestGCStateWatcherUsesEnabledMetadataCache(t *testing.T) {
+	_, _, manager, clean, cancel := newGCStateManagerForTest(t, newGCStateManagerForTestOptions{useEnabledKeyspaceCache: true})
+	defer clean()
+	defer cancel()
+	ctx, stop := context.WithTimeout(context.Background(), 10*time.Second)
+	defer stop()
+	require.NoError(t, manager.enabledKeyspaces.waitReady(ctx))
+
+	id := uint32(19)
+	_, err := manager.keyspaceManager.CreateKeyspaceByID(&keyspace.CreateKeyspaceByIDRequest{
+		ID: &id, Name: "watch-cache-created", Config: map[string]string{keyspace.GCManagementType: keyspace.KeyspaceLevelGC}, CreateTime: time.Now().Unix(),
+	})
+	require.NoError(t, err)
+	// A full watcher must use the index even when the legacy iterator fails.
+	const failpointName = "github.com/tikv/pd/pkg/gc/iterateAllKeyspacesGCStatesError"
+	require.NoError(t, failpoint.Enable(failpointName, `return("legacy iterator used")`))
+	defer func() { require.NoError(t, failpoint.Disable(failpointName)) }()
+	w, err := manager.WatchGCStates(ctx, false)
+	require.NoError(t, err)
+	defer w.Close()
+	for {
+		changes, err := w.RecvBatch(16)
+		require.NoError(t, err)
+		for _, change := range changes {
+			if state := mustUpsert(t, change); state.KeyspaceID == id {
+				require.True(t, state.IsKeyspaceLevel)
+				return
+			}
+		}
+	}
+}
+
+func TestGCStateWatcherWaitReadyStopsOnCancelAndLeaderLoss(t *testing.T) {
+	_, _, manager, clean, cancel := newGCStateManagerForTest(t, newGCStateManagerForTestOptions{
+		useEnabledKeyspaceCache: true,
+		beforeLeader: func(c *clientv3.Client) {
+			_, err := c.Put(context.Background(), keypath.KeyspaceMetaPath(19), "invalid protobuf")
+			require.NoError(t, err)
+		},
+	})
+	defer clean()
+	defer cancel()
+
+	ctx, stop := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() {
+		_, err := manager.WatchGCStates(ctx, false)
+		result <- err
+	}()
+	stop()
+	require.ErrorIs(t, <-result, context.Canceled)
+	require.Empty(t, manager.watchers)
+
+	waiting := make(chan struct{}, 1)
+	const waitHook = "github.com/tikv/pd/pkg/gc/watchGCStatesBeforeCacheReady"
+	require.NoError(t, failpoint.EnableCall(waitHook, func() { waiting <- struct{}{} }))
+	defer func() { require.NoError(t, failpoint.Disable(waitHook)) }()
+	result = make(chan error, 1)
+	go func() {
+		_, err := manager.WatchGCStates(context.Background(), false)
+		result <- err
+	}()
+	select {
+	case <-waiting:
+	case <-time.After(5 * time.Second):
+		t.Fatal("watcher did not begin waiting for cache readiness")
+	}
+	stopTerm := manager.OnNodeBecomesLeader()
+	defer stopTerm()
+	select {
+	case err := <-result:
+		require.ErrorIs(t, err, errs.ErrNotLeader)
+	case <-time.After(5 * time.Second):
+		t.Fatal("watcher did not exit on leader change")
+	}
+	require.Empty(t, manager.watchers)
+}
+
+func TestGCStateWatcherIndexedInitialMergesConcurrentGCWrite(t *testing.T) {
+	_, _, manager, clean, cancel := newGCStateManagerForTest(t, newGCStateManagerForTestOptions{useEnabledKeyspaceCache: true})
+	defer clean()
+	defer cancel()
+	ctx, stop := context.WithTimeout(context.Background(), 10*time.Second)
+	defer stop()
+	require.NoError(t, manager.enabledKeyspaces.waitReady(ctx))
+	_, err := manager.AdvanceTxnSafePoint(2, 10, time.Now())
+	require.NoError(t, err)
+
+	reached := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	releaseLoader := func() { once.Do(func() { close(release) }) }
+	defer releaseLoader()
+	const hook = "github.com/tikv/pd/pkg/gc/watchGCStatesInitialStateLoaded"
+	require.NoError(t, failpoint.EnableCall(hook, func(id uint32) {
+		if id == 2 {
+			close(reached)
+			<-release
+		}
+	}))
+	defer func() { require.NoError(t, failpoint.Disable(hook)) }()
+	w, err := manager.WatchGCStates(ctx, false)
+	require.NoError(t, err)
+	defer w.Close()
+	select {
+	case <-reached:
+	case <-ctx.Done():
+		t.Fatal("initial loader did not reach keyspace 2")
+	}
+	_, err = manager.AdvanceTxnSafePoint(2, 20, time.Now())
+	require.NoError(t, err)
+	for {
+		changes, err := w.RecvBatch(1)
+		require.NoError(t, err)
+		if state := mustUpsert(t, changes[0]); state.KeyspaceID == 2 {
+			require.Equal(t, uint64(20), state.TxnSafePoint)
+			break
+		}
+	}
+	releaseLoader()
+	require.Eventually(t, func() bool {
+		for {
+			change, ok, err := w.receiveOne(false)
+			require.NoError(t, err)
+			if !ok {
+				return w.initDone
+			}
+			state := mustUpsert(t, change)
+			require.False(t, state.KeyspaceID == 2 && state.TxnSafePoint == 10)
+		}
+	}, 5*time.Second, 10*time.Millisecond)
+}
+
+func TestGCStateWatcherIndexedPostRegistrationErrorCleansUp(t *testing.T) {
+	_, _, manager, clean, cancel := newGCStateManagerForTest(t, newGCStateManagerForTestOptions{useEnabledKeyspaceCache: true})
+	defer clean()
+	defer cancel()
+	ctx, stop := context.WithTimeout(context.Background(), 10*time.Second)
+	defer stop()
+	require.NoError(t, manager.enabledKeyspaces.waitReady(ctx))
+	const hook = "github.com/tikv/pd/pkg/gc/watchGCStatesRegistered"
+	require.NoError(t, failpoint.EnableCall(hook, manager.cancelEnabledKeyspaces))
+	defer func() { require.NoError(t, failpoint.Disable(hook)) }()
+	w, err := manager.WatchGCStates(ctx, false)
+	require.NoError(t, err)
+	defer w.Close()
+	_, err = w.RecvBatch(1)
+	require.Error(t, err)
+	require.NotContains(t, manager.watchers, w.id)
 }

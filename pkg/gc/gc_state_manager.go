@@ -23,6 +23,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/failpoint"
@@ -198,7 +199,10 @@ type GCStateManager struct {
 
 	// A read/write - update cache procedure must be done while holding the outer mutex `GCStateManager.mu`.
 	// A read-only operation can be done on gcStateCache directly without locking `GCStateManager.mu`.
-	gcStateCache *gcStateCache
+	gcStateCache           *gcStateCache
+	etcdClient             *clientv3.Client
+	enabledKeyspaces       *enabledKeyspaceCache
+	cancelEnabledKeyspaces context.CancelFunc
 
 	allKeyspacesGCStatesSingleFlight                  *syncutil.OrderedSingleFlight[map[uint32]GCState]
 	allKeyspacesGCStatesExcludeGCBarriersSingleFlight *syncutil.OrderedSingleFlight[map[uint32]GCState]
@@ -227,6 +231,14 @@ func NewGCStateManager(store endpoint.GCStateProvider, cfg config.PDServerConfig
 	return m
 }
 
+// SetEtcdClient supplies the client used by the leader-local keyspace index.
+// It must be called before the manager's first leadership generation starts.
+func (m *GCStateManager) SetEtcdClient(client *clientv3.Client) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.etcdClient = client
+}
+
 type keyspaceNameKeyType struct{}
 
 var keyspaceNameKey = keyspaceNameKeyType{}
@@ -248,14 +260,28 @@ func getKeyspaceNameFromCtx(ctx context.Context) string {
 // OnNodeBecomesLeader starts a local leadership generation and returns its teardown function.
 func (m *GCStateManager) OnNodeBecomesLeader() func() {
 	m.mu.Lock()
+	if m.cancelEnabledKeyspaces != nil {
+		m.cancelEnabledKeyspaces()
+	}
 	m.nextLeadershipGeneration++
 	generation := m.nextLeadershipGeneration
 	m.terminateAllGCStateWatchersLocked(errs.ErrNotLeader, watcherTerminationLeaderLost)
 	m.activeLeadershipGeneration.Store(generation)
 	m.gcStateCache.clearAll()
+	m.enabledKeyspaces = nil
+	m.cancelEnabledKeyspaces = nil
+	if m.etcdClient != nil {
+		termCtx, cancel := context.WithCancel(context.Background())
+		m.cancelEnabledKeyspaces = cancel
+		m.enabledKeyspaces = newEnabledKeyspaceCache(termCtx, m.etcdClient, keypath.KeyspaceMetaPrefix())
+	}
+	enabledKeyspaces := m.enabledKeyspaces
 	m.barrierMetrics.clearMetrics()
 	productionBarrierMetrics.current.Store(m.barrierMetrics)
 	m.mu.Unlock()
+	if enabledKeyspaces != nil {
+		go enabledKeyspaces.run()
+	}
 
 	return func() {
 		m.mu.Lock()
@@ -264,6 +290,11 @@ func (m *GCStateManager) OnNodeBecomesLeader() func() {
 			return
 		}
 		m.activeLeadershipGeneration.Store(0)
+		if m.cancelEnabledKeyspaces != nil {
+			m.cancelEnabledKeyspaces()
+			m.cancelEnabledKeyspaces = nil
+			m.enabledKeyspaces = nil
+		}
 		m.terminateAllGCStateWatchersLocked(errs.ErrNotLeader, watcherTerminationLeaderLost)
 		m.gcStateCache.clearAll()
 		m.barrierMetrics.clearMetrics()
