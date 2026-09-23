@@ -205,6 +205,14 @@ func TestTombstoneSharesDefaultRUTimeline(t *testing.T) {
 	re.Nil(tombstone.collectRequestAndConsumption(periodicReport).ConsumptionSinceLastRequest.RuBySecond)
 	defaultGC.run.requestInProgress = true
 	re.Nil(defaultGC.collectRequestAndConsumption(periodicReport).ConsumptionSinceLastRequest.RuBySecond)
+
+	// The idle default controller is kept while the tombstone reports through it.
+	for range 3 {
+		c.cleanUpResourceGroup()
+	}
+	current, ok := c.loadGroupController(defaultResourceGroupName)
+	re.True(ok)
+	re.Same(defaultGC, current)
 }
 
 func TestTokenRequestAcknowledgesRUTimeline(t *testing.T) {

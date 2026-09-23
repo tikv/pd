@@ -726,6 +726,15 @@ func (c *ResourceGroupsController) tombstoneGroupCostController(name string) {
 }
 
 func (c *ResourceGroupsController) cleanUpResourceGroup() {
+	// A tombstone reports through the default controller's RU timeline, and a
+	// replacement default controller would report a second timeline for the
+	// same group, so the default controller stays while a tombstone does.
+	c.groupsController.Range(func(_, value any) bool {
+		if owner := value.(*groupCostController).ruTimelineOwner; owner != nil {
+			owner.inactive = false
+		}
+		return true
+	})
 	c.groupsController.Range(func(key, value any) bool {
 		resourceGroupName := key.(string)
 		gc := value.(*groupCostController)
