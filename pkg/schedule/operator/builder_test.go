@@ -136,6 +136,22 @@ func (suite *operatorBuilderTestSuite) TestRecord() {
 	re.Error(legacyBuilder.err)
 }
 
+func (suite *operatorBuilderTestSuite) TestSetLeadersSkipsWitness() {
+	re := suite.Require()
+	peers := []*metapb.Peer{
+		{Id: 11, StoreId: 1},
+		{Id: 12, StoreId: 2},
+		{Id: 14, StoreId: 4, IsWitness: true},
+	}
+	region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers}, peers[0])
+	builder := NewBuilder("test", suite.cluster, region).
+		SetLeader(2).
+		SetLeaders([]uint64{2, 4})
+
+	re.NoError(builder.err)
+	re.Equal([]uint64{2}, builder.targetLeaderStoreIDs)
+}
+
 func (suite *operatorBuilderTestSuite) TestSetPeersDoesNotMutateCallerMap() {
 	re := suite.Require()
 	targetPeers := map[uint64]*metapb.Peer{
