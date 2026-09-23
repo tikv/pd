@@ -740,3 +740,31 @@ func TestControllerAddSchedulerHandlerRollbackOnSaveFailure(t *testing.T) {
 	re.NoError(err)
 	re.Empty(cfg, "the config saved before the failed PrepareConfig must be removed")
 }
+
+// TestControllerAddSchedulerRollbackOnPrepareFailure covers the
+// non-microservice creation path when PrepareConfig itself fails (rather
+// than the later SaveSchedulerConfig): AddScheduler must still undo
+// PrepareConfig's already-applied leader-transfer pause and must not leave
+// the scheduler registered or running.
+func TestControllerAddSchedulerRollbackOnPrepareFailure(t *testing.T) {
+	re := require.New(t)
+
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	// Store 999 is intentionally never registered, so PrepareConfig
+	// (pauseLeaderTransfer) fails on it after store 1 has already been
+	// paused.
+	tc.AddLeaderStore(1, 0)
+
+	sl, err := CreateScheduler(types.EvictLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigSliceDecoder(types.EvictLeaderScheduler, []string{"1,999"}), func(string) error { return nil })
+	re.NoError(err)
+
+	c := NewController(context.Background(), tc, storage.NewStorageWithMemoryBackend(), oc)
+
+	re.Error(c.AddScheduler(sl, "1,999"))
+
+	exist, _ := c.IsSchedulerExisted(sl.GetName())
+	re.False(exist, "a scheduler must not be registered when PrepareConfig fails")
+	re.True(tc.GetStore(1).AllowLeaderTransferIn(), "the leader-transfer pause applied by PrepareConfig must be undone")
+}

@@ -292,7 +292,17 @@ func (suite *scheduleTestSuite) checkEvictLeaderSchedulerMultiStoreAtomicCreate(
 	// simulate a persistence failure on an otherwise-valid creation request:
 	// the scheduler must not end up registered/running without its config
 	// having actually been saved.
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/persistFail", "return(true)"))
+	persistFailFp := "github.com/tikv/pd/pkg/schedule/schedulers/persistFail"
+	re.NoError(failpoint.Enable(persistFailFp, "return(true)"))
+	persistFailEnabled := true
+	defer func() {
+		// Guards against a failed assertion below aborting the test before
+		// the explicit Disable is reached, which would otherwise leave this
+		// process-wide failpoint enabled for later tests.
+		if persistFailEnabled {
+			re.NoError(failpoint.Disable(persistFailFp))
+		}
+	}()
 	input = map[string]any{"name": "evict-leader-scheduler", "store_id": 1}
 	body, err = json.Marshal(input)
 	re.NoError(err)
@@ -300,7 +310,8 @@ func (suite *scheduleTestSuite) checkEvictLeaderSchedulerMultiStoreAtomicCreate(
 		testutil.Status(re, http.StatusBadRequest)),
 	)
 	assertNoScheduler(re, urlPrefix, "evict-leader-scheduler")
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/persistFail"))
+	re.NoError(failpoint.Disable(persistFailFp))
+	persistFailEnabled = false
 
 	// the same request succeeds once persistence works again.
 	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, urlPrefix, body, testutil.StatusOK(re)))

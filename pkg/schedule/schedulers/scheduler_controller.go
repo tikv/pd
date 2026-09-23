@@ -246,6 +246,10 @@ func (c *Controller) AddScheduler(scheduler Scheduler, args ...string) error {
 	// scheduler, so a failure here never leaves a scheduler running (or
 	// visible via IsSchedulerExisted) without having actually been persisted.
 	if err := s.PrepareConfig(c.cluster); err != nil {
+		// PrepareConfig may have partially applied itself (e.g. evict-leader-
+		// scheduler pauses every requested store regardless of which one it
+		// failed on) before returning this error, so undo it here too.
+		scheduler.CleanConfig(c.cluster)
 		return err
 	}
 	if err := scheduler.SetDisable(false); err != nil {
