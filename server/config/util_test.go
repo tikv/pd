@@ -36,11 +36,11 @@ func TestValidateURLWithScheme(t *testing.T) {
 		{"http://127.0.0.1", false},
 		{"http://127.0.0.1/", false},
 		{"http://[::1]:2379", false},
-		// Ambiguous host syntaxes whose parse behavior differs across Go
-		// releases (url.ParseRequestURI got stricter on multi-port and
-		// unbracketed-IPv6 hosts in Go 1.26), so they are not asserted here:
-		//   - "http://::1:2379": errors on Go >= 1.26, parses on Go 1.25
-		//   - "http://localhost:80:80": errors on Go >= 1.26, parses on Go 1.25
+		// Ambiguous host syntaxes whose parse result depends on GODEBUG
+		// urlstrictcolons, which defaults to strict only when the main module
+		// declares go >= 1.26, so they are not asserted here:
+		//   - "http://::1:2379"
+		//   - "http://localhost:80:80"
 		{"https://foo.com/bar", false},
 		{"https://foo.com/bar/", false},
 	}
