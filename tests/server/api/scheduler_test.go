@@ -261,7 +261,10 @@ func (suite *scheduleTestSuite) TestEvictLeaderSchedulerMultiStoreAtomicCreate()
 // schedulers.EvictLeaderMultiStoreArgs), so if any requested store can't
 // actually be evicted (e.g. it doesn't exist), the whole create request
 // fails and no scheduler is left behind evicting only some of the requested
-// stores.
+// stores. It also covers persisting the config itself failing: Controller.
+// AddScheduler/AddSchedulerHandler must roll back any already-applied state
+// (e.g. paused leader transfers) on that failure too, not just leave the
+// scheduler unregistered.
 func (suite *scheduleTestSuite) checkEvictLeaderSchedulerMultiStoreAtomicCreate(cluster *tests.TestCluster) {
 	re := suite.Require()
 	leaderAddr := cluster.GetLeaderServer().GetAddr()
@@ -284,6 +287,25 @@ func (suite *scheduleTestSuite) checkEvictLeaderSchedulerMultiStoreAtomicCreate(
 
 	// the scheduler must not exist at all, not left running with only
 	// store 1 evicted.
+	assertNoScheduler(re, urlPrefix, "evict-leader-scheduler")
+
+	// simulate a persistence failure on an otherwise-valid creation request:
+	// the scheduler must not end up registered/running without its config
+	// having actually been saved.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/persistFail", "return(true)"))
+	input = map[string]any{"name": "evict-leader-scheduler", "store_id": 1}
+	body, err = json.Marshal(input)
+	re.NoError(err)
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, urlPrefix, body,
+		testutil.Status(re, http.StatusBadRequest)),
+	)
+	assertNoScheduler(re, urlPrefix, "evict-leader-scheduler")
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/persistFail"))
+
+	// the same request succeeds once persistence works again.
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, urlPrefix, body, testutil.StatusOK(re)))
+	suite.assertSchedulerExists(urlPrefix, "evict-leader-scheduler")
+	deleteScheduler(re, urlPrefix, "evict-leader-scheduler")
 	assertNoScheduler(re, urlPrefix, "evict-leader-scheduler")
 }
 

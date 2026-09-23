@@ -16,6 +16,7 @@ package schedulers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -678,4 +679,64 @@ func TestEvictLeaderDeleteWithSaveFailure(t *testing.T) {
 	re.Contains(conf.StoreIDWithRanges, uint64(1), "store should be restored after save failure")
 	re.Equal(keyRanges, conf.StoreIDWithRanges[1], "key ranges should be restored")
 	re.Empty(resp)
+}
+
+// TestControllerAddSchedulerRollbackOnSaveFailure covers the non-microservice
+// creation path: Controller.AddScheduler must undo PrepareConfig's already-
+// applied leader-transfer pause when the following SaveSchedulerConfig fails,
+// and must not leave the scheduler registered or running.
+func TestControllerAddSchedulerRollbackOnSaveFailure(t *testing.T) {
+	re := require.New(t)
+
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	tc.AddLeaderStore(1, 0)
+
+	sl, err := CreateScheduler(types.EvictLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigSliceDecoder(types.EvictLeaderScheduler, []string{"1"}), func(string) error { return nil })
+	re.NoError(err)
+
+	c := NewController(context.Background(), tc, storage.NewStorageWithMemoryBackend(), oc)
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/persistFail", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/persistFail"))
+	}()
+
+	re.Error(c.AddScheduler(sl, "1"))
+
+	exist, _ := c.IsSchedulerExisted(sl.GetName())
+	re.False(exist, "a scheduler must not be registered when its creation fails to persist")
+	re.True(tc.GetStore(1).AllowLeaderTransferIn(), "the leader-transfer pause applied by PrepareConfig must be undone")
+}
+
+// TestControllerAddSchedulerHandlerRollbackOnSaveFailure covers the
+// microservice creation path: Controller.AddSchedulerHandler must remove the
+// scheduler config it just saved, and undo PrepareConfig's already-applied
+// leader-transfer pause, when PrepareConfig itself fails.
+func TestControllerAddSchedulerHandlerRollbackOnSaveFailure(t *testing.T) {
+	re := require.New(t)
+
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	// Store 999 is intentionally never registered, so PrepareConfig
+	// (pauseLeaderTransfer) fails on it after store 1 has already been
+	// paused.
+	tc.AddLeaderStore(1, 0)
+
+	sl, err := CreateScheduler(types.EvictLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigSliceDecoder(types.EvictLeaderScheduler, []string{"1,999"}), func(string) error { return nil })
+	re.NoError(err)
+
+	testStorage := storage.NewStorageWithMemoryBackend()
+	c := NewController(context.Background(), tc, testStorage, oc)
+
+	re.Error(c.AddSchedulerHandler(sl, "1,999"))
+
+	exist, _ := c.IsSchedulerExisted(sl.GetName())
+	re.False(exist, "a scheduler must not be registered when PrepareConfig fails")
+	re.True(tc.GetStore(1).AllowLeaderTransferIn(), "the leader-transfer pause applied by PrepareConfig must be undone")
+	cfg, err := testStorage.LoadSchedulerConfig(sl.GetName())
+	re.NoError(err)
+	re.Empty(cfg, "the config saved before the failed PrepareConfig must be removed")
 }

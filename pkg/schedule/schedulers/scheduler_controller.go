@@ -180,6 +180,16 @@ func (c *Controller) AddSchedulerHandler(scheduler Scheduler, args ...string) er
 		return err
 	}
 	if err := scheduler.PrepareConfig(c.cluster); err != nil {
+		// PrepareConfig may have paused some stores before failing on
+		// another (e.g. evict-leader-scheduler pauses every requested
+		// store regardless of earlier failures), so undo whatever it did,
+		// then remove the config just saved above: this call must not
+		// leave the scheduler half set up.
+		scheduler.CleanConfig(c.cluster)
+		if rmErr := c.storage.RemoveSchedulerConfig(name); rmErr != nil {
+			log.Error("can not remove the scheduler config after a failed creation",
+				zap.String("scheduler-name", name), errs.ZapError(rmErr))
+		}
 		return err
 	}
 	c.schedulerHandlers[name] = scheduler
@@ -245,6 +255,10 @@ func (c *Controller) AddScheduler(scheduler Scheduler, args ...string) error {
 	}
 	if err := SaveSchedulerConfig(c.storage, scheduler); err != nil {
 		log.Error("can not save scheduler config", zap.String("scheduler-name", scheduler.GetName()), errs.ZapError(err))
+		// PrepareConfig above may already have taken effect (e.g. paused
+		// stores), so undo it before returning: this call must not leave
+		// the scheduler half set up.
+		scheduler.CleanConfig(c.cluster)
 		return err
 	}
 	c.wg.Add(1)
