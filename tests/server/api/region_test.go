@@ -397,11 +397,11 @@ func (suite *regionTestSuite) checkRegionCheck(cluster *tests.TestCluster) {
 	r4.Adjust()
 	re.Equal(&response.RegionsInfo{Count: 0, Regions: []response.RegionInfo{}}, r4)
 
-	r = r.Clone(core.SetApproximateSize(1))
+	r = r.Clone(core.SetApproximateSize(1), core.SetApproximateKeys(0))
 	tests.MustPutRegionInfo(re, cluster, r)
 	url = fmt.Sprintf("%s/regions/check/%s", urlPrefix, "empty-region")
 	r5 := &response.RegionsInfo{}
-	expected = &response.RegionsInfo{Count: 0, Regions: []response.RegionInfo{}}
+	expected = &response.RegionsInfo{Count: 1, Regions: []response.RegionInfo{*response.NewAPIRegionInfo(r)}}
 	testutil.Eventually(re, func() bool {
 		if err := testutil.ReadGetJSON(re, tests.TestDialClient, url, r5); err != nil {
 			return false

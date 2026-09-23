@@ -87,6 +87,7 @@ func TestIsEmptyRegion(t *testing.T) {
 		{size: 1, keys: 1, empty: false},
 		{size: 1, keys: 2, empty: false},
 		{size: 2, keys: 1, empty: false},
+		{size: 2, keys: 0, empty: false},
 		{size: 0, keys: 0, empty: true},
 	}
 	for _, tt := range tests {
