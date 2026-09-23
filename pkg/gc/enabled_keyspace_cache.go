@@ -78,6 +78,8 @@ func newEnabledKeyspaceCache(termCtx context.Context, client *clientv3.Client, p
 // run blocks until the leadership term ends. A failed or compacted watch is
 // followed by a complete reload, so no missing revision is silently skipped.
 func (c *enabledKeyspaceCache) run() {
+	initialLoadStartedAt := time.Now()
+	initialLoadLogged := false
 	retryDelay := enabledKeyspaceRetryDelay
 	var lastLog time.Time
 	suppressedErrors := 0
@@ -85,7 +87,14 @@ func (c *enabledKeyspaceCache) run() {
 		entries, revision, err := c.load()
 		phase := "load"
 		if err == nil {
-			c.publish(entries, revision)
+			if c.publish(entries, revision) && !initialLoadLogged {
+				log.Info("load enabled keyspace cache completed",
+					zap.String("prefix", c.prefix),
+					zap.Int64("revision", revision),
+					zap.Int("enabled-keyspace-count", len(entries)),
+					zap.Duration("cost", time.Since(initialLoadStartedAt)))
+				initialLoadLogged = true
+			}
 			watchStarted := time.Now()
 			err = c.watch(revision + 1)
 			phase = "watch"
@@ -191,17 +200,18 @@ func (c *enabledKeyspaceCache) snapshotAtLeast(ctx context.Context, revision int
 	}
 }
 
-func (c *enabledKeyspaceCache) publish(entries map[uint32]enabledKeyspace, revision int64) {
+func (c *enabledKeyspaceCache) publish(entries map[uint32]enabledKeyspace, revision int64) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.termCtx.Err() != nil {
-		return
+		return false
 	}
 	c.entries = entries
 	c.revision = revision
 	c.ready = true
 	close(c.changed)
 	c.changed = make(chan struct{})
+	return true
 }
 
 func (c *enabledKeyspaceCache) publishProgress(changes map[uint32]*enabledKeyspace, revision int64) {
