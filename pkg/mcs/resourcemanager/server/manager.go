@@ -111,6 +111,9 @@ type Manager struct {
 	keyspaceIDLookup map[string]uint32
 	// metrics is the collection of metrics.
 	metrics *metrics
+	// metricsLoopMu serializes backgroundMetricsFlush, since a new leadership
+	// term can start before the previous flusher exits.
+	metricsLoopMu sync.Mutex
 	// ruCollector is used to collect the RU metering data.
 	ruCollector *ruCollector
 }
@@ -659,13 +662,14 @@ func (m *Manager) getKeyspaceResourceGroupManagers() []*keyspaceResourceGroupMan
 	return krgms
 }
 
-func (m *Manager) dispatchConsumption(req *rmpb.TokenBucketRequest) error {
+func (m *Manager) dispatchConsumption(clientUniqueID uint64, req *rmpb.TokenBucketRequest) error {
 	isBackground := req.GetIsBackground()
 	isTiFlash := req.GetIsTiflash()
 	if isBackground && isTiFlash {
 		return errors.New("background and tiflash cannot be true at the same time")
 	}
 	m.consumptionDispatcher <- &consumptionItem{
+		clientUniqueID:    clientUniqueID,
 		keyspaceID:        ExtractKeyspaceID(req.GetKeyspaceId()),
 		resourceGroupName: req.GetResourceGroupName(),
 		Consumption:       req.GetConsumptionSinceLastRequest(),
@@ -752,6 +756,10 @@ func (m *Manager) GetKeyspaceIDByName(ctx context.Context, name string) (*rmpb.K
 func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 	defer logutil.LogPanic()
 	defer m.wg.Done()
+	m.metricsLoopMu.Lock()
+	defer m.metricsLoopMu.Unlock()
+	// The RU timeline belongs to one leadership term.
+	defer func() { m.metrics.ruTimeline.reset(time.Now()) }()
 	cleanUpTicker := time.NewTicker(metricsCleanupInterval)
 	defer cleanUpTicker.Stop()
 	metricsTicker := time.NewTicker(tickPerSecond)
@@ -832,6 +840,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				}
 			}
 		case <-metricsTicker.C:
+			m.metrics.ruTimeline.flush(time.Now())
 			// Prevent from holding the lock too long when there're many keyspaces and resource groups.
 			for _, krgm := range m.getKeyspaceResourceGroupManagers() {
 				// Conciliate the fill rates.
