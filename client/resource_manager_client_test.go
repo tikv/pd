@@ -31,6 +31,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/kvproto/pkg/meta_storagepb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 
 	"github.com/tikv/pd/client/clients/metastorage"
@@ -44,6 +45,9 @@ type testServiceDiscovery struct {
 	servingURL  string
 	keyspaceID  uint32
 	clientConns sync.Map
+
+	getOrCreateHookMu sync.RWMutex
+	getOrCreateHook   func()
 }
 
 func newTestServiceDiscovery(servingURL string, conn *grpc.ClientConn) *testServiceDiscovery {
@@ -75,11 +79,22 @@ func (*testServiceDiscovery) GetServiceClient() sd.ServiceClient                
 func (*testServiceDiscovery) GetServiceClientByKind(sd.APIKind) sd.ServiceClient { return nil }
 func (*testServiceDiscovery) GetAllServiceClients() []sd.ServiceClient           { return nil }
 func (t *testServiceDiscovery) GetOrCreateGRPCConn(url string) (*grpc.ClientConn, error) {
+	t.getOrCreateHookMu.RLock()
+	hook := t.getOrCreateHook
+	t.getOrCreateHookMu.RUnlock()
+	if hook != nil {
+		hook()
+	}
 	conn, ok := t.clientConns.Load(url)
 	if !ok {
 		return nil, errors.New("unexpected URL")
 	}
 	return conn.(*grpc.ClientConn), nil
+}
+func (t *testServiceDiscovery) setGetOrCreateHook(hook func()) {
+	t.getOrCreateHookMu.Lock()
+	t.getOrCreateHook = hook
+	t.getOrCreateHookMu.Unlock()
 }
 func (t *testServiceDiscovery) RemoveClientConn(url string) {
 	t.clientConns.Delete(url)
@@ -134,6 +149,10 @@ type testRMServer struct {
 	deleteCount atomic.Int32
 	tokenCount  atomic.Int32
 	getErr      error
+
+	blockTokenResponse   bool
+	holdTokenResponse    chan struct{}
+	tokenRequestReceived chan struct{}
 }
 
 func (s *testRMServer) ListResourceGroups(context.Context, *rmpb.ListResourceGroupsRequest) (*rmpb.ListResourceGroupsResponse, error) {
@@ -182,15 +201,30 @@ func (s *testRMServer) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTo
 			return err
 		}
 		s.tokenCount.Add(1)
+		if s.tokenRequestReceived != nil {
+			select {
+			case s.tokenRequestReceived <- struct{}{}:
+			default:
+			}
+		}
+		if s.blockTokenResponse {
+			<-stream.Context().Done()
+			return stream.Context().Err()
+		}
+		if s.holdTokenResponse != nil {
+			select {
+			case <-s.holdTokenResponse:
+			case <-stream.Context().Done():
+				return stream.Context().Err()
+			}
+		}
 		resp := &rmpb.TokenBucketsResponse{
 			Responses: make([]*rmpb.TokenBucketResponse, 0, len(req.GetRequests())),
 		}
 		for _, tokenReq := range req.GetRequests() {
 			resp.Responses = append(resp.Responses, &rmpb.TokenBucketResponse{
 				ResourceGroupName: tokenReq.GetResourceGroupName(),
-				KeyspaceId: &rmpb.KeyspaceIDValue{
-					Value: constants.NullKeyspaceID,
-				},
+				KeyspaceId:        &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: constants.NullKeyspaceID}},
 			})
 		}
 		if err := stream.Send(resp); err != nil {
@@ -199,13 +233,16 @@ func (s *testRMServer) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTo
 	}
 }
 
-func startTestRMServer(t *testing.T, id string) (string, *testRMServer, func()) {
+func startTestRMServer(t *testing.T, id string, opts ...func(*testRMServer)) (string, *testRMServer, func()) {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 
 	server := grpc.NewServer()
 	rmServer := &testRMServer{id: id}
+	for _, opt := range opts {
+		opt(rmServer)
+	}
 	rmpb.RegisterResourceManagerServer(server, rmServer)
 
 	done := make(chan struct{})
@@ -294,8 +331,8 @@ func TestResourceManagerWritesUsePDAndReadsUseRM(t *testing.T) {
 	t.Cleanup(rmCleanup)
 
 	inner := newInnerClientForRMRouteTest(t, ctx, pdAddr)
-	inner.resourceManagerDiscovery = newTestResourceManagerDiscovery(t, ctx, rmAddr)
-	t.Cleanup(inner.resourceManagerDiscovery.Close)
+	inner.resourceManagerDiscovery.Store(newTestResourceManagerDiscovery(t, ctx, rmAddr))
+	t.Cleanup(inner.resourceManagerDiscovery.Load().Close)
 
 	cli := &client{inner: inner}
 
@@ -333,8 +370,8 @@ func TestGetResourceGroupPreservesContextErrors(t *testing.T) {
 	t.Cleanup(rmCleanup)
 
 	inner := newInnerClientForRMRouteTest(t, ctx, pdAddr)
-	inner.resourceManagerDiscovery = newTestResourceManagerDiscovery(t, ctx, rmAddr)
-	t.Cleanup(inner.resourceManagerDiscovery.Close)
+	inner.resourceManagerDiscovery.Store(newTestResourceManagerDiscovery(t, ctx, rmAddr))
+	t.Cleanup(inner.resourceManagerDiscovery.Load().Close)
 
 	cli := &client{inner: inner}
 
@@ -365,8 +402,8 @@ func TestTryResourceManagerConnectUsesRMForTokenAndFallbackToPD(t *testing.T) {
 		t.Cleanup(rmCleanup)
 
 		inner := newInnerClientForRMRouteTest(t, ctx, pdAddr)
-		inner.resourceManagerDiscovery = newTestResourceManagerDiscovery(t, ctx, rmAddr)
-		t.Cleanup(inner.resourceManagerDiscovery.Close)
+		inner.resourceManagerDiscovery.Store(newTestResourceManagerDiscovery(t, ctx, rmAddr))
+		t.Cleanup(inner.resourceManagerDiscovery.Load().Close)
 
 		connection := &resourceManagerConnectionContext{}
 		err := inner.tryResourceManagerConnect(ctx, connection)
@@ -409,4 +446,324 @@ func TestTryResourceManagerConnectUsesRMForTokenAndFallbackToPD(t *testing.T) {
 
 		require.EqualValues(t, 1, pdServer.tokenCount.Load())
 	})
+}
+
+func TestTokenDispatcherReconnectsWhenRMEndpointChanges(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	pdRequestReceived := make(chan struct{}, 1)
+	pdAddr, pdServer, pdCleanup := startTestRMServer(t, "pd", func(server *testRMServer) {
+		server.blockTokenResponse = true
+		server.tokenRequestReceived = pdRequestReceived
+	})
+	t.Cleanup(pdCleanup)
+	rmAddr, rmServer, rmCleanup := startTestRMServer(t, "rm")
+	t.Cleanup(rmCleanup)
+
+	inner := newInnerClientForRMRouteTest(t, ctx, pdAddr)
+	inner.createTokenDispatcher()
+	t.Cleanup(func() {
+		inner.tokenDispatcher.dispatcherCancel()
+		inner.wg.Wait()
+	})
+	cli := &client{inner: inner}
+
+	firstRequestDone := make(chan error, 1)
+	go func() {
+		_, err := cli.AcquireTokenBuckets(ctx, &rmpb.TokenBucketsRequest{
+			Requests: []*rmpb.TokenBucketRequest{{ResourceGroupName: "test-group"}},
+		})
+		firstRequestDone <- err
+	}()
+	select {
+	case <-pdRequestReceived:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for the token request to reach PD")
+	}
+
+	discovery := newTestResourceManagerDiscovery(t, ctx, rmAddr)
+	t.Cleanup(discovery.Close)
+	inner.Lock()
+	inner.resourceManagerDiscovery.Store(discovery)
+	inner.Unlock()
+	require.NoError(t, inner.scheduleUpdateTokenConnection(""))
+
+	select {
+	case err := <-firstRequestDone:
+		require.Error(t, err)
+		require.Equal(t, codes.Canceled, status.Code(err))
+	case <-time.After(3 * time.Second):
+		t.Fatal("stale token request was not canceled after the RM endpoint changed")
+	}
+
+	requestCtx, requestCancel := context.WithTimeout(ctx, 3*time.Second)
+	defer requestCancel()
+	_, err := cli.AcquireTokenBuckets(requestCtx, &rmpb.TokenBucketsRequest{
+		Requests: []*rmpb.TokenBucketRequest{{ResourceGroupName: "test-group"}},
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, pdServer.tokenCount.Load())
+	require.EqualValues(t, 1, rmServer.tokenCount.Load())
+}
+
+func TestTokenDispatcherRechecksEndpointUpdatesAfterReconnect(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	pdRequestReceived := make(chan struct{}, 1)
+	pdAddr, pdServer, pdCleanup := startTestRMServer(t, "pd", func(server *testRMServer) {
+		server.blockTokenResponse = true
+		server.tokenRequestReceived = pdRequestReceived
+	})
+	t.Cleanup(pdCleanup)
+	rmAddr, rmServer, rmCleanup := startTestRMServer(t, "rm")
+	t.Cleanup(rmCleanup)
+	discovery := newTestResourceManagerDiscovery(t, ctx, rmAddr)
+	t.Cleanup(discovery.Close)
+
+	inner := newInnerClientForRMRouteTest(t, ctx, pdAddr)
+	inner.createTokenDispatcher()
+	t.Cleanup(func() {
+		inner.tokenDispatcher.dispatcherCancel()
+		inner.wg.Wait()
+	})
+	cli := &client{inner: inner}
+
+	firstRequestDone := make(chan error, 1)
+	go func() {
+		_, err := cli.AcquireTokenBuckets(ctx, &rmpb.TokenBucketsRequest{
+			Requests: []*rmpb.TokenBucketRequest{{ResourceGroupName: "first-request"}},
+		})
+		firstRequestDone <- err
+	}()
+	select {
+	case <-pdRequestReceived:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for the first token request to reach PD")
+	}
+
+	reconnectStarted := make(chan struct{})
+	allowReconnect := make(chan struct{})
+	var hookOnce, releaseOnce sync.Once
+	releaseReconnect := func() {
+		releaseOnce.Do(func() {
+			close(allowReconnect)
+		})
+	}
+	t.Cleanup(releaseReconnect)
+	testDiscovery := inner.serviceDiscovery.(*testServiceDiscovery)
+	testDiscovery.setGetOrCreateHook(func() {
+		hookOnce.Do(func() {
+			close(reconnectStarted)
+			<-allowReconnect
+		})
+	})
+	require.NoError(t, inner.scheduleUpdateTokenConnection(""))
+	select {
+	case err := <-firstRequestDone:
+		require.Error(t, err)
+		require.Equal(t, codes.Canceled, status.Code(err))
+	case <-time.After(3 * time.Second):
+		t.Fatal("stale token request was not canceled")
+	}
+
+	secondRequestDone := make(chan error, 1)
+	go func() {
+		_, err := cli.AcquireTokenBuckets(ctx, &rmpb.TokenBucketsRequest{
+			Requests: []*rmpb.TokenBucketRequest{{ResourceGroupName: "second-request"}},
+		})
+		secondRequestDone <- err
+	}()
+	select {
+	case <-reconnectStarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for the token dispatcher to start reconnecting")
+	}
+	inner.Lock()
+	inner.resourceManagerDiscovery.Store(discovery)
+	inner.Unlock()
+	require.NoError(t, inner.scheduleUpdateTokenConnection(""))
+	releaseReconnect()
+
+	select {
+	case err := <-secondRequestDone:
+		require.NoError(t, err)
+	case <-time.After(3 * time.Second):
+		t.Fatal("token request was not preserved across reconnects")
+	}
+	require.EqualValues(t, 1, pdServer.tokenCount.Load())
+	require.EqualValues(t, 1, rmServer.tokenCount.Load())
+}
+
+// A PD leader switch must not interrupt an in-flight token request that is
+// being served by a standalone resource-manager connection.
+func TestTokenDispatcherKeepsRMStreamOnPDLeaderChange(t *testing.T) {
+	t.Run("hold-release-without-pd-leader-change", func(t *testing.T) {
+		runRMTokenHoldTest(t, false)
+	})
+	t.Run("pd-leader-change-while-rm-recv-blocked", func(t *testing.T) {
+		runRMTokenHoldTest(t, true)
+	})
+}
+
+func runRMTokenHoldTest(t *testing.T, simulatePDLeaderChange bool) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	holdTokenResponse := make(chan struct{})
+	releaseHold := func() {
+		select {
+		case <-holdTokenResponse:
+		default:
+			close(holdTokenResponse)
+		}
+	}
+	if !simulatePDLeaderChange {
+		t.Cleanup(releaseHold)
+	}
+
+	rmRequestReceived := make(chan struct{}, 1)
+	pdAddr, pdServer, pdCleanup := startTestRMServer(t, "pd")
+	t.Cleanup(pdCleanup)
+	rmAddr, rmServer, rmCleanup := startTestRMServer(t, "rm", func(server *testRMServer) {
+		server.holdTokenResponse = holdTokenResponse
+		server.tokenRequestReceived = rmRequestReceived
+	})
+	t.Cleanup(rmCleanup)
+
+	inner := newInnerClientForRMRouteTest(t, ctx, pdAddr)
+	inner.resourceManagerDiscovery.Store(newTestResourceManagerDiscovery(t, ctx, rmAddr))
+	t.Cleanup(inner.resourceManagerDiscovery.Load().Close)
+	inner.createTokenDispatcher()
+	t.Cleanup(func() {
+		inner.tokenDispatcher.dispatcherCancel()
+		inner.wg.Wait()
+	})
+	cli := &client{inner: inner}
+
+	requestDone := make(chan error, 1)
+	go func() {
+		_, err := cli.AcquireTokenBuckets(ctx, &rmpb.TokenBucketsRequest{
+			Requests: []*rmpb.TokenBucketRequest{{ResourceGroupName: "rm-request"}},
+		})
+		requestDone <- err
+	}()
+	select {
+	case <-rmRequestReceived:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for the token request to reach RM")
+	}
+
+	if simulatePDLeaderChange {
+		// The registered PD leader callback must neither cancel the in-flight
+		// RM stream nor schedule a reconnect, so it returns without touching
+		// the dispatcher.
+		require.NoError(t, inner.onPDLeaderChanged(""))
+	} else {
+		releaseHold()
+	}
+
+	select {
+	case err := <-requestDone:
+		require.NoError(t, err, "PD leader change should not cancel an in-flight RM token stream")
+	case <-time.After(3 * time.Second):
+		if !simulatePDLeaderChange {
+			t.Fatal("timed out waiting for the RM token response")
+		}
+	}
+	require.EqualValues(t, 0, pdServer.tokenCount.Load())
+	require.EqualValues(t, 1, rmServer.tokenCount.Load())
+
+	if !simulatePDLeaderChange {
+		return
+	}
+	// A PD leader switch must not have scheduled a reconnect, so the next
+	// request reuses the same held RM stream rather than opening a fresh one.
+	secondRequest := &rmpb.TokenBucketsRequest{
+		Requests: []*rmpb.TokenBucketRequest{{ResourceGroupName: "rm-request-2"}},
+	}
+	select {
+	case <-cli.inner.updateTokenConnectionCh:
+		t.Fatal("PD leader change scheduled an unnecessary RM token stream reconnect")
+	default:
+	}
+	secondDone := make(chan error, 1)
+	go func() {
+		_, err := cli.AcquireTokenBuckets(ctx, secondRequest)
+		secondDone <- err
+	}()
+	// With the hold still active the second request is also kept on the RM
+	// stream and survives; release it so the dispatcher can complete.
+	releaseHold()
+	select {
+	case err := <-secondDone:
+		require.NoError(t, err, "PD leader change should not break later RM token requests")
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for the second RM token response")
+	}
+	require.EqualValues(t, 0, pdServer.tokenCount.Load())
+	require.EqualValues(t, 2, rmServer.tokenCount.Load())
+}
+
+// A membership check that observes a new PD leader synchronously while a
+// service-mode switch is in progress must not deadlock: the registered
+// leader callback reads the lock-free RM discovery pointer instead of
+// reentering the mode-switch write lock it is running under.
+type manualServiceDiscovery struct{ sd.ServiceDiscovery }
+
+func (*manualServiceDiscovery) Init() error { return nil }
+
+type testMembersServer struct {
+	pdpb.UnimplementedPDServer
+	leader atomic.Pointer[pdpb.Member]
+}
+
+func (s *testMembersServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.GetMembersResponse, error) {
+	m := s.leader.Load()
+	return &pdpb.GetMembersResponse{Header: &pdpb.ResponseHeader{}, Members: []*pdpb.Member{m}, Leader: m}, nil
+}
+
+func TestLeaderChangeDuringServiceModeSwitch(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	server := grpc.NewServer()
+	t.Cleanup(server.Stop)
+	members := &testMembersServer{}
+	oldURL := "http://" + listener.Addr().String()
+	_, port, err := net.SplitHostPort(listener.Addr().String())
+	require.NoError(t, err)
+	members.leader.Store(&pdpb.Member{MemberId: 1, ClientUrls: []string{oldURL}})
+	pdpb.RegisterPDServer(server, members)
+	rmpb.RegisterResourceManagerServer(server, &testRMServer{id: "pd"})
+	go func() { _ = server.Serve(listener) }()
+
+	discovery := sd.NewDefaultServiceDiscovery(ctx, cancel, []string{oldURL}, nil)
+	t.Cleanup(discovery.Close)
+	require.NoError(t, discovery.CheckMemberChanged())
+
+	inner := newInnerClientForRMRouteTest(t, ctx, oldURL)
+	inner.serviceDiscovery = &manualServiceDiscovery{ServiceDiscovery: discovery}
+	require.NoError(t, inner.setup())
+	t.Cleanup(func() {
+		inner.tokenDispatcher.dispatcherCancel()
+		inner.wg.Wait()
+	})
+
+	inner.Lock()
+	inner.serviceMode = pdpb.ServiceMode_API_SVC_MODE
+	inner.Unlock()
+	members.leader.Store(&pdpb.Member{MemberId: 2, ClientUrls: []string{"http://localhost:" + port}})
+	inner.setServiceMode(pdpb.ServiceMode_PD_SVC_MODE)
+	t.Cleanup(func() {
+		if inner.tsoClient != nil {
+			inner.tsoClient.Close()
+		}
+	})
+	inner.RLock()
+	require.Equal(t, pdpb.ServiceMode_PD_SVC_MODE, inner.serviceMode)
+	inner.RUnlock()
 }

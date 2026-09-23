@@ -672,7 +672,7 @@ func TestPersistAndReloadIntegrity(t *testing.T) {
 			err = proto.Unmarshal([]byte(rawValue), groupSetting)
 			re.NoError(err)
 			re.NotNil(groupSetting.KeyspaceId)
-			re.Equal(keyspaceID, groupSetting.KeyspaceId.Value)
+			re.Equal(keyspaceID, groupSetting.KeyspaceId.GetValue())
 			re.Equal(uint64(500), groupSetting.RUSettings.RU.Settings.FillRate)
 		}
 	})
@@ -1106,5 +1106,66 @@ func TestConciliateFillRate(t *testing.T) {
 			re.Equal(float64(-1), group.getOverrideFillRate(), "check fill rate of case %s, group %d", tc.name, i)
 			re.Equal(int64(-1), group.getOverrideBurstLimit(), "check burst limit of case %s, group %d", tc.name, i)
 		}
+	}
+}
+
+func TestRUTrackerPreservesPositiveFractionalDemand(t *testing.T) {
+	re := require.New(t)
+	rt := newRUTracker(defaultRUTrackerTimeConstant)
+	now := time.Now()
+	rt.sample(0, now, 0)
+	rt.sample(0, now.Add(5*time.Second), 0)
+	re.True(rt.isInitialized())
+	re.Zero(rt.getRUPerSec())
+	rt.sample(0, now.Add(10*time.Second), 1)
+	re.InDelta(0.1, rt.getRUPerSec(), 1e-12)
+	// Preserve the existing cleanup of negligible demand on a zero sample.
+	rt.sample(0, now.Add(15*time.Second), 0)
+	re.Zero(rt.getRUPerSec())
+	re.True(rt.isInitialized())
+}
+
+func TestConciliateFractionalDemand(t *testing.T) {
+	for _, clients := range []uint64{1, 2} {
+		t.Run(fmt.Sprintf("clients-%d", clients), func(t *testing.T) {
+			re := require.New(t)
+			krgm := newKeyspaceResourceGroupManager(1, storage.NewStorageWithMemoryBackend())
+			krgm.setServiceLimit(50)
+			now := time.Now()
+			for _, name := range []string{"cold", "hot"} {
+				re.NoError(krgm.addResourceGroup(newTestResourceGroup(name, 8, 100, 100)))
+				grt := krgm.getOrCreateGroupRUTracker(name)
+				grt.sample(1, now, 0)
+				grt.sample(1, now.Add(5*time.Second), 0)
+				tokens := 1.0
+				if name == "hot" {
+					tokens = 800
+				}
+				grt.sample(1, now.Add(10*time.Second), tokens)
+			}
+			krgm.conciliateFillRates()
+			cold := krgm.getMutableResourceGroup("cold")
+			re.InDelta(0.1, cold.getOverrideFillRate(), 1e-12)
+			re.Zero(cold.getOverrideBurstLimit())
+			re.InDelta(50.0, cold.getOverrideFillRate()+krgm.getMutableResourceGroup("hot").getOverrideFillRate(), 1e-12)
+			// Consume the allocated rate over time, beyond the initial borrowing allowance.
+			// A zero burst capacity must not prevent replenishment from repaying loans.
+			for round := range 20 {
+				at := now.Add(time.Duration(10+5*round) * time.Second)
+				for clientID := uint64(1); clientID <= clients; clientID++ {
+					requested := 0.5 / float64(clients)
+					result := cold.RequestRU(at, requested, 5000, clientID,
+						krgm.getGroupRUTracker("cold"), krgm.getServiceLimiter())
+					re.NotNil(result)
+					re.InDelta(requested, result.GrantedTokens.Tokens, 1e-12, "round %d", round)
+				}
+				re.InDelta(-0.5, cold.RUSettings.RU.Tokens, 1e-12)
+			}
+			var sum float64
+			for _, slot := range cold.RUSettings.RU.tokenSlots {
+				sum += slot.fillRate
+			}
+			re.InDelta(0.1, sum, 1e-12)
+		})
 	}
 }

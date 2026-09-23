@@ -21,6 +21,7 @@ import (
 	"io"
 	"net/http"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -38,8 +39,10 @@ import (
 	"github.com/tikv/pd/pkg/cluster"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace"
 	mcsaffinity "github.com/tikv/pd/pkg/mcs/scheduling/server/affinity"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server/keyspace_meta"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/meta"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/rule"
 	"github.com/tikv/pd/pkg/ratelimit"
@@ -47,6 +50,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/keyrange"
 	"github.com/tikv/pd/pkg/schedule/labeler"
@@ -88,6 +92,8 @@ type Cluster struct {
 	configWatcher     *config.Watcher
 	ruleWatcher       *rule.Watcher
 	affinityWatcher   *mcsaffinity.Watcher
+	keyspaceWatcher   *keyspace_meta.Watcher
+	keyspaceCache     *keyspace.Cache
 	coordinator       *schedule.Coordinator
 	checkMembershipCh chan struct{}
 	pdLeader          atomic.Value
@@ -158,6 +164,7 @@ func NewCluster(
 		regionStats:       statistics.NewRegionStatistics(basicCluster, persistConfig, ruleManager),
 		storage:           storage,
 		hbStreams:         hbStreams,
+		keyspaceCache:     keyspace.NewCache(),
 		checkMembershipCh: checkMembershipCh,
 		httpClient:        httpClient,
 		backendAddress:    backendAddress,
@@ -237,6 +244,11 @@ func (c *Cluster) GetAffinityManager() *affinity.Manager {
 	return c.affinityManager
 }
 
+// GetKeyspaceCache returns the keyspace cache.
+func (c *Cluster) GetKeyspaceCache() *keyspace.Cache {
+	return c.keyspaceCache
+}
+
 // GetRegionSplitter returns the region splitter.
 func (c *Cluster) GetRegionSplitter() *splitter.RegionSplitter {
 	return c.coordinator.GetRegionSplitter()
@@ -250,6 +262,11 @@ func (c *Cluster) GetRegionScatterer() *scatter.RegionScatterer {
 // GetStoresLoads returns load stats of all stores.
 func (c *Cluster) GetStoresLoads() map[uint64]statistics.StoreKindLoads {
 	return c.hotStat.GetStoresLoads()
+}
+
+// GetStoreReadCPURecentMax returns the recent max read CPU usage of a store.
+func (c *Cluster) GetStoreReadCPURecentMax(storeID uint64) float64 {
+	return c.hotStat.GetStoreReadCPURecentMax(storeID)
 }
 
 // IsRegionHot checks if a region is in hot state.
@@ -317,6 +334,7 @@ func (c *Cluster) SetRuntimeResources(
 	configWatcher *config.Watcher,
 	ruleWatcher *rule.Watcher,
 	affinityWatcher *mcsaffinity.Watcher,
+	keyspaceWatcher *keyspace_meta.Watcher,
 ) {
 	c.runtimeMu.Lock()
 	defer c.runtimeMu.Unlock()
@@ -324,6 +342,12 @@ func (c *Cluster) SetRuntimeResources(
 	c.configWatcher = configWatcher
 	c.ruleWatcher = ruleWatcher
 	c.affinityWatcher = affinityWatcher
+	c.keyspaceWatcher = keyspaceWatcher
+	metaWatcher.SetOnStoreTombstoned(func(storeID uint64) {
+		c.hotStat.RemoveRollingStoreStats(storeID)
+		c.ruleManager.RemoveStoreCache(storeID)
+		DeleteStoreMetrics(strconv.FormatUint(storeID, 10))
+	})
 }
 
 func (c *Cluster) stopCluster() {
@@ -337,12 +361,14 @@ func (c *Cluster) cleanupRuntimeResources() {
 	ruleWatcher := c.ruleWatcher
 	metaWatcher := c.metaWatcher
 	configWatcher := c.configWatcher
+	keyspaceWatcher := c.keyspaceWatcher
 	hbStreams := c.hbStreams
 	storage := c.storage
 	c.affinityWatcher = nil
 	c.ruleWatcher = nil
 	c.metaWatcher = nil
 	c.configWatcher = nil
+	c.keyspaceWatcher = nil
 	c.hbStreams = nil
 	c.storage = nil
 	c.runtimeMu.Unlock()
@@ -359,6 +385,9 @@ func (c *Cluster) cleanupRuntimeResources() {
 	}
 	if configWatcher != nil {
 		configWatcher.Close()
+	}
+	if keyspaceWatcher != nil {
+		keyspaceWatcher.Close()
 	}
 	if storage != nil {
 		storage.Close()
@@ -587,11 +616,11 @@ func (c *Cluster) HandleStoreHeartbeat(heartbeat *schedulingpb.StoreHeartbeatReq
 	reportInterval := stats.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
 
-	regions := make(map[uint64]*core.RegionInfo, len(stats.GetPeerStats()))
+	reportedRegions := make(map[uint64]struct{}, len(stats.GetPeerStats()))
 	for _, peerStat := range stats.GetPeerStats() {
 		regionID := peerStat.GetRegionId()
 		region := c.GetRegion(regionID)
-		regions[regionID] = region
+		reportedRegions[regionID] = struct{}{}
 		if region == nil {
 			log.Warn("discard hot peer stat for unknown region",
 				zap.Uint64("region-id", regionID),
@@ -617,23 +646,11 @@ func (c *Cluster) HandleStoreHeartbeat(heartbeat *schedulingpb.StoreHeartbeatReq
 			utils.RegionReadCPU:       regionReadCPU * float64(interval),
 			utils.RegionWriteCPU:      0,
 		}
-		checkReadPeerTask := func(cache *statistics.HotPeerCache) {
-			stats := cache.CheckPeerFlow(region, []*metapb.Peer{peer}, loads, interval)
-			for _, stat := range stats {
-				cache.UpdateStat(stat)
-			}
-		}
-		c.hotStat.CheckReadAsync(checkReadPeerTask)
+		c.hotStat.CheckReadPeerAsync(region, peer, loads, interval)
 	}
 
 	// Here we will compare the reported regions with the previous hot peers to decide if it is still hot.
-	collectUnReportedPeerTask := func(cache *statistics.HotPeerCache) {
-		stats := cache.CheckColdPeer(storeID, regions, interval)
-		for _, stat := range stats {
-			cache.UpdateStat(stat)
-		}
-	}
-	c.hotStat.CheckReadAsync(collectUnReportedPeerTask)
+	c.hotStat.CheckColdPeerAsync(storeID, reportedRegions, interval)
 	return nil
 }
 
@@ -725,8 +742,51 @@ func (c *Cluster) collectMetrics() {
 	for _, s := range stores {
 		statsMap.Observe(s)
 		statistics.ObserveHotStat(s, c.hotStat.StoresStats)
+		// Observe/ObserveHotStat write from this snapshot unconditionally, so a
+		// concurrent bury or final removal of s between GetStores() above and
+		// this write can have its own metric cleanup undone by it. Re-checking
+		// right after the write and redoing the cleanup closes that race
+		// without needing synchronization with the bury/removal path.
+		current := c.GetStore(s.GetID())
+		// DeleteClusterStatusMetrics only covers the clusterStatusGauge fields
+		// observe() keeps refreshing unconditionally while a store stays
+		// tombstoned (store_tombstone_count and friends, self-healing by
+		// design); only clean those up once the store is gone for good, or
+		// they'd flicker off every tick during a legitimate tombstone period.
+		if current == nil {
+			statistics.DeleteClusterStatusMetrics(s)
+		}
+		// ResetStoreStatistics covers storeStatusGauge/storeStats, which
+		// observe() itself stops writing as soon as it sees a tombstoned
+		// store -- so, unlike the fields above, there's no legitimate write to
+		// preserve here once the store is IsRemoved(), not just once it's
+		// gone entirely. But storeStatusGauge's cleanup is a DeletePartialMatch
+		// full-vector scan, so only pay for it when this iteration's own s was
+		// still live (observe(s) could then have written using stale data);
+		// once a snapshot correctly shows IsRemoved(), observe() already
+		// skipped writing these fields and there's nothing to undo, so a
+		// tombstoned store sitting in GetStores() for up to 30 days doesn't
+		// cost a scan on every 10s tick.
+		if !s.IsRemoved() && (current == nil || current.IsRemoved()) {
+			statistics.ResetStoreStatistics(strconv.FormatUint(s.GetID(), 10))
+		}
 	}
 	statsMap.Collect()
+	// statsMap.Collect() writes statistics.StoreLimitGauge from its own
+	// GetStoresLimit() snapshot, taken independently of stores above and with
+	// no cluster reference of its own to re-check against. Reuse the stores
+	// snapshot already captured here to catch and undo it. Like
+	// ResetStoreStatistics above, a store limit has no legitimate reason to
+	// still be configured once the store is tombstoned, so this also checks
+	// IsRemoved(), not just full removal.
+	for _, s := range stores {
+		if store := c.GetStore(s.GetID()); store == nil || store.IsRemoved() {
+			id := strconv.FormatUint(s.GetID(), 10)
+			statistics.StoreLimitGauge.DeleteLabelValues(id, "add-peer")
+			statistics.StoreLimitGauge.DeleteLabelValues(id, "remove-peer")
+			statistics.StoreLimitGauge.DeleteLabelValues(id, "transfer-leader-in")
+		}
+	}
 
 	c.coordinator.GetSchedulersController().CollectSchedulerMetrics()
 	c.coordinator.CollectHotSpotMetrics()
@@ -745,6 +805,9 @@ func resetMetrics() {
 	statistics.Reset()
 	schedulers.ResetSchedulerMetrics()
 	schedule.ResetHotSpotMetrics()
+	filter.ResetFilterMetrics()
+	hbstream.ResetHeartbeatStreamMetrics()
+	ResetStoreMetrics()
 }
 
 // StartBackgroundJobs starts background jobs.
@@ -903,19 +966,27 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 
 // HandleRegionBuckets processes region buckets from client
 func (c *Cluster) HandleRegionBuckets(b *metapb.Buckets) error {
-	if err := c.processRegionBuckets(b); err != nil {
+	applied, err := c.processRegionBuckets(b)
+	if err != nil {
 		return err
 	}
-
-	c.hotStat.CheckAsync(buckets.NewCheckPeerTask(b))
+	if applied {
+		c.hotStat.CheckAsync(buckets.NewCheckPeerTask(b))
+	}
 	return nil
 }
 
-// processRegionBuckets update the bucket information.
-func (c *Cluster) processRegionBuckets(buckets *metapb.Buckets) error {
+// processRegionBuckets updates the bucket information. The first return
+// value reports whether the report was actually applied, so callers don't
+// enqueue hot-bucket work for a report that was ignored because its leader
+// is tombstoned.
+func (c *Cluster) processRegionBuckets(buckets *metapb.Buckets) (bool, error) {
 	region := c.GetRegion(buckets.GetRegionId())
 	if region == nil {
-		return errors.Errorf("region %v not found", buckets.GetRegionId())
+		return false, errors.Errorf("region %v not found", buckets.GetRegionId())
+	}
+	if store := c.GetStore(region.GetLeader().GetStoreId()); store != nil && store.IsRemoved() {
+		return false, nil
 	}
 	// use CAS to update the bucket information.
 	// the two request(A:3,B:2) get the same region and need to update the buckets.
@@ -923,10 +994,10 @@ func (c *Cluster) processRegionBuckets(buckets *metapb.Buckets) error {
 	// the retry should keep the old version and the new version will be set to the region.bucket, like two requests (A:2,B:3).
 	for range 3 {
 		if success := region.CompareAndSetReportBuckets(buckets); success {
-			return nil
+			return true, nil
 		}
 	}
-	return nil
+	return false, nil
 }
 
 // IsPrepared return true if the prepare checker is ready.

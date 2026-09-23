@@ -232,6 +232,7 @@ func checkRules(t *testing.T, rules []*Rule, expect [][2]string) {
 	re := require.New(t)
 	re.Len(rules, len(expect))
 	for i := range rules {
+		// #nosec G602 -- require.Len above guarantees an expected key for every rule.
 		re.Equal(expect[i], rules[i].Key())
 	}
 }
@@ -525,7 +526,7 @@ func TestCacheManager(t *testing.T) {
 	}
 	region := core.NewRegionInfo(regionMeta, regionMeta.Peers[0])
 	fit := manager.FitRegion(stores, region)
-	manager.SetRegionFitCache(region, fit)
+	manager.SetRegionFitCache(stores, region, fit)
 	// bestFit is not stored when the total number of hits is insufficient.
 	for i := 1; i < minHitCountToCacheHit/2; i++ {
 		manager.FitRegion(stores, region)

@@ -28,6 +28,7 @@ import (
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
@@ -47,7 +48,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 type sequencer struct {
@@ -788,6 +789,78 @@ func TestSeedGroupDistributionByRange(t *testing.T) {
 	re.Equal(group, val)
 }
 
+func TestInternalScatterAllowsWhenReadCPUIsBelowLowWatermark(t *testing.T) {
+	re := require.New(t)
+	scatterer, tc, region := newInternalScatterReadCPUTestFixture(t)
+	setUnifiedReadPoolThreadCount(tc)
+	setStoreReadCPU(tc, 1, 500)
+	setStoreReadCPU(tc, 4, 50)
+
+	op, err := scatterer.ScatterInternal(region, "below-read-pool-low-watermark", []byte("a"), []byte("z"))
+	re.NoError(err)
+	re.NotNil(op)
+	_, targetLeader := finalPlacementAfterOperator(region, op)
+	re.Equal(uint64(4), targetLeader)
+}
+
+func TestInternalScatterSkipsWhenIdleTargetHasZeroReadCPU(t *testing.T) {
+	re := require.New(t)
+	scatterer, tc, region := newInternalScatterReadCPUTestFixture(t)
+	setUnifiedReadPoolThreadCount(tc)
+	setStoreReadCPU(tc, 1, 500)
+	setStoreReadCPU(tc, 4, 0)
+	region = core.RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{
+		Region:   region.GetMeta(),
+		Leader:   region.GetLeader(),
+		CpuStats: &pdpb.CPUStats{UnifiedRead: 400},
+	}, 0)
+	tc.PutRegion(region)
+
+	op, err := scatterer.ScatterInternal(region, "idle-zero-read-cpu", []byte("a"), []byte("z"))
+	re.ErrorIs(err, ErrInternalScatterBalancedReadCPU)
+	re.Nil(op)
+}
+
+func TestInternalScatterSkipsWhenReadCPUIsBalanced(t *testing.T) {
+	re := require.New(t)
+	scatterer, tc, region := newInternalScatterReadCPUTestFixture(t)
+	setUnifiedReadPoolThreadCount(tc)
+	setStoreReadCPU(tc, 1, 500)
+	setStoreReadCPU(tc, 4, 450)
+
+	op, err := scatterer.ScatterInternal(region, "balanced-read-cpu", []byte("a"), []byte("z"))
+	re.ErrorIs(err, ErrInternalScatterBalancedReadCPU)
+	var retryLater *InternalScatterRetryLater
+	re.ErrorAs(err, &retryLater)
+	re.Equal(InternalScatterRetryBalancedReadCPU, retryLater.Reason)
+	re.Nil(op)
+}
+
+func TestInternalScatterAllowsWhenReadCPUIsImbalanced(t *testing.T) {
+	re := require.New(t)
+	scatterer, tc, region := newInternalScatterReadCPUTestFixture(t)
+	setUnifiedReadPoolThreadCount(tc)
+	setStoreReadCPU(tc, 1, 700)
+	setStoreReadCPU(tc, 4, 450)
+
+	op, err := scatterer.ScatterInternal(region, "imbalanced-read-cpu", []byte("a"), []byte("z"))
+	re.NoError(err)
+	re.NotNil(op)
+	_, targetLeader := finalPlacementAfterOperator(region, op)
+	re.Equal(uint64(4), targetLeader)
+}
+
+func TestInternalScatterBalancedReadCPUDoesNotBlockSameLeader(t *testing.T) {
+	re := require.New(t)
+	scatterer, tc, region := newInternalScatterReadCPUTestFixture(t)
+	setUnifiedReadPoolThreadCount(tc)
+	setStoreReadCPU(tc, 1, 500)
+
+	op, err := scatterer.ScatterInternal(region, "balanced-same-leader", []byte("t"), []byte("z"))
+	re.NoError(err)
+	re.Nil(op)
+}
+
 func TestSeedGroupDistributionByRangeAppliesNetChange(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1238,7 +1311,7 @@ func TestScatterWithAffinity(t *testing.T) {
 	re.Nil(op)
 }
 
-func TestScatterInternalSkipsHotOnlyForAdmin(t *testing.T) {
+func TestScatterSkipsHotRegion(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1268,14 +1341,16 @@ func TestScatterInternalSkipsHotOnlyForAdmin(t *testing.T) {
 	scatterer := NewRegionScatterer(ctx, tc, oc, tc.AddPendingProcessedRegions)
 
 	op, err := scatterer.Scatter(region, "", true)
-	re.ErrorContains(err, "is hot")
+	re.ErrorIs(err, ErrRegionHot)
 	re.Nil(op)
+	var retryLater *InternalScatterRetryLater
+	re.NotErrorAs(err, &retryLater)
 
 	op, err = scatterer.ScatterInternal(region, "", region.GetStartKey(), region.GetEndKey())
-	re.NoError(err)
-	if op != nil {
-		re.Equal(InternalScatterOperatorDesc, op.Desc())
-	}
+	re.ErrorIs(err, ErrRegionHot)
+	re.ErrorAs(err, &retryLater)
+	re.Equal(InternalScatterRetryHotRegion, retryLater.Reason)
+	re.Nil(op)
 }
 
 func TestInternalScatterPeerSelection(t *testing.T) {
@@ -1408,15 +1483,68 @@ func TestInternalScatterLeaderFiltersRejectedTarget(t *testing.T) {
 		4: {StoreId: 4, Role: metapb.PeerRole_Voter},
 		5: {StoreId: 5, Role: metapb.PeerRole_Voter},
 	}
-	candidates := scatterer.filterAllowedLeaderCandidateStores(
+	candidates, _ := scatterer.filterAllowedLeaderCandidateStores(
 		region,
 		targetPeers,
 		[]uint64{1, 4, 5},
+		nil,
+		0,
 	)
 	re.NotContains(candidates, uint64(4))
 
 	leader, _ := scatterer.selectAvailableLeaderStore(group, region, candidates, state.ordinaryEngine.asSelectionContext(), true)
 	re.Equal(uint64(5), leader)
+
+	for _, id := range []uint64{1, 5} {
+		tc.ResetStoreLimit(id, storelimit.TransferLeaderIn, 0.000001)
+		re.True(tc.GetStore(id).GetStoreLimit().Take(storelimit.RegionInfluence[storelimit.TransferLeaderIn], storelimit.TransferLeaderIn, constant.Medium))
+	}
+	candidates, _ = scatterer.filterAllowedLeaderCandidateStores(region, targetPeers, []uint64{1, 4, 5}, nil, 0)
+	// Keeping the current leader does not require transfer-in budget.
+	re.Equal([]uint64{1}, candidates)
+}
+
+func TestInternalScatterLeaderFiltersReadPoolPressure(t *testing.T) {
+	re := require.New(t)
+	scatterer, state, region, _ := newInternalScatterSelectionTestFixture(t, nil)
+	tc := scatterer.cluster.(*mockcluster.Cluster)
+	region = core.RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{
+		Region:   region.GetMeta(),
+		Leader:   region.GetLeader(),
+		CpuStats: &pdpb.CPUStats{UnifiedRead: 300},
+	}, 0)
+	cfg := tc.PersistOptions.GetStoreConfig().Clone()
+	cfg.ReadPool.Unified.MaxThreadCount = 12
+	tc.SetStoreConfig(cfg)
+	tc.Set(4, &pdpb.StoreStats{
+		Interval: &pdpb.TimeInterval{EndTimestamp: utils.StoreHeartBeatReportInterval},
+		CpuUsages: []*pdpb.RecordPair{{
+			Key:   "unified-read-0",
+			Value: 550,
+		}},
+	})
+
+	group := "test-leader-read-pool-pressure"
+	re.True(state.ordinaryEngine.selectedLeader.InitGroupDistribution(group, map[uint64]uint64{1: 3, 4: 0, 5: 1}))
+	targetPeers := map[uint64]*metapb.Peer{
+		1: region.GetStorePeer(1),
+		4: {StoreId: 4, Role: metapb.PeerRole_Voter},
+		5: {StoreId: 5, Role: metapb.PeerRole_Voter},
+	}
+	readCPUByStore := splitScatterReadCPUByStore(tc.GetStores(), tc)
+	candidates, _ := scatterer.filterAllowedLeaderCandidateStores(region, targetPeers, []uint64{1, 4, 5}, readCPUByStore, tc.GetStoreConfig().GetUnifiedReadPoolMaxThreadCount())
+	re.NotContains(candidates, uint64(4))
+
+	region = core.RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{
+		Region:   region.GetMeta(),
+		Leader:   region.GetLeader(),
+		CpuStats: &pdpb.CPUStats{UnifiedRead: 900},
+	}, 0)
+	candidates, _ = scatterer.filterAllowedLeaderCandidateStores(region, targetPeers, []uint64{1, 5}, nil, tc.GetStoreConfig().GetUnifiedReadPoolMaxThreadCount())
+	re.Equal([]uint64{1}, candidates)
+
+	leader, _ := scatterer.selectAvailableLeaderStore(group, region, candidates, state.ordinaryEngine.asSelectionContext(), true)
+	re.Equal(uint64(1), leader)
 }
 
 func TestInternalScatterLeaderKeepsOriginWhenSourcePausedOut(t *testing.T) {
@@ -1432,7 +1560,7 @@ func TestInternalScatterLeaderKeepsOriginWhenSourcePausedOut(t *testing.T) {
 		4: {StoreId: 4, Role: metapb.PeerRole_Voter},
 		5: {StoreId: 5, Role: metapb.PeerRole_Voter},
 	}
-	candidates := scatterer.filterAllowedLeaderCandidateStores(region, targetPeers, []uint64{1, 4, 5})
+	candidates, _ := scatterer.filterAllowedLeaderCandidateStores(region, targetPeers, []uint64{1, 4, 5}, nil, 0)
 	re.Equal([]uint64{1}, candidates)
 
 	leader, _ := scatterer.selectAvailableLeaderStore(group, region, candidates, state.ordinaryEngine.asSelectionContext(), true)
@@ -1481,6 +1609,46 @@ func newInternalScatterSelectionTestFixture(t *testing.T, storeRegionCounts map[
 
 	scatterer := NewRegionScatterer(ctx, tc, oc, tc.AddPendingProcessedRegions)
 	return scatterer, newTestScatterState(scatterer), region, peer
+}
+
+func newInternalScatterReadCPUTestFixture(t *testing.T) (*RegionScatterer, *mockcluster.Cluster, *core.RegionInfo) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
+	t.Cleanup(stream.Close)
+	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
+	for i := uint64(1); i <= 4; i++ {
+		tc.AddRegionStore(i, 0)
+		tc.SetStoreLastHeartbeatInterval(i, -10*time.Minute)
+	}
+
+	tc.AddLeaderRegionWithRange(1, "a", "j", 1, 2, 3)
+	tc.AddLeaderRegionWithRange(2, "j", "t", 1, 2, 3)
+	tc.AddLeaderRegionWithRange(3, "t", "z", 1, 2, 3)
+	region := tc.GetRegion(3)
+
+	scatterer := NewRegionScatterer(ctx, tc, oc, tc.AddPendingProcessedRegions)
+	return scatterer, tc, region
+}
+
+func setUnifiedReadPoolThreadCount(tc *mockcluster.Cluster) {
+	cfg := tc.PersistOptions.GetStoreConfig().Clone()
+	cfg.ReadPool.Unified.MaxThreadCount = 12
+	tc.SetStoreConfig(cfg)
+}
+
+func setStoreReadCPU(tc *mockcluster.Cluster, storeID uint64, readCPU uint64) {
+	tc.Set(storeID, &pdpb.StoreStats{
+		Interval: &pdpb.TimeInterval{EndTimestamp: utils.StoreHeartBeatReportInterval},
+		CpuUsages: []*pdpb.RecordPair{{
+			Key:   "unified-read-0",
+			Value: readCPU,
+		}},
+	})
 }
 
 func newTestExcludedStoreFilter(stores ...uint64) []filter.Filter {

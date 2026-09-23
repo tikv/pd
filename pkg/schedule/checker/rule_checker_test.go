@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/pingcap/failpoint"
@@ -31,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
@@ -408,6 +410,18 @@ func (suite *ruleCheckerTestSuite) TestFixRoleLeader() {
 	op := suite.rc.Check(suite.cluster.GetRegion(1))
 	re.NotNil(op)
 	re.Equal("fix-follower-role", op.Desc())
+	re.Equal(uint64(3), op.Step(0).(operator.TransferLeader).ToStore)
+
+	suite.cluster.SetStoreLimit(3, storelimit.TransferLeaderIn, 0.00006)
+	suite.cluster.ResetStoreLimit(3, storelimit.TransferLeaderIn, 0.000001)
+	limiter := suite.cluster.GetStore(3).GetStoreLimit()
+	re.True(limiter.Take(storelimit.RegionInfluence[storelimit.TransferLeaderIn], storelimit.TransferLeaderIn, constant.Medium))
+	re.Nil(suite.rc.Check(suite.cluster.GetRegion(1)))
+
+	suite.cluster.SetStoreLimit(3, storelimit.TransferLeaderIn, storelimit.Unlimited)
+	suite.cluster.ResetStoreLimit(3, storelimit.TransferLeaderIn, storelimit.Unlimited/time.Minute.Seconds())
+	op = suite.rc.Check(suite.cluster.GetRegion(1))
+	re.NotNil(op)
 	re.Equal(uint64(3), op.Step(0).(operator.TransferLeader).ToStore)
 }
 
@@ -1496,6 +1510,39 @@ func (suite *ruleCheckerTestSuite) TestFixDownPeer() {
 	err = suite.ruleManager.SetRule(rule)
 	re.NoError(err)
 	re.Nil(suite.rc.Check(region))
+}
+
+func (suite *ruleCheckerTestSuite) TestFastFailoverLeaderTransferWithExhaustedLimit() {
+	re := suite.Require()
+	tc := suite.cluster
+	for _, id := range []uint64{1, 2, 3, 4} {
+		tc.AddLeaderStore(id, 1)
+	}
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	tc.SetStoreDown(1)
+	tc.PutStore(tc.GetStore(1).Clone(core.SetLastHeartbeatTS(time.Now().Add(-time.Hour))))
+	region := tc.GetRegion(1)
+	region = region.Clone(core.WithDownPeers([]*pdpb.PeerStats{{Peer: region.GetStorePeer(1), DownSeconds: 3600}}))
+	// Prefer a healthy follower over retaining the outgoing leader.
+	suite.rc.record.incOfflineLeaderCount(1)
+	for _, id := range []uint64{2, 3, 4} {
+		tc.SetStoreLimit(id, storelimit.TransferLeaderIn, 0.00006)
+		tc.ResetStoreLimit(id, storelimit.TransferLeaderIn, 0.000001)
+		re.True(tc.GetStore(id).GetStoreLimit().Take(storelimit.RegionInfluence[storelimit.TransferLeaderIn], storelimit.TransferLeaderIn, constant.Medium))
+	}
+	op := suite.rc.Check(region)
+	re.Nil(op)
+
+	// Fast failover keeps its priority but must select a target with budget.
+	tc.SetStoreLimit(2, storelimit.TransferLeaderIn, storelimit.Unlimited)
+	tc.ResetStoreLimit(2, storelimit.TransferLeaderIn, storelimit.Unlimited/time.Minute.Seconds())
+	op = suite.rc.Check(region)
+	re.NotNil(op)
+	re.Equal(constant.Urgent, op.GetPriorityLevel())
+	re.Equal("replace-rule-down-leader-peer", op.Desc())
+	influence := operator.NewTotalOpInfluence([]*operator.Operator{op}, tc.GetBasicCluster())
+	re.Equal(storelimit.RegionInfluence[storelimit.TransferLeaderIn], influence.GetStoreInfluence(2).GetStepCost(storelimit.TransferLeaderIn))
+	re.Zero(influence.GetStoreInfluence(3).GetStepCost(storelimit.TransferLeaderIn))
 }
 
 func (suite *ruleCheckerTestSuite) TestFixDownPeerWithNoWitness() {
@@ -2630,4 +2677,25 @@ func (suite *ruleCheckerTestSuite) TestFixBetterLocationEngineConstraint() {
 	region2 := suite.cluster.GetRegion(2)
 	op = suite.rc.Check(region2)
 	re.Empty(op)
+}
+
+func TestRecorderRefreshLooksUpStoreIDNotCount(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	// Store 5 exists and is live -- it's the counter *value* below, not a
+	// store ID. Store 999, the counter's real key, is never registered.
+	cluster.AddRegionStore(5, 0)
+
+	rec := newRecord()
+	rec.offlineLeaderCounter[999] = 5
+	rec.lastUpdateTime = time.Now().Add(-offlineCounterTTL - time.Minute)
+
+	// If refresh's loop bound its range variable to the map value instead of
+	// the key, it would look up store 5 (found, live) instead of store 999
+	// (not found) and wrongly conclude nothing needs cleaning.
+	rec.refresh(cluster)
+
+	re.Empty(rec.offlineLeaderCounter)
 }

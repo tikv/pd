@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/stretchr/testify/require"
 
@@ -123,7 +124,7 @@ func checkCreateRequest(re *require.Assertions, request *handlers.CreateKeyspace
 
 // checkCreateByIDRequest verifies a keyspace meta matches a create request.
 func checkCreateByIDRequest(re *require.Assertions, request *handlers.CreateKeyspaceByIDParams, meta *keyspacepb.KeyspaceMeta) {
-	re.Equal(*request.ID, meta.Id)
+	re.Equal(*request.ID, meta.GetId())
 	re.Equal(keyspacepb.KeyspaceState_ENABLED, meta.State)
 	checkConfig(re, request.Config, keyspace.IgnoreMetaServiceGroup(meta.Config))
 }
@@ -305,9 +306,22 @@ func MustFinishSplitKeyspaceGroup(re *require.Assertions, server *tests.TestServ
 		if err != nil {
 			return false
 		}
-		if resp.StatusCode == http.StatusServiceUnavailable ||
-			resp.StatusCode == http.StatusInternalServerError {
+		if resp.StatusCode == http.StatusServiceUnavailable {
 			return false
+		}
+		if resp.StatusCode == http.StatusInternalServerError {
+			if !strings.Contains(string(data), "ErrKeyspaceGroupNotInSplit") {
+				return false
+			}
+			// A TSO server can finish the split after this test observes that the
+			// target group is ready but before this request reaches PD. Treat that
+			// race as success only after verifying the intended final state.
+			manager := server.GetServer().GetKeyspaceGroupManager()
+			if manager == nil {
+				return false
+			}
+			group, err := manager.GetKeyspaceGroupByID(id)
+			return err == nil && group != nil && !group.IsSplitting()
 		}
 		re.Equal(http.StatusOK, resp.StatusCode, string(data))
 		return true

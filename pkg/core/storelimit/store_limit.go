@@ -33,9 +33,10 @@ const (
 
 // RegionInfluence represents the influence of an operator step, which is used by store limit.
 var RegionInfluence = []int64{
-	AddPeer:      influence,
-	RemovePeer:   influence,
-	SendSnapshot: influence,
+	AddPeer:          influence,
+	RemovePeer:       influence,
+	SendSnapshot:     influence,
+	TransferLeaderIn: influence,
 }
 
 // SmallRegionInfluence represents the influence of an operator step
@@ -47,9 +48,10 @@ var SmallRegionInfluence = []int64{
 
 // TypeNameValue indicates the name of store limit type and the enum value
 var TypeNameValue = map[string]Type{
-	"add-peer":      AddPeer,
-	"remove-peer":   RemovePeer,
-	"send-snapshot": SendSnapshot,
+	"add-peer":           AddPeer,
+	"remove-peer":        RemovePeer,
+	"send-snapshot":      SendSnapshot,
+	"transfer-leader-in": TransferLeaderIn,
 }
 
 // String returns the representation of the Type

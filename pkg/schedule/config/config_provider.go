@@ -69,6 +69,7 @@ type SchedulerConfigProvider interface {
 
 	GetScheduleConfig() *ScheduleConfig
 	SetScheduleConfig(*ScheduleConfig)
+	SetSchedulers(SchedulerConfigs)
 }
 
 // CheckerConfigProvider is the interface for checker configurations.
@@ -148,4 +149,5 @@ type StoreConfigProvider interface {
 	CheckRegionKeys(uint64, uint64) error
 	IsEnableRegionBucket() bool
 	IsRaftKV2() bool
+	GetUnifiedReadPoolMaxThreadCount() uint64
 }

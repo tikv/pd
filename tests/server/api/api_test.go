@@ -48,7 +48,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 func TestReconnect(t *testing.T) {
@@ -101,6 +101,10 @@ func TestReconnect(t *testing.T) {
 	// Request will fail with no leader.
 	for name, s := range cluster.GetServers() {
 		if name != leader && name != newLeader {
+			// Once quorum is lost, etcd may not deliver the leader-key deletion
+			// before the stopped leader becomes unreachable. Clear the cached
+			// leader so this test exercises the no-leader response deterministically.
+			s.ResetPDLeader()
 			testutil.Eventually(re, func() bool {
 				res, err := tests.TestDialClient.Get(s.GetConfig().AdvertiseClientUrls + "/pd/api/v1/members")
 				re.NoError(err)
@@ -507,8 +511,7 @@ func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
 
 func (suite *middlewareTestSuite) TestAuditLocalLogBackend() {
 	re := suite.Require()
-	fname := testutil.InitTempFileLogger("info")
-	defer os.RemoveAll(fname)
+	fname := testutil.InitTempFileLogger(suite.T(), "info")
 	leader := suite.cluster.GetLeaderServer()
 	re.NotNil(leader)
 	input := map[string]any{
@@ -697,8 +700,10 @@ func (suite *redirectorTestSuite) TestRedirect() {
 	// Test redirect during leader election.
 	leader = suite.cluster.GetLeaderServer()
 	re.NotNil(leader)
-	err := leader.ResignLeaderWithRetry()
-	re.NoError(err)
+	// Reset only PD leadership. ResignLeaderWithRetry also transfers etcd
+	// leadership, which can race with the leader loop campaigning again and
+	// leave the test cluster without a stable leader.
+	leader.ResetPDLeader()
 	for _, svr := range suite.cluster.GetServers() {
 		url := fmt.Sprintf("%s/pd/api/v1/members", svr.GetServer().GetAddr())
 		testutil.Eventually(re, func() bool {
@@ -791,8 +796,7 @@ func (suite *redirectorTestSuite) TestXForwardedFor() {
 	re := suite.Require()
 	leader := suite.cluster.GetLeaderServer()
 	re.NoError(leader.BootstrapCluster())
-	fname := testutil.InitTempFileLogger("info")
-	defer os.RemoveAll(fname)
+	fname := testutil.InitTempFileLogger(suite.T(), "info")
 
 	follower := suite.cluster.GetServer(suite.cluster.GetFollower())
 	addr := follower.GetAddr() + "/pd/api/v1/regions"

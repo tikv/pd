@@ -26,6 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 func TestSplit(t *testing.T) {
@@ -61,7 +62,7 @@ func TestSplit(t *testing.T) {
 		ID:       "test",
 		Labels:   []labeler.RegionLabel{{Key: "test", Value: "test"}},
 		RuleType: labeler.KeyRange,
-		Data:     makeKeyRanges("bb", "dd"),
+		Data:     keyutil.BuildKeyRangeMaps("bb", "dd"),
 	})
 	re.NoError(err)
 	op = sc.Check(cluster.GetRegion(1))

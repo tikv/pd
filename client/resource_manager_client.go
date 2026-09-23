@@ -119,9 +119,7 @@ func (c *client) ListResourceGroups(ctx context.Context, ops ...GetResourceGroup
 	}
 	req := &rmpb.ListResourceGroupsRequest{
 		WithRuStats: getOp.withRUStats,
-		KeyspaceId: &rmpb.KeyspaceIDValue{
-			Value: c.inner.keyspaceID,
-		},
+		KeyspaceId:  &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: c.inner.keyspaceID}},
 	}
 	resp, err := cc.ListResourceGroups(ctx, req)
 	if err != nil {
@@ -149,9 +147,7 @@ func (c *client) GetResourceGroup(ctx context.Context, resourceGroupName string,
 	req := &rmpb.GetResourceGroupRequest{
 		ResourceGroupName: resourceGroupName,
 		WithRuStats:       getOp.withRUStats,
-		KeyspaceId: &rmpb.KeyspaceIDValue{
-			Value: c.inner.keyspaceID,
-		},
+		KeyspaceId:        &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: c.inner.keyspaceID}},
 	}
 	resp, err := cc.GetResourceGroup(ctx, req)
 	if err != nil {
@@ -192,12 +188,10 @@ func (c *client) putResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceG
 	}
 	// ensure to use the keyspace ID of the inner client
 	if metaGroup.KeyspaceId == nil {
-		metaGroup.KeyspaceId = &rmpb.KeyspaceIDValue{
-			Value: c.inner.keyspaceID,
-		}
-	} else if metaGroup.KeyspaceId.Value != c.inner.keyspaceID {
+		metaGroup.KeyspaceId = &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: c.inner.keyspaceID}}
+	} else if metaGroup.KeyspaceId.GetValue() != c.inner.keyspaceID {
 		return "", errs.ErrClientPutResourceGroupMismatchKeyspaceID.FastGenByArgs(
-			metaGroup.KeyspaceId.Value, c.inner.keyspaceID)
+			metaGroup.KeyspaceId.GetValue(), c.inner.keyspaceID)
 	}
 	req := &rmpb.PutResourceGroupRequest{
 		Group: metaGroup,
@@ -228,9 +222,7 @@ func (c *client) DeleteResourceGroup(ctx context.Context, resourceGroupName stri
 	}
 	req := &rmpb.DeleteResourceGroupRequest{
 		ResourceGroupName: resourceGroupName,
-		KeyspaceId: &rmpb.KeyspaceIDValue{
-			Value: c.inner.keyspaceID,
-		},
+		KeyspaceId:        &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: c.inner.keyspaceID}},
 	}
 	resp, err := cc.DeleteResourceGroup(ctx, req)
 	if err != nil {
@@ -320,6 +312,12 @@ type tokenDispatcher struct {
 	tokenBatchController *tokenBatchController
 }
 
+func (c *innerClient) setTokenConnectionCancel(cancel context.CancelFunc) {
+	c.tokenConnectionMu.Lock()
+	c.tokenConnectionCancel = cancel
+	c.tokenConnectionMu.Unlock()
+}
+
 type resourceManagerConnectionContext struct {
 	stream rmpb.ResourceManager_AcquireTokenBucketsClient
 	ctx    context.Context
@@ -351,56 +349,73 @@ func (c *innerClient) handleResourceTokenDispatcher(dispatcherCtx context.Contex
 		c.wg.Done()
 	}()
 	var (
-		connection   resourceManagerConnectionContext
-		firstRequest *tokenRequest
-		stream       rmpb.ResourceManager_AcquireTokenBucketsClient
-		streamCtx    context.Context
-		toReconnect  bool
-		err          error
+		connection     resourceManagerConnectionContext
+		currentRequest *tokenRequest
+		stream         rmpb.ResourceManager_AcquireTokenBucketsClient
+		streamCtx      context.Context
+		toReconnect    bool
+		err            error
 	)
 	if err = c.tryResourceManagerConnect(dispatcherCtx, &connection); err != nil {
 		log.Warn("[resource_manager] get token stream error", zap.Error(err))
+	} else {
+		c.setTokenConnectionCancel(connection.cancel)
 	}
+tokenRequestLoop:
 	for {
 		// Fetch the request from the channel.
 		select {
 		case <-dispatcherCtx.Done():
 			return
-		case firstRequest = <-tbc.tokenRequestCh:
+		case currentRequest = <-tbc.tokenRequestCh:
 		}
-		// Try to get a stream connection.
-		stream, streamCtx = connection.stream, connection.ctx
-		select {
-		case <-c.updateTokenConnectionCh:
-			toReconnect = true
-		default:
-			toReconnect = stream == nil
-		}
-		// If the stream is nil or the leader has changed, try to reconnect.
-		if toReconnect {
-			connection.reset()
-			if err := c.tryResourceManagerConnect(dispatcherCtx, &connection); err != nil {
-				log.Error("[resource_manager] try to connect token leader failed", errs.ZapError(err))
-			}
-			log.Info("[resource_manager] token leader may change, try to reconnect the stream")
+		for {
+			// Try to get a stream connection.
 			stream, streamCtx = connection.stream, connection.ctx
+			select {
+			case <-c.updateTokenConnectionCh:
+				toReconnect = true
+			default:
+				toReconnect = stream == nil
+			}
+			// If the stream is nil or the leader has changed, try to reconnect.
+			if toReconnect {
+				c.setTokenConnectionCancel(nil)
+				connection.reset()
+				if err := c.tryResourceManagerConnect(dispatcherCtx, &connection); err != nil {
+					log.Error("[resource_manager] try to connect token leader failed", errs.ZapError(err))
+				} else {
+					c.setTokenConnectionCancel(connection.cancel)
+				}
+				log.Info("[resource_manager] token leader may change, try to reconnect the stream")
+				stream, streamCtx = connection.stream, connection.ctx
+				if stream != nil {
+					continue
+				}
+			}
+			// If the stream is still nil, return an error.
+			if stream == nil {
+				currentRequest.done <- errors.Errorf("failed to get the stream connection")
+				c.serviceDiscovery.ScheduleCheckMemberChanged()
+				connection.reset()
+				continue tokenRequestLoop
+			}
+			select {
+			case <-streamCtx.Done():
+				c.setTokenConnectionCancel(nil)
+				connection.reset()
+				log.Info("[resource_manager] token stream is canceled")
+				if dispatcherCtx.Err() != nil {
+					return
+				}
+				continue
+			default:
+			}
+			break
 		}
-		// If the stream is still nil, return an error.
-		if stream == nil {
-			firstRequest.done <- errors.Errorf("failed to get the stream connection")
+		if err = c.processTokenRequests(stream, currentRequest); err != nil {
 			c.serviceDiscovery.ScheduleCheckMemberChanged()
-			connection.reset()
-			continue
-		}
-		select {
-		case <-streamCtx.Done():
-			connection.reset()
-			log.Info("[resource_manager] token stream is canceled")
-			continue
-		default:
-		}
-		if err = c.processTokenRequests(stream, firstRequest); err != nil {
-			c.serviceDiscovery.ScheduleCheckMemberChanged()
+			c.setTokenConnectionCancel(nil)
 			connection.reset()
 			log.Info("[resource_manager] token request error", zap.Error(err))
 		}

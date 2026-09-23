@@ -27,6 +27,7 @@ import (
 
 	"github.com/coreos/go-semver/semver"
 	"github.com/docker/go-units"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 	"google.golang.org/grpc/codes"
@@ -62,7 +63,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 const (
@@ -535,7 +536,7 @@ func resetStoreState(re *require.Assertions, rc *cluster.RaftCluster, storeID ui
 		err := rc.SetStoreLimit(storeID, storelimit.RemovePeer, storelimit.Unlimited)
 		re.NoError(err)
 	case metapb.StoreState_Tombstone:
-		rc.RemoveStoreLimit(storeID)
+		re.NoError(rc.RemoveStoreLimit(storeID))
 	default:
 	}
 }
@@ -544,10 +545,20 @@ func testStateAndLimit(re *require.Assertions, clusterID uint64, rc *cluster.Raf
 	// prepare
 	storeID := store.GetId()
 	oc := rc.GetOperatorController()
-	err := rc.SetStoreLimit(storeID, storelimit.AddPeer, 60)
-	re.NoError(err)
-	err = rc.SetStoreLimit(storeID, storelimit.RemovePeer, 60)
-	re.NoError(err)
+	// The store can be left tombstoned by a previous call to this helper (the
+	// tombstone beforeState block runs it twice on the same store). Production
+	// never un-tombstones a store, so don't fake that transition here either --
+	// these SetStoreLimit calls only exist to seed a limit before resetStoreState
+	// below establishes the state this specific case actually wants to test, and
+	// resetStoreState's own Tombstone branch clears any limit anyway, so seeding
+	// one is pointless (and rejected by SetStoreLimit) once the store is already
+	// tombstoned.
+	if store := rc.GetStore(storeID); store == nil || !store.IsRemoved() {
+		err := rc.SetStoreLimit(storeID, storelimit.AddPeer, 60)
+		re.NoError(err)
+		err = rc.SetStoreLimit(storeID, storelimit.RemovePeer, 60)
+		re.NoError(err)
+	}
 	op := operator.NewTestOperator(2, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: storeID, PeerID: 3})
 	oc.AddOperator(op)
 	op = operator.NewTestOperator(2, &metapb.RegionEpoch{}, operator.OpRegion, operator.RemovePeer{FromStore: storeID})
@@ -556,7 +567,7 @@ func testStateAndLimit(re *require.Assertions, clusterID uint64, rc *cluster.Raf
 	resetStoreState(re, rc, store.GetId(), beforeState)
 	_, isOKBefore := rc.GetAllStoresLimit()[storeID]
 	// run
-	err = run(rc)
+	err := run(rc)
 	// judge
 	_, isOKAfter := rc.GetAllStoresLimit()[storeID]
 	if len(expectStates) != 0 {
@@ -784,7 +795,7 @@ func TestRaftClusterStartTSOJob(t *testing.T) {
 			err := leaderServer.BootstrapCluster()
 			if err != nil {
 				// If the error is ErrEtcdTxnConflict, it means there is a temporary failure.
-				re.ErrorContains(err, errs.ErrEtcdTxnConflict.GetMsg())
+				assert.ErrorContains(t, err, errs.ErrEtcdTxnConflict.GetMsg())
 			}
 		}()
 	}
@@ -793,8 +804,11 @@ func TestRaftClusterStartTSOJob(t *testing.T) {
 		allocator := leaderServer.GetServer().GetTSOAllocator()
 		return allocator.IsInitialize()
 	})
-	re.NoError(tc.ResignLeader())
-	re.NotEmpty(tc.WaitLeader())
+	// The campaign loop can transfer leadership to a different peer concurrently,
+	// causing this request to time out even though the old leader has stepped down.
+	// Check the completed leader change before checking the old TSO allocator.
+	err = leaderServer.ResignLeader()
+	re.NotEmpty(tc.WaitLeaderChange(name), "resign leader returned: %v", err)
 	testutil.Eventually(re, func() bool {
 		allocator := tc.GetServer(name).GetServer().GetTSOAllocator()
 		return !allocator.IsInitialize()
@@ -882,8 +896,10 @@ func TestStoreVersionChange(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		resp, err := putStore(grpcPDClient, clusterID, store)
-		re.NoError(err)
-		re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
+		if !assert.NoError(t, err) {
+			return
+		}
+		assert.Equal(t, pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 	}()
 	time.Sleep(100 * time.Millisecond)
 	err = svr.SetClusterVersion("1.0.0")
@@ -964,7 +980,10 @@ func TestConcurrentHandleRegion(t *testing.T) {
 		go func(isReceiver bool) {
 			if isReceiver {
 				_, err := stream.Recv()
-				re.NoError(err)
+				if !assert.NoError(t, err) {
+					wg.Done()
+					return
+				}
 				wg.Done()
 			}
 			for {
@@ -974,7 +993,9 @@ func TestConcurrentHandleRegion(t *testing.T) {
 				default:
 					_, err = stream.Recv()
 					if err != nil {
-						re.ErrorContains(err, "code = Canceled")
+						if !assert.ErrorContains(t, err, "code = Canceled") {
+							return
+						}
 					}
 				}
 			}
@@ -1009,7 +1030,7 @@ func TestConcurrentHandleRegion(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			err := rc.HandleRegionHeartbeat(core.NewRegionInfo(region, region.Peers[0]))
-			re.NoError(err)
+			assert.NoError(t, err)
 		}()
 	}
 	wg.Wait()
@@ -1217,7 +1238,7 @@ func TestTiFlashWithPlacementRules(t *testing.T) {
 	re.NoError(err)
 	re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 	// test TiFlash store limit
-	expect := map[uint64]sc.StoreLimitConfig{11: {AddPeer: 30, RemovePeer: 30}}
+	expect := map[uint64]sc.StoreLimitConfig{11: {AddPeer: 30, RemovePeer: 30, TransferLeaderIn: storelimit.Unlimited}}
 	re.Equal(expect, svr.GetScheduleConfig().StoreLimit)
 
 	// cannot disable placement rules with TiFlash nodes
@@ -2082,8 +2103,7 @@ func TestPatrolRegionConfigChange(t *testing.T) {
 		endKey := []byte(strconv.Itoa(i * 2))
 		tests.MustPutRegion(re, tc, uint64(i), uint64(i%3+1), startKey, endKey)
 	}
-	fname := testutil.InitTempFileLogger("debug")
-	defer os.RemoveAll(fname)
+	fname := testutil.InitTempFileLogger(t, "debug")
 	checkLog(re, fname, "coordinator starts patrol regions")
 
 	// test change patrol region interval

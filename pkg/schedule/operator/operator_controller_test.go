@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
@@ -110,18 +111,30 @@ func (suite *operatorControllerTestSuite) TestGetOpInfluence() {
 	oc.SetOperator(op1)
 	re.True(op2.Start())
 	oc.SetOperator(op2)
+	ctx, cancel := context.WithCancel(suite.ctx)
+	wg := &sync.WaitGroup{}
+	wg.Add(2)
 	go func(ctx context.Context) {
-		checkRemoveOperatorSuccess(re, oc, op1)
+		defer wg.Done()
+		as := assert.New(suite.T())
+		if !as.True(oc.RemoveOperator(op1)) ||
+			!as.True(op1.IsEnd()) ||
+			!as.Equal(op1, oc.GetOperatorStatus(op1.RegionID()).Operator) {
+			return
+		}
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			default:
-				re.False(oc.RemoveOperator(op1))
+				if !as.False(oc.RemoveOperator(op1)) {
+					return
+				}
 			}
 		}
-	}(suite.ctx)
+	}(ctx)
 	go func(ctx context.Context) {
+		defer wg.Done()
 		for {
 			select {
 			case <-ctx.Done():
@@ -130,8 +143,10 @@ func (suite *operatorControllerTestSuite) TestGetOpInfluence() {
 				oc.GetOpInfluence(tc.GetBasicCluster())
 			}
 		}
-	}(suite.ctx)
+	}(ctx)
 	time.Sleep(time.Second)
+	cancel()
+	wg.Wait()
 	re.NotNil(oc.GetOperator(2))
 }
 
@@ -317,20 +332,20 @@ func (suite *operatorControllerTestSuite) TestConcurrentRemoveOperator() {
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/operator/concurrentRemoveOperator", "return(true)"))
 	var wg sync.WaitGroup
+	var success bool
 	wg.Add(2)
 	go func() {
+		defer wg.Done()
 		oc.Dispatch(region1, "test", nil)
-		wg.Done()
 	}()
 	go func() {
+		defer wg.Done()
 		time.Sleep(50 * time.Millisecond)
-		success := oc.AddOperator(op2)
-		// If the assert failed before wg.Done, the test will be blocked.
-		defer re.True(success)
-		wg.Done()
+		success = oc.AddOperator(op2)
 	}()
 	wg.Wait()
 
+	re.True(success)
 	re.Equal(op2, oc.GetOperator(1))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/operator/concurrentRemoveOperator"))
 }
@@ -521,12 +536,14 @@ func (suite *operatorControllerTestSuite) TestConcurrentMergeConflict() {
 			go func() {
 				defer wg.Done()
 				ops1, err := CreateMergeRegionOperator("merge-region", cluster, left, middle, OpMerge)
-				re.NoError(err)
-				re.Len(ops1, 2)
+				if !suite.NoError(err) || !suite.Len(ops1, 2) {
+					return
+				}
 				controller.AddWaitingOperator(ops1...)
 				ops2, err := CreateMergeRegionOperator("merge-region", cluster, middle, right, OpMerge)
-				re.NoError(err)
-				re.Len(ops2, 2)
+				if !suite.NoError(err) || !suite.Len(ops2, 2) {
+					return
+				}
 				controller.AddWaitingOperator(ops2...)
 			}()
 		}
@@ -648,6 +665,33 @@ func (suite *operatorControllerTestSuite) TestStoreLimit() {
 	op = NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, RemovePeer{FromStore: 2})
 	re.False(oc.AddOperator(op))
 	re.False(oc.RemoveOperator(op))
+
+	tc.AddLeaderStore(3, 0)
+	tc.AddLeaderRegion(1001, 1, 2, 3)
+	tc.SetStoreLimit(2, storelimit.TransferLeaderIn, 0.00006)
+	tc.SetStoreLimit(3, storelimit.TransferLeaderIn, 0.00006)
+	// Admission reserves the budget of every candidate, including store 3.
+	op, err := CreateTransferLeaderOperator("test", tc, tc.GetRegion(1001), 2, []uint64{2, 3}, OpLeader)
+	re.NoError(err)
+	pending, err := CreateTransferLeaderOperator("test", tc, tc.GetRegion(1001), 3, nil, OpLeader)
+	re.NoError(err)
+	re.True(oc.AddOperator(op))
+	checkRemoveOperatorSuccess(re, oc, op)
+	re.False(oc.AddOperator(pending))
+	re.False(oc.RemoveOperator(pending))
+
+	// Direct admission retains the Urgent exemption, independently of Builder's
+	// priority-agnostic target filter.
+	op = NewTestOperator(1001, &metapb.RegionEpoch{}, OpAdmin, TransferLeader{FromStore: 1, ToStore: 2})
+	re.True(oc.AddOperator(op))
+	checkRemoveOperatorSuccess(re, oc, op)
+
+	tc.SetStoreLimit(2, storelimit.TransferLeaderIn, storelimit.Unlimited)
+	for range 2 {
+		op = NewTestOperator(1001, &metapb.RegionEpoch{}, OpLeader, TransferLeader{FromStore: 1, ToStore: 2})
+		re.True(oc.AddOperator(op))
+		checkRemoveOperatorSuccess(re, oc, op)
+	}
 }
 
 // #1652
@@ -1049,7 +1093,7 @@ func (suite *operatorControllerTestSuite) TestInvalidStoreId() {
 }
 
 func TestConcurrentAddOperatorAndSetStoreLimit(t *testing.T) {
-	re := require.New(t)
+	as := assert.New(t)
 	opt := mockconfig.NewTestOptions()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1077,7 +1121,9 @@ func TestConcurrentAddOperatorAndSetStoreLimit(t *testing.T) {
 			for j := 1; j < 10; j++ {
 				regionID := uint64(j) + i*100
 				op := NewTestOperator(regionID, tc.GetRegion(regionID).GetRegionEpoch(), OpRegion, AddPeer{ToStore: storeID, PeerID: regionID})
-				re.True(oc.AddOperator(op))
+				if !as.True(oc.AddOperator(op)) {
+					return
+				}
 				tc.SetStoreLimit(storeID, storelimit.AddPeer, limit-float64(j)) // every goroutine set a different limit
 			}
 		}(uint64(i))

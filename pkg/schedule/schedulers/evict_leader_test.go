@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -31,6 +32,7 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/types"
@@ -61,6 +63,14 @@ func TestEvictLeader(t *testing.T) {
 	operatorutil.CheckMultiTargetTransferLeader(re, ops[0], operator.OpLeader, 1, []uint64{2, 3})
 	re.False(ops[0].Step(0).(operator.TransferLeader).IsFinish(tc.MockRegionInfo(1, 1, []uint64{2, 3}, []uint64{}, &metapb.RegionEpoch{ConfVer: 0, Version: 0})))
 	re.True(ops[0].Step(0).(operator.TransferLeader).IsFinish(tc.MockRegionInfo(1, 2, []uint64{1, 3}, []uint64{}, &metapb.RegionEpoch{ConfVer: 0, Version: 0})))
+	exhaustTransferLeaderInLimit(t, tc, 2, 3)
+	ops, _ = sl.Schedule(tc, false)
+	re.Empty(ops)
+	tc.SetStoreLimit(2, storelimit.TransferLeaderIn, storelimit.Unlimited)
+	tc.ResetStoreLimit(2, storelimit.TransferLeaderIn, storelimit.Unlimited/time.Minute.Seconds())
+	ops, _ = sl.Schedule(tc, false)
+	re.Len(ops, 1)
+	operatorutil.CheckMultiTargetTransferLeader(re, ops[0], operator.OpLeader, 1, []uint64{2})
 }
 
 func TestEvictLeaderWithUnhealthyPeer(t *testing.T) {
@@ -225,6 +235,216 @@ func TestEvictLeaderInvalidBatchKeepsLeaderTransferState(t *testing.T) {
 	sl.ServeHTTP(resp, req)
 	re.Equal(http.StatusBadRequest, resp.Code)
 	re.Equal("\"invalid argument for 'batch': expected a number, got string\"\n", resp.Body.String())
+	re.True(tc.GetStore(2).AllowLeaderTransferIn())
+}
+
+func TestEvictLeaderUpdateConfigStoreIDsValidation(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	tc.AddLeaderStore(1, 0)
+	tc.AddLeaderStore(2, 0)
+
+	sl, err := CreateScheduler(types.EvictLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.EvictLeaderScheduler, []string{"1"}), func(string) error { return nil })
+	re.NoError(err)
+
+	post := func(input map[string]any) *httptest.ResponseRecorder {
+		body, err := json.Marshal(input)
+		re.NoError(err)
+		req := httptest.NewRequest(http.MethodPost, "/config", bytes.NewReader(body))
+		resp := httptest.NewRecorder()
+		sl.ServeHTTP(resp, req)
+		return resp
+	}
+
+	// store_id and store_ids are mutually exclusive.
+	resp := post(map[string]any{"store_id": 1, "store_ids": []int{2}})
+	re.Equal(http.StatusBadRequest, resp.Code)
+	re.Contains(resp.Body.String(), "only one of store_id and store_ids can be set")
+
+	// fractional store ids must be rejected instead of silently truncated,
+	// both as a single value and inside a store_ids array.
+	resp = post(map[string]any{"store_id": 1.5})
+	re.Equal(http.StatusBadRequest, resp.Code)
+	re.Contains(resp.Body.String(), "please input a right store id")
+
+	resp = post(map[string]any{"store_ids": []float64{1, 2.5}})
+	re.Equal(http.StatusBadRequest, resp.Code)
+	re.Contains(resp.Body.String(), "please input a right store id")
+
+	// a JSON array of strings for "ranges" decodes as []any, not []string;
+	// it must still be accepted and applied.
+	resp = post(map[string]any{"store_ids": []int{2}, "ranges": []string{"a", "b"}})
+	re.Equal(http.StatusOK, resp.Code)
+	conf := sl.(*evictLeaderScheduler).conf
+	re.Equal([]keyutil.KeyRange{keyutil.NewKeyRange("a", "b")}, conf.StoreIDWithRanges[2])
+}
+
+func TestEvictLeaderUpdateConfigBatchPreservesExistingRanges(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	tc.AddLeaderStore(1, 0)
+	tc.AddLeaderStore(2, 0)
+
+	// Store 1 is created with a custom (non-default) range.
+	sl, err := CreateScheduler(types.EvictLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigSliceDecoder(types.EvictLeaderScheduler, []string{"1", "a", "b"}), func(string) error { return nil })
+	re.NoError(err)
+	conf := sl.(*evictLeaderScheduler).conf
+	customRanges := conf.StoreIDWithRanges[1]
+	re.Equal([]keyutil.KeyRange{keyutil.NewKeyRange("a", "b")}, customRanges)
+
+	// Batch-adding store 2 alongside the already-existing store 1, without
+	// specifying ranges, must leave store 1's custom ranges untouched and
+	// only default store 2 to the whole key space.
+	body, err := json.Marshal(map[string]any{"store_ids": []int{1, 2}})
+	re.NoError(err)
+	req := httptest.NewRequest(http.MethodPost, "/config", bytes.NewReader(body))
+	resp := httptest.NewRecorder()
+	sl.ServeHTTP(resp, req)
+	re.Equal(http.StatusOK, resp.Code)
+
+	re.Equal(customRanges, conf.StoreIDWithRanges[1])
+	re.Equal([]keyutil.KeyRange{keyutil.NewKeyRange("", "")}, conf.StoreIDWithRanges[2])
+}
+
+func TestEvictLeaderUpdateConfigBatchCopiesExplicitRangesPerStore(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	tc.AddLeaderStore(1, 0)
+	tc.AddLeaderStore(2, 0)
+
+	sl, err := CreateScheduler(types.EvictLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigSliceDecoder(types.EvictLeaderScheduler, []string{"1"}), func(string) error { return nil })
+	re.NoError(err)
+	conf := sl.(*evictLeaderScheduler).conf
+
+	body, err := json.Marshal(map[string]any{"store_ids": []int{1, 2}, "ranges": []string{"c", "d"}})
+	re.NoError(err)
+	req := httptest.NewRequest(http.MethodPost, "/config", bytes.NewReader(body))
+	resp := httptest.NewRecorder()
+	sl.ServeHTTP(resp, req)
+	re.Equal(http.StatusOK, resp.Code)
+
+	expected := []keyutil.KeyRange{keyutil.NewKeyRange("c", "d")}
+	re.Equal(expected, conf.StoreIDWithRanges[1])
+	re.Equal(expected, conf.StoreIDWithRanges[2])
+
+	// Each store must own an independent backing array: mutating one
+	// store's range must not affect the other.
+	conf.StoreIDWithRanges[1][0].StartKey = []byte("zzz")
+	re.Equal([]byte("c"), conf.StoreIDWithRanges[2][0].StartKey)
+}
+
+func TestEvictLeaderUpdateConfigEmptyRangesPreservesExisting(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	tc.AddLeaderStore(1, 0)
+	tc.AddLeaderStore(2, 0)
+
+	sl, err := CreateScheduler(types.EvictLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigSliceDecoder(types.EvictLeaderScheduler, []string{"1", "a", "b"}), func(string) error { return nil })
+	re.NoError(err)
+	conf := sl.(*evictLeaderScheduler).conf
+	customRanges := conf.StoreIDWithRanges[1]
+	re.Equal([]keyutil.KeyRange{keyutil.NewKeyRange("a", "b")}, customRanges)
+
+	// An empty "ranges" array carries no range pairs; it must be treated
+	// like an omitted field rather than resetting existing stores to the
+	// whole key space.
+	body, err := json.Marshal(map[string]any{"store_ids": []int{1, 2}, "ranges": []string{}})
+	re.NoError(err)
+	req := httptest.NewRequest(http.MethodPost, "/config", bytes.NewReader(body))
+	resp := httptest.NewRecorder()
+	sl.ServeHTTP(resp, req)
+	re.Equal(http.StatusOK, resp.Code)
+
+	re.Equal(customRanges, conf.StoreIDWithRanges[1])
+	re.Equal([]keyutil.KeyRange{keyutil.NewKeyRange("", "")}, conf.StoreIDWithRanges[2])
+}
+
+func TestEvictLeaderUpdateConfigBatchRollbackPreservesExisting(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	tc.AddLeaderStore(1, 0)
+	tc.AddLeaderStore(2, 0)
+
+	sl, err := CreateScheduler(types.EvictLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigSliceDecoder(types.EvictLeaderScheduler, []string{"1", "a", "b"}), func(string) error { return nil })
+	re.NoError(err)
+	re.NoError(sl.PrepareConfig(tc))
+	conf := sl.(*evictLeaderScheduler).conf
+	prevRanges := conf.StoreIDWithRanges[1]
+	prevBatch := conf.getBatch()
+	re.False(tc.GetStore(1).AllowLeaderTransferIn())
+	re.True(tc.GetStore(2).AllowLeaderTransferIn())
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/persistFail", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/persistFail"))
+	}()
+
+	body, err := json.Marshal(map[string]any{"store_ids": []int{1, 2}, "batch": prevBatch + 1})
+	re.NoError(err)
+	req := httptest.NewRequest(http.MethodPost, "/config", bytes.NewReader(body))
+	resp := httptest.NewRecorder()
+	sl.ServeHTTP(resp, req)
+	re.Equal(http.StatusBadRequest, resp.Code)
+
+	// Store 1 (already existed) keeps its old ranges; store 2 (newly added
+	// by this failed call) is removed entirely and its leader transfer is
+	// resumed; Batch is restored to its pre-call value.
+	re.Equal(prevRanges, conf.StoreIDWithRanges[1])
+	re.NotContains(conf.StoreIDWithRanges, uint64(2))
+	re.Equal(prevBatch, conf.getBatch())
+	re.False(tc.GetStore(1).AllowLeaderTransferIn())
+	re.True(tc.GetStore(2).AllowLeaderTransferIn())
+}
+
+// TestEvictLeaderUpdateConfigBatchRollbackOnMidLoopPauseFailure covers a
+// batch that fails partway through the id loop, rather than at the final
+// save: store 999 doesn't exist, so pausing it fails after store 1 (already
+// existing) and store 2 (new) have already been applied to StoreIDWithRanges
+// in memory. Both must still be rolled back exactly as if the failure had
+// happened at save time.
+func TestEvictLeaderUpdateConfigBatchRollbackOnMidLoopPauseFailure(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	tc.AddLeaderStore(1, 0)
+	tc.AddLeaderStore(2, 0)
+	// Store 999 is intentionally never registered, so pausing it fails.
+
+	sl, err := CreateScheduler(types.EvictLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigSliceDecoder(types.EvictLeaderScheduler, []string{"1", "a", "b"}), func(string) error { return nil })
+	re.NoError(err)
+	re.NoError(sl.PrepareConfig(tc))
+	conf := sl.(*evictLeaderScheduler).conf
+	prevRanges := conf.StoreIDWithRanges[1]
+
+	body, err := json.Marshal(map[string]any{"store_ids": []int{1, 2, 999}, "ranges": []string{"c", "d"}})
+	re.NoError(err)
+	req := httptest.NewRequest(http.MethodPost, "/config", bytes.NewReader(body))
+	resp := httptest.NewRecorder()
+	sl.ServeHTTP(resp, req)
+	re.Equal(http.StatusBadRequest, resp.Code)
+
+	// Store 1's ranges must not be left overwritten by the explicit ranges
+	// from this failed request, store 2 must not be left as a phantom
+	// unpersisted entry, and store 2's leader transfer must be resumed.
+	re.Equal(prevRanges, conf.StoreIDWithRanges[1])
+	re.NotContains(conf.StoreIDWithRanges, uint64(2))
+	re.NotContains(conf.StoreIDWithRanges, uint64(999))
 	re.True(tc.GetStore(2).AllowLeaderTransferIn())
 }
 

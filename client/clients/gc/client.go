@@ -64,7 +64,7 @@ func ExcludeGCBarriers(whetherToExclude bool) GCStatesAPIOption {
 	}
 }
 
-// ExcludeGlobalGCBarriers controls whether GetAllKeyspacesGCStates should exclude global GC barriers.
+// ExcludeGlobalGCBarriers controls whether GetGCState and GetAllKeyspacesGCStates should exclude global GC barriers.
 // Enabling this can reduce the cost of reading GC states, and is recommended for most use cases.
 // When global GC barriers are needed, explicitly set false to this option.
 func ExcludeGlobalGCBarriers(whetherToExclude bool) GCStatesAPIOption {
@@ -286,11 +286,17 @@ func (b *GlobalGCBarrierInfo) isExpiredImpl(now time.Time) bool {
 //nolint:revive
 type GCState struct {
 	// The ID of the keyspace this GC state belongs to.
-	KeyspaceID    uint32
-	TxnSafePoint  uint64
-	GCSafePoint   uint64
-	hasGCBarriers bool
-	gcBarriers    []*GCBarrierInfo
+	KeyspaceID uint32
+	// IsKeyspaceLevelGC reports whether this state belongs to an independent
+	// keyspace-level GC scope.
+	IsKeyspaceLevelGC bool
+	TxnSafePoint      uint64
+	GCSafePoint       uint64
+	hasGCBarriers     bool
+	gcBarriers        []*GCBarrierInfo
+
+	hasGlobalGCBarriers bool
+	globalGCBarriers    []*GlobalGCBarrierInfo
 }
 
 // NewGCStateWithoutGCBarriers creates a GCState instance without GC barriers info.
@@ -329,6 +335,28 @@ func (s GCState) GetGCBarriers() ([]*GCBarrierInfo, error) {
 			"to retrieve GC barriers, pass false to excludeGCBarriers parameter to GC APIs")
 	}
 	return s.gcBarriers, nil
+}
+
+// WithGlobalGCBarriers returns a copy of the GC state with global GC barriers.
+func (s GCState) WithGlobalGCBarriers(barriers []*GlobalGCBarrierInfo) GCState {
+	s.hasGlobalGCBarriers = true
+	s.globalGCBarriers = barriers
+	return s
+}
+
+// HasGlobalGCBarriers reports whether global GC barriers were returned.
+func (s GCState) HasGlobalGCBarriers() bool {
+	return s.hasGlobalGCBarriers
+}
+
+// GetGlobalGCBarriers returns global GC barriers when they were requested and
+// returned by the server.
+func (s GCState) GetGlobalGCBarriers() ([]*GlobalGCBarrierInfo, error) {
+	if !s.hasGlobalGCBarriers {
+		return nil, errors.New("trying to get global GC barriers from GCState that doesn't provide global GC barriers info. " +
+			"to retrieve global GC barriers, pass false to excludeGlobalGCBarriers parameter to GC APIs")
+	}
+	return s.globalGCBarriers, nil
 }
 
 // ClusterGCStates represents the information of the GC state for all keyspaces.

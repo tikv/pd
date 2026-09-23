@@ -308,7 +308,7 @@ func (s *testTSOStreamSuite) processRequestWithResultCh(count int64) (<-chan cal
 	ch := make(chan callbackInvocation, 1)
 	err := s.stream.processRequests(1, 2, 3, count, time.Now(), func(result tsoRequestResult, reqKeyspaceGroupID uint32, err error) {
 		if err == nil {
-			s.re.Equal(uint32(3), reqKeyspaceGroupID)
+			s.Equal(uint32(3), reqKeyspaceGroupID)
 		}
 		ch <- callbackInvocation{
 			result: result,
@@ -533,7 +533,10 @@ func (s *testTSOStreamSuite) TestEstimatedLatency() {
 		for time.Since(startTime) < time.Second {
 			<-tokenCh
 			reqStartTimeCh <- time.Now()
-			r := s.mustProcessRequestWithResultCh(1)
+			r, err := s.processRequestWithResultCh(1)
+			if !s.NoError(err) {
+				break
+			}
 			resCh <- r
 		}
 		close(reqStartTimeCh)

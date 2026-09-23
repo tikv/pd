@@ -183,7 +183,7 @@ func (d *DiagnosticRecorder) analyze(ops []*operator.Operator, plans []plan.Plan
 		}
 		res.Status = Pending
 		if d.summaryFunc != nil {
-			isAllNormal := false
+			var isAllNormal bool
 			res.StoreStatus, isAllNormal, _ = d.summaryFunc(plans)
 			if isAllNormal {
 				res.Status = Normal
