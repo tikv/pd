@@ -581,9 +581,19 @@ error = '''
 exceed max etcd txn operations
 '''
 
+["PD:keyspace:ErrGroupHasAssignedKeyspaces"]
+error = '''
+cannot delete meta-service group with assigned keyspaces
+'''
+
 ["PD:keyspace:ErrIllegalOperation"]
 error = '''
 unknown operation
+'''
+
+["PD:keyspace:ErrInvalidAssignmentCount"]
+error = '''
+assignment count must be non-negative
 '''
 
 ["PD:keyspace:ErrKeyspaceConfigPreconditionFailed"]
@@ -661,6 +671,16 @@ error = '''
 keyspace is not in this keyspace group
 '''
 
+["PD:keyspace:ErrMetaServiceGroupDisabled"]
+error = '''
+meta-service group is disabled
+'''
+
+["PD:keyspace:ErrMetaServiceGroupUnhealthy"]
+error = '''
+meta-service group etcd server is unhealthy
+'''
+
 ["PD:keyspace:ErrModifyDefaultKeyspace"]
 error = '''
 cannot modify default keyspace's state
@@ -694,6 +714,11 @@ region split failed
 ["PD:keyspace:ErrRegionSplitTimeout"]
 error = '''
 region split timeout
+'''
+
+["PD:keyspace:ErrUnknownMetaServiceGroup"]
+error = '''
+unknown meta-service group
 '''
 
 ["PD:keyspace:ErrUnsupportedOperationInKeyspace"]
