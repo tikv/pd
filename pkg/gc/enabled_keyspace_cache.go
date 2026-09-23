@@ -78,22 +78,20 @@ func newEnabledKeyspaceCache(termCtx context.Context, client *clientv3.Client, p
 // run blocks until the leadership term ends. A failed or compacted watch is
 // followed by a complete reload, so no missing revision is silently skipped.
 func (c *enabledKeyspaceCache) run() {
-	initialLoadStartedAt := time.Now()
-	initialLoadLogged := false
 	retryDelay := enabledKeyspaceRetryDelay
 	var lastLog time.Time
 	suppressedErrors := 0
 	for c.termCtx.Err() == nil {
+		loadStartedAt := time.Now()
 		entries, revision, err := c.load()
 		phase := "load"
 		if err == nil {
-			if c.publish(entries, revision) && !initialLoadLogged {
+			if c.publish(entries, revision) {
 				log.Info("load enabled keyspace cache completed",
 					zap.String("prefix", c.prefix),
 					zap.Int64("revision", revision),
 					zap.Int("enabled-keyspace-count", len(entries)),
-					zap.Duration("cost", time.Since(initialLoadStartedAt)))
-				initialLoadLogged = true
+					zap.Duration("cost", time.Since(loadStartedAt)))
 			}
 			watchStarted := time.Now()
 			err = c.watch(revision + 1)
