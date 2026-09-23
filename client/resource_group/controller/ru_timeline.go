@@ -15,7 +15,6 @@
 package controller
 
 import (
-	"math"
 	"time"
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
@@ -42,8 +41,9 @@ type ruSecondBucket struct {
 // from the same second and the receiver deduplicates the overlap.
 // Both recording and snapshotting advance the clock, so a clock rollback
 // quarantines the timeline before a previously closed second can be changed.
-// A full retained window is quarantined after a clock discontinuity or an
-// untimed external aggregate: neither can be attributed to natural seconds.
+// A full retained window is quarantined after a clock rollback or an untimed
+// external aggregate: neither can be attributed to natural seconds. A forward
+// step only relabels later seconds, like clock skew between clients.
 type ruTimeline struct {
 	buckets [ruTimelineSeconds + 1]ruSecondBucket
 	// start is the first second the timeline can attest to. It moves into the
@@ -51,7 +51,8 @@ type ruTimeline struct {
 	start int64
 	// acked is the first second the resource manager has not acknowledged.
 	acked int64
-	last  time.Time
+	// last is the latest second observed.
+	last int64
 }
 
 func (t *ruTimeline) advance(now time.Time) {
@@ -59,13 +60,10 @@ func (t *ruTimeline) advance(now time.Time) {
 	if t.start == 0 {
 		t.start = second
 	}
-	if !t.last.IsZero() {
-		wall := float64(now.UnixNano()-t.last.UnixNano()) / 1e9
-		if second < t.last.Unix() || math.Abs(wall-now.Sub(t.last).Seconds()) >= 1 {
-			t.invalidate(now)
-		}
+	if second < t.last {
+		t.invalidate(now)
 	}
-	t.last = now
+	t.last = second
 }
 
 func (t *ruTimeline) invalidate(now time.Time) {
