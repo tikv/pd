@@ -104,7 +104,7 @@ func TestRUTimelineMergesSources(t *testing.T) {
 
 func TestRUTimelineUnavailable(t *testing.T) {
 	const start = testTimelineStart
-	for _, scenario := range []string{"gap", "overflow", "conflict", "legacy", "nan", "future-second", "oversized", "new-source", "late-joiner", "source-kind", "capacity"} {
+	for _, scenario := range []string{"gap", "overflow", "conflict", "legacy", "nan", "future-second", "oversized", "new-source", "late-joiner", "source-kind", "capacity", "capacity-tail"} {
 		t.Run(scenario, func(t *testing.T) {
 			re := require.New(t)
 			c, timeline := newWarmTimeline(1)
@@ -118,6 +118,10 @@ func TestRUTimelineUnavailable(t *testing.T) {
 				for _, b := range report.RuBySecond.Buckets {
 					b.Rru, b.Wru = math.MaxFloat64, math.MaxFloat64
 				}
+			case "capacity-tail":
+				// A source rejected before the window may still be consuming in it.
+				timeline.sourceCount = ruTimelineMaxSources
+				timeline.record(timelineReport(2, start-1, nil), time.Unix(start-1, 0))
 			}
 			timeline.record(report, time.Unix(start+65, 0))
 			// Each follow-up would leave the window available if it were ignored.

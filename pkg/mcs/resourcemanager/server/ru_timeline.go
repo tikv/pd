@@ -215,9 +215,10 @@ func (t *ruTimeline) record(item *consumptionItem, now time.Time) {
 	created := source == nil
 	if created {
 		if t.sourceCount >= ruTimelineMaxSources {
-			// The rejected source replays up to a full retained window.
+			// A rejected source has no state to merge or expire, so withhold
+			// every window it may replay or leave unreported.
 			ruTimelineCapacity.Inc()
-			g.invalidate(sec-ruTimelineSeconds, sec)
+			g.invalidate(sec-ruTimelineSeconds, sec+ruTimelineSeconds)
 			return
 		}
 		source = &ruSource{first: sec}
