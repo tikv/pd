@@ -16,6 +16,7 @@ package election
 
 import (
 	"context"
+	"sync/atomic"
 	"time"
 
 	"go.etcd.io/etcd/api/v3/mvccpb"
@@ -62,17 +63,17 @@ type Leadership struct {
 	// name scopes test failpoints to one member.
 	name string
 	// The lease which is used to get this leadership
-	lease  *Lease
+	lease  atomic.Value // stored as *Lease
 	client *clientv3.Client
 	// leaderKey and leaderValue are key-value pair in etcd
 	leaderKey   string
-	leaderValue string
+	leaderValue atomic.Value // stored as string
 
-	// mu protects the in-memory leadership state: lease, leaderValue and
-	// keepAliveCancelFunc are read and written only while holding it.
-	// Getters take RLock; write paths (Campaign, Keep, Reset) take Lock.
-	// Never hold it while closing a lease, which can block on etcd.
-	mu                  syncutil.RWMutex
+	// mu protects keepAliveCancelFunc, the sole piece of leadership state that
+	// cannot be kept in an atomic: Keep and Reset read and replace it. The
+	// lease and leaderValue are atomics, so getters stay lock-free. Never hold
+	// mu while closing a lease, which can block on etcd.
+	mu                  syncutil.Mutex
 	keepAliveCancelFunc context.CancelFunc
 	// campaignTimes is used to record the campaign times of the leader within `campaignTimesRecordTimeout`.
 	// It is ordered by time to prevent the leader from campaigning too frequently.
@@ -94,22 +95,16 @@ func NewLeadership(client *clientv3.Client, leaderKey, purpose, name string) *Le
 // GetLease gets the lease of leadership, only if leadership is valid,
 // i.e. the owner is a true leader, the lease is not nil.
 func (ls *Leadership) GetLease() *Lease {
-	if ls == nil {
+	l := ls.lease.Load()
+	if l == nil {
 		return nil
 	}
-	ls.mu.RLock()
-	defer ls.mu.RUnlock()
-	return ls.lease
+	return l.(*Lease)
 }
 
 // SetLease sets the lease of leadership.
 func (ls *Leadership) SetLease(lease *Lease) {
-	if ls == nil {
-		return
-	}
-	ls.mu.Lock()
-	defer ls.mu.Unlock()
-	ls.lease = lease
+	ls.lease.Store(lease)
 }
 
 // GetClient is used to get the etcd client.
@@ -130,12 +125,11 @@ func (ls *Leadership) GetLeaderKey() string {
 
 // GetLeaderValue is used to get the leader value saved in etcd.
 func (ls *Leadership) GetLeaderValue() string {
-	if ls == nil {
+	leaderValue := ls.leaderValue.Load()
+	if leaderValue == nil {
 		return ""
 	}
-	ls.mu.RLock()
-	defer ls.mu.RUnlock()
-	return ls.leaderValue
+	return leaderValue.(string)
 }
 
 // GetCampaignTimesNum is used to get the campaign times of the leader within `campaignTimesRecordTimeout`.
@@ -176,10 +170,8 @@ func (ls *Leadership) AddCampaignTimes() {
 func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...clientv3.Cmp) error {
 	// Create a new lease to campaign
 	newLease := NewLease(ls.client, ls.purpose, ls.name)
-	ls.mu.Lock()
-	ls.leaderValue = leaderData
-	ls.lease = newLease
-	ls.mu.Unlock()
+	ls.leaderValue.Store(leaderData)
+	ls.SetLease(newLease)
 
 	failpoint.Inject("skipGrantLeader", func(val failpoint.Value) {
 		name, ok := val.(string)
@@ -227,7 +219,7 @@ func (ls *Leadership) Keep(ctx context.Context) {
 	ls.mu.Lock()
 	keepAliveCtx, cancel := context.WithCancel(ctx)
 	ls.keepAliveCancelFunc = cancel
-	lease := ls.lease
+	lease := ls.GetLease()
 	ls.mu.Unlock()
 	go lease.KeepAlive(keepAliveCtx)
 }
@@ -434,7 +426,7 @@ func (ls *Leadership) Reset() {
 		return
 	}
 	ls.mu.Lock()
-	lease := ls.lease
+	lease := ls.GetLease()
 	if lease == nil {
 		ls.mu.Unlock()
 		return
@@ -443,10 +435,11 @@ func (ls *Leadership) Reset() {
 		ls.keepAliveCancelFunc()
 		ls.keepAliveCancelFunc = nil
 	}
-	// A concurrent Reset can finish closing this lease and start a new campaign
-	// before Close returns. Clear the old value now and only close the captured
-	// lease, so this reset cannot overwrite or close the new leadership later.
-	ls.leaderValue = ""
+	// A concurrent Campaign can install a new lease after the one captured here.
+	// Clear the old value now, under the same lock that campaigns take, and only
+	// close the captured lease, so this reset cannot overwrite or close the new
+	// leadership when its Close returns.
+	ls.leaderValue.Store("")
 	ls.mu.Unlock()
 	err := lease.Close()
 	if err != nil {

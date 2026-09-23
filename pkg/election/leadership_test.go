@@ -156,10 +156,7 @@ func TestResetDoesNotClearNewLeadership(t *testing.T) {
 					leadership.Reset()
 					close(done)
 				}()
-				t.Cleanup(func() {
-					unblock()
-					wait(done)
-				})
+				t.Cleanup(func() { unblock() })
 				return done
 			}
 			firstReset := reset()
@@ -174,6 +171,8 @@ func TestResetDoesNotClearNewLeadership(t *testing.T) {
 			newLease := leadership.GetLease()
 			re.NotSame(oldLease, newLease)
 			unblock()
+			// Wait for the first Reset to finish its cleanup before asserting on
+			// the re-elected leadership.
 			wait(firstReset)
 
 			re.Same(newLease, leadership.GetLease())
