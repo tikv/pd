@@ -871,6 +871,9 @@ func (bs *balanceSolver) dstToleranceRatio(detail *statistics.StoreLoadDetail) f
 }
 
 func (bs *balanceSolver) destinationStoreFailure(detail *statistics.StoreLoadDetail, scope *placementLoadScope, toleranceRatio float64) string {
+	if scope != nil && !bs.placementLoadScopeContains(scope, detail.GetID()) {
+		return "dst-store-out-of-scope"
+	}
 	expect := bs.expectLoad(detail, scope)
 	if !bs.checkDstByPriorityAndTolerance(detail.LoadPred.Max(), expect, toleranceRatio) {
 		return "dst-store-failed"
@@ -1110,6 +1113,15 @@ func (bs *balanceSolver) getPlacementLoadPopulation(details []*statistics.StoreL
 		population[position/64] |= 1 << (position % 64)
 	}
 	return population
+}
+
+func (bs *balanceSolver) placementLoadScopeContains(scope *placementLoadScope, storeID uint64) bool {
+	bs.ensurePlacementPopulationIndex()
+	position, ok := bs.placementPopulationIndex.stores[storeID]
+	if !ok || int(position/64) >= len(scope.population) {
+		return false
+	}
+	return scope.population[position/64]&(1<<(position%64)) != 0
 }
 
 func (bs *balanceSolver) ensurePlacementPopulationIndex() {

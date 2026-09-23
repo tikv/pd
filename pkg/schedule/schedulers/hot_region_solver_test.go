@@ -919,6 +919,47 @@ func TestPlacementLoadPopulationHandlesStaleIndex(t *testing.T) {
 	require.NotContains(t, bs.placementPopulationIndex.stores, uint64(3))
 }
 
+func TestDestinationStoreFailureRejectsStoreOutsidePlacementScope(t *testing.T) {
+	withoutHistory := statistics.StoreLoad{Loads: statistics.Loads{10, 10}, HotPeerCount: 1}
+	withHistory := statistics.StoreLoad{
+		Loads:        statistics.Loads{1, 1},
+		HotPeerCount: 1,
+		HistoryLoads: statistics.HistoryLoads{{1}, {1}},
+	}
+	details := map[uint64]*statistics.StoreLoadDetail{
+		1: {
+			StoreSummaryInfo: &statistics.StoreSummaryInfo{
+				StoreInfo: core.NewStoreInfoWithLabel(1, map[string]string{"pool": "old"}),
+			},
+			LoadPred: withoutHistory.ToLoadPred(utils.Write, nil),
+		},
+		2: {
+			StoreSummaryInfo: &statistics.StoreSummaryInfo{
+				StoreInfo: core.NewStoreInfoWithLabel(2, map[string]string{"pool": "new"}),
+			},
+			LoadPred: withHistory.ToLoadPred(utils.Write, nil),
+		},
+	}
+	bs := &balanceSolver{
+		stLoadDetail:   details,
+		firstPriority:  utils.ByteDim,
+		secondPriority: utils.KeyDim,
+	}
+	bs.rank = initRankV2(bs)
+	rule := &placement.Rule{LabelConstraints: []placement.LabelConstraint{
+		{Key: "pool", Op: placement.In, Values: []string{"old"}},
+	}}
+	scope := bs.getPlacementLoadScope([]*placement.Rule{rule}, true)
+	require.NotNil(t, scope)
+	require.Empty(t, scope.expect.HistoryLoads[utils.ByteDim])
+
+	var failure string
+	require.NotPanics(t, func() {
+		failure = bs.destinationStoreFailure(details[2], scope, 1)
+	})
+	require.Equal(t, "dst-store-out-of-scope", failure)
+}
+
 func TestBeginSourcePlacementClearsPreviousEngineScope(t *testing.T) {
 	bs := &balanceSolver{
 		curScope:             &placementLoadScope{},
