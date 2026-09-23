@@ -22,6 +22,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
+	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
+
+	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
 func TestMain(m *testing.M) {
@@ -67,4 +72,48 @@ func TestEndTime(t *testing.T) {
 	re.NotNil(result)
 	re.True(ok)
 	re.Equal(timeNow, result)
+}
+
+func setRedactInfoLogForTest(t *testing.T, redactInfoLog logutil.RedactInfoLogType) {
+	re := require.New(t)
+	var (
+		lg    *zap.Logger
+		props *log.ZapProperties
+	)
+	re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, redactInfoLog))
+	t.Cleanup(func() {
+		re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, logutil.RedactInfoLogOFF))
+	})
+}
+
+func TestRequestInfoStringRedact(t *testing.T) {
+	re := require.New(t)
+	info := RequestInfo{
+		ServiceLabel:   "SetRegionLabelRule",
+		Method:         "HTTP/1.1/POST:/pd/api/v1/config/region-label/rule",
+		CallerID:       "pdctl",
+		IP:             "localhost",
+		Port:           "2379",
+		URLParam:       `{"key":["7480000000000000ff"]}`,
+		BodyParam:      `{"id":"test","data":[{"start_key":"7480000000000000ff","end_key":"7480000000000001ff"}]}`,
+		StartTimeStamp: time.Now().Unix(),
+	}
+	originalURLParam, originalBodyParam := info.URLParam, info.BodyParam
+	prefix := "{ServiceLabel:SetRegionLabelRule, Method:HTTP/1.1/POST:/pd/api/v1/config/region-label/rule, " +
+		"CallerID:pdctl, IP:localhost, Port:2379, StartTime:" + time.Unix(info.StartTimeStamp, 0).String()
+
+	// Redaction off: identical to the raw values.
+	re.Equal(prefix+", URLParam:"+info.URLParam+", BodyParam:"+info.BodyParam+"}", info.String())
+
+	setRedactInfoLogForTest(t, logutil.RedactInfoLogON)
+	s := info.String()
+	re.Equal(prefix+", URLParam:?, BodyParam:?}", s)
+	re.NotContains(s, "7480000000000000ff")
+
+	setRedactInfoLogForTest(t, logutil.RedactInfoLogMarker)
+	re.Equal(prefix+", URLParam:‹"+info.URLParam+"›, BodyParam:‹"+info.BodyParam+"›}", info.String())
+
+	// The raw fields themselves are left untouched.
+	re.Equal(originalURLParam, info.URLParam)
+	re.Equal(originalBodyParam, info.BodyParam)
 }

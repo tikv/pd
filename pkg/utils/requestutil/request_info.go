@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
 // RequestInfo holds service information from http.Request
@@ -39,9 +40,13 @@ type RequestInfo struct {
 	StartTimeStamp int64
 }
 
+// String implements fmt.Stringer. URLParam and BodyParam may carry user data
+// (e.g. region keys in label rules), so they are redacted according to the
+// `security.redact-info-log` setting.
 func (info *RequestInfo) String() string {
 	s := fmt.Sprintf("{ServiceLabel:%s, Method:%s, CallerID:%s, IP:%s, Port:%s, StartTime:%s, URLParam:%s, BodyParam:%s}",
-		info.ServiceLabel, info.Method, info.CallerID, info.IP, info.Port, time.Unix(info.StartTimeStamp, 0), info.URLParam, info.BodyParam)
+		info.ServiceLabel, info.Method, info.CallerID, info.IP, info.Port, time.Unix(info.StartTimeStamp, 0),
+		logutil.RedactString(info.URLParam), logutil.RedactString(info.BodyParam))
 	return s
 }
 
