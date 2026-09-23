@@ -243,6 +243,128 @@ func (suite *configTestSuite) checkConfigSchedule(cluster *tests.TestCluster) {
 		re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, addr, scheduleConfig1))
 		return reflect.DeepEqual(*scheduleConfig1, *scheduleConfig)
 	})
+
+	invalidDefaultStoreLimit := map[string]any{
+		"default-store-limit": map[string]any{
+			"add-peer":    -1,
+			"remove-peer": scheduleConfig.DefaultStoreLimit.RemovePeer,
+		},
+	}
+	postData, err = json.Marshal(invalidDefaultStoreLimit)
+	re.NoError(err)
+	err = testutil.CheckPostJSON(tests.TestDialClient, addr, postData,
+		testutil.StatusNotOK(re),
+		testutil.StringContain(re, "default-store-limit.add-peer should be finite and non-negative"))
+	re.NoError(err)
+	re.Equal(scheduleConfig.DefaultStoreLimit, leaderServer.GetPersistOptions().GetScheduleConfig().DefaultStoreLimit)
+
+	for _, endpoint := range []string{"config", "config/schedule"} {
+		addr := fmt.Sprintf("%s/pd/api/v1/%s", urlPrefix, endpoint)
+		postData = []byte(`{"store-limit":{"1":{"add-peer":0,"remove-peer":0,"transfer-leader-in":0},"2":{"add-peer":10,"remove-peer":20,"transfer-leader-in":30}}}`)
+		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, addr, postData, testutil.StatusOK(re)))
+		current := leaderServer.GetPersistOptions().GetScheduleConfig().Clone()
+		re.Equal(sc.StoreLimitConfig{}, current.StoreLimit[1])
+		re.Equal(sc.StoreLimitConfig{AddPeer: 10, RemovePeer: 20, TransferLeaderIn: 30}, current.StoreLimit[2])
+		re.Equal(scheduleConfig.DefaultStoreLimit, current.DefaultStoreLimit)
+		re.Equal(scheduleConfig.MaxStoreDownTime, current.MaxStoreDownTime)
+		persisted := &config.Config{}
+		exists, err := leaderServer.GetServer().GetStorage().LoadConfig(persisted)
+		re.NoError(err)
+		re.True(exists)
+		re.Equal(current.StoreLimit, persisted.Schedule.StoreLimit)
+
+		for _, field := range []string{"add-peer", "remove-peer", "transfer-leader-in"} {
+			postData, err = json.Marshal(map[string]any{
+				"store-limit": map[string]any{"1": map[string]float64{field: -1}},
+			})
+			re.NoError(err)
+			re.NoError(testutil.CheckPostJSON(tests.TestDialClient, addr, postData,
+				testutil.StatusNotOK(re),
+				testutil.StringContain(re, "store-limit[1]."+field+" should be finite and non-negative")))
+			re.Equal(current, leaderServer.GetPersistOptions().GetScheduleConfig())
+			after := &config.Config{}
+			exists, err = leaderServer.GetServer().GetStorage().LoadConfig(after)
+			re.NoError(err)
+			re.True(exists)
+			re.Equal(persisted.Schedule, after.Schedule)
+		}
+	}
+}
+
+func (suite *configTestSuite) TestStoreLimitPartialUpdates() {
+	suite.env.RunTest(suite.checkStoreLimitPartialUpdates)
+}
+
+func (suite *configTestSuite) checkStoreLimitPartialUpdates(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leader := cluster.GetLeaderServer()
+	for _, endpoint := range []string{"config", "config/schedule"} {
+		addr := leader.GetAddr() + "/pd/api/v1/" + endpoint
+		for _, testCase := range []struct {
+			patch    string
+			expected sc.StoreLimitConfig
+		}{
+			{`{"add-peer":30,"remove-peer":40}`, sc.StoreLimitConfig{AddPeer: 30, RemovePeer: 40, TransferLeaderIn: 300}},
+			{`{"transfer-leader-in":120}`, sc.StoreLimitConfig{AddPeer: 10, RemovePeer: 20, TransferLeaderIn: 120}},
+			{`{"transfer-leader-in":0}`, sc.StoreLimitConfig{AddPeer: 10, RemovePeer: 20}},
+			{`{"TRANSFER-LEADER-IN":120}`, sc.StoreLimitConfig{AddPeer: 10, RemovePeer: 20, TransferLeaderIn: 120}},
+			{`{"add-peer":null,"remove-peer":null,"transfer-leader-in":null}`, sc.StoreLimitConfig{AddPeer: 10, RemovePeer: 20, TransferLeaderIn: 300}},
+			{`{}`, sc.StoreLimitConfig{AddPeer: 10, RemovePeer: 20, TransferLeaderIn: 300}},
+			{`null`, sc.StoreLimitConfig{AddPeer: 10, RemovePeer: 20, TransferLeaderIn: 300}},
+		} {
+			seed := []byte(`{"store-limit":{"1":{"add-peer":10,"remove-peer":20,"transfer-leader-in":300}}}`)
+			re.NoError(testutil.CheckPostJSON(tests.TestDialClient, addr, seed, testutil.StatusOK(re)))
+			before := leader.GetPersistOptions().GetScheduleConfig().Clone()
+			patch := []byte(`{"store-limit":{"1":` + testCase.patch + `}}`)
+			re.NoError(testutil.CheckPostJSON(tests.TestDialClient, addr, patch, testutil.StatusOK(re)))
+			before.StoreLimit[1] = testCase.expected
+			re.Equal(before, leader.GetPersistOptions().GetScheduleConfig())
+			persisted := &config.Config{}
+			exists, err := leader.GetServer().GetStorage().LoadConfig(persisted)
+			re.NoError(err)
+			re.True(exists)
+			re.Equal(before.StoreLimit, persisted.Schedule.StoreLimit)
+		}
+
+		// Each request adds a fresh store so an earlier iteration cannot mask a
+		// default/store ordering bug. Exercise both legacy key spellings as well.
+		for i := range 20 {
+			prefix := ""
+			if endpoint == "config" && i%2 == 0 {
+				prefix = "schedule."
+			}
+			storeID := uint64(9000 + i)
+			if endpoint == "config/schedule" {
+				storeID += 1000
+			}
+			patch := fmt.Appendf(nil, `{"%sstore-limit":{"%d":{"transfer-leader-in":300},"%d":{}},"%sdefault-store-limit":{"add-peer":%d,"remove-peer":70,"transfer-leader-in":120}}`,
+				prefix, storeID, storeID+100, prefix, 60+i)
+			re.NoError(testutil.CheckPostJSON(tests.TestDialClient, addr, patch, testutil.StatusOK(re)))
+			current := leader.GetPersistOptions().GetScheduleConfig()
+			re.Equal(sc.StoreLimitConfig{AddPeer: float64(60 + i), RemovePeer: 70, TransferLeaderIn: 300}, current.StoreLimit[storeID])
+			re.Equal(current.DefaultStoreLimit, current.StoreLimit[storeID+100])
+		}
+		before := leader.GetPersistOptions().GetScheduleConfig().Clone()
+		invalidPatches := []string{
+			`{"default-store-limit":{"add-peer":99},"store-limit":{"1":{"transfer-leader-in":-1}}}`,
+			`{"default-store-limit":{"add-peer":99},"store-limit":{"1":{"transfer-leader-in":"invalid"}}}`,
+		}
+		if endpoint == "config" {
+			invalidPatches = append(invalidPatches,
+				`{"default-store-limit":{"add-peer":99},"schedule.unknown-option":1}`,
+				`{"default-store-limit":{"add-peer":99},"schedule.default-store-limit":{"add-peer":100}}`)
+		}
+		for _, patch := range invalidPatches {
+			re.NoError(testutil.CheckPostJSON(tests.TestDialClient, addr, []byte(patch), testutil.StatusNotOK(re)))
+			re.Equal(before, leader.GetPersistOptions().GetScheduleConfig())
+			persisted := &config.Config{}
+			exists, err := leader.GetServer().GetStorage().LoadConfig(persisted)
+			re.NoError(err)
+			re.True(exists)
+			re.Equal(before.StoreLimit, persisted.Schedule.StoreLimit)
+			re.Equal(before.DefaultStoreLimit, persisted.Schedule.DefaultStoreLimit)
+		}
+	}
 }
 
 func (suite *configTestSuite) TestConfigReplication() {
