@@ -113,8 +113,9 @@ func TestRegionEmptyFilter(t *testing.T) {
 	}
 	re.Equal(filter.Select(region), statusRegionEmpty)
 
+	// balance-region only considers the size, so a small region with keys is still filtered.
 	region = region.Clone(core.SetApproximateSize(1), core.SetApproximateKeys(2))
-	re.Equal(filter.Select(region), statusOK)
+	re.Equal(filter.Select(region), statusRegionEmpty)
 }
 
 func TestRegionWitnessFilter(t *testing.T) {
