@@ -92,14 +92,15 @@ func (t *ruTimeline) ack(end int64) {
 }
 
 // snapshot copies the unacknowledged closed seconds, filling idle seconds
-// with zero. It returns nil while the timeline is quarantined.
+// with zero. It returns nil while the timeline is quarantined, and after a
+// clock rollback until the clock passes the acknowledged seconds again.
 func (t *ruTimeline) snapshot(now time.Time) *rmpb.RUConsumptionBySecond {
 	t.advance(now)
 	end := now.Unix()
-	if end < t.start {
+	start := max(t.start, end-ruTimelineSeconds, t.acked)
+	if end < start {
 		return nil
 	}
-	start := max(t.start, end-ruTimelineSeconds, t.acked)
 	values := make([]rmpb.RUConsumptionBucket, end-start)
 	buckets := make([]*rmpb.RUConsumptionBucket, len(values))
 	for i := range values {
@@ -113,7 +114,8 @@ func (t *ruTimeline) snapshot(now time.Time) *rmpb.RUConsumptionBySecond {
 }
 
 // trimRUTimelines keeps at most the newest budget/len(requests) seconds of each
-// request's RU timeline. The server withholds the windows of dropped seconds.
+// request's RU timeline. Dropped seconds become gaps, and the resource manager
+// withholds the minutes they belong to.
 func trimRUTimelines(requests []*rmpb.TokenBucketRequest, budget int) {
 	total := 0
 	for _, req := range requests {

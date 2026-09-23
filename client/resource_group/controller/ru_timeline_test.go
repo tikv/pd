@@ -76,6 +76,13 @@ func TestRUTimelineAck(t *testing.T) {
 	// A stale acknowledgement never rewinds the timeline.
 	tl.ack(start + 1)
 	re.Equal(start+2, tl.snapshot(time.Unix(start+4, 0)).StartUnixSec)
+	// After a clock rollback, acknowledged seconds are not reported again,
+	// even once the quarantine is over.
+	sent = tl.snapshot(time.Unix(start+600, 0))
+	tl.ack(sent.StartUnixSec + int64(len(sent.Buckets)))
+	re.Nil(tl.snapshot(time.Unix(start+300, 0)))
+	re.Nil(tl.snapshot(time.Unix(start+480, 0)))
+	re.Equal(start+600, tl.snapshot(time.Unix(start+601, 0)).StartUnixSec)
 }
 
 func TestTrimRUTimelines(t *testing.T) {

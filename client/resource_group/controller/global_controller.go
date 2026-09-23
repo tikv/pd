@@ -826,7 +826,8 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 			metrics.FailedTokenRequestDuration.Observe(latency.Seconds())
 		} else {
 			metrics.SuccessfulTokenRequestDuration.Observe(latency.Seconds())
-			// The resource manager dispatches every request before responding.
+			// The resource manager has received these seconds; any it drops
+			// afterwards become gaps that withhold their minutes.
 			for i, gc := range reporters {
 				gc.ackRU(requests[i])
 			}
