@@ -19,6 +19,7 @@ import (
 	"os"
 	"reflect"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -190,6 +191,8 @@ func (c *Config) Clone() *Config {
 // PersistConfig wraps all configurations that need to persist to storage and
 // allows to access them safely.
 type PersistConfig struct {
+	scheduleMu sync.Mutex
+
 	ttl *cache.TTLString
 	// Store the global configuration that is related to the scheduling.
 	clusterVersion unsafe.Pointer
@@ -252,6 +255,12 @@ func (o *PersistConfig) GetScheduleConfig() *sc.ScheduleConfig {
 
 // SetScheduleConfig sets the scheduling configuration dynamically.
 func (o *PersistConfig) SetScheduleConfig(cfg *sc.ScheduleConfig) {
+	o.scheduleMu.Lock()
+	defer o.scheduleMu.Unlock()
+	o.installScheduleConfig(cfg)
+}
+
+func (o *PersistConfig) installScheduleConfig(cfg *sc.ScheduleConfig) {
 	old := o.GetScheduleConfig()
 	o.schedule.Store(cfg)
 	// The coordinator is not aware of the underlying scheduler config changes,
@@ -259,6 +268,16 @@ func (o *PersistConfig) SetScheduleConfig(cfg *sc.ScheduleConfig) {
 	if !reflect.DeepEqual(old.Schedulers, cfg.Schedulers) {
 		o.tryNotifySchedulersUpdating()
 	}
+}
+
+// SetSchedulers replaces only the scheduler list.
+func (o *PersistConfig) SetSchedulers(schedulers sc.SchedulerConfigs) {
+	o.scheduleMu.Lock()
+	defer o.scheduleMu.Unlock()
+
+	next := o.GetScheduleConfig().Clone()
+	next.Schedulers = append(sc.SchedulerConfigs(nil), schedulers...)
+	o.installScheduleConfig(next)
 }
 
 // AdjustScheduleCfg adjusts the schedule config during the initialization.
@@ -271,6 +290,7 @@ func AdjustScheduleCfg(scheduleCfg *sc.ScheduleConfig) {
 			scheduleCfg.Schedulers = append(scheduleCfg.Schedulers, ps)
 		}
 	}
+	scheduleCfg.MigrateDeprecatedFlags()
 }
 
 // GetReplicationConfig returns replication configurations.
@@ -494,10 +514,7 @@ func (o *PersistConfig) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitCon
 		return limit
 	}
 	cfg := o.GetScheduleConfig().Clone()
-	limitCfg := sc.StoreLimitConfig{
-		AddPeer:    sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
-		RemovePeer: sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
-	}
+	limitCfg := cfg.GetDefaultStoreLimit()
 	cfg.StoreLimit[storeID] = limitCfg
 	o.SetScheduleConfig(cfg)
 	return o.GetScheduleConfig().StoreLimit[storeID]
@@ -511,6 +528,8 @@ func (o *PersistConfig) GetStoreLimitByType(storeID uint64, typ storelimit.Type)
 		return limit.AddPeer
 	case storelimit.RemovePeer:
 		return limit.RemovePeer
+	case storelimit.TransferLeaderIn:
+		return limit.TransferLeaderIn
 	// todo: impl it in store limit v2.
 	case storelimit.SendSnapshot:
 		return 0.0
@@ -572,19 +591,10 @@ func (o *PersistConfig) IsTikvRegionSplitEnabled() bool {
 // SetAllStoresLimit sets all store limit for a given type and rate.
 func (o *PersistConfig) SetAllStoresLimit(typ storelimit.Type, ratePerMin float64) {
 	v := o.GetScheduleConfig().Clone()
-	switch typ {
-	case storelimit.AddPeer:
-		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, ratePerMin)
-		for storeID := range v.StoreLimit {
-			sc := sc.StoreLimitConfig{AddPeer: ratePerMin, RemovePeer: v.StoreLimit[storeID].RemovePeer}
-			v.StoreLimit[storeID] = sc
-		}
-	case storelimit.RemovePeer:
-		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, ratePerMin)
-		for storeID := range v.StoreLimit {
-			sc := sc.StoreLimitConfig{AddPeer: v.StoreLimit[storeID].AddPeer, RemovePeer: ratePerMin}
-			v.StoreLimit[storeID] = sc
-		}
+	v.DefaultStoreLimit = v.DefaultStoreLimit.SetLimit(typ, ratePerMin)
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(typ, ratePerMin)
+	for storeID, limit := range v.StoreLimit {
+		v.StoreLimit[storeID] = limit.SetLimit(typ, ratePerMin)
 	}
 
 	o.SetScheduleConfig(v)
