@@ -26,8 +26,10 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
 
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
+	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -37,6 +39,8 @@ const (
 	enabledKeyspacePageSize       = 256
 	enabledKeyspaceRequestTimeout = 5 * time.Second
 	enabledKeyspaceRetryDelay     = time.Second
+	enabledKeyspaceMaxRetryDelay  = 30 * time.Second
+	enabledKeyspaceLogInterval    = 30 * time.Second
 	enabledKeyspaceWatchTimeout   = 10 * time.Second
 )
 
@@ -49,9 +53,10 @@ type enabledKeyspace struct {
 // enabledKeyspaceCache belongs to one leadership term. The published map and
 // its revision always describe one complete, successfully applied snapshot.
 type enabledKeyspaceCache struct {
-	termCtx context.Context
-	client  *clientv3.Client
-	prefix  string
+	termCtx        context.Context
+	client         *clientv3.Client
+	prefix         string
+	watcherFactory func(*clientv3.Client) clientv3.Watcher
 
 	mu       sync.Mutex
 	entries  map[uint32]enabledKeyspace
@@ -62,31 +67,63 @@ type enabledKeyspaceCache struct {
 
 func newEnabledKeyspaceCache(termCtx context.Context, client *clientv3.Client, prefix string) *enabledKeyspaceCache {
 	return &enabledKeyspaceCache{
-		termCtx: termCtx,
-		client:  client,
-		prefix:  prefix,
-		changed: make(chan struct{}),
+		termCtx:        termCtx,
+		client:         client,
+		prefix:         prefix,
+		watcherFactory: clientv3.NewWatcher,
+		changed:        make(chan struct{}),
 	}
 }
 
 // run blocks until the leadership term ends. A failed or compacted watch is
 // followed by a complete reload, so no missing revision is silently skipped.
 func (c *enabledKeyspaceCache) run() {
+	retryDelay := enabledKeyspaceRetryDelay
+	var lastLog time.Time
+	suppressedErrors := 0
 	for c.termCtx.Err() == nil {
 		entries, revision, err := c.load()
+		phase := "load"
 		if err == nil {
 			c.publish(entries, revision)
-			_ = c.watch(revision + 1)
+			watchStarted := time.Now()
+			err = c.watch(revision + 1)
+			phase = "watch"
+			if time.Since(watchStarted) >= enabledKeyspaceMaxRetryDelay {
+				retryDelay = enabledKeyspaceRetryDelay
+			}
 		}
 		if c.termCtx.Err() != nil {
 			return
 		}
+		if time.Since(lastLog) >= enabledKeyspaceLogInterval {
+			log.Warn("failed to synchronize enabled keyspace cache",
+				zap.String("prefix", c.prefix),
+				zap.String("phase", phase),
+				zap.Int64("revision", c.appliedRevision()),
+				zap.Duration("retry-delay", retryDelay),
+				zap.Int("suppressed-errors", suppressedErrors),
+				zap.Error(err))
+			lastLog = time.Now()
+			suppressedErrors = 0
+		} else {
+			suppressedErrors++
+		}
+		timer := time.NewTimer(retryDelay)
 		select {
 		case <-c.termCtx.Done():
+			timer.Stop()
 			return
-		case <-time.After(enabledKeyspaceRetryDelay):
+		case <-timer.C:
 		}
+		retryDelay = min(retryDelay*2, enabledKeyspaceMaxRetryDelay)
 	}
+}
+
+func (c *enabledKeyspaceCache) appliedRevision() int64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.revision
 }
 
 func (c *enabledKeyspaceCache) waitReady(ctx context.Context) error {
@@ -249,7 +286,7 @@ func (c *enabledKeyspaceCache) decode(rawKey, rawValue []byte) (uint32, enabledK
 // prior events on the same stream, so they prove a complete applied revision.
 // Event response headers alone may be ahead of the delivered prefix events.
 func (c *enabledKeyspaceCache) watch(nextRevision int64) error {
-	watcher := clientv3.NewWatcher(c.client)
+	watcher := c.watcherFactory(c.client)
 	defer watcher.Close()
 	watchCtx, cancel := context.WithCancel(clientv3.WithRequireLeader(c.termCtx))
 	defer cancel()

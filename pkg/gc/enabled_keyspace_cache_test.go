@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -32,6 +33,42 @@ import (
 )
 
 const enabledKeyspaceTestPrefix = "/test/enabled-keyspaces/"
+
+type pauseAfterFirstPageKV struct {
+	clientv3.KV
+	firstPage chan<- int64
+	release   <-chan struct{}
+	once      sync.Once
+}
+
+func (kv *pauseAfterFirstPageKV) Get(ctx context.Context, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
+	resp, err := kv.KV.Get(ctx, key, opts...)
+	if err == nil {
+		kv.once.Do(func() {
+			kv.firstPage <- resp.Header.Revision
+			select {
+			case <-kv.release:
+			case <-ctx.Done():
+			}
+		})
+	}
+	return resp, err
+}
+
+type pauseBeforeWatch struct {
+	clientv3.Watcher
+	started chan<- struct{}
+	release <-chan struct{}
+}
+
+func (w *pauseBeforeWatch) Watch(ctx context.Context, key string, opts ...clientv3.OpOption) clientv3.WatchChan {
+	w.started <- struct{}{}
+	select {
+	case <-w.release:
+	case <-ctx.Done():
+	}
+	return w.Watcher.Watch(ctx, key, opts...)
+}
 
 func putEnabledKeyspaceTestMeta(t *testing.T, client *clientv3.Client, id uint32, state keyspacepb.KeyspaceState, gcType string) int64 {
 	t.Helper()
@@ -154,14 +191,60 @@ func TestEnabledKeyspaceCacheLoadsAllPagesAtOneRevision(t *testing.T) {
 	resp, err := client.Txn(ctx).Then(ops...).Commit()
 	require.NoError(t, err)
 	revision = resp.Header.Revision
+	firstPage := make(chan int64, 1)
+	releasePage := make(chan struct{})
+	clientWithPause := *client
+	clientWithPause.KV = &pauseAfterFirstPageKV{KV: client.KV, firstPage: firstPage, release: releasePage}
 	termCtx, stop := context.WithCancel(context.Background())
 	defer stop()
-	cache := newEnabledKeyspaceCache(termCtx, client, enabledKeyspaceTestPrefix)
-	entries, loadedRevision, err := cache.load()
+	cache := newEnabledKeyspaceCache(termCtx, &clientWithPause, enabledKeyspaceTestPrefix)
+	type loadedSnapshot struct {
+		entries  map[uint32]enabledKeyspace
+		revision int64
+		err      error
+	}
+	loaded := make(chan loadedSnapshot, 1)
+	go func() {
+		entries, loadedRevision, err := cache.load()
+		loaded <- loadedSnapshot{entries: entries, revision: loadedRevision, err: err}
+	}()
+	select {
+	case firstRevision := <-firstPage:
+		require.Equal(t, revision, firstRevision)
+	case <-ctx.Done():
+		t.Fatal("first metadata page was not read")
+	}
+	_, err = client.Delete(ctx, fmt.Sprintf("%s%08d", enabledKeyspaceTestPrefix, enabledKeyspacePageSize+1))
 	require.NoError(t, err)
-	require.Equal(t, revision, loadedRevision)
-	require.Len(t, entries, enabledKeyspacePageSize+1)
-	require.Equal(t, enabledKeyspace{id: enabledKeyspacePageSize + 1, gcManagementType: keyspace.KeyspaceLevelGC}, entries[enabledKeyspacePageSize+1])
+	insertedRevision := putEnabledKeyspaceTestMeta(t, client, 300, keyspacepb.KeyspaceState_ENABLED, keyspace.UnifiedGC)
+	close(releasePage)
+	var initial loadedSnapshot
+	select {
+	case initial = <-loaded:
+	case <-ctx.Done():
+		t.Fatal("fixed-revision metadata load did not finish")
+	}
+	require.NoError(t, initial.err)
+	require.Equal(t, revision, initial.revision)
+	require.Len(t, initial.entries, enabledKeyspacePageSize+1)
+	require.Contains(t, initial.entries, uint32(enabledKeyspacePageSize+1))
+	require.NotContains(t, initial.entries, uint32(300))
+
+	cache.publish(initial.entries, initial.revision)
+	watchDone := make(chan error, 1)
+	go func() { watchDone <- cache.watch(initial.revision + 1) }()
+	list, applied, err := cache.snapshotAtLeast(ctx, insertedRevision)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, applied, insertedRevision)
+	require.Len(t, list, enabledKeyspacePageSize+1)
+	require.NotContains(t, list, enabledKeyspace{id: enabledKeyspacePageSize + 1, gcManagementType: keyspace.KeyspaceLevelGC})
+	require.Equal(t, enabledKeyspace{id: 300, gcManagementType: keyspace.UnifiedGC}, list[len(list)-1])
+	stop()
+	select {
+	case <-watchDone:
+	case <-ctx.Done():
+		t.Fatal("metadata watch did not stop")
+	}
 }
 
 func TestEnabledKeyspaceCacheRejectsMalformedMetadataUntilReload(t *testing.T) {
@@ -201,33 +284,49 @@ func TestEnabledKeyspaceCacheReloadsAfterCompactedWatch(t *testing.T) {
 	termCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cache := newEnabledKeyspaceCache(termCtx, client, enabledKeyspaceTestPrefix)
-	entries, revision, err := cache.load()
-	require.NoError(t, err)
-	require.Equal(t, first, revision)
-	cache.publish(entries, revision)
-
+	watchStarting := make(chan struct{}, 1)
+	releaseWatch := make(chan struct{})
+	firstWatch := true
+	cache.watcherFactory = func(client *clientv3.Client) clientv3.Watcher {
+		watcher := clientv3.NewWatcher(client)
+		if !firstWatch {
+			return watcher
+		}
+		firstWatch = false
+		return &pauseBeforeWatch{Watcher: watcher, started: watchStarting, release: releaseWatch}
+	}
+	done := make(chan struct{})
+	go func() {
+		cache.run()
+		close(done)
+	}()
 	ctx, stop := context.WithTimeout(context.Background(), 10*time.Second)
 	defer stop()
+	select {
+	case <-watchStarting:
+	case <-ctx.Done():
+		t.Fatal("initial cache load did not reach watch startup")
+	}
+	list, revision, err := cache.snapshotAtLeast(ctx, first)
+	require.NoError(t, err)
+	require.Equal(t, first, revision)
+	require.Equal(t, []enabledKeyspace{{id: 1, gcManagementType: keyspace.KeyspaceLevelGC}}, list)
 	_, err = client.Delete(ctx, fmt.Sprintf("%s%08d", enabledKeyspaceTestPrefix, 1))
 	require.NoError(t, err)
 	latest := putEnabledKeyspaceTestMeta(t, client, 2, keyspacepb.KeyspaceState_ENABLED, keyspace.UnifiedGC)
 	_, err = client.Compact(ctx, latest, clientv3.WithCompactPhysical())
 	require.NoError(t, err)
-	// The watch cannot replay the missing revisions. Its caller must reload
-	// the complete prefix before publishing a newer waterline.
-	require.Error(t, cache.watch(revision+1))
-	list, applied, err := cache.snapshotAtLeast(ctx, revision)
-	require.NoError(t, err)
-	require.Equal(t, revision, applied)
-	require.Equal(t, []enabledKeyspace{{id: 1, gcManagementType: keyspace.KeyspaceLevelGC}}, list)
-
-	entries, revision, err = cache.load()
-	require.NoError(t, err)
-	cache.publish(entries, revision)
-	list, applied, err = cache.snapshotAtLeast(ctx, latest)
+	close(releaseWatch)
+	list, applied, err := cache.snapshotAtLeast(ctx, latest)
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, applied, latest)
 	require.Equal(t, []enabledKeyspace{{id: 2, gcManagementType: keyspace.UnifiedGC}}, list)
+	cancel()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		t.Fatal("cache run did not stop")
+	}
 }
 
 func TestEnabledKeyspaceCacheTermCancellationUnblocksWaiters(t *testing.T) {
