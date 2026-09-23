@@ -102,7 +102,7 @@ func (suite *regionTestSuite) checkRegion(cluster *pdTests.TestCluster) {
 	downPeer := &metapb.Peer{Id: 8, StoreId: 3}
 	r1 := pdTests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"),
 		core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1),
-		core.SetRegionVersion(1), core.SetApproximateSize(1), core.SetApproximateKeys(100),
+		core.SetRegionVersion(1), core.SetApproximateSize(1), core.SetApproximateKeys(0),
 		core.SetReadQuery(100), core.SetWrittenQuery(100),
 		core.SetPeers([]*metapb.Peer{
 			{Id: 1, StoreId: 1},
@@ -161,7 +161,7 @@ func (suite *regionTestSuite) checkRegion(cluster *pdTests.TestCluster) {
 		// region check learner-peer command
 		{[]string{"region", "check", "learner-peer"}, []*core.RegionInfo{r3}},
 		// region check empty-region command
-		{[]string{"region", "check", "empty-region"}, []*core.RegionInfo{}},
+		{[]string{"region", "check", "empty-region"}, []*core.RegionInfo{r1}},
 		// region check undersized-region command
 		{[]string{"region", "check", "undersized-region"}, []*core.RegionInfo{r1, r3, r4}},
 		// region check oversized-region command

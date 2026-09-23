@@ -4328,7 +4328,7 @@ func TestDownStoreLimit(t *testing.T) {
 			Peer:        region.GetStorePeer(1),
 			DownSeconds: 24 * 60 * 60,
 		},
-	}), core.SetApproximateSize(1))
+	}), core.SetApproximateSize(1), core.SetApproximateKeys(0))
 	err = tc.putRegion(region)
 	re.NoError(err)
 	for i := uint64(1); i < 20; i++ {
