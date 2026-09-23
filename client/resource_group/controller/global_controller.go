@@ -455,6 +455,9 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 								zap.String("name", name), zap.Error(err))
 							continue
 						}
+						// Earlier controllers of this group may have recorded the
+						// current seconds, which a fresh RU timeline cannot attest to.
+						newGC.mu.ruTimeline.invalidate(time.Now())
 						if c.groupsController.CompareAndSwap(name, gc, newGC) {
 							log.Info("[resource group controller] re-create resource group cost controller for tombstone",
 								zap.String("name", name))
@@ -717,6 +720,7 @@ func (c *ResourceGroupsController) tombstoneGroupCostController(name string) {
 		return
 	}
 	gc.tombstone.Store(true)
+	gc.ruTimelineOwner = defaultGC
 	c.groupsController.Store(name, gc)
 	// Its metrics will be deleted in the cleanup process.
 	metrics.ResourceGroupStatusGauge.WithLabelValues(name, name).Set(2)
@@ -728,21 +732,21 @@ func (c *ResourceGroupsController) cleanUpResourceGroup() {
 	c.groupsController.Range(func(key, value any) bool {
 		resourceGroupName := key.(string)
 		gc := value.(*groupCostController)
-		// Check for stale resource groups, which will be deleted when consumption is continuously unchanged.
+		// Keep idle controllers reporting a zero RU timeline. Their lifetime is
+		// bounded by the resource group; deleting an idle controller would
+		// silently end its timeline without a final report.
+		if !gc.tombstone.Load() {
+			return true
+		}
+		// Remove tombstones once their consumption stops changing.
 		gc.mu.Lock()
 		latestConsumption := *gc.mu.consumption
 		gc.mu.Unlock()
 		if equalRU(latestConsumption, *gc.run.consumption) {
-			if gc.inactive || gc.tombstone.Load() {
-				c.cleanupRequestSourceMetricsState(resourceGroupName)
-				c.groupsController.Delete(resourceGroupName)
-				metrics.ResourceGroupStatusGauge.DeleteLabelValues(resourceGroupName, resourceGroupName)
-				gc.metrics.deletePagingLabels(resourceGroupName)
-				return true
-			}
-			gc.inactive = true
-		} else {
-			gc.inactive = false
+			c.cleanupRequestSourceMetricsState(resourceGroupName)
+			c.groupsController.Delete(resourceGroupName)
+			metrics.ResourceGroupStatusGauge.DeleteLabelValues(resourceGroupName, resourceGroupName)
+			gc.metrics.deletePagingLabels(resourceGroupName)
 		}
 		return true
 	})
@@ -779,22 +783,26 @@ func (c *ResourceGroupsController) handleTokenBucketResponse(resp []*rmpb.TokenB
 
 func (c *ResourceGroupsController) collectTokenBucketRequests(ctx context.Context, source string, typ selectType, notifyMsg notifyMsg) {
 	c.run.currentRequests = make([]*rmpb.TokenBucketRequest, 0)
+	var reporters []*groupCostController
 	c.groupsController.Range(func(_, value any) bool {
 		gc := value.(*groupCostController)
 		request := gc.collectRequestAndConsumption(typ)
 		if request != nil {
 			request.KeyspaceId = &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: c.keyspaceID}}
 			c.run.currentRequests = append(c.run.currentRequests, request)
+			reporters = append(reporters, gc)
 			gc.metrics.tokenRequestCounter.Inc()
 		}
 		return true
 	})
 	if len(c.run.currentRequests) > 0 {
-		c.sendTokenBucketRequests(ctx, c.run.currentRequests, source, notifyMsg)
+		trimRUTimelines(c.run.currentRequests, ruTimelineBucketsPerRPC)
+		c.sendTokenBucketRequests(ctx, c.run.currentRequests, reporters, source, notifyMsg)
 	}
 }
 
-func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, requests []*rmpb.TokenBucketRequest, source string, notifyMsg notifyMsg) {
+// sendTokenBucketRequests sends requests[i] on behalf of reporters[i].
+func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, requests []*rmpb.TokenBucketRequest, reporters []*groupCostController, source string, notifyMsg notifyMsg) {
 	now := time.Now()
 	req := &rmpb.TokenBucketsRequest{
 		Requests:              requests,
@@ -818,6 +826,10 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 			metrics.FailedTokenRequestDuration.Observe(latency.Seconds())
 		} else {
 			metrics.SuccessfulTokenRequestDuration.Observe(latency.Seconds())
+			// The resource manager dispatches every request before responding.
+			for i, gc := range reporters {
+				gc.ackRU(requests[i])
+			}
 		}
 		if !notifyMsg.startTime.IsZero() && time.Since(notifyMsg.startTime) > slowNotifyFilterDuration {
 			log.Warn("[resource group controller] slow token bucket request", zap.String("source", source), zap.Duration("cost", time.Since(notifyMsg.startTime)))
