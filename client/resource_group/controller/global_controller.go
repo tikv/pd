@@ -455,9 +455,6 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 								zap.String("name", name), zap.Error(err))
 							continue
 						}
-						// Earlier controllers of this group may have recorded the
-						// current seconds, which a fresh RU timeline cannot attest to.
-						newGC.mu.ruTimeline.invalidate(time.Now())
 						if c.groupsController.CompareAndSwap(name, gc, newGC) {
 							log.Info("[resource group controller] re-create resource group cost controller for tombstone",
 								zap.String("name", name))
