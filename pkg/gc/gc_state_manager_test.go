@@ -101,6 +101,8 @@ type newGCStateManagerForTestOptions struct {
 	serverNodes             int
 	etcdServerCfgModifier   func(cfg *embed.Config)
 	etcdClientCfgModifier   etcdutil.CreateEtcdClientOpt
+	useEnabledKeyspaceIndex bool
+	beforeLeader            func(*clientv3.Client)
 }
 
 func (opt *newGCStateManagerForTestOptions) generateKeyspacesByCount(count int) {
@@ -148,6 +150,9 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 	kgm := keyspace.NewKeyspaceGroupManager(ctx, s, client)
 	keyspaceManager := keyspace.NewKeyspaceManager(ctx, s, mockcluster.NewCluster(ctx, config.NewPersistOptions(cfg)), allocator, &config.KeyspaceConfig{}, kgm, nil)
 	gcStateManager = NewGCStateManager(s.GetGCStateProvider(), cfg.PDServerCfg, keyspaceManager)
+	if opt.useEnabledKeyspaceIndex {
+		gcStateManager.SetEtcdClient(client)
+	}
 	t.Cleanup(gcStateManager.CloseBarrierMetrics)
 
 	err = kgm.Bootstrap(ctx)
@@ -214,6 +219,9 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 		}
 	}
 
+	if opt.beforeLeader != nil {
+		opt.beforeLeader(client)
+	}
 	stopGCStateManager := gcStateManager.OnNodeBecomesLeader()
 	originalClean := clean
 	clean = func() {
