@@ -417,6 +417,7 @@ func (m *GCStateManager) iterateEnabledKeyspacesGCStates(
 	if err != nil {
 		return fmt.Errorf("probe keyspace metadata revision: %w", err)
 	}
+	failpoint.InjectCall("watchGCStatesTargetRevisionProbed", resp.Header.Revision)
 	waitCtx, cancel := context.WithTimeout(ctx, gcStateWatchMetadataWaitTimeout)
 	entries, _, err := cache.snapshotAtLeast(waitCtx, resp.Header.Revision)
 	cancel()

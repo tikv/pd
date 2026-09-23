@@ -1114,6 +1114,28 @@ func TestWatchGCStatesInitialAndSkipInitialRegistrationBoundary(t *testing.T) {
 	re.Empty(firstAfterRegistration.GetGcBarriers())
 }
 
+func TestWatchGCStatesUsesIndexOnlyInNextGen(t *testing.T) {
+	cluster := newWatchGCStatesCluster(t, 1, true)
+	leader := cluster.GetLeaderServer()
+	require.NotNil(t, leader)
+	const legacyIterator = "github.com/tikv/pd/pkg/gc/iterateAllKeyspacesGCStatesError"
+	const legacyError = "legacy keyspace iterator reached"
+	require.NoError(t, failpoint.Enable(legacyIterator, `return("legacy keyspace iterator reached")`))
+	defer func() { require.NoError(t, failpoint.Disable(legacyIterator)) }()
+
+	client := newWatchGCStatesClient(t, leader.GetAddr())
+	stream, _ := openWatchGCStates(t, client, testutil.NewRequestHeader(leader.GetClusterID()), false)
+	if kerneltype.IsNextGen() {
+		state := recvWatchGCStateForKeyspace(t, stream, constant.NullKeyspaceID)
+		require.False(t, state.GetIsKeyspaceLevelGc())
+		return
+	}
+	response, err := stream.Recv()
+	require.Nil(t, response)
+	require.ErrorContains(t, err, legacyError)
+	require.Equal(t, codes.Unavailable, status.Code(err))
+}
+
 func TestWatchGCStatesRequestPreflight(t *testing.T) {
 	tests := []struct {
 		name     string
