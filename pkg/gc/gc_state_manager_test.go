@@ -300,6 +300,85 @@ func (s *gcStateManagerTestSuite) TestGCStateWatchLeadershipGeneration() {
 	re.ErrorIs(second.Err(), errs.ErrNotLeader)
 }
 
+func TestGCStateLeadershipClearsCacheBeforeEnablingReads(t *testing.T) {
+	for _, replacingLeader := range []bool{false, true} {
+		name := "follower-promotion"
+		if replacingLeader {
+			name = "leader-replacement"
+		}
+		t.Run(name, func(t *testing.T) {
+			re := require.New(t)
+			_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+			defer clean()
+			provider := endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(client), nil).GetGCStateProvider()
+			manager := NewGCStateManager(provider, config.PDServerConfig{}, nil)
+			defer manager.CloseBarrierMetrics()
+			if replacingLeader {
+				stop := manager.OnNodeBecomesLeader()
+				defer stop()
+			}
+
+			writeSafePoint := func(safePoint uint64) {
+				re.NoError(provider.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+					return wb.SetGCSafePoint(constant.NullKeyspaceID, safePoint)
+				}))
+			}
+			writeSafePoint(100)
+			// Reads can populate the cache even while this manager is a follower.
+			state, err := manager.GetGCState(constant.NullKeyspaceID, true)
+			re.NoError(err)
+			re.Equal(uint64(100), state.GCSafePoint)
+			// Another leader advances storage after the cached read.
+			writeSafePoint(200)
+
+			resetReached := make(chan struct{})
+			releaseReset := make(chan struct{})
+			release := sync.OnceFunc(func() { close(releaseReset) })
+			const hook = "github.com/tikv/pd/pkg/gc/beforeLeaderGCStateCacheReset"
+			re.NoError(failpoint.EnableCall(hook, func() {
+				close(resetReached)
+				<-releaseReset
+			}))
+			defer func() { re.NoError(failpoint.Disable(hook)) }()
+			leaderReady := make(chan struct{})
+			var stopLeader func()
+			go func() {
+				stopLeader = manager.OnNodeBecomesLeader()
+				close(leaderReady)
+			}()
+			defer func() {
+				release()
+				select {
+				case <-leaderReady:
+					stopLeader()
+				case <-time.After(5 * time.Second):
+					t.Error("leadership initialization did not stop")
+				}
+			}()
+			select {
+			case <-resetReached:
+			case <-time.After(5 * time.Second):
+				t.Fatal("leadership initialization did not reach the cache reset")
+			}
+
+			// Cache reads must remain disabled while the stale snapshot is present.
+			safePoint, err := manager.CompatibleLoadGCSafePoint(constant.NullKeyspaceID)
+			re.NoError(err)
+			re.Equal(uint64(200), safePoint)
+			release()
+			select {
+			case <-leaderReady:
+			case <-time.After(5 * time.Second):
+				t.Fatal("leadership initialization did not finish")
+			}
+			re.True(manager.nodeIsLeader())
+			safePoint, err = manager.CompatibleLoadGCSafePoint(constant.NullKeyspaceID)
+			re.NoError(err)
+			re.Equal(uint64(200), safePoint)
+		})
+	}
+}
+
 func (s *gcStateManagerTestSuite) TestGCStateWatchLoadsInitialStatesIncrementally() {
 	re := s.Require()
 	w, err := s.manager.registerGCStateWatcher(context.Background(), false, gcStateWatchConfig{

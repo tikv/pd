@@ -260,13 +260,16 @@ func getKeyspaceNameFromCtx(ctx context.Context) string {
 // OnNodeBecomesLeader starts a local leadership generation and returns its teardown function.
 func (m *GCStateManager) OnNodeBecomesLeader() func() {
 	m.mu.Lock()
+	// Disable lock-free cache reads throughout the reset, including when
+	// replacing an active leadership generation.
+	m.activeLeadershipGeneration.Store(0)
 	if m.cancelEnabledKeyspaces != nil {
 		m.cancelEnabledKeyspaces()
 	}
 	m.nextLeadershipGeneration++
 	generation := m.nextLeadershipGeneration
 	m.terminateAllGCStateWatchersLocked(errs.ErrNotLeader, watcherTerminationLeaderLost)
-	m.activeLeadershipGeneration.Store(generation)
+	failpoint.InjectCall("beforeLeaderGCStateCacheReset")
 	m.gcStateCache.clearAll()
 	m.enabledKeyspaces = nil
 	m.cancelEnabledKeyspaces = nil
@@ -278,6 +281,7 @@ func (m *GCStateManager) OnNodeBecomesLeader() func() {
 	enabledKeyspaces := m.enabledKeyspaces
 	m.barrierMetrics.clearMetrics()
 	productionBarrierMetrics.current.Store(m.barrierMetrics)
+	m.activeLeadershipGeneration.Store(generation)
 	m.mu.Unlock()
 	if enabledKeyspaces != nil {
 		go enabledKeyspaces.run()
