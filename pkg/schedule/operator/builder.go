@@ -853,7 +853,6 @@ func (b *Builder) allowLeader(peer *metapb.Peer, ignoreClusterLimit bool) bool {
 // 7. demote voter.
 // 8. remove voter/learner.
 // 9. add voter/learner.
-// 10. convert a legacy witness learner to a regular learner.
 // Plan 1-5 (replace plans) do not change voter/learner count, so they have higher priority.
 type stepPlan struct {
 	leaderBeforeAdd    uint64 // leader before adding peer.

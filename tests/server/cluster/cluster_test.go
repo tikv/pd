@@ -536,7 +536,7 @@ func resetStoreState(re *require.Assertions, rc *cluster.RaftCluster, storeID ui
 		err := rc.SetStoreLimit(storeID, storelimit.RemovePeer, storelimit.Unlimited)
 		re.NoError(err)
 	case metapb.StoreState_Tombstone:
-		rc.RemoveStoreLimit(storeID)
+		re.NoError(rc.RemoveStoreLimit(storeID))
 	default:
 	}
 }
@@ -545,10 +545,20 @@ func testStateAndLimit(re *require.Assertions, clusterID uint64, rc *cluster.Raf
 	// prepare
 	storeID := store.GetId()
 	oc := rc.GetOperatorController()
-	err := rc.SetStoreLimit(storeID, storelimit.AddPeer, 60)
-	re.NoError(err)
-	err = rc.SetStoreLimit(storeID, storelimit.RemovePeer, 60)
-	re.NoError(err)
+	// The store can be left tombstoned by a previous call to this helper (the
+	// tombstone beforeState block runs it twice on the same store). Production
+	// never un-tombstones a store, so don't fake that transition here either --
+	// these SetStoreLimit calls only exist to seed a limit before resetStoreState
+	// below establishes the state this specific case actually wants to test, and
+	// resetStoreState's own Tombstone branch clears any limit anyway, so seeding
+	// one is pointless (and rejected by SetStoreLimit) once the store is already
+	// tombstoned.
+	if store := rc.GetStore(storeID); store == nil || !store.IsRemoved() {
+		err := rc.SetStoreLimit(storeID, storelimit.AddPeer, 60)
+		re.NoError(err)
+		err = rc.SetStoreLimit(storeID, storelimit.RemovePeer, 60)
+		re.NoError(err)
+	}
 	op := operator.NewTestOperator(2, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: storeID, PeerID: 3})
 	oc.AddOperator(op)
 	op = operator.NewTestOperator(2, &metapb.RegionEpoch{}, operator.OpRegion, operator.RemovePeer{FromStore: storeID})
@@ -557,7 +567,7 @@ func testStateAndLimit(re *require.Assertions, clusterID uint64, rc *cluster.Raf
 	resetStoreState(re, rc, store.GetId(), beforeState)
 	_, isOKBefore := rc.GetAllStoresLimit()[storeID]
 	// run
-	err = run(rc)
+	err := run(rc)
 	// judge
 	_, isOKAfter := rc.GetAllStoresLimit()[storeID]
 	if len(expectStates) != 0 {
@@ -794,8 +804,11 @@ func TestRaftClusterStartTSOJob(t *testing.T) {
 		allocator := leaderServer.GetServer().GetTSOAllocator()
 		return allocator.IsInitialize()
 	})
-	re.NoError(tc.ResignLeader())
-	re.NotEmpty(tc.WaitLeader())
+	// The campaign loop can transfer leadership to a different peer concurrently,
+	// causing this request to time out even though the old leader has stepped down.
+	// Check the completed leader change before checking the old TSO allocator.
+	err = leaderServer.ResignLeader()
+	re.NotEmpty(tc.WaitLeaderChange(name), "resign leader returned: %v", err)
 	testutil.Eventually(re, func() bool {
 		allocator := tc.GetServer(name).GetServer().GetTSOAllocator()
 		return !allocator.IsInitialize()
@@ -2090,8 +2103,7 @@ func TestPatrolRegionConfigChange(t *testing.T) {
 		endKey := []byte(strconv.Itoa(i * 2))
 		tests.MustPutRegion(re, tc, uint64(i), uint64(i%3+1), startKey, endKey)
 	}
-	fname := testutil.InitTempFileLogger("debug")
-	defer os.RemoveAll(fname)
+	fname := testutil.InitTempFileLogger(t, "debug")
 	checkLog(re, fname, "coordinator starts patrol regions")
 
 	// test change patrol region interval

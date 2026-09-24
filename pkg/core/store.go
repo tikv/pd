@@ -889,7 +889,18 @@ func (s *StoresInfo) PutStore(store *StoreInfo, opts ...StoreCreateOption) {
 // putStoreLocked sets a StoreInfo with storeID.
 func (s *StoresInfo) putStoreLocked(store *StoreInfo, opts ...StoreCreateOption) {
 	if len(opts) > 0 {
-		store = s.stores[store.GetID()].Clone(opts...)
+		// Every opts-passing caller already treats this as a patch onto a
+		// store it expects to still be there (fetched via an earlier
+		// GetStore), not an insert -- so a store no longer in the map here
+		// means it was concurrently, fully removed since that read. Skip
+		// the patch instead of dereferencing a nil current entry: a heartbeat
+		// or similar in-flight update losing its race with removal isn't
+		// worth resurrecting (or crashing over).
+		current, ok := s.stores[store.GetID()]
+		if !ok {
+			return
+		}
+		store = current.Clone(opts...)
 	}
 	s.stores[store.GetID()] = store
 }

@@ -544,8 +544,8 @@ func (sr SplitRegion) GetCmd(*core.RegionInfo, bool) *hbstream.Operation {
 // Note: It is not an OpStep, only a sub step in ChangePeerV2Enter and ChangePeerV2Leave.
 type DemoteVoter struct {
 	ToStore, PeerID uint64
-	// IsWitness preserves the state of a legacy witness while it is demoted
-	// before conversion. It must never be set for a new peer.
+	// IsWitness preserves legacy metadata while an existing peer is demoted.
+	// It must never be set for a new peer.
 	IsWitness bool
 }
 
@@ -560,7 +560,8 @@ func (dv DemoteVoter) String() string {
 // ConfVerChanged returns the delta value for version increased by this step.
 func (dv DemoteVoter) ConfVerChanged(region *core.RegionInfo) uint64 {
 	peer := region.GetStorePeer(dv.ToStore)
-	// A legacy witness voter is demoted before it is converted and promoted.
+	// During a mixed-version rollout, an older PD may have already converted a
+	// legacy witness. Treat that state as having completed this compatibility step.
 	return typeutil.BoolToUint64(peer == nil || (peer.GetId() == dv.PeerID && peer.GetRole() == metapb.PeerRole_Learner) || (dv.IsWitness && !peer.GetIsWitness()))
 }
 
@@ -614,8 +615,8 @@ func (cpe ChangePeerV2Enter) ConfVerChanged(region *core.RegionInfo) uint64 {
 	}
 	for _, dv := range cpe.DemoteVoters {
 		peer := region.GetStorePeer(dv.ToStore)
-		// A legacy witness voter may be converted before this joint state is
-		// observed, which also means the demotion has completed.
+		// During a mixed-version rollout, an older PD may convert a legacy
+		// witness before this joint state is observed.
 		if peer != nil && (peer.GetId() != dv.PeerID || (!core.IsLearnerOrDemotingVoter(peer) && (!dv.IsWitness || peer.GetIsWitness()))) {
 			return 0
 		}

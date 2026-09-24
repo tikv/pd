@@ -177,8 +177,8 @@ func NewGrantLeaderSchedulerCommand() *cobra.Command {
 // NewEvictLeaderSchedulerCommand returns a command to add a evict-leader-scheduler.
 func NewEvictLeaderSchedulerCommand() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "evict-leader-scheduler <store_id>",
-		Short: "add a scheduler to evict leader from a store",
+		Use:   "evict-leader-scheduler <store_id> [store_id...]",
+		Short: "add a scheduler to evict leader from one or more stores",
 		Run:   addSchedulerForStoreCommandFunc,
 	}
 	return c
@@ -203,7 +203,8 @@ func checkSchedulerExist(cmd *cobra.Command, schedulerName string) (bool, error)
 }
 
 func addSchedulerForStoreCommandFunc(cmd *cobra.Command, args []string) {
-	if len(args) != 1 {
+	// Only evict-leader-scheduler accepts more than one store id.
+	if len(args) < 1 || (cmd.Name() != evictLeaderSchedulerName && len(args) != 1) {
 		cmd.Println(cmd.UsageString())
 		return
 	}
@@ -221,7 +222,7 @@ func addSchedulerForStoreCommandFunc(cmd *cobra.Command, args []string) {
 		}
 		fallthrough
 	default:
-		storeID, err := strconv.ParseUint(args[0], 10, 64)
+		storeIDs, err := parseStoreIDs(args)
 		if err != nil {
 			cmd.Println(err)
 			return
@@ -229,7 +230,15 @@ func addSchedulerForStoreCommandFunc(cmd *cobra.Command, args []string) {
 
 		input := make(map[string]any)
 		input["name"] = cmd.Name()
-		input["store_id"] = storeID
+		// Keep sending the single-value "store_id" field whenever possible so
+		// that a new pd-ctl still talks to an older pd-server for the common,
+		// single-store case; only use "store_ids" when adding multiple stores
+		// at once, which is a new capability that requires a new server too.
+		if len(storeIDs) == 1 {
+			input["store_id"] = storeIDs[0]
+		} else {
+			input["store_ids"] = storeIDs
+		}
 		postJSON(cmd, schedulersPrefix, input)
 	}
 }
@@ -614,7 +623,7 @@ func newConfigEvictLeaderCommand() *cobra.Command {
 		Run:   listSchedulerConfigCommandFunc,
 	}
 	c.AddCommand(&cobra.Command{
-		Use:   "add-store <store-id>",
+		Use:   "add-store <store_id> [store_id...]",
 		Short: "add a store to evict leader list",
 		Run:   func(cmd *cobra.Command, args []string) { addStoreToSchedulerConfig(cmd, c.Name(), args) },
 	}, &cobra.Command{
@@ -666,7 +675,11 @@ func newConfigShuffleRegionCommand() *cobra.Command {
 }
 
 func addStoreToSchedulerConfig(cmd *cobra.Command, schedulerName string, args []string) {
-	if len(args) != 1 {
+	// Only evict-leader-scheduler accepts more than one store id; this
+	// function is also reachable directly from other schedulers' own
+	// "config <name> add-store" subcommand (e.g. grant-leader-scheduler),
+	// which must keep requiring exactly one.
+	if len(args) < 1 || (schedulerName != evictLeaderSchedulerName && len(args) != 1) {
 		cmd.Println(cmd.UsageString())
 		return
 	}
@@ -680,16 +693,44 @@ func addStoreToSchedulerConfig(cmd *cobra.Command, schedulerName string, args []
 		return
 	}
 
-	storeID, err := strconv.ParseUint(args[0], 10, 64)
+	storeIDs, err := parseStoreIDs(args)
 	if err != nil {
 		cmd.Println(err)
 		return
 	}
-	input := make(map[string]any)
-	input["name"] = schedulerName
-	input["store_id"] = storeID
 
-	postJSON(cmd, path.Join(schedulerConfigPrefix, schedulerName, "config"), input)
+	// evict-leader-scheduler's config handler can add several stores in a
+	// single, batched call. Other schedulers reusing this helper (namely
+	// grant-leader-scheduler) only take one store per request, and a lone
+	// store id always goes through the single-value field for compatibility
+	// with an older pd-server.
+	if schedulerName == evictLeaderSchedulerName && len(storeIDs) > 1 {
+		input := make(map[string]any)
+		input["name"] = schedulerName
+		input["store_ids"] = storeIDs
+		postJSON(cmd, path.Join(schedulerConfigPrefix, schedulerName, "config"), input)
+		return
+	}
+	for _, storeID := range storeIDs {
+		input := make(map[string]any)
+		input["name"] = schedulerName
+		input["store_id"] = storeID
+
+		postJSON(cmd, path.Join(schedulerConfigPrefix, schedulerName, "config"), input)
+	}
+}
+
+// parseStoreIDs converts a list of store id strings into uint64s.
+func parseStoreIDs(args []string) ([]uint64, error) {
+	storeIDs := make([]uint64, 0, len(args))
+	for _, arg := range args {
+		storeID, err := strconv.ParseUint(arg, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		storeIDs = append(storeIDs, storeID)
+	}
+	return storeIDs, nil
 }
 
 var hiddenHotConfig = []string{
