@@ -18,13 +18,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/stretchr/testify/require"
+	pb "go.etcd.io/etcd/api/v3/etcdserverpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"google.golang.org/grpc"
 
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
@@ -59,6 +62,31 @@ type pauseBeforeWatch struct {
 	clientv3.Watcher
 	started chan<- struct{}
 	release <-chan struct{}
+}
+
+type signalWatchCreated struct {
+	clientv3.Watcher
+	created chan<- struct{}
+}
+
+func (w *signalWatchCreated) Watch(ctx context.Context, key string, opts ...clientv3.OpOption) clientv3.WatchChan {
+	ch := w.Watcher.Watch(ctx, key, opts...)
+	w.created <- struct{}{}
+	return ch
+}
+
+type neverCreateWatchServer struct {
+	pb.UnimplementedWatchServer
+	started chan struct{}
+}
+
+func (s *neverCreateWatchServer) Watch(stream pb.Watch_WatchServer) error {
+	if _, err := stream.Recv(); err != nil {
+		return err
+	}
+	close(s.started)
+	<-stream.Context().Done()
+	return stream.Context().Err()
 }
 
 func (w *pauseBeforeWatch) Watch(ctx context.Context, key string, opts ...clientv3.OpOption) clientv3.WatchChan {
@@ -361,4 +389,128 @@ func TestEnabledKeyspaceCacheTermCancellationUnblocksWaiters(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("cache run did not stop after term cancellation")
 	}
+}
+
+func TestEnabledKeyspaceCacheWatchCreationTimesOut(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	server := grpc.NewServer()
+	backend := &neverCreateWatchServer{started: make(chan struct{})}
+	pb.RegisterWatchServer(server, backend)
+	go func() { _ = server.Serve(listener) }()
+	defer server.Stop()
+	client, err := clientv3.New(clientv3.Config{Endpoints: []string{listener.Addr().String()}, DialTimeout: time.Second})
+	require.NoError(t, err)
+	defer client.Close()
+	termCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cache := newEnabledKeyspaceCache(termCtx, client, enabledKeyspaceTestPrefix)
+	done := make(chan error, 1)
+	go func() { done <- cache.watch(1) }()
+	select {
+	case <-backend.started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("watch create request did not reach server")
+	}
+	select {
+	case err := <-done:
+		require.Error(t, err)
+		require.NoError(t, termCtx.Err())
+	case <-time.After(6 * time.Second):
+		cancel()
+		<-done
+		t.Fatal("watch creation did not time out")
+	}
+}
+
+func TestEnabledKeyspaceCacheReloadsAfterWatchCreationTimeout(t *testing.T) {
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	t.Cleanup(clean)
+	first := putEnabledKeyspaceTestMeta(t, client, 1, keyspacepb.KeyspaceState_ENABLED, keyspace.KeyspaceLevelGC)
+	termCtx, cancel := context.WithCancel(context.Background())
+	cache := newEnabledKeyspaceCache(termCtx, client, enabledKeyspaceTestPrefix)
+	watchStarted := make(chan struct{}, 1)
+	releaseWatch := make(chan struct{})
+	firstWatch := true
+	cache.watcherFactory = func(client *clientv3.Client) clientv3.Watcher {
+		watcher := clientv3.NewWatcher(client)
+		if !firstWatch {
+			return watcher
+		}
+		firstWatch = false
+		return &pauseBeforeWatch{Watcher: watcher, started: watchStarted, release: releaseWatch}
+	}
+	done := make(chan struct{})
+	go func() {
+		cache.run()
+		close(done)
+	}()
+	defer func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Error("cache did not stop")
+		}
+	}()
+	ctx, stop := context.WithTimeout(context.Background(), 8*time.Second)
+	defer stop()
+	select {
+	case <-watchStarted:
+	case <-ctx.Done():
+		t.Fatal("initial cache load did not reach watch creation")
+	}
+	initial, revision, err := cache.snapshotAtLeast(ctx, first)
+	require.NoError(t, err)
+	require.Equal(t, first, revision)
+	require.Equal(t, []enabledKeyspace{{id: 1, gcManagementType: keyspace.KeyspaceLevelGC}}, initial)
+	latest := putEnabledKeyspaceTestMeta(t, client, 2, keyspacepb.KeyspaceState_ENABLED, keyspace.UnifiedGC)
+	list, applied, err := cache.snapshotAtLeast(ctx, latest)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, applied, latest)
+	require.Equal(t, []enabledKeyspace{
+		{id: 1, gcManagementType: keyspace.KeyspaceLevelGC},
+		{id: 2, gcManagementType: keyspace.UnifiedGC},
+	}, list)
+}
+
+func TestEnabledKeyspaceCacheWatchSurvivesCreationTimeout(t *testing.T) {
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	t.Cleanup(clean)
+	termCtx, stop := context.WithCancel(context.Background())
+	cache := newEnabledKeyspaceCache(termCtx, client, enabledKeyspaceTestPrefix)
+	created := make(chan struct{}, 1)
+	cache.watcherFactory = func(client *clientv3.Client) clientv3.Watcher {
+		return &signalWatchCreated{Watcher: clientv3.NewWatcher(client), created: created}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	entries, revision, err := cache.load()
+	require.NoError(t, err)
+	require.True(t, cache.publish(entries, revision))
+	done := make(chan error, 1)
+	go func() { done <- cache.watch(revision + 1) }()
+	defer func() {
+		stop()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Error("watch did not stop")
+		}
+	}()
+	select {
+	case <-created:
+	case <-ctx.Done():
+		t.Fatal("watch was not created")
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("watch ended after creation: %v", err)
+	case <-time.After(4 * time.Second):
+	}
+	latest := putEnabledKeyspaceTestMeta(t, client, 3, keyspacepb.KeyspaceState_ENABLED, keyspace.UnifiedGC)
+	list, applied, err := cache.snapshotAtLeast(ctx, latest)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, applied, latest)
+	require.Equal(t, []enabledKeyspace{{id: 3, gcManagementType: keyspace.UnifiedGC}}, list)
 }

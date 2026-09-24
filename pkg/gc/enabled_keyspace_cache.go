@@ -33,6 +33,7 @@ import (
 
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/grpcutil"
 )
 
 const (
@@ -298,7 +299,13 @@ func (c *enabledKeyspaceCache) watch(nextRevision int64) error {
 	defer watcher.Close()
 	watchCtx, cancel := context.WithCancel(clientv3.WithRequireLeader(c.termCtx))
 	defer cancel()
+	done := make(chan struct{})
+	go grpcutil.CheckStream(watchCtx, cancel, done)
 	watchCh := watcher.Watch(watchCtx, c.prefix, clientv3.WithPrefix(), clientv3.WithRev(nextRevision), clientv3.WithProgressNotify())
+	done <- struct{}{}
+	if err := watchCtx.Err(); err != nil {
+		return fmt.Errorf("keyspace metadata watch creation failed: %w", err)
+	}
 	ticker := time.NewTicker(etcdutil.RequestProgressInterval)
 	defer ticker.Stop()
 	pending := make(map[uint32]*enabledKeyspace)
