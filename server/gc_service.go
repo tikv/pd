@@ -941,6 +941,15 @@ func (s *GrpcServer) WatchGCStates(request *pdpb.WatchGCStatesRequest, stream pd
 	if done != nil {
 		defer done()
 	}
+	forwardedHost := grpcutil.GetForwardedHost(stream.Context())
+	if forwardedHost != "" {
+		if err := s.validatePDForwardedHost(forwardedHost); err != nil {
+			return err
+		}
+	}
+	if !s.isLocalRequest(forwardedHost) {
+		return s.forwardWatchGCStates(request, stream, forwardedHost)
+	}
 	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return err
 	}
