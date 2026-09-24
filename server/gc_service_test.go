@@ -17,8 +17,11 @@ package server
 import (
 	"context"
 	"errors"
+	"io"
 	"math"
 	"net"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -30,6 +33,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/errs"
@@ -495,4 +499,330 @@ func TestServeWatchGCStatesCancellationWhileReceiving(t *testing.T) {
 			require.Empty(t, stream.sent)
 		})
 	}
+}
+
+type watchGCStatesRPCServer struct {
+	pdpb.UnimplementedPDServer
+	watch func(*pdpb.WatchGCStatesRequest, pdpb.PD_WatchGCStatesServer) error
+}
+
+func (s *watchGCStatesRPCServer) WatchGCStates(request *pdpb.WatchGCStatesRequest, stream pdpb.PD_WatchGCStatesServer) error {
+	return s.watch(request, stream)
+}
+
+func newWatchGCStatesTestConn(t *testing.T, service pdpb.PDServer) *grpc.ClientConn {
+	t.Helper()
+	listener := bufconn.Listen(1 << 20)
+	transport := grpc.NewServer()
+	pdpb.RegisterPDServer(transport, service)
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- transport.Serve(listener) }()
+	t.Cleanup(func() { transport.Stop(); require.NoError(t, <-serveErr) })
+	conn, err := grpc.NewClient("passthrough:///bufnet",
+		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithStaticStreamWindowSize(64<<10), grpc.WithStaticConnWindowSize(64<<10),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, conn.Close()) })
+	return conn
+}
+
+func TestForwardWatchGCStatesRequestResponsesAndStatus(t *testing.T) {
+	for _, code := range []codes.Code{codes.OK, codes.Unimplemented, codes.Unavailable, codes.ResourceExhausted} {
+		t.Run(code.String(), func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			t.Cleanup(cancel)
+			request := &pdpb.WatchGCStatesRequest{
+				Header: &pdpb.RequestHeader{ClusterId: 42, SenderId: 7}, SkipLoadingInitial: true,
+			}
+			responses := []*pdpb.WatchGCStatesResponse{
+				{Header: &pdpb.ResponseHeader{ClusterId: 42}, Changes: []*pdpb.GCStateChange{{Change: &pdpb.GCStateChange_Upsert{Upsert: &pdpb.GCState{TxnSafePoint: 10}}}}},
+				{Header: &pdpb.ResponseHeader{ClusterId: 42}, Changes: []*pdpb.GCStateChange{{Change: &pdpb.GCStateChange_Removed{Removed: &pdpb.KeyspaceScope{}}}}},
+			}
+			terminal := status.Error(code, "upstream watch ended")
+			finish := make(chan struct{})
+			seenRequest := make(chan *pdpb.WatchGCStatesRequest, 1)
+			seenMetadata := make(chan metadata.MD, 1)
+			upstream := newWatchGCStatesTestConn(t, &watchGCStatesRPCServer{watch: func(req *pdpb.WatchGCStatesRequest, stream pdpb.PD_WatchGCStatesServer) error {
+				seenRequest <- req
+				md, _ := metadata.FromIncomingContext(stream.Context())
+				seenMetadata <- md
+				for _, response := range responses {
+					if err := stream.Send(response); err != nil {
+						return err
+					}
+				}
+				if code == codes.OK {
+					return nil
+				}
+				select {
+				case <-finish:
+					return terminal
+				case <-stream.Context().Done():
+					return stream.Context().Err()
+				}
+			}})
+			proxy := &GrpcServer{Server: &Server{ctx: ctx, serverLoopCtx: ctx}}
+			proxy.clientConns.Store("leader", upstream)
+			downstream := newWatchGCStatesTestConn(t, &watchGCStatesRPCServer{watch: func(req *pdpb.WatchGCStatesRequest, stream pdpb.PD_WatchGCStatesServer) error {
+				return proxy.forwardWatchGCStates(req, stream, "leader")
+			}})
+			clientCtx := metadata.NewOutgoingContext(ctx, metadata.Pairs(grpcutil.ForwardMetadataKey, "leader", "test-metadata", "preserved"))
+			stream, err := pdpb.NewPDClient(downstream).WatchGCStates(clientCtx, request)
+			require.NoError(t, err)
+			for _, expected := range responses {
+				response, err := stream.Recv()
+				require.NoError(t, err)
+				require.Equal(t, expected, response)
+			}
+			require.Equal(t, request, <-seenRequest)
+			md := <-seenMetadata
+			require.Equal(t, []string{""}, md.Get(grpcutil.ForwardMetadataKey))
+			require.Equal(t, []string{"preserved"}, md.Get("test-metadata"))
+			close(finish)
+			_, err = stream.Recv()
+			if code == codes.OK {
+				require.ErrorIs(t, err, io.EOF)
+			} else {
+				require.Equal(t, status.Convert(terminal).Proto(), status.Convert(err).Proto())
+			}
+		})
+	}
+}
+
+func TestForwardWatchGCStatesSendFailureCancelsUpstream(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	t.Cleanup(cancel)
+	upstreamExited := make(chan struct{})
+	upstream := newWatchGCStatesTestConn(t, &watchGCStatesRPCServer{watch: func(_ *pdpb.WatchGCStatesRequest, stream pdpb.PD_WatchGCStatesServer) error {
+		defer close(upstreamExited)
+		if err := stream.Send(&pdpb.WatchGCStatesResponse{}); err != nil {
+			return err
+		}
+		<-stream.Context().Done()
+		return stream.Context().Err()
+	}})
+	proxy := &GrpcServer{Server: &Server{ctx: ctx, serverLoopCtx: ctx}}
+	proxy.clientConns.Store("leader", upstream)
+	sendErr := errors.New("downstream send failed")
+	stream := &fakeWatchGCStatesServer{
+		ctx:      metadata.NewIncomingContext(ctx, metadata.Pairs(grpcutil.ForwardMetadataKey, "leader")),
+		sendHook: func(*pdpb.WatchGCStatesResponse) error { return sendErr },
+	}
+	err := proxy.forwardWatchGCStates(&pdpb.WatchGCStatesRequest{}, stream, "leader")
+	require.ErrorIs(t, err, sendErr)
+	waitWatchGCStatesSignal(t, upstreamExited, "upstream subscription was not canceled")
+	require.NoError(t, ctx.Err())
+}
+
+func TestForwardWatchGCStatesBlockedTransportCleanup(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		fullQueue bool
+		action    string
+		code      codes.Code
+	}{
+		{"upstream error", false, "upstream error", codes.Unavailable},
+		{"proxy shutdown", false, "proxy shutdown", codes.Canceled},
+		{"client cancel", false, "client cancel", codes.Canceled},
+		{"stalled send", false, "timeout", codes.ResourceExhausted},
+		{"stalled send after EOF", false, "upstream EOF", codes.ResourceExhausted},
+		{"full queue stalled send", true, "timeout", codes.ResourceExhausted},
+		{"full queue proxy shutdown", true, "proxy shutdown", codes.Canceled},
+		{"full queue client cancel", true, "client cancel", codes.Canceled},
+		{"full queue upstream error", true, "upstream error", codes.Unavailable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			t.Cleanup(cancel)
+			setWatchGCStatesForwardSendTimeout(t, time.Second)
+			proxyCtx, stopProxy := context.WithCancel(ctx)
+			t.Cleanup(stopProxy)
+			queueFull := make(chan struct{})
+			var fullOnce sync.Once
+			const fullPoint = "github.com/tikv/pd/server/watchGCStatesForwardQueueFull"
+			require.NoError(t, failpoint.EnableCall(fullPoint, func() { fullOnce.Do(func() { close(queueFull) }) }))
+			t.Cleanup(func() { require.NoError(t, failpoint.Disable(fullPoint)) })
+			finishUpstream := make(chan struct{})
+			upstreamExited := make(chan struct{})
+			// Three 128 KiB responses exhaust the downstream's static receive
+			// window and write quota. The client deliberately never calls Recv.
+			response := &pdpb.WatchGCStatesResponse{Header: &pdpb.ResponseHeader{Error: &pdpb.Error{Message: strings.Repeat("x", 128<<10)}}}
+			upstream := newWatchGCStatesTestConn(t, &watchGCStatesRPCServer{watch: func(_ *pdpb.WatchGCStatesRequest, stream pdpb.PD_WatchGCStatesServer) error {
+				defer close(upstreamExited)
+				for i := 0; i < 3 || tc.fullQueue; i++ {
+					select {
+					case <-finishUpstream:
+						return status.Error(codes.Unavailable, "leader changed")
+					default:
+					}
+					if err := stream.Send(response); err != nil {
+						return err
+					}
+				}
+				select {
+				case <-finishUpstream:
+					if tc.action == "upstream EOF" {
+						return nil
+					}
+					return status.Error(codes.Unavailable, "leader changed")
+				case <-stream.Context().Done():
+					return stream.Context().Err()
+				}
+			}})
+			proxy := &GrpcServer{Server: &Server{ctx: ctx, serverLoopCtx: proxyCtx}}
+			proxy.clientConns.Store("leader", upstream)
+			started, exited := make(chan struct{}), make(chan struct{})
+			handlerResult := make(chan error, 1)
+			downstream := newWatchGCStatesTestConn(t, &watchGCStatesRPCServer{watch: func(req *pdpb.WatchGCStatesRequest, stream pdpb.PD_WatchGCStatesServer) error {
+				observed := &observedWatchGCStatesStream{PD_WatchGCStatesServer: stream, blockedSendStarted: started, blockedSendExited: exited}
+				err := proxy.forwardWatchGCStates(req, observed, "leader")
+				handlerResult <- err
+				return err
+			}})
+			clientCtx, cancelClient := context.WithCancel(ctx)
+			t.Cleanup(cancelClient)
+			stream, err := pdpb.NewPDClient(downstream).WatchGCStates(grpcutil.BuildForwardContext(clientCtx, "leader"), &pdpb.WatchGCStatesRequest{})
+			require.NoError(t, err)
+			waitWatchGCStatesSignal(t, started, "downstream did not reach blocked Send")
+			if tc.fullQueue {
+				waitWatchGCStatesSignal(t, queueFull, "proxy queue did not fill")
+			}
+			select {
+			case <-exited:
+				require.FailNow(t, "send unexpectedly completed before termination")
+			default:
+			}
+			switch tc.action {
+			case "upstream error", "upstream EOF":
+				close(finishUpstream)
+			case "proxy shutdown":
+				stopProxy()
+			case "client cancel":
+				cancelClient()
+			}
+			if tc.fullQueue && tc.action == "upstream error" {
+				// Releasing backpressure lets Recv observe the terminal upstream
+				// status; it must retain that status instead of reconnecting.
+				for {
+					_, err := stream.Recv()
+					if err != nil {
+						require.Equal(t, codes.Unavailable, status.Code(err))
+						break
+					}
+				}
+			}
+			select {
+			case err := <-handlerResult:
+				require.Equal(t, tc.code, status.Code(err))
+			case <-time.After(5 * time.Second):
+				require.FailNow(t, "proxy handler remained blocked")
+			}
+			waitWatchGCStatesSignal(t, exited, "transport teardown did not unblock Send")
+			waitWatchGCStatesSignal(t, upstreamExited, "upstream subscription remained active")
+			require.NoError(t, ctx.Err())
+		})
+	}
+}
+
+func TestForwardWatchGCStatesSlowInitialConsumer(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	t.Cleanup(cancel)
+	// More batches than the proxy can buffer, with a consumer that keeps
+	// making progress but takes longer than one send timeout to load them all.
+	const batchCount, batchSize = 256, 1024
+	const sendTimeout = 2 * time.Second
+	setWatchGCStatesForwardSendTimeout(t, sendTimeout)
+	queueFull := make(chan struct{})
+	var fullOnce sync.Once
+	const fullPoint = "github.com/tikv/pd/server/watchGCStatesForwardQueueFull"
+	require.NoError(t, failpoint.EnableCall(fullPoint, func() { fullOnce.Do(func() { close(queueFull) }) }))
+	t.Cleanup(func() { require.NoError(t, failpoint.Disable(fullPoint)) })
+	upstream := newWatchGCStatesTestConn(t, &watchGCStatesRPCServer{watch: func(_ *pdpb.WatchGCStatesRequest, stream pdpb.PD_WatchGCStatesServer) error {
+		for batch := range batchCount {
+			response := &pdpb.WatchGCStatesResponse{Changes: make([]*pdpb.GCStateChange, batchSize)}
+			for i := range batchSize {
+				response.Changes[i] = &pdpb.GCStateChange{Change: &pdpb.GCStateChange_Upsert{Upsert: &pdpb.GCState{
+					KeyspaceScope: &pdpb.KeyspaceScope{Keyspace: &pdpb.KeyspaceScope_KeyspaceId{KeyspaceId: uint32(batch*batchSize + i)}},
+					TxnSafePoint:  100, GcSafePoint: 50,
+				}}}
+			}
+			if err := stream.Send(response); err != nil {
+				return err
+			}
+		}
+		return nil
+	}})
+	proxy := &GrpcServer{Server: &Server{ctx: ctx, serverLoopCtx: ctx}}
+	proxy.clientConns.Store("leader", upstream)
+	downstream := newWatchGCStatesTestConn(t, &watchGCStatesRPCServer{watch: func(req *pdpb.WatchGCStatesRequest, stream pdpb.PD_WatchGCStatesServer) error {
+		return proxy.forwardWatchGCStates(req, stream, "leader")
+	}})
+	stream, err := pdpb.NewPDClient(downstream).WatchGCStates(grpcutil.BuildForwardContext(ctx, "leader"), &pdpb.WatchGCStatesRequest{})
+	require.NoError(t, err)
+	// Start consuming only after the queue fills, so this exercises
+	// backpressure independently of how fast the test worker produces data.
+	waitWatchGCStatesSignal(t, queueFull, "initial snapshot did not fill the proxy queue")
+	start := time.Now()
+	for batch := range batchCount {
+		// Deliberately read slower than the upstream can produce the initial
+		// snapshot, while continuing to release the transport receive window.
+		time.Sleep(10 * time.Millisecond)
+		response, err := stream.Recv()
+		require.NoError(t, err)
+		require.Len(t, response.GetChanges(), batchSize)
+		for i, change := range response.GetChanges() {
+			state := change.GetUpsert()
+			require.Equal(t, uint32(batch*batchSize+i), state.GetKeyspaceScope().GetKeyspaceId())
+			require.Equal(t, uint64(100), state.GetTxnSafePoint())
+			require.Equal(t, uint64(50), state.GetGcSafePoint())
+		}
+	}
+	require.Greater(t, time.Since(start), sendTimeout)
+	_, err = stream.Recv()
+	require.ErrorIs(t, err, io.EOF)
+}
+
+func setWatchGCStatesForwardSendTimeout(t *testing.T, timeout time.Duration) {
+	t.Helper()
+	const name = "github.com/tikv/pd/server/watchGCStatesForwardSendTimeout"
+	require.NoError(t, failpoint.EnableCall(name, func(value *time.Duration) { *value = timeout }))
+	t.Cleanup(func() { require.NoError(t, failpoint.Disable(name)) })
+}
+
+func TestForwardWatchGCStatesIdleStream(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	t.Cleanup(cancel)
+	const sendTimeout = 500 * time.Millisecond
+	setWatchGCStatesForwardSendTimeout(t, sendTimeout)
+	resume := make(chan struct{})
+	upstream := newWatchGCStatesTestConn(t, &watchGCStatesRPCServer{watch: func(_ *pdpb.WatchGCStatesRequest, stream pdpb.PD_WatchGCStatesServer) error {
+		if err := stream.Send(&pdpb.WatchGCStatesResponse{Header: &pdpb.ResponseHeader{ClusterId: 42}}); err != nil {
+			return err
+		}
+		select {
+		case <-stream.Context().Done():
+			return stream.Context().Err()
+		case <-resume:
+			return stream.Send(&pdpb.WatchGCStatesResponse{Header: &pdpb.ResponseHeader{ClusterId: 43}})
+		}
+	}})
+	proxy := &GrpcServer{Server: &Server{ctx: ctx, serverLoopCtx: ctx}}
+	proxy.clientConns.Store("leader", upstream)
+	downstream := newWatchGCStatesTestConn(t, &watchGCStatesRPCServer{watch: func(req *pdpb.WatchGCStatesRequest, stream pdpb.PD_WatchGCStatesServer) error {
+		return proxy.forwardWatchGCStates(req, stream, "leader")
+	}})
+	stream, err := pdpb.NewPDClient(downstream).WatchGCStates(grpcutil.BuildForwardContext(ctx, "leader"), &pdpb.WatchGCStatesRequest{})
+	require.NoError(t, err)
+	response, err := stream.Recv()
+	require.NoError(t, err)
+	require.Equal(t, uint64(42), response.GetHeader().GetClusterId())
+	time.Sleep(2 * sendTimeout)
+	close(resume)
+	response, err = stream.Recv()
+	require.NoError(t, err)
+	require.Equal(t, uint64(43), response.GetHeader().GetClusterId())
+	_, err = stream.Recv()
+	require.ErrorIs(t, err, io.EOF)
 }
