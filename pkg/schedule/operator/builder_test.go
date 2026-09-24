@@ -102,8 +102,10 @@ func (suite *operatorBuilderTestSuite) TestRecord() {
 	re := suite.Require()
 	re.Error(suite.newBuilder().AddPeer(&metapb.Peer{StoreId: 1}).err)
 	re.NoError(suite.newBuilder().AddPeer(&metapb.Peer{StoreId: 4}).err)
+	re.Error(suite.newBuilder().AddPeer(&metapb.Peer{StoreId: 4, IsWitness: true}).err)
 	re.Error(suite.newBuilder().PromoteLearner(1).err)
 	re.NoError(suite.newBuilder().PromoteLearner(3).err)
+	re.Error(suite.newBuilder().PromoteLearner(4).err)
 	re.NoError(suite.newBuilder().SetLeader(1).SetLeader(2).err)
 	re.Error(suite.newBuilder().SetLeader(3).err)
 	re.Error(suite.newBuilder().RemovePeer(4).err)
@@ -125,6 +127,47 @@ func (suite *operatorBuilderTestSuite) TestRecord() {
 	re.Equal(m[4], builder.targetPeers[4])
 	re.Equal(uint64(0), builder.targetLeaderStoreID)
 	re.True(builder.addLightPeer)
+
+	// Witness peers stay decodable for compatibility, but must not be
+	// accepted as new operator targets.
+	legacyBuilder := suite.newBuilder().SetPeers(map[uint64]*metapb.Peer{
+		4: {StoreId: 4, IsWitness: true},
+	})
+	re.Error(legacyBuilder.err)
+}
+
+func (suite *operatorBuilderTestSuite) TestSetLeadersSkipsWitness() {
+	re := suite.Require()
+	peers := []*metapb.Peer{
+		{Id: 11, StoreId: 1},
+		{Id: 12, StoreId: 2},
+		{Id: 14, StoreId: 4, IsWitness: true},
+	}
+	region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers}, peers[0])
+	builder := NewBuilder("test", suite.cluster, region).
+		SetLeader(2).
+		SetLeaders([]uint64{2, 4})
+
+	re.NoError(builder.err)
+	re.Equal([]uint64{2}, builder.targetLeaderStoreIDs)
+}
+
+func (suite *operatorBuilderTestSuite) TestSetPeersDoesNotMutateCallerMap() {
+	re := suite.Require()
+	targetPeers := map[uint64]*metapb.Peer{
+		1: {StoreId: 1},
+		2: {StoreId: 2},
+		3: {StoreId: 3, Role: metapb.PeerRole_Learner},
+	}
+
+	builder := suite.newBuilder().SetPeers(targetPeers)
+	re.NoError(builder.err)
+	builder.AddPeer(&metapb.Peer{StoreId: 4})
+	re.NoError(builder.err)
+	re.NotContains(targetPeers, uint64(4))
+	builder.RemovePeer(2)
+	re.NoError(builder.err)
+	re.Contains(targetPeers, uint64(2))
 }
 
 func (suite *operatorBuilderTestSuite) TestPrepareBuild() {

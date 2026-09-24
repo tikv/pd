@@ -1194,15 +1194,6 @@ func TestRegionHeartbeat(t *testing.T) {
 		checkRegions(re, cluster.BasicCluster, regions[:i+1])
 		checkRegionsKV(re, cluster.storage, regions[:i+1])
 
-		// Change one peer to witness
-		region = region.Clone(
-			core.WithWitnesses([]*metapb.Peer{region.GetPeers()[rand.IntN(len(region.GetPeers()))]}),
-			core.WithIncConfVer(),
-		)
-		regions[i] = region
-		re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
-		checkRegions(re, cluster.BasicCluster, regions[:i+1])
-
 		// Change leader.
 		region = region.Clone(core.WithLeader(region.GetPeers()[1]))
 		regions[i] = region
@@ -2676,7 +2667,6 @@ func checkRegions(re *require.Assertions, cache *core.BasicCluster, regions []*c
 	regionCount := make(map[uint64]int)
 	leaderCount := make(map[uint64]int)
 	followerCount := make(map[uint64]int)
-	witnessCount := make(map[uint64]int)
 	for _, region := range regions {
 		for _, peer := range region.GetPeers() {
 			regionCount[peer.StoreId]++
@@ -2686,9 +2676,6 @@ func checkRegions(re *require.Assertions, cache *core.BasicCluster, regions []*c
 			} else {
 				followerCount[peer.StoreId]++
 				checkRegion(re, cache.GetFollower(peer.StoreId, region), region)
-			}
-			if peer.IsWitness {
-				witnessCount[peer.StoreId]++
 			}
 		}
 	}
@@ -2703,10 +2690,6 @@ func checkRegions(re *require.Assertions, cache *core.BasicCluster, regions []*c
 	for id, count := range followerCount {
 		re.Equal(count, cache.GetStoreFollowerCount(id))
 	}
-	for id, count := range witnessCount {
-		re.Equal(count, cache.GetStoreWitnessCount(id))
-	}
-
 	for _, region := range cache.GetRegions() {
 		checkRegion(re, region, regions[region.GetID()])
 	}
@@ -2942,7 +2925,7 @@ func dispatchHeartbeat(co *schedule.Coordinator, region *core.RegionInfo, stream
 	if err := co.GetCluster().(*RaftCluster).putRegion(region.Clone(core.SetSource(core.Heartbeat))); err != nil {
 		return err
 	}
-	co.GetOperatorController().Dispatch(region, operator.DispatchFromHeartBeat, nil)
+	co.GetOperatorController().Dispatch(region, operator.DispatchFromHeartBeat)
 	return nil
 }
 

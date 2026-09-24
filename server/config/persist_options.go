@@ -65,6 +65,7 @@ type PersistOptions struct {
 // NewPersistOptions creates a new PersistOptions instance.
 func NewPersistOptions(cfg *Config) *PersistOptions {
 	o := &PersistOptions{}
+	cfg.Schedule.MigrateDeprecatedFeatures()
 	o.schedule.Store(&cfg.Schedule)
 	o.replication.Store(&cfg.Replication)
 	o.pdServerConfig.Store(&cfg.PDServerCfg)
@@ -87,6 +88,7 @@ func (o *PersistOptions) GetScheduleConfig() *sc.ScheduleConfig {
 
 // SetScheduleConfig sets the PD scheduling configuration.
 func (o *PersistOptions) SetScheduleConfig(cfg *sc.ScheduleConfig) {
+	cfg.MigrateDeprecatedFeatures()
 	o.schedule.Store(cfg)
 }
 
@@ -378,11 +380,6 @@ func (o *PersistOptions) SetSplitMergeInterval(splitMergeInterval time.Duration)
 	o.SetScheduleConfig(v)
 }
 
-// GetSwitchWitnessInterval returns the interval between promote to non-witness and starting to switch to witness.
-func (o *PersistOptions) GetSwitchWitnessInterval() time.Duration {
-	return o.GetScheduleConfig().SwitchWitnessInterval.Duration
-}
-
 // IsDiagnosticAllowed returns whether is enable to use diagnostic.
 func (o *PersistOptions) IsDiagnosticAllowed() bool {
 	return o.GetScheduleConfig().EnableDiagnostic
@@ -392,18 +389,6 @@ func (o *PersistOptions) IsDiagnosticAllowed() bool {
 func (o *PersistOptions) SetEnableDiagnostic(enable bool) {
 	v := o.GetScheduleConfig().Clone()
 	v.EnableDiagnostic = enable
-	o.SetScheduleConfig(v)
-}
-
-// IsWitnessAllowed returns whether is enable to use witness.
-func (o *PersistOptions) IsWitnessAllowed() bool {
-	return o.GetScheduleConfig().EnableWitness
-}
-
-// SetEnableWitness to set the option for witness. It's only used to test.
-func (o *PersistOptions) SetEnableWitness(enable bool) {
-	v := o.GetScheduleConfig().Clone()
-	v.EnableWitness = enable
 	o.SetScheduleConfig(v)
 }
 
@@ -490,11 +475,6 @@ func (o *PersistOptions) GetLeaderScheduleLimit() uint64 {
 // GetRegionScheduleLimit returns the limit for region schedule.
 func (o *PersistOptions) GetRegionScheduleLimit() uint64 {
 	return o.getTTLNumberOr(sc.RegionScheduleLimitKey, o.GetScheduleConfig().RegionScheduleLimit)
-}
-
-// GetWitnessScheduleLimit returns the limit for region schedule.
-func (o *PersistOptions) GetWitnessScheduleLimit() uint64 {
-	return o.getTTLNumberOr(sc.WitnessScheduleLimitKey, o.GetScheduleConfig().WitnessScheduleLimit)
 }
 
 // GetReplicaScheduleLimit returns the limit for replica schedule.
@@ -896,6 +876,7 @@ func (o *PersistOptions) Reload(storage endpoint.ConfigStorage) error {
 		return err
 	}
 	adjustScheduleCfg(&cfg.Schedule)
+	cfg.Schedule.MigrateDeprecatedFeatures()
 	// Some fields may not be stored in the storage, we need to calculate them manually.
 	cfg.StoreConfig.Adjust()
 	if isExist {

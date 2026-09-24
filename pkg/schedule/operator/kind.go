@@ -46,46 +46,39 @@ const (
 	OpSplit
 	// Initiated by hot region scheduler.
 	OpHotRegion
-	// Include peer addition or removal or switch witness. This means that this operator may take a long time.
+	// Include peer addition or removal. This means that this operator may take a long time.
 	OpRegion
 	// Include leader transfer.
 	OpLeader
-	// Include witness leader transfer.
-	OpWitnessLeader
-	// Include witness transfer.
-	OpWitness
 	// Initiated by internal split-scatter dispatcher.
 	OpSplitScatter
 	opMax
 )
 
 var flagToName = map[OpKind]string{
-	OpLeader:        "leader",
-	OpRegion:        "region",
-	OpSplit:         "split",
-	OpAdmin:         "admin",
-	OpHotRegion:     "hot-region",
-	OpReplica:       "replica",
-	OpMerge:         "merge",
-	OpRange:         "range",
-	OpWitness:       "witness",
-	OpWitnessLeader: "witness-leader",
-	OpAffinity:      "affinity",
-	OpSplitScatter:  "split-scatter",
+	OpLeader:       "leader",
+	OpRegion:       "region",
+	OpSplit:        "split",
+	OpAdmin:        "admin",
+	OpHotRegion:    "hot-region",
+	OpReplica:      "replica",
+	OpMerge:        "merge",
+	OpRange:        "range",
+	OpAffinity:     "affinity",
+	OpSplitScatter: "split-scatter",
 }
 
 var nameToFlag = map[string]OpKind{
-	"leader":         OpLeader,
-	"region":         OpRegion,
-	"split":          OpSplit,
-	"admin":          OpAdmin,
-	"hot-region":     OpHotRegion,
-	"replica":        OpReplica,
-	"merge":          OpMerge,
-	"range":          OpRange,
-	"witness-leader": OpWitnessLeader,
-	"affinity":       OpAffinity,
-	"split-scatter":  OpSplitScatter,
+	"leader":        OpLeader,
+	"region":        OpRegion,
+	"split":         OpSplit,
+	"admin":         OpAdmin,
+	"hot-region":    OpHotRegion,
+	"replica":       OpReplica,
+	"merge":         OpMerge,
+	"range":         OpRange,
+	"affinity":      OpAffinity,
+	"split-scatter": OpSplitScatter,
 }
 
 func (k OpKind) String() string {

@@ -208,6 +208,7 @@ type PersistConfig struct {
 func NewPersistConfig(cfg *Config, ttl *cache.TTLString) *PersistConfig {
 	o := &PersistConfig{}
 	o.SetClusterVersion(&cfg.ClusterVersion)
+	cfg.Schedule.MigrateDeprecatedFeatures()
 	o.schedule.Store(&cfg.Schedule)
 	o.replication.Store(&cfg.Replication)
 	// storeConfig will be fetched from TiKV by PD,
@@ -279,6 +280,7 @@ func (o *PersistConfig) SetScheduleConfig(cfg *sc.ScheduleConfig) {
 }
 
 func (o *PersistConfig) installScheduleConfig(cfg *sc.ScheduleConfig) {
+	cfg.MigrateDeprecatedFeatures()
 	old := o.GetScheduleConfig()
 	o.schedule.Store(cfg)
 	// The coordinator is not aware of the underlying scheduler config changes,
@@ -424,11 +426,6 @@ func (o *PersistConfig) GetMaxMovableHotPeerSize() int64 {
 	return o.GetScheduleConfig().MaxMovableHotPeerSize
 }
 
-// GetSwitchWitnessInterval returns the interval between promote to non-witness and starting to switch to witness.
-func (o *PersistConfig) GetSwitchWitnessInterval() time.Duration {
-	return o.GetScheduleConfig().SwitchWitnessInterval.Duration
-}
-
 // GetSplitMergeInterval returns the interval between finishing split and starting to merge.
 func (o *PersistConfig) GetSplitMergeInterval() time.Duration {
 	return o.GetScheduleConfig().SplitMergeInterval.Duration
@@ -479,11 +476,6 @@ func (o *PersistConfig) IsRemoveExtraReplicaEnabled() bool {
 	return o.GetScheduleConfig().EnableRemoveExtraReplica
 }
 
-// IsWitnessAllowed returns if the witness is allowed.
-func (o *PersistConfig) IsWitnessAllowed() bool {
-	return o.GetScheduleConfig().EnableWitness
-}
-
 // IsPlacementRulesCacheEnabled returns if the placement rules cache is enabled.
 func (o *PersistConfig) IsPlacementRulesCacheEnabled() bool {
 	return o.GetReplicationConfig().EnablePlacementRulesCache
@@ -509,11 +501,6 @@ func (o *PersistConfig) GetLeaderScheduleLimit() uint64 {
 // GetRegionScheduleLimit returns the limit for region schedule.
 func (o *PersistConfig) GetRegionScheduleLimit() uint64 {
 	return o.getTTLUintOr(sc.RegionScheduleLimitKey, o.GetScheduleConfig().RegionScheduleLimit)
-}
-
-// GetWitnessScheduleLimit returns the limit for region schedule.
-func (o *PersistConfig) GetWitnessScheduleLimit() uint64 {
-	return o.getTTLUintOr(sc.WitnessScheduleLimitKey, o.GetScheduleConfig().WitnessScheduleLimit)
 }
 
 // GetReplicaScheduleLimit returns the limit for replica schedule.
@@ -647,13 +634,6 @@ func (o *PersistConfig) SetPlacementRulesCacheEnabled(enabled bool) {
 	v := o.GetReplicationConfig().Clone()
 	v.EnablePlacementRulesCache = enabled
 	o.SetReplicationConfig(v)
-}
-
-// SetEnableWitness sets if the witness is enabled.
-func (o *PersistConfig) SetEnableWitness(enable bool) {
-	v := o.GetScheduleConfig().Clone()
-	v.EnableWitness = enable
-	o.SetScheduleConfig(v)
 }
 
 // SetPlacementRuleEnabled set PlacementRuleEnabled

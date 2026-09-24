@@ -215,25 +215,6 @@ func (suite *operatorTestSuite) TestInfluence() {
 	}, *storeOpInfluence[1])
 	resetInfluence()
 
-	BecomeNonWitness{SendStore: 2, PeerID: 2, StoreID: 1}.Influence(&opInfluence, region)
-	re.Equal(StoreInfluence{
-		LeaderSize:   0,
-		LeaderCount:  0,
-		RegionSize:   50,
-		RegionCount:  0,
-		WitnessCount: -1,
-		StepCost:     map[storelimit.Type]int64{storelimit.AddPeer: 1000},
-	}, *storeOpInfluence[1])
-
-	re.Equal(StoreInfluence{
-		LeaderSize:  0,
-		LeaderCount: 0,
-		RegionSize:  0,
-		RegionCount: 0,
-		StepCost:    map[storelimit.Type]int64{storelimit.SendSnapshot: 50},
-	}, *storeOpInfluence[2])
-	resetInfluence()
-
 	AddPeer{ToStore: 2, PeerID: 2}.Influence(&opInfluence, region)
 	re.Equal(StoreInfluence{
 		LeaderSize:  0,
@@ -551,9 +532,7 @@ func (suite *operatorTestSuite) TestOpKindValues() {
 		{"hot-region", OpHotRegion, 1 << 6},
 		{"region", OpRegion, 1 << 7},
 		{"leader", OpLeader, 1 << 8},
-		{"witness-leader", OpWitnessLeader, 1 << 9},
-		{"witness", OpWitness, 1 << 10},
-		{"split-scatter", OpSplitScatter, 1 << 11},
+		{"split-scatter", OpSplitScatter, 1 << 9},
 	}
 	for _, testCase := range testCases {
 		re.Equal(testCase.want, testCase.kind, "unexpected %s kind value", testCase.name)

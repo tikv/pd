@@ -57,32 +57,6 @@ func WithPendingPeers(pendingPeers []*metapb.Peer) RegionCreateOption {
 	}
 }
 
-// WithWitness sets the witness for the region.
-func WithWitness(peerID uint64) RegionCreateOption {
-	return func(region *RegionInfo) {
-		for _, p := range region.GetPeers() {
-			if p.GetId() == peerID {
-				p.IsWitness = true
-			}
-		}
-	}
-}
-
-// WithWitnesses sets the witnesses for the region.
-func WithWitnesses(witnesses []*metapb.Peer) RegionCreateOption {
-	return func(region *RegionInfo) {
-		peers := region.meta.GetPeers()
-		for i := range peers {
-			for _, l := range witnesses {
-				if peers[i].GetId() == l.GetId() {
-					peers[i].IsWitness = true
-					break
-				}
-			}
-		}
-	}
-}
-
 // WithLearners sets the learners for the region.
 func WithLearners(learners []*metapb.Peer) RegionCreateOption {
 	return func(region *RegionInfo) {

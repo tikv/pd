@@ -31,7 +31,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
-	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -147,7 +146,6 @@ func ResetSchedulerMetrics() {
 	regionLabelStatusGauge.Reset()
 	opInfluenceStatus.Reset()
 	hotSchedulerResultCounter.Reset()
-	balanceWitnessCounter.Reset()
 	balanceDirectionCounter.Reset()
 	hotDirectionCounter.Reset()
 	evictedSlowStoreStatusGauge.Reset()
@@ -444,27 +442,6 @@ func (c *Controller) GetPausedSchedulerDelayUntil(name string) (int64, error) {
 		return -1, errs.ErrSchedulerNotFound.FastGenByArgs()
 	}
 	return s.GetDelayUntil(), nil
-}
-
-// CheckTransferWitnessLeader determines if transfer leader is required, then sends to the scheduler if needed
-func (c *Controller) CheckTransferWitnessLeader(region *core.RegionInfo) {
-	if core.NeedTransferWitnessLeader(region) {
-		c.RLock()
-		s, ok := c.schedulers[types.TransferWitnessLeaderScheduler.String()]
-		c.RUnlock()
-		if ok {
-			regionC := RecvRegionInfo(s.Scheduler)
-			if regionC == nil {
-				log.Warn("invalid scheduler type for transfer witness leader", zap.String("scheduler", s.GetName()))
-				return
-			}
-			select {
-			case regionC <- region:
-			default:
-				log.Warn("drop transfer witness leader due to recv region channel full", zap.Uint64("region-id", region.GetID()))
-			}
-		}
-	}
 }
 
 // GetAllSchedulerConfigs returns all scheduler configs.

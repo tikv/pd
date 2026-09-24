@@ -101,39 +101,6 @@ func schedulersRegister() {
 		return sche, nil
 	})
 
-	// balance witness
-	RegisterSliceDecoderBuilder(types.BalanceWitnessScheduler, func(args []string) ConfigDecoder {
-		return func(v any) error {
-			conf, ok := v.(*balanceWitnessSchedulerConfig)
-			if !ok {
-				return errs.ErrScheduleConfigNotExist.FastGenByArgs()
-			}
-			ranges, err := getKeyRanges(args)
-			if err != nil {
-				return err
-			}
-			conf.Ranges = ranges
-			conf.Batch = balanceWitnessBatchSize
-			return nil
-		}
-	})
-
-	RegisterScheduler(types.BalanceWitnessScheduler, func(opController *operator.Controller,
-		storage endpoint.ConfigStorage, decoder ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
-		conf := &balanceWitnessSchedulerConfig{
-			schedulerConfig: &baseSchedulerConfig{},
-		}
-		if err := decoder(conf); err != nil {
-			return nil, err
-		}
-		if conf.Batch == 0 {
-			conf.Batch = balanceWitnessBatchSize
-		}
-		sche := newBalanceWitnessScheduler(opController, conf)
-		conf.init(sche.GetName(), storage, conf)
-		return sche, nil
-	})
-
 	// evict leader
 	RegisterSliceDecoderBuilder(types.EvictLeaderScheduler, func(args []string) ConfigDecoder {
 		return func(v any) error {
@@ -524,21 +491,6 @@ func schedulersRegister() {
 			return nil, err
 		}
 		sche := newShuffleRegionScheduler(opController, conf)
-		conf.init(sche.GetName(), storage, conf)
-		return sche, nil
-	})
-
-	// transfer witness leader
-	RegisterSliceDecoderBuilder(types.TransferWitnessLeaderScheduler, func([]string) ConfigDecoder {
-		return func(any) error {
-			return nil
-		}
-	})
-
-	RegisterScheduler(types.TransferWitnessLeaderScheduler, func(opController *operator.Controller,
-		storage endpoint.ConfigStorage, _ ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
-		conf := &baseSchedulerConfig{}
-		sche := newTransferWitnessLeaderScheduler(opController, conf)
 		conf.init(sche.GetName(), storage, conf)
 		return sche, nil
 	})

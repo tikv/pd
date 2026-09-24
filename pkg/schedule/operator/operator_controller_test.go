@@ -177,12 +177,12 @@ func (suite *operatorControllerTestSuite) TestOperatorStatus() {
 	op1.SetStatusReachTime(STARTED, time.Now().Add(-SlowStepWaitTime-FastStepWaitTime))
 	region2 = ApplyOperatorStep(region2, op2)
 	tc.PutRegion(region2)
-	oc.Dispatch(region1, "test", nil)
-	oc.Dispatch(region2, "test", nil)
+	oc.Dispatch(region1, "test")
+	oc.Dispatch(region2, "test")
 	re.Equal(pdpb.OperatorStatus_TIMEOUT, oc.GetOperatorStatus(1).Status)
 	re.Equal(pdpb.OperatorStatus_RUNNING, oc.GetOperatorStatus(2).Status)
 	ApplyOperator(tc, op2)
-	oc.Dispatch(region2, "test", nil)
+	oc.Dispatch(region2, "test")
 	re.Equal(pdpb.OperatorStatus_SUCCESS, oc.GetOperatorStatus(2).Status)
 }
 
@@ -204,18 +204,18 @@ func (suite *operatorControllerTestSuite) TestFastFailOperator() {
 	op := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, steps...)
 	re.True(op.Start())
 	oc.SetOperator(op)
-	oc.Dispatch(region, "test", nil)
+	oc.Dispatch(region, "test")
 	re.Equal(pdpb.OperatorStatus_RUNNING, oc.GetOperatorStatus(1).Status)
 	// change the leader
 	region = region.Clone(core.WithLeader(region.GetPeer(2)))
-	oc.Dispatch(region, DispatchFromHeartBeat, nil)
+	oc.Dispatch(region, DispatchFromHeartBeat)
 	re.Equal(CANCELED, op.Status())
 	re.Nil(oc.GetOperator(region.GetID()))
 
 	// transfer leader to an illegal store.
 	op = NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, TransferLeader{ToStore: 5})
 	oc.SetOperator(op)
-	oc.Dispatch(region, DispatchFromHeartBeat, nil)
+	oc.Dispatch(region, DispatchFromHeartBeat)
 	re.Equal(CANCELED, op.Status())
 	re.Nil(oc.GetOperator(region.GetID()))
 }
@@ -336,7 +336,7 @@ func (suite *operatorControllerTestSuite) TestConcurrentRemoveOperator() {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		oc.Dispatch(region1, "test", nil)
+		oc.Dispatch(region1, "test")
 	}()
 	go func() {
 		defer wg.Done()
@@ -718,7 +718,7 @@ func (suite *operatorControllerTestSuite) TestDispatchOutdatedRegion() {
 	region := cluster.MockRegionInfo(1, 2, []uint64{1, 2}, []uint64{},
 		&metapb.RegionEpoch{ConfVer: 0, Version: 0})
 
-	controller.Dispatch(region, DispatchFromHeartBeat, nil)
+	controller.Dispatch(region, DispatchFromHeartBeat)
 	re.Equal(uint64(0), op.ConfVerChanged(region))
 	re.Equal(2, stream.MsgLength())
 
@@ -726,7 +726,7 @@ func (suite *operatorControllerTestSuite) TestDispatchOutdatedRegion() {
 	region = cluster.MockRegionInfo(1, 2, []uint64{2}, []uint64{},
 		&metapb.RegionEpoch{ConfVer: 0, Version: 0})
 
-	controller.Dispatch(region, DispatchFromHeartBeat, nil)
+	controller.Dispatch(region, DispatchFromHeartBeat)
 	re.Equal(uint64(1), op.ConfVerChanged(region))
 	re.Equal(2, stream.MsgLength())
 
@@ -740,7 +740,7 @@ func (suite *operatorControllerTestSuite) TestDispatchOutdatedRegion() {
 	// report region with an abnormal confver
 	region = cluster.MockRegionInfo(1, 1, []uint64{1, 2}, []uint64{},
 		&metapb.RegionEpoch{ConfVer: 1, Version: 0})
-	controller.Dispatch(region, DispatchFromHeartBeat, nil)
+	controller.Dispatch(region, DispatchFromHeartBeat)
 	re.Equal(uint64(0), op.ConfVerChanged(region))
 	// no new step
 	re.Equal(3, stream.MsgLength())
@@ -910,7 +910,7 @@ func (suite *operatorControllerTestSuite) TestDispatchUnfinishedStep() {
 		re.NotNil(region2.GetPendingPeers())
 
 		re.False(steps[0].IsFinish(region2))
-		controller.Dispatch(region2, DispatchFromHeartBeat, nil)
+		controller.Dispatch(region2, DispatchFromHeartBeat)
 
 		// In this case, the conf version has been changed, but the
 		// peer added is in pending state, the operator should not be
@@ -929,7 +929,7 @@ func (suite *operatorControllerTestSuite) TestDispatchUnfinishedStep() {
 			core.WithIncConfVer(),
 		)
 		re.True(steps[0].IsFinish(region3))
-		controller.Dispatch(region3, DispatchFromHeartBeat, nil)
+		controller.Dispatch(region3, DispatchFromHeartBeat)
 		re.Equal(uint64(1), op.ConfVerChanged(region3))
 		re.Equal(2, stream.MsgLength())
 
@@ -938,7 +938,7 @@ func (suite *operatorControllerTestSuite) TestDispatchUnfinishedStep() {
 			core.WithIncConfVer(),
 		)
 		re.True(steps[1].IsFinish(region4))
-		controller.Dispatch(region4, DispatchFromHeartBeat, nil)
+		controller.Dispatch(region4, DispatchFromHeartBeat)
 		re.Equal(uint64(2), op.ConfVerChanged(region4))
 		re.Equal(3, stream.MsgLength())
 
@@ -947,7 +947,7 @@ func (suite *operatorControllerTestSuite) TestDispatchUnfinishedStep() {
 			core.WithLeader(region4.GetStorePeer(3)),
 		)
 		re.True(steps[2].IsFinish(region5))
-		controller.Dispatch(region5, DispatchFromHeartBeat, nil)
+		controller.Dispatch(region5, DispatchFromHeartBeat)
 		re.Equal(uint64(2), op.ConfVerChanged(region5))
 		re.Equal(4, stream.MsgLength())
 
@@ -957,7 +957,7 @@ func (suite *operatorControllerTestSuite) TestDispatchUnfinishedStep() {
 			core.WithIncConfVer(),
 		)
 		re.True(steps[3].IsFinish(region6))
-		controller.Dispatch(region6, DispatchFromHeartBeat, nil)
+		controller.Dispatch(region6, DispatchFromHeartBeat)
 		re.Equal(uint64(3), op.ConfVerChanged(region6))
 
 		// The Operator has finished, so no message should be sent

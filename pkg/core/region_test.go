@@ -603,9 +603,6 @@ func TestSetRegion(t *testing.T) {
 		peer1 := &metapb.Peer{StoreId: uint64(i%5 + 1), Id: uint64(i*5 + 1)}
 		peer2 := &metapb.Peer{StoreId: uint64((i+1)%5 + 1), Id: uint64(i*5 + 2)}
 		peer3 := &metapb.Peer{StoreId: uint64((i+2)%5 + 1), Id: uint64(i*5 + 3)}
-		if i%3 == 0 {
-			peer2.IsWitness = true
-		}
 		region := NewRegionInfo(&metapb.Region{
 			Id:       uint64(i + 1),
 			Peers:    []*metapb.Peer{peer1, peer2, peer3},
@@ -720,13 +717,17 @@ func TestShouldRemoveFromSubTree(t *testing.T) {
 
 	region.voters[2].StoreId = 4
 	re.False(region.peersEqualTo(origin))
+
+	// A rolling upgrade must notice when an old PD changes the legacy flag.
+	region.voters[2].StoreId = 3
+	region.voters[2].IsWitness = true
+	re.False(region.peersEqualTo(origin))
 }
 
 func checkRegions(re *require.Assertions, regions *RegionsInfo) {
 	leaderMap := make(map[uint64]uint64)
 	followerMap := make(map[uint64]uint64)
 	learnerMap := make(map[uint64]uint64)
-	witnessMap := make(map[uint64]uint64)
 	pendingPeerMap := make(map[uint64]uint64)
 	for _, item := range regions.GetRegions() {
 		leaderMap[item.leader.StoreId]++
@@ -735,9 +736,6 @@ func checkRegions(re *require.Assertions, regions *RegionsInfo) {
 		}
 		for _, learner := range item.GetLearners() {
 			learnerMap[learner.StoreId]++
-		}
-		for _, witness := range item.GetWitnesses() {
-			witnessMap[witness.StoreId]++
 		}
 		for _, pendingPeer := range item.GetPendingPeers() {
 			pendingPeerMap[pendingPeer.StoreId]++
@@ -751,9 +749,6 @@ func checkRegions(re *require.Assertions, regions *RegionsInfo) {
 	}
 	for key, value := range regions.learners {
 		re.Equal(int(learnerMap[key]), value.length())
-	}
-	for key, value := range regions.witnesses {
-		re.Equal(int(witnessMap[key]), value.length())
 	}
 	for key, value := range regions.pendingPeers {
 		re.Equal(int(pendingPeerMap[key]), value.length())
@@ -1157,9 +1152,6 @@ func generateTestRegions(count int, storeNum int) []*RegionInfo {
 		peer1 := &metapb.Peer{StoreId: uint64(i%storeNum + 1), Id: uint64(i*storeNum + 1)}
 		peer2 := &metapb.Peer{StoreId: uint64((i+1)%storeNum + 1), Id: uint64(i*storeNum + 2)}
 		peer3 := &metapb.Peer{StoreId: uint64((i+2)%storeNum + 1), Id: uint64(i*storeNum + 3)}
-		if i%3 == 0 {
-			peer2.IsWitness = true
-		}
 		region := NewRegionInfo(&metapb.Region{
 			Id:          uint64(i + 1),
 			Peers:       []*metapb.Peer{peer1, peer2, peer3},
@@ -1485,7 +1477,7 @@ func TestQueryRegions(t *testing.T) {
 
 func TestCodecRule(t *testing.T) {
 	re := require.New(t)
-	for _, v := range []string{"leader", "peer", "learner", "witness"} {
+	for _, v := range []string{"leader", "peer", "learner"} {
 		rule := NewRule(v)
 		if rule != Unknown {
 			re.Equal(rule.String(), v)
@@ -1564,7 +1556,6 @@ func TestResetRegionCache(t *testing.T) {
 	re.Empty(regions.leaders)
 	re.Empty(regions.followers)
 	re.Empty(regions.learners)
-	re.Empty(regions.witnesses)
 	re.Empty(regions.pendingPeers)
 
 	// Verify that trees are reset

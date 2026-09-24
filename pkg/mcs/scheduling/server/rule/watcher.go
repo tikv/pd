@@ -385,7 +385,7 @@ func (rw *Watcher) reconcileRuleSnapshot(ctx context.Context) (int64, error) {
 				if !bytes.Equal([]byte(rule.StoreKey()), item.Key[len(rulePrefix):]) {
 					return fmt.Errorf("placement rule snapshot key does not match payload identity: %q", item.Key)
 				}
-				if err := rw.ruleManager.AdjustRule(rule, ""); err != nil {
+				if err := rw.ruleManager.AdjustRuleFromStorage(rule, ""); err != nil {
 					return fmt.Errorf("failed to adjust placement rule snapshot at key %q: %w", item.Key, err)
 				}
 				patch.SetRule(rule)
@@ -447,7 +447,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 				return err
 			}
 			// Try to add the rule change to the patch.
-			if err := rw.ruleManager.AdjustRule(rule, ""); err != nil {
+			if err := rw.ruleManager.AdjustRuleFromStorage(rule, ""); err != nil {
 				applyFailed = true
 				return err
 			}

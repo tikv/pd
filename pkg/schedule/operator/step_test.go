@@ -544,41 +544,6 @@ func (suite *operatorStepTestSuite) TestChangePeerV2Leave() {
 	suite.check(re, cpl, desc, testCases)
 }
 
-func (suite *operatorStepTestSuite) TestSwitchToWitness() {
-	re := suite.Require()
-	step := BecomeWitness{StoreID: 2, PeerID: 2}
-	testCases := []testCase{
-		{
-			[]*metapb.Peer{
-				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
-				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner},
-			},
-			0,
-			false,
-			re.NoError,
-		},
-		{
-			[]*metapb.Peer{
-				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
-				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
-			},
-			0,
-			false,
-			re.NoError,
-		},
-		{
-			[]*metapb.Peer{
-				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
-				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter, IsWitness: true},
-			},
-			1,
-			true,
-			re.NoError,
-		},
-	}
-	suite.check(re, step, "switch peer 2 on store 2 to witness", testCases)
-}
-
 func (suite *operatorStepTestSuite) check(re *require.Assertions, step OpStep, desc string, testCases []testCase) {
 	re.Equal(desc, step.String())
 	for _, testCase := range testCases {

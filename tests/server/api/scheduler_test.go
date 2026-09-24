@@ -200,8 +200,11 @@ func (suite *scheduleTestSuite) checkEvictLeaderSchedulerMultiStore(cluster *tes
 	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, urlPrefix, body, testutil.StatusOK(re)))
 	suite.assertSchedulerExists(urlPrefix, "evict-leader-scheduler")
 	resp := make(map[string]any)
-	re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))
-	re.Len(resp["store-id-ranges"], 2)
+	testutil.Eventually(re, func() bool {
+		re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))
+		ranges, ok := resp["store-id-ranges"].(map[string]any)
+		return ok && len(ranges) == 2
+	})
 
 	// the config endpoint (used to batch-add the remaining stores) rejects
 	// mixing store_id and store_ids too, and validates the batch size without
@@ -465,66 +468,6 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 		{
 			name:        "shuffle-region-scheduler",
 			createdName: "shuffle-region-scheduler",
-		},
-		{
-			name:        "transfer-witness-leader-scheduler",
-			createdName: "transfer-witness-leader-scheduler",
-		},
-		{
-			name:        "balance-witness-scheduler",
-			createdName: "balance-witness-scheduler",
-			extraTestFunc: func(name string) {
-				resp := make(map[string]any)
-				listURL := fmt.Sprintf("%s%s/%s/list", leaderAddr, server.SchedulerConfigHandlerPath, name)
-				testutil.Eventually(re, func() bool {
-					re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))
-					return resp["batch"] == 4.0
-				})
-				dataMap := make(map[string]any)
-				dataMap["batch"] = 3
-				updateURL := fmt.Sprintf("%s%s/%s/config", leaderAddr, server.SchedulerConfigHandlerPath, name)
-				body, err := json.Marshal(dataMap)
-				re.NoError(err)
-				re.NoError(testutil.CheckPostJSON(tests.TestDialClient, updateURL, body, testutil.StatusOK(re)))
-				resp = make(map[string]any)
-				testutil.Eventually(re, func() bool {
-					re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))
-					return resp["batch"] == 3.0
-				})
-				// update again
-				err = testutil.CheckPostJSON(tests.TestDialClient, updateURL, body,
-					testutil.StatusOK(re),
-					testutil.StringEqual(re, "\"Config is the same with origin, so do nothing.\"\n"))
-				re.NoError(err)
-				// update invalidate batch
-				dataMap = map[string]any{}
-				dataMap["batch"] = 100
-				body, err = json.Marshal(dataMap)
-				re.NoError(err)
-				err = testutil.CheckPostJSON(tests.TestDialClient, updateURL, body,
-					testutil.Status(re, http.StatusBadRequest),
-					testutil.StringEqual(re, "\"invalid batch size which should be an integer between 1 and 10\"\n"))
-				re.NoError(err)
-				resp = make(map[string]any)
-				testutil.Eventually(re, func() bool {
-					re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))
-					return resp["batch"] == 3.0
-				})
-				// empty body
-				err = testutil.CheckPostJSON(tests.TestDialClient, updateURL, nil,
-					testutil.Status(re, http.StatusInternalServerError),
-					testutil.StringEqual(re, "\"unexpected end of JSON input\"\n"))
-				re.NoError(err)
-				// config item not found
-				dataMap = map[string]any{}
-				dataMap["error"] = 3
-				body, err = json.Marshal(dataMap)
-				re.NoError(err)
-				err = testutil.CheckPostJSON(tests.TestDialClient, updateURL, body,
-					testutil.Status(re, http.StatusBadRequest),
-					testutil.StringEqual(re, "\"Config item is not found.\"\n"))
-				re.NoError(err)
-			},
 		},
 		{
 			name:        "grant-leader-scheduler",

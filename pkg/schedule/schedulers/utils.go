@@ -111,9 +111,6 @@ func (p *solver) sourceStoreScore(scheduleName string) float64 {
 	case constant.RegionKind:
 		sourceDelta := influence*influenceAmp - p.getRegionScoreDelta()
 		score = p.Source.RegionScore(p.GetSchedulerConfig().GetRegionScoreFormulaVersion(), p.GetSchedulerConfig().GetHighSpaceRatio(), p.GetSchedulerConfig().GetLowSpaceRatio(), sourceDelta)
-	case constant.WitnessKind:
-		sourceDelta := influence - tolerantResource
-		score = p.Source.WitnessScore(sourceDelta)
 	}
 	return score
 }
@@ -141,9 +138,6 @@ func (p *solver) targetStoreScore(scheduleName string) float64 {
 	case constant.RegionKind:
 		targetDelta := influence*influenceAmp + p.getRegionScoreDelta()
 		score = p.Target.RegionScore(p.GetSchedulerConfig().GetRegionScoreFormulaVersion(), p.GetSchedulerConfig().GetHighSpaceRatio(), p.GetSchedulerConfig().GetLowSpaceRatio(), targetDelta)
-	case constant.WitnessKind:
-		targetDelta := influence + tolerantResource
-		score = p.Target.WitnessScore(targetDelta)
 	}
 	return score
 }
@@ -183,7 +177,7 @@ func (p *solver) getTolerantResource() int64 {
 		return p.tolerantSource
 	}
 
-	if (p.kind.Resource == constant.LeaderKind || p.kind.Resource == constant.WitnessKind) && p.kind.Policy == constant.ByCount {
+	if p.kind.Resource == constant.LeaderKind && p.kind.Policy == constant.ByCount {
 		p.tolerantSource = int64(p.tolerantSizeRatio)
 	} else {
 		regionSize := p.GetAverageRegionSize()

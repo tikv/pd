@@ -155,7 +155,6 @@ func TestRegionStatisticsWithPlacementRule(t *testing.T) {
 		{Id: 6, StoreId: 2},
 		{Id: 4, StoreId: 3},
 		{Id: 8, StoreId: 7, Role: metapb.PeerRole_Learner},
-		{Id: 9, StoreId: 8, IsWitness: true},
 	}
 	metaStores := []*metapb.Store{
 		{Id: 1, Address: "mock://tikv-1:1"},
@@ -172,11 +171,9 @@ func TestRegionStatisticsWithPlacementRule(t *testing.T) {
 	r2 := &metapb.Region{Id: 0, Peers: peers[0:1], StartKey: []byte("aa"), EndKey: []byte("bb")}
 	r3 := &metapb.Region{Id: 1, Peers: peers, StartKey: []byte("ee"), EndKey: []byte("ff")}
 	r4 := &metapb.Region{Id: 2, Peers: peers[0:3], StartKey: []byte("gg"), EndKey: []byte("hh")}
-	r5 := &metapb.Region{Id: 0, Peers: peers[2:], StartKey: []byte("aa"), EndKey: []byte("bb")}
 	region2 := core.NewRegionInfo(r2, peers[0])
 	region3 := core.NewRegionInfo(r3, peers[0])
 	region4 := core.NewRegionInfo(r4, peers[0])
-	region5 := core.NewRegionInfo(r5, peers[4])
 	regionStats := NewRegionStatistics(nil, opt, manager)
 	// r2 didn't match the rules
 	regionStats.Observe(region2, stores)
@@ -188,9 +185,6 @@ func TestRegionStatisticsWithPlacementRule(t *testing.T) {
 	// r4 match the rules
 	re.Len(regionStats.stats[MissPeer], 1)
 	re.Len(regionStats.stats[ExtraPeer], 1)
-	regionStats.Observe(region5, stores)
-	// r5 match the rule
-	re.Len(regionStats.stats[WitnessLeader], 1)
 }
 
 func TestRegionLabelIsolationLevel(t *testing.T) {

@@ -175,7 +175,7 @@ func (c *Coordinator) drivePushOperator() {
 			log.Info("drive push operator has been stopped")
 			return
 		case <-ticker.C:
-			c.opController.PushOperators(c.RecordOpStepWithTTL)
+			c.opController.PushOperators()
 		}
 	}
 }
@@ -292,6 +292,14 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 				zap.Int("index", i), zap.Int("total", len(scheduleNames)))
 			return
 		default:
+		}
+		if name == "balance-witness-scheduler" || name == "transfer-witness-leader-scheduler" {
+			// These scheduler implementations were removed. Delete their
+			// independent configs so an upgraded cluster converges cleanly.
+			if err := c.cluster.GetStorage().RemoveSchedulerConfig(name); err != nil {
+				log.Warn("cannot remove deprecated scheduler config", zap.String("scheduler-name", name), errs.ZapError(err))
+			}
+			continue
 		}
 		data := configs[i]
 		typ := schedulers.FindSchedulerTypeByName(name)
@@ -689,9 +697,4 @@ func (c *Coordinator) GetCluster() sche.ClusterInformer {
 // GetDiagnosticResult returns the diagnostic result.
 func (c *Coordinator) GetDiagnosticResult(name string) (*schedulers.DiagnosticResult, error) {
 	return c.diagnosticManager.GetDiagnosticResult(name)
-}
-
-// RecordOpStepWithTTL records OpStep with TTL
-func (c *Coordinator) RecordOpStepWithTTL(regionID uint64) {
-	c.GetRuleChecker().RecordRegionPromoteToNonWitness(regionID)
 }

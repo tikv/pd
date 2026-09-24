@@ -195,14 +195,13 @@ var (
 
 // checker errors
 var (
-	ErrCheckerNotFound     = errors.Normalize("checker not found", errors.RFCCodeText("PD:checker:ErrCheckerNotFound"))
-	ErrCheckerMergeAgain   = errors.Normalize("region will be merged again, %s", errors.RFCCodeText("PD:checker:ErrCheckerMergeAgain"))
-	ErrNoStoreToAdd        = errors.Normalize("no store to add peer", errors.RFCCodeText("PD:checker:ErrNoStoreToAdd"))
-	ErrNoStoreToReplace    = errors.Normalize("no store to replace peer", errors.RFCCodeText("PD:checker:ErrNoStoreToReplace"))
-	ErrPeerCannotBeLeader  = errors.Normalize("peer cannot be leader", errors.RFCCodeText("PD:checker:ErrPeerCannotBeLeader"))
-	ErrPeerCannotBeWitness = errors.Normalize("peer cannot be witness", errors.RFCCodeText("PD:checker:ErrPeerCannotBeWitness"))
-	ErrNoNewLeader         = errors.Normalize("no new leader", errors.RFCCodeText("PD:checker:ErrNoNewLeader"))
-	ErrRegionNoLeader      = errors.Normalize("region no leader", errors.RFCCodeText("PD:checker:ErrRegionNoLeader"))
+	ErrCheckerNotFound    = errors.Normalize("checker not found", errors.RFCCodeText("PD:checker:ErrCheckerNotFound"))
+	ErrCheckerMergeAgain  = errors.Normalize("region will be merged again, %s", errors.RFCCodeText("PD:checker:ErrCheckerMergeAgain"))
+	ErrNoStoreToAdd       = errors.Normalize("no store to add peer", errors.RFCCodeText("PD:checker:ErrNoStoreToAdd"))
+	ErrNoStoreToReplace   = errors.Normalize("no store to replace peer", errors.RFCCodeText("PD:checker:ErrNoStoreToReplace"))
+	ErrPeerCannotBeLeader = errors.Normalize("peer cannot be leader", errors.RFCCodeText("PD:checker:ErrPeerCannotBeLeader"))
+	ErrNoNewLeader        = errors.Normalize("no new leader", errors.RFCCodeText("PD:checker:ErrNoNewLeader"))
+	ErrRegionNoLeader     = errors.Normalize("region no leader", errors.RFCCodeText("PD:checker:ErrRegionNoLeader"))
 )
 
 // scatter errors
