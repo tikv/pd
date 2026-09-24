@@ -207,17 +207,17 @@ func (m *RuleManager) AdjustRule(r *Rule, groupID string) (err error) {
 	if r.IsWitness {
 		return errs.ErrRuleContent.FastGenByArgs("witness peers are no longer supported")
 	}
-	return m.adjustRule(r, groupID)
+	return m.validateAndAdjustRule(r, groupID)
 }
 
 // AdjustRuleFromStorage checks and adjusts a rule loaded from persistent
 // storage. It normalizes fields from removed features before validation.
 func (m *RuleManager) AdjustRuleFromStorage(r *Rule, groupID string) (err error) {
 	r.IsWitness = false
-	return m.adjustRule(r, groupID)
+	return m.validateAndAdjustRule(r, groupID)
 }
 
-func (m *RuleManager) adjustRule(r *Rule, groupID string) (err error) {
+func (m *RuleManager) validateAndAdjustRule(r *Rule, groupID string) (err error) {
 	r.StartKey, err = hex.DecodeString(r.StartKeyHex)
 	if err != nil {
 		return errs.ErrHexDecodingString.FastGenByArgs(r.StartKeyHex)
@@ -856,7 +856,7 @@ func checkRule(rule *Rule, stores []*core.StoreInfo) bool {
 	})
 }
 
-// SetKeyType will update keyType for adjustRule()
+// SetKeyType updates the key type used when validating rules.
 func (m *RuleManager) SetKeyType(h string) *RuleManager {
 	m.Lock()
 	defer m.Unlock()
