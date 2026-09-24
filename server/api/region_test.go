@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"math/rand/v2"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -27,6 +28,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/keyspace"
+	keyspaceconstant "github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/response"
 	statutils "github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -149,6 +152,60 @@ func TestRegionsInfoMarshal(t *testing.T) {
 		err = json.Unmarshal(b, regionsInfo)
 		re.NoError(err)
 	}
+}
+
+func TestWriteKeyspaceRegionsInBatches(t *testing.T) {
+	re := require.New(t)
+	bound := keyspace.MakeRegionBound(keyspaceconstant.MaxValidKeyspaceID)
+	regions := core.NewRegionsInfo()
+	rawMiddle := append(append([]byte(nil), bound.RawLeftBound...), 1)
+	txnMiddle := append(append([]byte(nil), bound.TxnLeftBound...), 1)
+	for _, region := range []*core.RegionInfo{
+		core.NewTestRegionInfo(1, 1, bound.RawLeftBound, rawMiddle),
+		core.NewTestRegionInfo(2, 1, rawMiddle, bound.RawRightBound),
+		core.NewTestRegionInfo(3, 1, bound.TxnLeftBound, txnMiddle),
+		core.NewTestRegionInfo(4, 1, txnMiddle, bound.TxnRightBound),
+	} {
+		regions.PutRegion(region)
+	}
+
+	var scanLimits []int
+	scanRegions := func(startKey, endKey []byte, limit int) []*core.RegionInfo {
+		scanLimits = append(scanLimits, limit)
+		return regions.ScanRegions(startKey, endKey, limit)
+	}
+	w := httptest.NewRecorder()
+	(&regionsHandler{}).writeKeyspaceRegionsInBatches(
+		context.Background(), w, scanRegions, bound, 0, 1)
+
+	got := &response.RegionsInfo{}
+	re.NoError(json.Unmarshal(w.Body.Bytes(), got))
+	re.Equal(4, got.Count)
+	re.Equal([]uint64{1, 2, 3, 4}, []uint64{
+		got.Regions[0].ID, got.Regions[1].ID, got.Regions[2].ID, got.Regions[3].ID,
+	})
+	re.Equal([]int{1, 1, 1, 1}, scanLimits)
+}
+
+func TestWriteKeyspaceRegionsInBatchesStopsOnCancellation(t *testing.T) {
+	re := require.New(t)
+	bound := keyspace.MakeRegionBound(keyspaceconstant.MaxValidKeyspaceID)
+	ctx, cancel := context.WithCancel(context.Background())
+	scanCount := 0
+	scanRegions := func(_, _ []byte, _ int) []*core.RegionInfo {
+		scanCount++
+		cancel()
+		return []*core.RegionInfo{
+			core.NewTestRegionInfo(1, 1, bound.RawLeftBound, bound.RawRightBound),
+		}
+	}
+
+	w := httptest.NewRecorder()
+	(&regionsHandler{}).writeKeyspaceRegionsInBatches(ctx, w, scanRegions, bound, 0, 1)
+	re.Equal(1, scanCount)
+	got := &response.RegionsInfo{}
+	re.NoError(json.Unmarshal(w.Body.Bytes(), got))
+	re.Zero(got.Count)
 }
 
 func BenchmarkHexRegionKey(b *testing.B) {
