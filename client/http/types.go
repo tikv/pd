@@ -387,8 +387,8 @@ type Rule struct {
 	EndKey      []byte       `json:"-"`                  // range end key
 	EndKeyHex   string       `json:"end_key"`            // hex format end key, for marshal/unmarshal
 	Role        PeerRoleType `json:"role"`               // expected role of the peers
-	// IsWitness is retained to round-trip placement rules from older PD servers.
-	// Deprecated: new PD servers ignore this field and create regular peers.
+	// IsWitness is retained to decode placement rules from older PD servers.
+	// Deprecated: new PD servers reject rules with this field set to true.
 	IsWitness        bool              `json:"is_witness"`
 	Count            int               `json:"count"`                       // expected count of the peers
 	LabelConstraints []LabelConstraint `json:"label_constraints,omitempty"` // used to select stores to place peers
@@ -530,8 +530,8 @@ type ruleOp struct {
 	StartKeyHex string       `json:"start_key"`
 	EndKeyHex   string       `json:"end_key"`
 	Role        PeerRoleType `json:"role"`
-	// IsWitness is retained to round-trip placement rules from older PD servers.
-	// Deprecated: new PD servers ignore this field and create regular peers.
+	// IsWitness is retained to decode placement rules from older PD servers.
+	// Deprecated: new PD servers reject rules with this field set to true.
 	IsWitness        bool              `json:"is_witness"`
 	Count            int               `json:"count"`
 	LabelConstraints []LabelConstraint `json:"label_constraints,omitempty"`

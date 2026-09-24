@@ -65,7 +65,7 @@ type Rule struct {
 	EndKeyHex   string       `json:"end_key"`            // hex format end key, for marshal/unmarshal
 	Role        PeerRoleType `json:"role"`               // expected role of the peers
 	// IsWitness is kept for placement-rule API and storage compatibility.
-	// Deprecated: witness peers are no longer supported; true is treated as false.
+	// Deprecated: new rules with this field set to true are rejected.
 	IsWitness        bool              `json:"is_witness"`
 	Count            int               `json:"count"`                       // expected count of the peers
 	LabelConstraints []LabelConstraint `json:"label_constraints,omitempty"` // used to select stores to place peers

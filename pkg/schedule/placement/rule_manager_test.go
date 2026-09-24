@@ -105,8 +105,33 @@ func TestAdjustRule(t *testing.T) {
 		IsWitness:        true,
 		LabelConstraints: []LabelConstraint{{Key: "engine", Op: "in", Values: []string{"tiflash"}}},
 	}
-	re.NoError(manager.AdjustRule(deprecatedRule, "tiflash"))
-	re.False(deprecatedRule.IsWitness)
+	re.ErrorContains(manager.AdjustRule(deprecatedRule, "tiflash"), "witness peers are no longer supported")
+	re.True(deprecatedRule.IsWitness)
+}
+
+func TestLoadRemovedWitnessRule(t *testing.T) {
+	re := require.New(t)
+	store, _ := newTestManager(t)
+	legacyRule := &Rule{
+		GroupID:   "legacy",
+		ID:        "witness",
+		Role:      Voter,
+		Count:     1,
+		IsWitness: true,
+	}
+	re.NoError(store.RunInTxn(context.Background(), func(txn kv.Txn) error {
+		return store.SaveRule(txn, legacyRule.StoreKey(), legacyRule)
+	}))
+
+	manager := NewRuleManager(context.Background(), store, nil, nil)
+	re.NoError(manager.Initialize(3, nil, "", false))
+	re.False(manager.GetRule(legacyRule.GroupID, legacyRule.ID).IsWitness)
+
+	value, err := store.LoadRule(legacyRule.StoreKey())
+	re.NoError(err)
+	persisted, err := NewRuleFromJSON([]byte(value))
+	re.NoError(err)
+	re.False(persisted.IsWitness)
 }
 
 func TestLeaderCheck(t *testing.T) {
