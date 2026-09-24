@@ -30,7 +30,6 @@ import (
 
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
@@ -303,33 +302,10 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 	// Don't check isRaftLearnerEnabled cause it maybe disable learner feature but there are still some learners to promote.
 	opController := c.opController
 
-	// A legacy witness can win an election after a regular leader fails, but
-	// cannot serve reads or writes. Recover leadership independently of replica
-	// and snapshot limits, including while a joint-state change is unfinished.
-	witnessLeader := region.GetLeader().GetIsWitness()
-	if witnessLeader {
-		for _, peer := range region.GetPeers() {
-			if peer.GetIsWitness() || core.IsLearner(peer) {
-				continue
-			}
-			op, err := operator.CreateTransferLeaderOperator("transfer-deprecated-witness-leader", c.cluster, region, peer.GetStoreId(), nil, operator.OpLeader)
-			if err == nil {
-				op.SetPriorityLevel(constant.Urgent)
-				return []*operator.Operator{op}
-			}
-		}
-	}
-
 	if ops := measureChecker(c.metrics.checkRegionHistograms[jointStateChecker], func() []*operator.Operator {
 		return []*operator.Operator{c.jointStateChecker.Check(region)}
 	}); len(ops) > 0 {
 		return ops
-	}
-	// A witness leader without a safe transfer target cannot make progress on
-	// ordinary scheduling, but an unfinished joint-state change can still be
-	// completed above.
-	if witnessLeader {
-		return nil
 	}
 
 	if ops := measureChecker(c.metrics.checkRegionHistograms[splitChecker], func() []*operator.Operator {
@@ -423,7 +399,7 @@ func (c *Controller) tryAddOperators(region *core.RegionInfo) {
 		return
 	}
 	id := region.GetID()
-	if op := c.opController.GetOperator(id); op != nil && (!region.GetLeader().GetIsWitness() || op.GetPriorityLevel() == constant.Urgent) {
+	if c.opController.GetOperator(id) != nil {
 		c.RemovePendingProcessedRegion(id)
 		return
 	}

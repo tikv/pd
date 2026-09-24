@@ -50,9 +50,6 @@ const (
 	OpRegion
 	// Include leader transfer.
 	OpLeader
-	// Reserve two removed operation-kind bits for numeric compatibility.
-	_
-	_
 	// Initiated by internal split-scatter dispatcher.
 	OpSplitScatter
 	opMax

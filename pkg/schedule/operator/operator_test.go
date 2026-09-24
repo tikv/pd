@@ -532,7 +532,7 @@ func (suite *operatorTestSuite) TestOpKindValues() {
 		{"hot-region", OpHotRegion, 1 << 6},
 		{"region", OpRegion, 1 << 7},
 		{"leader", OpLeader, 1 << 8},
-		{"split-scatter", OpSplitScatter, 1 << 11},
+		{"split-scatter", OpSplitScatter, 1 << 9},
 	}
 	for _, testCase := range testCases {
 		re.Equal(testCase.want, testCase.kind, "unexpected %s kind value", testCase.name)
