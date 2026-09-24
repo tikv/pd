@@ -15,9 +15,11 @@
 package config
 
 import (
+	"math"
 	"sync/atomic"
 
 	"github.com/BurntSushi/toml"
+	"github.com/docker/go-units"
 	flag "github.com/spf13/pflag"
 	"go.uber.org/zap"
 
@@ -25,6 +27,7 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/utils/configutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
 const (
@@ -40,6 +43,10 @@ const (
 	defaultRound             = 0
 	defaultSample            = false
 	defaultInitialVersion    = 1
+	defaultRegionKeys        = 2560000
+	defaultRandomSeed        = 1
+	defaultRegionSize        = typeutil.ByteSize(256 * units.MiB)
+	defaultStoreCapacity     = typeutil.ByteSize(20 * units.TiB)
 
 	defaultLogFormat = "text"
 )
@@ -57,19 +64,24 @@ type Config struct {
 
 	Security configutil.SecurityConfig `toml:"security" json:"security"`
 
-	InitEpochVer      uint64  `toml:"epoch-ver" json:"epoch-ver"`
-	StoreCount        int     `toml:"store-count" json:"store-count"`
-	HotStoreCount     int     `toml:"hot-store-count" json:"hot-store-count"`
-	RegionCount       int     `toml:"region-count" json:"region-count"`
-	Replica           int     `toml:"replica" json:"replica"`
-	LeaderUpdateRatio float64 `toml:"leader-update-ratio" json:"leader-update-ratio"`
-	EpochUpdateRatio  float64 `toml:"epoch-update-ratio" json:"epoch-update-ratio"`
-	SpaceUpdateRatio  float64 `toml:"space-update-ratio" json:"space-update-ratio"`
-	FlowUpdateRatio   float64 `toml:"flow-update-ratio" json:"flow-update-ratio"`
-	ReportRatio       float64 `toml:"report-ratio" json:"report-ratio"`
-	Sample            bool    `toml:"sample" json:"sample"`
-	Round             int     `toml:"round" json:"round"`
-	MetricsAddr       string  `toml:"metrics-addr" json:"metrics-addr"`
+	InitEpochVer      uint64            `toml:"epoch-ver" json:"epoch-ver"`
+	RegionSize        typeutil.ByteSize `toml:"region-size" json:"region-size"`
+	RegionKeys        uint64            `toml:"region-keys" json:"region-keys"`
+	StoreCapacity     typeutil.ByteSize `toml:"store-capacity" json:"store-capacity"`
+	RandomSeed        uint64            `toml:"random-seed" json:"random-seed"`
+	StoreCount        int               `toml:"store-count" json:"store-count"`
+	HotStoreCount     int               `toml:"hot-store-count" json:"hot-store-count"`
+	RegionCount       int               `toml:"region-count" json:"region-count"`
+	Replica           int               `toml:"replica" json:"replica"`
+	LeaderUpdateRatio float64           `toml:"leader-update-ratio" json:"leader-update-ratio"`
+	EpochUpdateRatio  float64           `toml:"epoch-update-ratio" json:"epoch-update-ratio"`
+	SpaceUpdateRatio  float64           `toml:"space-update-ratio" json:"space-update-ratio"`
+	FlowUpdateRatio   float64           `toml:"flow-update-ratio" json:"flow-update-ratio"`
+	ReportRatio       float64           `toml:"report-ratio" json:"report-ratio"`
+	Sample            bool              `toml:"sample" json:"sample"`
+	Round             int               `toml:"round" json:"round"`
+	MetricsAddr       string            `toml:"metrics-addr" json:"metrics-addr"`
+	DeleteOperators   bool              `toml:"delete-operators" json:"delete-operators"`
 }
 
 // NewConfig return a set of settings.
@@ -124,54 +136,107 @@ func (c *Config) Parse(arguments []string) error {
 
 // Adjust is used to adjust configurations
 func (c *Config) Adjust(meta *toml.MetaData) {
+	isDefined := func(key string) bool {
+		return meta != nil && meta.IsDefined(key)
+	}
 	if len(c.Log.Format) == 0 {
 		c.Log.Format = defaultLogFormat
 	}
-	if !meta.IsDefined("round") {
+	if !isDefined("round") {
 		configutil.AdjustInt(&c.Round, defaultRound)
 	}
 
-	if !meta.IsDefined("store-count") {
+	if !isDefined("store-count") {
 		configutil.AdjustInt(&c.StoreCount, defaultStoreCount)
 	}
-	if !meta.IsDefined("region-count") {
+	if !isDefined("region-count") {
 		configutil.AdjustInt(&c.RegionCount, defaultRegionCount)
 	}
 
-	if !meta.IsDefined("hot-store-count") {
+	if !isDefined("hot-store-count") {
 		configutil.AdjustInt(&c.HotStoreCount, defaultHotStoreCount)
 	}
-	if !meta.IsDefined("replica") {
+	if !isDefined("replica") {
 		configutil.AdjustInt(&c.Replica, defaultReplica)
 	}
 
-	if !meta.IsDefined("leader-update-ratio") {
+	if !isDefined("leader-update-ratio") {
 		configutil.AdjustFloat64(&c.LeaderUpdateRatio, defaultLeaderUpdateRatio)
 	}
-	if !meta.IsDefined("epoch-update-ratio") {
+	if !isDefined("epoch-update-ratio") {
 		configutil.AdjustFloat64(&c.EpochUpdateRatio, defaultEpochUpdateRatio)
 	}
-	if !meta.IsDefined("space-update-ratio") {
+	if !isDefined("space-update-ratio") {
 		configutil.AdjustFloat64(&c.SpaceUpdateRatio, defaultSpaceUpdateRatio)
 	}
-	if !meta.IsDefined("flow-update-ratio") {
+	if !isDefined("flow-update-ratio") {
 		configutil.AdjustFloat64(&c.FlowUpdateRatio, defaultFlowUpdateRatio)
 	}
-	if !meta.IsDefined("report-ratio") {
+	if !isDefined("report-ratio") {
 		configutil.AdjustFloat64(&c.ReportRatio, defaultReportRatio)
 	}
-	if !meta.IsDefined("sample") {
+	if !isDefined("sample") {
 		c.Sample = defaultSample
 	}
-	if !meta.IsDefined("epoch-ver") {
+	if !isDefined("epoch-ver") {
 		c.InitEpochVer = defaultInitialVersion
+	}
+	if !isDefined("region-size") {
+		configutil.AdjustByteSize(&c.RegionSize, defaultRegionSize)
+	}
+	if !isDefined("region-keys") {
+		configutil.AdjustUint64(&c.RegionKeys, defaultRegionKeys)
+	}
+	if !isDefined("store-capacity") {
+		configutil.AdjustByteSize(&c.StoreCapacity, defaultStoreCapacity)
+	}
+	if !isDefined("random-seed") {
+		configutil.AdjustUint64(&c.RandomSeed, defaultRandomSeed)
 	}
 }
 
 // Validate is used to validate configurations
 func (c *Config) Validate() error {
+	if c.Round < 0 {
+		return errors.Errorf("round must be greater than or equal to 0")
+	}
+	if c.InitEpochVer == 0 {
+		return errors.Errorf("epoch-ver must be greater than 0")
+	}
+	if c.StoreCount <= 0 {
+		return errors.Errorf("store-count must be greater than 0")
+	}
+	if c.RegionCount <= 0 {
+		return errors.Errorf("region-count must be greater than 0")
+	}
+	if c.Replica <= 0 || c.Replica > c.StoreCount {
+		return errors.Errorf("replica must be in [1, store-count]")
+	}
+	if c.RegionSize == 0 {
+		return errors.Errorf("region-size must be greater than 0")
+	}
+	if c.RegionKeys == 0 {
+		return errors.Errorf("region-keys must be greater than 0")
+	}
+	if c.StoreCapacity == 0 {
+		return errors.Errorf("store-capacity must be greater than 0")
+	}
 	if c.HotStoreCount < 0 || c.HotStoreCount > c.StoreCount {
 		return errors.Errorf("hot-store-count must be in [0, store-count]")
+	}
+	for _, ratio := range []struct {
+		name  string
+		value float64
+	}{
+		{"report-ratio", c.ReportRatio},
+		{"leader-update-ratio", c.LeaderUpdateRatio},
+		{"epoch-update-ratio", c.EpochUpdateRatio},
+		{"space-update-ratio", c.SpaceUpdateRatio},
+		{"flow-update-ratio", c.FlowUpdateRatio},
+	} {
+		if math.IsNaN(ratio.value) || math.IsInf(ratio.value, 0) {
+			return errors.Errorf("%s must be finite", ratio.name)
+		}
 	}
 	if c.ReportRatio < 0 || c.ReportRatio > 1 {
 		return errors.Errorf("report-ratio must be in [0, 1]")
@@ -198,65 +263,76 @@ func (c *Config) Clone() *Config {
 	return cfg
 }
 
-// Options is the option of the heartbeat-bench.
-type Options struct {
-	HotStoreCount atomic.Value
-	ReportRatio   atomic.Value
+// WorkloadOptions is an immutable snapshot of the dynamically configurable
+// heartbeat workload.
+type WorkloadOptions struct {
+	HotStoreCount     int
+	ReportRatio       float64
+	LeaderUpdateRatio float64
+	EpochUpdateRatio  float64
+	SpaceUpdateRatio  float64
+	FlowUpdateRatio   float64
+}
 
-	LeaderUpdateRatio atomic.Value
-	EpochUpdateRatio  atomic.Value
-	SpaceUpdateRatio  atomic.Value
-	FlowUpdateRatio   atomic.Value
+// Options stores the dynamically configurable heartbeat workload.
+type Options struct {
+	value atomic.Value
 }
 
 // NewOptions creates a new option.
 func NewOptions(cfg *Config) *Options {
 	o := &Options{}
-	o.HotStoreCount.Store(cfg.HotStoreCount)
-	o.LeaderUpdateRatio.Store(cfg.LeaderUpdateRatio)
-	o.EpochUpdateRatio.Store(cfg.EpochUpdateRatio)
-	o.SpaceUpdateRatio.Store(cfg.SpaceUpdateRatio)
-	o.FlowUpdateRatio.Store(cfg.FlowUpdateRatio)
-	o.ReportRatio.Store(cfg.ReportRatio)
+	o.value.Store(workloadOptionsFromConfig(cfg))
 	return o
+}
+
+func workloadOptionsFromConfig(cfg *Config) WorkloadOptions {
+	return WorkloadOptions{
+		HotStoreCount:     cfg.HotStoreCount,
+		ReportRatio:       cfg.ReportRatio,
+		LeaderUpdateRatio: cfg.LeaderUpdateRatio,
+		EpochUpdateRatio:  cfg.EpochUpdateRatio,
+		SpaceUpdateRatio:  cfg.SpaceUpdateRatio,
+		FlowUpdateRatio:   cfg.FlowUpdateRatio,
+	}
+}
+
+// Snapshot returns one consistent workload configuration.
+func (o *Options) Snapshot() WorkloadOptions {
+	return o.value.Load().(WorkloadOptions)
 }
 
 // GetHotStoreCount returns the hot store count.
 func (o *Options) GetHotStoreCount() int {
-	return o.HotStoreCount.Load().(int)
+	return o.Snapshot().HotStoreCount
 }
 
 // GetLeaderUpdateRatio returns the leader update ratio.
 func (o *Options) GetLeaderUpdateRatio() float64 {
-	return o.LeaderUpdateRatio.Load().(float64)
+	return o.Snapshot().LeaderUpdateRatio
 }
 
 // GetEpochUpdateRatio returns the epoch update ratio.
 func (o *Options) GetEpochUpdateRatio() float64 {
-	return o.EpochUpdateRatio.Load().(float64)
+	return o.Snapshot().EpochUpdateRatio
 }
 
 // GetSpaceUpdateRatio returns the space update ratio.
 func (o *Options) GetSpaceUpdateRatio() float64 {
-	return o.SpaceUpdateRatio.Load().(float64)
+	return o.Snapshot().SpaceUpdateRatio
 }
 
 // GetFlowUpdateRatio returns the flow update ratio.
 func (o *Options) GetFlowUpdateRatio() float64 {
-	return o.FlowUpdateRatio.Load().(float64)
+	return o.Snapshot().FlowUpdateRatio
 }
 
 // GetReportRatio returns the report ratio.
 func (o *Options) GetReportRatio() float64 {
-	return o.ReportRatio.Load().(float64)
+	return o.Snapshot().ReportRatio
 }
 
 // SetOptions sets the option.
 func (o *Options) SetOptions(cfg *Config) {
-	o.HotStoreCount.Store(cfg.HotStoreCount)
-	o.LeaderUpdateRatio.Store(cfg.LeaderUpdateRatio)
-	o.EpochUpdateRatio.Store(cfg.EpochUpdateRatio)
-	o.SpaceUpdateRatio.Store(cfg.SpaceUpdateRatio)
-	o.FlowUpdateRatio.Store(cfg.FlowUpdateRatio)
-	o.ReportRatio.Store(cfg.ReportRatio)
+	o.value.Store(workloadOptionsFromConfig(cfg))
 }

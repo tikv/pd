@@ -3,12 +3,24 @@ round = 0
 store-count = 100
 hot-store-count = 10
 region-count = 2000000
+region-size = "256MiB"
+region-keys = 2560000
+# Keep the synthetic store above PD's low-space threshold at this Region count.
+store-capacity = "20TiB"
+random-seed = 1
 
 replica = 3
 
+# All ratios use the total Region count as their denominator. Every update
+# ratio must be less than or equal to report-ratio. Update sets may overlap.
+report-ratio = 1.0
 leader-update-ratio = 0.06
 epoch-update-ratio = 0.04
 space-update-ratio = 0.15
 flow-update-ratio = 0.35
+
+# Enable only when intentionally benchmarking repeated scheduler churn. The
+# benchmark does not execute PD operators like a real TiKV node.
+delete-operators = false
 
 sample = false
