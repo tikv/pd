@@ -109,7 +109,7 @@ func (s *idAllocatorTestSuite) checkCommand(cluster *tests.TestCluster) {
 	leaderServer := cluster.GetLeaderServer()
 	req := &pdpb.AllocIDRequest{Header: testutil.NewRequestHeader(leaderServer.GetClusterID())}
 
-	grpcPDClient, conn := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	grpcPDClient, conn := testutil.MustNewGRPCClient(s.T().Context(), re, leaderServer.GetAddr())
 	defer conn.Close()
 	var last uint64
 	for range 2 * id.DefaultAllocStep {
