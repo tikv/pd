@@ -116,15 +116,6 @@ func (ls *Leadership) SetLease(lease *Lease) {
 	ls.mu.Unlock()
 }
 
-// getLeaseLocked returns the current lease; the caller must hold mu.
-func (ls *Leadership) getLeaseLocked() *Lease {
-	l := ls.lease.Load()
-	if l == nil {
-		return nil
-	}
-	return l.(*Lease)
-}
-
 // GetClient is used to get the etcd client.
 func (ls *Leadership) GetClient() *clientv3.Client {
 	if ls == nil {
@@ -242,7 +233,7 @@ func (ls *Leadership) Keep(ctx context.Context) {
 	ls.mu.Lock()
 	keepAliveCtx, cancel := context.WithCancel(ctx)
 	ls.keepAliveCancelFunc = cancel
-	lease := ls.getLeaseLocked()
+	lease := ls.GetLease()
 	ls.mu.Unlock()
 	go lease.KeepAlive(keepAliveCtx)
 }
@@ -449,7 +440,7 @@ func (ls *Leadership) Reset() {
 		return
 	}
 	ls.mu.Lock()
-	lease := ls.getLeaseLocked()
+	lease := ls.GetLease()
 	if lease == nil {
 		ls.mu.Unlock()
 		return
