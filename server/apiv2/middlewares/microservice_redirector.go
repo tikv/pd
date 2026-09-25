@@ -75,7 +75,7 @@ func MicroserviceRedirector(rules ...serverapi.RedirectRule) gin.HandlerFunc {
 
 // AffinityMicroserviceRedirector only forwards affinity GET requests to the scheduling service.
 func AffinityMicroserviceRedirector() gin.HandlerFunc {
-	pdAffinityPath := "/pd/api/v2/affinity-groups"
+	pdAffinityPath := apiutil.CoreV2Path + "/affinity-groups"
 	targetAffinityPath := scheapi.APIPathPrefix + "/affinity-groups"
 	return MicroserviceRedirector(
 		serverapi.RedirectRule{

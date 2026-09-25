@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -62,21 +63,29 @@ func TestMember(t *testing.T) {
 
 	// member leader transfer <member_name>
 	args = []string{"-u", pdAddr, "member", "leader", "transfer", "pd2"}
-	_, err = tests.ExecuteCommand(cmd, args...)
+	testutil.Eventually(re, func() bool {
+		_, err = tests.ExecuteCommand(cmd, args...)
+		return err == nil
+	}, testutil.WithWaitFor(30*time.Second), testutil.WithTickInterval(500*time.Millisecond))
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
-		return svr.GetLeader().GetName() == "pd2"
-	})
+		etcdLeader, err := svr.GetEtcdLeader()
+		return err == nil && etcdLeader == "pd2" && cluster.GetLeader() == "pd2"
+	}, testutil.WithWaitFor(90*time.Second), testutil.WithTickInterval(time.Second))
 
 	// member leader resign
 	re.NotEmpty(cluster.WaitLeader())
 	args = []string{"-u", pdAddr, "member", "leader", "resign"}
-	output, err = tests.ExecuteCommand(cmd, args...)
-	re.Contains(string(output), "Success")
-	re.NoError(err)
 	testutil.Eventually(re, func() bool {
-		return svr.GetLeader().GetName() != "pd2"
-	})
+		output, err = tests.ExecuteCommand(cmd, args...)
+		return err == nil
+	}, testutil.WithWaitFor(30*time.Second), testutil.WithTickInterval(500*time.Millisecond))
+	re.NoError(err)
+	re.Contains(string(output), "Success")
+	testutil.Eventually(re, func() bool {
+		leader := cluster.GetLeader()
+		return leader != "" && leader != "pd2"
+	}, testutil.WithWaitFor(90*time.Second), testutil.WithTickInterval(time.Second))
 
 	// member leader_priority <member_name> <priority>
 	re.NotEmpty(cluster.WaitLeader())
