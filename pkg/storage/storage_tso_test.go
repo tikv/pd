@@ -29,6 +29,32 @@ import (
 
 var defaultContext = context.Background()
 
+<<<<<<< HEAD
+=======
+func prepare(t *testing.T) (storage Storage, clean func(), leadership *election.Leadership) {
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	storage = NewStorageWithEtcdBackend(client)
+	leadership = election.NewLeadership(client, testLeaderKey, "storage_tso_test", "test_member")
+	err := leadership.Campaign(60, testLeaderValue)
+	require.NoError(t, err)
+	return storage, clean, leadership
+}
+
+func TestSaveTimestampWithTimeout(t *testing.T) {
+	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/storage/kv/slowTxn", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/storage/kv/slowTxn"))
+	}()
+	storage, clean, leadership := prepare(t)
+	defer clean()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := storage.SaveTimestamp(ctx, testGroupID, time.Now().Round(0), leadership)
+	re.ErrorIs(err, context.DeadlineExceeded)
+}
+
+>>>>>>> 703f4bb25d (server, member, election: document and test the election client pinning (#11110))
 func TestSaveLoadTimestamp(t *testing.T) {
 	re := require.New(t)
 	storage, clean := newTestStorage(t)
