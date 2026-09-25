@@ -38,3 +38,8 @@ func init() {
 	prometheus.MustRegister(scatterCounter)
 	prometheus.MustRegister(scatterDistributionCounter)
 }
+
+// DeleteStoreMetrics deletes the scatter distribution metrics of a store.
+func DeleteStoreMetrics(storeID string) {
+	scatterDistributionCounter.DeletePartialMatch(prometheus.Labels{"store": storeID})
+}

@@ -16,6 +16,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"sync/atomic"
@@ -157,6 +158,10 @@ func (s *Service) RegionHeartbeat(stream schedulingpb.Scheduling_RegionHeartbeat
 		if store == nil {
 			return errors.Errorf("invalid store ID %d, not found", storeID)
 		}
+		if store.IsRemoved() {
+			log.Debug("skip region heartbeat from tombstone store", zap.Uint64("store-id", storeID))
+			continue
+		}
 
 		if time.Since(lastBind) > time.Minute {
 			s.hbStreams.BindStream(storeID, server)
@@ -170,6 +175,80 @@ func (s *Service) RegionHeartbeat(stream schedulingpb.Scheduling_RegionHeartbeat
 			log.Error("failed handle region heartbeat", zap.Error(err))
 			continue
 		}
+<<<<<<< HEAD
+=======
+
+		regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "success").Inc()
+		regionHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
+	}
+}
+
+// RegionBuckets implements gRPC SchedulingServer.
+func (s *Service) RegionBuckets(stream schedulingpb.Scheduling_RegionBucketsServer) error {
+	var cancel context.CancelFunc
+	defer func() {
+		// cancel the forward stream
+		if cancel != nil {
+			cancel()
+		}
+	}()
+
+	for {
+		request, err := stream.Recv()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return errors.WithStack(err)
+		}
+
+		c := s.GetCluster()
+		if c == nil {
+			resp := &schedulingpb.RegionBucketsResponse{Header: notBootstrappedHeader()}
+			err := stream.Send(resp)
+			return errors.WithStack(err)
+		}
+
+		buckets := request.GetBuckets()
+		if buckets == nil || len(buckets.Keys) == 0 {
+			continue
+		}
+
+		var (
+			storeLabel   string
+			storeAddress string
+		)
+		store := c.GetLeaderStoreByRegionID(buckets.GetRegionId())
+		if store == nil {
+			// As TiKV report buckets just after the region heartbeat, for new created region, PD may receive buckets report before the first region heartbeat is handled.
+			// So we should not return error here.
+			log.Debug("the store of the bucket in region is not found", zap.Uint64("region-id", buckets.GetRegionId()))
+		} else if store.IsRemoved() {
+			continue
+		} else {
+			storeLabel = strconv.FormatUint(store.GetID(), 10)
+			storeAddress = store.GetAddress()
+		}
+
+		start := time.Now()
+		err = c.HandleRegionBuckets(buckets)
+		if err != nil {
+			regionBucketsCounter.WithLabelValues(storeAddress, storeLabel, "error").Inc()
+			regionBucketsHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
+			regionBucketsReportInterval.WithLabelValues(storeAddress, storeLabel).Observe(float64(buckets.GetPeriodInMs() / 1000))
+			log.Debug("failed handle region buckets", zap.Error(err))
+		} else {
+			regionBucketsCounter.WithLabelValues(storeAddress, storeLabel, "success").Inc()
+			regionBucketsHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
+			regionBucketsReportInterval.WithLabelValues(storeAddress, storeLabel).Observe(float64(buckets.GetPeriodInMs() / 1000))
+		}
+		response := &schedulingpb.RegionBucketsResponse{
+			Header: wrapHeader(),
+		}
+		if err := stream.Send(response); err != nil {
+			return errors.WithStack(err)
+		}
+>>>>>>> a77df243d9 (*: delete per-store metrics when a store is tombstoned (#11127))
 	}
 }
 
@@ -182,11 +261,34 @@ func (s *Service) StoreHeartbeat(_ context.Context, request *schedulingpb.StoreH
 		return &schedulingpb.StoreHeartbeatResponse{Header: notBootstrappedHeader()}, nil
 	}
 
+<<<<<<< HEAD
 	if c.GetStore(request.GetStats().GetStoreId()) == nil {
 		s.metaWatcher.GetStoreWatcher().ForceLoad()
 	}
 
 	// TODO: add metrics
+=======
+	storeID := request.GetStats().GetStoreId()
+	if c.GetStore(storeID) == nil {
+		metaWatcher.GetStoreWatcher().ForceLoad()
+	}
+
+	store := c.GetStore(storeID)
+	if store == nil {
+		return &schedulingpb.StoreHeartbeatResponse{
+			Header: wrapErrorToHeader(schedulingpb.ErrorType_UNKNOWN, fmt.Sprintf("store %v not found", storeID)),
+		}, nil
+	}
+	if store.IsRemoved() {
+		return &schedulingpb.StoreHeartbeatResponse{
+			Header: wrapErrorToHeader(schedulingpb.ErrorType_UNKNOWN, fmt.Sprintf("store %v is tombstone", storeID)),
+		}, nil
+	}
+
+	start := time.Now()
+	storeAddress := store.GetAddress()
+	storeLabel := strconv.FormatUint(storeID, 10)
+>>>>>>> a77df243d9 (*: delete per-store metrics when a store is tombstoned (#11127))
 	if err := c.HandleStoreHeartbeat(request); err != nil {
 		log.Error("handle store heartbeat failed", zap.Error(err))
 	}
