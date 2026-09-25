@@ -431,6 +431,7 @@ func (td *tsoDispatcher) processRequests(
 		svcDiscovery       = td.provider.getServiceDiscovery()
 		clusterID          = svcDiscovery.GetClusterID()
 		keyspaceID         = svcDiscovery.GetKeyspaceID()
+		keyspaceIdentity   = svcDiscovery.GetKeyspaceIdentity()
 		reqKeyspaceGroupID = svcDiscovery.GetKeyspaceGroupID()
 	)
 
@@ -465,7 +466,7 @@ func (td *tsoDispatcher) processRequests(
 	}
 
 	err := stream.processRequests(
-		clusterID, keyspaceID, reqKeyspaceGroupID,
+		clusterID, keyspaceID, reqKeyspaceGroupID, keyspaceIdentity,
 		count, tbc.GetExtraBatchingStartTime(), cb)
 	if err != nil {
 		close(done)
