@@ -427,6 +427,7 @@ func checkBalanceRegionSchedule1(re *require.Assertions, enablePlacementRules bo
 	ops, _ := sb.Schedule(tc, false)
 	op := ops[0]
 	operatorutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpKind(0), 4, 1)
+	re.True(op.NeedStoreHealthCheck())
 
 	// Test stateFilter.
 	tc.SetStoreOffline(1)
@@ -810,6 +811,32 @@ func TestBalanceRegionShouldNotBalance(t *testing.T) {
 	tc.PutRegion(region)
 	operators, _ := sb.Schedule(tc, false)
 	re.Empty(operators)
+}
+
+// TestBalanceRegionUnhealthySource guards against balance-region excluding an
+// unhealthy store as a rebalance source: a move-peer operator populates its
+// new learner from the region's other (healthy) replicas and only removes
+// the old peer afterward, so it never needs the old store to be reachable.
+// See the review discussion on tikv/pd#11146.
+func TestBalanceRegionUnhealthySource(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	sb, err := CreateScheduler(types.BalanceRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceRegionScheduler, []string{"", ""}))
+	re.NoError(err)
+
+	tc.AddRegionStore(1, 100)
+	tc.AddRegionStore(2, 1)
+	tc.AddRegionStore(3, 1)
+	tc.AddRegionStore(4, 0)
+	tc.AddLeaderRegion(1, 2, 1, 3)
+	// Store 1 has missed heartbeats for 11 minutes (Unhealthy), but that
+	// doesn't stop balance-region from moving its peer to empty store 4.
+	tc.SetStoreLastHeartbeatInterval(1, 11*time.Minute)
+
+	ops, _ := sb.Schedule(tc, false)
+	re.Len(ops, 1)
+	operatorutil.CheckTransferPeer(re, ops[0], operator.OpKind(0), 1, 4)
 }
 
 func TestBalanceRegionEmptyRegion(t *testing.T) {
