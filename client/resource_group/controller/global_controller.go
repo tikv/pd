@@ -729,9 +729,7 @@ func (c *ResourceGroupsController) cleanUpResourceGroup() {
 		resourceGroupName := key.(string)
 		gc := value.(*groupCostController)
 		// Check for stale resource groups, which will be deleted when consumption is continuously unchanged.
-		gc.mu.Lock()
-		latestConsumption := *gc.mu.consumption
-		gc.mu.Unlock()
+		latestConsumption := gc.consumptionSnapshot()
 		if equalRU(latestConsumption, *gc.run.consumption) {
 			if gc.inactive || gc.tombstone.Load() {
 				c.cleanupRequestSourceMetricsState(resourceGroupName)
