@@ -40,8 +40,8 @@ func RequestCounter(method string, header *pdpb.RequestHeader, err *pdpb.Error, 
 
 	var (
 		event           = requestSuccess
-		callerID        = header.CallerId
-		callerComponent = header.CallerComponent
+		callerID        = header.GetCallerId()
+		callerComponent = header.GetCallerComponent()
 	)
 	if err != nil {
 		log.Warn("region request encounter error",
@@ -58,4 +58,24 @@ func RequestCounter(method string, header *pdpb.RequestHeader, err *pdpb.Error, 
 		callerComponent = "unknown"
 	}
 	counter.WithLabelValues(method, callerID, callerComponent, string(event)).Inc()
+}
+
+// RecordQueryRegionRequestMetrics attributes each logical query to the same
+// method and caller labels as its unary RPC, with the same success sampling.
+// Components correspond to query positions, not deduplicated response regions.
+// Missing or malformed component arrays fall back to the batch header.
+func RecordQueryRegionRequestMetrics(request *pdpb.QueryRegionRequest, err *pdpb.Error, counter *prometheus.CounterVec) {
+	header := pdpb.RequestHeader{CallerId: request.GetHeader().GetCallerId()}
+	record := func(method string, count int, components []string) {
+		for i := range count {
+			header.CallerComponent = request.GetHeader().GetCallerComponent()
+			if len(components) == count {
+				header.CallerComponent = components[i]
+			}
+			RequestCounter(method, &header, err, counter)
+		}
+	}
+	record("GetRegion", len(request.GetKeys()), request.GetKeyCallerComponents())
+	record("GetPrevRegion", len(request.GetPrevKeys()), request.GetPrevKeyCallerComponents())
+	record("GetRegionByID", len(request.GetIds()), request.GetIdCallerComponents())
 }

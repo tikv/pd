@@ -686,6 +686,12 @@ func (s *GrpcServer) DeleteGCBarrier(ctx context.Context, request *pdpb.DeleteGC
 	}, nil
 }
 
+// WatchGCStates is not supported yet. Keep returning Unimplemented while the
+// kvproto interface includes this RPC ahead of its server implementation.
+func (*GrpcServer) WatchGCStates(*pdpb.WatchGCStatesRequest, pdpb.PD_WatchGCStatesServer) error {
+	return status.Error(codes.Unimplemented, "method WatchGCStates not implemented")
+}
+
 // GetGCState gets the GC state.
 func (s *GrpcServer) GetGCState(ctx context.Context, request *pdpb.GetGCStateRequest) (*pdpb.GetGCStateResponse, error) {
 	done, err := s.rateLimitCheck()
