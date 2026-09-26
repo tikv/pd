@@ -366,10 +366,42 @@ func (s *hotScheduler) tryAddPendingInfluence(op *operator.Operator, srcStore []
 	return true
 }
 
+func getPlacementLoadState(cluster sche.SchedulerCluster, rankFormulaVersion string) placementLoadState {
+	if !cluster.GetSchedulerConfig().IsPlacementRulesEnabled() || rankFormulaVersion != "v2" {
+		return placementLoadState{}
+	}
+
+	canRestrict := [2]bool{
+		cluster.GetRuleManager().MayRestrictStoreLoad(true),
+		cluster.GetRuleManager().MayRestrictStoreLoad(false),
+	}
+	stores := cluster.GetStores()
+	for _, store := range stores {
+		recordStorePlacementRestriction(&canRestrict, store)
+	}
+	enabled := canRestrict[0] || canRestrict[1]
+	var population *placementPopulationIndex
+	if enabled {
+		population = &placementPopulationIndex{
+			stores:    make(map[uint64]uint, len(stores)),
+			wordCount: (len(stores) + 63) / 64,
+		}
+		for position, store := range stores {
+			population.stores[store.GetID()] = uint(position)
+		}
+	}
+	return placementLoadState{enabled: enabled, canRestrict: canRestrict, populationIndex: population}
+}
+
+func newBalanceReadSolvers(s *hotScheduler, cluster sche.SchedulerCluster) (leaderSolver, peerSolver *balanceSolver) {
+	leaderSolver = newBalanceSolver(s, cluster, utils.Read, transferLeader)
+	peerSolver = newBalanceSolver(s, cluster, utils.Read, movePeer)
+	return leaderSolver, peerSolver
+}
+
 func (s *hotScheduler) balanceHotReadRegions(cluster sche.SchedulerCluster) []*operator.Operator {
-	leaderSolver := newBalanceSolver(s, cluster, utils.Read, transferLeader)
+	leaderSolver, peerSolver := newBalanceReadSolvers(s, cluster)
 	leaderOps := leaderSolver.solve()
-	peerSolver := newBalanceSolver(s, cluster, utils.Read, movePeer)
 	peerOps := peerSolver.solve()
 	if len(leaderOps) == 0 && len(peerOps) == 0 {
 		return nil
