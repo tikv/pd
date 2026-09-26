@@ -18,6 +18,7 @@ import (
 	"context"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -114,6 +115,74 @@ func TestLeadership(t *testing.T) {
 	re.True(lease2.IsExpired())
 	re.NoError(lease1.Close())
 	re.NoError(lease2.Close())
+}
+
+func TestResetDoesNotClearNewLeadership(t *testing.T) {
+	for _, leaderValue := range []string{"same_leader", "different_leader"} {
+		t.Run(leaderValue, func(t *testing.T) {
+			re := require.New(t)
+			_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+			t.Cleanup(clean)
+			leadership := NewLeadership(client, "/test_leader", "test_leader", "test_leader")
+			t.Cleanup(leadership.Reset)
+			re.NoError(leadership.Campaign(10, "same_leader"))
+			leadership.Keep(t.Context())
+			oldLease := leadership.GetLease()
+
+			// Let the first Reset revoke the old leader key, but pause it before
+			// Close returns. The election loop can reset the same lease meanwhile.
+			const hook = "github.com/tikv/pd/pkg/election/afterRevokeLease"
+			reached := make(chan struct{})
+			release := make(chan struct{})
+			unblock := sync.OnceFunc(func() { close(release) })
+			re.NoError(failpoint.EnableCall(hook, func(lease *Lease) {
+				if lease == oldLease {
+					close(reached)
+					<-release
+				}
+			}))
+			t.Cleanup(func() { re.NoError(failpoint.Disable(hook)) })
+			wait := func(done <-chan struct{}) {
+				t.Helper()
+				select {
+				case <-done:
+				case <-time.After(10 * time.Second):
+					t.Fatal("leadership reset did not reach the expected checkpoint")
+				}
+			}
+			reset := func() <-chan struct{} {
+				done := make(chan struct{})
+				go func() {
+					leadership.Reset()
+					close(done)
+				}()
+				t.Cleanup(func() { unblock() })
+				return done
+			}
+			firstReset := reset()
+			wait(reached)
+			wait(reset())
+			re.False(leadership.Check())
+			re.Empty(leadership.GetLeaderValue())
+
+			// Re-election must not wait for the first Reset's blocking cleanup.
+			re.NoError(leadership.Campaign(10, leaderValue))
+			leadership.Keep(t.Context())
+			newLease := leadership.GetLease()
+			re.NotSame(oldLease, newLease)
+			unblock()
+			// Wait for the first Reset to finish its cleanup before asserting on
+			// the re-elected leadership.
+			wait(firstReset)
+
+			re.Same(newLease, leadership.GetLease())
+			re.True(leadership.Check())
+			resp, err := leadership.LeaderTxn().Then(clientv3.OpPut("/test_value", "value")).Commit()
+			re.NoError(err)
+			re.True(resp.Succeeded, "the new leader must still be able to commit leader-guarded writes")
+			re.Equal(leaderValue, leadership.GetLeaderValue())
+		})
+	}
 }
 
 func TestDeleteLeaderKeyByRevisionDoesNotDeleteChangedLeader(t *testing.T) {
