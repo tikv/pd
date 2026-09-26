@@ -48,6 +48,52 @@ func TestOperatorTestSuite(t *testing.T) {
 	suite.Run(t, new(operatorTestSuite))
 }
 
+func TestAdjustStepCostUsesRegionKeys(t *testing.T) {
+	tests := []struct {
+		size int64
+		keys int64
+		cost int64
+	}{
+		{size: 1, keys: 0, cost: 0},
+		{size: 1, keys: 1, cost: storelimit.SmallRegionInfluence[storelimit.AddPeer]},
+		{size: 1, keys: 2, cost: storelimit.SmallRegionInfluence[storelimit.AddPeer]},
+		{size: 2, keys: 1, cost: storelimit.SmallRegionInfluence[storelimit.AddPeer]},
+		{size: 21, keys: 2, cost: storelimit.RegionInfluence[storelimit.AddPeer]},
+	}
+	for _, tt := range tests {
+		var influence StoreInfluence
+		influence.AdjustStepCost(storelimit.AddPeer, tt.size, tt.keys)
+		require.Equal(t, tt.cost, influence.GetStepCost(storelimit.AddPeer))
+	}
+}
+
+func TestPeerInfluenceUsesRegionKeys(t *testing.T) {
+	region := newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2}).Clone(
+		core.SetApproximateSize(1),
+		core.SetApproximateKeys(2),
+	)
+
+	addInfluence := NewOpInfluence()
+	AddPeer{ToStore: 3}.Influence(addInfluence, region)
+	require.Equal(t, storelimit.SmallRegionInfluence[storelimit.AddPeer], addInfluence.GetStoreInfluence(3).GetStepCost(storelimit.AddPeer))
+
+	addLearnerInfluence := NewOpInfluence()
+	AddLearner{ToStore: 3}.Influence(addLearnerInfluence, region)
+	require.Equal(t, storelimit.SmallRegionInfluence[storelimit.AddPeer], addLearnerInfluence.GetStoreInfluence(3).GetStepCost(storelimit.AddPeer))
+
+	removeInfluence := NewOpInfluence()
+	RemovePeer{FromStore: 1}.Influence(removeInfluence, region)
+	require.Equal(t, storelimit.SmallRegionInfluence[storelimit.RemovePeer], removeInfluence.GetStoreInfluence(1).GetStepCost(storelimit.RemovePeer))
+
+	witnessInfluence := NewOpInfluence()
+	BecomeWitness{StoreID: 1, PeerID: 1}.Influence(witnessInfluence, region)
+	require.Equal(t, storelimit.SmallRegionInfluence[storelimit.RemovePeer], witnessInfluence.GetStoreInfluence(1).GetStepCost(storelimit.RemovePeer))
+
+	nonWitnessInfluence := NewOpInfluence()
+	BecomeNonWitness{StoreID: 1, PeerID: 1}.Influence(nonWitnessInfluence, region)
+	require.Equal(t, storelimit.SmallRegionInfluence[storelimit.AddPeer], nonWitnessInfluence.GetStoreInfluence(1).GetStepCost(storelimit.AddPeer))
+}
+
 func (suite *operatorTestSuite) SetupTest() {
 	cfg := mockconfig.NewTestOptions()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
