@@ -472,6 +472,16 @@ func (p GCStateProvider) RunInGCStateTransaction(f func(wb *GCStateWriteBatch) e
 			OpType: kv.RawTxnOpPut,
 			Value:  nextRevision,
 		})
+	} else {
+		// etcd treats a Compare-only transaction as serializable and may check
+		// the revision on a stale follower. A non-serializable Get makes etcd
+		// linearize the whole transaction before evaluating the comparison,
+		// including when it takes the empty Else branch. It does not write or
+		// advance the revision; its response is counted along with the ops below.
+		ops = append(ops, kv.RawTxnOp{
+			Key:    revisionKey,
+			OpType: kv.RawTxnOpGet,
+		})
 	}
 
 	txn, err := p.storage.createRawTxn()
