@@ -1136,11 +1136,11 @@ func (suite *keyspaceTestSuite) TestGCBarrierRemovalInvalidationAfterCommit() {
 	})
 	base := m.kgm.store
 	m.kgm.store = &errorKeyspaceGroupStorage{StorageEndpoint: m.store.(*endpoint.StorageEndpoint), failOnSaveID: 101}
-	_, err := m.kgm.RemoveKeyspacesFromGroup(101, m, []uint32{20000})
+	_, err := m.kgm.removeKeyspacesFromGroupWithConditions(suite.ctx, 101, m, []uint32{20000}, nil)
 	re.Error(err)
 	re.Zero(calls)
 	m.kgm.store = base
-	_, err = m.kgm.RemoveKeyspacesFromGroup(101, m, []uint32{20000})
+	_, err = m.kgm.removeKeyspacesFromGroupWithConditions(suite.ctx, 101, m, []uint32{20000}, nil)
 	re.NoError(err)
 	re.Equal(1, calls)
 }
