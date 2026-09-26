@@ -181,13 +181,19 @@ func decodeResourceGroup(body io.Reader, group *rmpb.ResourceGroup) error {
 	if err != nil {
 		return err
 	}
-	legacyJSON, rawKeyspaceID, err := splitResourceGroupJSON(data)
-	if err != nil {
-		return err
+	var keyspaceID resourceGroupKeyspaceIDJSON
+	legacyGroup := resourceGroupJSON{
+		resourceGroupWithoutKeyspaceID: (*resourceGroupWithoutKeyspaceID)(group),
+		KeyspaceID:                     resourceGroupKeyspaceIDField{value: &keyspaceID},
+		KeyspaceIDCamel:                resourceGroupKeyspaceIDField{value: &keyspaceID},
 	}
 	// Keep the legacy encoding/json behavior for all existing ResourceGroup
 	// fields. In particular, it matches JSON field names case-insensitively.
-	if err := json.Unmarshal(legacyJSON, group); err != nil {
+	if err := json.Unmarshal(data, &legacyGroup); err != nil {
+		var keyspaceIDErr *resourceGroupKeyspaceIDError
+		if errors.As(err, &keyspaceIDErr) {
+			return keyspaceIDErr
+		}
 		// The updated ResourceGroup contains a protobuf oneof, so clients may
 		// serialize the whole message as protobuf JSON. Retry strictly to
 		// accept enum names and quoted 64-bit integers without silently
@@ -196,65 +202,58 @@ func decodeResourceGroup(body io.Reader, group *rmpb.ResourceGroup) error {
 		if protoErr := (&jsonpb.Unmarshaler{}).Unmarshal(bytes.NewReader(data), group); protoErr != nil {
 			return fmt.Errorf("invalid resource group JSON: legacy JSON: %v; protobuf JSON: %w", err, protoErr)
 		}
-		return validateResourceGroupKeyspaceID(group, rawKeyspaceID)
+		return validateResourceGroupKeyspaceID(group, keyspaceID.raw)
 	}
-	if rawKeyspaceID != nil {
-		keyspaceID, err := decodeKeyspaceIDJSON(rawKeyspaceID)
+	if keyspaceID.raw != nil {
+		decodedKeyspaceID, err := decodeKeyspaceIDJSON(keyspaceID.raw)
 		if err != nil {
 			return err
 		}
-		group.KeyspaceId = keyspaceID
+		group.KeyspaceId = decodedKeyspaceID
 	}
-	return validateResourceGroupKeyspaceID(group, rawKeyspaceID)
+	return validateResourceGroupKeyspaceID(group, keyspaceID.raw)
 }
 
-func splitResourceGroupJSON(data []byte) ([]byte, json.RawMessage, error) {
-	if isJSONNull(data) {
-		return data, nil, nil
+// resourceGroupWithoutKeyspaceID lets encoding/json decode every legacy field
+// directly. The explicit fields in resourceGroupJSON shadow KeyspaceId, whose
+// protobuf oneof still requires compatibility handling.
+type resourceGroupWithoutKeyspaceID rmpb.ResourceGroup
+
+type resourceGroupJSON struct {
+	*resourceGroupWithoutKeyspaceID
+	KeyspaceID      resourceGroupKeyspaceIDField `json:"keyspace_id"`
+	KeyspaceIDCamel resourceGroupKeyspaceIDField `json:"keyspaceId"`
+}
+
+type resourceGroupKeyspaceIDJSON struct {
+	raw json.RawMessage
+}
+
+type resourceGroupKeyspaceIDField struct {
+	value *resourceGroupKeyspaceIDJSON
+}
+
+// UnmarshalJSON records and normalizes a ResourceGroup keyspace ID without
+// making a second copy of the rest of the request body.
+func (f *resourceGroupKeyspaceIDField) UnmarshalJSON(data []byte) error {
+	if f.value.raw != nil {
+		return &resourceGroupKeyspaceIDError{errors.New("keyspace_id must be set only once")}
 	}
-	// KeyspaceIDValue became a protobuf oneof, which encoding/json cannot decode.
-	// Remove it from the legacy payload and decode it separately with jsonpb.
-	fields, err := decodeJSONObjectFields(data)
+	raw, err := normalizeKeyspaceIDJSON(data)
 	if err != nil {
-		return nil, nil, err
+		return &resourceGroupKeyspaceIDError{err}
 	}
-	legacyFields := make([]jsonObjectField, 0, len(fields))
-	var rawKeyspaceID json.RawMessage
-	for _, field := range fields {
-		if !isKeyspaceIDJSONField(field.name) {
-			legacyFields = append(legacyFields, field)
-			continue
-		}
-		if rawKeyspaceID != nil {
-			return nil, nil, errors.New("keyspace_id must be set only once")
-		}
-		rawKeyspaceID, err = normalizeKeyspaceIDJSON(field.value)
-		if err != nil {
-			return nil, nil, err
-		}
-	}
-	return marshalJSONObjectFields(legacyFields), rawKeyspaceID, nil
+	f.value.raw = raw
+	return nil
+}
+
+type resourceGroupKeyspaceIDError struct {
+	error
 }
 
 type jsonObjectField struct {
 	name  string
 	value json.RawMessage
-}
-
-func marshalJSONObjectFields(fields []jsonObjectField) []byte {
-	var buffer bytes.Buffer
-	buffer.WriteByte('{')
-	for i, field := range fields {
-		if i > 0 {
-			buffer.WriteByte(',')
-		}
-		name, _ := json.Marshal(field.name)
-		buffer.Write(name)
-		buffer.WriteByte(':')
-		buffer.Write(field.value)
-	}
-	buffer.WriteByte('}')
-	return buffer.Bytes()
 }
 
 func decodeJSONObjectFields(data []byte) ([]jsonObjectField, error) {
@@ -291,10 +290,6 @@ func decodeJSONObjectFields(data []byte) ([]jsonObjectField, error) {
 		return nil, err
 	}
 	return fields, nil
-}
-
-func isKeyspaceIDJSONField(name string) bool {
-	return strings.EqualFold(name, "keyspace_id") || strings.EqualFold(name, "keyspaceId")
 }
 
 func isJSONNull(data []byte) bool {

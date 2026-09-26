@@ -109,10 +109,13 @@ func TestGenerateTSO(t *testing.T) {
 
 	// simulate the save to storage operation is done.
 	timestampOracle.lastSavedTime.Store(time.Now().Add(5 * time.Second))
-	_, err = timestampOracle.getTS(ctx, 2)
+	timestamp, err := timestampOracle.getTS(ctx, 2)
 	re.NoError(err)
-	physical, _ = timestampOracle.getTSO()
-	re.NotEqual(current, physical)
+	re.Greater(timestamp.GetPhysical(), current.UnixMilli())
+	re.Equal(int64(2), timestamp.GetLogical())
+	physical, logical := timestampOracle.getTSO()
+	re.Equal(timestamp.GetPhysical(), physical.UnixMilli())
+	re.Equal(timestamp.GetLogical(), logical)
 }
 
 func TestCurrentGetTSO(t *testing.T) {
