@@ -219,6 +219,7 @@ var (
 )
 
 type metrics struct {
+	ruTimeline *ruTimeline
 	// record update time of each resource group
 	consumptionRecordMap map[consumptionRecordKey]time.Time
 	// max per sec trackers for each keyspace and resource group.
@@ -273,6 +274,7 @@ func init() {
 
 func newMetrics() *metrics {
 	return &metrics{
+		ruTimeline:           newRUTimeline(ruSummaryMetrics),
 		consumptionRecordMap: make(map[consumptionRecordKey]time.Time),
 		maxPerSecTrackerMap:  make(map[trackerKey]*maxPerSecCostTracker),
 		counterMetricsMap:    make(map[metricsKey]*counterMetrics),
@@ -348,6 +350,7 @@ func (m *metrics) recordConsumption(
 	if consumption == nil {
 		return
 	}
+	m.ruTimeline.record(consumptionInfo, now)
 	m.getMaxPerSecTracker(keyspaceID, keyspaceName, groupName).collect(consumption)
 	m.getCounterMetrics(keyspaceID, keyspaceName, groupName, ruLabelType).add(consumption, controllerConfig, keyspaceID)
 	m.insertConsumptionRecord(keyspaceID, groupName, ruLabelType, now)

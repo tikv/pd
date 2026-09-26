@@ -150,6 +150,19 @@ func TestRecordConsumptionUsesActualRequestUnitCounters(t *testing.T) {
 		groupName:  groupName,
 		ruType:     defaultTypeLabel,
 	})
+
+	// Client RU timelines are merged without changing counter accounting.
+	now := time.Now()
+	report := timelineReport(1, now.Unix(), [][2]float64{{12, 8}})
+	report.keyspaceID, report.keyspaceName = keyspaceID, keyspaceName
+	report.resourceGroupName = groupName
+	m.recordConsumption(report, &ControllerConfig{}, now.Add(time.Second))
+	source := m.ruTimeline.groups[trackerKey{keyspaceID, groupName}].sources[ruSourceKey{client: 1}]
+	bucket := source.buckets[now.Unix()%int64(len(source.buckets))]
+	re.Equal(float64(12), bucket.rru)
+	re.Equal(float64(8), bucket.wru)
+	re.Equal(float64(12), testutil.ToFloat64(counter.RRUMetrics))
+	re.Equal(float64(8), testutil.ToFloat64(counter.WRUMetrics))
 }
 
 func TestRecordConsumptionKeepsRecordForEmptyConsumption(t *testing.T) {

@@ -58,6 +58,7 @@ const (
 
 // consumptionItem is used to send the consumption info to the background metrics flusher.
 type consumptionItem struct {
+	clientUniqueID    uint64
 	keyspaceID        uint32
 	keyspaceName      string
 	resourceGroupName string

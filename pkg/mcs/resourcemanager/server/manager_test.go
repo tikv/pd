@@ -460,7 +460,7 @@ func checkBackgroundMetricsFlush(ctx context.Context, re *require.Assertions, ma
 		},
 		KeyspaceId: keyspaceIDValue,
 	}
-	err = manager.dispatchConsumption(req)
+	err = manager.dispatchConsumption(1, req)
 	re.NoError(err)
 
 	keyspaceID := ExtractKeyspaceID(req.GetKeyspaceId())
@@ -487,10 +487,11 @@ func TestDispatchConsumptionIncludesOnlyConsumption(t *testing.T) {
 		KeyspaceId: &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: 42}},
 	}
 
-	err := m.dispatchConsumption(req)
+	err := m.dispatchConsumption(7, req)
 	re.NoError(err)
 
 	item := <-m.consumptionDispatcher
+	re.Equal(uint64(7), item.clientUniqueID)
 	re.Equal(uint32(42), item.keyspaceID)
 	re.Equal(req.GetResourceGroupName(), item.resourceGroupName)
 	re.Equal(req.GetConsumptionSinceLastRequest(), item.Consumption)
