@@ -618,12 +618,12 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 	ordinaryPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))
 	specialPeers := make(map[string]map[uint64]*metapb.Peer)
 	oldFit := r.cluster.GetRuleManager().FitRegion(r.cluster, region)
-	// view tracks the planned peer layout, including moves selected so far.
-	view := region
-	// viewFit records how the peers in view match placement rules.
+	// plannedRegion includes peer moves selected so far.
+	plannedRegion := region
+	// plannedFit records how the peers in plannedRegion match placement rules.
 	// After selecting A -> D for {A, B, C}, match {D, B, C} against the
 	// placement rules before checking the next candidate.
-	viewFit := oldFit
+	plannedFit := oldFit
 
 	// Group peers by the engine of their stores
 	for _, peer := range region.GetPeers() {
@@ -685,10 +685,10 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 				log.Error("failed to get the store", zap.Uint64("store-id", peer.GetStoreId()), errs.ZapError(errs.ErrGetSourceStore))
 				continue
 			}
-			if r.cluster.GetSharedConfig().IsPlacementRulesEnabled() && viewFit == nil {
-				viewFit = r.cluster.GetRuleManager().FitRegionWithoutCache(r.cluster, view)
+			if r.cluster.GetSharedConfig().IsPlacementRulesEnabled() && plannedFit == nil {
+				plannedFit = r.cluster.GetRuleManager().FitRegionWithoutCache(r.cluster, plannedRegion)
 			}
-			filters[filterLen-1] = filter.NewPlacementSafeguard(r.name, r.cluster.GetSharedConfig(), r.cluster.GetBasicCluster(), r.cluster.GetRuleManager(), view, sourceStore, viewFit)
+			filters[filterLen-1] = filter.NewPlacementSafeguard(r.name, r.cluster.GetSharedConfig(), r.cluster.GetBasicCluster(), r.cluster.GetRuleManager(), plannedRegion, sourceStore, plannedFit)
 			for {
 				newPeer := r.selectNewPeer(context, group, peer, filters, internalScatter)
 				selectedStores[newPeer.GetStoreId()] = struct{}{}
@@ -699,11 +699,11 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 					targetPeers[newPeer.GetStoreId()] = newPeer
 					selectedStores[peer.GetStoreId()] = struct{}{}
 					if peer.GetStoreId() != newPeer.GetStoreId() {
-						if view == region {
-							view = region.Clone()
+						if plannedRegion == region {
+							plannedRegion = region.Clone()
 						}
-						moveScatterPeer(view, peer.GetId(), newPeer.GetStoreId())
-						viewFit = nil
+						moveScatterPeer(plannedRegion, peer.GetId(), newPeer.GetStoreId())
+						plannedFit = nil
 					}
 					if collectLeaderCandidates && allowLeader(oldFit, peer) {
 						leaderCandidateStores = append(leaderCandidateStores, newPeer.GetStoreId())
@@ -855,10 +855,10 @@ func allowLeader(fit *placement.RegionFit, peer *metapb.Peer) bool {
 
 // moveScatterPeer updates only the selected peer in a request-owned layout.
 // The leader is cloned separately from the peer list and must move with it.
-func moveScatterPeer(view *core.RegionInfo, peerID, storeID uint64) {
-	view.GetPeer(peerID).StoreId = storeID
-	if view.GetLeader().GetId() == peerID {
-		view.GetLeader().StoreId = storeID
+func moveScatterPeer(plannedRegion *core.RegionInfo, peerID, storeID uint64) {
+	plannedRegion.GetPeer(peerID).StoreId = storeID
+	if plannedRegion.GetLeader().GetId() == peerID {
+		plannedRegion.GetLeader().StoreId = storeID
 	}
 }
 
