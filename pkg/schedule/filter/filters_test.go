@@ -559,3 +559,35 @@ func BenchmarkCloneRegionTest(b *testing.B) {
 		_ = createRegionForRuleFit(region.GetStartKey(), region.GetEndKey(), region.GetPeers(), region.GetLeader())
 	}
 }
+
+func TestPeerMovePreservesConfiguredIsolation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tc := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	tc.SetEnablePlacementRules(true)
+	for i, path := range [][]string{{"A", "a"}, {"A", "b"}, {"A", "c"}, {"B", "d"}, {"B", "d"}, {"B", "e"}, {"A", "b"}} {
+		tc.AddLabelsStore(uint64(i+1), 0, map[string]string{"zone": path[0], "host": path[1]})
+	}
+	rm := tc.GetRuleManager()
+	rule := rm.GetRule("pd", "default").Clone()
+	rule.Count, rule.LocationLabels = 4, []string{"zone", "host"}
+	region := tc.AddLeaderRegion(1, 2, 1, 3, 4)
+	for _, level := range []string{"", "host"} {
+		rule.IsolationLevel = level
+		require.NoError(t, rm.SetRule(rule))
+		before := rm.FitRegionWithoutCache(tc, region)
+		require.Equal(t, float64(303), before.RuleFits[0].IsolationScore)
+		after := rm.FitRegionWithoutCache(tc, region.Clone(core.WithReplacePeerStore(1, 5)))
+		require.Equal(t, float64(401), after.RuleFits[0].IsolationScore)
+		guard := NewPlacementSafeguard("test", tc.GetSharedConfig(), tc.GetBasicCluster(), rm, region, tc.GetStore(1), before)
+		require.Equal(t, level == "", guard.Target(tc.GetSharedConfig(), tc.GetStore(5)).IsOK())
+		require.True(t, guard.Target(tc.GetSharedConfig(), tc.GetStore(6)).IsOK())
+	}
+	// Existing violations do not prevent an incremental repair that retains the
+	// weighted-score safeguard; another collision may remain after one move.
+	degraded := region.Clone(core.WithReplacePeerStore(1, 7), core.WithReplacePeerStore(3, 5))
+	before := rm.FitRegionWithoutCache(tc, degraded)
+	require.False(t, before.RuleFits[0].IsIsolationSatisfied())
+	guard := NewPlacementSafeguard("test", tc.GetSharedConfig(), tc.GetBasicCluster(), rm, degraded, tc.GetStore(7), before)
+	require.True(t, guard.Target(tc.GetSharedConfig(), tc.GetStore(1)).IsOK())
+}

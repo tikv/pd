@@ -294,3 +294,30 @@ func TestPickPeersFromBinaryInt(t *testing.T) {
 		}
 	}
 }
+
+func TestRuleFitConfiguredIsolation(t *testing.T) {
+	tests := []struct {
+		name, level string
+		paths       [][]string
+		want        bool
+	}{
+		{"unset", "", [][]string{{"A", "a"}, {"A", "a"}}, true},
+		{"host-separated", "host", [][]string{{"A", "a"}, {"A", "b"}}, true},
+		{"zone-not-separated", "zone", [][]string{{"A", "a"}, {"A", "b"}}, false},
+		{"host-collision", "host", [][]string{{"B", "d"}, {"B", "d"}}, false},
+		{"case-insensitive", "host", [][]string{{"B", "d"}, {"b", "D"}}, false},
+		{"host-local-to-zone", "host", [][]string{{"A", "a"}, {"B", "a"}}, true},
+		{"missing-host", "host", [][]string{{"A", ""}, {"A", "b"}}, false},
+		{"separated-above-missing-host", "host", [][]string{{"A", ""}, {"B", ""}}, true},
+		{"single-peer", "host", [][]string{{"", ""}}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rf := &RuleFit{Rule: &Rule{LocationLabels: []string{"zone", "host"}, IsolationLevel: tt.level}}
+			for i, path := range tt.paths {
+				rf.Stores = append(rf.Stores, core.NewStoreInfoWithLabel(uint64(i+1), map[string]string{"zone": path[0], "host": path[1]}))
+			}
+			require.Equal(t, tt.want, rf.IsIsolationSatisfied())
+		})
+	}
+}

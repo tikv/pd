@@ -251,6 +251,14 @@ func AllowMerge(cluster sche.SharedCluster, region, adjacent *core.RegionInfo) b
 		if !ok || len(cl.GetRuleManager().GetSplitKeys(start, end)) > 0 {
 			return false
 		}
+		// Merge aligns the source to the target's peers. A fully replicated
+		// target can still violate its configured isolation level.
+		fit := cl.GetRuleManager().FitRegion(cluster.GetBasicCluster(), adjacent)
+		for _, ruleFit := range fit.RuleFits {
+			if !ruleFit.IsIsolationSatisfied() {
+				return false
+			}
+		}
 	}
 
 	if cl, ok := cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler }); ok {
