@@ -717,7 +717,7 @@ func (c *ResourceGroupsController) tombstoneGroupCostController(name string) {
 		return
 	}
 	gc.tombstone.Store(true)
-	gc.ruTimelineOwner = defaultGC
+	gc.ruTimeline = defaultGC.ruTimeline
 	c.groupsController.Store(name, gc)
 	// Its metrics will be deleted in the cleanup process.
 	metrics.ResourceGroupStatusGauge.WithLabelValues(name, name).Set(2)
@@ -726,15 +726,17 @@ func (c *ResourceGroupsController) tombstoneGroupCostController(name string) {
 }
 
 func (c *ResourceGroupsController) cleanUpResourceGroup() {
-	// A tombstone reports through the default controller's RU timeline, and a
-	// replacement default controller would report a second timeline for the
-	// same group, so the default controller stays while a tombstone does.
+	// Tombstones share the default controller's RU timeline, and a replacement
+	// default controller would report a second timeline for the same group, so
+	// the default controller stays while a tombstone does.
+	tombstoned := false
 	c.groupsController.Range(func(_, value any) bool {
-		if owner := value.(*groupCostController).ruTimelineOwner; owner != nil {
-			owner.inactive = false
-		}
-		return true
+		tombstoned = value.(*groupCostController).tombstone.Load()
+		return !tombstoned
 	})
+	if defaultGC, ok := c.loadGroupController(defaultResourceGroupName); ok && tombstoned {
+		defaultGC.inactive = false
+	}
 	c.groupsController.Range(func(key, value any) bool {
 		resourceGroupName := key.(string)
 		gc := value.(*groupCostController)
@@ -835,7 +837,9 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 			// The resource manager has received these seconds; any it drops
 			// afterwards become gaps that withhold their minutes.
 			for i, gc := range reporters {
-				gc.ackRU(requests[i])
+				if seconds := requests[i].GetConsumptionSinceLastRequest().GetRuBySecond(); seconds != nil {
+					gc.ruTimeline.ack(seconds.StartUnixSec + int64(len(seconds.Buckets)))
+				}
 			}
 		}
 		if !notifyMsg.startTime.IsZero() && time.Since(notifyMsg.startTime) > slowNotifyFilterDuration {

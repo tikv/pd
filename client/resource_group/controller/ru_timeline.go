@@ -15,6 +15,7 @@
 package controller
 
 import (
+	"sync"
 	"time"
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
@@ -34,8 +35,9 @@ type ruSecondBucket struct {
 	rru, wru float64
 }
 
-// ruTimeline records RRU and WRU by natural second. It is guarded by the mu
-// of the controller returned by timelineController.
+// ruTimeline records RRU and WRU by natural second. A client reports one
+// timeline per resource group, so controllers reporting as the same group
+// share one timeline.
 // Each report carries the closed seconds that the resource manager has not
 // acknowledged, bounded by the retained window. A failed report is resent
 // from the same second and the receiver deduplicates the overlap.
@@ -44,7 +46,10 @@ type ruSecondBucket struct {
 // A full retained window is quarantined after a clock rollback or an untimed
 // external aggregate: neither can be attributed to natural seconds. A forward
 // step only relabels later seconds, like clock skew between clients.
+// Methods read the clock while holding mu, so concurrent callers cannot
+// present seconds out of order and be mistaken for a clock rollback.
 type ruTimeline struct {
+	mu      sync.Mutex
 	buckets [ruTimelineSeconds + 1]ruSecondBucket
 	// start is the first second the timeline can attest to. It moves into the
 	// future while the timeline is quarantined.
@@ -55,24 +60,37 @@ type ruTimeline struct {
 	last int64
 }
 
-func (t *ruTimeline) advance(now time.Time) {
+func newRUTimeline(now time.Time) *ruTimeline {
+	return &ruTimeline{start: now.Unix(), last: now.Unix()}
+}
+
+func (t *ruTimeline) advanceLocked(now time.Time) {
 	second := now.Unix()
-	if t.start == 0 {
-		t.start = second
-	}
 	if second < t.last {
-		t.invalidate(now)
+		t.invalidateLocked(now)
 	}
 	t.last = second
 }
 
-func (t *ruTimeline) invalidate(now time.Time) {
+func (t *ruTimeline) invalidate() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.invalidateLocked(time.Now())
+}
+
+func (t *ruTimeline) invalidateLocked(now time.Time) {
 	t.start = max(t.start, now.Unix()+ruTimelineSeconds)
 	t.buckets = [ruTimelineSeconds + 1]ruSecondBucket{}
 }
 
-func (t *ruTimeline) record(now time.Time, rru, wru float64) {
-	t.advance(now)
+func (t *ruTimeline) record(rru, wru float64) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.recordLocked(time.Now(), rru, wru)
+}
+
+func (t *ruTimeline) recordLocked(now time.Time, rru, wru float64) {
+	t.advanceLocked(now)
 	second := now.Unix()
 	if second < t.start {
 		return
@@ -87,14 +105,22 @@ func (t *ruTimeline) record(now time.Time, rru, wru float64) {
 
 // ack records that the resource manager has received every second before end.
 func (t *ruTimeline) ack(end int64) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	t.acked = max(t.acked, end)
 }
 
 // snapshot copies the unacknowledged closed seconds, filling idle seconds
 // with zero. It returns nil while the timeline is quarantined, and after a
 // clock rollback until the clock passes the acknowledged seconds again.
-func (t *ruTimeline) snapshot(now time.Time) *rmpb.RUConsumptionBySecond {
-	t.advance(now)
+func (t *ruTimeline) snapshot() *rmpb.RUConsumptionBySecond {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.snapshotLocked(time.Now())
+}
+
+func (t *ruTimeline) snapshotLocked(now time.Time) *rmpb.RUConsumptionBySecond {
+	t.advanceLocked(now)
 	end := now.Unix()
 	start := max(t.start, end-ruTimelineSeconds, t.acked)
 	if end < start {

@@ -17,6 +17,8 @@ package controller
 import (
 	"context"
 	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -31,58 +33,93 @@ import (
 func TestRUTimeline(t *testing.T) {
 	re := require.New(t)
 	const start int64 = 1800000000
-	var tl ruTimeline
-	tl.record(time.Unix(start, 999999999), 10, 20)
-	tl.record(time.Unix(start+1, 0), -3, 5)
-	first := tl.snapshot(time.Unix(start+2, 0))
+	tl := newRUTimeline(time.Unix(start, 0))
+	tl.recordLocked(time.Unix(start, 999999999), 10, 20)
+	tl.recordLocked(time.Unix(start+1, 0), -3, 5)
+	first := tl.snapshotLocked(time.Unix(start+2, 0))
 	re.Equal(start, first.StartUnixSec)
 	re.Equal([]*rmpb.RUConsumptionBucket{{Rru: 10, Wru: 20}, {Rru: -3, Wru: 5}}, first.Buckets)
 
 	// Snapshots replay idle seconds as zero and own their memory.
-	again := tl.snapshot(time.Unix(start+3, 0))
+	again := tl.snapshotLocked(time.Unix(start+3, 0))
 	re.Equal(&rmpb.RUConsumptionBucket{}, again.Buckets[2])
 	again.Buckets[0].Rru = 999
 	re.Equal(float64(10), first.Buckets[0].Rru)
-	re.Equal(float64(10), tl.snapshot(time.Unix(start+3, 0)).Buckets[0].Rru)
+	re.Equal(float64(10), tl.snapshotLocked(time.Unix(start+3, 0)).Buckets[0].Rru)
 
 	// Only the retained window is replayed, and a reused slot never replays
 	// the second it held before.
-	tl.record(time.Unix(start+181, 0), 7, 8)
-	latest := tl.snapshot(time.Unix(start+183, 0))
+	tl.recordLocked(time.Unix(start+181, 0), 7, 8)
+	latest := tl.snapshotLocked(time.Unix(start+183, 0))
 	re.Len(latest.Buckets, ruTimelineSeconds)
 	re.Equal(start+3, latest.StartUnixSec)
 	re.Equal(&rmpb.RUConsumptionBucket{Rru: 7, Wru: 8}, latest.Buckets[ruTimelineSeconds-2])
 	re.Equal(&rmpb.RUConsumptionBucket{}, latest.Buckets[ruTimelineSeconds-1])
 
 	// A clock rollback quarantines a full window.
-	tl.record(time.Unix(start+180, 0), 100, 100)
-	re.Nil(tl.snapshot(time.Unix(start+184, 0)))
-	re.Empty(tl.snapshot(time.Unix(start+360, 0)).Buckets)
+	tl.recordLocked(time.Unix(start+180, 0), 100, 100)
+	re.Nil(tl.snapshotLocked(time.Unix(start+184, 0)))
+	re.Empty(tl.snapshotLocked(time.Unix(start+360, 0)).Buckets)
 }
 
 func TestRUTimelineAck(t *testing.T) {
 	re := require.New(t)
 	const start int64 = 1800000000
-	var tl ruTimeline
-	tl.record(time.Unix(start, 0), 1, 2)
-	sent := tl.snapshot(time.Unix(start+2, 0))
+	tl := newRUTimeline(time.Unix(start, 0))
+	tl.recordLocked(time.Unix(start, 0), 1, 2)
+	sent := tl.snapshotLocked(time.Unix(start+2, 0))
 	// An unacknowledged report is resent from the same second.
-	re.Equal(start, tl.snapshot(time.Unix(start+3, 0)).StartUnixSec)
+	re.Equal(start, tl.snapshotLocked(time.Unix(start+3, 0)).StartUnixSec)
 
 	tl.ack(sent.StartUnixSec + int64(len(sent.Buckets)))
-	next := tl.snapshot(time.Unix(start+4, 0))
+	next := tl.snapshotLocked(time.Unix(start+4, 0))
 	re.Equal(start+2, next.StartUnixSec)
 	re.Len(next.Buckets, 2)
 	// A stale acknowledgement never rewinds the timeline.
 	tl.ack(start + 1)
-	re.Equal(start+2, tl.snapshot(time.Unix(start+4, 0)).StartUnixSec)
+	re.Equal(start+2, tl.snapshotLocked(time.Unix(start+4, 0)).StartUnixSec)
 	// After a clock rollback, acknowledged seconds are not reported again,
 	// even once the quarantine is over.
-	sent = tl.snapshot(time.Unix(start+600, 0))
+	sent = tl.snapshotLocked(time.Unix(start+600, 0))
 	tl.ack(sent.StartUnixSec + int64(len(sent.Buckets)))
-	re.Nil(tl.snapshot(time.Unix(start+300, 0)))
-	re.Nil(tl.snapshot(time.Unix(start+480, 0)))
-	re.Equal(start+600, tl.snapshot(time.Unix(start+601, 0)).StartUnixSec)
+	re.Nil(tl.snapshotLocked(time.Unix(start+300, 0)))
+	re.Nil(tl.snapshotLocked(time.Unix(start+480, 0)))
+	re.Equal(start+600, tl.snapshotLocked(time.Unix(start+601, 0)).StartUnixSec)
+}
+
+func TestRUTimelineConcurrentRecording(t *testing.T) {
+	re := require.New(t)
+	tl := newRUTimeline(time.Now())
+	// Concurrent recording across second boundaries is never mistaken for a
+	// clock rollback, and every recorded unit is reported exactly once.
+	end := time.Now().Truncate(time.Second).Add(2 * time.Second)
+	var recorded atomic.Int64
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Go(func() {
+			for time.Now().Before(end) {
+				tl.record(1, 0)
+				recorded.Add(1)
+			}
+		})
+	}
+	var reported float64
+	drain := func() {
+		if s := tl.snapshot(); s != nil {
+			for _, b := range s.Buckets {
+				reported += b.Rru
+			}
+			tl.ack(s.StartUnixSec + int64(len(s.Buckets)))
+		}
+	}
+	for time.Now().Before(end) {
+		drain()
+		time.Sleep(time.Millisecond)
+	}
+	wg.Wait()
+	time.Sleep(time.Until(end.Add(time.Second + 10*time.Millisecond)))
+	drain()
+	re.Equal(float64(recorded.Load()), reported)
 }
 
 func TestTrimRUTimelines(t *testing.T) {
@@ -109,9 +146,9 @@ func TestTrimRUTimelines(t *testing.T) {
 }
 
 func timelineTotals(gc *groupCostController) (rru, wru float64) {
-	gc.mu.Lock()
-	defer gc.mu.Unlock()
-	for _, b := range gc.mu.ruTimeline.buckets {
+	gc.ruTimeline.mu.Lock()
+	defer gc.ruTimeline.mu.Unlock()
+	for _, b := range gc.ruTimeline.buckets {
 		rru += b.rru
 		wru += b.wru
 	}
@@ -169,7 +206,7 @@ func TestRUTimelineUntimedConsumption(t *testing.T) {
 	gc := createTestGroupCostController(re)
 	gc.addRUConsumption(&rmpb.Consumption{RRU: 100})
 	re.Equal(float64(100), gc.mu.consumption.RRU)
-	re.Nil(gc.mu.ruTimeline.snapshot(time.Now()))
+	re.Nil(gc.ruTimeline.snapshot())
 }
 
 func TestTombstoneSharesDefaultRUTimeline(t *testing.T) {
@@ -192,19 +229,11 @@ func TestTombstoneSharesDefaultRUTimeline(t *testing.T) {
 
 	// A tombstone reports as the default group; a second default timeline
 	// from the same client would conflict with the real one.
+	re.Same(defaultGC.ruTimeline, tombstone.ruTimeline)
 	_, _, _, _, err = c.OnRequestWait(ctx, "test-group", NewTestRequestInfo(true, 1, 1, AccessUnknown))
 	re.NoError(err)
 	_, wru := timelineTotals(defaultGC)
 	re.Positive(wru)
-	_, wru = timelineTotals(tombstone)
-	re.Zero(wru)
-
-	// Its reports carry the shared timeline, including its quarantine.
-	tombstone.addRUConsumption(&rmpb.Consumption{RRU: 1})
-	tombstone.run.requestInProgress = true
-	re.Nil(tombstone.collectRequestAndConsumption(periodicReport).ConsumptionSinceLastRequest.RuBySecond)
-	defaultGC.run.requestInProgress = true
-	re.Nil(defaultGC.collectRequestAndConsumption(periodicReport).ConsumptionSinceLastRequest.RuBySecond)
 
 	// The idle default controller is kept while the tombstone reports through it.
 	for range 3 {
@@ -229,9 +258,9 @@ func TestTokenRequestAcknowledgesRUTimeline(t *testing.T) {
 		req := gc.collectRequestAndConsumption(periodicReport)
 		c.sendTokenBucketRequests(ctx, []*rmpb.TokenBucketRequest{req}, []*groupCostController{gc}, FromPeriodReport, notifyMsg{})
 		<-c.tokenResponseChan
-		gc.mu.Lock()
-		acked := gc.mu.ruTimeline.acked
-		gc.mu.Unlock()
+		gc.ruTimeline.mu.Lock()
+		acked := gc.ruTimeline.acked
+		gc.ruTimeline.mu.Unlock()
 		if rpcErr != nil {
 			re.Zero(acked, "a failed report must be resent")
 		} else {

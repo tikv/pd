@@ -51,8 +51,11 @@ type groupCostController struct {
 		consumption   *rmpb.Consumption
 		storeCounter  map[uint64]*rmpb.Consumption
 		globalCounter *rmpb.Consumption
-		ruTimeline    ruTimeline
 	}
+	// ruTimeline records the consumption gc reports by natural second. A
+	// tombstone requests tokens as the default group, so it shares the default
+	// controller's timeline.
+	ruTimeline *ruTimeline
 
 	// fast path to make once token limit with un-limit burst.
 	burstable *atomic.Bool
@@ -95,10 +98,6 @@ type groupCostController struct {
 	tombstone atomic.Bool
 	// inactive is set to true when the resource group has not been updated for a long time.
 	inactive bool
-	// ruTimelineOwner is set for a tombstone. A tombstone requests tokens as
-	// the default group, so it shares that group's RU timeline: a client must
-	// report a single timeline per group.
-	ruTimelineOwner *groupCostController
 }
 
 type groupMetricsCollection struct {
@@ -356,7 +355,7 @@ func newGroupCostController(
 	gc.mu.consumption = &rmpb.Consumption{}
 	gc.mu.storeCounter = make(map[uint64]*rmpb.Consumption)
 	gc.mu.globalCounter = &rmpb.Consumption{}
-	gc.mu.ruTimeline.advance(time.Now())
+	gc.ruTimeline = newRUTimeline(time.Now())
 	// TODO: re-init the state if user change mode from RU to RAW mode.
 	gc.initRunState()
 	return gc, nil
@@ -660,10 +659,7 @@ func (gc *groupCostController) collectRequestAndConsumption(selectTyp selectType
 		return nil
 	}
 	req.ConsumptionSinceLastRequest = updateDeltaConsumption(gc.run.lastRequestConsumption, gc.run.consumption)
-	t := gc.timelineController()
-	t.mu.Lock()
-	req.ConsumptionSinceLastRequest.RuBySecond = t.mu.ruTimeline.snapshot(time.Now())
-	t.mu.Unlock()
+	req.ConsumptionSinceLastRequest.RuBySecond = gc.ruTimeline.snapshot()
 	gc.run.lastRequestTime = time.Now()
 	gc.run.requestInProgress = true
 	return req
@@ -784,7 +780,7 @@ func (gc *groupCostController) onRequestWaitImpl(
 		gc.metrics.observePagingRequest(bytesForEst)
 	}
 
-	gc.recordRU(reportedDelta)
+	gc.ruTimeline.record(reportedDelta.RRU, reportedDelta.WRU)
 	gc.mu.Lock()
 	// Calculate the penalty of the store
 	penalty = &rmpb.Consumption{}
@@ -829,7 +825,7 @@ func (gc *groupCostController) onResponseImpl(
 		}
 	}
 
-	gc.recordRU(reportedDelta)
+	gc.ruTimeline.record(reportedDelta.RRU, reportedDelta.WRU)
 	gc.mu.Lock()
 	add(gc.mu.consumption, reportedDelta)
 	add(gc.mu.storeCounter[req.StoreID()], count)
@@ -849,7 +845,7 @@ func (gc *groupCostController) onResponseWaitImpl(
 	delta := &rmpb.Consumption{}
 	calculateAfterKVRequest(gc.calculators, delta, detail, req, resp)
 	reportedDelta := reportedResponseConsumption(gc.calculators, req, delta)
-	gc.recordRU(reportedDelta)
+	gc.ruTimeline.record(reportedDelta.RRU, reportedDelta.WRU)
 	// `count` is the full per-request consumption (BeforeKVRequest + AfterKVRequest).
 	count := &rmpb.Consumption{}
 	*count = *delta
@@ -927,39 +923,8 @@ func (gc *groupCostController) addRUConsumption(consumption *rmpb.Consumption) {
 	// ReportConsumption currently receives query-wide TiFlash aggregates.
 	// Preserve token/counter behavior, but do not attribute them to a second.
 	if consumption.RRU != 0 || consumption.WRU != 0 {
-		t := gc.timelineController()
-		t.mu.Lock()
-		t.mu.ruTimeline.invalidate(time.Now())
-		t.mu.Unlock()
+		gc.ruTimeline.invalidate()
 	}
-}
-
-// timelineController returns the controller holding the RU timeline gc reports.
-func (gc *groupCostController) timelineController() *groupCostController {
-	if gc.ruTimelineOwner != nil {
-		return gc.ruTimelineOwner
-	}
-	return gc
-}
-
-// ackRU marks the RU timeline seconds carried by req as received.
-func (gc *groupCostController) ackRU(req *rmpb.TokenBucketRequest) {
-	seconds := req.GetConsumptionSinceLastRequest().GetRuBySecond()
-	if seconds == nil {
-		return
-	}
-	t := gc.timelineController()
-	t.mu.Lock()
-	t.mu.ruTimeline.ack(seconds.StartUnixSec + int64(len(seconds.Buckets)))
-	t.mu.Unlock()
-}
-
-// recordRU records confirmed consumption into the RU timeline gc reports.
-func (gc *groupCostController) recordRU(consumption *rmpb.Consumption) {
-	t := gc.timelineController()
-	t.mu.Lock()
-	t.mu.ruTimeline.record(time.Now(), consumption.RRU, consumption.WRU)
-	t.mu.Unlock()
 }
 
 func (gc *groupCostController) addRUV2Consumption(tikvRUV2, tidbRUV2, tiflashRUV2 float64) {
