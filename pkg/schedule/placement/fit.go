@@ -17,6 +17,7 @@ package placement
 import (
 	"math"
 	"math/bits"
+	"slices"
 	"sort"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -62,6 +63,19 @@ func (f *RegionFit) Replace(srcStoreID uint64, dstStore *core.StoreInfo) bool {
 	// the target store should be fit all constraints.
 	if !MatchLabelConstraints(dstStore, fit.Rule.LabelConstraints) {
 		return false
+	}
+
+	if fit.Rule.IsolationLevel != "" && fit.IsIsolationSatisfied() {
+		stores := slices.Clone(fit.Stores)
+		for i, store := range stores {
+			if store.GetID() == srcStoreID {
+				stores[i] = dstStore
+				break
+			}
+		}
+		if !(&RuleFit{Rule: fit.Rule, Stores: stores}).IsIsolationSatisfied() {
+			return false
+		}
 	}
 
 	score := isolationStoreScore(srcStoreID, dstStore, fit.Stores, fit.Rule.LocationLabels)
@@ -145,6 +159,31 @@ type RuleFit struct {
 // IsSatisfied returns if the rule is properly satisfied.
 func (f *RuleFit) IsSatisfied() bool {
 	return len(f.Peers) == f.Rule.Count && len(f.PeersWithDifferentRole) == 0
+}
+
+// IsIsolationSatisfied reports whether each pair of stores is separated at or
+// above the rule's configured isolation level. It does not impose a default
+// level or compare the weighted isolation score.
+func (f *RuleFit) IsIsolationSatisfied() bool {
+	if f.Rule.IsolationLevel == "" {
+		return true
+	}
+	level := slices.Index(f.Rule.LocationLabels, f.Rule.IsolationLevel)
+	if level < 0 {
+		return false
+	}
+	labels := f.Rule.LocationLabels[:level+1]
+	for i, store := range f.Stores {
+		if store == nil {
+			return false
+		}
+		for _, other := range f.Stores[i+1:] {
+			if other == nil || store.CompareLocation(other, labels) < 0 {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func (f *RuleFit) contain(storeID uint64) bool {
