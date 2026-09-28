@@ -106,7 +106,7 @@ func TestRUTimelineMergesSources(t *testing.T) {
 
 func TestRUTimelineUnavailable(t *testing.T) {
 	const start = testTimelineStart
-	for _, scenario := range []string{"gap", "overflow", "conflict", "legacy", "nan", "future-second", "oversized", "new-source", "late-joiner", "source-kind", "capacity", "capacity-tail"} {
+	for _, scenario := range []string{"gap", "overflow", "conflict", "legacy", "nan", "future-second", "oversized", "new-source", "late-joiner", "capacity", "capacity-tail"} {
 		t.Run(scenario, func(t *testing.T) {
 			re := require.New(t)
 			c, timeline := newWarmTimeline(1)
@@ -146,9 +146,6 @@ func TestRUTimelineUnavailable(t *testing.T) {
 			case "late-joiner":
 				// A first report trimmed to the next minute hides this one.
 				next = timelineReport(2, start+60, make([][2]float64, 6))
-			case "source-kind":
-				next = timelineReport(1, start+15, values[15:])
-				next.isBackground = true
 			case "capacity":
 				timeline.sourceCount = ruTimelineMaxSources
 				next = timelineReport(2, start, values)
@@ -171,6 +168,40 @@ func TestRUTimelineUnavailable(t *testing.T) {
 			re.Empty(families)
 		})
 	}
+}
+
+func TestRUTimelineIgnoresUntimedProducers(t *testing.T) {
+	re := require.New(t)
+	const start = testTimelineStart
+	c, timeline := newWarmTimeline(1)
+	timeline.record(timelineReport(1, start, make([][2]float64, 60)), time.Unix(start+65, 0))
+	// TiKV background tasks and TiFlash report aggregates without seconds;
+	// they are outside the peak and neither join nor withhold the group.
+	missing := testutil.ToFloat64(ruTimelineMissing)
+	for _, item := range []*consumptionItem{
+		{clientUniqueID: 7, resourceGroupName: "test", isBackground: true, Consumption: &rmpb.Consumption{RRU: 100}},
+		{clientUniqueID: 8, resourceGroupName: "test", isTiFlash: true, Consumption: &rmpb.Consumption{RRU: 100}},
+	} {
+		timeline.record(item, time.Unix(start+66, 0))
+	}
+	timeline.flush(time.Unix(start+90, 0))
+	re.Equal(missing, testutil.ToFloat64(ruTimelineMissing))
+	re.Len(timeline.groups[testTimelineKey].sources, 1)
+	re.Equal(start+60, c.results[testTimelineKey].summary.end)
+}
+
+func TestRUTimelineFlushLag(t *testing.T) {
+	re := require.New(t)
+	const start = testTimelineStart
+	c, timeline := newWarmTimeline(1)
+	// The flush lags until the oldest window it may still summarize, while
+	// the client clock runs four seconds ahead: its newest accepted second
+	// must not overwrite a second of that window.
+	timeline.record(timelineReport(1, start, make([][2]float64, 60)), time.Unix(start+65, 0))
+	timeline.record(timelineReport(1, start+60, make([][2]float64, 60)), time.Unix(start+125, 0))
+	timeline.record(timelineReport(1, start+120, make([][2]float64, 34)), time.Unix(start+149, 0))
+	timeline.flush(time.Unix(start+149, 0))
+	re.Equal(start+60, c.results[testTimelineKey].summary.end)
 }
 
 func TestRUTimelineToleratesClockSkew(t *testing.T) {
@@ -280,5 +311,7 @@ func TestRUTimelineSourceExpiry(t *testing.T) {
 	re.Len(timeline.groups[testTimelineKey].sources, 1)
 	// Windows overlapping the unknown tail are withheld until expiry; later
 	// windows are judged by the remaining source alone.
-	re.Equal(map[int64]bool{60: true, 360: true}, published)
+	// Client 2 last reported at start+65 and expires 90 seconds later, which
+	// withholds the windows ending at start+120 and start+180.
+	re.Equal(map[int64]bool{60: true, 240: true, 300: true, 360: true}, published)
 }

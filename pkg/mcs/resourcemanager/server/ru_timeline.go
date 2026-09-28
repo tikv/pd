@@ -24,16 +24,19 @@ import (
 )
 
 const (
-	// ruTimelineSeconds is the number of seconds each source can replay.
-	ruTimelineSeconds = 180
-	// ruTimelineClockSkew is how far, in seconds, a client clock may run ahead
-	// of the resource manager before its reported seconds are rejected.
-	ruTimelineClockSkew = 5
 	// ruWindowSeconds is the aligned window summarized from the timeline.
 	ruWindowSeconds = 60
 	// ruWindowDelay is how long a closed window waits for regular reports. It
 	// covers both the report interval and any lag of the client clock.
 	ruWindowDelay = 30
+	// ruTimelineSeconds is how long a second stays useful: its window is
+	// published at most a window plus the delay after the second closes. A
+	// source replays at most this many seconds, and a source silent for longer
+	// can no longer replay anything useful, so it is considered gone.
+	ruTimelineSeconds = ruWindowSeconds + ruWindowDelay
+	// ruTimelineClockSkew is how far, in seconds, a client clock may run ahead
+	// of the resource manager before its reported seconds are rejected.
+	ruTimelineClockSkew = 5
 	// ruTimelineMaxSources bounds the retained sources, which hold nearly all
 	// of the timeline's memory.
 	ruTimelineMaxSources = 10000
@@ -67,7 +70,7 @@ func newRUSummaryCollector() *ruSummaryCollector {
 	}
 	return &ruSummaryCollector{
 		results: make(map[trackerKey]publishedRUSummary),
-		peak:    desc("peak_per_second", "Maximum cluster net RRU+WRU in a natural second of the completed minute, in RU/s."),
+		peak:    desc("peak_per_second", "Maximum net foreground RRU+WRU that clients confirm in a natural second of the completed minute, summed across clients, in RU/s."),
 		peakAt:  desc("peak_second_timestamp_seconds", "Unix timestamp of the earliest second attaining the minute peak."),
 		rru:     desc("peak_rru_per_second", "RRU contribution in the second attaining the total minute peak."),
 		wru:     desc("peak_wru_per_second", "WRU contribution in the second attaining the total minute peak."),
@@ -111,24 +114,23 @@ var (
 
 func init() { prometheus.MustRegister(ruSummaryMetrics, ruTimelineQualityEvents) }
 
-type ruSourceKey struct {
-	client                  uint64
-	isBackground, isTiFlash bool
-}
-
 type ruSecondBucket struct {
 	second   int64
 	rru, wru float64
 }
 
+// ruSource holds the seconds one client replays for a group. Its buckets span
+// every second a flush may still summarize, from the start of the window
+// holding the replay horizon to the tolerated clock skew, so an accepted
+// second never overwrites one that is still needed.
 type ruSource struct {
-	buckets         [ruTimelineSeconds + 1]ruSecondBucket
+	buckets         [ruTimelineSeconds + ruWindowSeconds + ruTimelineClockSkew]ruSecondBucket
 	first, lastSeen int64
 }
 
 type ruTimelineGroup struct {
 	keyspaceName string
-	sources      map[ruSourceKey]*ruSource
+	sources      map[uint64]*ruSource
 	nextWindow   int64
 	invalid      map[int64]bool
 }
@@ -185,6 +187,11 @@ func (g *ruTimelineGroup) invalidate(start, end int64) {
 }
 
 func (t *ruTimeline) record(item *consumptionItem, now time.Time) {
+	// TiKV background tasks and TiFlash report RU without seconds; the peak
+	// covers the foreground RU that SQL-layer clients confirm by second.
+	if item.isBackground || item.isTiFlash {
+		return
+	}
 	sec := now.Unix()
 	if t.since == 0 || sec < t.since {
 		t.since = sec
@@ -192,7 +199,7 @@ func (t *ruTimeline) record(item *consumptionItem, now time.Time) {
 	key := trackerKey{item.keyspaceID, item.resourceGroupName}
 	g := t.groups[key]
 	if g == nil {
-		g = &ruTimelineGroup{keyspaceName: item.keyspaceName, sources: make(map[ruSourceKey]*ruSource), nextWindow: windowStart(sec), invalid: make(map[int64]bool)}
+		g = &ruTimelineGroup{keyspaceName: item.keyspaceName, sources: make(map[uint64]*ruSource), nextWindow: windowStart(sec), invalid: make(map[int64]bool)}
 		t.groups[key] = g
 		// A newly observed group cannot establish coverage before its first
 		// report. Early in a term, it also cannot know the sources that have
@@ -200,8 +207,7 @@ func (t *ruTimeline) record(item *consumptionItem, now time.Time) {
 		// have expired, as a source seen earlier would have.
 		g.invalidate(sec, max(sec, t.since+ruTimelineSeconds))
 	}
-	sourceKey := ruSourceKey{item.clientUniqueID, item.isBackground, item.isTiFlash}
-	source := g.sources[sourceKey]
+	source := g.sources[item.clientUniqueID]
 	created := source == nil
 	if created {
 		if t.sourceCount >= ruTimelineMaxSources {
@@ -212,13 +218,13 @@ func (t *ruTimeline) record(item *consumptionItem, now time.Time) {
 			return
 		}
 		source = &ruSource{first: sec}
-		g.sources[sourceKey] = source
+		g.sources[item.clientUniqueID] = source
 		t.sourceCount++
 	}
 	source.lastSeen = sec
 	payload := item.GetRuBySecond()
 	if payload == nil {
-		// A legacy or quarantined client cannot attribute its consumption.
+		// A legacy client cannot attribute its consumption.
 		ruTimelineMissing.Inc()
 		g.invalidate(sec-ruTimelineSeconds, sec)
 		return
