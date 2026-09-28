@@ -44,7 +44,6 @@ type ruWindowSummary struct {
 	end            int64
 	peak, rru, wru float64
 	peakAt         int64
-	available      bool
 }
 
 type publishedRUSummary struct {
@@ -52,12 +51,14 @@ type publishedRUSummary struct {
 	summary      ruWindowSummary
 }
 
-// ruSummaryCollector exposes immutable, explicitly timestamped window summaries.
-// Scrapes never advance windows, clear timelines, or perform aggregation.
+// ruSummaryCollector exposes the latest window of each group as immutable,
+// explicitly timestamped samples when it is complete; an incomplete window
+// leaves the group without samples. Scrapes never advance windows, clear
+// timelines, or perform aggregation.
 type ruSummaryCollector struct {
-	mu                                sync.RWMutex
-	results                           map[trackerKey]publishedRUSummary
-	peak, available, peakAt, rru, wru *prometheus.Desc
+	mu                     sync.RWMutex
+	results                map[trackerKey]publishedRUSummary
+	peak, peakAt, rru, wru *prometheus.Desc
 }
 
 func newRUSummaryCollector() *ruSummaryCollector {
@@ -65,18 +66,17 @@ func newRUSummaryCollector() *ruSummaryCollector {
 		return prometheus.NewDesc("resource_manager_resource_unit_"+name, help, []string{keyspaceNameLabel, newResourceGroupNameLabel}, nil)
 	}
 	return &ruSummaryCollector{
-		results:   make(map[trackerKey]publishedRUSummary),
-		peak:      desc("peak_per_second", "Maximum cluster net RRU+WRU in a natural second of the completed minute, in RU/s."),
-		available: desc("peak_available", "Whether the completed minute passed observed source coverage and known data quality checks."),
-		peakAt:    desc("peak_second_timestamp_seconds", "Unix timestamp of the earliest second attaining the minute peak."),
-		rru:       desc("peak_rru_per_second", "RRU contribution in the second attaining the total minute peak."),
-		wru:       desc("peak_wru_per_second", "WRU contribution in the second attaining the total minute peak."),
+		results: make(map[trackerKey]publishedRUSummary),
+		peak:    desc("peak_per_second", "Maximum cluster net RRU+WRU in a natural second of the completed minute, in RU/s."),
+		peakAt:  desc("peak_second_timestamp_seconds", "Unix timestamp of the earliest second attaining the minute peak."),
+		rru:     desc("peak_rru_per_second", "RRU contribution in the second attaining the total minute peak."),
+		wru:     desc("peak_wru_per_second", "WRU contribution in the second attaining the total minute peak."),
 	}
 }
 
 // Describe implements prometheus.Collector.
 func (c *ruSummaryCollector) Describe(ch chan<- *prometheus.Desc) {
-	for _, desc := range []*prometheus.Desc{c.peak, c.available, c.peakAt, c.rru, c.wru} {
+	for _, desc := range []*prometheus.Desc{c.peak, c.peakAt, c.rru, c.wru} {
 		ch <- desc
 	}
 }
@@ -89,11 +89,6 @@ func (c *ruSummaryCollector) Collect(ch chan<- prometheus.Metric) {
 		emit := func(desc *prometheus.Desc, value float64) {
 			ch <- prometheus.NewMetricWithTimestamp(time.Unix(p.summary.end, 0), prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, value, p.keyspaceName, key.groupName))
 		}
-		if !p.summary.available {
-			emit(c.available, 0)
-			continue
-		}
-		emit(c.available, 1)
 		emit(c.peak, p.summary.peak)
 		emit(c.peakAt, float64(p.summary.peakAt))
 		emit(c.rru, p.summary.rru)
@@ -139,7 +134,7 @@ type ruTimelineGroup struct {
 }
 
 // ruTimeline merges the RU timelines replayed by clients into
-// per-group timelines and publishes a summary for each closed window.
+// per-group timelines and publishes each closed window that is complete.
 // All state belongs to backgroundMetricsFlush. Only immutable summaries cross
 // into the scrape goroutines under the collector lock.
 // The resource manager clock only schedules windows, while values come from
@@ -276,11 +271,14 @@ func (t *ruTimeline) record(item *consumptionItem, now time.Time) {
 }
 
 // summarize sums every source by second and finds the busiest second of the
-// window beginning at start. Every observed source must cover the entire
-// window: new membership, legacy reports, crashes, and gaps all withhold it.
-func (g *ruTimelineGroup) summarize(start int64) ruWindowSummary {
+// window beginning at start. It reports false when the window cannot be shown
+// complete: it was invalidated, the group has no sources, an observed source
+// misses any of its seconds, or a total is not finite.
+func (g *ruTimelineGroup) summarize(start int64) (ruWindowSummary, bool) {
 	end := start + ruWindowSeconds
-	s := ruWindowSummary{end: end, peak: math.Inf(-1), peakAt: start, available: !g.invalid[start] && len(g.sources) > 0}
+	if g.invalid[start] || len(g.sources) == 0 {
+		return ruWindowSummary{}, false
+	}
 	var totals [ruWindowSeconds]ruSecondBucket
 	for _, source := range g.sources {
 		if source.first >= end {
@@ -289,23 +287,23 @@ func (g *ruTimelineGroup) summarize(start int64) ruWindowSummary {
 		for second := start; second < end; second++ {
 			b := source.buckets[second%int64(len(source.buckets))]
 			if b.second != second {
-				s.available = false
-				continue
+				return ruWindowSummary{}, false
 			}
 			totals[second-start].rru += b.rru
 			totals[second-start].wru += b.wru
 		}
 	}
+	s := ruWindowSummary{end: end, peak: math.Inf(-1)}
 	for i, b := range totals {
 		total := b.rru + b.wru
 		if math.IsNaN(total) || math.IsInf(total, 0) {
-			s.available = false
+			return ruWindowSummary{}, false
 		}
 		if total > s.peak {
 			s.peak, s.peakAt, s.rru, s.wru = total, start+int64(i), b.rru, b.wru
 		}
 	}
-	return s
+	return s, true
 }
 
 func (t *ruTimeline) flush(now time.Time) {
@@ -318,9 +316,14 @@ func (t *ruTimeline) flush(now time.Time) {
 			maps.DeleteFunc(g.invalid, func(w int64, _ bool) bool { return w < oldest })
 		}
 		for ; g.nextWindow+ruWindowSeconds+ruWindowDelay <= sec; g.nextWindow += ruWindowSeconds {
-			s := g.summarize(g.nextWindow)
+			s, ok := g.summarize(g.nextWindow)
 			t.collector.mu.Lock()
-			t.collector.results[key] = publishedRUSummary{keyspaceName: g.keyspaceName, summary: s}
+			if ok {
+				t.collector.results[key] = publishedRUSummary{keyspaceName: g.keyspaceName, summary: s}
+			} else {
+				// Exposing an older window again would repeat a stale timestamp.
+				delete(t.collector.results, key)
+			}
 			t.collector.mu.Unlock()
 			delete(g.invalid, g.nextWindow)
 		}

@@ -81,7 +81,7 @@ func TestRUTimelineMergesSources(t *testing.T) {
 		re.NotEqual(start+60, c.results[testTimelineKey].summary.end)
 		timeline.flush(time.Unix(start+90, 0))
 		got := c.results[testTimelineKey].summary
-		re.Equal(ruWindowSummary{end: start + 60, peak: 150, peakAt: start + 20, rru: 80, wru: 70, available: true}, got)
+		re.Equal(ruWindowSummary{end: start + 60, peak: 150, peakAt: start + 20, rru: 80, wru: 70}, got)
 
 		registry := prometheus.NewRegistry()
 		registry.MustRegister(c)
@@ -126,7 +126,7 @@ func TestRUTimelineUnavailable(t *testing.T) {
 				timeline.record(timelineReport(2, start-1, nil), time.Unix(start-1, 0))
 			}
 			timeline.record(report, time.Unix(start+65, 0))
-			// Each follow-up would leave the window available if it were ignored.
+			// Each follow-up would let the window be published if it were ignored.
 			var next *consumptionItem
 			switch scenario {
 			case "conflict":
@@ -165,12 +165,10 @@ func TestRUTimelineUnavailable(t *testing.T) {
 
 			registry := prometheus.NewRegistry()
 			registry.MustRegister(c)
+			// An incomplete window exposes no sample at all.
 			families, err := registry.Gather()
 			re.NoError(err)
-			re.Len(families, 1)
-			re.Equal("resource_manager_resource_unit_peak_available", families[0].GetName())
-			re.Zero(families[0].GetMetric()[0].GetGauge().GetValue())
-			re.Equal((start+60)*1000, families[0].GetMetric()[0].GetTimestampMs())
+			re.Empty(families)
 		})
 	}
 }
@@ -183,7 +181,7 @@ func TestRUTimelineToleratesClockSkew(t *testing.T) {
 	// resource manager's current second.
 	timeline.record(timelineReport(1, start, make([][2]float64, 66)), time.Unix(start+65, 0))
 	timeline.flush(time.Unix(start+90, 0))
-	re.True(c.results[testTimelineKey].summary.available)
+	re.Equal(start+60, c.results[testTimelineKey].summary.end)
 }
 
 func TestRUTimelineServerClockStep(t *testing.T) {
@@ -195,7 +193,7 @@ func TestRUTimelineServerClockStep(t *testing.T) {
 	timeline.record(timelineReport(1, start, values), time.Unix(start+65, 0))
 	timeline.flush(time.Unix(start+90, 0))
 	published := c.results[testTimelineKey].summary
-	re.True(published.available)
+	re.Equal(start+60, published.end)
 
 	// After a backward step, the published window stays put, and seconds from
 	// the client's future are rejected rather than merged early.
@@ -205,7 +203,7 @@ func TestRUTimelineServerClockStep(t *testing.T) {
 	// Once the clock catches up, later windows are published without a reset.
 	timeline.record(timelineReport(1, start+60, make([][2]float64, 60)), time.Unix(start+125, 0))
 	timeline.flush(time.Unix(start+150, 0))
-	re.Equal(ruWindowSummary{end: start + 120, peakAt: start + 60, available: true}, c.results[testTimelineKey].summary)
+	re.Equal(ruWindowSummary{end: start + 120, peakAt: start + 60}, c.results[testTimelineKey].summary)
 
 	// After a forward step, a new source only withholds the windows it could
 	// replay, however far the clock jumped.
@@ -238,7 +236,11 @@ func TestRUTimelineResetWarmup(t *testing.T) {
 	for w := start + 120; w <= start+360; w += ruWindowSeconds {
 		timeline.record(timelineReport(1, w, make([][2]float64, 60)), time.Unix(w+65, 0))
 		timeline.flush(time.Unix(w+90, 0))
-		re.Equal(ruWindowSummary{end: w + 60, peakAt: w, available: w > start+ruTimelineSeconds+120}, c.results[testTimelineKey].summary)
+		if w <= start+ruTimelineSeconds+120 {
+			re.Empty(c.results)
+		} else {
+			re.Equal(ruWindowSummary{end: w + 60, peakAt: w}, c.results[testTimelineKey].summary)
+		}
 	}
 }
 
@@ -248,8 +250,7 @@ func TestRUTimelineIdleAndRetention(t *testing.T) {
 	c, timeline := newWarmTimeline(1)
 	timeline.record(timelineReport(1, start, make([][2]float64, 60)), time.Unix(start+65, 0))
 	timeline.flush(time.Unix(start+90, 0))
-	re.True(c.results[testTimelineKey].summary.available)
-	re.Zero(c.results[testTimelineKey].summary.peak)
+	re.Equal(ruWindowSummary{end: start + 60, peakAt: start}, c.results[testTimelineKey].summary)
 	timeline.flush(time.Unix(start+600, 0))
 	re.Empty(timeline.groups)
 	re.Zero(timeline.sourceCount)
@@ -271,11 +272,13 @@ func TestRUTimelineSourceExpiry(t *testing.T) {
 		}
 		timeline.flush(time.Unix(now, 0))
 		if s, ok := c.results[testTimelineKey]; ok {
-			published[s.summary.end-start] = s.summary.available
+			// Only the latest window is exposed, never an older one.
+			re.Equal(timeline.groups[testTimelineKey].nextWindow, s.summary.end)
+			published[s.summary.end-start] = true
 		}
 	}
 	re.Len(timeline.groups[testTimelineKey].sources, 1)
 	// Windows overlapping the unknown tail are withheld until expiry; later
 	// windows are judged by the remaining source alone.
-	re.Equal(map[int64]bool{0: false, 60: true, 120: false, 180: false, 240: false, 300: false, 360: true}, published)
+	re.Equal(map[int64]bool{60: true, 360: true}, published)
 }
