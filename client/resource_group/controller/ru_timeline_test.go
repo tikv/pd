@@ -235,8 +235,11 @@ func TestTombstoneSharesDefaultRUTimeline(t *testing.T) {
 	_, wru := timelineTotals(defaultGC)
 	re.Positive(wru)
 
-	// The idle default controller is kept while the tombstone reports through it.
+	// The idle default controller is kept while an active tombstone reports
+	// through it.
 	for range 3 {
+		_, _, _, _, err = c.OnRequestWait(ctx, "test-group", NewTestRequestInfo(true, 1, 1, AccessUnknown))
+		re.NoError(err)
 		c.cleanUpResourceGroup()
 	}
 	current, ok := c.loadGroupController(defaultResourceGroupName)
