@@ -16,6 +16,7 @@ package gc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -328,7 +329,7 @@ func (c *enabledKeyspaceCache) watch(nextRevision int64) error {
 			}
 		case resp, ok := <-watchCh:
 			if !ok {
-				return fmt.Errorf("keyspace metadata watch closed")
+				return errors.New("keyspace metadata watch closed")
 			}
 			if err := resp.Err(); err != nil {
 				return err

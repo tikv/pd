@@ -16,7 +16,6 @@ package gc
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net"
 	"sync"
@@ -111,7 +110,7 @@ func putEnabledKeyspaceTestMeta(t *testing.T, client *clientv3.Client, id uint32
 	return resp.Header.Revision
 }
 
-func startEnabledKeyspaceTestCache(t *testing.T, client *clientv3.Client) (*enabledKeyspaceCache, <-chan struct{}) {
+func startEnabledKeyspaceTestCache(t *testing.T, client *clientv3.Client) *enabledKeyspaceCache {
 	t.Helper()
 	termCtx, cancel := context.WithCancel(context.Background())
 	cache := newEnabledKeyspaceCache(termCtx, client, enabledKeyspaceTestPrefix)
@@ -128,13 +127,13 @@ func startEnabledKeyspaceTestCache(t *testing.T, client *clientv3.Client) (*enab
 			t.Error("cache did not stop after term cancellation")
 		}
 	})
-	return cache, done
+	return cache
 }
 
 func TestEnabledKeyspaceCacheEmptySnapshotAndProgress(t *testing.T) {
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	t.Cleanup(clean)
-	cache, _ := startEnabledKeyspaceTestCache(t, client)
+	cache := startEnabledKeyspaceTestCache(t, client)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -158,7 +157,7 @@ func TestEnabledKeyspaceCacheAppliesMetadataChanges(t *testing.T) {
 	putEnabledKeyspaceTestMeta(t, client, 3, keyspacepb.KeyspaceState_ENABLED, keyspace.KeyspaceLevelGC)
 	putEnabledKeyspaceTestMeta(t, client, 2, keyspacepb.KeyspaceState_DISABLED, keyspace.UnifiedGC)
 	putEnabledKeyspaceTestMeta(t, client, 1, keyspacepb.KeyspaceState_ENABLED, keyspace.UnifiedGC)
-	cache, _ := startEnabledKeyspaceTestCache(t, client)
+	cache := startEnabledKeyspaceTestCache(t, client)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -200,7 +199,6 @@ func TestEnabledKeyspaceCacheLoadsAllPagesAtOneRevision(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	ops := make([]clientv3.Op, 0, enabledKeyspacePageSize+1)
-	var revision int64
 	for id := uint32(1); id <= enabledKeyspacePageSize+1; id++ {
 		value, err := proto.Marshal(&keyspacepb.KeyspaceMeta{
 			Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: id},
@@ -210,15 +208,14 @@ func TestEnabledKeyspaceCacheLoadsAllPagesAtOneRevision(t *testing.T) {
 		require.NoError(t, err)
 		ops = append(ops, clientv3.OpPut(fmt.Sprintf("%s%08d", enabledKeyspaceTestPrefix, id), string(value)))
 		if len(ops) == 100 {
-			resp, err := client.Txn(ctx).Then(ops...).Commit()
+			_, err := client.Txn(ctx).Then(ops...).Commit()
 			require.NoError(t, err)
-			revision = resp.Header.Revision
 			ops = ops[:0]
 		}
 	}
 	resp, err := client.Txn(ctx).Then(ops...).Commit()
 	require.NoError(t, err)
-	revision = resp.Header.Revision
+	revision := resp.Header.Revision
 	firstPage := make(chan int64, 1)
 	releasePage := make(chan struct{})
 	clientWithPause := *client
@@ -279,7 +276,7 @@ func TestEnabledKeyspaceCacheRejectsMalformedMetadataUntilReload(t *testing.T) {
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	t.Cleanup(clean)
 	initial := putEnabledKeyspaceTestMeta(t, client, 1, keyspacepb.KeyspaceState_ENABLED, keyspace.KeyspaceLevelGC)
-	cache, _ := startEnabledKeyspaceTestCache(t, client)
+	cache := startEnabledKeyspaceTestCache(t, client)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	require.NoError(t, cache.waitReady(ctx))
@@ -380,7 +377,7 @@ func TestEnabledKeyspaceCacheTermCancellationUnblocksWaiters(t *testing.T) {
 	cancel()
 	select {
 	case err := <-waitResult:
-		require.True(t, errors.Is(err, context.Canceled), "waiting snapshot error: %v", err)
+		require.ErrorIs(t, err, context.Canceled, "waiting snapshot error: %v", err)
 	case <-ctx.Done():
 		t.Fatal("snapshot did not stop after term cancellation")
 	}
