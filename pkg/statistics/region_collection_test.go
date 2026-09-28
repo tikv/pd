@@ -332,8 +332,9 @@ func TestRegionLabelIsolationCaseInsensitive(t *testing.T) {
 		level int
 	}{
 		{"distinct-dotted-i", [][]string{{"z1", "r1", "İ"}, {"z1", "r1", "i"}, {"z1", "r1", "b"}}, "host", 2},
-		{"unicode-fold", [][]string{{"z1", "r1", "Σ"}, {"z1", "r1", "ς"}, {"z1", "r1", "σ"}}, nonIsolation, -1},
-		{"unicode-long-s", [][]string{{"z1", "r1", "S"}, {"z1", "r1", "ſ"}, {"z1", "r1", "s"}}, nonIsolation, -1},
+		{"distinct-dotless-i", [][]string{{"z1", "r1", "ı"}, {"z1", "r1", "i"}, {"z1", "r1", "b"}}, "host", 2},
+		{"unicode-fold", [][]string{{"z1", "r1", "ς"}, {"z1", "r1", "σ"}, {"z1", "r1", "b"}}, nonIsolation, -1},
+		{"unicode-long-s", [][]string{{"z1", "r1", "ſ"}, {"z1", "r1", "s"}, {"z1", "r1", "b"}}, nonIsolation, -1},
 		{"distinct-unicode-values", [][]string{{"z1", "r1", "ß"}, {"z1", "r1", "ss"}, {"z1", "r1", "b"}}, "host", 2},
 		{"host", [][]string{{"z1", "r1", "A"}, {"z1", "r1", "a"}, {"z1", "r1", "B"}}, nonIsolation, -1},
 		{"rack", [][]string{{"z1", "R1", "h1"}, {"z1", "r1", "h2"}, {"z1", "r2", "h3"}}, "host", 2},
