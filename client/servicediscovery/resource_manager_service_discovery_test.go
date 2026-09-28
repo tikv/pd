@@ -70,6 +70,42 @@ func (c *countingMetaStorageClient) snapshotCallTimes() []time.Time {
 
 var _ metastorage.Client = (*countingMetaStorageClient)(nil)
 
+func TestResourceManagerDiscoveryNotifiesOnlyOnURLChange(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	var notifications int
+	discovery := NewResourceManagerDiscovery(ctx, 1, nil, nil, opt.NewOption(), func(string) error {
+		notifications++
+		return nil
+	})
+	t.Cleanup(discovery.Close)
+
+	for _, tc := range []struct {
+		name              string
+		url               string
+		wantNotifications int
+	}{
+		{name: "initial PD fallback"},
+		{name: "unchanged PD fallback"},
+		{name: "switch to standalone", url: "http://127.0.0.1:1234", wantNotifications: 1},
+		{name: "unchanged standalone", url: "http://127.0.0.1:1234", wantNotifications: 1},
+		{name: "switch back to PD fallback", wantNotifications: 2},
+		{name: "unchanged PD fallback after switch", wantNotifications: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			discovery.resetConn(tc.url)
+			require.Equal(t, tc.wantNotifications, notifications)
+			require.Equal(t, tc.url, discovery.GetServiceURL())
+			if tc.url == "" {
+				require.Nil(t, discovery.GetConn())
+			} else {
+				require.NotNil(t, discovery.GetConn())
+			}
+		})
+	}
+}
+
 func TestResourceManagerServiceURLUpdateBackoff(t *testing.T) {
 	oldRetryInterval := serviceURLRetryInterval
 	serviceURLRetryInterval = 50 * time.Millisecond

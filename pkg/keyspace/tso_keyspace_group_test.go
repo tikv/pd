@@ -1237,7 +1237,7 @@ func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupAggregatesMetaS
 	re := suite.Require()
 	store, ok := suite.kg.store.(*endpoint.StorageEndpoint)
 	re.True(ok)
-	mgm := NewMetaServiceGroupManager(store, map[string]string{"meta-group-1": "127.0.0.1:12379"})
+	mgm := NewMetaServiceGroupManager(store, map[string]string{"meta-group-1": "127.0.0.1:12379"}, nil)
 	enabled := true
 	re.NoError(mgm.PatchStatus(suite.ctx, "meta-group-1", &MetaServiceGroupStatusPatch{Enabled: &enabled}))
 	suite.kg.mgm = mgm
@@ -1272,7 +1272,7 @@ func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupDoesNotDoubleDe
 	re := suite.Require()
 	store, ok := suite.kg.store.(*endpoint.StorageEndpoint)
 	re.True(ok)
-	mgm := NewMetaServiceGroupManager(store, map[string]string{"meta-group-1": "127.0.0.1:12379"})
+	mgm := NewMetaServiceGroupManager(store, map[string]string{"meta-group-1": "127.0.0.1:12379"}, nil)
 	enabled := true
 	re.NoError(mgm.PatchStatus(suite.ctx, "meta-group-1", &MetaServiceGroupStatusPatch{Enabled: &enabled}))
 	suite.kg.mgm = mgm
