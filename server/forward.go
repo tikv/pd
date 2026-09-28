@@ -628,3 +628,124 @@ func (s *GrpcServer) getTSOForwardStream(forwardedHost string) (*streamWrapper, 
 	s.tsoClientPool.clients[forwardedHost] = forwardStream
 	return forwardStream, nil
 }
+
+// forwardWatchGCStates keeps one subscription to the requested leader. A failed
+// stream is returned to the caller, which must rediscover the leader and reload
+// initial state when reconnecting.
+func (s *GrpcServer) forwardWatchGCStates(request *pdpb.WatchGCStatesRequest, stream pdpb.PD_WatchGCStatesServer, forwardedHost string) error {
+	ctx, cancel := context.WithCancel(grpcutil.ResetForwardContext(stream.Context()))
+	defer cancel()
+	// Close cancels the server loop before tearing down transports. The root
+	// server context can outlive Close, so it is not sufficient here.
+	stop := context.AfterFunc(s.serverLoopCtx, cancel)
+	defer stop()
+
+	client, err := s.getDelegateClient(ctx, forwardedHost)
+	if err != nil {
+		return err
+	}
+	upstream, err := pdpb.NewPDClient(client).WatchGCStates(ctx, request)
+	if err != nil {
+		return err
+	}
+
+	// Absorb short bursts, then propagate backpressure to the leader. Initial
+	// loading is finite and must not fail just because the downstream is slower.
+	const maxPendingResponses = 64
+	responses := make(chan *pdpb.WatchGCStatesResponse, maxPendingResponses)
+	recvResult := make(chan error, 1)
+	go func() {
+		defer logutil.LogPanic()
+		defer close(responses)
+		for {
+			response, err := upstream.Recv()
+			if err != nil {
+				recvResult <- err
+				return
+			}
+			select {
+			case <-ctx.Done():
+				recvResult <- status.FromContextError(ctx.Err()).Err()
+				return
+			case responses <- response:
+			default:
+				failpoint.InjectCall("watchGCStatesForwardQueueFull")
+				select {
+				case <-ctx.Done():
+					recvResult <- status.FromContextError(ctx.Err()).Err()
+					return
+				case responses <- response:
+				}
+			}
+		}
+	}()
+
+	sendState := make(chan bool)
+	sendResult := make(chan error, 1)
+	go func() {
+		defer logutil.LogPanic()
+		for response := range responses {
+			select {
+			case <-ctx.Done():
+				return
+			case sendState <- true:
+			}
+			if err := stream.Send(response); err != nil {
+				sendResult <- err
+				return
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case sendState <- false:
+			}
+		}
+		sendResult <- nil
+	}()
+
+	// Do not join the sender: returning from the handler lets gRPC tear down
+	// the downstream transport and unblock Send. cancel releases the upstream
+	// subscription and the receiver on every exit path.
+	// When the queue is full, Recv cannot discover upstream termination until
+	// sending progresses. Bound each blocked Send, including after a clean EOF,
+	// without imposing a deadline on initial loading or a healthy idle watch.
+	sendTimeout := 30 * time.Second
+	failpoint.InjectCall("watchGCStatesForwardSendTimeout", &sendTimeout)
+	sendTimer := time.NewTimer(sendTimeout)
+	sendTimer.Stop()
+	defer sendTimer.Stop()
+	var sendTimeoutCh <-chan time.Time
+	for {
+		select {
+		case <-ctx.Done():
+			return status.FromContextError(ctx.Err()).Err()
+		case sending := <-sendState:
+			if sending {
+				sendTimer.Reset(sendTimeout)
+				sendTimeoutCh = sendTimer.C
+			} else {
+				sendTimer.Stop()
+				sendTimeoutCh = nil
+			}
+		case <-sendTimeoutCh:
+			return status.Error(codes.ResourceExhausted, errs.ErrGCStateWatcherSlowConsumer.Error())
+		case err := <-recvResult:
+			if err != io.EOF {
+				return err
+			}
+			// On a clean EOF, finish forwarding all responses before returning.
+			recvResult = nil
+		case err := <-sendResult:
+			if err != nil {
+				return err
+			}
+			// The receiver closes responses after publishing its terminal result.
+			if recvResult != nil {
+				if err := <-recvResult; err != io.EOF {
+					return err
+				}
+			}
+			return nil
+		}
+	}
+}

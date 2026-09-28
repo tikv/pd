@@ -23,6 +23,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/failpoint"
@@ -198,15 +199,18 @@ type GCStateManager struct {
 
 	// A read/write - update cache procedure must be done while holding the outer mutex `GCStateManager.mu`.
 	// A read-only operation can be done on gcStateCache directly without locking `GCStateManager.mu`.
-	gcStateCache *gcStateCache
+	gcStateCache           *gcStateCache
+	etcdClient             *clientv3.Client
+	enabledKeyspaces       *enabledKeyspaceCache
+	cancelEnabledKeyspaces context.CancelFunc
 
 	allKeyspacesGCStatesSingleFlight                  *syncutil.OrderedSingleFlight[map[uint32]GCState]
 	allKeyspacesGCStatesExcludeGCBarriersSingleFlight *syncutil.OrderedSingleFlight[map[uint32]GCState]
 
-	// Note that nodeLeadership is a counter instead of a bool. Theoretically, it's possible that an
-	// OnNodeBecomesFollower invocation of the previous lease is later than the OnNodeBecomesLeader call of the new
-	// lease during PD leader changes. Making this a counter helps in guaranteeing the eventual consistency.
-	nodeLeadership atomic.Int32
+	watchers                   map[uint64]*GCStateWatcher
+	nextWatcherID              uint64
+	nextLeadershipGeneration   uint64
+	activeLeadershipGeneration atomic.Uint64
 }
 
 // NewGCStateManager creates a GCStateManager of GC and services.
@@ -216,6 +220,7 @@ func NewGCStateManager(store endpoint.GCStateProvider, cfg config.PDServerConfig
 		cfg:                              cfg,
 		keyspaceManager:                  keyspaceManager,
 		gcStateCache:                     newGCStateCache(),
+		watchers:                         make(map[uint64]*GCStateWatcher),
 		allKeyspacesGCStatesSingleFlight: syncutil.NewOrderedSingleFlight[map[uint32]GCState](),
 		allKeyspacesGCStatesExcludeGCBarriersSingleFlight: syncutil.NewOrderedSingleFlight[map[uint32]GCState](),
 	}
@@ -224,6 +229,14 @@ func NewGCStateManager(store endpoint.GCStateProvider, cfg config.PDServerConfig
 		keyspaceManager.SetGCBarrierInvalidator(m.barrierMetrics.invalidateKeyspaceMetrics)
 	}
 	return m
+}
+
+// SetEtcdClient supplies the client used by the leader-local keyspace index.
+// It must be called before the manager's first leadership generation starts.
+func (m *GCStateManager) SetEtcdClient(client *clientv3.Client) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.etcdClient = client
 }
 
 type keyspaceNameKeyType struct{}
@@ -244,37 +257,57 @@ func getKeyspaceNameFromCtx(ctx context.Context) string {
 	return "<unknown>"
 }
 
-// OnNodeBecomesLeader marks the current PD node as leader for GC state watches.
-func (m *GCStateManager) OnNodeBecomesLeader() {
+// OnNodeBecomesLeader starts a local leadership generation and returns its teardown function.
+func (m *GCStateManager) OnNodeBecomesLeader() func() {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	m.nodeLeadership.Add(1)
-
-	// Also trigger cache invalidation even when transitioning from follower to leader, as a protection against
-	// potential inconsistent cache state left from the last leadership.
+	// Disable lock-free cache reads throughout the reset, including when
+	// replacing an active leadership generation.
+	m.activeLeadershipGeneration.Store(0)
+	if m.cancelEnabledKeyspaces != nil {
+		m.cancelEnabledKeyspaces()
+	}
+	m.nextLeadershipGeneration++
+	generation := m.nextLeadershipGeneration
+	m.terminateAllGCStateWatchersLocked(errs.ErrNotLeader, watcherTerminationLeaderLost)
+	failpoint.InjectCall("beforeLeaderGCStateCacheReset")
 	m.gcStateCache.clearAll()
+	m.enabledKeyspaces = nil
+	m.cancelEnabledKeyspaces = nil
+	if m.etcdClient != nil {
+		termCtx, cancel := context.WithCancel(context.Background())
+		m.cancelEnabledKeyspaces = cancel
+		m.enabledKeyspaces = newEnabledKeyspaceCache(termCtx, m.etcdClient, keypath.KeyspaceMetaPrefix())
+	}
+	enabledKeyspaces := m.enabledKeyspaces
 	m.barrierMetrics.clearMetrics()
 	productionBarrierMetrics.current.Store(m.barrierMetrics)
-}
+	m.activeLeadershipGeneration.Store(generation)
+	m.mu.Unlock()
+	if enabledKeyspaces != nil {
+		go enabledKeyspaces.run()
+	}
 
-// OnNodeBecomesFollower marks the current PD node as follower and closes all existing GC state watches.
-func (m *GCStateManager) OnNodeBecomesFollower() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	m.nodeLeadership.Add(-1)
-
-	// Invalidate the cache.
-	m.gcStateCache.clearAll()
-	m.barrierMetrics.clearMetrics()
-	if !m.nodeIsLeader() {
+	return func() {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		if m.activeLeadershipGeneration.Load() != generation {
+			return
+		}
+		m.activeLeadershipGeneration.Store(0)
+		if m.cancelEnabledKeyspaces != nil {
+			m.cancelEnabledKeyspaces()
+			m.cancelEnabledKeyspaces = nil
+			m.enabledKeyspaces = nil
+		}
+		m.terminateAllGCStateWatchersLocked(errs.ErrNotLeader, watcherTerminationLeaderLost)
+		m.gcStateCache.clearAll()
+		m.barrierMetrics.clearMetrics()
 		productionBarrierMetrics.current.CompareAndSwap(m.barrierMetrics, nil)
 	}
 }
 
 func (m *GCStateManager) nodeIsLeader() bool {
-	return m.nodeLeadership.Load() > 0
+	return m.activeLeadershipGeneration.Load() != 0
 }
 
 // redirectKeyspace checks the given keyspaceID, and returns the actual keyspaceID to operate on.
@@ -406,6 +439,14 @@ func (m *GCStateManager) advanceGCSafePointImpl(ctx context.Context, keyspaceID 
 		TxnSafePoint: txnSafePoint,
 		GCSafePoint:  newGCSafePoint,
 	})
+	if newGCSafePoint != oldGCSafePoint {
+		m.publishGCStateChangeLocked(NewGCStateUpsert(GCState{
+			KeyspaceID:      keyspaceID,
+			IsKeyspaceLevel: keyspaceID != constant.NullKeyspaceID,
+			TxnSafePoint:    txnSafePoint,
+			GCSafePoint:     newGCSafePoint,
+		}))
+	}
 
 	if newGCSafePoint != oldGCSafePoint {
 		log.Info("advanced GC safe point",
@@ -593,6 +634,14 @@ func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID
 		TxnSafePoint: newTxnSafePoint,
 		GCSafePoint:  gcSafePoint,
 	})
+	if newTxnSafePoint != oldTxnSafePoint {
+		m.publishGCStateChangeLocked(NewGCStateUpsert(GCState{
+			KeyspaceID:      keyspaceID,
+			IsKeyspaceLevel: keyspaceID != constant.NullKeyspaceID,
+			TxnSafePoint:    newTxnSafePoint,
+			GCSafePoint:     gcSafePoint,
+		}))
+	}
 
 	blockerDesc := ""
 	simulatedServiceID := ""
