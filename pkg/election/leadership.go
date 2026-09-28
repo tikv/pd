@@ -69,12 +69,13 @@ type Leadership struct {
 	leaderKey   string
 	leaderValue atomic.Value // stored as string
 
-	// mu protects keepAliveCancelFunc and serializes the publish of a new
-	// leadership (Campaign/Keep) against a Reset that captures the current
-	// lease to close. The lease and leaderValue fields themselves are
-	// atomics, so getters stay lock-free. Never hold mu while closing a
-	// lease, which can block on etcd.
+	// mu protects resetting and keepAliveCancelFunc and serializes the publish
+	// of a new leadership (Campaign/Keep) against a Reset that captures the
+	// current lease to close. The lease and leaderValue fields themselves are
+	// atomics, so getters stay lock-free. Never hold mu while closing a lease,
+	// which can block on etcd.
 	mu                  syncutil.Mutex
+	resetting           bool
 	keepAliveCancelFunc context.CancelFunc
 	// campaignTimes is used to record the campaign times of the leader within `campaignTimesRecordTimeout`.
 	// It is ordered by time to prevent the leader from campaigning too frequently.
@@ -112,6 +113,7 @@ func (ls *Leadership) SetLease(lease *Lease) {
 		return
 	}
 	ls.mu.Lock()
+	ls.resetting = false
 	ls.lease.Store(lease)
 	ls.mu.Unlock()
 }
@@ -183,6 +185,7 @@ func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...cl
 	// Create a new lease to campaign
 	newLease := NewLease(ls.client, ls.purpose, ls.name)
 	ls.mu.Lock()
+	ls.resetting = false
 	ls.leaderValue.Store(leaderData)
 	ls.lease.Store(newLease)
 	ls.mu.Unlock()
@@ -231,6 +234,10 @@ func (ls *Leadership) Keep(ctx context.Context) {
 		return
 	}
 	ls.mu.Lock()
+	if ls.resetting {
+		ls.mu.Unlock()
+		return
+	}
 	keepAliveCtx, cancel := context.WithCancel(ctx)
 	ls.keepAliveCancelFunc = cancel
 	lease := ls.GetLease()
@@ -445,6 +452,7 @@ func (ls *Leadership) Reset() {
 		ls.mu.Unlock()
 		return
 	}
+	ls.resetting = true
 	if ls.keepAliveCancelFunc != nil {
 		ls.keepAliveCancelFunc()
 		ls.keepAliveCancelFunc = nil

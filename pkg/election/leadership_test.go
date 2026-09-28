@@ -185,6 +185,71 @@ func TestResetDoesNotClearNewLeadership(t *testing.T) {
 	}
 }
 
+func TestKeepDoesNotRestartLeaseDuringReset(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	t.Cleanup(clean)
+	leadership := NewLeadership(client, "/test_leader", "test_leader", "test_leader")
+	t.Cleanup(leadership.Reset)
+	re.NoError(leadership.Campaign(10, "leader"))
+	leadership.Keep(t.Context())
+	oldLease := leadership.GetLease()
+
+	const hook = "github.com/tikv/pd/pkg/election/beforeRevokeLease"
+	reached := make(chan struct{})
+	release := make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
+	re.NoError(failpoint.EnableCall(hook, func(lease *Lease) {
+		if lease == oldLease {
+			close(reached)
+			<-release
+		}
+	}))
+	t.Cleanup(func() {
+		unblock()
+		re.NoError(failpoint.Disable(hook))
+	})
+
+	resetDone := make(chan struct{})
+	go func() {
+		leadership.Reset()
+		close(resetDone)
+	}()
+	select {
+	case <-reached:
+	case <-time.After(10 * time.Second):
+		t.Fatal("leadership reset did not reach the expected checkpoint")
+	}
+
+	// Keep can race with an external resignation after Campaign returns. It must
+	// not restart keepalive for the lease that Reset is already closing.
+	leadership.Keep(t.Context())
+	leadership.mu.Lock()
+	resetting := leadership.resetting
+	keepAliveCancelFunc := leadership.keepAliveCancelFunc
+	leadership.mu.Unlock()
+	re.True(resetting)
+	re.Nil(keepAliveCancelFunc)
+
+	unblock()
+	select {
+	case <-resetDone:
+	case <-time.After(10 * time.Second):
+		t.Fatal("leadership reset did not finish")
+	}
+
+	// Publishing a replacement lease clears the reset state, so its keepalive
+	// can start normally.
+	re.NoError(leadership.Campaign(10, "new_leader"))
+	leadership.Keep(t.Context())
+	leadership.mu.Lock()
+	resetting = leadership.resetting
+	keepAliveCancelFunc = leadership.keepAliveCancelFunc
+	leadership.mu.Unlock()
+	re.False(resetting)
+	re.NotNil(keepAliveCancelFunc)
+}
+
 func TestDeleteLeaderKeyByRevisionDoesNotDeleteChangedLeader(t *testing.T) {
 	re := require.New(t)
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
