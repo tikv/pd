@@ -920,11 +920,9 @@ func (gc *groupCostController) addRUConsumption(consumption *rmpb.Consumption) {
 	gc.mu.Lock()
 	add(gc.mu.consumption, consumption)
 	gc.mu.Unlock()
-	// ReportConsumption currently receives query-wide TiFlash aggregates.
-	// Preserve token/counter behavior, but do not attribute them to a second.
-	if consumption.RRU != 0 || consumption.WRU != 0 {
-		gc.ruTimeline.invalidate()
-	}
+	// ReportConsumption carries consumption measured after a query finishes,
+	// such as TiFlash MPP cost. It has no seconds, so it counts toward tokens
+	// and counters but stays out of the RU timeline.
 }
 
 func (gc *groupCostController) addRUV2Consumption(tikvRUV2, tidbRUV2, tiflashRUV2 float64) {

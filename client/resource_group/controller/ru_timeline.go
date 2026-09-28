@@ -23,7 +23,9 @@ import (
 
 const (
 	// ruTimelineSeconds is the number of closed seconds retained and replayed.
-	ruTimelineSeconds = 180
+	// The resource manager publishes a minute 30 seconds after it ends, so a
+	// second is useless once it is 90 seconds old.
+	ruTimelineSeconds = 90
 	// ruTimelineBucketsPerRPC bounds the RU timeline payload of one token RPC
 	// to about 2 MiB, so that seconds accumulated during an outage never push
 	// token requests past the server's message size limit.
@@ -41,18 +43,18 @@ type ruSecondBucket struct {
 // Each report carries the closed seconds that the resource manager has not
 // acknowledged, bounded by the retained window. A failed report is resent
 // from the same second and the receiver deduplicates the overlap.
-// Both recording and snapshotting advance the clock, so a clock rollback
-// quarantines the timeline before a previously closed second can be changed.
-// A full retained window is quarantined after a clock rollback or an untimed
-// external aggregate: neither can be attributed to natural seconds. A forward
-// step only relabels later seconds, like clock skew between clients.
+// Both recording and snapshotting advance the clock. After a clock rollback,
+// nothing is reported until the clock passes the latest second observed
+// before it, so a second that may already have been reported is never changed;
+// the skipped seconds are never reported and their minutes are withheld. A forward step only relabels later seconds, like clock skew
+// between clients.
 // Methods read the clock while holding mu, so concurrent callers cannot
 // present seconds out of order and be mistaken for a clock rollback.
 type ruTimeline struct {
 	mu      sync.Mutex
 	buckets [ruTimelineSeconds + 1]ruSecondBucket
-	// start is the first second the timeline can attest to. It moves into the
-	// future while the timeline is quarantined.
+	// start is the first second the timeline can attest to. It moves past the
+	// latest observed second after a clock rollback.
 	start int64
 	// acked is the first second the resource manager has not acknowledged.
 	acked int64
@@ -67,20 +69,9 @@ func newRUTimeline(now time.Time) *ruTimeline {
 func (t *ruTimeline) advanceLocked(now time.Time) {
 	second := now.Unix()
 	if second < t.last {
-		t.invalidateLocked(now)
+		t.start = max(t.start, t.last+1)
 	}
 	t.last = second
-}
-
-func (t *ruTimeline) invalidate() {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.invalidateLocked(time.Now())
-}
-
-func (t *ruTimeline) invalidateLocked(now time.Time) {
-	t.start = max(t.start, now.Unix()+ruTimelineSeconds)
-	t.buckets = [ruTimelineSeconds + 1]ruSecondBucket{}
 }
 
 func (t *ruTimeline) record(rru, wru float64) {
@@ -92,9 +83,6 @@ func (t *ruTimeline) record(rru, wru float64) {
 func (t *ruTimeline) recordLocked(now time.Time, rru, wru float64) {
 	t.advanceLocked(now)
 	second := now.Unix()
-	if second < t.start {
-		return
-	}
 	bucket := &t.buckets[second%int64(len(t.buckets))]
 	if bucket.second != second {
 		*bucket = ruSecondBucket{second: second}
@@ -111,8 +99,8 @@ func (t *ruTimeline) ack(end int64) {
 }
 
 // snapshot copies the unacknowledged closed seconds, filling idle seconds
-// with zero. It returns nil while the timeline is quarantined, and after a
-// clock rollback until the clock passes the acknowledged seconds again.
+// with zero. After a clock rollback it reports no seconds until the clock
+// passes the seconds it can no longer attest to.
 func (t *ruTimeline) snapshot() *rmpb.RUConsumptionBySecond {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -124,7 +112,7 @@ func (t *ruTimeline) snapshotLocked(now time.Time) *rmpb.RUConsumptionBySecond {
 	end := now.Unix()
 	start := max(t.start, end-ruTimelineSeconds, t.acked)
 	if end < start {
-		return nil
+		return &rmpb.RUConsumptionBySecond{StartUnixSec: end}
 	}
 	values := make([]rmpb.RUConsumptionBucket, end-start)
 	buckets := make([]*rmpb.RUConsumptionBucket, len(values))

@@ -49,17 +49,22 @@ func TestRUTimeline(t *testing.T) {
 
 	// Only the retained window is replayed, and a reused slot never replays
 	// the second it held before.
-	tl.recordLocked(time.Unix(start+181, 0), 7, 8)
-	latest := tl.snapshotLocked(time.Unix(start+183, 0))
+	tl.recordLocked(time.Unix(start+91, 0), 7, 8)
+	latest := tl.snapshotLocked(time.Unix(start+93, 0))
 	re.Len(latest.Buckets, ruTimelineSeconds)
 	re.Equal(start+3, latest.StartUnixSec)
 	re.Equal(&rmpb.RUConsumptionBucket{Rru: 7, Wru: 8}, latest.Buckets[ruTimelineSeconds-2])
 	re.Equal(&rmpb.RUConsumptionBucket{}, latest.Buckets[ruTimelineSeconds-1])
 
-	// A clock rollback quarantines a full window.
-	tl.recordLocked(time.Unix(start+180, 0), 100, 100)
-	re.Nil(tl.snapshotLocked(time.Unix(start+184, 0)))
-	re.Empty(tl.snapshotLocked(time.Unix(start+360, 0)).Buckets)
+	// After a clock rollback, nothing is recorded or reported until the clock
+	// passes the latest second observed before it.
+	tl.recordLocked(time.Unix(start+90, 0), 100, 100)
+	rolledBack := tl.snapshotLocked(time.Unix(start+92, 0))
+	re.Equal(start+92, rolledBack.StartUnixSec)
+	re.Empty(rolledBack.Buckets)
+	resumed := tl.snapshotLocked(time.Unix(start+96, 0))
+	re.Equal(start+94, resumed.StartUnixSec)
+	re.Equal([]*rmpb.RUConsumptionBucket{{}, {}}, resumed.Buckets)
 }
 
 func TestRUTimelineAck(t *testing.T) {
@@ -78,13 +83,17 @@ func TestRUTimelineAck(t *testing.T) {
 	// A stale acknowledgement never rewinds the timeline.
 	tl.ack(start + 1)
 	re.Equal(start+2, tl.snapshotLocked(time.Unix(start+4, 0)).StartUnixSec)
-	// After a clock rollback, acknowledged seconds are not reported again,
-	// even once the quarantine is over.
+	// After a clock rollback, acknowledged seconds are not reported again, and
+	// reporting resumes after the latest second observed before the rollback.
 	sent = tl.snapshotLocked(time.Unix(start+600, 0))
 	tl.ack(sent.StartUnixSec + int64(len(sent.Buckets)))
-	re.Nil(tl.snapshotLocked(time.Unix(start+300, 0)))
-	re.Nil(tl.snapshotLocked(time.Unix(start+480, 0)))
-	re.Equal(start+600, tl.snapshotLocked(time.Unix(start+601, 0)).StartUnixSec)
+	rolledBack := tl.snapshotLocked(time.Unix(start+300, 0))
+	re.Equal(start+300, rolledBack.StartUnixSec)
+	re.Empty(rolledBack.Buckets)
+	re.Empty(tl.snapshotLocked(time.Unix(start+480, 0)).Buckets)
+	resumed := tl.snapshotLocked(time.Unix(start+603, 0))
+	re.Equal(start+601, resumed.StartUnixSec)
+	re.Len(resumed.Buckets, 2)
 }
 
 func TestRUTimelineConcurrentRecording(t *testing.T) {
@@ -204,9 +213,13 @@ func TestRUTimelineFailedWait(t *testing.T) {
 func TestRUTimelineUntimedConsumption(t *testing.T) {
 	re := require.New(t)
 	gc := createTestGroupCostController(re)
+	// TiFlash aggregates count toward consumption but stay out of the timeline.
 	gc.addRUConsumption(&rmpb.Consumption{RRU: 100})
 	re.Equal(float64(100), gc.mu.consumption.RRU)
-	re.Nil(gc.ruTimeline.snapshot())
+	rru, wru := timelineTotals(gc)
+	re.Zero(rru)
+	re.Zero(wru)
+	re.NotNil(gc.ruTimeline.snapshot())
 }
 
 func TestTombstoneSharesDefaultRUTimeline(t *testing.T) {
