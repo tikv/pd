@@ -48,6 +48,7 @@ type groupCostController struct {
 	metrics *groupMetricsCollection
 	mu      struct {
 		sync.Mutex
+		// consumption contains legacy fields only; RUv2 is protected separately.
 		consumption   *rmpb.Consumption
 		storeCounter  map[uint64]*rmpb.Consumption
 		globalCounter *rmpb.Consumption
@@ -75,7 +76,7 @@ type groupCostController struct {
 		// last update.
 		targetPeriod time.Duration
 
-		// consumptions stores the last value of mu.consumption.
+		// consumption stores the last complete snapshot of legacy and RUv2 consumption.
 		// requestUnitConsumptions []*rmpb.RequestUnitItem
 		// resourceConsumptions    []*rmpb.ResourceItem
 		consumption *rmpb.Consumption
@@ -94,6 +95,15 @@ type groupCostController struct {
 	tombstone atomic.Bool
 	// inactive is set to true when the resource group has not been updated for a long time.
 	inactive bool
+
+	// Statement RUv2 reports do not contend with legacy KV accounting. When both
+	// locks are needed, acquire mu before ruv2 to keep full snapshots coherent.
+	ruv2 struct {
+		sync.Mutex
+		tikv    float64
+		tidb    float64
+		tiflash float64
+	}
 }
 
 type groupMetricsCollection struct {
@@ -419,10 +429,20 @@ func (gc *groupCostController) applyDegradedMode() {
 func (gc *groupCostController) updateRunState() {
 	newTime := time.Now()
 	gc.mu.Lock()
+	gc.ruv2.Lock()
+	*gc.run.consumption = gc.consumptionSnapshotLocked()
 	for _, calc := range gc.calculators {
-		calc.Trickle(gc.mu.consumption)
+		calc.Trickle(gc.run.consumption)
 	}
-	*gc.run.consumption = *gc.mu.consumption
+	// Calculators receive the complete accumulated consumption, including RUv2.
+	*gc.mu.consumption = *gc.run.consumption
+	gc.ruv2.tikv = gc.run.consumption.TikvRUV2
+	gc.ruv2.tidb = gc.run.consumption.TidbRUV2
+	gc.ruv2.tiflash = gc.run.consumption.TiflashRUV2
+	gc.mu.consumption.TikvRUV2 = 0
+	gc.mu.consumption.TidbRUV2 = 0
+	gc.mu.consumption.TiflashRUV2 = 0
+	gc.ruv2.Unlock()
 	gc.mu.Unlock()
 	logControllerTrace("[resource group controller] update run state", zap.String("name", gc.name), zap.Any("request-unit-consumption", gc.run.consumption), zap.Bool("is-throttled", gc.isThrottled.Load()))
 	gc.run.now = newTime
@@ -747,7 +767,7 @@ func (gc *groupCostController) onRequestWaitImpl(
 	reportedDelta := reportedRequestConsumption(gc.calculators, info, delta)
 
 	gc.mu.Lock()
-	add(gc.mu.consumption, reportedDelta)
+	gc.addConsumptionLocked(reportedDelta)
 	gc.mu.Unlock()
 
 	if !gc.burstable.Load() {
@@ -760,7 +780,7 @@ func (gc *groupCostController) onRequestWaitImpl(
 				gc.metrics.failedRequestCounterWithOthers.Inc()
 			}
 			gc.mu.Lock()
-			sub(gc.mu.consumption, reportedDelta)
+			gc.subConsumptionLocked(reportedDelta)
 			gc.mu.Unlock()
 			failpoint.Inject("triggerUpdate", func() {
 				gc.lowRUNotifyChan <- notifyMsg{}
@@ -819,7 +839,7 @@ func (gc *groupCostController) onResponseImpl(
 	}
 
 	gc.mu.Lock()
-	add(gc.mu.consumption, reportedDelta)
+	gc.addConsumptionLocked(reportedDelta)
 	add(gc.mu.storeCounter[req.StoreID()], count)
 	add(gc.mu.globalCounter, count)
 	gc.mu.Unlock()
@@ -879,7 +899,7 @@ func (gc *groupCostController) onResponseWaitImpl(
 	}
 
 	gc.mu.Lock()
-	add(gc.mu.consumption, reportedDelta)
+	gc.addConsumptionLocked(reportedDelta)
 	add(gc.mu.storeCounter[req.StoreID()], count)
 	add(gc.mu.globalCounter, count)
 	gc.mu.Unlock()
@@ -909,16 +929,69 @@ func collectRUCalculation(collector RUCalculationCollector, detail *RUCalculatio
 
 func (gc *groupCostController) addRUConsumption(consumption *rmpb.Consumption) {
 	gc.mu.Lock()
-	add(gc.mu.consumption, consumption)
+	gc.addConsumptionLocked(consumption)
 	gc.mu.Unlock()
 }
 
+// addConsumptionLocked requires mu. Normal KV calculators produce no RUv2,
+// while mixed reports acquire both locks so a snapshot observes all fields together.
+func (gc *groupCostController) addConsumptionLocked(consumption *rmpb.Consumption) {
+	if consumption == nil {
+		return
+	}
+	if consumption.TikvRUV2 == 0 && consumption.TidbRUV2 == 0 && consumption.TiflashRUV2 == 0 {
+		addLegacyConsumption(gc.mu.consumption, consumption)
+		return
+	}
+	gc.ruv2.Lock()
+	addLegacyConsumption(gc.mu.consumption, consumption)
+	gc.ruv2.tikv += consumption.TikvRUV2
+	gc.ruv2.tidb += consumption.TidbRUV2
+	gc.ruv2.tiflash += consumption.TiflashRUV2
+	gc.ruv2.Unlock()
+}
+
+// subConsumptionLocked undoes a failed request under the same locks as its add.
+func (gc *groupCostController) subConsumptionLocked(consumption *rmpb.Consumption) {
+	if consumption == nil {
+		return
+	}
+	if consumption.TikvRUV2 == 0 && consumption.TidbRUV2 == 0 && consumption.TiflashRUV2 == 0 {
+		subLegacyConsumption(gc.mu.consumption, consumption)
+		return
+	}
+	gc.ruv2.Lock()
+	subLegacyConsumption(gc.mu.consumption, consumption)
+	gc.ruv2.tikv -= consumption.TikvRUV2
+	gc.ruv2.tidb -= consumption.TidbRUV2
+	gc.ruv2.tiflash -= consumption.TiflashRUV2
+	gc.ruv2.Unlock()
+}
+
 func (gc *groupCostController) addRUV2Consumption(tikvRUV2, tidbRUV2, tiflashRUV2 float64) {
+	gc.ruv2.Lock()
+	gc.ruv2.tikv += tikvRUV2
+	gc.ruv2.tidb += tidbRUV2
+	gc.ruv2.tiflash += tiflashRUV2
+	gc.ruv2.Unlock()
+}
+
+func (gc *groupCostController) consumptionSnapshot() rmpb.Consumption {
 	gc.mu.Lock()
-	gc.mu.consumption.TikvRUV2 += tikvRUV2
-	gc.mu.consumption.TidbRUV2 += tidbRUV2
-	gc.mu.consumption.TiflashRUV2 += tiflashRUV2
+	gc.ruv2.Lock()
+	consumption := gc.consumptionSnapshotLocked()
+	gc.ruv2.Unlock()
 	gc.mu.Unlock()
+	return consumption
+}
+
+// consumptionSnapshotLocked requires both mu and ruv2.
+func (gc *groupCostController) consumptionSnapshotLocked() rmpb.Consumption {
+	consumption := *gc.mu.consumption
+	consumption.TikvRUV2 = gc.ruv2.tikv
+	consumption.TidbRUV2 = gc.ruv2.tidb
+	consumption.TiflashRUV2 = gc.ruv2.tiflash
+	return consumption
 }
 
 // GetActiveResourceGroup is used to get active resource group.

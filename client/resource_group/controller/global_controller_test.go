@@ -179,10 +179,7 @@ func TestControllerWithTwoGroupRequestConcurrency(t *testing.T) {
 	re.Equal(testResourceGroup, c2.meta)
 
 	// test report ru consumption
-	var totalConsumption rmpb.Consumption
-	c2.mu.Lock()
-	totalConsumption = *c2.mu.consumption
-	c2.mu.Unlock()
+	totalConsumption := c2.consumptionSnapshot()
 	delta := &rmpb.Consumption{
 		RRU:                      1.0,
 		WRU:                      2.0,
@@ -197,18 +194,14 @@ func TestControllerWithTwoGroupRequestConcurrency(t *testing.T) {
 	}
 	controller.ReportConsumption("test-group", delta)
 	// check the consumption
-	c2.mu.Lock()
 	add(&totalConsumption, delta)
-	require.Equal(t, c2.mu.consumption, &totalConsumption)
-	c2.mu.Unlock()
+	require.Equal(t, totalConsumption, c2.consumptionSnapshot())
 
 	controller.ReportRUV2Consumption("test-group", 3.0, 4.0, 5.0)
-	c2.mu.Lock()
 	totalConsumption.TikvRUV2 += 3.0
 	totalConsumption.TidbRUV2 += 4.0
 	totalConsumption.TiflashRUV2 += 5.0
-	require.Equal(t, c2.mu.consumption, &totalConsumption)
-	c2.mu.Unlock()
+	require.Equal(t, totalConsumption, c2.consumptionSnapshot())
 
 	// test report with unknown group
 	controller.ReportConsumption("unknown-name", delta)
@@ -268,6 +261,75 @@ func TestControllerWithTwoGroupRequestConcurrency(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		re.Fail("timeout")
 	}
+}
+
+func TestRUV2ConsumptionGroupLifecycle(t *testing.T) {
+	re := require.New(t)
+	ctx := context.Background()
+	provider := newMockResourceGroupProvider()
+	controller, err := NewResourceGroupController(ctx, 1, provider, nil, constants.NullKeyspaceID)
+	re.NoError(err)
+	group := &rmpb.ResourceGroup{
+		Name: "ruv2-lifecycle", Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{
+			Settings: &rmpb.TokenLimitSettings{FillRate: 1000000},
+		}},
+	}
+	defaultGroup := &rmpb.ResourceGroup{
+		Name: defaultResourceGroupName, Mode: group.Mode, RUSettings: group.RUSettings,
+	}
+	provider.On("GetResourceGroup", mock.Anything, group.Name, mock.Anything).Return(group, nil)
+	provider.On("GetResourceGroup", mock.Anything, defaultResourceGroupName, mock.Anything).Return(defaultGroup, nil)
+	gc, err := controller.tryGetResourceGroupController(ctx, group.Name, false)
+	re.NoError(err)
+	controller.ReportRUV2Consumption(group.Name, 1, 2, 3)
+	controller.cleanUpResourceGroup()
+	current, loaded := controller.loadGroupController(group.Name)
+	re.True(loaded)
+	re.Same(gc, current)
+	re.False(gc.inactive, "RUv2-only activity must prevent inactive cleanup")
+	gc.updateRunState()
+	re.Equal(float64(2), gc.run.consumption.TidbRUV2)
+	controller.cleanUpResourceGroup()
+	re.True(gc.inactive)
+	controller.ReportRUV2Consumption(group.Name, 1, 2, 3)
+	controller.cleanUpResourceGroup()
+	re.False(gc.inactive)
+	gc.updateRunState()
+	controller.cleanUpResourceGroup()
+	controller.cleanUpResourceGroup()
+	_, loaded = controller.loadGroupController(group.Name)
+	re.False(loaded)
+
+	// Unknown groups are still ignored; reporting must not create a controller.
+	controller.ReportRUV2Consumption(group.Name, 100, 100, 100)
+	controller.ReportConsumption(group.Name, &rmpb.Consumption{RRU: 100, TidbRUV2: 100})
+	_, loaded = controller.loadGroupController(group.Name)
+	re.False(loaded)
+	recreated, err := controller.tryGetResourceGroupController(ctx, group.Name, false)
+	re.NoError(err)
+	re.NotSame(gc, recreated)
+	re.Zero(recreated.consumptionSnapshot().TidbRUV2)
+	controller.ReportRUV2Consumption(group.Name, 5, 7, 11)
+	re.Equal(float64(7), recreated.consumptionSnapshot().TidbRUV2)
+	re.Equal(float64(4), gc.consumptionSnapshot().TidbRUV2)
+
+	// Direct reports retain existing name lookup semantics for tombstones.
+	controller.tombstoneGroupCostController(group.Name)
+	tombstone, loaded := controller.loadGroupController(group.Name)
+	re.True(loaded)
+	re.True(tombstone.tombstone.Load())
+	re.NotSame(recreated, tombstone)
+	controller.ReportRUV2Consumption(group.Name, 13, 17, 19)
+	re.Equal(float64(17), tombstone.consumptionSnapshot().TidbRUV2)
+	re.Equal(float64(7), recreated.consumptionSnapshot().TidbRUV2)
+	controller.cleanUpResourceGroup()
+	_, loaded = controller.loadGroupController(group.Name)
+	re.True(loaded, "pending RUv2 consumption must survive tombstone cleanup")
+	tombstone.updateRunState()
+	controller.cleanUpResourceGroup()
+	_, loaded = controller.loadGroupController(group.Name)
+	re.False(loaded)
 }
 
 func TestTryGetController(t *testing.T) {

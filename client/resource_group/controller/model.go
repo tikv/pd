@@ -482,6 +482,16 @@ func add(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
 	if custom1 == nil || custom2 == nil {
 		return
 	}
+	addLegacyConsumption(custom1, custom2)
+	custom1.TikvRUV2 += custom2.TikvRUV2
+	custom1.TidbRUV2 += custom2.TidbRUV2
+	custom1.TiflashRUV2 += custom2.TiflashRUV2
+}
+
+func addLegacyConsumption(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
+	if custom1 == nil || custom2 == nil {
+		return
+	}
 	custom1.RRU += custom2.RRU
 	custom1.WRU += custom2.WRU
 	custom1.ReadBytes += custom2.ReadBytes
@@ -492,9 +502,6 @@ func add(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
 	custom1.KvWriteRpcCount += custom2.KvWriteRpcCount
 	custom1.ReadCrossAzTrafficBytes += custom2.ReadCrossAzTrafficBytes
 	custom1.WriteCrossAzTrafficBytes += custom2.WriteCrossAzTrafficBytes
-	custom1.TikvRUV2 += custom2.TikvRUV2
-	custom1.TidbRUV2 += custom2.TidbRUV2
-	custom1.TiflashRUV2 += custom2.TiflashRUV2
 }
 
 func updateDeltaConsumption(last *rmpb.Consumption, now *rmpb.Consumption) *rmpb.Consumption {
@@ -558,6 +565,16 @@ func sub(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
 	if custom1 == nil || custom2 == nil {
 		return
 	}
+	subLegacyConsumption(custom1, custom2)
+	custom1.TikvRUV2 -= custom2.TikvRUV2
+	custom1.TidbRUV2 -= custom2.TidbRUV2
+	custom1.TiflashRUV2 -= custom2.TiflashRUV2
+}
+
+func subLegacyConsumption(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
+	if custom1 == nil || custom2 == nil {
+		return
+	}
 	custom1.RRU -= custom2.RRU
 	custom1.WRU -= custom2.WRU
 	custom1.ReadBytes -= custom2.ReadBytes
@@ -568,9 +585,6 @@ func sub(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
 	custom1.KvWriteRpcCount -= custom2.KvWriteRpcCount
 	custom1.ReadCrossAzTrafficBytes -= custom2.ReadCrossAzTrafficBytes
 	custom1.WriteCrossAzTrafficBytes -= custom2.WriteCrossAzTrafficBytes
-	custom1.TikvRUV2 -= custom2.TikvRUV2
-	custom1.TidbRUV2 -= custom2.TidbRUV2
-	custom1.TiflashRUV2 -= custom2.TiflashRUV2
 }
 
 func equalRU(custom1 rmpb.Consumption, custom2 rmpb.Consumption) bool {
