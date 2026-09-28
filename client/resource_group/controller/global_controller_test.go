@@ -335,6 +335,64 @@ func TestTryGetController(t *testing.T) {
 	re.NotEmpty(consumption)
 }
 
+func TestCleanUpResourceGroupJudgesWholeInterval(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mockProvider := newMockResourceGroupProvider()
+	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, 0)
+	re.NoError(err)
+
+	newGroup := func(name string) *rmpb.ResourceGroup {
+		return &rmpb.ResourceGroup{Name: name, Mode: rmpb.GroupMode_RUMode, RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 1000000}}}}
+	}
+	for _, name := range []string{defaultResourceGroupName, "bursty", "idle", "deleted"} {
+		mockProvider.On("GetResourceGroup", mock.Anything, name, mock.Anything).Return(newGroup(name), nil)
+		_, err = controller.tryGetResourceGroupController(ctx, name, false)
+		re.NoError(err)
+	}
+	controller.tombstoneGroupCostController("deleted")
+
+	requestInfo, responseInfo := NewTestRequestInfo(true, 1, 1, AccessCrossZone), NewTestResponseInfo(1, time.Millisecond, true)
+	consume := func(name string) {
+		gc, err := controller.tryGetResourceGroupController(ctx, name, true)
+		re.NoError(err)
+		_, _, _, _, err = gc.onRequestWaitImpl(ctx, requestInfo)
+		re.NoError(err)
+		_, err = gc.onResponseImpl(requestInfo, responseInfo)
+		re.NoError(err)
+	}
+	// cleanUpAfterIdleSecond simulates a cleanup pass that sees no consumption since the last state update.
+	cleanUpAfterIdleSecond := func() {
+		controller.executeOnAllGroups((*groupCostController).updateRunState)
+		controller.cleanUpResourceGroup()
+	}
+	exists := func(name string) bool {
+		_, ok := controller.loadGroupController(name)
+		return ok
+	}
+
+	// The bursty group consumes during every cleanup interval, the tombstone only during the first one.
+	consume("bursty")
+	consume("deleted")
+	cleanUpAfterIdleSecond()
+	re.True(exists("bursty"))
+	re.True(exists("idle"))
+	re.True(exists("deleted"))
+
+	consume("bursty")
+	cleanUpAfterIdleSecond()
+	re.True(exists("bursty"))
+	re.False(exists("idle"))
+	re.False(exists("deleted"))
+
+	// The bursty group is deleted after two cleanup intervals without consumption.
+	cleanUpAfterIdleSecond()
+	re.True(exists("bursty"))
+	cleanUpAfterIdleSecond()
+	re.False(exists("bursty"))
+}
+
 func TestGetResourceGroup(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
