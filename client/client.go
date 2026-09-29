@@ -728,7 +728,7 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegio
 	defer cancel()
 
 	if routerClient := c.getRouterClient(); routerClient != nil {
-		return routerClient.GetRegion(ctx, key, opts...)
+		return routerClient.GetRegion(caller.WithComponent(ctx, c.callerComponent), key, opts...)
 	}
 	option := &opt.GetRegionOp{}
 	for _, opt := range opts {
@@ -780,7 +780,7 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...opt.GetR
 	defer cancel()
 
 	if routerClient := c.getRouterClient(); routerClient != nil {
-		return routerClient.GetPrevRegion(ctx, key, opts...)
+		return routerClient.GetPrevRegion(caller.WithComponent(ctx, c.callerComponent), key, opts...)
 	}
 
 	option := &opt.GetRegionOp{}
@@ -831,7 +831,7 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...opt
 	defer cancel()
 
 	if routerClient := c.getRouterClient(); routerClient != nil {
-		return routerClient.GetRegionByID(ctx, regionID, opts...)
+		return routerClient.GetRegionByID(caller.WithComponent(ctx, c.callerComponent), regionID, opts...)
 	}
 
 	option := &opt.GetRegionOp{}

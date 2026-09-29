@@ -38,6 +38,7 @@ import (
 	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/batch"
+	"github.com/tikv/pd/client/pkg/caller"
 	cctx "github.com/tikv/pd/client/pkg/connectionctx"
 	"github.com/tikv/pd/client/pkg/retry"
 	sd "github.com/tikv/pd/client/servicediscovery"
@@ -246,6 +247,7 @@ func (c *Cli) newRequest(ctx context.Context, opts ...opt.GetRegionOption) *Requ
 	req := c.reqPool.Get().(*Request)
 	req.requestCtx = ctx
 	req.clientCtx = c.ctx
+	req.callerComponent = caller.ComponentFromContext(ctx)
 	// Reset the request fields before using it.
 	req.key = nil
 	req.prevKey = nil
@@ -735,10 +737,26 @@ func buildQueryRegionRequest(clusterID uint64, requests []*Request) *pdpb.QueryR
 	queryReq := &pdpb.QueryRegionRequest{
 		Header: &pdpb.RequestHeader{
 			ClusterId: clusterID,
+			CallerId:  string(caller.GetCallerID()),
 		},
 		Keys:     make([][]byte, 0, len(requests)),
 		PrevKeys: make([][]byte, 0, len(requests)),
 		Ids:      make([]uint64, 0, len(requests)),
+	}
+	// Homogeneous batches use the header, including with older servers. Mixed
+	// batches carry per-query attribution without changing batching or order.
+	mixed := false
+	if len(requests) > 0 {
+		component := requests[0].callerComponent
+		for _, req := range requests[1:] {
+			if req.callerComponent != component {
+				mixed = true
+				break
+			}
+		}
+		if !mixed {
+			queryReq.Header.CallerComponent = string(component)
+		}
 	}
 	for _, req := range requests {
 		if !queryReq.NeedBuckets && req.options.NeedBuckets {
@@ -746,10 +764,19 @@ func buildQueryRegionRequest(clusterID uint64, requests []*Request) *pdpb.QueryR
 		}
 		if req.key != nil {
 			queryReq.Keys = append(queryReq.Keys, req.key)
+			if mixed {
+				queryReq.KeyCallerComponents = append(queryReq.KeyCallerComponents, string(req.callerComponent))
+			}
 		} else if req.prevKey != nil {
 			queryReq.PrevKeys = append(queryReq.PrevKeys, req.prevKey)
+			if mixed {
+				queryReq.PrevKeyCallerComponents = append(queryReq.PrevKeyCallerComponents, string(req.callerComponent))
+			}
 		} else {
 			queryReq.Ids = append(queryReq.Ids, req.id)
+			if mixed {
+				queryReq.IdCallerComponents = append(queryReq.IdCallerComponents, string(req.callerComponent))
+			}
 		}
 	}
 	return queryReq
