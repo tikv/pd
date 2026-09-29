@@ -617,8 +617,7 @@ func TestPDLeaderClearsIdentityBeforeBlockingCleanup(t *testing.T) {
 	re.Nil(m.GetLeader())
 	re.Empty(m.GetLeadership().GetLeaderValue())
 	re.False(m.GetLeadership().Check())
-	re.Same(oldLease, m.GetLeadership().GetLease())
-	re.Equal(oldLeaseID, m.GetLeadership().GetLease().GetID())
+	re.Nil(m.GetLeadership().GetLease())
 }
 
 // TestPDLeaderResignsBeforeLoggingStepDown covers the other half of the same
@@ -684,8 +683,7 @@ func TestPDLeaderResignsBeforeLoggingStepDown(t *testing.T) {
 	re.Nil(m.GetLeader())
 	re.Empty(m.GetLeadership().GetLeaderValue())
 	re.False(m.GetLeadership().Check())
-	re.Same(oldLease, m.GetLeadership().GetLease())
-	re.Equal(oldLeaseID, m.GetLeadership().GetLease().GetID())
+	re.Nil(m.GetLeadership().GetLease())
 
 	// The identity is gone, and the reason has not been written yet. Reverse the
 	// two in campaignLeader and the line is already there by the time the resign
@@ -783,8 +781,7 @@ func TestTSOAllocatorResignsBeforeBlockingReset(t *testing.T) {
 
 	oldLease := svr.GetMember().GetLeadership().GetLease()
 	re.NotNil(oldLease)
-	oldLeaseID := oldLease.GetID()
-	re.NotEqual(clientv3.NoLease, oldLeaseID)
+	re.NotEqual(clientv3.NoLease, oldLease.GetID())
 
 	// Capture the log the same way TestPDLeaderResignsBeforeLoggingStepDown
 	// does, and for the same reasons.
@@ -806,11 +803,8 @@ func TestTSOAllocatorResignsBeforeBlockingReset(t *testing.T) {
 
 	// Hold the resign open inside Lease.Close, so that there is a window in
 	// which it has started but not finished.
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/blockLeaseClose",
-		fmt.Sprintf("return(\"leader election@%s\")", leaderName)))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/blockLeaseClose"))
-	}()
+	waitClose, resumeClose := pauseLeaseClose(t, oldLease)
+	defer resumeClose()
 	// Fail the periodic TSO update while the lease is still valid: that hands
 	// the step-down to the allocator rather than to the campaign loop, which is
 	// the path under test.
@@ -819,14 +813,13 @@ func TestTSOAllocatorResignsBeforeBlockingReset(t *testing.T) {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/failedToUpdateTimestamp"))
 	}()
 
-	// The allocator's resign has started - the leader is gone while the term's
-	// own lease is still the one being closed.
-	testutil.Eventually(re, func() bool {
-		m := svr.GetMember()
-		return m.GetLeader() == nil &&
-			!m.GetLeadership().Check() &&
-			m.GetLeadership().GetLease().GetID() == oldLeaseID
-	}, testutil.WithWaitFor(30*time.Second))
+	// The allocator's resign has started - the leader and the published lease
+	// are gone while cleanup of the captured old lease is still blocked.
+	waitClose()
+	m := svr.GetMember()
+	re.Nil(m.GetLeader())
+	re.False(m.GetLeadership().Check())
+	re.Nil(m.GetLeadership().GetLease())
 
 	// And the reset has not logged yet: the identity cleared first. With the
 	// resign after resetTimestamp, the line is already here.
@@ -836,6 +829,7 @@ func TestTSOAllocatorResignsBeforeBlockingReset(t *testing.T) {
 
 	// The line does arrive once the blocked close returns, which is what keeps
 	// the assertion above from passing merely because nothing was captured.
+	resumeClose()
 	testutil.Eventually(re, func() bool {
 		content, err := os.ReadFile(fname)
 		re.NoError(err)

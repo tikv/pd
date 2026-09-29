@@ -63,7 +63,7 @@ type Leadership struct {
 	// name scopes test failpoints to one member.
 	name string
 	// The lease which is used to get this leadership
-	lease  atomic.Value // stored as *Lease
+	lease  atomic.Pointer[Lease]
 	client *clientv3.Client
 	// leaderKey and leaderValue are key-value pair in etcd
 	leaderKey   string
@@ -99,11 +99,7 @@ func (ls *Leadership) GetLease() *Lease {
 	if ls == nil {
 		return nil
 	}
-	l := ls.lease.Load()
-	if l == nil {
-		return nil
-	}
-	return l.(*Lease)
+	return ls.lease.Load()
 }
 
 // SetLease sets the lease of leadership.
@@ -231,16 +227,24 @@ func (ls *Leadership) Keep(ctx context.Context) {
 		return
 	}
 	ls.mu.Lock()
+	lease := ls.GetLease()
+	if lease == nil {
+		ls.mu.Unlock()
+		return
+	}
 	keepAliveCtx, cancel := context.WithCancel(ctx)
 	ls.keepAliveCancelFunc = cancel
-	lease := ls.GetLease()
 	ls.mu.Unlock()
 	go lease.KeepAlive(keepAliveCtx)
 }
 
 // Check returns whether the leadership is still available.
 func (ls *Leadership) Check() bool {
-	return ls != nil && ls.GetLease() != nil && !ls.GetLease().IsExpired()
+	if ls == nil {
+		return false
+	}
+	lease := ls.GetLease()
+	return lease != nil && !lease.IsExpired()
 }
 
 // LeaderTxn returns txn() with a leader comparison to guarantee that
@@ -440,11 +444,10 @@ func (ls *Leadership) Reset() {
 		return
 	}
 	ls.mu.Lock()
-	lease := ls.GetLease()
-	if lease == nil {
-		ls.mu.Unlock()
-		return
-	}
+	// Detach the lease before blocking cleanup so a late Keep cannot restart
+	// keepalive for the leadership being reset. Campaign publishes a replacement
+	// under the same mutex, so a new leadership remains independently keepable.
+	lease := ls.lease.Swap(nil)
 	if ls.keepAliveCancelFunc != nil {
 		ls.keepAliveCancelFunc()
 		ls.keepAliveCancelFunc = nil
@@ -454,6 +457,9 @@ func (ls *Leadership) Reset() {
 	// overwrite or close a new leadership when its Close returns.
 	ls.leaderValue.Store("")
 	ls.mu.Unlock()
+	if lease == nil {
+		return
+	}
 	err := lease.Close()
 	if err != nil {
 		log.Error("close lease failed", zap.String("purpose", ls.purpose), errs.ZapError(err))

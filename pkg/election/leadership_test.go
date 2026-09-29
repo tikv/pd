@@ -107,14 +107,9 @@ func TestLeadership(t *testing.T) {
 
 	// Check the lease.
 	lease1 := leadership1.GetLease()
-	re.NotNil(lease1)
+	re.Nil(lease1)
 	lease2 := leadership2.GetLease()
-	re.NotNil(lease2)
-
-	re.True(lease1.IsExpired())
-	re.True(lease2.IsExpired())
-	re.NoError(lease1.Close())
-	re.NoError(lease2.Close())
+	re.Nil(lease2)
 }
 
 func TestResetDoesNotClearNewLeadership(t *testing.T) {
@@ -183,6 +178,70 @@ func TestResetDoesNotClearNewLeadership(t *testing.T) {
 			re.Equal(leaderValue, leadership.GetLeaderValue())
 		})
 	}
+}
+
+func TestKeepDoesNotRestartLeaseDuringReset(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	t.Cleanup(clean)
+	leadership := NewLeadership(client, "/test_leader", "test_leader", "test_leader")
+	t.Cleanup(leadership.Reset)
+	re.NoError(leadership.Campaign(10, "leader"))
+	leadership.Keep(t.Context())
+	oldLease := leadership.GetLease()
+
+	const hook = "github.com/tikv/pd/pkg/election/beforeRevokeLease"
+	reached := make(chan struct{})
+	release := make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
+	re.NoError(failpoint.EnableCall(hook, func(lease *Lease) {
+		if lease == oldLease {
+			close(reached)
+			<-release
+		}
+	}))
+	t.Cleanup(func() {
+		unblock()
+		re.NoError(failpoint.Disable(hook))
+	})
+
+	resetDone := make(chan struct{})
+	go func() {
+		leadership.Reset()
+		close(resetDone)
+	}()
+	select {
+	case <-reached:
+	case <-time.After(10 * time.Second):
+		t.Fatal("leadership reset did not reach the expected checkpoint")
+	}
+
+	// Reset detaches the old lease before cleanup, so a late Keep cannot
+	// install another keepalive context for the lease being closed.
+	re.Nil(leadership.GetLease())
+	leadership.Keep(t.Context())
+	leadership.mu.Lock()
+	keepAliveCancelFunc := leadership.keepAliveCancelFunc
+	leadership.mu.Unlock()
+	re.Nil(keepAliveCancelFunc)
+
+	unblock()
+	select {
+	case <-resetDone:
+	case <-time.After(10 * time.Second):
+		t.Fatal("leadership reset did not finish")
+	}
+
+	// A replacement campaign publishes a fresh lease and can keep it normally.
+	re.NoError(leadership.Campaign(10, "new_leader"))
+	newLease := leadership.GetLease()
+	re.NotNil(newLease)
+	re.NotSame(oldLease, newLease)
+	leadership.Keep(t.Context())
+	leadership.mu.Lock()
+	keepAliveCancelFunc = leadership.keepAliveCancelFunc
+	leadership.mu.Unlock()
+	re.NotNil(keepAliveCancelFunc)
 }
 
 func TestDeleteLeaderKeyByRevisionDoesNotDeleteChangedLeader(t *testing.T) {
