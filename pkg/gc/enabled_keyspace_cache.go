@@ -30,6 +30,7 @@ import (
 
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 )
@@ -149,6 +150,16 @@ func (c *enabledKeyspaceCache) appliedRevision() int64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.revision
+}
+
+// canSkipGCStateWarmup reports whether the published metadata excludes a
+// non-null keyspace from independent GC. Before the index is ready, a missing
+// entry cannot establish that the scope is obsolete.
+func (c *enabledKeyspaceCache) canSkipGCStateWarmup(id uint32) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry, exists := c.entries[id]
+	return c.ready && (!exists || entry.gcManagementType != keyspace.KeyspaceLevelGC)
 }
 
 func (c *enabledKeyspaceCache) waitReady(ctx context.Context) error {

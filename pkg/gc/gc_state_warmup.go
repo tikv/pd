@@ -299,11 +299,7 @@ func (w *gcStateWarmup) refresh(now time.Time) {
 		// Only retries consult the live index. They may retire an obsolete
 		// original target, but live membership never adds a new target.
 		if w.initial && id != constant.NullKeyspaceID && w.index != nil {
-			w.index.mu.Lock()
-			entry, exists := w.index.entries[id]
-			needed := !w.index.ready || (exists && entry.gcManagementType == keyspace.KeyspaceLevelGC)
-			w.index.mu.Unlock()
-			if !needed {
+			if w.index.canSkipGCStateWarmup(id) {
 				w.finish(id, scope, nil, now)
 				continue
 			}
