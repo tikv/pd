@@ -1655,7 +1655,13 @@ func (s *GrpcServer) QueryRegion(stream pdpb.PD_QueryRegionServer) error {
 		})
 		start := time.Now()
 		request.NeedBuckets = s.member.IsServing() && rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets()
-		resp := grpcutil.QueryRegion(rc.GetBasicCluster(), request)
+		basicCluster := rc.GetBasicCluster()
+		failpoint.Inject("queryRegionFollowerCacheMiss", func() {
+			if !s.member.IsServing() {
+				basicCluster = core.NewBasicCluster()
+			}
+		})
+		resp := grpcutil.QueryRegion(basicCluster, request)
 		queryRegionDuration.Observe(time.Since(start).Seconds())
 		grpcutil.RequestCounter("QueryRegion", request.Header, resp.Header.Error, regionRequestCounter)
 		if err := stream.Send(resp); err != nil {
