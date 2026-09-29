@@ -10,6 +10,8 @@
 
 **Spec:** [中文设计](../../analysis/gc-cold-loads-11311.md)，已经完成 review 并获得用户确认。
 
+**实现状态：** 四项任务已完成，逐项 review、整个分支 review 和最终补测复核均已通过。受影响包基础回归、普通与 NextGen 的相关 race/deadlock 和 GC RPC 验证、完整 `make check` 均已通过。没有依赖版本变化；已有 `x/sync` 仅从间接改为直接依赖。独立 PR 文案待用户确认后提交。
+
 ## Global Constraints
 
 - 所有 sub-agent 顺序执行；一个任务实现、测试和 review 完成后，才能派发下一任务。Sub-agent 不得自行委派。
@@ -62,11 +64,11 @@
 - 新增 `GCStateProvider.LoadGCSafePointPairs(ctx context.Context, keyspaceIDs []uint32) ([]GCSafePointReadResult, error)`。返回值按输入顺序；批级读取/响应错误由外层 error 表示，局部解码错误由对应结果 Err 表示。
 - 暴露 `MaxGCSafePointBatchSize = etcdutil.MaxEtcdTxnOps / 2`，供 manager 使用。
 
-- [ ] **Step 1: 编写失败测试。** `TestLoadGCSafePointPairs` 覆盖 null/独立 scope、缺失和已存在空值、混合三种编码、部分非空畸形值；`TestLoadGCSafePointPairsBatchBounds` 覆盖空输入零 RPC、60 scope 一次事务、超限及重复 ID 拒绝；context 测试验证已取消及阻塞读取后取消能够返回。
-- [ ] **Step 2: 运行 RED。** 使用 `GOTOOLCHAIN=auto make gotest GO_TOOLS_BIN_PATH=/home/wenxuan/dev/pingcap/pd/.tools/bin GOTEST_ARGS='./pkg/storage/kv ./pkg/storage/endpoint -run "TestLoadGCSafePointPairs|TestRawTxnWithContext" -count=1'`，记录缺少能力或行为导致的失败。
-- [ ] **Step 3: 实现接口。** etcd context 原始事务复用已有 `NewSlowLogTxnWithContext`；一次事务包含两个精确 Get/scope。复用或提取旧 reader 的纯解码帮助函数，保留空字符串零值；校验结果条数、key 映射及读取结果形状。
-- [ ] **Step 4: GREEN 与包回归。** 运行新测试，再运行 kv/endpoint 两个包全部测试。用存储 RPC 观测证实一批一个 Txn、没有额外 GC revision Get 或比较；测试必须检查实际响应语义而不是只镜像组装代码。
-- [ ] **Step 5: 自查、格式化与提交。** 确认无依赖变化、failpoints 已关闭，以 `storage: batch GC safe point reads` 类似主题签名提交，并报告接口及验证证据。
+- [x] **Step 1: 编写失败测试。** `TestLoadGCSafePointPairs` 覆盖 null/独立 scope、缺失和已存在空值、混合三种编码、部分非空畸形值；`TestLoadGCSafePointPairsBatchBounds` 覆盖空输入零 RPC、60 scope 一次事务、超限及重复 ID 拒绝；context 测试验证已取消及阻塞读取后取消能够返回。
+- [x] **Step 2: 运行 RED。** 使用 `GOTOOLCHAIN=auto make gotest GO_TOOLS_BIN_PATH=/home/wenxuan/dev/pingcap/pd/.tools/bin GOTEST_ARGS='./pkg/storage/kv ./pkg/storage/endpoint -run "TestLoadGCSafePointPairs|TestRawTxnWithContext" -count=1'`，记录缺少能力或行为导致的失败。
+- [x] **Step 3: 实现接口。** etcd context 原始事务复用已有 `NewSlowLogTxnWithContext`；一次事务包含两个精确 Get/scope。复用或提取旧 reader 的纯解码帮助函数，保留空字符串零值；校验结果条数、key 映射及读取结果形状。
+- [x] **Step 4: GREEN 与包回归。** 运行新测试，再运行 kv/endpoint 两个包全部测试。用存储 RPC 观测证实一批一个 Txn、没有额外 GC revision Get 或比较；测试必须检查实际响应语义而不是只镜像组装代码。
+- [x] **Step 5: 自查、格式化与提交。** 确认无依赖变化、failpoints 已关闭，以 `storage: batch GC safe point reads` 类似主题签名提交，并报告接口及验证证据。
 
 ### Task 2: 抽取并并行加载 enabled-keyspace 索引
 
@@ -82,12 +84,12 @@
 - `enabledKeyspaceLoadHooks` 有 `onPage func([]enabledKeyspace)` 和 `onInitialSnapshot func([]enabledKeyspace)`。只在首次成功快照前的页面及首次完整发布时调用，运行于 index mutex 外；调用方保证不等待 GC I/O。
 - 页和快照回调获得不可变值副本；不依赖后续复用的可变 map/slice。后续 reload 不再触发初始回调。
 
-- [ ] **Step 1: 抽取基线并添加失败测试。** 先保留源索引分页/watch/progress/compaction 测试；新增首页 Txn、H 缺失/畸形、More=false、4096 边界、高位 ID、固定 R、四并发及取消测试。现有 Get 拦截点需适配首页改为 Txn。
-- [ ] **Step 2: 运行 RED。** `GOTOOLCHAIN=auto make gotest GO_TOOLS_BIN_PATH=/home/wenxuan/dev/pingcap/pd/.tools/bin GOTEST_ARGS='./pkg/gc -run "TestEnabledKeyspace" -count=1'`，记录新增约束未满足的证据。
-- [ ] **Step 3: 实现首页与扫描。** 一个 Txn 同时读取最多 256 个 metadata 和 allocator key，从 Header 得到 R；保持原始续读 cursor。滚动派发4096-ID任务，b>=H扩当前区间至prefixEnd；H不可用顺序扫描。生产者和四 worker 共享可取消尝试生命周期，所有任务成功再发布。
-- [ ] **Step 4: 实现初始通知。** 各页完整解码后通知，初始完整快照固化通知一次；始终维护 all-ENABLED index。读取、channel 等待及回调不持 metadata mutex。保留 watch 的 pending/progress 规则。
-- [ ] **Step 5: GREEN 与索引回归。** 运行全部 `TestEnabledKeyspace*`，覆盖请求路由落后 follower 且 H 缺失、写入发生在 R 之后、满 channel 取消、慢任务继续派工。确认无 WatchGCStates 类型或协议依赖。
-- [ ] **Step 6: 自查、格式化与提交。** 签名提交 `gc: load the enabled keyspace index concurrently` 类似主题，报告 callback、构造函数及运行接口供后续使用。
+- [x] **Step 1: 抽取基线并添加失败测试。** 先保留源索引分页/watch/progress/compaction 测试；新增首页 Txn、H 缺失/畸形、More=false、4096 边界、高位 ID、固定 R、四并发及取消测试。现有 Get 拦截点需适配首页改为 Txn。
+- [x] **Step 2: 运行 RED。** `GOTOOLCHAIN=auto make gotest GO_TOOLS_BIN_PATH=/home/wenxuan/dev/pingcap/pd/.tools/bin GOTEST_ARGS='./pkg/gc -run "TestEnabledKeyspace" -count=1'`，记录新增约束未满足的证据。
+- [x] **Step 3: 实现首页与扫描。** 一个 Txn 同时读取最多 256 个 metadata 和 allocator key，从 Header 得到 R；保持原始续读 cursor。滚动派发4096-ID任务，b>=H扩当前区间至prefixEnd；H不可用顺序扫描。生产者和四 worker 共享可取消尝试生命周期，所有任务成功再发布。
+- [x] **Step 4: 实现初始通知。** 各页完整解码后通知，初始完整快照固化通知一次；始终维护 all-ENABLED index。读取、channel 等待及回调不持 metadata mutex。保留 watch 的 pending/progress 规则。
+- [x] **Step 5: GREEN 与索引回归。** 运行全部 `TestEnabledKeyspace*`，覆盖请求路由落后 follower 且 H 缺失、写入发生在 R 之后、满 channel 取消、慢任务继续派工。确认无 WatchGCStates 类型或协议依赖。
+- [x] **Step 6: 自查、格式化与提交。** 签名提交 `gc: load the enabled keyspace index concurrently` 类似主题，报告 callback、构造函数及运行接口供后续使用。
 
 ### Task 3: 共享冷读协调与任期隔离
 
@@ -104,12 +106,12 @@
 - Batch 结果必须分别表达已完成 scope、失败 scope 和正在由其他 flight 加载的 scope；flight 的终态成功通知不依赖缓存仍存在。
 - 新前台入口通过上述协议加载 singleton，加入已有 flight 时在释放 manager 等锁后等待。Follower/legacy/barrier-inclusive 保留原分支。
 
-- [ ] **Step 1: 写去重与生命周期失败测试。** 同一scope并发冷读只做一次事务；不同scope可重叠；foreground加入flight；取消、读失败唤醒；cache-miss/flight-retire交错；旧cleanup延迟和重复调用；reset暂停时禁用缓存快读；旧flight完成不能删除新flight。
-- [ ] **Step 2: 运行 RED。** `GOTOOLCHAIN=auto make gotest GO_TOOLS_BIN_PATH=/home/wenxuan/dev/pingcap/pd/.tools/bin GOTEST_ARGS='./pkg/gc -run "TestGCState.*(Load|Leadership)|TestGCStateManager/(TestGetGCState|TestGetAllKeyspaces)" -count=1'`，记录真实行为失败。
-- [ ] **Step 3: 实现 generation 与取消。** 参考 #11264 的 active generation 和 reset gating，移除 Watch 专有内容；先按 generation 禁用并取消，再等 manager 写锁清理；任务和上下文的生命周期不能因单个等待者退出而终止其他等待者需要的加载。
-- [ ] **Step 4: 实现两阶段 fill。** lock顺序为 manager→flight→shard；一次缓存检查与claim同一临界区，完成也用flight锁。I/O前释放flight锁，manager读锁至发布才释放，完成不依赖后台assembly。维持快读、cache指标/既有hook可用性及外层API语义。
-- [ ] **Step 5: GREEN 与原有GC回归。** 运行 loader/lifecycle新测试及完整pkg/gc测试，覆盖global barriers联合校验、follower直接读、OrderedSingleFlight和失败写入失效。按需补race验证真实交错，避免仅验证mock调用。
-- [ ] **Step 6: 自查、提交与接口报告。** 签名提交，详细报告prepare/execute、generation、flight终态接口和锁所有权，供Task4使用。
+- [x] **Step 1: 写去重与生命周期失败测试。** 同一scope并发冷读只做一次事务；不同scope可重叠；foreground加入flight；取消、读失败唤醒；cache-miss/flight-retire交错；旧cleanup延迟和重复调用；reset暂停时禁用缓存快读；旧flight完成不能删除新flight。
+- [x] **Step 2: 运行 RED。** `GOTOOLCHAIN=auto make gotest GO_TOOLS_BIN_PATH=/home/wenxuan/dev/pingcap/pd/.tools/bin GOTEST_ARGS='./pkg/gc -run "TestGCState.*(Load|Leadership)|TestGCStateManager/(TestGetGCState|TestGetAllKeyspaces)" -count=1'`，记录真实行为失败。
+- [x] **Step 3: 实现 generation 与取消。** 参考 #11264 的 active generation 和 reset gating，移除 Watch 专有内容；先按 generation 禁用并取消，再等 manager 写锁清理；任务和上下文的生命周期不能因单个等待者退出而终止其他等待者需要的加载。
+- [x] **Step 4: 实现两阶段 fill。** lock顺序为 manager→flight→shard；一次缓存检查与claim同一临界区，完成也用flight锁。I/O前释放flight锁，manager读锁至发布才释放，完成不依赖后台assembly。维持快读、cache指标/既有hook可用性及外层API语义。
+- [x] **Step 5: GREEN 与原有GC回归。** 运行 loader/lifecycle新测试及完整pkg/gc测试，覆盖global barriers联合校验、follower直接读、OrderedSingleFlight和失败写入失效。按需补race验证真实交错，避免仅验证mock调用。
+- [x] **Step 6: 自查、提交与接口报告。** 签名提交，详细报告prepare/execute、generation、flight终态接口和锁所有权，供Task4使用。
 
 ### Task 4: 初始批量预热与 NextGen 集成
 
@@ -128,13 +130,13 @@
 - 增加或抽取 `GCStateManager.SetEtcdClient(client *clientv3.Client)`，在首个generation启动前由NextGen分支配置；非NextGen不启用metadata/预热。
 - `gcStateWarmup` 拥有有界页提示队列、初始目标/完成状态、共享assembly及四worker调度；运行context由生命周期传入，generation取消会终止所有owned work。
 
-- [ ] **Step 1: 写预热失败测试。** null优先且占四容量之一；metadata后页暂停时前页可预热；四batch重叠且不超过四；过滤后120候选60miss一Txn；256missing五Txn；尾批不等新页；foreground不等后台执行容量。
-- [ ] **Step 2: 写恢复与范围测试。** 满队列遗漏由初始快照补齐；局部损坏/传输失败退避且健康scope继续；后台join成功后缓存先失效仍记completed；后续新增/启用/mode change/reload不预热，原pending可恢复；取消满队列和writer排队无死锁。
-- [ ] **Step 3: 运行 RED。** `GOTOOLCHAIN=auto make gotest GO_TOOLS_BIN_PATH=/home/wenxuan/dev/pingcap/pd/.tools/bin GOTEST_ARGS='./pkg/gc -run "TestGCStateWarmup" -count=1'`，保留失败证据。
-- [ ] **Step 4: 实现并衔接。** 初始null独立singleton与metadata并行；页提示不阻塞索引；初始完整目标固定，completed独立于cache。先取得后台容量再assembly/prepare，I/O前释放assembly，execute同goroutine释放manager锁；重试复用同一路径。
-- [ ] **Step 5: NextGen wiring和退出。** 服务初始化只在NextGen传入etcd client；generation启动两个pool并管理取消。成功或不再需要的初始目标完成后退出GCpool并释放临时集合，metadata继续watch。
-- [ ] **Step 6: GREEN与集成验证。** 运行新测试、完整GC/存储受影响包测试，普通与NextGen/deadlock/race组合；验证server/cluster callback构建和生命周期。失败时修正实际实现并重测受影响范围。
-- [ ] **Step 7: 自查与提交。** 签名提交完整集成，报告测试命令、结果、资源退出、剩余风险；不得以未完成的todo或禁用测试交付。
+- [x] **Step 1: 写预热失败测试。** null优先且占四容量之一；metadata后页暂停时前页可预热；四batch重叠且不超过四；过滤后120候选60miss一Txn；256missing五Txn；尾批不等新页；foreground不等后台执行容量。
+- [x] **Step 2: 写恢复与范围测试。** 满队列遗漏由初始快照补齐；局部损坏/传输失败退避且健康scope继续；后台join成功后缓存先失效仍记completed；后续新增/启用/mode change/reload不预热，原pending可恢复；取消满队列和writer排队无死锁。
+- [x] **Step 3: 运行 RED。** `GOTOOLCHAIN=auto make gotest GO_TOOLS_BIN_PATH=/home/wenxuan/dev/pingcap/pd/.tools/bin GOTEST_ARGS='./pkg/gc -run "TestGCStateWarmup" -count=1'`，保留失败证据。
+- [x] **Step 4: 实现并衔接。** 初始null独立singleton与metadata并行；页提示不阻塞索引；初始完整目标固定，completed独立于cache。先取得后台容量再assembly/prepare，I/O前释放assembly，execute同goroutine释放manager锁；重试复用同一路径。
+- [x] **Step 5: NextGen wiring和退出。** 服务初始化只在NextGen传入etcd client；generation启动两个pool并管理取消。成功或不再需要的初始目标完成后退出GCpool并释放临时集合，metadata继续watch。
+- [x] **Step 6: GREEN与集成验证。** 运行新测试、完整GC/存储受影响包测试，普通与NextGen/deadlock/race组合；验证server/cluster callback构建和生命周期。失败时修正实际实现并重测受影响范围。
+- [x] **Step 7: 自查与提交。** 签名提交完整集成，报告测试命令、结果、资源退出、剩余风险；不得以未完成的todo或禁用测试交付。
 
 ## 最终集成门槛
 
