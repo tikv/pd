@@ -806,6 +806,19 @@ func (s *GrpcServer) GetAllKeyspacesGCStates(ctx context.Context, request *pdpb.
 	}, nil
 }
 
+// WatchGCStates streams the GC states to the caller.
+//
+// TODO: This is a temporary placeholder, kept only to keep the build green while
+// the kvproto dependency is replaced with the fork which carries the txn
+// protocol version declaration. That fork is based on a commit which is newer
+// than the current checkout and already contains the WatchGCStates API, while
+// the real PD implementation (tikv/pd#10498) has not landed yet. Delete this
+// placeholder and drop it from the reviewer's checklist once tikv/pd#10498 is
+// merged and the kvproto replace directive is removed.
+func (*GrpcServer) WatchGCStates(_ *pdpb.WatchGCStatesRequest, _ pdpb.PD_WatchGCStatesServer) error {
+	return status.Errorf(codes.Unimplemented, "WatchGCStates is not implemented yet")
+}
+
 // SetGlobalGCBarrier sets a global GC barrier.
 func (s *GrpcServer) SetGlobalGCBarrier(ctx context.Context, request *pdpb.SetGlobalGCBarrierRequest) (*pdpb.SetGlobalGCBarrierResponse, error) {
 	done, err := s.rateLimitCheck()
