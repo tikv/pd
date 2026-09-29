@@ -167,6 +167,18 @@ func (c *Controller) AddSchedulerHandler(scheduler Scheduler, args ...string) er
 		return errs.ErrSchedulerExisted.FastGenByArgs()
 	}
 
+	// AddSchedulerHandler also runs on restore (InitSchedulers), where
+	// scheduler already carries a pre-existing, possibly config-update-
+	// accumulated persisted config rather than one freshly created by this
+	// call. Remember whether that config already existed, so a later
+	// PrepareConfig failure only removes it when this call is the one that
+	// created it — restoring legitimate history must never delete itself.
+	existingCfg, err := c.storage.LoadSchedulerConfig(name)
+	if err != nil {
+		return err
+	}
+	isNewConfig := len(existingCfg) == 0
+
 	// Run every step that can fail before registering the scheduler, so a
 	// failure here never leaves it visible (e.g. via IsSchedulerExisted)
 	// without having actually been persisted and prepared.
@@ -182,13 +194,17 @@ func (c *Controller) AddSchedulerHandler(scheduler Scheduler, args ...string) er
 	if err := scheduler.PrepareConfig(c.cluster); err != nil {
 		// PrepareConfig may have paused some stores before failing on
 		// another (e.g. evict-leader-scheduler pauses every requested
-		// store regardless of earlier failures), so undo whatever it did,
-		// then remove the config just saved above: this call must not
-		// leave the scheduler half set up.
+		// store regardless of earlier failures), so undo whatever it did.
 		scheduler.CleanConfig(c.cluster)
-		if rmErr := c.storage.RemoveSchedulerConfig(name); rmErr != nil {
-			log.Error("can not remove the scheduler config after a failed creation",
-				zap.String("scheduler-name", name), errs.ZapError(rmErr))
+		if isNewConfig {
+			// The config saved above didn't exist before this call, so it's
+			// an orphan of this failed creation: remove it. A pre-existing
+			// config (e.g. restored on startup) is left in place so the
+			// next attempt still has the real history to retry against.
+			if rmErr := c.storage.RemoveSchedulerConfig(name); rmErr != nil {
+				log.Error("can not remove the scheduler config after a failed creation",
+					zap.String("scheduler-name", name), errs.ZapError(rmErr))
+			}
 		}
 		return err
 	}

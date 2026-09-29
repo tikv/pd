@@ -710,11 +710,12 @@ func TestControllerAddSchedulerRollbackOnSaveFailure(t *testing.T) {
 	re.True(tc.GetStore(1).AllowLeaderTransferIn(), "the leader-transfer pause applied by PrepareConfig must be undone")
 }
 
-// TestControllerAddSchedulerHandlerRollbackOnSaveFailure covers the
+// TestControllerAddSchedulerHandlerRollbackOnPrepareFailure covers the
 // microservice creation path: Controller.AddSchedulerHandler must remove the
 // scheduler config it just saved, and undo PrepareConfig's already-applied
-// leader-transfer pause, when PrepareConfig itself fails.
-func TestControllerAddSchedulerHandlerRollbackOnSaveFailure(t *testing.T) {
+// leader-transfer pause, when PrepareConfig itself fails on a genuinely new
+// scheduler (no config existed for it before this call).
+func TestControllerAddSchedulerHandlerRollbackOnPrepareFailure(t *testing.T) {
 	re := require.New(t)
 
 	cancel, _, tc, oc := prepareSchedulersTest()
@@ -738,7 +739,50 @@ func TestControllerAddSchedulerHandlerRollbackOnSaveFailure(t *testing.T) {
 	re.True(tc.GetStore(1).AllowLeaderTransferIn(), "the leader-transfer pause applied by PrepareConfig must be undone")
 	cfg, err := testStorage.LoadSchedulerConfig(sl.GetName())
 	re.NoError(err)
-	re.Empty(cfg, "the config saved before the failed PrepareConfig must be removed")
+	re.Empty(cfg, "the config saved by this call before the failed PrepareConfig must be removed, since nothing existed before it")
+}
+
+// TestControllerAddSchedulerHandlerPreservesExistingConfigOnPrepareFailure
+// covers the restore path (InitSchedulers): when AddSchedulerHandler is
+// called for a scheduler whose config was already persisted before this
+// call (e.g. accumulated across earlier config updates), a PrepareConfig
+// failure must not delete that pre-existing config — only a config this
+// call itself created is an orphan safe to remove.
+func TestControllerAddSchedulerHandlerPreservesExistingConfigOnPrepareFailure(t *testing.T) {
+	re := require.New(t)
+
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	// Store 999 is intentionally never registered, so PrepareConfig
+	// (pauseLeaderTransfer) fails on it after store 1 has already been
+	// paused.
+	tc.AddLeaderStore(1, 0)
+
+	testStorage := storage.NewStorageWithMemoryBackend()
+
+	// Simulate a config that already existed before this call, e.g.
+	// restored from a previous run or accumulated via config updates.
+	preexisting, err := CreateScheduler(types.EvictLeaderScheduler, oc, testStorage,
+		ConfigSliceDecoder(types.EvictLeaderScheduler, []string{"1,999"}), func(string) error { return nil })
+	re.NoError(err)
+	re.NoError(SaveSchedulerConfig(testStorage, preexisting))
+	existingCfg, err := testStorage.LoadSchedulerConfig(preexisting.GetName())
+	re.NoError(err)
+	re.NotEmpty(existingCfg)
+
+	sl, err := CreateScheduler(types.EvictLeaderScheduler, oc, testStorage,
+		ConfigSliceDecoder(types.EvictLeaderScheduler, []string{"1,999"}), func(string) error { return nil })
+	re.NoError(err)
+	c := NewController(context.Background(), tc, testStorage, oc)
+
+	re.Error(c.AddSchedulerHandler(sl, "1,999"))
+
+	exist, _ := c.IsSchedulerExisted(sl.GetName())
+	re.False(exist, "a scheduler must not be registered when PrepareConfig fails")
+	re.True(tc.GetStore(1).AllowLeaderTransferIn(), "the leader-transfer pause applied by PrepareConfig must be undone")
+	cfg, err := testStorage.LoadSchedulerConfig(sl.GetName())
+	re.NoError(err)
+	re.Equal(existingCfg, cfg, "a config that existed before this call must survive a failed PrepareConfig")
 }
 
 // TestControllerAddSchedulerRollbackOnPrepareFailure covers the
