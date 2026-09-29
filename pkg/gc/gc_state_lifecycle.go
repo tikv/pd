@@ -17,9 +17,12 @@ package gc
 import (
 	"context"
 
+	clientv3 "go.etcd.io/etcd/client/v3"
+
 	"github.com/pingcap/failpoint"
 
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
@@ -31,6 +34,12 @@ type gcStateGeneration struct {
 	done    chan struct{}
 	flights map[uint32]*gcStateLoadFlight
 	cancels map[*gcStateLoadBatch]context.CancelFunc
+
+	// Runtime ownership is established before publishing this generation.
+	cancel   context.CancelFunc
+	workDone chan struct{}
+	index    *enabledKeyspaceCache
+	warmup   *gcStateWarmup
 }
 
 func (g *gcStateGeneration) retire() {
@@ -42,6 +51,9 @@ func (g *gcStateGeneration) retire() {
 	default:
 	}
 	close(g.done)
+	if g.cancel != nil {
+		g.cancel()
+	}
 	for id, flight := range g.flights {
 		flight.err = errs.ErrNotLeader
 		close(flight.done)
@@ -52,6 +64,15 @@ func (g *gcStateGeneration) retire() {
 	}
 }
 
+// SetEtcdClient enables metadata discovery and initial GC warmup. NextGen
+// configures it before the first leadership generation; other deployments leave
+// it unset and retain passive cache loading.
+func (m *GCStateManager) SetEtcdClient(client *clientv3.Client) {
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
+	m.etcdClient = client
+}
+
 // OnNodeBecomesLeader starts a unique leadership generation and returns its
 // idempotent cleanup. A delayed cleanup only affects the generation it owns.
 func (m *GCStateManager) OnNodeBecomesLeader() func() {
@@ -59,13 +80,23 @@ func (m *GCStateManager) OnNodeBecomesLeader() func() {
 	defer m.lifecycleMu.Unlock()
 	if previous := m.activeGeneration.Swap(nil); previous != nil {
 		previous.retire()
+		// Runtime completion never takes lifecycleMu. It is safe to retain
+		// reset serialization while joining already-cancelled work, before
+		// acquiring the manager lock.
+		previous.waitRuntime()
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	generation := &gcStateGeneration{
 		done:    make(chan struct{}),
 		flights: make(map[uint32]*gcStateLoadFlight),
 		cancels: make(map[*gcStateLoadBatch]context.CancelFunc),
+	}
+	var runtimeCtx context.Context
+	if m.etcdClient != nil {
+		runtimeCtx, generation.cancel = context.WithCancel(context.Background())
+		generation.workDone = make(chan struct{})
+		generation.index = newEnabledKeyspaceCache(m.etcdClient, keypath.KeyspaceMetaPrefix())
+		generation.warmup = newGCStateWarmup(m, generation, generation.index)
 	}
 	failpoint.InjectCall("beforeLeaderGCStateCacheReset")
 	m.gcStateCache.clearAll()
@@ -73,7 +104,25 @@ func (m *GCStateManager) OnNodeBecomesLeader() func() {
 	productionBarrierMetrics.current.Store(m.barrierMetrics)
 	m.generation = generation
 	m.activeGeneration.Store(generation)
+	m.mu.Unlock()
+	if runtimeCtx != nil {
+		go func() {
+			defer close(generation.workDone)
+			go generation.warmup.run(runtimeCtx)
+			generation.index.run(runtimeCtx, enabledKeyspaceLoadHooks{
+				onPage:            generation.warmup.onPage,
+				onInitialSnapshot: generation.warmup.onInitialSnapshot,
+			})
+			<-generation.warmup.done
+		}()
+	}
 	return func() { m.stopGCStateGeneration(generation) }
+}
+
+func (g *gcStateGeneration) waitRuntime() {
+	if g.workDone != nil {
+		<-g.workDone
+	}
 }
 
 func (m *GCStateManager) stopGCStateGeneration(generation *gcStateGeneration) {
@@ -83,16 +132,17 @@ func (m *GCStateManager) stopGCStateGeneration(generation *gcStateGeneration) {
 	m.activeGeneration.CompareAndSwap(generation, nil)
 	generation.retire()
 	m.lifecycleMu.Lock()
-	defer m.lifecycleMu.Unlock()
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.generation != generation {
-		return
+	if m.generation == generation {
+		m.generation = nil
+		m.gcStateCache.clearAll()
+		m.barrierMetrics.clearMetrics()
+		productionBarrierMetrics.current.CompareAndSwap(m.barrierMetrics, nil)
 	}
-	m.generation = nil
-	m.gcStateCache.clearAll()
-	m.barrierMetrics.clearMetrics()
-	productionBarrierMetrics.current.CompareAndSwap(m.barrierMetrics, nil)
+	m.mu.Unlock()
+	m.lifecycleMu.Unlock()
+	// Runtime workers may need manager/assembly locks to finish cancellation.
+	generation.waitRuntime()
 }
 
 func (m *GCStateManager) nodeIsLeader() bool {

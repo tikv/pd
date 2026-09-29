@@ -23,6 +23,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/failpoint"
@@ -208,6 +209,7 @@ type GCStateManager struct {
 	lifecycleMu      syncutil.Mutex
 	activeGeneration atomic.Pointer[gcStateGeneration]
 	generation       *gcStateGeneration
+	etcdClient       *clientv3.Client
 }
 
 // NewGCStateManager creates a GCStateManager of GC and services.
@@ -791,7 +793,9 @@ func (m *GCStateManager) deleteGCBarrierImpl(ctx context.Context, keyspaceID uin
 
 func (m *GCStateManager) getGCStateImpl(ctx context.Context, keyspaceID uint32, excludeGCBarriers bool) (GCState, error) {
 	// Try getting from cache if possible.
-	if generation := m.activeGeneration.Load(); excludeGCBarriers && generation != nil {
+	useCache := excludeGCBarriers
+	failpoint.Inject("getGCStateSkipCache", func() { useCache = false })
+	if generation := m.activeGeneration.Load(); useCache && generation != nil {
 		if cachedGCState, ok := m.gcStateCache.load(keyspaceID); ok && m.activeGeneration.Load() == generation {
 			failpoint.InjectCall("getGCStateCacheAccess", "hit")
 			gcStateCacheAccessHitCounter.Inc()

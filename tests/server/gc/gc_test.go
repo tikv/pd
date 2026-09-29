@@ -844,9 +844,12 @@ func TestGetGCStateSlowPathReadsLatestStateIfLeaderLostBeforeRead(t *testing.T) 
 	oldLeader := leaderServer.GetConfig().Name
 	req.ExcludeGcBarriers = true
 
-	// Start with no local cache and stop immediately before the slow path. The
-	// request has already passed the initial server-side role check, but after
-	// the transfer the manager must bypass cache and continue with the IO read.
+	// Force a fast-path cache miss even if NextGen startup warmup has already
+	// populated null scope. The request still excludes barriers, and the hook
+	// below pauses after the server-side role check before the slow-path read.
+	const skipCacheFailpoint = "github.com/tikv/pd/pkg/gc/getGCStateSkipCache"
+	re.NoError(failpoint.Enable(skipCacheFailpoint, "return(true)"))
+	defer func() { re.NoError(failpoint.Disable(skipCacheFailpoint)) }()
 	point := enableBlockingFailpoint(re, getGCStateBeforeSlowPathFailpoint)
 	defer point.releaseAndDisable(re)
 
