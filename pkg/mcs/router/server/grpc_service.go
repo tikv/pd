@@ -86,6 +86,8 @@ func (s *Service) BatchScanRegions(_ctx context.Context, request *pdpb.BatchScan
 }
 
 // ScanRegions implements the ScanRegions RPC method.
+//
+// Deprecated: use BatchScanRegions instead.
 func (s *Service) ScanRegions(_ctx context.Context, request *pdpb.ScanRegionsRequest) (*pdpb.ScanRegionsResponse, error) {
 	resp, err := grpcutil.ScanRegions(s.GetBasicCluster(), request, false)
 	grpcutil.RequestCounter("ScanRegions", request.GetHeader(), resp.GetHeader().GetError(), regionRequestCounter)

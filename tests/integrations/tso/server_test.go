@@ -87,7 +87,7 @@ func (suite *tsoServerTestSuite) SetupSuite() {
 	re.NoError(err)
 	backendEndpoints := suite.pdLeaderServer.GetAddr()
 	if suite.legacy {
-		suite.pdClient, suite.conn = testutil.MustNewGrpcClient(re, backendEndpoints)
+		suite.pdClient, suite.conn = testutil.MustNewGRPCClient(suite.ctx, re, backendEndpoints)
 	} else {
 		suite.tsoServer, suite.tsoServerCleanup = tests.StartSingleTSOTestServer(suite.ctx, re, backendEndpoints, tempurl.Alloc())
 		suite.tsoClientConn, suite.tsoClient = tso.MustNewGrpcClient(re, suite.tsoServer.GetAddr())

@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -857,29 +858,37 @@ func TestBalanceRegionEmptyRegion(t *testing.T) {
 }
 
 func TestConcurrencyUpdateConfig(t *testing.T) {
+	as := assert.New(t)
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	hb, err := CreateScheduler(types.ScatterRangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.ScatterRangeScheduler, []string{"s_00", "s_50", "t"}))
 	sche := hb.(*scatterRangeScheduler)
 	re.NoError(err)
-	ch := make(chan struct{})
+	stopCh := make(chan struct{})
+	workerDone := make(chan struct{})
 	args := []string{"test", "s_00", "s_99"}
 	go func() {
+		defer close(workerDone)
 		for {
 			select {
-			case <-ch:
+			case <-stopCh:
 				return
 			default:
 			}
-			re.NoError(sche.config.buildWithArgs(args))
-			re.NoError(sche.config.persist())
+			if !as.NoError(sche.config.buildWithArgs(args)) {
+				return
+			}
+			if !as.NoError(sche.config.persist()) {
+				return
+			}
 		}
 	}()
 	for range 1000 {
 		sche.Schedule(tc, false)
 	}
-	ch <- struct{}{}
+	close(stopCh)
+	<-workerDone
 }
 
 func TestBalanceWhenRegionNotHeartbeat(t *testing.T) {

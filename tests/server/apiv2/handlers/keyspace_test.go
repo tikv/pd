@@ -197,13 +197,19 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfigPreconditionsConcurrentS
 	re.NotNil(created)
 
 	nextKey := "next_file_id"
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 	start := make(chan struct{})
-	results := make(chan int, 2)
+	type updateResult struct {
+		status int
+		body   string
+		err    error
+	}
+	results := make(chan updateResult, 2)
 
-	go func() {
+	update := func(next string) {
 		<-start
-		next := "1000"
-		status, body, _ := tryUpdateKeyspaceConfig(re, suite.server, created.Name, &handlers.UpdateConfigParams{
+		status, body, _, err := updateKeyspaceConfig(ctx, suite.server, created.Name, &handlers.UpdateConfigParams{
 			Config: map[string]*string{
 				nextKey: &next,
 			},
@@ -211,33 +217,20 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfigPreconditionsConcurrentS
 				nextKey: nil,
 			},
 		})
-		if status != http.StatusOK && status != http.StatusConflict {
-			re.FailNow("unexpected status", "status=%d body=%s", status, body)
-		}
-		results <- status
-	}()
-	go func() {
-		<-start
-		next := "2000"
-		status, body, _ := tryUpdateKeyspaceConfig(re, suite.server, created.Name, &handlers.UpdateConfigParams{
-			Config: map[string]*string{
-				nextKey: &next,
-			},
-			Preconditions: map[string]*string{
-				nextKey: nil,
-			},
-		})
-		if status != http.StatusOK && status != http.StatusConflict {
-			re.FailNow("unexpected status", "status=%d body=%s", status, body)
-		}
-		results <- status
-	}()
+		results <- updateResult{status: status, body: body, err: err}
+	}
+	go update("1000")
+	go update("2000")
 
 	close(start)
 
-	s1 := <-results
-	s2 := <-results
-	re.ElementsMatch([]int{http.StatusOK, http.StatusConflict}, []int{s1, s2})
+	r1 := <-results
+	r2 := <-results
+	re.NoError(r1.err)
+	re.NoError(r2.err)
+	re.Contains([]int{http.StatusOK, http.StatusConflict}, r1.status, r1.body)
+	re.Contains([]int{http.StatusOK, http.StatusConflict}, r2.status, r2.body)
+	re.ElementsMatch([]int{http.StatusOK, http.StatusConflict}, []int{r1.status, r2.status})
 }
 
 func (suite *keyspaceTestSuite) TestUpdateKeyspaceState() {
