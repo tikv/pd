@@ -121,7 +121,10 @@
 
 **Interfaces:**
 
-- 消费 Task2 的 index callbacks 与 Task3 的两阶段 fill/generation 协议，派发前以已实现签名更新本节。
+- 消费 Task 2 的 `newEnabledKeyspaceCache(client *clientv3.Client, prefix string)` 与 `run(ctx context.Context, hooks enabledKeyspaceLoadHooks)`。`onPage func([]enabledKeyspace)` 可由扫描 worker 并发调用、初始失败重试时可重复；`onInitialSnapshot func([]enabledKeyspace)` 在首次完整发布后调用一次。两者获得值副本，后续 reload 不再调用；回调不能等待 GC I/O、assembly 锁或 manager 锁。索引 ready 不代表初始回调已处理完毕。
+- 消费 Task 3 的 `prepareGCStateLoadBatch(ctx context.Context, generation *gcStateGeneration, next func() (uint32, bool)) (*gcStateLoadBatch, error)` 与 `executeGCStateLoadBatch(ctx context.Context, batch *gcStateLoadBatch) gcStateLoadResult`。`next` 非阻塞消费当前候选；prepare 出错时不持锁，非空 batch 保留 manager RLock，空 batch 已释放。每个成功返回的 batch 在同一 goroutine 恰好执行一次 execute，assembly 在 execute 前释放，execute 返回后才处理等待或调度。
+- `gcStateLoadResult` 的字段为 `completed []uint32`、`failed map[uint32]error`、`joined map[uint32]*gcStateLoadFlight`。execute 返回后读取完整结果；`flight.done` 关闭后才可读取不可变 `flight.err`，也可用 `flight.wait(ctx)`。后台 nil err 直接记完成，不检查缓存是否仍存在，不为每个 joined scope 无界创建等待 goroutine。
+- `gcStateGeneration` 已提供唯一身份、`done` 退休信号和执行批次取消登记；`activeGeneration` 为缓存资格门禁。Task 4 补充 metadata/warmup 生命周期，context 保留在运行函数中，先取消再等 manager 写锁，等待 worker 退出时不持其需要的锁。详细所有权协议见 [loader 注释](../../../pkg/gc/gc_state_loader.go)。
 - 增加或抽取 `GCStateManager.SetEtcdClient(client *clientv3.Client)`，在首个generation启动前由NextGen分支配置；非NextGen不启用metadata/预热。
 - `gcStateWarmup` 拥有有界页提示队列、初始目标/完成状态、共享assembly及四worker调度；运行context由生命周期传入，generation取消会终止所有owned work。
 
