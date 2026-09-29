@@ -41,7 +41,6 @@ func TestGCStateLoadConcurrent(t *testing.T) {
 	release := make(chan struct{})
 	var releaseOnce sync.Once
 	unblock := func() { releaseOnce.Do(func() { close(release) }) }
-	defer unblock()
 	_, provider, m, clean, cancel := newGCStateManagerForTest(t, newGCStateManagerForTestOptions{
 		etcdClientCfgModifier: func(cfg *clientv3.Config) {
 			cfg.DialOptions = append(cfg.DialOptions, grpc.WithChainUnaryInterceptor(func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
@@ -71,12 +70,17 @@ func TestGCStateLoadConcurrent(t *testing.T) {
 	})
 	defer clean()
 	defer cancel()
+	defer unblock()
 	require.NoError(t, provider.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 		if err := wb.SetTxnSafePoint(2, 90); err != nil {
 			return err
 		}
 		return wb.SetGCSafePoint(2, 70)
 	}))
+	joined := make(chan uint32, 15)
+	const joinedFailpoint = "github.com/tikv/pd/pkg/gc/onGCStateLoadJoined"
+	require.NoError(t, failpoint.EnableCall(joinedFailpoint, func(id uint32) { joined <- id }))
+	defer func() { require.NoError(t, failpoint.Disable(joinedFailpoint)) }()
 	enabled.Store(true)
 	results := make(chan GCState, 16)
 	failures := make(chan error, 16)
@@ -88,8 +92,17 @@ func TestGCStateLoadConcurrent(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("load did not start")
 	}
-	// Hold the actual storage read while the other readers enter the cold path.
-	time.Sleep(100 * time.Millisecond)
+	// Keep the owner in storage until every other reader has joined its flight.
+	deadline := time.NewTimer(3 * time.Second)
+	defer deadline.Stop()
+	for range 15 {
+		select {
+		case id := <-joined:
+			require.Equal(t, uint32(2), id)
+		case <-deadline.C:
+			t.Fatal("readers did not all join the blocked load")
+		}
+	}
 	unblock()
 	for range 16 {
 		require.NoError(t, <-failures)

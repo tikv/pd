@@ -32,6 +32,7 @@ import (
 
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 )
@@ -117,6 +118,59 @@ func TestGCStateWarmupBatches(t *testing.T) {
 				require.True(t, ok)
 			}
 		})
+	}
+}
+
+// Available pages must replenish the preceding page's partial batch. Waiting
+// to publish the initial snapshot keeps its reconciliation from hiding a split.
+func TestGCStateWarmupAcrossPages(t *testing.T) {
+	var mu sync.Mutex
+	var sizes []int
+	m := newGCStateLoaderManager(t, func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoke grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+		if txn := gcWarmupRead(req); txn != nil {
+			mu.Lock()
+			sizes = append(sizes, len(txn.Success)/2)
+			mu.Unlock()
+		}
+		return invoke(ctx, method, req, reply, cc, opts...)
+	})
+	entries := gcWarmupEntries(100, 512)
+	for start := 0; start < len(entries); start += 60 {
+		require.NoError(t, m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+			for _, entry := range entries[start:min(start+60, len(entries))] {
+				if err := wb.SetTxnSafePoint(entry.id, uint64(entry.id)+1000); err != nil {
+					return err
+				}
+				if err := wb.SetGCSafePoint(entry.id, uint64(entry.id)+500); err != nil {
+					return err
+				}
+			}
+			return nil
+		}))
+	}
+	m.gcStateCache.store(constant.NullKeyspaceID, gcStateCacheEntry{})
+	w := newGCStateWarmup(m, m.activeGeneration.Load(), nil)
+	w.onPage(entries[:256])
+	w.onPage(entries[256:])
+	runGCWarmupTest(t, w)
+	require.Eventually(t, func() bool {
+		for _, entry := range entries {
+			if _, ok := m.gcStateCache.load(entry.id); !ok {
+				return false
+			}
+		}
+		return true
+	}, 5*time.Second, time.Millisecond)
+	w.onInitialSnapshot(entries)
+	gcWarmupWait(t, w.done)
+	mu.Lock()
+	observed := append([]int(nil), sizes...)
+	mu.Unlock()
+	require.ElementsMatch(t, []int{60, 60, 60, 60, 60, 60, 60, 60, 32}, observed)
+	for _, entry := range entries {
+		cached, ok := m.gcStateCache.load(entry.id)
+		require.True(t, ok)
+		require.Equal(t, gcStateCacheEntry{TxnSafePoint: uint64(entry.id) + 1000, GCSafePoint: uint64(entry.id) + 500}, cached)
 	}
 }
 
