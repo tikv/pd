@@ -27,12 +27,13 @@ const (
 	// ruWindowSeconds is the aligned window summarized from the timeline.
 	ruWindowSeconds = 60
 	// ruWindowDelay is how long a closed window waits for regular reports. It
-	// covers both the report interval and any lag of the client clock.
+	// covers both the report interval and any lag of the client clock. It is
+	// therefore also the longest a source may stay silent before it is
+	// considered gone: a longer silence means a missed regular report.
 	ruWindowDelay = 30
 	// ruTimelineSeconds is how long a second stays useful: its window is
-	// published at most a window plus the delay after the second closes. A
-	// source replays at most this many seconds, and a source silent for longer
-	// can no longer replay anything useful, so it is considered gone.
+	// published at most a window plus the delay after the second closes, and
+	// a source replays at most this many seconds.
 	ruTimelineSeconds = ruWindowSeconds + ruWindowDelay
 	// ruTimelineClockSkew is how far, in seconds, a client clock may run ahead
 	// of the resource manager before its reported seconds are rejected.
@@ -203,18 +204,20 @@ func (t *ruTimeline) record(item *consumptionItem, now time.Time) {
 		t.groups[key] = g
 		// A newly observed group cannot establish coverage before its first
 		// report. Early in a term, it also cannot know the sources that have
-		// not reported yet, so it withholds windows until any of them would
-		// have expired, as a source seen earlier would have.
-		g.invalidate(sec, max(sec, t.since+ruTimelineSeconds))
+		// not reported yet, so it withholds windows until any such source
+		// would have missed a regular report.
+		g.invalidate(sec, max(sec, t.since+ruWindowDelay))
 	}
 	source := g.sources[item.clientUniqueID]
 	created := source == nil
 	if created {
 		if t.sourceCount >= ruTimelineMaxSources {
 			// A rejected source has no state to merge or expire, so withhold
-			// every window it may replay or leave unreported.
+			// every window it may still replay (the backward bound) or leave
+			// unreported before it would have missed a regular report (the
+			// forward bound).
 			ruTimelineCapacity.Inc()
-			g.invalidate(sec-ruTimelineSeconds, sec+ruTimelineSeconds)
+			g.invalidate(sec-ruTimelineSeconds, sec+ruWindowDelay)
 			return
 		}
 		source = &ruSource{first: sec}
@@ -334,10 +337,10 @@ func (t *ruTimeline) flush(now time.Time) {
 			delete(g.invalid, g.nextWindow)
 		}
 		for k, source := range g.sources {
-			if sec-source.lastSeen > ruTimelineSeconds {
-				// The source can no longer replay its unreported tail. Later
-				// windows are judged by the remaining sources, as for a source
-				// that never reported.
+			if sec-source.lastSeen > ruWindowDelay {
+				// The source missed a regular report, so its unreported tail
+				// cannot be known. Later windows are judged by the remaining
+				// sources, as for a source that never reported.
 				g.invalidate(source.lastSeen, sec)
 				delete(g.sources, k)
 				t.sourceCount--

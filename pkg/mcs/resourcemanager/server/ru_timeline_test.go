@@ -121,9 +121,10 @@ func TestRUTimelineUnavailable(t *testing.T) {
 					b.Rru, b.Wru = math.MaxFloat64, math.MaxFloat64
 				}
 			case "capacity-tail":
-				// A source rejected before the window may still be consuming in it.
+				// A source rejected within the grace before the window may still
+				// be consuming in it.
 				timeline.sourceCount = ruTimelineMaxSources
-				timeline.record(timelineReport(2, start-1, nil), time.Unix(start-1, 0))
+				timeline.record(timelineReport(2, start-ruWindowDelay-1, nil), time.Unix(start-ruWindowDelay, 0))
 			}
 			timeline.record(report, time.Unix(start+65, 0))
 			// Each follow-up would let the window be published if it were ignored.
@@ -168,6 +169,20 @@ func TestRUTimelineUnavailable(t *testing.T) {
 			re.Empty(families)
 		})
 	}
+}
+
+// TestRUTimelineCapacityGrace pins the other side of the capacity-tail
+// scenario: a source rejected more than the grace before a window cannot be
+// consuming in it, so the window still publishes.
+func TestRUTimelineCapacityGrace(t *testing.T) {
+	re := require.New(t)
+	const start = testTimelineStart
+	c, timeline := newWarmTimeline(1)
+	timeline.sourceCount = ruTimelineMaxSources
+	timeline.record(timelineReport(2, start-ruWindowDelay-2, nil), time.Unix(start-ruWindowDelay-1, 0))
+	timeline.record(timelineReport(1, start, make([][2]float64, 60)), time.Unix(start+65, 0))
+	timeline.flush(time.Unix(start+90, 0))
+	re.Equal(start+60, c.results[testTimelineKey].summary.end)
 }
 
 func TestRUTimelineIgnoresUntimedProducers(t *testing.T) {
@@ -251,28 +266,69 @@ func TestRUTimelineServerClockStep(t *testing.T) {
 }
 
 func TestRUTimelineResetWarmup(t *testing.T) {
+	const start = testTimelineStart
+	for _, tc := range []struct {
+		name     string
+		offset   int64 // where the first post-reset report lands within its window
+		withheld int64 // windows withheld after the first one
+	}{
+		{"grace-within-window", 0, 0},
+		{"grace-crosses-window", ruWindowSeconds - ruWindowDelay, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			c, timeline := newWarmTimeline(1)
+			timeline.record(timelineReport(1, start, make([][2]float64, 60)), time.Unix(start+65, 0))
+			timeline.flush(time.Unix(start+90, 0))
+			re.NotEmpty(c.results)
+
+			timeline.reset()
+			re.Empty(c.results)
+			// A new term does not know the sources that stayed silent across
+			// the reset, so even a full replay withholds the window of the
+			// first report, and the next one when the 30-second grace for
+			// such sources crosses into it.
+			firstNow := start + 120 + tc.offset
+			base := windowStart(firstNow)
+			timeline.record(timelineReport(1, firstNow-ruTimelineSeconds, make([][2]float64, ruTimelineSeconds)), time.Unix(firstNow, 0))
+			for w := base; w <= base+360; w += ruWindowSeconds {
+				timeline.record(timelineReport(1, w, make([][2]float64, 60)), time.Unix(w+65, 0))
+				timeline.flush(time.Unix(w+90, 0))
+				if w <= base+tc.withheld*ruWindowSeconds {
+					re.Empty(c.results)
+				} else {
+					re.Equal(ruWindowSummary{end: w + 60, peakAt: w}, c.results[testTimelineKey].summary)
+				}
+			}
+		})
+	}
+}
+
+// TestRUTimelineIdleCadenceNoExpiry verifies that a client reporting at the
+// minimum required cadence, once every 20 seconds, never trips the
+// 30-second silence grace: a healthy idle client produces no gaps. It flushes
+// every second as production does; otherwise the check never sees the silence
+// between reports.
+func TestRUTimelineIdleCadenceNoExpiry(t *testing.T) {
 	re := require.New(t)
 	const start = testTimelineStart
 	c, timeline := newWarmTimeline(1)
-	timeline.record(timelineReport(1, start, make([][2]float64, 60)), time.Unix(start+65, 0))
-	timeline.flush(time.Unix(start+90, 0))
-	re.NotEmpty(c.results)
-
-	timeline.reset()
-	re.Empty(c.results)
-	// A new term does not know the sources that stayed silent across the
-	// reset, so even complete replay withholds windows until any such source
-	// would have expired.
-	timeline.record(timelineReport(1, start, make([][2]float64, 120)), time.Unix(start+120, 0))
-	for w := start + 120; w <= start+360; w += ruWindowSeconds {
-		timeline.record(timelineReport(1, w, make([][2]float64, 60)), time.Unix(w+65, 0))
-		timeline.flush(time.Unix(w+90, 0))
-		if w <= start+ruTimelineSeconds+120 {
-			re.Empty(c.results)
-		} else {
-			re.Equal(ruWindowSummary{end: w + 60, peakAt: w}, c.results[testTimelineKey].summary)
+	published := make(map[int64]bool)
+	for offset := range int64(301) {
+		now := start + offset
+		if offset%20 == 0 {
+			replay := max(start-60, now-ruTimelineSeconds)
+			timeline.record(timelineReport(1, replay, make([][2]float64, now-replay)), time.Unix(now, 0))
+		}
+		timeline.flush(time.Unix(now, 0))
+		re.Equal(1, timeline.sourceCount)
+		if s, ok := c.results[testTimelineKey]; ok {
+			published[s.summary.end-start] = true
 		}
 	}
+	// Every window after the initial warm-up one publishes; the 20-second
+	// cadence never lets the source miss the 30-second grace and open a gap.
+	re.Equal(map[int64]bool{60: true, 120: true, 180: true, 240: true}, published)
 }
 
 func TestRUTimelineIdleAndRetention(t *testing.T) {
@@ -311,7 +367,7 @@ func TestRUTimelineSourceExpiry(t *testing.T) {
 	re.Len(timeline.groups[testTimelineKey].sources, 1)
 	// Windows overlapping the unknown tail are withheld until expiry; later
 	// windows are judged by the remaining source alone.
-	// Client 2 last reported at start+65 and expires 90 seconds later, which
-	// withholds the windows ending at start+120 and start+180.
-	re.Equal(map[int64]bool{60: true, 240: true, 300: true, 360: true}, published)
+	// Client 2 last reported at start+65 and expires 30 seconds later, which
+	// withholds only the window ending at start+120.
+	re.Equal(map[int64]bool{60: true, 180: true, 240: true, 300: true, 360: true}, published)
 }
