@@ -106,6 +106,12 @@ type RawTxnCapable interface {
 	CreateRawTxn() RawTxn
 }
 
+// RawTxnWithContextCapable is implemented by KV backends that support creating
+// raw transactions bound to a caller's context.
+type RawTxnWithContextCapable interface {
+	CreateRawTxnWithContext(context.Context) RawTxn
+}
+
 // BaseReadWrite is the API set, shared by Base and Txn interfaces, that provides basic KV read and write operations.
 type BaseReadWrite interface {
 	Save(key, value string) error
