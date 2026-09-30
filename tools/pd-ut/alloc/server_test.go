@@ -49,9 +49,9 @@ func TestRunHTTPServerPublishesReachableAddress(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, allocatorURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, allocatorURL, nil) // #nosec G704 -- allocator URL is set by the local test harness.
 	re.NoError(err)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := http.DefaultClient.Do(req) // #nosec G704 -- allocator URL is set by the local test harness.
 	re.NoError(err)
 	defer func() { re.NoError(resp.Body.Close()) }()
 	re.Equal(http.StatusOK, resp.StatusCode)
