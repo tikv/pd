@@ -24,10 +24,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gogo/protobuf/proto"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/keyspace"
@@ -323,17 +325,17 @@ func (c *enabledKeyspaceCache) watch(ctx context.Context, nextRevision int64) er
 				pendingRevision = max(pendingRevision, event.Kv.ModRevision)
 				switch event.Type {
 				case mvccpb.PUT:
-					id, entry, enabled, err := c.decode(event.Kv.Key, event.Kv.Value)
+					id, entry, enabled, err := c.decodeKeyspaceMeta(event.Kv.Key, event.Kv.Value)
 					if err != nil {
 						return err
 					}
 					changes = append(changes, change{id: id, entry: entry, enabled: enabled})
 				case mvccpb.DELETE:
-					id64, err := strconv.ParseUint(strings.TrimPrefix(string(event.Kv.Key), c.prefix), 10, 32)
+					id, err := c.parseKeyspaceID(event.Kv.Key)
 					if err != nil {
-						return fmt.Errorf("invalid deleted keyspace metadata key %q: %w", event.Kv.Key, err)
+						return fmt.Errorf("invalid deleted keyspace metadata: %w", err)
 					}
-					changes = append(changes, change{id: uint32(id64)})
+					changes = append(changes, change{id: id})
 				default:
 					return fmt.Errorf("unexpected keyspace metadata event type %v", event.Type)
 				}
@@ -348,6 +350,33 @@ func (c *enabledKeyspaceCache) watch(ctx context.Context, nextRevision int64) er
 			}
 		}
 	}
+}
+
+func (c *enabledKeyspaceCache) parseKeyspaceID(rawKey []byte) (uint32, error) {
+	key := string(rawKey)
+	if !strings.HasPrefix(key, c.prefix) {
+		return 0, fmt.Errorf("keyspace metadata key %q is outside prefix", key)
+	}
+	id64, err := strconv.ParseUint(strings.TrimPrefix(key, c.prefix), 10, 32)
+	if err != nil {
+		return 0, fmt.Errorf("invalid keyspace metadata key %q: %w", key, err)
+	}
+	return uint32(id64), nil
+}
+
+func (c *enabledKeyspaceCache) decodeKeyspaceMeta(rawKey, rawValue []byte) (uint32, enabledKeyspace, bool, error) {
+	id, err := c.parseKeyspaceID(rawKey)
+	if err != nil {
+		return 0, enabledKeyspace{}, false, err
+	}
+	meta := &keyspacepb.KeyspaceMeta{}
+	if err := proto.Unmarshal(rawValue, meta); err != nil {
+		return 0, enabledKeyspace{}, false, fmt.Errorf("decode keyspace metadata %q: %w", rawKey, err)
+	}
+	if meta.GetId() != id {
+		return 0, enabledKeyspace{}, false, fmt.Errorf("keyspace metadata %q contains ID %d", rawKey, meta.GetId())
+	}
+	return id, enabledKeyspace{id: id, gcManagementType: meta.Config[keyspace.GCManagementType]}, meta.State == keyspacepb.KeyspaceState_ENABLED, nil
 }
 
 func sortedEnabledKeyspaces(entries map[uint32]enabledKeyspace) []enabledKeyspace {

@@ -44,9 +44,10 @@ type gcStateWarmupScope struct {
 }
 
 // gcStateWarmup owns only the initial discovery campaign. inputMu protects
-// short, nonblocking callback admission, independently of assembly and I/O.
-// assembly serializes candidate consumption through the common loader's single
-// cache/flight check. Workers release it before executing their own batch.
+// short, nonblocking callback admission, independently of stateMu and I/O.
+// stateMu protects scope scheduling, retry/completion state, and candidate/batch
+// assembly through the common loader's cache/flight check. Workers release it
+// before storage I/O.
 type gcStateWarmup struct {
 	manager    *GCStateManager
 	generation *gcStateGeneration
@@ -59,15 +60,15 @@ type gcStateWarmup struct {
 	wake      chan struct{}
 	done      chan struct{}
 
-	assembly syncutil.Mutex
-	scopes   map[uint32]*gcStateWarmupScope
+	stateMu syncutil.Mutex
+	scopes  map[uint32]*gcStateWarmupScope
 	// Only joined flights and failed scopes need periodic inspection.
-	waiting     map[uint32]*gcStateWarmupScope
-	remaining   int
-	candidates  []uint32
-	initial     bool
-	nullPending bool
-	finished    chan struct{}
+	waiting                   map[uint32]*gcStateWarmupScope
+	remaining                 int
+	candidates                []uint32
+	initialSnapshotReconciled bool
+	nullPending               bool
+	finished                  chan struct{}
 }
 
 func newGCStateWarmup(m *GCStateManager, generation *gcStateGeneration, index *enabledKeyspaceCache) *gcStateWarmup {
@@ -136,7 +137,7 @@ func (w *gcStateWarmup) run(ctx context.Context) {
 		}()
 	}
 	workers.Wait()
-	// Callbacks never acquire assembly. Closing admission before dropping the
+	// Callbacks never acquire stateMu. Closing admission before dropping the
 	// mailboxes also releases queued pages when the campaign is cancelled.
 	w.inputMu.Lock()
 	w.accepting = false
@@ -152,13 +153,13 @@ func (w *gcStateWarmup) work(ctx context.Context) {
 	ticker := time.NewTicker(gcStateWarmupPollInterval)
 	defer ticker.Stop()
 	for ctx.Err() == nil {
-		w.assembly.Lock()
+		w.stateMu.Lock()
 		if !w.nullPending {
 			w.ingest()
 			w.refresh(time.Now())
 		}
-		if w.complete() {
-			w.assembly.Unlock()
+		if w.tryFinish() {
+			w.stateMu.Unlock()
 			return
 		}
 		if w.nullPending || len(w.candidates) > 0 {
@@ -178,18 +179,18 @@ func (w *gcStateWarmup) work(ctx context.Context) {
 				}
 			}
 			batch, err := w.manager.prepareGCStateLoadBatch(ctx, w.generation, next)
-			w.assembly.Unlock()
+			w.stateMu.Unlock()
 			if err != nil {
 				return
 			}
 			result := w.manager.executeGCStateLoadBatch(ctx, batch)
-			w.assembly.Lock()
-			w.record(result, time.Now())
-			w.assembly.Unlock()
+			w.stateMu.Lock()
+			w.recordBatchResult(result, time.Now())
+			w.stateMu.Unlock()
 			w.notify()
 			continue
 		}
-		w.assembly.Unlock()
+		w.stateMu.Unlock()
 		select {
 		case <-ctx.Done():
 			return
@@ -204,9 +205,9 @@ func (w *gcStateWarmup) work(ctx context.Context) {
 }
 
 // ingest only receives already available pages. No manager lock is needed for
-// target reconciliation, and no producer can block on this assembly section.
+// target reconciliation, and no producer can block on this stateMu critical section.
 func (w *gcStateWarmup) ingest() {
-	for !w.initial {
+	for !w.initialSnapshotReconciled {
 		select {
 		case entries := <-w.pages:
 			for _, entry := range entries {
@@ -219,7 +220,7 @@ func (w *gcStateWarmup) ingest() {
 		}
 	}
 snapshot:
-	if w.initial {
+	if w.initialSnapshotReconciled {
 		return
 	}
 	select {
@@ -248,7 +249,7 @@ snapshot:
 				delete(w.waiting, id)
 			}
 		}
-		w.initial = true
+		w.initialSnapshotReconciled = true
 	default:
 	}
 }
@@ -289,7 +290,7 @@ func (w *gcStateWarmup) refresh(now time.Time) {
 			case <-scope.joined.done:
 				err := scope.joined.err
 				scope.joined = nil
-				w.finish(id, scope, err, now)
+				w.recordScopeResult(id, scope, err, now)
 			default:
 			}
 		}
@@ -298,9 +299,9 @@ func (w *gcStateWarmup) refresh(now time.Time) {
 		}
 		// Only retries consult the live index. They may retire an obsolete
 		// original target, but live membership never adds a new target.
-		if w.initial && id != constant.NullKeyspaceID && w.index != nil {
+		if w.initialSnapshotReconciled && id != constant.NullKeyspaceID && w.index != nil {
 			if w.index.canSkipGCStateWarmup(id) {
-				w.finish(id, scope, nil, now)
+				w.recordScopeResult(id, scope, nil, now)
 				continue
 			}
 		}
@@ -310,15 +311,15 @@ func (w *gcStateWarmup) refresh(now time.Time) {
 	}
 }
 
-func (w *gcStateWarmup) record(result gcStateLoadResult, now time.Time) {
+func (w *gcStateWarmup) recordBatchResult(result gcStateLoadResult, now time.Time) {
 	for _, id := range result.completed {
 		if scope := w.scopes[id]; scope != nil {
-			w.finish(id, scope, nil, now)
+			w.recordScopeResult(id, scope, nil, now)
 		}
 	}
 	for id, err := range result.failed {
 		if scope := w.scopes[id]; scope != nil {
-			w.finish(id, scope, err, now)
+			w.recordScopeResult(id, scope, err, now)
 		}
 	}
 	for id, flight := range result.joined {
@@ -330,7 +331,7 @@ func (w *gcStateWarmup) record(result gcStateLoadResult, now time.Time) {
 	}
 }
 
-func (w *gcStateWarmup) finish(id uint32, scope *gcStateWarmupScope, err error, now time.Time) {
+func (w *gcStateWarmup) recordScopeResult(id uint32, scope *gcStateWarmupScope, err error, now time.Time) {
 	scope.running = false
 	if err == nil {
 		if !scope.completed {
@@ -349,13 +350,13 @@ func (w *gcStateWarmup) finish(id uint32, scope *gcStateWarmupScope, err error, 
 	scope.retryAt = now.Add(scope.retryDelay)
 }
 
-func (w *gcStateWarmup) complete() bool {
+func (w *gcStateWarmup) tryFinish() bool {
 	select {
 	case <-w.finished:
 		return true
 	default:
 	}
-	if !w.initial || w.remaining != 0 {
+	if !w.initialSnapshotReconciled || w.remaining != 0 {
 		return false
 	}
 	close(w.finished)

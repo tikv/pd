@@ -58,7 +58,7 @@ type gcStateLoadBatch struct {
 // checking and claiming a flight share a critical section with publication.
 //
 // A nonempty batch retains m.mu.RLock. Its owner MUST call execute on the SAME
-// goroutine, after releasing any assembly lock and before waiting on anything.
+// goroutine, after releasing the warmup stateMu and before waiting on anything.
 // Empty batches retain no lock, but execute still returns their result. A nil
 // batch on error owns no lock. Cached completions and joined flights are available
 // in batch.result immediately; the owner must execute before waiting on flights.

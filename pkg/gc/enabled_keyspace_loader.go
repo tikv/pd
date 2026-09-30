@@ -19,18 +19,12 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"strconv"
-	"strings"
 	"sync"
 
-	"github.com/gogo/protobuf/proto"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/pingcap/kvproto/pkg/keyspacepb"
-
-	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/utils/keypath"
 )
@@ -178,7 +172,7 @@ func (c *enabledKeyspaceCache) decodePage(kvs []*mvccpb.KeyValue, more bool, rev
 		if kv == nil {
 			return nil, 0, fmt.Errorf("missing keyspace metadata at revision %d", revision)
 		}
-		id, entry, enabled, err := c.decode(kv.Key, kv.Value)
+		id, entry, enabled, err := c.decodeKeyspaceMeta(kv.Key, kv.Value)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -188,24 +182,4 @@ func (c *enabledKeyspaceCache) decodePage(kvs []*mvccpb.KeyValue, more bool, rev
 		}
 	}
 	return page, lastID, nil
-}
-
-func (c *enabledKeyspaceCache) decode(rawKey, rawValue []byte) (uint32, enabledKeyspace, bool, error) {
-	key := string(rawKey)
-	if !strings.HasPrefix(key, c.prefix) {
-		return 0, enabledKeyspace{}, false, fmt.Errorf("keyspace metadata key %q is outside prefix", key)
-	}
-	id64, err := strconv.ParseUint(strings.TrimPrefix(key, c.prefix), 10, 32)
-	if err != nil {
-		return 0, enabledKeyspace{}, false, fmt.Errorf("invalid keyspace metadata key %q: %w", key, err)
-	}
-	id := uint32(id64)
-	meta := &keyspacepb.KeyspaceMeta{}
-	if err := proto.Unmarshal(rawValue, meta); err != nil {
-		return 0, enabledKeyspace{}, false, fmt.Errorf("decode keyspace metadata %q: %w", key, err)
-	}
-	if meta.GetId() != id {
-		return 0, enabledKeyspace{}, false, fmt.Errorf("keyspace metadata %q contains ID %d", key, meta.GetId())
-	}
-	return id, enabledKeyspace{id: id, gcManagementType: meta.Config[keyspace.GCManagementType]}, meta.State == keyspacepb.KeyspaceState_ENABLED, nil
 }

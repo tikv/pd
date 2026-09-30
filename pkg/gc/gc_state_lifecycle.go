@@ -141,7 +141,7 @@ func (m *GCStateManager) stopGCStateGeneration(generation *gcStateGeneration) {
 	}
 	m.mu.Unlock()
 	m.lifecycleMu.Unlock()
-	// Runtime workers may need manager/assembly locks to finish cancellation.
+	// Runtime workers may need manager and warmup state locks to finish cancellation.
 	generation.waitRuntime()
 }
 

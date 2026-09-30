@@ -354,18 +354,18 @@ func TestGCStateWarmupJoinedSuccessSurvivesInvalidation(t *testing.T) {
 	runGCWarmupTest(t, w)
 	w.onPage(gcWarmupEntries(100, 1))
 	require.Eventually(t, func() bool {
-		w.assembly.Lock()
-		defer w.assembly.Unlock()
+		w.stateMu.Lock()
+		defer w.stateMu.Unlock()
 		scope := w.scopes[100]
 		return scope != nil && scope.joined != nil
 	}, 3*time.Second, time.Millisecond)
-	w.assembly.Lock()
+	w.stateMu.Lock()
 	close(release)
 	err := <-foreground
 	m.mu.Lock()
 	m.gcStateCache.remove(100)
 	m.mu.Unlock()
-	w.assembly.Unlock()
+	w.stateMu.Unlock()
 	require.NoError(t, err)
 	w.onInitialSnapshot(gcWarmupEntries(100, 1))
 	gcWarmupWait(t, w.done)
@@ -385,8 +385,8 @@ func TestGCStateWarmupInitialTargetsOnly(t *testing.T) {
 	runGCWarmupTest(t, w)
 	w.onPage(gcWarmupEntries(100, 1))
 	require.Eventually(t, func() bool {
-		w.assembly.Lock()
-		defer w.assembly.Unlock()
+		w.stateMu.Lock()
+		defer w.stateMu.Unlock()
 		scope := w.scopes[100]
 		return scope != nil && scope.completed
 	}, 3*time.Second, time.Millisecond)
@@ -601,8 +601,8 @@ func TestGCStateWarmupReloadDoesNotExpandTargets(t *testing.T) {
 	t.Cleanup(func() { cancel(); gcWarmupWait(t, indexDone) })
 	gcWarmupWait(t, started)
 	require.Eventually(t, func() bool {
-		w.assembly.Lock()
-		defer w.assembly.Unlock()
+		w.stateMu.Lock()
+		defer w.stateMu.Unlock()
 		scope := w.scopes[100]
 		return scope != nil && scope.joined != nil
 	}, 3*time.Second, time.Millisecond)
@@ -686,7 +686,7 @@ func TestGCStateWarmupRetiresObsoleteTarget(t *testing.T) {
 	w := newGCStateWarmup(m, m.activeGeneration.Load(), index)
 	w.onInitialSnapshot(gcWarmupEntries(100, 1))
 	runGCWarmupTest(t, w)
-	require.Eventually(t, func() bool { w.assembly.Lock(); defer w.assembly.Unlock(); return w.waiting[100] != nil }, 3*time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { w.stateMu.Lock(); defer w.stateMu.Unlock(); return w.waiting[100] != nil }, 3*time.Second, time.Millisecond)
 	index.publish(context.Background(), map[uint32]enabledKeyspace{}, 2)
 	gcWarmupWait(t, w.done)
 	require.Equal(t, int32(1), reads.Load())
