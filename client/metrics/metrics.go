@@ -27,9 +27,7 @@ import (
 var initialized int32
 
 func init() {
-	initMetrics(prometheus.Labels{})
-	initLabelValues()
-	initRegisteredConsumers()
+	initMetricsAndRegisteredConsumers(prometheus.Labels{})
 }
 
 var consumersInitializers = struct {
@@ -45,9 +43,11 @@ func RegisterConsumer(initConsumer func()) {
 	initConsumer()
 }
 
-func initRegisteredConsumers() {
+func initMetricsAndRegisteredConsumers(constLabels prometheus.Labels) {
 	consumersInitializers.Lock()
 	defer consumersInitializers.Unlock()
+	initMetrics(constLabels)
+	initLabelValues()
 	for _, initConsumer := range consumersInitializers.value {
 		initConsumer()
 	}
@@ -56,10 +56,9 @@ func initRegisteredConsumers() {
 // InitAndRegisterMetrics initializes and registers the metrics manually.
 func InitAndRegisterMetrics(constLabels prometheus.Labels) {
 	if atomic.CompareAndSwapInt32(&initialized, 0, 1) {
-		// init metrics with constLabels
-		initMetrics(constLabels)
-		initLabelValues()
-		initRegisteredConsumers()
+		// Rebuild metrics and publish them to consumers under the same lock used
+		// for late consumer registration.
+		initMetricsAndRegisteredConsumers(constLabels)
 		// register metrics
 		registerMetrics()
 		resourcegroupmetrics.InitAndRegisterMetrics(constLabels)
