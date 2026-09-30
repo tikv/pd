@@ -527,7 +527,6 @@ func notIsolatedStoresWithLabel(stores []*core.StoreInfo, label string) [][]*cor
 // labelGroupKey returns a key under which label values are equal iff they are
 // equal under strings.EqualFold, as compared by StoreInfo.CompareLocation.
 func labelGroupKey(value string) string {
-	hasUpper := false
 	for i := range len(value) {
 		c := value[i]
 		if c >= utf8.RuneSelf {
@@ -543,12 +542,8 @@ func labelGroupKey(value string) string {
 				return canonical
 			}, value)
 		}
-		hasUpper = hasUpper || ('A' <= c && c <= 'Z')
 	}
 	// For ASCII values, the key above reduces to ASCII lowercase.
-	if !hasUpper {
-		return value
-	}
 	return strings.ToLower(value)
 }
 
