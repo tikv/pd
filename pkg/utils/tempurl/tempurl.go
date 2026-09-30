@@ -94,6 +94,7 @@ func getFromUT() string {
 	// The allocator outlives test subprocesses, so do not leave idle connection
 	// goroutines running when a subprocess checks for leaks.
 	req.Close = true
+	// #nosec G704 -- The URL is provided by the local test harness.
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return ""
