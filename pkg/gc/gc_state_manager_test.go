@@ -570,9 +570,8 @@ func (s *gcStateManagerTestSuite) TestCompatibleUpdateGCSafePointSequentiallyWit
 		return wb.SetGCSafePoint(keyspaceID, 101)
 	})
 	re.NoError(err)
-	oldLeadership := s.manager.nodeLeadership.Load()
-	s.manager.nodeLeadership.Store(0)
-	defer s.manager.nodeLeadership.Store(oldLeadership)
+	oldGeneration := s.manager.activeGeneration.Swap(nil)
+	defer s.manager.activeGeneration.Store(oldGeneration)
 
 	gcSafePoint, err = s.manager.CompatibleLoadGCSafePoint(keyspaceID)
 	re.NoError(err)
