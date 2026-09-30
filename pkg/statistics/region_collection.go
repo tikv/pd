@@ -15,7 +15,10 @@
 package statistics
 
 import (
+	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"go.uber.org/zap"
 
@@ -486,7 +489,7 @@ func notIsolatedStoresWithLabel(stores []*core.StoreInfo, label string) [][]*cor
 	valueStoresMap := make(map[string][]*core.StoreInfo)
 
 	for _, s := range stores {
-		labelValue := s.GetLabelValue(label)
+		labelValue := labelGroupKey(s.GetLabelValue(label))
 		if labelValue == "" {
 			emptyValueStores = append(emptyValueStores, s)
 		} else {
@@ -519,6 +522,29 @@ func notIsolatedStoresWithLabel(stores []*core.StoreInfo, label string) [][]*cor
 		}
 	}
 	return res
+}
+
+// labelGroupKey returns a key under which label values are equal iff they are
+// equal under strings.EqualFold, as compared by StoreInfo.CompareLocation.
+func labelGroupKey(value string) string {
+	for i := range len(value) {
+		c := value[i]
+		if c >= utf8.RuneSelf {
+			// Map each rune to the smallest rune in its simple-fold orbit.
+			return strings.Map(func(r rune) rune {
+				canonical := r
+				for next := unicode.SimpleFold(r); next != r; next = unicode.SimpleFold(next) {
+					canonical = min(canonical, next)
+				}
+				if canonical >= 'A' && canonical <= 'Z' {
+					return canonical + ('a' - 'A')
+				}
+				return canonical
+			}, value)
+		}
+	}
+	// For ASCII values, the key above reduces to ASCII lowercase.
+	return strings.ToLower(value)
 }
 
 // logDownPeerWithNoDisconnectedStore logs down peers on connected stores.
