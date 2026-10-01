@@ -1603,7 +1603,7 @@ func getRegionCount(c *gin.Context) {
 	if !ok {
 		return
 	}
-	count := basicCluster.GetTotalRegionCount()
+	count := basicCluster.GetTotalRegionCountAtomic()
 	c.IndentedJSON(http.StatusOK, &response.RegionsInfo{Count: count})
 }
 
