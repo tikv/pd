@@ -433,6 +433,41 @@ func TestMetricsCleanupUsesCreationTimeKeyspaceName(t *testing.T) {
 	}
 }
 
+func TestSetGroupReacquiresOverrideGaugesAfterDelete(t *testing.T) {
+	re := require.New(t)
+	const keyspaceName, groupName = "override-reacquire-ks", "override-reacquire-group"
+	t.Cleanup(func() { deleteLabelValues(keyspaceName, groupName, defaultTypeLabel) })
+
+	group := &ResourceGroup{
+		Name: groupName,
+		RUSettings: NewRequestUnitSettings(groupName, &rmpb.TokenBucket{
+			Settings: &rmpb.TokenLimitSettings{FillRate: 100, BurstLimit: 200},
+		}),
+	}
+	m := newGaugeMetrics(keyspaceName, groupName)
+	fillRate := collectorWithLabels(overrideSettings, map[string]string{
+		newResourceGroupNameLabel: groupName, keyspaceNameLabel: keyspaceName, typeLabel: fillRateLabel,
+	})
+	burstLimit := collectorWithLabels(overrideSettings, map[string]string{
+		newResourceGroupNameLabel: groupName, keyspaceNameLabel: keyspaceName, typeLabel: burstLimitLabel,
+	})
+
+	group.overrideFillRateAndBurstLimit(50, 80)
+	m.setGroup(group, keyspaceName)
+	re.Equal(float64(50), testutil.ToFloat64(fillRate))
+	re.Equal(float64(80), testutil.ToFloat64(burstLimit))
+
+	group.overrideFillRateAndBurstLimit(-1, -1)
+	m.setGroup(group, keyspaceName)
+	re.Zero(testutil.CollectAndCount(fillRate))
+	re.Zero(testutil.CollectAndCount(burstLimit))
+
+	group.overrideFillRateAndBurstLimit(60, 90)
+	m.setGroup(group, keyspaceName)
+	re.Equal(float64(60), testutil.ToFloat64(fillRate))
+	re.Equal(float64(90), testutil.ToFloat64(burstLimit))
+}
+
 func collectorWithLabels(collector prometheus.Collector, labels map[string]string) prometheus.Collector {
 	return labelFilterCollector{collector: collector, labels: labels}
 }

@@ -538,12 +538,14 @@ func (m *gaugeMetrics) setGroup(group *ResourceGroup, _keyspaceName string) {
 	if overrideFillRate == -1 {
 		overrideSettings.DeleteLabelValues(group.Name, m.keyspaceName, fillRateLabel)
 	} else {
+		m.overrideFillRateGauge = overrideSettings.WithLabelValues(group.Name, m.keyspaceName, fillRateLabel)
 		m.overrideFillRateGauge.Set(overrideFillRate)
 	}
 	overrideBurstLimit := group.getOverrideBurstLimit()
 	if overrideBurstLimit == -1 {
 		overrideSettings.DeleteLabelValues(group.Name, m.keyspaceName, burstLimitLabel)
 	} else {
+		m.overrideBurstLimitGauge = overrideSettings.WithLabelValues(group.Name, m.keyspaceName, burstLimitLabel)
 		m.overrideBurstLimitGauge.Set(float64(overrideBurstLimit))
 	}
 }
