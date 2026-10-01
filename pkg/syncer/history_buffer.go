@@ -134,6 +134,46 @@ func (h *historyBuffer) record(records ...*core.RegionInfo) {
 	}
 }
 
+func (h *historyBuffer) recordUpdates(updates ...RegionUpdate) int {
+	return h.recordUpdatesFrom(0, false, updates...)
+}
+
+func (h *historyBuffer) recordUpdatesFrom(replayFrom uint64, hasDownstream bool, updates ...RegionUpdate) int {
+	if len(updates) == 0 {
+		return 0
+	}
+	h.Lock()
+	defer h.Unlock()
+	recordCount := len(updates)
+	// A full sync needs only correctness-critical changes for catch-up. Letting
+	// flow-only updates consume the retained window can otherwise exhaust the
+	// bounded history before a large snapshot finishes.
+	skipStats := len(h.retains) > 0
+	if skipStats {
+		recordCount = 0
+		for _, update := range updates {
+			if !update.StatsOnly {
+				recordCount++
+			}
+		}
+	}
+	if recordCount == 0 {
+		return 0
+	}
+	endIndex := h.index + uint64(recordCount)
+	if hasDownstream && replayFrom < endIndex {
+		h.observeRequiredWindowLocked(endIndex - replayFrom)
+	}
+	h.prepareRequiredWindowLocked(uint64(recordCount))
+	for _, update := range updates {
+		if update.StatsOnly && skipStats {
+			continue
+		}
+		h.recordLocked(update.Region)
+	}
+	return recordCount
+}
+
 func (h *historyBuffer) recordLocked(r *core.RegionInfo) {
 	syncIndexGauge.Set(float64(h.index))
 	h.records[h.tail] = r
