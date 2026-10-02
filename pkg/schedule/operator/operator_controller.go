@@ -19,6 +19,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -87,6 +88,11 @@ type Controller struct {
 	config    config.SharedConfigProvider
 	cluster   *core.BasicCluster
 	hbStreams *hbstream.HeartbeatStreams
+
+	// operatorLock serializes bulk cancellation with operator addition, promotion,
+	// and the final dispatch enqueue.
+	operatorLock       syncutil.Mutex
+	operatorGeneration atomic.Uint64
 
 	// fast path, TTLUint64 is safe for concurrent.
 	fastOperators *cache.TTLUint64
@@ -164,7 +170,8 @@ func (oc *Controller) Dispatch(region *core.RegionInfo, source string, recordOpS
 			if source == DispatchFromHeartBeat && oc.checkStaleOperator(op, step, region) {
 				return
 			}
-			oc.SendScheduleCommand(region, step, source)
+			failpoint.InjectCall("cancelOperatorBeforeDispatch")
+			oc.sendScheduleCommandIfCurrent(region, op, step, source)
 		case SUCCESS:
 			if op.ContainNonWitnessStep() {
 				recordOpStepWithTTL(op.RegionID())
@@ -255,16 +262,19 @@ func getNextPushOperatorTime(step OpStep, now time.Time) time.Time {
 // "next" is true to indicate that it may exist in next attempt,
 // and false is the end for the poll.
 func (oc *Controller) pollNeedDispatchRegion() (r *core.RegionInfo, next bool) {
-	if oc.opNotifierQueue.len() == 0 {
+	item, ok := oc.opNotifierQueue.pop()
+	if !ok || item == nil || item.op == nil {
 		return nil, false
 	}
-	item, _ := oc.opNotifierQueue.pop()
 	regionID := item.op.RegionID()
 	opi, ok := oc.operators.Load(regionID)
 	if !ok || opi.(*Operator) == nil {
 		return nil, true
 	}
 	op := opi.(*Operator)
+	if op != item.op {
+		return nil, true
+	}
 	// Check the operator lightly. It cant't dispatch the op for some scenario.
 	var reason CancelReasonType
 	r, reason = oc.checkOperatorLightly(op)
@@ -312,6 +322,29 @@ func (oc *Controller) PushOperators(recordOpStepWithTTL func(regionID uint64)) {
 
 // AddWaitingOperator adds operators to waiting operators.
 func (oc *Controller) AddWaitingOperator(ops ...*Operator) int {
+	oc.operatorLock.Lock()
+	defer oc.operatorLock.Unlock()
+	return oc.addWaitingOperatorLocked(ops...)
+}
+
+// GetOperatorGeneration returns the current bulk-cancellation generation.
+func (oc *Controller) GetOperatorGeneration() uint64 {
+	return oc.operatorGeneration.Load()
+}
+
+// AddWaitingOperatorWithGeneration adds waiting operators if no bulk
+// cancellation has happened since generation was captured.
+func (oc *Controller) AddWaitingOperatorWithGeneration(generation uint64, reason CancelReasonType, ops ...*Operator) int {
+	oc.operatorLock.Lock()
+	defer oc.operatorLock.Unlock()
+	if generation != oc.operatorGeneration.Load() {
+		oc.cancelAndBuryCreatedOperators(reason, ops...)
+		return 0
+	}
+	return oc.addWaitingOperatorLocked(ops...)
+}
+
+func (oc *Controller) addWaitingOperatorLocked(ops ...*Operator) int {
 	added := 0
 	needPromoted := 0
 
@@ -362,13 +395,31 @@ func (oc *Controller) AddWaitingOperator(ops ...*Operator) int {
 	}
 	operatorCounter.WithLabelValues(ops[0].Desc(), "promote-add").Add(float64(needPromoted))
 	for range needPromoted {
-		oc.PromoteWaitingOperator()
+		oc.promoteWaitingOperatorLocked()
 	}
 	return added
 }
 
 // AddOperator adds operators to the running operators.
 func (oc *Controller) AddOperator(ops ...*Operator) bool {
+	oc.operatorLock.Lock()
+	defer oc.operatorLock.Unlock()
+	return oc.addOperatorLocked(ops...)
+}
+
+// AddOperatorWithGeneration adds operators if no bulk cancellation has
+// happened since generation was captured.
+func (oc *Controller) AddOperatorWithGeneration(generation uint64, reason CancelReasonType, ops ...*Operator) bool {
+	oc.operatorLock.Lock()
+	defer oc.operatorLock.Unlock()
+	if generation != oc.operatorGeneration.Load() {
+		oc.cancelAndBuryCreatedOperators(reason, ops...)
+		return false
+	}
+	return oc.addOperatorLocked(ops...)
+}
+
+func (oc *Controller) addOperatorLocked(ops ...*Operator) bool {
 	// note: checkAddOperator uses false param for `isPromoting`.
 	// This is used to keep check logic before fixing issue #4946,
 	// but maybe user want to add operator when waiting queue is busy
@@ -397,6 +448,12 @@ func (oc *Controller) AddOperator(ops ...*Operator) bool {
 
 // PromoteWaitingOperator promotes operators from waiting operators.
 func (oc *Controller) PromoteWaitingOperator() {
+	oc.operatorLock.Lock()
+	defer oc.operatorLock.Unlock()
+	oc.promoteWaitingOperatorLocked()
+}
+
+func (oc *Controller) promoteWaitingOperatorLocked() {
 	var ops []*Operator
 	for {
 		// GetOperator returns one operator or two merge operators
@@ -633,11 +690,15 @@ func (oc *Controller) ack(op *Operator) {
 // RemoveOperators removes all operators from the running operators.
 func (oc *Controller) RemoveOperators(reasons ...CancelReasonType) {
 	removed := oc.removeOperatorsWithoutBury()
+	oc.cancelAndBuryOperators(removed, reasons...)
+}
+
+func (oc *Controller) cancelAndBuryOperators(ops []*Operator, reasons ...CancelReasonType) {
 	var cancelReason CancelReasonType
 	if len(reasons) > 0 {
 		cancelReason = reasons[0]
 	}
-	for _, op := range removed {
+	for _, op := range ops {
 		if op.Cancel(cancelReason) {
 			log.Info("operator removed",
 				zap.Uint64("region-id", op.RegionID()),
@@ -648,11 +709,56 @@ func (oc *Controller) RemoveOperators(reasons ...CancelReasonType) {
 	}
 }
 
+func (oc *Controller) cancelAndBuryCreatedOperators(reason CancelReasonType, ops ...*Operator) {
+	for _, op := range ops {
+		_ = op.Cancel(reason)
+		oc.buryOperator(op)
+	}
+}
+
+// CancelAllOperators cancels all running and waiting operators.
+func (oc *Controller) CancelAllOperators(reasons ...CancelReasonType) {
+	oc.operatorLock.Lock()
+	defer oc.operatorLock.Unlock()
+	oc.operatorGeneration.Add(1)
+	removed := oc.removeOperatorsWithoutBury()
+	oc.cancelAndBuryOperators(removed, reasons...)
+
+	var cancelReason CancelReasonType
+	if len(reasons) > 0 {
+		cancelReason = reasons[0]
+	}
+	var waitingOps []*Operator
+	for {
+		ops := oc.wop.GetOperator()
+		if ops == nil {
+			break
+		}
+		waitingOps = append(waitingOps, ops...)
+	}
+	oc.wopStatus.reset()
+	for _, op := range waitingOps {
+		if op == nil || op.IsEnd() {
+			continue
+		}
+		if op.Cancel(cancelReason) {
+			log.Info("waiting operator removed",
+				zap.Uint64("region-id", op.RegionID()),
+				zap.Duration("lives", op.ElapsedTime()),
+				zap.Reflect("operator", op))
+		}
+		oc.buryOperator(op)
+	}
+	oc.opNotifierQueue.clear()
+}
+
 func (oc *Controller) removeOperatorsWithoutBury() []*Operator {
 	var removed []*Operator
 	oc.operators.Range(func(regionID, value any) bool {
 		op := value.(*Operator)
-		oc.operators.Delete(regionID)
+		if !oc.operators.CompareAndDelete(regionID, op) {
+			return true
+		}
 		oc.counts.dec(op.SchedulerKind())
 		operatorCounter.WithLabelValues(op.Desc(), "remove").Inc()
 		oc.ack(op)
@@ -822,6 +928,15 @@ func (oc *Controller) GetOperatorsOfKind(mask OpKind) []*Operator {
 	return operators
 }
 
+func (oc *Controller) sendScheduleCommandIfCurrent(region *core.RegionInfo, op *Operator, step OpStep, source string) {
+	oc.operatorLock.Lock()
+	defer oc.operatorLock.Unlock()
+	if oc.GetOperator(region.GetID()) != op || op.Status() != STARTED {
+		return
+	}
+	oc.SendScheduleCommand(region, step, source)
+}
+
 // SendScheduleCommand sends a command to the region.
 func (oc *Controller) SendScheduleCommand(region *core.RegionInfo, step OpStep, source string) {
 	log.Info("send schedule command",
@@ -834,7 +949,12 @@ func (oc *Controller) SendScheduleCommand(region *core.RegionInfo, step OpStep, 
 	if cmd == nil {
 		return
 	}
-	oc.hbStreams.SendMsg(region, cmd)
+	if !oc.hbStreams.SendScheduleCommand(region, cmd) {
+		log.Debug("drop schedule command because heartbeat stream channel is full or closed",
+			zap.Uint64("region-id", region.GetID()),
+			zap.Stringer("step", step),
+			zap.String("source", source))
+	}
 }
 
 func (oc *Controller) pushFastOperator(op *Operator) {
