@@ -90,6 +90,24 @@ type Operator struct {
 	ApproximateSize  int64
 	timeout          time.Duration
 	influence        *OpInfluence
+	// needStoreHealthCheck marks whether the in-progress check should also
+	// reject a target store that has become unhealthy mid-execution. It is
+	// not set at creation time; callers opt in after the operator is built
+	// (see SetStoreHealthCheck), similar to additionalInfos.
+	needStoreHealthCheck atomic.Bool
+}
+
+// SetStoreHealthCheck marks whether the operator's in-progress steps should
+// additionally reject a target store that has become unhealthy. It can be
+// called at any time after the operator is created.
+func (o *Operator) SetStoreHealthCheck(need bool) {
+	o.needStoreHealthCheck.Store(need)
+}
+
+// NeedStoreHealthCheck returns whether the operator's in-progress steps
+// should additionally reject a target store that has become unhealthy.
+func (o *Operator) NeedStoreHealthCheck() bool {
+	return o.needStoreHealthCheck.Load()
 }
 
 // NewOperator creates a new operator.
