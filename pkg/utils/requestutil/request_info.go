@@ -15,7 +15,6 @@
 package requestutil
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -69,13 +68,16 @@ func getURLParam(r *http.Request) string {
 }
 
 func getBodyParam(r *http.Request) string {
-	if r.Body == nil {
+	// Make the body rewindable so downstream forwarding can retry on
+	// connection loss, then read it back via GetBody for audit logging.
+	if err := apiutil.EnsureRewindableBody(r); err != nil || r.GetBody == nil {
 		return ""
 	}
-	// http request body is a io.Reader between bytes.Reader and strings.Reader, it only has EOF error
-	buf, _ := io.ReadAll(r.Body)
-	r.Body.Close()
-	bodyParam := string(buf)
-	r.Body = io.NopCloser(bytes.NewBuffer(buf))
-	return bodyParam
+	rc, err := r.GetBody()
+	if err != nil {
+		return ""
+	}
+	defer rc.Close()
+	buf, _ := io.ReadAll(rc)
+	return string(buf)
 }
