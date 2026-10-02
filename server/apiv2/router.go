@@ -33,7 +33,7 @@ var group = apiutil.APIServiceGroup{
 	PathPrefix: apiV2Prefix,
 }
 
-const apiV2Prefix = "/pd/api/v2/"
+const apiV2Prefix = apiutil.CoreV2Path + "/"
 
 // NewV2Handler creates a HTTP handler for API.
 //
