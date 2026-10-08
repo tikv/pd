@@ -416,9 +416,9 @@ func TestMetricsCleanupUsesCreationTimeKeyspaceName(t *testing.T) {
 				keyspaceNameLabel:         testCase.creationKeyspaceName,
 			}
 
-			re.Greater(testutil.CollectAndCount(collectorWithLabels(readRequestUnitCost, counterLabels)), 0)
-			re.Greater(testutil.CollectAndCount(collectorWithLabels(readRequestUnitMaxPerSecCost, maxPerSecLabels)), 0)
-			re.Greater(testutil.CollectAndCount(collectorWithLabels(availableRUCounter, gaugeLabels)), 0)
+			re.Positive(testutil.CollectAndCount(collectorWithLabels(readRequestUnitCost, counterLabels)))
+			re.Positive(testutil.CollectAndCount(collectorWithLabels(readRequestUnitMaxPerSecCost, maxPerSecLabels)))
+			re.Positive(testutil.CollectAndCount(collectorWithLabels(availableRUCounter, gaugeLabels)))
 
 			m.cleanupAllMetrics(consumptionRecordKey{
 				keyspaceID: testCase.keyspaceID,
@@ -477,7 +477,7 @@ type labelFilterCollector struct {
 	labels    map[string]string
 }
 
-func (c labelFilterCollector) Describe(chan<- *prometheus.Desc) {}
+func (labelFilterCollector) Describe(chan<- *prometheus.Desc) {}
 
 func (c labelFilterCollector) Collect(ch chan<- prometheus.Metric) {
 	metricCh := make(chan prometheus.Metric)
