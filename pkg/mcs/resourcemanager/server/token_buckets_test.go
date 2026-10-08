@@ -573,3 +573,40 @@ func TestServiceLimitedClientAllocation(t *testing.T) {
 		})
 	}
 }
+
+func TestGroupTokenBucketRequestUnlimitedFillRateLoan(t *testing.T) {
+	re := require.New(t)
+	// The default group keeps its unlimited fill rate while the Service Limit
+	// only overrides the burst limit.
+	gtb := NewGroupTokenBucket(testResourceGroupName, &rmpb.TokenBucket{
+		Settings: &rmpb.TokenLimitSettings{FillRate: UnlimitedRate, BurstLimit: -1},
+	})
+	gtb.overrideBurstLimit = 100000
+	now := time.Now()
+	_, trickle := gtb.request(now, 100, 5000, 1)
+	re.Zero(trickle)
+	// A zero-token request deletes the slot and the bucket refills to the burst limit.
+	gtb.request(now.Add(time.Second), 0, 5000, 99)
+	re.Equal(100000.0, gtb.Tokens)
+	// A new slot joining a full bucket has no tokens of its own yet, so its
+	// grant is a loan. The unlimited fill rate repays it on the next refill,
+	// so the grant must not be trickled over the whole target period.
+	grant, trickle := gtb.request(now.Add(2*time.Second), 364.3, 5000, 2)
+	re.InDelta(364.3, grant.Tokens, 1e-9)
+	re.Zero(trickle)
+	// The same holds for a slot that is already in debt.
+	grant, trickle = gtb.request(now.Add(2*time.Second), 100, 5000, 2)
+	re.InDelta(100, grant.Tokens, 1e-9)
+	re.Zero(trickle)
+	re.Less(gtb.tokenSlots[2].curTokenCapacity, 0.0)
+	// The next refill repays the debt, so no runaway loan builds up.
+	grant, trickle = gtb.request(now.Add(3*time.Second), 100, 5000, 2)
+	re.InDelta(100, grant.Tokens, 1e-9)
+	re.Zero(trickle)
+	re.Greater(gtb.tokenSlots[2].curTokenCapacity, 0.0)
+	// A limited fill rate keeps smoothing such a loan over the target period.
+	gtb.overrideFillRate = 50000
+	grant, trickle = gtb.request(now.Add(3*time.Second), 100, 5000, 3)
+	re.InDelta(100, grant.Tokens, 1e-9)
+	re.Equal(int64(5000), trickle)
+}
