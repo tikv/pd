@@ -414,7 +414,7 @@ func initLabelValues() {
 	CmdFailedDurationGetGCState = cmdFailedDuration.WithLabelValues("get_gc_state")
 	CmdFailedDurationSetGlobalGCBarrier = cmdFailedDuration.WithLabelValues("set_global_gc_barrier")
 	CmdFailedDurationDeleteGlobalGCBarrier = cmdFailedDuration.WithLabelValues("delete_global_gc_barrier")
-	CmdFailedDurationGetAllKeyspacesGCStates = cmdDuration.WithLabelValues("get_all_keyspaces_gc_states")
+	CmdFailedDurationGetAllKeyspacesGCStates = cmdFailedDuration.WithLabelValues("get_all_keyspaces_gc_states")
 
 	InternalCmdDurationGetClusterInfo = internalCmdDuration.WithLabelValues("get_cluster_info")
 	InternalCmdDurationGetMembers = internalCmdDuration.WithLabelValues("get_members")
