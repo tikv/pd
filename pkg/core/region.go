@@ -186,6 +186,8 @@ const (
 	// EmptyRegionApproximateSize is the region approximate size of an empty region
 	// (heartbeat size <= 1MB).
 	EmptyRegionApproximateSize = 1
+	// EmptyRegionApproximateKeys is the approximate key count of an empty region.
+	EmptyRegionApproximateKeys = 0
 	// ImpossibleFlowSize is an impossible flow size (such as written_bytes, read_keys, etc.)
 	// It may be caused by overflow, refer to https://github.com/tikv/pd/issues/3379.
 	// They need to be filtered so as not to affect downstream.
@@ -197,6 +199,11 @@ const (
 	// InitClusterRegionThreshold is a threshold which represent a new cluster.
 	InitClusterRegionThreshold = 100
 )
+
+// IsEmptyRegion returns whether a region has no meaningful data according to its approximate size and keys.
+func IsEmptyRegion(size, keys int64) bool {
+	return size <= EmptyRegionApproximateSize && keys == EmptyRegionApproximateKeys
+}
 
 // RegionHeartbeatResponse is the interface for region heartbeat response.
 type RegionHeartbeatResponse interface {
@@ -279,7 +286,22 @@ func RegionFromHeartbeat(heartbeat RegionHeartbeatRequest, flowRoundDivisor uint
 // correct approximate size and buckets by the previous size if here exists a reported RegionInfo.
 // See https://github.com/tikv/tikv/issues/11114
 func (r *RegionInfo) Inherit(origin *RegionInfo, bucketEnable bool) {
+<<<<<<< HEAD
 	// regionSize should not be zero if region is not empty.
+=======
+	// Background:
+	// There are scenarios where TiKV reports size=0 and keys=0, which doesn't necessarily mean
+	// the region is empty, but rather that the statistics haven't been calculated yet:
+	//  1. After a leader transfer: When the new leader sends its first heartbeat, the statistics
+	//     (keys/size) might not have been recalculated yet, so it returns 0.
+	//  2. After an unsafe destroy range: Statistics are temporarily unavailable.
+	//
+	// To distinguish between "truly empty region" and "uninitialized statistics", TiKV uses:
+	// - size=0, keys=0: Uninitialized (need to inherit from previous values)
+	// - size=1, keys=0: Truly empty region
+	// - size=1, keys>0 or size>1: Region has data
+	// Ref: https://github.com/tikv/tikv/pull/19181
+>>>>>>> bcd573daf7 (core, statistics, operator: account for keys in empty regions (#11295))
 	if r.GetApproximateSize() == 0 {
 		if origin != nil {
 			r.approximateSize = origin.approximateSize
