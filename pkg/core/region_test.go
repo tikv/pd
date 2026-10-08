@@ -75,8 +75,6 @@ func TestNeedMerge(t *testing.T) {
 	}
 }
 
-<<<<<<< HEAD
-=======
 func TestIsEmptyRegion(t *testing.T) {
 	tests := []struct {
 		size  int64
@@ -95,27 +93,6 @@ func TestIsEmptyRegion(t *testing.T) {
 	}
 }
 
-func TestRegionFromHeartbeatIAKVSize(t *testing.T) {
-	re := require.New(t)
-	heartbeat := &pdpb.RegionHeartbeatRequest{
-		Region:              &metapb.Region{},
-		ApproximateKvSize:   100 * units.MiB,
-		ApproximateIaKvSize: 40 * units.MiB,
-	}
-
-	region := RegionFromHeartbeat(heartbeat, 1)
-	re.Equal(int64(100), region.GetApproximateKvSize())
-	re.Equal(int64(40), region.GetApproximateIAKvSize())
-	re.Equal(int64(40), region.Clone().GetApproximateIAKvSize())
-
-	oldHeartbeat := &pdpb.RegionHeartbeatRequest{
-		Region:            &metapb.Region{},
-		ApproximateKvSize: 100 * units.MiB,
-	}
-	re.Zero(RegionFromHeartbeat(oldHeartbeat, 1).GetApproximateIAKvSize())
-}
-
->>>>>>> bcd573daf7 (core, statistics, operator: account for keys in empty regions (#11295))
 func TestSortedEqual(t *testing.T) {
 	re := require.New(t)
 	testCases := []struct {

@@ -73,23 +73,23 @@ func TestPeerInfluenceUsesRegionKeys(t *testing.T) {
 	)
 
 	addInfluence := NewOpInfluence()
-	AddPeer{ToStore: 3}.Influence(addInfluence, region)
+	AddPeer{ToStore: 3}.Influence(*addInfluence, region)
 	require.Equal(t, storelimit.SmallRegionInfluence[storelimit.AddPeer], addInfluence.GetStoreInfluence(3).GetStepCost(storelimit.AddPeer))
 
 	addLearnerInfluence := NewOpInfluence()
-	AddLearner{ToStore: 3}.Influence(addLearnerInfluence, region)
+	AddLearner{ToStore: 3}.Influence(*addLearnerInfluence, region)
 	require.Equal(t, storelimit.SmallRegionInfluence[storelimit.AddPeer], addLearnerInfluence.GetStoreInfluence(3).GetStepCost(storelimit.AddPeer))
 
 	removeInfluence := NewOpInfluence()
-	RemovePeer{FromStore: 1}.Influence(removeInfluence, region)
+	RemovePeer{FromStore: 1}.Influence(*removeInfluence, region)
 	require.Equal(t, storelimit.SmallRegionInfluence[storelimit.RemovePeer], removeInfluence.GetStoreInfluence(1).GetStepCost(storelimit.RemovePeer))
 
 	witnessInfluence := NewOpInfluence()
-	BecomeWitness{StoreID: 1, PeerID: 1}.Influence(witnessInfluence, region)
+	BecomeWitness{StoreID: 1, PeerID: 1}.Influence(*witnessInfluence, region)
 	require.Equal(t, storelimit.SmallRegionInfluence[storelimit.RemovePeer], witnessInfluence.GetStoreInfluence(1).GetStepCost(storelimit.RemovePeer))
 
 	nonWitnessInfluence := NewOpInfluence()
-	BecomeNonWitness{StoreID: 1, PeerID: 1}.Influence(nonWitnessInfluence, region)
+	BecomeNonWitness{StoreID: 1, PeerID: 1}.Influence(*nonWitnessInfluence, region)
 	require.Equal(t, storelimit.SmallRegionInfluence[storelimit.AddPeer], nonWitnessInfluence.GetStoreInfluence(1).GetStepCost(storelimit.AddPeer))
 }
 
