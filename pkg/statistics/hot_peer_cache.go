@@ -670,6 +670,36 @@ func (f *HotPeerCache) gc() {
 		delete(f.metrics, storeID)
 		hotCacheStatusGauge.DeletePartialMatch(prometheus.Labels{"store": storeTag(storeID), "type": f.kind.String()})
 	}
+	// Clean up cold peers that no longer belong to any live region. These are the
+	// residual entries from #5713/#8698: after a region is merged/split away, its
+	// old peer can linger in peersOfStore with no subsequent heartbeats, so
+	// checkExpiredTask never fires for it and only gc() can collect it.
+	// Only inCold items are candidates: a live region still in the cluster will be
+	// re-reported by its store heartbeat on the next tick and re-added, so this is
+	// safe. Non-cold items are left to RemoveExpired / TopN TTL.
+	if f.cluster != nil {
+		for _, peers := range f.peersOfStore {
+			for _, v := range peers.GetAll() {
+				item := v.(*HotPeerStat)
+				if !item.inCold {
+					continue
+				}
+				if region := f.cluster.GetRegion(item.RegionID); region != nil {
+					continue
+				}
+				_ = peers.Remove(item.RegionID)
+				if s, ok := f.storesOfRegion[item.RegionID]; ok {
+					delete(s, item.StoreID)
+					if len(s) == 0 {
+						delete(f.storesOfRegion, item.RegionID)
+					}
+				}
+				if s, ok := f.regionsOfStore[item.StoreID]; ok {
+					delete(s, item.RegionID)
+				}
+			}
+		}
+	}
 	// remove expired items
 	for _, peers := range f.peersOfStore {
 		regions := peers.RemoveExpired()

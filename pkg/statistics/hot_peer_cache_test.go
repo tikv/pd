@@ -639,6 +639,40 @@ func TestRemoveFromCache(t *testing.T) {
 	}
 }
 
+func TestGcClearsColdItemsOfRemovedRegion(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster := core.NewBasicCluster()
+	cache := NewHotPeerCache(ctx, cluster, utils.Write)
+	region, err := buildRegion(cluster, utils.Write, 3, 60)
+	re.NoError(err)
+	// Make the region hot so its peers enter peersOfStore.
+	checkAndUpdate(re, cache, region, 3)
+
+	// Simulate the region being merged away: the old region never heartbeats
+	// again, so it is removed from the cluster.
+	cluster.RemoveRegion(region)
+
+	// Mark the retained peer as cold, as CheckColdPeer would after the
+	// region stopped being reported.
+	for storeID := range cache.storesOfRegion[region.GetID()] {
+		if item := cache.getOldHotPeerStat(region.GetID(), storeID); item != nil {
+			item.inCold = true
+		}
+	}
+
+	// gc() is throttled by topNTTL; force it to run.
+	cache.lastGCTime = time.Time{}
+	cache.gc()
+
+	// The cold items of the removed region must be gone.
+	re.Empty(cache.storesOfRegion[region.GetID()])
+	for storeID, peers := range cache.peersOfStore {
+		re.Nil(peers.Get(region.GetID()), "store %d still holds removed region %d", storeID, region.GetID())
+	}
+}
+
 func TestRemoveFromCacheRandom(t *testing.T) {
 	re := require.New(t)
 	peerCounts := []int{3, 5}
