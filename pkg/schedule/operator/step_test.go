@@ -625,7 +625,7 @@ func (suite *operatorStepTestSuite) TestSwitchToWitness() {
 // calls with a fixed needStoreHealthCheck value, so they cover "should this
 // step type honor the flag at all" -- not "when is it safe to pass true",
 // which is Controller.checkStaleOperator's job (see
-// TestOperatorControllerStopsHealthCheckAfterDispatch).
+// TestOperatorControllerKeepsRunningForAddLearnerOnUnhealthyTarget).
 func (suite *operatorStepTestSuite) TestNeedStoreHealthCheck() {
 	re := suite.Require()
 
@@ -664,9 +664,9 @@ func (suite *operatorStepTestSuite) TestNeedStoreHealthCheck() {
 
 	// BecomeNonWitness passes needStoreHealthCheck straight through, same as
 	// AddPeer/AddLearner above -- whether it's actually safe to ask for the
-	// check at all (i.e. whether this step's command has been dispatched
-	// before) is decided by Controller.checkStaleOperator, not by the step
-	// itself; see TestOperatorControllerStopsHealthCheckAfterDispatch.
+	// check at all is decided by Controller.checkStaleOperator based on step
+	// type (only TransferLeader is ever asked today), not by the step
+	// itself; see TestOperatorControllerKeepsRunningForAddLearnerOnUnhealthyTarget.
 	bn := BecomeNonWitness{StoreID: 11, PeerID: 11}
 	notFlippedPeers := []*metapb.Peer{
 		{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
