@@ -371,7 +371,7 @@ func UpdateKeyspaceConfig(c *gin.Context) {
 			c.AbortWithStatusJSON(http.StatusConflict, err.Error())
 			return
 		}
-		if goerrors.Is(err, keyspace.ErrUnknownMetaServiceGroup) || goerrors.Is(err, keyspace.ErrMetaServiceGroupDisabled) {
+		if goerrors.Is(err, errs.ErrUnknownMetaServiceGroup) || goerrors.Is(err, errs.ErrMetaServiceGroupDisabled) {
 			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
 			return
 		}

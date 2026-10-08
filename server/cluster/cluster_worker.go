@@ -183,8 +183,8 @@ func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 	if request.GetReason() == pdpb.SplitReason_LOAD {
 		c.GetCoordinator().GetCheckerController().RecordSplitScatterBatch(
 			reqRegion.GetId(),
-			// Wait until PD observes the source region version advanced by the split.
-			reqRegion.GetRegionEpoch().GetVersion()+1,
+			// TiKV assigns every result region oldVersion+len(split requests).
+			reqRegion.GetRegionEpoch().GetVersion()+uint64(len(newRegionIDs)),
 			newRegionIDs,
 		)
 	}

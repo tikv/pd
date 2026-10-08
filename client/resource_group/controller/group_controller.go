@@ -94,6 +94,8 @@ type groupCostController struct {
 	tombstone atomic.Bool
 	// inactive is set to true when the resource group has not been updated for a long time.
 	inactive bool
+	// lastCleanupConsumption is the consumption observed by the previous cleanup pass.
+	lastCleanupConsumption rmpb.Consumption
 }
 
 type groupMetricsCollection struct {

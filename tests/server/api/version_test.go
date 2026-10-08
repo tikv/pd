@@ -18,7 +18,6 @@ import (
 	"context"
 	"io"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -33,10 +32,14 @@ import (
 func TestGetVersion(t *testing.T) {
 	re := require.New(t)
 
-	fname := filepath.Join(os.TempDir(), "stdout")
-	old := os.Stdout
-	temp, err := os.Create(fname)
+	temp, err := os.CreateTemp(t.TempDir(), "stdout")
 	re.NoError(err)
+	fname := temp.Name()
+	old := os.Stdout
+	t.Cleanup(func() {
+		os.Stdout = old
+		re.NoError(temp.Close())
+	})
 	os.Stdout = temp
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -75,9 +78,4 @@ func TestGetVersion(t *testing.T) {
 	out, err := os.ReadFile(fname)
 	re.NoError(err)
 	re.NotContains(string(out), "PANIC")
-
-	// clean up
-	temp.Close()
-	os.Stdout = old
-	os.RemoveAll(fname)
 }

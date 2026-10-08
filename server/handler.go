@@ -265,6 +265,14 @@ func (h *Handler) SetLabelStoresLimit(ratePerMin float64, limitType storelimit.T
 		return err
 	}
 	for _, store := range c.GetStores() {
+		if store.IsRemoved() {
+			// A tombstoned store with no engine label is still classified
+			// TiKV by IsTiKV(), and SetStoreLimit now rejects it. Skip it
+			// here instead of letting that rejection abort the whole batch
+			// below (the engine=tikv branch returns err on the first
+			// failure).
+			continue
+		}
 		for _, label := range labels {
 			// set limit for tikv stores
 			if label.Key == core.EngineKey && label.Value == core.EngineTiKV {
@@ -461,6 +469,20 @@ func (h *Handler) RedirectSchedulerUpdate(name string, storeID float64) error {
 	input := make(map[string]any)
 	input["name"] = name
 	input["store_id"] = storeID
+	return h.redirectSchedulerConfigUpdate(name, input)
+}
+
+// RedirectSchedulerUpdateBatch applies the same store_ids config update as
+// RedirectSchedulerUpdate, but for several stores in a single request instead
+// of one request per store.
+func (h *Handler) RedirectSchedulerUpdateBatch(name string, storeIDs []float64) error {
+	input := make(map[string]any)
+	input["name"] = name
+	input["store_ids"] = storeIDs
+	return h.redirectSchedulerConfigUpdate(name, input)
+}
+
+func (h *Handler) redirectSchedulerConfigUpdate(name string, input map[string]any) error {
 	updateURL, err := url.JoinPath(h.GetAddr(), SchedulerConfigHandlerPath, name, "config")
 	if err != nil {
 		return err

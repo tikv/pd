@@ -922,6 +922,80 @@ func (suite *schedulerTestSuite) checkEvictLeaderScheduler(cluster *pdTests.Test
 	})
 }
 
+func (suite *schedulerTestSuite) TestEvictLeaderSchedulerMultiStore() {
+	suite.env.RunTest(suite.checkEvictLeaderSchedulerMultiStore)
+}
+
+func (suite *schedulerTestSuite) checkEvictLeaderSchedulerMultiStore(cluster *pdTests.TestCluster) {
+	re := suite.Require()
+	pdAddr := cluster.GetConfig().GetClientURL()
+	cmd := ctl.GetRootCmd()
+
+	// add multiple stores to evict-leader-scheduler in a single command.
+	output, err := tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-leader-scheduler", "3", "4"}...)
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
+	for _, storeID := range []string{"3", "4"} {
+		testutil.Eventually(re, func() bool {
+			output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "store", storeID}...)
+			re.NoError(err)
+			storeInfo := new(response.StoreInfo)
+			re.NoError(json.Unmarshal(output, &storeInfo))
+			return storeInfo.Status.PauseLeaderTransferIn && !storeInfo.Status.PauseLeaderTransferOut
+		})
+	}
+
+	output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "remove", "evict-leader-scheduler"}...)
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
+	for _, storeID := range []string{"3", "4"} {
+		testutil.Eventually(re, func() bool {
+			output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "store", storeID}...)
+			re.NoError(err)
+			storeInfo := new(response.StoreInfo)
+			re.NoError(json.Unmarshal(output, &storeInfo))
+			return !storeInfo.Status.PauseLeaderTransferIn && !storeInfo.Status.PauseLeaderTransferOut
+		})
+	}
+
+	// add multiple stores via "scheduler config evict-leader-scheduler add-store" too.
+	output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-leader-scheduler", "1"}...)
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
+	// The scheduler was just (re-)created above; give it a moment to become
+	// visible to the config endpoint before adding more stores to it.
+	testutil.Eventually(re, func() bool {
+		output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-leader-scheduler", "add-store", "3", "4"}...)
+		return err == nil && strings.Contains(string(output), "Success!")
+	})
+	for _, storeID := range []string{"1", "3", "4"} {
+		testutil.Eventually(re, func() bool {
+			output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "store", storeID}...)
+			re.NoError(err)
+			storeInfo := new(response.StoreInfo)
+			re.NoError(json.Unmarshal(output, &storeInfo))
+			return storeInfo.Status.PauseLeaderTransferIn && !storeInfo.Status.PauseLeaderTransferOut
+		})
+	}
+	output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "remove", "evict-leader-scheduler"}...)
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
+	for _, storeID := range []string{"1", "3", "4"} {
+		testutil.Eventually(re, func() bool {
+			output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "store", storeID}...)
+			re.NoError(err)
+			storeInfo := new(response.StoreInfo)
+			re.NoError(json.Unmarshal(output, &storeInfo))
+			return !storeInfo.Status.PauseLeaderTransferIn && !storeInfo.Status.PauseLeaderTransferOut
+		})
+	}
+
+	// grant-leader-scheduler keeps accepting exactly one store id.
+	output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "add", "grant-leader-scheduler", "1", "2"}...)
+	re.NoError(err)
+	re.Contains(string(output), "Usage")
+}
+
 func mightExec(re *require.Assertions, cmd *cobra.Command, args []string, v any) {
 	output, err := tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)

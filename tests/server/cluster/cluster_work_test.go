@@ -21,6 +21,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
@@ -151,7 +152,16 @@ func (s *raftClusterTestSuite) checkAskSplit(cluster *tests.TestCluster) {
 }
 
 func (s *raftClusterTestSuite) TestPendingProcessedRegions() {
-	s.env.RunTestInNonMicroserviceEnv(s.checkPendingProcessedRegions)
+	re := s.Require()
+	// Keep the batch-split entries pending until the assertion. Use a fresh
+	// environment so no patrol pass is already in flight when it is disabled.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/skipPatrolRegions", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/skipPatrolRegions"))
+	}()
+	env := tests.NewSchedulingTestEnvironment(s.T())
+	defer env.Cleanup()
+	env.RunTestInNonMicroserviceEnv(s.checkPendingProcessedRegions)
 }
 
 func (s *raftClusterTestSuite) checkPendingProcessedRegions(cluster *tests.TestCluster) {
