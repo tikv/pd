@@ -672,29 +672,30 @@ func (f *HotPeerCache) gc() {
 	}
 	// Clean up cold peers that no longer belong to any live region. These are the
 	// residual entries from #5713/#8698: after a region is merged/split away, its
-	// old peer can linger in peersOfStore with no subsequent heartbeats, so
-	// checkExpiredTask never fires for it and only gc() can collect it.
-	// Only inCold items are candidates: a live region still in the cluster will be
-	// re-reported by its store heartbeat on the next tick and re-added, so this is
-	// safe. Non-cold items are left to RemoveExpired / TopN TTL.
-	if f.cluster != nil {
-		for _, peers := range f.peersOfStore {
+	// old peer keeps being re-colded (and thus its TopN TTL re-armed) by the
+	// store's next heartbeat, so RemoveExpired alone never reclaims it and only
+	// gc() can. Only the read cache receives these cold-peer updates, and only
+	// inCold items whose region metadata is already gone are candidates. Live
+	// regions and non-cold items are left to their normal heartbeat and TopN TTL
+	// lifecycle.
+	if f.kind == utils.Read && f.cluster != nil {
+		for storeID, peers := range f.peersOfStore {
 			for _, v := range peers.GetAll() {
 				item := v.(*HotPeerStat)
 				if !item.inCold {
 					continue
 				}
-				if region := f.cluster.GetRegion(item.RegionID); region != nil {
+				if f.cluster.GetRegion(item.RegionID) != nil {
 					continue
 				}
 				_ = peers.Remove(item.RegionID)
 				if s, ok := f.storesOfRegion[item.RegionID]; ok {
-					delete(s, item.StoreID)
+					delete(s, storeID)
 					if len(s) == 0 {
 						delete(f.storesOfRegion, item.RegionID)
 					}
 				}
-				if s, ok := f.regionsOfStore[item.StoreID]; ok {
+				if s, ok := f.regionsOfStore[storeID]; ok {
 					delete(s, item.RegionID)
 				}
 			}
