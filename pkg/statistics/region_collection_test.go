@@ -27,6 +27,45 @@ import (
 	"github.com/tikv/pd/pkg/storage"
 )
 
+<<<<<<< HEAD
+=======
+func TestRegionStatsObserveIAKVSize(t *testing.T) {
+	re := require.New(t)
+	region := core.NewRegionInfo(
+		&metapb.Region{Id: 1},
+		nil,
+		core.SetApproximateKvSize(100),
+		core.SetApproximateIAKvSize(40),
+	)
+
+	stats := GetRegionStats([]*core.RegionInfo{region}, nil)
+	re.Equal(int64(100), stats.UserStorageSize)
+	re.Equal(int64(40), stats.UserIAStorageSize)
+	data, err := json.Marshal(stats)
+	re.NoError(err)
+	var response map[string]any
+	re.NoError(json.Unmarshal(data, &response))
+	re.Equal(float64(40), response["user_ia_storage_size"])
+
+	region = region.Clone(core.SetApproximateIAKvSize(120))
+	stats = GetRegionStats([]*core.RegionInfo{region}, nil)
+	re.Equal(int64(100), stats.UserIAStorageSize)
+}
+
+func TestRegionStatsEmptyCountUsesKeys(t *testing.T) {
+	regions := []*core.RegionInfo{
+		core.NewRegionInfo(&metapb.Region{Id: 1}, nil,
+			core.SetApproximateSize(1),
+			core.SetApproximateKeys(0)),
+		core.NewRegionInfo(&metapb.Region{Id: 2}, nil,
+			core.SetApproximateSize(1),
+			core.SetApproximateKeys(1)),
+	}
+
+	require.Equal(t, 1, GetRegionStats(regions, nil).EmptyCount)
+}
+
+>>>>>>> bcd573daf7 (core, statistics, operator: account for keys in empty regions (#11295))
 func TestRegionStatistics(t *testing.T) {
 	re := require.New(t)
 	store := storage.NewStorageWithMemoryBackend()
@@ -73,6 +112,11 @@ func TestRegionStatistics(t *testing.T) {
 	re.Len(regionStats.stats[EmptyRegion], 1)
 	re.Len(regionStats.stats[UndersizedRegion], 1)
 	re.Len(regionStats.stats[OfflinePeer], 1)
+
+	regionWithKeys := region1.Clone(core.SetApproximateSize(1), core.SetApproximateKeys(2))
+	re.True(regionStats.RegionStatsNeedUpdate(regionWithKeys))
+	regionStats.Observe(regionWithKeys, stores)
+	re.Empty(regionStats.stats[EmptyRegion])
 
 	region1 = region1.Clone(
 		core.WithDownPeers(downPeers),
