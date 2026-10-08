@@ -246,6 +246,8 @@ func TestStoreStateFilter(t *testing.T) {
 		&StoreStateFilter{MoveRegion: true},
 		&StoreStateFilter{TransferLeader: true, MoveRegion: true},
 		&StoreStateFilter{MoveRegion: true, AllowTemporaryStates: true},
+		&StoreStateFilter{TransferLeader: true, AllowTemporaryStates: true},
+		&StoreStateFilter{TransferLeader: true, OperatorLevel: constant.Urgent},
 	}
 	opt := mockconfig.NewTestOptions()
 	store := core.NewStoreInfoWithLabel(1, map[string]string{})
@@ -268,6 +270,22 @@ func TestStoreStateFilter(t *testing.T) {
 		{2, plan.StatusOK, plan.StatusOK},
 	}
 	check(store, testCases)
+
+	limiter := storelimit.NewStoreRateLimit(0.000001)
+	limitedStore := store.Clone(core.SetStoreLimit(limiter))
+	// Selection observes the budget without reserving it.
+	for range 2 {
+		check(limitedStore, []testCase{{0, plan.StatusOK, plan.StatusOK}})
+	}
+	re.True(limiter.Take(storelimit.RegionInfluence[storelimit.TransferLeaderIn], storelimit.TransferLeaderIn, constant.Medium))
+	check(limitedStore, []testCase{
+		{0, plan.StatusOK, plan.StatusStoreTransferLeaderInLimitThrottled},
+		{1, plan.StatusOK, plan.StatusOK},
+		{2, plan.StatusOK, plan.StatusStoreTransferLeaderInLimitThrottled},
+		{4, plan.StatusOK, plan.StatusOK},
+		{5, plan.StatusOK, plan.StatusStoreTransferLeaderInLimitThrottled},
+	})
+	re.Equal("store-state-exceed-transfer-leader-in-limit-filter", filters[0].Type().String())
 
 	// Disconnected
 	store = store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-5 * time.Minute)))

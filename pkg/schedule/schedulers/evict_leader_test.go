@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -27,6 +28,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
@@ -56,6 +58,14 @@ func TestEvictLeader(t *testing.T) {
 	operatorutil.CheckMultiTargetTransferLeader(re, ops[0], operator.OpLeader, 1, []uint64{2, 3})
 	re.False(ops[0].Step(0).(operator.TransferLeader).IsFinish(tc.MockRegionInfo(1, 1, []uint64{2, 3}, []uint64{}, &metapb.RegionEpoch{ConfVer: 0, Version: 0})))
 	re.True(ops[0].Step(0).(operator.TransferLeader).IsFinish(tc.MockRegionInfo(1, 2, []uint64{1, 3}, []uint64{}, &metapb.RegionEpoch{ConfVer: 0, Version: 0})))
+	exhaustTransferLeaderInLimit(t, tc, 2, 3)
+	ops, _ = sl.Schedule(tc, false)
+	re.Empty(ops)
+	tc.SetStoreLimit(2, storelimit.TransferLeaderIn, storelimit.Unlimited)
+	tc.ResetStoreLimit(2, storelimit.TransferLeaderIn, storelimit.Unlimited/time.Minute.Seconds())
+	ops, _ = sl.Schedule(tc, false)
+	re.Len(ops, 1)
+	operatorutil.CheckMultiTargetTransferLeader(re, ops[0], operator.OpLeader, 1, []uint64{2})
 }
 
 func TestEvictLeaderWithUnhealthyPeer(t *testing.T) {

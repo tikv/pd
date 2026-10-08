@@ -69,6 +69,7 @@ type SchedulerConfigProvider interface {
 
 	GetScheduleConfig() *ScheduleConfig
 	SetScheduleConfig(*ScheduleConfig)
+	SetSchedulers(SchedulerConfigs)
 }
 
 // CheckerConfigProvider is the interface for checker configurations.

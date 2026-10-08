@@ -20,6 +20,7 @@ import (
 	"math/rand/v2"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/docker/go-units"
 	"github.com/stretchr/testify/require"
@@ -30,6 +31,7 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -140,6 +142,13 @@ func (suite *balanceLeaderSchedulerTestSuite) TestBalanceLimit() {
 	// Region1:    F    F    F    L
 	suite.tc.UpdateLeaderCount(4, 16)
 	re.NotEmpty(suite.schedule())
+	exhaustTransferLeaderInLimit(suite.T(), suite.tc, 1, 2, 3, 4)
+	re.Empty(suite.schedule())
+	suite.tc.SetStoreLimit(2, storelimit.TransferLeaderIn, storelimit.Unlimited)
+	suite.tc.ResetStoreLimit(2, storelimit.TransferLeaderIn, storelimit.Unlimited/time.Minute.Seconds())
+	ops := suite.schedule()
+	re.Len(ops, 1)
+	operatorutil.CheckTransferLeader(re, ops[0], operator.OpLeader, 4, 2)
 }
 
 func (suite *balanceLeaderSchedulerTestSuite) TestBalanceLeaderSchedulePolicy() {

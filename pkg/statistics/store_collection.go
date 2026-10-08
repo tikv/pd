@@ -285,6 +285,7 @@ func (s *storeStatistics) collect() {
 		id := strconv.FormatUint(storeID, 10)
 		StoreLimitGauge.WithLabelValues(id, "add-peer").Set(limit.AddPeer)
 		StoreLimitGauge.WithLabelValues(id, "remove-peer").Set(limit.RemovePeer)
+		StoreLimitGauge.WithLabelValues(id, "transfer-leader-in").Set(limit.TransferLeaderIn)
 	}
 }
 
@@ -321,6 +322,7 @@ func ResetStoreStatistics(storeAddress string, id string) {
 		storeStatusGauge.DeleteLabelValues(storeAddress, id, m)
 	}
 	clusterStatusGauge.DeletePartialMatch(utils.SingleLabel("store", id))
+	StoreLimitGauge.DeleteLabelValues(id, "transfer-leader-in")
 }
 
 type storeStatisticsMap struct {
