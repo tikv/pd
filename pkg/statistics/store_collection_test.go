@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -27,6 +28,7 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/statistics/utils"
 )
@@ -101,6 +103,24 @@ func TestStoreStatistics(t *testing.T) {
 	re.Len(stats.LabelCounter["host:h2"], 4)
 	re.Len(stats.LabelCounter["zone:unknown"], 2)
 	re.Equal(0, stats.LeaderCount)
+}
+
+func TestStoreLimitMetricsIncludeTransferLeaderIn(t *testing.T) {
+	re := require.New(t)
+	const storeID = "1"
+	StoreLimitGauge.DeleteLabelValues(storeID, storelimit.TransferLeaderIn.String())
+	t.Cleanup(func() {
+		ResetStoreStatistics("", storeID)
+	})
+
+	opt := mockconfig.NewTestOptions()
+	opt.SetStoreLimit(1, storelimit.TransferLeaderIn, 30)
+	NewStoreStatisticsMap(opt).Collect()
+
+	re.Equal(float64(30), promtestutil.ToFloat64(
+		StoreLimitGauge.WithLabelValues(storeID, storelimit.TransferLeaderIn.String())))
+	ResetStoreStatistics("", storeID)
+	re.False(StoreLimitGauge.DeleteLabelValues(storeID, storelimit.TransferLeaderIn.String()))
 }
 
 func TestSummaryStoreInfos(t *testing.T) {

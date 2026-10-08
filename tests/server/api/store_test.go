@@ -15,6 +15,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -31,6 +32,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/mcs/discovery"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/response"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -139,8 +142,45 @@ func (suite *storeTestSuite) checkStoresList(cluster *tests.TestCluster) {
 
 func (suite *storeTestSuite) TestStores() {
 	suite.env.RunTestInNonMicroserviceEnv(suite.checkGetAllLimit)
-	suite.env.RunTestInNonMicroserviceEnv(suite.checkStoreLimitTTL)
 	suite.env.RunTestInNonMicroserviceEnv(suite.checkStoreLabel)
+}
+
+func (suite *storeTestSuite) TestStoreLimitRemainsAvailableDuringRollingUpgrade() {
+	suite.env.RunTest(suite.checkStoreLimitRemainsAvailableDuringRollingUpgrade)
+}
+
+func (suite *storeTestSuite) checkStoreLimitRemainsAvailableDuringRollingUpgrade(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leader := cluster.GetLeaderServer()
+	url := leader.GetAddr() + "/pd/api/v1/stores/limit"
+	currentDefault := leader.GetPersistOptions().GetScheduleConfig().DefaultStoreLimit.AddPeer
+	newDefault := currentDefault + 45
+	body := []byte(fmt.Sprintf(`{"rate":%v,"type":"add-peer"}`, newDefault))
+
+	if schedulingServer := cluster.GetSchedulingPrimaryServer(); schedulingServer != nil {
+		entry := &discovery.ServiceRegistryEntry{
+			Name:        "pre-feature-scheduling",
+			ServiceAddr: "http://127.0.0.1:1",
+			Version:     versioninfo.PDReleaseVersion,
+		}
+		serializedEntry, err := entry.Serialize()
+		re.NoError(err)
+		registryPath := keypath.RegistryPath(constant.SchedulingServiceName, entry.ServiceAddr)
+		_, err = cluster.GetEtcdClient().Put(context.Background(), registryPath, serializedEntry)
+		re.NoError(err)
+		// /stores/limit existed before default persistence. Keep it available
+		// during rolling upgrades without synchronously depending on every
+		// registered Scheduling Service member.
+		err = testutil.CheckPostJSON(tests.TestDialClient, url, body, testutil.StatusOK(re))
+		re.NoError(err)
+		re.Equal(newDefault, leader.GetPersistOptions().GetScheduleConfig().DefaultStoreLimit.AddPeer)
+		_, err = cluster.GetEtcdClient().Delete(context.Background(), registryPath)
+		re.NoError(err)
+		return
+	}
+	err := testutil.CheckPostJSON(tests.TestDialClient, url, body, testutil.StatusOK(re))
+	re.NoError(err)
+	re.Equal(newDefault, leader.GetPersistOptions().GetScheduleConfig().DefaultStoreLimit.AddPeer)
 }
 
 func (suite *storeTestSuite) checkGetAllLimit(cluster *tests.TestCluster) {
@@ -197,61 +237,6 @@ func (suite *storeTestSuite) checkGetAllLimit(cluster *tests.TestCluster) {
 			re.True(ok)
 		}
 	}
-}
-
-func (suite *storeTestSuite) checkStoreLimitTTL(cluster *tests.TestCluster) {
-	re := suite.Require()
-
-	leader := cluster.GetLeaderServer()
-	urlPrefix := leader.GetAddr() + "/pd/api/v1"
-	// add peer
-	url := fmt.Sprintf("%s/store/1/limit?ttlSecond=%v", urlPrefix, 5)
-	data := map[string]any{
-		"type": "add-peer",
-		"rate": 999,
-	}
-	postData, err := json.Marshal(data)
-	re.NoError(err)
-	err = testutil.CheckPostJSON(tests.TestDialClient, url, postData, testutil.StatusOK(re))
-	re.NoError(err)
-	// remove peer
-	data = map[string]any{
-		"type": "remove-peer",
-		"rate": 998,
-	}
-	postData, err = json.Marshal(data)
-	re.NoError(err)
-	err = testutil.CheckPostJSON(tests.TestDialClient, url, postData, testutil.StatusOK(re))
-	re.NoError(err)
-	// all store limit add peer
-	url = fmt.Sprintf("%s/stores/limit?ttlSecond=%v", urlPrefix, 3)
-	data = map[string]any{
-		"type": "add-peer",
-		"rate": 997,
-	}
-	postData, err = json.Marshal(data)
-	re.NoError(err)
-	err = testutil.CheckPostJSON(tests.TestDialClient, url, postData, testutil.StatusOK(re))
-	re.NoError(err)
-	// all store limit remove peer
-	data = map[string]any{
-		"type": "remove-peer",
-		"rate": 996,
-	}
-	postData, err = json.Marshal(data)
-	re.NoError(err)
-	err = testutil.CheckPostJSON(tests.TestDialClient, url, postData, testutil.StatusOK(re))
-	re.NoError(err)
-
-	re.Equal(float64(999), leader.GetPersistOptions().GetStoreLimit(uint64(1)).AddPeer)
-	re.Equal(float64(998), leader.GetPersistOptions().GetStoreLimit(uint64(1)).RemovePeer)
-	re.Equal(float64(997), leader.GetPersistOptions().GetStoreLimit(uint64(2)).AddPeer)
-	re.Equal(float64(996), leader.GetPersistOptions().GetStoreLimit(uint64(2)).RemovePeer)
-	time.Sleep(5 * time.Second)
-	re.NotEqual(float64(999), leader.GetPersistOptions().GetStoreLimit(uint64(1)).AddPeer)
-	re.NotEqual(float64(998), leader.GetPersistOptions().GetStoreLimit(uint64(1)).RemovePeer)
-	re.NotEqual(float64(997), leader.GetPersistOptions().GetStoreLimit(uint64(2)).AddPeer)
-	re.NotEqual(float64(996), leader.GetPersistOptions().GetStoreLimit(uint64(2)).RemovePeer)
 }
 
 func (suite *storeTestSuite) checkStoreLabel(cluster *tests.TestCluster) {
