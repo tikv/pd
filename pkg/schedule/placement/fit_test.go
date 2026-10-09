@@ -321,3 +321,26 @@ func TestRuleFitConfiguredIsolation(t *testing.T) {
 		})
 	}
 }
+
+func TestConfiguredIsolationNonRegression(t *testing.T) {
+	makeFit := func(hosts ...string) *RuleFit {
+		fit := &RuleFit{Rule: &Rule{LocationLabels: []string{"host"}, IsolationLevel: "host"}}
+		for i, host := range hosts {
+			fit.Stores = append(fit.Stores, core.NewStoreInfoWithLabel(uint64(i+1), map[string]string{"host": host}))
+		}
+		return fit
+	}
+	before := makeFit("a", "a", "a", "b", "b", "b")
+	// Equal pair count does not permit a larger concentration on one host.
+	require.False(t, before.IsIsolationPreserved(makeFit("a", "a", "a", "a", "b", "c")))
+	require.True(t, before.IsIsolationPreserved(makeFit("a", "a", "a", "b", "b", "c")))
+	require.True(t, before.IsIsolationPreserved(makeFit("a", "a", "a", "b", "b", "b")))
+	require.False(t, makeFit("a", "a", "b", "c", "d").IsIsolationPreserved(makeFit("a", "a", "b", "d", "d")))
+	require.False(t, before.IsIsolationPreserved(makeFit("a", "b")), "replica-count changes need their repair contract")
+	require.True(t, makeFit("a", "", "b").IsIsolationPreserved(makeFit("a", "c", "b")))
+	require.False(t, makeFit("a", "c", "b").IsIsolationPreserved(makeFit("a", "", "b")))
+	require.False(t, makeFit("a", "b").IsIsolationPreserved(makeFit("A", "a")))
+	invalid := makeFit("a")
+	invalid.Stores[0] = nil
+	require.False(t, invalid.IsIsolationPreserved(makeFit("b")))
+}
