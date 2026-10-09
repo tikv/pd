@@ -639,6 +639,9 @@ func TestRemoveFromCache(t *testing.T) {
 	}
 }
 
+// TestGcClearsColdItemsOfRemovedRegion: when a region is removed from the
+// cluster (merged or split away), its cold peers must be reclaimed by gc()
+// from all stores, with reverse indexes kept consistent.
 func TestGcClearsColdItemsOfRemovedRegion(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())

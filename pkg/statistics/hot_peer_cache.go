@@ -43,6 +43,11 @@ const (
 	HotRegionReportMinInterval = 3
 
 	queueCap = 20000
+
+	// gcColdSweepBatch bounds how many stores' cold-peer sweep gc() runs per
+	// call, so a single gc() cycle's lock-hold window stays bounded even when
+	// the cluster has many stores with many cached (cold) peers.
+	gcColdSweepBatch = 32
 )
 
 // ThresholdsUpdateInterval is the default interval to update thresholds.
@@ -117,6 +122,11 @@ type HotPeerCache struct {
 	thresholdsOfStore map[uint64]*thresholds                           // storeID -> thresholds
 	metrics           map[uint64][utils.ActionTypeLen]prometheus.Gauge // storeID -> metrics
 	lastGCTime        time.Time
+	// gcColdSweepCursor is the index into the current gc() cycle's store list
+	// where the previous cycle's cold-peer sweep stopped, so consecutive
+	// cycles rotate through the stores instead of rescanning the same stores
+	// first every time. It resets to 0 once a full rotation is complete.
+	gcColdSweepCursor int
 }
 
 // NewHotPeerCache creates a HotPeerCache
@@ -678,8 +688,28 @@ func (f *HotPeerCache) gc() {
 	// inCold items whose region metadata is already gone are candidates. Live
 	// regions and non-cold items are left to their normal heartbeat and TopN TTL
 	// lifecycle.
-	if f.kind == utils.Read && f.cluster != nil {
-		for storeID, peers := range f.peersOfStore {
+	if f.kind == utils.Read {
+		// Batch the cold-peer sweep across gc() cycles so a single cycle's
+		// lock-hold window stays bounded even on a large cluster: each cycle
+		// sweeps at most gcColdSweepBatch stores, rotating via
+		// gcColdSweepCursor so consecutive cycles pick up where the previous
+		// one left off instead of rescanning the same stores first every time.
+		// Once a full rotation (index wraps back to 0) completes, reset the
+		// cursor so the next cycle starts fresh instead of stalling on a
+		// shrinking store set.
+		storeIDs := make([]uint64, 0, len(f.peersOfStore))
+		for storeID := range f.peersOfStore {
+			storeIDs = append(storeIDs, storeID)
+		}
+		start := f.gcColdSweepCursor
+		count := len(storeIDs)
+		if start >= count {
+			start = 0
+		}
+		swept := 0
+		for i := start; i < start+gcColdSweepBatch && i < count; i++ {
+			storeID := storeIDs[i]
+			peers := f.peersOfStore[storeID]
 			for _, v := range peers.GetAll() {
 				item := v.(*HotPeerStat)
 				if !item.inCold {
@@ -699,7 +729,13 @@ func (f *HotPeerCache) gc() {
 					delete(s, item.RegionID)
 				}
 			}
+			swept++
 		}
+		next := start + swept
+		if next >= count {
+			next = 0
+		}
+		f.gcColdSweepCursor = next
 	}
 	// remove expired items
 	for _, peers := range f.peersOfStore {
