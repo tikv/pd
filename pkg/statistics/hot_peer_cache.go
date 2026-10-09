@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sort"
 	"sync/atomic"
 	"time"
 
@@ -122,10 +123,11 @@ type HotPeerCache struct {
 	thresholdsOfStore map[uint64]*thresholds                           // storeID -> thresholds
 	metrics           map[uint64][utils.ActionTypeLen]prometheus.Gauge // storeID -> metrics
 	lastGCTime        time.Time
-	// gcColdSweepCursor is the index into the current gc() cycle's store list
-	// where the previous cycle's cold-peer sweep stopped, so consecutive
-	// cycles rotate through the stores instead of rescanning the same stores
-	// first every time. It resets to 0 once a full rotation is complete.
+	// gcColdSweepCursor is the index into the sorted store list where the
+	// previous gc() cycle's cold-peer sweep stopped, so consecutive cycles
+	// rotate through the stores instead of rescanning the same stores first
+	// every time. It resets to 0 when it falls past the current store count
+	// (e.g. after stores are removed).
 	gcColdSweepCursor int
 }
 
@@ -689,53 +691,60 @@ func (f *HotPeerCache) gc() {
 	// regions and non-cold items are left to their normal heartbeat and TopN TTL
 	// lifecycle.
 	if f.kind == utils.Read {
-		// Batch the cold-peer sweep across gc() cycles so a single cycle's
-		// lock-hold window stays bounded even on a large cluster: each cycle
-		// sweeps at most gcColdSweepBatch stores, rotating via
-		// gcColdSweepCursor so consecutive cycles pick up where the previous
-		// one left off instead of rescanning the same stores first every time.
-		// Once a full rotation (index wraps back to 0) completes, reset the
-		// cursor so the next cycle starts fresh instead of stalling on a
-		// shrinking store set.
+		// Batch the cold-peer sweep so a single gc() cycle's lock-hold window
+		// stays bounded even on a large cluster: sort the store IDs (map
+		// iteration order is random) and sweep at most gcColdSweepBatch of
+		// them per cycle, rotating via gcColdSweepCursor so consecutive
+		// cycles cover different stores instead of always scanning the same
+		// first batch. The cursor wraps back to 0 once a full rotation
+		// completes or the store count shrinks below it.
 		storeIDs := make([]uint64, 0, len(f.peersOfStore))
 		for storeID := range f.peersOfStore {
 			storeIDs = append(storeIDs, storeID)
 		}
-		start := f.gcColdSweepCursor
+		sort.Slice(storeIDs, func(i, j int) bool { return storeIDs[i] < storeIDs[j] })
 		count := len(storeIDs)
-		if start >= count {
-			start = 0
-		}
-		swept := 0
-		for i := start; i < start+gcColdSweepBatch && i < count; i++ {
-			storeID := storeIDs[i]
-			peers := f.peersOfStore[storeID]
-			for _, v := range peers.GetAll() {
-				item := v.(*HotPeerStat)
-				if !item.inCold {
-					continue
-				}
-				if f.cluster.GetRegion(item.RegionID) != nil {
-					continue
-				}
-				_ = peers.Remove(item.RegionID)
-				if s, ok := f.storesOfRegion[item.RegionID]; ok {
-					delete(s, storeID)
-					if len(s) == 0 {
-						delete(f.storesOfRegion, item.RegionID)
+		if count > 0 {
+			// Advance through the sorted store list in bounded windows, rotating
+			// so consecutive cycles cover different stores. The cursor is a
+			// count of how many stores have been swept since the last wrap;
+			// wrapping it modulo the current count keeps the window correct
+			// even when the store set grows or shrinks between cycles.
+			start := f.gcColdSweepCursor % count
+			end := start + gcColdSweepBatch
+			for i := start; i < end && i < count; i++ {
+				storeID := storeIDs[i]
+				peers := f.peersOfStore[storeID]
+				for _, v := range peers.GetAll() {
+					item := v.(*HotPeerStat)
+					if !item.inCold {
+						continue
+					}
+					if f.cluster.GetRegion(item.RegionID) != nil {
+						continue
+					}
+					_ = peers.Remove(item.RegionID)
+					if s, ok := f.storesOfRegion[item.RegionID]; ok {
+						delete(s, storeID)
+						if len(s) == 0 {
+							delete(f.storesOfRegion, item.RegionID)
+						}
+					}
+					if s, ok := f.regionsOfStore[storeID]; ok {
+						delete(s, item.RegionID)
 					}
 				}
-				if s, ok := f.regionsOfStore[storeID]; ok {
-					delete(s, item.RegionID)
-				}
 			}
-			swept++
+			// A full window (reaching the end of the list) completes a rotation;
+			// reset the cursor so the next cycle starts from the beginning again.
+			if end >= count {
+				f.gcColdSweepCursor = 0
+			} else {
+				f.gcColdSweepCursor = end
+			}
+		} else {
+			f.gcColdSweepCursor = 0
 		}
-		next := start + swept
-		if next >= count {
-			next = 0
-		}
-		f.gcColdSweepCursor = next
 	}
 	// remove expired items
 	for _, peers := range f.peersOfStore {
