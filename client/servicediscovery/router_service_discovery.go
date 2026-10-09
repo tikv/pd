@@ -101,7 +101,8 @@ func (r *routerServiceDiscovery) GetServiceClientByKind(_ APIKind) ServiceClient
 
 // GetOrCreateGRPCConn creates a gRPC connection to the router service.
 func (r *routerServiceDiscovery) GetOrCreateGRPCConn(url string) (*grpc.ClientConn, error) {
-	return grpcutil.GetOrCreateGRPCConn(r.ctx, &r.clientConns, url, r.tlsCfg, r.option.GRPCDialOptions...)
+	return grpcutil.GetOrCreateGRPCConn(r.ctx, &r.clientConns, url, r.tlsCfg,
+		withExpectedService(r.option.GRPCDialOptions, routerExpectedServiceDialOptions)...)
 }
 
 // RemoveClientConn removes and closes the grpc client connection of the given URL.
@@ -196,12 +197,24 @@ func (r *routerServiceDiscovery) updateMember() error {
 		return err
 	}
 	changed := r.nodesChanged(sortedAddrs)
-	if !changed {
+	if changed {
+		r.updateURLs(sortedAddrs)
+	} else if !r.hasClosedNodeConn() {
 		return nil
 	}
-	r.updateURLs(sortedAddrs)
+	// Recreate the closed connections even if the nodes are unchanged, e.g., the
+	// address was reused by another service.
 	r.updateNodes(sortedAddrs)
 	return nil
+}
+
+func (r *routerServiceDiscovery) hasClosedNodeConn() bool {
+	closed := false
+	r.nodes.Range(func(_, value any) bool {
+		closed = value.(*serviceClient).GetClientConn() == nil
+		return !closed
+	})
+	return closed
 }
 
 func (r *routerServiceDiscovery) updateNodes(urls []string) {
@@ -222,7 +235,7 @@ func (r *routerServiceDiscovery) updateNodes(urls []string) {
 				continue
 			}
 			nodeClient := newPDServiceClient(newURL, r.GetServingURL(), conn, false)
-			r.nodes.LoadOrStore(newURL, nodeClient)
+			r.nodes.Store(newURL, nodeClient)
 		}
 	}
 	clients := make([]ServiceClient, 0, len(urls))

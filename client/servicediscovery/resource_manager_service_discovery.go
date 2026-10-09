@@ -25,6 +25,7 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/connectivity"
 
 	"github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
@@ -121,7 +122,9 @@ func (r *ResourceManagerDiscovery) resetConn(url string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	// An unchanged empty URL still means PD fallback, not a leader change.
-	if r.serviceURL == url {
+	// An unchanged URL with a closed connection, e.g., the address was reused by
+	// another service, still needs to reconnect.
+	if r.serviceURL == url && (len(url) == 0 || !isConnShutdown(r.conn)) {
 		return
 	}
 	if len(url) == 0 {
@@ -133,7 +136,8 @@ func (r *ResourceManagerDiscovery) resetConn(url string) {
 		_ = r.onLeaderChanged("")
 		return
 	}
-	newConn, err := grpcutil.GetClientConn(r.ctx, url, r.tlsCfg, r.option.GRPCDialOptions...)
+	newConn, err := grpcutil.GetClientConn(r.ctx, url, r.tlsCfg,
+		withExpectedService(r.option.GRPCDialOptions, resourceManagerExpectedServiceDialOptions)...)
 	if err != nil {
 		// Dial without `WithBlock`, normally it should not fail.
 		log.Error("[resource-manager] failed to create gRPC connection",
@@ -164,6 +168,16 @@ func (r *ResourceManagerDiscovery) GetConn() *grpc.ClientConn {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.conn
+}
+
+func (r *ResourceManagerDiscovery) isConnShutdown() bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.serviceURL) != 0 && isConnShutdown(r.conn)
+}
+
+func isConnShutdown(conn *grpc.ClientConn) bool {
+	return conn != nil && conn.GetState() == connectivity.Shutdown
 }
 
 func (r *ResourceManagerDiscovery) discoverServiceURL() (string, int64, error) {
@@ -230,9 +244,9 @@ func (r *ResourceManagerDiscovery) updateServiceURLLoop(revision int64) {
 				zap.Error(err))
 			return
 		}
-		if newRevision > revision {
+		if newRevision > revision || r.isConnShutdown() {
 			r.resetConn(url)
-			revision = newRevision
+			revision = max(revision, newRevision)
 		}
 	}
 	for {

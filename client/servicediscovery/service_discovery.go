@@ -1109,7 +1109,8 @@ func (c *serviceDiscovery) updateServiceClient(members []*pdpb.Member, leader *p
 
 // GetOrCreateGRPCConn returns the corresponding grpc client connection of the given URL.
 func (c *serviceDiscovery) GetOrCreateGRPCConn(url string) (*grpc.ClientConn, error) {
-	return grpcutil.GetOrCreateGRPCConn(c.ctx, &c.clientConns, url, c.tlsCfg, c.option.GRPCDialOptions...)
+	return grpcutil.GetOrCreateGRPCConn(c.ctx, &c.clientConns, url, c.tlsCfg,
+		withExpectedService(c.option.GRPCDialOptions, pdExpectedServiceDialOptions)...)
 }
 
 // RemoveClientConn removes and closes the grpc client connection of the given URL.
