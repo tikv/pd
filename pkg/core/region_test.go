@@ -243,6 +243,50 @@ func TestInherit(t *testing.T) {
 		re.Equal(int64(testCase.expect), r.approximateSize)
 	}
 
+	// case for approximateKeys
+	// keys are only inherited when size==0
+	keysTestCases := []struct {
+		originExists bool
+		originSize   int64
+		originKeys   int64
+		size         int64
+		keys         int64
+		expectKeys   int64
+	}{
+		{false, 0, 0, 0, 0, 0},     // no origin, size=0, keys=0 -> keys remain 0 (size set to 1 only)
+		{false, 0, 0, 1, 0, 0},     // no origin, size=1, keys=0 -> keys remain 0 (no inheritance)
+		{false, 0, 0, 1, 100, 100}, // no origin, size=1, keys=100 -> keys remain 100
+		{true, 1, 50, 1, 100, 100}, // origin exists, size=1, keys=100 -> keys remain 100
+		{true, 10, 100, 0, 0, 100}, // origin exists, size=0, keys=0 -> inherit both (size=10, keys=100)
+		{true, 5, 200, 0, 0, 200},  // origin exists, size=0, keys=0 -> inherit both (size=5, keys=200)
+	}
+	for _, testCase := range keysTestCases {
+		var origin *RegionInfo
+		if testCase.originExists {
+			origin = NewRegionInfo(&metapb.Region{Id: 100}, nil)
+			origin.approximateSize = testCase.originSize
+			origin.approximateKeys = testCase.originKeys
+		}
+		r := NewRegionInfo(&metapb.Region{Id: 100}, nil)
+		r.approximateSize = testCase.size
+		r.approximateKeys = testCase.keys
+		r.Inherit(origin, false)
+		re.Equal(testCase.expectKeys, r.approximateKeys)
+	}
+
+	// A small region with keys must stay non-empty when a heartbeat after
+	// leader transfer reports uninitialized statistics (size=0, keys=0).
+	{
+		origin := NewRegionInfo(&metapb.Region{Id: 100}, nil)
+		origin.approximateSize = EmptyRegionApproximateSize
+		origin.approximateKeys = 5
+		r := NewRegionInfo(&metapb.Region{Id: 100}, nil)
+		r.Inherit(origin, false)
+		re.Equal(int64(EmptyRegionApproximateSize), r.GetApproximateSize())
+		re.Equal(int64(5), r.GetApproximateKeys())
+		re.False(IsEmptyRegion(r.GetApproximateSize(), r.GetApproximateKeys()))
+	}
+
 	// bucket check
 	data := []struct {
 		originBuckets *metapb.Buckets
