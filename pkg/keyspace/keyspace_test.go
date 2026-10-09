@@ -677,6 +677,137 @@ func TestRollbackCreateKeyspaceRespectsConcurrentEnable(t *testing.T) {
 	re.Equal(constant.DefaultKeyspaceGroupID, groupID)
 }
 
+// TestRollbackCreateKeyspaceCacheMissLeavesGroupMembership verifies that a
+// GetGroupByKeyspaceID cache miss does not make buildRollbackGroupDeleteOp
+// treat the keyspace as having nothing to clean up. A miss there is never
+// proof the keyspace is genuinely in no group - every keyspace is added to
+// one at creation outside classic mode, and nothing legitimate can strip
+// that while the keyspace stays DISABLED (RemoveKeyspace requires ARCHIVED
+// or TOMBSTONE) - only a lagging cache can produce it. Treating a miss as
+// "nothing to delete" would let the compensating transaction commit having
+// deleted the meta while storage still lists the keyspace in its real
+// group, recreating exactly the #10461 split this PR exists to eliminate.
+// This simulates the lag by poking the cache directly (the same
+// construction used elsewhere in this file for a GetGroupByKeyspaceID
+// cache/storage divergence), and - since nothing else is running to fix the
+// cache on its own - expects rollback to exhaust its retries and leave the
+// keyspace exactly as it was (DISABLED, meta and group membership both
+// intact) rather than ever deleting the meta without confirming cleanup.
+func TestRollbackCreateKeyspaceCacheMissLeavesGroupMembership(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
+	}()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	kgm := NewKeyspaceGroupManager(ctx, store, nil)
+	re.NoError(kgm.Bootstrap(ctx))
+	manager := NewKeyspaceManager(ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{}, kgm, nil)
+	re.NoError(manager.Bootstrap())
+
+	created, err := manager.CreateKeyspace(&CreateKeyspaceRequest{
+		Name:       "rollback_cache_miss",
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+	created, err = manager.UpdateKeyspaceStateByID(
+		created.GetId(), keyspacepb.KeyspaceState_DISABLED, time.Now().Unix(),
+	)
+	re.NoError(err)
+	groupID, _, err := kgm.GetGroupByKeyspaceID(created.GetId())
+	re.NoError(err)
+
+	kgm.Lock()
+	if g := kgm.groups[endpoint.Basic].Get(groupID); g != nil {
+		kept := make([]uint32, 0, len(g.Keyspaces))
+		for _, id := range g.Keyspaces {
+			if id != created.GetId() {
+				kept = append(kept, id)
+			}
+		}
+		g.Keyspaces = kept
+	}
+	kgm.Unlock()
+	_, _, err = kgm.GetGroupByKeyspaceID(created.GetId())
+	re.ErrorIs(err, errs.ErrKeyspaceNotInAnyKeyspaceGroup)
+
+	re.Error(manager.rollbackCreateKeyspace(created))
+
+	meta, err := manager.LoadKeyspace(created.GetName())
+	re.NoError(err, "rollback must not delete the meta without confirming group cleanup")
+	re.Equal(keyspacepb.KeyspaceState_DISABLED, meta.GetState())
+	group, err := kgm.GetKeyspaceGroupByID(groupID)
+	re.NoError(err)
+	re.Contains(group.Keyspaces, created.GetId())
+}
+
+// TestRollbackCreateKeyspaceDoesNotHoldMetaLockAcrossGroupManagerLock
+// verifies that rollbackCreateKeyspace never holds metaLock while calling
+// into GroupManager (buildRollbackGroupDeleteOp touches GroupManager.RLock
+// via GetGroupByKeyspaceID and GroupManager.Lock via
+// updateKeyspaceForGroupTxnOp). RemoveKeyspacesFromGroup takes
+// GroupManager.Lock first and then metaLock, via RemoveKeyspace; holding
+// metaLock across the GroupManager call here would invert that order and
+// deadlock against a concurrent RemoveKeyspacesFromGroup. This holds
+// GroupManager.Lock directly (standing in for RemoveKeyspacesFromGroup
+// having already acquired it) while rollback is in flight, and confirms
+// metaLock can still be acquired promptly by a third party - i.e.
+// rollback is not holding it while blocked waiting on GroupManager.Lock.
+func TestRollbackCreateKeyspaceDoesNotHoldMetaLockAcrossGroupManagerLock(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
+	}()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	kgm := NewKeyspaceGroupManager(ctx, store, nil)
+	re.NoError(kgm.Bootstrap(ctx))
+	manager := NewKeyspaceManager(ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{}, kgm, nil)
+	re.NoError(manager.Bootstrap())
+
+	created, err := manager.CreateKeyspace(&CreateKeyspaceRequest{
+		Name:       "rollback_deadlock",
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+	created, err = manager.UpdateKeyspaceStateByID(
+		created.GetId(), keyspacepb.KeyspaceState_DISABLED, time.Now().Unix(),
+	)
+	re.NoError(err)
+
+	kgm.Lock()
+	rollbackDone := make(chan struct{})
+	go func() {
+		defer close(rollbackDone)
+		_ = manager.rollbackCreateKeyspace(created)
+	}()
+	time.Sleep(200 * time.Millisecond)
+
+	metaAcquired := make(chan struct{})
+	go func() {
+		manager.metaLock.Lock(created.GetId())
+		close(metaAcquired)
+		manager.metaLock.Unlock(created.GetId())
+	}()
+	select {
+	case <-metaAcquired:
+	case <-time.After(2 * time.Second):
+		kgm.Unlock()
+		<-rollbackDone
+		t.Fatal("metaLock could not be acquired while GroupManager.Lock was held - lock order is inverted")
+	}
+	kgm.Unlock()
+	select {
+	case <-rollbackDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("rollback did not finish after GroupManager.Lock was released")
+	}
+}
+
 // TestWaitSplitSuccessEnablesKeyspacePersistently verifies that once the
 // post-commit wait-for-split succeeds, the keyspace's ENABLED state is actually
 // persisted to storage, not just reflected in the in-memory state cache.

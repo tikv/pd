@@ -576,7 +576,16 @@ func (manager *Manager) createKeyspaceWithoutCheck(tracer *createKeyspaceTracer,
 // transaction it commits in (buildRollbackGroupDeleteOp), so a stale or
 // since-changed cache read only ever fails that attempt (triggering a
 // retry, which re-resolves the group fresh) rather than silently
-// committing a delete that did not actually apply.
+// committing a delete that did not actually apply. A cache miss
+// (GetGroupByKeyspaceID finding no group at all) gets the same treatment,
+// not a free pass to skip the group delete - see errRollbackGroupNotResolved.
+//
+// buildRollbackGroupDeleteOp is always called before metaLock is acquired,
+// never while holding it: it touches GroupManager.RLock/Lock, while
+// RemoveKeyspacesFromGroup takes GroupManager.Lock first and then metaLock
+// (via RemoveKeyspace) - holding metaLock across it would invert that order
+// and can deadlock against a concurrent RemoveKeyspacesFromGroup. metaLock
+// is scoped to just the RunTxn call below, which never touches GroupManager.
 func (manager *Manager) rollbackCreateKeyspace(keyspace *keyspacepb.KeyspaceMeta) error {
 	var regionLabeler *labeler.RegionLabeler
 	var ruleID string
@@ -607,13 +616,20 @@ func (manager *Manager) rollbackCreateKeyspace(keyspace *keyspacepb.KeyspaceMeta
 		return regionLabeler.GetRuleStorage().DeleteRegionRule(txn, ruleID)
 	}
 
-	manager.metaLock.Lock(id)
 	var groupCb txnCb
 	var committed, targetChanged bool
 	var err error
 	backoff := time.Second
 retryLoop:
 	for i := range 3 {
+		// Resolved before metaLock is acquired, deliberately: this touches
+		// GroupManager.RLock/Lock (GetGroupByKeyspaceID,
+		// updateKeyspaceForGroupTxnOp), while RemoveKeyspacesFromGroup takes
+		// GroupManager.Lock first and then metaLock (via RemoveKeyspace) -
+		// holding metaLock across this call would invert that order and can
+		// deadlock against a concurrent RemoveKeyspacesFromGroup. metaLock is
+		// only ever held below, around RunTxn itself, which never touches
+		// GroupManager.
 		var groupOp txnOp
 		var groupID uint32
 		groupOp, groupID, groupCb, err = manager.buildRollbackGroupDeleteOp(id)
@@ -622,7 +638,9 @@ retryLoop:
 			if groupOp != nil {
 				ops = append(ops, groupOp)
 			}
+			manager.metaLock.Lock(id)
 			err = manager.RunTxn(groupID, ops)
+			manager.metaLock.Unlock(id)
 			if err == nil {
 				committed = true
 				break retryLoop
@@ -647,11 +665,6 @@ retryLoop:
 			backoff *= 2
 		}
 	}
-	// Released before any post-commit side effect below: refreshKeyspaceMetaCache
-	// takes metaLock itself, and syncutil.LockGroup is not reentrant, so calling
-	// it (or anything else that does) while still holding the lock would
-	// self-deadlock.
-	manager.metaLock.Unlock(id)
 
 	if targetChanged {
 		return nil
@@ -708,6 +721,23 @@ var errRollbackTargetChanged = errors.New("keyspace no longer identifies the sam
 // the group fresh.
 var errRollbackGroupMembershipMoved = errors.New("keyspace group membership moved before the compensating transaction committed")
 
+// errRollbackGroupNotResolved means GetGroupByKeyspaceID could not find
+// keyspaceID in any group, outside classic mode. This is never a
+// legitimate state for a DISABLED keyspace to be in on its own: every
+// keyspace is added to a group at creation time, and the only path that
+// fully removes that membership (RemoveKeyspace, via RemoveKeyspacesFromGroup)
+// requires ARCHIVED or TOMBSTONE, neither of which this rollback's target
+// ever becomes. So a miss here can only be GetGroupByKeyspaceID's cache
+// lagging storage (see the function comment on rollbackCreateKeyspace), not
+// genuine absence - treating it as "nothing to clean up" would let the
+// compensating transaction delete the meta while storage still lists this
+// keyspace in whatever group it actually belongs to. Surfacing it as a
+// retryable error instead means the caller's retry loop re-resolves fresh
+// and, if every attempt still misses, gives up and leaves the keyspace
+// DISABLED rather than ever deleting the meta without having confirmed
+// there was truly no membership to remove.
+var errRollbackGroupNotResolved = errors.New("keyspace group membership not resolved, not safe to delete meta yet")
+
 // buildRollbackGroupDeleteOp resolves which TSO keyspace group keyspaceID
 // currently belongs to (via GetGroupByKeyspaceID) and returns a txnOp that
 // deletes it - meant to be committed as part of the same transaction as
@@ -727,18 +757,22 @@ var errRollbackGroupMembershipMoved = errors.New("keyspace group membership move
 // pre-check (group exists, not mid split/merge) and its post-commit
 // cache-refresh callback, both reused as-is.
 //
-// Returns a nil op and a nil callback (with a nil error) if keyspaceID
-// currently is not in any group, or if manager.kgm is nil (classic mode):
-// there is nothing to delete, so rollbackCreateKeyspace's transaction only
-// needs its meta op.
+// Returns a nil op and a nil callback, with a nil error, only if
+// manager.kgm is nil (classic mode): there is no group concept at all, so
+// rollbackCreateKeyspace's transaction only needs its meta op. If
+// GetGroupByKeyspaceID cannot resolve a group outside classic mode, that is
+// surfaced as an error (errRollbackGroupNotResolved) instead of also being
+// treated as "nothing to delete" - see that error's comment for why.
 func (manager *Manager) buildRollbackGroupDeleteOp(keyspaceID uint32) (op txnOp, groupID uint32, cb txnCb, err error) {
 	if manager.kgm == nil {
 		return nil, 0, nil, nil
 	}
 	groupID, userKind, err := manager.kgm.GetGroupByKeyspaceID(keyspaceID)
 	if err != nil {
-		// Not currently in any group - nothing to delete.
-		return nil, 0, nil, nil
+		// Not a cache hit, but not proof of absence either - see
+		// errRollbackGroupNotResolved. Surface it as retryable rather than
+		// treating it as nothing to delete.
+		return nil, 0, nil, errRollbackGroupNotResolved
 	}
 	_, cb, err = manager.kgm.updateKeyspaceForGroupTxnOp(userKind, strconv.FormatUint(uint64(groupID), 10), keyspaceID, opDelete)
 	if err != nil {
