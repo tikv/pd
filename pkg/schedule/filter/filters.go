@@ -763,7 +763,7 @@ func (*ruleLeaderFitFilter) Source(config.SharedConfigProvider, *core.StoreInfo)
 }
 
 // Target filters stores when select them as schedule target.
-func (f *ruleLeaderFitFilter) Target(_ config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
+func (f *ruleLeaderFitFilter) Target(conf config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
 	targetStoreID := store.GetID()
 	targetPeer := f.region.GetStorePeer(targetStoreID)
 	if targetPeer == nil && !f.allowMoveLeader {
@@ -785,7 +785,8 @@ func (f *ruleLeaderFitFilter) Target(_ config.SharedConfigProvider, store *core.
 		} else {
 			target = f.region.Clone(core.WithLeader(targetPeer))
 		}
-		if !f.ruleManager.FitRegionWithoutCache(f.cluster, target).IsSatisfied() {
+		rules := f.ruleManager.GetRulesForApplyRegion(target)
+		if !placement.NewRoleChecker(f.cluster, target.GetPeers(), rules, conf.IsWitnessAllowed()).IsSatisfied(target.GetLeader().GetStoreId()) {
 			return statusStoreNotMatchRule
 		}
 	}
