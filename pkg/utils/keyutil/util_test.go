@@ -28,6 +28,17 @@ func TestKeyUtil(t *testing.T) {
 	re.Equal("61-62", key)
 }
 
+func TestBuildKeyRangeMaps(t *testing.T) {
+	re := require.New(t)
+	re.Nil(BuildKeyRangeMaps())
+	re.Equal([]any{
+		map[string]any{"start_key": "", "end_key": "74"},
+		map[string]any{"start_key": "ab12", "end_key": "cd12"},
+	}, BuildKeyRangeMaps("", "74", "ab12", "cd12"))
+	keys := []string{"start", "end"}
+	re.Panics(func() { BuildKeyRangeMaps(keys[:1]...) })
+}
+
 func TestLess(t *testing.T) {
 	re := require.New(t)
 	TestData := []struct {

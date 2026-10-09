@@ -500,6 +500,7 @@ func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		r.URL.Host = url.Host
 		r.URL.Scheme = url.Scheme
 
+		// #nosec G704 -- Callers pass parsed PD member or service-discovery endpoints.
 		resp, err := p.client.Do(r)
 		if err != nil {
 			log.Warn("request failed", errs.ZapError(errs.ErrSendRequest, err))

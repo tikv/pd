@@ -64,8 +64,7 @@ func TestRegister(t *testing.T) {
 	sr = NewServiceRegister(ctx, client, "test_service", "127.0.0.1:2", "127.0.0.1:2", DefaultLeaseInSeconds)
 	err = sr.Register()
 	re.NoError(err)
-	fname := testutil.InitTempFileLogger("info")
-	defer os.Remove(fname)
+	fname := testutil.InitTempFileLogger(t, "info")
 	for i := range 3 {
 		re.Equal("127.0.0.1:2", getKeyAfterLeaseExpired(ctx, re, client, sr.key))
 		etcd.Server.HardStop() // close the etcd to make the keepalive failed

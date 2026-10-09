@@ -7,7 +7,7 @@
 
 ## Quick Facts
 - Language: Go modules (root + `client/` submodule).
-- Go version: CI uses 1.25 (install >=1.25).
+- Go version: CI uses 1.26 (install >=1.26).
 - Main binaries: `pd-server`, `pd-ctl`, `pd-recover`, tool suite.
 
 ## Build Shortcuts
@@ -127,7 +127,7 @@
 - Do not disable lint/security checks without discussion.
 
 ## Dependencies & Tools
-- Tools live in `.tools/bin`; `make install-tools` installs pinned versions (golangci-lint v2.6.0, etc.).
+- Tools live in `.tools/bin`; `make install-tools` installs pinned versions (golangci-lint v2.13.2, etc.).
 - `tools.go` pins tool deps; avoid adding runtime deps without justification; run `make tidy` after changes and ensure clean diff.
 
 ## Dashboard / UI
