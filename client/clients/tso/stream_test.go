@@ -364,6 +364,47 @@ func (s *testTSOStreamSuite) TestTSOStreamBasic() {
 	})
 }
 
+func (s *testTSOStreamSuite) TestTSOStreamRejectsRequestsDuringErrorTeardown() {
+	currentReqErrCh := make(chan error, 1)
+	nextReqErrCh := make(chan error, 1)
+	currentReqCallbackStarted := make(chan struct{})
+	releaseCurrentReqCallback := make(chan struct{})
+
+	err := s.stream.processRequests(1, 2, 3, 1, time.Now(), func(_ tsoRequestResult, _ uint32, err error) {
+		close(currentReqCallbackStarted)
+		<-releaseCurrentReqCallback
+		currentReqErrCh <- err
+	})
+	s.re.NoError(err)
+
+	s.inner.returnError(errors.New("mock rpc error"))
+
+	select {
+	case <-currentReqCallbackStarted:
+	case <-time.After(time.Second):
+		s.re.FailNow("recv loop did not start teardown callback in time")
+	}
+
+	err = s.stream.processRequests(1, 2, 3, 1, time.Now(), func(_ tsoRequestResult, _ uint32, err error) {
+		nextReqErrCh <- err
+	})
+
+	close(releaseCurrentReqCallback)
+
+	s.re.Error(err)
+	s.re.ErrorContains(err, "mock rpc error")
+	s.re.Error(<-currentReqErrCh)
+
+	s.stream.WaitForClosed()
+
+	select {
+	case err := <-nextReqErrCh:
+		s.re.Error(err)
+		s.re.ErrorContains(err, "mock rpc error")
+	default:
+	}
+}
+
 func (s *testTSOStreamSuite) testTSOStreamBrokenImpl(err error, pendingRequests int) {
 	var resultCh []<-chan callbackInvocation
 
