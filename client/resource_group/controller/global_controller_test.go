@@ -22,6 +22,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -335,6 +336,46 @@ func TestTryGetController(t *testing.T) {
 	re.NotEmpty(consumption)
 }
 
+func TestTryGetControllerConcurrentCreation(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mockProvider := newMockResourceGroupProvider()
+	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, constants.NullKeyspaceID)
+	re.NoError(err)
+	const callers = 32
+	var fetched sync.WaitGroup
+	fetched.Add(callers)
+	group := &rmpb.ResourceGroup{Name: "test-group", Mode: rmpb.GroupMode_RUMode, RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 1000000}}}}
+	// Every caller misses the cache before any of them stores a controller.
+	mockProvider.On("GetResourceGroup", mock.Anything, "test-group", mock.Anything).
+		Run(func(mock.Arguments) {
+			fetched.Done()
+			fetched.Wait()
+		}).
+		Return(group, nil)
+
+	results := make(chan *groupCostController, callers)
+	for range callers {
+		go func() {
+			gc, _ := controller.tryGetResourceGroupController(ctx, "test-group", false)
+			results <- gc
+		}()
+	}
+	gcs := make([]*groupCostController, 0, callers)
+	for range callers {
+		gcs = append(gcs, <-results)
+	}
+	// A caller that loses the race must use the registered controller, or
+	// what it records is never reported.
+	registered, ok := controller.loadGroupController("test-group")
+	re.True(ok)
+	for _, gc := range gcs {
+		re.Same(registered, gc)
+	}
+}
+
 func TestGetResourceGroup(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -536,6 +577,36 @@ func TestGetResourceGroup(t *testing.T) {
 		re.Same(unavailableErr, err)
 		re.Nil(gc)
 		mockProvider.AssertNumberOfCalls(t, "GetResourceGroup", 1)
+	})
+
+	t.Run("tombstone-skips-degraded-default", func(t *testing.T) {
+		re := require.New(t)
+		mockProvider := newMockResourceGroupProvider()
+		controller := newController(t, mockProvider, WithDegradedRUSettings(degradedRUSettings))
+
+		mockProvider.On("GetResourceGroup", mock.Anything, "test-group", mock.Anything).
+			Return(newResourceGroup("test-group", 1000000, 0), nil)
+		mockProvider.On("GetResourceGroup", mock.Anything, defaultResourceGroupName, mock.Anything).
+			Return((*rmpb.ResourceGroup)(nil), wrapGetResourceGroupErr(defaultResourceGroupName, status.Error(codes.Unavailable, "resource manager unavailable"))).
+			Once()
+		mockProvider.On("GetResourceGroup", mock.Anything, defaultResourceGroupName, mock.Anything).
+			Return(newResourceGroup(defaultResourceGroupName, 1000000, 0), nil)
+
+		_, err := controller.tryGetResourceGroupController(ctx, "test-group", false)
+		re.NoError(err)
+		// The default group is only available as an unregistered fallback.
+		controller.tombstoneGroupCostController("test-group")
+		defaultGC, err := controller.tryGetResourceGroupController(ctx, defaultResourceGroupName, false)
+		re.NoError(err)
+
+		// Every controller reporting as the default group must report one
+		// timeline, or the resource manager sees conflicting seconds.
+		controller.groupsController.Range(func(_, value any) bool {
+			if gc := value.(*groupCostController); gc.name == defaultResourceGroupName {
+				re.Same(defaultGC.ruTimeline, gc.ruTimeline)
+			}
+			return true
+		})
 	})
 }
 

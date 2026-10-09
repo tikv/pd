@@ -670,7 +670,8 @@ func (c *ResourceGroupsController) tryGetResourceGroupController(
 	}
 	if !isUseDegradedResourceGroup {
 		// Check again to prevent initializing the same resource group concurrently.
-		_, loaded := c.loadOrStoreGroupController(name, gc)
+		var loaded bool
+		gc, loaded = c.loadOrStoreGroupController(name, gc)
 		if !loaded {
 			metrics.ResourceGroupStatusGauge.WithLabelValues(name, group.Name).Set(1)
 			log.Info("[resource group controller] create resource group cost controller", zap.String("name", name))
@@ -692,6 +693,11 @@ func (c *ResourceGroupsController) tombstoneGroupCostController(name string) {
 	}
 	// Try to get the default group meta first.
 	defaultGC, err := c.tryGetResourceGroupController(c.loopCtx, defaultResourceGroupName, false)
+	if err == nil {
+		// A degraded fallback is not registered and never reports, so only the
+		// registered default controller's timeline can be shared.
+		defaultGC, _ = c.loadGroupController(defaultResourceGroupName)
+	}
 	if err != nil || defaultGC == nil {
 		log.Warn("[resource group controller] get default resource group meta for tombstone failed",
 			zap.String("name", name), zap.Error(err))
