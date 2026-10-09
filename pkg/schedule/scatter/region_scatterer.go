@@ -810,6 +810,9 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 		return nil, errs.ErrCreateOperator.FastGenByArgs(fmt.Sprintf("scatter changes peer count or roles for region %v", region.GetID()))
 	}
 
+	var readCPUByStore map[uint64]float64
+	readPoolThreadCount := uint64(0)
+	leaderBlockedByReadPoolPressure := false
 	// Validate all leader candidates against the complete planned membership.
 	// Admin scatter bypasses scheduling limits, but still obeys placement rules.
 	if r.cluster.GetSharedConfig().IsPlacementRulesEnabled() {
@@ -827,9 +830,6 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 		}
 		leaderCandidateStores = allowed
 	}
-	var readCPUByStore map[uint64]float64
-	readPoolThreadCount := uint64(0)
-	leaderBlockedByReadPoolPressure := false
 	if internalScatter {
 		var recentMaxProvider storeReadCPURecentMaxProvider
 		if provider, ok := r.cluster.(storeReadCPURecentMaxProvider); ok {
