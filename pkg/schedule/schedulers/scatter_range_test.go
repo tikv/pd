@@ -15,6 +15,7 @@
 package schedulers
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/rand/v2"
 	"testing"
@@ -98,4 +99,81 @@ func checkScatterRangeBalance(re *require.Assertions, enablePlacementRules bool)
 		regionCount = tc.GetStoreRegionCount(uint64(i))
 		re.LessOrEqual(regionCount, 32)
 	}
+}
+
+// TestScatterRangeConfigKeepsRawKeys is a regression test for
+// https://github.com/tikv/pd/issues/9670. Raw keys are usually not valid
+// UTF-8, and they must not change after the config is persisted and loaded.
+func TestScatterRangeConfigKeepsRawKeys(t *testing.T) {
+	re := require.New(t)
+	cancel, _, _, oc := prepareSchedulersTest()
+	defer cancel()
+
+	// The key from the issue. 0x80 is not valid UTF-8.
+	startKey := string([]byte{0x74, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x17, '_', 'i'})
+	endKey := string([]byte{0x74, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x18, 0xff, 0xfe})
+	store := storage.NewStorageWithMemoryBackend()
+
+	// Create the scheduler from args, which is what the HTTP API does.
+	s, err := CreateScheduler(types.ScatterRangeScheduler, oc, store,
+		ConfigSliceDecoder(types.ScatterRangeScheduler, []string{startKey, endKey, "test"}),
+		func(string) error { return nil })
+	re.NoError(err)
+	sr := s.(*scatterRangeScheduler)
+	re.NoError(sr.config.persist())
+
+	// Create the scheduler again from the persisted config, which is what a
+	// new PD leader does.
+	data, err := store.LoadSchedulerConfig(s.GetName())
+	re.NoError(err)
+	s2, err := CreateScheduler(types.ScatterRangeScheduler, oc, store,
+		ConfigJSONDecoder([]byte(data)), func(string) error { return nil })
+	re.NoError(err)
+	sr2 := s2.(*scatterRangeScheduler)
+	re.Equal(s.GetName(), s2.GetName())
+	re.Equal([]byte(startKey), sr2.config.getStartKey())
+	re.Equal([]byte(endKey), sr2.config.getEndKey())
+	re.Equal("test", sr2.config.getRangeName())
+
+	// ReloadConfig also keeps the raw keys.
+	re.NoError(sr2.ReloadConfig())
+	re.Equal([]byte(startKey), sr2.config.getStartKey())
+	re.Equal([]byte(endKey), sr2.config.getEndKey())
+
+	// The encoded config keeps the old string fields.
+	encoded, err := sr.EncodeConfig()
+	re.NoError(err)
+	m := make(map[string]any)
+	re.NoError(json.Unmarshal(encoded, &m))
+	re.Equal("test", m["range-name"])
+	re.Contains(m, "start-key")
+	re.Contains(m, "end-key")
+	re.Equal("7480000000000001175f69", m["start-key-hex"])
+}
+
+func TestScatterRangeConfigJSONCompatibility(t *testing.T) {
+	re := require.New(t)
+
+	// A config persisted by an older version has no hex fields.
+	conf := &scatterRangeSchedulerConfig{}
+	re.NoError(json.Unmarshal([]byte(`{"range-name":"test","start-key":"a_00","end-key":"a_99"}`), conf))
+	re.Equal("test", conf.RangeName)
+	re.Equal("a_00", conf.StartKey)
+	re.Equal("a_99", conf.EndKey)
+
+	// Empty keys mean the whole key space and do not need the hex fields.
+	conf = &scatterRangeSchedulerConfig{RangeName: "test"}
+	data, err := json.Marshal(conf)
+	re.NoError(err)
+	re.JSONEq(`{"range-name":"test","start-key":"","end-key":""}`, string(data))
+
+	// The hex fields take precedence over the string fields.
+	conf = &scatterRangeSchedulerConfig{}
+	re.NoError(json.Unmarshal([]byte(`{"range-name":"test","start-key":"t\ufffd","end-key":"","start-key-hex":"7480"}`), conf))
+	re.Equal(string([]byte{0x74, 0x80}), conf.StartKey)
+	re.Empty(conf.EndKey)
+
+	// A broken hex field is an error.
+	conf = &scatterRangeSchedulerConfig{}
+	re.Error(json.Unmarshal([]byte(`{"range-name":"test","start-key":"","end-key":"","start-key-hex":"zz"}`), conf))
 }
