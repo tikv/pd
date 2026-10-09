@@ -318,9 +318,6 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 
 		failpoint.Inject("fastCleanup", func() {
 			cleanupTicker.Reset(100 * time.Millisecond)
-			// because of checking `gc.run.consumption` in cleanupTicker,
-			// so should also change the stateUpdateTicker.
-			stateUpdateTicker.Reset(200 * time.Millisecond)
 		})
 		failpoint.Inject("acceleratedReportingPeriod", func() {
 			stateUpdateTicker.Reset(time.Millisecond * 100)
@@ -746,11 +743,13 @@ func (c *ResourceGroupsController) cleanUpResourceGroup() {
 	c.groupsController.Range(func(key, value any) bool {
 		resourceGroupName := key.(string)
 		gc := value.(*groupCostController)
-		// Check for stale resource groups, which will be deleted when consumption is continuously unchanged.
+		// Check for stale resource groups, which will be deleted when consumption is unchanged
+		// over whole cleanup intervals. Compare with the previous cleanup pass rather than
+		// `gc.run.consumption`, which only reflects the last state update interval.
 		gc.mu.Lock()
 		latestConsumption := *gc.mu.consumption
 		gc.mu.Unlock()
-		if equalRU(latestConsumption, *gc.run.consumption) {
+		if equalRU(latestConsumption, gc.lastCleanupConsumption) {
 			if gc.inactive || gc.tombstone.Load() {
 				c.cleanupRequestSourceMetricsState(resourceGroupName)
 				c.groupsController.Delete(resourceGroupName)
@@ -761,6 +760,7 @@ func (c *ResourceGroupsController) cleanUpResourceGroup() {
 			gc.inactive = true
 		} else {
 			gc.inactive = false
+			gc.lastCleanupConsumption = latestConsumption
 		}
 		return true
 	})
