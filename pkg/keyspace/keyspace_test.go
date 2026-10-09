@@ -1032,6 +1032,51 @@ func TestGetKeyspaceIDInRangeSkipsConfirmingScanAtOwnCeiling(t *testing.T) {
 		"a single call should reach full completion via the allocated-ID ceiling, without a second confirming scan")
 }
 
+// TestEvictKeyspacesFromCacheRollsBackVerifiedWatermark verifies that
+// evicting a keyspace ID below keyspaceIDVerifiedUpTo rolls the watermark
+// back to cover it. Without this, GetKeyspaceIDInRange would keep trusting
+// the cache's absence of that ID as proof it doesn't exist in storage
+// either - which evictKeyspacesFromCache's callers cannot actually promise,
+// since they also evict on a merely ambiguous (not confirmed) removal
+// result.
+func TestEvictKeyspacesFromCacheRollsBackVerifiedWatermark(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	allocator := mockid.NewIDAllocator()
+	kgm := NewKeyspaceGroupManager(ctx, store, nil)
+	manager := NewKeyspaceManager(ctx, store, nil, allocator, &mockConfig{}, kgm, nil)
+	re.NoError(kgm.Bootstrap(ctx))
+	re.NoError(manager.Bootstrap())
+
+	id := uint32(50)
+	_, err := manager.CreateKeyspaceByID(&CreateKeyspaceByIDRequest{
+		ID:         &id,
+		Name:       "ks50",
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+
+	// Advance the watermark past 50 by querying a range that reaches it.
+	_, ok := manager.GetKeyspaceIDInRange(0, 100, 10)
+	re.True(ok)
+	re.Greater(manager.keyspaceIDVerifiedUpTo, id)
+
+	// Simulate a removal call evicting keyspace 50 on an ambiguous commit
+	// result: the cache entry is gone, but the watermark must stop vouching
+	// for it too.
+	manager.evictKeyspacesFromCache([]uint32{id})
+	re.LessOrEqual(manager.keyspaceIDVerifiedUpTo, id)
+
+	// A query reaching past 50 now re-verifies against storage instead of
+	// trusting the eviction, and correctly rediscovers keyspace 50 - which
+	// was never actually removed from storage in this scenario.
+	ids, ok := manager.GetKeyspaceIDInRange(50, 50, 1)
+	re.True(ok)
+	re.Equal([]uint32{50}, ids)
+}
+
 func (suite *keyspaceTestSuite) TestGetKeyspaceIDInRange() {
 	re := suite.Require()
 	manager := suite.manager

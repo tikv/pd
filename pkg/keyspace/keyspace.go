@@ -1247,8 +1247,30 @@ func (manager *Manager) removeKeyspaceMetadataIfEligible(
 	return metaServiceGroupID, true, false, nil
 }
 
+// evictKeyspacesFromCache removes ids from the keyspace metadata cache. The
+// call sites in tso_keyspace_group.go call this both on confirmed success and
+// on a genuinely ambiguous commit result (the client gave up waiting before
+// learning the outcome) - but not on a definite failure, where the removal is
+// known not to have committed and the cache must be left alone (see
+// TestGCBarrierRemovalInvalidationAfterCommit). In the ambiguous case, a
+// retry cannot always rediscover an already-removed keyspace to evict it
+// again, since group membership may already be gone by the time the retry
+// runs even though the original call reported an error - so eviction has to
+// happen pessimistically there too, meaning some evictions here turn out to
+// be wrong (the removal didn't actually commit after all). That is something
+// GetKeyspaceIDInRange's keyspaceIDVerifiedUpTo watermark cannot tolerate on
+// its own, since it trusts cache absence below the watermark without a
+// storage check. Roll the watermark back to cover any evicted ID below it,
+// under the same lock backfillKeyspaceIDRange uses, so the next query that
+// reaches that far re-verifies against storage instead of trusting a
+// possibly-wrong eviction.
 func (manager *Manager) evictKeyspacesFromCache(ids []uint32) {
+	manager.keyspaceIDRangeMu.Lock()
+	defer manager.keyspaceIDRangeMu.Unlock()
 	for _, id := range ids {
+		if id < manager.keyspaceIDVerifiedUpTo {
+			manager.keyspaceIDVerifiedUpTo = id
+		}
 		manager.keyspaceNameLookup.Delete(id)
 		manager.keyspaceStateLookup.Delete(id)
 		manager.cache.DeleteKeyspace(id)
