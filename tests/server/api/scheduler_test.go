@@ -156,6 +156,170 @@ func (suite *scheduleTestSuite) checkOriginAPI(cluster *tests.TestCluster) {
 	re.NoError(err)
 }
 
+func (suite *scheduleTestSuite) TestEvictLeaderSchedulerMultiStore() {
+	suite.te.RunTest(suite.checkEvictLeaderSchedulerMultiStore)
+}
+
+func (suite *scheduleTestSuite) checkEvictLeaderSchedulerMultiStore(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leaderAddr := cluster.GetLeaderServer().GetAddr()
+	urlPrefix := fmt.Sprintf("%s/pd/api/v1/schedulers", leaderAddr)
+	for i := 1; i <= 4; i++ {
+		store := &metapb.Store{
+			Id:        uint64(i),
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
+		}
+		tests.MustPutStore(re, cluster, store)
+	}
+	listURL := fmt.Sprintf("%s%s/%s/list", leaderAddr, server.SchedulerConfigHandlerPath, "evict-leader-scheduler")
+
+	// store_id and store_ids cannot both be set.
+	input := map[string]any{"name": "evict-leader-scheduler", "store_id": 1, "store_ids": []int{2, 3}}
+	body, err := json.Marshal(input)
+	re.NoError(err)
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, urlPrefix, body,
+		testutil.Status(re, http.StatusBadRequest),
+		testutil.StringEqual(re, "only one of store_id and store_ids can be set")),
+	)
+
+	// store_ids must be a non-empty array of numbers.
+	input = map[string]any{"name": "evict-leader-scheduler", "store_ids": "not-an-array"}
+	body, err = json.Marshal(input)
+	re.NoError(err)
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, urlPrefix, body,
+		testutil.Status(re, http.StatusBadRequest),
+		testutil.StringEqual(re, "please input a right store id")),
+	)
+
+	// creating with multiple store ids in one call adds every store at once,
+	// deduplicating repeated ids.
+	input = map[string]any{"name": "evict-leader-scheduler", "store_ids": []int{1, 2, 1}}
+	body, err = json.Marshal(input)
+	re.NoError(err)
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, urlPrefix, body, testutil.StatusOK(re)))
+	suite.assertSchedulerExists(urlPrefix, "evict-leader-scheduler")
+	resp := make(map[string]any)
+	re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))
+	re.Len(resp["store-id-ranges"], 2)
+
+	// the config endpoint (used to add more stores to an existing scheduler)
+	// rejects mixing store_id and store_ids too, and validates the batch
+	// size without touching the existing store-id-ranges on failure.
+	configURL := fmt.Sprintf("%s%s/%s/config", leaderAddr, server.SchedulerConfigHandlerPath, "evict-leader-scheduler")
+	input = map[string]any{"name": "evict-leader-scheduler", "store_id": 3, "store_ids": []int{4}}
+	body, err = json.Marshal(input)
+	re.NoError(err)
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, configURL, body,
+		testutil.Status(re, http.StatusBadRequest),
+		testutil.StringEqual(re, "only one of store_id and store_ids can be set")),
+	)
+	input = map[string]any{"name": "evict-leader-scheduler", "store_ids": []int{3, 4}, "batch": 1000}
+	body, err = json.Marshal(input)
+	re.NoError(err)
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, configURL, body,
+		testutil.Status(re, http.StatusBadRequest),
+		testutil.StringEqual(re, "batch must be an integer in [1, 100]")),
+	)
+	resp = make(map[string]any)
+	re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))
+	re.Len(resp["store-id-ranges"], 2)
+
+	// adding more stores to an already-existing scheduler with store_ids
+	// appends them alongside the existing ones.
+	input = map[string]any{"name": "evict-leader-scheduler", "store_ids": []int{3, 4}}
+	body, err = json.Marshal(input)
+	re.NoError(err)
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, urlPrefix, body, testutil.StatusOK(re)))
+	resp = make(map[string]any)
+	testutil.Eventually(re, func() bool {
+		re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))
+		return len(resp["store-id-ranges"].(map[string]any)) == 4
+	})
+
+	// the single-value store_id field still works against the same scheduler.
+	deleteURL := fmt.Sprintf("%s/%s", urlPrefix, "evict-leader-scheduler-4")
+	err = testutil.CheckDelete(tests.TestDialClient, deleteURL, testutil.StatusOK(re))
+	re.NoError(err)
+	resp = make(map[string]any)
+	testutil.Eventually(re, func() bool {
+		re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))
+		return len(resp["store-id-ranges"].(map[string]any)) == 3
+	})
+
+	deleteScheduler(re, urlPrefix, "evict-leader-scheduler")
+	assertNoScheduler(re, urlPrefix, "evict-leader-scheduler")
+}
+
+func (suite *scheduleTestSuite) TestEvictLeaderSchedulerMultiStoreAtomicCreate() {
+	suite.te.RunTest(suite.checkEvictLeaderSchedulerMultiStoreAtomicCreate)
+}
+
+// checkEvictLeaderSchedulerMultiStoreAtomicCreate verifies that creating
+// evict-leader-scheduler with multiple store ids in one call is all-or-nothing:
+// every requested store is encoded into a single persisted creation arg (see
+// schedulers.EvictLeaderMultiStoreArgs), so if any requested store can't
+// actually be evicted (e.g. it doesn't exist), the whole create request
+// fails and no scheduler is left behind evicting only some of the requested
+// stores. It also covers persisting the config itself failing: Controller.
+// AddScheduler/AddSchedulerHandler must roll back any already-applied state
+// (e.g. paused leader transfers) on that failure too, not just leave the
+// scheduler unregistered.
+func (suite *scheduleTestSuite) checkEvictLeaderSchedulerMultiStoreAtomicCreate(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leaderAddr := cluster.GetLeaderServer().GetAddr()
+	urlPrefix := fmt.Sprintf("%s/pd/api/v1/schedulers", leaderAddr)
+	store := &metapb.Store{
+		Id:        1,
+		State:     metapb.StoreState_Up,
+		NodeState: metapb.NodeState_Serving,
+	}
+	tests.MustPutStore(re, cluster, store)
+
+	// store 999 doesn't exist, so pausing its leader transfer during
+	// creation fails and the whole request is rejected.
+	input := map[string]any{"name": "evict-leader-scheduler", "store_ids": []int{1, 999}}
+	body, err := json.Marshal(input)
+	re.NoError(err)
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, urlPrefix, body,
+		testutil.Status(re, http.StatusBadRequest)),
+	)
+
+	// the scheduler must not exist at all, not left running with only
+	// store 1 evicted.
+	assertNoScheduler(re, urlPrefix, "evict-leader-scheduler")
+
+	// simulate a persistence failure on an otherwise-valid creation request:
+	// the scheduler must not end up registered/running without its config
+	// having actually been saved.
+	persistFailFp := "github.com/tikv/pd/pkg/schedule/schedulers/persistFail"
+	re.NoError(failpoint.Enable(persistFailFp, "return(true)"))
+	persistFailEnabled := true
+	defer func() {
+		// Guards against a failed assertion below aborting the test before
+		// the explicit Disable is reached, which would otherwise leave this
+		// process-wide failpoint enabled for later tests.
+		if persistFailEnabled {
+			re.NoError(failpoint.Disable(persistFailFp))
+		}
+	}()
+	input = map[string]any{"name": "evict-leader-scheduler", "store_id": 1}
+	body, err = json.Marshal(input)
+	re.NoError(err)
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, urlPrefix, body,
+		testutil.Status(re, http.StatusBadRequest)),
+	)
+	assertNoScheduler(re, urlPrefix, "evict-leader-scheduler")
+	re.NoError(failpoint.Disable(persistFailFp))
+	persistFailEnabled = false
+
+	// the same request succeeds once persistence works again.
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, urlPrefix, body, testutil.StatusOK(re)))
+	suite.assertSchedulerExists(urlPrefix, "evict-leader-scheduler")
+	deleteScheduler(re, urlPrefix, "evict-leader-scheduler")
+	assertNoScheduler(re, urlPrefix, "evict-leader-scheduler")
+}
+
 func (suite *scheduleTestSuite) TestAPI() {
 	suite.te.RunTest(suite.checkAPI)
 }

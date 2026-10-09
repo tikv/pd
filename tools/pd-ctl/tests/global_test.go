@@ -59,7 +59,7 @@ func TestSendAndGetComponent(t *testing.T) {
 			if !as.Equal(command.PDControlCallerID, callerID) {
 				return
 			}
-			fmt.Fprint(w, callerID)
+			fmt.Fprint(w, command.PDControlCallerID)
 		})
 		info := apiutil.APIServiceGroup{
 			IsCore: true,

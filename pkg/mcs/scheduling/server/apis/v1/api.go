@@ -1377,7 +1377,7 @@ func accelerateRegionsScheduleInRanges(c *gin.Context) {
 		}
 		startKeys = append(startKeys, startKey)
 		endKeys = append(endKeys, endKey)
-		msgBuilder.WriteString(fmt.Sprintf("[%s,%s), ", startKeyHex, endKeyHex))
+		fmt.Fprintf(&msgBuilder, "[%s,%s), ", startKeyHex, endKeyHex)
 	}
 	err = handler.AccelerateRegionsScheduleInRanges(startKeys, endKeys, limit)
 	if err != nil {

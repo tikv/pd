@@ -1999,8 +1999,7 @@ func (suite *loopWatcherTestSuite) TestWatcherRequestProgress() {
 	checkWatcherRequestProgress := func(injectWatchChanBlock bool) {
 		ctx, cancel := context.WithCancel(suite.ctx)
 		defer cancel()
-		fname := testutil.InitTempFileLogger("debug")
-		defer os.RemoveAll(fname)
+		fname := testutil.InitTempFileLogger(suite.T(), "debug")
 		watcherName := "request-progress-test"
 		if injectWatchChanBlock {
 			watcherName = "request-progress-block-test"
@@ -2097,9 +2096,9 @@ func (suite *loopWatcherTestSuite) put(re *require.Assertions, key, value string
 
 func TestWriteKeyToFile(t *testing.T) {
 	re := require.New(t)
-	tempFile, err := os.CreateTemp("", "testfile")
+	tempFile, err := os.CreateTemp(t.TempDir(), "testfile")
 	re.NoError(err)
-	defer os.Remove(tempFile.Name())
+	re.NoError(tempFile.Close())
 
 	key := "test/key123"
 	op := "get"
@@ -2114,9 +2113,9 @@ func TestWriteKeyToFile(t *testing.T) {
 
 func TestWriteKeyToFileMultipleKeys(t *testing.T) {
 	re := require.New(t)
-	tempFile, err := os.CreateTemp("", "testfile")
+	tempFile, err := os.CreateTemp(t.TempDir(), "testfile")
 	re.NoError(err)
-	defer os.Remove(tempFile.Name())
+	re.NoError(tempFile.Close())
 
 	keys := []string{"test/key123", "another/key456", "key789"}
 	op := "put"

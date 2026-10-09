@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -49,23 +50,67 @@ var (
 	operatorPriorityLevel = constant.High
 
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	scatterSkipEmptyRegionCounter   = scatterCounter.WithLabelValues("skip", "empty-region")
-	scatterSkipNoRegionCounter      = scatterCounter.WithLabelValues("skip", "no-region")
-	scatterSkipNoLeaderCounter      = scatterCounter.WithLabelValues("skip", "no-leader")
-	scatterSkipHotRegionCounter     = scatterCounter.WithLabelValues("skip", "hot")
-	scatterSkipNotReplicatedCounter = scatterCounter.WithLabelValues("skip", "not-replicated")
-	scatterSkipAffinityCounter      = scatterCounter.WithLabelValues("skip", "affinity")
-	scatterUnnecessaryCounter       = scatterCounter.WithLabelValues("unnecessary", "")
-	scatterFailCounter              = scatterCounter.WithLabelValues("fail", "")
-	scatterSuccessCounter           = scatterCounter.WithLabelValues("success", "")
-	scatterOperatorRunningCounter   = scatterCounter.WithLabelValues("skip", "running")
-	scatterOperatorExistedCounter   = scatterCounter.WithLabelValues("fail", "other-existed")
+	scatterSkipEmptyRegionCounter      = scatterCounter.WithLabelValues("skip", "empty-region")
+	scatterSkipNoRegionCounter         = scatterCounter.WithLabelValues("skip", "no-region")
+	scatterSkipNoLeaderCounter         = scatterCounter.WithLabelValues("skip", "no-leader")
+	scatterSkipHotRegionCounter        = scatterCounter.WithLabelValues("skip", "hot")
+	scatterSkipNotReplicatedCounter    = scatterCounter.WithLabelValues("skip", "not-replicated")
+	scatterSkipAffinityCounter         = scatterCounter.WithLabelValues("skip", "affinity")
+	scatterSkipReadPoolPressureCounter = scatterCounter.WithLabelValues("skip", "read-pool-pressure")
+	scatterSkipBalancedReadCPUCounter  = scatterCounter.WithLabelValues("skip", "balanced-read-cpu")
+	scatterUnnecessaryCounter          = scatterCounter.WithLabelValues("unnecessary", "")
+	scatterFailCounter                 = scatterCounter.WithLabelValues("fail", "")
+	scatterSuccessCounter              = scatterCounter.WithLabelValues("success", "")
+	scatterOperatorRunningCounter      = scatterCounter.WithLabelValues("skip", "running")
+	scatterOperatorExistedCounter      = scatterCounter.WithLabelValues("fail", "other-existed")
+
+	// ErrRegionHot means scatter is skipped because the region is currently hot.
+	ErrRegionHot = errors.New("region is hot")
+	// ErrInternalScatterBalancedReadCPU means split-scatter is temporarily skipped
+	// because moving the selected leader would not reduce read CPU pressure enough.
+	ErrInternalScatterBalancedReadCPU = errors.New("internal split scatter skipped due to balanced read CPU")
 )
 
+// InternalScatterRetryLater means internal split-scatter should keep the pending
+// entry and retry later. Reason is for metrics and logs; Unwrap preserves the
+// underlying sentinel for errors.Is.
+type InternalScatterRetryLater struct {
+	Reason string
+	Err    error
+}
+
+// Error implements the error interface.
+func (e *InternalScatterRetryLater) Error() string {
+	if e.Err != nil {
+		return fmt.Sprintf("internal split scatter retry later (%s): %v", e.Reason, e.Err)
+	}
+	return fmt.Sprintf("internal split scatter retry later (%s)", e.Reason)
+}
+
+// Unwrap returns the underlying sentinel for errors.Is.
+func (e *InternalScatterRetryLater) Unwrap() error {
+	return e.Err
+}
+
+func retryInternalScatterLater(reason string, err error) error {
+	return &InternalScatterRetryLater{Reason: reason, Err: err}
+}
+
 const (
-	maxSleepDuration     = time.Minute
-	initialSleepDuration = 100 * time.Millisecond
-	maxRetryLimit        = 30
+	// InternalScatterRetryHotRegion is the retry-later reason when the region is hot.
+	InternalScatterRetryHotRegion = "hot-region"
+	// InternalScatterRetryBalancedReadCPU is the retry-later reason when a leader
+	// move would not reduce read CPU pressure enough.
+	InternalScatterRetryBalancedReadCPU   = "balanced-read-cpu"
+	maxSleepDuration                      = time.Minute
+	initialSleepDuration                  = 100 * time.Millisecond
+	maxRetryLimit                         = 30
+	splitScatterReadCPUUsagePerCore       = 100.0
+	splitScatterReadPoolLowWatermark      = 0.30
+	splitScatterReadPoolPressureThreshold = 0.70
+	// Only let internal split-scatter proceed by count when the current leader
+	// store is meaningfully busier than the chosen target leader store.
+	splitScatterReadCPUImbalanceThreshold = 0.10
 	// AdminScatterOperatorDesc is used by external admin/API scatter requests.
 	AdminScatterOperatorDesc = "scatter-region"
 	// InternalScatterOperatorDesc is used by PD-internal split-scatter dispatch.
@@ -105,6 +150,32 @@ func cloneDistribution(distribution map[uint64]uint64) map[uint64]uint64 {
 		cloned[id] = count
 	}
 	return cloned
+}
+
+type storeConfigProvider interface {
+	GetStoreConfig() sc.StoreConfigProvider
+}
+
+type storeReadCPURecentMaxProvider interface {
+	GetStoreReadCPURecentMax(storeID uint64) float64
+}
+
+func splitScatterReadCPUByStore(
+	stores []*core.StoreInfo,
+	recentMaxProvider storeReadCPURecentMaxProvider,
+) map[uint64]float64 {
+	if recentMaxProvider == nil {
+		return nil
+	}
+	readCPUByStore := make(map[uint64]float64, len(stores))
+	for _, store := range stores {
+		if store == nil {
+			continue
+		}
+		storeID := store.GetID()
+		readCPUByStore[storeID] = recentMaxProvider.GetStoreReadCPURecentMax(storeID)
+	}
+	return readCPUByStore
 }
 
 func decrementDistribution(distribution map[uint64]uint64, id uint64) {
@@ -590,10 +661,14 @@ func (r *RegionScatterer) scatterWithOptions(region *core.RegionInfo, group stri
 		return nil, nil
 	}
 
-	if !internalScatter && r.cluster.IsRegionHot(region) {
+	if r.cluster.IsRegionHot(region) {
 		scatterSkipHotRegionCounter.Inc()
 		log.Warn("region too hot during scatter", zap.Uint64("region-id", region.GetID()))
-		return nil, errors.Errorf("region %d is hot", region.GetID())
+		err := fmt.Errorf("region %d is hot: %w", region.GetID(), ErrRegionHot)
+		if internalScatter {
+			return nil, retryInternalScatterLater(InternalScatterRetryHotRegion, err)
+		}
+		return nil, err
 	}
 
 	return r.scatterRegionWithType(region, group, skipStoreLimit, internalScatter, state)
@@ -618,6 +693,13 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 	ordinaryPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))
 	specialPeers := make(map[string]map[uint64]*metapb.Peer)
 	oldFit := r.cluster.GetRuleManager().FitRegion(r.cluster, region)
+	// plannedRegion includes peer moves selected so far.
+	plannedRegion := region
+	// plannedFit records how the peers in plannedRegion match placement rules.
+	// After selecting A -> D for {A, B, C}, match {D, B, C} against the
+	// placement rules before checking the next candidate.
+	plannedFit := oldFit
+
 	// Group peers by the engine of their stores
 	for _, peer := range region.GetPeers() {
 		store := r.cluster.GetStore(peer.GetStoreId())
@@ -665,6 +747,7 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 		}
 		filters[filterLen-2] = filter.NewExcludedFilter(r.name, nil, selectedStores)
 		for _, peer := range peers {
+			failpoint.InjectCall("scatterPeerOrder", &peer)
 			if _, ok := selectedStores[peer.GetStoreId()]; ok {
 				if collectLeaderCandidates && allowLeader(oldFit, peer) {
 					leaderCandidateStores = append(leaderCandidateStores, peer.GetStoreId())
@@ -677,21 +760,34 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 				log.Error("failed to get the store", zap.Uint64("store-id", peer.GetStoreId()), errs.ZapError(errs.ErrGetSourceStore))
 				continue
 			}
-			filters[filterLen-1] = filter.NewPlacementSafeguard(r.name, r.cluster.GetSharedConfig(), r.cluster.GetBasicCluster(), r.cluster.GetRuleManager(), region, sourceStore, oldFit)
+			if r.cluster.GetSharedConfig().IsPlacementRulesEnabled() && plannedFit == nil {
+				plannedFit = r.cluster.GetRuleManager().FitRegionWithoutCache(r.cluster, plannedRegion)
+			}
+			filters[filterLen-1] = filter.NewPlacementSafeguard(r.name, r.cluster.GetSharedConfig(), r.cluster.GetBasicCluster(), r.cluster.GetRuleManager(), plannedRegion, sourceStore, plannedFit)
 			for {
 				newPeer := r.selectNewPeer(context, group, peer, filters, internalScatter)
-				targetPeers[newPeer.GetStoreId()] = newPeer
 				selectedStores[newPeer.GetStoreId()] = struct{}{}
 				// If the selected peer is a peer other than origin peer in this region,
 				// it is considered that the selected peer select itself.
 				// This origin peer re-selects.
 				if _, ok := peers[newPeer.GetStoreId()]; !ok || peer.GetStoreId() == newPeer.GetStoreId() {
+					targetPeers[newPeer.GetStoreId()] = newPeer
 					selectedStores[peer.GetStoreId()] = struct{}{}
+					if peer.GetStoreId() != newPeer.GetStoreId() {
+						if plannedRegion == region {
+							plannedRegion = region.Clone()
+						}
+						moveScatterPeer(plannedRegion, peer.GetId(), newPeer.GetStoreId())
+						plannedFit = nil
+					}
 					if collectLeaderCandidates && allowLeader(oldFit, peer) {
 						leaderCandidateStores = append(leaderCandidateStores, newPeer.GetStoreId())
 					}
 					break
 				}
+				// Reserving another peer keeps that peer in place, including its
+				// role; the source still needs a new target.
+				targetPeers[newPeer.GetStoreId()] = peers[newPeer.GetStoreId()]
 			}
 		}
 	}
@@ -702,16 +798,41 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 		// leader candidates so leader selection still only considers ordinary stores.
 		scatterWithSameEngine(peers, getSpecialEngineContext(engine), false)
 	}
+	var readCPUByStore map[uint64]float64
+	readPoolThreadCount := uint64(0)
+	leaderBlockedByReadPoolPressure := false
 	if internalScatter {
-		leaderCandidateStores = r.filterAllowedLeaderCandidateStores(region, targetPeers, leaderCandidateStores)
+		var recentMaxProvider storeReadCPURecentMaxProvider
+		if provider, ok := r.cluster.(storeReadCPURecentMaxProvider); ok {
+			recentMaxProvider = provider
+		}
+		readCPUByStore = splitScatterReadCPUByStore(r.cluster.GetStores(), recentMaxProvider)
+		readPoolThreadCount = r.getReadPoolThreadCount()
+		leaderCandidateStores, leaderBlockedByReadPoolPressure = r.filterAllowedLeaderCandidateStores(region, targetPeers, leaderCandidateStores, readCPUByStore, readPoolThreadCount)
 	}
 	// FIXME: target leader only considers the ordinary stores, maybe we need to consider the
 	// special engine stores if the engine supports to become a leader. But now there is only
 	// one engine, tiflash, which does not support the leader, so don't consider it for now.
 	targetLeader, leaderStorePickedCount := r.selectAvailableLeaderStore(group, region, leaderCandidateStores, ordinaryContext, internalScatter)
 	if targetLeader == 0 {
-		scatterSkipNoLeaderCounter.Inc()
+		observeNoLeaderTargetMetrics(internalScatter, leaderBlockedByReadPoolPressure)
 		return nil, errs.ErrGetTargetStore.FastGenByArgs(fmt.Sprintf("no target leader store found, region: %v", region))
+	}
+	if internalScatter && shouldSkipInternalScatterByBalancedReadCPU(region, targetLeader, readCPUByStore, readPoolThreadCount) {
+		scatterSkipBalancedReadCPUCounter.Inc()
+		return nil, retryInternalScatterLater(InternalScatterRetryBalancedReadCPU, ErrInternalScatterBalancedReadCPU)
+	}
+
+	if !scatterPeersValid(region, targetPeers) {
+		scatterFailCounter.Inc()
+		if state == nil {
+			currentPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))
+			for _, peer := range region.GetPeers() {
+				currentPeers[peer.GetStoreId()] = peer
+			}
+			r.Put(currentPeers, region.GetLeader().GetStoreId(), group)
+		}
+		return nil, errs.ErrCreateOperator.FastGenByArgs(fmt.Sprintf("scatter changes peer count or roles for region %v", region.GetID()))
 	}
 
 	if isSameDistribution(region, targetPeers, targetLeader) {
@@ -760,34 +881,94 @@ func (r *RegionScatterer) filterAllowedLeaderCandidateStores(
 	region *core.RegionInfo,
 	targetPeers map[uint64]*metapb.Peer,
 	candidateStores []uint64,
-) []uint64 {
+	readCPUByStore map[uint64]float64,
+	readPoolThreadCount uint64,
+) ([]uint64, bool) {
 	if len(candidateStores) == 0 {
-		return candidateStores
+		return candidateStores, false
 	}
 	filtered := candidateStores[:0]
 	leader := region.GetLeader()
 	if leader == nil {
-		return filtered
+		return filtered, false
 	}
 	currentLeaderStoreID := leader.GetStoreId()
 	if !r.isAllowedLeaderSource(currentLeaderStoreID) {
 		for _, storeID := range candidateStores {
 			if storeID == currentLeaderStoreID {
-				return append(filtered, storeID)
+				return append(filtered, storeID), false
 			}
 		}
-		return filtered
+		return filtered, false
 	}
+	regionReadCPU := float64(region.GetReadCPUUsage())
+	readPoolPressureFiltered := false
 	for _, storeID := range candidateStores {
 		peer := targetPeers[storeID]
 		if peer == nil {
+			continue
+		}
+		if r.cluster.GetStore(storeID) == nil {
+			continue
+		}
+		pendingReadCPU := regionReadCPU
+		if storeID == currentLeaderStoreID {
+			pendingReadCPU = 0
+		}
+		if isReadPoolUnderPressure(storeID, readCPUByStore, readPoolThreadCount, pendingReadCPU) {
+			readPoolPressureFiltered = true
 			continue
 		}
 		if operator.IsAllowedLeaderTarget(r.cluster, region, peer) {
 			filtered = append(filtered, storeID)
 		}
 	}
-	return filtered
+	return filtered, len(filtered) == 0 && readPoolPressureFiltered
+}
+
+func (r *RegionScatterer) getReadPoolThreadCount() uint64 {
+	if provider, ok := r.cluster.(storeConfigProvider); ok {
+		// This is a cluster-level StoreConfig estimate; PD does not know per-store
+		// runtime unified read-pool sizes, so heterogeneous stores may be imprecise.
+		return provider.GetStoreConfig().GetUnifiedReadPoolMaxThreadCount()
+	}
+	return 0
+}
+
+func isReadPoolUnderPressure(
+	storeID uint64,
+	readCPUByStore map[uint64]float64,
+	readPoolThreadCount uint64,
+	pendingReadCPU float64,
+) bool {
+	if readPoolThreadCount == 0 {
+		return false
+	}
+	readCPU := readCPUByStore[storeID] + pendingReadCPU
+	if readCPU == 0 {
+		return false
+	}
+	return readCPU >= float64(readPoolThreadCount)*splitScatterReadCPUUsagePerCore*splitScatterReadPoolPressureThreshold
+}
+
+func readPoolUsageRatio(
+	storeID uint64,
+	readCPUByStore map[uint64]float64,
+	readPoolThreadCount uint64,
+	pendingReadCPU float64,
+) float64 {
+	if readPoolThreadCount == 0 {
+		return 0
+	}
+	return (readCPUByStore[storeID] + pendingReadCPU) / (float64(readPoolThreadCount) * splitScatterReadCPUUsagePerCore)
+}
+
+func observeNoLeaderTargetMetrics(internalScatter, blockedByReadPoolPressure bool) {
+	if internalScatter && blockedByReadPoolPressure {
+		scatterSkipReadPoolPressureCounter.Inc()
+		return
+	}
+	scatterSkipNoLeaderCounter.Inc()
 }
 
 func (r *RegionScatterer) isAllowedLeaderSource(storeID uint64) bool {
@@ -818,6 +999,40 @@ func allowLeader(fit *placement.RegionFit, peer *metapb.Peer) bool {
 		return true
 	}
 	return false
+}
+
+// moveScatterPeer updates only the selected peer in a request-owned layout.
+// The leader is cloned separately from the peer list and must move with it.
+func moveScatterPeer(plannedRegion *core.RegionInfo, peerID, storeID uint64) {
+	plannedRegion.GetPeer(peerID).StoreId = storeID
+	if plannedRegion.GetLeader().GetId() == peerID {
+		plannedRegion.GetLeader().StoreId = storeID
+	}
+}
+
+// scatterPeersValid checks that planning preserves peer counts by role and witness status.
+func scatterPeersValid(region *core.RegionInfo, targets map[uint64]*metapb.Peer) bool {
+	if len(targets) != len(region.GetPeers()) {
+		return false
+	}
+	type peerKind struct {
+		role    metapb.PeerRole
+		witness bool
+	}
+	roles := make(map[peerKind]int)
+	for _, peer := range region.GetPeers() {
+		roles[peerKind{peer.GetRole(), peer.GetIsWitness()}]++
+	}
+	for storeID, peer := range targets {
+		if peer == nil || storeID == 0 || storeID != peer.GetStoreId() {
+			return false
+		}
+		roles[peerKind{peer.GetRole(), peer.GetIsWitness()}]--
+		if roles[peerKind{peer.GetRole(), peer.GetIsWitness()}] < 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func isSameDistribution(region *core.RegionInfo, targetPeers map[uint64]*metapb.Peer, targetLeader uint64) bool {
@@ -869,8 +1084,9 @@ func (r *RegionScatterer) selectNewPeer(context scatterSelectionContext, group s
 			continue
 		}
 		candidate := &metapb.Peer{
-			StoreId: store.GetID(),
-			Role:    peer.GetRole(),
+			StoreId:   store.GetID(),
+			Role:      peer.GetRole(),
+			IsWitness: peer.GetIsWitness(),
 		}
 		storeRegionCount := store.GetRegionCount()
 		if storeCount < minCount ||
@@ -961,6 +1177,41 @@ func leaderMoveReducesSourceTargetGap(selectedLeaders selectedStoreCounter, grou
 	// A zero source count means this group has no seeded/current leader history
 	// for the origin store, so keep the original scatter fallback behavior.
 	return fromCount == 0 || fromCount > toCount+1
+}
+
+func shouldSkipInternalScatterByBalancedReadCPU(
+	region *core.RegionInfo,
+	targetLeader uint64,
+	readCPUByStore map[uint64]float64,
+	readPoolThreadCount uint64,
+) bool {
+	if region == nil || region.GetLeader() == nil || readPoolThreadCount == 0 {
+		return false
+	}
+	sourceLeader := region.GetLeader().GetStoreId()
+	if sourceLeader == targetLeader {
+		return false
+	}
+	regionReadCPU := float64(region.GetReadCPUUsage())
+	targetProjectedRatio := readPoolUsageRatio(targetLeader, readCPUByStore, readPoolThreadCount, regionReadCPU)
+	if targetProjectedRatio < splitScatterReadPoolLowWatermark {
+		return false
+	}
+	sourceReadCPU, ok := readCPUByStore[sourceLeader]
+	if !ok {
+		return false
+	}
+	targetReadCPU, ok := readCPUByStore[targetLeader]
+	if !ok {
+		return false
+	}
+	sourceReadCPU -= regionReadCPU
+	if sourceReadCPU < 0 {
+		sourceReadCPU = 0
+	}
+	targetReadCPU += regionReadCPU
+	capacity := float64(readPoolThreadCount) * splitScatterReadCPUUsagePerCore
+	return sourceReadCPU-targetReadCPU < capacity*splitScatterReadCPUImbalanceThreshold
 }
 
 func isSameRegionEpoch(left, right *metapb.RegionEpoch) bool {

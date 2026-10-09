@@ -36,6 +36,7 @@ type task[TResult any] struct {
 const sealedFlag int64 = 1 << 62
 
 func newTask[TResult any]() *task[TResult] {
+	// #nosec G118 -- cancel is stored in execCancel and called on cancellation or completion.
 	ctx, cancel := context.WithCancel(context.Background())
 	t := &task[TResult]{
 		finishCh:   make(chan struct{}, 1),

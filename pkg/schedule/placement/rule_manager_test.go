@@ -78,6 +78,49 @@ func TestDefault2(t *testing.T) {
 	re.Equal([]string{"zone", "rack", "host"}, rules[1].LocationLabels)
 }
 
+func TestMayRestrictStoreLoad(t *testing.T) {
+	re := require.New(t)
+	_, manager := newTestManager(t, false)
+	re.False(manager.MayRestrictStoreLoad(true))
+	re.False(manager.MayRestrictStoreLoad(false))
+
+	setConstraints := func(constraints ...LabelConstraint) {
+		re.NoError(manager.SetRule(&Rule{
+			GroupID: "group", ID: "rule", Role: Voter, Count: 1,
+			LabelConstraints: constraints,
+		}))
+	}
+
+	setConstraints(LabelConstraint{Key: "zone", Op: In, Values: []string{"z1"}})
+	re.True(manager.MayRestrictStoreLoad(true))
+	re.False(manager.MayRestrictStoreLoad(false))
+
+	setConstraints(LabelConstraint{Key: core.EngineKey, Op: In, Values: []string{core.EngineTiFlash}})
+	re.False(manager.MayRestrictStoreLoad(true))
+	re.False(manager.MayRestrictStoreLoad(false))
+	setConstraints(LabelConstraint{Key: core.EngineKey, Op: NotIn, Values: []string{core.EngineTiFlash}})
+	re.False(manager.MayRestrictStoreLoad(true))
+	re.False(manager.MayRestrictStoreLoad(false))
+
+	setConstraints(
+		LabelConstraint{Key: core.EngineKey, Op: In, Values: []string{core.EngineTiFlash}},
+		LabelConstraint{Key: "zone", Op: In, Values: []string{"z1"}},
+	)
+	re.False(manager.MayRestrictStoreLoad(true))
+	re.True(manager.MayRestrictStoreLoad(false))
+
+	setConstraints()
+	re.False(manager.MayRestrictStoreLoad(true))
+	re.False(manager.MayRestrictStoreLoad(false))
+
+	re.NoError(manager.SetRule(&Rule{
+		GroupID: "group", ID: "restricted", Role: Voter, Count: 1,
+		LabelConstraints: []LabelConstraint{{Key: "zone", Op: In, Values: []string{"z1"}}},
+	}))
+	re.True(manager.MayRestrictStoreLoad(true))
+	re.False(manager.MayRestrictStoreLoad(false))
+}
+
 func TestAdjustRule(t *testing.T) {
 	re := require.New(t)
 	_, manager := newTestManager(t, false)
@@ -189,6 +232,7 @@ func checkRules(t *testing.T, rules []*Rule, expect [][2]string) {
 	re := require.New(t)
 	re.Len(rules, len(expect))
 	for i := range rules {
+		// #nosec G602 -- require.Len above guarantees an expected key for every rule.
 		re.Equal(expect[i], rules[i].Key())
 	}
 }
@@ -482,7 +526,7 @@ func TestCacheManager(t *testing.T) {
 	}
 	region := core.NewRegionInfo(regionMeta, regionMeta.Peers[0])
 	fit := manager.FitRegion(stores, region)
-	manager.SetRegionFitCache(region, fit)
+	manager.SetRegionFitCache(stores, region, fit)
 	// bestFit is not stored when the total number of hits is insufficient.
 	for i := 1; i < minHitCountToCacheHit/2; i++ {
 		manager.FitRegion(stores, region)

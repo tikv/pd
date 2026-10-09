@@ -63,18 +63,29 @@ type Leadership struct {
 	// name scopes test failpoints to one member.
 	name string
 	// The lease which is used to get this leadership
-	lease  atomic.Value // stored as *lease
+	lease  atomic.Pointer[Lease]
 	client *clientv3.Client
 	// leaderKey and leaderValue are key-value pair in etcd
 	leaderKey   string
-	leaderValue atomic.Value // Stored as string
+	leaderValue atomic.Value // stored as string
 
-	keepAliveCtx            context.Context
-	keepAliveCancelFunc     context.CancelFunc
-	keepAliveCancelFuncLock syncutil.Mutex
+	// mu protects keepAliveCancelFunc and serializes the publish of a new
+	// leadership (Campaign/SetLease) and the lease capture in Keep against a
+	// Reset that captures the current lease to close. The lease and leaderValue
+	// fields themselves are atomics, so getters stay lock-free. Never hold mu
+	// while closing a lease, which can block on etcd.
+	mu                  syncutil.Mutex
+	keepAliveCancelFunc context.CancelFunc
 	// campaignTimes is used to record the campaign times of the leader within `campaignTimesRecordTimeout`.
 	// It is ordered by time to prevent the leader from campaigning too frequently.
 	campaignTimes []time.Time
+}
+
+// LeadershipTerm is an immutable snapshot of one granted leadership term.
+type LeadershipTerm struct {
+	leaderKey   string
+	leaderValue string
+	leaseID     clientv3.LeaseID
 }
 
 // NewLeadership creates a new Leadership for the named member.
@@ -92,16 +103,20 @@ func NewLeadership(client *clientv3.Client, leaderKey, purpose, name string) *Le
 // GetLease gets the lease of leadership, only if leadership is valid,
 // i.e. the owner is a true leader, the lease is not nil.
 func (ls *Leadership) GetLease() *Lease {
-	l := ls.lease.Load()
-	if l == nil {
+	if ls == nil {
 		return nil
 	}
-	return l.(*Lease)
+	return ls.lease.Load()
 }
 
 // SetLease sets the lease of leadership.
 func (ls *Leadership) SetLease(lease *Lease) {
+	if ls == nil {
+		return
+	}
+	ls.mu.Lock()
 	ls.lease.Store(lease)
+	ls.mu.Unlock()
 }
 
 // GetClient is used to get the etcd client.
@@ -130,6 +145,42 @@ func (ls *Leadership) GetLeaderValue() string {
 		return ""
 	}
 	return leaderValue.(string)
+}
+
+// CaptureTerm captures the currently granted leadership term.
+func (ls *Leadership) CaptureTerm() (LeadershipTerm, bool) {
+	if ls == nil {
+		return LeadershipTerm{}, false
+	}
+	lease := ls.GetLease()
+	if lease == nil {
+		return LeadershipTerm{}, false
+	}
+	term := LeadershipTerm{
+		leaderKey:   ls.GetLeaderKey(),
+		leaderValue: ls.GetLeaderValue(),
+		leaseID:     lease.GetID(),
+	}
+	return term, term.leaderKey != "" && term.leaderValue != "" && term.leaseID != 0
+}
+
+// Comparisons returns the etcd comparisons that fence a transaction to the
+// captured leadership term.
+func (term LeadershipTerm) Comparisons() []clientv3.Cmp {
+	return []clientv3.Cmp{
+		clientv3.Compare(clientv3.Value(term.leaderKey), "=", term.leaderValue),
+		clientv3.Compare(clientv3.LeaseValue(term.leaderKey), "=", term.leaseID),
+	}
+}
+
+// LeaderValue returns the leader value captured by the term.
+func (term LeadershipTerm) LeaderValue() string {
+	return term.leaderValue
+}
+
+// LeaseID returns the leadership lease ID captured by the term.
+func (term LeadershipTerm) LeaseID() clientv3.LeaseID {
+	return term.leaseID
 }
 
 // GetCampaignTimesNum is used to get the campaign times of the leader within `campaignTimesRecordTimeout`.
@@ -168,10 +219,12 @@ func (ls *Leadership) AddCampaignTimes() {
 
 // Campaign is used to campaign with given lease and returns a leadership
 func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...clientv3.Cmp) error {
-	ls.leaderValue.Store(leaderData)
 	// Create a new lease to campaign
 	newLease := NewLease(ls.client, ls.purpose, ls.name)
-	ls.SetLease(newLease)
+	ls.mu.Lock()
+	ls.leaderValue.Store(leaderData)
+	ls.lease.Store(newLease)
+	ls.mu.Unlock()
 
 	failpoint.Inject("skipGrantLeader", func(val failpoint.Value) {
 		name, ok := val.(string)
@@ -216,15 +269,25 @@ func (ls *Leadership) Keep(ctx context.Context) {
 	if ls == nil {
 		return
 	}
-	ls.keepAliveCancelFuncLock.Lock()
-	ls.keepAliveCtx, ls.keepAliveCancelFunc = context.WithCancel(ctx)
-	ls.keepAliveCancelFuncLock.Unlock()
-	go ls.GetLease().KeepAlive(ls.keepAliveCtx)
+	ls.mu.Lock()
+	lease := ls.GetLease()
+	if lease == nil {
+		ls.mu.Unlock()
+		return
+	}
+	keepAliveCtx, cancel := context.WithCancel(ctx)
+	ls.keepAliveCancelFunc = cancel
+	ls.mu.Unlock()
+	go lease.KeepAlive(keepAliveCtx)
 }
 
 // Check returns whether the leadership is still available.
 func (ls *Leadership) Check() bool {
-	return ls != nil && ls.GetLease() != nil && !ls.GetLease().IsExpired()
+	if ls == nil {
+		return false
+	}
+	lease := ls.GetLease()
+	return lease != nil && !lease.IsExpired()
 }
 
 // LeaderTxn returns txn() with a leader comparison to guarantee that
@@ -420,17 +483,28 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 
 // Reset does some defer jobs such as closing lease, resetting lease etc.
 func (ls *Leadership) Reset() {
-	if ls == nil || ls.GetLease() == nil {
+	if ls == nil {
 		return
 	}
-	ls.keepAliveCancelFuncLock.Lock()
+	ls.mu.Lock()
+	// Detach the lease before blocking cleanup so a late Keep cannot restart
+	// keepalive for the leadership being reset. Campaign publishes a replacement
+	// under the same mutex, so a new leadership remains independently keepable.
+	lease := ls.lease.Swap(nil)
 	if ls.keepAliveCancelFunc != nil {
 		ls.keepAliveCancelFunc()
+		ls.keepAliveCancelFunc = nil
 	}
-	ls.keepAliveCancelFuncLock.Unlock()
-	err := ls.GetLease().Close()
+	// Clear the old value now, under the same lock that publishes a new
+	// leadership, and only close the captured lease, so this reset cannot
+	// overwrite or close a new leadership when its Close returns.
+	ls.leaderValue.Store("")
+	ls.mu.Unlock()
+	if lease == nil {
+		return
+	}
+	err := lease.Close()
 	if err != nil {
 		log.Error("close lease failed", zap.String("purpose", ls.purpose), errs.ZapError(err))
 	}
-	ls.leaderValue.Store("")
 }

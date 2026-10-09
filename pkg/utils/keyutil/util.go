@@ -25,6 +25,17 @@ func BuildKeyRangeKey(startKey, endKey []byte) string {
 	return fmt.Sprintf("%s-%s", hex.EncodeToString(startKey), hex.EncodeToString(endKey))
 }
 
+// BuildKeyRangeMaps groups consecutive keys into maps with start_key and end_key fields.
+// It returns nil for no keys and panics if the number of keys is odd.
+func BuildKeyRangeMaps(keys ...string) []any {
+	var ranges []any
+	for i := 0; i < len(keys); i += 2 {
+		pair := [2]string(keys[i:])
+		ranges = append(ranges, map[string]any{"start_key": pair[0], "end_key": pair[1]})
+	}
+	return ranges
+}
+
 // MaxKey return the bigger key for the given keys.
 func MaxKey(a, b []byte) []byte {
 	if bytes.Compare(a, b) > 0 {

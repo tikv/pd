@@ -74,8 +74,8 @@ func (h *Redirector) SetAddress(addr string) {
 	target, _ := url.Parse(addr) // error has been handled
 	h.proxy = httputil.NewSingleHostReverseProxy(target)
 
-	defaultDirector := h.proxy.Director
-	h.proxy.Director = func(r *http.Request) {
+	defaultDirector := h.proxy.Director        //nolint:staticcheck // SA1019: preserve existing proxy header semantics.
+	h.proxy.Director = func(r *http.Request) { //nolint:staticcheck // SA1019: preserve existing proxy header semantics.
 		defaultDirector(r)
 		r.Header.Add(proxyHeader, h.name)
 	}
@@ -108,6 +108,7 @@ func (h *Redirector) TemporaryRedirect(w http.ResponseWriter, r *http.Request) {
 		apiserver.StoppedHandler.ServeHTTP(w, r)
 		return
 	}
+	// #nosec G710 -- addr is validated configuration or a PD member client URL.
 	http.Redirect(w, r, addr+r.RequestURI, http.StatusTemporaryRedirect)
 }
 
