@@ -35,6 +35,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -195,6 +196,7 @@ type RaftCluster struct {
 	progressManager          *progress.Manager
 	regionSyncer             *syncer.RegionSyncer
 	changedRegions           chan *core.RegionInfo
+	keyspaceManager          *keyspace.Manager
 	keyspaceGroupManager     *keyspace.GroupManager
 	independentServices      sync.Map
 	hbstreams                *hbstream.HeartbeatStreams
@@ -337,6 +339,7 @@ func (c *RaftCluster) InitCluster(
 	id id.Allocator,
 	opt sc.ConfProvider,
 	hbstreams *hbstream.HeartbeatStreams,
+	keyspaceManager *keyspace.Manager,
 	keyspaceGroupManager *keyspace.GroupManager) error {
 	c.opt, c.id = opt.(*config.PersistOptions), id
 	c.ctx, c.cancel = context.WithCancel(c.serverCtx)
@@ -345,6 +348,7 @@ func (c *RaftCluster) InitCluster(
 		c.changedRegions = make(chan *core.RegionInfo, 100)
 	})
 	c.unsafeRecoveryController = unsaferecovery.NewController(c)
+	c.keyspaceManager = keyspaceManager
 	c.keyspaceGroupManager = keyspaceGroupManager
 	c.hbstreams = hbstreams
 	c.ruleManager = placement.NewRuleManager(c.ctx, c.storage, c, c.GetOpts())
@@ -373,7 +377,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	}
 	c.isKeyspaceGroupEnabled = s.IsKeyspaceGroupEnabled()
 	initClusterStart := time.Now()
-	err = c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetHBStreams(), s.GetKeyspaceGroupManager())
+	err = c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetHBStreams(), s.GetKeyspaceManager(), s.GetKeyspaceGroupManager())
 	if err != nil {
 		log.Warn("failed to initialize cluster", errs.ZapError(err), zap.Duration("cost", time.Since(initClusterStart)))
 		return err
@@ -490,7 +494,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	go c.runUpdateStoreStats()
 	go c.startGCTuner()
 	go c.startProgressGC()
-	go c.runStorageSizeCollector(s.GetMeteringWriter(), c.regionLabeler, s.GetKeyspaceManager())
+	go c.runStorageSizeCollector(s.GetMeteringWriter(), s.GetKeyspaceManager())
 
 	s.GetGCStateManager().OnNodeBecomesLeader()
 	c.stopGCStateManager = s.GetGCStateManager().OnNodeBecomesFollower
@@ -1038,6 +1042,14 @@ func (c *RaftCluster) Stop() {
 	}
 
 	c.wg.Wait()
+	// The keyspace cache is only kept in sync with storage while this node is
+	// leader (creates/updates/deletes are leader-only), so it can no longer be
+	// trusted once leadership is lost. Clear it now that every goroutine that
+	// could read or backfill it has stopped, so the next time this node becomes
+	// leader it rebuilds from a known-empty state instead of risking stale data.
+	if c.keyspaceManager != nil {
+		c.keyspaceManager.ClearCache()
+	}
 	log.Info("raft cluster is stopped")
 }
 
@@ -1096,6 +1108,21 @@ func (c *RaftCluster) GetRuleManager() *placement.RuleManager {
 // GetKeyRangeManager returns the key range manager reference
 func (c *RaftCluster) GetKeyRangeManager() *keyrange.Manager {
 	return c.keyRangeManager
+}
+
+// GetKeyspaceManager returns the keyspace manager reference.
+func (c *RaftCluster) GetKeyspaceManager() *keyspace.Manager {
+	return c.keyspaceManager
+}
+
+// GetKeyspaceIDInRange returns the keyspace info by the keyspace ID.
+func (c *RaftCluster) GetKeyspaceIDInRange(start, end uint32, limit int) ([]uint32, bool) {
+	return c.keyspaceManager.GetKeyspaceIDInRange(start, end, limit)
+}
+
+// KeyspaceExist returns whether the keyspace exists by the keyspace ID.
+func (c *RaftCluster) KeyspaceExist(id uint32) bool {
+	return c.keyspaceManager.KeyspaceExist(id)
 }
 
 // GetRegionLabeler returns the region labeler.
@@ -3028,7 +3055,6 @@ func (c *RaftCluster) adjustNetworkSlowStore(storeID uint64) {
 // runStorageSizeCollector runs the storage size collector for the metering.
 func (c *RaftCluster) runStorageSizeCollector(
 	writer *metering.Writer,
-	regionLabeler *labeler.RegionLabeler,
 	keyspaceManager *keyspace.Manager,
 ) {
 	defer logutil.LogPanic()
@@ -3051,40 +3077,28 @@ func (c *RaftCluster) runStorageSizeCollector(
 			log.Info("storage size collector has been stopped")
 			return
 		case <-ticker.C:
-			storageSizeInfoList := c.collectStorageSize(regionLabeler, keyspaceManager)
+			storageSizeInfoList := c.collectStorageSize(keyspaceManager)
 			// Collect the storage size info list of all keyspaces.
 			collector.Collect(storageSizeInfoList)
 		}
 	}
 }
 
-func (c *RaftCluster) collectStorageSize(
-	regionLabeler *labeler.RegionLabeler,
-	keyspaceManager *keyspace.Manager,
-) []*storageSizeInfo {
+func (c *RaftCluster) collectStorageSize(keyspaceManager *keyspace.Manager) []*storageSizeInfo {
 	regionBoundsMap := make(map[string]*keyspace.RegionBound)
-	start := time.Now()
-	// Iterate the region labeler to get all keyspaces and their corresponding region ranges.
-	regionLabeler.IterateLabelRules(func(rule *labeler.LabelRule) bool {
-		// Try to parse the keyspace ID from the label rule.
-		keyspaceID, ok := keyspace.ParseKeyspaceIDFromLabelRule(rule)
-		if !ok {
+	keyspaceManager.ScanAllKeyspace(func(keyspaceID uint32, name string, state keyspacepb.KeyspaceState) bool {
+		// Only meter keyspaces currently in active use, matching the
+		// pre-cache-backed behavior of skipping a keyspace once it is no
+		// longer ENABLED (e.g. ARCHIVED or TOMBSTONE), which can otherwise
+		// linger in the cache until it is fully deleted.
+		if state != keyspacepb.KeyspaceState_ENABLED {
 			return true
 		}
-		keyspaceName, err := keyspaceManager.GetEnabledKeyspaceNameByID(keyspaceID)
-		if err != nil {
-			// TODO: improve the observability of this error.
-			return true
-		}
-		// Make the region bounds.
-		regionBoundsMap[keyspaceName] = keyspace.MakeRegionBound(keyspaceID)
+		regionBoundsMap[name] = keyspace.MakeRegionBound(keyspaceID)
 		return true
 	})
-	log.Info("iterated the region bounds of all keyspaces",
-		zap.Duration("cost", time.Since(start)),
-		zap.Int("count", len(regionBoundsMap)))
 
-	start = time.Now()
+	start := time.Now()
 	storageSizeInfoList := make([]*storageSizeInfo, 0, len(regionBoundsMap))
 	// Observe the region stats of each keyspace.
 	for keyspaceName, regionBounds := range regionBoundsMap {
