@@ -19,10 +19,13 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/spf13/cobra"
 
 	"github.com/pingcap/errors"
 
+	pdhttp "github.com/tikv/pd/client/http"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/affinity"
 )
 
@@ -41,8 +44,142 @@ func NewAffinityCommand() *cobra.Command {
 		newAffinityShowCommand(),
 		newAffinityDeleteCommand(),
 		newAffinityUpdatePeersCommand(),
+		newAffinityRebalanceCommand(),
 	)
 	return cmd
+}
+
+func newAffinityRebalanceCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "rebalance",
+		Short: "preview or apply affinity balance for one table",
+		Run:   affinityRebalanceCommandFunc,
+	}
+	cmd.Flags().Bool("apply", false, "apply the generated plan")
+	cmd.Flags().Bool("force", false, "required when applying a rebalance plan")
+	return cmd
+}
+
+type affinityRebalanceResult struct {
+	GroupID   string   `json:"group_id"`
+	OldLeader uint64   `json:"old_leader"`
+	NewLeader uint64   `json:"new_leader"`
+	OldVoters []uint64 `json:"old_voters"`
+	NewVoters []uint64 `json:"new_voters"`
+	Changed   bool     `json:"changed"`
+	Applied   bool     `json:"applied"`
+	Error     string   `json:"error,omitempty"`
+}
+
+func affinityRebalanceCommandFunc(cmd *cobra.Command, _ []string) {
+	tableID, _ := cmd.Flags().GetUint64("table-id")
+	if tableID == 0 {
+		cmd.Println("--table-id is required")
+		return
+	}
+	apply, _ := cmd.Flags().GetBool("apply")
+	force, _ := cmd.Flags().GetBool("force")
+	if apply && !force {
+		cmd.Println("--force is required with --apply")
+		return
+	}
+
+	groups, err := PDCli.GetAllAffinityGroups(cmd.Context())
+	if err != nil {
+		cmd.Printf("Failed to get affinity groups: %v\n", err)
+		return
+	}
+	stores, err := PDCli.GetStores(cmd.Context())
+	if err != nil {
+		cmd.Printf("Failed to get stores: %v\n", err)
+		return
+	}
+
+	tableGroups := make([]*affinity.Group, 0)
+	for _, state := range groups {
+		if !isTableAffinityGroup(state.ID, tableID) {
+			continue
+		}
+		tableGroups = append(tableGroups, &affinity.Group{
+			ID:            state.ID,
+			LeaderStoreID: state.LeaderStoreID,
+			VoterStoreIDs: append([]uint64(nil), state.VoterStoreIDs...),
+			BalancePolicy: affinity.BalancePolicy(state.BalancePolicy),
+		})
+	}
+	if len(tableGroups) == 0 {
+		cmd.Printf("no affinity groups found for table %d\n", tableID)
+		return
+	}
+
+	availableStores := make([]uint64, 0, len(stores.Stores))
+	for _, store := range stores.Stores {
+		if (strings.EqualFold(store.Store.StateName, "up") || strings.EqualFold(store.Store.StateName, "serving")) && isTiKVStore(store) {
+			availableStores = append(availableStores, uint64(store.Store.ID))
+		}
+	}
+	replicaCount := 0
+	for _, group := range tableGroups {
+		if len(group.VoterStoreIDs) > 0 {
+			replicaCount = len(group.VoterStoreIDs)
+			break
+		}
+	}
+	if replicaCount == 0 {
+		cmd.Println("affinity groups do not have voter targets")
+		return
+	}
+	plans, err := affinity.PlanBalance(tableGroups, affinity.BalanceOptions{
+		Stores:       availableStores,
+		ReplicaCount: replicaCount,
+	})
+	if err != nil {
+		cmd.Printf("Failed to plan affinity rebalance: %v\n", err)
+		return
+	}
+
+	byID := make(map[string]*affinity.Group, len(tableGroups))
+	for _, group := range tableGroups {
+		byID[group.ID] = group
+	}
+	result := make([]affinityRebalanceResult, 0, len(plans))
+	for _, plan := range plans {
+		old := byID[plan.GroupID]
+		item := affinityRebalanceResult{
+			GroupID:   plan.GroupID,
+			OldLeader: old.LeaderStoreID,
+			NewLeader: plan.LeaderStoreID,
+			OldVoters: append([]uint64(nil), old.VoterStoreIDs...),
+			NewVoters: append([]uint64(nil), plan.VoterStoreIDs...),
+			Changed:   plan.Changed,
+		}
+		if apply && plan.Changed {
+			_, err := PDCli.UpdateAffinityGroupPeers(cmd.Context(), plan.GroupID, plan.LeaderStoreID, plan.VoterStoreIDs)
+			if err != nil {
+				item.Error = err.Error()
+			} else {
+				item.Applied = true
+			}
+		}
+		result = append(result, item)
+		if item.Error != "" {
+			break
+		}
+	}
+	jsonPrint(cmd, result)
+}
+
+func isTiKVStore(store pdhttp.StoreInfo) bool {
+	labels := make([]*metapb.StoreLabel, 0, len(store.Store.Labels))
+	for _, label := range store.Store.Labels {
+		labels = append(labels, &metapb.StoreLabel{Key: label.Key, Value: label.Value})
+	}
+	return core.NewStoreInfo(&metapb.Store{Id: uint64(store.Store.ID), Labels: labels}).IsTiKV()
+}
+
+func isTableAffinityGroup(groupID string, tableID uint64) bool {
+	table := strconv.FormatUint(tableID, 10)
+	return groupID == "_tidb_t_"+table || strings.HasPrefix(groupID, "_tidb_pt_"+table+"_")
 }
 
 func newAffinityShowCommand() *cobra.Command {
