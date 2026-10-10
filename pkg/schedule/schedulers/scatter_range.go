@@ -76,20 +76,24 @@ func (conf *scatterRangeSchedulerConfig) MarshalJSON() ([]byte, error) {
 // The hex fields take precedence. A config persisted by an older version has
 // no hex fields, so the string fields are used as before.
 func (conf *scatterRangeSchedulerConfig) UnmarshalJSON(data []byte) error {
-	var c scatterRangeSchedulerConfigJSON
+	var c struct {
+		scatterRangeSchedulerConfigJSON
+		StartKeyHex *string `json:"start-key-hex"`
+		EndKeyHex   *string `json:"end-key-hex"`
+	}
 	if err := json.Unmarshal(data, &c); err != nil {
 		return err
 	}
 	startKey, endKey := c.StartKey, c.EndKey
-	if len(c.StartKeyHex) > 0 {
-		key, err := hex.DecodeString(c.StartKeyHex)
+	if c.StartKeyHex != nil {
+		key, err := hex.DecodeString(*c.StartKeyHex)
 		if err != nil {
 			return err
 		}
 		startKey = string(key)
 	}
-	if len(c.EndKeyHex) > 0 {
-		key, err := hex.DecodeString(c.EndKeyHex)
+	if c.EndKeyHex != nil {
+		key, err := hex.DecodeString(*c.EndKeyHex)
 		if err != nil {
 			return err
 		}

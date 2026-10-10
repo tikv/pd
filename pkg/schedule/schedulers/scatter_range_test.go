@@ -173,6 +173,11 @@ func TestScatterRangeConfigJSONCompatibility(t *testing.T) {
 	re.Equal(string([]byte{0x74, 0x80}), conf.StartKey)
 	re.Empty(conf.EndKey)
 
+	conf = &scatterRangeSchedulerConfig{}
+	re.NoError(json.Unmarshal([]byte(`{"range-name":"test","start-key":"a_00","end-key":"a_99","start-key-hex":"","end-key-hex":""}`), conf))
+	re.Empty(conf.StartKey)
+	re.Empty(conf.EndKey)
+
 	// A broken hex field is an error.
 	conf = &scatterRangeSchedulerConfig{}
 	re.Error(json.Unmarshal([]byte(`{"range-name":"test","start-key":"","end-key":"","start-key-hex":"zz"}`), conf))
