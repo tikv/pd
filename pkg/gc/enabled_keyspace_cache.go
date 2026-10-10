@@ -1,0 +1,402 @@
+// Copyright 2026 TiKV Project Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package gc
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"slices"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/gogo/protobuf/proto"
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
+	"github.com/pingcap/log"
+
+	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/grpcutil"
+)
+
+const (
+	enabledKeyspacePageSize       = 256
+	enabledKeyspaceRequestTimeout = 5 * time.Second
+	enabledKeyspaceRetryDelay     = time.Second
+	enabledKeyspaceMaxRetryDelay  = 30 * time.Second
+	enabledKeyspaceLogInterval    = 30 * time.Second
+	enabledKeyspaceWatchTimeout   = 10 * time.Second
+)
+
+// enabledKeyspace is a value copy of the metadata needed by GC initialization.
+type enabledKeyspace struct {
+	id               uint32
+	gcManagementType string
+}
+
+// enabledKeyspaceLoadHooks only reports pages before the first successful
+// snapshot. Callbacks run outside the index mutex and own their value slices.
+// onPage may run concurrently; callbacks must not wait for GC I/O.
+type enabledKeyspaceLoadHooks struct {
+	onPage            func([]enabledKeyspace)
+	onInitialSnapshot func([]enabledKeyspace)
+}
+
+// enabledKeyspaceCache belongs to one leadership term. The published map and
+// its revision always describe one complete, successfully applied snapshot.
+type enabledKeyspaceCache struct {
+	client         *clientv3.Client
+	prefix         string
+	watcherFactory func(*clientv3.Client) clientv3.Watcher
+
+	mu       sync.Mutex
+	entries  map[uint32]enabledKeyspace
+	revision int64
+	stopped  error
+	ready    bool
+	changed  chan struct{}
+}
+
+func newEnabledKeyspaceCache(client *clientv3.Client, prefix string) *enabledKeyspaceCache {
+	return &enabledKeyspaceCache{
+		client:         client,
+		prefix:         prefix,
+		watcherFactory: clientv3.NewWatcher,
+		changed:        make(chan struct{}),
+	}
+}
+
+// run blocks until the leadership term ends. A failed or compacted watch is
+// followed by a complete reload, so no missing revision is silently skipped.
+// Call run once per cache. Returning retires the cache and wakes its waiters.
+func (c *enabledKeyspaceCache) run(ctx context.Context, hooks enabledKeyspaceLoadHooks) {
+	defer func() {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		c.stopped = ctx.Err()
+		close(c.changed)
+		c.changed = make(chan struct{})
+	}()
+	retryDelay := enabledKeyspaceRetryDelay
+	var lastLog time.Time
+	suppressedErrors := 0
+	for ctx.Err() == nil {
+		loadStartedAt := time.Now()
+		entries, revision, err := c.load(ctx, hooks.onPage)
+		phase := "load"
+		if err == nil {
+			if c.publish(ctx, entries, revision) {
+				if hooks.onInitialSnapshot != nil {
+					hooks.onInitialSnapshot(sortedEnabledKeyspaces(entries))
+				}
+				hooks = enabledKeyspaceLoadHooks{}
+				log.Info("load enabled keyspace cache completed",
+					zap.String("prefix", c.prefix),
+					zap.Int64("revision", revision),
+					zap.Int("enabled-keyspace-count", len(entries)),
+					zap.Duration("cost", time.Since(loadStartedAt)))
+			}
+			watchStarted := time.Now()
+			err = c.watch(ctx, revision+1)
+			phase = "watch"
+			if time.Since(watchStarted) >= enabledKeyspaceMaxRetryDelay {
+				retryDelay = enabledKeyspaceRetryDelay
+			}
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		if time.Since(lastLog) >= enabledKeyspaceLogInterval {
+			log.Warn("failed to synchronize enabled keyspace cache",
+				zap.String("prefix", c.prefix),
+				zap.String("phase", phase),
+				zap.Int64("revision", c.appliedRevision()),
+				zap.Duration("retry-delay", retryDelay),
+				zap.Int("suppressed-errors", suppressedErrors),
+				zap.Error(err))
+			lastLog = time.Now()
+			suppressedErrors = 0
+		} else {
+			suppressedErrors++
+		}
+		timer := time.NewTimer(retryDelay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+		retryDelay = min(retryDelay*2, enabledKeyspaceMaxRetryDelay)
+	}
+}
+
+func (c *enabledKeyspaceCache) appliedRevision() int64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.revision
+}
+
+// canSkipGCStateWarmup reports whether the published metadata excludes a
+// non-null keyspace from independent GC. Before the index is ready, a missing
+// entry cannot establish that the scope is obsolete.
+func (c *enabledKeyspaceCache) canSkipGCStateWarmup(id uint32) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry, exists := c.entries[id]
+	return c.ready && (!exists || entry.gcManagementType != keyspace.KeyspaceLevelGC)
+}
+
+func (c *enabledKeyspaceCache) waitReady(ctx context.Context) error {
+	for {
+		c.mu.Lock()
+		if err := ctx.Err(); err != nil {
+			c.mu.Unlock()
+			return err
+		}
+		if c.stopped != nil {
+			err := c.stopped
+			c.mu.Unlock()
+			return err
+		}
+		if c.ready {
+			c.mu.Unlock()
+			return nil
+		}
+		changed := c.changed
+		c.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-changed:
+		}
+	}
+}
+
+func (c *enabledKeyspaceCache) snapshotAtLeast(ctx context.Context, revision int64) ([]enabledKeyspace, int64, error) {
+	for {
+		c.mu.Lock()
+		if err := c.stopped; err != nil {
+			c.mu.Unlock()
+			return nil, 0, err
+		}
+		if err := ctx.Err(); err != nil {
+			c.mu.Unlock()
+			return nil, 0, err
+		}
+		if c.ready && c.revision >= revision {
+			result := make([]enabledKeyspace, 0, len(c.entries))
+			for _, entry := range c.entries {
+				result = append(result, entry)
+			}
+			applied := c.revision
+			c.mu.Unlock()
+			sortEnabledKeyspaces(result)
+			return result, applied, nil
+		}
+		changed := c.changed
+		c.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return nil, 0, ctx.Err()
+		case <-changed:
+		}
+	}
+}
+
+func (c *enabledKeyspaceCache) publish(ctx context.Context, entries map[uint32]enabledKeyspace, revision int64) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if ctx.Err() != nil {
+		return false
+	}
+	c.entries = entries
+	c.revision = revision
+	c.ready = true
+	close(c.changed)
+	c.changed = make(chan struct{})
+	return true
+}
+
+func (c *enabledKeyspaceCache) publishProgress(ctx context.Context, changes map[uint32]*enabledKeyspace, revision int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if ctx.Err() != nil || revision <= c.revision {
+		return
+	}
+	for id, entry := range changes {
+		if entry == nil {
+			delete(c.entries, id)
+		} else {
+			c.entries[id] = *entry
+		}
+	}
+	c.revision = revision
+	close(c.changed)
+	c.changed = make(chan struct{})
+}
+
+// watch updates a private working set. Progress notifications are ordered after
+// prior events on the same stream, so they prove a complete applied revision.
+// Event response headers alone may be ahead of the delivered prefix events.
+func (c *enabledKeyspaceCache) watch(ctx context.Context, nextRevision int64) error {
+	watcher := c.watcherFactory(c.client)
+	defer watcher.Close()
+	watchCtx, cancel := context.WithCancel(clientv3.WithRequireLeader(ctx))
+	defer cancel()
+	done := make(chan struct{})
+	go grpcutil.CheckStream(watchCtx, cancel, done)
+	watchCh := watcher.Watch(watchCtx, c.prefix, clientv3.WithPrefix(), clientv3.WithRev(nextRevision), clientv3.WithProgressNotify())
+	done <- struct{}{}
+	if err := watchCtx.Err(); err != nil {
+		return fmt.Errorf("keyspace metadata watch creation failed: %w", err)
+	}
+	ticker := time.NewTicker(etcdutil.RequestProgressInterval)
+	defer ticker.Stop()
+	pending := make(map[uint32]*enabledKeyspace)
+	publishedRevision := nextRevision - 1
+	pendingRevision := publishedRevision
+	lastProgress := time.Now()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			if time.Since(lastProgress) >= enabledKeyspaceWatchTimeout {
+				return fmt.Errorf("keyspace metadata watch made no progress for %s", enabledKeyspaceWatchTimeout)
+			}
+			ctx, cancel := context.WithTimeout(watchCtx, enabledKeyspaceRequestTimeout)
+			err := watcher.RequestProgress(ctx)
+			cancel()
+			if err != nil {
+				return err
+			}
+		case resp, ok := <-watchCh:
+			if !ok {
+				return errors.New("keyspace metadata watch closed")
+			}
+			if err := resp.Err(); err != nil {
+				return err
+			}
+			if resp.IsProgressNotify() {
+				if resp.Header.Revision < pendingRevision || resp.Header.Revision < publishedRevision ||
+					(resp.Header.Revision == publishedRevision && len(pending) != 0) {
+					return fmt.Errorf("keyspace metadata watch progress %d precedes applied events at %d", resp.Header.Revision, pendingRevision)
+				}
+				c.publishProgress(ctx, pending, resp.Header.Revision)
+				publishedRevision = resp.Header.Revision
+				pendingRevision = publishedRevision
+				lastProgress = time.Now()
+				clear(pending)
+				continue
+			}
+			if len(resp.Events) == 0 {
+				continue
+			}
+			// Decode the complete clientv3 response before changing the working
+			// set. clientv3 merges fragmented watch responses before delivery.
+			type change struct {
+				id      uint32
+				entry   enabledKeyspace
+				enabled bool
+			}
+			changes := make([]change, 0, len(resp.Events))
+			for _, event := range resp.Events {
+				if event.Kv == nil || event.Kv.ModRevision <= publishedRevision {
+					return fmt.Errorf("keyspace metadata watch received stale or missing event at revision %d", publishedRevision)
+				}
+				pendingRevision = max(pendingRevision, event.Kv.ModRevision)
+				switch event.Type {
+				case mvccpb.PUT:
+					id, entry, enabled, err := c.decodeKeyspaceMeta(event.Kv.Key, event.Kv.Value)
+					if err != nil {
+						return err
+					}
+					changes = append(changes, change{id: id, entry: entry, enabled: enabled})
+				case mvccpb.DELETE:
+					id, err := c.parseKeyspaceID(event.Kv.Key)
+					if err != nil {
+						return fmt.Errorf("invalid deleted keyspace metadata: %w", err)
+					}
+					changes = append(changes, change{id: id})
+				default:
+					return fmt.Errorf("unexpected keyspace metadata event type %v", event.Type)
+				}
+			}
+			for _, change := range changes {
+				if change.enabled {
+					entry := change.entry
+					pending[change.id] = &entry
+				} else {
+					pending[change.id] = nil
+				}
+			}
+		}
+	}
+}
+
+func (c *enabledKeyspaceCache) parseKeyspaceID(rawKey []byte) (uint32, error) {
+	key := string(rawKey)
+	if !strings.HasPrefix(key, c.prefix) {
+		return 0, fmt.Errorf("keyspace metadata key %q is outside prefix", key)
+	}
+	id64, err := strconv.ParseUint(strings.TrimPrefix(key, c.prefix), 10, 32)
+	if err != nil {
+		return 0, fmt.Errorf("invalid keyspace metadata key %q: %w", key, err)
+	}
+	return uint32(id64), nil
+}
+
+func (c *enabledKeyspaceCache) decodeKeyspaceMeta(rawKey, rawValue []byte) (uint32, enabledKeyspace, bool, error) {
+	id, err := c.parseKeyspaceID(rawKey)
+	if err != nil {
+		return 0, enabledKeyspace{}, false, err
+	}
+	meta := &keyspacepb.KeyspaceMeta{}
+	if err := proto.Unmarshal(rawValue, meta); err != nil {
+		return 0, enabledKeyspace{}, false, fmt.Errorf("decode keyspace metadata %q: %w", rawKey, err)
+	}
+	if meta.GetId() != id {
+		return 0, enabledKeyspace{}, false, fmt.Errorf("keyspace metadata %q contains ID %d", rawKey, meta.GetId())
+	}
+	return id, enabledKeyspace{id: id, gcManagementType: meta.Config[keyspace.GCManagementType]}, meta.State == keyspacepb.KeyspaceState_ENABLED, nil
+}
+
+func sortedEnabledKeyspaces(entries map[uint32]enabledKeyspace) []enabledKeyspace {
+	result := make([]enabledKeyspace, 0, len(entries))
+	for _, entry := range entries {
+		result = append(result, entry)
+	}
+	sortEnabledKeyspaces(result)
+	return result
+}
+
+func sortEnabledKeyspaces(entries []enabledKeyspace) {
+	slices.SortFunc(entries, func(a, b enabledKeyspace) int {
+		switch {
+		case a.id < b.id:
+			return -1
+		case a.id > b.id:
+			return 1
+		default:
+			return 0
+		}
+	})
+}

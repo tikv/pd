@@ -23,6 +23,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/failpoint"
@@ -203,10 +204,12 @@ type GCStateManager struct {
 	allKeyspacesGCStatesSingleFlight                  *syncutil.OrderedSingleFlight[map[uint32]GCState]
 	allKeyspacesGCStatesExcludeGCBarriersSingleFlight *syncutil.OrderedSingleFlight[map[uint32]GCState]
 
-	// Note that nodeLeadership is a counter instead of a bool. Theoretically, it's possible that an
-	// OnNodeBecomesFollower invocation of the previous lease is later than the OnNodeBecomesLeader call of the new
-	// lease during PD leader changes. Making this a counter helps in guaranteeing the eventual consistency.
-	nodeLeadership atomic.Int32
+	// lifecycleMu serializes resets, while activeGeneration gates lock-free reads
+	// before a reset waits for mu. generation identifies the state owned under mu.
+	lifecycleMu      syncutil.Mutex
+	activeGeneration atomic.Pointer[gcStateGeneration]
+	generation       *gcStateGeneration
+	etcdClient       *clientv3.Client
 }
 
 // NewGCStateManager creates a GCStateManager of GC and services.
@@ -242,39 +245,6 @@ func getKeyspaceNameFromCtx(ctx context.Context) string {
 		return value
 	}
 	return "<unknown>"
-}
-
-// OnNodeBecomesLeader marks the current PD node as leader for GC state watches.
-func (m *GCStateManager) OnNodeBecomesLeader() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	m.nodeLeadership.Add(1)
-
-	// Also trigger cache invalidation even when transitioning from follower to leader, as a protection against
-	// potential inconsistent cache state left from the last leadership.
-	m.gcStateCache.clearAll()
-	m.barrierMetrics.clearMetrics()
-	productionBarrierMetrics.current.Store(m.barrierMetrics)
-}
-
-// OnNodeBecomesFollower marks the current PD node as follower and closes all existing GC state watches.
-func (m *GCStateManager) OnNodeBecomesFollower() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	m.nodeLeadership.Add(-1)
-
-	// Invalidate the cache.
-	m.gcStateCache.clearAll()
-	m.barrierMetrics.clearMetrics()
-	if !m.nodeIsLeader() {
-		productionBarrierMetrics.current.CompareAndSwap(m.barrierMetrics, nil)
-	}
-}
-
-func (m *GCStateManager) nodeIsLeader() bool {
-	return m.nodeLeadership.Load() > 0
 }
 
 // redirectKeyspace checks the given keyspaceID, and returns the actual keyspaceID to operate on.
@@ -313,8 +283,8 @@ func (m *GCStateManager) CompatibleLoadGCSafePoint(keyspaceID uint32) (uint64, e
 		return 0, err
 	}
 
-	if m.nodeIsLeader() {
-		if cachedGCState, ok := m.gcStateCache.load(keyspaceID); ok {
+	if generation := m.activeGeneration.Load(); generation != nil {
+		if cachedGCState, ok := m.gcStateCache.load(keyspaceID); ok && m.activeGeneration.Load() == generation {
 			return cachedGCState.GCSafePoint, nil
 		}
 	}
@@ -821,10 +791,12 @@ func (m *GCStateManager) deleteGCBarrierImpl(ctx context.Context, keyspaceID uin
 	return deletedBarrier, nil
 }
 
-func (m *GCStateManager) getGCStateImpl(keyspaceID uint32, excludeGCBarriers bool) (GCState, error) {
+func (m *GCStateManager) getGCStateImpl(ctx context.Context, keyspaceID uint32, excludeGCBarriers bool) (GCState, error) {
 	// Try getting from cache if possible.
-	if excludeGCBarriers && m.nodeIsLeader() {
-		if cachedGCState, ok := m.gcStateCache.load(keyspaceID); ok {
+	useCache := excludeGCBarriers
+	failpoint.Inject("getGCStateSkipCache", func() { useCache = false })
+	if generation := m.activeGeneration.Load(); useCache && generation != nil {
+		if cachedGCState, ok := m.gcStateCache.load(keyspaceID); ok && m.activeGeneration.Load() == generation {
 			failpoint.InjectCall("getGCStateCacheAccess", "hit")
 			gcStateCacheAccessHitCounter.Inc()
 			return GCState{
@@ -836,32 +808,20 @@ func (m *GCStateManager) getGCStateImpl(keyspaceID uint32, excludeGCBarriers boo
 		}
 	}
 
-	return m.getGCStateImplSlow(keyspaceID, excludeGCBarriers)
+	return m.getGCStateImplSlow(ctx, keyspaceID, excludeGCBarriers)
 }
 
-func (m *GCStateManager) getGCStateImplSlow(keyspaceID uint32, excludeGCBarriers bool) (GCState, error) {
+func (m *GCStateManager) getGCStateImplSlow(ctx context.Context, keyspaceID uint32, excludeGCBarriers bool) (GCState, error) {
 	// Keep this hook before taking the manager lock so leader transitions are
 	// not blocked while tests pin the request at the slow-path boundary.
 	failpoint.InjectCall("getGCStateBeforeSlowPath")
 
 	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	if excludeGCBarriers && m.nodeIsLeader() {
-		// Check cache again after entering the lock.
-		// When entering this slow path after a cache miss, it's possible that some other concurrent call has caused
-		// cache update before we acquire the mutex.
-		if cachedGCState, ok := m.gcStateCache.load(keyspaceID); ok {
-			failpoint.InjectCall("getGCStateCacheAccess", "slow_hit")
-			gcStateCacheAccessSlowHitCounter.Inc()
-			return GCState{
-				KeyspaceID:      keyspaceID,
-				IsKeyspaceLevel: keyspaceID != constant.NullKeyspaceID,
-				TxnSafePoint:    cachedGCState.TxnSafePoint,
-				GCSafePoint:     cachedGCState.GCSafePoint,
-			}, nil
-		}
+	if generation := m.activeGeneration.Load(); excludeGCBarriers && generation != nil {
+		m.mu.RUnlock()
+		return m.loadGCState(ctx, generation, keyspaceID)
 	}
+	defer m.mu.RUnlock()
 
 	failpoint.InjectCall("getGCStateCacheAccess", "miss")
 	gcStateCacheAccessMissCounter.Inc()
@@ -943,7 +903,7 @@ func (m *GCStateManager) GetGCState(keyspaceID uint32, excludeGCBarriers bool) (
 		return GCState{}, err
 	}
 
-	gcState, err := m.getGCStateImpl(keyspaceID, excludeGCBarriers)
+	gcState, err := m.getGCStateImpl(context.Background(), keyspaceID, excludeGCBarriers)
 
 	if err != nil {
 		log.Error("failed to get GC state", zap.Uint32("keyspace-id", keyspaceID),
@@ -1028,8 +988,11 @@ func (m *GCStateManager) GetAllKeyspacesGCStates(ctx context.Context, excludeGCB
 	// invocation with different parameters may share their results incorrectly.
 	return m.allKeyspacesGCStatesExcludeGCBarriersSingleFlight.Do(ctx, func(execCtx context.Context) (map[uint32]GCState, error) {
 		gcStates := make(map[uint32]GCState)
-		if m.nodeIsLeader() {
+		if generation := m.activeGeneration.Load(); generation != nil {
 			gcStates = m.gcStateCache.cloneAllAsGCStates()
+			if m.activeGeneration.Load() != generation {
+				gcStates = make(map[uint32]GCState)
+			}
 		}
 
 		actualKeyspaces := make(map[uint32]struct{}, len(gcStates))
@@ -1091,7 +1054,7 @@ func (m *GCStateManager) iterateAllKeyspacesGCStates(
 	keyspaceIterator := m.keyspaceManager.IterateKeyspaces()
 
 	if keyspacePred(constant.NullKeyspaceID) {
-		nullKeyspaceGCState, err := m.getGCStateImpl(constant.NullKeyspaceID, excludeGCBarriers)
+		nullKeyspaceGCState, err := m.getGCStateImpl(ctx, constant.NullKeyspaceID, excludeGCBarriers)
 		if err != nil {
 			return err
 		}
@@ -1139,7 +1102,7 @@ func (m *GCStateManager) iterateAllKeyspacesGCStates(
 			continue
 		}
 
-		gcState, err := m.getGCStateImpl(keyspaceMeta.GetId(), excludeGCBarriers)
+		gcState, err := m.getGCStateImpl(ctx, keyspaceMeta.GetId(), excludeGCBarriers)
 		if err != nil {
 			return err
 		}
