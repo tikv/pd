@@ -97,6 +97,9 @@ type Group struct {
 	LeaderStoreID uint64 `json:"leader_store_id,omitempty"`
 	// VoterStoreIDs indicates which stores Voters should be on.
 	VoterStoreIDs []uint64 `json:"voter_store_ids,omitempty"`
+	// BalancePolicy controls whether the balance planner may improve this group.
+	// An empty value is treated as auto for backward compatibility.
+	BalancePolicy BalancePolicy `json:"balance_policy,omitempty"`
 }
 
 func (g *Group) String() string {
@@ -193,6 +196,7 @@ func newGroupState(g *runtimeGroupInfo) *GroupState {
 			CreateTimestamp: g.CreateTimestamp,
 			LeaderStoreID:   g.LeaderStoreID,
 			VoterStoreIDs:   slices.Clone(g.VoterStoreIDs),
+			BalancePolicy:   g.BalancePolicy,
 		},
 		RegularSchedulingAllowed:  g.IsRegularSchedulingAllowed(),
 		AffinitySchedulingAllowed: affinitySchedulingAllowed,
