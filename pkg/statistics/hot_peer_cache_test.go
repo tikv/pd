@@ -727,25 +727,25 @@ func TestGcKeepsColdItemsOfLiveRegion(t *testing.T) {
 	}
 }
 
-// TestGcColdSweepRotationWithStoreChurn: with more than gcColdSweepBatch
-// stores in the cache, removing stores between gc() cycles must not cause
-// any surviving store's cold peers to be skipped permanently. The store-ID
-// cursor (gcColdSweepLastStoreID) keeps the rotation correct regardless of
-// which store IDs are present at each cycle.
-func TestGcColdSweepRotationWithStoreChurn(t *testing.T) {
+// TestGcColdSweepWithStoreChurn: with many stores in the cache, adding and
+// removing stores between gc() cycles must not cause any surviving store's
+// cold peers to be skipped permanently. Every gc() call rechecks all stores
+// (the check is idempotent and cheap for stores without cold entries), so
+// rotation stays correct through churn.
+func TestGcColdSweepWithStoreChurn(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cluster := core.NewBasicCluster()
 	cache := NewHotPeerCache(ctx, cluster, utils.Read)
 
-	const storeCount = 40 // > gcColdSweepBatch (32)
+	const storeCount = 40 // many stores, including a gap in IDs
 	storeIDs := make([]uint64, 0, storeCount)
 	regionIDs := make([]uint64, 0, storeCount)
-	for i := 0; i < storeCount; i++ {
-		storeID := uint64(1000 + i)
-		regionID := uint64(2000 + i)
-		peer := &metapb.Peer{Id: uint64(3000 + i), StoreId: storeID}
+	// makeCold adds a store+region to the cluster, makes its peer hot and
+	// cold, then removes the region so the cold peer is a GC candidate.
+	makeCold := func(storeID, regionID uint64) {
+		peer := &metapb.Peer{Id: 3000 + regionID, StoreId: storeID}
 		region := core.NewRegionInfo(
 			&metapb.Region{
 				Id:          regionID,
@@ -761,41 +761,47 @@ func TestGcColdSweepRotationWithStoreChurn(t *testing.T) {
 		cluster.PutStore(core.NewStoreInfo(&metapb.Store{Id: storeID}, core.SetLastHeartbeatTS(time.Now())))
 		cluster.PutRegion(region)
 		checkAndUpdate(re, cache, region, 1)
-		storeIDs = append(storeIDs, storeID)
-		regionIDs = append(regionIDs, regionID)
-
-		// Remove the region from the cluster so its cold peer is a GC candidate.
 		cluster.RemoveRegion(region)
-
-		// Mark the peer cold via the same path a store heartbeat would.
 		reported := map[uint64]struct{}{}
 		stats := cache.checkColdPeerByRegionIDs(storeID, reported, uint64(utils.StoreHeartBeatReportInterval))
 		re.Len(stats, 1)
 		updateFlow(cache, stats)
 	}
-
-	// Remove half the stores from the cluster to simulate store churn.
-	// gc() will detect them as "removed" (absent from GetStores()) and clean
-	// their cache entries.
-	for i := 0; i < storeCount/2; i++ {
-		if store := cluster.GetStore(storeIDs[i]); store != nil {
-			cluster.DeleteStore(store)
-		}
-	}
-
-	// Run gc() cycles enough times to complete a full rotation.
-	// Each cycle sweeps at most gcColdSweepBatch stores; a full rotation
-	// therefore takes ceil(storeCount / gcColdSweepBatch) cycles.
-	cyclesNeeded := (storeCount+gcColdSweepBatch-1)/gcColdSweepBatch + 1
-	for cycle := 0; cycle < cyclesNeeded; cycle++ {
+	gc := func() {
 		cache.lastGCTime = time.Time{}
 		cache.gc()
 	}
 
-	// All surviving stores' cold peers must be reclaimed from the TopN and
-	// from the reverse indexes. Removed stores' entries were already cleaned
-	// by the removed-store loop at the top of gc().
-	for i := 0; i < storeCount; i++ {
+	for i := range storeCount {
+		storeID := uint64(1000 + i)
+		regionID := uint64(2000 + i)
+		makeCold(storeID, regionID)
+		storeIDs = append(storeIDs, storeID)
+		regionIDs = append(regionIDs, regionID)
+	}
+	gc()
+
+	// Remove half the stores from the cluster to simulate store churn.
+	// gc() will detect them as "removed" (absent from GetStores()) and clean
+	// their cache entries.
+	for i := range storeCount / 2 {
+		if store := cluster.GetStore(storeIDs[i]); store != nil {
+			cluster.DeleteStore(store)
+		}
+	}
+	// While stores are missing, a new store joins. Its ID falls in a gap in
+	// the sorted store list, which used to break index-based rotation.
+	const newStoreID uint64 = 1500
+	const newRegionID uint64 = 3000
+	makeCold(newStoreID, newRegionID)
+	gc()
+
+	// The removed stores' entries were already cleaned by the
+	// removed-store loop at the top of gc(); all other cold peers —
+	// including the newcomer's — must be gone after the next gc() call.
+	gc()
+	re.Empty(cache.coldPeersOfStore, "all cold entries should be reclaimed")
+	for i := range storeCount {
 		storeID := storeIDs[i]
 		regionID := regionIDs[i]
 		if i < storeCount/2 {
@@ -805,15 +811,20 @@ func TestGcColdSweepRotationWithStoreChurn(t *testing.T) {
 			_, inRegions := cache.regionsOfStore[storeID]
 			re.False(inRegions, "removed store %d should have no regionsOfStore entry", storeID)
 		} else {
-			// Surviving store: the cold peer must be gone from the TopN.
+			// Surviving store: the cold peer must be gone from the TopN and
+			// from the cold index.
 			peers := cache.peersOfStore[storeID]
 			re.NotNil(peers, "surviving store %d missing from peersOfStore", storeID)
 			re.Nil(peers.Get(regionID),
-				"store %d should have reclaimed cold region %d after full rotation", storeID, regionID)
+				"store %d should have reclaimed cold region %d", storeID, regionID)
 			_, inColdIdx := cache.coldPeersOfStore[storeID]
 			re.False(inColdIdx, "store %d should have no residual cold index entry", storeID)
 		}
 	}
+	// The store added during churn must have its cold peer reclaimed too.
+	re.NotNil(cache.peersOfStore[newStoreID])
+	re.Nil(cache.peersOfStore[newStoreID].Get(newRegionID),
+		"store %d added during churn should have reclaimed cold region %d", newStoreID, newRegionID)
 }
 
 // TestGcColdSweepUsesBoundedIndex: a single store holding many cold peers
@@ -849,7 +860,7 @@ func TestGcColdSweepUsesBoundedIndex(t *testing.T) {
 	cluster.PutStore(core.NewStoreInfo(&metapb.Store{Id: storeID}, core.SetLastHeartbeatTS(time.Now())))
 
 	// Fill the TopN with hotPeers non-cold hot regions; keep them live.
-	for r := 0; r < hotPeers; r++ {
+	for r := range hotPeers {
 		region := newRegion(uint64(4000 + r))
 		cluster.PutRegion(region)
 		checkAndUpdate(re, cache, region, 1)
@@ -867,7 +878,7 @@ func TestGcColdSweepUsesBoundedIndex(t *testing.T) {
 	// (which was removed from the cluster and is not reported) gets marked
 	// cold, and the cold index should hold exactly that one region.
 	reported := make(map[uint64]struct{}, hotPeers)
-	for r := 0; r < hotPeers; r++ {
+	for r := range hotPeers {
 		reported[uint64(4000+r)] = struct{}{}
 	}
 	stats := cache.checkColdPeerByRegionIDs(storeID, reported, uint64(utils.StoreHeartBeatReportInterval))

@@ -18,7 +18,7 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"sort"
+	"slices"
 	"sync/atomic"
 	"time"
 
@@ -44,11 +44,6 @@ const (
 	HotRegionReportMinInterval = 3
 
 	queueCap = 20000
-
-	// gcColdSweepBatch bounds how many stores' cold-peer sweep gc() runs per
-	// call, so a single gc() cycle's lock-hold window stays bounded even when
-	// the cluster has many stores with many cached (cold) peers.
-	gcColdSweepBatch = 32
 )
 
 // ThresholdsUpdateInterval is the default interval to update thresholds.
@@ -129,14 +124,6 @@ type HotPeerCache struct {
 	thresholdsOfStore map[uint64]*thresholds                           // storeID -> thresholds
 	metrics           map[uint64][utils.ActionTypeLen]prometheus.Gauge // storeID -> metrics
 	lastGCTime        time.Time
-	// gcColdSweepLastStoreID is the ID of the last store swept in the previous
-	// gc() cycle, so consecutive cycles resume from just after it instead of
-	// rescanning from the beginning. It is a store ID, not a positional
-	// index, so the rotation guarantee holds even when the store set
-	// grows or shrinks between cycles (a stale index into a shorter/longer
-	// sorted list would silently skip or delay stores).
-	// 0 means "sweep from the start next cycle".
-	gcColdSweepLastStoreID uint64
 }
 
 // NewHotPeerCache creates a HotPeerCache
@@ -723,76 +710,41 @@ func (f *HotPeerCache) gc() {
 	// regions and non-cold items are left to their normal heartbeat and TopN TTL
 	// lifecycle.
 	if f.kind == utils.Read {
-		// Batch the cold-peer sweep so a single gc() cycle's lock-hold window
-		// stays bounded even on a large cluster: sort the store IDs (map
-		// iteration order is random) and sweep at most gcColdSweepBatch of
-		// them per cycle, rotating via gcColdSweepLastStoreID so consecutive
-		// cycles cover different stores instead of always scanning the same
-		// first batch. Sweeping a store walks only its coldPeersOfStore
-		// index, which is bounded by that store's number of cold peers,
-		// instead of copying the whole TopN heap (including non-cold entries)
-		// via GetAll().
-		//
-		// The cursor is a store ID, not a positional index into the current
-		// store list, so the rotation guarantee holds even when the store
-		// set changes between cycles: a newly-added store ID sorts to its
-		// natural position, and removed stores fall out of the list
-		// without shifting the cursor's meaning.
+		// Cold-peer sweep. On each call every store's cold entries are
+		// checked: a dead region is evicted, a live one is kept. The per-store
+		// work is bounded by that store's coldPeersOfStore index instead of
+		// copying the whole TopN heap (which includes non-cold entries). A
+		// store with no cold entries costs almost nothing, so revisiting it
+		// is a no-op.
 		storeIDs := make([]uint64, 0, len(f.peersOfStore))
 		for storeID := range f.peersOfStore {
 			storeIDs = append(storeIDs, storeID)
 		}
-		sort.Slice(storeIDs, func(i, j int) bool { return storeIDs[i] < storeIDs[j] })
-		count := len(storeIDs)
-		if count > 0 {
-			// Resume just after the last store swept in the previous cycle.
-			// sort.Search returns the first index whose value is > lastID,
-			// i.e. the first store strictly after the cursor.
-			lastID := f.gcColdSweepLastStoreID
-			start := sort.Search(count, func(i int) bool { return storeIDs[i] > lastID })
-			end := start + gcColdSweepBatch
-			if end > count {
-				end = count
-			}
-			var lastSwept uint64
-			for i := start; i < end; i++ {
-				storeID := storeIDs[i]
-				lastSwept = storeID
-				// Walk only the bounded cold-peer index for this store.
-				// The store's TopN is not copied here.
-				for regionID := range f.coldPeersOfStore[storeID] {
-					// A region that is live must not be evicted even if it
-					// was previously marked cold; skip it and keep it indexed.
-					if f.cluster.GetRegion(regionID) != nil {
-						continue
-					}
-					peers := f.peersOfStore[storeID]
-					_ = peers.Remove(regionID)
-					if s, ok := f.storesOfRegion[regionID]; ok {
-						delete(s, storeID)
-						if len(s) == 0 {
-							delete(f.storesOfRegion, regionID)
-						}
-					}
-					if s, ok := f.regionsOfStore[storeID]; ok {
-						delete(s, regionID)
-					}
-					// Also remove from the cold index now that the item is gone.
-					delete(f.coldPeersOfStore[storeID], regionID)
+		slices.Sort(storeIDs)
+		for _, storeID := range storeIDs {
+			for regionID := range f.coldPeersOfStore[storeID] {
+				// A live region must not be evicted even if it was previously
+				// marked cold; skip it and keep it indexed.
+				if f.cluster.GetRegion(regionID) != nil {
+					continue
 				}
-				if len(f.coldPeersOfStore[storeID]) == 0 {
-					delete(f.coldPeersOfStore, storeID)
+				peers := f.peersOfStore[storeID]
+				_ = peers.Remove(regionID)
+				if s, ok := f.storesOfRegion[regionID]; ok {
+					delete(s, storeID)
+					if len(s) == 0 {
+						delete(f.storesOfRegion, regionID)
+					}
 				}
+				if s, ok := f.regionsOfStore[storeID]; ok {
+					delete(s, regionID)
+				}
+				// Also remove from the cold index now that the item is gone.
+				delete(f.coldPeersOfStore[storeID], regionID)
 			}
-			// When we've wrapped past the end of the list, reset the cursor
-			// so the next cycle starts from the beginning again.
-			if end >= count {
-				f.gcColdSweepLastStoreID = 0
-			} else {
-				f.gcColdSweepLastStoreID = lastSwept
+			if len(f.coldPeersOfStore[storeID]) == 0 {
+				delete(f.coldPeersOfStore, storeID)
 			}
-		} else {
-			f.gcColdSweepLastStoreID = 0
 		}
 	}
 	// remove expired items
