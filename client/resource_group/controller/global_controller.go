@@ -667,7 +667,8 @@ func (c *ResourceGroupsController) tryGetResourceGroupController(
 	}
 	if !isUseDegradedResourceGroup {
 		// Check again to prevent initializing the same resource group concurrently.
-		_, loaded := c.loadOrStoreGroupController(name, gc)
+		var loaded bool
+		gc, loaded = c.loadOrStoreGroupController(name, gc)
 		if !loaded {
 			metrics.ResourceGroupStatusGauge.WithLabelValues(name, group.Name).Set(1)
 			log.Info("[resource group controller] create resource group cost controller", zap.String("name", name))
@@ -689,6 +690,11 @@ func (c *ResourceGroupsController) tombstoneGroupCostController(name string) {
 	}
 	// Try to get the default group meta first.
 	defaultGC, err := c.tryGetResourceGroupController(c.loopCtx, defaultResourceGroupName, false)
+	if err == nil {
+		// A degraded fallback is not registered and never reports, so only the
+		// registered default controller's timeline can be shared.
+		defaultGC, _ = c.loadGroupController(defaultResourceGroupName)
+	}
 	if err != nil || defaultGC == nil {
 		log.Warn("[resource group controller] get default resource group meta for tombstone failed",
 			zap.String("name", name), zap.Error(err))
@@ -714,6 +720,7 @@ func (c *ResourceGroupsController) tombstoneGroupCostController(name string) {
 		return
 	}
 	gc.tombstone.Store(true)
+	gc.ruTimeline = defaultGC.ruTimeline
 	c.groupsController.Store(name, gc)
 	// Its metrics will be deleted in the cleanup process.
 	metrics.ResourceGroupStatusGauge.WithLabelValues(name, name).Set(2)
@@ -722,6 +729,17 @@ func (c *ResourceGroupsController) tombstoneGroupCostController(name string) {
 }
 
 func (c *ResourceGroupsController) cleanUpResourceGroup() {
+	// Tombstones share the default controller's RU timeline, and a replacement
+	// default controller would report a second timeline for the same group, so
+	// the default controller stays while a tombstone does.
+	tombstoned := false
+	c.groupsController.Range(func(_, value any) bool {
+		tombstoned = value.(*groupCostController).tombstone.Load()
+		return !tombstoned
+	})
+	if defaultGC, ok := c.loadGroupController(defaultResourceGroupName); ok && tombstoned {
+		defaultGC.inactive = false
+	}
 	c.groupsController.Range(func(key, value any) bool {
 		resourceGroupName := key.(string)
 		gc := value.(*groupCostController)
@@ -779,22 +797,26 @@ func (c *ResourceGroupsController) handleTokenBucketResponse(resp []*rmpb.TokenB
 
 func (c *ResourceGroupsController) collectTokenBucketRequests(ctx context.Context, source string, typ selectType, notifyMsg notifyMsg) {
 	c.run.currentRequests = make([]*rmpb.TokenBucketRequest, 0)
+	var reporters []*groupCostController
 	c.groupsController.Range(func(_, value any) bool {
 		gc := value.(*groupCostController)
 		request := gc.collectRequestAndConsumption(typ)
 		if request != nil {
 			request.KeyspaceId = &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: c.keyspaceID}}
 			c.run.currentRequests = append(c.run.currentRequests, request)
+			reporters = append(reporters, gc)
 			gc.metrics.tokenRequestCounter.Inc()
 		}
 		return true
 	})
 	if len(c.run.currentRequests) > 0 {
-		c.sendTokenBucketRequests(ctx, c.run.currentRequests, source, notifyMsg)
+		trimRUTimelines(c.run.currentRequests, ruTimelineBucketsPerRPC)
+		c.sendTokenBucketRequests(ctx, c.run.currentRequests, reporters, source, notifyMsg)
 	}
 }
 
-func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, requests []*rmpb.TokenBucketRequest, source string, notifyMsg notifyMsg) {
+// sendTokenBucketRequests sends requests[i] on behalf of reporters[i].
+func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, requests []*rmpb.TokenBucketRequest, reporters []*groupCostController, source string, notifyMsg notifyMsg) {
 	now := time.Now()
 	req := &rmpb.TokenBucketsRequest{
 		Requests:              requests,
@@ -818,6 +840,13 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 			metrics.FailedTokenRequestDuration.Observe(latency.Seconds())
 		} else {
 			metrics.SuccessfulTokenRequestDuration.Observe(latency.Seconds())
+			// The resource manager has received these seconds; any it drops
+			// afterwards become gaps that withhold their minutes.
+			for i, gc := range reporters {
+				if seconds := requests[i].GetConsumptionSinceLastRequest().GetRuBySecond(); seconds != nil {
+					gc.ruTimeline.ack(seconds.StartUnixSec + int64(len(seconds.Buckets)))
+				}
+			}
 		}
 		if !notifyMsg.startTime.IsZero() && time.Since(notifyMsg.startTime) > slowNotifyFilterDuration {
 			log.Warn("[resource group controller] slow token bucket request", zap.String("source", source), zap.Duration("cost", time.Since(notifyMsg.startTime)))

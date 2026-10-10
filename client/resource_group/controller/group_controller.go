@@ -52,6 +52,10 @@ type groupCostController struct {
 		storeCounter  map[uint64]*rmpb.Consumption
 		globalCounter *rmpb.Consumption
 	}
+	// ruTimeline records the consumption gc reports by natural second. A
+	// tombstone requests tokens as the default group, so it shares the default
+	// controller's timeline.
+	ruTimeline *ruTimeline
 
 	// fast path to make once token limit with un-limit burst.
 	burstable *atomic.Bool
@@ -353,6 +357,7 @@ func newGroupCostController(
 	gc.mu.consumption = &rmpb.Consumption{}
 	gc.mu.storeCounter = make(map[uint64]*rmpb.Consumption)
 	gc.mu.globalCounter = &rmpb.Consumption{}
+	gc.ruTimeline = newRUTimeline(time.Now())
 	// TODO: re-init the state if user change mode from RU to RAW mode.
 	gc.initRunState()
 	return gc, nil
@@ -656,6 +661,7 @@ func (gc *groupCostController) collectRequestAndConsumption(selectTyp selectType
 		return nil
 	}
 	req.ConsumptionSinceLastRequest = updateDeltaConsumption(gc.run.lastRequestConsumption, gc.run.consumption)
+	req.ConsumptionSinceLastRequest.RuBySecond = gc.ruTimeline.snapshot()
 	gc.run.lastRequestTime = time.Now()
 	gc.run.requestInProgress = true
 	return req
@@ -776,6 +782,7 @@ func (gc *groupCostController) onRequestWaitImpl(
 		gc.metrics.observePagingRequest(bytesForEst)
 	}
 
+	gc.ruTimeline.record(reportedDelta.RRU, reportedDelta.WRU)
 	gc.mu.Lock()
 	// Calculate the penalty of the store
 	penalty = &rmpb.Consumption{}
@@ -820,6 +827,7 @@ func (gc *groupCostController) onResponseImpl(
 		}
 	}
 
+	gc.ruTimeline.record(reportedDelta.RRU, reportedDelta.WRU)
 	gc.mu.Lock()
 	add(gc.mu.consumption, reportedDelta)
 	add(gc.mu.storeCounter[req.StoreID()], count)
@@ -839,6 +847,7 @@ func (gc *groupCostController) onResponseWaitImpl(
 	delta := &rmpb.Consumption{}
 	calculateAfterKVRequest(gc.calculators, delta, detail, req, resp)
 	reportedDelta := reportedResponseConsumption(gc.calculators, req, delta)
+	gc.ruTimeline.record(reportedDelta.RRU, reportedDelta.WRU)
 	// `count` is the full per-request consumption (BeforeKVRequest + AfterKVRequest).
 	count := &rmpb.Consumption{}
 	*count = *delta
@@ -913,6 +922,9 @@ func (gc *groupCostController) addRUConsumption(consumption *rmpb.Consumption) {
 	gc.mu.Lock()
 	add(gc.mu.consumption, consumption)
 	gc.mu.Unlock()
+	// ReportConsumption carries consumption measured after a query finishes,
+	// such as TiFlash MPP cost. It has no seconds, so it counts toward tokens
+	// and counters but stays out of the RU timeline.
 }
 
 func (gc *groupCostController) addRUV2Consumption(tikvRUV2, tidbRUV2, tiflashRUV2 float64) {
