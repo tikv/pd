@@ -286,22 +286,23 @@ func TestBarrierMetricsRegistrationAndLeadership(t *testing.T) {
 	observe := func(m *GCStateManager, id uint32) []barrierWarning {
 		return m.barrierMetrics.observeMetrics(m.barrierMetrics.generation(), id, "tenant", barriers, nil, now)
 	}
-	first.OnNodeBecomesLeader()
+	stopFirst := first.OnNodeBecomesLeader()
 	require.Len(t, observe(first, 42), 1)
 	require.Contains(t, gatherBarrierMetrics(t, prometheus.DefaultGatherer), "keyspace/42/old")
 	generation := first.barrierMetrics.generation()
-	first.OnNodeBecomesLeader()
+	stopReplacement := first.OnNodeBecomesLeader()
+	defer stopReplacement()
 	require.Empty(t, gatherBarrierMetrics(t, prometheus.DefaultGatherer))
 	require.Empty(t, first.barrierMetrics.observeMetrics(generation, 42, "tenant-a", barriers, nil, now))
 	require.Empty(t, gatherBarrierMetrics(t, prometheus.DefaultGatherer), "stale pre-leadership read cannot publish")
-	first.OnNodeBecomesFollower() // Previous lease ends, one leadership remains.
+	stopFirst() // Previous lease ends, the replacement leadership remains.
 	require.Len(t, observe(first, 42), 1)
 	require.Contains(t, gatherBarrierMetrics(t, prometheus.DefaultGatherer), "keyspace/42/old")
-	second.OnNodeBecomesLeader()
+	stopSecond := second.OnNodeBecomesLeader()
 	require.Len(t, observe(second, 43), 1)
 	first.CloseBarrierMetrics()
 	require.Equal(t, map[string]float64{"keyspace/43/old": 1_999_712_000}, gatherBarrierMetrics(t, prometheus.DefaultGatherer), "old owner cleanup must preserve replacement")
-	second.OnNodeBecomesFollower()
+	stopSecond()
 	require.Empty(t, gatherBarrierMetrics(t, prometheus.DefaultGatherer))
 	require.Nil(t, productionBarrierMetrics.current.Load(), "registry must not retain a stopped manager")
 }
@@ -811,6 +812,7 @@ func (s *gcStateManagerTestSuite) TestBarrierMetricsRemovalFencesInflightPublica
 	re := s.Require()
 	now := time.Unix(2_000_000_000, 0)
 	m := s.manager
+	stop := m.OnNodeBecomesLeader()
 	m.barrierMetrics.now = func() time.Time { return now }
 	registry := prometheus.NewRegistry()
 	registry.MustRegister(m.barrierMetrics)
@@ -829,7 +831,7 @@ func (s *gcStateManagerTestSuite) TestBarrierMetricsRemovalFencesInflightPublica
 		advance()
 		re.Equal(expected, gatherBarrierMetrics(s.T(), registry), "every accepted metadata state remains observable")
 	}
-	m.OnNodeBecomesFollower()
+	stop()
 	re.Empty(gatherBarrierMetrics(s.T(), registry))
 	m.OnNodeBecomesLeader()
 	re.Empty(gatherBarrierMetrics(s.T(), registry))
