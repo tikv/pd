@@ -17,6 +17,7 @@ package placement
 import (
 	"math"
 	"math/bits"
+	"slices"
 	"sort"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -62,6 +63,19 @@ func (f *RegionFit) Replace(srcStoreID uint64, dstStore *core.StoreInfo) bool {
 	// the target store should be fit all constraints.
 	if !MatchLabelConstraints(dstStore, fit.Rule.LabelConstraints) {
 		return false
+	}
+
+	if fit.Rule.IsolationLevel != "" {
+		stores := slices.Clone(fit.Stores)
+		for i, store := range stores {
+			if store.GetID() == srcStoreID {
+				stores[i] = dstStore
+				break
+			}
+		}
+		if !fit.IsIsolationPreserved(&RuleFit{Rule: fit.Rule, Stores: stores}) {
+			return false
+		}
 	}
 
 	score := isolationStoreScore(srcStoreID, dstStore, fit.Stores, fit.Rule.LocationLabels)
@@ -147,6 +161,93 @@ func (f *RuleFit) IsSatisfied() bool {
 	return len(f.Peers) == f.Rule.Count && len(f.PeersWithDifferentRole) == 0
 }
 
+// IsIsolationSatisfied reports whether each pair of stores is separated at or
+// above the rule's configured isolation level. It does not impose a default
+// level or compare the weighted isolation score.
+func (f *RuleFit) IsIsolationSatisfied() bool {
+	if f.Rule.IsolationLevel == "" {
+		return true
+	}
+	level := slices.Index(f.Rule.LocationLabels, f.Rule.IsolationLevel)
+	if level < 0 {
+		return false
+	}
+	labels := f.Rule.LocationLabels[:level+1]
+	for i, store := range f.Stores {
+		if store == nil {
+			return false
+		}
+		for _, other := range f.Stores[i+1:] {
+			if other == nil || store.CompareLocation(other, labels) < 0 {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// IsIsolationPreserved checks a fixed-size move against the configured isolation
+// level. It permits incremental repair, but neither the number of conflicting
+// pairs nor the largest set of peers not separated from one peer may increase.
+// Missing labels use CompareLocation's conservative pairwise semantics; they
+// are not grouped under a synthetic host name. Different rules are independent.
+func (f *RuleFit) IsIsolationPreserved(target *RuleFit) bool {
+	if f.Rule.IsolationLevel == "" {
+		return true
+	}
+	if target == nil || len(f.Stores) != len(target.Stores) {
+		return false
+	}
+	level := slices.Index(f.Rule.LocationLabels, f.Rule.IsolationLevel)
+	if level < 0 {
+		return false
+	}
+	labels := f.Rule.LocationLabels[:level+1]
+	beforePairs, beforeMax, beforeOK := isolationConflicts(f.Stores, labels)
+	afterPairs, afterMax, afterOK := isolationConflicts(target.Stores, labels)
+	return beforeOK && afterOK && afterPairs <= beforePairs && afterMax <= beforeMax
+}
+
+func isolationConflicts(stores []*core.StoreInfo, labels []string) (pairs, maxPeers int, valid bool) {
+	counts := make([]int, len(stores))
+	for i, store := range stores {
+		if store == nil {
+			return 0, 0, false
+		}
+		counts[i]++
+		for j := i + 1; j < len(stores); j++ {
+			if stores[j] == nil {
+				return 0, 0, false
+			}
+			if store.CompareLocation(stores[j], labels) < 0 {
+				pairs++
+				counts[i]++
+				counts[j]++
+			}
+		}
+	}
+	for _, count := range counts {
+		maxPeers = max(maxPeers, count)
+	}
+	return pairs, maxPeers, true
+}
+
+// IsIsolationPreserved checks complete fits made with the same effective rules.
+// It is for fixed-size scheduling, not replica-count-changing repairs.
+func (f *RegionFit) IsIsolationPreserved(target *RegionFit) bool {
+	if target == nil || len(f.RuleFits) != len(target.RuleFits) {
+		return false
+	}
+	for i, before := range f.RuleFits {
+		after := target.RuleFits[i]
+		if before.Rule != after.Rule || len(before.Peers) != len(after.Peers) ||
+			after.IsolationScore < before.IsolationScore || !before.IsIsolationPreserved(after) {
+			return false
+		}
+	}
+	return true
+}
+
 func (f *RuleFit) contain(storeID uint64) bool {
 	for _, p := range f.Peers {
 		if p.GetStoreId() == storeID {
@@ -183,6 +284,17 @@ func compareRuleFit(a, b *RuleFit) int {
 type StoreSet interface {
 	GetStores() []*core.StoreInfo
 	GetStore(id uint64) *core.StoreInfo
+}
+
+// FitRegionWithRules fits a layout with an explicit effective-rule snapshot.
+// It neither reads nor writes the real-region fit cache. Callers comparing two
+// planned layouts must supply the same rules and store metadata to both calls.
+func FitRegionWithRules(stores StoreSet, region *core.RegionInfo, rules []*Rule, supportWitness bool) *RegionFit {
+	regionStores := getStoresByRegion(stores, region)
+	fit := fitRegion(regionStores, region, rules, supportWitness)
+	fit.regionStores = regionStores
+	fit.rules = rules
+	return fit
 }
 
 // fitRegion tries to fit peers of a region to the rules.

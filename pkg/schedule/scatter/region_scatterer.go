@@ -798,6 +798,18 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 		// leader candidates so leader selection still only considers ordinary stores.
 		scatterWithSameEngine(peers, getSpecialEngineContext(engine), false)
 	}
+	if !scatterPeersValid(region, targetPeers) {
+		scatterFailCounter.Inc()
+		if state == nil {
+			currentPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))
+			for _, peer := range region.GetPeers() {
+				currentPeers[peer.GetStoreId()] = peer
+			}
+			r.Put(currentPeers, region.GetLeader().GetStoreId(), group)
+		}
+		return nil, errs.ErrCreateOperator.FastGenByArgs(fmt.Sprintf("scatter changes peer count or roles for region %v", region.GetID()))
+	}
+
 	var readCPUByStore map[uint64]float64
 	readPoolThreadCount := uint64(0)
 	leaderBlockedByReadPoolPressure := false
@@ -813,7 +825,22 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 	// FIXME: target leader only considers the ordinary stores, maybe we need to consider the
 	// special engine stores if the engine supports to become a leader. But now there is only
 	// one engine, tiflash, which does not support the leader, so don't consider it for now.
-	targetLeader, leaderStorePickedCount := r.selectAvailableLeaderStore(group, region, leaderCandidateStores, ordinaryContext, internalScatter)
+	isolationAllowed := r.scatterIsolationChecker(region, plannedRegion)
+	var targetLeader, leaderStorePickedCount uint64
+	for len(leaderCandidateStores) > 0 {
+		targetLeader, leaderStorePickedCount = r.selectAvailableLeaderStore(group, region, leaderCandidateStores, ordinaryContext, internalScatter)
+		if targetLeader == 0 || isolationAllowed(targetLeader) {
+			break
+		}
+		remaining := leaderCandidateStores[:0]
+		for _, id := range leaderCandidateStores {
+			if id != targetLeader {
+				remaining = append(remaining, id)
+			}
+		}
+		leaderCandidateStores = remaining
+		targetLeader = 0
+	}
 	if targetLeader == 0 {
 		observeNoLeaderTargetMetrics(internalScatter, leaderBlockedByReadPoolPressure)
 		return nil, errs.ErrGetTargetStore.FastGenByArgs(fmt.Sprintf("no target leader store found, region: %v", region))
@@ -821,18 +848,6 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 	if internalScatter && shouldSkipInternalScatterByBalancedReadCPU(region, targetLeader, readCPUByStore, readPoolThreadCount) {
 		scatterSkipBalancedReadCPUCounter.Inc()
 		return nil, retryInternalScatterLater(InternalScatterRetryBalancedReadCPU, ErrInternalScatterBalancedReadCPU)
-	}
-
-	if !scatterPeersValid(region, targetPeers) {
-		scatterFailCounter.Inc()
-		if state == nil {
-			currentPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))
-			for _, peer := range region.GetPeers() {
-				currentPeers[peer.GetStoreId()] = peer
-			}
-			r.Put(currentPeers, region.GetLeader().GetStoreId(), group)
-		}
-		return nil, errs.ErrCreateOperator.FastGenByArgs(fmt.Sprintf("scatter changes peer count or roles for region %v", region.GetID()))
 	}
 
 	if isSameDistribution(region, targetPeers, targetLeader) {
