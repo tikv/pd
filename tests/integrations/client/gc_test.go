@@ -53,7 +53,7 @@ func TestServiceSafePointV2Operations(t *testing.T) {
 	})
 	re.NoError(err)
 
-	grpcPDClient, conn := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	grpcPDClient, conn := testutil.MustNewGRPCClient(ctx, re, leaderServer.GetAddr())
 	defer conn.Close()
 	header := testutil.NewRequestHeader(leaderServer.GetClusterID())
 

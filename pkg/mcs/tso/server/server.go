@@ -392,7 +392,7 @@ func (s *Server) startServer() (err error) {
 func CreateServer(ctx context.Context, cfg *Config) *Server {
 	addr := cfg.GetAdvertiseListenAddr()
 	parsed, err := url.Parse(addr)
-	advertiseListenHost := ""
+	var advertiseListenHost string
 	if err != nil {
 		if _, _, splitErr := net.SplitHostPort(addr); splitErr != nil {
 			panic(fmt.Sprintf("invalid advertise listen address: %s", addr))
