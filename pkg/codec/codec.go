@@ -25,6 +25,7 @@ var (
 	tablePrefix  = []byte{'t'}
 	metaPrefix   = []byte{'m'}
 	recordPrefix = []byte("_r")
+	indexPrefix  = []byte("_i")
 )
 
 const (
@@ -189,12 +190,32 @@ func GenerateTableKey(tableID int64) []byte {
 	return buf
 }
 
+func appendRecordKeyPrefix(buf []byte, tableID int64) []byte {
+	buf = append(buf, tablePrefix...)
+	buf = EncodeInt(buf, tableID)
+	return append(buf, recordPrefix...)
+}
+
+// GenerateRecordKeyPrefix generates a table record key prefix.
+func GenerateRecordKeyPrefix(tableID int64) []byte {
+	buf := make([]byte, 0, len(tablePrefix)+len(recordPrefix)+8)
+	return appendRecordKeyPrefix(buf, tableID)
+}
+
 // GenerateRowKey generates a row key.
 func GenerateRowKey(tableID, rowID int64) []byte {
 	buf := make([]byte, 0, len(tablePrefix)+len(recordPrefix)+8*2)
+	buf = appendRecordKeyPrefix(buf, tableID)
+	buf = EncodeInt(buf, rowID)
+	return buf
+}
+
+// GenerateIndexKey generates an index key prefix.
+func GenerateIndexKey(tableID, indexID int64) []byte {
+	buf := make([]byte, 0, len(tablePrefix)+len(indexPrefix)+8*2)
 	buf = append(buf, tablePrefix...)
 	buf = EncodeInt(buf, tableID)
-	buf = append(buf, recordPrefix...)
-	buf = EncodeInt(buf, rowID)
+	buf = append(buf, indexPrefix...)
+	buf = EncodeInt(buf, indexID)
 	return buf
 }

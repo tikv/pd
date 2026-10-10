@@ -326,6 +326,9 @@ func (s *Service) AskBatchSplit(_ context.Context, request *schedulingpb.AskBatc
 	// status may be left, and these regions need to be checked with higher
 	// priority.
 	c.GetCoordinator().GetCheckerController().AddPendingProcessedRegions(false, recordRegions...)
+	// TODO(split-scatter): if load-based split-scatter is supported on the
+	// scheduling-service/NEXT_GEN path, record split-scatter batches here and
+	// plumb SplitReason through the forwarding request.
 
 	return &schedulingpb.AskBatchSplitResponse{
 		Header: wrapHeader(),

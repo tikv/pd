@@ -458,7 +458,7 @@ func (s *Server) startServer() (err error) {
 		Id:         uniqueID, // id is unique among all participants
 		ListenUrls: []string{s.cfg.GetAdvertiseListenAddr()},
 	}
-	s.participant.InitInfo(p, keypath.SchedulingSvcRootPath(), constant.PrimaryKey, "primary election")
+	s.participant.InitInfo(p, keypath.SchedulingSvcRootPath(), constant.PrimaryKey, constant.SchedulingServiceName+" primary election")
 
 	s.service = &Service{Server: s}
 	s.AddServiceReadyCallback(s.startCluster)

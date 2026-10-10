@@ -65,6 +65,14 @@ func TestKeyspaceGroupManagerTestSuite(t *testing.T) {
 	suite.Run(t, new(keyspaceGroupManagerTestSuite))
 }
 
+func TestKeyspaceGroupPrimaryElectionPurposeIncludesGroupID(t *testing.T) {
+	re := require.New(t)
+
+	re.Equal("keyspace group primary election 00000", keyspaceGroupPrimaryElectionPurpose(0))
+	re.Equal("keyspace group primary election 00012", keyspaceGroupPrimaryElectionPurpose(12))
+	re.Equal("keyspace group primary election 12345", keyspaceGroupPrimaryElectionPurpose(12345))
+}
+
 func (suite *keyspaceGroupManagerTestSuite) SetupSuite() {
 	t := suite.T()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
