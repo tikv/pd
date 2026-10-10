@@ -143,8 +143,8 @@ func TestDefaultStoreLimitAdjust(t *testing.T) {
 			name: "preserve explicit zero",
 			config: `
 [schedule.default-store-limit]
-add-peer = 0
-remove-peer = 60
+add-peer = 0.0
+remove-peer = 60.0
 `,
 			expect: sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 60},
 		},
@@ -152,10 +152,10 @@ remove-peer = 60
 			name: "store balance rate backfills undefined field",
 			config: `
 [schedule]
-store-balance-rate = 50
+store-balance-rate = 50.0
 
 [schedule.default-store-limit]
-add-peer = 0
+add-peer = 0.0
 `,
 			expect: sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 50},
 		},
@@ -163,11 +163,11 @@ add-peer = 0
 			name: "explicit default store limit wins over store balance rate",
 			config: `
 [schedule]
-store-balance-rate = 50
+store-balance-rate = 50.0
 
 [schedule.default-store-limit]
-add-peer = 60
-remove-peer = 70
+add-peer = 60.0
+remove-peer = 70.0
 `,
 			expect: sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 70},
 		},
