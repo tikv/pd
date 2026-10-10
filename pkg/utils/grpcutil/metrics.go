@@ -33,6 +33,17 @@ const (
 
 // RequestCounter increments the region request counter with the given method, header, error, and counter.
 func RequestCounter(method string, header *pdpb.RequestHeader, err *pdpb.Error, counter *prometheus.CounterVec) {
+	if err != nil {
+		log.Warn("region request encounter error",
+			zap.String("method", method),
+			zap.String("caller_id", header.GetCallerId()),
+			zap.String("caller_component", header.GetCallerComponent()),
+			zap.Stringer("error", err))
+	}
+	countRequest(method, header, err, counter)
+}
+
+func countRequest(method string, header *pdpb.RequestHeader, err *pdpb.Error, counter *prometheus.CounterVec) {
 	if err == nil && rand.IntN(100) != 0 {
 		// sample 1% region requests to avoid high cardinality
 		return
@@ -44,11 +55,6 @@ func RequestCounter(method string, header *pdpb.RequestHeader, err *pdpb.Error, 
 		callerComponent = header.GetCallerComponent()
 	)
 	if err != nil {
-		log.Warn("region request encounter error",
-			zap.String("method", method),
-			zap.String("caller_id", callerID),
-			zap.String("caller_component", callerComponent),
-			zap.Stringer("error", err))
 		event = requestFailed
 	}
 	if callerID == "" {
@@ -64,7 +70,18 @@ func RequestCounter(method string, header *pdpb.RequestHeader, err *pdpb.Error, 
 // method and caller labels as its unary RPC, with the same success sampling.
 // Components correspond to query positions, not deduplicated response regions.
 // Missing or malformed component arrays fall back to the batch header.
+// A header error is logged once per batch rather than once per query.
 func RecordQueryRegionRequestMetrics(request *pdpb.QueryRegionRequest, err *pdpb.Error, counter *prometheus.CounterVec) {
+	if err != nil {
+		log.Warn("region request encounter error",
+			zap.String("method", "QueryRegion"),
+			zap.String("caller_id", request.GetHeader().GetCallerId()),
+			zap.String("caller_component", request.GetHeader().GetCallerComponent()),
+			zap.Int("key_count", len(request.GetKeys())),
+			zap.Int("prev_key_count", len(request.GetPrevKeys())),
+			zap.Int("id_count", len(request.GetIds())),
+			zap.Stringer("error", err))
+	}
 	header := pdpb.RequestHeader{CallerId: request.GetHeader().GetCallerId()}
 	record := func(method string, count int, components []string) {
 		for i := range count {
@@ -72,7 +89,7 @@ func RecordQueryRegionRequestMetrics(request *pdpb.QueryRegionRequest, err *pdpb
 			if len(components) == count {
 				header.CallerComponent = components[i]
 			}
-			RequestCounter(method, &header, err, counter)
+			countRequest(method, &header, err, counter)
 		}
 	}
 	record("GetRegion", len(request.GetKeys()), request.GetKeyCallerComponents())

@@ -20,8 +20,12 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/log"
 )
 
 func TestQueryRegionRequestMetrics(t *testing.T) {
@@ -59,8 +63,13 @@ func TestQueryRegionRequestMetrics(t *testing.T) {
 					expected[i].component = "unknown"
 				}
 			}
+			core, logs := observer.New(zapcore.WarnLevel)
+			restore := log.ReplaceGlobals(zap.New(core), nil)
+			defer restore()
 			// Failures are not sampled, so attribution and counts are exact.
 			RecordQueryRegionRequestMetrics(request, &pdpb.Error{Type: pdpb.ErrorType_NOT_BOOTSTRAPPED}, counter)
+			// One batch error produces one warning, not one per logical query.
+			re.Len(logs.All(), 1)
 			re.Equal(len(expected), testutil.CollectAndCount(counter))
 			for _, want := range expected {
 				re.Equal(want.count, testutil.ToFloat64(counter.WithLabelValues(want.method, callerID, want.component, "failed")))
