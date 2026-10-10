@@ -20,11 +20,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/docker/go-units"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+
+	heartbeatconfig "github.com/tikv/pd/tools/pd-heartbeat-bench/config"
+	"github.com/tikv/pd/tools/utils"
 )
 
 type storeHeartbeatClient struct {
@@ -76,7 +81,7 @@ func TestStoreHeartbeatFailuresAreRecorded(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			stores := newStores(1)
+			stores := newStores(1, 1<<40)
 			stores.stat[1].Store(&pdpb.StoreStats{StoreId: 1})
 			stores.heartbeat(context.Background(), tc.client, 1)
 			count, storeID, err := stores.takeStoreHeartbeatFailures()
@@ -90,7 +95,7 @@ func TestStoreHeartbeatFailuresAreRecorded(t *testing.T) {
 }
 
 func TestStoreHeartbeatReporterFlushesBeforeDone(t *testing.T) {
-	stores := newStores(1)
+	stores := newStores(1, 1<<40)
 	stores.stat[1].Store(&pdpb.StoreStats{StoreId: 1})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -112,4 +117,141 @@ func TestStoreHeartbeatReporterFlushesBeforeDone(t *testing.T) {
 
 	count, _, _ := stores.takeStoreHeartbeatFailures()
 	require.Zero(t, count)
+}
+
+func TestStoreStatsIncludeSilentRegions(t *testing.T) {
+	const (
+		regionCount  = 100
+		replicaCount = 3
+		storeCount   = 10
+		regionSize   = 96 * units.MiB
+	)
+	rs := utils.NewRegions(
+		regionCount,
+		replicaCount,
+		storeCount,
+		&pdpb.RequestHeader{},
+		utils.WithRegionSize(regionSize),
+		utils.WithRandomSeed(9),
+	)
+	cfg := &heartbeatconfig.Config{
+		HotStoreCount:   storeCount,
+		ReportRatio:     0.1,
+		FlowUpdateRatio: 0.05,
+	}
+	rs.Update(heartbeatconfig.NewOptions(cfg))
+
+	stores := newStores(storeCount, 1<<60)
+	stores.update(rs)
+
+	var totalRegionCount, totalUsedSize, totalPeerStats, totalBytesWritten uint64
+	for storeID := 1; storeID <= storeCount; storeID++ {
+		stats := stores.stat[storeID].Load().(*pdpb.StoreStats)
+		totalRegionCount += uint64(stats.GetRegionCount())
+		totalUsedSize += stats.GetUsedSize()
+		totalPeerStats += uint64(len(stats.GetPeerStats()))
+		totalBytesWritten += stats.GetBytesWritten()
+		for _, peerStat := range stats.GetPeerStats() {
+			require.GreaterOrEqual(t, peerStat.GetReadBytes(), hotPeerByteReportThreshold)
+			require.GreaterOrEqual(t, peerStat.GetReadKeys(), hotPeerKeyReportThreshold)
+			require.GreaterOrEqual(t, peerStat.GetQueryStats().GetGet(), hotPeerQueryReportThreshold)
+		}
+	}
+	require.Equal(t, uint64(regionCount*replicaCount), totalRegionCount)
+	require.Equal(t, uint64(regionCount*replicaCount*regionSize), totalUsedSize)
+	require.Equal(t, uint64(5), totalPeerStats)
+	require.Positive(t, totalBytesWritten)
+}
+
+func TestHasRegionFlowIncludesReadOnlyTraffic(t *testing.T) {
+	require.True(t, hasRegionFlow(&pdpb.RegionHeartbeatRequest{BytesRead: 1}))
+	require.False(t, hasRegionFlow(&pdpb.RegionHeartbeatRequest{QueryStats: &pdpb.QueryStats{}}))
+}
+
+func TestStoreStatsAggregateColdFlowBeforeConversion(t *testing.T) {
+	rs := utils.NewRegions(6, 1, 1, &pdpb.RequestHeader{})
+	for _, region := range rs.Regions {
+		region.BytesWritten = 1
+		region.BytesRead = 2
+		region.KeysWritten = 3
+		region.KeysRead = 4
+		region.QueryStats.Get = 5
+		region.QueryStats.Put = 1
+	}
+	stores := newStores(1, 1<<40)
+	stores.update(rs)
+	stats := stores.stat[1].Load().(*pdpb.StoreStats)
+	require.Equal(t, uint64(1), stats.BytesWritten)
+	require.Equal(t, uint64(2), stats.BytesRead)
+	require.Equal(t, uint64(3), stats.KeysWritten)
+	require.Equal(t, uint64(4), stats.KeysRead)
+	require.Equal(t, uint64(5), stats.QueryStats.Get)
+	require.Equal(t, uint64(1), stats.QueryStats.Put)
+	require.Empty(t, stats.PeerStats)
+}
+
+func TestStoreStatsFilterAndBoundPeerStats(t *testing.T) {
+	const groupSize = hotPeerReportCapacity + 1
+	regions := make([]*pdpb.RegionHeartbeatRequest, 0, groupSize*hotPeerReportMetricCount+1)
+	addRegion := func(id, readBytes, readKeys, readQueries uint64) {
+		regions = append(regions, &pdpb.RegionHeartbeatRequest{
+			Region:    &metapb.Region{Id: id, Peers: []*metapb.Peer{{Id: id, StoreId: 1}}},
+			Leader:    &metapb.Peer{Id: id, StoreId: 1},
+			BytesRead: readBytes * storeHeartbeatsPerRegionHeartbeat,
+			KeysRead:  readKeys * storeHeartbeatsPerRegionHeartbeat,
+			QueryStats: &pdpb.QueryStats{
+				Get: readQueries * storeHeartbeatsPerRegionHeartbeat,
+			},
+		})
+	}
+	for i := range groupSize {
+		addRegion(uint64(i+1), hotPeerByteReportThreshold+uint64(i), 0, 0)
+		addRegion(uint64(groupSize+i+1), 0, hotPeerKeyReportThreshold+uint64(i), 0)
+		addRegion(uint64(2*groupSize+i+1), 0, 0, hotPeerQueryReportThreshold+uint64(i))
+	}
+	coldRegionID := uint64(groupSize*hotPeerReportMetricCount + 1)
+	addRegion(
+		coldRegionID,
+		hotPeerByteReportThreshold-1,
+		hotPeerKeyReportThreshold-1,
+		hotPeerQueryReportThreshold-1,
+	)
+
+	rs := &utils.Regions{Regions: regions}
+	stores := newStores(1, 1<<60)
+	stores.update(rs)
+	peerStats := stores.stat[1].Load().(*pdpb.StoreStats).GetPeerStats()
+	require.Len(t, peerStats, hotPeerReportCapacity*hotPeerReportMetricCount)
+
+	reported := make(map[uint64]struct{}, len(peerStats))
+	for _, peerStat := range peerStats {
+		reported[peerStat.GetRegionId()] = struct{}{}
+	}
+	require.NotContains(t, reported, uint64(1))
+	require.NotContains(t, reported, uint64(groupSize+1))
+	require.NotContains(t, reported, uint64(2*groupSize+1))
+	require.NotContains(t, reported, coldRegionID)
+	require.Contains(t, reported, uint64(groupSize))
+	require.Contains(t, reported, uint64(2*groupSize))
+	require.Contains(t, reported, uint64(3*groupSize))
+}
+
+func TestSelectHotPeerStatsKeepsExactCapacity(t *testing.T) {
+	peerStats := make([]*pdpb.PeerStat, hotPeerReportCapacity*hotPeerReportMetricCount)
+	for i := range peerStats {
+		peerStats[i] = &pdpb.PeerStat{
+			RegionId:  uint64(i + 1),
+			ReadBytes: uint64(i + 1),
+			ReadKeys:  uint64(i + 1),
+			QueryStats: &pdpb.QueryStats{
+				Get: uint64(i + 1),
+			},
+		}
+	}
+
+	selected := selectHotPeerStats(peerStats)
+	require.Len(t, selected, len(peerStats))
+	for i := range peerStats {
+		require.Same(t, peerStats[i], selected[i])
+	}
 }
