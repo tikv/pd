@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"slices"
 	"sync/atomic"
 	"time"
 
@@ -107,11 +108,17 @@ func (r *hotRegionInfo) storeID(i int) uint64 {
 
 // HotPeerCache saves the hot peer's statistics.
 type HotPeerCache struct {
-	kind              utils.RWType
-	cluster           *core.BasicCluster
-	peersOfStore      map[uint64]*utils.TopN         // storeID -> hot peers
-	storesOfRegion    map[uint64]map[uint64]struct{} // regionID -> storeIDs
-	regionsOfStore    map[uint64]map[uint64]struct{} // storeID -> regionIDs
+	kind           utils.RWType
+	cluster        *core.BasicCluster
+	peersOfStore   map[uint64]*utils.TopN         // storeID -> hot peers
+	storesOfRegion map[uint64]map[uint64]struct{} // regionID -> storeIDs
+	regionsOfStore map[uint64]map[uint64]struct{} // storeID -> regionIDs
+	// coldPeersOfStore is a bounded index of the regionIDs currently held as
+	// cold peers on each store (storeID -> regionIDs). It is maintained on the
+	// same paths that set/clear the inCold flag, so gc() can sweep cold peers
+	// by walking this index instead of copying every store's entire TopN heap
+	// (which includes the non-cold tail and is unbounded).
+	coldPeersOfStore  map[uint64]map[uint64]struct{} // storeID -> cold regionIDs
 	topNTTL           time.Duration
 	taskQueue         *chanx.UnboundedChan[func(*HotPeerCache)]
 	thresholdsOfStore map[uint64]*thresholds                           // storeID -> thresholds
@@ -127,6 +134,7 @@ func NewHotPeerCache(ctx context.Context, cluster *core.BasicCluster, kind utils
 		peersOfStore:      make(map[uint64]*utils.TopN),
 		storesOfRegion:    make(map[uint64]map[uint64]struct{}),
 		regionsOfStore:    make(map[uint64]map[uint64]struct{}),
+		coldPeersOfStore:  make(map[uint64]map[uint64]struct{}),
 		taskQueue:         chanx.NewUnboundedChan[func(*HotPeerCache)](ctx, queueCap),
 		thresholdsOfStore: make(map[uint64]*thresholds),
 		topNTTL:           time.Duration(3*kind.ReportInterval()) * time.Second,
@@ -608,6 +616,22 @@ func (f *HotPeerCache) putItem(item *HotPeerStat) {
 		f.regionsOfStore[item.StoreID] = regions
 	}
 	regions[item.RegionID] = struct{}{}
+	// Track the bounded cold-peer index so gc() never has to copy a store's
+	// entire TopN heap. An item entering or staying cold is indexed; an item
+	// becoming hot again (inCold cleared) or being dropped is un-indexed.
+	cold := f.coldPeersOfStore[item.StoreID]
+	if item.inCold {
+		if cold == nil {
+			cold = make(map[uint64]struct{})
+			f.coldPeersOfStore[item.StoreID] = cold
+		}
+		cold[item.RegionID] = struct{}{}
+	} else if cold != nil {
+		delete(cold, item.RegionID)
+		if len(cold) == 0 {
+			delete(f.coldPeersOfStore, item.StoreID)
+		}
+	}
 }
 
 func (f *HotPeerCache) removeItem(item *HotPeerStat) {
@@ -619,6 +643,12 @@ func (f *HotPeerCache) removeItem(item *HotPeerStat) {
 	}
 	if regions, ok := f.regionsOfStore[item.StoreID]; ok {
 		delete(regions, item.RegionID)
+	}
+	if cold, ok := f.coldPeersOfStore[item.StoreID]; ok {
+		delete(cold, item.RegionID)
+		if len(cold) == 0 {
+			delete(f.coldPeersOfStore, item.StoreID)
+		}
 	}
 }
 
@@ -666,17 +696,72 @@ func (f *HotPeerCache) gc() {
 		}
 		delete(f.peersOfStore, storeID)
 		delete(f.regionsOfStore, storeID)
+		delete(f.coldPeersOfStore, storeID)
 		delete(f.thresholdsOfStore, storeID)
 		delete(f.metrics, storeID)
 		hotCacheStatusGauge.DeletePartialMatch(prometheus.Labels{"store": storeTag(storeID), "type": f.kind.String()})
 	}
+	// Clean up cold peers that no longer belong to any live region. These are the
+	// residual entries from #5713/#8698: after a region is merged/split away, its
+	// old peer keeps being re-colded (and thus its TopN TTL re-armed) by the
+	// store's next heartbeat, so RemoveExpired alone never reclaims it and only
+	// gc() can. Only the read cache receives these cold-peer updates, and only
+	// inCold items whose region metadata is already gone are candidates. Live
+	// regions and non-cold items are left to their normal heartbeat and TopN TTL
+	// lifecycle.
+	if f.kind == utils.Read {
+		// Cold-peer sweep. On each call every store's cold entries are
+		// checked: a dead region is evicted, a live one is kept. The per-store
+		// work is bounded by that store's coldPeersOfStore index instead of
+		// copying the whole TopN heap (which includes non-cold entries). A
+		// store with no cold entries costs almost nothing, so revisiting it
+		// is a no-op.
+		storeIDs := make([]uint64, 0, len(f.peersOfStore))
+		for storeID := range f.peersOfStore {
+			storeIDs = append(storeIDs, storeID)
+		}
+		slices.Sort(storeIDs)
+		for _, storeID := range storeIDs {
+			for regionID := range f.coldPeersOfStore[storeID] {
+				// A live region must not be evicted even if it was previously
+				// marked cold; skip it and keep it indexed.
+				if f.cluster.GetRegion(regionID) != nil {
+					continue
+				}
+				peers := f.peersOfStore[storeID]
+				_ = peers.Remove(regionID)
+				if s, ok := f.storesOfRegion[regionID]; ok {
+					delete(s, storeID)
+					if len(s) == 0 {
+						delete(f.storesOfRegion, regionID)
+					}
+				}
+				if s, ok := f.regionsOfStore[storeID]; ok {
+					delete(s, regionID)
+				}
+				// Also remove from the cold index now that the item is gone.
+				delete(f.coldPeersOfStore[storeID], regionID)
+			}
+			if len(f.coldPeersOfStore[storeID]) == 0 {
+				delete(f.coldPeersOfStore, storeID)
+			}
+		}
+	}
 	// remove expired items
-	for _, peers := range f.peersOfStore {
+	for storeID, peers := range f.peersOfStore {
 		regions := peers.RemoveExpired()
 		for _, regionID := range regions {
 			delete(f.storesOfRegion, regionID)
-			for storeID := range f.regionsOfStore {
-				delete(f.regionsOfStore[storeID], regionID)
+			for sID := range f.regionsOfStore {
+				delete(f.regionsOfStore[sID], regionID)
+			}
+			// A region reclaimed by the TopN TTL is no longer a cold candidate;
+			// drop it from the cold index for the owning store.
+			if cold, ok := f.coldPeersOfStore[storeID]; ok {
+				delete(cold, regionID)
+				if len(cold) == 0 {
+					delete(f.coldPeersOfStore, storeID)
+				}
 			}
 		}
 	}
