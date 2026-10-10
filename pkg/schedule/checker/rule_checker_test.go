@@ -1826,6 +1826,53 @@ func (suite *ruleCheckerTestSuite) TestPreferAddTiFlashLearnerOverOfflinePeer() 
 	re.Equal("replace-rule-offline-peer", op.Desc())
 }
 
+func (suite *ruleCheckerTestSuite) TestPreferAvailableTiFlashLearnerRuleOverOfflinePeer() {
+	re := suite.Require()
+	suite.cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	suite.cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
+	suite.cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
+	suite.cluster.AddLabelsStore(4, 1, map[string]string{"host": "host4", core.EngineKey: core.EngineTiFlash, "zone": "z1"})
+	suite.cluster.AddLabelsStore(5, 1, map[string]string{"host": "host5", core.EngineKey: core.EngineTiFlash, "zone": "z2"})
+	suite.cluster.AddLabelsStore(6, 1, map[string]string{"host": "host6"})
+	suite.cluster.AddLeaderRegion(1, 1, 2, 3)
+	err := suite.ruleManager.SetRule(&placement.Rule{
+		GroupID: placement.DefaultGroupID,
+		ID:      placement.DefaultRuleID,
+		Role:    placement.Voter,
+		Count:   3,
+	})
+	re.NoError(err)
+	err = suite.ruleManager.DeleteRule(placement.DefaultGroupID, "witness")
+	re.NoError(err)
+	for _, rule := range []struct {
+		group string
+		zone  string
+	}{
+		{group: "tiflash-a", zone: "z1"},
+		{group: "tiflash-b", zone: "z2"},
+	} {
+		err = suite.ruleManager.SetRule(&placement.Rule{
+			GroupID: rule.group,
+			ID:      "learner",
+			Role:    placement.Learner,
+			Count:   1,
+			LabelConstraints: []placement.LabelConstraint{
+				{Key: core.EngineKey, Op: placement.In, Values: []string{core.EngineTiFlash}},
+				{Key: "zone", Op: placement.In, Values: []string{rule.zone}},
+			},
+		})
+		re.NoError(err)
+	}
+
+	suite.cluster.SetStoreOffline(2)
+	suite.cluster.SetStoreOffline(4)
+	op := suite.rc.Check(suite.cluster.GetRegion(1))
+	re.NotNil(op)
+	re.Equal("add-rule-peer", op.Desc())
+	addLearner := op.Step(0).(operator.AddLearner)
+	re.Equal(uint64(5), addLearner.ToStore)
+}
+
 func (suite *ruleCheckerTestSuite) TestDoNotPreferTiFlashSwapFitOverOfflinePeer() {
 	re := suite.Require()
 	suite.cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
