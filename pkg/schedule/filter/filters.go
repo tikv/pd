@@ -763,7 +763,7 @@ func (*ruleLeaderFitFilter) Source(config.SharedConfigProvider, *core.StoreInfo)
 }
 
 // Target filters stores when select them as schedule target.
-func (f *ruleLeaderFitFilter) Target(_ config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
+func (f *ruleLeaderFitFilter) Target(conf config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
 	targetStoreID := store.GetID()
 	targetPeer := f.region.GetStorePeer(targetStoreID)
 	if targetPeer == nil && !f.allowMoveLeader {
@@ -773,10 +773,24 @@ func (f *ruleLeaderFitFilter) Target(_ config.SharedConfigProvider, store *core.
 	if targetPeer != nil && targetPeer.IsWitness {
 		return statusStoreNotMatchRule
 	}
-	if f.oldFit.Replace(f.srcLeaderStoreID, store) {
-		return statusOK
+	if !f.oldFit.Replace(f.srcLeaderStoreID, store) {
+		return statusStoreNotMatchRule
 	}
-	return statusStoreNotMatchRule
+	// Preserve complete role matching for a previously satisfied layout.
+	// Unfinished repairs retain the existing incremental checks.
+	if f.oldFit.IsSatisfied() {
+		var target *core.RegionInfo
+		if targetPeer == nil {
+			target = f.region.Clone(core.WithReplacePeerStore(f.srcLeaderStoreID, targetStoreID), core.WithReplaceLeaderStore(targetStoreID))
+		} else {
+			target = f.region.Clone(core.WithLeader(targetPeer))
+		}
+		rules := f.ruleManager.GetRulesForApplyRegion(target)
+		if !placement.NewRoleChecker(f.cluster, target.GetPeers(), rules, conf.IsWitnessAllowed()).IsSatisfied(target.GetLeader().GetStoreId()) {
+			return statusStoreNotMatchRule
+		}
+	}
+	return statusOK
 }
 
 type ruleWitnessFitFilter struct {

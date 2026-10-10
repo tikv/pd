@@ -16,6 +16,7 @@ package operator
 
 import (
 	"fmt"
+	"maps"
 	"sort"
 
 	"github.com/pingcap/errors"
@@ -43,12 +44,15 @@ import (
 type Builder struct {
 	// basic info
 	sche.SharedCluster
-	desc            string
-	regionID        uint64
-	regionEpoch     *metapb.RegionEpoch
-	rules           []*placement.Rule
-	expectedRoles   map[uint64]placement.PeerRoleType
-	approximateSize int64
+	desc               string
+	regionID           uint64
+	regionEpoch        *metapb.RegionEpoch
+	checkTargetRules   bool
+	requireTargetRules bool
+	targetRoleChecker  *placement.RoleChecker
+	rules              []*placement.Rule
+	expectedRoles      map[uint64]placement.PeerRoleType
+	approximateSize    int64
 
 	// operation record
 	originPeers          peersMap
@@ -139,10 +143,8 @@ func NewBuilder(desc string, ci sche.SharedCluster, region *core.RegionInfo, opt
 	// placement rules
 	var rules []*placement.Rule
 	if err == nil && !b.skipPlacementRulesCheck && b.GetSharedConfig().IsPlacementRulesEnabled() {
-		fit := b.GetRuleManager().FitRegion(b.GetBasicCluster(), region)
-		for _, rf := range fit.RuleFits {
-			rules = append(rules, rf.Rule)
-		}
+		rules = b.GetRuleManager().GetRulesForApplyRegion(region)
+		b.checkTargetRules = placement.NewRoleChecker(b.GetBasicCluster(), region.GetPeers(), rules, b.GetSharedConfig().IsWitnessAllowed()).IsSatisfied(originLeaderStoreID)
 		if len(rules) == 0 {
 			err = errors.Errorf("cannot build operator for region match no placement rule")
 		}
@@ -169,12 +171,21 @@ func NewBuilder(desc string, ci sche.SharedCluster, region *core.RegionInfo, opt
 // IsAllowedLeaderTarget checks whether the peer can be selected as a
 // non-forced target leader by the operator builder.
 func IsAllowedLeaderTarget(ci sche.SharedCluster, region *core.RegionInfo, peer *metapb.Peer) bool {
+	return IsAllowedLeaderTargetForPeers(ci, region, nil, peer)
+}
+
+// IsAllowedLeaderTargetForPeers checks a candidate against the complete planned
+// membership. A nil targetPeers map uses the original membership.
+func IsAllowedLeaderTargetForPeers(ci sche.SharedCluster, region *core.RegionInfo, targetPeers map[uint64]*metapb.Peer, peer *metapb.Peer) bool {
 	b := NewBuilder("check-target-leader", ci, region)
+	if targetPeers != nil {
+		b.SetPeers(targetPeers)
+	}
 	if b.err != nil {
 		return false
 	}
 	b.currentPeers, b.currentLeaderStoreID = b.originPeers.copy(), b.originLeaderStoreID
-	return b.allowLeader(peer, false)
+	return b.allowTargetLeader(peer)
 }
 
 // AddPeer records an add Peer operation in Builder. If peer.Id is 0, the builder
@@ -404,6 +415,7 @@ func (b *Builder) EnableForceTargetLeader() *Builder {
 
 // Build creates the Operator.
 func (b *Builder) Build(kind OpKind) (*Operator, error) {
+	b.targetRoleChecker = nil
 	var brief string
 
 	if b.err != nil {
@@ -420,6 +432,10 @@ func (b *Builder) Build(kind OpKind) (*Operator, error) {
 	}
 	if b.err != nil {
 		return nil, b.err
+	}
+
+	if !b.allowTargetLeader(b.targetPeers[b.currentLeaderStoreID]) {
+		return nil, errors.New("cannot create operator: final leader is not allowed")
 	}
 
 	return NewOperator(b.desc, brief, b.regionID, b.regionEpoch, kind, b.approximateSize, b.steps...), nil
@@ -527,7 +543,7 @@ func (b *Builder) prepareBuild() (string, error) {
 
 	if b.targetLeaderStoreID != 0 {
 		targetLeader := b.targetPeers[b.targetLeaderStoreID]
-		if !b.allowLeader(targetLeader, b.forceTargetLeader) {
+		if !b.allowTargetLeader(targetLeader) {
 			return "", errors.New("cannot create operator: target leader is not allowed")
 		}
 	}
@@ -674,7 +690,7 @@ func (b *Builder) setTargetLeaderIfNotExist() {
 
 	for _, candidateStoreID := range b.targetPeers.IDs() {
 		peer := b.targetPeers[candidateStoreID]
-		if !b.allowLeader(peer, b.forceTargetLeader) {
+		if !b.allowTargetLeader(peer) {
 			continue
 		}
 		// if role info is given, store having role follower should not be target leader.
@@ -920,6 +936,42 @@ func (b *Builder) execBatchSwitchWitnesses() {
 	b.toNonWitness = newPeersMap()
 
 	b.steps = append(b.steps, step)
+}
+
+// allowTargetLeader checks the final membership, separately from temporary
+// leaders used while adding, promoting or removing peers. The initial scope is
+// role-preserving scheduling from a satisfied layout; repair and explicit force
+// operations retain their existing contracts.
+func (b *Builder) allowTargetLeader(peer *metapb.Peer) bool {
+	if peer == nil || !b.allowLeader(peer, b.forceTargetLeader) {
+		return false
+	}
+	if b.skipPlacementRulesCheck || len(b.rules) == 0 || (!b.requireTargetRules && (!b.checkTargetRules || b.forceTargetLeader)) {
+		return true
+	}
+	if b.targetRoleChecker == nil {
+		type peerRole struct {
+			role    metapb.PeerRole
+			witness bool
+		}
+		countRoles := func(peers peersMap) map[peerRole]int {
+			counts := make(map[peerRole]int)
+			for _, p := range peers {
+				counts[peerRole{p.GetRole(), p.GetIsWitness()}]++
+			}
+			return counts
+		}
+		// Gradual repairs and witness changes retain the existing admission rules.
+		if !b.requireTargetRules && !maps.Equal(countRoles(b.originPeers), countRoles(b.targetPeers)) {
+			return true
+		}
+		peers := make([]*metapb.Peer, 0, len(b.targetPeers))
+		for _, p := range b.targetPeers {
+			peers = append(peers, p)
+		}
+		b.targetRoleChecker = placement.NewRoleChecker(b.GetBasicCluster(), peers, b.rules, b.GetSharedConfig().IsWitnessAllowed())
+	}
+	return b.targetRoleChecker.IsSatisfied(peer.GetStoreId())
 }
 
 // check if the peer is allowed to become the leader.

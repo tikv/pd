@@ -263,6 +263,8 @@ func newScatterRegionOperator(desc string, ci sche.SharedCluster, origin *core.R
 	}
 
 	builder := NewBuilder(desc, ci, origin)
+	// Scatter preserves placement even when admin requests bypass scheduling limits.
+	builder.requireTargetRules = true
 	if skipLimitCheck {
 		builder.SetRemoveLightPeer()
 	}
