@@ -66,6 +66,14 @@ type ServerStream interface {
 	Send(regions *pdpb.SyncRegionResponse) error
 }
 
+// RegionUpdate is a Region change waiting to be synchronized to followers.
+// StatsOnly updates contain only flow statistics and may be skipped while a
+// full sync retains history records.
+type RegionUpdate struct {
+	Region    *core.RegionInfo
+	StatsOnly bool
+}
+
 type regionSyncStream struct {
 	// stream serializes the underlying gRPC Send calls. A timed-out send may
 	// still be blocked after sendMu is released.
@@ -205,8 +213,8 @@ func historyBufferMaxSizeFromMemory(totalMemory uint64) int {
 
 // RunServer runs the server of the region syncer.
 // regionNotifier is used to get the changed regions.
-func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *core.RegionInfo) {
-	var records []*core.RegionInfo
+func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan RegionUpdate) {
+	var updates []RegionUpdate
 	keepAliveTicker := time.NewTicker(syncerKeepAliveInterval)
 	shrinkTicker := time.NewTicker(historyBufferShrinkInterval)
 
@@ -230,26 +238,33 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 		case first := <-regionNotifier:
 			failpoint.InjectCall("syncRegionChannelFull")
 
-			records = append(records, first)
+			updates = append(updates, first)
 		loop:
 			for range maxSyncRegionBatchSize {
 				select {
-				case region := <-regionNotifier:
-					records = append(records, region)
+				case update := <-regionNotifier:
+					updates = append(updates, update)
 				default:
 					break loop
 				}
 			}
-			s.appendHistoryRecords(records)
-			s.broadcast(ctx, records, false)
+			appended := s.appendHistoryUpdates(updates)
+			s.broadcastAvailable(ctx, appended > 0, false)
 		case <-shrinkTicker.C:
 			s.observeDownstreamReplayWindow(0)
 			s.history.maybeShrink()
 		case <-keepAliveTicker.C:
 			s.broadcast(ctx, nil, true)
 		}
-		records = records[:0]
+		updates = updates[:0]
 	}
+}
+
+func (s *RegionSyncer) appendHistoryUpdates(updates []RegionUpdate) int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	minSendIndex, hasDownstream := s.minDownstreamSendIndexLocked()
+	return s.history.recordUpdatesFrom(minSendIndex, hasDownstream, updates...)
 }
 
 func (s *RegionSyncer) appendHistoryRecords(records []*core.RegionInfo) {
@@ -686,13 +701,17 @@ func (s *RegionSyncer) drainDownstreamLocked(ctx context.Context, name string, s
 }
 
 func (s *RegionSyncer) broadcast(ctx context.Context, records []*core.RegionInfo, keepAlive bool) {
+	s.broadcastAvailable(ctx, len(records) != 0, keepAlive)
+}
+
+func (s *RegionSyncer) broadcastAvailable(ctx context.Context, hasRecords, keepAlive bool) {
 	defer logutil.LogPanic()
 	s.mu.RLock()
 	for _, sender := range s.mu.streams {
 		if ctx.Err() != nil {
 			break
 		}
-		if len(records) != 0 || keepAlive {
+		if hasRecords || keepAlive {
 			sender.notify(keepAlive)
 		}
 	}
