@@ -157,6 +157,20 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		return nil
 	}
 
+	// Once a group is converged, let the automatic balance planner make at
+	// most one target change for its table. The next Region check will observe
+	// the new target and continue after the corresponding operators finish.
+	if group.BalancePolicy != affinity.BalancePolicyFixed && group.Phase == affinity.PhaseStable {
+		if _, err := c.affinityManager.AutoBalanceGroup(group.ID); err != nil {
+			affinityCheckerAbnormalReplicaCounter.Inc()
+			return nil
+		}
+		group = c.affinityManager.GetAffinityGroupState(group.ID)
+		if group == nil {
+			return nil
+		}
+	}
+
 	// For a Region already in affinity, try to merge it with neighboring affinity Regions.
 	if isAffinity {
 		return c.mergeCheck(region, group)

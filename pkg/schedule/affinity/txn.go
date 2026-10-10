@@ -298,6 +298,17 @@ func (m *Manager) UpdateAffinityGroupPeers(groupID string, leaderStoreID uint64,
 //   - Its equality will be checked.
 //   - Group must not change voterStoreIDs while it is not in the expired status.
 func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affinityVer uint64, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
+	return m.updateAffinityGroupPeersWithAffinityVerInternal(groupID, affinityVer, leaderStoreID, voterStoreIDs, false)
+}
+
+// updateAffinityGroupPeersWithBalanceVer is the planner write path. It keeps
+// the affinity version check while allowing an auto planner to change voters
+// for an available group.
+func (m *Manager) updateAffinityGroupPeersWithBalanceVer(groupID string, affinityVer uint64, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
+	return m.updateAffinityGroupPeersWithAffinityVerInternal(groupID, affinityVer, leaderStoreID, voterStoreIDs, true)
+}
+
+func (m *Manager) updateAffinityGroupPeersWithAffinityVerInternal(groupID string, affinityVer uint64, leaderStoreID uint64, voterStoreIDs []uint64, allowBalance bool) (*GroupState, error) {
 	// Step 0: Validate the correctness of leaderStoreID and voterStoreIDs.
 	if leaderStoreID == 0 || len(voterStoreIDs) == 0 {
 		return nil, errs.ErrAffinityGroupContent.FastGenByArgs("leader store ID and voter store IDs must be provided")
@@ -333,7 +344,7 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affini
 		// Group must not change voterStoreIDs while it is not in the expired status. Changing only leaderStoreID is allowed.
 		// RegularSchedulingAllowed == IsExpired
 		// The VoterStoreIDs are already sorted, so they can be compared directly
-		if !group.RegularSchedulingAllowed && !slices.Equal(voterStoreIDs, group.VoterStoreIDs) {
+		if !allowBalance && !group.RegularSchedulingAllowed && !slices.Equal(voterStoreIDs, group.VoterStoreIDs) {
 			return group, nil
 		}
 	}
