@@ -68,6 +68,8 @@ func TestGetFromUTTimesOutOnHungAllocator(t *testing.T) {
 	allocClient = &http.Client{Timeout: bound}
 	t.Cleanup(func() { allocClient = origClient })
 
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
 	start := time.Now()
 	require.Empty(t, getFromUT())
 	elapsed := time.Since(start)
