@@ -37,3 +37,6 @@ tmp*
 !.claude/
 .claude/*
 !.claude/skills
+!.codex/
+.codex/*
+!.codex/skills
