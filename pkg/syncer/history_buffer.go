@@ -85,6 +85,7 @@ func newHistoryBufferWithConfig(baseCapacity, maxCapacity, capacityUnit int, kv 
 		flushCount:   defaultFlushCount,
 	}
 	h.reload()
+	h.observeMetricsLocked()
 	return h
 }
 
@@ -128,9 +129,13 @@ func (h *historyBuffer) record(records ...*core.RegionInfo) {
 	}
 	h.Lock()
 	defer h.Unlock()
+	oldLength := h.len()
 	h.prepareRequiredWindowLocked(uint64(len(records)))
 	for _, r := range records {
 		h.recordLocked(r)
+	}
+	if h.len() != oldLength {
+		observeHistoryBufferLengthMetrics(h.len())
 	}
 }
 
@@ -312,6 +317,7 @@ func (h *historyBuffer) resetWithIndexLocked(index uint64) {
 	if h.capacity() > h.baseCapacity {
 		h.resizeLocked(h.baseCapacity)
 	}
+	h.observeMetricsLocked()
 }
 
 func (h *historyBuffer) resetWithIndexAndPersist(index uint64) {
@@ -396,6 +402,7 @@ func (h *historyBuffer) resizeLocked(newCapacity int) {
 	h.size = newCapacity + 1
 	h.head = 0
 	h.tail = keep % h.size
+	h.observeMetricsLocked()
 }
 
 func (h *historyBuffer) getLocked(index uint64) *core.RegionInfo {
@@ -404,4 +411,8 @@ func (h *historyBuffer) getLocked(index uint64) *core.RegionInfo {
 		return h.records[pos]
 	}
 	return nil
+}
+
+func (h *historyBuffer) observeMetricsLocked() {
+	observeHistoryBufferMetrics(h.len(), h.capacity())
 }
