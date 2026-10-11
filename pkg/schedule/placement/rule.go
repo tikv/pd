@@ -102,6 +102,23 @@ func (r *Rule) Key() [2]string {
 	return [2]string{r.GroupID, r.ID}
 }
 
+// isolationPrefix returns the rule's location labels up to and including its isolation
+// level, which is the granularity replicas are actually isolated at (see NewIsolationFilter):
+// with location labels ["zone","rack","host"] and isolation level "rack", replicas are forced
+// into distinct "zone,rack" domains, so that prefix names one isolation domain.
+// It reports false when the rule enforces no isolation level, or when the isolation level is
+// not one of the rule's location labels, because then the domain is undefined.
+func (r *Rule) isolationPrefix() ([]string, bool) {
+	if r.IsolationLevel == "" {
+		return nil, false
+	}
+	idx := slices.Index(r.LocationLabels, r.IsolationLevel)
+	if idx < 0 {
+		return nil, false
+	}
+	return r.LocationLabels[:idx+1], true
+}
+
 // StoreKey returns the rule's key for persistent store.
 func (r *Rule) StoreKey() string {
 	return hex.EncodeToString([]byte(r.GroupID)) + "-" + hex.EncodeToString([]byte(r.ID))
