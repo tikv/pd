@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
@@ -46,4 +47,32 @@ func TestTryAllocTestURLDoesNotFallBackFromConfiguredAllocator(t *testing.T) {
 
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 	require.Empty(t, tryAllocTestURL())
+}
+
+// TestGetFromUTTimesOutOnHungAllocator pins the P1 fix: an allocator that
+// accepts the connection but never completes the response must not wedge the
+// child. The call must give up on its own bounded deadline, well before the
+// caller would otherwise block indefinitely.
+func TestGetFromUTTimesOutOnHungAllocator(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// Swallow the request so Do and ReadAll hang until the client's
+		// deadline fires. No response is ever written.
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv(AllocURLFromUT, server.URL)
+
+	// Use a short bound so this test is fast; production keeps the larger
+	// allocRequestTimeout. Swap the package client, which getFromUT reads.
+	bound := 200 * time.Millisecond
+	origClient := allocClient
+	allocClient = &http.Client{Timeout: bound}
+	t.Cleanup(func() { allocClient = origClient })
+
+	start := time.Now()
+	require.Empty(t, getFromUT())
+	elapsed := time.Since(start)
+	// The whole bounded request — connect plus read — must end shortly after
+	// the deadline, proving it cannot block forever.
+	require.Less(t, elapsed, bound+2*time.Second,
+		"hung-allocator request exceeded the bounded deadline")
 }

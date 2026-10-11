@@ -16,6 +16,7 @@ package alloc
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -60,4 +61,44 @@ func TestRunHTTPServerPublishesReachableAddress(t *testing.T) {
 	allocatedURL, err := url.Parse(string(body))
 	re.NoError(err)
 	re.NotEmpty(allocatedURL.Port())
+}
+
+// TestReclaimTestAddrs pins the P2 fix: once the shared allocator holds more
+// than maxTestAddrMapLen live addresses, it re-issues the oldest ones instead
+// of retaining every address it has ever handed out, so a long run does not
+// drain the ephemeral port namespace into log.Fatal.
+func TestReclaimTestAddrs(t *testing.T) {
+	re := require.New(t)
+
+	testAddrMutex.Lock()
+	saved, savedSeq := testAddrMap, testAddrSeq
+	testAddrMap, testAddrSeq = make(map[string]int), 0
+	t.Cleanup(func() {
+		testAddrMutex.Lock()
+		testAddrMap, testAddrSeq = saved, savedSeq
+		testAddrMutex.Unlock()
+	})
+	testAddrMutex.Unlock()
+
+	// Seed the map with more live addresses than the bound, in insertion
+	// order a1 (oldest) ... aN (newest).
+	total := maxTestAddrMapLen + 8
+	for i := 1; i <= total; i++ {
+		testAddrMutex.Lock()
+		testAddrSeq++
+		testAddrMap[fmt.Sprintf("a%d", i)] = testAddrSeq
+		testAddrMutex.Unlock()
+	}
+
+	reclaimTestAddrs(maxTestAddrMapLen)
+
+	re.LessOrEqual(len(testAddrMap), maxTestAddrMapLen,
+		"map must be reclaimed down to the bound")
+	// The oldest addresses (a1 .. a8) must have been evicted first.
+	testAddrMutex.Lock()
+	defer testAddrMutex.Unlock()
+	for i := 1; i <= total-maxTestAddrMapLen; i++ {
+		_, stillHeld := testAddrMap[fmt.Sprintf("a%d", i)]
+		re.False(stillHeld, "oldest address a%d should have been reclaimed", i)
+	}
 }
