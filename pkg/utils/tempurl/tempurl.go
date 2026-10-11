@@ -15,6 +15,7 @@
 package tempurl
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -37,6 +38,13 @@ var (
 // reference: /pd/tools/pd-ut/alloc/server.go
 const AllocURLFromUT = "allocURLFromUT"
 
+// The shared allocator is the only port source when AllocURLFromUT is set, so
+// keep the allocation loop responsive and the pd-ut shutdown from stalling:
+// every request to it gets a bounded deadline.
+const allocRequestTimeout = 5 * time.Second
+
+var allocClient = &http.Client{Timeout: allocRequestTimeout}
+
 // Alloc allocates a local URL for testing.
 func Alloc() string {
 	for range 10 {
@@ -50,8 +58,10 @@ func Alloc() string {
 }
 
 func tryAllocTestURL() string {
-	if url := getFromUT(); url != "" {
-		return url
+	if os.Getenv(AllocURLFromUT) != "" {
+		// The shared allocator coordinates ports across test subprocesses. A local
+		// fallback would create a second allocation domain and allow duplicates.
+		return getFromUT()
 	}
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -83,18 +93,28 @@ func getFromUT() string {
 	if addr == "" {
 		return ""
 	}
+	// Bound the whole request so a hung allocator cannot wedge the only port
+	// allocation path. The outer retry loop and pd-ut shutdown make no
+	// progress while this call blocks indefinitely.
+	ctx, cancel := context.WithTimeout(context.Background(), allocRequestTimeout)
+	defer cancel()
 
-	// #nosec G704 -- The URL is provided by the local test harness.
-	req, err := http.NewRequest(http.MethodGet, addr, nil)
+	// #nosec G704 -- The allocator URL is provided by the local test harness.
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, addr, nil)
 	if err != nil {
 		return ""
 	}
-	// #nosec G704 -- The URL is provided by the local test harness.
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil || resp.StatusCode != http.StatusOK {
+	// The allocator outlives test subprocesses, so do not leave idle connection
+	// goroutines running when a subprocess checks for leaks.
+	req.Close = true
+	resp, err := allocClient.Do(req)
+	if err != nil {
 		return ""
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return ""
+	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return ""
