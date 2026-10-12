@@ -301,6 +301,11 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 		h.r.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if tp == types.BalanceRangeScheduler {
+		// The first job created along with the scheduler always gets job id 0.
+		h.r.JSON(w, http.StatusOK, "0")
+		return
+	}
 
 	h.r.JSON(w, http.StatusOK, "The scheduler is created.")
 }

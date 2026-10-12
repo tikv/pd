@@ -154,7 +154,7 @@ func (handler *balanceRangeSchedulerHandler) addJob(w http.ResponseWriter, r *ht
 		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	handler.rd.JSON(w, http.StatusOK, nil)
+	handler.rd.JSON(w, http.StatusOK, strconv.FormatUint(job.JobID, 10))
 }
 
 func (handler *balanceRangeSchedulerHandler) deleteJob(w http.ResponseWriter, r *http.Request) {
