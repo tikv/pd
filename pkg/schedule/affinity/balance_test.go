@@ -5,6 +5,12 @@
 // You may obtain a copy of the License at
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package affinity
 
@@ -55,7 +61,7 @@ func TestPlanBalanceUsesOnlyCheckerActions(t *testing.T) {
 	plans, err := PlanBalance(groups, BalanceOptions{
 		Stores: []uint64{1, 2, 3, 4}, ReplicaCount: 3,
 		ActionSets: map[string]BalanceActionSet{
-			"p0": {LeaderTargets: []uint64{1, 2, 3}, VoterReplacements: map[uint64]map[uint64][]uint64{
+			"p0": {LeaderTargets: []uint64{1}, VoterReplacements: map[uint64]map[uint64][]uint64{
 				3: {4: {1, 2, 3}},
 			}},
 		},
@@ -106,6 +112,72 @@ func TestPlanBalanceIsDeterministic(t *testing.T) {
 	second, err := PlanBalance(groups, options)
 	require.NoError(t, err)
 	require.Equal(t, first, second)
+}
+
+func TestPlanBalanceLeaderStageBeforeVoterMovement(t *testing.T) {
+	groups := []*Group{
+		{ID: "p0", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}},
+		{ID: "p1", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}},
+		{ID: "p2", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}},
+	}
+	plans, err := PlanBalance(groups, BalanceOptions{Stores: []uint64{1, 2, 3, 4}, ReplicaCount: 3,
+		ActionSets: allActionSets(groups, []uint64{1, 2, 3, 4})})
+	require.NoError(t, err)
+	require.Equal(t, 1, changedPlans(plans))
+	require.Equal(t, []uint64{1, 2, 3}, changedPlan(plans).VoterStoreIDs)
+}
+
+func TestPlanBalanceReplacementTieUsesMoveBytes(t *testing.T) {
+	groups := []*Group{
+		{ID: "p0", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}},
+		{ID: "p1", LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2, 3}},
+		{ID: "p2", LeaderStoreID: 3, VoterStoreIDs: []uint64{1, 2, 3}},
+	}
+	actions := allActionSets(groups, []uint64{1, 2, 3, 4})
+	for id, action := range actions {
+		action.MoveBytes = 100
+		if id == "p2" {
+			action.MoveBytes = 1
+		}
+		actions[id] = action
+	}
+	plans, err := PlanBalance(groups, BalanceOptions{Stores: []uint64{1, 2, 3, 4}, ReplicaCount: 3, ActionSets: actions})
+	require.NoError(t, err)
+	require.Equal(t, "p2", changedPlan(plans).GroupID)
+}
+
+func TestPlanBalanceStopsAtStrictLocalMinimum(t *testing.T) {
+	groups := []*Group{
+		{ID: "p0", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}},
+		{ID: "p1", LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2, 3}},
+		{ID: "p2", LeaderStoreID: 3, VoterStoreIDs: []uint64{1, 2, 3}},
+	}
+	stores := []uint64{1, 2, 3, 4}
+	for round := 0; round < 20; round++ {
+		before := make(map[uint64]int)
+		for _, group := range groups {
+			for _, store := range group.VoterStoreIDs {
+				before[store]++
+			}
+		}
+		plans, err := PlanBalance(groups, BalanceOptions{Stores: stores, ReplicaCount: 3, ActionSets: allActionSets(groups, stores)})
+		require.NoError(t, err)
+		if changedPlans(plans) == 0 {
+			return
+		}
+		require.Equal(t, 1, changedPlans(plans))
+		for i, plan := range plans {
+			groups[i] = &Group{ID: plan.GroupID, LeaderStoreID: plan.LeaderStoreID, VoterStoreIDs: slices.Clone(plan.VoterStoreIDs)}
+		}
+		after := make(map[uint64]int)
+		for _, group := range groups {
+			for _, store := range group.VoterStoreIDs {
+				after[store]++
+			}
+		}
+		require.Less(t, sumSquares(after), sumSquares(before))
+	}
+	t.Fatal("planner did not reach a strict local minimum")
 }
 
 func TestPlanBalanceRejectsDuplicateVoters(t *testing.T) {
