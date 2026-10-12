@@ -244,6 +244,120 @@ func gcStateLoadTestTxn(req any) bool {
 	return first != nil && string(first.Key) == keypath.TxnSafePointPath(2)
 }
 
+func TestGCStateLoadJoinedWaiterRetriesAfterInvalidation(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	entered := make(chan struct{})
+	releaseLoad := make(chan struct{})
+	var reads atomic.Int32
+	m := newGCStateLoaderManager(t, func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+		if gcStateLoadTestTxn(req) && reads.Add(1) == 1 {
+			close(entered)
+			select {
+			case <-releaseLoad:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		return invoker(ctx, method, req, reply, cc, opts...)
+	})
+	var releaseLoadOnce sync.Once
+	unblockLoad := func() { releaseLoadOnce.Do(func() { close(releaseLoad) }) }
+	defer unblockLoad()
+	require.NoError(t, m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+		if err := wb.SetTxnSafePoint(2, 90); err != nil {
+			return err
+		}
+		return wb.SetGCSafePoint(2, 70)
+	}))
+	joined := make(chan uint32, 1)
+	const joinedFailpoint = "github.com/tikv/pd/pkg/gc/onGCStateLoadJoined"
+	require.NoError(t, failpoint.EnableCall(joinedFailpoint, func(id uint32) { joined <- id }))
+	defer func() { require.NoError(t, failpoint.Disable(joinedFailpoint)) }()
+	waited := make(chan struct{})
+	releaseWaiter := make(chan struct{})
+	const waitedFailpoint = "github.com/tikv/pd/pkg/gc/afterGCStateLoadJoinedWait"
+	require.NoError(t, failpoint.EnableCall(waitedFailpoint, func() {
+		close(waited)
+		select {
+		case <-releaseWaiter:
+		case <-ctx.Done():
+		}
+	}))
+	defer func() { require.NoError(t, failpoint.Disable(waitedFailpoint)) }()
+	var releaseWaiterOnce sync.Once
+	unblockWaiter := func() { releaseWaiterOnce.Do(func() { close(releaseWaiter) }) }
+	defer unblockWaiter()
+
+	// Own the initial cold load, then make a foreground request join it.
+	generation := m.activeGeneration.Load()
+	loaded := make(chan gcStateLoadResult, 1)
+	go func() {
+		batch, err := m.prepareGCStateLoadBatch(ctx, generation, gcStateLoadCandidates(2))
+		if err != nil {
+			loaded <- gcStateLoadResult{failed: map[uint32]error{2: err}}
+			return
+		}
+		loaded <- m.executeGCStateLoadBatch(ctx, batch)
+	}()
+	select {
+	case <-entered:
+	case <-ctx.Done():
+		t.Fatal("cold load did not start")
+	}
+	type foregroundResult struct {
+		state GCState
+		err   error
+	}
+	foreground := make(chan foregroundResult, 1)
+	go func() {
+		state, err := m.getGCStateImpl(ctx, 2, true)
+		foreground <- foregroundResult{state: state, err: err}
+	}()
+	select {
+	case id := <-joined:
+		require.Equal(t, uint32(2), id)
+	case <-ctx.Done():
+		t.Fatal("foreground reader did not join the cold load")
+	}
+	unblockLoad()
+	select {
+	case <-waited:
+	case <-ctx.Done():
+		t.Fatal("joined reader did not observe successful load completion")
+	}
+	select {
+	case result := <-loaded:
+		require.Empty(t, result.failed)
+		require.Equal(t, []uint32{2}, result.completed)
+	case <-ctx.Done():
+		t.Fatal("cold load did not finish")
+	}
+	cached, ok := m.gcStateCache.load(2)
+	require.True(t, ok)
+	require.Equal(t, gcStateCacheEntry{TxnSafePoint: 90, GCSafePoint: 70}, cached)
+
+	// Publish newer values, then invalidate the cache through a rejected writer
+	// before the joined reader can recheck it. Successful writes alone refresh it.
+	_, err := m.AdvanceTxnSafePoint(2, 100, time.Now())
+	require.NoError(t, err)
+	_, _, err = m.AdvanceGCSafePoint(2, 80)
+	require.NoError(t, err)
+	_, _, err = m.AdvanceGCSafePoint(2, 79)
+	require.ErrorIs(t, err, errs.ErrDecreasingGCSafePoint)
+	_, ok = m.gcStateCache.load(2)
+	require.False(t, ok)
+	unblockWaiter()
+	select {
+	case result := <-foreground:
+		require.NoError(t, result.err)
+		require.Equal(t, GCState{KeyspaceID: 2, IsKeyspaceLevel: true, TxnSafePoint: 100, GCSafePoint: 80}, result.state)
+	case <-ctx.Done():
+		t.Fatal("joined reader did not retry the invalidated load")
+	}
+	require.Equal(t, int32(2), reads.Load(), "the joined reader must reload invalidated values from storage")
+}
+
 func TestGCStateLoadWaiterCancellationAndOverlap(t *testing.T) {
 	entered := make(chan struct{}, 1)
 	release := make(chan struct{})

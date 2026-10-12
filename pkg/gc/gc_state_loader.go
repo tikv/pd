@@ -213,6 +213,7 @@ func (m *GCStateManager) loadGCState(ctx context.Context, generation *gcStateGen
 			if err := flight.wait(ctx); err != nil {
 				return GCState{}, err
 			}
+			failpoint.InjectCall("afterGCStateLoadJoinedWait")
 		}
 		// Foreground waiters never return a flight's old payload. Recheck generation
 		// around the cache read, and retry if an intervening writer invalidated it.
