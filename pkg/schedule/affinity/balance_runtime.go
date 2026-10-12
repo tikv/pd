@@ -68,6 +68,9 @@ func (m *Manager) ObserveBalanceRegion(region *core.RegionInfo) {
 	var groupID string
 	if !observed {
 		groupID = m.regionLabeler.GetRegionLabel(region, labelKey)
+		if groupID == "" {
+			return
+		}
 	}
 	m.Lock()
 	defer m.Unlock()
