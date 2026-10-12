@@ -278,6 +278,7 @@ func (s *Service) RegisterAffinityRouter() {
 	router.Use(redirector)
 	router.GET("", getAllAffinityGroups)
 	router.GET("/:group_id", getAffinityGroup)
+	router.POST("/:group_id/rebalance", rebalanceAffinityGroup)
 }
 
 // getHealth returns the health status of the TSO service.
@@ -1761,4 +1762,54 @@ func getAffinityGroup(c *gin.Context) {
 		return
 	}
 	c.IndentedJSON(http.StatusOK, groupState)
+}
+
+// @Tags     affinity-groups
+// @Summary  Preview or apply one affinity balance step.
+// @Param    group_id  path  string                             true  "The group id of the affinity group"
+// @Param    body      body  RebalanceAffinityGroupRequest      true  "Whether to apply the plan"
+// @Produce  json
+// @Success  200  {array}   affinity.BalancePlan  "The balance plan, empty when no rebalance is available"
+// @Failure  400  {string}  string                "The input is invalid."
+// @Failure  404  {string}  string                "Affinity group not found."
+// @Failure  500  {string}  string                "Scheduling service failed to proceed the request."
+// @Router   /affinity-groups/{group_id}/rebalance [post]
+func rebalanceAffinityGroup(c *gin.Context) {
+	manager, ok := getAffinityManager(c)
+	if !ok {
+		return
+	}
+
+	groupID := c.Param("group_id")
+	if err := affinity.ValidateGroupID(groupID); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
+		return
+	}
+	req := &RebalanceAffinityGroupRequest{}
+	if err := c.BindJSON(req); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
+		return
+	}
+
+	plans, err := manager.RebalanceAffinityGroup(c.Request.Context(), groupID, req.Apply)
+	if err != nil {
+		switch {
+		case errs.ErrInvalidGroupID.Equal(err), errs.ErrAffinityGroupContent.Equal(err), errs.ErrEmptyRequest.Equal(err):
+			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
+		case errs.ErrAffinityGroupNotFound.Equal(err):
+			c.AbortWithStatusJSON(http.StatusNotFound, err.Error())
+		default:
+			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	if plans == nil {
+		plans = make([]affinity.BalancePlan, 0)
+	}
+	c.IndentedJSON(http.StatusOK, plans)
+}
+
+// RebalanceAffinityGroupRequest defines the input for previewing or applying an affinity rebalance.
+type RebalanceAffinityGroupRequest struct {
+	Apply bool `json:"apply"`
 }

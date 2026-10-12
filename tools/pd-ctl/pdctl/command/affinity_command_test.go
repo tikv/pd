@@ -31,27 +31,20 @@ import (
 
 const (
 	affinityGroupsPath = "/pd/api/v2/affinity-groups"
-	storesPath         = "/pd/api/v1/stores"
 )
 
 type affinityRebalanceTestServer struct {
-	groups       map[string]*pdhttp.AffinityGroupState
-	stores       pdhttp.StoresInfo
-	putIDs       []string
-	putBodies    []pdhttp.UpdateAffinityGroupPeersRequest
-	putResponses []int
+	groups          map[string]*pdhttp.AffinityGroupState
+	plans           []pdhttp.AffinityBalancePlan
+	rebalanceIDs    []string
+	rebalanceBodies []pdhttp.RebalanceAffinityGroupRequest
+	responseStatus  int
 }
 
-func newAffinityRebalanceTestServer(t *testing.T, groups map[string]*pdhttp.AffinityGroupState, storeIDs ...uint64) (*affinityRebalanceTestServer, *httptest.Server) {
+func newAffinityRebalanceTestServer(t *testing.T, groups map[string]*pdhttp.AffinityGroupState, plans ...pdhttp.AffinityBalancePlan) (*affinityRebalanceTestServer, *httptest.Server) {
 	t.Helper()
 
-	stores := pdhttp.StoresInfo{Count: len(storeIDs), Stores: make([]pdhttp.StoreInfo, 0, len(storeIDs))}
-	for _, id := range storeIDs {
-		stores.Stores = append(stores.Stores, pdhttp.StoreInfo{
-			Store: pdhttp.MetaStore{ID: int64(id), StateName: "Up"},
-		})
-	}
-	testServer := &affinityRebalanceTestServer{groups: groups, stores: stores}
+	testServer := &affinityRebalanceTestServer{groups: groups, plans: plans}
 	server := httptest.NewServer(http.HandlerFunc(testServer.handle))
 	t.Cleanup(server.Close)
 	return testServer, server
@@ -62,29 +55,26 @@ func (s *affinityRebalanceTestServer) handle(w http.ResponseWriter, r *http.Requ
 	switch {
 	case r.Method == http.MethodGet && r.URL.Path == affinityGroupsPath:
 		_ = json.NewEncoder(w).Encode(pdhttp.AffinityGroupsResponse{AffinityGroups: s.groups})
-	case r.Method == http.MethodGet && r.URL.Path == storesPath:
-		_ = json.NewEncoder(w).Encode(s.stores)
-	case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, affinityGroupsPath+"/"):
-		groupID := strings.TrimPrefix(r.URL.Path, affinityGroupsPath+"/")
+	case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, affinityGroupsPath+"/") && strings.HasSuffix(r.URL.Path, "/rebalance"):
+		groupID := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, affinityGroupsPath+"/"), "/rebalance")
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		var request pdhttp.UpdateAffinityGroupPeersRequest
+		var request pdhttp.RebalanceAffinityGroupRequest
 		if err := json.Unmarshal(body, &request); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		s.putIDs = append(s.putIDs, groupID)
-		s.putBodies = append(s.putBodies, request)
-		responseIndex := len(s.putIDs) - 1
-		if responseIndex < len(s.putResponses) && s.putResponses[responseIndex] != http.StatusOK {
-			w.WriteHeader(s.putResponses[responseIndex])
-			_, _ = io.WriteString(w, `{"error":"update failed"}`)
+		s.rebalanceIDs = append(s.rebalanceIDs, groupID)
+		s.rebalanceBodies = append(s.rebalanceBodies, request)
+		if s.responseStatus != 0 && s.responseStatus != http.StatusOK {
+			w.WriteHeader(s.responseStatus)
+			_, _ = io.WriteString(w, `{"error":"rebalance failed"}`)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(s.groups[groupID])
+		_ = json.NewEncoder(w).Encode(s.plans)
 	default:
 		http.NotFound(w, r)
 	}
@@ -127,14 +117,18 @@ func newAffinityHTTPClient(t *testing.T, server *httptest.Server) pdhttp.Client 
 	return client
 }
 
-func TestAffinityRebalancePreviewFiltersTableAndDoesNotWrite(t *testing.T) {
+func TestAffinityRebalancePreviewFiltersTableAndRequestsServerOnce(t *testing.T) {
 	groups := map[string]*pdhttp.AffinityGroupState{
 		"_tidb_t_42":      affinityGroup("_tidb_t_42", 1, 1, 2, 3),
 		"_tidb_pt_42_p1":  affinityGroup("_tidb_pt_42_p1", 1, 1, 2, 3),
 		"_tidb_t_99":      affinityGroup("_tidb_t_99", 1, 1, 2, 3),
 		"unrelated-group": affinityGroup("unrelated-group", 1, 1, 2, 3),
 	}
-	testServer, server := newAffinityRebalanceTestServer(t, groups, 1, 2, 3)
+	plans := []pdhttp.AffinityBalancePlan{
+		{GroupID: "_tidb_pt_42_p1", LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2, 3}, Changed: true},
+		{GroupID: "_tidb_t_42", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}},
+	}
+	testServer, server := newAffinityRebalanceTestServer(t, groups, plans...)
 	client := newAffinityHTTPClient(t, server)
 
 	output := executeAffinityRebalance(t, client, "--table-id", "42")
@@ -142,47 +136,58 @@ func TestAffinityRebalancePreviewFiltersTableAndDoesNotWrite(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(output), &result))
 	require.Len(t, result, 2)
 	require.Equal(t, []string{"_tidb_pt_42_p1", "_tidb_t_42"}, []string{result[0].GroupID, result[1].GroupID})
-	require.Empty(t, testServer.putIDs)
-	require.Empty(t, testServer.putBodies)
+	require.Equal(t, []string{"_tidb_pt_42_p1"}, testServer.rebalanceIDs)
+	require.Equal(t, []pdhttp.RebalanceAffinityGroupRequest{{Apply: false}}, testServer.rebalanceBodies)
+	require.Equal(t, uint64(1), result[1].OldLeader)
+	require.Equal(t, uint64(2), result[0].NewLeader)
+	require.False(t, result[0].Applied)
 }
 
 func TestAffinityRebalanceApplyRequiresForce(t *testing.T) {
 	testServer, server := newAffinityRebalanceTestServer(t, map[string]*pdhttp.AffinityGroupState{
 		"_tidb_t_42": affinityGroup("_tidb_t_42", 1, 1, 2, 3),
-	}, 1, 2, 3)
+	})
 	client := newAffinityHTTPClient(t, server)
 
 	output := executeAffinityRebalance(t, client, "--table-id", "42", "--apply")
 	require.Contains(t, output, "--force is required with --apply")
-	require.Empty(t, testServer.putIDs)
-	require.Empty(t, testServer.putBodies)
+	require.Empty(t, testServer.rebalanceIDs)
+	require.Empty(t, testServer.rebalanceBodies)
 }
 
-func TestAffinityRebalanceApplyStopsAfterFailure(t *testing.T) {
+func TestAffinityRebalanceApplyUsesServerPlan(t *testing.T) {
 	groups := map[string]*pdhttp.AffinityGroupState{
 		"_tidb_pt_42_p1": affinityGroup("_tidb_pt_42_p1", 1, 1, 2, 3),
 		"_tidb_pt_42_p2": affinityGroup("_tidb_pt_42_p2", 1, 1, 2, 3),
 		"_tidb_pt_42_p3": affinityGroup("_tidb_pt_42_p3", 1, 1, 2, 3),
 	}
-	testServer, server := newAffinityRebalanceTestServer(t, groups, 1, 2, 3)
-	testServer.putResponses = []int{http.StatusInternalServerError}
+	plans := []pdhttp.AffinityBalancePlan{
+		{GroupID: "_tidb_pt_42_p2", LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2, 3}, Changed: true},
+	}
+	testServer, server := newAffinityRebalanceTestServer(t, groups, plans...)
 	client := newAffinityHTTPClient(t, server)
 
 	output := executeAffinityRebalance(t, client, "--table-id", "42", "--apply", "--force")
 	var result []affinityRebalanceResult
 	require.NoError(t, json.Unmarshal([]byte(output), &result))
 	require.Len(t, result, 1)
-	require.Equal(t, "_tidb_pt_42_p1", result[0].GroupID)
-	require.NotEmpty(t, result[0].Error)
-	require.False(t, result[0].Applied)
-	require.Equal(t, []string{"_tidb_pt_42_p1"}, testServer.putIDs)
-	require.Len(t, testServer.putBodies, 1)
-	require.Equal(t, uint64(2), testServer.putBodies[0].LeaderStoreID)
-	require.Equal(t, []uint64{1, 2, 3}, testServer.putBodies[0].VoterStoreIDs)
+	require.Equal(t, "_tidb_pt_42_p2", result[0].GroupID)
+	require.True(t, result[0].Applied)
+	require.Equal(t, uint64(1), result[0].OldLeader)
+	require.Equal(t, []uint64{1, 2, 3}, result[0].NewVoters)
+	require.Equal(t, []string{"_tidb_pt_42_p1"}, testServer.rebalanceIDs)
+	require.Equal(t, []pdhttp.RebalanceAffinityGroupRequest{{Apply: true}}, testServer.rebalanceBodies)
 }
 
-func TestAffinityRebalanceStoreFilterUsesCoreEngineSemantics(t *testing.T) {
-	require.True(t, isTiKVStore(pdhttp.StoreInfo{Store: pdhttp.MetaStore{ID: 1}}))
-	require.True(t, isTiKVStore(pdhttp.StoreInfo{Store: pdhttp.MetaStore{ID: 2, Labels: []pdhttp.StoreLabel{{Key: "engine", Value: "tikv"}}}}))
-	require.False(t, isTiKVStore(pdhttp.StoreInfo{Store: pdhttp.MetaStore{ID: 3, Labels: []pdhttp.StoreLabel{{Key: "engine", Value: "tiflash"}}}}))
+func TestAffinityRebalanceStaleApplyReturnsNoAppliedPlan(t *testing.T) {
+	groups := map[string]*pdhttp.AffinityGroupState{
+		"_tidb_t_42": affinityGroup("_tidb_t_42", 1, 1, 2, 3),
+	}
+	testServer, server := newAffinityRebalanceTestServer(t, groups)
+	client := newAffinityHTTPClient(t, server)
+
+	output := executeAffinityRebalance(t, client, "--table-id", "42", "--apply", "--force")
+	require.Equal(t, "[]\n", output)
+	require.Equal(t, []string{"_tidb_t_42"}, testServer.rebalanceIDs)
+	require.Equal(t, []pdhttp.RebalanceAffinityGroupRequest{{Apply: true}}, testServer.rebalanceBodies)
 }

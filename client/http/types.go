@@ -815,3 +815,17 @@ type UpdateAffinityGroupPeersRequest struct {
 	LeaderStoreID uint64   `json:"leader_store_id"`
 	VoterStoreIDs []uint64 `json:"voter_store_ids"`
 }
+
+// RebalanceAffinityGroupRequest defines the body for previewing or applying an affinity rebalance.
+type RebalanceAffinityGroupRequest struct {
+	Apply bool `json:"apply"`
+}
+
+// AffinityBalancePlan describes the target peer distribution for an affinity group.
+// JSON field names match affinity.BalancePlan's exported Go fields.
+type AffinityBalancePlan struct {
+	GroupID       string
+	LeaderStoreID uint64
+	VoterStoreIDs []uint64
+	Changed       bool
+}

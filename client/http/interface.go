@@ -145,6 +145,8 @@ type Client interface {
 	GetAllAffinityGroups(ctx context.Context) (map[string]*AffinityGroupState, error)
 	// UpdateAffinityGroupPeers updates the leader and voter stores of an affinity group.
 	UpdateAffinityGroupPeers(ctx context.Context, groupID string, leaderStoreID uint64, voterStoreIDs []uint64) (*AffinityGroupState, error)
+	// RebalanceAffinityGroup previews or applies one affinity balance step.
+	RebalanceAffinityGroup(ctx context.Context, groupID string, apply bool) ([]AffinityBalancePlan, error)
 	// DeleteAffinityGroup deletes an affinity group by group ID.
 	DeleteAffinityGroup(ctx context.Context, groupID string, force bool) error
 	// BatchDeleteAffinityGroups deletes multiple affinity groups in batch.
@@ -1364,6 +1366,25 @@ func (c *client) UpdateAffinityGroupPeers(ctx context.Context, groupID string, l
 		return nil, err
 	}
 	return &state, nil
+}
+
+// RebalanceAffinityGroup previews or applies one affinity balance step.
+func (c *client) RebalanceAffinityGroup(ctx context.Context, groupID string, apply bool) ([]AffinityBalancePlan, error) {
+	reqJSON, err := json.Marshal(RebalanceAffinityGroupRequest{Apply: apply})
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	var plans []AffinityBalancePlan
+	err = c.request(ctx, newRequestInfo().
+		WithName("RebalanceAffinityGroup").
+		WithURI(fmt.Sprintf(AffinityGroupRebalance, groupID)).
+		WithMethod(http.MethodPost).
+		WithBody(reqJSON).
+		WithResp(&plans))
+	if err != nil {
+		return nil, err
+	}
+	return plans, nil
 }
 
 // DeleteAffinityGroup deletes an affinity group by group ID.

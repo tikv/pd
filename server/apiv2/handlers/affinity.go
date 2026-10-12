@@ -35,6 +35,7 @@ func RegisterAffinity(r *gin.RouterGroup) {
 	router.POST("", PostAffinityGroups)
 	router.PATCH("", BatchModifyAffinityGroups)
 	router.PUT("/:group_id", UpdateAffinityGroupPeers)
+	router.POST("/:group_id/rebalance", RebalanceAffinityGroup)
 	router.DELETE("/:group_id", DeleteAffinityGroup)
 	router.GET("", GetAllAffinityGroups)
 	router.GET("/:group_id", GetAffinityGroup)
@@ -94,6 +95,11 @@ type BatchModifyAffinityGroupsRequest struct {
 type UpdateAffinityGroupPeersRequest struct {
 	LeaderStoreID uint64   `json:"leader_store_id"`
 	VoterStoreIDs []uint64 `json:"voter_store_ids"`
+}
+
+// RebalanceAffinityGroupRequest defines the input for previewing or applying an affinity rebalance.
+type RebalanceAffinityGroupRequest struct {
+	Apply bool `json:"apply"`
 }
 
 // --- Handlers ---
@@ -380,6 +386,47 @@ func UpdateAffinityGroupPeers(c *gin.Context) {
 	}
 
 	c.IndentedJSON(http.StatusOK, state)
+}
+
+// RebalanceAffinityGroup previews or applies one affinity balance step.
+//
+//	@Tags		affinity-groups
+//	@Summary	Preview or apply one affinity balance step.
+//	@Param		group_id	path	string						true	"The group id of the affinity group"
+//	@Param		body		body	RebalanceAffinityGroupRequest	true	"Whether to apply the plan"
+//	@Produce	json
+//	@Success	200	{array}	affinity.BalancePlan	"The balance plan, empty when no rebalance is available"
+//	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	404	{string}	string	"Affinity group not found."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/affinity-groups/{group_id}/rebalance [post]
+func RebalanceAffinityGroup(c *gin.Context) {
+	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
+	manager, err := svr.GetAffinityManager()
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	groupID := c.Param("group_id")
+	if err := affinity.ValidateGroupID(groupID); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
+		return
+	}
+	req := &RebalanceAffinityGroupRequest{}
+	if err := c.BindJSON(req); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
+		return
+	}
+
+	plans, err := manager.RebalanceAffinityGroup(c.Request.Context(), groupID, req.Apply)
+	if handleAffinityError(c, err) {
+		return
+	}
+	if plans == nil {
+		plans = make([]affinity.BalancePlan, 0)
+	}
+	c.IndentedJSON(http.StatusOK, plans)
 }
 
 // DeleteAffinityGroup deletes a specific affinity group by group id.

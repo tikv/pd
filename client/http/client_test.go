@@ -61,6 +61,31 @@ func TestConfigWithTrailingSlash(t *testing.T) {
 	}
 }
 
+func TestRebalanceAffinityGroup(t *testing.T) {
+	re := require.New(t)
+	as := assert.New(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		as.Equal(http.MethodPost, r.Method)
+		as.Equal("/pd/api/v2/affinity-groups/_tidb_t_42/rebalance", r.URL.Path)
+		body, err := io.ReadAll(r.Body)
+		as.NoError(err)
+		as.JSONEq(`{"apply":true}`, string(body))
+		_, _ = io.WriteString(w, `[{"GroupID":"_tidb_t_42","LeaderStoreID":2,"VoterStoreIDs":[1,2,3],"Changed":true}]`)
+	}))
+	defer server.Close()
+	c := newClientWithMockServiceDiscovery("test-affinity-rebalance", []string{server.URL})
+	defer c.Close()
+
+	plans, err := c.RebalanceAffinityGroup(context.Background(), "_tidb_t_42", true)
+	re.NoError(err)
+	re.Equal([]AffinityBalancePlan{{
+		GroupID:       "_tidb_t_42",
+		LeaderStoreID: 2,
+		VoterStoreIDs: []uint64{1, 2, 3},
+		Changed:       true,
+	}}, plans)
+}
+
 func TestPDAllowFollowerHandleHeader(t *testing.T) {
 	re := require.New(t)
 	checked := 0
