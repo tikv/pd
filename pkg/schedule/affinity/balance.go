@@ -133,6 +133,10 @@ func PlanBalance(groups []*Group, options BalanceOptions) ([]BalancePlan, error)
 				continue
 			}
 			actions := options.ActionSets[group.ID]
+			votersSet := make(map[uint64]struct{}, len(oldVoters))
+			for _, store := range oldVoters {
+				votersSet[store] = struct{}{}
+			}
 			evaluate := func(leader, from, to uint64) {
 				score := baseScore
 				if leader != group.LeaderStoreID {
@@ -144,11 +148,7 @@ func PlanBalance(groups []*Group, options BalanceOptions) ([]BalancePlan, error)
 				if compareScore(score, baseScore) >= 0 {
 					return
 				}
-				voters := oldVoters
-				if replace {
-					voters = replaceVoter(oldVoters, from, to)
-				}
-				candidate := target{leader: leader, voters: voters}
+				candidate := target{leader: leader, voters: oldVoters, from: from, to: to}
 				moveBytes := uint64(0)
 				if replace {
 					moveBytes = actions.MoveBytes
@@ -161,13 +161,13 @@ func PlanBalance(groups []*Group, options BalanceOptions) ([]BalancePlan, error)
 					}
 				}
 				if best == nil || order < 0 || (order == 0 && targetLess(group.ID, candidate, bestGroup, best.target)) {
-					best = &targetCandidate{target: target{leader: leader, voters: slices.Clone(voters)}, score: score, moveBytes: moveBytes}
+					best = &targetCandidate{target: candidate, score: score, moveBytes: moveBytes}
 					bestGroup = group.ID
 				}
 			}
 			if !replace {
 				for _, leader := range actions.LeaderTargets {
-					if slices.Contains(oldVoters, leader) {
+					if _, exists := votersSet[leader]; exists {
 						evaluate(leader, 0, 0)
 					}
 				}
@@ -176,11 +176,13 @@ func PlanBalance(groups []*Group, options BalanceOptions) ([]BalancePlan, error)
 			for _, from := range oldVoters {
 				for to, leaders := range actions.VoterReplacements[from] {
 					_, exists := available[to]
-					if !exists || to == 0 || slices.Contains(oldVoters, to) {
+					_, alreadyVoter := votersSet[to]
+					if !exists || to == 0 || alreadyVoter {
 						continue
 					}
 					for _, leader := range leaders {
-						if leader == to || (leader != from && slices.Contains(oldVoters, leader)) {
+						_, staysVoter := votersSet[leader]
+						if leader == to || (leader != from && staysVoter) {
 							evaluate(leader, from, to)
 						}
 					}
@@ -193,6 +195,10 @@ func PlanBalance(groups []*Group, options BalanceOptions) ([]BalancePlan, error)
 	}
 
 	if best != nil {
+		voters := best.voters
+		if best.from != 0 {
+			voters = replaceVoter(voters, best.from, best.to)
+		}
 		for i := range plans {
 			if plans[i].GroupID != bestGroup {
 				continue
@@ -200,7 +206,7 @@ func PlanBalance(groups []*Group, options BalanceOptions) ([]BalancePlan, error)
 			plans[i] = BalancePlan{
 				GroupID:       bestGroup,
 				LeaderStoreID: best.leader,
-				VoterStoreIDs: slices.Clone(best.voters),
+				VoterStoreIDs: slices.Clone(voters),
 				Changed:       true,
 			}
 			break
@@ -210,8 +216,9 @@ func PlanBalance(groups []*Group, options BalanceOptions) ([]BalancePlan, error)
 }
 
 type target struct {
-	leader uint64
-	voters []uint64
+	leader   uint64
+	voters   []uint64
+	from, to uint64
 }
 
 type targetCandidate struct {
@@ -252,7 +259,10 @@ func targetLess(groupA string, a target, groupB string, b target) bool {
 	if a.leader != b.leader {
 		return a.leader < b.leader
 	}
-	return slices.Compare(a.voters, b.voters) < 0
+	if a.to != b.to {
+		return a.to < b.to
+	}
+	return a.from < b.from
 }
 
 func makePlan(group *Group, leader uint64, voters []uint64, changed bool) BalancePlan {
