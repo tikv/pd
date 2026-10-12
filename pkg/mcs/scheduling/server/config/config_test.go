@@ -15,6 +15,7 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -22,6 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
+	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/types"
@@ -208,4 +210,30 @@ func TestGetStoreLimitPreservesConcurrentWatcherUpdate(t *testing.T) {
 	re.Equal(watched.DefaultStoreLimit, persistConfig.GetScheduleConfig().DefaultStoreLimit)
 	re.Equal(watched.DefaultStoreLimit, persistConfig.GetScheduleConfig().StoreLimit[1])
 	re.Equal(watched.DefaultStoreLimit, limit)
+}
+
+func TestGetStoreLimitWithPartialDefaultTTL(t *testing.T) {
+	re := require.New(t)
+	oldAddPeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
+	oldRemovePeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer)
+	defer func() {
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, oldAddPeer)
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, oldRemovePeer)
+	}()
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, 15)
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, 15)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ttl := cache.NewStringTTL(ctx, time.Second, time.Minute)
+	cfg := NewConfig()
+	re.NoError(cfg.adjust(nil))
+	persistConfig := NewPersistConfig(cfg, ttl)
+	persistConfig.SetAllStoresLimit(storelimit.RemovePeer, 50)
+	ttl.PutWithTTL("default-add-peer", "40", time.Minute)
+
+	// The TTL only overrides add-peer, so remove-peer keeps the persisted default.
+	re.Equal(sc.StoreLimitConfig{AddPeer: 40, RemovePeer: 50}, persistConfig.GetStoreLimit(100))
+	_, ok := persistConfig.GetScheduleConfig().StoreLimit[100]
+	re.False(ok)
 }

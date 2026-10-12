@@ -537,6 +537,8 @@ func (o *PersistOptions) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitCo
 			return
 		}
 		limitCfg := next.GetDefaultStoreLimit()
+		// A TTL may override only one direction, so the other keeps the default.
+		returnSC = limitCfg
 		v, ok1, err := o.getTTLFloat("default-add-peer")
 		if err != nil {
 			log.Warn("failed to parse default-add-peer from PersistOptions's ttl storage", zap.Error(err))

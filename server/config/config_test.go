@@ -15,6 +15,7 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -27,6 +28,7 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/require"
 
+	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/ratelimit"
 	sc "github.com/tikv/pd/pkg/schedule/config"
@@ -121,6 +123,32 @@ func TestReloadDefaultStoreLimit(t *testing.T) {
 	re.NoError(reloadedOpt.Reload(storage))
 	re.Equal(sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 15}, reloadedOpt.GetScheduleConfig().DefaultStoreLimit)
 	re.Equal(sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 15}, reloadedOpt.GetStoreLimit(102))
+}
+
+func TestGetStoreLimitWithPartialDefaultTTL(t *testing.T) {
+	re := require.New(t)
+	oldAddPeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
+	oldRemovePeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer)
+	defer func() {
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, oldAddPeer)
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, oldRemovePeer)
+	}()
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, 15)
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, 15)
+
+	opt, err := newTestScheduleOption()
+	re.NoError(err)
+	opt.SetAllStoresLimit(storelimit.RemovePeer, 50)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opt.ttl = cache.NewStringTTL(ctx, time.Second, time.Minute)
+	opt.ttl.PutWithTTL("default-add-peer", "40", time.Minute)
+
+	// The TTL only overrides add-peer, so remove-peer keeps the persisted default.
+	re.Equal(sc.StoreLimitConfig{AddPeer: 40, RemovePeer: 50}, opt.GetStoreLimit(100))
+	_, ok := opt.GetScheduleConfig().StoreLimit[100]
+	re.False(ok)
 }
 
 func TestDefaultStoreLimitAdjust(t *testing.T) {

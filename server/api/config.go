@@ -582,9 +582,7 @@ func (h *confHandler) getLeaderConfig() (*config.Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	var leaderConfig config.Config
-	err = json.Unmarshal(b, &leaderConfig)
-	return &leaderConfig, err
+	return unmarshalRemoteConfig(b)
 }
 
 func (h *confHandler) getSchedulingServerConfig() (*config.Config, error) {

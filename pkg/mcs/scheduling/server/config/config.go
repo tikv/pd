@@ -575,6 +575,8 @@ func (o *PersistConfig) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitCon
 		return limit
 	}
 
+	// A TTL may override only one direction, so the other keeps the default.
+	returnSC = o.GetScheduleConfig().GetDefaultStoreLimit()
 	v, ok1, err := o.getTTLFloat("default-add-peer")
 	if err != nil {
 		log.Warn("failed to parse default-add-peer from PersistOptions's ttl storage", zap.Error(err))
@@ -690,6 +692,9 @@ func (o *PersistConfig) IsTikvRegionSplitEnabled() bool {
 
 // SetAllStoresLimit sets all store limit for a given type and rate.
 func (o *PersistConfig) SetAllStoresLimit(typ storelimit.Type, ratePerMin float64) {
+	o.scheduleMu.Lock()
+	defer o.scheduleMu.Unlock()
+
 	v := o.GetScheduleConfig().Clone()
 	switch typ {
 	case storelimit.AddPeer:
@@ -708,7 +713,7 @@ func (o *PersistConfig) SetAllStoresLimit(typ storelimit.Type, ratePerMin float6
 		}
 	}
 
-	o.SetScheduleConfig(v)
+	o.installScheduleConfig(v)
 }
 
 // SetMaxReplicas sets the number of replicas for each region.
