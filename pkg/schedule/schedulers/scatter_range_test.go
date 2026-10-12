@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -181,4 +182,32 @@ func TestScatterRangeConfigJSONCompatibility(t *testing.T) {
 	// A broken hex field is an error.
 	conf = &scatterRangeSchedulerConfig{}
 	re.Error(json.Unmarshal([]byte(`{"range-name":"test","start-key":"","end-key":"","start-key-hex":"zz"}`), conf))
+}
+
+func TestScatterRangeScheduleConfigKeepsRawKeys(t *testing.T) {
+	re := require.New(t)
+	cancel, opt, _, oc := prepareSchedulersTest()
+	defer cancel()
+	startKey := string([]byte{0x74, 0x80, 0x00, 0xff})
+	endKey := string([]byte{0x74, 0x80, 0x01, 0xfe})
+	args := []string{startKey, endKey, "test"}
+	opt.AddSchedulerCfg(types.ScatterRangeScheduler, args)
+	data, err := json.Marshal(opt.GetScheduleConfig())
+	re.NoError(err)
+	var schedule sc.ScheduleConfig
+	re.NoError(json.Unmarshal(data, &schedule))
+	for _, cfg := range schedule.Schedulers {
+		if cfg.Type != types.SchedulerTypeCompatibleMap[types.ScatterRangeScheduler] {
+			continue
+		}
+		s, err := CreateScheduler(types.ScatterRangeScheduler, oc, storage.NewStorageWithMemoryBackend(),
+			ConfigSliceDecoder(types.ScatterRangeScheduler, cfg.Args), func(string) error { return nil })
+		re.NoError(err)
+		sr := s.(*scatterRangeScheduler)
+		re.Equal([]byte(startKey), sr.config.getStartKey())
+		re.Equal([]byte(endKey), sr.config.getEndKey())
+		re.Equal("test", sr.config.getRangeName())
+		return
+	}
+	re.FailNow("scatter-range config missing")
 }
