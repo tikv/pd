@@ -46,12 +46,13 @@ var (
 // allocates exclusively fresh addresses — only a pathological run that
 // actually exceeds the bound ever sees recycling.
 // The bound exceeds the maximum concurrent in-flight allocations a pd-ut run
-// can hold: parallelism is structurally capped at the host CPU count
-// (pd-ut clamps an explicit --parallel above GOMAXPROCS), each test case runs
-// to completion before the next one, and a 2-minute child timeout bounds any
-// single allocation. Eviction therefore only triggers on a pathological run,
-// where the stalest addresses — those most likely already bound — are
-// re-issued; at realistic concurrency all retained entries are still unbound.
+// can hold: an explicit --parallel is clamped to this bound (values above it
+// are capped so they can never drive the live set past the limit), each test
+// case runs to completion before the next one, and a 2-minute child timeout
+// bounds any single allocation. Eviction therefore only triggers on a
+// pathological run, where the stalest addresses — those most likely already
+// bound — are re-issued; at realistic concurrency all retained entries are
+// still unbound.
 const maxTestAddrMapLen = 4096
 
 // reclaimTestAddrs frees the oldest addresses until at most limit remain.

@@ -42,6 +42,11 @@ import (
 const (
 	deadlockTag = "deadlock"
 	nextGenTag  = "nextgen"
+	// maxParallelAddrBound mirrors alloc.maxTestAddrMapLen, the shared port
+	// allocator's retained-address cap. A --parallel above it could push the
+	// allocator into its eviction path; values below it are left as the user
+	// requested.
+	maxParallelAddrBound = 4096
 )
 
 // initTags sets up the tags.
@@ -166,11 +171,13 @@ func run() (exitCode int) {
 			fmt.Println("parse parallel error", err)
 			return 1
 		}
-		// Cap parallelism at the host CPU count so the shared port allocator's
-		// retained-address bound (see alloc.maxTestAddrMapLen) stays reachable.
-		if parallel > procs {
-			fmt.Printf("Clamping --parallel %d to GOMAXPROCS=%d\n", parallel, procs)
-			parallel = procs
+		// Cap parallelism at the shared allocator's retained-address bound
+		// (see alloc.maxTestAddrMapLen) so a large --parallel can never
+		// trigger the eviction path. Oversubscription below the bound is
+		// left untouched.
+		if parallel > maxParallelAddrBound {
+			fmt.Printf("Clamping --parallel %d to %d to keep the port allocator's eviction bound reachable\n", parallel, maxParallelAddrBound)
+			parallel = maxParallelAddrBound
 		}
 	}
 	workDir, err = os.Getwd()
