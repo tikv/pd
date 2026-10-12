@@ -15,6 +15,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -65,6 +66,7 @@ import (
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 )
@@ -685,14 +687,17 @@ func (c *Cluster) GetPrepareRegionCount() (int, error) {
 	return c.getPrepareRegionCountFromPD()
 }
 
-func (c *Cluster) getPrepareRegionCountFromPD() (int, error) {
+func (c *Cluster) getBackendAddress() string {
 	backendAddresses := strings.Split(c.backendAddress, ",")
 	var backendAddress string
 	if len(backendAddresses) >= 1 {
 		backendAddress = backendAddresses[0]
 	}
+	return backendAddress
+}
 
-	url := fmt.Sprintf("%s/pd/api/v1/regions/count", backendAddress)
+func (c *Cluster) getPrepareRegionCountFromPD() (int, error) {
+	url := fmt.Sprintf("%s/pd/api/v1/regions/count", c.getBackendAddress())
 	ctx, cancel := context.WithTimeout(c.ctx, requestTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
@@ -714,6 +719,40 @@ func (c *Cluster) getPrepareRegionCountFromPD() (int, error) {
 		return 0, err
 	}
 	return regionsInfo.Count, nil
+}
+
+// UpdateBalanceRangeJobStatus persists the status of the balance range job through the PD,
+// because the storage of the scheduling service is only in memory.
+func (c *Cluster) UpdateBalanceRangeJobStatus(jobID uint64, status string) error {
+	data, err := json.Marshal(map[string]any{
+		"job-id": jobID,
+		"status": status,
+	})
+	if err != nil {
+		return err
+	}
+	url := fmt.Sprintf("%s/pd/api/v1/scheduler-config/%s/job/status",
+		c.getBackendAddress(), types.BalanceRangeScheduler.String())
+	ctx, cancel := context.WithTimeout(c.ctx, requestTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	// The request must be handled by the PD, it can't be forwarded back to the scheduling service.
+	req.Header.Set(apiutil.XForbiddenForwardToMicroserviceHeader, "true")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return errors.Errorf("failed to update the status of balance range job %d to %s, status code: %d, body: %s",
+			jobID, status, resp.StatusCode, string(body))
+	}
+	return nil
 }
 
 func (c *Cluster) runMetricsCollectionJob() {
