@@ -54,9 +54,11 @@ func TestTryAllocTestURLDoesNotFallBackFromConfiguredAllocator(t *testing.T) {
 // child. The call must give up on its own bounded deadline, well before the
 // caller would otherwise block indefinitely.
 func TestGetFromUTTimesOutOnHungAllocator(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
-		// Swallow the request so Do and ReadAll hang until the client's
-		// deadline fires. No response is ever written.
+	// Withhold the response: block until the client's deadline fires so that
+	// net/http never sends an implicit 200 OK and Do/ReadAll are forced to
+	// complete only via the client's bounded timeout.
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
 	}))
 	t.Cleanup(server.Close)
 	t.Setenv(AllocURLFromUT, server.URL)
