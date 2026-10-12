@@ -80,11 +80,11 @@ func (s *affinityRebalanceTestServer) handle(w http.ResponseWriter, r *http.Requ
 	}
 }
 
-func affinityGroup(id string, leader uint64, voters ...uint64) *pdhttp.AffinityGroupState {
+func affinityGroup(id string, voters ...uint64) *pdhttp.AffinityGroupState {
 	return &pdhttp.AffinityGroupState{
 		AffinityGroup: pdhttp.AffinityGroup{
 			ID:            id,
-			LeaderStoreID: leader,
+			LeaderStoreID: 1,
 			VoterStoreIDs: voters,
 		},
 	}
@@ -119,10 +119,10 @@ func newAffinityHTTPClient(t *testing.T, server *httptest.Server) pdhttp.Client 
 
 func TestAffinityRebalancePreviewFiltersTableAndRequestsServerOnce(t *testing.T) {
 	groups := map[string]*pdhttp.AffinityGroupState{
-		"_tidb_t_42":      affinityGroup("_tidb_t_42", 1, 1, 2, 3),
-		"_tidb_pt_42_p1":  affinityGroup("_tidb_pt_42_p1", 1, 1, 2, 3),
-		"_tidb_t_99":      affinityGroup("_tidb_t_99", 1, 1, 2, 3),
-		"unrelated-group": affinityGroup("unrelated-group", 1, 1, 2, 3),
+		"_tidb_t_42":      affinityGroup("_tidb_t_42", 1, 2, 3),
+		"_tidb_pt_42_p1":  affinityGroup("_tidb_pt_42_p1", 1, 2, 3),
+		"_tidb_t_99":      affinityGroup("_tidb_t_99", 1, 2, 3),
+		"unrelated-group": affinityGroup("unrelated-group", 1, 2, 3),
 	}
 	plans := []pdhttp.AffinityBalancePlan{
 		{GroupID: "_tidb_pt_42_p1", LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2, 3}, Changed: true},
@@ -145,7 +145,7 @@ func TestAffinityRebalancePreviewFiltersTableAndRequestsServerOnce(t *testing.T)
 
 func TestAffinityRebalanceApplyRequiresForce(t *testing.T) {
 	testServer, server := newAffinityRebalanceTestServer(t, map[string]*pdhttp.AffinityGroupState{
-		"_tidb_t_42": affinityGroup("_tidb_t_42", 1, 1, 2, 3),
+		"_tidb_t_42": affinityGroup("_tidb_t_42", 1, 2, 3),
 	})
 	client := newAffinityHTTPClient(t, server)
 
@@ -157,9 +157,9 @@ func TestAffinityRebalanceApplyRequiresForce(t *testing.T) {
 
 func TestAffinityRebalanceApplyUsesServerPlan(t *testing.T) {
 	groups := map[string]*pdhttp.AffinityGroupState{
-		"_tidb_pt_42_p1": affinityGroup("_tidb_pt_42_p1", 1, 1, 2, 3),
-		"_tidb_pt_42_p2": affinityGroup("_tidb_pt_42_p2", 1, 1, 2, 3),
-		"_tidb_pt_42_p3": affinityGroup("_tidb_pt_42_p3", 1, 1, 2, 3),
+		"_tidb_pt_42_p1": affinityGroup("_tidb_pt_42_p1", 1, 2, 3),
+		"_tidb_pt_42_p2": affinityGroup("_tidb_pt_42_p2", 1, 2, 3),
+		"_tidb_pt_42_p3": affinityGroup("_tidb_pt_42_p3", 1, 2, 3),
 	}
 	plans := []pdhttp.AffinityBalancePlan{
 		{GroupID: "_tidb_pt_42_p2", LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2, 3}, Changed: true},
@@ -181,7 +181,7 @@ func TestAffinityRebalanceApplyUsesServerPlan(t *testing.T) {
 
 func TestAffinityRebalanceStaleApplyReturnsNoAppliedPlan(t *testing.T) {
 	groups := map[string]*pdhttp.AffinityGroupState{
-		"_tidb_t_42": affinityGroup("_tidb_t_42", 1, 1, 2, 3),
+		"_tidb_t_42": affinityGroup("_tidb_t_42", 1, 2, 3),
 	}
 	testServer, server := newAffinityRebalanceTestServer(t, groups)
 	client := newAffinityHTTPClient(t, server)
