@@ -144,6 +144,13 @@ func (rw *Watcher) initializeKeyspaceMetaWatcher() error {
 		postEventsFn,
 		true, /* withPrefix */
 	)
+	// putFn/deleteFn write keyspaceCache directly (no staging), the same shape
+	// as the scheduling store watcher, so a full snapshot reload after
+	// compaction - with reconciliation of keys no longer in that snapshot -
+	// is enough here: it keeps the cache authoritative instead of silently
+	// skipping to the compact revision and losing whatever events fell in the
+	// gap.
+	rw.watcher.SetReconcileDeletedKeys()
 	rw.watcher.StartWatchLoop()
 	return rw.watcher.WaitLoad()
 }

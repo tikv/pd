@@ -34,7 +34,10 @@ import (
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
+	"github.com/tikv/pd/pkg/mock/mockcluster"
+	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/mock/mockid"
+	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -848,17 +851,12 @@ func TestGetKeyspaceIDInRangeBackfillsFromStorage(t *testing.T) {
 	re.ElementsMatch([]uint32{10, 11, 12}, ids)
 }
 
-// TestGetKeyspaceIDInRangeBackfillIsBounded verifies that backfilling from
-// storage advances in bounded batches rather than loading everything up to
-// the queried end in one call, and that repeated calls converge to a
-// complete answer.
-func TestGetKeyspaceIDInRangeBackfillIsBounded(t *testing.T) {
+// TestGetKeyspaceIDInRangeBackfillScansToCompletion verifies that a single
+// GetKeyspaceIDInRange call backfills every keyspace in storage in one shot
+// (paging internally as needed), not just the ones within the queried range,
+// and that the watermark reaches full completion after that one call.
+func TestGetKeyspaceIDInRangeBackfillScansToCompletion(t *testing.T) {
 	re := require.New(t)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/keyspaceIDRangeBackfillBatchSize", "return(2)"))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/keyspaceIDRangeBackfillBatchSize"))
-	}()
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
@@ -880,20 +878,11 @@ func TestGetKeyspaceIDInRangeBackfillIsBounded(t *testing.T) {
 
 	fresh := NewKeyspaceManager(ctx, store, nil, allocator, &mockConfig{}, kgm, nil)
 
-	// With a batch size of 2, a single call cannot possibly have backfilled
-	// all 5 keyspaces plus the default keyspace it starts scanning from.
 	ids, ok := fresh.GetKeyspaceIDInRange(20, 24, 10)
-	re.True(len(ids) < 5 || !ok, "first call should not already have the full answer with a small backfill batch")
-
-	// Repeated calls (mirroring repeated checker patrol passes) should
-	// eventually converge on the complete, correct answer.
-	testutil.Eventually(re, func() bool {
-		ids, ok := fresh.GetKeyspaceIDInRange(20, 24, 10)
-		return ok && len(ids) == 5
-	})
-	ids, ok = fresh.GetKeyspaceIDInRange(20, 24, 10)
 	re.True(ok)
 	re.ElementsMatch([]uint32{20, 21, 22, 23, 24}, ids)
+	re.Equal(constant.MaxValidKeyspaceID+1, fresh.keyspaceIDVerifiedUpTo,
+		"a single call should scan all of storage to completion, not just up to the queried end")
 }
 
 // TestManagerClearCache verifies that ClearCache empties the cache and resets
@@ -922,14 +911,11 @@ func TestManagerClearCache(t *testing.T) {
 	re.True(ok)
 	re.Equal([]uint32{30}, ids)
 	re.Positive(manager.keyspaceIDVerifiedUpTo)
-	re.EqualValues(30, manager.maxAllocatedKeyspaceID)
 
 	manager.ClearCache()
 	_, ok = manager.cache.getKeyspaceByID(id)
 	re.False(ok, "ClearCache should empty the cache")
 	re.Zero(manager.keyspaceIDVerifiedUpTo, "ClearCache should reset the backfill watermark")
-	re.EqualValues(-1, manager.maxAllocatedKeyspaceID,
-		"ClearCache should reset the allocated-ID ceiling, since this Manager is no longer the exclusive creator")
 
 	// GetKeyspaceIDInRange must still work correctly after the cache is
 	// cleared, by re-backfilling from storage rather than trusting a stale
@@ -937,99 +923,6 @@ func TestManagerClearCache(t *testing.T) {
 	ids, ok = manager.GetKeyspaceIDInRange(30, 30, 10)
 	re.True(ok)
 	re.Equal([]uint32{30}, ids)
-}
-
-// TestRecordAllocatedKeyspaceIDDoesNotResurrectAfterClearCache verifies that a
-// saveNewKeyspace call whose storage write already succeeded before a
-// concurrent ClearCache cannot, by applying its maxAllocatedKeyspaceID
-// bookkeeping late, re-set a non-negative ceiling right after ClearCache
-// reset it to -1 for a leadership change.
-func TestRecordAllocatedKeyspaceIDDoesNotResurrectAfterClearCache(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	allocator := mockid.NewIDAllocator()
-	kgm := NewKeyspaceGroupManager(ctx, store, nil)
-	manager := NewKeyspaceManager(ctx, store, nil, allocator, &mockConfig{}, kgm, nil)
-	re.NoError(kgm.Bootstrap(ctx))
-	// Bootstrap creates the default keyspace before the failpoint below is
-	// armed, so it does not itself get caught by it.
-	re.NoError(manager.Bootstrap())
-
-	reachedFailpoint := make(chan struct{})
-	clearCacheDone := make(chan struct{})
-	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/keyspace/saveNewKeyspaceBeforeRecordAllocatedID", func() {
-		close(reachedFailpoint)
-		<-clearCacheDone
-	}))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/saveNewKeyspaceBeforeRecordAllocatedID"))
-	}()
-
-	createDone := make(chan struct{})
-	go func() {
-		defer close(createDone)
-		id := uint32(50)
-		_, err := manager.CreateKeyspaceByID(&CreateKeyspaceByIDRequest{
-			ID:         &id,
-			Name:       "ks50",
-			CreateTime: time.Now().Unix(),
-		})
-		re.NoError(err)
-	}()
-
-	// The storage write for keyspace 50 has already succeeded by the time the
-	// failpoint is reached; simulate a leadership loss right at that point,
-	// before the pending call gets to apply its bookkeeping.
-	<-reachedFailpoint
-	manager.ClearCache()
-	re.EqualValues(-1, manager.maxAllocatedKeyspaceID)
-	close(clearCacheDone)
-	<-createDone
-
-	re.EqualValues(-1, manager.maxAllocatedKeyspaceID,
-		"a creation from before ClearCache must not resurrect a ceiling for the term ClearCache started")
-}
-
-// TestGetKeyspaceIDInRangeSkipsConfirmingScanAtOwnCeiling verifies that once
-// backfillKeyspaceIDRange has verified up through the highest keyspace ID this
-// Manager has itself created, it declares itself fully caught up immediately
-// instead of needing one more (otherwise redundant) storage call that returns
-// nothing just to confirm completeness.
-func TestGetKeyspaceIDInRangeSkipsConfirmingScanAtOwnCeiling(t *testing.T) {
-	re := require.New(t)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/keyspaceIDRangeBackfillBatchSize", "return(2)"))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/keyspaceIDRangeBackfillBatchSize"))
-	}()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	allocator := mockid.NewIDAllocator()
-	kgm := NewKeyspaceGroupManager(ctx, store, nil)
-	manager := NewKeyspaceManager(ctx, store, nil, allocator, &mockConfig{}, kgm, nil)
-	re.NoError(kgm.Bootstrap(ctx))
-	re.NoError(manager.Bootstrap())
-
-	// Only the default keyspace (ID 0, from Bootstrap) and this one exist, so
-	// a batch size of 2 backfills both of them (0 and 50) in a single, full
-	// batch — the exact case that would otherwise need a second, empty call
-	// to confirm there is nothing more.
-	id := uint32(50)
-	_, err := manager.CreateKeyspaceByID(&CreateKeyspaceByIDRequest{
-		ID:         &id,
-		Name:       "ks50",
-		CreateTime: time.Now().Unix(),
-	})
-	re.NoError(err)
-
-	ids, ok := manager.GetKeyspaceIDInRange(0, 50, 10)
-	re.True(ok)
-	re.Equal([]uint32{50, 0}, ids)
-	re.Equal(constant.MaxValidKeyspaceID+1, manager.keyspaceIDVerifiedUpTo,
-		"a single call should reach full completion via the allocated-ID ceiling, without a second confirming scan")
 }
 
 // TestEvictKeyspacesFromCacheRollsBackVerifiedWatermark verifies that
@@ -1075,6 +968,195 @@ func TestEvictKeyspacesFromCacheRollsBackVerifiedWatermark(t *testing.T) {
 	ids, ok := manager.GetKeyspaceIDInRange(50, 50, 1)
 	re.True(ok)
 	re.Equal([]uint32{50}, ids)
+}
+
+// TestCreateKeyspaceByIDEvictsCacheAfterSplitTimeout verifies that when
+// splitKeyspaceRegion's wait times out, the keyspace cache entry that
+// saveNewKeyspace wrote before the split was attempted does not survive as a
+// ghost after the storage-side rollback: KeyspaceExist and GetKeyspaceIDInRange
+// must both agree the keyspace does not exist, the same as storage.
+func TestCreateKeyspaceByIDEvictsCacheAfterSplitTimeout(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	allocator := mockid.NewIDAllocator()
+	kgm := NewKeyspaceGroupManager(ctx, store, nil)
+	cfg := &mockConfig{
+		WaitRegionSplit:          true,
+		WaitRegionSplitTimeout:   typeutil.NewDuration(50 * time.Millisecond),
+		CheckRegionSplitInterval: typeutil.NewDuration(5 * time.Millisecond),
+	}
+	manager := NewKeyspaceManager(ctx, store, nil, allocator, cfg, kgm, nil)
+	re.NoError(kgm.Bootstrap(ctx))
+	re.NoError(manager.Bootstrap())
+
+	id := uint32(60)
+	_, err := manager.CreateKeyspaceByID(&CreateKeyspaceByIDRequest{
+		ID:         &id,
+		Name:       "ks60",
+		CreateTime: time.Now().Unix(),
+	})
+	re.Error(err, "manager.cluster is nil, so the region bound can never be observed and the wait must time out")
+
+	re.False(manager.KeyspaceExist(id), "the rolled-back keyspace must not still appear to exist via cache")
+	ids, ok := manager.GetKeyspaceIDInRange(id, id, 1)
+	re.False(ok, "the range lookup must agree storage has nothing in this range, not trust a ghost cache entry")
+	re.Empty(ids)
+}
+
+// TestCreateKeyspaceEvictsCacheAfterSplitTimeout is
+// TestCreateKeyspaceByIDEvictsCacheAfterSplitTimeout's counterpart for
+// CreateKeyspace, which has its own, separately-written rollback block.
+func TestCreateKeyspaceEvictsCacheAfterSplitTimeout(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	allocator := mockid.NewIDAllocator()
+	kgm := NewKeyspaceGroupManager(ctx, store, nil)
+	cfg := &mockConfig{
+		WaitRegionSplit:          true,
+		WaitRegionSplitTimeout:   typeutil.NewDuration(50 * time.Millisecond),
+		CheckRegionSplitInterval: typeutil.NewDuration(5 * time.Millisecond),
+	}
+	manager := NewKeyspaceManager(ctx, store, nil, allocator, cfg, kgm, nil)
+	re.NoError(kgm.Bootstrap(ctx))
+	re.NoError(manager.Bootstrap())
+
+	// allocator is a fresh mockid.IDAllocator used by nothing else in this
+	// test, so this CreateKeyspace call's allocID() deterministically
+	// allocates ID 1.
+	id := uint32(1)
+	meta, err := manager.CreateKeyspace(&CreateKeyspaceRequest{
+		Name:       "ks61",
+		CreateTime: time.Now().Unix(),
+	})
+	re.Error(err, "manager.cluster is nil, so the region bound can never be observed and the wait must time out")
+	re.Nil(meta)
+
+	re.False(manager.KeyspaceExist(id), "the rolled-back keyspace must not still appear to exist via cache")
+	ids, ok := manager.GetKeyspaceIDInRange(id, id, 1)
+	re.False(ok, "the range lookup must agree storage has nothing in this range, not trust a ghost cache entry")
+	re.Empty(ids)
+}
+
+// failingRuleStorage wraps a real endpoint.StorageEndpoint but fails every
+// SaveRegionRule call, so a RegionLabeler built on it can be used to
+// deterministically fail SetLabelRule's storage write.
+type failingRuleStorage struct {
+	*endpoint.StorageEndpoint
+}
+
+func (*failingRuleStorage) SaveRegionRule(kv.Txn, string, any) error {
+	return errors.New("injected SaveRegionRule failure")
+}
+
+// TestCreateKeyspaceByIDFailsWhenCompatibilityLabelWriteFails verifies that a
+// failure to write the keyspaces/{id} compatibility region label rule fails
+// keyspace creation outright, matching upstream master's original (pre-this-PR)
+// handling of this same write, rather than being silently swallowed: a
+// scheduling-server primary that predates the keyspace-meta watcher has no
+// other way to learn this keyspace's boundary if the write is skipped.
+func TestCreateKeyspaceByIDFailsWhenCompatibilityLabelWriteFails(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	allocator := mockid.NewIDAllocator()
+	kgm := NewKeyspaceGroupManager(ctx, store, nil)
+
+	// Bootstrap first without a cluster/labeler attached, so bootstrapping the
+	// default keyspace does not itself go through (and fail on) the failing
+	// labeler below - this test is only about CreateKeyspaceByID's own
+	// handling of a label-write failure.
+	manager := NewKeyspaceManager(ctx, store, nil, allocator, &mockConfig{}, kgm, nil)
+	re.NoError(kgm.Bootstrap(ctx))
+	re.NoError(manager.Bootstrap())
+
+	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	failingLabeler, err := labeler.NewRegionLabeler(
+		ctx, &failingRuleStorage{endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)}, time.Hour)
+	re.NoError(err)
+	cluster.RegionLabeler = failingLabeler
+	manager.cluster = cluster
+
+	id := uint32(70)
+	_, err = manager.CreateKeyspaceByID(&CreateKeyspaceByIDRequest{
+		ID:         &id,
+		Name:       "ks70",
+		CreateTime: time.Now().Unix(),
+	})
+	re.Error(err, "a failed compatibility label write must fail creation outright")
+
+	re.False(manager.KeyspaceExist(id), "the rolled-back keyspace must not still appear to exist via cache")
+	ids, ok := manager.GetKeyspaceIDInRange(id, id, 1)
+	re.False(ok, "the range lookup must agree storage has nothing in this range, not trust a ghost cache entry")
+	re.Empty(ids)
+}
+
+// TestGetKeyspaceStateByIDDoesNotClobberConcurrentUpdate verifies that a
+// GetKeyspaceStateByID call which fell back to a slow storage read, racing
+// against a real, concurrent UpdateKeyspaceStateByID for the same keyspace,
+// does not overwrite that update's newer cache value with its own stale one.
+func TestGetKeyspaceStateByIDDoesNotClobberConcurrentUpdate(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	allocator := mockid.NewIDAllocator()
+	kgm := NewKeyspaceGroupManager(ctx, store, nil)
+	manager := NewKeyspaceManager(ctx, store, nil, allocator, &mockConfig{}, kgm, nil)
+	re.NoError(kgm.Bootstrap(ctx))
+	re.NoError(manager.Bootstrap())
+
+	meta := &keyspacepb.KeyspaceMeta{
+		Keyspace:       &keyspacepb.KeyspaceMeta_Id{Id: 80},
+		Name:           "ks80",
+		State:          keyspacepb.KeyspaceState_ARCHIVED,
+		CreatedAt:      time.Now().Unix(),
+		StateChangedAt: time.Now().Unix(),
+	}
+	re.NoError(manager.saveNewKeyspace(meta))
+	// Evict it from cache (but not storage) to force the next lookup onto the
+	// slow-read fallback path.
+	manager.cache.DeleteKeyspace(80)
+
+	reachedFailpoint := make(chan struct{})
+	releaseReader := make(chan struct{})
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/keyspace/getKeyspaceStateByIDBeforeCacheWrite", func() {
+		close(reachedFailpoint)
+		<-releaseReader
+	}))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/getKeyspaceStateByIDBeforeCacheWrite"))
+	}()
+
+	readerDone := make(chan struct{})
+	var readState keyspacepb.KeyspaceState
+	var readErr error
+	go func() {
+		defer close(readerDone)
+		readState, readErr = manager.GetKeyspaceStateByID(80)
+	}()
+
+	// Let the reader's storage read (ARCHIVED) complete and reach the point
+	// just before it would write that stale value to cache, then perform a
+	// real, concurrent state update while it is paused there.
+	<-reachedFailpoint
+	_, err := manager.UpdateKeyspaceStateByID(80, keyspacepb.KeyspaceState_TOMBSTONE, time.Now().Unix())
+	re.NoError(err)
+	close(releaseReader)
+	<-readerDone
+
+	re.NoError(readErr)
+	re.Equal(keyspacepb.KeyspaceState_ARCHIVED, readState,
+		"the reader itself still reports what it read, which is fine - it started before the update")
+
+	item, ok := manager.cache.getKeyspaceByID(80)
+	re.True(ok)
+	re.Equal(keyspacepb.KeyspaceState_TOMBSTONE, item.state,
+		"the concurrent update's value must survive; the stale reader's write must have been rejected")
 }
 
 func (suite *keyspaceTestSuite) TestGetKeyspaceIDInRange() {
@@ -1504,6 +1586,41 @@ func (suite *keyspaceTestSuite) TestGCBarrierRemovalInvalidationAfterCommit() {
 	re.True(found, "a rolled-back removal must not delete the cache entry")
 	m.kgm.store = base
 	_, err = m.kgm.removeKeyspacesFromGroupWithConditions(suite.ctx, 101, m, []uint32{20000}, nil)
+	re.NoError(err)
+	re.Equal(1, calls)
+}
+
+// TestGCBarrierRemovalRetainsCacheOnCallbackPhaseTransportError verifies that
+// a transport-shaped error (codes.Unavailable) returned by SaveKeyspaceGroup -
+// a callback-phase operation that runs before runKeyspaceGroupRemovalTxn's
+// actual commit - is still treated as a definite, non-ambiguous failure: it
+// must not evict the keyspace from cache, because nothing was ever sent to
+// etcd (the callback returned an error before the commit was even attempted).
+// commitResultIsAmbiguous alone cannot tell this apart from a genuine
+// commit-phase transport error, since both have the same error shape; only
+// runKeyspaceGroupRemovalTxn's callbackSucceeded flag can.
+func (suite *keyspaceTestSuite) TestGCBarrierRemovalRetainsCacheOnCallbackPhaseTransportError() {
+	re := suite.Require()
+	m := suite.manager
+	meta := &keyspacepb.KeyspaceMeta{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 20001}, Name: "barrier-remove-unavailable", State: keyspacepb.KeyspaceState_TOMBSTONE}
+	re.NoError(m.saveNewKeyspace(meta))
+	re.NoError(m.kgm.CreateKeyspaceGroups([]*endpoint.KeyspaceGroup{{ID: 102, UserKind: endpoint.Standard.String(), Keyspaces: []uint32{20001}}}))
+	calls := 0
+	m.SetGCBarrierInvalidator(func(uint32) { calls++ })
+
+	base := m.kgm.store
+	m.kgm.store = &unavailableOnSaveKeyspaceGroupStorage{StorageEndpoint: m.store.(*endpoint.StorageEndpoint), failOnSaveID: 102}
+	_, err := m.kgm.removeKeyspacesFromGroupWithConditions(suite.ctx, 102, m, []uint32{20001}, nil)
+	re.Error(err)
+	re.Zero(calls)
+
+	_, found := m.cache.getKeyspaceByID(20001)
+	re.True(found, "a callback-phase transport error must not evict the cache entry")
+	_, loadErr := m.LoadKeyspaceByID(20001)
+	re.NoError(loadErr, "storage must be unchanged, since the callback error means nothing was committed")
+
+	m.kgm.store = base
+	_, err = m.kgm.removeKeyspacesFromGroupWithConditions(suite.ctx, 102, m, []uint32{20001}, nil)
 	re.NoError(err)
 	re.Equal(1, calls)
 }

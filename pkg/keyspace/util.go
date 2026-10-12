@@ -464,12 +464,13 @@ type Checker interface {
 //   - endKey absent (region runs past every later keyspace): spanning iff the
 //     start keyspace still exists;
 //   - endKey sits exactly on startKey's keyspace right bound: not spanning;
-//   - otherwise: spanning iff the start or the end keyspace still exists.
+//   - otherwise: spanning iff any keyspace in [startKeyspaceID, endKeyspaceID]
+//     still exists, not just the two endpoints - a keyspace that lies strictly
+//     between them still means the region must be split.
 //
-// The last rule only looks at the two end keyspaces; keyspaces that lie strictly
-// between them are not inspected. An absent endKey is treated as +inf rather than
-// keyspace MaxValidKeyspaceID, so the result does not depend on the checker
-// implementation's handling of that sentinel ID.
+// An absent endKey is treated as +inf rather than keyspace MaxValidKeyspaceID,
+// so the result does not depend on the checker implementation's handling of
+// that sentinel ID.
 func RegionSpansMultipleKeyspaces(startKey, endKey []byte, checker Checker) bool {
 	if checker == nil {
 		return false
@@ -529,11 +530,12 @@ func RegionSpansMultipleKeyspaces(startKey, endKey []byte, checker Checker) bool
 			return false
 		}
 	}
-	// Check the keyspace existence of startKeyspaceID and endKeyspaceID.
-	//  If both of them do not exist, we consider it does not span multiple keyspaces.
-	startExist := checker.KeyspaceExist(startKeyspaceID)
-	endExist := checker.KeyspaceExist(endKeyspaceID)
-	return startExist || endExist
+	// Check whether any keyspace in [startKeyspaceID, endKeyspaceID] still
+	// exists - not just the two endpoints, since a keyspace that lies strictly
+	// between them (e.g. startKeyspaceID and endKeyspaceID both already
+	// removed, but one in between was not) still means this region spans it.
+	_, exist := checker.GetKeyspaceIDInRange(startKeyspaceID, endKeyspaceID, 1)
+	return exist
 }
 
 const scanLimit = 10
@@ -672,6 +674,14 @@ func (s *keyspaceItem) Less(than keyspaceItem) bool {
 type Cache struct {
 	syncutil.RWMutex
 	tree *btree.BTreeG[keyspaceItem]
+	// generation counts every mutation (Save, DeleteKeyspace, clearAll) made
+	// to this Cache. It lets a reader that fell back to a slow storage read
+	// (see SaveIfGenerationUnchanged) detect whether some other write landed
+	// while it was reading, without needing storage's own revision: a
+	// generation that is unchanged between the reader's snapshot and its own
+	// write attempt means nothing wrote to this Cache in between, so the
+	// reader's data is trivially the latest.
+	generation uint64
 }
 
 // NewCache creates a new Cache.
@@ -696,6 +706,7 @@ func (s *Cache) Save(keyspaceID uint32, name string, state keyspacepb.KeyspaceSt
 	defer s.Unlock()
 	item := keyspaceItem{keyspaceID: keyspaceID, name: name, state: state}
 	s.tree.ReplaceOrInsert(item)
+	s.generation++
 }
 
 // DeleteKeyspace deletes a keyspace by ID.
@@ -703,6 +714,37 @@ func (s *Cache) DeleteKeyspace(keyspaceID uint32) {
 	s.Lock()
 	defer s.Unlock()
 	s.tree.Delete(keyspaceItem{keyspaceID: keyspaceID})
+	s.generation++
+}
+
+// Generation returns the current value of the mutation counter described on
+// Cache.generation. A caller about to fall back to a slow storage read should
+// capture this beforehand and pass it to SaveIfGenerationUnchanged.
+func (s *Cache) Generation() uint64 {
+	s.RLock()
+	defer s.RUnlock()
+	return s.generation
+}
+
+// SaveIfGenerationUnchanged saves the keyspace information the same way Save
+// does, but only if no mutation has happened since the caller observed
+// expectedGeneration (typically via Generation, captured before a slow
+// storage read this call's data came from). It reports whether the write was
+// applied. Rejecting a stale write here is always safe to skip, never unsafe
+// to apply: any write that did happen in between - whether a newer Save or a
+// DeleteKeyspace - is authoritative and must not be clobbered by a read that
+// started before it, so that write must just be left alone instead of guessed
+// at or merged with.
+func (s *Cache) SaveIfGenerationUnchanged(keyspaceID uint32, name string, state keyspacepb.KeyspaceState, expectedGeneration uint64) bool {
+	s.Lock()
+	defer s.Unlock()
+	if s.generation != expectedGeneration {
+		return false
+	}
+	item := keyspaceItem{keyspaceID: keyspaceID, name: name, state: state}
+	s.tree.ReplaceOrInsert(item)
+	s.generation++
+	return true
 }
 
 // clearAll empties the cache in place. It must be used instead of replacing
@@ -714,6 +756,7 @@ func (s *Cache) clearAll() {
 	s.tree = btree.NewG(2, func(i, j keyspaceItem) bool {
 		return i.Less(j)
 	})
+	s.generation++
 }
 
 func (s *Cache) scanAllKeyspaces(f func(keyspaceID uint32, name string, state keyspacepb.KeyspaceState) bool) {
