@@ -70,7 +70,7 @@ func TestRebalanceAffinityGroup(t *testing.T) {
 		body, err := io.ReadAll(r.Body)
 		as.NoError(err)
 		as.JSONEq(`{"apply":true}`, string(body))
-		_, _ = io.WriteString(w, `[{"GroupID":"_tidb_t_42","LeaderStoreID":2,"VoterStoreIDs":[1,2,3],"Changed":true}]`)
+		_, _ = io.WriteString(w, `[{"group_id":"_tidb_t_42","leader_store_id":2,"voter_store_ids":[1,2,3],"changed":true}]`)
 	}))
 	defer server.Close()
 	c := newClientWithMockServiceDiscovery("test-affinity-rebalance", []string{server.URL})

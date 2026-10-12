@@ -822,10 +822,9 @@ type RebalanceAffinityGroupRequest struct {
 }
 
 // AffinityBalancePlan describes the target peer distribution for an affinity group.
-// JSON field names match affinity.BalancePlan's exported Go fields.
 type AffinityBalancePlan struct {
-	GroupID       string
-	LeaderStoreID uint64
-	VoterStoreIDs []uint64
-	Changed       bool
+	GroupID       string   `json:"group_id"`
+	LeaderStoreID uint64   `json:"leader_store_id"`
+	VoterStoreIDs []uint64 `json:"voter_store_ids"`
+	Changed       bool     `json:"changed"`
 }

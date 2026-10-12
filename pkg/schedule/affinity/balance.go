@@ -49,10 +49,10 @@ type BalanceActionSet struct {
 // BalancePlan is a target change produced by PlanBalance. It does not write
 // storage or create an operator.
 type BalancePlan struct {
-	GroupID       string
-	LeaderStoreID uint64
-	VoterStoreIDs []uint64
-	Changed       bool
+	GroupID       string   `json:"group_id"`
+	LeaderStoreID uint64   `json:"leader_store_id"`
+	VoterStoreIDs []uint64 `json:"voter_store_ids"`
+	Changed       bool     `json:"changed"`
 }
 
 // BalanceOptions supplies topology-independent inputs and checker-generated
