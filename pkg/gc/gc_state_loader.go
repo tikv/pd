@@ -47,102 +47,97 @@ type gcStateLoadResult struct {
 }
 
 type gcStateLoadBatch struct {
-	generation  *gcStateGeneration
 	keyspaceIDs []uint32
 	flights     []*gcStateLoadFlight
 	result      gcStateLoadResult
 }
 
-// prepareGCStateLoadBatch consumes currently available candidates until it owns
-// 60 missing scopes or next reports exhaustion. next must never block. Cache
-// checking and claiming a flight share a critical section with publication.
+// loadGCStateBatch consumes currently available candidates until it owns 60
+// missing scopes or next reports exhaustion, then reads and publishes them.
+// Cached completions and joined flights do not consume read slots. next consumes
+// only available candidates and must not acquire the manager or generation lock.
 //
-// A nonempty batch retains m.mu.RLock. Its owner MUST call execute on the SAME
-// goroutine, after releasing the warmup stateMu and before waiting on anything.
-// Empty batches retain no lock, but execute still returns their result. A nil
-// batch on error owns no lock. Cached completions and joined flights are available
-// in batch.result immediately; the owner must execute before waiting on flights.
-func (m *GCStateManager) prepareGCStateLoadBatch(ctx context.Context, generation *gcStateGeneration, next func() (uint32, bool)) (*gcStateLoadBatch, error) {
+// This call owns the manager read lock through publication, excluding safe-point
+// writers. Assembly is serialized by generation.mu, so concurrent workers cannot
+// split a partial batch. The lock order is manager, generation, then any short
+// scheduling lock acquired by next; generation.mu is released before storage I/O.
+// ctx must be independent of individual foreground waiters. Generation retirement
+// cancels the I/O, and joined flights are returned without waiting for them.
+func (m *GCStateManager) loadGCStateBatch(ctx context.Context, generation *gcStateGeneration, next func() (uint32, bool)) (gcStateLoadResult, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return gcStateLoadResult{}, err
 	}
 	failpoint.InjectCall("beforeGCStateLoadManagerLock")
 	m.mu.RLock()
+	defer m.mu.RUnlock()
 	if err := ctx.Err(); err != nil {
-		m.mu.RUnlock()
-		return nil, err
+		return gcStateLoadResult{}, err
 	}
 	if generation == nil || m.activeGeneration.Load() != generation {
-		m.mu.RUnlock()
-		return nil, errs.ErrNotLeader
+		return gcStateLoadResult{}, errs.ErrNotLeader
 	}
-	batch := &gcStateLoadBatch{generation: generation, result: gcStateLoadResult{failed: make(map[uint32]error), joined: make(map[uint32]*gcStateLoadFlight)}}
-	seen := make(map[uint32]struct{})
-	for len(batch.keyspaceIDs) < endpoint.MaxGCSafePointBatchSize {
-		id, ok := next()
-		if !ok {
-			break
-		}
-		if _, duplicate := seen[id]; duplicate {
-			continue
-		}
-		seen[id] = struct{}{}
-		generation.mu.Lock()
-		if m.activeGeneration.Load() != generation {
-			generation.mu.Unlock()
-			// Already claimed flights must still be executed to release the read lock.
-			if len(batch.keyspaceIDs) == 0 {
-				m.mu.RUnlock()
-				return nil, errs.ErrNotLeader
-			}
-			break
-		}
-		if _, cached := m.gcStateCache.load(id); cached {
-			batch.result.completed = append(batch.result.completed, id)
-			failpoint.InjectCall("getGCStateCacheAccess", "slow_hit")
-			gcStateCacheAccessSlowHitCounter.Inc()
-		} else {
-			// A join is still a cache miss for this caller, even though it does
-			// not issue another storage read.
-			failpoint.InjectCall("getGCStateCacheAccess", "miss")
-			gcStateCacheAccessMissCounter.Inc()
-			if flight, loading := generation.flights[id]; loading {
-				batch.result.joined[id] = flight
-				failpoint.InjectCall("onGCStateLoadJoined", id)
-			} else {
-				flight := &gcStateLoadFlight{done: make(chan struct{})}
-				generation.flights[id] = flight
-				batch.keyspaceIDs = append(batch.keyspaceIDs, id)
-				batch.flights = append(batch.flights, flight)
-			}
-		}
-		generation.mu.Unlock()
-	}
-	if len(batch.keyspaceIDs) == 0 {
-		m.mu.RUnlock()
-	}
-	return batch, nil
-}
-
-// executeGCStateLoadBatch reads and publishes an owned batch, then releases its
-// manager read lock. It never waits for joined flights. ctx must be independent
-// of individual foreground waiters; generation retirement cancels the I/O.
-// Call exactly once for each prepared batch, including cancellation/error paths.
-func (m *GCStateManager) executeGCStateLoadBatch(ctx context.Context, batch *gcStateLoadBatch) gcStateLoadResult {
-	if len(batch.keyspaceIDs) == 0 {
-		return batch.result
-	}
-	defer m.mu.RUnlock()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	generation := batch.generation
-	generation.mu.Lock()
-	if m.activeGeneration.Load() != generation {
-		cancel()
-	} else {
-		generation.cancels[batch] = cancel
+	batch := &gcStateLoadBatch{result: gcStateLoadResult{failed: make(map[uint32]error), joined: make(map[uint32]*gcStateLoadFlight)}}
+	// Keep assembly and cancellation registration in one critical section.
+	// Once a flight is claimed, every exit goes through publication below.
+	err := func() error {
+		generation.mu.Lock()
+		defer generation.mu.Unlock()
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if m.activeGeneration.Load() != generation {
+			return errs.ErrNotLeader
+		}
+		seen := make(map[uint32]struct{})
+		for len(batch.keyspaceIDs) < endpoint.MaxGCSafePointBatchSize {
+			if ctx.Err() != nil || m.activeGeneration.Load() != generation {
+				break
+			}
+			id, ok := next()
+			if !ok {
+				break
+			}
+			if _, duplicate := seen[id]; duplicate {
+				continue
+			}
+			seen[id] = struct{}{}
+			if _, cached := m.gcStateCache.load(id); cached {
+				batch.result.completed = append(batch.result.completed, id)
+				failpoint.InjectCall("getGCStateCacheAccess", "slow_hit")
+				gcStateCacheAccessSlowHitCounter.Inc()
+			} else {
+				// A join is still a cache miss for this caller, even though it does
+				// not issue another storage read.
+				failpoint.InjectCall("getGCStateCacheAccess", "miss")
+				gcStateCacheAccessMissCounter.Inc()
+				if flight, loading := generation.flights[id]; loading {
+					batch.result.joined[id] = flight
+					failpoint.InjectCall("onGCStateLoadJoined", id)
+				} else {
+					flight := &gcStateLoadFlight{done: make(chan struct{})}
+					generation.flights[id] = flight
+					batch.keyspaceIDs = append(batch.keyspaceIDs, id)
+					batch.flights = append(batch.flights, flight)
+				}
+			}
+		}
+		if len(batch.keyspaceIDs) > 0 {
+			if m.activeGeneration.Load() != generation {
+				cancel()
+			} else {
+				generation.cancels[batch] = cancel
+			}
+		}
+		return nil
+	}()
+	if err != nil {
+		return gcStateLoadResult{}, err
 	}
-	generation.mu.Unlock()
+	if len(batch.keyspaceIDs) == 0 {
+		return batch.result, nil
+	}
 	values, err := m.gcMetaStorage.LoadGCSafePointPairs(ctx, batch.keyspaceIDs)
 	failpoint.InjectCall("afterGCStateLoadBatchRead")
 	generation.mu.Lock()
@@ -176,18 +171,18 @@ func (m *GCStateManager) executeGCStateLoadBatch(ctx context.Context, batch *gcS
 			batch.result.failed[id] = scopeErr
 		}
 	}
-	return batch.result
+	return batch.result, nil
 }
 
 // loadGCState gives each foreground request independent cancellation. The owner
-// goroutine performs both prepare and execute, so no manager lock is transferred
-// between goroutines. Joined requests only wait after preparation released it.
+// goroutine owns the entire loader call. Joined requests only wait after it
+// has released the manager lock.
 func (m *GCStateManager) loadGCState(ctx context.Context, generation *gcStateGeneration, id uint32) (GCState, error) {
 	for {
 		ready := make(chan gcStateLoadResult, 1)
 		go func() {
 			pending := true
-			batch, err := m.prepareGCStateLoadBatch(context.WithoutCancel(ctx), generation, func() (uint32, bool) {
+			result, err := m.loadGCStateBatch(context.WithoutCancel(ctx), generation, func() (uint32, bool) {
 				if !pending {
 					return 0, false
 				}
@@ -198,7 +193,7 @@ func (m *GCStateManager) loadGCState(ctx context.Context, generation *gcStateGen
 				ready <- gcStateLoadResult{failed: map[uint32]error{id: err}}
 				return
 			}
-			ready <- m.executeGCStateLoadBatch(context.WithoutCancel(ctx), batch)
+			ready <- result
 		}()
 		var result gcStateLoadResult
 		select {

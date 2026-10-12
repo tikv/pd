@@ -19,6 +19,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pingcap/failpoint"
+
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -45,9 +47,9 @@ type gcStateWarmupScope struct {
 
 // gcStateWarmup owns only the initial discovery campaign. inputMu protects
 // short, nonblocking callback admission, independently of stateMu and I/O.
-// stateMu protects scope scheduling, retry/completion state, and candidate/batch
-// assembly through the common loader's cache/flight check. Workers release it
-// before storage I/O.
+// stateMu protects scope scheduling and retry/completion state. Workers and
+// candidate callbacks hold it only briefly, never while entering the loader or
+// waiting for manager/generation locks or storage I/O.
 type gcStateWarmup struct {
 	manager    *GCStateManager
 	generation *gcStateGeneration
@@ -153,6 +155,7 @@ func (w *gcStateWarmup) work(ctx context.Context) {
 	ticker := time.NewTicker(gcStateWarmupPollInterval)
 	defer ticker.Stop()
 	for ctx.Err() == nil {
+		failpoint.InjectCall("beforeGCStateWarmupSchedule")
 		w.stateMu.Lock()
 		if !w.nullPending {
 			w.ingest()
@@ -178,12 +181,11 @@ func (w *gcStateWarmup) work(ctx context.Context) {
 					return constant.NullKeyspaceID, true
 				}
 			}
-			batch, err := w.manager.prepareGCStateLoadBatch(ctx, w.generation, next)
 			w.stateMu.Unlock()
+			result, err := w.manager.loadGCStateBatch(ctx, w.generation, next)
 			if err != nil {
 				return
 			}
-			result := w.manager.executeGCStateLoadBatch(ctx, batch)
 			w.stateMu.Lock()
 			w.recordBatchResult(result, time.Now())
 			w.stateMu.Unlock()
@@ -264,6 +266,8 @@ func (w *gcStateWarmup) add(id uint32) {
 }
 
 func (w *gcStateWarmup) next() (uint32, bool) {
+	w.stateMu.Lock()
+	defer w.stateMu.Unlock()
 	for {
 		if len(w.candidates) == 0 {
 			w.ingest()

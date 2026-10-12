@@ -148,7 +148,17 @@ func gcStateLoadCandidates(ids ...uint32) func() (uint32, bool) {
 }
 
 func TestGCStateLoadBatchAndTerminalResult(t *testing.T) {
-	storage, _, m, clean, cancel := newGCStateManagerForTest(t, newGCStateManagerForTestOptions{})
+	var batchSize atomic.Int32
+	storage, _, m, clean, cancel := newGCStateManagerForTest(t, newGCStateManagerForTestOptions{
+		etcdClientCfgModifier: func(cfg *clientv3.Config) {
+			cfg.DialOptions = append(cfg.DialOptions, grpc.WithChainUnaryInterceptor(func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoke grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+				if txn := gcWarmupRead(req); txn != nil {
+					batchSize.Store(int32(len(txn.Success) / 2))
+				}
+				return invoke(ctx, method, req, reply, cc, opts...)
+			}))
+		},
+	})
 	defer clean()
 	defer cancel()
 	generation := m.activeGeneration.Load()
@@ -161,10 +171,9 @@ func TestGCStateLoadBatchAndTerminalResult(t *testing.T) {
 		}
 	}
 	require.NoError(t, storage.Save(keypath.TxnSafePointPath(1), "broken"))
-	batch, err := m.prepareGCStateLoadBatch(context.Background(), generation, gcStateLoadCandidates(ids...))
+	result, err := m.loadGCStateBatch(context.Background(), generation, gcStateLoadCandidates(ids...))
 	require.NoError(t, err)
-	require.Len(t, batch.keyspaceIDs, 60)
-	result := m.executeGCStateLoadBatch(context.Background(), batch)
+	require.Equal(t, int32(60), batchSize.Load())
 	require.Len(t, result.completed, 119)
 	require.Len(t, result.failed, 1)
 	require.Error(t, result.failed[1])
@@ -173,26 +182,33 @@ func TestGCStateLoadBatchAndTerminalResult(t *testing.T) {
 
 	// Join an owned flight, then invalidate its successful publication before
 	// consuming the notification. The terminal success must remain observable.
-	owned := make(chan *gcStateLoadFlight, 1)
-	execute := make(chan struct{})
+	read := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	defer unblock()
+	const afterRead = "github.com/tikv/pd/pkg/gc/afterGCStateLoadBatchRead"
+	require.NoError(t, failpoint.EnableCall(afterRead, func() { close(read); <-release }))
+	defer func() { require.NoError(t, failpoint.Disable(afterRead)) }()
 	finished := make(chan gcStateLoadResult, 1)
 	go func() {
-		b, e := m.prepareGCStateLoadBatch(context.Background(), generation, gcStateLoadCandidates(121))
+		r, e := m.loadGCStateBatch(context.Background(), generation, gcStateLoadCandidates(121))
 		if e != nil {
-			finished <- gcStateLoadResult{failed: map[uint32]error{121: e}}
-			return
+			r.failed = map[uint32]error{121: e}
 		}
-		owned <- b.flights[0]
-		<-execute
-		finished <- m.executeGCStateLoadBatch(context.Background(), b)
+		finished <- r
 	}()
-	flight := <-owned
-	b, err := m.prepareGCStateLoadBatch(context.Background(), generation, gcStateLoadCandidates(121))
+	gcWarmupWait(t, read)
+	generation.mu.Lock()
+	flight := generation.flights[121]
+	generation.mu.Unlock()
+	require.NotNil(t, flight)
+	joined, err := m.loadGCStateBatch(context.Background(), generation, gcStateLoadCandidates(121))
 	require.NoError(t, err)
-	require.Empty(t, b.keyspaceIDs)
-	joined := m.executeGCStateLoadBatch(context.Background(), b)
+	require.Empty(t, joined.completed)
+	require.Empty(t, joined.failed)
 	require.Same(t, flight, joined.joined[121])
-	close(execute)
+	unblock()
 	require.Equal(t, []uint32{121}, (<-finished).completed)
 	m.mu.Lock()
 	m.gcStateCache.remove(121)
@@ -293,12 +309,11 @@ func TestGCStateLoadJoinedWaiterRetriesAfterInvalidation(t *testing.T) {
 	generation := m.activeGeneration.Load()
 	loaded := make(chan gcStateLoadResult, 1)
 	go func() {
-		batch, err := m.prepareGCStateLoadBatch(ctx, generation, gcStateLoadCandidates(2))
+		result, err := m.loadGCStateBatch(ctx, generation, gcStateLoadCandidates(2))
 		if err != nil {
-			loaded <- gcStateLoadResult{failed: map[uint32]error{2: err}}
-			return
+			result.failed = map[uint32]error{2: err}
 		}
-		loaded <- m.executeGCStateLoadBatch(ctx, batch)
+		loaded <- result
 	}()
 	select {
 	case <-entered:
@@ -428,16 +443,15 @@ func TestGCStateLoadFailureWakesJoinedReaders(t *testing.T) {
 	generation := m.activeGeneration.Load()
 	result := make(chan gcStateLoadResult, 1)
 	go func() {
-		b, err := m.prepareGCStateLoadBatch(context.Background(), generation, gcStateLoadCandidates(2))
+		r, err := m.loadGCStateBatch(context.Background(), generation, gcStateLoadCandidates(2))
 		if err != nil {
-			return
+			r.failed = map[uint32]error{2: err}
 		}
-		result <- m.executeGCStateLoadBatch(context.Background(), b)
+		result <- r
 	}()
 	<-entered
-	b, err := m.prepareGCStateLoadBatch(context.Background(), generation, gcStateLoadCandidates(2))
+	joined, err := m.loadGCStateBatch(context.Background(), generation, gcStateLoadCandidates(2))
 	require.NoError(t, err)
-	joined := m.executeGCStateLoadBatch(context.Background(), b)
 	require.NotNil(t, joined.joined[2])
 	unblock()
 	require.ErrorIs(t, joined.joined[2].wait(context.Background()), loadErr)
@@ -525,9 +539,8 @@ func TestGCStateLoadChecksAfterManagerLock(t *testing.T) {
 	}()
 	result := make(chan error, 1)
 	go func() {
-		b, err := m.prepareGCStateLoadBatch(ctx, generation, gcStateLoadCandidates(2))
+		r, err := m.loadGCStateBatch(ctx, generation, gcStateLoadCandidates(2))
 		if err == nil {
-			r := m.executeGCStateLoadBatch(ctx, b)
 			err = r.failed[2]
 		}
 		result <- err
@@ -538,6 +551,61 @@ func TestGCStateLoadChecksAfterManagerLock(t *testing.T) {
 	require.ErrorIs(t, <-result, context.Canceled)
 	_, ok := m.gcStateCache.load(2)
 	require.False(t, ok)
+}
+
+func TestGCStateLoadCancellationDuringAssembly(t *testing.T) {
+	for _, retire := range []bool{false, true} {
+		name := "cancellation"
+		if retire {
+			name = "retirement"
+		}
+		t.Run(name, func(t *testing.T) {
+			_, _, m, clean, cancel := newGCStateManagerForTest(t, newGCStateManagerForTestOptions{})
+			defer clean()
+			defer cancel()
+			generation := m.activeGeneration.Load()
+			defer m.stopGCStateGeneration(generation)
+			ctx, cancelLoad := context.WithCancel(context.Background())
+			defer cancelLoad()
+			pending := true
+			wantErr := context.Canceled
+			if retire {
+				wantErr = errs.ErrNotLeader
+			}
+			result, err := m.loadGCStateBatch(ctx, generation, func() (uint32, bool) {
+				if pending {
+					pending = false
+					return 2, true
+				}
+				// End assembly after a flight has already been claimed. Retirement
+				// gates new work before it can acquire the generation lock itself.
+				if retire {
+					m.activeGeneration.CompareAndSwap(generation, nil)
+				} else {
+					cancelLoad()
+				}
+				return 0, false
+			})
+			require.NoError(t, err)
+			require.ErrorIs(t, result.failed[2], wantErr)
+			require.Empty(t, result.completed)
+			_, cached := m.gcStateCache.load(2)
+			require.False(t, cached)
+			generation.mu.Lock()
+			flights, operations := len(generation.flights), len(generation.cancels)
+			generation.mu.Unlock()
+			require.Zero(t, flights, "claimed flights must complete on cancellation")
+			require.Zero(t, operations, "cancellation registrations must be released")
+			writerDone := make(chan struct{})
+			go func() {
+				m.mu.Lock()
+				m.gcStateCache.remove(2)
+				m.mu.Unlock()
+				close(writerDone)
+			}()
+			gcWarmupWait(t, writerDone)
+		})
+	}
 }
 
 func TestGCStateLoadMissBeforeFlightRetires(t *testing.T) {
@@ -605,26 +673,32 @@ func TestGCStateLeadershipResetWaitsForOldPublication(t *testing.T) {
 	defer newStop()
 	require.NoError(t, failpoint.Disable("github.com/tikv/pd/pkg/gc/afterGCStateLoadBatchRead"))
 	current := m.activeGeneration.Load()
-	ready := make(chan *gcStateLoadFlight, 1)
+	ready := make(chan struct{})
 	execute := make(chan struct{})
+	var executeOnce sync.Once
+	unblockExecute := func() { executeOnce.Do(func() { close(execute) }) }
+	defer unblockExecute()
+	require.NoError(t, failpoint.EnableCall("github.com/tikv/pd/pkg/gc/afterGCStateLoadBatchRead", func() { close(ready); <-execute }))
 	done := make(chan gcStateLoadResult, 1)
 	go func() {
-		b, err := m.prepareGCStateLoadBatch(context.Background(), current, gcStateLoadCandidates(2))
+		r, err := m.loadGCStateBatch(context.Background(), current, gcStateLoadCandidates(2))
 		if err != nil {
-			return
+			r.failed = map[uint32]error{2: err}
 		}
-		ready <- b.flights[0]
-		<-execute
-		done <- m.executeGCStateLoadBatch(context.Background(), b)
+		done <- r
 	}()
-	flight := <-ready
+	gcWarmupWait(t, ready)
+	current.mu.Lock()
+	flight := current.flights[2]
+	current.mu.Unlock()
+	require.NotNil(t, flight)
 	oldCleanup := make(chan struct{})
 	go func() { oldStop(); oldStop(); close(oldCleanup) }()
 	current.mu.Lock()
 	currentFlight := current.flights[2]
 	current.mu.Unlock()
 	require.Same(t, flight, currentFlight)
-	close(execute)
+	unblockExecute()
 	require.Equal(t, []uint32{2}, (<-done).completed)
 	<-oldCleanup
 	require.Same(t, current, m.activeGeneration.Load())

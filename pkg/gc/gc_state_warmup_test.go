@@ -17,6 +17,7 @@ package gc
 import (
 	"context"
 	"errors"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -28,6 +29,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/grpc"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
 	"github.com/tikv/pd/pkg/keyspace"
@@ -71,6 +73,51 @@ func gcWarmupWait(t *testing.T, ch <-chan struct{}) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("warmup event timed out")
 	}
+}
+
+func TestGCStateWarmupBookkeepingWhileLoaderWaitsForManager(t *testing.T) {
+	m := newGCStateLoaderManager(t, func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoke grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+		return invoke(ctx, method, req, reply, cc, opts...)
+	})
+	started := make(chan struct{})
+	var startedOnce sync.Once
+	const beforeLock = "github.com/tikv/pd/pkg/gc/beforeGCStateLoadManagerLock"
+	require.NoError(t, failpoint.EnableCall(beforeLock, func() { startedOnce.Do(func() { close(started) }) }))
+	defer func() { require.NoError(t, failpoint.Disable(beforeLock)) }()
+	m.mu.Lock()
+	var unlocked sync.Once
+	unblock := func() { unlocked.Do(m.mu.Unlock) }
+	defer unblock()
+	w := newGCStateWarmup(m, m.activeGeneration.Load(), nil)
+	runGCWarmupTest(t, w)
+	gcWarmupWait(t, started)
+
+	// A worker waiting for a safe-point writer must leave scheduling available
+	// so delivered metadata can be reconciled without waiting for that writer.
+	offered := make(chan struct{})
+	go func() {
+		w.onPage(gcWarmupEntries(100, 1))
+		w.onInitialSnapshot(gcWarmupEntries(100, 1))
+		close(offered)
+	}()
+	gcWarmupWait(t, offered)
+	reconciled := make(chan struct{})
+	go func() {
+		w.stateMu.Lock()
+		w.ingest()
+		w.stateMu.Unlock()
+		close(reconciled)
+	}()
+	progressed := false
+	select {
+	case <-reconciled:
+		progressed = true
+	case <-time.After(time.Second):
+	}
+	unblock()
+	gcWarmupWait(t, reconciled)
+	gcWarmupWait(t, w.done)
+	require.True(t, progressed, "metadata bookkeeping blocked behind the manager lock")
 }
 
 // Splitting inputs before filtering would produce two transactions for mixed
@@ -124,6 +171,11 @@ func TestGCStateWarmupBatches(t *testing.T) {
 // Available pages must replenish the preceding page's partial batch. Waiting
 // to publish the initial snapshot keeps its reconciliation from hiding a split.
 func TestGCStateWarmupAcrossPages(t *testing.T) {
+	// Give competing workers time to consume candidates after each miss. A
+	// per-candidate assembly lock would split the tail into multiple reads.
+	const access = "github.com/tikv/pd/pkg/gc/getGCStateCacheAccess"
+	require.NoError(t, failpoint.EnableCall(access, func(string) { runtime.Gosched() }))
+	defer func() { require.NoError(t, failpoint.Disable(access)) }()
 	var mu sync.Mutex
 	var sizes []int
 	m := newGCStateLoaderManager(t, func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoke grpc.UnaryInvoker, opts ...grpc.CallOption) error {
@@ -238,6 +290,14 @@ func TestGCStateWarmupConcurrencyAndForeground(t *testing.T) {
 		}
 	}
 	require.ElementsMatch(t, []int{1, 60, 60, 60}, sizes)
+	bookkeeping := make(chan struct{})
+	go func() {
+		w.stateMu.Lock()
+		w.refresh(time.Now())
+		w.stateMu.Unlock()
+		close(bookkeeping)
+	}()
+	gcWarmupWait(t, bookkeeping)
 	foreground := make(chan error, 1)
 	go func() { _, err := m.GetGCState(2, true); foreground <- err }()
 	select {
@@ -331,6 +391,9 @@ func TestGCStateWarmupRetriesFailures(t *testing.T) {
 func TestGCStateWarmupJoinedSuccessSurvivesInvalidation(t *testing.T) {
 	entered := make(chan struct{}, 1)
 	release := make(chan struct{})
+	var releaseOnce sync.Once
+	unblockLoad := func() { releaseOnce.Do(func() { close(release) }) }
+	defer unblockLoad()
 	var reads atomic.Int32
 	m := newGCStateLoaderManager(t, func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoke grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 		if txn := gcWarmupRead(req); txn != nil && string(txn.Success[0].GetRequestRange().Key) == keypath.TxnSafePointPath(100) {
@@ -359,13 +422,35 @@ func TestGCStateWarmupJoinedSuccessSurvivesInvalidation(t *testing.T) {
 		scope := w.scopes[100]
 		return scope != nil && scope.joined != nil
 	}, 3*time.Second, time.Millisecond)
-	w.stateMu.Lock()
-	close(release)
+	// Pause scheduling outside every lock until the joined flight has completed
+	// and its cache entry has been invalidated. Bookkeeping must then observe the
+	// terminal success even though the cached value is gone.
+	paused := make(chan struct{}, gcStateWarmupWorkers)
+	resume := make(chan struct{})
+	var resumeOnce sync.Once
+	unblockWarmup := func() { resumeOnce.Do(func() { close(resume) }) }
+	defer unblockWarmup()
+	const schedule = "github.com/tikv/pd/pkg/gc/beforeGCStateWarmupSchedule"
+	require.NoError(t, failpoint.EnableCall(schedule, func() {
+		select {
+		case <-resume:
+			return
+		default:
+		}
+		paused <- struct{}{}
+		<-resume
+	}))
+	defer func() { require.NoError(t, failpoint.Disable(schedule)) }()
+	w.notify()
+	for range gcStateWarmupWorkers {
+		gcWarmupWait(t, paused)
+	}
+	unblockLoad()
 	err := <-foreground
 	m.mu.Lock()
 	m.gcStateCache.remove(100)
 	m.mu.Unlock()
-	w.stateMu.Unlock()
+	unblockWarmup()
 	require.NoError(t, err)
 	w.onInitialSnapshot(gcWarmupEntries(100, 1))
 	gcWarmupWait(t, w.done)
