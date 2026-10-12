@@ -40,6 +40,26 @@ func TestPlanBalanceTransfersOneLeader(t *testing.T) {
 	require.Equal(t, []uint64{1, 2, 3}, changedPlan(plans).VoterStoreIDs)
 }
 
+func TestPlanBalancePreservesOriginalLeaderOnTie(t *testing.T) {
+	groups := []*Group{
+		{ID: "p0", LeaderStoreID: 3, VoterStoreIDs: []uint64{1, 2, 3}},
+		{ID: "p1", LeaderStoreID: 3, VoterStoreIDs: []uint64{1, 2, 3}},
+		{ID: "p2", LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2, 3}},
+	}
+	plans, err := PlanBalance(groups, BalanceOptions{
+		Stores: []uint64{1, 2, 3, 4},
+		ActionSets: map[string]BalanceActionSet{
+			"p0": {VoterReplacements: map[uint64]map[uint64][]uint64{
+				1: {4: {2, 3}},
+			}},
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "p0", changedPlan(plans).GroupID)
+	require.Equal(t, uint64(3), changedPlan(plans).LeaderStoreID)
+	require.Equal(t, []uint64{2, 3, 4}, changedPlan(plans).VoterStoreIDs)
+}
+
 func TestPlanBalanceReplacesOneVoter(t *testing.T) {
 	groups := []*Group{
 		{ID: "p0", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}},
@@ -144,6 +164,82 @@ func TestPlanBalanceReplacementTieUsesMoveBytes(t *testing.T) {
 	plans, err := PlanBalance(groups, BalanceOptions{Stores: []uint64{1, 2, 3, 4}, ActionSets: actions})
 	require.NoError(t, err)
 	require.Equal(t, "p2", changedPlan(plans).GroupID)
+}
+
+func TestPlanBalanceGlobalLeaderScoreBreaksTableScoreTie(t *testing.T) {
+	groups := []*Group{
+		{ID: "p0", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}},
+		{ID: "p1", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}},
+		{ID: "p2", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}},
+		{ID: "p3", LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2, 3}},
+		{ID: "p4", LeaderStoreID: 3, VoterStoreIDs: []uint64{1, 2, 3}},
+	}
+	plans, err := PlanBalance(groups, BalanceOptions{
+		Stores: []uint64{1, 2, 3},
+		ActionSets: map[string]BalanceActionSet{
+			"p0": {LeaderTargets: []uint64{2, 3}},
+		},
+		GlobalLeaderCounts: map[uint64]int{1: 30, 2: 10, 3: 2},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "p0", changedPlan(plans).GroupID)
+	require.Equal(t, uint64(3), changedPlan(plans).LeaderStoreID)
+}
+
+func TestPlanBalanceGlobalVoterScoreBreaksTableScoreTie(t *testing.T) {
+	groups := []*Group{
+		{ID: "p0", LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2, 3}},
+		{ID: "p1", LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2, 3}},
+		{ID: "p2", LeaderStoreID: 3, VoterStoreIDs: []uint64{1, 2, 3}},
+	}
+	plans, err := PlanBalance(groups, BalanceOptions{
+		Stores: []uint64{1, 2, 3, 4, 5},
+		ActionSets: map[string]BalanceActionSet{
+			"p0": {VoterReplacements: map[uint64]map[uint64][]uint64{
+				1: {4: {2}, 5: {2}},
+			}},
+		},
+		GlobalVoterCounts: map[uint64]int{1: 30, 2: 3, 3: 3, 4: 10, 5: 2},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "p0", changedPlan(plans).GroupID)
+	require.Equal(t, []uint64{2, 3, 5}, changedPlan(plans).VoterStoreIDs)
+}
+
+func TestPlanBalanceGlobalLeaderScorePrecedesVoterScore(t *testing.T) {
+	groups := []*Group{
+		{ID: "p0", LeaderStoreID: 3, VoterStoreIDs: []uint64{1, 2, 3}},
+		{ID: "p1", LeaderStoreID: 3, VoterStoreIDs: []uint64{1, 2, 3}},
+		{ID: "p2", LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2, 3}},
+	}
+	plans, err := PlanBalance(groups, BalanceOptions{
+		Stores: []uint64{1, 2, 3, 4, 5},
+		ActionSets: map[string]BalanceActionSet{
+			"p0": {VoterReplacements: map[uint64]map[uint64][]uint64{
+				1: {4: {2}, 5: {3}},
+			}},
+		},
+		GlobalLeaderCounts: map[uint64]int{2: 2, 3: 20},
+		GlobalVoterCounts:  map[uint64]int{1: 30, 2: 3, 3: 3, 4: 10, 5: 2},
+	})
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), changedPlan(plans).LeaderStoreID)
+	require.Equal(t, []uint64{2, 3, 4}, changedPlan(plans).VoterStoreIDs)
+}
+
+func TestPlanBalanceGlobalCountsDoNotOverrideStrictTableScore(t *testing.T) {
+	groups := []*Group{
+		{ID: "p0", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}},
+		{ID: "p1", LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2, 3}},
+		{ID: "p2", LeaderStoreID: 3, VoterStoreIDs: []uint64{1, 2, 3}},
+	}
+	stores := []uint64{1, 2, 3}
+	plans, err := PlanBalance(groups, BalanceOptions{
+		Stores: stores, ActionSets: allActionSets(groups, stores),
+		GlobalLeaderCounts: map[uint64]int{1: 100, 2: 20, 3: 1},
+	})
+	require.NoError(t, err)
+	require.Zero(t, changedPlans(plans))
 }
 
 func TestPlanBalanceStopsAtStrictLocalMinimum(t *testing.T) {
