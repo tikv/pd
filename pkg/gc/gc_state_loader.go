@@ -78,17 +78,24 @@ func (m *GCStateManager) loadGCStateBatch(ctx context.Context, generation *gcSta
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	stop := context.AfterFunc(generation.ctx, cancel)
+	defer stop()
+	// AfterFunc dispatches asynchronously when already canceled. Observe that
+	// state synchronously so no new load starts in a canceled generation.
+	if generation.ctx.Err() != nil {
+		cancel()
+	}
 	batch := &gcStateLoadBatch{result: gcStateLoadResult{failed: make(map[uint32]error), joined: make(map[uint32]*gcStateLoadFlight)}}
-	// Keep assembly and cancellation registration in one critical section.
+	// Keep flight claims and batch assembly in one critical section.
 	// Once a flight is claimed, every exit goes through publication below.
 	err := func() error {
 		generation.mu.Lock()
 		defer generation.mu.Unlock()
-		if err := ctx.Err(); err != nil {
-			return err
-		}
 		if m.activeGeneration.Load() != generation {
 			return errs.ErrNotLeader
+		}
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 		seen := make(map[uint32]struct{})
 		for len(batch.keyspaceIDs) < endpoint.MaxGCSafePointBatchSize {
@@ -123,12 +130,10 @@ func (m *GCStateManager) loadGCStateBatch(ctx context.Context, generation *gcSta
 				}
 			}
 		}
-		if len(batch.keyspaceIDs) > 0 {
-			if m.activeGeneration.Load() != generation {
-				cancel()
-			} else {
-				generation.cancels[batch] = cancel
-			}
+		// Leadership may have been gated while next was assembling the batch,
+		// before retirement can acquire generation.mu and cancel its context.
+		if m.activeGeneration.Load() != generation {
+			cancel()
 		}
 		return nil
 	}()
@@ -142,7 +147,6 @@ func (m *GCStateManager) loadGCStateBatch(ctx context.Context, generation *gcSta
 	failpoint.InjectCall("afterGCStateLoadBatchRead")
 	generation.mu.Lock()
 	defer generation.mu.Unlock()
-	delete(generation.cancels, batch)
 	if m.activeGeneration.Load() != generation {
 		err = errs.ErrNotLeader
 	} else if ctx.Err() != nil {

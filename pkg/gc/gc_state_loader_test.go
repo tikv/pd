@@ -500,6 +500,122 @@ func TestGCStateLeadershipCancelsLoadBeforeLock(t *testing.T) {
 	require.Equal(t, uint64(0), state.TxnSafePoint)
 }
 
+func TestGCStateGenerationCancellationCancelsAllBatches(t *testing.T) {
+	entered := make(chan struct{}, 2)
+	canceled := make(chan struct{}, 2)
+	release := make(chan struct{})
+	defer close(release)
+	m := newGCStateLoaderManager(t, func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+		if gcWarmupRead(req) != nil {
+			entered <- struct{}{}
+			select {
+			case <-ctx.Done():
+				canceled <- struct{}{}
+				return ctx.Err()
+			case <-release:
+				return context.Canceled
+			}
+		}
+		return invoker(ctx, method, req, reply, cc, opts...)
+	})
+	generation := m.activeGeneration.Load()
+	require.Nil(t, generation.index, "foreground-only generations must also own a cancellation domain")
+	require.NotNil(t, generation.cancel)
+	results := make(chan error, 2)
+	for _, id := range []uint32{2, 3} {
+		go func() {
+			result, err := m.loadGCStateBatch(context.Background(), generation, gcStateLoadCandidates(id))
+			if err == nil {
+				err = result.failed[id]
+			}
+			results <- err
+		}()
+	}
+	for range 2 {
+		gcWarmupWait(t, entered)
+	}
+	// Exercise the common cancellation domain directly, without retirement's
+	// flight notification or any per-batch registration traversal.
+	generation.cancel()
+	for range 2 {
+		gcWarmupWait(t, canceled)
+		select {
+		case err := <-results:
+			require.ErrorIs(t, err, context.Canceled)
+		case <-time.After(3 * time.Second):
+			t.Fatal("batch did not complete after generation cancellation")
+		}
+	}
+	require.Same(t, generation, m.activeGeneration.Load())
+	for _, id := range []uint32{2, 3} {
+		_, cached := m.gcStateCache.load(id)
+		require.False(t, cached)
+	}
+}
+
+func TestGCStateLoadBatchInputCancellation(t *testing.T) {
+	for _, deadline := range []bool{false, true} {
+		name := "cancellation"
+		if deadline {
+			name = "deadline"
+		}
+		t.Run(name, func(t *testing.T) {
+			type valueKey struct{}
+			entered := make(chan struct{}, 1)
+			rpcContexts := make(chan context.Context, 1)
+			m := newGCStateLoaderManager(t, func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+				if gcStateLoadTestTxn(req) {
+					rpcContexts <- ctx
+					entered <- struct{}{}
+					<-ctx.Done()
+					return ctx.Err()
+				}
+				return invoker(ctx, method, req, reply, cc, opts...)
+			})
+			generation := m.activeGeneration.Load()
+			ctx := context.WithValue(context.Background(), valueKey{}, "batch")
+			var cancelLoad context.CancelFunc
+			wantErr := context.Canceled
+			if deadline {
+				ctx, cancelLoad = context.WithTimeout(ctx, time.Second)
+				wantErr = context.DeadlineExceeded
+			} else {
+				ctx, cancelLoad = context.WithCancel(ctx)
+			}
+			defer cancelLoad()
+			loaded := make(chan error, 1)
+			go func() {
+				result, err := m.loadGCStateBatch(ctx, generation, gcStateLoadCandidates(2))
+				if err == nil {
+					err = result.failed[2]
+				}
+				loaded <- err
+			}()
+			gcWarmupWait(t, entered)
+			rpcCtx := <-rpcContexts
+			require.Equal(t, "batch", rpcCtx.Value(valueKey{}))
+			if deadline {
+				inputDeadline, _ := ctx.Deadline()
+				rpcDeadline, hasDeadline := rpcCtx.Deadline()
+				require.True(t, hasDeadline)
+				require.Equal(t, inputDeadline, rpcDeadline)
+			}
+			if !deadline {
+				cancelLoad()
+			}
+			select {
+			case err := <-loaded:
+				require.ErrorIs(t, err, wantErr)
+			case <-time.After(3 * time.Second):
+				t.Fatal("batch ignored input context cancellation")
+			}
+			require.Same(t, generation, m.activeGeneration.Load())
+			_, cached := m.gcStateCache.load(2)
+			require.False(t, cached)
+		})
+	}
+}
+
 func TestGCStateLoadCancelBeforePublication(t *testing.T) {
 	_, _, m, clean, cancel := newGCStateManagerForTest(t, newGCStateManagerForTestOptions{})
 	defer clean()
@@ -592,10 +708,9 @@ func TestGCStateLoadCancellationDuringAssembly(t *testing.T) {
 			_, cached := m.gcStateCache.load(2)
 			require.False(t, cached)
 			generation.mu.Lock()
-			flights, operations := len(generation.flights), len(generation.cancels)
+			flights := len(generation.flights)
 			generation.mu.Unlock()
 			require.Zero(t, flights, "claimed flights must complete on cancellation")
-			require.Zero(t, operations, "cancellation registrations must be released")
 			writerDone := make(chan struct{})
 			go func() {
 				m.mu.Lock()

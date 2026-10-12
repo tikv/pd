@@ -27,15 +27,15 @@ import (
 )
 
 // A generation is a unique identity, including after its active lifetime ends.
-// Contexts stay on the executing goroutines; retirement closes done and cancels
-// their registered operations before waiting for the manager lock.
+// Its context owns the cancellation domain for shared loads and runtime workers;
+// retirement closes done and cancels that work before waiting for the manager lock.
 type gcStateGeneration struct {
 	mu      syncutil.Mutex
 	done    chan struct{}
 	flights map[uint32]*gcStateLoadFlight
-	cancels map[*gcStateLoadBatch]context.CancelFunc
 
-	// Runtime ownership is established before publishing this generation.
+	// Lifecycle ownership is established before publishing this generation.
+	ctx      context.Context
 	cancel   context.CancelFunc
 	workDone chan struct{}
 	index    *enabledKeyspaceIndex
@@ -51,16 +51,11 @@ func (g *gcStateGeneration) retire() {
 	default:
 	}
 	close(g.done)
-	if g.cancel != nil {
-		g.cancel()
-	}
+	g.cancel()
 	for id, flight := range g.flights {
 		flight.err = errs.ErrNotLeader
 		close(flight.done)
 		delete(g.flights, id)
-	}
-	for _, cancel := range g.cancels {
-		cancel()
 	}
 }
 
@@ -86,14 +81,14 @@ func (m *GCStateManager) OnNodeBecomesLeader() func() {
 		previous.waitRuntime()
 	}
 	m.mu.Lock()
+	ctx, cancel := context.WithCancel(context.Background())
 	generation := &gcStateGeneration{
 		done:    make(chan struct{}),
 		flights: make(map[uint32]*gcStateLoadFlight),
-		cancels: make(map[*gcStateLoadBatch]context.CancelFunc),
+		ctx:     ctx,
+		cancel:  cancel,
 	}
-	var runtimeCtx context.Context
 	if m.etcdClient != nil {
-		runtimeCtx, generation.cancel = context.WithCancel(context.Background())
 		generation.workDone = make(chan struct{})
 		generation.index = newEnabledKeyspaceIndex(m.etcdClient, keypath.KeyspaceMetaPrefix())
 		generation.warmup = newGCStateWarmup(m, generation, generation.index)
@@ -105,11 +100,11 @@ func (m *GCStateManager) OnNodeBecomesLeader() func() {
 	m.generation = generation
 	m.activeGeneration.Store(generation)
 	m.mu.Unlock()
-	if runtimeCtx != nil {
+	if generation.workDone != nil {
 		go func() {
 			defer close(generation.workDone)
-			go generation.warmup.run(runtimeCtx)
-			generation.index.run(runtimeCtx, enabledKeyspaceLoadHooks{
+			go generation.warmup.run(generation.ctx)
+			generation.index.run(generation.ctx, enabledKeyspaceLoadHooks{
 				onPage:            generation.warmup.onPage,
 				onInitialSnapshot: generation.warmup.onInitialSnapshot,
 			})
