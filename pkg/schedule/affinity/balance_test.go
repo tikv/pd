@@ -105,6 +105,32 @@ func TestPlanBalanceInitializesNewGroup(t *testing.T) {
 	require.True(t, plans[0].Changed)
 }
 
+func TestPlanBalanceInitializesSingleReplica(t *testing.T) {
+	plans, err := PlanBalance([]*Group{{ID: "p0"}}, BalanceOptions{Stores: []uint64{1, 2}, ReplicaCount: 1})
+	require.NoError(t, err)
+	require.Len(t, plans[0].VoterStoreIDs, 1)
+	require.Equal(t, plans[0].LeaderStoreID, plans[0].VoterStoreIDs[0])
+}
+
+func TestPlanBalanceFindsAlternativeInitialVoters(t *testing.T) {
+	plans, err := PlanBalance([]*Group{{ID: "p0"}}, BalanceOptions{
+		Stores: []uint64{1, 2, 3, 4}, ReplicaCount: 3,
+		ValidTarget: func(_ *Group, _ uint64, voters []uint64) bool { return !containsStore(voters, 2) },
+	})
+	require.NoError(t, err)
+	require.NotContains(t, plans[0].VoterStoreIDs, uint64(2))
+}
+
+func TestPlanBalanceFindsAlternativeReplacementVoters(t *testing.T) {
+	groups := []*Group{{ID: "p0", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 10, 11}}}
+	plans, err := PlanBalance(groups, BalanceOptions{
+		Stores: []uint64{1, 2, 3, 4}, ReplicaCount: 3,
+		ValidTarget: func(_ *Group, _ uint64, voters []uint64) bool { return !containsStore(voters, 2) },
+	})
+	require.NoError(t, err)
+	require.Equal(t, []uint64{1, 3, 4}, plans[0].VoterStoreIDs)
+}
+
 func TestPlanBalanceInitializesOnLeastLoadedVoters(t *testing.T) {
 	groups := []*Group{
 		{ID: "fixed0", BalancePolicy: BalancePolicyFixed, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}},

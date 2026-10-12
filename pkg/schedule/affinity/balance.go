@@ -103,21 +103,24 @@ func PlanBalance(groups []*Group, options BalanceOptions) ([]BalancePlan, error)
 			oldTargetValid = options.ValidTarget(group, oldLeader, oldVoters)
 		}
 		var best *targetCandidate
-		candidates := candidateTargets(stores, oldVoters, options.ReplicaCount)
-		if len(oldVoters) == 0 {
-			candidates = initialCandidateTargets(stores, options.ReplicaCount, voterCounts)
-		}
-		for _, candidate := range candidates {
+		hasValidCandidate := false
+		evaluate := func(candidate target) bool {
 			if options.ValidTarget != nil && !options.ValidTarget(group, candidate.leader, candidate.voters) {
-				continue
+				return false
 			}
+			hasValidCandidate = true
 			score := scoreAfter(leaderCounts, voterCounts, oldLeader, oldVoters, candidate.leader, candidate.voters)
 			if oldTargetValid && len(oldVoters) > 0 && compareScore(score, oldScore) >= 0 {
-				continue
+				return false
 			}
 			if best == nil || compareScore(score, best.score) < 0 || (compareScore(score, best.score) == 0 && targetLess(candidate, best.target)) {
-				best = &targetCandidate{target: candidate, score: score}
+				best = &targetCandidate{target: target{leader: candidate.leader, voters: slices.Clone(candidate.voters)}, score: score}
 			}
+			return false
+		}
+		visitPreferredCandidateTargets(stores, oldVoters, options.ReplicaCount, voterCounts, evaluate)
+		if options.ValidTarget != nil && !hasValidCandidate {
+			visitAllCandidateTargets(stores, oldVoters, options.ReplicaCount, evaluate)
 		}
 		if best == nil {
 			if !oldTargetValid {
@@ -142,16 +145,21 @@ type targetCandidate struct {
 }
 type balanceScore struct{ leader, voter int }
 
-func candidateTargets(stores, oldVoters []uint64, replicaCount int) []target {
+func visitPreferredCandidateTargets(stores, oldVoters []uint64, replicaCount int, voterCounts map[uint64]int, visit func(target) bool) {
 	if len(oldVoters) == 0 {
-		return nil
+		for _, candidate := range initialCandidateTargets(stores, replicaCount, voterCounts) {
+			if visit(candidate) {
+				return
+			}
+		}
+		return
 	}
-	var voterSets [][]uint64
-	// Keep the current set as a candidate only while every peer is on an
-	// available store. If a store was removed, at least one replacement is
-	// required before the target can be selected.
 	if containsAll(stores, oldVoters) {
-		voterSets = append(voterSets, slices.Clone(oldVoters))
+		for _, leader := range oldVoters {
+			if visit(target{leader: leader, voters: oldVoters}) {
+				return
+			}
+		}
 		for i := range oldVoters {
 			for _, store := range stores {
 				if slices.Contains(oldVoters, store) {
@@ -160,36 +168,105 @@ func candidateTargets(stores, oldVoters []uint64, replicaCount int) []target {
 				voters := slices.Clone(oldVoters)
 				voters[i] = store
 				slices.Sort(voters)
-				voterSets = append(voterSets, voters)
+				for _, leader := range voters {
+					if visit(target{leader: leader, voters: voters}) {
+						return
+					}
+				}
 			}
 		}
-	} else {
-		available := make([]uint64, 0, len(oldVoters))
-		for _, voter := range oldVoters {
-			if slices.Contains(stores, voter) {
-				available = append(available, voter)
+		return
+	}
+	visitPreferredReplacementTargets(stores, oldVoters, replicaCount, voterCounts, visit)
+}
+
+func visitAllCandidateTargets(stores, oldVoters []uint64, replicaCount int, visit func(target) bool) {
+	if len(oldVoters) == 0 {
+		forEachCombination(stores, replicaCount, func(voters []uint64) bool {
+			for _, leader := range voters {
+				if visit(target{leader: leader, voters: voters}) {
+					return true
+				}
 			}
-		}
-		missing := replicaCount - len(available)
-		candidates := make([]uint64, 0, len(stores)-len(available))
-		for _, store := range stores {
-			if !slices.Contains(available, store) {
-				candidates = append(candidates, store)
-			}
-		}
-		for _, replacement := range combinations(candidates, missing) {
-			voters := append(slices.Clone(available), replacement...)
-			slices.Sort(voters)
-			voterSets = append(voterSets, voters)
+			return false
+		})
+		return
+	}
+	if containsAll(stores, oldVoters) {
+		visitPreferredCandidateTargets(stores, oldVoters, replicaCount, nil, visit)
+		return
+	}
+	available := make([]uint64, 0, len(oldVoters))
+	for _, voter := range oldVoters {
+		if slices.Contains(stores, voter) {
+			available = append(available, voter)
 		}
 	}
-	var result []target
-	for _, voters := range voterSets {
+	missing := replicaCount - len(available)
+	candidates := make([]uint64, 0, len(stores)-len(available))
+	for _, store := range stores {
+		if !slices.Contains(available, store) {
+			candidates = append(candidates, store)
+		}
+	}
+	voters := make([]uint64, replicaCount)
+	forEachCombination(candidates, missing, func(replacement []uint64) bool {
+		copy(voters, available)
+		copy(voters[len(available):], replacement)
+		slices.Sort(voters)
 		for _, leader := range voters {
-			result = append(result, target{leader: leader, voters: slices.Clone(voters)})
+			if visit(target{leader: leader, voters: voters}) {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+func visitPreferredReplacementTargets(stores, oldVoters []uint64, replicaCount int, voterCounts map[uint64]int, visit func(target) bool) {
+	available := make([]uint64, 0, len(oldVoters))
+	for _, voter := range oldVoters {
+		if slices.Contains(stores, voter) {
+			available = append(available, voter)
 		}
 	}
-	return result
+	candidates := make([]uint64, 0, len(stores)-len(available))
+	for _, store := range stores {
+		if !slices.Contains(available, store) {
+			candidates = append(candidates, store)
+		}
+	}
+	slices.SortFunc(candidates, func(a, b uint64) int {
+		if voterCounts[a] != voterCounts[b] {
+			return voterCounts[a] - voterCounts[b]
+		}
+		return compareUint64(a, b)
+	})
+	for _, leader := range stores {
+		voters := make([]uint64, 0, replicaCount)
+		voters = append(voters, available...)
+		if !slices.Contains(available, leader) {
+			voters = append(voters, leader)
+		}
+		for _, store := range candidates {
+			if store == leader {
+				continue
+			}
+			if len(voters) == replicaCount {
+				break
+			}
+			voters = append(voters, store)
+		}
+		if len(voters) != replicaCount {
+			continue
+		}
+		slices.Sort(voters)
+		for _, candidateLeader := range voters {
+			if visit(target{leader: candidateLeader, voters: voters}) {
+				return
+			}
+		}
+	}
 }
 
 func initialCandidateTargets(stores []uint64, replicaCount int, voterCounts map[uint64]int) []target {
@@ -214,6 +291,9 @@ func initialCandidateTargets(stores []uint64, replicaCount int, voterCounts map[
 		voters := make([]uint64, 0, replicaCount)
 		voters = append(voters, leader)
 		for _, store := range byVoterCount {
+			if len(voters) == replicaCount {
+				break
+			}
 			if store == leader {
 				continue
 			}
@@ -228,6 +308,27 @@ func initialCandidateTargets(stores []uint64, replicaCount int, voterCounts map[
 	return result
 }
 
+func forEachCombination(values []uint64, size int, visit func([]uint64) bool) bool {
+	if size < 0 || size > len(values) {
+		return false
+	}
+	chosen := make([]uint64, size)
+	var walk func(int, int) bool
+	walk = func(start, depth int) bool {
+		if depth == size {
+			return visit(chosen)
+		}
+		for i := start; i <= len(values)-(size-depth); i++ {
+			chosen[depth] = values[i]
+			if walk(i+1, depth+1) {
+				return true
+			}
+		}
+		return false
+	}
+	return walk(0, 0)
+}
+
 func containsAll(values, required []uint64) bool {
 	for _, value := range required {
 		if !slices.Contains(values, value) {
@@ -235,6 +336,16 @@ func containsAll(values, required []uint64) bool {
 		}
 	}
 	return true
+}
+
+func compareUint64(a, b uint64) int {
+	if a < b {
+		return -1
+	}
+	if a > b {
+		return 1
+	}
+	return 0
 }
 
 func scoreAfter(leaders, voters map[uint64]int, oldLeader uint64, oldVoters []uint64, newLeader uint64, newVoters []uint64) balanceScore {
@@ -320,21 +431,6 @@ func sumSquares(counts map[uint64]int) int {
 		total += count * count
 	}
 	return total
-}
-func combinations(values []uint64, size int) [][]uint64 {
-	result := make([][]uint64, 0)
-	var visit func(int, []uint64)
-	visit = func(start int, chosen []uint64) {
-		if len(chosen) == size {
-			result = append(result, slices.Clone(chosen))
-			return
-		}
-		for i := start; i < len(values); i++ {
-			visit(i+1, append(chosen, values[i]))
-		}
-	}
-	visit(0, nil)
-	return result
 }
 func stringsCompare(a, b string) int {
 	if a < b {
