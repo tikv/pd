@@ -1,3 +1,17 @@
+// Copyright 2026 TiKV Project Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package affinity
 
 import (
@@ -87,6 +101,48 @@ func TestPlanBalanceRemovesOfflineStore(t *testing.T) {
 	require.True(t, anyPlanChanged(plans))
 }
 
+func TestPlanBalanceReplacesMultipleOfflineVoters(t *testing.T) {
+	groups := []*Group{
+		{ID: "p0", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 5, 6}},
+	}
+	plans, err := PlanBalance(groups, BalanceOptions{Stores: []uint64{1, 2, 3, 4}, ReplicaCount: 3})
+	require.NoError(t, err)
+	require.NotContains(t, plans[0].VoterStoreIDs, uint64(5))
+	require.NotContains(t, plans[0].VoterStoreIDs, uint64(6))
+	require.True(t, plans[0].Changed)
+}
+
+func TestPlanBalanceRejectsZeroStore(t *testing.T) {
+	_, err := PlanBalance([]*Group{{ID: "p0"}}, BalanceOptions{Stores: []uint64{0, 1}, ReplicaCount: 1})
+	require.EqualError(t, err, "store ID must be positive")
+}
+
+func TestPlanBalanceRepairsUnsetLeader(t *testing.T) {
+	groups := []*Group{{ID: "p0", VoterStoreIDs: []uint64{1, 2, 3}}}
+	plans, err := PlanBalance(groups, BalanceOptions{Stores: []uint64{1, 2, 3}, ReplicaCount: 3})
+	require.NoError(t, err)
+	require.NotZero(t, plans[0].LeaderStoreID)
+}
+
+func TestPlanBalanceRepairsInvalidExistingTarget(t *testing.T) {
+	groups := []*Group{{ID: "p0", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}}}
+	plans, err := PlanBalance(groups, BalanceOptions{
+		Stores: []uint64{1, 2, 3}, ReplicaCount: 3,
+		ValidTarget: func(_ *Group, leader uint64, _ []uint64) bool { return leader != 1 },
+	})
+	require.NoError(t, err)
+	require.NotEqual(t, uint64(1), plans[0].LeaderStoreID)
+}
+
+func TestPlanBalanceErrorsWhenInvalidTargetCannotBeReplaced(t *testing.T) {
+	groups := []*Group{{ID: "p0", VoterStoreIDs: []uint64{1, 2, 3}}}
+	_, err := PlanBalance(groups, BalanceOptions{
+		Stores: []uint64{1, 2, 3}, ReplicaCount: 3,
+		ValidTarget: func(_ *Group, _ uint64, _ []uint64) bool { return false },
+	})
+	require.EqualError(t, err, `unable to find valid balance target for group "p0"`)
+}
+
 func TestPlanBalanceIsDeterministicAfterRestart(t *testing.T) {
 	groups := []*Group{
 		{ID: "p1", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}},
@@ -126,7 +182,7 @@ func TestPlanBalanceRecomputesAfterStoreReturns(t *testing.T) {
 		}
 	}
 	requireBalancedCounts(t, voters)
-	require.Greater(t, voters[4], 0)
+	require.Positive(t, voters[4])
 }
 
 func containsStore(values []uint64, value uint64) bool {

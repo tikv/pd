@@ -1,5 +1,17 @@
 // Copyright 2026 TiKV Project Authors.
-// Licensed under the Apache License, Version 2.0.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package affinity
 
 import (
@@ -12,7 +24,9 @@ import (
 type BalancePolicy string
 
 const (
-	BalancePolicyAuto  BalancePolicy = "auto"
+	// BalancePolicyAuto allows the planner to improve the group's placement.
+	BalancePolicyAuto BalancePolicy = "auto"
+	// BalancePolicyFixed keeps the group's placement unchanged.
 	BalancePolicyFixed BalancePolicy = "fixed"
 )
 
@@ -41,6 +55,9 @@ func PlanBalance(groups []*Group, options BalanceOptions) ([]BalancePlan, error)
 	stores := sortedUnique(options.Stores)
 	if len(stores) == 0 {
 		return nil, errors.New("no stores available for affinity balance")
+	}
+	if stores[0] == 0 {
+		return nil, errors.New("store ID must be positive")
 	}
 	if options.ReplicaCount <= 0 {
 		return nil, errors.New("replica count must be positive")
@@ -75,7 +92,10 @@ func PlanBalance(groups []*Group, options BalanceOptions) ([]BalancePlan, error)
 			return nil, fmt.Errorf("group %q has %d voters, want %d", group.ID, len(oldVoters), options.ReplicaCount)
 		}
 		oldLeader, oldScore := group.LeaderStoreID, calcBalanceScore(leaderCounts, voterCounts)
-		oldTargetValid := (oldLeader == 0 || slices.Contains(stores, oldLeader)) && containsAll(stores, oldVoters)
+		oldTargetValid := oldLeader != 0 && slices.Contains(stores, oldLeader) && containsAll(stores, oldVoters)
+		if oldTargetValid && options.ValidTarget != nil {
+			oldTargetValid = options.ValidTarget(group, oldLeader, oldVoters)
+		}
 		var best *targetCandidate
 		for _, candidate := range candidateTargets(stores, oldVoters, options.ReplicaCount) {
 			if options.ValidTarget != nil && !options.ValidTarget(group, candidate.leader, candidate.voters) {
@@ -90,6 +110,9 @@ func PlanBalance(groups []*Group, options BalanceOptions) ([]BalancePlan, error)
 			}
 		}
 		if best == nil {
+			if !oldTargetValid {
+				return nil, fmt.Errorf("unable to find valid balance target for group %q", group.ID)
+			}
 			plans = append(plans, makePlan(group, oldLeader, oldVoters, false))
 			continue
 		}
@@ -119,18 +142,34 @@ func candidateTargets(stores, oldVoters []uint64, replicaCount int) []target {
 		// required before the target can be selected.
 		if containsAll(stores, oldVoters) {
 			voterSets = append(voterSets, slices.Clone(oldVoters))
-		}
-		for i := range oldVoters {
+			for i := range oldVoters {
+				for _, store := range stores {
+					if slices.Contains(oldVoters, store) {
+						continue
+					}
+					voters := slices.Clone(oldVoters)
+					voters[i] = store
+					slices.Sort(voters)
+					voterSets = append(voterSets, voters)
+				}
+			}
+		} else {
+			available := make([]uint64, 0, len(oldVoters))
+			for _, voter := range oldVoters {
+				if slices.Contains(stores, voter) {
+					available = append(available, voter)
+				}
+			}
+			missing := replicaCount - len(available)
+			candidates := make([]uint64, 0, len(stores)-len(available))
 			for _, store := range stores {
-				if slices.Contains(oldVoters, store) {
-					continue
+				if !slices.Contains(available, store) {
+					candidates = append(candidates, store)
 				}
-				voters := slices.Clone(oldVoters)
-				voters[i] = store
+			}
+			for _, replacement := range combinations(candidates, missing) {
+				voters := append(slices.Clone(available), replacement...)
 				slices.Sort(voters)
-				if !containsAll(stores, voters) {
-					continue
-				}
 				voterSets = append(voterSets, voters)
 			}
 		}
@@ -213,7 +252,7 @@ func sortedUnique(stores []uint64) []uint64 {
 	result := normalizeVoters(stores)
 	return slices.Compact(result)
 }
-func makeCounts(stores []uint64) (map[uint64]int, map[uint64]int) {
+func makeCounts(stores []uint64) (leaders, voters map[uint64]int) {
 	l, v := make(map[uint64]int, len(stores)), make(map[uint64]int, len(stores))
 	for _, store := range stores {
 		l[store], v[store] = 0, 0
