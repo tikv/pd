@@ -153,7 +153,7 @@ func TestPlanBalanceStopsAtStrictLocalMinimum(t *testing.T) {
 		{ID: "p2", LeaderStoreID: 3, VoterStoreIDs: []uint64{1, 2, 3}},
 	}
 	stores := []uint64{1, 2, 3, 4}
-	for round := 0; round < 20; round++ {
+	for range 20 {
 		before := make(map[uint64]int)
 		for _, group := range groups {
 			for _, store := range group.VoterStoreIDs {
