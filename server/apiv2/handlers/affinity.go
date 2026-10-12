@@ -99,6 +99,7 @@ type UpdateAffinityGroupPeersRequest struct {
 
 // RebalanceAffinityGroupRequest defines the input for previewing or applying an affinity rebalance.
 type RebalanceAffinityGroupRequest struct {
+	// Apply publishes final targets for all table groups without waiting for Region moves to finish.
 	Apply bool `json:"apply"`
 }
 
@@ -388,14 +389,14 @@ func UpdateAffinityGroupPeers(c *gin.Context) {
 	c.IndentedJSON(http.StatusOK, state)
 }
 
-// RebalanceAffinityGroup previews or applies one affinity balance step.
+// RebalanceAffinityGroup previews or applies a complete affinity rebalance for a table.
 //
 //	@Tags		affinity-groups
-//	@Summary	Preview or apply one affinity balance step.
+//	@Summary	Preview or apply a complete affinity rebalance for a table.
 //	@Param		group_id	path	string						true	"The group id of the affinity group"
-//	@Param		body		body	RebalanceAffinityGroupRequest	true	"Whether to apply the plan"
+//	@Param		body		body	RebalanceAffinityGroupRequest	true	"Apply publishes all final table targets; Region moves finish asynchronously"
 //	@Produce	json
-//	@Success	200	{array}	affinity.BalancePlan	"The balance plan, empty when no rebalance is available"
+//	@Success	200	{array}	affinity.BalancePlan	"Final group targets; operators converge asynchronously"
 //	@Failure	400	{string}	string	"The input is invalid."
 //	@Failure	404	{string}	string	"Affinity group not found."
 //	@Failure	500	{string}	string	"PD server failed to proceed the request."

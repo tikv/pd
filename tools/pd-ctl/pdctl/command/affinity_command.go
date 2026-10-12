@@ -51,11 +51,11 @@ func NewAffinityCommand() *cobra.Command {
 func newAffinityRebalanceCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "rebalance",
-		Short: "preview or apply affinity balance for one table",
+		Short: "preview or apply a complete affinity rebalance for one table",
 		Run:   affinityRebalanceCommandFunc,
 	}
-	cmd.Flags().Bool("apply", false, "apply the generated plan")
-	cmd.Flags().Bool("force", false, "required when applying a rebalance plan")
+	cmd.Flags().Bool("apply", false, "apply final targets for all table groups; Region moves finish asynchronously")
+	cmd.Flags().Bool("force", false, "required with --apply")
 	return cmd
 }
 
