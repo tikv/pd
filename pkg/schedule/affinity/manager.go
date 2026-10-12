@@ -156,6 +156,7 @@ func (m *Manager) initGroupLocked(group *Group) {
 			CreateTimestamp: group.CreateTimestamp,
 			LeaderStoreID:   group.LeaderStoreID,
 			VoterStoreIDs:   slices.Clone(group.VoterStoreIDs),
+			BalancePolicy:   group.BalancePolicy,
 		},
 		availability:        groupDegraded,
 		degradedExpiredAt:   newDegradedExpiredAtFromNow(),
@@ -470,7 +471,8 @@ func (m *Manager) SyncGroupFromEtcd(group *Group) {
 	existingGroup, exists := m.groups[group.ID]
 	if exists &&
 		existingGroup.LeaderStoreID == group.LeaderStoreID &&
-		slices.Equal(existingGroup.VoterStoreIDs, group.VoterStoreIDs) {
+		slices.Equal(existingGroup.VoterStoreIDs, group.VoterStoreIDs) &&
+		existingGroup.BalancePolicy == group.BalancePolicy {
 		m.RUnlock()
 		return
 	}
@@ -527,6 +529,10 @@ func (m *Manager) SyncGroupFromEtcd(group *Group) {
 		}
 		if !slices.Equal(groupInfo.VoterStoreIDs, group.VoterStoreIDs) {
 			groupInfo.VoterStoreIDs = slices.Clone(group.VoterStoreIDs)
+			changed = true
+		}
+		if groupInfo.BalancePolicy != group.BalancePolicy {
+			groupInfo.BalancePolicy = group.BalancePolicy
 			changed = true
 		}
 

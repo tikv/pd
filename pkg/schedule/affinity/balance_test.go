@@ -88,8 +88,14 @@ func TestPlanBalanceKeepsMalformedFixedTarget(t *testing.T) {
 	plans, err := PlanBalance(groups, BalanceOptions{Stores: []uint64{1, 2, 3}, ReplicaCount: 3})
 	require.NoError(t, err)
 	require.Equal(t, BalancePlan{
-		GroupID: "fixed", LeaderStoreID: 9, VoterStoreIDs: []uint64{9, 10}, Changed: false,
+		GroupID: "fixed", LeaderStoreID: 9, VoterStoreIDs: []uint64{10, 9}, Changed: false,
 	}, plans[0])
+}
+
+func TestPlanBalanceRejectsDuplicateGroupIDs(t *testing.T) {
+	groups := []*Group{{ID: "p0"}, {ID: "p0"}}
+	_, err := PlanBalance(groups, BalanceOptions{Stores: []uint64{1}, ReplicaCount: 1})
+	require.EqualError(t, err, `duplicate affinity group ID "p0"`)
 }
 
 func TestPlanBalanceRejectsInvalidBalancePolicy(t *testing.T) {
@@ -142,6 +148,25 @@ func TestPlanBalanceFindsAlternativeVoterCombination(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, []uint64{1, 4, 5}, plans[0].VoterStoreIDs)
+}
+
+func TestPlanBalanceSearchesAllValidVoterCombinations(t *testing.T) {
+	groups := []*Group{
+		{ID: "fixed0", BalancePolicy: BalancePolicyFixed, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}},
+		{ID: "fixed1", BalancePolicy: BalancePolicyFixed, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}},
+		{ID: "fixed2", BalancePolicy: BalancePolicyFixed, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}},
+		{ID: "auto", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}},
+	}
+	plans, err := PlanBalance(groups, BalanceOptions{
+		Stores: []uint64{1, 2, 3, 4, 5}, ReplicaCount: 3,
+		ValidTarget: func(_ *Group, _ uint64, _ []uint64) bool { return true },
+	})
+	require.NoError(t, err)
+	byID := make(map[string]BalancePlan, len(plans))
+	for _, plan := range plans {
+		byID[plan.GroupID] = plan
+	}
+	require.Equal(t, []uint64{2, 4, 5}, byID["auto"].VoterStoreIDs)
 }
 
 func TestPlanBalanceInitializesOnLeastLoadedVoters(t *testing.T) {

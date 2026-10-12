@@ -74,6 +74,13 @@ func PlanBalance(groups []*Group, options BalanceOptions) ([]BalancePlan, error)
 			return nil, fmt.Errorf("group %q has invalid balance policy %q", group.ID, group.BalancePolicy)
 		}
 	}
+	seenIDs := make(map[string]struct{}, len(groups))
+	for _, group := range groups {
+		if _, exists := seenIDs[group.ID]; exists {
+			return nil, fmt.Errorf("duplicate affinity group ID %q", group.ID)
+		}
+		seenIDs[group.ID] = struct{}{}
+	}
 	ordered := slices.Clone(groups)
 	slices.SortFunc(ordered, func(a, b *Group) int { return cmp.Compare(a.ID, b.ID) })
 	leaderCounts, voterCounts := makeCounts(stores)
@@ -92,7 +99,7 @@ func PlanBalance(groups []*Group, options BalanceOptions) ([]BalancePlan, error)
 			return nil, fmt.Errorf("group %q has duplicate voter store ID", group.ID)
 		}
 		if group.BalancePolicy == BalancePolicyFixed {
-			plans = append(plans, makePlan(group, group.LeaderStoreID, oldVoters, false))
+			plans = append(plans, makePlan(group, group.LeaderStoreID, group.VoterStoreIDs, false))
 			continue
 		}
 		if len(oldVoters) > 0 && len(oldVoters) != options.ReplicaCount {
@@ -107,12 +114,10 @@ func PlanBalance(groups []*Group, options BalanceOptions) ([]BalancePlan, error)
 		applyCounts(leaderCounts, voterCounts, oldLeader, oldVoters, 0, nil)
 		baseScore := calcBalanceScore(leaderCounts, voterCounts)
 		var best *targetCandidate
-		hasValidCandidate := false
 		evaluate := func(candidate target) {
 			if options.ValidTarget != nil && !options.ValidTarget(group, candidate.leader, candidate.voters) {
 				return
 			}
-			hasValidCandidate = true
 			score := scoreAfter(baseScore, leaderCounts, voterCounts, candidate)
 			if oldTargetValid && len(oldVoters) > 0 && compareScore(score, oldScore) >= 0 {
 				return
@@ -122,7 +127,7 @@ func PlanBalance(groups []*Group, options BalanceOptions) ([]BalancePlan, error)
 			}
 		}
 		visitCandidateTargets(stores, oldVoters, options.ReplicaCount, voterCounts, false, evaluate)
-		if options.ValidTarget != nil && !hasValidCandidate {
+		if options.ValidTarget != nil {
 			visitCandidateTargets(stores, oldVoters, options.ReplicaCount, voterCounts, true, evaluate)
 		}
 		if best == nil {
