@@ -37,11 +37,11 @@ const (
 // load pins the entire attempt to the initial transaction's revision. Its map
 // stays private until every range succeeds; a failed attempt cancels and joins
 // the producer and workers before discarding the partial result.
-func (c *enabledKeyspaceCache) load(ctx context.Context, onPage func([]enabledKeyspace)) (map[uint32]enabledKeyspace, int64, error) {
-	end := clientv3.GetPrefixRangeEnd(c.prefix)
+func (i *enabledKeyspaceIndex) load(ctx context.Context, onPage func([]enabledKeyspace)) (map[uint32]enabledKeyspace, int64, error) {
+	end := clientv3.GetPrefixRangeEnd(i.prefix)
 	requestCtx, cancel := context.WithTimeout(ctx, enabledKeyspaceRequestTimeout)
-	resp, err := c.client.Txn(requestCtx).Then(
-		clientv3.OpGet(c.prefix, clientv3.WithRange(end), clientv3.WithLimit(enabledKeyspacePageSize)),
+	resp, err := i.client.Txn(requestCtx).Then(
+		clientv3.OpGet(i.prefix, clientv3.WithRange(end), clientv3.WithLimit(enabledKeyspacePageSize)),
 		clientv3.OpGet(keypath.KeyspaceAllocIDPath()),
 	).Commit()
 	cancel()
@@ -57,7 +57,7 @@ func (c *enabledKeyspaceCache) load(ctx context.Context, onPage func([]enabledKe
 		return nil, 0, errors.New("missing range response in initial keyspace metadata transaction")
 	}
 	revision := resp.Header.Revision
-	page, lastID, err := c.decodePage(first.Kvs, first.More, revision)
+	page, lastID, err := i.decodePage(first.Kvs, first.More, revision)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -99,7 +99,7 @@ func (c *enabledKeyspaceCache) load(ctx context.Context, onPage func([]enabledKe
 		for boundary := (uint64(lastID)/enabledKeyspaceRangeSize + 1) * enabledKeyspaceRangeSize; ; boundary += enabledKeyspaceRangeSize {
 			taskEnd := end
 			if boundary < watermark {
-				taskEnd = fmt.Sprintf("%s%08d", c.prefix, boundary)
+				taskEnd = fmt.Sprintf("%s%08d", i.prefix, boundary)
 			}
 			select {
 			case <-attemptCtx.Done():
@@ -122,7 +122,7 @@ func (c *enabledKeyspaceCache) load(ctx context.Context, onPage func([]enabledKe
 					if !ok {
 						return nil
 					}
-					if err := c.loadRange(attemptCtx, task.start, task.end, revision, consume); err != nil {
+					if err := i.loadRange(attemptCtx, task.start, task.end, revision, consume); err != nil {
 						return err
 					}
 				}
@@ -138,15 +138,15 @@ func (c *enabledKeyspaceCache) load(ctx context.Context, onPage func([]enabledKe
 	return entries, revision, nil
 }
 
-func (c *enabledKeyspaceCache) loadRange(ctx context.Context, start, end string, revision int64, consume func([]enabledKeyspace)) error {
+func (i *enabledKeyspaceIndex) loadRange(ctx context.Context, start, end string, revision int64, consume func([]enabledKeyspace)) error {
 	for {
 		requestCtx, cancel := context.WithTimeout(ctx, enabledKeyspaceRequestTimeout)
-		resp, err := c.client.Get(requestCtx, start, clientv3.WithRange(end), clientv3.WithLimit(enabledKeyspacePageSize), clientv3.WithRev(revision))
+		resp, err := i.client.Get(requestCtx, start, clientv3.WithRange(end), clientv3.WithLimit(enabledKeyspacePageSize), clientv3.WithRev(revision))
 		cancel()
 		if err != nil {
 			return err
 		}
-		page, _, err := c.decodePage(resp.Kvs, resp.More, revision)
+		page, _, err := i.decodePage(resp.Kvs, resp.More, revision)
 		if err != nil {
 			return err
 		}
@@ -162,7 +162,7 @@ func (c *enabledKeyspaceCache) loadRange(ctx context.Context, start, end string,
 }
 
 // decodePage completes validation before exposing any entries to the caller.
-func (c *enabledKeyspaceCache) decodePage(kvs []*mvccpb.KeyValue, more bool, revision int64) ([]enabledKeyspace, uint32, error) {
+func (i *enabledKeyspaceIndex) decodePage(kvs []*mvccpb.KeyValue, more bool, revision int64) ([]enabledKeyspace, uint32, error) {
 	if more && len(kvs) == 0 {
 		return nil, 0, fmt.Errorf("empty keyspace metadata page at revision %d", revision)
 	}
@@ -172,7 +172,7 @@ func (c *enabledKeyspaceCache) decodePage(kvs []*mvccpb.KeyValue, more bool, rev
 		if kv == nil {
 			return nil, 0, fmt.Errorf("missing keyspace metadata at revision %d", revision)
 		}
-		id, entry, enabled, err := c.decodeKeyspaceMeta(kv.Key, kv.Value)
+		id, entry, enabled, err := i.decodeKeyspaceMeta(kv.Key, kv.Value)
 		if err != nil {
 			return nil, 0, err
 		}

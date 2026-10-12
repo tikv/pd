@@ -150,13 +150,13 @@ func putEnabledKeyspaceTestMeta(t *testing.T, client *clientv3.Client, id uint32
 	return resp.Header.Revision
 }
 
-func startEnabledKeyspaceTestCache(t *testing.T, client *clientv3.Client) *enabledKeyspaceCache {
+func startEnabledKeyspaceTestIndex(t *testing.T, client *clientv3.Client) *enabledKeyspaceIndex {
 	t.Helper()
 	termCtx, cancel := context.WithCancel(context.Background())
-	cache := newEnabledKeyspaceCache(client, enabledKeyspaceTestPrefix)
+	index := newEnabledKeyspaceIndex(client, enabledKeyspaceTestPrefix)
 	done := make(chan struct{})
 	go func() {
-		cache.run(termCtx, enabledKeyspaceLoadHooks{})
+		index.run(termCtx, enabledKeyspaceLoadHooks{})
 		close(done)
 	}()
 	t.Cleanup(func() {
@@ -164,45 +164,45 @@ func startEnabledKeyspaceTestCache(t *testing.T, client *clientv3.Client) *enabl
 		select {
 		case <-done:
 		case <-time.After(5 * time.Second):
-			t.Error("cache did not stop after term cancellation")
+			t.Error("index did not stop after term cancellation")
 		}
 	})
-	return cache
+	return index
 }
 
-func TestEnabledKeyspaceCacheEmptySnapshotAndProgress(t *testing.T) {
+func TestEnabledKeyspaceIndexEmptySnapshotAndProgress(t *testing.T) {
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	t.Cleanup(clean)
-	cache := startEnabledKeyspaceTestCache(t, client)
+	index := startEnabledKeyspaceTestIndex(t, client)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	require.NoError(t, cache.waitReady(ctx))
-	initial, revision, err := cache.snapshotAtLeast(ctx, 0)
+	require.NoError(t, index.waitReady(ctx))
+	initial, revision, err := index.snapshotAtLeast(ctx, 0)
 	require.NoError(t, err)
 	require.Empty(t, initial)
 	require.Positive(t, revision)
 
 	resp, err := client.Put(ctx, "/test/unrelated", "changed")
 	require.NoError(t, err)
-	list, applied, err := cache.snapshotAtLeast(ctx, resp.Header.Revision)
+	list, applied, err := index.snapshotAtLeast(ctx, resp.Header.Revision)
 	require.NoError(t, err)
 	require.Empty(t, list)
 	require.GreaterOrEqual(t, applied, resp.Header.Revision)
 }
 
-func TestEnabledKeyspaceCacheAppliesMetadataChanges(t *testing.T) {
+func TestEnabledKeyspaceIndexAppliesMetadataChanges(t *testing.T) {
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	t.Cleanup(clean)
 	putEnabledKeyspaceTestMeta(t, client, 3, keyspacepb.KeyspaceState_ENABLED, keyspace.KeyspaceLevelGC)
 	putEnabledKeyspaceTestMeta(t, client, 2, keyspacepb.KeyspaceState_DISABLED, keyspace.UnifiedGC)
 	putEnabledKeyspaceTestMeta(t, client, 1, keyspacepb.KeyspaceState_ENABLED, keyspace.UnifiedGC)
-	cache := startEnabledKeyspaceTestCache(t, client)
+	index := startEnabledKeyspaceTestIndex(t, client)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	require.NoError(t, cache.waitReady(ctx))
-	list, _, err := cache.snapshotAtLeast(ctx, 0)
+	require.NoError(t, index.waitReady(ctx))
+	list, _, err := index.snapshotAtLeast(ctx, 0)
 	require.NoError(t, err)
 	require.Equal(t, []enabledKeyspace{
 		{id: 1, gcManagementType: keyspace.UnifiedGC},
@@ -210,7 +210,7 @@ func TestEnabledKeyspaceCacheAppliesMetadataChanges(t *testing.T) {
 	}, list)
 
 	rev := putEnabledKeyspaceTestMeta(t, client, 2, keyspacepb.KeyspaceState_ENABLED, keyspace.KeyspaceLevelGC)
-	list, _, err = cache.snapshotAtLeast(ctx, rev)
+	list, _, err = index.snapshotAtLeast(ctx, rev)
 	require.NoError(t, err)
 	require.Equal(t, []enabledKeyspace{
 		{id: 1, gcManagementType: keyspace.UnifiedGC},
@@ -219,7 +219,7 @@ func TestEnabledKeyspaceCacheAppliesMetadataChanges(t *testing.T) {
 	}, list)
 
 	rev = putEnabledKeyspaceTestMeta(t, client, 1, keyspacepb.KeyspaceState_DISABLED, keyspace.UnifiedGC)
-	list, _, err = cache.snapshotAtLeast(ctx, rev)
+	list, _, err = index.snapshotAtLeast(ctx, rev)
 	require.NoError(t, err)
 	require.Equal(t, []enabledKeyspace{
 		{id: 2, gcManagementType: keyspace.KeyspaceLevelGC},
@@ -228,12 +228,12 @@ func TestEnabledKeyspaceCacheAppliesMetadataChanges(t *testing.T) {
 
 	resp, err := client.Delete(ctx, fmt.Sprintf("%s%08d", enabledKeyspaceTestPrefix, 3))
 	require.NoError(t, err)
-	list, _, err = cache.snapshotAtLeast(ctx, resp.Header.Revision)
+	list, _, err = index.snapshotAtLeast(ctx, resp.Header.Revision)
 	require.NoError(t, err)
 	require.Equal(t, []enabledKeyspace{{id: 2, gcManagementType: keyspace.KeyspaceLevelGC}}, list)
 }
 
-func TestEnabledKeyspaceCacheLoadsAllPagesAtOneRevision(t *testing.T) {
+func TestEnabledKeyspaceIndexLoadsAllPagesAtOneRevision(t *testing.T) {
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	t.Cleanup(clean)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -262,7 +262,7 @@ func TestEnabledKeyspaceCacheLoadsAllPagesAtOneRevision(t *testing.T) {
 	clientWithPause.KV = &pauseAfterFirstPageKV{KV: client.KV, firstPage: firstPage, release: releasePage}
 	termCtx, stop := context.WithCancel(context.Background())
 	defer stop()
-	cache := newEnabledKeyspaceCache(&clientWithPause, enabledKeyspaceTestPrefix)
+	index := newEnabledKeyspaceIndex(&clientWithPause, enabledKeyspaceTestPrefix)
 	type loadedSnapshot struct {
 		entries  map[uint32]enabledKeyspace
 		revision int64
@@ -270,7 +270,7 @@ func TestEnabledKeyspaceCacheLoadsAllPagesAtOneRevision(t *testing.T) {
 	}
 	loaded := make(chan loadedSnapshot, 1)
 	go func() {
-		entries, loadedRevision, err := cache.load(termCtx, nil)
+		entries, loadedRevision, err := index.load(termCtx, nil)
 		loaded <- loadedSnapshot{entries: entries, revision: loadedRevision, err: err}
 	}()
 	select {
@@ -295,10 +295,10 @@ func TestEnabledKeyspaceCacheLoadsAllPagesAtOneRevision(t *testing.T) {
 	require.Contains(t, initial.entries, uint32(enabledKeyspacePageSize+1))
 	require.NotContains(t, initial.entries, uint32(300))
 
-	cache.publish(termCtx, initial.entries, initial.revision)
+	index.publish(termCtx, initial.entries, initial.revision)
 	watchDone := make(chan error, 1)
-	go func() { watchDone <- cache.watch(termCtx, initial.revision+1) }()
-	list, applied, err := cache.snapshotAtLeast(ctx, insertedRevision)
+	go func() { watchDone <- index.watch(termCtx, initial.revision+1) }()
+	list, applied, err := index.snapshotAtLeast(ctx, insertedRevision)
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, applied, insertedRevision)
 	require.Len(t, list, enabledKeyspacePageSize+1)
@@ -312,28 +312,28 @@ func TestEnabledKeyspaceCacheLoadsAllPagesAtOneRevision(t *testing.T) {
 	}
 }
 
-func TestEnabledKeyspaceCacheRejectsMalformedMetadataUntilReload(t *testing.T) {
+func TestEnabledKeyspaceIndexRejectsMalformedMetadataUntilReload(t *testing.T) {
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	t.Cleanup(clean)
 	initial := putEnabledKeyspaceTestMeta(t, client, 1, keyspacepb.KeyspaceState_ENABLED, keyspace.KeyspaceLevelGC)
-	cache := startEnabledKeyspaceTestCache(t, client)
+	index := startEnabledKeyspaceTestIndex(t, client)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	require.NoError(t, cache.waitReady(ctx))
+	require.NoError(t, index.waitReady(ctx))
 
 	resp, err := client.Put(ctx, fmt.Sprintf("%s%08d", enabledKeyspaceTestPrefix, 2), "malformed protobuf")
 	require.NoError(t, err)
 	shortCtx, stop := context.WithTimeout(ctx, 300*time.Millisecond)
 	defer stop()
-	_, _, err = cache.snapshotAtLeast(shortCtx, resp.Header.Revision)
+	_, _, err = index.snapshotAtLeast(shortCtx, resp.Header.Revision)
 	require.ErrorIs(t, err, context.DeadlineExceeded)
-	list, revision, err := cache.snapshotAtLeast(ctx, initial)
+	list, revision, err := index.snapshotAtLeast(ctx, initial)
 	require.NoError(t, err)
 	require.Equal(t, initial, revision)
 	require.Equal(t, []enabledKeyspace{{id: 1, gcManagementType: keyspace.KeyspaceLevelGC}}, list)
 
 	fixed := putEnabledKeyspaceTestMeta(t, client, 2, keyspacepb.KeyspaceState_ENABLED, keyspace.UnifiedGC)
-	list, revision, err = cache.snapshotAtLeast(ctx, fixed)
+	list, revision, err = index.snapshotAtLeast(ctx, fixed)
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, revision, fixed)
 	require.Equal(t, []enabledKeyspace{
@@ -342,17 +342,17 @@ func TestEnabledKeyspaceCacheRejectsMalformedMetadataUntilReload(t *testing.T) {
 	}, list)
 }
 
-func TestEnabledKeyspaceCacheReloadsAfterCompactedWatch(t *testing.T) {
+func TestEnabledKeyspaceIndexReloadsAfterCompactedWatch(t *testing.T) {
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	t.Cleanup(clean)
 	first := putEnabledKeyspaceTestMeta(t, client, 1, keyspacepb.KeyspaceState_ENABLED, keyspace.KeyspaceLevelGC)
 	termCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cache := newEnabledKeyspaceCache(client, enabledKeyspaceTestPrefix)
+	index := newEnabledKeyspaceIndex(client, enabledKeyspaceTestPrefix)
 	watchStarting := make(chan struct{}, 1)
 	releaseWatch := make(chan struct{})
 	firstWatch := true
-	cache.watcherFactory = func(client *clientv3.Client) clientv3.Watcher {
+	index.watcherFactory = func(client *clientv3.Client) clientv3.Watcher {
 		watcher := clientv3.NewWatcher(client)
 		if !firstWatch {
 			return watcher
@@ -363,7 +363,7 @@ func TestEnabledKeyspaceCacheReloadsAfterCompactedWatch(t *testing.T) {
 	var pageCalls, snapshotCalls atomic.Int32
 	done := make(chan struct{})
 	go func() {
-		cache.run(termCtx, enabledKeyspaceLoadHooks{onPage: func([]enabledKeyspace) { pageCalls.Add(1) }, onInitialSnapshot: func([]enabledKeyspace) { snapshotCalls.Add(1) }})
+		index.run(termCtx, enabledKeyspaceLoadHooks{onPage: func([]enabledKeyspace) { pageCalls.Add(1) }, onInitialSnapshot: func([]enabledKeyspace) { snapshotCalls.Add(1) }})
 		close(done)
 	}()
 	ctx, stop := context.WithTimeout(context.Background(), 10*time.Second)
@@ -371,9 +371,9 @@ func TestEnabledKeyspaceCacheReloadsAfterCompactedWatch(t *testing.T) {
 	select {
 	case <-watchStarting:
 	case <-ctx.Done():
-		t.Fatal("initial cache load did not reach watch startup")
+		t.Fatal("initial index load did not reach watch startup")
 	}
-	list, revision, err := cache.snapshotAtLeast(ctx, first)
+	list, revision, err := index.snapshotAtLeast(ctx, first)
 	require.NoError(t, err)
 	require.Equal(t, first, revision)
 	require.Equal(t, []enabledKeyspace{{id: 1, gcManagementType: keyspace.KeyspaceLevelGC}}, list)
@@ -383,7 +383,7 @@ func TestEnabledKeyspaceCacheReloadsAfterCompactedWatch(t *testing.T) {
 	_, err = client.Compact(ctx, latest, clientv3.WithCompactPhysical())
 	require.NoError(t, err)
 	close(releaseWatch)
-	list, applied, err := cache.snapshotAtLeast(ctx, latest)
+	list, applied, err := index.snapshotAtLeast(ctx, latest)
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, applied, latest)
 	require.Equal(t, []enabledKeyspace{{id: 2, gcManagementType: keyspace.UnifiedGC}}, list)
@@ -393,28 +393,28 @@ func TestEnabledKeyspaceCacheReloadsAfterCompactedWatch(t *testing.T) {
 	select {
 	case <-done:
 	case <-ctx.Done():
-		t.Fatal("cache run did not stop")
+		t.Fatal("index run did not stop")
 	}
 }
 
-func TestEnabledKeyspaceCacheTermCancellationUnblocksWaiters(t *testing.T) {
+func TestEnabledKeyspaceIndexTermCancellationUnblocksWaiters(t *testing.T) {
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	t.Cleanup(clean)
 	termCtx, cancel := context.WithCancel(context.Background())
-	cache := newEnabledKeyspaceCache(client, enabledKeyspaceTestPrefix)
+	index := newEnabledKeyspaceIndex(client, enabledKeyspaceTestPrefix)
 	done := make(chan struct{})
 	go func() {
-		cache.run(termCtx, enabledKeyspaceLoadHooks{})
+		index.run(termCtx, enabledKeyspaceLoadHooks{})
 		close(done)
 	}()
 	ctx, stop := context.WithTimeout(context.Background(), 10*time.Second)
 	defer stop()
-	require.NoError(t, cache.waitReady(ctx))
-	_, revision, err := cache.snapshotAtLeast(ctx, 0)
+	require.NoError(t, index.waitReady(ctx))
+	_, revision, err := index.snapshotAtLeast(ctx, 0)
 	require.NoError(t, err)
 	waitResult := make(chan error, 1)
 	go func() {
-		_, _, err := cache.snapshotAtLeast(ctx, revision+100)
+		_, _, err := index.snapshotAtLeast(ctx, revision+100)
 		waitResult <- err
 	}()
 	cancel()
@@ -427,11 +427,11 @@ func TestEnabledKeyspaceCacheTermCancellationUnblocksWaiters(t *testing.T) {
 	select {
 	case <-done:
 	case <-ctx.Done():
-		t.Fatal("cache run did not stop after term cancellation")
+		t.Fatal("index run did not stop after term cancellation")
 	}
 }
 
-func TestEnabledKeyspaceCacheWatchCreationTimesOut(t *testing.T) {
+func TestEnabledKeyspaceIndexWatchCreationTimesOut(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	server := grpc.NewServer()
@@ -444,9 +444,9 @@ func TestEnabledKeyspaceCacheWatchCreationTimesOut(t *testing.T) {
 	defer client.Close()
 	termCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cache := newEnabledKeyspaceCache(client, enabledKeyspaceTestPrefix)
+	index := newEnabledKeyspaceIndex(client, enabledKeyspaceTestPrefix)
 	done := make(chan error, 1)
-	go func() { done <- cache.watch(termCtx, 1) }()
+	go func() { done <- index.watch(termCtx, 1) }()
 	select {
 	case <-backend.started:
 	case <-time.After(3 * time.Second):
@@ -463,16 +463,16 @@ func TestEnabledKeyspaceCacheWatchCreationTimesOut(t *testing.T) {
 	}
 }
 
-func TestEnabledKeyspaceCacheReloadsAfterWatchCreationTimeout(t *testing.T) {
+func TestEnabledKeyspaceIndexReloadsAfterWatchCreationTimeout(t *testing.T) {
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	t.Cleanup(clean)
 	first := putEnabledKeyspaceTestMeta(t, client, 1, keyspacepb.KeyspaceState_ENABLED, keyspace.KeyspaceLevelGC)
 	termCtx, cancel := context.WithCancel(context.Background())
-	cache := newEnabledKeyspaceCache(client, enabledKeyspaceTestPrefix)
+	index := newEnabledKeyspaceIndex(client, enabledKeyspaceTestPrefix)
 	watchStarted := make(chan struct{}, 1)
 	releaseWatch := make(chan struct{})
 	firstWatch := true
-	cache.watcherFactory = func(client *clientv3.Client) clientv3.Watcher {
+	index.watcherFactory = func(client *clientv3.Client) clientv3.Watcher {
 		watcher := clientv3.NewWatcher(client)
 		if !firstWatch {
 			return watcher
@@ -482,7 +482,7 @@ func TestEnabledKeyspaceCacheReloadsAfterWatchCreationTimeout(t *testing.T) {
 	}
 	done := make(chan struct{})
 	go func() {
-		cache.run(termCtx, enabledKeyspaceLoadHooks{})
+		index.run(termCtx, enabledKeyspaceLoadHooks{})
 		close(done)
 	}()
 	defer func() {
@@ -490,7 +490,7 @@ func TestEnabledKeyspaceCacheReloadsAfterWatchCreationTimeout(t *testing.T) {
 		select {
 		case <-done:
 		case <-time.After(5 * time.Second):
-			t.Error("cache did not stop")
+			t.Error("index did not stop")
 		}
 	}()
 	ctx, stop := context.WithTimeout(context.Background(), 8*time.Second)
@@ -498,14 +498,14 @@ func TestEnabledKeyspaceCacheReloadsAfterWatchCreationTimeout(t *testing.T) {
 	select {
 	case <-watchStarted:
 	case <-ctx.Done():
-		t.Fatal("initial cache load did not reach watch creation")
+		t.Fatal("initial index load did not reach watch creation")
 	}
-	initial, revision, err := cache.snapshotAtLeast(ctx, first)
+	initial, revision, err := index.snapshotAtLeast(ctx, first)
 	require.NoError(t, err)
 	require.Equal(t, first, revision)
 	require.Equal(t, []enabledKeyspace{{id: 1, gcManagementType: keyspace.KeyspaceLevelGC}}, initial)
 	latest := putEnabledKeyspaceTestMeta(t, client, 2, keyspacepb.KeyspaceState_ENABLED, keyspace.UnifiedGC)
-	list, applied, err := cache.snapshotAtLeast(ctx, latest)
+	list, applied, err := index.snapshotAtLeast(ctx, latest)
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, applied, latest)
 	require.Equal(t, []enabledKeyspace{
@@ -514,22 +514,22 @@ func TestEnabledKeyspaceCacheReloadsAfterWatchCreationTimeout(t *testing.T) {
 	}, list)
 }
 
-func TestEnabledKeyspaceCacheWatchSurvivesCreationTimeout(t *testing.T) {
+func TestEnabledKeyspaceIndexWatchSurvivesCreationTimeout(t *testing.T) {
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	t.Cleanup(clean)
 	termCtx, stop := context.WithCancel(context.Background())
-	cache := newEnabledKeyspaceCache(client, enabledKeyspaceTestPrefix)
+	index := newEnabledKeyspaceIndex(client, enabledKeyspaceTestPrefix)
 	created := make(chan struct{}, 1)
-	cache.watcherFactory = func(client *clientv3.Client) clientv3.Watcher {
+	index.watcherFactory = func(client *clientv3.Client) clientv3.Watcher {
 		return &signalWatchCreated{Watcher: clientv3.NewWatcher(client), created: created}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	entries, revision, err := cache.load(termCtx, nil)
+	entries, revision, err := index.load(termCtx, nil)
 	require.NoError(t, err)
-	require.True(t, cache.publish(termCtx, entries, revision))
+	require.True(t, index.publish(termCtx, entries, revision))
 	done := make(chan error, 1)
-	go func() { done <- cache.watch(termCtx, revision+1) }()
+	go func() { done <- index.watch(termCtx, revision+1) }()
 	defer func() {
 		stop()
 		select {
@@ -549,7 +549,7 @@ func TestEnabledKeyspaceCacheWatchSurvivesCreationTimeout(t *testing.T) {
 	case <-time.After(4 * time.Second):
 	}
 	latest := putEnabledKeyspaceTestMeta(t, client, 3, keyspacepb.KeyspaceState_ENABLED, keyspace.UnifiedGC)
-	list, applied, err := cache.snapshotAtLeast(ctx, latest)
+	list, applied, err := index.snapshotAtLeast(ctx, latest)
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, applied, latest)
 	require.Equal(t, []enabledKeyspace{{id: 3, gcManagementType: keyspace.UnifiedGC}}, list)
@@ -601,7 +601,7 @@ func putEnabledKeyspaceTestWatermark(t *testing.T, client *clientv3.Client, wate
 	require.NoError(t, err)
 }
 
-func TestEnabledKeyspaceCacheFirstPageTransaction(t *testing.T) {
+func TestEnabledKeyspaceIndexFirstPageTransaction(t *testing.T) {
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	t.Cleanup(clean)
 	for _, count := range []int{0, 1, 256} {
@@ -646,8 +646,8 @@ func TestEnabledKeyspaceCacheFirstPageTransaction(t *testing.T) {
 				}
 				return err
 			})
-			cache := newEnabledKeyspaceCache(intercepted, prefix)
-			entries, revision, err := cache.load(context.Background(), nil)
+			index := newEnabledKeyspaceIndex(intercepted, prefix)
+			entries, revision, err := index.load(context.Background(), nil)
 			require.NoError(t, err)
 			require.Len(t, entries, count)
 			require.Positive(t, revision)
@@ -658,7 +658,7 @@ func TestEnabledKeyspaceCacheFirstPageTransaction(t *testing.T) {
 	}
 }
 
-func TestEnabledKeyspaceCacheRangeCoverage(t *testing.T) {
+func TestEnabledKeyspaceIndexRangeCoverage(t *testing.T) {
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	t.Cleanup(clean)
 	ids := append(enabledKeyspaceTestIDs(256), 256, 4095, 4096, 8191, 8192, 9999, 10000, 50000, constant.SystemKeyspaceID, constant.MaxValidKeyspaceID)
@@ -705,8 +705,8 @@ func TestEnabledKeyspaceCacheRangeCoverage(t *testing.T) {
 				}
 				return err
 			})
-			cache := newEnabledKeyspaceCache(intercepted, enabledKeyspaceTestPrefix)
-			entries, loadedRevision, err := cache.load(context.Background(), nil)
+			index := newEnabledKeyspaceIndex(intercepted, enabledKeyspaceTestPrefix)
+			entries, loadedRevision, err := index.load(context.Background(), nil)
 			require.NoError(t, err)
 			require.Equal(t, revision, loadedRevision)
 			require.Len(t, entries, len(ids))
@@ -718,7 +718,7 @@ func TestEnabledKeyspaceCacheRangeCoverage(t *testing.T) {
 	}
 }
 
-func TestEnabledKeyspaceCacheRollingWorkers(t *testing.T) {
+func TestEnabledKeyspaceIndexRollingWorkers(t *testing.T) {
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	t.Cleanup(clean)
 	putEnabledKeyspaceTestIDs(t, client, append(enabledKeyspaceTestIDs(256), constant.SystemKeyspaceID))
@@ -752,10 +752,10 @@ func TestEnabledKeyspaceCacheRollingWorkers(t *testing.T) {
 		}
 		return invoke(ctx, method, req, reply, cc, opts...)
 	})
-	cache := newEnabledKeyspaceCache(intercepted, enabledKeyspaceTestPrefix)
+	index := newEnabledKeyspaceIndex(intercepted, enabledKeyspaceTestPrefix)
 	loaded := make(chan error, 1)
 	go func() {
-		entries, _, err := cache.load(ctx, nil)
+		entries, _, err := index.load(ctx, nil)
 		if err == nil && len(entries) != 257 {
 			err = fmt.Errorf("loaded %d entries", len(entries))
 		}
@@ -790,7 +790,7 @@ func TestEnabledKeyspaceCacheRollingWorkers(t *testing.T) {
 	require.Zero(t, active.Load())
 }
 
-func TestEnabledKeyspaceCacheCancelsAttempt(t *testing.T) {
+func TestEnabledKeyspaceIndexCancelsAttempt(t *testing.T) {
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	t.Cleanup(clean)
 	putEnabledKeyspaceTestIDs(t, client, append(enabledKeyspaceTestIDs(256), constant.SystemKeyspaceID))
@@ -831,10 +831,10 @@ func TestEnabledKeyspaceCacheCancelsAttempt(t *testing.T) {
 				}
 				return invoke(ctx, method, req, reply, cc, opts...)
 			})
-			cache := newEnabledKeyspaceCache(intercepted, enabledKeyspaceTestPrefix)
+			index := newEnabledKeyspaceIndex(intercepted, enabledKeyspaceTestPrefix)
 			done := make(chan error, 1)
 			go func() {
-				entries, revision, err := cache.load(ctx, nil)
+				entries, revision, err := index.load(ctx, nil)
 				if entries != nil || revision != 0 {
 					done <- errors.New("failed attempt returned a partial snapshot")
 					return
@@ -869,12 +869,12 @@ func TestEnabledKeyspaceCacheCancelsAttempt(t *testing.T) {
 				t.Fatal("failed attempt did not cancel blocked workers and producer")
 			}
 			require.Zero(t, active.Load())
-			require.Zero(t, cache.appliedRevision())
+			require.Zero(t, index.appliedRevision())
 		})
 	}
 }
 
-func TestEnabledKeyspaceCacheLaggingFollowerWithoutWatermark(t *testing.T) {
+func TestEnabledKeyspaceIndexLaggingFollowerWithoutWatermark(t *testing.T) {
 	servers, _, clean := etcdutil.NewTestEtcdCluster(t, 3, nil)
 	t.Cleanup(clean)
 	testCtx, testCancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -921,23 +921,23 @@ func TestEnabledKeyspaceCacheLaggingFollowerWithoutWatermark(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, stale.Kvs)
 	require.Less(t, stale.Header.Revision, latest)
-	cache := newEnabledKeyspaceCache(followerClient, enabledKeyspaceTestPrefix)
+	index := newEnabledKeyspaceIndex(followerClient, enabledKeyspaceTestPrefix)
 	ctx, cancel := context.WithTimeout(testCtx, 200*time.Millisecond)
 	defer cancel()
-	entries, revision, err := cache.load(ctx, nil)
+	entries, revision, err := index.load(ctx, nil)
 	require.Error(t, err, "an isolated follower must not publish its stale empty prefix")
 	require.Nil(t, entries)
 	require.Zero(t, revision)
 	mend()
 	ctx, stop := context.WithTimeout(testCtx, 10*time.Second)
 	defer stop()
-	entries, revision, err = cache.load(ctx, nil)
+	entries, revision, err = index.load(ctx, nil)
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, revision, latest)
 	require.Equal(t, map[uint32]enabledKeyspace{1: {id: 1, gcManagementType: keyspace.UnifiedGC}}, entries)
 }
 
-func TestEnabledKeyspaceCacheInitialHooks(t *testing.T) {
+func TestEnabledKeyspaceIndexInitialHooks(t *testing.T) {
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	t.Cleanup(clean)
 	putEnabledKeyspaceTestIDs(t, client, append(enabledKeyspaceTestIDs(256), 4096, 8192))
@@ -946,14 +946,14 @@ func TestEnabledKeyspaceCacheInitialHooks(t *testing.T) {
 	defer cancel()
 	ctx, stop := context.WithTimeout(context.Background(), 10*time.Second)
 	defer stop()
-	cache := newEnabledKeyspaceCache(client, enabledKeyspaceTestPrefix)
+	index := newEnabledKeyspaceIndex(client, enabledKeyspaceTestPrefix)
 	var mu sync.Mutex
 	var pages [][]enabledKeyspace
 	snapshots := make(chan []enabledKeyspace, 2)
 	hooks := enabledKeyspaceLoadHooks{
 		onPage: func(page []enabledKeyspace) {
 			// Reentrant access must be safe, and no partial snapshot may be ready.
-			if cache.appliedRevision() != 0 {
+			if index.appliedRevision() != 0 {
 				panic("page callback after initial publication")
 			}
 			mu.Lock()
@@ -961,14 +961,14 @@ func TestEnabledKeyspaceCacheInitialHooks(t *testing.T) {
 			mu.Unlock()
 		},
 		onInitialSnapshot: func(snapshot []enabledKeyspace) {
-			if cache.appliedRevision() == 0 {
+			if index.appliedRevision() == 0 {
 				panic("snapshot callback before publication")
 			}
 			snapshots <- snapshot
 		},
 	}
 	done := make(chan struct{})
-	go func() { cache.run(termCtx, hooks); close(done) }()
+	go func() { index.run(termCtx, hooks); close(done) }()
 	defer func() { cancel(); <-done }()
 	var initial []enabledKeyspace
 	select {
@@ -987,7 +987,7 @@ func TestEnabledKeyspaceCacheInitialHooks(t *testing.T) {
 	require.True(t, slices.IsSortedFunc(initial, func(a, b enabledKeyspace) int { return int(a.id) - int(b.id) }))
 	// A watch change must not mutate retained page/snapshot values or add hooks.
 	latest := putEnabledKeyspaceTestMeta(t, client, 4096, keyspacepb.KeyspaceState_DISABLED, keyspace.KeyspaceLevelGC)
-	current, _, err := cache.snapshotAtLeast(ctx, latest)
+	current, _, err := index.snapshotAtLeast(ctx, latest)
 	require.NoError(t, err)
 	require.Len(t, current, 257)
 	require.Len(t, initial, 258)
@@ -1005,12 +1005,12 @@ func TestEnabledKeyspaceCacheInitialHooks(t *testing.T) {
 		}
 	}
 	mu.Unlock()
-	current, _, err = cache.snapshotAtLeast(ctx, latest)
+	current, _, err = index.snapshotAtLeast(ctx, latest)
 	require.NoError(t, err)
 	require.Equal(t, uint32(0), current[0].id)
 }
 
-func TestEnabledKeyspaceCachePagesAfterConsumedRanges(t *testing.T) {
+func TestEnabledKeyspaceIndexPagesAfterConsumedRanges(t *testing.T) {
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	t.Cleanup(clean)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -1057,8 +1057,8 @@ func TestEnabledKeyspaceCachePagesAfterConsumedRanges(t *testing.T) {
 		}
 		return err
 	})
-	cache := newEnabledKeyspaceCache(intercepted, enabledKeyspaceTestPrefix)
-	entries, loadedRevision, err := cache.load(ctx, func(page []enabledKeyspace) {
+	index := newEnabledKeyspaceIndex(intercepted, enabledKeyspaceTestPrefix)
+	entries, loadedRevision, err := index.load(ctx, func(page []enabledKeyspace) {
 		mu.Lock()
 		pageSizes = append(pageSizes, len(page))
 		mu.Unlock()

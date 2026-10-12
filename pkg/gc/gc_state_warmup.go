@@ -51,7 +51,7 @@ type gcStateWarmupScope struct {
 type gcStateWarmup struct {
 	manager    *GCStateManager
 	generation *gcStateGeneration
-	index      *enabledKeyspaceCache
+	index      *enabledKeyspaceIndex
 
 	inputMu   syncutil.Mutex
 	accepting bool
@@ -71,7 +71,7 @@ type gcStateWarmup struct {
 	finished                  chan struct{}
 }
 
-func newGCStateWarmup(m *GCStateManager, generation *gcStateGeneration, index *enabledKeyspaceCache) *gcStateWarmup {
+func newGCStateWarmup(m *GCStateManager, generation *gcStateGeneration, index *enabledKeyspaceIndex) *gcStateWarmup {
 	return &gcStateWarmup{
 		manager:     m,
 		generation:  generation,

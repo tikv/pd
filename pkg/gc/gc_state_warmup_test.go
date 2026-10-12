@@ -380,7 +380,7 @@ func TestGCStateWarmupInitialTargetsOnly(t *testing.T) {
 	m := newGCStateLoaderManager(t, func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoke grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 		return invoke(ctx, method, req, reply, cc, opts...)
 	})
-	index := newEnabledKeyspaceCache(nil, "")
+	index := newEnabledKeyspaceIndex(nil, "")
 	w := newGCStateWarmup(m, m.activeGeneration.Load(), index)
 	runGCWarmupTest(t, w)
 	w.onPage(gcWarmupEntries(100, 1))
@@ -578,7 +578,7 @@ func TestGCStateWarmupReloadDoesNotExpandTargets(t *testing.T) {
 	putEnabledKeyspaceTestMeta(t, client, 100, keyspacepb.KeyspaceState_ENABLED, keyspace.KeyspaceLevelGC)
 	putEnabledKeyspaceTestMeta(t, client, 101, keyspacepb.KeyspaceState_DISABLED, keyspace.KeyspaceLevelGC)
 	putEnabledKeyspaceTestMeta(t, client, 102, keyspacepb.KeyspaceState_ENABLED, keyspace.UnifiedGC)
-	index := newEnabledKeyspaceCache(client, enabledKeyspaceTestPrefix)
+	index := newEnabledKeyspaceIndex(client, enabledKeyspaceTestPrefix)
 	started := make(chan struct{}, 1)
 	release := make(chan struct{})
 	first := true
@@ -646,7 +646,7 @@ func TestGCStateWarmupBeforeMetadataFinalPage(t *testing.T) {
 	m := newGCStateLoaderManager(t, func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoke grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 		return invoke(ctx, method, req, reply, cc, opts...)
 	})
-	index := newEnabledKeyspaceCache(intercepted, enabledKeyspaceTestPrefix)
+	index := newEnabledKeyspaceIndex(intercepted, enabledKeyspaceTestPrefix)
 	w := newGCStateWarmup(m, m.activeGeneration.Load(), index)
 	runGCWarmupTest(t, w)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -681,7 +681,7 @@ func TestGCStateWarmupRetiresObsoleteTarget(t *testing.T) {
 		}
 		return invoke(ctx, method, req, reply, cc, opts...)
 	})
-	index := newEnabledKeyspaceCache(nil, "")
+	index := newEnabledKeyspaceIndex(nil, "")
 	index.publish(context.Background(), map[uint32]enabledKeyspace{100: gcWarmupEntries(100, 1)[0]}, 1)
 	w := newGCStateWarmup(m, m.activeGeneration.Load(), index)
 	w.onInitialSnapshot(gcWarmupEntries(100, 1))

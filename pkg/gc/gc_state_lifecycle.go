@@ -38,7 +38,7 @@ type gcStateGeneration struct {
 	// Runtime ownership is established before publishing this generation.
 	cancel   context.CancelFunc
 	workDone chan struct{}
-	index    *enabledKeyspaceCache
+	index    *enabledKeyspaceIndex
 	warmup   *gcStateWarmup
 }
 
@@ -95,7 +95,7 @@ func (m *GCStateManager) OnNodeBecomesLeader() func() {
 	if m.etcdClient != nil {
 		runtimeCtx, generation.cancel = context.WithCancel(context.Background())
 		generation.workDone = make(chan struct{})
-		generation.index = newEnabledKeyspaceCache(m.etcdClient, keypath.KeyspaceMetaPrefix())
+		generation.index = newEnabledKeyspaceIndex(m.etcdClient, keypath.KeyspaceMetaPrefix())
 		generation.warmup = newGCStateWarmup(m, generation, generation.index)
 	}
 	failpoint.InjectCall("beforeLeaderGCStateCacheReset")
