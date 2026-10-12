@@ -28,6 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
@@ -181,6 +182,29 @@ func TestBalanceRuntimeChecksSelectedAction(t *testing.T) {
 	plans, err = manager.balanceTable(t.Context(), ids[0], true)
 	require.NoError(t, err)
 	require.Equal(t, 1, changedPlans(plans))
+}
+
+func TestBalanceRuntimeRejectsUnobservedPersistentUpdate(t *testing.T) {
+	manager := newBalanceRuntimeManager(t)
+	ids := seedBalanceGroups(t, manager, []uint64{1, 1, 1})
+	manager.SetBalanceActionBuilder(func(_ context.Context, group *GroupState, _ GroupKeyRanges) (BalanceActionSet, bool) {
+		return BalanceActionSet{LeaderTargets: group.VoterStoreIDs}, true
+	}, nil, nil, nil)
+	plans, err := manager.RebalanceAffinityGroup(t.Context(), ids[0], false)
+	require.NoError(t, err)
+	selected := changedPlan(plans).GroupID
+	group := manager.GetAffinityGroupState(selected).Group
+	group.BalancePolicy = BalancePolicyFixed
+	require.NoError(t, manager.storage.RunInTxn(t.Context(), func(txn kv.Txn) error {
+		return manager.storage.SaveAffinityGroup(txn, selected, &group)
+	}))
+	plans, err = manager.RebalanceAffinityGroup(t.Context(), ids[0], true)
+	require.NoError(t, err)
+	require.Empty(t, plans, "a remote update must be protected before the watcher observes it")
+	value, err := manager.storage.LoadAffinityGroup(selected)
+	require.NoError(t, err)
+	require.Contains(t, value, `"balance_policy":"fixed"`)
+	require.Equal(t, uint64(1), manager.GetAffinityGroupState(selected).LeaderStoreID)
 }
 
 func TestFixedGroupRetainsTargetDuringRepair(t *testing.T) {

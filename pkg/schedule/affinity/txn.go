@@ -17,6 +17,7 @@ package affinity
 import (
 	"bytes"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"slices"
@@ -32,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
@@ -363,6 +365,7 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVerInternal(groupID string
 	}
 
 	// Step 2: Save the Group in storage.
+	original := group.Group
 	group.LeaderStoreID = leaderStoreID
 	group.VoterStoreIDs = slices.Clone(voterStoreIDs)
 	// Keep the input generation and committed rules fixed across the write.
@@ -384,11 +387,39 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVerInternal(groupID string
 			}
 		}
 		err = m.storage.RunInTxn(m.ctx, func(txn kv.Txn) error {
+			if affinityVer != 0 {
+				key := keypath.AffinityGroupPath(groupID)
+				var value string
+				var loadErr error
+				if revisionTxn, ok := txn.(kv.RevisionTxn); ok {
+					value, loadErr = revisionTxn.LoadWithRevision(key)
+				} else {
+					value, loadErr = txn.Load(key)
+				}
+				if loadErr != nil {
+					return loadErr
+				}
+				var persisted Group
+				if value == "" {
+					return errs.ErrEtcdTxnConflict.FastGenByArgs()
+				}
+				if err := json.Unmarshal([]byte(value), &persisted); err != nil {
+					return err
+				}
+				if persisted.ID != original.ID || persisted.CreateTimestamp != original.CreateTimestamp ||
+					persisted.BalancePolicy != original.BalancePolicy || persisted.LeaderStoreID != original.LeaderStoreID ||
+					!slices.Equal(normalizeVoters(persisted.VoterStoreIDs), original.VoterStoreIDs) {
+					return errs.ErrEtcdTxnConflict.FastGenByArgs()
+				}
+			}
 			return m.storage.SaveAffinityGroup(txn, groupID, &group.Group)
 		})
 		return err == nil, err
 	}
 	saved, err := save()
+	if errs.ErrEtcdTxnConflict.Equal(err) {
+		return m.GetAffinityGroupState(groupID), nil
+	}
 	if err != nil {
 		return nil, err
 	}
