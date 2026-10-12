@@ -73,8 +73,9 @@ func TestBalanceRuntimeConvergesBeforeNextPlan(t *testing.T) {
 	ids := seedBalanceGroups(t, manager, []uint64{1, 1, 1})
 	manager.SetBalanceActionBuilder(func(_ context.Context, group *GroupState, _ GroupKeyRanges) (BalanceActionSet, bool) {
 		return BalanceActionSet{LeaderTargets: group.VoterStoreIDs}, true
-	}, nil, nil, nil)
-	old := manager.GetAffinityGroupState(ids[0])
+	}, nil, nil)
+	snapshot := manager.balanceSnapshot(ids[0])
+	require.NoError(t, manager.captureBalanceDependencies(t.Context(), snapshot))
 	plans, err := manager.balanceTable(t.Context(), ids[0], true)
 	require.NoError(t, err)
 	require.Equal(t, 1, changedPlans(plans))
@@ -84,9 +85,11 @@ func TestBalanceRuntimeConvergesBeforeNextPlan(t *testing.T) {
 	require.Empty(t, plans)
 	_, err = manager.UpdateAffinityGroupPeers(ids[0], 3, []uint64{1, 2, 3})
 	require.NoError(t, err)
-	state, err := manager.updateAffinityGroupPeersWithBalanceVer(ids[0], old.affinityVer, 2, []uint64{1, 2, 3})
+	applied, err := manager.commitBalancePlans(t.Context(), snapshot,
+		[]BalancePlan{{GroupID: ids[0], LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2, 3}, Changed: true}})
 	require.NoError(t, err)
-	require.Equal(t, uint64(3), state.LeaderStoreID)
+	require.False(t, applied)
+	require.Equal(t, uint64(3), manager.GetAffinityGroupState(ids[0]).LeaderStoreID)
 }
 
 func TestBalanceRuntimeStableCacheAndInvalidation(t *testing.T) {
@@ -97,7 +100,7 @@ func TestBalanceRuntimeStableCacheAndInvalidation(t *testing.T) {
 	manager.SetBalanceActionBuilder(func(_ context.Context, group *GroupState, _ GroupKeyRanges) (BalanceActionSet, bool) {
 		builds.Add(1)
 		return BalanceActionSet{LeaderTargets: group.VoterStoreIDs}, true
-	}, rules.Load, nil, nil)
+	}, rules.Load, nil)
 	plans, err := manager.balanceTable(t.Context(), ids[0], true)
 	require.NoError(t, err)
 	require.Zero(t, changedPlans(plans))
@@ -126,7 +129,7 @@ func TestBalanceRuntimeRejectsChangedTableSnapshot(t *testing.T) {
 			manager.InvalidateBalance(ids[2])
 		}
 		return BalanceActionSet{LeaderTargets: group.VoterStoreIDs}, true
-	}, nil, nil, nil)
+	}, nil, nil)
 	plans, err := manager.balanceTable(t.Context(), ids[0], true)
 	require.NoError(t, err)
 	require.Empty(t, plans, "stale plans must not be reported as applied")
@@ -143,7 +146,7 @@ func TestBalanceRuntimeBuildBudgetRetainsProgress(t *testing.T) {
 	manager.SetBalanceActionBuilder(func(_ context.Context, group *GroupState, _ GroupKeyRanges) (BalanceActionSet, bool) {
 		builds++
 		return BalanceActionSet{LeaderTargets: group.VoterStoreIDs}, true
-	}, rules.Load, nil, nil)
+	}, rules.Load, nil)
 	for i := 1; i <= 3; i++ {
 		_, err := manager.balanceTableWithBudget(t.Context(), ids[0], true, 1)
 		require.NoError(t, err)
@@ -168,7 +171,7 @@ func TestBalanceRuntimeChecksSelectedAction(t *testing.T) {
 	ready, legal := false, false
 	manager.SetBalanceActionBuilder(func(_ context.Context, group *GroupState, _ GroupKeyRanges) (BalanceActionSet, bool) {
 		return BalanceActionSet{LeaderTargets: group.VoterStoreIDs}, true
-	}, nil, func(context.Context, *GroupState, GroupKeyRanges, BalancePlan) (bool, bool) { return ready, legal }, nil)
+	}, nil, func(context.Context, *GroupState, GroupKeyRanges, BalancePlan) (bool, bool) { return ready, legal })
 	plans, err := manager.balanceTable(t.Context(), ids[0], true)
 	require.NoError(t, err)
 	require.Empty(t, plans)
@@ -189,7 +192,7 @@ func TestBalanceRuntimeRejectsUnobservedPersistentUpdate(t *testing.T) {
 	ids := seedBalanceGroups(t, manager, []uint64{1, 1, 1})
 	manager.SetBalanceActionBuilder(func(_ context.Context, group *GroupState, _ GroupKeyRanges) (BalanceActionSet, bool) {
 		return BalanceActionSet{LeaderTargets: group.VoterStoreIDs}, true
-	}, nil, nil, nil)
+	}, nil, nil)
 	plans, err := manager.RebalanceAffinityGroup(t.Context(), ids[0], false)
 	require.NoError(t, err)
 	selected := changedPlan(plans).GroupID
@@ -207,11 +210,14 @@ func TestBalanceRuntimeRejectsUnobservedPersistentUpdate(t *testing.T) {
 	require.Equal(t, uint64(1), manager.GetAffinityGroupState(selected).LeaderStoreID)
 }
 
-func TestFixedGroupRetainsTargetDuringRepair(t *testing.T) {
+func TestFixedGroupRecoversFromHealthySeed(t *testing.T) {
 	manager := newBalanceRuntimeManager(t)
 	ids := seedBalanceGroups(t, manager, []uint64{1})
 	group := manager.GetAffinityGroupState(ids[0]).Group
 	group.BalancePolicy = BalancePolicyFixed
+	require.NoError(t, manager.storage.RunInTxn(t.Context(), func(txn kv.Txn) error {
+		return manager.storage.SaveAffinityGroup(txn, group.ID, &group)
+	}))
 	manager.SyncGroupFromEtcd(&group)
 	unavailable := map[uint64]storeCondition{3: storeDown}
 	_, changes := manager.getGroupAvailabilityChanges(unavailable)
@@ -219,9 +225,9 @@ func TestFixedGroupRetainsTargetDuringRepair(t *testing.T) {
 	require.True(t, manager.GetAffinityGroupState(ids[0]).RegularSchedulingAllowed)
 	region := manager.groups[ids[0]].Regions[1].region.Clone(core.WithReplacePeerStore(3, 4))
 	manager.ObserveAvailableRegion(region, manager.GetAffinityGroupState(ids[0]))
-	require.Equal(t, []uint64{1, 2, 3}, manager.GetAffinityGroupState(ids[0]).VoterStoreIDs)
+	require.Equal(t, []uint64{1, 2, 4}, manager.GetAffinityGroupState(ids[0]).VoterStoreIDs)
+	require.Equal(t, BalancePolicyFixed, manager.GetAffinityGroupState(ids[0]).BalancePolicy)
 	_, changes = manager.getGroupAvailabilityChanges(map[uint64]storeCondition{})
-	require.Contains(t, changes, ids[0])
 	manager.setGroupAvailabilityChanges(map[uint64]storeCondition{}, changes)
 	require.True(t, manager.GetAffinityGroupState(ids[0]).AffinitySchedulingAllowed)
 }

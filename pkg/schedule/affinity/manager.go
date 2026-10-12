@@ -21,6 +21,7 @@ import (
 	"strings"
 	"sync"
 
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/log"
@@ -43,11 +44,12 @@ const (
 )
 
 type regionCache struct {
-	region        *core.RegionInfo
-	balanceRegion *core.RegionInfo
-	groupInfo     *runtimeGroupInfo
-	affinityVer   uint64
-	isAffinity    bool
+	region                *core.RegionInfo
+	balanceRegion         *core.RegionInfo
+	groupInfo             *runtimeGroupInfo
+	affinityVer           uint64
+	isAffinity            bool
+	balanceScheduleDenied bool
 }
 
 // Manager is the manager of all affinity information.
@@ -75,13 +77,17 @@ type Manager struct {
 	unavailableStores       map[uint64]storeCondition     // {store_id} -> storeCondition
 	balanceTables           map[string]*balanceTableState // {table_id} -> balance runtime state
 	balanceBuilder          BalanceActionBuilder
+	balanceProgressBuilder  BalanceActionProgressBuilder
+	balanceVirtualBuilder   VirtualBalanceActionProgressBuilder
 	balanceValidator        BalanceActionValidator
-	balanceRuleLock         sync.Locker
 	balanceRuleRevision     func() uint64
+	balanceTerm             func() ([]clientv3.Cmp, bool)
+	balanceMetadata         func() map[string]string
+	balanceAdmission        func() bool
 	balanceStoreRevision    uint64
 	balanceStoreFingerprint uint64
 	balanceQueue            chan string
-	balanceMutex            syncutil.Mutex
+	balanceLocks            map[string]*sync.Mutex
 
 	// The following members are protected by metaMutex only, not protected by RWMutex.
 	// keyRanges cached in memory to reduce labeler lock contention
@@ -108,6 +114,7 @@ func NewManager(ctx context.Context, storage endpoint.AffinityStorage, storeSetI
 		unavailableStores:   make(map[uint64]storeCondition),
 		balanceTables:       make(map[string]*balanceTableState),
 		balanceQueue:        make(chan string, 64),
+		balanceLocks:        make(map[string]*sync.Mutex),
 		keyRanges:           make(map[string]GroupKeyRanges),
 		labelRuleBuffer:     make(map[string]*labeler.LabelRule),
 	}
@@ -348,6 +355,7 @@ func (m *Manager) deleteCacheLocked(regionID uint64) {
 
 func (m *Manager) saveCache(cache *regionCache) {
 	regionID := cache.region.GetID()
+	cache.balanceScheduleDenied = m.regionLabeler.ScheduleDisabled(cache.region)
 	m.Lock()
 	defer m.Unlock()
 	// If the Group has changed, update it but do not save it afterward.

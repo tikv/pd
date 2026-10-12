@@ -73,7 +73,13 @@ func (se *StorageEndpoint) RunInTxnWithConditions(
 	if !ok {
 		return errors.New("storage backend does not support conditional transactions")
 	}
-	return runner.RunInTxnWithConditions(ctx, conditions, f)
+	return runner.RunInTxnWithConditions(ctx, conditions, trackBalanceMutations(f))
+}
+
+// RunInTxn runs a transaction and advances the dependency tokens of modified
+// affinity targets and scheduling metadata in the same commit.
+func (se *StorageEndpoint) RunInTxn(ctx context.Context, f func(kv.Txn) error) error {
+	return se.Base.RunInTxn(ctx, trackBalanceMutations(f))
 }
 
 // loadJSON loads a specific key from the StorageEndpoint, and parses it as JSON into type T.
