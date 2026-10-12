@@ -15,6 +15,7 @@
 package affinity
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -67,7 +68,7 @@ func TestPlanBalanceKeepsFixedAndFiltersInvalidTargets(t *testing.T) {
 	}
 	plans, err := PlanBalance(groups, BalanceOptions{
 		Stores: []uint64{1, 2, 3, 4}, ReplicaCount: 3,
-		ValidTarget: func(_ *Group, leader uint64, voters []uint64) bool { return leader != 4 && !containsStore(voters, 4) },
+		ValidTarget: func(_ *Group, leader uint64, voters []uint64) bool { return leader != 4 && !slices.Contains(voters, 4) },
 	})
 	require.NoError(t, err)
 	byID := make(map[string]BalancePlan, len(plans))
@@ -115,7 +116,7 @@ func TestPlanBalanceInitializesSingleReplica(t *testing.T) {
 func TestPlanBalanceFindsAlternativeInitialVoters(t *testing.T) {
 	plans, err := PlanBalance([]*Group{{ID: "p0"}}, BalanceOptions{
 		Stores: []uint64{1, 2, 3, 4}, ReplicaCount: 3,
-		ValidTarget: func(_ *Group, _ uint64, voters []uint64) bool { return !containsStore(voters, 2) },
+		ValidTarget: func(_ *Group, _ uint64, voters []uint64) bool { return !slices.Contains(voters, 2) },
 	})
 	require.NoError(t, err)
 	require.NotContains(t, plans[0].VoterStoreIDs, uint64(2))
@@ -125,10 +126,22 @@ func TestPlanBalanceFindsAlternativeReplacementVoters(t *testing.T) {
 	groups := []*Group{{ID: "p0", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 10, 11}}}
 	plans, err := PlanBalance(groups, BalanceOptions{
 		Stores: []uint64{1, 2, 3, 4}, ReplicaCount: 3,
-		ValidTarget: func(_ *Group, _ uint64, voters []uint64) bool { return !containsStore(voters, 2) },
+		ValidTarget: func(_ *Group, _ uint64, voters []uint64) bool { return !slices.Contains(voters, 2) },
 	})
 	require.NoError(t, err)
 	require.Equal(t, []uint64{1, 3, 4}, plans[0].VoterStoreIDs)
+}
+
+func TestPlanBalanceFindsAlternativeVoterCombination(t *testing.T) {
+	groups := []*Group{{ID: "p0", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}}}
+	plans, err := PlanBalance(groups, BalanceOptions{
+		Stores: []uint64{1, 2, 3, 4, 5}, ReplicaCount: 3,
+		ValidTarget: func(_ *Group, _ uint64, voters []uint64) bool {
+			return slices.Equal(voters, []uint64{1, 4, 5})
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, []uint64{1, 4, 5}, plans[0].VoterStoreIDs)
 }
 
 func TestPlanBalanceInitializesOnLeastLoadedVoters(t *testing.T) {
@@ -218,13 +231,24 @@ func TestPlanBalanceErrorsWhenInvalidTargetCannotBeReplaced(t *testing.T) {
 	require.EqualError(t, err, `unable to find valid balance target for group "p0"`)
 }
 
-func TestInitialCandidateTargetsScalesWithStoreCount(t *testing.T) {
+func TestPreferredTargetsScaleWithStoreCount(t *testing.T) {
 	stores := make([]uint64, 100)
 	counts := make(map[uint64]int, len(stores))
 	for i := range stores {
 		stores[i] = uint64(i + 1)
 	}
-	require.Len(t, initialCandidateTargets(stores, 3, counts), len(stores))
+	for _, oldVoters := range [][]uint64{nil, {1, 101, 102}} {
+		calls := 0
+		visitCandidateTargets(stores, oldVoters, 3, counts, false, func(candidate target) {
+			calls++
+			require.Len(t, candidate.voters, 3)
+			require.Contains(t, candidate.voters, candidate.leader)
+			if len(oldVoters) > 0 {
+				require.Contains(t, candidate.voters, uint64(1))
+			}
+		})
+		require.Equal(t, 3*len(stores), calls)
+	}
 }
 
 func TestPlanBalanceIsDeterministicAfterRestart(t *testing.T) {
@@ -267,15 +291,6 @@ func TestPlanBalanceRecomputesAfterStoreReturns(t *testing.T) {
 	}
 	requireBalancedCounts(t, voters)
 	require.Positive(t, voters[4])
-}
-
-func containsStore(values []uint64, value uint64) bool {
-	for _, current := range values {
-		if current == value {
-			return true
-		}
-	}
-	return false
 }
 
 func anyPlanChanged(plans []BalancePlan) bool {
