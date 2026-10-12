@@ -84,6 +84,9 @@ func PlanBalance(groups []*Group, options BalanceOptions) ([]BalancePlan, error)
 	plans := make([]BalancePlan, 0, len(ordered))
 	for _, group := range ordered {
 		oldVoters := normalizeVoters(group.VoterStoreIDs)
+		if hasDuplicate(oldVoters) {
+			return nil, fmt.Errorf("group %q has duplicate voter store ID", group.ID)
+		}
 		if group.BalancePolicy == BalancePolicyFixed {
 			plans = append(plans, makePlan(group, group.LeaderStoreID, oldVoters, false))
 			continue
@@ -92,12 +95,16 @@ func PlanBalance(groups []*Group, options BalanceOptions) ([]BalancePlan, error)
 			return nil, fmt.Errorf("group %q has %d voters, want %d", group.ID, len(oldVoters), options.ReplicaCount)
 		}
 		oldLeader, oldScore := group.LeaderStoreID, calcBalanceScore(leaderCounts, voterCounts)
-		oldTargetValid := oldLeader != 0 && slices.Contains(stores, oldLeader) && containsAll(stores, oldVoters)
+		oldTargetValid := oldLeader != 0 && slices.Contains(stores, oldLeader) && slices.Contains(oldVoters, oldLeader) && containsAll(stores, oldVoters)
 		if oldTargetValid && options.ValidTarget != nil {
 			oldTargetValid = options.ValidTarget(group, oldLeader, oldVoters)
 		}
 		var best *targetCandidate
-		for _, candidate := range candidateTargets(stores, oldVoters, options.ReplicaCount) {
+		candidates := candidateTargets(stores, oldVoters, options.ReplicaCount)
+		if len(oldVoters) == 0 {
+			candidates = initialCandidateTargets(stores, options.ReplicaCount, voterCounts)
+		}
+		for _, candidate := range candidates {
 			if options.ValidTarget != nil && !options.ValidTarget(group, candidate.leader, candidate.voters) {
 				continue
 			}
@@ -133,45 +140,44 @@ type targetCandidate struct {
 type balanceScore struct{ leader, voter int }
 
 func candidateTargets(stores, oldVoters []uint64, replicaCount int) []target {
-	var voterSets [][]uint64
 	if len(oldVoters) == 0 {
-		voterSets = combinations(stores, replicaCount)
-	} else {
-		// Keep the current set as a candidate only while every peer is on an
-		// available store. If a store was removed, at least one replacement is
-		// required before the target can be selected.
-		if containsAll(stores, oldVoters) {
-			voterSets = append(voterSets, slices.Clone(oldVoters))
-			for i := range oldVoters {
-				for _, store := range stores {
-					if slices.Contains(oldVoters, store) {
-						continue
-					}
-					voters := slices.Clone(oldVoters)
-					voters[i] = store
-					slices.Sort(voters)
-					voterSets = append(voterSets, voters)
-				}
-			}
-		} else {
-			available := make([]uint64, 0, len(oldVoters))
-			for _, voter := range oldVoters {
-				if slices.Contains(stores, voter) {
-					available = append(available, voter)
-				}
-			}
-			missing := replicaCount - len(available)
-			candidates := make([]uint64, 0, len(stores)-len(available))
+		return nil
+	}
+	var voterSets [][]uint64
+	// Keep the current set as a candidate only while every peer is on an
+	// available store. If a store was removed, at least one replacement is
+	// required before the target can be selected.
+	if containsAll(stores, oldVoters) {
+		voterSets = append(voterSets, slices.Clone(oldVoters))
+		for i := range oldVoters {
 			for _, store := range stores {
-				if !slices.Contains(available, store) {
-					candidates = append(candidates, store)
+				if slices.Contains(oldVoters, store) {
+					continue
 				}
-			}
-			for _, replacement := range combinations(candidates, missing) {
-				voters := append(slices.Clone(available), replacement...)
+				voters := slices.Clone(oldVoters)
+				voters[i] = store
 				slices.Sort(voters)
 				voterSets = append(voterSets, voters)
 			}
+		}
+	} else {
+		available := make([]uint64, 0, len(oldVoters))
+		for _, voter := range oldVoters {
+			if slices.Contains(stores, voter) {
+				available = append(available, voter)
+			}
+		}
+		missing := replicaCount - len(available)
+		candidates := make([]uint64, 0, len(stores)-len(available))
+		for _, store := range stores {
+			if !slices.Contains(available, store) {
+				candidates = append(candidates, store)
+			}
+		}
+		for _, replacement := range combinations(candidates, missing) {
+			voters := append(slices.Clone(available), replacement...)
+			slices.Sort(voters)
+			voterSets = append(voterSets, voters)
 		}
 	}
 	var result []target
@@ -179,6 +185,42 @@ func candidateTargets(stores, oldVoters []uint64, replicaCount int) []target {
 		for _, leader := range voters {
 			result = append(result, target{leader: leader, voters: slices.Clone(voters)})
 		}
+	}
+	return result
+}
+
+func initialCandidateTargets(stores []uint64, replicaCount int, voterCounts map[uint64]int) []target {
+	byVoterCount := slices.Clone(stores)
+	slices.SortFunc(byVoterCount, func(a, b uint64) int {
+		if voterCounts[a] < voterCounts[b] {
+			return -1
+		}
+		if voterCounts[a] > voterCounts[b] {
+			return 1
+		}
+		if a < b {
+			return -1
+		}
+		if a > b {
+			return 1
+		}
+		return 0
+	})
+	result := make([]target, 0, len(stores))
+	for _, leader := range stores {
+		voters := make([]uint64, 0, replicaCount)
+		voters = append(voters, leader)
+		for _, store := range byVoterCount {
+			if store == leader {
+				continue
+			}
+			voters = append(voters, store)
+			if len(voters) == replicaCount {
+				break
+			}
+		}
+		slices.Sort(voters)
+		result = append(result, target{leader: leader, voters: voters})
 	}
 	return result
 }
@@ -251,6 +293,9 @@ func normalizeVoters(voters []uint64) []uint64 {
 func sortedUnique(stores []uint64) []uint64 {
 	result := normalizeVoters(stores)
 	return slices.Compact(result)
+}
+func hasDuplicate(values []uint64) bool {
+	return len(slices.Compact(slices.Clone(values))) != len(values)
 }
 func makeCounts(stores []uint64) (leaders, voters map[uint64]int) {
 	l, v := make(map[uint64]int, len(stores)), make(map[uint64]int, len(stores))

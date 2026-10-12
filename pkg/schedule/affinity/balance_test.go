@@ -87,6 +87,23 @@ func TestPlanBalanceInitializesNewGroup(t *testing.T) {
 	require.True(t, plans[0].Changed)
 }
 
+func TestPlanBalanceInitializesOnLeastLoadedVoters(t *testing.T) {
+	groups := []*Group{
+		{ID: "fixed0", BalancePolicy: BalancePolicyFixed, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}},
+		{ID: "fixed1", BalancePolicy: BalancePolicyFixed, LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2, 3}},
+		{ID: "fixed2", BalancePolicy: BalancePolicyFixed, LeaderStoreID: 3, VoterStoreIDs: []uint64{1, 2, 4}},
+		{ID: "new"},
+	}
+	plans, err := PlanBalance(groups, BalanceOptions{Stores: []uint64{1, 2, 3, 4}, ReplicaCount: 3})
+	require.NoError(t, err)
+	for _, plan := range plans {
+		if plan.GroupID == "new" {
+			require.Equal(t, uint64(4), plan.LeaderStoreID)
+			require.Equal(t, []uint64{1, 3, 4}, plan.VoterStoreIDs)
+		}
+	}
+}
+
 func TestPlanBalanceRemovesOfflineStore(t *testing.T) {
 	groups := []*Group{
 		{ID: "p0", LeaderStoreID: 4, VoterStoreIDs: []uint64{1, 2, 4}},
@@ -134,6 +151,20 @@ func TestPlanBalanceRepairsInvalidExistingTarget(t *testing.T) {
 	require.NotEqual(t, uint64(1), plans[0].LeaderStoreID)
 }
 
+func TestPlanBalanceRepairsLeaderOutsideVoters(t *testing.T) {
+	groups := []*Group{{ID: "p0", LeaderStoreID: 1, VoterStoreIDs: []uint64{2, 3, 4}}}
+	plans, err := PlanBalance(groups, BalanceOptions{Stores: []uint64{1, 2, 3, 4}, ReplicaCount: 3})
+	require.NoError(t, err)
+	require.Contains(t, plans[0].VoterStoreIDs, plans[0].LeaderStoreID)
+	require.True(t, plans[0].Changed)
+}
+
+func TestPlanBalanceRejectsDuplicateVoters(t *testing.T) {
+	groups := []*Group{{ID: "p0", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 1, 1}}}
+	_, err := PlanBalance(groups, BalanceOptions{Stores: []uint64{1, 2, 3}, ReplicaCount: 3})
+	require.EqualError(t, err, `group "p0" has duplicate voter store ID`)
+}
+
 func TestPlanBalanceErrorsWhenInvalidTargetCannotBeReplaced(t *testing.T) {
 	groups := []*Group{{ID: "p0", VoterStoreIDs: []uint64{1, 2, 3}}}
 	_, err := PlanBalance(groups, BalanceOptions{
@@ -141,6 +172,15 @@ func TestPlanBalanceErrorsWhenInvalidTargetCannotBeReplaced(t *testing.T) {
 		ValidTarget: func(_ *Group, _ uint64, _ []uint64) bool { return false },
 	})
 	require.EqualError(t, err, `unable to find valid balance target for group "p0"`)
+}
+
+func TestInitialCandidateTargetsScalesWithStoreCount(t *testing.T) {
+	stores := make([]uint64, 100)
+	counts := make(map[uint64]int, len(stores))
+	for i := range stores {
+		stores[i] = uint64(i + 1)
+	}
+	require.Len(t, initialCandidateTargets(stores, 3, counts), len(stores))
 }
 
 func TestPlanBalanceIsDeterministicAfterRestart(t *testing.T) {
