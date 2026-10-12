@@ -166,8 +166,11 @@ func run() (exitCode int) {
 			fmt.Println("parse parallel error", err)
 			return 1
 		}
+		// Cap parallelism at the host CPU count so the shared port allocator's
+		// retained-address bound (see alloc.maxTestAddrMapLen) stays reachable.
 		if parallel > procs {
-			fmt.Printf("Recommend to set parallel be same as the GOMAXPROCS=%d\n", procs)
+			fmt.Printf("Clamping --parallel %d to GOMAXPROCS=%d\n", parallel, procs)
+			parallel = procs
 		}
 	}
 	workDir, err = os.Getwd()
