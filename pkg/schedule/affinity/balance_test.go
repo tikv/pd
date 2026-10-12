@@ -30,7 +30,7 @@ func TestPlanBalanceTransfersOneLeader(t *testing.T) {
 		{ID: "p4", LeaderStoreID: 3, VoterStoreIDs: []uint64{1, 2, 3}},
 	}
 	plans, err := PlanBalance(groups, BalanceOptions{
-		Stores: []uint64{1, 2, 3}, ReplicaCount: 3,
+		Stores:     []uint64{1, 2, 3},
 		ActionSets: allActionSets(groups, []uint64{1, 2, 3}),
 	})
 	require.NoError(t, err)
@@ -47,7 +47,7 @@ func TestPlanBalanceReplacesOneVoter(t *testing.T) {
 		{ID: "p2", LeaderStoreID: 3, VoterStoreIDs: []uint64{1, 2, 3}},
 	}
 	actions := allActionSets(groups, []uint64{1, 2, 3, 4})
-	plans, err := PlanBalance(groups, BalanceOptions{Stores: []uint64{1, 2, 3, 4}, ReplicaCount: 3, ActionSets: actions})
+	plans, err := PlanBalance(groups, BalanceOptions{Stores: []uint64{1, 2, 3, 4}, ActionSets: actions})
 	require.NoError(t, err)
 	require.Equal(t, 1, changedPlans(plans))
 	require.Contains(t, changedPlan(plans).VoterStoreIDs, uint64(4))
@@ -59,7 +59,7 @@ func TestPlanBalanceUsesOnlyCheckerActions(t *testing.T) {
 		{ID: "p0", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}},
 	}
 	plans, err := PlanBalance(groups, BalanceOptions{
-		Stores: []uint64{1, 2, 3, 4}, ReplicaCount: 3,
+		Stores: []uint64{1, 2, 3, 4},
 		ActionSets: map[string]BalanceActionSet{
 			"p0": {LeaderTargets: []uint64{1}, VoterReplacements: map[uint64]map[uint64][]uint64{
 				3: {4: {1, 2, 3}},
@@ -72,32 +72,32 @@ func TestPlanBalanceUsesOnlyCheckerActions(t *testing.T) {
 
 func TestPlanBalanceFixedGroupKeepsCanonicalVoters(t *testing.T) {
 	groups := []*Group{{ID: "fixed", BalancePolicy: BalancePolicyFixed, LeaderStoreID: 9, VoterStoreIDs: []uint64{10, 9}}}
-	plans, err := PlanBalance(groups, BalanceOptions{Stores: []uint64{1, 2, 3, 9, 10}, ReplicaCount: 2})
+	plans, err := PlanBalance(groups, BalanceOptions{Stores: []uint64{1, 2, 3, 9, 10}})
 	require.NoError(t, err)
 	require.Equal(t, BalancePlan{GroupID: "fixed", LeaderStoreID: 9, VoterStoreIDs: []uint64{9, 10}}, plans[0])
 }
 
 func TestPlanBalanceNoActionKeepsTarget(t *testing.T) {
 	groups := []*Group{{ID: "p0", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}}}
-	plans, err := PlanBalance(groups, BalanceOptions{Stores: []uint64{1, 2, 3, 4}, ReplicaCount: 3})
+	plans, err := PlanBalance(groups, BalanceOptions{Stores: []uint64{1, 2, 3, 4}})
 	require.NoError(t, err)
 	require.False(t, plans[0].Changed)
 	require.Equal(t, []uint64{1, 2, 3}, plans[0].VoterStoreIDs)
 }
 
 func TestPlanBalanceSkipsUnseededGroup(t *testing.T) {
-	plans, err := PlanBalance([]*Group{{ID: "p0"}}, BalanceOptions{Stores: []uint64{1, 2, 3}, ReplicaCount: 3})
+	plans, err := PlanBalance([]*Group{{ID: "p0"}}, BalanceOptions{Stores: []uint64{1, 2, 3}})
 	require.NoError(t, err)
 	require.Equal(t, BalancePlan{GroupID: "p0"}, plans[0])
 }
 
 func TestPlanBalanceRejectsDuplicateGroupIDs(t *testing.T) {
-	_, err := PlanBalance([]*Group{{ID: "p0"}, {ID: "p0"}}, BalanceOptions{Stores: []uint64{1}, ReplicaCount: 1})
+	_, err := PlanBalance([]*Group{{ID: "p0"}, {ID: "p0"}}, BalanceOptions{Stores: []uint64{1}})
 	require.EqualError(t, err, `duplicate affinity group ID "p0"`)
 }
 
 func TestPlanBalanceRejectsInvalidPolicy(t *testing.T) {
-	_, err := PlanBalance([]*Group{{ID: "p0", BalancePolicy: BalancePolicy("invalid")}}, BalanceOptions{Stores: []uint64{1}, ReplicaCount: 1})
+	_, err := PlanBalance([]*Group{{ID: "p0", BalancePolicy: BalancePolicy("invalid")}}, BalanceOptions{Stores: []uint64{1}})
 	require.EqualError(t, err, `group "p0" has invalid balance policy "invalid"`)
 }
 
@@ -106,7 +106,7 @@ func TestPlanBalanceIsDeterministic(t *testing.T) {
 		{ID: "p1", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}},
 		{ID: "p0", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}},
 	}
-	options := BalanceOptions{Stores: []uint64{1, 2, 3}, ReplicaCount: 3, ActionSets: allActionSets(groups, []uint64{1, 2, 3})}
+	options := BalanceOptions{Stores: []uint64{1, 2, 3}, ActionSets: allActionSets(groups, []uint64{1, 2, 3})}
 	first, err := PlanBalance(groups, options)
 	require.NoError(t, err)
 	second, err := PlanBalance(groups, options)
@@ -120,7 +120,7 @@ func TestPlanBalanceLeaderStageBeforeVoterMovement(t *testing.T) {
 		{ID: "p1", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}},
 		{ID: "p2", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}},
 	}
-	plans, err := PlanBalance(groups, BalanceOptions{Stores: []uint64{1, 2, 3, 4}, ReplicaCount: 3,
+	plans, err := PlanBalance(groups, BalanceOptions{Stores: []uint64{1, 2, 3, 4},
 		ActionSets: allActionSets(groups, []uint64{1, 2, 3, 4})})
 	require.NoError(t, err)
 	require.Equal(t, 1, changedPlans(plans))
@@ -141,7 +141,7 @@ func TestPlanBalanceReplacementTieUsesMoveBytes(t *testing.T) {
 		}
 		actions[id] = action
 	}
-	plans, err := PlanBalance(groups, BalanceOptions{Stores: []uint64{1, 2, 3, 4}, ReplicaCount: 3, ActionSets: actions})
+	plans, err := PlanBalance(groups, BalanceOptions{Stores: []uint64{1, 2, 3, 4}, ActionSets: actions})
 	require.NoError(t, err)
 	require.Equal(t, "p2", changedPlan(plans).GroupID)
 }
@@ -160,7 +160,7 @@ func TestPlanBalanceStopsAtStrictLocalMinimum(t *testing.T) {
 				before[store]++
 			}
 		}
-		plans, err := PlanBalance(groups, BalanceOptions{Stores: stores, ReplicaCount: 3, ActionSets: allActionSets(groups, stores)})
+		plans, err := PlanBalance(groups, BalanceOptions{Stores: stores, ActionSets: allActionSets(groups, stores)})
 		require.NoError(t, err)
 		if changedPlans(plans) == 0 {
 			return
@@ -181,8 +181,21 @@ func TestPlanBalanceStopsAtStrictLocalMinimum(t *testing.T) {
 }
 
 func TestPlanBalanceRejectsDuplicateVoters(t *testing.T) {
-	_, err := PlanBalance([]*Group{{ID: "p0", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 1, 2}}}, BalanceOptions{Stores: []uint64{1, 2, 3}, ReplicaCount: 3})
+	_, err := PlanBalance([]*Group{{ID: "p0", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 1, 2}}}, BalanceOptions{Stores: []uint64{1, 2, 3}})
 	require.EqualError(t, err, `group "p0" has duplicate voter store ID`)
+}
+
+func TestPlanBalanceDifferentReplicaCounts(t *testing.T) {
+	groups := []*Group{
+		{ID: "p0", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}},
+		{ID: "p1", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 3}},
+		{ID: "p2", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 3}},
+	}
+	plans, err := PlanBalance(groups, BalanceOptions{Stores: []uint64{1, 2, 3},
+		ActionSets: map[string]BalanceActionSet{"p0": {LeaderTargets: []uint64{2}}}})
+	require.NoError(t, err)
+	require.Equal(t, "p0", changedPlan(plans).GroupID)
+	require.Equal(t, uint64(2), changedPlan(plans).LeaderStoreID)
 }
 
 func allActionSets(groups []*Group, stores []uint64) map[string]BalanceActionSet {

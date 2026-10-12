@@ -59,9 +59,8 @@ type BalancePlan struct {
 // legal actions. A missing action set means that the group has no eligible
 // balance action in this pass.
 type BalanceOptions struct {
-	Stores       []uint64
-	ReplicaCount int
-	ActionSets   map[string]BalanceActionSet
+	Stores     []uint64
+	ActionSets map[string]BalanceActionSet
 }
 
 // PlanBalance computes one deterministic pass over groups belonging to one
@@ -75,12 +74,6 @@ func PlanBalance(groups []*Group, options BalanceOptions) ([]BalancePlan, error)
 	}
 	if stores[0] == 0 {
 		return nil, errors.New("store ID must be positive")
-	}
-	if options.ReplicaCount <= 0 {
-		return nil, errors.New("replica count must be positive")
-	}
-	if options.ReplicaCount > len(stores) {
-		return nil, fmt.Errorf("replica count %d exceeds available stores %d", options.ReplicaCount, len(stores))
 	}
 
 	seenIDs := make(map[string]struct{}, len(groups))
@@ -128,7 +121,7 @@ func PlanBalance(groups []*Group, options BalanceOptions) ([]BalancePlan, error)
 	for _, replace := range []bool{false, true} {
 		for i, group := range ordered {
 			oldVoters := plans[i].VoterStoreIDs
-			if group.BalancePolicy == BalancePolicyFixed || len(oldVoters) != options.ReplicaCount ||
+			if group.BalancePolicy == BalancePolicyFixed || len(oldVoters) == 0 ||
 				!slices.Contains(oldVoters, group.LeaderStoreID) {
 				continue
 			}

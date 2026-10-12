@@ -230,8 +230,11 @@ func TestSyncGroupFromEtcdUpdatesBalancePolicy(t *testing.T) {
 	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
 	re.NoError(err)
 
-	manager.SyncGroupFromEtcd(&Group{ID: "policy", BalancePolicy: BalancePolicyFixed})
+	input := &Group{ID: "policy", BalancePolicy: BalancePolicyFixed, LeaderStoreID: 1, VoterStoreIDs: []uint64{3, 1, 2}}
+	manager.SyncGroupFromEtcd(input)
 	re.Equal(BalancePolicyFixed, manager.GetAffinityGroupState("policy").BalancePolicy)
+	re.Equal([]uint64{1, 2, 3}, manager.GetAffinityGroupState("policy").VoterStoreIDs)
+	re.Equal([]uint64{3, 1, 2}, input.VoterStoreIDs, "watcher input must not be mutated")
 	manager.SyncGroupFromEtcd(&Group{ID: "policy", BalancePolicy: BalancePolicyAuto})
 	re.Equal(BalancePolicyAuto, manager.GetAffinityGroupState("policy").BalancePolicy)
 }
