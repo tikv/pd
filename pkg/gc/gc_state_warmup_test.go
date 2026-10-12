@@ -104,7 +104,8 @@ func TestGCStateWarmupBookkeepingWhileLoaderWaitsForManager(t *testing.T) {
 	reconciled := make(chan struct{})
 	go func() {
 		w.stateMu.Lock()
-		w.ingest()
+		w.ingestPages()
+		w.reconcileInitialSnapshot()
 		w.stateMu.Unlock()
 		close(reconciled)
 	}()
@@ -223,6 +224,42 @@ func TestGCStateWarmupAcrossPages(t *testing.T) {
 		cached, ok := m.gcStateCache.load(entry.id)
 		require.True(t, ok)
 		require.Equal(t, gcStateCacheEntry{TxnSafePoint: uint64(entry.id) + 1000, GCSafePoint: uint64(entry.id) + 500}, cached)
+	}
+}
+
+// Batch assembly consumes delivered pages without reconciling the full snapshot
+// under the generation lock. The worker loop later repairs missing page hints.
+func TestGCStateWarmupDefersSnapshotReconciliation(t *testing.T) {
+	m := newGCStateLoaderManager(t, func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoke grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+		return invoke(ctx, method, req, reply, cc, opts...)
+	})
+	m.gcStateCache.store(constant.NullKeyspaceID, gcStateCacheEntry{})
+	w := newGCStateWarmup(m, m.activeGeneration.Load(), nil)
+	entries := gcWarmupEntries(100, 8)
+	w.onPage(entries[:2])
+	w.onPage(entries[2:4])
+	w.onInitialSnapshot(entries)
+
+	result, err := m.loadGCStateBatch(context.Background(), w.generation, w.next)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []uint32{100, 101, 102, 103}, result.completed)
+	require.Empty(t, result.failed)
+	require.Empty(t, result.joined)
+	require.False(t, w.initialSnapshotReconciled)
+	for _, entry := range entries[4:] {
+		_, cached := m.gcStateCache.load(entry.id)
+		require.False(t, cached)
+	}
+	w.stateMu.Lock()
+	w.recordBatchResult(result, time.Now())
+	w.stateMu.Unlock()
+
+	runGCWarmupTest(t, w)
+	gcWarmupWait(t, w.done)
+	require.True(t, w.initialSnapshotReconciled)
+	for _, entry := range entries {
+		_, cached := m.gcStateCache.load(entry.id)
+		require.True(t, cached)
 	}
 }
 

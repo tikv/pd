@@ -47,8 +47,9 @@ type gcStateWarmupScope struct {
 
 // gcStateWarmup owns only the initial discovery campaign. inputMu protects
 // short, nonblocking callback admission, independently of stateMu and I/O.
-// stateMu protects scope scheduling and retry/completion state. Workers and
-// candidate callbacks hold it only briefly, never while entering the loader or
+// stateMu protects scope scheduling and retry/completion state. Candidate
+// callbacks consume only delivered pages; full snapshot reconciliation runs in
+// the worker loop. Workers never hold stateMu while entering the loader or
 // waiting for manager/generation locks or storage I/O.
 type gcStateWarmup struct {
 	manager    *GCStateManager
@@ -158,7 +159,8 @@ func (w *gcStateWarmup) work(ctx context.Context) {
 		failpoint.InjectCall("beforeGCStateWarmupSchedule")
 		w.stateMu.Lock()
 		if !w.nullPending {
-			w.ingest()
+			w.ingestPages()
+			w.reconcileInitialSnapshot()
 			w.refresh(time.Now())
 		}
 		if w.tryFinish() {
@@ -206,9 +208,8 @@ func (w *gcStateWarmup) work(ctx context.Context) {
 	}
 }
 
-// ingest only receives already available pages. No manager lock is needed for
-// target reconciliation, and no producer can block on this stateMu critical section.
-func (w *gcStateWarmup) ingest() {
+// ingestPages only receives already available pages without waiting for producers.
+func (w *gcStateWarmup) ingestPages() {
 	for !w.initialSnapshotReconciled {
 		select {
 		case entries := <-w.pages:
@@ -218,10 +219,14 @@ func (w *gcStateWarmup) ingest() {
 				}
 			}
 		default:
-			goto snapshot
+			return
 		}
 	}
-snapshot:
+}
+
+// reconcileInitialSnapshot repairs dropped page hints and excludes targets from
+// failed metadata attempts. It runs only in the worker loop, outside loader locks.
+func (w *gcStateWarmup) reconcileInitialSnapshot() {
 	if w.initialSnapshotReconciled {
 		return
 	}
@@ -270,7 +275,7 @@ func (w *gcStateWarmup) next() (uint32, bool) {
 	defer w.stateMu.Unlock()
 	for {
 		if len(w.candidates) == 0 {
-			w.ingest()
+			w.ingestPages()
 			if len(w.candidates) == 0 {
 				return 0, false
 			}
