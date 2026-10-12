@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
@@ -178,7 +179,7 @@ func (m *Manager) createGroupsWithSkipExisting(changes []GroupKeyRanges, skipExi
 	}
 
 	// Step 5: Save the Group and Label information in storage.
-	if err := endpoint.RunBatchOpInTxn(m.ctx, m.storage, saveOps); err != nil {
+	if err := endpoint.RunBatchOpInTxnWithLimit(m.ctx, m.storage, saveOps, etcdutil.MaxEtcdTxnOps/2); err != nil {
 		log.Error("failed to add affinity groups",
 			zap.Int("total-groups", len(filteredChanges)),
 			zap.Error(err))
@@ -271,7 +272,7 @@ func (m *Manager) DeleteAffinityGroups(groupIDs []string, force bool) error {
 	}
 
 	// Step 5: Save the Group and Label information in storage.
-	if err := endpoint.RunBatchOpInTxn(m.ctx, m.storage, saveOps); err != nil {
+	if err := endpoint.RunBatchOpInTxnWithLimit(m.ctx, m.storage, saveOps, etcdutil.MaxEtcdTxnOps/2); err != nil {
 		log.Error("failed to delete affinity groups",
 			zap.Int("total-groups", len(toDelete)),
 			zap.Error(err))
@@ -300,21 +301,6 @@ func (m *Manager) UpdateAffinityGroupPeers(groupID string, leaderStoreID uint64,
 //   - Its equality will be checked.
 //   - Group must not change voterStoreIDs while it is not in the expired status.
 func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affinityVer uint64, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
-	return m.updateAffinityGroupPeersWithAffinityVerInternal(groupID, affinityVer, leaderStoreID, voterStoreIDs, false, nil)
-}
-
-// updateAffinityGroupPeersWithBalanceVer is the planner write path. It keeps
-// the affinity version check while allowing an auto planner to change voters
-// for an available group.
-func (m *Manager) updateAffinityGroupPeersWithBalanceVer(groupID string, affinityVer uint64, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
-	return m.updateAffinityGroupPeersWithAffinityVerInternal(groupID, affinityVer, leaderStoreID, voterStoreIDs, true, nil)
-}
-
-func (m *Manager) updateAffinityGroupPeersWithBalanceSnapshot(groupID string, affinityVer uint64, leaderStoreID uint64, voterStoreIDs []uint64, snapshot *balanceSnapshot) (*GroupState, error) {
-	return m.updateAffinityGroupPeersWithAffinityVerInternal(groupID, affinityVer, leaderStoreID, voterStoreIDs, true, snapshot)
-}
-
-func (m *Manager) updateAffinityGroupPeersWithAffinityVerInternal(groupID string, affinityVer uint64, leaderStoreID uint64, voterStoreIDs []uint64, allowBalance bool, snapshot *balanceSnapshot) (*GroupState, error) {
 	// Step 0: Validate the correctness of leaderStoreID and voterStoreIDs.
 	if leaderStoreID == 0 || len(voterStoreIDs) == 0 {
 		return nil, errs.ErrAffinityGroupContent.FastGenByArgs("leader store ID and voter store IDs must be provided")
@@ -337,16 +323,6 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVerInternal(groupID string
 	if group == nil {
 		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
 	}
-	if snapshot != nil {
-		m.RLock()
-		table := m.balanceTables[snapshot.tableID]
-		current := table != nil && m.balanceFingerprintLocked(table) == snapshot.fingerprint
-		m.RUnlock()
-		if !current || group.BalancePolicy == BalancePolicyFixed {
-			return group, nil
-		}
-	}
-
 	voterStoreIDs = slices.Clone(voterStoreIDs)
 	slices.Sort(voterStoreIDs)
 	// When affinityVer is non-zero, it indicates a non-admin operation and triggers additional checks.
@@ -359,7 +335,7 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVerInternal(groupID string
 		// Group must not change voterStoreIDs while it is not in the expired status. Changing only leaderStoreID is allowed.
 		// RegularSchedulingAllowed == IsExpired
 		// The VoterStoreIDs are already sorted, so they can be compared directly
-		if !allowBalance && !group.RegularSchedulingAllowed && !slices.Equal(voterStoreIDs, group.VoterStoreIDs) {
+		if !group.RegularSchedulingAllowed && !slices.Equal(voterStoreIDs, group.VoterStoreIDs) {
 			return group, nil
 		}
 	}
@@ -368,76 +344,44 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVerInternal(groupID string
 	original := group.Group
 	group.LeaderStoreID = leaderStoreID
 	group.VoterStoreIDs = slices.Clone(voterStoreIDs)
-	// Keep the input generation and committed rules fixed across the write.
-	// metaMutex already serializes group/range edits. The read locks also
-	// serialize Region invalidation and rule updates with this commit.
-	save := func() (saved bool, err error) {
-		if snapshot != nil {
-			if snapshot.ruleLock != nil {
-				snapshot.ruleLock.Lock()
-				defer snapshot.ruleLock.Unlock()
+	// Balance submissions use commitBalancePlans. Safety repair only compares
+	// this group's persisted target and never holds checker locks across IO.
+	err := m.storage.RunInTxn(m.ctx, func(txn kv.Txn) error {
+		if affinityVer != 0 {
+			key := keypath.AffinityGroupPath(groupID)
+			var value string
+			var loadErr error
+			if revisionTxn, ok := txn.(kv.RevisionTxn); ok {
+				value, loadErr = revisionTxn.LoadWithRevision(key)
+			} else {
+				value, loadErr = txn.Load(key)
 			}
-			m.RLock()
-			defer m.RUnlock()
-			table := m.balanceTables[snapshot.tableID]
-			current := m.groups[groupID]
-			if table == nil || current == nil || current.AffinityVer != affinityVer ||
-				m.balanceFingerprintLocked(table) != snapshot.fingerprint {
-				return false, nil
+			if loadErr != nil {
+				return loadErr
+			}
+			var persisted Group
+			if value == "" {
+				return errs.ErrEtcdTxnConflict.FastGenByArgs()
+			}
+			if err := json.Unmarshal([]byte(value), &persisted); err != nil {
+				return err
+			}
+			if persisted.ID != original.ID || persisted.CreateTimestamp != original.CreateTimestamp ||
+				persisted.BalancePolicy != original.BalancePolicy || persisted.LeaderStoreID != original.LeaderStoreID ||
+				!slices.Equal(normalizeVoters(persisted.VoterStoreIDs), original.VoterStoreIDs) {
+				return errs.ErrEtcdTxnConflict.FastGenByArgs()
 			}
 		}
-		err = m.storage.RunInTxn(m.ctx, func(txn kv.Txn) error {
-			if affinityVer != 0 {
-				key := keypath.AffinityGroupPath(groupID)
-				var value string
-				var loadErr error
-				if revisionTxn, ok := txn.(kv.RevisionTxn); ok {
-					value, loadErr = revisionTxn.LoadWithRevision(key)
-				} else {
-					value, loadErr = txn.Load(key)
-				}
-				if loadErr != nil {
-					return loadErr
-				}
-				var persisted Group
-				if value == "" {
-					return errs.ErrEtcdTxnConflict.FastGenByArgs()
-				}
-				if err := json.Unmarshal([]byte(value), &persisted); err != nil {
-					return err
-				}
-				if persisted.ID != original.ID || persisted.CreateTimestamp != original.CreateTimestamp ||
-					persisted.BalancePolicy != original.BalancePolicy || persisted.LeaderStoreID != original.LeaderStoreID ||
-					!slices.Equal(normalizeVoters(persisted.VoterStoreIDs), original.VoterStoreIDs) {
-					return errs.ErrEtcdTxnConflict.FastGenByArgs()
-				}
-			}
-			return m.storage.SaveAffinityGroup(txn, groupID, &group.Group)
-		})
-		return err == nil, err
-	}
-	saved, err := save()
+		return m.storage.SaveAffinityGroup(txn, groupID, &group.Group)
+	})
 	if errs.ErrEtcdTxnConflict.Equal(err) {
 		return m.GetAffinityGroupState(groupID), nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	if !saved {
-		return m.GetAffinityGroupState(groupID), nil
-	}
-
 	// Step 3: Save the information in memory.
-	updated, err := m.updateGroupPeers(groupID, leaderStoreID, voterStoreIDs)
-	if err == nil && updated != nil && snapshot != nil {
-		snapshot.applied = true
-		m.Lock()
-		if state := m.balanceTables[snapshot.tableID]; state != nil {
-			state.phase = balanceConverging
-		}
-		m.Unlock()
-	}
-	return updated, err
+	return m.updateGroupPeers(groupID, leaderStoreID, voterStoreIDs)
 }
 
 // UpdateAffinityGroupKeyRanges batch modifies key ranges for multiple affinity groups.

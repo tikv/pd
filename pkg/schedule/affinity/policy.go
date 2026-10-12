@@ -123,7 +123,7 @@ func calcGroupAvailability(
 func (m *Manager) ObserveAvailableRegion(region *core.RegionInfo, group *GroupState) {
 	// Use the peer distribution of the first observed available Region as the result.
 	// In the future, we may want to use a more sophisticated strategy rather than first-win.
-	if group == nil || group.AffinitySchedulingAllowed || group.BalancePolicy == BalancePolicyFixed {
+	if group == nil || group.AffinitySchedulingAllowed {
 		return
 	}
 	leaderStoreID := region.GetLeader().GetStoreId()
@@ -184,10 +184,16 @@ func (m *Manager) collectMetrics() {
 }
 
 func (m *Manager) collectUnavailableStores() map[uint64]storeCondition {
+	return m.collectUnavailableStoresFor(m.storeSetInformer.GetStores())
+}
+
+func (m *Manager) collectUnavailableStoresFor(stores []*core.StoreInfo) map[uint64]storeCondition {
 	unavailableStores := make(map[uint64]storeCondition)
-	stores := m.storeSetInformer.GetStores()
 	lowSpaceRatio := m.conf.GetLowSpaceRatio()
 	for _, store := range stores {
+		if store == nil {
+			continue
+		}
 		switch {
 		// First the conditions that will mark the group as expired
 		case store.IsRemoved() || store.IsPhysicallyDestroyed():
@@ -224,19 +230,20 @@ func (m *Manager) getGroupAvailabilityChanges(unavailableStores map[uint64]store
 	// Validate whether unavailableStores has changed.
 	m.RLock()
 	isUnavailableStoresChanged = !maps.Equal(unavailableStores, m.unavailableStores)
-	if !isUnavailableStoresChanged {
-		m.RUnlock()
-		return false, nil
-	}
 
 	// Analyze which Groups have changed availability
 	// Collect log messages to print after releasing lock
 	for _, groupInfo := range m.groups {
 		availability := groupInfo.GetAvailability()
+		if groupInfo.LeaderStoreID == 0 || len(groupInfo.VoterStoreIDs) == 0 {
+			// An empty target must still be initialized from a healthy Region.
+			unavailableGroupCount++
+			continue
+		}
 
-		// Auto groups reseed after expiry. Fixed groups retain their original
-		// target and become available again when its stores recover.
-		if availability == groupExpired && groupInfo.BalancePolicy != BalancePolicyFixed {
+		// Expired groups of either policy recover from a healthy Region seed.
+		// Fixed disables improvement balancing, not initialization or repair.
+		if availability == groupExpired {
 			unavailableGroupCount++
 			continue
 		}
@@ -261,6 +268,7 @@ func (m *Manager) getGroupAvailabilityChanges(unavailableStores map[uint64]store
 			zap.Int("available-group-count", availableGroupCount))
 	}
 
+	isUnavailableStoresChanged = isUnavailableStoresChanged || len(groupAvailabilityChanges) > 0
 	return
 }
 
@@ -275,9 +283,21 @@ func (m *Manager) setGroupAvailabilityChanges(unavailableStores map[uint64]store
 
 func (m *Manager) checkHasUnavailableStore(leaderStoreID uint64, voterStoreIDs []uint64) error {
 	m.RLock()
-	defer m.RUnlock()
+	unavailable := maps.Clone(m.unavailableStores)
+	m.RUnlock()
+	return checkUnavailableTargetStores(unavailable, leaderStoreID, voterStoreIDs)
+}
+
+func (m *Manager) checkBalanceTargetStores(leaderStoreID uint64, voterStoreIDs []uint64) error {
+	if m.storeSetInformer != nil {
+		return checkUnavailableTargetStores(m.collectUnavailableStores(), leaderStoreID, voterStoreIDs)
+	}
+	return m.checkHasUnavailableStore(leaderStoreID, voterStoreIDs)
+}
+
+func checkUnavailableTargetStores(unavailable map[uint64]storeCondition, leaderStoreID uint64, voterStoreIDs []uint64) error {
 	for _, storeID := range voterStoreIDs {
-		condition, ok := m.unavailableStores[storeID]
+		condition, ok := unavailable[storeID]
 		if ok && (!condition.affectsLeaderOnly() || storeID == leaderStoreID) {
 			return errs.ErrAffinityGroupContent.GenWithStackByArgs(fmt.Sprintf("store %d is %s", storeID, condition.String()))
 		}
