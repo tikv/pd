@@ -50,11 +50,12 @@ type AffinityChecker struct {
 	conf             config.CheckerConfigProvider
 	recentMergeCache *cache.TTLUint64
 	startTime        time.Time
+	opController     *operator.Controller
 }
 
 // NewAffinityChecker create an affinity checker.
 func NewAffinityChecker(ctx context.Context, cluster sche.CheckerCluster, conf config.CheckerConfigProvider) *AffinityChecker {
-	return &AffinityChecker{
+	checker := &AffinityChecker{
 		cluster:          cluster,
 		ruleManager:      cluster.GetRuleManager(),
 		affinityManager:  cluster.GetAffinityManager(),
@@ -62,6 +63,10 @@ func NewAffinityChecker(ctx context.Context, cluster sche.CheckerCluster, conf c
 		recentMergeCache: cache.NewIDTTL(ctx, gcInterval, recentMergeTTL),
 		startTime:        time.Now(),
 	}
+	if checker.affinityManager != nil {
+		checker.affinityManager.SetBalanceActionBuilder(checker.buildBalanceActions, checker.ruleManager.GetRevision, checker.validateBalanceAction, checker.ruleManager.RLocker())
+	}
+	return checker
 }
 
 // GetType return AffinityChecker's type.
@@ -81,6 +86,9 @@ func (c *AffinityChecker) hasAffinityGroups() bool {
 // Check verifies a region's replicas according to affinity group constraints, creating an Operator if needed.
 func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	affinityCheckerCounter.Inc()
+	if c.affinityManager != nil {
+		c.affinityManager.ObserveBalanceRegion(region)
+	}
 
 	if c.IsPaused() {
 		affinityCheckerPausedCounter.Inc()
@@ -165,10 +173,8 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 			affinityCheckerAbnormalReplicaCounter.Inc()
 			return nil
 		}
-		group = c.affinityManager.GetAffinityGroupState(group.ID)
-		if group == nil {
-			return nil
-		}
+		// Planning is asynchronous; this check continues against the target
+		// it read. The next heartbeat observes any committed balance target.
 	}
 
 	// For a Region already in affinity, try to merge it with neighboring affinity Regions.

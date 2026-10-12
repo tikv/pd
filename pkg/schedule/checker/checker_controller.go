@@ -122,6 +122,7 @@ func NewController(ctx context.Context, cluster sche.CheckerCluster, conf config
 		metrics:                 newCheckerControllerMetrics(),
 	}
 	c.splitScatter = newSplitScatterController(ctx, cluster, opController, c.AddPendingProcessedRegions)
+	c.affinityChecker.opController = opController
 	c.duration.Store(time.Duration(0))
 	return c
 }
@@ -298,6 +299,9 @@ func (c *Controller) checkPriorityRegions() {
 // CheckRegion will check the region and add a new operator if needed.
 // The function is exposed for test purpose.
 func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
+	if manager := c.cluster.GetAffinityManager(); manager != nil {
+		manager.ObserveBalanceRegion(region)
+	}
 	// If PD has restarted, it needs to check learners added before and promote them.
 	// Don't check isRaftLearnerEnabled cause it maybe disable learner feature but there are still some learners to promote.
 	opController := c.opController

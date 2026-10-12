@@ -298,17 +298,21 @@ func (m *Manager) UpdateAffinityGroupPeers(groupID string, leaderStoreID uint64,
 //   - Its equality will be checked.
 //   - Group must not change voterStoreIDs while it is not in the expired status.
 func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affinityVer uint64, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
-	return m.updateAffinityGroupPeersWithAffinityVerInternal(groupID, affinityVer, leaderStoreID, voterStoreIDs, false)
+	return m.updateAffinityGroupPeersWithAffinityVerInternal(groupID, affinityVer, leaderStoreID, voterStoreIDs, false, nil)
 }
 
 // updateAffinityGroupPeersWithBalanceVer is the planner write path. It keeps
 // the affinity version check while allowing an auto planner to change voters
 // for an available group.
 func (m *Manager) updateAffinityGroupPeersWithBalanceVer(groupID string, affinityVer uint64, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
-	return m.updateAffinityGroupPeersWithAffinityVerInternal(groupID, affinityVer, leaderStoreID, voterStoreIDs, true)
+	return m.updateAffinityGroupPeersWithAffinityVerInternal(groupID, affinityVer, leaderStoreID, voterStoreIDs, true, nil)
 }
 
-func (m *Manager) updateAffinityGroupPeersWithAffinityVerInternal(groupID string, affinityVer uint64, leaderStoreID uint64, voterStoreIDs []uint64, allowBalance bool) (*GroupState, error) {
+func (m *Manager) updateAffinityGroupPeersWithBalanceSnapshot(groupID string, affinityVer uint64, leaderStoreID uint64, voterStoreIDs []uint64, snapshot *balanceSnapshot) (*GroupState, error) {
+	return m.updateAffinityGroupPeersWithAffinityVerInternal(groupID, affinityVer, leaderStoreID, voterStoreIDs, true, snapshot)
+}
+
+func (m *Manager) updateAffinityGroupPeersWithAffinityVerInternal(groupID string, affinityVer uint64, leaderStoreID uint64, voterStoreIDs []uint64, allowBalance bool, snapshot *balanceSnapshot) (*GroupState, error) {
 	// Step 0: Validate the correctness of leaderStoreID and voterStoreIDs.
 	if leaderStoreID == 0 || len(voterStoreIDs) == 0 {
 		return nil, errs.ErrAffinityGroupContent.FastGenByArgs("leader store ID and voter store IDs must be provided")
@@ -331,6 +335,15 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVerInternal(groupID string
 	if group == nil {
 		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
 	}
+	if snapshot != nil {
+		m.RLock()
+		table := m.balanceTables[snapshot.tableID]
+		current := table != nil && m.balanceFingerprintLocked(table) == snapshot.fingerprint
+		m.RUnlock()
+		if !current || group.BalancePolicy == BalancePolicyFixed {
+			return group, nil
+		}
+	}
 
 	voterStoreIDs = slices.Clone(voterStoreIDs)
 	slices.Sort(voterStoreIDs)
@@ -352,14 +365,47 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVerInternal(groupID string
 	// Step 2: Save the Group in storage.
 	group.LeaderStoreID = leaderStoreID
 	group.VoterStoreIDs = slices.Clone(voterStoreIDs)
-	if err := m.storage.RunInTxn(m.ctx, func(txn kv.Txn) error {
-		return m.storage.SaveAffinityGroup(txn, groupID, &group.Group)
-	}); err != nil {
+	// Keep the input generation and committed rules fixed across the write.
+	// metaMutex already serializes group/range edits. The read locks also
+	// serialize Region invalidation and rule updates with this commit.
+	save := func() (saved bool, err error) {
+		if snapshot != nil {
+			if snapshot.ruleLock != nil {
+				snapshot.ruleLock.Lock()
+				defer snapshot.ruleLock.Unlock()
+			}
+			m.RLock()
+			defer m.RUnlock()
+			table := m.balanceTables[snapshot.tableID]
+			current := m.groups[groupID]
+			if table == nil || current == nil || current.AffinityVer != affinityVer ||
+				m.balanceFingerprintLocked(table) != snapshot.fingerprint {
+				return false, nil
+			}
+		}
+		err = m.storage.RunInTxn(m.ctx, func(txn kv.Txn) error {
+			return m.storage.SaveAffinityGroup(txn, groupID, &group.Group)
+		})
+		return err == nil, err
+	}
+	saved, err := save()
+	if err != nil {
 		return nil, err
+	}
+	if !saved {
+		return m.GetAffinityGroupState(groupID), nil
 	}
 
 	// Step 3: Save the information in memory.
-	return m.updateGroupPeers(groupID, leaderStoreID, voterStoreIDs)
+	updated, err := m.updateGroupPeers(groupID, leaderStoreID, voterStoreIDs)
+	if err == nil && snapshot != nil {
+		m.Lock()
+		if state := m.balanceTables[snapshot.tableID]; state != nil {
+			state.phase = balanceConverging
+		}
+		m.Unlock()
+	}
+	return updated, err
 }
 
 // UpdateAffinityGroupKeyRanges batch modifies key ranges for multiple affinity groups.

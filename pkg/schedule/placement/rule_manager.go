@@ -64,6 +64,9 @@ type RuleManager struct {
 	// storeLoadRestrictions caches ruleConfig.mayRestrictStoreLoad as bits for
 	// the hot scheduler's lock-free fast path.
 	storeLoadRestrictions atomic.Uint32
+	// revision changes after a committed rule or rule-group update. Consumers
+	// can invalidate derived affinity actions without reading all rules.
+	revision atomic.Uint64
 
 	// used for rule validation
 	keyType          string
@@ -567,7 +570,13 @@ func (m *RuleManager) TryCommitPatchLocked(patch *RuleConfigPatch) error {
 	patch.commit()
 	m.updateStoreLoadRestrictions()
 	m.ruleList = ruleList
+	m.revision.Add(1)
 	return nil
+}
+
+// GetRevision returns the generation of the committed placement configuration.
+func (m *RuleManager) GetRevision() uint64 {
+	return m.revision.Load()
 }
 
 func (m *RuleManager) savePatch(p *ruleConfig) error {

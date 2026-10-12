@@ -123,7 +123,7 @@ func calcGroupAvailability(
 func (m *Manager) ObserveAvailableRegion(region *core.RegionInfo, group *GroupState) {
 	// Use the peer distribution of the first observed available Region as the result.
 	// In the future, we may want to use a more sophisticated strategy rather than first-win.
-	if group == nil || group.AffinitySchedulingAllowed {
+	if group == nil || group.AffinitySchedulingAllowed || group.BalancePolicy == BalancePolicyFixed {
 		return
 	}
 	leaderStoreID := region.GetLeader().GetStoreId()
@@ -163,6 +163,7 @@ func (m *Manager) checkGroupsAvailability() {
 	if !m.IsAvailable() {
 		return
 	}
+	m.refreshBalanceStores()
 	unavailableStores := m.collectUnavailableStores()
 	isUnavailableStoresChanged, groupAvailabilityChanges := m.getGroupAvailabilityChanges(unavailableStores)
 	if isUnavailableStoresChanged {
@@ -233,8 +234,9 @@ func (m *Manager) getGroupAvailabilityChanges(unavailableStores map[uint64]store
 	for _, groupInfo := range m.groups {
 		availability := groupInfo.GetAvailability()
 
-		// A Group in the expired status cannot be restored.
-		if availability == groupExpired {
+		// Auto groups reseed after expiry. Fixed groups retain their original
+		// target and become available again when its stores recover.
+		if availability == groupExpired && groupInfo.BalancePolicy != BalancePolicyFixed {
 			unavailableGroupCount++
 			continue
 		}

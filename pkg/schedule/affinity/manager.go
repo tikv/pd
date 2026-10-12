@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"slices"
 	"strings"
+	"sync"
 
 	"go.uber.org/zap"
 
@@ -42,10 +43,11 @@ const (
 )
 
 type regionCache struct {
-	region      *core.RegionInfo
-	groupInfo   *runtimeGroupInfo
-	affinityVer uint64
-	isAffinity  bool
+	region        *core.RegionInfo
+	balanceRegion *core.RegionInfo
+	groupInfo     *runtimeGroupInfo
+	affinityVer   uint64
+	isAffinity    bool
 }
 
 // Manager is the manager of all affinity information.
@@ -67,10 +69,19 @@ type Manager struct {
 	regionLabeler    *labeler.RegionLabeler // region labeler for syncing key ranges
 
 	// The following members are protected by RWMutex.
-	affinityRegionCount int
-	groups              map[string]*runtimeGroupInfo // {group_id} -> runtimeGroupInfo
-	regions             map[uint64]regionCache       // {region_id} -> regionCache
-	unavailableStores   map[uint64]storeCondition    // {store_id} -> storeCondition
+	affinityRegionCount     int
+	groups                  map[string]*runtimeGroupInfo  // {group_id} -> runtimeGroupInfo
+	regions                 map[uint64]regionCache        // {region_id} -> regionCache
+	unavailableStores       map[uint64]storeCondition     // {store_id} -> storeCondition
+	balanceTables           map[string]*balanceTableState // {table_id} -> balance runtime state
+	balanceBuilder          BalanceActionBuilder
+	balanceValidator        BalanceActionValidator
+	balanceRuleLock         sync.Locker
+	balanceRuleRevision     func() uint64
+	balanceStoreRevision    uint64
+	balanceStoreFingerprint uint64
+	balanceQueue            chan string
+	balanceMutex            syncutil.Mutex
 
 	// The following members are protected by metaMutex only, not protected by RWMutex.
 	// keyRanges cached in memory to reduce labeler lock contention
@@ -95,6 +106,8 @@ func NewManager(ctx context.Context, storage endpoint.AffinityStorage, storeSetI
 		groups:              make(map[string]*runtimeGroupInfo),
 		regions:             make(map[uint64]regionCache),
 		unavailableStores:   make(map[uint64]storeCondition),
+		balanceTables:       make(map[string]*balanceTableState),
+		balanceQueue:        make(chan string, 64),
 		keyRanges:           make(map[string]GroupKeyRanges),
 		labelRuleBuffer:     make(map[string]*labeler.LabelRule),
 	}
@@ -166,6 +179,7 @@ func (m *Manager) initGroupLocked(group *Group) {
 		LabelRule:           nil,
 		RangeCount:          0,
 	}
+	m.invalidateBalanceLocked(group.ID)
 }
 
 func (m *Manager) noGroupsExist(groups []*Group) error {
@@ -203,6 +217,7 @@ func (m *Manager) resetCountLocked(groupInfo *runtimeGroupInfo) {
 	m.affinityRegionCount -= groupInfo.AffinityRegionCount
 	groupInfo.AffinityRegionCount = 0
 	groupInfo.AffinityVer++
+	m.invalidateBalanceLocked(groupInfo.ID)
 }
 
 func (m *Manager) updateGroupPeers(groupID string, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
@@ -302,6 +317,12 @@ func (m *Manager) clearGroupCacheLocked(groupID string) {
 func (m *Manager) deleteGroupLocked(groupID string) {
 	m.clearGroupCacheLocked(groupID)
 	delete(m.groups, groupID)
+	if state := m.balanceTables[TableGroupPrefix(groupID)]; state != nil {
+		delete(state.groups, groupID)
+		if len(state.groups) == 0 {
+			delete(m.balanceTables, TableGroupPrefix(groupID))
+		}
+	}
 }
 
 func (m *Manager) deleteGroups(groupIDs []string) {
@@ -332,6 +353,11 @@ func (m *Manager) saveCache(cache *regionCache) {
 	// If the Group has changed, update it but do not save it afterward.
 	groupInfo, ok := m.groups[cache.groupInfo.ID]
 	if ok && groupInfo == cache.groupInfo && groupInfo.AffinityVer == cache.affinityVer {
+		old, exists := m.regions[regionID]
+		if !exists || balanceRegionChanged(old.balanceInput(), cache.region) {
+			m.invalidateBalanceLocked(groupInfo.ID)
+		}
+		cache.balanceRegion = cache.region
 		m.deleteCacheLocked(regionID)
 		m.regions[regionID] = *cache
 		groupInfo.Regions[regionID] = *cache
@@ -354,6 +380,9 @@ func (m *Manager) InvalidCache(regionID uint64) {
 
 	m.Lock()
 	defer m.Unlock()
+	if cached, ok := m.regions[regionID]; ok {
+		m.invalidateBalanceLocked(cached.groupInfo.ID)
+	}
 	m.deleteCacheLocked(regionID)
 }
 

@@ -442,6 +442,26 @@ func TestRuleVersion(t *testing.T) {
 	re.Equal(uint64(0), newRule.Version)
 }
 
+func TestRuleManagerRevision(t *testing.T) {
+	_, manager := newTestManager(t, false)
+	revision := manager.GetRevision()
+	rule := manager.GetRule(DefaultGroupID, DefaultRuleID)
+	rule.Count++
+	require.NoError(t, manager.SetRule(rule))
+	require.Greater(t, manager.GetRevision(), revision)
+	revision = manager.GetRevision()
+	require.NoError(t, manager.SetRuleGroup(&RuleGroup{ID: DefaultGroupID, Index: 1}))
+	require.Greater(t, manager.GetRevision(), revision)
+	revision = manager.GetRevision()
+	require.Error(t, manager.DeleteRule(DefaultGroupID, DefaultRuleID))
+	require.Equal(t, revision, manager.GetRevision(), "failed updates must not invalidate balance actions")
+	rule.ID = "second"
+	require.NoError(t, manager.SetRule(rule))
+	revision = manager.GetRevision()
+	require.NoError(t, manager.DeleteRule(DefaultGroupID, DefaultRuleID))
+	require.Greater(t, manager.GetRevision(), revision)
+}
+
 func TestCheckApplyRules(t *testing.T) {
 	re := require.New(t)
 	err := checkApplyRules([]*Rule{
