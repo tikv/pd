@@ -79,6 +79,24 @@ func TestPlanBalanceKeepsFixedAndFiltersInvalidTargets(t *testing.T) {
 	require.NotContains(t, byID["auto"].VoterStoreIDs, uint64(4))
 }
 
+func TestPlanBalanceKeepsMalformedFixedTarget(t *testing.T) {
+	groups := []*Group{{
+		ID: "fixed", BalancePolicy: BalancePolicyFixed,
+		LeaderStoreID: 9, VoterStoreIDs: []uint64{10, 9},
+	}}
+	plans, err := PlanBalance(groups, BalanceOptions{Stores: []uint64{1, 2, 3}, ReplicaCount: 3})
+	require.NoError(t, err)
+	require.Equal(t, BalancePlan{
+		GroupID: "fixed", LeaderStoreID: 9, VoterStoreIDs: []uint64{9, 10}, Changed: false,
+	}, plans[0])
+}
+
+func TestPlanBalanceRejectsInvalidBalancePolicy(t *testing.T) {
+	groups := []*Group{{ID: "p0", BalancePolicy: BalancePolicy("invalid")}}
+	_, err := PlanBalance(groups, BalanceOptions{Stores: []uint64{1}, ReplicaCount: 1})
+	require.EqualError(t, err, `group "p0" has invalid balance policy "invalid"`)
+}
+
 func TestPlanBalanceInitializesNewGroup(t *testing.T) {
 	plans, err := PlanBalance([]*Group{{ID: "p0"}}, BalanceOptions{Stores: []uint64{1, 2, 3}, ReplicaCount: 3})
 	require.NoError(t, err)

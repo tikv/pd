@@ -69,6 +69,9 @@ func PlanBalance(groups []*Group, options BalanceOptions) ([]BalancePlan, error)
 		if group == nil {
 			return nil, errors.New("nil affinity group")
 		}
+		if group.BalancePolicy != "" && group.BalancePolicy != BalancePolicyAuto && group.BalancePolicy != BalancePolicyFixed {
+			return nil, fmt.Errorf("group %q has invalid balance policy %q", group.ID, group.BalancePolicy)
+		}
 	}
 	ordered := slices.Clone(groups)
 	slices.SortFunc(ordered, func(a, b *Group) int { return stringsCompare(a.ID, b.ID) })
