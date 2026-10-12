@@ -611,10 +611,7 @@ func (gtb *GroupTokenBucket) request(
 			zap.Int("slot-len", len(gtb.tokenSlots)),
 		)
 	}
-<<<<<<< HEAD
 	res, trickleDuration := gtb.assignSlotTokens(slot, requiredToken, targetPeriodMs)
-=======
-	res, trickleDuration := slot.assignSlotTokens(requiredToken, targetPeriodMs)
 	// When the effective group fill rate is unlimited, there is no group rate to
 	// smooth a loan against. Without this, a slot that holds no tokens (new or in
 	// debt) gets the whole target period as trickle, which holds the client to
@@ -623,7 +620,6 @@ func (gtb *GroupTokenBucket) request(
 	if res.Tokens > 0 && gtb.getFillRate() >= UnlimitedRate {
 		trickleDuration = 0
 	}
->>>>>>> 34ce7eca7e (resourcemanager: skip slot trickle for unlimited fill rate (#11324))
 	// Inspect the group token bucket and the assigned token result to catch any anomalies.
 	if isAnomaly := gtb.inspectAnomalies(res, slot, []zap.Field{
 		zap.Time("now", now),
