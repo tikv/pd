@@ -207,6 +207,7 @@ func (m *Manager) InvalidateBalance(groupID string) {
 type balanceSnapshot struct {
 	tableID     string
 	fingerprint balanceFingerprint
+	applied     bool
 	groups      []*GroupState
 	ranges      map[string]GroupKeyRanges
 	actions     map[string]BalanceActionSet
@@ -356,9 +357,8 @@ func (m *Manager) balanceTableWithBudget(ctx context.Context, groupID string, ap
 					return plans, nil
 				}
 				m.refreshBalanceStores()
-				var updated *GroupState
-				updated, err = m.updateAffinityGroupPeersWithBalanceSnapshot(group.ID, group.affinityVer, plan.LeaderStoreID, plan.VoterStoreIDs, snapshot)
-				if err == nil && (updated == nil || updated.LeaderStoreID != plan.LeaderStoreID || !slices.Equal(updated.VoterStoreIDs, plan.VoterStoreIDs)) {
+				_, err = m.updateAffinityGroupPeersWithBalanceSnapshot(group.ID, group.affinityVer, plan.LeaderStoreID, plan.VoterStoreIDs, snapshot)
+				if err == nil && !snapshot.applied {
 					return nil, nil
 				}
 				return plans, err

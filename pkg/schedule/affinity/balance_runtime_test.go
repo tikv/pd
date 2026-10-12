@@ -135,6 +135,23 @@ func TestBalanceRuntimeRejectsChangedTableSnapshot(t *testing.T) {
 	}
 }
 
+func TestBalanceRuntimeDoesNotReportUnappliedPlan(t *testing.T) {
+	manager := newBalanceRuntimeManager(t)
+	ids := seedBalanceGroups(t, manager, []uint64{1, 1, 1})
+	manager.SetBalanceActionBuilder(func(_ context.Context, group *GroupState, _ GroupKeyRanges) (BalanceActionSet, bool) {
+		if group.ID == ids[0] {
+			_, err := manager.UpdateAffinityGroupPeers(ids[0], 2, group.VoterStoreIDs)
+			require.NoError(t, err)
+		}
+		return BalanceActionSet{LeaderTargets: group.VoterStoreIDs}, true
+	}, nil, nil, nil)
+
+	plans, err := manager.balanceTable(t.Context(), ids[0], true)
+	require.NoError(t, err)
+	require.Empty(t, plans, "a stale plan must not be reported as applied")
+	require.Equal(t, uint64(2), manager.GetAffinityGroupState(ids[0]).LeaderStoreID)
+}
+
 func TestBalanceRuntimeBuildBudgetRetainsProgress(t *testing.T) {
 	manager := newBalanceRuntimeManager(t)
 	ids := seedBalanceGroups(t, manager, []uint64{1, 2, 3})

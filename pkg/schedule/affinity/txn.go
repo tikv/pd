@@ -429,7 +429,8 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVerInternal(groupID string
 
 	// Step 3: Save the information in memory.
 	updated, err := m.updateGroupPeers(groupID, leaderStoreID, voterStoreIDs)
-	if err == nil && snapshot != nil {
+	if err == nil && updated != nil && snapshot != nil {
+		snapshot.applied = true
 		m.Lock()
 		if state := m.balanceTables[snapshot.tableID]; state != nil {
 			state.phase = balanceConverging
