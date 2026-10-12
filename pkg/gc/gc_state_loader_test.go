@@ -373,6 +373,264 @@ func TestGCStateLoadJoinedWaiterRetriesAfterInvalidation(t *testing.T) {
 	require.Equal(t, int32(2), reads.Load(), "the joined reader must reload invalidated values from storage")
 }
 
+func gcStateLoadInvalidationGate(t *testing.T, ctx context.Context) (<-chan struct{}, chan<- struct{}) {
+	t.Helper()
+	loaded := make(chan struct{}, 1)
+	resume := make(chan struct{})
+	const hook = "github.com/tikv/pd/pkg/gc/afterGCStateLoadCompleted"
+	require.NoError(t, failpoint.EnableCall(hook, func() {
+		select {
+		case loaded <- struct{}{}:
+		case <-ctx.Done():
+			return
+		}
+		select {
+		case <-resume:
+		case <-ctx.Done():
+		}
+	}))
+	t.Cleanup(func() { require.NoError(t, failpoint.Disable(hook)) })
+	return loaded, resume
+}
+
+func gcStateInvalidateAfterWrite(t *testing.T, m *GCStateManager, gcSafePoint uint64) {
+	t.Helper()
+	_, err := m.AdvanceTxnSafePoint(2, gcSafePoint+20, time.Now())
+	require.NoError(t, err)
+	_, _, err = m.AdvanceGCSafePoint(2, gcSafePoint)
+	require.NoError(t, err)
+	_, _, err = m.AdvanceGCSafePoint(2, gcSafePoint-1)
+	require.ErrorIs(t, err, errs.ErrDecreasingGCSafePoint)
+	_, cached := m.gcStateCache.load(2)
+	require.False(t, cached)
+}
+
+func TestGCStateLoadDirectFallback(t *testing.T) {
+	for _, name := range []string{"success", "storage-error", "txn-decode-error", "gc-decode-error", "request-cancel", "request-deadline", "retirement", "request-cancel-before-return", "retirement-before-return"} {
+		t.Run(name, func(t *testing.T) {
+			var reads atomic.Int32
+			rpcContexts := make(chan context.Context, 1)
+			release := make(chan struct{})
+			var releaseOnce sync.Once
+			unblock := func() { releaseOnce.Do(func() { close(release) }) }
+			loadErr := errors.New("fallback read unavailable")
+			storage, _, m, clean, cancel := newGCStateManagerForTest(t, newGCStateManagerForTestOptions{
+				etcdClientCfgModifier: func(cfg *clientv3.Config) {
+					cfg.DialOptions = append(cfg.DialOptions, grpc.WithChainUnaryInterceptor(func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+						if gcStateLoadTestTxn(req) && reads.Add(1) == 3 {
+							var err error
+							if name == "storage-error" {
+								err = loadErr
+							} else {
+								err = invoker(ctx, method, req, reply, cc, opts...)
+							}
+							// Return the already-read response even after cancellation so
+							// the loader must check cancellation and leadership itself.
+							rpcContexts <- ctx
+							select {
+							case <-release:
+							case <-ctx.Done():
+							}
+							return err
+						}
+						return invoker(ctx, method, req, reply, cc, opts...)
+					}))
+				},
+			})
+			defer clean()
+			defer cancel()
+			defer m.stopGCStateGeneration(m.activeGeneration.Load())
+			defer unblock()
+			type valueKey struct{}
+			ctx := context.WithValue(context.Background(), valueKey{}, "foreground")
+			var cancelRequest context.CancelFunc
+			if name == "request-deadline" {
+				ctx, cancelRequest = context.WithTimeout(ctx, 2*time.Second)
+			} else {
+				ctx, cancelRequest = context.WithTimeout(ctx, 10*time.Second)
+			}
+			defer cancelRequest()
+			shared, resume := gcStateLoadInvalidationGate(t, ctx)
+			type foregroundResult struct {
+				state GCState
+				err   error
+			}
+			foreground := make(chan foregroundResult, 1)
+			go func() {
+				state, err := m.getGCStateImpl(ctx, 2, true)
+				foreground <- foregroundResult{state: state, err: err}
+			}()
+			for _, target := range []uint64{80, 90} {
+				gcWarmupWait(t, shared)
+				gcStateInvalidateAfterWrite(t, m, target)
+				if target == 90 {
+					switch name {
+					case "txn-decode-error":
+						require.NoError(t, storage.Save(keypath.TxnSafePointPath(2), "broken"))
+					case "gc-decode-error":
+						require.NoError(t, storage.Save(keypath.GCSafePointPath(2), "broken"))
+					}
+				}
+				select {
+				case resume <- struct{}{}:
+				case <-ctx.Done():
+					t.Fatal("request canceled before resuming the shared reader")
+				}
+			}
+			var rpcCtx context.Context
+			select {
+			case rpcCtx = <-rpcContexts:
+			case <-ctx.Done():
+				t.Fatal("fallback read did not start")
+			}
+			require.Equal(t, "foreground", rpcCtx.Value(valueKey{}))
+			generation := m.activeGeneration.Load()
+			var stopped <-chan struct{}
+			switch name {
+			case "request-cancel":
+				cancelRequest()
+			case "request-deadline":
+				deadline, _ := ctx.Deadline()
+				rpcDeadline, hasDeadline := rpcCtx.Deadline()
+				require.True(t, hasDeadline)
+				require.Equal(t, deadline, rpcDeadline)
+				gcWarmupWait(t, ctx.Done())
+			case "retirement":
+				done := make(chan struct{})
+				stopped = done
+				go func() { m.stopGCStateGeneration(generation); close(done) }()
+				gcWarmupWait(t, generation.done)
+				gcWarmupWait(t, rpcCtx.Done())
+			case "request-cancel-before-return", "retirement-before-return":
+				consumed := make(chan struct{})
+				resumeReturn := make(chan struct{})
+				var returnOnce sync.Once
+				unblockReturn := func() { returnOnce.Do(func() { close(resumeReturn) }) }
+				const hook = "github.com/tikv/pd/pkg/gc/beforeGCStateLoadDirectReturn"
+				require.NoError(t, failpoint.EnableCall(hook, func() {
+					close(consumed)
+					select {
+					case <-resumeReturn:
+					case <-ctx.Done():
+					}
+				}))
+				defer func() { require.NoError(t, failpoint.Disable(hook)) }()
+				defer unblockReturn()
+				unblock()
+				gcWarmupWait(t, consumed)
+				// The reader has returned a successful pair and released its lock;
+				// only the foreground result branch can now reject the stale result.
+				if name == "retirement-before-return" {
+					done := make(chan struct{})
+					stopped = done
+					m.stopGCStateGeneration(generation)
+					close(done)
+					stop := m.OnNodeBecomesLeader()
+					defer stop()
+					m.gcStateCache.store(2, gcStateCacheEntry{TxnSafePoint: 120, GCSafePoint: 100})
+				} else {
+					cancelRequest()
+				}
+				unblockReturn()
+			default:
+				unblock()
+			}
+			var result foregroundResult
+			select {
+			case result = <-foreground:
+			case <-shared:
+				t.Fatal("another shared reload started instead of returning the direct read")
+			case <-time.After(3 * time.Second):
+				t.Fatal("foreground fallback did not finish")
+			}
+			switch name {
+			case "success":
+				require.NoError(t, result.err)
+				require.Equal(t, GCState{KeyspaceID: 2, IsKeyspaceLevel: true, TxnSafePoint: 110, GCSafePoint: 90}, result.state)
+			case "storage-error":
+				require.ErrorIs(t, result.err, loadErr)
+			case "txn-decode-error", "gc-decode-error":
+				require.Error(t, result.err)
+			case "request-cancel", "request-cancel-before-return":
+				require.ErrorIs(t, result.err, context.Canceled)
+				gcWarmupWait(t, rpcCtx.Done())
+			case "request-deadline":
+				require.ErrorIs(t, result.err, context.DeadlineExceeded)
+			case "retirement", "retirement-before-return":
+				require.ErrorIs(t, result.err, errs.ErrNotLeader)
+				gcWarmupWait(t, stopped)
+				if name == "retirement" {
+					stop := m.OnNodeBecomesLeader()
+					defer stop()
+					m.gcStateCache.store(2, gcStateCacheEntry{TxnSafePoint: 120, GCSafePoint: 100})
+				}
+				m.stopGCStateGeneration(generation)
+				state, err := m.getGCStateImpl(context.Background(), 2, true)
+				require.NoError(t, err)
+				require.Equal(t, uint64(120), state.TxnSafePoint)
+				require.Equal(t, uint64(100), state.GCSafePoint)
+			}
+			require.Equal(t, int32(3), reads.Load(), "two shared reads and one independent fallback must suffice")
+			if name != "retirement" && name != "retirement-before-return" {
+				_, cached := m.gcStateCache.load(2)
+				require.False(t, cached, "fallback must not depend on or repopulate the cache")
+			}
+		})
+	}
+}
+
+func TestGCStateLoadDirectFallbackCancellationBeforeManagerLock(t *testing.T) {
+	var reads atomic.Int32
+	m := newGCStateLoaderManager(t, func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+		if gcStateLoadTestTxn(req) {
+			reads.Add(1)
+		}
+		return invoker(ctx, method, req, reply, cc, opts...)
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	shared, resume := gcStateLoadInvalidationGate(t, ctx)
+	var lockAttempts atomic.Int32
+	waiting := make(chan struct{})
+	const hook = "github.com/tikv/pd/pkg/gc/beforeGCStateLoadManagerLock"
+	require.NoError(t, failpoint.EnableCall(hook, func() {
+		if lockAttempts.Add(1) == 3 {
+			close(waiting)
+		}
+	}))
+	defer func() { require.NoError(t, failpoint.Disable(hook)) }()
+	foreground := make(chan error, 1)
+	go func() { _, err := m.getGCStateImpl(ctx, 2, true); foreground <- err }()
+	locked := false
+	defer func() {
+		if locked {
+			m.mu.Unlock()
+		}
+	}()
+	for _, target := range []uint64{80, 90} {
+		gcWarmupWait(t, shared)
+		gcStateInvalidateAfterWrite(t, m, target)
+		if target == 90 {
+			m.mu.Lock()
+			locked = true
+		}
+		select {
+		case resume <- struct{}{}:
+		case <-ctx.Done():
+			t.Fatal("request canceled before resuming the shared reader")
+		}
+	}
+	gcWarmupWait(t, waiting)
+	cancel()
+	select {
+	case err := <-foreground:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(3 * time.Second):
+		t.Fatal("request cancellation waited for the fallback's manager lock")
+	}
+	require.Equal(t, int32(2), reads.Load(), "direct I/O must not start while a writer holds the manager lock")
+}
+
 func TestGCStateLoadWaiterCancellationAndOverlap(t *testing.T) {
 	entered := make(chan struct{}, 1)
 	release := make(chan struct{})

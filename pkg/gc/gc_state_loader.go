@@ -52,6 +52,17 @@ type gcStateLoadBatch struct {
 	result      gcStateLoadResult
 }
 
+func (g *gcStateGeneration) loadContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(g.ctx, cancel)
+	// AfterFunc dispatches asynchronously when already canceled. Observe that
+	// state synchronously so no new load starts in a canceled generation.
+	if g.ctx.Err() != nil {
+		cancel()
+	}
+	return ctx, func() { stop(); cancel() }
+}
+
 // loadGCStateBatch consumes currently available candidates until it owns 60
 // missing scopes or next reports exhaustion, then reads and publishes them.
 // Cached completions and joined flights do not consume read slots. next consumes
@@ -76,15 +87,8 @@ func (m *GCStateManager) loadGCStateBatch(ctx context.Context, generation *gcSta
 	if generation == nil || m.activeGeneration.Load() != generation {
 		return gcStateLoadResult{}, errs.ErrNotLeader
 	}
-	ctx, cancel := context.WithCancel(ctx)
+	ctx, cancel := generation.loadContext(ctx)
 	defer cancel()
-	stop := context.AfterFunc(generation.ctx, cancel)
-	defer stop()
-	// AfterFunc dispatches asynchronously when already canceled. Observe that
-	// state synchronously so no new load starts in a canceled generation.
-	if generation.ctx.Err() != nil {
-		cancel()
-	}
 	batch := &gcStateLoadBatch{result: gcStateLoadResult{failed: make(map[uint32]error), joined: make(map[uint32]*gcStateLoadFlight)}}
 	// Keep flight claims and batch assembly in one critical section.
 	// Once a flight is claimed, every exit goes through publication below.
@@ -182,7 +186,11 @@ func (m *GCStateManager) loadGCStateBatch(ctx context.Context, generation *gcSta
 // goroutine owns the entire loader call. Joined requests only wait after it
 // has released the manager lock.
 func (m *GCStateManager) loadGCState(ctx context.Context, generation *gcStateGeneration, id uint32) (GCState, error) {
-	for {
+	// Successful safe-point writes refresh the cache, but failed writes invalidate
+	// it. Repeated failures can remove successful fills before this waiter rechecks
+	// the cache. Allow one shared retry, then return a direct atomic storage snapshot
+	// without requiring that its cached values survive an intervening writer.
+	for range 2 {
 		ready := make(chan gcStateLoadResult, 1)
 		go func() {
 			pending := true
@@ -214,6 +222,7 @@ func (m *GCStateManager) loadGCState(ctx context.Context, generation *gcStateGen
 			}
 			failpoint.InjectCall("afterGCStateLoadJoinedWait")
 		}
+		failpoint.InjectCall("afterGCStateLoadCompleted")
 		// Foreground waiters never return a flight's old payload. Recheck generation
 		// around the cache read, and retry if an intervening writer invalidated it.
 		if m.activeGeneration.Load() != generation {
@@ -227,4 +236,56 @@ func (m *GCStateManager) loadGCState(ctx context.Context, generation *gcStateGen
 			return GCState{KeyspaceID: id, IsKeyspaceLevel: id != constant.NullKeyspaceID, TxnSafePoint: cached.TxnSafePoint, GCSafePoint: cached.GCSafePoint}, nil
 		}
 	}
+	// Keep request cancellation responsive even if the direct reader is waiting
+	// for the manager lock. Unlike a shared load, this read belongs to this caller.
+	ready := make(chan endpoint.GCSafePointReadResult, 1)
+	go func() { ready <- m.readGCStateDirect(ctx, generation, id) }()
+	select {
+	case <-ctx.Done():
+		return GCState{}, ctx.Err()
+	case <-generation.done:
+		return GCState{}, errs.ErrNotLeader
+	case result := <-ready:
+		failpoint.InjectCall("beforeGCStateLoadDirectReturn")
+		// Retirement or request cancellation may happen after the reader releases
+		// its lock, even when the ready branch wins the select above.
+		if m.activeGeneration.Load() != generation {
+			return GCState{}, errs.ErrNotLeader
+		}
+		if err := ctx.Err(); err != nil {
+			return GCState{}, err
+		}
+		if result.Err != nil {
+			return GCState{}, result.Err
+		}
+		return GCState{KeyspaceID: id, IsKeyspaceLevel: id != constant.NullKeyspaceID, TxnSafePoint: result.TxnSafePoint, GCSafePoint: result.GCSafePoint}, nil
+	}
+}
+
+func (m *GCStateManager) readGCStateDirect(ctx context.Context, generation *gcStateGeneration, id uint32) endpoint.GCSafePointReadResult {
+	failpoint.InjectCall("beforeGCStateLoadManagerLock")
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if generation == nil || m.activeGeneration.Load() != generation {
+		return endpoint.GCSafePointReadResult{Err: errs.ErrNotLeader}
+	}
+	ctx, cancel := generation.loadContext(ctx)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return endpoint.GCSafePointReadResult{Err: err}
+	}
+	failpoint.InjectCall("getGCStateCacheAccess", "miss")
+	gcStateCacheAccessMissCounter.Inc()
+	values, err := m.gcMetaStorage.LoadGCSafePointPairs(ctx, []uint32{id})
+	if m.activeGeneration.Load() != generation {
+		err = errs.ErrNotLeader
+	} else if ctx.Err() != nil {
+		err = ctx.Err()
+	}
+	if err != nil {
+		return endpoint.GCSafePointReadResult{Err: err}
+	}
+	// Return the pair from this transaction directly; do not publish it to the
+	// cache or re-enter the shared-load retry loop.
+	return values[0]
 }
