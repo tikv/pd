@@ -86,6 +86,9 @@ func newEnabledKeyspaceIndex(client *clientv3.Client, prefix string) *enabledKey
 
 // run blocks until the leadership term ends. A failed or compacted watch is
 // followed by a complete reload, so no missing revision is silently skipped.
+// The watch intentionally outlives initial GC warmup in preparation for upcoming
+// WatchGCStates initialization with revision-consistent metadata snapshots
+// (https://github.com/tikv/pd/pull/11264).
 // Call run once per index. Returning retires the index and wakes its waiters.
 func (i *enabledKeyspaceIndex) run(ctx context.Context, hooks enabledKeyspaceLoadHooks) {
 	defer func() {
