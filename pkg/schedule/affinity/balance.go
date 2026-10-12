@@ -61,6 +61,10 @@ type BalancePlan struct {
 type BalanceOptions struct {
 	Stores     []uint64
 	ActionSets map[string]BalanceActionSet
+	// GlobalLeaderCounts and GlobalVoterCounts contain affinity counts before
+	// this pass. They only break ties after a strict table-score improvement.
+	GlobalLeaderCounts map[uint64]int
+	GlobalVoterCounts  map[uint64]int
 }
 
 // PlanBalance computes one deterministic pass over groups belonging to one
@@ -102,6 +106,10 @@ func PlanBalance(groups []*Group, options BalanceOptions) ([]BalancePlan, error)
 		}
 	}
 	baseScore := calcBalanceScore(leaderCounts, voterCounts)
+	globalBaseScore := balanceScore{
+		leader: sumSquares(options.GlobalLeaderCounts),
+		voter:  sumSquares(options.GlobalVoterCounts),
+	}
 	available := make(map[uint64]struct{}, len(stores))
 	for _, store := range stores {
 		available[store] = struct{}{}
@@ -142,19 +150,35 @@ func PlanBalance(groups []*Group, options BalanceOptions) ([]BalancePlan, error)
 					return
 				}
 				candidate := target{leader: leader, voters: oldVoters, from: from, to: to}
+				globalScore := scoreAfterGlobalMove(globalBaseScore, options.GlobalLeaderCounts, options.GlobalVoterCounts,
+					group.LeaderStoreID, leader, from, to)
 				moveBytes := uint64(0)
 				if replace {
 					moveBytes = actions.MoveBytes
 				}
+				preservesLeader := leader == group.LeaderStoreID
 				order := 0
 				if best != nil {
 					order = compareScore(score, best.score)
 					if order == 0 {
+						order = compareScore(globalScore, best.globalScore)
+					}
+					if order == 0 {
 						order = cmp.Compare(moveBytes, best.moveBytes)
+					}
+					if order == 0 && preservesLeader != best.preservesLeader {
+						if preservesLeader {
+							order = -1
+						} else {
+							order = 1
+						}
 					}
 				}
 				if best == nil || order < 0 || (order == 0 && targetLess(group.ID, candidate, bestGroup, best.target)) {
-					best = &targetCandidate{target: candidate, score: score, moveBytes: moveBytes}
+					best = &targetCandidate{
+						target: candidate, score: score, globalScore: globalScore,
+						moveBytes: moveBytes, preservesLeader: preservesLeader,
+					}
 					bestGroup = group.ID
 				}
 			}
@@ -216,8 +240,10 @@ type target struct {
 
 type targetCandidate struct {
 	target
-	score     balanceScore
-	moveBytes uint64
+	score           balanceScore
+	globalScore     balanceScore
+	moveBytes       uint64
+	preservesLeader bool
 }
 
 type balanceScore struct{ leader, voter int }
@@ -236,6 +262,33 @@ func replaceVoter(voters []uint64, from, to uint64) []uint64 {
 
 func calcBalanceScore(leaders, voters map[uint64]int) balanceScore {
 	return balanceScore{sumSquares(leaders), sumSquares(voters)}
+}
+
+func scoreAfterGlobalMove(base balanceScore, leaders, voters map[uint64]int, oldLeader, newLeader, from, to uint64) balanceScore {
+	score := base
+	if leaders != nil {
+		score.leader += countMoveDelta(leaders, oldLeader, newLeader)
+	}
+	if voters != nil {
+		score.voter += countMoveDelta(voters, from, to)
+	}
+	return score
+}
+
+func countMoveDelta(counts map[uint64]int, from, to uint64) int {
+	if from == to {
+		return 0
+	}
+	delta := 0
+	if from != 0 {
+		count := counts[from]
+		delta += (count-1)*(count-1) - count*count
+	}
+	if to != 0 {
+		count := counts[to]
+		delta += (count+1)*(count+1) - count*count
+	}
+	return delta
 }
 
 func compareScore(a, b balanceScore) int {
