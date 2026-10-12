@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"slices"
 	"sync/atomic"
 	"time"
 
@@ -710,19 +709,12 @@ func (f *HotPeerCache) gc() {
 	// regions and non-cold items are left to their normal heartbeat and TopN TTL
 	// lifecycle.
 	if f.kind == utils.Read {
-		// Cold-peer sweep. On each call every store's cold entries are
-		// checked: a dead region is evicted, a live one is kept. The per-store
-		// work is bounded by that store's coldPeersOfStore index instead of
-		// copying the whole TopN heap (which includes non-cold entries). A
-		// store with no cold entries costs almost nothing, so revisiting it
-		// is a no-op.
-		storeIDs := make([]uint64, 0, len(f.peersOfStore))
-		for storeID := range f.peersOfStore {
-			storeIDs = append(storeIDs, storeID)
-		}
-		slices.Sort(storeIDs)
-		for _, storeID := range storeIDs {
-			for regionID := range f.coldPeersOfStore[storeID] {
+		// Cold-peer sweep only visits stores and peers with cold entries; a
+		// dead region is evicted, while a live one is kept. The per-store work
+		// is limited to its coldPeersOfStore index instead of copying the whole
+		// TopN heap, which also contains non-cold entries.
+		for storeID, coldPeers := range f.coldPeersOfStore {
+			for regionID := range coldPeers {
 				// A live region must not be evicted even if it was previously
 				// marked cold; skip it and keep it indexed.
 				if f.cluster.GetRegion(regionID) != nil {
@@ -740,9 +732,9 @@ func (f *HotPeerCache) gc() {
 					delete(s, regionID)
 				}
 				// Also remove from the cold index now that the item is gone.
-				delete(f.coldPeersOfStore[storeID], regionID)
+				delete(coldPeers, regionID)
 			}
-			if len(f.coldPeersOfStore[storeID]) == 0 {
+			if len(coldPeers) == 0 {
 				delete(f.coldPeersOfStore, storeID)
 			}
 		}
