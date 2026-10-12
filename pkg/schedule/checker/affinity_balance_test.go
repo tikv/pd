@@ -21,10 +21,13 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 // Exercise the real checker entry point, persisted target change, operator
@@ -82,4 +85,33 @@ func TestAffinityBalanceActionsRequireAllRegions(t *testing.T) {
 	intersectBalanceActions(&first, second)
 	require.Equal(t, []uint64{1, 3}, first.LeaderTargets)
 	require.Equal(t, map[uint64]map[uint64][]uint64{1: {4: {2, 4}}}, first.VoterReplacements)
+}
+
+func TestAffinityBalanceRequiresCompleteHealthyCoverage(t *testing.T) {
+	opt := newAffinityTestOptions()
+	tc := mockcluster.NewCluster(t.Context(), opt)
+	for id := uint64(1); id <= 4; id++ {
+		tc.AddRegionStore(id, 10)
+	}
+	manager := tc.GetAffinityManager()
+	checker := newTestAffinityChecker(t.Context(), tc, opt)
+	require.NoError(t, createAffinityGroupForTest(manager, &affinity.Group{ID: "coverage", LeaderStoreID: 1,
+		VoterStoreIDs: []uint64{1, 2, 3}}, []byte("a"), []byte("c")))
+	ranges := affinity.GroupKeyRanges{GroupID: "coverage",
+		KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("c")}}}
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	tc.PutRegion(tc.GetRegion(1).Clone(core.WithStartKey([]byte("a")), core.WithEndKey([]byte("b"))))
+	manager.GetAndCacheRegionAffinityGroupState(tc.GetRegion(1))
+	_, ready := checker.buildBalanceActions(t.Context(), manager.GetAffinityGroupState("coverage"), ranges)
+	require.False(t, ready, "cached affinity counts must not hide a coverage hole")
+	tc.AddLeaderRegion(2, 1, 2, 3)
+	tc.PutRegion(tc.GetRegion(2).Clone(core.WithStartKey([]byte("b")), core.WithEndKey([]byte("c"))))
+	manager.GetAndCacheRegionAffinityGroupState(tc.GetRegion(2))
+	actions, ready := checker.buildBalanceActions(t.Context(), manager.GetAffinityGroupState("coverage"), ranges)
+	require.True(t, ready)
+	require.Contains(t, actions.LeaderTargets, uint64(2))
+	require.NotEmpty(t, actions.VoterReplacements)
+	tc.PutRegion(tc.GetRegion(2).Clone(core.WithPendingPeers([]*metapb.Peer{tc.GetRegion(2).GetStorePeer(2)})))
+	_, ready = checker.buildBalanceActions(t.Context(), manager.GetAffinityGroupState("coverage"), ranges)
+	require.False(t, ready, "one pending Region must prevent a group target change")
 }
