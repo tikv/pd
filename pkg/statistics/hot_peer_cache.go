@@ -578,8 +578,9 @@ func (f *HotPeerCache) gc() {
 		stores[store.GetID()] = struct{}{}
 	}
 	// calcHotThresholds can populate thresholdsOfStore for a store that never becomes
-	// hot enough to enter peersOfStore, so peersOfStore alone can miss it; check the
-	// union of both.
+	// hot enough to enter peersOfStore, so peersOfStore alone can miss it. A later
+	// Remove in the same pre-collected expired batch can also recreate metrics after
+	// an earlier gc already dropped the store; check the union of all three.
 	removed := make(map[uint64]struct{})
 	for storeID := range f.peersOfStore {
 		if _, ok := stores[storeID]; !ok {
@@ -587,6 +588,11 @@ func (f *HotPeerCache) gc() {
 		}
 	}
 	for storeID := range f.thresholdsOfStore {
+		if _, ok := stores[storeID]; !ok {
+			removed[storeID] = struct{}{}
+		}
+	}
+	for storeID := range f.metrics {
 		if _, ok := stores[storeID]; !ok {
 			removed[storeID] = struct{}{}
 		}

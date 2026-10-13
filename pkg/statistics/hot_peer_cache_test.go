@@ -761,6 +761,14 @@ func TestRemoveExpireItems(t *testing.T) {
 	// every call regardless of whether gc() actually deleted the old one.
 	re.Zero(hotCacheStatusGauge.DeletePartialMatch(prometheus.Labels{"store": storeTag(store1ID), "type": cache.kind.String()}))
 	re.Zero(hotCacheStatusGauge.DeletePartialMatch(prometheus.Labels{"store": storeTag(store2ID), "type": cache.kind.String()}))
+	// case3: a later Remove in the same pre-collected expired batch recreates the
+	// metrics after gc already dropped the store; the next gc must still collect it.
+	cache.UpdateStat(&HotPeerStat{StoreID: store1ID, RegionID: region1.GetID(), actionType: utils.Remove})
+	re.Contains(cache.metrics, store1ID)
+	cache.lastGCTime = time.Time{}
+	cache.gc()
+	re.NotContains(cache.metrics, store1ID)
+	re.Zero(hotCacheStatusGauge.DeletePartialMatch(prometheus.Labels{"store": storeTag(store1ID), "type": cache.kind.String()}))
 }
 
 func TestDifferentReportInterval(t *testing.T) {
