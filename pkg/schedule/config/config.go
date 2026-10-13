@@ -568,8 +568,12 @@ func parseDeprecatedFlag(meta *configutil.ConfigMetaData, name string, old, new 
 }
 
 // MigrateDeprecatedFlags updates new flags according to deprecated flags.
+// Without JSON presence information, a non-zero legacy store-balance-rate
+// overrides both peer directions, matching the behavior before
+// default-store-limit was persisted.
 func (c *ScheduleConfig) MigrateDeprecatedFlags() {
-	c.applyDeprecatedFlagMigration(true, true)
+	keep := c.StoreBalanceRate == 0
+	c.applyDeprecatedFlagMigration(keep, keep)
 }
 
 // MigrateDeprecatedFlagsFromJSON migrates a full persisted or remote schedule

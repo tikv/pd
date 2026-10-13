@@ -221,6 +221,19 @@ remove-peer = 70.0
 	re.NoError(json.Unmarshal(data, schedule))
 	re.NoError(schedule.MigrateDeprecatedFlagsFromJSON(data))
 	re.Equal(sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 60}, schedule.DefaultStoreLimit)
+
+	// Without JSON presence, a legacy rate still populates both peer limits.
+	schedule = &sc.ScheduleConfig{StoreBalanceRate: 60}
+	schedule.MigrateDeprecatedFlags()
+	re.Equal(sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 60}, schedule.DefaultStoreLimit)
+	re.Zero(schedule.StoreBalanceRate)
+	re.Equal(60.0, sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer))
+	re.Equal(60.0, sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer))
+
+	// With no legacy rate, existing values (including explicit zero) are kept.
+	schedule = &sc.ScheduleConfig{DefaultStoreLimit: sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 30}}
+	schedule.MigrateDeprecatedFlags()
+	re.Equal(sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 30}, schedule.DefaultStoreLimit)
 }
 
 func TestReloadLegacyStoreBalanceRate(t *testing.T) {
