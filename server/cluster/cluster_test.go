@@ -788,21 +788,25 @@ func TestBucketHeartbeat(t *testing.T) {
 	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), regions[0]))
 	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), regions[1]))
 	re.Nil(cluster.GetRegion(uint64(1)).GetBuckets())
-	_, err = cluster.processReportBuckets(buckets)
+	applied, err := cluster.processReportBuckets(buckets)
 	re.NoError(err)
+	re.True(applied)
 	re.Equal(buckets, cluster.GetRegion(uint64(1)).GetBuckets())
 
-	// case3: the bucket version is same.
-	_, err = cluster.processReportBuckets(buckets)
+	// case3: the bucket version is same, but the report still carries fresh
+	// flow stats and must feed hot-bucket statistics.
+	applied, err = cluster.processReportBuckets(buckets)
 	re.NoError(err)
+	re.True(applied)
 	// case4: the bucket version is changed.
 	newBuckets := &metapb.Buckets{
 		RegionId: 1,
 		Version:  3,
 		Keys:     [][]byte{{'1'}, {'2'}},
 	}
-	_, err = cluster.processReportBuckets(newBuckets)
+	applied, err = cluster.processReportBuckets(newBuckets)
 	re.NoError(err)
+	re.True(applied)
 	re.Equal(newBuckets, cluster.GetRegion(uint64(1)).GetBuckets())
 
 	// case5: region update should inherit buckets.

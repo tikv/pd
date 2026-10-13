@@ -1198,9 +1198,9 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 }
 
 // processReportBuckets updates the bucket information. The first return value
-// reports whether the report was actually applied, so callers don't enqueue
-// hot-bucket work for a report that was ignored because its leader is
-// tombstoned.
+// reports whether the report should feed hot-bucket statistics. It is false
+// only when the leader is tombstoned or the CAS update keeps losing races; a
+// report with an unchanged version still carries fresh flow stats.
 func (c *RaftCluster) processReportBuckets(buckets *metapb.Buckets) (bool, error) {
 	region := c.GetRegion(buckets.GetRegionId())
 	if region == nil {
@@ -1219,7 +1219,7 @@ func (c *RaftCluster) processReportBuckets(buckets *metapb.Buckets) (bool, error
 		// region should not update if the version of the buckets is less than the old one.
 		if old != nil && buckets.GetVersion() <= old.GetVersion() {
 			versionNotMatchCounter.Inc()
-			return false, nil
+			return true, nil
 		}
 		failpoint.Inject("concurrentBucketHeartbeat", func() {
 			time.Sleep(500 * time.Millisecond)
