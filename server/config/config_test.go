@@ -786,13 +786,13 @@ func TestGCConcurrencyConfig(t *testing.T) {
 	require.Equal(t, 4, cfg.PDServerCfg.GCKeyspaceIndexLoadConcurrency)
 	require.Equal(t, 4, cfg.PDServerCfg.GCStateCacheWarmupConcurrency)
 	for _, name := range []string{"gc-keyspace-index-load-concurrency", "gc-state-cache-warmup-concurrency"} {
-		for _, value := range []int{-1, 0, 1, 2, 4, 128} {
+		for _, value := range []int{-1, 0, 1, 2, 4, 16, 17, 128, math.MaxInt} {
 			t.Run(fmt.Sprintf("%s/%d", name, value), func(t *testing.T) {
 				cfg := NewConfig()
 				meta, err := toml.Decode(fmt.Sprintf("[pd-server]\n%s = %d\n", name, value), cfg)
 				require.NoError(t, err)
 				err = cfg.Adjust(&meta, false)
-				if value < 1 {
+				if value < 1 || value > 16 {
 					require.ErrorContains(t, err, name)
 					return
 				}
@@ -811,6 +811,7 @@ func TestGCConcurrencyConfigReload(t *testing.T) {
 	for _, values := range []map[string]int{
 		{},
 		{"gc-keyspace-index-load-concurrency": 1, "gc-state-cache-warmup-concurrency": 2},
+		{"gc-keyspace-index-load-concurrency": 16, "gc-state-cache-warmup-concurrency": 16},
 	} {
 		store := storage.NewStorageWithMemoryBackend()
 		require.NoError(t, store.SaveConfig(map[string]any{"pd-server": values}))
@@ -827,6 +828,24 @@ func TestGCConcurrencyConfigReload(t *testing.T) {
 				want = value
 			}
 			require.Equal(t, float64(want), fields[name])
+		}
+	}
+}
+
+func TestGCConcurrencyConfigReloadRejectsInvalid(t *testing.T) {
+	for _, name := range []string{"gc-keyspace-index-load-concurrency", "gc-state-cache-warmup-concurrency"} {
+		for _, value := range []int{-1, 0, 17, 128, math.MaxInt} {
+			t.Run(fmt.Sprintf("%s/%d", name, value), func(t *testing.T) {
+				store := storage.NewStorageWithMemoryBackend()
+				require.NoError(t, store.SaveConfig(map[string]any{
+					"pd-server": map[string]int{name: value},
+				}))
+				opt, err := newTestScheduleOption()
+				require.NoError(t, err)
+				previous := opt.GetPDServerConfig().Clone()
+				require.ErrorContains(t, opt.Reload(store), name)
+				require.Equal(t, previous, opt.GetPDServerConfig())
+			})
 		}
 	}
 }

@@ -108,10 +108,14 @@ func TestGCConcurrencyConfigUpdateAndReload(t *testing.T) {
 	}
 	re.Equal(4, getConfig().GCKeyspaceIndexLoadConcurrency)
 	re.Equal(4, getConfig().GCStateCacheWarmupConcurrency)
-	data := []byte(`{"gc-keyspace-index-load-concurrency":1,"pd-server.gc-state-cache-warmup-concurrency":2}`)
+	data := []byte(`{"gc-keyspace-index-load-concurrency":16,"pd-server.gc-state-cache-warmup-concurrency":16}`)
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, configURL, data, testutil.StatusOK(re)))
+	re.Equal(16, getConfig().GCKeyspaceIndexLoadConcurrency)
+	re.Equal(16, getConfig().GCStateCacheWarmupConcurrency)
+	data = []byte(`{"gc-keyspace-index-load-concurrency":1,"pd-server.gc-state-cache-warmup-concurrency":2}`)
 	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, configURL, data, testutil.StatusOK(re)))
 	for _, name := range []string{"gc-keyspace-index-load-concurrency", "gc-state-cache-warmup-concurrency"} {
-		for _, value := range []int{0, -1} {
+		for _, value := range []int{0, -1, 17, 128, 1 << 30} {
 			data, err := json.Marshal(map[string]int{name: value})
 			re.NoError(err)
 			re.NoError(testutil.CheckPostJSON(tests.TestDialClient, configURL, data,

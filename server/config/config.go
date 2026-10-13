@@ -214,8 +214,10 @@ const (
 	DefaultMinResolvedTSPersistenceInterval = time.Second
 	// DefaultGCKeyspaceIndexLoadConcurrency is the default metadata scan concurrency.
 	DefaultGCKeyspaceIndexLoadConcurrency = 4
+	maxGCKeyspaceIndexLoadConcurrency     = 16
 	// DefaultGCStateCacheWarmupConcurrency is the default GC state warmup concurrency.
 	DefaultGCStateCacheWarmupConcurrency = 4
+	maxGCStateCacheWarmupConcurrency     = 16
 
 	defaultEnableGRPCGateway   = true
 	defaultDisableErrorVerbose = true
@@ -619,11 +621,8 @@ func (c *PDServerConfig) Clone() *PDServerConfig {
 
 // Validate is used to validate if some pd-server configurations are right.
 func (c *PDServerConfig) Validate() error {
-	if c.GCKeyspaceIndexLoadConcurrency < 1 {
-		return errors.New("gc-keyspace-index-load-concurrency must be at least 1")
-	}
-	if c.GCStateCacheWarmupConcurrency < 1 {
-		return errors.New("gc-state-cache-warmup-concurrency must be at least 1")
+	if err := c.validateGCConcurrency(); err != nil {
+		return err
 	}
 	switch c.DashboardAddress {
 	case "auto":
@@ -650,6 +649,16 @@ func (c *PDServerConfig) Validate() error {
 		return errors.New(fmt.Sprintf("gc-tuner-threshold should between %v and %v", minGCTunerThreshold, maxGCTunerThreshold))
 	}
 
+	return nil
+}
+
+func (c *PDServerConfig) validateGCConcurrency() error {
+	if c.GCKeyspaceIndexLoadConcurrency < 1 || c.GCKeyspaceIndexLoadConcurrency > maxGCKeyspaceIndexLoadConcurrency {
+		return errors.Errorf("gc-keyspace-index-load-concurrency must be between 1 and %d", maxGCKeyspaceIndexLoadConcurrency)
+	}
+	if c.GCStateCacheWarmupConcurrency < 1 || c.GCStateCacheWarmupConcurrency > maxGCStateCacheWarmupConcurrency {
+		return errors.Errorf("gc-state-cache-warmup-concurrency must be between 1 and %d", maxGCStateCacheWarmupConcurrency)
+	}
 	return nil
 }
 

@@ -895,6 +895,9 @@ func (o *PersistOptions) Reload(storage endpoint.ConfigStorage) error {
 	if err != nil {
 		return err
 	}
+	if err := cfg.PDServerCfg.validateGCConcurrency(); err != nil {
+		return err
+	}
 	adjustScheduleCfg(&cfg.Schedule)
 	// Some fields may not be stored in the storage, we need to calculate them manually.
 	cfg.StoreConfig.Adjust()
