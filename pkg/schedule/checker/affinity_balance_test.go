@@ -28,12 +28,23 @@ import (
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/schedule/affinity"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
+
+type scanCountingAffinityCluster struct {
+	sche.CheckerCluster
+	scanCalls int
+}
+
+func (c *scanCountingAffinityCluster) ScanRegions(startKey, endKey []byte, limit int) []*core.RegionInfo {
+	c.scanCalls++
+	return c.CheckerCluster.ScanRegions(startKey, endKey, limit)
+}
 
 func (c *AffinityChecker) buildBalanceActions(ctx context.Context, group *affinity.GroupState, ranges affinity.GroupKeyRanges) (affinity.BalanceActionSet, bool) {
 	storeIDs := c.balanceStoreIDs()
@@ -145,6 +156,9 @@ func TestAffinityBalanceProgressBuilderBoundsFits(t *testing.T) {
 	storeIDs := checker.balanceStoreIDs()
 	const budget = 2
 	for _, mode := range []affinity.BalanceActionMode{affinity.BalanceBuildLeaders, affinity.BalanceBuildVoters} {
+		oneShot := checker.buildBalanceActionsProgress(t.Context(), state, ranges, storeIDs, mode, nil, 0)
+		require.True(t, oneShot.Ready)
+		require.True(t, oneShot.Complete)
 		var cursor any
 		var result affinity.BalanceActionBuildResult
 		for {
@@ -159,7 +173,10 @@ func TestAffinityBalanceProgressBuilderBoundsFits(t *testing.T) {
 			require.Empty(t, result.Actions.VoterReplacements, "partial candidates must not escape a page")
 			cursor = result.Cursor
 		}
+		require.Equal(t, oneShot.Actions, result.Actions, "paged work must produce the same actions as one-shot work")
 		if mode == affinity.BalanceBuildLeaders {
+			require.ElementsMatch(t, []uint64{1, 2, 3}, result.Actions.LeaderTargets,
+				"every feasible leader target must survive the first-region intersection")
 			require.Contains(t, result.Actions.LeaderTargets, uint64(2))
 		} else {
 			require.Contains(t, result.Actions.VoterReplacements, uint64(1))
@@ -167,6 +184,51 @@ func TestAffinityBalanceProgressBuilderBoundsFits(t *testing.T) {
 			require.True(t, slices.Contains(result.Actions.VoterReplacements[1][4], uint64(2)))
 		}
 	}
+}
+
+func TestAffinityBalanceProgressBudgetBoundsRegionScans(t *testing.T) {
+	opt := newAffinityTestOptions()
+	tc := mockcluster.NewCluster(t.Context(), opt)
+	for id := uint64(1); id <= 4; id++ {
+		tc.AddRegionStore(id, 10)
+		tc.SetStoreUp(id)
+	}
+	manager := tc.GetAffinityManager()
+	checker := newTestAffinityChecker(t.Context(), tc, opt)
+	group := &affinity.Group{ID: "scan-budget", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}}
+	require.NoError(t, createAffinityGroupForTest(manager, group, []byte("a"), []byte("z")))
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	tc.PutRegion(tc.GetRegion(1).Clone(core.WithStartKey([]byte("a")), core.WithEndKey([]byte("d"))))
+	tc.AddLeaderRegion(2, 1, 2, 3)
+	tc.PutRegion(tc.GetRegion(2).Clone(core.WithStartKey([]byte("d")), core.WithEndKey([]byte("z"))))
+	for _, id := range []uint64{1, 2} {
+		manager.GetAndCacheRegionAffinityGroupState(tc.GetRegion(id))
+	}
+	countingCluster := &scanCountingAffinityCluster{CheckerCluster: tc}
+	checker.cluster = countingCluster
+	ranges := affinity.GroupKeyRanges{GroupID: group.ID,
+		KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("b")}, {StartKey: []byte("c"), EndKey: []byte("z")}}}
+	storeIDs := checker.balanceStoreIDs()
+	var cursor any
+	var result affinity.BalanceActionBuildResult
+	const budget = 1
+	for range 128 {
+		previousScans := countingCluster.scanCalls
+		result = checker.buildBalanceActionsProgress(t.Context(), manager.GetAffinityGroupState(group.ID), ranges,
+			storeIDs, affinity.BalanceBuildLeaders, cursor, budget)
+		require.LessOrEqual(t, countingCluster.scanCalls-previousScans, budget,
+			"one page must not hide multiple ScanRegions calls inside the cursor")
+		require.LessOrEqual(t, result.Checks, budget)
+		require.True(t, result.Ready)
+		if result.Complete {
+			break
+		}
+		require.NotNil(t, result.Cursor)
+		require.Empty(t, result.Actions.LeaderTargets)
+		cursor = result.Cursor
+	}
+	require.True(t, result.Complete)
+	require.GreaterOrEqual(t, countingCluster.scanCalls, 3, "the overlapping ranges revisit one Region before the next")
 }
 
 func TestAffinityBalanceAdmissionBlocksBuild(t *testing.T) {
@@ -189,6 +251,15 @@ func TestAffinityBalanceAdmissionBlocksBuild(t *testing.T) {
 		checker.balanceStoreIDs(), affinity.BalanceBuildLeaders, nil, 8)
 	require.True(t, result.BlockTable)
 	require.False(t, result.Ready)
+	checker.PauseOrResume(0)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	result = checker.buildBalanceActionsProgress(ctx, manager.GetAffinityGroupState(group.ID),
+		affinity.GroupKeyRanges{GroupID: group.ID, KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("b")}}},
+		checker.balanceStoreIDs(), affinity.BalanceBuildLeaders, nil, 8)
+	require.True(t, result.BlockTable)
+	require.False(t, result.Ready)
+	require.Empty(t, result.Actions.LeaderTargets)
 }
 
 func TestAffinityBalanceRoleSwitchAndStoreFilters(t *testing.T) {
@@ -241,12 +312,18 @@ func TestAffinityBalanceRoleSwitchAndStoreFilters(t *testing.T) {
 	require.NoError(t, tc.GetBasicCluster().PauseLeaderTransfer(1, constant.Out))
 	blockedLeaderSource := checker.buildBalanceActionsProgress(t.Context(), state, ranges, stores,
 		affinity.BalanceBuildVoters, nil, 0)
+	require.True(t, blockedLeaderSource.Ready)
+	require.True(t, blockedLeaderSource.Complete)
 	require.NotContains(t, blockedLeaderSource.Actions.VoterReplacements[1][4], uint64(2),
 		"a voter replacement that requires transferring from a paused leader is not actionable")
+	tc.GetBasicCluster().ResumeLeaderTransfer(1, constant.Out)
 
 	tc.SetStoreBusy(2, true)
 	blockedVoterSource := checker.buildBalanceActionsProgress(t.Context(), state, ranges, stores,
 		affinity.BalanceBuildVoters, nil, 0)
+	require.True(t, blockedVoterSource.BlockTable)
+	require.False(t, blockedVoterSource.Ready)
+	require.Empty(t, blockedVoterSource.Actions.VoterReplacements)
 	require.NotContains(t, blockedVoterSource.Actions.VoterReplacements, uint64(2),
 		"busy source stores are excluded from voter replacements")
 
@@ -256,11 +333,38 @@ func TestAffinityBalanceRoleSwitchAndStoreFilters(t *testing.T) {
 		affinity.BalanceBuildVoters, nil, 0)
 	require.NotContains(t, offline.Actions.VoterReplacements[1], uint64(4))
 	tc.SetStoreUp(4)
-	tc.GetBasicCluster().ResumeLeaderTransfer(1, constant.Out)
 	tc.SetStoreBusy(2, false)
 	recovered := checker.buildBalanceActionsProgress(t.Context(), state, ranges, checker.balanceStoreIDs(),
 		affinity.BalanceBuildVoters, nil, 0)
 	require.Contains(t, recovered.Actions.VoterReplacements[1], uint64(4), "a recovered destination can be considered again")
+}
+
+func TestAffinityBalanceTemporaryBestLocationBlocksTable(t *testing.T) {
+	opt := newAffinityTestOptions()
+	opt.SetLocationLabels([]string{"region", "zone", "host"})
+	tc := mockcluster.NewCluster(t.Context(), opt)
+	tc.AddLabelsStore(1, 0, map[string]string{"region": "r1", "zone": "z1", "host": "h1"})
+	tc.AddLabelsStore(2, 0, map[string]string{"region": "r1", "zone": "z1", "host": "h1"})
+	tc.AddLabelsStore(3, 0, map[string]string{"region": "r1", "zone": "z1", "host": "h2"})
+	tc.AddLabelsStore(4, 0, map[string]string{"region": "r1", "zone": "z2", "host": "h1"})
+	tc.AddLabelsStore(5, 0, map[string]string{"region": "r1", "zone": "z3", "host": "h1"})
+	tc.AddLabelsStore(6, 0, map[string]string{"region": "r1", "zone": "z3", "host": "h2"})
+	manager := tc.GetAffinityManager()
+	checker := newTestAffinityChecker(t.Context(), tc, opt)
+	group := &affinity.Group{ID: "best-location-block", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 3, 4}}
+	require.NoError(t, createAffinityGroupForTest(manager, group, []byte("a"), []byte("b")))
+	tc.AddLeaderRegion(1, 1, 3, 4)
+	tc.PutRegion(tc.GetRegion(1).Clone(core.WithStartKey([]byte("a")), core.WithEndKey([]byte("b"))))
+	region := tc.GetRegion(1)
+	manager.GetAndCacheRegionAffinityGroupState(region)
+	tc.SetStoreBusy(1, true)
+	tc.SetStoreBusy(3, true)
+	result := checker.buildBalanceActionsProgress(t.Context(), manager.GetAffinityGroupState(group.ID),
+		affinity.GroupKeyRanges{GroupID: group.ID, KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("b")}}},
+		checker.balanceStoreIDs(), affinity.BalanceBuildLeaders, nil, 8)
+	require.True(t, result.BlockTable)
+	require.False(t, result.Ready)
+	require.Empty(t, result.Actions.LeaderTargets)
 }
 
 func TestAffinityBalanceScheduleDenyBlocksAndRecovers(t *testing.T) {
@@ -296,7 +400,7 @@ func TestAffinityBalanceScheduleDenyBlocksAndRecovers(t *testing.T) {
 	require.NoError(t, tc.GetRegionLabeler().SetLabelRule(rule))
 	manager.ObserveBalanceRegion(region)
 	recovered := checker.buildBalanceActionsProgress(t.Context(), manager.GetAffinityGroupState(group.ID), ranges,
-		checker.balanceStoreIDs(), affinity.BalanceBuildLeaders, nil, 8)
+		checker.balanceStoreIDs(), affinity.BalanceBuildLeaders, nil, 0)
 	require.True(t, recovered.Ready)
 	require.True(t, recovered.Complete)
 }

@@ -113,6 +113,7 @@ func (m *Manager) createGroupsWithSkipExisting(changes []GroupKeyRanges, skipExi
 			CreateTimestamp: uint64(time.Now().Unix()),
 			LeaderStoreID:   0,
 			VoterStoreIDs:   nil,
+			BalancePolicy:   BalancePolicyAuto,
 		}
 		if err := m.AdjustGroup(group); err != nil {
 			return err
@@ -294,6 +295,75 @@ func (m *Manager) DeleteAffinityGroups(groupIDs []string, force bool) error {
 // UpdateAffinityGroupPeers updates the leader and voter stores of an affinity group and marks it available.
 func (m *Manager) UpdateAffinityGroupPeers(groupID string, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
 	return m.updateAffinityGroupPeersWithAffinityVer(groupID, 0, leaderStoreID, voterStoreIDs)
+}
+
+// UpdateAffinityGroupPolicy updates the balance policy of an affinity group.
+func (m *Manager) UpdateAffinityGroupPolicy(groupID string, policy BalancePolicy) (*GroupState, error) {
+	if err := ValidateGroupID(groupID); err != nil {
+		return nil, err
+	}
+	if policy == "" {
+		policy = BalancePolicyAuto
+	}
+	if err := validateBalancePolicy(policy); err != nil {
+		return nil, err
+	}
+
+	m.metaMutex.Lock()
+	defer m.metaMutex.Unlock()
+
+	group := m.GetAffinityGroupState(groupID)
+	if group == nil {
+		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
+	}
+	if group.BalancePolicy == policy {
+		return group, nil
+	}
+
+	original := group.Group
+	updated := original
+	updated.BalancePolicy = policy
+	err := m.storage.RunInTxn(m.ctx, func(txn kv.Txn) error {
+		key := keypath.AffinityGroupPath(groupID)
+		var (
+			value   string
+			loadErr error
+		)
+		if revisionTxn, ok := txn.(kv.RevisionTxn); ok {
+			value, loadErr = revisionTxn.LoadWithRevision(key)
+		} else {
+			value, loadErr = txn.Load(key)
+		}
+		if loadErr != nil {
+			return loadErr
+		}
+		if value == "" {
+			return errs.ErrEtcdTxnConflict.FastGenByArgs()
+		}
+		var persisted Group
+		if err := json.Unmarshal([]byte(value), &persisted); err != nil {
+			return err
+		}
+		if persisted.ID != original.ID || persisted.CreateTimestamp != original.CreateTimestamp ||
+			persisted.BalancePolicy != original.BalancePolicy || persisted.LeaderStoreID != original.LeaderStoreID ||
+			!slices.Equal(normalizeVoters(persisted.VoterStoreIDs), original.VoterStoreIDs) {
+			return errs.ErrEtcdTxnConflict.FastGenByArgs()
+		}
+		return m.storage.SaveAffinityGroup(txn, groupID, &updated)
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	m.Lock()
+	defer m.Unlock()
+	groupInfo, ok := m.groups[groupID]
+	if !ok {
+		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
+	}
+	groupInfo.BalancePolicy = policy
+	m.resetCountLocked(groupInfo)
+	return newGroupState(groupInfo), nil
 }
 
 // updateAffinityGroupPeersWithAffinityVer updates the leader and voter stores of an affinity group and marks it available.

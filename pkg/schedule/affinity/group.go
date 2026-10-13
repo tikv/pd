@@ -282,6 +282,9 @@ func (m *Manager) AdjustGroup(g *Group) error {
 	if err := ValidateGroupID(g.ID); err != nil {
 		return err
 	}
+	if err := validateBalancePolicy(g.BalancePolicy); err != nil {
+		return err
+	}
 	// If no distribution is provided, we will use the default distribution.
 	if g.LeaderStoreID == 0 && len(g.VoterStoreIDs) == 0 {
 		return nil
@@ -306,6 +309,15 @@ func (m *Manager) AdjustGroup(g *Group) error {
 	}
 
 	return nil
+}
+
+func validateBalancePolicy(policy BalancePolicy) error {
+	switch policy {
+	case "", BalancePolicyAuto, BalancePolicyFixed:
+		return nil
+	default:
+		return errs.ErrAffinityGroupContent.FastGenByArgs(fmt.Sprintf("invalid balance policy %q", policy))
+	}
 }
 
 // GroupKeyRanges represents key ranges with group id.

@@ -19,7 +19,6 @@ import (
 	"encoding/json"
 	"slices"
 	"strings"
-	"sync"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -87,7 +86,7 @@ type Manager struct {
 	balanceStoreRevision    uint64
 	balanceStoreFingerprint uint64
 	balanceQueue            chan string
-	balanceLocks            map[string]*sync.Mutex
+	balanceLocks            map[string]*balanceTableLock
 
 	// The following members are protected by metaMutex only, not protected by RWMutex.
 	// keyRanges cached in memory to reduce labeler lock contention
@@ -114,7 +113,7 @@ func NewManager(ctx context.Context, storage endpoint.AffinityStorage, storeSetI
 		unavailableStores:   make(map[uint64]storeCondition),
 		balanceTables:       make(map[string]*balanceTableState),
 		balanceQueue:        make(chan string, 64),
-		balanceLocks:        make(map[string]*sync.Mutex),
+		balanceLocks:        make(map[string]*balanceTableLock),
 		keyRanges:           make(map[string]GroupKeyRanges),
 		labelRuleBuffer:     make(map[string]*labeler.LabelRule),
 	}
@@ -139,6 +138,12 @@ func (m *Manager) initialize() error {
 			log.Error("failed to unmarshal affinity group, skipping",
 				zap.String("key", k),
 				zap.Error(errs.ErrLoadRule.Wrap(err)))
+			return
+		}
+		if err := validateBalancePolicy(group.BalancePolicy); err != nil {
+			log.Warn("invalid affinity group balance policy, skipping",
+				zap.String("key", k),
+				zap.Error(err))
 			return
 		}
 		m.initGroupLocked(group)
@@ -500,6 +505,15 @@ func (m *Manager) GetAllAffinityGroupStates() []*GroupState {
 
 // SyncGroupFromEtcd synchronizes a group from etcd to the in-memory state.
 func (m *Manager) SyncGroupFromEtcd(group *Group) {
+	if group == nil {
+		return
+	}
+	if err := validateBalancePolicy(group.BalancePolicy); err != nil {
+		log.Warn("invalid affinity group balance policy from etcd, skipping",
+			zap.String("group-id", group.ID),
+			zap.Error(err))
+		return
+	}
 	// Voter order has no meaning, but affinity comparisons use canonical order.
 	copy := *group
 	copy.VoterStoreIDs = normalizeVoters(group.VoterStoreIDs)

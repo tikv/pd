@@ -90,6 +90,35 @@ type balanceFingerprint struct {
 	table, stores, rules uint64
 }
 
+type balanceTableLock struct {
+	mutex sync.Mutex
+	users int
+}
+
+func (m *Manager) acquireBalanceTableLock(tableID string) *sync.Mutex {
+	m.Lock()
+	defer m.Unlock()
+	lock := m.balanceLocks[tableID]
+	if lock == nil {
+		lock = &balanceTableLock{}
+		m.balanceLocks[tableID] = lock
+	}
+	lock.users++
+	return &lock.mutex
+}
+
+func (m *Manager) releaseBalanceTableLock(tableID string, mutex *sync.Mutex) {
+	m.Lock()
+	defer m.Unlock()
+	lock := m.balanceLocks[tableID]
+	if lock != nil && &lock.mutex == mutex {
+		lock.users--
+		if lock.users == 0 {
+			delete(m.balanceLocks, tableID)
+		}
+	}
+}
+
 // ObserveBalanceRegion invalidates only on changes that affect affinity
 // actions. Ordinary heartbeat statistics do not invalidate the action cache.
 func (m *Manager) ObserveBalanceRegion(region *core.RegionInfo) {
@@ -172,6 +201,7 @@ type balanceTableState struct {
 	dependencyFingerprint balanceFingerprint
 	queued                bool
 	retryAfter            time.Time
+	retryDelay            time.Duration
 }
 
 // SetBalanceActionBuilder connects the checker to the pure affinity planner.
@@ -219,9 +249,10 @@ func (m *Manager) runBalanceWorker() {
 						state.retryAfter = time.Now().Add(time.Second)
 					}
 				} else {
-					// Unready groups and failed writes retry without rebuilding
-					// placement on every heartbeat.
-					state.retryAfter = time.Now().Add(time.Second)
+					// Back off while repair or execution admission is unchanged.
+					// Relevant input changes reset the delay immediately.
+					state.retryDelay = min(max(time.Second, state.retryDelay*2), 30*time.Second)
+					state.retryAfter = time.Now().Add(state.retryDelay)
 				}
 			}
 			m.Unlock()
@@ -291,6 +322,7 @@ func (m *Manager) invalidateBalanceLocked(groupID string) {
 	clearBalanceDependencies(state)
 	state.nextGroup = ""
 	state.retryAfter = time.Time{}
+	state.retryDelay = 0
 }
 
 // InvalidateBalance invalidates the changed group's legal actions and its
@@ -463,15 +495,8 @@ func (m *Manager) balanceTableWithBudget(ctx context.Context, groupID string, ap
 //nolint:revive // the boolean reports whether a bounded build should resume.
 func (m *Manager) balanceTableWithProgress(ctx context.Context, groupID string, apply bool, buildBudget int) ([]BalancePlan, error, bool) {
 	tableID := TableGroupPrefix(groupID)
-	m.Lock()
-	tableLock := m.balanceLocks[tableID]
-	if tableLock == nil {
-		tableLock = &sync.Mutex{}
-		m.balanceLocks[tableID] = tableLock
-	}
-	m.Unlock()
-	// The lock map is kept for the Manager lifetime so deleting and recreating
-	// a table cannot leave two planners holding different locks for one table.
+	tableLock := m.acquireBalanceTableLock(tableID)
+	defer m.releaseBalanceTableLock(tableID, tableLock)
 	if !tableLock.TryLock() {
 		return nil, nil, false
 	}
@@ -817,7 +842,23 @@ func (m *Manager) removeIllegalBalanceAction(snapshot *balanceSnapshot, group *G
 	if state == nil || m.balanceFingerprintLocked(state) != snapshot.fingerprint {
 		return
 	}
-	actions := state.actions[group.ID]
+	// Snapshots read the role-specific caches. Remove a rejected action
+	// from every representation so a subsequent snapshot cannot restore it.
+	actions := discardBalanceAction(state.actions[group.ID], group, plan)
+	state.actions[group.ID] = actions
+	if slices.Equal(plan.VoterStoreIDs, group.VoterStoreIDs) {
+		state.leaderTargets[group.ID] = slices.DeleteFunc(slices.Clone(state.leaderTargets[group.ID]),
+			func(id uint64) bool { return id == plan.LeaderStoreID })
+	}
+	if voters, ok := state.voterActions[group.ID]; ok {
+		state.voterActions[group.ID] = discardBalanceAction(voters, group, plan)
+	}
+	delete(state.cursors, group.ID)
+	state.pending = nil
+}
+
+func discardBalanceAction(actions BalanceActionSet, group *GroupState, plan BalancePlan) BalanceActionSet {
+	actions = cloneBalanceActionSet(actions)
 	if slices.Equal(plan.VoterStoreIDs, group.VoterStoreIDs) {
 		actions.LeaderTargets = slices.DeleteFunc(actions.LeaderTargets, func(id uint64) bool { return id == plan.LeaderStoreID })
 	} else {
@@ -826,12 +867,15 @@ func (m *Manager) removeIllegalBalanceAction(snapshot *balanceSnapshot, group *G
 				for to, leaders := range targets {
 					if !slices.Contains(group.VoterStoreIDs, to) && slices.Contains(plan.VoterStoreIDs, to) {
 						targets[to] = slices.DeleteFunc(leaders, func(id uint64) bool { return id == plan.LeaderStoreID })
+						if len(targets[to]) == 0 {
+							delete(targets, to)
+						}
 					}
 				}
 			}
 		}
 	}
-	state.actions[group.ID] = actions
+	return actions
 }
 
 func findChangedPlan(plans []BalancePlan) *BalancePlan {
