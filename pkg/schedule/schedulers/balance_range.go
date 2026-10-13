@@ -204,9 +204,8 @@ func (handler *balanceRangeSchedulerHandler) updateJobStatus(w http.ResponseWrit
 	switch {
 	case err == nil:
 		handler.rd.JSON(w, http.StatusOK, nil)
-	case errs.ErrScheduleConfigNotExist.Equal(err):
-		handler.rd.JSON(w, http.StatusNotFound, err.Error())
-	case errors.Cause(err) == errJobStatusConflict:
+	// 404 is reserved for the PD that doesn't support this API, see ErrBalanceRangeJobStatusUnsupported.
+	case errs.ErrScheduleConfigNotExist.Equal(err), errors.Cause(err) == errJobStatusConflict:
 		handler.rd.JSON(w, http.StatusConflict, err.Error())
 	default:
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
@@ -220,6 +219,10 @@ type balanceRangeJobStatusUpdater interface {
 }
 
 var errJobStatusConflict = errors.New("job status conflict")
+
+// ErrBalanceRangeJobStatusUnsupported is returned by the balanceRangeJobStatusUpdater if the PD
+// doesn't support updating the job status, e.g. the PD hasn't been upgraded yet.
+var ErrBalanceRangeJobStatusUnsupported = errors.New("updating balance range job status is unsupported")
 
 type balanceRangeSchedulerConfig struct {
 	schedulerConfig
@@ -285,10 +288,12 @@ func (conf *balanceRangeSchedulerConfig) updateJobStatus(jobID uint64, status Jo
 		if job.Status == status {
 			return nil
 		}
-		if status == running {
-			return conf.beginLocked(index, nil)
+		// The status may skip running, e.g. the job is started by the scheduling service when the
+		// PD doesn't support this API, but it can never move backward.
+		if status.rank() <= job.Status.rank() {
+			return errors.Annotatef(errJobStatusConflict, "the job:%d is %s, can't be %s", jobID, job.Status.String(), status.String())
 		}
-		return conf.finishLocked(index, nil)
+		return conf.setStatusLocked(conf.jobs[index], status, nil)
 	}
 	return errs.ErrScheduleConfigNotExist.FastGenByArgs(jobID)
 }
@@ -367,19 +372,28 @@ func (conf *balanceRangeSchedulerConfig) setStatusLocked(job *balanceRangeSchedu
 		case running:
 			job.Start = &now
 		case finished:
+			if job.Start == nil {
+				job.Start = &now
+			}
 			job.Finish = &now
 		}
 		job.Status = status
 	}
-	if updater == nil {
-		return conf.persistLocked(updateFn)
+	if updater != nil {
+		err := updater.UpdateBalanceRangeJobStatus(job.JobID, status.String())
+		if err == nil {
+			// The persisted time will be synced back by the config watcher.
+			updateFn()
+			return nil
+		}
+		if errors.Cause(err) != ErrBalanceRangeJobStatusUnsupported {
+			return err
+		}
+		// Fall back to the local storage, the status will be persisted by the PD after it's upgraded.
+		log.Warn("the PD doesn't support updating balance range job status, fall back to the local storage",
+			zap.Uint64("job-id", job.JobID), zap.String("status", status.String()))
 	}
-	if err := updater.UpdateBalanceRangeJobStatus(job.JobID, status.String()); err != nil {
-		return err
-	}
-	// The persisted time will be synced back by the config watcher.
-	updateFn()
-	return nil
+	return conf.persistLocked(updateFn)
 }
 
 // mergeLocked merges the jobs loaded from the storage into the current jobs. It keeps the
@@ -405,6 +419,17 @@ func (conf *balanceRangeSchedulerConfig) mergeLocked(loaded []*balanceRangeSched
 		jobs = append(jobs, old)
 	}
 	conf.jobs = jobs
+}
+
+// containsLocked checks whether the job is still in the jobs. The identity of the jobs is kept
+// by mergeLocked, so a removed or replaced job can be found by the pointer.
+func (conf *balanceRangeSchedulerConfig) containsLocked(job *balanceRangeSchedulerJob) bool {
+	for _, j := range conf.jobs {
+		if j == job {
+			return true
+		}
+	}
+	return false
 }
 
 func (conf *balanceRangeSchedulerConfig) peekLocked() (int, *balanceRangeSchedulerJob) {
@@ -576,8 +601,9 @@ func (s *balanceRangeScheduler) checkJob(cluster sche.SchedulerCluster) bool {
 			return false
 		}
 	}
-	// If the running job has been completed by others, e.g. cancelled by the user, it needs to stop the job.
-	if s.rangeJob != nil && s.rangeJob.isComplete() {
+	// If the running job has been completed by others, e.g. cancelled by the user, or removed from the jobs,
+	// e.g. the scheduler is re-created, it needs to stop the job and clean its key ranges.
+	if s.rangeJob != nil && (s.rangeJob.isComplete() || !s.conf.containsLocked(s.rangeJob)) {
 		s.cleanJobStatus(cluster, s.rangeJob)
 	}
 
@@ -596,7 +622,10 @@ func (s *balanceRangeScheduler) checkJob(cluster sche.SchedulerCluster) bool {
 		}
 	}
 	// The job may be running before this scheduler is created, e.g. the primary of the scheduling service changes.
-	if s.rangeJob == nil || s.rangeJob.JobID != job.JobID {
+	if s.rangeJob != job {
+		if s.rangeJob != nil {
+			s.cleanJobStatus(cluster, s.rangeJob)
+		}
 		cluster.GetKeyRangeManager().Append(job.Ranges)
 		s.rangeJob = job
 	}
@@ -633,7 +662,7 @@ func (s *balanceRangeScheduler) checkJob(cluster sche.SchedulerCluster) bool {
 func (s *balanceRangeScheduler) cleanJobStatus(cluster sche.SchedulerCluster, job *balanceRangeSchedulerJob) {
 	km := cluster.GetKeyRangeManager()
 	km.Delete(job.Ranges)
-	if s.rangeJob != nil && s.rangeJob.JobID == job.JobID {
+	if s.rangeJob == job {
 		s.rangeJob = nil
 	}
 	for storeID := range s.scoreMap {

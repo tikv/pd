@@ -749,6 +749,11 @@ func (c *Cluster) UpdateBalanceRangeJobStatus(jobID uint64, status string) error
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
+		// The PD hasn't registered this API, e.g. it hasn't been upgraded yet.
+		if resp.StatusCode == http.StatusNotFound {
+			return errors.Annotatef(schedulers.ErrBalanceRangeJobStatusUnsupported,
+				"failed to update the status of balance range job %d to %s, body: %s", jobID, status, string(body))
+		}
 		return errors.Errorf("failed to update the status of balance range job %d to %s, status code: %d, body: %s",
 			jobID, status, resp.StatusCode, string(body))
 	}

@@ -678,11 +678,22 @@ func TestBalanceRangeUpdateJobStatus(t *testing.T) {
 	conf.jobs[0].Status = cancelled
 	re.Equal(http.StatusConflict, put(`{"job-id":1,"status":"finished"}`))
 
-	re.Equal(http.StatusNotFound, put(`{"job-id":2,"status":"running"}`))
+	// 404 is reserved for the PD that doesn't support this API
+	re.Equal(http.StatusConflict, put(`{"job-id":2,"status":"running"}`))
 	re.True(errs.ErrScheduleConfigNotExist.Equal(conf.updateJobStatus(2, running)))
 	re.Equal(http.StatusBadRequest, put(`{"status":"running"}`))
 	re.Equal(http.StatusBadRequest, put(`{"job-id":1,"status":"cancelled"}`))
 	re.Equal(http.StatusBadRequest, put(`{"job-id":1,"status":"pending"}`))
+
+	// the job may be started when the PD doesn't support this API, so it can be finished from pending
+	conf.jobs[0].Status = pending
+	conf.jobs[0].Start = nil
+	conf.jobs[0].Finish = nil
+	re.Equal(http.StatusOK, put(`{"job-id":1,"status":"finished"}`))
+	re.Equal(finished, conf.jobs[0].Status)
+	re.Equal(finished, loadStatus())
+	re.NotNil(conf.jobs[0].Start)
+	re.NotNil(conf.jobs[0].Finish)
 }
 
 func TestBalanceRangeMergeJobs(t *testing.T) {
@@ -817,4 +828,74 @@ func TestBalanceRangeJobFinishedByOthers(t *testing.T) {
 	re.NoError(sc.conf.updateJobStatus(0, finished))
 	re.False(sc.IsScheduleAllowed(tc))
 	re.True(km.IsEmpty())
+}
+
+func TestBalanceRangeJobStatusUnsupported(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	cluster := &mockJobStatusUpdater{Cluster: tc, err: errors.Annotate(ErrBalanceRangeJobStatusUnsupported, "404")}
+	km := tc.GetKeyRangeManager()
+	s := storage.NewStorageWithMemoryBackend()
+	scheduler, err := CreateScheduler(types.BalanceRangeScheduler, oc, s,
+		ConfigSliceDecoder(types.BalanceRangeScheduler, []string{"leader-scatter", "tikv", "1h", "test", "100", "200"}))
+	re.NoError(err)
+	sc := scheduler.(*balanceRangeScheduler)
+
+	// the job is started and persisted by the local storage if the PD doesn't support the API
+	sc.IsScheduleAllowed(cluster)
+	re.Equal(running, sc.conf.jobs[0].Status)
+	re.False(km.IsEmpty())
+	var jobs []*balanceRangeSchedulerJob
+	re.NoError(sc.conf.load(&jobs))
+	re.Len(jobs, 1)
+	re.Equal(running, jobs[0].Status)
+
+	// the job can be finished by the local storage too
+	sc.conf.Lock()
+	re.NoError(sc.conf.finishLocked(0, cluster))
+	sc.conf.Unlock()
+	re.False(sc.IsScheduleAllowed(cluster))
+	re.True(km.IsEmpty())
+	re.NoError(sc.conf.load(&jobs))
+	re.Equal(finished, jobs[0].Status)
+}
+
+func TestBalanceRangeJobRemovedByOthers(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	scheduler, err := CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigSliceDecoder(types.BalanceRangeScheduler, []string{"leader-scatter", "tikv", "1h", "test", "100", "200"}))
+	re.NoError(err)
+	sc := scheduler.(*balanceRangeScheduler)
+	km := tc.GetKeyRangeManager()
+	sc.IsScheduleAllowed(tc)
+	re.Equal(running, sc.conf.jobs[0].Status)
+	re.False(km.IsEmpty())
+	oldRange := sc.conf.jobs[0].Ranges[0]
+
+	// the running job is removed by the watcher, its key ranges must be cleaned
+	sc.conf.Lock()
+	sc.conf.mergeLocked(nil)
+	sc.conf.Unlock()
+	re.False(sc.IsScheduleAllowed(tc))
+	re.True(km.IsEmpty())
+	re.Nil(sc.rangeJob)
+
+	// the running job is replaced by another job, the key ranges of the old job must be cleaned
+	sc.conf.Lock()
+	sc.conf.mergeLocked([]*balanceRangeSchedulerJob{{
+		JobID:   1,
+		Rule:    core.LeaderScatter,
+		Engine:  core.EngineTiKV,
+		Timeout: time.Hour,
+		Ranges:  []keyutil.KeyRange{keyutil.NewKeyRange("300", "400")},
+		Status:  pending,
+	}})
+	sc.conf.Unlock()
+	sc.IsScheduleAllowed(tc)
+	re.Equal(uint64(1), sc.rangeJob.JobID)
+	re.False(km.IsEmpty())
+	re.Equal([]keyutil.KeyRange{oldRange}, km.GetNonOverlappingKeyRanges(&oldRange))
 }
