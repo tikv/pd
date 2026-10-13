@@ -35,6 +35,7 @@ import (
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
+	"github.com/tikv/pd/server/config"
 )
 
 const (
@@ -63,9 +64,10 @@ type enabledKeyspaceLoadHooks struct {
 // enabledKeyspaceIndex belongs to one leadership term. The published map and
 // its revision always describe one complete, successfully applied snapshot.
 type enabledKeyspaceIndex struct {
-	client         *clientv3.Client
-	prefix         string
-	watcherFactory func(*clientv3.Client) clientv3.Watcher
+	client             *clientv3.Client
+	prefix             string
+	watcherFactory     func(*clientv3.Client) clientv3.Watcher
+	getLoadConcurrency func() int
 
 	mu       sync.Mutex
 	entries  map[uint32]enabledKeyspace
@@ -77,10 +79,11 @@ type enabledKeyspaceIndex struct {
 
 func newEnabledKeyspaceIndex(client *clientv3.Client, prefix string) *enabledKeyspaceIndex {
 	return &enabledKeyspaceIndex{
-		client:         client,
-		prefix:         prefix,
-		watcherFactory: clientv3.NewWatcher,
-		changed:        make(chan struct{}),
+		client:             client,
+		prefix:             prefix,
+		watcherFactory:     clientv3.NewWatcher,
+		getLoadConcurrency: func() int { return config.DefaultGCKeyspaceIndexLoadConcurrency },
+		changed:            make(chan struct{}),
 	}
 }
 
@@ -102,7 +105,6 @@ func (i *enabledKeyspaceIndex) run(ctx context.Context, hooks enabledKeyspaceLoa
 	var lastLog time.Time
 	suppressedErrors := 0
 	for ctx.Err() == nil {
-		loadStartedAt := time.Now()
 		entries, revision, err := i.load(ctx, hooks.onPage)
 		phase := "load"
 		if err == nil {
@@ -111,11 +113,6 @@ func (i *enabledKeyspaceIndex) run(ctx context.Context, hooks enabledKeyspaceLoa
 					hooks.onInitialSnapshot(sortedEnabledKeyspaces(entries))
 				}
 				hooks = enabledKeyspaceLoadHooks{}
-				log.Info("load enabled keyspace index completed",
-					zap.String("prefix", i.prefix),
-					zap.Int64("revision", revision),
-					zap.Int("enabled-keyspace-count", len(entries)),
-					zap.Duration("cost", time.Since(loadStartedAt)))
 			}
 			watchStarted := time.Now()
 			err = i.watch(ctx, revision+1)

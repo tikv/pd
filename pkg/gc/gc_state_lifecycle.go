@@ -91,6 +91,7 @@ func (m *GCStateManager) OnNodeBecomesLeader() func() {
 	if m.etcdClient != nil {
 		generation.workDone = make(chan struct{})
 		generation.index = newEnabledKeyspaceIndex(m.etcdClient, keypath.KeyspaceMetaPrefix())
+		generation.index.getLoadConcurrency = func() int { return m.getConfig().GCKeyspaceIndexLoadConcurrency }
 		generation.warmup = newGCStateWarmup(m, generation, generation.index)
 	}
 	failpoint.InjectCall("beforeLeaderGCStateCacheReset")

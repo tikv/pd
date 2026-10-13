@@ -20,24 +20,40 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
-const (
-	enabledKeyspaceRangeSize   = 4096
-	enabledKeyspaceLoadWorkers = 4
-)
+const enabledKeyspaceRangeSize = 4096
 
 // load pins the entire attempt to the initial transaction's revision. Its map
 // stays private until every range succeeds; a failed attempt cancels and joins
 // the producer and workers before discarding the partial result.
-func (i *enabledKeyspaceIndex) load(ctx context.Context, onPage func([]enabledKeyspace)) (map[uint32]enabledKeyspace, int64, error) {
+func (i *enabledKeyspaceIndex) load(ctx context.Context, onPage func([]enabledKeyspace)) (entries map[uint32]enabledKeyspace, revision int64, err error) {
+	concurrency := i.getLoadConcurrency()
+	started := time.Now()
+	log.Info("start loading GC keyspace index", zap.String("prefix", i.prefix),
+		zap.Int("concurrency", concurrency), zap.Int("page-size", enabledKeyspacePageSize))
+	defer func() {
+		message := "load enabled keyspace index completed"
+		if ctx.Err() != nil {
+			message = "loading GC keyspace index canceled"
+		} else if err != nil {
+			message = "loading GC keyspace index failed"
+		}
+		log.Info(message, zap.String("prefix", i.prefix), zap.Int("concurrency", concurrency),
+			zap.Int64("revision", revision), zap.Int("enabled-keyspace-count", len(entries)),
+			zap.Duration("cost", time.Since(started)), zap.Error(err))
+	}()
 	end := clientv3.GetPrefixRangeEnd(i.prefix)
 	requestCtx, cancel := context.WithTimeout(ctx, enabledKeyspaceRequestTimeout)
 	resp, err := i.client.Txn(requestCtx).Then(
@@ -56,12 +72,12 @@ func (i *enabledKeyspaceIndex) load(ctx context.Context, onPage func([]enabledKe
 	if first == nil || allocator == nil {
 		return nil, 0, errors.New("missing range response in initial keyspace metadata transaction")
 	}
-	revision := resp.Header.Revision
+	revision = resp.Header.Revision
 	page, lastID, err := i.decodePage(first.Kvs, first.More, revision)
 	if err != nil {
 		return nil, 0, err
 	}
-	entries := make(map[uint32]enabledKeyspace)
+	entries = make(map[uint32]enabledKeyspace)
 	var mu sync.Mutex
 	consume := func(page []enabledKeyspace) {
 		mu.Lock()
@@ -92,7 +108,7 @@ func (i *enabledKeyspaceIndex) load(ctx context.Context, onPage func([]enabledKe
 	}
 	cursor := string(first.Kvs[len(first.Kvs)-1].Key) + "\x00"
 	type keyRange struct{ start, end string }
-	tasks := make(chan keyRange, enabledKeyspaceLoadWorkers)
+	tasks := make(chan keyRange, concurrency)
 	group, attemptCtx := errgroup.WithContext(ctx)
 	group.Go(func() error {
 		defer close(tasks)
@@ -112,7 +128,7 @@ func (i *enabledKeyspaceIndex) load(ctx context.Context, onPage func([]enabledKe
 			cursor = taskEnd
 		}
 	})
-	for range enabledKeyspaceLoadWorkers {
+	for range concurrency {
 		group.Go(func() error {
 			for {
 				select {

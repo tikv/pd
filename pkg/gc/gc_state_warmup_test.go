@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -27,16 +28,20 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/etcd/api/v3/etcdserverpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 	"google.golang.org/grpc"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
+	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/server/config"
 )
 
 func gcWarmupRead(req any) *etcdserverpb.TxnRequest {
@@ -285,68 +290,92 @@ func TestGCStateWarmupStreamsPartialPage(t *testing.T) {
 	gcWarmupWait(t, w.done)
 }
 
-// Four blocked background reads include the prioritized null singleton; a
-// foreground singleton must still execute without a background worker slot.
+// The configured number of blocked background reads includes the prioritized
+// null singleton. Foreground reads remain independent of background capacity.
 func TestGCStateWarmupConcurrencyAndForeground(t *testing.T) {
-	entered := make(chan int, 8)
-	release := make(chan struct{})
-	var once sync.Once
-	unblock := func() { once.Do(func() { close(release) }) }
-	defer unblock()
-	var active, maxActive atomic.Int32
-	m := newGCStateLoaderManager(t, func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoke grpc.UnaryInvoker, opts ...grpc.CallOption) error {
-		if txn := gcWarmupRead(req); txn != nil && string(txn.Success[0].GetRequestRange().Key) != keypath.TxnSafePointPath(2) {
-			n := active.Add(1)
-			for {
-				old := maxActive.Load()
-				if n <= old || maxActive.CompareAndSwap(old, n) {
-					break
+	for _, concurrency := range []int{1, 2, 4} {
+		t.Run(strconv.Itoa(concurrency), func(t *testing.T) {
+			entered := make(chan int, 8)
+			release := make(chan struct{})
+			var once sync.Once
+			unblock := func() { once.Do(func() { close(release) }) }
+			defer unblock()
+			var active, maxActive atomic.Int32
+			m := newGCStateLoaderManager(t, func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoke grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+				if txn := gcWarmupRead(req); txn != nil && string(txn.Success[0].GetRequestRange().Key) != keypath.TxnSafePointPath(2) {
+					n := active.Add(1)
+					for {
+						old := maxActive.Load()
+						if n <= old || maxActive.CompareAndSwap(old, n) {
+							break
+						}
+					}
+					defer active.Add(-1)
+					entered <- len(txn.Success) / 2
+					select {
+					case <-release:
+					case <-ctx.Done():
+						return ctx.Err()
+					}
+				}
+				return invoke(ctx, method, req, reply, cc, opts...)
+			})
+			m.stopGCStateGeneration(m.activeGeneration.Load())
+			options := config.NewPersistOptions(&config.Config{PDServerCfg: m.cfg})
+			next := options.GetPDServerConfig().Clone()
+			next.GCStateCacheWarmupConcurrency = concurrency
+			options.SetPDServerConfig(next)
+			m.SetConfigGetter(options.GetPDServerConfig)
+			m.OnNodeBecomesLeader()
+			core, logs := observer.New(zap.InfoLevel)
+			restore := log.ReplaceGlobals(zap.New(core), nil)
+			defer restore()
+			w := newGCStateWarmup(m, m.activeGeneration.Load(), nil)
+			// Updating the setting after creation must not resize this campaign.
+			next = next.Clone()
+			next.GCStateCacheWarmupConcurrency = 8
+			options.SetPDServerConfig(next)
+			w.onPage(gcWarmupEntries(100, 256))
+			w.onInitialSnapshot(gcWarmupEntries(100, 256))
+			runGCWarmupTest(t, w)
+			sizes := make([]int, 0, concurrency)
+			for range concurrency {
+				select {
+				case n := <-entered:
+					sizes = append(sizes, n)
+				case <-time.After(5 * time.Second):
+					t.Fatal("configured background reads did not overlap")
 				}
 			}
-			defer active.Add(-1)
-			entered <- len(txn.Success) / 2
+			require.ElementsMatch(t, []int{1, 60, 60, 60}[:concurrency], sizes)
+			started := logs.FilterMessage("start warming GC state cache").All()
+			require.Len(t, started, 1)
+			require.EqualValues(t, concurrency, started[0].ContextMap()["concurrency"])
+			bookkeeping := make(chan struct{})
+			go func() {
+				w.stateMu.Lock()
+				w.refresh(time.Now())
+				w.stateMu.Unlock()
+				close(bookkeeping)
+			}()
+			gcWarmupWait(t, bookkeeping)
+			foreground := make(chan error, 1)
+			go func() { _, err := m.GetGCState(2, true); foreground <- err }()
 			select {
-			case <-release:
-			case <-ctx.Done():
-				return ctx.Err()
+			case err := <-foreground:
+				require.NoError(t, err)
+			case <-time.After(5 * time.Second):
+				t.Fatal("foreground waited for background capacity")
 			}
-		}
-		return invoke(ctx, method, req, reply, cc, opts...)
-	})
-	w := newGCStateWarmup(m, m.activeGeneration.Load(), nil)
-	w.onPage(gcWarmupEntries(100, 256))
-	w.onInitialSnapshot(gcWarmupEntries(100, 256))
-	runGCWarmupTest(t, w)
-	sizes := make([]int, 0, 4)
-	for range 4 {
-		select {
-		case n := <-entered:
-			sizes = append(sizes, n)
-		case <-time.After(5 * time.Second):
-			t.Fatal("four background reads did not overlap")
-		}
+			require.Equal(t, int32(concurrency), maxActive.Load())
+			unblock()
+			gcWarmupWait(t, w.done)
+			require.Equal(t, int32(concurrency), maxActive.Load())
+			completed := logs.FilterMessage("warming GC state cache completed").All()
+			require.Len(t, completed, 1)
+			require.EqualValues(t, concurrency, completed[0].ContextMap()["concurrency"])
+		})
 	}
-	require.ElementsMatch(t, []int{1, 60, 60, 60}, sizes)
-	bookkeeping := make(chan struct{})
-	go func() {
-		w.stateMu.Lock()
-		w.refresh(time.Now())
-		w.stateMu.Unlock()
-		close(bookkeeping)
-	}()
-	gcWarmupWait(t, bookkeeping)
-	foreground := make(chan error, 1)
-	go func() { _, err := m.GetGCState(2, true); foreground <- err }()
-	select {
-	case err := <-foreground:
-		require.NoError(t, err)
-	case <-time.After(5 * time.Second):
-		t.Fatal("foreground waited for background capacity")
-	}
-	require.Equal(t, int32(4), maxActive.Load())
-	unblock()
-	gcWarmupWait(t, w.done)
-	require.Equal(t, int32(4), maxActive.Load())
 }
 
 // Dropped bounded page hints must be reconciled from the initial snapshot.
@@ -462,7 +491,7 @@ func TestGCStateWarmupJoinedSuccessSurvivesInvalidation(t *testing.T) {
 	// Pause scheduling outside every lock until the joined flight has completed
 	// and its cache entry has been invalidated. Bookkeeping must then observe the
 	// terminal success even though the cached value is gone.
-	paused := make(chan struct{}, gcStateWarmupWorkers)
+	paused := make(chan struct{}, w.concurrency)
 	resume := make(chan struct{})
 	var resumeOnce sync.Once
 	unblockWarmup := func() { resumeOnce.Do(func() { close(resume) }) }
@@ -479,7 +508,7 @@ func TestGCStateWarmupJoinedSuccessSurvivesInvalidation(t *testing.T) {
 	}))
 	defer func() { require.NoError(t, failpoint.Disable(schedule)) }()
 	w.notify()
-	for range gcStateWarmupWorkers {
+	for range w.concurrency {
 		gcWarmupWait(t, paused)
 	}
 	unblockLoad()
@@ -579,6 +608,11 @@ func TestGCStateWarmupRuntime(t *testing.T) {
 		}
 		return invoke(ctx, method, req, reply, cc, opts...)
 	})
+	options := config.NewPersistOptions(&config.Config{PDServerCfg: m.cfg})
+	next := options.GetPDServerConfig().Clone()
+	next.GCStateCacheWarmupConcurrency = 2
+	options.SetPDServerConfig(next)
+	m.SetConfigGetter(options.GetPDServerConfig)
 	enabled.Store(true)
 	stop := m.OnNodeBecomesLeader()
 	generation := m.activeGeneration.Load()
@@ -592,6 +626,11 @@ func TestGCStateWarmupRuntime(t *testing.T) {
 	// Metadata and ordinary scopes progressed while the null read was held.
 	close(releaseNull)
 	gcWarmupWait(t, generation.warmup.done)
+	require.Equal(t, 2, generation.warmup.concurrency)
+	next = next.Clone()
+	next.GCStateCacheWarmupConcurrency = 1
+	options.SetPDServerConfig(next)
+	require.Same(t, generation.warmup, m.activeGeneration.Load().warmup)
 	select {
 	case <-generation.workDone:
 		t.Fatal("metadata watch exited with campaign")
@@ -604,6 +643,7 @@ func TestGCStateWarmupRuntime(t *testing.T) {
 	defer newStop()
 	current := m.activeGeneration.Load()
 	gcWarmupWait(t, current.warmup.done)
+	require.Equal(t, 1, current.warmup.concurrency)
 	stop()
 	require.Same(t, current, m.activeGeneration.Load())
 	_, ok := m.gcStateCache.load(constant.NullKeyspaceID)

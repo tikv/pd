@@ -34,9 +34,12 @@ import (
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 	"google.golang.org/grpc"
 
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
+	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
@@ -788,6 +791,101 @@ func TestEnabledKeyspaceIndexRollingWorkers(t *testing.T) {
 	require.NoError(t, <-loaded)
 	require.EqualValues(t, 4, peak.Load())
 	require.Zero(t, active.Load())
+}
+
+// Changes during the initial transaction apply only to the following attempt,
+// including when the same index is reused for retries or watch reconstruction.
+func TestEnabledKeyspaceIndexConcurrencySnapshot(t *testing.T) {
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	t.Cleanup(clean)
+	putEnabledKeyspaceTestIDs(t, client, append(enabledKeyspaceTestIDs(256), constant.SystemKeyspaceID))
+	putEnabledKeyspaceTestWatermark(t, client, 49152)
+	core, logs := observer.New(zap.InfoLevel)
+	restore := log.ReplaceGlobals(zap.New(core), nil)
+	defer restore()
+	type attemptState struct {
+		initial        chan struct{}
+		releaseInitial chan struct{}
+		ranges         chan struct{}
+		releaseRanges  chan struct{}
+		active         atomic.Int32
+		peak           atomic.Int32
+	}
+	var attempt *attemptState
+	intercepted := newEnabledKeyspaceInterceptClient(t, client, func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoke grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+		switch req.(type) {
+		case *pb.TxnRequest:
+			close(attempt.initial)
+			select {
+			case <-attempt.releaseInitial:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		case *pb.RangeRequest:
+			n := attempt.active.Add(1)
+			defer attempt.active.Add(-1)
+			for {
+				old := attempt.peak.Load()
+				if n <= old || attempt.peak.CompareAndSwap(old, n) {
+					break
+				}
+			}
+			attempt.ranges <- struct{}{}
+			select {
+			case <-attempt.releaseRanges:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		return invoke(ctx, method, req, reply, cc, opts...)
+	})
+	index := newEnabledKeyspaceIndex(intercepted, enabledKeyspaceTestPrefix)
+	var configured, configReads atomic.Int32
+	configured.Store(1)
+	index.getLoadConcurrency = func() int {
+		configReads.Add(1)
+		return int(configured.Load())
+	}
+	for n, concurrency := range []int{1, 2, 4} {
+		attempt = &attemptState{
+			initial: make(chan struct{}), releaseInitial: make(chan struct{}),
+			ranges: make(chan struct{}, 32), releaseRanges: make(chan struct{}),
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		loaded := make(chan error, 1)
+		go func() {
+			entries, _, err := index.load(ctx, nil)
+			if err == nil && len(entries) != 257 {
+				err = fmt.Errorf("loaded %d entries", len(entries))
+			}
+			loaded <- err
+		}()
+		func() {
+			defer cancel()
+			gcWarmupWait(t, attempt.initial)
+			started := logs.FilterMessage("start loading GC keyspace index").All()
+			require.Len(t, started, n+1)
+			require.EqualValues(t, concurrency, started[n].ContextMap()["concurrency"])
+			configured.Store(int32(concurrency * 2))
+			close(attempt.releaseInitial)
+			for range concurrency {
+				gcWarmupWait(t, attempt.ranges)
+			}
+			require.EqualValues(t, concurrency, attempt.peak.Load())
+			close(attempt.releaseRanges)
+			select {
+			case err := <-loaded:
+				require.NoError(t, err)
+			case <-time.After(5 * time.Second):
+				t.Fatal("metadata load did not finish")
+			}
+			require.EqualValues(t, concurrency, attempt.peak.Load())
+			require.EqualValues(t, n+1, configReads.Load())
+			completed := logs.FilterMessage("load enabled keyspace index completed").All()
+			require.Len(t, completed, n+1)
+			require.EqualValues(t, concurrency, completed[n].ContextMap()["concurrency"])
+		}()
+	}
 }
 
 func TestEnabledKeyspaceIndexCancelsAttempt(t *testing.T) {

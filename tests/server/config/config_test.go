@@ -28,6 +28,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
+
+	"github.com/pingcap/log"
 
 	cfg "github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	"github.com/tikv/pd/pkg/ratelimit"
@@ -35,6 +39,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
@@ -80,6 +85,61 @@ func TestRateLimitConfigReload(t *testing.T) {
 	re.NotNil(leader)
 	re.True(leader.GetServer().GetServiceMiddlewarePersistOptions().IsRateLimitEnabled())
 	re.Len(leader.GetServer().GetServiceMiddlewarePersistOptions().GetRateLimitConfig().LimiterConfig, 1)
+}
+
+func TestGCConcurrencyConfigUpdateAndReload(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 3, func(cfg *config.Config, _ string) {
+		cfg.Keyspace.WaitRegionSplit = false
+	})
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+	leader := cluster.GetLeaderServer()
+	re.NoError(leader.BootstrapCluster())
+	configURL := leader.GetAddr() + "/pd/api/v1/config"
+	getConfig := func() *config.PDServerConfig {
+		result := &config.PDServerConfig{}
+		re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, configURL+"/pd-server", result))
+		return result
+	}
+	re.Equal(4, getConfig().GCKeyspaceIndexLoadConcurrency)
+	re.Equal(4, getConfig().GCStateCacheWarmupConcurrency)
+	data := []byte(`{"gc-keyspace-index-load-concurrency":1,"pd-server.gc-state-cache-warmup-concurrency":2}`)
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, configURL, data, testutil.StatusOK(re)))
+	for _, name := range []string{"gc-keyspace-index-load-concurrency", "gc-state-cache-warmup-concurrency"} {
+		for _, value := range []int{0, -1} {
+			data, err := json.Marshal(map[string]int{name: value})
+			re.NoError(err)
+			re.NoError(testutil.CheckPostJSON(tests.TestDialClient, configURL, data,
+				testutil.StatusNotOK(re), testutil.StringContain(re, name)))
+			re.Equal(1, getConfig().GCKeyspaceIndexLoadConcurrency)
+			re.Equal(2, getConfig().GCStateCacheWarmupConcurrency)
+		}
+	}
+	// Leadership reload must retain successful updates and exclude rejected ones.
+	core, logs := observer.New(zap.InfoLevel)
+	restore := log.ReplaceGlobals(zap.New(core), nil)
+	defer restore()
+	oldLeader := leader.GetServer().Name()
+	re.NoError(leader.GetServer().GetMember().ResignEtcdLeader(leader.GetServer().Context(), oldLeader, ""))
+	re.NotEmpty(cluster.WaitLeader())
+	leader = cluster.GetLeaderServer()
+	re.NotEqual(oldLeader, leader.GetServer().Name())
+	configURL = leader.GetAddr() + "/pd/api/v1/config"
+	re.Equal(1, getConfig().GCKeyspaceIndexLoadConcurrency)
+	re.Equal(2, getConfig().GCStateCacheWarmupConcurrency)
+	if kerneltype.IsNextGen() {
+		// These executions must consume the reloaded options through the server's
+		// manager wiring, even though its original startup configuration was 4.
+		testutil.Eventually(re, func() bool {
+			return logs.FilterMessage("start loading GC keyspace index").FilterField(zap.Int("concurrency", 1)).Len() > 0 &&
+				logs.FilterMessage("start warming GC state cache").FilterField(zap.Int("concurrency", 2)).Len() > 0
+		})
+	}
 }
 
 func TestMetricStorageValidationAtQueryTime(t *testing.T) {

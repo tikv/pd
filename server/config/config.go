@@ -212,6 +212,10 @@ const (
 
 	// DefaultMinResolvedTSPersistenceInterval is the default value of min resolved ts persistent interval.
 	DefaultMinResolvedTSPersistenceInterval = time.Second
+	// DefaultGCKeyspaceIndexLoadConcurrency is the default metadata scan concurrency.
+	DefaultGCKeyspaceIndexLoadConcurrency = 4
+	// DefaultGCStateCacheWarmupConcurrency is the default GC state warmup concurrency.
+	DefaultGCStateCacheWarmupConcurrency = 4
 
 	defaultEnableGRPCGateway   = true
 	defaultDisableErrorVerbose = true
@@ -529,9 +533,19 @@ type PDServerConfig struct {
 	GCTunerThreshold float64 `toml:"gc-tuner-threshold" json:"gc-tuner-threshold"`
 	// BlockSafePointV1 is used to control gc safe point v1 and service safe point v1 can not be updated.
 	BlockSafePointV1 bool `toml:"block-safe-point-v1" json:"block-safe-point-v1,string"`
+	// GCKeyspaceIndexLoadConcurrency limits metadata scans in each full-load attempt.
+	GCKeyspaceIndexLoadConcurrency int `toml:"gc-keyspace-index-load-concurrency" json:"gc-keyspace-index-load-concurrency"`
+	// GCStateCacheWarmupConcurrency limits GC state reads in each initial warmup campaign.
+	GCStateCacheWarmupConcurrency int `toml:"gc-state-cache-warmup-concurrency" json:"gc-state-cache-warmup-concurrency"`
 }
 
 func (c *PDServerConfig) adjust(meta *configutil.ConfigMetaData) error {
+	if !meta.IsDefined("gc-keyspace-index-load-concurrency") {
+		configutil.AdjustInt(&c.GCKeyspaceIndexLoadConcurrency, DefaultGCKeyspaceIndexLoadConcurrency)
+	}
+	if !meta.IsDefined("gc-state-cache-warmup-concurrency") {
+		configutil.AdjustInt(&c.GCStateCacheWarmupConcurrency, DefaultGCStateCacheWarmupConcurrency)
+	}
 	configutil.AdjustDuration(&c.MaxResetTSGap, defaultMaxResetTSGap)
 	if !meta.IsDefined("use-region-storage") {
 		c.UseRegionStorage = defaultUseRegionStorage
@@ -605,6 +619,12 @@ func (c *PDServerConfig) Clone() *PDServerConfig {
 
 // Validate is used to validate if some pd-server configurations are right.
 func (c *PDServerConfig) Validate() error {
+	if c.GCKeyspaceIndexLoadConcurrency < 1 {
+		return errors.New("gc-keyspace-index-load-concurrency must be at least 1")
+	}
+	if c.GCStateCacheWarmupConcurrency < 1 {
+		return errors.New("gc-state-cache-warmup-concurrency must be at least 1")
+	}
 	switch c.DashboardAddress {
 	case "auto":
 	case "none":

@@ -571,6 +571,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		log.Info("no metering config provided, the metering writer will not be started")
 	}
 	s.gcStateManager = gc.NewGCStateManager(s.storage.GetGCStateProvider(), s.cfg.PDServerCfg, s.keyspaceManager)
+	s.gcStateManager.SetConfigGetter(s.persistOptions.GetPDServerConfig)
 	if kerneltype.IsNextGen() {
 		s.gcStateManager.SetEtcdClient(s.client)
 	}

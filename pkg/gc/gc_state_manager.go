@@ -194,6 +194,7 @@ type GCStateManager struct {
 	mu              syncutil.RWMutex
 	gcMetaStorage   endpoint.GCStateProvider
 	cfg             config.PDServerConfig
+	getConfig       func() *config.PDServerConfig
 	keyspaceManager *keyspace.Manager
 	barrierMetrics  *barrierMetrics
 
@@ -223,10 +224,18 @@ func NewGCStateManager(store endpoint.GCStateProvider, cfg config.PDServerConfig
 		allKeyspacesGCStatesExcludeGCBarriersSingleFlight: syncutil.NewOrderedSingleFlight[map[uint32]GCState](),
 	}
 	m.barrierMetrics = newBarrierMetrics(time.Now)
+	m.getConfig = func() *config.PDServerConfig { return &m.cfg }
 	if keyspaceManager != nil {
 		keyspaceManager.SetGCBarrierInvalidator(m.barrierMetrics.invalidateKeyspaceMetrics)
 	}
 	return m
+}
+
+// SetConfigGetter supplies the latest immutable PD server configuration.
+// Call it during startup, before the first leadership generation. The getter
+// must support concurrent calls; each background execution snapshots its setting.
+func (m *GCStateManager) SetConfigGetter(getConfig func() *config.PDServerConfig) {
+	m.getConfig = getConfig
 }
 
 type keyspaceNameKeyType struct{}

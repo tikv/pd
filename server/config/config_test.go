@@ -780,6 +780,57 @@ dashboard-address = "foo"
 	}
 }
 
+func TestGCConcurrencyConfig(t *testing.T) {
+	cfg := NewConfig()
+	require.NoError(t, cfg.Adjust(nil, false))
+	require.Equal(t, 4, cfg.PDServerCfg.GCKeyspaceIndexLoadConcurrency)
+	require.Equal(t, 4, cfg.PDServerCfg.GCStateCacheWarmupConcurrency)
+	for _, name := range []string{"gc-keyspace-index-load-concurrency", "gc-state-cache-warmup-concurrency"} {
+		for _, value := range []int{-1, 0, 1, 2, 4, 128} {
+			t.Run(fmt.Sprintf("%s/%d", name, value), func(t *testing.T) {
+				cfg := NewConfig()
+				meta, err := toml.Decode(fmt.Sprintf("[pd-server]\n%s = %d\n", name, value), cfg)
+				require.NoError(t, err)
+				err = cfg.Adjust(&meta, false)
+				if value < 1 {
+					require.ErrorContains(t, err, name)
+					return
+				}
+				require.NoError(t, err)
+				data, err := json.Marshal(cfg.PDServerCfg)
+				require.NoError(t, err)
+				var fields map[string]any
+				require.NoError(t, json.Unmarshal(data, &fields))
+				require.Equal(t, float64(value), fields[name])
+			})
+		}
+	}
+}
+
+func TestGCConcurrencyConfigReload(t *testing.T) {
+	for _, values := range []map[string]int{
+		{},
+		{"gc-keyspace-index-load-concurrency": 1, "gc-state-cache-warmup-concurrency": 2},
+	} {
+		store := storage.NewStorageWithMemoryBackend()
+		require.NoError(t, store.SaveConfig(map[string]any{"pd-server": values}))
+		opt, err := newTestScheduleOption()
+		require.NoError(t, err)
+		require.NoError(t, opt.Reload(store))
+		data, err := json.Marshal(opt.GetPDServerConfig())
+		require.NoError(t, err)
+		var fields map[string]any
+		require.NoError(t, json.Unmarshal(data, &fields))
+		for _, name := range []string{"gc-keyspace-index-load-concurrency", "gc-state-cache-warmup-concurrency"} {
+			want := 4
+			if value, ok := values[name]; ok {
+				want = value
+			}
+			require.Equal(t, float64(want), fields[name])
+		}
+	}
+}
+
 func TestDashboardConfig(t *testing.T) {
 	re := require.New(t)
 	cfgData := `

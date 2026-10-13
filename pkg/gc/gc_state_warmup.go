@@ -19,15 +19,18 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 const (
-	gcStateWarmupWorkers       = 4
 	gcStateWarmupPageQueue     = 16
 	gcStateWarmupPollInterval  = 100 * time.Millisecond
 	gcStateWarmupRetryDelay    = time.Second
@@ -52,9 +55,10 @@ type gcStateWarmupScope struct {
 // the worker loop. Workers never hold stateMu while entering the loader or
 // waiting for manager/generation locks or storage I/O.
 type gcStateWarmup struct {
-	manager    *GCStateManager
-	generation *gcStateGeneration
-	index      *enabledKeyspaceIndex
+	manager     *GCStateManager
+	generation  *gcStateGeneration
+	index       *enabledKeyspaceIndex
+	concurrency int
 
 	inputMu   syncutil.Mutex
 	accepting bool
@@ -75,14 +79,16 @@ type gcStateWarmup struct {
 }
 
 func newGCStateWarmup(m *GCStateManager, generation *gcStateGeneration, index *enabledKeyspaceIndex) *gcStateWarmup {
+	concurrency := m.getConfig().GCStateCacheWarmupConcurrency
 	return &gcStateWarmup{
 		manager:     m,
 		generation:  generation,
 		index:       index,
+		concurrency: concurrency,
 		accepting:   true,
 		pages:       make(chan []enabledKeyspace, gcStateWarmupPageQueue),
 		snapshot:    make(chan []enabledKeyspace, 1),
-		wake:        make(chan struct{}, gcStateWarmupWorkers),
+		wake:        make(chan struct{}, concurrency),
 		done:        make(chan struct{}),
 		finished:    make(chan struct{}),
 		nullPending: true,
@@ -93,7 +99,7 @@ func newGCStateWarmup(m *GCStateManager, generation *gcStateGeneration, index *e
 }
 
 func (w *gcStateWarmup) notify() {
-	for range gcStateWarmupWorkers {
+	for range w.concurrency {
 		select {
 		case w.wake <- struct{}{}:
 		default:
@@ -131,9 +137,21 @@ func (w *gcStateWarmup) onInitialSnapshot(entries []enabledKeyspace) {
 
 func (w *gcStateWarmup) run(ctx context.Context) {
 	defer close(w.done)
+	started := time.Now()
+	log.Info("start warming GC state cache", zap.Int("concurrency", w.concurrency),
+		zap.Int("batch-size", endpoint.MaxGCSafePointBatchSize))
+	defer func() {
+		message := "warming GC state cache canceled"
+		select {
+		case <-w.finished:
+			message = "warming GC state cache completed"
+		default:
+		}
+		log.Info(message, zap.Int("concurrency", w.concurrency), zap.Duration("cost", time.Since(started)))
+	}()
 	workers := new(sync.WaitGroup)
-	workers.Add(gcStateWarmupWorkers)
-	for range gcStateWarmupWorkers {
+	workers.Add(w.concurrency)
+	for range w.concurrency {
 		go func() {
 			defer workers.Done()
 			w.work(ctx)

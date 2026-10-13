@@ -116,6 +116,7 @@ func (opt *newGCStateManagerForTestOptions) generateKeyspacesByCount(count int) 
 func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions) (storage *endpoint.StorageEndpoint, provider endpoint.GCStateProvider, gcStateManager *GCStateManager, clean func(), cancel context.CancelFunc) {
 	cfg := config.NewConfig()
 	re := require.New(t)
+	re.NoError(cfg.Adjust(nil, false))
 
 	var etcdClusterOpt etcdutil.TestEtcdClusterOptions
 	etcdClusterOpt.ServerCfgModifier = opt.etcdServerCfgModifier
