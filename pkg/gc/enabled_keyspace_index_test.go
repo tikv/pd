@@ -664,7 +664,7 @@ func TestEnabledKeyspaceIndexFirstPageTransaction(t *testing.T) {
 func TestEnabledKeyspaceIndexRangeCoverage(t *testing.T) {
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	t.Cleanup(clean)
-	ids := append(enabledKeyspaceTestIDs(256), 256, 4095, 4096, 8191, 8192, 9999, 10000, 50000, constant.SystemKeyspaceID, constant.MaxValidKeyspaceID)
+	ids := append(enabledKeyspaceTestIDs(256), 256, 4351, 4352, 8447, 8448, 9999, 10000, 50000, constant.SystemKeyspaceID, constant.MaxValidKeyspaceID)
 	putEnabledKeyspaceTestIDs(t, client, ids)
 	end := clientv3.GetPrefixRangeEnd(enabledKeyspaceTestPrefix)
 	key := func(s string) string { return enabledKeyspaceTestPrefix + s }
@@ -679,9 +679,10 @@ func TestEnabledKeyspaceIndexRangeCoverage(t *testing.T) {
 		{"overflow", binary.BigEndian.AppendUint64(nil, ^uint64(0)), [][2]string{{key("00000255\x00"), end}}},
 		{"zero", binary.BigEndian.AppendUint64(nil, 0), [][2]string{{key("00000255\x00"), end}}},
 		{"already-consumed", binary.BigEndian.AppendUint64(nil, 255), [][2]string{{key("00000255\x00"), end}}},
-		{"first-boundary", binary.BigEndian.AppendUint64(nil, 4096), [][2]string{{key("00000255\x00"), end}}},
-		{"exact-boundary", binary.BigEndian.AppendUint64(nil, 8192), [][2]string{{key("00000255\x00"), key("00004096")}, {key("00004096"), end}}},
-		{"between-boundaries", binary.BigEndian.AppendUint64(nil, 10000), [][2]string{{key("00000255\x00"), key("00004096")}, {key("00004096"), key("00008192")}, {key("00008192"), end}}},
+		{"consumed-to-watermark", binary.BigEndian.AppendUint64(nil, 256), [][2]string{{key("00000255\x00"), end}}},
+		{"first-boundary", binary.BigEndian.AppendUint64(nil, 4352), [][2]string{{key("00000255\x00"), end}}},
+		{"exact-boundary", binary.BigEndian.AppendUint64(nil, 8448), [][2]string{{key("00000255\x00"), key("00004352")}, {key("00004352"), end}}},
+		{"between-boundaries", binary.BigEndian.AppendUint64(nil, 10000), [][2]string{{key("00000255\x00"), key("00004352")}, {key("00004352"), key("00008448")}, {key("00008448"), end}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := client.Delete(context.Background(), keypath.KeyspaceAllocIDPath())
@@ -717,6 +718,83 @@ func TestEnabledKeyspaceIndexRangeCoverage(t *testing.T) {
 				require.Contains(t, entries, id)
 			}
 			require.ElementsMatch(t, tc.want, ranges)
+		})
+	}
+}
+
+func TestEnabledKeyspaceIndexBoundsSparseRangeTasks(t *testing.T) {
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	t.Cleanup(clean)
+	for _, tc := range []struct {
+		name         string
+		concurrency  int
+		firstID      uint32
+		watermark    uint64
+		wantRanges   int
+		wantFirstEnd uint32
+	}{
+		{"one-worker", 1, 0, 1000000, 32, 31498},
+		{"two-workers", 2, 0, 1000000, 64, 15877},
+		{"four-workers", 4, 0, 1000000, 128, 8067},
+		// Absolute alignment would add a 129th task for this first page.
+		{"offset-first-page", 4, 100000, 1000000, 128, 107286},
+		{"max-watermark", 4, 0, uint64(constant.MaxValidKeyspaceID), 128, 131326},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			_, err := client.Delete(ctx, enabledKeyspaceTestPrefix, clientv3.WithPrefix())
+			require.NoError(t, err)
+			ids := enabledKeyspaceTestIDs(256)
+			for n := range ids {
+				ids[n] += tc.firstID
+			}
+			lastID := ids[len(ids)-1]
+			ids = append(ids, constant.SystemKeyspaceID)
+			putEnabledKeyspaceTestIDs(t, client, ids)
+			putEnabledKeyspaceTestWatermark(t, client, tc.watermark)
+			var mu sync.Mutex
+			var ranges [][2]string
+			var transactionRevision int64
+			var transactions int
+			intercepted := newEnabledKeyspaceInterceptClient(t, client, func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoke grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+				if request, ok := req.(*pb.RangeRequest); ok {
+					if request.Revision != transactionRevision || request.Limit != 256 {
+						return fmt.Errorf("page revision/limit = %d/%d, want %d/256", request.Revision, request.Limit, transactionRevision)
+					}
+					mu.Lock()
+					ranges = append(ranges, [2]string{string(request.Key), string(request.RangeEnd)})
+					mu.Unlock()
+				}
+				err := invoke(ctx, method, req, reply, cc, opts...)
+				if response, ok := reply.(*pb.TxnResponse); ok && err == nil {
+					transactionRevision = response.Header.Revision
+					transactions++
+				}
+				return err
+			})
+			index := newEnabledKeyspaceIndex(intercepted, enabledKeyspaceTestPrefix)
+			index.getLoadConcurrency = func() int { return tc.concurrency }
+			entries, revision, err := index.load(ctx, nil)
+			require.NoError(t, err)
+			require.Len(t, entries, len(ids))
+			for _, id := range ids {
+				require.Equal(t, enabledKeyspace{id: id, gcManagementType: keyspace.KeyspaceLevelGC}, entries[id])
+			}
+			require.Positive(t, revision)
+			require.Equal(t, transactionRevision, revision)
+			require.Equal(t, 1, transactions)
+			// Only the system keyspace remains after the first page, so every
+			// task fits in one RPC even when its numeric range is empty.
+			require.Len(t, ranges, tc.wantRanges)
+			slices.SortFunc(ranges, func(a, b [2]string) int { return strings.Compare(a[0], b[0]) })
+			key := func(id uint32) string { return fmt.Sprintf("%s%08d", enabledKeyspaceTestPrefix, id) }
+			require.Equal(t, key(lastID)+"\x00", ranges[0][0])
+			require.Equal(t, key(tc.wantFirstEnd), ranges[0][1])
+			for n := 1; n < len(ranges); n++ {
+				require.Equal(t, ranges[n-1][1], ranges[n][0], "range tasks must be contiguous")
+			}
+			require.Equal(t, clientv3.GetPrefixRangeEnd(enabledKeyspaceTestPrefix), ranges[len(ranges)-1][1])
 		})
 	}
 }
@@ -881,6 +959,12 @@ func TestEnabledKeyspaceIndexConcurrencySnapshot(t *testing.T) {
 			}
 			require.EqualValues(t, concurrency, attempt.peak.Load())
 			require.EqualValues(t, n+1, configReads.Load())
+			planned := logs.FilterMessage("planned GC keyspace index ranges").All()
+			require.Len(t, planned, n+1)
+			require.EqualValues(t, concurrency, planned[n].ContextMap()["concurrency"])
+			require.EqualValues(t, 4096, planned[n].ContextMap()["range-size"])
+			require.EqualValues(t, concurrency*32, planned[n].ContextMap()["task-budget"])
+			require.EqualValues(t, 12, planned[n].ContextMap()["range-count"])
 			completed := logs.FilterMessage("load enabled keyspace index completed").All()
 			require.Len(t, completed, n+1)
 			require.EqualValues(t, concurrency, completed[n].ContextMap()["concurrency"])
@@ -1113,13 +1197,13 @@ func TestEnabledKeyspaceIndexPagesAfterConsumedRanges(t *testing.T) {
 	t.Cleanup(clean)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	// The first page ends exactly at 4096, after consuming the whole first
-	// conceptual range. Both remaining tasks need more than one page.
+	// The first page consumes IDs through 4096. The remaining ranges start at
+	// 4097 and 8193, and both tasks need more than one page.
 	ids := make([]uint32, 0, 901)
 	for id := uint32(3841); id <= 4440; id++ {
 		ids = append(ids, id)
 	}
-	for id := uint32(8192); id <= 8491; id++ {
+	for id := uint32(8193); id <= 8492; id++ {
 		ids = append(ids, id)
 	}
 	ids = append(ids, constant.SystemKeyspaceID)
@@ -1170,10 +1254,10 @@ func TestEnabledKeyspaceIndexPagesAfterConsumedRanges(t *testing.T) {
 	require.NotContains(t, entries, uint32(6000))
 	end := clientv3.GetPrefixRangeEnd(enabledKeyspaceTestPrefix)
 	require.ElementsMatch(t, [][2]string{
-		{enabledKeyspaceTestPrefix + "00004096\x00", enabledKeyspaceTestPrefix + "00008192"},
-		{enabledKeyspaceTestPrefix + "00004352\x00", enabledKeyspaceTestPrefix + "00008192"},
-		{enabledKeyspaceTestPrefix + "00008192", end},
-		{enabledKeyspaceTestPrefix + "00008447\x00", end},
+		{enabledKeyspaceTestPrefix + "00004096\x00", enabledKeyspaceTestPrefix + "00008193"},
+		{enabledKeyspaceTestPrefix + "00004352\x00", enabledKeyspaceTestPrefix + "00008193"},
+		{enabledKeyspaceTestPrefix + "00008193", end},
+		{enabledKeyspaceTestPrefix + "00008448\x00", end},
 	}, ranges)
 	require.ElementsMatch(t, []int{256, 256, 88, 256, 45}, pageSizes)
 }

@@ -33,7 +33,10 @@ import (
 	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
-const enabledKeyspaceRangeSize = 4096
+const (
+	enabledKeyspaceMinRangeSize   = 4096
+	enabledKeyspaceTasksPerWorker = 32
+)
 
 // load pins the entire attempt to the initial transaction's revision. Its map
 // stays private until every range succeeds; a failed attempt cancels and joins
@@ -106,13 +109,27 @@ func (i *enabledKeyspaceIndex) load(ctx context.Context, onPage func([]enabledKe
 			watermark = value
 		}
 	}
+	lo := uint64(lastID) + 1
+	var span uint64
+	if watermark > lo {
+		span = watermark - lo
+	}
+	taskBudget := uint64(concurrency) * enabledKeyspaceTasksPerWorker
+	// Bound range tasks, including empty scans, while allowing each task to
+	// paginate. Starting boundaries at lo keeps the task count within budget.
+	rangeSize := max(uint64(enabledKeyspaceMinRangeSize), (span+taskBudget-1)/taskBudget)
+	rangeCount := max(uint64(1), (span+rangeSize-1)/rangeSize)
+	log.Info("planned GC keyspace index ranges", zap.String("prefix", i.prefix),
+		zap.Int("concurrency", concurrency), zap.Uint64("range-size", rangeSize),
+		zap.Uint64("task-budget", taskBudget), zap.Uint64("range-count", rangeCount),
+		zap.Uint64("next-id", lo), zap.Uint64("watermark", watermark), zap.Int64("revision", revision))
 	cursor := string(first.Kvs[len(first.Kvs)-1].Key) + "\x00"
 	type keyRange struct{ start, end string }
 	tasks := make(chan keyRange, concurrency)
 	group, attemptCtx := errgroup.WithContext(ctx)
 	group.Go(func() error {
 		defer close(tasks)
-		for boundary := (uint64(lastID)/enabledKeyspaceRangeSize + 1) * enabledKeyspaceRangeSize; ; boundary += enabledKeyspaceRangeSize {
+		for boundary := lo + rangeSize; ; boundary += rangeSize {
 			taskEnd := end
 			if boundary < watermark {
 				taskEnd = fmt.Sprintf("%s%08d", i.prefix, boundary)
