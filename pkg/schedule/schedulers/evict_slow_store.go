@@ -85,8 +85,15 @@ type evictSlowStoreSchedulerConfig struct {
 	networkSlowStoreRecoverStartAts map[uint64]*time.Time
 	// Duration gap for recovering the candidate, unit: s.
 	RecoverySec uint64 `json:"recovery-duration"`
-	// EvictedStores is only used by disk slow store scheduler
+	// EvictedStores is only used by disk slow store scheduler. It holds at most one id, the
+	// primary evicted store, so it keeps the single-store format that PD versions without
+	// group eviction understand: an older leader restores, drains and recovers exactly that
+	// store, which is a state it can reach on its own. Use evictedStores() for the full set.
 	EvictedStores []uint64 `json:"evict-stores"`
+	// EvictedGroupStores holds the other same-domain stores evicted together with the primary
+	// in EvictedStores. Older PD versions ignore the field and drop it on their next persist,
+	// so they never observe a multi-store eviction. Non-empty only if EvictedStores is.
+	EvictedGroupStores []uint64 `json:"evict-group-stores"`
 	// EnableGroupEviction allows the disk slow store scheduler to evict leaders from every
 	// slow store that shares one isolation domain, instead of only a single store. The
 	// domain is derived from the placement rules (see groupIsolationLabels), so this switch
@@ -107,6 +114,7 @@ func initEvictSlowStoreSchedulerConfig() *evictSlowStoreSchedulerConfig {
 		lastSlowStoreCaptureTS:          time.Time{},
 		RecoverySec:                     defaultRecoverySec,
 		EvictedStores:                   make([]uint64, 0),
+		EvictedGroupStores:              make([]uint64, 0),
 		EnableGroupEviction:             false,
 		Batch:                           EvictLeaderBatchSize,
 		EnableNetworkSlowStore:          false,
@@ -122,6 +130,7 @@ func (conf *evictSlowStoreSchedulerConfig) persistLocked(updateFn func()) error 
 		oldNetworkSlowStoreRecoverStartAts = make(map[uint64]*time.Time)
 		oldIsRecovered                     = conf.isRecovered
 		oldEvictedStores                   = conf.EvictedStores
+		oldEvictedGroupStores              = conf.EvictedGroupStores
 		oldEnableGroupEviction             = conf.EnableGroupEviction
 		oldPausedNetworkSlowStores         = conf.PausedNetworkSlowStores
 		oldEvictedNetworkSlowStores        = conf.EvictedNetworkSlowStores
@@ -137,6 +146,7 @@ func (conf *evictSlowStoreSchedulerConfig) persistLocked(updateFn func()) error 
 		conf.networkSlowStoreRecoverStartAts = oldNetworkSlowStoreRecoverStartAts
 		conf.isRecovered = oldIsRecovered
 		conf.EvictedStores = oldEvictedStores
+		conf.EvictedGroupStores = oldEvictedGroupStores
 		conf.EnableGroupEviction = oldEnableGroupEviction
 		conf.PausedNetworkSlowStores = oldPausedNetworkSlowStores
 		conf.EvictedNetworkSlowStores = oldEvictedNetworkSlowStores
@@ -151,7 +161,7 @@ func (conf *evictSlowStoreSchedulerConfig) getStores() []uint64 {
 	conf.RLock()
 	defer conf.RUnlock()
 
-	return append(conf.EvictedStores, conf.EvictedNetworkSlowStores...)
+	return append(conf.evictedStoresLocked(), conf.EvictedNetworkSlowStores...)
 }
 
 func (*evictSlowStoreSchedulerConfig) getKeyRangesByID(uint64) []keyutil.KeyRange {
@@ -168,16 +178,49 @@ func (conf *evictSlowStoreSchedulerConfig) getBatch() int {
 func (conf *evictSlowStoreSchedulerConfig) evictedStores() []uint64 {
 	conf.RLock()
 	defer conf.RUnlock()
-	res := make([]uint64, len(conf.EvictedStores))
-	copy(res, conf.EvictedStores)
-	return res
+	return conf.evictedStoresLocked()
+}
+
+// evictedStoresLocked returns a copy of the disk slow stores currently being evicted: the
+// primary followed by the rest of its group.
+func (conf *evictSlowStoreSchedulerConfig) evictedStoresLocked() []uint64 {
+	res := make([]uint64, 0, len(conf.EvictedStores)+len(conf.EvictedGroupStores))
+	res = append(res, conf.EvictedStores...)
+	return append(res, conf.EvictedGroupStores...)
+}
+
+// setEvictedStoresLocked replaces the disk slow store eviction set with the deduplicated ids,
+// keeping the persisted layout: the first id is the primary in EvictedStores and the rest go
+// to EvictedGroupStores. Removing the primary therefore promotes the next group member, so
+// an older PD still drains one store of the group instead of none.
+func (conf *evictSlowStoreSchedulerConfig) setEvictedStoresLocked(ids []uint64) {
+	uniq := make([]uint64, 0, len(ids))
+	for _, id := range ids {
+		if !slices.Contains(uniq, id) {
+			uniq = append(uniq, id)
+		}
+	}
+	if len(uniq) == 0 {
+		conf.EvictedStores = []uint64{}
+		conf.EvictedGroupStores = []uint64{}
+		return
+	}
+	conf.EvictedStores = uniq[:1:1]
+	conf.EvictedGroupStores = append(make([]uint64, 0, len(uniq)-1), uniq[1:]...)
+}
+
+// normalizeEvictedStores rewrites a loaded config into the persisted layout. It also accepts
+// a config whose evict-stores lists several ids, as written by development builds of group
+// eviction.
+func (conf *evictSlowStoreSchedulerConfig) normalizeEvictedStores() {
+	conf.setEvictedStoresLocked(conf.evictedStoresLocked())
 }
 
 // isEvictingDiskSlowStore reports whether any disk slow store is being evicted.
 func (conf *evictSlowStoreSchedulerConfig) isEvictingDiskSlowStore() bool {
 	conf.RLock()
 	defer conf.RUnlock()
-	return len(conf.EvictedStores) > 0
+	return len(conf.EvictedStores)+len(conf.EvictedGroupStores) > 0
 }
 
 // isGroupEvictionEnabled reports whether same-domain group eviction is turned on.
@@ -268,10 +311,38 @@ func (conf *evictSlowStoreSchedulerConfig) setEvictedStoresAndPersist(ids []uint
 	conf.Lock()
 	defer conf.Unlock()
 	return conf.persistLocked(func() {
-		conf.EvictedStores = ids
+		conf.setEvictedStoresLocked(ids)
 		// Reset the recovery clock so as for multi store issues we need to wait whole zone is stable
 		conf.lastSlowStoreCaptureTS = time.Now()
 	})
+}
+
+// addEvictedAndPersist appends ids to the disk slow store eviction set and persists it in
+// one critical section, so a concurrent ReloadConfig is never overwritten by a stale
+// snapshot. Ids already in the set are skipped and returned as dup. When anything is added,
+// the capture timestamp is reset (the group is freshly slow).
+func (conf *evictSlowStoreSchedulerConfig) addEvictedAndPersist(ids []uint64) (dup []uint64, err error) {
+	conf.Lock()
+	defer conf.Unlock()
+	next := conf.evictedStoresLocked()
+	for _, id := range ids {
+		if slices.Contains(next, id) {
+			dup = append(dup, id)
+			continue
+		}
+		next = append(next, id)
+	}
+	if len(dup) == len(ids) {
+		return dup, nil
+	}
+	if err := conf.persistLocked(func() {
+		conf.setEvictedStoresLocked(next)
+		// Reset the recovery clock so as for multi store issues we need to wait whole zone is stable
+		conf.lastSlowStoreCaptureTS = time.Now()
+	}); err != nil {
+		return nil, err
+	}
+	return dup, nil
 }
 
 // removeEvictedAndPersist drops the given ids from the eviction set (only those
@@ -284,8 +355,9 @@ func (conf *evictSlowStoreSchedulerConfig) removeEvictedAndPersist(ids []uint64)
 	for _, id := range ids {
 		drop[id] = struct{}{}
 	}
-	kept := make([]uint64, 0, len(conf.EvictedStores))
-	for _, id := range conf.EvictedStores {
+	all := conf.evictedStoresLocked()
+	kept := make([]uint64, 0, len(all))
+	for _, id := range all {
 		if _, ok := drop[id]; ok {
 			removed = append(removed, id)
 			continue
@@ -296,7 +368,7 @@ func (conf *evictSlowStoreSchedulerConfig) removeEvictedAndPersist(ids []uint64)
 		return nil, nil
 	}
 	if err = conf.persistLocked(func() {
-		conf.EvictedStores = kept
+		conf.setEvictedStoresLocked(kept)
 	}); err != nil {
 		return nil, err
 	}
@@ -324,13 +396,12 @@ func (conf *evictSlowStoreSchedulerConfig) tryUpdateRecoverStatus(isRecovered bo
 func (conf *evictSlowStoreSchedulerConfig) clearEvictedAndPersist() (oldIDs []uint64, err error) {
 	conf.Lock()
 	defer conf.Unlock()
-	if len(conf.EvictedStores) == 0 {
+	oldIDs = conf.evictedStoresLocked()
+	if len(oldIDs) == 0 {
 		return nil, nil
 	}
-	oldIDs = make([]uint64, len(conf.EvictedStores))
-	copy(oldIDs, conf.EvictedStores)
 	err = conf.persistLocked(func() {
-		conf.EvictedStores = []uint64{}
+		conf.setEvictedStoresLocked(nil)
 		conf.lastSlowStoreCaptureTS = time.Time{}
 	})
 	if err != nil {
@@ -428,6 +499,7 @@ func (handler *evictSlowStoreHandler) listConfig(w http.ResponseWriter, _ *http.
 		RecoverySec:              handler.config.RecoverySec,
 		Batch:                    handler.config.Batch,
 		EvictedStores:            handler.config.EvictedStores,
+		EvictedGroupStores:       handler.config.EvictedGroupStores,
 		EnableGroupEviction:      handler.config.EnableGroupEviction,
 		EnableNetworkSlowStore:   handler.config.EnableNetworkSlowStore,
 		PausedNetworkSlowStores:  handler.config.PausedNetworkSlowStores,
@@ -440,6 +512,9 @@ type evictSlowStoreScheduler struct {
 	*BaseScheduler
 	conf    *evictSlowStoreSchedulerConfig
 	handler http.Handler
+	// evictLeaderRound rotates the evicted store order across Schedule calls. Schedule
+	// runs on a single goroutine, so it needs no lock.
+	evictLeaderRound int
 }
 
 // ServeHTTP implements the http.Handler interface.
@@ -465,14 +540,14 @@ func (s *evictSlowStoreScheduler) ReloadConfig() error {
 		newCfg.Batch = EvictLeaderBatchSize
 	}
 	old := make(map[uint64]struct{})
-	for _, id := range s.conf.EvictedStores {
+	for _, id := range s.conf.evictedStoresLocked() {
 		old[id] = struct{}{}
 	}
 	for _, id := range s.conf.PausedNetworkSlowStores {
 		old[id] = struct{}{}
 	}
 	new := make(map[uint64]struct{})
-	for _, id := range newCfg.EvictedStores {
+	for _, id := range newCfg.evictedStoresLocked() {
 		new[id] = struct{}{}
 	}
 	for _, id := range newCfg.PausedNetworkSlowStores {
@@ -480,7 +555,7 @@ func (s *evictSlowStoreScheduler) ReloadConfig() error {
 	}
 	pauseAndResumeLeaderTransfer(s.conf.cluster, constant.In, old, new)
 	s.conf.RecoverySec = newCfg.RecoverySec
-	s.conf.EvictedStores = newCfg.EvictedStores
+	s.conf.setEvictedStoresLocked(newCfg.evictedStoresLocked())
 	s.conf.EnableGroupEviction = newCfg.EnableGroupEviction
 	s.conf.PausedNetworkSlowStores = newCfg.PausedNetworkSlowStores
 	s.conf.EvictedNetworkSlowStores = newCfg.EvictedNetworkSlowStores
@@ -490,6 +565,11 @@ func (s *evictSlowStoreScheduler) ReloadConfig() error {
 }
 
 // PrepareConfig implements the Scheduler interface.
+//
+// Disk-evicted stores that are no longer in the cluster (or are removed) are pruned and the
+// surviving set is persisted before anything is marked. Otherwise one stale id would fail
+// SlowStoreEvicted, abort Controller.AddScheduler, and keep the scheduler from ever reaching
+// reconcileDiskSlowStoreGroup, which is what drops such ids at runtime.
 //
 // It is atomic: on any failure it undoes the marks it already applied and returns the error,
 // so a caller that aborts (Controller.AddScheduler does not start the scheduler, and hence
@@ -511,6 +591,22 @@ func (s *evictSlowStoreScheduler) PrepareConfig(cluster sche.SchedulerCluster) e
 		}
 	}
 
+	var gone []uint64
+	for _, storeID := range s.conf.evictedStores() {
+		if store := cluster.GetStore(storeID); store == nil || store.IsRemoved() {
+			gone = append(gone, storeID)
+		}
+	}
+	if len(gone) > 0 {
+		removed, err := s.conf.removeEvictedAndPersist(gone)
+		if err != nil {
+			return err
+		}
+		for _, storeID := range removed {
+			log.Info("evicted slow store is no longer in the cluster, dropping it", zap.Uint64("store-id", storeID))
+			evictedSlowStoreStatusGauge.DeleteLabelValues(strconv.FormatUint(storeID, 10), string(diskSlowStore))
+		}
+	}
 	for _, storeID := range s.conf.evictedStores() {
 		if err := cluster.SlowStoreEvicted(storeID); err != nil {
 			rollback()
@@ -548,10 +644,10 @@ func (s *evictSlowStoreScheduler) CleanConfig(cluster sche.SchedulerCluster) {
 	}
 }
 
-// prepareEvictLeader marks the given newly-detected stores as evicted (each is
-// expected to not already be evicted) and persists the resulting set. On any
-// failure it rolls back the marks it added so the slow-evicted counter stays
-// balanced.
+// prepareEvictLeader marks the given newly-detected stores as evicted and adds them
+// to the persisted set. On any failure it rolls back the marks it added so the
+// slow-evicted counter stays balanced; a store that is already in the set (for
+// example, added by a concurrent ReloadConfig) does not get a second mark.
 func (s *evictSlowStoreScheduler) prepareEvictLeader(cluster sche.SchedulerCluster, addIDs []uint64) error {
 	if len(addIDs) == 0 {
 		return nil
@@ -568,15 +664,18 @@ func (s *evictSlowStoreScheduler) prepareEvictLeader(cluster sche.SchedulerClust
 		marked = append(marked, storeID)
 	}
 
-	newSet := append(s.conf.evictedStores(), addIDs...)
-	if err := s.conf.setEvictedStoresAndPersist(newSet); err != nil {
+	failpoint.InjectCall("beforeAddEvictedStores")
+	dup, err := s.conf.addEvictedAndPersist(addIDs)
+	if err != nil {
 		log.Info("failed to persist evicted slow store", zap.Uint64s("store-ids", addIDs), zap.Error(err))
 		for _, id := range addIDs {
 			cluster.SlowStoreRecovered(id)
 		}
 		return err
 	}
-
+	for _, id := range dup {
+		cluster.SlowStoreRecovered(id)
+	}
 	return nil
 }
 
@@ -591,8 +690,35 @@ func (s *evictSlowStoreScheduler) cleanupEvictLeader(cluster sche.SchedulerClust
 	}
 }
 
+// schedulerEvictLeader returns at most batch operators. One scheduleEvictLeaderOnce round
+// yields an operator per evicted store, so with several evicted stores the shared batch loop
+// can overshoot; the result is truncated here. The store order is rotated on every call so
+// the truncation does not always favor the first evicted store.
 func (s *evictSlowStoreScheduler) schedulerEvictLeader(cluster sche.SchedulerCluster) []*operator.Operator {
-	return scheduleEvictLeaderBatch(s.GetName(), cluster, s.conf)
+	s.evictLeaderRound++
+	ops := scheduleEvictLeaderBatch(s.GetName(), cluster, rotatedEvictLeaderStores{
+		evictSlowStoreSchedulerConfig: s.conf,
+		offset:                        s.evictLeaderRound,
+	})
+	if batch := s.conf.getBatch(); len(ops) > batch {
+		ops = ops[:batch]
+	}
+	return ops
+}
+
+// rotatedEvictLeaderStores rotates the evicted store order by offset.
+type rotatedEvictLeaderStores struct {
+	*evictSlowStoreSchedulerConfig
+	offset int
+}
+
+func (r rotatedEvictLeaderStores) getStores() []uint64 {
+	stores := r.evictSlowStoreSchedulerConfig.getStores()
+	if n := len(stores); n > 1 {
+		k := r.offset % n
+		return slices.Concat(stores[k:], stores[:k])
+	}
+	return stores
 }
 
 // IsScheduleAllowed implements the Scheduler interface.

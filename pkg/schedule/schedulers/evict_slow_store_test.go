@@ -16,6 +16,7 @@ package schedulers
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -621,12 +622,15 @@ func (suite *evictSlowStoreTestSuite) TestEvictSlowStorePrepareAtomic() {
 	es2, ok := suite.es.(*evictSlowStoreScheduler)
 	re.True(ok)
 
-	// Store 5 is not in the cluster, so marking it fails. Store 1 is marked first and must
-	// be rolled back: PrepareConfig's caller does not start the scheduler on error, so a
-	// leaked mark would exclude store 1 from leader transfers with nothing left to clear it.
-	re.NoError(es2.conf.setEvictedStoresAndPersist([]uint64{1, 5}))
+	// Network-evicted store 5 is not in the cluster, so marking it fails. Disk-evicted store 1
+	// is marked first and must be rolled back: PrepareConfig's caller does not start the
+	// scheduler on error, so a leaked mark would exclude store 1 from leader transfers with
+	// nothing left to clear it.
+	re.NoError(es2.conf.setEvictedStoresAndPersist([]uint64{1}))
+	es2.conf.EvictedNetworkSlowStores = []uint64{5}
 	re.Error(suite.es.PrepareConfig(suite.tc))
 	re.False(suite.tc.GetStore(1).EvictedAsSlowStore())
+	es2.conf.EvictedNetworkSlowStores = []uint64{}
 
 	// The mark is a balanced counter, so a leak would also survive a later evict/recover
 	// round trip. Verify a subsequent successful prepare/clean cycle leaves it at zero.
@@ -1441,4 +1445,151 @@ func TestEvictSlowStoreGroupIdempotent(t *testing.T) {
 	re.Empty(conf.evictedStores())
 	re.False(tc.GetStore(1).EvictedAsSlowStore())
 	re.False(tc.GetStore(2).EvictedAsSlowStore())
+}
+
+// TestEvictSlowStorePreparePrunesMissingPersistedStore: a persisted disk-evicted id whose
+// store is gone or removed must not keep the scheduler from starting; it is pruned and the
+// surviving set is persisted.
+func (suite *evictSlowStoreTestSuite) TestEvictSlowStorePreparePrunesMissingPersistedStore() {
+	re := suite.Require()
+	es := suite.es.(*evictSlowStoreScheduler)
+
+	suite.tc.PutStore(suite.tc.GetStore(3).Clone(func(store *core.StoreInfo) {
+		store.GetMeta().NodeState = metapb.NodeState_Removed
+	}))
+	re.NoError(es.conf.setEvictedStoresAndPersist([]uint64{999, 1, 3}))
+	re.NoError(suite.es.PrepareConfig(suite.tc))
+	re.Equal([]uint64{1}, es.conf.evictedStores())
+	re.True(suite.tc.GetStore(1).EvictedAsSlowStore())
+	re.False(suite.tc.GetStore(3).EvictedAsSlowStore())
+
+	var persisted evictSlowStoreSchedulerConfig
+	re.NoError(es.conf.load(&persisted))
+	re.Equal([]uint64{1}, persisted.evictedStoresLocked())
+}
+
+// TestEvictSlowStorePersistedFormatLegacyCompatible: evict-stores never holds more than one
+// id, so a PD without group eviction restores, drains and recovers exactly the primary and
+// never observes a multi-store value. The rest of the group lives in a field it ignores.
+func TestEvictSlowStorePersistedFormatLegacyCompatible(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	for id := uint64(1); id <= 3; id++ {
+		tc.AddLeaderStore(id, 0)
+	}
+	st := storage.NewStorageWithMemoryBackend()
+	es, err := CreateScheduler(types.EvictSlowStoreScheduler, oc, st,
+		ConfigSliceDecoder(types.EvictSlowStoreScheduler, nil), nil)
+	re.NoError(err)
+	conf := es.(*evictSlowStoreScheduler).conf
+
+	type legacyConfig struct {
+		EvictedStores []uint64 `json:"evict-stores"`
+	}
+	loadLegacy := func() legacyConfig {
+		var legacy legacyConfig
+		re.NoError(conf.load(&legacy))
+		return legacy
+	}
+
+	re.NoError(conf.setEvictedStoresAndPersist([]uint64{1, 2, 3}))
+	re.Equal([]uint64{1, 2, 3}, conf.evictedStores())
+	re.Equal([]uint64{1}, loadLegacy().EvictedStores)
+	var persisted evictSlowStoreSchedulerConfig
+	re.NoError(conf.load(&persisted))
+	re.Equal([]uint64{1}, persisted.EvictedStores)
+	re.Equal([]uint64{2, 3}, persisted.EvictedGroupStores)
+
+	// Dropping the primary promotes the next group member, so an older leader still drains
+	// one store of the group.
+	removed, err := conf.removeEvictedAndPersist([]uint64{1})
+	re.NoError(err)
+	re.Equal([]uint64{1}, removed)
+	re.Equal([]uint64{2}, loadLegacy().EvictedStores)
+	re.Equal([]uint64{2, 3}, conf.evictedStores())
+
+	// A config written by an older PD (no group field) or by a development build that put
+	// several ids in evict-stores is normalized on load.
+	re.NoError(st.SaveSchedulerConfig(es.GetName(), []byte(`{"evict-stores":[3,1]}`)))
+	re.NoError(es.ReloadConfig())
+	re.Equal([]uint64{3, 1}, conf.evictedStores())
+	re.Equal([]uint64{3}, conf.EvictedStores)
+	re.Equal([]uint64{1}, conf.EvictedGroupStores)
+	es2, err := CreateScheduler(types.EvictSlowStoreScheduler, oc, st,
+		ConfigJSONDecoder([]byte(`{"evict-stores":[3,1]}`)), nil)
+	re.NoError(err)
+	re.Equal([]uint64{3}, es2.(*evictSlowStoreScheduler).conf.EvictedStores)
+	re.Equal([]uint64{1}, es2.(*evictSlowStoreScheduler).conf.EvictedGroupStores)
+
+	// The list API exposes the whole group.
+	data, err := json.Marshal(conf)
+	re.NoError(err)
+	re.Contains(string(data), `"evict-group-stores":[1]`)
+}
+
+// TestEvictSlowStoreGroupEvictionRespectsBatchLimit: with several evicted stores one
+// Schedule call still returns at most batch operators, and the store order rotates so every
+// evicted store gets drained.
+func TestEvictSlowStoreGroupEvictionRespectsBatchLimit(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	tc.AddLeaderStore(1, 0)
+	tc.AddLeaderStore(2, 0)
+	tc.AddLeaderStore(3, 0)
+	tc.AddLeaderRegion(1, 1, 3)
+	tc.AddLeaderRegion(2, 2, 3)
+
+	es := createTestEvictSlowStoreScheduler(re, oc).(*evictSlowStoreScheduler)
+	es.conf.Batch = 1
+	re.NoError(es.conf.setEvictedStoresAndPersist([]uint64{1, 2}))
+
+	sources := make(map[uint64]struct{})
+	for range 4 {
+		ops := es.schedulerEvictLeader(tc)
+		re.Len(ops, 1)
+		sources[ops[0].RegionID()] = struct{}{}
+	}
+	re.Len(sources, 2)
+
+	es.conf.Batch = 3
+	re.Len(es.schedulerEvictLeader(tc), 2)
+}
+
+// TestEvictSlowStorePrepareDoesNotOverwriteConcurrentReload: adding newly-slow stores reads,
+// appends and persists the eviction set under one lock, so a ReloadConfig that commits after
+// the stores were marked is kept.
+func TestEvictSlowStorePrepareDoesNotOverwriteConcurrentReload(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	for id := uint64(1); id <= 3; id++ {
+		tc.AddLeaderStore(id, 0)
+	}
+	st := storage.NewStorageWithMemoryBackend()
+	es, err := CreateScheduler(types.EvictSlowStoreScheduler, oc, st,
+		ConfigSliceDecoder(types.EvictSlowStoreScheduler, nil), nil)
+	re.NoError(err)
+	conf := es.(*evictSlowStoreScheduler).conf
+	re.NoError(conf.setEvictedStoresAndPersist([]uint64{1}))
+
+	const fp = "github.com/tikv/pd/pkg/schedule/schedulers/beforeAddEvictedStores"
+	re.NoError(failpoint.EnableCall(fp, func() {
+		re.NoError(st.SaveSchedulerConfig(es.GetName(), []byte(`{"evict-stores":[1],"evict-group-stores":[3]}`)))
+		re.NoError(es.ReloadConfig())
+	}))
+	defer func() {
+		re.NoError(failpoint.Disable(fp))
+	}()
+
+	re.NoError(es.(*evictSlowStoreScheduler).prepareEvictLeader(tc, []uint64{2, 3}))
+	re.Equal([]uint64{1, 3, 2}, conf.evictedStores())
+	re.True(tc.GetStore(2).EvictedAsSlowStore())
+
+	var persisted evictSlowStoreSchedulerConfig
+	re.NoError(conf.load(&persisted))
+	re.Equal([]uint64{1, 3, 2}, persisted.evictedStoresLocked())
 }
