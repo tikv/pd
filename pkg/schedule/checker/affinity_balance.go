@@ -136,6 +136,9 @@ func (c *AffinityChecker) validateBalanceAction(ctx context.Context, group *affi
 		// This also invalidates a cached plan when the checker has not yet seen
 		// the newest heartbeat for this Region.
 		c.affinityManager.ObserveBalanceRegion(region)
+		if !c.isRegionPlacementRuleSatisfiedWithBestLocation(region, true) {
+			return true, false
+		}
 	}
 	if !c.balanceSchedulingAllowed() || ctx.Err() != nil {
 		return false, false
