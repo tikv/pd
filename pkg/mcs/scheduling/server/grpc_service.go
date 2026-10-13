@@ -16,6 +16,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"sync/atomic"
@@ -25,6 +26,11 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/schedulingpb"
 	"github.com/pingcap/log"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
@@ -33,10 +39,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/versioninfo"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 // gRPC errors
@@ -156,6 +158,10 @@ func (s *Service) RegionHeartbeat(stream schedulingpb.Scheduling_RegionHeartbeat
 		if store == nil {
 			return errors.Errorf("invalid store ID %d, not found", storeID)
 		}
+		if store.IsRemoved() {
+			log.Debug("skip region heartbeat from tombstone store", zap.Uint64("store-id", storeID))
+			continue
+		}
 
 		if time.Since(lastBind) > time.Minute {
 			s.hbStreams.BindStream(storeID, server)
@@ -181,8 +187,21 @@ func (s *Service) StoreHeartbeat(_ context.Context, request *schedulingpb.StoreH
 		return &schedulingpb.StoreHeartbeatResponse{Header: notBootstrappedHeader()}, nil
 	}
 
-	if c.GetStore(request.GetStats().GetStoreId()) == nil {
+	storeID := request.GetStats().GetStoreId()
+	if c.GetStore(storeID) == nil {
 		s.metaWatcher.GetStoreWatcher().ForceLoad()
+	}
+
+	store := c.GetStore(storeID)
+	if store == nil {
+		return &schedulingpb.StoreHeartbeatResponse{
+			Header: wrapErrorToHeader(schedulingpb.ErrorType_UNKNOWN, fmt.Sprintf("store %v not found", storeID)),
+		}, nil
+	}
+	if store.IsRemoved() {
+		return &schedulingpb.StoreHeartbeatResponse{
+			Header: wrapErrorToHeader(schedulingpb.ErrorType_UNKNOWN, fmt.Sprintf("store %v is tombstone", storeID)),
+		}, nil
 	}
 
 	// TODO: add metrics
