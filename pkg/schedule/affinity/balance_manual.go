@@ -21,8 +21,6 @@ import (
 	"slices"
 )
 
-const maxManualBalancePairChecks = 100_000
-
 // BalanceActionRebuilder builds legal actions for a virtual target using the
 // original group as the placement reference. A false result means the table
 // is not ready to plan.
@@ -30,10 +28,13 @@ type BalanceActionRebuilder func(context.Context, *Group, *Group) (BalanceAction
 
 // PlanTableRebalance repeatedly applies strict table-wide balance steps and
 // then considers coordinated pairs at a single-step local minimum. Pair
-// planning is bounded to two groups and a fixed search budget; it never
-// enumerates complete store assignments. Changed flags compare final targets
-// with the original targets.
+// actions are generated lazily, so the planner does not retain all legal
+// actions for every group at once. Changed flags compare final targets with
+// the original targets.
 func PlanTableRebalance(ctx context.Context, groups []*Group, options BalanceOptions, rebuild BalanceActionRebuilder) ([]BalancePlan, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	initialPlans, err := PlanBalance(groups, options)
 	if err != nil {
 		return nil, err
@@ -56,7 +57,6 @@ func PlanTableRebalance(ctx context.Context, groups []*Group, options BalanceOpt
 	}
 	globalLeaders := cloneBalanceCounts(options.GlobalLeaderCounts)
 	globalVoters := cloneBalanceCounts(options.GlobalVoterCounts)
-	pairChecksLeft := maxManualBalancePairChecks
 
 	for {
 		if err := ctx.Err(); err != nil {
@@ -93,12 +93,11 @@ func PlanTableRebalance(ctx context.Context, groups []*Group, options BalanceOpt
 			continue
 		}
 
-		pair, found, checks, err := findImprovingPair(ctx, current, options.Stores, actions,
-			globalLeaders, globalVoters, pairChecksLeft)
+		pair, found, err := findImprovingPair(ctx, current, options.Stores, actions,
+			globalLeaders, globalVoters)
 		if err != nil {
 			return nil, err
 		}
-		pairChecksLeft -= checks
 		if !found {
 			return finalBalancePlans(original, current), nil
 		}
@@ -236,56 +235,54 @@ type manualBalancePair struct {
 }
 
 func findImprovingPair(ctx context.Context, groups []*Group, stores []uint64, actionSets map[string]BalanceActionSet,
-	globalLeaders, globalVoters map[uint64]int, maxChecks int) (manualBalancePair, bool, int, error) {
-	if maxChecks <= 0 {
-		return manualBalancePair{}, false, 0, nil
-	}
+	globalLeaders, globalVoters map[uint64]int) (manualBalancePair, bool, error) {
 	leaders, voters := countsForGroups(groups)
 	baseScore := calcBalanceScore(leaders, voters)
 	baseGlobalScore := balanceScore{leader: sumSquares(globalLeaders), voter: sumSquares(globalVoters)}
-	candidates := make([][]manualBalanceAction, len(groups))
-	candidateGroups := make([]int, 0, len(groups))
+	actionGenerators := make([]manualBalanceActionGenerator, len(groups))
 	for i, group := range groups {
-		if group.BalancePolicy == BalancePolicyFixed {
-			continue
-		}
 		if err := ctx.Err(); err != nil {
-			return manualBalancePair{}, false, 0, err
+			return manualBalancePair{}, false, err
 		}
-		candidates[i] = manualBalanceActions(group, actionSets[group.ID], stores, leaders)
-		if len(candidates[i]) > 0 {
-			candidateGroups = append(candidateGroups, i)
+		if group.BalancePolicy != BalancePolicyFixed {
+			actionGenerators[i] = newManualBalanceActionGenerator(group, actionSets[group.ID], stores, leaders)
 		}
 	}
 	var best manualBalancePair
 	found := false
-	checks := 0
-	for a := range candidateGroups {
-		i := candidateGroups[a]
-		for b := a + 1; b < len(candidateGroups); b++ {
-			j := candidateGroups[b]
-			for _, first := range candidates[i] {
-				for _, second := range candidates[j] {
-					if checks >= maxChecks {
-						return best, found, checks, nil
+	for i, firstGroup := range groups {
+		if firstGroup.BalancePolicy == BalancePolicyFixed {
+			continue
+		}
+		for j := i + 1; j < len(groups); j++ {
+			if err := ctx.Err(); err != nil {
+				return manualBalancePair{}, false, err
+			}
+			secondGroup := groups[j]
+			if secondGroup.BalancePolicy == BalancePolicyFixed {
+				continue
+			}
+			var searchErr error
+			actionGenerators[i].visit(func(first manualBalanceAction) bool {
+				if searchErr != nil {
+					return false
+				}
+				actionGenerators[j].visit(func(second manualBalanceAction) bool {
+					if err := ctx.Err(); err != nil {
+						searchErr = err
+						return false
 					}
-					checks++
-					if checks&1023 == 0 {
-						if err := ctx.Err(); err != nil {
-							return manualBalancePair{}, false, checks, err
-						}
-					}
-					score := scoreAfterPair(baseScore, leaders, voters, groups[i], first, groups[j], second)
+					score := scoreAfterPair(baseScore, leaders, voters, firstGroup, first, secondGroup, second)
 					if compareScore(score, baseScore) >= 0 {
-						continue
+						return true
 					}
 					globalScore := scoreAfterGlobalPair(baseGlobalScore, globalLeaders, globalVoters,
-						groups[i], first, groups[j], second)
+						firstGroup, first, secondGroup, second)
 					preserves := 0
-					if first.leader == groups[i].LeaderStoreID {
+					if first.leader == firstGroup.LeaderStoreID {
 						preserves++
 					}
-					if second.leader == groups[j].LeaderStoreID {
+					if second.leader == secondGroup.LeaderStoreID {
 						preserves++
 					}
 					pair := manualBalancePair{
@@ -296,72 +293,30 @@ func findImprovingPair(ctx context.Context, groups []*Group, stores []uint64, ac
 					if !found || manualPairLess(pair, best) {
 						best, found = pair, true
 					}
-				}
+					return true
+				})
+				return searchErr == nil
+			})
+			if searchErr != nil {
+				return manualBalancePair{}, false, searchErr
 			}
 		}
 	}
-	return best, found, checks, nil
+	return best, found, nil
 }
 
 func manualBalanceActions(group *Group, actions BalanceActionSet, stores []uint64, leaderCounts map[uint64]int) []manualBalanceAction {
-	voters := normalizeVoters(group.VoterStoreIDs)
-	votersSet := make(map[uint64]struct{}, len(voters))
-	available := make(map[uint64]struct{}, len(stores))
-	for _, store := range voters {
-		votersSet[store] = struct{}{}
-	}
-	for _, store := range stores {
-		available[store] = struct{}{}
-	}
-	seen := make(map[struct{ leader, from, to uint64 }]struct{})
 	result := make([]manualBalanceAction, 0)
-	add := func(leader, from, to uint64, targetVoters []uint64, moveBytes uint64) {
-		if leader != group.LeaderStoreID && 2*(leaderCounts[leader]-leaderCounts[group.LeaderStoreID]+1) != 0 {
-			return
-		}
-		key := struct{ leader, from, to uint64 }{leader, from, to}
-		if _, exists := seen[key]; exists ||
-			(leader == group.LeaderStoreID && from == 0 && to == 0) {
-			return
+	seen := make(map[struct{ leader, from, to uint64 }]struct{})
+	newManualBalanceActionGenerator(group, actions, stores, leaderCounts).visit(func(action manualBalanceAction) bool {
+		key := struct{ leader, from, to uint64 }{action.leader, action.from, action.to}
+		if _, exists := seen[key]; exists {
+			return true
 		}
 		seen[key] = struct{}{}
-		result = append(result, manualBalanceAction{
-			GroupID:   group.ID,
-			target:    target{leader: leader, voters: slices.Clone(targetVoters), from: from, to: to},
-			moveBytes: moveBytes,
-		})
-	}
-	for _, leader := range actions.LeaderTargets {
-		if _, valid := votersSet[leader]; valid {
-			add(leader, 0, 0, voters, 0)
-		}
-	}
-	for _, from := range voters {
-		targets := actions.VoterReplacements[from]
-		toStores := make([]uint64, 0, len(targets))
-		for to := range targets {
-			toStores = append(toStores, to)
-		}
-		slices.Sort(toStores)
-		for _, to := range toStores {
-			if _, valid := available[to]; !valid || to == 0 {
-				continue
-			}
-			if _, alreadyVoter := votersSet[to]; alreadyVoter {
-				continue
-			}
-			newVoters := replaceVoter(voters, from, to)
-			leaders := slices.Clone(targets[to])
-			slices.Sort(leaders)
-			for _, leader := range leaders {
-				_, staysVoter := votersSet[leader]
-				if leader != to && (leader == from || !staysVoter) {
-					continue
-				}
-				add(leader, from, to, newVoters, actions.MoveBytes)
-			}
-		}
-	}
+		result = append(result, action)
+		return true
+	})
 	slices.SortFunc(result, func(a, b manualBalanceAction) int {
 		if order := cmp.Compare(a.leader, b.leader); order != 0 {
 			return order
@@ -372,6 +327,80 @@ func manualBalanceActions(group *Group, actions BalanceActionSet, stores []uint6
 		return cmp.Compare(a.from, b.from)
 	})
 	return result
+}
+
+type manualBalanceActionGenerator struct {
+	group        *Group
+	actions      BalanceActionSet
+	voters       []uint64
+	votersSet    map[uint64]struct{}
+	stores       []uint64
+	leaderCounts map[uint64]int
+}
+
+func newManualBalanceActionGenerator(group *Group, actions BalanceActionSet, stores []uint64,
+	leaderCounts map[uint64]int) manualBalanceActionGenerator {
+	voters := normalizeVoters(group.VoterStoreIDs)
+	votersSet := make(map[uint64]struct{}, len(voters))
+	for _, store := range voters {
+		votersSet[store] = struct{}{}
+	}
+	return manualBalanceActionGenerator{
+		group: group, actions: actions, voters: voters,
+		votersSet: votersSet, stores: stores, leaderCounts: leaderCounts,
+	}
+}
+
+func (g manualBalanceActionGenerator) visit(visit func(manualBalanceAction) bool) {
+	group, actions := g.group, g.actions
+	add := func(leader, from, to uint64, targetVoters []uint64, moveBytes uint64) bool {
+		if leader != group.LeaderStoreID && 2*(g.leaderCounts[leader]-g.leaderCounts[group.LeaderStoreID]+1) != 0 {
+			return true
+		}
+		if leader == group.LeaderStoreID && from == 0 && to == 0 {
+			return true
+		}
+		return visit(manualBalanceAction{
+			GroupID:   group.ID,
+			target:    target{leader: leader, voters: slices.Clone(targetVoters), from: from, to: to},
+			moveBytes: moveBytes,
+		})
+	}
+	for _, leader := range actions.LeaderTargets {
+		if _, valid := g.votersSet[leader]; valid {
+			if !add(leader, 0, 0, g.voters, 0) {
+				return
+			}
+		}
+	}
+	for _, from := range g.voters {
+		targets := actions.VoterReplacements[from]
+		toStores := make([]uint64, 0, len(targets))
+		for to := range targets {
+			toStores = append(toStores, to)
+		}
+		slices.Sort(toStores)
+		for _, to := range toStores {
+			if to == 0 || !slices.Contains(g.stores, to) {
+				continue
+			}
+			if _, alreadyVoter := g.votersSet[to]; alreadyVoter {
+				continue
+			}
+			newVoters := replaceVoter(g.voters, from, to)
+			leaders := slices.Clone(targets[to])
+			slices.Sort(leaders)
+			for _, leader := range leaders {
+				_, staysVoter := g.votersSet[leader]
+				if leader != to && (leader == from || !staysVoter) {
+					continue
+				}
+				if !add(leader, from, to, newVoters, actions.MoveBytes) {
+					return
+				}
+			}
+		}
+	}
 }
 
 func countsForGroups(groups []*Group) (leaders map[uint64]int, voters map[uint64]int) {

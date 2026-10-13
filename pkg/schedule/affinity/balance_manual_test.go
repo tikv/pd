@@ -128,12 +128,12 @@ func TestFindImprovingBalancePairUsesGlobalScoreForTies(t *testing.T) {
 		{ID: "z4", LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2, 3, 4, 5, 6}},
 		{ID: "z5", LeaderStoreID: 3, VoterStoreIDs: []uint64{1, 2, 3, 4, 5, 6}},
 	}
-	pair, found, _, err := findImprovingPair(t.Context(), groups, []uint64{1, 2, 3, 4, 5, 6}, map[string]BalanceActionSet{
+	pair, found, err := findImprovingPair(t.Context(), groups, []uint64{1, 2, 3, 4, 5, 6}, map[string]BalanceActionSet{
 		"a0": {LeaderTargets: []uint64{5}},
 		"a3": {LeaderTargets: []uint64{6}},
 		"z0": {LeaderTargets: []uint64{2}},
 		"z3": {LeaderTargets: []uint64{3}},
-	}, map[uint64]int{1: 3, 2: 2, 3: 1, 4: 3, 5: 2, 6: 3}, nil, 100)
+	}, map[uint64]int{1: 3, 2: 2, 3: 1, 4: 3, 5: 2, 6: 3}, nil)
 
 	require.NoError(t, err)
 	require.True(t, found)

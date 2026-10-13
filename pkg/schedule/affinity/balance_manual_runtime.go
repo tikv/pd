@@ -20,6 +20,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/kv"
@@ -27,10 +28,18 @@ import (
 
 const manualBalanceBuildPageSize = 256
 
+// Manual table rebalancing builds every group's legal actions before it can
+// publish one complete final plan. Keep an unbounded request context from
+// holding the table lock forever while still allowing normal-sized tables to
+// finish in one request.
+const manualBalancePlanningTimeout = 30 * time.Second
+
 func (m *Manager) rebalanceTable(ctx context.Context, groupID string, apply bool) ([]BalancePlan, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	planningCtx, cancel := context.WithTimeout(ctx, manualBalancePlanningTimeout)
+	defer cancel()
 	if m.GetAffinityGroupState(groupID) == nil {
 		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
 	}
@@ -43,10 +52,13 @@ func (m *Manager) rebalanceTable(ctx context.Context, groupID string, apply bool
 		m.balanceLocks[tableID] = tableLock
 	}
 	m.Unlock()
-	tableLock.Lock()
+	if !tableLock.TryLock() {
+		return nil, nil
+	}
 	defer tableLock.Unlock()
 
 	var (
+		snapshot       *balanceSnapshot
 		wasStable      bool
 		originalFinger balanceFingerprint
 	)
@@ -61,6 +73,9 @@ func (m *Manager) rebalanceTable(ctx context.Context, groupID string, apply bool
 	}
 	m.Unlock()
 	defer func() {
+		if snapshot != nil {
+			m.releaseBalanceDependencies(snapshot)
+		}
 		if !wasStable {
 			return
 		}
@@ -73,14 +88,14 @@ func (m *Manager) rebalanceTable(ctx context.Context, groupID string, apply bool
 		m.Unlock()
 	}()
 
-	snapshot := m.balanceSnapshot(groupID)
+	snapshot = m.balanceSnapshot(groupID)
 	if snapshot == nil {
 		return nil, nil
 	}
 	if snapshot.virtual == nil {
 		return nil, errors.New("virtual balance action builder is not configured")
 	}
-	if err := m.captureBalanceDependencies(ctx, snapshot); err != nil {
+	if err := m.captureBalanceDependencies(planningCtx, snapshot); err != nil {
 		if errs.ErrEtcdTxnConflict.Equal(err) {
 			return nil, nil
 		}
@@ -118,7 +133,7 @@ func (m *Manager) rebalanceTable(ctx context.Context, groupID string, apply bool
 
 	actions := make(map[string]BalanceActionSet, len(autoGroups))
 	for _, group := range autoGroups {
-		built, ready, err := m.buildManualBalanceActions(ctx, snapshot, group, &group.Group)
+		built, ready, err := m.buildManualBalanceActions(planningCtx, snapshot, group, &group.Group)
 		if err != nil {
 			return nil, err
 		}
@@ -128,7 +143,7 @@ func (m *Manager) rebalanceTable(ctx context.Context, groupID string, apply bool
 		actions[group.ID] = built
 	}
 	var rebuildErr error
-	plans, err := PlanTableRebalance(ctx, groups, BalanceOptions{
+	plans, err := PlanTableRebalance(planningCtx, groups, BalanceOptions{
 		Stores: snapshot.stores, ActionSets: actions,
 		GlobalLeaderCounts: snapshot.globalLeaders, GlobalVoterCounts: snapshot.globalVoters,
 	}, func(buildCtx context.Context, original, virtual *Group) (BalanceActionSet, bool) {
@@ -149,7 +164,7 @@ func (m *Manager) rebalanceTable(ctx context.Context, groupID string, apply bool
 	if err != nil {
 		return nil, err
 	}
-	if err := ctx.Err(); err != nil {
+	if err := planningCtx.Err(); err != nil {
 		return nil, err
 	}
 
@@ -173,14 +188,14 @@ func (m *Manager) rebalanceTable(ctx context.Context, groupID string, apply bool
 			return nil, nil
 		}
 		if snapshot.validator != nil {
-			ready, legal := snapshot.validator(ctx, group, snapshot.ranges[group.ID], plan)
+			ready, legal := snapshot.validator(planningCtx, group, snapshot.ranges[group.ID], plan)
 			if !ready || !legal {
 				return nil, nil
 			}
 		}
 	}
 
-	current, err := m.balanceDependenciesCurrent(ctx, snapshot)
+	current, err := m.balanceDependenciesCurrent(planningCtx, snapshot)
 	if err != nil {
 		return nil, err
 	}
@@ -199,7 +214,7 @@ func (m *Manager) rebalanceTable(ctx context.Context, groupID string, apply bool
 	if !apply {
 		return plans, nil
 	}
-	committed, err := m.commitBalancePlans(ctx, snapshot, plans)
+	committed, err := m.commitBalancePlans(planningCtx, snapshot, plans)
 	if err != nil {
 		return nil, err
 	}
