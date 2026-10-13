@@ -24,6 +24,9 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/log"
+	"github.com/unrolled/render"
+	"go.uber.org/zap"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
@@ -35,8 +38,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/reflectutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"github.com/unrolled/render"
-	"go.uber.org/zap"
 )
 
 const (
@@ -328,7 +329,7 @@ func (s *balanceLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 	if dryRun {
 		collector = plan.NewCollector(basePlan)
 	}
-	defer s.filterCounter.Flush()
+	defer s.filterCounter.Flush(cluster)
 	batch := s.conf.getBatch()
 	balanceLeaderScheduleCounter.Inc()
 

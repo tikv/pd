@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"runtime"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -13,6 +14,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/schedulingpb"
 	"github.com/pingcap/log"
+	"go.uber.org/zap"
+
 	"github.com/tikv/pd/pkg/cluster"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
@@ -21,6 +24,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/keyrange"
 	"github.com/tikv/pd/pkg/schedule/labeler"
@@ -37,7 +41,6 @@ import (
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
-	"go.uber.org/zap"
 )
 
 // Cluster is used to manage all information for scheduling purpose.
@@ -541,8 +544,50 @@ func (c *Cluster) collectMetrics() {
 	for _, s := range stores {
 		statsMap.Observe(s)
 		statistics.ObserveHotStat(s, c.hotStat.StoresStats)
+		// Observe/ObserveHotStat write from this snapshot unconditionally, so a
+		// concurrent bury or final removal of s between GetStores() above and
+		// this write can have its own metric cleanup undone by it. Re-checking
+		// right after the write and redoing the cleanup closes that race
+		// without needing synchronization with the bury/removal path.
+		current := c.GetStore(s.GetID())
+		// DeleteClusterStatusMetrics only covers the clusterStatusGauge fields
+		// observe() keeps refreshing unconditionally while a store stays
+		// tombstoned (store_tombstone_count and friends, self-healing by
+		// design); only clean those up once the store is gone for good, or
+		// they'd flicker off every tick during a legitimate tombstone period.
+		if current == nil {
+			statistics.DeleteClusterStatusMetrics(s)
+		}
+		// ResetStoreStatistics covers storeStatusGauge/storeStats, which
+		// observe() itself stops writing as soon as it sees a tombstoned
+		// store -- so, unlike the fields above, there's no legitimate write to
+		// preserve here once the store is IsRemoved(), not just once it's
+		// gone entirely. But storeStatusGauge's cleanup is a DeletePartialMatch
+		// full-vector scan, so only pay for it when this iteration's own s was
+		// still live (observe(s) could then have written using stale data);
+		// once a snapshot correctly shows IsRemoved(), observe() already
+		// skipped writing these fields and there's nothing to undo, so a
+		// tombstoned store sitting in GetStores() for up to 30 days doesn't
+		// cost a scan on every 10s tick.
+		if !s.IsRemoved() && (current == nil || current.IsRemoved()) {
+			statistics.ResetStoreStatistics(strconv.FormatUint(s.GetID(), 10))
+		}
 	}
 	statsMap.Collect()
+	// statsMap.Collect() writes statistics.StoreLimitGauge from its own
+	// GetStoresLimit() snapshot, taken independently of stores above and with
+	// no cluster reference of its own to re-check against. Reuse the stores
+	// snapshot already captured here to catch and undo it. Like
+	// ResetStoreStatistics above, a store limit has no legitimate reason to
+	// still be configured once the store is tombstoned, so this also checks
+	// IsRemoved(), not just full removal.
+	for _, s := range stores {
+		if store := c.GetStore(s.GetID()); store == nil || store.IsRemoved() {
+			id := strconv.FormatUint(s.GetID(), 10)
+			statistics.StoreLimitGauge.DeleteLabelValues(id, "add-peer")
+			statistics.StoreLimitGauge.DeleteLabelValues(id, "remove-peer")
+		}
+	}
 
 	c.coordinator.GetSchedulersController().CollectSchedulerMetrics()
 	c.coordinator.CollectHotSpotMetrics()
@@ -561,6 +606,8 @@ func resetMetrics() {
 	statistics.Reset()
 	schedulers.ResetSchedulerMetrics()
 	schedule.ResetHotSpotMetrics()
+	filter.ResetFilterMetrics()
+	hbstream.ResetHeartbeatStreamMetrics()
 }
 
 // StartBackgroundJobs starts background jobs.
