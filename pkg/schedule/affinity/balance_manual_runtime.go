@@ -199,6 +199,9 @@ func (m *Manager) rebalanceTable(ctx context.Context, groupID string, apply bool
 	if err != nil {
 		return nil, err
 	}
+	if err := planningCtx.Err(); err != nil {
+		return nil, err
+	}
 	if !current || !m.balanceSnapshotCurrent(snapshot) {
 		return nil, nil
 	}

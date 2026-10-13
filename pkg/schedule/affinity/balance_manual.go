@@ -39,6 +39,9 @@ func PlanTableRebalance(ctx context.Context, groups []*Group, options BalanceOpt
 	if err != nil {
 		return nil, err
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if len(initialPlans) == 0 {
 		return initialPlans, nil
 	}
@@ -69,6 +72,9 @@ func PlanTableRebalance(ctx context.Context, groups []*Group, options BalanceOpt
 		if err != nil {
 			return nil, err
 		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		var changed *BalancePlan
 		for i := range stepPlans {
 			if stepPlans[i].Changed {
@@ -96,6 +102,9 @@ func PlanTableRebalance(ctx context.Context, groups []*Group, options BalanceOpt
 		pair, found, err := findImprovingPair(ctx, current, options.Stores, actions,
 			globalLeaders, globalVoters)
 		if err != nil {
+			return nil, err
+		}
+		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		if !found {
