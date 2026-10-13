@@ -483,6 +483,89 @@ func (s *gcStateManagerTestSuite) TestGCStateWatcherMetrics() {
 	}()
 }
 
+func (s *gcStateManagerTestSuite) TestGCStateWatcherSendTimeoutPreservesFirstCause() {
+	for _, tc := range []struct {
+		name  string
+		cause error
+	}{
+		{"timeout", errs.ErrGCStateWatcherSlowConsumer},
+		{"client cancel", context.Canceled},
+		{"leader loss", errs.ErrNotLeader},
+	} {
+		s.Run(tc.name, func() {
+			re := s.Require()
+			stop := s.manager.OnNodeBecomesLeader()
+			defer stop()
+			activeBefore := promtestutil.ToFloat64(gcStateWatcherGauge)
+			clientBefore := promtestutil.ToFloat64(gcStateWatcherTerminationClientCancelCounter)
+			leaderBefore := promtestutil.ToFloat64(gcStateWatcherTerminationLeaderLostCounter)
+			slowBefore := promtestutil.ToFloat64(gcStateWatcherTerminationSlowConsumerCounter)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			w, err := s.manager.WatchGCStates(ctx, true)
+			re.NoError(err)
+			switch tc.name {
+			case "client cancel":
+				// The parent can cancel before the handler's deferred Close runs.
+				cancel()
+				clientBefore++
+			case "leader loss":
+				stop()
+				leaderBefore++
+			default:
+				slowBefore++
+			}
+			w.CloseForSlowConsumer()
+			w.CloseForSlowConsumer()
+			w.Close()
+			re.ErrorIs(w.Err(), tc.cause)
+			re.Empty(s.manager.watchers)
+			re.Equal(activeBefore, promtestutil.ToFloat64(gcStateWatcherGauge))
+			re.Equal(clientBefore, promtestutil.ToFloat64(gcStateWatcherTerminationClientCancelCounter))
+			re.Equal(leaderBefore, promtestutil.ToFloat64(gcStateWatcherTerminationLeaderLostCounter))
+			re.Equal(slowBefore, promtestutil.ToFloat64(gcStateWatcherTerminationSlowConsumerCounter))
+		})
+	}
+}
+
+func (s *gcStateManagerTestSuite) TestGCStateWatcherSendTimeoutStopsInitialLoader() {
+	re := s.Require()
+	stop := s.manager.OnNodeBecomesLeader()
+	defer stop()
+	loaded := make(chan struct{}, 1)
+	const hook = "github.com/tikv/pd/pkg/gc/watchGCStatesInitialStateLoaded"
+	re.NoError(failpoint.EnableCall(hook, func(uint32) {
+		select {
+		case loaded <- struct{}{}:
+		default:
+		}
+	}))
+	defer func() { re.NoError(failpoint.Disable(hook)) }()
+	// Start the loader explicitly so its exit can be observed. An unbuffered
+	// initial channel prevents it from progressing without a receiving worker.
+	w, err := s.manager.registerGCStateWatcher(context.Background(), true, gcStateWatchConfig{})
+	re.NoError(err)
+	defer w.Close()
+	exited := make(chan struct{})
+	go func() {
+		defer close(exited)
+		s.manager.loadInitialGCStates(w, 1)
+	}()
+	select {
+	case <-loaded:
+	case <-time.After(5 * time.Second):
+		re.FailNow("initial loader did not start")
+	}
+	w.CloseForSlowConsumer()
+	select {
+	case <-exited:
+	case <-time.After(5 * time.Second):
+		re.FailNow("send timeout did not release the initial loader")
+	}
+	re.ErrorIs(w.Err(), errs.ErrGCStateWatcherSlowConsumer)
+	re.Empty(s.manager.watchers)
+}
+
 func mustUpsert(t testing.TB, change GCStateChange) GCState {
 	state, ok := change.Upsert()
 	require.True(t, ok)

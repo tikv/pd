@@ -1540,10 +1540,16 @@ func TestWatchGCStatesBlockedSendCleansUpPublicHandler(t *testing.T) {
 	}{
 		{"leader loss", "leader_lost", codes.Unavailable, false},
 		{"slow consumer", "slow_consumer", codes.ResourceExhausted, false},
+		{"stalled send", "slow_consumer", codes.ResourceExhausted, false},
 		{"forwarded leader loss", "leader_lost", codes.Unavailable, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			re := require.New(t)
+			if tc.name == "stalled send" {
+				const timeoutPoint = "github.com/tikv/pd/server/watchGCStatesSendTimeout"
+				re.NoError(failpoint.EnableCall(timeoutPoint, func(timeout *time.Duration) { *timeout = time.Second }))
+				t.Cleanup(func() { re.NoError(failpoint.Disable(timeoutPoint)) })
+			}
 			serverCount := 1
 			if tc.forwarded {
 				serverCount = 2
@@ -1599,7 +1605,7 @@ func TestWatchGCStatesBlockedSendCleansUpPublicHandler(t *testing.T) {
 			if tc.reason == "leader_lost" {
 				stop := manager.OnNodeBecomesLeader()
 				t.Cleanup(stop)
-			} else {
+			} else if tc.name == "slow consumer" {
 				// The sending worker cannot receive these 1025 updates, overflowing
 				// the default live queue's 1024 slots.
 				for target := uint64(11); target <= 1035; target++ {
