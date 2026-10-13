@@ -188,7 +188,7 @@ func TestGCStateLoadBatchAndTerminalResult(t *testing.T) {
 	unblock := func() { releaseOnce.Do(func() { close(release) }) }
 	defer unblock()
 	const afterRead = "github.com/tikv/pd/pkg/gc/afterGCStateLoadBatchRead"
-	require.NoError(t, failpoint.EnableCall(afterRead, func() { close(read); <-release }))
+	require.NoError(t, failpoint.EnableCall(afterRead, func(context.Context, *GCStateManager, []uint32) { close(read); <-release }))
 	defer func() { require.NoError(t, failpoint.Disable(afterRead)) }()
 	finished := make(chan gcStateLoadResult, 1)
 	go func() {
@@ -722,6 +722,190 @@ func TestGCStateLoadFailureWakesJoinedReaders(t *testing.T) {
 	require.Equal(t, GCState{KeyspaceID: 2, IsKeyspaceLevel: true}, state)
 }
 
+func TestGCStateLoadOverlappingBatchesCompleteOwnedScopesIndependently(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	defer unblock()
+	loadErr := errors.New("overlapping batch unavailable")
+	reads := make(chan []string, 4)
+	m := newGCStateLoaderManager(t, func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoke grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+		if txn := gcWarmupRead(req); txn != nil {
+			keys := make([]string, 0, len(txn.Success))
+			for _, op := range txn.Success {
+				keys = append(keys, string(op.GetRequestRange().GetKey()))
+			}
+			reads <- keys
+			if keys[0] == keypath.TxnSafePointPath(1) {
+				close(entered)
+				select {
+				case <-release:
+					return loadErr
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+		}
+		return invoke(ctx, method, req, reply, cc, opts...)
+	})
+	require.NoError(t, m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+		if err := wb.SetTxnSafePoint(3, 90); err != nil {
+			return err
+		}
+		return wb.SetGCSafePoint(3, 70)
+	}))
+
+	generation := m.activeGeneration.Load()
+	type batchResult struct {
+		result gcStateLoadResult
+		err    error
+	}
+	first := make(chan batchResult, 1)
+	go func() {
+		result, err := m.loadGCStateBatch(ctx, generation, gcStateLoadCandidates(1, 2))
+		first <- batchResult{result: result, err: err}
+	}()
+	gcWarmupWait(t, entered)
+	second := make(chan batchResult, 1)
+	go func() {
+		result, err := m.loadGCStateBatch(ctx, generation, gcStateLoadCandidates(2, 3))
+		second <- batchResult{result: result, err: err}
+	}()
+	var overlap gcStateLoadResult
+	select {
+	case result := <-second:
+		require.NoError(t, result.err)
+		overlap = result.result
+	case <-ctx.Done():
+		t.Fatal("owned scope C waited for joined scope B")
+	}
+	// The [B, C] result must publish C before [A, B] finishes, while keeping
+	// B attached to its original flight instead of reading that pair again.
+	require.Equal(t, []uint32{3}, overlap.completed)
+	require.Empty(t, overlap.failed)
+	require.Len(t, overlap.joined, 1)
+	flight := overlap.joined[2]
+	require.NotNil(t, flight)
+	select {
+	case <-flight.done:
+		t.Fatal("joined scope B completed before its storage read was released")
+	default:
+	}
+	entry, ok := m.gcStateCache.load(3)
+	require.True(t, ok)
+	require.Equal(t, gcStateCacheEntry{TxnSafePoint: 90, GCSafePoint: 70}, entry)
+	unblock()
+	require.ErrorIs(t, flight.wait(ctx), loadErr)
+	select {
+	case result := <-first:
+		require.NoError(t, result.err)
+		require.Empty(t, result.result.completed)
+		require.Len(t, result.result.failed, 2)
+		require.ErrorIs(t, result.result.failed[1], loadErr)
+		require.Same(t, result.result.failed[2], flight.err)
+	case <-ctx.Done():
+		t.Fatal("failed batch did not finish")
+	}
+	for _, id := range []uint32{1, 2} {
+		_, cached := m.gcStateCache.load(id)
+		require.False(t, cached)
+	}
+	entry, ok = m.gcStateCache.load(3)
+	require.True(t, ok)
+	require.Equal(t, gcStateCacheEntry{TxnSafePoint: 90, GCSafePoint: 70}, entry)
+	require.Len(t, reads, 2)
+	require.Equal(t, []string{keypath.TxnSafePointPath(1), keypath.GCSafePointPath(1), keypath.TxnSafePointPath(2), keypath.GCSafePointPath(2)}, <-reads)
+	require.Equal(t, []string{keypath.TxnSafePointPath(3), keypath.GCSafePointPath(3)}, <-reads)
+	require.Empty(t, reads, "overlapping scope B must be read only by the first batch")
+}
+
+func TestGCStateLoadPublicationPrecedesSafePointWriter(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		want gcStateCacheEntry
+	}{
+		{name: "txn safe point", want: gcStateCacheEntry{TxnSafePoint: 120, GCSafePoint: 70}},
+		{name: "GC safe point", want: gcStateCacheEntry{TxnSafePoint: 90, GCSafePoint: 80}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, provider, m, clean, cancel := newGCStateManagerForTest(t, newGCStateManagerForTestOptions{})
+			defer clean()
+			defer cancel()
+			require.NoError(t, provider.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+				if err := wb.SetTxnSafePoint(2, 90); err != nil {
+					return err
+				}
+				return wb.SetGCSafePoint(2, 70)
+			}))
+			read := make(chan struct{})
+			release := make(chan struct{})
+			var releaseOnce sync.Once
+			unblock := func() { releaseOnce.Do(func() { close(release) }) }
+			const afterRead = "github.com/tikv/pd/pkg/gc/afterGCStateLoadBatchRead"
+			require.NoError(t, failpoint.EnableCall(afterRead, func(_ context.Context, _ *GCStateManager, _ []uint32) {
+				close(read)
+				<-release
+			}))
+			defer func() { require.NoError(t, failpoint.Disable(afterRead)) }()
+			defer unblock()
+			loaded := make(chan error, 1)
+			go func() {
+				result, err := m.loadGCStateBatch(context.Background(), m.activeGeneration.Load(), gcStateLoadCandidates(2))
+				if err == nil {
+					err = result.failed[2]
+				}
+				loaded <- err
+			}()
+			gcWarmupWait(t, read)
+			written := make(chan error, 1)
+			go func() {
+				var err error
+				if tc.want.TxnSafePoint == 120 {
+					_, err = m.AdvanceTxnSafePoint(2, 120, time.Now())
+				} else {
+					_, _, err = m.AdvanceGCSafePoint(2, 80)
+				}
+				written <- err
+			}()
+			// A pending writer prevents new readers from taking the RWMutex.
+			// This proves the real writer reached the lock, without a timing sleep.
+			require.Eventually(t, func() bool {
+				if m.mu.TryRLock() {
+					m.mu.RUnlock()
+					return false
+				}
+				return true
+			}, 3*time.Second, time.Millisecond, "safe-point writer did not queue behind publication")
+			select {
+			case err := <-written:
+				t.Fatalf("writer completed before the old read was published: %v", err)
+			default:
+			}
+			values, err := provider.LoadGCSafePointPairs(context.Background(), []uint32{2})
+			require.NoError(t, err)
+			require.Equal(t, []endpoint.GCSafePointReadResult{{KeyspaceID: 2, TxnSafePoint: 90, GCSafePoint: 70}}, values)
+			unblock()
+			for _, done := range []<-chan error{loaded, written} {
+				select {
+				case err := <-done:
+					require.NoError(t, err)
+				case <-time.After(3 * time.Second):
+					t.Fatal("loader or writer did not finish after releasing publication")
+				}
+			}
+			entry, ok := m.gcStateCache.load(2)
+			require.True(t, ok)
+			require.Equal(t, tc.want, entry, "late publication must not overwrite the writer's newer state")
+			values, err = provider.LoadGCSafePointPairs(context.Background(), []uint32{2})
+			require.NoError(t, err)
+			require.Equal(t, []endpoint.GCSafePointReadResult{{KeyspaceID: 2, TxnSafePoint: tc.want.TxnSafePoint, GCSafePoint: tc.want.GCSafePoint}}, values)
+		})
+	}
+}
+
 func TestGCStateLeadershipCancelsLoadBeforeLock(t *testing.T) {
 	entered := make(chan struct{}, 1)
 	canceled := make(chan struct{}, 1)
@@ -883,7 +1067,7 @@ func TestGCStateLoadCancelBeforePublication(t *testing.T) {
 	var once sync.Once
 	unblock := func() { once.Do(func() { close(release) }) }
 	defer unblock()
-	require.NoError(t, failpoint.EnableCall("github.com/tikv/pd/pkg/gc/afterGCStateLoadBatchRead", func() { close(read); <-release }))
+	require.NoError(t, failpoint.EnableCall("github.com/tikv/pd/pkg/gc/afterGCStateLoadBatchRead", func(context.Context, *GCStateManager, []uint32) { close(read); <-release }))
 	defer func() { require.NoError(t, failpoint.Disable("github.com/tikv/pd/pkg/gc/afterGCStateLoadBatchRead")) }()
 	generation := m.activeGeneration.Load()
 	loaded := make(chan error, 1)
@@ -1031,7 +1215,7 @@ func TestGCStateLeadershipResetWaitsForOldPublication(t *testing.T) {
 	var once sync.Once
 	unblock := func() { once.Do(func() { close(release) }) }
 	defer unblock()
-	require.NoError(t, failpoint.EnableCall("github.com/tikv/pd/pkg/gc/afterGCStateLoadBatchRead", func() { close(read); <-release }))
+	require.NoError(t, failpoint.EnableCall("github.com/tikv/pd/pkg/gc/afterGCStateLoadBatchRead", func(context.Context, *GCStateManager, []uint32) { close(read); <-release }))
 	defer func() { require.NoError(t, failpoint.Disable("github.com/tikv/pd/pkg/gc/afterGCStateLoadBatchRead")) }()
 	loaded := make(chan error, 1)
 	go func() { _, err := m.getGCStateImpl(context.Background(), 2, true); loaded <- err }()
@@ -1051,7 +1235,7 @@ func TestGCStateLeadershipResetWaitsForOldPublication(t *testing.T) {
 	var executeOnce sync.Once
 	unblockExecute := func() { executeOnce.Do(func() { close(execute) }) }
 	defer unblockExecute()
-	require.NoError(t, failpoint.EnableCall("github.com/tikv/pd/pkg/gc/afterGCStateLoadBatchRead", func() { close(ready); <-execute }))
+	require.NoError(t, failpoint.EnableCall("github.com/tikv/pd/pkg/gc/afterGCStateLoadBatchRead", func(context.Context, *GCStateManager, []uint32) { close(ready); <-execute }))
 	done := make(chan gcStateLoadResult, 1)
 	go func() {
 		r, err := m.loadGCStateBatch(context.Background(), current, gcStateLoadCandidates(2))

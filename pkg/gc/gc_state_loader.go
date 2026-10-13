@@ -148,7 +148,7 @@ func (m *GCStateManager) loadGCStateBatch(ctx context.Context, generation *gcSta
 		return batch.result, nil
 	}
 	values, err := m.gcMetaStorage.LoadGCSafePointPairs(ctx, batch.keyspaceIDs)
-	failpoint.InjectCall("afterGCStateLoadBatchRead")
+	failpoint.InjectCall("afterGCStateLoadBatchRead", ctx, m, batch.keyspaceIDs)
 	generation.mu.Lock()
 	defer generation.mu.Unlock()
 	if m.activeGeneration.Load() != generation {
@@ -168,6 +168,7 @@ func (m *GCStateManager) loadGCStateBatch(ctx context.Context, generation *gcSta
 		} else {
 			if scopeErr == nil {
 				m.gcStateCache.store(id, gcStateCacheEntry{TxnSafePoint: values[i].TxnSafePoint, GCSafePoint: values[i].GCSafePoint})
+				failpoint.InjectCall("onGCStateLoadPublished", m, id)
 			}
 			flight.err = scopeErr
 			close(flight.done)
