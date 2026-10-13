@@ -147,7 +147,7 @@ func TestBalanceRuntimeDoesNotReportUnappliedPlan(t *testing.T) {
 			require.NoError(t, err)
 		}
 		return BalanceActionSet{LeaderTargets: group.VoterStoreIDs}, true
-	}, nil, nil, nil)
+	}, nil, nil)
 
 	plans, err := manager.balanceTable(t.Context(), ids[0], true)
 	require.NoError(t, err)
@@ -210,7 +210,7 @@ func TestBalanceRuntimeRejectsUnobservedPersistentUpdate(t *testing.T) {
 	manager.SetBalanceActionBuilder(func(_ context.Context, group *GroupState, _ GroupKeyRanges) (BalanceActionSet, bool) {
 		return BalanceActionSet{LeaderTargets: group.VoterStoreIDs}, true
 	}, nil, nil)
-	plans, err := manager.RebalanceAffinityGroup(t.Context(), ids[0], false)
+	plans, err := manager.balanceTable(t.Context(), ids[0], false)
 	require.NoError(t, err)
 	selected := changedPlan(plans).GroupID
 	group := manager.GetAffinityGroupState(selected).Group
@@ -218,7 +218,7 @@ func TestBalanceRuntimeRejectsUnobservedPersistentUpdate(t *testing.T) {
 	require.NoError(t, manager.storage.RunInTxn(t.Context(), func(txn kv.Txn) error {
 		return manager.storage.SaveAffinityGroup(txn, selected, &group)
 	}))
-	plans, err = manager.RebalanceAffinityGroup(t.Context(), ids[0], true)
+	plans, err = manager.balanceTable(t.Context(), ids[0], true)
 	require.NoError(t, err)
 	require.Empty(t, plans, "a remote update must be protected before the watcher observes it")
 	value, err := manager.storage.LoadAffinityGroup(selected)

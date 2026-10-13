@@ -169,7 +169,7 @@ func (m *Manager) rebalanceTable(ctx context.Context, groupID string, apply bool
 		if err := m.AdjustGroup(&candidate); err != nil {
 			return nil, nil
 		}
-		if err := m.checkHasUnavailableStore(candidate.LeaderStoreID, candidate.VoterStoreIDs); err != nil {
+		if err := m.checkBalanceTargetStores(candidate.LeaderStoreID, candidate.VoterStoreIDs); err != nil {
 			return nil, nil
 		}
 		if snapshot.validator != nil {
