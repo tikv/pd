@@ -202,6 +202,7 @@ type balanceTableState struct {
 	actions               map[string]BalanceActionSet
 	leaderTargets         map[string][]uint64
 	voterActions          map[string]BalanceActionSet
+	blockedGroups         map[string]struct{} // Temporary omissions; protected by the Manager lock.
 	mode                  BalanceActionMode
 	cursors               map[string]any
 	regionBytes           map[string]map[uint64]uint64
@@ -329,6 +330,7 @@ func (m *Manager) invalidateBalanceLocked(groupID string) {
 			actions:       make(map[string]BalanceActionSet),
 			leaderTargets: make(map[string][]uint64),
 			voterActions:  make(map[string]BalanceActionSet),
+			blockedGroups: make(map[string]struct{}),
 			cursors:       make(map[string]any),
 			regionBytes:   make(map[string]map[uint64]uint64),
 			moveBytes:     make(map[string]uint64),
@@ -346,12 +348,7 @@ func (m *Manager) invalidateBalanceLocked(groupID string) {
 		}
 	}
 	state.mode = BalanceBuildLeaders
-	delete(state.actions, groupID)
-	delete(state.leaderTargets, groupID)
-	delete(state.voterActions, groupID)
-	delete(state.cursors, groupID)
-	delete(state.regionBytes, groupID)
-	delete(state.moveBytes, groupID)
+	discardBalanceBuildLocked(state, groupID)
 	discardPendingBalanceSnapshotLocked(state)
 	clearBalanceDependencies(state)
 	state.nextGroup = ""
@@ -477,6 +474,7 @@ func (m *Manager) balanceSnapshot(groupID string) *balanceSnapshot {
 		unreadyGroups: make(map[string]struct{}),
 		blockedGroups: make(map[string]struct{}),
 	}
+	maps.Copy(result.blockedGroups, state.blockedGroups)
 	if state.dependencyFingerprint == fingerprint {
 		result.dependencies = maps.Clone(state.dependencies)
 		result.conditions = slices.Clone(state.dependencyConditions)
@@ -864,6 +862,9 @@ func (m *Manager) cacheBalanceBuildPage(snapshot *balanceSnapshot, groupID strin
 	if state == nil || m.balanceFingerprintLocked(state) != snapshot.fingerprint {
 		return BalanceActionSet{}, false
 	}
+	if page.TemporaryBlocked {
+		state.blockedGroups[groupID] = struct{}{}
+	}
 	weights := state.regionBytes[groupID]
 	if weights == nil {
 		weights = make(map[uint64]uint64, len(page.RegionBytes))
@@ -901,7 +902,7 @@ func (m *Manager) discardBalanceBuild(snapshot *balanceSnapshot, groupID string)
 	m.Lock()
 	defer m.Unlock()
 	state := m.balanceTables[snapshot.tableID]
-	if state == nil {
+	if state == nil || m.balanceFingerprintLocked(state) != snapshot.fingerprint {
 		return
 	}
 	discardPendingBalanceSnapshotLocked(state)
@@ -913,20 +914,20 @@ func discardBalanceBuildLocked(state *balanceTableState, groupID string) {
 	delete(state.actions, groupID)
 	delete(state.leaderTargets, groupID)
 	delete(state.voterActions, groupID)
+	delete(state.blockedGroups, groupID)
 	delete(state.regionBytes, groupID)
 	delete(state.moveBytes, groupID)
 	state.mode = BalanceBuildLeaders
 }
 
-// A retained snapshot owns the completeness flags for its cached actions.
-// Discarding it must also discard every action set with temporary omissions.
+// Discard every cached action set with temporary omissions along with pending
+// work. Only table state is read here: the planner mutates its snapshot outside
+// the Manager lock, even while a Region heartbeat invalidates the table.
 func discardPendingBalanceSnapshotLocked(state *balanceTableState) {
-	if state.pending != nil {
-		for id := range state.pending.blockedGroups {
-			discardBalanceBuildLocked(state, id)
-		}
-		state.pending = nil
+	for id := range state.blockedGroups {
+		discardBalanceBuildLocked(state, id)
 	}
+	state.pending = nil
 }
 
 func (m *Manager) discardBlockedBalanceBuilds(snapshot *balanceSnapshot) {

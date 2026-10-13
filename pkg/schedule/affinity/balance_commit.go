@@ -15,6 +15,7 @@
 package affinity
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"maps"
@@ -27,6 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 // SetBalanceCommitGuard installs the current authority and placement metadata
@@ -76,16 +78,66 @@ func (m *Manager) balanceMetadataCurrent(version balanceMetadataVersion, ruleRev
 		(ruleRevision == nil || ruleRevision() == version.rules)
 }
 
+// balanceSnapshotRangesCurrent fences the independent affinity and labeler
+// watchers. A globally verified label revision does not prove that this table's
+// cached ranges have caught up with the label rules at that revision.
+func (m *Manager) balanceSnapshotRangesCurrent(snapshot *balanceSnapshot) bool {
+	if m.regionLabeler.GetRevision() != snapshot.fingerprint.labels {
+		return false
+	}
+	matched := true
+	m.regionLabeler.RLock()
+	for _, group := range snapshot.groups {
+		actual, err := extractKeyRangesFromLabelRule(m.regionLabeler.GetLabelRuleLocked(GetLabelRuleID(group.ID)))
+		expected := snapshot.ranges[group.ID]
+		if err != nil || len(expected.KeyRanges) != len(actual.KeyRanges) {
+			matched = false
+			break
+		}
+		if len(expected.KeyRanges) == 0 {
+			continue // Missing rules and empty rules both describe no ranges.
+		}
+		// Range order has no scheduling meaning. Sort private slices to avoid
+		// mutating Manager or RegionLabeler data while comparing coverage.
+		expected.KeyRanges = slices.Clone(expected.KeyRanges)
+		compare := func(a, b keyutil.KeyRange) int {
+			if cmp := bytes.Compare(a.StartKey, b.StartKey); cmp != 0 {
+				return cmp
+			}
+			return bytes.Compare(a.EndKey, b.EndKey)
+		}
+		slices.SortFunc(expected.KeyRanges, compare)
+		slices.SortFunc(actual.KeyRanges, compare)
+		if !balanceRangesEqual(expected, actual) {
+			matched = false
+			break
+		}
+	}
+	m.regionLabeler.RUnlock()
+	return matched && m.regionLabeler.GetRevision() == snapshot.fingerprint.labels
+}
+
 func (m *Manager) captureBalanceDependencies(ctx context.Context, snapshot *balanceSnapshot) error {
 	if snapshot.dependencies != nil {
+		// This table's ranges were verified when these dependencies were
+		// captured. Reuse that result only at the same label revision, so
+		// bounded pages need not rescan all of the table's ranges.
+		if m.regionLabeler.GetRevision() != snapshot.fingerprint.labels {
+			return balanceConflict()
+		}
 		return nil
+	}
+	// Every table must verify its own ranges before consulting the shared
+	// global metadata fast path.
+	if !m.balanceSnapshotRangesCurrent(snapshot) {
+		return balanceConflict()
 	}
 	m.RLock()
 	term, metadata, ruleRevision := m.balanceTerm, m.balanceMetadata, m.balanceRuleRevision
 	version := balanceMetadataVersion{source: m.balanceMetadataSource}
 	verified := m.balanceMetadataVerified
 	m.RUnlock()
-	version.labels = m.regionLabeler.GetRevision()
+	version.labels = snapshot.fingerprint.labels
 	if ruleRevision != nil {
 		version.rules = ruleRevision()
 	}

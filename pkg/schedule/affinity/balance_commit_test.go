@@ -16,14 +16,17 @@ package affinity
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 func TestBalanceCommitProtectsOtherPartition(t *testing.T) {
@@ -63,6 +66,89 @@ func TestBalanceCommitProtectsMembership(t *testing.T) {
 	applied, err := m.commitBalancePlans(t.Context(), snapshot, []BalancePlan{{GroupID: ids[0], LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2, 3}, Changed: true}})
 	require.NoError(t, err)
 	require.False(t, applied)
+}
+
+func TestBalanceDependenciesRejectLaggingRangeWatcher(t *testing.T) {
+	for _, cached := range []bool{false, true} {
+		t.Run(map[bool]string{false: "uncached_metadata", true: "shared_metadata_cache"}[cached], func(t *testing.T) {
+			m := newBalanceRuntimeManager(t)
+			ids := seedBalanceGroups(t, m, []uint64{1, 1})
+			m.SetBalanceActionBuilder(func(_ context.Context, g *GroupState, _ GroupKeyRanges) (BalanceActionSet, bool) {
+				return BalanceActionSet{LeaderTargets: g.VoterStoreIDs}, true
+			}, func() uint64 { return 1 }, nil)
+			metadataReads := 0
+			m.SetBalanceCommitGuard(nil, func() map[string]string {
+				metadataReads++
+				return nil
+			})
+			other := GroupKeyRanges{GroupID: "_tidb_pt_20_p1",
+				KeyRanges: []keyutil.KeyRange{{StartKey: []byte{20}, EndKey: []byte{21}}}}
+			require.NoError(t, m.CreateAffinityGroups([]GroupKeyRanges{other}))
+			// Only RegionLabeler has observed the expanded range. The affinity
+			// watcher's Manager cache still ends at key 2.
+			rule := MakeLabelRule(GroupKeyRanges{GroupID: ids[1],
+				KeyRanges: []keyutil.KeyRange{{StartKey: []byte{1}, EndKey: []byte{3}}}})
+			require.NoError(t, m.regionLabeler.SetLabelRule(rule))
+			if cached {
+				require.NoError(t, m.captureBalanceDependencies(t.Context(), m.balanceSnapshot(other.GroupID)))
+				require.Equal(t, 1, metadataReads)
+			}
+			before := metadataReads
+			snapshot := m.balanceSnapshot(ids[0])
+			err := m.captureBalanceDependencies(t.Context(), snapshot)
+			require.True(t, errs.ErrEtcdTxnConflict.Equal(err))
+			require.Nil(t, snapshot.dependencies)
+			require.Equal(t, before, metadataReads)
+			plans, err := m.balanceTable(t.Context(), ids[0], true)
+			require.NoError(t, err)
+			require.Empty(t, plans)
+			require.NotEqual(t, balanceStable, m.balanceTables[snapshot.tableID].phase)
+			for _, id := range ids {
+				require.Equal(t, uint64(1), m.GetAffinityGroupState(id).LeaderStoreID)
+			}
+			// Once the independent affinity watcher catches up, the same
+			// metadata generation can be used safely.
+			require.NoError(t, m.SyncKeyRangesFromEtcd(rule))
+			require.NoError(t, m.captureBalanceDependencies(t.Context(), m.balanceSnapshot(ids[0])))
+			if cached {
+				require.Equal(t, before, metadataReads, "valid tables still share the global metadata comparison")
+			}
+		})
+	}
+}
+
+func TestBalanceDependenciesDoNotReuseChangedLabelRevision(t *testing.T) {
+	m := newBalanceRuntimeManager(t)
+	ids := seedBalanceGroups(t, m, []uint64{1})
+	m.SetBalanceActionBuilder(func(context.Context, *GroupState, GroupKeyRanges) (BalanceActionSet, bool) {
+		return BalanceActionSet{}, true
+	}, nil, nil)
+	snapshot := m.balanceSnapshot(ids[0])
+	require.NoError(t, m.captureBalanceDependencies(t.Context(), snapshot))
+	require.NotNil(t, snapshot.dependencies)
+	require.NoError(t, m.regionLabeler.DeleteLabelRule(GetLabelRuleID(ids[0])))
+	require.True(t, errs.ErrEtcdTxnConflict.Equal(m.captureBalanceDependencies(t.Context(), snapshot)))
+	// A fresh label revision must also reject the stale Manager ranges.
+	require.True(t, errs.ErrEtcdTxnConflict.Equal(m.captureBalanceDependencies(t.Context(), m.balanceSnapshot(ids[0]))))
+	m.SyncKeyRangesDeleteFromEtcd(GetLabelRuleID(ids[0]))
+	require.NoError(t, m.captureBalanceDependencies(t.Context(), m.balanceSnapshot(ids[0])))
+}
+
+func TestBalanceDependenciesIgnoreRangeOrder(t *testing.T) {
+	m := newBalanceRuntimeManager(t)
+	ranges := GroupKeyRanges{GroupID: "_tidb_pt_10_p1", KeyRanges: []keyutil.KeyRange{
+		{StartKey: []byte{0}, EndKey: []byte{1}}, {StartKey: []byte{2}, EndKey: []byte{3}},
+	}}
+	require.NoError(t, m.CreateAffinityGroups([]GroupKeyRanges{ranges}))
+	m.SetBalanceActionBuilder(func(context.Context, *GroupState, GroupKeyRanges) (BalanceActionSet, bool) {
+		return BalanceActionSet{}, true
+	}, nil, nil)
+	reordered := cloneBalanceRanges(ranges)
+	slices.Reverse(reordered.KeyRanges)
+	require.NoError(t, m.regionLabeler.SetLabelRule(MakeLabelRule(reordered)))
+	snapshot := m.balanceSnapshot(ranges.GroupID)
+	require.NoError(t, m.captureBalanceDependencies(t.Context(), snapshot))
+	require.Equal(t, ranges, snapshot.ranges[ranges.GroupID], "comparison must not reorder the planner's ranges")
 }
 
 func TestFixedGroupRestoresAvailabilityAfterLoad(t *testing.T) {
