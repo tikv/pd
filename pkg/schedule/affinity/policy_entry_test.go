@@ -97,3 +97,26 @@ func TestUpdateAffinityGroupPolicyRejectsStaleStorage(t *testing.T) {
 	require.Equal(t, BalancePolicyAuto, persisted.BalancePolicy)
 	require.Equal(t, uint64(2), persisted.LeaderStoreID)
 }
+
+func TestAdminPeersUpdatePreservesRemotePolicy(t *testing.T) {
+	manager := newBalanceRuntimeManager(t)
+	id := seedBalanceGroups(t, manager, []uint64{1})[0]
+	remote := manager.GetAffinityGroupState(id).Group
+	remote.BalancePolicy = BalancePolicyFixed
+	require.NoError(t, manager.storage.RunInTxn(t.Context(), func(txn kv.Txn) error {
+		return manager.storage.SaveAffinityGroup(txn, id, &remote)
+	}))
+	// Scheduling's policy write has not reached PD's local Manager.
+	require.Equal(t, BalancePolicyAuto, manager.GetAffinityGroupState(id).BalancePolicy)
+	updated, err := manager.UpdateAffinityGroupPeers(id, 2, []uint64{3, 1, 2})
+	require.NoError(t, err)
+	require.Equal(t, BalancePolicyFixed, updated.BalancePolicy)
+	require.Equal(t, BalancePolicyFixed, manager.GetAffinityGroupState(id).BalancePolicy)
+	value, err := manager.storage.LoadAffinityGroup(id)
+	require.NoError(t, err)
+	var persisted Group
+	require.NoError(t, json.Unmarshal([]byte(value), &persisted))
+	require.Equal(t, BalancePolicyFixed, persisted.BalancePolicy)
+	require.Equal(t, uint64(2), persisted.LeaderStoreID)
+	require.Equal(t, []uint64{1, 2, 3}, persisted.VoterStoreIDs)
+}

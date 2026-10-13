@@ -1371,6 +1371,7 @@ func (c *client) UpdateAffinityGroupPeers(ctx context.Context, groupID string, l
 }
 
 // RebalanceAffinityGroup previews or applies a complete table rebalance.
+// A failed apply returns any reported per-group progress alongside the error.
 func (c *client) RebalanceAffinityGroup(ctx context.Context, groupID string, apply bool) ([]AffinityBalancePlan, error) {
 	reqJSON, err := json.Marshal(RebalanceAffinityGroupRequest{Apply: apply})
 	if err != nil {
@@ -1387,9 +1388,14 @@ func (c *client) RebalanceAffinityGroup(ctx context.Context, groupID string, app
 	// caller's context instead of the default 30-second HTTP timeout, while
 	// preserving an explicitly configured HTTP client's timeout.
 	request.noClientTimeout = apply && c.inner.defaultHTTPClient
+	// A failed apply may already have committed targets. Replaying it would
+	// silently construct and execute another plan, including after network errors.
+	request.noRetry = apply
+	var partial AffinityBalanceApplyResult
+	request.errorResponse = &partial
 	err = c.request(ctx, request)
 	if err != nil {
-		return nil, err
+		return partial.Plans, err
 	}
 	return plans, nil
 }

@@ -393,6 +393,8 @@ func UpdateAffinityGroupPeers(c *gin.Context) {
 }
 
 // RebalanceAffinityGroup previews or applies a complete affinity rebalance for a table.
+// Planning has a 30-second limit and execution has a separate 30-minute limit.
+// An apply failure can return BalanceApplyResult with per-group progress.
 //
 //	@Tags		affinity-groups
 //	@Summary	Preview or apply a complete affinity rebalance for a table.
@@ -427,6 +429,10 @@ func RebalanceAffinityGroup(c *gin.Context) {
 	}
 
 	plans, err := manager.RebalanceAffinityGroup(c.Request.Context(), groupID, req.Apply)
+	if err != nil && len(plans) > 0 {
+		c.AbortWithStatusJSON(affinityErrorStatus(err), affinity.BalanceApplyResult{Plans: plans, Error: err.Error()})
+		return
+	}
 	if handleAffinityError(c, err) {
 		return
 	}
@@ -564,28 +570,32 @@ func handleAffinityError(c *gin.Context, err error) bool {
 	if err == nil {
 		return false
 	}
+	c.AbortWithStatusJSON(affinityErrorStatus(err), err.Error())
+	return true
+}
+
+func affinityErrorStatus(err error) int {
 	switch {
 	case errors.Is(err, affinity.ErrBalanceBusy), errors.Is(err, affinity.ErrBalanceConflict):
-		c.AbortWithStatusJSON(http.StatusConflict, err.Error())
+		return http.StatusConflict
 	case errors.Is(err, affinity.ErrBalanceNotReady):
-		c.AbortWithStatusJSON(http.StatusServiceUnavailable, err.Error())
+		return http.StatusServiceUnavailable
 	case errors.Is(err, context.DeadlineExceeded):
-		c.AbortWithStatusJSON(http.StatusGatewayTimeout, err.Error())
+		return http.StatusGatewayTimeout
 	case errs.ErrAffinityGroupNotFound.Equal(err):
-		c.AbortWithStatusJSON(http.StatusNotFound, err.Error())
+		return http.StatusNotFound
 	case errs.ErrAffinityGroupContent.Equal(err),
 		errs.ErrInvalidGroupID.Equal(err),
 		errs.ErrEmptyRequest.Equal(err),
 		errs.ErrAffinityGroupConflict.Equal(err),
 		errs.ErrInvalidKeyFormat.Equal(err):
-		c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
+		return http.StatusBadRequest
 	case errs.ErrAffinityGroupExist.Equal(err), errs.ErrEtcdTxnConflict.Equal(err):
-		c.AbortWithStatusJSON(http.StatusConflict, err.Error())
+		return http.StatusConflict
 	default:
 		// such as ErrAffinityInternal
-		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		return http.StatusInternalServerError
 	}
-	return true
 }
 
 // validateKeyRange checks if a key range is valid.

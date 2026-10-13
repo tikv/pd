@@ -22,13 +22,10 @@ import (
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
-	"github.com/pingcap/errors"
-
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
-	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
@@ -53,13 +50,6 @@ func (m *Manager) SetBalanceAdmission(check func() bool) {
 }
 
 func balanceConflict() error { return errs.ErrEtcdTxnConflict.FastGenByArgs() }
-
-func balanceBatchError(err error, committed int) error {
-	if committed == 0 {
-		return err
-	}
-	return errors.Annotatef(err, "affinity rebalance already committed %d groups", committed)
-}
 
 func canonicalJSON(value string) string {
 	var decoded any
@@ -197,55 +187,10 @@ func (m *Manager) commitBalancePlans(ctx context.Context, snapshot *balanceSnaps
 		return false, nil
 	}
 	changed := slices.DeleteFunc(slices.Clone(plans), func(plan BalancePlan) bool { return !plan.Changed })
-	const batchSize = etcdutil.MaxEtcdTxnOps - 8
-	if len(changed) > batchSize {
-		// A manual table plan may exceed etcd's transaction limit. Keep every
-		// batch fenced to the original authority, and recapture table inputs
-		// after our own writes. A concurrent edit aborts the remaining batches.
-		conditions := slices.Clone(snapshot.conditions)
-		expectedGroups := make(map[string]Group, len(snapshot.groups))
-		for _, group := range snapshot.groups {
-			expectedGroups[group.ID] = group.Group
-		}
-		current := snapshot
-		for start := 0; start < len(changed); start += batchSize {
-			end := min(start+batchSize, len(changed))
-			applied, err := m.commitBalancePlans(ctx, current, changed[start:end])
-			if err != nil {
-				return false, balanceBatchError(err, start)
-			}
-			if !applied {
-				return false, balanceBatchError(balanceConflict(), start)
-			}
-			for _, plan := range changed[start:end] {
-				group := expectedGroups[plan.GroupID]
-				group.LeaderStoreID, group.VoterStoreIDs = plan.LeaderStoreID, normalizeVoters(plan.VoterStoreIDs)
-				expectedGroups[plan.GroupID] = group
-			}
-			if end < len(changed) {
-				current = m.balanceSnapshot(snapshot.groups[0].ID)
-				if current == nil {
-					return false, balanceBatchError(balanceConflict(), end)
-				}
-				if err := m.captureBalanceDependencies(ctx, current); err != nil {
-					return false, balanceBatchError(err, end)
-				}
-				if len(current.groups) != len(expectedGroups) || current.fingerprint.stores != snapshot.fingerprint.stores ||
-					current.fingerprint.rules != snapshot.fingerprint.rules ||
-					current.dependencies[endpoint.AffinityMetadataRevisionKey()] != snapshot.dependencies[endpoint.AffinityMetadataRevisionKey()] {
-					return false, balanceBatchError(balanceConflict(), end)
-				}
-				for _, group := range current.groups {
-					expected := expectedGroups[group.ID]
-					if group.String() != expected.String() {
-						return false, balanceBatchError(balanceConflict(), end)
-					}
-				}
-				current.conditions = conditions
-			}
-		}
-		snapshot.applied = true
-		return true, nil
+	// Both automatic and manual callers submit one group and wait before the
+	// next target. Reject batches rather than introducing a second apply path.
+	if len(changed) != 1 {
+		return false, balanceConflict()
 	}
 	if !m.balanceSnapshotCurrent(snapshot) {
 		return false, nil
@@ -306,13 +251,14 @@ func (m *Manager) commitBalancePlans(ctx context.Context, snapshot *balanceSnaps
 		return false, err
 	}
 	for _, group := range updates {
-		if _, err := m.updateGroupPeers(group.ID, group.LeaderStoreID, group.VoterStoreIDs); err != nil {
+		if _, err := m.updateGroupTarget(group); err != nil {
 			return false, err
 		}
 	}
 	m.Lock()
 	if table := m.balanceTables[snapshot.tableID]; table != nil {
 		table.phase = balanceConverging
+		table.converging = &balanceConvergence{target: updates[0], ranges: cloneBalanceRanges(snapshot.ranges[updates[0].ID])}
 	}
 	m.Unlock()
 	snapshot.applied = true

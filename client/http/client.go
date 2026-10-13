@@ -157,7 +157,7 @@ func (ci *clientInner) requestWithRetry(
 				continue
 			}
 			statusCode, err = ci.doRequest(ctx, serverURL, reqInfo, headerOpts...)
-			if err == nil || noNeedRetryForRequest(reqInfo, statusCode) {
+			if err == nil || reqInfo.noRetry || noNeedRetryForRequest(reqInfo, statusCode) {
 				return err
 			}
 			log.Debug("[pd] http request url failed", append(logFields,
@@ -171,7 +171,7 @@ func (ci *clientInner) requestWithRetry(
 		}
 		return err
 	}
-	if reqInfo.bo == nil {
+	if reqInfo.bo == nil || reqInfo.noRetry {
 		return execFunc()
 	}
 	// Copy a new backoffer for each request.
@@ -263,6 +263,11 @@ func (ci *clientInner) doRequest(
 			// PD will return a JSON body containing the detailed error message
 			// when the status code is not `http.StatusOK` 200.
 			bs = bytes.TrimSpace(bs)
+			if reqInfo.errorResponse != nil {
+				if decodeErr := json.Unmarshal(bs, reqInfo.errorResponse); decodeErr != nil {
+					logFields = append(logFields, zap.NamedError("decode-error-response", decodeErr))
+				}
+			}
 			logFields = append(logFields, zap.ByteString("body", bs))
 		}
 

@@ -16,6 +16,7 @@ package http
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -221,4 +222,75 @@ func TestAffinityApplyUsesContextBeyondDefaultClientTimeout(t *testing.T) {
 	stop()
 	_, err = c.RebalanceAffinityGroup(cancelled, "_tidb_t_42", true)
 	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestAffinityApplyFailureIsNotReplayedAndRetainsProgress(t *testing.T) {
+	for _, status := range []int{http.StatusConflict, http.StatusServiceUnavailable, http.StatusGatewayTimeout} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			var requests atomic.Int32
+			handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				requests.Add(1)
+				w.WriteHeader(status)
+				_, _ = io.WriteString(w, `{"error":"plan changed","plans":[{"group_id":"p1","status":"applied"},{"group_id":"p2","status":"submitted","reason":"range changed"},{"group_id":"p3","status":"not_submitted"}]}`)
+			})
+			first, second := httptest.NewServer(handler), httptest.NewServer(handler)
+			defer first.Close()
+			defer second.Close()
+			c := newClientWithMockServiceDiscovery("affinity-apply-no-replay", []string{first.URL, second.URL})
+			defer c.Close()
+			bo := retry.InitialBackoffer(time.Millisecond, time.Millisecond, 100*time.Millisecond)
+			plans, err := c.WithBackoffer(bo).RebalanceAffinityGroup(t.Context(), "p1", true)
+			require.Error(t, err)
+			require.Equal(t, int32(1), requests.Load(), "neither failover nor backoff may replay apply")
+			require.Len(t, plans, 3)
+			require.Equal(t, "applied", plans[0].Status)
+			require.Equal(t, "submitted", plans[1].Status)
+			require.Equal(t, "range changed", plans[1].Reason)
+			require.Equal(t, "not_submitted", plans[2].Status)
+		})
+	}
+}
+
+func TestAffinityApplyNetworkFailureIsNotReplayed(t *testing.T) {
+	var requests atomic.Int32
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		connection, _, err := w.(http.Hijacker).Hijack()
+		assert.NoError(t, err)
+		if err == nil {
+			assert.NoError(t, connection.Close())
+		}
+	})
+	first, second := httptest.NewServer(handler), httptest.NewServer(handler)
+	defer first.Close()
+	defer second.Close()
+	c := newClientWithMockServiceDiscovery("affinity-apply-network-error", []string{first.URL, second.URL})
+	defer c.Close()
+	bo := retry.InitialBackoffer(time.Millisecond, time.Millisecond, 100*time.Millisecond)
+	_, err := c.WithBackoffer(bo).RebalanceAffinityGroup(t.Context(), "p1", true)
+	require.Error(t, err)
+	require.Equal(t, int32(1), requests.Load())
+}
+
+func TestAffinityPreviewCanRetry(t *testing.T) {
+	var requests atomic.Int32
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body RebalanceAffinityGroupRequest
+		assert.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.False(t, body.Apply)
+		if requests.Add(1) == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = io.WriteString(w, `"not ready"`)
+			return
+		}
+		_, _ = io.WriteString(w, `[]`)
+	})
+	first, second := httptest.NewServer(handler), httptest.NewServer(handler)
+	defer first.Close()
+	defer second.Close()
+	c := newClientWithMockServiceDiscovery("affinity-preview-retry", []string{first.URL, second.URL})
+	defer c.Close()
+	_, err := c.RebalanceAffinityGroup(t.Context(), "p1", false)
+	require.NoError(t, err)
+	require.Equal(t, int32(2), requests.Load())
 }

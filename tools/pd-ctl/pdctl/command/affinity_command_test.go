@@ -71,7 +71,7 @@ func (s *affinityRebalanceTestServer) handle(w http.ResponseWriter, r *http.Requ
 		s.rebalanceBodies = append(s.rebalanceBodies, request)
 		if s.responseStatus != 0 && s.responseStatus != http.StatusOK {
 			w.WriteHeader(s.responseStatus)
-			_, _ = io.WriteString(w, `{"error":"rebalance failed"}`)
+			_ = json.NewEncoder(w).Encode(pdhttp.AffinityBalanceApplyResult{Plans: s.plans, Error: "rebalance failed"})
 			return
 		}
 		_ = json.NewEncoder(w).Encode(s.plans)
@@ -172,7 +172,7 @@ func TestAffinityRebalanceApplyUsesServerPlan(t *testing.T) {
 		"_tidb_pt_42_p3": affinityGroup("_tidb_pt_42_p3", 1, 2, 3),
 	}
 	plans := []pdhttp.AffinityBalancePlan{
-		{GroupID: "_tidb_pt_42_p2", LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2, 3}, Changed: true},
+		{GroupID: "_tidb_pt_42_p2", LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2, 3}, Changed: true, Status: "applied"},
 	}
 	testServer, server := newAffinityRebalanceTestServer(t, groups, plans...)
 	client := newAffinityHTTPClient(t, server)
@@ -200,4 +200,30 @@ func TestAffinityRebalanceStaleApplyReturnsNoAppliedPlan(t *testing.T) {
 	require.Equal(t, "[]\n", output)
 	require.Equal(t, []string{"_tidb_t_42"}, testServer.rebalanceIDs)
 	require.Equal(t, []pdhttp.RebalanceAffinityGroupRequest{{Apply: true}}, testServer.rebalanceBodies)
+}
+
+func TestAffinityRebalancePartialFailureDisplaysExecutionStates(t *testing.T) {
+	plans := []pdhttp.AffinityBalancePlan{
+		{GroupID: "_tidb_pt_42_p1", Changed: true, Status: "applied"},
+		{GroupID: "_tidb_pt_42_p2", Changed: true, Status: "submitted", Reason: "range changed"},
+		{GroupID: "_tidb_pt_42_p3", Changed: true, Status: "not_submitted"},
+	}
+	testServer, server := newAffinityRebalanceTestServer(t, map[string]*pdhttp.AffinityGroupState{
+		"_tidb_pt_42_p1": affinityGroup("_tidb_pt_42_p1", 1, 2, 3),
+	}, plans...)
+	testServer.responseStatus = http.StatusConflict
+	output := executeAffinityRebalance(t, newAffinityHTTPClient(t, server), "--table-id", "42", "--apply", "--force")
+	require.Contains(t, output, "Failed to rebalance")
+	start := strings.Index(output, "\n[")
+	require.NotEqual(t, -1, start)
+	var results []affinityRebalanceResult
+	require.NoError(t, json.Unmarshal([]byte(output[start+1:]), &results))
+	require.Len(t, results, 3)
+	require.True(t, results[0].Applied)
+	require.False(t, results[1].Applied)
+	require.Equal(t, "submitted", results[1].Status)
+	require.Equal(t, "range changed", results[1].Reason)
+	require.False(t, results[2].Applied)
+	require.Equal(t, "not_submitted", results[2].Status)
+	require.Len(t, testServer.rebalanceIDs, 1)
 }

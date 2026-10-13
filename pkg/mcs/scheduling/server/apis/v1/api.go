@@ -1779,6 +1779,8 @@ func getAffinityGroup(c *gin.Context) {
 // @Failure  504  {string}  string                "Rebalance timed out."
 // @Failure  500  {string}  string                "Scheduling service failed to proceed the request."
 // @Router   /affinity-groups/{group_id}/rebalance [post]
+// Apply failures preserve per-group progress in affinity.BalanceApplyResult.
+// Planning is limited to 30 seconds; sequential execution to 30 minutes.
 func rebalanceAffinityGroup(c *gin.Context) {
 	manager, ok := getAffinityManager(c)
 	if !ok {
@@ -1798,19 +1800,23 @@ func rebalanceAffinityGroup(c *gin.Context) {
 
 	plans, err := manager.RebalanceAffinityGroup(c.Request.Context(), groupID, req.Apply)
 	if err != nil {
+		var body any = err.Error()
+		if len(plans) > 0 {
+			body = affinity.BalanceApplyResult{Plans: plans, Error: err.Error()}
+		}
 		switch {
 		case errors.Is(err, affinity.ErrBalanceBusy), errors.Is(err, affinity.ErrBalanceConflict), errs.ErrEtcdTxnConflict.Equal(err):
-			c.AbortWithStatusJSON(http.StatusConflict, err.Error())
+			c.AbortWithStatusJSON(http.StatusConflict, body)
 		case errors.Is(err, affinity.ErrBalanceNotReady):
-			c.AbortWithStatusJSON(http.StatusServiceUnavailable, err.Error())
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, body)
 		case errors.Is(err, context.DeadlineExceeded):
-			c.AbortWithStatusJSON(http.StatusGatewayTimeout, err.Error())
+			c.AbortWithStatusJSON(http.StatusGatewayTimeout, body)
 		case errs.ErrInvalidGroupID.Equal(err), errs.ErrAffinityGroupContent.Equal(err), errs.ErrEmptyRequest.Equal(err):
-			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
+			c.AbortWithStatusJSON(http.StatusBadRequest, body)
 		case errs.ErrAffinityGroupNotFound.Equal(err):
-			c.AbortWithStatusJSON(http.StatusNotFound, err.Error())
+			c.AbortWithStatusJSON(http.StatusNotFound, body)
 		default:
-			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+			c.AbortWithStatusJSON(http.StatusInternalServerError, body)
 		}
 		return
 	}

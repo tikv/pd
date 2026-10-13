@@ -821,6 +821,12 @@ type RebalanceAffinityGroupRequest struct {
 	Apply bool `json:"apply"`
 }
 
+// AffinityBalanceApplyResult retains execution progress after a failed apply.
+type AffinityBalanceApplyResult struct {
+	Plans []AffinityBalancePlan `json:"plans"`
+	Error string                `json:"error"`
+}
+
 // AffinityBalancePlan describes the target peer distribution for an affinity group.
 type AffinityBalancePlan struct {
 	GroupID          string                `json:"group_id"`

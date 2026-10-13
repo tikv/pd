@@ -16,7 +16,6 @@ package affinity
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
@@ -128,29 +127,23 @@ func TestBalanceCommitDoesNotBlockRegionObservation(t *testing.T) {
 	<-done
 }
 
-func TestBalanceCommitLargeTableUsesGuardedBatches(t *testing.T) {
+func TestBalanceCommitRejectsMultipleGroups(t *testing.T) {
 	m := newBalanceRuntimeManager(t)
-	changes := make([]GroupKeyRanges, 130)
-	for i := range changes {
-		changes[i].GroupID = fmt.Sprintf("_tidb_pt_30_p%03d", i)
-	}
-	require.NoError(t, m.CreateAffinityGroups(changes))
-	plans := make([]BalancePlan, len(changes))
-	for i, change := range changes {
-		_, err := m.UpdateAffinityGroupPeers(change.GroupID, 1, []uint64{1, 2, 3})
-		require.NoError(t, err)
-		plans[i] = BalancePlan{GroupID: change.GroupID, LeaderStoreID: uint64(2 + i%2), VoterStoreIDs: []uint64{1, 2, 3}, Changed: true}
+	ids := seedBalanceGroups(t, m, []uint64{1, 1})
+	plans := make([]BalancePlan, len(ids))
+	for i, id := range ids {
+		plans[i] = BalancePlan{GroupID: id, LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2, 3}, Changed: true}
 	}
 	m.SetBalanceActionBuilder(func(context.Context, *GroupState, GroupKeyRanges) (BalanceActionSet, bool) {
 		return BalanceActionSet{}, true
 	}, nil, nil)
-	snapshot := m.balanceSnapshot(changes[0].GroupID)
+	snapshot := m.balanceSnapshot(ids[0])
 	require.NoError(t, m.captureBalanceDependencies(t.Context(), snapshot))
 	applied, err := m.commitBalancePlans(t.Context(), snapshot, plans)
-	require.NoError(t, err)
-	require.True(t, applied)
+	require.Error(t, err)
+	require.False(t, applied)
 	for _, plan := range plans {
-		require.Equal(t, plan.LeaderStoreID, m.GetAffinityGroupState(plan.GroupID).LeaderStoreID)
+		require.Equal(t, uint64(1), m.GetAffinityGroupState(plan.GroupID).LeaderStoreID)
 	}
 }
 
@@ -183,6 +176,7 @@ func TestBalanceHeartbeatRefreshesMoveBytesWithoutReplanning(t *testing.T) {
 	table.phase = balanceStable
 	table.actions[ids[0]] = BalanceActionSet{MoveBytes: 10 * 1024 * 1024}
 	table.regionBytes[ids[0]] = map[uint64]uint64{1: 10 * 1024 * 1024}
+	table.moveBytes[ids[0]] = 10 * 1024 * 1024
 	version := table.version
 	m.Unlock()
 	m.ObserveBalanceRegion(region.Clone(core.SetApproximateSize(100)))

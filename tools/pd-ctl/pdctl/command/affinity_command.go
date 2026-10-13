@@ -114,7 +114,9 @@ func affinityRebalanceCommandFunc(cmd *cobra.Command, _ []string) {
 	plans, err := PDCli.RebalanceAffinityGroup(cmd.Context(), tableGroups[0].ID, apply)
 	if err != nil {
 		cmd.Printf("Failed to rebalance affinity groups: %v\n", err)
-		return
+		if len(plans) == 0 {
+			return
+		}
 	}
 	byID := groups
 	result := make([]affinityRebalanceResult, 0, len(plans))
@@ -127,7 +129,7 @@ func affinityRebalanceCommandFunc(cmd *cobra.Command, _ []string) {
 			OldVoters:   affinityGroupVoters(old),
 			NewVoters:   append([]uint64(nil), plan.VoterStoreIDs...),
 			Changed:     plan.Changed,
-			Applied:     apply && plan.Changed,
+			Applied:     plan.Status == "applied",
 			BeforeScore: plan.BeforeScore,
 			AfterScore:  plan.AfterScore,
 			MoveBytes:   plan.MoveBytes,

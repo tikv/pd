@@ -26,6 +26,7 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	sche "github.com/tikv/pd/pkg/schedule/core"
@@ -33,7 +34,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
-	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
@@ -101,118 +101,6 @@ func TestAffinityBalanceLeaderConvergence(t *testing.T) {
 	tc.PutRegion(region.Clone(core.WithLeader(peer)))
 	checker.Check(tc.GetRegion(1))
 	require.Equal(t, affinity.PhaseStable, manager.GetAffinityGroupState(target.ID).Phase)
-}
-
-func TestAffinityManualRebalanceTableWithFixedRepresentative(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	opt := newAffinityTestOptions()
-	tc := mockcluster.NewCluster(ctx, opt)
-	for id := uint64(1); id <= 3; id++ {
-		tc.AddRegionStore(id, 10)
-		tc.SetStoreUp(id)
-	}
-	manager := tc.GetAffinityManager()
-	checker := newTestAffinityChecker(ctx, tc, opt)
-	ids := []string{"_tidb_pt_200_p1", "_tidb_pt_200_p2", "_tidb_pt_200_p3"}
-	for i, id := range ids {
-		start, end := []byte{byte(i + 1)}, []byte{byte(i + 2)}
-		require.NoError(t, createAffinityGroupForTest(manager, &affinity.Group{
-			ID: id, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3},
-		}, start, end))
-		tc.AddLeaderRegion(uint64(i+1), 1, 2, 3)
-		tc.PutRegion(tc.GetRegion(uint64(i+1)).Clone(core.WithStartKey(start), core.WithEndKey(end)))
-	}
-	for i := range ids {
-		group, aligned := manager.GetAndCacheRegionAffinityGroupState(tc.GetRegion(uint64(i + 1)))
-		require.True(t, aligned)
-		if i == 0 {
-			fixed := group.Group
-			fixed.BalancePolicy = affinity.BalancePolicyFixed
-			require.NoError(t, tc.GetStorage().RunInTxn(ctx, func(txn kv.Txn) error {
-				return tc.GetStorage().SaveAffinityGroup(txn, fixed.ID, &fixed)
-			}))
-			manager.SyncGroupFromEtcd(&fixed)
-		}
-	}
-	for i := range ids {
-		_, aligned := manager.GetAndCacheRegionAffinityGroupState(tc.GetRegion(uint64(i + 1)))
-		require.True(t, aligned)
-		group := manager.GetAffinityGroupState(ids[i])
-		require.Equal(t, affinity.PhaseStable, group.Phase)
-	}
-
-	before := make(map[string]affinity.Group, len(ids))
-	for _, id := range ids {
-		before[id] = manager.GetAffinityGroupState(id).Group
-	}
-	preview, err := manager.RebalanceAffinityGroup(ctx, ids[0], false)
-	require.NoError(t, err)
-	require.Len(t, preview, len(ids))
-	changed := 0
-	for _, plan := range preview {
-		require.Equal(t, before[plan.GroupID].ID, plan.GroupID)
-		if plan.Changed {
-			changed++
-		}
-		if plan.GroupID == ids[0] {
-			require.False(t, plan.Changed)
-			require.Equal(t, before[plan.GroupID].LeaderStoreID, plan.LeaderStoreID)
-			require.Equal(t, before[plan.GroupID].VoterStoreIDs, plan.VoterStoreIDs)
-		}
-	}
-	require.NotZero(t, changed)
-	for _, id := range ids {
-		require.Equal(t, before[id], manager.GetAffinityGroupState(id).Group)
-	}
-
-	applyCtx, stopApply := context.WithTimeout(ctx, 10*time.Second)
-	defer stopApply()
-	type applyResult struct {
-		plans []affinity.BalancePlan
-		err   error
-	}
-	result := make(chan applyResult, 1)
-	go func() {
-		plans, err := manager.RebalanceAffinityGroup(applyCtx, ids[0], true)
-		result <- applyResult{plans: plans, err: err}
-	}()
-	// Deliver the operator's resulting heartbeats one group at a time. The
-	// request must wait for these before publishing the next group's target.
-	for planIndex, plan := range preview {
-		if !plan.Changed {
-			continue
-		}
-		require.Eventually(t, func() bool {
-			return manager.GetAffinityGroupState(plan.GroupID).LeaderStoreID == plan.LeaderStoreID
-		}, 3*time.Second, 10*time.Millisecond)
-		for _, later := range preview[planIndex+1:] {
-			require.Equal(t, before[later.GroupID], manager.GetAffinityGroupState(later.GroupID).Group,
-				"the next target must wait for the current group to converge")
-		}
-		index := slices.Index(ids, plan.GroupID)
-		region := tc.GetRegion(uint64(index + 1))
-		ops := checker.Check(region)
-		require.NotEmpty(t, ops)
-		tc.PutRegion(region.Clone(core.WithLeader(region.GetStorePeer(plan.LeaderStoreID))))
-		checker.Check(tc.GetRegion(region.GetID()))
-	}
-	completed := <-result
-	require.NoError(t, completed.err)
-	applied := completed.plans
-	require.Len(t, applied, len(preview))
-	for i := range preview {
-		require.Equal(t, preview[i].GroupID, applied[i].GroupID)
-		require.Equal(t, preview[i].LeaderStoreID, applied[i].LeaderStoreID)
-		require.Equal(t, preview[i].VoterStoreIDs, applied[i].VoterStoreIDs)
-	}
-	for _, plan := range applied {
-		state := manager.GetAffinityGroupState(plan.GroupID)
-		require.Equal(t, plan.LeaderStoreID, state.LeaderStoreID)
-		require.Equal(t, plan.VoterStoreIDs, state.VoterStoreIDs)
-	}
-	require.Equal(t, before[ids[0]].LeaderStoreID, manager.GetAffinityGroupState(ids[0]).LeaderStoreID)
-	require.Equal(t, before[ids[0]].VoterStoreIDs, manager.GetAffinityGroupState(ids[0]).VoterStoreIDs)
 }
 
 func TestAffinityBalanceRequiresCompleteHealthyCoverage(t *testing.T) {
@@ -322,26 +210,32 @@ func TestAffinityBalanceProgressBudgetBoundsRegionScans(t *testing.T) {
 	ranges := affinity.GroupKeyRanges{GroupID: group.ID,
 		KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("b")}, {StartKey: []byte("c"), EndKey: []byte("z")}}}
 	storeIDs := checker.balanceStoreIDs()
-	var cursor any
-	var result affinity.BalanceActionBuildResult
 	const budget = 1
-	for range 128 {
-		previousScans := countingCluster.scanCalls
-		result = checker.buildBalanceActionsProgress(t.Context(), manager.GetAffinityGroupState(group.ID), ranges,
-			storeIDs, affinity.BalanceBuildLeaders, cursor, budget)
-		require.LessOrEqual(t, countingCluster.scanCalls-previousScans, budget,
-			"one page must not hide multiple ScanRegions calls inside the cursor")
-		require.LessOrEqual(t, result.Checks, budget)
-		require.True(t, result.Ready)
-		if result.Complete {
-			break
+	for _, mode := range []affinity.BalanceActionMode{affinity.BalanceBuildLeaders, affinity.BalanceValidateTarget} {
+		var cursor any
+		var result affinity.BalanceActionBuildResult
+		scanCalls := countingCluster.scanCalls
+		target := *group
+		target.LeaderStoreID = 2
+		for range 128 {
+			previousScans := countingCluster.scanCalls
+			result = checker.buildVirtualBalanceActionsProgress(t.Context(), manager.GetAffinityGroupState(group.ID), ranges,
+				&target, storeIDs, mode, cursor, budget)
+			require.LessOrEqual(t, countingCluster.scanCalls-previousScans, budget,
+				"one page must not hide multiple ScanRegions calls inside the cursor")
+			require.LessOrEqual(t, result.Checks, budget)
+			require.True(t, result.Ready)
+			require.False(t, result.InvalidTarget)
+			if result.Complete {
+				break
+			}
+			require.NotNil(t, result.Cursor)
+			require.Empty(t, result.Actions.LeaderTargets)
+			cursor = result.Cursor
 		}
-		require.NotNil(t, result.Cursor)
-		require.Empty(t, result.Actions.LeaderTargets)
-		cursor = result.Cursor
+		require.True(t, result.Complete)
+		require.GreaterOrEqual(t, countingCluster.scanCalls-scanCalls, 3, "the overlapping ranges revisit one Region before the next")
 	}
-	require.True(t, result.Complete)
-	require.GreaterOrEqual(t, countingCluster.scanCalls, 3, "the overlapping ranges revisit one Region before the next")
 }
 
 func TestAffinityBalanceAdmissionBlocksBuild(t *testing.T) {
@@ -434,9 +328,10 @@ func TestAffinityBalanceRoleSwitchAndStoreFilters(t *testing.T) {
 	tc.SetStoreBusy(2, true)
 	blockedVoterSource := checker.buildBalanceActionsProgress(t.Context(), state, ranges, stores,
 		affinity.BalanceBuildVoters, nil, 0)
-	require.True(t, blockedVoterSource.BlockTable)
-	require.False(t, blockedVoterSource.Ready)
-	require.Empty(t, blockedVoterSource.Actions.VoterReplacements)
+	require.True(t, blockedVoterSource.Ready)
+	require.True(t, blockedVoterSource.Complete)
+	require.True(t, blockedVoterSource.TemporaryBlocked)
+	require.False(t, blockedVoterSource.BlockTable)
 	require.NotContains(t, blockedVoterSource.Actions.VoterReplacements, uint64(2),
 		"busy source stores are excluded from voter replacements")
 
@@ -450,6 +345,100 @@ func TestAffinityBalanceRoleSwitchAndStoreFilters(t *testing.T) {
 	recovered := checker.buildBalanceActionsProgress(t.Context(), state, ranges, checker.balanceStoreIDs(),
 		affinity.BalanceBuildVoters, nil, 0)
 	require.Contains(t, recovered.Actions.VoterReplacements[1], uint64(4), "a recovered destination can be considered again")
+}
+
+func TestAffinityBalanceTemporaryLeaderLimitKeepsOtherCandidates(t *testing.T) {
+	opt := newAffinityTestOptions()
+	tc := mockcluster.NewCluster(t.Context(), opt)
+	for id := uint64(1); id <= 4; id++ {
+		tc.AddRegionStore(id, 10)
+		tc.SetStoreUp(id)
+	}
+	manager := tc.GetAffinityManager()
+	checker := newTestAffinityChecker(t.Context(), tc, opt)
+	group := &affinity.Group{ID: "temporary-candidate", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}}
+	require.NoError(t, createAffinityGroupForTest(manager, group, []byte("a"), []byte("c")))
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	tc.PutRegion(tc.GetRegion(1).Clone(core.WithStartKey([]byte("a")), core.WithEndKey([]byte("c")), core.SetApproximateSize(10)))
+	manager.GetAndCacheRegionAffinityGroupState(tc.GetRegion(1))
+	state := manager.GetAffinityGroupState(group.ID)
+	ranges := affinity.GroupKeyRanges{GroupID: group.ID, KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("c")}}}
+	stores := checker.balanceStoreIDs()
+	page := checker.buildBalanceActionsProgress(t.Context(), state, ranges, stores, affinity.BalanceBuildLeaders, nil, 1)
+	require.NotNil(t, page.Cursor)
+	exhaust := func(id uint64, typ storelimit.Type) {
+		tc.SetStoreLimit(id, typ, 0.00006)
+		tc.ResetStoreLimit(id, typ, 0.000001)
+		require.True(t, tc.GetStore(id).GetStoreLimit().Take(storelimit.RegionInfluence[typ], typ, constant.Medium))
+		require.False(t, tc.GetStore(id).IsAvailable(typ, constant.Medium))
+	}
+	exhaust(2, storelimit.TransferLeaderIn)
+	cursor := page.Cursor
+	for range 50 {
+		page = checker.buildBalanceActionsProgress(t.Context(), state, ranges, stores, affinity.BalanceBuildLeaders, cursor, 1)
+		require.True(t, page.Ready)
+		if page.Complete {
+			break
+		}
+		cursor = page.Cursor
+	}
+	require.True(t, page.Complete)
+	require.True(t, page.TemporaryBlocked)
+	require.NotContains(t, page.Actions.LeaderTargets, uint64(2))
+	require.Contains(t, page.Actions.LeaderTargets, uint64(3))
+	ready, _ := checker.validateBalanceAction(t.Context(), state, ranges,
+		affinity.BalancePlan{LeaderStoreID: 2, VoterStoreIDs: group.VoterStoreIDs})
+	require.False(t, ready, "cached actions must recheck the receiving store's limit")
+	ready, legal := checker.validateBalanceAction(t.Context(), state, ranges,
+		affinity.BalancePlan{LeaderStoreID: 3, VoterStoreIDs: group.VoterStoreIDs})
+	require.True(t, ready)
+	require.True(t, legal)
+	tc.SetStoreLimit(2, storelimit.TransferLeaderIn, storelimit.Unlimited)
+	tc.ResetStoreLimit(2, storelimit.TransferLeaderIn, storelimit.Unlimited/time.Minute.Seconds())
+	page = checker.buildBalanceActionsProgress(t.Context(), state, ranges, stores, affinity.BalanceBuildLeaders, nil, 0)
+	require.True(t, page.Complete)
+	require.False(t, page.TemporaryBlocked)
+	require.Contains(t, page.Actions.LeaderTargets, uint64(2))
+	plan := affinity.BalancePlan{LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 4}}
+	exhaust(4, storelimit.AddPeer)
+	ready, _ = checker.validateBalanceAction(t.Context(), state, ranges, plan)
+	require.False(t, ready, "voter targets also need a fresh execution check")
+}
+
+func TestAffinityBalancePagesReturnOnlyNewRegionBytes(t *testing.T) {
+	opt := newAffinityTestOptions()
+	tc := mockcluster.NewCluster(t.Context(), opt)
+	for id := uint64(1); id <= 3; id++ {
+		tc.AddRegionStore(id, 10)
+		tc.SetStoreUp(id)
+	}
+	manager := tc.GetAffinityManager()
+	checker := newTestAffinityChecker(t.Context(), tc, opt)
+	group := &affinity.Group{ID: "page-bytes", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}}
+	require.NoError(t, createAffinityGroupForTest(manager, group, []byte("a"), []byte("c")))
+	for i := uint64(1); i <= 2; i++ {
+		tc.AddLeaderRegion(i, 1, 2, 3)
+		tc.PutRegion(tc.GetRegion(i).Clone(core.WithStartKey([]byte{byte('a' + i - 1)}),
+			core.WithEndKey([]byte{byte('a' + i)}), core.SetApproximateSize(10)))
+		manager.GetAndCacheRegionAffinityGroupState(tc.GetRegion(i))
+	}
+	state := manager.GetAffinityGroupState(group.ID)
+	ranges := affinity.GroupKeyRanges{GroupID: group.ID, KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("c")}}}
+	var cursor any
+	observed := 0
+	var result affinity.BalanceActionBuildResult
+	for range 100 {
+		result = checker.buildBalanceActionsProgress(t.Context(), state, ranges, checker.balanceStoreIDs(), affinity.BalanceBuildLeaders, cursor, 1)
+		require.True(t, result.Ready)
+		observed += len(result.RegionBytes)
+		if result.Complete {
+			break
+		}
+		cursor = result.Cursor
+	}
+	require.True(t, result.Complete)
+	require.Equal(t, 2, observed, "each Region size should be reported once, regardless of page count")
+	require.Equal(t, uint64(20*1024*1024), result.Actions.MoveBytes)
 }
 
 func TestAffinityBalanceTemporaryBestLocationBlocksTable(t *testing.T) {

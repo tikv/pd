@@ -112,6 +112,8 @@ type requestInfo struct {
 	bo              *retry.Backoffer
 	targetURL       string
 	noClientTimeout bool
+	noRetry         bool
+	errorResponse   any
 }
 
 // newRequestInfo creates a new request info.

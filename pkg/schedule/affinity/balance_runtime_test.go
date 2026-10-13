@@ -138,23 +138,6 @@ func TestBalanceRuntimeRejectsChangedTableSnapshot(t *testing.T) {
 	}
 }
 
-func TestBalanceRuntimeDoesNotReportUnappliedPlan(t *testing.T) {
-	manager := newBalanceRuntimeManager(t)
-	ids := seedBalanceGroups(t, manager, []uint64{1, 1, 1})
-	manager.SetBalanceActionBuilder(func(_ context.Context, group *GroupState, _ GroupKeyRanges) (BalanceActionSet, bool) {
-		if group.ID == ids[0] {
-			_, err := manager.UpdateAffinityGroupPeers(ids[0], 2, group.VoterStoreIDs)
-			require.NoError(t, err)
-		}
-		return BalanceActionSet{LeaderTargets: group.VoterStoreIDs}, true
-	}, nil, nil)
-
-	plans, err := manager.balanceTable(t.Context(), ids[0], true)
-	require.NoError(t, err)
-	require.Empty(t, plans, "a stale plan must not be reported as applied")
-	require.Equal(t, uint64(2), manager.GetAffinityGroupState(ids[0]).LeaderStoreID)
-}
-
 func TestBalanceRuntimeBuildBudgetRetainsProgress(t *testing.T) {
 	manager := newBalanceRuntimeManager(t)
 	ids := seedBalanceGroups(t, manager, []uint64{1, 2, 3})
@@ -311,4 +294,162 @@ func TestBalanceTableLockReleasedAfterLastUser(t *testing.T) {
 	require.Contains(t, manager.balanceLocks, "table")
 	manager.releaseBalanceTableLock("table", second)
 	require.Empty(t, manager.balanceLocks)
+}
+
+func TestBalanceBuildFailureDropsMutatedCursor(t *testing.T) {
+	for _, block := range []bool{false, true} {
+		t.Run(map[bool]string{false: "unready", true: "blocked"}[block], func(t *testing.T) {
+			manager := newBalanceRuntimeManager(t)
+			ids := seedBalanceGroups(t, manager, []uint64{1})
+			manager.SetBalanceActionBuilders(nil, func(_ context.Context, _ *GroupState, _ GroupKeyRanges, _ []uint64,
+				_ BalanceActionMode, cursor any, _ int) BalanceActionBuildResult {
+				if cursor == nil {
+					return BalanceActionBuildResult{Cursor: new(int), Ready: true, Checks: 1}
+				}
+				*cursor.(*int)++
+				return BalanceActionBuildResult{BlockTable: block, Checks: 1}
+			}, nil, nil, nil)
+			snapshot := manager.balanceSnapshot(ids[0])
+			complete, _, _ := manager.buildBalanceActionStage(t.Context(), snapshot, snapshot.groups, 1)
+			require.False(t, complete)
+			require.Contains(t, manager.balanceTables[snapshot.tableID].cursors, ids[0])
+			manager.buildBalanceActionStage(t.Context(), snapshot, snapshot.groups, 1)
+			state := manager.balanceTables[snapshot.tableID]
+			require.NotContains(t, state.cursors, ids[0])
+			require.NotContains(t, state.leaderTargets, ids[0])
+			require.NotContains(t, state.actions, ids[0])
+		})
+	}
+}
+
+func TestBalanceUnreadyWorkConsumesSharedBudget(t *testing.T) {
+	manager := newBalanceRuntimeManager(t)
+	ids := seedBalanceGroups(t, manager, []uint64{1, 1, 1})
+	calls := 0
+	manager.SetBalanceActionBuilders(nil, func(_ context.Context, _ *GroupState, _ GroupKeyRanges, _ []uint64,
+		_ BalanceActionMode, _ any, budget int) BalanceActionBuildResult {
+		calls++
+		return BalanceActionBuildResult{Checks: budget}
+	}, nil, nil, nil)
+	snapshot := manager.balanceSnapshot(ids[0])
+	complete, remaining, _ := manager.buildBalanceActionStage(t.Context(), snapshot, snapshot.groups, 2)
+	require.False(t, complete)
+	require.Zero(t, remaining)
+	require.Equal(t, 1, calls)
+}
+
+func TestBalanceSelectedTargetValidationSharesPageBudget(t *testing.T) {
+	manager := newBalanceRuntimeManager(t)
+	ids := seedBalanceGroups(t, manager, []uint64{1, 1})
+	validationCalls := 0
+	manager.SetBalanceActionBuilders(nil, func(_ context.Context, group *GroupState, _ GroupKeyRanges, _ []uint64,
+		_ BalanceActionMode, _ any, _ int) BalanceActionBuildResult {
+		return BalanceActionBuildResult{Ready: true, Complete: true, Checks: 1,
+			Actions: BalanceActionSet{LeaderTargets: group.VoterStoreIDs}}
+	}, func(_ context.Context, _ *GroupState, _ GroupKeyRanges, _ *Group, _ []uint64,
+		mode BalanceActionMode, cursor any, budget int) BalanceActionBuildResult {
+		require.Equal(t, BalanceValidateTarget, mode)
+		require.Equal(t, 1, budget)
+		validationCalls++
+		visited, _ := cursor.(int)
+		visited++
+		return BalanceActionBuildResult{Ready: true, Complete: visited == 3, Cursor: visited, Checks: 1}
+	}, nil, func(context.Context, *GroupState, GroupKeyRanges, BalancePlan) (bool, bool) {
+		t.Fatal("paged validation must not fall back to the full-group validator")
+		return false, false
+	})
+	var plans []BalancePlan
+	for range 10 {
+		before := validationCalls
+		var err error
+		var incomplete bool
+		plans, err, incomplete = manager.balanceTableWithProgress(t.Context(), ids[0], true, 1)
+		require.NoError(t, err)
+		require.LessOrEqual(t, validationCalls-before, 1)
+		if findChangedPlan(plans) != nil {
+			require.False(t, incomplete)
+			break
+		}
+		require.True(t, incomplete)
+		for _, id := range ids {
+			require.Equal(t, uint64(1), manager.GetAffinityGroupState(id).LeaderStoreID, "partial validation must not submit a target")
+		}
+	}
+	require.NotNil(t, findChangedPlan(plans))
+	require.Equal(t, 3, validationCalls)
+}
+
+func TestTemporaryCandidateDoesNotPreventOtherGroupImprovement(t *testing.T) {
+	manager := newBalanceRuntimeManager(t)
+	ids := seedBalanceGroups(t, manager, []uint64{1, 1})
+	manager.SetBalanceActionBuilders(nil, func(_ context.Context, group *GroupState, _ GroupKeyRanges, _ []uint64,
+		_ BalanceActionMode, _ any, _ int) BalanceActionBuildResult {
+		if group.ID == ids[0] {
+			return BalanceActionBuildResult{Ready: true, Complete: true, TemporaryBlocked: true}
+		}
+		return BalanceActionBuildResult{Ready: true, Complete: true, Actions: BalanceActionSet{LeaderTargets: []uint64{2}}}
+	}, nil, nil, nil)
+	plans, err := manager.balanceTable(t.Context(), ids[0], true)
+	require.NoError(t, err)
+	require.Equal(t, ids[1], changedPlan(plans).GroupID)
+	state := manager.balanceTables[TableGroupPrefix(ids[0])]
+	require.NotContains(t, state.leaderTargets, ids[0], "temporary omissions must be rebuilt after convergence")
+}
+
+func TestBalanceWaitsForFullCoverageBeforeCapturingDependencies(t *testing.T) {
+	manager := newBalanceRuntimeManager(t)
+	ids := seedBalanceGroups(t, manager, []uint64{1, 1, 1})
+	fullyConverged := false
+	metadataReads := 0
+	manager.SetBalanceCommitGuard(nil, func() map[string]string {
+		metadataReads++
+		return nil
+	})
+	manager.SetBalanceActionBuilders(nil, func(_ context.Context, group *GroupState, _ GroupKeyRanges, _ []uint64,
+		mode BalanceActionMode, _ any, _ int) BalanceActionBuildResult {
+		if mode == BalanceCheckConvergence {
+			return BalanceActionBuildResult{Ready: fullyConverged, Complete: fullyConverged, Checks: 1}
+		}
+		return BalanceActionBuildResult{Ready: true, Complete: true, Checks: 1, Actions: BalanceActionSet{LeaderTargets: group.VoterStoreIDs}}
+	}, nil, nil, nil)
+	plans, err := manager.balanceTable(t.Context(), ids[0], true)
+	require.NoError(t, err)
+	plan := changedPlan(plans)
+	require.NotNil(t, plan)
+	region := manager.groups[plan.GroupID].Regions[1].region
+	heartbeat := region.Clone(core.WithLeader(region.GetStorePeer(plan.LeaderStoreID)))
+	manager.ObserveBalanceRegion(heartbeat)
+	manager.GetAndCacheRegionAffinityGroupState(heartbeat)
+	require.Equal(t, PhaseStable, manager.GetAffinityGroupState(plan.GroupID).Phase)
+	require.NotNil(t, manager.balanceTables[TableGroupPrefix(ids[0])].converging)
+	before := metadataReads
+	plans, err = manager.balanceTable(t.Context(), ids[0], true)
+	require.NoError(t, err)
+	require.Empty(t, plans)
+	require.Equal(t, before, metadataReads, "convergence waiting must not scan global rule metadata")
+	fullyConverged = true
+	plans, err = manager.balanceTable(t.Context(), ids[0], true)
+	require.NoError(t, err)
+	require.Equal(t, 1, changedPlans(plans))
+}
+
+func TestBalancePageBytesAccumulateIncrementally(t *testing.T) {
+	manager := newBalanceRuntimeManager(t)
+	ids := seedBalanceGroups(t, manager, []uint64{1})
+	manager.SetBalanceActionBuilder(func(context.Context, *GroupState, GroupKeyRanges) (BalanceActionSet, bool) {
+		return BalanceActionSet{}, true
+	}, nil, nil)
+	snapshot := manager.balanceSnapshot(ids[0])
+	for _, page := range []BalanceActionBuildResult{
+		{RegionBytes: map[uint64]uint64{10: 100}},
+		{RegionBytes: map[uint64]uint64{20: 200}},
+		{RegionBytes: map[uint64]uint64{10: 150}},
+		{Complete: true},
+	} {
+		_, ok := manager.cacheBalanceBuildPage(snapshot, ids[0], page)
+		require.True(t, ok)
+	}
+	state := manager.balanceTables[snapshot.tableID]
+	require.Equal(t, uint64(350), state.actions[ids[0]].MoveBytes)
+	require.Equal(t, uint64(350), state.moveBytes[ids[0]])
 }
