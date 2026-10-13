@@ -102,15 +102,16 @@ const (
 )
 
 type requestInfo struct {
-	callerID    string
-	name        string
-	uri         string
-	method      string
-	body        []byte
-	res         any
-	respHandler respHandleFunc
-	bo          *retry.Backoffer
-	targetURL   string
+	callerID        string
+	name            string
+	uri             string
+	method          string
+	body            []byte
+	res             any
+	respHandler     respHandleFunc
+	bo              *retry.Backoffer
+	targetURL       string
+	noClientTimeout bool
 }
 
 // newRequestInfo creates a new request info.

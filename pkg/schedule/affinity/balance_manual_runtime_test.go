@@ -141,7 +141,7 @@ func TestManualRebalanceCommitsAndWaitsForEachGroup(t *testing.T) {
 func TestManualNoImprovementDoesNotCacheAutomaticStable(t *testing.T) {
 	manager := newBalanceRuntimeManager(t)
 	ids := seedManualBalanceGroups(t, manager, []uint64{1, 1, 1, 1, 2, 2})
-	manager.SetBalanceActionBuilders(func(_ context.Context, group *GroupState, _ GroupKeyRanges) (BalanceActionSet, bool) {
+	manager.SetBalanceActionBuilders(func(_ context.Context, _ *GroupState, _ GroupKeyRanges) (BalanceActionSet, bool) {
 		return BalanceActionSet{}, true
 	}, nil, func(_ context.Context, _ *GroupState, _ GroupKeyRanges, target *Group,
 		_ []uint64, _ BalanceActionMode, _ any, _ int) BalanceActionBuildResult {

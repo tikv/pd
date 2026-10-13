@@ -1377,12 +1377,17 @@ func (c *client) RebalanceAffinityGroup(ctx context.Context, groupID string, app
 		return nil, errors.Trace(err)
 	}
 	var plans []AffinityBalancePlan
-	err = c.request(ctx, newRequestInfo().
+	request := newRequestInfo().
 		WithName("RebalanceAffinityGroup").
 		WithURI(fmt.Sprintf(AffinityGroupRebalance, groupID)).
 		WithMethod(http.MethodPost).
 		WithBody(reqJSON).
-		WithResp(&plans))
+		WithResp(&plans)
+	// Applying a table can wait for multiple Region migrations. Follow the
+	// caller's context instead of the default 30-second HTTP timeout, while
+	// preserving an explicitly configured HTTP client's timeout.
+	request.noClientTimeout = apply && c.inner.defaultHTTPClient
+	err = c.request(ctx, request)
 	if err != nil {
 		return nil, err
 	}

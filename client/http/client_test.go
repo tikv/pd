@@ -195,3 +195,30 @@ func TestUpdateAffinityGroupPolicy(t *testing.T) {
 	re.NoError(err)
 	re.Equal("fixed", state.BalancePolicy)
 }
+
+func TestAffinityApplyUsesContextBeyondDefaultClientTimeout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		timer := time.NewTimer(30 * time.Millisecond)
+		defer timer.Stop()
+		select {
+		case <-r.Context().Done():
+			return
+		case <-timer.C:
+			_, _ = io.WriteString(w, `[]`)
+		}
+	}))
+	defer server.Close()
+	c := newClientWithMockServiceDiscovery("affinity-apply-timeout", []string{server.URL}).(*client)
+	defer c.Close()
+	c.inner.cli.Timeout = time.Millisecond
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	_, err := c.RebalanceAffinityGroup(ctx, "_tidb_t_42", true)
+	require.NoError(t, err)
+	require.Equal(t, time.Millisecond, c.inner.cli.Timeout)
+
+	cancelled, stop := context.WithCancel(t.Context())
+	stop()
+	_, err = c.RebalanceAffinityGroup(cancelled, "_tidb_t_42", true)
+	require.ErrorIs(t, err, context.Canceled)
+}
