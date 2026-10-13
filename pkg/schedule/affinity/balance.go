@@ -158,28 +158,13 @@ func PlanBalance(groups []*Group, options BalanceOptions) ([]BalancePlan, error)
 					moveBytes = actions.MoveBytes
 				}
 				preservesLeader := leader == group.LeaderStoreID
-				order := 0
-				if best != nil {
-					order = compareScore(score, best.score)
-					if order == 0 {
-						order = cmp.Compare(moveBytes, best.moveBytes)
-					}
-					if order == 0 {
-						order = compareScore(globalScore, best.globalScore)
-					}
-					if order == 0 && preservesLeader != best.preservesLeader {
-						if preservesLeader {
-							order = -1
-						} else {
-							order = 1
-						}
-					}
+				ranked := targetCandidate{
+					target: candidate, score: score, globalScore: globalScore,
+					moveBytes: moveBytes, preservesLeader: preservesLeader,
 				}
-				if best == nil || order < 0 || (order == 0 && targetLess(group.ID, candidate, bestGroup, best.target)) {
-					best = &targetCandidate{
-						target: candidate, score: score, globalScore: globalScore,
-						moveBytes: moveBytes, preservesLeader: preservesLeader,
-					}
+				if best == nil || balanceCandidateLess(group.ID, ranked, bestGroup, *best) {
+					copy := ranked
+					best = &copy
 					bestGroup = group.ID
 				}
 			}
@@ -245,6 +230,22 @@ type targetCandidate struct {
 	globalScore     balanceScore
 	moveBytes       uint64
 	preservesLeader bool
+}
+
+func balanceCandidateLess(groupID string, candidate targetCandidate, bestGroupID string, best targetCandidate) bool {
+	if order := compareScore(candidate.score, best.score); order != 0 {
+		return order < 0
+	}
+	if candidate.moveBytes != best.moveBytes {
+		return candidate.moveBytes < best.moveBytes
+	}
+	if order := compareScore(candidate.globalScore, best.globalScore); order != 0 {
+		return order < 0
+	}
+	if candidate.preservesLeader != best.preservesLeader {
+		return candidate.preservesLeader
+	}
+	return targetLess(groupID, candidate.target, bestGroupID, best.target)
 }
 
 type balanceScore struct{ leader, voter int }
