@@ -206,6 +206,29 @@ func TestPlanBalanceGlobalVoterScoreBreaksTableScoreTie(t *testing.T) {
 	require.Equal(t, []uint64{2, 3, 5}, changedPlan(plans).VoterStoreIDs)
 }
 
+func TestPlanBalanceMoveBytesPrecedesGlobalScore(t *testing.T) {
+	groups := []*Group{
+		{ID: "p0", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}},
+		{ID: "p1", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}},
+		{ID: "p2", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}},
+	}
+	plans, err := PlanBalance(groups, BalanceOptions{
+		Stores: []uint64{1, 2, 3, 4},
+		ActionSets: map[string]BalanceActionSet{
+			"p0": {MoveBytes: 100, VoterReplacements: map[uint64]map[uint64][]uint64{
+				2: {4: {1, 3}},
+			}},
+			"p1": {MoveBytes: 1, VoterReplacements: map[uint64]map[uint64][]uint64{
+				3: {4: {1, 2}},
+			}},
+		},
+		GlobalVoterCounts: map[uint64]int{2: 20, 3: 2, 4: 10},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "p1", changedPlan(plans).GroupID)
+	require.Equal(t, []uint64{1, 2, 4}, changedPlan(plans).VoterStoreIDs)
+}
+
 func TestPlanBalanceGlobalLeaderScorePrecedesVoterScore(t *testing.T) {
 	groups := []*Group{
 		{ID: "p0", LeaderStoreID: 3, VoterStoreIDs: []uint64{1, 2, 3}},

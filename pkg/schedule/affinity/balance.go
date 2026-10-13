@@ -42,7 +42,7 @@ type BalanceActionSet struct {
 	// allowed after that replacement.
 	VoterReplacements map[uint64]map[uint64][]uint64
 	// MoveBytes estimates the bytes moved by replacing one voter for the
-	// whole group. It breaks ties between equal balance scores.
+	// whole group. It breaks table-score ties before global affinity counts.
 	MoveBytes uint64
 }
 
@@ -62,7 +62,8 @@ type BalanceOptions struct {
 	Stores     []uint64
 	ActionSets map[string]BalanceActionSet
 	// GlobalLeaderCounts and GlobalVoterCounts contain affinity counts before
-	// this pass. They only break ties after a strict table-score improvement.
+	// this pass. They only break ties after a strict table-score improvement
+	// and an equal MoveBytes estimate.
 	GlobalLeaderCounts map[uint64]int
 	GlobalVoterCounts  map[uint64]int
 }
@@ -161,10 +162,10 @@ func PlanBalance(groups []*Group, options BalanceOptions) ([]BalancePlan, error)
 				if best != nil {
 					order = compareScore(score, best.score)
 					if order == 0 {
-						order = compareScore(globalScore, best.globalScore)
+						order = cmp.Compare(moveBytes, best.moveBytes)
 					}
 					if order == 0 {
-						order = cmp.Compare(moveBytes, best.moveBytes)
+						order = compareScore(globalScore, best.globalScore)
 					}
 					if order == 0 && preservesLeader != best.preservesLeader {
 						if preservesLeader {
