@@ -314,30 +314,6 @@ func findImprovingPair(ctx context.Context, groups []*Group, stores []uint64, ac
 	return best, found, nil
 }
 
-func manualBalanceActions(group *Group, actions BalanceActionSet, stores []uint64, leaderCounts map[uint64]int) []manualBalanceAction {
-	result := make([]manualBalanceAction, 0)
-	seen := make(map[struct{ leader, from, to uint64 }]struct{})
-	newManualBalanceActionGenerator(group, actions, stores, leaderCounts).visit(func(action manualBalanceAction) bool {
-		key := struct{ leader, from, to uint64 }{action.leader, action.from, action.to}
-		if _, exists := seen[key]; exists {
-			return true
-		}
-		seen[key] = struct{}{}
-		result = append(result, action)
-		return true
-	})
-	slices.SortFunc(result, func(a, b manualBalanceAction) int {
-		if order := cmp.Compare(a.leader, b.leader); order != 0 {
-			return order
-		}
-		if order := cmp.Compare(a.to, b.to); order != 0 {
-			return order
-		}
-		return cmp.Compare(a.from, b.from)
-	})
-	return result
-}
-
 type manualBalanceActionGenerator struct {
 	group        *Group
 	actions      BalanceActionSet
