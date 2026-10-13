@@ -58,6 +58,7 @@ type balanceActionProgress struct {
 	baselineRegion   *core.RegionInfo
 	baselineFit      *placement.RegionFit
 	regionBytes      map[uint64]uint64
+	blocked          bool
 }
 
 func (c *AffinityChecker) balanceRuleMetadata() map[string]string {
@@ -245,6 +246,10 @@ func (c *AffinityChecker) buildBalanceActionsForTarget(ctx context.Context, actu
 			if progress.baselineFit == nil || !progress.baselineFit.IsSatisfied() {
 				return affinity.BalanceActionBuildResult{Checks: checks}
 			}
+			if !c.isRegionPlacementRuleSatisfiedWithBestLocation(baseline, cachedFit) {
+				progress.blocked = true
+				return completeBalanceBuild(progress, checks)
+			}
 			progress.baselineRegion = baseline
 		}
 
@@ -257,6 +262,9 @@ func (c *AffinityChecker) buildBalanceActionsForTarget(ctx context.Context, actu
 					continue
 				}
 				if leaderID != progress.baselineRegion.GetLeader().GetStoreId() && !c.leaderSourceAllowed(progress.baselineRegion.GetLeader().GetStoreId()) {
+					if c.leaderSourceAllowedWithTemporaryState(progress.baselineRegion.GetLeader().GetStoreId()) {
+						progress.blocked = true
+					}
 					progress.candidateIndex++
 					continue
 				}
@@ -271,7 +279,12 @@ func (c *AffinityChecker) buildBalanceActionsForTarget(ctx context.Context, actu
 				checks++
 				fit := c.ruleManager.FitRegionWithoutCache(c.cluster, virtual)
 				if fit != nil && fit.IsSatisfied() && placementNotWorse(progress.baselineFit, fit) {
-					progress.nextLeaderTarget = append(progress.nextLeaderTarget, leaderID)
+					virtualBest := c.isRegionPlacementRuleSatisfiedWithBestLocation(virtual, false)
+					if virtualBest {
+						progress.nextLeaderTarget = append(progress.nextLeaderTarget, leaderID)
+					} else {
+						progress.blocked = true
+					}
 				}
 			}
 		} else {
@@ -282,6 +295,14 @@ func (c *AffinityChecker) buildBalanceActionsForTarget(ctx context.Context, actu
 				if leaderStore == nil || !leaderStore.IsUp() || !leaderStore.IsTiKV() || !c.leaderTargetAllowed(leaderStore) ||
 					progress.baselineRegion.GetStorePeer(candidate.to) != nil || source == nil || !c.voterSourceAllowed(source) ||
 					(candidate.leader != progress.baselineRegion.GetLeader().GetStoreId() && !c.leaderSourceAllowed(progress.baselineRegion.GetLeader().GetStoreId())) {
+					if source != nil && !c.voterSourceAllowed(source) && c.voterSourceAllowedWithTemporaryState(source) {
+						progress.blocked = true
+					}
+					if candidate.leader != progress.baselineRegion.GetLeader().GetStoreId() &&
+						!c.leaderSourceAllowed(progress.baselineRegion.GetLeader().GetStoreId()) &&
+						c.leaderSourceAllowedWithTemporaryState(progress.baselineRegion.GetLeader().GetStoreId()) {
+						progress.blocked = true
+					}
 					progress.candidateIndex++
 					continue
 				}
@@ -298,7 +319,12 @@ func (c *AffinityChecker) buildBalanceActionsForTarget(ctx context.Context, actu
 				checks++
 				fit := c.ruleManager.FitRegionWithoutCache(c.cluster, virtual)
 				if fit != nil && fit.IsSatisfied() && placementNotWorse(progress.baselineFit, fit) {
-					progress.nextVoters = append(progress.nextVoters, candidate)
+					virtualBest := c.isRegionPlacementRuleSatisfiedWithBestLocation(virtual, false)
+					if virtualBest {
+						progress.nextVoters = append(progress.nextVoters, candidate)
+					} else {
+						progress.blocked = true
+					}
 				}
 			}
 		}
@@ -343,7 +369,7 @@ func completeBalanceBuild(progress *balanceActionProgress, checks int) affinity.
 		actions.MoveBytes += size
 	}
 	return affinity.BalanceActionBuildResult{
-		Actions: actions, Complete: true, Ready: true, Checks: checks, RegionBytes: progress.regionBytes,
+		Actions: actions, Complete: true, Ready: !progress.blocked, BlockTable: progress.blocked, Checks: checks, RegionBytes: progress.regionBytes,
 	}
 }
 
@@ -394,6 +420,17 @@ func (c *AffinityChecker) leaderSourceAllowed(storeID uint64) bool {
 
 func (c *AffinityChecker) voterSourceAllowed(store *core.StoreInfo) bool {
 	return (&filter.StoreStateFilter{ActionScope: c.Name(), MoveRegion: true}).
+		Source(c.cluster.GetSharedConfig(), store).IsOK()
+}
+
+func (c *AffinityChecker) voterSourceAllowedWithTemporaryState(store *core.StoreInfo) bool {
+	return (&filter.StoreStateFilter{ActionScope: c.Name(), MoveRegion: true, AllowTemporaryStates: true}).
+		Source(c.cluster.GetSharedConfig(), store).IsOK()
+}
+
+func (c *AffinityChecker) leaderSourceAllowedWithTemporaryState(storeID uint64) bool {
+	store := c.cluster.GetStore(storeID)
+	return store != nil && (&filter.StoreStateFilter{ActionScope: c.Name(), TransferLeader: true, AllowTemporaryStates: true}).
 		Source(c.cluster.GetSharedConfig(), store).IsOK()
 }
 
