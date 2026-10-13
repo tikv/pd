@@ -158,9 +158,46 @@ func TestAffinityManualRebalanceTableWithFixedRepresentative(t *testing.T) {
 		require.Equal(t, before[id], manager.GetAffinityGroupState(id).Group)
 	}
 
-	applied, err := manager.RebalanceAffinityGroup(ctx, ids[0], true)
-	require.NoError(t, err)
-	require.Equal(t, preview, applied)
+	applyCtx, stopApply := context.WithTimeout(ctx, 5*time.Second)
+	defer stopApply()
+	type applyResult struct {
+		plans []affinity.BalancePlan
+		err   error
+	}
+	result := make(chan applyResult, 1)
+	go func() {
+		plans, err := manager.RebalanceAffinityGroup(applyCtx, ids[0], true)
+		result <- applyResult{plans: plans, err: err}
+	}()
+	// Deliver the operator's resulting heartbeats one group at a time. The
+	// request must wait for these before publishing the next group's target.
+	for planIndex, plan := range preview {
+		if !plan.Changed {
+			continue
+		}
+		require.Eventually(t, func() bool {
+			return manager.GetAffinityGroupState(plan.GroupID).LeaderStoreID == plan.LeaderStoreID
+		}, time.Second, 10*time.Millisecond)
+		for _, later := range preview[planIndex+1:] {
+			require.Equal(t, before[later.GroupID], manager.GetAffinityGroupState(later.GroupID).Group,
+				"the next target must wait for the current group to converge")
+		}
+		index := slices.Index(ids, plan.GroupID)
+		region := tc.GetRegion(uint64(index + 1))
+		ops := checker.Check(region)
+		require.NotEmpty(t, ops)
+		tc.PutRegion(region.Clone(core.WithLeader(region.GetStorePeer(plan.LeaderStoreID))))
+		checker.Check(tc.GetRegion(region.GetID()))
+	}
+	completed := <-result
+	require.NoError(t, completed.err)
+	applied := completed.plans
+	require.Len(t, applied, len(preview))
+	for i := range preview {
+		require.Equal(t, preview[i].GroupID, applied[i].GroupID)
+		require.Equal(t, preview[i].LeaderStoreID, applied[i].LeaderStoreID)
+		require.Equal(t, preview[i].VoterStoreIDs, applied[i].VoterStoreIDs)
+	}
 	for _, plan := range applied {
 		state := manager.GetAffinityGroupState(plan.GroupID)
 		require.Equal(t, plan.LeaderStoreID, state.LeaderStoreID)

@@ -49,10 +49,24 @@ type BalanceActionSet struct {
 // BalancePlan is a target change produced by PlanBalance. It does not write
 // storage or create an operator.
 type BalancePlan struct {
-	GroupID       string   `json:"group_id"`
-	LeaderStoreID uint64   `json:"leader_store_id"`
-	VoterStoreIDs []uint64 `json:"voter_store_ids"`
-	Changed       bool     `json:"changed"`
+	GroupID          string        `json:"group_id"`
+	LeaderStoreID    uint64        `json:"leader_store_id"`
+	VoterStoreIDs    []uint64      `json:"voter_store_ids"`
+	Changed          bool          `json:"changed"`
+	OldLeaderStoreID uint64        `json:"old_leader_store_id,omitempty"`
+	OldVoterStoreIDs []uint64      `json:"old_voter_store_ids,omitempty"`
+	BeforeScore      *BalanceScore `json:"score_before,omitempty"`
+	AfterScore       *BalanceScore `json:"score_after,omitempty"`
+	MoveBytes        uint64        `json:"move_bytes,omitempty"`
+	Revision         string        `json:"revision,omitempty"`
+	Status           string        `json:"status,omitempty"`
+	Reason           string        `json:"reason,omitempty"`
+}
+
+// BalanceScore reports the table's leader and voter sum-of-squares scores.
+type BalanceScore struct {
+	Leader int `json:"leader"`
+	Voter  int `json:"voter"`
 }
 
 // BalanceOptions supplies topology-independent inputs and checker-generated

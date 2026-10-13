@@ -26,26 +26,22 @@ import (
 // is not ready to plan.
 type BalanceActionRebuilder func(context.Context, *Group, *Group) (BalanceActionSet, bool)
 
-// PlanTableRebalance repeatedly applies strict table-wide balance steps and
-// then considers coordinated pairs at a single-step local minimum. Pair
-// actions are generated lazily, so the planner does not retain all legal
-// actions for every group at once. Changed flags compare final targets with
-// the original targets.
+// PlanTableRebalance greedily assigns targets to auto groups in ID order.
+// Fixed groups reserve their existing counts first. Each selected target is
+// built only from checker-generated legal actions; virtual intermediate
+// targets are not required to improve the score of the original table. The
+// complete final table is published only when its score strictly improves.
 func PlanTableRebalance(ctx context.Context, groups []*Group, options BalanceOptions, rebuild BalanceActionRebuilder) ([]BalancePlan, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	initialPlans, err := PlanBalance(groups, options)
-	if err != nil {
+	if _, err := PlanBalance(groups, options); err != nil {
 		return nil, err
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if len(initialPlans) == 0 {
-		return initialPlans, nil
-	}
-
+	stores := sortedUnique(options.Stores)
 	original := make(map[string]*Group, len(groups))
 	current := make([]*Group, 0, len(groups))
 	for _, group := range groups {
@@ -54,86 +50,71 @@ func PlanTableRebalance(ctx context.Context, groups []*Group, options BalanceOpt
 		current = append(current, copy)
 	}
 	slices.SortFunc(current, func(a, b *Group) int { return cmp.Compare(a.ID, b.ID) })
-	actions := make(map[string]BalanceActionSet, len(options.ActionSets))
-	for id, actionSet := range options.ActionSets {
-		actions[id] = actionSet
-	}
 	globalLeaders := cloneBalanceCounts(options.GlobalLeaderCounts)
 	globalVoters := cloneBalanceCounts(options.GlobalVoterCounts)
+	initialLeaders, initialVoters := countsForGroups(current)
+	initialScore := calcBalanceScore(initialLeaders, initialVoters)
+	leaders, voters := makeCounts(stores)
+	for _, group := range current {
+		if group.BalancePolicy == BalancePolicyFixed {
+			addBalanceTarget(leaders, voters, group.LeaderStoreID, group.VoterStoreIDs)
+		}
+	}
+	virtualStepBudget := min(max(256, len(current)*min(max(1, len(stores)), 64)), 1<<20)
+	virtualSteps, actionChecks := 0, 0
+	const maxManualBalanceActionChecks = 1 << 22
 
-	for {
+	for _, group := range current {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		stepPlans, err := PlanBalance(current, BalanceOptions{
-			Stores: options.Stores, ActionSets: actions,
-			GlobalLeaderCounts: globalLeaders, GlobalVoterCounts: globalVoters,
-		})
-		if err != nil {
-			return nil, err
+		if group.BalancePolicy == BalancePolicyFixed {
+			continue
 		}
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		var changed *BalancePlan
-		for i := range stepPlans {
-			if stepPlans[i].Changed {
-				changed = &stepPlans[i]
+		old := original[group.ID]
+		actions := options.ActionSets[group.ID]
+		for {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			best, err := bestManualBalanceAction(ctx, old, group, actions, stores, leaders, voters,
+				globalLeaders, globalVoters, &actionChecks, maxManualBalanceActionChecks)
+			if err != nil {
+				return nil, err
+			}
+			if best == nil || sameBalanceTarget(group, best.target) {
 				break
 			}
-		}
-		if changed != nil {
-			group := findVirtualGroup(current, changed.GroupID)
-			if group == nil {
-				return nil, nil
+			if virtualSteps >= virtualStepBudget {
+				return nil, errors.New("manual balance virtual target budget exceeded")
 			}
-			updateGlobalBalanceCounts(globalLeaders, globalVoters, group, changed.LeaderStoreID, changed.VoterStoreIDs)
-			group = updateVirtualGroup(current, changed.GroupID, changed.LeaderStoreID, changed.VoterStoreIDs)
-			ready, err := rebuildVirtualActions(ctx, original[changed.GroupID], group, rebuild, actions)
+			group.LeaderStoreID = best.leader
+			group.VoterStoreIDs = slices.Clone(best.voters)
+			virtualSteps++
+			updated, ready, err := rebuildVirtualActions(ctx, old, group, rebuild)
 			if err != nil {
 				return nil, err
 			}
 			if !ready {
-				return nil, ctx.Err()
+				return nil, ErrBalanceNotReady
 			}
-			continue
+			actions = updated
 		}
-
-		pair, found, err := findImprovingPair(ctx, current, options.Stores, actions,
-			globalLeaders, globalVoters)
-		if err != nil {
-			return nil, err
-		}
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		if !found {
-			return finalBalancePlans(original, current), nil
-		}
-		first := findVirtualGroup(current, pair.first.GroupID)
-		second := findVirtualGroup(current, pair.second.GroupID)
-		if first == nil || second == nil {
-			return nil, nil
-		}
-		updateGlobalBalanceCounts(globalLeaders, globalVoters, first, pair.first.leader, pair.first.voters)
-		updateGlobalBalanceCounts(globalLeaders, globalVoters, second, pair.second.leader, pair.second.voters)
-		first = updateVirtualGroup(current, pair.first.GroupID, pair.first.leader, pair.first.voters)
-		second = updateVirtualGroup(current, pair.second.GroupID, pair.second.leader, pair.second.voters)
-		ready, err := rebuildVirtualActions(ctx, original[pair.first.GroupID], first, rebuild, actions)
-		if err != nil {
-			return nil, err
-		}
-		if !ready {
-			return nil, ctx.Err()
-		}
-		ready, err = rebuildVirtualActions(ctx, original[pair.second.GroupID], second, rebuild, actions)
-		if err != nil {
-			return nil, err
-		}
-		if !ready {
-			return nil, ctx.Err()
-		}
+		addBalanceTarget(leaders, voters, group.LeaderStoreID, group.VoterStoreIDs)
+		updateGlobalBalanceCounts(globalLeaders, globalVoters, old, group.LeaderStoreID, group.VoterStoreIDs)
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	finalLeaders, finalVoters := countsForGroups(current)
+	finalScore := calcBalanceScore(finalLeaders, finalVoters)
+	if compareScore(finalScore, initialScore) >= 0 {
+		for i := range current {
+			current[i] = cloneBalanceGroup(original[current[i].ID])
+		}
+		return finalBalancePlans(original, current, initialScore, initialScore, options.ActionSets, false), nil
+	}
+	return finalBalancePlans(original, current, initialScore, finalScore, options.ActionSets, true), nil
 }
 
 func cloneBalanceGroup(group *Group) *Group {
@@ -142,24 +123,105 @@ func cloneBalanceGroup(group *Group) *Group {
 	return &copy
 }
 
-func updateVirtualGroup(groups []*Group, groupID string, leader uint64, voters []uint64) *Group {
-	for _, group := range groups {
-		if group.ID == groupID {
-			group.LeaderStoreID = leader
-			group.VoterStoreIDs = slices.Clone(voters)
-			return group
-		}
-	}
-	return nil
+func sameBalanceTarget(group *Group, target target) bool {
+	return group.LeaderStoreID == target.leader && slices.Equal(normalizeVoters(group.VoterStoreIDs), normalizeVoters(target.voters))
 }
 
-func findVirtualGroup(groups []*Group, groupID string) *Group {
-	for _, group := range groups {
-		if group.ID == groupID {
-			return group
-		}
+func addBalanceTarget(leaders, voters map[uint64]int, leader uint64, voterIDs []uint64) {
+	if leader != 0 {
+		leaders[leader]++
 	}
-	return nil
+	for _, storeID := range voterIDs {
+		voters[storeID]++
+	}
+}
+
+func bestManualBalanceAction(ctx context.Context, original, group *Group, actions BalanceActionSet,
+	stores []uint64, leaders, voters, globalLeaders, globalVoters map[uint64]int,
+	checks *int, maxChecks int) (*manualBalanceAction, error) {
+	base := calcBalanceScore(leaders, voters)
+	globalBase := balanceScore{leader: sumSquares(globalLeaders), voter: sumSquares(globalVoters)}
+	var best *manualBalanceAction
+	var bestScore, bestGlobal balanceScore
+	var bestPreserves bool
+	consider := func(candidate manualBalanceAction) bool {
+		if err := ctx.Err(); err != nil {
+			return false
+		}
+		(*checks)++
+		if *checks > maxChecks {
+			return false
+		}
+		score := scoreAfterAddTarget(base, leaders, voters, candidate)
+		globalScore := scoreAfterAction(globalBase, globalLeaders, globalVoters, original, candidate)
+		preserves := candidate.leader == original.LeaderStoreID
+		if best == nil || manualActionLess(candidate, score, globalScore, preserves, *best, bestScore, bestGlobal, bestPreserves) {
+			copy := candidate
+			copy.voters = slices.Clone(candidate.voters)
+			best = &copy
+			bestScore, bestGlobal, bestPreserves = score, globalScore, preserves
+		}
+		return true
+	}
+	if !consider(manualBalanceAction{
+		GroupID: group.ID,
+		target:  target{leader: group.LeaderStoreID, voters: normalizeVoters(group.VoterStoreIDs)},
+	}) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return nil, errors.New("manual balance action budget exceeded")
+	}
+	newManualBalanceActionGenerator(group, actions, stores).visit(consider)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if *checks > maxChecks {
+		return nil, errors.New("manual balance action budget exceeded")
+	}
+	return best, nil
+}
+
+func scoreAfterAddTarget(base balanceScore, leaders, voters map[uint64]int, action manualBalanceAction) balanceScore {
+	leaderDeltas, voterDeltas := make(map[uint64]int, 1), make(map[uint64]int, len(action.voters))
+	if action.leader != 0 {
+		leaderDeltas[action.leader]++
+	}
+	for _, storeID := range action.voters {
+		voterDeltas[storeID]++
+	}
+	base.leader = scoreWithDeltas(base.leader, leaders, leaderDeltas)
+	base.voter = scoreWithDeltas(base.voter, voters, voterDeltas)
+	return base
+}
+
+func scoreAfterAction(base balanceScore, leaders, voters map[uint64]int, group *Group, action manualBalanceAction) balanceScore {
+	leaderDeltas, voterDeltas := make(map[uint64]int, 2), make(map[uint64]int, 2)
+	addManualActionDeltas(leaderDeltas, voterDeltas, group, action)
+	if leaders != nil {
+		base.leader = scoreWithDeltas(base.leader, leaders, leaderDeltas)
+	}
+	if voters != nil {
+		base.voter = scoreWithDeltas(base.voter, voters, voterDeltas)
+	}
+	return base
+}
+
+func manualActionLess(candidate manualBalanceAction, score, globalScore balanceScore, preserves bool,
+	best manualBalanceAction, bestScore, bestGlobal balanceScore, bestPreserves bool) bool {
+	if order := compareScore(score, bestScore); order != 0 {
+		return order < 0
+	}
+	if candidate.moveBytes != best.moveBytes {
+		return candidate.moveBytes < best.moveBytes
+	}
+	if order := compareScore(globalScore, bestGlobal); order != 0 {
+		return order < 0
+	}
+	if preserves != bestPreserves {
+		return preserves
+	}
+	return targetLess(candidate.GroupID, candidate.target, best.GroupID, best.target)
 }
 
 func cloneBalanceCounts(counts map[uint64]int) map[uint64]int {
@@ -203,31 +265,57 @@ func updateGlobalBalanceCounts(leaders, voters map[uint64]int, group *Group, new
 	}
 }
 
-func rebuildVirtualActions(ctx context.Context, original, virtual *Group, rebuild BalanceActionRebuilder, actions map[string]BalanceActionSet) (bool, error) {
+func rebuildVirtualActions(ctx context.Context, original, virtual *Group, rebuild BalanceActionRebuilder) (BalanceActionSet, bool, error) {
 	if rebuild == nil {
-		return false, errors.New("balance action rebuilder is required after changing a virtual target")
+		return BalanceActionSet{}, false, errors.New("balance action rebuilder is required after changing a virtual target")
 	}
 	updated, ready := rebuild(ctx, cloneBalanceGroup(original), cloneBalanceGroup(virtual))
 	if err := ctx.Err(); err != nil {
-		return false, err
+		return BalanceActionSet{}, false, err
 	}
-	if !ready {
-		return false, nil
-	}
-	actions[virtual.ID] = updated
-	return true, nil
+	return updated, ready, nil
 }
 
-func finalBalancePlans(original map[string]*Group, current []*Group) []BalancePlan {
+func finalBalancePlans(original map[string]*Group, current []*Group, before, after balanceScore,
+	actionSets map[string]BalanceActionSet, improved bool) []BalancePlan {
 	plans := make([]BalancePlan, len(current))
+	beforeScore, afterScore := &BalanceScore{Leader: before.leader, Voter: before.voter}, &BalanceScore{Leader: after.leader, Voter: after.voter}
 	for i, group := range current {
 		old := original[group.ID]
 		voters := normalizeVoters(group.VoterStoreIDs)
-		plans[i] = makePlan(group, group.LeaderStoreID, voters,
-			group.LeaderStoreID != old.LeaderStoreID || !slices.Equal(voters, normalizeVoters(old.VoterStoreIDs)))
+		changed := group.LeaderStoreID != old.LeaderStoreID || !slices.Equal(voters, normalizeVoters(old.VoterStoreIDs))
+		plans[i] = makePlan(group, group.LeaderStoreID, voters, changed)
+		plans[i].OldLeaderStoreID = old.LeaderStoreID
+		plans[i].OldVoterStoreIDs = normalizeVoters(old.VoterStoreIDs)
+		plans[i].BeforeScore = beforeScore
+		plans[i].AfterScore = afterScore
+		plans[i].Status = "unchanged"
+		if !improved {
+			plans[i].Reason = "no strict table-score improvement"
+			continue
+		}
+		if changed {
+			plans[i].Status = "planned"
+			moveCount := 0
+			for _, storeID := range plans[i].OldVoterStoreIDs {
+				if !slices.Contains(voters, storeID) {
+					moveCount++
+				}
+			}
+			plans[i].MoveBytes = actionSets[group.ID].MoveBytes * uint64(moveCount)
+		}
 	}
 	return plans
 }
+
+// ErrBalanceBusy indicates another rebalance request currently owns the table.
+var ErrBalanceBusy = errors.New("affinity rebalance is busy")
+
+// ErrBalanceNotReady indicates the table or checker cannot safely rebalance yet.
+var ErrBalanceNotReady = errors.New("affinity rebalance is not ready")
+
+// ErrBalanceConflict indicates a planning dependency changed before submission.
+var ErrBalanceConflict = errors.New("affinity rebalance plan conflict")
 
 type manualBalanceAction struct {
 	GroupID string
@@ -235,96 +323,15 @@ type manualBalanceAction struct {
 	moveBytes uint64
 }
 
-type manualBalancePair struct {
-	first, second manualBalanceAction
-	score         balanceScore
-	globalScore   balanceScore
-	moveBytes     uint64
-	preserves     int
-}
-
-func findImprovingPair(ctx context.Context, groups []*Group, stores []uint64, actionSets map[string]BalanceActionSet,
-	globalLeaders, globalVoters map[uint64]int) (manualBalancePair, bool, error) {
-	leaders, voters := countsForGroups(groups)
-	baseScore := calcBalanceScore(leaders, voters)
-	baseGlobalScore := balanceScore{leader: sumSquares(globalLeaders), voter: sumSquares(globalVoters)}
-	actionGenerators := make([]manualBalanceActionGenerator, len(groups))
-	for i, group := range groups {
-		if err := ctx.Err(); err != nil {
-			return manualBalancePair{}, false, err
-		}
-		if group.BalancePolicy != BalancePolicyFixed {
-			actionGenerators[i] = newManualBalanceActionGenerator(group, actionSets[group.ID], stores, leaders)
-		}
-	}
-	var best manualBalancePair
-	found := false
-	for i, firstGroup := range groups {
-		if firstGroup.BalancePolicy == BalancePolicyFixed {
-			continue
-		}
-		for j := i + 1; j < len(groups); j++ {
-			if err := ctx.Err(); err != nil {
-				return manualBalancePair{}, false, err
-			}
-			secondGroup := groups[j]
-			if secondGroup.BalancePolicy == BalancePolicyFixed {
-				continue
-			}
-			var searchErr error
-			actionGenerators[i].visit(func(first manualBalanceAction) bool {
-				if searchErr != nil {
-					return false
-				}
-				actionGenerators[j].visit(func(second manualBalanceAction) bool {
-					if err := ctx.Err(); err != nil {
-						searchErr = err
-						return false
-					}
-					score := scoreAfterPair(baseScore, leaders, voters, firstGroup, first, secondGroup, second)
-					if compareScore(score, baseScore) >= 0 {
-						return true
-					}
-					globalScore := scoreAfterGlobalPair(baseGlobalScore, globalLeaders, globalVoters,
-						firstGroup, first, secondGroup, second)
-					preserves := 0
-					if first.leader == firstGroup.LeaderStoreID {
-						preserves++
-					}
-					if second.leader == secondGroup.LeaderStoreID {
-						preserves++
-					}
-					pair := manualBalancePair{
-						first: first, second: second,
-						score: score, globalScore: globalScore,
-						moveBytes: first.moveBytes + second.moveBytes, preserves: preserves,
-					}
-					if !found || manualPairLess(pair, best) {
-						best, found = pair, true
-					}
-					return true
-				})
-				return searchErr == nil
-			})
-			if searchErr != nil {
-				return manualBalancePair{}, false, searchErr
-			}
-		}
-	}
-	return best, found, nil
-}
-
 type manualBalanceActionGenerator struct {
-	group        *Group
-	actions      BalanceActionSet
-	voters       []uint64
-	votersSet    map[uint64]struct{}
-	stores       []uint64
-	leaderCounts map[uint64]int
+	group     *Group
+	actions   BalanceActionSet
+	voters    []uint64
+	votersSet map[uint64]struct{}
+	stores    []uint64
 }
 
-func newManualBalanceActionGenerator(group *Group, actions BalanceActionSet, stores []uint64,
-	leaderCounts map[uint64]int) manualBalanceActionGenerator {
+func newManualBalanceActionGenerator(group *Group, actions BalanceActionSet, stores []uint64) manualBalanceActionGenerator {
 	voters := normalizeVoters(group.VoterStoreIDs)
 	votersSet := make(map[uint64]struct{}, len(voters))
 	for _, store := range voters {
@@ -332,16 +339,13 @@ func newManualBalanceActionGenerator(group *Group, actions BalanceActionSet, sto
 	}
 	return manualBalanceActionGenerator{
 		group: group, actions: actions, voters: voters,
-		votersSet: votersSet, stores: stores, leaderCounts: leaderCounts,
+		votersSet: votersSet, stores: stores,
 	}
 }
 
 func (g manualBalanceActionGenerator) visit(visit func(manualBalanceAction) bool) {
 	group, actions := g.group, g.actions
 	add := func(leader, from, to uint64, targetVoters []uint64, moveBytes uint64) bool {
-		if leader != group.LeaderStoreID && 2*(g.leaderCounts[leader]-g.leaderCounts[group.LeaderStoreID]+1) != 0 {
-			return true
-		}
 		if leader == group.LeaderStoreID && from == 0 && to == 0 {
 			return true
 		}
@@ -401,15 +405,6 @@ func countsForGroups(groups []*Group) (leaders map[uint64]int, voters map[uint64
 	return leaders, voters
 }
 
-func scoreAfterPair(base balanceScore, leaders, voters map[uint64]int, firstGroup *Group, first manualBalanceAction, secondGroup *Group, second manualBalanceAction) balanceScore {
-	leaderDeltas, voterDeltas := make(map[uint64]int, 4), make(map[uint64]int, 4)
-	addManualActionDeltas(leaderDeltas, voterDeltas, firstGroup, first)
-	addManualActionDeltas(leaderDeltas, voterDeltas, secondGroup, second)
-	base.leader = scoreWithDeltas(base.leader, leaders, leaderDeltas)
-	base.voter = scoreWithDeltas(base.voter, voters, voterDeltas)
-	return base
-}
-
 func addManualActionDeltas(leaderDeltas, voterDeltas map[uint64]int, group *Group, action manualBalanceAction) {
 	if group.LeaderStoreID != action.leader {
 		if group.LeaderStoreID != 0 {
@@ -419,24 +414,24 @@ func addManualActionDeltas(leaderDeltas, voterDeltas map[uint64]int, group *Grou
 			leaderDeltas[action.leader]++
 		}
 	}
-	if action.from != 0 {
-		voterDeltas[action.from]--
-		voterDeltas[action.to]++
+	oldVoters := make(map[uint64]int, len(group.VoterStoreIDs))
+	newVoters := make(map[uint64]int, len(action.voters))
+	for _, storeID := range group.VoterStoreIDs {
+		oldVoters[storeID]++
 	}
-}
-
-func scoreAfterGlobalPair(base balanceScore, leaders, voters map[uint64]int,
-	firstGroup *Group, first manualBalanceAction, secondGroup *Group, second manualBalanceAction) balanceScore {
-	leaderDeltas, voterDeltas := make(map[uint64]int, 4), make(map[uint64]int, 4)
-	addManualActionDeltas(leaderDeltas, voterDeltas, firstGroup, first)
-	addManualActionDeltas(leaderDeltas, voterDeltas, secondGroup, second)
-	if leaders != nil {
-		base.leader = scoreWithDeltas(base.leader, leaders, leaderDeltas)
+	for _, storeID := range action.voters {
+		newVoters[storeID]++
 	}
-	if voters != nil {
-		base.voter = scoreWithDeltas(base.voter, voters, voterDeltas)
+	for storeID, count := range oldVoters {
+		if delta := newVoters[storeID] - count; delta != 0 {
+			voterDeltas[storeID] += delta
+		}
 	}
-	return base
+	for storeID, count := range newVoters {
+		if _, existed := oldVoters[storeID]; !existed {
+			voterDeltas[storeID] += count
+		}
+	}
 }
 
 func scoreWithDeltas(base int, counts, deltas map[uint64]int) int {
@@ -445,26 +440,4 @@ func scoreWithDeltas(base int, counts, deltas map[uint64]int) int {
 		base += 2*count*delta + delta*delta
 	}
 	return base
-}
-
-func manualPairLess(a, b manualBalancePair) bool {
-	if order := compareScore(a.score, b.score); order != 0 {
-		return order < 0
-	}
-	if order := compareScore(a.globalScore, b.globalScore); order != 0 {
-		return order < 0
-	}
-	if a.moveBytes != b.moveBytes {
-		return a.moveBytes < b.moveBytes
-	}
-	if a.preserves != b.preserves {
-		return a.preserves > b.preserves
-	}
-	if targetLess(a.first.GroupID, a.first.target, b.first.GroupID, b.first.target) {
-		return true
-	}
-	if targetLess(b.first.GroupID, b.first.target, a.first.GroupID, a.first.target) {
-		return false
-	}
-	return targetLess(a.second.GroupID, a.second.target, b.second.GroupID, b.second.target)
 }

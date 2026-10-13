@@ -16,10 +16,11 @@ package affinity
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/tikv/pd/pkg/errs"
@@ -38,23 +39,28 @@ func (m *Manager) rebalanceTable(ctx context.Context, groupID string, apply bool
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	executionCtx, cancelExecution := context.WithCancel(ctx)
+	stopExecutionManagerContext := context.AfterFunc(m.ctx, cancelExecution)
+	defer stopExecutionManagerContext()
+	defer cancelExecution()
 	planningCtx, cancel := context.WithTimeout(ctx, manualBalancePlanningTimeout)
+	stopManagerContext := context.AfterFunc(m.ctx, cancel)
+	defer stopManagerContext()
 	defer cancel()
+	if err := planningCtx.Err(); err != nil {
+		return nil, err
+	}
 	if m.GetAffinityGroupState(groupID) == nil {
 		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
 	}
 
 	tableID := TableGroupPrefix(groupID)
-	m.Lock()
-	tableLock := m.balanceLocks[tableID]
-	if tableLock == nil {
-		tableLock = new(sync.Mutex)
-		m.balanceLocks[tableID] = tableLock
-	}
-	m.Unlock()
+	tableLock := m.acquireBalanceTableLock(tableID)
 	if !tableLock.TryLock() {
-		return nil, nil
+		m.releaseBalanceTableLock(tableID, tableLock)
+		return nil, ErrBalanceBusy
 	}
+	defer m.releaseBalanceTableLock(tableID, tableLock)
 	defer tableLock.Unlock()
 
 	var (
@@ -90,19 +96,19 @@ func (m *Manager) rebalanceTable(ctx context.Context, groupID string, apply bool
 
 	snapshot = m.balanceSnapshot(groupID)
 	if snapshot == nil {
-		return nil, nil
+		return nil, ErrBalanceNotReady
 	}
 	if snapshot.virtual == nil {
 		return nil, errors.New("virtual balance action builder is not configured")
 	}
 	if err := m.captureBalanceDependencies(planningCtx, snapshot); err != nil {
 		if errs.ErrEtcdTxnConflict.Equal(err) {
-			return nil, nil
+			return nil, ErrBalanceConflict
 		}
 		return nil, err
 	}
 	if !m.balanceSnapshotCurrent(snapshot) {
-		return nil, nil
+		return nil, ErrBalanceConflict
 	}
 
 	slices.SortFunc(snapshot.groups, func(a, b *GroupState) int { return strings.Compare(a.ID, b.ID) })
@@ -120,15 +126,39 @@ func (m *Manager) rebalanceTable(ctx context.Context, groupID string, apply bool
 			continue
 		}
 		if group.Phase != PhaseStable || !group.AffinitySchedulingAllowed {
-			return nil, nil
+			return nil, ErrBalanceNotReady
 		}
 		autoGroups = append(autoGroups, group)
 	}
 	if selected == nil {
-		return nil, nil
+		return nil, ErrBalanceConflict
 	}
-	if len(autoGroups) == 0 || len(snapshot.stores) == 0 {
-		return nil, nil
+	if len(autoGroups) == 0 {
+		current, err := m.balanceDependenciesCurrent(planningCtx, snapshot)
+		if err != nil {
+			return nil, err
+		}
+		if !current || !m.balanceSnapshotCurrent(snapshot) {
+			return nil, ErrBalanceConflict
+		}
+		plans := unchangedManualBalancePlans(groups)
+		revision, err := manualBalanceRevision(snapshot)
+		if err != nil {
+			return nil, err
+		}
+		for i := range plans {
+			plans[i].Revision = revision
+		}
+		m.Lock()
+		if state := m.balanceTables[tableID]; state != nil && m.balanceFingerprintLocked(state) == snapshot.fingerprint {
+			state.phase = balanceStable
+			state.fingerprint = snapshot.fingerprint
+		}
+		m.Unlock()
+		return plans, nil
+	}
+	if len(snapshot.stores) == 0 {
+		return nil, ErrBalanceNotReady
 	}
 
 	actions := make(map[string]BalanceActionSet, len(autoGroups))
@@ -138,7 +168,7 @@ func (m *Manager) rebalanceTable(ctx context.Context, groupID string, apply bool
 			return nil, err
 		}
 		if !ready {
-			return nil, nil
+			return nil, ErrBalanceNotReady
 		}
 		actions[group.ID] = built
 	}
@@ -176,21 +206,24 @@ func (m *Manager) rebalanceTable(ctx context.Context, groupID string, apply bool
 		changed = true
 		group := groupStates[plan.GroupID]
 		if group == nil || group.BalancePolicy == BalancePolicyFixed {
-			return nil, errors.New("manual balance plan contains an ineligible group")
+			return nil, ErrBalanceConflict
 		}
 		candidate := group.Group
 		candidate.LeaderStoreID = plan.LeaderStoreID
 		candidate.VoterStoreIDs = slices.Clone(plan.VoterStoreIDs)
 		if err := m.AdjustGroup(&candidate); err != nil {
-			return nil, nil
+			return nil, err
 		}
 		if err := m.checkBalanceTargetStores(candidate.LeaderStoreID, candidate.VoterStoreIDs); err != nil {
-			return nil, nil
+			return nil, ErrBalanceConflict
 		}
 		if snapshot.validator != nil {
 			ready, legal := snapshot.validator(planningCtx, group, snapshot.ranges[group.ID], plan)
-			if !ready || !legal {
-				return nil, nil
+			if !ready {
+				return nil, ErrBalanceNotReady
+			}
+			if !legal {
+				return nil, ErrBalanceConflict
 			}
 		}
 	}
@@ -203,7 +236,14 @@ func (m *Manager) rebalanceTable(ctx context.Context, groupID string, apply bool
 		return nil, err
 	}
 	if !current || !m.balanceSnapshotCurrent(snapshot) {
-		return nil, nil
+		return nil, ErrBalanceConflict
+	}
+	revision, err := manualBalanceRevision(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	for i := range plans {
+		plans[i].Revision = revision
 	}
 	if !changed {
 		m.Lock()
@@ -217,14 +257,182 @@ func (m *Manager) rebalanceTable(ctx context.Context, groupID string, apply bool
 	if !apply {
 		return plans, nil
 	}
-	committed, err := m.commitBalancePlans(planningCtx, snapshot, plans)
-	if err != nil {
-		return nil, err
+	if snapshot.validator == nil {
+		return nil, ErrBalanceNotReady
 	}
-	if !committed {
-		return nil, nil
+	expectedGroups := make(map[string]Group, len(snapshot.groups))
+	for _, group := range snapshot.groups {
+		expectedGroups[group.ID] = group.Group
+	}
+	committedGroups := 0
+	for _, plan := range plans {
+		if !plan.Changed {
+			continue
+		}
+		if err := executionCtx.Err(); err != nil {
+			return nil, manualBalancePartialError(err, committedGroups)
+		}
+		current := snapshot
+		if committedGroups != 0 {
+			current, err = m.nextManualBalanceSnapshot(executionCtx, groupID, snapshot, expectedGroups)
+			if err != nil {
+				return nil, manualBalancePartialError(err, committedGroups)
+			}
+		}
+		group := findManualBalanceGroup(current.groups, plan.GroupID)
+		if group == nil {
+			if current != snapshot {
+				m.releaseBalanceDependencies(current)
+			}
+			return nil, manualBalancePartialError(ErrBalanceConflict, committedGroups)
+		}
+		ready, legal := current.validator(executionCtx, group, current.ranges[plan.GroupID], plan)
+		if err := executionCtx.Err(); err != nil {
+			if current != snapshot {
+				m.releaseBalanceDependencies(current)
+			}
+			return nil, manualBalancePartialError(err, committedGroups)
+		}
+		if !ready || !legal {
+			if current != snapshot {
+				m.releaseBalanceDependencies(current)
+			}
+			reason := ErrBalanceConflict
+			if !ready {
+				reason = ErrBalanceNotReady
+			}
+			return nil, manualBalancePartialError(reason, committedGroups)
+		}
+		committed, commitErr := m.commitBalancePlans(executionCtx, current, []BalancePlan{plan})
+		if commitErr != nil {
+			return nil, manualBalancePartialError(commitErr, committedGroups)
+		}
+		if !committed {
+			return nil, manualBalancePartialError(ErrBalanceConflict, committedGroups)
+		}
+		committedGroups++
+		group := expectedGroups[plan.GroupID]
+		group.LeaderStoreID = plan.LeaderStoreID
+		group.VoterStoreIDs = normalizeVoters(plan.VoterStoreIDs)
+		expectedGroups[plan.GroupID] = group
+		if err := m.waitManualBalanceConvergence(executionCtx, current, plan); err != nil {
+			return nil, manualBalancePartialError(err, committedGroups)
+		}
 	}
 	return plans, nil
+}
+
+func unchangedManualBalancePlans(groups []*Group) []BalancePlan {
+	original := make(map[string]*Group, len(groups))
+	for _, group := range groups {
+		original[group.ID] = group
+	}
+	leaders, voters := countsForGroups(groups)
+	score := calcBalanceScore(leaders, voters)
+	return finalBalancePlans(original, groups, score, score, nil, false)
+}
+
+func manualBalanceRevision(snapshot *balanceSnapshot) (string, error) {
+	revision := struct {
+		Table    string `json:"table"`
+		Metadata string `json:"metadata"`
+	}{
+		Table:    snapshot.dependencies[endpoint.AffinityTableRevisionKey(snapshot.tableID)],
+		Metadata: snapshot.dependencies[endpoint.AffinityMetadataRevisionKey()],
+	}
+	encoded, err := json.Marshal(revision)
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
+}
+
+func (m *Manager) nextManualBalanceSnapshot(ctx context.Context, groupID string, original *balanceSnapshot,
+	expectedGroups map[string]Group) (*balanceSnapshot, error) {
+	current := m.balanceSnapshot(groupID)
+	if current == nil {
+		return nil, ErrBalanceConflict
+	}
+	if err := m.captureBalanceDependencies(ctx, current); err != nil {
+		m.releaseBalanceDependencies(current)
+		if errs.ErrEtcdTxnConflict.Equal(err) {
+			return nil, ErrBalanceConflict
+		}
+		return nil, err
+	}
+	metadataKey := endpoint.AffinityMetadataRevisionKey()
+	if current.fingerprint.stores != original.fingerprint.stores || current.fingerprint.rules != original.fingerprint.rules ||
+		current.dependencies[metadataKey] != original.dependencies[metadataKey] || !manualBalanceTargetsMatch(current.groups, expectedGroups) {
+		m.releaseBalanceDependencies(current)
+		return nil, ErrBalanceConflict
+	}
+	current.conditions = slices.Clone(original.conditions)
+	if !m.balanceSnapshotCurrent(current) {
+		m.releaseBalanceDependencies(current)
+		return nil, ErrBalanceConflict
+	}
+	return current, nil
+}
+
+func manualBalanceTargetsMatch(groups []*GroupState, expected map[string]Group) bool {
+	if len(groups) != len(expected) {
+		return false
+	}
+	for _, group := range groups {
+		want, ok := expected[group.ID]
+		if !ok || group.Group.String() != want.String() {
+			return false
+		}
+	}
+	return true
+}
+
+func findManualBalanceGroup(groups []*GroupState, groupID string) *GroupState {
+	for _, group := range groups {
+		if group.ID == groupID {
+			return group
+		}
+	}
+	return nil
+}
+
+func (m *Manager) waitManualBalanceConvergence(ctx context.Context, snapshot *balanceSnapshot, plan BalancePlan) error {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		group := m.GetAffinityGroupState(plan.GroupID)
+		if group == nil || group.LeaderStoreID != plan.LeaderStoreID ||
+			!slices.Equal(normalizeVoters(group.VoterStoreIDs), normalizeVoters(plan.VoterStoreIDs)) {
+			return ErrBalanceConflict
+		}
+		ready, legal := snapshot.validator(ctx, group, snapshot.ranges[plan.GroupID], plan)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if ready && legal {
+			return nil
+		}
+		if ready {
+			return ErrBalanceConflict
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-m.ctx.Done():
+			return context.Canceled
+		case <-ticker.C:
+		}
+	}
+}
+
+func manualBalancePartialError(err error, committed int) error {
+	if committed == 0 {
+		return err
+	}
+	return fmt.Errorf("%w: already committed %d groups", err, committed)
 }
 
 func (*Manager) buildManualBalanceActions(ctx context.Context, snapshot *balanceSnapshot,

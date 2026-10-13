@@ -44,14 +44,15 @@ func TestPlanTableRebalanceRebuildsChangedTargets(t *testing.T) {
 		return BalanceActionSet{}, true
 	})
 	require.NoError(t, err)
-	require.Equal(t, []string{"p0", "p1"}, rebuilt)
-	require.Equal(t, []string{"p0", "p1"}, changedPlanIDs(plans))
-	require.Equal(t, uint64(2), plans[0].LeaderStoreID)
+	require.Equal(t, []string{"p1", "p3"}, rebuilt)
+	require.Equal(t, []string{"p1", "p3"}, changedPlanIDs(plans))
+	require.False(t, plans[0].Changed)
 	require.Equal(t, uint64(2), plans[1].LeaderStoreID)
+	require.Equal(t, uint64(2), plans[3].LeaderStoreID)
 	require.False(t, plans[2].Changed)
 }
 
-func TestPlanTableRebalanceUsesCoordinatedLeaderPair(t *testing.T) {
+func TestPlanTableRebalanceDoesNotPublishPairOnlyImprovement(t *testing.T) {
 	groups := []*Group{
 		{ID: "p0", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}},
 		{ID: "p1", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}},
@@ -70,15 +71,17 @@ func TestPlanTableRebalanceUsesCoordinatedLeaderPair(t *testing.T) {
 		return BalanceActionSet{}, true
 	})
 	require.NoError(t, err)
-	require.Equal(t, []string{"p0", "p3"}, changedPlanIDs(plans))
-	require.Equal(t, uint64(2), plans[0].LeaderStoreID)
-	require.Equal(t, uint64(3), plans[3].LeaderStoreID)
-	require.Equal(t, balanceScore{leader: 12, voter: 108}, calcBalanceScore(
-		map[uint64]int{1: 2, 2: 2, 3: 2}, map[uint64]int{1: 6, 2: 6, 3: 6},
-	))
+	require.Empty(t, changedPlanIDs(plans))
+	require.Len(t, plans, len(groups))
+	for i, plan := range plans {
+		require.False(t, plan.Changed)
+		require.Equal(t, groups[i].LeaderStoreID, plan.LeaderStoreID)
+		require.Equal(t, "unchanged", plan.Status)
+		require.NotEmpty(t, plan.Reason)
+	}
 }
 
-func TestPlanTableRebalanceUsesCoordinatedVoterPair(t *testing.T) {
+func TestPlanTableRebalanceGreedilyBalancesVoterTargets(t *testing.T) {
 	groups := []*Group{
 		{ID: "p0", LeaderStoreID: 1, VoterStoreIDs: []uint64{1}},
 		{ID: "p1", LeaderStoreID: 2, VoterStoreIDs: []uint64{2}},
@@ -95,11 +98,15 @@ func TestPlanTableRebalanceUsesCoordinatedVoterPair(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, []string{"p0", "p1"}, changedPlanIDs(plans))
-	require.False(t, plans[0].Changed)
-	require.Equal(t, uint64(2), plans[1].LeaderStoreID)
-	require.Equal(t, []uint64{2}, plans[1].VoterStoreIDs)
-	require.Equal(t, uint64(3), plans[2].LeaderStoreID)
-	require.Equal(t, []uint64{3}, plans[2].VoterStoreIDs)
+	byID := make(map[string]BalancePlan, len(plans))
+	for _, plan := range plans {
+		byID[plan.GroupID] = plan
+	}
+	require.Equal(t, uint64(2), byID["p0"].LeaderStoreID)
+	require.Equal(t, []uint64{2}, byID["p0"].VoterStoreIDs)
+	require.Equal(t, uint64(3), byID["p1"].LeaderStoreID)
+	require.Equal(t, []uint64{3}, byID["p1"].VoterStoreIDs)
+	require.False(t, byID["fixed"].Changed)
 }
 
 func TestUpdateGlobalBalanceCountsTracksVirtualTarget(t *testing.T) {
@@ -113,32 +120,45 @@ func TestUpdateGlobalBalanceCountsTracksVirtualTarget(t *testing.T) {
 	require.Equal(t, map[uint64]int{1: 1, 2: 1, 3: 1}, voters)
 }
 
-func TestFindImprovingBalancePairUsesGlobalScoreForTies(t *testing.T) {
+func TestPlanTableRebalanceReturnsOriginalTargetsWithoutImprovement(t *testing.T) {
 	groups := []*Group{
-		{ID: "a0", LeaderStoreID: 4, VoterStoreIDs: []uint64{1, 2, 3, 4, 5, 6}},
-		{ID: "a1", LeaderStoreID: 4, VoterStoreIDs: []uint64{1, 2, 3, 4, 5, 6}},
-		{ID: "a2", LeaderStoreID: 4, VoterStoreIDs: []uint64{1, 2, 3, 4, 5, 6}},
-		{ID: "a3", LeaderStoreID: 5, VoterStoreIDs: []uint64{1, 2, 3, 4, 5, 6}},
-		{ID: "a4", LeaderStoreID: 5, VoterStoreIDs: []uint64{1, 2, 3, 4, 5, 6}},
-		{ID: "a5", LeaderStoreID: 6, VoterStoreIDs: []uint64{1, 2, 3, 4, 5, 6}},
-		{ID: "z0", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3, 4, 5, 6}},
-		{ID: "z1", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3, 4, 5, 6}},
-		{ID: "z2", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3, 4, 5, 6}},
-		{ID: "z3", LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2, 3, 4, 5, 6}},
-		{ID: "z4", LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2, 3, 4, 5, 6}},
-		{ID: "z5", LeaderStoreID: 3, VoterStoreIDs: []uint64{1, 2, 3, 4, 5, 6}},
+		{ID: "p0", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2}},
+		{ID: "p1", LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2}},
 	}
-	pair, found, err := findImprovingPair(t.Context(), groups, []uint64{1, 2, 3, 4, 5, 6}, map[string]BalanceActionSet{
-		"a0": {LeaderTargets: []uint64{5}},
-		"a3": {LeaderTargets: []uint64{6}},
-		"z0": {LeaderTargets: []uint64{2}},
-		"z3": {LeaderTargets: []uint64{3}},
-	}, map[uint64]int{1: 3, 2: 2, 3: 1, 4: 3, 5: 2, 6: 3}, nil)
-
+	plans, err := PlanTableRebalance(t.Context(), groups, BalanceOptions{
+		Stores: []uint64{1, 2},
+		ActionSets: map[string]BalanceActionSet{
+			"p0": {LeaderTargets: []uint64{2}},
+			"p1": {LeaderTargets: []uint64{1}},
+		},
+	}, func(_ context.Context, _ *Group, _ *Group) (BalanceActionSet, bool) {
+		return BalanceActionSet{}, true
+	})
 	require.NoError(t, err)
-	require.True(t, found)
-	require.Equal(t, "z0", pair.first.GroupID)
-	require.Equal(t, "z3", pair.second.GroupID)
+	require.Len(t, plans, len(groups))
+	require.Empty(t, changedPlanIDs(plans))
+	for i, plan := range plans {
+		require.Equal(t, groups[i].LeaderStoreID, plan.LeaderStoreID)
+		require.Equal(t, groups[i].VoterStoreIDs, plan.VoterStoreIDs)
+		require.Equal(t, groups[i].LeaderStoreID, plan.OldLeaderStoreID)
+		require.Equal(t, groups[i].VoterStoreIDs, plan.OldVoterStoreIDs)
+		require.Equal(t, plan.BeforeScore, plan.AfterScore)
+		require.Equal(t, "unchanged", plan.Status)
+		require.Equal(t, "no strict table-score improvement", plan.Reason)
+	}
+}
+
+func TestManualBalanceGlobalScoreUsesCompleteVoterTarget(t *testing.T) {
+	group := &Group{LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2}}
+	action := manualBalanceAction{target: target{
+		leader: 1, voters: []uint64{2, 3}, from: 2, to: 3,
+	}}
+	voterCounts := map[uint64]int{1: 3, 2: 2, 3: 0}
+	base := balanceScore{voter: sumSquares(voterCounts)}
+
+	score := scoreAfterAction(base, nil, voterCounts, group, action)
+
+	require.Equal(t, 9, score.voter)
 }
 
 func changedPlanIDs(plans []BalancePlan) []string {

@@ -60,14 +60,20 @@ func newAffinityRebalanceCommand() *cobra.Command {
 }
 
 type affinityRebalanceResult struct {
-	GroupID   string   `json:"group_id"`
-	OldLeader uint64   `json:"old_leader"`
-	NewLeader uint64   `json:"new_leader"`
-	OldVoters []uint64 `json:"old_voters"`
-	NewVoters []uint64 `json:"new_voters"`
-	Changed   bool     `json:"changed"`
-	Applied   bool     `json:"applied"`
-	Error     string   `json:"error,omitempty"`
+	GroupID     string                       `json:"group_id"`
+	OldLeader   uint64                       `json:"old_leader"`
+	NewLeader   uint64                       `json:"new_leader"`
+	OldVoters   []uint64                     `json:"old_voters"`
+	NewVoters   []uint64                     `json:"new_voters"`
+	Changed     bool                         `json:"changed"`
+	Applied     bool                         `json:"applied"`
+	Error       string                       `json:"error,omitempty"`
+	BeforeScore *pdhttp.AffinityBalanceScore `json:"score_before,omitempty"`
+	AfterScore  *pdhttp.AffinityBalanceScore `json:"score_after,omitempty"`
+	MoveBytes   uint64                       `json:"move_bytes,omitempty"`
+	Revision    string                       `json:"revision,omitempty"`
+	Status      string                       `json:"status,omitempty"`
+	Reason      string                       `json:"reason,omitempty"`
 }
 
 func affinityRebalanceCommandFunc(cmd *cobra.Command, _ []string) {
@@ -114,13 +120,23 @@ func affinityRebalanceCommandFunc(cmd *cobra.Command, _ []string) {
 	for _, plan := range plans {
 		old := byID[plan.GroupID]
 		item := affinityRebalanceResult{
-			GroupID:   plan.GroupID,
-			OldLeader: affinityGroupLeader(old),
-			NewLeader: plan.LeaderStoreID,
-			OldVoters: affinityGroupVoters(old),
-			NewVoters: append([]uint64(nil), plan.VoterStoreIDs...),
-			Changed:   plan.Changed,
-			Applied:   apply && plan.Changed,
+			GroupID:     plan.GroupID,
+			OldLeader:   affinityGroupLeader(old),
+			NewLeader:   plan.LeaderStoreID,
+			OldVoters:   affinityGroupVoters(old),
+			NewVoters:   append([]uint64(nil), plan.VoterStoreIDs...),
+			Changed:     plan.Changed,
+			Applied:     apply && plan.Changed,
+			BeforeScore: plan.BeforeScore,
+			AfterScore:  plan.AfterScore,
+			MoveBytes:   plan.MoveBytes,
+			Revision:    plan.Revision,
+			Status:      plan.Status,
+			Reason:      plan.Reason,
+		}
+		if plan.OldLeaderStoreID != 0 {
+			item.OldLeader = plan.OldLeaderStoreID
+			item.OldVoters = append([]uint64(nil), plan.OldVoterStoreIDs...)
 		}
 		result = append(result, item)
 	}

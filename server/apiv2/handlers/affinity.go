@@ -16,6 +16,8 @@ package handlers
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -99,7 +101,7 @@ type UpdateAffinityGroupPeersRequest struct {
 
 // RebalanceAffinityGroupRequest defines the input for previewing or applying an affinity rebalance.
 type RebalanceAffinityGroupRequest struct {
-	// Apply publishes final targets for all table groups without waiting for Region moves to finish.
+	// Apply submits one group at a time and waits for convergence before continuing.
 	Apply bool `json:"apply"`
 }
 
@@ -394,7 +396,7 @@ func UpdateAffinityGroupPeers(c *gin.Context) {
 //	@Tags		affinity-groups
 //	@Summary	Preview or apply a complete affinity rebalance for a table.
 //	@Param		group_id	path	string						true	"The group id of the affinity group"
-//	@Param		body		body	RebalanceAffinityGroupRequest	true	"Apply publishes all final table targets; Region moves finish asynchronously"
+//	@Param		body		body	RebalanceAffinityGroupRequest	true	"Apply submits groups sequentially and waits for convergence"
 //	@Produce	json
 //	@Success	200	{array}	affinity.BalancePlan	"Final group targets; operators converge asynchronously"
 //	@Failure	400	{string}	string	"The input is invalid."
@@ -559,6 +561,12 @@ func handleAffinityError(c *gin.Context, err error) bool {
 		return false
 	}
 	switch {
+	case errors.Is(err, affinity.ErrBalanceBusy), errors.Is(err, affinity.ErrBalanceConflict):
+		c.AbortWithStatusJSON(http.StatusConflict, err.Error())
+	case errors.Is(err, affinity.ErrBalanceNotReady):
+		c.AbortWithStatusJSON(http.StatusServiceUnavailable, err.Error())
+	case errors.Is(err, context.DeadlineExceeded):
+		c.AbortWithStatusJSON(http.StatusGatewayTimeout, err.Error())
 	case errs.ErrAffinityGroupNotFound.Equal(err):
 		c.AbortWithStatusJSON(http.StatusNotFound, err.Error())
 	case errs.ErrAffinityGroupContent.Equal(err),
