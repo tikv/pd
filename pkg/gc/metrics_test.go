@@ -104,6 +104,9 @@ func (s *barrierMetricsTestKV) LoadRange(key, end string, limit int) (keys, valu
 func (s *barrierMetricsTestKV) CreateRawTxn() kv.RawTxn {
 	return &barrierMetricsTestTxn{RawTxn: s.Base.(kv.RawTxnCapable).CreateRawTxn(), store: s}
 }
+func (s *barrierMetricsTestKV) CreateRawTxnWithContext(ctx context.Context) kv.RawTxn {
+	return &barrierMetricsTestTxn{RawTxn: s.Base.(kv.RawTxnWithContextCapable).CreateRawTxnWithContext(ctx), store: s}
+}
 
 type barrierMetricsTestTxn struct {
 	kv.RawTxn
@@ -126,6 +129,49 @@ func (t *barrierMetricsTestTxn) Commit() (kv.RawTxnResponse, error) {
 		return kv.RawTxnResponse{Succeeded: false}, nil
 	}
 	return t.RawTxn.Commit()
+}
+
+func (s *gcStateManagerTestSuite) TestBarrierMetricsKVLeaderColdRead() {
+	re := s.Require()
+	re.NoError(s.provider.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+		if err := wb.SetTxnSafePoint(2, 90); err != nil {
+			return err
+		}
+		return wb.SetGCSafePoint(2, 70)
+	}))
+	wrapped := &barrierMetricsTestKV{Base: s.storage.Base}
+	s.manager.gcMetaStorage = endpoint.NewStorageEndpoint(wrapped, nil).GetGCStateProvider()
+	re.True(s.manager.nodeIsLeader())
+	_, cached := s.manager.gcStateCache.load(2)
+	re.False(cached)
+	expected := GCState{KeyspaceID: 2, IsKeyspaceLevel: true, TxnSafePoint: 90, GCSafePoint: 70}
+	state, err := s.manager.GetGCState(2, true)
+	re.NoError(err)
+	re.Equal(expected, state)
+
+	s.manager.OnNodeBecomesLeader()
+	wrapped.fail = true
+	_, err = s.manager.GetGCState(2, true)
+	re.ErrorContains(err, "invalid GC safe point batch response")
+	_, cached = s.manager.gcStateCache.load(2)
+	re.False(cached, "failed reads must not populate the cache")
+	wrapped.fail = false
+	state, err = s.manager.GetGCState(2, true)
+	re.NoError(err)
+	re.Equal(expected, state)
+}
+
+func (s *gcStateManagerTestSuite) TestBarrierMetricsKVContextCancellation() {
+	re := s.Require()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// Cancel after the provider's initial context check and transaction creation,
+	// so the real etcd transaction must observe the forwarded context.
+	wrapped := &barrierMetricsTestKV{Base: s.storage.Base, beforeCommit: cancel}
+	provider := endpoint.NewStorageEndpoint(wrapped, nil).GetGCStateProvider()
+	results, err := provider.LoadGCSafePointPairs(ctx, []uint32{2})
+	re.ErrorIs(err, context.Canceled)
+	re.Empty(results)
 }
 
 func TestBarrierMetricsAgeBoundaries(t *testing.T) {
