@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/hex"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -32,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
@@ -625,4 +627,85 @@ func TestRuleManagerLogRedact(t *testing.T) {
 	re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, logutil.RedactInfoLogMarker))
 	re.NoError(manager.SetRule(newRule("r1")))
 	re.Contains(readLog(), `[rule="‹{`)
+}
+
+func TestRuleManagerLoadRulesLogRedact(t *testing.T) {
+	const startKey, endKey = "7480000000000000ff", "7480000000000001ff"
+	validRule := &Rule{GroupID: "redact", ID: "valid", StartKeyHex: startKey, EndKeyHex: endKey, Role: Voter, Count: 1}
+	invalidRule := validRule.Clone()
+	invalidRule.ID, invalidRule.Count = "invalid", 0
+	mismatchRule := validRule.Clone()
+	mismatchRule.ID = "mismatch"
+	validJSON := validRule.String()
+
+	for _, mode := range []struct {
+		name string
+		typ  logutil.RedactInfoLogType
+	}{
+		{"off", logutil.RedactInfoLogOFF},
+		{"on", logutil.RedactInfoLogON},
+		{"marker", logutil.RedactInfoLogMarker},
+	} {
+		t.Run(mode.name, func(t *testing.T) {
+			re := require.New(t)
+			fname := testutil.InitTempFileLogger(t, "info")
+			var (
+				lg    *zap.Logger
+				props *log.ZapProperties
+			)
+			re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, mode.typ))
+			t.Cleanup(func() {
+				re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, logutil.RedactInfoLogOFF))
+			})
+
+			memory := kv.NewMemoryKV()
+			store := endpoint.NewStorageEndpoint(memory, nil)
+			for key, value := range map[string]string{
+				validRule.StoreKey():   validJSON,
+				invalidRule.StoreKey(): invalidRule.String(),
+				"malformed":            validJSON[:len(validJSON)-1],
+				"duplicate":            validJSON,
+				"mismatch":             mismatchRule.String(),
+			} {
+				re.NoError(memory.Save(keypath.RuleKeyPath(key), value))
+			}
+			manager := NewRuleManager(context.Background(), store, nil, nil)
+			re.NoError(manager.loadRules())
+
+			output, err := os.ReadFile(fname)
+			re.NoError(err)
+			for _, msg := range []string{
+				"failed to unmarshal rule value", "rule is in bad format", "duplicated rule key", "mismatch data key, need to restore",
+			} {
+				re.Contains(string(output), msg)
+			}
+			if mode.typ == logutil.RedactInfoLogON {
+				re.NotContains(string(output), startKey)
+				re.NotContains(string(output), endKey)
+				re.Equal(4, strings.Count(string(output), "[rule-value=?]"))
+			} else {
+				re.Contains(string(output), startKey)
+				re.Contains(string(output), endKey)
+				if mode.typ == logutil.RedactInfoLogMarker {
+					re.Equal(4, strings.Count(string(output), `[rule-value="‹{`))
+				}
+			}
+
+			for _, key := range []string{invalidRule.StoreKey(), "malformed", "duplicate", "mismatch"} {
+				value, err := store.LoadRule(key)
+				re.NoError(err)
+				re.Empty(value)
+			}
+			re.Equal(2, manager.GetRulesCount())
+			for _, rule := range []*Rule{validRule, mismatchRule} {
+				loaded := manager.GetRule(rule.GroupID, rule.ID)
+				re.NotNil(loaded)
+				re.Equal(startKey, loaded.StartKeyHex)
+				re.Equal(endKey, loaded.EndKeyHex)
+				value, err := store.LoadRule(rule.StoreKey())
+				re.NoError(err)
+				re.Equal(rule.String(), value)
+			}
+		})
+	}
 }

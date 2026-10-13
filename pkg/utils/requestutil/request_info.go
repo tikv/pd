@@ -42,11 +42,18 @@ type RequestInfo struct {
 
 // String implements fmt.Stringer. URLParam and BodyParam may carry user data
 // (e.g. region keys in label rules), so they are redacted according to the
-// `security.redact-info-log` setting.
+// `security.redact-info-log` setting. Empty fields are preserved.
 func (info *RequestInfo) String() string {
+	urlParam, bodyParam := info.URLParam, info.BodyParam
+	if urlParam != "" {
+		urlParam = logutil.RedactString(urlParam)
+	}
+	if bodyParam != "" {
+		bodyParam = logutil.RedactString(bodyParam)
+	}
 	s := fmt.Sprintf("{ServiceLabel:%s, Method:%s, CallerID:%s, IP:%s, Port:%s, StartTime:%s, URLParam:%s, BodyParam:%s}",
 		info.ServiceLabel, info.Method, info.CallerID, info.IP, info.Port, time.Unix(info.StartTimeStamp, 0),
-		logutil.RedactString(info.URLParam), logutil.RedactString(info.BodyParam))
+		urlParam, bodyParam)
 	return s
 }
 

@@ -117,3 +117,43 @@ func TestRequestInfoStringRedact(t *testing.T) {
 	re.Equal(originalURLParam, info.URLParam)
 	re.Equal(originalBodyParam, info.BodyParam)
 }
+
+func TestRequestInfoStringRedactEmptyFields(t *testing.T) {
+	for _, mode := range []struct {
+		name      string
+		redact    logutil.RedactInfoLogType
+		wantQuery string
+		wantBody  string
+	}{
+		{name: "off", redact: logutil.RedactInfoLogOFF, wantQuery: "query-secret", wantBody: "body-secret"},
+		{name: "on", redact: logutil.RedactInfoLogON, wantQuery: "?", wantBody: "?"},
+		{name: "marker", redact: logutil.RedactInfoLogMarker, wantQuery: "‹query-secret›", wantBody: "‹body-secret›"},
+	} {
+		t.Run(mode.name, func(t *testing.T) {
+			re := require.New(t)
+			setRedactInfoLogForTest(t, mode.redact)
+			for _, testCase := range []struct {
+				name     string
+				urlParam string
+				body     string
+				want     string
+			}{
+				{name: "both empty", want: ", URLParam:, BodyParam:}"},
+				{name: "empty body", urlParam: "query-secret", want: ", URLParam:" + mode.wantQuery + ", BodyParam:}"},
+				{name: "empty query", body: "body-secret", want: ", URLParam:, BodyParam:" + mode.wantBody + "}"},
+			} {
+				info := RequestInfo{URLParam: testCase.urlParam, BodyParam: testCase.body}
+				re.Contains(info.String(), testCase.want, testCase.name)
+				re.Equal(testCase.urlParam, info.URLParam, testCase.name)
+				re.Equal(testCase.body, info.BodyParam, testCase.name)
+			}
+
+			req, err := http.NewRequest(http.MethodGet, "http://127.0.0.1:2379/test", nil)
+			re.NoError(err)
+			info := GetRequestInfo(req)
+			re.JSONEq("{}", info.URLParam)
+			re.Empty(info.BodyParam)
+			re.Contains(info.String(), ", BodyParam:}")
+		})
+	}
+}
