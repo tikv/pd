@@ -472,7 +472,9 @@ func (m *Manager) balanceTableWithProgress(ctx context.Context, groupID string, 
 	m.Unlock()
 	// The lock map is kept for the Manager lifetime so deleting and recreating
 	// a table cannot leave two planners holding different locks for one table.
-	tableLock.Lock()
+	if !tableLock.TryLock() {
+		return nil, nil, false
+	}
 	defer tableLock.Unlock()
 
 	var snapshot *balanceSnapshot
@@ -549,6 +551,12 @@ func (m *Manager) balanceTableWithProgress(ctx context.Context, groupID string, 
 		}
 		changed := findChangedPlan(plans)
 		if snapshot.mode == BalanceBuildLeaders && changed == nil {
+			// Every group must have a complete leader action set before the
+			// table can advance to voter replacement planning. A temporarily
+			// unready group must stay in leader mode and be retried.
+			if len(snapshot.unreadyGroups) > 0 {
+				return plans, nil, false
+			}
 			for id, actions := range snapshot.actions {
 				snapshot.leaderTargets[id] = slices.Clone(actions.LeaderTargets)
 			}
