@@ -193,6 +193,23 @@ func TestGCStateWarmupAcrossPages(t *testing.T) {
 		return invoke(ctx, method, req, reply, cc, opts...)
 	})
 	entries := gcWarmupEntries(100, 512)
+	published := make(map[uint32]*atomic.Bool, len(entries))
+	for _, entry := range entries {
+		published[entry.id] = new(atomic.Bool)
+	}
+	var remaining atomic.Int32
+	remaining.Store(int32(len(entries)))
+	allPublished := make(chan struct{})
+	const onPublished = "github.com/tikv/pd/pkg/gc/onGCStateLoadPublished"
+	require.NoError(t, failpoint.EnableCall(onPublished, func(manager *GCStateManager, id uint32) {
+		if manager != m {
+			return
+		}
+		if seen, expected := published[id]; expected && seen.CompareAndSwap(false, true) && remaining.Add(-1) == 0 {
+			close(allPublished)
+		}
+	}))
+	defer func() { require.NoError(t, failpoint.Disable(onPublished)) }()
 	for start := 0; start < len(entries); start += 60 {
 		require.NoError(t, m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 			for _, entry := range entries[start:min(start+60, len(entries))] {
@@ -211,14 +228,7 @@ func TestGCStateWarmupAcrossPages(t *testing.T) {
 	w.onPage(entries[:256])
 	w.onPage(entries[256:])
 	runGCWarmupTest(t, w)
-	require.Eventually(t, func() bool {
-		for _, entry := range entries {
-			if _, ok := m.gcStateCache.load(entry.id); !ok {
-				return false
-			}
-		}
-		return true
-	}, 5*time.Second, time.Millisecond)
+	gcWarmupWait(t, allPublished)
 	w.onInitialSnapshot(entries)
 	gcWarmupWait(t, w.done)
 	mu.Lock()

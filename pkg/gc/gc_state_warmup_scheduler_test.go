@@ -238,6 +238,11 @@ func TestGCStateWarmupReconcilesSchedulingContainers(t *testing.T) {
 func TestGCStateWarmupEarlierDeadlineWakesWorkers(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := newGCWarmupSchedulerTest(t)
+		isCompleted := func(id uint32) bool {
+			w.stateMu.Lock()
+			defer w.stateMu.Unlock()
+			return w.scopes[id].completed
+		}
 		start := time.Now()
 		failGCWarmupScope(t, w, 100, start, 15*time.Second)
 		w.add(101)
@@ -259,15 +264,15 @@ func TestGCStateWarmupEarlierDeadlineWakesWorkers(t *testing.T) {
 		synctest.Wait()
 		time.Sleep(999 * time.Millisecond)
 		synctest.Wait()
-		require.False(t, w.scopes[101].completed)
+		require.False(t, isCompleted(101))
 		time.Sleep(time.Millisecond)
 		synctest.Wait()
-		require.True(t, w.scopes[101].completed)
-		require.False(t, w.scopes[100].completed)
+		require.True(t, isCompleted(101))
+		require.False(t, isCompleted(100))
 		// New metadata must also interrupt the remaining long retry deadline.
 		w.onPage(gcWarmupEntries(102, 1))
 		synctest.Wait()
-		require.True(t, w.scopes[102].completed)
+		require.True(t, isCompleted(102))
 		w.onInitialSnapshot(gcWarmupEntries(101, 2))
 		synctest.Wait()
 		gcWarmupWait(t, w.done)
