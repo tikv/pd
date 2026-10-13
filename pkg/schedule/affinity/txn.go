@@ -53,6 +53,7 @@ type affinityTxnRunner struct {
 	conditions []clientv3.Cmp
 }
 
+// RunInTxn writes with the authority conditions captured for this operation.
 func (runner affinityTxnRunner) RunInTxn(ctx context.Context, f func(kv.Txn) error) error {
 	return runner.manager.runBalanceTxn(ctx, runner.conditions, f)
 }

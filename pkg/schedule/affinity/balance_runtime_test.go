@@ -396,6 +396,83 @@ func TestTemporaryCandidateDoesNotPreventOtherGroupImprovement(t *testing.T) {
 	require.NotContains(t, state.leaderTargets, ids[0], "temporary omissions must be rebuilt after convergence")
 }
 
+func TestBalanceInvalidationRebuildsTemporaryOmissionsAcrossGroups(t *testing.T) {
+	manager := newBalanceRuntimeManager(t)
+	ids := seedBalanceGroups(t, manager, []uint64{1, 1})
+	blocked, builds := true, 0
+	manager.SetBalanceActionBuilders(nil, func(_ context.Context, group *GroupState, _ GroupKeyRanges, _ []uint64,
+		_ BalanceActionMode, _ any, _ int) BalanceActionBuildResult {
+		if group.ID == ids[0] {
+			builds++
+			if blocked {
+				return BalanceActionBuildResult{Ready: true, Complete: true, TemporaryBlocked: true, Checks: 1}
+			}
+			return BalanceActionBuildResult{Ready: true, Complete: true, Checks: 1,
+				Actions: BalanceActionSet{LeaderTargets: []uint64{2}}}
+		}
+		return BalanceActionBuildResult{Ready: true, Complete: !blocked, Cursor: true, Checks: 1}
+	}, nil, nil, nil)
+	_, err, incomplete := manager.balanceTableWithProgress(t.Context(), ids[0], true, 2)
+	require.NoError(t, err)
+	require.True(t, incomplete)
+	state := manager.balanceTables[TableGroupPrefix(ids[0])]
+	require.NotNil(t, state.pending)
+	require.Contains(t, state.leaderTargets, ids[0])
+
+	// B's heartbeat discards the table snapshot while A still has an omitted
+	// candidate. A must be rebuilt even though its own input has not changed.
+	region := manager.groups[ids[1]].Regions[2].region.Clone(core.WithIncConfVer())
+	manager.ObserveBalanceRegion(region)
+	require.Nil(t, state.pending)
+	require.NotContains(t, state.leaderTargets, ids[0])
+	blocked = false
+	plans, err := manager.balanceTable(t.Context(), ids[0], true)
+	require.NoError(t, err)
+	require.Equal(t, 2, builds)
+	require.NotNil(t, changedPlan(plans))
+	require.Equal(t, ids[0], changedPlan(plans).GroupID)
+	require.Equal(t, uint64(2), manager.GetAffinityGroupState(ids[0]).LeaderStoreID)
+}
+
+func TestBalancePendingInvalidationDoesNotReadPlannerMaps(t *testing.T) {
+	manager := newBalanceRuntimeManager(t)
+	ids := seedBalanceGroups(t, manager, []uint64{1, 1})
+	var resumed chan struct{}
+	manager.SetBalanceActionBuilders(nil, func(_ context.Context, _ *GroupState, _ GroupKeyRanges, _ []uint64,
+		_ BalanceActionMode, cursor any, _ int) BalanceActionBuildResult {
+		if cursor != nil {
+			close(resumed)
+		}
+		return BalanceActionBuildResult{Ready: true, Cursor: true, TemporaryBlocked: true, Checks: 1}
+	}, nil, nil, nil)
+	groups := []*GroupState{manager.GetAffinityGroupState(ids[0])}
+	for range 100 {
+		snapshot := manager.balanceSnapshot(ids[0])
+		require.NoError(t, manager.captureBalanceDependencies(t.Context(), snapshot))
+		manager.buildBalanceActionStage(t.Context(), snapshot, groups, 1)
+		require.True(t, manager.retainBalanceSnapshot(snapshot))
+		resumed = make(chan struct{})
+		done := make(chan bool, 1)
+		manager.Lock()
+		go func() {
+			complete, _, _ := manager.buildBalanceActionStage(t.Context(), snapshot, groups, 1)
+			done <- complete
+		}()
+		<-resumed
+		// The resumed builder records blocked candidates outside the Manager
+		// lock before trying to cache its page. Invalidation must not touch
+		// that mutable snapshot, even though it is still state.pending.
+		manager.invalidateBalanceLocked(ids[1])
+		manager.Unlock()
+		require.False(t, <-done, "the invalidated page must not be cached")
+		manager.RLock()
+		state := manager.balanceTables[snapshot.tableID]
+		require.Nil(t, state.pending)
+		require.NotContains(t, state.leaderTargets, ids[0])
+		manager.RUnlock()
+	}
+}
+
 func TestBalanceWaitsForFullCoverageBeforeCapturingDependencies(t *testing.T) {
 	manager := newBalanceRuntimeManager(t)
 	ids := seedBalanceGroups(t, manager, []uint64{1, 1, 1})
