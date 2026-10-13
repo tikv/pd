@@ -755,6 +755,7 @@ type CreateAffinityGroupsRequest struct {
 
 // AffinityGroup defines an affinity group.
 type AffinityGroup struct {
+	BalancePolicy   string   `json:"balance_policy,omitempty"`
 	ID              string   `json:"id"`
 	CreateTimestamp uint64   `json:"create_timestamp"`
 	LeaderStoreID   uint64   `json:"leader_store_id,omitempty"`
@@ -841,4 +842,9 @@ type AffinityBalancePlan struct {
 type AffinityBalanceScore struct {
 	Leader int `json:"leader"`
 	Voter  int `json:"voter"`
+}
+
+// UpdateAffinityGroupPolicyRequest defines the body for updating an affinity group's balance policy.
+type UpdateAffinityGroupPolicyRequest struct {
+	BalancePolicy string `json:"balance_policy"`
 }

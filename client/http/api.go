@@ -93,6 +93,7 @@ const (
 	// Affinity
 	AffinityGroups         = "/pd/api/v2/affinity-groups"
 	AffinityGroupByID      = "/pd/api/v2/affinity-groups/%s"
+	AffinityGroupPolicy    = "/pd/api/v2/affinity-groups/%s/policy"
 	AffinityGroupRebalance = "/pd/api/v2/affinity-groups/%s/rebalance"
 )
 

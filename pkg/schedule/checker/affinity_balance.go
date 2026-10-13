@@ -15,12 +15,14 @@
 package checker
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"slices"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/affinity"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -41,24 +43,51 @@ type balanceVoterCandidate struct {
 	leader uint64
 }
 
+type balanceRegionScanCursor struct {
+	ranges     []keyutil.KeyRange
+	rangeIndex int
+	nextKey    []byte
+	started    bool
+	lastRegion uint64
+}
+
+type balanceRegionScanResult struct {
+	region  *core.RegionInfo
+	found   bool
+	done    bool
+	scanned bool
+	covered bool
+}
+
 type balanceActionProgress struct {
-	mode             affinity.BalanceActionMode
-	actualGroupID    string
-	actualLeader     uint64
-	actualVoters     []uint64
-	targetLeader     uint64
-	targetVoters     []uint64
-	regions          []balanceRegionRef
-	regionIndex      int
-	candidateIndex   int
-	leaderTargets    []uint64
-	nextLeaderTarget []uint64
-	voters           []balanceVoterCandidate
-	nextVoters       []balanceVoterCandidate
-	baselineRegion   *core.RegionInfo
-	baselineFit      *placement.RegionFit
-	regionBytes      map[uint64]uint64
-	blocked          bool
+	mode                       affinity.BalanceActionMode
+	actualGroupID              string
+	actualLeader               uint64
+	actualVoters               []uint64
+	targetLeader               uint64
+	targetVoters               []uint64
+	storeIDs                   []uint64
+	regionScan                 balanceRegionScanCursor
+	currentRegion              balanceRegionRef
+	hasCurrentRegion           bool
+	candidateIntersectionReady bool
+	candidateIndex             int
+	pendingCandidate           bool
+	pendingCandidateValidated  bool
+	pendingLeader              uint64
+	pendingVoter               balanceVoterCandidate
+	leaderTargets              []uint64
+	nextLeaderTarget           []uint64
+	voters                     []balanceVoterCandidate
+	nextVoters                 []balanceVoterCandidate
+	voterFromIndex             int
+	voterToIndex               int
+	voterLeaderIndex           int
+	voterToChecked             bool
+	baselineRegion             *core.RegionInfo
+	baselineFit                *placement.RegionFit
+	regionBytes                map[uint64]uint64
+	actions                    affinity.BalanceActionSet
 }
 
 func (c *AffinityChecker) balanceRuleMetadata() map[string]string {
@@ -75,21 +104,65 @@ func (c *AffinityChecker) balanceRuleMetadata() map[string]string {
 	return metadata
 }
 
-func (c *AffinityChecker) balanceRegions(group *affinity.GroupState, ranges affinity.GroupKeyRanges) ([]*core.RegionInfo, bool) {
-	if group == nil || len(ranges.KeyRanges) == 0 || !group.AffinitySchedulingAllowed {
-		return nil, false
+func newBalanceRegionScanCursor(ranges affinity.GroupKeyRanges) balanceRegionScanCursor {
+	keyRanges := keyutil.NewKeyRanges(ranges.KeyRanges)
+	keyRanges.Merge()
+	merged := keyRanges.Ranges()
+	cursor := balanceRegionScanCursor{ranges: make([]keyutil.KeyRange, 0, len(merged))}
+	for _, keyRange := range merged {
+		cursor.ranges = append(cursor.ranges, keyutil.KeyRange{
+			StartKey: slices.Clone(keyRange.StartKey),
+			EndKey:   slices.Clone(keyRange.EndKey),
+		})
 	}
-	regions, err := c.cluster.BatchScanRegions(keyutil.NewKeyRanges(ranges.KeyRanges), core.WithOutputMustContainAllKeyRange())
-	if err != nil || len(regions) == 0 {
-		return nil, false
-	}
-	waiting := c.waitingAffinityRegions()
-	for _, region := range regions {
-		if !c.balanceRegionReady(group, region, waiting) {
-			return nil, false
+	return cursor
+}
+
+// next scans at most one region. scanned counts ScanRegions calls; covered is
+// false when a range is not covered. Duplicate regions are skipped one scan
+// at a time so the caller can keep the work budget accurate.
+func (p *balanceRegionScanCursor) next(cluster sche.CheckerCluster) balanceRegionScanResult {
+	for p.rangeIndex < len(p.ranges) {
+		keyRange := p.ranges[p.rangeIndex]
+		if !p.started {
+			p.nextKey = slices.Clone(keyRange.StartKey)
+			p.started = true
 		}
+		if len(keyRange.EndKey) > 0 && bytes.Compare(p.nextKey, keyRange.EndKey) >= 0 {
+			p.rangeIndex++
+			p.started = false
+			continue
+		}
+
+		regions := cluster.ScanRegions(p.nextKey, keyRange.EndKey, 1)
+		if len(regions) == 0 || !balanceRegionCoversKeyRange(regions[0], p.nextKey, keyRange.EndKey) {
+			return balanceRegionScanResult{scanned: true}
+		}
+		region := regions[0]
+		p.nextKey = slices.Clone(region.GetEndKey())
+		if len(region.GetEndKey()) == 0 || (len(keyRange.EndKey) > 0 && bytes.Compare(region.GetEndKey(), keyRange.EndKey) >= 0) {
+			p.rangeIndex++
+			p.started = false
+		}
+		if region.GetID() == p.lastRegion {
+			return balanceRegionScanResult{scanned: true, covered: true}
+		}
+		p.lastRegion = region.GetID()
+		return balanceRegionScanResult{region: region, found: true, scanned: true, covered: true}
 	}
-	return regions, true
+	return balanceRegionScanResult{done: true, covered: true}
+}
+
+func (p *balanceRegionScanCursor) done() bool {
+	return p.rangeIndex >= len(p.ranges)
+}
+
+func balanceRegionCoversKeyRange(region *core.RegionInfo, startKey, endKey []byte) bool {
+	if region == nil || (len(region.GetEndKey()) > 0 && bytes.Compare(region.GetEndKey(), startKey) <= 0) ||
+		(len(region.GetStartKey()) > 0 && bytes.Compare(region.GetStartKey(), startKey) > 0) {
+		return false
+	}
+	return len(endKey) == 0 || len(region.GetStartKey()) == 0 || bytes.Compare(region.GetStartKey(), endKey) < 0
 }
 
 func (c *AffinityChecker) waitingAffinityRegions() map[uint64]struct{} {
@@ -125,22 +198,7 @@ func (c *AffinityChecker) balanceRegionReady(group *affinity.GroupState, region 
 }
 
 func (c *AffinityChecker) validateBalanceAction(ctx context.Context, group *affinity.GroupState, ranges affinity.GroupKeyRanges, plan affinity.BalancePlan) (ready, legal bool) {
-	if !c.balanceSchedulingAllowed() || ctx.Err() != nil {
-		return false, false
-	}
-	regions, covered := c.balanceRegions(group, ranges)
-	if !covered {
-		return false, false
-	}
-	for _, region := range regions {
-		// This also invalidates a cached plan when the checker has not yet seen
-		// the newest heartbeat for this Region.
-		c.affinityManager.ObserveBalanceRegion(region)
-		if !c.isRegionPlacementRuleSatisfiedWithBestLocation(region, true) {
-			return true, false
-		}
-	}
-	if !c.balanceSchedulingAllowed() || ctx.Err() != nil {
+	if !c.balanceSchedulingAllowed() || ctx.Err() != nil || group == nil || len(ranges.KeyRanges) == 0 || !group.AffinitySchedulingAllowed {
 		return false, false
 	}
 	if len(plan.VoterStoreIDs) != len(group.VoterStoreIDs) || plan.LeaderStoreID == 0 || !slices.Contains(plan.VoterStoreIDs, plan.LeaderStoreID) {
@@ -155,6 +213,53 @@ func (c *AffinityChecker) validateBalanceAction(ctx context.Context, group *affi
 			return true, false
 		}
 		seen[storeID] = struct{}{}
+	}
+	scan := newBalanceRegionScanCursor(ranges)
+	waiting := c.waitingAffinityRegions()
+	for {
+		if ctx.Err() != nil {
+			return false, false
+		}
+		scanResult := scan.next(c.cluster)
+		if scanResult.done {
+			break
+		}
+		if !scanResult.covered {
+			return false, false
+		}
+		if !scanResult.found {
+			continue
+		}
+		region := scanResult.region
+		if !c.balanceRegionReady(group, region, waiting) {
+			return false, false
+		}
+		// This also invalidates a cached plan when the checker has not yet seen
+		// the newest heartbeat for this Region.
+		c.affinityManager.ObserveBalanceRegion(region)
+		switch c.regionPlacementBestLocation(region, c.ruleManager.FitRegion(c.cluster, region)) {
+		case bestLocationTemporarilyBlocked:
+			return false, false
+		case bestLocationRejected:
+			return true, false
+		}
+		target := cloneRegionWithReplacePeerStores(region, plan.LeaderStoreID, plan.VoterStoreIDs...)
+		if target == nil {
+			return true, false
+		}
+		fit := c.ruleManager.FitRegionWithoutCache(c.cluster, target)
+		if fit == nil || !fit.IsSatisfied() {
+			return true, false
+		}
+		switch c.regionPlacementBestLocation(target, fit) {
+		case bestLocationTemporarilyBlocked:
+			return false, false
+		case bestLocationRejected:
+			return true, false
+		}
+	}
+	if !c.balanceSchedulingAllowed() || ctx.Err() != nil {
+		return false, false
 	}
 	return true, true
 }
@@ -183,17 +288,13 @@ func (c *AffinityChecker) buildBalanceActionsForTarget(ctx context.Context, actu
 	if mode != affinity.BalanceBuildLeaders && mode != affinity.BalanceBuildVoters {
 		return affinity.BalanceActionBuildResult{BlockTable: true}
 	}
-	if !actual.AffinitySchedulingAllowed || actual.Phase != affinity.PhaseStable || len(target.VoterStoreIDs) != len(actual.VoterStoreIDs) ||
+	if !actual.AffinitySchedulingAllowed || actual.Phase != affinity.PhaseStable || len(ranges.KeyRanges) == 0 || len(target.VoterStoreIDs) != len(actual.VoterStoreIDs) ||
 		target.LeaderStoreID == 0 || !slices.Contains(target.VoterStoreIDs, target.LeaderStoreID) {
 		return affinity.BalanceActionBuildResult{}
 	}
 
 	progress, ok := cursor.(*balanceActionProgress)
-	if !ok || !progress.matches(actual, target, mode) {
-		regions, ready := c.balanceRegions(actual, ranges)
-		if !ready {
-			return affinity.BalanceActionBuildResult{}
-		}
+	if !ok || !progress.matches(actual, target, ranges, storeIDs, mode) {
 		progress = &balanceActionProgress{
 			mode:          mode,
 			actualGroupID: actual.ID,
@@ -201,36 +302,57 @@ func (c *AffinityChecker) buildBalanceActionsForTarget(ctx context.Context, actu
 			actualVoters:  slices.Clone(actual.VoterStoreIDs),
 			targetLeader:  target.LeaderStoreID,
 			targetVoters:  slices.Clone(target.VoterStoreIDs),
-			regions:       make([]balanceRegionRef, 0, len(regions)),
-			regionBytes:   make(map[uint64]uint64, len(regions)),
-		}
-		for _, region := range regions {
-			progress.regions = append(progress.regions, balanceRegionRef{
-				id: region.GetID(), version: region.GetRegionEpoch().GetVersion(), confVer: region.GetRegionEpoch().GetConfVer(),
-				leaderID: region.GetLeader().GetStoreId(),
-			})
-		}
-		if mode == affinity.BalanceBuildLeaders {
-			progress.leaderTargets = slices.Clone(target.VoterStoreIDs)
-		} else {
-			progress.voters = c.balanceVoterCandidates(target, storeIDs)
+			storeIDs:      slices.Clone(storeIDs),
+			regionScan:    newBalanceRegionScanCursor(ranges),
+			regionBytes:   make(map[uint64]uint64),
+			actions:       affinity.BalanceActionSet{VoterReplacements: make(map[uint64]map[uint64][]uint64)},
 		}
 	}
 
 	checks := 0
 	waiting := c.waitingAffinityRegions()
-	for progress.regionIndex < len(progress.regions) {
+	for {
 		if ctx.Err() != nil {
-			return affinity.BalanceActionBuildResult{BlockTable: true, Checks: checks}
+			return blockedBalanceBuild(checks)
 		}
-		ref := progress.regions[progress.regionIndex]
+		if !progress.hasCurrentRegion {
+			if progress.regionScan.done() {
+				return completeBalanceBuild(progress, checks)
+			}
+			if budget > 0 && checks >= budget {
+				return pendingBalanceBuild(progress, checks)
+			}
+			scanResult := progress.regionScan.next(c.cluster)
+			if scanResult.scanned {
+				checks++
+			}
+			if scanResult.done {
+				return completeBalanceBuild(progress, checks)
+			}
+			if !scanResult.covered {
+				return affinity.BalanceActionBuildResult{Checks: checks}
+			}
+			if !scanResult.found {
+				continue
+			}
+			region := scanResult.region
+			if !c.balanceRegionReady(actual, region, waiting) || region.GetLeader() == nil {
+				return affinity.BalanceActionBuildResult{Checks: checks}
+			}
+			progress.currentRegion = balanceRegionRef{
+				id: region.GetID(), version: region.GetRegionEpoch().GetVersion(), confVer: region.GetRegionEpoch().GetConfVer(),
+				leaderID: region.GetLeader().GetStoreId(),
+			}
+			progress.hasCurrentRegion = true
+		}
+		ref := progress.currentRegion
 		region := c.cluster.GetRegion(ref.id)
 		if !c.balanceRegionMatchesRef(region, ref) || !c.balanceRegionReady(actual, region, waiting) {
 			return affinity.BalanceActionBuildResult{Checks: checks}
 		}
 		if progress.baselineFit == nil {
 			if budget > 0 && checks >= budget {
-				return affinity.BalanceActionBuildResult{Cursor: progress, Ready: true, Checks: checks}
+				return pendingBalanceBuild(progress, checks)
 			}
 			baseline := region
 			cachedFit := target.LeaderStoreID == actual.LeaderStoreID && slices.Equal(target.VoterStoreIDs, actual.VoterStoreIDs)
@@ -247,190 +369,435 @@ func (c *AffinityChecker) buildBalanceActionsForTarget(ctx context.Context, actu
 				progress.baselineFit = c.ruleManager.FitRegionWithoutCache(c.cluster, baseline)
 			}
 			if progress.baselineFit == nil || !progress.baselineFit.IsSatisfied() {
-				return affinity.BalanceActionBuildResult{Checks: checks}
+				return blockedBalanceBuild(checks)
 			}
-			if !c.isRegionPlacementRuleSatisfiedWithBestLocation(baseline, cachedFit) {
-				progress.blocked = true
-				return completeBalanceBuild(progress, checks)
+			if c.regionPlacementBestLocation(baseline, progress.baselineFit) != bestLocationSatisfied {
+				return blockedBalanceBuild(checks)
 			}
 			progress.baselineRegion = baseline
 		}
 
 		if mode == affinity.BalanceBuildLeaders {
-			for progress.candidateIndex < len(progress.leaderTargets) {
-				leaderID := progress.leaderTargets[progress.candidateIndex]
-				store := c.cluster.GetStore(leaderID)
-				if store == nil || !store.IsUp() || !store.IsTiKV() || !c.leaderTargetAllowed(store) {
-					progress.candidateIndex++
-					continue
-				}
-				if leaderID != progress.baselineRegion.GetLeader().GetStoreId() && !c.leaderSourceAllowed(progress.baselineRegion.GetLeader().GetStoreId()) {
-					if c.leaderSourceAllowedWithTemporaryState(progress.baselineRegion.GetLeader().GetStoreId()) {
-						progress.blocked = true
+			if progress.candidateIntersectionReady && progress.candidateIndex >= len(progress.leaderTargets) {
+				finishBalanceBuildRegion(progress, region)
+				continue
+			}
+			if !progress.pendingCandidate {
+				if !progress.candidateIntersectionReady {
+					if budget > 0 && checks >= budget {
+						return pendingBalanceBuild(progress, checks)
 					}
-					progress.candidateIndex++
-					continue
+					leaderID, hasCandidate := nextBalanceLeaderTarget(progress, target)
+					if !hasCandidate {
+						progress.candidateIntersectionReady = true
+						finishBalanceBuildRegion(progress, region)
+						continue
+					}
+					checks++
+					if leaderID != progress.baselineRegion.GetLeader().GetStoreId() {
+						status := c.leaderTargetStatus(leaderID)
+						if status == balanceStoreTemporarilyBlocked {
+							return blockedBalanceBuild(checks)
+						}
+						if status == balanceStoreRejected {
+							progress.candidateIndex++
+							continue
+						}
+					}
+					progress.pendingLeader = leaderID
+					progress.pendingCandidate = true
 				}
+				if progress.candidateIntersectionReady {
+					progress.pendingLeader = progress.leaderTargets[progress.candidateIndex]
+					progress.pendingCandidate = true
+				}
+			}
+			leaderID := progress.pendingLeader
+			if !progress.pendingCandidateValidated {
 				if budget > 0 && checks >= budget {
-					return affinity.BalanceActionBuildResult{Cursor: progress, Ready: true, Checks: checks}
-				}
-				virtual := cloneRegionWithReplacePeerStores(progress.baselineRegion, leaderID, target.VoterStoreIDs...)
-				progress.candidateIndex++
-				if virtual == nil {
-					continue
+					return pendingBalanceBuild(progress, checks)
 				}
 				checks++
-				fit := c.ruleManager.FitRegionWithoutCache(c.cluster, virtual)
-				if fit != nil && fit.IsSatisfied() && placementNotWorse(progress.baselineFit, fit) {
-					virtualBest := c.isRegionPlacementRuleSatisfiedWithBestLocation(virtual, false)
-					if virtualBest {
-						progress.nextLeaderTarget = append(progress.nextLeaderTarget, leaderID)
+				if leaderID != progress.baselineRegion.GetLeader().GetStoreId() {
+					if status := c.leaderTargetStatus(leaderID); status == balanceStoreTemporarilyBlocked {
+						return blockedBalanceBuild(checks)
+					} else if status == balanceStoreRejected {
+						progress.pendingCandidate = false
+						progress.candidateIndex++
+						continue
+					}
+					if status := c.leaderSourceStatus(progress.baselineRegion.GetLeader().GetStoreId()); status == balanceStoreTemporarilyBlocked {
+						return blockedBalanceBuild(checks)
+					} else if status == balanceStoreRejected {
+						progress.pendingCandidate = false
+						progress.candidateIndex++
+						continue
+					}
+				}
+				progress.pendingCandidateValidated = true
+			}
+			if budget > 0 && checks >= budget {
+				return pendingBalanceBuild(progress, checks)
+			}
+			virtual := cloneRegionWithReplacePeerStores(progress.baselineRegion, leaderID, target.VoterStoreIDs...)
+			if virtual == nil {
+				progress.pendingCandidate = false
+				progress.pendingCandidateValidated = false
+				progress.candidateIndex++
+				continue
+			}
+			checks++
+			progress.pendingCandidate = false
+			progress.pendingCandidateValidated = false
+			progress.candidateIndex++
+			fit := c.ruleManager.FitRegionWithoutCache(c.cluster, virtual)
+			if fit != nil && fit.IsSatisfied() && placementNotWorse(progress.baselineFit, fit) {
+				status := c.regionPlacementBestLocation(virtual, fit)
+				if status == bestLocationTemporarilyBlocked {
+					return blockedBalanceBuild(checks)
+				}
+				if status == bestLocationSatisfied {
+					progress.nextLeaderTarget = append(progress.nextLeaderTarget, leaderID)
+					if progress.regionScan.done() {
+						progress.actions.LeaderTargets = append(progress.actions.LeaderTargets, leaderID)
 					}
 				}
 			}
 		} else {
-			for progress.candidateIndex < len(progress.voters) {
-				candidate := progress.voters[progress.candidateIndex]
-				leaderStore := c.cluster.GetStore(candidate.leader)
-				source := c.cluster.GetStore(candidate.from)
-				if leaderStore == nil || !leaderStore.IsUp() || !leaderStore.IsTiKV() || !c.leaderTargetAllowed(leaderStore) ||
-					progress.baselineRegion.GetStorePeer(candidate.to) != nil || source == nil || !c.voterSourceAllowed(source) ||
-					(candidate.leader != progress.baselineRegion.GetLeader().GetStoreId() && !c.leaderSourceAllowed(progress.baselineRegion.GetLeader().GetStoreId())) {
-					if source != nil && !c.voterSourceAllowed(source) && c.voterSourceAllowedWithTemporaryState(source) {
-						progress.blocked = true
-					}
-					if candidate.leader != progress.baselineRegion.GetLeader().GetStoreId() &&
-						!c.leaderSourceAllowed(progress.baselineRegion.GetLeader().GetStoreId()) &&
-						c.leaderSourceAllowedWithTemporaryState(progress.baselineRegion.GetLeader().GetStoreId()) {
-						progress.blocked = true
-					}
-					progress.candidateIndex++
-					continue
-				}
+			if !progress.candidateIntersectionReady && !progress.pendingCandidate {
 				if budget > 0 && checks >= budget {
-					return affinity.BalanceActionBuildResult{Cursor: progress, Ready: true, Checks: checks}
+					return pendingBalanceBuild(progress, checks)
 				}
-				voters := slices.Clone(target.VoterStoreIDs)
-				voters[slices.Index(voters, candidate.from)] = candidate.to
-				virtual := cloneRegionWithReplacePeerStores(progress.baselineRegion, candidate.leader, voters...)
-				progress.candidateIndex++
-				if virtual == nil {
+				candidate, candidateState := c.nextBalanceVoterCandidate(progress, target)
+				checks++
+				if candidateState == balanceCandidateBlocked {
+					return blockedBalanceBuild(checks)
+				}
+				if candidateState == balanceCandidateDone {
+					progress.candidateIntersectionReady = true
+					finishBalanceBuildRegion(progress, region)
 					continue
+				}
+				if candidateState != balanceCandidateReady {
+					continue
+				}
+				progress.pendingVoter = candidate
+				progress.pendingCandidate = true
+			}
+			if progress.candidateIntersectionReady && !progress.pendingCandidate {
+				if progress.candidateIndex >= len(progress.voters) {
+					finishBalanceBuildRegion(progress, region)
+					continue
+				}
+				progress.pendingVoter = progress.voters[progress.candidateIndex]
+				progress.pendingCandidate = true
+			}
+			candidate := progress.pendingVoter
+			if !progress.pendingCandidateValidated {
+				if budget > 0 && checks >= budget {
+					return pendingBalanceBuild(progress, checks)
 				}
 				checks++
-				fit := c.ruleManager.FitRegionWithoutCache(c.cluster, virtual)
-				if fit != nil && fit.IsSatisfied() && placementNotWorse(progress.baselineFit, fit) {
-					virtualBest := c.isRegionPlacementRuleSatisfiedWithBestLocation(virtual, false)
-					if virtualBest {
-						progress.nextVoters = append(progress.nextVoters, candidate)
+				blocked, allowed := c.balanceVoterCandidateAllowed(progress.baselineRegion, candidate)
+				if blocked {
+					return blockedBalanceBuild(checks)
+				}
+				if !allowed {
+					progress.pendingCandidate = false
+					if progress.candidateIntersectionReady {
+						progress.candidateIndex++
+					}
+					continue
+				}
+				progress.pendingCandidateValidated = true
+			}
+			if budget > 0 && checks >= budget {
+				return pendingBalanceBuild(progress, checks)
+			}
+			fromIndex := slices.Index(target.VoterStoreIDs, candidate.from)
+			if fromIndex < 0 {
+				return blockedBalanceBuild(checks)
+			}
+			voters := slices.Clone(target.VoterStoreIDs)
+			voters[fromIndex] = candidate.to
+			virtual := cloneRegionWithReplacePeerStores(progress.baselineRegion, candidate.leader, voters...)
+			progress.pendingCandidate = false
+			progress.pendingCandidateValidated = false
+			if progress.candidateIntersectionReady {
+				progress.candidateIndex++
+			}
+			if virtual == nil {
+				continue
+			}
+			checks++
+			fit := c.ruleManager.FitRegionWithoutCache(c.cluster, virtual)
+			if fit != nil && fit.IsSatisfied() && placementNotWorse(progress.baselineFit, fit) {
+				status := c.regionPlacementBestLocation(virtual, fit)
+				if status == bestLocationTemporarilyBlocked {
+					return blockedBalanceBuild(checks)
+				}
+				if status == bestLocationSatisfied {
+					progress.nextVoters = append(progress.nextVoters, candidate)
+					if progress.regionScan.done() {
+						addBalanceVoterAction(&progress.actions, candidate)
 					}
 				}
 			}
 		}
-
-		progress.regionBytes[region.GetID()] = approximateBalanceRegionBytes(region)
-		if mode == affinity.BalanceBuildLeaders {
-			progress.leaderTargets = progress.nextLeaderTarget
-			progress.nextLeaderTarget = nil
-		} else {
-			progress.voters = progress.nextVoters
-			progress.nextVoters = nil
-		}
-		progress.regionIndex++
-		progress.candidateIndex = 0
-		progress.baselineFit = nil
-		progress.baselineRegion = nil
 	}
-	return completeBalanceBuild(progress, checks)
 }
 
-func (p *balanceActionProgress) matches(actual *affinity.GroupState, target *affinity.Group, mode affinity.BalanceActionMode) bool {
+func (p *balanceActionProgress) matches(actual *affinity.GroupState, target *affinity.Group, ranges affinity.GroupKeyRanges, storeIDs []uint64, mode affinity.BalanceActionMode) bool {
 	return p.mode == mode && p.actualGroupID == actual.ID && p.actualLeader == actual.LeaderStoreID &&
 		slices.Equal(p.actualVoters, actual.VoterStoreIDs) && p.targetLeader == target.LeaderStoreID &&
-		slices.Equal(p.targetVoters, target.VoterStoreIDs)
+		slices.Equal(p.targetVoters, target.VoterStoreIDs) && slices.Equal(p.storeIDs, storeIDs) && balanceRangesEqual(p.regionScan.ranges, ranges)
+}
+
+func balanceRangesEqual(left []keyutil.KeyRange, right affinity.GroupKeyRanges) bool {
+	ranges := newBalanceRegionScanCursor(right).ranges
+	if len(left) != len(ranges) {
+		return false
+	}
+	for i := range left {
+		if !bytes.Equal(left[i].StartKey, ranges[i].StartKey) || !bytes.Equal(left[i].EndKey, ranges[i].EndKey) {
+			return false
+		}
+	}
+	return true
+}
+
+func pendingBalanceBuild(progress *balanceActionProgress, checks int) affinity.BalanceActionBuildResult {
+	return affinity.BalanceActionBuildResult{Actions: affinity.BalanceActionSet{VoterReplacements: make(map[uint64]map[uint64][]uint64)},
+		Cursor: progress, Ready: true, Checks: checks, RegionBytes: progress.regionBytes}
+}
+
+func blockedBalanceBuild(checks int) affinity.BalanceActionBuildResult {
+	return affinity.BalanceActionBuildResult{BlockTable: true, Checks: checks}
+}
+
+func finishBalanceBuildRegion(progress *balanceActionProgress, region *core.RegionInfo) {
+	progress.regionBytes[region.GetID()] = approximateBalanceRegionBytes(region)
+	if progress.mode == affinity.BalanceBuildLeaders {
+		progress.leaderTargets = progress.nextLeaderTarget
+		progress.nextLeaderTarget = nil
+	} else {
+		progress.voters = progress.nextVoters
+		progress.nextVoters = nil
+	}
+	progress.hasCurrentRegion = false
+	progress.currentRegion = balanceRegionRef{}
+	progress.candidateIndex = 0
+	progress.pendingCandidate = false
+	progress.baselineFit = nil
+	progress.baselineRegion = nil
+}
+
+func nextBalanceLeaderTarget(progress *balanceActionProgress, target *affinity.Group) (uint64, bool) {
+	if !progress.candidateIntersectionReady {
+		if progress.candidateIndex >= len(target.VoterStoreIDs) {
+			return 0, false
+		}
+		return target.VoterStoreIDs[progress.candidateIndex], true
+	}
+	if progress.candidateIndex >= len(progress.leaderTargets) {
+		return 0, false
+	}
+	return progress.leaderTargets[progress.candidateIndex], true
 }
 
 func completeBalanceBuild(progress *balanceActionProgress, checks int) affinity.BalanceActionBuildResult {
-	actions := affinity.BalanceActionSet{VoterReplacements: make(map[uint64]map[uint64][]uint64)}
-	if progress.mode == affinity.BalanceBuildLeaders {
-		actions.LeaderTargets = slices.Clone(progress.leaderTargets)
-	} else {
-		for _, candidate := range progress.voters {
-			targets := actions.VoterReplacements[candidate.from]
-			if targets == nil {
-				targets = make(map[uint64][]uint64)
-				actions.VoterReplacements[candidate.from] = targets
-			}
-			targets[candidate.to] = append(targets[candidate.to], candidate.leader)
-		}
+	if progress.actions.VoterReplacements == nil {
+		progress.actions.VoterReplacements = make(map[uint64]map[uint64][]uint64)
 	}
 	for _, size := range progress.regionBytes {
-		actions.MoveBytes += size
+		progress.actions.MoveBytes += size
 	}
 	return affinity.BalanceActionBuildResult{
-		Actions: actions, Complete: true, Ready: !progress.blocked, BlockTable: progress.blocked, Checks: checks, RegionBytes: progress.regionBytes,
+		Actions: progress.actions, Complete: true, Ready: true, Checks: checks, RegionBytes: progress.regionBytes,
 	}
 }
 
-func (c *AffinityChecker) balanceVoterCandidates(target *affinity.Group, storeIDs []uint64) []balanceVoterCandidate {
+func addBalanceVoterAction(actions *affinity.BalanceActionSet, candidate balanceVoterCandidate) {
+	targets := actions.VoterReplacements[candidate.from]
+	if targets == nil {
+		targets = make(map[uint64][]uint64)
+		actions.VoterReplacements[candidate.from] = targets
+	}
+	targets[candidate.to] = append(targets[candidate.to], candidate.leader)
+}
+
+type balanceCandidateState uint8
+
+const (
+	balanceCandidatePending balanceCandidateState = iota
+	balanceCandidateReady
+	balanceCandidateBlocked
+	balanceCandidateDone
+)
+
+func (c *AffinityChecker) nextBalanceVoterCandidate(progress *balanceActionProgress, target *affinity.Group) (balanceVoterCandidate, balanceCandidateState) {
+	if progress.voterFromIndex >= len(target.VoterStoreIDs) {
+		return balanceVoterCandidate{}, balanceCandidateDone
+	}
+	from := target.VoterStoreIDs[progress.voterFromIndex]
+	if progress.voterToIndex >= len(progress.storeIDs) {
+		progress.voterFromIndex++
+		progress.voterToIndex = 0
+		progress.voterLeaderIndex = 0
+		progress.voterToChecked = false
+		return balanceVoterCandidate{}, balanceCandidatePending
+	}
+	to := progress.storeIDs[progress.voterToIndex]
+	if !progress.voterToChecked {
+		progress.voterToChecked = true
+		store := c.cluster.GetStore(to)
+		status := balanceStoreRejected
+		if store != nil && store.IsUp() && store.IsTiKV() && !slices.Contains(target.VoterStoreIDs, to) {
+			status = c.voterTargetAllowed(store)
+		}
+		if c.cluster.GetStore(from) == nil || status == balanceStoreRejected {
+			progress.voterToIndex++
+			progress.voterLeaderIndex = 0
+			progress.voterToChecked = false
+		} else if status == balanceStoreTemporarilyBlocked {
+			return balanceVoterCandidate{}, balanceCandidateBlocked
+		}
+		return balanceVoterCandidate{}, balanceCandidatePending
+	}
+	if progress.voterLeaderIndex >= len(target.VoterStoreIDs) {
+		progress.voterToIndex++
+		progress.voterLeaderIndex = 0
+		progress.voterToChecked = false
+		return balanceVoterCandidate{}, balanceCandidatePending
+	}
+	leader := target.VoterStoreIDs[progress.voterLeaderIndex]
+	if progress.voterLeaderIndex == progress.voterFromIndex {
+		leader = to
+	}
+	progress.voterLeaderIndex++
+	if progress.voterLeaderIndex >= len(target.VoterStoreIDs) {
+		progress.voterToIndex++
+		progress.voterLeaderIndex = 0
+		progress.voterToChecked = false
+	}
+	leaderStore := c.cluster.GetStore(leader)
+	if leaderStore == nil || !leaderStore.IsUp() || !leaderStore.IsTiKV() {
+		return balanceVoterCandidate{}, balanceCandidatePending
+	}
+	status := c.leaderTargetStatus(leader)
+	if status == balanceStoreTemporarilyBlocked {
+		return balanceVoterCandidate{}, balanceCandidateBlocked
+	}
+	if status == balanceStoreRejected {
+		return balanceVoterCandidate{}, balanceCandidatePending
+	}
+	return balanceVoterCandidate{from: from, to: to, leader: leader}, balanceCandidateReady
+}
+
+func (c *AffinityChecker) balanceVoterCandidateAllowed(region *core.RegionInfo, candidate balanceVoterCandidate) (blocked, allowed bool) {
+	leaderStore := c.cluster.GetStore(candidate.leader)
+	targetStore := c.cluster.GetStore(candidate.to)
+	source := c.cluster.GetStore(candidate.from)
+	if leaderStore == nil || !leaderStore.IsUp() || !leaderStore.IsTiKV() {
+		return false, false
+	}
+	if status := c.leaderTargetStatus(candidate.leader); status == balanceStoreTemporarilyBlocked {
+		return true, false
+	} else if status == balanceStoreRejected {
+		return false, false
+	}
+	if targetStore == nil || !targetStore.IsUp() || !targetStore.IsTiKV() {
+		return false, false
+	}
+	if status := c.voterTargetAllowed(targetStore); status == balanceStoreTemporarilyBlocked {
+		return true, false
+	} else if status == balanceStoreRejected {
+		return false, false
+	}
+	if region.GetStorePeer(candidate.to) != nil || source == nil {
+		return false, false
+	}
+	if status := c.voterSourceStatus(source); status == balanceStoreTemporarilyBlocked {
+		return true, false
+	} else if status == balanceStoreRejected {
+		return false, false
+	}
+	if candidate.leader != region.GetLeader().GetStoreId() {
+		if status := c.leaderSourceStatus(region.GetLeader().GetStoreId()); status == balanceStoreTemporarilyBlocked {
+			return true, false
+		} else if status == balanceStoreRejected {
+			return false, false
+		}
+	}
+	return false, true
+}
+
+type balanceStoreStatus uint8
+
+const (
+	balanceStoreAllowed balanceStoreStatus = iota
+	balanceStoreRejected
+	balanceStoreTemporarilyBlocked
+)
+
+func (c *AffinityChecker) voterTargetAllowed(store *core.StoreInfo) balanceStoreStatus {
 	conf := c.cluster.GetSharedConfig()
-	moveState := &filter.StoreStateFilter{ActionScope: c.Name(), MoveRegion: true, AllowTemporaryStates: true}
-	specialUse := filter.NewSpecialUseFilter(c.Name())
-	storage := filter.NewStorageThresholdFilter(c.Name())
-	stores := make(map[uint64]*core.StoreInfo, len(storeIDs))
-	for _, store := range c.cluster.GetStores() {
-		stores[store.GetID()] = store
+	strict := &filter.StoreStateFilter{ActionScope: c.Name(), MoveRegion: true}
+	temporary := &filter.StoreStateFilter{ActionScope: c.Name(), MoveRegion: true, AllowTemporaryStates: true}
+	if !filter.NewSpecialUseFilter(c.Name()).Target(conf, store).IsOK() || !filter.NewStorageThresholdFilter(c.Name()).Target(conf, store).IsOK() {
+		return balanceStoreRejected
 	}
-	candidates := make([]balanceVoterCandidate, 0)
-	for i, from := range target.VoterStoreIDs {
-		if c.cluster.GetStore(from) == nil {
-			continue
-		}
-		for _, to := range storeIDs {
-			store := stores[to]
-			if store == nil || slices.Contains(target.VoterStoreIDs, to) || !store.IsUp() || !store.IsTiKV() ||
-				!moveState.Target(conf, store).IsOK() || !specialUse.Target(conf, store).IsOK() || !storage.Target(conf, store).IsOK() {
-				continue
-			}
-			voters := slices.Clone(target.VoterStoreIDs)
-			voters[i] = to
-			for _, leader := range voters {
-				leaderStore := stores[leader]
-				if leaderStore == nil || !leaderStore.IsUp() || !leaderStore.IsTiKV() || !c.leaderTargetAllowed(leaderStore) {
-					continue
-				}
-				candidates = append(candidates, balanceVoterCandidate{from: from, to: to, leader: leader})
-			}
-		}
+	if strict.Target(conf, store).IsOK() {
+		return balanceStoreAllowed
 	}
-	return candidates
+	if temporary.Target(conf, store).IsOK() {
+		return balanceStoreTemporarilyBlocked
+	}
+	return balanceStoreRejected
 }
 
-func (c *AffinityChecker) leaderTargetAllowed(store *core.StoreInfo) bool {
-	return (&filter.StoreStateFilter{ActionScope: c.Name(), TransferLeader: true, AllowTemporaryStates: true}).
-		Target(c.cluster.GetSharedConfig(), store).IsOK()
-}
-
-func (c *AffinityChecker) leaderSourceAllowed(storeID uint64) bool {
+func (c *AffinityChecker) leaderTargetStatus(storeID uint64) balanceStoreStatus {
 	store := c.cluster.GetStore(storeID)
-	return store != nil && (&filter.StoreStateFilter{ActionScope: c.Name(), TransferLeader: true, AllowTemporaryStates: true}).
-		Source(c.cluster.GetSharedConfig(), store).IsOK()
+	if store == nil || !store.IsUp() || !store.IsTiKV() {
+		return balanceStoreRejected
+	}
+	strict := &filter.StoreStateFilter{ActionScope: c.Name(), TransferLeader: true}
+	temporary := &filter.StoreStateFilter{ActionScope: c.Name(), TransferLeader: true, AllowTemporaryStates: true}
+	if strict.Target(c.cluster.GetSharedConfig(), store).IsOK() {
+		return balanceStoreAllowed
+	}
+	if temporary.Target(c.cluster.GetSharedConfig(), store).IsOK() {
+		return balanceStoreTemporarilyBlocked
+	}
+	return balanceStoreRejected
 }
 
-func (c *AffinityChecker) voterSourceAllowed(store *core.StoreInfo) bool {
-	return (&filter.StoreStateFilter{ActionScope: c.Name(), MoveRegion: true}).
-		Source(c.cluster.GetSharedConfig(), store).IsOK()
-}
-
-func (c *AffinityChecker) voterSourceAllowedWithTemporaryState(store *core.StoreInfo) bool {
-	return (&filter.StoreStateFilter{ActionScope: c.Name(), MoveRegion: true, AllowTemporaryStates: true}).
-		Source(c.cluster.GetSharedConfig(), store).IsOK()
-}
-
-func (c *AffinityChecker) leaderSourceAllowedWithTemporaryState(storeID uint64) bool {
+func (c *AffinityChecker) leaderSourceStatus(storeID uint64) balanceStoreStatus {
 	store := c.cluster.GetStore(storeID)
-	return store != nil && (&filter.StoreStateFilter{ActionScope: c.Name(), TransferLeader: true, AllowTemporaryStates: true}).
-		Source(c.cluster.GetSharedConfig(), store).IsOK()
+	if store == nil {
+		return balanceStoreRejected
+	}
+	strict := &filter.StoreStateFilter{ActionScope: c.Name(), TransferLeader: true}
+	temporary := &filter.StoreStateFilter{ActionScope: c.Name(), TransferLeader: true, AllowTemporaryStates: true}
+	if strict.Source(c.cluster.GetSharedConfig(), store).IsOK() {
+		return balanceStoreAllowed
+	}
+	if temporary.Source(c.cluster.GetSharedConfig(), store).IsOK() {
+		return balanceStoreTemporarilyBlocked
+	}
+	return balanceStoreRejected
+}
+
+func (c *AffinityChecker) voterSourceStatus(store *core.StoreInfo) balanceStoreStatus {
+	strict := &filter.StoreStateFilter{ActionScope: c.Name(), MoveRegion: true}
+	temporary := &filter.StoreStateFilter{ActionScope: c.Name(), MoveRegion: true, AllowTemporaryStates: true}
+	if strict.Source(c.cluster.GetSharedConfig(), store).IsOK() {
+		return balanceStoreAllowed
+	}
+	if temporary.Source(c.cluster.GetSharedConfig(), store).IsOK() {
+		return balanceStoreTemporarilyBlocked
+	}
+	return balanceStoreRejected
 }
 
 func (c *AffinityChecker) balanceStoreIDs() []uint64 {

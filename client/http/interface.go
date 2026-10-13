@@ -145,6 +145,8 @@ type Client interface {
 	GetAllAffinityGroups(ctx context.Context) (map[string]*AffinityGroupState, error)
 	// UpdateAffinityGroupPeers updates the leader and voter stores of an affinity group.
 	UpdateAffinityGroupPeers(ctx context.Context, groupID string, leaderStoreID uint64, voterStoreIDs []uint64) (*AffinityGroupState, error)
+	// UpdateAffinityGroupPolicy updates the balance policy of an affinity group.
+	UpdateAffinityGroupPolicy(ctx context.Context, groupID string, balancePolicy string) (*AffinityGroupState, error)
 	// RebalanceAffinityGroup previews or applies one affinity balance step.
 	RebalanceAffinityGroup(ctx context.Context, groupID string, apply bool) ([]AffinityBalancePlan, error)
 	// DeleteAffinityGroup deletes an affinity group by group ID.
@@ -1445,6 +1447,26 @@ func (c *client) AddAffinityGroupKeyRanges(ctx context.Context, groupKeyRanges m
 		return nil, err
 	}
 	return resp.AffinityGroups, nil
+}
+
+// UpdateAffinityGroupPolicy updates the balance policy of an affinity group.
+func (c *client) UpdateAffinityGroupPolicy(ctx context.Context, groupID string, balancePolicy string) (*AffinityGroupState, error) {
+	req := UpdateAffinityGroupPolicyRequest{BalancePolicy: balancePolicy}
+	reqJSON, err := json.Marshal(req)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	var state AffinityGroupState
+	err = c.request(ctx, newRequestInfo().
+		WithName("UpdateAffinityGroupPolicy").
+		WithURI(fmt.Sprintf(AffinityGroupPolicy, groupID)).
+		WithMethod(http.MethodPatch).
+		WithBody(reqJSON).
+		WithResp(&state))
+	if err != nil {
+		return nil, err
+	}
+	return &state, nil
 }
 
 // RemoveAffinityGroupKeyRanges removes key ranges from affinity groups.

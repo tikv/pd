@@ -204,6 +204,38 @@ func TestBalanceRuntimeChecksSelectedAction(t *testing.T) {
 	require.Equal(t, 1, changedPlans(plans))
 }
 
+func TestBalanceRuntimeRejectedActionCannotReturnFromCanonicalCache(t *testing.T) {
+	manager := newBalanceRuntimeManager(t)
+	ids := seedBalanceGroups(t, manager, []uint64{1, 1})
+	manager.SetBalanceActionBuilder(func(_ context.Context, group *GroupState, _ GroupKeyRanges) (BalanceActionSet, bool) {
+		return BalanceActionSet{LeaderTargets: group.VoterStoreIDs}, true
+	}, nil, nil)
+	snapshot := manager.balanceSnapshot(ids[0])
+	group := manager.GetAffinityGroupState(ids[0])
+	actions := BalanceActionSet{LeaderTargets: []uint64{1, 2, 3},
+		VoterReplacements: map[uint64]map[uint64][]uint64{3: {4: {1, 2}}}, MoveBytes: 123}
+	manager.Lock()
+	state := manager.balanceTables[snapshot.tableID]
+	state.fingerprint = snapshot.fingerprint
+	state.actions[group.ID] = cloneBalanceActionSet(actions)
+	state.leaderTargets[group.ID] = []uint64{1, 2, 3}
+	state.voterActions[group.ID] = cloneBalanceActionSet(actions)
+	manager.Unlock()
+	manager.removeIllegalBalanceAction(snapshot, group,
+		BalancePlan{LeaderStoreID: 2, VoterStoreIDs: group.VoterStoreIDs})
+	manager.RLock()
+	require.NotContains(t, state.leaderTargets[group.ID], uint64(2))
+	require.NotContains(t, state.voterActions[group.ID].LeaderTargets, uint64(2))
+	manager.RUnlock()
+	manager.removeIllegalBalanceAction(snapshot, group,
+		BalancePlan{LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2, 4}})
+	manager.RLock()
+	require.Equal(t, []uint64{1}, state.voterActions[group.ID].VoterReplacements[3][4])
+	require.Equal(t, uint64(123), state.voterActions[group.ID].MoveBytes)
+	manager.RUnlock()
+	require.Contains(t, actions.VoterReplacements[3][4], uint64(2), "input action sets must remain immutable")
+}
+
 func TestBalanceRuntimeRejectsUnobservedPersistentUpdate(t *testing.T) {
 	manager := newBalanceRuntimeManager(t)
 	ids := seedBalanceGroups(t, manager, []uint64{1, 1, 1})
@@ -268,4 +300,15 @@ func TestBalanceRuntimeOrdinaryHeartbeatKeepsActions(t *testing.T) {
 	manager.ObserveBalanceRegion(changed)
 	require.Greater(t, state.version, version)
 	require.Empty(t, state.actions)
+}
+
+func TestBalanceTableLockReleasedAfterLastUser(t *testing.T) {
+	manager := newBalanceRuntimeManager(t)
+	first := manager.acquireBalanceTableLock("table")
+	second := manager.acquireBalanceTableLock("table")
+	require.Same(t, first, second)
+	manager.releaseBalanceTableLock("table", first)
+	require.Contains(t, manager.balanceLocks, "table")
+	manager.releaseBalanceTableLock("table", second)
+	require.Empty(t, manager.balanceLocks)
 }

@@ -280,6 +280,7 @@ func (s *Service) RegisterAffinityRouter() {
 	router.GET("", getAllAffinityGroups)
 	router.GET("/:group_id", getAffinityGroup)
 	router.POST("/:group_id/rebalance", rebalanceAffinityGroup)
+	router.PATCH("/:group_id/policy", updateAffinityGroupPolicy)
 }
 
 // getHealth returns the health status of the TSO service.
@@ -1820,4 +1821,46 @@ func rebalanceAffinityGroup(c *gin.Context) {
 type RebalanceAffinityGroupRequest struct {
 	// Apply submits one group at a time and waits for convergence before continuing.
 	Apply bool `json:"apply"`
+}
+
+type updateAffinityGroupPolicyRequest struct {
+	BalancePolicy affinity.BalancePolicy `json:"balance_policy"`
+}
+
+// @Tags     affinity-groups
+// @Summary  Update the balance policy of an affinity group.
+// @Param    group_id  path  string  true  "The group id of the affinity group"
+// @Param    body      body  updateAffinityGroupPolicyRequest  true  "New balance policy: auto or fixed"
+// @Produce  json
+// @Success  200  {object}  *affinity.GroupState
+// @Failure  400  {string}  string  "The input is invalid."
+// @Failure  404  {string}  string  "Affinity group not found."
+// @Failure  409  {string}  string  "Affinity group changed during the update."
+// @Failure  500  {string}  string  "Scheduling service failed to proceed the request."
+// @Router   /affinity-groups/{group_id}/policy [patch]
+func updateAffinityGroupPolicy(c *gin.Context) {
+	manager, ok := getAffinityManager(c)
+	if !ok {
+		return
+	}
+	var req updateAffinityGroupPolicyRequest
+	if err := c.BindJSON(&req); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
+		return
+	}
+	state, err := manager.UpdateAffinityGroupPolicy(c.Param("group_id"), req.BalancePolicy)
+	if err != nil {
+		switch {
+		case errs.ErrInvalidGroupID.Equal(err), errs.ErrAffinityGroupContent.Equal(err):
+			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
+		case errs.ErrAffinityGroupNotFound.Equal(err):
+			c.AbortWithStatusJSON(http.StatusNotFound, err.Error())
+		case errs.ErrEtcdTxnConflict.Equal(err):
+			c.AbortWithStatusJSON(http.StatusConflict, err.Error())
+		default:
+			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	c.IndentedJSON(http.StatusOK, state)
 }
