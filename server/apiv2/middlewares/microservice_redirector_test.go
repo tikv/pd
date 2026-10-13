@@ -55,6 +55,18 @@ func TestAffinityMicroserviceRedirectRules(t *testing.T) {
 			path:   pdAffinityPath,
 		},
 		{
+			name:       "update affinity policy",
+			method:     http.MethodPatch,
+			path:       pdAffinityPath + "/_tidb_t_42/policy",
+			wantMatch:  true,
+			wantTarget: targetAffinityPath + "/_tidb_t_42/policy",
+		},
+		{
+			name:   "batch affinity patch remains on PD",
+			method: http.MethodPatch,
+			path:   pdAffinityPath,
+		},
+		{
 			name:   "other affinity post remains on PD",
 			method: http.MethodPost,
 			path:   pdAffinityPath + "/_tidb_t_42",

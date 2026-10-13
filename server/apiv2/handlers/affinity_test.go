@@ -15,10 +15,16 @@
 package handlers
 
 import (
+	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+
+	"github.com/tikv/pd/pkg/schedule/affinity"
 )
 
 func TestRegisterAffinityPolicyRoute(t *testing.T) {
@@ -32,4 +38,25 @@ func TestRegisterAffinityPolicyRoute(t *testing.T) {
 		}
 	}
 	require.Fail(t, "affinity policy route is not registered")
+}
+
+func TestAffinityBalanceErrorsHaveExplicitHTTPStatus(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		code int
+	}{
+		{affinity.ErrBalanceBusy, http.StatusConflict},
+		{affinity.ErrBalanceConflict, http.StatusConflict},
+		{affinity.ErrBalanceNotReady, http.StatusServiceUnavailable},
+		{context.DeadlineExceeded, http.StatusGatewayTimeout},
+	} {
+		t.Run(tc.err.Error(), func(t *testing.T) {
+			response := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(response)
+			err := fmt.Errorf("already committed 1 group: %w", tc.err)
+			require.True(t, handleAffinityError(ctx, err))
+			require.Equal(t, tc.code, response.Code)
+			require.Contains(t, response.Body.String(), "already committed 1 group")
+		})
+	}
 }

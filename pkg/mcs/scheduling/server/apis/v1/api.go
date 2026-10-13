@@ -1771,9 +1771,12 @@ func getAffinityGroup(c *gin.Context) {
 // @Param    group_id  path  string                             true  "The group id of the affinity group"
 // @Param    body      body  RebalanceAffinityGroupRequest      true  "Apply submits groups sequentially and waits for convergence"
 // @Produce  json
-// @Success  200  {array}   affinity.BalancePlan  "Final group targets; operators converge asynchronously"
+// @Success  200  {array}   affinity.BalancePlan  "Preview targets or completed group changes"
 // @Failure  400  {string}  string                "The input is invalid."
 // @Failure  404  {string}  string                "Affinity group not found."
+// @Failure  409  {string}  string                "Rebalance is busy or the plan changed."
+// @Failure  503  {string}  string                "Affinity group is not ready."
+// @Failure  504  {string}  string                "Rebalance timed out."
 // @Failure  500  {string}  string                "Scheduling service failed to proceed the request."
 // @Router   /affinity-groups/{group_id}/rebalance [post]
 func rebalanceAffinityGroup(c *gin.Context) {

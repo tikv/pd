@@ -147,7 +147,7 @@ type Client interface {
 	UpdateAffinityGroupPeers(ctx context.Context, groupID string, leaderStoreID uint64, voterStoreIDs []uint64) (*AffinityGroupState, error)
 	// UpdateAffinityGroupPolicy updates the balance policy of an affinity group.
 	UpdateAffinityGroupPolicy(ctx context.Context, groupID string, balancePolicy string) (*AffinityGroupState, error)
-	// RebalanceAffinityGroup previews or applies one affinity balance step.
+	// RebalanceAffinityGroup previews or applies a complete table rebalance.
 	RebalanceAffinityGroup(ctx context.Context, groupID string, apply bool) ([]AffinityBalancePlan, error)
 	// DeleteAffinityGroup deletes an affinity group by group ID.
 	DeleteAffinityGroup(ctx context.Context, groupID string, force bool) error
@@ -1370,7 +1370,7 @@ func (c *client) UpdateAffinityGroupPeers(ctx context.Context, groupID string, l
 	return &state, nil
 }
 
-// RebalanceAffinityGroup previews or applies one affinity balance step.
+// RebalanceAffinityGroup previews or applies a complete table rebalance.
 func (c *client) RebalanceAffinityGroup(ctx context.Context, groupID string, apply bool) ([]AffinityBalancePlan, error) {
 	reqJSON, err := json.Marshal(RebalanceAffinityGroupRequest{Apply: apply})
 	if err != nil {

@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 )
 
@@ -66,6 +67,7 @@ func (m *Manager) rebalanceTable(ctx context.Context, groupID string, apply bool
 	var (
 		snapshot       *balanceSnapshot
 		wasStable      bool
+		restoreStable  bool
 		originalFinger balanceFingerprint
 	)
 	m.refreshBalanceStores()
@@ -82,7 +84,7 @@ func (m *Manager) rebalanceTable(ctx context.Context, groupID string, apply bool
 		if snapshot != nil {
 			m.releaseBalanceDependencies(snapshot)
 		}
-		if !wasStable {
+		if !wasStable || !restoreStable {
 			return
 		}
 		m.Lock()
@@ -246,15 +248,13 @@ func (m *Manager) rebalanceTable(ctx context.Context, groupID string, apply bool
 		plans[i].Revision = revision
 	}
 	if !changed {
-		m.Lock()
-		if state := m.balanceTables[tableID]; state != nil && m.balanceFingerprintLocked(state) == snapshot.fingerprint {
-			state.phase = balanceStable
-			state.fingerprint = snapshot.fingerprint
-		}
-		m.Unlock()
+		// A reconstruction with no better final layout does not prove that
+		// the current layout has no improving automatic single-step action.
+		restoreStable = true
 		return plans, nil
 	}
 	if !apply {
+		restoreStable = true
 		return plans, nil
 	}
 	if snapshot.validator == nil {
@@ -265,7 +265,7 @@ func (m *Manager) rebalanceTable(ctx context.Context, groupID string, apply bool
 		expectedGroups[group.ID] = group.Group
 	}
 	committedGroups := 0
-	for _, plan := range plans {
+	for planIndex, plan := range plans {
 		if !plan.Changed {
 			continue
 		}
@@ -311,13 +311,14 @@ func (m *Manager) rebalanceTable(ctx context.Context, groupID string, apply bool
 			return nil, manualBalancePartialError(ErrBalanceConflict, committedGroups)
 		}
 		committedGroups++
-		group := expectedGroups[plan.GroupID]
-		group.LeaderStoreID = plan.LeaderStoreID
-		group.VoterStoreIDs = normalizeVoters(plan.VoterStoreIDs)
-		expectedGroups[plan.GroupID] = group
+		expected := expectedGroups[plan.GroupID]
+		expected.LeaderStoreID = plan.LeaderStoreID
+		expected.VoterStoreIDs = normalizeVoters(plan.VoterStoreIDs)
+		expectedGroups[plan.GroupID] = expected
 		if err := m.waitManualBalanceConvergence(executionCtx, current, plan); err != nil {
 			return nil, manualBalancePartialError(err, committedGroups)
 		}
+		plans[planIndex].Status = "applied"
 	}
 	return plans, nil
 }
@@ -380,7 +381,7 @@ func manualBalanceTargetsMatch(groups []*GroupState, expected map[string]Group) 
 	}
 	for _, group := range groups {
 		want, ok := expected[group.ID]
-		if !ok || group.Group.String() != want.String() {
+		if !ok || group.String() != want.String() {
 			return false
 		}
 	}
@@ -413,9 +414,11 @@ func (m *Manager) waitManualBalanceConvergence(ctx context.Context, snapshot *ba
 			return err
 		}
 		if ready && legal {
-			return nil
+			if current := m.GetAffinityGroupState(plan.GroupID); current != nil && current.Phase == PhaseStable {
+				return nil
+			}
 		}
-		if ready {
+		if ready && !legal {
 			return ErrBalanceConflict
 		}
 		select {

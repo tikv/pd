@@ -136,9 +136,6 @@ func TestAffinityManualRebalanceTableWithFixedRepresentative(t *testing.T) {
 		}
 	}
 	for i := range ids {
-		checker.Check(tc.GetRegion(uint64(i + 1)))
-	}
-	for i := range ids {
 		_, aligned := manager.GetAndCacheRegionAffinityGroupState(tc.GetRegion(uint64(i + 1)))
 		require.True(t, aligned)
 		group := manager.GetAffinityGroupState(ids[i])
@@ -169,7 +166,7 @@ func TestAffinityManualRebalanceTableWithFixedRepresentative(t *testing.T) {
 		require.Equal(t, before[id], manager.GetAffinityGroupState(id).Group)
 	}
 
-	applyCtx, stopApply := context.WithTimeout(ctx, 5*time.Second)
+	applyCtx, stopApply := context.WithTimeout(ctx, 10*time.Second)
 	defer stopApply()
 	type applyResult struct {
 		plans []affinity.BalancePlan
@@ -188,7 +185,7 @@ func TestAffinityManualRebalanceTableWithFixedRepresentative(t *testing.T) {
 		}
 		require.Eventually(t, func() bool {
 			return manager.GetAffinityGroupState(plan.GroupID).LeaderStoreID == plan.LeaderStoreID
-		}, time.Second, 10*time.Millisecond)
+		}, 3*time.Second, 10*time.Millisecond)
 		for _, later := range preview[planIndex+1:] {
 			require.Equal(t, before[later.GroupID], manager.GetAffinityGroupState(later.GroupID).Group,
 				"the next target must wait for the current group to converge")

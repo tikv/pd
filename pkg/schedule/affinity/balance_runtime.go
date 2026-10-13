@@ -479,8 +479,8 @@ func (m *Manager) balanceTable(ctx context.Context, groupID string, apply bool) 
 }
 
 // RebalanceAffinityGroup previews or applies the complete final rebalance plan
-// for the containing table. Region movement converges asynchronously after an
-// applied plan.
+// for the containing table. Apply submits groups sequentially and waits for
+// each target to converge.
 func (m *Manager) RebalanceAffinityGroup(ctx context.Context, groupID string, apply bool) ([]BalancePlan, error) {
 	if m.GetAffinityGroupState(groupID) == nil {
 		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)

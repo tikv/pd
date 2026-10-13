@@ -125,7 +125,11 @@ func TestAffinityRebalancePreviewFiltersTableAndRequestsServerOnce(t *testing.T)
 		"unrelated-group": affinityGroup("unrelated-group", 1, 2, 3),
 	}
 	plans := []pdhttp.AffinityBalancePlan{
-		{GroupID: "_tidb_pt_42_p1", LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2, 3}, Changed: true},
+		{GroupID: "_tidb_pt_42_p1", LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2, 3}, Changed: true,
+			OldLeaderStoreID: 3, OldVoterStoreIDs: []uint64{1, 2, 3},
+			BeforeScore: &pdhttp.AffinityBalanceScore{Leader: 9, Voter: 27},
+			AfterScore:  &pdhttp.AffinityBalanceScore{Leader: 5, Voter: 27}, MoveBytes: 123,
+			Revision: "table-revision", Status: "planned"},
 		{GroupID: "_tidb_t_42", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}},
 	}
 	testServer, server := newAffinityRebalanceTestServer(t, groups, plans...)
@@ -141,6 +145,12 @@ func TestAffinityRebalancePreviewFiltersTableAndRequestsServerOnce(t *testing.T)
 	require.Equal(t, uint64(1), result[1].OldLeader)
 	require.Equal(t, uint64(2), result[0].NewLeader)
 	require.False(t, result[0].Applied)
+	require.Equal(t, uint64(3), result[0].OldLeader, "the server snapshot supersedes the earlier CLI read")
+	require.Equal(t, plans[0].BeforeScore, result[0].BeforeScore)
+	require.Equal(t, plans[0].AfterScore, result[0].AfterScore)
+	require.Equal(t, uint64(123), result[0].MoveBytes)
+	require.Equal(t, "table-revision", result[0].Revision)
+	require.Equal(t, "planned", result[0].Status)
 }
 
 func TestAffinityRebalanceApplyRequiresForce(t *testing.T) {

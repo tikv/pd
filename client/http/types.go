@@ -755,7 +755,6 @@ type CreateAffinityGroupsRequest struct {
 
 // AffinityGroup defines an affinity group.
 type AffinityGroup struct {
-	BalancePolicy   string   `json:"balance_policy,omitempty"`
 	ID              string   `json:"id"`
 	CreateTimestamp uint64   `json:"create_timestamp"`
 	LeaderStoreID   uint64   `json:"leader_store_id,omitempty"`

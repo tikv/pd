@@ -54,13 +54,15 @@ func TestManualRebalanceReportsDependencyConflict(t *testing.T) {
 	ids := seedBalanceGroups(t, manager, []uint64{1, 1, 1})
 	var updated bool
 	manager.SetBalanceActionBuilders(func(_ context.Context, group *GroupState, _ GroupKeyRanges) (BalanceActionSet, bool) {
+		return BalanceActionSet{LeaderTargets: group.VoterStoreIDs}, true
+	}, nil, func(ctx context.Context, group *GroupState, ranges GroupKeyRanges, target *Group, stores []uint64, mode BalanceActionMode, cursor any, budget int) BalanceActionBuildResult {
 		if !updated {
 			updated = true
 			_, err := manager.UpdateAffinityGroupPeers(ids[0], 2, group.VoterStoreIDs)
 			require.NoError(t, err)
 		}
-		return BalanceActionSet{LeaderTargets: group.VoterStoreIDs}, true
-	}, nil, manualBalanceVirtualBuilder, nil, nil)
+		return manualBalanceVirtualBuilder(ctx, group, ranges, target, stores, mode, cursor, budget)
+	}, nil, nil)
 
 	_, err := manager.RebalanceAffinityGroup(t.Context(), ids[0], false)
 	require.ErrorIs(t, err, ErrBalanceConflict)
@@ -100,6 +102,18 @@ func TestManualRebalanceCommitsAndWaitsForEachGroup(t *testing.T) {
 	validator := func(_ context.Context, group *GroupState, _ GroupKeyRanges, plan BalancePlan) (bool, bool) {
 		if group.LeaderStoreID == plan.LeaderStoreID && slices.Equal(group.VoterStoreIDs, plan.VoterStoreIDs) &&
 			originalLeaders[group.ID] != plan.LeaderStoreID {
+			manager.RLock()
+			var region *core.RegionInfo
+			for _, cached := range manager.groups[group.ID].Regions {
+				region = cached.balanceInput()
+				break
+			}
+			manager.RUnlock()
+			require.NotNil(t, region)
+			heartbeat := region.Clone(core.WithLeader(region.GetStorePeer(plan.LeaderStoreID)))
+			manager.ObserveBalanceRegion(heartbeat)
+			_, aligned := manager.GetAndCacheRegionAffinityGroupState(heartbeat)
+			require.True(t, aligned)
 			converged = append(converged, group.ID)
 			changed := 0
 			for id, original := range originalLeaders {
@@ -122,6 +136,27 @@ func TestManualRebalanceCommitsAndWaitsForEachGroup(t *testing.T) {
 	for _, plan := range plans {
 		require.NotEmpty(t, plan.Revision)
 	}
+}
+
+func TestManualNoImprovementDoesNotCacheAutomaticStable(t *testing.T) {
+	manager := newBalanceRuntimeManager(t)
+	ids := seedManualBalanceGroups(t, manager, []uint64{1, 1, 1, 1, 2, 2})
+	manager.SetBalanceActionBuilders(func(_ context.Context, group *GroupState, _ GroupKeyRanges) (BalanceActionSet, bool) {
+		return BalanceActionSet{}, true
+	}, nil, func(_ context.Context, _ *GroupState, _ GroupKeyRanges, target *Group,
+		_ []uint64, _ BalanceActionMode, _ any, _ int) BalanceActionBuildResult {
+		var actions BalanceActionSet
+		if target.ID == ids[0] {
+			actions.LeaderTargets = []uint64{2}
+		}
+		return BalanceActionBuildResult{Actions: actions, Complete: true, Ready: true}
+	}, nil, nil)
+	// Reconstruction retains the first group's original target on an empty
+	// count tie, although moving its leader would improve the current table.
+	plans, err := manager.RebalanceAffinityGroup(t.Context(), ids[0], false)
+	require.NoError(t, err)
+	require.Empty(t, changedPlanIDs(plans))
+	require.Equal(t, balanceIdle, manager.balanceTables[TableGroupPrefix(ids[0])].phase)
 }
 
 func manualBalanceVirtualBuilder(_ context.Context, _ *GroupState, _ GroupKeyRanges, target *Group,

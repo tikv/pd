@@ -172,7 +172,7 @@ func bestManualBalanceAction(ctx context.Context, original, group *Group, action
 		}
 		return nil, errors.New("manual balance action budget exceeded")
 	}
-	newManualBalanceActionGenerator(group, actions, stores).visit(consider)
+	newManualBalanceActionGenerator(group, actions, stores).visit(ctx, consider)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -209,19 +209,13 @@ func scoreAfterAction(base balanceScore, leaders, voters map[uint64]int, group *
 
 func manualActionLess(candidate manualBalanceAction, score, globalScore balanceScore, preserves bool,
 	best manualBalanceAction, bestScore, bestGlobal balanceScore, bestPreserves bool) bool {
-	if order := compareScore(score, bestScore); order != 0 {
-		return order < 0
-	}
-	if candidate.moveBytes != best.moveBytes {
-		return candidate.moveBytes < best.moveBytes
-	}
-	if order := compareScore(globalScore, bestGlobal); order != 0 {
-		return order < 0
-	}
-	if preserves != bestPreserves {
-		return preserves
-	}
-	return targetLess(candidate.GroupID, candidate.target, best.GroupID, best.target)
+	return balanceCandidateLess(candidate.GroupID, targetCandidate{
+		target: candidate.target, score: score, globalScore: globalScore,
+		moveBytes: candidate.moveBytes, preservesLeader: preserves,
+	}, best.GroupID, targetCandidate{
+		target: best.target, score: bestScore, globalScore: bestGlobal,
+		moveBytes: best.moveBytes, preservesLeader: bestPreserves,
+	})
 }
 
 func cloneBalanceCounts(counts map[uint64]int) map[uint64]int {
@@ -343,7 +337,7 @@ func newManualBalanceActionGenerator(group *Group, actions BalanceActionSet, sto
 	}
 }
 
-func (g manualBalanceActionGenerator) visit(visit func(manualBalanceAction) bool) {
+func (g manualBalanceActionGenerator) visit(ctx context.Context, visit func(manualBalanceAction) bool) {
 	group, actions := g.group, g.actions
 	add := func(leader, from, to uint64, targetVoters []uint64, moveBytes uint64) bool {
 		if leader == group.LeaderStoreID && from == 0 && to == 0 {
@@ -356,6 +350,9 @@ func (g manualBalanceActionGenerator) visit(visit func(manualBalanceAction) bool
 		})
 	}
 	for _, leader := range actions.LeaderTargets {
+		if ctx.Err() != nil {
+			return
+		}
 		if _, valid := g.votersSet[leader]; valid {
 			if !add(leader, 0, 0, g.voters, 0) {
 				return
@@ -363,13 +360,22 @@ func (g manualBalanceActionGenerator) visit(visit func(manualBalanceAction) bool
 		}
 	}
 	for _, from := range g.voters {
+		if ctx.Err() != nil {
+			return
+		}
 		targets := actions.VoterReplacements[from]
 		toStores := make([]uint64, 0, len(targets))
 		for to := range targets {
+			if ctx.Err() != nil {
+				return
+			}
 			toStores = append(toStores, to)
 		}
 		slices.Sort(toStores)
 		for _, to := range toStores {
+			if ctx.Err() != nil {
+				return
+			}
 			if to == 0 || !slices.Contains(g.stores, to) {
 				continue
 			}
@@ -380,6 +386,9 @@ func (g manualBalanceActionGenerator) visit(visit func(manualBalanceAction) bool
 			leaders := slices.Clone(targets[to])
 			slices.Sort(leaders)
 			for _, leader := range leaders {
+				if ctx.Err() != nil {
+					return
+				}
 				_, staysVoter := g.votersSet[leader]
 				if leader != to && (leader == from || !staysVoter) {
 					continue

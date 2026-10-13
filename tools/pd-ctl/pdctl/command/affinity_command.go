@@ -55,7 +55,7 @@ func newAffinityRebalanceCommand() *cobra.Command {
 		Short: "preview or apply a complete affinity rebalance for one table",
 		Run:   affinityRebalanceCommandFunc,
 	}
-	cmd.Flags().Bool("apply", false, "apply final targets for all table groups; Region moves finish asynchronously")
+	cmd.Flags().Bool("apply", false, "apply table targets sequentially and wait for each group to converge")
 	cmd.Flags().Bool("force", false, "required with --apply")
 	return cmd
 }
