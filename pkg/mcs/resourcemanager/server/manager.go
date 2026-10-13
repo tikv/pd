@@ -312,6 +312,33 @@ func (m *Manager) accessKeyspaceResourceGroupManager(keyspaceID uint32, groupNam
 
 // Init initializes the resource group manager.
 func (m *Manager) Init(ctx context.Context) error {
+	// If a previous leadership term is still in progress, its
+	// backgroundMetricsFlush (and possibly persistLoop) workers may still be
+	// running and accessing the metric maps. Cancel and wait for them to
+	// exit before resetting the maps so no worker reads or writes during
+	// the reset.
+	if m.cancel != nil {
+		m.cancel()
+		m.wg.Wait()
+	}
+	// The Manager is a single, long-lived instance that serves across
+	// multiple primary/leader campaigns, so discard any in-memory metric
+	// state or Prometheus label series left over from a previous term
+	// before starting a new one; otherwise the new leader would inherit
+	// stale counters/gauges that stay visible in monitoring until the
+	// 20-minute cleanup timeout.
+	m.metrics.resetAll(func(keyspaceID uint32) string {
+		if keyspaceID == constant.NullKeyspaceID {
+			return ""
+		}
+		name, err := m.getKeyspaceNameByID(ctx, keyspaceID)
+		if err != nil {
+			log.Warn("failed to resolve keyspace name while resetting RU metrics on leadership change",
+				zap.Uint32("keyspace-id", keyspaceID), zap.Error(err))
+			return ""
+		}
+		return name
+	})
 	if m.enableMetadataWatcher {
 		if err := m.initControllerConfig(); err != nil {
 			return err

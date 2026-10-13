@@ -359,6 +359,51 @@ func (m *metrics) cleanupAllMetrics(r consumptionRecordKey, keyspaceName string)
 	m.deleteMaxPerSecTracker(r.keyspaceID, r.groupName)
 }
 
+// resetAll clears all in-memory metric state and purges the corresponding
+// label series from the Prometheus registry. It is called when the
+// resource manager primary/leader switches over, so that stale series
+// left behind by the previous leader (which stepped down before its
+// cleanup ticker got a chance to run) do not linger until the 20-minute
+// cleanup timeout.
+func (m *metrics) resetAll(getKeyspaceName func(keyspaceID uint32) string) {
+	// A group can have counter labels registered for multiple RU types
+	// (e.g. "tp" and "background"), and the gauge map is keyed with an
+	// empty RU type, so take the union of the two maps' keys to make
+	// sure every registered label combination is covered.
+	ruTypes := make(map[metricsKey]struct{}, len(m.counterMetricsMap)+len(m.gaugeMetricsMap))
+	for mk := range m.counterMetricsMap {
+		ruTypes[mk] = struct{}{}
+	}
+	for mk := range m.gaugeMetricsMap {
+		ruTypes[mk] = struct{}{}
+	}
+	for mk := range ruTypes {
+		// deleteMetrics removes both the in-memory map entries and the
+		// Prometheus label values (via deleteLabelValues), so this covers
+		// the full registered label-value set for the given key.
+		keyspaceName := getKeyspaceName(mk.keyspaceID)
+		if keyspaceName == "" {
+			// The lookup failed (e.g. a transient storage error during
+			// Init), so fall back to the keyspace name recorded when the
+			// tracker was created; an exact-label deletion with an empty
+			// value would leave the previous leader's series behind in the
+			// registry, and the cleared maps mean the cleanup ticker can
+			// no longer find them.
+			if tracker := m.maxPerSecTrackerMap[trackerKey{mk.keyspaceID, mk.groupName}]; tracker != nil {
+				keyspaceName = tracker.keyspaceName
+			}
+		}
+		m.deleteMetrics(mk.keyspaceID, keyspaceName, mk.groupName, mk.ruType)
+	}
+	// The max-per-sec trackers register their own gauge label values
+	// (read/write_request_unit_max_per_sec), which deleteMetrics already
+	// removes, so it is safe to drop the tracker map entries unconditionally.
+	m.maxPerSecTrackerMap = make(map[trackerKey]*maxPerSecCostTracker)
+	m.consumptionRecordMap = make(map[consumptionRecordKey]time.Time)
+	m.counterMetricsMap = make(map[metricsKey]*counterMetrics)
+	m.gaugeMetricsMap = make(map[metricsKey]*gaugeMetrics)
+}
+
 type counterMetrics struct {
 	RRUMetrics                 prometheus.Counter
 	WRUMetrics                 prometheus.Counter

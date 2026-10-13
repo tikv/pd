@@ -573,16 +573,19 @@ func TestCleanUpTicker(t *testing.T) {
 	keyspaceID := uint32(1)
 	prepareKeyspaceName(ctx, re, m, &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: keyspaceID}}, "test_keyspace")
 	// Insert two consumption records manually.
-	m.metrics.consumptionRecordMap[consumptionRecordKey{
-		keyspaceID: keyspaceID,
-		groupName:  "test_group_1",
-		ruType:     defaultTypeLabel,
-	}] = time.Now().Add(-metricsCleanupTimeout * 2)
-	m.metrics.consumptionRecordMap[consumptionRecordKey{
-		keyspaceID: keyspaceID,
-		groupName:  "test_group_2",
-		ruType:     defaultTypeLabel,
-	}] = time.Now().Add(-metricsCleanupTimeout / 2)
+	insertRecords := func() {
+		m.metrics.consumptionRecordMap[consumptionRecordKey{
+			keyspaceID: keyspaceID,
+			groupName:  "test_group_1",
+			ruType:     defaultTypeLabel,
+		}] = time.Now().Add(-metricsCleanupTimeout * 2)
+		m.metrics.consumptionRecordMap[consumptionRecordKey{
+			keyspaceID: keyspaceID,
+			groupName:  "test_group_2",
+			ruType:     defaultTypeLabel,
+		}] = time.Now().Add(-metricsCleanupTimeout / 2)
+	}
+	insertRecords()
 	// Start the background metrics flush loop.
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/fastCleanupTicker", `return(true)`))
 	defer func() {
@@ -590,6 +593,11 @@ func TestCleanUpTicker(t *testing.T) {
 	}()
 	err := m.Init(ctx)
 	re.NoError(err)
+	// Init resets the metric state, so the records inserted before Init
+	// must have been cleared; insert them again to exercise the cleanup
+	// ticker.
+	re.Empty(m.metrics.consumptionRecordMap)
+	insertRecords()
 	// Ensure the cleanup ticker is triggered.
 	time.Sleep(200 * time.Millisecond)
 	// Close the manager to avoid the data race.

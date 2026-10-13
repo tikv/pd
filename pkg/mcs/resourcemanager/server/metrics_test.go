@@ -331,3 +331,82 @@ func TestMaxPerSecCostTracker(t *testing.T) {
 		}
 	}
 }
+
+func TestMetricsResetAllClearsMapsAndLabelValues(t *testing.T) {
+	re := require.New(t)
+
+	const (
+		keyspaceName = "reset-all-keyspace"
+		groupName    = "reset-all-group"
+		keyspaceID   = uint32(505)
+	)
+
+	m := newMetrics()
+	m.recordConsumption(&consumptionItem{
+		keyspaceID:        keyspaceID,
+		keyspaceName:      keyspaceName,
+		resourceGroupName: groupName,
+		Consumption: &rmpb.Consumption{
+			RRU: 10,
+			WRU: 5,
+		},
+	}, &ControllerConfig{}, time.Now())
+	re.NotEmpty(m.consumptionRecordMap)
+	re.NotEmpty(m.counterMetricsMap)
+	re.NotEmpty(m.maxPerSecTrackerMap)
+
+	m.resetAll(func(id uint32) string {
+		re.Equal(keyspaceID, id)
+		return keyspaceName
+	})
+
+	re.Empty(m.consumptionRecordMap)
+	re.Empty(m.counterMetricsMap)
+	re.Empty(m.gaugeMetricsMap)
+	re.Empty(m.maxPerSecTrackerMap)
+	// The label values registered by recordConsumption should have been
+	// removed from the registry; re-creating the counter below starts
+	// from zero instead of accumulating on the stale value.
+	re.Equal(float64(0), testutil.ToFloat64(
+		m.getCounterMetrics(keyspaceID, keyspaceName, groupName, defaultTypeLabel).RRUMetrics,
+	))
+	t.Cleanup(func() {
+		deleteLabelValues(keyspaceName, groupName, defaultTypeLabel)
+	})
+}
+
+func TestMetricsResetAllFallsBackToTrackerKeyspaceName(t *testing.T) {
+	re := require.New(t)
+
+	const (
+		keyspaceName = "reset-all-fallback-keyspace"
+		groupName    = "reset-all-fallback-group"
+		keyspaceID   = uint32(506)
+	)
+
+	m := newMetrics()
+	m.recordConsumption(&consumptionItem{
+		keyspaceID:        keyspaceID,
+		keyspaceName:      keyspaceName,
+		resourceGroupName: groupName,
+		Consumption: &rmpb.Consumption{
+			RRU: 1,
+		},
+	}, &ControllerConfig{}, time.Now())
+	// Simulate a failed keyspace-name lookup at Init time: the resolver
+	// returns "" so resetAll must fall back to the name recorded when the
+	// tracker was created, otherwise the previous leader's label series
+	// would be left behind in the registry.
+	m.resetAll(func(id uint32) string {
+		re.Equal(keyspaceID, id)
+		return ""
+	})
+
+	re.Empty(m.maxPerSecTrackerMap)
+	re.Equal(float64(0), testutil.ToFloat64(
+		m.getCounterMetrics(keyspaceID, keyspaceName, groupName, defaultTypeLabel).RRUMetrics,
+	))
+	t.Cleanup(func() {
+		deleteLabelValues(keyspaceName, groupName, defaultTypeLabel)
+	})
+}
