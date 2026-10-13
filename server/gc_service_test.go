@@ -161,6 +161,10 @@ func (r *fakeGCStateChangeReceiver) Err() error {
 	return r.terminalErr
 }
 
+func (r *fakeGCStateChangeReceiver) CloseForSlowConsumer() {
+	r.terminalErr = errs.ErrGCStateWatcherSlowConsumer
+}
+
 type fakeWatchGCStatesServer struct {
 	ctx      context.Context
 	sent     []*pdpb.WatchGCStatesResponse
@@ -263,6 +267,7 @@ func TestWatchGCStatesErrorToStatus(t *testing.T) {
 // the terminal cause through a context, which the supervisor can read safely.
 type cancelableGCStateReceiver struct {
 	ctx            context.Context
+	cancel         context.CancelCauseFunc
 	changes        []gc.GCStateChange
 	receiveStarted chan struct{}
 	receiveExited  chan struct{}
@@ -270,6 +275,9 @@ type cancelableGCStateReceiver struct {
 
 func (r *cancelableGCStateReceiver) Done() <-chan struct{} { return r.ctx.Done() }
 func (r *cancelableGCStateReceiver) Err() error            { return context.Cause(r.ctx) }
+func (r *cancelableGCStateReceiver) CloseForSlowConsumer() {
+	r.cancel(errs.ErrGCStateWatcherSlowConsumer)
+}
 func (r *cancelableGCStateReceiver) RecvBatch(maxChanges int) ([]gc.GCStateChange, error) {
 	if err := r.Err(); err != nil {
 		return nil, err
@@ -305,11 +313,12 @@ func TestServeWatchGCStatesCancellationUnblocksHandler(t *testing.T) {
 	}{
 		{"leader loss", errs.ErrNotLeader, codes.Unavailable},
 		{"slow consumer", errs.ErrGCStateWatcherSlowConsumer, codes.ResourceExhausted},
+		{"client cancel", context.Canceled, codes.Canceled},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			streamCtx, cancelStream := context.WithCancel(context.Background())
 			receiverCtx, cancelReceiver := context.WithCancelCause(streamCtx)
-			receiver := &cancelableGCStateReceiver{ctx: receiverCtx, changes: []gc.GCStateChange{gc.NewGCStateUpsert(gc.GCState{KeyspaceID: 7, TxnSafePoint: 10})}}
+			receiver := &cancelableGCStateReceiver{ctx: receiverCtx, cancel: cancelReceiver, changes: []gc.GCStateChange{gc.NewGCStateUpsert(gc.GCState{KeyspaceID: 7, TxnSafePoint: 10})}}
 			sendStarted, sendExited := make(chan struct{}), make(chan struct{})
 			stream := &fakeWatchGCStatesServer{ctx: streamCtx, sendHook: func(*pdpb.WatchGCStatesResponse) error {
 				close(sendStarted)
@@ -384,7 +393,7 @@ func (s *watchGCStatesTransportServer) WatchGCStates(_ *pdpb.WatchGCStatesReques
 	ctx, cancel := context.WithCancelCause(stream.Context())
 	defer cancel(context.Canceled)
 	s.cancelReceiver <- cancel
-	receiver := &cancelableGCStateReceiver{ctx: ctx, changes: s.changes}
+	receiver := &cancelableGCStateReceiver{ctx: ctx, cancel: cancel, changes: s.changes}
 	observed := &observedWatchGCStatesStream{PD_WatchGCStatesServer: stream, blockedSendStarted: s.blockedSendStarted, blockedSendExited: s.blockedSendExited}
 	err := serveWatchGCStates(receiver, observed, maxWatchGCStatesResponseSize)
 	s.handlerResult <- err
@@ -399,8 +408,11 @@ func TestWatchGCStatesTransportCancellationUnblocksSend(t *testing.T) {
 	}{
 		{"leader loss", errs.ErrNotLeader, codes.Unavailable},
 		{"slow consumer", errs.ErrGCStateWatcherSlowConsumer, codes.ResourceExhausted},
+		{"client cancel", context.Canceled, codes.Canceled},
+		{"stalled send", nil, codes.ResourceExhausted},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			setWatchGCStatesSendTimeout(t, time.Second)
 			service := &watchGCStatesTransportServer{
 				cancelReceiver: make(chan context.CancelCauseFunc, 1), handlerResult: make(chan error, 1),
 				blockedSendStarted: make(chan struct{}), blockedSendExited: make(chan struct{}),
@@ -434,7 +446,9 @@ func TestWatchGCStatesTransportCancellationUnblocksSend(t *testing.T) {
 			default:
 			}
 			cancelReceiver := <-service.cancelReceiver
-			cancelReceiver(tc.cause)
+			if tc.cause != nil {
+				cancelReceiver(tc.cause)
+			}
 			select {
 			case err := <-service.handlerResult:
 				require.Equal(t, tc.code, status.Code(err))
@@ -451,10 +465,95 @@ func TestWatchGCStatesTransportCancellationUnblocksSend(t *testing.T) {
 	}
 }
 
+func setWatchGCStatesSendTimeout(t *testing.T, timeout time.Duration) {
+	t.Helper()
+	const name = "github.com/tikv/pd/server/watchGCStatesSendTimeout"
+	require.NoError(t, failpoint.EnableCall(name, func(value *time.Duration) { *value = timeout }))
+	t.Cleanup(func() { require.NoError(t, failpoint.Disable(name)) })
+}
+
+func TestServeWatchGCStatesIdleAfterSend(t *testing.T) {
+	const sendTimeout = 100 * time.Millisecond
+	setWatchGCStatesSendTimeout(t, sendTimeout)
+	ctx, cancel := context.WithCancelCause(context.Background())
+	receiver := &cancelableGCStateReceiver{
+		ctx: ctx, cancel: cancel, changes: []gc.GCStateChange{gc.NewGCStateRemoved(7)},
+		receiveStarted: make(chan struct{}), receiveExited: make(chan struct{}),
+	}
+	stream := &fakeWatchGCStatesServer{ctx: ctx}
+	handlerDone := make(chan struct{})
+	var handlerErr error
+	t.Cleanup(func() {
+		cancel(context.Canceled)
+		waitWatchGCStatesSignal(t, handlerDone, "idle handler did not clean up")
+		waitWatchGCStatesSignal(t, receiver.receiveExited, "idle receiver did not clean up")
+	})
+	go func() { defer close(handlerDone); handlerErr = serveWatchGCStates(receiver, stream, 1024) }()
+	waitWatchGCStatesSignal(t, receiver.receiveStarted, "handler did not finish sending")
+	select {
+	case <-handlerDone:
+		require.FailNow(t, "idle watch terminated", "%v", handlerErr)
+	case <-time.After(2 * sendTimeout):
+	}
+	cancel(context.Canceled)
+	waitWatchGCStatesSignal(t, handlerDone, "idle handler did not return after cancellation")
+	require.Equal(t, codes.Canceled, status.Code(handlerErr))
+	require.Len(t, stream.sent, 1)
+}
+
+func TestWatchGCStatesTransportProgressingInitial(t *testing.T) {
+	const sendTimeout = time.Second
+	setWatchGCStatesSendTimeout(t, sendTimeout)
+	service := &watchGCStatesTransportServer{
+		cancelReceiver: make(chan context.CancelCauseFunc, 1), handlerResult: make(chan error, 1),
+		blockedSendStarted: make(chan struct{}), blockedSendExited: make(chan struct{}),
+	}
+	const count = 16 * 1024
+	for i := range count {
+		service.changes = append(service.changes, gc.NewGCStateUpsert(gc.GCState{
+			KeyspaceID: uint32(i), IsKeyspaceLevel: true, TxnSafePoint: math.MaxUint64, GCSafePoint: math.MaxUint64 - 1,
+		}))
+	}
+	conn := newWatchGCStatesTestConn(t, service)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	t.Cleanup(cancel)
+	stream, err := pdpb.NewPDClient(conn).WatchGCStates(ctx, &pdpb.WatchGCStatesRequest{})
+	require.NoError(t, err)
+	waitWatchGCStatesSignal(t, service.blockedSendStarted, "initial sending did not exhaust transport quota")
+	started := time.Now()
+	for received := 0; received < count; {
+		// Reading a batch releases flow control regularly, while the whole
+		// initial transfer takes longer than a single send timeout.
+		time.Sleep(100 * time.Millisecond)
+		response, err := stream.Recv()
+		require.NoError(t, err)
+		require.NotEmpty(t, response.GetChanges())
+		for _, change := range response.GetChanges() {
+			require.Equal(t, uint32(received), change.GetUpsert().GetKeyspaceScope().GetKeyspaceId())
+			require.Equal(t, uint64(math.MaxUint64), change.GetUpsert().GetTxnSafePoint())
+			received++
+		}
+	}
+	require.Greater(t, time.Since(started), sendTimeout)
+	select {
+	case err := <-service.handlerResult:
+		require.FailNow(t, "progressing initial watch terminated", "%v", err)
+	default:
+	}
+	cancelReceiver := <-service.cancelReceiver
+	cancelReceiver(context.Canceled)
+	select {
+	case err := <-service.handlerResult:
+		require.Equal(t, codes.Canceled, status.Code(err))
+	case <-ctx.Done():
+		require.FailNow(t, "handler did not return after cancellation")
+	}
+}
+
 func TestServeWatchGCStatesCancellationBeforeServing(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(context.Background())
 	cancel(errs.ErrNotLeader)
-	receiver := &cancelableGCStateReceiver{ctx: ctx, changes: []gc.GCStateChange{gc.NewGCStateRemoved(7)}}
+	receiver := &cancelableGCStateReceiver{ctx: ctx, cancel: cancel, changes: []gc.GCStateChange{gc.NewGCStateRemoved(7)}}
 	stream := &fakeWatchGCStatesServer{}
 	err := serveWatchGCStates(receiver, stream, 1024)
 	require.Equal(t, codes.Unavailable, status.Code(err))
@@ -470,7 +569,7 @@ func TestServeWatchGCStatesCancellationWhileReceiving(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			streamCtx, cancelStream := context.WithCancel(context.Background())
 			ctx, cancelReceiver := context.WithCancelCause(streamCtx)
-			receiver := &cancelableGCStateReceiver{ctx: ctx, receiveStarted: make(chan struct{}), receiveExited: make(chan struct{})}
+			receiver := &cancelableGCStateReceiver{ctx: ctx, cancel: cancelReceiver, receiveStarted: make(chan struct{}), receiveExited: make(chan struct{})}
 			stream := &fakeWatchGCStatesServer{ctx: streamCtx}
 			handlerDone := make(chan struct{})
 			var handlerErr error

@@ -287,6 +287,25 @@ func (w *GCStateWatcher) Close() {
 	w.manager.terminateGCStateWatcher(w, context.Canceled, watcherTerminationClientCancel)
 }
 
+// CloseForSlowConsumer stops a watcher whose transport cannot make progress.
+// An existing terminal cause takes precedence over the send timeout.
+func (w *GCStateWatcher) CloseForSlowConsumer() {
+	if w.manager == nil {
+		w.cancel(errs.ErrGCStateWatcherSlowConsumer)
+		return
+	}
+	w.manager.mu.Lock()
+	defer w.manager.mu.Unlock()
+	w.cancel(errs.ErrGCStateWatcherSlowConsumer)
+	reason := watcherTerminationSlowConsumer
+	if w.Err() != errs.ErrGCStateWatcherSlowConsumer {
+		// Parent cancellation can precede the handler's deferred Close. Record
+		// the cause that won cancellation rather than mislabeling it a timeout.
+		reason = watcherTerminationClientCancel
+	}
+	w.manager.terminateGCStateWatcherLocked(w, w.Err(), reason)
+}
+
 // WatchGCStates registers a watcher in the current local leadership generation.
 func (m *GCStateManager) WatchGCStates(ctx context.Context, skipLoadingInitial bool) (*GCStateWatcher, error) {
 	return m.registerGCStateWatcher(ctx, skipLoadingInitial, gcStateWatchConfig{

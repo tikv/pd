@@ -48,6 +48,7 @@ type gcStateChangeReceiver interface {
 	RecvBatch(maxChanges int) ([]gc.GCStateChange, error)
 	Done() <-chan struct{}
 	Err() error
+	CloseForSlowConsumer()
 }
 
 // UpdateGCSafePoint implements gRPC PDServer.
@@ -616,24 +617,48 @@ func serveWatchGCStates(receiver gcStateChangeReceiver, stream pdpb.PD_WatchGCSt
 		return watchGCStatesErrorToStatus(err)
 	}
 	resultCh := make(chan error, 1)
+	sendState := make(chan bool)
+	done := make(chan struct{})
+	defer close(done)
 	go func() {
 		defer logutil.LogPanic()
-		resultCh <- sendWatchGCStates(receiver, stream, maxResponseSize)
+		resultCh <- sendWatchGCStates(receiver, stream, maxResponseSize, sendState, done)
 	}()
 	// Do not join the worker here: returning lets gRPC tear down the transport
 	// stream, which interrupts a Send blocked on flow control.
-	select {
-	case err := <-resultCh:
-		if cause := receiver.Err(); cause != nil {
-			return watchGCStatesErrorToStatus(cause)
+	// Only in-flight sends have a deadline; initial loading and idle watches
+	// may remain active for as long as the client keeps making progress.
+	sendTimeout := 30 * time.Second
+	failpoint.InjectCall("watchGCStatesSendTimeout", &sendTimeout)
+	sendTimer := time.NewTimer(sendTimeout)
+	sendTimer.Stop()
+	defer sendTimer.Stop()
+	var sendTimeoutCh <-chan time.Time
+	for {
+		select {
+		case err := <-resultCh:
+			if cause := receiver.Err(); cause != nil {
+				return watchGCStatesErrorToStatus(cause)
+			}
+			return err
+		case <-receiver.Done():
+			return watchGCStatesErrorToStatus(receiver.Err())
+		case sending := <-sendState:
+			if sending {
+				sendTimer.Reset(sendTimeout)
+				sendTimeoutCh = sendTimer.C
+			} else {
+				sendTimer.Stop()
+				sendTimeoutCh = nil
+			}
+		case <-sendTimeoutCh:
+			receiver.CloseForSlowConsumer()
+			return watchGCStatesErrorToStatus(receiver.Err())
 		}
-		return err
-	case <-receiver.Done():
-		return watchGCStatesErrorToStatus(receiver.Err())
 	}
 }
 
-func sendWatchGCStates(receiver gcStateChangeReceiver, stream pdpb.PD_WatchGCStatesServer, maxResponseSize int) error {
+func sendWatchGCStates(receiver gcStateChangeReceiver, stream pdpb.PD_WatchGCStatesServer, maxResponseSize int, sendState chan<- bool, done <-chan struct{}) error {
 	for {
 		changes, err := receiver.RecvBatch(watchGCStatesRecvBatchSize)
 		if err != nil {
@@ -652,8 +677,18 @@ func sendWatchGCStates(receiver gcStateChangeReceiver, stream pdpb.PD_WatchGCSta
 			if err := receiver.Err(); err != nil {
 				return watchGCStatesErrorToStatus(err)
 			}
+			select {
+			case <-done:
+				return nil
+			case sendState <- true:
+			}
 			if err := stream.Send(response); err != nil {
 				return err
+			}
+			select {
+			case <-done:
+				return nil
+			case sendState <- false:
 			}
 		}
 	}
