@@ -27,6 +27,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sasha-s/go-deadlock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -54,6 +55,9 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	// Deadlock detection stays enabled, but pooled timers cannot cross synctest
+	// bubble boundaries. Set this once before any tests start acquiring locks.
+	deadlock.Opts.TimerPool = deadlock.TimerPoolDisabled
 	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 

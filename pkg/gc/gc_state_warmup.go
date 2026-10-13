@@ -15,7 +15,9 @@
 package gc
 
 import (
+	"container/heap"
 	"context"
+	"slices"
 	"sync"
 	"time"
 
@@ -44,7 +46,6 @@ type gcStateWarmupScope struct {
 	queued     bool
 	running    bool
 	joined     *gcStateLoadFlight
-	retryAt    time.Time
 	retryDelay time.Duration
 }
 
@@ -69,8 +70,11 @@ type gcStateWarmup struct {
 
 	stateMu syncutil.Mutex
 	scopes  map[uint32]*gcStateWarmupScope
-	// Only joined flights and failed scopes need periodic inspection.
-	waiting                   map[uint32]*gcStateWarmupScope
+	// A pending scope is queued, running, joined, or in retries, exclusively.
+	// Only joined flights need periodic inspection, shared by all workers.
+	joined                    map[uint32]*gcStateWarmupScope
+	nextJoinedCheck           time.Time
+	retries                   gcStateWarmupRetries
 	remaining                 int
 	candidates                []uint32
 	initialSnapshotReconciled bool
@@ -93,7 +97,7 @@ func newGCStateWarmup(m *GCStateManager, generation *gcStateGeneration, index *e
 		finished:    make(chan struct{}),
 		nullPending: true,
 		scopes:      map[uint32]*gcStateWarmupScope{constant.NullKeyspaceID: {}},
-		waiting:     make(map[uint32]*gcStateWarmupScope),
+		joined:      make(map[uint32]*gcStateWarmupScope),
 		remaining:   1,
 	}
 }
@@ -166,13 +170,18 @@ func (w *gcStateWarmup) run(ctx context.Context) {
 	w.snapshot = nil
 	w.inputMu.Unlock()
 	w.scopes = nil
-	w.waiting = nil
+	w.joined = nil
+	w.retries = nil
 	w.candidates = nil
 }
 
 func (w *gcStateWarmup) work(ctx context.Context) {
-	ticker := time.NewTicker(gcStateWarmupPollInterval)
-	defer ticker.Stop()
+	var timer *time.Timer
+	defer func() {
+		if timer != nil {
+			timer.Stop()
+		}
+	}()
 	for ctx.Err() == nil {
 		failpoint.InjectCall("beforeGCStateWarmupSchedule")
 		w.stateMu.Lock()
@@ -212,7 +221,18 @@ func (w *gcStateWarmup) work(ctx context.Context) {
 			w.notify()
 			continue
 		}
+		deadline := w.nextDeadline()
 		w.stateMu.Unlock()
+		failpoint.InjectCall("beforeGCStateWarmupWait")
+		var timerC <-chan time.Time
+		if !deadline.IsZero() {
+			if timer == nil {
+				timer = time.NewTimer(time.Until(deadline))
+			} else {
+				timer.Reset(time.Until(deadline))
+			}
+			timerC = timer.C
+		}
 		select {
 		case <-ctx.Done():
 			return
@@ -221,7 +241,10 @@ func (w *gcStateWarmup) work(ctx context.Context) {
 		case <-w.finished:
 			return
 		case <-w.wake:
-		case <-ticker.C:
+		case <-timerC:
+		}
+		if timer != nil {
+			timer.Stop()
 		}
 	}
 }
@@ -269,11 +292,17 @@ func (w *gcStateWarmup) reconcileInitialSnapshot() {
 				w.remaining++
 			}
 		}
-		for id := range w.waiting {
+		for id := range w.joined {
 			if targets[id] == nil {
-				delete(w.waiting, id)
+				delete(w.joined, id)
 			}
 		}
+		if len(w.joined) == 0 {
+			w.nextJoinedCheck = time.Time{}
+		}
+		w.retries = slices.DeleteFunc(w.retries, func(retry gcStateWarmupRetry) bool { return targets[retry.id] == nil })
+		heap.Init(&w.retries)
+		w.candidates = slices.DeleteFunc(w.candidates, func(id uint32) bool { return targets[id] == nil })
 		w.initialSnapshotReconciled = true
 	default:
 	}
@@ -311,19 +340,33 @@ func (w *gcStateWarmup) next() (uint32, bool) {
 }
 
 func (w *gcStateWarmup) refresh(now time.Time) {
-	for id, scope := range w.waiting {
-		if scope.joined != nil {
+	if len(w.joined) > 0 && !now.Before(w.nextJoinedCheck) {
+		// Workers share this deadline under stateMu, so wake notifications and
+		// concurrent timers cannot repeat the same joined scan every turn.
+		w.nextJoinedCheck = now.Add(gcStateWarmupPollInterval)
+		for id, scope := range w.joined {
 			select {
 			case <-scope.joined.done:
 				err := scope.joined.err
 				scope.joined = nil
+				delete(w.joined, id)
 				w.recordScopeResult(id, scope, err, now)
 			default:
 			}
 		}
-		if scope.completed || scope.queued || scope.running || scope.joined != nil || scope.retryAt.IsZero() || now.Before(scope.retryAt) {
-			continue
+		if len(w.joined) == 0 {
+			w.nextJoinedCheck = time.Time{}
 		}
+	}
+	// Even after a large outage, one scheduling turn only removes a batch of
+	// due retries. Future retries require only a look at the heap's root.
+	for range endpoint.MaxGCSafePointBatchSize {
+		if len(w.retries) == 0 || now.Before(w.retries[0].retryAt) {
+			break
+		}
+		retry := heap.Pop(&w.retries).(gcStateWarmupRetry)
+		id := retry.id
+		scope := w.scopes[id]
 		// Only retries consult the live index. They may retire an obsolete
 		// original target, but live membership never adds a new target.
 		if w.initialSnapshotReconciled && id != constant.NullKeyspaceID && w.index != nil {
@@ -332,10 +375,19 @@ func (w *gcStateWarmup) refresh(now time.Time) {
 				continue
 			}
 		}
-		delete(w.waiting, id)
 		scope.queued = true
 		w.candidates = append(w.candidates, id)
 	}
+}
+
+// nextDeadline is called under stateMu before waiting. Buffered wake
+// notifications preserve any earlier deadline or new input arriving after it.
+func (w *gcStateWarmup) nextDeadline() time.Time {
+	deadline := w.nextJoinedCheck
+	if len(w.retries) > 0 && (deadline.IsZero() || w.retries[0].retryAt.Before(deadline)) {
+		deadline = w.retries[0].retryAt
+	}
+	return deadline
 }
 
 func (w *gcStateWarmup) recordBatchResult(result gcStateLoadResult, now time.Time) {
@@ -351,9 +403,12 @@ func (w *gcStateWarmup) recordBatchResult(result gcStateLoadResult, now time.Tim
 	}
 	for id, flight := range result.joined {
 		if scope := w.scopes[id]; scope != nil {
+			if len(w.joined) == 0 {
+				w.nextJoinedCheck = now.Add(gcStateWarmupPollInterval)
+			}
 			scope.running = false
 			scope.joined = flight
-			w.waiting[id] = scope
+			w.joined[id] = scope
 		}
 	}
 }
@@ -365,16 +420,14 @@ func (w *gcStateWarmup) recordScopeResult(id uint32, scope *gcStateWarmupScope, 
 			w.remaining--
 		}
 		scope.completed = true
-		delete(w.waiting, id)
 		return
 	}
-	w.waiting[id] = scope
 	if scope.retryDelay == 0 {
 		scope.retryDelay = gcStateWarmupRetryDelay
 	} else {
 		scope.retryDelay = min(scope.retryDelay*2, gcStateWarmupMaxRetryDelay)
 	}
-	scope.retryAt = now.Add(scope.retryDelay)
+	heap.Push(&w.retries, gcStateWarmupRetry{id: id, retryAt: now.Add(scope.retryDelay)})
 }
 
 func (w *gcStateWarmup) tryFinish() bool {

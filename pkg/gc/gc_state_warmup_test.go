@@ -848,7 +848,11 @@ func TestGCStateWarmupRetiresObsoleteTarget(t *testing.T) {
 	w := newGCStateWarmup(m, m.activeGeneration.Load(), index)
 	w.onInitialSnapshot(gcWarmupEntries(100, 1))
 	runGCWarmupTest(t, w)
-	require.Eventually(t, func() bool { w.stateMu.Lock(); defer w.stateMu.Unlock(); return w.waiting[100] != nil }, 3*time.Second, time.Millisecond)
+	require.Eventually(t, func() bool {
+		w.stateMu.Lock()
+		defer w.stateMu.Unlock()
+		return w.scopes[100] != nil && w.scopes[100].retryDelay > 0
+	}, 3*time.Second, time.Millisecond)
 	index.publish(context.Background(), map[uint32]enabledKeyspace{}, 2)
 	gcWarmupWait(t, w.done)
 	require.Equal(t, int32(1), reads.Load())
