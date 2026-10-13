@@ -282,8 +282,6 @@ func (c *AffinityChecker) buildBalanceActionsForTarget(ctx context.Context, actu
 					virtualBest := c.isRegionPlacementRuleSatisfiedWithBestLocation(virtual, false)
 					if virtualBest {
 						progress.nextLeaderTarget = append(progress.nextLeaderTarget, leaderID)
-					} else {
-						progress.blocked = true
 					}
 				}
 			}
@@ -322,8 +320,6 @@ func (c *AffinityChecker) buildBalanceActionsForTarget(ctx context.Context, actu
 					virtualBest := c.isRegionPlacementRuleSatisfiedWithBestLocation(virtual, false)
 					if virtualBest {
 						progress.nextVoters = append(progress.nextVoters, candidate)
-					} else {
-						progress.blocked = true
 					}
 				}
 			}
