@@ -634,6 +634,10 @@ func TestRuleManagerLoadRulesLogRedact(t *testing.T) {
 	validRule := &Rule{GroupID: "redact", ID: "valid", StartKeyHex: startKey, EndKeyHex: endKey, Role: Voter, Count: 1}
 	invalidRule := validRule.Clone()
 	invalidRule.ID, invalidRule.Count = "invalid", 0
+	invalidStartKeyRule := validRule.Clone()
+	invalidStartKeyRule.ID, invalidStartKeyRule.StartKeyHex = "invalid-start-key", startKey+"zz"
+	invalidEndKeyRule := validRule.Clone()
+	invalidEndKeyRule.ID, invalidEndKeyRule.EndKeyHex = "invalid-end-key", endKey+"zz"
 	mismatchRule := validRule.Clone()
 	mismatchRule.ID = "mismatch"
 	validJSON := validRule.String()
@@ -661,11 +665,13 @@ func TestRuleManagerLoadRulesLogRedact(t *testing.T) {
 			memory := kv.NewMemoryKV()
 			store := endpoint.NewStorageEndpoint(memory, nil)
 			for key, value := range map[string]string{
-				validRule.StoreKey():   validJSON,
-				invalidRule.StoreKey(): invalidRule.String(),
-				"malformed":            validJSON[:len(validJSON)-1],
-				"duplicate":            validJSON,
-				"mismatch":             mismatchRule.String(),
+				validRule.StoreKey():           validJSON,
+				invalidRule.StoreKey():         invalidRule.String(),
+				invalidStartKeyRule.StoreKey(): invalidStartKeyRule.String(),
+				invalidEndKeyRule.StoreKey():   invalidEndKeyRule.String(),
+				"malformed":                    validJSON[:len(validJSON)-1],
+				"duplicate":                    validJSON,
+				"mismatch":                     mismatchRule.String(),
 			} {
 				re.NoError(memory.Save(keypath.RuleKeyPath(key), value))
 			}
@@ -682,16 +688,24 @@ func TestRuleManagerLoadRulesLogRedact(t *testing.T) {
 			if mode.typ == logutil.RedactInfoLogON {
 				re.NotContains(string(output), startKey)
 				re.NotContains(string(output), endKey)
-				re.Equal(4, strings.Count(string(output), "[rule-value=?]"))
+				re.Equal(6, strings.Count(string(output), "[rule-value=?]"))
+				re.Contains(string(output), "[PD:placement:ErrLoadRule]load rule failed: ?")
 			} else {
 				re.Contains(string(output), startKey)
 				re.Contains(string(output), endKey)
+				for _, key := range []string{invalidStartKeyRule.StartKeyHex, invalidEndKeyRule.EndKeyHex} {
+					cause := "[PD:hex:ErrHexDecodingString]decode string " + key + " error"
+					if mode.typ == logutil.RedactInfoLogMarker {
+						cause = "‹" + cause + "›"
+					}
+					re.Contains(string(output), "[PD:placement:ErrLoadRule]load rule failed: "+cause)
+				}
 				if mode.typ == logutil.RedactInfoLogMarker {
-					re.Equal(4, strings.Count(string(output), `[rule-value="‹{`))
+					re.Equal(6, strings.Count(string(output), `[rule-value="‹{`))
 				}
 			}
 
-			for _, key := range []string{invalidRule.StoreKey(), "malformed", "duplicate", "mismatch"} {
+			for _, key := range []string{invalidRule.StoreKey(), invalidStartKeyRule.StoreKey(), invalidEndKeyRule.StoreKey(), "malformed", "duplicate", "mismatch"} {
 				value, err := store.LoadRule(key)
 				re.NoError(err)
 				re.Empty(value)

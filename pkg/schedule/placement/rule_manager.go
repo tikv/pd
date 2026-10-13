@@ -185,7 +185,7 @@ func (m *RuleManager) loadRules() error {
 		}
 		err = m.AdjustRule(r, "")
 		if err != nil {
-			log.Error("rule is in bad format", zap.String("rule-key", k), logutil.ZapRedactString("rule-value", v), errs.ZapError(errs.ErrLoadRule, err))
+			log.Error("rule is in bad format", zap.String("rule-key", k), logutil.ZapRedactString("rule-value", v), errs.ZapError(errs.ErrLoadRule, errors.New(logutil.RedactString(err.Error()))))
 			toDelete = append(toDelete, k)
 			return
 		}
