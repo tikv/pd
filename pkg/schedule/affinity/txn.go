@@ -412,46 +412,52 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affini
 
 	// Step 2: Save the Group in storage.
 	original := group.Group
-	group.LeaderStoreID = leaderStoreID
-	group.VoterStoreIDs = slices.Clone(voterStoreIDs)
+	var updated Group
 	// Balance submissions use commitBalancePlans. Safety repair only compares
 	// this group's persisted target and never holds checker locks across IO.
 	err := m.storage.RunInTxn(m.ctx, func(txn kv.Txn) error {
-		if affinityVer != 0 {
-			key := keypath.AffinityGroupPath(groupID)
-			var value string
-			var loadErr error
-			if revisionTxn, ok := txn.(kv.RevisionTxn); ok {
-				value, loadErr = revisionTxn.LoadWithRevision(key)
-			} else {
-				value, loadErr = txn.Load(key)
-			}
-			if loadErr != nil {
-				return loadErr
-			}
-			var persisted Group
-			if value == "" {
-				return errs.ErrEtcdTxnConflict.FastGenByArgs()
-			}
-			if err := json.Unmarshal([]byte(value), &persisted); err != nil {
-				return err
-			}
-			if persisted.ID != original.ID || persisted.CreateTimestamp != original.CreateTimestamp ||
-				persisted.BalancePolicy != original.BalancePolicy || persisted.LeaderStoreID != original.LeaderStoreID ||
-				!slices.Equal(normalizeVoters(persisted.VoterStoreIDs), original.VoterStoreIDs) {
-				return errs.ErrEtcdTxnConflict.FastGenByArgs()
-			}
+		key := keypath.AffinityGroupPath(groupID)
+		var value string
+		var loadErr error
+		if revisionTxn, ok := txn.(kv.RevisionTxn); ok {
+			value, loadErr = revisionTxn.LoadWithRevision(key)
+		} else {
+			value, loadErr = txn.Load(key)
 		}
-		return m.storage.SaveAffinityGroup(txn, groupID, &group.Group)
+		if loadErr != nil {
+			return loadErr
+		}
+		if value == "" {
+			return errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
+		}
+		if err := json.Unmarshal([]byte(value), &updated); err != nil {
+			return err
+		}
+		if updated.ID != original.ID || updated.CreateTimestamp != original.CreateTimestamp ||
+			(affinityVer != 0 && (updated.BalancePolicy != original.BalancePolicy || updated.LeaderStoreID != original.LeaderStoreID ||
+				!slices.Equal(normalizeVoters(updated.VoterStoreIDs), original.VoterStoreIDs))) {
+			return errs.ErrEtcdTxnConflict.FastGenByArgs()
+		}
+		// PD's admin cache can lag behind scheduling's policy updates. Change
+		// only the requested peers and retain the authoritative policy.
+		updated.LeaderStoreID = leaderStoreID
+		updated.VoterStoreIDs = slices.Clone(voterStoreIDs)
+		if err := validateBalancePolicy(updated.BalancePolicy); err != nil {
+			return err
+		}
+		return m.storage.SaveAffinityGroup(txn, groupID, &updated)
 	})
 	if errs.ErrEtcdTxnConflict.Equal(err) {
+		if affinityVer == 0 {
+			return nil, err
+		}
 		return m.GetAffinityGroupState(groupID), nil
 	}
 	if err != nil {
 		return nil, err
 	}
 	// Step 3: Save the information in memory.
-	return m.updateGroupPeers(groupID, leaderStoreID, voterStoreIDs)
+	return m.updateGroupTarget(updated)
 }
 
 // UpdateAffinityGroupKeyRanges batch modifies key ranges for multiple affinity groups.
