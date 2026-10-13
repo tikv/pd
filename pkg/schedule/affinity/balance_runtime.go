@@ -98,7 +98,7 @@ const (
 )
 
 type balanceFingerprint struct {
-	table, stores, rules uint64
+	table, stores, rules, labels uint64
 }
 
 type balanceTableLock struct {
@@ -239,6 +239,8 @@ func (m *Manager) SetBalanceActionBuilders(builder BalanceActionBuilder, progres
 	start := m.balanceBuilder == nil && m.balanceProgressBuilder == nil
 	m.balanceBuilder, m.balanceProgressBuilder, m.balanceVirtualBuilder = builder, progressBuilder, virtualBuilder
 	m.balanceRuleRevision = ruleRevision
+	m.balanceMetadataSource++
+	m.balanceMetadataVerified = nil
 	m.balanceValidator = validator
 	m.Unlock()
 	if start {
@@ -310,7 +312,12 @@ func (m *Manager) balanceFingerprintLocked(state *balanceTableState) balanceFing
 	if m.balanceRuleRevision != nil {
 		rules = m.balanceRuleRevision()
 	}
-	return balanceFingerprint{state.version, m.balanceStoreRevision, rules}
+	return balanceFingerprint{
+		table:  state.version,
+		stores: m.balanceStoreRevision,
+		rules:  rules,
+		labels: m.regionLabeler.GetRevision(),
+	}
 }
 
 func (m *Manager) invalidateBalanceLocked(groupID string) {
@@ -345,7 +352,7 @@ func (m *Manager) invalidateBalanceLocked(groupID string) {
 	delete(state.cursors, groupID)
 	delete(state.regionBytes, groupID)
 	delete(state.moveBytes, groupID)
-	state.pending = nil
+	discardPendingBalanceSnapshotLocked(state)
 	clearBalanceDependencies(state)
 	state.nextGroup = ""
 	state.retryAfter = time.Time{}
@@ -383,7 +390,6 @@ type balanceSnapshot struct {
 	dependencies     map[string]string
 	conditions       []clientv3.Cmp
 	applied          bool
-	metadata         map[string]string
 	admission        func() bool
 	prepared         bool
 	validationPlans  []BalancePlan
@@ -408,7 +414,8 @@ func (m *Manager) balanceSnapshot(groupID string) *balanceSnapshot {
 	if state.phase == balanceStable && state.fingerprint == fingerprint {
 		return nil
 	}
-	if fingerprint.stores != state.fingerprint.stores || fingerprint.rules != state.fingerprint.rules {
+	if fingerprint.stores != state.fingerprint.stores || fingerprint.rules != state.fingerprint.rules ||
+		fingerprint.labels != state.fingerprint.labels {
 		clear(state.actions)
 		clear(state.leaderTargets)
 		clear(state.voterActions)
@@ -418,7 +425,7 @@ func (m *Manager) balanceSnapshot(groupID string) *balanceSnapshot {
 		if state.converging != nil {
 			state.converging.cursor = nil
 		}
-		state.pending = nil
+		discardPendingBalanceSnapshotLocked(state)
 		clearBalanceDependencies(state)
 		state.phase = balanceIdle
 		state.mode = BalanceBuildLeaders
@@ -428,11 +435,11 @@ func (m *Manager) balanceSnapshot(groupID string) *balanceSnapshot {
 		if state.pending.fingerprint == fingerprint && state.dependencyFingerprint == fingerprint {
 			return state.pending
 		}
-		state.pending = nil
+		discardPendingBalanceSnapshotLocked(state)
 		clearBalanceDependencies(state)
 	}
 	liveUnavailable := m.collectUnavailableStoresFor(liveStores)
-	globalLeaders, globalVoters := make(map[uint64]int, len(m.groups)), make(map[uint64]int, len(m.groups))
+	globalLeaders, globalVoters := make(map[uint64]int, len(liveStores)), make(map[uint64]int, len(liveStores))
 	for _, group := range m.groups {
 		if group.LeaderStoreID != 0 {
 			globalLeaders[group.LeaderStoreID]++
@@ -896,14 +903,29 @@ func (m *Manager) discardBalanceBuild(snapshot *balanceSnapshot, groupID string)
 	if state == nil {
 		return
 	}
+	discardPendingBalanceSnapshotLocked(state)
+	discardBalanceBuildLocked(state, groupID)
+}
+
+func discardBalanceBuildLocked(state *balanceTableState, groupID string) {
 	delete(state.cursors, groupID)
 	delete(state.actions, groupID)
 	delete(state.leaderTargets, groupID)
 	delete(state.voterActions, groupID)
 	delete(state.regionBytes, groupID)
 	delete(state.moveBytes, groupID)
-	state.pending = nil
 	state.mode = BalanceBuildLeaders
+}
+
+// A retained snapshot owns the completeness flags for its cached actions.
+// Discarding it must also discard every action set with temporary omissions.
+func discardPendingBalanceSnapshotLocked(state *balanceTableState) {
+	if state.pending != nil {
+		for id := range state.pending.blockedGroups {
+			discardBalanceBuildLocked(state, id)
+		}
+		state.pending = nil
+	}
 }
 
 func (m *Manager) discardBlockedBalanceBuilds(snapshot *balanceSnapshot) {
@@ -923,7 +945,7 @@ func (m *Manager) releaseBalanceDependencies(snapshot *balanceSnapshot) {
 	defer m.Unlock()
 	if state := m.balanceTables[snapshot.tableID]; state != nil {
 		if state.pending == snapshot {
-			state.pending = nil
+			discardPendingBalanceSnapshotLocked(state)
 		}
 		if state.dependencyFingerprint == snapshot.fingerprint {
 			clearBalanceDependencies(state)
@@ -1041,7 +1063,7 @@ func (m *Manager) removeIllegalBalanceAction(snapshot *balanceSnapshot, group *G
 		state.voterActions[group.ID] = discardBalanceAction(voters, group, plan)
 	}
 	delete(state.cursors, group.ID)
-	state.pending = nil
+	discardPendingBalanceSnapshotLocked(state)
 }
 
 func discardBalanceAction(actions BalanceActionSet, group *GroupState, plan BalancePlan) BalanceActionSet {

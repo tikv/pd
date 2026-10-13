@@ -39,6 +39,8 @@ func (m *Manager) SetBalanceCommitGuard(term func() ([]clientv3.Cmp, bool), meta
 	}
 	if metadata != nil {
 		m.balanceMetadata = metadata
+		m.balanceMetadataSource++
+		m.balanceMetadataVerified = nil
 	}
 }
 
@@ -60,13 +62,33 @@ func canonicalJSON(value string) string {
 	return string(data)
 }
 
+// balanceMetadataVersion records a successful comparison with authoritative
+// metadata. Local generations prevent reusing it while a watcher is behind.
+type balanceMetadataVersion struct {
+	token  string
+	rules  uint64
+	labels uint64
+	source uint64
+}
+
+func (m *Manager) balanceMetadataCurrent(version balanceMetadataVersion, ruleRevision func() uint64) bool {
+	return m.regionLabeler.GetRevision() == version.labels &&
+		(ruleRevision == nil || ruleRevision() == version.rules)
+}
+
 func (m *Manager) captureBalanceDependencies(ctx context.Context, snapshot *balanceSnapshot) error {
 	if snapshot.dependencies != nil {
 		return nil
 	}
 	m.RLock()
-	term, metadata := m.balanceTerm, m.balanceMetadata
+	term, metadata, ruleRevision := m.balanceTerm, m.balanceMetadata, m.balanceRuleRevision
+	version := balanceMetadataVersion{source: m.balanceMetadataSource}
+	verified := m.balanceMetadataVerified
 	m.RUnlock()
+	version.labels = m.regionLabeler.GetRevision()
+	if ruleRevision != nil {
+		version.rules = ruleRevision()
+	}
 	if term != nil {
 		var ok bool
 		snapshot.conditions, ok = term()
@@ -83,17 +105,6 @@ func (m *Manager) captureBalanceDependencies(ctx context.Context, snapshot *bala
 		data, _ := json.Marshal(group.Group)
 		expected[keypath.AffinityGroupPath(group.ID)] = canonicalJSON(string(data))
 	}
-	snapshot.metadata = make(map[string]string)
-	if metadata != nil {
-		for key, value := range metadata() {
-			snapshot.metadata[key] = canonicalJSON(value)
-		}
-	}
-	m.regionLabeler.IterateLabelRules(func(rule *labeler.LabelRule) bool {
-		data, _ := json.Marshal(rule)
-		snapshot.metadata[keypath.RegionLabelKeyPath(rule.ID)] = canonicalJSON(string(data))
-		return true
-	})
 	snapshot.dependencies = make(map[string]string, 2)
 	if err := m.runBalanceTxn(ctx, snapshot.conditions, func(txn kv.Txn) error {
 		for _, key := range []string{endpoint.AffinityTableRevisionKey(snapshot.tableID), endpoint.AffinityMetadataRevisionKey()} {
@@ -103,6 +114,7 @@ func (m *Manager) captureBalanceDependencies(ctx context.Context, snapshot *bala
 			}
 			snapshot.dependencies[key] = value
 		}
+		version.token = snapshot.dependencies[endpoint.AffinityMetadataRevisionKey()]
 		// Compare the authoritative inputs with the in-memory watcher snapshot.
 		// The generation reads fence additions and deletions as well as updates;
 		// data reads deliberately add no per-key transaction comparisons.
@@ -129,6 +141,25 @@ func (m *Manager) captureBalanceDependencies(ctx context.Context, snapshot *bala
 		if !maps.Equal(expected, actual) {
 			return balanceConflict()
 		}
+		// A version already verified by another table needs only the token
+		// comparisons above, not another cluster-wide read and serialization.
+		if verified != nil && *verified == version && (metadata == nil || ruleRevision != nil) {
+			if !m.balanceMetadataCurrent(version, ruleRevision) {
+				return balanceConflict()
+			}
+			return nil
+		}
+		expectedMetadata := make(map[string]string)
+		if metadata != nil {
+			for key, value := range metadata() {
+				expectedMetadata[key] = canonicalJSON(value)
+			}
+		}
+		m.regionLabeler.IterateLabelRules(func(rule *labeler.LabelRule) bool {
+			data, _ := json.Marshal(rule)
+			expectedMetadata[keypath.RegionLabelKeyPath(rule.ID)] = canonicalJSON(string(data))
+			return true
+		})
 		actual = make(map[string]string)
 		prefixes := []string{keypath.RegionLabelPathPrefix()}
 		if metadata != nil {
@@ -143,7 +174,7 @@ func (m *Manager) captureBalanceDependencies(ctx context.Context, snapshot *bala
 				actual[key] = canonicalJSON(values[i])
 			}
 		}
-		if !maps.Equal(snapshot.metadata, actual) {
+		if !maps.Equal(expectedMetadata, actual) || !m.balanceMetadataCurrent(version, ruleRevision) {
 			return balanceConflict()
 		}
 		return nil
@@ -151,13 +182,22 @@ func (m *Manager) captureBalanceDependencies(ctx context.Context, snapshot *bala
 		snapshot.dependencies = nil
 		return err
 	}
+	if !m.balanceMetadataCurrent(version, ruleRevision) {
+		snapshot.dependencies = nil
+		return balanceConflict()
+	}
 	m.Lock()
+	defer m.Unlock()
+	if m.balanceMetadataSource != version.source {
+		snapshot.dependencies = nil
+		return balanceConflict()
+	}
+	m.balanceMetadataVerified = &version
 	if state := m.balanceTables[snapshot.tableID]; state != nil && m.balanceFingerprintLocked(state) == snapshot.fingerprint {
 		state.dependencies = maps.Clone(snapshot.dependencies)
 		state.dependencyConditions = slices.Clone(snapshot.conditions)
 		state.dependencyFingerprint = snapshot.fingerprint
 	}
-	m.Unlock()
 	return nil
 }
 

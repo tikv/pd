@@ -82,6 +82,8 @@ type Manager struct {
 	balanceRuleRevision     func() uint64
 	balanceTerm             func() ([]clientv3.Cmp, bool)
 	balanceMetadata         func() map[string]string
+	balanceMetadataSource   uint64
+	balanceMetadataVerified *balanceMetadataVersion
 	balanceAdmission        func() bool
 	balanceStoreRevision    uint64
 	balanceStoreFingerprint uint64
