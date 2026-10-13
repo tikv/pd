@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
@@ -89,6 +90,84 @@ func TestAffinityBalanceLeaderConvergence(t *testing.T) {
 	tc.PutRegion(region.Clone(core.WithLeader(peer)))
 	checker.Check(tc.GetRegion(1))
 	require.Equal(t, affinity.PhaseStable, manager.GetAffinityGroupState(target.ID).Phase)
+}
+
+func TestAffinityManualRebalanceTableWithFixedRepresentative(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opt := newAffinityTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	for id := uint64(1); id <= 3; id++ {
+		tc.AddRegionStore(id, 10)
+		tc.SetStoreUp(id)
+	}
+	manager := tc.GetAffinityManager()
+	checker := newTestAffinityChecker(ctx, tc, opt)
+	ids := []string{"_tidb_pt_200_p1", "_tidb_pt_200_p2", "_tidb_pt_200_p3"}
+	for i, id := range ids {
+		start, end := []byte{byte(i + 1)}, []byte{byte(i + 2)}
+		require.NoError(t, createAffinityGroupForTest(manager, &affinity.Group{
+			ID: id, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3},
+		}, start, end))
+		tc.AddLeaderRegion(uint64(i+1), 1, 2, 3)
+		tc.PutRegion(tc.GetRegion(uint64(i+1)).Clone(core.WithStartKey(start), core.WithEndKey(end)))
+	}
+	for i := range ids {
+		group, aligned := manager.GetAndCacheRegionAffinityGroupState(tc.GetRegion(uint64(i + 1)))
+		require.True(t, aligned)
+		if i == 0 {
+			fixed := group.Group
+			fixed.BalancePolicy = affinity.BalancePolicyFixed
+			require.NoError(t, tc.GetStorage().RunInTxn(ctx, func(txn kv.Txn) error {
+				return tc.GetStorage().SaveAffinityGroup(txn, fixed.ID, &fixed)
+			}))
+			manager.SyncGroupFromEtcd(&fixed)
+		}
+	}
+	for i := range ids {
+		checker.Check(tc.GetRegion(uint64(i + 1)))
+	}
+	for i := range ids {
+		_, aligned := manager.GetAndCacheRegionAffinityGroupState(tc.GetRegion(uint64(i + 1)))
+		require.True(t, aligned)
+		group := manager.GetAffinityGroupState(ids[i])
+		require.Equal(t, affinity.PhaseStable, group.Phase)
+	}
+
+	before := make(map[string]affinity.Group, len(ids))
+	for _, id := range ids {
+		before[id] = manager.GetAffinityGroupState(id).Group
+	}
+	preview, err := manager.RebalanceAffinityGroup(ctx, ids[0], false)
+	require.NoError(t, err)
+	require.Len(t, preview, len(ids))
+	changed := 0
+	for _, plan := range preview {
+		require.Equal(t, before[plan.GroupID].ID, plan.GroupID)
+		if plan.Changed {
+			changed++
+		}
+		if plan.GroupID == ids[0] {
+			require.False(t, plan.Changed)
+			require.Equal(t, before[plan.GroupID].LeaderStoreID, plan.LeaderStoreID)
+			require.Equal(t, before[plan.GroupID].VoterStoreIDs, plan.VoterStoreIDs)
+		}
+	}
+	require.NotZero(t, changed)
+	for _, id := range ids {
+		require.Equal(t, before[id], manager.GetAffinityGroupState(id).Group)
+	}
+
+	applied, err := manager.RebalanceAffinityGroup(ctx, ids[0], true)
+	require.NoError(t, err)
+	require.Equal(t, preview, applied)
+	for _, plan := range applied {
+		state := manager.GetAffinityGroupState(plan.GroupID)
+		require.Equal(t, plan.LeaderStoreID, state.LeaderStoreID)
+		require.Equal(t, plan.VoterStoreIDs, state.VoterStoreIDs)
+	}
+	require.Equal(t, before[ids[0]].LeaderStoreID, manager.GetAffinityGroupState(ids[0]).LeaderStoreID)
+	require.Equal(t, before[ids[0]].VoterStoreIDs, manager.GetAffinityGroupState(ids[0]).VoterStoreIDs)
 }
 
 func TestAffinityBalanceRequiresCompleteHealthyCoverage(t *testing.T) {

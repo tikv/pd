@@ -209,7 +209,7 @@ func (m *Manager) rebalanceTable(ctx context.Context, groupID string, apply bool
 	return plans, nil
 }
 
-func (m *Manager) buildManualBalanceActions(ctx context.Context, snapshot *balanceSnapshot,
+func (*Manager) buildManualBalanceActions(ctx context.Context, snapshot *balanceSnapshot,
 	actual *GroupState, target *Group) (BalanceActionSet, bool, error) {
 	leaders, ready, err := buildManualBalanceActionMode(ctx, snapshot, actual, target, BalanceBuildLeaders)
 	if err != nil || !ready {

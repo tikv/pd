@@ -107,10 +107,10 @@ func PlanTableRebalance(ctx context.Context, groups []*Group, options BalanceOpt
 		if first == nil || second == nil {
 			return nil, nil
 		}
-		updateGlobalBalanceCounts(globalLeaders, globalVoters, first, pair.first.target.leader, pair.first.target.voters)
-		updateGlobalBalanceCounts(globalLeaders, globalVoters, second, pair.second.target.leader, pair.second.target.voters)
-		first = updateVirtualGroup(current, pair.first.GroupID, pair.first.target.leader, pair.first.target.voters)
-		second = updateVirtualGroup(current, pair.second.GroupID, pair.second.target.leader, pair.second.target.voters)
+		updateGlobalBalanceCounts(globalLeaders, globalVoters, first, pair.first.leader, pair.first.voters)
+		updateGlobalBalanceCounts(globalLeaders, globalVoters, second, pair.second.leader, pair.second.voters)
+		first = updateVirtualGroup(current, pair.first.GroupID, pair.first.leader, pair.first.voters)
+		second = updateVirtualGroup(current, pair.second.GroupID, pair.second.leader, pair.second.voters)
 		ready, err := rebuildVirtualActions(ctx, original[pair.first.GroupID], first, rebuild, actions)
 		if err != nil {
 			return nil, err
@@ -260,7 +260,7 @@ func findImprovingPair(ctx context.Context, groups []*Group, stores []uint64, ac
 	var best manualBalancePair
 	found := false
 	checks := 0
-	for a := 0; a < len(candidateGroups); a++ {
+	for a := range candidateGroups {
 		i := candidateGroups[a]
 		for b := a + 1; b < len(candidateGroups); b++ {
 			j := candidateGroups[b]
@@ -282,10 +282,10 @@ func findImprovingPair(ctx context.Context, groups []*Group, stores []uint64, ac
 					globalScore := scoreAfterGlobalPair(baseGlobalScore, globalLeaders, globalVoters,
 						groups[i], first, groups[j], second)
 					preserves := 0
-					if first.target.leader == groups[i].LeaderStoreID {
+					if first.leader == groups[i].LeaderStoreID {
 						preserves++
 					}
-					if second.target.leader == groups[j].LeaderStoreID {
+					if second.leader == groups[j].LeaderStoreID {
 						preserves++
 					}
 					pair := manualBalancePair{
@@ -363,19 +363,19 @@ func manualBalanceActions(group *Group, actions BalanceActionSet, stores []uint6
 		}
 	}
 	slices.SortFunc(result, func(a, b manualBalanceAction) int {
-		if order := cmp.Compare(a.target.leader, b.target.leader); order != 0 {
+		if order := cmp.Compare(a.leader, b.leader); order != 0 {
 			return order
 		}
-		if order := cmp.Compare(a.target.to, b.target.to); order != 0 {
+		if order := cmp.Compare(a.to, b.to); order != 0 {
 			return order
 		}
-		return cmp.Compare(a.target.from, b.target.from)
+		return cmp.Compare(a.from, b.from)
 	})
 	return result
 }
 
-func countsForGroups(groups []*Group) (map[uint64]int, map[uint64]int) {
-	leaders, voters := make(map[uint64]int), make(map[uint64]int)
+func countsForGroups(groups []*Group) (leaders map[uint64]int, voters map[uint64]int) {
+	leaders, voters = make(map[uint64]int), make(map[uint64]int)
 	for _, group := range groups {
 		if group.LeaderStoreID != 0 {
 			leaders[group.LeaderStoreID]++
@@ -397,17 +397,17 @@ func scoreAfterPair(base balanceScore, leaders, voters map[uint64]int, firstGrou
 }
 
 func addManualActionDeltas(leaderDeltas, voterDeltas map[uint64]int, group *Group, action manualBalanceAction) {
-	if group.LeaderStoreID != action.target.leader {
+	if group.LeaderStoreID != action.leader {
 		if group.LeaderStoreID != 0 {
 			leaderDeltas[group.LeaderStoreID]--
 		}
-		if action.target.leader != 0 {
-			leaderDeltas[action.target.leader]++
+		if action.leader != 0 {
+			leaderDeltas[action.leader]++
 		}
 	}
-	if action.target.from != 0 {
-		voterDeltas[action.target.from]--
-		voterDeltas[action.target.to]++
+	if action.from != 0 {
+		voterDeltas[action.from]--
+		voterDeltas[action.to]++
 	}
 }
 
