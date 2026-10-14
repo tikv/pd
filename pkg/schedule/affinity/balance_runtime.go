@@ -241,6 +241,8 @@ func (m *Manager) loadBalanceStoreSnapshot() ([]*core.StoreInfo, uint64) {
 	})
 	h := fnv.New64a()
 	for _, store := range stores {
+		// Match StoreStateFilter's down threshold so recovery also invalidates
+		// completed searches for tables that have no peers on this store.
 		input := struct {
 			ID        uint64
 			State     int32
@@ -248,7 +250,7 @@ func (m *Manager) loadBalanceStoreSnapshot() ([]*core.StoreInfo, uint64) {
 			Labels    []*metapb.StoreLabel
 			Flags     [8]bool
 		}{ID: store.GetID(), State: int32(store.GetMeta().GetState()), NodeState: int32(store.GetMeta().GetNodeState()), Labels: store.GetLabels(),
-			Flags: [8]bool{store.IsUnhealthy(), store.IsLowSpace(m.conf.GetLowSpaceRatio()),
+			Flags: [8]bool{store.DownTime() > m.conf.GetMaxStoreDownTime(), store.IsLowSpace(m.conf.GetLowSpaceRatio()),
 				store.AllowLeaderTransferIn(), store.AllowLeaderTransferOut(), store.EvictedAsSlowStore(),
 				store.EvictedAsStoppingStore(), store.IsEvictedAsSlowTrend(), m.conf.CheckLabelProperty(config.RejectLeader, store.GetLabels())}}
 		data, _ := json.Marshal(input)
