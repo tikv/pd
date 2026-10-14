@@ -340,8 +340,6 @@ func (m *Manager) commitBalancePlans(ctx context.Context, snapshot *balanceSnaps
 		}
 		updates = append(updates, group)
 	}
-	m.metaMutex.Lock()
-	defer m.metaMutex.Unlock()
 	var targetToken string
 	err := m.runBalanceTxn(ctx, snapshot.conditions, func(txn kv.Txn) error {
 		if err := checkBalanceDependencies(txn, snapshot); err != nil {
