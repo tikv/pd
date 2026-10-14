@@ -32,6 +32,8 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/config"
 )
@@ -853,16 +855,28 @@ func (m *Manager) loadBalanceStoreSnapshot() ([]*core.StoreInfo, uint64) {
 			continue
 		}
 		input := struct {
-			ID        uint64
-			State     int32
-			NodeState int32
-			Labels    []*metapb.StoreLabel
-			Flags     [10]bool
-		}{
-			store.GetID(), int32(store.GetMeta().GetState()), int32(store.GetMeta().GetNodeState()), store.GetLabels(),
-			[10]bool{store.IsUnhealthy(), store.IsDisconnected(), store.IsBusy(), store.IsLowSpace(m.conf.GetLowSpaceRatio()),
-				store.AllowLeaderTransferIn(), store.AllowLeaderTransferOut(), store.EvictedAsSlowStore(),
-				store.EvictedAsStoppingStore(), store.IsEvictedAsSlowTrend(), m.conf.CheckLabelProperty(config.RejectLeader, store.GetLabels())},
+			ID         uint64
+			State      int32
+			NodeState  int32
+			Labels     []*metapb.StoreLabel
+			Flags      [10]bool
+			LimitFlags [12]bool
+		}{}
+		input.ID = store.GetID()
+		input.State = int32(store.GetMeta().GetState())
+		input.NodeState = int32(store.GetMeta().GetNodeState())
+		input.Labels = store.GetLabels()
+		input.Flags = [10]bool{store.IsUnhealthy(), store.IsDisconnected(), store.IsBusy(), store.IsLowSpace(m.conf.GetLowSpaceRatio()),
+			store.AllowLeaderTransferIn(), store.AllowLeaderTransferOut(), store.EvictedAsSlowStore(),
+			store.EvictedAsStoppingStore(), store.IsEvictedAsSlowTrend(), m.conf.CheckLabelProperty(config.RejectLeader, store.GetLabels())}
+		limitIndex := 0
+		for _, typ := range []storelimit.Type{storelimit.AddPeer, storelimit.RemovePeer, storelimit.TransferLeaderIn} {
+			for level := constant.Low; level < constant.PriorityLevelLen; level++ {
+				if limit := store.GetStoreLimit(); limit != nil {
+					input.LimitFlags[limitIndex] = limit.Available(storelimit.RegionInfluence[typ], typ, level)
+				}
+				limitIndex++
+			}
 		}
 		data, _ := json.Marshal(input)
 		_, _ = h.Write(data)
