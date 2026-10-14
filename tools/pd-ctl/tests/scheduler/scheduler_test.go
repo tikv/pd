@@ -15,7 +15,6 @@
 package scheduler_test
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -1059,8 +1058,7 @@ func TestHotSchedulerUpgrade(t *testing.T) {
 	defer func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/skipStoreConfigSync"))
 	}()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := pdTests.NewTestCluster(ctx, 1)
 	re.NoError(err)
 	defer cluster.Destroy()

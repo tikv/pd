@@ -439,7 +439,7 @@ func runExistingTestCases(pkgs []string) (tasks []task, err error) {
 
 	// read content
 	existPkgs := make(map[string]struct{})
-	for _, line := range strings.Split(string(content), "\n") {
+	for line := range strings.SplitSeq(string(content), "\n") {
 		if len(line) == 0 || strings.Contains(line, "no test files") {
 			continue
 		}
