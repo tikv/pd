@@ -85,6 +85,8 @@ type Manager struct {
 	balanceMetadataSource   uint64
 	balanceMetadataVerified *balanceMetadataVersion
 	balanceAdmission        func() bool
+	balanceLeaderCounts     map[uint64]int
+	balanceVoterCounts      map[uint64]int
 	balanceStoreRevision    uint64
 	balanceStoreFingerprint uint64
 	balanceQueue            chan string
@@ -114,6 +116,8 @@ func NewManager(ctx context.Context, storage endpoint.AffinityStorage, storeSetI
 		regions:             make(map[uint64]regionCache),
 		unavailableStores:   make(map[uint64]storeCondition),
 		balanceTables:       make(map[string]*balanceTableState),
+		balanceLeaderCounts: make(map[uint64]int),
+		balanceVoterCounts:  make(map[uint64]int),
 		balanceQueue:        make(chan string, 64),
 		balanceLocks:        make(map[string]*balanceTableLock),
 		keyRanges:           make(map[string]GroupKeyRanges),
@@ -193,7 +197,40 @@ func (m *Manager) initGroupLocked(group *Group) {
 		LabelRule:           nil,
 		RangeCount:          0,
 	}
+	m.addBalanceCountsLocked(&m.groups[group.ID].Group)
 	m.invalidateBalanceLocked(group.ID)
+}
+
+func (m *Manager) addBalanceCountsLocked(group *Group) {
+	if group == nil {
+		return
+	}
+	if group.LeaderStoreID != 0 {
+		m.balanceLeaderCounts[group.LeaderStoreID]++
+	}
+	for _, storeID := range group.VoterStoreIDs {
+		m.balanceVoterCounts[storeID]++
+	}
+}
+
+func (m *Manager) removeBalanceCountsLocked(group *Group) {
+	if group == nil {
+		return
+	}
+	if group.LeaderStoreID != 0 {
+		if count := m.balanceLeaderCounts[group.LeaderStoreID] - 1; count > 0 {
+			m.balanceLeaderCounts[group.LeaderStoreID] = count
+		} else {
+			delete(m.balanceLeaderCounts, group.LeaderStoreID)
+		}
+	}
+	for _, storeID := range group.VoterStoreIDs {
+		if count := m.balanceVoterCounts[storeID] - 1; count > 0 {
+			m.balanceVoterCounts[storeID] = count
+		} else {
+			delete(m.balanceVoterCounts, storeID)
+		}
+	}
 }
 
 func (m *Manager) noGroupsExist(groups []*Group) error {
@@ -243,6 +280,11 @@ func (m *Manager) updateGroupTarget(group Group) (*GroupState, error) {
 		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(group.ID)
 	}
 
+	oldGroup := groupInfo.Group
+	if oldGroup.LeaderStoreID != group.LeaderStoreID || !slices.Equal(oldGroup.VoterStoreIDs, group.VoterStoreIDs) {
+		m.removeBalanceCountsLocked(&oldGroup)
+		m.addBalanceCountsLocked(&group)
+	}
 	groupInfo.SetAvailability(groupAvailable)
 	groupInfo.Group = group
 	groupInfo.VoterStoreIDs = slices.Clone(group.VoterStoreIDs)
@@ -329,6 +371,9 @@ func (m *Manager) clearGroupCacheLocked(groupID string) {
 }
 
 func (m *Manager) deleteGroupLocked(groupID string) {
+	if groupInfo, ok := m.groups[groupID]; ok {
+		m.removeBalanceCountsLocked(&groupInfo.Group)
+	}
 	m.clearGroupCacheLocked(groupID)
 	delete(m.groups, groupID)
 	if state := m.balanceTables[TableGroupPrefix(groupID)]; state != nil {
@@ -529,7 +574,8 @@ func (m *Manager) SyncGroupFromEtcd(group *Group) {
 	if exists &&
 		existingGroup.LeaderStoreID == group.LeaderStoreID &&
 		slices.Equal(existingGroup.VoterStoreIDs, group.VoterStoreIDs) &&
-		existingGroup.BalancePolicy == group.BalancePolicy {
+		existingGroup.BalancePolicy == group.BalancePolicy &&
+		existingGroup.CreateTimestamp == group.CreateTimestamp {
 		m.RUnlock()
 		return
 	}
@@ -580,6 +626,13 @@ func (m *Manager) SyncGroupFromEtcd(group *Group) {
 		delete(m.labelRuleBuffer, group.ID)
 	} else {
 		changed := false
+		targetChanged := groupInfo.LeaderStoreID != group.LeaderStoreID ||
+			!slices.Equal(groupInfo.VoterStoreIDs, group.VoterStoreIDs)
+		if targetChanged {
+			oldGroup := groupInfo.Group
+			m.removeBalanceCountsLocked(&oldGroup)
+			m.addBalanceCountsLocked(group)
+		}
 		if groupInfo.LeaderStoreID != group.LeaderStoreID {
 			groupInfo.LeaderStoreID = group.LeaderStoreID
 			changed = true
@@ -590,6 +643,10 @@ func (m *Manager) SyncGroupFromEtcd(group *Group) {
 		}
 		if groupInfo.BalancePolicy != group.BalancePolicy {
 			groupInfo.BalancePolicy = group.BalancePolicy
+			changed = true
+		}
+		if groupInfo.CreateTimestamp != group.CreateTimestamp {
+			groupInfo.CreateTimestamp = group.CreateTimestamp
 			changed = true
 		}
 

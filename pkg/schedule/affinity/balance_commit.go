@@ -82,9 +82,6 @@ func (m *Manager) balanceMetadataCurrent(version balanceMetadataVersion, ruleRev
 // watchers. A globally verified label revision does not prove that this table's
 // cached ranges have caught up with the label rules at that revision.
 func (m *Manager) balanceSnapshotRangesCurrent(snapshot *balanceSnapshot) bool {
-	if m.regionLabeler.GetRevision() != snapshot.fingerprint.labels {
-		return false
-	}
 	matched := true
 	m.regionLabeler.RLock()
 	for _, group := range snapshot.groups {
@@ -114,15 +111,15 @@ func (m *Manager) balanceSnapshotRangesCurrent(snapshot *balanceSnapshot) bool {
 		}
 	}
 	m.regionLabeler.RUnlock()
-	return matched && m.regionLabeler.GetRevision() == snapshot.fingerprint.labels
+	return matched
 }
 
 func (m *Manager) captureBalanceDependencies(ctx context.Context, snapshot *balanceSnapshot) error {
 	if snapshot.dependencies != nil {
-		// This table's ranges were verified when these dependencies were
-		// captured. Reuse that result only at the same label revision, so
-		// bounded pages need not rescan all of the table's ranges.
-		if m.regionLabeler.GetRevision() != snapshot.fingerprint.labels {
+		// Recheck only this table's ranges. The labeler revision is global, so
+		// comparing it here would make an unrelated table's label update abort
+		// this table's in-flight plan.
+		if !m.balanceSnapshotRangesCurrent(snapshot) {
 			return balanceConflict()
 		}
 		return nil
@@ -137,7 +134,10 @@ func (m *Manager) captureBalanceDependencies(ctx context.Context, snapshot *bala
 	version := balanceMetadataVersion{source: m.balanceMetadataSource}
 	verified := m.balanceMetadataVerified
 	m.RUnlock()
-	version.labels = snapshot.fingerprint.labels
+	// Label revisions are global and must not be part of a table fingerprint.
+	// Capture the current revision only for the short authoritative metadata
+	// comparison below; table range equality fences the independent watchers.
+	version.labels = m.regionLabeler.GetRevision()
 	if ruleRevision != nil {
 		version.rules = ruleRevision()
 	}
@@ -157,16 +157,26 @@ func (m *Manager) captureBalanceDependencies(ctx context.Context, snapshot *bala
 		data, _ := json.Marshal(group.Group)
 		expected[keypath.AffinityGroupPath(group.ID)] = canonicalJSON(string(data))
 	}
+	metadataKey := endpoint.AffinityTableMetadataRevisionKey(snapshot.tableID)
 	snapshot.dependencies = make(map[string]string, 2)
+	var globalMetadataToken string
 	if err := m.runBalanceTxn(ctx, snapshot.conditions, func(txn kv.Txn) error {
-		for _, key := range []string{endpoint.AffinityTableRevisionKey(snapshot.tableID), endpoint.AffinityMetadataRevisionKey()} {
+		for _, key := range []string{endpoint.AffinityTableRevisionKey(snapshot.tableID), metadataKey} {
 			value, err := txn.Load(key)
 			if err != nil {
 				return err
 			}
 			snapshot.dependencies[key] = value
 		}
-		version.token = snapshot.dependencies[endpoint.AffinityMetadataRevisionKey()]
+		// Keep the cluster-wide token only for the shared metadata verification
+		// cache. It is deliberately not a submission dependency: unrelated
+		// affinity tables must not abort this table's plan.
+		var err error
+		globalMetadataToken, err = txn.Load(endpoint.AffinityMetadataRevisionKey())
+		if err != nil {
+			return err
+		}
+		version.token = globalMetadataToken
 		// Compare the authoritative inputs with the in-memory watcher snapshot.
 		// The generation reads fence additions and deletions as well as updates;
 		// data reads deliberately add no per-key transaction comparisons.

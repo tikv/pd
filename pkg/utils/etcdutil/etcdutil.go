@@ -1112,3 +1112,20 @@ func (lw *LoopWatcher) SetReconcileDeletedKeys() {
 	lw.loadedKeys = make(map[string]struct{})
 	lw.reloadOnCompaction = true
 }
+
+// SetInitialLoadedKeys seeds the deletion reconciliation state with keys that
+// were applied by another authoritative snapshot before this watcher started.
+// It must be called after SetReconcileDeletedKeys and before StartWatchLoop.
+// The keys are treated as successfully loaded, so a key missing from the
+// watcher's first consistent snapshot is reported through deleteFn.
+func (lw *LoopWatcher) SetInitialLoadedKeys(keys []string) {
+	if !lw.reconcileDeletedKeys {
+		return
+	}
+	if lw.loadedKeys == nil {
+		lw.loadedKeys = make(map[string]struct{}, len(keys))
+	}
+	for _, key := range keys {
+		lw.loadedKeys[key] = struct{}{}
+	}
+}
