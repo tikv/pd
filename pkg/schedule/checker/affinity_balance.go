@@ -287,13 +287,17 @@ func (c *AffinityChecker) balanceStoreActionStatus(id uint64, leader, source boo
 	return balanceRejected
 }
 
-func (c *AffinityChecker) balanceSchedulingAllowed() bool {
+func (c *AffinityChecker) balanceTargetSubmissionAllowed() bool {
 	if c.cluster == nil || c.conf == nil || c.affinityManager == nil || c.IsPaused() || c.cluster.IsSchedulingHalted() ||
 		!c.cluster.GetSharedConfig().IsPlacementRulesEnabled() {
 		return false
 	}
-	limit := c.conf.GetAffinityScheduleLimit()
-	return limit > 0 && (c.opController == nil || c.opController.OperatorCount(operator.OpAffinity) < limit)
+	return c.conf.GetAffinityScheduleLimit() > 0
+}
+
+func (c *AffinityChecker) balanceSchedulingAllowed() bool {
+	return c.balanceTargetSubmissionAllowed() &&
+		(c.opController == nil || c.opController.OperatorCount(operator.OpAffinity) < c.conf.GetAffinityScheduleLimit())
 }
 
 func approximateBalanceRegionBytes(region *core.RegionInfo) uint64 {
