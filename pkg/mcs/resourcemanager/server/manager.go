@@ -105,6 +105,9 @@ type Manager struct {
 	// consumptionChan is used to send the consumption
 	// info to the background metrics flusher.
 	consumptionDispatcher chan *consumptionItem
+	consumptionMu         sync.RWMutex
+	acceptingConsumption  bool
+	consumptionTermDone   <-chan struct{}
 	// cached keyspace name for each keyspace ID.
 	keyspaceNameLookup map[uint32]string
 	// used to get the keyspace ID by name.
@@ -177,6 +180,9 @@ func NewManager[T factoryProvider](srv bs.Server) *Manager {
 	})
 	// The second initialization after becoming serving.
 	srv.AddServiceReadyCallback(m.Init)
+	if provider, ok := any(srv).(interface{ AddServiceExitCallback(...func()) }); ok {
+		provider.AddServiceExitCallback(m.cleanupMetricsOnStepDown)
+	}
 	return m
 }
 
@@ -201,10 +207,33 @@ func NewMetadataOnlyManager[T metadataFactoryProvider](srv bs.Server) (*Manager,
 
 // This is used for testing only now.
 func (m *Manager) close() {
+	m.stopLeaderWorkers()
+}
+
+// cleanupMetricsOnStepDown stops this term's workers and clears its Prometheus series.
+func (m *Manager) cleanupMetricsOnStepDown() {
+	m.stopLeaderWorkers()
+	m.metrics.resetAll()
+}
+
+// stopLeaderWorkers closes this term's consumption gate, waits for workers, and drops queued requests.
+func (m *Manager) stopLeaderWorkers() {
 	if m.cancel != nil {
 		m.cancel()
+		m.cancel = nil
 	}
+	m.consumptionMu.Lock()
+	m.acceptingConsumption = false
+	m.consumptionTermDone = nil
+	m.consumptionMu.Unlock()
 	m.wg.Wait()
+	for {
+		select {
+		case <-m.consumptionDispatcher:
+		default:
+			return
+		}
+	}
 }
 
 // GetBasicServer returns the basic server.
@@ -312,33 +341,8 @@ func (m *Manager) accessKeyspaceResourceGroupManager(keyspaceID uint32, groupNam
 
 // Init initializes the resource group manager.
 func (m *Manager) Init(ctx context.Context) error {
-	// If a previous leadership term is still in progress, its
-	// backgroundMetricsFlush (and possibly persistLoop) workers may still be
-	// running and accessing the metric maps. Cancel and wait for them to
-	// exit before resetting the maps so no worker reads or writes during
-	// the reset.
-	if m.cancel != nil {
-		m.cancel()
-		m.wg.Wait()
-	}
-	// The Manager is a single, long-lived instance that serves across
-	// multiple primary/leader campaigns, so discard any in-memory metric
-	// state or Prometheus label series left over from a previous term
-	// before starting a new one; otherwise the new leader would inherit
-	// stale counters/gauges that stay visible in monitoring until the
-	// 20-minute cleanup timeout.
-	m.metrics.resetAll(func(keyspaceID uint32) string {
-		if keyspaceID == constant.NullKeyspaceID {
-			return ""
-		}
-		name, err := m.getKeyspaceNameByID(ctx, keyspaceID)
-		if err != nil {
-			log.Warn("failed to resolve keyspace name while resetting RU metrics on leadership change",
-				zap.Uint32("keyspace-id", keyspaceID), zap.Error(err))
-			return ""
-		}
-		return name
-	})
+	// Stop any previous term and discard consumption it had queued before starting new workers.
+	m.stopLeaderWorkers()
 	if m.enableMetadataWatcher {
 		if err := m.initControllerConfig(); err != nil {
 			return err
@@ -369,6 +373,10 @@ func (m *Manager) Init(ctx context.Context) error {
 			m.persistLoop(ctx)
 		}()
 	}
+	m.consumptionMu.Lock()
+	m.consumptionTermDone = ctx.Done()
+	m.acceptingConsumption = true
+	m.consumptionMu.Unlock()
 	// TODO: Add a goroutine to loadKeyspaceResourceGroups periodically to avoid
 	// the resource group exists gap between PD server and resource manager service
 	// during redirection.
@@ -692,13 +700,27 @@ func (m *Manager) dispatchConsumption(req *rmpb.TokenBucketRequest) error {
 	if isBackground && isTiFlash {
 		return errors.New("background and tiflash cannot be true at the same time")
 	}
-	m.consumptionDispatcher <- &consumptionItem{
+	item := &consumptionItem{
 		keyspaceID:        ExtractKeyspaceID(req.GetKeyspaceId()),
 		resourceGroupName: req.GetResourceGroupName(),
 		Consumption:       req.GetConsumptionSinceLastRequest(),
 		isBackground:      isBackground,
 		isTiFlash:         isTiFlash,
 	}
+	m.consumptionMu.RLock()
+	defer m.consumptionMu.RUnlock()
+	if m.srv != nil {
+		if !m.acceptingConsumption {
+			return errs.ErrNotLeader
+		}
+		select {
+		case m.consumptionDispatcher <- item:
+			return nil
+		case <-m.consumptionTermDone:
+			return errs.ErrNotLeader
+		}
+	}
+	m.consumptionDispatcher <- item
 	return nil
 }
 
@@ -840,7 +862,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				if err != nil {
 					continue
 				}
-				setOrRemoveServiceLimitMetrics(keyspaceName, krgm.getServiceLimiter().getServiceLimit())
+				m.metrics.setServiceLimitMetric(keyspaceName, krgm.getServiceLimiter().getServiceLimit())
 
 				for _, group := range krgm.getResourceGroupList(true, true) {
 					groupName := group.Name

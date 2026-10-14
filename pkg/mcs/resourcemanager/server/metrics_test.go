@@ -347,18 +347,17 @@ func TestMetricsResetAllClearsMapsAndLabelValues(t *testing.T) {
 		keyspaceName:      keyspaceName,
 		resourceGroupName: groupName,
 		Consumption: &rmpb.Consumption{
-			RRU: 10,
-			WRU: 5,
+			RRU:                     10,
+			WRU:                     5,
+			ReadCrossAzTrafficBytes: 12,
 		},
 	}, &ControllerConfig{}, time.Now())
+	m.setServiceLimitMetric(keyspaceName, 100)
 	re.NotEmpty(m.consumptionRecordMap)
 	re.NotEmpty(m.counterMetricsMap)
 	re.NotEmpty(m.maxPerSecTrackerMap)
 
-	m.resetAll(func(id uint32) string {
-		re.Equal(keyspaceID, id)
-		return keyspaceName
-	})
+	m.resetAll()
 
 	re.Empty(m.consumptionRecordMap)
 	re.Empty(m.counterMetricsMap)
@@ -370,12 +369,17 @@ func TestMetricsResetAllClearsMapsAndLabelValues(t *testing.T) {
 	re.Equal(float64(0), testutil.ToFloat64(
 		m.getCounterMetrics(keyspaceID, keyspaceName, groupName, defaultTypeLabel).RRUMetrics,
 	))
+	re.Equal(float64(0), testutil.ToFloat64(
+		crossAZTrafficCost.WithLabelValues(groupName, "read", keyspaceName),
+	))
+	re.Equal(float64(0), testutil.ToFloat64(serviceLimit.WithLabelValues(keyspaceName)))
 	t.Cleanup(func() {
 		deleteLabelValues(keyspaceName, groupName, defaultTypeLabel)
+		serviceLimit.DeleteLabelValues(keyspaceName)
 	})
 }
 
-func TestMetricsResetAllFallsBackToTrackerKeyspaceName(t *testing.T) {
+func TestMetricsResetAllUsesGaugeLabelsWithoutTrackers(t *testing.T) {
 	re := require.New(t)
 
 	const (
@@ -385,28 +389,43 @@ func TestMetricsResetAllFallsBackToTrackerKeyspaceName(t *testing.T) {
 	)
 
 	m := newMetrics()
-	m.recordConsumption(&consumptionItem{
-		keyspaceID:        keyspaceID,
-		keyspaceName:      keyspaceName,
-		resourceGroupName: groupName,
-		Consumption: &rmpb.Consumption{
-			RRU: 1,
-		},
-	}, &ControllerConfig{}, time.Now())
-	// Simulate a failed keyspace-name lookup at Init time: the resolver
-	// returns "" so resetAll must fall back to the name recorded when the
-	// tracker was created, otherwise the previous leader's label series
-	// would be left behind in the registry.
-	m.resetAll(func(id uint32) string {
-		re.Equal(keyspaceID, id)
-		return ""
-	})
-
+	m.getGaugeMetrics(keyspaceID, keyspaceName, groupName).availableRUCounter.Set(1)
 	re.Empty(m.maxPerSecTrackerMap)
-	re.Equal(float64(0), testutil.ToFloat64(
-		m.getCounterMetrics(keyspaceID, keyspaceName, groupName, defaultTypeLabel).RRUMetrics,
-	))
+
+	m.resetAll()
+
+	re.Empty(m.gaugeMetricsMap)
+	re.Equal(float64(0), testutil.ToFloat64(availableRUCounter.WithLabelValues(groupName, groupName, keyspaceName)))
 	t.Cleanup(func() {
 		deleteLabelValues(keyspaceName, groupName, defaultTypeLabel)
+	})
+}
+
+func TestCleanupKeepsCrossAZMetricsWhileAnotherRUTypeIsActive(t *testing.T) {
+	re := require.New(t)
+
+	const (
+		keyspaceName = "cross-az-cleanup-keyspace"
+		groupName    = "cross-az-cleanup-group"
+		keyspaceID   = uint32(508)
+	)
+	m := newMetrics()
+	m.getCounterMetrics(keyspaceID, keyspaceName, groupName, defaultTypeLabel).
+		ReadCrossAZTrafficMetrics.Add(3)
+	m.getCounterMetrics(keyspaceID, keyspaceName, groupName, backgroundTypeLabel).
+		ReadCrossAZTrafficMetrics.Add(7)
+	staleRecord := consumptionRecordKey{keyspaceID: keyspaceID, groupName: groupName, ruType: defaultTypeLabel}
+	activeRecord := consumptionRecordKey{keyspaceID: keyspaceID, groupName: groupName, ruType: backgroundTypeLabel}
+	m.insertConsumptionRecord(keyspaceID, groupName, defaultTypeLabel, time.Now().Add(-metricsCleanupTimeout*2))
+	m.insertConsumptionRecord(keyspaceID, groupName, backgroundTypeLabel, time.Now())
+
+	m.cleanupAllMetrics(staleRecord, keyspaceName)
+	re.Equal(float64(10), testutil.ToFloat64(crossAZTrafficCost.WithLabelValues(groupName, "read", keyspaceName)))
+
+	m.cleanupAllMetrics(activeRecord, keyspaceName)
+	re.Equal(float64(0), testutil.ToFloat64(crossAZTrafficCost.WithLabelValues(groupName, "read", keyspaceName)))
+	t.Cleanup(func() {
+		deleteLabelValues(keyspaceName, groupName, defaultTypeLabel)
+		deleteLabelValues(keyspaceName, groupName, backgroundTypeLabel)
 	})
 }

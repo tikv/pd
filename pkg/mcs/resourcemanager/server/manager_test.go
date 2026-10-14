@@ -585,15 +585,6 @@ func TestCleanUpMetrics(t *testing.T) {
 		}] = time.Now().Add(-metricsCleanupTimeout / 2)
 	}
 	insertRecords()
-	err := m.Init(ctx)
-	re.NoError(err)
-	// Init resets the metric state, so the records inserted before Init
-	// must have been cleared.
-	re.Empty(m.metrics.consumptionRecordMap)
-	m.close()
-	// Exercise the cleanup path directly with the background worker stopped,
-	// so the test does not race with its map iteration.
-	insertRecords()
 	m.cleanUpMetrics(ctx)
 
 	re.Len(m.metrics.consumptionRecordMap, 1)
@@ -605,6 +596,74 @@ func TestCleanUpMetrics(t *testing.T) {
 	keyspaceName, err := m.getKeyspaceNameByID(ctx, keyspaceID)
 	re.NoError(err)
 	re.Equal("test_keyspace", keyspaceName)
+}
+
+func TestCleanupMetricsOnStepDown(t *testing.T) {
+	re := require.New(t)
+	m := newManagerBase(&ControllerConfig{}, ResourceGroupWriteRoleLegacyAll)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	m.cancel = cancel
+	m.srv = &testBasicServer{}
+	m.consumptionMu.Lock()
+	m.consumptionTermDone = ctx.Done()
+	m.acceptingConsumption = true
+	m.consumptionMu.Unlock()
+	m.wg.Add(1)
+	go func() {
+		defer m.wg.Done()
+		<-ctx.Done()
+	}()
+
+	const (
+		keyspaceName = "step-down-keyspace"
+		groupName    = "step-down-group"
+		keyspaceID   = uint32(507)
+	)
+	m.metrics.recordConsumption(&consumptionItem{
+		keyspaceID:        keyspaceID,
+		keyspaceName:      keyspaceName,
+		resourceGroupName: groupName,
+		Consumption:       &rmpb.Consumption{RRU: 1},
+	}, &ControllerConfig{}, time.Now())
+	re.NoError(m.dispatchConsumption(&rmpb.TokenBucketRequest{
+		ResourceGroupName:           "step-down-group",
+		KeyspaceId:                  &keyspacepb.KeyspaceIDValue{Keyspace: &keyspacepb.KeyspaceIDValue_Value{Value: keyspaceID}},
+		ConsumptionSinceLastRequest: &rmpb.Consumption{RRU: 1},
+	}))
+
+	m.cleanupMetricsOnStepDown()
+
+	re.Nil(m.cancel)
+	re.Empty(m.consumptionDispatcher)
+	re.Error(m.dispatchConsumption(&rmpb.TokenBucketRequest{}))
+	re.Empty(m.metrics.consumptionRecordMap)
+	re.Empty(m.metrics.counterMetricsMap)
+	re.Empty(m.metrics.maxPerSecTrackerMap)
+	t.Cleanup(func() {
+		deleteLabelValues(keyspaceName, groupName, defaultTypeLabel)
+	})
+}
+
+func TestManagerInitOpensConsumptionGateUntilStepDown(t *testing.T) {
+	re := require.New(t)
+	m := prepareManager()
+	m.srv = &testBasicServer{}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	re.NoError(m.Init(ctx))
+
+	m.consumptionMu.RLock()
+	re.True(m.acceptingConsumption)
+	re.NotNil(m.consumptionTermDone)
+	m.consumptionMu.RUnlock()
+
+	m.cleanupMetricsOnStepDown()
+	m.consumptionMu.RLock()
+	re.False(m.acceptingConsumption)
+	re.Nil(m.consumptionTermDone)
+	m.consumptionMu.RUnlock()
 }
 
 func TestKeyspaceServiceLimit(t *testing.T) {
