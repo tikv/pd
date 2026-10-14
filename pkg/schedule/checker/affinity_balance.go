@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"hash/fnv"
 	"slices"
 
 	"github.com/tikv/pd/pkg/core"
@@ -105,6 +106,45 @@ func (c *AffinityChecker) balanceRuleMetadata() map[string]string {
 		metadata[keypath.RuleGroupIDPath(group.ID)] = string(data)
 	}
 	return metadata
+}
+
+// balanceRuleFingerprint hashes only placement inputs that can apply to the
+// supplied affinity ranges. RuleManager's global revision is still checked at
+// submission time, while this scoped value keeps unrelated tables from
+// rebuilding their action indexes.
+func (c *AffinityChecker) balanceRuleFingerprint(ranges []affinity.GroupKeyRanges) uint64 {
+	rules := make(map[string][]byte)
+	groups := make(map[string][]byte)
+	for _, groupRanges := range ranges {
+		for _, keyRange := range groupRanges.KeyRanges {
+			for _, rule := range c.ruleManager.GetRulesForApplyRange(keyRange.StartKey, keyRange.EndKey) {
+				data, _ := json.Marshal(rule)
+				rules[rule.StoreKey()] = data
+				if group := c.ruleManager.GetRuleGroup(rule.GroupID); group != nil {
+					groupData, _ := json.Marshal(group)
+					groups[rule.GroupID] = groupData
+				}
+			}
+		}
+	}
+	h := fnv.New64a()
+	keys := make([]string, 0, len(groups)+len(rules))
+	for key := range groups {
+		keys = append(keys, "group:"+key)
+	}
+	for key := range rules {
+		keys = append(keys, "rule:"+key)
+	}
+	slices.Sort(keys)
+	for _, key := range keys {
+		_, _ = h.Write([]byte(key))
+		if len(key) > len("group:") && key[:len("group:")] == "group:" {
+			_, _ = h.Write(groups[key[len("group:"):]])
+		} else {
+			_, _ = h.Write(rules[key[len("rule:"):]])
+		}
+	}
+	return h.Sum64()
 }
 
 func newBalanceRegionScanCursor(ranges affinity.GroupKeyRanges) balanceRegionScanCursor {
