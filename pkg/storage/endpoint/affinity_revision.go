@@ -48,7 +48,9 @@ func affinityTableID(groupID string) string {
 	return tableID
 }
 
-// AffinityMetadataRevisionKey covers placement rules and Region labels.
+// AffinityMetadataRevisionKey covers the complete placement and label
+// metadata snapshot. Balance submission uses table-scoped tokens for
+// affinity labels, while this token remains useful for full reconciliation.
 func AffinityMetadataRevisionKey() string {
 	return strings.TrimSuffix(keypath.AffinityGroupsPrefix(), "affinity_groups/") + "affinity_metadata_revision"
 }
