@@ -92,7 +92,7 @@ func (m *Manager) rebalanceTable(ctx context.Context, groupID string, apply bool
 	actions := make(map[string]BalanceActionSet, len(autoGroups))
 	blockedGroups := make(map[string]struct{})
 	for _, group := range autoGroups {
-		built, ready, err := m.buildManualBalanceActions(planningCtx, snapshot, group, &group.Group, blockedGroups)
+		built, ready, err := buildManualBalanceActions(planningCtx, snapshot, group, &group.Group, blockedGroups)
 		if err != nil {
 			return nil, err
 		}
@@ -118,7 +118,7 @@ func (m *Manager) rebalanceTable(ctx context.Context, groupID string, apply bool
 			rebuildErr = errors.New("manual balance target has no table group state")
 			return BalanceActionSet{}, false
 		}
-		built, ready, buildErr := m.buildManualBalanceActions(buildCtx, snapshot, state, virtual, blockedGroups)
+		built, ready, buildErr := buildManualBalanceActions(buildCtx, snapshot, state, virtual, blockedGroups)
 		if buildErr != nil {
 			rebuildErr = buildErr
 		}
@@ -438,7 +438,7 @@ func manualBalancePartialError(err error, submitted int) error {
 	return fmt.Errorf("%w: already committed %d groups", err, submitted)
 }
 
-func (m *Manager) buildManualBalanceActions(ctx context.Context, snapshot *balanceSnapshot,
+func buildManualBalanceActions(ctx context.Context, snapshot *balanceSnapshot,
 	actual *GroupState, target *Group, blockedGroups map[string]struct{}) (BalanceActionSet, bool, error) {
 	leaders, ready, err := buildManualBalanceActionMode(ctx, snapshot, actual, target, BalanceBuildLeaders, blockedGroups)
 	if err != nil || !ready {
@@ -499,16 +499,7 @@ func (m *Manager) balanceDependenciesCurrent(ctx context.Context, snapshot *bala
 		return false, nil
 	}
 	err := m.runBalanceTxn(ctx, snapshot.conditions, func(txn kv.Txn) error {
-		for key, expected := range snapshot.dependencies {
-			value, err := txn.Load(key)
-			if err != nil {
-				return err
-			}
-			if value != expected {
-				return errs.ErrEtcdTxnConflict.FastGenByArgs()
-			}
-		}
-		return nil
+		return checkBalanceDependencies(txn, snapshot)
 	})
 	if err != nil {
 		if errs.ErrEtcdTxnConflict.Equal(err) {

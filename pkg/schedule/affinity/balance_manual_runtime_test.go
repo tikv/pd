@@ -93,8 +93,8 @@ func TestManualRebalanceCommitsAllTargetsBeforeWaiting(t *testing.T) {
 	ids := seedManualBalanceGroups(t, manager, []uint64{1, 1, 1, 1})
 	validated := make(map[string]*Group)
 	var converged []string
-	manager.SetBalanceActionBuilder(func(ctx context.Context, group *GroupState, ranges GroupKeyRanges, target *Group,
-		stores []uint64, mode BalanceActionMode, cursor any, budget int) BalanceActionBuildResult {
+	manager.SetBalanceActionBuilder(func(_ context.Context, group *GroupState, _ GroupKeyRanges, target *Group,
+		_ []uint64, mode BalanceActionMode, _ any, _ int) BalanceActionBuildResult {
 		switch mode {
 		case BalanceValidateTarget:
 			validated[target.ID] = &Group{ID: target.ID, LeaderStoreID: target.LeaderStoreID,
@@ -153,8 +153,8 @@ func TestManualFallbackUsesAutomaticImprovement(t *testing.T) {
 		_, err := manager.UpdateAffinityGroupPeers(id, 2, []uint64{1, 2, 3})
 		require.NoError(t, err)
 	}
-	manager.SetBalanceActionBuilder(func(ctx context.Context, group *GroupState, ranges GroupKeyRanges, target *Group,
-		stores []uint64, mode BalanceActionMode, cursor any, budget int) BalanceActionBuildResult {
+	manager.SetBalanceActionBuilder(func(_ context.Context, _ *GroupState, _ GroupKeyRanges, target *Group,
+		_ []uint64, mode BalanceActionMode, _ any, _ int) BalanceActionBuildResult {
 		var actions BalanceActionSet
 		if mode == BalanceBuildLeaders && target.ID == ids[0] {
 			actions.LeaderTargets = []uint64{2}
@@ -253,8 +253,8 @@ func TestManualPartialApplyRetainsSubmittedStates(t *testing.T) {
 	ids := seedManualBalanceGroups(t, manager, []uint64{1, 1, 1, 1})
 	validated := make(map[string]*Group)
 	var firstConverged string
-	manager.SetBalanceActionBuilder(func(ctx context.Context, group *GroupState, ranges GroupKeyRanges, target *Group,
-		stores []uint64, mode BalanceActionMode, cursor any, budget int) BalanceActionBuildResult {
+	manager.SetBalanceActionBuilder(func(_ context.Context, group *GroupState, ranges GroupKeyRanges, target *Group,
+		_ []uint64, mode BalanceActionMode, _ any, _ int) BalanceActionBuildResult {
 		switch mode {
 		case BalanceBuildLeaders:
 			return BalanceActionBuildResult{Ready: true, Complete: true,

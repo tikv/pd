@@ -20,11 +20,16 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 
 	scheapi "github.com/tikv/pd/pkg/mcs/scheduling/server/apis/v1"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/apiutil/serverapi"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m)
+}
 
 func TestAffinityMicroserviceRedirectRules(t *testing.T) {
 	targetAffinityPath := scheapi.APIPathPrefix + "/affinity-groups"

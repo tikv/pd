@@ -399,7 +399,7 @@ func UpdateAffinityGroupPeers(c *gin.Context) {
 //	@Tags		affinity-groups
 //	@Summary	Preview or apply a complete affinity rebalance for a table.
 //	@Param		group_id	path	string						true	"The group id of the affinity group"
-	//	@Param		body		body	RebalanceAffinityGroupRequest	true	"Apply submits table targets in bounded batches and waits for convergence"
+//	@Param		body		body	RebalanceAffinityGroupRequest	true	"Apply submits table targets in bounded batches and waits for convergence"
 //	@Produce	json
 //	@Success	200	{array}	affinity.BalancePlan	"Preview targets or completed group changes"
 //	@Failure	400	{string}	string	"The input is invalid."

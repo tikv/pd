@@ -110,66 +110,19 @@ func PlanTableRebalance(ctx context.Context, groups []*Group, options BalanceOpt
 	finalLeaders, finalVoters := countsForGroups(current)
 	finalScore := calcBalanceScore(finalLeaders, finalVoters)
 	if compareScore(finalScore, initialScore) >= 0 {
-		// The ordered reconstruction is intentionally conservative and may
-		// discard a legal single-step improvement when an earlier group has a
-		// score tie. Preserve the automatic planner's verified one-step result
-		// as a fallback so manual planning never regresses to a no-op while an
-		// improvement is available. The action came from the same checker-built
-		// action set, so no new placement search is introduced here.
-		automaticGroups := make([]*Group, 0, len(groups))
-		for _, group := range groups {
-			automaticGroups = append(automaticGroups, cloneBalanceGroup(group))
-		}
-		automaticByID := make(map[string]*Group, len(automaticGroups))
-		for _, group := range automaticGroups {
-			automaticByID[group.ID] = group
-		}
-		hasAutomaticImprovement := false
-		for _, automatic := range automaticPlans {
-			old := automaticByID[automatic.GroupID]
-			if old == nil {
-				continue
-			}
-			if automatic.Changed {
-				hasAutomaticImprovement = true
-				old.LeaderStoreID = automatic.LeaderStoreID
-				old.VoterStoreIDs = slices.Clone(automatic.VoterStoreIDs)
+		// Reconstruction can miss an existing single-step improvement. Reuse
+		// the automatic selection and the same result assembly in that case.
+		for i, plan := range automaticPlans {
+			current[i] = cloneBalanceGroup(original[plan.GroupID])
+			if plan.Changed {
+				current[i].LeaderStoreID = plan.LeaderStoreID
+				current[i].VoterStoreIDs = slices.Clone(plan.VoterStoreIDs)
 			}
 		}
-		if hasAutomaticImprovement {
-			automaticLeaders, automaticVoters := countsForGroups(automaticGroups)
-			automaticScore := calcBalanceScore(automaticLeaders, automaticVoters)
-			for i := range automaticPlans {
-				old := original[automaticPlans[i].GroupID]
-				if old == nil {
-					continue
-				}
-				automaticPlans[i].OldLeaderStoreID = old.LeaderStoreID
-				automaticPlans[i].OldVoterStoreIDs = normalizeVoters(old.VoterStoreIDs)
-				automaticPlans[i].BeforeScore = &BalanceScore{Leader: initialScore.leader, Voter: initialScore.voter}
-				automaticPlans[i].AfterScore = &BalanceScore{Leader: automaticScore.leader, Voter: automaticScore.voter}
-				if automaticPlans[i].Changed {
-					automaticPlans[i].Status = "planned"
-					newVoters := normalizeVoters(automaticPlans[i].VoterStoreIDs)
-					moveCount := 0
-					for _, storeID := range automaticPlans[i].OldVoterStoreIDs {
-						if !slices.Contains(newVoters, storeID) {
-							moveCount++
-						}
-					}
-					automaticPlans[i].MoveBytes = options.ActionSets[automaticPlans[i].GroupID].MoveBytes * uint64(moveCount)
-				} else {
-					automaticPlans[i].Status = "unchanged"
-				}
-			}
-			return automaticPlans, nil
-		}
-		for i := range current {
-			current[i] = cloneBalanceGroup(original[current[i].ID])
-		}
-		return finalBalancePlans(original, current, initialScore, initialScore, options.ActionSets, false), nil
+		finalLeaders, finalVoters = countsForGroups(current)
+		finalScore = calcBalanceScore(finalLeaders, finalVoters)
 	}
-	return finalBalancePlans(original, current, initialScore, finalScore, options.ActionSets, true), nil
+	return finalBalancePlans(original, current, initialScore, finalScore, options.ActionSets, compareScore(finalScore, initialScore) < 0), nil
 }
 
 func cloneBalanceGroup(group *Group) *Group {
