@@ -50,11 +50,9 @@ const (
 	OpRegion
 	// Include leader transfer.
 	OpLeader
-	// Preserve removed witness bits so API-visible OpKind values remain stable.
-	opKindReservedWitnessLeader OpKind = 1 << iota
-	opKindReservedWitness
+	// Preserve the two removed witness bits so API-visible OpKind values remain stable.
 	// Initiated by internal split-scatter dispatcher.
-	OpSplitScatter
+	OpSplitScatter OpKind = 1 << (iota + 2)
 	opMax
 )
 

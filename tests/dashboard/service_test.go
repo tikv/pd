@@ -87,12 +87,24 @@ func (suite *dashboardTestSuite) TestDashboardProxy() {
 }
 
 func (suite *dashboardTestSuite) checkRespCode(re *require.Assertions, url string, code int) {
-	resp, err := suite.httpClient.Get(url)
-	re.NoError(err)
-	_, err = io.ReadAll(resp.Body)
-	re.NoError(err)
-	resp.Body.Close()
-	re.Equal(code, resp.StatusCode)
+	var lastStatusCode int
+	var lastErr error
+	re.Eventuallyf(func() bool {
+		resp, err := suite.httpClient.Get(url)
+		if err != nil {
+			lastErr = err
+			return false
+		}
+		defer resp.Body.Close()
+		if _, err = io.Copy(io.Discard, resp.Body); err != nil {
+			lastErr = err
+			return false
+		}
+		lastStatusCode = resp.StatusCode
+		lastErr = nil
+		return lastStatusCode == code
+	}, 10*time.Second, 100*time.Millisecond,
+		"GET %s: expected status %d, last status %d, last error %v", url, code, lastStatusCode, lastErr)
 }
 
 func waitForConfigSync() {
