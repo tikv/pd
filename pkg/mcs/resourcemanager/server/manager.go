@@ -422,7 +422,9 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 					sqlLayerRuMetrics.Add(consumption.SqlLayerCpuTimeMs * m.controllerConfig.RequestUnit.CPUMsCost)
 					sqlCPUMetrics.Add(consumption.SqlLayerCpuTimeMs)
 				}
-				kvCPUMetrics.Add(consumption.TotalCpuTimeMs - consumption.SqlLayerCpuTimeMs)
+				if kvCPUTimeMs := consumption.TotalCpuTimeMs - consumption.SqlLayerCpuTimeMs; kvCPUTimeMs > 0 {
+					kvCPUMetrics.Add(kvCPUTimeMs)
+				}
 			}
 			// RPC count info.
 			if consumption.KvReadRpcCount > 0 {
