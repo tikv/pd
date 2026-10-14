@@ -49,8 +49,8 @@ func newManualBalanceFixture(t *testing.T, storeCount uint64, groups []manualBal
 		if group.fixed {
 			policy = affinity.BalancePolicyFixed
 		}
-		start := string([]byte{byte('a' + 2*i)})
-		end := string([]byte{byte('b' + 2*i)})
+		start := fmt.Sprintf("%08d", 2*i)
+		end := fmt.Sprintf("%08d", 2*i+1)
 		createBalanceGroup(t, manager, id, start, end, group.leader, group.voters, policy)
 		addBalanceRegion(t, tc, manager, uint64(i+1), start, end, group.leader, group.voters...)
 	}
@@ -164,6 +164,39 @@ func TestPlanTableRebalanceReturnsCancellation(t *testing.T) {
 	plans, err := checker.planTableRebalance(ctx, snapshot)
 	require.ErrorIs(t, err, context.Canceled)
 	require.Nil(t, plans)
+}
+
+func TestManualBalanceCandidateBudgetCountsFullValidation(t *testing.T) {
+	checker, _, _ := newManualBalanceFixture(t, 100, []manualBalanceFixtureGroup{{leader: 1, voters: []uint64{1, 2, 3}}})
+	snapshot := &affinity.BalanceSnapshot{Groups: make([]*affinity.GroupState, 1024), Stores: make([]uint64, 100)}
+	for i := range snapshot.Stores {
+		snapshot.Stores[i] = uint64(i + 1)
+	}
+	for i := range snapshot.Groups {
+		voters := []uint64{uint64(3*i%100 + 1), uint64((3*i+1)%100 + 1), uint64((3*i+2)%100 + 1)}
+		snapshot.Groups[i] = &affinity.GroupState{Group: affinity.Group{
+			ID: fmt.Sprintf("_tidb_pt_100_p%d", i), LeaderStoreID: voters[0], VoterStoreIDs: voters,
+		}}
+	}
+	scorer, err := newManualBalanceScorer(snapshot.Groups)
+	require.NoError(t, err)
+	checks := 0
+	for _, replace := range []bool{false, true} {
+		result, err := checker.findManualBalanceCandidate(t.Context(), snapshot, snapshot.Groups, snapshot.Groups, scorer, replace, -1, &checks)
+		require.NoError(t, err)
+		require.Nil(t, result.candidate)
+	}
+	require.Zero(t, checks, "a balanced table's raw candidates must not spend the full validation budget")
+
+	checker, _, snapshot = newManualBalanceFixture(t, 3, []manualBalanceFixtureGroup{
+		{leader: 1, voters: []uint64{1, 2, 3}},
+		{leader: 1, voters: []uint64{1, 2, 3}, fixed: true},
+	})
+	scorer, err = newManualBalanceScorer(snapshot.Groups)
+	require.NoError(t, err)
+	checks = maxManualBalanceCandidates
+	_, err = checker.findManualBalanceCandidate(t.Context(), snapshot, snapshot.Groups, snapshot.Groups, scorer, false, -1, &checks)
+	require.EqualError(t, err, "manual affinity balance candidate budget exceeded")
 }
 
 func TestManualBalanceCandidateTieBreaks(t *testing.T) {

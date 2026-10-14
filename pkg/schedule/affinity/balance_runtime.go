@@ -192,6 +192,9 @@ func (m *Manager) invalidateBalanceLocked(groupID string) {
 	// Generations cannot be reused when a deleted table is recreated.
 	m.balanceGeneration++
 	state.version = m.balanceGeneration
+	if group := m.groups[groupID]; group != nil {
+		group.balanceVer = m.balanceGeneration
+	}
 }
 
 // InvalidateBalance advances the table's generation after an observed change.

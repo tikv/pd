@@ -35,10 +35,14 @@ import (
 type balanceTxnCountingStorage struct {
 	storage.Storage
 	transactions int
+	before       func()
 }
 
 func (s *balanceTxnCountingStorage) RunInTxn(ctx context.Context, f func(kv.Txn) error) error {
 	s.transactions++
+	if s.before != nil {
+		s.before()
+	}
 	return s.Storage.RunInTxn(ctx, f)
 }
 
@@ -114,6 +118,56 @@ func TestCommitBalanceTargetsKeepsFirstBatchAfterLaterTargetConflict(t *testing.
 	require.False(t, committed)
 	require.Equal(t, uint64(2), loadBalanceGroup(t, manager, ids[0]).LeaderStoreID)
 	require.Equal(t, uint64(2), loadBalanceGroup(t, manager, ids[1]).LeaderStoreID)
+}
+
+func TestCommitBalanceTargetsScopesRegionGenerationToBatch(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		groupIndex int
+		duringTxn  bool
+	}{
+		{"previous batch before commit", 0, false},
+		{"previous batch during commit", 0, true},
+		{"current batch before commit", 1, false},
+		{"current batch during commit", 1, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			manager := newBalanceRuntimeManager(t)
+			ids := seedBalanceGroups(t, manager, []uint64{1, 1})
+			first := prepareBalanceCommit(t, manager, ids[0])
+			committed, err := manager.CommitBalanceTargets(t.Context(), first, []*Group{balanceCommitTarget(first, ids[0], 2)})
+			require.NoError(t, err)
+			require.True(t, committed)
+			second, err := manager.RefreshBalanceSnapshot(t.Context(), first)
+			require.NoError(t, err)
+			region := manager.regions[uint64(tc.groupIndex+1)].balanceInput()
+			heartbeat := func() {
+				manager.ObserveBalanceRegion(region.Clone(core.WithLeader(region.GetStorePeer(2))))
+			}
+			if tc.duringTxn {
+				manager.storage = &balanceTxnCountingStorage{Storage: manager.storage.(storage.Storage), before: heartbeat}
+			} else {
+				heartbeat()
+			}
+
+			committed, err = manager.CommitBalanceTargets(t.Context(), second, []*Group{balanceCommitTarget(second, ids[1], 3)})
+
+			if tc.groupIndex == 0 {
+				require.NoError(t, err)
+				require.True(t, committed)
+				require.Equal(t, uint64(3), loadBalanceGroup(t, manager, ids[1]).LeaderStoreID)
+			} else {
+				require.False(t, committed)
+				if tc.duringTxn {
+					require.NoError(t, err)
+				} else {
+					require.True(t, errs.ErrEtcdTxnConflict.Equal(err))
+				}
+				require.Equal(t, uint64(1), loadBalanceGroup(t, manager, ids[1]).LeaderStoreID)
+			}
+			require.Equal(t, uint64(2), loadBalanceGroup(t, manager, ids[0]).LeaderStoreID)
+		})
+	}
 }
 
 func TestRefreshBalanceSnapshotAcceptsRegionGenerationChange(t *testing.T) {

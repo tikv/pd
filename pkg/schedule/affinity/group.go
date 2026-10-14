@@ -126,6 +126,8 @@ type GroupState struct {
 
 	// affinityVer is used to mark the version of the cache.
 	affinityVer uint64
+	// balanceVer fences Region and target changes for a manual submission batch.
+	balanceVer uint64
 	// groupInfoPtr is a pointer to the original information.
 	// It is used only for pointer comparison and should not access any internal data.
 	groupInfoPtr *runtimeGroupInfo
@@ -165,6 +167,7 @@ type runtimeGroupInfo struct {
 	degradedExpiredAt uint64
 	// AffinityVer initializes at 1 and increments by 1 each time the Group changes.
 	AffinityVer uint64
+	balanceVer  uint64
 	// AffinityRegionCount indicates how many Regions have all Voter and Leader peers in the correct stores. (AffinityVer equals).
 	AffinityRegionCount int
 
@@ -205,6 +208,7 @@ func newGroupState(g *runtimeGroupInfo) *GroupState {
 		RegionCount:               len(g.Regions),
 		AffinityRegionCount:       g.AffinityRegionCount,
 		affinityVer:               g.AffinityVer,
+		balanceVer:                g.balanceVer,
 		groupInfoPtr:              g,
 	}
 }

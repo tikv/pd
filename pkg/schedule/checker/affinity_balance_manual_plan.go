@@ -246,10 +246,6 @@ func (c *AffinityChecker) findManualBalanceCandidate(ctx context.Context, snapsh
 		if !ok {
 			return result, nil
 		}
-		(*candidateChecks)++
-		if *candidateChecks > maxManualBalanceCandidates {
-			return result, errors.New("manual affinity balance candidate budget exceeded")
-		}
 		groupIndex := candidates.group
 		if onlyGroup >= 0 {
 			groupIndex = onlyGroup
@@ -278,6 +274,11 @@ func (c *AffinityChecker) findManualBalanceCandidate(ctx context.Context, snapsh
 		}
 		if err := ctx.Err(); err != nil {
 			return result, err
+		}
+		// Cheap scoring and no-op rejection do not spend the validation budget.
+		(*candidateChecks)++
+		if *candidateChecks > maxManualBalanceCandidates {
+			return result, errors.New("manual affinity balance candidate budget exceeded")
 		}
 		status, moveBytes, err := c.validateManualBalanceTarget(ctx, snapshot, original[groupIndex], &target)
 		if err != nil {

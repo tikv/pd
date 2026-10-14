@@ -89,10 +89,34 @@ func (m *Manager) CheckBalanceDependencies(ctx context.Context, snapshot *Balanc
 	})
 }
 
+// A previous batch may already be migrating. Only changes to groups in this
+// batch invalidate its Region checks; table metadata and durable targets stay
+// protected by the same versions and transaction conditions.
+func (m *Manager) balanceBatchCurrent(snapshot *BalanceSnapshot, groups []*GroupState) bool {
+	m.RLock()
+	defer m.RUnlock()
+	state := m.balanceTables[snapshot.TableID]
+	if state == nil {
+		return false
+	}
+	version := m.balanceVersionLocked(state)
+	if version.Ranges != snapshot.Version.Ranges || version.Stores != snapshot.Version.Stores ||
+		version.Rules != snapshot.Version.Rules || version.Labels != snapshot.Version.Labels {
+		return false
+	}
+	for _, expected := range groups {
+		current := m.groups[expected.ID]
+		if current == nil || current != expected.groupInfoPtr || current.balanceVer != expected.balanceVer {
+			return false
+		}
+	}
+	return true
+}
+
 // CommitBalanceTargets atomically submits one capacity-bounded manual batch.
 // The caller validates every target and submits all batches before waiting.
 func (m *Manager) CommitBalanceTargets(ctx context.Context, snapshot *BalanceSnapshot, targets []*Group) (bool, error) {
-	if len(targets) == 0 || len(targets) > endpoint.MaxAffinityTxnBatchOps || !m.BalanceSnapshotCurrent(snapshot) {
+	if len(targets) == 0 || len(targets) > endpoint.MaxAffinityTxnBatchOps {
 		return false, balanceConflict()
 	}
 	groups := make([]Group, len(targets))
@@ -117,12 +141,15 @@ func (m *Manager) CommitBalanceTargets(ctx context.Context, snapshot *BalanceSna
 			return false, nil
 		}
 	}
+	if !m.balanceBatchCurrent(snapshot, originals) {
+		return false, balanceConflict()
+	}
 	var token string
 	err := m.runBalanceTxn(ctx, snapshot.conditions, func(txn kv.Txn) error {
 		if err := checkBalanceDependencies(txn, snapshot); err != nil {
 			return err
 		}
-		if !m.BalanceSnapshotCurrent(snapshot) {
+		if !m.balanceBatchCurrent(snapshot, originals) {
 			return balanceConflict()
 		}
 		for i := range groups {

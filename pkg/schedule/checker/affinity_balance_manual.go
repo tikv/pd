@@ -99,14 +99,14 @@ func (c *AffinityChecker) refreshManualBalance(ctx context.Context, snapshot *af
 	version, exists := c.affinityManager.GetBalanceVersion(current.TableID)
 	if !exists || version.Ranges != current.Version.Ranges || version.Stores != current.Version.Stores ||
 		version.Rules != current.Version.Rules || version.Labels != current.Version.Labels ||
-		c.balanceInputFingerprint(current) != fingerprint {
+		!sameBalanceMetadata(snapshot.Version, current.Version) && c.balanceInputFingerprint(current) != fingerprint {
 		return nil, affinity.ErrBalanceConflict
 	}
 	return current, nil
 }
 
 func (c *AffinityChecker) rebalanceTable(ctx context.Context, groupID string, apply bool) ([]affinity.BalancePlan, error) {
-	if !c.balanceSchedulingAllowed() {
+	if !c.balanceTargetSubmissionAllowed() {
 		return nil, affinity.ErrBalanceNotReady
 	}
 	ctx, cancel := context.WithTimeout(ctx, manualBalanceExecutionTimeout)
@@ -204,6 +204,9 @@ func (c *AffinityChecker) rebalanceTable(ctx context.Context, groupID string, ap
 			if c.balanceTargetExecutionStatus(&manualPlanGroup(snapshot, target.ID).Group, target) != balanceAllowed {
 				return fail(affinity.ErrBalanceNotReady, changed[start])
 			}
+		}
+		if !c.balanceTargetSubmissionAllowed() {
+			return fail(affinity.ErrBalanceNotReady, changed[start])
 		}
 		committed, err := c.affinityManager.CommitBalanceTargets(ctx, snapshot, targets)
 		if err != nil {

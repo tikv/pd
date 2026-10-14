@@ -25,6 +25,9 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/schedule/affinity"
+	"github.com/tikv/pd/pkg/schedule/labeler"
+	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 )
 
 func TestManualBalanceSubmitsWholeTableBeforeConvergence(t *testing.T) {
@@ -34,13 +37,34 @@ func TestManualBalanceSubmitsWholeTableBeforeConvergence(t *testing.T) {
 			name = "range conflict retains submitted targets"
 		}
 		t.Run(name, func(t *testing.T) {
-			checker, manager, initial := newManualBalanceFixture(t, 3, []manualBalanceFixtureGroup{
-				{leader: 1, voters: []uint64{1, 2, 3}},
-				{leader: 1, voters: []uint64{1, 2, 3}},
-				{leader: 1, voters: []uint64{1, 2, 3}},
-				{leader: 1, voters: []uint64{1, 2, 3}},
-			})
-			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			groups := make([]manualBalanceFixtureGroup, 2*endpoint.MaxAffinityTxnBatchOps+1)
+			for i := range groups {
+				groups[i] = manualBalanceFixtureGroup{leader: 1, voters: []uint64{1, 2, 3}}
+			}
+			checker, manager, initial := newManualBalanceFixture(t, 3, groups)
+			tc := checker.cluster.(*mockcluster.Cluster)
+			heartbeatObserved := make(chan struct{})
+			heartbeatSent := false
+			checker.cluster = &affinityBalanceScanCluster{CheckerCluster: tc, beforeScan: func() {
+				if heartbeatSent {
+					return
+				}
+				for _, group := range initial.Groups {
+					target := manager.GetAffinityGroupState(group.ID)
+					if target.LeaderStoreID == group.LeaderStoreID {
+						continue
+					}
+					region := tc.GetRegionByKey(initial.Ranges[group.ID].KeyRanges[0].StartKey)
+					heartbeat := region.Clone(core.WithLeader(region.GetStorePeer(target.LeaderStoreID)))
+					tc.PutRegion(heartbeat)
+					manager.ObserveBalanceRegion(heartbeat)
+					manager.GetAndCacheRegionAffinityGroupState(heartbeat)
+					heartbeatSent = true
+					close(heartbeatObserved)
+					return
+				}
+			}}
+			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 			defer cancel()
 			type result struct {
 				plans []affinity.BalancePlan
@@ -58,8 +82,13 @@ func TestManualBalanceSubmitsWholeTableBeforeConvergence(t *testing.T) {
 						changed++
 					}
 				}
-				return changed >= 2
-			}, 3*time.Second, time.Millisecond)
+				return changed > endpoint.MaxAffinityTxnBatchOps
+			}, 10*time.Second, time.Millisecond)
+			select {
+			case <-heartbeatObserved:
+			default:
+				t.Fatal("expected a previous batch heartbeat while validating the next batch")
+			}
 			require.True(t, manager.IsManualBalanceRunning(initial.TableID))
 			select {
 			case done := <-results:
@@ -70,10 +99,9 @@ func TestManualBalanceSubmitsWholeTableBeforeConvergence(t *testing.T) {
 			if changeRanges {
 				require.NoError(t, manager.UpdateAffinityGroupKeyRanges(nil, []affinity.GroupKeyRanges{initial.Ranges[initial.Groups[0].ID]}))
 			} else {
-				tc := checker.cluster.(*mockcluster.Cluster)
-				for i, group := range initial.Groups {
+				for _, group := range initial.Groups {
 					target := manager.GetAffinityGroupState(group.ID)
-					region := tc.GetRegion(uint64(i + 1))
+					region := tc.GetRegionByKey(initial.Ranges[group.ID].KeyRanges[0].StartKey)
 					heartbeat := region.Clone(core.WithLeader(region.GetStorePeer(target.LeaderStoreID)))
 					tc.PutRegion(heartbeat)
 					manager.ObserveBalanceRegion(heartbeat)
@@ -96,20 +124,120 @@ func TestManualBalanceSubmitsWholeTableBeforeConvergence(t *testing.T) {
 					}
 					changed++
 					if changeRanges {
-						require.Equal(t, "submitted", plan.Status)
+						require.Contains(t, []string{"submitted", "applied"}, plan.Status)
 					} else {
 						require.Equal(t, "applied", plan.Status)
 					}
 					require.Equal(t, plan.LeaderStoreID, manager.GetAffinityGroupState(plan.GroupID).LeaderStoreID)
 					require.NotEmpty(t, plan.Revision)
 				}
-				require.GreaterOrEqual(t, changed, 2)
+				require.Greater(t, changed, endpoint.MaxAffinityTxnBatchOps)
 			case <-ctx.Done():
 				t.Fatal("manual balance did not complete or detect changed ranges")
 			}
 			require.False(t, manager.IsManualBalanceRunning(initial.TableID))
 		})
 	}
+}
+
+func TestManualBalanceRechecksSubmissionGateBetweenBatches(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		stop func(*AffinityChecker, *mockcluster.Cluster)
+	}{
+		{"paused", func(checker *AffinityChecker, _ *mockcluster.Cluster) { checker.PauseOrResume(60) }},
+		{"halted", func(_ *AffinityChecker, tc *mockcluster.Cluster) { tc.SetHaltScheduling(true, "test") }},
+		{"limit zero", func(_ *AffinityChecker, tc *mockcluster.Cluster) { tc.SetAffinityScheduleLimit(0) }},
+		{"placement disabled", func(_ *AffinityChecker, tc *mockcluster.Cluster) {
+			config := tc.GetReplicationConfig().Clone()
+			config.EnablePlacementRules = false
+			tc.SetReplicationConfig(config)
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			groups := make([]manualBalanceFixtureGroup, 2*endpoint.MaxAffinityTxnBatchOps+1)
+			for i := range groups {
+				groups[i] = manualBalanceFixtureGroup{leader: 1, voters: []uint64{1, 2, 3}}
+			}
+			checker, manager, initial := newManualBalanceFixture(t, 3, groups)
+			tc := checker.cluster.(*mockcluster.Cluster)
+			stopped := false
+			checker.cluster = &affinityBalanceScanCluster{CheckerCluster: tc, beforeScan: func() {
+				if stopped {
+					return
+				}
+				for _, group := range initial.Groups {
+					if manager.GetAffinityGroupState(group.ID).LeaderStoreID != group.LeaderStoreID {
+						test.stop(checker, tc)
+						stopped = true
+						return
+					}
+				}
+			}}
+
+			plans, err := manager.RebalanceAffinityGroup(t.Context(), initial.Groups[0].ID, true)
+
+			require.ErrorIs(t, err, affinity.ErrBalanceNotReady)
+			require.True(t, stopped)
+			submitted, pending := 0, 0
+			for _, plan := range plans {
+				switch plan.Status {
+				case "submitted":
+					submitted++
+					require.Equal(t, plan.LeaderStoreID, manager.GetAffinityGroupState(plan.GroupID).LeaderStoreID)
+				case "not_submitted":
+					pending++
+					require.Equal(t, uint64(1), manager.GetAffinityGroupState(plan.GroupID).LeaderStoreID)
+				}
+			}
+			require.Equal(t, endpoint.MaxAffinityTxnBatchOps, submitted)
+			require.Positive(t, pending)
+		})
+	}
+}
+
+func TestManualBalanceTargetSubmissionIgnoresOperatorCapacity(t *testing.T) {
+	checker, manager, initial := newManualBalanceFixture(t, 3, []manualBalanceFixtureGroup{{leader: 1, voters: []uint64{1, 2, 3}}})
+	tc := checker.cluster.(*mockcluster.Cluster)
+	tc.SetAffinityScheduleLimit(1)
+	tc.AddLeaderRegion(100, 1, 2, 3)
+	checker.opController = operator.NewController(t.Context(), tc.GetBasicCluster(), tc.GetSharedConfig(), nil)
+	op, err := operator.CreateTransferLeaderOperator("affinity-test", tc, tc.GetRegion(100), 2, nil, operator.OpAffinity)
+	require.NoError(t, err)
+	require.True(t, op.Start())
+	checker.opController.SetOperator(op)
+	require.False(t, checker.balanceSchedulingAllowed())
+
+	plans, err := manager.RebalanceAffinityGroup(t.Context(), initial.Groups[0].ID, false)
+
+	require.NoError(t, err)
+	require.Len(t, plans, 1)
+	require.False(t, plans[0].Changed)
+}
+
+func TestManualBalanceRefreshReusesFingerprintAfterHeartbeat(t *testing.T) {
+	checker, manager, snapshot := newManualBalanceFixture(t, 3, []manualBalanceFixtureGroup{{leader: 1, voters: []uint64{1, 2, 3}}})
+	tc := checker.cluster.(*mockcluster.Cluster)
+	scanCluster := &affinityBalanceScanCluster{CheckerCluster: tc}
+	checker.cluster = scanCluster
+	require.NoError(t, manager.PrepareBalanceCommit(t.Context(), snapshot))
+	fingerprint := checker.balanceInputFingerprint(snapshot)
+	require.Equal(t, 1, scanCluster.labelReads)
+	region := tc.GetRegion(1)
+	manager.ObserveBalanceRegion(region.Clone(core.WithLeader(region.GetStorePeer(2))))
+
+	current, err := checker.refreshManualBalance(t.Context(), snapshot, fingerprint)
+
+	require.NoError(t, err)
+	require.Greater(t, current.Version.Table, snapshot.Version.Table)
+	require.Equal(t, 1, scanCluster.labelReads, "normal migration needs no metadata rescan")
+	require.NoError(t, tc.GetRegionLabeler().SetLabelRule(&labeler.LabelRule{
+		ID: "unrelated-manual-metadata", RuleType: labeler.KeyRange,
+		Labels: []labeler.RegionLabel{{Key: "balance-test", Value: "unrelated"}}, Data: labeler.MakeKeyRanges("79", "7a"),
+	}))
+	_, err = checker.refreshManualBalance(t.Context(), current, fingerprint)
+	require.NoError(t, err)
+	require.Equal(t, 2, scanCluster.labelReads, "metadata changes must still recheck relevance")
 }
 
 func TestManualBalanceReadsCurrentApproximateSize(t *testing.T) {
