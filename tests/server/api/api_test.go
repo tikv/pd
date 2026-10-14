@@ -537,6 +537,7 @@ func (suite *middlewareTestSuite) TestAuditLocalLogBackend() {
 	b, err := os.ReadFile(fname)
 	re.NoError(err)
 	re.Contains(string(b), "audit log")
+	re.Contains(string(b), `BodyParam:\"info\"`)
 	re.NoError(err)
 	re.Equal(http.StatusOK, resp.StatusCode)
 }
