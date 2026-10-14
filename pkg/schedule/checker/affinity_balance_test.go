@@ -16,6 +16,7 @@ package checker
 
 import (
 	"context"
+	"encoding/hex"
 	"slices"
 	"testing"
 	"time"
@@ -33,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 type affinityBalanceScanCluster struct {
@@ -319,6 +321,90 @@ func TestAffinityBalanceBusyVoterDestinationRetries(t *testing.T) {
 	task.search = nil
 	require.False(t, runAffinityBalanceTask(t, t.Context(), checker, task))
 	require.Contains(t, manager.GetAffinityGroupState("_tidb_pt_100_p0").VoterStoreIDs, uint64(4))
+}
+
+func TestAffinityBalanceRecoveredDestinationInvalidatesStable(t *testing.T) {
+	tc, checker := newAffinityBalanceTestCluster(t, 4)
+	tc.SetMaxStoreDownTime(time.Minute)
+	tc.SetStoreLastHeartbeatInterval(4, 2*time.Minute)
+	require.False(t, tc.GetStore(4).IsUnhealthy(), "the configured down threshold is below the fixed unhealthy threshold")
+	manager := tc.GetAffinityManager()
+	ids := []string{"_tidb_pt_100_p1", "_tidb_pt_100_p2", "_tidb_pt_100_p3"}
+	keys := []string{"a", "b", "c", "d"}
+	for i, id := range ids {
+		leader := uint64(i + 1)
+		createBalanceGroup(t, manager, id, keys[i], keys[i+1], leader, []uint64{1, 2, 3}, affinity.BalancePolicyAuto)
+		addBalanceRegion(t, tc, manager, leader, keys[i], keys[i+1], leader, 1, 2, 3)
+	}
+
+	task := &affinityBalanceTask{}
+	require.True(t, runAffinityBalanceTask(t, t.Context(), checker, task))
+	task.version, task.fingerprint, task.stable = task.search.snapshot.Version, task.search.fingerprint, true
+	task.search = nil
+	balancer := &affinityBalancer{checker: checker, tables: map[string]*affinityBalanceTask{"_tidb_pt_100": task}, queue: make(chan string, 1)}
+	balancer.enqueue(ids[0])
+	require.Empty(t, balancer.queue, "an unchanged stable table should remain cached")
+
+	tc.SetStoreUp(4)
+	// Snapshot creation samples the same store fingerprint as the availability loop.
+	recovered := manager.GetBalanceSnapshot(ids[0])
+	require.Greater(t, recovered.Version.Stores, task.version.Stores)
+	require.Equal(t, task.version.Table, recovered.Version.Table, "recovery of an unused destination does not change the table's Regions")
+	balancer.enqueue(ids[0])
+	require.Len(t, balancer.queue, 1, "destination recovery must wake the stable table")
+	<-balancer.queue
+	require.False(t, runAffinityBalanceTask(t, t.Context(), checker, task))
+	require.Contains(t, manager.GetAffinityGroupState(ids[0]).VoterStoreIDs, uint64(4))
+}
+
+func TestAffinityBalanceFingerprintLabelRanges(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		ranges     []keyutil.KeyRange
+		labelKeys  []string
+		intersects bool
+	}{
+		{"disjoint", []keyutil.KeyRange{keyutil.NewKeyRange("c", "d")}, []string{"a", "b"}, false},
+		{"adjacent before", []keyutil.KeyRange{keyutil.NewKeyRange("b", "d")}, []string{"a", "b"}, false},
+		{"adjacent after", []keyutil.KeyRange{keyutil.NewKeyRange("b", "d")}, []string{"d", "e"}, false},
+		{"overlap", []keyutil.KeyRange{keyutil.NewKeyRange("b", "d")}, []string{"c", "e"}, true},
+		{"equal", []keyutil.KeyRange{keyutil.NewKeyRange("b", "d")}, []string{"b", "d"}, true},
+		{"unsorted adjacent", []keyutil.KeyRange{keyutil.NewKeyRange("d", "f"), keyutil.NewKeyRange("b", "d")}, []string{"c", "e"}, true},
+		{"nested overlaps", []keyutil.KeyRange{keyutil.NewKeyRange("d", "e"), keyutil.NewKeyRange("b", "h"), keyutil.NewKeyRange("c", "d")}, []string{"f", "g"}, true},
+		{"gap", []keyutil.KeyRange{keyutil.NewKeyRange("f", "h"), keyutil.NewKeyRange("b", "d")}, []string{"d", "f"}, false},
+		{"crossing gap", []keyutil.KeyRange{keyutil.NewKeyRange("f", "h"), keyutil.NewKeyRange("b", "d")}, []string{"c", "g"}, true},
+		{"unbounded start", []keyutil.KeyRange{keyutil.NewKeyRange("", "b")}, []string{"", "a"}, true},
+		{"unbounded end", []keyutil.KeyRange{keyutil.NewKeyRange("b", "")}, []string{"z", ""}, true},
+		{"unbounded nested", []keyutil.KeyRange{keyutil.NewKeyRange("f", "h"), keyutil.NewKeyRange("b", "")}, []string{"z", ""}, true},
+		{"later label range", []keyutil.KeyRange{keyutil.NewKeyRange("d", "f")}, []string{"a", "b", "e", "g"}, true},
+		{"empty table", nil, []string{"a", "b"}, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			tc, checker := newAffinityBalanceTestCluster(t, 3)
+			snapshot := &affinity.BalanceSnapshot{
+				Groups: []*affinity.GroupState{{Group: affinity.Group{ID: "fingerprint"}}},
+				Ranges: map[string]affinity.GroupKeyRanges{"fingerprint": {KeyRanges: test.ranges}},
+			}
+			previous := checker.balanceInputFingerprint(snapshot)
+			keys := make([]string, len(test.labelKeys))
+			for i, key := range test.labelKeys {
+				keys[i] = hex.EncodeToString([]byte(key))
+			}
+			for _, value := range []string{"first", "second"} {
+				require.NoError(t, tc.GetRegionLabeler().SetLabelRule(&labeler.LabelRule{
+					ID: "fingerprint-label", RuleType: labeler.KeyRange,
+					Labels: []labeler.RegionLabel{{Key: "balance-test", Value: value}}, Data: labeler.MakeKeyRanges(keys...),
+				}))
+				current := checker.balanceInputFingerprint(snapshot)
+				if test.intersects {
+					require.NotEqual(t, previous, current, "intersecting label additions and updates must invalidate the search")
+				} else {
+					require.Equal(t, previous, current, "unrelated label changes must preserve the search")
+				}
+				previous = current
+			}
+		})
+	}
 }
 
 func TestAffinityBalanceYieldPreservesRangeCursorAndLocalProgress(t *testing.T) {

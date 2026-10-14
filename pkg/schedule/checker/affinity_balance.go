@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"hash/fnv"
 	"slices"
+	"sort"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/affinity"
@@ -112,6 +113,23 @@ func (c *AffinityChecker) balanceInputFingerprint(snapshot *affinity.BalanceSnap
 	for _, group := range snapshot.Groups {
 		ranges = append(ranges, snapshot.Ranges[group.ID].KeyRanges...)
 	}
+	// Merge the table's range union once. Its increasing end keys allow a
+	// binary intersection check for each label range instead of a table scan.
+	slices.SortFunc(ranges, func(a, b keyutil.KeyRange) int { return bytes.Compare(a.StartKey, b.StartKey) })
+	merged := ranges[:0]
+	for _, keyRange := range ranges {
+		if len(merged) > 0 {
+			last := &merged[len(merged)-1]
+			if len(last.EndKey) == 0 || bytes.Compare(keyRange.StartKey, last.EndKey) <= 0 {
+				if len(keyRange.EndKey) == 0 || len(last.EndKey) > 0 && bytes.Compare(keyRange.EndKey, last.EndKey) > 0 {
+					last.EndKey = keyRange.EndKey
+				}
+				continue
+			}
+		}
+		merged = append(merged, keyRange)
+	}
+	ranges = merged
 	rules, groups := c.ruleManager.GetRuleConfigForRanges(ranges)
 	inputs := make(map[string][]byte, len(rules)+len(groups))
 	for _, rule := range rules {
@@ -122,12 +140,12 @@ func (c *AffinityChecker) balanceInputFingerprint(snapshot *affinity.BalanceSnap
 	}
 	c.cluster.GetRegionLabeler().IterateLabelRules(func(rule *labeler.LabelRule) bool {
 		for _, labelRange := range rule.GetKeyRanges() {
-			for _, tableRange := range ranges {
-				if (len(labelRange.EndKey) == 0 || bytes.Compare(tableRange.StartKey, labelRange.EndKey) < 0) &&
-					(len(tableRange.EndKey) == 0 || bytes.Compare(labelRange.StartKey, tableRange.EndKey) < 0) {
-					inputs["label:"+rule.ID], _ = json.Marshal(rule)
-					return true
-				}
+			index := sort.Search(len(ranges), func(i int) bool {
+				return len(ranges[i].EndKey) == 0 || bytes.Compare(ranges[i].EndKey, labelRange.StartKey) > 0
+			})
+			if index < len(ranges) && (len(labelRange.EndKey) == 0 || bytes.Compare(ranges[index].StartKey, labelRange.EndKey) < 0) {
+				inputs["label:"+rule.ID], _ = json.Marshal(rule)
+				return true
 			}
 		}
 		return true
