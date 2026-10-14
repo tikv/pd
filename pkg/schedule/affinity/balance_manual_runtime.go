@@ -389,7 +389,7 @@ func manualBalanceRevision(snapshot *balanceSnapshot) (string, error) {
 		Metadata string `json:"metadata"`
 	}{
 		Table:    snapshot.dependencies[endpoint.AffinityTableRevisionKey(snapshot.tableID)],
-		Metadata: snapshot.dependencies[endpoint.AffinityMetadataRevisionKey()],
+		Metadata: snapshot.dependencies[endpoint.AffinityTableMetadataRevisionKey(snapshot.tableID)],
 	}
 	encoded, err := json.Marshal(revision)
 	if err != nil {
@@ -411,7 +411,7 @@ func (m *Manager) nextManualBalanceSnapshot(ctx context.Context, groupID string,
 		}
 		return nil, err
 	}
-	metadataKey := endpoint.AffinityMetadataRevisionKey()
+	metadataKey := endpoint.AffinityTableMetadataRevisionKey(original.tableID)
 	if current.fingerprint.stores != original.fingerprint.stores || current.fingerprint.rules != original.fingerprint.rules ||
 		current.dependencies[metadataKey] != original.dependencies[metadataKey] || !manualBalanceTargetsMatch(current.groups, expectedGroups) {
 		m.releaseBalanceDependencies(current)

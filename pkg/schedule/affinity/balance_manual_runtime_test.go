@@ -139,7 +139,7 @@ func TestManualRebalanceCommitsAndWaitsForEachGroup(t *testing.T) {
 	}
 }
 
-func TestManualNoImprovementDoesNotCacheAutomaticStable(t *testing.T) {
+func TestManualFallbackUsesAutomaticImprovement(t *testing.T) {
 	manager := newBalanceRuntimeManager(t)
 	ids := seedManualBalanceGroups(t, manager, []uint64{1, 1, 1, 1, 2, 2})
 	// Cross-table counts make preserving the initial seed preferable during
@@ -169,7 +169,7 @@ func TestManualNoImprovementDoesNotCacheAutomaticStable(t *testing.T) {
 	require.Equal(t, ids[0], changedPlan(auto).GroupID)
 	plans, err := manager.RebalanceAffinityGroup(t.Context(), ids[0], false)
 	require.NoError(t, err)
-	require.Empty(t, changedPlanIDs(plans))
+	require.Equal(t, []string{ids[0]}, changedPlanIDs(plans))
 	require.Equal(t, balanceIdle, manager.balanceTables[TableGroupPrefix(ids[0])].phase)
 }
 
