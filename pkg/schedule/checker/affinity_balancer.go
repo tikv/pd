@@ -178,6 +178,10 @@ func sameBalanceTable(a, b affinity.BalanceVersion) bool {
 	return a.Table == b.Table && a.Ranges == b.Ranges && a.Stores == b.Stores
 }
 
+func sameBalanceMetadata(a, b affinity.BalanceVersion) bool {
+	return a.Ranges == b.Ranges && a.Rules == b.Rules && a.Labels == b.Labels
+}
+
 func (b *affinityBalancer) prepareSearch(id string, task *affinityBalanceTask) (*balanceSearch, error) {
 	manager := b.checker.affinityManager
 	version, exists := manager.GetBalanceVersion(id)
@@ -193,7 +197,15 @@ func (b *affinityBalancer) prepareSearch(id string, task *affinityBalanceTask) (
 	if snapshot == nil {
 		return nil, nil
 	}
-	fingerprint := b.checker.balanceInputFingerprint(snapshot)
+	var fingerprint uint64
+	switch {
+	case search != nil && sameBalanceMetadata(search.snapshot.Version, snapshot.Version):
+		fingerprint = search.fingerprint
+	case task.version != (affinity.BalanceVersion{}) && sameBalanceMetadata(task.version, snapshot.Version):
+		fingerprint = task.fingerprint
+	default:
+		fingerprint = b.checker.balanceInputFingerprint(snapshot)
+	}
 	if !manager.BalanceSnapshotCurrent(snapshot) {
 		return nil, errs.ErrEtcdTxnConflict.FastGenByArgs()
 	}

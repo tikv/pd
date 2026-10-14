@@ -462,8 +462,9 @@ const (
 )
 
 // cloneRegionWithReplacePeerStores clones the Region and updates its voters and leader to the target stores.
-// If the number of voters does not match or the leader is not among the target voters,
-// it returns nil to indicate failure. Source and target placement must not contain duplicate store IDs respectively.
+// If the number of voters does not match, the leader is not among the target
+// voters, or a target voter shares a store with a preserved learner, it returns
+// nil. Source and target voters must not contain duplicate store IDs respectively.
 func cloneRegionWithReplacePeerStores(region *core.RegionInfo, leaderStoreID uint64, voterStoreIDs ...uint64) *core.RegionInfo {
 	if region == nil {
 		return nil
@@ -473,6 +474,11 @@ func cloneRegionWithReplacePeerStores(region *core.RegionInfo, leaderStoreID uin
 
 	if len(sourceVoters) != len(voterStoreIDs) || !slices.Contains(voterStoreIDs, leaderStoreID) {
 		return nil
+	}
+	for _, learner := range region.GetLearners() {
+		if slices.Contains(voterStoreIDs, learner.GetStoreId()) {
+			return nil
+		}
 	}
 
 	// presences records whether a storeID exists in the source and/or target
