@@ -150,9 +150,10 @@ func PlanTableRebalance(ctx context.Context, groups []*Group, options BalanceOpt
 				automaticPlans[i].AfterScore = &BalanceScore{Leader: automaticScore.leader, Voter: automaticScore.voter}
 				if automaticPlans[i].Changed {
 					automaticPlans[i].Status = "planned"
+					newVoters := normalizeVoters(automaticPlans[i].VoterStoreIDs)
 					moveCount := 0
 					for _, storeID := range automaticPlans[i].OldVoterStoreIDs {
-						if !slices.Contains(normalizeVoters(automaticPlans[i].VoterStoreIDs), storeID) {
+						if !slices.Contains(newVoters, storeID) {
 							moveCount++
 						}
 					}
