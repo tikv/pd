@@ -86,6 +86,7 @@ var (
 	ruleCheckerPromoteWitnessCounter              = ruleCheckerCounterWithEvent("promote-witness")
 	ruleCheckerReplaceOfflineCounter              = ruleCheckerCounterWithEvent("replace-offline")
 	ruleCheckerAddRulePeerCounter                 = ruleCheckerCounterWithEvent("add-rule-peer")
+	ruleCheckerAddTiFlashLearnerCounter           = ruleCheckerCounterWithEvent("add-tiflash-learner")
 	ruleCheckerNoStoreAddCounter                  = ruleCheckerCounterWithEvent("no-store-add")
 	ruleCheckerNoStoreThenTryReplace              = ruleCheckerCounterWithEvent("no-store-then-try-replace")
 	ruleCheckerNoStoreReplaceCounter              = ruleCheckerCounterWithEvent("no-store-replace")
