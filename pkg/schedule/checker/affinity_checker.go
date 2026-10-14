@@ -89,9 +89,6 @@ func (c *AffinityChecker) hasAffinityGroups() bool {
 // Check verifies a region's replicas according to affinity group constraints, creating an Operator if needed.
 func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	affinityCheckerCounter.Inc()
-	if c.affinityManager != nil {
-		c.affinityManager.ObserveBalanceRegion(region)
-	}
 
 	if c.IsPaused() {
 		affinityCheckerPausedCounter.Inc()

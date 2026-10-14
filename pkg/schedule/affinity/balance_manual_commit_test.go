@@ -254,7 +254,7 @@ func TestRefreshBalanceSnapshotDoesNotCaptureLaterPrimaryTerm(t *testing.T) {
 	manager.storage = conditional
 	manager.SetBalanceCommitGuard(func() ([]clientv3.Cmp, bool) {
 		return []clientv3.Cmp{expectedTerm}, true
-	}, nil)
+	})
 	snapshot := manager.GetBalanceSnapshot(groupID)
 	require.NotNil(t, snapshot)
 	require.NoError(t, manager.PrepareBalanceCommit(t.Context(), snapshot))

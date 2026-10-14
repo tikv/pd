@@ -441,7 +441,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	c.affinityManager.SetBalanceCommitGuard(func() ([]clientv3.Cmp, bool) {
 		term, ok := c.member.GetLeadership().CaptureTerm()
 		return term.Comparisons(), ok
-	}, nil)
+	})
 
 	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
 		observeSlowStoreStart := time.Now()

@@ -61,25 +61,35 @@ func AffinityPlacementRevisionKey() string {
 
 type balanceMutationTxn struct {
 	kv.Txn
-	changed  map[string]struct{}
-	explicit map[string]struct{}
+	// True means this token was already written explicitly by the caller.
+	revisions map[string]bool
 }
 
 func (txn *balanceMutationTxn) mark(key string) {
 	if id, ok := strings.CutPrefix(key, keypath.AffinityGroupsPrefix()); ok {
-		txn.changed[AffinityTableRevisionKey(id)] = struct{}{}
+		key = AffinityTableRevisionKey(id)
 	} else if strings.HasPrefix(key, keypath.RegionLabelPathPrefix()) {
 		ruleID := strings.TrimPrefix(key, keypath.RegionLabelPathPrefix())
 		if strings.HasPrefix(ruleID, "affinity_group/") {
 			groupID := strings.TrimPrefix(ruleID, "affinity_group/")
-			txn.changed[AffinityTableMetadataRevisionKey(groupID)] = struct{}{}
+			key = AffinityTableMetadataRevisionKey(groupID)
 		} else {
-			txn.changed[AffinityPlacementRevisionKey()] = struct{}{}
+			key = AffinityPlacementRevisionKey()
 		}
 	} else if strings.HasPrefix(key, keypath.RulesPathPrefix()) ||
 		strings.HasPrefix(key, keypath.RuleGroupPathPrefix()) {
-		txn.changed[AffinityPlacementRevisionKey()] = struct{}{}
+		key = AffinityPlacementRevisionKey()
+	} else {
+		return
 	}
+	txn.trackRevision(key, false)
+}
+
+func (txn *balanceMutationTxn) trackRevision(key string, explicit bool) {
+	if txn.revisions == nil {
+		txn.revisions = make(map[string]bool)
+	}
+	txn.revisions[key] = explicit || txn.revisions[key]
 }
 
 // Save records the mutation and queues the original write.
@@ -98,7 +108,7 @@ func (txn *balanceMutationTxn) saveExplicitRevision(key, value string) error {
 	if err := txn.Txn.Save(key, value); err != nil {
 		return err
 	}
-	txn.explicit[key] = struct{}{}
+	txn.trackRevision(key, true)
 	return nil
 }
 
@@ -132,17 +142,13 @@ func (txn *balanceMutationTxn) LoadWithRevision(key string) (string, error) {
 
 func trackBalanceMutations(f func(kv.Txn) error) func(kv.Txn) error {
 	return func(txn kv.Txn) error {
-		tracked := &balanceMutationTxn{
-			Txn:      txn,
-			changed:  make(map[string]struct{}),
-			explicit: make(map[string]struct{}),
-		}
+		tracked := &balanceMutationTxn{Txn: txn}
 		if err := f(tracked); err != nil {
 			return err
 		}
 		// One put per token even when a batch modifies many groups/rules.
-		for key := range tracked.changed {
-			if _, explicit := tracked.explicit[key]; explicit {
+		for key, explicit := range tracked.revisions {
+			if explicit {
 				continue
 			}
 			var token [16]byte

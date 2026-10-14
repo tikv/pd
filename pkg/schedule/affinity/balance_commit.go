@@ -32,23 +32,62 @@ import (
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
-// SetBalanceCommitGuard installs the current authority and placement metadata
-// providers. A term is captured before the final validation and is not renewed
-// by the target write.
-func (m *Manager) SetBalanceCommitGuard(term func() ([]clientv3.Cmp, bool), metadata func() map[string]string) {
+// SetBalanceCommitGuard installs the authority provider. A term is captured
+// before the final validation and is not renewed by the target write.
+func (m *Manager) SetBalanceCommitGuard(term func() ([]clientv3.Cmp, bool)) {
 	m.Lock()
 	defer m.Unlock()
-	if term != nil {
-		m.balanceTerm = term
-	}
-	if metadata != nil {
-		m.balanceMetadata = metadata
-		m.balanceMetadataSource++
-		m.balanceMetadataVerified = nil
-	}
+	m.balanceTerm = term
 }
 
 func balanceConflict() error { return errs.ErrEtcdTxnConflict.FastGenByArgs() }
+
+// Cleanup uses authoritative membership and token comparisons: empty range
+// reads alone do not fence a concurrently recreated group or affinity label.
+func (m *Manager) cleanupBalanceRevisions(runner endpoint.TxnStorage, tableID string) error {
+	reader, ok := m.storage.(kv.BaseReadWrite)
+	if !ok {
+		return balanceConflict()
+	}
+	return runner.RunInTxn(m.ctx, func(txn kv.Txn) error {
+		tokens := []string{endpoint.AffinityTableRevisionKey(tableID), endpoint.AffinityTableMetadataRevisionKey(tableID)}
+		for _, key := range tokens {
+			if _, err := txn.Load(key); err != nil {
+				return err
+			}
+		}
+		for _, prefix := range []string{keypath.AffinityGroupsPrefix(), keypath.RegionLabelKeyPath(LabelRuleIDPrefix)} {
+			value, err := reader.Load(prefix + tableID)
+			if err != nil || value != "" {
+				return err
+			}
+			if !strings.HasPrefix(tableID, "_tidb_pt_") {
+				continue
+			}
+			start := prefix + tableID + "_p"
+			end := clientv3.GetPrefixRangeEnd(start)
+			for {
+				keys, _, err := reader.LoadRange(start, end, 1)
+				if err != nil {
+					return err
+				}
+				if len(keys) == 0 {
+					break
+				}
+				if TableGroupPrefix(strings.TrimPrefix(keys[0], prefix)) == tableID {
+					return nil
+				}
+				start = keys[0] + "\x00"
+			}
+		}
+		for _, key := range tokens {
+			if err := txn.Remove(key); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
 
 func canonicalJSON(value string) string {
 	var decoded any
@@ -325,6 +364,24 @@ func checkBalanceDependencies(txn kv.Txn, snapshot *BalanceSnapshot) error {
 	return nil
 }
 
+// Legacy tables may have no durable token yet. Fence their original group
+// explicitly so deleting the table and its tokens cannot resurrect a target.
+func checkBalanceOriginal(txn kv.Txn, snapshot *BalanceSnapshot, original *Group) error {
+	if snapshot.dependencies[endpoint.AffinityTableRevisionKey(snapshot.TableID)] != "" {
+		return nil
+	}
+	persisted, err := loadAffinityGroupInTxn(txn, original.ID)
+	if err != nil {
+		return err
+	}
+	if persisted == nil || persisted.ID != original.ID || persisted.CreateTimestamp != original.CreateTimestamp ||
+		persisted.BalancePolicy != original.BalancePolicy || persisted.LeaderStoreID != original.LeaderStoreID ||
+		!slices.Equal(normalizeVoters(persisted.VoterStoreIDs), original.VoterStoreIDs) {
+		return balanceConflict()
+	}
+	return nil
+}
+
 // CommitBalanceTarget updates one target using the captured durable versions
 // and primary term. Network IO runs without Manager or RuleManager locks.
 func (m *Manager) CommitBalanceTarget(ctx context.Context, snapshot *BalanceSnapshot, target *Group) (bool, error) {
@@ -352,6 +409,9 @@ func (m *Manager) CommitBalanceTarget(ctx context.Context, snapshot *BalanceSnap
 		}
 		if m.IsManualBalanceRunning(snapshot.TableID) {
 			return balanceConflict()
+		}
+		if err := checkBalanceOriginal(txn, snapshot, &original.Group); err != nil {
+			return err
 		}
 		if err := m.storage.SaveAffinityGroup(txn, group.ID, &group); err != nil {
 			return err

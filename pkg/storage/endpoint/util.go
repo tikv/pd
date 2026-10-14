@@ -88,7 +88,7 @@ type TxnStorage interface {
 // RunBatchOpInTxn runs a batch of operations in transaction.
 // The batch is split into multiple transactions if it exceeds the maximum number of operations per transaction.
 func RunBatchOpInTxn(ctx context.Context, storage TxnStorage, batch []func(kv.Txn) error) error {
-	return RunBatchOpInTxnWithLimit(ctx, storage, batch, MaxAffinityTxnBatchOps)
+	return RunBatchOpInTxnWithLimit(ctx, storage, batch, etcdutil.MaxEtcdTxnOps)
 }
 
 // RunBatchOpInTxnWithLimit reserves transaction capacity for operations added

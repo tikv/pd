@@ -15,6 +15,7 @@
 package endpoint
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -108,4 +109,22 @@ func TestAffinityRevisionBatchAndTermFence(t *testing.T) {
 		}
 	}
 	require.NoError(t, RunBatchOpInTxnWithLimit(ctx, se, batch, etcdutil.MaxEtcdTxnOps/2), "custom groups need capacity for one generation token per group")
+	batch = make([]func(kv.Txn) error, etcdutil.MaxEtcdTxnOps)
+	for i := range batch {
+		key := fmt.Sprintf("batch-rule-%03d", i)
+		batch[i] = func(txn kv.Txn) error { return se.SaveRule(txn, key, map[string]string{"id": key}) }
+	}
+	transactions := 0
+	require.NoError(t, RunBatchOpInTxn(ctx, &countingTxnStorage{TxnStorage: se, transactions: &transactions}, batch))
+	require.Equal(t, 1, transactions, "placement batches keep the generic capacity and write one shared token")
+}
+
+type countingTxnStorage struct {
+	TxnStorage
+	transactions *int
+}
+
+func (s *countingTxnStorage) RunInTxn(ctx context.Context, f func(kv.Txn) error) error {
+	(*s.transactions)++
+	return s.TxnStorage.RunInTxn(ctx, f)
 }
