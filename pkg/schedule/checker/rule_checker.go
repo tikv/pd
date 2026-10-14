@@ -15,6 +15,7 @@
 package checker
 
 import (
+	"errors"
 	"math"
 	"time"
 
@@ -174,12 +175,18 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 }
 
 func (c *RuleChecker) fixMissingTiFlashLearnerPeer(region *core.RegionInfo, fit *placement.RegionFit) (*operator.Operator, error) {
+	var noStoreErr error
 	for _, rf := range fit.RuleFits {
 		if len(rf.Peers) < rf.Rule.Count && isTiFlashLearnerRule(rf.Rule) {
-			return c.addTiFlashLearnerPeer(region, fit, rf)
+			op, err := c.addTiFlashLearnerPeer(region, fit, rf)
+			if errors.Is(err, errs.ErrNoStoreToAdd) {
+				noStoreErr = err
+				continue
+			}
+			return op, err
 		}
 	}
-	return nil, nil
+	return nil, noStoreErr
 }
 
 func isTiFlashLearnerRule(rule *placement.Rule) bool {

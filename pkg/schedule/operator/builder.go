@@ -17,6 +17,7 @@ package operator
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -1062,7 +1063,7 @@ func (b *Builder) labelMatch(x, y uint64) int {
 	}
 	labels := b.GetSharedConfig().GetLocationLabels()
 	for i, l := range labels {
-		if sx.GetLabelValue(l) != sy.GetLabelValue(l) {
+		if !strings.EqualFold(sx.GetLabelValue(l), sy.GetLabelValue(l)) {
 			return i
 		}
 	}

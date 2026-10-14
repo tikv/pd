@@ -88,6 +88,16 @@ func (suite *operatorBuilderTestSuite) TestNewBuilder() {
 	re.Error(builder.err)
 }
 
+func (suite *operatorBuilderTestSuite) TestLabelMatchCaseInsensitive() {
+	re := suite.Require()
+	suite.cluster.AddLabelsStore(11, 0, map[string]string{"zone": "Z1", "host": "H1"})
+	suite.cluster.AddLabelsStore(12, 0, map[string]string{"zone": "Z1", "host": "H2"})
+	builder := suite.newBuilder()
+	re.Equal(2, builder.labelMatch(1, 11))
+	re.Equal(1, builder.labelMatch(1, 12))
+	re.Equal(0, builder.labelMatch(8, 11))
+}
+
 func (suite *operatorBuilderTestSuite) newBuilder() *Builder {
 	peers := []*metapb.Peer{
 		{Id: 11, StoreId: 1},

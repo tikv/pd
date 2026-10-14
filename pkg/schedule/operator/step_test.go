@@ -17,6 +17,7 @@ package operator
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -50,12 +51,14 @@ func (suite *operatorStepTestSuite) SetupTest() {
 	ctx, cancel := context.WithCancel(context.Background())
 	suite.cancel = cancel
 	suite.cluster = mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
-	for i := 1; i <= 10; i++ {
+	for i := 1; i <= 11; i++ {
 		suite.cluster.PutStoreWithLabels(uint64(i))
 	}
 	suite.cluster.SetStoreDown(8)
 	suite.cluster.SetStoreDown(9)
 	suite.cluster.SetStoreDown(10)
+	// store 11 is unhealthy (>10min unreachable) but not yet down (<30min default MaxStoreDownTime).
+	suite.cluster.SetStoreLastHeartbeatInterval(11, 11*time.Minute)
 }
 
 func (suite *operatorStepTestSuite) TearDownTest() {
@@ -115,6 +118,43 @@ func (suite *operatorStepTestSuite) TestTransferLeader() {
 		},
 	}
 	suite.check(re, step, "transfer leader from store 1 to store 9", testCases)
+
+	// Multi-target: the primary ToStore has no peer, but a ToStores
+	// candidate does and is healthy -- CheckInProgress must succeed via
+	// that candidate instead of rejecting on the primary's missing peer.
+	step = TransferLeader{FromStore: 1, ToStore: 4, ToStores: []uint64{2}}
+	testCases = []testCase{
+		{
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
+			},
+			0,
+			false,
+			re.NoError,
+		},
+	}
+	suite.checkWithHealthCheck(re, step, "transfer leader from store 1 to store 4", testCases, true)
+
+	// Multi-target: the primary ToStore has a peer but is unhealthy, and a
+	// ToStores candidate is healthy but has no peer -- neither candidate is
+	// both peered and healthy, so CheckInProgress must fail rather than
+	// pairing the primary's peer with the candidate's health.
+	step = TransferLeader{FromStore: 1, ToStore: 11, ToStores: []uint64{5}}
+	testCases = []testCase{
+		{
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 11, StoreId: 11, Role: metapb.PeerRole_Voter},
+			},
+			0,
+			false,
+			re.Error,
+		},
+	}
+	suite.checkWithHealthCheck(re, step, "transfer leader from store 1 to store 11", testCases, true)
 }
 
 func (suite *operatorStepTestSuite) TestAddPeer() {
@@ -544,13 +584,66 @@ func (suite *operatorStepTestSuite) TestChangePeerV2Leave() {
 	suite.check(re, cpl, desc, testCases)
 }
 
+func (suite *operatorStepTestSuite) TestNeedStoreHealthCheck() {
+	re := suite.Require()
+
+	unhealthyPeers := []*metapb.Peer{
+		{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+		{Id: 11, StoreId: 11, Role: metapb.PeerRole_Voter},
+	}
+
+	tl := TransferLeader{FromStore: 1, ToStore: 11}
+	suite.checkWithHealthCheck(re, tl, "transfer leader from store 1 to store 11",
+		[]testCase{{unhealthyPeers, 0, false, re.NoError}}, false)
+	suite.checkWithHealthCheck(re, tl, "transfer leader from store 1 to store 11",
+		[]testCase{{unhealthyPeers, 0, false, re.Error}}, true)
+
+	ap := AddPeer{ToStore: 11, PeerID: 11}
+	suite.checkWithHealthCheck(re, ap, "add peer 11 on store 11",
+		[]testCase{{[]*metapb.Peer{{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter}}, 0, false, re.NoError}}, false)
+	suite.checkWithHealthCheck(re, ap, "add peer 11 on store 11",
+		[]testCase{{[]*metapb.Peer{{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter}}, 0, false, re.Error}}, true)
+
+	al := AddLearner{ToStore: 11, PeerID: 11}
+	suite.checkWithHealthCheck(re, al, "add learner peer 11 on store 11",
+		[]testCase{{[]*metapb.Peer{{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter}}, 0, false, re.NoError}}, false)
+	suite.checkWithHealthCheck(re, al, "add learner peer 11 on store 11",
+		[]testCase{{[]*metapb.Peer{{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter}}, 0, false, re.Error}}, true)
+
+	// PromoteLearner doesn't need the target reachable for raft to commit the
+	// role flip, so it must ignore needStoreHealthCheck even when true, same
+	// as RemovePeer and DemoteVoter.
+	pl := PromoteLearner{ToStore: 11, PeerID: 11}
+	notPromotedPeers := []*metapb.Peer{
+		{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+		{Id: 11, StoreId: 11, Role: metapb.PeerRole_Learner},
+	}
+	suite.checkWithHealthCheck(re, pl, "promote learner peer 11 on store 11 to voter",
+		[]testCase{{notPromotedPeers, 0, false, re.NoError}}, true)
+
+	// ChangePeerV2Enter's PromoteLearners are the same as standalone
+	// PromoteLearner: ignore needStoreHealthCheck regardless of whether the
+	// target has already entered joint state.
+	cpe := ChangePeerV2Enter{PromoteLearners: []PromoteLearner{{PeerID: 11, ToStore: 11}}}
+	notInJointStatePeers := []*metapb.Peer{
+		{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+		{Id: 11, StoreId: 11, Role: metapb.PeerRole_Learner},
+	}
+	suite.checkWithHealthCheck(re, cpe, "use joint consensus, promote learner peer 11 on store 11 to voter",
+		[]testCase{{notInJointStatePeers, 0, false, re.NoError}}, true)
+}
+
 func (suite *operatorStepTestSuite) check(re *require.Assertions, step OpStep, desc string, testCases []testCase) {
+	suite.checkWithHealthCheck(re, step, desc, testCases, false)
+}
+
+func (suite *operatorStepTestSuite) checkWithHealthCheck(re *require.Assertions, step OpStep, desc string, testCases []testCase, needStoreHealthCheck bool) {
 	re.Equal(desc, step.String())
 	for _, testCase := range testCases {
 		region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: testCase.Peers}, testCase.Peers[0])
 		re.Equal(testCase.ConfVerChanged, step.ConfVerChanged(region))
 		re.Equal(testCase.IsFinish, step.IsFinish(region))
-		err := step.CheckInProgress(suite.cluster.GetBasicCluster(), suite.cluster.GetSharedConfig(), region)
+		err := step.CheckInProgress(suite.cluster.GetBasicCluster(), suite.cluster.GetSharedConfig(), region, needStoreHealthCheck)
 		testCase.CheckInProgress(err)
 		_ = step.GetCmd(region, true)
 

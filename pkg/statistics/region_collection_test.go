@@ -53,6 +53,19 @@ func TestRegionStatsObserveIAKVSize(t *testing.T) {
 	re.Equal(int64(100), stats.UserIAStorageSize)
 }
 
+func TestRegionStatsEmptyCountUsesKeys(t *testing.T) {
+	regions := []*core.RegionInfo{
+		core.NewRegionInfo(&metapb.Region{Id: 1}, nil,
+			core.SetApproximateSize(1),
+			core.SetApproximateKeys(0)),
+		core.NewRegionInfo(&metapb.Region{Id: 2}, nil,
+			core.SetApproximateSize(1),
+			core.SetApproximateKeys(1)),
+	}
+
+	require.Equal(t, 1, GetRegionStats(regions, nil).EmptyCount)
+}
+
 func TestRegionStatistics(t *testing.T) {
 	re := require.New(t)
 	store := storage.NewStorageWithMemoryBackend()
@@ -99,6 +112,11 @@ func TestRegionStatistics(t *testing.T) {
 	re.Len(regionStats.stats[EmptyRegion], 1)
 	re.Len(regionStats.stats[UndersizedRegion], 1)
 	re.Len(regionStats.stats[OfflinePeer], 1)
+
+	regionWithKeys := region1.Clone(core.SetApproximateSize(1), core.SetApproximateKeys(2))
+	re.True(regionStats.RegionStatsNeedUpdate(regionWithKeys))
+	regionStats.Observe(regionWithKeys, stores)
+	re.Empty(regionStats.stats[EmptyRegion])
 
 	region1 = region1.Clone(
 		core.WithDownPeers(downPeers),
@@ -314,6 +332,48 @@ func TestRegionLabelIsolationLevel(t *testing.T) {
 	}
 	for i, res := range counter {
 		re.Equal(res, labelLevelStats.labelCounter[i])
+	}
+}
+
+func TestRegionLabelIsolationCaseInsensitive(t *testing.T) {
+	labels := []string{"zone", "rack", "host"}
+	for _, tt := range []struct {
+		name  string
+		paths [][]string
+		label string
+		level int
+	}{
+		{"distinct-dotted-i", [][]string{{"z1", "r1", "İ"}, {"z1", "r1", "i"}, {"z1", "r1", "b"}}, "host", 2},
+		{"distinct-dotless-i", [][]string{{"z1", "r1", "ı"}, {"z1", "r1", "i"}, {"z1", "r1", "b"}}, "host", 2},
+		{"unicode-fold", [][]string{{"z1", "r1", "ς"}, {"z1", "r1", "σ"}, {"z1", "r1", "b"}}, nonIsolation, -1},
+		{"unicode-long-s", [][]string{{"z1", "r1", "ſ"}, {"z1", "r1", "s"}, {"z1", "r1", "b"}}, nonIsolation, -1},
+		{"mixed-ascii-kelvin", [][]string{{"z1", "r1", "K8S"}, {"z1", "r1", "K8s"}, {"z1", "r1", "b"}}, nonIsolation, -1},
+		{"mixed-ascii-long-s", [][]string{{"z1", "r1", "h-s"}, {"z1", "r1", "H-ſ"}, {"z1", "r1", "b"}}, nonIsolation, -1},
+		{"distinct-unicode-values", [][]string{{"z1", "r1", "ß"}, {"z1", "r1", "ss"}, {"z1", "r1", "b"}}, "host", 2},
+		{"host", [][]string{{"z1", "r1", "A"}, {"z1", "r1", "a"}, {"z1", "r1", "B"}}, nonIsolation, -1},
+		{"rack", [][]string{{"z1", "R1", "h1"}, {"z1", "r1", "h2"}, {"z1", "r2", "h3"}}, "host", 2},
+		{"zone", [][]string{{"Z1", "r1", "h1"}, {"z1", "r2", "h1"}, {"z2", "r1", "h1"}}, "rack", 1},
+		{"missing-label", [][]string{{"Z1", "r1", "h1"}, {"z1", "R1", ""}, {"z2", "r1", "h3"}}, nonIsolation, -1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			stores := make([]*core.StoreInfo, 0, len(tt.paths))
+			for i, path := range tt.paths {
+				storeLabels := make([]*metapb.StoreLabel, 0, len(labels))
+				for j, label := range labels {
+					storeLabels = append(storeLabels, &metapb.StoreLabel{Key: label, Value: path[j]})
+				}
+				stores = append(stores, core.NewStoreInfo(&metapb.Store{Id: uint64(i + 1), Labels: storeLabels}))
+			}
+			label, level := GetRegionLabelIsolation(stores, labels)
+			require.Equal(t, tt.label, label)
+			require.Equal(t, tt.level, level)
+			for i, isolationLevel := range labels {
+				require.Equal(t, tt.level >= 0 && tt.level <= i, IsRegionLabelIsolationSatisfied(stores, labels, isolationLevel))
+			}
+			stats := NewLabelStatistics()
+			stats.Observe(core.NewRegionInfo(&metapb.Region{Id: 1}, nil), stores, labels)
+			require.Equal(t, map[string]int{tt.label: 1}, stats.GetLabelCounter())
+		})
 	}
 }
 

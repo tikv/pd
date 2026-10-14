@@ -842,7 +842,7 @@ func (s *gcStateManagerTestSuite) TestBarrierMetricsRemovalFencesInflightPublica
 	// Remove metadata after it was resolved and the GC transaction loaded its
 	// barriers. The successful GC commit must not restore the removed sample.
 	counted.beforeCommit = func() {
-		_, err := groupManager.RemoveKeyspacesFromGroup(101, m.keyspaceManager, []uint32{2})
+		_, err := groupManager.RemoveKeyspacesFromGroup(context.Background(), 101, m.keyspaceManager, nil, []uint32{2})
 		re.NoError(err)
 		re.Equal(map[string]float64{"global//global": 1_999_712_000}, gatherBarrierMetrics(s.T(), registry))
 	}
