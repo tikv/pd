@@ -50,6 +50,9 @@ const (
 	OpRegion
 	// Include leader transfer.
 	OpLeader
+	// Preserve removed witness bits so API-visible OpKind values remain stable.
+	opKindReservedWitnessLeader OpKind = 1 << iota
+	opKindReservedWitness
 	// Initiated by internal split-scatter dispatcher.
 	OpSplitScatter
 	opMax
@@ -84,9 +87,11 @@ var nameToFlag = map[string]OpKind{
 func (k OpKind) String() string {
 	var flagNames []string
 	for flag := OpKind(1); flag < opMax; flag <<= 1 {
-		if k&flag != 0 {
-			flagNames = append(flagNames, flagToName[flag])
+		name, ok := flagToName[flag]
+		if !ok || k&flag == 0 {
+			continue
 		}
+		flagNames = append(flagNames, name)
 	}
 	if len(flagNames) == 0 {
 		return "unknown"
