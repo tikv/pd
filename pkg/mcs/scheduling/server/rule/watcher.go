@@ -598,6 +598,21 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 		}
 		return err
 	}
+	reconcileDeletedFn := func(snapshotKeys map[string]struct{}) error {
+		var reconcileErr error
+		rw.regionLabeler.IterateLabelRulesLocked(func(rule *labeler.LabelRule) bool {
+			key := keypath.RegionLabelKeyPath(rule.ID)
+			if _, ok := snapshotKeys[key]; ok {
+				return true
+			}
+			if err := deleteFn(&mvccpb.KeyValue{Key: []byte(key)}); err != nil {
+				reconcileErr = err
+				return false
+			}
+			return true
+		})
+		return reconcileErr
+	}
 	postEventsFn := func([]*clientv3.Event) error {
 		defer rw.regionLabeler.Unlock()
 		if rw.checkerController == nil {
@@ -619,6 +634,7 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 		postEventsFn,
 		true, /* withPrefix */
 	)
+	rw.labelWatcher.SetReconcileDeletedKeysFn(reconcileDeletedFn)
 	rw.labelWatcher.StartWatchLoop()
 	return rw.labelWatcher.WaitLoad()
 }

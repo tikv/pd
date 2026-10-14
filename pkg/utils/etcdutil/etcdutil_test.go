@@ -499,6 +499,55 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadInitializesEmptyReconciliation
 	re.Empty(watcher.loadedKeys)
 }
 
+func (suite *loopWatcherTestSuite) TestWatcherReconcilesDeletedKeysFnWithoutRetainingIndex() {
+	re := suite.Require()
+	const prefix = "TestWatcherReconcilesDeletedKeysFnWithoutRetainingIndex/"
+	keepKey := prefix + "keep"
+	deletedKey := prefix + "deleted"
+	suite.put(re, keepKey, "keep")
+	suite.put(re, deletedKey, "deleted")
+
+	cache := make(map[string]string)
+	watcher := NewLoopWatcher(
+		suite.ctx,
+		&suite.wg,
+		suite.client,
+		"test",
+		prefix,
+		func([]*clientv3.Event) error { return nil },
+		func(kv *mvccpb.KeyValue) error {
+			cache[string(kv.Key)] = string(kv.Value)
+			return nil
+		},
+		func(kv *mvccpb.KeyValue) error {
+			delete(cache, string(kv.Key))
+			return nil
+		},
+		func([]*clientv3.Event) error { return nil },
+		true, /* withPrefix */
+	)
+	watcher.SetReconcileDeletedKeysFn(func(snapshotKeys map[string]struct{}) error {
+		for key := range cache {
+			if _, ok := snapshotKeys[key]; !ok {
+				delete(cache, key)
+			}
+		}
+		return nil
+	})
+
+	_, err := watcher.load(suite.ctx)
+	re.NoError(err)
+	re.Equal(map[string]string{keepKey: "keep", deletedKey: "deleted"}, cache)
+	re.Nil(watcher.loadedKeys)
+
+	_, err = suite.client.Delete(suite.ctx, deletedKey)
+	re.NoError(err)
+	_, err = watcher.load(suite.ctx)
+	re.NoError(err)
+	re.Equal(map[string]string{keepKey: "keep"}, cache)
+	re.Nil(watcher.loadedKeys)
+}
+
 func (suite *loopWatcherTestSuite) TestInitialLoadFailsWhenContextCanceled() {
 	re := suite.Require()
 	ctx, cancel := context.WithCancel(suite.ctx)
@@ -1240,7 +1289,16 @@ func (suite *loopWatcherTestSuite) TestWatcherReloadsAndReconcilesAfterCompactio
 		func([]*clientv3.Event) error { return nil },
 		true, /* withPrefix */
 	)
-	watcher.SetReconcileDeletedKeys()
+	watcher.SetReconcileDeletedKeysFn(func(snapshotKeys map[string]struct{}) error {
+		cache.Lock()
+		defer cache.Unlock()
+		for key := range cache.data {
+			if _, ok := snapshotKeys[key]; !ok {
+				delete(cache.data, key)
+			}
+		}
+		return nil
+	})
 	watcher.watchChangeRetryInterval = 100 * time.Millisecond
 	watcher.StartWatchLoop()
 	re.NoError(watcher.WaitLoad())
@@ -1263,6 +1321,7 @@ func (suite *loopWatcherTestSuite) TestWatcherReloadsAndReconcilesAfterCompactio
 	re.NoError(err)
 	watcher.updateClientCh <- replacementClient
 	checkCache(map[string]string{keepKey: "after-compaction"})
+	re.Nil(watcher.loadedKeys)
 }
 
 func (suite *loopWatcherTestSuite) TestWatcherSkipsCompactionReloadByDefault() {
