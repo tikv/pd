@@ -455,7 +455,6 @@ func TestDescendGreaterThanG(t *testing.T) {
 const benchmarkTreeSize = 10000
 
 func BenchmarkInsert(b *testing.B) {
-
 	insertP := perm(benchmarkTreeSize)
 
 	i := 0
@@ -531,7 +530,6 @@ func BenchmarkDeleteInsertCloneEachTime(b *testing.B) {
 }
 
 func BenchmarkDelete(b *testing.B) {
-
 	insertP := perm(benchmarkTreeSize)
 	removeP := perm(benchmarkTreeSize)
 
@@ -557,7 +555,6 @@ func BenchmarkDelete(b *testing.B) {
 }
 
 func BenchmarkGet(b *testing.B) {
-
 	insertP := perm(benchmarkTreeSize)
 	removeP := perm(benchmarkTreeSize)
 
@@ -580,7 +577,6 @@ func BenchmarkGet(b *testing.B) {
 }
 
 func BenchmarkGetCloneEachTime(b *testing.B) {
-
 	insertP := perm(benchmarkTreeSize)
 	removeP := perm(benchmarkTreeSize)
 
