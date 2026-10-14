@@ -66,7 +66,15 @@ func (*StorageEndpoint) SaveKeyspaceMeta(txn kv.Txn, meta *keyspacepb.KeyspaceMe
 // If keyspace does not exist or error occurs, returned meta will be nil.
 func (*StorageEndpoint) LoadKeyspaceMeta(txn kv.Txn, id uint32) (*keyspacepb.KeyspaceMeta, error) {
 	metaPath := keypath.KeyspaceMetaPath(id)
-	metaVal, err := txn.Load(metaPath)
+	var (
+		metaVal string
+		err     error
+	)
+	if revisionTxn, ok := txn.(kv.RevisionTxn); ok {
+		metaVal, err = revisionTxn.LoadWithRevision(metaPath)
+	} else {
+		metaVal, err = txn.Load(metaPath)
+	}
 	if err != nil || metaVal == "" {
 		return nil, err
 	}

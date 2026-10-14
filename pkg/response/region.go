@@ -111,9 +111,10 @@ func fromPeerStatsSlice(peers []*pdpb.PeerStats) []PDPeerStats {
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 // easyjson:json
 type RegionInfo struct {
-	ID          uint64              `json:"id"`
-	StartKey    string              `json:"start_key"`
-	EndKey      string              `json:"end_key"`
+	ID       uint64 `json:"id"`
+	StartKey string `json:"start_key"` // hex-encoded
+	EndKey   string `json:"end_key"`   // hex-encoded
+
 	RegionEpoch *metapb.RegionEpoch `json:"epoch,omitempty"`
 	Peers       []MetaPeer          `json:"peers,omitempty"`
 

@@ -24,6 +24,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync/atomic"
 
 	"go.uber.org/zap"
 
@@ -60,6 +61,9 @@ type RuleManager struct {
 	initialized bool
 	ruleConfig  *ruleConfig
 	ruleList    ruleList
+	// storeLoadRestrictions caches ruleConfig.mayRestrictStoreLoad as bits for
+	// the hot scheduler's lock-free fast path.
+	storeLoadRestrictions atomic.Uint32
 
 	// used for rule validation
 	keyType          string
@@ -155,6 +159,7 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string, isolat
 		}
 	}
 	m.ruleConfig.adjust()
+	m.updateStoreLoadRestrictions()
 	ruleList, err := buildRuleList(m.ruleConfig)
 	if err != nil {
 		return err
@@ -409,11 +414,56 @@ func (m *RuleManager) GetRulesCount() int {
 	return len(m.ruleConfig.rules)
 }
 
+// MayRestrictStoreLoad returns whether placement rules may restrict the load
+// statistics population for the given store engine.
+func (m *RuleManager) MayRestrictStoreLoad(isTiKV bool) bool {
+	restrictions := m.storeLoadRestrictions.Load()
+	if isTiKV {
+		return restrictions&1 != 0
+	}
+	return restrictions&2 != 0
+}
+
+func (m *RuleManager) updateStoreLoadRestrictions() {
+	var restrictions uint32
+	if m.ruleConfig.mayRestrictStoreLoad[0] {
+		restrictions |= 1
+	}
+	if m.ruleConfig.mayRestrictStoreLoad[1] {
+		restrictions |= 2
+	}
+	m.storeLoadRestrictions.Store(restrictions)
+}
+
 // GetGroupsCount returns the number of rule groups.
 func (m *RuleManager) GetGroupsCount() int {
 	m.RLock()
 	defer m.RUnlock()
 	return len(m.ruleConfig.groups)
+}
+
+// GetRuleConfigForReconcile returns storage-key-ordered references to the
+// current rules and explicitly configured groups. Callers must not mutate them.
+func (m *RuleManager) GetRuleConfigForReconcile() ([]*Rule, []*RuleGroup) {
+	m.RLock()
+	rules := make([]*Rule, 0, len(m.ruleConfig.rules))
+	for _, rule := range m.ruleConfig.rules {
+		rules = append(rules, rule)
+	}
+	groups := make([]*RuleGroup, 0, len(m.ruleConfig.groups))
+	for _, group := range m.ruleConfig.groups {
+		if !group.isDefault() {
+			groups = append(groups, group)
+		}
+	}
+	m.RUnlock()
+
+	sort.Slice(rules, func(i, j int) bool {
+		return rules[i].GroupID < rules[j].GroupID ||
+			(rules[i].GroupID == rules[j].GroupID && rules[i].ID < rules[j].ID)
+	})
+	sort.Slice(groups, func(i, j int) bool { return groups[i].ID < groups[j].ID })
+	return rules, groups
 }
 
 // GetRulesByGroup returns sorted rules of a group.
@@ -494,19 +544,24 @@ func (m *RuleManager) FitRegion(storeSet StoreSet, region *core.RegionInfo) (fit
 	fit.regionStores = regionStores
 	fit.rules = rules
 	if isCached {
-		m.SetRegionFitCache(region, fit)
+		m.SetRegionFitCache(storeSet, region, fit)
 	}
 	return fit
 }
 
 // SetRegionFitCache sets RegionFitCache
-func (m *RuleManager) SetRegionFitCache(region *core.RegionInfo, fit *RegionFit) {
-	m.cache.SetCache(region, fit)
+func (m *RuleManager) SetRegionFitCache(storeSet StoreSet, region *core.RegionInfo, fit *RegionFit) {
+	m.cache.SetCache(storeSet, region, fit)
 }
 
 // InvalidCache invalids the cache.
 func (m *RuleManager) InvalidCache(regionID uint64) {
 	m.cache.Invalid(regionID)
+}
+
+// RemoveStoreCache removes the store cache with a given store ID.
+func (m *RuleManager) RemoveStoreCache(storeID uint64) {
+	m.cache.RemoveStoreCache(storeID)
 }
 
 // SetPlaceholderRegionFitCache sets a placeholder region fit cache information
@@ -551,6 +606,7 @@ func (m *RuleManager) TryCommitPatchLocked(patch *RuleConfigPatch) error {
 
 	// update in-memory state
 	patch.commit()
+	m.updateStoreLoadRestrictions()
 	m.ruleList = ruleList
 	return nil
 }

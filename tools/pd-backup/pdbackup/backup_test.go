@@ -29,6 +29,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
@@ -50,7 +51,7 @@ var (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 type backupTestSuite struct {
@@ -68,6 +69,7 @@ func TestBackupTestSuite(t *testing.T) {
 	defer clean()
 
 	server, serverConfig := setupServer()
+	defer server.Close()
 	testSuite := &backupTestSuite{
 		etcd:         servers[0],
 		etcdClient:   etcdClient,
@@ -76,6 +78,15 @@ func TestBackupTestSuite(t *testing.T) {
 	}
 
 	suite.Run(t, testSuite)
+}
+
+func TestOutputToFileReturnsFlushError(t *testing.T) {
+	tmpFile, err := os.CreateTemp(t.TempDir(), "pd-backup")
+	require.NoError(t, err)
+	require.NoError(t, tmpFile.Close())
+
+	err = OutputToFile(&BackupInfo{}, tmpFile)
+	require.Error(t, err)
 }
 
 func setupServer() (*httptest.Server, *config.Config) {
@@ -158,9 +169,11 @@ func (s *backupTestSuite) TestGetBackupInfo() {
 	}
 	re.Equal(expected, actual)
 
-	tmpFile, err := os.CreateTemp("", "pd_tests")
+	tmpFile, err := os.CreateTemp(s.T().TempDir(), "pd_tests")
 	re.NoError(err)
-	defer os.RemoveAll(tmpFile.Name())
+	s.T().Cleanup(func() {
+		re.NoError(tmpFile.Close())
+	})
 
 	re.NoError(OutputToFile(actual, tmpFile))
 	_, err = tmpFile.Seek(0, 0)

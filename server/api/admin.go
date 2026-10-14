@@ -57,8 +57,9 @@ func newAdminHandler(svr *server.Server, rd *render.Render) *adminHandler {
 //	@Summary	Drop a specific region from cache.
 //	@Param		id	path	integer	true	"Region Id"
 //	@Produce	json
-//	@Success	200	{string}	string	"The region is removed from server cache."
+//	@Success	200	{string}	string	"The region is removed from server/follower cache."
 //	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	500	{string}	string	"The follower failed to reset region cache."
 //	@Router		/admin/cache/region/{id} [delete]
 func (h *adminHandler) DeleteRegionCache(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
@@ -67,6 +68,14 @@ func (h *adminHandler) DeleteRegionCache(w http.ResponseWriter, r *http.Request)
 	regionID, err := strconv.ParseUint(regionIDStr, 10, 64)
 	if err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if isFollowerSyncedClusterRequest(r) {
+		if err = h.svr.ResetFollowerRegionCache(regionID); err != nil {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		h.rd.JSON(w, http.StatusOK, "The region is removed from follower cache and the follower starts to resync regions from leader.")
 		return
 	}
 	rc.RemoveRegionIfExist(regionID)
@@ -131,11 +140,20 @@ func (h *adminHandler) DeleteRegionStorage(w http.ResponseWriter, r *http.Reques
 //	@Tags		admin
 //	@Summary	Drop all regions from cache.
 //	@Produce	json
-//	@Success	200	{string}	string	"All regions are removed from server cache."
+//	@Success	200	{string}	string	"All regions are removed from server/follower cache."
+//	@Failure	500	{string}	string	"The follower failed to reset region cache."
 //	@Router		/admin/cache/regions [delete]
 func (h *adminHandler) DeleteAllRegionCache(w http.ResponseWriter, r *http.Request) {
 	var err error
 	rc := getCluster(r)
+	if isFollowerSyncedClusterRequest(r) {
+		if err = h.svr.ResetFollowerRegionCache(); err != nil {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		h.rd.JSON(w, http.StatusOK, "All regions are removed from follower cache and the follower starts to resync regions from leader.")
+		return
+	}
 	rc.ResetRegionCache()
 	msg := "All regions are removed from server cache."
 	if rc.IsServiceIndependent(constant.SchedulingServiceName) {

@@ -115,7 +115,7 @@ func (suite *statTestSuite) checkRegionStats(cluster *tests.TestCluster) {
 			&metapb.Peer{Id: 107, StoreId: 5},
 			core.SetApproximateSize(1),
 			core.SetApproximateKvSize(1),
-			core.SetApproximateKeys(1),
+			core.SetApproximateKeys(0),
 		),
 		core.NewRegionInfo(
 			&metapb.Region{
@@ -144,7 +144,7 @@ func (suite *statTestSuite) checkRegionStats(cluster *tests.TestCluster) {
 	// region range       size  rows store1 store2 store3 store4 store5
 	// 1      ["", "a")   100   50 	  L      F      F
 	// 2      ["a", "t")  200   150	  F                    L      F
-	// 3      ["t", "x")  1     1	  F                           L
+	// 3      ["t", "x")  1     0	  F                           L
 	// 4      ["x", "")   50    20                   	   L
 
 	statsAll := &statistics.RegionStats{
@@ -152,13 +152,13 @@ func (suite *statTestSuite) checkRegionStats(cluster *tests.TestCluster) {
 		EmptyCount:       1,
 		StorageSize:      351,
 		UserStorageSize:  291,
-		StorageKeys:      221,
+		StorageKeys:      220,
 		StoreLeaderCount: map[uint64]int{1: 1, 4: 2, 5: 1},
 		StorePeerCount:   map[uint64]int{1: 3, 2: 1, 3: 1, 4: 2, 5: 2},
 		StoreLeaderSize:  map[uint64]int64{1: 100, 4: 250, 5: 1},
-		StoreLeaderKeys:  map[uint64]int64{1: 50, 4: 170, 5: 1},
+		StoreLeaderKeys:  map[uint64]int64{1: 50, 4: 170, 5: 0},
 		StorePeerSize:    map[uint64]int64{1: 301, 2: 100, 3: 100, 4: 250, 5: 201},
-		StorePeerKeys:    map[uint64]int64{1: 201, 2: 50, 3: 50, 4: 170, 5: 151},
+		StorePeerKeys:    map[uint64]int64{1: 200, 2: 50, 3: 50, 4: 170, 5: 150},
 	}
 
 	stats23 := &statistics.RegionStats{
@@ -166,13 +166,13 @@ func (suite *statTestSuite) checkRegionStats(cluster *tests.TestCluster) {
 		EmptyCount:       1,
 		StorageSize:      201,
 		UserStorageSize:  181,
-		StorageKeys:      151,
+		StorageKeys:      150,
 		StoreLeaderCount: map[uint64]int{4: 1, 5: 1},
 		StorePeerCount:   map[uint64]int{1: 2, 4: 1, 5: 2},
 		StoreLeaderSize:  map[uint64]int64{4: 200, 5: 1},
-		StoreLeaderKeys:  map[uint64]int64{4: 150, 5: 1},
+		StoreLeaderKeys:  map[uint64]int64{4: 150, 5: 0},
 		StorePeerSize:    map[uint64]int64{1: 201, 4: 200, 5: 201},
-		StorePeerKeys:    map[uint64]int64{1: 151, 4: 150, 5: 151},
+		StorePeerKeys:    map[uint64]int64{1: 150, 4: 150, 5: 150},
 	}
 
 	testdata := []struct {
@@ -217,13 +217,13 @@ func (suite *statTestSuite) checkRegionStats(cluster *tests.TestCluster) {
 		EmptyCount:           1,
 		StorageSize:          351,
 		UserStorageSize:      291,
-		StorageKeys:          221,
+		StorageKeys:          220,
 		StoreLeaderCount:     map[uint64]int{1: 1},
 		StorePeerCount:       map[uint64]int{1: 3},
 		StoreLeaderSize:      map[uint64]int64{1: 100},
 		StoreLeaderKeys:      map[uint64]int64{1: 50},
 		StorePeerSize:        map[uint64]int64{1: 301},
-		StorePeerKeys:        map[uint64]int64{1: 201},
+		StorePeerKeys:        map[uint64]int64{1: 200},
 		StoreWriteBytes:      map[uint64]uint64{1: regions[0].GetBytesWritten() / intervalSec},
 		StoreWriteKeys:       map[uint64]uint64{1: regions[0].GetKeysWritten() / intervalSec},
 		StoreWriteQuery:      map[uint64]uint64{1: regions[0].GetWriteQueryNum() / intervalSec},

@@ -20,12 +20,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
-
-	"github.com/tikv/pd/client/pkg/utils/testutil"
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(m)
 }
 
 func TestGCBarrierInfoExpiration(t *testing.T) {
@@ -76,6 +74,57 @@ func TestGCStateAccessors(t *testing.T) {
 	re.NoError(err)
 	re.Len(barriers, 1)
 	re.Equal("b1", barriers[0].BarrierID)
+}
+
+func TestGCStateGlobalBarrierAccessors(t *testing.T) {
+	re := require.New(t)
+
+	original := NewGCStateWithoutGCBarriers(1, 10, 9)
+	re.False(original.HasGlobalGCBarriers())
+	barriers, err := original.GetGlobalGCBarriers()
+	re.Error(err)
+	re.Nil(barriers)
+
+	withEmpty := original.WithGlobalGCBarriers(nil)
+	re.False(original.HasGlobalGCBarriers())
+	re.True(withEmpty.HasGlobalGCBarriers())
+	re.False(withEmpty.HasGCBarriers())
+	barriers, err = withEmpty.GetGlobalGCBarriers()
+	re.NoError(err)
+	re.Empty(barriers)
+
+	expected := []*GlobalGCBarrierInfo{
+		NewGlobalGCBarrierInfo(
+			"backup",
+			20,
+			time.Minute,
+			time.Now(),
+		),
+	}
+	withBarriers := original.WithGlobalGCBarriers(expected)
+	re.True(withBarriers.HasGlobalGCBarriers())
+	barriers, err = withBarriers.GetGlobalGCBarriers()
+	re.NoError(err)
+	re.Equal(expected, barriers)
+
+	localOnly := NewGCStateWithGCBarriers(
+		1,
+		10,
+		9,
+		[]*GCBarrierInfo{
+			NewGCBarrierInfo(
+				"local",
+				21,
+				time.Minute,
+				time.Now(),
+			),
+		},
+	)
+	re.False(localOnly.HasGlobalGCBarriers())
+
+	withLocal := localOnly.WithGlobalGCBarriers(expected)
+	re.True(withLocal.HasGCBarriers())
+	re.True(withLocal.HasGlobalGCBarriers())
 }
 
 func TestClusterGCStatesAccessors(t *testing.T) {

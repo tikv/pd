@@ -201,6 +201,12 @@ func TestPlanApply(t *testing.T) {
 	re.NotNil(labeler.GetLabelRule("rule1"))
 	re.NotNil(labeler.GetLabelRule("rule2"))
 	re.Nil(labeler.GetLabelRule("existing"))
+	re.Equal([][]byte{
+		{0x12, 0x34},
+		{0x56, 0x78},
+		{0xab, 0xcd},
+		{0xef, 0xef},
+	}, labeler.GetSplitKeys(nil, nil))
 }
 
 func TestPlanApplyWithError(t *testing.T) {

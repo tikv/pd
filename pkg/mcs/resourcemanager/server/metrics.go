@@ -21,8 +21,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
-
-	"github.com/tikv/pd/pkg/utils/grpcutil"
 )
 
 const (
@@ -49,8 +47,6 @@ const (
 )
 
 var (
-	grpcStreamSendDuration = grpcutil.NewGRPCStreamSendDuration(namespace, serverSubsystem)
-
 	// RU cost metrics.
 	// `sum` is added to the name to maintain compatibility with the previous use of histogram.
 	readRequestUnitCost = prometheus.NewCounterVec(
@@ -211,6 +207,15 @@ var (
 			Name:      "service_limit",
 			Help:      "Gauge of the total RU limit of specific keyspace.",
 		}, []string{keyspaceNameLabel})
+
+	pushRUMetricsDuration = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: ruSubsystem,
+			Name:      "push_ru_metrics_duration_seconds",
+			Help:      "The duration of pushing RU metrics to Prometheus.",
+			Buckets:   prometheus.DefBuckets,
+		})
 )
 
 type metrics struct {
@@ -242,7 +247,6 @@ type trackerKey struct {
 }
 
 func init() {
-	prometheus.MustRegister(grpcStreamSendDuration)
 	prometheus.MustRegister(readRequestUnitCost)
 	prometheus.MustRegister(writeRequestUnitCost)
 	prometheus.MustRegister(activeRequestUnitCost)
@@ -264,6 +268,7 @@ func init() {
 	prometheus.MustRegister(sampledRequestUnitPerSec)
 	prometheus.MustRegister(overrideSettings)
 	prometheus.MustRegister(serviceLimit)
+	prometheus.MustRegister(pushRUMetricsDuration)
 }
 
 func newMetrics() *metrics {
@@ -340,6 +345,9 @@ func (m *metrics) recordConsumption(
 		ruLabelType = tiflashTypeLabel
 	}
 	consumption := consumptionInfo.Consumption
+	if consumption == nil {
+		return
+	}
 	m.getMaxPerSecTracker(keyspaceID, keyspaceName, groupName).collect(consumption)
 	m.getCounterMetrics(keyspaceID, keyspaceName, groupName, ruLabelType).add(consumption, controllerConfig, keyspaceID)
 	m.insertConsumptionRecord(keyspaceID, groupName, ruLabelType, now)
@@ -409,6 +417,9 @@ func calculateActiveRU(consumption *rmpb.Consumption, controllerConfig *Controll
 }
 
 func (m *counterMetrics) add(consumption *rmpb.Consumption, controllerConfig *ControllerConfig, keyspaceID uint32) {
+	if consumption == nil {
+		return
+	}
 	// RU info.
 	if consumption.RRU > 0 {
 		m.RRUMetrics.Add(consumption.RRU)
@@ -445,7 +456,12 @@ func (m *counterMetrics) add(consumption *rmpb.Consumption, controllerConfig *Co
 			m.SQLLayerRUMetrics.Add(sqlRU)
 			m.SQLCPUMetrics.Add(consumption.SqlLayerCpuTimeMs)
 		}
-		m.KvCPUMetrics.Add(consumption.TotalCpuTimeMs - consumption.SqlLayerCpuTimeMs)
+		// A well-behaved client keeps TotalCpuTimeMs >= SqlLayerCpuTimeMs, but the
+		// values are reported by the client and not validated here. Guard against a
+		// negative KV CPU time so a malformed report cannot panic prometheus.Counter.Add.
+		if kvCPUTimeMs := consumption.TotalCpuTimeMs - consumption.SqlLayerCpuTimeMs; kvCPUTimeMs > 0 {
+			m.KvCPUMetrics.Add(kvCPUTimeMs)
+		}
 	}
 	// RPC count info.
 	if consumption.KvReadRpcCount > 0 {
@@ -599,8 +615,4 @@ func (t *maxPerSecCostTracker) flushMetrics() {
 		t.maxPerSecRRU = 0
 		t.maxPerSecWRU = 0
 	}
-}
-
-func newAcquireTokenBucketsMetricsStream(stream rmpb.ResourceManager_AcquireTokenBucketsServer) rmpb.ResourceManager_AcquireTokenBucketsServer {
-	return grpcutil.NewMetricsStream(stream, stream.Send, stream.Recv, grpcStreamSendDuration, "acquire-token-buckets")
 }

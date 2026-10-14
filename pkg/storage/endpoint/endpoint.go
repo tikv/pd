@@ -15,9 +15,12 @@
 package endpoint
 
 import (
+	"context"
 	"encoding/json"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
+
+	"github.com/pingcap/errors"
 
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
@@ -45,6 +48,32 @@ func NewStorageEndpoint(
 		encryptionKeyManager,
 		0,
 	}
+}
+
+func (se *StorageEndpoint) createRawTxn() (kv.RawTxn, error) {
+	rawTxnCapable, ok := se.Base.(kv.RawTxnCapable)
+	if !ok {
+		return nil, errors.New("storage endpoint does not support raw transaction")
+	}
+	return rawTxnCapable.CreateRawTxn(), nil
+}
+
+// RunInTxnWithConditions runs f in a transaction with additional etcd
+// comparisons. Backends without conditional transaction support may still run
+// transactions that have no additional conditions.
+func (se *StorageEndpoint) RunInTxnWithConditions(
+	ctx context.Context,
+	conditions []clientv3.Cmp,
+	f func(txn kv.Txn) error,
+) error {
+	if len(conditions) == 0 {
+		return se.RunInTxn(ctx, f)
+	}
+	runner, ok := se.Base.(kv.ConditionalTxnRunner)
+	if !ok {
+		return errors.New("storage backend does not support conditional transactions")
+	}
+	return runner.RunInTxnWithConditions(ctx, conditions, f)
 }
 
 // loadJSON loads a specific key from the StorageEndpoint, and parses it as JSON into type T.

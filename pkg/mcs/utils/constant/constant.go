@@ -38,6 +38,13 @@ const (
 	DefaultDisableErrorVerbose = true
 	// DefaultLease is the default value of lease
 	DefaultLease = int64(5)
+	// TransferPrimaryLeaseMultiplier scales the leader lease to derive the TTL of the
+	// expected primary flag written by the `{service}/primary/transfer` API. The flag
+	// only needs to outlive the re-election window so the target member can win the
+	// campaign; if the target never comes up within this window the flag expires and
+	// the cluster falls back to a free election. Tying it to the leader lease keeps the
+	// window proportional to how fast leadership turns over.
+	TransferPrimaryLeaseMultiplier = int64(3)
 	// PrimaryTickInterval is the interval to check primary
 	PrimaryTickInterval = 50 * time.Millisecond
 	// LeaderTickInterval is the interval to check leader

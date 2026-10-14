@@ -145,17 +145,14 @@ func TestTSOServerStartFirst(t *testing.T) {
 	defer cluster.Destroy()
 	re.NoError(err)
 	addr := cluster.GetConfig().GetClientURL()
-	ch := make(chan struct{})
-	defer close(ch)
-	clusterCh := make(chan *tests.TestTSOCluster)
-	defer close(clusterCh)
+	type clusterResult struct {
+		cluster *tests.TestTSOCluster
+		err     error
+	}
+	clusterCh := make(chan clusterResult, 1)
 	go func() {
 		tsoCluster, err := tests.NewTestTSOCluster(ctx, 2, addr)
-		re.NoError(err)
-		primary := tsoCluster.WaitForDefaultPrimaryServing(re)
-		re.NotNil(primary)
-		clusterCh <- tsoCluster
-		ch <- struct{}{}
+		clusterCh <- clusterResult{cluster: tsoCluster, err: err}
 	}()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
@@ -164,9 +161,12 @@ func TestTSOServerStartFirst(t *testing.T) {
 	pdLeaderServer := cluster.GetServer(leaderName)
 	re.NoError(pdLeaderServer.BootstrapCluster())
 	re.NoError(err)
-	tsoCluster := <-clusterCh
+	result := <-clusterCh
+	re.NoError(result.err)
+	tsoCluster := result.cluster
 	defer tsoCluster.Destroy()
-	<-ch
+	primary := tsoCluster.WaitForDefaultPrimaryServing(re)
+	re.NotNil(primary)
 
 	time.Sleep(time.Second * 1)
 	input := make(map[string]any)

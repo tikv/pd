@@ -87,6 +87,19 @@ func (suite *scatterSplitSuite) checkSplitRegions(cluster *tests.TestCluster) {
 	err := testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/regions/split", urlPrefix), []byte(body), checkOpt)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/handler/splitResponses"))
 	re.NoError(err)
+
+	for _, body := range []string{
+		`{"split_keys":"not-an-array"}`,
+		`{"split_keys":[1]}`,
+	} {
+		err = testutil.CheckPostJSON(
+			tests.TestDialClient,
+			fmt.Sprintf("%s/regions/split", urlPrefix),
+			[]byte(body),
+			testutil.Status(re, http.StatusBadRequest),
+		)
+		re.NoError(err)
+	}
 }
 
 func (suite *scatterSplitSuite) TestScatterRegions() {

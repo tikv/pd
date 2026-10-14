@@ -86,9 +86,6 @@ var (
 	ErrNotStarted                 = status.Error(codes.Unavailable, "server not started")
 	ErrEtcdNotStarted             = status.Error(codes.Unavailable, "server is started, but etcd not started")
 	ErrFollowerHandlingNotAllowed = status.Error(codes.Unavailable, "not leader and follower handling not allowed")
-
-	// Unimplemented indicates operation is not implemented or not supported.
-	ErrRecvNotSupported = status.Error(codes.Unimplemented, "recv is not supported by this stream")
 )
 
 // common error in multiple packages
@@ -267,6 +264,16 @@ var (
 	// errKeyspaceGroupNotInMerging is used to indicate target keyspace group is not in merging state.
 	ErrKeyspaceGroupModRevisionStale = errors.Normalize("keyspace group mod revision is stale", errors.RFCCodeText("PD:keyspace:ErrKeyspaceGroupModRevisionStale"))
 	// ErrKeyspaceGroupModRevisionStale is used to indicate target keyspace group mod revision is stale.
+	// ErrUnknownMetaServiceGroup indicates that the specified meta-service group does not exist.
+	ErrUnknownMetaServiceGroup = errors.Normalize("unknown meta-service group", errors.RFCCodeText("PD:keyspace:ErrUnknownMetaServiceGroup"))
+	// ErrInvalidAssignmentCount indicates that an assignment count is negative.
+	ErrInvalidAssignmentCount = errors.Normalize("assignment count must be non-negative", errors.RFCCodeText("PD:keyspace:ErrInvalidAssignmentCount"))
+	// ErrMetaServiceGroupDisabled indicates that a meta-service group is disabled.
+	ErrMetaServiceGroupDisabled = errors.Normalize("meta-service group is disabled", errors.RFCCodeText("PD:keyspace:ErrMetaServiceGroupDisabled"))
+	// ErrGroupHasAssignedKeyspaces indicates that a group with assigned keyspaces cannot be deleted.
+	ErrGroupHasAssignedKeyspaces = errors.Normalize("cannot delete meta-service group with assigned keyspaces", errors.RFCCodeText("PD:keyspace:ErrGroupHasAssignedKeyspaces"))
+	// ErrMetaServiceGroupUnhealthy indicates that a group's etcd server failed the health check.
+	ErrMetaServiceGroupUnhealthy = errors.Normalize("meta-service group etcd server is unhealthy", errors.RFCCodeText("PD:keyspace:ErrMetaServiceGroupUnhealthy"))
 )
 
 // diagnostic errors
@@ -387,7 +394,7 @@ var (
 	ErrEtcdGrantLease    = errors.Normalize("etcd lease failed", errors.RFCCodeText("PD:etcd:ErrEtcdGrantLease"))
 	ErrEtcdTxnInternal   = errors.Normalize("internal etcd transaction error occurred", errors.RFCCodeText("PD:etcd:ErrEtcdTxnInternal"))
 	ErrEtcdTxnConflict   = errors.Normalize("etcd transaction failed, conflicted and rolled back", errors.RFCCodeText("PD:etcd:ErrEtcdTxnConflict"))
-	ErrEtcdTxnResponse   = errors.Normalize("etcd transaction returned invalid response: %v", errors.RFCCodeText("PD:etcd:ErrEtcdTxnResponse"))
+	ErrEtcdTxnResponse   = errors.Normalize("etcd transaction returned unexpected response: %v", errors.RFCCodeText("PD:etcd:ErrEtcdTxnResponse"))
 	ErrEtcdKVPut         = errors.Normalize("etcd KV put failed", errors.RFCCodeText("PD:etcd:ErrEtcdKVPut"))
 	ErrEtcdKVDelete      = errors.Normalize("etcd KV delete failed", errors.RFCCodeText("PD:etcd:ErrEtcdKVDelete"))
 	ErrEtcdKVGet         = errors.Normalize("etcd KV get failed", errors.RFCCodeText("PD:etcd:ErrEtcdKVGet"))

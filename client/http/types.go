@@ -17,6 +17,7 @@ package http
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
@@ -72,8 +73,8 @@ var NewKeyRange = pd.NewKeyRange
 // RegionInfo stores the information of one region.
 type RegionInfo struct {
 	ID                int64            `json:"id"`
-	StartKey          string           `json:"start_key"`
-	EndKey            string           `json:"end_key"`
+	StartKey          string           `json:"start_key"` // hex-encoded
+	EndKey            string           `json:"end_key"`   // hex-encoded
 	Epoch             RegionEpoch      `json:"epoch"`
 	Peers             []RegionPeer     `json:"peers"`
 	Leader            RegionPeer       `json:"leader"`
@@ -405,8 +406,8 @@ func (r *Rule) String() string {
 func (r *Rule) Clone() *Rule {
 	var clone Rule
 	_ = json.Unmarshal([]byte(r.String()), &clone)
-	clone.StartKey = append(r.StartKey[:0:0], r.StartKey...)
-	clone.EndKey = append(r.EndKey[:0:0], r.EndKey...)
+	clone.StartKey = slices.Clone(r.StartKey)
+	clone.EndKey = slices.Clone(r.EndKey)
 	return &clone
 }
 
@@ -675,6 +676,17 @@ type KeyspaceGCManagementTypeConfig struct {
 	Config KeyspaceGCManagementType `json:"config"`
 }
 
+// UpdateKeyspaceConfigParams represents parameters needed to modify target keyspace configs.
+// A map of string to string pointer is used to differentiate between json null and "",
+// which will both be set to "" if value type is string during marshaling.
+type UpdateKeyspaceConfigParams struct {
+	Config map[string]*string `json:"config"`
+	// Preconditions specifies prerequisites for updating config, using a JSON-merge-patch-like encoding:
+	// - key -> nil means the key must be absent.
+	// - key -> "value" means the key must exist and equal "value".
+	Preconditions map[string]*string `json:"preconditions,omitempty"`
+}
+
 // tempKeyspaceMeta is the keyspace meta struct that returned from the http interface.
 type tempKeyspaceMeta struct {
 	ID             uint32            `json:"id"`
@@ -683,6 +695,22 @@ type tempKeyspaceMeta struct {
 	CreatedAt      int64             `json:"created_at"`
 	StateChangedAt int64             `json:"state_changed_at"`
 	Config         map[string]string `json:"config"`
+}
+
+func (meta *tempKeyspaceMeta) toPB() (*keyspacepb.KeyspaceMeta, error) {
+	keyspaceState, err := stringToKeyspaceState(meta.State)
+	if err != nil {
+		return nil, err
+	}
+
+	return &keyspacepb.KeyspaceMeta{
+		Name:           meta.Name,
+		Keyspace:       &keyspacepb.KeyspaceMeta_Id{Id: meta.ID},
+		Config:         meta.Config,
+		CreatedAt:      meta.CreatedAt,
+		StateChangedAt: meta.StateChangedAt,
+		State:          keyspaceState,
+	}, nil
 }
 
 func stringToKeyspaceState(str string) (keyspacepb.KeyspaceState, error) {

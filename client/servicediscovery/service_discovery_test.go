@@ -46,7 +46,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(m)
 }
 
 type testGRPCServer struct {
@@ -137,6 +137,18 @@ type serviceClientTestSuite struct {
 
 func TestServiceClientClientTestSuite(t *testing.T) {
 	suite.Run(t, new(serviceClientTestSuite))
+}
+
+func TestServiceClientGetClientConnReturnsNilAfterClose(t *testing.T) {
+	re := require.New(t)
+
+	conn, err := grpc.Dial("localhost:0", grpc.WithTransportCredentials(insecure.NewCredentials())) //nolint:staticcheck
+	re.NoError(err)
+
+	client := &serviceClient{conn: conn}
+	re.NotNil(client.GetClientConn())
+	re.NoError(conn.Close())
+	re.Nil(client.GetClientConn())
 }
 
 func (suite *serviceClientTestSuite) SetupSuite() {

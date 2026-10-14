@@ -15,7 +15,7 @@
 package core
 
 import (
-	"github.com/pingcap/kvproto/pkg/metapb"
+	"sync"
 
 	"github.com/tikv/pd/pkg/slice"
 )
@@ -23,19 +23,20 @@ import (
 // GetStoreTopoWeight calculates the topology weight of a store based on its labels and the labels of other stores.
 func GetStoreTopoWeight(store *StoreInfo, stores []*StoreInfo, locationLabels []string, count int) float64 {
 	topology, validLabels, sameLocationStoreNum, isMatch := buildTopology(store, stores, locationLabels, count)
+	defer putTopology(topology)
 	weight := 1.0
 	topo := topology
 	if isMatch {
 		return weight / float64(count) / sameLocationStoreNum
 	}
 
-	storeLabels := getSortedLabels(store.GetLabels(), locationLabels)
-	for _, label := range storeLabels {
-		if _, ok := topo[label.Value]; ok {
-			if slice.Contains(validLabels, label.Key) {
+	for _, label := range locationLabels {
+		value := getStoreLabelValue(store.GetMeta(), label)
+		if _, ok := topo[value]; ok {
+			if slice.Contains(validLabels, label) {
 				weight /= float64(len(topo))
 			}
-			topo = topo[label.Value].(map[string]any)
+			topo = topo[value].(map[string]any)
 		} else {
 			break
 		}
@@ -44,22 +45,43 @@ func GetStoreTopoWeight(store *StoreInfo, stores []*StoreInfo, locationLabels []
 	return weight / sameLocationStoreNum
 }
 
+// Object pool for store topology.
+var topologyPool = sync.Pool{
+	New: func() any {
+		return make(map[string]any, 8)
+	},
+}
+
+// buildTopology builds the store topology graph and returns:
+// - topology: pooled store topology map
+// - validLabels: filtered valid location labels
+// - sameLocationStoreNum: number of stores in the same location
+// - isMatch: whether the location matches exactly
 func buildTopology(s *StoreInfo, stores []*StoreInfo, locationLabels []string, count int) (map[string]any, []string, float64, bool) {
-	topology := make(map[string]any)
+	topology := getTopology()
+	var inlineLabelCount [16]int
+	var labelCount []int
+	if len(locationLabels) <= len(inlineLabelCount) {
+		labelCount = inlineLabelCount[:len(locationLabels)]
+	} else {
+		labelCount = make([]int, len(locationLabels))
+	}
+
 	sameLocationStoreNum := 1.0
-	totalLabelCount := make([]int, len(locationLabels))
+
 	for _, store := range stores {
 		if store.IsServing() || store.IsPreparing() {
-			labelCount := updateTopology(topology, getSortedLabels(store.GetLabels(), locationLabels))
-			for i, c := range labelCount {
-				totalLabelCount[i] += c
-			}
+			updateTopology(topology, store, locationLabels, labelCount)
 		}
 	}
 
 	validLabels := locationLabels
 	var isMatch bool
-	for i, c := range totalLabelCount {
+	for i, c := range labelCount {
+		if c == 0 {
+			validLabels = validLabels[:i]
+			break
+		}
 		if count/c == 0 {
 			validLabels = validLabels[:i]
 			break
@@ -70,6 +92,7 @@ func buildTopology(s *StoreInfo, stores []*StoreInfo, locationLabels []string, c
 			break
 		}
 	}
+
 	for _, store := range stores {
 		if store.GetID() == s.GetID() {
 			continue
@@ -82,38 +105,41 @@ func buildTopology(s *StoreInfo, stores []*StoreInfo, locationLabels []string, c
 	return topology, validLabels, sameLocationStoreNum, isMatch
 }
 
-func getSortedLabels(storeLabels []*metapb.StoreLabel, locationLabels []string) []*metapb.StoreLabel {
-	var sortedLabels []*metapb.StoreLabel
-	for _, ll := range locationLabels {
-		find := false
-		for _, sl := range storeLabels {
-			if ll == sl.Key {
-				sortedLabels = append(sortedLabels, sl)
-				find = true
-				break
-			}
-		}
-		// TODO: we need to improve this logic to make the label calculation more accurate if the user has the wrong label settings.
-		if !find {
-			sortedLabels = append(sortedLabels, &metapb.StoreLabel{Key: ll, Value: ""})
-		}
+// updateTopology records a store's topology in the `topology` variable.
+func updateTopology(topology map[string]any, store *StoreInfo, locationLabels []string, labelCount []int) {
+	if len(locationLabels) == 0 {
+		return
 	}
-	return sortedLabels
+
+	topo := topology
+	for i, label := range locationLabels {
+		value := getStoreLabelValue(store.GetMeta(), label)
+		if _, exist := topo[value]; !exist {
+			m := getTopology()
+			topo[value] = m
+			labelCount[i]++
+		}
+		topo = topo[value].(map[string]any)
+	}
 }
 
-// updateTopology records stores' topology in the `topology` variable.
-func updateTopology(topology map[string]any, sortedLabels []*metapb.StoreLabel) []int {
-	labelCount := make([]int, len(sortedLabels))
-	if len(sortedLabels) == 0 {
-		return labelCount
-	}
-	topo := topology
-	for i, l := range sortedLabels {
-		if _, exist := topo[l.Value]; !exist {
-			topo[l.Value] = make(map[string]any)
-			labelCount[i] += 1
+func cleanTopology(topology map[string]any) {
+	for k, v := range topology {
+		if subTopo, ok := v.(map[string]any); ok {
+			cleanTopology(subTopo)
+			topologyPool.Put(subTopo)
 		}
-		topo = topo[l.Value].(map[string]any)
+		delete(topology, k)
 	}
-	return labelCount
+}
+
+func getTopology() map[string]any {
+	topology := topologyPool.Get().(map[string]any)
+	cleanTopology(topology)
+	return topology
+}
+
+func putTopology(topology map[string]any) {
+	cleanTopology(topology)
+	topologyPool.Put(topology)
 }

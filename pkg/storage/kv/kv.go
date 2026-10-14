@@ -14,7 +14,11 @@
 
 package kv
 
-import "context"
+import (
+	"context"
+
+	clientv3 "go.etcd.io/etcd/client/v3"
+)
 
 // RawTxnCmpType represents the comparison type that is used in the condition of RawTxn.
 type RawTxnCmpType int
@@ -87,8 +91,7 @@ type RawTxnResponse struct {
 }
 
 // RawTxn is a low-level transaction interface. It follows the same pattern of etcd's transaction
-// API. When the backend is etcd, it simply calls etcd's equivalent APIs internally. Otherwise, the
-// behavior is simulated.
+// API.
 // Avoid reading/writing the same key multiple times in a single transaction, otherwise the behavior
 // would be undefined.
 type RawTxn interface {
@@ -96,6 +99,11 @@ type RawTxn interface {
 	Then(ops ...RawTxnOp) RawTxn
 	Else(ops ...RawTxnOp) RawTxn
 	Commit() (RawTxnResponse, error)
+}
+
+// RawTxnCapable is implemented by KV backends that support creating raw transactions.
+type RawTxnCapable interface {
+	CreateRawTxn() RawTxn
 }
 
 // BaseReadWrite is the API set, shared by Base and Txn interfaces, that provides basic KV read and write operations.
@@ -110,6 +118,20 @@ type BaseReadWrite interface {
 // It enables kv to atomically apply a set of updates.
 type Txn interface {
 	BaseReadWrite
+}
+
+// RevisionTxn is a transaction that can guard a point read by the key's mod revision
+// instead of its value. It avoids copying a large value into the commit request and
+// detects same-value rewrites as conflicts.
+type RevisionTxn interface {
+	Txn
+	LoadWithRevision(key string) (string, error)
+}
+
+// ConditionalTxnRunner runs a transaction with additional etcd comparisons.
+// The comparisons and the transaction operations are committed atomically.
+type ConditionalTxnRunner interface {
+	RunInTxnWithConditions(ctx context.Context, conditions []clientv3.Cmp, f func(txn Txn) error) error
 }
 
 // Base is an abstract interface for load/save pd cluster data.
@@ -132,8 +154,8 @@ type Base interface {
 	// range there will be a condition constructed. Be aware of the
 	// possibility of causing phantom read.
 	// RunInTxn may not suit all use cases. When RunInTxn is found
-	// improper to use, consider using CreateRawTxn instead, which
-	// is available when the backend is etcd.
+	// improper to use, require RawTxnCapable explicitly and use
+	// CreateRawTxn instead.
 	//
 	// Note that transaction are not committed until RunInTxn returns nil.
 	// Note:
@@ -143,10 +165,4 @@ type Base interface {
 	// 2. Only when storage is etcd, does RunInTxn checks that
 	// values loaded during transaction has not been modified before commit.
 	RunInTxn(ctx context.Context, f func(txn Txn) error) error
-
-	// CreateRawTxn creates a transaction that provides the if-then-else
-	// API pattern when the backend is etcd, makes it possible
-	// to precisely control how etcd's transaction API is used. When the
-	// backend is not etcd, it panics.
-	CreateRawTxn() RawTxn
 }

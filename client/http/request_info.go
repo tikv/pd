@@ -15,7 +15,7 @@
 package http
 
 import (
-	"fmt"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -93,6 +93,7 @@ const (
 	deletePitrRestoreModeMarkName           = "DeletePitrRestoreModeMark"
 	createOperators                         = "CreateOperators"
 	deleteOperators                         = "DeleteOperators"
+	UpdateKeyspaceConfigName                = "UpdateKeyspaceConfig"
 	UpdateKeyspaceGCManagementTypeName      = "UpdateKeyspaceGCManagementType"
 	GetKeyspaceMetaByNameName               = "GetKeyspaceMetaByName"
 	GetKeyspaceMetaByIDName                 = "GetKeyspaceMetaByID"
@@ -172,7 +173,7 @@ func (ri *requestInfo) WithTargetURL(targetURL string) *requestInfo {
 }
 
 func (ri *requestInfo) getURL(addr string) string {
-	return fmt.Sprintf("%s%s", addr, ri.uri)
+	return strings.TrimRight(addr, "/") + ri.uri
 }
 
 func (ri *requestInfo) logFields() []zap.Field {

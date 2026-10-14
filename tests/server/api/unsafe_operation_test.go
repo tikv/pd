@@ -141,10 +141,17 @@ func (suite *unsafeOperationTestSuite) checkRemoveFailedStores(cluster *tests.Te
 		testutil.StringContain(re, "disable-paranoid-check is specified multiple times"))
 	re.NoError(err)
 
+	err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/remove-failed-stores/abort", nil, testutil.Status(re, 400),
+		testutil.StringEqual(re, "\"[PD:unsaferecovery:ErrUnsafeRecoveryInvalidInput]invalid input no ongoing unsafe recovery\"\n"))
+	re.NoError(err)
+
 	input = map[string]any{"stores": []uint64{1}, "plan-execution-timeout": 300, "disable-paranoid-check": true}
 	data, err = json.Marshal(input)
 	re.NoError(err)
 	err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/remove-failed-stores", data, testutil.StatusOK(re))
+	re.NoError(err)
+
+	err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/remove-failed-stores/abort", nil, testutil.StatusOK(re))
 	re.NoError(err)
 
 	// Test show

@@ -20,6 +20,7 @@ import (
 	"runtime/trace"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/opentracing/opentracing-go"
@@ -149,13 +150,17 @@ type Client interface {
 var _ Client = (*client)(nil)
 
 // serviceModeKeeper is for service mode switching.
+// resourceManagerDiscovery is written under the mutex but may be read lock-free
+// from synchronous discovery callbacks that run while the write lock is held
+// (see innerClient.setServiceMode -> TSO Setup -> CheckMemberChanged ->
+// switchLeader -> onPDLeaderChanged), so it is stored as an atomic pointer.
 type serviceModeKeeper struct {
 	sync.RWMutex
 	serviceMode              pdpb.ServiceMode
 	tsoClient                *tso.Cli
 	tsoSvcDiscovery          sd.ServiceDiscovery
 	routerClient             *router.Cli
-	resourceManagerDiscovery *sd.ResourceManagerDiscovery
+	resourceManagerDiscovery atomic.Pointer[sd.ResourceManagerDiscovery]
 	msDiscovery              sd.ServiceDiscovery
 }
 
@@ -166,9 +171,9 @@ func (k *serviceModeKeeper) close() {
 		k.tsoSvcDiscovery.Close()
 		k.tsoSvcDiscovery = nil
 	}
-	if k.resourceManagerDiscovery != nil {
-		k.resourceManagerDiscovery.Close()
-		k.resourceManagerDiscovery = nil
+	if resourceManagerDiscovery := k.resourceManagerDiscovery.Load(); resourceManagerDiscovery != nil {
+		resourceManagerDiscovery.Close()
+		k.resourceManagerDiscovery.Store(nil)
 	}
 	if k.msDiscovery != nil {
 		k.msDiscovery.Close()
@@ -574,7 +579,7 @@ func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err 
 			return physical, logical, err
 		}
 
-		if !errs.IsLeaderChange(err) {
+		if !isRetryableGetTSError(err) {
 			break
 		}
 
@@ -585,7 +590,7 @@ func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err 
 			failpoint.Return(physical, logical, err)
 		})
 
-		// If the leader changes, we need to retry.
+		// If the leader changes or the callee ID mismatches, we need to retry.
 		// For the first time, we retry immediately to avoid impacting the latency.
 		var interval time.Duration
 		if retryCount != 0 {
@@ -606,6 +611,10 @@ func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err 
 	})
 	metrics.TSORetryCount.Observe(float64(retryCount))
 	return physical, logical, err
+}
+
+func isRetryableGetTSError(err error) bool {
+	return errs.IsLeaderChange(err) || errs.IsCalleeMismatch(err)
 }
 
 // GetLocalTS implements the TSOClient interface.

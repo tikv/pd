@@ -31,8 +31,9 @@ import (
 // microServiceSuite is a test suite for microservice related tests.
 type microServiceSuite struct {
 	suite.Suite
-	cluster *pdTests.TestCluster
-	cancels []testutil.CleanupFunc
+	cluster   *pdTests.TestCluster
+	rmCluster *pdTests.TestResourceManagerCluster
+	cancels   []testutil.CleanupFunc
 }
 
 func TestMicroServiceSuite(t *testing.T) {
@@ -47,6 +48,11 @@ func (suite *microServiceSuite) TearDownSuite() {
 	for _, fn := range suite.cancels {
 		fn()
 	}
+	// Destroy the resource manager cluster before the PD cluster it's registered
+	// against: t.Cleanup (registered in startCluster as a SetupSuite-failure
+	// fallback) only fires after this function returns, so it can't be relied on
+	// as the primary teardown on the success path.
+	suite.rmCluster.Destroy()
 	suite.cluster.Destroy()
 }
 
@@ -74,7 +80,51 @@ func (suite *microServiceSuite) TestMicroService() {
 		v := make([]any, 0)
 		tests.MustExec(re, cmd, []string{"-u", pdAddr, "microservice", "tso", "members"}, &v)
 		re.Len(v, 2)
+
+		// PD rejects an unknown node before forwarding anything.
+		errRes := tests.MustExec(re, cmd, []string{"-u", pdAddr, "microservice", "tso", "evict-primary", "http://127.0.0.1:1"}, nil)
+		re.Contains(errRes, "is not a tso node")
+
+		// Evict all keyspace group primaries on the current tso primary node. The
+		// request goes to PD, which forwards it to that node. The node address is
+		// passed without a scheme to exercise the address normalization on the PD
+		// side. Retry until the default keyspace group has a second replica to
+		// receive the transfer; a failed eviction transfers nothing, so retrying
+		// is safe. Keep this last: it moves the tso primary away.
+		testutil.Eventually(re, func() bool {
+			primary := cluster.GetDefaultTSOPrimaryServer()
+			if primary == nil {
+				return false
+			}
+			node := strings.TrimPrefix(primary.GetAddr(), "http://")
+			out, err := tests.ExecuteCommand(cmd, "-u", pdAddr, "microservice", "tso", "evict-primary", node)
+			return err == nil && strings.Contains(string(out), "success")
+		})
 	}
+
+	primaryServer := suite.rmCluster.WaitForPrimaryServing(re)
+	address := primaryServer.GetAddr()
+	res := tests.MustExec(re, cmd, []string{"-u", pdAddr, "microservice", "resource-manager", "primary"}, nil)
+	primaryAddress := strings.Trim(res, "\"\n")
+	suite.Equal(address, primaryAddress)
+
+	v := make([]any, 0)
+	tests.MustExec(re, cmd, []string{"-u", pdAddr, "microservice", "resource-manager", "members"}, &v)
+	re.Len(v, 2)
+	wantAddrs := make(map[string]struct{}, len(suite.rmCluster.GetServers()))
+	for _, srv := range suite.rmCluster.GetServers() {
+		wantAddrs[srv.GetAddr()] = struct{}{}
+	}
+	gotAddrs := make(map[string]struct{}, len(v))
+	for _, member := range v {
+		entry, ok := member.(map[string]any)
+		re.True(ok)
+		addr, ok := entry["service-addr"].(string)
+		re.True(ok)
+		gotAddrs[addr] = struct{}{}
+	}
+	suite.Equal(wantAddrs, gotAddrs)
+	suite.Contains(gotAddrs, primaryAddress)
 }
 
 func (suite *microServiceSuite) startCluster() {
@@ -107,4 +157,9 @@ func (suite *microServiceSuite) startCluster() {
 	re.NoError(err)
 	cluster.SetTSOCluster(ts)
 	suite.cluster = cluster
+	// start resource manager cluster
+	rmCluster, err := pdTests.NewTestResourceManagerCluster(ctx, 2, leaderServer.GetAddr())
+	re.NoError(err)
+	suite.T().Cleanup(rmCluster.Destroy)
+	suite.rmCluster = rmCluster
 }

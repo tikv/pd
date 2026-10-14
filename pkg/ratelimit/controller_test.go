@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/time/rate"
 
@@ -43,12 +44,13 @@ type labelCase struct {
 }
 
 func runMulitLabelLimiter(t *testing.T, limiter *Controller, testCase []labelCase) {
-	re := require.New(t)
+	as := assert.New(t)
 	var caseWG sync.WaitGroup
 	for _, tempCas := range testCase {
 		caseWG.Add(1)
 		cas := tempCas
 		go func() {
+			defer caseWG.Done()
 			var lock syncutil.Mutex
 			successCount, failedCount := 0, 0
 			var wg sync.WaitGroup
@@ -63,8 +65,9 @@ func runMulitLabelLimiter(t *testing.T, limiter *Controller, testCase []labelCas
 					}()
 				}
 				wg.Wait()
-				re.Equal(rd.fail, failedCount)
-				re.Equal(rd.success, successCount)
+				if !as.Equal(rd.fail, failedCount) || !as.Equal(rd.success, successCount) {
+					return
+				}
 				for range rd.release {
 					r.release()
 				}
@@ -72,7 +75,6 @@ func runMulitLabelLimiter(t *testing.T, limiter *Controller, testCase []labelCas
 				failedCount -= rd.fail
 				successCount -= rd.success
 			}
-			caseWG.Done()
 		}()
 	}
 	caseWG.Wait()
@@ -324,6 +326,7 @@ func TestControllerWithTwoLimiters(t *testing.T) {
 	re := require.New(t)
 	limiter := NewController(context.Background(), "grpc", nil)
 	defer limiter.Close()
+	slowQPSLimit := rate.Every(time.Hour)
 	testCase := []labelCase{
 		{
 			label: "test1",
@@ -375,7 +378,7 @@ func TestControllerWithTwoLimiters(t *testing.T) {
 			label: "test2",
 			round: []changeAndResult{
 				{
-					opt: UpdateQPSLimiter(50, 5),
+					opt: UpdateQPSLimiter(float64(slowQPSLimit), 5),
 					checkOptionStatus: func(label string, o Option) {
 						status := limiter.Update(label, o)
 						re.NotZero(status & LimiterUpdated)
@@ -386,7 +389,7 @@ func TestControllerWithTwoLimiters(t *testing.T) {
 					waitDuration: time.Second,
 					checkStatusFunc: func(label string) {
 						limit, burst := limiter.GetQPSLimiterStatus(label)
-						re.Equal(rate.Limit(50), limit)
+						re.Equal(slowQPSLimit, limit)
 						re.Equal(5, burst)
 					},
 				},

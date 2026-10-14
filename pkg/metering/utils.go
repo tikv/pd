@@ -37,6 +37,9 @@ const (
 
 // NewRUValue creates a new metering RU value.
 func NewRUValue(value float64) common.MeteringValue {
+	if value < 0 {
+		value = 0
+	}
 	return common.MeteringValue{Value: uint64(value), Unit: UnitRU}
 }
 

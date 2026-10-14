@@ -188,7 +188,6 @@ func (s *Service) ModifyResourceGroup(_ context.Context, req *rmpb.PutResourceGr
 
 // AcquireTokenBuckets implements ResourceManagerServer.AcquireTokenBuckets.
 func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBucketsServer) error {
-	stream = newAcquireTokenBucketsMetricsStream(stream)
 	for {
 		select {
 		case <-s.ctx.Done():
@@ -227,7 +226,8 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 		for _, req := range request.Requests {
 			keyspaceID := ExtractKeyspaceID(req.GetKeyspaceId())
 			resourceGroupName := req.GetResourceGroupName()
-			requestFields := append(logFields,
+			requestFields := logFields
+			requestFields = append(requestFields,
 				zap.Uint32("keyspace-id", keyspaceID),
 				zap.String("resource-group", resourceGroupName),
 			)
@@ -254,7 +254,7 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 			now := time.Now()
 			resp := &rmpb.TokenBucketResponse{
 				ResourceGroupName: rg.Name,
-				KeyspaceId:        &rmpb.KeyspaceIDValue{Value: keyspaceID},
+				KeyspaceId:        &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: keyspaceID}},
 			}
 			switch rg.Mode {
 			case rmpb.GroupMode_RUMode:

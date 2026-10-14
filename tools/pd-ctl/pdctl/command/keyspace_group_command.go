@@ -15,7 +15,6 @@
 package command
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -25,10 +24,12 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tikv/pd/pkg/keyspace/constant"
-	"github.com/tikv/pd/pkg/storage/endpoint"
 )
 
-const keyspaceGroupsPrefix = "pd/api/v2/tso/keyspace-groups"
+const (
+	keyspaceGroupsPrefix = "pd/api/v2/tso/keyspace-groups"
+	flagHideKGKeyspaces  = "hide-keyspaces"
+)
 
 // NewKeyspaceGroupCommand return a keyspace group subcommand of rootCmd
 func NewKeyspaceGroupCommand() *cobra.Command {
@@ -46,6 +47,7 @@ func NewKeyspaceGroupCommand() *cobra.Command {
 	cmd.AddCommand(newSetPriorityKeyspaceGroupCommand())
 	cmd.AddCommand(newShowKeyspaceGroupPrimaryCommand())
 	cmd.Flags().String("state", "", "state filter")
+	cmd.Flags().Bool(flagHideKGKeyspaces, false, "hide keyspace list in keyspace group output")
 	return cmd
 }
 
@@ -127,51 +129,55 @@ func newShowKeyspaceGroupPrimaryCommand() *cobra.Command {
 func showKeyspaceGroupsCommandFunc(cmd *cobra.Command, args []string) {
 	prefix := keyspaceGroupsPrefix
 	if len(args) > 1 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
-	cFunc := convertToKeyspaceGroups
+	flags := cmd.Flags()
+	hideKeyspaces, err := flags.GetBool(flagHideKGKeyspaces)
+	if err != nil {
+		cmd.Printf("Failed to get %s: %s\n", flagHideKGKeyspaces, err)
+		return
+	}
+	query := make(url.Values)
+	if hideKeyspaces {
+		query.Set("hide_keyspaces", "true")
+	}
 	if len(args) == 1 {
 		if _, err := strconv.Atoi(args[0]); err != nil {
 			cmd.Println("keyspace_group_id should be a number")
 			return
 		}
 		prefix = fmt.Sprintf("%s/%s", keyspaceGroupsPrefix, args[0])
-		cFunc = convertToKeyspaceGroup
 	} else {
-		flags := cmd.Flags()
 		state, err := flags.GetString("state")
 		if err != nil {
 			cmd.Printf("Failed to get state: %s\n", err)
 		}
-		stateValue := ""
 		if len(state) != 0 {
 			state = strings.ToLower(state)
 			switch state {
 			case "merge", "split":
-				stateValue = fmt.Sprintf("state=%v", state)
+				query.Set("state", state)
 			default:
 				cmd.Println("Unknown state: " + state)
 				return
 			}
 		}
-
-		if len(stateValue) != 0 {
-			prefix = fmt.Sprintf("%v?%v", keyspaceGroupsPrefix, stateValue)
-		}
+	}
+	if len(query) > 0 {
+		prefix += "?" + query.Encode()
 	}
 	r, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get the keyspace groups information: %s\n", err)
 		return
 	}
-	r = cFunc(r)
 	cmd.Println(r)
 }
 
 func splitKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) < 3 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	_, err := strconv.ParseUint(args[0], 10, 32)
@@ -201,7 +207,7 @@ func splitKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
 
 func splitRangeKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) < 4 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	_, err := strconv.ParseUint(args[0], 10, 32)
@@ -233,7 +239,7 @@ func splitRangeKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
 
 func finishSplitKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) < 1 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	_, err := strconv.ParseUint(args[0], 10, 32)
@@ -291,7 +297,7 @@ func mergeKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
 		params["merge-list"] = groups
 	} else {
 		cmd.Println("Must specify the source keyspace group ID(s) or the merge all flag")
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	// TODO: implement the retry mechanism under merge all flag.
@@ -300,7 +306,7 @@ func mergeKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
 
 func finishMergeKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) < 1 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	_, err := strconv.ParseUint(args[0], 10, 32)
@@ -318,7 +324,7 @@ func finishMergeKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
 
 func setNodesKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) < 2 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	_, err := strconv.ParseUint(args[0], 10, 32)
@@ -342,7 +348,7 @@ func setNodesKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
 
 func setPriorityKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) < 3 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	_, err := strconv.ParseUint(args[0], 10, 32)
@@ -377,7 +383,7 @@ func setPriorityKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
 
 func showKeyspaceGroupPrimaryCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) < 1 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	_, err := strconv.ParseUint(args[0], 10, 32)
@@ -391,30 +397,4 @@ func showKeyspaceGroupPrimaryCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	cmd.Println(r)
-}
-
-func convertToKeyspaceGroup(content string) string {
-	kg := endpoint.KeyspaceGroup{}
-	err := json.Unmarshal([]byte(content), &kg)
-	if err != nil {
-		return content
-	}
-	byteArr, err := json.MarshalIndent(kg, "", "  ")
-	if err != nil {
-		return content
-	}
-	return string(byteArr)
-}
-
-func convertToKeyspaceGroups(content string) string {
-	kgs := []*endpoint.KeyspaceGroup{}
-	err := json.Unmarshal([]byte(content), &kgs)
-	if err != nil {
-		return content
-	}
-	byteArr, err := json.MarshalIndent(kgs, "", "  ")
-	if err != nil {
-		return content
-	}
-	return string(byteArr)
 }

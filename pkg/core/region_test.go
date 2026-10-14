@@ -22,11 +22,14 @@ import (
 	mrand "math/rand/v2"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 	"unsafe"
 
+	"github.com/docker/go-units"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pingcap/failpoint"
@@ -72,6 +75,44 @@ func TestNeedMerge(t *testing.T) {
 		}
 		re.Equal(v.expect, r.NeedMerge(mererSize, mergeKeys))
 	}
+}
+
+func TestIsEmptyRegion(t *testing.T) {
+	tests := []struct {
+		size  int64
+		keys  int64
+		empty bool
+	}{
+		{size: 1, keys: 0, empty: true},
+		{size: 1, keys: 1, empty: false},
+		{size: 1, keys: 2, empty: false},
+		{size: 2, keys: 1, empty: false},
+		{size: 2, keys: 0, empty: false},
+		{size: 0, keys: 0, empty: true},
+	}
+	for _, tt := range tests {
+		require.Equal(t, tt.empty, IsEmptyRegion(tt.size, tt.keys))
+	}
+}
+
+func TestRegionFromHeartbeatIAKVSize(t *testing.T) {
+	re := require.New(t)
+	heartbeat := &pdpb.RegionHeartbeatRequest{
+		Region:              &metapb.Region{},
+		ApproximateKvSize:   100 * units.MiB,
+		ApproximateIaKvSize: 40 * units.MiB,
+	}
+
+	region := RegionFromHeartbeat(heartbeat, 1)
+	re.Equal(int64(100), region.GetApproximateKvSize())
+	re.Equal(int64(40), region.GetApproximateIAKvSize())
+	re.Equal(int64(40), region.Clone().GetApproximateIAKvSize())
+
+	oldHeartbeat := &pdpb.RegionHeartbeatRequest{
+		Region:            &metapb.Region{},
+		ApproximateKvSize: 100 * units.MiB,
+	}
+	re.Zero(RegionFromHeartbeat(oldHeartbeat, 1).GetApproximateIAKvSize())
 }
 
 func TestSortedEqual(t *testing.T) {
@@ -431,6 +472,45 @@ func TestNeedSync(t *testing.T) {
 	}
 }
 
+func TestRegionGuideLogicalStorageSizeChanged(t *testing.T) {
+	regionGuide := GenerateRegionGuideFunc(false)
+	origin := NewRegionInfo(&metapb.Region{Id: 1}, nil)
+	testCases := []struct {
+		name   string
+		update func(*RegionInfo)
+	}{
+		{
+			name: "row-based storage size",
+			update: func(region *RegionInfo) {
+				region.approximateKvSize = 1
+			},
+		},
+		{
+			name: "IA row-based storage size",
+			update: func(region *RegionInfo) {
+				region.approximateIAKvSize = 1
+			},
+		},
+		{
+			name: "columnar storage size",
+			update: func(region *RegionInfo) {
+				region.approximateColumnarKvSize = 1
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			region := origin.Clone()
+			testCase.update(region)
+			saveKV, saveCache, needSync, _ := regionGuide(ContextTODO(), region, origin)
+			require.False(t, saveKV)
+			require.True(t, saveCache)
+			require.False(t, needSync)
+		})
+	}
+}
+
 func TestRegionMap(t *testing.T) {
 	re := require.New(t)
 	rm := make(map[uint64]*regionItem)
@@ -521,12 +601,16 @@ func TestSetRegionConcurrence(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/core/UpdateSubTree", `return()`))
 	regions := NewRegionsInfo()
 	region := NewTestRegionInfo(1, 1, []byte("a"), []byte("b"))
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		_, err := regions.AtomicCheckAndPutRegion(ContextTODO(), region)
-		re.NoError(err)
+		assert.NoError(t, err)
 	}()
 	_, err := regions.AtomicCheckAndPutRegion(ContextTODO(), region)
 	re.NoError(err)
+	wg.Wait()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/core/UpdateSubTree"))
 }
 

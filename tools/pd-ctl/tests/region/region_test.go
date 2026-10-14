@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,6 +31,7 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/response"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/api"
 	pdTests "github.com/tikv/pd/tests"
 	ctl "github.com/tikv/pd/tools/pd-ctl/pdctl"
@@ -100,7 +102,7 @@ func (suite *regionTestSuite) checkRegion(cluster *pdTests.TestCluster) {
 	downPeer := &metapb.Peer{Id: 8, StoreId: 3}
 	r1 := pdTests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"),
 		core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1),
-		core.SetRegionVersion(1), core.SetApproximateSize(1), core.SetApproximateKeys(100),
+		core.SetRegionVersion(1), core.SetApproximateSize(1), core.SetApproximateKeys(0),
 		core.SetReadQuery(100), core.SetWrittenQuery(100),
 		core.SetPeers([]*metapb.Peer{
 			{Id: 1, StoreId: 1},
@@ -557,10 +559,13 @@ func (suite *regionTestSuite) followerDirect(cluster *pdTests.TestCluster) {
 			re.NoError(err)
 			re.Contains(string(output), "Failed to get region")
 		} else {
-			output, err := tests.ExecuteCommand(cmd, "-u", serverAddr, "region", "100", "--no-forward")
-			re.NoError(err)
-			outputStr := string(output)
-			re.Contains(outputStr, "\"id\":100")
+			// The region is created on the leader and propagates to followers
+			// asynchronously through the region syncer, so the follower may not
+			// have it yet. Retry until the synced region shows up.
+			testutil.Eventually(re, func() bool {
+				output, err := tests.ExecuteCommand(cmd, "-u", serverAddr, "region", "100", "--no-forward")
+				return err == nil && strings.Contains(string(output), "\"id\":100")
+			})
 		}
 	}
 }

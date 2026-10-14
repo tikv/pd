@@ -305,6 +305,7 @@ func TestProtectedKeyspace(t *testing.T) {
 			cli, err := pd.NewClientWithContext(ctx, caller.TestComponent,
 				leaderServer.GetLeader().GetClientUrls(), pd.SecurityOption{})
 			re.NoError(err)
+			defer cli.Close()
 			_, _, err = cli.GetTS(ctx)
 			re.NoError(err)
 		})

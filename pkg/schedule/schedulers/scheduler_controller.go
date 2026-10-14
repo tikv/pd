@@ -124,19 +124,37 @@ func (c *Controller) CollectSchedulerMetrics() {
 	}
 	c.RUnlock()
 	ruleMgr := c.cluster.GetRuleManager()
-	if ruleMgr == nil {
+	if ruleMgr != nil {
+		ruleCnt := ruleMgr.GetRulesCount()
+		groupCnt := ruleMgr.GetGroupsCount()
+		ruleStatusGauge.WithLabelValues("rule_count").Set(float64(ruleCnt))
+		ruleStatusGauge.WithLabelValues("group_count").Set(float64(groupCnt))
+	}
+
+	labelerMgr := c.cluster.GetRegionLabeler()
+	if labelerMgr == nil {
 		return
 	}
-	ruleCnt := ruleMgr.GetRulesCount()
-	groupCnt := ruleMgr.GetGroupsCount()
-	ruleStatusGauge.WithLabelValues("rule_count").Set(float64(ruleCnt))
-	ruleStatusGauge.WithLabelValues("group_count").Set(float64(groupCnt))
+	ruleCnt, keyRangeCnt := labelerMgr.GetRuleAndKeyRangeCounts()
+	regionLabelStatusGauge.WithLabelValues("rule_count").Set(float64(ruleCnt))
+	regionLabelStatusGauge.WithLabelValues("range_count").Set(float64(keyRangeCnt))
 }
 
 // ResetSchedulerMetrics resets metrics of all schedulers.
 func ResetSchedulerMetrics() {
 	schedulerStatusGauge.Reset()
 	ruleStatusGauge.Reset()
+	regionLabelStatusGauge.Reset()
+	opInfluenceStatus.Reset()
+	hotSchedulerResultCounter.Reset()
+	balanceWitnessCounter.Reset()
+	balanceDirectionCounter.Reset()
+	hotDirectionCounter.Reset()
+	evictedSlowStoreStatusGauge.Reset()
+	evictedStoppingStoreStatusGauge.Reset()
+	slowStoreTriggerLimitGauge.Reset()
+	storeSlowTrendEvictedStatusGauge.Reset()
+	balanceRangeGauge.Reset()
 }
 
 // AddSchedulerHandler adds the HTTP handler for a scheduler.
@@ -149,7 +167,21 @@ func (c *Controller) AddSchedulerHandler(scheduler Scheduler, args ...string) er
 		return errs.ErrSchedulerExisted.FastGenByArgs()
 	}
 
-	c.schedulerHandlers[name] = scheduler
+	// AddSchedulerHandler also runs on restore (InitSchedulers), where
+	// scheduler already carries a pre-existing, possibly config-update-
+	// accumulated persisted config rather than one freshly created by this
+	// call. Remember whether that config already existed, so a later
+	// PrepareConfig failure only removes it when this call is the one that
+	// created it — restoring legitimate history must never delete itself.
+	existingCfg, err := c.storage.LoadSchedulerConfig(name)
+	if err != nil {
+		return err
+	}
+	isNewConfig := len(existingCfg) == 0
+
+	// Run every step that can fail before registering the scheduler, so a
+	// failure here never leaves it visible (e.g. via IsSchedulerExisted)
+	// without having actually been persisted and prepared.
 	if err := scheduler.SetDisable(false); err != nil {
 		log.Error("can not update scheduler status", zap.String("scheduler-name", name),
 			errs.ZapError(err))
@@ -159,8 +191,26 @@ func (c *Controller) AddSchedulerHandler(scheduler Scheduler, args ...string) er
 		log.Error("can not save HTTP scheduler config", zap.String("scheduler-name", scheduler.GetName()), errs.ZapError(err))
 		return err
 	}
+	if err := scheduler.PrepareConfig(c.cluster); err != nil {
+		// PrepareConfig may have paused some stores before failing on
+		// another (e.g. evict-leader-scheduler pauses every requested
+		// store regardless of earlier failures), so undo whatever it did.
+		scheduler.CleanConfig(c.cluster)
+		if isNewConfig {
+			// The config saved above didn't exist before this call, so it's
+			// an orphan of this failed creation: remove it. A pre-existing
+			// config (e.g. restored on startup) is left in place so the
+			// next attempt still has the real history to retry against.
+			if rmErr := c.storage.RemoveSchedulerConfig(name); rmErr != nil {
+				log.Error("can not remove the scheduler config after a failed creation",
+					zap.String("scheduler-name", name), errs.ZapError(rmErr))
+			}
+		}
+		return err
+	}
+	c.schedulerHandlers[name] = scheduler
 	c.cluster.GetSchedulerConfig().AddSchedulerCfg(scheduler.GetType(), args)
-	return scheduler.PrepareConfig(c.cluster)
+	return nil
 }
 
 // RemoveSchedulerHandler removes the HTTP handler for a scheduler.
@@ -208,13 +258,16 @@ func (c *Controller) AddScheduler(scheduler Scheduler, args ...string) error {
 	}
 
 	s := NewScheduleController(c.ctx, c.cluster, c.opController, scheduler)
+	// Run every step that can fail before registering and starting the
+	// scheduler, so a failure here never leaves a scheduler running (or
+	// visible via IsSchedulerExisted) without having actually been persisted.
 	if err := s.PrepareConfig(c.cluster); err != nil {
+		// PrepareConfig may have partially applied itself (e.g. evict-leader-
+		// scheduler pauses every requested store regardless of which one it
+		// failed on) before returning this error, so undo it here too.
+		scheduler.CleanConfig(c.cluster)
 		return err
 	}
-
-	c.wg.Add(1)
-	go c.runScheduler(s)
-	c.schedulers[s.GetName()] = s
 	if err := scheduler.SetDisable(false); err != nil {
 		log.Error("can not update scheduler status", zap.String("scheduler-name", name),
 			errs.ZapError(err))
@@ -222,8 +275,15 @@ func (c *Controller) AddScheduler(scheduler Scheduler, args ...string) error {
 	}
 	if err := SaveSchedulerConfig(c.storage, scheduler); err != nil {
 		log.Error("can not save scheduler config", zap.String("scheduler-name", scheduler.GetName()), errs.ZapError(err))
+		// PrepareConfig above may already have taken effect (e.g. paused
+		// stores), so undo it before returning: this call must not leave
+		// the scheduler half set up.
+		scheduler.CleanConfig(c.cluster)
 		return err
 	}
+	c.wg.Add(1)
+	go c.runScheduler(s)
+	c.schedulers[s.GetName()] = s
 	c.cluster.GetSchedulerConfig().AddSchedulerCfg(s.GetType(), args)
 	return nil
 }
@@ -296,6 +356,12 @@ func (c *Controller) PauseOrResumeScheduler(name string, t int64) error {
 
 // ReloadSchedulerConfig reloads a scheduler's config if it exists.
 func (c *Controller) ReloadSchedulerConfig(name string) error {
+	c.RLock()
+	if c.cluster == nil {
+		c.RUnlock()
+		return errs.ErrNotBootstrapped.FastGenByArgs()
+	}
+	c.RUnlock()
 	if exist, _ := c.IsSchedulerExisted(name); !exist {
 		return errs.ErrSchedulerNotFound.FastGenByArgs()
 	}

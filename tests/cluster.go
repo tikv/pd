@@ -46,7 +46,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/apiv2"
@@ -122,18 +121,25 @@ type TestServer struct {
 var zapLogOnce sync.Once
 
 // NewTestServer creates a new TestServer.
-func NewTestServer(ctx context.Context, cfg *config.Config, services []string, handlers ...server.HandlerBuilder) (*TestServer, error) {
+func NewTestServer(ctx context.Context, cfg *config.Config, services []string, handlers ...server.HandlerBuilder) (_ *TestServer, err error) {
 	// use temp dir to ensure test isolation.
 	if cfg.DataDir == "" || strings.HasPrefix(cfg.DataDir, "default.") {
-		tempDir, err := os.MkdirTemp("", "pd_tests")
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to create safeguard temp data dir for test server")
+		tempDir, mkdirErr := os.MkdirTemp("", "pd_tests")
+		if mkdirErr != nil {
+			return nil, errors.Wrap(mkdirErr, "failed to create safeguard temp data dir for test server")
 		}
 		cfg.DataDir = tempDir
+		defer func() {
+			if err != nil {
+				if cleanupErr := os.RemoveAll(tempDir); cleanupErr != nil {
+					log.Warn("failed to clean test server data directory", zap.Error(cleanupErr))
+				}
+			}
+		}()
 	}
 	// disable the heartbeat async runner in test
 	cfg.Schedule.EnableHeartbeatConcurrentRunner = false
-	err := logutil.SetupLogger(&cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
+	err = logutil.SetupLogger(&cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
 	if err != nil {
 		return nil, err
 	}
@@ -580,24 +586,14 @@ func NewTestClusterWithKeyspaceGroup(ctx context.Context, initialServerCount int
 
 func createTestCluster(ctx context.Context, initialServerCount int, services []string, handlers []server.HandlerBuilder, opts ...ConfigOption) (*TestCluster, error) {
 	schedulers.Register()
-	config := newClusterConfig(initialServerCount)
-	servers := make(map[string]*TestServer)
-	for _, cfg := range config.InitialServers {
-		allOpts := append([]ConfigOption{WithGCTuner(false)}, opts...)
-		serverConf, err := cfg.Generate(allOpts...)
-		if err != nil {
-			return nil, err
-		}
-		s, err := NewTestServer(ctx, serverConf, services, handlers...)
-		if err != nil {
-			return nil, err
-		}
-		servers[cfg.Name] = s
+	config, err := newClusterConfig(initialServerCount)
+	if err != nil {
+		return nil, err
 	}
-	return &TestCluster{
+	testCluster := &TestCluster{
 		ctx:      ctx,
 		config:   config,
-		servers:  servers,
+		servers:  make(map[string]*TestServer),
 		services: services,
 		opts:     opts,
 		tsPool: struct {
@@ -606,7 +602,22 @@ func createTestCluster(ctx context.Context, initialServerCount int, services []s
 		}{
 			pool: make(map[uint64]struct{}),
 		},
-	}, nil
+	}
+	for _, cfg := range config.InitialServers {
+		allOpts := append([]ConfigOption{WithGCTuner(false)}, opts...)
+		serverConf, err := cfg.Generate(allOpts...)
+		if err != nil {
+			testCluster.Destroy()
+			return nil, err
+		}
+		s, err := NewTestServer(ctx, serverConf, services, handlers...)
+		if err != nil {
+			testCluster.Destroy()
+			return nil, err
+		}
+		testCluster.servers[cfg.Name] = s
+	}
+	return testCluster, nil
 }
 
 // RestartTestPDCluster restarts the PD test cluster.
@@ -679,7 +690,9 @@ func restartTestCluster(
 
 // RunServer starts to run TestServer.
 func RunServer(server *TestServer) <-chan error {
-	resC := make(chan error)
+	// Buffer the one-shot result so the goroutine can exit even if the caller
+	// returns early after another concurrently started server fails.
+	resC := make(chan error, 1)
 	go func() { resC <- server.Run() }()
 	return resC
 }
@@ -701,6 +714,21 @@ func RunServers(servers []*TestServer) error {
 // RunInitialServers starts to run servers in InitialServers.
 func (c *TestCluster) RunInitialServers() error {
 	return c.runInitialServersWithRetry(defaultMaxRetryTimes)
+}
+
+func (c *TestCluster) regenerateInitialServerConfigs() ([]*config.Config, error) {
+	c.config.regenerateInitialServerURLs()
+
+	serverConfs := make([]*config.Config, 0, len(c.config.InitialServers))
+	allOpts := append([]ConfigOption{WithGCTuner(false)}, c.opts...)
+	for _, conf := range c.config.InitialServers {
+		serverConf, err := conf.Generate(allOpts...)
+		if err != nil {
+			return nil, err
+		}
+		serverConfs = append(serverConfs, serverConf)
+	}
+	return serverConfs, nil
 }
 
 // runInitialServersWithRetry starts to run servers with port conflict handling.
@@ -738,26 +766,21 @@ func (c *TestCluster) runInitialServersWithRetry(maxRetries int) error {
 				_ = s.Destroy()
 			}
 
+			// Regenerate all ports before building any server configs. Generate reads
+			// every initial server's peer URL when composing the initial cluster.
+			serverConfs, err := c.regenerateInitialServerConfigs()
+			if err != nil {
+				return err
+			}
+
 			// Recreate servers with new ports
-			for _, conf := range c.config.InitialServers {
-				// Regenerate config to get new ports
-				conf.ClientURLs = tempurl.Alloc()
-				conf.PeerURLs = tempurl.Alloc()
-				conf.AdvertiseClientURLs = conf.ClientURLs
-				conf.AdvertisePeerURLs = conf.PeerURLs
-
-				// Use the original opts passed during cluster creation
-				allOpts := append([]ConfigOption{WithGCTuner(false)}, c.opts...)
-				serverConf, err := conf.Generate(allOpts...)
-				if err != nil {
-					return err
-				}
-
+			for i, serverConf := range serverConfs {
 				// Use the original services passed during cluster creation
 				s, err := NewTestServer(c.ctx, serverConf, c.services)
 				if err != nil {
 					return err
 				}
+				conf := c.config.InitialServers[i]
 				c.servers[conf.Name] = s
 			}
 
@@ -864,6 +887,17 @@ func (c *TestCluster) GetLeaderServer() *TestServer {
 // WaitLeader is used to get leader.
 // If it exceeds the maximum number of loops, it will return an empty string.
 func (c *TestCluster) WaitLeader(ops ...WaitOption) string {
+	return c.waitLeaderExcept("", ops...)
+}
+
+// WaitLeaderChange waits until all running servers agree on a leader that is
+// different from oldLeader. If it exceeds the maximum number of loops, it will
+// return an empty string.
+func (c *TestCluster) WaitLeaderChange(oldLeader string, ops ...WaitOption) string {
+	return c.waitLeaderExcept(oldLeader, ops...)
+}
+
+func (c *TestCluster) waitLeaderExcept(oldLeader string, ops ...WaitOption) string {
 	option := &WaitOp{
 		retryTimes:   WaitLeaderRetryTimes,
 		waitInterval: WaitLeaderCheckInterval,
@@ -886,7 +920,7 @@ func (c *TestCluster) WaitLeader(ops ...WaitOption) string {
 			}
 		}
 		for name, num := range counter {
-			if num == running && c.GetServer(name).IsLeader() {
+			if name != oldLeader && num == running && c.GetServer(name).IsLeader() {
 				time.Sleep(WaitLeaderReturnDelay)
 				return name
 			}
@@ -975,7 +1009,19 @@ func (c *TestCluster) HandleRegionBuckets(b *metapb.Buckets) error {
 
 // Join is used to add a new TestServer into the cluster.
 func (c *TestCluster) Join(ctx context.Context, opts ...ConfigOption) (*TestServer, error) {
-	conf, err := c.config.join().Generate(opts...)
+	serverConfig, err := c.config.join()
+	if err != nil {
+		return nil, err
+	}
+	cleanupConfig := true
+	defer func() {
+		if cleanupConfig {
+			if cleanupErr := os.RemoveAll(serverConfig.DataDir); cleanupErr != nil {
+				log.Warn("failed to clean joined test server data directory", zap.Error(cleanupErr))
+			}
+		}
+	}()
+	conf, err := serverConfig.Generate(opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -983,13 +1029,27 @@ func (c *TestCluster) Join(ctx context.Context, opts ...ConfigOption) (*TestServ
 	if err != nil {
 		return nil, err
 	}
+	c.config.JoinServers = append(c.config.JoinServers, serverConfig)
 	c.servers[conf.Name] = s
+	cleanupConfig = false
 	return s, nil
 }
 
 // JoinWithKeyspaceGroup is used to add a new TestServer into the cluster with keyspace group enabled.
 func (c *TestCluster) JoinWithKeyspaceGroup(ctx context.Context, opts ...ConfigOption) (*TestServer, error) {
-	conf, err := c.config.join().Generate(opts...)
+	serverConfig, err := c.config.join()
+	if err != nil {
+		return nil, err
+	}
+	cleanupConfig := true
+	defer func() {
+		if cleanupConfig {
+			if cleanupErr := os.RemoveAll(serverConfig.DataDir); cleanupErr != nil {
+				log.Warn("failed to clean joined test server data directory", zap.Error(cleanupErr))
+			}
+		}
+	}()
+	conf, err := serverConfig.Generate(opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -997,7 +1057,9 @@ func (c *TestCluster) JoinWithKeyspaceGroup(ctx context.Context, opts ...ConfigO
 	if err != nil {
 		return nil, err
 	}
+	c.config.JoinServers = append(c.config.JoinServers, serverConfig)
 	c.servers[conf.Name] = s
+	cleanupConfig = false
 	return s, nil
 }
 
@@ -1014,6 +1076,11 @@ func (c *TestCluster) Destroy() {
 	}
 	if c.tsoCluster != nil {
 		c.tsoCluster.Destroy()
+	}
+	if c.config != nil {
+		if err := c.config.cleanup(); err != nil {
+			log.Warn("failed to clean test cluster data directories", errs.ZapError(err))
+		}
 	}
 }
 

@@ -15,18 +15,24 @@
 package tests
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
 	"github.com/pingcap/errors"
 
+	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	serverconfig "github.com/tikv/pd/server/config"
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 func TestShouldRetryCurrentServers(t *testing.T) {
@@ -53,4 +59,107 @@ func TestClassifyInitialServersError(t *testing.T) {
 	re.Equal(startServersRetryRecreate, classifyInitialServersError(errors.New("Etcd cluster ID mismatch")))
 	re.Equal(startServersNoRetry, classifyInitialServersError(errors.New("some other error")))
 	re.Equal(startServersNoRetry, classifyInitialServersError(nil))
+}
+
+func TestRunServerDoesNotBlockWithoutReceiver(t *testing.T) {
+	t.Parallel()
+
+	result := RunServer(&TestServer{state: Destroy})
+	require.Eventually(t, func() bool {
+		return len(result) == 1
+	}, time.Second, 10*time.Millisecond)
+	require.Error(t, <-result)
+}
+
+func TestNewTestServerCleansOwnedDataDirOnSetupFailure(t *testing.T) {
+	tempRoot := t.TempDir()
+	t.Setenv("TMPDIR", tempRoot)
+	invalidLogPath := filepath.Join(tempRoot, "log-directory")
+	require.NoError(t, os.Mkdir(invalidLogPath, 0755))
+
+	cfg := serverconfig.NewConfig()
+	cfg.DataDir = ""
+	cfg.Log.File.Filename = invalidLogPath
+	server, err := NewTestServer(context.Background(), cfg, nil)
+	require.Error(t, err)
+	require.Nil(t, server)
+
+	tempDirs, err := filepath.Glob(filepath.Join(tempRoot, "pd_tests*"))
+	require.NoError(t, err)
+	require.Empty(t, tempDirs)
+}
+
+func TestNewTestClusterCleansDataDirsOnSetupFailure(t *testing.T) {
+	tempRoot := t.TempDir()
+	t.Setenv("TMPDIR", tempRoot)
+	invalidLogPath := filepath.Join(tempRoot, "log-directory")
+	require.NoError(t, os.Mkdir(invalidLogPath, 0755))
+
+	var dataDir string
+	cluster, err := NewTestCluster(context.Background(), 1, func(conf *serverconfig.Config, _ string) {
+		dataDir = conf.DataDir
+		conf.Log.File.Filename = invalidLogPath
+	})
+	require.Error(t, err)
+	require.Nil(t, cluster)
+	require.NotEmpty(t, dataDir)
+
+	_, err = os.Stat(dataDir)
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestRegenerateInitialServerURLsKeepsInitialClusterConsistent(t *testing.T) {
+	t.Parallel()
+
+	re := require.New(t)
+	config, err := newClusterConfig(3)
+	re.NoError(err)
+	cleanupClusterConfig(t, config)
+	cluster := &TestCluster{
+		config: config,
+		opts: []ConfigOption{
+			func(conf *serverconfig.Config, _ string) {
+				conf.InitialClusterToken = "retry-token"
+			},
+		},
+	}
+
+	regenerateServerURLs := func(server *serverConfig) {
+		server.ClientURLs = tempurl.Alloc()
+		server.PeerURLs = tempurl.Alloc()
+		server.AdvertiseClientURLs = server.ClientURLs
+		server.AdvertisePeerURLs = server.PeerURLs
+	}
+
+	regenerateServerURLs(config.InitialServers[0])
+	firstConf, err := config.InitialServers[0].Generate(WithGCTuner(false))
+	re.NoError(err)
+	regenerateServerURLs(config.InitialServers[1])
+	secondConf, err := config.InitialServers[1].Generate(WithGCTuner(false))
+	re.NoError(err)
+	re.NotEqual(firstConf.InitialCluster, secondConf.InitialCluster)
+
+	serverConfs, err := cluster.regenerateInitialServerConfigs()
+	re.NoError(err)
+	re.Len(serverConfs, len(config.InitialServers))
+
+	expectedInitialCluster := config.getServerAddrs()
+	for _, server := range config.InitialServers {
+		re.Contains(expectedInitialCluster, server.PeerURLs)
+	}
+	for _, conf := range serverConfs {
+		re.Equal(expectedInitialCluster, conf.InitialCluster)
+		re.Equal("retry-token", conf.InitialClusterToken)
+		re.False(conf.PDServerCfg.EnableGOGCTuner)
+	}
+}
+
+func cleanupClusterConfig(t *testing.T, config *clusterConfig) {
+	t.Helper()
+	for _, server := range config.InitialServers {
+		dataDir := server.DataDir
+		t.Cleanup(func() {
+			require.NoError(t, os.RemoveAll(dataDir))
+		})
+	}
 }

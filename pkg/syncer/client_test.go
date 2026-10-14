@@ -26,16 +26,18 @@ import (
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockserver"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 // For issue https://github.com/tikv/pd/issues/3936
@@ -88,9 +90,34 @@ func TestErrorCode(t *testing.T) {
 	rc := NewRegionSyncer(server)
 	conn, err := grpcutil.GetClientConn(ctx, "http://127.0.0.1", nil)
 	re.NoError(err)
+	defer func() {
+		re.NoError(conn.Close())
+	}()
 	cancel()
 	_, err = rc.syncRegion(ctx, conn)
 	ev, ok := status.FromError(err)
 	re.True(ok)
 	re.Equal(codes.Canceled, ev.Code())
+}
+
+func TestHandleRegionSyncResponseSkipsErrorResponse(t *testing.T) {
+	re := require.New(t)
+	syncer, _ := newTestRegionSyncer(t)
+	syncer.history.resetWithIndex(10)
+	syncer.streamingRunning.Store(true)
+
+	handled, fullSyncing := syncer.handleRegionSyncResponse(context.Background(), &pdpb.SyncRegionResponse{
+		Header: &pdpb.ResponseHeader{
+			ClusterId: keypath.ClusterID(),
+			Error: &pdpb.Error{
+				Type:    pdpb.ErrorType_UNKNOWN,
+				Message: "server stopped, close the region syncer client",
+			},
+		},
+	}, nil, nil, false)
+
+	re.False(handled)
+	re.False(fullSyncing)
+	re.Equal(uint64(10), syncer.history.getNextIndex())
+	re.False(syncer.IsRunning())
 }

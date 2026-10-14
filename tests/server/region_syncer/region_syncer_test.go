@@ -33,7 +33,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 func TestRegionSyncer(t *testing.T) {
@@ -87,18 +87,46 @@ func TestRegionSyncer(t *testing.T) {
 	})
 	close(mockSyncFull)
 
-	checkRegions := func() {
+	checkRegions := func(expectedRegions []*core.RegionInfo) {
 		// ensure flush to region storage, we use a duration larger than the
 		// region storage flush rate limit (3s).
 		time.Sleep(4 * time.Second)
 
 		// test All regions have been synchronized to the cache of followerServer
 		re.NotNil(followerServer)
-		cacheRegions := leaderServer.GetServer().GetBasicCluster().GetRegions()
-		re.Len(cacheRegions, regionLen)
 		testutil.Eventually(re, func() bool {
-			for _, region := range cacheRegions {
+			leaderRegions := leaderServer.GetServer().GetBasicCluster().GetRegions()
+			followerRegions := followerServer.GetServer().GetBasicCluster().GetRegions()
+			if len(leaderRegions) != len(expectedRegions) || len(followerRegions) != len(expectedRegions) {
+				return false
+			}
+			for _, region := range expectedRegions {
+				leaderRegion := leaderServer.GetServer().GetBasicCluster().GetRegion(region.GetID())
+				if leaderRegion == nil {
+					t.Logf("leader region %d is nil", region.GetID())
+					return false
+				}
+				if region.GetMeta().String() != leaderRegion.GetMeta().String() {
+					t.Logf("region.Meta: %v, leaderRegion.Meta: %v", region.GetMeta().String(), leaderRegion.GetMeta().String())
+					return false
+				}
+				if region.GetStat().String() != leaderRegion.GetStat().String() {
+					t.Logf("region.Stat: %v, leaderRegion.Stat: %v", region.GetStat().String(), leaderRegion.GetStat().String())
+					return false
+				}
+				if region.GetLeader().String() != leaderRegion.GetLeader().String() {
+					t.Logf("region.Leader: %v, leaderRegion.Leader: %v", region.GetLeader().String(), leaderRegion.GetLeader().String())
+					return false
+				}
+				if region.GetBuckets().String() != leaderRegion.GetBuckets().String() {
+					t.Logf("region.Buckets: %v, leaderRegion.Buckets: %v", region.GetBuckets().String(), leaderRegion.GetBuckets().String())
+					return false
+				}
 				r := followerServer.GetServer().GetBasicCluster().GetRegion(region.GetID())
+				if r == nil {
+					t.Logf("follower region %d is nil", region.GetID())
+					return false
+				}
 				if region.GetMeta().String() != r.GetMeta().String() {
 					t.Logf("region.Meta: %v, r.Meta: %v", region.GetMeta().String(), r.GetMeta().String())
 					return false
@@ -119,7 +147,7 @@ func TestRegionSyncer(t *testing.T) {
 			return true
 		})
 	}
-	checkRegions()
+	checkRegions(regions)
 
 	// merge case
 	// region2 -> region1 -> region0
@@ -166,7 +194,7 @@ func TestRegionSyncer(t *testing.T) {
 		re.NoError(err)
 	}
 
-	checkRegions()
+	checkRegions(regions)
 
 	err = leaderServer.Stop()
 	re.NoError(err)
@@ -377,10 +405,14 @@ func TestPrepareCheckerWithTransferLeader(t *testing.T) {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
 	}()
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))
 	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) { conf.PDServerCfg.UseRegionStorage = true })
-	defer cluster.Destroy()
+	defer func() {
+		cancel()
+		if cluster != nil {
+			cluster.Destroy()
+		}
+	}()
 	re.NoError(err)
 
 	err = cluster.RunInitialServers()

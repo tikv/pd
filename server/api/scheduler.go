@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"path"
@@ -33,6 +34,7 @@ import (
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -177,7 +179,7 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case types.GrantLeaderScheduler, types.EvictLeaderScheduler:
+	case types.GrantLeaderScheduler:
 		_, ok := input["store_id"]
 		if !ok {
 			h.r.JSON(w, http.StatusBadRequest, "missing store id")
@@ -207,6 +209,53 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 		}
 
 		collector(strconv.FormatUint(uint64(storeID), 10))
+	case types.EvictLeaderScheduler:
+		storeIDs, err := collectEvictLeaderStoreIDs(input)
+		if err != nil {
+			h.r.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		exist, err := h.IsSchedulerExisted(name)
+		if err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		if !exist {
+			// Every requested store is encoded into the single persisted
+			// creation arg (see schedulers.EvictLeaderMultiStoreArgs), so
+			// the scheduler is created with all of them in one call. This
+			// keeps creation atomic (one call either adds every requested
+			// store or none of them) and avoids a follow-up scheduler-config
+			// update that, in microservice mode, is watched independently of
+			// scheduler creation and can race with it.
+			ids := make([]uint64, 0, len(storeIDs))
+			for _, id := range storeIDs {
+				ids = append(ids, uint64(id))
+			}
+			if len(ids) == 1 {
+				collector(strconv.FormatUint(ids[0], 10))
+			} else {
+				collector(schedulers.EvictLeaderMultiStoreArgs(ids))
+			}
+			if err := h.AddScheduler(tp, args...); err != nil {
+				h.r.JSON(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			h.r.JSON(w, http.StatusOK, "The scheduler is created.")
+			return
+		}
+
+		// The scheduler already exists: add the requested stores to it via
+		// the existing per-store config-update path.
+		if err := h.RedirectSchedulerUpdateBatch(name, storeIDs); err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		log.Info("update scheduler", zap.String("scheduler-name", name), zap.Any("store-ids", storeIDs))
+		h.r.JSON(w, http.StatusOK, "The scheduler has been applied to the store.")
+		return
 	case types.ShuffleHotRegionScheduler:
 		limit := uint64(1)
 		l, ok := input["limit"].(float64)
@@ -254,6 +303,52 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 	}
 
 	h.r.JSON(w, http.StatusOK, "The scheduler is created.")
+}
+
+// collectEvictLeaderStoreIDs reads the target store IDs for evict-leader-scheduler
+// from the request body. It accepts either a single "store_id" (backward compatible
+// with existing clients) or a "store_ids" array to add multiple stores in one call.
+func collectEvictLeaderStoreIDs(input map[string]any) ([]float64, error) {
+	_, hasStoreID := input["store_id"]
+	rawStoreIDs, hasStoreIDs := input["store_ids"]
+	switch {
+	case hasStoreID && hasStoreIDs:
+		return nil, errors.New("only one of store_id and store_ids can be set")
+	case hasStoreIDs:
+		arr, ok := rawStoreIDs.([]any)
+		if !ok || len(arr) == 0 {
+			return nil, errors.New("please input a right store id")
+		}
+		storeIDs := make([]float64, 0, len(arr))
+		seen := make(map[float64]struct{}, len(arr))
+		for _, v := range arr {
+			id, ok := v.(float64)
+			if !ok || !isIntegerStoreID(id) {
+				return nil, errors.New("please input a right store id")
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			storeIDs = append(storeIDs, id)
+		}
+		return storeIDs, nil
+	case hasStoreID:
+		storeID, ok := input["store_id"].(float64)
+		if !ok || !isIntegerStoreID(storeID) {
+			return nil, errors.New("please input a right store id")
+		}
+		return []float64{storeID}, nil
+	default:
+		return nil, errors.New("missing store id")
+	}
+}
+
+// isIntegerStoreID reports whether f is a non-negative integer that fits in
+// a uint64, rejecting fractional values like 1.5 that would otherwise be
+// silently truncated by a later uint64 conversion.
+func isIntegerStoreID(f float64) bool {
+	return f >= 0 && f <= float64(math.MaxUint64) && f == math.Trunc(f)
 }
 
 // DeleteScheduler deletes a scheduler.

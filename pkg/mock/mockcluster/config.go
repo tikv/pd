@@ -47,6 +47,11 @@ func (mc *Cluster) SetEnableOneWayMerge(v bool) {
 	mc.updateScheduleConfig(func(s *sc.ScheduleConfig) { s.EnableOneWayMerge = v })
 }
 
+// SetEnableCrossTableMerge updates the EnableCrossTableMerge configuration.
+func (mc *Cluster) SetEnableCrossTableMerge(v bool) {
+	mc.updateScheduleConfig(func(s *sc.ScheduleConfig) { s.EnableCrossTableMerge = v })
+}
+
 // SetMaxSnapshotCount updates the MaxSnapshotCount configuration.
 func (mc *Cluster) SetMaxSnapshotCount(v int) {
 	mc.updateScheduleConfig(func(s *sc.ScheduleConfig) { s.MaxSnapshotCount = uint64(v) })
