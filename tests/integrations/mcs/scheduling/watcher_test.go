@@ -15,7 +15,6 @@
 package scheduling
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
