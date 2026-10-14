@@ -232,6 +232,7 @@ func (c *AffinityChecker) rebalanceTable(ctx context.Context, groupID string, ap
 		if err != nil {
 			return fail(err, changed[0])
 		}
+		scanGeneration := snapshot.Version.Table
 		complete := true
 		for _, index := range changed {
 			version, exists := c.affinityManager.GetBalanceVersion(snapshot.TableID)
@@ -256,10 +257,18 @@ func (c *AffinityChecker) rebalanceTable(ctx context.Context, groupID string, ap
 			}
 		}
 		if complete {
-			if _, err := c.refreshManualBalance(ctx, snapshot, fingerprint); err != nil {
+			current, err := c.refreshManualBalance(ctx, snapshot, fingerprint)
+			if err != nil {
 				return fail(err, changed[0])
 			}
-			return plans, nil
+			// A heartbeat may invalidate an earlier group's convergence check.
+			// Retry the whole round; it is normal migration, not a conflict.
+			if current.Version.Table == scanGeneration && c.affinityManager.BalanceSnapshotCurrent(current) {
+				return plans, nil
+			}
+			for _, index := range changed {
+				plans[index].Status = "submitted"
+			}
 		}
 		select {
 		case <-ctx.Done():

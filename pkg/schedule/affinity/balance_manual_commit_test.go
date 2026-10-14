@@ -28,6 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
@@ -118,6 +119,31 @@ func TestCommitBalanceTargetsKeepsFirstBatchAfterLaterTargetConflict(t *testing.
 	require.False(t, committed)
 	require.Equal(t, uint64(2), loadBalanceGroup(t, manager, ids[0]).LeaderStoreID)
 	require.Equal(t, uint64(2), loadBalanceGroup(t, manager, ids[1]).LeaderStoreID)
+}
+
+func TestCommitBalanceTargetsDoesNotResurrectDeletedLegacyTable(t *testing.T) {
+	manager := newBalanceRuntimeManager(t)
+	id := seedBalanceGroups(t, manager, []uint64{1})[0]
+	base := manager.storage.(storage.Storage)
+	require.NoError(t, base.Remove(endpoint.AffinityTableRevisionKey(id)))
+	require.NoError(t, base.Remove(endpoint.AffinityTableMetadataRevisionKey(id)))
+	snapshot := prepareBalanceCommit(t, manager, id)
+	// Durable deletion can precede the MCS watcher's local deletion.
+	require.NoError(t, base.RunInTxn(t.Context(), func(txn kv.Txn) error {
+		if err := base.DeleteAffinityGroup(txn, id); err != nil {
+			return err
+		}
+		return base.DeleteRegionRule(txn, GetLabelRuleID(id))
+	}))
+	require.NoError(t, manager.cleanupBalanceRevisions(base, snapshot.TableID))
+
+	committed, err := manager.CommitBalanceTargets(t.Context(), snapshot, []*Group{balanceCommitTarget(snapshot, id, 2)})
+
+	require.NoError(t, err)
+	require.False(t, committed)
+	value, err := base.LoadAffinityGroup(id)
+	require.NoError(t, err)
+	require.Empty(t, value)
 }
 
 func TestCommitBalanceTargetsScopesRegionGenerationToBatch(t *testing.T) {

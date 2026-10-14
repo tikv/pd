@@ -42,7 +42,7 @@ type affinityBalanceScanCluster struct {
 	delay      time.Duration
 	starts     [][]byte
 	labelReads int
-	beforeScan func()
+	beforeScan func([]byte)
 }
 
 func (c *affinityBalanceScanCluster) GetRegionLabeler() *labeler.RegionLabeler {
@@ -52,7 +52,7 @@ func (c *affinityBalanceScanCluster) GetRegionLabeler() *labeler.RegionLabeler {
 
 func (c *affinityBalanceScanCluster) ScanRegions(startKey, endKey []byte, limit int) []*core.RegionInfo {
 	if c.beforeScan != nil {
-		c.beforeScan()
+		c.beforeScan(startKey)
 	}
 	c.starts = append(c.starts, slices.Clone(startKey))
 	if c.delay > 0 {

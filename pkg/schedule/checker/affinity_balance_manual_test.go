@@ -15,8 +15,10 @@
 package checker
 
 import (
+	"bytes"
 	"context"
 	"slices"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -45,7 +47,7 @@ func TestManualBalanceSubmitsWholeTableBeforeConvergence(t *testing.T) {
 			tc := checker.cluster.(*mockcluster.Cluster)
 			heartbeatObserved := make(chan struct{})
 			heartbeatSent := false
-			checker.cluster = &affinityBalanceScanCluster{CheckerCluster: tc, beforeScan: func() {
+			checker.cluster = &affinityBalanceScanCluster{CheckerCluster: tc, beforeScan: func([]byte) {
 				if heartbeatSent {
 					return
 				}
@@ -162,7 +164,7 @@ func TestManualBalanceRechecksSubmissionGateBetweenBatches(t *testing.T) {
 			checker, manager, initial := newManualBalanceFixture(t, 3, groups)
 			tc := checker.cluster.(*mockcluster.Cluster)
 			stopped := false
-			checker.cluster = &affinityBalanceScanCluster{CheckerCluster: tc, beforeScan: func() {
+			checker.cluster = &affinityBalanceScanCluster{CheckerCluster: tc, beforeScan: func([]byte) {
 				if stopped {
 					return
 				}
@@ -192,6 +194,110 @@ func TestManualBalanceRechecksSubmissionGateBetweenBatches(t *testing.T) {
 			}
 			require.Equal(t, endpoint.MaxAffinityTxnBatchOps, submitted)
 			require.Positive(t, pending)
+		})
+	}
+}
+
+func TestManualBalanceRechecksEarlierGroupAfterConvergenceHeartbeat(t *testing.T) {
+	for _, restoreImmediately := range []bool{false, true} {
+		name := "remains off target"
+		if restoreImmediately {
+			name = "returns to target in the same round"
+		}
+		t.Run(name, func(t *testing.T) {
+			checker, manager, initial := newManualBalanceFixture(t, 3, []manualBalanceFixtureGroup{
+				{leader: 1, voters: []uint64{1, 2, 3}},
+				{leader: 1, voters: []uint64{1, 2, 3}},
+				{leader: 1, voters: []uint64{1, 2, 3}},
+			})
+			preview, err := manager.RebalanceAffinityGroup(t.Context(), initial.Groups[0].ID, false)
+			require.NoError(t, err)
+			changed := slices.DeleteFunc(slices.Clone(preview), func(plan affinity.BalancePlan) bool { return !plan.Changed })
+			require.Len(t, changed, 2)
+			tc := checker.cluster.(*mockcluster.Cluster)
+			firstKey := initial.Ranges[changed[0].GroupID].KeyRanges[0].StartKey
+			secondKey := initial.Ranges[changed[1].GroupID].KeyRanges[0].StartKey
+			observe := func(key []byte, leader uint64) {
+				region := tc.GetRegionByKey(key)
+				heartbeat := region.Clone(core.WithLeader(region.GetStorePeer(leader)))
+				tc.PutRegion(heartbeat)
+				manager.ObserveBalanceRegion(heartbeat)
+				manager.GetAndCacheRegionAffinityGroupState(heartbeat)
+			}
+			var armed atomic.Bool
+			firstChecked, injected, rescanned := false, false, false
+			invalidated, rechecked := make(chan struct{}), make(chan struct{})
+			checker.cluster = &affinityBalanceScanCluster{CheckerCluster: tc, beforeScan: func(key []byte) {
+				if !armed.Load() {
+					return
+				}
+				if bytes.Equal(key, firstKey) {
+					firstChecked = true
+					if injected && !rescanned {
+						rescanned = true
+						close(rechecked)
+					}
+				}
+				if firstChecked && !injected && bytes.Equal(key, secondKey) {
+					observe(firstKey, changed[0].OldLeaderStoreID)
+					if restoreImmediately {
+						observe(firstKey, changed[0].LeaderStoreID)
+					}
+					injected = true
+					close(invalidated)
+				}
+			}}
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			type result struct {
+				plans []affinity.BalancePlan
+				err   error
+			}
+			results := make(chan result, 1)
+			go func() {
+				plans, err := manager.RebalanceAffinityGroup(ctx, initial.Groups[0].ID, true)
+				results <- result{plans, err}
+			}()
+			require.Eventually(t, func() bool {
+				for _, plan := range changed {
+					if manager.GetAffinityGroupState(plan.GroupID).LeaderStoreID != plan.LeaderStoreID {
+						return false
+					}
+				}
+				return true
+			}, 3*time.Second, time.Millisecond)
+			for _, plan := range preview {
+				observe(initial.Ranges[plan.GroupID].KeyRanges[0].StartKey, plan.LeaderStoreID)
+			}
+			armed.Store(true)
+			select {
+			case <-invalidated:
+			case done := <-results:
+				t.Fatalf("apply returned before the convergence interleaving: %v", done.err)
+			case <-ctx.Done():
+				t.Fatal("convergence interleaving was not reached")
+			}
+			select {
+			case <-rechecked:
+			case done := <-results:
+				t.Fatalf("apply returned without rechecking the invalidated group: %v", done.err)
+			case <-ctx.Done():
+				t.Fatal("invalidated convergence round was not retried")
+			}
+			if !restoreImmediately {
+				observe(firstKey, changed[0].LeaderStoreID)
+			}
+			select {
+			case done := <-results:
+				require.NoError(t, done.err)
+				for _, plan := range done.plans {
+					if plan.Changed {
+						require.Equal(t, "applied", plan.Status)
+					}
+				}
+			case <-ctx.Done():
+				t.Fatal("manual balance did not finish after convergence")
+			}
 		})
 	}
 }

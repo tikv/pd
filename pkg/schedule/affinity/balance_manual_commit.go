@@ -153,6 +153,9 @@ func (m *Manager) CommitBalanceTargets(ctx context.Context, snapshot *BalanceSna
 			return balanceConflict()
 		}
 		for i := range groups {
+			if err := checkBalanceOriginal(txn, snapshot, &originals[i].Group); err != nil {
+				return err
+			}
 			if err := m.storage.SaveAffinityGroup(txn, groups[i].ID, &groups[i]); err != nil {
 				return err
 			}
