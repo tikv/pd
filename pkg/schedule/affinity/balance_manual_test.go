@@ -16,157 +16,173 @@ package affinity
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/tikv/pd/pkg/errs"
 )
 
-func TestPlanTableRebalanceRebuildsChangedTargets(t *testing.T) {
-	groups := []*Group{
-		{ID: "p0", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2}},
-		{ID: "p1", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2}},
-		{ID: "p2", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2}},
-		{ID: "p3", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2}},
-		{ID: "p4", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2}},
-		{ID: "p5", LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2}},
-	}
-	actions := make(map[string]BalanceActionSet, len(groups))
-	for _, group := range groups {
-		actions[group.ID] = BalanceActionSet{LeaderTargets: []uint64{2}}
-	}
-	var rebuilt []string
-	plans, err := PlanTableRebalance(t.Context(), groups, BalanceOptions{
-		Stores: []uint64{1, 2}, ActionSets: actions,
-	}, func(_ context.Context, original, virtual *Group) (BalanceActionSet, bool) {
-		require.Equal(t, uint64(1), original.LeaderStoreID)
-		require.Equal(t, uint64(2), virtual.LeaderStoreID)
-		rebuilt = append(rebuilt, virtual.ID)
-		return BalanceActionSet{}, true
-	})
-	require.NoError(t, err)
-	require.Equal(t, []string{"p1", "p3"}, rebuilt)
-	require.Equal(t, []string{"p1", "p3"}, changedPlanIDs(plans))
-	require.False(t, plans[0].Changed)
-	require.Equal(t, uint64(2), plans[1].LeaderStoreID)
-	require.Equal(t, uint64(2), plans[3].LeaderStoreID)
-	require.False(t, plans[2].Changed)
+func TestRebalanceAffinityGroupRequiresRebalancer(t *testing.T) {
+	manager := newBalanceRuntimeManager(t)
+	groupID := seedBalanceGroups(t, manager, []uint64{1})[0]
+
+	plans, err := manager.RebalanceAffinityGroup(t.Context(), groupID, false)
+
+	require.ErrorIs(t, err, ErrBalanceNotReady)
+	require.Nil(t, plans)
+	require.False(t, manager.IsManualBalanceRunning(groupID))
 }
 
-func TestPlanTableRebalanceDoesNotPublishPairOnlyImprovement(t *testing.T) {
-	groups := []*Group{
-		{ID: "p0", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}},
-		{ID: "p1", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}},
-		{ID: "p2", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}},
-		{ID: "p3", LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2, 3}},
-		{ID: "p4", LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2, 3}},
-		{ID: "p5", LeaderStoreID: 3, VoterStoreIDs: []uint64{1, 2, 3}},
-	}
-	plans, err := PlanTableRebalance(t.Context(), groups, BalanceOptions{
-		Stores: []uint64{1, 2, 3},
-		ActionSets: map[string]BalanceActionSet{
-			"p0": {LeaderTargets: []uint64{2}},
-			"p3": {LeaderTargets: []uint64{3}},
-		},
-	}, func(_ context.Context, _ *Group, _ *Group) (BalanceActionSet, bool) {
-		return BalanceActionSet{}, true
-	})
-	require.NoError(t, err)
-	require.Empty(t, changedPlanIDs(plans))
-	require.Len(t, plans, len(groups))
-	for i, plan := range plans {
-		require.False(t, plan.Changed)
-		require.Equal(t, groups[i].LeaderStoreID, plan.LeaderStoreID)
-		require.Equal(t, "unchanged", plan.Status)
-		require.NotEmpty(t, plan.Reason)
-	}
-}
-
-func TestPlanTableRebalanceGreedilyBalancesVoterTargets(t *testing.T) {
-	groups := []*Group{
-		{ID: "p0", LeaderStoreID: 1, VoterStoreIDs: []uint64{1}},
-		{ID: "p1", LeaderStoreID: 2, VoterStoreIDs: []uint64{2}},
-		{ID: "fixed", BalancePolicy: BalancePolicyFixed, LeaderStoreID: 1, VoterStoreIDs: []uint64{1}},
-	}
-	plans, err := PlanTableRebalance(t.Context(), groups, BalanceOptions{
-		Stores: []uint64{1, 2, 3},
-		ActionSets: map[string]BalanceActionSet{
-			"p0": {VoterReplacements: map[uint64]map[uint64][]uint64{1: {2: {2}}}},
-			"p1": {VoterReplacements: map[uint64]map[uint64][]uint64{2: {3: {3}}}},
-		},
-	}, func(_ context.Context, _ *Group, _ *Group) (BalanceActionSet, bool) {
-		return BalanceActionSet{}, true
-	})
-	require.NoError(t, err)
-	require.Equal(t, []string{"p0", "p1"}, changedPlanIDs(plans))
-	byID := make(map[string]BalancePlan, len(plans))
-	for _, plan := range plans {
-		byID[plan.GroupID] = plan
-	}
-	require.Equal(t, uint64(2), byID["p0"].LeaderStoreID)
-	require.Equal(t, []uint64{2}, byID["p0"].VoterStoreIDs)
-	require.Equal(t, uint64(3), byID["p1"].LeaderStoreID)
-	require.Equal(t, []uint64{3}, byID["p1"].VoterStoreIDs)
-	require.False(t, byID["fixed"].Changed)
-}
-
-func TestUpdateGlobalBalanceCountsTracksVirtualTarget(t *testing.T) {
-	leaders := map[uint64]int{1: 2, 2: 1}
-	voters := map[uint64]int{1: 2, 2: 1, 3: 0}
-	group := &Group{LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2}}
-
-	updateGlobalBalanceCounts(leaders, voters, group, 2, []uint64{2, 3})
-
-	require.Equal(t, map[uint64]int{1: 1, 2: 2}, leaders)
-	require.Equal(t, map[uint64]int{1: 1, 2: 1, 3: 1}, voters)
-}
-
-func TestPlanTableRebalanceReturnsOriginalTargetsWithoutImprovement(t *testing.T) {
-	groups := []*Group{
-		{ID: "p0", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2}},
-		{ID: "p1", LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2}},
-	}
-	plans, err := PlanTableRebalance(t.Context(), groups, BalanceOptions{
-		Stores: []uint64{1, 2},
-		ActionSets: map[string]BalanceActionSet{
-			"p0": {LeaderTargets: []uint64{2}},
-			"p1": {LeaderTargets: []uint64{1}},
-		},
-	}, func(_ context.Context, _ *Group, _ *Group) (BalanceActionSet, bool) {
-		return BalanceActionSet{}, true
-	})
-	require.NoError(t, err)
-	require.Len(t, plans, len(groups))
-	require.Empty(t, changedPlanIDs(plans))
-	for i, plan := range plans {
-		require.Equal(t, groups[i].LeaderStoreID, plan.LeaderStoreID)
-		require.Equal(t, groups[i].VoterStoreIDs, plan.VoterStoreIDs)
-		require.Equal(t, groups[i].LeaderStoreID, plan.OldLeaderStoreID)
-		require.Equal(t, groups[i].VoterStoreIDs, plan.OldVoterStoreIDs)
-		require.Equal(t, plan.BeforeScore, plan.AfterScore)
-		require.Equal(t, "unchanged", plan.Status)
-		require.Equal(t, "no strict table-score improvement", plan.Reason)
-	}
-}
-
-func TestManualBalanceGlobalScoreUsesCompleteVoterTarget(t *testing.T) {
-	group := &Group{LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2}}
-	action := manualBalanceAction{target: target{
-		leader: 1, voters: []uint64{2, 3}, from: 2, to: 3,
-	}}
-	voterCounts := map[uint64]int{1: 3, 2: 2, 3: 0}
-	base := balanceScore{voter: sumSquares(voterCounts)}
-
-	score := scoreAfterAction(base, nil, voterCounts, group, action)
-
-	require.Equal(t, 9, score.voter)
-}
-
-func changedPlanIDs(plans []BalancePlan) []string {
-	ids := make([]string, 0)
-	for _, plan := range plans {
-		if plan.Changed {
-			ids = append(ids, plan.GroupID)
+func TestRebalanceAffinityGroupRejectsConcurrentRequestForTable(t *testing.T) {
+	manager := newBalanceRuntimeManager(t)
+	groupID := seedBalanceGroups(t, manager, []uint64{1})[0]
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	manager.SetBalanceRebalancer(func(ctx context.Context, id string, _ bool) ([]BalancePlan, error) {
+		close(entered)
+		select {
+		case <-release:
+			return []BalancePlan{{GroupID: id}}, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
 		}
+	})
+	type result struct {
+		plans []BalancePlan
+		err   error
 	}
-	return ids
+	first := make(chan result, 1)
+	go func() {
+		plans, err := manager.RebalanceAffinityGroup(t.Context(), groupID, true)
+		first <- result{plans: plans, err: err}
+	}()
+
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first rebalance did not start")
+	}
+	require.True(t, manager.IsManualBalanceRunning(groupID))
+	plans, err := manager.RebalanceAffinityGroup(t.Context(), groupID, false)
+	require.ErrorIs(t, err, ErrBalanceBusy)
+	require.Nil(t, plans)
+
+	close(release)
+	select {
+	case got := <-first:
+		require.NoError(t, got.err)
+		require.Len(t, got.plans, 1)
+	case <-time.After(5 * time.Second):
+		t.Fatal("first rebalance did not finish")
+	}
+	require.False(t, manager.IsManualBalanceRunning(groupID))
+}
+
+func TestRebalanceAffinityGroupReleasesTableAfterPreviewOrError(t *testing.T) {
+	failure := errors.New("manual rebalance failed")
+	for _, tc := range []struct {
+		name      string
+		apply     bool
+		callback  BalanceRebalancer
+		wantErr   error
+		wantPlans int
+	}{
+		{
+			name:  "preview",
+			apply: false,
+			callback: func(_ context.Context, id string, _ bool) ([]BalancePlan, error) {
+				return []BalancePlan{{GroupID: id}}, nil
+			},
+			wantPlans: 1,
+		},
+		{
+			name:  "error",
+			apply: true,
+			callback: func(context.Context, string, bool) ([]BalancePlan, error) {
+				return nil, failure
+			},
+			wantErr: failure,
+		},
+		{
+			name:  "wrapped conflict retains partial result",
+			apply: true,
+			callback: func(_ context.Context, id string, _ bool) ([]BalancePlan, error) {
+				return []BalancePlan{{GroupID: id, Status: "submitted"}}, fmt.Errorf("already committed 1 group: %w", errs.ErrEtcdTxnConflict.FastGenByArgs())
+			},
+			wantErr:   ErrBalanceConflict,
+			wantPlans: 1,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			manager := newBalanceRuntimeManager(t)
+			groupID := seedBalanceGroups(t, manager, []uint64{1})[0]
+			manager.SetBalanceRebalancer(tc.callback)
+
+			plans, err := manager.RebalanceAffinityGroup(t.Context(), groupID, tc.apply)
+
+			if tc.wantErr != nil {
+				require.ErrorIs(t, err, tc.wantErr)
+			} else {
+				require.NoError(t, err)
+			}
+			require.Len(t, plans, tc.wantPlans)
+			require.False(t, manager.IsManualBalanceRunning(groupID))
+		})
+	}
+}
+
+func TestRebalanceAffinityGroupCancellationReleasesTable(t *testing.T) {
+	for _, lifecycle := range []bool{false, true} {
+		name := "caller-context"
+		if lifecycle {
+			name = "manager-lifecycle"
+		}
+		t.Run(name, func(t *testing.T) {
+			managerCtx, cancelManager := context.WithCancel(t.Context())
+			defer cancelManager()
+			manager := newBalanceRuntimeManagerWithContext(t, managerCtx)
+			groupID := seedBalanceGroups(t, manager, []uint64{1})[0]
+			requestCtx := t.Context()
+			var cancel context.CancelFunc
+			if lifecycle {
+				cancel = cancelManager
+			} else {
+				var cancelRequest context.CancelFunc
+				requestCtx, cancelRequest = context.WithCancel(t.Context())
+				cancel = cancelRequest
+			}
+			defer cancel()
+			entered := make(chan struct{})
+			manager.SetBalanceRebalancer(func(ctx context.Context, _ string, _ bool) ([]BalancePlan, error) {
+				close(entered)
+				<-ctx.Done()
+				return nil, ctx.Err()
+			})
+			type result struct{ err error }
+			done := make(chan result, 1)
+			go func() {
+				_, err := manager.RebalanceAffinityGroup(requestCtx, groupID, true)
+				done <- result{err: err}
+			}()
+
+			select {
+			case <-entered:
+			case <-time.After(5 * time.Second):
+				t.Fatal("rebalance callback did not start")
+			}
+			require.True(t, manager.IsManualBalanceRunning(groupID))
+			cancel()
+			select {
+			case got := <-done:
+				require.ErrorIs(t, got.err, context.Canceled)
+			case <-time.After(5 * time.Second):
+				t.Fatal("rebalance did not stop after cancellation")
+			}
+			require.False(t, manager.IsManualBalanceRunning(groupID))
+		})
+	}
 }

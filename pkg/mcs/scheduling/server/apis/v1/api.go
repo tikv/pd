@@ -1805,7 +1805,7 @@ func rebalanceAffinityGroup(c *gin.Context) {
 			body = affinity.BalanceApplyResult{Plans: plans, Error: err.Error()}
 		}
 		switch {
-		case errors.Is(err, affinity.ErrBalanceBusy), errors.Is(err, affinity.ErrBalanceConflict), errs.ErrEtcdTxnConflict.Equal(err):
+		case errors.Is(err, affinity.ErrBalanceBusy), errors.Is(err, affinity.ErrBalanceConflict), errors.Is(err, errs.ErrEtcdTxnConflict), errs.ErrEtcdTxnConflict.Equal(err):
 			c.AbortWithStatusJSON(http.StatusConflict, body)
 		case errors.Is(err, affinity.ErrBalanceNotReady):
 			c.AbortWithStatusJSON(http.StatusServiceUnavailable, body)

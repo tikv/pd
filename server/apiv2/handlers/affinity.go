@@ -590,7 +590,7 @@ func affinityErrorStatus(err error) int {
 		errs.ErrAffinityGroupConflict.Equal(err),
 		errs.ErrInvalidKeyFormat.Equal(err):
 		return http.StatusBadRequest
-	case errs.ErrAffinityGroupExist.Equal(err), errs.ErrEtcdTxnConflict.Equal(err):
+	case errs.ErrAffinityGroupExist.Equal(err), errs.ErrEtcdTxnConflict.Equal(err), errors.Is(err, errs.ErrEtcdTxnConflict):
 		return http.StatusConflict
 	default:
 		// such as ErrAffinityInternal

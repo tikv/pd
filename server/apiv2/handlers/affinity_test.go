@@ -24,6 +24,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/affinity"
 )
 
@@ -49,6 +50,7 @@ func TestAffinityBalanceErrorsHaveExplicitHTTPStatus(t *testing.T) {
 		{affinity.ErrBalanceConflict, http.StatusConflict},
 		{affinity.ErrBalanceNotReady, http.StatusServiceUnavailable},
 		{context.DeadlineExceeded, http.StatusGatewayTimeout},
+		{errs.ErrEtcdTxnConflict.FastGenByArgs(), http.StatusConflict},
 	} {
 		t.Run(tc.err.Error(), func(t *testing.T) {
 			response := httptest.NewRecorder()

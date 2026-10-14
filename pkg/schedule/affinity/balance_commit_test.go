@@ -16,219 +16,263 @@ package affinity
 
 import (
 	"context"
+	"encoding/json"
 	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
-func TestBalanceCommitProtectsTableDependencies(t *testing.T) {
-	m := newBalanceRuntimeManager(t)
-	ids := seedBalanceGroups(t, m, []uint64{1, 1})
-	setTestBalanceBuilder(m, func(_ context.Context, g *GroupState, _ GroupKeyRanges) (BalanceActionSet, bool) {
-		return BalanceActionSet{LeaderTargets: g.VoterStoreIDs}, true
-	}, nil)
-	snapshot := manualBalanceSnapshot(t, m, ids[0])
-	require.NoError(t, m.captureBalanceDependencies(t.Context(), snapshot))
-	remote := m.GetAffinityGroupState(ids[1]).Group
+func prepareBalanceCommit(t *testing.T, manager *Manager, groupID string) *BalanceSnapshot {
+	t.Helper()
+	snapshot := manager.GetBalanceSnapshot(groupID)
+	require.NotNil(t, snapshot)
+	require.NoError(t, manager.PrepareBalanceCommit(t.Context(), snapshot))
+	return snapshot
+}
+
+func balanceCommitTarget(snapshot *BalanceSnapshot, groupID string, leaderStoreID uint64) *Group {
+	for _, group := range snapshot.Groups {
+		if group.ID == groupID {
+			target := group.Group
+			target.LeaderStoreID = leaderStoreID
+			return &target
+		}
+	}
+	return nil
+}
+
+func loadBalanceGroup(t *testing.T, manager *Manager, groupID string) Group {
+	t.Helper()
+	value, err := manager.storage.LoadAffinityGroup(groupID)
+	require.NoError(t, err)
+	var group Group
+	require.NoError(t, json.Unmarshal([]byte(value), &group))
+	return group
+}
+
+type balanceConditionalStorage struct {
+	storage.Storage
+	expected clientv3.Cmp
+	received [][]clientv3.Cmp
+}
+
+func (s *balanceConditionalStorage) RunInTxnWithConditions(ctx context.Context, conditions []clientv3.Cmp, f func(kv.Txn) error) error {
+	s.received = append(s.received, slices.Clone(conditions))
+	if len(conditions) != 1 ||
+		string(conditions[0].KeyBytes()) != string(s.expected.KeyBytes()) ||
+		conditions[0].Target != s.expected.Target || conditions[0].Result != s.expected.Result ||
+		string(conditions[0].ValueBytes()) != string(s.expected.ValueBytes()) {
+		return errs.ErrEtcdTxnConflict.FastGenByArgs()
+	}
+	value, err := s.Load(string(s.expected.KeyBytes()))
+	if err != nil {
+		return err
+	}
+	if value != string(s.expected.ValueBytes()) {
+		return errs.ErrEtcdTxnConflict.FastGenByArgs()
+	}
+	return s.RunInTxn(ctx, f)
+}
+
+func TestBalanceCommitRejectsChangedTableTarget(t *testing.T) {
+	manager := newBalanceRuntimeManager(t)
+	ids := seedBalanceGroups(t, manager, []uint64{1, 1})
+	snapshot := prepareBalanceCommit(t, manager, ids[0])
+
+	remote := manager.GetAffinityGroupState(ids[1]).Group
 	remote.LeaderStoreID = 2
-	require.NoError(t, m.storage.RunInTxn(t.Context(), func(txn kv.Txn) error {
-		return m.storage.SaveAffinityGroup(txn, remote.ID, &remote)
+	require.NoError(t, manager.storage.RunInTxn(t.Context(), func(txn kv.Txn) error {
+		return manager.storage.SaveAffinityGroup(txn, remote.ID, &remote)
 	}))
-	applied, err := m.commitBalancePlans(t.Context(), snapshot, []BalancePlan{{
-		GroupID: ids[0], LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2, 3}, Changed: true,
-	}})
+
+	committed, err := manager.CommitBalanceTarget(t.Context(), snapshot, balanceCommitTarget(snapshot, ids[0], 3))
 	require.NoError(t, err)
-	require.False(t, applied)
-	require.Equal(t, uint64(1), m.GetAffinityGroupState(ids[0]).LeaderStoreID)
+	require.False(t, committed)
+	require.Equal(t, uint64(1), manager.GetAffinityGroupState(ids[0]).LeaderStoreID)
 }
 
-func TestBalanceCommitProtectsTableMembership(t *testing.T) {
-	m := newBalanceRuntimeManager(t)
-	ids := seedBalanceGroups(t, m, []uint64{1, 1})
-	setTestBalanceBuilder(m, func(_ context.Context, g *GroupState, _ GroupKeyRanges) (BalanceActionSet, bool) {
-		return BalanceActionSet{LeaderTargets: g.VoterStoreIDs}, true
-	}, nil)
-	snapshot := manualBalanceSnapshot(t, m, ids[0])
-	require.NoError(t, m.captureBalanceDependencies(t.Context(), snapshot))
+func TestBalanceCommitRejectsChangedTableMembership(t *testing.T) {
+	manager := newBalanceRuntimeManager(t)
+	ids := seedBalanceGroups(t, manager, []uint64{1, 1})
+	snapshot := prepareBalanceCommit(t, manager, ids[0])
 	remote := Group{ID: "_tidb_pt_10_p99", LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2, 3}}
-	require.NoError(t, m.storage.RunInTxn(t.Context(), func(txn kv.Txn) error {
-		return m.storage.SaveAffinityGroup(txn, remote.ID, &remote)
+	require.NoError(t, manager.storage.RunInTxn(t.Context(), func(txn kv.Txn) error {
+		return manager.storage.SaveAffinityGroup(txn, remote.ID, &remote)
 	}))
-	applied, err := m.commitBalancePlans(t.Context(), snapshot, []BalancePlan{{
-		GroupID: ids[0], LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2, 3}, Changed: true,
-	}})
+
+	committed, err := manager.CommitBalanceTarget(t.Context(), snapshot, balanceCommitTarget(snapshot, ids[0], 3))
 	require.NoError(t, err)
-	require.False(t, applied)
+	require.False(t, committed)
 }
 
-func TestBalanceCommitRetainsLaterWatcherTarget(t *testing.T) {
-	m := newBalanceRuntimeManager(t)
-	ids := seedBalanceGroups(t, m, []uint64{1, 1})
-	setTestBalanceBuilder(m, func(_ context.Context, g *GroupState, _ GroupKeyRanges) (BalanceActionSet, bool) {
-		return BalanceActionSet{LeaderTargets: g.VoterStoreIDs}, true
+func TestBalanceCommitRejectsPlacementTokenChange(t *testing.T) {
+	manager := newBalanceRuntimeManager(t)
+	ids := seedBalanceGroups(t, manager, []uint64{1})
+	snapshot := prepareBalanceCommit(t, manager, ids[0])
+	placementKey := endpoint.AffinityPlacementRevisionKey()
+	require.NoError(t, manager.storage.RunInTxn(t.Context(), func(txn kv.Txn) error {
+		return txn.Save(placementKey, "external-placement")
+	}))
+
+	committed, err := manager.CommitBalanceTarget(t.Context(), snapshot, balanceCommitTarget(snapshot, ids[0], 2))
+	require.NoError(t, err)
+	require.False(t, committed)
+	require.Equal(t, uint64(1), manager.GetAffinityGroupState(ids[0]).LeaderStoreID)
+}
+
+func TestPrepareBalanceCommitRejectsMissingPrimaryTerm(t *testing.T) {
+	manager := newBalanceRuntimeManager(t)
+	ids := seedBalanceGroups(t, manager, []uint64{1})
+	manager.SetBalanceCommitGuard(func() ([]clientv3.Cmp, bool) {
+		return nil, false
 	}, nil)
-	snapshot := manualBalanceSnapshot(t, m, ids[0])
-	require.NoError(t, m.captureBalanceDependencies(t.Context(), snapshot))
-	base := m.storage.(storage.Storage)
-	m.storage = &balanceSamplingStorage{Storage: base, after: func() {
-		later := m.GetAffinityGroupState(ids[0]).Group
+	snapshot := manager.GetBalanceSnapshot(ids[0])
+	require.NotNil(t, snapshot)
+	require.True(t, errs.ErrEtcdTxnConflict.Equal(manager.PrepareBalanceCommit(t.Context(), snapshot)))
+}
+
+func TestBalanceCommitRejectsRevokedPrimaryTerm(t *testing.T) {
+	manager := newBalanceRuntimeManager(t)
+	ids := seedBalanceGroups(t, manager, []uint64{1})
+	base := manager.storage.(storage.Storage)
+	termKey, termValue := "affinity-test-primary", "primary-term-1"
+	require.NoError(t, base.RunInTxn(t.Context(), func(txn kv.Txn) error {
+		return txn.Save(termKey, termValue)
+	}))
+	expected := clientv3.Compare(clientv3.Value(termKey), "=", termValue)
+	conditional := &balanceConditionalStorage{Storage: base, expected: expected}
+	manager.storage = conditional
+	manager.SetBalanceCommitGuard(func() ([]clientv3.Cmp, bool) {
+		return []clientv3.Cmp{expected}, true
+	}, nil)
+
+	snapshot := manager.GetBalanceSnapshot(ids[0])
+	require.NotNil(t, snapshot)
+	require.NoError(t, manager.PrepareBalanceCommit(t.Context(), snapshot))
+	require.Len(t, conditional.received, 1)
+	require.Equal(t, []clientv3.Cmp{expected}, conditional.received[0])
+
+	require.NoError(t, base.RunInTxn(t.Context(), func(txn kv.Txn) error {
+		return txn.Save(termKey, "primary-term-2")
+	}))
+	committed, err := manager.CommitBalanceTarget(t.Context(), snapshot, balanceCommitTarget(snapshot, ids[0], 2))
+	require.NoError(t, err)
+	require.False(t, committed)
+	require.Len(t, conditional.received, 2)
+	require.Equal(t, []clientv3.Cmp{expected}, conditional.received[1])
+	require.Equal(t, uint64(1), manager.GetAffinityGroupState(ids[0]).LeaderStoreID)
+	require.Equal(t, uint64(1), loadBalanceGroup(t, manager, ids[0]).LeaderStoreID)
+}
+
+func TestPrepareBalanceCommitRejectsIndependentRangeWatcherUpdates(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		apply func(*testing.T, *Manager, string)
+	}{
+		{
+			name: "labeler-ahead-of-range-cache",
+			apply: func(t *testing.T, manager *Manager, groupID string) {
+				rule := MakeLabelRule(GroupKeyRanges{GroupID: groupID, KeyRanges: []keyutil.KeyRange{{StartKey: []byte{9}, EndKey: []byte{10}}}})
+				require.NoError(t, manager.regionLabeler.SetLabelRule(rule))
+			},
+		},
+		{
+			name: "range-cache-ahead-of-labeler",
+			apply: func(t *testing.T, manager *Manager, groupID string) {
+				rule := MakeLabelRule(GroupKeyRanges{GroupID: groupID, KeyRanges: []keyutil.KeyRange{{StartKey: []byte{9}, EndKey: []byte{10}}}})
+				data, err := json.Marshal(rule)
+				require.NoError(t, err)
+				rule, err = labeler.NewLabelRuleFromJSON(data)
+				require.NoError(t, err)
+				require.NoError(t, manager.SyncKeyRangesFromEtcd(rule))
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			manager := newBalanceRuntimeManager(t)
+			groupID := seedBalanceGroups(t, manager, []uint64{1})[0]
+			tc.apply(t, manager, groupID)
+			snapshot := manager.GetBalanceSnapshot(groupID)
+			require.NotNil(t, snapshot)
+			require.True(t, manager.BalanceSnapshotCurrent(snapshot))
+
+			err := manager.PrepareBalanceCommit(t.Context(), snapshot)
+			require.True(t, errs.ErrEtcdTxnConflict.Equal(err))
+		})
+	}
+}
+
+func TestPrepareBalanceCommitIgnoresRangeOrder(t *testing.T) {
+	manager := newBalanceRuntimeManager(t)
+	ranges := GroupKeyRanges{GroupID: "_tidb_pt_10_p1", KeyRanges: []keyutil.KeyRange{
+		{StartKey: []byte{0}, EndKey: []byte{1}}, {StartKey: []byte{2}, EndKey: []byte{3}},
+	}}
+	require.NoError(t, manager.CreateAffinityGroups([]GroupKeyRanges{ranges}))
+	reordered := cloneBalanceRanges(ranges)
+	slices.Reverse(reordered.KeyRanges)
+	require.NoError(t, manager.regionLabeler.SetLabelRule(MakeLabelRule(reordered)))
+
+	snapshot := manager.GetBalanceSnapshot(ranges.GroupID)
+	require.NotNil(t, snapshot)
+	require.NoError(t, manager.PrepareBalanceCommit(t.Context(), snapshot))
+	require.Equal(t, ranges, snapshot.Ranges[ranges.GroupID])
+}
+
+func TestBalanceCommitDoesNotOverwriteLaterWatcherTarget(t *testing.T) {
+	manager := newBalanceRuntimeManager(t)
+	ids := seedBalanceGroups(t, manager, []uint64{1, 1})
+	snapshot := prepareBalanceCommit(t, manager, ids[0])
+	base := manager.storage.(storage.Storage)
+	manager.storage = &balanceSamplingStorage{Storage: base, after: func() {
+		later := manager.GetAffinityGroupState(ids[0]).Group
 		later.LeaderStoreID = 3
 		require.NoError(t, base.RunInTxn(t.Context(), func(txn kv.Txn) error {
 			return base.SaveAffinityGroup(txn, later.ID, &later)
 		}))
-		m.SyncGroupFromEtcd(&later)
+		manager.SyncGroupFromEtcd(&later)
 	}}
-	committed, err := m.commitBalancePlans(t.Context(), snapshot, []BalancePlan{{
-		GroupID: ids[0], LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2, 3}, Changed: true,
-	}})
+
+	committed, err := manager.CommitBalanceTarget(t.Context(), snapshot, balanceCommitTarget(snapshot, ids[0], 2))
 	require.NoError(t, err)
 	require.True(t, committed)
-	require.Equal(t, uint64(3), m.GetAffinityGroupState(ids[0]).LeaderStoreID)
-	require.Equal(t, uint64(2), snapshot.groups[0].LeaderStoreID)
-	stored, err := base.Load(endpoint.AffinityTableRevisionKey(snapshot.tableID))
+	require.Equal(t, uint64(3), manager.GetAffinityGroupState(ids[0]).LeaderStoreID)
+	require.Equal(t, uint64(3), loadBalanceGroup(t, manager, ids[0]).LeaderStoreID)
+	key := endpoint.AffinityTableRevisionKey(snapshot.TableID)
+	stored, err := base.Load(key)
 	require.NoError(t, err)
-	require.NotEqual(t, stored, snapshot.dependencies[endpoint.AffinityTableRevisionKey(snapshot.tableID)])
+	require.NotEqual(t, stored, snapshot.dependencies[key])
 }
 
-func TestBalanceCommitBatchUsesExactTargetToken(t *testing.T) {
-	m := newBalanceRuntimeManager(t)
-	ids := seedBalanceGroups(t, m, []uint64{1, 1})
-	setTestBalanceBuilder(m, func(_ context.Context, g *GroupState, _ GroupKeyRanges) (BalanceActionSet, bool) {
-		return BalanceActionSet{LeaderTargets: g.VoterStoreIDs}, true
-	}, nil)
-	snapshot := manualBalanceSnapshot(t, m, ids[0])
-	require.NoError(t, m.captureBalanceDependencies(t.Context(), snapshot))
-	plans := []BalancePlan{
-		{GroupID: ids[0], LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2, 3}, Changed: true},
-		{GroupID: ids[1], LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2, 3}, Changed: true},
-	}
-	applied, err := m.commitBalancePlans(t.Context(), snapshot, plans)
-	require.NoError(t, err)
-	require.True(t, applied)
-	key := endpoint.AffinityTableRevisionKey(snapshot.tableID)
-	var stored string
-	err = m.storage.RunInTxn(t.Context(), func(txn kv.Txn) error {
-		var loadErr error
-		stored, loadErr = txn.Load(key)
-		return loadErr
-	})
-	require.NoError(t, err)
-	require.Equal(t, stored, snapshot.dependencies[key])
-	require.Equal(t, uint64(2), m.GetAffinityGroupState(ids[0]).LeaderStoreID)
-	require.Equal(t, uint64(2), m.GetAffinityGroupState(ids[1]).LeaderStoreID)
-
-	// An external write after our batch must fence a retry that still carries
-	// the old snapshot token.
-	require.NoError(t, m.storage.RunInTxn(t.Context(), func(txn kv.Txn) error {
-		return txn.Save(key, "external-target")
-	}))
-	applied, err = m.commitBalancePlans(t.Context(), snapshot, []BalancePlan{{
-		GroupID: ids[0], LeaderStoreID: 3, VoterStoreIDs: []uint64{1, 2, 3}, Changed: true,
-	}})
-	require.NoError(t, err)
-	require.False(t, applied)
-	require.Equal(t, uint64(2), m.GetAffinityGroupState(ids[0]).LeaderStoreID)
-}
-
-func TestBalanceCommitRejectsPlacementChange(t *testing.T) {
-	m := newBalanceRuntimeManager(t)
-	ids := seedBalanceGroups(t, m, []uint64{1, 1})
-	setTestBalanceBuilder(m, func(_ context.Context, g *GroupState, _ GroupKeyRanges) (BalanceActionSet, bool) {
-		return BalanceActionSet{LeaderTargets: g.VoterStoreIDs}, true
-	}, nil)
-	snapshot := manualBalanceSnapshot(t, m, ids[0])
-	require.NoError(t, m.captureBalanceDependencies(t.Context(), snapshot))
-	require.NoError(t, m.storage.RunInTxn(t.Context(), func(txn kv.Txn) error {
-		return txn.Save(endpoint.AffinityPlacementRevisionKey(), "changed")
-	}))
-	applied, err := m.commitBalancePlans(t.Context(), snapshot, []BalancePlan{{
-		GroupID: ids[0], LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2, 3}, Changed: true,
-	}})
-	require.NoError(t, err)
-	require.False(t, applied)
-}
-
-func TestBalanceDependenciesDoNotReuseChangedLabelRevision(t *testing.T) {
-	m := newBalanceRuntimeManager(t)
-	ids := seedBalanceGroups(t, m, []uint64{1})
-	setTestBalanceBuilder(m, func(context.Context, *GroupState, GroupKeyRanges) (BalanceActionSet, bool) {
-		return BalanceActionSet{}, true
-	}, nil)
-	snapshot := manualBalanceSnapshot(t, m, ids[0])
-	require.NoError(t, m.captureBalanceDependencies(t.Context(), snapshot))
-	require.NotNil(t, snapshot.dependencies)
-	require.NoError(t, m.regionLabeler.DeleteLabelRule(GetLabelRuleID(ids[0])))
-	require.True(t, errs.ErrEtcdTxnConflict.Equal(m.captureBalanceDependencies(t.Context(), snapshot)))
-	// A fresh snapshot must also wait for the affinity range watcher to catch up.
-	fresh := manualBalanceSnapshot(t, m, ids[0])
-	require.True(t, errs.ErrEtcdTxnConflict.Equal(m.captureBalanceDependencies(t.Context(), fresh)))
-	m.SyncKeyRangesDeleteFromEtcd(GetLabelRuleID(ids[0]))
-	require.NoError(t, m.captureBalanceDependencies(t.Context(), manualBalanceSnapshot(t, m, ids[0])))
-}
-
-func TestBalanceDependenciesIgnoreRangeOrder(t *testing.T) {
-	m := newBalanceRuntimeManager(t)
-	ranges := GroupKeyRanges{GroupID: "_tidb_pt_10_p1", KeyRanges: []keyutil.KeyRange{
-		{StartKey: []byte{0}, EndKey: []byte{1}}, {StartKey: []byte{2}, EndKey: []byte{3}},
-	}}
-	require.NoError(t, m.CreateAffinityGroups([]GroupKeyRanges{ranges}))
-	setTestBalanceBuilder(m, func(context.Context, *GroupState, GroupKeyRanges) (BalanceActionSet, bool) {
-		return BalanceActionSet{}, true
-	}, nil)
-	reordered := cloneBalanceRanges(ranges)
-	slices.Reverse(reordered.KeyRanges)
-	require.NoError(t, m.regionLabeler.SetLabelRule(MakeLabelRule(reordered)))
-	snapshot := manualBalanceSnapshot(t, m, ranges.GroupID)
-	require.NoError(t, m.captureBalanceDependencies(t.Context(), snapshot))
-	require.Equal(t, ranges, snapshot.ranges[ranges.GroupID], "comparison must not reorder the planner's ranges")
-}
-
-func TestBalancePreviewNoopDoesNotAdvanceTargetRevision(t *testing.T) {
-	m := newBalanceRuntimeManager(t)
-	ids := seedBalanceGroups(t, m, []uint64{1})
-	setTestBalanceBuilder(m, func(_ context.Context, g *GroupState, _ GroupKeyRanges) (BalanceActionSet, bool) {
-		return BalanceActionSet{LeaderTargets: g.VoterStoreIDs}, true
-	}, nil)
-	key := endpoint.AffinityTableRevisionKey(ids[0])
-	load := func() string {
-		var value string
-		require.NoError(t, m.storage.RunInTxn(t.Context(), func(txn kv.Txn) error {
-			var err error
-			value, err = txn.Load(key)
-			return err
+func TestBalanceCommitDoesNotPublishToRebuiltGroupWithSameID(t *testing.T) {
+	manager := newBalanceRuntimeManager(t)
+	ids := seedBalanceGroups(t, manager, []uint64{1})
+	snapshot := prepareBalanceCommit(t, manager, ids[0])
+	base := manager.storage.(storage.Storage)
+	rebuilt := manager.GetAffinityGroupState(ids[0]).Group
+	rebuilt.CreateTimestamp++
+	manager.storage = &balanceSamplingStorage{Storage: base, after: func() {
+		require.NoError(t, base.RunInTxn(t.Context(), func(txn kv.Txn) error {
+			return base.SaveAffinityGroup(txn, rebuilt.ID, &rebuilt)
 		}))
-		return value
-	}
-	before := load()
-	plans, err := m.balanceTable(t.Context(), ids[0], false)
-	require.NoError(t, err)
-	require.Zero(t, changedPlans(plans))
-	require.Equal(t, before, load())
-}
+		manager.SyncGroupFromEtcd(&rebuilt)
+	}}
 
-func TestBalanceCommitRejectsExternalPlacementWriteAfterBatch(t *testing.T) {
-	m := newBalanceRuntimeManager(t)
-	ids := seedBalanceGroups(t, m, []uint64{1, 1})
-	setTestBalanceBuilder(m, func(_ context.Context, g *GroupState, _ GroupKeyRanges) (BalanceActionSet, bool) {
-		return BalanceActionSet{LeaderTargets: g.VoterStoreIDs}, true
-	}, nil)
-	snapshot := manualBalanceSnapshot(t, m, ids[0])
-	require.NoError(t, m.captureBalanceDependencies(t.Context(), snapshot))
-	placementKey := endpoint.AffinityPlacementRevisionKey()
-	require.NoError(t, m.storage.RunInTxn(t.Context(), func(txn kv.Txn) error {
-		return txn.Save(placementKey, "external-placement")
-	}))
-	applied, err := m.commitBalancePlans(t.Context(), snapshot, []BalancePlan{{
-		GroupID: ids[0], LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2, 3}, Changed: true,
-	}})
+	committed, err := manager.CommitBalanceTarget(t.Context(), snapshot, balanceCommitTarget(snapshot, ids[0], 2))
 	require.NoError(t, err)
-	require.False(t, applied)
-	require.Equal(t, uint64(1), m.GetAffinityGroupState(ids[0]).LeaderStoreID)
+	require.True(t, committed)
+	current := manager.GetAffinityGroupState(ids[0])
+	require.Equal(t, rebuilt.CreateTimestamp, current.CreateTimestamp)
+	require.Equal(t, uint64(1), current.LeaderStoreID)
+	persisted := loadBalanceGroup(t, manager, ids[0])
+	require.Equal(t, rebuilt.CreateTimestamp, persisted.CreateTimestamp)
+	require.Equal(t, uint64(1), persisted.LeaderStoreID)
 }
