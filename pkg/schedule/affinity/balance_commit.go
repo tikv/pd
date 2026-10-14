@@ -126,6 +126,9 @@ func balanceTableKeyRange(snapshot *balanceSnapshot, prefix string) (string, str
 }
 
 func (m *Manager) captureBalanceDependencies(ctx context.Context, snapshot *balanceSnapshot) error {
+	if !m.balanceSnapshotCurrent(snapshot) {
+		return balanceConflict()
+	}
 	// Sample before range reconciliation and verify after the authoritative
 	// reads. Independent watchers cannot pair old ranges with a newer token.
 	labels := m.regionLabeler.GetRevision()
@@ -266,7 +269,9 @@ func (m *Manager) captureBalanceDependencies(ctx context.Context, snapshot *bala
 	}
 	m.Lock()
 	defer m.Unlock()
-	if labels != m.regionLabeler.GetRevision() || m.balanceMetadataSource != version.source ||
+	state := m.balanceTables[snapshot.tableID]
+	if state == nil || state.rangeVersion != snapshot.rangeVersion ||
+		labels != m.regionLabeler.GetRevision() || m.balanceMetadataSource != version.source ||
 		m.currentBalanceRuleRevisionLocked() != snapshot.ruleRevision {
 		return balanceConflict()
 	}
@@ -290,7 +295,7 @@ func (m *Manager) balanceSnapshotCurrent(snapshot *balanceSnapshot) bool {
 	m.RLock()
 	defer m.RUnlock()
 	table := m.balanceTables[snapshot.tableID]
-	return table != nil && m.balanceFingerprintLocked(table) == snapshot.fingerprint &&
+	return table != nil && m.balanceFingerprintLocked(table) == snapshot.fingerprint && table.rangeVersion == snapshot.rangeVersion &&
 		m.currentBalanceRuleRevisionLocked() == snapshot.ruleRevision
 }
 
