@@ -508,9 +508,10 @@ func (c *AffinityChecker) buildBalanceActionsForTarget(ctx context.Context, actu
 				}
 				return pendingBalanceBuild(progress, checks)
 			}
-			if status == bestLocationTemporarilyBlocked {
+			switch status {
+			case bestLocationTemporarilyBlocked:
 				progress.temporarilyBlocked = true
-			} else if status == bestLocationSatisfied {
+			case bestLocationSatisfied:
 				if mode == affinity.BalanceBuildLeaders {
 					progress.nextLeaderTarget = append(progress.nextLeaderTarget, progress.pendingPlacementLeader)
 					if progress.regionScan.done() {

@@ -2,6 +2,15 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package affinity
 
@@ -13,6 +22,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keyutil"
@@ -56,6 +66,35 @@ func TestBalanceCommitProtectsTableMembership(t *testing.T) {
 	}})
 	require.NoError(t, err)
 	require.False(t, applied)
+}
+
+func TestBalanceCommitRetainsLaterWatcherTarget(t *testing.T) {
+	m := newBalanceRuntimeManager(t)
+	ids := seedBalanceGroups(t, m, []uint64{1, 1})
+	setTestBalanceBuilder(m, func(_ context.Context, g *GroupState, _ GroupKeyRanges) (BalanceActionSet, bool) {
+		return BalanceActionSet{LeaderTargets: g.VoterStoreIDs}, true
+	}, nil)
+	snapshot := manualBalanceSnapshot(t, m, ids[0])
+	require.NoError(t, m.captureBalanceDependencies(t.Context(), snapshot))
+	base := m.storage.(storage.Storage)
+	m.storage = &balanceSamplingStorage{Storage: base, after: func() {
+		later := m.GetAffinityGroupState(ids[0]).Group
+		later.LeaderStoreID = 3
+		require.NoError(t, base.RunInTxn(t.Context(), func(txn kv.Txn) error {
+			return base.SaveAffinityGroup(txn, later.ID, &later)
+		}))
+		m.SyncGroupFromEtcd(&later)
+	}}
+	committed, err := m.commitBalancePlans(t.Context(), snapshot, []BalancePlan{{
+		GroupID: ids[0], LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2, 3}, Changed: true,
+	}})
+	require.NoError(t, err)
+	require.True(t, committed)
+	require.Equal(t, uint64(3), m.GetAffinityGroupState(ids[0]).LeaderStoreID)
+	require.Equal(t, uint64(2), snapshot.groups[0].LeaderStoreID)
+	stored, err := base.Load(endpoint.AffinityTableRevisionKey(snapshot.tableID))
+	require.NoError(t, err)
+	require.NotEqual(t, stored, snapshot.dependencies[endpoint.AffinityTableRevisionKey(snapshot.tableID)])
 }
 
 func TestBalanceCommitBatchUsesExactTargetToken(t *testing.T) {
