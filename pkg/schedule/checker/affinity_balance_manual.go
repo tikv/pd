@@ -15,13 +15,16 @@
 package checker
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"slices"
 	"time"
 
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 const (
@@ -257,13 +260,17 @@ func (c *AffinityChecker) rebalanceTable(ctx context.Context, groupID string, ap
 			}
 		}
 		if complete {
+			complete, err = c.checkManualBalanceRegionSnapshot(ctx, snapshot, plans, changed)
+			if err != nil {
+				return fail(err, changed[0])
+			}
 			current, err := c.refreshManualBalance(ctx, snapshot, fingerprint)
 			if err != nil {
 				return fail(err, changed[0])
 			}
 			// A heartbeat may invalidate an earlier group's convergence check.
 			// Retry the whole round; it is normal migration, not a conflict.
-			if current.Version.Table == scanGeneration && c.affinityManager.BalanceSnapshotCurrent(current) {
+			if complete && current.Version.Table == scanGeneration && c.affinityManager.BalanceSnapshotCurrent(current) {
 				return plans, nil
 			}
 			for _, index := range changed {
@@ -276,6 +283,58 @@ func (c *AffinityChecker) rebalanceTable(ctx context.Context, groupID string, ap
 		case <-ticker.C:
 		}
 	}
+}
+
+// Read every submitted range under one RegionTree read lock. Checker observation
+// may lag behind heartbeats; Manager generations alone cannot prove convergence.
+func (c *AffinityChecker) checkManualBalanceRegionSnapshot(ctx context.Context, snapshot *affinity.BalanceSnapshot,
+	plans []affinity.BalancePlan, changed []int) (bool, error) {
+	ranges := keyutil.NewKeyRangesWithSize(len(changed))
+	groups := make(map[string]*affinity.GroupState, len(changed))
+	for _, index := range changed {
+		id := plans[index].GroupID
+		groups[id] = nil
+		for _, keyRange := range snapshot.Ranges[id].KeyRanges {
+			ranges.Append(keyRange.StartKey, keyRange.EndKey)
+		}
+	}
+	for _, group := range snapshot.Groups {
+		if _, exists := groups[group.ID]; exists {
+			groups[group.ID] = group
+		}
+	}
+	slices.SortFunc(ranges.Ranges(), func(a, b *keyutil.KeyRange) int { return bytes.Compare(a.StartKey, b.StartKey) })
+	regions, err := c.cluster.BatchScanRegions(ranges, core.WithOutputMustContainAllKeyRange())
+	if err != nil || len(regions) == 0 {
+		return false, ctx.Err()
+	}
+	// The batch scanner checks internal gaps and finite ends. Also require
+	// coverage at each start and at an unbounded end.
+	first := 0
+	for _, keyRange := range ranges.Ranges() {
+		for first < len(regions) && len(regions[first].GetEndKey()) > 0 && bytes.Compare(regions[first].GetEndKey(), keyRange.StartKey) <= 0 {
+			first++
+		}
+		if first == len(regions) || !balanceRegionCoversKeyRange(regions[first], keyRange.StartKey, keyRange.EndKey) {
+			return false, ctx.Err()
+		}
+	}
+	if len(ranges.Ranges()[len(ranges.Ranges())-1].EndKey) == 0 && len(regions[len(regions)-1].GetEndKey()) != 0 {
+		return false, ctx.Err()
+	}
+	// BatchScanRegions has released the tree lock before placement and operator
+	// checks run. All checks below use the same captured RegionInfo objects.
+	waiting := c.waitingAffinityRegions()
+	for _, region := range regions {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		actual, _ := c.affinityManager.GetRegionAffinityGroupState(region)
+		if actual == nil || groups[actual.ID] == nil || c.validateBalanceRegion(groups[actual.ID], nil, region, waiting) != balanceAllowed {
+			return false, nil
+		}
+	}
+	return true, ctx.Err()
 }
 
 func (c *AffinityChecker) checkManualBalanceConvergence(ctx context.Context, snapshot *affinity.BalanceSnapshot, plan *affinity.BalancePlan) (bool, error) {

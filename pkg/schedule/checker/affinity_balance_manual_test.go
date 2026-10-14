@@ -199,12 +199,16 @@ func TestManualBalanceRechecksSubmissionGateBetweenBatches(t *testing.T) {
 }
 
 func TestManualBalanceRechecksEarlierGroupAfterConvergenceHeartbeat(t *testing.T) {
-	for _, restoreImmediately := range []bool{false, true} {
-		name := "remains off target"
-		if restoreImmediately {
-			name = "returns to target in the same round"
-		}
-		t.Run(name, func(t *testing.T) {
+	for _, test := range []struct {
+		name               string
+		restoreImmediately bool
+		observeHeartbeat   bool
+	}{
+		{name: "remains off target", observeHeartbeat: true},
+		{name: "returns to target in the same round", restoreImmediately: true, observeHeartbeat: true},
+		{name: "checker observation delayed"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
 			checker, manager, initial := newManualBalanceFixture(t, 3, []manualBalanceFixtureGroup{
 				{leader: 1, voters: []uint64{1, 2, 3}},
 				{leader: 1, voters: []uint64{1, 2, 3}},
@@ -217,15 +221,18 @@ func TestManualBalanceRechecksEarlierGroupAfterConvergenceHeartbeat(t *testing.T
 			tc := checker.cluster.(*mockcluster.Cluster)
 			firstKey := initial.Ranges[changed[0].GroupID].KeyRanges[0].StartKey
 			secondKey := initial.Ranges[changed[1].GroupID].KeyRanges[0].StartKey
-			observe := func(key []byte, leader uint64) {
+			updateRegion := func(key []byte, leader uint64, observe bool) {
 				region := tc.GetRegionByKey(key)
 				heartbeat := region.Clone(core.WithLeader(region.GetStorePeer(leader)))
 				tc.PutRegion(heartbeat)
-				manager.ObserveBalanceRegion(heartbeat)
-				manager.GetAndCacheRegionAffinityGroupState(heartbeat)
+				if observe {
+					manager.ObserveBalanceRegion(heartbeat)
+					manager.GetAndCacheRegionAffinityGroupState(heartbeat)
+				}
 			}
 			var armed atomic.Bool
 			firstChecked, injected, rescanned := false, false, false
+			var generationBefore, generationAfter uint64
 			invalidated, rechecked := make(chan struct{}), make(chan struct{})
 			checker.cluster = &affinityBalanceScanCluster{CheckerCluster: tc, beforeScan: func(key []byte) {
 				if !armed.Load() {
@@ -239,10 +246,14 @@ func TestManualBalanceRechecksEarlierGroupAfterConvergenceHeartbeat(t *testing.T
 					}
 				}
 				if firstChecked && !injected && bytes.Equal(key, secondKey) {
-					observe(firstKey, changed[0].OldLeaderStoreID)
-					if restoreImmediately {
-						observe(firstKey, changed[0].LeaderStoreID)
+					version, _ := manager.GetBalanceVersion(initial.TableID)
+					generationBefore = version.Table
+					updateRegion(firstKey, changed[0].OldLeaderStoreID, test.observeHeartbeat)
+					if test.restoreImmediately {
+						updateRegion(firstKey, changed[0].LeaderStoreID, test.observeHeartbeat)
 					}
+					version, _ = manager.GetBalanceVersion(initial.TableID)
+					generationAfter = version.Table
 					injected = true
 					close(invalidated)
 				}
@@ -267,7 +278,7 @@ func TestManualBalanceRechecksEarlierGroupAfterConvergenceHeartbeat(t *testing.T
 				return true
 			}, 3*time.Second, time.Millisecond)
 			for _, plan := range preview {
-				observe(initial.Ranges[plan.GroupID].KeyRanges[0].StartKey, plan.LeaderStoreID)
+				updateRegion(initial.Ranges[plan.GroupID].KeyRanges[0].StartKey, plan.LeaderStoreID, true)
 			}
 			armed.Store(true)
 			select {
@@ -277,6 +288,9 @@ func TestManualBalanceRechecksEarlierGroupAfterConvergenceHeartbeat(t *testing.T
 			case <-ctx.Done():
 				t.Fatal("convergence interleaving was not reached")
 			}
+			if !test.observeHeartbeat {
+				require.Equal(t, generationBefore, generationAfter, "RegionTree changes must be checked before checker observation")
+			}
 			select {
 			case <-rechecked:
 			case done := <-results:
@@ -284,8 +298,8 @@ func TestManualBalanceRechecksEarlierGroupAfterConvergenceHeartbeat(t *testing.T
 			case <-ctx.Done():
 				t.Fatal("invalidated convergence round was not retried")
 			}
-			if !restoreImmediately {
-				observe(firstKey, changed[0].LeaderStoreID)
+			if !test.restoreImmediately {
+				updateRegion(firstKey, changed[0].LeaderStoreID, test.observeHeartbeat)
 			}
 			select {
 			case done := <-results:
