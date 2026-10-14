@@ -1828,16 +1828,24 @@ func TestEvictSlowStorePersistedFormatLegacyCompatible(t *testing.T) {
 
 	// A config written by an older PD (no group field) or by a development build that put
 	// several ids in evict-stores is normalized on load.
+	// The normalized layout is written back, so the stored value never keeps the multi-id
+	// evict-stores an older leader would misread.
 	re.NoError(st.SaveSchedulerConfig(es.GetName(), []byte(`{"evict-stores":[3,1]}`)))
 	re.NoError(es.ReloadConfig())
 	re.Equal([]uint64{3, 1}, conf.evictedStores())
 	re.Equal([]uint64{3}, conf.EvictedStores)
 	re.Equal([]uint64{1}, conf.EvictedGroupStores)
+	re.Equal([]uint64{3}, loadLegacy().EvictedStores)
+	re.NoError(conf.load(&persisted))
+	re.Equal([]uint64{1}, persisted.EvictedGroupStores)
+
+	re.NoError(st.SaveSchedulerConfig(es.GetName(), []byte(`{"evict-stores":[3,1]}`)))
 	es2, err := CreateScheduler(types.EvictSlowStoreScheduler, oc, st,
 		ConfigJSONDecoder([]byte(`{"evict-stores":[3,1]}`)), nil)
 	re.NoError(err)
 	re.Equal([]uint64{3}, es2.(*evictSlowStoreScheduler).conf.EvictedStores)
 	re.Equal([]uint64{1}, es2.(*evictSlowStoreScheduler).conf.EvictedGroupStores)
+	re.Equal([]uint64{3}, loadLegacy().EvictedStores)
 
 	// The list API exposes the whole group.
 	data, err := json.Marshal(conf)
@@ -1892,6 +1900,7 @@ func TestEvictSlowStorePrepareDoesNotOverwriteConcurrentReload(t *testing.T) {
 	re.NoError(err)
 	conf := es.(*evictSlowStoreScheduler).conf
 	re.NoError(conf.setEvictedStoresAndPersist([]uint64{1}))
+	re.NoError(es.PrepareConfig(tc))
 
 	const fp = "github.com/tikv/pd/pkg/schedule/schedulers/beforeAddEvictedStores"
 	re.NoError(failpoint.EnableCall(fp, func() {
@@ -1904,9 +1913,61 @@ func TestEvictSlowStorePrepareDoesNotOverwriteConcurrentReload(t *testing.T) {
 
 	re.NoError(es.(*evictSlowStoreScheduler).prepareEvictLeader(tc, []uint64{2, 3}))
 	re.Equal([]uint64{1, 3, 2}, conf.evictedStores())
-	re.True(tc.GetStore(2).EvictedAsSlowStore())
+	// Store 3 entered the set through the reload, which marked it; the duplicate mark made by
+	// prepareEvictLeader is undone, so it stays marked exactly once.
+	for _, id := range []uint64{1, 2, 3} {
+		re.True(tc.GetStore(id).EvictedAsSlowStore(), "store %d", id)
+	}
 
 	var persisted evictSlowStoreSchedulerConfig
 	re.NoError(conf.load(&persisted))
 	re.Equal([]uint64{1, 3, 2}, persisted.evictedStoresLocked())
+
+	es.(*evictSlowStoreScheduler).cleanupEvictLeader(tc)
+	requireSlowMarkCleared(re, tc, 1, 2, 3)
+}
+
+// TestEvictSlowStoreReloadReconcilesSlowMarks: ids a reload adds to or removes from the disk
+// eviction set get a slow-evicted mark or lose it, like on every other path, so a store in the
+// set is never left eligible for leaders and the mark stays balanced.
+func TestEvictSlowStoreReloadReconcilesSlowMarks(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	for id := uint64(1); id <= 3; id++ {
+		tc.AddLeaderStore(id, 0)
+	}
+	st := storage.NewStorageWithMemoryBackend()
+	es, err := CreateScheduler(types.EvictSlowStoreScheduler, oc, st,
+		ConfigSliceDecoder(types.EvictSlowStoreScheduler, nil), nil)
+	re.NoError(err)
+	conf := es.(*evictSlowStoreScheduler).conf
+	re.NoError(conf.setEvictedStoresAndPersist([]uint64{1, 2}))
+	re.NoError(es.PrepareConfig(tc))
+
+	re.NoError(st.SaveSchedulerConfig(es.GetName(), []byte(`{"evict-stores":[2],"evict-group-stores":[3]}`)))
+	re.NoError(es.ReloadConfig())
+	re.Equal([]uint64{2, 3}, conf.evictedStores())
+	re.False(tc.GetStore(1).EvictedAsSlowStore())
+	re.True(tc.GetStore(2).EvictedAsSlowStore())
+	re.True(tc.GetStore(3).EvictedAsSlowStore())
+	// Disk-evicted ids are not paused; only network slow stores are.
+	re.True(tc.GetStore(3).AllowLeaderTransferIn())
+
+	// Reloading the same value changes nothing.
+	re.NoError(es.ReloadConfig())
+	es.(*evictSlowStoreScheduler).cleanupEvictLeader(tc)
+	requireSlowMarkCleared(re, tc, 1, 2, 3)
+}
+
+// requireSlowMarkCleared asserts that each store's slow-evicted counter is exactly zero: not
+// marked, and one SlowStoreEvicted makes it marked (a negative counter would not).
+func requireSlowMarkCleared(re *require.Assertions, tc *mockcluster.Cluster, ids ...uint64) {
+	for _, id := range ids {
+		re.False(tc.GetStore(id).EvictedAsSlowStore(), "store %d", id)
+		re.NoError(tc.SlowStoreEvicted(id))
+		re.True(tc.GetStore(id).EvictedAsSlowStore(), "store %d", id)
+		tc.SlowStoreRecovered(id)
+	}
 }

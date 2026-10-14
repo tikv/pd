@@ -211,9 +211,12 @@ func (conf *evictSlowStoreSchedulerConfig) setEvictedStoresLocked(ids []uint64) 
 
 // normalizeEvictedStores rewrites a loaded config into the persisted layout. It also accepts
 // a config whose evict-stores lists several ids, as written by development builds of group
-// eviction.
-func (conf *evictSlowStoreSchedulerConfig) normalizeEvictedStores() {
+// eviction. It reports whether the layout changed, in which case the caller must persist the
+// normalized value so an older PD never reads the multi-id evict-stores.
+func (conf *evictSlowStoreSchedulerConfig) normalizeEvictedStores() bool {
+	oldEvicted, oldGroup := conf.EvictedStores, conf.EvictedGroupStores
 	conf.setEvictedStoresLocked(conf.evictedStoresLocked())
+	return !slices.Equal(oldEvicted, conf.EvictedStores) || !slices.Equal(oldGroup, conf.EvictedGroupStores)
 }
 
 // isEvictingDiskSlowStore reports whether any disk slow store is being evicted.
@@ -532,6 +535,11 @@ func (s *evictSlowStoreScheduler) EncodeConfig() ([]byte, error) {
 }
 
 // ReloadConfig implements the Scheduler interface.
+//
+// Disk-evicted stores get the same runtime mark as on every other path (SlowStoreEvicted /
+// SlowStoreRecovered for ids the reload adds / removes), so every id in the eviction set
+// carries exactly one slow-evicted mark no matter how it entered the set. Paused network
+// slow stores keep using the leader-transfer pause.
 func (s *evictSlowStoreScheduler) ReloadConfig() error {
 	s.conf.Lock()
 	defer s.conf.Unlock()
@@ -543,28 +551,49 @@ func (s *evictSlowStoreScheduler) ReloadConfig() error {
 	if newCfg.Batch == 0 {
 		newCfg.Batch = EvictLeaderBatchSize
 	}
-	old := make(map[uint64]struct{})
-	for _, id := range s.conf.evictedStoresLocked() {
-		old[id] = struct{}{}
+	rewrite := newCfg.normalizeEvictedStores()
+
+	oldEvicted := s.conf.evictedStoresLocked()
+	newEvicted := newCfg.evictedStoresLocked()
+	for _, id := range oldEvicted {
+		if !slices.Contains(newEvicted, id) {
+			s.conf.cluster.SlowStoreRecovered(id)
+			evictedSlowStoreStatusGauge.DeleteLabelValues(strconv.FormatUint(id, 10), string(diskSlowStore))
+		}
 	}
+	for _, id := range newEvicted {
+		if slices.Contains(oldEvicted, id) {
+			continue
+		}
+		// A missing store keeps its id in the set; reconcileDiskSlowStoreGroup drops it.
+		if err := s.conf.cluster.SlowStoreEvicted(id); err != nil {
+			log.Warn("failed to evict slow store on config reload", zap.Uint64("store-id", id), zap.Error(err))
+			continue
+		}
+		evictedSlowStoreStatusGauge.WithLabelValues(strconv.FormatUint(id, 10), string(diskSlowStore)).Set(1)
+	}
+
+	old := make(map[uint64]struct{})
 	for _, id := range s.conf.PausedNetworkSlowStores {
 		old[id] = struct{}{}
 	}
 	new := make(map[uint64]struct{})
-	for _, id := range newCfg.evictedStoresLocked() {
-		new[id] = struct{}{}
-	}
 	for _, id := range newCfg.PausedNetworkSlowStores {
 		new[id] = struct{}{}
 	}
 	pauseAndResumeLeaderTransfer(s.conf.cluster, constant.In, old, new)
 	s.conf.RecoverySec = newCfg.RecoverySec
-	s.conf.setEvictedStoresLocked(newCfg.evictedStoresLocked())
+	s.conf.setEvictedStoresLocked(newEvicted)
 	s.conf.EnableGroupEviction = newCfg.EnableGroupEviction
 	s.conf.PausedNetworkSlowStores = newCfg.PausedNetworkSlowStores
 	s.conf.EvictedNetworkSlowStores = newCfg.EvictedNetworkSlowStores
 	s.conf.EnableNetworkSlowStore = newCfg.EnableNetworkSlowStore
 	s.conf.Batch = newCfg.Batch
+	if rewrite {
+		// The stored value has a multi-id evict-stores; replace it with the normalized
+		// layout so an older PD never observes it.
+		return s.conf.save()
+	}
 	return nil
 }
 
@@ -650,8 +679,9 @@ func (s *evictSlowStoreScheduler) CleanConfig(cluster sche.SchedulerCluster) {
 
 // prepareEvictLeader marks the given newly-detected stores as evicted and adds them
 // to the persisted set. On any failure it rolls back the marks it added so the
-// slow-evicted counter stays balanced; a store that is already in the set (for
-// example, added by a concurrent ReloadConfig) does not get a second mark.
+// slow-evicted counter stays balanced. A store that is already in the set (for
+// example, added by a concurrent ReloadConfig) already carries the set's mark, so
+// the extra mark made here is undone.
 func (s *evictSlowStoreScheduler) prepareEvictLeader(cluster sche.SchedulerCluster, addIDs []uint64) error {
 	if len(addIDs) == 0 {
 		return nil
