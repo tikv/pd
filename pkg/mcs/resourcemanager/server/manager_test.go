@@ -28,7 +28,6 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/goleak"
 
-	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 
@@ -563,7 +562,7 @@ func checkAddAndModifyResourceGroup(re *require.Assertions, manager *Manager, ke
 	})
 }
 
-func TestCleanUpTicker(t *testing.T) {
+func TestCleanUpMetrics(t *testing.T) {
 	re := require.New(t)
 	m := prepareManager()
 
@@ -586,22 +585,16 @@ func TestCleanUpTicker(t *testing.T) {
 		}] = time.Now().Add(-metricsCleanupTimeout / 2)
 	}
 	insertRecords()
-	// Start the background metrics flush loop.
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/fastCleanupTicker", `return(true)`))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/fastCleanupTicker"))
-	}()
 	err := m.Init(ctx)
 	re.NoError(err)
 	// Init resets the metric state, so the records inserted before Init
-	// must have been cleared; insert them again to exercise the cleanup
-	// ticker.
+	// must have been cleared.
 	re.Empty(m.metrics.consumptionRecordMap)
-	insertRecords()
-	// Ensure the cleanup ticker is triggered.
-	time.Sleep(200 * time.Millisecond)
-	// Close the manager to avoid the data race.
 	m.close()
+	// Exercise the cleanup path directly with the background worker stopped,
+	// so the test does not race with its map iteration.
+	insertRecords()
+	m.cleanUpMetrics(ctx)
 
 	re.Len(m.metrics.consumptionRecordMap, 1)
 	re.Contains(m.metrics.consumptionRecordMap, consumptionRecordKey{

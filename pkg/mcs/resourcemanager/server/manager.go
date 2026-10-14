@@ -829,35 +829,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				rg.UpdateRUConsumption(consumptionInfo.Consumption)
 			}
 		case <-cleanUpTicker.C:
-			// Clean up the metrics that have not been updated for a long time.
-			for r, lastTime := range m.metrics.consumptionRecordMap {
-				if time.Since(lastTime) <= metricsCleanupTimeout {
-					continue
-				}
-				keyspaceName, err := m.getKeyspaceNameByID(ctx, r.keyspaceID)
-				if err != nil {
-					continue
-				}
-				m.metrics.cleanupAllMetrics(r, keyspaceName)
-				m.ruCollector.remove(keyspaceName)
-			}
-			// Clean up the stale RU trackers.
-			for _, krgm := range m.getKeyspaceResourceGroupManagers() {
-				for _, group := range krgm.getResourceGroupList(false, true) {
-					grt := krgm.getGroupRUTracker(group.Name)
-					if grt == nil {
-						continue
-					}
-					if staleClientUniqueIDs := grt.cleanupStaleRUTrackers(); len(staleClientUniqueIDs) > 0 {
-						log.Info("cleaned up stale ru trackers",
-							zap.Uint32("keyspace-id", krgm.keyspaceID),
-							zap.String("group-name", group.Name),
-							zap.Int("stale-client-unique-ids-count", len(staleClientUniqueIDs)),
-							zap.Uint64s("stale-client-unique-ids", staleClientUniqueIDs),
-						)
-					}
-				}
-			}
+			m.cleanUpMetrics(ctx)
 		case <-metricsTicker.C:
 			// Prevent from holding the lock too long when there're many keyspaces and resource groups.
 			for _, krgm := range m.getKeyspaceResourceGroupManagers() {
@@ -916,6 +888,38 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				log.Warn("push metrics to Prometheus failed", zap.Error(err))
 			}
 			pushRUMetricsDuration.Observe(time.Since(start).Seconds())
+		}
+	}
+}
+
+func (m *Manager) cleanUpMetrics(ctx context.Context) {
+	// Clean up the metrics that have not been updated for a long time.
+	for r, lastTime := range m.metrics.consumptionRecordMap {
+		if time.Since(lastTime) <= metricsCleanupTimeout {
+			continue
+		}
+		keyspaceName, err := m.getKeyspaceNameByID(ctx, r.keyspaceID)
+		if err != nil {
+			continue
+		}
+		m.metrics.cleanupAllMetrics(r, keyspaceName)
+		m.ruCollector.remove(keyspaceName)
+	}
+	// Clean up the stale RU trackers.
+	for _, krgm := range m.getKeyspaceResourceGroupManagers() {
+		for _, group := range krgm.getResourceGroupList(false, true) {
+			grt := krgm.getGroupRUTracker(group.Name)
+			if grt == nil {
+				continue
+			}
+			if staleClientUniqueIDs := grt.cleanupStaleRUTrackers(); len(staleClientUniqueIDs) > 0 {
+				log.Info("cleaned up stale ru trackers",
+					zap.Uint32("keyspace-id", krgm.keyspaceID),
+					zap.String("group-name", group.Name),
+					zap.Int("stale-client-unique-ids-count", len(staleClientUniqueIDs)),
+					zap.Uint64s("stale-client-unique-ids", staleClientUniqueIDs),
+				)
+			}
 		}
 	}
 }

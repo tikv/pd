@@ -593,6 +593,8 @@ func deleteLabelValues(keyspaceName, groupName, ruLabelType string) {
 	sqlLayerRequestUnitCost.DeleteLabelValues(groupName, groupName, keyspaceName)
 	readByteCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
 	writeByteCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
+	crossAZTrafficCost.DeleteLabelValues(groupName, "read", keyspaceName)
+	crossAZTrafficCost.DeleteLabelValues(groupName, "write", keyspaceName)
 	kvCPUCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
 	sqlCPUCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
 	requestCount.DeleteLabelValues(groupName, groupName, readTypeLabel, keyspaceName)
