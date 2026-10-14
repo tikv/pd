@@ -1257,7 +1257,7 @@ func TestAffinityMergeCheckDisabledByZeroConfig(t *testing.T) {
 			cluster.PutRegion(region2)
 
 			affinityManager := cluster.GetAffinityManager()
-			checker := NewAffinityChecker(context.Background(), cluster, opt)
+			checker := NewAffinityChecker(t.Context(), cluster, opt)
 			group := &affinity.Group{
 				ID:            "test_group",
 				LeaderStoreID: 1,
@@ -2236,111 +2236,9 @@ func TestAffinityBestLocationFilteredByTemporarySourceState(t *testing.T) {
 	re.Zero(newStoreID)
 	re.True(filterByTempState)
 	re.False(checker.isRegionPlacementRuleSatisfiedWithBestLocation(region, true))
-}
-
-func TestAffinityBestLocationProgressBudget(t *testing.T) {
-	opt := newAffinityTestOptions()
-	opt.SetLocationLabels([]string{"region", "zone", "host"})
-	tc := mockcluster.NewCluster(t.Context(), opt)
-	tc.AddLabelsStore(1, 0, map[string]string{"region": "r1", "zone": "z1", "host": "h1"})
-	tc.AddLabelsStore(2, 0, map[string]string{"region": "r1", "zone": "z2", "host": "h1"})
-	tc.AddLabelsStore(3, 0, map[string]string{"region": "r1", "zone": "z3", "host": "h1"})
-	tc.AddLabelsStore(4, 0, map[string]string{"region": "r1", "zone": "z4", "host": "h1"})
-	checker := newTestAffinityChecker(t.Context(), tc, opt)
-	region := tc.AddLeaderRegion(1, 1, 2, 3)
-	fit := checker.ruleManager.FitRegion(tc, region)
-	require.NotNil(t, fit)
-
-	want, complete, wantChecks, _ := checker.regionPlacementBestLocationProgress(t.Context(), region, fit,
-		tc.GetStores(), nil, nil, 0)
-	require.True(t, complete)
-	for _, budget := range []int{1, 2} {
-		var progress *balanceBestLocationCheck
-		var got bestLocationStatus
-		var checks int
-		for range 100 {
-			var used int
-			got, complete, used, progress = checker.regionPlacementBestLocationProgress(t.Context(), region, fit,
-				tc.GetStores(), progress, nil, budget)
-			require.LessOrEqual(t, used, budget)
-			checks += used
-			if complete {
-				break
-			}
-		}
-		require.True(t, complete)
-		require.Equal(t, want, got)
-		require.Equal(t, wantChecks, checks)
-	}
-}
-
-func TestAffinityBestLocationCacheKeyIncludesRuleFitStores(t *testing.T) {
-	opt := newAffinityTestOptions()
-	tc := mockcluster.NewCluster(t.Context(), opt)
-	for id := uint64(1); id <= 3; id++ {
-		tc.AddRegionStore(id, 0)
-	}
-	region := tc.AddLeaderRegion(1, 1, 2, 3)
-	rule := &placement.Rule{GroupID: "test", ID: "rule", Role: placement.Voter, Count: 1}
-	left := &placement.RegionFit{RuleFits: []*placement.RuleFit{{Rule: rule, Stores: []*core.StoreInfo{tc.GetStore(1)}}}}
-	right := &placement.RegionFit{RuleFits: []*placement.RuleFit{{Rule: rule, Stores: []*core.StoreInfo{tc.GetStore(2)}}}}
-	require.NotEqual(t, balanceBestLocationCacheKey(region, left, false), balanceBestLocationCacheKey(region, right, false))
-}
-
-func TestAffinityBestLocationTemporarySourceIsNotCached(t *testing.T) {
-	opt := newAffinityTestOptions()
-	opt.SetLocationLabels([]string{"region", "zone", "host"})
-	tc := mockcluster.NewCluster(t.Context(), opt)
-	tc.AddLabelsStore(1, 0, map[string]string{"region": "r1", "zone": "z1", "host": "h1"})
-	tc.AddLabelsStore(2, 0, map[string]string{"region": "r1", "zone": "z2", "host": "h1"})
-	tc.AddLabelsStore(3, 0, map[string]string{"region": "r1", "zone": "z3", "host": "h1"})
-	checker := newTestAffinityChecker(t.Context(), tc, opt)
-	region := tc.AddLeaderRegion(1, 1, 2, 3)
-	fit := checker.ruleManager.FitRegion(tc, region)
-	require.NotNil(t, fit)
-	require.NotEmpty(t, fit.RuleFits)
-	for id := uint64(1); id <= 3; id++ {
-		tc.SetStoreBusy(id, true)
-	}
-	cache := make(map[string]bestLocationStatus)
-	var progress *balanceBestLocationCheck
-	var status bestLocationStatus
-	for range 100 {
-		var done bool
-		status, done, _, progress = checker.regionPlacementBestLocationProgress(t.Context(), region, fit,
-			tc.GetStores(), progress, cache, 1)
-		if done {
-			break
-		}
-	}
-	require.Equal(t, bestLocationSatisfied, status)
-	require.Empty(t, cache)
-}
-
-func TestAffinityBestLocationResetsStaleSourceCursor(t *testing.T) {
-	opt := newAffinityTestOptions()
-	opt.SetLocationLabels([]string{"region", "zone", "host"})
-	tc := mockcluster.NewCluster(t.Context(), opt)
-	for id, zone := range []string{"z1", "z2", "z3", "z4"} {
-		tc.AddLabelsStore(uint64(id+1), 0, map[string]string{"region": "r1", "zone": zone, "host": "h1"})
-	}
-	checker := newTestAffinityChecker(t.Context(), tc, opt)
-	region := tc.AddLeaderRegion(1, 1, 2, 3)
-	fit := checker.ruleManager.FitRegion(tc, region)
-	require.NotNil(t, fit)
-	require.NotEmpty(t, fit.RuleFits)
-	strategy := checker.strategy(region, fit.RuleFits[0].Rule, false)
-	_, _, _, done, _, progress, _ := strategy.getBetterLocationProgress(t.Context(), tc, region, fit, fit.RuleFits[0], tc.GetStores(), nil, 1)
-	require.False(t, done)
-	require.NotNil(t, progress)
-	require.NotZero(t, progress.sourceStoreID)
-	progress.sourceStoreID++
-	progress.storeIndex = len(progress.storeSnapshot)
-	progress.selectionComplete = true
-	_, _, _, done, _, reset, _ := strategy.getBetterLocationProgress(t.Context(), tc, region, fit, fit.RuleFits[0], tc.GetStores(), progress, 1)
-	require.False(t, done)
-	require.NotNil(t, reset)
-	require.Equal(t, 1, reset.storeIndex)
+	fit = checker.ruleManager.FitRegion(tc, region)
+	re.NotNil(fit)
+	re.Equal(bestLocationTemporarilyBlocked, checker.regionPlacementBestLocation(region, fit))
 }
 
 // TestAffinityStrictCheckDivergesFromIsRegionReplicated documents the intended

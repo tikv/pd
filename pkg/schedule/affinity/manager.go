@@ -74,21 +74,17 @@ type Manager struct {
 	groups                  map[string]*runtimeGroupInfo  // {group_id} -> runtimeGroupInfo
 	regions                 map[uint64]regionCache        // {region_id} -> regionCache
 	unavailableStores       map[uint64]storeCondition     // {store_id} -> storeCondition
-	balanceTables           map[string]*balanceTableState // {table_id} -> balance runtime state
-	balanceBuilder          BalanceActionProgressBuilder
+	balanceTables           map[string]*balanceTableState // {table_id} -> metadata generations
+	balanceGeneration       uint64
 	balanceRuleRevision     func() uint64
-	balanceRuleFingerprint  func([]GroupKeyRanges) uint64
 	balanceTerm             func() ([]clientv3.Cmp, bool)
 	balanceMetadata         func() map[string]string
 	balanceMetadataSource   uint64
 	balanceMetadataVerified *balanceMetadataVersion
-	balanceAdmission        func() bool
 	balanceLeaderCounts     map[uint64]int
 	balanceVoterCounts      map[uint64]int
 	balanceStoreRevision    uint64
 	balanceStoreFingerprint uint64
-	balanceQueue            chan string
-	balanceLocks            map[string]*balanceTableLock
 
 	// The following members are protected by metaMutex only, not protected by RWMutex.
 	// keyRanges cached in memory to reduce labeler lock contention
@@ -116,8 +112,6 @@ func NewManager(ctx context.Context, storage endpoint.AffinityStorage, storeSetI
 		balanceTables:       make(map[string]*balanceTableState),
 		balanceLeaderCounts: make(map[uint64]int),
 		balanceVoterCounts:  make(map[uint64]int),
-		balanceQueue:        make(chan string, 64),
-		balanceLocks:        make(map[string]*balanceTableLock),
 		keyRanges:           make(map[string]GroupKeyRanges),
 		labelRuleBuffer:     make(map[string]*labeler.LabelRule),
 	}

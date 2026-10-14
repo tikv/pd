@@ -456,7 +456,7 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affini
 	// Step 2: Save the Group in storage.
 	original := group.Group
 	var updated Group
-	// Balance submissions use commitBalancePlans. Safety repair only compares
+	// Balance submissions use CommitBalanceTarget. Safety repair only compares
 	// this group's persisted target and never holds checker locks across IO.
 	err = runner.RunInTxn(m.ctx, func(txn kv.Txn) error {
 		key := keypath.AffinityGroupPath(groupID)

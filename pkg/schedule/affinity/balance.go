@@ -21,328 +21,168 @@ import (
 	"slices"
 )
 
-// BalancePolicy controls the improvement behavior of an affinity group.
+// BalancePolicy controls whether an affinity group may be balanced.
 type BalancePolicy string
 
 const (
-	// BalancePolicyAuto allows the planner to improve the group's placement.
+	// BalancePolicyAuto allows the group's placement to be improved.
 	BalancePolicyAuto BalancePolicy = "auto"
 	// BalancePolicyFixed keeps the group's placement unchanged.
 	BalancePolicyFixed BalancePolicy = "fixed"
 )
 
-// BalanceActionSet contains actions already validated by the affinity checker.
-// The planner only selects from these actions and never evaluates placement
-// rules itself.
-type BalanceActionSet struct {
-	// LeaderTargets contains stores that can become leader while voters stay
-	// unchanged.
-	LeaderTargets []uint64
-	// VoterReplacements maps source voter to destination store and the leaders
-	// allowed after that replacement.
-	VoterReplacements map[uint64]map[uint64][]uint64
-	// MoveBytes estimates the bytes moved by replacing one voter for the
-	// whole group. It breaks table-score ties before global affinity counts.
-	MoveBytes uint64
+// BalanceScore measures the leader and voter distribution across affinity groups.
+type BalanceScore struct {
+	Leader int
+	Voter  int
 }
 
-// BalancePlan is a target change produced by PlanBalance. It does not write
-// storage or create an operator.
-type BalancePlan struct {
+// Compare orders scores by leader balance first, then voter balance.
+func (s BalanceScore) Compare(other BalanceScore) int {
+	if order := cmp.Compare(s.Leader, other.Leader); order != 0 {
+		return order
+	}
+	return cmp.Compare(s.Voter, other.Voter)
+}
+
+// BalanceMove describes a leader transfer or a single voter replacement.
+// A leader transfer has both FromStoreID and ToStoreID set to zero.
+type BalanceMove struct {
 	GroupID       string
 	LeaderStoreID uint64
-	VoterStoreIDs []uint64
-	Changed       bool
+	FromStoreID   uint64
+	ToStoreID     uint64
 }
 
-// BalanceOptions supplies topology-independent inputs and checker-generated
-// legal actions. A missing action set means that the group has no eligible
-// balance action in this pass.
-type BalanceOptions struct {
-	Stores     []uint64
-	ActionSets map[string]BalanceActionSet
-	// GlobalLeaderCounts and GlobalVoterCounts contain affinity counts before
-	// this pass. They only break ties after a strict table-score improvement
-	// and an equal MoveBytes estimate.
-	GlobalLeaderCounts map[uint64]int
-	GlobalVoterCounts  map[uint64]int
+type balanceGroup struct {
+	leaderStoreID uint64
+	voters        map[uint64]struct{}
+	fixed         bool
 }
 
-// PlanBalance computes one deterministic pass over groups belonging to one
-// table. It returns all group targets for callers that need a preview, but at
-// most one returned plan has Changed set. Fixed groups remain unchanged and
-// contribute to the balance counters.
-func PlanBalance(groups []*Group, options BalanceOptions) ([]BalancePlan, error) {
-	stores := sortedUnique(options.Stores)
-	if len(stores) == 0 {
-		return nil, errors.New("no stores available for affinity balance")
-	}
-	if stores[0] == 0 {
-		return nil, errors.New("store ID must be positive")
-	}
+// BalanceScorer scores placements and evaluates individual candidate moves.
+type BalanceScorer struct {
+	groups       map[string]balanceGroup
+	leaderCounts map[uint64]int
+	voterCounts  map[uint64]int
+	score        BalanceScore
+}
 
-	seenIDs := make(map[string]struct{}, len(groups))
-	ordered := slices.Clone(groups)
-	for _, group := range ordered {
+// NewBalanceScorer validates groups and initializes their balance counts.
+func NewBalanceScorer(groups []*Group) (*BalanceScorer, error) {
+	scorer := &BalanceScorer{
+		groups:       make(map[string]balanceGroup, len(groups)),
+		leaderCounts: make(map[uint64]int),
+		voterCounts:  make(map[uint64]int),
+	}
+	for _, group := range groups {
 		if group == nil {
 			return nil, errors.New("nil affinity group")
+		}
+		if _, exists := scorer.groups[group.ID]; exists {
+			return nil, fmt.Errorf("duplicate affinity group ID %q", group.ID)
 		}
 		if group.BalancePolicy != "" && group.BalancePolicy != BalancePolicyAuto && group.BalancePolicy != BalancePolicyFixed {
 			return nil, fmt.Errorf("group %q has invalid balance policy %q", group.ID, group.BalancePolicy)
 		}
-		if _, exists := seenIDs[group.ID]; exists {
-			return nil, fmt.Errorf("duplicate affinity group ID %q", group.ID)
-		}
-		seenIDs[group.ID] = struct{}{}
-	}
-	slices.SortFunc(ordered, func(a, b *Group) int { return cmp.Compare(a.ID, b.ID) })
 
-	leaderCounts, voterCounts := makeCounts(stores)
-	for _, group := range ordered {
-		if group.LeaderStoreID != 0 {
-			leaderCounts[group.LeaderStoreID]++
+		if group.LeaderStoreID == 0 && len(group.VoterStoreIDs) == 0 {
+			scorer.groups[group.ID] = balanceGroup{fixed: group.BalancePolicy == BalancePolicyFixed}
+			continue
 		}
-		for _, store := range group.VoterStoreIDs {
-			voterCounts[store]++
+		if group.LeaderStoreID == 0 || len(group.VoterStoreIDs) == 0 {
+			return nil, fmt.Errorf("group %q must have both leader and voter stores", group.ID)
 		}
-	}
-	baseScore := calcBalanceScore(leaderCounts, voterCounts)
-	globalBaseScore := balanceScore{
-		leader: sumSquares(options.GlobalLeaderCounts),
-		voter:  sumSquares(options.GlobalVoterCounts),
-	}
-	available := make(map[uint64]struct{}, len(stores))
-	for _, store := range stores {
-		available[store] = struct{}{}
-	}
-	plans := make([]BalancePlan, len(ordered))
-	for i, group := range ordered {
-		voters := normalizeVoters(group.VoterStoreIDs)
-		if hasDuplicate(voters) {
-			return nil, fmt.Errorf("group %q has duplicate voter store ID", group.ID)
-		}
-		plans[i] = makePlan(group, group.LeaderStoreID, voters, false)
-	}
-	var best *targetCandidate
-	var bestGroup string
-	// Search the whole table for a leader transfer before considering any
-	// voter movement. Scores use constant-time deltas from the current load.
-	for _, replace := range []bool{false, true} {
-		for i, group := range ordered {
-			oldVoters := plans[i].VoterStoreIDs
-			if group.BalancePolicy == BalancePolicyFixed || len(oldVoters) == 0 ||
-				!slices.Contains(oldVoters, group.LeaderStoreID) {
-				continue
-			}
-			actions := options.ActionSets[group.ID]
-			votersSet := make(map[uint64]struct{}, len(oldVoters))
-			for _, store := range oldVoters {
-				votersSet[store] = struct{}{}
-			}
-			evaluate := func(leader, from, to uint64) {
-				score := baseScore
-				if leader != group.LeaderStoreID {
-					score.leader += 2 * (leaderCounts[leader] - leaderCounts[group.LeaderStoreID] + 1)
-				}
-				if replace {
-					score.voter += 2 * (voterCounts[to] - voterCounts[from] + 1)
-				}
-				if compareScore(score, baseScore) >= 0 {
-					return
-				}
-				candidate := target{leader: leader, voters: oldVoters, from: from, to: to}
-				globalScore := scoreAfterGlobalMove(globalBaseScore, options.GlobalLeaderCounts, options.GlobalVoterCounts,
-					group.LeaderStoreID, leader, from, to)
-				moveBytes := uint64(0)
-				if replace {
-					moveBytes = actions.MoveBytes
-				}
-				preservesLeader := leader == group.LeaderStoreID
-				ranked := targetCandidate{
-					target: candidate, score: score, globalScore: globalScore,
-					moveBytes: moveBytes, preservesLeader: preservesLeader,
-				}
-				if best == nil || balanceCandidateLess(group.ID, ranked, bestGroup, *best) {
-					copy := ranked
-					best = &copy
-					bestGroup = group.ID
-				}
-			}
-			if !replace {
-				for _, leader := range actions.LeaderTargets {
-					if _, exists := votersSet[leader]; exists {
-						evaluate(leader, 0, 0)
-					}
-				}
-				continue
-			}
-			for _, from := range oldVoters {
-				for to, leaders := range actions.VoterReplacements[from] {
-					_, exists := available[to]
-					_, alreadyVoter := votersSet[to]
-					if !exists || to == 0 || alreadyVoter {
-						continue
-					}
-					for _, leader := range leaders {
-						_, staysVoter := votersSet[leader]
-						if leader == to || (leader != from && staysVoter) {
-							evaluate(leader, from, to)
-						}
-					}
-				}
-			}
-		}
-		if best != nil {
-			break
-		}
-	}
 
-	if best != nil {
-		voters := best.voters
-		if best.from != 0 {
-			voters = replaceVoter(voters, best.from, best.to)
+		voters := make(map[uint64]struct{}, len(group.VoterStoreIDs))
+		for _, storeID := range group.VoterStoreIDs {
+			if storeID == 0 {
+				return nil, fmt.Errorf("group %q has invalid voter store ID 0", group.ID)
+			}
+			if _, exists := voters[storeID]; exists {
+				return nil, fmt.Errorf("group %q has duplicate voter store ID", group.ID)
+			}
+			voters[storeID] = struct{}{}
+			scorer.voterCounts[storeID]++
 		}
-		for i := range plans {
-			if plans[i].GroupID != bestGroup {
-				continue
-			}
-			plans[i] = BalancePlan{
-				GroupID:       bestGroup,
-				LeaderStoreID: best.leader,
-				VoterStoreIDs: slices.Clone(voters),
-				Changed:       true,
-			}
-			break
+		if _, exists := voters[group.LeaderStoreID]; !exists {
+			return nil, fmt.Errorf("group %q leader store ID is not a voter", group.ID)
+		}
+		scorer.leaderCounts[group.LeaderStoreID]++
+		scorer.groups[group.ID] = balanceGroup{
+			leaderStoreID: group.LeaderStoreID,
+			voters:        voters,
+			fixed:         group.BalancePolicy == BalancePolicyFixed,
 		}
 	}
-	return plans, nil
+	scorer.score = BalanceScore{
+		Leader: sumSquares(scorer.leaderCounts),
+		Voter:  sumSquares(scorer.voterCounts),
+	}
+	return scorer, nil
 }
 
-type target struct {
-	leader   uint64
-	voters   []uint64
-	from, to uint64
+// Score returns the current score.
+func (s *BalanceScorer) Score() BalanceScore {
+	return s.score
 }
 
-type targetCandidate struct {
-	target
-	score           balanceScore
-	globalScore     balanceScore
-	moveBytes       uint64
-	preservesLeader bool
-}
+// Evaluate returns the score after move when its shape is valid. The boolean
+// is true only when the move is valid and strictly improves the current score.
+func (s *BalanceScorer) Evaluate(move BalanceMove) (BalanceScore, bool) {
+	group, exists := s.groups[move.GroupID]
+	if !exists || group.fixed || len(group.voters) == 0 || move.LeaderStoreID == 0 {
+		return s.score, false
+	}
 
-func balanceCandidateLess(groupID string, candidate targetCandidate, bestGroupID string, best targetCandidate) bool {
-	if order := compareScore(candidate.score, best.score); order != 0 {
-		return order < 0
-	}
-	if candidate.moveBytes != best.moveBytes {
-		return candidate.moveBytes < best.moveBytes
-	}
-	if order := compareScore(candidate.globalScore, best.globalScore); order != 0 {
-		return order < 0
-	}
-	if candidate.preservesLeader != best.preservesLeader {
-		return candidate.preservesLeader
-	}
-	return targetLess(groupID, candidate.target, bestGroupID, best.target)
-}
-
-type balanceScore struct{ leader, voter int }
-
-func replaceVoter(voters []uint64, from, to uint64) []uint64 {
-	result := slices.Clone(voters)
-	for i, voter := range result {
-		if voter == from {
-			result[i] = to
-			break
+	next := s.score
+	if move.FromStoreID == 0 && move.ToStoreID == 0 {
+		if move.LeaderStoreID == group.leaderStoreID {
+			return s.score, false
 		}
+		if _, isVoter := group.voters[move.LeaderStoreID]; !isVoter {
+			return s.score, false
+		}
+	} else {
+		if move.FromStoreID == 0 || move.ToStoreID == 0 {
+			return s.score, false
+		}
+		if _, isVoter := group.voters[move.FromStoreID]; !isVoter {
+			return s.score, false
+		}
+		if _, isVoter := group.voters[move.ToStoreID]; isVoter {
+			return s.score, false
+		}
+		if move.LeaderStoreID != move.ToStoreID {
+			if move.LeaderStoreID == move.FromStoreID {
+				return s.score, false
+			}
+			if _, remainsVoter := group.voters[move.LeaderStoreID]; !remainsVoter {
+				return s.score, false
+			}
+		}
+		next.Voter += countMoveDelta(s.voterCounts, move.FromStoreID, move.ToStoreID)
 	}
-	slices.Sort(result)
-	return result
+
+	if move.LeaderStoreID != group.leaderStoreID {
+		next.Leader += countMoveDelta(s.leaderCounts, group.leaderStoreID, move.LeaderStoreID)
+	}
+	return next, next.Compare(s.score) < 0
 }
 
-func calcBalanceScore(leaders, voters map[uint64]int) balanceScore {
-	return balanceScore{sumSquares(leaders), sumSquares(voters)}
+// LeaderCount returns the number of groups led by storeID.
+func (s *BalanceScorer) LeaderCount(storeID uint64) int {
+	return s.leaderCounts[storeID]
 }
 
-func scoreAfterGlobalMove(base balanceScore, leaders, voters map[uint64]int, oldLeader, newLeader, from, to uint64) balanceScore {
-	score := base
-	if leaders != nil {
-		score.leader += countMoveDelta(leaders, oldLeader, newLeader)
-	}
-	if voters != nil {
-		score.voter += countMoveDelta(voters, from, to)
-	}
-	return score
+// VoterCount returns the number of voter placements on storeID.
+func (s *BalanceScorer) VoterCount(storeID uint64) int {
+	return s.voterCounts[storeID]
 }
 
 func countMoveDelta(counts map[uint64]int, from, to uint64) int {
-	if from == to {
-		return 0
-	}
-	delta := 0
-	if from != 0 {
-		count := counts[from]
-		delta += (count-1)*(count-1) - count*count
-	}
-	if to != 0 {
-		count := counts[to]
-		delta += (count+1)*(count+1) - count*count
-	}
-	return delta
-}
-
-func compareScore(a, b balanceScore) int {
-	if order := cmp.Compare(a.leader, b.leader); order != 0 {
-		return order
-	}
-	return cmp.Compare(a.voter, b.voter)
-}
-
-func targetLess(groupA string, a target, groupB string, b target) bool {
-	if groupA != groupB {
-		return groupA < groupB
-	}
-	if a.leader != b.leader {
-		return a.leader < b.leader
-	}
-	if a.to != b.to {
-		return a.to < b.to
-	}
-	return a.from < b.from
-}
-
-func makePlan(group *Group, leader uint64, voters []uint64, changed bool) BalancePlan {
-	return BalancePlan{GroupID: group.ID, LeaderStoreID: leader, VoterStoreIDs: slices.Clone(voters), Changed: changed}
-}
-
-func normalizeVoters(voters []uint64) []uint64 {
-	result := slices.Clone(voters)
-	slices.Sort(result)
-	return result
-}
-
-func sortedUnique(stores []uint64) []uint64 {
-	result := normalizeVoters(stores)
-	return slices.Compact(result)
-}
-
-func hasDuplicate(values []uint64) bool {
-	for i := 1; i < len(values); i++ {
-		if values[i] == values[i-1] {
-			return true
-		}
-	}
-	return false
-}
-
-func makeCounts(stores []uint64) (leaders, voters map[uint64]int) {
-	l, v := make(map[uint64]int, len(stores)), make(map[uint64]int, len(stores))
-	for _, store := range stores {
-		l[store], v[store] = 0, 0
-	}
-	return l, v
+	fromCount, toCount := counts[from], counts[to]
+	return 2 * (toCount - fromCount + 1)
 }
 
 func sumSquares(counts map[uint64]int) int {
@@ -351,4 +191,10 @@ func sumSquares(counts map[uint64]int) int {
 		total += count * count
 	}
 	return total
+}
+
+func normalizeVoters(voters []uint64) []uint64 {
+	result := slices.Clone(voters)
+	slices.Sort(result)
+	return result
 }

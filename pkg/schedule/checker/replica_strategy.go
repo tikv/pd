@@ -15,9 +15,6 @@
 package checker
 
 import (
-	"context"
-	"slices"
-
 	"go.uber.org/zap"
 
 	"github.com/pingcap/log"
@@ -42,16 +39,6 @@ type ReplicaStrategy struct {
 	fastFailover   bool
 }
 
-type storeSelectionProgress struct {
-	storeSnapshot     []*core.StoreInfo
-	sourceStoreID     uint64
-	storeIndex        int
-	targetIndex       int
-	topCandidates     []*core.StoreInfo
-	selectionComplete bool
-	bestTarget        *core.StoreInfo
-}
-
 // SelectStoreToAdd returns the store to add a replica to a region.
 // `coLocationStores` are the stores used to compare location with target
 // store.
@@ -71,15 +58,6 @@ func (s *ReplicaStrategy) SelectStoreToAdd(coLocationStores []*core.StoreInfo, e
 	//
 	// The reason for it is to prevent the non-optimal replica placement due
 	// to the short-term state, resulting in redundant scheduling.
-	target, temporary, done, _, _ := s.selectStoreToAddProgress(context.Background(), coLocationStores, extraFilters, s.cluster.GetStores(), nil, 0)
-	if !done {
-		return 0, false
-	}
-	return target, temporary
-}
-
-func (s *ReplicaStrategy) selectStoreToAddProgress(ctx context.Context, coLocationStores []*core.StoreInfo,
-	extraFilters []filter.Filter, storeSnapshot []*core.StoreInfo, progress *storeSelectionProgress, budget int) (targetID uint64, temporary, done bool, checks int, next *storeSelectionProgress) {
 	level := constant.High
 	if s.fastFailover {
 		level = constant.Urgent
@@ -93,66 +71,26 @@ func (s *ReplicaStrategy) selectStoreToAddProgress(ctx context.Context, coLocati
 	if len(s.locationLabels) > 0 && s.isolationLevel != "" {
 		filters = append(filters, filter.NewIsolationFilter(s.checkerName, s.isolationLevel, s.locationLabels, coLocationStores))
 	}
-	filters = append(filters, extraFilters...)
-	filters = append(filters, s.extraFilters...)
+	if len(extraFilters) > 0 {
+		filters = append(filters, extraFilters...)
+	}
+	if len(s.extraFilters) > 0 {
+		filters = append(filters, s.extraFilters...)
+	}
 	isolationComparer := filter.IsolationComparer(s.locationLabels, coLocationStores)
 	strictStateFilter := &filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true, AllowFastFailover: s.fastFailover, OperatorLevel: level}
-	strictFilters := append(slices.Clone(filters), strictStateFilter)
-	if progress == nil {
-		progress = &storeSelectionProgress{storeSnapshot: slices.Clone(storeSnapshot)}
+	targetCandidate := filter.NewCandidates(s.cluster.GetStores()).
+		FilterTarget(s.cluster.GetCheckerConfig(), nil, nil, filters...).
+		KeepTheTopStores(isolationComparer, false) // greater isolation score is better
+	if targetCandidate.Len() == 0 {
+		return 0, false
 	}
-	for !progress.selectionComplete && progress.storeIndex < len(progress.storeSnapshot) {
-		if ctx.Err() != nil || (budget > 0 && checks >= budget) {
-			return 0, false, false, checks, progress
-		}
-		store := progress.storeSnapshot[progress.storeIndex]
-		progress.storeIndex++
-		checks++
-		if store == nil {
-			continue
-		}
-		candidate := filter.NewCandidates([]*core.StoreInfo{store}).
-			FilterTarget(s.cluster.GetCheckerConfig(), nil, nil, filters...)
-		if candidate.Len() > 0 {
-			if len(progress.topCandidates) == 0 {
-				progress.topCandidates = append(progress.topCandidates, store)
-			} else {
-				compare := isolationComparer(progress.topCandidates[0], store)
-				if compare == 0 {
-					progress.topCandidates = append(progress.topCandidates, store)
-				} else if compare < 0 {
-					progress.topCandidates = []*core.StoreInfo{store}
-				}
-			}
-		}
+	target := targetCandidate.FilterTarget(s.cluster.GetCheckerConfig(), nil, nil, strictStateFilter).
+		PickTheTopStore(filter.RegionScoreComparer(s.cluster.GetCheckerConfig()), true) // less region score is better
+	if target == nil {
+		return 0, true // filter by temporary states
 	}
-	if progress.storeIndex >= len(progress.storeSnapshot) {
-		progress.selectionComplete = true
-	}
-	for progress.targetIndex < len(progress.topCandidates) {
-		if ctx.Err() != nil || (budget > 0 && checks >= budget) {
-			return 0, false, false, checks, progress
-		}
-		store := progress.topCandidates[progress.targetIndex]
-		progress.targetIndex++
-		checks++
-		current := s.cluster.GetStore(store.GetID())
-		if current == nil {
-			continue
-		}
-		candidate := filter.NewCandidates([]*core.StoreInfo{current}).
-			FilterTarget(s.cluster.GetCheckerConfig(), nil, nil, strictFilters...)
-		if candidate.Len() > 0 && (progress.bestTarget == nil || filter.RegionScoreComparer(s.cluster.GetCheckerConfig())(progress.bestTarget, current) > 0) {
-			progress.bestTarget = current
-		}
-	}
-	if len(progress.topCandidates) == 0 {
-		return 0, false, true, checks, nil
-	}
-	if progress.bestTarget == nil {
-		return 0, true, true, checks, nil
-	}
-	return progress.bestTarget.GetID(), false, true, checks, nil
+	return target.GetID(), false
 }
 
 // SelectStoreToFix returns a store to replace down/offline old peer. The location
@@ -174,23 +112,14 @@ func (s *ReplicaStrategy) SelectStoreToFix(coLocationStores []*core.StoreInfo, o
 // SelectStoreToImprove returns a store to replace oldStore. The location
 // placement after scheduling should be better than original.
 func (s *ReplicaStrategy) SelectStoreToImprove(coLocationStores []*core.StoreInfo, old uint64) (uint64, bool) {
-	target, temporary, done, _, _ := s.selectStoreToImproveProgress(context.Background(), coLocationStores, old, s.cluster.GetStores(), nil, 0)
-	if !done {
-		return 0, false
-	}
-	return target, temporary
-}
-
-func (s *ReplicaStrategy) selectStoreToImproveProgress(ctx context.Context, coLocationStores []*core.StoreInfo, old uint64,
-	storeSnapshot []*core.StoreInfo, cursor *storeSelectionProgress, budget int) (targetID uint64, temporary, done bool, checks int, next *storeSelectionProgress) {
 	if len(coLocationStores) == 0 {
-		return 0, false, true, 0, nil
+		return 0, false
 	}
 	// trick to avoid creating a slice with `old` removed.
 	swapStoreToFirst(coLocationStores, old)
 	oldStore := s.cluster.GetStore(old)
 	if oldStore == nil {
-		return 0, false, true, 0, nil
+		return 0, false
 	}
 	filters := []filter.Filter{
 		filter.NewLocationImprover(s.checkerName, s.locationLabels, coLocationStores, oldStore),
@@ -198,7 +127,7 @@ func (s *ReplicaStrategy) selectStoreToImproveProgress(ctx context.Context, coLo
 	if len(s.locationLabels) > 0 && s.isolationLevel != "" {
 		filters = append(filters, filter.NewIsolationFilter(s.checkerName, s.isolationLevel, s.locationLabels, coLocationStores[1:]))
 	}
-	return s.selectStoreToAddProgress(ctx, coLocationStores[1:], filters, storeSnapshot, cursor, budget)
+	return s.SelectStoreToAdd(coLocationStores[1:], filters...)
 }
 
 func swapStoreToFirst(stores []*core.StoreInfo, id uint64) {
@@ -252,25 +181,19 @@ func (s *ReplicaStrategy) selectStoreToRemoveWithTempState(coLocationStores []*c
 }
 
 func (s *ReplicaStrategy) getBetterLocation(cluster sche.SharedCluster, region *core.RegionInfo, fit *placement.RegionFit, rf *placement.RuleFit) (oldStoreID, newStoreID uint64, filterByTempState bool) {
-	oldStoreID, newStoreID, filterByTempState, _, _, _, _ = s.getBetterLocationProgress(context.Background(), cluster, region, fit, rf,
-		cluster.GetStores(), nil, 0)
-	return
+	oldStoreID, newStoreID, status := s.getBetterLocationWithStatus(cluster, region, fit, rf)
+	return oldStoreID, newStoreID, status == bestLocationTemporarilyBlocked
 }
 
-func (s *ReplicaStrategy) getBetterLocationProgress(ctx context.Context, cluster sche.SharedCluster, region *core.RegionInfo,
-	fit *placement.RegionFit, rf *placement.RuleFit, storeSnapshot []*core.StoreInfo, cursor *storeSelectionProgress, budget int) (oldStoreID, newStoreID uint64,
-	filterByTempState, done bool, checks int, next *storeSelectionProgress, temporarySource bool) {
+func (s *ReplicaStrategy) getBetterLocationWithStatus(cluster sche.SharedCluster, region *core.RegionInfo, fit *placement.RegionFit, rf *placement.RuleFit) (oldStoreID, newStoreID uint64, status bestLocationStatus) {
 	ruleStores := getRuleFitStores(cluster, rf)
 	oldStoreID, sourceFilterByTempState := s.selectStoreToRemoveWithTempState(ruleStores)
 	if oldStoreID == 0 {
-		return 0, 0, false, true, 0, nil, sourceFilterByTempState
+		return 0, 0, bestLocationRejected
 	}
 	oldStore := cluster.GetStore(oldStoreID)
 	if oldStore == nil {
-		return 0, 0, false, true, 0, nil, sourceFilterByTempState
-	}
-	if cursor != nil && cursor.sourceStoreID != 0 && cursor.sourceStoreID != oldStoreID {
-		cursor = nil
+		return 0, 0, bestLocationRejected
 	}
 	var coLocationStores []*core.StoreInfo
 	regionStores := cluster.GetRegionStores(region)
@@ -288,20 +211,20 @@ func (s *ReplicaStrategy) getBetterLocationProgress(ctx context.Context, cluster
 			}
 		}
 	}
-	newStoreID, filterByTempState, done, checks, next = s.selectStoreToImproveProgress(ctx, coLocationStores, oldStoreID, storeSnapshot, cursor, budget)
-	if next != nil {
-		next.sourceStoreID = oldStoreID
-	}
-	if !done {
-		return oldStoreID, 0, false, false, checks, next, sourceFilterByTempState
-	}
+	newStoreID, filterByTempState := s.SelectStoreToImprove(coLocationStores, oldStoreID)
 	if sourceFilterByTempState {
 		if newStoreID != 0 || filterByTempState {
-			return 0, 0, true, true, checks, nil, true
+			return 0, 0, bestLocationTemporarilyBlocked
 		}
-		return 0, 0, false, true, checks, nil, true
+		return 0, 0, bestLocationSatisfied
 	}
-	return oldStoreID, newStoreID, filterByTempState, true, checks, nil, false
+	if filterByTempState {
+		return oldStoreID, 0, bestLocationTemporarilyBlocked
+	}
+	if newStoreID != 0 {
+		return oldStoreID, newStoreID, bestLocationRejected
+	}
+	return oldStoreID, 0, bestLocationSatisfied
 }
 
 func isWitnessEnabled(cluster sche.CheckerCluster) bool {

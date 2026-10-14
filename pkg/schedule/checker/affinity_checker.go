@@ -17,7 +17,6 @@ package checker
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"slices"
 	"time"
 
@@ -52,6 +51,7 @@ type AffinityChecker struct {
 	recentMergeCache *cache.TTLUint64
 	startTime        time.Time
 	opController     *operator.Controller
+	balancer         *affinityBalancer
 }
 
 // NewAffinityChecker create an affinity checker.
@@ -65,10 +65,8 @@ func NewAffinityChecker(ctx context.Context, cluster sche.CheckerCluster, conf c
 		startTime:        time.Now(),
 	}
 	if checker.affinityManager != nil {
-		checker.affinityManager.SetBalanceActionBuilder(checker.buildBalanceActionProgress, checker.ruleManager.GetRevision)
-		checker.affinityManager.SetBalanceRuleFingerprint(checker.balanceRuleFingerprint)
-		checker.affinityManager.SetBalanceAdmission(checker.balanceSchedulingAllowed)
-		checker.affinityManager.SetBalanceCommitGuard(nil, checker.balanceRuleMetadata)
+		checker.affinityManager.SetBalancePlacementGuard(checker.ruleManager.GetRevision, checker.balanceRuleMetadata)
+		checker.balancer = newAffinityBalancer(ctx, checker)
 	}
 	return checker
 }
@@ -173,10 +171,7 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	// most one target change for its table. The next Region check will observe
 	// the new target and continue after the corresponding operators finish.
 	if group.BalancePolicy != affinity.BalancePolicyFixed && group.Phase == affinity.PhaseStable {
-		if _, err := c.affinityManager.AutoBalanceGroup(group.ID); err != nil {
-			affinityCheckerAbnormalReplicaCounter.Inc()
-			return nil
-		}
+		c.balancer.enqueue(group.ID)
 		// Planning is asynchronous; this check continues against the target
 		// it read. The next heartbeat observes any committed balance target.
 	}
@@ -558,140 +553,33 @@ const (
 )
 
 func (c *AffinityChecker) regionPlacementBestLocation(region *core.RegionInfo, fit *placement.RegionFit) bestLocationStatus {
-	status, _, _, _ := c.regionPlacementBestLocationProgress(context.Background(), region, fit, c.cluster.GetStores(), nil, nil, 0)
-	return status
-}
-
-type balanceBestLocationPeer struct {
-	StoreID uint64
-	Role    int32
-	Witness bool
-}
-
-type balanceBestLocationRuleFit struct {
-	Stores []uint64
-}
-
-func (c *AffinityChecker) regionPlacementBestLocationProgress(ctx context.Context, region *core.RegionInfo, fit *placement.RegionFit,
-	storeSnapshot []*core.StoreInfo, progress *balanceBestLocationCheck, resultCache map[string]bestLocationStatus,
-	budget int) (bestLocationStatus, bool, int, *balanceBestLocationCheck) {
 	if fit == nil || !fit.IsSatisfied() {
-		return bestLocationRejected, true, 0, nil
+		return bestLocationRejected
 	}
-	cacheKey := balanceBestLocationCacheKey(region, fit, isWitnessEnabled(c.cluster))
-	if resultCache != nil {
-		if status, ok := resultCache[cacheKey]; ok {
-			return status, true, 0, nil
-		}
-	}
-	if progress == nil || progress.region != region || progress.fit != fit {
-		progress = &balanceBestLocationCheck{region: region, fit: fit, cacheable: true}
-	}
-	checks := 0
 
 	// Check whether all peers covered by the rules are at the best isolation level.
 	// This logic is based on `RuleChecker.fixBetterLocation`.
-	for progress.ruleIndex < len(fit.RuleFits) {
-		if ctx.Err() != nil {
-			return bestLocationSatisfied, false, checks, progress
-		}
-		rf := fit.RuleFits[progress.ruleIndex]
+	for _, rf := range fit.RuleFits {
 		if len(rf.Rule.LocationLabels) == 0 {
-			progress.ruleIndex++
 			continue
 		}
 		isWitness := rf.Rule.IsWitness && isWitnessEnabled(c.cluster)
 		// If the peer to be moved is a witness, since no snapshot is needed, we also reuse the fast failover logic.
 		strategy := c.strategy(region, rf.Rule, isWitness)
-		if budget > 0 && checks >= budget {
-			return bestLocationSatisfied, false, checks, progress
+		_, _, status := strategy.getBetterLocationWithStatus(c.cluster, region, fit, rf)
+		if status == bestLocationTemporarilyBlocked {
+			return bestLocationTemporarilyBlocked
 		}
-		_, newStoreID, filterByTempState, done, used, next, temporarySource := strategy.getBetterLocationProgress(ctx,
-			c.cluster, region, fit, rf, storeSnapshot, progress.storeSelection, remainingBalanceBudget(budget, checks))
-		checks += used
-		progress.storeSelection = next
-		if !done {
-			return bestLocationSatisfied, false, checks, progress
-		}
-		progress.storeSelection = nil
-		if temporarySource {
-			progress.cacheable = false
-		}
-		if filterByTempState {
-			return bestLocationTemporarilyBlocked, true, checks, nil
-		}
-		if newStoreID != 0 {
-			return bestLocationRejected, true, checks, nil
+		if status != bestLocationSatisfied {
+			return bestLocationRejected
 		}
 		// If the isolation level does not meet the requirement, it is also considered not to be at the best location.
 		if !statistics.IsRegionLabelIsolationSatisfied(rf.Stores, rf.Rule.LocationLabels, rf.Rule.IsolationLevel) {
-			return bestLocationRejected, true, checks, nil
+			return bestLocationRejected
 		}
-		progress.ruleIndex++
 	}
 
-	if progress.cacheable && resultCache != nil && len(resultCache) < maxBalanceBestLocationCacheEntries {
-		resultCache[cacheKey] = bestLocationSatisfied
-	}
-	return bestLocationSatisfied, true, checks, nil
-}
-
-func balanceBestLocationCacheKey(region *core.RegionInfo, fit *placement.RegionFit, witnessSupported bool) string {
-	peers := make([]balanceBestLocationPeer, 0, len(region.GetPeers()))
-	for _, peer := range region.GetPeers() {
-		if peer == nil {
-			continue
-		}
-		peers = append(peers, balanceBestLocationPeer{StoreID: peer.GetStoreId(), Role: int32(peer.GetRole()), Witness: peer.GetIsWitness()})
-	}
-	slices.SortFunc(peers, func(left, right balanceBestLocationPeer) int {
-		if left.StoreID < right.StoreID {
-			return -1
-		}
-		if left.StoreID > right.StoreID {
-			return 1
-		}
-		if left.Role < right.Role {
-			return -1
-		}
-		if left.Role > right.Role {
-			return 1
-		}
-		if left.Witness == right.Witness {
-			return 0
-		}
-		if left.Witness {
-			return 1
-		}
-		return -1
-	})
-	key, _ := json.Marshal(struct {
-		Peers            []balanceBestLocationPeer
-		LeaderStoreID    uint64
-		Rules            []*placement.Rule
-		RuleFits         []balanceBestLocationRuleFit
-		WitnessSupported bool
-	}{Peers: peers, LeaderStoreID: region.GetLeader().GetStoreId(), Rules: fit.GetRules(), RuleFits: balanceBestLocationRuleFits(fit), WitnessSupported: witnessSupported})
-	return string(key)
-}
-
-func balanceBestLocationRuleFits(fit *placement.RegionFit) []balanceBestLocationRuleFit {
-	ruleFits := make([]balanceBestLocationRuleFit, 0, len(fit.RuleFits))
-	for _, ruleFit := range fit.RuleFits {
-		if ruleFit == nil {
-			ruleFits = append(ruleFits, balanceBestLocationRuleFit{})
-			continue
-		}
-		stores := make([]uint64, 0, len(ruleFit.Stores))
-		for _, store := range ruleFit.Stores {
-			if store != nil {
-				stores = append(stores, store.GetID())
-			}
-		}
-		slices.Sort(stores)
-		ruleFits = append(ruleFits, balanceBestLocationRuleFit{Stores: stores})
-	}
-	return ruleFits
+	return bestLocationSatisfied
 }
 
 func (c *AffinityChecker) strategy(region *core.RegionInfo, rule *placement.Rule, fastFailover bool) *ReplicaStrategy {
