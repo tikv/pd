@@ -15,6 +15,7 @@
 package statistics
 
 import (
+	"container/list"
 	"context"
 	"fmt"
 	"math"
@@ -38,6 +39,9 @@ const (
 	HotThresholdRatio = 0.8
 
 	rollingWindowsSize = 5
+
+	// gcColdPeerSweepBatch bounds region lookups performed by one read-cache GC.
+	gcColdPeerSweepBatch = 10000
 
 	// HotRegionReportMinInterval is used for the simulator and test
 	HotRegionReportMinInterval = 3
@@ -77,6 +81,11 @@ type hotRegionInfo struct {
 	leaderStoreID uint64
 }
 
+type coldPeerKey struct {
+	storeID  uint64
+	regionID uint64
+}
+
 func newHotRegionInfo(region *core.RegionInfo) *hotRegionInfo {
 	return &hotRegionInfo{
 		meta:          region.GetMeta(),
@@ -112,17 +121,16 @@ type HotPeerCache struct {
 	peersOfStore   map[uint64]*utils.TopN         // storeID -> hot peers
 	storesOfRegion map[uint64]map[uint64]struct{} // regionID -> storeIDs
 	regionsOfStore map[uint64]map[uint64]struct{} // storeID -> regionIDs
-	// coldPeersOfStore is a bounded index of the regionIDs currently held as
-	// cold peers on each store (storeID -> regionIDs). It is maintained on the
-	// same paths that set/clear the inCold flag, so gc() can sweep cold peers
-	// by walking this index instead of copying every store's entire TopN heap
-	// (which includes the non-cold tail and is unbounded).
-	coldPeersOfStore  map[uint64]map[uint64]struct{} // storeID -> cold regionIDs
-	topNTTL           time.Duration
-	taskQueue         *chanx.UnboundedChan[func(*HotPeerCache)]
-	thresholdsOfStore map[uint64]*thresholds                           // storeID -> thresholds
-	metrics           map[uint64][utils.ActionTypeLen]prometheus.Gauge // storeID -> metrics
-	lastGCTime        time.Time
+	// coldPeersOfStore indexes cold peers by store and keeps each candidate's
+	// position in coldPeerSweepQueue. This lets gc() visit a bounded batch
+	// without scanning or copying a store's full TopN.
+	coldPeersOfStore   map[uint64]map[uint64]*list.Element // storeID -> regionID -> sweep queue element
+	coldPeerSweepQueue list.List
+	topNTTL            time.Duration
+	taskQueue          *chanx.UnboundedChan[func(*HotPeerCache)]
+	thresholdsOfStore  map[uint64]*thresholds                           // storeID -> thresholds
+	metrics            map[uint64][utils.ActionTypeLen]prometheus.Gauge // storeID -> metrics
+	lastGCTime         time.Time
 }
 
 // NewHotPeerCache creates a HotPeerCache
@@ -133,7 +141,7 @@ func NewHotPeerCache(ctx context.Context, cluster *core.BasicCluster, kind utils
 		peersOfStore:      make(map[uint64]*utils.TopN),
 		storesOfRegion:    make(map[uint64]map[uint64]struct{}),
 		regionsOfStore:    make(map[uint64]map[uint64]struct{}),
-		coldPeersOfStore:  make(map[uint64]map[uint64]struct{}),
+		coldPeersOfStore:  make(map[uint64]map[uint64]*list.Element),
 		taskQueue:         chanx.NewUnboundedChan[func(*HotPeerCache)](ctx, queueCap),
 		thresholdsOfStore: make(map[uint64]*thresholds),
 		topNTTL:           time.Duration(3*kind.ReportInterval()) * time.Second,
@@ -615,21 +623,39 @@ func (f *HotPeerCache) putItem(item *HotPeerStat) {
 		f.regionsOfStore[item.StoreID] = regions
 	}
 	regions[item.RegionID] = struct{}{}
-	// Track the bounded cold-peer index so gc() never has to copy a store's
-	// entire TopN heap. An item entering or staying cold is indexed; an item
-	// becoming hot again (inCold cleared) or being dropped is un-indexed.
-	cold := f.coldPeersOfStore[item.StoreID]
+	// Track cold peers in the sweep queue so gc() neither copies a store's
+	// entire TopN heap nor walks every cold peer in one call.
 	if item.inCold {
-		if cold == nil {
-			cold = make(map[uint64]struct{})
-			f.coldPeersOfStore[item.StoreID] = cold
-		}
-		cold[item.RegionID] = struct{}{}
-	} else if cold != nil {
-		delete(cold, item.RegionID)
-		if len(cold) == 0 {
-			delete(f.coldPeersOfStore, item.StoreID)
-		}
+		f.addColdPeer(item.StoreID, item.RegionID)
+	} else {
+		f.removeColdPeer(item.StoreID, item.RegionID)
+	}
+}
+
+func (f *HotPeerCache) addColdPeer(storeID, regionID uint64) {
+	cold := f.coldPeersOfStore[storeID]
+	if cold == nil {
+		cold = make(map[uint64]*list.Element)
+		f.coldPeersOfStore[storeID] = cold
+	}
+	if _, ok := cold[regionID]; ok {
+		return
+	}
+	key := coldPeerKey{storeID: storeID, regionID: regionID}
+	cold[regionID] = f.coldPeerSweepQueue.PushBack(key)
+}
+
+func (f *HotPeerCache) removeColdPeer(storeID, regionID uint64) {
+	cold := f.coldPeersOfStore[storeID]
+	if cold == nil {
+		return
+	}
+	if element, ok := cold[regionID]; ok {
+		f.coldPeerSweepQueue.Remove(element)
+		delete(cold, regionID)
+	}
+	if len(cold) == 0 {
+		delete(f.coldPeersOfStore, storeID)
 	}
 }
 
@@ -643,12 +669,7 @@ func (f *HotPeerCache) removeItem(item *HotPeerStat) {
 	if regions, ok := f.regionsOfStore[item.StoreID]; ok {
 		delete(regions, item.RegionID)
 	}
-	if cold, ok := f.coldPeersOfStore[item.StoreID]; ok {
-		delete(cold, item.RegionID)
-		if len(cold) == 0 {
-			delete(f.coldPeersOfStore, item.StoreID)
-		}
-	}
+	f.removeColdPeer(item.StoreID, item.RegionID)
 }
 
 func (f *HotPeerCache) gc() {
@@ -692,10 +713,10 @@ func (f *HotPeerCache) gc() {
 					delete(f.storesOfRegion, regionID)
 				}
 			}
+			f.removeColdPeer(storeID, regionID)
 		}
 		delete(f.peersOfStore, storeID)
 		delete(f.regionsOfStore, storeID)
-		delete(f.coldPeersOfStore, storeID)
 		delete(f.thresholdsOfStore, storeID)
 		delete(f.metrics, storeID)
 		hotCacheStatusGauge.DeletePartialMatch(prometheus.Labels{"store": storeTag(storeID), "type": f.kind.String()})
@@ -709,35 +730,7 @@ func (f *HotPeerCache) gc() {
 	// regions and non-cold items are left to their normal heartbeat and TopN TTL
 	// lifecycle.
 	if f.kind == utils.Read {
-		// Cold-peer sweep only visits stores and peers with cold entries; a
-		// dead region is evicted, while a live one is kept. The per-store work
-		// is limited to its coldPeersOfStore index instead of copying the whole
-		// TopN heap, which also contains non-cold entries.
-		for storeID, coldPeers := range f.coldPeersOfStore {
-			for regionID := range coldPeers {
-				// A live region must not be evicted even if it was previously
-				// marked cold; skip it and keep it indexed.
-				if f.cluster.GetRegion(regionID) != nil {
-					continue
-				}
-				peers := f.peersOfStore[storeID]
-				_ = peers.Remove(regionID)
-				if s, ok := f.storesOfRegion[regionID]; ok {
-					delete(s, storeID)
-					if len(s) == 0 {
-						delete(f.storesOfRegion, regionID)
-					}
-				}
-				if s, ok := f.regionsOfStore[storeID]; ok {
-					delete(s, regionID)
-				}
-				// Also remove from the cold index now that the item is gone.
-				delete(coldPeers, regionID)
-			}
-			if len(coldPeers) == 0 {
-				delete(f.coldPeersOfStore, storeID)
-			}
-		}
+		f.sweepColdPeers(gcColdPeerSweepBatch)
 	}
 	// remove expired items
 	for storeID, peers := range f.peersOfStore {
@@ -749,13 +742,48 @@ func (f *HotPeerCache) gc() {
 			}
 			// A region reclaimed by the TopN TTL is no longer a cold candidate;
 			// drop it from the cold index for the owning store.
-			if cold, ok := f.coldPeersOfStore[storeID]; ok {
-				delete(cold, regionID)
-				if len(cold) == 0 {
-					delete(f.coldPeersOfStore, storeID)
-				}
+			f.removeColdPeer(storeID, regionID)
+		}
+	}
+}
+
+// sweepColdPeers checks at most limit cold peers per call. Live candidates are
+// appended to the queue tail, so every candidate is revisited even as stores
+// and cold peers enter or leave the cache.
+func (f *HotPeerCache) sweepColdPeers(limit int) {
+	for range limit {
+		element := f.coldPeerSweepQueue.Front()
+		if element == nil {
+			return
+		}
+		key := element.Value.(coldPeerKey)
+		cold := f.coldPeersOfStore[key.storeID]
+		if cold == nil {
+			f.coldPeerSweepQueue.Remove(element)
+			continue
+		}
+		if _, ok := cold[key.regionID]; !ok {
+			f.coldPeerSweepQueue.Remove(element)
+			continue
+		}
+		// A live region must not be evicted even if its peer was marked cold.
+		if f.cluster.GetRegion(key.regionID) != nil {
+			f.coldPeerSweepQueue.MoveToBack(element)
+			continue
+		}
+		if peers := f.peersOfStore[key.storeID]; peers != nil {
+			_ = peers.Remove(key.regionID)
+		}
+		if stores, ok := f.storesOfRegion[key.regionID]; ok {
+			delete(stores, key.storeID)
+			if len(stores) == 0 {
+				delete(f.storesOfRegion, key.regionID)
 			}
 		}
+		if regions, ok := f.regionsOfStore[key.storeID]; ok {
+			delete(regions, key.regionID)
+		}
+		f.removeColdPeer(key.storeID, key.regionID)
 	}
 }
 

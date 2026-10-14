@@ -678,6 +678,7 @@ func TestGcClearsColdItemsOfRemovedRegion(t *testing.T) {
 	// The cold items of the removed region must be reclaimed from every store,
 	// and the reverse indexes must be consistent.
 	re.NotContains(cache.storesOfRegion, region.GetID())
+	re.Zero(cache.coldPeerSweepQueue.Len())
 	for _, peer := range region.GetPeers() {
 		storeID := peer.GetStoreId()
 		peers := cache.peersOfStore[storeID]
@@ -717,6 +718,7 @@ func TestGcKeepsColdItemsOfLiveRegion(t *testing.T) {
 	cache.gc()
 	cache.lastGCTime = time.Time{}
 	cache.gc()
+	re.Equal(len(region.GetPeers()), cache.coldPeerSweepQueue.Len())
 	for _, peer := range region.GetPeers() {
 		storeID := peer.GetStoreId()
 		peers := cache.peersOfStore[storeID]
@@ -727,11 +729,8 @@ func TestGcKeepsColdItemsOfLiveRegion(t *testing.T) {
 	}
 }
 
-// TestGcColdSweepWithStoreChurn: with many stores in the cache, adding and
-// removing stores between gc() cycles must not cause any surviving store's
-// cold peers to be skipped permanently. Every gc() call rechecks all stores
-// (the check is idempotent and cheap for stores without cold entries), so
-// rotation stays correct through churn.
+// TestGcColdSweepWithStoreChurn verifies that unprocessed cold candidates stay
+// queued and are reclaimed after stores are removed and added.
 func TestGcColdSweepWithStoreChurn(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -771,6 +770,9 @@ func TestGcColdSweepWithStoreChurn(t *testing.T) {
 		cache.lastGCTime = time.Time{}
 		cache.gc()
 	}
+	// Keep automatic UpdateStat GC calls throttled while setting up the cold
+	// candidates; the test explicitly controls the partial sweep below.
+	cache.lastGCTime = time.Now().Add(time.Hour)
 
 	for i := range storeCount {
 		storeID := uint64(1000 + i)
@@ -779,7 +781,11 @@ func TestGcColdSweepWithStoreChurn(t *testing.T) {
 		storeIDs = append(storeIDs, storeID)
 		regionIDs = append(regionIDs, regionID)
 	}
-	gc()
+	// Process only one candidate so cold peers remain queued across the store
+	// changes below. This exercises the same bounded sweep used by gc().
+	cache.sweepColdPeers(1)
+	re.Equal(storeCount-1, cache.coldPeerSweepQueue.Len())
+	re.Contains(cache.coldPeersOfStore[storeIDs[storeCount-1]], regionIDs[storeCount-1])
 
 	// Remove half the stores from the cluster to simulate store churn.
 	// gc() will detect them as "removed" (absent from GetStores()) and clean
@@ -789,18 +795,22 @@ func TestGcColdSweepWithStoreChurn(t *testing.T) {
 			cluster.DeleteStore(store)
 		}
 	}
-	// While stores are missing, a new store joins. Its ID falls in a gap in
-	// the sorted store list, which used to break index-based rotation.
+	// While stores are missing, a new store with an interleaved ID joins.
 	const newStoreID uint64 = 1500
 	const newRegionID uint64 = 3000
 	makeCold(newStoreID, newRegionID)
+	// The survivor's candidate was not consumed by the initial one-item
+	// sweep, and both it and the newcomer are still queued before GC.
+	re.Contains(cache.coldPeersOfStore[storeIDs[storeCount-1]], regionIDs[storeCount-1])
+	re.Contains(cache.coldPeersOfStore[newStoreID], newRegionID)
 	gc()
+	re.Empty(cache.coldPeersOfStore, "one bounded batch should reclaim these candidates")
+	re.Zero(cache.coldPeerSweepQueue.Len())
 
-	// The removed stores' entries were already cleaned by the
-	// removed-store loop at the top of gc(); all other cold peers —
-	// including the newcomer's — must be gone after the next gc() call.
+	// A second pass should be a no-op after the first batch drained the queue.
 	gc()
 	re.Empty(cache.coldPeersOfStore, "all cold entries should be reclaimed")
+	re.Zero(cache.coldPeerSweepQueue.Len(), "all candidates should leave the sweep queue")
 	for i := range storeCount {
 		storeID := storeIDs[i]
 		regionID := regionIDs[i]
@@ -827,10 +837,8 @@ func TestGcColdSweepWithStoreChurn(t *testing.T) {
 		"store %d added during churn should have reclaimed cold region %d", newStoreID, newRegionID)
 }
 
-// TestGcColdSweepUsesBoundedIndex: a single store holding many cold peers
-// must not cause gc() to copy that store's entire TopN heap. The cold sweep
-// walks coldPeersOfStore, whose size is bounded by the number of cold items,
-// so a store with many hot (non-cold) peers does not increase the GC work.
+// TestGcColdSweepUsesBoundedIndex: a single store holding many non-cold peers
+// must not make gc() copy or scan that store's entire TopN heap.
 func TestGcColdSweepUsesBoundedIndex(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -894,6 +902,7 @@ func TestGcColdSweepUsesBoundedIndex(t *testing.T) {
 	// gc() must evict the cold region while leaving the hot ones intact.
 	cache.lastGCTime = time.Time{}
 	cache.gc()
+	re.Zero(cache.coldPeerSweepQueue.Len())
 	re.Nil(cache.peersOfStore[storeID].Get(coldRegionID),
 		"cold region %d should be evicted by gc()", coldRegionID)
 	// Hot peers remain.
