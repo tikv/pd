@@ -66,6 +66,10 @@ func (txn *balanceMutationTxn) mark(key string) {
 		if strings.HasPrefix(ruleID, "affinity_group/") {
 			groupID := strings.TrimPrefix(ruleID, "affinity_group/")
 			txn.changed[AffinityTableMetadataRevisionKey(groupID)] = struct{}{}
+			// Preserve the cluster-wide metadata generation for consumers that
+			// reconcile the complete label snapshot. Balance submission uses the
+			// table-scoped token above, so this does not abort unrelated tables.
+			txn.changed[AffinityMetadataRevisionKey()] = struct{}{}
 		} else {
 			txn.changed[AffinityMetadataRevisionKey()] = struct{}{}
 		}
