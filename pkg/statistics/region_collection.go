@@ -16,6 +16,7 @@ package statistics
 
 import (
 	"maps"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -478,12 +479,7 @@ func IsRegionLabelIsolationSatisfied(stores []*core.StoreInfo, labels []string, 
 	if level == -1 {
 		return false
 	}
-	for _, key := range labels[level:] {
-		if key == isolationLevel {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(labels[level:], isolationLevel)
 }
 
 func notIsolatedStoresWithLabel(stores []*core.StoreInfo, label string) [][]*core.StoreInfo {

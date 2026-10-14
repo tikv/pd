@@ -254,7 +254,7 @@ func schedulersRegister() {
 			}
 
 			storeIDs := make([]uint64, 0)
-			for _, id := range strings.Split(args[1], ",") {
+			for id := range strings.SplitSeq(args[1], ",") {
 				storeID, err := strconv.ParseUint(id, 10, 64)
 				if err != nil {
 					return errs.ErrStrconvParseUint.Wrap(err)

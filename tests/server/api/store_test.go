@@ -244,7 +244,7 @@ func (suite *storeTestSuite) checkStoreLimitRemainsAvailableDuringRollingUpgrade
 	url := leader.GetAddr() + "/pd/api/v1/stores/limit"
 	currentDefault := leader.GetPersistOptions().GetScheduleConfig().DefaultStoreLimit.AddPeer
 	newDefault := currentDefault + 45
-	body := []byte(fmt.Sprintf(`{"rate":%v,"type":"add-peer"}`, newDefault))
+	body := fmt.Appendf(nil, `{"rate":%v,"type":"add-peer"}`, newDefault)
 
 	if schedulingServer := cluster.GetSchedulingPrimaryServer(); schedulingServer != nil {
 		entry := &discovery.ServiceRegistryEntry{

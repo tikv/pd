@@ -231,7 +231,7 @@ func (c *RaftCluster) SetOnStoreBuried(fn func(storeID string)) {
 // - This type is exported by HTTP API. Please pay more attention when modifying it.
 // - Need to sync with client/http/types.go#ClusterStatus
 type Status struct {
-	RaftBootstrapTime time.Time `json:"raft_bootstrap_time,omitempty"`
+	RaftBootstrapTime time.Time `json:"raft_bootstrap_time"`
 	IsInitialized     bool      `json:"is_initialized"`
 	ReplicationStatus string    `json:"replication_status"`
 }

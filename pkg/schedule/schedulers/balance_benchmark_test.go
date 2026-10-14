@@ -160,10 +160,10 @@ func BenchmarkPlacementRule(b *testing.B) {
 	cancel, tc, oc := newBenchCluster(re, true, true, false)
 	defer cancel()
 	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{})
-	b.ResetTimer()
+
 	var ops []*operator.Operator
 	var plans []plan.Plan
-	for range b.N {
+	for b.Loop() {
 		ops, plans = sc.Schedule(tc, false)
 	}
 	b.StopTimer()
@@ -177,8 +177,8 @@ func BenchmarkLabel(b *testing.B) {
 	cancel, tc, oc := newBenchCluster(re, false, true, false)
 	defer cancel()
 	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{})
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		sc.Schedule(tc, false)
 	}
 }
@@ -188,8 +188,8 @@ func BenchmarkNoLabel(b *testing.B) {
 	cancel, tc, oc := newBenchCluster(re, false, false, false)
 	defer cancel()
 	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{})
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		sc.Schedule(tc, false)
 	}
 }
@@ -199,8 +199,8 @@ func BenchmarkDiagnosticNoLabel1(b *testing.B) {
 	cancel, tc, oc := newBenchCluster(re, false, false, false)
 	defer cancel()
 	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{})
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		sc.Schedule(tc, true)
 	}
 }
@@ -209,8 +209,8 @@ func BenchmarkDiagnosticNoLabel2(b *testing.B) {
 	cancel, tc, oc := newBenchBigCluster(100, 100)
 	defer cancel()
 	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{})
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		sc.Schedule(tc, true)
 	}
 }
@@ -219,8 +219,8 @@ func BenchmarkNoLabel2(b *testing.B) {
 	cancel, tc, oc := newBenchBigCluster(100, 100)
 	defer cancel()
 	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{})
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		sc.Schedule(tc, false)
 	}
 }
@@ -230,8 +230,8 @@ func BenchmarkTombStore(b *testing.B) {
 	cancel, tc, oc := newBenchCluster(re, false, false, true)
 	defer cancel()
 	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{})
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		sc.Schedule(tc, false)
 	}
 }

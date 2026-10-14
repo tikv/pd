@@ -534,8 +534,8 @@ func BenchmarkRegionTreeRandomLookUpRegion(b *testing.B) {
 
 func BenchmarkRegionTreeScan(b *testing.B) {
 	data := mock1MRegionTree().shuffleItems()
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		data.tree.scanRanges()
 	}
 }

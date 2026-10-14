@@ -169,10 +169,7 @@ func TestFeedback(t *testing.T) {
 			continue
 		}
 		cost := tick - stats.start
-		exec := stats.expectCost
-		if exec < 5 {
-			exec = 5
-		}
+		exec := max(stats.expectCost, 5)
 		err := exec*wait - cost
 		queue.Remove(first)
 		s.Feedback(float64(err))

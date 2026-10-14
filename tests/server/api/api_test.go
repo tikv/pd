@@ -53,8 +53,7 @@ func TestMain(m *testing.M) {
 
 func TestReconnect(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) {
 		conf.TickInterval = typeutil.Duration{Duration: 50 * time.Millisecond}
 		conf.ElectionInterval = typeutil.Duration{Duration: 250 * time.Millisecond}
@@ -204,7 +203,7 @@ func (suite *middlewareTestSuite) TestRequestInfoMiddleware() {
 
 func BenchmarkDoRequestWithServiceMiddleware(b *testing.B) {
 	re := require.New(b)
-	b.StopTimer()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
@@ -222,8 +221,8 @@ func BenchmarkDoRequestWithServiceMiddleware(b *testing.B) {
 	resp, err := tests.TestDialClient.Do(req)
 	re.NoError(err)
 	resp.Body.Close()
-	b.StartTimer()
-	for range b.N {
+
+	for b.Loop() {
 		err = doTestRequestWithLogAudit(leader)
 		re.NoError(err)
 	}
@@ -542,7 +541,7 @@ func (suite *middlewareTestSuite) TestAuditLocalLogBackend() {
 
 func BenchmarkDoRequestWithLocalLogAudit(b *testing.B) {
 	re := require.New(b)
-	b.StopTimer()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
@@ -560,8 +559,8 @@ func BenchmarkDoRequestWithLocalLogAudit(b *testing.B) {
 	resp, err := tests.TestDialClient.Do(req)
 	re.NoError(err)
 	resp.Body.Close()
-	b.StartTimer()
-	for range b.N {
+
+	for b.Loop() {
 		err = doTestRequestWithLogAudit(leader)
 		re.NoError(err)
 	}
@@ -571,7 +570,7 @@ func BenchmarkDoRequestWithLocalLogAudit(b *testing.B) {
 
 func BenchmarkDoRequestWithPrometheusAudit(b *testing.B) {
 	re := require.New(b)
-	b.StopTimer()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
@@ -589,8 +588,8 @@ func BenchmarkDoRequestWithPrometheusAudit(b *testing.B) {
 	resp, err := tests.TestDialClient.Do(req)
 	re.NoError(err)
 	resp.Body.Close()
-	b.StartTimer()
-	for range b.N {
+
+	for b.Loop() {
 		err = doTestRequestWithPrometheus(leader)
 		re.NoError(err)
 	}
@@ -600,7 +599,7 @@ func BenchmarkDoRequestWithPrometheusAudit(b *testing.B) {
 
 func BenchmarkDoRequestWithoutServiceMiddleware(b *testing.B) {
 	re := require.New(b)
-	b.StopTimer()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
@@ -618,8 +617,8 @@ func BenchmarkDoRequestWithoutServiceMiddleware(b *testing.B) {
 	resp, err := tests.TestDialClient.Do(req)
 	re.NoError(err)
 	resp.Body.Close()
-	b.StartTimer()
-	for range b.N {
+
+	for b.Loop() {
 		err = doTestRequestWithLogAudit(leader)
 		re.NoError(err)
 	}
@@ -816,8 +815,7 @@ func (suite *redirectorTestSuite) TestXForwardedFor() {
 
 func TestFollowerRegionAPIWithNoForward(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) {
 		conf.PDServerCfg.UseRegionStorage = true
 		conf.TickInterval = typeutil.Duration{Duration: 50 * time.Millisecond}
@@ -884,8 +882,7 @@ func TestFollowerRegionAPIWithNoForward(t *testing.T) {
 
 func TestFollowerRegionResetCacheWithNoForward(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) {
 		conf.PDServerCfg.UseRegionStorage = true
 		conf.TickInterval = typeutil.Duration{Duration: 50 * time.Millisecond}
@@ -1104,8 +1101,7 @@ func mustRequestSuccess(re *require.Assertions, s *server.Server) http.Header {
 func TestRemovingProgress(t *testing.T) {
 	re := require.New(t)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Replication.MaxReplicas = 1
 	})
@@ -1420,8 +1416,7 @@ func (suite *forwardTestSuite) checkConfig(_ *tests.TestCluster) {
 
 func TestSendApiWhenRestartRaftCluster(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) {
 		conf.Replication.MaxReplicas = 1
 	})
@@ -1463,8 +1458,7 @@ func TestSendApiWhenRestartRaftCluster(t *testing.T) {
 func TestPreparingProgress(t *testing.T) {
 	re := require.New(t)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Replication.MaxReplicas = 1
 		// prevent scheduling

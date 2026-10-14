@@ -17,6 +17,7 @@ package kv
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -225,7 +226,7 @@ func (kv *etcdKVBase) RunInTxnWithConditions(
 	txn := &etcdTxn{
 		kv:         kv,
 		ctx:        ctx,
-		conditions: append([]clientv3.Cmp(nil), conditions...),
+		conditions: slices.Clone(conditions),
 	}
 	err := f(txn)
 	if err != nil {

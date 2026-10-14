@@ -176,7 +176,7 @@ type HTTPReplicationStatus struct {
 		TotalRegions    int     `json:"total_regions,omitempty"`
 		SyncedRegions   int     `json:"synced_regions,omitempty"`
 		RecoverProgress float32 `json:"recover_progress,omitempty"`
-	} `json:"dr-auto-sync,omitempty"`
+	} `json:"dr-auto-sync"`
 }
 
 // GetReplicationStatusHTTP returns status for HTTP API.

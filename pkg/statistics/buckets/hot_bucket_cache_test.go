@@ -15,7 +15,6 @@
 package buckets
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -30,8 +29,7 @@ func TestMain(m *testing.M) {
 
 func TestPutItem(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cache := NewBucketsCache(ctx)
 	testdata := []struct {
 		regionID    uint64
@@ -127,8 +125,7 @@ func TestConvertToBucketTreeStat(t *testing.T) {
 
 func TestGetBucketsByKeyRange(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cache := NewBucketsCache(ctx)
 	bucket1 := newTestBuckets(1, 1, [][]byte{[]byte(""), []byte("015")}, 0)
 	bucket2 := newTestBuckets(2, 1, [][]byte{[]byte("015"), []byte("020")}, 0)

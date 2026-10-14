@@ -800,8 +800,7 @@ func (suite *regionTestSuite) checkRegionRangeHoles(cluster *tests.TestCluster) 
 
 func BenchmarkGetRegions(b *testing.B) {
 	re := require.New(b)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := b.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -828,8 +827,7 @@ func BenchmarkGetRegions(b *testing.B) {
 	re.Equal(regionCount, regions.Count)
 	resp.Body.Close()
 
-	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		resp, err := apiutil.GetJSON(tests.TestDialClient, url, nil)
 		re.NoError(err)
 		resp.Body.Close()

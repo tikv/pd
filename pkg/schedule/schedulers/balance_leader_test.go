@@ -752,8 +752,8 @@ func BenchmarkCandidateStores(b *testing.B) {
 		leaderCount := int(rand.Int32N(10000))
 		tc.AddLeaderStore(id, leaderCount)
 	}
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		updateAndResortStoresInCandidateStores(tc)
 	}
 }

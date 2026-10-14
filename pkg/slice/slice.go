@@ -92,10 +92,7 @@ func SplitIntoBatches[T any](slice []T, batchSize int) [][]T {
 	sliceLen := len(slice)
 	batches := make([][]T, 0, (sliceLen+batchSize-1)/batchSize)
 	for i := 0; i < sliceLen; i += batchSize {
-		end := i + batchSize
-		if end > sliceLen {
-			end = sliceLen
-		}
+		end := min(i+batchSize, sliceLen)
 		batches = append(batches, slice[i:end])
 	}
 	return batches

@@ -1929,7 +1929,7 @@ func memberFailpointEnabled(val failpoint.Value, memberID uint64) bool {
 	if !ok {
 		return false
 	}
-	for _, memberIDString := range strings.Split(memberString, ",") {
+	for memberIDString := range strings.SplitSeq(memberString, ",") {
 		id, err := strconv.ParseUint(strings.TrimSpace(memberIDString), 10, 64)
 		if err == nil && id == memberID {
 			return true

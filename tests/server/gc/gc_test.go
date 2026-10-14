@@ -141,8 +141,7 @@ func (p *blockingFailpoint) releaseAndDisable(re *require.Assertions) {
 
 func TestGCOperations(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Keyspace.WaitRegionSplit = false
 	})
@@ -478,7 +477,7 @@ func TestGCOperations(t *testing.T) {
 		re.Len(resp.GetGlobalGcBarriers().GetBarriers(), 2)
 		re.Empty(resp.GetGcState().GetGcBarriers())
 
-		barriers := append([]*pdpb.GlobalGCBarrierInfo(nil), resp.GetGlobalGcBarriers().GetBarriers()...)
+		barriers := slices.Clone(resp.GetGlobalGcBarriers().GetBarriers())
 		slices.SortFunc(barriers, func(a, b *pdpb.GlobalGCBarrierInfo) int {
 			if a.GetBarrierId() < b.GetBarrierId() {
 				return -1
@@ -531,7 +530,7 @@ func TestGCOperations(t *testing.T) {
 		IncludeGlobalGcBarriers: true,
 	})
 	re.NoError(err)
-	barriersWithExpired := append([]*pdpb.GlobalGCBarrierInfo(nil), expiredResp.GetGlobalGcBarriers().GetBarriers()...)
+	barriersWithExpired := slices.Clone(expiredResp.GetGlobalGcBarriers().GetBarriers())
 	slices.SortFunc(barriersWithExpired, func(a, b *pdpb.GlobalGCBarrierInfo) int {
 		if a.GetBarrierId() < b.GetBarrierId() {
 			return -1

@@ -76,7 +76,7 @@ type GroupTokenBucket struct {
 	// Settings is the setting of TokenBucket.
 	// MaxTokens limits the number of tokens that can be accumulated
 	Settings              *rmpb.TokenLimitSettings `json:"settings,omitempty"`
-	GroupTokenBucketState `json:"state,omitempty"`
+	GroupTokenBucketState `json:"state"`
 }
 
 func (gtb *GroupTokenBucket) getFillRate() float64 {

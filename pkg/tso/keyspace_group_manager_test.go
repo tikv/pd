@@ -122,8 +122,7 @@ func TestFinishSplitKeyspaceGroupDoesNotBlockStateReads(t *testing.T) {
 		}),
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	kgm = &KeyspaceGroupManager{
 		ctx:        ctx,
 		httpClient: client,

@@ -806,13 +806,13 @@ func BenchmarkRandomRegion(b *testing.B) {
 		}
 		b.Run(fmt.Sprintf("random region whole range with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
-			for range b.N {
+			for b.Loop() {
 				regions.randLeaderRegion(1, nil)
 			}
 		})
 		b.Run(fmt.Sprintf("random regions whole range with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
-			for range b.N {
+			for b.Loop() {
 				regions.RandLeaderRegions(1, nil)
 			}
 		})
@@ -821,13 +821,13 @@ func BenchmarkRandomRegion(b *testing.B) {
 		}
 		b.Run(fmt.Sprintf("random region single range with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
-			for range b.N {
+			for b.Loop() {
 				regions.randLeaderRegion(1, ranges)
 			}
 		})
 		b.Run(fmt.Sprintf("random regions single range with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
-			for range b.N {
+			for b.Loop() {
 				regions.RandLeaderRegions(1, ranges)
 			}
 		})
@@ -839,13 +839,13 @@ func BenchmarkRandomRegion(b *testing.B) {
 		}
 		b.Run(fmt.Sprintf("random region multiple ranges with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
-			for range b.N {
+			for b.Loop() {
 				regions.randLeaderRegion(1, ranges)
 			}
 		})
 		b.Run(fmt.Sprintf("random regions multiple ranges with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
-			for range b.N {
+			for b.Loop() {
 				regions.RandLeaderRegions(1, ranges)
 			}
 		})
@@ -1034,7 +1034,7 @@ func BenchmarkUpdateSubTreeOrderInsensitive(b *testing.B) {
 		// Update the subtrees from an empty `*RegionsInfo`.
 		b.Run(fmt.Sprintf("from empty with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
-			for range b.N {
+			for b.Loop() {
 				for idx := range items {
 					regions.UpdateSubTreeOrderInsensitive(items[idx])
 				}
@@ -1045,7 +1045,7 @@ func BenchmarkUpdateSubTreeOrderInsensitive(b *testing.B) {
 		// which means the regions are completely non-overlapped.
 		b.Run(fmt.Sprintf("from non-overlapped regions with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
-			for range b.N {
+			for b.Loop() {
 				for idx := range items {
 					regions.UpdateSubTreeOrderInsensitive(items[idx])
 				}
@@ -1057,7 +1057,7 @@ func BenchmarkUpdateSubTreeOrderInsensitive(b *testing.B) {
 		b.Run(fmt.Sprintf("from overlapped regions with size %d", size), func(b *testing.B) {
 			items = generateRegionItems(size)
 			b.ResetTimer()
-			for range b.N {
+			for b.Loop() {
 				for idx := range items {
 					regions.UpdateSubTreeOrderInsensitive(items[idx])
 				}
@@ -1100,8 +1100,8 @@ func BenchmarkRegionFromHeartbeat(b *testing.B) {
 		DownPeers:       []*pdpb.PeerStats{{Peer: peers[2], DownSeconds: 100}},
 	}
 	flowRoundDivisor := uint64(3)
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		RegionFromHeartbeat(regionReq, flowRoundDivisor)
 	}
 }
@@ -1640,8 +1640,8 @@ func BenchmarkQueryRegions(b *testing.B) {
 
 		for i := range regionSize {
 			peer := &metapb.Peer{StoreId: 1, Id: uint64(i + 1)}
-			startKey := []byte(fmt.Sprintf("%20d", i*10))
-			endKey := []byte(fmt.Sprintf("%20d", (i+1)*10))
+			startKey := fmt.Appendf(nil, "%20d", i*10)
+			endKey := fmt.Appendf(nil, "%20d", (i+1)*10)
 			region := NewRegionInfo(&metapb.Region{
 				Id:       uint64(i + 1),
 				Peers:    []*metapb.Peer{peer},
@@ -1672,21 +1672,21 @@ func BenchmarkQueryRegions(b *testing.B) {
 
 			b.Run(fmt.Sprintf("QueryByKeys_regions=%d_queries=%d", regionSize, querySize), func(b *testing.B) {
 				b.ResetTimer()
-				for range b.N {
+				for b.Loop() {
 					regions.QueryRegions(queryKeys, nil, nil, false)
 				}
 			})
 
 			b.Run(fmt.Sprintf("QueryByPrevKeys_regions=%d_queries=%d", regionSize, querySize), func(b *testing.B) {
 				b.ResetTimer()
-				for range b.N {
+				for b.Loop() {
 					regions.QueryRegions(nil, queryPrevKeys, nil, false)
 				}
 			})
 
 			b.Run(fmt.Sprintf("QueryByIDs_regions=%d_queries=%d", regionSize, querySize), func(b *testing.B) {
 				b.ResetTimer()
-				for range b.N {
+				for b.Loop() {
 					regions.QueryRegions(nil, nil, queryIDs, false)
 				}
 			})
@@ -1697,7 +1697,7 @@ func BenchmarkQueryRegions(b *testing.B) {
 				mixedPrevKeys := queryPrevKeys[:halfSize]
 				mixedIDs := queryIDs[:halfSize]
 				b.ResetTimer()
-				for range b.N {
+				for b.Loop() {
 					regions.QueryRegions(mixedKeys, mixedPrevKeys, mixedIDs, false)
 				}
 			})

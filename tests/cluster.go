@@ -785,10 +785,7 @@ func (c *TestCluster) runInitialServersWithRetry(maxRetries int) error {
 			}
 
 			// Wait before retry
-			backoff := time.Duration(i+1) * 500 * time.Millisecond
-			if backoff > 3*time.Second {
-				backoff = 3 * time.Second
-			}
+			backoff := min(time.Duration(i+1)*500*time.Millisecond, 3*time.Second)
 			time.Sleep(backoff)
 			continue
 		case startServersRetryCurrent:

@@ -1299,7 +1299,7 @@ func (kgm *KeyspaceGroupManager) sendDeleteRequestToKeyspaceGroupsAPI(suffix str
 	var lastErr error
 	var lastResp *http.Response
 	var lastParseErr error
-	for _, endpoint := range strings.Split(kgm.cfg.GetBackendEndpoints(), ",") {
+	for endpoint := range strings.SplitSeq(kgm.cfg.GetBackendEndpoints(), ",") {
 		endpoint = strings.TrimSpace(endpoint)
 		if endpoint == "" {
 			continue

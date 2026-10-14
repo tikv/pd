@@ -18,6 +18,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -948,9 +949,7 @@ func AdjustMetaServiceGroups(metaGroups map[string]string) error {
 	for groupID := range metaGroups {
 		delete(metaGroups, groupID)
 	}
-	for groupID, endpoint := range dict {
-		metaGroups[groupID] = endpoint
-	}
+	maps.Copy(metaGroups, dict)
 
 	return nil
 }
@@ -962,9 +961,7 @@ func (c *KeyspaceConfig) Clone() *KeyspaceConfig {
 	cfg.PreAlloc = preAlloc
 	if c.MetaServiceGroups != nil {
 		cfg.MetaServiceGroups = make(map[string]string, len(c.MetaServiceGroups))
-		for name, endpoint := range c.MetaServiceGroups {
-			cfg.MetaServiceGroups[name] = endpoint
-		}
+		maps.Copy(cfg.MetaServiceGroups, c.MetaServiceGroups)
 	}
 	return &cfg
 }
@@ -994,9 +991,7 @@ func (c *KeyspaceConfig) GetCheckRegionSplitInterval() time.Duration {
 // GetMetaServiceGroups returns the current meta-service-group configuration.
 func (c *KeyspaceConfig) GetMetaServiceGroups() map[string]string {
 	ret := make(map[string]string, len(c.MetaServiceGroups))
-	for name, endpoint := range c.MetaServiceGroups {
-		ret[name] = endpoint
-	}
+	maps.Copy(ret, c.MetaServiceGroups)
 	return ret
 }
 

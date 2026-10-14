@@ -104,7 +104,7 @@ func (k OpKind) String() string {
 // ParseOperatorKind converts string (flag name list concat by ',') to OpKind.
 func ParseOperatorKind(str string) (OpKind, error) {
 	var k OpKind
-	for _, flagName := range strings.Split(str, ",") {
+	for flagName := range strings.SplitSeq(str, ",") {
 		flag, ok := nameToFlag[flagName]
 		if !ok {
 			return 0, errors.Errorf("unknown flag name: %s", flagName)

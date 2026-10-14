@@ -1072,8 +1072,8 @@ func benchmarkPatrolKeyspaceAssignmentN(
 		re.NoError(err)
 	}
 	// Benchmark the keyspace assignment patrol.
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		err := suite.manager.PatrolKeyspaceAssignment(0, 0)
 		re.NoError(err)
 	}
@@ -1174,8 +1174,7 @@ func (suite *keyspaceTestSuite) TestRemoveKeyspaceCleansCache() {
 // failing, while a present group is still assigned normally.
 func TestAssignGroupAndSaveKeyspace(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	kgm := NewKeyspaceGroupManager(ctx, store, nil)
 
