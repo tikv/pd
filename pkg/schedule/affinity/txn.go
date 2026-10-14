@@ -71,6 +71,25 @@ func (m *Manager) captureAffinityTxnRunner() (endpoint.TxnStorage, error) {
 	return affinityTxnRunner{manager: m, conditions: slices.Clone(conditions)}, nil
 }
 
+func loadAffinityGroupInTxn(txn kv.Txn, groupID string) (*Group, error) {
+	key := keypath.AffinityGroupPath(groupID)
+	var value string
+	var err error
+	if revisionTxn, ok := txn.(kv.RevisionTxn); ok {
+		value, err = revisionTxn.LoadWithRevision(key)
+	} else {
+		value, err = txn.Load(key)
+	}
+	if err != nil || value == "" {
+		return nil, err
+	}
+	var group Group
+	if err := json.Unmarshal([]byte(value), &group); err != nil {
+		return nil, err
+	}
+	return &group, nil
+}
+
 // GetLabelRuleID returns the label rule ID for an affinity group.
 // This ensures consistent naming between label creation and deletion.
 // Format: "affinity_group/{group_id}"
@@ -211,7 +230,7 @@ func (m *Manager) createGroupsWithSkipExisting(changes []GroupKeyRanges, skipExi
 	}
 
 	// Step 5: Save the Group and Label information in storage.
-	if err := endpoint.RunBatchOpInTxn(m.ctx, runner, saveOps); err != nil {
+	if err := endpoint.RunBatchOpInTxnWithLimit(m.ctx, runner, saveOps, endpoint.MaxAffinityTxnBatchOps); err != nil {
 		log.Error("failed to add affinity groups",
 			zap.Int("total-groups", len(filteredChanges)),
 			zap.Error(err))
@@ -308,7 +327,7 @@ func (m *Manager) DeleteAffinityGroups(groupIDs []string, force bool) error {
 	}
 
 	// Step 5: Save the Group and Label information in storage.
-	if err := endpoint.RunBatchOpInTxn(m.ctx, runner, saveOps); err != nil {
+	if err := endpoint.RunBatchOpInTxnWithLimit(m.ctx, runner, saveOps, endpoint.MaxAffinityTxnBatchOps); err != nil {
 		log.Error("failed to delete affinity groups",
 			zap.Int("total-groups", len(toDelete)),
 			zap.Error(err))
@@ -324,6 +343,17 @@ func (m *Manager) DeleteAffinityGroups(groupIDs []string, force bool) error {
 	}
 
 	m.deleteGroups(toDelete)
+	tables := make(map[string]struct{})
+	for _, groupID := range toDelete {
+		tableID := TableGroupPrefix(groupID)
+		if _, cleaned := tables[tableID]; cleaned {
+			continue
+		}
+		tables[tableID] = struct{}{}
+		if err := m.cleanupBalanceRevisions(runner, tableID); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -363,25 +393,12 @@ func (m *Manager) UpdateAffinityGroupPolicy(groupID string, policy BalancePolicy
 	updated := original
 	updated.BalancePolicy = policy
 	err = runner.RunInTxn(m.ctx, func(txn kv.Txn) error {
-		key := keypath.AffinityGroupPath(groupID)
-		var (
-			value   string
-			loadErr error
-		)
-		if revisionTxn, ok := txn.(kv.RevisionTxn); ok {
-			value, loadErr = revisionTxn.LoadWithRevision(key)
-		} else {
-			value, loadErr = txn.Load(key)
-		}
+		persisted, loadErr := loadAffinityGroupInTxn(txn, groupID)
 		if loadErr != nil {
 			return loadErr
 		}
-		if value == "" {
+		if persisted == nil {
 			return errs.ErrEtcdTxnConflict.FastGenByArgs()
-		}
-		var persisted Group
-		if err := json.Unmarshal([]byte(value), &persisted); err != nil {
-			return err
 		}
 		if persisted.ID != original.ID || persisted.CreateTimestamp != original.CreateTimestamp ||
 			persisted.BalancePolicy != original.BalancePolicy || persisted.LeaderStoreID != original.LeaderStoreID ||
@@ -459,23 +476,14 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affini
 	// Balance submissions use CommitBalanceTarget. Safety repair only compares
 	// this group's persisted target and never holds checker locks across IO.
 	err = runner.RunInTxn(m.ctx, func(txn kv.Txn) error {
-		key := keypath.AffinityGroupPath(groupID)
-		var value string
-		var loadErr error
-		if revisionTxn, ok := txn.(kv.RevisionTxn); ok {
-			value, loadErr = revisionTxn.LoadWithRevision(key)
-		} else {
-			value, loadErr = txn.Load(key)
-		}
+		persisted, loadErr := loadAffinityGroupInTxn(txn, groupID)
 		if loadErr != nil {
 			return loadErr
 		}
-		if value == "" {
+		if persisted == nil {
 			return errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
 		}
-		if err := json.Unmarshal([]byte(value), &updated); err != nil {
-			return err
-		}
+		updated = *persisted
 		if updated.ID != original.ID || updated.CreateTimestamp != original.CreateTimestamp ||
 			(affinityVer != 0 && (updated.BalancePolicy != original.BalancePolicy || updated.LeaderStoreID != original.LeaderStoreID ||
 				!slices.Equal(normalizeVoters(updated.VoterStoreIDs), original.VoterStoreIDs))) {
@@ -621,7 +629,7 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 	}
 
 	// Step 4: Save the Label information in storage.
-	if err := endpoint.RunBatchOpInTxn(m.ctx, runner, plan.CommitOps()); err != nil {
+	if err := endpoint.RunBatchOpInTxnWithLimit(m.ctx, runner, plan.CommitOps(), endpoint.MaxAffinityTxnBatchOps); err != nil {
 		log.Error("failed to update affinity group ranges",
 			zap.Int("total-groups", len(addOps)+len(removeOps)),
 			zap.Error(err))

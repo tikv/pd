@@ -596,7 +596,7 @@ func (s *Server) startCluster(ctx context.Context) error {
 	am.SetBalanceCommitGuard(func() ([]clientv3.Cmp, bool) {
 		term, ok := s.participant.GetLeadership().CaptureTerm()
 		return term.Comparisons(), ok
-	}, nil)
+	})
 	configWatcher.SetSchedulersController(cluster.GetCoordinator().GetSchedulersController())
 	ruleWatcher, err = rule.NewWatcher(ctx, s.GetClient(), cluster.GetStorage(),
 		cluster.GetCoordinator().GetCheckerController(), cluster.GetRuleManager(), cluster.GetRegionLabeler())

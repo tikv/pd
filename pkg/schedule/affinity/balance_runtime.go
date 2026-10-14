@@ -193,13 +193,6 @@ func (m *Manager) invalidateBalanceLocked(groupID string) {
 	state.version = m.balanceGeneration
 }
 
-// InvalidateBalance advances the table's generation after an observed change.
-func (m *Manager) InvalidateBalance(groupID string) {
-	m.Lock()
-	defer m.Unlock()
-	m.invalidateBalanceLocked(groupID)
-}
-
 func cloneBalanceRanges(ranges GroupKeyRanges) GroupKeyRanges {
 	ranges.KeyRanges = slices.Clone(ranges.KeyRanges)
 	for i := range ranges.KeyRanges {

@@ -28,6 +28,8 @@ import (
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
@@ -134,7 +136,7 @@ func TestPrepareBalanceCommitRejectsMissingPrimaryTerm(t *testing.T) {
 	ids := seedBalanceGroups(t, manager, []uint64{1})
 	manager.SetBalanceCommitGuard(func() ([]clientv3.Cmp, bool) {
 		return nil, false
-	}, nil)
+	})
 	snapshot := manager.GetBalanceSnapshot(ids[0])
 	require.NotNil(t, snapshot)
 	require.True(t, errs.ErrEtcdTxnConflict.Equal(manager.PrepareBalanceCommit(t.Context(), snapshot)))
@@ -153,7 +155,7 @@ func TestBalanceCommitRejectsRevokedPrimaryTerm(t *testing.T) {
 	manager.storage = conditional
 	manager.SetBalanceCommitGuard(func() ([]clientv3.Cmp, bool) {
 		return []clientv3.Cmp{expected}, true
-	}, nil)
+	})
 
 	snapshot := manager.GetBalanceSnapshot(ids[0])
 	require.NotNil(t, snapshot)
@@ -275,4 +277,133 @@ func TestBalanceCommitDoesNotPublishToRebuiltGroupWithSameID(t *testing.T) {
 	persisted := loadBalanceGroup(t, manager, ids[0])
 	require.Equal(t, rebuilt.CreateTimestamp, persisted.CreateTimestamp)
 	require.Equal(t, uint64(1), persisted.LeaderStoreID)
+}
+
+func TestDeleteAffinityGroupsCleansOnlyEmptyTableRevisions(t *testing.T) {
+	manager := newBalanceRuntimeManager(t)
+	ids := seedBalanceGroups(t, manager, []uint64{1, 1})
+	base := manager.storage.(storage.Storage)
+	otherID := "_tidb_pt_10_pother_p1"
+	require.NoError(t, manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: otherID}}))
+	otherToken, err := base.Load(endpoint.AffinityTableRevisionKey(otherID))
+	require.NoError(t, err)
+	tokens := []string{endpoint.AffinityTableRevisionKey(ids[0]), endpoint.AffinityTableMetadataRevisionKey(ids[0])}
+	require.NoError(t, manager.DeleteAffinityGroups(ids[:1], true))
+	for _, key := range tokens {
+		value, err := base.Load(key)
+		require.NoError(t, err)
+		require.NotEmpty(t, value, "remaining partitions retain their shared token")
+	}
+	require.NoError(t, manager.DeleteAffinityGroups(ids[1:], true))
+	require.NoError(t, manager.DeleteAffinityGroups([]string{ids[0], "custom-missing"}, true))
+	for _, id := range []string{ids[0], "custom-missing"} {
+		for _, key := range []string{endpoint.AffinityTableRevisionKey(id), endpoint.AffinityTableMetadataRevisionKey(id)} {
+			value, err := base.Load(key)
+			require.NoError(t, err)
+			require.Empty(t, value, "deleting absent groups must leave no version keys")
+		}
+	}
+	currentOtherToken, err := base.Load(endpoint.AffinityTableRevisionKey(otherID))
+	require.NoError(t, err)
+	require.Equal(t, otherToken, currentOtherToken)
+}
+
+func TestBalanceCommitRejectsDeletedOrRecreatedTable(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		for _, recreate := range []bool{false, true} {
+			name := "versioned"
+			if legacy {
+				name = "missing tokens"
+			}
+			if recreate {
+				name += "/recreated"
+			} else {
+				name += "/deleted"
+			}
+			t.Run(name, func(t *testing.T) {
+				manager := newBalanceRuntimeManager(t)
+				id := seedBalanceGroups(t, manager, []uint64{1})[0]
+				base := manager.storage.(storage.Storage)
+				if legacy {
+					require.NoError(t, base.Remove(endpoint.AffinityTableRevisionKey(id)))
+					require.NoError(t, base.Remove(endpoint.AffinityTableMetadataRevisionKey(id)))
+				}
+				snapshot := prepareBalanceCommit(t, manager, id)
+				original := snapshot.Groups[0].Group
+				labelKey := keypath.RegionLabelKeyPath(GetLabelRuleID(id))
+				label, err := base.Load(labelKey)
+				require.NoError(t, err)
+				// Keep Manager stale, as it can be while MCS watchers catch up.
+				require.NoError(t, base.RunInTxn(t.Context(), func(txn kv.Txn) error {
+					if err := base.DeleteAffinityGroup(txn, id); err != nil {
+						return err
+					}
+					return txn.Remove(labelKey)
+				}))
+				require.NoError(t, manager.cleanupBalanceRevisions(base, snapshot.TableID))
+				if recreate {
+					require.NoError(t, base.RunInTxn(t.Context(), func(txn kv.Txn) error {
+						if err := base.SaveAffinityGroup(txn, id, &original); err != nil {
+							return err
+						}
+						return txn.Save(labelKey, label)
+					}))
+				}
+				committed, err := manager.CommitBalanceTarget(t.Context(), snapshot, balanceCommitTarget(snapshot, id, 2))
+				require.NoError(t, err)
+				require.False(t, committed)
+				if recreate {
+					require.Equal(t, uint64(1), loadBalanceGroup(t, manager, id).LeaderStoreID)
+				} else {
+					value, err := base.LoadAffinityGroup(id)
+					require.NoError(t, err)
+					require.Empty(t, value)
+				}
+			})
+		}
+	}
+}
+
+type balanceCleanupSamplingStorage struct {
+	storage.Storage
+	afterEmptyRange func()
+}
+
+func (s *balanceCleanupSamplingStorage) LoadRange(start, end string, limit int) (keys, values []string, err error) {
+	keys, values, err = s.Storage.LoadRange(start, end, limit)
+	if err == nil && len(keys) == 0 && s.afterEmptyRange != nil && start == keypath.RegionLabelKeyPath(GetLabelRuleID("_tidb_pt_10_p")) {
+		s.afterEmptyRange()
+	}
+	return keys, values, err
+}
+
+func TestBalanceCleanupDoesNotDeleteRecreatedTable(t *testing.T) {
+	_, client, cleanup := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer cleanup()
+	manager := newBalanceRuntimeManager(t)
+	base := storage.NewStorageWithEtcdBackend(client)
+	manager.storage = base
+	id := seedBalanceGroups(t, manager, []uint64{1})[0]
+	recreated := manager.GetAffinityGroupState(id).Group
+	require.NoError(t, base.RunInTxn(t.Context(), func(txn kv.Txn) error {
+		if err := base.DeleteAffinityGroup(txn, id); err != nil {
+			return err
+		}
+		return base.DeleteRegionRule(txn, GetLabelRuleID(id))
+	}))
+	manager.storage = &balanceCleanupSamplingStorage{Storage: base, afterEmptyRange: func() {
+		require.NoError(t, base.RunInTxn(t.Context(), func(txn kv.Txn) error {
+			return base.SaveAffinityGroup(txn, id, &recreated)
+		}))
+	}}
+
+	err := manager.cleanupBalanceRevisions(base, TableGroupPrefix(id))
+
+	require.True(t, errs.ErrEtcdTxnConflict.Equal(err))
+	require.Equal(t, recreated, loadBalanceGroup(t, manager, id))
+	for _, key := range []string{endpoint.AffinityTableRevisionKey(id), endpoint.AffinityTableMetadataRevisionKey(id)} {
+		value, err := base.Load(key)
+		require.NoError(t, err)
+		require.NotEmpty(t, value)
+	}
 }

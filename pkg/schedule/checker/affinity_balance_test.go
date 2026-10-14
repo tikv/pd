@@ -114,25 +114,49 @@ func TestAffinityBalanceLeaderConvergence(t *testing.T) {
 		createBalanceGroup(t, manager, id, starts[i-1], ends[i-1], 1, []uint64{1, 2, 3}, affinity.BalancePolicyAuto)
 		addBalanceRegion(t, tc, manager, i, starts[i-1], ends[i-1], 1, 1, 2, 3)
 	}
-	for i := uint64(1); i <= 3; i++ {
-		checker.Check(tc.GetRegion(i))
+	check := func(region *core.RegionInfo) []*operator.Operator {
+		manager.ObserveBalanceRegion(region) // Controller observes before invoking individual checkers.
+		return checker.Check(region)
 	}
-	checker.Check(tc.GetRegion(1))
+	for i := uint64(1); i <= 3; i++ {
+		check(tc.GetRegion(i))
+	}
+	check(tc.GetRegion(1))
 	require.Eventually(t, func() bool {
-		checker.Check(tc.GetRegion(1))
+		check(tc.GetRegion(1))
 		return manager.GetAffinityGroupState("_tidb_pt_100_p1").LeaderStoreID != 1
 	}, 3*time.Second, 10*time.Millisecond)
 	target := manager.GetAffinityGroupState("_tidb_pt_100_p1")
 	require.NotEqual(t, uint64(1), target.LeaderStoreID)
-	ops := checker.Check(tc.GetRegion(1))
+	ops := check(tc.GetRegion(1))
 	require.Len(t, ops, 1, "a target change must produce a transfer operator, not merge using stale isAffinity")
 	require.Equal(t, operator.OpLeader|operator.OpAffinity, ops[0].Kind())
 	region := tc.GetRegion(1)
 	peer := region.GetStorePeer(target.LeaderStoreID)
 	require.NotNil(t, peer)
 	tc.PutRegion(region.Clone(core.WithLeader(peer)))
-	checker.Check(tc.GetRegion(1))
+	check(tc.GetRegion(1))
 	require.Equal(t, affinity.PhaseStable, manager.GetAffinityGroupState(target.ID).Phase)
+}
+
+func TestControllerObservesAffinityRegionBeforeRuleRepair(t *testing.T) {
+	tc, _ := newAffinityBalanceTestCluster(t, 3)
+	manager := tc.GetAffinityManager()
+	createBalanceGroup(t, manager, "_tidb_pt_100_p0", "a", "b", 1, []uint64{1, 2, 3}, affinity.BalancePolicyAuto)
+	region := addBalanceRegion(t, tc, manager, 1, "a", "b", 1, 1, 2, 3)
+	controller := NewController(t.Context(), tc, tc.GetCheckerConfig(), operator.NewController(t.Context(), tc.GetBasicCluster(), tc.GetSharedConfig(), nil))
+	version, exists := manager.GetBalanceVersion("_tidb_pt_100")
+	require.True(t, exists)
+	heartbeat := region.Clone(core.SetPeers([]*metapb.Peer{region.GetStorePeer(1), region.GetStorePeer(2)}))
+	tc.PutRegion(heartbeat)
+
+	ops := controller.CheckRegion(heartbeat)
+
+	require.Len(t, ops, 1)
+	require.Equal(t, operator.OpReplica, ops[0].Kind()&operator.OpReplica)
+	current, exists := manager.GetBalanceVersion("_tidb_pt_100")
+	require.True(t, exists)
+	require.Greater(t, current.Table, version.Table)
 }
 
 func TestAffinityBalanceRequiresCompleteRangeCoverage(t *testing.T) {

@@ -358,7 +358,7 @@ func (l *RegionLabeler) Patch(patch LabelRulePatch) error {
 			return l.storage.SaveRegionRule(txn, localID, localRule)
 		})
 	}
-	if err := endpoint.RunBatchOpInTxn(l.ctx, l.storage, batch); err != nil {
+	if err := endpoint.RunBatchOpInTxnWithLimit(l.ctx, l.storage, batch, endpoint.MaxAffinityTxnBatchOps); err != nil {
 		return err
 	}
 
