@@ -25,17 +25,18 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/goleak"
 
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 func TestEtcd(t *testing.T) {
 	re := require.New(t)
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
 
 	kv := NewEtcdKVBase(client)
@@ -43,7 +44,16 @@ func TestEtcd(t *testing.T) {
 	testRange(re, kv)
 	testSaveMultiple(re, kv, 20)
 	testLoadConflict(re, kv)
+	testRevisionLoadConflict(re, kv)
+	testRunInTxnWithConditions(re, kv)
 	testRawTxn(re, kv)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	re.ErrorIs(kv.RunInTxn(ctx, func(txn Txn) error {
+		_, err := txn.Load("canceled-key")
+		return err
+	}), context.Canceled)
 }
 
 func TestLevelDB(t *testing.T) {
@@ -172,6 +182,59 @@ func testLoadConflict(re *require.Assertions, kv Base) {
 	re.Error(kv.RunInTxn(context.Background(), conflictLoader))
 }
 
+func testRunInTxnWithConditions(re *require.Assertions, kv *etcdKVBase) {
+	const (
+		conditionKey = "conditional-txn-guard"
+		dataKey      = "conditional-txn-data"
+	)
+	re.NoError(kv.Save(conditionKey, "current"))
+	re.NoError(kv.RunInTxnWithConditions(
+		context.Background(),
+		[]clientv3.Cmp{clientv3.Compare(clientv3.Value(conditionKey), "=", "current")},
+		func(txn Txn) error {
+			return txn.Save(dataKey, "committed")
+		},
+	))
+	value, err := kv.Load(dataKey)
+	re.NoError(err)
+	re.Equal("committed", value)
+
+	err = kv.RunInTxnWithConditions(
+		context.Background(),
+		[]clientv3.Cmp{clientv3.Compare(clientv3.Value(conditionKey), "=", "stale")},
+		func(txn Txn) error {
+			return txn.Save(dataKey, "must-not-commit")
+		},
+	)
+	re.ErrorIs(err, errs.ErrEtcdTxnConflict)
+	value, err = kv.Load(dataKey)
+	re.NoError(err)
+	re.Equal("committed", value)
+}
+
+func testRevisionLoadConflict(re *require.Assertions, kv *etcdKVBase) {
+	const (
+		key       = "revision-load-key"
+		resultKey = "revision-load-result"
+	)
+	re.NoError(kv.Save(key, "value"))
+	err := kv.RunInTxn(context.Background(), func(txn Txn) error {
+		value, err := txn.(RevisionTxn).LoadWithRevision(key)
+		if err != nil {
+			return err
+		}
+		re.Equal("value", value)
+		// Rewriting the same value changes only the revision. A revision-based
+		// comparison must still reject the stale transaction.
+		re.NoError(kv.Save(key, value))
+		return txn.Save(resultKey, "must-not-commit")
+	})
+	re.ErrorIs(err, errs.ErrEtcdTxnConflict)
+	value, err := kv.Load(resultKey)
+	re.NoError(err)
+	re.Empty(value)
+}
+
 // nolint:unparam
 func mustHaveKeys(re *require.Assertions, kv Base, prefix string, expected ...KeyValuePair) {
 	keys, values, err := kv.LoadRange(prefix, clientv3.GetPrefixRangeEnd(prefix), 0)
@@ -183,7 +246,10 @@ func mustHaveKeys(re *require.Assertions, kv Base, prefix string, expected ...Ke
 	}
 }
 
-func testRawTxn(re *require.Assertions, kv Base) {
+func testRawTxn(re *require.Assertions, kv interface {
+	Base
+	RawTxnCapable
+}) {
 	// Test NotExists condition, putting in transaction.
 	res, err := kv.CreateRawTxn().If(
 		RawTxnCondition{

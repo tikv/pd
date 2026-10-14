@@ -62,6 +62,8 @@ type healthChecker struct {
 	// the checked healthy endpoints dynamically and periodically.
 	client *clientv3.Client
 
+	clientOpts []CreateEtcdClientOpt
+
 	endpointCountState prometheus.Gauge
 }
 
@@ -70,21 +72,27 @@ func initHealthChecker(
 	tickerInterval time.Duration,
 	tlsConfig *tls.Config,
 	client *clientv3.Client,
-	source string,
+	purpose EtcdClientPurpose,
+	opts ...CreateEtcdClientOpt,
 ) {
 	healthChecker := &healthChecker{
-		source:             source,
+		source:             string(purpose),
 		tickerInterval:     tickerInterval,
 		tlsConfig:          tlsConfig,
 		client:             client,
-		endpointCountState: etcdStateGauge.WithLabelValues(source, endpointLabel),
+		clientOpts:         opts,
+		endpointCountState: etcdStateGauge.WithLabelValues(string(purpose), endpointLabel),
 	}
 	// A health checker has the same lifetime with the given etcd client.
 	ctx := client.Ctx()
+	syncerDone := make(chan struct{})
 	// Sync etcd endpoints and check the last health time of each endpoint periodically.
-	go healthChecker.syncer(ctx)
+	go func() {
+		defer close(syncerDone)
+		healthChecker.syncer(ctx)
+	}()
 	// Inspect the health of each endpoint by reading the health key periodically.
-	go healthChecker.inspector(ctx)
+	go healthChecker.inspector(ctx, syncerDone)
 }
 
 func (checker *healthChecker) syncer(ctx context.Context) {
@@ -104,7 +112,7 @@ func (checker *healthChecker) syncer(ctx context.Context) {
 	}
 }
 
-func (checker *healthChecker) inspector(ctx context.Context) {
+func (checker *healthChecker) inspector(ctx context.Context, syncerDone <-chan struct{}) {
 	defer logutil.LogPanic()
 	ticker := time.NewTicker(checker.tickerInterval)
 	defer ticker.Stop()
@@ -114,6 +122,9 @@ func (checker *healthChecker) inspector(ctx context.Context) {
 		case <-ctx.Done():
 			log.Info("etcd client is closed, exit the health inspector goroutine",
 				zap.String("source", checker.source))
+			// The syncer may still be creating a healthy client after the context is
+			// canceled. Wait for it to stop so every client it created is closed.
+			<-syncerDone
 			checker.close()
 			return
 		case <-ticker.C:
@@ -362,7 +373,7 @@ func (checker *healthChecker) update() {
 	for ep := range epMap {
 		client := checker.loadClient(ep)
 		if client == nil {
-			checker.initClient(ep)
+			checker.initClient(ep, checker.clientOpts...)
 			continue
 		}
 		since := time.Since(client.lastHealth)
@@ -413,8 +424,8 @@ func (checker *healthChecker) loadClient(ep string) *healthyClient {
 	return nil
 }
 
-func (checker *healthChecker) initClient(ep string) {
-	client, err := newClient(checker.tlsConfig, ep)
+func (checker *healthChecker) initClient(ep string, opts ...CreateEtcdClientOpt) {
+	client, err := newClient(checker.tlsConfig, []string{ep}, opts...)
 	if err != nil {
 		log.Error("failed to create etcd healthy client",
 			zap.String("endpoint", ep),

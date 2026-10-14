@@ -24,6 +24,8 @@ static: install-tools
 	@ golangci-lint run -c $(ROOT_PATH)/.golangci.yml --verbose ./... --allow-parallel-runners
 	@ echo "modernize ..."
 	@ go run golang.org/x/tools/gopls/internal/analysis/modernize/cmd/modernize@v0.18.1 -test ./...
+	@ echo "leakcheck ..."
+	@ leakcheck -exclude-packages="tests/integrations/realcluster" ./...
 
 tidy:
 	@ go mod tidy
@@ -34,9 +36,16 @@ test: failpoint-enable
 	CGO_ENABLED=1 go test ./$(value test_name)/... -v -tags deadlock -race -cover || { $(MAKE) failpoint-disable && exit 1; }
 	$(MAKE) failpoint-disable
 
+# gotest runs a targeted go test with failpoints automatically enabled/disabled.
+# Usage: make gotest GOTEST_ARGS='./client/... -run TestFoo -count=1'
+GOTEST_ARGS ?= ./...
+gotest: failpoint-enable
+	go test $(GOTEST_ARGS) || { $(MAKE) failpoint-disable && exit 1; }
+	$(MAKE) failpoint-disable
+
 ci-test-job:
 	if [ -f ./$(value test_name)/covprofile ]; then rm ./$(value test_name)/covprofile; fi
-	CGO_ENABLED=1 go test ./$(value test_name)/... -v -tags deadlock -race -cover -covermode=atomic -coverprofile=./$(value test_name)/covprofile -coverpkg=../../...
+	CGO_ENABLED=1 go test ./$(value test_name)/... -tags deadlock -race -cover -covermode=atomic -coverprofile=./$(value test_name)/covprofile -coverpkg=../../...
 
 install-tools:
 	cd $(ROOT_PATH) && $(MAKE) install-tools

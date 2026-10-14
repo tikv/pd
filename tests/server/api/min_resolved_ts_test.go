@@ -102,7 +102,8 @@ func (suite *minResolvedTSTestSuite) checkMinResolvedTS(cluster *tests.TestClust
 	})
 	// case4: set min resolved ts
 	ts := uint64(233)
-	setAllStoresMinResolvedTS(leader, ts)
+	err := setAllStoresMinResolvedTS(leader, ts)
+	re.NoError(err)
 	checkMinResolvedTS(re, urlPrefix, &api.MinResolvedTS{
 		MinResolvedTS:   ts,
 		IsRealTime:      true,
@@ -116,7 +117,8 @@ func (suite *minResolvedTSTestSuite) checkMinResolvedTS(cluster *tests.TestClust
 		IsRealTime:      false,
 		PersistInterval: interval,
 	})
-	setAllStoresMinResolvedTS(leader, ts)
+	err = setAllStoresMinResolvedTS(leader, ts)
+	re.NoError(err)
 	checkMinResolvedTS(re, urlPrefix, &api.MinResolvedTS{
 		MinResolvedTS:   ts, // last persist value
 		IsRealTime:      false,
@@ -146,7 +148,8 @@ func (suite *minResolvedTSTestSuite) checkMinResolvedTSByStores(cluster *tests.T
 		storeID := uint64(i)
 		testTS := ts + storeID
 		testMap[storeID] = testTS
-		rc.SetMinResolvedTS(storeID, testTS)
+		err := rc.SetMinResolvedTS(storeID, testTS)
+		re.NoError(err)
 
 		testStoresID = append(testStoresID, strconv.Itoa(i))
 	}
@@ -184,11 +187,15 @@ func setMinResolvedTSPersistenceInterval(svr *tests.TestServer, duration typeuti
 	svr.GetRaftCluster().SetPDServerConfig(cfg)
 }
 
-func setAllStoresMinResolvedTS(svr *tests.TestServer, ts uint64) {
+func setAllStoresMinResolvedTS(svr *tests.TestServer, ts uint64) error {
 	rc := svr.GetRaftCluster()
 	for i := 1; i <= 3; i++ {
-		rc.SetMinResolvedTS(uint64(i), ts)
+		err := rc.SetMinResolvedTS(uint64(i), ts)
+		if err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func checkMinResolvedTS(re *require.Assertions, url string, expect *api.MinResolvedTS) {

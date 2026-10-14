@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
@@ -45,6 +46,52 @@ type operatorTestSuite struct {
 
 func TestOperatorTestSuite(t *testing.T) {
 	suite.Run(t, new(operatorTestSuite))
+}
+
+func TestAdjustStepCostUsesRegionKeys(t *testing.T) {
+	tests := []struct {
+		size int64
+		keys int64
+		cost int64
+	}{
+		{size: 1, keys: 0, cost: 0},
+		{size: 1, keys: 1, cost: storelimit.SmallRegionInfluence[storelimit.AddPeer]},
+		{size: 1, keys: 2, cost: storelimit.SmallRegionInfluence[storelimit.AddPeer]},
+		{size: 2, keys: 1, cost: storelimit.SmallRegionInfluence[storelimit.AddPeer]},
+		{size: 21, keys: 2, cost: storelimit.RegionInfluence[storelimit.AddPeer]},
+	}
+	for _, tt := range tests {
+		var influence StoreInfluence
+		influence.AdjustStepCost(storelimit.AddPeer, tt.size, tt.keys)
+		require.Equal(t, tt.cost, influence.GetStepCost(storelimit.AddPeer))
+	}
+}
+
+func TestPeerInfluenceUsesRegionKeys(t *testing.T) {
+	region := newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2}).Clone(
+		core.SetApproximateSize(1),
+		core.SetApproximateKeys(2),
+	)
+
+	addInfluence := NewOpInfluence()
+	AddPeer{ToStore: 3}.Influence(addInfluence, region)
+	require.Equal(t, storelimit.SmallRegionInfluence[storelimit.AddPeer], addInfluence.GetStoreInfluence(3).GetStepCost(storelimit.AddPeer))
+
+	addLearnerInfluence := NewOpInfluence()
+	AddLearner{ToStore: 3}.Influence(addLearnerInfluence, region)
+	require.Equal(t, storelimit.SmallRegionInfluence[storelimit.AddPeer], addLearnerInfluence.GetStoreInfluence(3).GetStepCost(storelimit.AddPeer))
+
+	removeInfluence := NewOpInfluence()
+	RemovePeer{FromStore: 1}.Influence(removeInfluence, region)
+	require.Equal(t, storelimit.SmallRegionInfluence[storelimit.RemovePeer], removeInfluence.GetStoreInfluence(1).GetStepCost(storelimit.RemovePeer))
+
+	witnessInfluence := NewOpInfluence()
+	BecomeWitness{StoreID: 1, PeerID: 1}.Influence(witnessInfluence, region)
+	require.Equal(t, storelimit.SmallRegionInfluence[storelimit.RemovePeer], witnessInfluence.GetStoreInfluence(1).GetStepCost(storelimit.RemovePeer))
+
+	nonWitnessInfluence := NewOpInfluence()
+	BecomeNonWitness{StoreID: 1, PeerID: 1}.Influence(nonWitnessInfluence, region)
+	require.Equal(t, storelimit.SmallRegionInfluence[storelimit.AddPeer], nonWitnessInfluence.GetStoreInfluence(1).GetStepCost(storelimit.AddPeer))
 }
 
 func (suite *operatorTestSuite) SetupTest() {
@@ -176,7 +223,27 @@ func (suite *operatorTestSuite) TestInfluence() {
 		storeOpInfluence[2] = &StoreInfluence{}
 	}
 
-	AddLearner{ToStore: 2, PeerID: 2, SendStore: 1}.Influence(opInfluence, region)
+	// Leader-transfer cost is independent of region size.
+	for _, size := range []int64{1, 1024} {
+		TransferLeader{FromStore: 1, ToStore: 2}.Influence(&opInfluence, region.Clone(core.SetApproximateSize(size)))
+		re.Zero(storeOpInfluence[1].GetStepCost(storelimit.TransferLeaderIn))
+		re.Equal(storelimit.RegionInfluence[storelimit.TransferLeaderIn], storeOpInfluence[2].GetStepCost(storelimit.TransferLeaderIn))
+		resetInfluence()
+	}
+
+	for _, targets := range [][]uint64{{2, 3}, {3}, {2, 3, 3}} {
+		influence := NewOpInfluence()
+		TransferLeader{FromStore: 1, ToStore: 2, ToStores: targets}.Influence(influence, region)
+		re.Zero(influence.GetStoreInfluence(1).GetStepCost(storelimit.TransferLeaderIn))
+		for _, id := range []uint64{2, 3} {
+			re.Equal(storelimit.RegionInfluence[storelimit.TransferLeaderIn], influence.GetStoreInfluence(id).GetStepCost(storelimit.TransferLeaderIn))
+		}
+		re.Equal(int64(1), influence.GetStoreInfluence(2).LeaderCount)
+		re.Zero(influence.GetStoreInfluence(3).LeaderCount)
+		re.Zero(influence.GetStoreInfluence(3).LeaderSize)
+	}
+
+	AddLearner{ToStore: 2, PeerID: 2, SendStore: 1}.Influence(&opInfluence, region)
 	re.Equal(StoreInfluence{
 		LeaderSize:  0,
 		LeaderCount: 0,
@@ -194,7 +261,7 @@ func (suite *operatorTestSuite) TestInfluence() {
 	}, *storeOpInfluence[1])
 	resetInfluence()
 
-	BecomeNonWitness{SendStore: 2, PeerID: 2, StoreID: 1}.Influence(opInfluence, region)
+	BecomeNonWitness{SendStore: 2, PeerID: 2, StoreID: 1}.Influence(&opInfluence, region)
 	re.Equal(StoreInfluence{
 		LeaderSize:   0,
 		LeaderCount:  0,
@@ -213,7 +280,7 @@ func (suite *operatorTestSuite) TestInfluence() {
 	}, *storeOpInfluence[2])
 	resetInfluence()
 
-	AddPeer{ToStore: 2, PeerID: 2}.Influence(opInfluence, region)
+	AddPeer{ToStore: 2, PeerID: 2}.Influence(&opInfluence, region)
 	re.Equal(StoreInfluence{
 		LeaderSize:  0,
 		LeaderCount: 0,
@@ -222,7 +289,7 @@ func (suite *operatorTestSuite) TestInfluence() {
 		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
 	}, *storeOpInfluence[2])
 
-	TransferLeader{FromStore: 1, ToStore: 2}.Influence(opInfluence, region)
+	TransferLeader{FromStore: 1, ToStore: 2}.Influence(&opInfluence, region)
 	re.Equal(StoreInfluence{
 		LeaderSize:  -50,
 		LeaderCount: -1,
@@ -235,10 +302,13 @@ func (suite *operatorTestSuite) TestInfluence() {
 		LeaderCount: 1,
 		RegionSize:  50,
 		RegionCount: 1,
-		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
+		StepCost: map[storelimit.Type]int64{
+			storelimit.AddPeer:          1000,
+			storelimit.TransferLeaderIn: 1000,
+		},
 	}, *storeOpInfluence[2])
 
-	RemovePeer{FromStore: 1}.Influence(opInfluence, region)
+	RemovePeer{FromStore: 1}.Influence(&opInfluence, region)
 	re.Equal(StoreInfluence{
 		LeaderSize:  -50,
 		LeaderCount: -1,
@@ -251,10 +321,13 @@ func (suite *operatorTestSuite) TestInfluence() {
 		LeaderCount: 1,
 		RegionSize:  50,
 		RegionCount: 1,
-		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
+		StepCost: map[storelimit.Type]int64{
+			storelimit.AddPeer:          1000,
+			storelimit.TransferLeaderIn: 1000,
+		},
 	}, *storeOpInfluence[2])
 
-	MergeRegion{IsPassive: false}.Influence(opInfluence, region)
+	MergeRegion{IsPassive: false}.Influence(&opInfluence, region)
 	re.Equal(StoreInfluence{
 		LeaderSize:  -50,
 		LeaderCount: -1,
@@ -267,10 +340,13 @@ func (suite *operatorTestSuite) TestInfluence() {
 		LeaderCount: 1,
 		RegionSize:  50,
 		RegionCount: 1,
-		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
+		StepCost: map[storelimit.Type]int64{
+			storelimit.AddPeer:          1000,
+			storelimit.TransferLeaderIn: 1000,
+		},
 	}, *storeOpInfluence[2])
 
-	MergeRegion{IsPassive: true}.Influence(opInfluence, region)
+	MergeRegion{IsPassive: true}.Influence(&opInfluence, region)
 	re.Equal(StoreInfluence{
 		LeaderSize:  -50,
 		LeaderCount: -2,
@@ -283,7 +359,10 @@ func (suite *operatorTestSuite) TestInfluence() {
 		LeaderCount: 1,
 		RegionSize:  50,
 		RegionCount: 0,
-		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
+		StepCost: map[storelimit.Type]int64{
+			storelimit.AddPeer:          1000,
+			storelimit.TransferLeaderIn: 1000,
+		},
 	}, *storeOpInfluence[2])
 }
 
@@ -477,9 +556,53 @@ func (suite *operatorTestSuite) TestSchedulerKind() {
 			op:     NewTestOperator(1, &metapb.RegionEpoch{}, OpLeader),
 			expect: OpLeader,
 		},
+		{
+			op:     NewTestOperator(1, &metapb.RegionEpoch{}, OpAffinity|OpRegion),
+			expect: OpAffinity,
+		}, {
+			op:     NewTestOperator(1, &metapb.RegionEpoch{}, OpSplitScatter|OpRegion),
+			expect: OpSplitScatter,
+		}, {
+			op:     NewTestOperator(1, &metapb.RegionEpoch{}, OpAdmin|OpSplitScatter|OpRegion),
+			expect: OpAdmin,
+		}, {
+			op:     NewTestOperator(1, &metapb.RegionEpoch{}, OpAffinity|OpLeader),
+			expect: OpAffinity,
+		}, {
+			op:     NewTestOperator(1, &metapb.RegionEpoch{}, OpAffinity|OpMerge|OpRegion),
+			expect: OpAffinity,
+		}, {
+			op:     NewTestOperator(1, &metapb.RegionEpoch{}, OpAdmin|OpAffinity|OpRegion),
+			expect: OpAdmin,
+		},
 	}
 	for _, v := range testData {
 		re.Equal(v.expect, v.op.SchedulerKind())
+	}
+}
+
+func (suite *operatorTestSuite) TestOpKindValues() {
+	re := suite.Require()
+	testCases := []struct {
+		name string
+		kind OpKind
+		want OpKind
+	}{
+		{"admin", OpAdmin, 1 << 0},
+		{"affinity", OpAffinity, 1 << 1},
+		{"merge", OpMerge, 1 << 2},
+		{"range", OpRange, 1 << 3},
+		{"replica", OpReplica, 1 << 4},
+		{"split", OpSplit, 1 << 5},
+		{"hot-region", OpHotRegion, 1 << 6},
+		{"region", OpRegion, 1 << 7},
+		{"leader", OpLeader, 1 << 8},
+		{"witness-leader", OpWitnessLeader, 1 << 9},
+		{"witness", OpWitness, 1 << 10},
+		{"split-scatter", OpSplitScatter, 1 << 11},
+	}
+	for _, testCase := range testCases {
+		re.Equal(testCase.want, testCase.kind, "unexpected %s kind value", testCase.name)
 	}
 }
 
@@ -593,8 +716,19 @@ func TestOperatorCheckConcurrently(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			re.Nil(op.Check(region))
+			assert.Nil(t, op.Check(region))
 		}()
 	}
 	wg.Wait()
+}
+
+func TestOperatorStoreHealthCheck(t *testing.T) {
+	re := require.New(t)
+	op := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, AddPeer{ToStore: 1, PeerID: 1})
+	// Not tied to creation: defaults to false, and can be toggled any time after Build/NewOperator.
+	re.False(op.NeedStoreHealthCheck())
+	op.SetStoreHealthCheck(true)
+	re.True(op.NeedStoreHealthCheck())
+	op.SetStoreHealthCheck(false)
+	re.False(op.NeedStoreHealthCheck())
 }

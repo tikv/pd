@@ -18,6 +18,7 @@ import (
 	"context"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/docker/go-units"
 	"github.com/stretchr/testify/require"
@@ -25,6 +26,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/config"
@@ -62,6 +65,31 @@ func prepareSchedulersTest(needToRunStream ...bool) (func(), config.SchedulerCon
 	return clean, opt, tc, oc
 }
 
+func exhaustTransferLeaderInLimit(t *testing.T, cluster *mockcluster.Cluster, storeIDs ...uint64) {
+	t.Helper()
+	// One token takes long enough to refill that no sleeps or timing assertions are needed.
+	for _, id := range storeIDs {
+		cluster.SetStoreLimit(id, storelimit.TransferLeaderIn, 0.00006)
+		cluster.ResetStoreLimit(id, storelimit.TransferLeaderIn, 0.000001)
+		limiter := cluster.GetStore(id).GetStoreLimit()
+		require.True(t, limiter.Take(storelimit.RegionInfluence[storelimit.TransferLeaderIn], storelimit.TransferLeaderIn, constant.Medium))
+		require.False(t, cluster.GetStore(id).IsAvailable(storelimit.TransferLeaderIn, constant.Medium))
+	}
+}
+
+func TestReloadSchedulerConfigWithoutSchedulerDoesNotPanic(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	c := NewController(context.Background(), tc, storage.NewStorageWithMemoryBackend(), oc)
+	c.schedulerHandlers["test-scheduler"] = nil
+
+	re.NotPanics(func() {
+		re.Error(c.ReloadSchedulerConfig("test-scheduler"))
+	})
+}
+
 func TestShuffleLeader(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
@@ -88,6 +116,14 @@ func TestShuffleLeader(t *testing.T) {
 		re.NotEmpty(ops)
 		re.Equal(operator.OpLeader|operator.OpAdmin, ops[0].Kind())
 	}
+	exhaustTransferLeaderInLimit(t, tc, 1, 2, 3, 4)
+	ops, _ = sl.Schedule(tc, false)
+	re.Empty(ops)
+	tc.SetStoreLimit(2, storelimit.TransferLeaderIn, storelimit.Unlimited)
+	tc.ResetStoreLimit(2, storelimit.TransferLeaderIn, storelimit.Unlimited/time.Minute.Seconds())
+	ops, _ = sl.Schedule(tc, false)
+	re.Len(ops, 1)
+	re.Equal(uint64(2), ops[0].Step(0).(operator.TransferLeader).ToStore)
 }
 
 func TestRejectLeader(t *testing.T) {
@@ -141,6 +177,14 @@ func TestRejectLeader(t *testing.T) {
 	tc.UpdateSubTree(region, origin, overlaps, rangeChanged)
 	ops, _ = sl.Schedule(tc, false)
 	operatorutil.CheckTransferLeader(re, ops[0], operator.OpLeader, 1, 2)
+	exhaustTransferLeaderInLimit(t, tc, 1, 2, 3)
+	ops, _ = sl.Schedule(tc, false)
+	re.Empty(ops)
+	tc.SetStoreLimit(2, storelimit.TransferLeaderIn, storelimit.Unlimited)
+	tc.ResetStoreLimit(2, storelimit.TransferLeaderIn, storelimit.Unlimited/time.Minute.Seconds())
+	ops, _ = sl.Schedule(tc, false)
+	re.Len(ops, 1)
+	re.Equal(uint64(2), ops[0].Step(0).(operator.TransferLeader).ToStore)
 }
 
 func TestRemoveRejectLeader(t *testing.T) {
@@ -273,18 +317,20 @@ func TestShuffleRegionRole(t *testing.T) {
 
 	// update rule to 1leader+1follower+1learner
 	tc.SetEnablePlacementRules(true)
-	tc.SetRule(&placement.Rule{
+	err := tc.SetRule(&placement.Rule{
 		GroupID: placement.DefaultGroupID,
 		ID:      placement.DefaultRuleID,
 		Role:    placement.Voter,
 		Count:   2,
 	})
-	tc.SetRule(&placement.Rule{
+	re.NoError(err)
+	err = tc.SetRule(&placement.Rule{
 		GroupID: placement.DefaultGroupID,
 		ID:      "learner",
 		Role:    placement.Learner,
 		Count:   1,
 	})
+	re.NoError(err)
 
 	// Add stores 1, 2, 3, 4
 	tc.AddRegionStore(1, 6)
@@ -523,15 +569,15 @@ func TestIsDefault(t *testing.T) {
 	defer cancel()
 
 	for schedulerType := range types.SchedulerTypeCompatibleMap {
-		bs, err := CreateScheduler(schedulerType, oc,
+		s, err := CreateScheduler(schedulerType, oc,
 			storage.NewStorageWithMemoryBackend(),
 			testDecoder,
 			func(string) error { return nil })
 		re.NoError(err)
 		if slices.Contains(types.DefaultSchedulers, schedulerType) {
-			re.True(bs.IsDefault())
+			re.True(s.IsDefault())
 		} else {
-			re.False(bs.IsDefault())
+			re.False(s.IsDefault())
 		}
 	}
 }

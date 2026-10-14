@@ -17,9 +17,11 @@ package tso
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
+	"net/url"
 	"regexp"
 	"slices"
 	"strings"
@@ -58,6 +60,8 @@ import (
 )
 
 const (
+	keyspaceGroupPrimaryElectionPurposePrefix = "keyspace group primary election"
+
 	// mergingCheckInterval is the interval for merging check to see if the keyspace groups
 	// merging process could be moved forward.
 	mergingCheckInterval = 5 * time.Second
@@ -66,7 +70,25 @@ const (
 	// do this check and re-distribute the primaries if necessary.
 	defaultPrimaryPriorityCheckInterval = 10 * time.Second
 	groupPatrolInterval                 = time.Minute
+	// keyspaceGroupMetricsSyncInterval is the interval for syncing keyspace list length metrics from kgm.kgs.
+	keyspaceGroupMetricsSyncInterval = 15 * time.Second
+	// finishKeyspaceGroupPerEndpointTimeout is the deadline for each backend endpoint attempt.
+	finishKeyspaceGroupPerEndpointTimeout = 3 * time.Second
 )
+
+// getBootstrapKeyspaceID returns the keyspace ID used for bootstrapping.
+// It mirrors keyspace.GetBootstrapKeyspaceID() to avoid importing pkg/keyspace (which would
+// create an import cycle with keyspace importing pkg/tso for keyspace list length metric).
+func getBootstrapKeyspaceID() uint32 {
+	if kerneltype.IsNextGen() {
+		return constant.SystemKeyspaceID
+	}
+	return constant.DefaultKeyspaceID
+}
+
+func keyspaceGroupPrimaryElectionPurpose(groupID uint32) string {
+	return fmt.Sprintf("%s %05d", keyspaceGroupPrimaryElectionPurposePrefix, groupID)
+}
 
 type state struct {
 	syncutil.RWMutex
@@ -91,6 +113,10 @@ type state struct {
 	// Once a group receives its first TSO request and pass the certain check, it will be added to this map.
 	// Being merged will cause the group to be removed from this map eventually if the merge is successful.
 	requestedGroups map[uint32]struct{}
+
+	// modRevision is the modification revision of keyspace space.
+	// It is used to indicate that server must return the newer keyspace infos avoid to tso fallback the older keyspace.
+	modRevision uint64
 }
 
 func (s *state) initialize() {
@@ -131,6 +157,19 @@ func (s *state) getKeyspaceGroupMeta(
 	s.RLock()
 	defer s.RUnlock()
 	return s.allocators[groupID], s.kgs[groupID]
+}
+
+// SetModRevision sets the modification revision of the keyspace group state.
+// return true if the mod revision is updated.
+// It only allows increasing the mod revision.
+func (s *state) SetModRevision(modRevision uint64) bool {
+	s.Lock()
+	defer s.Unlock()
+	if s.modRevision < modRevision {
+		s.modRevision = modRevision
+		return true
+	}
+	return false
 }
 
 // getSplittingGroups returns the IDs of the splitting keyspace groups.
@@ -240,7 +279,7 @@ func (s *state) checkGroupMerge(
 // keyspace movement between keyspace groups.
 func (s *state) getKeyspaceGroupMetaWithCheck(
 	keyspaceID, keyspaceGroupID uint32,
-) (*Allocator, *endpoint.KeyspaceGroup, uint32, error) {
+) (*Allocator, *endpoint.KeyspaceGroup, uint32, uint64, error) {
 	s.RLock()
 	defer s.RUnlock()
 
@@ -248,7 +287,7 @@ func (s *state) getKeyspaceGroupMetaWithCheck(
 		kg := s.kgs[keyspaceGroupID]
 		if kg != nil {
 			if _, ok := kg.KeyspaceLookupTable[keyspaceID]; ok {
-				return allocator, kg, keyspaceGroupID, nil
+				return allocator, kg, keyspaceGroupID, s.modRevision, nil
 			}
 		}
 	}
@@ -257,31 +296,31 @@ func (s *state) getKeyspaceGroupMetaWithCheck(
 	// keyspace groups, and return the correct keyspace group meta to the client.
 	if kgid, ok := s.keyspaceLookupTable[keyspaceID]; ok {
 		if s.allocators[kgid] != nil {
-			return s.allocators[kgid], s.kgs[kgid], kgid, nil
+			return s.allocators[kgid], s.kgs[kgid], kgid, s.modRevision, nil
 		}
-		return nil, s.kgs[kgid], kgid, genNotServedErr(errs.ErrGetAllocator, keyspaceGroupID)
+		return nil, s.kgs[kgid], kgid, s.modRevision, genNotServedErr(errs.ErrGetAllocator, keyspaceGroupID)
 	}
 
 	// The keyspace doesn't belong to any keyspace group but the keyspace has been assigned to a
 	// keyspace group before, which means the keyspace group hasn't initialized yet.
 	if keyspaceGroupID != constant.DefaultKeyspaceGroupID {
-		return nil, nil, keyspaceGroupID, errs.ErrKeyspaceNotAssigned.FastGenByArgs(keyspaceID)
+		return nil, nil, keyspaceGroupID, s.modRevision, errs.ErrKeyspaceNotAssigned.FastGenByArgs(keyspaceID)
 	}
 
 	// For migrating the existing keyspaces which have no keyspace group assigned as configured
 	// in the keyspace meta. All these keyspaces will be served by the default keyspace group.
 	if s.allocators[constant.DefaultKeyspaceGroupID] == nil {
-		return nil, nil, constant.DefaultKeyspaceGroupID,
+		return nil, nil, constant.DefaultKeyspaceGroupID, s.modRevision,
 			errs.ErrKeyspaceNotAssigned.FastGenByArgs(keyspaceID)
 	}
 	return s.allocators[constant.DefaultKeyspaceGroupID],
 		s.kgs[constant.DefaultKeyspaceGroupID],
-		constant.DefaultKeyspaceGroupID, nil
+		constant.DefaultKeyspaceGroupID, s.modRevision, nil
 }
 
 func (s *state) getNextPrimaryToReset(
 	groupID int, localAddress string,
-) (member member.ElectionMember, kg *endpoint.KeyspaceGroup, localPriority, nextGroupID int) {
+) (member member.Election, kg *endpoint.KeyspaceGroup, localPriority, nextGroupID int) {
 	s.RLock()
 	defer s.RUnlock()
 
@@ -291,7 +330,7 @@ func (s *state) getNextPrimaryToReset(
 	for j := 0; j < groupSize; groupID, j = (groupID+1)%groupSize, j+1 {
 		allocator := s.allocators[groupID]
 		kg := s.kgs[groupID]
-		if allocator != nil && kg != nil && allocator.GetMember().IsLeader() {
+		if allocator != nil && kg != nil && allocator.GetMember().IsServing() {
 			maxPriority := math.MinInt32
 			localPriority := math.MaxInt32
 			for _, member := range kg.Members {
@@ -315,7 +354,7 @@ func (s *state) getNextPrimaryToReset(
 }
 
 // KeyspaceGroupManager manages the members of the keyspace groups assigned to this host.
-// The replicas campaign for the leaders which provide the tso service for the corresponding
+// The replicas campaign for the primaries which provide the tso service for the corresponding
 // keyspace groups.
 type KeyspaceGroupManager struct {
 	// state is the in-memory state of the keyspace groups
@@ -349,6 +388,8 @@ type KeyspaceGroupManager struct {
 
 	// mergeCheckerCancelMap is the cancel function map for the merge checker of each keyspace group.
 	mergeCheckerCancelMap sync.Map // GroupID -> context.CancelFunc
+	// finishSplitMu serializes split finish requests without blocking state readers.
+	finishSplitMu sync.Mutex
 
 	primaryPriorityCheckInterval time.Duration
 
@@ -413,10 +454,11 @@ func (kgm *KeyspaceGroupManager) Initialize() error {
 		return errs.ErrLoadKeyspaceGroupsTerminated.Wrap(err)
 	}
 
-	kgm.wg.Add(3)
+	kgm.wg.Add(4)
 	go kgm.primaryPriorityCheckLoop()
 	go kgm.groupSplitPatroller()
 	go kgm.deletedGroupCleaner()
+	go kgm.keyspaceGroupMetricsSyncer()
 
 	return nil
 }
@@ -481,6 +523,7 @@ func (kgm *KeyspaceGroupManager) InitializeTSOServerWatchLoop() error {
 		func([]*clientv3.Event) error { return nil },
 		true, /* withPrefix */
 	)
+	kgm.tsoNodesWatcher.SetReconcileDeletedKeys()
 	kgm.tsoNodesWatcher.StartWatchLoop()
 	if err := kgm.tsoNodesWatcher.WaitLoad(); err != nil {
 		log.Error("failed to load the registered tso servers", errs.ZapError(err))
@@ -496,11 +539,19 @@ func (kgm *KeyspaceGroupManager) InitializeTSOServerWatchLoop() error {
 // Value: endpoint.KeyspaceGroup
 func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 	defaultKGConfigured := false
+	maxLoadedModRevision := uint64(0)
 	putFn := func(kv *mvccpb.KeyValue) error {
 		group := &endpoint.KeyspaceGroup{}
 		if err := json.Unmarshal(kv.Value, group); err != nil {
 			return errs.ErrJSONUnmarshal.Wrap(err)
 		}
+		failpoint.Inject("SkipKeyspaceWatch", func(val failpoint.Value) {
+			addr, ok := val.(string)
+			if ok && addr == kgm.electionNamePrefix {
+				failpoint.Return(nil)
+			}
+		})
+		maxLoadedModRevision = max(maxLoadedModRevision, uint64(kv.ModRevision))
 		kgm.updateKeyspaceGroup(group)
 		if group.ID == constant.DefaultKeyspaceGroupID {
 			defaultKGConfigured = true
@@ -515,11 +566,26 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		kgm.deleteKeyspaceGroup(groupID)
 		return nil
 	}
-	postEventsFn := func([]*clientv3.Event) error {
+	postEventsFn := func(event []*clientv3.Event) error {
 		// Retry the groups that are not initialized successfully before.
 		for id, group := range kgm.groupUpdateRetryList {
 			delete(kgm.groupUpdateRetryList, id)
 			kgm.updateKeyspaceGroup(group)
+		}
+		failpoint.Inject("SkipKeyspaceWatch", func(val failpoint.Value) {
+			addr, ok := val.(string)
+			if ok && addr == kgm.electionNamePrefix {
+				failpoint.Return(nil)
+			}
+		})
+		if len(event) > 0 {
+			last := event[len(event)-1]
+			if !kgm.SetModRevision(uint64(last.Kv.ModRevision)) {
+				log.Warn("watch keyspace group met mod revision not increased",
+					zap.Uint32("current-mod-revision", uint32(kgm.modRevision)),
+					zap.Uint64("new-mod-revision", uint64(last.Kv.ModRevision)),
+				)
+			}
 		}
 		return nil
 	}
@@ -530,12 +596,21 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		"keyspace-watcher",
 		// To keep the consistency with the previous code, we should trim the suffix `/`.
 		strings.TrimSuffix(keypath.KeyspaceGroupIDPrefix(), "/"),
-		func([]*clientv3.Event) error { return nil },
+		func([]*clientv3.Event) error {
+			maxLoadedModRevision = 0
+			return nil
+		},
 		putFn,
 		deleteFn,
 		postEventsFn,
 		true, /* withPrefix */
 	)
+	kgm.groupWatcher.SetConsistentLoad()
+	kgm.groupWatcher.SetInitialLoadSuccessFn(func() {
+		if maxLoadedModRevision > 0 {
+			kgm.SetModRevision(maxLoadedModRevision)
+		}
+	})
 	if kgm.loadFromEtcdMaxRetryTimes > 0 {
 		kgm.groupWatcher.SetLoadRetryTimes(kgm.loadFromEtcdMaxRetryTimes)
 	}
@@ -578,8 +653,8 @@ func (kgm *KeyspaceGroupManager) primaryPriorityCheckLoop() {
 			return
 		case <-ticker.C:
 			// Every primaryPriorityCheckInterval, we only reset the primary of one keyspace group
-			member, kg, localPriority, nextGroupID := kgm.getNextPrimaryToReset(groupID, kgm.tsoServiceID.ServiceAddr)
-			if member != nil {
+			electedMember, kg, localPriority, nextGroupID := kgm.getNextPrimaryToReset(groupID, kgm.tsoServiceID.ServiceAddr)
+			if electedMember != nil {
 				aliveTSONodes := make(map[string]struct{})
 				kgm.tsoNodes.Range(func(key, _ any) bool {
 					aliveTSONodes[typeutil.TrimScheme(key.(string))] = struct{}{}
@@ -589,18 +664,18 @@ func (kgm *KeyspaceGroupManager) primaryPriorityCheckLoop() {
 					log.Warn("no alive tso node", zap.String("local-address", kgm.tsoServiceID.ServiceAddr))
 					continue
 				}
-				// If there is a alive member with higher priority, reset the leader.
-				resetLeader := false
+				// If there is a alive member with higher priority, reset the primary.
+				resetPrimary := false
 				for _, m := range kg.Members {
 					if m.Priority <= localPriority {
 						continue
 					}
 					if _, ok := aliveTSONodes[typeutil.TrimScheme(m.Address)]; ok {
-						resetLeader = true
+						resetPrimary = true
 						break
 					}
 				}
-				if resetLeader {
+				if resetPrimary {
 					select {
 					case <-ctx.Done():
 					default:
@@ -610,16 +685,24 @@ func (kgm *KeyspaceGroupManager) primaryPriorityCheckLoop() {
 							continue
 						}
 						// only members of specific group are valid primary candidates.
-						group := kgm.GetKeyspaceGroups()[kg.ID]
-						memberMap := make(map[string]bool, len(group.Members))
-						for _, m := range group.Members {
+						// Use kg directly instead of GetKeyspaceGroups()[kg.ID], which
+						// is built from the keyspace lookup table and would miss a served
+						// group that has no keyspaces, causing a nil-pointer panic here.
+						memberMap := make(map[string]bool, len(kg.Members))
+						for _, m := range kg.Members {
 							memberMap[m.Address] = true
 						}
 						log.Info("tso priority checker moves primary",
 							zap.String("local-address", kgm.tsoServiceID.ServiceAddr),
 							zap.Uint32("keyspace-group-id", kg.ID),
 							zap.Int("local-priority", localPriority))
-						if err := utils.TransferPrimary(kgm.etcdClient, allocator.GetExpectedPrimaryLease(),
+						participant, ok := allocator.GetMember().(*member.Participant)
+						if !ok {
+							log.Warn("the tso member is not a participant, skip transferring primary",
+								zap.Uint32("keyspace-group-id", kg.ID))
+							continue
+						}
+						if err := utils.TransferPrimary(kgm.etcdClient, participant,
 							mcs.TSOServiceName, kgm.GetServiceConfig().GetName(), "", kg.ID, memberMap); err != nil {
 							log.Error("failed to transfer primary", zap.Error(err))
 							continue
@@ -686,7 +769,17 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 		kgm.metrics.mergeTargetGauge.Dec()
 	}
 
-	// If this host is already assigned a replica of this keyspace group, i.e., the election member
+	failpoint.Inject("delayBeforeCheckingElectionMember", func() {
+		if oldAM == nil && (group.IsSplitTarget() || group.IsSplitSource()) {
+			log.Info("INJECTED DELAY before update the keyspace group",
+				zap.Uint32("target-group-id", group.ID),
+				zap.Uint32("source-group-id", group.SplitState.SplitSource),
+				zap.Int("keyspaces-count", len(group.Keyspaces)))
+			time.Sleep(10 * time.Second) // Adjust this to match client query timing
+		}
+	})
+
+	// If this host is already assigned a replica of this keyspace group, i.e., the member
 	// is already initialized, just update the meta.
 	if oldAM != nil {
 		kgm.updateKeyspaceGroupMembership(oldGroup, group, true)
@@ -694,7 +787,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 	}
 
 	// If the keyspace group is not initialized, initialize it.
-	// The format of leader name is address-groupID.
+	// The format of primary name is address-groupID.
 	uniqueName := fmt.Sprintf("%s-%05d", kgm.electionNamePrefix, group.ID)
 	uniqueID := memberutil.GenerateUniqueID(uniqueName)
 	log.Info("joining primary election",
@@ -711,7 +804,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 		Id:         uniqueID, // id is unique among all participants
 		ListenUrls: []string{kgm.cfg.GetAdvertiseListenAddr()},
 	}
-	participant.InitInfo(p, "keyspace group primary election")
+	participant.InitInfo(p, keyspaceGroupPrimaryElectionPurpose(group.ID))
 	// If the keyspace group is in split, we should ensure that the primary elected by the new keyspace group
 	// is always on the same TSO Server node as the primary of the old keyspace group, and this constraint cannot
 	// be broken until the entire split process is completed.
@@ -727,7 +820,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 			return
 		}
 		participant.SetCampaignChecker(func(*election.Leadership) bool {
-			return splitSourceAM.GetMember().IsLeader()
+			return splitSourceAM.GetMember().IsServing()
 		})
 	}
 	// Initialize all kinds of maps.
@@ -791,6 +884,10 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 
 	if oldGroup != nil {
 		oldKeyspaces = oldGroup.Keyspaces
+		// Keep the existing keyspaces sorted to simplify diff calculation
+		sort.Slice(oldKeyspaces, func(i, j int) bool {
+			return oldKeyspaces[i] < oldKeyspaces[j]
+		})
 		oldKeyspaceLookupTable = oldGroup.KeyspaceLookupTable
 	}
 
@@ -852,16 +949,16 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 				j++
 			}
 		}
-		kgm.checkReserveKeyspace(newGroup, newKeyspaces, constant.DefaultKeyspaceID)
-		if kerneltype.IsNextGen() {
-			kgm.checkReserveKeyspace(newGroup, newKeyspaces, constant.SystemKeyspaceID)
-		}
+		keyspaceID := getBootstrapKeyspaceID()
+		kgm.checkReserveKeyspace(newGroup, newKeyspaces, keyspaceID)
 	}
 	// Check the split state.
 	if oldGroup != nil {
 		// SplitTarget -> !Splitting
 		if oldGroup.IsSplitTarget() && !newGroup.IsSplitting() {
-			kgm.allocators[groupID].GetMember().(*member.Participant).SetCampaignChecker(nil)
+			if allocator := kgm.allocators[groupID]; allocator != nil {
+				allocator.GetMember().(*member.Participant).SetCampaignChecker(nil)
+			}
 			splitTime := kgm.splittingGroups[groupID]
 			delete(kgm.splittingGroups, groupID)
 			kgm.metrics.splitTargetGauge.Dec()
@@ -927,6 +1024,7 @@ func (kgm *KeyspaceGroupManager) deleteKeyspaceGroup(groupID uint32) {
 			}
 		}
 		kgm.kgs[groupID] = nil
+		DeleteKeyspaceListLengthMetric(groupID)
 	}
 
 	allocator := kgm.allocators[groupID]
@@ -939,10 +1037,7 @@ func (kgm *KeyspaceGroupManager) deleteKeyspaceGroup(groupID uint32) {
 }
 
 func (kgm *KeyspaceGroupManager) genDefaultKeyspaceGroupMeta() *endpoint.KeyspaceGroup {
-	keyspaces := []uint32{constant.DefaultKeyspaceID}
-	if kerneltype.IsNextGen() {
-		keyspaces = append(keyspaces, constant.SystemKeyspaceID)
-	}
+	keyspaces := []uint32{getBootstrapKeyspaceID()}
 	return &endpoint.KeyspaceGroup{
 		ID: constant.DefaultKeyspaceGroupID,
 		Members: []endpoint.KeyspaceGroupMember{{
@@ -985,23 +1080,23 @@ func (kgm *KeyspaceGroupManager) GetAllocator(keyspaceGroupID uint32) (*Allocato
 // FindGroupByKeyspaceID returns the keyspace group that contains the keyspace with the given ID.
 func (kgm *KeyspaceGroupManager) FindGroupByKeyspaceID(
 	keyspaceID uint32,
-) (*Allocator, *endpoint.KeyspaceGroup, uint32, error) {
-	curAllocator, curKeyspaceGroup, curKeyspaceGroupID, err :=
+) (*Allocator, *endpoint.KeyspaceGroup, uint32, uint64, error) {
+	curAllocator, curKeyspaceGroup, curKeyspaceGroupID, modRevision, err :=
 		kgm.getKeyspaceGroupMetaWithCheck(keyspaceID, constant.DefaultKeyspaceGroupID)
 	if err != nil {
-		return nil, nil, curKeyspaceGroupID, err
+		return nil, curKeyspaceGroup, curKeyspaceGroupID, modRevision, err
 	}
-	return curAllocator, curKeyspaceGroup, curKeyspaceGroupID, nil
+	return curAllocator, curKeyspaceGroup, curKeyspaceGroupID, modRevision, nil
 }
 
-// GetElectionMember returns the election member of the keyspace group serving the given keyspace.
-func (kgm *KeyspaceGroupManager) GetElectionMember(
+// GetMember returns the member of the keyspace group serving the given keyspace.
+func (kgm *KeyspaceGroupManager) GetMember(
 	keyspaceID, keyspaceGroupID uint32,
-) (member.ElectionMember, error) {
+) (member.Election, error) {
 	if err := checkKeySpaceGroupID(keyspaceGroupID); err != nil {
 		return nil, err
 	}
-	allocator, _, _, err := kgm.getKeyspaceGroupMetaWithCheck(keyspaceID, keyspaceGroupID)
+	allocator, _, _, _, err := kgm.getKeyspaceGroupMetaWithCheck(keyspaceID, keyspaceGroupID)
 	if err != nil {
 		return nil, err
 	}
@@ -1022,6 +1117,34 @@ func (kgm *KeyspaceGroupManager) GetKeyspaceGroups() map[uint32]*endpoint.Keyspa
 	return keyspaceGroups
 }
 
+// GetServingKeyspaceGroups returns all keyspace groups that this TSO node is actively
+// serving (i.e. has an allocator for), regardless of keyspace assignments.
+func (kgm *KeyspaceGroupManager) GetServingKeyspaceGroups() map[uint32]*endpoint.KeyspaceGroup {
+	kgm.RLock()
+	defer kgm.RUnlock()
+	result := make(map[uint32]*endpoint.KeyspaceGroup)
+	for i, allocator := range kgm.allocators {
+		if allocator != nil {
+			result[uint32(i)] = kgm.kgs[i]
+		}
+	}
+	return result
+}
+
+// GetKeyspaceGroupByID returns the keyspace group with the given ID if this TSO node is
+// serving it (i.e. has a non-nil allocator for it). It returns nil when the ID is out of
+// range or the group is not served by this node.
+func (kgm *KeyspaceGroupManager) GetKeyspaceGroupByID(id uint32) *endpoint.KeyspaceGroup {
+	if err := checkKeySpaceGroupID(id); err != nil {
+		return nil
+	}
+	allocator, kg := kgm.getKeyspaceGroupMeta(id)
+	if allocator == nil {
+		return nil
+	}
+	return kg
+}
+
 // HandleTSORequest forwards TSO allocation requests to correct TSO Allocators of the given keyspace group.
 func (kgm *KeyspaceGroupManager) HandleTSORequest(
 	ctx context.Context,
@@ -1031,7 +1154,7 @@ func (kgm *KeyspaceGroupManager) HandleTSORequest(
 	if err := checkKeySpaceGroupID(keyspaceGroupID); err != nil {
 		return pdpb.Timestamp{}, keyspaceGroupID, err
 	}
-	allocator, _, curKeyspaceGroupID, err := kgm.getKeyspaceGroupMetaWithCheck(keyspaceID, keyspaceGroupID)
+	allocator, _, curKeyspaceGroupID, _, err := kgm.getKeyspaceGroupMetaWithCheck(keyspaceID, keyspaceGroupID)
 	if err != nil {
 		return pdpb.Timestamp{}, curKeyspaceGroupID, err
 	}
@@ -1083,10 +1206,10 @@ func (kgm *KeyspaceGroupManager) GetMinTS() (_ pdpb.Timestamp, kgAskedCount, kgT
 		// If any keyspace group hasn't elected primary, we can't know its current timestamp of
 		// the group, so as to the min ts across all keyspace groups. Return error in this case.
 		if !allocator.isPrimaryElected() {
-			return pdpb.Timestamp{}, kgAskedCount, kgTotalCount, errs.ErrGetMinTS.FastGenByArgs("leader is not elected")
+			return pdpb.Timestamp{}, kgAskedCount, kgTotalCount, errs.ErrGetMinTS.FastGenByArgs(fmt.Sprintf("keyspace group %d's primary is not elected", i))
 		}
 		// Skip the keyspace groups that are not served by this TSO Server/Pod.
-		if !allocator.isPrimary() {
+		if !allocator.isServing() {
 			continue
 		}
 		kgAskedCount++
@@ -1169,24 +1292,99 @@ func (kgm *KeyspaceGroupManager) checkTSOSplit(
 
 const keyspaceGroupsAPIPrefix = "/pd/api/v2/tso/keyspace-groups"
 
-// Put the code below into the critical section to prevent from sending too many HTTP requests.
+func (kgm *KeyspaceGroupManager) sendDeleteRequestToKeyspaceGroupsAPI(suffix string) (*http.Response, error) {
+	parentCtx := kgm.ctx
+	if parentCtx == nil {
+		parentCtx = context.Background()
+	}
+
+	var lastErr error
+	var lastResp *http.Response
+	var lastParseErr error
+	for _, endpoint := range strings.Split(kgm.cfg.GetBackendEndpoints(), ",") {
+		endpoint = strings.TrimSpace(endpoint)
+		if endpoint == "" {
+			continue
+		}
+		parsedURL, err := url.Parse(endpoint)
+		if err != nil {
+			log.Warn("skip invalid backend endpoint",
+				zap.String("endpoint", endpoint),
+				zap.Error(err))
+			lastParseErr = err
+			continue
+		}
+		if parsedURL.Host == "" || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
+			validationErr := perrors.Errorf("invalid backend endpoint %q: host=%q scheme=%q",
+				endpoint, parsedURL.Host, parsedURL.Scheme)
+			log.Warn("skip unsupported backend endpoint",
+				zap.String("endpoint", endpoint),
+				zap.String("host", parsedURL.Host),
+				zap.String("scheme", parsedURL.Scheme))
+			lastParseErr = validationErr
+			continue
+		}
+		requestURL := strings.TrimRight(endpoint, "/") + keyspaceGroupsAPIPrefix + suffix
+		perEndpointTimeout := finishKeyspaceGroupPerEndpointTimeout
+		failpoint.Inject("finishKeyspaceGroupPerEndpointTimeout", func(val failpoint.Value) {
+			if ms, ok := val.(int); ok {
+				perEndpointTimeout = time.Duration(ms) * time.Millisecond
+			}
+		})
+		reqCtx, reqCancel := context.WithTimeout(parentCtx, perEndpointTimeout)
+		resp, err := apiutil.DoDeleteWithContext(reqCtx, kgm.httpClient, requestURL)
+		reqCancel()
+		if err == nil && resp.StatusCode == http.StatusOK {
+			if lastResp != nil {
+				lastResp.Body.Close()
+			}
+			return resp, nil
+		}
+		if err != nil {
+			if resp != nil {
+				resp.Body.Close()
+			}
+			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+				log.Warn("finish keyspace group request timed out",
+					zap.String("endpoint", endpoint),
+					zap.String("suffix", suffix),
+					zap.Error(err))
+			}
+			lastErr = err
+			continue
+		}
+		if lastResp != nil {
+			lastResp.Body.Close()
+		}
+		lastResp = resp
+	}
+	if lastResp != nil {
+		return lastResp, nil
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	if lastParseErr != nil {
+		return nil, errs.ErrURLParse.Wrap(lastParseErr).GenWithStackByCause()
+	}
+	return nil, errs.ErrURLParse.FastGenByArgs("no valid backend endpoint configured")
+}
+
 func (kgm *KeyspaceGroupManager) finishSplitKeyspaceGroup(id uint32) error {
 	start := time.Now()
-	kgm.Lock()
-	defer kgm.Unlock()
-	// Check if the keyspace group is in split state.
+	kgm.finishSplitMu.Lock()
+	defer kgm.finishSplitMu.Unlock()
+
+	kgm.RLock()
 	splitGroup := kgm.kgs[id]
-	if !splitGroup.IsSplitTarget() {
+	canFinish := splitGroup.IsSplitTarget() && kgm.httpClient != nil
+	kgm.RUnlock()
+	if !canFinish {
 		return nil
 	}
-	// Check if the HTTP client is initialized.
-	if kgm.httpClient == nil {
-		return nil
-	}
+
 	startRequest := time.Now()
-	resp, err := apiutil.DoDelete(
-		kgm.httpClient,
-		kgm.cfg.GeBackendEndpoints()+keyspaceGroupsAPIPrefix+fmt.Sprintf("/%d/split", id))
+	resp, err := kgm.sendDeleteRequestToKeyspaceGroupsAPI(fmt.Sprintf("/%d/split", id))
 	if err != nil {
 		return err
 	}
@@ -1202,9 +1400,15 @@ func (kgm *KeyspaceGroupManager) finishSplitKeyspaceGroup(id uint32) error {
 	// Note: to avoid data race with state read APIs, we always replace the group in memory as a whole.
 	// For now, we only have scenarios to update split state/merge state, and the other fields are always
 	// loaded from etcd without any modification, so we can simply copy the group and replace the state.
-	newSplitGroup := *splitGroup
-	newSplitGroup.SplitState = nil
-	kgm.kgs[id] = &newSplitGroup
+	kgm.Lock()
+	// A watcher update can replace the group while the HTTP request is in flight. Only
+	// complete the split state observed before the request, never a newer transition.
+	if currentGroup := kgm.kgs[id]; currentGroup == splitGroup && currentGroup.IsSplitTarget() {
+		newSplitGroup := *currentGroup
+		newSplitGroup.SplitState = nil
+		kgm.kgs[id] = &newSplitGroup
+	}
+	kgm.Unlock()
 	kgm.metrics.finishSplitDuration.Observe(time.Since(start).Seconds())
 	return nil
 }
@@ -1223,9 +1427,7 @@ func (kgm *KeyspaceGroupManager) finishMergeKeyspaceGroup(id uint32) error {
 		return nil
 	}
 	startRequest := time.Now()
-	resp, err := apiutil.DoDelete(
-		kgm.httpClient,
-		kgm.cfg.GeBackendEndpoints()+keyspaceGroupsAPIPrefix+fmt.Sprintf("/%d/merge", id))
+	resp, err := kgm.sendDeleteRequestToKeyspaceGroupsAPI(fmt.Sprintf("/%d/merge", id))
 	if err != nil {
 		return err
 	}
@@ -1290,7 +1492,7 @@ mergeLoop:
 		}
 		// If the current TSO node is not the merge target TSO primary node,
 		// we still need to keep this loop running to avoid unexpected primary changes.
-		if !allocator.isPrimary() {
+		if !allocator.isServing() {
 			log.Debug("current tso node is not the merge target primary",
 				zap.String("member", kgm.tsoServiceID.ServiceAddr),
 				zap.Uint32("merge-target-id", mergeTargetID),
@@ -1300,11 +1502,11 @@ mergeLoop:
 		// Check if the keyspace group primaries in the merge map are all gone.
 		if len(mergeMap) != 0 {
 			for id := range mergeMap {
-				leaderPath := keypath.LeaderPath(&keypath.MsParam{
+				electionPath := keypath.ElectionPath(&keypath.MsParam{
 					ServiceName: mcs.TSOServiceName,
 					GroupID:     id,
 				})
-				val, err := kgm.storage.Load(leaderPath)
+				val, err := kgm.storage.Load(electionPath)
 				if err != nil {
 					log.Error("failed to check if the keyspace group primary in the merge list has gone",
 						zap.String("member", kgm.tsoServiceID.ServiceAddr),
@@ -1379,6 +1581,9 @@ mergeLoop:
 				zap.Error(err))
 			continue
 		}
+		for _, groupID := range mergeList {
+			DeleteKeyspaceListLengthMetric(groupID)
+		}
 		kgm.metrics.mergeDuration.Observe(time.Since(startTime).Seconds())
 		log.Info("finished merging keyspace group",
 			zap.String("member", kgm.tsoServiceID.ServiceAddr),
@@ -1411,7 +1616,7 @@ func (kgm *KeyspaceGroupManager) groupSplitPatroller() {
 		}
 		for _, groupID := range kgm.getSplittingGroups() {
 			allocator, group := kgm.getKeyspaceGroupMeta(groupID)
-			if !allocator.isPrimary() {
+			if !allocator.isServing() {
 				continue
 			}
 			if len(group.Keyspaces) == 0 {
@@ -1432,6 +1637,36 @@ func (kgm *KeyspaceGroupManager) groupSplitPatroller() {
 				continue
 			}
 		}
+	}
+}
+
+// keyspaceGroupMetricsSyncer periodically syncs keyspace list length metrics from
+// in-memory keyspace group state, so metrics stay correct without depending on API calls.
+func (kgm *KeyspaceGroupManager) keyspaceGroupMetricsSyncer() {
+	defer logutil.LogPanic()
+	defer kgm.wg.Done()
+	interval := keyspaceGroupMetricsSyncInterval
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	log.Info("keyspace group metrics syncer is started",
+		zap.Duration("sync-interval", interval))
+	for {
+		select {
+		case <-kgm.ctx.Done():
+			log.Info("keyspace group metrics syncer exited")
+			return
+		case <-ticker.C:
+		}
+		if kgm.metrics == nil {
+			continue
+		}
+		kgm.RLock()
+		for groupID, kg := range kgm.kgs {
+			if kg != nil {
+				getOrInitKeyspaceCountGauge(uint32(groupID)).Set(float64(len(kg.Keyspaces)))
+			}
+		}
+		kgm.RUnlock()
 	}
 }
 
@@ -1476,7 +1711,8 @@ func (kgm *KeyspaceGroupManager) deletedGroupCleaner() {
 			log.Info("delete the keyspace group tso key",
 				zap.Uint32("keyspace-group-id", groupID))
 			// Clean up the remaining TSO keys.
-			err := kgm.storage.DeleteTimestamp(groupID)
+
+			err := kgm.storage.DeleteTimestamp(kgm.ctx, groupID)
 			if err != nil {
 				log.Warn("failed to delete the keyspace group tso key",
 					zap.Uint32("keyspace-group-id", groupID),

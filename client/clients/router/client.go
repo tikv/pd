@@ -29,8 +29,10 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/routerpb"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/client/errs"
@@ -153,6 +155,7 @@ type Client interface {
 	// Limit limits the maximum number of regions returned. It returns all the regions in the given range if limit <= 0.
 	// If a region has no leader, corresponding leader will be placed by a peer
 	// with empty value (PeerID is 0).
+	//
 	// Deprecated: use BatchScanRegions instead.
 	ScanRegions(ctx context.Context, key, endKey []byte, limit int, opts ...opt.GetRegionOption) ([]*Region, error)
 	// BatchScanRegions gets a list of regions, starts from the region that contains key.
@@ -177,6 +180,11 @@ type Cli struct {
 	conCtxMgr *cctx.Manager[pdpb.PD_QueryRegionClient]
 	// updateConnectionCh is used to trigger the connection update actively.
 	updateConnectionCh chan struct{}
+
+	// msDiscovery is the service discovery for the router service.
+	msDiscovery sd.ServiceDiscovery
+	// msConCtxMgr is used to store the context of the router service stream connection.
+	msConCtxMgr *cctx.Manager[routerpb.Router_QueryRegionClient]
 	// bo is the backoffer for the router client.
 	bo *retry.Backoffer
 
@@ -189,6 +197,7 @@ type Cli struct {
 func NewClient(
 	ctx context.Context,
 	svcDiscovery sd.ServiceDiscovery,
+	msDiscovery sd.ServiceDiscovery,
 	option *opt.Option,
 ) *Cli {
 	ctx, cancel := context.WithCancel(ctx)
@@ -199,6 +208,8 @@ func NewClient(
 		option:             option,
 		conCtxMgr:          cctx.NewManager[pdpb.PD_QueryRegionClient](),
 		updateConnectionCh: make(chan struct{}, 1),
+		msConCtxMgr:        cctx.NewManager[routerpb.Router_QueryRegionClient](),
+		msDiscovery:        msDiscovery,
 		bo: retry.InitialBackoffer(
 			sd.UpdateMemberBackOffBaseTime,
 			sd.UpdateMemberMaxBackoffTime,
@@ -214,13 +225,16 @@ func NewClient(
 		requestCh: make(chan *Request, defaultMaxRouterRequestBatchSize*2),
 		batchController: batch.NewController(
 			defaultMaxRouterRequestBatchSize,
-			requestFinisher(nil),
+			requestFinisher(nil, nil),
 			metrics.QueryRegionBestBatchSize,
 		),
 	}
 	c.leaderURL.Store(svcDiscovery.GetServingURL())
 	c.svcDiscovery.ExecAndAddLeaderSwitchedCallback(c.updateLeaderURL)
 	c.svcDiscovery.AddMembersChangedCallback(c.scheduleUpdateConnection)
+	if c.msDiscovery != nil {
+		c.msDiscovery.AddMembersChangedCallback(c.scheduleUpdateConnection)
+	}
 
 	c.wg.Add(2)
 	go c.connectionDaemon()
@@ -251,42 +265,76 @@ func (c *Cli) newRequest(ctx context.Context, opts ...opt.GetRegionOption) *Requ
 	return req
 }
 
-func requestFinisher(resp *pdpb.QueryRegionResponse) batch.FinisherFunc[*Request] {
-	var keyIdx, prevKeyIdx int
-	return func(_ int, req *Request, err error) {
-		requestCtx := req.requestCtx
-		defer trace.StartRegion(requestCtx, "pdclient.regionReqDone").End()
+func finishRegionRequest(req *Request, regionResp *pdpb.RegionResponse, err error) {
+	defer trace.StartRegion(req.requestCtx, "pdclient.regionReqDone").End()
+	if err != nil {
+		req.tryDone(err)
+		return
+	}
+	if regionResp != nil {
+		// Since the region results may be modified by the requester,
+		// we need to ensure each region result returned is unique.
+		req.region = convertToRegionCopy(regionResp)
+		// NeedBuckets is a batch-wide flag in the QueryRegion request, so the
+		// response may carry buckets for a region even when this particular
+		// request did not ask for them. Drop them here to match the
+		// per-request semantics of the unary GetRegion path.
+		if req.region != nil && !req.options.NeedBuckets {
+			req.region.Buckets = nil
+		}
+	}
+	req.tryDone(nil)
+}
 
+// requestFinisher completes requests, or collects misses for a leader retry when
+// missingRequests is non-nil. In that case, a nil response retries the whole batch.
+func requestFinisher(resp *pdpb.QueryRegionResponse, missingRequests *[]*Request) batch.FinisherFunc[*Request] {
+	var cursor struct {
+		keyIdx, prevKeyIdx int
+	}
+	return func(_ int, req *Request, err error) {
 		if err != nil {
-			req.tryDone(err)
+			finishRegionRequest(req, nil, err)
 			return
 		}
-
+		// Without a retry collector, a nil response without an error indicates
+		// an abnormal situation (e.g., timeout or connection issue).
+		if resp == nil && missingRequests == nil {
+			finishRegionRequest(req, nil, errs.ErrClientRouterConnectionTimeout)
+			return
+		}
 		var id uint64
 		if req.key != nil {
-			id = resp.KeyIdMap[keyIdx]
-			keyIdx++
+			if cursor.keyIdx < len(resp.GetKeyIdMap()) {
+				id = resp.GetKeyIdMap()[cursor.keyIdx]
+				cursor.keyIdx++
+			}
 		} else if req.prevKey != nil {
-			id = resp.PrevKeyIdMap[prevKeyIdx]
-			prevKeyIdx++
-		} else if req.id != 0 {
+			if cursor.prevKeyIdx < len(resp.GetPrevKeyIdMap()) {
+				id = resp.GetPrevKeyIdMap()[cursor.prevKeyIdx]
+				cursor.prevKeyIdx++
+			}
+		} else {
 			id = req.id
 		}
-		if regionResp, ok := resp.RegionsById[id]; ok {
-			// Since the region results may be modified by the requester,
-			// we need to ensure each region result returned is unique.
-			req.region = convertToRegionCopy(regionResp)
+		var regionResp *pdpb.RegionResponse
+		if id != 0 {
+			regionResp = resp.GetRegionsById()[id]
 		}
-		req.tryDone(err)
+		if missingRequests != nil && regionResp.GetRegion() == nil {
+			*missingRequests = append(*missingRequests, req)
+			return
+		}
+		finishRegionRequest(req, regionResp, nil)
 	}
 }
 
 func (c *Cli) cancelCollectedRequests(err error) {
-	c.batchController.FinishCollectedRequests(requestFinisher(nil), err)
+	c.batchController.FinishCollectedRequests(requestFinisher(nil, nil), err)
 }
 
 func (c *Cli) doneCollectedRequests(resp *pdpb.QueryRegionResponse) {
-	c.batchController.FinishCollectedRequests(requestFinisher(resp), nil)
+	c.batchController.FinishCollectedRequests(requestFinisher(resp, nil), nil)
 }
 
 // Close closes the router client.
@@ -355,6 +403,26 @@ func (c *Cli) getAllClientConns() map[string]*grpc.ClientConn {
 	return conns
 }
 
+func (c *Cli) getAllMsClientConns() map[string]*grpc.ClientConn {
+	if c.msDiscovery == nil {
+		return nil
+	}
+	conns := make(map[string]*grpc.ClientConn)
+	c.msDiscovery.GetClientConns().Range(func(key, value any) bool {
+		url, ok := key.(string)
+		if !ok || len(url) == 0 {
+			return true
+		}
+		conn, ok := value.(*grpc.ClientConn)
+		if !ok || conn == nil {
+			return true
+		}
+		conns[url] = conn
+		return true
+	})
+	return conns
+}
+
 // scheduleUpdateConnection is used to schedule an update to the connection(s).
 func (c *Cli) scheduleUpdateConnection() {
 	select {
@@ -376,6 +444,7 @@ func (c *Cli) connectionDaemon() {
 	log.Info("[router] connection daemon is started")
 	for {
 		c.updateConnection(updaterCtx)
+		c.updateMsConnection(updaterCtx)
 		select {
 		case <-updaterCtx.Done():
 			log.Info("[router] connection daemon is exiting")
@@ -390,6 +459,51 @@ func (c *Cli) connectionDaemon() {
 			// Triggered by the leader/follower change.
 		}
 	}
+}
+
+func (c *Cli) updateMsConnection(ctx context.Context) {
+	if c.msDiscovery == nil {
+		return
+	}
+	conns := c.getAllMsClientConns()
+	if len(conns) == 0 {
+		log.Debug("[router] no router service node found")
+		return
+	}
+	// Add the missing router service stream connections.
+	for url, conn := range conns {
+		if c.msConCtxMgr.Exist(url) {
+			log.Debug("[router] the router service remains unchanged", zap.String("url", url))
+			continue
+		}
+		cctx, cancel := context.WithCancel(ctx)
+		stream, err := routerpb.NewRouterClient(conn).QueryRegion(cctx)
+		if err != nil {
+			log.Warn("[router] failed to create the router service stream connection", errs.ZapError(err))
+			cancel()
+			continue
+		}
+		// Store the stream connection context if it is successfully created.
+		if stream != nil {
+			if !c.msConCtxMgr.Store(cctx, cancel, url, stream) {
+				log.Info("[router] already exists router service stream connection", zap.String("url", url))
+				cancel()
+				continue
+			}
+			log.Info("[router] successfully established the router service stream connection", zap.String("url", url))
+		} else {
+			log.Warn("[router] failed to create the router service stream connection")
+			cancel()
+		}
+	}
+	// Remove the stale follower router stream connections.
+	c.msConCtxMgr.GC(func(url string) bool {
+		if _, ok := conns[url]; !ok {
+			log.Info("[router] release the stale router service stream connection", zap.String("url", url))
+			return true
+		}
+		return false
+	})
 }
 
 // updateConnection is used to get the leader client connection and update the connection context if it does not exist before.
@@ -407,7 +521,11 @@ func (c *Cli) updateConnection(ctx context.Context) {
 		}
 		// Store the stream connection context if it is successfully created.
 		if stream != nil {
-			c.conCtxMgr.Store(cctx, cancel, url, stream)
+			if !c.conCtxMgr.Store(cctx, cancel, url, stream) {
+				log.Info("[router] already exists leader router stream connection", zap.String("url", url))
+				cancel()
+				return
+			}
 			log.Info("[router] successfully established the leader router stream connection", zap.String("url", url))
 		} else {
 			log.Warn("[router] failed to create the leader router stream connection")
@@ -431,10 +549,16 @@ func (c *Cli) updateConnection(ctx context.Context) {
 			stream, err := pdpb.NewPDClient(conn).QueryRegion(cctx)
 			if err != nil {
 				log.Error("[router] failed to create the router stream connection", errs.ZapError(err))
+				cancel()
+				continue
 			}
 			// Store the stream connection context if it is successfully created.
 			if stream != nil {
-				c.conCtxMgr.Store(cctx, cancel, url, stream)
+				if !c.conCtxMgr.Store(cctx, cancel, url, stream) {
+					log.Info("[router] already exists router stream connection", zap.String("url", url))
+					cancel()
+					continue
+				}
 				log.Info("[router] successfully established the router stream connection", zap.String("url", url))
 			} else {
 				log.Warn("[router] failed to create the router stream connection")
@@ -466,9 +590,8 @@ func (c *Cli) dispatcher() {
 	defer c.wg.Done()
 
 	var (
-		stream            pdpb.PD_QueryRegionClient
+		leaderRetryCh     chan *Request
 		streamURL         string
-		streamCtx         context.Context
 		timeoutTimer      *time.Timer
 		resetTimeoutTimer = func() {
 			if timeoutTimer == nil {
@@ -487,6 +610,10 @@ func (c *Cli) dispatcher() {
 		if timeoutTimer != nil {
 			timeoutTimer.Stop()
 		}
+		cancelErr := ctx.Err()
+		for len(leaderRetryCh) > 0 {
+			finishRegionRequest(<-leaderRetryCh, nil, cancelErr)
+		}
 		log.Info("[router] dispatcher exited")
 	}()
 batchLoop:
@@ -497,8 +624,15 @@ batchLoop:
 		default:
 		}
 
-		// Step 1: Fetch the pending router requests in batch.
-		err := c.batchController.FetchPendingRequests(ctx, c.requestCh, nil, 0)
+		// Step 1: Fetch the pending router requests in batch. Requests missed by a
+		// follower are prioritized in the next standalone batch. Fresh requests retain
+		// their own routing and retry semantics.
+		isLeaderRetryBatch := len(leaderRetryCh) > 0
+		batchRequestCh := c.requestCh
+		if isLeaderRetryBatch {
+			batchRequestCh = leaderRetryCh
+		}
+		err := c.batchController.FetchPendingRequests(ctx, batchRequestCh, nil, 0)
 		if err != nil {
 			if err == context.Canceled {
 				log.Info("[router] stop fetching the pending router requests due to context canceled")
@@ -510,6 +644,10 @@ batchLoop:
 
 		// Step 2: Choose a stream connection to send the router request.
 		resetTimeoutTimer()
+		var (
+			processQueryFunc processFn
+			retry            bool
+		)
 	connectionCtxChoosingLoop:
 		for {
 			// Check if the dispatcher is canceled or the timeout timer is triggered.
@@ -519,83 +657,140 @@ batchLoop:
 			case <-timeoutTimer.C:
 				log.Error("[router] router stream connection is not ready until timeout, abort the batch")
 				c.svcDiscovery.ScheduleCheckMemberChanged()
-				c.batchController.FinishCollectedRequests(requestFinisher(nil), err)
+				c.batchController.FinishCollectedRequests(requestFinisher(nil, nil), errs.ErrClientRouterConnectionTimeout)
 				continue batchLoop
 			default:
 			}
-			// Check whether allow the follower to handle this batch of requests.
-			allowFollowerHandle := c.option.GetEnableFollowerHandle()
-			if allowFollowerHandle {
-				// We need to ensure all requests in a same batch allow to be handled by the follower.
-				// IMPROVE: separate into the follower and leader handle batches.
-				c.batchController.IterCollectedRequests(func(req *Request) bool {
-					if !req.options.AllowFollowerHandle {
-						allowFollowerHandle = false
-						return false
-					}
-					return true
-				})
-			}
-			// Check if the follower handle is enabled again before choosing the stream connection.
-			allowFollowerHandle = allowFollowerHandle && c.option.GetEnableFollowerHandle()
-			// Choose a stream connection to send the router request later.
-			var connectionCtx *cctx.ConnectionCtx[pdpb.PD_QueryRegionClient]
-			if allowFollowerHandle {
-				connectionCtx = c.conCtxMgr.RandomlyPick()
+			if isLeaderRetryBatch {
+				processQueryFunc, streamURL, retry = c.sendToPD(ctx, true)
 			} else {
-				connectionCtx = c.conCtxMgr.GetConnectionCtx(c.getLeaderURL())
+				processQueryFunc, streamURL = c.sendToMs(ctx)
+				if processQueryFunc == nil {
+					processQueryFunc, streamURL, retry = c.sendToPD(ctx, false)
+				}
 			}
-			if connectionCtx == nil {
-				log.Info("[router] router stream connection is not ready")
-				c.updateConnection(ctx)
+			if retry {
 				continue connectionCtxChoosingLoop
 			}
-			streamCtx, streamURL, stream = connectionCtx.Ctx, connectionCtx.StreamURL, connectionCtx.Stream
-			// Check if the stream connection is canceled.
-			select {
-			case <-streamCtx.Done():
-				log.Info("[router] router stream connection is canceled", zap.String("stream-url", streamURL))
-				c.conCtxMgr.Release(streamURL)
-				continue connectionCtxChoosingLoop
-			default:
-			}
-			// The stream connection is ready, break the loop.
 			break connectionCtxChoosingLoop
 		}
 
 		// Step 3: Dispatch the router requests to the stream connection.
 		// TODO: timeout handling if the stream takes too long to process the requests.
-		err = c.processRequests(stream)
-		if err != nil && !c.handleProcessRequestError(ctx, streamURL, err) {
-			return
+		retryRequests, err := processQueryFunc()
+		if err != nil {
+			if !c.handleProcessRequestError(ctx, streamURL, err) {
+				return
+			}
+			continue
+		}
+		if len(retryRequests) > 0 && leaderRetryCh == nil {
+			leaderRetryCh = make(chan *Request, defaultMaxRouterRequestBatchSize)
+		}
+		for _, req := range retryRequests {
+			leaderRetryCh <- req
 		}
 	}
 }
 
-func (c *Cli) processRequests(stream pdpb.PD_QueryRegionClient) error {
-	var (
-		requests     = c.batchController.GetCollectedRequests()
-		traceRegions = make([]*trace.Region, 0, len(requests))
-		spans        = make([]opentracing.Span, 0, len(requests))
-	)
-	for _, req := range requests {
-		traceRegions = append(traceRegions, trace.StartRegion(req.requestCtx, "pdclient.regionReqSend"))
-		if span := opentracing.SpanFromContext(req.requestCtx); span != nil && span.Tracer() != nil {
-			spans = append(spans, span.Tracer().StartSpan("pdclient.processRegionRequests", opentracing.ChildOf(span.Context())))
-		}
+func (c *Cli) sendToPD(ctx context.Context, forceLeader bool) (processFn, string, bool) {
+	allowFollowerHandle := !forceLeader && c.option.GetEnableFollowerHandle()
+	// Check whether allow the follower to handle this batch of requests.
+	if allowFollowerHandle {
+		// We need to ensure all requests in a same batch allow to be handled by the follower.
+		// IMPROVE: separate into the follower and leader handle batches.
+		c.batchController.IterCollectedRequests(func(req *Request) bool {
+			if !req.options.AllowFollowerHandle {
+				allowFollowerHandle = false
+				return false
+			}
+			return true
+		})
 	}
-	defer func() {
-		for i := range spans {
-			spans[i].Finish()
-		}
-		for i := range traceRegions {
-			traceRegions[i].End()
-		}
-	}()
 
+	var connectionCtx *cctx.ConnectionCtx[pdpb.PD_QueryRegionClient]
+	if allowFollowerHandle {
+		connectionCtx = c.conCtxMgr.RandomlyPick()
+		failpoint.Inject("forceUseFollower", func(val failpoint.Value) {
+			if url, ok := val.(string); ok {
+				connectionCtx = c.conCtxMgr.GetConnectionCtx(url)
+			}
+		})
+	} else {
+		connectionCtx = c.conCtxMgr.GetConnectionCtx(c.getLeaderURL())
+	}
+	if connectionCtx == nil {
+		log.Info("[router] router stream connection is not ready")
+		c.updateConnection(ctx)
+		return nil, "", true
+	}
+	// Check if the stream connection is canceled.
+	select {
+	case <-connectionCtx.Ctx.Done():
+		log.Info("[router] router stream connection is canceled", zap.String("stream-url", connectionCtx.StreamURL))
+		c.conCtxMgr.Release(connectionCtx.StreamURL)
+		return nil, "", true
+	default:
+	}
+	isFollower := connectionCtx.StreamURL != c.getLeaderURL()
+	return func() ([]*Request, error) {
+		return c.processRequestsInner(
+			connectionCtx.Stream.Send,
+			connectionCtx.Stream.Recv,
+			isFollower,
+			forceLeader,
+		)
+	}, connectionCtx.StreamURL, false
+}
+
+type processFn func() ([]*Request, error)
+
+// sendToMs returns the stream function, stream url
+func (c *Cli) sendToMs(ctx context.Context) (processFn, string) {
+	allowRouterServiceHandle := c.msConCtxMgr.Size() > 0
+	if allowRouterServiceHandle {
+		// We need to ensure all requests in a same batch allow to be handled by the router service.
+		c.batchController.IterCollectedRequests(func(req *Request) bool {
+			if !req.options.AllowRouterServiceHandle {
+				allowRouterServiceHandle = false
+				return false
+			}
+			return true
+		})
+	}
+	allowRouterServiceHandle = allowRouterServiceHandle && c.msConCtxMgr.Size() > 0
+	if !allowRouterServiceHandle {
+		return nil, ""
+	}
+	connectionCtx := c.msConCtxMgr.RandomlyPick()
+	if connectionCtx == nil {
+		log.Info("[router] router service stream connection is not ready")
+		c.updateMsConnection(ctx)
+		return nil, ""
+	}
+	streamCtx, streamURL, stream := connectionCtx.Ctx, connectionCtx.StreamURL, connectionCtx.Stream
+	select {
+	case <-streamCtx.Done():
+		log.Info("[router] router service stream connection is canceled", zap.String("stream-url", streamURL))
+		c.msConCtxMgr.Release(streamURL)
+		return nil, ""
+	default:
+	}
+	return func() ([]*Request, error) {
+		return c.processRequestsInner(stream.Send, stream.Recv, false, false)
+	}, streamURL
+}
+
+type recvFn func() (*pdpb.QueryRegionResponse, error)
+type sendFn func(*pdpb.QueryRegionRequest) error
+
+// buildQueryRegionRequest converts the collected requests into one QueryRegion
+// request. A request with neither key nor prevKey is an ID query, so the entire
+// uint64 ID range, including zero, is preserved.
+func buildQueryRegionRequest(clusterID uint64, requests []*Request) *pdpb.QueryRegionRequest {
 	queryReq := &pdpb.QueryRegionRequest{
 		Header: &pdpb.RequestHeader{
-			ClusterId: c.svcDiscovery.GetClusterID(),
+			ClusterId: clusterID,
 		},
 		Keys:     make([][]byte, 0, len(requests)),
 		PrevKeys: make([][]byte, 0, len(requests)),
@@ -609,45 +804,94 @@ func (c *Cli) processRequests(stream pdpb.PD_QueryRegionClient) error {
 			queryReq.Keys = append(queryReq.Keys, req.key)
 		} else if req.prevKey != nil {
 			queryReq.PrevKeys = append(queryReq.PrevKeys, req.prevKey)
-		} else if req.id != 0 {
-			queryReq.Ids = append(queryReq.Ids, req.id)
 		} else {
-			panic("invalid region query request received")
+			queryReq.Ids = append(queryReq.Ids, req.id)
 		}
 	}
+	return queryReq
+}
+
+func (c *Cli) processRequestsInner(
+	send sendFn,
+	recv recvFn,
+	isFollower bool,
+	isLeaderRetryBatch bool,
+) ([]*Request, error) {
+	var (
+		requests = c.batchController.GetCollectedRequests()
+		spans    = make([]opentracing.Span, 0, len(requests))
+	)
+	traceCtx := context.Background()
+	if len(requests) > 0 {
+		traceCtx = requests[0].requestCtx
+	}
+	traceRegion := trace.StartRegion(traceCtx, "pdclient.regionReqSendBatch")
+	for _, req := range requests {
+		if span := opentracing.SpanFromContext(req.requestCtx); span != nil && span.Tracer() != nil {
+			spans = append(spans, span.Tracer().StartSpan("pdclient.processRegionRequests", opentracing.ChildOf(span.Context())))
+		}
+	}
+	defer func() {
+		for i := len(spans) - 1; i >= 0; i-- {
+			spans[i].Finish()
+		}
+		traceRegion.End()
+	}()
+
+	queryReq := buildQueryRegionRequest(c.svcDiscovery.GetClusterID(), requests)
 	start := time.Now()
-	err := stream.Send(queryReq)
-	if err != nil {
-		return err
+	if err := send(queryReq); err != nil {
+		metrics.RequestFailedDurationQueryRegion.Observe(time.Since(start).Seconds())
+		return nil, err
 	}
 	metrics.QueryRegionBatchSendLatency.Observe(
-		time.Since(
-			c.batchController.GetExtraBatchingStartTime(),
-		).Seconds(),
+		time.Since(c.batchController.GetExtraBatchingStartTime()).Seconds(),
 	)
-	resp, err := stream.Recv()
+	resp, err := recv()
 	if err != nil {
 		metrics.RequestFailedDurationQueryRegion.Observe(time.Since(start).Seconds())
-		return err
+		return nil, err
 	}
 	metrics.RequestDurationQueryRegion.Observe(time.Since(start).Seconds())
 	metrics.QueryRegionBatchSizeTotal.Observe(float64(len(requests)))
-	// Currently, header errors can occur due to an unready PD leader or follower,
-	// resulting in either a `NOT_BOOTSTRAPPED` or `REGION_NOT_FOUND` error.
-	if headerErr := resp.GetHeader().GetError(); headerErr != nil {
-		return errors.New(headerErr.String())
+	headerErr := resp.GetHeader().GetError()
+	if headerErr == nil {
+		if keysLen := len(queryReq.Keys); keysLen > 0 {
+			metrics.QueryRegionBatchSizeByKeys.Observe(float64(keysLen))
+		}
+		if prevKeysLen := len(queryReq.PrevKeys); prevKeysLen > 0 {
+			metrics.QueryRegionBatchSizeByPrevKeys.Observe(float64(prevKeysLen))
+		}
+		if idsLen := len(queryReq.Ids); idsLen > 0 {
+			metrics.QueryRegionBatchSizeByIDs.Observe(float64(idsLen))
+		}
 	}
-	if keysLen := len(queryReq.Keys); keysLen > 0 {
-		metrics.QueryRegionBatchSizeByKeys.Observe(float64(keysLen))
+	// Like unary ServiceClient.NeedRetry, use the selected role rather than
+	// the error type. A leader fallback is final even if discovery changes.
+	retryOnLeader := isFollower && !isLeaderRetryBatch
+	if headerErr != nil && !retryOnLeader {
+		return nil, errors.New(headerErr.String())
 	}
-	if prevKeysLen := len(queryReq.PrevKeys); prevKeysLen > 0 {
-		metrics.QueryRegionBatchSizeByPrevKeys.Observe(float64(prevKeysLen))
-	}
-	if idsLen := len(queryReq.Ids); idsLen > 0 {
-		metrics.QueryRegionBatchSizeByIDs.Observe(float64(idsLen))
+	if retryOnLeader {
+		// A successful follower response may contain both hits and misses, so
+		// only the missing requests need to be retried. A header error invalidates
+		// the entire response, matching the unary retry behavior.
+		responseForFinisher := resp
+		if headerErr != nil {
+			responseForFinisher = nil
+		}
+		var missingRequests []*Request
+		if responseForFinisher == nil {
+			missingRequests = make([]*Request, 0, len(requests))
+		}
+		c.batchController.FinishCollectedRequests(
+			requestFinisher(responseForFinisher, &missingRequests),
+			nil,
+		)
+		return missingRequests, nil
 	}
 	c.doneCollectedRequests(resp)
-	return nil
+	return nil, nil
 }
 
 func (c *Cli) handleProcessRequestError(
@@ -668,6 +912,8 @@ func (c *Cli) handleProcessRequestError(
 
 	// Delete the stream connection context.
 	c.conCtxMgr.Release(streamURL)
+	c.msConCtxMgr.Release(streamURL)
+
 	if errs.IsLeaderChange(err) {
 		// If the leader changes, we better call `CheckMemberChanged` blockingly to
 		// ensure the next round of router requests can be sent to the new leader.
@@ -681,6 +927,9 @@ func (c *Cli) handleProcessRequestError(
 	} else {
 		// For other errors, we can just schedule a member change check asynchronously.
 		c.svcDiscovery.ScheduleCheckMemberChanged()
+		if c.msDiscovery != nil {
+			c.msDiscovery.ScheduleCheckMemberChanged()
+		}
 	}
 
 	return true

@@ -18,6 +18,7 @@ import (
 	"context"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -33,19 +34,19 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 const defaultLeaseTimeout = 1
 
 func TestLeadership(t *testing.T) {
 	re := require.New(t)
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
 
 	// Campaign the same leadership
-	leadership1 := NewLeadership(client, "/test_leader", "test_leader_1")
-	leadership2 := NewLeadership(client, "/test_leader", "test_leader_2")
+	leadership1 := NewLeadership(client, "/test_leader", "test_leader_1", "test_leader_1")
+	leadership2 := NewLeadership(client, "/test_leader", "test_leader_2", "test_leader_2")
 
 	// leadership1 starts first and get the leadership
 	err := leadership1.Campaign(defaultLeaseTimeout, "test_leader_1")
@@ -65,8 +66,7 @@ func TestLeadership(t *testing.T) {
 	re.False(leadership2.Check())
 
 	// Delete the leader key and campaign for leadership1
-	err = leadership1.DeleteLeaderKey()
-	re.NoError(err)
+	deleteLeaderKeyByCurrentRevision(t, leadership1, client, "/test_leader")
 	err = leadership1.Campaign(defaultLeaseTimeout, "test_leader_1")
 	re.NoError(err)
 	re.True(leadership1.Check())
@@ -81,8 +81,7 @@ func TestLeadership(t *testing.T) {
 	re.False(leadership2.Check())
 
 	// Delete the leader key and re-campaign for leadership2
-	err = leadership1.DeleteLeaderKey()
-	re.NoError(err)
+	deleteLeaderKeyByCurrentRevision(t, leadership1, client, "/test_leader")
 	err = leadership2.Campaign(defaultLeaseTimeout, "test_leader_2")
 	re.NoError(err)
 	re.True(leadership2.Check())
@@ -108,14 +107,191 @@ func TestLeadership(t *testing.T) {
 
 	// Check the lease.
 	lease1 := leadership1.GetLease()
-	re.NotNil(lease1)
+	re.Nil(lease1)
 	lease2 := leadership2.GetLease()
-	re.NotNil(lease2)
+	re.Nil(lease2)
+}
 
-	re.True(lease1.IsExpired())
-	re.True(lease2.IsExpired())
-	re.NoError(lease1.Close())
-	re.NoError(lease2.Close())
+func TestResetDoesNotClearNewLeadership(t *testing.T) {
+	for _, leaderValue := range []string{"same_leader", "different_leader"} {
+		t.Run(leaderValue, func(t *testing.T) {
+			re := require.New(t)
+			_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+			t.Cleanup(clean)
+			leadership := NewLeadership(client, "/test_leader", "test_leader", "test_leader")
+			t.Cleanup(leadership.Reset)
+			re.NoError(leadership.Campaign(10, "same_leader"))
+			leadership.Keep(t.Context())
+			oldLease := leadership.GetLease()
+
+			// Let the first Reset revoke the old leader key, but pause it before
+			// Close returns. The election loop can reset the same lease meanwhile.
+			const hook = "github.com/tikv/pd/pkg/election/afterRevokeLease"
+			reached := make(chan struct{})
+			release := make(chan struct{})
+			unblock := sync.OnceFunc(func() { close(release) })
+			re.NoError(failpoint.EnableCall(hook, func(lease *Lease) {
+				if lease == oldLease {
+					close(reached)
+					<-release
+				}
+			}))
+			t.Cleanup(func() { re.NoError(failpoint.Disable(hook)) })
+			wait := func(done <-chan struct{}) {
+				t.Helper()
+				select {
+				case <-done:
+				case <-time.After(10 * time.Second):
+					t.Fatal("leadership reset did not reach the expected checkpoint")
+				}
+			}
+			reset := func() <-chan struct{} {
+				done := make(chan struct{})
+				go func() {
+					leadership.Reset()
+					close(done)
+				}()
+				t.Cleanup(func() { unblock() })
+				return done
+			}
+			firstReset := reset()
+			wait(reached)
+			wait(reset())
+			re.False(leadership.Check())
+			re.Empty(leadership.GetLeaderValue())
+
+			// Re-election must not wait for the first Reset's blocking cleanup.
+			re.NoError(leadership.Campaign(10, leaderValue))
+			leadership.Keep(t.Context())
+			newLease := leadership.GetLease()
+			re.NotSame(oldLease, newLease)
+			unblock()
+			// Wait for the first Reset to finish its cleanup before asserting on
+			// the re-elected leadership.
+			wait(firstReset)
+
+			re.Same(newLease, leadership.GetLease())
+			re.True(leadership.Check())
+			resp, err := leadership.LeaderTxn().Then(clientv3.OpPut("/test_value", "value")).Commit()
+			re.NoError(err)
+			re.True(resp.Succeeded, "the new leader must still be able to commit leader-guarded writes")
+			re.Equal(leaderValue, leadership.GetLeaderValue())
+		})
+	}
+}
+
+func TestKeepDoesNotRestartLeaseDuringReset(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	t.Cleanup(clean)
+	leadership := NewLeadership(client, "/test_leader", "test_leader", "test_leader")
+	t.Cleanup(leadership.Reset)
+	re.NoError(leadership.Campaign(10, "leader"))
+	leadership.Keep(t.Context())
+	oldLease := leadership.GetLease()
+
+	const hook = "github.com/tikv/pd/pkg/election/beforeRevokeLease"
+	reached := make(chan struct{})
+	release := make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
+	re.NoError(failpoint.EnableCall(hook, func(lease *Lease) {
+		if lease == oldLease {
+			close(reached)
+			<-release
+		}
+	}))
+	t.Cleanup(func() {
+		unblock()
+		re.NoError(failpoint.Disable(hook))
+	})
+
+	resetDone := make(chan struct{})
+	go func() {
+		leadership.Reset()
+		close(resetDone)
+	}()
+	select {
+	case <-reached:
+	case <-time.After(10 * time.Second):
+		t.Fatal("leadership reset did not reach the expected checkpoint")
+	}
+
+	// Reset detaches the old lease before cleanup, so a late Keep cannot
+	// install another keepalive context for the lease being closed.
+	re.Nil(leadership.GetLease())
+	leadership.Keep(t.Context())
+	leadership.mu.Lock()
+	keepAliveCancelFunc := leadership.keepAliveCancelFunc
+	leadership.mu.Unlock()
+	re.Nil(keepAliveCancelFunc)
+
+	unblock()
+	select {
+	case <-resetDone:
+	case <-time.After(10 * time.Second):
+		t.Fatal("leadership reset did not finish")
+	}
+
+	// A replacement campaign publishes a fresh lease and can keep it normally.
+	re.NoError(leadership.Campaign(10, "new_leader"))
+	newLease := leadership.GetLease()
+	re.NotNil(newLease)
+	re.NotSame(oldLease, newLease)
+	leadership.Keep(t.Context())
+	leadership.mu.Lock()
+	keepAliveCancelFunc = leadership.keepAliveCancelFunc
+	leadership.mu.Unlock()
+	re.NotNil(keepAliveCancelFunc)
+}
+
+func TestDeleteLeaderKeyByRevisionDoesNotDeleteChangedLeader(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+
+	leaderKey := "/test_leader"
+	leadership1 := NewLeadership(client, leaderKey, "test_leader_1", "test_leader_1")
+	leadership2 := NewLeadership(client, leaderKey, "test_leader_2", "test_leader_2")
+
+	err := leadership1.Campaign(defaultLeaseTimeout, "test_leader_1")
+	re.NoError(err)
+	resp, err := client.Get(context.Background(), leaderKey)
+	re.NoError(err)
+	re.Len(resp.Kvs, 1)
+	oldRevision := resp.Kvs[0].ModRevision
+
+	_, err = client.Delete(context.Background(), leaderKey)
+	re.NoError(err)
+	err = leadership2.Campaign(defaultLeaseTimeout, "test_leader_2")
+	re.NoError(err)
+
+	err = leadership1.DeleteLeaderKeyByRevision(oldRevision)
+	re.Error(err)
+	resp, err = client.Get(context.Background(), leaderKey)
+	re.NoError(err)
+	re.Len(resp.Kvs, 1)
+	re.Equal("test_leader_2", string(resp.Kvs[0].Value))
+
+	resp, err = client.Get(context.Background(), leaderKey)
+	re.NoError(err)
+	err = leadership2.DeleteLeaderKeyByRevision(resp.Kvs[0].ModRevision)
+	re.NoError(err)
+	resp, err = client.Get(context.Background(), leaderKey)
+	re.NoError(err)
+	re.Empty(resp.Kvs)
+
+	err = leadership2.DeleteLeaderKeyByRevision(resp.Header.Revision)
+	re.NoError(err)
+}
+
+func deleteLeaderKeyByCurrentRevision(t *testing.T, leadership *Leadership, client *clientv3.Client, leaderKey string) {
+	resp, err := client.Get(context.Background(), leaderKey)
+	require.NoError(t, err)
+	revision := resp.Header.Revision
+	if len(resp.Kvs) > 0 {
+		revision = resp.Kvs[0].ModRevision
+	}
+	require.NoError(t, leadership.DeleteLeaderKeyByRevision(revision))
 }
 
 func TestExitWatch(t *testing.T) {
@@ -125,9 +301,9 @@ func TestExitWatch(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick", "return(true)"))
 	// Case1: close the client before the watch loop starts
 	checkExitWatch(t, leaderKey, func(_ *embed.Etcd, client *clientv3.Client) func() {
-		re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayWatcher", `pause`))
+		re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/delayWatcher", `pause`))
 		client.Close()
-		re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayWatcher"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/delayWatcher"))
 		return func() {}
 	})
 	// Case2: close the client when the watch loop is running
@@ -146,9 +322,9 @@ func TestExitWatch(t *testing.T) {
 	})
 	// Case4: close the server before the watch loop starts
 	checkExitWatch(t, leaderKey, func(server *embed.Etcd, _ *clientv3.Client) func() {
-		re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayWatcher", `pause`))
+		re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/delayWatcher", `pause`))
 		server.Close()
-		re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayWatcher"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/delayWatcher"))
 		return func() {}
 	})
 	// Case5: close the server when the watch loop is running
@@ -162,14 +338,23 @@ func TestExitWatch(t *testing.T) {
 	checkExitWatch(t, leaderKey, func(server *embed.Etcd, client *clientv3.Client) func() {
 		cfg1 := server.Config()
 		etcd2 := etcdutil.MustAddEtcdMember(t, &cfg1, client)
-		client2, err := etcdutil.CreateEtcdClient(nil, etcd2.Config().ListenClientUrls)
+		cfg2 := etcd2.Config()
+		etcd3 := etcdutil.MustAddEtcdMember(t, &cfg2, client)
+		client2, err := etcdutil.CreateEtcdClient(nil, etcd2.Config().ListenClientUrls, etcdutil.TestEtcdClientPurpose, true)
 		re.NoError(err)
 		// close the original leader
 		server.Server.HardStop()
+		// wait new leader
+		testutil.Eventually(re, func() bool {
+			_, err := client2.Get(context.Background(), leaderKey, clientv3.WithLimit(1))
+			return err == nil
+		})
 		// delete the leader key with the new client
-		client2.Delete(context.Background(), leaderKey)
+		_, err = client2.Delete(context.Background(), leaderKey)
+		re.NoError(err)
 		return func() {
 			etcd2.Close()
+			etcd3.Close()
 			client2.Close()
 		}
 	})
@@ -197,14 +382,14 @@ func TestExitWatch(t *testing.T) {
 
 func checkExitWatch(t *testing.T, leaderKey string, injectFunc func(server *embed.Etcd, client *clientv3.Client) func()) {
 	re := require.New(t)
-	servers, client1, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	servers, client1, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
-	client2, err := etcdutil.CreateEtcdClient(nil, servers[0].Config().ListenClientUrls)
+	client2, err := etcdutil.CreateEtcdClient(nil, servers[0].Config().ListenClientUrls, etcdutil.TestEtcdClientPurpose, true)
 	re.NoError(err)
 	defer client2.Close()
 
-	leadership1 := NewLeadership(client1, leaderKey, "test_leader_1")
-	leadership2 := NewLeadership(client2, leaderKey, "test_leader_2")
+	leadership1 := NewLeadership(client1, leaderKey, "test_leader_1", "test_leader_1")
+	leadership2 := NewLeadership(client2, leaderKey, "test_leader_2", "test_leader_2")
 	err = leadership1.Campaign(defaultLeaseTimeout, "test_leader_1")
 	re.NoError(err)
 	resp, err := client2.Get(context.Background(), leaderKey)
@@ -231,17 +416,16 @@ func checkExitWatch(t *testing.T, leaderKey string, injectFunc func(server *embe
 func TestRequestProgress(t *testing.T) {
 	checkWatcherRequestProgress := func(injectWatchChanBlock bool) {
 		re := require.New(t)
-		fname := testutil.InitTempFileLogger("debug")
-		defer os.RemoveAll(fname)
-		servers, client1, clean := etcdutil.NewTestEtcdCluster(t, 1)
+		fname := testutil.InitTempFileLogger(t, "debug")
+		servers, client1, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 		defer clean()
-		client2, err := etcdutil.CreateEtcdClient(nil, servers[0].Config().ListenClientUrls)
+		client2, err := etcdutil.CreateEtcdClient(nil, servers[0].Config().ListenClientUrls, etcdutil.TestEtcdClientPurpose, true)
 		re.NoError(err)
 		defer client2.Close()
 
 		leaderKey := "/test_leader"
-		leadership1 := NewLeadership(client1, leaderKey, "test_leader_1")
-		leadership2 := NewLeadership(client2, leaderKey, "test_leader_2")
+		leadership1 := NewLeadership(client1, leaderKey, "test_leader_1", "test_leader_1")
+		leadership2 := NewLeadership(client2, leaderKey, "test_leader_2", "test_leader_2")
 		err = leadership1.Campaign(defaultLeaseTimeout, "test_leader_1")
 		re.NoError(err)
 
@@ -256,14 +440,16 @@ func TestRequestProgress(t *testing.T) {
 		if injectWatchChanBlock {
 			re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/watchChanBlock", "return(true)"))
 			testutil.Eventually(re, func() bool {
-				b, _ := os.ReadFile(fname)
+				b, err := os.ReadFile(fname)
+				re.NoError(err)
 				l := string(b)
 				return strings.Contains(l, "watch channel is blocked for a long time")
 			})
 			re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/watchChanBlock"))
 		} else {
 			testutil.Eventually(re, func() bool {
-				b, _ := os.ReadFile(fname)
+				b, err := os.ReadFile(fname)
+				re.NoError(err)
 				l := string(b)
 				return strings.Contains(l, "watcher receives progress notify in watch loop")
 			})
@@ -275,9 +461,9 @@ func TestRequestProgress(t *testing.T) {
 
 func TestCampaignTimes(t *testing.T) {
 	re := require.New(t)
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
-	leadership := NewLeadership(client, "test_leader", "test_leader")
+	leadership := NewLeadership(client, "test_leader", "test_leader", "test_leader")
 
 	// all the campaign times are within the timeout.
 	campaignTimesRecordTimeout = 10 * time.Second

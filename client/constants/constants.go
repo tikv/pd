@@ -31,6 +31,9 @@ const (
 	DefaultKeyspaceGroupID = uint32(0)
 	// DefaultKeyspaceName is the default keyspace name.
 	DefaultKeyspaceName = "DEFAULT"
+	// TSOKeyspaceGroupIDKey is the key for tso keyspace group id in keyspace config.
+	// Note: Config[TSOKeyspaceGroupIDKey] is only used to judge whether there is keyspace group id.
+	TSOKeyspaceGroupIDKey = "tso_keyspace_group_id"
 
 	// RetryInterval is the base retry interval.
 	RetryInterval = 500 * time.Millisecond

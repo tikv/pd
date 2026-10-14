@@ -16,11 +16,12 @@ package schedulers
 
 import (
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"net/http"
 	"strconv"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/log"
@@ -41,6 +42,7 @@ const (
 	splitProgressiveRank    = 5
 	minHotScheduleInterval  = time.Second
 	maxHotScheduleInterval  = 20 * time.Second
+	defaultPendingWeight    = 1.0
 	defaultPendingAmpFactor = 2.0
 	defaultStddevThreshold  = 0.1
 	defaultTopnPosition     = 10
@@ -74,7 +76,6 @@ type baseHotScheduler struct {
 	regionPendings map[uint64]*pendingInfluence
 	// types is the resource types that the scheduler considers.
 	types           []resourceType
-	r               *rand.Rand
 	updateReadTime  time.Time
 	updateWriteTime time.Time
 }
@@ -89,7 +90,6 @@ func newBaseHotScheduler(
 		BaseScheduler:  base,
 		regionPendings: make(map[uint64]*pendingInfluence),
 		stHistoryLoads: statistics.NewStoreHistoryLoads(sampleDuration, sampleInterval),
-		r:              rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
 		ret.types = append(ret.types, ty)
@@ -101,8 +101,10 @@ func newBaseHotScheduler(
 // prepareForBalance calculate the summary of pending Influence for each store and prepare the load detail for
 // each store, only update read or write load detail
 func (s *baseHotScheduler) prepareForBalance(typ resourceType, cluster sche.SchedulerCluster) {
-	storeInfos := statistics.SummaryStoreInfos(cluster.GetStores())
-	s.summaryPendingInfluence(storeInfos)
+	stores := cluster.GetStores()
+	storeInfos := statistics.SummaryStoreInfos(stores)
+	s.summaryPendingInfluence(cluster, storeInfos)
+	s.stHistoryLoads.GC(stores)
 	storesLoads := cluster.GetStoresLoads()
 	isTraceRegionFlow := cluster.GetSchedulerConfig().IsTraceRegionFlow()
 
@@ -144,10 +146,25 @@ func (s *baseHotScheduler) updateHistoryLoadConfig(sampleDuration, sampleInterva
 	s.stHistoryLoads = s.stHistoryLoads.UpdateConfig(sampleDuration, sampleInterval)
 }
 
+func (s *baseHotScheduler) getEffectivePendingWeight() float64 {
+	if conf, ok := s.conf.(*hotRegionSchedulerConfig); ok {
+		pendingWeight := conf.getPendingWeight()
+		if pendingWeight < defaultPendingWeight {
+			log.Warn("pending-weight is less than default, fallback to default",
+				zap.Float64("pendingWeight", pendingWeight),
+				zap.Float64("defaultPendingWeight", defaultPendingWeight))
+			return defaultPendingWeight
+		}
+		return pendingWeight
+	}
+	return defaultPendingWeight
+}
+
 // summaryPendingInfluence calculate the summary of pending Influence for each store
 // and clean the region from regionInfluence if they have ended operator.
 // It makes each dim rate or count become `weight` times to the origin value.
-func (s *baseHotScheduler) summaryPendingInfluence(storeInfos map[uint64]*statistics.StoreSummaryInfo) {
+func (s *baseHotScheduler) summaryPendingInfluence(cluster sche.SchedulerCluster, storeInfos map[uint64]*statistics.StoreSummaryInfo) {
+	pendingWeight := s.getEffectivePendingWeight()
 	for id, p := range s.regionPendings {
 		for _, from := range p.froms {
 			from := storeInfos[from]
@@ -160,6 +177,7 @@ func (s *baseHotScheduler) summaryPendingInfluence(storeInfos map[uint64]*statis
 				continue
 			}
 
+			weight *= pendingWeight
 			if from != nil && weight > 0 {
 				from.AddInfluence(&p.origin, -weight)
 			}
@@ -170,17 +188,33 @@ func (s *baseHotScheduler) summaryPendingInfluence(storeInfos map[uint64]*statis
 	}
 	// for metrics
 	for storeID, info := range storeInfos {
+		// storeInfos is built from a snapshot taken at the top of
+		// prepareForBalance, so info.IsRemoved() can be stale by the time
+		// this loop runs; re-check the store fresh through cluster instead,
+		// otherwise a store buried after the snapshot was taken but before
+		// this write can still recreate HotPendingSum for it.
+		if store := cluster.GetStore(storeID); store == nil || store.IsRemoved() {
+			continue
+		}
 		storeLabel := strconv.FormatUint(storeID, 10)
 		if infl := info.PendingSum; infl != nil && len(infl.Loads) != 0 {
 			utils.ForeachRegionStats(func(rwTy utils.RWType, dim int, kind utils.RegionStatKind) {
 				HotPendingSum.WithLabelValues(storeLabel, rwTy.String(), utils.DimToString(dim)).Set(infl.Loads[kind])
 			})
+			// The check above and this write are not atomic with DeleteStoreMetrics,
+			// so a bury landing in between can still let this write recreate the
+			// series after cleanup ran. Re-check right after writing to narrow that
+			// window; a store buried later still leaves a bounded residual until the
+			// next tick, which is an accepted, documented limitation.
+			if store := cluster.GetStore(storeID); store == nil || store.IsRemoved() {
+				HotPendingSum.DeletePartialMatch(prometheus.Labels{"store": storeLabel})
+			}
 		}
 	}
 }
 
 func (s *baseHotScheduler) randomType() resourceType {
-	return s.types[s.r.Int()%len(s.types)]
+	return s.types[rand.Int()%len(s.types)]
 }
 
 type hotScheduler struct {
@@ -214,18 +248,29 @@ func (s *hotScheduler) ReloadConfig() error {
 	s.conf.Lock()
 	defer s.conf.Unlock()
 
-	newCfg := &hotRegionSchedulerConfig{}
+	newCfg := &hotRegionSchedulerConfig{
+		hotRegionSchedulerParam: s.conf.hotRegionSchedulerParam,
+	}
+	newCfg.ReadPriorities = append([]string(nil), s.conf.ReadPriorities...)
+	newCfg.WriteLeaderPriorities = append([]string(nil), s.conf.WriteLeaderPriorities...)
+	newCfg.WritePeerPriorities = append([]string(nil), s.conf.WritePeerPriorities...)
 	if err := s.conf.load(newCfg); err != nil {
+		return err
+	}
+	if err := newCfg.validateLocked(); err != nil {
 		return err
 	}
 	s.conf.MinHotByteRate = newCfg.MinHotByteRate
 	s.conf.MinHotKeyRate = newCfg.MinHotKeyRate
 	s.conf.MinHotQueryRate = newCfg.MinHotQueryRate
+	s.conf.MinHotCPURate = newCfg.MinHotCPURate
 	s.conf.MaxZombieRounds = newCfg.MaxZombieRounds
+	s.conf.PendingWeight = newCfg.PendingWeight
 	s.conf.MaxPeerNum = newCfg.MaxPeerNum
 	s.conf.ByteRateRankStepRatio = newCfg.ByteRateRankStepRatio
 	s.conf.KeyRateRankStepRatio = newCfg.KeyRateRankStepRatio
 	s.conf.QueryRateRankStepRatio = newCfg.QueryRateRankStepRatio
+	s.conf.CPURateRankStepRatio = newCfg.CPURateRankStepRatio
 	s.conf.CountRankStepRatio = newCfg.CountRankStepRatio
 	s.conf.GreatDecRatio = newCfg.GreatDecRatio
 	s.conf.MinorDecRatio = newCfg.MinorDecRatio
@@ -321,10 +366,42 @@ func (s *hotScheduler) tryAddPendingInfluence(op *operator.Operator, srcStore []
 	return true
 }
 
+func getPlacementLoadState(cluster sche.SchedulerCluster, rankFormulaVersion string) placementLoadState {
+	if !cluster.GetSchedulerConfig().IsPlacementRulesEnabled() || rankFormulaVersion != "v2" {
+		return placementLoadState{}
+	}
+
+	canRestrict := [2]bool{
+		cluster.GetRuleManager().MayRestrictStoreLoad(true),
+		cluster.GetRuleManager().MayRestrictStoreLoad(false),
+	}
+	stores := cluster.GetStores()
+	for _, store := range stores {
+		recordStorePlacementRestriction(&canRestrict, store)
+	}
+	enabled := canRestrict[0] || canRestrict[1]
+	var population *placementPopulationIndex
+	if enabled {
+		population = &placementPopulationIndex{
+			stores:    make(map[uint64]uint, len(stores)),
+			wordCount: (len(stores) + 63) / 64,
+		}
+		for position, store := range stores {
+			population.stores[store.GetID()] = uint(position)
+		}
+	}
+	return placementLoadState{enabled: enabled, canRestrict: canRestrict, populationIndex: population}
+}
+
+func newBalanceReadSolvers(s *hotScheduler, cluster sche.SchedulerCluster) (leaderSolver, peerSolver *balanceSolver) {
+	leaderSolver = newBalanceSolver(s, cluster, utils.Read, transferLeader)
+	peerSolver = newBalanceSolver(s, cluster, utils.Read, movePeer)
+	return leaderSolver, peerSolver
+}
+
 func (s *hotScheduler) balanceHotReadRegions(cluster sche.SchedulerCluster) []*operator.Operator {
-	leaderSolver := newBalanceSolver(s, cluster, utils.Read, transferLeader)
+	leaderSolver, peerSolver := newBalanceReadSolvers(s, cluster)
 	leaderOps := leaderSolver.solve()
-	peerSolver := newBalanceSolver(s, cluster, utils.Read, movePeer)
 	peerOps := peerSolver.solve()
 	if len(leaderOps) == 0 && len(peerOps) == 0 {
 		return nil

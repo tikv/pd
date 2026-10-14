@@ -20,12 +20,13 @@ import (
 	"time"
 
 	"github.com/unrolled/render"
-	"github.com/urfave/negroni"
+	"github.com/urfave/negroni/v3"
 
 	"github.com/pingcap/failpoint"
 
 	"github.com/tikv/pd/pkg/audit"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/requestutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
@@ -79,33 +80,92 @@ func (rm *requestInfoMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Reques
 }
 
 type clusterMiddleware struct {
-	s  *server.Server
-	rd *render.Render
+	s                         *server.Server
+	rd                        *render.Render
+	allowFollowerSyncedRegion bool
+	allowFollowerRegionReset  bool
 }
 
-func newClusterMiddleware(s *server.Server) clusterMiddleware {
-	return clusterMiddleware{
+type clusterMiddlewareOption func(*clusterMiddleware)
+
+func withFollowerSyncedRegion() clusterMiddlewareOption {
+	return func(m *clusterMiddleware) {
+		m.allowFollowerSyncedRegion = true
+	}
+}
+
+func withFollowerRegionReset() clusterMiddlewareOption {
+	return func(m *clusterMiddleware) {
+		m.allowFollowerRegionReset = true
+	}
+}
+
+func newClusterMiddleware(s *server.Server, opts ...clusterMiddlewareOption) clusterMiddleware {
+	m := clusterMiddleware{
 		s:  s,
 		rd: render.New(render.Options{IndentJSON: true}),
 	}
+	for _, opt := range opts {
+		opt(&m)
+	}
+	return m
 }
 
 func (m clusterMiddleware) middleware(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rc := m.s.GetRaftCluster()
+		isFollowerSyncedCluster := false
+		if rc == nil {
+			rc = m.getFollowerSyncedCluster(r)
+			isFollowerSyncedCluster = rc != nil
+		}
 		if rc == nil {
 			m.rd.JSON(w, http.StatusInternalServerError, errs.ErrNotBootstrapped.FastGenByArgs().Error())
 			return
 		}
 		ctx := context.WithValue(r.Context(), clusterCtxKey{}, rc)
+		ctx = context.WithValue(ctx, followerSyncedClusterCtxKey{}, isFollowerSyncedCluster)
 		h.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
+func (m clusterMiddleware) getFollowerSyncedCluster(r *http.Request) *cluster.RaftCluster {
+	if r.Header.Get(apiutil.PDAllowFollowerHandleHeader) == "" ||
+		m.s.GetMember().IsServing() {
+		return nil
+	}
+	switch r.Method {
+	case http.MethodGet:
+		if !m.allowFollowerSyncedRegion {
+			return nil
+		}
+	case http.MethodDelete:
+		if !m.allowFollowerRegionReset {
+			return nil
+		}
+	default:
+		return nil
+	}
+	rc := m.s.DirectlyGetRaftCluster()
+	if rc == nil {
+		return nil
+	}
+	if r.Method == http.MethodGet && !rc.GetRegionSyncer().IsRunning() {
+		return nil
+	}
+	return rc
+}
+
 type clusterCtxKey struct{}
+type followerSyncedClusterCtxKey struct{}
 
 func getCluster(r *http.Request) *cluster.RaftCluster {
 	return r.Context().Value(clusterCtxKey{}).(*cluster.RaftCluster)
+}
+
+func isFollowerSyncedClusterRequest(r *http.Request) bool {
+	v, _ := r.Context().Value(followerSyncedClusterCtxKey{}).(bool)
+	return v
 }
 
 type auditMiddleware struct {

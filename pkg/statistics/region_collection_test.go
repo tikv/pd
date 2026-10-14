@@ -16,6 +16,7 @@ package statistics
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -28,6 +29,42 @@ import (
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/storage"
 )
+
+func TestRegionStatsObserveIAKVSize(t *testing.T) {
+	re := require.New(t)
+	region := core.NewRegionInfo(
+		&metapb.Region{Id: 1},
+		nil,
+		core.SetApproximateKvSize(100),
+		core.SetApproximateIAKvSize(40),
+	)
+
+	stats := GetRegionStats([]*core.RegionInfo{region}, nil)
+	re.Equal(int64(100), stats.UserStorageSize)
+	re.Equal(int64(40), stats.UserIAStorageSize)
+	data, err := json.Marshal(stats)
+	re.NoError(err)
+	var response map[string]any
+	re.NoError(json.Unmarshal(data, &response))
+	re.Equal(float64(40), response["user_ia_storage_size"])
+
+	region = region.Clone(core.SetApproximateIAKvSize(120))
+	stats = GetRegionStats([]*core.RegionInfo{region}, nil)
+	re.Equal(int64(100), stats.UserIAStorageSize)
+}
+
+func TestRegionStatsEmptyCountUsesKeys(t *testing.T) {
+	regions := []*core.RegionInfo{
+		core.NewRegionInfo(&metapb.Region{Id: 1}, nil,
+			core.SetApproximateSize(1),
+			core.SetApproximateKeys(0)),
+		core.NewRegionInfo(&metapb.Region{Id: 2}, nil,
+			core.SetApproximateSize(1),
+			core.SetApproximateKeys(1)),
+	}
+
+	require.Equal(t, 1, GetRegionStats(regions, nil).EmptyCount)
+}
 
 func TestRegionStatistics(t *testing.T) {
 	re := require.New(t)
@@ -75,6 +112,11 @@ func TestRegionStatistics(t *testing.T) {
 	re.Len(regionStats.stats[EmptyRegion], 1)
 	re.Len(regionStats.stats[UndersizedRegion], 1)
 	re.Len(regionStats.stats[OfflinePeer], 1)
+
+	regionWithKeys := region1.Clone(core.SetApproximateSize(1), core.SetApproximateKeys(2))
+	re.True(regionStats.RegionStatsNeedUpdate(regionWithKeys))
+	regionStats.Observe(regionWithKeys, stores)
+	re.Empty(regionStats.stats[EmptyRegion])
 
 	region1 = region1.Clone(
 		core.WithDownPeers(downPeers),
@@ -218,19 +260,29 @@ func TestRegionLabelIsolationLevel(t *testing.T) {
 			{"zone": "z1", "host": "h3"},
 		},
 	}
-	res := []string{"rack", "host", "zone", "rack", "none", "rack", "host"}
+	isolationResSet := []string{"rack", "host", "zone", "rack", "none", "rack", "host"}
+	levelResSet := []int{1, 2, 0, 1, -1, 1, 2}
+	satisfiedResSet := []map[string]bool{
+		{"zone": false, "rack": true, "host": true, "bar": false, "none": true, "": true},
+		{"zone": false, "rack": false, "host": true, "bar": false, "none": true, "": true},
+		{"zone": true, "rack": true, "host": true, "bar": false, "none": true, "": true},
+		{"zone": false, "rack": true, "host": true, "bar": false, "none": true, "": true},
+		{"zone": false, "rack": false, "host": false, "bar": false, "none": true, "": true},
+		{"zone": false, "rack": true, "host": true, "bar": false, "none": true, "": true},
+		{"zone": false, "rack": false, "host": true, "bar": false, "none": true, "": true},
+	}
 	counter := map[string]int{"none": 1, "host": 2, "rack": 3, "zone": 1}
 	regionID := 1
-	f := func(labels []map[string]string, res string, locationLabels []string) {
+	f := func(locationLabels []string, storeLabels []map[string]string, isolationRes string, levelRes int, satisfiedRes map[string]bool) {
 		metaStores := []*metapb.Store{
 			{Id: 1, Address: "mock://tikv-1:1"},
 			{Id: 2, Address: "mock://tikv-2:2"},
 			{Id: 3, Address: "mock://tikv-3:3"},
 		}
-		stores := make([]*core.StoreInfo, 0, len(labels))
+		stores := make([]*core.StoreInfo, 0, len(storeLabels))
 		for i, m := range metaStores {
 			var newLabels []*metapb.StoreLabel
-			for k, v := range labels[i] {
+			for k, v := range storeLabels[i] {
 				newLabels = append(newLabels, &metapb.StoreLabel{Key: k, Value: v})
 			}
 			s := core.NewStoreInfo(m, core.SetStoreLabels(newLabels))
@@ -238,45 +290,106 @@ func TestRegionLabelIsolationLevel(t *testing.T) {
 			stores = append(stores, s)
 		}
 		region := core.NewRegionInfo(&metapb.Region{Id: uint64(regionID)}, nil)
-		label := GetRegionLabelIsolation(stores, locationLabels)
+		label, level := GetRegionLabelIsolation(stores, locationLabels)
 		labelLevelStats.Observe(region, stores, locationLabels)
-		re.Equal(res, label)
+		re.Equal(isolationRes, label)
+		re.Equal(levelRes, level)
+		for isolationLevel, res := range satisfiedRes {
+			re.Equal(res, IsRegionLabelIsolationSatisfied(stores, locationLabels, isolationLevel))
+		}
 		regionID++
 	}
 
 	for i, labels := range labelsSet {
-		f(labels, res[i], locationLabels)
+		f(locationLabels, labels, isolationResSet[i], levelResSet[i], satisfiedResSet[i])
 	}
 	for i, res := range counter {
 		re.Equal(res, labelLevelStats.labelCounter[i])
 	}
 
-	label := GetRegionLabelIsolation(nil, locationLabels)
+	label, level := GetRegionLabelIsolation(nil, locationLabels)
 	re.Equal(nonIsolation, label)
-	label = GetRegionLabelIsolation(nil, nil)
+	re.Equal(-1, level)
+	label, level = GetRegionLabelIsolation(nil, nil)
 	re.Equal(nonIsolation, label)
+	re.Equal(-1, level)
 	store := core.NewStoreInfo(&metapb.Store{Id: 1, Address: "mock://tikv-1:1"}, core.SetStoreLabels([]*metapb.StoreLabel{{Key: "foo", Value: "bar"}}))
-	label = GetRegionLabelIsolation([]*core.StoreInfo{store}, locationLabels)
+	label, level = GetRegionLabelIsolation([]*core.StoreInfo{store}, locationLabels)
 	re.Equal("zone", label)
+	re.Equal(0, level)
 
 	regionID = 1
-	res = []string{"rack", "none", "zone", "rack", "none", "rack", "none"}
-	counter = map[string]int{"none": 3, "host": 0, "rack": 3, "zone": 1}
 	locationLabels = []string{"zone", "rack"}
+	isolationResSet = []string{"rack", "none", "zone", "rack", "none", "rack", "none"}
+	levelResSet = []int{1, -1, 0, 1, -1, 1, -1}
+	satisfiedResSet = []map[string]bool{
+		{"zone": false, "rack": true, "bar": false, "none": true, "": true},
+		{"zone": false, "rack": false, "bar": false, "none": true, "": true},
+		{"zone": true, "rack": true, "bar": false, "none": true, "": true},
+		{"zone": false, "rack": true, "bar": false, "none": true, "": true},
+		{"zone": false, "rack": false, "bar": false, "none": true, "": true},
+		{"zone": false, "rack": true, "bar": false, "none": true, "": true},
+		{"zone": false, "rack": false, "bar": false, "none": true, "": true},
+	}
+	counter = map[string]int{"none": 3, "host": 0, "rack": 3, "zone": 1}
 
 	for i, labels := range labelsSet {
-		f(labels, res[i], locationLabels)
+		f(locationLabels, labels, isolationResSet[i], levelResSet[i], satisfiedResSet[i])
 	}
 	for i, res := range counter {
 		re.Equal(res, labelLevelStats.labelCounter[i])
 	}
 }
 
+func TestRegionLabelIsolationCaseInsensitive(t *testing.T) {
+	labels := []string{"zone", "rack", "host"}
+	for _, tt := range []struct {
+		name  string
+		paths [][]string
+		label string
+		level int
+	}{
+		{"distinct-dotted-i", [][]string{{"z1", "r1", "İ"}, {"z1", "r1", "i"}, {"z1", "r1", "b"}}, "host", 2},
+		{"distinct-dotless-i", [][]string{{"z1", "r1", "ı"}, {"z1", "r1", "i"}, {"z1", "r1", "b"}}, "host", 2},
+		{"unicode-fold", [][]string{{"z1", "r1", "ς"}, {"z1", "r1", "σ"}, {"z1", "r1", "b"}}, nonIsolation, -1},
+		{"unicode-long-s", [][]string{{"z1", "r1", "ſ"}, {"z1", "r1", "s"}, {"z1", "r1", "b"}}, nonIsolation, -1},
+		{"mixed-ascii-kelvin", [][]string{{"z1", "r1", "K8S"}, {"z1", "r1", "K8s"}, {"z1", "r1", "b"}}, nonIsolation, -1},
+		{"mixed-ascii-long-s", [][]string{{"z1", "r1", "h-s"}, {"z1", "r1", "H-ſ"}, {"z1", "r1", "b"}}, nonIsolation, -1},
+		{"distinct-unicode-values", [][]string{{"z1", "r1", "ß"}, {"z1", "r1", "ss"}, {"z1", "r1", "b"}}, "host", 2},
+		{"host", [][]string{{"z1", "r1", "A"}, {"z1", "r1", "a"}, {"z1", "r1", "B"}}, nonIsolation, -1},
+		{"rack", [][]string{{"z1", "R1", "h1"}, {"z1", "r1", "h2"}, {"z1", "r2", "h3"}}, "host", 2},
+		{"zone", [][]string{{"Z1", "r1", "h1"}, {"z1", "r2", "h1"}, {"z2", "r1", "h1"}}, "rack", 1},
+		{"missing-label", [][]string{{"Z1", "r1", "h1"}, {"z1", "R1", ""}, {"z2", "r1", "h3"}}, nonIsolation, -1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			stores := make([]*core.StoreInfo, 0, len(tt.paths))
+			for i, path := range tt.paths {
+				storeLabels := make([]*metapb.StoreLabel, 0, len(labels))
+				for j, label := range labels {
+					storeLabels = append(storeLabels, &metapb.StoreLabel{Key: label, Value: path[j]})
+				}
+				stores = append(stores, core.NewStoreInfo(&metapb.Store{Id: uint64(i + 1), Labels: storeLabels}))
+			}
+			label, level := GetRegionLabelIsolation(stores, labels)
+			require.Equal(t, tt.label, label)
+			require.Equal(t, tt.level, level)
+			for i, isolationLevel := range labels {
+				require.Equal(t, tt.level >= 0 && tt.level <= i, IsRegionLabelIsolationSatisfied(stores, labels, isolationLevel))
+			}
+			stats := NewLabelStatistics()
+			stats.Observe(core.NewRegionInfo(&metapb.Region{Id: 1}, nil), stores, labels)
+			require.Equal(t, map[string]int{tt.label: 1}, stats.GetLabelCounter())
+		})
+	}
+}
+
 func BenchmarkObserve(b *testing.B) {
+	re := require.New(b)
 	// Setup
 	store := storage.NewStorageWithMemoryBackend()
 	manager := placement.NewRuleManager(context.Background(), store, nil, nil)
-	manager.Initialize(3, []string{"zone", "rack", "host"}, "", false)
+	err := manager.Initialize(3, []string{"zone", "rack", "host"}, "", false)
+	re.NoError(err)
 	opt := mockconfig.NewTestOptions()
 	opt.SetPlacementRuleEnabled(false)
 	peers := []*metapb.Peer{
@@ -299,9 +412,10 @@ func BenchmarkObserve(b *testing.B) {
 
 	regionNum := uint64(1000000)
 	regions := make([]*core.RegionInfo, 0, regionNum)
+	leader := peers[0]
 	for i := uint64(1); i <= regionNum; i++ {
 		r := &metapb.Region{Id: i, Peers: peers, StartKey: []byte{byte(i)}, EndKey: []byte{byte(i + 1)}}
-		regions = append(regions, core.NewRegionInfo(r, peers[0]))
+		regions = append(regions, core.NewRegionInfo(r, leader))
 	}
 	regionStats := NewRegionStatistics(nil, opt, manager)
 

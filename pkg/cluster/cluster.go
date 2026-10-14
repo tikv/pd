@@ -19,6 +19,7 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule"
+	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/statistics"
 )
@@ -30,46 +31,37 @@ type Cluster interface {
 	GetLabelStats() *statistics.LabelStatistics
 	GetCoordinator() *schedule.Coordinator
 	GetRuleManager() *placement.RuleManager
+	GetAffinityManager() *affinity.Manager
 	GetBasicCluster() *core.BasicCluster
 }
 
 // HandleStatsAsync handles the flow asynchronously.
 func HandleStatsAsync(c Cluster, region *core.RegionInfo) {
-	checkWritePeerTask := func(cache *statistics.HotPeerCache) {
-		reportInterval := region.GetInterval()
-		interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
-		stats := cache.CheckPeerFlow(region, region.GetPeers(), region.GetWriteLoads(), interval)
-		for _, stat := range stats {
-			cache.UpdateStat(stat)
-		}
-	}
-
-	checkExpiredTask := func(cache *statistics.HotPeerCache) {
-		expiredStats := cache.CollectExpiredItems(region)
-		for _, stat := range expiredStats {
-			cache.UpdateStat(stat)
-		}
-	}
-
-	c.GetHotStat().CheckWriteAsync(checkExpiredTask)
-	c.GetHotStat().CheckReadAsync(checkExpiredTask)
-	c.GetHotStat().CheckWriteAsync(checkWritePeerTask)
+	c.GetHotStat().CheckRegionFlowAsync(region)
 	c.GetCoordinator().GetSchedulersController().CheckTransferWitnessLeader(region)
 }
 
 // HandleOverlaps handles the overlap regions.
 func HandleOverlaps(ctx context.Context, c Cluster, overlaps []*core.RegionInfo) {
+	regionStats := c.GetRegionStats()
+	labelStats := c.GetLabelStats()
+	ruleManager := c.GetRuleManager()
+	affinityManager := c.GetAffinityManager()
 	for _, item := range overlaps {
 		select {
 		case <-ctx.Done():
 			return
 		default:
 		}
-		if c.GetRegionStats() != nil {
-			c.GetRegionStats().ClearDefunctRegion(item.GetID())
+		id := item.GetID()
+		if regionStats != nil {
+			regionStats.ClearDefunctRegion(id)
 		}
-		c.GetLabelStats().MarkDefunctRegion(item.GetID())
-		c.GetRuleManager().InvalidCache(item.GetID())
+		if affinityManager != nil {
+			affinityManager.InvalidCache(id)
+		}
+		labelStats.MarkDefunctRegion(id)
+		ruleManager.InvalidCache(id)
 	}
 }
 

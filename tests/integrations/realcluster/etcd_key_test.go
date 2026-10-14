@@ -75,18 +75,21 @@ var (
 		"/pd//scheduler_config/balance-leader-scheduler",
 		"/pd//scheduler_config/balance-region-scheduler",
 		"/pd//scheduler_config/evict-slow-store-scheduler",
+		"/pd//scheduler_config/evict-stopping-store-scheduler",
 		"/pd//timestamp",
 		"/pd//tso/keyspace_groups/membership/", // ms
 		"/pd/cluster_id",
 	}
 	// The keys that prefix is `/ms`.
+	// Note: `expected_primary` is no longer present in steady state. It is only
+	// written transiently by the `{service}/primary/transfer` API and is deleted
+	// once the target wins the campaign (or expires via its TTL), so it must not be
+	// listed as an always-present key here.
 	msKeys = []string{
 		"",
 		"/ms//scheduling/primary",
-		"/ms//scheduling/primary/expected_primary",
 		"/ms//scheduling/registry/http://...:",
 		"/ms//tso//primary",
-		"/ms//tso//primary/expected_primary",
 		"/ms//tso/registry/http://...:",
 	}
 	// These keys with `/pd` are only in `ms` mode.
@@ -109,7 +112,7 @@ func (s *etcdKeySuite) TestEtcdKey() {
 	}
 	t := s.T()
 	//  call `UpdateGCSafePoint` to create the key `/pd//gc/safe_point`.
-	_, err := s.cli.UpdateGCSafePoint(context.Background(), 1)
+	_, err := s.cli.UpdateGCSafePoint(context.Background(), 1) //nolint:staticcheck
 	re.NoError(err)
 	endpoints := getPDEndpoints(re)
 

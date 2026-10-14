@@ -45,4 +45,6 @@ var (
 	TimeIntervalFactory = func() *pdpb.TimeInterval { return &pdpb.TimeInterval{} }
 	// QueryStatsFactory returns new query stats.
 	QueryStatsFactory = func() *pdpb.QueryStats { return &pdpb.QueryStats{} }
+	// CPUStatsFactory returns new cpu stats.
+	CPUStatsFactory = func() *pdpb.CPUStats { return &pdpb.CPUStats{} }
 )

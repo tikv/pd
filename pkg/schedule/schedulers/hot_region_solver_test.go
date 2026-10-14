@@ -15,10 +15,12 @@
 package schedulers
 
 import (
+	"math"
 	"testing"
 	"time"
 
 	"github.com/docker/go-units"
+	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -26,12 +28,47 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/versioninfo"
 )
+
+var benchmarkBalanceSolvers [2]*balanceSolver
+
+func BenchmarkNewBalanceReadSolvers(b *testing.B) {
+	cancel, _, tc, oc := prepareSchedulersTest()
+	b.Cleanup(cancel)
+	scheduler, err := CreateScheduler(types.BalanceHotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigSliceDecoder(types.BalanceHotRegionScheduler, nil))
+	if err != nil {
+		b.Fatal(err)
+	}
+	hot := scheduler.(*hotScheduler)
+	for id := uint64(1); id <= 1000; id++ {
+		detail := &statistics.StoreLoadDetail{
+			StoreSummaryInfo: &statistics.StoreSummaryInfo{
+				StoreInfo: core.NewStoreInfoWithLabel(id, map[string]string{
+					"zone": "z1",
+					"rack": "r1",
+					"host": "h1",
+				}),
+			},
+			LoadPred: (statistics.StoreLoad{}).ToLoadPred(utils.Read, nil),
+		}
+		hot.stLoadInfos[readLeader][id] = detail
+		hot.stLoadInfos[readPeer][id] = detail
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		benchmarkBalanceSolvers[0], benchmarkBalanceSolvers[1] = newBalanceReadSolvers(hot, tc)
+	}
+}
 
 func TestSplitBucketsBySize(t *testing.T) {
 	re := require.New(t)
@@ -42,8 +79,11 @@ func TestSplitBucketsBySize(t *testing.T) {
 	re.NoError(err)
 	solve := newBalanceSolver(hb.(*hotScheduler), tc, utils.Read, transferLeader)
 	solve.cur = &solution{}
-	region := core.NewTestRegionInfo(1, 1, []byte("a"), []byte("f"))
-
+	region := core.NewTestRegionInfo(1, 1, []byte("a"), []byte("f"), core.SetApproximateSize(1000))
+	solve.opTy = movePeer
+	store := core.NewStoreInfoWithLabel(1, nil)
+	solve.cur.srcStore = &statistics.StoreLoadDetail{StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: store}}
+	solve.cur.dstStore = &statistics.StoreLoadDetail{StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: store}}
 	testdata := []struct {
 		hotBuckets [][]byte
 		splitKeys  [][]byte
@@ -61,27 +101,37 @@ func TestSplitBucketsBySize(t *testing.T) {
 			nil,
 		},
 	}
+	checkFn := func() {
+		enabledBucket := tc.IsEnableRegionBucket()
+		for _, data := range testdata {
+			b := &metapb.Buckets{
+				RegionId:   1,
+				PeriodInMs: 1000,
+				Keys:       data.hotBuckets,
+			}
+			region.UpdateBuckets(b, region.GetBuckets())
+			solve.cur.region = region
+			ops := solve.buildOperators()
+			if data.splitKeys == nil {
+				re.Empty(ops)
+				continue
+			}
+			if !enabledBucket {
+				re.Empty(ops)
+				return
+			}
+			re.Len(ops, 1)
+			op := ops[0]
+			re.Equal(splitHotReadBuckets, op.Desc())
 
-	for _, data := range testdata {
-		b := &metapb.Buckets{
-			RegionId:   1,
-			PeriodInMs: 1000,
-			Keys:       data.hotBuckets,
+			expectOp, err := operator.CreateSplitRegionOperator(splitHotReadBuckets, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, data.splitKeys)
+			re.NoError(err)
+			re.Equal(expectOp.Brief(), op.Brief())
 		}
-		region.UpdateBuckets(b, region.GetBuckets())
-		ops := solve.createSplitOperator([]*core.RegionInfo{region}, bySize)
-		if data.splitKeys == nil {
-			re.Empty(ops)
-			continue
-		}
-		re.Len(ops, 1)
-		op := ops[0]
-		re.Equal(splitHotReadBuckets, op.Desc())
-
-		expectOp, err := operator.CreateSplitRegionOperator(splitHotReadBuckets, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, data.splitKeys)
-		re.NoError(err)
-		re.Equal(expectOp.Brief(), op.Brief())
 	}
+	checkFn()
+	tc.SetRegionBucketEnabled(false)
+	checkFn()
 }
 
 func TestSplitBucketsByLoad(t *testing.T) {
@@ -91,6 +141,9 @@ func TestSplitBucketsByLoad(t *testing.T) {
 	defer cancel()
 	hb, err := CreateScheduler(readType, oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
+	// Explicitly use byte/key here so this test only verifies split-key selection
+	// instead of depending on the cluster-version-specific default priorities.
+	hb.(*hotScheduler).conf.ReadPriorities = []string{utils.BytePriority, utils.KeyPriority}
 	solve := newBalanceSolver(hb.(*hotScheduler), tc, utils.Read, transferLeader)
 	solve.cur = &solution{}
 	region := core.NewTestRegionInfo(1, 1, []byte("a"), []byte("f"))
@@ -143,6 +196,46 @@ func TestSplitBucketsByLoad(t *testing.T) {
 	}
 }
 
+func TestSplitBucketsByLoadWithCPUFallback(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	tc.SetRegionBucketEnabled(true)
+	tc.SetClusterVersion(versioninfo.MustParseVersion("8.5.7"))
+	defer cancel()
+	hb, err := CreateScheduler(readType, oc, storage.NewStorageWithMemoryBackend(), nil)
+	re.NoError(err)
+	hb.(*hotScheduler).conf.ReadPriorities = []string{utils.CPUPriority, utils.BytePriority}
+	solve := newBalanceSolver(hb.(*hotScheduler), tc, utils.Read, transferLeader)
+	solve.cur = &solution{}
+	region := core.NewTestRegionInfo(1, 1, []byte("a"), []byte("f"))
+
+	b := &metapb.Buckets{
+		RegionId:   1,
+		PeriodInMs: 1000,
+		Keys:       [][]byte{[]byte(""), []byte("b"), []byte("d"), []byte("")},
+		Stats: &metapb.BucketStats{
+			ReadBytes:  []uint64{2 * units.MiB, 2 * units.MiB, 20 * units.MiB},
+			ReadKeys:   []uint64{256, 256, 256},
+			ReadQps:    []uint64{1000, 1, 1},
+			WriteBytes: []uint64{0, 0, 0},
+			WriteQps:   []uint64{0, 0, 0},
+			WriteKeys:  []uint64{0, 0, 0},
+		},
+	}
+	task := buckets.NewCheckPeerTask(b)
+	re.True(tc.CheckAsync(task))
+	time.Sleep(time.Millisecond * 10)
+
+	ops := solve.createSplitOperator([]*core.RegionInfo{region}, byLoad)
+	re.Len(ops, 1)
+	op := ops[0]
+	re.Equal(splitHotReadBuckets, op.Desc())
+
+	expectOp, err := operator.CreateSplitRegionOperator(splitHotReadBuckets, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, [][]byte{[]byte("d")})
+	re.NoError(err)
+	re.Equal(expectOp.Brief(), op.Brief())
+}
+
 func TestHotCacheSortHotPeer(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
@@ -150,24 +243,28 @@ func TestHotCacheSortHotPeer(t *testing.T) {
 	sche, err := CreateScheduler(types.BalanceHotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigJSONDecoder([]byte("null")))
 	re.NoError(err)
 	hb := sche.(*hotScheduler)
+	hb.conf.ReadPriorities = []string{utils.QueryPriority, utils.BytePriority}
 	leaderSolver := newBalanceSolver(hb, tc, utils.Read, transferLeader)
 	hotPeers := []*statistics.HotPeerStat{{
 		RegionID: 1,
 		Loads: []float64{
 			utils.QueryDim: 10,
 			utils.ByteDim:  1,
+			utils.CPUDim:   0,
 		},
 	}, {
 		RegionID: 2,
 		Loads: []float64{
 			utils.QueryDim: 1,
 			utils.ByteDim:  10,
+			utils.CPUDim:   0,
 		},
 	}, {
 		RegionID: 3,
 		Loads: []float64{
 			utils.QueryDim: 5,
 			utils.ByteDim:  6,
+			utils.CPUDim:   0,
 		},
 	}}
 
@@ -181,6 +278,30 @@ func TestHotCacheSortHotPeer(t *testing.T) {
 	leaderSolver.maxPeerNum = 2
 	u = leaderSolver.filterHotPeers(st)
 	checkSortResult(re, []uint64{1, 2}, u)
+
+	// Verify the CPU-first priority path can pick by CPU dim.
+	tc.SetClusterVersion(versioninfo.MustParseVersion("8.5.7"))
+	hb.conf.ReadPriorities = []string{utils.CPUPriority, utils.BytePriority}
+	cpuLeaderSolver := newBalanceSolver(hb, tc, utils.Read, transferLeader)
+	cpuHotPeers := []*statistics.HotPeerStat{{
+		RegionID: 1,
+		Loads: []float64{
+			utils.QueryDim: 1,
+			utils.ByteDim:  1,
+			utils.CPUDim:   30,
+		},
+	}, {
+		RegionID: 2,
+		Loads: []float64{
+			utils.QueryDim: 100,
+			utils.ByteDim:  1,
+			utils.CPUDim:   5,
+		},
+	}}
+	st.HotPeers = cpuHotPeers
+	cpuLeaderSolver.maxPeerNum = 1
+	u = cpuLeaderSolver.filterHotPeers(st)
+	checkSortResult(re, []uint64{1}, u)
 }
 
 func checkSortResult(re *require.Assertions, regions []uint64, hotPeers []*statistics.HotPeerStat) {
@@ -241,11 +362,18 @@ func TestMaxZombieDuration(t *testing.T) {
 		},
 	}
 	for _, testCase := range testCases {
-		src := &statistics.StoreLoadDetail{
-			StoreSummaryInfo: &statistics.StoreSummaryInfo{},
-		}
+		var src *statistics.StoreLoadDetail
 		if testCase.isTiFlash {
-			src.SetEngineAsTiFlash()
+			store := core.NewStoreInfoWithLabel(1, map[string]string{core.EngineKey: core.EngineTiFlash})
+			src = &statistics.StoreLoadDetail{
+				StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: store},
+			}
+		} else {
+			// Create a TiKV store for non-TiFlash cases
+			store := core.NewStoreInfoWithLabel(1, map[string]string{})
+			src = &statistics.StoreLoadDetail{
+				StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: store},
+			}
 		}
 		bs := &balanceSolver{
 			sche:          hb.(*hotScheduler),
@@ -564,6 +692,351 @@ func TestExpect(t *testing.T) {
 	}
 }
 
+func TestPlacementLoadScopePreservesExpectationGuards(t *testing.T) {
+	re := require.New(t)
+	details := make(map[uint64]*statistics.StoreLoadDetail)
+	for id, load := range map[uint64]float64{1: 10.5, 2: 9.5, 3: 10, 4: 10, 5: 100, 6: 100, 7: 200, 8: 300} {
+		pool := "other"
+		if id <= 4 || id == 7 {
+			pool = "target"
+		}
+		labels := map[string]string{"pool": pool}
+		if id >= 7 {
+			labels[core.EngineKey] = core.EngineTiFlash
+		}
+		current := statistics.StoreLoad{
+			Loads:        statistics.Loads{load, 10},
+			HotPeerCount: 1,
+			HistoryLoads: statistics.HistoryLoads{{10}, {10}},
+		}
+		details[id] = &statistics.StoreLoadDetail{
+			StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: core.NewStoreInfoWithLabel(id, labels)},
+			LoadPred:         current.ToLoadPred(utils.Write, nil),
+		}
+	}
+	bs := &balanceSolver{
+		stLoadDetail: details, firstPriority: utils.ByteDim, secondPriority: utils.KeyDim,
+		resourceTy: writePeer,
+	}
+	bs.rank = initRankV2(bs)
+	rule := &placement.Rule{LabelConstraints: []placement.LabelConstraint{
+		{Key: "pool", Op: placement.In, Values: []string{"target"}},
+	}}
+	scope := bs.getPlacementLoadScope([]*placement.Rule{rule}, true)
+	re.NotNil(scope)
+	re.Equal(float64(10), scope.expect.Loads[utils.ByteDim])
+	re.Equal([]float64{10}, scope.expect.HistoryLoads[utils.ByteDim])
+	re.InDelta(math.Sqrt(0.125)/10, scope.stddev.Loads[utils.ByteDim], 1e-9)
+	crossEngineRule := &placement.Rule{LabelConstraints: append(rule.LabelConstraints,
+		placement.LabelConstraint{Key: core.EngineKey, Op: placement.NotIn, Values: []string{"other"}})}
+	re.Equal(float64(10), bs.getPlacementLoadScope([]*placement.Rule{crossEngineRule}, true).expect.Loads[utils.ByteDim])
+	re.Equal(float64(200), bs.getPlacementLoadScope([]*placement.Rule{crossEngineRule}, false).expect.Loads[utils.ByteDim])
+	re.False(bs.checkSrcByPriorityAndTolerance(details[1].LoadPred.Min(), &scope.expect, 1.05))
+	re.False(bs.checkSrcHistoryLoadsByPriorityAndTolerance(&details[1].LoadPred.Current, &scope.expect, 1.05))
+
+	bs.cur = &solution{}
+	bs.curScope = scope
+	re.True(bs.isUniformFirstPriority(details[1]))
+	unconstrainedRule := &placement.Rule{}
+	re.Nil(bs.getPlacementLoadScope([]*placement.Rule{unconstrainedRule}, true))
+	cacheSize := len(bs.placementScopeCache)
+	re.Nil(bs.getPlacementLoadScope([]*placement.Rule{unconstrainedRule}, true))
+	re.Len(bs.placementScopeCache, cacheSize)
+
+	equivalentRule := &placement.Rule{GroupID: "other", ID: "same-scope", LabelConstraints: []placement.LabelConstraint{
+		{Key: "pool", Op: placement.In, Values: []string{"target"}},
+	}}
+	re.Same(scope, bs.getPlacementLoadScope([]*placement.Rule{equivalentRule}, true))
+	samePopulationRule := &placement.Rule{GroupID: "other", ID: "same-population", LabelConstraints: []placement.LabelConstraint{
+		{Key: "pool", Op: placement.In, Values: []string{"target", "unused"}},
+	}}
+	samePopulationScope := bs.getPlacementLoadScope([]*placement.Rule{samePopulationRule}, true)
+	re.NotSame(scope, samePopulationScope)
+	re.Equal(scope.population, samePopulationScope.population)
+	re.True(samePlacementLoadPopulation(scope, true, samePopulationScope, true))
+	re.True(samePlacementLoadPopulation(nil, true, nil, true))
+	re.False(samePlacementLoadPopulation(nil, true, nil, false))
+	re.False(samePlacementLoadPopulation(scope, true, nil, true))
+
+	otherRule := &placement.Rule{GroupID: "pd", ID: "other", LabelConstraints: []placement.LabelConstraint{
+		{Key: "pool", Op: placement.In, Values: []string{"other"}},
+	}}
+	// The scope cache is keyed on the value-derived rule constraints, not on
+	// Rule pointer identity: a different *Rule with the same constraints and
+	// engine still hits the same cached scope.
+	updatedRule := &placement.Rule{GroupID: "pd", ID: "updated", LabelConstraints: rule.LabelConstraints}
+	re.Same(scope, bs.getPlacementLoadScope([]*placement.Rule{updatedRule}, true))
+	updatedRule.LabelConstraints = otherRule.LabelConstraints
+	re.Equal(float64(100), bs.getPlacementLoadScope([]*placement.Rule{updatedRule}, true).expect.Loads[utils.ByteDim])
+
+	rules := []*placement.Rule{rule, otherRule}
+	re.Nil(bs.getPlacementLoadScope(rules, true))
+	cacheSize = len(bs.placementScopeCache)
+	re.Nil(bs.getPlacementLoadScope(rules, true))
+	re.Len(bs.placementScopeCache, cacheSize)
+
+	targetRules := []*placement.Rule{
+		{GroupID: "pd", ID: "a", LabelConstraints: rule.LabelConstraints},
+		{GroupID: "pd", ID: "b", LabelConstraints: rule.LabelConstraints},
+	}
+	otherRules := []*placement.Rule{
+		{GroupID: "pd", ID: "a", LabelConstraints: otherRule.LabelConstraints},
+		{GroupID: "pd", ID: "b", LabelConstraints: otherRule.LabelConstraints},
+	}
+	targetScope := bs.getPlacementLoadScope(targetRules, true)
+	otherScope := bs.getPlacementLoadScope(otherRules, true)
+	re.Equal(float64(10), targetScope.expect.Loads[utils.ByteDim])
+	re.Equal(float64(100), otherScope.expect.Loads[utils.ByteDim])
+	re.False(samePlacementLoadPopulation(targetScope, true, otherScope, true))
+	noMatchRule := &placement.Rule{LabelConstraints: []placement.LabelConstraint{
+		{Key: "pool", Op: placement.In, Values: []string{"missing"}},
+	}}
+	re.Nil(bs.getPlacementLoadScope([]*placement.Rule{noMatchRule}, true))
+}
+
+func TestPrepareForRegionFallsBackForStaleStoreLabels(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	scheduler, err := CreateScheduler(writeType, oc, storage.NewStorageWithMemoryBackend(), nil)
+	re.NoError(err)
+	scheduler.(*hotScheduler).conf.WriteLeaderPriorities = []string{utils.BytePriority, utils.KeyPriority}
+
+	peers := []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}}
+	region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers}, peers[0])
+	rule := &placement.Rule{
+		Role: placement.Voter,
+		LabelConstraints: []placement.LabelConstraint{
+			{Key: "pool", Op: placement.In, Values: []string{"new"}},
+		},
+	}
+	fit := &placement.RegionFit{RuleFits: []*placement.RuleFit{{Rule: rule, Peers: peers}}}
+	current := statistics.StoreLoad{
+		Loads:        statistics.Loads{20, 10},
+		HotPeerCount: 1,
+		HistoryLoads: statistics.HistoryLoads{{20}, {10}},
+	}
+	loadPred := current.ToLoadPred(utils.Write, nil)
+	loadPred.Expect = statistics.StoreLoad{
+		Loads:        statistics.Loads{10, 10},
+		HotPeerCount: 1,
+		HistoryLoads: statistics.HistoryLoads{{10}, {10}},
+	}
+	source := &statistics.StoreLoadDetail{
+		StoreSummaryInfo: &statistics.StoreSummaryInfo{
+			StoreInfo: core.NewStoreInfoWithLabel(1, map[string]string{"pool": "old"}),
+		},
+		LoadPred: loadPred,
+	}
+	bs := newBalanceSolver(scheduler.(*hotScheduler), tc, utils.Write, transferLeader)
+	bs.stLoadDetail = map[uint64]*statistics.StoreLoadDetail{
+		1: source,
+		2: {
+			StoreSummaryInfo: &statistics.StoreSummaryInfo{
+				StoreInfo: core.NewStoreInfoWithLabel(2, map[string]string{"pool": "old"}),
+			},
+			LoadPred: current.ToLoadPred(utils.Write, nil),
+		},
+	}
+
+	scope := bs.prepareForRegion(region, fit, source)
+	re.Nil(scope)
+	re.NotPanics(func() {
+		bs.sourceStoreFailure(source, scope)
+	})
+}
+
+func TestPrepareForRegionExcludesWitnessRules(t *testing.T) {
+	re := require.New(t)
+	peers := []*metapb.Peer{
+		{Id: 1, StoreId: 1},
+		{Id: 2, StoreId: 2},
+		{Id: 3, StoreId: 3, IsWitness: true},
+	}
+	region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers}, peers[0])
+	nonWitnessRule := &placement.Rule{
+		Role: placement.Voter,
+		LabelConstraints: []placement.LabelConstraint{
+			{Key: "pool", Op: placement.In, Values: []string{"regular"}},
+		},
+	}
+	witnessRule := &placement.Rule{
+		Role:      placement.Voter,
+		IsWitness: true,
+		LabelConstraints: []placement.LabelConstraint{
+			{Key: "pool", Op: placement.In, Values: []string{"witness"}},
+		},
+	}
+	fit := &placement.RegionFit{RuleFits: []*placement.RuleFit{
+		{Rule: nonWitnessRule, Peers: peers[:2]},
+		{Rule: witnessRule, Peers: peers[2:]},
+	}}
+	details := make(map[uint64]*statistics.StoreLoadDetail)
+	for id, load := range map[uint64]float64{1: 20, 2: 10, 3: 100, 4: 200} {
+		pool := "witness"
+		if id <= 2 {
+			pool = "regular"
+		}
+		current := statistics.StoreLoad{
+			Loads:        statistics.Loads{load, 10},
+			HotPeerCount: 1,
+			HistoryLoads: statistics.HistoryLoads{{load}, {10}},
+		}
+		details[id] = &statistics.StoreLoadDetail{
+			StoreSummaryInfo: &statistics.StoreSummaryInfo{
+				StoreInfo: core.NewStoreInfoWithLabel(id, map[string]string{"pool": pool}),
+			},
+			LoadPred: current.ToLoadPred(utils.Write, nil),
+		}
+	}
+	bs := &balanceSolver{opTy: transferLeader, stLoadDetail: details}
+
+	scope := bs.prepareForRegion(region, fit, details[1])
+	re.NotNil(scope)
+	re.Equal(float64(15), scope.expect.Loads[utils.ByteDim])
+	re.Equal([]float64{15}, scope.expect.HistoryLoads[utils.ByteDim])
+	re.Nil(bs.prepareForRegion(region, fit, details[3]))
+}
+
+func TestPlacementLoadPopulationHandlesStaleIndex(t *testing.T) {
+	details := map[uint64]*statistics.StoreLoadDetail{
+		1: {StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: core.NewStoreInfoWithLabel(1, nil)}},
+		2: {StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: core.NewStoreInfoWithLabel(2, nil)}},
+	}
+	bs := &balanceSolver{
+		stLoadDetail: details,
+		placementPopulationIndex: &placementPopulationIndex{
+			stores:    map[uint64]uint{1: 0, 3: 1},
+			wordCount: 1,
+		},
+	}
+
+	first := &placementLoadScope{population: bs.getPlacementLoadPopulation([]*statistics.StoreLoadDetail{details[1]})}
+	second := &placementLoadScope{population: bs.getPlacementLoadPopulation([]*statistics.StoreLoadDetail{details[2]})}
+	require.False(t, samePlacementLoadPopulation(first, true, second, true))
+	require.Len(t, bs.placementPopulationIndex.stores, len(details))
+	require.Contains(t, bs.placementPopulationIndex.stores, uint64(2))
+	require.NotContains(t, bs.placementPopulationIndex.stores, uint64(3))
+}
+
+func TestDestinationStoreFailureRejectsStoreOutsidePlacementScope(t *testing.T) {
+	withoutHistory := statistics.StoreLoad{Loads: statistics.Loads{10, 10}, HotPeerCount: 1}
+	withHistory := statistics.StoreLoad{
+		Loads:        statistics.Loads{1, 1},
+		HotPeerCount: 1,
+		HistoryLoads: statistics.HistoryLoads{{1}, {1}},
+	}
+	details := map[uint64]*statistics.StoreLoadDetail{
+		1: {
+			StoreSummaryInfo: &statistics.StoreSummaryInfo{
+				StoreInfo: core.NewStoreInfoWithLabel(1, map[string]string{"pool": "old"}),
+			},
+			LoadPred: withoutHistory.ToLoadPred(utils.Write, nil),
+		},
+		2: {
+			StoreSummaryInfo: &statistics.StoreSummaryInfo{
+				StoreInfo: core.NewStoreInfoWithLabel(2, map[string]string{"pool": "new"}),
+			},
+			LoadPred: withHistory.ToLoadPred(utils.Write, nil),
+		},
+	}
+	bs := &balanceSolver{
+		stLoadDetail:   details,
+		firstPriority:  utils.ByteDim,
+		secondPriority: utils.KeyDim,
+	}
+	bs.rank = initRankV2(bs)
+	rule := &placement.Rule{LabelConstraints: []placement.LabelConstraint{
+		{Key: "pool", Op: placement.In, Values: []string{"old"}},
+	}}
+	scope := bs.getPlacementLoadScope([]*placement.Rule{rule}, true)
+	require.NotNil(t, scope)
+	require.Empty(t, scope.expect.HistoryLoads[utils.ByteDim])
+
+	var failure string
+	require.NotPanics(t, func() {
+		failure = bs.destinationStoreFailure(details[2], scope, 1)
+	})
+	require.Equal(t, "dst-store-out-of-scope", failure)
+}
+
+func TestBeginSourcePlacementClearsPreviousEngineScope(t *testing.T) {
+	bs := &balanceSolver{
+		curScope:             &placementLoadScope{},
+		placementV2Enabled:   true,
+		placementCanRestrict: [2]bool{true, false},
+	}
+
+	require.False(t, bs.beginSourcePlacement(false))
+	require.Nil(t, bs.curScope)
+}
+
+func TestPrepareForRegionCountsEngineFallback(t *testing.T) {
+	re := require.New(t)
+	peers := []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}}
+	region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers}, peers[0])
+	rule := &placement.Rule{Role: placement.Voter, LabelConstraints: []placement.LabelConstraint{
+		{Key: "pool", Op: placement.In, Values: []string{"missing"}},
+	}}
+	fit := &placement.RegionFit{RuleFits: []*placement.RuleFit{{Rule: rule, Peers: peers}}}
+	current := statistics.StoreLoad{
+		Loads:        statistics.Loads{20, 10},
+		HotPeerCount: 1,
+		HistoryLoads: statistics.HistoryLoads{{20}, {10}},
+	}
+	source := &statistics.StoreLoadDetail{
+		StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: core.NewStoreInfoWithLabel(1, map[string]string{"pool": "old"})},
+		LoadPred:         current.ToLoadPred(utils.Write, nil),
+	}
+	bs := &balanceSolver{
+		opTy:               transferLeader,
+		stLoadDetail:       map[uint64]*statistics.StoreLoadDetail{1: source, 2: {StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: core.NewStoreInfoWithLabel(2, map[string]string{"pool": "old"})}, LoadPred: current.ToLoadPred(utils.Write, nil)}},
+		placementV2Enabled: true,
+	}
+
+	before := promtestutil.ToFloat64(hotSchedulerPlacementScopeFallbackCounter)
+	re.Nil(bs.prepareForRegion(region, fit, source))
+	re.Greater(promtestutil.ToFloat64(hotSchedulerPlacementScopeFallbackCounter), before)
+}
+
+func TestRevertRegionPlacementSafeguard(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	tc.SetEnablePlacementRules(true)
+	for id, labels := range map[uint64]map[string]string{
+		1: {"a": "yes"},
+		2: {"a": "yes", "b": "yes"},
+		3: {"a": "yes"},
+		4: {"a": "yes"},
+	} {
+		tc.AddLabelsStore(id, 1, labels)
+	}
+	re.NoError(tc.SetRule(&placement.Rule{
+		GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID,
+		Role: placement.Voter, Count: 2,
+		LabelConstraints: []placement.LabelConstraint{{Key: "a", Op: placement.In, Values: []string{"yes"}}},
+	}))
+	re.NoError(tc.SetRule(&placement.Rule{
+		GroupID: placement.DefaultGroupID, ID: "voter-b",
+		Role: placement.Voter, Count: 1,
+		LabelConstraints: []placement.LabelConstraint{{Key: "b", Op: placement.In, Values: []string{"yes"}}},
+	}))
+
+	peers := []*metapb.Peer{{Id: 2, StoreId: 2}, {Id: 3, StoreId: 3}, {Id: 4, StoreId: 4}}
+	region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers}, peers[1])
+	fit := tc.GetRuleManager().FitRegion(tc.GetBasicCluster(), region)
+	re.True(fit.IsSatisfied())
+	scheduler, err := CreateScheduler(writeType, oc, storage.NewStorageWithMemoryBackend(), nil)
+	re.NoError(err)
+	bs := newBalanceSolver(scheduler.(*hotScheduler), tc, utils.Write, movePeer)
+	bs.cur = &solution{
+		srcStore: &statistics.StoreLoadDetail{StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: tc.GetStore(1)}},
+		dstStore: &statistics.StoreLoadDetail{StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: tc.GetStore(2)}},
+	}
+	re.False(bs.isRevertRegionValid(region, fit))
+}
+
 func TestBucketFirstStat(t *testing.T) {
 	re := require.New(t)
 	testdata := []struct {
@@ -582,7 +1055,7 @@ func TestBucketFirstStat(t *testing.T) {
 			firstPriority:  utils.QueryDim,
 			secondPriority: utils.ByteDim,
 			rwTy:           utils.Write,
-			expect:         utils.RegionWriteBytes,
+			expect:         utils.RegionWriteQueryNum,
 		},
 		{
 			firstPriority:  utils.KeyDim,
@@ -593,6 +1066,18 @@ func TestBucketFirstStat(t *testing.T) {
 		{
 			firstPriority:  utils.QueryDim,
 			secondPriority: utils.ByteDim,
+			rwTy:           utils.Read,
+			expect:         utils.RegionReadQueryNum,
+		},
+		{
+			firstPriority:  utils.CPUDim,
+			secondPriority: utils.QueryDim,
+			rwTy:           utils.Read,
+			expect:         utils.RegionReadQueryNum,
+		},
+		{
+			firstPriority:  utils.CPUDim,
+			secondPriority: utils.CPUDim,
 			rwTy:           utils.Read,
 			expect:         utils.RegionReadBytes,
 		},

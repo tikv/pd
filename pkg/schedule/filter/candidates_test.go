@@ -15,9 +15,7 @@
 package filter
 
 import (
-	"math/rand"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
@@ -31,7 +29,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 // A dummy comparer for testing.
@@ -122,7 +120,7 @@ func newTestCandidates(ids ...uint64) *StoreCandidates {
 	for _, id := range ids {
 		stores = append(stores, core.NewStoreInfo(&metapb.Store{Id: id}))
 	}
-	return NewCandidates(rand.New(rand.NewSource(time.Now().UnixNano())), stores)
+	return NewCandidates(stores)
 }
 
 func check(re *require.Assertions, candidates *StoreCandidates, ids ...uint64) {

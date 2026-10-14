@@ -16,19 +16,6 @@ package controller
 
 import (
 	"time"
-
-	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
-)
-
-var (
-	requestUnitLimitTypeList map[rmpb.RequestUnitType]struct{} = map[rmpb.RequestUnitType]struct{}{
-		rmpb.RequestUnitType_RU: {},
-	}
-	requestResourceLimitTypeList map[rmpb.RawResourceType]struct{} = map[rmpb.RawResourceType]struct{}{
-		rmpb.RawResourceType_IOReadFlow:  {},
-		rmpb.RawResourceType_IOWriteFlow: {},
-		rmpb.RawResourceType_CPU:         {},
-	}
 )
 
 const (
@@ -98,7 +85,7 @@ type LocalBucketConfig struct {
 }
 
 // BaseConfig is the configuration of the resource manager controller which includes some option for client needed.
-// TODO: unified the configuration for client and server, server side in pkg/mcs/resourcemanger/config.go.
+// TODO: unified the configuration for client and server, server side in pkg/mcs/resourcemanager/config.go.
 type BaseConfig struct {
 	// EnableDegradedMode is to control whether resource control client enable degraded mode when server is disconnect.
 	DegradedModeWaitDuration Duration `toml:"degraded-mode-wait-duration" json:"degraded-mode-wait-duration"`
@@ -115,6 +102,28 @@ type BaseConfig struct {
 
 	// EnableControllerTraceLog is to control whether resource control client enable trace.
 	EnableControllerTraceLog bool `toml:"enable-controller-trace-log" json:"enable-controller-trace-log,string"`
+
+	// RUVersionPolicy configures which RU calculation version to use per keyspace.
+	RUVersionPolicy *RUVersionPolicy `toml:"ru-version-policy" json:"ru-version-policy,omitempty"`
+}
+
+// RUVersion represents an RU calculation version.
+type RUVersion = int32
+
+const (
+	// RUVersionV1 is the default RU calculation version.
+	RUVersionV1 RUVersion = 1
+	// RUVersionV2 is the new RU calculation version with detailed metrics.
+	RUVersionV2 RUVersion = 2
+)
+
+// DefaultRUVersion is the default RU calculation version used when no policy is configured.
+const DefaultRUVersion = RUVersionV1
+
+// RUVersionPolicy configures RU calculation version per keyspace.
+type RUVersionPolicy struct {
+	Default   RUVersion            `json:"default"`
+	Overrides map[uint32]RUVersion `json:"overrides,omitempty"`
 }
 
 // Config is the configuration of the resource manager controller.

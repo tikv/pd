@@ -58,8 +58,43 @@ type OpStep interface {
 	fmt.Stringer
 	ConfVerChanged(region *core.RegionInfo) uint64
 	IsFinish(region *core.RegionInfo) bool
-	CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo) error
-	Influence(opInfluence OpInfluence, region *core.RegionInfo)
+	// CheckInProgress validates that the step is still safe to keep running.
+	// needStoreHealthCheck is an opt-in, per-operator permission (see
+	// Operator.SetStoreHealthCheck) to additionally reject a target that has
+	// gone Unhealthy, on top of the unconditional Down check in
+	// validateStore. A step implementation decides *whether* it ever wants
+	// the check at all, based on whether its own conf change needs the
+	// target store to actively participate (be reachable) for raft to
+	// commit it:
+	//   - steps whose conf change is a pure role/metadata flip that the raft
+	//     group's current healthy majority can commit without the target's
+	//     participation (e.g. RemovePeer, BecomeWitness, DemoteVoter,
+	//     PromoteLearner) should ignore the parameter entirely: the change
+	//     will land whether or not the target is reachable right now, so
+	//     rejecting it provides no protection. It can also be actively
+	//     counterproductive: rejecting removal of a peer specifically
+	//     because its store is unhealthy is backwards (see #11146's
+	//     regionSource discussion), and a rejected promotion of an
+	//     already-caught-up learner is typically just silently redone by
+	//     another checker's operator that doesn't carry the flag, so the
+	//     rejection only fragments the original operator for no benefit.
+	//   - TransferLeader needs the target to actually campaign and start
+	//     serving as leader, and creates no peer and no irreversible conf
+	//     change, so rejecting it on an Unhealthy target is always safe: it
+	//     passes the parameter straight through to validateStore, and the
+	//     caller (checkStaleOperator) currently only ever asks for the check
+	//     when the step is TransferLeader.
+	//   - AddPeer/AddLearner/BecomeNonWitness need to stream a snapshot to
+	//     the target, and their command is dispatched synchronously at
+	//     operator creation, before any heartbeat-driven check can run -- so
+	//     rejecting them on an Unhealthy target can't undo a conf change
+	//     that may already be landing and would only orphan the peer. They
+	//     still pass the parameter straight through to validateStore, but
+	//     checkStaleOperator never asks them for the check today; safely
+	//     extending it to them needs an orphan-cleanup / replacement design
+	//     that is a follow-up to #11143.
+	CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo, needStoreHealthCheck bool) error
+	Influence(opInfluence *OpInfluence, region *core.RegionInfo)
 	Timeout(regionSize int64) time.Duration
 	GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *hbstream.Operation
 }
@@ -90,10 +125,19 @@ func (tl TransferLeader) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (tl TransferLeader) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo) error {
+func (tl TransferLeader) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo, needStoreHealthCheck bool) error {
 	errList := make([]error, 0, len(tl.ToStores)+1)
-	for _, storeID := range append(tl.ToStores, tl.ToStore) {
-		peer := region.GetStorePeer(tl.ToStore)
+	// Build candidates into a freshly allocated slice rather than
+	// append(tl.ToStores, tl.ToStore): ToStores is typically constructed by
+	// repeated append (see Builder.targetLeaderStoreIDs), which usually
+	// leaves it with spare capacity, so appending directly onto it here
+	// would write into (and alias) the caller's backing array across every
+	// call to this step's CheckInProgress.
+	candidates := make([]uint64, 0, len(tl.ToStores)+1)
+	candidates = append(candidates, tl.ToStores...)
+	candidates = append(candidates, tl.ToStore)
+	for _, storeID := range candidates {
+		peer := region.GetStorePeer(storeID)
 		if peer == nil {
 			errList = append(errList, errors.New("peer does not existed"))
 			continue
@@ -102,7 +146,7 @@ func (tl TransferLeader) CheckInProgress(ci *core.BasicCluster, config config.Sh
 			errList = append(errList, errors.New("peer already is a learner"))
 			continue
 		}
-		if err := validateStore(ci, config, storeID); err != nil {
+		if err := validateStore(ci, config, storeID, needStoreHealthCheck); err != nil {
 			errList = append(errList, err)
 			continue
 		}
@@ -112,7 +156,7 @@ func (tl TransferLeader) CheckInProgress(ci *core.BasicCluster, config config.Sh
 }
 
 // Influence calculates the store difference that current step makes.
-func (tl TransferLeader) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
+func (tl TransferLeader) Influence(opInfluence *OpInfluence, region *core.RegionInfo) {
 	from := opInfluence.GetStoreInfluence(tl.FromStore)
 	to := opInfluence.GetStoreInfluence(tl.ToStore)
 
@@ -120,6 +164,15 @@ func (tl TransferLeader) Influence(opInfluence OpInfluence, region *core.RegionI
 	from.LeaderCount--
 	to.LeaderSize += region.GetApproximateSize()
 	to.LeaderCount++
+
+	// TiKV chooses the receiver, so reserve a full cost for every possible target.
+	to.AddStepCost(storelimit.TransferLeaderIn, storelimit.RegionInfluence[storelimit.TransferLeaderIn])
+	for i, storeID := range tl.ToStores {
+		if storeID == tl.ToStore || slices.Contains(tl.ToStores[:i], storeID) {
+			continue
+		}
+		opInfluence.GetStoreInfluence(storeID).AddStepCost(storelimit.TransferLeaderIn, storelimit.RegionInfluence[storelimit.TransferLeaderIn])
+	}
 }
 
 // Timeout returns duration that current step may take.
@@ -178,7 +231,7 @@ func (ap AddPeer) IsFinish(region *core.RegionInfo) bool {
 }
 
 // Influence calculates the store difference that current step makes.
-func (ap AddPeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
+func (ap AddPeer) Influence(opInfluence *OpInfluence, region *core.RegionInfo) {
 	to := opInfluence.GetStoreInfluence(ap.ToStore)
 
 	regionSize := region.GetApproximateSize()
@@ -191,12 +244,12 @@ func (ap AddPeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	if ap.IsLightWeight || ap.IsWitness {
 		return
 	}
-	to.AdjustStepCost(storelimit.AddPeer, regionSize)
+	to.AdjustStepCost(storelimit.AddPeer, regionSize, region.GetApproximateKeys())
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (ap AddPeer) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo) error {
-	if err := validateStore(ci, config, ap.ToStore); err != nil {
+func (ap AddPeer) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo, needStoreHealthCheck bool) error {
+	if err := validateStore(ci, config, ap.ToStore, needStoreHealthCheck); err != nil {
 		return err
 	}
 	peer := region.GetStorePeer(ap.ToStore)
@@ -249,8 +302,10 @@ func (bw BecomeWitness) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (bw BecomeWitness) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo) error {
-	if err := validateStore(ci, config, bw.StoreID); err != nil {
+func (bw BecomeWitness) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo, _ bool) error {
+	// BecomeWitness sheds data off the store rather than adding to it, so unlike
+	// AddPeer/AddLearner/BecomeNonWitness it never needs the extra health check.
+	if err := validateStore(ci, config, bw.StoreID, false); err != nil {
 		return err
 	}
 	peer := region.GetStorePeer(bw.StoreID)
@@ -261,13 +316,13 @@ func (bw BecomeWitness) CheckInProgress(ci *core.BasicCluster, config config.Sha
 }
 
 // Influence calculates the store difference that current step makes.
-func (bw BecomeWitness) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
+func (bw BecomeWitness) Influence(opInfluence *OpInfluence, region *core.RegionInfo) {
 	to := opInfluence.GetStoreInfluence(bw.StoreID)
 
 	regionSize := region.GetApproximateSize()
 	to.WitnessCount += 1
 	to.RegionSize -= regionSize
-	to.AdjustStepCost(storelimit.RemovePeer, regionSize)
+	to.AdjustStepCost(storelimit.RemovePeer, regionSize, region.GetApproximateKeys())
 }
 
 // Timeout returns duration that current step may take.
@@ -311,8 +366,8 @@ func (bn BecomeNonWitness) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (bn BecomeNonWitness) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo) error {
-	if err := validateStore(ci, config, bn.StoreID); err != nil {
+func (bn BecomeNonWitness) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo, needStoreHealthCheck bool) error {
+	if err := validateStore(ci, config, bn.StoreID, needStoreHealthCheck); err != nil {
 		return err
 	}
 	peer := region.GetStorePeer(bn.StoreID)
@@ -323,13 +378,13 @@ func (bn BecomeNonWitness) CheckInProgress(ci *core.BasicCluster, config config.
 }
 
 // Influence calculates the store difference that current step makes.
-func (bn BecomeNonWitness) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
+func (bn BecomeNonWitness) Influence(opInfluence *OpInfluence, region *core.RegionInfo) {
 	to := opInfluence.GetStoreInfluence(bn.StoreID)
 
 	regionSize := region.GetApproximateSize()
 	to.WitnessCount -= 1
 	to.RegionSize += regionSize
-	to.AdjustStepCost(storelimit.AddPeer, regionSize)
+	to.AdjustStepCost(storelimit.AddPeer, regionSize, region.GetApproximateKeys())
 
 	if bn.SendStore == 0 {
 		return
@@ -397,14 +452,14 @@ func (bsw BatchSwitchWitness) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (bsw BatchSwitchWitness) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo) error {
+func (bsw BatchSwitchWitness) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo, needStoreHealthCheck bool) error {
 	for _, w := range bsw.ToWitnesses {
-		if err := w.CheckInProgress(ci, config, region); err != nil {
+		if err := w.CheckInProgress(ci, config, region, needStoreHealthCheck); err != nil {
 			return err
 		}
 	}
 	for _, nw := range bsw.ToNonWitnesses {
-		if err := nw.CheckInProgress(ci, config, region); err != nil {
+		if err := nw.CheckInProgress(ci, config, region, needStoreHealthCheck); err != nil {
 			return err
 		}
 	}
@@ -412,7 +467,7 @@ func (bsw BatchSwitchWitness) CheckInProgress(ci *core.BasicCluster, config conf
 }
 
 // Influence calculates the store difference that current step makes.
-func (bsw BatchSwitchWitness) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
+func (bsw BatchSwitchWitness) Influence(opInfluence *OpInfluence, region *core.RegionInfo) {
 	for _, w := range bsw.ToWitnesses {
 		w.Influence(opInfluence, region)
 	}
@@ -480,8 +535,8 @@ func (al AddLearner) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (al AddLearner) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo) error {
-	if err := validateStore(ci, config, al.ToStore); err != nil {
+func (al AddLearner) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo, needStoreHealthCheck bool) error {
+	if err := validateStore(ci, config, al.ToStore, needStoreHealthCheck); err != nil {
 		return err
 	}
 	peer := region.GetStorePeer(al.ToStore)
@@ -498,7 +553,7 @@ func (al AddLearner) CheckInProgress(ci *core.BasicCluster, config config.Shared
 }
 
 // Influence calculates the store difference that current step makes.
-func (al AddLearner) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
+func (al AddLearner) Influence(opInfluence *OpInfluence, region *core.RegionInfo) {
 	to := opInfluence.GetStoreInfluence(al.ToStore)
 	regionSize := region.GetApproximateSize()
 	if al.IsWitness {
@@ -510,7 +565,7 @@ func (al AddLearner) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 	if al.IsLightWeight || al.IsWitness {
 		return
 	}
-	to.AdjustStepCost(storelimit.AddPeer, regionSize)
+	to.AdjustStepCost(storelimit.AddPeer, regionSize, region.GetApproximateKeys())
 	if al.SendStore == 0 {
 		return
 	}
@@ -566,7 +621,7 @@ func (pl PromoteLearner) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (pl PromoteLearner) CheckInProgress(_ *core.BasicCluster, _ config.SharedConfigProvider, region *core.RegionInfo) error {
+func (pl PromoteLearner) CheckInProgress(_ *core.BasicCluster, _ config.SharedConfigProvider, region *core.RegionInfo, _ bool) error {
 	peer := region.GetStorePeer(pl.ToStore)
 	if peer.GetId() != pl.PeerID {
 		return errors.New("peer does not exist")
@@ -575,7 +630,7 @@ func (pl PromoteLearner) CheckInProgress(_ *core.BasicCluster, _ config.SharedCo
 }
 
 // Influence calculates the store difference that current step makes.
-func (PromoteLearner) Influence(OpInfluence, *core.RegionInfo) {}
+func (PromoteLearner) Influence(*OpInfluence, *core.RegionInfo) {}
 
 // Timeout returns duration that current step may take.
 func (PromoteLearner) Timeout(regionSize int64) time.Duration {
@@ -618,7 +673,7 @@ func (rp RemovePeer) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (rp RemovePeer) CheckInProgress(_ *core.BasicCluster, _ config.SharedConfigProvider, region *core.RegionInfo) error {
+func (rp RemovePeer) CheckInProgress(_ *core.BasicCluster, _ config.SharedConfigProvider, region *core.RegionInfo, _ bool) error {
 	if rp.FromStore == region.GetLeader().GetStoreId() {
 		return errors.New("cannot remove leader peer")
 	}
@@ -626,7 +681,7 @@ func (rp RemovePeer) CheckInProgress(_ *core.BasicCluster, _ config.SharedConfig
 }
 
 // Influence calculates the store difference that current step makes.
-func (rp RemovePeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
+func (rp RemovePeer) Influence(opInfluence *OpInfluence, region *core.RegionInfo) {
 	from := opInfluence.GetStoreInfluence(rp.FromStore)
 
 	regionSize := region.GetStorePeerApproximateSize(rp.FromStore)
@@ -645,7 +700,7 @@ func (rp RemovePeer) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 	if rp.IsDownStore && regionSize > storelimit.SmallRegionThreshold {
 		regionSize = storelimit.SmallRegionThreshold
 	}
-	from.AdjustStepCost(storelimit.RemovePeer, regionSize)
+	from.AdjustStepCost(storelimit.RemovePeer, regionSize, region.GetStorePeerApproximateKeys(rp.FromStore))
 }
 
 // Timeout returns duration that current step may take.
@@ -692,12 +747,12 @@ func (mr MergeRegion) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (MergeRegion) CheckInProgress(*core.BasicCluster, config.SharedConfigProvider, *core.RegionInfo) error {
+func (MergeRegion) CheckInProgress(*core.BasicCluster, config.SharedConfigProvider, *core.RegionInfo, bool) error {
 	return nil
 }
 
 // Influence calculates the store difference that current step makes.
-func (mr MergeRegion) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
+func (mr MergeRegion) Influence(opInfluence *OpInfluence, region *core.RegionInfo) {
 	if mr.IsPassive {
 		for _, peer := range region.GetPeers() {
 			o := opInfluence.GetStoreInfluence(peer.GetStoreId())
@@ -749,7 +804,7 @@ func (sr SplitRegion) IsFinish(region *core.RegionInfo) bool {
 }
 
 // Influence calculates the store difference that current step makes.
-func (SplitRegion) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
+func (SplitRegion) Influence(opInfluence *OpInfluence, region *core.RegionInfo) {
 	for _, peer := range region.GetPeers() {
 		inf := opInfluence.GetStoreInfluence(peer.GetStoreId())
 		inf.RegionCount++
@@ -760,7 +815,7 @@ func (SplitRegion) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (SplitRegion) CheckInProgress(*core.BasicCluster, config.SharedConfigProvider, *core.RegionInfo) error {
+func (SplitRegion) CheckInProgress(*core.BasicCluster, config.SharedConfigProvider, *core.RegionInfo, bool) error {
 	return nil
 }
 
@@ -885,7 +940,7 @@ func (cpe ChangePeerV2Enter) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (cpe ChangePeerV2Enter) CheckInProgress(_ *core.BasicCluster, _ config.SharedConfigProvider, region *core.RegionInfo) error {
+func (cpe ChangePeerV2Enter) CheckInProgress(_ *core.BasicCluster, _ config.SharedConfigProvider, region *core.RegionInfo, _ bool) error {
 	inJointState, notInJointState := false, false
 	for _, pl := range cpe.PromoteLearners {
 		peer := region.GetStorePeer(pl.ToStore)
@@ -933,7 +988,7 @@ func (cpe ChangePeerV2Enter) CheckInProgress(_ *core.BasicCluster, _ config.Shar
 }
 
 // Influence calculates the store difference that current step makes.
-func (ChangePeerV2Enter) Influence(OpInfluence, *core.RegionInfo) {}
+func (ChangePeerV2Enter) Influence(*OpInfluence, *core.RegionInfo) {}
 
 // Timeout returns duration that current step may take.
 func (cpe ChangePeerV2Enter) Timeout(regionSize int64) time.Duration {
@@ -1014,7 +1069,7 @@ func (cpl ChangePeerV2Leave) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (cpl ChangePeerV2Leave) CheckInProgress(_ *core.BasicCluster, _ config.SharedConfigProvider, region *core.RegionInfo) error {
+func (cpl ChangePeerV2Leave) CheckInProgress(_ *core.BasicCluster, _ config.SharedConfigProvider, region *core.RegionInfo, _ bool) error {
 	inJointState, notInJointState, demoteLeader := false, false, false
 	leaderStoreID := region.GetLeader().GetStoreId()
 
@@ -1073,7 +1128,7 @@ func (cpl ChangePeerV2Leave) CheckInProgress(_ *core.BasicCluster, _ config.Shar
 }
 
 // Influence calculates the store difference that current step makes.
-func (ChangePeerV2Leave) Influence(OpInfluence, *core.RegionInfo) {}
+func (ChangePeerV2Leave) Influence(*OpInfluence, *core.RegionInfo) {}
 
 // Timeout returns duration that current step may take.
 func (cpl ChangePeerV2Leave) Timeout(regionSize int64) time.Duration {
@@ -1092,10 +1147,13 @@ func (ChangePeerV2Leave) GetCmd(_ *core.RegionInfo, useConfChangeV2 bool) *hbstr
 	}
 }
 
-func validateStore(ci *core.BasicCluster, config config.SharedConfigProvider, id uint64) error {
+func validateStore(ci *core.BasicCluster, config config.SharedConfigProvider, id uint64, needStoreHealthCheck bool) error {
 	store := ci.GetStore(id)
 	if store == nil {
 		return errors.New("target store does not exist")
+	}
+	if needStoreHealthCheck && store.IsUnhealthy() {
+		return errors.New("target store is unhealthy")
 	}
 	if store.DownTime() > config.GetMaxStoreDownTime() {
 		return errors.New("target store is down")

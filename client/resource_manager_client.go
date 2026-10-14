@@ -23,10 +23,10 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/pingcap/errors"
-	"github.com/pingcap/kvproto/pkg/meta_storagepb"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/client/clients/metastorage"
 	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
@@ -62,7 +62,7 @@ type ResourceManagerClient interface {
 	DeleteResourceGroup(ctx context.Context, resourceGroupName string) (string, error)
 	LoadResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup, int64, error)
 	AcquireTokenBuckets(ctx context.Context, request *rmpb.TokenBucketsRequest) ([]*rmpb.TokenBucketResponse, error)
-	Watch(ctx context.Context, key []byte, opts ...opt.MetaStorageOption) (chan []*meta_storagepb.Event, error)
+	Watch(ctx context.Context, key []byte, opts ...opt.MetaStorageOption) (chan *metastorage.WatchResponse, error)
 }
 
 // GetResourceGroupOp represents available options when getting resource group.
@@ -78,8 +78,8 @@ func WithRUStats(op *GetResourceGroupOp) {
 	op.withRUStats = true
 }
 
-// resourceManagerClient gets the ResourceManager client of current PD leader.
-func (c *innerClient) resourceManagerClient() (rmpb.ResourceManagerClient, error) {
+// resourceManagerWriteClient gets the ResourceManager client from current PD leader.
+func (c *innerClient) resourceManagerWriteClient() (rmpb.ResourceManagerClient, error) {
 	cc, err := c.getOrCreateGRPCConn()
 	if err != nil {
 		return nil, err
@@ -87,9 +87,29 @@ func (c *innerClient) resourceManagerClient() (rmpb.ResourceManagerClient, error
 	return rmpb.NewResourceManagerClient(cc), nil
 }
 
+// resourceManagerReadClient gets the ResourceManager client for read RPCs.
+func (c *innerClient) resourceManagerReadClient() (rmpb.ResourceManagerClient, error) {
+	if ds := c.getResourceManagerDiscovery(); ds != nil {
+		// If the discovery has not established the connection, using PD server connection.
+		if cc := ds.GetConn(); cc != nil {
+			return rmpb.NewResourceManagerClient(cc), nil
+		}
+	}
+	cc, err := c.getOrCreateGRPCConn()
+	if err != nil {
+		return nil, err
+	}
+	return rmpb.NewResourceManagerClient(cc), nil
+}
+
+// resourceManagerTokenClient gets the ResourceManager client for token RPCs.
+func (c *innerClient) resourceManagerTokenClient() (rmpb.ResourceManagerClient, error) {
+	return c.resourceManagerReadClient()
+}
+
 // ListResourceGroups loads and returns all metadata of resource groups.
 func (c *client) ListResourceGroups(ctx context.Context, ops ...GetResourceGroupOption) ([]*rmpb.ResourceGroup, error) {
-	cc, err := c.inner.resourceManagerClient()
+	cc, err := c.inner.resourceManagerReadClient()
 	if err != nil {
 		return nil, err
 	}
@@ -99,13 +119,12 @@ func (c *client) ListResourceGroups(ctx context.Context, ops ...GetResourceGroup
 	}
 	req := &rmpb.ListResourceGroupsRequest{
 		WithRuStats: getOp.withRUStats,
-		KeyspaceId: &rmpb.KeyspaceIDValue{
-			Value: c.inner.keyspaceID,
-		},
+		KeyspaceId:  &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: c.inner.keyspaceID}},
 	}
 	resp, err := cc.ListResourceGroups(ctx, req)
 	if err != nil {
 		c.inner.gRPCErrorHandler(err)
+		c.inner.resourceManagerErrorHandler(err)
 		return nil, errs.ErrClientListResourceGroup.FastGenByArgs(err.Error())
 	}
 	resErr := resp.GetError()
@@ -117,7 +136,7 @@ func (c *client) ListResourceGroups(ctx context.Context, ops ...GetResourceGroup
 
 // GetResourceGroup implements the ResourceManagerClient interface.
 func (c *client) GetResourceGroup(ctx context.Context, resourceGroupName string, ops ...GetResourceGroupOption) (*rmpb.ResourceGroup, error) {
-	cc, err := c.inner.resourceManagerClient()
+	cc, err := c.inner.resourceManagerReadClient()
 	if err != nil {
 		return nil, err
 	}
@@ -128,14 +147,22 @@ func (c *client) GetResourceGroup(ctx context.Context, resourceGroupName string,
 	req := &rmpb.GetResourceGroupRequest{
 		ResourceGroupName: resourceGroupName,
 		WithRuStats:       getOp.withRUStats,
-		KeyspaceId: &rmpb.KeyspaceIDValue{
-			Value: c.inner.keyspaceID,
-		},
+		KeyspaceId:        &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: c.inner.keyspaceID}},
 	}
 	resp, err := cc.GetResourceGroup(ctx, req)
 	if err != nil {
 		c.inner.gRPCErrorHandler(err)
-		return nil, &errs.ErrClientGetResourceGroup{ResourceGroupName: resourceGroupName, Cause: err.Error()}
+		c.inner.resourceManagerErrorHandler(err)
+		causeErr := err
+		switch ctxErr := ctx.Err(); ctxErr {
+		case context.Canceled, context.DeadlineExceeded:
+			causeErr = ctxErr
+		}
+		return nil, &errs.ErrClientGetResourceGroup{
+			ResourceGroupName: resourceGroupName,
+			Cause:             err.Error(),
+			Err:               causeErr,
+		}
 	}
 	resErr := resp.GetError()
 	if resErr != nil {
@@ -155,18 +182,16 @@ func (c *client) ModifyResourceGroup(ctx context.Context, metaGroup *rmpb.Resour
 }
 
 func (c *client) putResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup, typ actionType) (string, error) {
-	cc, err := c.inner.resourceManagerClient()
+	cc, err := c.inner.resourceManagerWriteClient()
 	if err != nil {
 		return "", err
 	}
 	// ensure to use the keyspace ID of the inner client
 	if metaGroup.KeyspaceId == nil {
-		metaGroup.KeyspaceId = &rmpb.KeyspaceIDValue{
-			Value: c.inner.keyspaceID,
-		}
-	} else if metaGroup.KeyspaceId.Value != c.inner.keyspaceID {
+		metaGroup.KeyspaceId = &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: c.inner.keyspaceID}}
+	} else if metaGroup.KeyspaceId.GetValue() != c.inner.keyspaceID {
 		return "", errs.ErrClientPutResourceGroupMismatchKeyspaceID.FastGenByArgs(
-			metaGroup.KeyspaceId.Value, c.inner.keyspaceID)
+			metaGroup.KeyspaceId.GetValue(), c.inner.keyspaceID)
 	}
 	req := &rmpb.PutResourceGroupRequest{
 		Group: metaGroup,
@@ -191,15 +216,13 @@ func (c *client) putResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceG
 
 // DeleteResourceGroup implements the ResourceManagerClient interface.
 func (c *client) DeleteResourceGroup(ctx context.Context, resourceGroupName string) (string, error) {
-	cc, err := c.inner.resourceManagerClient()
+	cc, err := c.inner.resourceManagerWriteClient()
 	if err != nil {
 		return "", err
 	}
 	req := &rmpb.DeleteResourceGroupRequest{
 		ResourceGroupName: resourceGroupName,
-		KeyspaceId: &rmpb.KeyspaceIDValue{
-			Value: c.inner.keyspaceID,
-		},
+		KeyspaceId:        &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: c.inner.keyspaceID}},
 	}
 	resp, err := cc.DeleteResourceGroup(ctx, req)
 	if err != nil {
@@ -289,6 +312,12 @@ type tokenDispatcher struct {
 	tokenBatchController *tokenBatchController
 }
 
+func (c *innerClient) setTokenConnectionCancel(cancel context.CancelFunc) {
+	c.tokenConnectionMu.Lock()
+	c.tokenConnectionCancel = cancel
+	c.tokenConnectionMu.Unlock()
+}
+
 type resourceManagerConnectionContext struct {
 	stream rmpb.ResourceManager_AcquireTokenBucketsClient
 	ctx    context.Context
@@ -320,56 +349,73 @@ func (c *innerClient) handleResourceTokenDispatcher(dispatcherCtx context.Contex
 		c.wg.Done()
 	}()
 	var (
-		connection   resourceManagerConnectionContext
-		firstRequest *tokenRequest
-		stream       rmpb.ResourceManager_AcquireTokenBucketsClient
-		streamCtx    context.Context
-		toReconnect  bool
-		err          error
+		connection     resourceManagerConnectionContext
+		currentRequest *tokenRequest
+		stream         rmpb.ResourceManager_AcquireTokenBucketsClient
+		streamCtx      context.Context
+		toReconnect    bool
+		err            error
 	)
 	if err = c.tryResourceManagerConnect(dispatcherCtx, &connection); err != nil {
 		log.Warn("[resource_manager] get token stream error", zap.Error(err))
+	} else {
+		c.setTokenConnectionCancel(connection.cancel)
 	}
+tokenRequestLoop:
 	for {
 		// Fetch the request from the channel.
 		select {
 		case <-dispatcherCtx.Done():
 			return
-		case firstRequest = <-tbc.tokenRequestCh:
+		case currentRequest = <-tbc.tokenRequestCh:
 		}
-		// Try to get a stream connection.
-		stream, streamCtx = connection.stream, connection.ctx
-		select {
-		case <-c.updateTokenConnectionCh:
-			toReconnect = true
-		default:
-			toReconnect = stream == nil
-		}
-		// If the stream is nil or the leader has changed, try to reconnect.
-		if toReconnect {
-			connection.reset()
-			if err := c.tryResourceManagerConnect(dispatcherCtx, &connection); err != nil {
-				log.Error("[resource_manager] try to connect token leader failed", errs.ZapError(err))
-			}
-			log.Info("[resource_manager] token leader may change, try to reconnect the stream")
+		for {
+			// Try to get a stream connection.
 			stream, streamCtx = connection.stream, connection.ctx
+			select {
+			case <-c.updateTokenConnectionCh:
+				toReconnect = true
+			default:
+				toReconnect = stream == nil
+			}
+			// If the stream is nil or the leader has changed, try to reconnect.
+			if toReconnect {
+				c.setTokenConnectionCancel(nil)
+				connection.reset()
+				if err := c.tryResourceManagerConnect(dispatcherCtx, &connection); err != nil {
+					log.Error("[resource_manager] try to connect token leader failed", errs.ZapError(err))
+				} else {
+					c.setTokenConnectionCancel(connection.cancel)
+				}
+				log.Info("[resource_manager] token leader may change, try to reconnect the stream")
+				stream, streamCtx = connection.stream, connection.ctx
+				if stream != nil {
+					continue
+				}
+			}
+			// If the stream is still nil, return an error.
+			if stream == nil {
+				currentRequest.done <- errors.Errorf("failed to get the stream connection")
+				c.serviceDiscovery.ScheduleCheckMemberChanged()
+				connection.reset()
+				continue tokenRequestLoop
+			}
+			select {
+			case <-streamCtx.Done():
+				c.setTokenConnectionCancel(nil)
+				connection.reset()
+				log.Info("[resource_manager] token stream is canceled")
+				if dispatcherCtx.Err() != nil {
+					return
+				}
+				continue
+			default:
+			}
+			break
 		}
-		// If the stream is still nil, return an error.
-		if stream == nil {
-			firstRequest.done <- errors.Errorf("failed to get the stream connection")
+		if err = c.processTokenRequests(stream, currentRequest); err != nil {
 			c.serviceDiscovery.ScheduleCheckMemberChanged()
-			connection.reset()
-			continue
-		}
-		select {
-		case <-streamCtx.Done():
-			connection.reset()
-			log.Info("[resource_manager] token stream is canceled")
-			continue
-		default:
-		}
-		if err = c.processTokenRequests(stream, firstRequest); err != nil {
-			c.serviceDiscovery.ScheduleCheckMemberChanged()
+			c.setTokenConnectionCancel(nil)
 			connection.reset()
 			log.Info("[resource_manager] token request error", zap.Error(err))
 		}
@@ -386,6 +432,7 @@ func (c *innerClient) processTokenRequests(stream rmpb.ResourceManager_AcquireTo
 	resp, err := stream.Recv()
 	if err != nil {
 		c.gRPCErrorHandler(err)
+		c.resourceManagerErrorHandler(err)
 		err = errors.WithStack(err)
 		t.done <- err
 		return err
@@ -406,7 +453,7 @@ func (c *innerClient) tryResourceManagerConnect(ctx context.Context, connection 
 	ticker := time.NewTicker(constants.RetryInterval)
 	defer ticker.Stop()
 	for range constants.MaxRetryTimes {
-		cc, err := c.resourceManagerClient()
+		cc, err := c.resourceManagerTokenClient()
 		if err != nil {
 			continue
 		}
@@ -417,6 +464,9 @@ func (c *innerClient) tryResourceManagerConnect(ctx context.Context, connection 
 			connection.ctx = cctx
 			connection.stream = stream
 			return nil
+		}
+		if err != nil {
+			c.resourceManagerErrorHandler(err)
 		}
 		cancel()
 		select {

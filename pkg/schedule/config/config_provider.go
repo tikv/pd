@@ -69,6 +69,7 @@ type SchedulerConfigProvider interface {
 
 	GetScheduleConfig() *ScheduleConfig
 	SetScheduleConfig(*ScheduleConfig)
+	SetSchedulers(SchedulerConfigs)
 }
 
 // CheckerConfigProvider is the interface for checker configurations.
@@ -89,12 +90,16 @@ type CheckerConfigProvider interface {
 	GetMaxMergeRegionSize() uint64
 	GetMaxMergeRegionKeys() uint64
 	GetReplicaScheduleLimit() uint64
+	GetRegionScheduleLimit() uint64
 }
 
 // SharedConfigProvider is the interface for shared configurations.
 type SharedConfigProvider interface {
 	GetMaxReplicas() int
 	IsPlacementRulesEnabled() bool
+	GetAffinityScheduleLimit() uint64
+	GetSplitScatterScheduleLimit() uint64
+	GetMaxAffinityMergeRegionSize() uint64
 	GetMaxSnapshotCount() uint64
 	GetMaxPendingPeerCount() uint64
 	GetLowSpaceRatio() float64
@@ -144,4 +149,5 @@ type StoreConfigProvider interface {
 	CheckRegionKeys(uint64, uint64) error
 	IsEnableRegionBucket() bool
 	IsRaftKV2() bool
+	GetUnifiedReadPoolMaxThreadCount() uint64
 }

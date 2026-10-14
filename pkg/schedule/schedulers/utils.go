@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/utils/keyutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
 const (
@@ -49,7 +50,7 @@ type solver struct {
 	*plan.BalanceSchedulerPlan
 	sche.SchedulerCluster
 	kind              constant.ScheduleKind
-	opInfluence       operator.OpInfluence
+	opInfluence       *operator.OpInfluence
 	tolerantSizeRatio float64
 	tolerantSource    int64
 	fit               *placement.RegionFit
@@ -58,7 +59,7 @@ type solver struct {
 	targetScore float64
 }
 
-func newSolver(basePlan *plan.BalanceSchedulerPlan, kind constant.ScheduleKind, cluster sche.SchedulerCluster, opInfluence operator.OpInfluence) *solver {
+func newSolver(basePlan *plan.BalanceSchedulerPlan, kind constant.ScheduleKind, cluster sche.SchedulerCluster, opInfluence *operator.OpInfluence) *solver {
 	return &solver{
 		BalanceSchedulerPlan: basePlan,
 		SchedulerCluster:     cluster,
@@ -108,7 +109,7 @@ func (p *solver) sourceStoreScore(scheduleName string) float64 {
 		sourceDelta := influence - tolerantResource
 		score = p.Source.LeaderScore(p.kind.Policy, sourceDelta)
 	case constant.RegionKind:
-		sourceDelta := influence*influenceAmp - tolerantResource
+		sourceDelta := influence*influenceAmp - p.getRegionScoreDelta()
 		score = p.Source.RegionScore(p.GetSchedulerConfig().GetRegionScoreFormulaVersion(), p.GetSchedulerConfig().GetHighSpaceRatio(), p.GetSchedulerConfig().GetLowSpaceRatio(), sourceDelta)
 	case constant.WitnessKind:
 		sourceDelta := influence - tolerantResource
@@ -138,7 +139,7 @@ func (p *solver) targetStoreScore(scheduleName string) float64 {
 		targetDelta := influence + tolerantResource
 		score = p.Target.LeaderScore(p.kind.Policy, targetDelta)
 	case constant.RegionKind:
-		targetDelta := influence*influenceAmp + tolerantResource
+		targetDelta := influence*influenceAmp + p.getRegionScoreDelta()
 		score = p.Target.RegionScore(p.GetSchedulerConfig().GetRegionScoreFormulaVersion(), p.GetSchedulerConfig().GetHighSpaceRatio(), p.GetSchedulerConfig().GetLowSpaceRatio(), targetDelta)
 	case constant.WitnessKind:
 		targetDelta := influence + tolerantResource
@@ -159,12 +160,20 @@ func (p *solver) shouldBalance(scheduleName string) bool {
 	shouldBalance := p.sourceScore > p.targetScore
 
 	if !shouldBalance && log.GetLevel() <= zap.DebugLevel {
+		// For RegionKind, the delta actually applied to sourceScore/targetScore
+		// is getRegionScoreDelta(), not the bare tolerant margin, whenever the
+		// candidate region is larger than that margin — log the value that
+		// actually drove the decision instead of the one that may not have.
+		tolerantResource := p.getTolerantResource()
+		if p.kind.Resource == constant.RegionKind {
+			tolerantResource = p.getRegionScoreDelta()
+		}
 		log.Debug("skip balance "+p.kind.Resource.String(),
 			zap.String("scheduler", scheduleName), zap.Uint64("region-id", p.Region.GetID()), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID),
 			zap.Int64("source-size", p.Source.GetRegionSize()), zap.Float64("source-score", p.sourceScore),
 			zap.Int64("target-size", p.Target.GetRegionSize()), zap.Float64("target-score", p.targetScore),
 			zap.Int64("average-region-size", p.GetAverageRegionSize()),
-			zap.Int64("tolerant-resource", p.getTolerantResource()))
+			zap.Int64("tolerant-resource", tolerantResource))
 	}
 	return shouldBalance
 }
@@ -181,6 +190,19 @@ func (p *solver) getTolerantResource() int64 {
 		p.tolerantSource = int64(float64(regionSize) * p.tolerantSizeRatio)
 	}
 	return p.tolerantSource
+}
+
+// getRegionScoreDelta returns the delta used to score a candidate move for
+// RegionKind balancing. It is the larger of the general tolerant margin and
+// the candidate region's own size, applied symmetrically to both the source
+// and target side, so a projected post-move comparison isn't skewed by one
+// side knowing the candidate's size and the other not.
+func (p *solver) getRegionScoreDelta() int64 {
+	delta := p.getTolerantResource()
+	if p.Region != nil {
+		delta = max(delta, p.Region.GetApproximateSize())
+	}
+	return delta
 }
 
 func adjustTolerantRatio(cluster sche.SchedulerCluster, kind constant.ScheduleKind) float64 {
@@ -404,4 +426,97 @@ func pauseAndResumeLeaderTransfer[T any](cluster *core.BasicCluster, direction c
 			log.Error("pause leader transfer failed", zap.Uint64("store-id", id), zap.String("direction", direction.String()), errs.ZapError(err))
 		}
 	}
+}
+
+// getCountThreshold calculates the count threshold for a given key range and rule.
+func getCountThreshold(c sche.SchedulerCluster, stores []*core.StoreInfo, store *core.StoreInfo, kr keyutil.KeyRange, rule core.Rule) float64 {
+	start := time.Now()
+	cfg := c.GetSchedulerConfig()
+	if !cfg.IsPlacementRulesEnabled() {
+		var regionCount int
+		var weight float64
+		if rule == core.LeaderScatter {
+			regionCount = c.GetRegionCount(kr.StartKey, kr.EndKey)
+			weight = 1
+		} else {
+			regionCount = c.GetRegionCount(kr.StartKey, kr.EndKey) * cfg.GetMaxReplicas()
+			weight = core.GetStoreTopoWeight(store, stores, cfg.GetLocationLabels(), cfg.GetMaxReplicas())
+		}
+
+		return float64(regionCount) * weight
+	}
+
+	keys := c.GetRuleManager().GetSplitKeys(kr.StartKey, kr.EndKey)
+	if len(keys) == 0 {
+		return calculateRangeCount(c, stores, store, kr.StartKey, kr.EndKey, rule)
+	}
+
+	storeRegionCount := 0.0
+	startKey := kr.StartKey
+	for _, key := range keys {
+		endKey := key
+		storeRegionCount += calculateRangeCount(c, stores, store, startKey, endKey, rule)
+		startKey = endKey
+	}
+	// the range from the last split key to the last key
+	storeRegionCount += calculateRangeCount(c, stores, store, startKey, kr.EndKey, rule)
+	log.Debug("threshold calculation time", zap.Duration("cost", time.Since(start)))
+	return storeRegionCount
+}
+
+func isSatisfyRole(r core.Rule, role placement.PeerRoleType) bool {
+	switch r {
+	case core.LeaderScatter:
+		return role == placement.Leader || role == placement.Voter
+	case core.LearnerScatter:
+		return role == placement.Learner
+	default:
+		return true
+	}
+}
+
+func calculateRangeCount(c sche.SchedulerCluster, stores []*core.StoreInfo, store *core.StoreInfo, startKey, endKey []byte, r core.Rule) float64 {
+	var storeCount float64
+	rules := c.GetRuleManager().GetRulesForApplyRange(startKey, endKey)
+	for _, rule := range rules {
+		if !isSatisfyRole(r, rule.Role) {
+			continue
+		}
+
+		if !placement.MatchLabelConstraints(store, rule.LabelConstraints) {
+			continue
+		}
+
+		var matchStores []*core.StoreInfo
+		for _, s := range stores {
+			if s.IsRemoving() || s.IsRemoved() {
+				continue
+			}
+			if placement.MatchLabelConstraints(s, rule.LabelConstraints) {
+				matchStores = append(matchStores, s)
+			}
+		}
+		if len(matchStores) == 0 {
+			return 0.0
+		}
+		regionCount := c.GetRegionCount(startKey, endKey)
+		var weight float64
+		if r == core.LeaderScatter {
+			weight = 1.0 / float64(len(matchStores))
+		} else {
+			weight = core.GetStoreTopoWeight(store, matchStores, rule.LocationLabels, rule.Count)
+			regionCount *= rule.Count
+		}
+		storeCount += float64(regionCount) * weight
+		log.Debug("calculate range result",
+			logutil.ZapRedactString("start-key", string(core.HexRegionKey(startKey))),
+			logutil.ZapRedactString("end-key", string(core.HexRegionKey(endKey))),
+			zap.Uint64("store-id", store.GetID()),
+			zap.String("rule", rule.String()),
+			zap.Int("region-count", regionCount),
+			zap.Float64("weight", weight),
+			zap.Float64("store-count", storeCount),
+		)
+	}
+	return storeCount
 }

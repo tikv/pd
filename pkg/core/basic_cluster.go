@@ -54,12 +54,17 @@ func (bc *BasicCluster) GetLeaderStoreByRegionID(regionID uint64) *StoreInfo {
 func (bc *BasicCluster) getWriteRate(
 	f func(storeID uint64) (bytesRate, keysRate float64),
 ) (storeIDs []uint64, bytesRates, keysRates []float64) {
-	storeIDs = bc.GetStoreIDs()
-	count := len(storeIDs)
-	bytesRates = make([]float64, 0, count)
-	keysRates = make([]float64, 0, count)
-	for _, id := range storeIDs {
+	stores := bc.GetStores()
+	storeIDs = make([]uint64, 0, len(stores))
+	bytesRates = make([]float64, 0, len(stores))
+	keysRates = make([]float64, 0, len(stores))
+	for _, store := range stores {
+		if store.IsRemoved() {
+			continue
+		}
+		id := store.GetID()
 		bytesRate, keysRate := f(id)
+		storeIDs = append(storeIDs, id)
 		bytesRates = append(bytesRates, bytesRate)
 		keysRates = append(keysRates, keysRate)
 	}
@@ -103,6 +108,10 @@ type RegionSetInformer interface {
 	ScanRegions(startKey, endKey []byte, limit int) []*RegionInfo
 	GetRegionByKey(regionKey []byte) *RegionInfo
 	BatchScanRegions(keyRanges *keyutil.KeyRanges, opts ...BatchScanRegionsOptionFunc) ([]*RegionInfo, error)
+	GetRegionCount(startKey, endKey []byte) int
+	GetStoreLeaderCountByRange(storeID uint64, startKey, endKey []byte) int
+	GetStoreLearnerCountByRange(storeID uint64, startKey, endKey []byte) int
+	GetStorePeerCountByRange(storeID uint64, startKey, endKey []byte) int
 }
 
 type batchScanRegionsOptions struct {
@@ -136,6 +145,7 @@ type StoreSetInformer interface {
 	GetNonWitnessVoterStores(region *RegionInfo) []*StoreInfo
 	GetFollowerStores(region *RegionInfo) []*StoreInfo
 	GetLeaderStore(region *RegionInfo) *StoreInfo
+	GetAvgNetworkSlowScore(id uint64) uint64
 }
 
 // StoreSetController is used to control stores' status.
@@ -144,7 +154,9 @@ type StoreSetController interface {
 	ResumeLeaderTransfer(id uint64, d constant.Direction)
 
 	SlowStoreEvicted(id uint64) error
+	StoppingStoreEvicted(id uint64) error
 	SlowStoreRecovered(id uint64)
+	StoppingStoreRecovered(id uint64)
 	SlowTrendEvicted(id uint64) error
 	SlowTrendRecovered(id uint64)
 }

@@ -58,7 +58,7 @@ type LabelRule struct {
 
 func (rule *LabelRule) String() string {
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("id: %s, index: %d, type: %s", rule.ID, rule.Index, rule.RuleType))
+	fmt.Fprintf(&b, "id: %s, index: %d, type: %s", rule.ID, rule.Index, rule.RuleType)
 	b.WriteString(", labels: ")
 	for i, l := range rule.Labels {
 		if i == 0 {
@@ -77,7 +77,7 @@ func (rule *LabelRule) String() string {
 		if i == 0 {
 			b.WriteString("[")
 		}
-		b.WriteString(fmt.Sprintf("startKey: {%s}, endKey: {%s}", r.StartKeyHex, r.EndKeyHex))
+		fmt.Fprintf(&b, "startKey: {%s}, endKey: {%s}", r.StartKeyHex, r.EndKeyHex)
 		if i == len(ranges)-1 {
 			b.WriteString("]")
 		} else {
@@ -87,11 +87,34 @@ func (rule *LabelRule) String() string {
 	return b.String()
 }
 
+// GetKeyRanges returns the key ranges of the LabelRule.
+func (rule *LabelRule) GetKeyRanges() []*KeyRangeRule {
+	if rule.RuleType != KeyRange {
+		return nil
+	}
+	rs, ok := rule.Data.([]*KeyRangeRule)
+	if !ok {
+		return nil
+	}
+	return rs
+}
+
 // NewLabelRuleFromJSON creates a label rule from the JSON data.
 func NewLabelRuleFromJSON(data []byte) (*LabelRule, error) {
 	lr := &LabelRule{}
-	err := json.Unmarshal(data, lr)
-	if err != nil {
+	if err := json.Unmarshal(data, lr); err != nil {
+		return nil, err
+	}
+	if err := lr.checkAndAdjust(); err != nil {
+		return nil, err
+	}
+	return lr, nil
+}
+
+// NewLabelRuleFromJSONWithoutCheck creates a label rule from the JSON data. It will not call checkAndAdjust.
+func NewLabelRuleFromJSONWithoutCheck(data []byte) (*LabelRule, error) {
+	lr := &LabelRule{}
+	if err := json.Unmarshal(data, lr); err != nil {
 		return nil, err
 	}
 	return lr, nil

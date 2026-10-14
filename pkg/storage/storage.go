@@ -20,12 +20,14 @@ import (
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
@@ -39,15 +41,16 @@ type Storage interface {
 	endpoint.MetaStorage
 	endpoint.RuleStorage
 	endpoint.ReplicationStatusStorage
-	endpoint.GCSafePointStorage
 	endpoint.GCStateStorage
 	endpoint.MinResolvedTSStorage
 	endpoint.ExternalTSStorage
-	endpoint.SafePointV2Storage
 	endpoint.KeyspaceStorage
 	endpoint.ResourceGroupStorage
 	endpoint.TSOStorage
 	endpoint.KeyspaceGroupStorage
+	endpoint.MetaServiceGroupStorage
+	endpoint.MaintenanceStorage
+	endpoint.AffinityStorage
 }
 
 // NewStorageWithMemoryBackend creates a new storage with memory backend.
@@ -101,6 +104,22 @@ func NewCoreStorage(defaultStorage Storage, regionStorage endpoint.RegionStorage
 		regionStorage: regionStorage,
 		regionLoaded:  unloaded,
 	}
+}
+
+// RunInTxnWithConditions forwards a conditional transaction to the default storage.
+func (ps *coreStorage) RunInTxnWithConditions(
+	ctx context.Context,
+	conditions []clientv3.Cmp,
+	f func(txn kv.Txn) error,
+) error {
+	if len(conditions) == 0 {
+		return ps.RunInTxn(ctx, f)
+	}
+	runner, ok := ps.Storage.(kv.ConditionalTxnRunner)
+	if !ok {
+		return errors.New("storage backend does not support conditional transactions")
+	}
+	return runner.RunInTxnWithConditions(ctx, conditions, f)
 }
 
 // RetrieveRegionStorage retrieve the region storage from the given storage.
@@ -222,4 +241,13 @@ func AreRegionsLoaded(s Storage) bool {
 		return ps.regionLoaded == fromLeveldb
 	}
 	return ps.regionLoaded == fromEtcd
+}
+
+// IsBootstrapped returns whether the cluster is bootstrapped.
+func IsBootstrapped(s Storage) bool {
+	data, err := s.Load(keypath.ClusterBootstrapTimePath())
+	if err != nil {
+		return false
+	}
+	return data != ""
 }

@@ -78,7 +78,7 @@ var (
 			Subsystem: "scheduler",
 			Name:      "balance_direction",
 			Help:      "Counter of direction of balance related schedulers.",
-		}, []string{"type", "source", "target"})
+		}, []string{"type", "store", "direction"})
 
 	// TODO: pre-allocate gauge metrics
 	hotDirectionCounter = prometheus.NewCounterVec(
@@ -88,14 +88,6 @@ var (
 			Name:      "hot_region_direction",
 			Help:      "Counter of hot region scheduler.",
 		}, []string{"type", "rw", "store", "direction", "dim"})
-
-	hotPendingStatus = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: "pd",
-			Subsystem: "scheduler",
-			Name:      "hot_pending",
-			Help:      "Pending influence status in hot region scheduler.",
-		}, []string{"type", "source", "target"})
 
 	hotPeerHist = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -112,7 +104,23 @@ var (
 			Subsystem: "scheduler",
 			Name:      "evicted_slow_store_status",
 			Help:      "Store evicted status due to slow",
-		}, []string{"type", "store"})
+		}, []string{"store", "slow_type"})
+
+	evictedStoppingStoreStatusGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "scheduler",
+			Name:      "evicted_stopping_store_status",
+			Help:      "Store evicted status due to stopping",
+		}, []string{"store"})
+
+	slowStoreTriggerLimitGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "scheduler",
+			Name:      "slow_store_trigger_limit",
+			Help:      "slow store trigger limit",
+		}, []string{"store", "slow_type"})
 
 	storeSlowTrendEvictedStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -154,11 +162,35 @@ var (
 			Name:      "status",
 			Help:      "Status of the rule.",
 		}, []string{"type"})
+
+	regionLabelStatusGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "region_label",
+			Name:      "status",
+			Help:      "Status of the region labeler.",
+		}, []string{"type"})
+
+	balanceRangeGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "balance_range",
+			Name:      "store",
+			Help:      "Store status for balance range schedule",
+		}, []string{"store", "type"})
+	balanceRangeJobGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "balance_range",
+			Name:      "job",
+			Help:      "job status for balance range schedule",
+		}, []string{})
 )
 
 func init() {
 	prometheus.MustRegister(schedulerStatusGauge)
 	prometheus.MustRegister(ruleStatusGauge)
+	prometheus.MustRegister(regionLabelStatusGauge)
 	prometheus.MustRegister(schedulerCounter)
 	prometheus.MustRegister(balanceWitnessCounter)
 	prometheus.MustRegister(hotSchedulerResultCounter)
@@ -166,13 +198,32 @@ func init() {
 	prometheus.MustRegister(balanceDirectionCounter)
 	prometheus.MustRegister(opInfluenceStatus)
 	prometheus.MustRegister(tolerantResourceStatus)
-	prometheus.MustRegister(hotPendingStatus)
 	prometheus.MustRegister(hotPeerHist)
 	prometheus.MustRegister(evictedSlowStoreStatusGauge)
+	prometheus.MustRegister(evictedStoppingStoreStatusGauge)
+	prometheus.MustRegister(slowStoreTriggerLimitGauge)
 	prometheus.MustRegister(storeSlowTrendEvictedStatusGauge)
 	prometheus.MustRegister(storeSlowTrendActionStatusGauge)
 	prometheus.MustRegister(storeSlowTrendMiscGauge)
 	prometheus.MustRegister(HotPendingSum)
+	prometheus.MustRegister(balanceRangeGauge)
+	prometheus.MustRegister(balanceRangeJobGauge)
+}
+
+// DeleteStoreMetrics deletes the per-store scheduler metrics of a store.
+func DeleteStoreMetrics(storeID string) {
+	opInfluenceStatus.DeletePartialMatch(prometheus.Labels{"store": storeID})
+	balanceWitnessCounter.DeleteLabelValues("move-witness", storeID+"-out")
+	balanceWitnessCounter.DeleteLabelValues("move-witness", storeID+"-in")
+	hotSchedulerResultCounter.DeletePartialMatch(prometheus.Labels{"store": storeID})
+	balanceDirectionCounter.DeletePartialMatch(prometheus.Labels{"store": storeID})
+	hotDirectionCounter.DeletePartialMatch(prometheus.Labels{"store": storeID})
+	evictedSlowStoreStatusGauge.DeletePartialMatch(prometheus.Labels{"store": storeID})
+	evictedStoppingStoreStatusGauge.DeleteLabelValues(storeID)
+	slowStoreTriggerLimitGauge.DeletePartialMatch(prometheus.Labels{"store": storeID})
+	storeSlowTrendEvictedStatusGauge.DeletePartialMatch(prometheus.Labels{"store": storeID})
+	balanceRangeGauge.DeletePartialMatch(prometheus.Labels{"store": storeID})
+	HotPendingSum.DeletePartialMatch(prometheus.Labels{"store": storeID})
 }
 
 func balanceLeaderCounterWithEvent(event string) prometheus.Counter {
@@ -223,10 +274,6 @@ func shuffleRegionCounterWithEvent(event string) prometheus.Counter {
 	return schedulerCounter.WithLabelValues(types.ShuffleRegionScheduler.String(), event)
 }
 
-func splitBucketCounterWithEvent(event string) prometheus.Counter {
-	return schedulerCounter.WithLabelValues(types.SplitBucketScheduler.String(), event)
-}
-
 func transferWitnessLeaderCounterWithEvent(event string) prometheus.Counter {
 	return schedulerCounter.WithLabelValues(types.TransferWitnessLeaderScheduler.String(), event)
 }
@@ -261,7 +308,8 @@ var (
 	evictLeaderNoTargetStoreCounter = evictLeaderCounterWithEvent("no-target-store")
 	evictLeaderNewOperatorCounter   = evictLeaderCounterWithEvent("new-operator")
 
-	evictSlowStoreCounter = schedulerCounter.WithLabelValues(types.EvictSlowStoreScheduler.String(), "schedule")
+	evictSlowStoreCounter     = schedulerCounter.WithLabelValues(types.EvictSlowStoreScheduler.String(), "schedule")
+	evictStoppingStoreCounter = schedulerCounter.WithLabelValues(types.EvictStoppingStoreScheduler.String(), "schedule")
 
 	grantHotRegionCounter     = grantHotRegionCounterWithEvent("schedule")
 	grantHotRegionSkipCounter = grantHotRegionCounterWithEvent("skip")
@@ -278,9 +326,12 @@ var (
 	hotSchedulerNoRegionCounter             = hotRegionCounterWithEvent("no_region")
 	hotSchedulerUnhealthyReplicaCounter     = hotRegionCounterWithEvent("unhealthy_replica")
 	hotSchedulerAbnormalReplicaCounter      = hotRegionCounterWithEvent("abnormal_replica")
+	hotSchedulerIgnoredAffinity             = hotRegionCounterWithEvent("ignored_affinity")
 	hotSchedulerCreateOperatorFailedCounter = hotRegionCounterWithEvent("create_operator_failed")
 	hotSchedulerNewOperatorCounter          = hotRegionCounterWithEvent("new_operator")
 	hotSchedulerSnapshotSenderLimitCounter  = hotRegionCounterWithEvent("snapshot_sender_limit")
+	// Fallback to engine-wide expectation when a scoped load snapshot is stale.
+	hotSchedulerPlacementScopeFallbackCounter = hotRegionCounterWithEvent("placement_scope_fallback")
 	// hot region counter related with the split region
 	hotSchedulerNotFoundSplitKeysCounter          = hotRegionCounterWithEvent("not_found_split_keys")
 	hotSchedulerRegionBucketsNotHotCounter        = hotRegionCounterWithEvent("region_buckets_not_hot")
@@ -303,6 +354,7 @@ var (
 	writeSkipKeyDimUniformStoreCounter   = hotRegionCounterWithEvent("write-skip-key-uniform-store")
 	readSkipQueryDimUniformStoreCounter  = hotRegionCounterWithEvent("read-skip-query-uniform-store")
 	writeSkipQueryDimUniformStoreCounter = hotRegionCounterWithEvent("write-skip-query-uniform-store")
+	readSkipCPUDimUniformStoreCounter    = hotRegionCounterWithEvent("read-skip-cpu-uniform-store")
 	pendingOpFailsStoreCounter           = hotRegionCounterWithEvent("pending-op-fails")
 
 	labelCounter            = labelCounterWithEvent("schedule")
@@ -341,17 +393,6 @@ var (
 	shuffleRegionCreateOperatorFailCounter = shuffleRegionCounterWithEvent("create-operator-fail")
 	shuffleRegionNoSourceStoreCounter      = shuffleRegionCounterWithEvent("no-source-store")
 
-	splitBucketDisableCounter            = splitBucketCounterWithEvent("bucket-disable")
-	splitBucketSplitLimitCounter         = splitBucketCounterWithEvent("split-limit")
-	splitBucketScheduleCounter           = splitBucketCounterWithEvent("schedule")
-	splitBucketNoRegionCounter           = splitBucketCounterWithEvent("no-region")
-	splitBucketRegionTooSmallCounter     = splitBucketCounterWithEvent("region-too-small")
-	splitBucketOperatorExistCounter      = splitBucketCounterWithEvent("operator-exist")
-	splitBucketKeyRangeNotMatchCounter   = splitBucketCounterWithEvent("key-range-not-match")
-	splitBucketNoSplitKeysCounter        = splitBucketCounterWithEvent("no-split-keys")
-	splitBucketCreateOperatorFailCounter = splitBucketCounterWithEvent("create-operator-fail")
-	splitBucketNewOperatorCounter        = splitBucketCounterWithEvent("new-operator")
-
 	transferWitnessLeaderCounter              = transferWitnessLeaderCounterWithEvent("schedule")
 	transferWitnessLeaderNewOperatorCounter   = transferWitnessLeaderCounterWithEvent("new-operator")
 	transferWitnessLeaderNoTargetStoreCounter = transferWitnessLeaderCounterWithEvent("no-target-store")
@@ -365,4 +406,6 @@ var (
 	balanceRangeCreateOpFailCounter  = balanceRangeCounterWithEvent("create-operator-fail")
 	balanceRangeNoReplacementCounter = balanceRangeCounterWithEvent("no-replacement")
 	balanceRangeNoJobCounter         = balanceRangeCounterWithEvent("no-job")
+	balanceRangeBalancedCounter      = balanceRangeCounterWithEvent("balanced")
+	balancePersistFailedCounter      = balanceRangeCounterWithEvent("persist-failed")
 )

@@ -21,10 +21,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/tikv/pd/pkg/utils/assertutil"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
-	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/join"
 	"github.com/tikv/pd/tests"
 )
@@ -163,11 +162,91 @@ func TestFailedPDJoinsPreviousCluster(t *testing.T) {
 	re.Error(join.PrepareJoinCluster(pd2.GetConfig()))
 }
 
+// Regression test for https://github.com/tikv/pd/issues/10999: a member that
+// tries to join while advertising a client URL already owned by another member
+// must be rejected before it can corrupt membership — even though its peer URL
+// is unique and --join points to a different string than the duplicated client
+// URL, so the `cfg.Join == cfg.AdvertiseClientUrls` self-join check does not
+// trigger.
+func TestJoinWithDuplicateClientURL(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+
+	pd1 := cluster.GetServer("pd1")
+	client := pd1.GetEtcdClient()
+	dupClientURL := pd1.GetConfig().AdvertiseClientUrls
+
+	// PrepareJoinCluster (run inside cluster.Join) detects that dupClientURL is
+	// already owned by pd1 and refuses the join before MemberAdd.
+	_, err = cluster.Join(ctx, func(conf *config.Config, _ string) {
+		conf.AdvertiseClientUrls = dupClientURL
+	})
+	re.Error(err)
+	re.Contains(err.Error(), "already used by member")
+
+	// Membership is untouched: the orphan never entered the member list.
+	members, err := etcdutil.ListEtcdMembers(ctx, client)
+	re.NoError(err)
+	re.Len(members.Members, 1)
+}
+
+// Regression test for the failed-start recovery path of issue #10999: a member
+// whose peer was already added but never started (joinedFailedToStart) re-joins
+// with another member's advertised client URL. It must still be rejected — the
+// read-only conflict check runs on the recovery path too, using the
+// non-linearizable member list so recovery is never blocked on quorum.
+func TestFailedStartRecoveryRejectsDuplicateClientURL(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+
+	pd1 := cluster.GetServer("pd1")
+	dupClientURL := pd1.GetConfig().AdvertiseClientUrls
+
+	// First join succeeds through MemberAdd but the new PD never starts, leaving
+	// an unnamed etcd member with pd2's peer URL (the failed-start recovery
+	// state). The cluster is now at 1/2 quorum.
+	pd2, err := cluster.Join(ctx)
+	re.NoError(err)
+	pd2Cfg := pd2.GetConfig().Clone()
+	re.NoError(pd2.Destroy())
+
+	// Re-joining the same peer while advertising pd1's client URL must be
+	// rejected before startup, even on the joinedFailedToStart path.
+	pd2Cfg.AdvertiseClientUrls = dupClientURL
+	_, err = tests.NewTestServer(ctx, pd2Cfg, nil)
+	re.Error(err)
+	re.Contains(err.Error(), "already used by member")
+}
+
 // A PD joins itself.
 func TestPDJoinsItself(t *testing.T) {
 	re := require.New(t)
-	cfg := tests.NewTestSingleConfig(assertutil.CheckerWithNilAssert(re))
-	defer testutil.CleanServer(cfg.DataDir)
-	cfg.Join = cfg.AdvertiseClientUrls
-	re.Error(join.PrepareJoinCluster(cfg))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	// Get a server config and modify it to join itself
+	cfg := cluster.GetConfig().InitialServers[0]
+	serverCfg, err := cfg.Generate()
+	re.NoError(err)
+	serverCfg.Join = serverCfg.AdvertiseClientUrls
+	re.Error(join.PrepareJoinCluster(serverCfg))
 }

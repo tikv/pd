@@ -17,7 +17,7 @@ package cases
 import (
 	"context"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"strconv"
 	"time"
 
@@ -219,7 +219,7 @@ func newRegionStats() func() HTTPCase {
 
 func (c *regionsStats) do(ctx context.Context, cli pdHttp.Client) error {
 	upperBound := max(totalRegion/c.regionSample, 1)
-	random := rand.Intn(upperBound)
+	random := rand.IntN(upperBound)
 	startID := c.regionSample*random*4 + 1
 	endID := c.regionSample*(random+1)*4 + 1
 	regionStats, err := cli.GetRegionStatusByKeyRange(ctx,
@@ -250,6 +250,7 @@ func newUpdateGCSafePoint() func() GRPCCase {
 
 func (*updateGCSafePoint) unary(ctx context.Context, cli pd.Client) error {
 	s := time.Now().Unix()
+	//nolint:staticcheck
 	_, err := cli.UpdateGCSafePoint(ctx, uint64(s))
 	if err != nil {
 		return err
@@ -274,7 +275,8 @@ func newUpdateServiceGCSafePoint() func() GRPCCase {
 
 func (*updateServiceGCSafePoint) unary(ctx context.Context, cli pd.Client) error {
 	s := time.Now().Unix()
-	id := rand.Int63n(100) + 1
+	id := rand.Int64N(100) + 1
+	//nolint:staticcheck
 	_, err := cli.UpdateServiceGCSafePoint(ctx, strconv.FormatInt(id, 10), id, uint64(s))
 	if err != nil {
 		return err
@@ -298,7 +300,7 @@ func newGetRegion() func() GRPCCase {
 }
 
 func (*getRegion) unary(ctx context.Context, cli pd.Client) error {
-	id := rand.Intn(totalRegion)*4 + 1
+	id := rand.IntN(totalRegion)*4 + 1
 	_, err := cli.GetRegion(ctx, generateKeyForSimulator(id))
 	if err != nil {
 		return err
@@ -322,7 +324,7 @@ func newGetRegionEnableFollower() func() GRPCCase {
 }
 
 func (*getRegionEnableFollower) unary(ctx context.Context, cli pd.Client) error {
-	id := rand.Intn(totalRegion)*4 + 1
+	id := rand.IntN(totalRegion)*4 + 1
 	_, err := cli.GetRegion(ctx, generateKeyForSimulator(id), opt.WithAllowFollowerHandle())
 	if err != nil {
 		return err
@@ -349,7 +351,7 @@ func newScanRegions() func() GRPCCase {
 
 func (c *scanRegions) unary(ctx context.Context, cli pd.Client) error {
 	upperBound := totalRegion / c.regionSample
-	random := rand.Intn(upperBound)
+	random := rand.IntN(upperBound)
 	startID := c.regionSample*random*4 + 1
 	endID := c.regionSample*(random+1)*4 + 1
 	//nolint:staticcheck
@@ -399,7 +401,7 @@ func newGetStore() func() GRPCCase {
 }
 
 func (*getStore) unary(ctx context.Context, cli pd.Client) error {
-	storeIdx := rand.Intn(totalStore)
+	storeIdx := rand.IntN(totalStore)
 	_, err := cli.GetStore(ctx, storesID[storeIdx])
 	if err != nil {
 		return err

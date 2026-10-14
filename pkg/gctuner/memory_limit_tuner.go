@@ -61,7 +61,7 @@ func (t *memoryLimitTuner) tuning() {
 		return
 	}
 	r := memory.ForceReadMemStats()
-	gogc := util.GetGOGC()
+	gogc := util.GetGCPercent()
 	ratio := float64(100+gogc) / 100
 	// This `if` checks whether the **last** GC was triggered by MemoryLimit as far as possible.
 	// If the **last** GC was triggered by MemoryLimit, we'll set MemoryLimit to MAXVALUE to return control back to GOGC

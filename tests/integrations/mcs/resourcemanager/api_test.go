@@ -24,15 +24,19 @@ import (
 	"net/url"
 	"testing"
 
+	//nolint:staticcheck // kvproto is generated against the legacy protobuf runtime.
+	"github.com/golang/protobuf/jsonpb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/pingcap/failpoint"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	"github.com/tikv/pd/pkg/mcs/resourcemanager/server/apis/v1"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
 )
 
@@ -65,29 +69,28 @@ func (suite *resourceManagerAPITestSuite) TearDownTest() {
 	suite.cluster.Destroy()
 }
 
-func (suite *resourceManagerAPITestSuite) getEndpoint(re *require.Assertions, elems ...string) string {
-	endpoint, err := url.JoinPath(
-		suite.cluster.GetLeaderServer().GetAddr(),
-		append([]string{apis.APIPathPrefix}, elems...)...,
-	)
-	re.NoError(err)
-	return endpoint
-}
-
 // sendRequest is a helper function to send HTTP requests and handle common response processing
-func (suite *resourceManagerAPITestSuite) sendRequest(
+func sendRequest(
 	re *require.Assertions,
+	leaderAddr string,
 	method, path string,
 	queryParams url.Values,
 	body any,
 ) ([]byte, int) {
 	var bodyReader io.Reader
 	if body != nil {
-		data, err := json.Marshal(body)
-		re.NoError(err)
-		bodyReader = bytes.NewBuffer(data)
+		if group, ok := body.(*rmpb.ResourceGroup); ok {
+			data, err := marshalResourceGroup(group)
+			re.NoError(err)
+			bodyReader = bytes.NewReader(data)
+		} else {
+			data, err := json.Marshal(body)
+			re.NoError(err)
+			bodyReader = bytes.NewBuffer(data)
+		}
 	}
-	path = suite.getEndpoint(re, path)
+	path, err := url.JoinPath(leaderAddr, apis.APIPathPrefix, path)
+	re.NoError(err)
 	if len(queryParams) > 0 {
 		path += "?" + queryParams.Encode()
 	}
@@ -102,13 +105,32 @@ func (suite *resourceManagerAPITestSuite) sendRequest(
 	return bodyBytes, resp.StatusCode
 }
 
+func marshalResourceGroup(group *rmpb.ResourceGroup) ([]byte, error) {
+	legacyGroup := *group
+	legacyGroup.KeyspaceId = nil
+	data, err := json.Marshal(&legacyGroup)
+	if err != nil || group.GetKeyspaceId() == nil {
+		return data, err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return nil, err
+	}
+	var keyspaceID bytes.Buffer
+	if err := (&jsonpb.Marshaler{OrigName: true}).Marshal(&keyspaceID, group.GetKeyspaceId()); err != nil {
+		return nil, err
+	}
+	fields["keyspace_id"] = keyspaceID.Bytes()
+	return json.Marshal(fields)
+}
+
 // mustSendRequest is a helper function that expects a successful response
 func (suite *resourceManagerAPITestSuite) mustSendRequest(
 	re *require.Assertions,
 	method, path string,
 	body any,
 ) []byte {
-	bodyBytes, statusCode := suite.sendRequest(re, method, path, nil, body)
+	bodyBytes, statusCode := sendRequest(re, suite.cluster.GetLeaderServer().GetAddr(), method, path, nil, body)
 	re.Equal(http.StatusOK, statusCode, string(bodyBytes))
 	return bodyBytes
 }
@@ -129,9 +151,8 @@ func (suite *resourceManagerAPITestSuite) TestResourceGroupAPI() {
 			},
 		)
 		re.NoError(err)
-		keyspaceID := &rmpb.KeyspaceIDValue{
-			Value: meta.GetId(),
-		}
+		keyspaceID := &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: meta.GetId()}}
+
 		// Add a resource group.
 		groupToAdd := &rmpb.ResourceGroup{
 			Name:     "test_group",
@@ -147,6 +168,30 @@ func (suite *resourceManagerAPITestSuite) TestResourceGroupAPI() {
 			},
 			KeyspaceId: keyspaceID,
 		}
+		missingGroup := &rmpb.ResourceGroup{
+			Name:     "test_group_non_existing",
+			Mode:     groupToAdd.Mode,
+			Priority: groupToAdd.Priority,
+			RUSettings: &rmpb.GroupRequestUnitSettings{
+				RU: &rmpb.TokenBucket{
+					Settings: &rmpb.TokenLimitSettings{
+						FillRate:   groupToAdd.GetRUSettings().GetRU().GetSettings().GetFillRate(),
+						BurstLimit: groupToAdd.GetRUSettings().GetRU().GetSettings().GetBurstLimit(),
+					},
+				},
+			},
+			KeyspaceId: keyspaceID,
+		}
+		bodyBytes, statusCode := sendRequest(
+			re,
+			suite.cluster.GetLeaderServer().GetAddr(),
+			http.MethodPut,
+			"/config/group",
+			nil,
+			missingGroup,
+		)
+		re.Equal(http.StatusNotFound, statusCode)
+		re.NotEmpty(string(bodyBytes))
 		suite.mustAddResourceGroup(re, groupToAdd)
 		// Get the resource group.
 		group := suite.mustGetResourceGroup(re, groupToAdd.Name, keyspaceName+"_err")
@@ -235,9 +280,7 @@ func (suite *resourceManagerAPITestSuite) TestResourceGroupAPIInit() {
 						},
 					},
 				},
-				KeyspaceId: &rmpb.KeyspaceIDValue{
-					Value: keyspaceID,
-				},
+				KeyspaceId: &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: keyspaceID}},
 			}
 			suite.mustUpdateResourceGroup(re, groupToUpdate)
 		},
@@ -270,7 +313,7 @@ func (suite *resourceManagerAPITestSuite) mustUpdateResourceGroup(re *require.As
 func (suite *resourceManagerAPITestSuite) mustGetResourceGroup(re *require.Assertions, name string, keyspaceName string) *server.ResourceGroup {
 	queryParams := url.Values{}
 	queryParams.Set("keyspace_name", keyspaceName)
-	bodyBytes, statusCode := suite.sendRequest(re, http.MethodGet, "/config/group/"+name, queryParams, nil)
+	bodyBytes, statusCode := sendRequest(re, suite.server.GetAddr(), http.MethodGet, "/config/group/"+name, queryParams, nil)
 	if statusCode != http.StatusOK {
 		re.Equal(http.StatusNotFound, statusCode)
 		return nil
@@ -283,7 +326,7 @@ func (suite *resourceManagerAPITestSuite) mustGetResourceGroup(re *require.Asser
 func (suite *resourceManagerAPITestSuite) mustGetResourceGroupList(re *require.Assertions, keyspaceName string) []*server.ResourceGroup {
 	queryParams := url.Values{}
 	queryParams.Set("keyspace_name", keyspaceName)
-	bodyBytes, statusCode := suite.sendRequest(re, http.MethodGet, "/config/groups", queryParams, nil)
+	bodyBytes, statusCode := sendRequest(re, suite.server.GetAddr(), http.MethodGet, "/config/groups", queryParams, nil)
 	if statusCode != http.StatusOK {
 		re.Equal(http.StatusNotFound, statusCode)
 		return nil
@@ -296,7 +339,7 @@ func (suite *resourceManagerAPITestSuite) mustGetResourceGroupList(re *require.A
 func (suite *resourceManagerAPITestSuite) mustDeleteResourceGroup(re *require.Assertions, name string, keyspaceName string) {
 	queryParams := url.Values{}
 	queryParams.Set("keyspace_name", keyspaceName)
-	bodyBytes, statusCode := suite.sendRequest(re, http.MethodDelete, "/config/group/"+name, queryParams, nil)
+	bodyBytes, statusCode := sendRequest(re, suite.server.GetAddr(), http.MethodDelete, "/config/group/"+name, queryParams, nil)
 	if statusCode != http.StatusOK {
 		re.Equal(http.StatusNotFound, statusCode)
 		return
@@ -338,14 +381,16 @@ func (suite *resourceManagerAPITestSuite) TestKeyspaceServiceLimitAPI() {
 
 	// Prepare the keyspace for later test.
 	leaderServer := suite.cluster.GetLeaderServer()
-	leaderServer.GetKeyspaceManager().CreateKeyspace(
+	_, err := leaderServer.GetKeyspaceManager().CreateKeyspace(
 		&keyspace.CreateKeyspaceRequest{
 			Name: "test_keyspace",
 		},
 	)
+	re.NoError(err)
+	leaderAddr := suite.cluster.GetLeaderServer().GetAddr()
 	for _, keyspaceName := range []string{"", "test_keyspace"} {
 		// Get the keyspace service limit.
-		limit, statusCode := suite.tryToGetKeyspaceServiceLimit(re, keyspaceName)
+		limit, statusCode := tryToGetKeyspaceServiceLimit(re, leaderAddr, keyspaceName)
 		if len(keyspaceName) == 0 {
 			// The null keyspace is always available.
 			re.Equal(http.StatusOK, statusCode)
@@ -356,42 +401,75 @@ func (suite *resourceManagerAPITestSuite) TestKeyspaceServiceLimitAPI() {
 			re.Equal(0.0, limit)
 		}
 		// Try to set the keyspace service limit to a negative value.
-		resp, statusCode := suite.tryToSetKeyspaceServiceLimit(re, keyspaceName, -1.0)
+		resp, statusCode := tryToSetKeyspaceServiceLimit(re, leaderAddr, keyspaceName, -1.0)
 		re.Equal(http.StatusBadRequest, statusCode)
 		re.Equal("service_limit must be non-negative", resp)
 		// Set the keyspace service limit to a positive value.
-		resp, statusCode = suite.tryToSetKeyspaceServiceLimit(re, keyspaceName, 1.0)
+		resp, statusCode = tryToSetKeyspaceServiceLimit(re, leaderAddr, keyspaceName, 1.0)
 		re.Equal(http.StatusOK, statusCode)
 		re.Equal("Success!", resp)
-		limit, statusCode = suite.tryToGetKeyspaceServiceLimit(re, keyspaceName)
+		limit, statusCode = tryToGetKeyspaceServiceLimit(re, leaderAddr, keyspaceName)
 		re.Equal(http.StatusOK, statusCode)
 		re.Equal(1.0, limit)
 	}
 	// Try to set a non-existing keyspace's service limit.
-	resp, statusCode := suite.tryToSetKeyspaceServiceLimit(re, "non_existing_keyspace", 1.0)
-	re.Equal(http.StatusBadRequest, statusCode)
-	re.Equal("keyspace not found with name: non_existing_keyspace", resp)
+	resp, statusCode := tryToSetKeyspaceServiceLimit(re, leaderAddr, "non_existing_keyspace", 1.0)
+	re.Equal(http.StatusNotFound, statusCode)
+	re.Equal(errs.ErrKeyspaceNotExistsByName.FastGenByArgs("non_existing_keyspace").Error(), resp)
 	// Try to get a non-existing keyspace's service limit.
-	limit, statusCode := suite.tryToGetKeyspaceServiceLimit(re, "non_existing_keyspace")
-	re.Equal(http.StatusBadRequest, statusCode)
+	limit, statusCode := tryToGetKeyspaceServiceLimit(re, leaderAddr, "non_existing_keyspace")
+	re.Equal(http.StatusNotFound, statusCode)
 	re.Equal(0.0, limit)
+
+	// Test RU version via controller config API.
+	// Initially no RU version policy in controller config.
+	config := suite.mustGetControllerConfig(re)
+	re.Nil(config.RUVersionPolicy)
+	// Set a negative ru_version, should fail.
+	resp, statusCode = tryToSetKeyspaceRUVersion(re, leaderAddr, "test_keyspace", -1)
+	re.Equal(http.StatusBadRequest, statusCode)
+	re.Equal("ru_version must be positive", resp)
+	resp, statusCode = tryToSetKeyspaceRUVersion(re, leaderAddr, "test_keyspace", 0)
+	re.Equal(http.StatusBadRequest, statusCode)
+	re.Equal("ru_version must be positive", resp)
+	// Set ru_version > 0 should update the controller config's RUVersionPolicy.
+	resp, statusCode = tryToSetKeyspaceRUVersion(re, leaderAddr, "test_keyspace", 3)
+	re.Equal(http.StatusOK, statusCode)
+	re.Equal("Success!", resp)
+	config = suite.mustGetControllerConfig(re)
+	re.NotNil(config.RUVersionPolicy)
+	// The keyspace ID is resolved from the name; check the overrides map has the entry.
+	re.NotEmpty(config.RUVersionPolicy.Overrides)
+	// Update ru_version to a different value.
+	resp, statusCode = tryToSetKeyspaceRUVersion(re, leaderAddr, "test_keyspace", 5)
+	re.Equal(http.StatusOK, statusCode)
+	re.Equal("Success!", resp)
+	config = suite.mustGetControllerConfig(re)
+	re.NotNil(config.RUVersionPolicy)
+	re.NotEmpty(config.RUVersionPolicy.Overrides)
+	// Try to set a non-existing keyspace's RU version.
+	_, statusCode = tryToSetKeyspaceRUVersion(re, leaderAddr, "non_existing_keyspace", 3)
+	re.Equal(http.StatusBadRequest, statusCode)
 }
 
-func (suite *resourceManagerAPITestSuite) tryToGetKeyspaceServiceLimit(re *require.Assertions, keyspaceName string) (float64, int) {
-	bodyBytes, statusCode := suite.sendRequest(re, http.MethodGet, "/config/keyspace/service-limit/"+keyspaceName, nil, nil)
+type serviceLimitResponse struct {
+	ServiceLimit float64 `json:"service_limit"`
+}
+
+func tryToGetKeyspaceServiceLimit(re *require.Assertions, leaderAddr, keyspaceName string) (float64, int) {
+	bodyBytes, statusCode := sendRequest(re, leaderAddr, http.MethodGet, "/config/keyspace/service-limit/"+keyspaceName, nil, nil)
 	if statusCode != http.StatusOK {
 		return 0.0, statusCode
 	}
-	var limiter struct {
-		ServiceLimit float64 `json:"service_limit"`
-	}
+	var limiter serviceLimitResponse
 	re.NoError(json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&limiter))
 	return limiter.ServiceLimit, statusCode
 }
 
-func (suite *resourceManagerAPITestSuite) tryToSetKeyspaceServiceLimit(re *require.Assertions, keyspaceName string, limit float64) (string, int) {
-	bodyBytes, statusCode := suite.sendRequest(
+func tryToSetKeyspaceServiceLimit(re *require.Assertions, leaderAddr, keyspaceName string, limit float64) (string, int) {
+	bodyBytes, statusCode := sendRequest(
 		re,
+		leaderAddr,
 		http.MethodPost,
 		"/config/keyspace/service-limit/"+keyspaceName,
 		nil,
@@ -400,4 +478,107 @@ func (suite *resourceManagerAPITestSuite) tryToSetKeyspaceServiceLimit(re *requi
 		},
 	)
 	return string(bodyBytes), statusCode
+}
+
+func tryToSetKeyspaceRUVersion(re *require.Assertions, leaderAddr, keyspaceName string, ruVersion int32) (string, int) {
+	bodyBytes, statusCode := sendRequest(
+		re,
+		leaderAddr,
+		http.MethodPost,
+		"/config/controller/ru-version/"+keyspaceName,
+		nil,
+		apis.SetKeyspaceRUVersionRequest{
+			RUVersion: ruVersion,
+		},
+	)
+	return string(bodyBytes), statusCode
+}
+
+// resourceManagerForwardingTestSuite is a test suite for testing the forwarding behavior of Resource Manager APIs.
+type resourceManagerForwardingTestSuite struct {
+	suite.Suite
+	ctx              context.Context
+	cancel           context.CancelFunc
+	pdCluster        *tests.TestCluster
+	rmCluster        *tests.TestResourceManagerCluster
+	backendEndpoints string
+	primary          *server.Server
+	follower         *server.Server
+}
+
+func TestResourceManagerForwarding(t *testing.T) {
+	suite.Run(t, new(resourceManagerForwardingTestSuite))
+}
+
+func (suite *resourceManagerForwardingTestSuite) SetupTest() {
+	re := suite.Require()
+	var err error
+	suite.ctx, suite.cancel = context.WithCancel(context.Background())
+
+	suite.pdCluster, err = tests.NewTestCluster(suite.ctx, 1)
+	re.NoError(err)
+	err = suite.pdCluster.RunInitialServers()
+	re.NoError(err)
+	leaderName := suite.pdCluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	pdLeaderServer := suite.pdCluster.GetServer(leaderName)
+	re.NoError(pdLeaderServer.BootstrapCluster())
+	suite.backendEndpoints = pdLeaderServer.GetAddr()
+
+	suite.rmCluster, err = tests.NewTestResourceManagerCluster(suite.ctx, 2, suite.backendEndpoints)
+	re.NoError(err)
+
+	suite.primary = suite.rmCluster.WaitForPrimaryServing(re)
+	re.NotNil(suite.primary)
+	for _, srv := range suite.rmCluster.GetServers() {
+		if srv.GetAddr() != suite.primary.GetAddr() {
+			suite.follower = srv
+			break
+		}
+	}
+	re.NotNil(suite.follower, "follower should not be nil")
+	re.False(suite.follower.IsServing(), "follower should not be serving")
+}
+
+func (suite *resourceManagerForwardingTestSuite) TearDownTest() {
+	suite.cancel()
+	suite.rmCluster.Destroy()
+	suite.pdCluster.Destroy()
+}
+
+// TestResourceManagerForwardingBehavior checks that requests are correctly forwarded or handled locally.
+func (suite *resourceManagerForwardingTestSuite) TestResourceManagerForwardingBehavior() {
+	re := suite.Require()
+	followerAddr := suite.follower.GetAddr()
+	followerURL := func(path string) string {
+		return fmt.Sprintf("%s%s%s", followerAddr, apis.APIPathPrefix, path)
+	}
+
+	// Case 1: PUT /admin/log should be handled by the follower locally.
+	logURL := followerURL("admin/log")
+	level := "debug"
+	logPayload, err := json.Marshal(level)
+	re.NoError(err)
+	req, err := http.NewRequest(http.MethodPut, logURL, bytes.NewBuffer(logPayload))
+	re.NoError(err)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := tests.TestDialClient.Do(req)
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusOK, resp.StatusCode)
+
+	// Case 2: GET /config should be handled by the follower locally.
+	configURL := followerURL("config")
+	var followerCfg server.Config
+	err = testutil.ReadGetJSON(re, tests.TestDialClient, configURL, &followerCfg, testutil.StatusOK(re))
+	re.NoError(err)
+	re.Equal(suite.follower.GetConfig().GetListenAddr(), followerCfg.GetListenAddr())
+	re.NotEqual(suite.primary.GetConfig().GetListenAddr(), followerCfg.GetListenAddr())
+	re.Equal(level, followerCfg.Log.Level)
+
+	// Case 3: GET /config/groups should be handled by the follower forwarded to the primary.
+	controllerURL := followerURL("config/groups")
+	groups := make([]*server.ResourceGroup, 0)
+	err = testutil.ReadGetJSON(re, tests.TestDialClient, controllerURL, &groups, testutil.StatusOK(re))
+	re.NoError(err)
 }

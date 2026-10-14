@@ -19,15 +19,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/utils/apiutil"
-	"github.com/tikv/pd/pkg/utils/assertutil"
-	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/tests"
 	cmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
@@ -35,42 +35,51 @@ import (
 )
 
 func TestSendAndGetComponent(t *testing.T) {
+	as := assert.New(t)
 	re := require.New(t)
 	handler := func(context.Context, *server.Server) (http.Handler, apiutil.APIServiceGroup, error) {
 		mux := http.NewServeMux()
 		// check pd http sdk api
 		mux.HandleFunc("/pd/api/v1/cluster", func(w http.ResponseWriter, r *http.Request) {
 			callerID := apiutil.GetCallerIDOnHTTP(r)
-			re.Equal(command.PDControlCallerID, callerID)
+			if !as.Equal(command.PDControlCallerID, callerID) {
+				return
+			}
 			cluster := &metapb.Cluster{Id: 1}
 			clusterBytes, err := json.Marshal(cluster)
-			re.NoError(err)
+			if !as.NoError(err) {
+				return
+			}
 			w.Write(clusterBytes)
 		})
 		// check http client api
 		// TODO: remove this comment after replacing dialClient with the PD HTTP client completely.
 		mux.HandleFunc("/pd/api/v1/stores", func(w http.ResponseWriter, r *http.Request) {
 			callerID := apiutil.GetCallerIDOnHTTP(r)
-			re.Equal(command.PDControlCallerID, callerID)
-			fmt.Fprint(w, callerID)
+			if !as.Equal(command.PDControlCallerID, callerID) {
+				return
+			}
+			fmt.Fprint(w, command.PDControlCallerID)
 		})
 		info := apiutil.APIServiceGroup{
 			IsCore: true,
 		}
 		return mux, info, nil
 	}
-	cfg := tests.NewTestSingleConfig(assertutil.CheckerWithNilAssert(re))
+
 	ctx, cancel := context.WithCancel(context.Background())
-	svr, err := server.CreateServer(ctx, cfg, nil, handler)
+	defer cancel()
+
+	cluster, err := tests.NewTestClusterWithHandlers(ctx, 1, []server.HandlerBuilder{handler})
 	re.NoError(err)
-	err = svr.Run()
+	defer cluster.Destroy()
+
+	err = cluster.RunInitialServers()
 	re.NoError(err)
-	pdAddr := svr.GetAddr()
-	defer func() {
-		cancel()
-		svr.Close()
-		testutil.CleanServer(svr.GetConfig().DataDir)
-	}()
+
+	leaderName := cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	pdAddr := cluster.GetLeaderServer().GetAddr()
 
 	cmd := cmd.GetRootCmd()
 	args := []string{"-u", pdAddr, "cluster"}
@@ -84,4 +93,58 @@ func TestSendAndGetComponent(t *testing.T) {
 	output, err = ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	re.Equal(fmt.Sprintf("%s\n", command.PDControlCallerID), string(output))
+}
+
+func TestRegionNoProxyHeader(t *testing.T) {
+	re := require.New(t)
+	var (
+		mu    sync.Mutex
+		count = 0
+	)
+	handler := func(context.Context, *server.Server) (http.Handler, apiutil.APIServiceGroup, error) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/pd/api/v1/regions", func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			if vals := r.Header.Values(apiutil.PDAllowFollowerHandleHeader); len(vals) > 0 {
+				count++
+			}
+			mu.Unlock()
+			fmt.Fprint(w, `{}`)
+		})
+		info := apiutil.APIServiceGroup{IsCore: true}
+		return mux, info, nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cluster, err := tests.NewTestClusterWithHandlers(ctx, 1, []server.HandlerBuilder{handler})
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+
+	leaderName := cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	pdAddr := cluster.GetLeaderServer().GetAddr()
+
+	cmd := cmd.GetRootCmd()
+	_, err = ExecuteCommand(cmd, "-u", pdAddr, "region")
+	re.NoError(err)
+	re.Equal(0, count)
+
+	// PD-Allow-follower-handle is only added when --no-forward=true.
+	_, err = ExecuteCommand(cmd, "-u", pdAddr, "region", "--no-forward")
+	re.NoError(err)
+	re.Equal(1, count)
+
+	// --no-forward=false should not add PD-Allow-follower-handle.
+	_, err = ExecuteCommand(cmd, "-u", pdAddr, "region", "--no-forward=false")
+	re.NoError(err)
+	re.Equal(1, count)
+
+	_, err = ExecuteCommand(cmd, "-u", pdAddr, "region", "--no-forward=true")
+	re.NoError(err)
+	re.Equal(2, count)
 }

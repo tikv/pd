@@ -16,7 +16,7 @@ package core
 
 import (
 	"bytes"
-	"math/rand"
+	"math/rand/v2"
 
 	"go.uber.org/zap"
 
@@ -92,6 +92,33 @@ func newRegionTreeWithCountRef() *regionTree {
 	}
 }
 
+// GetCountByRange returns the number of regions in the range [startKey, endKey).
+func (t *regionTree) GetCountByRange(startKey, endKey []byte) int {
+	start := &regionItem{&RegionInfo{meta: &metapb.Region{StartKey: startKey}}}
+	end := &regionItem{&RegionInfo{meta: &metapb.Region{StartKey: endKey}}}
+	// it returns 0 if startKey is nil.
+	item, startIndex := t.tree.GetWithIndex(start)
+	// if item is nil, it means that the startKey is not found in the tree, we need to check the previous item, avoid
+	// to the startKey in the previous iterm.
+	// regions: [a c] [c f] [f h], startKey: b
+	// the first item is index 2 [c,f]
+	if item == nil {
+		item = t.tree.GetAt(startIndex - 1)
+		// if the item is not nil and the start key in the previous item range, the previous should be included.
+		if item != nil && bytes.Compare(item.GetEndKey(), startKey) > 0 {
+			startIndex--
+		}
+	}
+	var endIndex int
+	// it should return the length of the tree if endKey is nil.
+	if len(endKey) == 0 {
+		endIndex = t.tree.Len()
+	} else {
+		_, endIndex = t.tree.GetWithIndex(end)
+	}
+	return endIndex - startIndex
+}
+
 func (t *regionTree) length() int {
 	if t == nil {
 		return 0
@@ -128,6 +155,17 @@ func (t *regionTree) overlaps(item *regionItem) []*RegionInfo {
 		return true
 	})
 	return overlaps
+}
+
+// updateRef transfers the reference from origin to region when an item is
+// replaced in place, i.e. the tree keeps the same item and only its embedded
+// RegionInfo changes. It is a no-op for trees that do not count references.
+func (t *regionTree) updateRef(origin, region *RegionInfo) {
+	if !t.countRef {
+		return
+	}
+	origin.DecRef()
+	region.IncRef()
 }
 
 // update updates the tree with the region.
@@ -197,10 +235,7 @@ func (t *regionTree) updateStat(origin *RegionInfo, region *RegionInfo) {
 	if !origin.LoadedFromStorage() && region.LoadedFromStorage() {
 		t.notFromStorageRegionsCnt--
 	}
-	if t.countRef {
-		origin.DecRef()
-		region.IncRef()
-	}
+	t.updateRef(origin, region)
 }
 
 // remove removes a region if the region is in the tree.
@@ -370,7 +405,7 @@ func (t *regionTree) RandomRegions(n int, ranges []keyutil.KeyRange) []*RegionIn
 		pivotItem            = &regionItem{&RegionInfo{meta: &metapb.Region{}}}
 		region               *RegionInfo
 		regions              = make([]*RegionInfo, 0, n)
-		rangeLen, curLen     = len(ranges), len(regions)
+		curLen               = len(regions)
 		// setStartEndIndices is a helper function to set `startIndex` and `endIndex`
 		// according to the `startKey` and `endKey` and check if the range is invalid
 		// to skip the iteration.
@@ -411,15 +446,15 @@ func (t *regionTree) RandomRegions(n int, ranges []keyutil.KeyRange) []*RegionIn
 		}
 	)
 	// This is a fast path to reduce the unnecessary iterations when we only have one range.
-	if rangeLen <= 1 {
-		if rangeLen == 1 {
+	if len(ranges) <= 1 {
+		if len(ranges) == 1 {
 			startKey, endKey = ranges[0].StartKey, ranges[0].EndKey
 			if setAndCheckStartEndIndices() {
 				return regions
 			}
 		}
 		for curLen < n {
-			randIndex = rand.Intn(endIndex-startIndex) + startIndex
+			randIndex = rand.IntN(endIndex-startIndex) + startIndex
 			region = t.tree.GetAt(randIndex).RegionInfo
 			if region.isInvolved(startKey, endKey) {
 				regions = append(regions, region)
@@ -436,13 +471,13 @@ func (t *regionTree) RandomRegions(n int, ranges []keyutil.KeyRange) []*RegionIn
 	// keep retrying until we get enough regions.
 	for curLen < n {
 		// Shuffle the ranges to increase the randomness.
-		for _, i := range rand.Perm(rangeLen) {
+		for _, i := range rand.Perm(len(ranges)) {
 			startKey, endKey = ranges[i].StartKey, ranges[i].EndKey
 			if setAndCheckStartEndIndices() {
 				continue
 			}
 
-			randIndex = rand.Intn(endIndex-startIndex) + startIndex
+			randIndex = rand.IntN(endIndex-startIndex) + startIndex
 			region = t.tree.GetAt(randIndex).RegionInfo
 			if region.isInvolved(startKey, endKey) {
 				regions = append(regions, region)

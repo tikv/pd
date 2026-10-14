@@ -23,6 +23,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/replication_modepb"
 )
 
 func TestMain(m *testing.M) {
@@ -73,4 +74,131 @@ func TestPeerStats(t *testing.T) {
 	var ret []map[string]any
 	re.NoError(json.Unmarshal(data, &ret))
 	re.Equal(expected, ret)
+}
+
+func TestEasyJSONCompatibility(t *testing.T) {
+	re := require.New(t)
+
+	peer := MetaPeer{
+		Peer: &metapb.Peer{
+			Id:        1,
+			StoreId:   10,
+			Role:      metapb.PeerRole_Voter,
+			IsWitness: false,
+		},
+		RoleName:  metapb.PeerRole_Voter.String(),
+		IsLearner: false,
+	}
+	// Serialize with easyjson
+	easyData, err := peer.MarshalJSON()
+	re.NoError(err)
+	// Serialize with standard json
+	stdData, err := json.Marshal(peer)
+	re.NoError(err)
+	// Deserialize with both methods and compare
+	var easyMetaPeer, stdMetaPeer MetaPeer
+	re.NoError(easyMetaPeer.UnmarshalJSON(easyData))
+	re.NoError(json.Unmarshal(stdData, &stdMetaPeer))
+	re.Equal(stdMetaPeer, easyMetaPeer)
+
+	stats := PDPeerStats{
+		PeerStats: &pdpb.PeerStats{
+			Peer:        &metapb.Peer{Id: 2, StoreId: 20, Role: metapb.PeerRole_Learner},
+			DownSeconds: 100,
+		},
+		Peer: fromPeer(&metapb.Peer{Id: 2, StoreId: 20, Role: metapb.PeerRole_Learner}),
+	}
+	// Serialize with easyjson
+	easyData, err = stats.MarshalJSON()
+	re.NoError(err)
+	// Serialize with standard json
+	stdData, err = json.Marshal(stats)
+	re.NoError(err)
+	// Deserialize with both methods and compare
+	var easyPDPeerStats, stdPDPeerStats PDPeerStats
+	re.NoError(easyPDPeerStats.UnmarshalJSON(easyData))
+	re.NoError(json.Unmarshal(stdData, &stdPDPeerStats))
+	re.Equal(stdPDPeerStats, easyPDPeerStats)
+
+	status := ReplicationStatus{
+		State:   replication_modepb.RegionReplicationState_INTEGRITY_OVER_LABEL.String(),
+		StateID: 1,
+	}
+	// Serialize with easyjson
+	easyData, err = status.MarshalJSON()
+	re.NoError(err)
+	// Serialize with standard json
+	stdData, err = json.Marshal(status)
+	re.NoError(err)
+	// Deserialize with both methods and compare
+	var easyReplicationStatus, stdReplicationStatus ReplicationStatus
+	re.NoError(easyReplicationStatus.UnmarshalJSON(easyData))
+	re.NoError(json.Unmarshal(stdData, &stdReplicationStatus))
+	re.Equal(stdReplicationStatus, easyReplicationStatus)
+
+	region := RegionInfo{
+		ID:       100,
+		StartKey: "7480000000000000FF5F698000000000FF0000010380000000FF0000000F04",
+		EndKey:   "7480000000000000FF5F698000000000FF0000010380000000FF0000001104",
+		RegionEpoch: &metapb.RegionEpoch{
+			ConfVer: 1,
+			Version: 2,
+		},
+		Peers: []MetaPeer{
+			{
+				Peer:      &metapb.Peer{Id: 101, StoreId: 1, Role: metapb.PeerRole_Voter},
+				RoleName:  metapb.PeerRole_Voter.String(),
+				IsLearner: false,
+			},
+			{
+				Peer:      &metapb.Peer{Id: 102, StoreId: 2, Role: metapb.PeerRole_Learner},
+				RoleName:  metapb.PeerRole_Learner.String(),
+				IsLearner: true,
+			},
+		},
+		Leader: MetaPeer{
+			Peer:      &metapb.Peer{Id: 101, StoreId: 1, Role: metapb.PeerRole_Voter},
+			RoleName:  metapb.PeerRole_Voter.String(),
+			IsLearner: false,
+		},
+		WrittenBytes:              1000,
+		ReadBytes:                 2000,
+		WrittenKeys:               100,
+		ReadKeys:                  200,
+		ApproximateSize:           500,
+		ApproximateKeys:           1000,
+		ApproximateKvSize:         450,
+		ApproximateColumnarKvSize: 50,
+		ReplicationStatus: &ReplicationStatus{
+			State:   replication_modepb.RegionReplicationState_INTEGRITY_OVER_LABEL.String(),
+			StateID: 1,
+		},
+	}
+	// Serialize with easyjson
+	easyData, err = region.MarshalJSON()
+	re.NoError(err)
+	// Serialize with standard json
+	stdData, err = json.Marshal(region)
+	re.NoError(err)
+	// Deserialize with both methods and compare
+	var easyRegionInfo, stdRegionInfo RegionInfo
+	re.NoError(easyRegionInfo.UnmarshalJSON(easyData))
+	re.NoError(json.Unmarshal(stdData, &stdRegionInfo))
+	re.Equal(stdRegionInfo, easyRegionInfo)
+
+	regions := RegionsInfo{
+		Count:   2,
+		Regions: []RegionInfo{region, region},
+	}
+	// Serialize with easyjson
+	easyData, err = regions.MarshalJSON()
+	re.NoError(err)
+	// Serialize with standard json
+	stdData, err = json.Marshal(regions)
+	re.NoError(err)
+	// Deserialize with both methods and compare
+	var easyRegionsInfo, stdRegionsInfo RegionsInfo
+	re.NoError(easyRegionsInfo.UnmarshalJSON(easyData))
+	re.NoError(json.Unmarshal(stdData, &stdRegionsInfo))
+	re.Equal(stdRegionsInfo, easyRegionsInfo)
 }

@@ -271,6 +271,7 @@ func (hp *indexedHeap) Push(x any) {
 func (hp *indexedHeap) Pop() any {
 	l := hp.Len()
 	item := hp.items[l-1]
+	hp.items[l-1] = nil // avoid memory leak
 	hp.items = hp.items[:l-1]
 	delete(hp.index, item.ID())
 	return item

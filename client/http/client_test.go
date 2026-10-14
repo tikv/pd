@@ -16,22 +16,49 @@ package http
 
 import (
 	"context"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/pkg/retry"
-	"github.com/tikv/pd/client/pkg/utils/testutil"
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(m)
+}
+
+func TestConfigWithTrailingSlash(t *testing.T) {
+	for _, suffix := range []string{"", "/", "///", "/proxy%2Ftenant/"} {
+		t.Run(suffix, func(t *testing.T) {
+			re := require.New(t)
+			as := assert.New(t)
+			requestPath := ConfigWithTTLSeconds(5)
+			if suffix == "/proxy%2Ftenant/" {
+				requestPath = "/proxy%2Ftenant" + requestPath
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				as.Equal(http.MethodPost, r.Method)
+				as.Equal(requestPath, r.RequestURI)
+				body, err := io.ReadAll(r.Body)
+				as.NoError(err)
+				as.JSONEq(`{"schedule.leader-schedule-limit":8}`, string(body))
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer server.Close()
+			c := newClientWithMockServiceDiscovery("test-trailing-slash", []string{server.URL + suffix})
+			defer c.Close()
+			re.NoError(c.SetConfig(context.Background(), map[string]any{"schedule.leader-schedule-limit": 8}, 5))
+		})
+	}
 }
 
 func TestPDAllowFollowerHandleHeader(t *testing.T) {
@@ -52,8 +79,10 @@ func TestPDAllowFollowerHandleHeader(t *testing.T) {
 	})
 	c := newClientWithMockServiceDiscovery("test-header", []string{"http://127.0.0.1"}, WithHTTPClient(httpClient))
 	defer c.Close()
-	c.GetRegions(context.Background())
-	c.GetHistoryHotRegions(context.Background(), &HistoryHotRegionsRequest{})
+	_, err := c.GetRegions(context.Background())
+	re.NoError(err)
+	_, err = c.GetHistoryHotRegions(context.Background(), &HistoryHotRegionsRequest{})
+	re.NoError(err)
 	re.Equal(2, checked)
 }
 
@@ -74,9 +103,11 @@ func TestWithCallerID(t *testing.T) {
 	})
 	c := newClientWithMockServiceDiscovery("test-caller-id", []string{"http://127.0.0.1"}, WithHTTPClient(httpClient))
 	defer c.Close()
-	c.GetRegions(context.Background())
+	_, err := c.GetRegions(context.Background())
+	re.NoError(err)
 	expectedVal.Store("test")
-	c.WithCallerID(expectedVal.Load().(string)).GetRegions(context.Background())
+	_, err = c.WithCallerID(expectedVal.Load().(string)).GetRegions(context.Background())
+	re.NoError(err)
 	re.Equal(2, checked)
 }
 

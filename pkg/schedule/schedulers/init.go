@@ -147,7 +147,21 @@ func schedulersRegister() {
 
 			id, err := strconv.ParseUint(args[0], 10, 64)
 			if err != nil {
-				return errs.ErrStrconvParseUint.Wrap(err)
+				// args[0] may instead be a comma-joined list of store IDs
+				// (see EvictLeaderMultiStoreArgs), used to create the
+				// scheduler with several stores in one call.
+				ids, ok := parseMultiStoreIDsArg(args[0])
+				if !ok {
+					return errs.ErrStrconvParseUint.Wrap(err)
+				}
+				if len(args) > 1 {
+					return errs.ErrSchedulerConfig.FastGenByArgs("ranges")
+				}
+				for _, id := range ids {
+					conf.StoreIDWithRanges[id] = []keyutil.KeyRange{keyutil.NewKeyRange("", "")}
+				}
+				conf.Batch = EvictLeaderBatchSize
+				return nil
 			}
 
 			ranges, err := getKeyRanges(args[1:])
@@ -186,6 +200,13 @@ func schedulersRegister() {
 		}
 	})
 
+	// evict stopping store
+	RegisterSliceDecoderBuilder(types.EvictStoppingStoreScheduler, func([]string) ConfigDecoder {
+		return func(any) error {
+			return nil
+		}
+	})
+
 	RegisterScheduler(types.EvictSlowStoreScheduler, func(opController *operator.Controller,
 		storage endpoint.ConfigStorage, decoder ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
 		conf := initEvictSlowStoreSchedulerConfig()
@@ -197,6 +218,21 @@ func schedulersRegister() {
 		}
 		conf.cluster = opController.GetCluster()
 		sche := newEvictSlowStoreScheduler(opController, conf)
+		conf.init(sche.GetName(), storage, conf)
+		return sche, nil
+	})
+
+	RegisterScheduler(types.EvictStoppingStoreScheduler, func(opController *operator.Controller,
+		storage endpoint.ConfigStorage, decoder ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
+		conf := initEvictStoppingStoreSchedulerConfig()
+		if err := decoder(conf); err != nil {
+			return nil, err
+		}
+		if conf.Batch == 0 {
+			conf.Batch = EvictLeaderBatchSize
+		}
+		conf.cluster = opController.GetCluster()
+		sche := newEvictStoppingStoreScheduler(opController, conf)
 		conf.init(sche.GetName(), storage, conf)
 		return sche, nil
 	})
@@ -268,6 +304,9 @@ func schedulersRegister() {
 			if err := decoder(conf); err != nil {
 				return nil, err
 			}
+		}
+		if err := conf.validateLocked(); err != nil {
+			return nil, err
 		}
 		sche := newHotScheduler(opController, conf)
 		conf.init(sche.GetName(), storage, conf)
@@ -503,24 +542,6 @@ func schedulersRegister() {
 		return sche, nil
 	})
 
-	// split bucket
-	RegisterSliceDecoderBuilder(types.SplitBucketScheduler, func([]string) ConfigDecoder {
-		return func(any) error {
-			return nil
-		}
-	})
-
-	RegisterScheduler(types.SplitBucketScheduler, func(opController *operator.Controller,
-		storage endpoint.ConfigStorage, decoder ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
-		conf := initSplitBucketConfig()
-		if err := decoder(conf); err != nil {
-			return nil, err
-		}
-		sche := newSplitBucketScheduler(opController, conf)
-		conf.init(sche.GetName(), storage, conf)
-		return sche, nil
-	})
-
 	// transfer witness leader
 	RegisterSliceDecoderBuilder(types.TransferWitnessLeaderScheduler, func([]string) ConfigDecoder {
 		return func(any) error {
@@ -588,6 +609,9 @@ func schedulersRegister() {
 			duration, err := time.ParseDuration(timeout)
 			if err != nil {
 				return errs.ErrURLParse.Wrap(err)
+			}
+			if duration <= 0 {
+				return errs.ErrURLParse.FastGenByArgs("timeout must be greater than 0")
 			}
 			alias, err := url.QueryUnescape(args[3])
 			if err != nil {

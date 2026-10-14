@@ -16,7 +16,7 @@ package connectionctx
 
 import (
 	"context"
-	"math/rand"
+	"math/rand/v2"
 	"sync"
 )
 
@@ -53,7 +53,9 @@ func (c *Manager[T]) Exist(url string) bool {
 
 // Store is used to store the connection context, `overwrite` is used to force the store operation
 // no matter whether the connection context exists before, which is false by default.
-func (c *Manager[T]) Store(ctx context.Context, cancel context.CancelFunc, url string, stream T, overwrite ...bool) {
+// It returns whether the manager took ownership of ctx/cancel/stream. If false, the caller
+// must cancel ctx to avoid leaking the stream and its associated resources.
+func (c *Manager[T]) Store(ctx context.Context, cancel context.CancelFunc, url string, stream T, overwrite ...bool) bool {
 	c.Lock()
 	defer c.Unlock()
 	overwriteFlag := false
@@ -62,9 +64,10 @@ func (c *Manager[T]) Store(ctx context.Context, cancel context.CancelFunc, url s
 	}
 	_, ok := c.connectionCtxs[url]
 	if !overwriteFlag && ok {
-		return
+		return false
 	}
 	c.storeLocked(ctx, cancel, url, stream)
+	return true
 }
 
 func (c *Manager[T]) storeLocked(ctx context.Context, cancel context.CancelFunc, url string, stream T) {
@@ -73,19 +76,23 @@ func (c *Manager[T]) storeLocked(ctx context.Context, cancel context.CancelFunc,
 }
 
 // CleanAllAndStore is used to store the connection context exclusively. It will release
-// all other connection contexts. `stream` is optional, if it is not provided, all
-// connection contexts other than the given `url` will be released.
-func (c *Manager[T]) CleanAllAndStore(ctx context.Context, cancel context.CancelFunc, url string, stream ...T) {
+// all other connection contexts.
+// It returns whether the manager took ownership of ctx/cancel/stream. If a connection is
+// already registered with the url it returns false, and the caller must cancel ctx to avoid
+// leaking the stream and its associated resources. Otherwise it returns true, meaning the
+// manager now owns ctx/cancel/stream and will cancel them when the entry is released.
+func (c *Manager[T]) CleanAllAndStore(ctx context.Context, cancel context.CancelFunc, url string, stream T) bool {
 	c.Lock()
 	defer c.Unlock()
 	// Remove all other `connectionCtx`s.
 	c.gcLocked(func(curURL string) bool {
 		return curURL != url
 	})
-	if len(stream) == 0 {
-		return
+	if _, ok := c.connectionCtxs[url]; ok {
+		return false
 	}
-	c.storeLocked(ctx, cancel, url, stream[0])
+	c.storeLocked(ctx, cancel, url, stream)
+	return true
 }
 
 // GC is used to release all connection contexts that match the given condition.
@@ -132,7 +139,7 @@ func (c *Manager[T]) RandomlyPick() *ConnectionCtx[T] {
 	idx := 0
 	var connectionCtx *ConnectionCtx[T]
 	for _, cc := range c.connectionCtxs {
-		j := rand.Intn(idx + 1)
+		j := rand.IntN(idx + 1)
 		if j < 1 {
 			connectionCtx = cc
 		}
@@ -150,4 +157,11 @@ func (c *Manager[T]) GetConnectionCtx(url string) *ConnectionCtx[T] {
 		return nil
 	}
 	return cc
+}
+
+// Size is used to get the size of the connection context map.
+func (c *Manager[T]) Size() int {
+	c.RLock()
+	defer c.RUnlock()
+	return len(c.connectionCtxs)
 }

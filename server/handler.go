@@ -258,15 +258,6 @@ func (h *Handler) SetAllStoresLimit(ratePerMin float64, limitType storelimit.Typ
 	return c.SetAllStoresLimit(limitType, ratePerMin)
 }
 
-// SetAllStoresLimitTTL is used to set limit of all stores with ttl
-func (h *Handler) SetAllStoresLimitTTL(ratePerMin float64, limitType storelimit.Type, ttl time.Duration) error {
-	c, err := h.GetRaftCluster()
-	if err != nil {
-		return err
-	}
-	return c.SetAllStoresLimitTTL(limitType, ratePerMin, ttl)
-}
-
 // SetLabelStoresLimit is used to set limit of label stores.
 func (h *Handler) SetLabelStoresLimit(ratePerMin float64, limitType storelimit.Type, labels []*metapb.StoreLabel) error {
 	c, err := h.GetRaftCluster()
@@ -274,7 +265,25 @@ func (h *Handler) SetLabelStoresLimit(ratePerMin float64, limitType storelimit.T
 		return err
 	}
 	for _, store := range c.GetStores() {
+		if store.IsRemoved() {
+			// A tombstoned store with no engine label is still classified
+			// TiKV by IsTiKV(), and SetStoreLimit now rejects it. Skip it
+			// here instead of letting that rejection abort the whole batch
+			// below (the engine=tikv branch returns err on the first
+			// failure).
+			continue
+		}
 		for _, label := range labels {
+			// set limit for tikv stores
+			if label.Key == core.EngineKey && label.Value == core.EngineTiKV {
+				if store.IsTiKV() {
+					err = c.SetStoreLimit(store.GetID(), limitType, ratePerMin)
+					if err != nil {
+						return err
+					}
+					continue
+				}
+			}
 			for _, sl := range store.GetLabels() {
 				if label.Key == sl.Key && label.Value == sl.Value {
 					// TODO: need to handle some of stores are persisted, and some of stores are not.
@@ -334,12 +343,20 @@ func (h *Handler) ResetTS(ts uint64, ignoreSmaller, skipUpperBoundCheck bool, _ 
 
 // GetProgressByID returns the progress details for a given store ID.
 func (h *Handler) GetProgressByID(storeID uint64) (*progress.Progress, error) {
-	return h.s.GetRaftCluster().GetProgressByID(storeID)
+	c, err := h.GetRaftCluster()
+	if err != nil {
+		return nil, err
+	}
+	return c.GetProgressByID(storeID)
 }
 
 // GetProgressByAction returns the progress details for a given action.
 func (h *Handler) GetProgressByAction(action string) (*progress.Progress, error) {
-	return h.s.GetRaftCluster().GetProgressByAction(action)
+	c, err := h.GetRaftCluster()
+	if err != nil {
+		return nil, err
+	}
+	return c.GetProgressByAction(action)
 }
 
 // PluginLoad loads the plugin referenced by the pluginPath
@@ -380,16 +397,9 @@ func (h *Handler) GetAddr() string {
 	return h.s.GetAddr()
 }
 
-// SetStoreLimitTTL set storeLimit with ttl
-func (h *Handler) SetStoreLimitTTL(data string, value float64, ttl time.Duration) error {
-	return h.s.SaveTTLConfig(map[string]any{
-		data: value,
-	}, ttl)
-}
-
 // IsLeader return true if this server is leader
 func (h *Handler) IsLeader() bool {
-	return h.s.member.IsLeader()
+	return h.s.member.IsServing()
 }
 
 // GetHistoryHotRegions get hot region info in HistoryHotRegion form.
@@ -431,6 +441,7 @@ func (h *Handler) packHotRegions(hotPeersStat statistics.StoreHotPeersStat, hotR
 				IsLearner:      core.IsLearner(region.GetPeer(hotPeerStat.StoreID)),
 				HotDegree:      int64(hotPeerStat.HotDegree),
 				FlowBytes:      hotPeerStat.ByteRate,
+				FlowCPU:        hotPeerStat.CPURate,
 				KeyRate:        hotPeerStat.KeyRate,
 				QueryRate:      hotPeerStat.QueryRate,
 				StartKey:       string(region.GetStartKey()),
@@ -458,6 +469,20 @@ func (h *Handler) RedirectSchedulerUpdate(name string, storeID float64) error {
 	input := make(map[string]any)
 	input["name"] = name
 	input["store_id"] = storeID
+	return h.redirectSchedulerConfigUpdate(name, input)
+}
+
+// RedirectSchedulerUpdateBatch applies the same store_ids config update as
+// RedirectSchedulerUpdate, but for several stores in a single request instead
+// of one request per store.
+func (h *Handler) RedirectSchedulerUpdateBatch(name string, storeIDs []float64) error {
+	input := make(map[string]any)
+	input["name"] = name
+	input["store_ids"] = storeIDs
+	return h.redirectSchedulerConfigUpdate(name, input)
+}
+
+func (h *Handler) redirectSchedulerConfigUpdate(name string, input map[string]any) error {
 	updateURL, err := url.JoinPath(h.GetAddr(), SchedulerConfigHandlerPath, name, "config")
 	if err != nil {
 		return err

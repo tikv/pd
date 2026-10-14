@@ -47,6 +47,8 @@ type etcdKVBase struct {
 	client *clientv3.Client
 }
 
+var _ ConditionalTxnRunner = (*etcdKVBase)(nil)
+
 // NewEtcdKVBase creates a new etcd kv.
 func NewEtcdKVBase(client *clientv3.Client) *etcdKVBase {
 	return &etcdKVBase{client: client}
@@ -96,7 +98,6 @@ func (kv *etcdKVBase) Save(key, value string) error {
 	failpoint.Inject("etcdSaveFailed", func() {
 		failpoint.Return(errors.New("save failed"))
 	})
-	etcdutil.InjectFailToCollectTestEtcdKey(key, "save")
 
 	txn := NewSlowLogTxn(kv.client)
 	resp, err := txn.Then(clientv3.OpPut(key, value)).Commit()
@@ -113,8 +114,6 @@ func (kv *etcdKVBase) Save(key, value string) error {
 
 // Remove removes the key from etcd.
 func (kv *etcdKVBase) Remove(key string) error {
-	etcdutil.InjectFailToCollectTestEtcdKey(key, "remove")
-
 	txn := NewSlowLogTxn(kv.client)
 	resp, err := txn.Then(clientv3.OpDelete(key)).Commit()
 	if err != nil {
@@ -144,6 +143,15 @@ type SlowLogTxn struct {
 // NewSlowLogTxn create a SlowLogTxn.
 func NewSlowLogTxn(client *clientv3.Client) clientv3.Txn {
 	ctx, cancel := context.WithTimeout(client.Ctx(), requestTimeout)
+	return &SlowLogTxn{
+		Txn:    client.Txn(ctx),
+		cancel: cancel,
+	}
+}
+
+// NewSlowLogTxnWithContext creates a SlowLogTxn with a specific context.
+func NewSlowLogTxnWithContext(ctx context.Context, client *clientv3.Client) clientv3.Txn {
+	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	return &SlowLogTxn{
 		Txn:    client.Txn(ctx),
 		cancel: cancel,
@@ -204,9 +212,20 @@ type etcdTxn struct {
 
 // RunInTxn runs user provided function f in a transaction.
 func (kv *etcdKVBase) RunInTxn(ctx context.Context, f func(txn Txn) error) error {
+	return kv.RunInTxnWithConditions(ctx, nil, f)
+}
+
+// RunInTxnWithConditions runs user provided function f in a transaction with
+// additional etcd comparisons.
+func (kv *etcdKVBase) RunInTxnWithConditions(
+	ctx context.Context,
+	conditions []clientv3.Cmp,
+	f func(txn Txn) error,
+) error {
 	txn := &etcdTxn{
-		kv:  kv,
-		ctx: ctx,
+		kv:         kv,
+		ctx:        ctx,
+		conditions: append([]clientv3.Cmp(nil), conditions...),
 	}
 	err := f(txn)
 	if err != nil {
@@ -218,8 +237,6 @@ func (kv *etcdKVBase) RunInTxn(ctx context.Context, f func(txn Txn) error) error
 // Save puts a put operation into operations.
 // Note that save result are not immediately observable before current transaction commit.
 func (txn *etcdTxn) Save(key, value string) error {
-	etcdutil.InjectFailToCollectTestEtcdKey(key, "save")
-
 	operation := clientv3.OpPut(key, value)
 	txn.operations = append(txn.operations, operation)
 
@@ -228,8 +245,6 @@ func (txn *etcdTxn) Save(key, value string) error {
 
 // Remove puts a delete operation into operations.
 func (txn *etcdTxn) Remove(key string) error {
-	etcdutil.InjectFailToCollectTestEtcdKey(key, "remove")
-
 	operation := clientv3.OpDelete(key)
 	txn.operations = append(txn.operations, operation)
 	return nil
@@ -237,7 +252,17 @@ func (txn *etcdTxn) Remove(key string) error {
 
 // Load loads the target value from etcd and puts a comparator into conditions.
 func (txn *etcdTxn) Load(key string) (string, error) {
-	resp, err := etcdutil.EtcdKVGet(txn.kv.client, key)
+	return txn.loadValue(key, false)
+}
+
+// LoadWithRevision loads the target value from etcd and compares its mod revision
+// at commit time, keeping large values out of the transaction request.
+func (txn *etcdTxn) LoadWithRevision(key string) (string, error) {
+	return txn.loadValue(key, true)
+}
+
+func (txn *etcdTxn) loadValue(key string, compareRevision bool) (string, error) {
+	resp, err := etcdutil.EtcdKVGetWithContext(txn.ctx, txn.kv.client, key)
 	if err != nil {
 		return "", err
 	}
@@ -250,9 +275,13 @@ func (txn *etcdTxn) Load(key string) (string, error) {
 		value = ""
 		condition = clientv3.Compare(clientv3.CreateRevision(key), "=", 0)
 	case 1:
-		// If target key has value, must make sure it stays the same at the time of commit.
 		value = string(resp.Kvs[0].Value)
-		condition = clientv3.Compare(clientv3.Value(key), "=", value)
+		if compareRevision {
+			condition = clientv3.Compare(clientv3.ModRevision(key), "=", resp.Kvs[0].ModRevision)
+		} else {
+			// If target key has value, must make sure it stays the same at the time of commit.
+			condition = clientv3.Compare(clientv3.Value(key), "=", value)
+		}
 	default:
 		// If response contains multiple kvs, error occurred.
 		return "", errs.ErrEtcdKVGetResponse.GenWithStackByArgs(resp.Kvs)
@@ -280,8 +309,11 @@ func (txn *etcdTxn) LoadRange(key, endKey string, limit int) (keys []string, val
 
 // commit perform the operations on etcd, with pre-condition that values observed by user have not been changed.
 func (txn *etcdTxn) commit() error {
+	failpoint.Inject("slowTxn", func() {
+		time.Sleep(10 * time.Second)
+	})
 	// Using slowLogTxn to commit transaction.
-	slowLogTxn := NewSlowLogTxn(txn.kv.client)
+	slowLogTxn := NewSlowLogTxnWithContext(txn.ctx, txn.kv.client)
 	slowLogTxn.If(txn.conditions...)
 	slowLogTxn.Then(txn.operations...)
 	resp, err := slowLogTxn.Commit()
@@ -355,7 +387,6 @@ func convertOps(ops []RawTxnOp) []clientv3.Op {
 // the transaction.
 func (l *rawTxnWrapper) Then(ops ...RawTxnOp) RawTxn {
 	convertedOps := convertOps(ops)
-	etcdutil.InjectFailToCollectTestEtcdOps(convertedOps...)
 	l.inner = l.inner.Then(convertedOps...)
 	return l
 }
@@ -364,7 +395,6 @@ func (l *rawTxnWrapper) Then(ops ...RawTxnOp) RawTxn {
 // to the transaction.
 func (l *rawTxnWrapper) Else(ops ...RawTxnOp) RawTxn {
 	convertedOps := convertOps(ops)
-	etcdutil.InjectFailToCollectTestEtcdOps(convertedOps...)
 	l.inner = l.inner.Else(convertedOps...)
 	return l
 }

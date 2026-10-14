@@ -16,6 +16,7 @@ package api
 
 import (
 	"encoding/json"
+	"net/http"
 	"net/url"
 	"sort"
 	"testing"
@@ -25,6 +26,7 @@ import (
 	"github.com/pingcap/failpoint"
 
 	"github.com/tikv/pd/pkg/schedule/labeler"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
 )
@@ -65,13 +67,14 @@ func (suite *regionLabelTestSuite) checkGetSet(cluster *tests.TestCluster) {
 	re.Empty(resp)
 
 	rules := []*labeler.LabelRule{
-		{ID: "rule1", Labels: []labeler.RegionLabel{{Key: "k1", Value: "v1"}}, RuleType: "key-range", Data: makeKeyRanges("1234", "5678")},
-		{ID: "rule2/a/b", Labels: []labeler.RegionLabel{{Key: "k2", Value: "v2"}}, RuleType: "key-range", Data: makeKeyRanges("ab12", "cd12")},
-		{ID: "rule3", Labels: []labeler.RegionLabel{{Key: "k3", Value: "v3"}}, RuleType: "key-range", Data: makeKeyRanges("abcd", "efef")},
+		{ID: "rule1", Labels: []labeler.RegionLabel{{Key: "k1", Value: "v1"}}, RuleType: "key-range", Data: keyutil.BuildKeyRangeMaps("1234", "5678")},
+		{ID: "rule2/a/b", Labels: []labeler.RegionLabel{{Key: "k2", Value: "v2"}}, RuleType: "key-range", Data: keyutil.BuildKeyRangeMaps("ab12", "cd12")},
+		{ID: "rule3", Labels: []labeler.RegionLabel{{Key: "k3", Value: "v3"}}, RuleType: "key-range", Data: keyutil.BuildKeyRangeMaps("abcd", "efef")},
 	}
 	ruleIDs := []string{"rule1", "rule2/a/b", "rule3"}
 	for _, rule := range rules {
-		data, _ := json.Marshal(rule)
+		data, err := json.Marshal(rule)
+		re.NoError(err)
 		err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/rule", data, testutil.StatusOK(re))
 		re.NoError(err)
 	}
@@ -96,23 +99,19 @@ func (suite *regionLabelTestSuite) checkGetSet(cluster *tests.TestCluster) {
 
 	patch := labeler.LabelRulePatch{
 		SetRules: []*labeler.LabelRule{
-			{ID: "rule2/a/b", Labels: []labeler.RegionLabel{{Key: "k2", Value: "v2"}}, RuleType: "key-range", Data: makeKeyRanges("ab12", "cd12")},
+			{ID: "rule2/a/b", Labels: []labeler.RegionLabel{{Key: "k2", Value: "v2"}}, RuleType: "key-range", Data: keyutil.BuildKeyRangeMaps("ab12", "cd12")},
 		},
 		DeleteRules: []string{"rule1"},
 	}
-	data, _ := json.Marshal(patch)
+	data, err := json.Marshal(patch)
+	re.NoError(err)
 	err = testutil.CheckPatchJSON(tests.TestDialClient, urlPrefix+"/rules", data, testutil.StatusOK(re))
 	re.NoError(err)
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix+"/rules", &resp)
 	re.NoError(err)
 	sort.Slice(resp, func(i, j int) bool { return resp[i].ID < resp[j].ID })
 	re.Equal([]*labeler.LabelRule{rules[1], rules[2]}, resp)
-}
 
-func makeKeyRanges(keys ...string) []any {
-	var res []any
-	for i := 0; i < len(keys); i += 2 {
-		res = append(res, map[string]any{"start_key": keys[i], "end_key": keys[i+1]})
-	}
-	return res
+	err = testutil.CheckDelete(tests.TestDialClient, urlPrefix+"/rule/no-exist", testutil.Status(re, http.StatusNotFound))
+	re.NoError(err)
 }

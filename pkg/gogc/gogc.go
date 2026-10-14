@@ -21,26 +21,25 @@ import (
 	"sync/atomic"
 )
 
-var gogcValue int64
+var gogcPercent int64
 
 func init() {
-	gogcValue = 100
+	gogcPercent = 100
 	if val, err := strconv.Atoi(os.Getenv("GOGC")); err == nil {
-		gogcValue = int64(val)
+		gogcPercent = int64(val)
 	}
 }
 
-// SetGOGC update GOGC and related metrics.
-func SetGOGC(val int) int {
+// SetGCPercent update GOGC percent and related metrics.
+func SetGCPercent(val int) {
 	if val <= 0 {
 		val = 100
 	}
-	result := debug.SetGCPercent(val)
-	atomic.StoreInt64(&gogcValue, int64(val))
-	return result
+	debug.SetGCPercent(val)
+	atomic.StoreInt64(&gogcPercent, int64(val))
 }
 
-// GetGOGC returns the current value of GOGC.
-func GetGOGC() int {
-	return int(atomic.LoadInt64(&gogcValue))
+// GetGCPercent returns the current value of GOGC percent.
+func GetGCPercent() int {
+	return int(atomic.LoadInt64(&gogcPercent))
 }

@@ -41,7 +41,7 @@ func (tikvCollector) engine() string {
 }
 
 func (tikvCollector) filter(info *StoreSummaryInfo, kind constant.ResourceKind) bool {
-	if info.IsTiFlash() {
+	if !info.IsTiKV() {
 		return false
 	}
 	switch kind {
@@ -59,6 +59,7 @@ func (tikvCollector) getLoads(storeLoads StoreKindLoads, peerLoadSum Loads, rwTy
 		loads[utils.ByteDim] = storeLoads[utils.StoreReadBytes]
 		loads[utils.KeyDim] = storeLoads[utils.StoreReadKeys]
 		loads[utils.QueryDim] = storeLoads[utils.StoreReadQuery]
+		loads[utils.CPUDim] = storeLoads[utils.StoreReadCPU]
 	case utils.Write:
 		switch kind {
 		case constant.LeaderKind:
@@ -95,7 +96,9 @@ func (tiflashCollector) filter(info *StoreSummaryInfo, kind constant.ResourceKin
 	case constant.LeaderKind:
 		return false
 	case constant.RegionKind:
-		return info.IsTiFlash()
+		// Only TiFlash write nodes should be included in hot region scheduling.
+		// TiFlash compute nodes don't store data and shouldn't be scheduled.
+		return info.IsTiFlashWrite()
 	}
 	return false
 }

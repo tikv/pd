@@ -36,8 +36,17 @@ const (
 	DefaultLogLevel = "info"
 	// DefaultDisableErrorVerbose is the default value of DisableErrorVerbose
 	DefaultDisableErrorVerbose = true
-	// DefaultLeaderLease is the default value of LeaderLease
-	DefaultLeaderLease = int64(5)
+	// DefaultLease is the default value of lease
+	DefaultLease = int64(5)
+	// TransferPrimaryLeaseMultiplier scales the leader lease to derive the TTL of the
+	// expected primary flag written by the `{service}/primary/transfer` API. The flag
+	// only needs to outlive the re-election window so the target member can win the
+	// campaign; if the target never comes up within this window the flag expires and
+	// the cluster falls back to a free election. Tying it to the leader lease keeps the
+	// window proportional to how fast leadership turns over.
+	TransferPrimaryLeaseMultiplier = int64(3)
+	// PrimaryTickInterval is the interval to check primary
+	PrimaryTickInterval = 50 * time.Millisecond
 	// LeaderTickInterval is the interval to check leader
 	LeaderTickInterval = 50 * time.Millisecond
 
@@ -47,8 +56,12 @@ const (
 	PDServiceName = "pd"
 	// TSOServiceName is the name of tso server.
 	TSOServiceName = "tso"
+	// ResourceManagerServiceName is the name of resource manager server.
+	ResourceManagerServiceName = "resource_manager"
 	// SchedulingServiceName is the name of scheduling server.
 	SchedulingServiceName = "scheduling"
+	// RouterServiceName is the name of router server.
+	RouterServiceName = "router"
 
 	// MaxKeyspaceGroupCount is the max count of keyspace groups. keyspace group in tso
 	// is the sharding unit, i.e., by the definition here, the max count of the shards

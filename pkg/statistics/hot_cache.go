@@ -28,11 +28,6 @@ import (
 
 const chanMaxLength = 6000000
 
-var (
-	readTaskMetrics  = hotCacheFlowQueueStatusGauge.WithLabelValues(utils.Read.String())
-	writeTaskMetrics = hotCacheFlowQueueStatusGauge.WithLabelValues(utils.Write.String())
-)
-
 // HotCache is a cache hold hot regions.
 type HotCache struct {
 	ctx        context.Context
@@ -76,6 +71,90 @@ func (w *HotCache) CheckReadAsync(task func(cache *HotPeerCache)) bool {
 	default:
 		return false
 	}
+}
+
+// CheckRegionFlowAsync checks the expired read and write items and the write
+// flow for a region asynchronously while retaining only immutable metadata.
+func (w *HotCache) CheckRegionFlowAsync(region *core.RegionInfo) {
+	checkExpiredTask, checkWritePeerTask := newRegionFlowTasks(region)
+	w.CheckWriteAsync(checkExpiredTask)
+	w.CheckReadAsync(checkExpiredTask)
+	w.CheckWriteAsync(checkWritePeerTask)
+}
+
+func newRegionFlowTasks(region *core.RegionInfo) (checkExpiredTask, checkWritePeerTask func(*HotPeerCache)) {
+	regionInfo := hotRegionInfo{
+		meta:          region.GetMeta(),
+		leaderStoreID: region.GetLeader().GetStoreId(),
+	}
+	reportInterval := region.GetInterval()
+	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
+	writtenBytes := region.GetBytesWritten()
+	writtenKeys := region.GetKeysWritten()
+	writeQueryNum := region.GetWriteQueryNum()
+	return newExpiredRegionTask(regionInfo.meta), newWriteRegionTask(
+		regionInfo.meta,
+		regionInfo.leaderStoreID,
+		interval,
+		writtenBytes,
+		writtenKeys,
+		writeQueryNum,
+	)
+}
+
+func newExpiredRegionTask(meta *metapb.Region) func(*HotPeerCache) {
+	return func(cache *HotPeerCache) {
+		regionInfo := hotRegionInfo{meta: meta}
+		expiredStats := cache.collectExpiredItemsForRegion(&regionInfo)
+		for _, stat := range expiredStats {
+			cache.UpdateStat(stat)
+		}
+	}
+}
+
+func newWriteRegionTask(meta *metapb.Region, leaderStoreID, interval, writtenBytes, writtenKeys, writeQueryNum uint64) func(*HotPeerCache) {
+	return func(cache *HotPeerCache) {
+		regionInfo := hotRegionInfo{meta: meta, leaderStoreID: leaderStoreID}
+		var loads [utils.RegionStatCount]float64
+		loads[utils.RegionWriteBytes] = float64(writtenBytes)
+		loads[utils.RegionWriteKeys] = float64(writtenKeys)
+		loads[utils.RegionWriteQueryNum] = float64(writeQueryNum)
+		stats := cache.checkPeerFlowForRegion(&regionInfo, nil, loads[:], interval)
+		for _, stat := range stats {
+			cache.UpdateStat(stat)
+		}
+	}
+}
+
+// CheckReadPeerAsync checks the read flow for one peer asynchronously without
+// retaining the complete RegionInfo or Peer in the pending task.
+func (w *HotCache) CheckReadPeerAsync(region *core.RegionInfo, peer *metapb.Peer, loads []float64, interval uint64) bool {
+	return w.CheckReadAsync(newReadPeerTask(region, peer, loads, interval))
+}
+
+func newReadPeerTask(region *core.RegionInfo, peer *metapb.Peer, loads []float64, interval uint64) func(*HotPeerCache) {
+	meta := region.GetMeta()
+	leaderStoreID := region.GetLeader().GetStoreId()
+	storeID := peer.GetStoreId()
+	return func(cache *HotPeerCache) {
+		regionInfo := hotRegionInfo{meta: meta, leaderStoreID: leaderStoreID}
+		stats := cache.checkPeerFlowForRegion(&regionInfo, []uint64{storeID}, loads, interval)
+		for _, stat := range stats {
+			cache.UpdateStat(stat)
+		}
+	}
+}
+
+// CheckColdPeerAsync checks peers missing from a store heartbeat
+// asynchronously. The pending task only keeps the reported region IDs.
+func (w *HotCache) CheckColdPeerAsync(storeID uint64, reportedRegions map[uint64]struct{}, interval uint64) bool {
+	checkColdPeerTask := func(cache *HotPeerCache) {
+		stats := cache.checkColdPeerByRegionIDs(storeID, reportedRegions, interval)
+		for _, stat := range stats {
+			cache.UpdateStat(stat)
+		}
+	}
+	return w.CheckReadAsync(checkColdPeerTask)
 }
 
 // GetHotPeerStats returns hot peer stats for the specified kind (read/write).
@@ -159,9 +238,16 @@ func (w *HotCache) GetHotPeerStat(kind utils.RWType, regionID, storeID uint64) *
 func (w *HotCache) CollectMetrics() {
 	w.CheckWriteAsync(func(cache *HotPeerCache) {
 		cache.collectMetrics()
+		// gc() is otherwise only triggered from UpdateStat, so a store removed while
+		// the cluster is idle (or was the only store still receiving updates) would
+		// never have its hotCacheStatusGauge series cleaned up. Piggyback on this
+		// periodic, activity-independent tick instead; gc() already self-throttles
+		// via topNTTL, so calling it every tick is cheap.
+		cache.gc()
 	})
 	w.CheckReadAsync(func(cache *HotPeerCache) {
 		cache.collectMetrics()
+		cache.gc()
 	})
 }
 
@@ -187,7 +273,6 @@ func (w *HotCache) runReadTask(task func(cache *HotPeerCache)) {
 	if task != nil {
 		// TODO: do we need a run-task timeout to protect the queue won't be stuck by a task?
 		task(w.readCache)
-		readTaskMetrics.Set(float64(w.readCache.taskQueue.Len()))
 	}
 }
 
@@ -195,7 +280,6 @@ func (w *HotCache) runWriteTask(task func(cache *HotPeerCache)) {
 	if task != nil {
 		// TODO: do we need a run-task timeout to protect the queue won't be stuck by a task?
 		task(w.writeCache)
-		writeTaskMetrics.Set(float64(w.writeCache.taskQueue.Len()))
 	}
 }
 

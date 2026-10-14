@@ -166,10 +166,11 @@ func doRequest(cmd *cobra.Command, prefix string, method string, customHeader ht
 		o(b)
 	}
 	var resp string
+	header := buildNoProxyHeader(cmd, customHeader)
 
 	endpoints := getEndpoints(cmd)
 	err := tryURLs(cmd, endpoints, func(endpoint string) error {
-		return do(endpoint, prefix, method, &resp, customHeader, b)
+		return do(endpoint, prefix, method, &resp, header, b)
 	})
 	return resp, err
 }
@@ -181,11 +182,24 @@ func doRequestSingleEndpoint(cmd *cobra.Command, endpoint, prefix, method string
 		o(b)
 	}
 	var resp string
+	header := buildNoProxyHeader(cmd, customHeader)
 
 	err := requestURL(cmd, endpoint, func(endpoint string) error {
-		return do(endpoint, prefix, method, &resp, customHeader, b)
+		return do(endpoint, prefix, method, &resp, header, b)
 	})
 	return resp, err
+}
+
+func buildNoProxyHeader(cmd *cobra.Command, customHeader http.Header) http.Header {
+	header := customHeader.Clone()
+	if header == nil {
+		header = http.Header{}
+	}
+
+	if direct, err := cmd.Flags().GetBool("no-forward"); err == nil && direct {
+		header.Set(apiutil.PDAllowFollowerHandleHeader, "true")
+	}
+	return header
 }
 
 func dial(req *http.Request) (string, error) {
@@ -270,7 +284,7 @@ func requestJSON(cmd *cobra.Command, method, prefix string, input map[string]any
 	err = tryURLs(cmd, endpoints, func(endpoint string) error {
 		var req *http.Request
 		var resp *http.Response
-		url := endpoint + "/" + prefix
+		url := strings.TrimRight(endpoint, "/") + "/" + strings.TrimLeft(prefix, "/")
 		switch method {
 		case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodGet:
 			req, err = http.NewRequest(method, url, bytes.NewBuffer(data))
@@ -315,7 +329,7 @@ func patchJSON(cmd *cobra.Command, prefix string, input map[string]any) {
 // do send a request to server. Default is Get.
 func do(endpoint, prefix, method string, resp *string, customHeader http.Header, b *bodyOption) error {
 	var err error
-	url := endpoint + "/" + prefix
+	url := strings.TrimRight(endpoint, "/") + "/" + strings.TrimLeft(prefix, "/")
 	if method == "" {
 		method = http.MethodGet
 	}

@@ -18,6 +18,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
+	"github.com/tikv/pd/pkg/schedule/affinity"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/plan"
@@ -151,6 +152,8 @@ func (f *regionEmptyFilter) Select(region *core.RegionInfo) *plan.Status {
 }
 
 // isEmptyRegionAllowBalance returns true if the region is not empty or the number of regions is too small.
+// Balance-region balances by region size, so it intentionally only checks the approximate size here
+// instead of core.IsEmptyRegion: a region smaller than 1MiB contributes nothing to balancing even if it has keys.
 func isEmptyRegionAllowBalance(cluster sche.SharedCluster, region *core.RegionInfo) bool {
 	return region.GetApproximateSize() > core.EmptyRegionApproximateSize || cluster.GetTotalRegionCount() < core.InitClusterRegionThreshold
 }
@@ -196,4 +199,26 @@ func (f *SnapshotSenderFilter) Select(region *core.RegionInfo) *plan.Status {
 		return statusOK
 	}
 	return statusRegionLeaderSendSnapshotThrottled
+}
+
+type affinityFilter struct {
+	affinityManager *affinity.Manager
+}
+
+// NewAffinityFilter creates a RegionFilter that filters all affinity regions.
+func NewAffinityFilter(cluster sche.SharedCluster) RegionFilter {
+	return &affinityFilter{
+		affinityManager: cluster.GetAffinityManager(),
+	}
+}
+
+// Select implements the RegionFilter interface.
+func (f *affinityFilter) Select(region *core.RegionInfo) *plan.Status {
+	if f.affinityManager != nil {
+		group, _ := f.affinityManager.GetRegionAffinityGroupState(region)
+		if group != nil && !group.RegularSchedulingAllowed {
+			return statusRegionAffinity
+		}
+	}
+	return statusOK
 }

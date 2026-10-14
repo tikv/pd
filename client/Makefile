@@ -27,9 +27,16 @@ basic-test: failpoint-enable
 	CGO_ENABLED=1 go test ./... || { $(MAKE) failpoint-disable && exit 1; }
 	$(MAKE) failpoint-disable
 
+# gotest runs a targeted go test with failpoints automatically enabled/disabled.
+# Usage: make gotest GOTEST_ARGS='./... -run TestFoo -count=1'
+GOTEST_ARGS ?= ./...
+gotest: failpoint-enable
+	go test $(GOTEST_ARGS) || { $(MAKE) failpoint-disable && exit 1; }
+	$(MAKE) failpoint-disable
+
 ci-test-job:
 	if [ -f covprofile ]; then rm covprofile; fi
-	CGO_ENABLED=1 go test ./... -v -tags deadlock -race -cover -covermode=atomic -coverprofile=covprofile -coverpkg=../...
+	CGO_ENABLED=1 go test ./... -tags deadlock -race -cover -covermode=atomic -coverprofile=covprofile -coverpkg=../...
 
 failpoint-enable:
 	cd $(ROOT_PATH) && $(MAKE) failpoint-enable
@@ -47,9 +54,10 @@ static: install-tools
 	@ golangci-lint run -c ../.golangci.yml --verbose ./... --allow-parallel-runners
 	@ echo "modernize ..."
 	@ go run golang.org/x/tools/gopls/internal/analysis/modernize/cmd/modernize@v0.18.1 -test ./...
+	@ echo "leakcheck ..."
+	@ leakcheck ./...
 
 tidy:
 	@ go mod tidy
 	git diff go.mod go.sum | cat
 	git diff --quiet go.mod go.sum
-

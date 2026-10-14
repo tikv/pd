@@ -15,7 +15,9 @@
 package typeutil
 
 import (
-	"math/rand"
+	"encoding/json"
+	"math"
+	"math/rand/v2"
 	"testing"
 	"time"
 
@@ -25,7 +27,7 @@ import (
 func TestParseTimestamp(t *testing.T) {
 	re := require.New(t)
 	for range 3 {
-		t := time.Now().Add(time.Second * time.Duration(rand.Int31n(1000)))
+		t := time.Now().Add(time.Second * time.Duration(rand.Int32N(1000)))
 		data := Uint64ToBytes(uint64(t.UnixNano()))
 		nt, err := ParseTimestamp(data)
 		re.NoError(err)
@@ -40,7 +42,7 @@ func TestParseTimestamp(t *testing.T) {
 func TestSubTimeByWallClock(t *testing.T) {
 	re := require.New(t)
 	for range 100 {
-		r := rand.Int63n(1000)
+		r := rand.Int64N(1000)
 		t1 := time.Now()
 		// Add r seconds.
 		t2 := t1.Add(time.Second * time.Duration(r))
@@ -74,4 +76,34 @@ func TestSmallTimeDifference(t *testing.T) {
 	re.Equal(int64(1), milliseconds)
 	milliseconds = SubTSOPhysicalByWallClock(t2, t1)
 	re.Equal(int64(-1), milliseconds)
+}
+
+func TestTimeOptional(t *testing.T) {
+	re := require.New(t)
+	now := time.Now()
+	// marshal & unmarshal for valid & invalid time
+	for _, t := range []*time.Time{&now, nil} {
+		from := TimeOptional{t}
+		data, err := from.MarshalJSON()
+		re.NoError(err)
+		var to TimeOptional
+		err = to.UnmarshalJSON(data)
+		re.NoError(err)
+		re.Equal(from.unixSeconds(), to.unixSeconds())
+	}
+
+	// unmarshal for valid & invalid time
+	for _, v := range []int64{now.Unix(), 0, math.MaxInt64} {
+		data, err := json.Marshal(v)
+		re.NoError(err)
+
+		var to TimeOptional
+		err = to.UnmarshalJSON(data)
+		re.NoError(err)
+		if v > 0 && v < math.MaxInt64 {
+			re.NotNil(to.Time)
+		} else {
+			re.Nil(to.Time)
+		}
+	}
 }

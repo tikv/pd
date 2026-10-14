@@ -17,6 +17,7 @@ package config
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -29,6 +30,7 @@ import (
 
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/pkg/errs"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/storage"
@@ -72,6 +74,25 @@ type persistedConfig struct {
 	Store          sc.StoreConfig       `json:"store"`
 }
 
+// UnmarshalJSON consumes persisted schedule-field presence while decoding, so
+// decoder metadata never leaks into the runtime ScheduleConfig.
+func (c *persistedConfig) UnmarshalJSON(data []byte) error {
+	type plainPersistedConfig persistedConfig
+	if err := json.Unmarshal(data, (*plainPersistedConfig)(c)); err != nil {
+		return err
+	}
+	var fields struct {
+		Schedule json.RawMessage `json:"schedule"`
+	}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	if len(fields.Schedule) == 0 {
+		return nil
+	}
+	return c.Schedule.MigrateDeprecatedFlagsFromJSON(fields.Schedule)
+}
+
 // NewWatcher creates a new watcher to watch the config meta change from PD.
 func NewWatcher(
 	ctx context.Context,
@@ -91,14 +112,17 @@ func NewWatcher(
 	}
 	err := cw.initializeConfigWatcher()
 	if err != nil {
+		cw.Close()
 		return nil, err
 	}
 	err = cw.initializeTTLConfigWatcher()
 	if err != nil {
+		cw.Close()
 		return nil, err
 	}
 	err = cw.initializeSchedulerConfigWatcher()
 	if err != nil {
+		cw.Close()
 		return nil, err
 	}
 	return cw, nil
@@ -119,7 +143,9 @@ func (cw *Watcher) getSchedulersController() *schedulers.Controller {
 
 func (cw *Watcher) initializeConfigWatcher() error {
 	putFn := func(kv *mvccpb.KeyValue) error {
-		cfg := &persistedConfig{}
+		cfg := &persistedConfig{
+			Schedule: sc.ScheduleConfig{DefaultStoreLimit: sc.DefaultStoreLimitConfig()},
+		}
 		if err := json.Unmarshal(kv.Value, cfg); err != nil {
 			log.Warn("failed to unmarshal scheduling config entry",
 				zap.String("event-kv-key", string(kv.Key)), zap.Error(err))
@@ -147,6 +173,7 @@ func (cw *Watcher) initializeConfigWatcher() error {
 		func([]*clientv3.Event) error { return nil },
 		false, /* withPrefix */
 	)
+	cw.configWatcher.SetReloadOnCompaction()
 	cw.configWatcher.StartWatchLoop()
 	return cw.configWatcher.WaitLoad()
 }
@@ -178,6 +205,7 @@ func (cw *Watcher) initializeTTLConfigWatcher() error {
 		func([]*clientv3.Event) error { return nil },
 		true, /* withPrefix */
 	)
+	cw.ttlConfigWatcher.SetReconcileDeletedKeys()
 	cw.ttlConfigWatcher.StartWatchLoop()
 	return cw.ttlConfigWatcher.WaitLoad()
 }
@@ -198,7 +226,16 @@ func (cw *Watcher) initializeSchedulerConfigWatcher() error {
 		}
 		// Ensure the scheduler config could be updated as soon as possible.
 		if sc := cw.getSchedulersController(); sc != nil {
-			return sc.ReloadSchedulerConfig(name)
+			err1 := sc.ReloadSchedulerConfig(name)
+			if errors.Is(err1, errs.ErrSchedulerNotFound) {
+				// Mostly it is caused by the coordinator doesn't start running.
+				// But to prevent the scheduler is truly not found, we still add a debug log here.
+				log.Debug("failed to reload scheduler config, scheduler not found",
+					zap.String("scheduler-name", name),
+					zap.Error(err1))
+				return nil
+			}
+			return err1
 		}
 		return nil
 	}
@@ -220,6 +257,7 @@ func (cw *Watcher) initializeSchedulerConfigWatcher() error {
 		func([]*clientv3.Event) error { return nil },
 		true, /* withPrefix */
 	)
+	cw.schedulerConfigWatcher.SetReconcileDeletedKeys()
 	cw.schedulerConfigWatcher.StartWatchLoop()
 	return cw.schedulerConfigWatcher.WaitLoad()
 }

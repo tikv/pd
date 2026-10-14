@@ -35,22 +35,24 @@ func newClusterHandler(svr *server.Server, rd *render.Render) *clusterHandler {
 }
 
 // GetCluster gets the cluster info.
-// @Tags     cluster
-// @Summary  Get cluster info.
-// @Produce  json
-// @Success  200  {object}  metapb.Cluster
-// @Router   /cluster [get]
+//
+//	@Tags		cluster
+//	@Summary	Get cluster info.
+//	@Produce	json
+//	@Success	200	{object}	metapb.Cluster
+//	@Router		/cluster [get]
 func (h *clusterHandler) GetCluster(w http.ResponseWriter, _ *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetCluster())
 }
 
 // GetClusterStatus gets the cluster status.
-// @Tags     cluster
-// @Summary  Get cluster status.
-// @Produce  json
-// @Success  200  {object}  cluster.Status
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /cluster/status [get]
+//
+//	@Tags		cluster
+//	@Summary	Get cluster status.
+//	@Produce	json
+//	@Success	200	{object}	cluster.Status
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/cluster/status [get]
 func (h *clusterHandler) GetClusterStatus(w http.ResponseWriter, _ *http.Request) {
 	status, err := h.svr.GetClusterStatus()
 	if err != nil {

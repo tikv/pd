@@ -18,7 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"math/rand"
+	"math/rand/v2"
 	"net/http"
 	"sort"
 	"strings"
@@ -84,7 +84,7 @@ func (suite *memberTestSuite) checkMemberLeader(cluster *tests.TestCluster) {
 		addrs = append(addrs, svr.GetAddr()+api.APIPrefix+"/api/v1/leader")
 	}
 
-	addr := addrs[rand.Intn(len(addrs))]
+	addr := addrs[rand.IntN(len(addrs))]
 	resp, err := tests.TestDialClient.Get(addr)
 	re.NoError(err)
 	defer resp.Body.Close()
@@ -110,7 +110,7 @@ func (suite *memberTestSuite) checkChangeLeaderPeerUrls(cluster *tests.TestClust
 		addrs = append(addrs, svr.GetAddr()+api.APIPrefix+"/api/v1/leader")
 	}
 
-	addr := addrs[rand.Intn(len(addrs))]
+	addr := addrs[rand.IntN(len(addrs))]
 	resp, err := tests.TestDialClient.Get(addr)
 	re.NoError(err)
 	defer resp.Body.Close()
@@ -127,16 +127,17 @@ func (suite *memberTestSuite) checkChangeLeaderPeerUrls(cluster *tests.TestClust
 	for _, svr := range svrs {
 		addrs1 = append(addrs1, svr.GetAddr()+api.APIPrefix+"/api/v1/members")
 	}
-	addr = addrs1[rand.Intn(len(addrs1))]
+	addr = addrs1[rand.IntN(len(addrs1))]
 	resp, err = tests.TestDialClient.Get(addr)
 	re.NoError(err)
 	buf, err = io.ReadAll(resp.Body)
 	re.NoError(err)
 	resp.Body.Close()
-	got1 := make(map[string]*pdpb.Member)
-	json.Unmarshal(buf, &got1)
-	re.Equal(newPeerUrls, got1["leader"].GetPeerUrls())
-	re.Equal(newPeerUrls, got1["etcd_leader"].GetPeerUrls())
+	got1 := &pdpb.GetMembersResponse{}
+	err = json.Unmarshal(buf, &got1)
+	re.NoError(err)
+	re.Equal(newPeerUrls, got1.GetLeader().GetPeerUrls())
+	re.Equal(newPeerUrls, got1.GetEtcdLeader().GetPeerUrls())
 
 	// reset
 	suite.changeLeaderPeerUrls(leader, peerUrls)
@@ -165,7 +166,8 @@ func (suite *memberTestSuite) checkResignMyself(cluster *tests.TestCluster) {
 	resp, err := tests.TestDialClient.Post(addr, "", nil)
 	re.NoError(err)
 	re.Equal(http.StatusOK, resp.StatusCode)
-	_, _ = io.Copy(io.Discard, resp.Body)
+	_, err = io.Copy(io.Discard, resp.Body)
+	re.NoError(err)
 	resp.Body.Close()
 }
 
@@ -180,10 +182,11 @@ func relaxEqualStings(re *require.Assertions, a, b []string) {
 }
 
 func checkListResponse(re *require.Assertions, body []byte, svrs map[string]*tests.TestServer) {
-	got := make(map[string][]*pdpb.Member)
-	json.Unmarshal(body, &got)
-	re.Len(svrs, len(got["members"]))
-	for _, member := range got["members"] {
+	got := &pdpb.GetMembersResponse{}
+	err := json.Unmarshal(body, &got)
+	re.NoError(err)
+	re.Len(svrs, len(got.GetMembers()))
+	for _, member := range got.GetMembers() {
 		for _, svr := range svrs {
 			if member.GetName() != svr.GetConfig().Name {
 				continue

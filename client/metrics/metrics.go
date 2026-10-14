@@ -275,6 +275,7 @@ var (
 	CmdDurationSplitRegions             prometheus.Observer
 	CmdDurationSplitAndScatterRegions   prometheus.Observer
 	CmdDurationLoadKeyspace             prometheus.Observer
+	CmdDurationLoadKeyspaceByID         prometheus.Observer
 	CmdDurationUpdateKeyspaceState      prometheus.Observer
 	CmdDurationGetAllKeyspaces          prometheus.Observer
 	CmdDurationGet                      prometheus.Observer
@@ -289,6 +290,9 @@ var (
 	CmdDurationSetGCBarrier             prometheus.Observer
 	CmdDurationDeleteGCBarrier          prometheus.Observer
 	CmdDurationGetGCState               prometheus.Observer
+	CmdDurationSetGlobalGCBarrier       prometheus.Observer
+	CmdDurationDeleteGlobalGCBarrier    prometheus.Observer
+	CmdDurationGetAllKeyspacesGCStates  prometheus.Observer
 
 	CmdFailedDurationGetRegion                prometheus.Observer
 	CmdFailedDurationTSOWait                  prometheus.Observer
@@ -303,6 +307,7 @@ var (
 	CmdFailedDurationUpdateGCSafePoint        prometheus.Observer
 	CmdFailedDurationUpdateServiceGCSafePoint prometheus.Observer
 	CmdFailedDurationLoadKeyspace             prometheus.Observer
+	CmdFailedDurationLoadKeyspaceByID         prometheus.Observer
 	CmdFailedDurationUpdateKeyspaceState      prometheus.Observer
 	CmdFailedDurationGet                      prometheus.Observer
 	CmdFailedDurationPut                      prometheus.Observer
@@ -316,6 +321,9 @@ var (
 	CmdFailedDurationSetGCBarrier             prometheus.Observer
 	CmdFailedDurationDeleteGCBarrier          prometheus.Observer
 	CmdFailedDurationGetGCState               prometheus.Observer
+	CmdFailedDurationSetGlobalGCBarrier       prometheus.Observer
+	CmdFailedDurationDeleteGlobalGCBarrier    prometheus.Observer
+	CmdFailedDurationGetAllKeyspacesGCStates  prometheus.Observer
 
 	InternalCmdDurationGetClusterInfo prometheus.Observer
 	InternalCmdDurationGetMembers     prometheus.Observer
@@ -359,6 +367,7 @@ func initLabelValues() {
 	CmdDurationSplitRegions = cmdDuration.WithLabelValues("split_regions")
 	CmdDurationSplitAndScatterRegions = cmdDuration.WithLabelValues("split_and_scatter_regions")
 	CmdDurationLoadKeyspace = cmdDuration.WithLabelValues("load_keyspace")
+	CmdDurationLoadKeyspaceByID = cmdDuration.WithLabelValues("load_keyspace_by_id")
 	CmdDurationUpdateKeyspaceState = cmdDuration.WithLabelValues("update_keyspace_state")
 	CmdDurationGetAllKeyspaces = cmdDuration.WithLabelValues("get_all_keyspaces")
 	CmdDurationGet = cmdDuration.WithLabelValues("get")
@@ -373,6 +382,9 @@ func initLabelValues() {
 	CmdDurationSetGCBarrier = cmdDuration.WithLabelValues("set_gc_barrier")
 	CmdDurationDeleteGCBarrier = cmdDuration.WithLabelValues("delete_gc_barrier")
 	CmdDurationGetGCState = cmdDuration.WithLabelValues("get_gc_state")
+	CmdDurationSetGlobalGCBarrier = cmdDuration.WithLabelValues("set_global_gc_barrier")
+	CmdDurationDeleteGlobalGCBarrier = cmdDuration.WithLabelValues("delete_global_gc_barrier")
+	CmdDurationGetAllKeyspacesGCStates = cmdDuration.WithLabelValues("get_all_keyspaces_gc_states")
 
 	CmdFailedDurationGetRegion = cmdFailedDuration.WithLabelValues("get_region")
 	CmdFailedDurationTSOWait = cmdFailedDuration.WithLabelValues("wait")
@@ -387,6 +399,7 @@ func initLabelValues() {
 	CmdFailedDurationUpdateGCSafePoint = cmdFailedDuration.WithLabelValues("update_gc_safe_point")
 	CmdFailedDurationUpdateServiceGCSafePoint = cmdFailedDuration.WithLabelValues("update_service_gc_safe_point")
 	CmdFailedDurationLoadKeyspace = cmdFailedDuration.WithLabelValues("load_keyspace")
+	CmdFailedDurationLoadKeyspaceByID = cmdFailedDuration.WithLabelValues("load_keyspace_by_id")
 	CmdFailedDurationUpdateKeyspaceState = cmdFailedDuration.WithLabelValues("update_keyspace_state")
 	CmdFailedDurationGet = cmdFailedDuration.WithLabelValues("get")
 	CmdFailedDurationPut = cmdFailedDuration.WithLabelValues("put")
@@ -400,6 +413,9 @@ func initLabelValues() {
 	CmdFailedDurationSetGCBarrier = cmdFailedDuration.WithLabelValues("set_gc_barrier")
 	CmdFailedDurationDeleteGCBarrier = cmdFailedDuration.WithLabelValues("delete_gc_barrier")
 	CmdFailedDurationGetGCState = cmdFailedDuration.WithLabelValues("get_gc_state")
+	CmdFailedDurationSetGlobalGCBarrier = cmdFailedDuration.WithLabelValues("set_global_gc_barrier")
+	CmdFailedDurationDeleteGlobalGCBarrier = cmdFailedDuration.WithLabelValues("delete_global_gc_barrier")
+	CmdFailedDurationGetAllKeyspacesGCStates = cmdDuration.WithLabelValues("get_all_keyspaces_gc_states")
 
 	InternalCmdDurationGetClusterInfo = internalCmdDuration.WithLabelValues("get_cluster_info")
 	InternalCmdDurationGetMembers = internalCmdDuration.WithLabelValues("get_members")

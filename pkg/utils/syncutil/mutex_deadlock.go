@@ -13,7 +13,6 @@
 // limitations under the License.
 
 //go:build deadlock
-// +build deadlock
 
 package syncutil
 

@@ -17,14 +17,15 @@ package store_test
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 	"go.etcd.io/etcd/client/pkg/v3/transport"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -40,26 +41,45 @@ import (
 	"github.com/tikv/pd/tools/pd-ctl/tests"
 )
 
-func TestStoreLimitV2(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := pdTests.NewTestCluster(ctx, 1)
-	re.NoError(err)
-	defer cluster.Destroy()
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	re.NotEmpty(cluster.WaitLeader())
+type storeTestSuite struct {
+	suite.Suite
+	env *pdTests.SchedulingTestEnvironment
+}
+
+func TestStoreTestSuite(t *testing.T) {
+	suite.Run(t, new(storeTestSuite))
+}
+
+func (s *storeTestSuite) SetupSuite() {
+	s.env = pdTests.NewSchedulingTestEnvironment(s.T())
+}
+
+func (s *storeTestSuite) TearDownSuite() {
+	s.env.Cleanup()
+}
+
+func (s *storeTestSuite) TearDownTest() {
+	re := s.Require()
+	s.env.Reset(re)
+}
+
+func (s *storeTestSuite) TestStoreLimitV2() {
+	s.env.RunTest(s.checkStoreLimitV2)
+}
+func (s *storeTestSuite) checkStoreLimitV2(cluster *pdTests.TestCluster) {
+	re := s.Require()
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
-
-	leaderServer := cluster.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
-
 	// store command
 	args := []string{"-u", pdAddr, "config", "set", "store-limit-version", "v2"}
-	_, err = tests.ExecuteCommand(cmd, args...)
+	_, err := tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
+	defer func() {
+		// reset to v1 to avoid affecting other tests
+		args = []string{"-u", pdAddr, "config", "set", "store-limit-version", "v1"}
+		_, err = tests.ExecuteCommand(cmd, args...)
+		re.NoError(err)
+	}()
 
 	args = []string{"-u", pdAddr, "store", "limit"}
 	output, err := tests.ExecuteCommand(cmd, args...)
@@ -72,16 +92,111 @@ func TestStoreLimitV2(t *testing.T) {
 	re.Contains(string(output), "not support set limit")
 }
 
-func TestStore(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := pdTests.NewTestCluster(ctx, 1)
+func (s *storeTestSuite) TestStore() {
+	// TODO: enable this test in microservice mode
+	s.env.RunTestInNonMicroserviceEnv(s.checkStore)
+}
+
+func (s *storeTestSuite) TestTransferLeaderInStoreLimit() {
+	s.env.RunTestInNonMicroserviceEnv(s.checkTransferLeaderInStoreLimit)
+}
+
+func (s *storeTestSuite) checkTransferLeaderInStoreLimit(cluster *pdTests.TestCluster) {
+	re := s.Require()
+	pdAddr := cluster.GetConfig().GetClientURL()
+	leaderServer := cluster.GetLeaderServer()
+	for _, storeID := range []uint64{1, 2} {
+		pdTests.MustPutStore(re, cluster, &metapb.Store{
+			Id:        storeID,
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
+			Labels:    []*metapb.StoreLabel{{Key: "zone", Value: strconv.FormatUint(storeID, 10)}},
+		})
+	}
+
+	peerLimits := leaderServer.GetRaftCluster().GetScheduleConfig().StoreLimit
+
+	cmd := ctl.GetRootCmd()
+	args := []string{"-u", pdAddr, "store", "limit", "1", "30", "transfer-leader-in"}
+	_, err := tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	defer cluster.Destroy()
-	err = cluster.RunInitialServers()
+	re.Equal(float64(30), leaderServer.GetRaftCluster().GetStoreLimitByType(1, storelimit.TransferLeaderIn))
+
+	cmd = ctl.GetRootCmd()
+	args = []string{"-u", pdAddr, "store", "limit", "transfer-leader-in"}
+	output, err := tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
+	limits := make(map[string]map[string]float64)
+	re.NoError(json.Unmarshal(output, &limits))
+	re.Equal(float64(30), limits["1"]["transfer-leader-in"])
+
+	cmd = ctl.GetRootCmd()
+	args = []string{"-u", pdAddr, "store", "limit", "all", "20", "transfer-leader-in"}
+	_, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	for _, storeID := range []uint64{1, 2} {
+		re.Equal(float64(20), leaderServer.GetRaftCluster().GetStoreLimitByType(storeID, storelimit.TransferLeaderIn))
+	}
+
+	re.NoError(leaderServer.Stop())
+	re.NoError(leaderServer.Run())
 	re.NotEmpty(cluster.WaitLeader())
+	re.Equal(float64(20), leaderServer.GetRaftCluster().GetStoreLimitByType(1, storelimit.TransferLeaderIn))
+
+	cmd = ctl.GetRootCmd()
+	args = []string{"-u", pdAddr, "store", "limit", "1", "0", "transfer-leader-in"}
+	output, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Contains(string(output), "rate should be a number")
+	re.Equal(float64(20), leaderServer.GetRaftCluster().GetStoreLimitByType(1, storelimit.TransferLeaderIn))
+
+	unlimited := strconv.FormatFloat(storelimit.Unlimited, 'f', -1, 64)
+	cmd = ctl.GetRootCmd()
+	args = []string{"-u", pdAddr, "store", "limit", "1", unlimited, "transfer-leader-in"}
+	output, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.NotContains(string(output), "rate should")
+	re.Equal(storelimit.Unlimited, leaderServer.GetRaftCluster().GetStoreLimitByType(1, storelimit.TransferLeaderIn))
+
+	cmd = ctl.GetRootCmd()
+	args = []string{"-u", pdAddr, "store", "limit", "all", "0", "transfer-leader-in"}
+	output, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Contains(string(output), "rate should be a number")
+	re.Equal(float64(20), leaderServer.GetRaftCluster().GetStoreLimitByType(2, storelimit.TransferLeaderIn))
+
+	cmd = ctl.GetRootCmd()
+	args = []string{"-u", pdAddr, "store", "limit", "all", "zone", "2", unlimited, "transfer-leader-in"}
+	output, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
+	re.Equal(storelimit.Unlimited, leaderServer.GetRaftCluster().GetStoreLimitByType(2, storelimit.TransferLeaderIn))
+
+	cmd = ctl.GetRootCmd()
+	args = []string{"-u", pdAddr, "store", "limit", "all", "zone", "2", "25", "transfer-leader-in"}
+	output, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
+	re.Equal(float64(25), leaderServer.GetRaftCluster().GetStoreLimitByType(2, storelimit.TransferLeaderIn))
+	re.Equal(storelimit.Unlimited, leaderServer.GetRaftCluster().GetStoreLimitByType(1, storelimit.TransferLeaderIn))
+
+	cmd = ctl.GetRootCmd()
+	args = []string{"-u", pdAddr, "store", "limit", "all", unlimited, "transfer-leader-in"}
+	output, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.NotContains(string(output), "rate should")
+	re.NoError(leaderServer.Stop())
+	re.NoError(leaderServer.Run())
+	re.NotEmpty(cluster.WaitLeader())
+	for _, storeID := range []uint64{1, 2} {
+		re.Equal(storelimit.Unlimited, leaderServer.GetRaftCluster().GetStoreLimitByType(storeID, storelimit.TransferLeaderIn))
+		re.Equal(peerLimits[storeID].AddPeer, leaderServer.GetRaftCluster().GetStoreLimitByType(storeID, storelimit.AddPeer))
+		re.Equal(peerLimits[storeID].RemovePeer, leaderServer.GetRaftCluster().GetStoreLimitByType(storeID, storelimit.RemovePeer))
+	}
+}
+
+func (s *storeTestSuite) checkStore(cluster *pdTests.TestCluster) {
+	re := s.Require()
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
 
@@ -89,10 +204,9 @@ func TestStore(t *testing.T) {
 		{
 			Store: &response.MetaStore{
 				Store: &metapb.Store{
-					Id:            1,
-					State:         metapb.StoreState_Up,
-					NodeState:     metapb.NodeState_Serving,
-					LastHeartbeat: time.Now().UnixNano(),
+					Id:        1,
+					State:     metapb.StoreState_Up,
+					NodeState: metapb.NodeState_Serving,
 				},
 				StateName: metapb.StoreState_Up.String(),
 			},
@@ -100,10 +214,9 @@ func TestStore(t *testing.T) {
 		{
 			Store: &response.MetaStore{
 				Store: &metapb.Store{
-					Id:            3,
-					State:         metapb.StoreState_Up,
-					NodeState:     metapb.NodeState_Serving,
-					LastHeartbeat: time.Now().UnixNano(),
+					Id:        3,
+					State:     metapb.StoreState_Up,
+					NodeState: metapb.NodeState_Serving,
 				},
 				StateName: metapb.StoreState_Up.String(),
 			},
@@ -111,10 +224,9 @@ func TestStore(t *testing.T) {
 		{
 			Store: &response.MetaStore{
 				Store: &metapb.Store{
-					Id:            2,
-					State:         metapb.StoreState_Tombstone,
-					NodeState:     metapb.NodeState_Removed,
-					LastHeartbeat: time.Now().UnixNano(),
+					Id:        2,
+					State:     metapb.StoreState_Tombstone,
+					NodeState: metapb.NodeState_Removed,
 				},
 				StateName: metapb.StoreState_Tombstone.String(),
 			},
@@ -122,12 +234,10 @@ func TestStore(t *testing.T) {
 	}
 
 	leaderServer := cluster.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
 
 	for _, store := range stores {
 		pdTests.MustPutStore(re, cluster, store.Store.Store)
 	}
-	defer cluster.Destroy()
 
 	// store command
 	args := []string{"-u", pdAddr, "store"}
@@ -252,6 +362,13 @@ func TestStore(t *testing.T) {
 	limit = leaderServer.GetRaftCluster().GetStoreLimitByType(1, storelimit.AddPeer)
 	re.Equal(float64(10), limit)
 
+	// Omitting the type must preserve both custom and default leader limits.
+	defaultLeaderLimit := leaderServer.GetPersistOptions().GetScheduleConfig().DefaultStoreLimit.TransferLeaderIn
+	args = []string{"-u", pdAddr, "store", "limit", "1", "37", "transfer-leader-in"}
+	output, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
+
 	// store limit all <rate>
 	args = []string{"-u", pdAddr, "store", "limit", "all", "20"}
 	_, err = tests.ExecuteCommand(cmd, args...)
@@ -268,6 +385,8 @@ func TestStore(t *testing.T) {
 	re.Equal(float64(20), limit1)
 	re.Equal(float64(20), limit2)
 	re.Equal(float64(20), limit3)
+	re.Equal(float64(37), leaderServer.GetRaftCluster().GetStoreLimitByType(1, storelimit.TransferLeaderIn))
+	re.Equal(defaultLeaderLimit, leaderServer.GetPersistOptions().GetScheduleConfig().DefaultStoreLimit.TransferLeaderIn)
 
 	re.NoError(leaderServer.Stop())
 	re.NoError(leaderServer.Run())
@@ -276,6 +395,8 @@ func TestStore(t *testing.T) {
 	storesLimit := leaderServer.GetPersistOptions().GetAllStoresLimit()
 	re.Equal(float64(20), storesLimit[1].AddPeer)
 	re.Equal(float64(20), storesLimit[1].RemovePeer)
+	re.Equal(float64(37), storesLimit[1].TransferLeaderIn)
+	re.Equal(defaultLeaderLimit, leaderServer.GetPersistOptions().GetScheduleConfig().DefaultStoreLimit.TransferLeaderIn)
 
 	// store limit all <rate> <type>
 	args = []string{"-u", pdAddr, "store", "limit", "all", "25", "remove-peer"}
@@ -310,7 +431,7 @@ func TestStore(t *testing.T) {
 	re.NoError(err)
 
 	allAddPeerLimit := make(map[string]map[string]any)
-	json.Unmarshal(output, &allAddPeerLimit)
+	re.NoError(json.Unmarshal(output, &allAddPeerLimit))
 	re.Equal(float64(20), allAddPeerLimit["1"]["add-peer"].(float64))
 	re.Equal(float64(20), allAddPeerLimit["3"]["add-peer"].(float64))
 	_, ok := allAddPeerLimit["2"]["add-peer"]
@@ -321,7 +442,7 @@ func TestStore(t *testing.T) {
 	re.NoError(err)
 
 	allRemovePeerLimit := make(map[string]map[string]any)
-	json.Unmarshal(output, &allRemovePeerLimit)
+	re.NoError(json.Unmarshal(output, &allRemovePeerLimit))
 	re.Equal(float64(20), allRemovePeerLimit["1"]["remove-peer"].(float64))
 	re.Equal(float64(25), allRemovePeerLimit["3"]["remove-peer"].(float64))
 	_, ok = allRemovePeerLimit["2"]["add-peer"]
@@ -330,10 +451,9 @@ func TestStore(t *testing.T) {
 	// put enough stores for replica.
 	for id := 1000; id <= 1005; id++ {
 		store2 := &metapb.Store{
-			Id:            uint64(id),
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:        uint64(id),
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
 		}
 		pdTests.MustPutStore(re, cluster, store2)
 	}
@@ -491,19 +611,27 @@ func TestStore(t *testing.T) {
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	re.Contains(string(output), "rate should be less than")
+
+	// store limit all engine tikv 21 remove peer for tikv stores
+	args = []string{"-u", pdAddr, "store", "limit", "all", "engine", "tikv", "21", "remove-peer"}
+	_, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+
+	args = []string{"-u", pdAddr, "store", "limit", "remove-peer"}
+	output, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	allRemovePeerLimit = make(map[string]map[string]any)
+	re.NoError(json.Unmarshal(output, &allRemovePeerLimit))
+	re.Equal(float64(21), allRemovePeerLimit["1"]["remove-peer"].(float64))
+	re.Equal(float64(21), allRemovePeerLimit["3"]["remove-peer"].(float64))
 }
 
 // https://github.com/tikv/pd/issues/5024
-func TestTombstoneStore(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := pdTests.NewTestCluster(ctx, 1)
-	re.NoError(err)
-	defer cluster.Destroy()
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	re.NotEmpty(cluster.WaitLeader())
+func (s *storeTestSuite) TestTombstoneStore() {
+	s.env.RunTest(s.checkTombstoneStore)
+}
+func (s *storeTestSuite) checkTombstoneStore(cluster *pdTests.TestCluster) {
+	re := s.Require()
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
 
@@ -511,10 +639,9 @@ func TestTombstoneStore(t *testing.T) {
 		{
 			Store: &response.MetaStore{
 				Store: &metapb.Store{
-					Id:            2,
-					State:         metapb.StoreState_Tombstone,
-					NodeState:     metapb.NodeState_Removed,
-					LastHeartbeat: time.Now().UnixNano(),
+					Id:        2,
+					State:     metapb.StoreState_Tombstone,
+					NodeState: metapb.NodeState_Removed,
 				},
 				StateName: metapb.StoreState_Tombstone.String(),
 			},
@@ -522,10 +649,9 @@ func TestTombstoneStore(t *testing.T) {
 		{
 			Store: &response.MetaStore{
 				Store: &metapb.Store{
-					Id:            3,
-					State:         metapb.StoreState_Tombstone,
-					NodeState:     metapb.NodeState_Removed,
-					LastHeartbeat: time.Now().UnixNano(),
+					Id:        3,
+					State:     metapb.StoreState_Tombstone,
+					NodeState: metapb.NodeState_Removed,
 				},
 				StateName: metapb.StoreState_Tombstone.String(),
 			},
@@ -533,23 +659,18 @@ func TestTombstoneStore(t *testing.T) {
 		{
 			Store: &response.MetaStore{
 				Store: &metapb.Store{
-					Id:            4,
-					State:         metapb.StoreState_Tombstone,
-					NodeState:     metapb.NodeState_Removed,
-					LastHeartbeat: time.Now().UnixNano(),
+					Id:        4,
+					State:     metapb.StoreState_Tombstone,
+					NodeState: metapb.NodeState_Removed,
 				},
 				StateName: metapb.StoreState_Tombstone.String(),
 			},
 		},
 	}
-
-	leaderServer := cluster.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
 
 	for _, store := range stores {
 		pdTests.MustPutStore(re, cluster, store.Store.Store)
 	}
-	defer cluster.Destroy()
 	pdTests.MustPutRegion(re, cluster, 1, 2, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000), core.SetReportInterval(0, utils.RegionHeartBeatReportInterval))
 	pdTests.MustPutRegion(re, cluster, 2, 3, []byte("b"), []byte("c"), core.SetWrittenBytes(3000000000), core.SetReportInterval(0, utils.RegionHeartBeatReportInterval))
 	// store remove-tombstone
@@ -561,27 +682,17 @@ func TestTombstoneStore(t *testing.T) {
 	re.Contains(message, "3")
 }
 
+// TestStoreTLS tests the store command with TLS enabled.
+// So we need another cluster to run this test.
 func TestStoreTLS(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	certPath := filepath.Join("..", "cert")
+	certPath := t.TempDir()
 	certScript := filepath.Join("..", "cert_opt.sh")
-	// generate certs
-	if err := os.Mkdir(certPath, 0755); err != nil {
-		t.Fatal(err)
-	}
 	if err := exec.Command(certScript, "generate", certPath).Run(); err != nil {
 		t.Fatal(err)
 	}
-	defer func() {
-		if err := exec.Command(certScript, "cleanup", certPath).Run(); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.RemoveAll(certPath); err != nil {
-			t.Fatal(err)
-		}
-	}()
 
 	tlsInfo := transport.TLSInfo{
 		KeyFile:       filepath.Join(certPath, "pd-server-key.pem"),
@@ -611,10 +722,9 @@ func TestStoreTLS(t *testing.T) {
 		{
 			Store: &response.MetaStore{
 				Store: &metapb.Store{
-					Id:            1,
-					State:         metapb.StoreState_Up,
-					NodeState:     metapb.NodeState_Serving,
-					LastHeartbeat: time.Now().UnixNano(),
+					Id:        1,
+					State:     metapb.StoreState_Up,
+					NodeState: metapb.NodeState_Serving,
 				},
 				StateName: metapb.StoreState_Up.String(),
 			},
@@ -622,10 +732,9 @@ func TestStoreTLS(t *testing.T) {
 		{
 			Store: &response.MetaStore{
 				Store: &metapb.Store{
-					Id:            2,
-					State:         metapb.StoreState_Up,
-					NodeState:     metapb.NodeState_Serving,
-					LastHeartbeat: time.Now().UnixNano(),
+					Id:        2,
+					State:     metapb.StoreState_Up,
+					NodeState: metapb.NodeState_Serving,
 				},
 				StateName: metapb.StoreState_Up.String(),
 			},
@@ -644,9 +753,9 @@ func TestStoreTLS(t *testing.T) {
 	pdAddr = strings.ReplaceAll(pdAddr, "http", "https")
 	// store command
 	args := []string{"-u", pdAddr, "store",
-		"--cacert=" + filepath.Join("..", "cert", "ca.pem"),
-		"--cert=" + filepath.Join("..", "cert", "client.pem"),
-		"--key=" + filepath.Join("..", "cert", "client-key.pem")}
+		"--cacert=" + filepath.Join(certPath, "ca.pem"),
+		"--cert=" + filepath.Join(certPath, "client.pem"),
+		"--key=" + filepath.Join(certPath, "client-key.pem")}
 	output, err := tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	storesInfo := new(response.StoresInfo)

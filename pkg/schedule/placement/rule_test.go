@@ -16,7 +16,7 @@ package placement
 
 import (
 	"encoding/hex"
-	"math/rand"
+	"math/rand/v2"
 	"testing"
 
 	"github.com/stretchr/testify/require"

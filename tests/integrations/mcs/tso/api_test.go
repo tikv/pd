@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	apis "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
+	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -71,7 +72,7 @@ func (suite *tsoAPITestSuite) SetupTest() {
 	pdLeaderServer := suite.pdCluster.GetServer(leaderName)
 	re.NoError(pdLeaderServer.BootstrapCluster())
 	suite.backendEndpoints = pdLeaderServer.GetAddr()
-	suite.tsoCluster, err = tests.NewTestTSOCluster(suite.ctx, 1, suite.backendEndpoints)
+	suite.tsoCluster, err = tests.NewTestTSOCluster(suite.ctx, 2, suite.backendEndpoints)
 	re.NoError(err)
 }
 
@@ -94,7 +95,7 @@ func (suite *tsoAPITestSuite) TestGetKeyspaceGroupMembers() {
 	re.True(defaultGroupMember.IsPrimary)
 	primaryMember, err := primary.GetMember(constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID)
 	re.NoError(err)
-	re.Equal(primaryMember.GetLeaderID(), defaultGroupMember.PrimaryID)
+	re.Equal(primaryMember.(*member.Participant).GetPrimaryID(), defaultGroupMember.PrimaryID)
 }
 
 func (suite *tsoAPITestSuite) TestForwardResetTS() {
@@ -144,17 +145,14 @@ func TestTSOServerStartFirst(t *testing.T) {
 	defer cluster.Destroy()
 	re.NoError(err)
 	addr := cluster.GetConfig().GetClientURL()
-	ch := make(chan struct{})
-	defer close(ch)
-	clusterCh := make(chan *tests.TestTSOCluster)
-	defer close(clusterCh)
+	type clusterResult struct {
+		cluster *tests.TestTSOCluster
+		err     error
+	}
+	clusterCh := make(chan clusterResult, 1)
 	go func() {
 		tsoCluster, err := tests.NewTestTSOCluster(ctx, 2, addr)
-		re.NoError(err)
-		primary := tsoCluster.WaitForDefaultPrimaryServing(re)
-		re.NotNil(primary)
-		clusterCh <- tsoCluster
-		ch <- struct{}{}
+		clusterCh <- clusterResult{cluster: tsoCluster, err: err}
 	}()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
@@ -163,9 +161,12 @@ func TestTSOServerStartFirst(t *testing.T) {
 	pdLeaderServer := cluster.GetServer(leaderName)
 	re.NoError(pdLeaderServer.BootstrapCluster())
 	re.NoError(err)
-	tsoCluster := <-clusterCh
+	result := <-clusterCh
+	re.NoError(result.err)
+	tsoCluster := result.cluster
 	defer tsoCluster.Destroy()
-	<-ch
+	primary := tsoCluster.WaitForDefaultPrimaryServing(re)
+	re.NotNil(primary)
 
 	time.Sleep(time.Second * 1)
 	input := make(map[string]any)
@@ -282,4 +283,76 @@ func (suite *tsoAPITestSuite) TestConfig() {
 	re.Equal(cfg.GetTSOSaveInterval(), primary.GetConfig().GetTSOSaveInterval())
 	re.Equal(cfg.GetTSOUpdatePhysicalInterval(), primary.GetConfig().GetTSOUpdatePhysicalInterval())
 	re.Equal(cfg.GetMaxResetTSGap(), primary.GetConfig().GetMaxResetTSGap())
+}
+
+func (suite *tsoAPITestSuite) TestHealth() {
+	re := suite.Require()
+
+	s := suite.tsoCluster.WaitForDefaultPrimaryServing(re)
+	testutil.Eventually(re, func() bool {
+		return s.IsServing()
+	})
+	resp, err := tests.TestDialClient.Get(s.GetConfig().GetAdvertiseListenAddr() + "/health")
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusOK, resp.StatusCode)
+}
+
+// TestForwardingBehavior specifically tests the API forwarding logic.
+func (suite *tsoAPITestSuite) TestForwardingBehavior() {
+	re := suite.Require()
+
+	primary := suite.tsoCluster.WaitForDefaultPrimaryServing(re)
+	re.NotNil(primary)
+	var follower *tso.Server
+	for _, srv := range suite.tsoCluster.GetServers() {
+		if srv.Name() != primary.Name() {
+			follower = srv
+			break
+		}
+	}
+	re.NotNil(follower)
+	re.True(primary.IsServing())
+	re.False(follower.IsServing())
+	re.NotEqual(follower.GetConfig().GetListenAddr(), primary.GetConfig().GetListenAddr())
+
+	followerAddr := follower.GetAddr()
+	followerURL := func(path string) string {
+		return fmt.Sprintf("%s%s%s", followerAddr, apis.APIPathPrefix, path)
+	}
+
+	// Test: PUT /admin/log should be handled by the follower locally.
+	logURL := followerURL("/admin/log")
+	level := "debug"
+	logPayload, err := json.Marshal(level)
+	re.NoError(err)
+	req, _ := http.NewRequest(http.MethodPut, logURL, bytes.NewBuffer(logPayload))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := tests.TestDialClient.Do(req)
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusOK, resp.StatusCode)
+
+	// Test: GET /config should be handled by the follower locally.
+	configURL := followerURL("/config")
+	var followerCfg tso.Config
+	err = testutil.ReadGetJSON(re, tests.TestDialClient, configURL, &followerCfg)
+	re.NoError(err)
+	re.Equal(follower.GetConfig().GetListenAddr(), followerCfg.GetListenAddr())
+	re.NotEqual(primary.GetConfig().GetListenAddr(), followerCfg.GetListenAddr())
+	re.Equal(level, followerCfg.Log.Level)
+
+	// Test: GET /keyspace-groups/members should be handled by the follower locally.
+	membersURL := followerURL("/keyspace-groups/members")
+	var kgms map[uint32]*apis.KeyspaceGroupMember
+	err = testutil.ReadGetJSON(re, tests.TestDialClient, membersURL, &kgms)
+	re.NoError(err)
+	re.Len(kgms, 1)
+	kgm := kgms[constant.DefaultKeyspaceGroupID]
+	re.NotNil(kgm)
+	re.Len(kgm.Member.ListenUrls, 1)
+	respListenURL := kgm.Member.ListenUrls[0]
+	re.Equal(follower.GetConfig().GetListenAddr(), respListenURL)
+	re.NotEqual(primary.GetConfig().GetListenAddr(), respListenURL)
+	re.False(kgm.IsPrimary)
 }

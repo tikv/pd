@@ -16,16 +16,17 @@ package tso_test
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
-	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -34,19 +35,44 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
-func TestRequestFollower(t *testing.T) {
-	re := require.New(t)
+type tsoTestSuite struct {
+	suite.Suite
+	env            *tests.SchedulingTestEnvironment
+	updateInterval time.Duration
+}
+
+func TestTSOSuite(t *testing.T) {
+	suite.Run(t, new(tsoTestSuite))
+}
+
+func (s *tsoTestSuite) SetupSuite() {
+	// Set to max update interval so we can drain the logical part easily later.
+	s.updateInterval = config.MaxTSOUpdatePhysicalInterval
+	s.env = tests.NewSchedulingTestEnvironment(s.T(), func(conf *config.Config, _ string) {
+		conf.TSOUpdatePhysicalInterval = typeutil.Duration{Duration: s.updateInterval}
+	})
+	s.env.PDCount = 2
+}
+
+func (s *tsoTestSuite) TearDownSuite() {
+	s.env.Cleanup()
+}
+
+func (s *tsoTestSuite) TearDownTest() {
+	s.env.Reset(s.Require())
+}
+
+func (s *tsoTestSuite) TestRequestFollower() {
+	s.env.RunTestInNonMicroserviceEnv(s.checkRequestFollower)
+}
+
+func (s *tsoTestSuite) checkRequestFollower(cluster *tests.TestCluster) {
+	re := s.Require()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 2)
-	re.NoError(err)
-	defer cluster.Destroy()
-
-	re.NoError(cluster.RunInitialServers())
-	re.NotEmpty(cluster.WaitLeader())
 
 	var followerServer *tests.TestServer
 	for _, s := range cluster.GetServers() {
@@ -56,17 +82,21 @@ func TestRequestFollower(t *testing.T) {
 	}
 	re.NotNil(followerServer)
 
-	grpcPDClient := testutil.MustNewGrpcClient(re, followerServer.GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, followerServer.GetAddr())
+	defer conn.Close()
 	clusterID := followerServer.GetClusterID()
 	req := &pdpb.TsoRequest{
-		Header:     testutil.NewRequestHeader(clusterID),
-		Count:      1,
-		DcLocation: tso.GlobalDCLocation,
+		Header: testutil.NewRequestHeader(clusterID),
+		Count:  1,
 	}
-	ctx = grpcutil.BuildForwardContext(ctx, followerServer.GetAddr())
+	// Connect directly without forwarding metadata to verify the original
+	// follower request behavior.
 	tsoClient, err := grpcPDClient.Tso(ctx)
 	re.NoError(err)
-	defer tsoClient.CloseSend()
+	defer func() {
+		err = tsoClient.CloseSend()
+		re.NoError(err)
+	}()
 
 	start := time.Now()
 	re.NoError(tsoClient.Send(req))
@@ -81,20 +111,17 @@ func TestRequestFollower(t *testing.T) {
 
 // In some cases, when a TSO request arrives, the SyncTimestamp may not finish yet.
 // This test is used to simulate this situation and verify that the retry mechanism.
-func TestDelaySyncTimestamp(t *testing.T) {
-	re := require.New(t)
+func (s *tsoTestSuite) TestDelaySyncTimestamp() {
+	s.env.RunTestInNonMicroserviceEnv(s.checkDelaySyncTimestamp)
+}
+
+func (s *tsoTestSuite) checkDelaySyncTimestamp(cluster *tests.TestCluster) {
+	re := s.Require()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 2)
-	re.NoError(err)
-	defer cluster.Destroy()
-	re.NoError(cluster.RunInitialServers())
-	re.NotEmpty(cluster.WaitLeader())
 
 	var leaderServer, nextLeaderServer *tests.TestServer
 	leaderServer = cluster.GetLeaderServer()
-	re.NotNil(leaderServer)
-	leaderServer.BootstrapCluster()
 	for _, s := range cluster.GetServers() {
 		if s.GetConfig().Name != cluster.GetLeader() {
 			nextLeaderServer = s
@@ -102,24 +129,28 @@ func TestDelaySyncTimestamp(t *testing.T) {
 	}
 	re.NotNil(nextLeaderServer)
 
-	grpcPDClient := testutil.MustNewGrpcClient(re, nextLeaderServer.GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, nextLeaderServer.GetAddr())
+	defer conn.Close()
 	clusterID := nextLeaderServer.GetClusterID()
 	req := &pdpb.TsoRequest{
-		Header:     testutil.NewRequestHeader(clusterID),
-		Count:      1,
-		DcLocation: tso.GlobalDCLocation,
+		Header: testutil.NewRequestHeader(clusterID),
+		Count:  1,
 	}
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/delaySyncTimestamp", `return(true)`))
 
 	// Make the old leader resign and wait for the new leader to get a lease
-	leaderServer.ResignLeader()
+	err := leaderServer.ResignLeaderWithRetry()
+	re.NoError(err)
 	re.True(nextLeaderServer.WaitLeader())
 
 	ctx = grpcutil.BuildForwardContext(ctx, nextLeaderServer.GetAddr())
 	tsoClient, err := grpcPDClient.Tso(ctx)
 	re.NoError(err)
-	defer tsoClient.CloseSend()
+	defer func() {
+		err = tsoClient.CloseSend()
+		re.NoError(err)
+	}()
 	re.NoError(tsoClient.Send(req))
 	resp, err := tsoClient.Recv()
 	re.NoError(err)
@@ -135,57 +166,77 @@ func checkAndReturnTimestampResponse(re *require.Assertions, req *pdpb.TsoReques
 	return timestamp
 }
 
-func TestLogicalOverflow(t *testing.T) {
-	re := require.New(t)
+func (s *tsoTestSuite) TestLogicalOverflow() {
+	s.env.RunTestInNonMicroserviceEnv(s.checkLogicalOverflow)
+}
+
+func (s *tsoTestSuite) checkLogicalOverflow(cluster *tests.TestCluster) {
+	re := s.Require()
+	const (
+		maxLogical = 1 << 18
+		count      = maxLogical / 10
+	)
+	var (
+		overflowPhysical atomic.Int64
+		overflowed       atomic.Bool
+	)
+	// Exhaust logical capacity on the first matching request while holding the
+	// allocation lock, so a periodic update cannot clear it before allocation.
+	const beforeGenerateTSOFailpoint = "github.com/tikv/pd/pkg/tso/beforeGenerateTSO"
+	re.NoError(failpoint.EnableCall(beforeGenerateTSOFailpoint, func(physical int64, logical *int64, batchCount int64) {
+		if batchCount == count && overflowPhysical.CompareAndSwap(0, physical) {
+			*logical = maxLogical - 1
+		}
+	}))
+	defer func() {
+		re.NoError(failpoint.Disable(beforeGenerateTSOFailpoint))
+	}()
+	const onLogicalOverflowFailpoint = "github.com/tikv/pd/pkg/tso/onLogicalOverflow"
+	re.NoError(failpoint.EnableCall(onLogicalOverflowFailpoint, func(batchCount uint32) {
+		if batchCount == count {
+			overflowed.Store(true)
+		}
+	}))
+	defer func() {
+		re.NoError(failpoint.Disable(onLogicalOverflowFailpoint))
+	}()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	// Set to max update interval so we can drain the logical part easily later.
-	updateInterval := config.MaxTSOUpdatePhysicalInterval
-	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
-		conf.TSOUpdatePhysicalInterval = typeutil.Duration{Duration: updateInterval}
-	})
-	defer cluster.Destroy()
-	re.NoError(err)
-	re.NoError(cluster.RunInitialServers())
-	re.NotEmpty(cluster.WaitLeader())
 
 	leaderServer := cluster.GetLeaderServer()
 	re.NotNil(leaderServer)
-	leaderServer.BootstrapCluster()
-	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	defer conn.Close()
 	clusterID := leaderServer.GetClusterID()
 
 	tsoClient, err := grpcPDClient.Tso(ctx)
 	re.NoError(err)
-	defer tsoClient.CloseSend()
+	defer func() {
+		err = tsoClient.CloseSend()
+		re.NoError(err)
+	}()
 
 	var (
-		maxDuration   time.Duration
+		firstPhysical int64
 		lastTimestamp *pdpb.Timestamp
 	)
-	// Since the max logical count is 2 << 18 (262144), we request 20 times with 26214 count each time.
-	// This ensures that the logical part will definitely overflow once within the `updateInterval`.
-	count := (1 << 18) / 10
+	// Keep allocating after the forced overflow to check recovery and monotonicity.
 	for range 20 {
-		begin := time.Now()
 		req := &pdpb.TsoRequest{
-			Header:     testutil.NewRequestHeader(clusterID),
-			Count:      uint32(count),
-			DcLocation: tso.GlobalDCLocation,
+			Header: testutil.NewRequestHeader(clusterID),
+			Count:  uint32(count),
 		}
 		re.NoError(tsoClient.Send(req))
 		resp, err := tsoClient.Recv()
 		re.NoError(err)
-		// Record the max duration to validate whether the overflow is triggered later.
-		duration := time.Since(begin)
-		if duration > maxDuration {
-			maxDuration = duration
-		}
 		// Check the monotonicity of the timestamp.
 		timestamp := checkAndReturnTimestampResponse(re, req, resp)
 		re.NotNil(timestamp)
-		if lastTimestamp != nil {
+		re.Less(timestamp.GetLogical(), int64(maxLogical))
+		if lastTimestamp == nil {
+			firstPhysical = timestamp.GetPhysical()
+		} else {
 			lastPhysical, curPhysical := lastTimestamp.GetPhysical(), timestamp.GetPhysical()
 			re.GreaterOrEqual(curPhysical, lastPhysical)
 			// If the physical time is the same, the logical time must be strictly increasing.
@@ -195,6 +246,7 @@ func TestLogicalOverflow(t *testing.T) {
 		}
 		lastTimestamp = timestamp
 	}
-	// Due to the overflow triggered, there at least one request duration greater than the `updateInterval`.
-	re.Greater(maxDuration, updateInterval)
+	re.Positive(overflowPhysical.Load(), "the logical capacity must be exhausted")
+	re.True(overflowed.Load(), "the logical overflow branch must be reached")
+	re.Greater(firstPhysical, overflowPhysical.Load())
 }

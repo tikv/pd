@@ -15,15 +15,14 @@
 package region_test
 
 import (
-	"context"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/pingcap/failpoint"
@@ -32,30 +31,50 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/response"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/api"
 	pdTests "github.com/tikv/pd/tests"
 	ctl "github.com/tikv/pd/tools/pd-ctl/pdctl"
 	"github.com/tikv/pd/tools/pd-ctl/tests"
 )
 
-func TestRegionKeyFormat(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := pdTests.NewTestCluster(ctx, 1)
-	defer cluster.Destroy()
-	re.NoError(err)
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	re.NotEmpty(cluster.WaitLeader())
+type regionTestSuite struct {
+	suite.Suite
+	env *pdTests.SchedulingTestEnvironment
+}
+
+func TestRegionTestSuite(t *testing.T) {
+	suite.Run(t, new(regionTestSuite))
+}
+
+func (suite *regionTestSuite) SetupSuite() {
+	suite.env = pdTests.NewSchedulingTestEnvironment(suite.T())
+	suite.env.PDCount = 3
+	suite.env.RunFunc(func(cluster *pdTests.TestCluster) {
+		suite.NotEmpty(cluster.WaitLeader())
+	})
+}
+
+func (suite *regionTestSuite) TearDownSuite() {
+	suite.env.Cleanup()
+}
+
+func (suite *regionTestSuite) TearDownTest() {
+	re := suite.Require()
+	suite.env.Reset(re)
+}
+
+func (suite *regionTestSuite) TestRegionKeyFormat() {
+	suite.env.RunTest(suite.checkRegionKeyFormat)
+}
+func (suite *regionTestSuite) checkRegionKeyFormat(cluster *pdTests.TestCluster) {
+	re := suite.Require()
 	url := cluster.GetConfig().GetClientURL()
+	cluster.WaitLeader()
 	store := &metapb.Store{
-		Id:            1,
-		State:         metapb.StoreState_Up,
-		LastHeartbeat: time.Now().UnixNano(),
+		Id:    1,
+		State: metapb.StoreState_Up,
 	}
-	leaderServer := cluster.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
 	pdTests.MustPutStore(re, cluster, store)
 
 	cmd := ctl.GetRootCmd()
@@ -64,32 +83,26 @@ func TestRegionKeyFormat(t *testing.T) {
 	re.NotContains(string(output), "unknown flag")
 }
 
-func TestRegion(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := pdTests.NewTestCluster(ctx, 1)
-	re.NoError(err)
-	defer cluster.Destroy()
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	re.NotEmpty(cluster.WaitLeader())
+func (suite *regionTestSuite) TestRegion() {
+	suite.env.RunTest(suite.checkRegion)
+}
+
+func (suite *regionTestSuite) checkRegion(cluster *pdTests.TestCluster) {
+	re := suite.Require()
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
 
 	store := &metapb.Store{
-		Id:            1,
-		State:         metapb.StoreState_Up,
-		LastHeartbeat: time.Now().UnixNano(),
+		Id:    1,
+		State: metapb.StoreState_Up,
 	}
 	leaderServer := cluster.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
 	pdTests.MustPutStore(re, cluster, store)
 
 	downPeer := &metapb.Peer{Id: 8, StoreId: 3}
 	r1 := pdTests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"),
 		core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1),
-		core.SetRegionVersion(1), core.SetApproximateSize(1), core.SetApproximateKeys(100),
+		core.SetRegionVersion(1), core.SetApproximateSize(1), core.SetApproximateKeys(0),
 		core.SetReadQuery(100), core.SetWrittenQuery(100),
 		core.SetPeers([]*metapb.Peer{
 			{Id: 1, StoreId: 1},
@@ -113,10 +126,10 @@ func TestRegion(t *testing.T) {
 		core.SetRegionVersion(4), core.SetApproximateSize(10), core.SetApproximateKeys(1000),
 		core.SetReadQuery(400), core.SetWrittenQuery(400),
 	)
-	defer cluster.Destroy()
 
 	getRegionsByType := func(storeID uint64, regionType core.SubTreeRegionType) []*core.RegionInfo {
-		regions, _ := leaderServer.GetRaftCluster().GetStoreRegionsByTypeInSubTree(storeID, regionType)
+		regions, err := leaderServer.GetRaftCluster().GetStoreRegionsByTypeInSubTree(storeID, regionType)
+		re.NoError(err)
 		return regions
 	}
 
@@ -135,6 +148,7 @@ func TestRegion(t *testing.T) {
 		{[]string{"region", "store", "1", "--type=learner"}, getRegionsByType(1, core.LearnerInSubTree)},
 		{[]string{"region", "store", "1", "--type=witness"}, getRegionsByType(1, core.WitnessInSubTree)},
 		{[]string{"region", "store", "1", "--type=pending"}, getRegionsByType(1, core.PendingPeerInSubTree)},
+		{[]string{"region", "store", "2", "--type=pending"}, getRegionsByType(2, core.PendingPeerInSubTree)},
 		{[]string{"region", "store", "1", "--type=all"}, []*core.RegionInfo{r1, r2, r3, r4}},
 		// region check extra-peer command
 		{[]string{"region", "check", "extra-peer"}, []*core.RegionInfo{r1}},
@@ -268,37 +282,28 @@ func TestRegion(t *testing.T) {
 	}, *rangeHoles)
 }
 
-func TestRegionNoLeader(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := pdTests.NewTestCluster(ctx, 1)
-	re.NoError(err)
-	defer cluster.Destroy()
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	re.NotEmpty(cluster.WaitLeader())
+func (suite *regionTestSuite) TestRegionNoLeader() {
+	suite.env.RunTest(suite.checkRegionNoLeader)
+}
+
+func (suite *regionTestSuite) checkRegionNoLeader(cluster *pdTests.TestCluster) {
+	re := suite.Require()
 	url := cluster.GetConfig().GetClientURL()
 	stores := []*metapb.Store{
 		{
-			Id:            1,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:    1,
+			State: metapb.StoreState_Up,
 		},
 		{
-			Id:            2,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:    2,
+			State: metapb.StoreState_Up,
 		},
 		{
-			Id:            3,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:    3,
+			State: metapb.StoreState_Up,
 		},
 	}
 
-	leaderServer := cluster.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
 	for i := range stores {
 		pdTests.MustPutStore(re, cluster, stores[i])
 	}
@@ -318,33 +323,16 @@ func TestRegionNoLeader(t *testing.T) {
 	cluster.GetLeaderServer().GetRaftCluster().GetBasicCluster().SetRegion(r)
 
 	cmd := ctl.GetRootCmd()
-	_, err = tests.ExecuteCommand(cmd, "-u", url, "region", "100")
+	_, err := tests.ExecuteCommand(cmd, "-u", url, "region", "100")
 	re.NoError(err)
 }
 
-type patrolTestSuite struct {
-	suite.Suite
-	env *pdTests.SchedulingTestEnvironment
-}
-
-func TestPatrolTestSuite(t *testing.T) {
-	suite.Run(t, new(patrolTestSuite))
-}
-
-func (suite *patrolTestSuite) SetupSuite() {
-	suite.env = pdTests.NewSchedulingTestEnvironment(suite.T())
-}
-
-func (suite *patrolTestSuite) TearDownSuite() {
-	suite.env.Cleanup()
-}
-
-func (suite *patrolTestSuite) TestPatrol() {
+func (suite *regionTestSuite) TestPatrol() {
 	// This tool is designed to run in a non-microservice environment.
 	suite.env.RunTestInNonMicroserviceEnv(suite.checkPatrol)
 }
 
-func (suite *patrolTestSuite) checkPatrol(cluster *pdTests.TestCluster) {
+func (suite *regionTestSuite) checkPatrol(cluster *pdTests.TestCluster) {
 	re := suite.Require()
 	cmd := ctl.GetRootCmd()
 	pdAddr := cluster.GetLeaderServer().GetAddr()
@@ -436,13 +424,13 @@ func (suite *patrolTestSuite) checkPatrol(cluster *pdTests.TestCluster) {
 	re.NoError(err)
 }
 
-func (suite *patrolTestSuite) TestPatrolWithHollowRegion() {
+func (suite *regionTestSuite) TestPatrolWithHollowRegion() {
 	// This tool is designed to run in a non-microservice environment.
 	suite.env.RunTestInNonMicroserviceEnv(suite.checkPatrolWithHollowRegion)
 }
 
 // checkPatrolWithHollowRegion tests the case where the next region's start key does not match the current region's end key.
-func (suite *patrolTestSuite) checkPatrolWithHollowRegion(cluster *pdTests.TestCluster) {
+func (suite *regionTestSuite) checkPatrolWithHollowRegion(cluster *pdTests.TestCluster) {
 	re := suite.Require()
 	cmd := ctl.GetRootCmd()
 	pdAddr := cluster.GetLeaderServer().GetAddr()
@@ -480,11 +468,11 @@ func (suite *patrolTestSuite) checkPatrolWithHollowRegion(cluster *pdTests.TestC
 	re.Contains(string(output), "merge failed: no matching sibling found for region 101")
 }
 
-func (suite *patrolTestSuite) TestPatrolWithLimit() {
+func (suite *regionTestSuite) TestPatrolWithLimit() {
 	suite.env.RunTestInNonMicroserviceEnv(suite.checkPatrolWithLimit)
 }
 
-func (suite *patrolTestSuite) checkPatrolWithLimit(cluster *pdTests.TestCluster) {
+func (suite *regionTestSuite) checkPatrolWithLimit(cluster *pdTests.TestCluster) {
 	re := suite.Require()
 	cmd := ctl.GetRootCmd()
 	pdAddr := cluster.GetLeaderServer().GetAddr()
@@ -514,5 +502,70 @@ func (suite *patrolTestSuite) checkPatrolWithLimit(cluster *pdTests.TestCluster)
 		re.Equal(float64(totalRegions), res["scan_count"], "scan_count should equal total regions regardless of limit")
 		re.Empty(res["count"])
 		re.Empty(res["results"])
+	}
+}
+
+func (suite *regionTestSuite) TestFollowerDirect() {
+	suite.env.RunTestInNonMicroserviceEnv(suite.followerDirect)
+}
+
+func (suite *regionTestSuite) followerDirect(cluster *pdTests.TestCluster) {
+	re := suite.Require()
+	re.NotEmpty(cluster.WaitLeader())
+	if err := cluster.GetLeaderServer().BootstrapCluster(); err != nil {
+		re.Contains(err.Error(), "already bootstrapped")
+	}
+	cmd := ctl.GetRootCmd()
+	stores := []*metapb.Store{
+		{
+			Id:    1,
+			State: metapb.StoreState_Up,
+		},
+		{
+			Id:    2,
+			State: metapb.StoreState_Up,
+		},
+		{
+			Id:    3,
+			State: metapb.StoreState_Up,
+		},
+	}
+
+	for i := range stores {
+		pdTests.MustPutStore(re, cluster, stores[i])
+	}
+	metaRegion := &metapb.Region{
+		Id:       100,
+		StartKey: []byte(""),
+		EndKey:   []byte(""),
+		Peers: []*metapb.Peer{
+			{Id: 1, StoreId: 1},
+			{Id: 5, StoreId: 2},
+			{Id: 6, StoreId: 3}},
+		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
+	}
+	region := core.NewRegionInfo(metaRegion, metaRegion.Peers[0])
+	re.NoError(cluster.HandleRegionHeartbeat(region))
+	pdAddr := cluster.GetLeaderServer().GetAddr()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/api/RejectGetRegionByIDWhenAccessLeader", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/api/RejectGetRegionByIDWhenAccessLeader"))
+	}()
+	for _, server := range cluster.GetServers() {
+		serverAddr := server.GetAddr()
+		// leader reject any region info request with --no-forward, followers should work normally.
+		if serverAddr == pdAddr {
+			output, err := tests.ExecuteCommand(cmd, "-u", serverAddr, "region", "100", "--no-forward")
+			re.NoError(err)
+			re.Contains(string(output), "Failed to get region")
+		} else {
+			// The region is created on the leader and propagates to followers
+			// asynchronously through the region syncer, so the follower may not
+			// have it yet. Retry until the synced region shows up.
+			testutil.Eventually(re, func() bool {
+				output, err := tests.ExecuteCommand(cmd, "-u", serverAddr, "region", "100", "--no-forward")
+				return err == nil && strings.Contains(string(output), "\"id\":100")
+			})
+		}
 	}
 }

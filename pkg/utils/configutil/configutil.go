@@ -19,6 +19,7 @@ import (
 	"io"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -72,11 +73,11 @@ func (m *ConfigMetaData) CheckUndecoded() error {
 	if len(undecoded) == 0 {
 		return nil
 	}
-	errInfo := "Config contains undefined item: "
+	parts := make([]string, 0, len(undecoded))
 	for _, key := range undecoded {
-		errInfo += key.String() + ", "
+		parts = append(parts, key.String())
 	}
-	return errors.New(errInfo[:len(errInfo)-2])
+	return errors.New("Config contains undefined item: " + strings.Join(parts, ", "))
 }
 
 // SecurityConfig indicates the security configuration

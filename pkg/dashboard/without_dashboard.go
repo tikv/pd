@@ -13,7 +13,6 @@
 // limitations under the License.
 
 //go:build without_dashboard
-// +build without_dashboard
 
 package dashboard
 

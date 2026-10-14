@@ -63,6 +63,7 @@ func NewConfigCommand() *cobra.Command {
 	conf.AddCommand(NewSetConfigCommand())
 	conf.AddCommand(NewDeleteConfigCommand())
 	conf.AddCommand(NewPlacementRulesCommand())
+	conf.AddCommand(NewAffinityCommand())
 	return conf
 }
 

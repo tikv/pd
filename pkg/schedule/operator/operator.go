@@ -65,6 +65,8 @@ var (
 	ExceedWaitLimit CancelReasonType = "exceed wait limit"
 	// RelatedMergeRegion is the cancel reason when the operator is cancelled by related merge region.
 	RelatedMergeRegion CancelReasonType = "related merge region"
+	// StartFailed is the cancel reason when the operator fails to start.
+	StartFailed CancelReasonType = "start failed"
 	// Unknown is the cancel reason when the operator is cancelled by an unknown reason.
 	Unknown CancelReasonType = "unknown"
 )
@@ -88,6 +90,24 @@ type Operator struct {
 	ApproximateSize  int64
 	timeout          time.Duration
 	influence        *OpInfluence
+	// needStoreHealthCheck marks whether the in-progress check should also
+	// reject a target store that has become unhealthy mid-execution. It is
+	// not set at creation time; callers opt in after the operator is built
+	// (see SetStoreHealthCheck), similar to additionalInfos.
+	needStoreHealthCheck atomic.Bool
+}
+
+// SetStoreHealthCheck marks whether the operator's in-progress steps should
+// additionally reject a target store that has become unhealthy. It can be
+// called at any time after the operator is created.
+func (o *Operator) SetStoreHealthCheck(need bool) {
+	o.needStoreHealthCheck.Store(need)
+}
+
+// NeedStoreHealthCheck returns whether the operator's in-progress steps
+// should additionally reject a target store that has become unhealthy.
+func (o *Operator) NeedStoreHealthCheck() bool {
+	return o.needStoreHealthCheck.Load()
 }
 
 // NewOperator creates a new operator.
@@ -218,6 +238,12 @@ func (o *Operator) Kind() OpKind {
 // SchedulerKind return the highest OpKind even if the operator has many OpKind
 // fix #3778
 func (o *Operator) SchedulerKind() OpKind {
+	if o.kind&OpAdmin != 0 {
+		return OpAdmin
+	}
+	if o.kind&OpSplitScatter != 0 {
+		return OpSplitScatter
+	}
 	// LowBit ref: https://en.wikipedia.org/wiki/Find_first_set
 	// 6(110) ==> 2(10)
 	// 5(101) ==> 1(01)
@@ -416,7 +442,7 @@ func (o *Operator) GetPriorityLevel() constant.PriorityLevel {
 }
 
 // UnfinishedInfluence calculates the store difference which unfinished operator steps make.
-func (o *Operator) UnfinishedInfluence(opInfluence OpInfluence, region *core.RegionInfo) {
+func (o *Operator) UnfinishedInfluence(opInfluence *OpInfluence, region *core.RegionInfo) {
 	for step := atomic.LoadInt32(&o.currentStep); int(step) < len(o.steps); step++ {
 		if !o.steps[int(step)].IsFinish(region) {
 			o.steps[int(step)].Influence(opInfluence, region)
@@ -425,7 +451,7 @@ func (o *Operator) UnfinishedInfluence(opInfluence OpInfluence, region *core.Reg
 }
 
 // TotalInfluence calculates the store difference which whole operator steps make.
-func (o *Operator) TotalInfluence(opInfluence OpInfluence, region *core.RegionInfo) {
+func (o *Operator) TotalInfluence(opInfluence *OpInfluence, region *core.RegionInfo) {
 	// skip if region is nil and not cache influence.
 	if region == nil && o.influence == nil {
 		return
@@ -433,7 +459,7 @@ func (o *Operator) TotalInfluence(opInfluence OpInfluence, region *core.RegionIn
 	if o.influence == nil {
 		o.influence = NewOpInfluence()
 		for step := range o.steps {
-			o.steps[step].Influence(*o.influence, region)
+			o.steps[step].Influence(o.influence, region)
 		}
 	}
 	opInfluence.Add(o.influence)

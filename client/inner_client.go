@@ -22,8 +22,11 @@ import (
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 
@@ -42,6 +45,7 @@ const (
 
 type innerClient struct {
 	keyspaceID       uint32
+	keyspaceMeta     *keyspacepb.KeyspaceMeta // keyspace metadata
 	svrUrls          []string
 	serviceDiscovery sd.ServiceDiscovery
 	tokenDispatcher  *tokenDispatcher
@@ -51,6 +55,8 @@ type innerClient struct {
 
 	// For internal usage.
 	updateTokenConnectionCh chan struct{}
+	tokenConnectionMu       sync.Mutex
+	tokenConnectionCancel   context.CancelFunc
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -70,14 +76,16 @@ func (c *innerClient) init(updateKeyspaceIDCb sd.UpdateKeyspaceIDFunc) error {
 		}
 		return err
 	}
+	c.msDiscovery = sd.NewRouterServiceDiscovery(c.ctx, c, c.serviceDiscovery,
+		c.tlsCfg, c.option)
 
 	// Check if the router client has been enabled.
 	if c.option.GetEnableRouterClient() {
 		c.enableRouterClient()
 	}
+
 	c.wg.Add(1)
 	go c.routerClientInitializer()
-
 	return nil
 }
 
@@ -110,7 +118,7 @@ func (c *innerClient) enableRouterClient() {
 	}
 	c.RUnlock()
 	// Create a new router client first before acquiring the lock.
-	routerClient := router.NewClient(c.ctx, c.serviceDiscovery, c.option)
+	routerClient := router.NewClient(c.ctx, c.serviceDiscovery, c.msDiscovery, c.option)
 	c.Lock()
 	// Double check if the router client has been enabled.
 	if c.routerClient != nil {
@@ -139,40 +147,22 @@ func (c *innerClient) disableRouterClient() {
 func (c *innerClient) setServiceMode(newMode pdpb.ServiceMode) {
 	c.Lock()
 	defer c.Unlock()
-
-	if c.option.UseTSOServerProxy {
-		// If we are using TSO server proxy, we always use PD_SVC_MODE.
-		newMode = pdpb.ServiceMode_PD_SVC_MODE
-	}
 	if newMode == c.serviceMode {
 		return
 	}
-	log.Info("[pd] changing TSO provider",
-		zap.String("old", convertToString(c.serviceMode)),
-		zap.String("new", convertToString(newMode)))
 	c.resetTSOClientLocked(newMode)
-	oldMode := c.serviceMode
+	c.resetResourceManagerDiscoveryLocked(newMode)
 	c.serviceMode = newMode
-	log.Info("[pd] TSO provider changed",
-		zap.String("old", convertToString(oldMode)),
-		zap.String("new", convertToString(newMode)))
-}
-
-func convertToString(mode pdpb.ServiceMode) string {
-	switch mode {
-	case pdpb.ServiceMode_PD_SVC_MODE:
-		return "pd"
-	case pdpb.ServiceMode_API_SVC_MODE:
-		return "tso server"
-	case pdpb.ServiceMode_UNKNOWN_SVC_MODE:
-		return "unknown"
-	default:
-		return "invalid"
-	}
+	log.Info("[pd] service mode changed", zap.String("new-mode", newMode.String()))
 }
 
 // Reset a new TSO client.
 func (c *innerClient) resetTSOClientLocked(mode pdpb.ServiceMode) {
+	// `UseTSOServerProxy` is intended to force using PD as the TSO provider,
+	// but should not block other components (e.g. RM) from switching service mode.
+	if c.option.UseTSOServerProxy {
+		mode = pdpb.ServiceMode_PD_SVC_MODE
+	}
 	// Re-create a new TSO client.
 	var (
 		newTSOCli          *tso.Cli
@@ -182,10 +172,11 @@ func (c *innerClient) resetTSOClientLocked(mode pdpb.ServiceMode) {
 	case pdpb.ServiceMode_PD_SVC_MODE:
 		newTSOCli = tso.NewClient(c.ctx, c.option,
 			c.serviceDiscovery, &tso.PDStreamBuilderFactory{})
+		log.Info("[pd] tso provider changed to pd")
 	case pdpb.ServiceMode_API_SVC_MODE:
 		newTSOSvcDiscovery = sd.NewTSOServiceDiscovery(
 			c.ctx, c, c.serviceDiscovery,
-			c.keyspaceID, c.tlsCfg, c.option)
+			c.keyspaceID, c.keyspaceMeta, c.tlsCfg, c.option)
 		// At this point, the keyspace group isn't known yet. Starts from the default keyspace group,
 		// and will be updated later.
 		newTSOCli = tso.NewClient(c.ctx, c.option,
@@ -196,6 +187,7 @@ func (c *innerClient) resetTSOClientLocked(mode pdpb.ServiceMode) {
 				zap.Error(err))
 			return
 		}
+		log.Info("[pd] tso provider changed to tso server")
 	case pdpb.ServiceMode_UNKNOWN_SVC_MODE:
 		log.Warn("[pd] intend to switch to unknown service mode, just return")
 		return
@@ -217,7 +209,36 @@ func (c *innerClient) resetTSOClientLocked(mode pdpb.ServiceMode) {
 	}
 }
 
+func (c *innerClient) resetResourceManagerDiscoveryLocked(mode pdpb.ServiceMode) {
+	switch mode {
+	case pdpb.ServiceMode_PD_SVC_MODE:
+		if rmDiscovery := c.resourceManagerDiscovery.Load(); rmDiscovery != nil {
+			rmDiscovery.Close()
+		}
+		c.resourceManagerDiscovery.Store(nil)
+	case pdpb.ServiceMode_API_SVC_MODE:
+		rmDiscovery := sd.NewResourceManagerDiscovery(
+			c.ctx, c.serviceDiscovery.GetClusterID(), c, c.tlsCfg, c.option, c.scheduleUpdateTokenConnection)
+		c.resourceManagerDiscovery.Store(rmDiscovery)
+		rmDiscovery.Init()
+	case pdpb.ServiceMode_UNKNOWN_SVC_MODE:
+		log.Warn("[pd] intend to switch to unknown service mode, just return")
+		return
+	}
+}
+
+func (c *innerClient) getResourceManagerDiscovery() *sd.ResourceManagerDiscovery {
+	c.RLock()
+	defer c.RUnlock()
+	return c.resourceManagerDiscovery.Load()
+}
+
+// scheduleUpdateTokenConnection asks the token dispatcher to reconnect to
+// the current endpoint. It is used by the RM discovery reset path, which
+// has already repointed (or cleared) the RM connection, so the active
+// stream must be interrupted; the dispatcher then re-resolves the endpoint.
 func (c *innerClient) scheduleUpdateTokenConnection(string) error {
+	c.cancelTokenConnection()
 	select {
 	case c.updateTokenConnectionCh <- struct{}{}:
 	default:
@@ -225,10 +246,52 @@ func (c *innerClient) scheduleUpdateTokenConnection(string) error {
 	return nil
 }
 
-func (c *innerClient) getServiceMode() pdpb.ServiceMode {
+// onPDLeaderChanged is the PD service-discovery leader callback. It decides
+// whether a token-connection update is needed after a PD leader switch:
+// while the client serves token streams from the PD-provided resource
+// manager the target has moved, so the in-flight stream is canceled and a
+// reconnect is scheduled. When a standalone resource-manager connection is
+// in use the token target is unchanged, so neither is done. It reads the
+// lock-free RM discovery pointer so it is safe to run while the caller
+// holds the service-mode write lock (setServiceMode -> TSO Setup ->
+// CheckMemberChanged -> switchLeader).
+func (c *innerClient) onPDLeaderChanged(string) error {
+	rmDiscovery := c.resourceManagerDiscovery.Load()
+	if rmDiscovery != nil && rmDiscovery.GetConn() != nil {
+		return nil
+	}
+	c.cancelTokenConnection()
+	select {
+	case c.updateTokenConnectionCh <- struct{}{}:
+	default:
+	}
+	return nil
+}
+
+func (c *innerClient) cancelTokenConnection() {
+	// Interrupt an in-flight request so the dispatcher can reconnect to the
+	// current endpoint instead of waiting on the stale stream.
+	c.tokenConnectionMu.Lock()
+	if c.tokenConnectionCancel != nil {
+		c.tokenConnectionCancel()
+	}
+	c.tokenConnectionMu.Unlock()
+}
+
+type tsoProvider int
+
+const (
+	tsoProviderPD tsoProvider = iota
+	tsoProviderTSOServer
+)
+
+func (c *innerClient) getTSOProvider() tsoProvider {
 	c.RLock()
 	defer c.RUnlock()
-	return c.serviceMode
+	if c.tsoSvcDiscovery != nil {
+		return tsoProviderTSOServer
+	}
+	return tsoProviderPD
 }
 
 func (c *innerClient) getTSOClient() *tso.Cli {
@@ -249,6 +312,7 @@ func (c *innerClient) close() {
 		c.tokenDispatcher.tokenBatchController.revokePendingTokenRequest(tokenErr)
 		c.tokenDispatcher.dispatcherCancel()
 	}
+	log.Info("[pd] close client successfully")
 }
 
 func (c *innerClient) setup() error {
@@ -263,7 +327,7 @@ func (c *innerClient) setup() error {
 	}
 
 	// Register callbacks
-	c.serviceDiscovery.AddLeaderSwitchedCallback(c.scheduleUpdateTokenConnection)
+	c.serviceDiscovery.AddLeaderSwitchedCallback(c.onPDLeaderChanged)
 
 	// Create dispatchers
 	c.createTokenDispatcher()
@@ -271,27 +335,78 @@ func (c *innerClient) setup() error {
 	return nil
 }
 
-// getClientAndContext returns the leader pd client and the original context. If leader is unhealthy, it returns
-// follower pd client and the context which holds forward information.
-func (c *innerClient) getRegionAPIClientAndContext(ctx context.Context, allowFollower bool) (sd.ServiceClient, context.Context) {
-	var serviceClient sd.ServiceClient
-	if allowFollower {
-		serviceClient = c.serviceDiscovery.GetServiceClientByKind(sd.UniversalAPIKind)
-		if serviceClient != nil {
-			return serviceClient, serviceClient.BuildGRPCTargetContext(ctx, !allowFollower)
-		}
+// getServiceClient returns the service client according to the options.
+// It returns the service client, the context built for gRPC target, and a boolean indicating whether it's a router service client.
+// when can't get the client from the router service or follower, it will rollback to the leader client.
+func (c *innerClient) getServiceClient(ctx context.Context, regionOp *opt.GetRegionOp, storeOp ...*opt.GetStoreOp) (sd.ServiceClient, context.Context, bool) {
+	var (
+		serviceClient  sd.ServiceClient
+		mustLeader     bool
+		isRouterClient bool
+	)
+	allowRouterServiceHandle := regionOp.AllowRouterServiceHandle
+	if len(storeOp) > 0 {
+		allowRouterServiceHandle = allowRouterServiceHandle || storeOp[0].AllowRouterServiceHandle
 	}
+
+	switch {
+	case allowRouterServiceHandle:
+		isRouterClient = true
+		serviceClient = c.msDiscovery.GetServiceClient()
+		mustLeader = false
+	case regionOp.AllowFollowerHandle && c.option.GetEnableFollowerHandle():
+		mustLeader = false
+		serviceClient = c.serviceDiscovery.GetServiceClientByKind(sd.UniversalAPIKind)
+	default:
+		mustLeader = true
+		isRouterClient = false
+	}
+	if serviceClient != nil && serviceClient.GetClientConn() != nil && serviceClient.Available() {
+		return serviceClient, serviceClient.BuildGRPCTargetContext(ctx, mustLeader), isRouterClient
+	}
+	// Fallback to the leader client.
+	isRouterClient = false
 	serviceClient = c.serviceDiscovery.GetServiceClient()
 	if serviceClient == nil || serviceClient.GetClientConn() == nil {
-		return nil, ctx
+		return nil, ctx, false
 	}
-	return serviceClient, serviceClient.BuildGRPCTargetContext(ctx, !allowFollower)
+	return serviceClient, serviceClient.BuildGRPCTargetContext(ctx, mustLeader), isRouterClient
 }
 
 // gRPCErrorHandler is used to handle the gRPC error returned by the resource manager service.
 func (c *innerClient) gRPCErrorHandler(err error) {
 	if errs.IsLeaderChange(err) {
 		c.serviceDiscovery.ScheduleCheckMemberChanged()
+	}
+}
+
+func shouldUpdateRMURL(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errs.IsLeaderChange(err) {
+		return true
+	}
+	if s, ok := status.FromError(err); ok {
+		// If the rm instance stops, we can reset the connection and
+		// use pd instance url instead of it.
+		if errs.IsNetworkError(s.Code()) || s.Code() == codes.Canceled {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *innerClient) resourceManagerErrorHandler(err error) {
+	if !shouldUpdateRMURL(err) {
+		return
+	}
+
+	c.RLock()
+	defer c.RUnlock()
+	log.Warn("[resource-manager] resource manager error", zap.Error(err))
+	if rmDiscovery := c.resourceManagerDiscovery.Load(); rmDiscovery != nil {
+		rmDiscovery.ScheduleUpdateServiceURL()
 	}
 }
 

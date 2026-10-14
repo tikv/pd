@@ -197,7 +197,8 @@ func (suite *hotStatusTestSuite) checkGetHistoryHotRegionsIDAndTypes(cluster *te
 	check := func(res []byte, statusCode int, _ http.Header) {
 		re.Equal(200, statusCode)
 		historyHotRegions := &storage.HistoryHotRegions{}
-		json.Unmarshal(res, historyHotRegions)
+		err := json.Unmarshal(res, historyHotRegions)
+		re.NoError(err)
 		re.Len(historyHotRegions.HistoryHotRegion, 1)
 		re.Equal(hotRegions[0], historyHotRegions.HistoryHotRegion[0])
 	}
@@ -219,6 +220,5 @@ func writeToDB(kv *kv.LevelDBKV, hotRegions []*storage.HistoryHotRegion) error {
 		}
 		batch.Put([]byte(key), value)
 	}
-	kv.Write(batch, nil)
-	return nil
+	return kv.Write(batch, nil)
 }

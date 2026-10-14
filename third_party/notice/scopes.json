@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "source_commit": "c658147acc0e8925aef48bfec5da0fce957d26ab",
+  "generator": {
+    "image": "us-docker.pkg.dev/pingcap-testing-account/internal/test/notice-generator@sha256:60fd803ae1ff5d74cc158cc9190d27c2b0bef4b892bcbe8d9b7de0c1ae2252d5",
+    "go_version": "go1.25.12",
+    "go_licenses_version": "v1.6.0"
+  },
+  "target": {
+    "goos": "linux",
+    "goarch": "amd64",
+    "first_party_prefixes": [
+      "github.com/pingcap/",
+      "github.com/tikv/"
+    ]
+  },
+  "profiles": [
+    {
+      "id": "pd-root",
+      "module": ".",
+      "packages": ["./..."],
+      "build_tags": [],
+      "description": "Default root Go module; includes pd-server source packages."
+    },
+    {
+      "id": "pd-tools",
+      "module": "tools",
+      "packages": ["./..."],
+      "build_tags": [],
+      "description": "Nested tools module, including pd-ctl and pd-recover built by make build."
+    },
+    {
+      "id": "pd-client",
+      "module": "client",
+      "packages": ["./..."],
+      "build_tags": [],
+      "description": "Published github.com/tikv/pd/client Go module."
+    },
+    {
+      "id": "pd-swagger",
+      "module": ".",
+      "packages": ["./..."],
+      "build_tags": ["swagger_server"],
+      "description": "Conditional pd-server Swagger build enabled by SWAGGER=1."
+    }
+  ],
+  "notice_file": "ThirdPartyNotices.txt",
+  "components_file": "third_party/notice/components.json"
+}

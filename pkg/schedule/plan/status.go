@@ -43,6 +43,8 @@ const (
 	StatusStoreAddLimitThrottled
 	// StatusStoreRemoveLimitThrottled represents the store cannot be selected due to the remove peer limitation.
 	StatusStoreRemoveLimitThrottled
+	// StatusStoreTransferLeaderInLimitThrottled represents the store cannot be selected due to the leader transfer-in limitation.
+	StatusStoreTransferLeaderInLimitThrottled
 )
 
 // config limitation
@@ -94,6 +96,8 @@ const (
 	StatusRegionLabelReject
 	// StatusRegionSendSnapshotThrottled represents the plan conflicts with send snapshot.
 	StatusRegionSendSnapshotThrottled
+	// StatusRegionAffinity indicates that the Region is in an affinity state and therefore should not be scheduled.
+	StatusRegionAffinity
 )
 
 const (
@@ -110,10 +114,11 @@ var statusText = map[StatusCode]string{
 	StatusStoreNotMatchRule:    "StoreNotMatchRule",
 
 	// store is limited by soft constraint
-	StatusStoreSnapshotThrottled:    "StoreSnapshotThrottled",
-	StatusStorePendingPeerThrottled: "StorePendingPeerThrottled",
-	StatusStoreAddLimitThrottled:    "StoreAddPeerThrottled",
-	StatusStoreRemoveLimitThrottled: "StoreRemovePeerThrottled",
+	StatusStoreSnapshotThrottled:              "StoreSnapshotThrottled",
+	StatusStorePendingPeerThrottled:           "StorePendingPeerThrottled",
+	StatusStoreAddLimitThrottled:              "StoreAddPeerThrottled",
+	StatusStoreRemoveLimitThrottled:           "StoreRemovePeerThrottled",
+	StatusStoreTransferLeaderInLimitThrottled: "StoreTransferLeaderInThrottled",
 
 	// store is limited by specified configuration
 	StatusStoreRejectLeader:      "StoreRejectLeader",
@@ -136,6 +141,7 @@ var statusText = map[StatusCode]string{
 	StatusRegionNotReplicated: "RegionNotReplicated",
 	StatusRegionNotMatchRule:  "RegionNotMatchRule",
 	StatusRegionNoLeader:      "RegionNoLeader",
+	StatusRegionAffinity:      "RegionAffinity",
 
 	// non-filter
 	StatusNoTargetRegion:    "NoTargetRegion",

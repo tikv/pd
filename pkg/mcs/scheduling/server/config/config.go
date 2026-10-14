@@ -19,6 +19,7 @@ import (
 	"os"
 	"reflect"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -139,7 +140,7 @@ func (c *Config) adjust(meta *toml.MetaData) error {
 		return err
 	}
 
-	configutil.AdjustInt64(&c.LeaderLease, mcsconstant.DefaultLeaderLease)
+	configutil.AdjustInt64(&c.LeaderLease, mcsconstant.DefaultLease)
 
 	if err := c.Schedule.Adjust(configMetaData.Child("schedule"), false); err != nil {
 		return err
@@ -160,8 +161,8 @@ func (c *Config) GetName() string {
 	return c.Name
 }
 
-// GeBackendEndpoints returns the BackendEndpoints
-func (c *Config) GeBackendEndpoints() string {
+// GetBackendEndpoints returns the BackendEndpoints
+func (c *Config) GetBackendEndpoints() string {
 	return c.BackendEndpoints
 }
 
@@ -190,6 +191,8 @@ func (c *Config) Clone() *Config {
 // PersistConfig wraps all configurations that need to persist to storage and
 // allows to access them safely.
 type PersistConfig struct {
+	scheduleMu sync.Mutex
+
 	ttl *cache.TTLString
 	// Store the global configuration that is related to the scheduling.
 	clusterVersion unsafe.Pointer
@@ -197,7 +200,7 @@ type PersistConfig struct {
 	replication    atomic.Value
 	storeConfig    atomic.Value
 	// schedulersUpdatingNotifier is used to notify that the schedulers have been updated.
-	// Store as `chan<- struct{}`.
+	// Store as `chan struct{}`.
 	schedulersUpdatingNotifier atomic.Value
 }
 
@@ -215,16 +218,30 @@ func NewPersistConfig(cfg *Config, ttl *cache.TTLString) *PersistConfig {
 }
 
 // SetSchedulersUpdatingNotifier sets the schedulers updating notifier.
-func (o *PersistConfig) SetSchedulersUpdatingNotifier(notifier chan<- struct{}) {
+func (o *PersistConfig) SetSchedulersUpdatingNotifier(notifier chan struct{}) {
 	o.schedulersUpdatingNotifier.Store(notifier)
 }
 
-func (o *PersistConfig) getSchedulersUpdatingNotifier() chan<- struct{} {
+// ClearSchedulersUpdatingNotifier clears the schedulers updating notifier if it
+// still matches the given notifier.
+func (o *PersistConfig) ClearSchedulersUpdatingNotifier(notifier chan struct{}) {
+	if notifier == nil {
+		return
+	}
+	current := o.getSchedulersUpdatingNotifier()
+	if current != notifier {
+		return
+	}
+	var empty chan struct{}
+	o.schedulersUpdatingNotifier.CompareAndSwap(current, empty)
+}
+
+func (o *PersistConfig) getSchedulersUpdatingNotifier() chan struct{} {
 	v := o.schedulersUpdatingNotifier.Load()
 	if v == nil {
 		return nil
 	}
-	return v.(chan<- struct{})
+	return v.(chan struct{})
 }
 
 func (o *PersistConfig) tryNotifySchedulersUpdating() {
@@ -232,7 +249,11 @@ func (o *PersistConfig) tryNotifySchedulersUpdating() {
 	if notifier == nil {
 		return
 	}
-	notifier <- struct{}{}
+	// Scheduler update notifications are coalesced; one pending signal is enough.
+	select {
+	case notifier <- struct{}{}:
+	default:
+	}
 }
 
 // GetClusterVersion returns the cluster version.
@@ -252,6 +273,12 @@ func (o *PersistConfig) GetScheduleConfig() *sc.ScheduleConfig {
 
 // SetScheduleConfig sets the scheduling configuration dynamically.
 func (o *PersistConfig) SetScheduleConfig(cfg *sc.ScheduleConfig) {
+	o.scheduleMu.Lock()
+	defer o.scheduleMu.Unlock()
+	o.installScheduleConfig(cfg)
+}
+
+func (o *PersistConfig) installScheduleConfig(cfg *sc.ScheduleConfig) {
 	old := o.GetScheduleConfig()
 	o.schedule.Store(cfg)
 	// The coordinator is not aware of the underlying scheduler config changes,
@@ -259,6 +286,16 @@ func (o *PersistConfig) SetScheduleConfig(cfg *sc.ScheduleConfig) {
 	if !reflect.DeepEqual(old.Schedulers, cfg.Schedulers) {
 		o.tryNotifySchedulersUpdating()
 	}
+}
+
+// SetSchedulers replaces only the scheduler list.
+func (o *PersistConfig) SetSchedulers(schedulers sc.SchedulerConfigs) {
+	o.scheduleMu.Lock()
+	defer o.scheduleMu.Unlock()
+
+	next := o.GetScheduleConfig().Clone()
+	next.Schedulers = append(sc.SchedulerConfigs(nil), schedulers...)
+	o.installScheduleConfig(next)
 }
 
 // AdjustScheduleCfg adjusts the schedule config during the initialization.
@@ -271,6 +308,7 @@ func AdjustScheduleCfg(scheduleCfg *sc.ScheduleConfig) {
 			scheduleCfg.Schedulers = append(scheduleCfg.Schedulers, ps)
 		}
 	}
+	scheduleCfg.MigrateDeprecatedFlags()
 }
 
 // GetReplicationConfig returns replication configurations.
@@ -304,6 +342,16 @@ func (o *PersistConfig) GetMaxReplicas() int {
 // IsPlacementRulesEnabled returns if the placement rules is enabled.
 func (o *PersistConfig) IsPlacementRulesEnabled() bool {
 	return o.GetReplicationConfig().EnablePlacementRules
+}
+
+// GetAffinityScheduleLimit returns the limit for affinity schedule.
+func (o *PersistConfig) GetAffinityScheduleLimit() uint64 {
+	return o.getTTLUintOr(sc.AffinityScheduleLimitKey, o.GetScheduleConfig().AffinityScheduleLimit)
+}
+
+// GetSplitScatterScheduleLimit returns the limit for split-scatter schedule.
+func (o *PersistConfig) GetSplitScatterScheduleLimit() uint64 {
+	return o.getTTLUintOr(sc.SplitScatterScheduleLimitKey, o.GetScheduleConfig().SplitScatterScheduleLimit)
 }
 
 // GetLowSpaceRatio returns the low space ratio.
@@ -485,61 +533,26 @@ func (o *PersistConfig) GetHotRegionScheduleLimit() uint64 {
 
 // GetStoreLimit returns the limit of a store.
 func (o *PersistConfig) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitConfig) {
-	defer func() {
-		returnSC.RemovePeer = o.getTTLFloatOr(fmt.Sprintf("remove-peer-%v", storeID), returnSC.RemovePeer)
-		returnSC.AddPeer = o.getTTLFloatOr(fmt.Sprintf("add-peer-%v", storeID), returnSC.AddPeer)
-	}()
 	if limit, ok := o.GetScheduleConfig().StoreLimit[storeID]; ok {
 		return limit
 	}
 	cfg := o.GetScheduleConfig().Clone()
-	sc := sc.StoreLimitConfig{
-		AddPeer:    sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
-		RemovePeer: sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
-	}
-	v, ok1, err := o.getTTLFloat("default-add-peer")
-	if err != nil {
-		log.Warn("failed to parse default-add-peer from PersistOptions's ttl storage", zap.Error(err))
-	}
-	canSetAddPeer := ok1 && err == nil
-	if canSetAddPeer {
-		returnSC.AddPeer = v
-	}
-
-	v, ok2, err := o.getTTLFloat("default-remove-peer")
-	if err != nil {
-		log.Warn("failed to parse default-remove-peer from PersistOptions's ttl storage", zap.Error(err))
-	}
-	canSetRemovePeer := ok2 && err == nil
-	if canSetRemovePeer {
-		returnSC.RemovePeer = v
-	}
-
-	if canSetAddPeer || canSetRemovePeer {
-		return returnSC
-	}
-	cfg.StoreLimit[storeID] = sc
+	limitCfg := cfg.GetDefaultStoreLimit()
+	cfg.StoreLimit[storeID] = limitCfg
 	o.SetScheduleConfig(cfg)
 	return o.GetScheduleConfig().StoreLimit[storeID]
 }
 
 // GetStoreLimitByType returns the limit of a store with a given type.
 func (o *PersistConfig) GetStoreLimitByType(storeID uint64, typ storelimit.Type) (returned float64) {
-	defer func() {
-		switch typ {
-		case storelimit.AddPeer:
-			returned = o.getTTLFloatOr(fmt.Sprintf("add-peer-%v", storeID), returned)
-		case storelimit.RemovePeer:
-			returned = o.getTTLFloatOr(fmt.Sprintf("remove-peer-%v", storeID), returned)
-		default:
-		}
-	}()
 	limit := o.GetStoreLimit(storeID)
 	switch typ {
 	case storelimit.AddPeer:
 		return limit.AddPeer
 	case storelimit.RemovePeer:
 		return limit.RemovePeer
+	case storelimit.TransferLeaderIn:
+		return limit.TransferLeaderIn
 	// todo: impl it in store limit v2.
 	case storelimit.SendSnapshot:
 		return 0.0
@@ -561,6 +574,12 @@ func (o *PersistConfig) GetMaxPendingPeerCount() uint64 {
 // GetMaxMergeRegionSize returns the max region size.
 func (o *PersistConfig) GetMaxMergeRegionSize() uint64 {
 	return o.getTTLUintOr(sc.MaxMergeRegionSizeKey, o.GetScheduleConfig().MaxMergeRegionSize)
+}
+
+// GetMaxAffinityMergeRegionSize returns the max affinity merge region size.
+// A zero value means the affinity merge is disabled.
+func (o *PersistConfig) GetMaxAffinityMergeRegionSize() uint64 {
+	return o.GetScheduleConfig().GetMaxAffinityMergeRegionSize()
 }
 
 // GetMaxMergeRegionKeys returns the max number of keys.
@@ -595,19 +614,10 @@ func (o *PersistConfig) IsTikvRegionSplitEnabled() bool {
 // SetAllStoresLimit sets all store limit for a given type and rate.
 func (o *PersistConfig) SetAllStoresLimit(typ storelimit.Type, ratePerMin float64) {
 	v := o.GetScheduleConfig().Clone()
-	switch typ {
-	case storelimit.AddPeer:
-		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, ratePerMin)
-		for storeID := range v.StoreLimit {
-			sc := sc.StoreLimitConfig{AddPeer: ratePerMin, RemovePeer: v.StoreLimit[storeID].RemovePeer}
-			v.StoreLimit[storeID] = sc
-		}
-	case storelimit.RemovePeer:
-		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, ratePerMin)
-		for storeID := range v.StoreLimit {
-			sc := sc.StoreLimitConfig{AddPeer: v.StoreLimit[storeID].AddPeer, RemovePeer: ratePerMin}
-			v.StoreLimit[storeID] = sc
-		}
+	v.DefaultStoreLimit = v.DefaultStoreLimit.SetLimit(typ, ratePerMin)
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(typ, ratePerMin)
+	for storeID, limit := range v.StoreLimit {
+		v.StoreLimit[storeID] = limit.SetLimit(typ, ratePerMin)
 	}
 
 	o.SetScheduleConfig(v)
@@ -711,6 +721,11 @@ func (o *PersistConfig) IsRaftKV2() bool {
 	return o.GetStoreConfig().IsRaftKV2()
 }
 
+// GetUnifiedReadPoolMaxThreadCount returns TiKV unified read pool max thread count.
+func (o *PersistConfig) GetUnifiedReadPoolMaxThreadCount() uint64 {
+	return o.GetStoreConfig().GetUnifiedReadPoolMaxThreadCount()
+}
+
 // TODO: implement the following methods
 
 // AddSchedulerCfg adds the scheduler configurations.
@@ -768,25 +783,6 @@ func (o *PersistConfig) getTTLBool(key string) (result bool, contains bool, err 
 
 func (o *PersistConfig) getTTLBoolOr(key string, defaultValue bool) bool {
 	if v, ok, err := o.getTTLBool(key); ok {
-		if err == nil {
-			return v
-		}
-		log.Warn("failed to parse "+key+" from PersistOptions's ttl storage", zap.Error(err))
-	}
-	return defaultValue
-}
-
-func (o *PersistConfig) getTTLFloat(key string) (float64, bool, error) {
-	stringForm, ok := o.GetTTLData(key)
-	if !ok {
-		return 0, false, nil
-	}
-	r, err := strconv.ParseFloat(stringForm, 64)
-	return r, true, err
-}
-
-func (o *PersistConfig) getTTLFloatOr(key string, defaultValue float64) float64 {
-	if v, ok, err := o.getTTLFloat(key); ok {
 		if err == nil {
 			return v
 		}

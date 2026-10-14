@@ -34,19 +34,22 @@ type StoreLoadDetail struct {
 func (li *StoreLoadDetail) ToHotPeersStat() *HotPeersStat {
 	storeByteRate, storeKeyRate, storeQueryRate := li.LoadPred.Current.Loads[utils.ByteDim],
 		li.LoadPred.Current.Loads[utils.KeyDim], li.LoadPred.Current.Loads[utils.QueryDim]
+	storeCPURate := li.LoadPred.Current.Loads[utils.CPUDim]
 	if len(li.HotPeers) == 0 {
 		return &HotPeersStat{
 			StoreByteRate:  storeByteRate,
 			StoreKeyRate:   storeKeyRate,
 			StoreQueryRate: storeQueryRate,
+			StoreCPURate:   storeCPURate,
 			TotalBytesRate: 0.0,
 			TotalKeysRate:  0.0,
 			TotalQueryRate: 0.0,
+			TotalCPURate:   0.0,
 			Count:          0,
 			Stats:          make([]HotPeerStatShow, 0),
 		}
 	}
-	var byteRate, keyRate, queryRate float64
+	var byteRate, keyRate, queryRate, cpuRate float64
 	peers := make([]HotPeerStatShow, 0, len(li.HotPeers))
 	for _, peer := range li.HotPeers {
 		if peer.HotDegree > 0 {
@@ -54,6 +57,7 @@ func (li *StoreLoadDetail) ToHotPeersStat() *HotPeersStat {
 			byteRate += peer.GetLoad(utils.ByteDim)
 			keyRate += peer.GetLoad(utils.KeyDim)
 			queryRate += peer.GetLoad(utils.QueryDim)
+			cpuRate += peer.GetLoad(utils.CPUDim)
 		}
 	}
 
@@ -61,9 +65,11 @@ func (li *StoreLoadDetail) ToHotPeersStat() *HotPeersStat {
 		TotalBytesRate: byteRate,
 		TotalKeysRate:  keyRate,
 		TotalQueryRate: queryRate,
+		TotalCPURate:   cpuRate,
 		StoreByteRate:  storeByteRate,
 		StoreKeyRate:   storeKeyRate,
 		StoreQueryRate: storeQueryRate,
+		StoreCPURate:   storeCPURate,
 		Count:          len(peers),
 		Stats:          peers,
 	}
@@ -74,10 +80,74 @@ func (li *StoreLoadDetail) IsUniform(dim int, threshold float64) bool {
 	return li.LoadPred.Stddev.Loads[dim] < threshold
 }
 
+// StoreLoadSummary incrementally summarizes a store population.
+type StoreLoadSummary struct {
+	count        int
+	loadSum      Loads
+	historySum   HistoryLoads
+	hotPeerCount float64
+}
+
+// Add adds a store load to the summary.
+func (s *StoreLoadSummary) Add(load *StoreLoad) {
+	s.count++
+	for dim, value := range load.Loads {
+		s.loadSum[dim] += value
+	}
+	s.hotPeerCount += load.HotPeerCount
+	for dim, loads := range load.HistoryLoads {
+		if len(s.historySum[dim]) < len(loads) {
+			grown := make([]float64, len(loads))
+			copy(grown, s.historySum[dim])
+			s.historySum[dim] = grown
+		}
+		for i, value := range loads {
+			s.historySum[dim][i] += value
+		}
+	}
+}
+
+// Result returns the expectation and normalized standard deviation. Details
+// must be the same store population whose current loads were passed to Add.
+func (s *StoreLoadSummary) Result(details []*StoreLoadDetail) (expect, stddev StoreLoad) {
+	if s.count == 0 {
+		return
+	}
+	count := float64(s.count)
+	for dim, load := range s.loadSum {
+		expect.Loads[dim] = load / count
+	}
+	expect.HotPeerCount = s.hotPeerCount / count
+	stddev.HotPeerCount = expect.HotPeerCount
+	for dim, loads := range s.historySum {
+		expect.HistoryLoads[dim] = make([]float64, len(loads))
+		for i, load := range loads {
+			expect.HistoryLoads[dim][i] = load / count
+		}
+	}
+	if expect.HotPeerCount == 0 {
+		return
+	}
+	for _, detail := range details {
+		for dim, load := range detail.LoadPred.Current.Loads {
+			stddev.Loads[dim] += math.Pow(load-expect.Loads[dim], 2) //nolint:staticcheck
+		}
+	}
+	for dim, variance := range stddev.Loads {
+		if expect.Loads[dim] == 0 {
+			stddev.Loads[dim] = 0
+			continue
+		}
+		stddev.Loads[dim] = math.Sqrt(variance/count) / expect.Loads[dim]
+	}
+	return
+}
+
 func toHotPeerStatShow(p *HotPeerStat) HotPeerStatShow {
 	byteRate := p.GetLoad(utils.ByteDim)
 	keyRate := p.GetLoad(utils.KeyDim)
 	queryRate := p.GetLoad(utils.QueryDim)
+	cpuRate := p.GetLoad(utils.CPUDim)
 	return HotPeerStatShow{
 		StoreID:   p.StoreID,
 		Stores:    p.GetStores(),
@@ -87,6 +157,7 @@ func toHotPeerStatShow(p *HotPeerStat) HotPeerStatShow {
 		ByteRate:  byteRate,
 		KeyRate:   keyRate,
 		QueryRate: queryRate,
+		CPURate:   cpuRate,
 		AntiCount: p.AntiCount,
 	}
 }
@@ -94,7 +165,6 @@ func toHotPeerStatShow(p *HotPeerStat) HotPeerStatShow {
 // StoreSummaryInfo records the summary information of store.
 type StoreSummaryInfo struct {
 	*core.StoreInfo
-	isTiFlash  bool
 	PendingSum *Influence
 }
 
@@ -110,7 +180,6 @@ func SummaryStoreInfos(stores []*core.StoreInfo) map[uint64]*StoreSummaryInfo {
 	for _, store := range stores {
 		info := &StoreSummaryInfo{
 			StoreInfo:  store,
-			isTiFlash:  store.IsTiFlash(),
 			PendingSum: nil,
 		}
 		infos[store.GetID()] = info
@@ -133,16 +202,6 @@ func (s *StoreSummaryInfo) AddInfluence(infl *Influence, w float64) {
 		s.PendingSum.Loads[i] += load * w
 	}
 	s.PendingSum.HotPeerCount += infl.HotPeerCount * w
-}
-
-// IsTiFlash returns true if the store is TiFlash.
-func (s *StoreSummaryInfo) IsTiFlash() bool {
-	return s.isTiFlash
-}
-
-// SetEngineAsTiFlash set whether store is TiFlash, it is only used in tests.
-func (s *StoreSummaryInfo) SetEngineAsTiFlash() {
-	s.isTiFlash = true
 }
 
 // Loads is a vector that contains different dimensions of loads.
@@ -178,10 +237,12 @@ func (load StoreLoad) ToLoadPred(rwTy utils.RWType, infl *Influence) *StoreLoadP
 			future.Loads[utils.ByteDim] += infl.Loads[utils.RegionReadBytes]
 			future.Loads[utils.KeyDim] += infl.Loads[utils.RegionReadKeys]
 			future.Loads[utils.QueryDim] += infl.Loads[utils.RegionReadQueryNum]
+			future.Loads[utils.CPUDim] += infl.Loads[utils.RegionReadCPU]
 		case utils.Write:
 			future.Loads[utils.ByteDim] += infl.Loads[utils.RegionWriteBytes]
 			future.Loads[utils.KeyDim] += infl.Loads[utils.RegionWriteKeys]
 			future.Loads[utils.QueryDim] += infl.Loads[utils.RegionWriteQueryNum]
+			future.Loads[utils.CPUDim] += infl.Loads[utils.RegionWriteCPU]
 		}
 		future.HotPeerCount += infl.HotPeerCount
 	}
@@ -303,6 +364,27 @@ func (s *StoreHistoryLoads) Add(storeID uint64, rwTp utils.RWType, kind constant
 		s.loads[rwTp][kind][storeID] = load
 	}
 	load.add(pointLoad)
+}
+
+// GC removes history load entries for stores that are no longer alive, so a
+// store that's gone doesn't keep its entry for the scheduler's entire
+// lifetime (there's otherwise no periodic sweep of this cache at all).
+func (s *StoreHistoryLoads) GC(stores []*core.StoreInfo) {
+	alive := make(map[uint64]struct{}, len(stores))
+	for _, store := range stores {
+		if !store.IsRemoved() {
+			alive[store.GetID()] = struct{}{}
+		}
+	}
+	for i := range s.loads {
+		for j := range s.loads[i] {
+			for storeID := range s.loads[i][j] {
+				if _, ok := alive[storeID]; !ok {
+					delete(s.loads[i][j], storeID)
+				}
+			}
+		}
+	}
 }
 
 // Get returns the store loads from the history, not one time point.

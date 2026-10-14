@@ -19,9 +19,12 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
@@ -56,8 +59,7 @@ func WithTickInterval(tickInterval time.Duration) WaitOption {
 	return func(op *WaitOp) { op.tickInterval = tickInterval }
 }
 
-// Eventually asserts that given condition will be met in a period of time.
-func Eventually(re *require.Assertions, condition func() bool, opts ...WaitOption) {
+func newWaitOp(opts ...WaitOption) *WaitOp {
 	option := &WaitOp{
 		waitFor:      defaultWaitFor,
 		tickInterval: defaultTickInterval,
@@ -65,7 +67,23 @@ func Eventually(re *require.Assertions, condition func() bool, opts ...WaitOptio
 	for _, opt := range opts {
 		opt(option)
 	}
+	return option
+}
+
+// Eventually asserts that given condition will be met in a period of time.
+func Eventually(re *require.Assertions, condition func() bool, opts ...WaitOption) {
+	option := newWaitOp(opts...)
 	re.Eventually(
+		condition,
+		option.waitFor,
+		option.tickInterval,
+	)
+}
+
+// EventuallyWithAssert checks that the condition is met without stopping the calling goroutine.
+func EventuallyWithAssert(as *assert.Assertions, condition func() bool, opts ...WaitOption) bool {
+	option := newWaitOp(opts...)
+	return as.Eventually(
 		condition,
 		option.waitFor,
 		option.tickInterval,
@@ -80,10 +98,12 @@ func NewRequestHeader(clusterID uint64) *pdpb.RequestHeader {
 }
 
 // MustNewGrpcClient must create a new PD grpc client.
-func MustNewGrpcClient(re *require.Assertions, addr string) pdpb.PDClient {
+func MustNewGrpcClient(re *require.Assertions, addr string) (pdpb.PDClient, *grpc.ClientConn) {
+	// TODO: use grpc.NewClient instead of grpc.Dial.
+	//nolint:staticcheck
 	conn, err := grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	re.NoError(err)
-	return pdpb.NewPDClient(conn)
+	return pdpb.NewPDClient(conn), conn
 }
 
 // CleanServer is used to clean data directory.
@@ -93,15 +113,25 @@ func CleanServer(dataDir string) {
 }
 
 // InitTempFileLogger initializes the logger and redirects the log output to a temporary file.
-func InitTempFileLogger(level string) (fname string) {
+func InitTempFileLogger(t testing.TB, level string) (fname string) {
+	t.Helper()
 	cfg := &log.Config{}
-	f, _ := os.CreateTemp("", "pd_tests")
+	f, err := os.CreateTemp(t.TempDir(), "pd_tests")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		assert.NoError(t, f.Close(), "close temporary file logger")
+	})
 	fname = f.Name()
-	f.Close()
 	cfg.File.Filename = fname
 	cfg.Level = level
-	lg, p, _ := log.InitLogger(cfg)
-	log.ReplaceGlobals(lg, p)
+	output := zapcore.AddSync(f)
+	lg, p, err := log.InitLoggerWithWriteSyncer(cfg, output, output)
+	require.NoError(t, err)
+	restoreLogger := log.ReplaceGlobals(lg, p)
+	t.Cleanup(func() {
+		restoreLogger()
+		assert.NoError(t, lg.Sync(), "sync temporary file logger")
+	})
 	return fname
 }
 

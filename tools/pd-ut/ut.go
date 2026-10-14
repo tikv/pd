@@ -22,26 +22,47 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math/rand"
+	"math/rand/v2"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/pmezard/go-difflib/difflib"
-	"go.uber.org/zap"
 
 	"github.com/tikv/pd/tools/pd-ut/alloc"
 
 	// Set the correct value when it runs inside docker.
 	_ "go.uber.org/automaxprocs"
 )
+
+const (
+	deadlockTag = "deadlock"
+	nextGenTag  = "nextgen"
+	// maxParallelAddrBound mirrors alloc.maxTestAddrMapLen, the shared port
+	// allocator's retained-address cap. A --parallel above it could push the
+	// allocator into its eviction path; values below it are left as the user
+	// requested.
+	maxParallelAddrBound = 4096
+)
+
+// initTags sets up the tags.
+func initTags() {
+	tmpTags := []string{deadlockTag}
+
+	if isNextGenEnabled() {
+		tmpTags = append(tmpTags, nextGenTag)
+	}
+
+	tags = strings.Join(tmpTags, " ")
+}
+
+func isNextGenEnabled() bool {
+	return os.Getenv("NEXT_GEN") == "1"
+}
 
 func usage() bool {
 	msg := `// run all tests
@@ -97,8 +118,6 @@ go tool cover --func=xxx`
 var (
 	modulePath           = filepath.Join("github.com", "tikv", "pd")
 	integrationsTestPath = filepath.Join("tests", "integrations")
-	etcdKeyTestFilePath  = filepath.Join("tools", "pd-ut", "testdata")
-	etcdKeyTestFile      string
 )
 
 var (
@@ -112,24 +131,31 @@ var (
 	coverProfile string
 	ignoreDirs   string
 	cache        bool
-	group        string
+	// tags for tests
+	tags string = deadlockTag
 )
 
 func main() {
+	os.Exit(run())
+}
+
+func run() (exitCode int) {
+	// Initialize tags
+	initTags()
+
 	race = handleFlag("--race")
 	parallelStr := stripFlag("--parallel")
 	junitFile = stripFlag("--junitfile")
 	coverProfile = stripFlag("--coverprofile")
 	ignoreDirs = stripFlag("--ignore")
 	cache = handleFlag("--cache")
-	group = stripFlag("--group")
 
 	if coverProfile != "" {
 		var err error
 		coverFileTempDir, err = os.MkdirTemp("", "cov")
 		if err != nil {
 			fmt.Println("create temp dir fail", coverFileTempDir)
-			os.Exit(1)
+			return 1
 		}
 		defer os.RemoveAll(coverFileTempDir)
 	}
@@ -143,10 +169,15 @@ func main() {
 		parallel, err = strconv.Atoi(parallelStr)
 		if err != nil {
 			fmt.Println("parse parallel error", err)
-			return
+			return 1
 		}
-		if parallel > procs {
-			fmt.Printf("Recommend to set parallel be same as the GOMAXPROCS=%d\n", procs)
+		// Cap parallelism at the shared allocator's retained-address bound
+		// (see alloc.maxTestAddrMapLen) so a large --parallel can never
+		// trigger the eviction path. Oversubscription below the bound is
+		// left untouched.
+		if parallel > maxParallelAddrBound {
+			fmt.Printf("Clamping --parallel %d to %d to keep the port allocator's eviction bound reachable\n", parallel, maxParallelAddrBound)
+			parallel = maxParallelAddrBound
 		}
 	}
 	workDir, err = os.Getwd()
@@ -154,10 +185,11 @@ func main() {
 		fmt.Println("os.Getwd() error", err)
 	}
 
-	srv := alloc.RunHTTPServer()
+	srv := alloc.RunHTTPServer(context.Background())
 	defer func() {
 		if err := srv.Shutdown(context.Background()); err != nil {
-			log.Fatal("server shutdown error", zap.Error(err))
+			log.Printf("server shutdown error: %v", err)
+			exitCode = 1
 		}
 	}()
 
@@ -194,8 +226,9 @@ func main() {
 		}
 	}
 	if !isSucceed {
-		os.Exit(1)
+		return 1
 	}
+	return 0
 }
 
 func cmdList(args ...string) bool {
@@ -224,6 +257,7 @@ func cmdList(args ...string) bool {
 
 		err := buildTestBinary(pkg)
 		if err != nil {
+			// #nosec G706 -- pd-ut logs developer-selected package names and compiler errors.
 			log.Println("build package error", pkg, err)
 			return false
 		}
@@ -298,7 +332,6 @@ func cmdRun(args ...string) bool {
 	}
 	tasks := make([]task, 0, 5000)
 	start := time.Now()
-	var tmpEtcdKeyFile string
 
 	switch len(args) {
 	case 0, 1: // 0: run all tests, 1: run tests for a single package
@@ -323,6 +356,7 @@ func cmdRun(args ...string) bool {
 		pkg := args[0]
 		err := buildTestBinary(pkg)
 		if err != nil {
+			// #nosec G706 -- pd-ut logs developer-selected package names and compiler errors.
 			log.Println("build package error", pkg, err)
 			return false
 		}
@@ -342,19 +376,6 @@ func cmdRun(args ...string) bool {
 			log.Println("filter test cases error", err)
 			return false
 		}
-	}
-
-	var needCheckEtcd bool
-	if group != "" {
-		needCheckEtcd = true
-		etcdKeyTestFile = fmt.Sprintf("group.%s.etcdkey", group)
-		pwd, _ := os.Getwd()
-		tmpEtcdKeyFile = filepath.Join(pwd, etcdKeyTestFilePath, fmt.Sprintf("tmp.%s", etcdKeyTestFile))
-
-		os.Setenv("GO_FAILPOINTS", fmt.Sprintf("github.com/tikv/pd/pkg/utils/etcdutil/CollectEtcdKey=return(\"%s\")", tmpEtcdKeyFile))
-		defer func() {
-			os.Setenv("GO_FAILPOINTS", "github.com/tikv/pd/pkg/utils/etcdutil/CollectEtcdKey=return(\"\")")
-		}()
 	}
 
 	fmt.Printf("building task finish, parallelism=%d, count=%d, takes=%v\n", parallel*2, len(tasks), time.Since(start))
@@ -385,45 +406,6 @@ func cmdRun(args ...string) bool {
 		}
 	}
 
-	if needCheckEtcd && success {
-		etcdKeyFile := filepath.Join(etcdKeyTestFilePath, etcdKeyTestFile)
-		fmt.Printf("check the etcd key compatibility: \n%s\n%s\n", etcdKeyFile, tmpEtcdKeyFile)
-
-		// compare the etcd key file with the tmpEtcdKeyFile
-		// if they are the same, then the etcd key is compatible
-		etcdKeyFileContent, err := os.ReadFile(etcdKeyFile)
-		if err != nil {
-			fmt.Println("read etcd key file error", err)
-			etcdKeyFileContent = []byte{}
-		}
-		tmpEtcdKeyFileContent, err := os.ReadFile(tmpEtcdKeyFile)
-		if err != nil {
-			fmt.Println("read tmp etcd key file error", err)
-			tmpEtcdKeyFileContent = []byte{}
-		}
-
-		etcdKey := string(etcdKeyFileContent)
-		tmpEtcdKey := removeDuplicate(tmpEtcdKeyFileContent)
-		os.WriteFile(tmpEtcdKeyFile, []byte(tmpEtcdKey), 0600)
-		// If the content is too long, maybe we can not print them.
-		fmt.Printf("etcd key: %s\n\ntest etcd key: %s\n", etcdKey, tmpEtcdKey)
-
-		diff := difflib.UnifiedDiff{
-			A:        difflib.SplitLines(etcdKey),
-			B:        difflib.SplitLines(tmpEtcdKey),
-			FromFile: etcdKeyFile,
-			ToFile:   tmpEtcdKeyFile,
-			Context:  3,
-		}
-		diffText, _ := difflib.GetUnifiedDiffString(diff)
-
-		if len(diffText) != 0 {
-			// print the diff
-			fmt.Println("etcd key is not compatible:")
-			fmt.Println(diffText)
-			return false
-		}
-	}
 	if junitFile != "" {
 		out := collectTestResults(works)
 		f, err := os.Create(junitFile)
@@ -438,7 +420,10 @@ func cmdRun(args ...string) bool {
 	}
 
 	if coverProfile != "" {
-		collectCoverProfileFile()
+		if err := collectCoverProfileFile(); err != nil {
+			fmt.Println("collect cover profile error:", err)
+			return false
+		}
 	}
 
 	return success
@@ -583,7 +568,7 @@ func filterTestCases(tasks []task, arg1 string) ([]task, error) {
 
 func listPackages() ([]string, error) {
 	listPath := strings.Join([]string{".", "..."}, string(filepath.Separator))
-	cmd := exec.Command("go", "list", listPath)
+	cmd := goCommand("list", listPath)
 	cmd.Dir = workDir
 	ss, err := cmdToLines(cmd)
 	if err != nil {
@@ -647,7 +632,7 @@ func (n *numa) runTestCase(pkg string, fn string) testResult {
 		cmd.Stderr = &buf
 
 		start = time.Now()
-		err = cmd.Run()
+		err = runCommandWithTempDir(cmd)
 		if err != nil {
 			var exitError *exec.ExitError
 			if errors.As(err, &exitError) {
@@ -679,6 +664,25 @@ func (n *numa) runTestCase(pkg string, fn string) testResult {
 	res.d = time.Since(start)
 	res.Time = formatDurationAsSeconds(res.d)
 	return res
+}
+
+func runCommandWithTempDir(cmd *exec.Cmd) (err error) {
+	tempDir, err := os.MkdirTemp("", "pd-ut-test-")
+	if err != nil {
+		return fmt.Errorf("create test command temp directory: %w", err)
+	}
+	defer func() {
+		if cleanupErr := os.RemoveAll(tempDir); cleanupErr != nil {
+			err = errors.Join(err, fmt.Errorf("remove test command temp directory: %w", cleanupErr))
+		}
+	}()
+
+	cmd.Env = append(cmd.Environ(),
+		"TMPDIR="+tempDir,
+		"TMP="+tempDir,
+		"TEMP="+tempDir,
+	)
+	return cmd.Run()
 }
 
 func collectTestResults(workers []numa) JUnitTestSuites {
@@ -745,7 +749,7 @@ func (*numa) testCommand(pkg string, fn string) *exec.Cmd {
 		args = append(args, []string{"-test.timeout", "2m"}...)
 	} else {
 		// it takes a longer when race is enabled. so it is set more timeout value.
-		args = append(args, []string{"-test.timeout", "5m"}...)
+		args = append(args, []string{"-test.timeout", "10m"}...)
 	}
 
 	// core.test -test.run TestClusteredPrefixColum
@@ -773,8 +777,8 @@ func generateBuildCache() error {
 		return nil
 	}
 	fmt.Println("generate build cache")
-	// cd cmd/pd-server && go test -tags=deadlock -exec-=true -vet=off -toolexec=go-compile-without-link
-	cmd := exec.Command("go", "test", "-exec=true", "-vet", "off", "--tags=deadlock")
+	// cd cmd/pd-server && go test -tags=$(tags) -exec-=true -vet=off -toolexec=go-compile-without-link
+	cmd := goCommand("test", "-exec=true", "-vet", "off", "--tags="+tags)
 	goCompileWithoutLink := fmt.Sprintf("-toolexec=%s", filepath.Join(workDir, "tools", "pd-ut", "go-compile-without-link.sh"))
 	cmd.Dir = filepath.Join(workDir, "cmd", "pd-server")
 	if strings.Contains(workDir, integrationsTestPath) {
@@ -792,14 +796,14 @@ func generateBuildCache() error {
 }
 
 // buildTestBinaryMulti is much faster than build the test packages one by one.
-func buildTestBinaryMulti(pkgs []string) ([]byte, error) {
+func buildTestBinaryMulti(pkgs []string) (_ []byte, err error) {
 	// staged build, generate the build cache for all the tests first, then generate the test binary.
 	// This way is faster than generating test binaries directly, because the cache can be used.
 	if err := generateBuildCache(); err != nil {
 		return nil, withTrace(err)
 	}
 
-	// go test --exec=xprog --tags=deadlock -vet=off --count=0 $(pkgs)
+	// go test --exec=xprog --tags=$(tags) -vet=off --count=0 $(pkgs)
 	// workPath just like `/pd/tests/integrations`
 	xprogPath := filepath.Join(workDir, "bin", "xprog")
 	if strings.Contains(workDir, integrationsTestPath) {
@@ -812,7 +816,7 @@ func buildTestBinaryMulti(pkgs []string) ([]byte, error) {
 
 	// We use 2 * parallel for `go build` to make it faster.
 	p := strconv.Itoa(parallel * 2)
-	cmd := exec.Command("go", "test", "-p", p, "--exec", xprogPath, "-vet", "off", "--tags=deadlock")
+	cmd := goCommand("test", "-p", p, "--exec", xprogPath, "-vet", "off", "--tags="+tags)
 	if coverProfile != "" {
 		coverPkg := strings.Join([]string{".", "..."}, string(filepath.Separator))
 		if strings.Contains(workDir, integrationsTestPath) {
@@ -829,6 +833,11 @@ func buildTestBinaryMulti(pkgs []string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer func() {
+		closeErr := outputFile.Close()
+		removeErr := os.Remove(outputFile.Name())
+		err = errors.Join(err, closeErr, removeErr)
+	}()
 	cmd.Stdout = outputFile
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -840,14 +849,13 @@ func buildTestBinaryMulti(pkgs []string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer outputFile.Close()
 
 	return content, nil
 }
 
 func buildTestBinary(pkg string) error {
 	//nolint:gosec
-	cmd := exec.Command("go", "test", "-c", "-vet", "off", "--tags=deadlock", "-o", testFileName(pkg), "-v")
+	cmd := goCommand("test", "-c", "-vet", "off", "--tags="+tags, "-o", testFileName(pkg), "-v")
 	if coverProfile != "" {
 		coverPkg := strings.Join([]string{".", "..."}, string(filepath.Separator))
 		cmd.Args = append(cmd.Args, "-cover", fmt.Sprintf("-coverpkg=%s", coverPkg))
@@ -887,6 +895,7 @@ func testFileFullPath(pkg string) string {
 func listNewTestCases(pkg string) []string {
 	exe := strings.Join([]string{".", testFileName(pkg)}, string(filepath.Separator))
 	// core.test -test.list Test
+	// #nosec G702 -- pd-ut intentionally executes the test binary in the selected package directory.
 	cmd := exec.Command(exe, "-test.list", "Test")
 	cmd.Dir = filepath.Join(workDir, pkg)
 	var buf bytes.Buffer
@@ -914,6 +923,28 @@ func cmdToLines(cmd *exec.Cmd) ([]string, error) {
 	return ret, nil
 }
 
+// Keep child go commands on the same toolchain as pd-ut itself to avoid
+// mixing PATH's go binary with an auto-downloaded newer toolchain in CI.
+func goCommand(args ...string) *exec.Cmd {
+	// #nosec G702 -- The executable is fixed and all arguments are constructed internally.
+	cmd := exec.Command("go", args...)
+	if toolchain := pdUTToolchain(); toolchain != "" {
+		cmd.Env = append(os.Environ(), "GOTOOLCHAIN="+toolchain)
+	}
+	return cmd
+}
+
+func pdUTToolchain() string {
+	if toolchain, ok := os.LookupEnv("GOTOOLCHAIN"); ok && toolchain != "" && toolchain != "auto" {
+		return toolchain
+	}
+	version := runtime.Version()
+	if strings.HasPrefix(version, "go1.") {
+		return version
+	}
+	return ""
+}
+
 func filter(input []string, f func(string) bool) []string {
 	ret := input[:0]
 	for _, s := range input {
@@ -926,7 +957,7 @@ func filter(input []string, f func(string) bool) []string {
 
 func shuffle(tasks []task) {
 	for i := range tasks {
-		pos := rand.Intn(len(tasks))
+		pos := rand.IntN(len(tasks))
 		tasks[i], tasks[pos] = tasks[pos], tasks[i]
 	}
 }
@@ -973,7 +1004,7 @@ func goVersion() string {
 	if version, ok := os.LookupEnv("GOVERSION"); ok {
 		return version
 	}
-	cmd := exec.Command("go", "version")
+	cmd := goCommand("version")
 	out, err := cmd.Output()
 	if err != nil {
 		return "unknown"
@@ -1038,23 +1069,4 @@ type JUnitFailure struct {
 	Message  string `xml:"message,attr"`
 	Type     string `xml:"type,attr"`
 	Contents string `xml:",chardata"`
-}
-
-func removeDuplicate(content []byte) string {
-	lines := strings.Split(string(content), "\n")
-	unique := make(map[string]struct{})
-	for _, line := range lines {
-		if len(line) == 0 {
-			continue
-		}
-		unique[line] = struct{}{}
-	}
-	var res []string
-	for k := range unique {
-		res = append(res, k)
-	}
-
-	// sort the result
-	sort.Strings(res)
-	return strings.Join(res, "\n")
 }

@@ -15,11 +15,10 @@
 package core_test
 
 import (
-	"context"
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -35,46 +34,66 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
-func TestHotRegionStorage(t *testing.T) {
-	re := require.New(t)
-	statistics.Denoising = false
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1,
+type hotRegionStorageTestSuite struct {
+	suite.Suite
+	interval time.Duration
+	env      *tests.SchedulingTestEnvironment
+}
+
+func TestHotRegionStorageTestSuite(t *testing.T) {
+	suite.Run(t, new(hotRegionStorageTestSuite))
+}
+
+func (s *hotRegionStorageTestSuite) SetupSuite() {
+	statistics.DisableDenoising()
+	s.interval = 100 * time.Millisecond
+	s.env = tests.NewSchedulingTestEnvironment(s.T(),
 		func(cfg *config.Config, _ string) {
 			cfg.Schedule.HotRegionCacheHitsThreshold = 0
-			cfg.Schedule.HotRegionsWriteInterval.Duration = 1000 * time.Millisecond
+			cfg.Schedule.HotRegionsWriteInterval.Duration = s.interval
 			cfg.Schedule.HotRegionsReservedDays = 1
 		},
 	)
-	re.NoError(err)
-	defer cluster.Destroy()
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	re.NotEmpty(cluster.WaitLeader())
-	stores := []*metapb.Store{
-		{
-			Id:            1,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-		{
-			Id:            2,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-	}
+}
 
-	leaderServer := cluster.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
-	for _, store := range stores {
-		tests.MustPutStore(re, cluster, store)
-	}
+func (s *hotRegionStorageTestSuite) TearDownSuite() {
+	s.env.Cleanup()
+}
 
+func (s *hotRegionStorageTestSuite) SetupTest() {
+	re := s.Require()
+	s.env.RunFunc(func(cluster *tests.TestCluster) {
+		stores := []*metapb.Store{
+			{
+				Id:    1,
+				State: metapb.StoreState_Up,
+			},
+			{
+				Id:    2,
+				State: metapb.StoreState_Up,
+			},
+		}
+		for _, store := range stores {
+			tests.MustPutStore(re, cluster, store)
+		}
+	})
+}
+
+func (s *hotRegionStorageTestSuite) TearDownTest() {
+	s.env.Reset(s.Require())
+}
+
+func (s *hotRegionStorageTestSuite) TestHotRegionStorage() {
+	s.env.RunTestInNonMicroserviceEnv(s.checkHotRegionStorage)
+}
+
+func (s *hotRegionStorageTestSuite) checkHotRegionStorage(cluster *tests.TestCluster) {
+	re := s.Require()
 	startTime := time.Now().Unix()
+	leaderServer := cluster.GetLeaderServer()
 	tests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000),
 		core.SetReportInterval(uint64(startTime-utils.RegionHeartBeatReportInterval), uint64(startTime)))
 	tests.MustPutRegion(re, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000),
@@ -106,88 +125,68 @@ func TestHotRegionStorage(t *testing.T) {
 		},
 	}
 	for _, storeStats := range storeStats {
-		leaderServer.GetRaftCluster().HandleStoreHeartbeat(&pdpb.StoreHeartbeatRequest{Stats: storeStats}, &pdpb.StoreHeartbeatResponse{})
+		err := leaderServer.GetRaftCluster().HandleStoreHeartbeat(&pdpb.StoreHeartbeatRequest{Stats: storeStats}, &pdpb.StoreHeartbeatResponse{})
+		re.NoError(err)
 	}
-	var iter storage.HotRegionStorageIterator
-	var next *storage.HistoryHotRegion
 	hotRegionStorage := leaderServer.GetServer().GetHistoryHotRegionStorage()
+	var writeRegions, readRegions []*storage.HistoryHotRegion
 	testutil.Eventually(re, func() bool { // wait for the history hot region to be written to the storage
-		iter = hotRegionStorage.NewIterator([]string{utils.Write.String()}, startTime*1000, time.Now().UnixMilli())
-		next, err = iter.Next()
-		return err == nil && next != nil
+		var err error
+		writeRegions, err = loadHistoryHotRegions(hotRegionStorage, utils.Write.String(), startTime*1000)
+		if err != nil || len(writeRegions) != 2 {
+			return false
+		}
+		readRegions, err = loadHistoryHotRegions(hotRegionStorage, utils.Read.String(), startTime*1000)
+		return err == nil && len(readRegions) == 2
 	})
-	re.Equal(uint64(1), next.RegionID)
-	re.Equal(uint64(1), next.StoreID)
-	re.Equal(utils.Write.String(), next.HotRegionType)
-	next, err = iter.Next()
-	re.NoError(err)
-	re.NotNil(next)
-	re.Equal(uint64(2), next.RegionID)
-	re.Equal(uint64(2), next.StoreID)
-	re.Equal(utils.Write.String(), next.HotRegionType)
-	next, err = iter.Next()
-	re.NoError(err)
-	re.Nil(next)
-	iter = hotRegionStorage.NewIterator([]string{utils.Read.String()}, startTime*1000, time.Now().UnixMilli())
-	next, err = iter.Next()
-	re.NoError(err)
-	re.NotNil(next)
-	re.Equal(uint64(3), next.RegionID)
-	re.Equal(uint64(1), next.StoreID)
-	re.Equal(utils.Read.String(), next.HotRegionType)
-	next, err = iter.Next()
-	re.NoError(err)
-	re.NotNil(next)
-	re.Equal(uint64(4), next.RegionID)
-	re.Equal(uint64(2), next.StoreID)
-	re.Equal(utils.Read.String(), next.HotRegionType)
-	next, err = iter.Next()
-	re.NoError(err)
-	re.Nil(next)
+	re.Equal(uint64(1), writeRegions[0].RegionID)
+	re.Equal(uint64(1), writeRegions[0].StoreID)
+	re.Equal(utils.Write.String(), writeRegions[0].HotRegionType)
+	re.Equal(uint64(2), writeRegions[1].RegionID)
+	re.Equal(uint64(2), writeRegions[1].StoreID)
+	re.Equal(utils.Write.String(), writeRegions[1].HotRegionType)
+	re.Equal(uint64(3), readRegions[0].RegionID)
+	re.Equal(uint64(1), readRegions[0].StoreID)
+	re.Equal(utils.Read.String(), readRegions[0].HotRegionType)
+	re.Equal(uint64(4), readRegions[1].RegionID)
+	re.Equal(uint64(2), readRegions[1].StoreID)
+	re.Equal(utils.Read.String(), readRegions[1].HotRegionType)
 }
 
-func TestHotRegionStorageReservedDayConfigChange(t *testing.T) {
-	re := require.New(t)
-	statistics.Denoising = false
-	ctx, cancel := context.WithCancel(context.Background())
-	interval := 100 * time.Millisecond
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1,
-		func(cfg *config.Config, _ string) {
-			cfg.Schedule.HotRegionCacheHitsThreshold = 0
-			cfg.Schedule.HotRegionsWriteInterval.Duration = interval
-			cfg.Schedule.HotRegionsReservedDays = 1
-		},
-	)
-	re.NoError(err)
-	defer cluster.Destroy()
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	re.NotEmpty(cluster.WaitLeader())
-	stores := []*metapb.Store{
-		{
-			Id:            1,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-		{
-			Id:            2,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
+func loadHistoryHotRegions(
+	hotRegionStorage *storage.HotRegionStorage,
+	hotRegionType string,
+	startTime int64,
+) ([]*storage.HistoryHotRegion, error) {
+	iter := hotRegionStorage.NewIterator([]string{hotRegionType}, startTime, time.Now().UnixMilli())
+	regions := make([]*storage.HistoryHotRegion, 0)
+	for {
+		next, err := iter.Next()
+		if err != nil {
+			return nil, err
+		}
+		if next == nil {
+			return regions, nil
+		}
+		regions = append(regions, next)
 	}
+}
 
-	leaderServer := cluster.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
-	for _, store := range stores {
-		tests.MustPutStore(re, cluster, store)
-	}
+func (s *hotRegionStorageTestSuite) TestHotRegionStorageReservedDayConfigChange() {
+	s.env.RunTestInNonMicroserviceEnv(s.checkHotRegionStorageReservedDayConfigChange)
+}
 
+func (s *hotRegionStorageTestSuite) checkHotRegionStorageReservedDayConfigChange(cluster *tests.TestCluster) {
+	re := s.Require()
 	startTime := time.Now().Unix()
+	leaderServer := cluster.GetLeaderServer()
 	tests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000),
 		core.SetReportInterval(uint64(startTime-utils.RegionHeartBeatReportInterval), uint64(startTime)))
-	var iter storage.HotRegionStorageIterator
-	var next *storage.HistoryHotRegion
+	var (
+		iter storage.HotRegionStorageIterator
+		next *storage.HistoryHotRegion
+		err  error
+	)
 	testutil.Eventually(re, func() bool { // wait for the history hot region to be written to the storage
 		hotRegionStorage := leaderServer.GetServer().GetHistoryHotRegionStorage()
 		iter = hotRegionStorage.NewIterator([]string{utils.Write.String()}, startTime*1000, time.Now().UnixMilli())
@@ -203,11 +202,12 @@ func TestHotRegionStorageReservedDayConfigChange(t *testing.T) {
 	schedule := leaderServer.GetConfig().Schedule
 	// set reserved day to zero, close hot region storage
 	schedule.HotRegionsReservedDays = 0
-	leaderServer.GetServer().SetScheduleConfig(schedule)
-	time.Sleep(3 * interval)
+	err = leaderServer.GetServer().SetScheduleConfig(schedule)
+	re.NoError(err)
+	time.Sleep(3 * s.interval)
 	tests.MustPutRegion(re, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000),
 		core.SetReportInterval(uint64(time.Now().Unix()-utils.RegionHeartBeatReportInterval), uint64(time.Now().Unix())))
-	time.Sleep(10 * interval)
+	time.Sleep(10 * s.interval)
 	hotRegionStorage := leaderServer.GetServer().GetHistoryHotRegionStorage()
 	iter = hotRegionStorage.NewIterator([]string{utils.Write.String()}, startTime*1000, time.Now().UnixMilli())
 	next, err = iter.Next()
@@ -221,8 +221,9 @@ func TestHotRegionStorageReservedDayConfigChange(t *testing.T) {
 	re.Nil(next)
 	// set reserved day to one, open hot region storage
 	schedule.HotRegionsReservedDays = 1
-	leaderServer.GetServer().SetScheduleConfig(schedule)
-	time.Sleep(3 * interval)
+	err = leaderServer.GetServer().SetScheduleConfig(schedule)
+	re.NoError(err)
+	time.Sleep(3 * s.interval)
 	hotRegionStorage = leaderServer.GetServer().GetHistoryHotRegionStorage()
 	iter = hotRegionStorage.NewIterator([]string{utils.Write.String()}, startTime*1000, time.Now().UnixMilli())
 	next, err = iter.Next()
@@ -239,48 +240,22 @@ func TestHotRegionStorageReservedDayConfigChange(t *testing.T) {
 	re.Equal(utils.Write.String(), next.HotRegionType)
 }
 
-func TestHotRegionStorageWriteIntervalConfigChange(t *testing.T) {
-	re := require.New(t)
-	statistics.Denoising = false
-	ctx, cancel := context.WithCancel(context.Background())
-	interval := 100 * time.Millisecond
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1,
-		func(cfg *config.Config, _ string) {
-			cfg.Schedule.HotRegionCacheHitsThreshold = 0
-			cfg.Schedule.HotRegionsWriteInterval.Duration = interval
-			cfg.Schedule.HotRegionsReservedDays = 1
-		},
-	)
-	re.NoError(err)
-	defer cluster.Destroy()
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	re.NotEmpty(cluster.WaitLeader())
-	stores := []*metapb.Store{
-		{
-			Id:            1,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-		{
-			Id:            2,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-	}
+func (s *hotRegionStorageTestSuite) TestHotRegionStorageWriteIntervalConfigChange() {
+	s.env.RunTestInNonMicroserviceEnv(s.checkHotRegionStorageWriteIntervalConfigChange)
+}
 
-	leaderServer := cluster.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
-	for _, store := range stores {
-		tests.MustPutStore(re, cluster, store)
-	}
+func (s *hotRegionStorageTestSuite) checkHotRegionStorageWriteIntervalConfigChange(cluster *tests.TestCluster) {
+	re := s.Require()
 	startTime := time.Now().Unix()
+	leaderServer := cluster.GetLeaderServer()
 	tests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"),
 		core.SetWrittenBytes(3000000000),
 		core.SetReportInterval(uint64(startTime-utils.RegionHeartBeatReportInterval), uint64(startTime)))
-	var iter storage.HotRegionStorageIterator
-	var next *storage.HistoryHotRegion
+	var (
+		iter storage.HotRegionStorageIterator
+		next *storage.HistoryHotRegion
+		err  error
+	)
 	testutil.Eventually(re, func() bool { // wait for the history hot region to be written to the storage
 		hotRegionStorage := leaderServer.GetServer().GetHistoryHotRegionStorage()
 		iter = hotRegionStorage.NewIterator([]string{utils.Write.String()}, startTime*1000, time.Now().UnixMilli())
@@ -295,12 +270,13 @@ func TestHotRegionStorageWriteIntervalConfigChange(t *testing.T) {
 	re.Nil(next)
 	schedule := leaderServer.GetConfig().Schedule
 	// set the time to 20 times the interval
-	schedule.HotRegionsWriteInterval.Duration = 20 * interval
-	leaderServer.GetServer().SetScheduleConfig(schedule)
-	time.Sleep(3 * interval)
+	schedule.HotRegionsWriteInterval.Duration = 20 * s.interval
+	err = leaderServer.GetServer().SetScheduleConfig(schedule)
+	re.NoError(err)
+	time.Sleep(3 * s.interval)
 	tests.MustPutRegion(re, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000),
 		core.SetReportInterval(uint64(time.Now().Unix()-utils.RegionHeartBeatReportInterval), uint64(time.Now().Unix())))
-	time.Sleep(10 * interval)
+	time.Sleep(10 * s.interval)
 	// it cant get new hot region because wait time smaller than hot region write interval
 	hotRegionStorage := leaderServer.GetServer().GetHistoryHotRegionStorage()
 	iter = hotRegionStorage.NewIterator([]string{utils.Write.String()}, startTime*1000, time.Now().UnixMilli())

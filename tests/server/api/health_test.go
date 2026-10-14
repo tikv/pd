@@ -58,7 +58,7 @@ func (suite *healthTestSuite) checkHealthSlice(cluster *tests.TestCluster) {
 
 	for _, server := range servers {
 		svr := server.GetServer()
-		if !svr.IsClosed() && svr.GetMember().IsLeader() {
+		if !svr.IsClosed() && svr.GetMember().IsServing() {
 			leader = svr
 		} else {
 			follower = svr

@@ -16,16 +16,22 @@ package tso_test
 
 import (
 	"context"
+	"io"
+	"net"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
-	"github.com/tikv/pd/pkg/tso"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
@@ -40,6 +46,7 @@ type tsoProxyTestSuite struct {
 	follower     *tests.TestServer
 
 	pdClient     pdpb.PDClient
+	conn         *grpc.ClientConn
 	defaultReq   *pdpb.TsoRequest
 	proxyClient  pdpb.PD_TsoClient
 	clientCtx    context.Context
@@ -69,34 +76,53 @@ func (s *tsoProxyTestSuite) SetupTest() {
 		}
 	}
 
-	s.pdClient = testutil.MustNewGrpcClient(re, s.follower.GetAddr())
+	s.pdClient, s.conn = testutil.MustNewGrpcClient(re, s.follower.GetAddr())
 	clusterID := s.leader.GetClusterID()
 	s.defaultReq = &pdpb.TsoRequest{
-		Header:     testutil.NewRequestHeader(clusterID),
-		Count:      1,
-		DcLocation: tso.GlobalDCLocation,
+		Header: testutil.NewRequestHeader(clusterID),
+		Count:  1,
 	}
 
 	s.reCreateProxyClient()
 }
 
 func (s *tsoProxyTestSuite) reCreateProxyClient() {
+	re := s.Require()
 	if s.proxyClient != nil {
-		_ = s.proxyClient.CloseSend()
+		err := s.proxyClient.CloseSend()
+		if err != nil && err != io.EOF {
+			re.NoError(err)
+		}
+	}
+	if s.clientCancel != nil {
 		s.clientCancel()
 	}
-	s.proxyClient, s.clientCtx, s.clientCancel = s.createClient()
+	var err error
+	s.proxyClient, s.clientCtx, s.clientCancel, err = s.createClient()
+	re.NoError(err)
 }
 
-func (s *tsoProxyTestSuite) createClient() (pdpb.PD_TsoClient, context.Context, context.CancelFunc) {
+func (s *tsoProxyTestSuite) createClient() (pdpb.PD_TsoClient, context.Context, context.CancelFunc, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	ctx = grpcutil.BuildForwardContext(ctx, s.leader.GetAddr())
-	tsoClient, _ := s.pdClient.Tso(ctx)
-	return tsoClient, ctx, cancel
+	tsoClient, err := s.pdClient.Tso(ctx)
+	if err != nil {
+		cancel()
+		return nil, nil, nil, err
+	}
+	return tsoClient, ctx, cancel, nil
 }
-
 func (s *tsoProxyTestSuite) TearDownTest() {
-	_ = s.proxyClient.CloseSend()
+	re := s.Require()
+	if s.proxyClient != nil {
+		err := s.proxyClient.CloseSend()
+		if err != nil && err != io.EOF {
+			re.NoError(err)
+		}
+	}
+	if s.conn != nil {
+		s.conn.Close()
+	}
 	s.clientCancel()
 	s.cluster.Destroy()
 	s.serverCancel()
@@ -115,6 +141,125 @@ func (s *tsoProxyTestSuite) verifyProxyIsHealthyWith(client pdpb.PD_TsoClient) {
 	timestamp := resp.GetTimestamp()
 	re.Positive(timestamp.GetPhysical())
 	re.GreaterOrEqual(uint32(timestamp.GetLogical()), s.defaultReq.GetCount())
+}
+
+func (s *tsoProxyTestSuite) TestRejectFollowerForwardedHost() {
+	re := s.Require()
+	client, conn := testutil.MustNewGrpcClient(re, s.leader.GetAddr())
+	defer conn.Close()
+
+	s.verifyForwardedHostRejected(client, s.follower.GetAddr())
+	s.verifyForwardedHostRejected(s.pdClient, s.follower.GetAddr())
+}
+
+func (s *tsoProxyTestSuite) TestAcceptLeaderForwardedHostWithDifferentScheme() {
+	re := s.Require()
+	forwardedHost := strings.Replace(s.leader.GetAddr(), "http://", "https://", 1)
+	re.NotEqual(s.leader.GetAddr(), forwardedHost)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ctx = grpcutil.BuildForwardContext(ctx, forwardedHost)
+
+	resp, err := s.pdClient.GetAllStores(ctx, &pdpb.GetAllStoresRequest{Header: s.defaultReq.GetHeader()})
+	re.NoError(err)
+	re.NotNil(resp)
+	re.Equal(s.defaultReq.GetHeader().GetClusterId(), resp.GetHeader().GetClusterId())
+
+	client, err := s.pdClient.Tso(ctx)
+	re.NoError(err)
+	defer func() {
+		err := client.CloseSend()
+		if err != nil && err != io.EOF {
+			re.NoError(err)
+		}
+	}()
+	s.verifyProxyIsHealthyWith(client)
+}
+
+func (s *tsoProxyTestSuite) verifyForwardedHostRejected(client pdpb.PDClient, forwardedHost string) {
+	re := s.Require()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ctx = grpcutil.BuildForwardContext(ctx, forwardedHost)
+	_, err := client.GetAllStores(ctx, &pdpb.GetAllStoresRequest{Header: s.defaultReq.GetHeader()})
+	re.Error(err)
+	re.Equal(codes.InvalidArgument, status.Code(err))
+	re.ErrorContains(err, errs.NotLeaderErr)
+
+	tsoClient, err := client.Tso(ctx)
+	re.NoError(err)
+	defer func() {
+		err := tsoClient.CloseSend()
+		if err != nil && err != io.EOF {
+			re.NoError(err)
+		}
+	}()
+	re.NoError(tsoClient.Send(s.defaultReq))
+	_, err = tsoClient.Recv()
+	re.Error(err)
+	re.Equal(codes.InvalidArgument, status.Code(err))
+
+	regionHeartbeatClient, err := client.RegionHeartbeat(ctx)
+	re.NoError(err)
+	defer func() {
+		err := regionHeartbeatClient.CloseSend()
+		if err != nil && err != io.EOF {
+			re.NoError(err)
+		}
+	}()
+	re.NoError(regionHeartbeatClient.Send(&pdpb.RegionHeartbeatRequest{Header: s.defaultReq.GetHeader()}))
+	_, err = regionHeartbeatClient.Recv()
+	re.Error(err)
+	re.Equal(codes.InvalidArgument, status.Code(err))
+
+	reportBucketsClient, err := client.ReportBuckets(ctx)
+	re.NoError(err)
+	re.NoError(reportBucketsClient.Send(&pdpb.ReportBucketsRequest{Header: s.defaultReq.GetHeader()}))
+	_, err = reportBucketsClient.CloseAndRecv()
+	re.Error(err)
+	re.Equal(codes.InvalidArgument, status.Code(err))
+}
+
+func (s *tsoProxyTestSuite) TestRejectUnknownForwardedHost() {
+	re := s.Require()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	re.NoError(err)
+	accepted := make(chan bool, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			accepted <- false
+			return
+		}
+		conn.Close()
+		accepted <- true
+	}()
+	defer func() {
+		re.NoError(listener.Close())
+		re.False(<-accepted)
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ctx = grpcutil.BuildForwardContext(ctx, "http://"+listener.Addr().String())
+
+	_, err = s.pdClient.GetAllStores(ctx, &pdpb.GetAllStoresRequest{Header: s.defaultReq.GetHeader()})
+	re.Error(err)
+	re.Equal(codes.InvalidArgument, status.Code(err))
+
+	client, err := s.pdClient.Tso(ctx)
+	re.NoError(err)
+	defer func() {
+		err := client.CloseSend()
+		if err != nil && err != io.EOF {
+			re.NoError(err)
+		}
+	}()
+	re.NoError(client.Send(s.defaultReq))
+	_, err = client.Recv()
+	re.Error(err)
+	re.Equal(codes.InvalidArgument, status.Code(err))
 }
 
 func (s *tsoProxyTestSuite) assertReceiveError(re *require.Assertions, errStr string) {
@@ -169,14 +314,24 @@ func (s *tsoProxyTestSuite) TestProxyCanNotCreateConnectionToLeader() {
 }
 
 func (s *tsoProxyTestSuite) TestClientsContinueToWorkAfterFirstStreamIsClosed() {
+	re := s.Require()
 	s.verifyProxyIsHealthy()
 	// open second stream
-	proxyClient, _, cancel := s.createClient()
+	proxyClient, _, cancel, err := s.createClient()
 	defer cancel()
-	defer proxyClient.CloseSend()
+	re.NoError(err)
+	defer func() {
+		err := proxyClient.CloseSend()
+		if err != nil && err != io.EOF {
+			re.NoError(err)
+		}
+	}()
 
 	// close the first stream
-	s.proxyClient.CloseSend()
+	err = s.proxyClient.CloseSend()
+	if err != nil && err != io.EOF {
+		re.NoError(err)
+	}
 
 	// verify other streams are still working
 	s.verifyProxyIsHealthyWith(proxyClient)

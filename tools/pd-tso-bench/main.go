@@ -18,7 +18,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"net/http/httptest"
 	"os"
 	"os/signal"
@@ -186,7 +186,7 @@ func reqWorker(ctx context.Context, pdClients []pd.Client, clientIdx int, durCh 
 		for ; i < maxRetryTime; i++ {
 			var ticker *time.Ticker
 			if *maxTSOSendIntervalMilliseconds > 0 {
-				sleepBeforeGetTS := time.Duration(rand.Intn(*maxTSOSendIntervalMilliseconds)) * time.Millisecond
+				sleepBeforeGetTS := time.Duration(rand.IntN(*maxTSOSendIntervalMilliseconds)) * time.Millisecond
 				if sleepBeforeGetTS > 0 {
 					ticker = time.NewTicker(sleepBeforeGetTS)
 					select {
@@ -236,6 +236,7 @@ func createPDClient(ctx context.Context) (pd.Client, error) {
 	if *useTSOServerProxy {
 		opts = append(opts, opt.WithTSOServerProxyOption(true))
 	}
+	//nolint:staticcheck
 	opts = append(opts, opt.WithGRPCDialOptions(
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
 			Time:    keepaliveTime,
@@ -266,11 +267,17 @@ func createPDClient(ctx context.Context) (pd.Client, error) {
 		return nil, err
 	}
 
-	pdCli.UpdateOption(opt.MaxTSOBatchWaitInterval, *maxBatchWaitInterval)
-	pdCli.UpdateOption(opt.EnableTSOFollowerProxy, *enableTSOFollowerProxy)
+	if err := pdCli.UpdateOption(opt.MaxTSOBatchWaitInterval, *maxBatchWaitInterval); err != nil {
+		pdCli.Close()
+		return nil, err
+	}
+	if err := pdCli.UpdateOption(opt.EnableTSOFollowerProxy, *enableTSOFollowerProxy); err != nil {
+		pdCli.Close()
+		return nil, err
+	}
 	return pdCli, err
 }
 
 func shouldInjectFault() bool {
-	return rand.Intn(10000) < int(*faultInjectionRate*10000)
+	return rand.IntN(10000) < int(*faultInjectionRate*10000)
 }

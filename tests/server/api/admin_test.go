@@ -227,6 +227,7 @@ func (suite *adminTestSuite) checkResetTS(cluster *tests.TestCluster) {
 			re.Contains(string(b), "Reset ts successfully.")
 			return true
 		case http.StatusServiceUnavailable:
+			// If the error is ErrEtcdTxnConflict, it means there is a temporary failure.
 			re.Contains(string(b), "[PD:etcd:ErrEtcdTxnConflict]etcd transaction failed, conflicted and rolled back")
 			return false
 		default:
@@ -300,6 +301,10 @@ func (suite *adminTestSuite) TestMarkSnapshotRecovering() {
 	suite.env.RunTest(suite.checkMarkSnapshotRecovering)
 }
 
+func (suite *adminTestSuite) TestMarkPitrRestoreMode() {
+	suite.env.RunTest(suite.checkMarkPitrRestoreMode)
+}
+
 func (suite *adminTestSuite) checkMarkSnapshotRecovering(cluster *tests.TestCluster) {
 	re := suite.Require()
 	leader := cluster.GetLeaderServer()
@@ -319,6 +324,27 @@ func (suite *adminTestSuite) checkMarkSnapshotRecovering(cluster *tests.TestClus
 	resp, err2 := grpcServer.IsSnapshotRecovering(context.Background(), &pdpb.IsSnapshotRecoveringRequest{})
 	re.NoError(err2)
 	re.True(resp.Marked)
+	// unmark
+	err := testutil.CheckDelete(tests.TestDialClient, url, testutil.StatusOK(re))
+	re.NoError(err)
+	re.NoError(testutil.CheckGetJSON(tests.TestDialClient, url, nil,
+		testutil.StatusOK(re), testutil.StringContain(re, "false")))
+}
+
+func (suite *adminTestSuite) checkMarkPitrRestoreMode(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leader := cluster.GetLeaderServer()
+	urlPrefix := leader.GetAddr() + "/pd/api/v1"
+	url := fmt.Sprintf("%s/admin/cluster/markers/pitr-restore-mode", urlPrefix)
+	// default to false
+	re.NoError(testutil.CheckGetJSON(tests.TestDialClient, url, nil,
+		testutil.StatusOK(re), testutil.StringContain(re, "false")))
+
+	// mark
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, url, nil,
+		testutil.StatusOK(re)))
+	re.NoError(testutil.CheckGetJSON(tests.TestDialClient, url, nil,
+		testutil.StatusOK(re), testutil.StringContain(re, "true")))
 	// unmark
 	err := testutil.CheckDelete(tests.TestDialClient, url, testutil.StatusOK(re))
 	re.NoError(err)
@@ -388,7 +414,8 @@ func (suite *adminTestSuite) checkCleanPath(cluster *tests.TestCluster) {
 
 	// handled by router
 	response := httptest.NewRecorder()
-	r, _, _ := api.NewHandler(context.Background(), leader.GetServer())
+	r, _, err := api.NewHandler(context.Background(), leader.GetServer())
+	re.NoError(err)
 	request, err := http.NewRequest(http.MethodGet, url, http.NoBody)
 	re.NoError(err)
 	r.ServeHTTP(response, request)

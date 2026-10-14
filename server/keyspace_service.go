@@ -22,16 +22,19 @@ import (
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
 // KeyspaceServer wraps GrpcServer to provide keyspace service.
 type KeyspaceServer struct {
+	keyspacepb.UnimplementedKeyspaceServer
 	*GrpcServer
 }
 
@@ -39,11 +42,11 @@ type KeyspaceServer struct {
 func getErrorHeader(err error) *pdpb.ResponseHeader {
 	switch err {
 	case errs.ErrKeyspaceExists:
-		return wrapErrorToHeader(pdpb.ErrorType_DUPLICATED_ENTRY, err.Error())
+		return grpcutil.WrapErrorToHeader(pdpb.ErrorType_DUPLICATED_ENTRY, err.Error())
 	case errs.ErrKeyspaceNotFound:
-		return wrapErrorToHeader(pdpb.ErrorType_ENTRY_NOT_FOUND, err.Error())
+		return grpcutil.WrapErrorToHeader(pdpb.ErrorType_ENTRY_NOT_FOUND, err.Error())
 	default:
-		return wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error())
+		return grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error())
 	}
 }
 
@@ -61,8 +64,43 @@ func (s *KeyspaceServer) LoadKeyspace(_ context.Context, request *keyspacepb.Loa
 	if err != nil {
 		return &keyspacepb.LoadKeyspaceResponse{Header: getErrorHeader(err)}, nil
 	}
+	failpoint.Inject("skipKeyspaceRegionCheck", func() {
+		failpoint.Return(&keyspacepb.LoadKeyspaceResponse{
+			Header:   grpcutil.WrapHeader(),
+			Keyspace: meta,
+		}, nil)
+	})
+	if !manager.CheckKeyspaceRegionBound(meta) {
+		// If the keyspace region is not split yet, we treat it as not found.
+		// To avoid clients using the keyspace before region split is done.
+		err = errs.ErrKeyspaceNotFound
+		return &keyspacepb.LoadKeyspaceResponse{Header: getErrorHeader(err)}, nil
+	}
 	return &keyspacepb.LoadKeyspaceResponse{
-		Header:   wrapHeader(),
+		Header:   grpcutil.WrapHeader(),
+		Keyspace: meta,
+	}, nil
+}
+
+// LoadKeyspaceByID loads and returns target keyspace metadata.
+// Request must specify keyspace ID.
+// On Error, keyspaceMeta in response will be nil,
+// error information will be encoded in response header with corresponding error type.
+func (s *KeyspaceServer) LoadKeyspaceByID(_ context.Context, request *keyspacepb.LoadKeyspaceByIDRequest) (*keyspacepb.LoadKeyspaceResponse, error) {
+	if err := s.validateRequest(request.GetHeader()); err != nil {
+		return nil, err
+	}
+
+	manager := s.GetKeyspaceManager()
+	meta, err := manager.LoadKeyspaceByID(request.GetId())
+	if err != nil {
+		return &keyspacepb.LoadKeyspaceResponse{Header: getErrorHeader(err)}, nil
+	}
+	// TiKV needs keyspace metadata, including encryption settings, before it can
+	// split the keyspace regions. Checking the region bounds here would create a
+	// circular dependency between loading the metadata and splitting the regions.
+	return &keyspacepb.LoadKeyspaceResponse{
+		Header:   grpcutil.WrapHeader(),
 		Keyspace: meta,
 	}, nil
 }
@@ -95,10 +133,13 @@ func (s *KeyspaceServer) WatchKeyspaces(request *keyspacepb.WatchKeyspacesReques
 			return nil
 		}
 		defer func() {
+			for i := range keyspaces {
+				keyspaces[i] = nil // avoid memory leak
+			}
 			keyspaces = keyspaces[:0]
 		}()
 		err := stream.Send(&keyspacepb.WatchKeyspacesResponse{
-			Header:    wrapHeader(),
+			Header:    grpcutil.WrapHeader(),
 			Keyspaces: keyspaces})
 		if err != nil {
 			defer cancel() // cancel context to stop watcher
@@ -141,7 +182,7 @@ func (s *KeyspaceServer) UpdateKeyspaceState(_ context.Context, request *keyspac
 		return &keyspacepb.UpdateKeyspaceStateResponse{Header: getErrorHeader(err)}, nil
 	}
 	return &keyspacepb.UpdateKeyspaceStateResponse{
-		Header:   wrapHeader(),
+		Header:   grpcutil.WrapHeader(),
 		Keyspace: meta,
 	}, nil
 }
@@ -153,13 +194,13 @@ func (s *KeyspaceServer) GetAllKeyspaces(_ context.Context, request *keyspacepb.
 	}
 
 	manager := s.GetKeyspaceManager()
-	keyspaces, err := manager.LoadRangeKeyspace(request.StartId, int(request.Limit))
+	keyspaces, err := manager.LoadRangeKeyspace(request.GetStartId(), int(request.Limit))
 	if err != nil {
 		return &keyspacepb.GetAllKeyspacesResponse{Header: getErrorHeader(err)}, nil
 	}
 
 	return &keyspacepb.GetAllKeyspacesResponse{
-		Header:    wrapHeader(),
+		Header:    grpcutil.WrapHeader(),
 		Keyspaces: keyspaces,
 	}, nil
 }

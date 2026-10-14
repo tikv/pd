@@ -15,6 +15,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -28,15 +29,20 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 
+	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace/constant"
+	"github.com/tikv/pd/pkg/schedule/checker"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
@@ -63,23 +69,63 @@ func (suite *ruleTestSuite) TearDownSuite() {
 
 func (suite *ruleTestSuite) TearDownTest() {
 	re := suite.Require()
-	cleanFunc := func(cluster *tests.TestCluster) {
-		def := placement.GroupBundle{
-			ID: "pd",
-			Rules: []*placement.Rule{
-				{GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID, Role: "voter", Count: 3},
+	suite.env.Reset(re)
+}
+
+func (suite *ruleTestSuite) TestRegionLabel() {
+	suite.env.RunTestInMicroserviceEnv(suite.checkRegionLabeler)
+}
+
+func (suite *ruleTestSuite) checkRegionLabeler(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leaderServer := cluster.GetLeaderServer()
+	pdAddr := leaderServer.GetAddr()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges"))
+	}()
+	urlPrefix := fmt.Sprintf("%s/pd/api/v1/config/region-label/rule", pdAddr)
+	startKey := codec.EncodeBytes([]byte{'r', 0, 0, 0})
+	endKey := codec.EncodeBytes([]byte{'r', 0, 0, 1})
+	rule := &labeler.LabelRule{
+		ID:    "keyspaces/0",
+		Index: 0,
+		Labels: []labeler.RegionLabel{
+			{
+				Key:   "id",
+				Value: "0",
 			},
-		}
-		data, err := json.Marshal([]placement.GroupBundle{def})
-		re.NoError(err)
-		urlPrefix := cluster.GetLeaderServer().GetAddr()
-		err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/pd/api/v1/config/placement-rule", data, testutil.StatusOK(re))
-		re.NoError(err)
+		},
+		RuleType: "key-range",
+		Data: []any{
+			map[string]any{
+				"start_key": hex.EncodeToString(startKey),
+				"end_key":   hex.EncodeToString(endKey),
+			},
+		},
 	}
-	suite.env.RunTest(cleanFunc)
+	data, err := json.Marshal(rule)
+	re.NoError(err)
+	err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix, data, testutil.StatusOK(re))
+	re.NoError(err)
+	server := cluster.GetSchedulingPrimaryServer()
+	var kr [2][]byte
+	var exist bool
+	testutil.Eventually(re, func() bool {
+		kr, exist = server.GetCoordinator().GetCheckerController().PopOneSuspectKeyRange()
+		if exist {
+			return bytes.Equal(kr[0], []byte(startKey)) && bytes.Equal(kr[1], []byte(endKey))
+		}
+		return false
+	})
 }
 
 func (suite *ruleTestSuite) TestSet() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges"))
+	}()
 	suite.env.RunTest(suite.checkSet)
 }
 
@@ -170,13 +216,19 @@ func (suite *ruleTestSuite) checkSet(cluster *tests.TestCluster) {
 	}
 	for _, testCase := range testCases {
 		suite.T().Log(testCase.name)
+		var cc *checker.Controller
+		if suite.env.Env == tests.MicroserviceEnv {
+			cc = cluster.GetSchedulingPrimaryServer().GetCluster().GetCoordinator().GetCheckerController()
+		} else {
+			cc = leaderServer.GetRaftCluster().GetCoordinator().GetCheckerController()
+		}
 		// clear suspect keyRanges to prevent test case from others
-		leaderServer.GetRaftCluster().ClearSuspectKeyRanges()
+		cc.ClearSuspectKeyRanges()
 		if testCase.success {
 			err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/rule", testCase.rawData, testutil.StatusOK(re))
 			popKeyRangeMap := map[string]struct{}{}
 			for range len(testCase.popKeyRange) / 2 {
-				v, got := leaderServer.GetRaftCluster().PopOneSuspectKeyRange()
+				v, got := cc.PopOneSuspectKeyRange()
 				re.True(got)
 				popKeyRangeMap[hex.EncodeToString(v[0])] = struct{}{}
 				popKeyRangeMap[hex.EncodeToString(v[1])] = struct{}{}
@@ -289,7 +341,8 @@ func (suite *ruleTestSuite) checkSetAll(cluster *tests.TestCluster) {
 	leaderServer.GetPersistOptions().GetReplicationConfig().LocationLabels = []string{"host"}
 	defaultRule := leaderServer.GetRaftCluster().GetRuleManager().GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
 	defaultRule.LocationLabels = []string{"host"}
-	leaderServer.GetRaftCluster().GetRuleManager().SetRule(defaultRule)
+	err := leaderServer.GetRaftCluster().GetRuleManager().SetRule(defaultRule)
+	re.NoError(err)
 
 	successData, err := json.Marshal([]*placement.Rule{&rule1, &rule2})
 	re.NoError(err)
@@ -566,6 +619,11 @@ func (suite *ruleTestSuite) checkGetAllByKey(cluster *tests.TestCluster) {
 }
 
 func (suite *ruleTestSuite) TestDelete() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges"))
+	}()
 	suite.env.RunTest(suite.checkDelete)
 }
 
@@ -1341,7 +1399,7 @@ func (suite *regionRuleTestSuite) checkRegionPlacementRule(cluster *tests.TestCl
 	}
 
 	ruleManager := leaderServer.GetRaftCluster().GetRuleManager()
-	ruleManager.SetRule(&placement.Rule{
+	err := ruleManager.SetRule(&placement.Rule{
 		GroupID:     "test",
 		ID:          "test2",
 		StartKeyHex: hex.EncodeToString([]byte("ghi")),
@@ -1349,7 +1407,8 @@ func (suite *regionRuleTestSuite) checkRegionPlacementRule(cluster *tests.TestCl
 		Role:        placement.Learner,
 		Count:       1,
 	})
-	ruleManager.SetRule(&placement.Rule{
+	re.NoError(err)
+	err = ruleManager.SetRule(&placement.Rule{
 		GroupID:     "test",
 		ID:          "test3",
 		StartKeyHex: hex.EncodeToString([]byte("ooo")),
@@ -1357,10 +1416,11 @@ func (suite *regionRuleTestSuite) checkRegionPlacementRule(cluster *tests.TestCl
 		Role:        placement.Learner,
 		Count:       1,
 	})
+	re.NoError(err)
 	fit := &placement.RegionFit{}
 
 	u := fmt.Sprintf("%s/config/rules/region/%d/detail", urlPrefix, 1)
-	err := testutil.ReadGetJSON(re, tests.TestDialClient, u, fit)
+	err = testutil.ReadGetJSON(re, tests.TestDialClient, u, fit)
 	re.NoError(err)
 	re.Len(fit.RuleFits, 1)
 	re.Len(fit.OrphanPeers, 1)
@@ -1378,18 +1438,25 @@ func (suite *regionRuleTestSuite) checkRegionPlacementRule(cluster *tests.TestCl
 	re.Len(fit.OrphanPeers, 2)
 
 	var label labeler.LabelRule
-	escapedID := url.PathEscape("keyspaces/0")
+	// In NextGen, default keyspace ID is SystemKeyspaceID, in Classic it's 0
+	var expectedKeyspaceID string
+	if kerneltype.IsNextGen() {
+		expectedKeyspaceID = fmt.Sprintf("keyspaces/%d", constant.SystemKeyspaceID)
+	} else {
+		expectedKeyspaceID = "keyspaces/0"
+	}
+	escapedID := url.PathEscape(expectedKeyspaceID)
 	u = fmt.Sprintf("%s/config/region-label/rule/%s", urlPrefix, escapedID)
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, u, &label)
 	re.NoError(err)
-	re.Equal("keyspaces/0", label.ID)
+	re.Equal(expectedKeyspaceID, label.ID)
 
 	var labels []labeler.LabelRule
 	u = fmt.Sprintf("%s/config/region-label/rules", urlPrefix)
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, u, &labels)
 	re.NoError(err)
 	re.Len(labels, 1)
-	re.Equal("keyspaces/0", labels[0].ID)
+	re.Equal(expectedKeyspaceID, labels[0].ID)
 
 	u = fmt.Sprintf("%s/config/region-label/rules/ids", urlPrefix)
 	err = testutil.CheckGetJSON(tests.TestDialClient, u, []byte(`["rule1", "rule3"]`), func(resp []byte, _ int, _ http.Header) {
@@ -1399,11 +1466,12 @@ func (suite *regionRuleTestSuite) checkRegionPlacementRule(cluster *tests.TestCl
 	})
 	re.NoError(err)
 
-	err = testutil.CheckGetJSON(tests.TestDialClient, u, []byte(`["keyspaces/0"]`), func(resp []byte, _ int, _ http.Header) {
+	expectedIDsJSON := fmt.Sprintf("[\"%s\"]", expectedKeyspaceID)
+	err = testutil.CheckGetJSON(tests.TestDialClient, u, []byte(expectedIDsJSON), func(resp []byte, _ int, _ http.Header) {
 		err := json.Unmarshal(resp, &labels)
 		re.NoError(err)
 		re.Len(labels, 1)
-		re.Equal("keyspaces/0", labels[0].ID)
+		re.Equal(expectedKeyspaceID, labels[0].ID)
 	})
 	re.NoError(err)
 

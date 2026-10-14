@@ -27,6 +27,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
@@ -34,10 +35,12 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 
+	pdClient "github.com/tikv/pd/client"
 	pd "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/client/pkg/retry"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -46,6 +49,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/versioninfo"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
@@ -55,12 +59,13 @@ type httpClientTestSuite struct {
 	suite.Suite
 	// 1. Using `NewClient` will create a `DefaultPDServiceDiscovery` internal.
 	// 2. Using `NewClientWithServiceDiscovery` will need a `PDServiceDiscovery` to be passed in.
-	withServiceDiscovery bool
-	ctx                  context.Context
-	cancelFunc           context.CancelFunc
-	cluster              *tests.TestCluster
-	endpoints            []string
-	client               pd.Client
+	withServiceDiscovery   bool
+	ctx                    context.Context
+	cancelFunc             context.CancelFunc
+	cluster                *tests.TestCluster
+	endpoints              []string
+	client                 pd.Client
+	serviceDiscoveryClient pdClient.Client
 }
 
 func TestHTTPClientTestSuite(t *testing.T) {
@@ -80,7 +85,9 @@ func (suite *httpClientTestSuite) SetupSuite() {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
 	suite.ctx, suite.cancelFunc = context.WithCancel(context.Background())
 
-	cluster, err := tests.NewTestCluster(suite.ctx, 2)
+	cluster, err := tests.NewTestCluster(suite.ctx, 2, func(conf *config.Config, _ string) {
+		conf.Schedule.AffinityScheduleLimit = 4
+	})
 	re.NoError(err)
 
 	err = cluster.RunInitialServers()
@@ -103,6 +110,7 @@ func (suite *httpClientTestSuite) SetupSuite() {
 	for _, region := range []*core.RegionInfo{
 		core.NewTestRegionInfo(10, 1, []byte("a1"), []byte("a2")),
 		core.NewTestRegionInfo(11, 1, []byte("a2"), []byte("a3")),
+		core.NewTestRegionInfo(12, 1, []byte("a3"), []byte("a4")),
 	} {
 		err := leaderServer.GetRaftCluster().HandleRegionHeartbeat(region)
 		re.NoError(err)
@@ -123,6 +131,7 @@ func (suite *httpClientTestSuite) SetupSuite() {
 	if suite.withServiceDiscovery {
 		// Run test with specific service discovery.
 		cli := setupCli(suite.ctx, re, suite.endpoints)
+		suite.serviceDiscoveryClient = cli
 		sd := cli.GetServiceDiscovery()
 		suite.client = pd.NewClientWithServiceDiscovery("pd-http-client-it-grpc", sd)
 	} else {
@@ -136,6 +145,9 @@ func (suite *httpClientTestSuite) TearDownSuite() {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
 	suite.cancelFunc()
 	suite.client.Close()
+	if suite.serviceDiscoveryClient != nil {
+		suite.serviceDiscoveryClient.Close()
+	}
 	suite.cluster.Destroy()
 }
 
@@ -159,20 +171,20 @@ func (suite *httpClientTestSuite) TestMeta() {
 	re.Equal(core.HexRegionKeyStr([]byte("a3")), region.EndKey)
 	regions, err := client.GetRegions(ctx)
 	re.NoError(err)
-	re.Equal(int64(2), regions.Count)
-	re.Len(regions.Regions, 2)
+	re.Equal(int64(3), regions.Count)
+	re.Len(regions.Regions, 3)
 	regions, err = client.GetRegionsByKeyRange(ctx, pd.NewKeyRange([]byte("a1"), []byte("a3")), -1)
 	re.NoError(err)
 	re.Equal(int64(2), regions.Count)
 	re.Len(regions.Regions, 2)
 	regions, err = client.GetRegionsByStoreID(ctx, 1)
 	re.NoError(err)
-	re.Equal(int64(2), regions.Count)
-	re.Len(regions.Regions, 2)
+	re.Equal(int64(3), regions.Count)
+	re.Len(regions.Regions, 3)
 	regions, err = client.GetEmptyRegions(ctx)
 	re.NoError(err)
-	re.Equal(int64(2), regions.Count)
-	re.Len(regions.Regions, 2)
+	re.Equal(int64(3), regions.Count)
+	re.Len(regions.Regions, 3)
 	state, err := client.GetRegionsReplicatedStateByKeyRange(ctx, pd.NewKeyRange([]byte("a1"), []byte("a3")))
 	re.NoError(err)
 	re.Equal("INPROGRESS", state)
@@ -218,14 +230,18 @@ func (suite *httpClientTestSuite) TestMeta() {
 	version, err := client.GetClusterVersion(ctx)
 	re.NoError(err)
 	re.Equal("1.0.0", version)
-	rgs, _ := client.GetRegionsByKeyRange(ctx, pd.NewKeyRange([]byte("a"), []byte("a1")), 100)
+	rgs, err := client.GetRegionsByKeyRange(ctx, pd.NewKeyRange([]byte("a"), []byte("a1")), 100)
+	re.NoError(err)
 	re.Equal(int64(0), rgs.Count)
-	rgs, _ = client.GetRegionsByKeyRange(ctx, pd.NewKeyRange([]byte("a1"), []byte("a3")), 100)
+	rgs, err = client.GetRegionsByKeyRange(ctx, pd.NewKeyRange([]byte("a1"), []byte("a3")), 100)
+	re.NoError(err)
 	re.Equal(int64(2), rgs.Count)
-	rgs, _ = client.GetRegionsByKeyRange(ctx, pd.NewKeyRange([]byte("a2"), []byte("b")), 100)
-	re.Equal(int64(1), rgs.Count)
-	rgs, _ = client.GetRegionsByKeyRange(ctx, pd.NewKeyRange([]byte(""), []byte("")), 100)
+	rgs, err = client.GetRegionsByKeyRange(ctx, pd.NewKeyRange([]byte("a2"), []byte("b")), 100)
+	re.NoError(err)
 	re.Equal(int64(2), rgs.Count)
+	rgs, err = client.GetRegionsByKeyRange(ctx, pd.NewKeyRange([]byte(""), []byte("")), 100)
+	re.NoError(err)
+	re.Equal(int64(3), rgs.Count)
 	// store 2 origin status:offline
 	err = client.DeleteStore(ctx, 2)
 	re.NoError(err)
@@ -361,6 +377,49 @@ func (suite *httpClientTestSuite) TestRule() {
 	err = client.SetPlacementRule(ctx, testRule)
 	re.NoError(err)
 	suite.checkRuleResult(ctx, re, testRule, 1, true)
+
+	// ***** Test placement rule failed passing check after transfer leader
+	// Transfer the leader to another store to ensure the PD follower
+	// exists stale store labels.
+	suite.transferLeader(ctx, re)
+	tranferLeaderRule := []*pd.GroupBundle{
+		{
+			ID: "test-transfer-leader",
+			Rules: []*pd.Rule{
+				{
+					GroupID:  "test-transfer-leader",
+					ID:       "readonly",
+					Role:     pd.Voter,
+					Count:    3,
+					StartKey: []byte{},
+					EndKey:   []byte{},
+					LabelConstraints: []pd.LabelConstraint{
+						{
+							Key:    "$mode",
+							Op:     pd.In,
+							Values: []string{"readonly"},
+						},
+					},
+				},
+			},
+		},
+	}
+	err = client.SetPlacementRuleBundles(ctx, tranferLeaderRule, true)
+	re.Error(err)
+	re.ErrorContains(err, "invalid rule content, rule 'readonly' from rule group 'test-transfer-leader' can not match any store")
+	storeID := suite.setStoreLabels(ctx, re, map[string]string{
+		"$mode": "readonly",
+	})
+	err = client.SetPlacementRuleBundles(ctx, tranferLeaderRule, true)
+	re.NoError(err)
+	suite.checkRuleResult(ctx, re, tranferLeaderRule[0].Rules[0], 1, true)
+
+	suite.transferLeader(ctx, re)
+	suite.checkRuleResult(ctx, re, tranferLeaderRule[0].Rules[0], 1, true)
+	re.NoError(client.DeleteStoreLabel(ctx, storeID, "$mode"))
+	store, err := client.GetStore(ctx, uint64(storeID))
+	re.NoError(err)
+	re.Empty(store.Store.Labels)
 }
 
 func (suite *httpClientTestSuite) checkRuleResult(
@@ -419,7 +478,13 @@ func (suite *httpClientTestSuite) TestRegionLabel() {
 	labelRules, err := client.GetAllRegionLabelRules(ctx)
 	re.NoError(err)
 	re.Len(labelRules, 1)
-	re.Equal("keyspaces/0", labelRules[0].ID)
+
+	// In NextGen, the bootstrap keyspace is SYSTEM with ID 16777214, not DEFAULT with ID 0
+	expectedKeyspaceID := "keyspaces/0"
+	if kerneltype.IsNextGen() {
+		expectedKeyspaceID = "keyspaces/16777214"
+	}
+	re.Equal(expectedKeyspaceID, labelRules[0].ID)
 	// Set a new region label rule.
 	labelRule := &pd.LabelRule{
 		ID:       "rule1",
@@ -464,7 +529,7 @@ func (suite *httpClientTestSuite) TestRegionLabel() {
 	re.NoError(err)
 	re.Len(labelRules, 1)
 	re.Equal(labelRule, labelRules[0])
-	labelRules, err = client.GetRegionLabelRulesByIDs(ctx, []string{"keyspaces/0", "rule2"})
+	labelRules, err = client.GetRegionLabelRulesByIDs(ctx, []string{expectedKeyspaceID, "rule2"})
 	re.NoError(err)
 	sort.Slice(labelRules, func(i, j int) bool {
 		return labelRules[i].ID < labelRules[j].ID
@@ -701,19 +766,14 @@ func (suite *httpClientTestSuite) TestSchedulers() {
 	re.Equal("cancelled", status)
 }
 
-func (suite *httpClientTestSuite) TestStoreLabels() {
-	re := suite.Require()
+func (suite *httpClientTestSuite) setStoreLabels(ctx context.Context, re *require.Assertions, storeLabels map[string]string) int64 {
 	client := suite.client
-	ctx, cancel := context.WithCancel(suite.ctx)
-	defer cancel()
 	resp, err := client.GetStores(ctx)
 	re.NoError(err)
 	re.NotEmpty(resp.Stores)
 	firstStore := resp.Stores[0]
 	re.Empty(firstStore.Store.Labels, nil)
-	storeLabels := map[string]string{
-		"zone": "zone1",
-	}
+
 	err = client.SetStoreLabels(ctx, firstStore.Store.ID, storeLabels)
 	re.NoError(err)
 
@@ -730,17 +790,50 @@ func (suite *httpClientTestSuite) TestStoreLabels() {
 		re.Equal(value, labelsMap[key])
 	}
 
-	re.NoError(client.DeleteStoreLabel(ctx, firstStore.Store.ID, "zone"))
-	store, err := client.GetStore(ctx, uint64(firstStore.Store.ID))
-	re.NoError(err)
-	re.Empty(store.Store.Labels)
+	return firstStore.Store.ID
 }
 
-func (suite *httpClientTestSuite) TestTransferLeader() {
+func (suite *httpClientTestSuite) TestStoreLabels() {
 	re := suite.Require()
 	client := suite.client
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
+
+	storeID := suite.setStoreLabels(ctx, re, map[string]string{
+		"zone": "zone1",
+	})
+
+	re.NoError(client.DeleteStoreLabel(ctx, storeID, "zone"))
+	store, err := client.GetStore(ctx, uint64(storeID))
+	re.NoError(err)
+	re.Empty(store.Store.Labels)
+}
+
+func (suite *httpClientTestSuite) TestSetStoreLabelsRejectEngineKey() {
+	re := suite.Require()
+	client := suite.client
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	resp, err := client.GetStores(ctx)
+	re.NoError(err)
+	re.NotEmpty(resp.Stores)
+	firstStore := resp.Stores[0]
+
+	// Setting EngineKey should be rejected
+	err = client.SetStoreLabels(ctx, firstStore.Store.ID, map[string]string{
+		core.EngineKey: "tiflash",
+	})
+	re.Error(err)
+	re.Contains(err.Error(), "reserved")
+
+	err = client.DeleteStoreLabel(ctx, firstStore.Store.ID, core.EngineKey)
+	re.Error(err)
+	re.Contains(err.Error(), "can't modify label key")
+}
+
+func (suite *httpClientTestSuite) transferLeader(ctx context.Context, re *require.Assertions) {
+	client := suite.client
 	members, err := client.GetMembers(ctx)
 	re.NoError(err)
 	re.Len(members.Members, 2)
@@ -771,6 +864,13 @@ func (suite *httpClientTestSuite) TestTransferLeader() {
 	re.NoError(err)
 	re.Len(members.Members, 2)
 	re.Equal(leader.GetName(), members.Leader.GetName())
+}
+func (suite *httpClientTestSuite) TestTransferLeader() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	suite.transferLeader(ctx, re)
 }
 
 func (suite *httpClientTestSuite) TestVersion() {
@@ -803,6 +903,12 @@ func (suite *httpClientTestSuite) TestAdmin() {
 	err = client.ResetBaseAllocID(ctx, 456)
 	re.NoError(err)
 	err = client.DeleteSnapshotRecoveringMark(ctx)
+	re.NoError(err)
+
+	// Test PiTR restore mode mark APIs
+	err = client.SetPitrRestoreModeMark(ctx)
+	re.NoError(err)
+	err = client.DeletePitrRestoreModeMark(ctx)
 	re.NoError(err)
 }
 
@@ -842,11 +948,13 @@ func (suite *httpClientTestSuite) TestRedirectWithMetrics() {
 		return nil
 	})
 	c := pd.NewClientWithServiceDiscovery("pd-http-client-it", sd, pd.WithHTTPClient(httpClient), pd.WithMetrics(metricCnt, nil))
-	c.CreateScheduler(context.Background(), "test", 0)
+	err := c.CreateScheduler(context.Background(), "test", 0)
+	re.ErrorContains(err, "mock error")
 	var out dto.Metric
 	failureCnt, err := metricCnt.GetMetricWithLabelValues([]string{"CreateScheduler", "network error"}...)
 	re.NoError(err)
-	failureCnt.Write(&out)
+	err = failureCnt.Write(&out)
+	re.NoError(err)
 	re.Equal(float64(2), out.GetCounter().GetValue())
 	c.Close()
 
@@ -859,10 +967,12 @@ func (suite *httpClientTestSuite) TestRedirectWithMetrics() {
 		return nil
 	})
 	c = pd.NewClientWithServiceDiscovery("pd-http-client-it", sd, pd.WithHTTPClient(httpClient), pd.WithMetrics(metricCnt, nil))
-	c.CreateScheduler(context.Background(), "test", 0)
+	err = c.CreateScheduler(context.Background(), "test", 0)
+	re.NoError(err)
 	successCnt, err := metricCnt.GetMetricWithLabelValues([]string{"CreateScheduler", ""}...)
 	re.NoError(err)
-	successCnt.Write(&out)
+	err = successCnt.Write(&out)
+	re.NoError(err)
 	re.Equal(float64(1), out.GetCounter().GetValue())
 	c.Close()
 
@@ -874,14 +984,17 @@ func (suite *httpClientTestSuite) TestRedirectWithMetrics() {
 		return nil
 	})
 	c = pd.NewClientWithServiceDiscovery("pd-http-client-it", sd, pd.WithHTTPClient(httpClient), pd.WithMetrics(metricCnt, nil))
-	c.CreateScheduler(context.Background(), "test", 0)
+	err = c.CreateScheduler(context.Background(), "test", 0)
+	re.NoError(err)
 	successCnt, err = metricCnt.GetMetricWithLabelValues([]string{"CreateScheduler", ""}...)
 	re.NoError(err)
-	successCnt.Write(&out)
+	err = successCnt.Write(&out)
+	re.NoError(err)
 	re.Equal(float64(2), out.GetCounter().GetValue())
 	failureCnt, err = metricCnt.GetMetricWithLabelValues([]string{"CreateScheduler", "network error"}...)
 	re.NoError(err)
-	failureCnt.Write(&out)
+	err = failureCnt.Write(&out)
+	re.NoError(err)
 	re.Equal(float64(3), out.GetCounter().GetValue())
 	c.Close()
 }
@@ -892,7 +1005,13 @@ func (suite *httpClientTestSuite) TestUpdateKeyspaceGCManagementType() {
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
 
-	keyspaceName := "DEFAULT"
+	// Use the correct bootstrap keyspace name based on build type
+	var keyspaceName string
+	if kerneltype.IsNextGen() {
+		keyspaceName = constant.SystemKeyspaceName
+	} else {
+		keyspaceName = constant.DefaultKeyspaceName
+	}
 	expectGCManagementType := "test-type"
 
 	keyspaceSafePointVersionConfig := pd.KeyspaceGCManagementTypeConfig{
@@ -921,6 +1040,103 @@ func (suite *httpClientTestSuite) TestUpdateKeyspaceGCManagementType() {
 	re.Error(err)
 }
 
+func (suite *httpClientTestSuite) TestUpdateKeyspaceConfig() {
+	re := suite.Require()
+	client := suite.client
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	var keyspaceName string
+	if kerneltype.IsNextGen() {
+		keyspaceName = constant.SystemKeyspaceName
+	} else {
+		keyspaceName = constant.DefaultKeyspaceName
+	}
+
+	configKey := "http_client_test_update_keyspace_config"
+	initialValue := "v1"
+	updatedMeta, err := client.UpdateKeyspaceConfig(ctx, keyspaceName, &pd.UpdateKeyspaceConfigParams{
+		Config: map[string]*string{
+			configKey: &initialValue,
+		},
+		Preconditions: map[string]*string{
+			configKey: nil,
+		},
+	})
+	re.NoError(err)
+	re.NotNil(updatedMeta)
+	re.Equal(keyspaceName, updatedMeta.GetName())
+	re.Equal(initialValue, updatedMeta.GetConfig()[configKey])
+
+	keyspaceMetaRes, err := client.GetKeyspaceMetaByName(ctx, keyspaceName)
+	re.NoError(err)
+	val, ok := keyspaceMetaRes.Config[configKey]
+	re.True(ok)
+	re.Equal(initialValue, val)
+
+	wrongExpected := "wrong"
+	nextValue := "v2"
+	_, err = client.UpdateKeyspaceConfig(ctx, keyspaceName, &pd.UpdateKeyspaceConfigParams{
+		Config: map[string]*string{
+			configKey: &nextValue,
+		},
+		Preconditions: map[string]*string{
+			configKey: &wrongExpected,
+		},
+	})
+	re.Error(err)
+	re.Contains(err.Error(), "409 Conflict")
+	re.Contains(err.Error(), "precondition failed")
+
+	updatedMeta, err = client.UpdateKeyspaceConfig(ctx, keyspaceName, &pd.UpdateKeyspaceConfigParams{
+		Config: map[string]*string{
+			configKey: nil,
+		},
+		Preconditions: map[string]*string{
+			configKey: &initialValue,
+		},
+	})
+	re.NoError(err)
+	re.NotNil(updatedMeta)
+	_, ok = updatedMeta.Config[configKey]
+	re.False(ok)
+
+	keyspaceMetaRes, err = client.GetKeyspaceMetaByName(ctx, keyspaceName)
+	re.NoError(err)
+	_, ok = keyspaceMetaRes.Config[configKey]
+	re.False(ok)
+}
+
+func (suite *httpClientTestSuite) TestGetKeyspaceMetaByID() {
+	re := suite.Require()
+	client := suite.client
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	// Fetch the bootstrap keyspace by name first to get its ID.
+	// In NextGen, it's SYSTEM keyspace; in Classic, it's DEFAULT keyspace.
+	var bootstrapKeyspaceName string
+	if kerneltype.IsNextGen() {
+		bootstrapKeyspaceName = constant.SystemKeyspaceName
+	} else {
+		bootstrapKeyspaceName = constant.DefaultKeyspaceName
+	}
+
+	metaByName, err := client.GetKeyspaceMetaByName(ctx, bootstrapKeyspaceName)
+	re.NoError(err)
+	re.NotNil(metaByName)
+
+	// Fetch the same keyspace by ID and compare.
+	metaByID, err := client.GetKeyspaceMetaByID(ctx, metaByName.GetId())
+	re.NoError(err)
+	re.NotNil(metaByID)
+	re.Equal(metaByName, metaByID)
+
+	// Query a non-existing ID should return error.
+	_, err = client.GetKeyspaceMetaByID(ctx, math.MaxUint32)
+	re.Error(err)
+}
+
 func (suite *httpClientTestSuite) TestGetHealthStatus() {
 	re := suite.Require()
 	healths, err := suite.client.GetHealthStatus(suite.ctx)
@@ -935,6 +1151,7 @@ func (suite *httpClientTestSuite) TestGetHealthStatus() {
 }
 
 func (suite *httpClientTestSuite) TestRetryOnLeaderChange() {
+	as := assert.New(suite.T())
 	re := suite.Require()
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
@@ -950,8 +1167,9 @@ func (suite *httpClientTestSuite) TestRetryOnLeaderChange() {
 			if err != nil && strings.Contains(err.Error(), "context canceled") {
 				return
 			}
-			re.NoError(err)
-			re.Len(healths, 2)
+			if !as.NoError(err) || !as.Len(healths, 2) {
+				return
+			}
 			select {
 			case <-ctx.Done():
 				return
@@ -963,7 +1181,8 @@ func (suite *httpClientTestSuite) TestRetryOnLeaderChange() {
 	leader := suite.cluster.GetLeaderServer()
 	re.NotNil(leader)
 	for range 3 {
-		leader.ResignLeader()
+		err := leader.ResignLeader()
+		re.NoError(err)
 		re.NotEmpty(suite.cluster.WaitLeader())
 		leader = suite.cluster.GetLeaderServer()
 		re.NotNil(leader)
@@ -981,34 +1200,48 @@ func (suite *httpClientTestSuite) TestGetGCSafePoint() {
 	defer cancel()
 
 	// adding some safepoints to the server
+	now := time.Now().Truncate(time.Second)
 	list := &api.ListServiceGCSafepoint{
 		ServiceGCSafepoints: []*endpoint.ServiceSafePoint{
 			{
-				ServiceID: "AAA",
-				ExpiredAt: time.Now().Unix() + 10,
-				SafePoint: 1,
+				ServiceID:  "AAA",
+				ExpiredAt:  now.Unix() + 10,
+				SafePoint:  10,
+				KeyspaceID: constant.NullKeyspaceID,
 			},
 			{
-				ServiceID: "BBB",
-				ExpiredAt: time.Now().Unix() + 10,
-				SafePoint: 2,
+				ServiceID:  "BBB",
+				ExpiredAt:  now.Unix() + 10,
+				SafePoint:  20,
+				KeyspaceID: constant.NullKeyspaceID,
 			},
 			{
-				ServiceID: "CCC",
-				ExpiredAt: time.Now().Unix() + 10,
-				SafePoint: 3,
+				ServiceID:  "CCC",
+				ExpiredAt:  now.Unix() + 10,
+				SafePoint:  30,
+				KeyspaceID: constant.NullKeyspaceID,
+			},
+			{
+				ServiceID:  "gc_worker",
+				ExpiredAt:  math.MaxInt64,
+				SafePoint:  1,
+				KeyspaceID: constant.NullKeyspaceID,
 			},
 		},
 		GCSafePoint:           1,
 		MinServiceGcSafepoint: 1,
 	}
 
-	storage := suite.cluster.GetLeaderServer().GetServer().GetStorage()
-	for _, ssp := range list.ServiceGCSafepoints {
-		err := storage.SaveServiceGCSafePoint(ssp)
+	gcStateManager := suite.cluster.GetLeaderServer().GetServer().GetGCStateManager()
+	// Skip writing "gc_worker".
+	for _, ssp := range list.ServiceGCSafepoints[:3] {
+		_, _, err := gcStateManager.CompatibleUpdateServiceGCSafePoint(constant.NullKeyspaceID, ssp.ServiceID, ssp.SafePoint, ssp.ExpiredAt-now.Unix(), now)
 		re.NoError(err)
 	}
-	storage.SaveGCSafePoint(1)
+	_, err := gcStateManager.AdvanceTxnSafePoint(constant.NullKeyspaceID, 1, now)
+	re.NoError(err)
+	_, _, err = gcStateManager.AdvanceGCSafePoint(constant.NullKeyspaceID, 1)
+	re.NoError(err)
 
 	// get the safepoints and start testing
 	l, err := client.GetGCSafePoint(ctx)
@@ -1016,7 +1249,7 @@ func (suite *httpClientTestSuite) TestGetGCSafePoint() {
 
 	re.Equal(uint64(1), l.GCSafePoint)
 	re.Equal(uint64(1), l.MinServiceGcSafepoint)
-	re.Len(l.ServiceGCSafepoints, 3)
+	re.Len(l.ServiceGCSafepoints, 4)
 
 	// sort the gc safepoints based on order of ServiceID
 	sort.Slice(l.ServiceGCSafepoints, func(i, j int) bool {
@@ -1035,80 +1268,79 @@ func (suite *httpClientTestSuite) TestGetGCSafePoint() {
 		re.Equal("Delete service GC safepoint successfully.", msg)
 	}
 
-	// check that the safepoitns are indeed deleted
+	// check that the safepoints are indeed deleted.
+	// "gc_worker" will still exist in the result set as it's pseudo.
 	l, err = client.GetGCSafePoint(ctx)
 	re.NoError(err)
 
 	re.Equal(uint64(1), l.GCSafePoint)
-	re.Equal(uint64(0), l.MinServiceGcSafepoint)
-	re.Empty(l.ServiceGCSafepoints)
+	re.Equal(uint64(1), l.MinServiceGcSafepoint)
+	re.Len(l.ServiceGCSafepoints, 1)
+	re.Equal("gc_worker", l.ServiceGCSafepoints[0].ServiceID)
 
-	// try delete gc_worker, should get an error
+	// Deleting "gc_worker" should result in an error in earlier version. As the service safe point becomes a
+	// compatibility layer over GC barriers, it won't take any effect except that possibly deleting the residual
+	// service safe point of "gc_worker" that was written by previous version.
 	_, err = client.DeleteGCSafePoint(ctx, "gc_worker")
-	re.Error(err)
+	re.NoError(err)
+
+	// However, after the deletion, it doesn't affect the behavior that generates the pseudo service safe point for
+	// "gc_worker".
+	l, err = client.GetGCSafePoint(ctx)
+	re.NoError(err)
+	re.Equal(uint64(1), l.GCSafePoint)
+	re.Equal(uint64(1), l.MinServiceGcSafepoint)
+	re.Len(l.ServiceGCSafepoints, 1)
+	re.Equal("gc_worker", l.ServiceGCSafepoints[0].ServiceID)
 
 	// try delete some non-exist safepoints, should return normally
 	var msg string
 	msg, err = client.DeleteGCSafePoint(ctx, "non_exist")
 	re.NoError(err)
 	re.Equal("Delete service GC safepoint successfully.", msg)
+
+	suite.Run("force-delete-observation", func() {
+		re := suite.Require()
+		const serviceID = "http-force-delete-observed"
+		now := time.Now()
+		ts := uint64(now.Add(-80*time.Hour).UnixMilli()) << 18
+		_, err := gcStateManager.SetGCBarrier(constant.NullKeyspaceID, serviceID, ts, time.Duration(math.MaxInt64), now)
+		re.NoError(err)
+		_, err = gcStateManager.AdvanceTxnSafePoint(constant.NullKeyspaceID, ts, now)
+		re.NoError(err)
+		gather := func() []*dto.Metric {
+			families, err := prometheus.DefaultGatherer.Gather()
+			re.NoError(err)
+			var samples []*dto.Metric
+			for _, family := range families {
+				if family.GetName() != "pd_gc_barrier_timestamp_seconds" {
+					continue
+				}
+				for _, metric := range family.GetMetric() {
+					for _, label := range metric.GetLabel() {
+						if label.GetName() == "barrier_id" && label.GetValue() == serviceID {
+							samples = append(samples, metric)
+						}
+					}
+				}
+			}
+			return samples
+		}
+		re.Len(gather(), 1, "successful advancement publishes the nonexpiring barrier")
+		msg, err := client.DeleteGCSafePoint(ctx, serviceID)
+		re.NoError(err)
+		re.Equal("Delete service GC safepoint successfully.", msg)
+		re.Empty(gather(), "successful HTTP deletion must remove the sample without another advancement")
+	})
 }
 
-func TestGetSiblingsRegions(t *testing.T) {
-	re := require.New(t)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
-	}()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 2, func(conf *config.Config, _ string) {
-		conf.Replication.MaxReplicas = 1
-	})
-	re.NoError(err)
-	defer cluster.Destroy()
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	leader := cluster.WaitLeader()
-	re.NotEmpty(leader)
-	leaderServer := cluster.GetLeaderServer()
+func (suite *httpClientTestSuite) TestGetSiblingsRegions() {
+	re := suite.Require()
 
-	err = leaderServer.BootstrapCluster()
-	// Add 2 more stores to the cluster.
-	for i := 2; i <= 4; i++ {
-		tests.MustPutStore(re, cluster, &metapb.Store{
-			Id:            uint64(i),
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
-		})
-	}
-	re.NoError(err)
-	for _, region := range []*core.RegionInfo{
-		core.NewTestRegionInfo(10, 1, []byte("a1"), []byte("a2")),
-		core.NewTestRegionInfo(11, 1, []byte("a2"), []byte("a3")),
-		core.NewTestRegionInfo(12, 1, []byte("a3"), []byte("a4")),
-	} {
-		err := leaderServer.GetRaftCluster().HandleRegionHeartbeat(region)
-		re.NoError(err)
-	}
-	var (
-		testServers = cluster.GetServers()
-		endpoints   = make([]string, 0, len(testServers))
-	)
-	for _, s := range testServers {
-		addr := s.GetConfig().AdvertiseClientUrls
-		url, err := url.Parse(addr)
-		re.NoError(err)
-		endpoints = append(endpoints, url.Host)
-	}
-	client := pd.NewClient("pd-http-client-it-http", endpoints)
-	defer client.Close()
-	rg, err := client.GetRegionByID(ctx, 11)
+	rg, err := suite.client.GetRegionByID(suite.ctx, 11)
 	re.NoError(err)
 	re.NotNil(rg)
-
-	rgs, err := client.GetRegionSiblingsByID(ctx, 11)
+	rgs, err := suite.client.GetRegionSiblingsByID(suite.ctx, 11)
 	re.NoError(err)
 	re.Equal(int64(2), rgs.Count)
 	re.Equal(int64(10), rgs.Regions[0].ID)
@@ -1117,15 +1349,176 @@ func TestGetSiblingsRegions(t *testing.T) {
 	rightStartKey := rgs.Regions[rgs.Count-1].GetStartKey()
 	re.Zero(strings.Compare(rightStartKey, rg.EndKey))
 
+	// Create a merge operator to test the siblings regions.
+	leaderServer := suite.cluster.GetLeaderServer()
+	oc := leaderServer.GetRaftCluster().GetOperatorController()
+	err = suite.client.SetConfig(suite.ctx, map[string]any{
+		"max-replicas": 1,
+	})
+	re.NoError(err)
+	defer func() {
+		// clean operators
+		oc.RemoveOperators()
+		oc.CleanAllOpRecords()
+		re.Empty(oc.GetOperators())
+		// reset to default value to avoid affecting other tests.
+		err = suite.client.SetConfig(suite.ctx, map[string]any{
+			"max-replicas": 3,
+		})
+		re.NoError(err)
+	}()
 	input := map[string]any{
 		"name":             "merge-region",
 		"source_region_id": 10,
 		"target_region_id": 11,
 	}
-	err = client.CreateOperators(ctx, input)
+	err = suite.client.CreateOperators(suite.ctx, input)
 	re.NoError(err)
-	ops := leaderServer.GetRaftCluster().GetOperatorController().GetOperators()
+	ops := oc.GetOperators()
 	re.Len(ops, 2)
-	re.NotZero(ops[0].Kind() & operator.OpMerge)
-	re.NotZero(ops[1].Kind() & operator.OpMerge)
+	re.NotZero(ops[0].Kind() & operator.OpAdmin)
+	re.NotZero(ops[1].Kind() & operator.OpAdmin)
+}
+
+func (suite *httpClientTestSuite) TestAffinityGroups() {
+	re := suite.Require()
+	client := suite.client
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	// Test key encoding: use raw keys that will be properly encoded
+	testKey1 := []byte("test_key_1")
+	testKey2 := []byte("test_key_2")
+	testKey3 := []byte("test_key_3")
+	testKey4 := []byte("test_key_4")
+
+	// Test 1: Create affinity groups
+	affinityGroups := map[string][]pd.AffinityGroupKeyRange{
+		"test-group-1": {
+			{
+				StartKey: testKey1,
+				EndKey:   testKey2,
+			},
+		},
+		"test-group-2": {
+			{
+				StartKey: testKey3,
+				EndKey:   testKey4,
+			},
+		},
+	}
+
+	createResp, err := client.CreateAffinityGroups(ctx, affinityGroups)
+	re.NoError(err)
+	re.NotNil(createResp)
+	re.Len(createResp, 2)
+	re.Contains(createResp, "test-group-1")
+	re.Contains(createResp, "test-group-2")
+
+	// Verify the created groups
+	group1 := createResp["test-group-1"]
+	re.NotNil(group1)
+	re.Equal("test-group-1", group1.ID)
+	re.Equal(1, group1.RangeCount)
+
+	group2 := createResp["test-group-2"]
+	re.NotNil(group2)
+	re.Equal("test-group-2", group2.ID)
+	re.Equal(1, group2.RangeCount)
+
+	// Test 2: Get single affinity group
+	getGroup, err := client.GetAffinityGroup(ctx, "test-group-1")
+	re.NoError(err)
+	re.NotNil(getGroup)
+	re.Equal("test-group-1", getGroup.ID)
+	re.Equal(1, getGroup.RangeCount)
+
+	// Test 3: Get all affinity groups
+	allGroups, err := client.GetAllAffinityGroups(ctx)
+	re.NoError(err)
+	re.NotNil(allGroups)
+	re.GreaterOrEqual(len(allGroups), 2)
+	re.Contains(allGroups, "test-group-1")
+	re.Contains(allGroups, "test-group-2")
+
+	// Test 4: Add key ranges to affinity groups
+	testKey5 := []byte("test_key_5")
+	testKey6 := []byte("test_key_6")
+
+	addRanges := map[string][]pd.AffinityGroupKeyRange{
+		"test-group-1": {
+			{
+				StartKey: testKey5,
+				EndKey:   testKey6,
+			},
+		},
+	}
+
+	modifyResp, err := client.AddAffinityGroupKeyRanges(ctx, addRanges)
+	re.NoError(err)
+	re.NotNil(modifyResp)
+	re.Contains(modifyResp, "test-group-1")
+	modifiedGroup := modifyResp["test-group-1"]
+	re.Equal(2, modifiedGroup.RangeCount)
+
+	// Test 5: Update affinity group peers
+	updatedGroup, err := client.UpdateAffinityGroupPeers(ctx, "test-group-1", 1, []uint64{1, 2, 3})
+	re.NoError(err)
+	re.NotNil(updatedGroup)
+	re.Equal(uint64(1), updatedGroup.LeaderStoreID)
+	re.Equal([]uint64{1, 2, 3}, updatedGroup.VoterStoreIDs)
+
+	// Test 6: Remove key ranges from affinity groups
+	removeRanges := map[string][]pd.AffinityGroupKeyRange{
+		"test-group-1": {
+			{
+				StartKey: testKey5,
+				EndKey:   testKey6,
+			},
+		},
+	}
+
+	removeResp, err := client.RemoveAffinityGroupKeyRanges(ctx, removeRanges)
+	re.NoError(err)
+	re.NotNil(removeResp)
+	re.Contains(removeResp, "test-group-1")
+	removedGroup := removeResp["test-group-1"]
+	re.Equal(1, removedGroup.RangeCount)
+
+	// Test 7: Delete single affinity group (with force since it still has ranges)
+	err = client.DeleteAffinityGroup(ctx, "test-group-1", true)
+	re.NoError(err)
+
+	// Verify deletion
+	_, err = client.GetAffinityGroup(ctx, "test-group-1")
+	re.Error(err)
+
+	// Test 8: Batch delete affinity groups (with force since they have ranges)
+	err = client.BatchDeleteAffinityGroups(ctx, []string{"test-group-2"}, true)
+	re.NoError(err)
+
+	// Verify batch deletion
+	_, err = client.GetAffinityGroup(ctx, "test-group-2")
+	re.Error(err)
+
+	// Test 9: Test force delete with non-empty group
+	affinityGroups2 := map[string][]pd.AffinityGroupKeyRange{
+		"test-group-3": {
+			{
+				StartKey: testKey1,
+				EndKey:   testKey2,
+			},
+		},
+	}
+
+	_, err = client.CreateAffinityGroups(ctx, affinityGroups2)
+	re.NoError(err)
+
+	// Force delete the group
+	err = client.DeleteAffinityGroup(ctx, "test-group-3", true)
+	re.NoError(err)
+
+	// Verify force deletion
+	_, err = client.GetAffinityGroup(ctx, "test-group-3")
+	re.Error(err)
 }

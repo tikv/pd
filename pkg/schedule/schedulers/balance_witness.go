@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 
@@ -307,7 +308,7 @@ func (s *balanceWitnessScheduler) transferWitnessOut(solver *solver, collector *
 	finalFilters := s.filters
 	conf := solver.GetSchedulerConfig()
 	if witnessFilter := filter.NewPlacementWitnessSafeguard(s.GetName(), conf, solver.GetBasicCluster(), solver.GetRuleManager(), solver.Region, solver.Source, solver.fit); witnessFilter != nil {
-		finalFilters = append(s.filters, witnessFilter)
+		finalFilters = slices.Concat(s.filters, []filter.Filter{witnessFilter})
 	}
 	targets = filter.SelectTargetStores(targets, finalFilters, conf, collector, s.filterCounter)
 	sort.Slice(targets, func(i, j int) bool {
@@ -351,7 +352,6 @@ func (s *balanceWitnessScheduler) createOperator(solver *solver, collector *plan
 		schedulerCounter.WithLabelValues(s.GetName(), "new-operator"),
 	)
 	op.FinishedCounters = append(op.FinishedCounters,
-		balanceDirectionCounter.WithLabelValues(s.GetName(), solver.sourceMetricLabel(), solver.targetMetricLabel()),
 		s.counter.WithLabelValues("move-witness", solver.sourceMetricLabel()+"-out"),
 		s.counter.WithLabelValues("move-witness", solver.targetMetricLabel()+"-in"),
 	)

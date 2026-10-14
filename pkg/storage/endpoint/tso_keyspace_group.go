@@ -20,6 +20,8 @@ import (
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keypath"
@@ -74,7 +76,7 @@ func IsUserKindValid(kind string) bool {
 	}
 }
 
-// KeyspaceGroupMember defines an election member which campaigns for the primary of the keyspace group.
+// KeyspaceGroupMember defines an member which campaigns for the primary of the keyspace group.
 // Its `Priority` is used in keyspace group primary weighted-election to balance primaries' distribution.
 // Among multiple replicas of a keyspace group, the higher the priority, the more likely
 // the replica is to be elected as primary.
@@ -175,7 +177,16 @@ var _ KeyspaceGroupStorage = (*StorageEndpoint)(nil)
 
 // LoadKeyspaceGroup loads the keyspace group by ID.
 func (*StorageEndpoint) LoadKeyspaceGroup(txn kv.Txn, id uint32) (*KeyspaceGroup, error) {
-	value, err := txn.Load(keypath.KeyspaceGroupIDPath(id))
+	key := keypath.KeyspaceGroupIDPath(id)
+	var (
+		value string
+		err   error
+	)
+	if revisionTxn, ok := txn.(kv.RevisionTxn); ok {
+		value, err = revisionTxn.LoadWithRevision(key)
+	} else {
+		value, err = txn.Load(key)
+	}
 	if err != nil || value == "" {
 		return nil, err
 	}
@@ -193,6 +204,9 @@ func (*StorageEndpoint) SaveKeyspaceGroup(txn kv.Txn, kg *KeyspaceGroup) error {
 
 // DeleteKeyspaceGroup deletes the keyspace group.
 func (*StorageEndpoint) DeleteKeyspaceGroup(txn kv.Txn, id uint32) error {
+	if id == constant.DefaultKeyspaceGroupID {
+		return errs.ErrModifyDefaultKeyspaceGroup
+	}
 	return txn.Remove(keypath.KeyspaceGroupIDPath(id))
 }
 

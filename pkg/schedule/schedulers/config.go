@@ -102,6 +102,6 @@ func (b *baseDefaultSchedulerConfig) setDisable(disabled bool) error {
 	b.Lock()
 	defer b.Unlock()
 	b.Disabled = disabled
-	log.Info("set scheduler disable", zap.Bool("disabled", disabled))
+	log.Debug("set scheduler disable", zap.Bool("disabled", disabled))
 	return b.save()
 }

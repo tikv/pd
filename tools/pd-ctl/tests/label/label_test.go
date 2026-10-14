@@ -19,7 +19,6 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -57,7 +56,6 @@ func TestLabel(t *testing.T) {
 							Value: "us-west",
 						},
 					},
-					LastHeartbeat: time.Now().UnixNano(),
 				},
 				StateName: metapb.StoreState_Up.String(),
 			},
@@ -73,7 +71,6 @@ func TestLabel(t *testing.T) {
 							Value: "us-east",
 						},
 					},
-					LastHeartbeat: time.Now().UnixNano(),
 				},
 				StateName: metapb.StoreState_Up.String(),
 			},
@@ -89,7 +86,6 @@ func TestLabel(t *testing.T) {
 							Value: "us-west",
 						},
 					},
-					LastHeartbeat: time.Now().UnixNano(),
 				},
 				StateName: metapb.StoreState_Up.String(),
 			},

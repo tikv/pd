@@ -46,8 +46,9 @@ import (
 
 const (
 	runSchedulerCheckInterval = 3 * time.Second
-	collectTimeout            = 5 * time.Minute
-	maxLoadConfigRetries      = 10
+	// CollectTimeout is the timeout for collecting regions.
+	CollectTimeout       = 5 * time.Minute
+	maxLoadConfigRetries = 10
 	// pushOperatorTickInterval is the interval try to push the operator.
 	pushOperatorTickInterval = 500 * time.Millisecond
 
@@ -84,13 +85,23 @@ func NewCoordinator(parentCtx context.Context, cluster sche.ClusterInformer, hbS
 	ctx, cancel := context.WithCancel(parentCtx)
 	opController := operator.NewController(ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), hbStreams)
 	schedulers := schedulers.NewController(ctx, cluster, cluster.GetStorage(), opController)
-	checkers := checker.NewController(ctx, cluster, cluster.GetCheckerConfig(), cluster.GetRuleManager(), cluster.GetRegionLabeler(), opController)
+	checkers := checker.NewController(ctx, cluster, cluster.GetCheckerConfig(), opController)
+
+	// Set the callbacks for operator success
+	opController.SetSuccessCallbacks(
+		func(op *operator.Operator) {
+			if checker := checkers.GetAffinityChecker(); checker != nil {
+				checker.RecordOpSuccess(op)
+			}
+		},
+	)
+
 	return &Coordinator{
 		ctx:                   ctx,
 		cancel:                cancel,
 		schedulersInitialized: false,
 		cluster:               cluster,
-		prepareChecker:        newPrepareChecker(),
+		prepareChecker:        newPrepareChecker(cluster.GetPrepareRegionCount),
 		checkers:              checkers,
 		regionScatterer:       scatter.NewRegionScatterer(ctx, cluster, opController, checkers.AddPendingProcessedRegions),
 		regionSplitter:        splitter.NewRegionSplitter(cluster, splitter.NewSplitRegionsHandler(cluster, opController), checkers.AddPendingProcessedRegions),
@@ -206,8 +217,8 @@ func (c *Coordinator) driveSlowNodeScheduler() {
 }
 
 // RunUntilStop runs the coordinator until receiving the stop signal.
-func (c *Coordinator) RunUntilStop(collectWaitTime ...time.Duration) {
-	c.Run(collectWaitTime...)
+func (c *Coordinator) RunUntilStop() {
+	c.Run()
 	<-c.ctx.Done()
 	log.Info("coordinator is stopping")
 	c.GetSchedulersController().Wait()
@@ -216,7 +227,7 @@ func (c *Coordinator) RunUntilStop(collectWaitTime ...time.Duration) {
 }
 
 // Run starts coordinator.
-func (c *Coordinator) Run(collectWaitTime ...time.Duration) {
+func (c *Coordinator) Run() {
 	ticker := time.NewTicker(runSchedulerCheckInterval)
 	failpoint.Inject("changeCoordinatorTicker", func() {
 		ticker.Reset(100 * time.Millisecond)
@@ -224,7 +235,7 @@ func (c *Coordinator) Run(collectWaitTime ...time.Duration) {
 	defer ticker.Stop()
 	log.Info("coordinator starts to collect cluster information")
 	for {
-		if c.ShouldRun(collectWaitTime...) {
+		if c.ShouldRun() {
 			log.Info("coordinator has finished cluster information preparation")
 			break
 		}
@@ -274,6 +285,14 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 	scheduleCfg := c.cluster.GetSchedulerConfig().GetScheduleConfig().Clone()
 	// The new way to create scheduler with the independent configuration.
 	for i, name := range scheduleNames {
+		select {
+		case <-c.ctx.Done():
+			log.Info("InitSchedulers context cancelled",
+				zap.String("stage", "creating schedulers with independent configuration"),
+				zap.Int("index", i), zap.Int("total", len(scheduleNames)))
+			return
+		default:
+		}
 		data := configs[i]
 		typ := schedulers.FindSchedulerTypeByName(name)
 		var cfg sc.SchedulerConfig
@@ -315,6 +334,14 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 	// The old way to create the scheduler.
 	k := 0
 	for _, schedulerCfg := range scheduleCfg.Schedulers {
+		select {
+		case <-c.ctx.Done():
+			log.Info("InitSchedulers context cancelled",
+				zap.String("stage", "creating schedulers with old configuration"),
+				zap.Int("index", k), zap.Int("total", len(scheduleCfg.Schedulers)))
+			return
+		default:
+		}
 		if schedulerCfg.Disable {
 			scheduleCfg.Schedulers[k] = schedulerCfg
 			k++
@@ -326,7 +353,7 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 		s, err := schedulers.CreateScheduler(tp, c.opController,
 			c.cluster.GetStorage(), schedulers.ConfigSliceDecoder(tp, schedulerCfg.Args), c.schedulers.RemoveScheduler)
 		if err != nil {
-			log.Error("can not create scheduler", zap.Stringer("type", tp), zap.String("scheduler-type", schedulerCfg.Type),
+			log.Error("can not create scheduler", zap.String("scheduler-type", schedulerCfg.Type),
 				zap.Strings("scheduler-args", schedulerCfg.Args), errs.ZapError(err))
 			continue
 		}
@@ -356,7 +383,8 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 
 	// Removes the invalid scheduler config and persist.
 	scheduleCfg.Schedulers = scheduleCfg.Schedulers[:k]
-	c.cluster.GetSchedulerConfig().SetScheduleConfig(scheduleCfg)
+	validSchedulers := append(sc.SchedulerConfigs(nil), scheduleCfg.Schedulers...)
+	c.cluster.GetSchedulerConfig().SetSchedulers(validSchedulers)
 	if err := c.cluster.GetSchedulerConfig().Persist(c.cluster.GetStorage()); err != nil {
 		log.Error("cannot persist schedule config", errs.ZapError(err))
 	}
@@ -501,36 +529,49 @@ func (c *Coordinator) CollectHotSpotMetrics() {
 func collectHotMetrics(cluster sche.ClusterInformer, stores []*core.StoreInfo, typ utils.RWType) {
 	kind := typ.String()
 	hotPeerStats := cluster.GetHotPeerStats(typ)
-	status := statistics.CollectHotPeerInfos(stores, hotPeerStats) // only returns TotalBytesRate,TotalKeysRate,TotalQueryRate,Count
+	status := statistics.CollectHotPeerInfos(stores, hotPeerStats) // only returns TotalBytesRate,TotalKeysRate,TotalQueryRate,TotalCPURate,Count
 
 	for _, s := range stores {
 		// TODO: pre-allocate gauge metrics
 		storeAddress := s.GetAddress()
 		storeID := s.GetID()
 		storeLabel := strconv.FormatUint(storeID, 10)
+		// HotPeerCache.gc() only removes a tombstoned store from status.AsLeader/
+		// AsPeer's source data on its own TTL-throttled schedule, not every tick,
+		// so a known-tombstoned store here can still have stale hot-peer data.
+		// Treat it as not hot regardless, so the delete branches below run
+		// instead of republishing hotSpotStatusGauge every tick until
+		// HotPeerCache.gc() eventually catches up.
+		removed := s.IsRemoved()
 		stat, hasHotLeader := status.AsLeader[storeID]
+		hasHotLeader = hasHotLeader && !removed
 		if hasHotLeader {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_leader").Set(stat.TotalBytesRate)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_keys_as_leader").Set(stat.TotalKeysRate)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_leader").Set(stat.TotalQueryRate)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_cpu_as_leader").Set(stat.TotalCPURate)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_"+kind+"_region_as_leader").Set(float64(stat.Count))
 		} else {
 			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_leader")
 			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "total_"+kind+"_keys_as_leader")
 			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_leader")
+			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "total_"+kind+"_cpu_as_leader")
 			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "hot_"+kind+"_region_as_leader")
 		}
 
 		stat, hasHotPeer := status.AsPeer[storeID]
+		hasHotPeer = hasHotPeer && !removed
 		if hasHotPeer {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_peer").Set(stat.TotalBytesRate)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_keys_as_peer").Set(stat.TotalKeysRate)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_peer").Set(stat.TotalQueryRate)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_cpu_as_peer").Set(stat.TotalCPURate)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_"+kind+"_region_as_peer").Set(float64(stat.Count))
 		} else {
 			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_peer")
 			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "total_"+kind+"_keys_as_peer")
 			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_peer")
+			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "total_"+kind+"_cpu_as_peer")
 			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "hot_"+kind+"_region_as_peer")
 		}
 
@@ -538,6 +579,19 @@ func collectHotMetrics(cluster sche.ClusterInformer, stores []*core.StoreInfo, t
 			utils.ForeachRegionStats(func(rwTy utils.RWType, dim int, _ utils.RegionStatKind) {
 				schedulers.HotPendingSum.DeleteLabelValues(storeLabel, rwTy.String(), utils.DimToString(dim))
 			})
+		}
+
+		// stores is a snapshot taken before this loop; if s was buried or fully
+		// removed concurrently, the writes above can recreate a series
+		// DeleteStoreMetrics already deleted for it. DeleteStoreMetrics is a
+		// DeletePartialMatch full-vector scan, so only pay for it when this
+		// iteration's own s was still live: once a snapshot correctly shows
+		// IsRemoved(), a tombstoned store sitting in GetStores() for up to 30
+		// days doesn't cost a scan on every tick.
+		if !removed {
+			if store := cluster.GetStore(storeID); store == nil || store.IsRemoved() {
+				DeleteStoreMetrics(storeLabel)
+			}
 		}
 	}
 }
@@ -549,8 +603,8 @@ func ResetHotSpotMetrics() {
 }
 
 // ShouldRun returns true if the coordinator should run.
-func (c *Coordinator) ShouldRun(collectWaitTime ...time.Duration) bool {
-	return c.prepareChecker.check(c.cluster.GetBasicCluster(), collectWaitTime...)
+func (c *Coordinator) ShouldRun() bool {
+	return c.prepareChecker.check(c.cluster.GetBasicCluster())
 }
 
 // GetSchedulersController returns the schedulers controller.

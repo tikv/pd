@@ -18,6 +18,9 @@ const (
 	// DefaultKeyspaceName is the name reserved for default keyspace.
 	DefaultKeyspaceName = "DEFAULT"
 
+	// StartKeyspaceID is the start keyspace for keyspace id.
+	StartKeyspaceID = uint32(0)
+
 	// DefaultKeyspaceID is the default key space id.
 	// 0 is reserved for default keyspace with the name "DEFAULT". It's initialized when PD bootstraps
 	// and reserved for users who haven't been assigned keyspace.
@@ -26,6 +29,10 @@ const (
 	// Valid keyspace id range is [0, 0xFFFFFF](uint24max, or 16777215)
 	// In kv encode, the first byte is represented by r/x, which means txn kv/raw kv, so there are 24 bits left.
 	MaxValidKeyspaceID = uint32(0xFFFFFF)
+	// RegionLabelIDPrefix is the prefix of keyspace region label rule IDs.
+	RegionLabelIDPrefix = "keyspaces/"
+	// RegionLabelKey is the label key that stores the keyspace ID.
+	RegionLabelKey = "id"
 
 	// ValidKeyspaceIDMask is the mask of valid bits for keyspace ID. If any bit outside the mask is set, the keyspace
 	// ID is considered invalid and regarded as the same as NullKeyspaceID.

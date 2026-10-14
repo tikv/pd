@@ -16,8 +16,10 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -33,6 +35,8 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/registry"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server/meta"
+	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -52,17 +56,13 @@ func (dummyRestService) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	w.Write([]byte("not implemented"))
 }
 
-// ConfigProvider is used to get scheduling config from the given
-// `bs.server` without modifying its interface.
-type ConfigProvider any
-
 // Service is the scheduling grpc service.
 type Service struct {
 	*Server
 }
 
 // NewService creates a new scheduling service.
-func NewService[T ConfigProvider](svr bs.Server) registry.RegistrableService {
+func NewService(svr bs.Server) registry.RegistrableService {
 	server, ok := svr.(*Server)
 	if !ok {
 		log.Fatal("create scheduling server failed")
@@ -150,18 +150,105 @@ func (s *Service) RegionHeartbeat(stream schedulingpb.Scheduling_RegionHeartbeat
 		if store == nil {
 			return errors.Errorf("invalid store ID %d, not found", storeID)
 		}
+		if store.IsRemoved() {
+			log.Debug("skip region heartbeat from tombstone store", zap.Uint64("store-id", storeID))
+			continue
+		}
+
+		storeAddress := store.GetAddress()
+		storeLabel := strconv.FormatUint(storeID, 10)
 
 		if time.Since(lastBind) > time.Minute {
-			s.hbStreams.BindStream(storeID, server)
+			streams := c.GetHeartbeatStreams()
+			if streams == nil {
+				resp := &schedulingpb.RegionHeartbeatResponse{Header: notBootstrappedHeader()}
+				err := server.Send(resp)
+				return errors.WithStack(err)
+			}
+			streams.BindStream(storeID, server)
 			lastBind = time.Now()
 		}
+
+		start := time.Now()
 		// scheduling service doesn't sync the pd server config, so we use 0 here
 		region := core.RegionFromHeartbeat(request, 0)
 		err = c.HandleRegionHeartbeat(region)
 		if err != nil {
-			// TODO: if we need to send the error back to PD.
-			log.Error("failed handle region heartbeat", zap.Error(err))
+			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "error").Inc()
+			regionHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
+			log.Debug("failed handle region heartbeat", zap.Error(err))
 			continue
+		}
+
+		regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "success").Inc()
+		regionHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
+	}
+}
+
+// RegionBuckets implements gRPC SchedulingServer.
+func (s *Service) RegionBuckets(stream schedulingpb.Scheduling_RegionBucketsServer) error {
+	var cancel context.CancelFunc
+	defer func() {
+		// cancel the forward stream
+		if cancel != nil {
+			cancel()
+		}
+	}()
+
+	for {
+		request, err := stream.Recv()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return errors.WithStack(err)
+		}
+
+		c := s.GetCluster()
+		if c == nil {
+			resp := &schedulingpb.RegionBucketsResponse{Header: notBootstrappedHeader()}
+			err := stream.Send(resp)
+			return errors.WithStack(err)
+		}
+
+		buckets := request.GetBuckets()
+		if buckets == nil || len(buckets.Keys) == 0 {
+			continue
+		}
+
+		var (
+			storeLabel   string
+			storeAddress string
+		)
+		store := c.GetLeaderStoreByRegionID(buckets.GetRegionId())
+		if store == nil {
+			// As TiKV report buckets just after the region heartbeat, for new created region, PD may receive buckets report before the first region heartbeat is handled.
+			// So we should not return error here.
+			log.Debug("the store of the bucket in region is not found", zap.Uint64("region-id", buckets.GetRegionId()))
+		} else if store.IsRemoved() {
+			continue
+		} else {
+			storeLabel = strconv.FormatUint(store.GetID(), 10)
+			storeAddress = store.GetAddress()
+		}
+
+		start := time.Now()
+		err = c.HandleRegionBuckets(buckets)
+		if err != nil {
+			regionBucketsCounter.WithLabelValues(storeAddress, storeLabel, "error").Inc()
+			regionBucketsHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
+			regionBucketsReportInterval.WithLabelValues(storeAddress, storeLabel).Observe(float64(buckets.GetPeriodInMs() / 1000))
+			log.Debug("failed handle region buckets", zap.Error(err))
+		} else {
+			regionBucketsCounter.WithLabelValues(storeAddress, storeLabel, "success").Inc()
+			regionBucketsHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
+			regionBucketsReportInterval.WithLabelValues(storeAddress, storeLabel).Observe(float64(buckets.GetPeriodInMs() / 1000))
+		}
+		response := &schedulingpb.RegionBucketsResponse{
+			Header: wrapHeader(),
+		}
+		if err := stream.Send(response); err != nil {
+			return errors.WithStack(err)
 		}
 	}
 }
@@ -169,19 +256,41 @@ func (s *Service) RegionHeartbeat(stream schedulingpb.Scheduling_RegionHeartbeat
 // StoreHeartbeat implements gRPC SchedulingServer.
 func (s *Service) StoreHeartbeat(_ context.Context, request *schedulingpb.StoreHeartbeatRequest) (*schedulingpb.StoreHeartbeatResponse, error) {
 	c := s.GetCluster()
-	if c == nil {
-		// TODO: add metrics
-		log.Info("cluster isn't initialized")
+	var metaWatcher *meta.Watcher
+	if c != nil {
+		metaWatcher = c.GetMetaWatcher()
+	}
+	if c == nil || metaWatcher == nil {
 		return &schedulingpb.StoreHeartbeatResponse{Header: notBootstrappedHeader()}, nil
 	}
 
-	if c.GetStore(request.GetStats().GetStoreId()) == nil {
-		s.metaWatcher.GetStoreWatcher().ForceLoad()
+	storeID := request.GetStats().GetStoreId()
+	if c.GetStore(storeID) == nil {
+		metaWatcher.GetStoreWatcher().ForceLoad()
 	}
 
-	// TODO: add metrics
+	store := c.GetStore(storeID)
+	if store == nil {
+		return &schedulingpb.StoreHeartbeatResponse{
+			Header: wrapErrorToHeader(schedulingpb.ErrorType_UNKNOWN, fmt.Sprintf("store %v not found", storeID)),
+		}, nil
+	}
+	if store.IsRemoved() {
+		return &schedulingpb.StoreHeartbeatResponse{
+			Header: wrapErrorToHeader(schedulingpb.ErrorType_UNKNOWN, fmt.Sprintf("store %v is tombstone", storeID)),
+		}, nil
+	}
+
+	start := time.Now()
+	storeAddress := store.GetAddress()
+	storeLabel := strconv.FormatUint(storeID, 10)
 	if err := c.HandleStoreHeartbeat(request); err != nil {
-		log.Error("handle store heartbeat failed", zap.Error(err))
+		storeHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "error").Inc()
+		storeHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
+		log.Debug("handle store heartbeat failed", zap.Error(err))
+	} else {
+		storeHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "success").Inc()
+		storeHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
 	}
 	return &schedulingpb.StoreHeartbeatResponse{Header: wrapHeader()}, nil
 }
@@ -288,7 +397,16 @@ func (s *Service) AskBatchSplit(_ context.Context, request *schedulingpb.AskBatc
 	splitCount := request.GetSplitCount()
 	err := c.ValidRegion(reqRegion)
 	if err != nil {
-		return nil, err
+		return &schedulingpb.AskBatchSplitResponse{
+			Header: wrapErrorToHeader(schedulingpb.ErrorType_UNKNOWN, err.Error()),
+		}, nil
+	}
+	region := c.GetRegion(reqRegion.GetId())
+	if affinityManager := c.GetAffinityManager(); affinityManager != nil && !affinityManager.AllowSplit(region, request.GetReason()) {
+		c.GetCoordinator().GetHeartbeatStreams().SendMsg(region, &hbstream.Operation{ChangeSplit: &pdpb.ChangeSplit{AutoSplitEnabled: false}})
+		return &schedulingpb.AskBatchSplitResponse{
+			Header: wrapErrorToHeader(schedulingpb.ErrorType_UNKNOWN, "cannot split affinity region"),
+		}, nil
 	}
 	splitIDs := make([]*pdpb.SplitID, 0, splitCount)
 	recordRegions := make([]uint64, 0, splitCount+1)
@@ -356,6 +474,15 @@ func (s *Service) AskBatchSplit(_ context.Context, request *schedulingpb.AskBatc
 	// status may be left, and these regions need to be checked with higher
 	// priority.
 	c.GetCoordinator().GetCheckerController().AddPendingProcessedRegions(false, recordRegions...)
+	if request.GetReason() == pdpb.SplitReason_LOAD {
+		newRegionIDs := recordRegions[:len(recordRegions)-1]
+		c.GetCoordinator().GetCheckerController().RecordSplitScatterBatch(
+			reqRegion.GetId(),
+			// TiKV assigns every result region oldVersion+len(split requests).
+			reqRegion.GetRegionEpoch().GetVersion()+uint64(len(newRegionIDs)),
+			newRegionIDs,
+		)
+	}
 
 	return &schedulingpb.AskBatchSplitResponse{
 		Header: wrapHeader(),

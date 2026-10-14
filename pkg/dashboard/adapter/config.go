@@ -36,6 +36,7 @@ func GenDashboardConfig(srv *server.Server) (*config.Config, error) {
 	dashboardCfg.EnableTelemetry = cfg.Dashboard.EnableTelemetry
 	dashboardCfg.EnableExperimental = cfg.Dashboard.EnableExperimental
 	dashboardCfg.DisableCustomPromAddr = cfg.Dashboard.DisableCustomPromAddr
+	dashboardCfg.TempDir = cfg.Dashboard.TempDir
 	if dashboardCfg.ClusterTLSConfig, err = cfg.Security.ToClientTLSConfig(); err != nil {
 		return nil, err
 	}

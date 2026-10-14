@@ -182,7 +182,7 @@ func (s *items[T]) removeAt(index int) T {
 	item := (*s)[index]
 	copy((*s)[index:], (*s)[index+1:])
 	var zero T
-	(*s)[len(*s)-1] = zero
+	(*s)[len(*s)-1] = zero // avoid memory leak
 	*s = (*s)[:len(*s)-1]
 	return item
 }
@@ -321,7 +321,7 @@ func (s *children[T]) insertAt(index int, n *node[T]) {
 func (s *children[T]) removeAt(index int) *node[T] {
 	n := (*s)[index]
 	copy((*s)[index:], (*s)[index+1:])
-	(*s)[len(*s)-1] = nil
+	(*s)[len(*s)-1] = nil // avoid memory leak
 	*s = (*s)[:len(*s)-1]
 	return n
 }
@@ -1028,7 +1028,7 @@ func (t *BTreeG[T]) Get(key T) (_ T, _ bool) {
 }
 
 // GetWithIndex gets the key and its index.
-// If the key is not in the tree, the the index is the number of items < key.
+// If the key is not in the tree, the index is the number of items < key.
 func (t *BTreeG[T]) GetWithIndex(key T) (_ T, _ int) {
 	if t.root == nil {
 		var zero T

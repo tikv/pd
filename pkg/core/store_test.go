@@ -286,3 +286,217 @@ func TestPutStore(t *testing.T) {
 	storesInfo.PutStore(store, opts...)
 	re.Equal(store, storesInfo.GetStore(store.GetID()))
 }
+
+// TestPutStoreSkipsPatchForRemovedStore guards against a nil-pointer panic in
+// putStoreLocked: an opts-passing PutStore call always treats its store
+// argument as a patch onto whatever's currently in the map (see the
+// len(opts) > 0 branch), never as an insert, so a caller racing a concurrent
+// full removal (e.g. HandleStoreHeartbeat racing RemoveTombStoneRecords for
+// the same store) must not crash just because the entry it meant to patch is
+// already gone.
+func TestPutStoreSkipsPatchForRemovedStore(t *testing.T) {
+	re := require.New(t)
+	store := newStoreInfoWithAvailable(1, 20*units.GiB, 100*units.GiB, 1.4)
+	storesInfo := NewStoresInfo()
+	storesInfo.PutStore(store)
+	re.NotNil(storesInfo.GetStore(store.GetID()))
+
+	storesInfo.DeleteStore(store)
+	re.Nil(storesInfo.GetStore(store.GetID()))
+
+	re.NotPanics(func() {
+		storesInfo.PutStore(store, SetLastHeartbeatTS(time.Now()))
+	})
+	re.Nil(storesInfo.GetStore(store.GetID()))
+}
+
+func TestStoreInfoIsTiFlash(t *testing.T) {
+	re := require.New(t)
+
+	testCases := []struct {
+		name                   string
+		labels                 map[string]string
+		expectedTiKV           bool
+		expectedTiFlashWrite   bool
+		expectedTiFlashCompute bool
+	}{
+		{
+			name:                   "TiKV node without engine label",
+			labels:                 map[string]string{},
+			expectedTiKV:           true,
+			expectedTiFlashWrite:   false,
+			expectedTiFlashCompute: false,
+		},
+		{
+			name: "TiKV node with engine label",
+			labels: map[string]string{
+				EngineKey: EngineTiKV,
+			},
+			expectedTiKV:           true,
+			expectedTiFlashWrite:   false,
+			expectedTiFlashCompute: false,
+		},
+		{
+			name: "TiFlash classic node or write node",
+			labels: map[string]string{
+				EngineKey: EngineTiFlash,
+			},
+			expectedTiKV:           false,
+			expectedTiFlashWrite:   true,
+			expectedTiFlashCompute: false,
+		},
+		{
+			name: "TiFlash compute node",
+			labels: map[string]string{
+				EngineKey: EngineTiFlashCompute,
+			},
+			expectedTiKV:           false,
+			expectedTiFlashWrite:   false,
+			expectedTiFlashCompute: true,
+		},
+		{
+			name: "TiFlash node with additional labels",
+			labels: map[string]string{
+				EngineKey: EngineTiFlash,
+				"zone":    "zone1",
+				"rack":    "rack1",
+				"host":    "host1",
+			},
+			expectedTiKV:           false,
+			expectedTiFlashWrite:   true,
+			expectedTiFlashCompute: false,
+		},
+		{
+			name: "TiFlash compute node with additional labels",
+			labels: map[string]string{
+				EngineKey: EngineTiFlashCompute,
+				"zone":    "zone2",
+				"rack":    "rack2",
+				"host":    "host2",
+			},
+			expectedTiKV:           false,
+			expectedTiFlashWrite:   false,
+			expectedTiFlashCompute: true,
+		},
+		{
+			name: "Store with wrong engine value",
+			labels: map[string]string{
+				EngineKey: "unknown_engine",
+			},
+			expectedTiKV:           false,
+			expectedTiFlashWrite:   false,
+			expectedTiFlashCompute: false,
+		},
+		{
+			name: "Store with case sensitive engine label",
+			labels: map[string]string{
+				EngineKey: "TiFlash", // uppercase, should not match
+			},
+			expectedTiKV:           false,
+			expectedTiFlashWrite:   false,
+			expectedTiFlashCompute: false,
+		},
+		{
+			name: "Store with empty engine value",
+			labels: map[string]string{
+				EngineKey: "",
+			},
+			expectedTiKV:           true,
+			expectedTiFlashWrite:   false,
+			expectedTiFlashCompute: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(*testing.T) {
+			store := NewStoreInfoWithLabel(1, tc.labels)
+			result := store.IsTiKV()
+			re.Equal(tc.expectedTiKV, result, "Expected to return %v for test case: %s", tc.expectedTiKV, tc.name)
+			result = store.IsTiFlashWrite()
+			re.Equal(tc.expectedTiFlashWrite, result, "Expected to return %v for test case: %s", tc.expectedTiFlashWrite, tc.name)
+			result = store.IsTiFlashCompute()
+			re.Equal(tc.expectedTiFlashCompute, result, "Expected to return %v for test case: %s", tc.expectedTiFlashCompute, tc.name)
+		})
+	}
+}
+
+func TestGetAvgNetworkSlowScore(t *testing.T) {
+	re := require.New(t)
+
+	type args struct {
+		scores map[uint64]map[uint64]uint64 // storeID -> networkSlowScores
+	}
+	type want struct {
+		storeID uint64
+		avg     uint64
+	}
+	testCases := []struct {
+		name string
+		args args
+		want []want // Support multiple storeID checks in one test case
+	}{
+		{
+			name: "Store not found",
+			args: args{
+				scores: map[uint64]map[uint64]uint64{},
+			},
+			want: []want{
+				{storeID: 1, avg: 0},
+				{storeID: 123, avg: 0},
+			},
+		},
+		{
+			name: "Store exists, but no network slow scores",
+			args: args{
+				scores: map[uint64]map[uint64]uint64{
+					1: {},
+				},
+			},
+			want: []want{
+				{storeID: 1, avg: 0}, // Only one store, no other stores to calculate avg with
+			},
+		},
+		{
+			name: "Multiple stores with various scores",
+			args: args{
+				scores: map[uint64]map[uint64]uint64{
+					1: {2: 7}, // store1's scores to other stores (excluding itself)
+					2: {1: 5}, // store2's scores to other stores (excluding itself)
+				},
+			},
+			want: []want{
+				{storeID: 1, avg: 7}, // store1 excludes itself, only counts store2, networkSlowScores[2]=7
+				{storeID: 2, avg: 5}, // store2 excludes itself, only counts store1, networkSlowScores[1]=5
+			},
+		},
+		{
+			name: "Multiple stores with missing scores (should default to 1)",
+			args: args{
+				scores: map[uint64]map[uint64]uint64{
+					1: {2: 7},  // store1's scores (excluding itself)
+					2: {1: 5},  // store2's scores (excluding itself)
+					3: {1: 10}, // store3's scores, only has score for store1 (excluding itself)
+				},
+			},
+			want: []want{
+				{storeID: 1, avg: 4}, // store1 excludes itself, counts store2(7) and store3(default 1), avg=(7+1)/2=4
+				{storeID: 2, avg: 3}, // store2 excludes itself, counts store1(5) and store3(default 1), avg=(5+1)/2=3
+				{storeID: 3, avg: 5}, // store3 excludes itself, counts store1(10) and store2(default 1), avg=(10+1)/2=5
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(*testing.T) {
+			storesInfo := NewStoresInfo()
+			for id, scores := range tc.args.scores {
+				store := NewStoreInfo(&metapb.Store{Id: id})
+				store.rawStats.NetworkSlowScores = scores
+				storesInfo.PutStore(store)
+			}
+			for _, w := range tc.want {
+				re.Equal(w.avg, storesInfo.GetAvgNetworkSlowScore(w.storeID))
+			}
+		})
+	}
+}

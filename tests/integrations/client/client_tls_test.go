@@ -47,12 +47,10 @@ var certScript = strings.Join([]string{".", "cert_opt.sh"}, string(filepath.Sepa
 func TestTLSReloadAtomicReplace(t *testing.T) {
 	re := require.New(t)
 
-	certPath := strings.Join([]string{".", "cert"}, string(filepath.Separator))
-	certExpiredPath := strings.Join([]string{".", "cert-expired"}, string(filepath.Separator))
-	cleanFunc := generateCerts(re, certPath)
-	defer cleanFunc()
-	cleanFunc = generateCerts(re, certExpiredPath)
-	defer cleanFunc()
+	certPath := t.TempDir()
+	certExpiredPath := t.TempDir()
+	generateCerts(re, certPath)
+	generateCerts(re, certExpiredPath)
 	testTLSInfo := buildTLSInfo(certPath, "pd-server")
 	testTLSInfoExpired := buildTLSInfo(certExpiredPath, "pd-server")
 	testClientTLSInfo := buildTLSInfo(certPath, "client")
@@ -60,7 +58,7 @@ func TestTLSReloadAtomicReplace(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	tmpDir := t.TempDir()
-	os.RemoveAll(tmpDir)
+	re.NoError(os.RemoveAll(tmpDir))
 
 	certsDir := t.TempDir()
 
@@ -104,18 +102,9 @@ func buildTLSInfo(path, name string) transport.TLSInfo {
 	}
 }
 
-func generateCerts(re *require.Assertions, path string) func() {
-	err := os.Mkdir(path, 0755)
+func generateCerts(re *require.Assertions, path string) {
+	err := exec.Command(certScript, "generate", path).Run()
 	re.NoError(err)
-	err = exec.Command(certScript, "generate", path).Run()
-	re.NoError(err)
-
-	return func() {
-		err := exec.Command(certScript, "cleanup", path).Run()
-		re.NoError(err)
-		err = os.RemoveAll(path)
-		re.NoError(err)
-	}
 }
 
 func testTLSReload(
@@ -170,7 +159,7 @@ func testTLSReload(
 					CAPath:   testClientTLSInfo.TrustedCAFile,
 					CertPath: testClientTLSInfo.CertFile,
 					KeyPath:  testClientTLSInfo.KeyFile,
-				}, opt.WithGRPCDialOptions(grpc.WithBlock()))
+				}, opt.WithGRPCDialOptions(grpc.WithBlock())) //nolint:staticcheck
 			if err != nil {
 				errc <- err
 				dcancel()
@@ -203,7 +192,7 @@ func testTLSReload(
 			CAPath:   testClientTLSInfo.TrustedCAFile,
 			CertPath: testClientTLSInfo.CertFile,
 			KeyPath:  testClientTLSInfo.KeyFile,
-		}, opt.WithGRPCDialOptions(grpc.WithBlock()))
+		}, opt.WithGRPCDialOptions(grpc.WithBlock())) //nolint:staticcheck
 	re.NoError(err)
 	dcancel()
 	cli.Close()
@@ -218,7 +207,7 @@ func testTLSReload(
 			SSLCABytes:   caData,
 			SSLCertBytes: certData,
 			SSLKEYBytes:  keyData,
-		}, opt.WithGRPCDialOptions(grpc.WithBlock()))
+		}, opt.WithGRPCDialOptions(grpc.WithBlock())) //nolint:staticcheck
 	re.NoError(err)
 	defer cli.Close()
 	cancel1()
@@ -281,9 +270,8 @@ func copyFile(src, dst string) error {
 func TestMultiCN(t *testing.T) {
 	re := require.New(t)
 
-	certPath := strings.Join([]string{".", "cert-multi-cn"}, string(filepath.Separator))
-	cleanFunc := generateCerts(re, certPath)
-	defer cleanFunc()
+	certPath := t.TempDir()
+	generateCerts(re, certPath)
 	testTLSInfo := buildTLSInfo(certPath, "pd-server")
 	testClientTLSInfo := buildTLSInfo(certPath, "client")
 	testTiDBClientTLSInfo := buildTLSInfo(certPath, "tidb-client")
@@ -332,7 +320,7 @@ func testAllowedCN(ctx context.Context, endpoints []string, tls transport.TLSInf
 			CAPath:   tls.TrustedCAFile,
 			CertPath: tls.CertFile,
 			KeyPath:  tls.KeyFile,
-		}, opt.WithGRPCDialOptions(grpc.WithBlock()))
+		}, opt.WithGRPCDialOptions(grpc.WithBlock())) //nolint:staticcheck
 	if err != nil {
 		return err
 	}

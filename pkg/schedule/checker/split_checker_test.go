@@ -26,6 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 func TestSplit(t *testing.T) {
@@ -39,7 +40,7 @@ func TestSplit(t *testing.T) {
 	regionLabeler := cluster.RegionLabeler
 	sc := NewSplitChecker(cluster, ruleManager, regionLabeler)
 	cluster.AddLeaderStore(1, 1)
-	ruleManager.SetRule(&placement.Rule{
+	err := ruleManager.SetRule(&placement.Rule{
 		GroupID:     "test",
 		ID:          "test",
 		StartKeyHex: "aa",
@@ -47,6 +48,7 @@ func TestSplit(t *testing.T) {
 		Role:        placement.Voter,
 		Count:       1,
 	})
+	re.NoError(err)
 	cluster.AddLeaderRegionWithRange(1, "", "", 1)
 	op := sc.Check(cluster.GetRegion(1))
 	re.NotNil(op)
@@ -56,12 +58,13 @@ func TestSplit(t *testing.T) {
 	re.Equal("cc", hex.EncodeToString(splitKeys[1]))
 
 	// region label has higher priority.
-	regionLabeler.SetLabelRule(&labeler.LabelRule{
+	err = regionLabeler.SetLabelRule(&labeler.LabelRule{
 		ID:       "test",
 		Labels:   []labeler.RegionLabel{{Key: "test", Value: "test"}},
 		RuleType: labeler.KeyRange,
-		Data:     makeKeyRanges("bb", "dd"),
+		Data:     keyutil.BuildKeyRangeMaps("bb", "dd"),
 	})
+	re.NoError(err)
 	op = sc.Check(cluster.GetRegion(1))
 	re.NotNil(op)
 	re.Equal(1, op.Len())

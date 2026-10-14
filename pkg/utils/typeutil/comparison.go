@@ -45,7 +45,7 @@ func MinDuration(a, b time.Duration) time.Duration {
 	return b
 }
 
-// AreStringSlicesEqual checks if two string slices are equal. Empyt slice and nil are considered equal.
+// AreStringSlicesEqual checks if two string slices are equal. Empty slice and nil are considered equal.
 // It returns true if the slices are of the same length and all elements are identical in both slices, otherwise, it returns false.
 func AreStringSlicesEqual(a, b []string) bool {
 	if len(a) != len(b) {

@@ -31,7 +31,7 @@ package btree
 import (
 	"flag"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"reflect"
 	"sort"
 	"sync"
@@ -44,7 +44,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 // perm returns a random permutation of n Int items in the range [0, n).

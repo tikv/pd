@@ -44,9 +44,9 @@ func GetRootCmd() *cobra.Command {
 	}
 
 	rootCmd.PersistentFlags().StringP("pd", "u", "http://127.0.0.1:2379", "address of PD")
-	rootCmd.PersistentFlags().String("cacert", "", "path of file that contains list of trusted SSL CAs")
-	rootCmd.PersistentFlags().String("cert", "", "path of file that contains X509 certificate in PEM format")
-	rootCmd.PersistentFlags().String("key", "", "path of file that contains X509 key in PEM format")
+	rootCmd.PersistentFlags().String("cacert", os.Getenv("CA_PATH"), "path of file that contains list of trusted SSL CAs")
+	rootCmd.PersistentFlags().String("cert", os.Getenv("CERT_PATH"), "path of file that contains X509 certificate in PEM format")
+	rootCmd.PersistentFlags().String("key", os.Getenv("KEY_PATH"), "path of file that contains X509 key in PEM format")
 
 	rootCmd.Flags().ParseErrorsWhitelist.UnknownFlags = true
 
@@ -68,12 +68,16 @@ func GetRootCmd() *cobra.Command {
 		command.NewLogCommand(),
 		command.NewPluginCommand(),
 		command.NewServiceGCSafepointCommand(),
+		command.NewGCStateCommand(),
 		command.NewMinResolvedTSCommand(),
 		command.NewCompletionCommand(),
 		command.NewUnsafeCommand(),
 		command.NewKeyspaceGroupCommand(),
 		command.NewKeyspaceCommand(),
 		command.NewResourceManagerCommand(),
+		command.NewMaintenanceCommand(),
+		command.NewMetaServiceGroupCommand(),
+		command.NewMicroServicesCommand(),
 	)
 
 	return rootCmd
@@ -98,7 +102,7 @@ func MainStart(args []string) {
 	}
 
 	rootCmd.SetArgs(args)
-	rootCmd.ParseFlags(args)
+	_ = rootCmd.ParseFlags(args)
 	rootCmd.SetOut(os.Stdout)
 	rootCmd.SetErr(os.Stderr)
 
@@ -126,13 +130,13 @@ func loop(persistentFlags *pflag.FlagSet, readlineCompleter readline.AutoComplet
 		rootCmd := GetRootCmd()
 		persistentFlags.VisitAll(func(flag *pflag.Flag) {
 			if flag.Changed {
-				rootCmd.PersistentFlags().Set(flag.Name, flag.Value.String())
+				_ = rootCmd.PersistentFlags().Set(flag.Name, flag.Value.String())
 			}
 		})
-		rootCmd.LocalFlags().MarkHidden("pd")
-		rootCmd.LocalFlags().MarkHidden("cacert")
-		rootCmd.LocalFlags().MarkHidden("cert")
-		rootCmd.LocalFlags().MarkHidden("key")
+		_ = rootCmd.LocalFlags().MarkHidden("pd")
+		_ = rootCmd.LocalFlags().MarkHidden("cacert")
+		_ = rootCmd.LocalFlags().MarkHidden("cert")
+		_ = rootCmd.LocalFlags().MarkHidden("key")
 		rootCmd.SetOut(os.Stdout)
 		return rootCmd
 	}
@@ -158,7 +162,7 @@ func loop(persistentFlags *pflag.FlagSet, readlineCompleter readline.AutoComplet
 
 		rootCmd := getREPLCmd()
 		rootCmd.SetArgs(args)
-		rootCmd.ParseFlags(args)
+		_ = rootCmd.ParseFlags(args)
 		if err := rootCmd.Execute(); err != nil {
 			rootCmd.Println(err)
 		}

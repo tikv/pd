@@ -28,11 +28,6 @@ import (
 	bs "github.com/tikv/pd/pkg/basicserver"
 )
 
-var (
-	// ServerServiceRegistry is the global grpc service registry.
-	ServerServiceRegistry = NewServerServiceRegistry()
-)
-
 // ServiceBuilder is a function that creates a grpc service.
 type ServiceBuilder func(bs.Server) RegistrableService
 

@@ -27,12 +27,12 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 func TestDiscover(t *testing.T) {
 	re := require.New(t)
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
 	sr1 := NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:1", "127.0.0.1:1", DefaultLeaseInSeconds)
 	err := sr1.Register()
@@ -58,7 +58,7 @@ func TestDiscover(t *testing.T) {
 
 func TestServiceRegistryEntry(t *testing.T) {
 	re := require.New(t)
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
 	entry1 := &ServiceRegistryEntry{ServiceAddr: "127.0.0.1:1"}
 	s1, err := entry1.Serialize()
@@ -77,10 +77,12 @@ func TestServiceRegistryEntry(t *testing.T) {
 	re.NoError(err)
 	re.Len(endpoints, 2)
 	returnedEntry1 := &ServiceRegistryEntry{}
-	returnedEntry1.Deserialize([]byte(endpoints[0]))
+	err = returnedEntry1.Deserialize([]byte(endpoints[0]))
+	re.NoError(err)
 	re.Equal("127.0.0.1:1", returnedEntry1.ServiceAddr)
 	returnedEntry2 := &ServiceRegistryEntry{}
-	returnedEntry2.Deserialize([]byte(endpoints[1]))
+	err = returnedEntry2.Deserialize([]byte(endpoints[1]))
+	re.NoError(err)
 	re.Equal("127.0.0.1:2", returnedEntry2.ServiceAddr)
 
 	sr1.cancel()

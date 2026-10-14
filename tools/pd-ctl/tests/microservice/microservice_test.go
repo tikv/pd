@@ -1,0 +1,165 @@
+// Copyright 2025 TiKV Project Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package microservice_test
+
+import (
+	"context"
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/suite"
+
+	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/utils/testutil"
+	pdTests "github.com/tikv/pd/tests"
+	ctl "github.com/tikv/pd/tools/pd-ctl/pdctl"
+	"github.com/tikv/pd/tools/pd-ctl/tests"
+)
+
+// microServiceSuite is a test suite for microservice related tests.
+type microServiceSuite struct {
+	suite.Suite
+	cluster   *pdTests.TestCluster
+	rmCluster *pdTests.TestResourceManagerCluster
+	cancels   []testutil.CleanupFunc
+}
+
+func TestMicroServiceSuite(t *testing.T) {
+	suite.Run(t, new(microServiceSuite))
+}
+
+func (suite *microServiceSuite) SetupSuite() {
+	suite.startCluster()
+}
+
+func (suite *microServiceSuite) TearDownSuite() {
+	for _, fn := range suite.cancels {
+		fn()
+	}
+	// Destroy the resource manager cluster before the PD cluster it's registered
+	// against: t.Cleanup (registered in startCluster as a SetupSuite-failure
+	// fallback) only fires after this function returns, so it can't be relied on
+	// as the primary teardown on the success path.
+	suite.rmCluster.Destroy()
+	suite.cluster.Destroy()
+}
+
+func (suite *microServiceSuite) TestMicroService() {
+	cluster := suite.cluster
+	re := suite.Require()
+	cmd := ctl.GetRootCmd()
+	pdAddr := cluster.GetConfig().GetClientURL()
+	if primaryServer := cluster.GetSchedulingPrimaryServer(); primaryServer != nil {
+		address := primaryServer.GetAddr()
+		res := tests.MustExec(re, cmd, []string{"-u", pdAddr, "microservice", "scheduling", "primary"}, nil)
+		primaryAddress := strings.Trim(res, "\"\n")
+		suite.Equal(address, primaryAddress)
+
+		v := make([]any, 0)
+		tests.MustExec(re, cmd, []string{"-u", pdAddr, "microservice", "scheduling", "members"}, &v)
+		re.Len(v, 2)
+	}
+	if primaryServer := cluster.GetDefaultTSOPrimaryServer(); primaryServer != nil {
+		address := primaryServer.GetAddr()
+		res := tests.MustExec(re, cmd, []string{"-u", pdAddr, "microservice", "tso", "primary"}, nil)
+		primaryAddress := strings.Trim(res, "\"\n")
+		suite.Equal(address, primaryAddress)
+
+		v := make([]any, 0)
+		tests.MustExec(re, cmd, []string{"-u", pdAddr, "microservice", "tso", "members"}, &v)
+		re.Len(v, 2)
+
+		// PD rejects an unknown node before forwarding anything.
+		errRes := tests.MustExec(re, cmd, []string{"-u", pdAddr, "microservice", "tso", "evict-primary", "http://127.0.0.1:1"}, nil)
+		re.Contains(errRes, "is not a tso node")
+
+		// Evict all keyspace group primaries on the current tso primary node. The
+		// request goes to PD, which forwards it to that node. The node address is
+		// passed without a scheme to exercise the address normalization on the PD
+		// side. Retry until the default keyspace group has a second replica to
+		// receive the transfer; a failed eviction transfers nothing, so retrying
+		// is safe. Keep this last: it moves the tso primary away.
+		testutil.Eventually(re, func() bool {
+			primary := cluster.GetDefaultTSOPrimaryServer()
+			if primary == nil {
+				return false
+			}
+			node := strings.TrimPrefix(primary.GetAddr(), "http://")
+			out, err := tests.ExecuteCommand(cmd, "-u", pdAddr, "microservice", "tso", "evict-primary", node)
+			return err == nil && strings.Contains(string(out), "success")
+		})
+	}
+
+	primaryServer := suite.rmCluster.WaitForPrimaryServing(re)
+	address := primaryServer.GetAddr()
+	res := tests.MustExec(re, cmd, []string{"-u", pdAddr, "microservice", "resource-manager", "primary"}, nil)
+	primaryAddress := strings.Trim(res, "\"\n")
+	suite.Equal(address, primaryAddress)
+
+	v := make([]any, 0)
+	tests.MustExec(re, cmd, []string{"-u", pdAddr, "microservice", "resource-manager", "members"}, &v)
+	re.Len(v, 2)
+	wantAddrs := make(map[string]struct{}, len(suite.rmCluster.GetServers()))
+	for _, srv := range suite.rmCluster.GetServers() {
+		wantAddrs[srv.GetAddr()] = struct{}{}
+	}
+	gotAddrs := make(map[string]struct{}, len(v))
+	for _, member := range v {
+		entry, ok := member.(map[string]any)
+		re.True(ok)
+		addr, ok := entry["service-addr"].(string)
+		re.True(ok)
+		gotAddrs[addr] = struct{}{}
+	}
+	suite.Equal(wantAddrs, gotAddrs)
+	suite.Contains(gotAddrs, primaryAddress)
+}
+
+func (suite *microServiceSuite) startCluster() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(context.Background())
+	suite.cancels = append(suite.cancels, func() {
+		cancel()
+	})
+
+	cluster, err := pdTests.NewTestClusterWithKeyspaceGroup(ctx, 1)
+	re.NoError(err)
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+	re.NotEmpty(cluster.WaitLeader())
+	leaderServer := cluster.GetServer(cluster.GetLeader())
+	re.NoError(leaderServer.BootstrapCluster())
+	leaderServer.GetRaftCluster().SetPrepared()
+	// start scheduling cluster
+	tc, err := pdTests.NewTestSchedulingCluster(ctx, 2, cluster)
+	re.NoError(err)
+	tc.WaitForPrimaryServing(re)
+	tc.GetPrimaryServer().GetCluster().SetPrepared()
+	cluster.SetSchedulingCluster(tc)
+	testutil.Eventually(re, func() bool {
+		return cluster.GetLeaderServer().GetServer().IsServiceIndependent(mcs.SchedulingServiceName)
+	})
+	// start tso cluster
+	ts, err := pdTests.NewTestTSOCluster(ctx, 2, leaderServer.GetAddr())
+	ts.WaitForDefaultPrimaryServing(re)
+	re.NoError(err)
+	cluster.SetTSOCluster(ts)
+	suite.cluster = cluster
+	// start resource manager cluster
+	rmCluster, err := pdTests.NewTestResourceManagerCluster(ctx, 2, leaderServer.GetAddr())
+	re.NoError(err)
+	suite.T().Cleanup(rmCluster.Destroy)
+	suite.rmCluster = rmCluster
+}

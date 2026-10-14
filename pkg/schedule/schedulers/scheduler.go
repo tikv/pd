@@ -23,6 +23,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
@@ -158,7 +159,7 @@ func CreateScheduler(
 ) (Scheduler, error) {
 	fn, ok := schedulerMap[typ]
 	if !ok {
-		return nil, errs.ErrSchedulerCreateFuncNotRegistered.FastGenByArgs(typ)
+		return nil, errs.ErrSchedulerCreateFuncNotRegistered.FastGenByArgs()
 	}
 
 	return fn(oc, storage, dec, removeSchedulerCb...)
@@ -167,6 +168,9 @@ func CreateScheduler(
 // SaveSchedulerConfig saves the config of the specified scheduler.
 func SaveSchedulerConfig(storage endpoint.ConfigStorage, s Scheduler) error {
 	data, err := s.EncodeConfig()
+	failpoint.Inject("persistFail", func() {
+		err = errors.New("fail to persist")
+	})
 	if err != nil {
 		return err
 	}

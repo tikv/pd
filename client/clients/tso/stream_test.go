@@ -29,6 +29,7 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/pkg/utils/testutil"
 )
 
 const mockStreamURL = "mock:///"
@@ -307,7 +308,7 @@ func (s *testTSOStreamSuite) processRequestWithResultCh(count int64) (<-chan cal
 	ch := make(chan callbackInvocation, 1)
 	err := s.stream.processRequests(1, 2, 3, count, time.Now(), func(result tsoRequestResult, reqKeyspaceGroupID uint32, err error) {
 		if err == nil {
-			s.re.Equal(uint32(3), reqKeyspaceGroupID)
+			s.Equal(uint32(3), reqKeyspaceGroupID)
 		}
 		ch <- callbackInvocation{
 			result: result,
@@ -356,10 +357,11 @@ func (s *testTSOStreamSuite) TestTSOStreamBasic() {
 
 	// After an error from the (simulated) RPC stream, the tsoStream should be in a broken status and can't accept
 	// new request anymore.
-	err := s.stream.processRequests(1, 2, 3, 1, time.Now(), func(_result tsoRequestResult, _reqKeyspaceGroupID uint32, _err error) {
-		panic("unreachable")
+	testutil.Eventually(s.re, func() bool {
+		return s.stream.processRequests(1, 2, 3, 1, time.Now(), func(_result tsoRequestResult, _reqKeyspaceGroupID uint32, err error) {
+			s.re.Error(err)
+		}) != nil
 	})
-	s.re.Error(err)
 }
 
 func (s *testTSOStreamSuite) testTSOStreamBrokenImpl(err error, pendingRequests int) {
@@ -531,7 +533,10 @@ func (s *testTSOStreamSuite) TestEstimatedLatency() {
 		for time.Since(startTime) < time.Second {
 			<-tokenCh
 			reqStartTimeCh <- time.Now()
-			r := s.mustProcessRequestWithResultCh(1)
+			r, err := s.processRequestWithResultCh(1)
+			if !s.NoError(err) {
+				break
+			}
 			resCh <- r
 		}
 		close(reqStartTimeCh)

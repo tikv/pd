@@ -17,7 +17,7 @@ package simulator
 import (
 	"context"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"net/http"
 	"strconv"
 	"sync"
@@ -118,6 +118,10 @@ func (er *EventRunner) Tick(tickCount int64) {
 			finishedIndex++
 		}
 	}
+	// avoid memory leak
+	for i := range finishedIndex {
+		er.events[i] = nil
+	}
 	er.events = er.events[finishedIndex:]
 }
 
@@ -198,7 +202,12 @@ func (*AddNode) Run(raft *RaftEngine, _ int64) bool {
 
 	raft.conn.Nodes[s.ID] = n
 	n.raftEngine = raft
-	n.client = newRetryClient(n)
+	n.client, err = newRetryClient(n)
+	if err != nil {
+		delete(raft.conn.Nodes, s.ID)
+		simutil.Logger.Error("create client failed", zap.Uint64("node-id", s.ID), zap.Error(err))
+		return false
+	}
 
 	err = n.Start()
 	if err != nil {
@@ -224,7 +233,7 @@ func (e *DownNode) Run(raft *RaftEngine, _ int64) bool {
 	var node *Node
 	if e.ID == 0 {
 		arrNodes := raft.conn.getNodes()
-		i := rand.Intn(len(arrNodes))
+		i := rand.IntN(len(arrNodes))
 		node = nodes[arrNodes[i].GetId()]
 	} else {
 		node = nodes[uint64(e.ID)]

@@ -18,10 +18,13 @@ import (
 	"context"
 	"io"
 	"slices"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -31,6 +34,7 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
@@ -126,9 +130,11 @@ func (f *tsoForwarder) forwardTSORequest(
 ) (*tsopb.TsoResponse, error) {
 	tsopbReq := &tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{
-			ClusterId:       request.GetHeader().GetClusterId(),
-			SenderId:        request.GetHeader().GetSenderId(),
-			KeyspaceId:      constant.DefaultKeyspaceID,
+			ClusterId: request.GetHeader().GetClusterId(),
+			SenderId:  request.GetHeader().GetSenderId(),
+			Keyspace: &tsopb.RequestHeader_KeyspaceId{
+				KeyspaceId: keyspace.GetBootstrapKeyspaceID(),
+			},
 			KeyspaceGroupId: constant.DefaultKeyspaceGroupID,
 		},
 		Count: request.GetCount(),
@@ -284,6 +290,15 @@ func createRegionHeartbeatSchedulingStream(ctx context.Context, client *grpc.Cli
 	return forwardStream, forwardCtx, cancelForward, err
 }
 
+func createRegionBucketsSchedulingStream(ctx context.Context, client *grpc.ClientConn) (schedulingpb.Scheduling_RegionBucketsClient, context.Context, context.CancelFunc, error) {
+	done := make(chan struct{})
+	forwardCtx, cancelForward := context.WithCancel(ctx)
+	go grpcutil.CheckStream(forwardCtx, cancelForward, done)
+	forwardStream, err := schedulingpb.NewSchedulingClient(client).RegionBuckets(forwardCtx)
+	done <- struct{}{}
+	return forwardStream, forwardCtx, cancelForward, err
+}
+
 func forwardRegionHeartbeatToScheduling(rc *cluster.RaftCluster, forwardStream schedulingpb.Scheduling_RegionHeartbeatClient, server *heartbeatServer, errCh chan error) {
 	defer logutil.LogPanic()
 	defer close(errCh)
@@ -332,6 +347,7 @@ func forwardRegionHeartbeatToScheduling(rc *cluster.RaftCluster, forwardStream s
 			SplitRegion:     resp.GetSplitRegion(),
 			ChangePeerV2:    resp.GetChangePeerV2(),
 			SwitchWitnesses: resp.GetSwitchWitnesses(),
+			ChangeSplit:     resp.GetChangeSplit(),
 		}
 
 		if err := server.Send(response); err != nil {
@@ -354,6 +370,37 @@ func forwardRegionHeartbeatClientToServer(forwardStream pdpb.PD_RegionHeartbeatC
 			errCh <- errors.WithStack(err)
 			return
 		}
+	}
+}
+
+func forwardRegionBucketsToScheduling(forwardStream schedulingpb.Scheduling_RegionBucketsClient, server *bucketHeartbeatServer, errCh chan error) {
+	defer logutil.LogPanic()
+	defer close(errCh)
+	for {
+		resp, err := forwardStream.Recv()
+		if err == io.EOF {
+			errCh <- errors.WithStack(err)
+			return
+		}
+		if err != nil {
+			errCh <- errors.WithStack(err)
+			return
+		}
+
+		schedulingpbErr := resp.GetHeader().GetError()
+		if schedulingpbErr != nil {
+			// TODO: handle more error types if needed.
+			if schedulingpbErr.Type == schedulingpb.ErrorType_NOT_BOOTSTRAPPED {
+				response := &pdpb.ReportBucketsResponse{
+					Header: grpcutil.NotBootstrappedHeader(),
+				}
+				if err := server.send(response); err != nil {
+					errCh <- errors.WithStack(err)
+					return
+				}
+			}
+		}
+		// ignore other error types or success responses for now.
 	}
 }
 
@@ -410,6 +457,25 @@ func (s *GrpcServer) getDelegateClient(ctx context.Context, forwardedHost string
 	return conn.(*grpc.ClientConn), nil
 }
 
+// validatePDForwardedHost checks that a PD address received from forwarding
+// metadata belongs to the current PD leader. The metadata is controlled by the
+// caller, so it must be validated before both local handling and dialing.
+func (s *GrpcServer) validatePDForwardedHost(forwardedHost string) error {
+	leader := s.GetLeader()
+	if leader == nil || len(leader.GetClientUrls()) == 0 {
+		return errs.ErrNotLeader
+	}
+	for _, clientURL := range leader.GetClientUrls() {
+		if isSamePDClientURL(clientURL, forwardedHost) {
+			return nil
+		}
+	}
+	// Preserve the not-leader marker because PD clients use it to
+	// synchronously refresh membership when their forwarded host becomes stale.
+	return status.Errorf(codes.InvalidArgument,
+		"forwarded host %q is not a client URL of the PD leader: pd %s of cluster", forwardedHost, errs.NotLeaderErr)
+}
+
 func (s *GrpcServer) closeDelegateClient(forwardedHost string) {
 	client, ok := s.clientConns.LoadAndDelete(forwardedHost)
 	if !ok {
@@ -427,7 +493,25 @@ func (s *GrpcServer) isLocalRequest(host string) bool {
 		return true
 	}
 	memberAddrs := s.GetMember().Member().GetClientUrls()
-	return slices.Contains(memberAddrs, host)
+	return slices.ContainsFunc(memberAddrs, func(addr string) bool {
+		return isSamePDClientURL(addr, host)
+	})
+}
+
+// isSamePDClientURL checks whether two HTTP(S) client URLs differ only in
+// scheme. PD clients may rewrite the scheme to match their TLS configuration,
+// while gRPC uses the URL host and the TLS configuration independently.
+func isSamePDClientURL(first, second string) bool {
+	firstBaseURL, firstHasValidScheme := trimPDClientURLScheme(first)
+	secondBaseURL, secondHasValidScheme := trimPDClientURLScheme(second)
+	return firstHasValidScheme && secondHasValidScheme && firstBaseURL == secondBaseURL
+}
+
+func trimPDClientURLScheme(url string) (string, bool) {
+	if baseURL, ok := strings.CutPrefix(url, "http://"); ok {
+		return baseURL, true
+	}
+	return strings.CutPrefix(url, "https://")
 }
 
 func (s *GrpcServer) getGlobalTSO(ctx context.Context) (pdpb.Timestamp, error) {
@@ -436,8 +520,10 @@ func (s *GrpcServer) getGlobalTSO(ctx context.Context) (pdpb.Timestamp, error) {
 	}
 	request := &tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{
-			ClusterId:       keypath.ClusterID(),
-			KeyspaceId:      constant.DefaultKeyspaceID,
+			ClusterId: keypath.ClusterID(),
+			Keyspace: &tsopb.RequestHeader_KeyspaceId{
+				KeyspaceId: keyspace.GetBootstrapKeyspaceID(),
+			},
 			KeyspaceGroupId: constant.DefaultKeyspaceGroupID,
 		},
 		Count: 1,

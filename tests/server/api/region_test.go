@@ -21,12 +21,14 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"reflect"
 	"sort"
 	"strconv"
 	"testing"
 	"time"
 
 	"github.com/docker/go-units"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
@@ -36,6 +38,7 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/response"
+	"github.com/tikv/pd/pkg/schedule/checker"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -52,103 +55,31 @@ func TestRegionTestSuite(t *testing.T) {
 	suite.Run(t, new(regionTestSuite))
 }
 
-func (suite *regionTestSuite) SetupTest() {
-	// use a new environment to avoid affecting other tests
+func (suite *regionTestSuite) SetupSuite() {
 	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
 }
 
-func (suite *regionTestSuite) TearDownTest() {
+func (suite *regionTestSuite) TearDownSuite() {
 	suite.env.Cleanup()
 }
 
-func (suite *regionTestSuite) TestSplitRegions() {
-	suite.env.RunTest(suite.checkSplitRegions)
-}
-
-func (suite *regionTestSuite) checkSplitRegions(cluster *tests.TestCluster) {
-	leader := cluster.GetLeaderServer()
-	urlPrefix := leader.GetAddr() + "/pd/api/v1"
+func (suite *regionTestSuite) TearDownTest() {
 	re := suite.Require()
-	s1 := &metapb.Store{
-		Id:        13,
-		State:     metapb.StoreState_Up,
-		NodeState: metapb.NodeState_Serving,
-	}
-	tests.MustPutStore(re, cluster, s1)
-	r1 := core.NewTestRegionInfo(601, 13, []byte("aaa"), []byte("ggg"))
-	r1.GetMeta().Peers = append(r1.GetMeta().Peers, &metapb.Peer{Id: 5, StoreId: 14}, &metapb.Peer{Id: 6, StoreId: 15})
-	tests.MustPutRegionInfo(re, cluster, r1)
-	checkRegionCount(re, cluster, 1)
-
-	newRegionID := uint64(11)
-	body := fmt.Sprintf(`{"retry_limit":%v, "split_keys": ["%s","%s","%s"]}`, 3,
-		hex.EncodeToString([]byte("bbb")),
-		hex.EncodeToString([]byte("ccc")),
-		hex.EncodeToString([]byte("ddd")))
-	checkOpt := func(res []byte, _ int, _ http.Header) {
-		s := &struct {
-			ProcessedPercentage int      `json:"processed-percentage"`
-			NewRegionsID        []uint64 `json:"regions-id"`
-		}{}
-		err := json.Unmarshal(res, s)
-		re.NoError(err)
-		re.Equal(100, s.ProcessedPercentage)
-		re.Equal([]uint64{newRegionID}, s.NewRegionsID)
-	}
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/handler/splitResponses", fmt.Sprintf("return(%v)", newRegionID)))
-	err := testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/regions/split", urlPrefix), []byte(body), checkOpt)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/handler/splitResponses"))
-	re.NoError(err)
-}
-
-func (suite *regionTestSuite) TestAccelerateRegionsScheduleInRange() {
-	re := suite.Require()
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges", "return(true)"))
-	suite.env.RunTest(suite.checkAccelerateRegionsScheduleInRange)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges"))
-}
-
-func (suite *regionTestSuite) checkAccelerateRegionsScheduleInRange(cluster *tests.TestCluster) {
-	leader := cluster.GetLeaderServer()
-	urlPrefix := leader.GetAddr() + "/pd/api/v1"
-	re := suite.Require()
-	for i := 1; i <= 3; i++ {
-		s1 := &metapb.Store{
-			Id:        uint64(i),
-			State:     metapb.StoreState_Up,
-			NodeState: metapb.NodeState_Serving,
-		}
-		tests.MustPutStore(re, cluster, s1)
-	}
-	regionCount := uint64(3)
-	for i := uint64(1); i <= regionCount; i++ {
-		r1 := core.NewTestRegionInfo(550+i, 1, []byte("a"+strconv.FormatUint(i, 10)), []byte("a"+strconv.FormatUint(i+1, 10)))
-		r1.GetMeta().Peers = append(r1.GetMeta().Peers, &metapb.Peer{Id: 100 + i, StoreId: (i + 1) % regionCount}, &metapb.Peer{Id: 200 + i, StoreId: (i + 2) % regionCount})
-		tests.MustPutRegionInfo(re, cluster, r1)
-	}
-	checkRegionCount(re, cluster, regionCount)
-
-	body := fmt.Sprintf(`{"start_key":"%s", "end_key": "%s"}`, hex.EncodeToString([]byte("a1")), hex.EncodeToString([]byte("a3")))
-	err := testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/regions/accelerate-schedule", urlPrefix), []byte(body),
-		testutil.StatusOK(re))
-	re.NoError(err)
-	idList := leader.GetRaftCluster().GetPendingProcessedRegions()
-	if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
-		idList = sche.GetCluster().GetCoordinator().GetCheckerController().GetPendingProcessedRegions()
-	}
-	re.Len(idList, 2, len(idList))
+	suite.env.Reset(re)
 }
 
 func (suite *regionTestSuite) TestAccelerateRegionsScheduleInRanges() {
 	re := suite.Require()
+	// Ensure the pending processed regions are not added or removed during the test.
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/skipPatrolRegions", "return(true)"))
 	suite.env.RunTest(suite.checkAccelerateRegionsScheduleInRanges)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/skipPatrolRegions"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges"))
 }
 
 func (suite *regionTestSuite) checkAccelerateRegionsScheduleInRanges(cluster *tests.TestCluster) {
 	leader := cluster.GetLeaderServer()
-	urlPrefix := leader.GetAddr() + "/pd/api/v1"
 	re := suite.Require()
 	for i := 1; i <= 6; i++ {
 		s1 := &metapb.Store{
@@ -166,62 +97,40 @@ func (suite *regionTestSuite) checkAccelerateRegionsScheduleInRanges(cluster *te
 	}
 	checkRegionCount(re, cluster, regionCount)
 
+	var checkerController *checker.Controller
+	if sche := cluster.GetSchedulingPrimaryServer(); sche == nil {
+		checkerController = leader.GetRaftCluster().GetCoordinator().GetCheckerController()
+	} else {
+		checkerController = sche.GetCluster().GetCoordinator().GetCheckerController()
+	}
+
+	checkerController.ClearPendingProcessedRegions()
+	re.Empty(checkerController.GetPendingProcessedRegions())
+
+	urlPrefix := leader.GetAddr() + "/pd/api/v1"
+	// Test accelerate schedule in ranges.
 	body := fmt.Sprintf(`[{"start_key":"%s", "end_key": "%s"}, {"start_key":"%s", "end_key": "%s"}]`,
 		hex.EncodeToString([]byte("a1")), hex.EncodeToString([]byte("a3")), hex.EncodeToString([]byte("a4")), hex.EncodeToString([]byte("a6")))
 	err := testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/regions/accelerate-schedule/batch", urlPrefix), []byte(body),
 		testutil.StatusOK(re))
 	re.NoError(err)
-	idList := leader.GetRaftCluster().GetPendingProcessedRegions()
-	if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
-		idList = sche.GetCluster().GetCoordinator().GetCheckerController().GetPendingProcessedRegions()
-	}
-	re.Len(idList, 4)
-}
 
-func (suite *regionTestSuite) TestScatterRegions() {
-	suite.env.RunTest(suite.checkScatterRegions)
-}
+	testutil.Eventually(re, func() bool {
+		return len(checkerController.GetPendingProcessedRegions()) == 4
+	})
 
-func (suite *regionTestSuite) checkScatterRegions(cluster *tests.TestCluster) {
-	leader := cluster.GetLeaderServer()
-	urlPrefix := leader.GetAddr() + "/pd/api/v1"
-	re := suite.Require()
-	for i := 13; i <= 16; i++ {
-		s1 := &metapb.Store{
-			Id:        uint64(i),
-			State:     metapb.StoreState_Up,
-			NodeState: metapb.NodeState_Serving,
-		}
-		tests.MustPutStore(re, cluster, s1)
-	}
-	r1 := core.NewTestRegionInfo(701, 13, []byte("b1"), []byte("b2"))
-	r1.GetMeta().Peers = append(r1.GetMeta().Peers, &metapb.Peer{Id: 5, StoreId: 14}, &metapb.Peer{Id: 6, StoreId: 15})
-	r2 := core.NewTestRegionInfo(702, 13, []byte("b2"), []byte("b3"))
-	r2.GetMeta().Peers = append(r2.GetMeta().Peers, &metapb.Peer{Id: 7, StoreId: 14}, &metapb.Peer{Id: 8, StoreId: 15})
-	r3 := core.NewTestRegionInfo(703, 13, []byte("b4"), []byte("b4"))
-	r3.GetMeta().Peers = append(r3.GetMeta().Peers, &metapb.Peer{Id: 9, StoreId: 14}, &metapb.Peer{Id: 10, StoreId: 15})
-	tests.MustPutRegionInfo(re, cluster, r1)
-	tests.MustPutRegionInfo(re, cluster, r2)
-	tests.MustPutRegionInfo(re, cluster, r3)
-	checkRegionCount(re, cluster, 3)
+	checkerController.ClearPendingProcessedRegions()
+	re.Empty(checkerController.GetPendingProcessedRegions())
 
-	body := fmt.Sprintf(`{"start_key":"%s", "end_key": "%s"}`, hex.EncodeToString([]byte("b1")), hex.EncodeToString([]byte("b3")))
-	err := testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/regions/scatter", urlPrefix), []byte(body), testutil.StatusOK(re))
+	// Test accelerate schedule in range.
+	body = fmt.Sprintf(`{"start_key":"%s", "end_key": "%s"}`, hex.EncodeToString([]byte("a1")), hex.EncodeToString([]byte("a3")))
+	err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/regions/accelerate-schedule", urlPrefix), []byte(body),
+		testutil.StatusOK(re))
 	re.NoError(err)
-	oc := leader.GetRaftCluster().GetOperatorController()
-	if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
-		oc = sche.GetCoordinator().GetOperatorController()
-	}
 
-	op1 := oc.GetOperator(701)
-	op2 := oc.GetOperator(702)
-	op3 := oc.GetOperator(703)
-	// At least one operator used to scatter region
-	re.True(op1 != nil || op2 != nil || op3 != nil)
-
-	body = `{"regions_id": [701, 702, 703]}`
-	err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/regions/scatter", urlPrefix), []byte(body), testutil.StatusOK(re))
-	re.NoError(err)
+	testutil.Eventually(re, func() bool {
+		return len(checkerController.GetPendingProcessedRegions()) == 2
+	})
 }
 
 func (suite *regionTestSuite) TestCheckRegionsReplicated() {
@@ -383,20 +292,6 @@ func checkRegionCount(re *require.Assertions, cluster *tests.TestCluster, count 
 	}
 }
 
-func pauseAllCheckers(re *require.Assertions, cluster *tests.TestCluster) {
-	checkerNames := []string{"learner", "replica", "rule", "split", "merge", "joint-state"}
-	addr := cluster.GetLeaderServer().GetAddr()
-	for _, checkerName := range checkerNames {
-		resp := make(map[string]any)
-		url := fmt.Sprintf("%s/pd/api/v1/checker/%s", addr, checkerName)
-		err := testutil.CheckPostJSON(tests.TestDialClient, url, []byte(`{"delay":1000}`), testutil.StatusOK(re))
-		re.NoError(err)
-		err = testutil.ReadGetJSON(re, tests.TestDialClient, url, &resp)
-		re.NoError(err)
-		re.True(resp["paused"].(bool))
-	}
-}
-
 func (suite *regionTestSuite) TestRegion() {
 	suite.env.RunTest(suite.checkRegion)
 }
@@ -409,7 +304,9 @@ func (suite *regionTestSuite) checkRegion(cluster *tests.TestCluster) {
 		core.SetWrittenBytes(100*units.MiB),
 		core.SetWrittenKeys(1*units.MiB),
 		core.SetReadBytes(200*units.MiB),
-		core.SetReadKeys(2*units.MiB))
+		core.SetReadKeys(2*units.MiB),
+		core.SetApproximateKvSize(4*units.MiB),
+	)
 	buckets := &metapb.Buckets{
 		RegionId: 2,
 		Keys:     [][]byte{[]byte("a"), []byte("b")},
@@ -425,6 +322,8 @@ func (suite *regionTestSuite) checkRegion(cluster *tests.TestCluster) {
 	r1 := &response.RegionInfo{}
 	r1m := make(map[string]any)
 	re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, url, r1))
+	re.Equal(uint64(1), r1.BucketVersion)
+	re.Equal(int64(4*units.MiB), r1.ApproximateKvSize)
 	r1.Adjust()
 	re.Equal(response.NewAPIRegionInfo(r), r1)
 	re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, url, &r1m))
@@ -477,12 +376,13 @@ func (suite *regionTestSuite) checkRegionCheck(cluster *tests.TestCluster) {
 
 	url = fmt.Sprintf("%s/regions/check/%s", urlPrefix, "down-peer")
 	r2 := &response.RegionsInfo{}
+	expected := &response.RegionsInfo{Count: 1, Regions: []response.RegionInfo{*response.NewAPIRegionInfo(r)}}
 	testutil.Eventually(re, func() bool {
 		if err := testutil.ReadGetJSON(re, tests.TestDialClient, url, r2); err != nil {
 			return false
 		}
 		r2.Adjust()
-		return suite.Equal(&response.RegionsInfo{Count: 1, Regions: []response.RegionInfo{*response.NewAPIRegionInfo(r)}}, r2)
+		return reflect.DeepEqual(expected, r2)
 	})
 
 	url = fmt.Sprintf("%s/regions/check/%s", urlPrefix, "pending-peer")
@@ -497,40 +397,41 @@ func (suite *regionTestSuite) checkRegionCheck(cluster *tests.TestCluster) {
 	r4.Adjust()
 	re.Equal(&response.RegionsInfo{Count: 0, Regions: []response.RegionInfo{}}, r4)
 
-	r = r.Clone(core.SetApproximateSize(1))
+	r = r.Clone(core.SetApproximateSize(1), core.SetApproximateKeys(0))
 	tests.MustPutRegionInfo(re, cluster, r)
 	url = fmt.Sprintf("%s/regions/check/%s", urlPrefix, "empty-region")
 	r5 := &response.RegionsInfo{}
+	expected = &response.RegionsInfo{Count: 1, Regions: []response.RegionInfo{*response.NewAPIRegionInfo(r)}}
 	testutil.Eventually(re, func() bool {
 		if err := testutil.ReadGetJSON(re, tests.TestDialClient, url, r5); err != nil {
 			return false
 		}
 		r5.Adjust()
-		return suite.Equal(&response.RegionsInfo{Count: 1, Regions: []response.RegionInfo{*response.NewAPIRegionInfo(r)}}, r5)
+		return reflect.DeepEqual(expected, r5)
 	})
 
 	r = r.Clone(core.SetApproximateSize(1))
 	tests.MustPutRegionInfo(re, cluster, r)
 	url = fmt.Sprintf("%s/regions/check/%s", urlPrefix, "hist-size")
 	r6 := make([]*api.HistItem, 1)
+	histSizes := []*api.HistItem{{Start: 1, End: 1, Count: 1}}
 	testutil.Eventually(re, func() bool {
 		if err := testutil.ReadGetJSON(re, tests.TestDialClient, url, &r6); err != nil {
 			return false
 		}
-		histSizes := []*api.HistItem{{Start: 1, End: 1, Count: 1}}
-		return suite.Equal(histSizes, r6)
+		return reflect.DeepEqual(histSizes, r6)
 	})
 
 	r = r.Clone(core.SetApproximateKeys(1000))
 	tests.MustPutRegionInfo(re, cluster, r)
 	url = fmt.Sprintf("%s/regions/check/%s", urlPrefix, "hist-keys")
 	r7 := make([]*api.HistItem, 1)
+	histKeys := []*api.HistItem{{Start: 1000, End: 1999, Count: 1}}
 	testutil.Eventually(re, func() bool {
 		if err := testutil.ReadGetJSON(re, tests.TestDialClient, url, &r7); err != nil {
 			return false
 		}
-		histKeys := []*api.HistItem{{Start: 1000, End: 1999, Count: 1}}
-		return suite.Equal(histKeys, r7)
+		return reflect.DeepEqual(histKeys, r7)
 	})
 
 	// ref https://github.com/tikv/pd/issues/3558, we should change size to pass `NeedUpdate` for observing.
@@ -548,8 +449,8 @@ func (suite *regionTestSuite) checkRegionCheck(cluster *tests.TestCluster) {
 		if err := testutil.ReadGetJSON(re, tests.TestDialClient, url, r8); err != nil {
 			return false
 		}
-		r4.Adjust()
-		return suite.Equal(r.GetID(), r8.Regions[0].ID) && r8.Count == 1
+		r8.Adjust()
+		return r8.Count == 1 && len(r8.Regions) > 0 && r.GetID() == r8.Regions[0].ID
 	})
 }
 
@@ -616,15 +517,13 @@ func (suite *regionTestSuite) checkStoreRegions(cluster *tests.TestCluster) {
 		re.Equal(regionIDs[i], r.ID)
 	}
 
-	regionIDs = []uint64{4}
 	url = fmt.Sprintf("%s/regions/store/%d", urlPrefix, 2)
 	r5 := &response.RegionsInfo{}
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, url, r5)
 	re.NoError(err)
-	re.Len(regionIDs, r5.Count)
-	for i, r := range r5.Regions {
-		re.Equal(regionIDs[i], r.ID)
-	}
+	re.Equal(1, r5.Count)
+	re.Len(r5.Regions, 1)
+	re.Equal(uint64(4), r5.Regions[0].ID)
 
 	regionIDs = []uint64{}
 	url = fmt.Sprintf("%s/regions/store/%d", urlPrefix, 3)
@@ -698,6 +597,7 @@ func (suite *regionTestSuite) TestRegionsWithKillRequest() {
 }
 
 func (suite *regionTestSuite) checkRegionsWithKillRequest(cluster *tests.TestCluster) {
+	as := assert.New(suite.T())
 	re := suite.Require()
 	leader := cluster.GetLeaderServer()
 	urlPrefix := leader.GetAddr() + "/pd/api/v1"
@@ -724,9 +624,13 @@ func (suite *regionTestSuite) checkRegionsWithKillRequest(cluster *tests.TestClu
 				resp.Body.Close()
 			}
 		}()
-		re.Error(err)
-		re.Contains(err.Error(), "context canceled")
-		re.Nil(resp)
+		if err == nil {
+			as.Fail("An error is expected but got nil")
+			doneCh <- struct{}{}
+			return
+		}
+		as.Contains(err.Error(), "context canceled")
+		as.Nil(resp)
 		doneCh <- struct{}{}
 	}()
 	time.Sleep(100 * time.Millisecond) // wait for the request to be sent
@@ -916,7 +820,8 @@ func BenchmarkGetRegions(b *testing.B) {
 			core.SetApproximateKeys(10), core.SetApproximateSize(10))
 		tests.MustPutRegionInfo(re, cluster, r)
 	}
-	resp, _ := apiutil.GetJSON(tests.TestDialClient, url, nil)
+	resp, err := apiutil.GetJSON(tests.TestDialClient, url, nil)
+	re.NoError(err)
 	regions := &response.RegionsInfo{}
 	err = json.NewDecoder(resp.Body).Decode(regions)
 	re.NoError(err)
@@ -925,7 +830,8 @@ func BenchmarkGetRegions(b *testing.B) {
 
 	b.ResetTimer()
 	for range b.N {
-		resp, _ := apiutil.GetJSON(tests.TestDialClient, url, nil)
+		resp, err := apiutil.GetJSON(tests.TestDialClient, url, nil)
+		re.NoError(err)
 		resp.Body.Close()
 	}
 }

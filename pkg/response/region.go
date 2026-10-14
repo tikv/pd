@@ -111,24 +111,27 @@ func fromPeerStatsSlice(peers []*pdpb.PeerStats) []PDPeerStats {
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 // easyjson:json
 type RegionInfo struct {
-	ID          uint64              `json:"id"`
-	StartKey    string              `json:"start_key"`
-	EndKey      string              `json:"end_key"`
+	ID       uint64 `json:"id"`
+	StartKey string `json:"start_key"` // hex-encoded
+	EndKey   string `json:"end_key"`   // hex-encoded
+
 	RegionEpoch *metapb.RegionEpoch `json:"epoch,omitempty"`
 	Peers       []MetaPeer          `json:"peers,omitempty"`
 
-	Leader            MetaPeer      `json:"leader,omitempty"`
-	DownPeers         []PDPeerStats `json:"down_peers,omitempty"`
-	PendingPeers      []MetaPeer    `json:"pending_peers,omitempty"`
-	CPUUsage          uint64        `json:"cpu_usage"`
-	WrittenBytes      uint64        `json:"written_bytes"`
-	ReadBytes         uint64        `json:"read_bytes"`
-	WrittenKeys       uint64        `json:"written_keys"`
-	ReadKeys          uint64        `json:"read_keys"`
-	ApproximateSize   int64         `json:"approximate_size"`
-	ApproximateKeys   int64         `json:"approximate_keys"`
-	ApproximateKvSize int64         `json:"approximate_kv_size"`
-	Buckets           []string      `json:"buckets,omitempty"`
+	Leader                    MetaPeer      `json:"leader,omitempty"`
+	DownPeers                 []PDPeerStats `json:"down_peers,omitempty"`
+	PendingPeers              []MetaPeer    `json:"pending_peers,omitempty"`
+	CPUUsage                  uint64        `json:"cpu_usage"`
+	WrittenBytes              uint64        `json:"written_bytes"`
+	ReadBytes                 uint64        `json:"read_bytes"`
+	WrittenKeys               uint64        `json:"written_keys"`
+	ReadKeys                  uint64        `json:"read_keys"`
+	ApproximateSize           int64         `json:"approximate_size"`
+	ApproximateKeys           int64         `json:"approximate_keys"`
+	ApproximateKvSize         int64         `json:"approximate_kv_size"`
+	ApproximateColumnarKvSize int64         `json:"approximate_columnar_kv_size"`
+	Buckets                   []string      `json:"buckets,omitempty"`
+	BucketVersion             uint64        `json:"bucket_version,omitempty"`
 
 	ReplicationStatus *ReplicationStatus `json:"replication_status,omitempty"`
 }
@@ -177,15 +180,19 @@ func InitRegion(r *core.RegionInfo, s *RegionInfo) *RegionInfo {
 	s.ApproximateSize = r.GetApproximateSize()
 	s.ApproximateKeys = r.GetApproximateKeys()
 	s.ApproximateKvSize = r.GetApproximateKvSize()
+	s.ApproximateColumnarKvSize = r.GetApproximateColumnarKvSize()
 	s.ReplicationStatus = fromPBReplicationStatus(r.GetReplicationStatus())
 	s.Buckets = nil
 
-	keys := r.GetBuckets().GetKeys()
-	if len(keys) > 0 {
+	bucket := r.GetBuckets()
+	if keys := bucket.GetKeys(); len(keys) > 0 {
 		s.Buckets = make([]string, len(keys))
 		for i, key := range keys {
 			s.Buckets[i] = core.HexRegionKeyStr(key)
 		}
+	}
+	if version := bucket.GetVersion(); version > 0 {
+		s.BucketVersion = version
 	}
 	return s
 }

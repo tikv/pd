@@ -16,7 +16,10 @@ package statistics
 
 import (
 	"maps"
+	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"go.uber.org/zap"
 
@@ -170,6 +173,9 @@ func (r *RegionStatistics) RegionStatsNeedUpdate(region *core.RegionInfo) bool {
 	if r.IsRegionStatsType(regionID, LearnerPeer) != (len(region.GetLearners()) != 0) {
 		return true
 	}
+	if r.IsRegionStatsType(regionID, EmptyRegion) != core.IsEmptyRegion(region.GetApproximateSize(), region.GetApproximateKeys()) {
+		return true
+	}
 
 	// merge
 	return r.IsRegionStatsType(regionID, UndersizedRegion) !=
@@ -250,7 +256,7 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 	if len(learners) > 0 {
 		conditions |= LearnerPeer
 	}
-	if regionSize <= core.EmptyRegionApproximateSize {
+	if core.IsEmptyRegion(regionSize, region.GetApproximateKeys()) {
 		conditions |= EmptyRegion
 	}
 	if region.IsOversized(regionMaxSize, regionMaxKeys) {
@@ -383,7 +389,7 @@ func NewLabelStatistics() *LabelStatistics {
 // Observe records the current label status.
 func (l *LabelStatistics) Observe(region *core.RegionInfo, stores []*core.StoreInfo, labels []string) {
 	regionID := region.GetID()
-	regionIsolation := GetRegionLabelIsolation(stores, labels)
+	regionIsolation, _ := GetRegionLabelIsolation(stores, labels)
 	l.Lock()
 	defer l.Unlock()
 	if label, ok := l.regionLabelStats[regionID]; ok {
@@ -442,9 +448,9 @@ func (l *LabelStatistics) GetLabelCounter() map[string]int {
 }
 
 // GetRegionLabelIsolation returns the isolation level of the region.
-func GetRegionLabelIsolation(stores []*core.StoreInfo, labels []string) string {
+func GetRegionLabelIsolation(stores []*core.StoreInfo, labels []string) (string, int) {
 	if len(stores) == 0 || len(labels) == 0 {
-		return nonIsolation
+		return nonIsolation, -1
 	}
 	queueStores := [][]*core.StoreInfo{stores}
 	for level, label := range labels {
@@ -457,10 +463,27 @@ func GetRegionLabelIsolation(stores []*core.StoreInfo, labels []string) string {
 		}
 		queueStores = newQueueStores
 		if len(queueStores) == 0 {
-			return labels[level]
+			return labels[level], level
 		}
 	}
-	return nonIsolation
+	return nonIsolation, -1
+}
+
+// IsRegionLabelIsolationSatisfied checks whether the isolation level of the region satisfied.
+func IsRegionLabelIsolationSatisfied(stores []*core.StoreInfo, labels []string, isolationLevel string) bool {
+	if isolationLevel == "" || isolationLevel == nonIsolation {
+		return true
+	}
+	_, level := GetRegionLabelIsolation(stores, labels)
+	if level == -1 {
+		return false
+	}
+	for _, key := range labels[level:] {
+		if key == isolationLevel {
+			return true
+		}
+	}
+	return false
 }
 
 func notIsolatedStoresWithLabel(stores []*core.StoreInfo, label string) [][]*core.StoreInfo {
@@ -468,7 +491,7 @@ func notIsolatedStoresWithLabel(stores []*core.StoreInfo, label string) [][]*cor
 	valueStoresMap := make(map[string][]*core.StoreInfo)
 
 	for _, s := range stores {
-		labelValue := s.GetLabelValue(label)
+		labelValue := labelGroupKey(s.GetLabelValue(label))
 		if labelValue == "" {
 			emptyValueStores = append(emptyValueStores, s)
 		} else {
@@ -501,6 +524,29 @@ func notIsolatedStoresWithLabel(stores []*core.StoreInfo, label string) [][]*cor
 		}
 	}
 	return res
+}
+
+// labelGroupKey returns a key under which label values are equal iff they are
+// equal under strings.EqualFold, as compared by StoreInfo.CompareLocation.
+func labelGroupKey(value string) string {
+	for i := range len(value) {
+		c := value[i]
+		if c >= utf8.RuneSelf {
+			// Map each rune to the smallest rune in its simple-fold orbit.
+			return strings.Map(func(r rune) rune {
+				canonical := r
+				for next := unicode.SimpleFold(r); next != r; next = unicode.SimpleFold(next) {
+					canonical = min(canonical, next)
+				}
+				if canonical >= 'A' && canonical <= 'Z' {
+					return canonical + ('a' - 'A')
+				}
+				return canonical
+			}, value)
+		}
+	}
+	// For ASCII values, the key above reduces to ASCII lowercase.
+	return strings.ToLower(value)
 }
 
 // logDownPeerWithNoDisconnectedStore logs down peers on connected stores.

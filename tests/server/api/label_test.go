@@ -313,6 +313,34 @@ func (suite *strictlyLabelsStoreTestSuite) checkStoreMatch(cluster *tests.TestCl
 			valid:       true,
 			expectError: "placement rules is disabled",
 		},
+		{
+			store: &metapb.Store{
+				Id:      4,
+				Address: "mock://tiflash-4:4",
+				State:   metapb.StoreState_Up,
+				Labels: []*metapb.StoreLabel{
+					{
+						Key:   "zone",
+						Value: "us-west-1",
+					},
+					{
+						Key:   "disk",
+						Value: "ssd",
+					},
+					{
+						Key:   core.EngineKey,
+						Value: core.EngineTiFlash,
+					},
+					{
+						Key:   core.EngineRoleKey,
+						Value: "write",
+					},
+				},
+				Version: "3.0.0",
+			},
+			valid:       true,
+			expectError: "placement rules is disabled",
+		},
 	}
 
 	for _, testCase := range testCases {
@@ -326,7 +354,7 @@ func (suite *strictlyLabelsStoreTestSuite) checkStoreMatch(cluster *tests.TestCl
 				Version: testCase.store.Version,
 			},
 		})
-		if testCase.store.Address == "mock://tiflash-3:3" {
+		if testCase.store.Address == "mock://tiflash-3:3" || testCase.store.Address == "mock://tiflash-4:4" {
 			re.Contains(resp.GetHeader().GetError().String(), testCase.expectError)
 			continue
 		}

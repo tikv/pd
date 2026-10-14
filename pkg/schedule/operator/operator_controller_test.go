@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
@@ -75,20 +76,20 @@ func (suite *operatorControllerTestSuite) TestCacheInfluence() {
 	oc.SetOperator(op)
 	re.True(op.Start())
 	influence := NewOpInfluence()
-	AddOpInfluence(op, *influence, bc)
+	AddOpInfluence(op, influence, bc)
 	re.Equal(int64(-96), influence.GetStoreInfluence(2).RegionSize)
 
 	// case: influence is same even if the region size changed.
 	region = region.Clone(core.SetApproximateSize(100))
 	tc.PutRegion(region)
 	influence1 := NewOpInfluence()
-	AddOpInfluence(op, *influence1, bc)
+	AddOpInfluence(op, influence1, bc)
 	re.Equal(int64(-96), influence1.GetStoreInfluence(2).RegionSize)
 
 	// case: influence is valid even if the region is removed.
 	tc.RemoveRegion(region)
 	influence2 := NewOpInfluence()
-	AddOpInfluence(op, *influence2, bc)
+	AddOpInfluence(op, influence2, bc)
 	re.Equal(int64(-96), influence2.GetStoreInfluence(2).RegionSize)
 }
 
@@ -110,18 +111,30 @@ func (suite *operatorControllerTestSuite) TestGetOpInfluence() {
 	oc.SetOperator(op1)
 	re.True(op2.Start())
 	oc.SetOperator(op2)
+	ctx, cancel := context.WithCancel(suite.ctx)
+	wg := &sync.WaitGroup{}
+	wg.Add(2)
 	go func(ctx context.Context) {
-		checkRemoveOperatorSuccess(re, oc, op1)
+		defer wg.Done()
+		as := assert.New(suite.T())
+		if !as.True(oc.RemoveOperator(op1)) ||
+			!as.True(op1.IsEnd()) ||
+			!as.Equal(op1, oc.GetOperatorStatus(op1.RegionID()).Operator) {
+			return
+		}
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			default:
-				re.False(oc.RemoveOperator(op1))
+				if !as.False(oc.RemoveOperator(op1)) {
+					return
+				}
 			}
 		}
-	}(suite.ctx)
+	}(ctx)
 	go func(ctx context.Context) {
+		defer wg.Done()
 		for {
 			select {
 			case <-ctx.Done():
@@ -130,8 +143,10 @@ func (suite *operatorControllerTestSuite) TestGetOpInfluence() {
 				oc.GetOpInfluence(tc.GetBasicCluster())
 			}
 		}
-	}(suite.ctx)
+	}(ctx)
 	time.Sleep(time.Second)
+	cancel()
+	wg.Wait()
 	re.NotNil(oc.GetOperator(2))
 }
 
@@ -223,6 +238,72 @@ func (suite *operatorControllerTestSuite) TestFastFailWithUnhealthyStore() {
 	re.False(oc.checkStaleOperator(op, steps[0], region))
 	tc.SetStoreDown(2)
 	re.True(oc.checkStaleOperator(op, steps[0], region))
+}
+
+// TestOperatorControllerRejectsTransferLeaderOnUnhealthyTarget guards against
+// a blocking point raised in review on tikv/pd#11146: checkStaleOperator must
+// keep rejecting an Unhealthy target for TransferLeader regardless of
+// whether its request has already been sent. A leader transfer creates no
+// peer and no irreversible conf change, so if the target goes unhealthy
+// before it becomes leader, cancelling is always safe; leaving the operator
+// running would only retry the request until the Down threshold while
+// holding the scheduling slot.
+func (suite *operatorControllerTestSuite) TestOperatorControllerRejectsTransferLeaderOnUnhealthyTarget() {
+	re := suite.Require()
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(suite.ctx, opt)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc, false /* no need to run */)
+	oc := NewController(suite.ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
+	tc.AddLeaderStore(1, 1)
+	tc.AddLeaderStore(2, 1)
+	tc.AddLeaderStore(3, 1)
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	region := tc.GetRegion(1)
+
+	op := NewTestOperator(1, region.GetRegionEpoch(), OpLeader, TransferLeader{FromStore: 1, ToStore: 2})
+	op.SetStoreHealthCheck(true)
+	re.True(oc.AddOperator(op))
+
+	// Store 2 goes unhealthy after AddOperator already dispatched the
+	// request at creation time. TransferLeader is still cancelled instead of
+	// being left to retry until the Down threshold.
+	tc.SetStoreLastHeartbeatInterval(2, 11*time.Minute)
+	oc.Dispatch(region, DispatchFromHeartBeat, nil)
+	re.Equal(CANCELED, op.Status())
+}
+
+// TestOperatorControllerKeepsRunningForAddLearnerOnUnhealthyTarget documents
+// a deliberate scope boundary raised in review on tikv/pd#11146: opting an
+// AddLearner/AddPeer/BecomeNonWitness operator into SetStoreHealthCheck does
+// not protect it against an Unhealthy target on the real AddOperator path.
+// addOperatorInner dispatches the first step's command synchronously at
+// creation time, before any heartbeat-driven check can run, so
+// checkStaleOperator never gets a chance to reject the target -- even when
+// it was already Unhealthy before the operator was created. Only
+// TransferLeader (see the sibling test above) gets real protection from the
+// flag today; extending it to peer-creating steps needs an orphan-cleanup /
+// replacement design that is a follow-up to #11143.
+func (suite *operatorControllerTestSuite) TestOperatorControllerKeepsRunningForAddLearnerOnUnhealthyTarget() {
+	re := suite.Require()
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(suite.ctx, opt)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc, false /* no need to run */)
+	oc := NewController(suite.ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
+	tc.AddLeaderStore(1, 1)
+	tc.AddLeaderStore(2, 1)
+	tc.AddLeaderStore(3, 1)
+	tc.AddLeaderStore(4, 0)
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	region := tc.GetRegion(1)
+
+	// Store 4 is already Unhealthy before the operator is even created.
+	tc.SetStoreLastHeartbeatInterval(4, 11*time.Minute)
+	op := NewTestOperator(1, region.GetRegionEpoch(), OpRegion, AddLearner{ToStore: 4, PeerID: 4})
+	op.SetStoreHealthCheck(true)
+	re.True(oc.AddOperator(op))
+
+	oc.Dispatch(region, DispatchFromHeartBeat, nil)
+	re.Equal(STARTED, op.Status())
 }
 
 func (suite *operatorControllerTestSuite) TestCheckAddUnexpectedStatus() {
@@ -317,20 +398,20 @@ func (suite *operatorControllerTestSuite) TestConcurrentRemoveOperator() {
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/operator/concurrentRemoveOperator", "return(true)"))
 	var wg sync.WaitGroup
+	var success bool
 	wg.Add(2)
 	go func() {
+		defer wg.Done()
 		oc.Dispatch(region1, "test", nil)
-		wg.Done()
 	}()
 	go func() {
+		defer wg.Done()
 		time.Sleep(50 * time.Millisecond)
-		success := oc.AddOperator(op2)
-		// If the assert failed before wg.Done, the test will be blocked.
-		defer re.True(success)
-		wg.Done()
+		success = oc.AddOperator(op2)
 	}()
 	wg.Wait()
 
+	re.True(success)
 	re.Equal(op2, oc.GetOperator(1))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/operator/concurrentRemoveOperator"))
 }
@@ -420,10 +501,10 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegionForMergeRegion()
 	cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
 	cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
 
-	source := newRegionInfo(101, "1a", "1b", 10, 10, []uint64{101, 1}, []uint64{101, 1})
+	source := suite.newRegionInfo(101, "1a", "1b", 10, 10, []uint64{101, 1}, []uint64{101, 1})
 	source.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
 	cluster.PutRegion(source)
-	target := newRegionInfo(102, "1b", "1c", 10, 10, []uint64{101, 1}, []uint64{101, 1})
+	target := suite.newRegionInfo(102, "1b", "1c", 10, 10, []uint64{101, 1}, []uint64{101, 1})
 	target.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
 	cluster.PutRegion(target)
 
@@ -506,13 +587,13 @@ func (suite *operatorControllerTestSuite) TestConcurrentMergeConflict() {
 	cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
 
 	for i := range 10 {
-		left := newRegionInfo(uint64(100+i), fmt.Sprintf("%da", i), fmt.Sprintf("%db", i), 10, 10, []uint64{101, 1}, []uint64{101, 1})
+		left := suite.newRegionInfo(uint64(100+i), fmt.Sprintf("%da", i), fmt.Sprintf("%db", i), 10, 10, []uint64{101, 1}, []uint64{101, 1})
 		left.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
 		cluster.PutRegion(left)
-		middle := newRegionInfo(uint64(101+i), fmt.Sprintf("%db", i), fmt.Sprintf("%dc", i), 10, 10, []uint64{101, 1}, []uint64{101, 1})
+		middle := suite.newRegionInfo(uint64(101+i), fmt.Sprintf("%db", i), fmt.Sprintf("%dc", i), 10, 10, []uint64{101, 1}, []uint64{101, 1})
 		middle.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
 		cluster.PutRegion(middle)
-		right := newRegionInfo(uint64(102+i), fmt.Sprintf("%dc", i), fmt.Sprintf("%dd", i), 10, 10, []uint64{101, 1}, []uint64{101, 1})
+		right := suite.newRegionInfo(uint64(102+i), fmt.Sprintf("%dc", i), fmt.Sprintf("%dd", i), 10, 10, []uint64{101, 1}, []uint64{101, 1})
 		right.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
 		cluster.PutRegion(right)
 		wg := &sync.WaitGroup{}
@@ -521,12 +602,14 @@ func (suite *operatorControllerTestSuite) TestConcurrentMergeConflict() {
 			go func() {
 				defer wg.Done()
 				ops1, err := CreateMergeRegionOperator("merge-region", cluster, left, middle, OpMerge)
-				re.NoError(err)
-				re.Len(ops1, 2)
+				if !suite.NoError(err) || !suite.Len(ops1, 2) {
+					return
+				}
 				controller.AddWaitingOperator(ops1...)
 				ops2, err := CreateMergeRegionOperator("merge-region", cluster, middle, right, OpMerge)
-				re.NoError(err)
-				re.Len(ops2, 2)
+				if !suite.NoError(err) || !suite.Len(ops2, 2) {
+					return
+				}
 				controller.AddWaitingOperator(ops2...)
 			}()
 		}
@@ -552,10 +635,10 @@ func (suite *operatorControllerTestSuite) TestCheckOperatorLightly() {
 	cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
 	cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
 
-	source := newRegionInfo(101, "1a", "1b", 10, 10, []uint64{101, 1}, []uint64{101, 1})
+	source := suite.newRegionInfo(101, "1a", "1b", 10, 10, []uint64{101, 1}, []uint64{101, 1})
 	source.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
 	cluster.PutRegion(source)
-	target := newRegionInfo(102, "1b", "1c", 10, 10, []uint64{101, 1}, []uint64{101, 1})
+	target := suite.newRegionInfo(102, "1b", "1c", 10, 10, []uint64{101, 1}, []uint64{101, 1})
 	target.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
 	cluster.PutRegion(target)
 
@@ -648,6 +731,33 @@ func (suite *operatorControllerTestSuite) TestStoreLimit() {
 	op = NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, RemovePeer{FromStore: 2})
 	re.False(oc.AddOperator(op))
 	re.False(oc.RemoveOperator(op))
+
+	tc.AddLeaderStore(3, 0)
+	tc.AddLeaderRegion(1001, 1, 2, 3)
+	tc.SetStoreLimit(2, storelimit.TransferLeaderIn, 0.00006)
+	tc.SetStoreLimit(3, storelimit.TransferLeaderIn, 0.00006)
+	// Admission reserves the budget of every candidate, including store 3.
+	op, err := CreateTransferLeaderOperator("test", tc, tc.GetRegion(1001), 2, []uint64{2, 3}, OpLeader)
+	re.NoError(err)
+	pending, err := CreateTransferLeaderOperator("test", tc, tc.GetRegion(1001), 3, nil, OpLeader)
+	re.NoError(err)
+	re.True(oc.AddOperator(op))
+	checkRemoveOperatorSuccess(re, oc, op)
+	re.False(oc.AddOperator(pending))
+	re.False(oc.RemoveOperator(pending))
+
+	// Direct admission retains the Urgent exemption, independently of Builder's
+	// priority-agnostic target filter.
+	op = NewTestOperator(1001, &metapb.RegionEpoch{}, OpAdmin, TransferLeader{FromStore: 1, ToStore: 2})
+	re.True(oc.AddOperator(op))
+	checkRemoveOperatorSuccess(re, oc, op)
+
+	tc.SetStoreLimit(2, storelimit.TransferLeaderIn, storelimit.Unlimited)
+	for range 2 {
+		op = NewTestOperator(1001, &metapb.RegionEpoch{}, OpLeader, TransferLeader{FromStore: 1, ToStore: 2})
+		re.True(oc.AddOperator(op))
+		checkRemoveOperatorSuccess(re, oc, op)
+	}
 }
 
 // #1652
@@ -720,10 +830,19 @@ func (suite *operatorControllerTestSuite) TestInfluenceOpt() {
 	op.Start()
 	inf := controller.GetOpInfluence(cluster.GetBasicCluster())
 	re.Len(inf.StoresInfluence, 1)
+	inf = controller.GetOpInfluence(cluster.GetBasicCluster(), nil)
+	re.Len(inf.StoresInfluence, 1)
 	inf = controller.GetOpInfluence(cluster.GetBasicCluster(), WithRangeOption([]keyutil.KeyRange{{StartKey: []byte("100"), EndKey: []byte("200")}}))
 	re.Empty(inf.StoresInfluence)
 	inf = controller.GetOpInfluence(cluster.GetBasicCluster(), WithRangeOption([]keyutil.KeyRange{{StartKey: []byte("100"), EndKey: []byte("400")}}))
 	re.Len(inf.StoresInfluence, 1)
+	cluster.ResetRegionCache()
+	inf = controller.GetOpInfluence(cluster.GetBasicCluster(), WithRangeOption([]keyutil.KeyRange{{StartKey: []byte("100"), EndKey: []byte("400")}}))
+	re.Empty(inf.StoresInfluence)
+	inf = controller.GetOpInfluence(nil, WithRangeOption([]keyutil.KeyRange{{StartKey: []byte("100"), EndKey: []byte("400")}}))
+	re.Empty(inf.StoresInfluence)
+	opt := WithRangeOption([]keyutil.KeyRange{{StartKey: []byte("100"), EndKey: []byte("400")}})
+	re.False(opt(nil))
 }
 
 func (suite *operatorControllerTestSuite) TestCalcInfluence() {
@@ -748,7 +867,7 @@ func (suite *operatorControllerTestSuite) TestCalcInfluence() {
 	op := NewTestOperator(1, epoch, OpRegion, steps...)
 	re.True(controller.AddOperator(op))
 
-	check := func(influence OpInfluence, id uint64, expect *StoreInfluence) {
+	check := func(influence *OpInfluence, id uint64, expect *StoreInfluence) {
 		si := influence.GetStoreInfluence(id)
 		re.Equal(si.LeaderCount, expect.LeaderCount)
 		re.Equal(si.LeaderSize, expect.LeaderSize)
@@ -915,13 +1034,16 @@ func (suite *operatorControllerTestSuite) TestDispatchUnfinishedStep() {
 	}
 }
 
-func newRegionInfo(id uint64, startKey, endKey string, size, keys int64, leader []uint64, peers ...[]uint64) *core.RegionInfo {
+func (suite *operatorControllerTestSuite) newRegionInfo(id uint64, startKey, endKey string, size, keys int64, leader []uint64, peers ...[]uint64) *core.RegionInfo {
+	re := suite.Require()
 	prs := make([]*metapb.Peer, 0, len(peers))
 	for _, peer := range peers {
 		prs = append(prs, &metapb.Peer{Id: peer[0], StoreId: peer[1]})
 	}
-	start, _ := hex.DecodeString(startKey)
-	end, _ := hex.DecodeString(endKey)
+	start, err := hex.DecodeString(startKey)
+	re.NoError(err)
+	end, err := hex.DecodeString(endKey)
+	re.NoError(err)
 	return core.NewRegionInfo(
 		&metapb.Region{
 			Id:       id,
@@ -953,7 +1075,7 @@ func (suite *operatorControllerTestSuite) TestAddWaitingOperator() {
 	addPeerOp := func(i uint64) *Operator {
 		start := fmt.Sprintf("%da", i)
 		end := fmt.Sprintf("%db", i)
-		region := newRegionInfo(i, start, end, 1, 1, []uint64{101, 1}, []uint64{101, 1})
+		region := suite.newRegionInfo(i, start, end, 1, 0, []uint64{101, 1}, []uint64{101, 1})
 		cluster.PutRegion(region)
 		peer := &metapb.Peer{
 			StoreId: 2,
@@ -987,9 +1109,9 @@ func (suite *operatorControllerTestSuite) TestAddWaitingOperator() {
 	re.Equal(1, added)
 	re.NotNil(controller.GetOperator(uint64(100)))
 
-	source := newRegionInfo(101, "1a", "1b", 1, 1, []uint64{101, 1}, []uint64{101, 1})
+	source := suite.newRegionInfo(101, "1a", "1b", 1, 1, []uint64{101, 1}, []uint64{101, 1})
 	cluster.PutRegion(source)
-	target := newRegionInfo(102, "0a", "0b", 1, 1, []uint64{101, 1}, []uint64{101, 1})
+	target := suite.newRegionInfo(102, "0a", "0b", 1, 1, []uint64{101, 1}, []uint64{101, 1})
 	cluster.PutRegion(target)
 
 	ops, err := CreateMergeRegionOperator("merge-region", cluster, source, target, OpMerge)
@@ -998,12 +1120,13 @@ func (suite *operatorControllerTestSuite) TestAddWaitingOperator() {
 
 	// test with label schedule=deny
 	labelerManager := cluster.GetRegionLabeler()
-	labelerManager.SetLabelRule(&labeler.LabelRule{
+	err = labelerManager.SetLabelRule(&labeler.LabelRule{
 		ID:       "schedulelabel",
 		Labels:   []labeler.RegionLabel{{Key: "schedule", Value: "deny"}},
 		RuleType: labeler.KeyRange,
 		Data:     []any{map[string]any{"start_key": "1a", "end_key": "1b"}},
 	})
+	re.NoError(err)
 
 	re.True(labelerManager.ScheduleDisabled(source))
 	// add operator should be success since it is not check in addWaitingOperator
@@ -1020,8 +1143,12 @@ func (suite *operatorControllerTestSuite) TestInvalidStoreId() {
 	// If PD and store 3 are gone, PD will not have info of store 3 after recreating it.
 	tc.AddRegionStore(1, 1)
 	tc.AddRegionStore(2, 1)
+	tc.AddRegionStore(3, 1)
 	tc.AddRegionStore(4, 1)
 	tc.AddLeaderRegionWithRange(1, "", "", 1, 2, 3, 4)
+	// Remove store 3 to simulate the scenario where store 3 is gone
+	store3 := tc.GetStore(3)
+	tc.GetBasicCluster().DeleteStore(store3)
 	steps := []OpStep{
 		RemovePeer{FromStore: 3, PeerID: 3, IsDownStore: false},
 	}
@@ -1032,7 +1159,7 @@ func (suite *operatorControllerTestSuite) TestInvalidStoreId() {
 }
 
 func TestConcurrentAddOperatorAndSetStoreLimit(t *testing.T) {
-	re := require.New(t)
+	as := assert.New(t)
 	opt := mockconfig.NewTestOptions()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1060,10 +1187,132 @@ func TestConcurrentAddOperatorAndSetStoreLimit(t *testing.T) {
 			for j := 1; j < 10; j++ {
 				regionID := uint64(j) + i*100
 				op := NewTestOperator(regionID, tc.GetRegion(regionID).GetRegionEpoch(), OpRegion, AddPeer{ToStore: storeID, PeerID: regionID})
-				re.True(oc.AddOperator(op))
+				if !as.True(oc.AddOperator(op)) {
+					return
+				}
 				tc.SetStoreLimit(storeID, storelimit.AddPeer, limit-float64(j)) // every goroutine set a different limit
 			}
 		}(uint64(i))
 	}
 	wg.Wait()
+}
+
+// TestMergeOperatorsSynchronousCancellation tests that when one merge operator is cancelled,
+// its related merge operator is also cancelled synchronously.
+// This applies to both OpMerge and OpAffinity merge operators.
+// It also verifies AddWaitingOperator and checkOperatorLightly work correctly for both types.
+func (suite *operatorControllerTestSuite) TestMergeOperatorsSynchronousCancellation() {
+	re := suite.Require()
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(suite.ctx, opts)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster, false)
+	controller := NewController(suite.ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), stream)
+
+	// Add stores
+	cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
+	cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
+
+	testCases := []struct {
+		name               string
+		desc               string
+		kind               OpKind
+		source             *core.RegionInfo
+		target             *core.RegionInfo
+		verifyOpMergeCount bool
+	}{
+		{
+			name:               "OpMerge operators",
+			desc:               "merge-region",
+			kind:               OpMerge,
+			source:             suite.newRegionInfo(101, "1a", "1b", 10, 10, []uint64{101, 1}, []uint64{101, 1}),
+			target:             suite.newRegionInfo(102, "1b", "1c", 10, 10, []uint64{101, 1}, []uint64{101, 1}),
+			verifyOpMergeCount: false, // OpMerge operators count towards OpMerge
+		},
+		{
+			name:               "OpAffinity merge operators",
+			desc:               "affinity-merge-region",
+			kind:               OpAffinity,
+			source:             suite.newRegionInfo(201, "2a", "2b", 10, 10, []uint64{101, 1}, []uint64{101, 1}),
+			target:             suite.newRegionInfo(202, "2b", "2c", 10, 10, []uint64{101, 1}, []uint64{101, 1}),
+			verifyOpMergeCount: true, // OpAffinity operators should NOT count towards OpMerge
+		},
+	}
+
+	for _, tc := range testCases {
+		suite.Run(tc.name, func() {
+			cluster.PutRegion(tc.source)
+			cluster.PutRegion(tc.target)
+
+			// Test 1: Verify checkOperatorLightly works for merge operators
+			ops1, err := CreateMergeRegionOperator(tc.desc, cluster, tc.source, tc.target, tc.kind)
+			re.NoError(err)
+			re.Len(ops1, 2)
+
+			// checkOperatorLightly should succeed initially
+			r, reason := controller.checkOperatorLightly(ops1[0])
+			re.Empty(reason)
+			re.Equal(tc.source, r)
+
+			// Change region epoch version, checkOperatorLightly should fail with EpochNotMatch
+			tc.source.GetMeta().RegionEpoch = &metapb.RegionEpoch{ConfVer: 0, Version: 1}
+			cluster.PutRegion(tc.source)
+			r, reason = controller.checkOperatorLightly(ops1[0])
+			re.Nil(r)
+			re.Equal(EpochNotMatch, reason)
+
+			// Reset epoch for next tests
+			tc.source.GetMeta().RegionEpoch = &metapb.RegionEpoch{ConfVer: 0, Version: 0}
+			cluster.PutRegion(tc.source)
+
+			// Test 2: Verify AddWaitingOperator recognizes merge operators as paired
+			ops2, err := CreateMergeRegionOperator(tc.desc, cluster, tc.source, tc.target, tc.kind)
+			re.NoError(err)
+			re.Len(ops2, 2)
+
+			// Both operators should have RelatedMergeRegion set
+			re.NotZero(ops2[0].GetRelatedMergeRegion())
+			re.NotZero(ops2[1].GetRelatedMergeRegion())
+
+			// AddWaitingOperator should recognize them as paired and count as 2
+			added := controller.AddWaitingOperator(ops2...)
+			re.Equal(2, added)
+
+			// Promote to running operators
+			controller.PromoteWaitingOperator()
+			controller.PromoteWaitingOperator()
+
+			// Verify both operators are added
+			op1 := controller.GetOperator(tc.source.GetID())
+			re.NotNil(op1)
+			op2 := controller.GetOperator(tc.target.GetID())
+			re.NotNil(op2)
+
+			// Test 3: Verify synchronous cancellation
+			// Verify RelatedMergeRegion is set
+			re.Equal(tc.target.GetID(), op1.GetRelatedMergeRegion())
+			re.Equal(tc.source.GetID(), op2.GetRelatedMergeRegion())
+
+			// Verify operator kind
+			re.Equal(tc.kind, op1.Kind())
+			re.Equal(tc.kind, op2.Kind())
+
+			// Remove one operator
+			removed := controller.RemoveOperator(op1)
+			re.True(removed)
+
+			// Verify both operators are removed (synchronous cancellation)
+			re.Nil(controller.GetOperator(tc.source.GetID()))
+			re.Nil(controller.GetOperator(tc.target.GetID()))
+
+			// Verify both operators are cancelled
+			re.Equal(CANCELED, op1.Status())
+			re.Equal(CANCELED, op2.Status())
+
+			// For OpAffinity, verify operator count is correct (should not count as OpMerge)
+			if tc.verifyOpMergeCount {
+				re.Equal(uint64(0), controller.OperatorCount(OpMerge))
+			}
+		})
+	}
 }

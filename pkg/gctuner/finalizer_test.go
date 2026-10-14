@@ -27,7 +27,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 type testState struct {
@@ -56,4 +56,56 @@ func TestFinalizer(t *testing.T) {
 	require.Equal(t, maxCount, atomic.LoadInt32(&state.count))
 	runtime.GC()
 	require.Equal(t, maxCount, atomic.LoadInt32(&state.count))
+}
+
+func TestFinalizerStopWaitsForCallback(t *testing.T) {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	finished := make(chan struct{})
+	f := newFinalizer(func() {
+		close(entered)
+		<-release
+		close(finished)
+	})
+	defer func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+		f.stop()
+	}()
+
+	runtime.GC()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("finalizer callback did not start")
+	}
+
+	stopping := make(chan struct{})
+	stopped := make(chan struct{})
+	go func() {
+		close(stopping)
+		f.stop()
+		close(stopped)
+	}()
+	<-stopping
+	select {
+	case <-stopped:
+		t.Error("stop returned before the callback finished")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(release)
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stop did not return after the callback finished")
+	}
+	select {
+	case <-finished:
+	default:
+		t.Fatal("callback is still running after stop returned")
+	}
 }
