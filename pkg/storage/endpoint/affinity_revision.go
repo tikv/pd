@@ -26,13 +26,26 @@ import (
 // AffinityTableRevisionKey identifies a table's durable target generation.
 // It lives outside the group prefix so watchers never parse it as a Group.
 func AffinityTableRevisionKey(groupID string) string {
+	tableID := affinityTableID(groupID)
+	return strings.TrimSuffix(keypath.AffinityGroupsPrefix(), "affinity_groups/") + "affinity_revisions/" + tableID
+}
+
+// AffinityTableMetadataRevisionKey identifies metadata changes for one
+// affinity table. Region-label updates for another table must not invalidate
+// this table's cached balance actions or an in-flight manual plan.
+func AffinityTableMetadataRevisionKey(groupID string) string {
+	tableID := affinityTableID(groupID)
+	return strings.TrimSuffix(keypath.AffinityGroupsPrefix(), "affinity_groups/") + "affinity_metadata_revisions/" + tableID
+}
+
+func affinityTableID(groupID string) string {
 	tableID := groupID
 	if strings.HasPrefix(tableID, "_tidb_pt_") {
 		if index := strings.LastIndex(tableID, "_p"); index >= len("_tidb_pt_") {
 			tableID = tableID[:index]
 		}
 	}
-	return strings.TrimSuffix(keypath.AffinityGroupsPrefix(), "affinity_groups/") + "affinity_revisions/" + tableID
+	return tableID
 }
 
 // AffinityMetadataRevisionKey covers placement rules and Region labels.
@@ -48,9 +61,16 @@ type balanceMutationTxn struct {
 func (txn *balanceMutationTxn) mark(key string) {
 	if id, ok := strings.CutPrefix(key, keypath.AffinityGroupsPrefix()); ok {
 		txn.changed[AffinityTableRevisionKey(id)] = struct{}{}
+	} else if strings.HasPrefix(key, keypath.RegionLabelPathPrefix()) {
+		ruleID := strings.TrimPrefix(key, keypath.RegionLabelPathPrefix())
+		if strings.HasPrefix(ruleID, "affinity_group/") {
+			groupID := strings.TrimPrefix(ruleID, "affinity_group/")
+			txn.changed[AffinityTableMetadataRevisionKey(groupID)] = struct{}{}
+		} else {
+			txn.changed[AffinityMetadataRevisionKey()] = struct{}{}
+		}
 	} else if strings.HasPrefix(key, keypath.RulesPathPrefix()) ||
-		strings.HasPrefix(key, keypath.RuleGroupPathPrefix()) ||
-		strings.HasPrefix(key, keypath.RegionLabelPathPrefix()) {
+		strings.HasPrefix(key, keypath.RuleGroupPathPrefix()) {
 		txn.changed[AffinityMetadataRevisionKey()] = struct{}{}
 	}
 }

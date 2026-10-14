@@ -317,7 +317,11 @@ func (m *Manager) balanceFingerprintLocked(state *balanceTableState) balanceFing
 		table:  state.version,
 		stores: m.balanceStoreRevision,
 		rules:  rules,
-		labels: m.regionLabeler.GetRevision(),
+		// RegionLabeler revision is cluster-wide. Group/range watcher updates
+		// already bump the table generation, while range equality is checked at
+		// capture time. Keeping it out of the fingerprint prevents an unrelated
+		// table's label update from restarting this table's build.
+		labels: 0,
 	}
 }
 
@@ -436,15 +440,8 @@ func (m *Manager) balanceSnapshot(groupID string) *balanceSnapshot {
 		clearBalanceDependencies(state)
 	}
 	liveUnavailable := m.collectUnavailableStoresFor(liveStores)
-	globalLeaders, globalVoters := make(map[uint64]int, len(liveStores)), make(map[uint64]int, len(liveStores))
-	for _, group := range m.groups {
-		if group.LeaderStoreID != 0 {
-			globalLeaders[group.LeaderStoreID]++
-		}
-		for _, storeID := range group.VoterStoreIDs {
-			globalVoters[storeID]++
-		}
-	}
+	globalLeaders := maps.Clone(m.balanceLeaderCounts)
+	globalVoters := maps.Clone(m.balanceVoterCounts)
 	progressBuilder := m.balanceProgressBuilder
 	mode := state.mode
 	if progressBuilder == nil && m.balanceBuilder != nil {
@@ -975,13 +972,11 @@ func (m *Manager) refreshBalanceSnapshotScores(snapshot *balanceSnapshot) bool {
 	}
 	clear(snapshot.globalLeaders)
 	clear(snapshot.globalVoters)
-	for _, group := range m.groups {
-		if group.LeaderStoreID != 0 {
-			snapshot.globalLeaders[group.LeaderStoreID]++
-		}
-		for _, storeID := range group.VoterStoreIDs {
-			snapshot.globalVoters[storeID]++
-		}
+	for storeID, count := range m.balanceLeaderCounts {
+		snapshot.globalLeaders[storeID] = count
+	}
+	for storeID, count := range m.balanceVoterCounts {
+		snapshot.globalVoters[storeID] = count
 	}
 	for id, actions := range snapshot.actions {
 		if current, ok := state.actions[id]; ok {
