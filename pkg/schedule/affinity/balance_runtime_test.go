@@ -160,40 +160,35 @@ func TestBalanceSnapshotTracksPlacementRuleRevision(t *testing.T) {
 	require.True(t, manager.BalanceSnapshotCurrent(fresh))
 }
 
-func TestObserveBalanceRegionIgnoresApproximateSize(t *testing.T) {
-	manager := newBalanceRuntimeManager(t)
-	ids := seedBalanceGroups(t, manager, []uint64{1})
-	manager.GetBalanceSnapshot(ids[0])
-	before, ok := manager.GetBalanceVersion(ids[0])
-	require.True(t, ok)
-	region := manager.regions[1].balanceInput()
-
-	manager.ObserveBalanceRegion(region.Clone(core.SetApproximateSize(100)))
-
-	after, ok := manager.GetBalanceVersion(ids[0])
-	require.True(t, ok)
-	require.Equal(t, before, after)
-}
-
-func TestObserveBalanceRegionInvalidatesTopologyChanges(t *testing.T) {
+func TestObserveBalanceRegionVersionTracksRelevantChanges(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		change func(*core.RegionInfo) *core.RegionInfo
+		name        string
+		change      func(*core.RegionInfo) *core.RegionInfo
+		invalidates bool
 	}{
 		{
-			name: "peers",
+			name: "approximate size",
+			change: func(region *core.RegionInfo) *core.RegionInfo {
+				return region.Clone(core.SetApproximateSize(100))
+			},
+		},
+		{
+			name:        "peers",
+			invalidates: true,
 			change: func(region *core.RegionInfo) *core.RegionInfo {
 				return region.Clone(core.SetPeers([]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 4}}))
 			},
 		},
 		{
-			name: "leader",
+			name:        "leader",
+			invalidates: true,
 			change: func(region *core.RegionInfo) *core.RegionInfo {
 				return region.Clone(core.WithLeader(&metapb.Peer{Id: 2, StoreId: 2}))
 			},
 		},
 		{
-			name: "ranges",
+			name:        "ranges",
+			invalidates: true,
 			change: func(region *core.RegionInfo) *core.RegionInfo {
 				return region.Clone(core.WithStartKey([]byte{9}))
 			},
@@ -211,7 +206,11 @@ func TestObserveBalanceRegionInvalidatesTopologyChanges(t *testing.T) {
 
 			after, ok := manager.GetBalanceVersion(ids[0])
 			require.True(t, ok)
-			require.Greater(t, after.Table, before.Table)
+			if tc.invalidates {
+				require.Greater(t, after.Table, before.Table)
+			} else {
+				require.Equal(t, before, after)
+			}
 		})
 	}
 }

@@ -97,21 +97,14 @@ func runAffinityBalanceTask(t *testing.T, ctx context.Context, checker *Affinity
 }
 
 func TestAffinityBalanceLeaderConvergence(t *testing.T) {
-	opt := newAffinityTestOptions()
-	tc := mockcluster.NewCluster(t.Context(), opt)
-	for id := uint64(1); id <= 3; id++ {
-		tc.AddRegionStore(id, 10)
-		tc.SetStoreUp(id)
-	}
+	tc, checker := newAffinityBalanceTestCluster(t, 3)
 	manager := tc.GetAffinityManager()
-	checker := newTestAffinityChecker(t.Context(), tc, opt)
+	starts := []string{"a", "b", "c"}
+	ends := []string{"b", "c", "d"}
 	for i := uint64(1); i <= 3; i++ {
-		start, end := []byte{byte(i)}, []byte{byte(i + 1)}
 		id := []string{"_tidb_pt_100_p1", "_tidb_pt_100_p2", "_tidb_pt_100_p3"}[i-1]
-		require.NoError(t, createAffinityGroupForTest(manager,
-			&affinity.Group{ID: id, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}}, start, end))
-		tc.AddLeaderRegion(i, 1, 2, 3)
-		tc.PutRegion(tc.GetRegion(i).Clone(core.WithStartKey(start), core.WithEndKey(end)))
+		createBalanceGroup(t, manager, id, starts[i-1], ends[i-1], 1, []uint64{1, 2, 3}, affinity.BalancePolicyAuto)
+		addBalanceRegion(t, tc, manager, i, starts[i-1], ends[i-1], 1, 1, 2, 3)
 	}
 	for i := uint64(1); i <= 3; i++ {
 		checker.Check(tc.GetRegion(i))
