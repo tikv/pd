@@ -42,6 +42,32 @@ type scanCountingAffinityCluster struct {
 	scanCalls int
 }
 
+func (c *AffinityChecker) buildBalanceActionsProgress(ctx context.Context, group *affinity.GroupState, ranges affinity.GroupKeyRanges,
+	storeIDs []uint64, mode affinity.BalanceActionMode, cursor any, budget int) affinity.BalanceActionBuildResult {
+	if group == nil {
+		return affinity.BalanceActionBuildResult{BlockTable: true}
+	}
+	return c.buildBalanceActionProgress(ctx, group, ranges, &group.Group, storeIDs, mode, cursor, budget)
+}
+
+func (c *AffinityChecker) buildVirtualBalanceActionsProgress(ctx context.Context, actual *affinity.GroupState, ranges affinity.GroupKeyRanges,
+	target *affinity.Group, storeIDs []uint64, mode affinity.BalanceActionMode, cursor any, budget int) affinity.BalanceActionBuildResult {
+	if actual == nil || target == nil {
+		return affinity.BalanceActionBuildResult{BlockTable: true}
+	}
+	return c.buildBalanceActionProgress(ctx, actual, ranges, target, storeIDs, mode, cursor, budget)
+}
+
+func (c *AffinityChecker) validateBalanceAction(ctx context.Context, group *affinity.GroupState, ranges affinity.GroupKeyRanges, plan affinity.BalancePlan) (ready, legal bool) {
+	if group == nil {
+		return false, false
+	}
+	target := group.Group
+	target.LeaderStoreID, target.VoterStoreIDs = plan.LeaderStoreID, plan.VoterStoreIDs
+	page := c.buildBalanceActionsForTarget(ctx, group, &target, ranges, nil, affinity.BalanceValidateTarget, nil, 0)
+	return page.Ready, page.Ready && page.Complete && !page.InvalidTarget
+}
+
 func (c *scanCountingAffinityCluster) ScanRegions(startKey, endKey []byte, limit int) []*core.RegionInfo {
 	c.scanCalls++
 	return c.CheckerCluster.ScanRegions(startKey, endKey, limit)
@@ -162,10 +188,12 @@ func TestAffinityBalanceProgressBuilderBoundsFits(t *testing.T) {
 		require.True(t, oneShot.Complete)
 		var cursor any
 		var result affinity.BalanceActionBuildResult
+		pageChecks := 0
 		for {
 			result = checker.buildBalanceActionsProgress(t.Context(), state, ranges, storeIDs, mode, cursor, budget)
 			require.True(t, result.Ready)
 			require.LessOrEqual(t, result.Checks, budget)
+			pageChecks += result.Checks
 			if result.Complete {
 				break
 			}
@@ -175,6 +203,7 @@ func TestAffinityBalanceProgressBuilderBoundsFits(t *testing.T) {
 			cursor = result.Cursor
 		}
 		require.Equal(t, oneShot.Actions, result.Actions, "paged work must produce the same actions as one-shot work")
+		require.Equal(t, oneShot.Checks, pageChecks, "paged store scans and placement checks must be fully charged")
 		if mode == affinity.BalanceBuildLeaders {
 			require.ElementsMatch(t, []uint64{1, 2, 3}, result.Actions.LeaderTargets,
 				"every feasible leader target must survive the first-region intersection")
@@ -464,8 +493,10 @@ func TestAffinityBalanceTemporaryBestLocationBlocksTable(t *testing.T) {
 	result := checker.buildBalanceActionsProgress(t.Context(), manager.GetAffinityGroupState(group.ID),
 		affinity.GroupKeyRanges{GroupID: group.ID, KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("b")}}},
 		checker.balanceStoreIDs(), affinity.BalanceBuildLeaders, nil, 8)
-	require.True(t, result.BlockTable)
-	require.False(t, result.Ready)
+	// Busy candidates are temporary omissions; another legal destination may
+	// still be considered by the planner.
+	require.False(t, result.BlockTable)
+	require.True(t, result.Ready)
 	require.Empty(t, result.Actions.LeaderTargets)
 }
 

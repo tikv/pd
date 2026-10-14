@@ -20,8 +20,13 @@ import (
 	"strings"
 
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 )
+
+// MaxAffinityTxnBatchOps reserves one revision write per data operation and
+// space for shared generations. It also applies to direct label-rule patches.
+const MaxAffinityTxnBatchOps = (etcdutil.MaxEtcdTxnOps - 2) / 2
 
 // AffinityTableRevisionKey identifies a table's durable target generation.
 // It lives outside the group prefix so watchers never parse it as a Group.
@@ -48,16 +53,16 @@ func affinityTableID(groupID string) string {
 	return tableID
 }
 
-// AffinityMetadataRevisionKey covers the complete placement and label
-// metadata snapshot. Balance submission uses table-scoped tokens for
-// affinity labels, while this token remains useful for full reconciliation.
-func AffinityMetadataRevisionKey() string {
-	return strings.TrimSuffix(keypath.AffinityGroupsPrefix(), "affinity_groups/") + "affinity_metadata_revision"
+// AffinityPlacementRevisionKey fences placement rules, rule groups, and
+// non-affinity region labels that can carry shared scheduling constraints.
+func AffinityPlacementRevisionKey() string {
+	return strings.TrimSuffix(keypath.AffinityGroupsPrefix(), "affinity_groups/") + "affinity_placement_revision"
 }
 
 type balanceMutationTxn struct {
 	kv.Txn
-	changed map[string]struct{}
+	changed  map[string]struct{}
+	explicit map[string]struct{}
 }
 
 func (txn *balanceMutationTxn) mark(key string) {
@@ -68,16 +73,12 @@ func (txn *balanceMutationTxn) mark(key string) {
 		if strings.HasPrefix(ruleID, "affinity_group/") {
 			groupID := strings.TrimPrefix(ruleID, "affinity_group/")
 			txn.changed[AffinityTableMetadataRevisionKey(groupID)] = struct{}{}
-			// Preserve the cluster-wide metadata generation for consumers that
-			// reconcile the complete label snapshot. Balance submission uses the
-			// table-scoped token above, so this does not abort unrelated tables.
-			txn.changed[AffinityMetadataRevisionKey()] = struct{}{}
 		} else {
-			txn.changed[AffinityMetadataRevisionKey()] = struct{}{}
+			txn.changed[AffinityPlacementRevisionKey()] = struct{}{}
 		}
 	} else if strings.HasPrefix(key, keypath.RulesPathPrefix()) ||
 		strings.HasPrefix(key, keypath.RuleGroupPathPrefix()) {
-		txn.changed[AffinityMetadataRevisionKey()] = struct{}{}
+		txn.changed[AffinityPlacementRevisionKey()] = struct{}{}
 	}
 }
 
@@ -93,6 +94,34 @@ func (txn *balanceMutationTxn) Remove(key string) error {
 	return txn.Txn.Remove(key)
 }
 
+func (txn *balanceMutationTxn) saveExplicitRevision(key, value string) error {
+	if err := txn.Txn.Save(key, value); err != nil {
+		return err
+	}
+	txn.explicit[key] = struct{}{}
+	return nil
+}
+
+// SaveAffinityTableRevision writes and returns the exact target token for a
+// table. Balance submissions use the returned value after committing their
+// target changes instead of rereading a token that a later write may replace.
+func SaveAffinityTableRevision(txn kv.Txn, groupID string) (string, error) {
+	var token [16]byte
+	if _, err := rand.Read(token[:]); err != nil {
+		return "", err
+	}
+	value := hex.EncodeToString(token[:])
+	key := AffinityTableRevisionKey(groupID)
+	if tracked, ok := txn.(*balanceMutationTxn); ok {
+		if err := tracked.saveExplicitRevision(key, value); err != nil {
+			return "", err
+		}
+	} else if err := txn.Save(key, value); err != nil {
+		return "", err
+	}
+	return value, nil
+}
+
 // LoadWithRevision preserves revision comparisons supported by the backend.
 func (txn *balanceMutationTxn) LoadWithRevision(key string) (string, error) {
 	if revision, ok := txn.Txn.(kv.RevisionTxn); ok {
@@ -103,12 +132,19 @@ func (txn *balanceMutationTxn) LoadWithRevision(key string) (string, error) {
 
 func trackBalanceMutations(f func(kv.Txn) error) func(kv.Txn) error {
 	return func(txn kv.Txn) error {
-		tracked := &balanceMutationTxn{Txn: txn, changed: make(map[string]struct{})}
+		tracked := &balanceMutationTxn{
+			Txn:      txn,
+			changed:  make(map[string]struct{}),
+			explicit: make(map[string]struct{}),
+		}
 		if err := f(tracked); err != nil {
 			return err
 		}
 		// One put per token even when a batch modifies many groups/rules.
 		for key := range tracked.changed {
+			if _, explicit := tracked.explicit[key]; explicit {
+				continue
+			}
 			var token [16]byte
 			if _, err := rand.Read(token[:]); err != nil {
 				return err

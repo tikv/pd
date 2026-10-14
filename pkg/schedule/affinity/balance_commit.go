@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"maps"
 	"slices"
+	"strings"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
@@ -64,82 +65,88 @@ func canonicalJSON(value string) string {
 	return string(data)
 }
 
-// balanceMetadataVersion records a successful comparison with authoritative
-// metadata. Local generations prevent reusing it while a watcher is behind.
+// balanceMetadataVersion caches one authoritative comparison of shared
+// constraints. Affinity ranges are reconciled separately for every table.
 type balanceMetadataVersion struct {
 	token  string
 	rules  uint64
-	labels uint64
 	source uint64
 }
 
-func (m *Manager) balanceMetadataCurrent(version balanceMetadataVersion, ruleRevision func() uint64) bool {
-	return m.regionLabeler.GetRevision() == version.labels &&
-		(ruleRevision == nil || ruleRevision() == version.rules)
+func canonicalLabelJSON(rule *labeler.LabelRule) string {
+	copy := *rule
+	ranges := slices.Clone(rule.GetKeyRanges())
+	slices.SortFunc(ranges, func(a, b *labeler.KeyRangeRule) int {
+		if cmp := bytes.Compare(a.StartKey, b.StartKey); cmp != 0 {
+			return cmp
+		}
+		return bytes.Compare(a.EndKey, b.EndKey)
+	})
+	copy.Data = ranges
+	data, _ := json.Marshal(&copy)
+	return canonicalJSON(string(data))
 }
 
-// balanceSnapshotRangesCurrent fences the independent affinity and labeler
-// watchers. A globally verified label revision does not prove that this table's
-// cached ranges have caught up with the label rules at that revision.
-func (m *Manager) balanceSnapshotRangesCurrent(snapshot *balanceSnapshot) bool {
-	matched := true
+func (m *Manager) balanceSnapshotLabels(snapshot *balanceSnapshot) (map[string]string, bool) {
+	expected := make(map[string]string, len(snapshot.groups))
 	m.regionLabeler.RLock()
+	defer m.regionLabeler.RUnlock()
 	for _, group := range snapshot.groups {
-		actual, err := extractKeyRangesFromLabelRule(m.regionLabeler.GetLabelRuleLocked(GetLabelRuleID(group.ID)))
-		expected := snapshot.ranges[group.ID]
-		if err != nil || len(expected.KeyRanges) != len(actual.KeyRanges) {
-			matched = false
-			break
+		rule := m.regionLabeler.GetLabelRuleLocked(GetLabelRuleID(group.ID))
+		actual, err := extractKeyRangesFromLabelRule(rule)
+		ranges := cloneBalanceRanges(snapshot.ranges[group.ID])
+		sortRanges := func(ranges GroupKeyRanges) {
+			slices.SortFunc(ranges.KeyRanges, func(a, b keyutil.KeyRange) int {
+				if cmp := bytes.Compare(a.StartKey, b.StartKey); cmp != 0 {
+					return cmp
+				}
+				return bytes.Compare(a.EndKey, b.EndKey)
+			})
 		}
-		if len(expected.KeyRanges) == 0 {
-			continue // Missing rules and empty rules both describe no ranges.
+		sortRanges(ranges)
+		sortRanges(actual)
+		if err != nil || !balanceRangesEqual(ranges, actual) {
+			return nil, false
 		}
-		// Range order has no scheduling meaning. Sort private slices to avoid
-		// mutating Manager or RegionLabeler data while comparing coverage.
-		expected.KeyRanges = slices.Clone(expected.KeyRanges)
-		compare := func(a, b keyutil.KeyRange) int {
-			if cmp := bytes.Compare(a.StartKey, b.StartKey); cmp != 0 {
-				return cmp
-			}
-			return bytes.Compare(a.EndKey, b.EndKey)
-		}
-		slices.SortFunc(expected.KeyRanges, compare)
-		slices.SortFunc(actual.KeyRanges, compare)
-		if !balanceRangesEqual(expected, actual) {
-			matched = false
-			break
+		if rule != nil {
+			expected[keypath.RegionLabelKeyPath(rule.ID)] = canonicalLabelJSON(rule)
 		}
 	}
-	m.regionLabeler.RUnlock()
-	return matched
+	return expected, true
+}
+
+func balanceTableKeyRange(snapshot *balanceSnapshot, prefix string) (string, string) {
+	for _, group := range snapshot.groups {
+		if group.ID != snapshot.tableID {
+			prefix += "_p"
+			return prefix, clientv3.GetPrefixRangeEnd(prefix)
+		}
+	}
+	return prefix, prefix + "\x00"
 }
 
 func (m *Manager) captureBalanceDependencies(ctx context.Context, snapshot *balanceSnapshot) error {
-	if snapshot.dependencies != nil {
-		// Recheck only this table's ranges. The labeler revision is global, so
-		// comparing it here would make an unrelated table's label update abort
-		// this table's in-flight plan.
-		if !m.balanceSnapshotRangesCurrent(snapshot) {
-			return balanceConflict()
-		}
-		return nil
-	}
-	// Every table must verify its own ranges before consulting the shared
-	// global metadata fast path.
-	if !m.balanceSnapshotRangesCurrent(snapshot) {
+	// Sample before range reconciliation and verify after the authoritative
+	// reads. Independent watchers cannot pair old ranges with a newer token.
+	labels := m.regionLabeler.GetRevision()
+	expectedLabels, matched := m.balanceSnapshotLabels(snapshot)
+	if !matched {
 		return balanceConflict()
 	}
 	m.RLock()
-	term, metadata, ruleRevision := m.balanceTerm, m.balanceMetadata, m.balanceRuleRevision
-	version := balanceMetadataVersion{source: m.balanceMetadataSource}
+	term, metadata := m.balanceTerm, m.balanceMetadata
+	version := balanceMetadataVersion{rules: snapshot.ruleRevision, source: m.balanceMetadataSource}
 	verified := m.balanceMetadataVerified
+	rulesCurrent := m.currentBalanceRuleRevisionLocked() == snapshot.ruleRevision
 	m.RUnlock()
-	// Label revisions are global and must not be part of a table fingerprint.
-	// Capture the current revision only for the short authoritative metadata
-	// comparison below; table range equality fences the independent watchers.
-	version.labels = m.regionLabeler.GetRevision()
-	if ruleRevision != nil {
-		version.rules = ruleRevision()
+	if !rulesCurrent {
+		return balanceConflict()
+	}
+	if snapshot.dependencies != nil {
+		if labels != m.regionLabeler.GetRevision() {
+			return balanceConflict()
+		}
+		return nil
 	}
 	if term != nil {
 		var ok bool
@@ -152,74 +159,84 @@ func (m *Manager) captureBalanceDependencies(ctx context.Context, snapshot *bala
 	if !ok {
 		return balanceConflict()
 	}
-	expected := make(map[string]string)
+	dependencies := make(map[string]string, 3)
+	expectedGroups := make(map[string]string, len(snapshot.groups))
 	for _, group := range snapshot.groups {
 		data, _ := json.Marshal(group.Group)
-		expected[keypath.AffinityGroupPath(group.ID)] = canonicalJSON(string(data))
+		expectedGroups[keypath.AffinityGroupPath(group.ID)] = canonicalJSON(string(data))
 	}
-	metadataKey := endpoint.AffinityTableMetadataRevisionKey(snapshot.tableID)
-	snapshot.dependencies = make(map[string]string, 2)
-	var globalMetadataToken string
-	if err := m.runBalanceTxn(ctx, snapshot.conditions, func(txn kv.Txn) error {
-		for _, key := range []string{endpoint.AffinityTableRevisionKey(snapshot.tableID), metadataKey} {
+	loadMap := func(prefix, end string, normalize func(string) (string, error)) (map[string]string, error) {
+		keys, values, err := reader.LoadRange(prefix, end, 0)
+		if err != nil {
+			return nil, err
+		}
+		actual := make(map[string]string, len(keys))
+		for i, key := range keys {
+			value, err := normalize(values[i])
+			if err != nil {
+				return nil, err
+			}
+			actual[key] = value
+		}
+		return actual, nil
+	}
+	err := m.runBalanceTxn(ctx, snapshot.conditions, func(txn kv.Txn) error {
+		for _, key := range []string{
+			endpoint.AffinityTableRevisionKey(snapshot.tableID),
+			endpoint.AffinityTableMetadataRevisionKey(snapshot.tableID),
+			endpoint.AffinityPlacementRevisionKey(),
+		} {
 			value, err := txn.Load(key)
 			if err != nil {
 				return err
 			}
-			snapshot.dependencies[key] = value
+			dependencies[key] = value
 		}
-		// Keep the cluster-wide token only for the shared metadata verification
-		// cache. It is deliberately not a submission dependency: unrelated
-		// affinity tables must not abort this table's plan.
-		var err error
-		globalMetadataToken, err = txn.Load(endpoint.AffinityMetadataRevisionKey())
-		if err != nil {
-			return err
-		}
-		version.token = globalMetadataToken
-		// Compare the authoritative inputs with the in-memory watcher snapshot.
-		// The generation reads fence additions and deletions as well as updates;
-		// data reads deliberately add no per-key transaction comparisons.
-		prefix := keypath.AffinityGroupPath(snapshot.tableID)
-		end := prefix + "\x00"
-		if slices.ContainsFunc(snapshot.groups, func(g *GroupState) bool { return g.ID != snapshot.tableID }) {
-			prefix += "_p"
-			end = clientv3.GetPrefixRangeEnd(prefix)
-		}
-		keys, values, err := reader.LoadRange(prefix, end, 0)
-		if err != nil {
-			return err
-		}
-		actual := make(map[string]string, len(keys))
-		for i, key := range keys {
+		version.token = dependencies[endpoint.AffinityPlacementRevisionKey()]
+		prefix, end := balanceTableKeyRange(snapshot, keypath.AffinityGroupPath(snapshot.tableID))
+		actual, err := loadMap(prefix, end, func(value string) (string, error) {
 			var group Group
-			if err := json.Unmarshal([]byte(values[i]), &group); err != nil {
-				return err
+			if err := json.Unmarshal([]byte(value), &group); err != nil {
+				return "", err
 			}
 			group.VoterStoreIDs = normalizeVoters(group.VoterStoreIDs)
 			data, _ := json.Marshal(group)
-			actual[key] = canonicalJSON(string(data))
+			return canonicalJSON(string(data)), nil
+		})
+		if err != nil {
+			return err
 		}
-		if !maps.Equal(expected, actual) {
+		if !maps.Equal(expectedGroups, actual) {
 			return balanceConflict()
 		}
-		// A version already verified by another table needs only the token
-		// comparisons above, not another cluster-wide read and serialization.
-		if verified != nil && *verified == version && (metadata == nil || ruleRevision != nil) {
-			if !m.balanceMetadataCurrent(version, ruleRevision) {
-				return balanceConflict()
+		prefix, end = balanceTableKeyRange(snapshot, keypath.RegionLabelKeyPath(GetLabelRuleID(snapshot.tableID)))
+		actual, err = loadMap(prefix, end, func(value string) (string, error) {
+			rule, err := labeler.NewLabelRuleFromJSON([]byte(value))
+			if err != nil {
+				return "", err
 			}
+			return canonicalLabelJSON(rule), nil
+		})
+		if err != nil {
+			return err
+		}
+		if !maps.Equal(expectedLabels, actual) {
+			return balanceConflict()
+		}
+		if verified != nil && *verified == version {
 			return nil
 		}
-		expectedMetadata := make(map[string]string)
+		expected := make(map[string]string)
 		if metadata != nil {
 			for key, value := range metadata() {
-				expectedMetadata[key] = canonicalJSON(value)
+				expected[key] = canonicalJSON(value)
 			}
 		}
 		m.regionLabeler.IterateLabelRules(func(rule *labeler.LabelRule) bool {
-			data, _ := json.Marshal(rule)
-			expectedMetadata[keypath.RegionLabelKeyPath(rule.ID)] = canonicalJSON(string(data))
+			if !strings.HasPrefix(rule.ID, LabelRuleIDPrefix) {
+				data, _ := json.Marshal(rule)
+				expected[keypath.RegionLabelKeyPath(rule.ID)] = canonicalJSON(string(data))
+			}
 			return true
 		})
 		actual = make(map[string]string)
@@ -228,38 +245,33 @@ func (m *Manager) captureBalanceDependencies(ctx context.Context, snapshot *bala
 			prefixes = append(prefixes, keypath.RulesPathPrefix(), keypath.RuleGroupPathPrefix())
 		}
 		for _, prefix := range prefixes {
-			keys, values, err = reader.LoadRange(prefix, clientv3.GetPrefixRangeEnd(prefix), 0)
+			keys, values, err := reader.LoadRange(prefix, clientv3.GetPrefixRangeEnd(prefix), 0)
 			if err != nil {
 				return err
 			}
 			for i, key := range keys {
+				if strings.HasPrefix(key, keypath.RegionLabelKeyPath(LabelRuleIDPrefix)) {
+					continue
+				}
 				actual[key] = canonicalJSON(values[i])
 			}
 		}
-		if !maps.Equal(expectedMetadata, actual) || !m.balanceMetadataCurrent(version, ruleRevision) {
+		if !maps.Equal(expected, actual) {
 			return balanceConflict()
 		}
 		return nil
-	}); err != nil {
-		snapshot.dependencies = nil
+	})
+	if err != nil {
 		return err
-	}
-	if !m.balanceMetadataCurrent(version, ruleRevision) {
-		snapshot.dependencies = nil
-		return balanceConflict()
 	}
 	m.Lock()
 	defer m.Unlock()
-	if m.balanceMetadataSource != version.source {
-		snapshot.dependencies = nil
+	if labels != m.regionLabeler.GetRevision() || m.balanceMetadataSource != version.source ||
+		m.currentBalanceRuleRevisionLocked() != snapshot.ruleRevision {
 		return balanceConflict()
 	}
 	m.balanceMetadataVerified = &version
-	if state := m.balanceTables[snapshot.tableID]; state != nil && m.balanceFingerprintLocked(state) == snapshot.fingerprint {
-		state.dependencies = maps.Clone(snapshot.dependencies)
-		state.dependencyConditions = slices.Clone(snapshot.conditions)
-		state.dependencyFingerprint = snapshot.fingerprint
-	}
+	snapshot.dependencies = dependencies
 	return nil
 }
 
@@ -278,39 +290,42 @@ func (m *Manager) balanceSnapshotCurrent(snapshot *balanceSnapshot) bool {
 	m.RLock()
 	defer m.RUnlock()
 	table := m.balanceTables[snapshot.tableID]
-	return table != nil && m.balanceFingerprintLocked(table) == snapshot.fingerprint
+	return table != nil && m.balanceFingerprintLocked(table) == snapshot.fingerprint &&
+		m.currentBalanceRuleRevisionLocked() == snapshot.ruleRevision
 }
 
-// commitBalancePlans protects table scoring and placement dependencies, not only
-// the selected group. No Manager or RuleManager lock is held during network IO.
-func (m *Manager) commitBalancePlans(ctx context.Context, snapshot *balanceSnapshot, plans []BalancePlan) (bool, error) {
-	defer m.releaseBalanceDependencies(snapshot)
-	if snapshot.admission != nil && !snapshot.admission() {
-		return false, nil
+func checkBalanceDependencies(txn kv.Txn, snapshot *balanceSnapshot) error {
+	if len(snapshot.dependencies) != 3 {
+		return balanceConflict()
 	}
+	for key, expected := range snapshot.dependencies {
+		value, err := txn.Load(key)
+		if err != nil {
+			return err
+		}
+		if value != expected {
+			return balanceConflict()
+		}
+	}
+	return nil
+}
+
+// commitBalancePlans shares the same bounded target transaction for automatic
+// and manual callers. Durable generations fence all table targets, ranges,
+// shared constraints and the original authority term, without holding Manager
+// or RuleManager locks during network IO.
+func (m *Manager) commitBalancePlans(ctx context.Context, snapshot *balanceSnapshot, plans []BalancePlan) (bool, error) {
 	changed := slices.DeleteFunc(slices.Clone(plans), func(plan BalancePlan) bool { return !plan.Changed })
-	// Both automatic and manual callers submit one group and wait before the
-	// next target. Reject batches rather than introducing a second apply path.
-	if len(changed) != 1 {
+	if len(changed) == 0 || len(changed) > endpoint.MaxAffinityTxnBatchOps {
 		return false, balanceConflict()
 	}
-	if !m.balanceSnapshotCurrent(snapshot) {
-		return false, nil
-	}
-	originals := make(map[string]*GroupState, len(snapshot.groups))
-	for _, group := range snapshot.groups {
-		originals[group.ID] = group
-	}
-	updates := make([]Group, 0)
-	for _, plan := range plans {
-		if !plan.Changed {
-			continue
+	updates := make([]Group, 0, len(changed))
+	for _, plan := range changed {
+		index := slices.IndexFunc(snapshot.groups, func(group *GroupState) bool { return group.ID == plan.GroupID })
+		if index < 0 || snapshot.groups[index].BalancePolicy == BalancePolicyFixed {
+			return false, balanceConflict()
 		}
-		old := originals[plan.GroupID]
-		if old == nil || old.BalancePolicy == BalancePolicyFixed {
-			return false, nil
-		}
-		group := old.Group
+		group := snapshot.groups[index].Group
 		group.LeaderStoreID, group.VoterStoreIDs = plan.LeaderStoreID, normalizeVoters(plan.VoterStoreIDs)
 		if err := m.AdjustGroup(&group); err != nil {
 			return false, err
@@ -320,23 +335,17 @@ func (m *Manager) commitBalancePlans(ctx context.Context, snapshot *balanceSnaps
 		}
 		updates = append(updates, group)
 	}
-	if len(updates) == 0 {
-		return false, nil
-	}
-	// Serialize local metadata writers, but keep the checker-facing mutex free.
 	m.metaMutex.Lock()
 	defer m.metaMutex.Unlock()
+	var targetToken string
 	err := m.runBalanceTxn(ctx, snapshot.conditions, func(txn kv.Txn) error {
-		for key, expected := range snapshot.dependencies {
-			value, err := txn.Load(key)
-			if err != nil {
-				return err
-			}
-			if value != expected {
-				return balanceConflict()
-			}
+		if err := checkBalanceDependencies(txn, snapshot); err != nil {
+			return err
 		}
-		if !m.balanceSnapshotCurrent(snapshot) || (snapshot.admission != nil && !snapshot.admission()) {
+		m.RLock()
+		current := m.currentBalanceRuleRevisionLocked() == snapshot.ruleRevision
+		m.RUnlock()
+		if !current || snapshot.admission != nil && !snapshot.admission() {
 			return balanceConflict()
 		}
 		for i := range updates {
@@ -344,7 +353,9 @@ func (m *Manager) commitBalancePlans(ctx context.Context, snapshot *balanceSnaps
 				return err
 			}
 		}
-		return nil
+		var err error
+		targetToken, err = endpoint.SaveAffinityTableRevision(txn, snapshot.tableID)
+		return err
 	})
 	if errs.ErrEtcdTxnConflict.Equal(err) {
 		return false, nil
@@ -352,15 +363,20 @@ func (m *Manager) commitBalancePlans(ctx context.Context, snapshot *balanceSnaps
 	if err != nil {
 		return false, err
 	}
+	// Remember exactly our own token. A later read could silently adopt an
+	// intervening management change and let a subsequent manual batch proceed.
+	snapshot.dependencies[endpoint.AffinityTableRevisionKey(snapshot.tableID)] = targetToken
 	for _, group := range updates {
-		if _, err := m.updateGroupTarget(group); err != nil {
+		state, err := m.updateGroupTarget(group)
+		if err != nil {
 			return false, err
 		}
+		index := slices.IndexFunc(snapshot.groups, func(g *GroupState) bool { return g.ID == group.ID })
+		snapshot.groups[index] = state
 	}
 	m.Lock()
 	if table := m.balanceTables[snapshot.tableID]; table != nil {
 		table.phase = balanceConverging
-		table.converging = &balanceConvergence{target: updates[0], ranges: cloneBalanceRanges(snapshot.ranges[updates[0].ID])}
 	}
 	m.Unlock()
 	snapshot.applied = true

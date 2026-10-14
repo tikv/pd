@@ -29,6 +29,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 func newTestManager(t *testing.T, enableWitness bool) (endpoint.RuleStorage, *RuleManager) {
@@ -54,6 +55,27 @@ func TestDefault(t *testing.T) {
 	re.Empty(rules[0].EndKey)
 	re.Equal(Voter, rules[0].Role)
 	re.Equal([]string{"zone", "rack", "host"}, rules[0].LocationLabels)
+}
+
+func TestRuleConfigIncludesAllIntersectingIntervals(t *testing.T) {
+	_, manager := newTestManager(t, false)
+	require.NoError(t, manager.SetRuleGroup(&RuleGroup{ID: "scoped", Index: 1, Override: true}))
+	require.NoError(t, manager.SetRules([]*Rule{
+		{GroupID: "scoped", ID: "left", StartKeyHex: "61", EndKeyHex: "6d", Role: Voter, Count: 3},
+		{GroupID: "scoped", ID: "right", StartKeyHex: "6d", EndKeyHex: "7a", Role: Voter, Count: 3},
+	}))
+	require.Empty(t, manager.GetRulesForApplyRange([]byte("a"), []byte("z")), "a Region cannot cross the rule boundary")
+	rules, groups := manager.GetRuleConfigForRanges([]keyutil.KeyRange{
+		{StartKey: []byte("a"), EndKey: []byte("z")},
+		{StartKey: []byte("b"), EndKey: []byte("m")},
+	})
+	ids := make([]string, 0, len(rules))
+	for _, rule := range rules {
+		ids = append(ids, rule.ID)
+	}
+	require.ElementsMatch(t, []string{"left", "right"}, ids)
+	require.Len(t, groups, 1)
+	require.Equal(t, "scoped", groups[0].ID)
 }
 
 func TestDefault2(t *testing.T) {

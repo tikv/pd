@@ -62,12 +62,14 @@ type balanceRegionScanResult struct {
 
 type balanceActionProgress struct {
 	mode                       affinity.BalanceActionMode
+	ruleRevision               uint64
 	actualGroupID              string
 	actualLeader               uint64
 	actualVoters               []uint64
 	targetLeader               uint64
 	targetVoters               []uint64
 	storeIDs                   []uint64
+	storeSnapshot              []*core.StoreInfo
 	regionScan                 balanceRegionScanCursor
 	currentRegion              balanceRegionRef
 	hasCurrentRegion           bool
@@ -87,12 +89,32 @@ type balanceActionProgress struct {
 	voterToChecked             bool
 	baselineRegion             *core.RegionInfo
 	baselineFit                *placement.RegionFit
+	baselineBestLocation       *balanceBestLocationCheck
+	baselineBestLocationReady  bool
 	actualPlacementChecked     bool
+	actualPlacementFit         *placement.RegionFit
+	actualBestLocation         *balanceBestLocationCheck
+	pendingBestLocation        *balanceBestLocationCheck
+	pendingPlacementRegion     *core.RegionInfo
+	pendingPlacementFit        *placement.RegionFit
+	pendingPlacementLeader     uint64
+	pendingPlacementVoter      balanceVoterCandidate
+	bestLocationCache          map[string]bestLocationStatus
 	pageRegionBytes            map[uint64]uint64
 	moveBytes                  uint64
 	temporarilyBlocked         bool
 	actions                    affinity.BalanceActionSet
 }
+
+type balanceBestLocationCheck struct {
+	region         *core.RegionInfo
+	fit            *placement.RegionFit
+	ruleIndex      int
+	storeSelection *storeSelectionProgress
+	cacheable      bool
+}
+
+const maxBalanceBestLocationCacheEntries = 1024
 
 func (c *AffinityChecker) balanceRuleMetadata() map[string]string {
 	rules, groups := c.ruleManager.GetRuleConfigForReconcile()
@@ -115,17 +137,18 @@ func (c *AffinityChecker) balanceRuleMetadata() map[string]string {
 func (c *AffinityChecker) balanceRuleFingerprint(ranges []affinity.GroupKeyRanges) uint64 {
 	rules := make(map[string][]byte)
 	groups := make(map[string][]byte)
+	var keyRanges []keyutil.KeyRange
 	for _, groupRanges := range ranges {
-		for _, keyRange := range groupRanges.KeyRanges {
-			for _, rule := range c.ruleManager.GetRulesForApplyRange(keyRange.StartKey, keyRange.EndKey) {
-				data, _ := json.Marshal(rule)
-				rules[rule.StoreKey()] = data
-				if group := c.ruleManager.GetRuleGroup(rule.GroupID); group != nil {
-					groupData, _ := json.Marshal(group)
-					groups[rule.GroupID] = groupData
-				}
-			}
-		}
+		keyRanges = append(keyRanges, groupRanges.KeyRanges...)
+	}
+	applicableRules, applicableGroups := c.ruleManager.GetRuleConfigForRanges(keyRanges)
+	for _, rule := range applicableRules {
+		data, _ := json.Marshal(rule)
+		rules[rule.StoreKey()] = data
+	}
+	for _, group := range applicableGroups {
+		data, _ := json.Marshal(group)
+		groups[group.ID] = data
 	}
 	h := fnv.New64a()
 	keys := make([]string, 0, len(groups)+len(rules))
@@ -240,16 +263,6 @@ func (c *AffinityChecker) balanceRegionReady(group *affinity.GroupState, region 
 	return true
 }
 
-func (c *AffinityChecker) validateBalanceAction(ctx context.Context, group *affinity.GroupState, ranges affinity.GroupKeyRanges, plan affinity.BalancePlan) (ready, legal bool) {
-	if group == nil {
-		return false, false
-	}
-	target := group.Group
-	target.LeaderStoreID, target.VoterStoreIDs = plan.LeaderStoreID, plan.VoterStoreIDs
-	page := c.buildBalanceActionsForTarget(ctx, group, &target, ranges, nil, affinity.BalanceValidateTarget, nil, 0)
-	return page.Ready, page.Ready && page.Complete && !page.InvalidTarget
-}
-
 func (c *AffinityChecker) balanceTargetExecutionStatus(group *affinity.Group, plan affinity.BalancePlan) balanceStoreStatus {
 	if plan.LeaderStoreID != group.LeaderStoreID {
 		for _, status := range []balanceStoreStatus{c.leaderSourceStatus(group.LeaderStoreID), c.leaderTargetStatus(plan.LeaderStoreID)} {
@@ -283,22 +296,16 @@ func (c *AffinityChecker) balanceTargetExecutionStatus(group *affinity.Group, pl
 	return balanceStoreAllowed
 }
 
-func (c *AffinityChecker) buildBalanceActionsProgress(ctx context.Context, group *affinity.GroupState, ranges affinity.GroupKeyRanges,
-	storeIDs []uint64, mode affinity.BalanceActionMode, cursor any, budget int) affinity.BalanceActionBuildResult {
-	if group == nil {
+func (c *AffinityChecker) buildBalanceActionProgress(ctx context.Context, actual *affinity.GroupState, ranges affinity.GroupKeyRanges,
+	target *affinity.Group, storeIDs []uint64, mode affinity.BalanceActionMode, cursor any, budget int) affinity.BalanceActionBuildResult {
+	if actual == nil {
 		return affinity.BalanceActionBuildResult{BlockTable: true}
 	}
-	return c.buildBalanceActionsForTarget(ctx, group, &group.Group, ranges, storeIDs, mode, cursor, budget)
-}
-
-func (c *AffinityChecker) buildVirtualBalanceActionsProgress(ctx context.Context, actual *affinity.GroupState, ranges affinity.GroupKeyRanges,
-	target *affinity.Group, storeIDs []uint64, mode affinity.BalanceActionMode, cursor any, budget int) affinity.BalanceActionBuildResult {
-	if actual == nil || target == nil {
-		return affinity.BalanceActionBuildResult{BlockTable: true}
+	if target == nil {
+		target = &actual.Group
 	}
 	return c.buildBalanceActionsForTarget(ctx, actual, target, ranges, storeIDs, mode, cursor, budget)
 }
-
 func (c *AffinityChecker) buildBalanceActionsForTarget(ctx context.Context, actual *affinity.GroupState, target *affinity.Group,
 	ranges affinity.GroupKeyRanges, storeIDs []uint64, mode affinity.BalanceActionMode, cursor any, budget int) affinity.BalanceActionBuildResult {
 	if ctx.Err() != nil || !c.balanceSchedulingAllowed() {
@@ -327,18 +334,23 @@ func (c *AffinityChecker) buildBalanceActionsForTarget(ctx context.Context, actu
 		return affinity.BalanceActionBuildResult{}
 	}
 
+	revision := c.ruleManager.GetRevision()
 	progress, ok := cursor.(*balanceActionProgress)
-	if !ok || !progress.matches(actual, target, ranges, storeIDs, mode) {
+	if !ok || !progress.matches(actual, target, ranges, storeIDs, mode, revision) {
+		storeSnapshot := c.cluster.GetStores()
 		progress = &balanceActionProgress{
-			mode:          mode,
-			actualGroupID: actual.ID,
-			actualLeader:  actual.LeaderStoreID,
-			actualVoters:  slices.Clone(actual.VoterStoreIDs),
-			targetLeader:  target.LeaderStoreID,
-			targetVoters:  slices.Clone(target.VoterStoreIDs),
-			storeIDs:      slices.Clone(storeIDs),
-			regionScan:    newBalanceRegionScanCursor(ranges),
-			actions:       affinity.BalanceActionSet{VoterReplacements: make(map[uint64]map[uint64][]uint64)},
+			mode:              mode,
+			ruleRevision:      revision,
+			actualGroupID:     actual.ID,
+			actualLeader:      actual.LeaderStoreID,
+			actualVoters:      slices.Clone(actual.VoterStoreIDs),
+			targetLeader:      target.LeaderStoreID,
+			targetVoters:      slices.Clone(target.VoterStoreIDs),
+			storeIDs:          slices.Clone(storeIDs),
+			storeSnapshot:     slices.Clone(storeSnapshot),
+			regionScan:        newBalanceRegionScanCursor(ranges),
+			actions:           affinity.BalanceActionSet{VoterReplacements: make(map[uint64]map[uint64][]uint64)},
+			bestLocationCache: make(map[string]bestLocationStatus),
 		}
 	}
 
@@ -388,15 +400,33 @@ func (c *AffinityChecker) buildBalanceActionsForTarget(ctx context.Context, actu
 			continue
 		}
 		if mode == affinity.BalanceValidateTarget && !progress.actualPlacementChecked {
+			if progress.actualPlacementFit == nil {
+				if budget > 0 && checks >= budget {
+					return pendingBalanceBuild(progress, checks)
+				}
+				checks++
+				c.affinityManager.ObserveBalanceRegion(region)
+				progress.actualPlacementFit = c.ruleManager.FitRegion(c.cluster, region)
+			}
 			if budget > 0 && checks >= budget {
 				return pendingBalanceBuild(progress, checks)
 			}
-			checks++
-			c.affinityManager.ObserveBalanceRegion(region)
-			if c.regionPlacementBestLocation(region, c.ruleManager.FitRegion(c.cluster, region)) != bestLocationSatisfied {
+			status, done, used, next := c.regionPlacementBestLocationProgress(ctx, region, progress.actualPlacementFit,
+				progress.storeSnapshot, progress.actualBestLocation, progress.bestLocationCache, remainingBalanceBudget(budget, checks))
+			checks += used
+			progress.actualBestLocation = next
+			if !done {
+				if ctx.Err() != nil {
+					return blockedBalanceBuild(checks)
+				}
+				return pendingBalanceBuild(progress, checks)
+			}
+			if status != bestLocationSatisfied {
 				return blockedBalanceBuild(checks)
 			}
 			progress.actualPlacementChecked = true
+			progress.actualPlacementFit = nil
+			progress.actualBestLocation = nil
 		}
 		if progress.baselineFit == nil {
 			if budget > 0 && checks >= budget {
@@ -419,26 +449,85 @@ func (c *AffinityChecker) buildBalanceActionsForTarget(ctx context.Context, actu
 			} else {
 				progress.baselineFit = c.ruleManager.FitRegionWithoutCache(c.cluster, baseline)
 			}
+			progress.baselineRegion = baseline
+			if progress.baselineFit == nil || !progress.baselineFit.IsSatisfied() {
+				if mode == affinity.BalanceValidateTarget {
+					return affinity.BalanceActionBuildResult{Ready: true, Complete: true, InvalidTarget: true, Checks: checks}
+				}
+				return blockedBalanceBuild(checks)
+			}
+		}
+		if !progress.baselineBestLocationReady {
+			if budget > 0 && checks >= budget {
+				return pendingBalanceBuild(progress, checks)
+			}
+			status, done, used, next := c.regionPlacementBestLocationProgress(ctx, progress.baselineRegion, progress.baselineFit,
+				progress.storeSnapshot, progress.baselineBestLocation, progress.bestLocationCache, remainingBalanceBudget(budget, checks))
+			checks += used
+			progress.baselineBestLocation = next
+			if !done {
+				if ctx.Err() != nil {
+					return blockedBalanceBuild(checks)
+				}
+				return pendingBalanceBuild(progress, checks)
+			}
 			if mode == affinity.BalanceValidateTarget {
-				status := c.regionPlacementBestLocation(baseline, progress.baselineFit)
 				if status == bestLocationRejected {
 					return affinity.BalanceActionBuildResult{Ready: true, Complete: true, InvalidTarget: true, Checks: checks}
 				}
 				if status == bestLocationTemporarilyBlocked {
 					return blockedBalanceBuild(checks)
 				}
-			} else if progress.baselineFit == nil || !progress.baselineFit.IsSatisfied() {
-				return blockedBalanceBuild(checks)
-			} else if c.regionPlacementBestLocation(baseline, progress.baselineFit) != bestLocationSatisfied {
+			} else if status != bestLocationSatisfied {
 				return blockedBalanceBuild(checks)
 			}
-			progress.baselineRegion = baseline
+			progress.baselineBestLocationReady = true
+			progress.baselineBestLocation = nil
 		}
 		if mode == affinity.BalanceValidateTarget {
 			progress.hasCurrentRegion = false
 			progress.baselineFit = nil
 			progress.baselineRegion = nil
+			progress.baselineBestLocationReady = false
+			progress.baselineBestLocation = nil
 			progress.actualPlacementChecked = false
+			continue
+		}
+
+		if progress.pendingPlacementRegion != nil {
+			if budget > 0 && checks >= budget {
+				return pendingBalanceBuild(progress, checks)
+			}
+			status, done, used, next := c.regionPlacementBestLocationProgress(ctx, progress.pendingPlacementRegion, progress.pendingPlacementFit,
+				progress.storeSnapshot, progress.pendingBestLocation, progress.bestLocationCache, remainingBalanceBudget(budget, checks))
+			checks += used
+			progress.pendingBestLocation = next
+			if !done {
+				if ctx.Err() != nil {
+					return blockedBalanceBuild(checks)
+				}
+				return pendingBalanceBuild(progress, checks)
+			}
+			if status == bestLocationTemporarilyBlocked {
+				progress.temporarilyBlocked = true
+			} else if status == bestLocationSatisfied {
+				if mode == affinity.BalanceBuildLeaders {
+					progress.nextLeaderTarget = append(progress.nextLeaderTarget, progress.pendingPlacementLeader)
+					if progress.regionScan.done() {
+						progress.actions.LeaderTargets = append(progress.actions.LeaderTargets, progress.pendingPlacementLeader)
+					}
+				} else {
+					progress.nextVoters = append(progress.nextVoters, progress.pendingPlacementVoter)
+					if progress.regionScan.done() {
+						addBalanceVoterAction(&progress.actions, progress.pendingPlacementVoter)
+					}
+				}
+			}
+			progress.pendingPlacementRegion = nil
+			progress.pendingPlacementFit = nil
+			progress.pendingPlacementLeader = 0
+			progress.pendingPlacementVoter = balanceVoterCandidate{}
+			progress.pendingBestLocation = nil
 			continue
 		}
 
@@ -523,17 +612,10 @@ func (c *AffinityChecker) buildBalanceActionsForTarget(ctx context.Context, actu
 			progress.candidateIndex++
 			fit := c.ruleManager.FitRegionWithoutCache(c.cluster, virtual)
 			if fit != nil && fit.IsSatisfied() && placementNotWorse(progress.baselineFit, fit) {
-				status := c.regionPlacementBestLocation(virtual, fit)
-				if status == bestLocationTemporarilyBlocked {
-					progress.temporarilyBlocked = true
-					continue
-				}
-				if status == bestLocationSatisfied {
-					progress.nextLeaderTarget = append(progress.nextLeaderTarget, leaderID)
-					if progress.regionScan.done() {
-						progress.actions.LeaderTargets = append(progress.actions.LeaderTargets, leaderID)
-					}
-				}
+				progress.pendingPlacementRegion = virtual
+				progress.pendingPlacementFit = fit
+				progress.pendingPlacementLeader = leaderID
+				continue
 			}
 		} else {
 			if !progress.candidateIntersectionReady && !progress.pendingCandidate {
@@ -607,17 +689,10 @@ func (c *AffinityChecker) buildBalanceActionsForTarget(ctx context.Context, actu
 			checks++
 			fit := c.ruleManager.FitRegionWithoutCache(c.cluster, virtual)
 			if fit != nil && fit.IsSatisfied() && placementNotWorse(progress.baselineFit, fit) {
-				status := c.regionPlacementBestLocation(virtual, fit)
-				if status == bestLocationTemporarilyBlocked {
-					progress.temporarilyBlocked = true
-					continue
-				}
-				if status == bestLocationSatisfied {
-					progress.nextVoters = append(progress.nextVoters, candidate)
-					if progress.regionScan.done() {
-						addBalanceVoterAction(&progress.actions, candidate)
-					}
-				}
+				progress.pendingPlacementRegion = virtual
+				progress.pendingPlacementFit = fit
+				progress.pendingPlacementVoter = candidate
+				continue
 			}
 		}
 	}
@@ -640,8 +715,9 @@ func (c *AffinityChecker) completeBalanceTargetBuild(actual *affinity.GroupState
 	return completeBalanceBuild(progress, checks)
 }
 
-func (p *balanceActionProgress) matches(actual *affinity.GroupState, target *affinity.Group, ranges affinity.GroupKeyRanges, storeIDs []uint64, mode affinity.BalanceActionMode) bool {
-	return p.mode == mode && p.actualGroupID == actual.ID && p.actualLeader == actual.LeaderStoreID &&
+func (p *balanceActionProgress) matches(actual *affinity.GroupState, target *affinity.Group, ranges affinity.GroupKeyRanges,
+	storeIDs []uint64, mode affinity.BalanceActionMode, revision uint64) bool {
+	return p.mode == mode && p.ruleRevision == revision && p.actualGroupID == actual.ID && p.actualLeader == actual.LeaderStoreID &&
 		slices.Equal(p.actualVoters, actual.VoterStoreIDs) && p.targetLeader == target.LeaderStoreID &&
 		slices.Equal(p.targetVoters, target.VoterStoreIDs) && slices.Equal(p.storeIDs, storeIDs) && balanceRangesEqual(p.regionScan.ranges, ranges)
 }
@@ -662,6 +738,13 @@ func balanceRangesEqual(left []keyutil.KeyRange, right affinity.GroupKeyRanges) 
 func pendingBalanceBuild(progress *balanceActionProgress, checks int) affinity.BalanceActionBuildResult {
 	return affinity.BalanceActionBuildResult{Actions: affinity.BalanceActionSet{VoterReplacements: make(map[uint64]map[uint64][]uint64)},
 		Cursor: progress, Ready: true, Checks: checks, RegionBytes: takeBalanceRegionBytes(progress), TemporaryBlocked: progress.temporarilyBlocked}
+}
+
+func remainingBalanceBudget(budget, checks int) int {
+	if budget <= 0 {
+		return 0
+	}
+	return budget - checks
 }
 
 func takeBalanceRegionBytes(progress *balanceActionProgress) map[uint64]uint64 {
@@ -700,8 +783,17 @@ func finishBalanceBuildRegion(progress *balanceActionProgress, region *core.Regi
 	progress.currentRegion = balanceRegionRef{}
 	progress.candidateIndex = 0
 	progress.pendingCandidate = false
+	progress.baselineBestLocationReady = false
 	progress.baselineFit = nil
 	progress.baselineRegion = nil
+	progress.baselineBestLocation = nil
+	progress.actualPlacementFit = nil
+	progress.actualBestLocation = nil
+	progress.pendingBestLocation = nil
+	progress.pendingPlacementRegion = nil
+	progress.pendingPlacementFit = nil
+	progress.pendingPlacementLeader = 0
+	progress.pendingPlacementVoter = balanceVoterCandidate{}
 }
 
 func nextBalanceLeaderTarget(progress *balanceActionProgress, target *affinity.Group) (uint64, bool) {
