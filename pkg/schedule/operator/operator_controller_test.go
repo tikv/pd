@@ -268,13 +268,13 @@ func (suite *operatorControllerTestSuite) TestOperatorControllerRejectsTransferL
 	// request at creation time. TransferLeader is still cancelled instead of
 	// being left to retry until the Down threshold.
 	tc.SetStoreLastHeartbeatInterval(2, 11*time.Minute)
-	oc.Dispatch(region, DispatchFromHeartBeat, nil)
+	oc.Dispatch(region, DispatchFromHeartBeat)
 	re.Equal(CANCELED, op.Status())
 }
 
 // TestOperatorControllerKeepsRunningForAddLearnerOnUnhealthyTarget documents
 // a deliberate scope boundary raised in review on tikv/pd#11146: opting an
-// AddLearner/AddPeer/BecomeNonWitness operator into SetStoreHealthCheck does
+// AddLearner/AddPeer operator into SetStoreHealthCheck does
 // not protect it against an Unhealthy target on the real AddOperator path.
 // addOperatorInner dispatches the first step's command synchronously at
 // creation time, before any heartbeat-driven check can run, so
@@ -302,7 +302,7 @@ func (suite *operatorControllerTestSuite) TestOperatorControllerKeepsRunningForA
 	op.SetStoreHealthCheck(true)
 	re.True(oc.AddOperator(op))
 
-	oc.Dispatch(region, DispatchFromHeartBeat, nil)
+	oc.Dispatch(region, DispatchFromHeartBeat)
 	re.Equal(STARTED, op.Status())
 }
 
