@@ -53,36 +53,24 @@ func TestBalanceScorerEvaluatesLeaderAndVoterMoves(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, BalanceScore{Leader: 11, Voter: 75}, scorer.Score())
 
-	leaderScore, ok := scorer.Evaluate(BalanceMove{GroupID: "p0", LeaderStoreID: 2})
-	require.True(t, ok)
-	require.Equal(t, BalanceScore{Leader: 9, Voter: 75}, leaderScore)
-
-	voterScore, ok := scorer.Evaluate(BalanceMove{
-		GroupID: "p0", LeaderStoreID: 1, FromStoreID: 3, ToStoreID: 4,
-	})
-	require.True(t, ok)
-	require.Equal(t, BalanceScore{Leader: 11, Voter: 67}, voterScore)
-
-	unchangedScore, ok := scorer.Evaluate(BalanceMove{GroupID: "p3", LeaderStoreID: 1})
-	require.False(t, ok)
-	require.Equal(t, BalanceScore{Leader: 17, Voter: 75}, unchangedScore)
-}
-
-func TestBalanceScorerAllowsLeaderChangeWithVoterReplacement(t *testing.T) {
-	scorer, err := NewBalanceScorer([]*Group{
-		{ID: "p0", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}},
-		{ID: "p1", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}},
-		{ID: "p2", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}},
-		{ID: "p3", LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2, 3}},
-	})
-	require.NoError(t, err)
-
-	// Store 1 remains a voter, but the resulting leader moves to store 2.
-	next, ok := scorer.Evaluate(BalanceMove{
-		GroupID: "p0", LeaderStoreID: 2, FromStoreID: 3, ToStoreID: 4,
-	})
-	require.True(t, ok)
-	require.Equal(t, BalanceScore{Leader: 8, Voter: 42}, next)
+	for _, tc := range []struct {
+		name     string
+		move     BalanceMove
+		score    BalanceScore
+		improves bool
+	}{
+		{"leader", BalanceMove{GroupID: "p0", LeaderStoreID: 2}, BalanceScore{Leader: 9, Voter: 75}, true},
+		{"voter", BalanceMove{GroupID: "p0", LeaderStoreID: 1, FromStoreID: 3, ToStoreID: 4}, BalanceScore{Leader: 11, Voter: 67}, true},
+		// The old leader remains a voter while a different voter is replaced.
+		{"leader and voter", BalanceMove{GroupID: "p0", LeaderStoreID: 2, FromStoreID: 3, ToStoreID: 4}, BalanceScore{Leader: 9, Voter: 67}, true},
+		{"worse", BalanceMove{GroupID: "p3", LeaderStoreID: 1}, BalanceScore{Leader: 17, Voter: 75}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			score, improves := scorer.Evaluate(tc.move)
+			require.Equal(t, tc.score, score)
+			require.Equal(t, tc.improves, improves)
+		})
+	}
 }
 
 func TestBalanceScorerStrictImprovementsTerminate(t *testing.T) {
