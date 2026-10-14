@@ -35,8 +35,7 @@ func TestMain(m *testing.M) {
 
 func TestBackoffer(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	base := time.Second
 	max := 100 * time.Millisecond
@@ -160,8 +159,7 @@ func isBackofferReset(bo *Backoffer) bool {
 
 func TestBackofferWithLog(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	conf := &log.Config{Level: "debug", File: log.FileLogConfig{}, DisableTimestamp: true}
 	lg, err := newZapTestLogger(conf)

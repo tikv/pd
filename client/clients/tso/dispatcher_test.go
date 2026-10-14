@@ -422,7 +422,7 @@ func BenchmarkTSODispatcherHandleRequests(b *testing.B) {
 	}()
 
 	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		req := getReq()
 		dispatcher.push(req)
 		_, _, err := req.Wait()

@@ -150,8 +150,7 @@ func TestSendTokenBucketRequestsStopsWhenContextIsCanceled(t *testing.T) {
 
 func TestControllerWithTwoGroupRequestConcurrency(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/triggerPeriodicReport", fmt.Sprintf("return(\"%s\")", defaultResourceGroupName)))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/triggerLowRUReport", fmt.Sprintf("return(\"%s\")", "test-group")))
@@ -272,8 +271,7 @@ func TestControllerWithTwoGroupRequestConcurrency(t *testing.T) {
 
 func TestTryGetController(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	mockProvider := newMockResourceGroupProvider()
 	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, constants.NullKeyspaceID)
@@ -337,8 +335,7 @@ func TestTryGetController(t *testing.T) {
 
 func TestCleanUpResourceGroupJudgesWholeInterval(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	mockProvider := newMockResourceGroupProvider()
 	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, 0)
 	re.NoError(err)
@@ -394,8 +391,7 @@ func TestCleanUpResourceGroupJudgesWholeInterval(t *testing.T) {
 }
 
 func TestGetResourceGroup(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	newResourceGroup := func(name string, fillRate uint64, burstLimit int64) *rmpb.ResourceGroup {
 		return &rmpb.ResourceGroup{
@@ -695,8 +691,7 @@ func TestGetResourceGroupRuntimeState(t *testing.T) {
 
 func TestTokenBucketsRequestWithKeyspaceID(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	checkKeyspace := func(keyspaceID uint32) {
 		mockProvider := newMockResourceGroupProvider()
@@ -875,8 +870,7 @@ func TestRUVersionFromInitialControllerConfig(t *testing.T) {
 
 func TestRUVersionWatchViaControllerConfig(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	mockProvider := &MockResourceGroupProvider{}
 	mockProvider.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&meta_storagepb.GetResponse{

@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -797,10 +798,5 @@ func EqualWithoutOrder[T comparable](a, b []T) bool {
 
 // Contains returns true if the given slice contains the value.
 func Contains[T comparable](slice []T, value T) bool {
-	for _, v := range slice {
-		if v == value {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(slice, value)
 }
