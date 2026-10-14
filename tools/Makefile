@@ -18,7 +18,7 @@ PATH := $(GO_TOOLS_BIN_PATH):$(PATH)
 SHELL := env PATH='$(PATH)' GOBIN='$(GO_TOOLS_BIN_PATH)' $(shell which bash)
 # Resolve auto toolchain once so recursive go commands don't mix tool versions in CI.
 GO_EFFECTIVE_TOOLCHAIN := $(shell GOTOOLCHAIN=auto go env GOVERSION)
-PACKAGES := $(shell GOTOOLCHAIN=$(GO_EFFECTIVE_TOOLCHAIN) go list ./... | grep -v pd-ctl/helper)
+PACKAGES = $(shell GOTOOLCHAIN=$(GO_EFFECTIVE_TOOLCHAIN) go list ./... | grep -v pd-ctl/helper)
 
 install-tools:
 	cd $(ROOT_PATH) && $(MAKE) install-tools

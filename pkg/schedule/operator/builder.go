@@ -17,7 +17,6 @@ package operator
 import (
 	"fmt"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/pingcap/errors"
