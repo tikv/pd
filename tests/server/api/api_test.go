@@ -33,6 +33,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/response"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -723,6 +724,74 @@ func (suite *redirectorTestSuite) TestXForwardedFor() {
 	l := string(b)
 	re.Contains(l, "/pd/api/v1/regions")
 	re.NotContains(l, suite.cluster.GetConfig().GetClientURLs())
+}
+
+func TestFollowerRegionAPIWithNoForward(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) {
+		conf.PDServerCfg.UseRegionStorage = true
+		conf.TickInterval = typeutil.Duration{Duration: 50 * time.Millisecond}
+		conf.ElectionInterval = typeutil.Duration{Duration: 250 * time.Millisecond}
+	})
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+	leader := cluster.GetLeaderServer()
+	re.NoError(leader.BootstrapCluster())
+	re.True(cluster.WaitRegionSyncerClientsReady(2))
+
+	follower := cluster.GetServer(cluster.GetFollower())
+	re.NotNil(follower)
+	testutil.Eventually(re, func() bool {
+		return follower.GetServer().DirectlyGetRaftCluster().GetRegionSyncer().IsRunning()
+	})
+
+	regions := tests.InitRegions(3)
+	for _, region := range regions {
+		re.NoError(leader.GetRaftCluster().HandleRegionHeartbeat(region))
+	}
+	testutil.Eventually(re, func() bool {
+		return len(follower.GetServer().GetBasicCluster().GetRegions()) == len(regions)
+	})
+
+	req, err := http.NewRequest(http.MethodGet, follower.GetAddr()+"/pd/api/v1/regions", http.NoBody)
+	re.NoError(err)
+	req.Header.Set(apiutil.PDAllowFollowerHandleHeader, "true")
+	resp, err := tests.TestDialClient.Do(req)
+	re.NoError(err)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	re.NoError(err)
+	re.Equal(http.StatusOK, resp.StatusCode, string(body))
+	var regionsInfo response.RegionsInfo
+	re.NoError(json.Unmarshal(body, &regionsInfo))
+	re.Equal(len(regions), regionsInfo.Count)
+
+	req, err = http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/api/v1/region/id/%d", follower.GetAddr(), regions[0].GetID()), http.NoBody)
+	re.NoError(err)
+	req.Header.Set(apiutil.PDAllowFollowerHandleHeader, "true")
+	resp, err = tests.TestDialClient.Do(req)
+	re.NoError(err)
+	defer resp.Body.Close()
+	body, err = io.ReadAll(resp.Body)
+	re.NoError(err)
+	re.Equal(http.StatusOK, resp.StatusCode, string(body))
+	re.Contains(string(body), fmt.Sprintf(`"id":%d`, regions[0].GetID()))
+
+	req, err = http.NewRequest(http.MethodGet, follower.GetAddr()+"/pd/api/v1/regions/check/miss-peer", http.NoBody)
+	re.NoError(err)
+	req.Header.Set(apiutil.PDAllowFollowerHandleHeader, "true")
+	resp, err = tests.TestDialClient.Do(req)
+	re.NoError(err)
+	defer resp.Body.Close()
+	body, err = io.ReadAll(resp.Body)
+	re.NoError(err)
+	re.Equal(http.StatusInternalServerError, resp.StatusCode, string(body))
+	re.Contains(string(body), "TiKV cluster not bootstrapped")
 }
 
 func mustRequestSuccess(re *require.Assertions, s *server.Server) http.Header {

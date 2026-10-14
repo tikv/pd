@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/tikv/pd/pkg/audit"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/requestutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
@@ -77,20 +78,36 @@ func (rm *requestInfoMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Reques
 }
 
 type clusterMiddleware struct {
-	s  *server.Server
-	rd *render.Render
+	s                         *server.Server
+	rd                        *render.Render
+	allowFollowerSyncedRegion bool
 }
 
-func newClusterMiddleware(s *server.Server) clusterMiddleware {
-	return clusterMiddleware{
+type clusterMiddlewareOption func(*clusterMiddleware)
+
+func withFollowerSyncedRegion() clusterMiddlewareOption {
+	return func(m *clusterMiddleware) {
+		m.allowFollowerSyncedRegion = true
+	}
+}
+
+func newClusterMiddleware(s *server.Server, opts ...clusterMiddlewareOption) clusterMiddleware {
+	m := clusterMiddleware{
 		s:  s,
 		rd: render.New(render.Options{IndentJSON: true}),
 	}
+	for _, opt := range opts {
+		opt(&m)
+	}
+	return m
 }
 
 func (m clusterMiddleware) middleware(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rc := m.s.GetRaftCluster()
+		if rc == nil {
+			rc = m.getFollowerSyncedCluster(r)
+		}
 		if rc == nil {
 			m.rd.JSON(w, http.StatusInternalServerError, errs.ErrNotBootstrapped.FastGenByArgs().Error())
 			return
@@ -98,6 +115,20 @@ func (m clusterMiddleware) middleware(h http.Handler) http.Handler {
 		ctx := context.WithValue(r.Context(), clusterCtxKey{}, rc)
 		h.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func (m clusterMiddleware) getFollowerSyncedCluster(r *http.Request) *cluster.RaftCluster {
+	if r.Method != http.MethodGet ||
+		!m.allowFollowerSyncedRegion ||
+		m.s.IsServing() ||
+		r.Header.Get(apiutil.PDAllowFollowerHandleHeader) == "" {
+		return nil
+	}
+	rc := m.s.DirectlyGetRaftCluster()
+	if rc == nil || !rc.GetRegionSyncer().IsRunning() {
+		return nil
+	}
+	return rc
 }
 
 type clusterCtxKey struct{}
