@@ -203,6 +203,7 @@ func newTestSchedulingServiceForSplit(
 		ctx,
 		persistConfig,
 		storage,
+		storage,
 		basicCluster,
 		hbStreams,
 		make(chan struct{}),

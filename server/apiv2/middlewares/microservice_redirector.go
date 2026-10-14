@@ -17,6 +17,7 @@ package middlewares
 import (
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -73,15 +74,46 @@ func MicroserviceRedirector(rules ...serverapi.RedirectRule) gin.HandlerFunc {
 	}
 }
 
-// AffinityMicroserviceRedirector only forwards affinity GET requests to the scheduling service.
+const pdAffinityPath = "/pd/api/v2/affinity-groups"
+
+// AffinityMicroserviceRedirector forwards affinity reads and rebalances to the scheduling service.
 func AffinityMicroserviceRedirector() gin.HandlerFunc {
-	pdAffinityPath := "/pd/api/v2/affinity-groups"
+	return MicroserviceRedirector(affinityMicroserviceRedirectRules()...)
+}
+
+func affinityMicroserviceRedirectRules() []serverapi.RedirectRule {
 	targetAffinityPath := scheapi.APIPathPrefix + "/affinity-groups"
-	return MicroserviceRedirector(
-		serverapi.RedirectRule{
+	return []serverapi.RedirectRule{
+		{
 			MatchPath:         pdAffinityPath,
 			TargetPath:        targetAffinityPath,
 			TargetServiceName: constant.SchedulingServiceName,
-			MatchMethods:      []string{http.MethodGet},
-		})
+			MatchMethods:      []string{http.MethodGet, http.MethodPatch},
+			Filter: func(r *http.Request) bool {
+				if r.Method != http.MethodPatch {
+					return true
+				}
+				suffix, ok := strings.CutPrefix(r.URL.Path, pdAffinityPath+"/")
+				if !ok {
+					return false
+				}
+				parts := strings.Split(suffix, "/")
+				return len(parts) == 2 && parts[0] != "" && parts[1] == "policy"
+			},
+		},
+		{
+			MatchPath:         pdAffinityPath,
+			TargetPath:        targetAffinityPath,
+			TargetServiceName: constant.SchedulingServiceName,
+			MatchMethods:      []string{http.MethodPost},
+			Filter: func(r *http.Request) bool {
+				suffix, ok := strings.CutPrefix(r.URL.Path, pdAffinityPath+"/")
+				if !ok {
+					return false
+				}
+				parts := strings.Split(suffix, "/")
+				return len(parts) == 2 && parts[0] != "" && parts[1] == "rebalance"
+			},
+		},
+	}
 }

@@ -1257,7 +1257,7 @@ func TestAffinityMergeCheckDisabledByZeroConfig(t *testing.T) {
 			cluster.PutRegion(region2)
 
 			affinityManager := cluster.GetAffinityManager()
-			checker := NewAffinityChecker(context.Background(), cluster, opt)
+			checker := NewAffinityChecker(t.Context(), cluster, opt)
 			group := &affinity.Group{
 				ID:            "test_group",
 				LeaderStoreID: 1,
@@ -2236,6 +2236,9 @@ func TestAffinityBestLocationFilteredByTemporarySourceState(t *testing.T) {
 	re.Zero(newStoreID)
 	re.True(filterByTempState)
 	re.False(checker.isRegionPlacementRuleSatisfiedWithBestLocation(region, true))
+	fit = checker.ruleManager.FitRegion(tc, region)
+	re.NotNil(fit)
+	re.Equal(bestLocationTemporarilyBlocked, checker.regionPlacementBestLocation(region, fit))
 }
 
 // TestAffinityStrictCheckDivergesFromIsRegionReplicated documents the intended

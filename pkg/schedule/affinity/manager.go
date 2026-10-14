@@ -20,6 +20,7 @@ import (
 	"slices"
 	"strings"
 
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/log"
@@ -42,10 +43,12 @@ const (
 )
 
 type regionCache struct {
-	region      *core.RegionInfo
-	groupInfo   *runtimeGroupInfo
-	affinityVer uint64
-	isAffinity  bool
+	region                *core.RegionInfo
+	balanceRegion         *core.RegionInfo
+	groupInfo             *runtimeGroupInfo
+	affinityVer           uint64
+	isAffinity            bool
+	balanceScheduleDenied bool
 }
 
 // Manager is the manager of all affinity information.
@@ -67,10 +70,23 @@ type Manager struct {
 	regionLabeler    *labeler.RegionLabeler // region labeler for syncing key ranges
 
 	// The following members are protected by RWMutex.
-	affinityRegionCount int
-	groups              map[string]*runtimeGroupInfo // {group_id} -> runtimeGroupInfo
-	regions             map[uint64]regionCache       // {region_id} -> regionCache
-	unavailableStores   map[uint64]storeCondition    // {store_id} -> storeCondition
+	affinityRegionCount     int
+	groups                  map[string]*runtimeGroupInfo  // {group_id} -> runtimeGroupInfo
+	regions                 map[uint64]regionCache        // {region_id} -> regionCache
+	unavailableStores       map[uint64]storeCondition     // {store_id} -> storeCondition
+	balanceTables           map[string]*balanceTableState // {table_id} -> metadata generations
+	balanceGeneration       uint64
+	balanceRuleRevision     func() uint64
+	balanceTerm             func() ([]clientv3.Cmp, bool)
+	balanceMetadata         func() map[string]string
+	balanceMetadataSource   uint64
+	balanceMetadataVerified *balanceMetadataVersion
+	balanceLeaderCounts     map[uint64]int
+	balanceVoterCounts      map[uint64]int
+	balanceStoreRevision    uint64
+	balanceStoreFingerprint uint64
+	balanceRebalancer       BalanceRebalancer
+	manualBalanceTables     map[string]struct{}
 
 	// The following members are protected by metaMutex only, not protected by RWMutex.
 	// keyRanges cached in memory to reduce labeler lock contention
@@ -95,6 +111,10 @@ func NewManager(ctx context.Context, storage endpoint.AffinityStorage, storeSetI
 		groups:              make(map[string]*runtimeGroupInfo),
 		regions:             make(map[uint64]regionCache),
 		unavailableStores:   make(map[uint64]storeCondition),
+		balanceTables:       make(map[string]*balanceTableState),
+		balanceLeaderCounts: make(map[uint64]int),
+		balanceVoterCounts:  make(map[uint64]int),
+		manualBalanceTables: make(map[string]struct{}),
 		keyRanges:           make(map[string]GroupKeyRanges),
 		labelRuleBuffer:     make(map[string]*labeler.LabelRule),
 	}
@@ -119,6 +139,12 @@ func (m *Manager) initialize() error {
 			log.Error("failed to unmarshal affinity group, skipping",
 				zap.String("key", k),
 				zap.Error(errs.ErrLoadRule.Wrap(err)))
+			return
+		}
+		if err := validateBalancePolicy(group.BalancePolicy); err != nil {
+			log.Warn("invalid affinity group balance policy, skipping",
+				zap.String("key", k),
+				zap.Error(err))
 			return
 		}
 		m.initGroupLocked(group)
@@ -155,7 +181,8 @@ func (m *Manager) initGroupLocked(group *Group) {
 			ID:              group.ID,
 			CreateTimestamp: group.CreateTimestamp,
 			LeaderStoreID:   group.LeaderStoreID,
-			VoterStoreIDs:   slices.Clone(group.VoterStoreIDs),
+			VoterStoreIDs:   normalizeVoters(group.VoterStoreIDs),
+			BalancePolicy:   group.BalancePolicy,
 		},
 		availability:        groupDegraded,
 		degradedExpiredAt:   newDegradedExpiredAtFromNow(),
@@ -164,6 +191,40 @@ func (m *Manager) initGroupLocked(group *Group) {
 		Regions:             make(map[uint64]regionCache),
 		LabelRule:           nil,
 		RangeCount:          0,
+	}
+	m.addBalanceCountsLocked(&m.groups[group.ID].Group)
+	m.invalidateBalanceLocked(group.ID)
+}
+
+func (m *Manager) addBalanceCountsLocked(group *Group) {
+	if group == nil {
+		return
+	}
+	if group.LeaderStoreID != 0 {
+		m.balanceLeaderCounts[group.LeaderStoreID]++
+	}
+	for _, storeID := range group.VoterStoreIDs {
+		m.balanceVoterCounts[storeID]++
+	}
+}
+
+func (m *Manager) removeBalanceCountsLocked(group *Group) {
+	if group == nil {
+		return
+	}
+	if group.LeaderStoreID != 0 {
+		if count := m.balanceLeaderCounts[group.LeaderStoreID] - 1; count > 0 {
+			m.balanceLeaderCounts[group.LeaderStoreID] = count
+		} else {
+			delete(m.balanceLeaderCounts, group.LeaderStoreID)
+		}
+	}
+	for _, storeID := range group.VoterStoreIDs {
+		if count := m.balanceVoterCounts[storeID] - 1; count > 0 {
+			m.balanceVoterCounts[storeID] = count
+		} else {
+			delete(m.balanceVoterCounts, storeID)
+		}
 	}
 }
 
@@ -202,20 +263,26 @@ func (m *Manager) resetCountLocked(groupInfo *runtimeGroupInfo) {
 	m.affinityRegionCount -= groupInfo.AffinityRegionCount
 	groupInfo.AffinityRegionCount = 0
 	groupInfo.AffinityVer++
+	m.invalidateBalanceLocked(groupInfo.ID)
 }
 
-func (m *Manager) updateGroupPeers(groupID string, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
+func (m *Manager) updateGroupTarget(group Group) (*GroupState, error) {
 	m.Lock()
 	defer m.Unlock()
 
-	groupInfo, ok := m.groups[groupID]
+	groupInfo, ok := m.groups[group.ID]
 	if !ok {
-		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
+		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(group.ID)
 	}
 
+	oldGroup := groupInfo.Group
+	if oldGroup.LeaderStoreID != group.LeaderStoreID || !slices.Equal(oldGroup.VoterStoreIDs, group.VoterStoreIDs) {
+		m.removeBalanceCountsLocked(&oldGroup)
+		m.addBalanceCountsLocked(&group)
+	}
 	groupInfo.SetAvailability(groupAvailable)
-	groupInfo.LeaderStoreID = leaderStoreID
-	groupInfo.VoterStoreIDs = slices.Clone(voterStoreIDs)
+	groupInfo.Group = group
+	groupInfo.VoterStoreIDs = slices.Clone(group.VoterStoreIDs)
 	m.resetCountLocked(groupInfo)
 
 	return newGroupState(groupInfo), nil
@@ -275,6 +342,9 @@ func (m *Manager) updateGroupLabelRuleLockedWithCount(groupID string, labelRule 
 	// Set LabelRule
 	groupInfo.LabelRule = labelRule
 	groupInfo.RangeCount = rangeCount
+	if state := m.balanceTables[TableGroupPrefix(groupID)]; state != nil {
+		state.rangeVersion++
+	}
 }
 
 func (m *Manager) updateGroupLabelRules(labels map[string]*labeler.LabelRule, needClear bool) {
@@ -299,8 +369,18 @@ func (m *Manager) clearGroupCacheLocked(groupID string) {
 }
 
 func (m *Manager) deleteGroupLocked(groupID string) {
+	if groupInfo, ok := m.groups[groupID]; ok {
+		m.removeBalanceCountsLocked(&groupInfo.Group)
+	}
 	m.clearGroupCacheLocked(groupID)
 	delete(m.groups, groupID)
+	if state := m.balanceTables[TableGroupPrefix(groupID)]; state != nil {
+		delete(state.groups, groupID)
+		state.rangeVersion++
+		if len(state.groups) == 0 {
+			delete(m.balanceTables, TableGroupPrefix(groupID))
+		}
+	}
 }
 
 func (m *Manager) deleteGroups(groupIDs []string) {
@@ -326,11 +406,17 @@ func (m *Manager) deleteCacheLocked(regionID uint64) {
 
 func (m *Manager) saveCache(cache *regionCache) {
 	regionID := cache.region.GetID()
+	cache.balanceScheduleDenied = m.regionLabeler.ScheduleDisabled(cache.region)
 	m.Lock()
 	defer m.Unlock()
 	// If the Group has changed, update it but do not save it afterward.
 	groupInfo, ok := m.groups[cache.groupInfo.ID]
 	if ok && groupInfo == cache.groupInfo && groupInfo.AffinityVer == cache.affinityVer {
+		old, exists := m.regions[regionID]
+		if !exists || balanceRegionChanged(old.balanceInput(), cache.region) {
+			m.invalidateBalanceLocked(groupInfo.ID)
+		}
+		cache.balanceRegion = cache.region
 		m.deleteCacheLocked(regionID)
 		m.regions[regionID] = *cache
 		groupInfo.Regions[regionID] = *cache
@@ -353,6 +439,9 @@ func (m *Manager) InvalidCache(regionID uint64) {
 
 	m.Lock()
 	defer m.Unlock()
+	if cached, ok := m.regions[regionID]; ok {
+		m.invalidateBalanceLocked(cached.groupInfo.ID)
+	}
 	m.deleteCacheLocked(regionID)
 }
 
@@ -462,6 +551,19 @@ func (m *Manager) GetAllAffinityGroupStates() []*GroupState {
 
 // SyncGroupFromEtcd synchronizes a group from etcd to the in-memory state.
 func (m *Manager) SyncGroupFromEtcd(group *Group) {
+	if group == nil {
+		return
+	}
+	if err := validateBalancePolicy(group.BalancePolicy); err != nil {
+		log.Warn("invalid affinity group balance policy from etcd, skipping",
+			zap.String("group-id", group.ID),
+			zap.Error(err))
+		return
+	}
+	// Voter order has no meaning, but affinity comparisons use canonical order.
+	copy := *group
+	copy.VoterStoreIDs = normalizeVoters(group.VoterStoreIDs)
+	group = &copy
 	m.metaMutex.Lock()
 	defer m.metaMutex.Unlock()
 
@@ -470,7 +572,9 @@ func (m *Manager) SyncGroupFromEtcd(group *Group) {
 	existingGroup, exists := m.groups[group.ID]
 	if exists &&
 		existingGroup.LeaderStoreID == group.LeaderStoreID &&
-		slices.Equal(existingGroup.VoterStoreIDs, group.VoterStoreIDs) {
+		slices.Equal(existingGroup.VoterStoreIDs, group.VoterStoreIDs) &&
+		existingGroup.BalancePolicy == group.BalancePolicy &&
+		existingGroup.CreateTimestamp == group.CreateTimestamp {
 		m.RUnlock()
 		return
 	}
@@ -521,12 +625,27 @@ func (m *Manager) SyncGroupFromEtcd(group *Group) {
 		delete(m.labelRuleBuffer, group.ID)
 	} else {
 		changed := false
+		targetChanged := groupInfo.LeaderStoreID != group.LeaderStoreID ||
+			!slices.Equal(groupInfo.VoterStoreIDs, group.VoterStoreIDs)
+		if targetChanged {
+			oldGroup := groupInfo.Group
+			m.removeBalanceCountsLocked(&oldGroup)
+			m.addBalanceCountsLocked(group)
+		}
 		if groupInfo.LeaderStoreID != group.LeaderStoreID {
 			groupInfo.LeaderStoreID = group.LeaderStoreID
 			changed = true
 		}
 		if !slices.Equal(groupInfo.VoterStoreIDs, group.VoterStoreIDs) {
 			groupInfo.VoterStoreIDs = slices.Clone(group.VoterStoreIDs)
+			changed = true
+		}
+		if groupInfo.BalancePolicy != group.BalancePolicy {
+			groupInfo.BalancePolicy = group.BalancePolicy
+			changed = true
+		}
+		if groupInfo.CreateTimestamp != group.CreateTimestamp {
+			groupInfo.CreateTimestamp = group.CreateTimestamp
 			changed = true
 		}
 

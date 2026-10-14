@@ -209,6 +209,33 @@ func TestTxnWithEtcd(t *testing.T) {
 	allRules = labeler.GetAllLabelRules()
 	re.Empty(allRules)
 
+	// Affinity range rules add one table revision write each. The default batch
+	// size must keep 64 independent table patches below etcd's transaction limit.
+	const affinityTableCount = 64
+	affinityPatch := LabelRulePatch{}
+	for i := range affinityTableCount {
+		tableID := fmt.Sprintf("table_%02d", i)
+		affinityPatch.SetRules = append(affinityPatch.SetRules, &LabelRule{
+			ID:       "affinity_group/" + tableID,
+			Labels:   []RegionLabel{{Key: "affinity", Value: tableID}},
+			RuleType: KeyRange,
+			Data:     MakeKeyRanges("", ""),
+		})
+	}
+	re.NoError(labeler.Patch(affinityPatch))
+	for i := range affinityTableCount {
+		tableID := fmt.Sprintf("table_%02d", i)
+		token, err := store.Load(endpoint.AffinityTableMetadataRevisionKey(tableID))
+		re.NoError(err)
+		re.NotEmpty(token)
+	}
+	affinityDeletes := LabelRulePatch{}
+	for _, rule := range affinityPatch.SetRules {
+		affinityDeletes.DeleteRules = append(affinityDeletes.DeleteRules, rule.ID)
+	}
+	re.NoError(labeler.Patch(affinityDeletes))
+	re.Empty(labeler.GetAllLabelRules())
+
 	// test patch rules in batch with duplicated rule id
 	patch.SetRules = patch.SetRules[:0]
 	patch.DeleteRules = patch.DeleteRules[:0]

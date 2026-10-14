@@ -15,6 +15,7 @@
 package apis
 
 import (
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -278,6 +279,8 @@ func (s *Service) RegisterAffinityRouter() {
 	router.Use(redirector)
 	router.GET("", getAllAffinityGroups)
 	router.GET("/:group_id", getAffinityGroup)
+	router.POST("/:group_id/rebalance", rebalanceAffinityGroup)
+	router.PATCH("/:group_id/policy", updateAffinityGroupPolicy)
 }
 
 // getHealth returns the health status of the TSO service.
@@ -1761,4 +1764,112 @@ func getAffinityGroup(c *gin.Context) {
 		return
 	}
 	c.IndentedJSON(http.StatusOK, groupState)
+}
+
+// @Tags     affinity-groups
+// @Summary  Preview or apply a complete affinity rebalance for a table.
+// @Param    group_id  path  string                             true  "The group id of the affinity group"
+// @Param    body      body  RebalanceAffinityGroupRequest      true  "Apply submits table targets in bounded batches and waits for convergence"
+// @Produce  json
+// @Success  200  {array}   affinity.BalancePlan  "Preview targets or completed group changes"
+// @Failure  400  {string}  string                "The input is invalid."
+// @Failure  404  {string}  string                "Affinity group not found."
+// @Failure  409  {string}  string                "Rebalance is busy or the plan changed."
+// @Failure  503  {string}  string                "Affinity group is not ready."
+// @Failure  504  {string}  string                "Rebalance timed out."
+// @Failure  500  {string}  string                "Scheduling service failed to proceed the request."
+// @Router   /affinity-groups/{group_id}/rebalance [post]
+// Apply failures preserve per-group progress in affinity.BalanceApplyResult.
+// Planning is limited to 30 seconds; execution and convergence wait are limited to 30 minutes.
+func rebalanceAffinityGroup(c *gin.Context) {
+	manager, ok := getAffinityManager(c)
+	if !ok {
+		return
+	}
+
+	groupID := c.Param("group_id")
+	if err := affinity.ValidateGroupID(groupID); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
+		return
+	}
+	req := &RebalanceAffinityGroupRequest{}
+	if err := c.BindJSON(req); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
+		return
+	}
+
+	plans, err := manager.RebalanceAffinityGroup(c.Request.Context(), groupID, req.Apply)
+	if err != nil {
+		var body any = err.Error()
+		if len(plans) > 0 {
+			body = affinity.BalanceApplyResult{Plans: plans, Error: err.Error()}
+		}
+		switch {
+		case errors.Is(err, affinity.ErrBalanceBusy), errors.Is(err, affinity.ErrBalanceConflict), errors.Is(err, errs.ErrEtcdTxnConflict), errs.ErrEtcdTxnConflict.Equal(err):
+			c.AbortWithStatusJSON(http.StatusConflict, body)
+		case errors.Is(err, affinity.ErrBalanceNotReady):
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, body)
+		case errors.Is(err, context.DeadlineExceeded):
+			c.AbortWithStatusJSON(http.StatusGatewayTimeout, body)
+		case errs.ErrInvalidGroupID.Equal(err), errs.ErrAffinityGroupContent.Equal(err), errs.ErrEmptyRequest.Equal(err):
+			c.AbortWithStatusJSON(http.StatusBadRequest, body)
+		case errs.ErrAffinityGroupNotFound.Equal(err):
+			c.AbortWithStatusJSON(http.StatusNotFound, body)
+		default:
+			c.AbortWithStatusJSON(http.StatusInternalServerError, body)
+		}
+		return
+	}
+	if plans == nil {
+		plans = make([]affinity.BalancePlan, 0)
+	}
+	c.IndentedJSON(http.StatusOK, plans)
+}
+
+// RebalanceAffinityGroupRequest defines the input for previewing or applying an affinity rebalance.
+type RebalanceAffinityGroupRequest struct {
+	// Apply submits the complete table plan in capacity-bounded batches and then waits for convergence.
+	Apply bool `json:"apply"`
+}
+
+type updateAffinityGroupPolicyRequest struct {
+	BalancePolicy affinity.BalancePolicy `json:"balance_policy"`
+}
+
+// @Tags     affinity-groups
+// @Summary  Update the balance policy of an affinity group.
+// @Param    group_id  path  string  true  "The group id of the affinity group"
+// @Param    body      body  updateAffinityGroupPolicyRequest  true  "New balance policy: auto or fixed"
+// @Produce  json
+// @Success  200  {object}  *affinity.GroupState
+// @Failure  400  {string}  string  "The input is invalid."
+// @Failure  404  {string}  string  "Affinity group not found."
+// @Failure  409  {string}  string  "Affinity group changed during the update."
+// @Failure  500  {string}  string  "Scheduling service failed to proceed the request."
+// @Router   /affinity-groups/{group_id}/policy [patch]
+func updateAffinityGroupPolicy(c *gin.Context) {
+	manager, ok := getAffinityManager(c)
+	if !ok {
+		return
+	}
+	var req updateAffinityGroupPolicyRequest
+	if err := c.BindJSON(&req); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
+		return
+	}
+	state, err := manager.UpdateAffinityGroupPolicy(c.Param("group_id"), req.BalancePolicy)
+	if err != nil {
+		switch {
+		case errs.ErrInvalidGroupID.Equal(err), errs.ErrAffinityGroupContent.Equal(err):
+			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
+		case errs.ErrAffinityGroupNotFound.Equal(err):
+			c.AbortWithStatusJSON(http.StatusNotFound, err.Error())
+		case errs.ErrEtcdTxnConflict.Equal(err):
+			c.AbortWithStatusJSON(http.StatusConflict, err.Error())
+		default:
+			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	c.IndentedJSON(http.StatusOK, state)
 }

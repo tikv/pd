@@ -97,6 +97,9 @@ type Group struct {
 	LeaderStoreID uint64 `json:"leader_store_id,omitempty"`
 	// VoterStoreIDs indicates which stores Voters should be on.
 	VoterStoreIDs []uint64 `json:"voter_store_ids,omitempty"`
+	// BalancePolicy controls whether the balance planner may improve this group.
+	// An empty value is treated as auto for backward compatibility.
+	BalancePolicy BalancePolicy `json:"balance_policy,omitempty"`
 }
 
 func (g *Group) String() string {
@@ -123,6 +126,8 @@ type GroupState struct {
 
 	// affinityVer is used to mark the version of the cache.
 	affinityVer uint64
+	// balanceVer fences Region and target changes for a manual submission batch.
+	balanceVer uint64
 	// groupInfoPtr is a pointer to the original information.
 	// It is used only for pointer comparison and should not access any internal data.
 	groupInfoPtr *runtimeGroupInfo
@@ -162,6 +167,7 @@ type runtimeGroupInfo struct {
 	degradedExpiredAt uint64
 	// AffinityVer initializes at 1 and increments by 1 each time the Group changes.
 	AffinityVer uint64
+	balanceVer  uint64
 	// AffinityRegionCount indicates how many Regions have all Voter and Leader peers in the correct stores. (AffinityVer equals).
 	AffinityRegionCount int
 
@@ -193,6 +199,7 @@ func newGroupState(g *runtimeGroupInfo) *GroupState {
 			CreateTimestamp: g.CreateTimestamp,
 			LeaderStoreID:   g.LeaderStoreID,
 			VoterStoreIDs:   slices.Clone(g.VoterStoreIDs),
+			BalancePolicy:   g.BalancePolicy,
 		},
 		RegularSchedulingAllowed:  g.IsRegularSchedulingAllowed(),
 		AffinitySchedulingAllowed: affinitySchedulingAllowed,
@@ -201,6 +208,7 @@ func newGroupState(g *runtimeGroupInfo) *GroupState {
 		RegionCount:               len(g.Regions),
 		AffinityRegionCount:       g.AffinityRegionCount,
 		affinityVer:               g.AffinityVer,
+		balanceVer:                g.balanceVer,
 		groupInfoPtr:              g,
 	}
 }
@@ -278,6 +286,9 @@ func (m *Manager) AdjustGroup(g *Group) error {
 	if err := ValidateGroupID(g.ID); err != nil {
 		return err
 	}
+	if err := validateBalancePolicy(g.BalancePolicy); err != nil {
+		return err
+	}
 	// If no distribution is provided, we will use the default distribution.
 	if g.LeaderStoreID == 0 && len(g.VoterStoreIDs) == 0 {
 		return nil
@@ -302,6 +313,15 @@ func (m *Manager) AdjustGroup(g *Group) error {
 	}
 
 	return nil
+}
+
+func validateBalancePolicy(policy BalancePolicy) error {
+	switch policy {
+	case "", BalancePolicyAuto, BalancePolicyFixed:
+		return nil
+	default:
+		return errs.ErrAffinityGroupContent.FastGenByArgs(fmt.Sprintf("invalid balance policy %q", policy))
+	}
 }
 
 // GroupKeyRanges represents key ranges with group id.

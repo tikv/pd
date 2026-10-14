@@ -145,6 +145,10 @@ type Client interface {
 	GetAllAffinityGroups(ctx context.Context) (map[string]*AffinityGroupState, error)
 	// UpdateAffinityGroupPeers updates the leader and voter stores of an affinity group.
 	UpdateAffinityGroupPeers(ctx context.Context, groupID string, leaderStoreID uint64, voterStoreIDs []uint64) (*AffinityGroupState, error)
+	// UpdateAffinityGroupPolicy updates the balance policy of an affinity group.
+	UpdateAffinityGroupPolicy(ctx context.Context, groupID string, balancePolicy string) (*AffinityGroupState, error)
+	// RebalanceAffinityGroup previews or applies a complete table rebalance.
+	RebalanceAffinityGroup(ctx context.Context, groupID string, apply bool) ([]AffinityBalancePlan, error)
 	// DeleteAffinityGroup deletes an affinity group by group ID.
 	DeleteAffinityGroup(ctx context.Context, groupID string, force bool) error
 	// BatchDeleteAffinityGroups deletes multiple affinity groups in batch.
@@ -1366,6 +1370,36 @@ func (c *client) UpdateAffinityGroupPeers(ctx context.Context, groupID string, l
 	return &state, nil
 }
 
+// RebalanceAffinityGroup previews or applies a complete table rebalance.
+// A failed apply returns any reported per-group progress alongside the error.
+func (c *client) RebalanceAffinityGroup(ctx context.Context, groupID string, apply bool) ([]AffinityBalancePlan, error) {
+	reqJSON, err := json.Marshal(RebalanceAffinityGroupRequest{Apply: apply})
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	var plans []AffinityBalancePlan
+	request := newRequestInfo().
+		WithName("RebalanceAffinityGroup").
+		WithURI(fmt.Sprintf(AffinityGroupRebalance, groupID)).
+		WithMethod(http.MethodPost).
+		WithBody(reqJSON).
+		WithResp(&plans)
+	// Applying a table can wait for multiple Region migrations. Follow the
+	// caller's context instead of the default 30-second HTTP timeout, while
+	// preserving an explicitly configured HTTP client's timeout.
+	request.noClientTimeout = apply && c.inner.defaultHTTPClient
+	// A failed apply may already have committed targets. Replaying it would
+	// silently construct and execute another plan, including after network errors.
+	request.noRetry = apply
+	var partial AffinityBalanceApplyResult
+	request.errorResponse = &partial
+	err = c.request(ctx, request)
+	if err != nil {
+		return partial.Plans, err
+	}
+	return plans, nil
+}
+
 // DeleteAffinityGroup deletes an affinity group by group ID.
 func (c *client) DeleteAffinityGroup(ctx context.Context, groupID string, force bool) error {
 	uri := fmt.Sprintf(AffinityGroupByID, groupID)
@@ -1424,6 +1458,26 @@ func (c *client) AddAffinityGroupKeyRanges(ctx context.Context, groupKeyRanges m
 		return nil, err
 	}
 	return resp.AffinityGroups, nil
+}
+
+// UpdateAffinityGroupPolicy updates the balance policy of an affinity group.
+func (c *client) UpdateAffinityGroupPolicy(ctx context.Context, groupID string, balancePolicy string) (*AffinityGroupState, error) {
+	req := UpdateAffinityGroupPolicyRequest{BalancePolicy: balancePolicy}
+	reqJSON, err := json.Marshal(req)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	var state AffinityGroupState
+	err = c.request(ctx, newRequestInfo().
+		WithName("UpdateAffinityGroupPolicy").
+		WithURI(fmt.Sprintf(AffinityGroupPolicy, groupID)).
+		WithMethod(http.MethodPatch).
+		WithBody(reqJSON).
+		WithResp(&state))
+	if err != nil {
+		return nil, err
+	}
+	return &state, nil
 }
 
 // RemoveAffinityGroupKeyRanges removes key ranges from affinity groups.

@@ -216,6 +216,29 @@ func TestSyncLabelRuleBeforeGroup(t *testing.T) {
 	re.Equal(1, state.RangeCount)
 }
 
+func TestSyncGroupFromEtcdUpdatesBalancePolicy(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	store := storage.NewStorageWithMemoryBackend()
+	storeInfos := core.NewStoresInfo()
+	storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: 1, Address: "test1"}))
+	conf := mockconfig.NewTestOptions()
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	re.NoError(err)
+	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	re.NoError(err)
+
+	input := &Group{ID: "policy", BalancePolicy: BalancePolicyFixed, LeaderStoreID: 1, VoterStoreIDs: []uint64{3, 1, 2}}
+	manager.SyncGroupFromEtcd(input)
+	re.Equal(BalancePolicyFixed, manager.GetAffinityGroupState("policy").BalancePolicy)
+	re.Equal([]uint64{1, 2, 3}, manager.GetAffinityGroupState("policy").VoterStoreIDs)
+	re.Equal([]uint64{3, 1, 2}, input.VoterStoreIDs, "watcher input must not be mutated")
+	manager.SyncGroupFromEtcd(&Group{ID: "policy", BalancePolicy: BalancePolicyAuto})
+	re.Equal(BalancePolicyAuto, manager.GetAffinityGroupState("policy").BalancePolicy)
+}
+
 // TestRegionCountStaleCache documents that RegionCount counts stale cache entries when group changes.
 func TestRegionCountStaleCache(t *testing.T) {
 	re := require.New(t)

@@ -77,7 +77,6 @@ func (s *ReplicaStrategy) SelectStoreToAdd(coLocationStores []*core.StoreInfo, e
 	if len(s.extraFilters) > 0 {
 		filters = append(filters, s.extraFilters...)
 	}
-
 	isolationComparer := filter.IsolationComparer(s.locationLabels, coLocationStores)
 	strictStateFilter := &filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true, AllowFastFailover: s.fastFailover, OperatorLevel: level}
 	targetCandidate := filter.NewCandidates(s.cluster.GetStores()).
@@ -182,14 +181,19 @@ func (s *ReplicaStrategy) selectStoreToRemoveWithTempState(coLocationStores []*c
 }
 
 func (s *ReplicaStrategy) getBetterLocation(cluster sche.SharedCluster, region *core.RegionInfo, fit *placement.RegionFit, rf *placement.RuleFit) (oldStoreID, newStoreID uint64, filterByTempState bool) {
+	oldStoreID, newStoreID, status := s.getBetterLocationWithStatus(cluster, region, fit, rf)
+	return oldStoreID, newStoreID, status == bestLocationTemporarilyBlocked
+}
+
+func (s *ReplicaStrategy) getBetterLocationWithStatus(cluster sche.SharedCluster, region *core.RegionInfo, fit *placement.RegionFit, rf *placement.RuleFit) (oldStoreID, newStoreID uint64, status bestLocationStatus) {
 	ruleStores := getRuleFitStores(cluster, rf)
 	oldStoreID, sourceFilterByTempState := s.selectStoreToRemoveWithTempState(ruleStores)
 	if oldStoreID == 0 {
-		return 0, 0, false
+		return 0, 0, bestLocationRejected
 	}
 	oldStore := cluster.GetStore(oldStoreID)
 	if oldStore == nil {
-		return 0, 0, false
+		return 0, 0, bestLocationRejected
 	}
 	var coLocationStores []*core.StoreInfo
 	regionStores := cluster.GetRegionStores(region)
@@ -207,14 +211,20 @@ func (s *ReplicaStrategy) getBetterLocation(cluster sche.SharedCluster, region *
 			}
 		}
 	}
-	newStoreID, filterByTempState = s.SelectStoreToImprove(coLocationStores, oldStoreID)
+	newStoreID, filterByTempState := s.SelectStoreToImprove(coLocationStores, oldStoreID)
 	if sourceFilterByTempState {
 		if newStoreID != 0 || filterByTempState {
-			return 0, 0, true
+			return 0, 0, bestLocationTemporarilyBlocked
 		}
-		return 0, 0, false
+		return 0, 0, bestLocationSatisfied
 	}
-	return
+	if filterByTempState {
+		return oldStoreID, 0, bestLocationTemporarilyBlocked
+	}
+	if newStoreID != 0 {
+		return oldStoreID, newStoreID, bestLocationRejected
+	}
+	return oldStoreID, 0, bestLocationSatisfied
 }
 
 func isWitnessEnabled(cluster sche.CheckerCluster) bool {

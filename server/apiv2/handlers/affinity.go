@@ -16,6 +16,8 @@ package handlers
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -35,6 +37,8 @@ func RegisterAffinity(r *gin.RouterGroup) {
 	router.POST("", PostAffinityGroups)
 	router.PATCH("", BatchModifyAffinityGroups)
 	router.PUT("/:group_id", UpdateAffinityGroupPeers)
+	router.POST("/:group_id/rebalance", RebalanceAffinityGroup)
+	router.PATCH("/:group_id/policy", UpdateAffinityGroupPolicy)
 	router.DELETE("/:group_id", DeleteAffinityGroup)
 	router.GET("", GetAllAffinityGroups)
 	router.GET("/:group_id", GetAffinityGroup)
@@ -94,6 +98,12 @@ type BatchModifyAffinityGroupsRequest struct {
 type UpdateAffinityGroupPeersRequest struct {
 	LeaderStoreID uint64   `json:"leader_store_id"`
 	VoterStoreIDs []uint64 `json:"voter_store_ids"`
+}
+
+// RebalanceAffinityGroupRequest defines the input for previewing or applying an affinity rebalance.
+type RebalanceAffinityGroupRequest struct {
+	// Apply submits the complete table plan in capacity-bounded batches and then waits for convergence.
+	Apply bool `json:"apply"`
 }
 
 // --- Handlers ---
@@ -382,6 +392,56 @@ func UpdateAffinityGroupPeers(c *gin.Context) {
 	c.IndentedJSON(http.StatusOK, state)
 }
 
+// RebalanceAffinityGroup previews or applies a complete affinity rebalance for a table.
+// Planning has a 30-second limit and execution has a separate 30-minute limit.
+// An apply failure can return BalanceApplyResult with per-group progress.
+//
+//	@Tags		affinity-groups
+//	@Summary	Preview or apply a complete affinity rebalance for a table.
+//	@Param		group_id	path	string						true	"The group id of the affinity group"
+//	@Param		body		body	RebalanceAffinityGroupRequest	true	"Apply submits table targets in bounded batches and waits for convergence"
+//	@Produce	json
+//	@Success	200	{array}	affinity.BalancePlan	"Preview targets or completed group changes"
+//	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	404	{string}	string	"Affinity group not found."
+//	@Failure	409	{string}	string	"Rebalance is busy or the plan changed."
+//	@Failure	503	{string}	string	"Affinity group is not ready."
+//	@Failure	504	{string}	string	"Rebalance timed out."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/affinity-groups/{group_id}/rebalance [post]
+func RebalanceAffinityGroup(c *gin.Context) {
+	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
+	manager, err := svr.GetAffinityManager()
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	groupID := c.Param("group_id")
+	if err := affinity.ValidateGroupID(groupID); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
+		return
+	}
+	req := &RebalanceAffinityGroupRequest{}
+	if err := c.BindJSON(req); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
+		return
+	}
+
+	plans, err := manager.RebalanceAffinityGroup(c.Request.Context(), groupID, req.Apply)
+	if err != nil && len(plans) > 0 {
+		c.AbortWithStatusJSON(affinityErrorStatus(err), affinity.BalanceApplyResult{Plans: plans, Error: err.Error()})
+		return
+	}
+	if handleAffinityError(c, err) {
+		return
+	}
+	if plans == nil {
+		plans = make([]affinity.BalancePlan, 0)
+	}
+	c.IndentedJSON(http.StatusOK, plans)
+}
+
 // DeleteAffinityGroup deletes a specific affinity group by group id.
 //
 //	@Tags			affinity-groups
@@ -510,22 +570,32 @@ func handleAffinityError(c *gin.Context, err error) bool {
 	if err == nil {
 		return false
 	}
+	c.AbortWithStatusJSON(affinityErrorStatus(err), err.Error())
+	return true
+}
+
+func affinityErrorStatus(err error) int {
 	switch {
+	case errors.Is(err, affinity.ErrBalanceBusy), errors.Is(err, affinity.ErrBalanceConflict):
+		return http.StatusConflict
+	case errors.Is(err, affinity.ErrBalanceNotReady):
+		return http.StatusServiceUnavailable
+	case errors.Is(err, context.DeadlineExceeded):
+		return http.StatusGatewayTimeout
 	case errs.ErrAffinityGroupNotFound.Equal(err):
-		c.AbortWithStatusJSON(http.StatusNotFound, err.Error())
+		return http.StatusNotFound
 	case errs.ErrAffinityGroupContent.Equal(err),
 		errs.ErrInvalidGroupID.Equal(err),
 		errs.ErrEmptyRequest.Equal(err),
 		errs.ErrAffinityGroupConflict.Equal(err),
 		errs.ErrInvalidKeyFormat.Equal(err):
-		c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
-	case errs.ErrAffinityGroupExist.Equal(err):
-		c.AbortWithStatusJSON(http.StatusConflict, err.Error())
+		return http.StatusBadRequest
+	case errs.ErrAffinityGroupExist.Equal(err), errs.ErrEtcdTxnConflict.Equal(err), errors.Is(err, errs.ErrEtcdTxnConflict):
+		return http.StatusConflict
 	default:
 		// such as ErrAffinityInternal
-		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		return http.StatusInternalServerError
 	}
-	return true
 }
 
 // validateKeyRange checks if a key range is valid.
@@ -587,4 +657,43 @@ func convertAndValidateRangeOps(ops []GroupRangesModification, manager *affinity
 	}
 
 	return result, nil
+}
+
+// UpdateAffinityGroupPolicyRequest defines the body for updating an affinity group's balance policy.
+type UpdateAffinityGroupPolicyRequest struct {
+	BalancePolicy affinity.BalancePolicy `json:"balance_policy"`
+}
+
+// UpdateAffinityGroupPolicy updates the balance policy of an affinity group.
+//
+//	@Tags		affinity-groups
+//	@Summary	Update the balance policy of an affinity group.
+//	@Param		group_id	path	string						true	"The group id of the affinity group"
+//	@Param		body		body	UpdateAffinityGroupPolicyRequest	true	"New balance policy: auto or fixed"
+//	@Produce	json
+//	@Success	200	{object}	affinity.GroupState	"Updated affinity group state"
+//	@Failure	400	{string}	string						"The input is invalid."
+//	@Failure	404	{string}	string						"Affinity group not found."
+//	@Failure	409	{string}	string						"Affinity group changed during the update."
+//	@Failure	500	{string}	string						"PD server failed to proceed the request."
+//	@Router		/affinity-groups/{group_id}/policy [patch]
+func UpdateAffinityGroupPolicy(c *gin.Context) {
+	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
+	manager, err := svr.GetAffinityManager()
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	groupID := c.Param("group_id")
+	req := &UpdateAffinityGroupPolicyRequest{}
+	if err := c.BindJSON(req); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
+		return
+	}
+	state, err := manager.UpdateAffinityGroupPolicy(groupID, req.BalancePolicy)
+	if handleAffinityError(c, err) {
+		return
+	}
+	c.IndentedJSON(http.StatusOK, state)
 }

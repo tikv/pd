@@ -16,6 +16,7 @@ package command
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -23,6 +24,7 @@ import (
 
 	"github.com/pingcap/errors"
 
+	pdhttp "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/pkg/schedule/affinity"
 )
 
@@ -41,8 +43,126 @@ func NewAffinityCommand() *cobra.Command {
 		newAffinityShowCommand(),
 		newAffinityDeleteCommand(),
 		newAffinityUpdatePeersCommand(),
+		newAffinityRebalanceCommand(),
+		newAffinityUpdatePolicyCommand(),
 	)
 	return cmd
+}
+
+func newAffinityRebalanceCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "rebalance",
+		Short: "preview or apply a complete affinity rebalance for one table",
+		Run:   affinityRebalanceCommandFunc,
+	}
+	cmd.Flags().Bool("apply", false, "apply the table rebalance and wait for convergence")
+	cmd.Flags().Bool("force", false, "required with --apply")
+	return cmd
+}
+
+type affinityRebalanceResult struct {
+	GroupID     string                       `json:"group_id"`
+	OldLeader   uint64                       `json:"old_leader"`
+	NewLeader   uint64                       `json:"new_leader"`
+	OldVoters   []uint64                     `json:"old_voters"`
+	NewVoters   []uint64                     `json:"new_voters"`
+	Changed     bool                         `json:"changed"`
+	Applied     bool                         `json:"applied"`
+	Error       string                       `json:"error,omitempty"`
+	BeforeScore *pdhttp.AffinityBalanceScore `json:"score_before,omitempty"`
+	AfterScore  *pdhttp.AffinityBalanceScore `json:"score_after,omitempty"`
+	MoveBytes   uint64                       `json:"move_bytes,omitempty"`
+	Revision    string                       `json:"revision,omitempty"`
+	Status      string                       `json:"status,omitempty"`
+	Reason      string                       `json:"reason,omitempty"`
+}
+
+func affinityRebalanceCommandFunc(cmd *cobra.Command, _ []string) {
+	tableID, _ := cmd.Flags().GetUint64("table-id")
+	if tableID == 0 {
+		cmd.Println("--table-id is required")
+		return
+	}
+	apply, _ := cmd.Flags().GetBool("apply")
+	force, _ := cmd.Flags().GetBool("force")
+	if apply && !force {
+		cmd.Println("--force is required with --apply")
+		return
+	}
+
+	groups, err := PDCli.GetAllAffinityGroups(cmd.Context())
+	if err != nil {
+		cmd.Printf("Failed to get affinity groups: %v\n", err)
+		return
+	}
+
+	tableGroups := make([]*pdhttp.AffinityGroupState, 0)
+	for _, state := range groups {
+		if state == nil {
+			continue
+		}
+		if !isTableAffinityGroup(state.ID, tableID) {
+			continue
+		}
+		tableGroups = append(tableGroups, state)
+	}
+	if len(tableGroups) == 0 {
+		cmd.Printf("no affinity groups found for table %d\n", tableID)
+		return
+	}
+	sort.Slice(tableGroups, func(i, j int) bool { return tableGroups[i].ID < tableGroups[j].ID })
+	plans, err := PDCli.RebalanceAffinityGroup(cmd.Context(), tableGroups[0].ID, apply)
+	if err != nil {
+		cmd.Printf("Failed to rebalance affinity groups: %v\n", err)
+		if len(plans) == 0 {
+			return
+		}
+	}
+	byID := groups
+	result := make([]affinityRebalanceResult, 0, len(plans))
+	for _, plan := range plans {
+		old := byID[plan.GroupID]
+		item := affinityRebalanceResult{
+			GroupID:     plan.GroupID,
+			OldLeader:   affinityGroupLeader(old),
+			NewLeader:   plan.LeaderStoreID,
+			OldVoters:   affinityGroupVoters(old),
+			NewVoters:   append([]uint64(nil), plan.VoterStoreIDs...),
+			Changed:     plan.Changed,
+			Applied:     plan.Status == "applied",
+			BeforeScore: plan.BeforeScore,
+			AfterScore:  plan.AfterScore,
+			MoveBytes:   plan.MoveBytes,
+			Revision:    plan.Revision,
+			Status:      plan.Status,
+			Reason:      plan.Reason,
+		}
+		if plan.OldLeaderStoreID != 0 {
+			item.OldLeader = plan.OldLeaderStoreID
+			item.OldVoters = append([]uint64(nil), plan.OldVoterStoreIDs...)
+		}
+		result = append(result, item)
+	}
+	jsonPrint(cmd, result)
+}
+
+func affinityGroupLeader(group *pdhttp.AffinityGroupState) uint64 {
+	if group == nil {
+		return 0
+	}
+	return group.LeaderStoreID
+}
+
+func affinityGroupVoters(group *pdhttp.AffinityGroupState) []uint64 {
+	if group == nil {
+		return nil
+	}
+	return append([]uint64(nil), group.VoterStoreIDs...)
+}
+
+func isTableAffinityGroup(groupID string, tableID uint64) bool {
+	table := strconv.FormatUint(tableID, 10)
+	return groupID == "_tidb_t_"+table || strings.HasPrefix(groupID, "_tidb_pt_"+table+"_")
 }
 
 func newAffinityShowCommand() *cobra.Command {
@@ -72,6 +192,17 @@ func newAffinityUpdatePeersCommand() *cobra.Command {
 	}
 	cmd.Flags().Uint64("leader", 0, "leader store ID")
 	cmd.Flags().String("voters", "", "comma separated voter store IDs, e.g. 1,2,3")
+	return cmd
+}
+
+func newAffinityUpdatePolicyCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "policy",
+		Short: "set the balance policy for a specific affinity group",
+		Run:   affinityUpdatePolicyCommandFunc,
+	}
+	cmd.Flags().String("balance-policy", "", "balance policy: auto or fixed")
+	_ = cmd.MarkFlagRequired("balance-policy")
 	return cmd
 }
 
@@ -146,6 +277,26 @@ func affinityUpdatePeersCommandFunc(cmd *cobra.Command, _ []string) {
 	state, err := PDCli.UpdateAffinityGroupPeers(cmd.Context(), groupID, leader, voters)
 	if err != nil {
 		cmd.Printf("Failed to update affinity group peers: %v\n", err)
+		return
+	}
+	jsonPrint(cmd, state)
+}
+
+func affinityUpdatePolicyCommandFunc(cmd *cobra.Command, _ []string) {
+	groupID, err := getGroupID(cmd)
+	if err != nil {
+		cmd.Println(err)
+		return
+	}
+
+	policy, _ := cmd.Flags().GetString("balance-policy")
+	if policy != string(affinity.BalancePolicyAuto) && policy != string(affinity.BalancePolicyFixed) {
+		cmd.Printf("balance-policy must be %q or %q\n", affinity.BalancePolicyAuto, affinity.BalancePolicyFixed)
+		return
+	}
+	state, err := PDCli.UpdateAffinityGroupPolicy(cmd.Context(), groupID, policy)
+	if err != nil {
+		cmd.Printf("Failed to update affinity group balance policy: %v\n", err)
 		return
 	}
 	jsonPrint(cmd, state)

@@ -65,6 +65,7 @@ import (
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 )
@@ -128,6 +129,7 @@ func NewCluster(
 	parentCtx context.Context,
 	persistConfig *config.PersistConfig,
 	storage storage.Storage,
+	affinityStorage endpoint.AffinityStorage,
 	basicCluster *core.BasicCluster,
 	hbStreams *hbstream.HeartbeatStreams,
 	checkMembershipCh chan struct{},
@@ -143,7 +145,7 @@ func NewCluster(
 		return nil, err
 	}
 	ruleManager := placement.NewRuleManager(ctx, storage, basicCluster, persistConfig)
-	affinityManager, err := affinity.NewManager(ctx, storage, basicCluster, persistConfig, labelerManager)
+	affinityManager, err := affinity.NewManager(ctx, affinityStorage, basicCluster, persistConfig, labelerManager)
 	if err != nil {
 		storage.Close()
 		hbStreams.Close()

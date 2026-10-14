@@ -759,6 +759,7 @@ type AffinityGroup struct {
 	CreateTimestamp uint64   `json:"create_timestamp"`
 	LeaderStoreID   uint64   `json:"leader_store_id,omitempty"`
 	VoterStoreIDs   []uint64 `json:"voter_store_ids,omitempty"`
+	BalancePolicy   string   `json:"balance_policy,omitempty"`
 }
 
 // AffinityGroupState defines the runtime state of an affinity group.
@@ -813,4 +814,42 @@ type BatchModifyAffinityGroupsRequest struct {
 type UpdateAffinityGroupPeersRequest struct {
 	LeaderStoreID uint64   `json:"leader_store_id"`
 	VoterStoreIDs []uint64 `json:"voter_store_ids"`
+}
+
+// RebalanceAffinityGroupRequest defines the body for previewing or applying an affinity rebalance.
+type RebalanceAffinityGroupRequest struct {
+	Apply bool `json:"apply"`
+}
+
+// AffinityBalanceApplyResult retains execution progress after a failed apply.
+type AffinityBalanceApplyResult struct {
+	Plans []AffinityBalancePlan `json:"plans"`
+	Error string                `json:"error"`
+}
+
+// AffinityBalancePlan describes the target peer distribution for an affinity group.
+type AffinityBalancePlan struct {
+	GroupID          string                `json:"group_id"`
+	LeaderStoreID    uint64                `json:"leader_store_id"`
+	VoterStoreIDs    []uint64              `json:"voter_store_ids"`
+	Changed          bool                  `json:"changed"`
+	OldLeaderStoreID uint64                `json:"old_leader_store_id,omitempty"`
+	OldVoterStoreIDs []uint64              `json:"old_voter_store_ids,omitempty"`
+	BeforeScore      *AffinityBalanceScore `json:"score_before,omitempty"`
+	AfterScore       *AffinityBalanceScore `json:"score_after,omitempty"`
+	MoveBytes        uint64                `json:"move_bytes,omitempty"`
+	Revision         string                `json:"revision,omitempty"`
+	Status           string                `json:"status,omitempty"`
+	Reason           string                `json:"reason,omitempty"`
+}
+
+// AffinityBalanceScore reports the table's leader and voter balance scores.
+type AffinityBalanceScore struct {
+	Leader int `json:"leader"`
+	Voter  int `json:"voter"`
+}
+
+// UpdateAffinityGroupPolicyRequest defines the body for updating an affinity group's balance policy.
+type UpdateAffinityGroupPolicyRequest struct {
+	BalancePolicy string `json:"balance_policy"`
 }

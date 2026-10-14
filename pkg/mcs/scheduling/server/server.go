@@ -582,7 +582,10 @@ func (s *Server) startCluster(ctx context.Context) error {
 		return err
 	}
 	hbStreams = hbstream.NewHeartbeatStreams(ctx, constant.SchedulingServiceName, basicCluster)
-	cluster, err = NewCluster(ctx, s.persistConfig, storage, basicCluster, hbStreams, s.checkMembershipCh, s.GetHTTPClient(), s.GetBackendEndpoints())
+	// Affinity targets are shared with PD; scheduling caches for other metadata
+	// remain in memory and are populated by their existing watchers.
+	affinityStorage := endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(s.GetClient()), nil)
+	cluster, err = NewCluster(ctx, s.persistConfig, storage, affinityStorage, basicCluster, hbStreams, s.checkMembershipCh, s.GetHTTPClient(), s.GetBackendEndpoints())
 	storage = nil
 	hbStreams = nil
 	if err != nil {
@@ -590,6 +593,10 @@ func (s *Server) startCluster(ctx context.Context) error {
 	}
 
 	am := cluster.GetAffinityManager()
+	am.SetBalanceCommitGuard(func() ([]clientv3.Cmp, bool) {
+		term, ok := s.participant.GetLeadership().CaptureTerm()
+		return term.Comparisons(), ok
+	})
 	configWatcher.SetSchedulersController(cluster.GetCoordinator().GetSchedulersController())
 	ruleWatcher, err = rule.NewWatcher(ctx, s.GetClient(), cluster.GetStorage(),
 		cluster.GetCoordinator().GetCheckerController(), cluster.GetRuleManager(), cluster.GetRegionLabeler())

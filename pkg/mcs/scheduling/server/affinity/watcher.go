@@ -82,6 +82,14 @@ func NewWatcher(
 
 // initializeGroupWatcher initializes the watcher for affinity group changes.
 func (w *Watcher) initializeGroupWatcher(ctx context.Context) error {
+	// The scheduling Manager is initialized from storage before this watcher is
+	// created. Seed deletion reconciliation with that snapshot so a group
+	// deleted in the gap between the two loads is removed from memory even
+	// though its delete event is older than the watch revision.
+	initialKeys := make([]string, 0)
+	for _, group := range w.affinityManager.GetAllAffinityGroupStates() {
+		initialKeys = append(initialKeys, keypath.AffinityGroupPath(group.ID))
+	}
 	putFn := func(kv *mvccpb.KeyValue) error {
 		log.Info("update affinity group", zap.String("key", string(kv.Key)), zap.String("value", string(kv.Value)))
 		group := &affinity.Group{}
@@ -111,6 +119,8 @@ func (w *Watcher) initializeGroupWatcher(ctx context.Context) error {
 		func([]*clientv3.Event) error { return nil },
 		true, /* withPrefix */
 	)
+	w.groupWatcher.SetReconcileDeletedKeys()
+	w.groupWatcher.SetInitialLoadedKeys(initialKeys)
 	w.groupWatcher.StartWatchLoop()
 	return w.groupWatcher.WaitLoad()
 }

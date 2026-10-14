@@ -406,6 +406,13 @@ func TestDeleteAffinityGroupsForceMissing(t *testing.T) {
 	err = manager.DeleteAffinityGroups([]string{"missing-group", "with-range"}, true)
 	re.NoError(err)
 	re.False(manager.IsGroupExist("with-range"))
+	for _, id := range []string{"missing-group", "with-range"} {
+		for _, key := range []string{endpoint.AffinityTableRevisionKey(id), endpoint.AffinityTableMetadataRevisionKey(id)} {
+			value, err := store.Load(key)
+			re.NoError(err)
+			re.Empty(value)
+		}
+	}
 }
 
 // TestSameGroupNonOverlappingAdd ensures adding disjoint ranges to the same group is allowed.

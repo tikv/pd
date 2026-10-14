@@ -91,8 +91,10 @@ const (
 	GetKeyspaceMetaByName = "/pd/api/v2/keyspaces/%s"
 	GetKeyspaceMetaByID   = "/pd/api/v2/keyspaces/id/%d"
 	// Affinity
-	AffinityGroups    = "/pd/api/v2/affinity-groups"
-	AffinityGroupByID = "/pd/api/v2/affinity-groups/%s"
+	AffinityGroups         = "/pd/api/v2/affinity-groups"
+	AffinityGroupByID      = "/pd/api/v2/affinity-groups/%s"
+	AffinityGroupPolicy    = "/pd/api/v2/affinity-groups/%s/policy"
+	AffinityGroupRebalance = "/pd/api/v2/affinity-groups/%s/rebalance"
 )
 
 // RegionByID returns the path of PD HTTP API to get region by ID.

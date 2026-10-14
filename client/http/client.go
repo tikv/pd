@@ -62,9 +62,10 @@ type clientInner struct {
 
 	// source is used to mark the source of the client creation,
 	// it will also be used in the caller ID of the inner client.
-	source  string
-	tlsConf *tls.Config
-	cli     *http.Client
+	source            string
+	tlsConf           *tls.Config
+	cli               *http.Client
+	defaultHTTPClient bool
 
 	requestCounter    *prometheus.CounterVec
 	executionDuration *prometheus.HistogramVec
@@ -79,6 +80,7 @@ func newClientInner(ctx context.Context, cancel context.CancelFunc, source strin
 func (ci *clientInner) init(sd sd.ServiceDiscovery) {
 	// Init the HTTP client if it's not configured.
 	if ci.cli == nil {
+		ci.defaultHTTPClient = true
 		ci.cli = &http.Client{Timeout: defaultTimeout}
 		if ci.tlsConf != nil {
 			transport := http.DefaultTransport.(*http.Transport).Clone()
@@ -155,7 +157,7 @@ func (ci *clientInner) requestWithRetry(
 				continue
 			}
 			statusCode, err = ci.doRequest(ctx, serverURL, reqInfo, headerOpts...)
-			if err == nil || noNeedRetryForRequest(reqInfo, statusCode) {
+			if err == nil || reqInfo.noRetry || noNeedRetryForRequest(reqInfo, statusCode) {
 				return err
 			}
 			log.Debug("[pd] http request url failed", append(logFields,
@@ -169,7 +171,7 @@ func (ci *clientInner) requestWithRetry(
 		}
 		return err
 	}
-	if reqInfo.bo == nil {
+	if reqInfo.bo == nil || reqInfo.noRetry {
 		return execFunc()
 	}
 	// Copy a new backoffer for each request.
@@ -224,7 +226,13 @@ func (ci *clientInner) doRequest(
 	req.Header.Set(xCallerIDKey, callerID)
 
 	start := time.Now()
-	resp, err := ci.cli.Do(req)
+	httpClient := ci.cli
+	if reqInfo.noClientTimeout {
+		copy := *httpClient
+		copy.Timeout = 0
+		httpClient = &copy
+	}
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		ci.reqCounter(name, networkErrorStatus)
 		log.Warn("[pd] do http request failed", append(logFields, zap.Error(err))...)
@@ -255,6 +263,11 @@ func (ci *clientInner) doRequest(
 			// PD will return a JSON body containing the detailed error message
 			// when the status code is not `http.StatusOK` 200.
 			bs = bytes.TrimSpace(bs)
+			if reqInfo.errorResponse != nil {
+				if decodeErr := json.Unmarshal(bs, reqInfo.errorResponse); decodeErr != nil {
+					logFields = append(logFields, zap.NamedError("decode-error-response", decodeErr))
+				}
+			}
 			logFields = append(logFields, zap.ByteString("body", bs))
 		}
 

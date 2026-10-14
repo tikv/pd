@@ -50,11 +50,13 @@ type AffinityChecker struct {
 	conf             config.CheckerConfigProvider
 	recentMergeCache *cache.TTLUint64
 	startTime        time.Time
+	opController     *operator.Controller
+	balancer         *affinityBalancer
 }
 
 // NewAffinityChecker create an affinity checker.
 func NewAffinityChecker(ctx context.Context, cluster sche.CheckerCluster, conf config.CheckerConfigProvider) *AffinityChecker {
-	return &AffinityChecker{
+	checker := &AffinityChecker{
 		cluster:          cluster,
 		ruleManager:      cluster.GetRuleManager(),
 		affinityManager:  cluster.GetAffinityManager(),
@@ -62,6 +64,12 @@ func NewAffinityChecker(ctx context.Context, cluster sche.CheckerCluster, conf c
 		recentMergeCache: cache.NewIDTTL(ctx, gcInterval, recentMergeTTL),
 		startTime:        time.Now(),
 	}
+	if checker.affinityManager != nil {
+		checker.affinityManager.SetBalancePlacementGuard(checker.ruleManager.GetRevision, checker.balanceRuleMetadata)
+		checker.affinityManager.SetBalanceRebalancer(checker.rebalanceTable)
+		checker.balancer = newAffinityBalancer(ctx, checker)
+	}
+	return checker
 }
 
 // GetType return AffinityChecker's type.
@@ -155,6 +163,15 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	if group == nil || !group.AffinitySchedulingAllowed {
 		affinityCheckerGroupSchedulingDisabledCounter.Inc()
 		return nil
+	}
+
+	// Once a group is converged, let the automatic balance planner make at
+	// most one target change for its table. The next Region check will observe
+	// the new target and continue after the corresponding operators finish.
+	if group.BalancePolicy != affinity.BalancePolicyFixed && group.Phase == affinity.PhaseStable {
+		c.balancer.enqueue(group.ID)
+		// Planning is asynchronous; this check continues against the target
+		// it read. The next heartbeat observes any committed balance target.
 	}
 
 	// For a Region already in affinity, try to merge it with neighboring affinity Regions.
@@ -442,8 +459,9 @@ const (
 )
 
 // cloneRegionWithReplacePeerStores clones the Region and updates its voters and leader to the target stores.
-// If the number of voters does not match or the leader is not among the target voters,
-// it returns nil to indicate failure. Source and target placement must not contain duplicate store IDs respectively.
+// If the number of voters does not match, the leader is not among the target
+// voters, or a target voter shares a store with a preserved learner, it returns
+// nil. Source and target voters must not contain duplicate store IDs respectively.
 func cloneRegionWithReplacePeerStores(region *core.RegionInfo, leaderStoreID uint64, voterStoreIDs ...uint64) *core.RegionInfo {
 	if region == nil {
 		return nil
@@ -453,6 +471,11 @@ func cloneRegionWithReplacePeerStores(region *core.RegionInfo, leaderStoreID uin
 
 	if len(sourceVoters) != len(voterStoreIDs) || !slices.Contains(voterStoreIDs, leaderStoreID) {
 		return nil
+	}
+	for _, learner := range region.GetLearners() {
+		if slices.Contains(voterStoreIDs, learner.GetStoreId()) {
+			return nil
+		}
 	}
 
 	// presences records whether a storeID exists in the source and/or target
@@ -522,9 +545,20 @@ func (c *AffinityChecker) isRegionPlacementRuleSatisfiedWithBestLocation(region 
 		fit = c.ruleManager.FitRegionWithoutCache(c.cluster, region)
 	}
 
-	// Check region is satisfied
+	return c.regionPlacementBestLocation(region, fit) == bestLocationSatisfied
+}
+
+type bestLocationStatus uint8
+
+const (
+	bestLocationSatisfied bestLocationStatus = iota
+	bestLocationRejected
+	bestLocationTemporarilyBlocked
+)
+
+func (c *AffinityChecker) regionPlacementBestLocation(region *core.RegionInfo, fit *placement.RegionFit) bestLocationStatus {
 	if fit == nil || !fit.IsSatisfied() {
-		return false
+		return bestLocationRejected
 	}
 
 	// Check whether all peers covered by the rules are at the best isolation level.
@@ -536,19 +570,20 @@ func (c *AffinityChecker) isRegionPlacementRuleSatisfiedWithBestLocation(region 
 		isWitness := rf.Rule.IsWitness && isWitnessEnabled(c.cluster)
 		// If the peer to be moved is a witness, since no snapshot is needed, we also reuse the fast failover logic.
 		strategy := c.strategy(region, rf.Rule, isWitness)
-		_, newStoreID, filterByTempState := strategy.getBetterLocation(c.cluster, region, fit, rf)
-		// filterByTempState being true means a better placement exists but is temporarily unschedulable.
-		// This is also considered not satisfied.
-		if newStoreID != 0 || filterByTempState {
-			return false
+		_, _, status := strategy.getBetterLocationWithStatus(c.cluster, region, fit, rf)
+		if status == bestLocationTemporarilyBlocked {
+			return bestLocationTemporarilyBlocked
+		}
+		if status != bestLocationSatisfied {
+			return bestLocationRejected
 		}
 		// If the isolation level does not meet the requirement, it is also considered not to be at the best location.
 		if !statistics.IsRegionLabelIsolationSatisfied(rf.Stores, rf.Rule.LocationLabels, rf.Rule.IsolationLevel) {
-			return false
+			return bestLocationRejected
 		}
 	}
 
-	return true
+	return bestLocationSatisfied
 }
 
 func (c *AffinityChecker) strategy(region *core.RegionInfo, rule *placement.Rule, fastFailover bool) *ReplicaStrategy {
