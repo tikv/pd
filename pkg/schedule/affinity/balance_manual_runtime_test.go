@@ -41,11 +41,10 @@ func TestManualRebalanceReportsBusyAndNotReady(t *testing.T) {
 	tableLock.Unlock()
 	manager.releaseBalanceTableLock(tableID, tableLock)
 
-	manager.SetBalanceActionBuilders(func(context.Context, *GroupState, GroupKeyRanges) (BalanceActionSet, bool) {
-		return BalanceActionSet{}, true
-	}, nil, func(context.Context, *GroupState, GroupKeyRanges, *Group, []uint64, BalanceActionMode, any, int) BalanceActionBuildResult {
+	manager.SetBalanceActionBuilder(func(context.Context, *GroupState, GroupKeyRanges, *Group,
+		[]uint64, BalanceActionMode, any, int) BalanceActionBuildResult {
 		return BalanceActionBuildResult{}
-	}, nil, nil)
+	}, nil)
 	_, err = manager.RebalanceAffinityGroup(t.Context(), ids[0], false)
 	require.ErrorIs(t, err, ErrBalanceNotReady)
 }
@@ -54,16 +53,15 @@ func TestManualRebalanceReportsDependencyConflict(t *testing.T) {
 	manager := newBalanceRuntimeManager(t)
 	ids := seedBalanceGroups(t, manager, []uint64{1, 1, 1})
 	var updated bool
-	manager.SetBalanceActionBuilders(func(_ context.Context, group *GroupState, _ GroupKeyRanges) (BalanceActionSet, bool) {
-		return BalanceActionSet{LeaderTargets: group.VoterStoreIDs}, true
-	}, nil, func(ctx context.Context, group *GroupState, ranges GroupKeyRanges, target *Group, stores []uint64, mode BalanceActionMode, cursor any, budget int) BalanceActionBuildResult {
+	manager.SetBalanceActionBuilder(func(ctx context.Context, group *GroupState, ranges GroupKeyRanges, target *Group,
+		stores []uint64, mode BalanceActionMode, cursor any, budget int) BalanceActionBuildResult {
 		if !updated {
 			updated = true
 			_, err := manager.UpdateAffinityGroupPeers(ids[0], 2, group.VoterStoreIDs)
 			require.NoError(t, err)
 		}
 		return manualBalanceVirtualBuilder(ctx, group, ranges, target, stores, mode, cursor, budget)
-	}, nil, nil)
+	}, nil)
 
 	_, err := manager.RebalanceAffinityGroup(t.Context(), ids[0], false)
 	require.ErrorIs(t, err, ErrBalanceConflict)
@@ -78,9 +76,7 @@ func TestManualRebalanceAllFixedReturnsFullUnchangedPlan(t *testing.T) {
 		return manager.storage.SaveAffinityGroup(txn, group.ID, &group)
 	}))
 	manager.SyncGroupFromEtcd(&group)
-	manager.SetBalanceActionBuilders(func(context.Context, *GroupState, GroupKeyRanges) (BalanceActionSet, bool) {
-		return BalanceActionSet{}, true
-	}, nil, manualBalanceVirtualBuilder, nil, nil)
+	manager.SetBalanceActionBuilder(manualBalanceVirtualBuilder, nil)
 
 	plans, err := manager.RebalanceAffinityGroup(t.Context(), ids[0], true)
 	require.NoError(t, err)
@@ -92,17 +88,29 @@ func TestManualRebalanceAllFixedReturnsFullUnchangedPlan(t *testing.T) {
 	require.NotEmpty(t, plans[0].Revision)
 }
 
-func TestManualRebalanceCommitsAndWaitsForEachGroup(t *testing.T) {
+func TestManualRebalanceCommitsAllTargetsBeforeWaiting(t *testing.T) {
 	manager := newBalanceRuntimeManager(t)
 	ids := seedManualBalanceGroups(t, manager, []uint64{1, 1, 1, 1})
-	originalLeaders := make(map[string]uint64, len(ids))
-	for _, id := range ids {
-		originalLeaders[id] = manager.GetAffinityGroupState(id).LeaderStoreID
-	}
+	validated := make(map[string]*Group)
 	var converged []string
-	validator := func(_ context.Context, group *GroupState, _ GroupKeyRanges, plan BalancePlan) (bool, bool) {
-		if group.LeaderStoreID == plan.LeaderStoreID && slices.Equal(group.VoterStoreIDs, plan.VoterStoreIDs) &&
-			originalLeaders[group.ID] != plan.LeaderStoreID {
+	manager.SetBalanceActionBuilder(func(ctx context.Context, group *GroupState, ranges GroupKeyRanges, target *Group,
+		stores []uint64, mode BalanceActionMode, cursor any, budget int) BalanceActionBuildResult {
+		switch mode {
+		case BalanceValidateTarget:
+			validated[target.ID] = &Group{ID: target.ID, LeaderStoreID: target.LeaderStoreID,
+				VoterStoreIDs: slices.Clone(target.VoterStoreIDs)}
+			return BalanceActionBuildResult{Ready: true, Complete: true}
+		case BalanceCheckConvergence:
+			if len(converged) == 0 {
+				require.NotEmpty(t, validated)
+				for id, expected := range validated {
+					current := manager.GetAffinityGroupState(id)
+					require.NotNil(t, current)
+					require.Equal(t, expected.LeaderStoreID, current.LeaderStoreID,
+						"all targets must be committed before convergence is checked")
+					require.Equal(t, expected.VoterStoreIDs, current.VoterStoreIDs)
+				}
+			}
 			manager.RLock()
 			var region *core.RegionInfo
 			for _, cached := range manager.groups[group.ID].Regions {
@@ -111,29 +119,27 @@ func TestManualRebalanceCommitsAndWaitsForEachGroup(t *testing.T) {
 			}
 			manager.RUnlock()
 			require.NotNil(t, region)
-			heartbeat := region.Clone(core.WithLeader(region.GetStorePeer(plan.LeaderStoreID)))
+			heartbeat := region.Clone(core.WithLeader(region.GetStorePeer(target.LeaderStoreID)))
 			manager.ObserveBalanceRegion(heartbeat)
 			_, aligned := manager.GetAndCacheRegionAffinityGroupState(heartbeat)
 			require.True(t, aligned)
 			converged = append(converged, group.ID)
-			changed := 0
-			for id, original := range originalLeaders {
-				if manager.GetAffinityGroupState(id).LeaderStoreID != original {
-					changed++
-				}
-			}
-			require.Equal(t, len(converged), changed, "a later group was committed before the prior group converged")
+			return BalanceActionBuildResult{Ready: true, Complete: true, Checks: 1}
+		case BalanceBuildLeaders:
+			return BalanceActionBuildResult{Ready: true, Complete: true,
+				Actions: BalanceActionSet{LeaderTargets: slices.Clone(target.VoterStoreIDs)}, Checks: 1}
+		case BalanceBuildVoters:
+			return BalanceActionBuildResult{Ready: true, Complete: true, Checks: 1}
+		default:
+			return BalanceActionBuildResult{}
 		}
-		return true, true
-	}
-	manager.SetBalanceActionBuilders(func(_ context.Context, group *GroupState, _ GroupKeyRanges) (BalanceActionSet, bool) {
-		return BalanceActionSet{LeaderTargets: slices.Clone(group.VoterStoreIDs)}, true
-	}, nil, manualBalanceVirtualBuilder, nil, validator)
+	}, nil)
 
 	plans, err := manager.RebalanceAffinityGroup(t.Context(), ids[0], true)
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, len(changedPlanIDs(plans)), 2)
 	require.Len(t, converged, len(changedPlanIDs(plans)))
+	require.Len(t, validated, len(changedPlanIDs(plans)))
 	for _, plan := range plans {
 		require.NotEmpty(t, plan.Revision)
 	}
@@ -142,35 +148,32 @@ func TestManualRebalanceCommitsAndWaitsForEachGroup(t *testing.T) {
 func TestManualFallbackUsesAutomaticImprovement(t *testing.T) {
 	manager := newBalanceRuntimeManager(t)
 	ids := seedManualBalanceGroups(t, manager, []uint64{1, 1, 1, 1, 2, 2})
-	// Cross-table counts make preserving the initial seed preferable during
-	// reconstruction, while table scoring alone still permits a single step.
 	for _, id := range []string{"other-table-1", "other-table-2"} {
 		require.NoError(t, manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: id}}))
 		_, err := manager.UpdateAffinityGroupPeers(id, 2, []uint64{1, 2, 3})
 		require.NoError(t, err)
 	}
-	manager.SetBalanceActionBuilders(func(_ context.Context, _ *GroupState, _ GroupKeyRanges) (BalanceActionSet, bool) {
-		return BalanceActionSet{}, true
-	}, nil, func(_ context.Context, _ *GroupState, _ GroupKeyRanges, target *Group,
-		_ []uint64, _ BalanceActionMode, _ any, _ int) BalanceActionBuildResult {
+	manager.SetBalanceActionBuilder(func(ctx context.Context, group *GroupState, ranges GroupKeyRanges, target *Group,
+		stores []uint64, mode BalanceActionMode, cursor any, budget int) BalanceActionBuildResult {
 		var actions BalanceActionSet
-		if target.ID == ids[0] {
+		if mode == BalanceBuildLeaders && target.ID == ids[0] {
 			actions.LeaderTargets = []uint64{2}
 		}
-		return BalanceActionBuildResult{Actions: actions, Complete: true, Ready: true}
-	}, nil, nil)
+		return BalanceActionBuildResult{Actions: actions, Complete: true, Ready: true, Checks: 1}
+	}, nil)
 	groups := make([]*Group, 0, len(ids))
 	for _, id := range ids {
 		groups = append(groups, &manager.GetAffinityGroupState(id).Group)
 	}
-	auto, err := PlanBalance(groups, BalanceOptions{Stores: []uint64{1, 2, 3},
-		ActionSets: map[string]BalanceActionSet{ids[0]: {LeaderTargets: []uint64{2}}}})
+	auto, err := PlanBalance(groups, BalanceOptions{
+		Stores:     []uint64{1, 2, 3},
+		ActionSets: map[string]BalanceActionSet{ids[0]: {LeaderTargets: []uint64{2}}},
+	})
 	require.NoError(t, err)
 	require.Equal(t, ids[0], changedPlan(auto).GroupID)
 	plans, err := manager.RebalanceAffinityGroup(t.Context(), ids[0], false)
 	require.NoError(t, err)
 	require.Equal(t, []string{ids[0]}, changedPlanIDs(plans))
-	require.Equal(t, balanceIdle, manager.balanceTables[TableGroupPrefix(ids[0])].phase)
 }
 
 func TestManualWaitRejectsRangeChanges(t *testing.T) {
@@ -178,10 +181,8 @@ func TestManualWaitRejectsRangeChanges(t *testing.T) {
 		t.Run(map[bool]string{false: "added", true: "removed"}[remove], func(t *testing.T) {
 			manager := newBalanceRuntimeManager(t)
 			id := seedBalanceGroups(t, manager, []uint64{1})[0]
-			manager.SetBalanceActionBuilder(func(context.Context, *GroupState, GroupKeyRanges) (BalanceActionSet, bool) {
-				return BalanceActionSet{}, true
-			}, nil, func(context.Context, *GroupState, GroupKeyRanges, BalancePlan) (bool, bool) { return true, true })
-			snapshot := manager.balanceSnapshot(id)
+			manager.SetBalanceActionBuilder(manualBalanceVirtualBuilder, nil)
+			snapshot := manager.newBalanceSnapshot(id, true)
 			require.NoError(t, manager.captureBalanceDependencies(t.Context(), snapshot))
 			change := GroupKeyRanges{GroupID: id, KeyRanges: []keyutil.KeyRange{{StartKey: []byte{1}, EndKey: []byte{2}}}}
 			if remove {
@@ -192,100 +193,140 @@ func TestManualWaitRejectsRangeChanges(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 			defer cancel()
 			err := manager.waitManualBalanceConvergence(ctx, snapshot,
-				BalancePlan{GroupID: id, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}})
+				[]BalancePlan{{GroupID: id, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}, Changed: true, Status: "submitted"}})
 			require.ErrorIs(t, err, ErrBalanceConflict)
 		})
 	}
 }
 
+func TestManualConvergenceDropsFailedCursor(t *testing.T) {
+	manager := newBalanceRuntimeManager(t)
+	id := seedBalanceGroups(t, manager, []uint64{1})[0]
+	var calls int
+	reset := false
+	manager.SetBalanceActionBuilder(func(_ context.Context, _ *GroupState, _ GroupKeyRanges, _ *Group,
+		_ []uint64, mode BalanceActionMode, cursor any, _ int) BalanceActionBuildResult {
+		if mode != BalanceCheckConvergence {
+			return BalanceActionBuildResult{Ready: true, Complete: true}
+		}
+		calls++
+		if calls == 1 {
+			return BalanceActionBuildResult{Ready: false, Cursor: new(struct{}), Checks: 1}
+		}
+		require.Nil(t, cursor, "an unready page must not reuse its mutated cursor")
+		reset = true
+		return BalanceActionBuildResult{Ready: true, Complete: true, Checks: 1}
+	}, nil)
+	snapshot := manager.newBalanceSnapshot(id, true)
+	require.NoError(t, manager.captureBalanceDependencies(t.Context(), snapshot))
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	err := manager.waitManualBalanceConvergence(ctx, snapshot, []BalancePlan{{
+		GroupID: id, LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2, 3}, Changed: true, Status: "submitted",
+	}})
+	require.NoError(t, err)
+	require.True(t, reset)
+}
+
 func TestManualNoImprovementReportsTemporaryCandidates(t *testing.T) {
 	manager := newBalanceRuntimeManager(t)
 	ids := seedManualBalanceGroups(t, manager, []uint64{1, 2, 3})
-	manager.SetBalanceActionBuilders(func(_ context.Context, group *GroupState, _ GroupKeyRanges) (BalanceActionSet, bool) {
-		return BalanceActionSet{LeaderTargets: group.VoterStoreIDs}, true
-	}, nil, func(_ context.Context, actual *GroupState, _ GroupKeyRanges, target *Group,
+	manager.SetBalanceActionBuilder(func(_ context.Context, actual *GroupState, _ GroupKeyRanges, target *Group,
 		_ []uint64, mode BalanceActionMode, _ any, _ int) BalanceActionBuildResult {
 		actions := BalanceActionSet{}
 		if mode == BalanceBuildLeaders {
-			actions.LeaderTargets = target.VoterStoreIDs
+			actions.LeaderTargets = slices.Clone(target.VoterStoreIDs)
 		}
-		return BalanceActionBuildResult{Ready: true, Complete: true, Actions: actions, TemporaryBlocked: actual.ID == ids[0]}
-	}, nil, nil)
+		return BalanceActionBuildResult{Ready: true, Complete: true, Actions: actions, Checks: 1,
+			TemporaryBlocked: actual.ID == ids[0] && mode == BalanceBuildLeaders}
+	}, nil)
 	plans, err := manager.RebalanceAffinityGroup(t.Context(), ids[0], false)
 	require.ErrorIs(t, err, ErrBalanceNotReady)
 	require.Len(t, plans, 3)
 	require.Equal(t, "temporarily_blocked", plans[0].Status)
 	require.NotEmpty(t, plans[0].Reason)
 	require.Empty(t, changedPlanIDs(plans))
-	require.Equal(t, balanceIdle, manager.balanceTables[TableGroupPrefix(ids[0])].phase)
 }
 
-func TestManualPartialApplyRetainsGroupStates(t *testing.T) {
-	for _, duringWait := range []bool{false, true} {
-		t.Run(map[bool]string{false: "before-next-group", true: "range-during-wait"}[duringWait], func(t *testing.T) {
-			manager := newBalanceRuntimeManager(t)
-			ids := seedManualBalanceGroups(t, manager, []uint64{1, 1, 1, 1})
-			first := ""
-			validator := func(_ context.Context, group *GroupState, ranges GroupKeyRanges, plan BalancePlan) (bool, bool) {
-				if first != "" && group.ID != first {
-					return false, false
+func TestManualPartialApplyRetainsSubmittedStates(t *testing.T) {
+	manager := newBalanceRuntimeManager(t)
+	ids := seedManualBalanceGroups(t, manager, []uint64{1, 1, 1, 1})
+	validated := make(map[string]*Group)
+	var firstConverged string
+	manager.SetBalanceActionBuilder(func(ctx context.Context, group *GroupState, ranges GroupKeyRanges, target *Group,
+		stores []uint64, mode BalanceActionMode, cursor any, budget int) BalanceActionBuildResult {
+		switch mode {
+		case BalanceBuildLeaders:
+			return BalanceActionBuildResult{Ready: true, Complete: true,
+				Actions: BalanceActionSet{LeaderTargets: slices.Clone(target.VoterStoreIDs)}, Checks: 1}
+		case BalanceBuildVoters:
+			return BalanceActionBuildResult{Ready: true, Complete: true, Checks: 1}
+		case BalanceValidateTarget:
+			validated[target.ID] = planTarget(BalancePlan{GroupID: target.ID, LeaderStoreID: target.LeaderStoreID,
+				VoterStoreIDs: target.VoterStoreIDs})
+			return BalanceActionBuildResult{Ready: true, Complete: true}
+		case BalanceCheckConvergence:
+			if firstConverged == "" {
+				require.NotEmpty(t, validated)
+				for id, expected := range validated {
+					current := manager.GetAffinityGroupState(id)
+					require.NotNil(t, current)
+					require.Equal(t, expected.LeaderStoreID, current.LeaderStoreID,
+						"all targets must be submitted before convergence starts")
 				}
-				if group.LeaderStoreID == plan.LeaderStoreID && plan.LeaderStoreID != 1 {
-					first = group.ID
-					if duringWait {
-						require.NoError(t, manager.UpdateAffinityGroupKeyRanges(nil, []GroupKeyRanges{ranges}))
-					} else {
-						manager.RLock()
-						var region *core.RegionInfo
-						for _, cached := range manager.groups[group.ID].Regions {
-							region = cached.balanceInput()
-							break
-						}
-						manager.RUnlock()
-						require.NotNil(t, region)
-						heartbeat := region.Clone(core.WithLeader(region.GetStorePeer(plan.LeaderStoreID)))
-						manager.ObserveBalanceRegion(heartbeat)
-						manager.GetAndCacheRegionAffinityGroupState(heartbeat)
-					}
+				firstConverged = group.ID
+				manager.RLock()
+				var region *core.RegionInfo
+				for _, cached := range manager.groups[group.ID].Regions {
+					region = cached.balanceInput()
+					break
 				}
-				return true, true
+				manager.RUnlock()
+				require.NotNil(t, region)
+				heartbeat := region.Clone(core.WithLeader(region.GetStorePeer(target.LeaderStoreID)))
+				manager.ObserveBalanceRegion(heartbeat)
+				manager.GetAndCacheRegionAffinityGroupState(heartbeat)
+				require.NoError(t, manager.UpdateAffinityGroupKeyRanges(nil, []GroupKeyRanges{ranges}))
+				return BalanceActionBuildResult{Ready: true, Complete: true, Checks: 1}
 			}
-			manager.SetBalanceActionBuilders(func(_ context.Context, group *GroupState, _ GroupKeyRanges) (BalanceActionSet, bool) {
-				return BalanceActionSet{LeaderTargets: group.VoterStoreIDs}, true
-			}, nil, manualBalanceVirtualBuilder, nil, validator)
-			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-			defer cancel()
-			plans, err := manager.RebalanceAffinityGroup(ctx, ids[0], true)
-			if duringWait {
-				require.ErrorIs(t, err, ErrBalanceConflict)
-			} else {
-				require.ErrorIs(t, err, ErrBalanceNotReady)
+			return BalanceActionBuildResult{Ready: true, Complete: true, Checks: 1}
+		default:
+			return BalanceActionBuildResult{}
+		}
+	}, nil)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	plans, err := manager.RebalanceAffinityGroup(ctx, ids[0], true)
+	require.ErrorIs(t, err, ErrBalanceConflict)
+	require.Len(t, plans, len(ids))
+	require.NotEmpty(t, firstConverged)
+	applied, submitted, failures := 0, 0, 0
+	for _, plan := range plans {
+		if !plan.Changed {
+			continue
+		}
+		if plan.GroupID == firstConverged {
+			require.Equal(t, "applied", plan.Status)
+			applied++
+		} else {
+			require.Equal(t, "submitted", plan.Status)
+			if plan.Reason != "" {
+				failures++
 			}
-			require.Len(t, plans, len(ids))
-			require.NotEmpty(t, first)
-			notSubmitted, completed := 0, 0
-			for _, plan := range plans {
-				if plan.GroupID == first {
-					if duringWait {
-						require.Equal(t, "submitted", plan.Status)
-						require.NotEmpty(t, plan.Reason)
-					} else {
-						require.Equal(t, "applied", plan.Status)
-					}
-					completed++
-				} else if plan.Changed {
-					require.Equal(t, "not_submitted", plan.Status)
-					notSubmitted++
-				}
-			}
-			require.Equal(t, 1, completed)
-			require.Positive(t, notSubmitted)
-		})
+			submitted++
+		}
 	}
+	require.Equal(t, 1, applied)
+	require.Positive(t, submitted)
+	require.Equal(t, 1, failures)
 }
 
 func manualBalanceVirtualBuilder(_ context.Context, _ *GroupState, _ GroupKeyRanges, target *Group,
-	_ []uint64, _ BalanceActionMode, _ any, _ int) BalanceActionBuildResult {
+	_ []uint64, mode BalanceActionMode, _ any, _ int) BalanceActionBuildResult {
+	if mode == BalanceValidateTarget || mode == BalanceCheckConvergence {
+		return BalanceActionBuildResult{Ready: true, Complete: true, Checks: 1}
+	}
 	return BalanceActionBuildResult{
 		Actions:  BalanceActionSet{LeaderTargets: slices.Clone(target.VoterStoreIDs)},
 		Complete: true,

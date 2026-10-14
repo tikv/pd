@@ -102,7 +102,7 @@ type UpdateAffinityGroupPeersRequest struct {
 
 // RebalanceAffinityGroupRequest defines the input for previewing or applying an affinity rebalance.
 type RebalanceAffinityGroupRequest struct {
-	// Apply submits one group at a time and waits for convergence before continuing.
+	// Apply submits the complete table plan in capacity-bounded batches and then waits for convergence.
 	Apply bool `json:"apply"`
 }
 
@@ -399,7 +399,7 @@ func UpdateAffinityGroupPeers(c *gin.Context) {
 //	@Tags		affinity-groups
 //	@Summary	Preview or apply a complete affinity rebalance for a table.
 //	@Param		group_id	path	string						true	"The group id of the affinity group"
-//	@Param		body		body	RebalanceAffinityGroupRequest	true	"Apply submits groups sequentially and waits for convergence"
+	//	@Param		body		body	RebalanceAffinityGroupRequest	true	"Apply submits table targets in bounded batches and waits for convergence"
 //	@Produce	json
 //	@Success	200	{array}	affinity.BalancePlan	"Preview targets or completed group changes"
 //	@Failure	400	{string}	string	"The input is invalid."

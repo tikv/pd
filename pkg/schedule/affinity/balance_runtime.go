@@ -464,12 +464,12 @@ func (m *Manager) balanceTable(ctx context.Context, groupID string, apply bool) 
 	return m.balanceTableWithBudget(ctx, groupID, apply, 0)
 }
 
-// RebalanceAffinityGroup previews or applies one legal balance step.
+// RebalanceAffinityGroup previews or applies a complete table rebalance.
 func (m *Manager) RebalanceAffinityGroup(ctx context.Context, groupID string, apply bool) ([]BalancePlan, error) {
 	if m.GetAffinityGroupState(groupID) == nil {
 		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
 	}
-	return m.balanceTable(ctx, groupID, apply)
+	return m.rebalanceTable(ctx, groupID, apply)
 }
 
 func (m *Manager) balanceTableWithBudget(ctx context.Context, groupID string, apply bool, budget int) ([]BalancePlan, error) {

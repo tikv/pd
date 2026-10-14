@@ -1769,7 +1769,7 @@ func getAffinityGroup(c *gin.Context) {
 // @Tags     affinity-groups
 // @Summary  Preview or apply a complete affinity rebalance for a table.
 // @Param    group_id  path  string                             true  "The group id of the affinity group"
-// @Param    body      body  RebalanceAffinityGroupRequest      true  "Apply submits groups sequentially and waits for convergence"
+// @Param    body      body  RebalanceAffinityGroupRequest      true  "Apply submits table targets in bounded batches and waits for convergence"
 // @Produce  json
 // @Success  200  {array}   affinity.BalancePlan  "Preview targets or completed group changes"
 // @Failure  400  {string}  string                "The input is invalid."
@@ -1780,7 +1780,7 @@ func getAffinityGroup(c *gin.Context) {
 // @Failure  500  {string}  string                "Scheduling service failed to proceed the request."
 // @Router   /affinity-groups/{group_id}/rebalance [post]
 // Apply failures preserve per-group progress in affinity.BalanceApplyResult.
-// Planning is limited to 30 seconds; sequential execution to 30 minutes.
+// Planning is limited to 30 seconds; execution and convergence wait are limited to 30 minutes.
 func rebalanceAffinityGroup(c *gin.Context) {
 	manager, ok := getAffinityManager(c)
 	if !ok {
@@ -1828,7 +1828,7 @@ func rebalanceAffinityGroup(c *gin.Context) {
 
 // RebalanceAffinityGroupRequest defines the input for previewing or applying an affinity rebalance.
 type RebalanceAffinityGroupRequest struct {
-	// Apply submits one group at a time and waits for convergence before continuing.
+	// Apply submits the complete table plan in capacity-bounded batches and then waits for convergence.
 	Apply bool `json:"apply"`
 }
 

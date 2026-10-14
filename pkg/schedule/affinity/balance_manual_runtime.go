@@ -20,7 +20,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/tikv/pd/pkg/errs"
@@ -30,13 +29,7 @@ import (
 
 const manualBalanceBuildPageSize = 256
 
-// Manual table rebalancing builds every group's legal actions before it can
-// publish one complete final plan. Keep an unbounded request context from
-// holding the table lock forever while still allowing normal-sized tables to
-// finish in one request.
 const manualBalancePlanningTimeout = 30 * time.Second
-
-// Execution has a separate limit because Region migrations can outlive planning.
 const manualBalanceExecutionTimeout = 30 * time.Minute
 
 // BalanceApplyResult preserves per-group execution state when apply stops.
@@ -54,10 +47,10 @@ func (m *Manager) rebalanceTable(ctx context.Context, groupID string, apply bool
 	stopExecutionManagerContext := context.AfterFunc(m.ctx, cancelExecution)
 	defer stopExecutionManagerContext()
 	defer cancelExecution()
-	planningCtx, cancel := context.WithTimeout(ctx, manualBalancePlanningTimeout)
-	stopManagerContext := context.AfterFunc(m.ctx, cancel)
-	defer stopManagerContext()
-	defer cancel()
+	planningCtx, cancelPlanning := context.WithTimeout(ctx, manualBalancePlanningTimeout)
+	stopPlanningManagerContext := context.AfterFunc(m.ctx, cancelPlanning)
+	defer stopPlanningManagerContext()
+	defer cancelPlanning()
 	if err := planningCtx.Err(); err != nil {
 		return nil, err
 	}
@@ -73,121 +66,33 @@ func (m *Manager) rebalanceTable(ctx context.Context, groupID string, apply bool
 	}
 	defer m.releaseBalanceTableLock(tableID, tableLock)
 	defer tableLock.Unlock()
-	for {
-		ready, _, pending := m.checkBalanceConvergence(planningCtx, tableID, manualBalanceBuildPageSize)
-		if err := planningCtx.Err(); err != nil {
-			return nil, err
-		}
-		if ready {
-			break
-		}
-		if !pending {
-			return nil, ErrBalanceNotReady
-		}
-	}
 
-	var (
-		snapshot       *balanceSnapshot
-		wasStable      bool
-		restoreStable  bool
-		originalFinger balanceFingerprint
-	)
-	m.refreshBalanceStores()
-	m.Lock()
-	if state := m.balanceTables[tableID]; state != nil {
-		originalFinger = m.balanceFingerprintLocked(state)
-		wasStable = state.phase == balanceStable && state.fingerprint == originalFinger
-		if wasStable {
-			state.phase = balanceIdle
-		}
-	}
-	m.Unlock()
-	defer func() {
-		if snapshot != nil {
-			m.releaseBalanceDependencies(snapshot)
-		}
-		if !wasStable || !restoreStable {
-			return
-		}
-		m.Lock()
-		if state := m.balanceTables[tableID]; state != nil && state.phase == balanceIdle &&
-			m.balanceFingerprintLocked(state) == originalFinger {
-			state.phase = balanceStable
-			state.fingerprint = originalFinger
-		}
-		m.Unlock()
-	}()
-
-	snapshot = m.balanceSnapshot(groupID)
+	snapshot := m.newBalanceSnapshot(groupID, true)
 	if snapshot == nil {
 		return nil, ErrBalanceNotReady
 	}
-	if snapshot.virtual == nil {
-		return nil, errors.New("virtual balance action builder is not configured")
-	}
-	if err := m.captureBalanceDependencies(planningCtx, snapshot); err != nil {
-		if errs.ErrEtcdTxnConflict.Equal(err) {
-			return nil, ErrBalanceConflict
-		}
-		return nil, err
-	}
-	if !m.balanceSnapshotCurrent(snapshot) {
-		return nil, ErrBalanceConflict
-	}
-
-	slices.SortFunc(snapshot.groups, func(a, b *GroupState) int { return strings.Compare(a.ID, b.ID) })
 	groups := make([]*Group, 0, len(snapshot.groups))
-	autoGroups := make([]*GroupState, 0, len(snapshot.groups))
-	groupStates := make(map[string]*GroupState, len(snapshot.groups))
-	var selected *GroupState
 	for _, group := range snapshot.groups {
-		groupStates[group.ID] = group
 		groups = append(groups, &group.Group)
-		if group.ID == groupID {
-			selected = group
-		}
-		if group.BalancePolicy == BalancePolicyFixed {
-			continue
-		}
+	}
+	autoGroups := snapshot.autoGroups
+	autoByID := make(map[string]*GroupState, len(autoGroups))
+	for _, group := range autoGroups {
+		autoByID[group.ID] = group
 		if group.Phase != PhaseStable || !group.AffinitySchedulingAllowed {
 			return nil, ErrBalanceNotReady
 		}
-		autoGroups = append(autoGroups, group)
 	}
-	if selected == nil {
-		return nil, ErrBalanceConflict
-	}
-	if len(autoGroups) == 0 {
-		current, err := m.balanceDependenciesCurrent(planningCtx, snapshot)
-		if err != nil {
-			return nil, err
-		}
-		if !current || !m.balanceSnapshotCurrent(snapshot) {
-			return nil, ErrBalanceConflict
-		}
-		plans := unchangedManualBalancePlans(groups)
-		revision, err := manualBalanceRevision(snapshot)
-		if err != nil {
-			return nil, err
-		}
-		for i := range plans {
-			plans[i].Revision = revision
-		}
-		m.Lock()
-		if state := m.balanceTables[tableID]; state != nil && m.balanceFingerprintLocked(state) == snapshot.fingerprint {
-			state.phase = balanceStable
-			state.fingerprint = snapshot.fingerprint
-		}
-		m.Unlock()
-		return plans, nil
-	}
-	if len(snapshot.stores) == 0 {
+	if len(autoGroups) > 0 && len(snapshot.stores) == 0 {
 		return nil, ErrBalanceNotReady
 	}
 
+	// Scan every automatic group's ranges before capturing durable dependencies.
+	// This request-local snapshot leaves automatic worker state untouched.
 	actions := make(map[string]BalanceActionSet, len(autoGroups))
+	blockedGroups := make(map[string]struct{})
 	for _, group := range autoGroups {
-		built, ready, err := m.buildManualBalanceActions(planningCtx, snapshot, group, &group.Group)
+		built, ready, err := m.buildManualBalanceActions(planningCtx, snapshot, group, &group.Group, blockedGroups)
 		if err != nil {
 			return nil, err
 		}
@@ -196,17 +101,24 @@ func (m *Manager) rebalanceTable(ctx context.Context, groupID string, apply bool
 		}
 		actions[group.ID] = built
 	}
+	if err := m.captureBalanceDependencies(planningCtx, snapshot); err != nil {
+		if errs.ErrEtcdTxnConflict.Equal(err) {
+			return nil, ErrBalanceConflict
+		}
+		return nil, err
+	}
+
 	var rebuildErr error
 	plans, err := PlanTableRebalance(planningCtx, groups, BalanceOptions{
 		Stores: snapshot.stores, ActionSets: actions,
 		GlobalLeaderCounts: snapshot.globalLeaders, GlobalVoterCounts: snapshot.globalVoters,
 	}, func(buildCtx context.Context, original, virtual *Group) (BalanceActionSet, bool) {
-		state := groupStates[original.ID]
+		state := autoByID[original.ID]
 		if state == nil {
-			rebuildErr = errors.New("virtual balance target has no table group state")
+			rebuildErr = errors.New("manual balance target has no table group state")
 			return BalanceActionSet{}, false
 		}
-		built, ready, buildErr := m.buildManualBalanceActions(buildCtx, snapshot, state, virtual)
+		built, ready, buildErr := m.buildManualBalanceActions(buildCtx, snapshot, state, virtual, blockedGroups)
 		if buildErr != nil {
 			rebuildErr = buildErr
 		}
@@ -228,7 +140,7 @@ func (m *Manager) rebalanceTable(ctx context.Context, groupID string, apply bool
 			continue
 		}
 		changed = true
-		group := groupStates[plan.GroupID]
+		group := autoByID[plan.GroupID]
 		if group == nil || group.BalancePolicy == BalancePolicyFixed {
 			return nil, ErrBalanceConflict
 		}
@@ -241,19 +153,10 @@ func (m *Manager) rebalanceTable(ctx context.Context, groupID string, apply bool
 		if err := m.checkBalanceTargetStores(candidate.LeaderStoreID, candidate.VoterStoreIDs); err != nil {
 			return nil, ErrBalanceConflict
 		}
-		if snapshot.validator != nil {
-			ready, legal := snapshot.validator(planningCtx, group, snapshot.ranges[group.ID], plan)
-			if !ready {
-				return nil, ErrBalanceNotReady
-			}
-			if !legal {
-				return nil, ErrBalanceConflict
-			}
-		}
 	}
-	if !changed && len(snapshot.blockedGroups) > 0 {
+	if !changed && len(blockedGroups) > 0 {
 		for i := range plans {
-			if _, blocked := snapshot.blockedGroups[plans[i].GroupID]; blocked {
+			if _, blocked := blockedGroups[plans[i].GroupID]; blocked {
 				plans[i].Status = "temporarily_blocked"
 				plans[i].Reason = "some balance candidates are temporarily unavailable"
 			}
@@ -265,10 +168,7 @@ func (m *Manager) rebalanceTable(ctx context.Context, groupID string, apply bool
 	if err != nil {
 		return nil, err
 	}
-	if err := planningCtx.Err(); err != nil {
-		return nil, err
-	}
-	if !current || !m.balanceSnapshotCurrent(snapshot) {
+	if !current {
 		return nil, ErrBalanceConflict
 	}
 	revision, err := manualBalanceRevision(snapshot)
@@ -279,108 +179,20 @@ func (m *Manager) rebalanceTable(ctx context.Context, groupID string, apply bool
 		plans[i].Revision = revision
 	}
 	if !changed {
-		// A reconstruction with no better final layout does not prove that
-		// the current layout has no improving automatic single-step action.
-		restoreStable = true
 		return plans, nil
 	}
 	if !apply {
-		restoreStable = true
+		for _, plan := range plans {
+			if !plan.Changed {
+				continue
+			}
+			if err := validateManualBalanceTarget(planningCtx, snapshot, autoByID[plan.GroupID], planTarget(plan)); err != nil {
+				return nil, err
+			}
+		}
 		return plans, nil
 	}
-	if snapshot.validator == nil {
-		return nil, ErrBalanceNotReady
-	}
-	expectedGroups := make(map[string]Group, len(snapshot.groups))
-	for _, group := range snapshot.groups {
-		expectedGroups[group.ID] = group.Group
-	}
-	committedGroups := 0
-	for i := range plans {
-		if plans[i].Changed {
-			plans[i].Status = "not_submitted"
-		}
-	}
-	fail := func(err error, index int) ([]BalancePlan, error) {
-		plans[index].Reason = err.Error()
-		return plans, manualBalancePartialError(err, committedGroups)
-	}
-	for planIndex, plan := range plans {
-		if !plan.Changed {
-			continue
-		}
-		if err := executionCtx.Err(); err != nil {
-			return fail(err, planIndex)
-		}
-		current := snapshot
-		if committedGroups != 0 {
-			current, err = m.nextManualBalanceSnapshot(executionCtx, groupID, snapshot, expectedGroups)
-			if err != nil {
-				return fail(err, planIndex)
-			}
-		}
-		group := findManualBalanceGroup(current.groups, plan.GroupID)
-		if group == nil {
-			if current != snapshot {
-				m.releaseBalanceDependencies(current)
-			}
-			return fail(ErrBalanceConflict, planIndex)
-		}
-		ready, legal := current.validator(executionCtx, group, current.ranges[plan.GroupID], plan)
-		if err := executionCtx.Err(); err != nil {
-			if current != snapshot {
-				m.releaseBalanceDependencies(current)
-			}
-			return fail(err, planIndex)
-		}
-		if !ready || !legal {
-			if current != snapshot {
-				m.releaseBalanceDependencies(current)
-			}
-			reason := ErrBalanceConflict
-			if !ready {
-				reason = ErrBalanceNotReady
-			}
-			return fail(reason, planIndex)
-		}
-		committed, commitErr := m.commitBalancePlans(executionCtx, current, []BalancePlan{plan})
-		if commitErr != nil {
-			plans[planIndex].Status = "unknown"
-			return fail(commitErr, planIndex)
-		}
-		if !committed {
-			return fail(ErrBalanceConflict, planIndex)
-		}
-		committedGroups++
-		plans[planIndex].Status = "submitted"
-		expected := expectedGroups[plan.GroupID]
-		expected.LeaderStoreID = plan.LeaderStoreID
-		expected.VoterStoreIDs = normalizeVoters(plan.VoterStoreIDs)
-		expectedGroups[plan.GroupID] = expected
-		// Capture our new durable table generation before waiting. Metadata
-		// must still match the original plan, including its range generation.
-		waitSnapshot, err := m.nextManualBalanceSnapshot(executionCtx, groupID, snapshot, expectedGroups)
-		if err != nil {
-			return fail(err, planIndex)
-		}
-		waitErr := m.waitManualBalanceConvergence(executionCtx, waitSnapshot, plan)
-		m.releaseBalanceDependencies(waitSnapshot)
-		if waitErr != nil {
-			return fail(waitErr, planIndex)
-		}
-		plans[planIndex].Status = "applied"
-	}
-	return plans, nil
-}
-
-func unchangedManualBalancePlans(groups []*Group) []BalancePlan {
-	original := make(map[string]*Group, len(groups))
-	for _, group := range groups {
-		original[group.ID] = group
-	}
-	leaders, voters := countsForGroups(groups)
-	score := calcBalanceScore(leaders, voters)
-	return finalBalancePlans(original, groups, score, score, nil, false)
+	return m.applyManualBalancePlans(executionCtx, snapshot, plans)
 }
 
 func manualBalanceRevision(snapshot *balanceSnapshot) (string, error) {
@@ -398,171 +210,294 @@ func manualBalanceRevision(snapshot *balanceSnapshot) (string, error) {
 	return string(encoded), nil
 }
 
-func (m *Manager) nextManualBalanceSnapshot(ctx context.Context, groupID string, original *balanceSnapshot,
-	expectedGroups map[string]Group) (*balanceSnapshot, error) {
-	current := m.balanceSnapshot(groupID)
-	if current == nil {
-		return nil, ErrBalanceConflict
-	}
-	if err := m.captureBalanceDependencies(ctx, current); err != nil {
-		m.releaseBalanceDependencies(current)
-		if errs.ErrEtcdTxnConflict.Equal(err) {
-			return nil, ErrBalanceConflict
+func (m *Manager) applyManualBalancePlans(ctx context.Context, snapshot *balanceSnapshot, plans []BalancePlan) ([]BalancePlan, error) {
+	changed := make([]int, 0, len(plans))
+	for i := range plans {
+		if plans[i].Changed {
+			plans[i].Status = "not_submitted"
+			changed = append(changed, i)
 		}
-		return nil, err
 	}
-	metadataKey := endpoint.AffinityTableMetadataRevisionKey(original.tableID)
-	if current.fingerprint.stores != original.fingerprint.stores || current.fingerprint.rules != original.fingerprint.rules ||
-		current.dependencies[metadataKey] != original.dependencies[metadataKey] || !manualBalanceTargetsMatch(current.groups, expectedGroups) {
-		m.releaseBalanceDependencies(current)
-		return nil, ErrBalanceConflict
+	batchSize := max(1, endpoint.MaxAffinityTxnBatchOps)
+	submitted := 0
+	for start := 0; start < len(changed); start += batchSize {
+		end := min(start+batchSize, len(changed))
+		batch := make([]BalancePlan, 0, end-start)
+		for _, index := range changed[start:end] {
+			batch = append(batch, plans[index])
+		}
+		fail := func(err error, index int) ([]BalancePlan, error) {
+			plans[index].Reason = err.Error()
+			return plans, manualBalancePartialError(err, submitted)
+		}
+		if err := ctx.Err(); err != nil {
+			return fail(err, changed[start])
+		}
+		current, err := m.balanceDependenciesCurrent(ctx, snapshot)
+		if err != nil {
+			return fail(err, changed[start])
+		}
+		if !current || !m.manualBalanceTargetsCurrent(snapshot) {
+			return fail(ErrBalanceConflict, changed[start])
+		}
+		for _, index := range changed[start:end] {
+			group := findManualBalanceGroup(snapshot.groups, plans[index].GroupID)
+			if err := validateManualBalanceTarget(ctx, snapshot, group, planTarget(plans[index])); err != nil {
+				return fail(err, index)
+			}
+		}
+
+		committed, err := m.commitBalancePlans(ctx, snapshot, batch)
+		if err != nil {
+			for _, index := range changed[start:end] {
+				plans[index].Status = "unknown"
+				plans[index].Reason = err.Error()
+			}
+			return plans, manualBalancePartialError(err, submitted)
+		}
+		if !committed {
+			return fail(ErrBalanceConflict, changed[start])
+		}
+		for _, index := range changed[start:end] {
+			plans[index].Status = "submitted"
+		}
+		submitted += len(batch)
 	}
-	current.conditions = slices.Clone(original.conditions)
-	if !m.balanceSnapshotCurrent(current) {
-		m.releaseBalanceDependencies(current)
-		return nil, ErrBalanceConflict
+
+	if err := m.waitManualBalanceConvergence(ctx, snapshot, plans); err != nil {
+		return plans, manualBalancePartialError(err, submitted)
 	}
-	return current, nil
+	return plans, nil
 }
 
-func manualBalanceTargetsMatch(groups []*GroupState, expected map[string]Group) bool {
-	if len(groups) != len(expected) {
-		return false
-	}
-	for _, group := range groups {
-		want, ok := expected[group.ID]
-		if !ok || group.String() != want.String() {
-			return false
-		}
-	}
-	return true
+func planTarget(plan BalancePlan) *Group {
+	return &Group{ID: plan.GroupID, LeaderStoreID: plan.LeaderStoreID, VoterStoreIDs: slices.Clone(plan.VoterStoreIDs)}
 }
 
 func findManualBalanceGroup(groups []*GroupState, groupID string) *GroupState {
 	for _, group := range groups {
-		if group.ID == groupID {
+		if group != nil && group.ID == groupID {
 			return group
 		}
 	}
 	return nil
 }
 
-func (m *Manager) waitManualBalanceConvergence(ctx context.Context, snapshot *balanceSnapshot, plan BalancePlan) error {
+func validateManualBalanceTarget(ctx context.Context, snapshot *balanceSnapshot, actual *GroupState, target *Group) error {
+	if actual == nil || target == nil {
+		return ErrBalanceConflict
+	}
+	page, ready, err := buildManualBalanceActionMode(ctx, snapshot, actual, target, BalanceValidateTarget, nil)
+	if err != nil {
+		return err
+	}
+	if page.InvalidTarget {
+		return ErrBalanceConflict
+	}
+	if !ready {
+		return ErrBalanceNotReady
+	}
+	return nil
+}
+
+func (m *Manager) waitManualBalanceConvergence(ctx context.Context, snapshot *balanceSnapshot, plans []BalancePlan) error {
+	changed := make([]int, 0, len(plans))
+	for i := range plans {
+		if plans[i].Changed {
+			changed = append(changed, i)
+		}
+	}
+	cursors := make(map[string]any, len(changed))
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
-	for {
-		if err := ctx.Err(); err != nil {
-			return err
+	next := 0
+	failPending := func(err error) error {
+		for _, index := range changed {
+			if plans[index].Status == "submitted" {
+				plans[index].Reason = err.Error()
+				break
+			}
 		}
-		current, err := m.balancePersistentDependenciesCurrent(ctx, snapshot)
+		return err
+	}
+	for remaining := len(changed); remaining > 0; {
+		current, err := m.balanceDependenciesCurrent(ctx, snapshot)
 		if err != nil {
-			return err
+			return failPending(err)
 		}
-		if !current {
-			return ErrBalanceConflict
+		if !current || !m.manualBalanceTargetsCurrent(snapshot) {
+			return failPending(ErrBalanceConflict)
 		}
-		group := m.GetAffinityGroupState(plan.GroupID)
-		if group == nil || group.LeaderStoreID != plan.LeaderStoreID ||
-			!slices.Equal(normalizeVoters(group.VoterStoreIDs), normalizeVoters(plan.VoterStoreIDs)) {
-			return ErrBalanceConflict
-		}
-		ready, legal := snapshot.validator(ctx, group, snapshot.ranges[plan.GroupID], plan)
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if ready && legal {
-			current, err := m.balancePersistentDependenciesCurrent(ctx, snapshot)
+		progress := false
+		for step := range changed {
+			index := changed[(next+step)%len(changed)]
+			if plans[index].Status == "applied" {
+				continue
+			}
+			// Recheck before each group so a range or target change observed
+			// while an earlier group was being inspected stops the same pass.
+			// This keeps the result genuinely partial instead of marking later
+			// groups converged against an obsolete range snapshot.
+			current, err := m.balanceDependenciesCurrent(ctx, snapshot)
 			if err != nil {
+				return failPending(err)
+			}
+			if !current || !m.manualBalanceTargetsCurrent(snapshot) {
+				return failPending(ErrBalanceConflict)
+			}
+			fail := func(err error) error {
+				plans[index].Reason = err.Error()
 				return err
 			}
-			if !current {
-				return ErrBalanceConflict
+			if err := ctx.Err(); err != nil {
+				return fail(err)
 			}
-			if current := m.GetAffinityGroupState(plan.GroupID); current != nil && current.Phase == PhaseStable {
-				m.Lock()
-				if state := m.balanceTables[snapshot.tableID]; state != nil {
-					state.converging = nil
-					state.phase = balanceIdle
-				}
-				m.Unlock()
-				return nil
+			plan := plans[index]
+			actual := m.GetAffinityGroupState(plan.GroupID)
+			if actual == nil {
+				return fail(ErrBalanceConflict)
 			}
+			cursor := cursors[plan.GroupID]
+			page := snapshot.builder(ctx, actual, snapshot.ranges[plan.GroupID], planTarget(plan), snapshot.stores,
+				BalanceCheckConvergence, cursor, manualBalanceBuildPageSize)
+			if err := ctx.Err(); err != nil {
+				return fail(err)
+			}
+			if page.Checks < 0 || page.Checks > manualBalanceBuildPageSize {
+				return fail(errors.New("manual balance convergence checker returned an invalid check count"))
+			}
+			if page.InvalidTarget {
+				return fail(ErrBalanceConflict)
+			}
+			if page.BlockTable {
+				delete(cursors, plan.GroupID)
+				continue
+			}
+			if !page.Ready {
+				delete(cursors, plan.GroupID)
+				continue
+			}
+			if page.Complete {
+				plans[index].Status = "applied"
+				delete(cursors, plan.GroupID)
+				remaining--
+				progress = true
+				continue
+			}
+			if page.Checks == 0 || page.Cursor == nil {
+				return fail(errors.New("manual balance convergence checker made no paging progress"))
+			}
+			cursors[plan.GroupID] = page.Cursor
+			progress = true
 		}
-		if ready && !legal {
-			return ErrBalanceConflict
+		if remaining == 0 {
+			current, err := m.balanceDependenciesCurrent(ctx, snapshot)
+			if err != nil {
+				return failPending(err)
+			}
+			if !current || !m.manualBalanceTargetsCurrent(snapshot) {
+				return failPending(ErrBalanceConflict)
+			}
+			return nil
+		}
+		next = (next + 1) % len(changed)
+		if progress {
+			continue
 		}
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return failPending(ctx.Err())
 		case <-m.ctx.Done():
-			return context.Canceled
+			return failPending(context.Canceled)
 		case <-ticker.C:
 		}
 	}
+	return nil
 }
 
-func manualBalancePartialError(err error, committed int) error {
-	if committed == 0 {
+func (m *Manager) manualBalanceTargetsCurrent(snapshot *balanceSnapshot) bool {
+	m.metaMutex.Lock()
+	defer m.metaMutex.Unlock()
+	m.RLock()
+	defer m.RUnlock()
+	for _, expected := range snapshot.groups {
+		actual := m.groups[expected.ID]
+		if actual == nil || actual.LeaderStoreID != expected.LeaderStoreID ||
+			!slices.Equal(normalizeVoters(actual.VoterStoreIDs), normalizeVoters(expected.VoterStoreIDs)) ||
+			!balanceRangesEqual(m.keyRanges[expected.ID], snapshot.ranges[expected.ID]) {
+			return false
+		}
+	}
+	return true
+}
+
+func manualBalancePartialError(err error, submitted int) error {
+	if submitted == 0 {
 		return err
 	}
-	return fmt.Errorf("%w: already committed %d groups", err, committed)
+	return fmt.Errorf("%w: already committed %d groups", err, submitted)
 }
 
-func (*Manager) buildManualBalanceActions(ctx context.Context, snapshot *balanceSnapshot,
-	actual *GroupState, target *Group) (BalanceActionSet, bool, error) {
-	leaders, ready, err := buildManualBalanceActionMode(ctx, snapshot, actual, target, BalanceBuildLeaders)
+func (m *Manager) buildManualBalanceActions(ctx context.Context, snapshot *balanceSnapshot,
+	actual *GroupState, target *Group, blockedGroups map[string]struct{}) (BalanceActionSet, bool, error) {
+	leaders, ready, err := buildManualBalanceActionMode(ctx, snapshot, actual, target, BalanceBuildLeaders, blockedGroups)
 	if err != nil || !ready {
 		return BalanceActionSet{}, ready, err
 	}
-	voters, ready, err := buildManualBalanceActionMode(ctx, snapshot, actual, target, BalanceBuildVoters)
+	if leaders.InvalidTarget {
+		return BalanceActionSet{}, false, ErrBalanceConflict
+	}
+	voters, ready, err := buildManualBalanceActionMode(ctx, snapshot, actual, target, BalanceBuildVoters, blockedGroups)
 	if err != nil || !ready {
 		return BalanceActionSet{}, ready, err
+	}
+	if voters.InvalidTarget {
+		return BalanceActionSet{}, false, ErrBalanceConflict
 	}
 	voters.Actions.LeaderTargets = slices.Clone(leaders.Actions.LeaderTargets)
 	return voters.Actions, true, nil
 }
 
 func buildManualBalanceActionMode(ctx context.Context, snapshot *balanceSnapshot, actual *GroupState,
-	target *Group, mode BalanceActionMode) (BalanceActionBuildResult, bool, error) {
+	target *Group, mode BalanceActionMode, blockedGroups map[string]struct{}) (BalanceActionBuildResult, bool, error) {
 	var cursor any
 	for {
 		if err := ctx.Err(); err != nil {
 			return BalanceActionBuildResult{}, false, err
 		}
-		page := snapshot.virtual(ctx, actual, snapshot.ranges[actual.ID], target, snapshot.stores, mode, cursor, manualBalanceBuildPageSize)
+		page := snapshot.builder(ctx, actual, snapshot.ranges[actual.ID], target, snapshot.stores, mode, cursor, manualBalanceBuildPageSize)
 		if err := ctx.Err(); err != nil {
 			return BalanceActionBuildResult{}, false, err
 		}
-		if page.BlockTable || !page.Ready {
-			return BalanceActionBuildResult{}, false, nil
-		}
 		if page.Checks < 0 || page.Checks > manualBalanceBuildPageSize {
-			return BalanceActionBuildResult{}, false, errors.New("virtual balance action builder returned an invalid check count")
+			return BalanceActionBuildResult{}, false, errors.New("manual balance action builder returned an invalid check count")
 		}
-		if page.TemporaryBlocked {
-			snapshot.blockedGroups[actual.ID] = struct{}{}
+		if page.InvalidTarget {
+			return page, true, nil
+		}
+		if page.BlockTable || !page.Ready {
+			return page, false, nil
+		}
+		if page.TemporaryBlocked && blockedGroups != nil {
+			blockedGroups[actual.ID] = struct{}{}
 		}
 		if page.Complete {
 			return page, true, nil
 		}
 		if page.Checks == 0 || page.Cursor == nil {
-			return BalanceActionBuildResult{}, false, errors.New("virtual balance action builder made no paging progress")
+			return BalanceActionBuildResult{}, false, errors.New("manual balance action builder made no paging progress")
 		}
 		cursor = page.Cursor
 	}
 }
 
 func (m *Manager) balanceDependenciesCurrent(ctx context.Context, snapshot *balanceSnapshot) (bool, error) {
-	if !m.balanceSnapshotCurrent(snapshot) {
+	m.RLock()
+	ruleRevision := m.balanceRuleRevision
+	m.RUnlock()
+	if ruleRevision != nil && ruleRevision() != snapshot.ruleRevision {
 		return false, nil
 	}
-	current, err := m.balancePersistentDependenciesCurrent(ctx, snapshot)
-	return current && m.balanceSnapshotCurrent(snapshot), err
-}
-
-// Heartbeats change the local action fingerprint during normal convergence.
-// Only durable management generations and the captured term fence this wait.
-func (m *Manager) balancePersistentDependenciesCurrent(ctx context.Context, snapshot *balanceSnapshot) (bool, error) {
 	err := m.runBalanceTxn(ctx, snapshot.conditions, func(txn kv.Txn) error {
 		for key, expected := range snapshot.dependencies {
 			value, err := txn.Load(key)
