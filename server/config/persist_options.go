@@ -325,10 +325,7 @@ var supportedTTLConfigs = []string{
 
 // IsSupportedTTLConfig checks whether a key is a supported config item with ttl
 func IsSupportedTTLConfig(key string) bool {
-	if slices.Contains(supportedTTLConfigs, key) {
-		return true
-	}
-	return false
+	return slices.Contains(supportedTTLConfigs, key)
 }
 
 // GetMaxSnapshotCount returns the number of the max snapshot which is allowed to send.
