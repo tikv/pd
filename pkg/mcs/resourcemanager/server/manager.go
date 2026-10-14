@@ -216,20 +216,28 @@ func (m *Manager) cleanupMetricsOnStepDown() {
 	m.metrics.resetAll()
 }
 
-// stopLeaderWorkers closes this term's consumption gate, waits for workers, and drops queued requests.
+// stopLeaderWorkers closes this term's consumption gate, waits for workers, and flushes queued requests.
 func (m *Manager) stopLeaderWorkers() {
+	m.consumptionMu.Lock()
+	flushPending := m.acceptingConsumption
+	m.acceptingConsumption = false
+	m.consumptionTermDone = nil
+	m.consumptionMu.Unlock()
 	if m.cancel != nil {
 		m.cancel()
 		m.cancel = nil
 	}
-	m.consumptionMu.Lock()
-	m.acceptingConsumption = false
-	m.consumptionTermDone = nil
-	m.consumptionMu.Unlock()
 	m.wg.Wait()
+	if flushPending {
+		m.flushPendingConsumption()
+	}
+}
+
+func (m *Manager) flushPendingConsumption() {
 	for {
 		select {
-		case <-m.consumptionDispatcher:
+		case item := <-m.consumptionDispatcher:
+			m.processConsumption(context.Background(), item)
 		default:
 			return
 		}
@@ -835,21 +843,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			log.Info("resource group manager background metrics flush loop exits")
 			return
 		case consumptionInfo := <-m.consumptionDispatcher:
-			if consumptionInfo == nil || consumptionInfo.Consumption == nil {
-				continue
-			}
-			keyspaceID := consumptionInfo.keyspaceID
-			keyspaceName, err := m.getKeyspaceNameByID(ctx, keyspaceID)
-			if err != nil {
-				continue
-			}
-			consumptionInfo.keyspaceName = keyspaceName
-			m.ruCollector.Collect(consumptionInfo)
-			m.metrics.recordConsumption(consumptionInfo, m.GetControllerConfig(), time.Now())
-			// TODO: maybe we need to distinguish background ru.
-			if rg, _ := m.GetMutableResourceGroup(keyspaceID, consumptionInfo.resourceGroupName); rg != nil {
-				rg.UpdateRUConsumption(consumptionInfo.Consumption)
-			}
+			m.processConsumption(ctx, consumptionInfo)
 		case <-cleanUpTicker.C:
 			m.cleanUpMetrics(ctx)
 		case <-metricsTicker.C:
@@ -914,18 +908,55 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 	}
 }
 
+func (m *Manager) processConsumption(ctx context.Context, consumptionInfo *consumptionItem) {
+	if consumptionInfo == nil || consumptionInfo.Consumption == nil {
+		return
+	}
+	keyspaceID := consumptionInfo.keyspaceID
+	keyspaceName, err := m.getKeyspaceNameByID(ctx, keyspaceID)
+	if err != nil && ctx.Err() != nil {
+		// A report already accepted into the queue must still reach metering
+		// when the leader context is canceled during step-down.
+		keyspaceName, err = m.getKeyspaceNameByID(context.WithoutCancel(ctx), keyspaceID)
+	}
+	if err != nil {
+		return
+	}
+	consumptionInfo.keyspaceName = keyspaceName
+	m.ruCollector.Collect(consumptionInfo)
+	m.metrics.recordConsumption(consumptionInfo, m.GetControllerConfig(), time.Now())
+	// TODO: maybe we need to distinguish background ru.
+	if rg, _ := m.GetMutableResourceGroup(keyspaceID, consumptionInfo.resourceGroupName); rg != nil {
+		rg.UpdateRUConsumption(consumptionInfo.Consumption)
+	}
+}
+
 func (m *Manager) cleanUpMetrics(ctx context.Context) {
-	// Clean up the metrics that have not been updated for a long time.
+	// Count records by group and keyspace once so each stale record can be
+	// removed without rescanning the full record map.
+	groupRecordCount := make(map[trackerKey]int, len(m.metrics.consumptionRecordMap))
+	keyspaceRecordCount := make(map[uint32]int, len(m.metrics.consumptionRecordMap))
+	staleRecords := make([]consumptionRecordKey, 0)
 	for r, lastTime := range m.metrics.consumptionRecordMap {
+		groupRecordCount[trackerKey{r.keyspaceID, r.groupName}]++
+		keyspaceRecordCount[r.keyspaceID]++
 		if time.Since(lastTime) <= metricsCleanupTimeout {
 			continue
 		}
+		staleRecords = append(staleRecords, r)
+	}
+	for _, r := range staleRecords {
 		keyspaceName, err := m.getKeyspaceNameByID(ctx, r.keyspaceID)
 		if err != nil {
 			continue
 		}
-		m.metrics.cleanupAllMetrics(r, keyspaceName)
-		m.ruCollector.remove(keyspaceName)
+		groupKey := trackerKey{r.keyspaceID, r.groupName}
+		groupRecordCount[groupKey]--
+		keyspaceRecordCount[r.keyspaceID]--
+		m.metrics.cleanupStaleRecord(r, keyspaceName, groupRecordCount[groupKey] == 0)
+		if keyspaceRecordCount[r.keyspaceID] == 0 {
+			m.ruCollector.remove(keyspaceName)
+		}
 	}
 	// Clean up the stale RU trackers.
 	for _, krgm := range m.getKeyspaceResourceGroupManagers() {

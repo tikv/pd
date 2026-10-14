@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/gogo/protobuf/proto"
+	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -620,6 +621,7 @@ func TestCleanupMetricsOnStepDown(t *testing.T) {
 		groupName    = "step-down-group"
 		keyspaceID   = uint32(507)
 	)
+	m.updateKeyspaceNameLookup(keyspaceID, keyspaceName)
 	m.metrics.recordConsumption(&consumptionItem{
 		keyspaceID:        keyspaceID,
 		keyspaceName:      keyspaceName,
@@ -628,7 +630,7 @@ func TestCleanupMetricsOnStepDown(t *testing.T) {
 	}, &ControllerConfig{}, time.Now())
 	re.NoError(m.dispatchConsumption(&rmpb.TokenBucketRequest{
 		ResourceGroupName:           "step-down-group",
-		KeyspaceId:                  &keyspacepb.KeyspaceIDValue{Keyspace: &keyspacepb.KeyspaceIDValue_Value{Value: keyspaceID}},
+		KeyspaceId:                  &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: keyspaceID}},
 		ConsumptionSinceLastRequest: &rmpb.Consumption{RRU: 1},
 	}))
 
@@ -640,8 +642,53 @@ func TestCleanupMetricsOnStepDown(t *testing.T) {
 	re.Empty(m.metrics.consumptionRecordMap)
 	re.Empty(m.metrics.counterMetricsMap)
 	re.Empty(m.metrics.maxPerSecTrackerMap)
+	re.Equal(1.0, m.ruCollector.keyspaceRUMetering[keyspaceName].oltpRU)
 	t.Cleanup(func() {
 		deleteLabelValues(keyspaceName, groupName, defaultTypeLabel)
+	})
+}
+
+func TestCleanUpMetricsKeepsGroupStateForActiveRUType(t *testing.T) {
+	re := require.New(t)
+	m := newManagerBase(&ControllerConfig{}, ResourceGroupWriteRoleLegacyAll)
+
+	const (
+		keyspaceName = "active-ru-cleanup-keyspace"
+		groupName    = "active-ru-cleanup-group"
+		keyspaceID   = uint32(509)
+	)
+	m.updateKeyspaceNameLookup(keyspaceID, keyspaceName)
+	m.metrics.recordConsumption(&consumptionItem{
+		keyspaceID:        keyspaceID,
+		keyspaceName:      keyspaceName,
+		resourceGroupName: groupName,
+		Consumption:       &rmpb.Consumption{RRU: 2, ReadCrossAzTrafficBytes: 3},
+	}, &ControllerConfig{}, time.Now().Add(-metricsCleanupTimeout*2))
+	m.metrics.recordConsumption(&consumptionItem{
+		keyspaceID:        keyspaceID,
+		keyspaceName:      keyspaceName,
+		resourceGroupName: groupName,
+		isBackground:      true,
+		Consumption:       &rmpb.Consumption{RRU: 5, ReadCrossAzTrafficBytes: 7},
+	}, &ControllerConfig{}, time.Now())
+	m.metrics.getGaugeMetrics(keyspaceID, keyspaceName, groupName).availableRUCounter.Set(1)
+	tracker := m.metrics.maxPerSecTrackerMap[trackerKey{keyspaceID, groupName}]
+	m.ruCollector.Collect(&consumptionItem{
+		keyspaceName: keyspaceName,
+		Consumption:  &rmpb.Consumption{RRU: 11},
+	})
+
+	m.cleanUpMetrics(context.Background())
+
+	re.NotContains(m.metrics.consumptionRecordMap, consumptionRecordKey{keyspaceID, groupName, defaultTypeLabel})
+	re.Contains(m.metrics.consumptionRecordMap, consumptionRecordKey{keyspaceID, groupName, backgroundTypeLabel})
+	re.Same(tracker, m.metrics.maxPerSecTrackerMap[trackerKey{keyspaceID, groupName}])
+	re.Equal(float64(10), promtestutil.ToFloat64(crossAZTrafficCost.WithLabelValues(groupName, "read", keyspaceName)))
+	re.Equal(float64(1), promtestutil.ToFloat64(availableRUCounter.WithLabelValues(groupName, groupName, keyspaceName)))
+	re.Equal(11.0, m.ruCollector.keyspaceRUMetering[keyspaceName].oltpRU)
+	t.Cleanup(func() {
+		deleteLabelValues(keyspaceName, groupName, defaultTypeLabel)
+		deleteLabelValues(keyspaceName, groupName, backgroundTypeLabel)
 	})
 }
 

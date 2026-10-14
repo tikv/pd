@@ -327,13 +327,19 @@ func (m *metrics) getGaugeMetrics(keyspaceID uint32, keyspaceName, groupName str
 }
 
 func (m *metrics) deleteMetrics(keyspaceID uint32, keyspaceName, groupName, ruType string) {
-	m.deleteMetricsWithCrossAZ(keyspaceID, keyspaceName, groupName, ruType, true)
+	m.deleteRUTypeMetrics(keyspaceID, keyspaceName, groupName, ruType)
+	m.deleteGroupMetrics(keyspaceID, keyspaceName, groupName)
 }
 
-func (m *metrics) deleteMetricsWithCrossAZ(keyspaceID uint32, keyspaceName, groupName, ruType string, clearCrossAZ bool) {
+func (m *metrics) deleteRUTypeMetrics(keyspaceID uint32, keyspaceName, groupName, ruType string) {
 	delete(m.counterMetricsMap, metricsKey{keyspaceID, groupName, ruType})
+	deleteRUTypeLabelValues(keyspaceName, groupName, ruType)
+}
+
+func (m *metrics) deleteGroupMetrics(keyspaceID uint32, keyspaceName, groupName string) {
 	delete(m.gaugeMetricsMap, metricsKey{keyspaceID, groupName, ""})
-	deleteLabelValuesWithCrossAZ(keyspaceName, groupName, ruType, clearCrossAZ)
+	m.deleteMaxPerSecTracker(keyspaceID, groupName)
+	deleteGroupLabelValues(keyspaceName, groupName)
 }
 
 func (m *metrics) recordConsumption(
@@ -360,17 +366,12 @@ func (m *metrics) recordConsumption(
 	m.insertConsumptionRecord(keyspaceID, groupName, ruLabelType, now)
 }
 
-func (m *metrics) cleanupAllMetrics(r consumptionRecordKey, keyspaceName string) {
+func (m *metrics) cleanupStaleRecord(r consumptionRecordKey, keyspaceName string, clearGroupMetrics bool) {
 	m.deleteConsumptionRecord(r)
-	clearCrossAZ := true
-	for record := range m.consumptionRecordMap {
-		if record.keyspaceID == r.keyspaceID && record.groupName == r.groupName {
-			clearCrossAZ = false
-			break
-		}
+	m.deleteRUTypeMetrics(r.keyspaceID, keyspaceName, r.groupName, r.ruType)
+	if clearGroupMetrics {
+		m.deleteGroupMetrics(r.keyspaceID, keyspaceName, r.groupName)
 	}
-	m.deleteMetricsWithCrossAZ(r.keyspaceID, keyspaceName, r.groupName, r.ruType, clearCrossAZ)
-	m.deleteMaxPerSecTracker(r.keyspaceID, r.groupName)
 }
 
 // resetAll clears this manager's cached RU metrics and their Prometheus label series.
@@ -384,7 +385,7 @@ func (m *metrics) resetAll() {
 		m.deleteMetrics(key.keyspaceID, metric.keyspaceName, key.groupName, key.ruType)
 	}
 	for key, tracker := range m.maxPerSecTrackerMap {
-		deleteLabelValues(tracker.keyspaceName, key.groupName, "")
+		deleteMaxPerSecLabels(tracker.keyspaceName, key.groupName)
 	}
 	for keyspaceName := range m.serviceLimitNameSet {
 		serviceLimit.DeleteLabelValues(keyspaceName)
@@ -588,10 +589,11 @@ func (m *metrics) setServiceLimitMetric(keyspaceName string, limit float64) {
 }
 
 func deleteLabelValues(keyspaceName, groupName, ruLabelType string) {
-	deleteLabelValuesWithCrossAZ(keyspaceName, groupName, ruLabelType, true)
+	deleteRUTypeLabelValues(keyspaceName, groupName, ruLabelType)
+	deleteGroupLabelValues(keyspaceName, groupName)
 }
 
-func deleteLabelValuesWithCrossAZ(keyspaceName, groupName, ruLabelType string, clearCrossAZ bool) {
+func deleteRUTypeLabelValues(keyspaceName, groupName, ruLabelType string) {
 	readRequestUnitCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
 	writeRequestUnitCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
 	activeRequestUnitCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
@@ -599,24 +601,29 @@ func deleteLabelValuesWithCrossAZ(keyspaceName, groupName, ruLabelType string, c
 	tikvRequestUnitV2Cost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
 	tidbRequestUnitV2Cost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
 	tiflashRequestUnitV2Cost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
-	sqlLayerRequestUnitCost.DeleteLabelValues(groupName, groupName, keyspaceName)
 	readByteCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
 	writeByteCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
-	if clearCrossAZ {
-		crossAZTrafficCost.DeleteLabelValues(groupName, "read", keyspaceName)
-		crossAZTrafficCost.DeleteLabelValues(groupName, "write", keyspaceName)
-	}
 	kvCPUCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
 	sqlCPUCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
+}
+
+func deleteGroupLabelValues(keyspaceName, groupName string) {
+	sqlLayerRequestUnitCost.DeleteLabelValues(groupName, groupName, keyspaceName)
+	crossAZTrafficCost.DeleteLabelValues(groupName, "read", keyspaceName)
+	crossAZTrafficCost.DeleteLabelValues(groupName, "write", keyspaceName)
 	requestCount.DeleteLabelValues(groupName, groupName, readTypeLabel, keyspaceName)
 	requestCount.DeleteLabelValues(groupName, groupName, writeTypeLabel, keyspaceName)
 	availableRUCounter.DeleteLabelValues(groupName, groupName, keyspaceName)
-	readRequestUnitMaxPerSecCost.DeleteLabelValues(groupName, keyspaceName)
-	writeRequestUnitMaxPerSecCost.DeleteLabelValues(groupName, keyspaceName)
+	deleteMaxPerSecLabels(keyspaceName, groupName)
 	sampledRequestUnitPerSec.DeleteLabelValues(groupName, keyspaceName)
 	overrideSettings.DeleteLabelValues(groupName, keyspaceName, fillRateLabel)
 	overrideSettings.DeleteLabelValues(groupName, keyspaceName, burstLimitLabel)
 	resourceGroupConfigGauge.DeletePartialMatch(prometheus.Labels{newResourceGroupNameLabel: groupName, keyspaceNameLabel: keyspaceName})
+}
+
+func deleteMaxPerSecLabels(keyspaceName, groupName string) {
+	readRequestUnitMaxPerSecCost.DeleteLabelValues(groupName, keyspaceName)
+	writeRequestUnitMaxPerSecCost.DeleteLabelValues(groupName, keyspaceName)
 }
 
 type maxPerSecCostTracker struct {
