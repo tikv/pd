@@ -513,11 +513,24 @@ func (c *Cluster) updateScheduler() {
 				log.Error("scheduler not found", zap.String("type", scheduler.Type))
 				continue
 			}
+			schedulerName := schedulerType.String()
+			decoder := schedulers.ConfigSliceDecoder(schedulerType, scheduler.Args)
+			if schedulerConfig, err := c.storage.LoadSchedulerConfig(schedulerName); err != nil {
+				log.Error("failed to load scheduler config before adding scheduler",
+					zap.String("scheduler-name", schedulerName), errs.ZapError(err))
+				continue
+			} else if schedulerConfig != "" {
+				// The config watcher may persist a scheduler's full config before
+				// this loop creates the scheduler from its args. Prefer the saved
+				// config so AddScheduler does not overwrite it with the args-only
+				// defaults before the watcher can reload it.
+				decoder = schedulers.ConfigJSONDecoder([]byte(schedulerConfig))
+			}
 			s, err := schedulers.CreateScheduler(
 				schedulerType,
 				c.coordinator.GetOperatorController(),
 				c.storage,
-				schedulers.ConfigSliceDecoder(schedulerType, scheduler.Args),
+				decoder,
 				schedulersController.RemoveScheduler,
 			)
 			if err != nil {
