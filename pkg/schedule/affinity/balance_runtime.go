@@ -73,7 +73,8 @@ type BalanceActionBuildResult struct {
 
 // BalanceActionProgressBuilder builds a page of legal actions using the same
 // store snapshot as the table plan. A ready but incomplete result is resumed
-// by the affinity worker.
+// by the affinity worker. A completed result transfers ownership of Actions
+// to the caller; the builder must not mutate that action set afterwards.
 type BalanceActionProgressBuilder func(context.Context, *GroupState, GroupKeyRanges, *Group, []uint64, BalanceActionMode, any, int) BalanceActionBuildResult
 
 type balancePhase uint8
@@ -675,10 +676,10 @@ func (m *Manager) cacheBalanceBuildPage(snapshot *balanceSnapshot, groupID strin
 		*record = *previous
 	}
 	if snapshot.mode == BalanceBuildLeaders {
-		record.set = cloneBalanceActionSet(page.Actions)
+		record.set = page.Actions
 		record.leadersReady, record.leadersBlocked = true, snapshot.groupBlocked
 	} else {
-		voters := cloneBalanceActionSet(page.Actions)
+		voters := page.Actions
 		voters.LeaderTargets = record.set.LeaderTargets
 		record.set = voters
 		record.votersReady, record.votersBlocked = true, snapshot.groupBlocked
