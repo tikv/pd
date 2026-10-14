@@ -229,6 +229,23 @@ func TestPrepareBalanceCommitIgnoresRangeOrder(t *testing.T) {
 	require.Equal(t, ranges, snapshot.Ranges[ranges.GroupID])
 }
 
+func TestPrepareBalanceCommitIgnoresSimilarTableKeys(t *testing.T) {
+	manager := newBalanceRuntimeManager(t)
+	ids := seedBalanceGroups(t, manager, []uint64{1})
+	otherID := "_tidb_pt_10_pother_p1"
+	require.NoError(t, manager.CreateAffinityGroups([]GroupKeyRanges{{
+		GroupID: otherID,
+		KeyRanges: []keyutil.KeyRange{{
+			StartKey: []byte{10},
+			EndKey:   []byte{11},
+		}},
+	}}))
+
+	snapshot := manager.GetBalanceSnapshot(ids[0])
+	require.NotNil(t, snapshot)
+	require.NoError(t, manager.PrepareBalanceCommit(t.Context(), snapshot))
+}
+
 func TestBalanceCommitDoesNotOverwriteLaterWatcherTarget(t *testing.T) {
 	manager := newBalanceRuntimeManager(t)
 	ids := seedBalanceGroups(t, manager, []uint64{1, 1})

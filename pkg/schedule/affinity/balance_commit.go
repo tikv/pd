@@ -218,13 +218,20 @@ func (m *Manager) PrepareBalanceCommit(ctx context.Context, snapshot *BalanceSna
 		data, _ := json.Marshal(group.Group)
 		expectedGroups[keypath.AffinityGroupPath(group.ID)] = canonicalJSON(string(data))
 	}
-	loadMap := func(prefix, end string, normalize func(string) (string, error)) (map[string]string, error) {
+	loadMap := func(prefix, end, keyPrefix string, normalize func(string) (string, error)) (map[string]string, error) {
 		keys, values, err := reader.LoadRange(prefix, end, 0)
 		if err != nil {
 			return nil, err
 		}
 		actual := make(map[string]string, len(keys))
 		for i, key := range keys {
+			// The range prefix is only a byte-prefix match. Partition tables
+			// therefore need an additional ownership check so that a table such
+			// as _tidb_pt_10_pother is not mistaken for _tidb_pt_10.
+			groupID := strings.TrimPrefix(key, keyPrefix)
+			if groupID == key || TableGroupPrefix(groupID) != snapshot.TableID {
+				continue
+			}
 			value, err := normalize(values[i])
 			if err != nil {
 				return nil, err
@@ -247,7 +254,7 @@ func (m *Manager) PrepareBalanceCommit(ctx context.Context, snapshot *BalanceSna
 		}
 		version.token = dependencies[endpoint.AffinityPlacementRevisionKey()]
 		prefix, end := balanceTableKeyRange(snapshot, keypath.AffinityGroupPath(snapshot.TableID))
-		actual, err := loadMap(prefix, end, func(value string) (string, error) {
+		actual, err := loadMap(prefix, end, keypath.AffinityGroupsPrefix(), func(value string) (string, error) {
 			var group Group
 			if err := json.Unmarshal([]byte(value), &group); err != nil {
 				return "", err
@@ -263,7 +270,7 @@ func (m *Manager) PrepareBalanceCommit(ctx context.Context, snapshot *BalanceSna
 			return balanceConflict()
 		}
 		prefix, end = balanceTableKeyRange(snapshot, keypath.RegionLabelKeyPath(GetLabelRuleID(snapshot.TableID)))
-		actual, err = loadMap(prefix, end, func(value string) (string, error) {
+		actual, err = loadMap(prefix, end, keypath.RegionLabelKeyPath(LabelRuleIDPrefix), func(value string) (string, error) {
 			rule, err := labeler.NewLabelRuleFromJSON([]byte(value))
 			if err != nil {
 				return "", err
