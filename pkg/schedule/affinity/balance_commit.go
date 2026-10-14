@@ -115,7 +115,7 @@ func (m *Manager) balanceSnapshotLabels(snapshot *balanceSnapshot) (map[string]s
 	return expected, true
 }
 
-func balanceTableKeyRange(snapshot *balanceSnapshot, prefix string) (string, string) {
+func balanceTableKeyRange(snapshot *balanceSnapshot, prefix string) (start, end string) {
 	for _, group := range snapshot.groups {
 		if group.ID != snapshot.tableID {
 			prefix += "_p"
@@ -369,13 +369,28 @@ func (m *Manager) commitBalancePlans(ctx context.Context, snapshot *balanceSnaps
 	// Remember exactly our own token. A later read could silently adopt an
 	// intervening management change and let a subsequent manual batch proceed.
 	snapshot.dependencies[endpoint.AffinityTableRevisionKey(snapshot.tableID)] = targetToken
+	// Serialize only publication with local metadata writers. A watcher may
+	// already have applied a later target while the transaction was in flight.
+	m.metaMutex.Lock()
+	defer m.metaMutex.Unlock()
 	for _, group := range updates {
-		state, err := m.updateGroupTarget(group)
-		if err != nil {
-			return false, err
-		}
 		index := slices.IndexFunc(snapshot.groups, func(g *GroupState) bool { return g.ID == group.ID })
-		snapshot.groups[index] = state
+		original := snapshot.groups[index]
+		current := m.GetAffinityGroupState(group.ID)
+		if current != nil && current.CreateTimestamp == original.CreateTimestamp && current.BalancePolicy == original.BalancePolicy &&
+			current.LeaderStoreID == original.LeaderStoreID && slices.Equal(current.VoterStoreIDs, original.VoterStoreIDs) {
+			state, err := m.updateGroupTarget(group)
+			if err != nil {
+				return true, err
+			}
+			snapshot.groups[index] = state
+		} else {
+			// Preserve the submitted target for subsequent dependency checks,
+			// without overwriting a newer local observation.
+			expected := *original
+			expected.Group = group
+			snapshot.groups[index] = &expected
+		}
 	}
 	m.Lock()
 	if table := m.balanceTables[snapshot.tableID]; table != nil {
