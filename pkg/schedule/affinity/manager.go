@@ -80,6 +80,7 @@ type Manager struct {
 	balanceVirtualBuilder   VirtualBalanceActionProgressBuilder
 	balanceValidator        BalanceActionValidator
 	balanceRuleRevision     func() uint64
+	balanceRuleFingerprint  func([]GroupKeyRanges) uint64
 	balanceTerm             func() ([]clientv3.Cmp, bool)
 	balanceMetadata         func() map[string]string
 	balanceMetadataSource   uint64

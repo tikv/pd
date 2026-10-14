@@ -66,6 +66,7 @@ func NewAffinityChecker(ctx context.Context, cluster sche.CheckerCluster, conf c
 	if checker.affinityManager != nil {
 		checker.affinityManager.SetBalanceActionBuilders(nil, checker.buildBalanceActionsProgress, checker.buildVirtualBalanceActionsProgress,
 			checker.ruleManager.GetRevision, checker.validateBalanceAction)
+		checker.affinityManager.SetBalanceRuleFingerprint(checker.balanceRuleFingerprint)
 		checker.affinityManager.SetBalanceAdmission(checker.balanceSchedulingAllowed)
 		checker.affinityManager.SetBalanceCommitGuard(nil, checker.balanceRuleMetadata)
 	}

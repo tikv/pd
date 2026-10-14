@@ -249,6 +249,15 @@ func (m *Manager) SetBalanceActionBuilders(builder BalanceActionBuilder, progres
 	}
 }
 
+// SetBalanceRuleFingerprint supplies a table-scoped placement fingerprint.
+// The callback receives the current table ranges and lets the checker avoid
+// invalidating unrelated tables when placement rules change elsewhere.
+func (m *Manager) SetBalanceRuleFingerprint(fingerprint func([]GroupKeyRanges) uint64) {
+	m.Lock()
+	m.balanceRuleFingerprint = fingerprint
+	m.Unlock()
+}
+
 func (m *Manager) runBalanceWorker() {
 	for {
 		select {
@@ -286,6 +295,8 @@ func (m *Manager) runBalanceWorker() {
 // Stable tables return immediately. Planning runs on the affinity worker;
 // targets converge through the existing AffinityChecker operator path.
 func (m *Manager) AutoBalanceGroup(groupID string) (*BalancePlan, error) {
+	m.metaMutex.Lock()
+	defer m.metaMutex.Unlock()
 	m.Lock()
 	defer m.Unlock()
 	state := m.balanceTables[TableGroupPrefix(groupID)]
@@ -293,6 +304,9 @@ func (m *Manager) AutoBalanceGroup(groupID string) (*BalancePlan, error) {
 		return nil, nil
 	}
 	fingerprint := m.balanceFingerprintLocked(state)
+	if m.balanceRuleFingerprint != nil {
+		fingerprint.rules = m.currentBalanceRuleFingerprintLocked(state)
+	}
 	if state.phase == balanceStable && state.fingerprint == fingerprint {
 		return nil, nil
 	}
@@ -310,7 +324,9 @@ func (m *Manager) AutoBalanceGroup(groupID string) (*BalancePlan, error) {
 
 func (m *Manager) balanceFingerprintLocked(state *balanceTableState) balanceFingerprint {
 	var rules uint64
-	if m.balanceRuleRevision != nil {
+	if m.balanceRuleFingerprint != nil {
+		rules = state.fingerprint.rules
+	} else if m.balanceRuleRevision != nil {
 		rules = m.balanceRuleRevision()
 	}
 	return balanceFingerprint{
@@ -323,6 +339,21 @@ func (m *Manager) balanceFingerprintLocked(state *balanceTableState) balanceFing
 		// table's label update from restarting this table's build.
 		labels: 0,
 	}
+}
+
+func (m *Manager) currentBalanceRuleFingerprintLocked(state *balanceTableState) uint64 {
+	if m.balanceRuleFingerprint == nil {
+		if m.balanceRuleRevision == nil {
+			return 0
+		}
+		return m.balanceRuleRevision()
+	}
+	ranges := make([]GroupKeyRanges, 0, len(state.groups))
+	for groupID := range state.groups {
+		ranges = append(ranges, cloneBalanceRanges(m.keyRanges[groupID]))
+	}
+	slices.SortFunc(ranges, func(a, b GroupKeyRanges) int { return strings.Compare(a.GroupID, b.GroupID) })
+	return m.balanceRuleFingerprint(ranges)
 }
 
 func (m *Manager) invalidateBalanceLocked(groupID string) {
@@ -412,6 +443,9 @@ func (m *Manager) balanceSnapshot(groupID string) *balanceSnapshot {
 	}
 	m.updateBalanceStoreFingerprintLocked(storeFingerprint)
 	fingerprint := m.balanceFingerprintLocked(state)
+	if m.balanceRuleFingerprint != nil {
+		fingerprint.rules = m.currentBalanceRuleFingerprintLocked(state)
+	}
 	if state.phase == balanceStable && state.fingerprint == fingerprint {
 		return nil
 	}
@@ -431,6 +465,11 @@ func (m *Manager) balanceSnapshot(groupID string) *balanceSnapshot {
 		state.phase = balanceIdle
 		state.mode = BalanceBuildLeaders
 		state.nextGroup = ""
+	}
+	if m.balanceRuleFingerprint != nil {
+		// Keep the scoped rule generation authoritative for subsequent checks
+		// made while this snapshot is being built.
+		state.fingerprint.rules = fingerprint.rules
 	}
 	if state.pending != nil {
 		if state.pending.fingerprint == fingerprint && state.dependencyFingerprint == fingerprint {
