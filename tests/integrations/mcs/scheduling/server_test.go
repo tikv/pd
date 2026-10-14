@@ -1071,8 +1071,8 @@ func (suite *serverTestSuite) TestPrepareChecker() {
 			Region: &metapb.Region{
 				Id:       i,
 				Peers:    peers,
-				StartKey: []byte(fmt.Sprintf("k%d", i)),
-				EndKey:   []byte(fmt.Sprintf("k%d", i+1)),
+				StartKey: fmt.Appendf(nil, "k%d", i),
+				EndKey:   fmt.Appendf(nil, "k%d", i+1),
 			},
 			Leader:          leaderPeer,
 			ApproximateSize: 10 * units.MiB,
@@ -1124,8 +1124,8 @@ func (suite *serverTestSuite) TestPrepareChecker() {
 			Region: &metapb.Region{
 				Id:       i,
 				Peers:    peers,
-				StartKey: []byte(fmt.Sprintf("k%d", i)),
-				EndKey:   []byte(fmt.Sprintf("k%d", i+1)),
+				StartKey: fmt.Appendf(nil, "k%d", i),
+				EndKey:   fmt.Appendf(nil, "k%d", i+1),
 			},
 			Leader:          leaderPeer,
 			ApproximateSize: 10 * units.MiB,
@@ -1153,8 +1153,8 @@ func (suite *serverTestSuite) TestPrepareChecker() {
 			Region: &metapb.Region{
 				Id:       i,
 				Peers:    peers,
-				StartKey: []byte(fmt.Sprintf("k%d", i)),
-				EndKey:   []byte(fmt.Sprintf("k%d", i+1)),
+				StartKey: fmt.Appendf(nil, "k%d", i),
+				EndKey:   fmt.Appendf(nil, "k%d", i+1),
 			},
 			Leader:          leaderPeer,
 			ApproximateSize: 10 * units.MiB,

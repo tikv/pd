@@ -741,8 +741,7 @@ func TestMixedTSODeployment(t *testing.T) {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/skipUpdateServiceMode"))
 	}()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -783,8 +782,7 @@ func TestMixedTSODeployment(t *testing.T) {
 // So we need another cluster to run this test.
 func TestUpgradingPDAndTSOClusters(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	// Create an PD cluster which has 3 servers
 	pdCluster, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 3)

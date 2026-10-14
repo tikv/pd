@@ -537,7 +537,7 @@ func benchmarkTSOProxyNClients(clientCount int, b *testing.B) {
 			builder.WriteString("SequentialClients_")
 		}
 		b.Run(fmt.Sprintf("%s_%dReqsPerClient", builder.String(), t.requestsPerClient), func(b *testing.B) {
-			for range b.N {
+			for b.Loop() {
 				err := tsoProxy(suite.defaultReq, streams, t.concurrentClient, t.requestsPerClient)
 				re.NoError(err)
 			}
