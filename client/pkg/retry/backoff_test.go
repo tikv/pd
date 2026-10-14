@@ -16,7 +16,6 @@ package retry
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"fmt"
 	"testing"
