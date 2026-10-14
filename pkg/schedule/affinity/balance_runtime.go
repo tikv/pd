@@ -36,20 +36,13 @@ import (
 	"github.com/tikv/pd/pkg/schedule/config"
 )
 
-// BalanceActionBuilder builds the intersection of legal single-step actions
-// for a fully covered and converged affinity group. False means that checker
-// repair or an operator must finish before the group can be balanced.
-type BalanceActionBuilder func(context.Context, *GroupState, GroupKeyRanges) (BalanceActionSet, bool)
-
 // BalanceActionMode selects which action class the checker builds. Leader
 // transfers are exhausted across a table before voter replacements are built.
 type BalanceActionMode uint8
 
 const (
-	// BalanceBuildAll builds both leader and voter actions.
-	BalanceBuildAll BalanceActionMode = iota
 	// BalanceBuildLeaders builds leader transfer actions.
-	BalanceBuildLeaders
+	BalanceBuildLeaders BalanceActionMode = iota
 	// BalanceBuildVoters builds voter replacement actions.
 	BalanceBuildVoters
 	// BalanceCheckConvergence scans complete range coverage and peer alignment
@@ -79,15 +72,7 @@ type BalanceActionBuildResult struct {
 // BalanceActionProgressBuilder builds a page of legal actions using the same
 // store snapshot as the table plan. A ready but incomplete result is resumed
 // by the affinity worker.
-type BalanceActionProgressBuilder func(context.Context, *GroupState, GroupKeyRanges, []uint64, BalanceActionMode, any, int) BalanceActionBuildResult
-
-// VirtualBalanceActionProgressBuilder builds actions for a virtual target
-// while validating every scanned region against the actual group state.
-type VirtualBalanceActionProgressBuilder func(context.Context, *GroupState, GroupKeyRanges, *Group, []uint64, BalanceActionMode, any, int) BalanceActionBuildResult
-
-// BalanceActionValidator rechecks the selected action before submission.
-// Unready groups wait for convergence; illegal actions are removed from the cache.
-type BalanceActionValidator func(context.Context, *GroupState, GroupKeyRanges, BalancePlan) (ready, legal bool)
+type BalanceActionProgressBuilder func(context.Context, *GroupState, GroupKeyRanges, *Group, []uint64, BalanceActionMode, any, int) BalanceActionBuildResult
 
 type balancePhase uint8
 
@@ -98,7 +83,7 @@ const (
 )
 
 type balanceFingerprint struct {
-	table, stores, rules, labels uint64
+	table, stores, rules uint64
 }
 
 type balanceTableLock struct {
@@ -195,66 +180,53 @@ func balanceRegionChanged(a, b *core.RegionInfo) bool {
 }
 
 type balanceTableState struct {
-	phase                 balancePhase
-	version               uint64
-	fingerprint           balanceFingerprint
-	groups                map[string]struct{}
-	actions               map[string]BalanceActionSet
-	leaderTargets         map[string][]uint64
-	voterActions          map[string]BalanceActionSet
-	blockedGroups         map[string]struct{} // Temporary omissions; protected by the Manager lock.
-	mode                  BalanceActionMode
-	cursors               map[string]any
-	regionBytes           map[string]map[uint64]uint64
-	moveBytes             map[string]uint64
-	converging            *balanceConvergence
-	nextGroup             string
-	pending               *balanceSnapshot
-	dependencies          map[string]string
-	dependencyConditions  []clientv3.Cmp
-	dependencyFingerprint balanceFingerprint
-	queued                bool
-	retryAfter            time.Time
-	retryDelay            time.Duration
+	phase        balancePhase
+	version      uint64
+	rangeVersion uint64
+	ruleVersion  uint64
+	ruleRanges   uint64
+	fingerprint  balanceFingerprint
+	groups       map[string]struct{}
+	actions      map[string]*balanceGroupActions
+	pending      *balanceSnapshot
+	queued       bool
+	retryAfter   time.Time
+	retryDelay   time.Duration
 }
 
-type balanceConvergence struct {
-	target Group
-	ranges GroupKeyRanges
-	cursor any
+// Completed action records are immutable except for regionBytes, which is
+// accessed only under the Manager lock. Replacements use copy-on-write so a
+// worker can retain a record while heartbeats refresh its migration estimate.
+type balanceGroupActions struct {
+	set                           BalanceActionSet
+	leadersReady, votersReady     bool
+	leadersBlocked, votersBlocked bool
+	regionBytes                   map[uint64]uint64
 }
 
-// SetBalanceActionBuilder connects the checker to the pure affinity planner.
-// One background worker builds action indexes so Region checks never perform
-// placement searches. Repeated requests for a table are coalesced.
-func (m *Manager) SetBalanceActionBuilder(builder BalanceActionBuilder, ruleRevision func() uint64, validator BalanceActionValidator) {
-	m.SetBalanceActionBuilders(builder, nil, nil, ruleRevision, validator)
-}
-
-// SetBalanceActionBuilders connects the legacy and resumable checkers to the
-// affinity planner. The legacy builder remains for package tests and callers
-// that do not need bounded placement scans.
-func (m *Manager) SetBalanceActionBuilders(builder BalanceActionBuilder, progressBuilder BalanceActionProgressBuilder,
-	virtualBuilder VirtualBalanceActionProgressBuilder, ruleRevision func() uint64, validator BalanceActionValidator) {
+// SetBalanceActionBuilder installs the checker's sole, resumable action
+// interface. The worker owns unfinished scans; Region checks only enqueue work.
+func (m *Manager) SetBalanceActionBuilder(builder BalanceActionProgressBuilder, ruleRevision func() uint64) {
 	m.Lock()
-	start := m.balanceBuilder == nil && m.balanceProgressBuilder == nil
-	m.balanceBuilder, m.balanceProgressBuilder, m.balanceVirtualBuilder = builder, progressBuilder, virtualBuilder
-	m.balanceRuleRevision = ruleRevision
+	start := m.balanceBuilder == nil
+	m.balanceBuilder, m.balanceRuleRevision = builder, ruleRevision
 	m.balanceMetadataSource++
 	m.balanceMetadataVerified = nil
-	m.balanceValidator = validator
 	m.Unlock()
-	if start {
+	if start && builder != nil {
 		go m.runBalanceWorker()
 	}
 }
 
-// SetBalanceRuleFingerprint supplies a table-scoped placement fingerprint.
-// The callback receives the current table ranges and lets the checker avoid
-// invalidating unrelated tables when placement rules change elsewhere.
+// SetBalanceRuleFingerprint supplies a fingerprint of placement rules that
+// actually intersect the table. It runs on the worker, outside Manager locks.
 func (m *Manager) SetBalanceRuleFingerprint(fingerprint func([]GroupKeyRanges) uint64) {
 	m.Lock()
 	m.balanceRuleFingerprint = fingerprint
+	for _, state := range m.balanceTables {
+		state.ruleRanges = 0
+		state.phase = balanceIdle
+	}
 	m.Unlock()
 }
 
@@ -272,7 +244,6 @@ func (m *Manager) runBalanceWorker() {
 			if state := m.balanceTables[TableGroupPrefix(groupID)]; state != nil {
 				state.queued = false
 				if incomplete && err == nil {
-					state.retryAfter = time.Time{}
 					select {
 					case m.balanceQueue <- groupID:
 						state.queued = true
@@ -280,8 +251,6 @@ func (m *Manager) runBalanceWorker() {
 						state.retryAfter = time.Now().Add(time.Second)
 					}
 				} else {
-					// Back off while repair or execution admission is unchanged.
-					// Relevant input changes reset the delay immediately.
 					state.retryDelay = min(max(time.Second, state.retryDelay*2), 30*time.Second)
 					state.retryAfter = time.Now().Add(state.retryDelay)
 				}
@@ -291,257 +260,203 @@ func (m *Manager) runBalanceWorker() {
 	}
 }
 
-// AutoBalanceGroup requests one balance pass for the table containing groupID.
-// Stable tables return immediately. Planning runs on the affinity worker;
-// targets converge through the existing AffinityChecker operator path.
+// AutoBalanceGroup only checks cheap generations and coalesces worker requests.
+// It never takes the metadata mutex or scans table ranges on a Region check.
 func (m *Manager) AutoBalanceGroup(groupID string) (*BalancePlan, error) {
-	m.metaMutex.Lock()
-	defer m.metaMutex.Unlock()
 	m.Lock()
 	defer m.Unlock()
 	state := m.balanceTables[TableGroupPrefix(groupID)]
-	if state == nil || (m.balanceBuilder == nil && m.balanceProgressBuilder == nil) || state.queued {
+	if state == nil || m.balanceBuilder == nil || state.queued {
 		return nil, nil
 	}
-	fingerprint := m.balanceFingerprintLocked(state)
-	if m.balanceRuleFingerprint != nil {
-		fingerprint.rules = m.currentBalanceRuleFingerprintLocked(state)
-	}
-	if state.phase == balanceStable && state.fingerprint == fingerprint {
+	rules := m.currentBalanceRuleRevisionLocked()
+	if state.phase == balanceStable && state.fingerprint == m.balanceFingerprintLocked(state) &&
+		state.ruleVersion == rules && state.ruleRanges == state.rangeVersion {
 		return nil, nil
 	}
-	if time.Now().Before(state.retryAfter) {
+	if time.Now().Before(state.retryAfter) && state.ruleVersion == rules {
 		return nil, nil
 	}
 	select {
 	case m.balanceQueue <- groupID:
 		state.queued = true
 	default:
-		// A full worker queue is retried by the next affinity check.
 	}
 	return nil, nil
 }
 
-func (m *Manager) balanceFingerprintLocked(state *balanceTableState) balanceFingerprint {
-	var rules uint64
-	if m.balanceRuleFingerprint != nil {
-		rules = state.fingerprint.rules
-	} else if m.balanceRuleRevision != nil {
-		rules = m.balanceRuleRevision()
-	}
-	return balanceFingerprint{
-		table:  state.version,
-		stores: m.balanceStoreRevision,
-		rules:  rules,
-		// RegionLabeler revision is cluster-wide. Group/range watcher updates
-		// already bump the table generation, while range equality is checked at
-		// capture time. Keeping it out of the fingerprint prevents an unrelated
-		// table's label update from restarting this table's build.
-		labels: 0,
-	}
-}
-
-func (m *Manager) currentBalanceRuleFingerprintLocked(state *balanceTableState) uint64 {
-	if m.balanceRuleFingerprint == nil {
-		if m.balanceRuleRevision == nil {
-			return 0
-		}
+func (m *Manager) currentBalanceRuleRevisionLocked() uint64 {
+	if m.balanceRuleRevision != nil {
 		return m.balanceRuleRevision()
 	}
-	ranges := make([]GroupKeyRanges, 0, len(state.groups))
-	for groupID := range state.groups {
-		ranges = append(ranges, cloneBalanceRanges(m.keyRanges[groupID]))
+	return 0
+}
+
+func (m *Manager) balanceFingerprintLocked(state *balanceTableState) balanceFingerprint {
+	return balanceFingerprint{table: state.version, stores: m.balanceStoreRevision, rules: state.fingerprint.rules}
+}
+
+// refreshBalanceRuleFingerprint samples ranges and rule generations together.
+// An unrelated rule update advances ruleVersion without deleting legal actions.
+func (m *Manager) refreshBalanceRuleFingerprint(tableID string) bool {
+	m.metaMutex.Lock()
+	m.RLock()
+	state := m.balanceTables[tableID]
+	if state == nil {
+		m.RUnlock()
+		m.metaMutex.Unlock()
+		return false
 	}
-	slices.SortFunc(ranges, func(a, b GroupKeyRanges) int { return strings.Compare(a.GroupID, b.GroupID) })
-	return m.balanceRuleFingerprint(ranges)
+	revision, rangesVersion := m.currentBalanceRuleRevisionLocked(), state.rangeVersion
+	if state.ruleVersion == revision && state.ruleRanges == rangesVersion {
+		m.RUnlock()
+		m.metaMutex.Unlock()
+		return true
+	}
+	callback := m.balanceRuleFingerprint
+	ranges := make([]GroupKeyRanges, 0, len(state.groups))
+	for id := range state.groups {
+		ranges = append(ranges, cloneBalanceRanges(m.keyRanges[id]))
+	}
+	m.RUnlock()
+	m.metaMutex.Unlock()
+	fingerprint := revision
+	if callback != nil {
+		fingerprint = callback(ranges)
+	}
+	m.Lock()
+	defer m.Unlock()
+	state = m.balanceTables[tableID]
+	if state == nil || state.rangeVersion != rangesVersion || m.currentBalanceRuleRevisionLocked() != revision {
+		return false
+	}
+	if state.fingerprint.rules != fingerprint {
+		clear(state.actions)
+		state.pending = nil
+		state.phase = balanceIdle
+	}
+	state.fingerprint.rules = fingerprint
+	state.ruleVersion, state.ruleRanges = revision, rangesVersion
+	return true
 }
 
 func (m *Manager) invalidateBalanceLocked(groupID string) {
 	tableID := TableGroupPrefix(groupID)
 	state := m.balanceTables[tableID]
 	if state == nil {
-		state = &balanceTableState{
-			groups:        make(map[string]struct{}),
-			actions:       make(map[string]BalanceActionSet),
-			leaderTargets: make(map[string][]uint64),
-			voterActions:  make(map[string]BalanceActionSet),
-			blockedGroups: make(map[string]struct{}),
-			cursors:       make(map[string]any),
-			regionBytes:   make(map[string]map[uint64]uint64),
-			moveBytes:     make(map[string]uint64),
-			mode:          BalanceBuildLeaders,
-		}
+		state = &balanceTableState{groups: make(map[string]struct{}), actions: make(map[string]*balanceGroupActions)}
 		m.balanceTables[tableID] = state
+	}
+	if _, exists := state.groups[groupID]; !exists {
+		state.rangeVersion++
 	}
 	state.groups[groupID] = struct{}{}
 	state.version++
 	state.phase = balanceIdle
-	if state.converging != nil {
-		state.phase = balanceConverging
-		if state.converging.target.ID == groupID {
-			state.converging.cursor = nil
-		}
-	}
-	state.mode = BalanceBuildLeaders
-	discardBalanceBuildLocked(state, groupID)
-	discardPendingBalanceSnapshotLocked(state)
-	clearBalanceDependencies(state)
-	state.nextGroup = ""
-	state.retryAfter = time.Time{}
-	state.retryDelay = 0
+	delete(state.actions, groupID)
+	// A pending scan is owned by the worker. Never inspect its mutable cursor,
+	// weights or maps here, even when this pointer is also held by the worker.
+	state.pending = nil
+	state.retryAfter, state.retryDelay = time.Time{}, 0
 }
 
-// InvalidateBalance invalidates the changed group's legal actions and its
-// table's final no-improvement decision.
+// InvalidateBalance discards one group's actions and the table's stable result.
 func (m *Manager) InvalidateBalance(groupID string) {
 	m.Lock()
 	defer m.Unlock()
 	m.invalidateBalanceLocked(groupID)
 }
 
+// A snapshot owns all unfinished work and submission dependencies. The table
+// only retains its pointer between pages; invalidators never access its fields.
 type balanceSnapshot struct {
-	tableID          string
-	fingerprint      balanceFingerprint
-	groups           []*GroupState
-	ranges           map[string]GroupKeyRanges
-	actions          map[string]BalanceActionSet
-	leaderTargets    map[string][]uint64
-	stores           []uint64
-	mode             BalanceActionMode
-	cursors          map[string]any
-	nextGroup        string
-	globalLeaders    map[uint64]int
-	globalVoters     map[uint64]int
-	unreadyGroups    map[string]struct{}
-	blockedGroups    map[string]struct{}
-	planningGroups   []*Group
-	autoGroups       []*GroupState
-	progress         BalanceActionProgressBuilder
-	virtual          VirtualBalanceActionProgressBuilder
-	validator        BalanceActionValidator
-	dependencies     map[string]string
-	conditions       []clientv3.Cmp
-	applied          bool
-	admission        func() bool
-	prepared         bool
-	validationPlans  []BalancePlan
-	validationCursor any
+	tableID         string
+	fingerprint     balanceFingerprint
+	ruleRevision    uint64
+	groups          []*GroupState
+	autoGroups      []*GroupState
+	ranges          map[string]GroupKeyRanges
+	actions         map[string]*balanceGroupActions
+	stores          []uint64
+	globalLeaders   map[uint64]int
+	globalVoters    map[uint64]int
+	builder         BalanceActionProgressBuilder
+	admission       func() bool
+	dependencies    map[string]string
+	conditions      []clientv3.Cmp
+	applied         bool
+	mode            BalanceActionMode
+	next            int
+	cursor          any
+	regionBytes     map[uint64]uint64
+	blocked         bool
+	groupBlocked    bool
+	validationPlans []BalancePlan
 }
 
 func (m *Manager) balanceSnapshot(groupID string) *balanceSnapshot {
-	// Range metadata and target updates share metaMutex. Snapshotting both
-	// here avoids using ranges from a different group target generation.
-	liveStores, storeFingerprint := m.loadBalanceStoreSnapshot()
+	return m.newBalanceSnapshot(groupID, false)
+}
+
+func (m *Manager) newBalanceSnapshot(groupID string, manual bool) *balanceSnapshot {
+	tableID := TableGroupPrefix(groupID)
+	if !m.refreshBalanceRuleFingerprint(tableID) {
+		return nil
+	}
+	stores, storeFingerprint := m.loadBalanceStoreSnapshot()
+	unavailable := m.collectUnavailableStoresFor(stores)
 	m.metaMutex.Lock()
 	defer m.metaMutex.Unlock()
 	m.Lock()
 	defer m.Unlock()
-	tableID := TableGroupPrefix(groupID)
 	state := m.balanceTables[tableID]
-	if state == nil || (m.balanceBuilder == nil && m.balanceProgressBuilder == nil) {
+	if state == nil || m.balanceBuilder == nil {
 		return nil
 	}
 	m.updateBalanceStoreFingerprintLocked(storeFingerprint)
-	fingerprint := m.balanceFingerprintLocked(state)
-	if m.balanceRuleFingerprint != nil {
-		fingerprint.rules = m.currentBalanceRuleFingerprintLocked(state)
+	if state.fingerprint.stores != m.balanceStoreRevision {
+		clear(state.actions)
+		state.pending = nil
+		state.phase = balanceIdle
 	}
-	if state.phase == balanceStable && state.fingerprint == fingerprint {
+	fingerprint := m.balanceFingerprintLocked(state)
+	if !manual && state.phase == balanceStable && state.fingerprint == fingerprint {
 		return nil
 	}
-	if fingerprint.stores != state.fingerprint.stores || fingerprint.rules != state.fingerprint.rules ||
-		fingerprint.labels != state.fingerprint.labels {
-		clear(state.actions)
-		clear(state.leaderTargets)
-		clear(state.voterActions)
-		clear(state.cursors)
-		clear(state.regionBytes)
-		clear(state.moveBytes)
-		if state.converging != nil {
-			state.converging.cursor = nil
-		}
-		discardPendingBalanceSnapshotLocked(state)
-		clearBalanceDependencies(state)
-		state.phase = balanceIdle
-		state.mode = BalanceBuildLeaders
-		state.nextGroup = ""
+	if !manual && state.pending != nil && state.pending.fingerprint == fingerprint &&
+		state.pending.ruleRevision == m.currentBalanceRuleRevisionLocked() {
+		return state.pending
 	}
-	if m.balanceRuleFingerprint != nil {
-		// Keep the scoped rule generation authoritative for subsequent checks
-		// made while this snapshot is being built.
-		state.fingerprint.rules = fingerprint.rules
-	}
-	if state.pending != nil {
-		if state.pending.fingerprint == fingerprint && state.dependencyFingerprint == fingerprint {
-			return state.pending
-		}
-		discardPendingBalanceSnapshotLocked(state)
-		clearBalanceDependencies(state)
-	}
-	liveUnavailable := m.collectUnavailableStoresFor(liveStores)
-	globalLeaders := maps.Clone(m.balanceLeaderCounts)
-	globalVoters := maps.Clone(m.balanceVoterCounts)
-	progressBuilder := m.balanceProgressBuilder
-	mode := state.mode
-	if progressBuilder == nil && m.balanceBuilder != nil {
-		legacyBuilder := m.balanceBuilder
-		progressBuilder = func(ctx context.Context, group *GroupState, ranges GroupKeyRanges, _ []uint64, _ BalanceActionMode, _ any, _ int) BalanceActionBuildResult {
-			actions, ready := legacyBuilder(ctx, group, ranges)
-			return BalanceActionBuildResult{Actions: actions, Complete: ready, Ready: ready, BlockTable: !ready, Checks: 1}
-		}
-		mode = BalanceBuildAll
-	}
+	state.fingerprint = fingerprint
 	result := &balanceSnapshot{
-		tableID:       tableID,
-		fingerprint:   fingerprint,
-		progress:      progressBuilder,
-		virtual:       m.balanceVirtualBuilder,
-		validator:     m.balanceValidator,
-		admission:     m.balanceAdmission,
+		tableID: tableID, fingerprint: fingerprint, ruleRevision: m.currentBalanceRuleRevisionLocked(),
+		builder: m.balanceBuilder, admission: m.balanceAdmission, mode: BalanceCheckConvergence,
 		ranges:        make(map[string]GroupKeyRanges, len(state.groups)),
-		actions:       make(map[string]BalanceActionSet, len(state.groups)),
-		leaderTargets: make(map[string][]uint64, len(state.leaderTargets)),
-		cursors:       make(map[string]any, len(state.cursors)),
-		stores:        availableStoreIDsFromStores(liveStores, liveUnavailable),
-		mode:          mode,
-		nextGroup:     state.nextGroup,
-		globalLeaders: globalLeaders,
-		globalVoters:  globalVoters,
-		unreadyGroups: make(map[string]struct{}),
-		blockedGroups: make(map[string]struct{}),
-	}
-	maps.Copy(result.blockedGroups, state.blockedGroups)
-	if state.dependencyFingerprint == fingerprint {
-		result.dependencies = maps.Clone(state.dependencies)
-		result.conditions = slices.Clone(state.dependencyConditions)
+		actions:       make(map[string]*balanceGroupActions, len(state.groups)),
+		stores:        availableStoreIDsFromStores(stores, unavailable),
+		globalLeaders: maps.Clone(m.balanceLeaderCounts), globalVoters: maps.Clone(m.balanceVoterCounts),
 	}
 	for id := range state.groups {
-		group := m.groups[id]
-		if group == nil {
-			continue
-		}
-		result.groups = append(result.groups, newGroupState(group))
-		result.ranges[id] = m.keyRanges[id]
-		if leaders, ok := state.leaderTargets[id]; ok {
-			result.leaderTargets[id] = slices.Clone(leaders)
-		}
-		if actions, ok := state.actions[id]; ok && mode == BalanceBuildAll {
-			result.actions[id] = cloneBalanceActionSet(actions)
-		}
-		switch mode {
-		case BalanceBuildLeaders:
-			if leaders, ok := state.leaderTargets[id]; ok {
-				result.actions[id] = BalanceActionSet{LeaderTargets: slices.Clone(leaders)}
-			}
-		case BalanceBuildVoters:
-			if actions, ok := state.voterActions[id]; ok {
-				result.actions[id] = cloneBalanceActionSet(actions)
+		if group := m.groups[id]; group != nil {
+			copy := newGroupState(group)
+			result.groups = append(result.groups, copy)
+			result.ranges[id] = cloneBalanceRanges(m.keyRanges[id])
+			if copy.BalancePolicy != BalancePolicyFixed {
+				result.autoGroups = append(result.autoGroups, copy)
 			}
 		}
-		if cursor, ok := state.cursors[id]; ok {
-			result.cursors[id] = cursor
+		if record := state.actions[id]; record != nil {
+			if record.leadersBlocked || record.votersBlocked {
+				// Temporary omissions are usable in the current pass, but must
+				// be reconstructed on every new pass before declaring stability.
+				delete(state.actions, id)
+			} else {
+				result.actions[id] = record
+			}
 		}
 	}
+	slices.SortFunc(result.groups, func(a, b *GroupState) int { return strings.Compare(a.ID, b.ID) })
+	slices.SortFunc(result.autoGroups, func(a, b *GroupState) int { return strings.Compare(a.ID, b.ID) })
 	return result
 }
 
@@ -549,8 +464,7 @@ func (m *Manager) balanceTable(ctx context.Context, groupID string, apply bool) 
 	return m.balanceTableWithBudget(ctx, groupID, apply, 0)
 }
 
-// RebalanceAffinityGroup previews or applies one legal step for the containing
-// table. An unready or already stable table keeps its current targets.
+// RebalanceAffinityGroup previews or applies one legal balance step.
 func (m *Manager) RebalanceAffinityGroup(ctx context.Context, groupID string, apply bool) ([]BalancePlan, error) {
 	if m.GetAffinityGroupState(groupID) == nil {
 		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
@@ -558,8 +472,8 @@ func (m *Manager) RebalanceAffinityGroup(ctx context.Context, groupID string, ap
 	return m.balanceTable(ctx, groupID, apply)
 }
 
-func (m *Manager) balanceTableWithBudget(ctx context.Context, groupID string, apply bool, buildBudget int) ([]BalancePlan, error) {
-	plans, err, _ := m.balanceTableWithProgress(ctx, groupID, apply, buildBudget)
+func (m *Manager) balanceTableWithBudget(ctx context.Context, groupID string, apply bool, budget int) ([]BalancePlan, error) {
+	plans, err, _ := m.balanceTableWithProgress(ctx, groupID, apply, budget)
 	return plans, err
 }
 
@@ -584,410 +498,218 @@ func balanceRangesEqual(a, b GroupKeyRanges) bool {
 	return true
 }
 
-// checkBalanceConvergence retains the submitted target across heartbeat-driven
-// cache invalidation. Cached Region counts alone cannot prove full convergence.
-func (m *Manager) checkBalanceConvergence(ctx context.Context, tableID string, budget int) (bool, int, bool) {
-	m.metaMutex.Lock()
-	m.Lock()
-	state := m.balanceTables[tableID]
-	if state == nil || state.converging == nil {
-		m.Unlock()
-		m.metaMutex.Unlock()
-		return true, budget, false
-	}
-	convergence := state.converging
-	info := m.groups[convergence.target.ID]
-	if info == nil {
-		state.converging = nil
-		state.phase = balanceIdle
-		m.Unlock()
-		m.metaMutex.Unlock()
-		return true, budget, false
-	}
-	group := newGroupState(info)
-	ranges := m.keyRanges[group.ID]
-	if group.String() != convergence.target.String() || !balanceRangesEqual(ranges, convergence.ranges) {
-		convergence.target = group.Group
-		convergence.ranges = cloneBalanceRanges(ranges)
-		convergence.cursor = nil
-	}
-	fingerprint := m.balanceFingerprintLocked(state)
-	progress, validator := m.balanceProgressBuilder, m.balanceValidator
-	cursor := convergence.cursor
-	m.Unlock()
-	m.metaMutex.Unlock()
-	if group.Phase != PhaseStable || !group.AffinitySchedulingAllowed {
-		return false, budget, false
-	}
-	var page BalanceActionBuildResult
-	if progress != nil {
-		page = progress(ctx, group, ranges, nil, BalanceCheckConvergence, cursor, budget)
-	} else {
-		page.Ready, page.Complete = true, true
-		if validator != nil {
-			page.Ready, page.Complete = validator(ctx, group, ranges,
-				makePlan(&group.Group, group.LeaderStoreID, group.VoterStoreIDs, false))
-		}
-	}
-	m.Lock()
-	defer m.Unlock()
-	state = m.balanceTables[tableID]
-	if state == nil || state.converging != convergence || m.balanceFingerprintLocked(state) != fingerprint {
-		return false, budget, false
-	}
-	if page.Checks < 0 || (budget > 0 && page.Checks > budget) || ctx.Err() != nil || page.BlockTable || !page.Ready {
-		convergence.cursor = nil
-		return false, max(0, budget-page.Checks), false
-	}
-	remaining := budget
-	if budget > 0 {
-		remaining -= page.Checks
-	}
-	if !page.Complete {
-		convergence.cursor = page.Cursor
-		return false, remaining, page.Checks > 0
-	}
-	state.converging = nil
-	state.phase = balanceIdle
-	if budget > 0 && remaining == 0 {
-		return false, remaining, true
-	}
-	return true, remaining, false
-}
-
-//nolint:revive // the boolean reports whether a bounded build should resume.
-func (m *Manager) balanceTableWithProgress(ctx context.Context, groupID string, apply bool, buildBudget int) ([]BalancePlan, error, bool) {
+//nolint:revive // the last boolean requests another bounded worker page.
+func (m *Manager) balanceTableWithProgress(ctx context.Context, groupID string, apply bool, budget int) ([]BalancePlan, error, bool) {
 	tableID := TableGroupPrefix(groupID)
-	tableLock := m.acquireBalanceTableLock(tableID)
-	defer m.releaseBalanceTableLock(tableID, tableLock)
-	if !tableLock.TryLock() {
+	lock := m.acquireBalanceTableLock(tableID)
+	defer m.releaseBalanceTableLock(tableID, lock)
+	if !lock.TryLock() {
 		return nil, nil, false
 	}
-	defer tableLock.Unlock()
-	ready, remaining, incomplete := m.checkBalanceConvergence(ctx, tableID, buildBudget)
-	if !ready {
-		return nil, ctx.Err(), incomplete
-	}
-
-	var snapshot *balanceSnapshot
-	retainDependencies := false
-	defer func() {
-		if snapshot != nil && !retainDependencies {
-			m.discardBlockedBalanceBuilds(snapshot)
-			m.releaseBalanceDependencies(snapshot)
-		}
-	}()
-
-	snapshot = m.balanceSnapshot(groupID)
+	defer lock.Unlock()
+	snapshot := m.balanceSnapshot(groupID)
 	if snapshot == nil {
 		return nil, nil, false
 	}
-	if !snapshot.prepared {
-		slices.SortFunc(snapshot.groups, func(a, b *GroupState) int { return strings.Compare(a.ID, b.ID) })
-		snapshot.planningGroups = make([]*Group, 0, len(snapshot.groups))
-		snapshot.autoGroups = make([]*GroupState, 0, len(snapshot.groups))
-		for _, group := range snapshot.groups {
-			snapshot.planningGroups = append(snapshot.planningGroups, &group.Group)
-			if group.BalancePolicy != BalancePolicyFixed {
-				snapshot.autoGroups = append(snapshot.autoGroups, group)
-			}
+	retain := false
+	defer func() {
+		if !retain {
+			m.releaseBalanceDependencies(snapshot)
 		}
-		snapshot.prepared = true
-	}
-	groups, autoGroups := snapshot.planningGroups, snapshot.autoGroups
-	for _, group := range autoGroups {
+	}()
+	for _, group := range snapshot.autoGroups {
 		if group.Phase != PhaseStable || !group.AffinitySchedulingAllowed {
 			return nil, nil, false
 		}
 	}
-	if len(autoGroups) == 0 || len(snapshot.stores) == 0 {
-		return nil, nil, false
+	groups := make([]*Group, 0, len(snapshot.groups))
+	for _, group := range snapshot.groups {
+		groups = append(groups, &group.Group)
 	}
+	remaining := budget
+	yield := func() ([]BalancePlan, error, bool) {
+		retain = m.retainBalanceSnapshot(snapshot)
+		return nil, ctx.Err(), retain
+	}
+	for {
+		if snapshot.mode == BalanceValidateTarget {
+			return m.finishBalancePlan(ctx, snapshot, apply, remaining, budget > 0, &retain)
+		}
+		if len(snapshot.autoGroups) == 0 || len(snapshot.groups) == 1 {
+			break // One group cannot strictly lower either sum of squared counts.
+		}
+		if budget > 0 && remaining == 0 {
+			return yield()
+		}
+		complete, left, resume := m.buildBalanceActionStage(ctx, snapshot, snapshot.autoGroups, remaining)
+		remaining = left
+		if ctx.Err() != nil || !m.balanceSnapshotCurrent(snapshot) {
+			return nil, ctx.Err(), false
+		}
+		if !complete {
+			if resume {
+				return yield()
+			}
+			return nil, nil, false
+		}
+		if snapshot.mode == BalanceCheckConvergence {
+			snapshot.mode, snapshot.next = BalanceBuildLeaders, 0
+			continue
+		}
+		sets := m.balanceActionSets(snapshot)
+		plans, err := PlanBalance(groups, BalanceOptions{
+			Stores: snapshot.stores, ActionSets: sets,
+			GlobalLeaderCounts: snapshot.globalLeaders, GlobalVoterCounts: snapshot.globalVoters,
+		})
+		if err != nil {
+			return nil, err, false
+		}
+		if findChangedPlan(plans) != nil {
+			if err := m.captureBalanceDependencies(ctx, snapshot); err != nil {
+				if errs.ErrEtcdTxnConflict.Equal(err) {
+					return nil, nil, false
+				}
+				return nil, err, false
+			}
+			snapshot.mode, snapshot.cursor, snapshot.validationPlans = BalanceValidateTarget, nil, plans
+			continue
+		}
+		if snapshot.blocked {
+			return plans, nil, false
+		}
+		if snapshot.mode == BalanceBuildLeaders {
+			snapshot.mode, snapshot.next = BalanceBuildVoters, 0
+			continue
+		}
+		break
+	}
+	// A no-op still verifies watcher inputs before caching stability.
 	if err := m.captureBalanceDependencies(ctx, snapshot); err != nil {
 		if errs.ErrEtcdTxnConflict.Equal(err) {
 			return nil, nil, false
 		}
 		return nil, err, false
 	}
-	finish := func(plans []BalancePlan, plan BalancePlan) ([]BalancePlan, error, bool) {
-		snapshot.validationPlans = plans
-		budget := remaining
-		if buildBudget == 0 {
-			budget = -1 // An explicit synchronous call has no page limit.
-		}
-		result, err, yield := m.finishBalancePlan(ctx, snapshot, plans, plan, apply, budget)
-		retainDependencies = yield && m.retainBalanceSnapshot(snapshot)
-		return result, err, retainDependencies
-	}
-	if snapshot.validationPlans != nil {
-		return finish(snapshot.validationPlans, *findChangedPlan(snapshot.validationPlans))
-	}
-	for {
-		complete, nextRemaining, yield := m.buildBalanceActionStage(ctx, snapshot, autoGroups, remaining)
-		remaining = nextRemaining
-		if ctx.Err() != nil {
-			return nil, ctx.Err(), false
-		}
-		if !complete {
-			if yield && m.retainBalanceSnapshot(snapshot) {
-				retainDependencies = true
-			} else {
-				yield = false
-			}
-			return nil, nil, yield
-		}
-		if !m.refreshBalanceSnapshotScores(snapshot) {
-			return nil, nil, false
-		}
-		if snapshot.mode == BalanceBuildVoters {
-			for id, actions := range snapshot.actions {
-				actions.LeaderTargets = slices.Clone(snapshot.leaderTargets[id])
-				snapshot.actions[id] = actions
-			}
-		}
-
-		plans, err := PlanBalance(groups, BalanceOptions{
-			Stores: snapshot.stores, ActionSets: snapshot.actions,
-			GlobalLeaderCounts: snapshot.globalLeaders, GlobalVoterCounts: snapshot.globalVoters,
-		})
-		if err != nil {
-			return plans, err, false
-		}
-		changed := findChangedPlan(plans)
-		if snapshot.mode == BalanceBuildLeaders && changed == nil {
-			// Every group must have a complete leader action set before the
-			// table can advance to voter replacement planning. A temporarily
-			// unready group must stay in leader mode and be retried.
-			if len(snapshot.unreadyGroups) > 0 || len(snapshot.blockedGroups) > 0 {
-				return plans, nil, false
-			}
-			for id, actions := range snapshot.actions {
-				snapshot.leaderTargets[id] = slices.Clone(actions.LeaderTargets)
-			}
-			if !m.balanceSnapshotCurrent(snapshot) {
-				return nil, nil, false
-			}
-			m.Lock()
-			state := m.balanceTables[snapshot.tableID]
-			switched := false
-			var voterActions map[string]BalanceActionSet
-			if state != nil && m.balanceFingerprintLocked(state) == snapshot.fingerprint {
-				switched = true
-				state.mode = BalanceBuildVoters
-				state.phase = balanceIdle
-				for id, leaders := range snapshot.leaderTargets {
-					state.leaderTargets[id] = slices.Clone(leaders)
-				}
-				clear(state.actions)
-				clear(state.cursors)
-				state.nextGroup = ""
-				voterActions = make(map[string]BalanceActionSet, len(state.voterActions))
-				for id, actions := range state.voterActions {
-					cloned := cloneBalanceActionSet(actions)
-					state.actions[id] = cloned
-					voterActions[id] = cloned
-				}
-			}
-			m.Unlock()
-			if !switched {
-				return nil, nil, false
-			}
-			snapshot.mode = BalanceBuildVoters
-			snapshot.actions = voterActions
-			for id := range snapshot.unreadyGroups {
-				delete(snapshot.actions, id)
-			}
-			snapshot.cursors = make(map[string]any, len(autoGroups))
-			snapshot.nextGroup = ""
-			if buildBudget > 0 && remaining <= 0 {
-				if m.retainBalanceSnapshot(snapshot) {
-					retainDependencies = true
-				} else {
-					return nil, nil, false
-				}
-				return nil, nil, true
-			}
-			continue
-		}
-		if changed != nil {
-			if len(snapshot.unreadyGroups) > 0 {
-				return nil, nil, false
-			}
-			return finish(plans, *changed)
-		}
-		if len(snapshot.unreadyGroups) > 0 || len(snapshot.blockedGroups) > 0 {
-			return plans, nil, false
-		}
+	plans, err := PlanBalance(groups, BalanceOptions{Stores: snapshot.stores, ActionSets: m.balanceActionSets(snapshot)})
+	if err == nil {
 		m.Lock()
-		if state := m.balanceTables[snapshot.tableID]; state != nil && m.balanceFingerprintLocked(state) == snapshot.fingerprint {
+		if state := m.balanceTables[tableID]; state != nil && m.balanceFingerprintLocked(state) == snapshot.fingerprint {
 			state.phase = balanceStable
-			state.fingerprint = snapshot.fingerprint
 		}
 		m.Unlock()
-		return plans, nil, false
 	}
+	return plans, err, false
 }
 
+// buildBalanceActionStage retains at most one unfinished group cursor. Each
+// page charges all work, including unready scans, against the shared budget.
 func (m *Manager) buildBalanceActionStage(ctx context.Context, snapshot *balanceSnapshot, groups []*GroupState, budget int) (bool, int, bool) {
-	ordered := rotateBalanceGroups(groups, snapshot.nextGroup)
-	complete := true
 	remaining := budget
-	for _, group := range ordered {
-		if _, unready := snapshot.unreadyGroups[group.ID]; unready {
+	for snapshot.next < len(groups) {
+		group := groups[snapshot.next]
+		record := snapshot.actions[group.ID]
+		if snapshot.mode == BalanceBuildLeaders && record != nil && record.leadersReady ||
+			snapshot.mode == BalanceBuildVoters && record != nil && record.votersReady {
+			snapshot.blocked = snapshot.blocked || record.leadersBlocked || record.votersBlocked
+			snapshot.next++
 			continue
 		}
-		if _, built := snapshot.actions[group.ID]; built {
-			if _, hasCursor := snapshot.cursors[group.ID]; !hasCursor {
-				continue
-			}
-		}
-		if budget > 0 && remaining <= 0 {
+		if budget > 0 && remaining == 0 {
 			return false, remaining, true
 		}
-		cursor := snapshot.cursors[group.ID]
-		page := snapshot.progress(ctx, group, snapshot.ranges[group.ID], snapshot.stores, snapshot.mode, cursor, remaining)
-		if page.Checks < 0 || (budget > 0 && page.Checks > remaining) {
-			m.discardBalanceBuild(snapshot, group.ID)
+		page := snapshot.builder(ctx, group, snapshot.ranges[group.ID], &group.Group, snapshot.stores, snapshot.mode, snapshot.cursor, remaining)
+		if page.Checks < 0 || budget > 0 && page.Checks > remaining {
 			return false, remaining, false
 		}
 		if budget > 0 {
 			remaining -= page.Checks
 		}
-		if ctx.Err() != nil {
-			m.discardBalanceBuild(snapshot, group.ID)
+		if ctx.Err() != nil || page.BlockTable || !page.Ready {
+			snapshot.cursor, snapshot.regionBytes = nil, nil
 			return false, remaining, false
 		}
-		if page.BlockTable {
-			m.discardBalanceBuild(snapshot, group.ID)
-			return false, remaining, false
-		}
-		if !page.Ready {
-			m.discardBalanceBuild(snapshot, group.ID)
-			snapshot.unreadyGroups[group.ID] = struct{}{}
-			snapshot.actions[group.ID] = BalanceActionSet{VoterReplacements: make(map[uint64]map[uint64][]uint64)}
-			delete(snapshot.cursors, group.ID)
-			continue
-		}
-		if page.TemporaryBlocked {
-			snapshot.blockedGroups[group.ID] = struct{}{}
-		}
-		actions, ok := m.cacheBalanceBuildPage(snapshot, group.ID, page)
-		if !ok {
-			return false, remaining, false
-		}
-		snapshot.actions[group.ID] = actions
-		if page.Complete {
-			delete(snapshot.cursors, group.ID)
-		} else {
-			if page.Checks == 0 {
+		snapshot.blocked = snapshot.blocked || page.TemporaryBlocked
+		snapshot.groupBlocked = snapshot.groupBlocked || page.TemporaryBlocked
+		if snapshot.mode != BalanceCheckConvergence {
+			if !m.cacheBalanceBuildPage(snapshot, group.ID, page) {
 				return false, remaining, false
 			}
-			snapshot.cursors[group.ID] = page.Cursor
-			complete = false
 		}
-		snapshot.nextGroup = group.ID
+		if !page.Complete {
+			snapshot.cursor = page.Cursor
+			return false, remaining, page.Checks > 0
+		}
+		snapshot.next++
+		snapshot.cursor, snapshot.regionBytes = nil, nil
+		snapshot.groupBlocked = false
 	}
-	return complete, remaining, !complete
+	return true, remaining, false
 }
 
-func (m *Manager) cacheBalanceBuildPage(snapshot *balanceSnapshot, groupID string, page BalanceActionBuildResult) (BalanceActionSet, bool) {
+func (m *Manager) cacheBalanceBuildPage(snapshot *balanceSnapshot, groupID string, page BalanceActionBuildResult) bool {
 	m.Lock()
 	defer m.Unlock()
 	state := m.balanceTables[snapshot.tableID]
-	if state == nil || m.balanceFingerprintLocked(state) != snapshot.fingerprint {
-		return BalanceActionSet{}, false
+	if state == nil || m.balanceFingerprintLocked(state) != snapshot.fingerprint ||
+		m.currentBalanceRuleRevisionLocked() != snapshot.ruleRevision {
+		return false
 	}
-	if page.TemporaryBlocked {
-		state.blockedGroups[groupID] = struct{}{}
+	if snapshot.regionBytes == nil {
+		snapshot.regionBytes = make(map[uint64]uint64)
 	}
-	weights := state.regionBytes[groupID]
-	if weights == nil {
-		weights = make(map[uint64]uint64, len(page.RegionBytes))
-		state.regionBytes[groupID] = weights
-	}
-	for regionID, bytes := range page.RegionBytes {
-		if cached, ok := m.regions[regionID]; ok && cached.groupInfo.ID == groupID {
-			bytes = approximateRegionBytes(cached.balanceInput())
+	for id, size := range page.RegionBytes {
+		if cached, ok := m.regions[id]; ok && cached.groupInfo.ID == groupID {
+			size = approximateRegionBytes(cached.balanceInput())
 		}
-		state.moveBytes[groupID] = state.moveBytes[groupID] - weights[regionID] + bytes
-		weights[regionID] = bytes
+		snapshot.regionBytes[id] = size
 	}
-	actions := cloneBalanceActionSet(page.Actions)
-	actions.MoveBytes = state.moveBytes[groupID]
-	if state.voterActions == nil {
-		state.voterActions = make(map[string]BalanceActionSet)
+	if !page.Complete {
+		return true
+	}
+	record := &balanceGroupActions{regionBytes: snapshot.regionBytes}
+	if previous := snapshot.actions[groupID]; previous != nil {
+		*record = *previous
 	}
 	if snapshot.mode == BalanceBuildLeaders {
-		state.leaderTargets[groupID] = slices.Clone(actions.LeaderTargets)
-	} else if snapshot.mode == BalanceBuildVoters && page.Complete {
-		state.voterActions[groupID] = cloneBalanceActionSet(actions)
-	}
-	state.actions[groupID] = actions
-	if page.Complete {
-		delete(state.cursors, groupID)
+		record.set = cloneBalanceActionSet(page.Actions)
+		record.leadersReady, record.leadersBlocked = true, snapshot.groupBlocked
 	} else {
-		state.cursors[groupID] = page.Cursor
+		voters := cloneBalanceActionSet(page.Actions)
+		voters.LeaderTargets = record.set.LeaderTargets
+		record.set = voters
+		record.votersReady, record.votersBlocked = true, snapshot.groupBlocked
 	}
-	state.nextGroup = groupID
-	state.fingerprint = snapshot.fingerprint
-	return cloneBalanceActionSet(actions), true
+	// Sizes are accumulated incrementally; only a completed scan visits its
+	// observations once to publish the final total.
+	if len(snapshot.regionBytes) > 0 {
+		record.regionBytes = snapshot.regionBytes
+		record.set.MoveBytes = 0
+		for id, size := range record.regionBytes {
+			if cached, ok := m.regions[id]; ok && cached.groupInfo.ID == groupID {
+				size = approximateRegionBytes(cached.balanceInput())
+				record.regionBytes[id] = size
+			}
+			record.set.MoveBytes += size
+		}
+	}
+	state.actions[groupID], snapshot.actions[groupID] = record, record
+	return true
 }
 
-func (m *Manager) discardBalanceBuild(snapshot *balanceSnapshot, groupID string) {
-	m.Lock()
-	defer m.Unlock()
+func (m *Manager) balanceActionSets(snapshot *balanceSnapshot) map[string]BalanceActionSet {
+	m.RLock()
+	defer m.RUnlock()
+	snapshot.globalLeaders, snapshot.globalVoters = maps.Clone(m.balanceLeaderCounts), maps.Clone(m.balanceVoterCounts)
+	sets := make(map[string]BalanceActionSet, len(snapshot.actions))
 	state := m.balanceTables[snapshot.tableID]
-	if state == nil || m.balanceFingerprintLocked(state) != snapshot.fingerprint {
-		return
-	}
-	discardPendingBalanceSnapshotLocked(state)
-	discardBalanceBuildLocked(state, groupID)
-}
-
-func discardBalanceBuildLocked(state *balanceTableState, groupID string) {
-	delete(state.cursors, groupID)
-	delete(state.actions, groupID)
-	delete(state.leaderTargets, groupID)
-	delete(state.voterActions, groupID)
-	delete(state.blockedGroups, groupID)
-	delete(state.regionBytes, groupID)
-	delete(state.moveBytes, groupID)
-	state.mode = BalanceBuildLeaders
-}
-
-// Discard every cached action set with temporary omissions along with pending
-// work. Only table state is read here: the planner mutates its snapshot outside
-// the Manager lock, even while a Region heartbeat invalidates the table.
-func discardPendingBalanceSnapshotLocked(state *balanceTableState) {
-	for id := range state.blockedGroups {
-		discardBalanceBuildLocked(state, id)
-	}
-	state.pending = nil
-}
-
-func (m *Manager) discardBlockedBalanceBuilds(snapshot *balanceSnapshot) {
-	for id := range snapshot.blockedGroups {
-		m.discardBalanceBuild(snapshot, id)
-	}
-}
-
-func clearBalanceDependencies(state *balanceTableState) {
-	state.dependencies = nil
-	state.dependencyConditions = nil
-	state.dependencyFingerprint = balanceFingerprint{}
-}
-
-func (m *Manager) releaseBalanceDependencies(snapshot *balanceSnapshot) {
-	m.Lock()
-	defer m.Unlock()
-	if state := m.balanceTables[snapshot.tableID]; state != nil {
-		if state.pending == snapshot {
-			discardPendingBalanceSnapshotLocked(state)
+	for id, record := range snapshot.actions {
+		actions := record.set
+		if state != nil && state.actions[id] != nil {
+			actions.MoveBytes = state.actions[id].set.MoveBytes
 		}
-		if state.dependencyFingerprint == snapshot.fingerprint {
-			clearBalanceDependencies(state)
-		}
+		sets[id] = actions
 	}
+	return sets
 }
 
 func (m *Manager) retainBalanceSnapshot(snapshot *balanceSnapshot) bool {
@@ -995,88 +717,55 @@ func (m *Manager) retainBalanceSnapshot(snapshot *balanceSnapshot) bool {
 	defer m.Unlock()
 	state := m.balanceTables[snapshot.tableID]
 	if state == nil || m.balanceFingerprintLocked(state) != snapshot.fingerprint ||
-		state.dependencyFingerprint != snapshot.fingerprint || state.dependencies == nil {
+		m.currentBalanceRuleRevisionLocked() != snapshot.ruleRevision {
 		return false
 	}
 	state.pending = snapshot
 	return true
 }
 
-func (m *Manager) refreshBalanceSnapshotScores(snapshot *balanceSnapshot) bool {
-	m.RLock()
-	defer m.RUnlock()
-	state := m.balanceTables[snapshot.tableID]
-	if state == nil || m.balanceFingerprintLocked(state) != snapshot.fingerprint {
-		return false
+func (m *Manager) releaseBalanceDependencies(snapshot *balanceSnapshot) {
+	m.Lock()
+	defer m.Unlock()
+	if state := m.balanceTables[snapshot.tableID]; state != nil && state.pending == snapshot {
+		state.pending = nil
 	}
-	clear(snapshot.globalLeaders)
-	clear(snapshot.globalVoters)
-	for storeID, count := range m.balanceLeaderCounts {
-		snapshot.globalLeaders[storeID] = count
-	}
-	for storeID, count := range m.balanceVoterCounts {
-		snapshot.globalVoters[storeID] = count
-	}
-	for id, actions := range snapshot.actions {
-		if current, ok := state.actions[id]; ok {
-			actions.MoveBytes = current.MoveBytes
-			snapshot.actions[id] = actions
-		}
-	}
-	return true
 }
 
-//nolint:revive // the boolean reports whether a bounded build should resume.
-func (m *Manager) finishBalancePlan(ctx context.Context, snapshot *balanceSnapshot, plans []BalancePlan, plan BalancePlan, apply bool, budget int) ([]BalancePlan, error, bool) {
-	for _, group := range snapshot.groups {
-		if group.ID != plan.GroupID {
-			continue
-		}
-		if snapshot.virtual != nil {
-			if budget == 0 {
-				return nil, nil, true
-			}
-			target := group.Group
-			target.LeaderStoreID, target.VoterStoreIDs = plan.LeaderStoreID, plan.VoterStoreIDs
-			page := snapshot.virtual(ctx, group, snapshot.ranges[group.ID], &target, nil,
-				BalanceValidateTarget, snapshot.validationCursor, max(0, budget))
-			if page.Checks < 0 || (budget > 0 && page.Checks > budget) || ctx.Err() != nil || page.BlockTable || !page.Ready {
-				m.discardBalanceBuild(snapshot, group.ID)
-				return nil, ctx.Err(), false
-			}
-			if page.InvalidTarget {
-				m.removeIllegalBalanceAction(snapshot, group, plan)
-				return nil, nil, false
-			}
-			if !page.Complete {
-				snapshot.validationCursor = page.Cursor
-				return nil, nil, page.Checks > 0
-			}
-		} else if snapshot.validator != nil {
-			ready, legal := snapshot.validator(ctx, group, snapshot.ranges[group.ID], plan)
-			if !ready {
-				m.discardBalanceBuild(snapshot, group.ID)
-				return nil, ctx.Err(), false
-			}
-			if !legal {
-				m.removeIllegalBalanceAction(snapshot, group, plan)
-				return nil, nil, false
-			}
-		}
-		if !apply {
-			return plans, nil, false
-		}
-		m.refreshBalanceStores()
-		if !m.balanceSnapshotCurrent(snapshot) {
-			return nil, nil, false
-		}
-		committed, err := m.commitBalancePlans(ctx, snapshot, []BalancePlan{plan})
-		if !committed {
+//nolint:revive // the last boolean requests another bounded validation page.
+func (m *Manager) finishBalancePlan(ctx context.Context, snapshot *balanceSnapshot, apply bool, budget int, bounded bool, retain *bool) ([]BalancePlan, error, bool) {
+	plan := findChangedPlan(snapshot.validationPlans)
+	groupIndex := slices.IndexFunc(snapshot.groups, func(group *GroupState) bool { return group.ID == plan.GroupID })
+	group := snapshot.groups[groupIndex]
+	if bounded && budget == 0 {
+		*retain = m.retainBalanceSnapshot(snapshot)
+		return nil, nil, *retain
+	}
+	target := group.Group
+	target.LeaderStoreID, target.VoterStoreIDs = plan.LeaderStoreID, plan.VoterStoreIDs
+	page := snapshot.builder(ctx, group, snapshot.ranges[group.ID], &target, snapshot.stores, BalanceValidateTarget, snapshot.cursor, budget)
+	if page.Checks < 0 || bounded && page.Checks > budget || ctx.Err() != nil || page.BlockTable || !page.Ready {
+		return nil, ctx.Err(), false
+	}
+	if page.InvalidTarget {
+		m.removeIllegalBalanceAction(snapshot, group, *plan)
+		return nil, nil, false
+	}
+	if !page.Complete {
+		snapshot.cursor = page.Cursor
+		*retain = page.Checks > 0 && m.retainBalanceSnapshot(snapshot)
+		return nil, nil, *retain
+	}
+	if !m.balanceSnapshotCurrent(snapshot) {
+		return nil, nil, false
+	}
+	if apply {
+		committed, err := m.commitBalancePlans(ctx, snapshot, []BalancePlan{*plan})
+		if !committed || err != nil {
 			return nil, err, false
 		}
-		return plans, err, false
 	}
-	return nil, nil, false
+	return snapshot.validationPlans, nil, false
 }
 
 func (m *Manager) removeIllegalBalanceAction(snapshot *balanceSnapshot, group *GroupState, plan BalancePlan) {
@@ -1086,24 +775,17 @@ func (m *Manager) removeIllegalBalanceAction(snapshot *balanceSnapshot, group *G
 	if state == nil || m.balanceFingerprintLocked(state) != snapshot.fingerprint {
 		return
 	}
-	// Snapshots read the role-specific caches. Remove a rejected action
-	// from every representation so a subsequent snapshot cannot restore it.
-	actions := discardBalanceAction(state.actions[group.ID], group, plan)
-	state.actions[group.ID] = actions
-	if slices.Equal(plan.VoterStoreIDs, group.VoterStoreIDs) {
-		state.leaderTargets[group.ID] = slices.DeleteFunc(slices.Clone(state.leaderTargets[group.ID]),
-			func(id uint64) bool { return id == plan.LeaderStoreID })
+	if previous := state.actions[group.ID]; previous != nil {
+		record := *previous
+		record.set = discardBalanceAction(record.set, group, plan)
+		state.actions[group.ID] = &record
 	}
-	if voters, ok := state.voterActions[group.ID]; ok {
-		state.voterActions[group.ID] = discardBalanceAction(voters, group, plan)
-	}
-	delete(state.cursors, group.ID)
-	discardPendingBalanceSnapshotLocked(state)
+	state.pending = nil
 }
 
 func discardBalanceAction(actions BalanceActionSet, group *GroupState, plan BalancePlan) BalanceActionSet {
 	actions = cloneBalanceActionSet(actions)
-	if slices.Equal(plan.VoterStoreIDs, group.VoterStoreIDs) {
+	if slices.Equal(normalizeVoters(plan.VoterStoreIDs), normalizeVoters(group.VoterStoreIDs)) {
 		actions.LeaderTargets = slices.DeleteFunc(actions.LeaderTargets, func(id uint64) bool { return id == plan.LeaderStoreID })
 	} else {
 		for from, targets := range actions.VoterReplacements {
@@ -1129,20 +811,6 @@ func findChangedPlan(plans []BalancePlan) *BalancePlan {
 		}
 	}
 	return nil
-}
-
-func rotateBalanceGroups(groups []*GroupState, after string) []*GroupState {
-	if len(groups) == 0 || after == "" {
-		return groups
-	}
-	index := slices.IndexFunc(groups, func(group *GroupState) bool { return group.ID == after })
-	if index < 0 || index+1 == len(groups) {
-		return groups
-	}
-	result := make([]*GroupState, 0, len(groups))
-	result = append(result, groups[index+1:]...)
-	result = append(result, groups[:index+1]...)
-	return result
 }
 
 // refreshBalanceStores runs in affinity's existing availability loop and
@@ -1213,24 +881,18 @@ func (m *Manager) updateBalanceRegionBytesLocked(groupID string, regionID, bytes
 	if state == nil {
 		return
 	}
-	weights := state.regionBytes[groupID]
-	if weights == nil {
+	previous := state.actions[groupID]
+	if previous == nil {
 		return
 	}
-	previous, ok := weights[regionID]
+	size, ok := previous.regionBytes[regionID]
 	if !ok {
 		return
 	}
-	weights[regionID] = bytes
-	state.moveBytes[groupID] = state.moveBytes[groupID] - previous + bytes
-	if actions, ok := state.actions[groupID]; ok {
-		actions.MoveBytes = actions.MoveBytes - previous + bytes
-		state.actions[groupID] = actions
-	}
-	if actions, ok := state.voterActions[groupID]; ok {
-		actions.MoveBytes = actions.MoveBytes - previous + bytes
-		state.voterActions[groupID] = actions
-	}
+	previous.regionBytes[regionID] = bytes
+	record := *previous
+	record.set.MoveBytes = record.set.MoveBytes - size + bytes
+	state.actions[groupID] = &record
 }
 
 func approximateRegionBytes(region *core.RegionInfo) uint64 {

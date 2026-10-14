@@ -75,10 +75,7 @@ type Manager struct {
 	regions                 map[uint64]regionCache        // {region_id} -> regionCache
 	unavailableStores       map[uint64]storeCondition     // {store_id} -> storeCondition
 	balanceTables           map[string]*balanceTableState // {table_id} -> balance runtime state
-	balanceBuilder          BalanceActionBuilder
-	balanceProgressBuilder  BalanceActionProgressBuilder
-	balanceVirtualBuilder   VirtualBalanceActionProgressBuilder
-	balanceValidator        BalanceActionValidator
+	balanceBuilder          BalanceActionProgressBuilder
 	balanceRuleRevision     func() uint64
 	balanceRuleFingerprint  func([]GroupKeyRanges) uint64
 	balanceTerm             func() ([]clientv3.Cmp, bool)
@@ -348,6 +345,9 @@ func (m *Manager) updateGroupLabelRuleLockedWithCount(groupID string, labelRule 
 	// Set LabelRule
 	groupInfo.LabelRule = labelRule
 	groupInfo.RangeCount = rangeCount
+	if state := m.balanceTables[TableGroupPrefix(groupID)]; state != nil {
+		state.rangeVersion++
+	}
 }
 
 func (m *Manager) updateGroupLabelRules(labels map[string]*labeler.LabelRule, needClear bool) {
@@ -379,6 +379,7 @@ func (m *Manager) deleteGroupLocked(groupID string) {
 	delete(m.groups, groupID)
 	if state := m.balanceTables[TableGroupPrefix(groupID)]; state != nil {
 		delete(state.groups, groupID)
+		state.rangeVersion++
 		if len(state.groups) == 0 {
 			delete(m.balanceTables, TableGroupPrefix(groupID))
 		}

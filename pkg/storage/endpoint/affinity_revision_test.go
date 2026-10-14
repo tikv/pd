@@ -66,13 +66,39 @@ func TestAffinityRevisionBatchAndTermFence(t *testing.T) {
 		}
 		return se.SaveRegionRule(txn, "range1", map[string]string{"id": "range1"})
 	}))
-	metadata, err := se.Load(AffinityMetadataRevisionKey())
+	placementToken, err := se.Load(AffinityPlacementRevisionKey())
 	require.NoError(t, err)
-	require.NotEmpty(t, metadata)
+	require.NotEmpty(t, placementToken)
+	rangeToken, err := se.Load(AffinityTableMetadataRevisionKey("_tidb_pt_10_p1"))
+	require.NoError(t, err)
+	require.Empty(t, rangeToken)
+	require.NoError(t, se.RunInTxn(ctx, func(txn kv.Txn) error {
+		return se.SaveRegionRule(txn, "affinity_group/_tidb_pt_10_p1", map[string]string{"id": "affinity"})
+	}))
+	rangeToken, err = se.Load(AffinityTableMetadataRevisionKey("_tidb_pt_10_p1"))
+	require.NoError(t, err)
+	require.NotEmpty(t, rangeToken)
+	updatedPlacementToken, err := se.Load(AffinityPlacementRevisionKey())
+	require.NoError(t, err)
+	require.Equal(t, placementToken, updatedPlacementToken, "affinity range changes must not advance the placement token")
 	require.NoError(t, se.RunInTxn(ctx, func(txn kv.Txn) error { return se.DeleteRegionRule(txn, "range1") }))
-	updated, err := se.Load(AffinityMetadataRevisionKey())
+	updatedPlacementToken, err = se.Load(AffinityPlacementRevisionKey())
 	require.NoError(t, err)
-	require.NotEqual(t, metadata, updated)
+	require.NotEqual(t, placementToken, updatedPlacementToken, "non-affinity region labels must advance the shared scheduling token")
+
+	manualToken := ""
+	require.NoError(t, se.RunInTxn(ctx, func(txn kv.Txn) error {
+		if err := se.SaveAffinityGroup(txn, "_tidb_pt_10_p1", map[string]string{"id": "explicit"}); err != nil {
+			return err
+		}
+		var err error
+		manualToken, err = SaveAffinityTableRevision(txn, "_tidb_pt_10_p1")
+		return err
+	}))
+	require.NotEmpty(t, manualToken)
+	storedManualToken, err := se.Load(AffinityTableRevisionKey("_tidb_pt_10_p1"))
+	require.NoError(t, err)
+	require.Equal(t, manualToken, storedManualToken, "the automatic mutation token must not overwrite an explicit token")
 
 	batch := make([]func(kv.Txn) error, 130)
 	for i := range batch {

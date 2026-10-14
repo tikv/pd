@@ -35,7 +35,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
-	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
@@ -212,7 +211,7 @@ func (m *Manager) createGroupsWithSkipExisting(changes []GroupKeyRanges, skipExi
 	}
 
 	// Step 5: Save the Group and Label information in storage.
-	if err := endpoint.RunBatchOpInTxnWithLimit(m.ctx, runner, saveOps, etcdutil.MaxEtcdTxnOps/2); err != nil {
+	if err := endpoint.RunBatchOpInTxn(m.ctx, runner, saveOps); err != nil {
 		log.Error("failed to add affinity groups",
 			zap.Int("total-groups", len(filteredChanges)),
 			zap.Error(err))
@@ -309,7 +308,7 @@ func (m *Manager) DeleteAffinityGroups(groupIDs []string, force bool) error {
 	}
 
 	// Step 5: Save the Group and Label information in storage.
-	if err := endpoint.RunBatchOpInTxnWithLimit(m.ctx, runner, saveOps, etcdutil.MaxEtcdTxnOps/2); err != nil {
+	if err := endpoint.RunBatchOpInTxn(m.ctx, runner, saveOps); err != nil {
 		log.Error("failed to delete affinity groups",
 			zap.Int("total-groups", len(toDelete)),
 			zap.Error(err))

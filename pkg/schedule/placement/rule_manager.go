@@ -40,6 +40,7 @@ import (
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
@@ -471,6 +472,40 @@ func (m *RuleManager) GetRulesForApplyRange(start, end []byte) []*Rule {
 	m.RLock()
 	defer m.RUnlock()
 	return m.ruleList.getRulesForApplyRange(start, end)
+}
+
+// GetRuleConfigForRanges returns every effective rule and group intersecting
+// the ranges, including ranges crossing rule boundaries, at one revision.
+// Returned configurations are immutable references, as in GetAllRules.
+func (m *RuleManager) GetRuleConfigForRanges(ranges []keyutil.KeyRange) ([]*Rule, []*RuleGroup) {
+	m.RLock()
+	defer m.RUnlock()
+	rules := make(map[string]*Rule)
+	groups := make(map[string]*RuleGroup)
+	for _, keyRange := range ranges {
+		keys := append([][]byte{keyRange.StartKey}, m.ruleList.rangeList.GetSplitKeys(keyRange.StartKey, keyRange.EndKey)...)
+		for _, key := range keys {
+			index, _ := m.ruleList.rangeList.GetDataByKey(key)
+			if index < 0 {
+				continue
+			}
+			for _, rule := range m.ruleList.ranges[index].applyRules {
+				rules[rule.StoreKey()] = rule
+				if group := m.ruleConfig.groups[rule.GroupID]; group != nil {
+					groups[group.ID] = group
+				}
+			}
+		}
+	}
+	resultRules := make([]*Rule, 0, len(rules))
+	for _, rule := range rules {
+		resultRules = append(resultRules, rule)
+	}
+	resultGroups := make([]*RuleGroup, 0, len(groups))
+	for _, group := range groups {
+		resultGroups = append(resultGroups, group)
+	}
+	return resultRules, resultGroups
 }
 
 // IsRegionFitCached returns whether the RegionFit can be cached.
