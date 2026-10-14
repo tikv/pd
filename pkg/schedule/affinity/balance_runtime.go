@@ -372,6 +372,7 @@ func (m *Manager) InvalidateBalance(groupID string) {
 type balanceSnapshot struct {
 	tableID         string
 	fingerprint     balanceFingerprint
+	rangeVersion    uint64
 	ruleRevision    uint64
 	groups          []*GroupState
 	autoGroups      []*GroupState
@@ -424,12 +425,13 @@ func (m *Manager) newBalanceSnapshot(groupID string, manual bool) *balanceSnapsh
 		return nil
 	}
 	if !manual && state.pending != nil && state.pending.fingerprint == fingerprint &&
+		state.pending.rangeVersion == state.rangeVersion &&
 		state.pending.ruleRevision == m.currentBalanceRuleRevisionLocked() {
 		return state.pending
 	}
 	state.fingerprint = fingerprint
 	result := &balanceSnapshot{
-		tableID: tableID, fingerprint: fingerprint, ruleRevision: m.currentBalanceRuleRevisionLocked(),
+		tableID: tableID, fingerprint: fingerprint, rangeVersion: state.rangeVersion, ruleRevision: m.currentBalanceRuleRevisionLocked(),
 		builder: m.balanceBuilder, admission: m.balanceAdmission, mode: BalanceCheckConvergence,
 		ranges:        make(map[string]GroupKeyRanges, len(state.groups)),
 		actions:       make(map[string]*balanceGroupActions, len(state.groups)),
@@ -593,7 +595,7 @@ func (m *Manager) balanceTableWithProgress(ctx context.Context, groupID string, 
 	plans, err := PlanBalance(groups, BalanceOptions{Stores: snapshot.stores, ActionSets: m.balanceActionSets(snapshot)})
 	if err == nil {
 		m.Lock()
-		if state := m.balanceTables[tableID]; state != nil && m.balanceFingerprintLocked(state) == snapshot.fingerprint {
+		if state := m.balanceTables[tableID]; state != nil && m.balanceFingerprintLocked(state) == snapshot.fingerprint && state.rangeVersion == snapshot.rangeVersion {
 			state.phase = balanceStable
 		}
 		m.Unlock()
@@ -650,7 +652,7 @@ func (m *Manager) cacheBalanceBuildPage(snapshot *balanceSnapshot, groupID strin
 	m.Lock()
 	defer m.Unlock()
 	state := m.balanceTables[snapshot.tableID]
-	if state == nil || m.balanceFingerprintLocked(state) != snapshot.fingerprint ||
+	if state == nil || m.balanceFingerprintLocked(state) != snapshot.fingerprint || state.rangeVersion != snapshot.rangeVersion ||
 		m.currentBalanceRuleRevisionLocked() != snapshot.ruleRevision {
 		return false
 	}
@@ -716,7 +718,7 @@ func (m *Manager) retainBalanceSnapshot(snapshot *balanceSnapshot) bool {
 	m.Lock()
 	defer m.Unlock()
 	state := m.balanceTables[snapshot.tableID]
-	if state == nil || m.balanceFingerprintLocked(state) != snapshot.fingerprint ||
+	if state == nil || m.balanceFingerprintLocked(state) != snapshot.fingerprint || state.rangeVersion != snapshot.rangeVersion ||
 		m.currentBalanceRuleRevisionLocked() != snapshot.ruleRevision {
 		return false
 	}
@@ -772,7 +774,7 @@ func (m *Manager) removeIllegalBalanceAction(snapshot *balanceSnapshot, group *G
 	m.Lock()
 	defer m.Unlock()
 	state := m.balanceTables[snapshot.tableID]
-	if state == nil || m.balanceFingerprintLocked(state) != snapshot.fingerprint {
+	if state == nil || m.balanceFingerprintLocked(state) != snapshot.fingerprint || state.rangeVersion != snapshot.rangeVersion {
 		return
 	}
 	if previous := state.actions[group.ID]; previous != nil {
