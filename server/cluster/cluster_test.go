@@ -3764,8 +3764,14 @@ func TestDownStoreLimit(t *testing.T) {
 			Peer:        region.GetStorePeer(1),
 			DownSeconds: 24 * 60 * 60,
 		},
+<<<<<<< HEAD
 	}), core.SetApproximateSize(1))
 	tc.putRegion(region)
+=======
+	}), core.SetApproximateSize(1), core.SetApproximateKeys(0))
+	err = tc.putRegion(region)
+	re.NoError(err)
+>>>>>>> bcd573daf7 (core, statistics, operator: account for keys in empty regions (#11295))
 	for i := uint64(1); i < 20; i++ {
 		tc.addRegionStore(i+3, 100)
 		op := rc.Check(region)
