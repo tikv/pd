@@ -1124,12 +1124,12 @@ func TestGetKeyspaceStateByIDDoesNotClobberConcurrentUpdate(t *testing.T) {
 
 	reachedFailpoint := make(chan struct{})
 	releaseReader := make(chan struct{})
-	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/keyspace/getKeyspaceStateByIDBeforeCacheWrite", func() {
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/keyspace/loadKeyspaceByIDBeforeCacheWrite", func() {
 		close(reachedFailpoint)
 		<-releaseReader
 	}))
 	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/getKeyspaceStateByIDBeforeCacheWrite"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/loadKeyspaceByIDBeforeCacheWrite"))
 	}()
 
 	readerDone := make(chan struct{})
@@ -1157,6 +1157,135 @@ func TestGetKeyspaceStateByIDDoesNotClobberConcurrentUpdate(t *testing.T) {
 	re.True(ok)
 	re.Equal(keyspacepb.KeyspaceState_TOMBSTONE, item.state,
 		"the concurrent update's value must survive; the stale reader's write must have been rejected")
+}
+
+// TestLoadKeyspaceByIDDoesNotClobberConcurrentUpdate verifies that the
+// generation guard lives in LoadKeyspaceByID itself, protecting every one of
+// its callers (gc_state_manager, keyspace_service, the region/keyspace HTTP
+// handlers, etc.), not just the two callers (GetKeyspaceNameByID and
+// GetKeyspaceStateByID) that used to re-apply the guard around their own,
+// now-redundant second write.
+func TestLoadKeyspaceByIDDoesNotClobberConcurrentUpdate(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	allocator := mockid.NewIDAllocator()
+	kgm := NewKeyspaceGroupManager(ctx, store, nil)
+	manager := NewKeyspaceManager(ctx, store, nil, allocator, &mockConfig{}, kgm, nil)
+	re.NoError(kgm.Bootstrap(ctx))
+	re.NoError(manager.Bootstrap())
+
+	meta := &keyspacepb.KeyspaceMeta{
+		Keyspace:       &keyspacepb.KeyspaceMeta_Id{Id: 81},
+		Name:           "ks81",
+		State:          keyspacepb.KeyspaceState_ARCHIVED,
+		CreatedAt:      time.Now().Unix(),
+		StateChangedAt: time.Now().Unix(),
+	}
+	re.NoError(manager.saveNewKeyspace(meta))
+	// Evict it from cache (but not storage) to force the next lookup onto the
+	// slow-read fallback path.
+	manager.cache.DeleteKeyspace(81)
+
+	reachedFailpoint := make(chan struct{})
+	releaseReader := make(chan struct{})
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/keyspace/loadKeyspaceByIDBeforeCacheWrite", func() {
+		close(reachedFailpoint)
+		<-releaseReader
+	}))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/loadKeyspaceByIDBeforeCacheWrite"))
+	}()
+
+	readerDone := make(chan struct{})
+	var readMeta *keyspacepb.KeyspaceMeta
+	var readErr error
+	go func() {
+		defer close(readerDone)
+		readMeta, readErr = manager.LoadKeyspaceByID(81)
+	}()
+
+	// Let the reader's storage read (ARCHIVED) complete and reach the point
+	// just before it would write that stale value to cache, then perform a
+	// real, concurrent state update while it is paused there.
+	<-reachedFailpoint
+	_, err := manager.UpdateKeyspaceStateByID(81, keyspacepb.KeyspaceState_TOMBSTONE, time.Now().Unix())
+	re.NoError(err)
+	close(releaseReader)
+	<-readerDone
+
+	re.NoError(readErr)
+	re.Equal(keyspacepb.KeyspaceState_ARCHIVED, readMeta.GetState(),
+		"the reader itself still reports what it read, which is fine - it started before the update")
+
+	item, ok := manager.cache.getKeyspaceByID(81)
+	re.True(ok)
+	re.Equal(keyspacepb.KeyspaceState_TOMBSTONE, item.state,
+		"the concurrent update's value must survive; LoadKeyspaceByID's own stale write must have been rejected")
+}
+
+// TestBackfillKeyspaceIDRangeDoesNotClobberConcurrentUpdate verifies that a
+// backfillKeyspaceIDRange scan which buffered a stale read of a keyspace,
+// racing a real, concurrent UpdateKeyspaceStateByID for the same keyspace,
+// does not overwrite that update's newer cache value with its own buffered
+// one when it bulk-applies - and leaves keyspaceIDVerifiedUpTo exactly where
+// it started, so a later call retries the whole range fresh instead of
+// trusting the rejected buffer.
+func TestBackfillKeyspaceIDRangeDoesNotClobberConcurrentUpdate(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	allocator := mockid.NewIDAllocator()
+	kgm := NewKeyspaceGroupManager(ctx, store, nil)
+	manager := NewKeyspaceManager(ctx, store, nil, allocator, &mockConfig{}, kgm, nil)
+	re.NoError(kgm.Bootstrap(ctx))
+	re.NoError(manager.Bootstrap())
+
+	id := uint32(90)
+	_, err := manager.CreateKeyspaceByID(&CreateKeyspaceByIDRequest{
+		ID:         &id,
+		Name:       "ks90",
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+
+	verifiedUpToBefore := manager.keyspaceIDVerifiedUpTo
+	re.LessOrEqual(verifiedUpToBefore, id, "the watermark must not already cover id for this race to be meaningful")
+
+	reachedFailpoint := make(chan struct{})
+	releaseScan := make(chan struct{})
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/keyspace/backfillKeyspaceIDRangeBeforeApply", func() {
+		close(reachedFailpoint)
+		<-releaseScan
+	}))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/backfillKeyspaceIDRangeBeforeApply"))
+	}()
+
+	scanDone := make(chan struct{})
+	go func() {
+		defer close(scanDone)
+		manager.GetKeyspaceIDInRange(0, 200, 10)
+	}()
+
+	// Let the scan finish paging through storage (picking up id in its
+	// original ENABLED state) and reach the point just before it would
+	// bulk-apply that buffer to cache, then perform a real, concurrent state
+	// update while it is paused there.
+	<-reachedFailpoint
+	_, err = manager.UpdateKeyspaceStateByID(id, keyspacepb.KeyspaceState_DISABLED, time.Now().Unix())
+	re.NoError(err)
+	close(releaseScan)
+	<-scanDone
+
+	item, ok := manager.cache.getKeyspaceByID(id)
+	re.True(ok)
+	re.Equal(keyspacepb.KeyspaceState_DISABLED, item.state,
+		"the concurrent update's value must survive; the stale scan's buffered write must have been rejected")
+	re.LessOrEqual(manager.keyspaceIDVerifiedUpTo, verifiedUpToBefore,
+		"a rejected buffer must not advance the watermark; a later call must retry the full range fresh")
 }
 
 func (suite *keyspaceTestSuite) TestGetKeyspaceIDInRange() {

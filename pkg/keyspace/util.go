@@ -747,6 +747,29 @@ func (s *Cache) SaveIfGenerationUnchanged(keyspaceID uint32, name string, state 
 	return true
 }
 
+// SaveBatchIfGenerationUnchanged saves every item in items the same way Save
+// does, but atomically and only if no mutation has happened since the caller
+// observed expectedGeneration - mirroring SaveIfGenerationUnchanged's
+// single-item guarantee for a caller (such as backfillKeyspaceIDRange) that
+// buffered a whole range of entries from one storage read and must apply
+// them all-or-nothing. A per-item SaveIfGenerationUnchanged call would not
+// work for this: the first item's own write bumps the generation, so every
+// later item in the same batch would see a mismatch against the batch's
+// original expectedGeneration and be rejected even though nothing external
+// actually raced it.
+func (s *Cache) SaveBatchIfGenerationUnchanged(items []keyspaceItem, expectedGeneration uint64) bool {
+	s.Lock()
+	defer s.Unlock()
+	if s.generation != expectedGeneration {
+		return false
+	}
+	for _, item := range items {
+		s.tree.ReplaceOrInsert(item)
+	}
+	s.generation++
+	return true
+}
+
 // clearAll empties the cache in place. It must be used instead of replacing
 // the *Cache pointer held by a caller, since the pointer itself may be read
 // concurrently without synchronization.

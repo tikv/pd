@@ -841,6 +841,14 @@ func (manager *Manager) LoadKeyspaceByID(spaceID uint32) (*keyspacepb.KeyspaceMe
 		meta *keyspacepb.KeyspaceMeta
 		err  error
 	)
+	// Capture the generation before the storage read below, so the cache
+	// write below can detect whether a concurrent, authoritative write
+	// (Save or DeleteKeyspace, e.g. from UpdateKeyspaceStateByID) landed
+	// while this read was in flight - see Cache.SaveIfGenerationUnchanged.
+	// This guards every caller of LoadKeyspaceByID at the source, rather
+	// than relying on each caller to re-apply the same guard around its own
+	// now-redundant second write.
+	generation := manager.cache.Generation()
 	err = manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
 		meta, err = manager.store.LoadKeyspaceMeta(txn, spaceID)
 		if err != nil {
@@ -852,7 +860,8 @@ func (manager *Manager) LoadKeyspaceByID(spaceID uint32) (*keyspacepb.KeyspaceMe
 		return nil
 	})
 	if err == nil {
-		manager.cache.Save(meta.GetId(), meta.GetName(), meta.GetState())
+		failpoint.InjectCall("loadKeyspaceByIDBeforeCacheWrite")
+		manager.cache.SaveIfGenerationUnchanged(meta.GetId(), meta.GetName(), meta.GetState(), generation)
 	}
 	if manager.mgm != nil && meta != nil {
 		manager.mgm.AttachEndpoints(meta.GetConfig())
@@ -1405,23 +1414,38 @@ func (manager *Manager) backfillKeyspaceIDRange() {
 		return
 	}
 	startID := manager.keyspaceIDVerifiedUpTo
+	// Capture the generation once, before paging through storage below, so
+	// the bulk cache apply at the end can detect whether some other write (a
+	// real create/update/delete, e.g. from UpdateKeyspaceStateByID) landed
+	// anywhere in the scanned range while this scan was in flight. This has
+	// to be all-or-nothing for the whole scan rather than checked per page
+	// or per item: the watermark would otherwise advance past an ID whose
+	// write got rejected, permanently losing it, and the generation bump
+	// that caused a rejection could belong to a wholly unrelated keyspace ID
+	// elsewhere in the range - there is no way to tell "this specific ID is
+	// still stale" from the generation counter alone. So every page read
+	// here is buffered in memory, untouched by cache, and only committed -
+	// atomically with the watermark - if nothing wrote to the cache during
+	// the entire scan; otherwise the whole buffer is discarded and the
+	// watermark is left exactly where it started, relying on the next call
+	// to retry the full range fresh.
+	generation := manager.cache.Generation()
+	var buffered []keyspaceItem
+	verifiedUpTo := startID
 	for {
 		keyspaces, err := manager.LoadRangeKeyspace(startID, etcdutil.MaxEtcdTxnOps)
 		if err != nil {
 			log.Warn("[keyspace] failed to backfill keyspace ID range cache",
 				zap.Uint32("start-id", startID), errs.ZapError(err))
-			// Keep whatever progress this call already made so a retry does
-			// not have to redo the pages that already succeeded.
-			manager.keyspaceIDVerifiedUpTo = startID
-			return
+			break
 		}
 		for _, meta := range keyspaces {
-			manager.cache.Save(meta.GetId(), meta.GetName(), meta.GetState())
+			buffered = append(buffered, keyspaceItem{keyspaceID: meta.GetId(), name: meta.GetName(), state: meta.GetState()})
 		}
 		if len(keyspaces) < etcdutil.MaxEtcdTxnOps {
 			// Storage has nothing left beyond this page.
-			manager.keyspaceIDVerifiedUpTo = constant.MaxValidKeyspaceID + 1
-			return
+			verifiedUpTo = constant.MaxValidKeyspaceID + 1
+			break
 		}
 		startID = keyspaces[len(keyspaces)-1].GetId() + 1
 		if startID > constant.MaxValidKeyspaceID {
@@ -1429,10 +1453,25 @@ func (manager *Manager) backfillKeyspaceIDRange() {
 			// space: there is nothing left to load, so stop here instead of
 			// making one more LoadRangeKeyspace call that would only fail
 			// startID's own upper-bound check.
-			manager.keyspaceIDVerifiedUpTo = constant.MaxValidKeyspaceID + 1
-			return
+			verifiedUpTo = constant.MaxValidKeyspaceID + 1
+			break
 		}
+		verifiedUpTo = startID
 	}
+	if len(buffered) == 0 {
+		// Keep whatever progress this call already made (none, if the very
+		// first page failed to load) so a retry does not have to redo pages
+		// that already succeeded.
+		manager.keyspaceIDVerifiedUpTo = verifiedUpTo
+		return
+	}
+	failpoint.InjectCall("backfillKeyspaceIDRangeBeforeApply")
+	if manager.cache.SaveBatchIfGenerationUnchanged(buffered, generation) {
+		manager.keyspaceIDVerifiedUpTo = verifiedUpTo
+	}
+	// If a concurrent write landed during the scan, leave the watermark
+	// unchanged above: the next call must retry the full range fresh rather
+	// than trust a buffer that raced a real update.
 }
 
 // ClearCache empties the keyspace cache and resets the backfill watermark. It must
@@ -1526,22 +1565,18 @@ func (manager *Manager) GetKeyspaceNameByID(id uint32) (string, error) {
 	if ok {
 		return item.name, nil
 	}
-	// Capture the generation before the slow storage read below, so the
-	// eventual cache write can detect whether a concurrent, authoritative
-	// write (Save or DeleteKeyspace) landed while this read was in flight -
-	// see Cache.SaveIfGenerationUnchanged.
-	generation := manager.cache.Generation()
-	var loadedName string
-	// If the keyspace name is not in the cache, try to get it from the storage.
+	// If the keyspace name is not in the cache, try to get it from the
+	// storage. LoadKeyspaceByID itself guards its own cache write against a
+	// concurrent, authoritative write, so no further generation handling is
+	// needed here.
 	meta, err := manager.LoadKeyspaceByID(id)
 	if err != nil {
 		return "", err
 	}
-	loadedName = meta.GetName()
+	loadedName := meta.GetName()
 	if len(loadedName) == 0 {
 		return "", errors.Errorf("got an empty keyspace name by id %d", id)
 	}
-	manager.cache.SaveIfGenerationUnchanged(id, loadedName, meta.GetState(), generation)
 	return loadedName, nil
 }
 
@@ -1570,7 +1605,13 @@ func (manager *Manager) ScanAllKeyspace(fn func(keyspaceID uint32, name string, 
 		if !ok {
 			return
 		}
-		manager.cache.Save(meta.GetId(), meta.GetName(), meta.GetState())
+		// Deliberately does not warm the cache here: fn already receives the
+		// scanned (keyspaceID, name, state) directly, and ScanAllKeyspace's
+		// only caller (collectStorageSize's periodic metering loop) only
+		// ever uses those values, never a subsequent cache read - so there
+		// is nothing here that would benefit from the write, only an
+		// unconditional cache.Save racing concurrent, authoritative writers
+		// like UpdateKeyspaceStateByID for no reason.
 		if !fn(meta.GetId(), meta.GetName(), meta.GetState()) {
 			return
 		}
@@ -1587,24 +1628,16 @@ func (manager *Manager) GetKeyspaceStateByID(id uint32) (keyspacepb.KeyspaceStat
 	if ok {
 		return item.state, nil
 	}
-	// Capture the generation before the slow storage read below, so the
-	// eventual cache write can detect whether a concurrent, authoritative
-	// write (Save or DeleteKeyspace) landed while this read was in flight -
-	// see Cache.SaveIfGenerationUnchanged.
-	generation := manager.cache.Generation()
-	var loadedState keyspacepb.KeyspaceState
-	// If the keyspace state is not in the cache, try to get it from the storage.
+	// If the keyspace state is not in the cache, try to get it from the
+	// storage. LoadKeyspaceByID itself guards its own cache write against a
+	// concurrent, authoritative write, so no further generation handling is
+	// needed here.
 	meta, err := manager.LoadKeyspaceByID(id)
 	// Only check wether the keyspace meta is nil, ensure the returned state is as latest as possible.
 	if meta == nil {
 		return keyspacepb.KeyspaceState_DISABLED, err
 	}
-	loadedState = meta.GetState()
-	failpoint.InjectCall("getKeyspaceStateByIDBeforeCacheWrite")
-	// Load or store the keyspace state to the cache, unless a concurrent
-	// write already made this read's data stale.
-	manager.cache.SaveIfGenerationUnchanged(meta.GetId(), meta.GetName(), loadedState, generation)
-	return loadedState, nil
+	return meta.GetState(), nil
 }
 
 // GetEnabledKeyspaceNameByID gets the enabled keyspace name by ID. If the state is not enabled, it will return an error.

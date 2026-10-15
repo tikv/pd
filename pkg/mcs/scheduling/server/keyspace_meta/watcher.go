@@ -26,6 +26,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/keyspace"
@@ -89,14 +90,27 @@ func (rw *Watcher) initializeKeyspaceMetaWatcher() error {
 	putFn := func(kv *mvccpb.KeyValue) error {
 		keyspaceID, err := rw.extractKeyspaceIDFromMetaKey(string(kv.Key))
 		if err != nil {
+			// watch()'s revision advances past this event regardless of the
+			// error returned here, so a parse failure would otherwise lose
+			// this key's update silently until the next compaction-triggered
+			// reload. Request an out-of-band, rate-limited full reload
+			// instead, so an authoritative view gets re-applied even if this
+			// specific event's data is dropped.
+			rw.watcher.ForceLoad()
 			return err
 		}
+		failpoint.Inject("keyspaceMetaWatcherPutFnError", func() {
+			rw.watcher.ForceLoad()
+			failpoint.Return(errors.New("injected keyspace meta watcher put failure"))
+		})
 		if rw.keyspaceCache != nil {
 			meta, err := keyspace.NewKeyspaceMeta(string(kv.Value))
 			if err != nil {
+				rw.watcher.ForceLoad()
 				return err
 			}
 			if meta.GetId() != keyspaceID {
+				rw.watcher.ForceLoad()
 				return fmt.Errorf("keyspace ID in meta does not match the one in key, meta Id: %d, keyspace ID: %d", meta.GetId(), keyspaceID)
 			}
 			log.Debug("update keyspace meta",
@@ -114,6 +128,10 @@ func (rw *Watcher) initializeKeyspaceMetaWatcher() error {
 		log.Debug("delete keyspace meta", zap.String("key", string(kv.Key)))
 		keyspaceID, err := rw.extractKeyspaceIDFromMetaKey(string(kv.Key))
 		if err != nil {
+			// See the matching comment in putFn: request a full reload so a
+			// parse failure here doesn't silently and permanently drop this
+			// deletion from the cache.
+			rw.watcher.ForceLoad()
 			return err
 		}
 		if rw.keyspaceCache != nil {
