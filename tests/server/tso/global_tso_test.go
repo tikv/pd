@@ -27,6 +27,7 @@ import (
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
@@ -177,4 +178,41 @@ func TestLogicalOverflow(t *testing.T) {
 	for _, updateInterval := range []int{1, 5, 30, 50} {
 		runCase(time.Duration(updateInterval) * time.Millisecond)
 	}
+}
+
+func TestTSOStorageUsesElectionClient(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	saveInterval := time.Second
+	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
+		conf.TSOSaveInterval = typeutil.NewDuration(saveInterval)
+	})
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+	leaderServer := cluster.GetLeaderServer()
+	re.NotNil(leaderServer)
+	re.NoError(leaderServer.BootstrapCluster())
+
+	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	req := &pdpb.TsoRequest{
+		Header:     testutil.NewRequestHeader(leaderServer.GetClusterID()),
+		Count:      1,
+		DcLocation: tso.GlobalDCLocation,
+	}
+	last := testGetTimestamp(re, ctx, grpcPDClient, req)
+
+	// Close the server etcd client. The TSO storage shares the election etcd
+	// client, so saving the timestamp should not be affected.
+	re.NoError(leaderServer.GetEtcdClient().Close())
+	// Wait for several rounds of saving the timestamp.
+	for start := time.Now(); time.Since(start) < 5*saveInterval; {
+		ts := testGetTimestamp(re, ctx, grpcPDClient, req)
+		re.Equal(1, tsoutil.CompareTimestamp(ts, last))
+		last = ts
+		time.Sleep(100 * time.Millisecond)
+	}
+	re.True(leaderServer.IsLeader())
 }
