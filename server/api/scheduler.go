@@ -83,7 +83,7 @@ func (h *schedulerHandler) GetSchedulers(w http.ResponseWriter, r *http.Request)
 //	@Accept		json
 //	@Param		body	body	object	true	"json params"
 //	@Produce	json
-//	@Success	200	{string}	string	"The scheduler is created."
+//	@Success	200	{string}	string	"The scheduler is created. For balance-range-scheduler, returns the created job ID as a decimal string."
 //	@Failure	400	{string}	string	"Bad format request."
 //	@Failure	500	{string}	string	"PD server failed to proceed the request."
 //	@Router		/schedulers [post]
