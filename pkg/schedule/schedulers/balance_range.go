@@ -43,6 +43,10 @@ import (
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
+// BalanceRangeFirstJobID is the ID of the job created along with a new
+// balance-range-scheduler.
+const BalanceRangeFirstJobID uint64 = 0
+
 var (
 	defaultJobTimeout = 30 * time.Minute
 	reserveDuration   = 7 * 24 * time.Hour

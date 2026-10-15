@@ -111,7 +111,11 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 
 	switch tp {
 	case types.BalanceRangeScheduler:
-		exist, _ := h.IsSchedulerExisted(name)
+		exist, err := h.IsSchedulerExisted(name)
+		if err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		if exist {
 			handler, err := h.GetSchedulerConfigHandler()
 			if err == nil && handler != nil {
@@ -302,8 +306,7 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if tp == types.BalanceRangeScheduler {
-		// The first job created along with the scheduler always gets job id 0.
-		h.r.JSON(w, http.StatusOK, "0")
+		h.r.JSON(w, http.StatusOK, strconv.FormatUint(schedulers.BalanceRangeFirstJobID, 10))
 		return
 	}
 
