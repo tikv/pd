@@ -457,28 +457,6 @@ func (m *Manager) GetAllAffinityGroupStates() []*GroupState {
 	return result
 }
 
-// GetAllAffinityLabelRuleIDs returns the label rule IDs currently held by the
-// manager, including rules buffered until their affinity group is observed.
-func (m *Manager) GetAllAffinityLabelRuleIDs() []string {
-	m.metaMutex.Lock()
-	defer m.metaMutex.Unlock()
-	m.RLock()
-	defer m.RUnlock()
-
-	ids := make([]string, 0, len(m.groups)+len(m.labelRuleBuffer))
-	for _, group := range m.groups {
-		if group.LabelRule != nil {
-			ids = append(ids, group.LabelRule.ID)
-		}
-	}
-	for _, rule := range m.labelRuleBuffer {
-		if rule != nil {
-			ids = append(ids, rule.ID)
-		}
-	}
-	return ids
-}
-
 // These methods are called by the watcher in microservice.
 // They are called by the watcher when it receives events from etcd.
 

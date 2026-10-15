@@ -139,17 +139,6 @@ func (w *Watcher) initializeAffinityLabelWatcher(ctx context.Context) error {
 		w.affinityManager.SyncKeyRangesDeleteFromEtcd(ruleID)
 		return nil
 	}
-	reconcileDeletedFn := func(snapshotKeys map[string]struct{}) error {
-		for _, ruleID := range w.affinityManager.GetAllAffinityLabelRuleIDs() {
-			key := keypath.RegionLabelKeyPath(ruleID)
-			if _, ok := snapshotKeys[key]; ok {
-				continue
-			}
-			w.affinityManager.SyncKeyRangesDeleteFromEtcd(ruleID)
-		}
-		return nil
-	}
-
 	w.labelWatcher = etcdutil.NewLoopWatcher(
 		ctx, w.wg,
 		w.etcdClient,
@@ -160,7 +149,7 @@ func (w *Watcher) initializeAffinityLabelWatcher(ctx context.Context) error {
 		func([]*clientv3.Event) error { return nil },
 		true, /* withPrefix */
 	)
-	w.labelWatcher.SetReconcileDeletedKeysFn(reconcileDeletedFn)
+	w.labelWatcher.SetReconcileDeletedKeys()
 	w.labelWatcher.StartWatchLoop()
 	return w.labelWatcher.WaitLoad()
 }

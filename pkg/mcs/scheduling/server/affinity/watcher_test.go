@@ -225,7 +225,6 @@ func TestAffinityLabelWatcherReloadsAfterCompaction(t *testing.T) {
 
 	re.Equal(1, manager.GetAffinityGroupState(keepGroup.ID).RangeCount)
 	re.Equal(1, manager.GetAffinityGroupState(deleteGroup.ID).RangeCount)
-	re.Contains(manager.GetAllAffinityLabelRuleIDs(), bufferedRule.ID)
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock", "return(true)"))
 	failpointEnabled = true
@@ -246,13 +245,17 @@ func TestAffinityLabelWatcherReloadsAfterCompaction(t *testing.T) {
 		watcher.labelWatcher.ForceLoad()
 		keepState := manager.GetAffinityGroupState(keepGroup.ID)
 		deleteState := manager.GetAffinityGroupState(deleteGroup.ID)
-		ids := manager.GetAllAffinityLabelRuleIDs()
 		return keepState != nil && keepState.RangeCount == 2 &&
-			deleteState != nil && deleteState.RangeCount == 0 &&
-			len(ids) == 1 && ids[0] == updatedKeepRule.ID
+			deleteState != nil && deleteState.RangeCount == 0
 	})
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock"))
 	failpointEnabled = false
+
+	re.NoError(putGroup(ctx, client, makeTestGroup("compaction-buffered", 3, []uint64{3})))
+	testutil.Eventually(re, func() bool {
+		groupState := manager.GetAffinityGroupState("compaction-buffered")
+		return groupState != nil && groupState.RangeCount == 0
+	})
 }
 
 // TestConcurrentLabelRuleUpdates tests multiple label rule updates happening concurrently.

@@ -457,12 +457,6 @@ func MakeKeyRanges(keys ...string) []any {
 func (l *RegionLabeler) IterateLabelRules(iterator func(rule *LabelRule) bool) {
 	l.RLock()
 	defer l.RUnlock()
-	l.IterateLabelRulesLocked(iterator)
-}
-
-// IterateLabelRulesLocked iterates the label rules while the caller holds the
-// labeler's lock. It will return once the iterator returns false.
-func (l *RegionLabeler) IterateLabelRulesLocked(iterator func(rule *LabelRule) bool) {
 	for _, rule := range l.ruleIndex.rules {
 		if !iterator(rule) {
 			return

@@ -445,9 +445,6 @@ type LoopWatcher struct {
 	reconcileDeletedKeys bool
 	// loadedKeys tracks successfully applied keys only when reconcileDeletedKeys is enabled.
 	loadedKeys map[string]struct{}
-	// reconcileDeletedKeysFn reconciles keys missing from a full snapshot using
-	// the consumer's own cache instead of retaining a second key index.
-	reconcileDeletedKeysFn func(map[string]struct{}) error
 }
 
 // NewLoopWatcher creates a new LoopWatcher.
@@ -829,16 +826,11 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 			}
 			return
 		}
-		if preErr != nil || (!lw.reconcileDeletedKeys && lw.reconcileDeletedKeysFn == nil) {
+		if preErr != nil || !lw.reconcileDeletedKeys {
 			return
 		}
 		if loadCompleted && callbackErr == nil {
-			if lw.reconcileDeletedKeys {
-				lw.loadedKeys = snapshotKeys
-			}
-			return
-		}
-		if !lw.reconcileDeletedKeys {
+			lw.loadedKeys = snapshotKeys
 			return
 		}
 		// Some callbacks may have succeeded before another callback failed. The
@@ -898,7 +890,7 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 			if snapshotRevision == 0 {
 				snapshotRevision = resp.Header.Revision
 				opts = lw.buildLoadingOpts(limit, snapshotRevision)
-				if lw.reconcileDeletedKeys || lw.reconcileDeletedKeysFn != nil {
+				if lw.reconcileDeletedKeys {
 					snapshotKeys = make(map[string]struct{}, len(lw.loadedKeys))
 				}
 			}
@@ -911,7 +903,7 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 					log.Warn("put failed in watch loop when loading consistent snapshot", zap.String("name", lw.name), zap.String("watch-key", lw.key),
 						zap.ByteString("key", item.Key), zap.ByteString("value", item.Value), zap.Error(putErr))
 				} else {
-					if lw.reconcileDeletedKeys || lw.reconcileDeletedKeysFn != nil {
+					if lw.reconcileDeletedKeys {
 						snapshotKeys[string(item.Key)] = struct{}{}
 					}
 					log.Debug("put successfully in watch loop when loading", zap.String("name", lw.name), zap.String("watch-key", lw.key),
@@ -921,12 +913,7 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 			// Note: if there are no keys in etcd, the resp.More is false. It also means the load is finished.
 			if !resp.More {
 				if callbackErr == nil {
-					if lw.reconcileDeletedKeys {
-						reconciledDeletedKeys, callbackErr = lw.reconcileLoadedKeys(snapshotKeys)
-					}
-					if callbackErr == nil && lw.reconcileDeletedKeysFn != nil {
-						callbackErr = lw.reconcileDeletedKeysFn(snapshotKeys)
-					}
+					reconciledDeletedKeys, callbackErr = lw.reconcileLoadedKeys(snapshotKeys)
 				}
 				loadCompleted = true
 				return snapshotRevision + 1, callbackErr
@@ -1123,21 +1110,5 @@ func (lw *LoopWatcher) SetRetryOnPostEventError() {
 func (lw *LoopWatcher) SetReconcileDeletedKeys() {
 	lw.reconcileDeletedKeys = true
 	lw.loadedKeys = make(map[string]struct{})
-	lw.reloadOnCompaction = true
-}
-
-// SetReconcileDeletedKeysFn enables full snapshot reload after compaction and
-// invokes fn with the keys successfully applied by each full snapshot. The
-// callback is responsible for removing entries from the consumer's own cache
-// when they are absent from the snapshot. Unlike SetReconcileDeletedKeys, this
-// method does not retain a key index in LoopWatcher and is suitable for
-// prefixes whose cardinality is not bounded independently of the consumer's
-// cache.
-//
-// It must be called before StartWatchLoop. The callback runs after the snapshot
-// put callbacks and before postEventsFn, so it can participate in the same
-// batch reconciliation and return an error when the snapshot was not applied.
-func (lw *LoopWatcher) SetReconcileDeletedKeysFn(fn func(map[string]struct{}) error) {
-	lw.reconcileDeletedKeysFn = fn
 	lw.reloadOnCompaction = true
 }
