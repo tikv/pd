@@ -177,15 +177,22 @@ func IsAllowedLeaderTarget(ci sche.SharedCluster, region *core.RegionInfo, peer 
 // IsAllowedLeaderTargetForPeers checks a candidate against the complete planned
 // membership. A nil targetPeers map uses the original membership.
 func IsAllowedLeaderTargetForPeers(ci sche.SharedCluster, region *core.RegionInfo, targetPeers map[uint64]*metapb.Peer, peer *metapb.Peer) bool {
+	return NewLeaderTargetChecker(ci, region, targetPeers)(peer)
+}
+
+// NewLeaderTargetChecker prepares a non-forced leader check for one planned
+// membership. It reuses the builder and its role matcher across candidates.
+// Call it again when membership or placement metadata changes. The returned
+// function must not be called concurrently.
+func NewLeaderTargetChecker(ci sche.SharedCluster, region *core.RegionInfo, targetPeers map[uint64]*metapb.Peer) func(*metapb.Peer) bool {
 	b := NewBuilder("check-target-leader", ci, region)
 	if targetPeers != nil {
 		b.SetPeers(targetPeers)
 	}
-	if b.err != nil {
-		return false
-	}
 	b.currentPeers, b.currentLeaderStoreID = b.originPeers.copy(), b.originLeaderStoreID
-	return b.allowTargetLeader(peer)
+	return func(peer *metapb.Peer) bool {
+		return b.err == nil && b.allowTargetLeader(peer)
+	}
 }
 
 // AddPeer records an add Peer operation in Builder. If peer.Id is 0, the builder

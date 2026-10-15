@@ -920,6 +920,8 @@ func (r *RegionScatterer) filterAllowedLeaderCandidateStores(
 	}
 	regionReadCPU := float64(region.GetReadCPUUsage())
 	readPoolPressureFiltered := false
+	// Prepare once for this complete target membership, not once per candidate.
+	allowLeader := operator.NewLeaderTargetChecker(r.cluster, region, targetPeers)
 	for _, storeID := range candidateStores {
 		peer := targetPeers[storeID]
 		if peer == nil {
@@ -936,7 +938,7 @@ func (r *RegionScatterer) filterAllowedLeaderCandidateStores(
 			readPoolPressureFiltered = true
 			continue
 		}
-		if operator.IsAllowedLeaderTargetForPeers(r.cluster, region, targetPeers, peer) {
+		if allowLeader(peer) {
 			filtered = append(filtered, storeID)
 		}
 	}

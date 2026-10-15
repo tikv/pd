@@ -148,3 +148,26 @@ func TestTargetLeaderBeforePeerIDAllocation(t *testing.T) {
 		require.Zero(t, peer.GetId())
 	}
 }
+
+func TestLeaderTargetCheckerReusesPlannedMembership(t *testing.T) {
+	tc, region := newLeaderRuleTestCluster(t, true)
+	for _, id := range []uint64{5, 6} {
+		tc.AddLabelsStore(id, 0, map[string]string{"zone": "B"})
+	}
+	peers := map[uint64]*metapb.Peer{4: {StoreId: 4}, 5: {StoreId: 5}, 6: {StoreId: 6}}
+	allowed := NewLeaderTargetChecker(tc, region, peers)
+	for _, id := range []uint64{5, 4, 6, 4} {
+		require.Equal(t, id == 4, allowed(peers[id]))
+	}
+	require.False(t, allowed(nil))
+	// Store state is still checked for every candidate, not cached as an answer.
+	tc.SetStoreOffline(4)
+	require.False(t, allowed(peers[4]))
+	for _, peer := range peers {
+		require.Zero(t, peer.GetId())
+	}
+	require.Equal(t, uint64(1), region.GetLeader().GetStoreId())
+	// Invalid membership must reject every candidate without entering the builder.
+	invalid := NewLeaderTargetChecker(tc, region, map[uint64]*metapb.Peer{4: {StoreId: 5}})
+	require.False(t, invalid(peers[4]))
+}
