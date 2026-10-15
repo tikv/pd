@@ -75,7 +75,7 @@ func TestRUTimelineMergesSources(t *testing.T) {
 		re.Empty(c.results)
 		timeline.flush(time.Unix(start+90, 0))
 		got := c.results[testTimelineKey].summary
-		re.Equal(ruWindowSummary{end: start + 60, peak: 150, peakAt: start + 20, rru: 80, wru: 70}, got)
+		re.Equal(ruWindowSummary{end: start + 60, peak: 150, rru: 80, wru: 70}, got)
 
 		registry := prometheus.NewRegistry()
 		registry.MustRegister(c)
@@ -110,43 +110,43 @@ func TestRUTimelineBestEffort(t *testing.T) {
 		{
 			name:    "partial-source",
 			reports: []*consumptionItem{timelineReport(2, start+30, [][2]float64{{40, 0}})},
-			want:    ruWindowSummary{end: start + 60, peak: 40, peakAt: start + 30, rru: 40},
+			want:    ruWindowSummary{end: start + 60, peak: 40, rru: 40},
 		},
 		{
 			name:    "gap-in-source",
 			reports: []*consumptionItem{timelineReport(2, start, [][2]float64{{1, 0}}), timelineReport(2, start+40, [][2]float64{{0, 100}})},
-			want:    ruWindowSummary{end: start + 60, peak: 105, peakAt: start + 40, rru: 5, wru: 100},
+			want:    ruWindowSummary{end: start + 60, peak: 105, rru: 5, wru: 100},
 		},
 		{
 			name: "non-finite-second",
 			reports: []*consumptionItem{
 				timelineReport(2, start+10, [][2]float64{{math.NaN(), 0}, {math.Inf(1), 0}, {7, 0}}),
 			},
-			want: ruWindowSummary{end: start + 60, peak: 30, peakAt: start + 10, rru: 10, wru: 20},
+			want: ruWindowSummary{end: start + 60, peak: 30, rru: 10, wru: 20},
 		},
 		{
 			name:    "legacy-client",
 			reports: []*consumptionItem{{clientUniqueID: 2, resourceGroupName: "test", Consumption: &rmpb.Consumption{RRU: 1000}}},
-			want:    ruWindowSummary{end: start + 60, peak: 30, peakAt: start + 10, rru: 10, wru: 20},
+			want:    ruWindowSummary{end: start + 60, peak: 30, rru: 10, wru: 20},
 		},
 		{
 			// A resent second overwrites the earlier value of the same client.
 			name:    "overwrite",
 			reports: []*consumptionItem{timelineReport(1, start+10, [][2]float64{{50, 0}})},
-			want:    ruWindowSummary{end: start + 60, peak: 50, peakAt: start + 10, rru: 50},
+			want:    ruWindowSummary{end: start + 60, peak: 50, rru: 50},
 		},
 		{
 			// The newer report arrives first, as with concurrent reports.
 			name:    "out-of-order",
 			reports: []*consumptionItem{timelineReport(2, start+50, [][2]float64{{0, 1}}), timelineReport(2, start+40, [][2]float64{{90, 0}})},
-			want:    ruWindowSummary{end: start + 60, peak: 95, peakAt: start + 40, rru: 95},
+			want:    ruWindowSummary{end: start + 60, peak: 95, rru: 95},
 		},
 		{
 			// A second beyond the tolerated clock skew is dropped instead of
 			// taking the place of a second that is still to be summarized.
 			name:    "future-second",
 			reports: []*consumptionItem{timelineReport(1, start+10+ruSourceSeconds, [][2]float64{{0, 0}})},
-			want:    ruWindowSummary{end: start + 60, peak: 30, peakAt: start + 10, rru: 10, wru: 20},
+			want:    ruWindowSummary{end: start + 60, peak: 30, rru: 10, wru: 20},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -234,7 +234,7 @@ func TestRUTimelinePublishesTimelyReports(t *testing.T) {
 				all += values[id][s]
 			}
 			if total > want.peak {
-				want.peak, want.peakAt, want.rru = total, s, total
+				want.peak, want.rru = total, total
 			}
 			truePeak = max(truePeak, all)
 		}
@@ -257,7 +257,7 @@ func TestRUTimelineSourceLimit(t *testing.T) {
 	re.Equal(1, timeline.rejected)
 	re.Len(timeline.groups[testTimelineKey].sources, 1)
 	timeline.flush(time.Unix(start+90, 0))
-	re.Equal(ruWindowSummary{end: start + 60, peak: 30, peakAt: start + 10, rru: 10, wru: 20}, c.results[testTimelineKey].summary)
+	re.Equal(ruWindowSummary{end: start + 60, peak: 30, rru: 10, wru: 20}, c.results[testTimelineKey].summary)
 	re.Zero(timeline.rejected)
 }
 
@@ -274,7 +274,7 @@ func TestRUTimelineCountsForegroundOnly(t *testing.T) {
 	timeline.record(tiflash, time.Unix(start+66, 0))
 	timeline.flush(time.Unix(start+90, 0))
 	re.Len(timeline.groups[testTimelineKey].sources, 1)
-	re.Equal(ruWindowSummary{end: start + 60, peakAt: start}, c.results[testTimelineKey].summary)
+	re.Equal(ruWindowSummary{end: start + 60}, c.results[testTimelineKey].summary)
 }
 
 func TestRUTimelineFlushLag(t *testing.T) {
@@ -293,9 +293,9 @@ func TestRUTimelineFlushLag(t *testing.T) {
 	timeline.record(timelineReport(1, start+120, make([][2]float64, 34)), time.Unix(start+149, 0))
 	timeline.record(timelineReport(1, start-60, make([][2]float64, 60)), time.Unix(start+149, 0))
 	timeline.flush(time.Unix(start+149, 0))
-	re.Equal(ruWindowSummary{end: start + 60, peak: 100, peakAt: start, rru: 100}, c.results[testTimelineKey].summary)
+	re.Equal(ruWindowSummary{end: start + 60, peak: 100, rru: 100}, c.results[testTimelineKey].summary)
 	timeline.flush(time.Unix(start+150, 0))
-	re.Equal(ruWindowSummary{end: start + 120, peak: 200, peakAt: start + 100, rru: 200}, c.results[testTimelineKey].summary)
+	re.Equal(ruWindowSummary{end: start + 120, peak: 200, rru: 200}, c.results[testTimelineKey].summary)
 }
 
 func TestRUTimelineToleratesClockSkew(t *testing.T) {
@@ -308,7 +308,7 @@ func TestRUTimelineToleratesClockSkew(t *testing.T) {
 	values[59] = [2]float64{100, 0}
 	timeline.record(timelineReport(1, start, values), time.Unix(start+65, 0))
 	timeline.flush(time.Unix(start+90, 0))
-	re.Equal(ruWindowSummary{end: start + 60, peak: 100, peakAt: start + 59, rru: 100}, c.results[testTimelineKey].summary)
+	re.Equal(ruWindowSummary{end: start + 60, peak: 100, rru: 100}, c.results[testTimelineKey].summary)
 }
 
 func TestRUTimelineServerClockStep(t *testing.T) {
@@ -330,13 +330,13 @@ func TestRUTimelineServerClockStep(t *testing.T) {
 	// Once the clock catches up, later windows are published without a reset.
 	timeline.record(timelineReport(1, start+60, make([][2]float64, 60)), time.Unix(start+125, 0))
 	timeline.flush(time.Unix(start+150, 0))
-	re.Equal(ruWindowSummary{end: start + 120, peakAt: start + 60}, c.results[testTimelineKey].summary)
+	re.Equal(ruWindowSummary{end: start + 120}, c.results[testTimelineKey].summary)
 
 	// After a forward step, the timeline resumes at the latest windows.
 	future := start + 365*86400
 	timeline.record(timelineReport(1, future, make([][2]float64, 5)), time.Unix(future+10, 0))
 	timeline.flush(time.Unix(future+ruWindowSeconds+ruWindowDelay, 0))
-	re.Equal(ruWindowSummary{end: future + ruWindowSeconds, peakAt: future}, c.results[testTimelineKey].summary)
+	re.Equal(ruWindowSummary{end: future + ruWindowSeconds}, c.results[testTimelineKey].summary)
 }
 
 // TestRUTimelineTermStart pins that a new term waits for every client to
@@ -364,7 +364,7 @@ func TestRUTimelineTermStart(t *testing.T) {
 	timeline.flush(time.Unix(now+ruWindowDelay-1, 0))
 	re.Empty(c.results)
 	timeline.flush(time.Unix(now+ruWindowDelay, 0))
-	re.Equal(ruWindowSummary{end: start + 120, peak: 65, peakAt: start + 70, rru: 65}, c.results[testTimelineKey].summary)
+	re.Equal(ruWindowSummary{end: start + 120, peak: 65, rru: 65}, c.results[testTimelineKey].summary)
 }
 
 // TestRUTimelineSourceLifecycle pins that windows keep publishing while any

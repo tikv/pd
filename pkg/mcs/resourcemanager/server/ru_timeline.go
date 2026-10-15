@@ -51,7 +51,6 @@ const (
 type ruWindowSummary struct {
 	end            int64
 	peak, rru, wru float64
-	peakAt         int64
 }
 
 type publishedRUSummary struct {
@@ -63,9 +62,9 @@ type publishedRUSummary struct {
 // explicitly timestamped samples. Scrapes never advance windows, clear
 // timelines, or perform aggregation.
 type ruSummaryCollector struct {
-	mu                     sync.RWMutex
-	results                map[trackerKey]publishedRUSummary
-	peak, peakAt, rru, wru *prometheus.Desc
+	mu             sync.RWMutex
+	results        map[trackerKey]publishedRUSummary
+	peak, rru, wru *prometheus.Desc
 }
 
 func newRUSummaryCollector() *ruSummaryCollector {
@@ -75,7 +74,6 @@ func newRUSummaryCollector() *ruSummaryCollector {
 	return &ruSummaryCollector{
 		results: make(map[trackerKey]publishedRUSummary),
 		peak:    desc("peak_per_second", "Maximum net foreground RRU+WRU of a natural second in the completed minute, summed over the clients that reported it, in RU/s."),
-		peakAt:  desc("peak_second_timestamp_seconds", "Unix timestamp of the earliest second attaining the minute peak."),
 		rru:     desc("peak_rru_per_second", "RRU contribution in the second attaining the total minute peak."),
 		wru:     desc("peak_wru_per_second", "WRU contribution in the second attaining the total minute peak."),
 	}
@@ -83,7 +81,7 @@ func newRUSummaryCollector() *ruSummaryCollector {
 
 // Describe implements prometheus.Collector.
 func (c *ruSummaryCollector) Describe(ch chan<- *prometheus.Desc) {
-	for _, desc := range []*prometheus.Desc{c.peak, c.peakAt, c.rru, c.wru} {
+	for _, desc := range []*prometheus.Desc{c.peak, c.rru, c.wru} {
 		ch <- desc
 	}
 }
@@ -97,7 +95,6 @@ func (c *ruSummaryCollector) Collect(ch chan<- prometheus.Metric) {
 			ch <- prometheus.NewMetricWithTimestamp(time.Unix(p.summary.end, 0), prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, value, p.keyspaceName, key.groupName))
 		}
 		emit(c.peak, p.summary.peak)
-		emit(c.peakAt, float64(p.summary.peakAt))
 		emit(c.rru, p.summary.rru)
 		emit(c.wru, p.summary.wru)
 	}
@@ -236,9 +233,9 @@ func (g *ruTimelineGroup) summarize(start int64) (ruWindowSummary, bool) {
 		return ruWindowSummary{}, false
 	}
 	s := ruWindowSummary{end: start + ruWindowSeconds, peak: math.Inf(-1)}
-	for i, b := range totals {
+	for _, b := range totals {
 		if total := b.rru + b.wru; total > s.peak && !math.IsInf(total, 0) {
-			s.peak, s.peakAt, s.rru, s.wru = total, start+int64(i), b.rru, b.wru
+			s.peak, s.rru, s.wru = total, b.rru, b.wru
 		}
 	}
 	return s, !math.IsInf(s.peak, 0)
