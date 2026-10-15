@@ -241,7 +241,7 @@ func TestTombstoneSharesDefaultRUTimeline(t *testing.T) {
 	tombstone, _ := c.loadGroupController("test-group")
 
 	// A tombstone reports as the default group; a second default timeline
-	// from the same client would conflict with the real one.
+	// from the same client would overwrite the seconds of the real one.
 	re.Same(defaultGC.ruTimeline, tombstone.ruTimeline)
 	_, _, _, _, err = c.OnRequestWait(ctx, "test-group", NewTestRequestInfo(true, 1, 1, AccessUnknown))
 	re.NoError(err)

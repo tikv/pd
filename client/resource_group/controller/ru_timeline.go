@@ -44,10 +44,11 @@ type ruSecondBucket struct {
 // acknowledged, bounded by the retained window. A failed report is resent
 // from the same second and the receiver deduplicates the overlap.
 // Both recording and snapshotting advance the clock. After a clock rollback,
+// consumption lands in seconds that may already hold earlier consumption, so
 // nothing is reported until the clock passes the latest second observed
-// before it, so a second that may already have been reported is never changed;
-// the skipped seconds are never reported and their minutes are withheld. A forward step only relabels later seconds, like clock skew
-// between clients.
+// before it; a reported second never overstates its consumption, and the
+// skipped seconds are never reported. A forward step only relabels later
+// seconds, like clock skew between clients.
 // Methods read the clock while holding mu, so concurrent callers cannot
 // present seconds out of order and be mistaken for a clock rollback.
 type ruTimeline struct {
@@ -127,8 +128,8 @@ func (t *ruTimeline) snapshotLocked(now time.Time) *rmpb.RUConsumptionBySecond {
 }
 
 // trimRUTimelines keeps at most the newest budget/len(requests) seconds of each
-// request's RU timeline. Dropped seconds become gaps, and the resource manager
-// withholds the minutes they belong to.
+// request's RU timeline. Dropped seconds are never reported, so they count as
+// zero in their minutes.
 func trimRUTimelines(requests []*rmpb.TokenBucketRequest, budget int) {
 	total := 0
 	for _, req := range requests {
