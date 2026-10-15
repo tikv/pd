@@ -654,17 +654,10 @@ func TestGetResourceGroup(t *testing.T) {
 		re.NoError(err)
 		// The default group is only available as an unregistered fallback.
 		controller.tombstoneGroupCostController("test-group")
-		defaultGC, err := controller.tryGetResourceGroupController(ctx, defaultResourceGroupName, false)
-		re.NoError(err)
-
-		// Every controller reporting as the default group must report one
-		// timeline, or the timelines overwrite each other's seconds.
-		controller.groupsController.Range(func(_, value any) bool {
-			if gc := value.(*groupCostController); gc.name == defaultResourceGroupName {
-				re.Same(defaultGC.ruTimeline, gc.ruTimeline)
-			}
-			return true
-		})
+		// A tombstone would report a second default timeline once the default
+		// controller registers, so the group is deleted instead.
+		_, ok := controller.loadGroupController("test-group")
+		re.False(ok)
 	})
 }
 

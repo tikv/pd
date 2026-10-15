@@ -847,6 +847,8 @@ func (gc *groupCostController) onResponseWaitImpl(
 	delta := &rmpb.Consumption{}
 	calculateAfterKVRequest(gc.calculators, delta, detail, req, resp)
 	reportedDelta := reportedResponseConsumption(gc.calculators, req, delta)
+	// TiKV has already done the work, so the timeline records it even if the
+	// wait below fails.
 	gc.ruTimeline.record(reportedDelta.RRU, reportedDelta.WRU)
 	// `count` is the full per-request consumption (BeforeKVRequest + AfterKVRequest).
 	count := &rmpb.Consumption{}
@@ -918,13 +920,13 @@ func collectRUCalculation(collector RUCalculationCollector, detail *RUCalculatio
 	collector.CollectRUCalculation(*detail)
 }
 
+// addRUConsumption adds consumption measured after a query finishes, such as
+// TiFlash MPP cost. It has no seconds, so it counts toward tokens and counters
+// but stays out of the RU timeline.
 func (gc *groupCostController) addRUConsumption(consumption *rmpb.Consumption) {
 	gc.mu.Lock()
 	add(gc.mu.consumption, consumption)
 	gc.mu.Unlock()
-	// ReportConsumption carries consumption measured after a query finishes,
-	// such as TiFlash MPP cost. It has no seconds, so it counts toward tokens
-	// and counters but stays out of the RU timeline.
 }
 
 func (gc *groupCostController) addRUV2Consumption(tikvRUV2, tidbRUV2, tiflashRUV2 float64) {

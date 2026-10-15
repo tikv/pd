@@ -56,8 +56,8 @@ func TestRUTimeline(t *testing.T) {
 	re.Equal(&rmpb.RUConsumptionBucket{Rru: 7, Wru: 8}, latest.Buckets[ruTimelineSeconds-2])
 	re.Equal(&rmpb.RUConsumptionBucket{}, latest.Buckets[ruTimelineSeconds-1])
 
-	// After a clock rollback, nothing is recorded or reported until the clock
-	// passes the latest second observed before it.
+	// After a clock rollback, nothing is reported until the clock passes the
+	// latest second observed before it.
 	tl.recordLocked(time.Unix(start+90, 0), 100, 100)
 	rolledBack := tl.snapshotLocked(time.Unix(start+92, 0))
 	re.Equal(start+92, rolledBack.StartUnixSec)
@@ -126,7 +126,8 @@ func TestRUTimelineConcurrentRecording(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 	wg.Wait()
-	time.Sleep(time.Until(end.Add(time.Second + 10*time.Millisecond)))
+	// Wait for the second of the last record to close.
+	time.Sleep(time.Until(time.Now().Truncate(time.Second).Add(time.Second + 10*time.Millisecond)))
 	drain()
 	re.Equal(float64(recorded.Load()), reported)
 }
@@ -219,7 +220,6 @@ func TestRUTimelineUntimedConsumption(t *testing.T) {
 	rru, wru := timelineTotals(gc)
 	re.Zero(rru)
 	re.Zero(wru)
-	re.NotNil(gc.ruTimeline.snapshot())
 }
 
 func TestTombstoneSharesDefaultRUTimeline(t *testing.T) {
@@ -270,27 +270,24 @@ func TestTokenRequestAcknowledgesRUTimeline(t *testing.T) {
 		c, err := NewResourceGroupController(ctx, 1, provider, nil, constants.NullKeyspaceID)
 		re.NoError(err)
 		gc := createTestGroupCostController(re)
+		start := time.Now().Add(-3 * time.Second)
+		gc.ruTimeline = newRUTimeline(start)
+		gc.ruTimeline.recordLocked(start.Add(time.Second), 1, 0)
 		gc.run.requestInProgress = true
 		req := gc.collectRequestAndConsumption(periodicReport)
+		seconds := req.ConsumptionSinceLastRequest.RuBySecond
+		re.Equal(start.Unix(), seconds.StartUnixSec)
+		re.GreaterOrEqual(len(seconds.Buckets), 3)
+		re.Equal(&rmpb.RUConsumptionBucket{Rru: 1}, seconds.Buckets[1])
 		c.sendTokenBucketRequests(ctx, []*rmpb.TokenBucketRequest{req}, []*groupCostController{gc}, FromPeriodReport, notifyMsg{})
 		<-c.tokenResponseChan
 		gc.ruTimeline.mu.Lock()
-		acked := gc.ruTimeline.acked
+		from := gc.ruTimeline.from
 		gc.ruTimeline.mu.Unlock()
 		if rpcErr != nil {
-			re.Zero(acked, "a failed report must be resent")
+			re.Equal(start.Unix(), from, "a failed report must be resent")
 		} else {
-			seconds := req.ConsumptionSinceLastRequest.RuBySecond
-			re.Equal(seconds.StartUnixSec+int64(len(seconds.Buckets)), acked)
+			re.Equal(seconds.StartUnixSec+int64(len(seconds.Buckets)), from)
 		}
 	}
-}
-
-func TestTokenRequestCarriesRUTimeline(t *testing.T) {
-	re := require.New(t)
-	gc := createTestGroupCostController(re)
-	gc.run.requestInProgress = true
-	report := gc.collectRequestAndConsumption(periodicReport)
-	re.NotNil(report)
-	re.NotNil(report.ConsumptionSinceLastRequest.RuBySecond)
 }

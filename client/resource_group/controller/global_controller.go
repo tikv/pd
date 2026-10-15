@@ -696,7 +696,7 @@ func (c *ResourceGroupsController) tombstoneGroupCostController(name string) {
 		defaultGC, _ = c.loadGroupController(defaultResourceGroupName)
 	}
 	if err != nil || defaultGC == nil {
-		log.Warn("[resource group controller] get default resource group meta for tombstone failed",
+		log.Warn("[resource group controller] registered default resource group controller unavailable for tombstone",
 			zap.String("name", name), zap.Error(err))
 		// Directly delete the resource group controller if the default group is not available.
 		c.cleanupRequestSourceMetricsState(name)

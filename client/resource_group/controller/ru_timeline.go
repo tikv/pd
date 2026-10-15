@@ -27,8 +27,10 @@ const (
 	// second is useless once it is 90 seconds old.
 	ruTimelineSeconds = 90
 	// ruTimelineBucketsPerRPC bounds the RU timeline payload of one token RPC
-	// to about 2 MiB, so that seconds accumulated during an outage never push
-	// token requests past the server's message size limit.
+	// to about 2 MiB, half of the 4 MiB that a gRPC server receives by default,
+	// so that seconds accumulated during an outage do not fail token requests.
+	// A bucket takes at most 20 bytes on the wire. The other half holds the
+	// rest of a batch of up to about 16,000 resource groups.
 	ruTimelineBucketsPerRPC = 100000
 )
 
@@ -52,25 +54,25 @@ type ruSecondBucket struct {
 // Methods read the clock while holding mu, so concurrent callers cannot
 // present seconds out of order and be mistaken for a clock rollback.
 type ruTimeline struct {
-	mu      sync.Mutex
+	mu sync.Mutex
+	// buckets hold the retained closed seconds and the open one.
 	buckets [ruTimelineSeconds + 1]ruSecondBucket
-	// start is the first second the timeline can attest to. It moves past the
-	// latest observed second after a clock rollback.
-	start int64
-	// acked is the first second the resource manager has not acknowledged.
-	acked int64
+	// from is the first second the next snapshot may report. It moves past the
+	// seconds of an acknowledged report, and past the latest observed second
+	// after a clock rollback.
+	from int64
 	// last is the latest second observed.
 	last int64
 }
 
 func newRUTimeline(now time.Time) *ruTimeline {
-	return &ruTimeline{start: now.Unix(), last: now.Unix()}
+	return &ruTimeline{from: now.Unix(), last: now.Unix()}
 }
 
 func (t *ruTimeline) advanceLocked(now time.Time) {
 	second := now.Unix()
 	if second < t.last {
-		t.start = max(t.start, t.last+1)
+		t.from = max(t.from, t.last+1)
 	}
 	t.last = second
 }
@@ -92,11 +94,12 @@ func (t *ruTimeline) recordLocked(now time.Time, rru, wru float64) {
 	bucket.wru += wru
 }
 
-// ack records that the resource manager has received every second before end.
+// ack stops reporting the seconds before end, which a successful report
+// carried or trimmed.
 func (t *ruTimeline) ack(end int64) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.acked = max(t.acked, end)
+	t.from = max(t.from, end)
 }
 
 // snapshot copies the unacknowledged closed seconds, filling idle seconds
@@ -111,7 +114,7 @@ func (t *ruTimeline) snapshot() *rmpb.RUConsumptionBySecond {
 func (t *ruTimeline) snapshotLocked(now time.Time) *rmpb.RUConsumptionBySecond {
 	t.advanceLocked(now)
 	end := now.Unix()
-	start := max(t.start, end-ruTimelineSeconds, t.acked)
+	start := max(t.from, end-ruTimelineSeconds)
 	if end < start {
 		return &rmpb.RUConsumptionBySecond{StartUnixSec: end}
 	}
