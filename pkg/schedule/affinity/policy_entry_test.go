@@ -68,6 +68,13 @@ func TestUpdateAffinityGroupPolicyPersistsAndInvalidates(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(value), &persisted))
 	require.Equal(t, BalancePolicyFixed, persisted.BalancePolicy)
 
+	affinityVersion = current.affinityVer
+	balanceVersion = manager.balanceTables[TableGroupPrefix(groupID)].version
+	updated, err = manager.UpdateAffinityGroupPolicy(groupID, BalancePolicyFixed)
+	require.NoError(t, err)
+	require.Equal(t, affinityVersion, updated.affinityVer)
+	require.Equal(t, balanceVersion, manager.balanceTables[TableGroupPrefix(groupID)].version)
+
 	updated, err = manager.UpdateAffinityGroupPolicy(groupID, "")
 	require.NoError(t, err)
 	require.Equal(t, BalancePolicyAuto, updated.BalancePolicy)
@@ -96,6 +103,40 @@ func TestUpdateAffinityGroupPolicyRejectsStaleStorage(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(value), &persisted))
 	require.Equal(t, BalancePolicyAuto, persisted.BalancePolicy)
 	require.Equal(t, uint64(2), persisted.LeaderStoreID)
+}
+
+func TestUpdateAffinityGroupPolicyRejectsStaleNoop(t *testing.T) {
+	for _, policy := range []BalancePolicy{BalancePolicyAuto, BalancePolicyFixed} {
+		t.Run(string(policy), func(t *testing.T) {
+			manager := newBalanceRuntimeManager(t)
+			groupID := seedBalanceGroups(t, manager, []uint64{1})[0]
+			_, err := manager.UpdateAffinityGroupPolicy(groupID, policy)
+			require.NoError(t, err)
+
+			remote := manager.GetAffinityGroupState(groupID).Group
+			remote.BalancePolicy = BalancePolicyFixed
+			if policy == BalancePolicyFixed {
+				remote.BalancePolicy = BalancePolicyAuto
+			}
+			require.NoError(t, manager.storage.RunInTxn(t.Context(), func(txn kv.Txn) error {
+				return manager.storage.SaveAffinityGroup(txn, groupID, &remote)
+			}))
+
+			// The watcher has not delivered the other instance's policy change.
+			require.Equal(t, policy, manager.GetAffinityGroupState(groupID).BalancePolicy)
+			_, err = manager.UpdateAffinityGroupPolicy(groupID, policy)
+			require.ErrorIs(t, err, errs.ErrEtcdTxnConflict)
+			require.Equal(t, remote, loadBalanceGroup(t, manager, groupID))
+			require.Equal(t, policy, manager.GetAffinityGroupState(groupID).BalancePolicy)
+
+			manager.SyncGroupFromEtcd(&remote)
+			updated, err := manager.UpdateAffinityGroupPolicy(groupID, policy)
+			require.NoError(t, err)
+			require.Equal(t, policy, updated.BalancePolicy)
+			remote.BalancePolicy = policy
+			require.Equal(t, remote, loadBalanceGroup(t, manager, groupID))
+		})
+	}
 }
 
 func TestAdminPeersUpdatePreservesRemotePolicy(t *testing.T) {

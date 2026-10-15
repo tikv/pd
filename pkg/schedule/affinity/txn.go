@@ -385,10 +385,6 @@ func (m *Manager) UpdateAffinityGroupPolicy(groupID string, policy BalancePolicy
 	if group == nil {
 		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
 	}
-	if group.BalancePolicy == policy {
-		return group, nil
-	}
-
 	original := group.Group
 	updated := original
 	updated.BalancePolicy = policy
@@ -405,10 +401,16 @@ func (m *Manager) UpdateAffinityGroupPolicy(groupID string, policy BalancePolicy
 			!slices.Equal(normalizeVoters(persisted.VoterStoreIDs), original.VoterStoreIDs) {
 			return errs.ErrEtcdTxnConflict.FastGenByArgs()
 		}
+		if persisted.BalancePolicy == policy {
+			return nil
+		}
 		return m.storage.SaveAffinityGroup(txn, groupID, &updated)
 	})
 	if err != nil {
 		return nil, err
+	}
+	if group.BalancePolicy == policy {
+		return group, nil
 	}
 
 	m.Lock()
