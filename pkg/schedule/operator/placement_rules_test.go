@@ -171,3 +171,30 @@ func TestLeaderTargetCheckerReusesPlannedMembership(t *testing.T) {
 	invalid := NewLeaderTargetChecker(tc, region, map[uint64]*metapb.Peer{4: {StoreId: 5}})
 	require.False(t, invalid(peers[4]))
 }
+
+func TestBuilderReusesOriginalRoleChecker(t *testing.T) {
+	t.Run("same-layout", func(t *testing.T) {
+		tc, region := newLeaderRuleTestCluster(t, false)
+		voters := tc.GetRuleManager().GetRule("pd", "voters").Clone()
+		voters.LabelConstraints = nil
+		require.NoError(t, tc.GetRuleManager().SetRule(voters))
+		b := NewBuilder("test", tc, region).SetLeader(2)
+		original := b.originRoleChecker
+		op, err := b.Build(OpLeader)
+		require.NoError(t, err)
+		require.NotNil(t, op)
+		require.Same(t, original, b.targetRoleChecker)
+		require.Equal(t, uint64(2), b.currentLeaderStoreID)
+	})
+	t.Run("store-changed-before-build", func(t *testing.T) {
+		tc, region := newLeaderRuleTestCluster(t, false)
+		b := NewBuilder("test", tc, region).SetLeader(1)
+		require.True(t, b.checkTargetRules)
+		// A non-leader's new labels invalidate the complete layout.
+		tc.PutStoreWithLabels(3, "zone", "A")
+		op, err := b.Build(OpLeader)
+		require.Error(t, err)
+		require.Nil(t, op)
+		require.NotSame(t, b.originRoleChecker, b.targetRoleChecker)
+	})
+}

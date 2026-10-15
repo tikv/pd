@@ -130,3 +130,36 @@ func TestRoleCheckerAgainstExhaustiveAssignments(t *testing.T) {
 		}
 	}
 }
+
+func TestRoleCheckerMatchesPeers(t *testing.T) {
+	stores := core.NewBasicCluster()
+	peers := make(map[uint64]*metapb.Peer)
+	for id := uint64(1); id <= 3; id++ {
+		stores.PutStore(core.NewStoreInfoWithLabel(id, map[string]string{"zone": "A"}))
+		peers[id] = &metapb.Peer{StoreId: id}
+	}
+	checker := NewRoleChecker(stores, []*metapb.Peer{peers[3], peers[1], peers[2]}, []*Rule{{Role: Voter, Count: 3}}, false)
+	require.True(t, checker.MatchesPeers(stores, peers, false))
+	peers[1].Id = 123
+	require.True(t, checker.MatchesPeers(stores, peers, false))
+	// Snapshot role values must not follow later mutations of the input peers.
+	peers[1].Role = metapb.PeerRole_Learner
+	require.False(t, checker.MatchesPeers(stores, peers, false))
+	peers[1].Role = metapb.PeerRole_Voter
+	peers[1].IsWitness = true
+	require.False(t, checker.MatchesPeers(stores, peers, false))
+	peers[1].IsWitness = false
+	require.False(t, checker.MatchesPeers(stores, peers, true))
+	peers[1].StoreId = 4
+	require.False(t, checker.MatchesPeers(stores, peers, false))
+	peers[1].StoreId = 1
+	delete(peers, 3)
+	require.False(t, checker.MatchesPeers(stores, peers, false))
+	peers[3] = &metapb.Peer{StoreId: 3}
+	require.True(t, checker.MatchesPeers(stores, peers, false))
+	stores.PutStore(core.NewStoreInfoWithLabel(3, map[string]string{"zone": "B"}))
+	require.False(t, checker.MatchesPeers(stores, peers, false))
+	var absent *RoleChecker
+	require.False(t, absent.MatchesPeers(stores, peers, false))
+	require.False(t, (&RoleChecker{}).MatchesPeers(stores, peers, false))
+}

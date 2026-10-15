@@ -49,6 +49,7 @@ type Builder struct {
 	regionEpoch        *metapb.RegionEpoch
 	checkTargetRules   bool
 	requireTargetRules bool
+	originRoleChecker  *placement.RoleChecker
 	targetRoleChecker  *placement.RoleChecker
 	rules              []*placement.Rule
 	expectedRoles      map[uint64]placement.PeerRoleType
@@ -144,7 +145,8 @@ func NewBuilder(desc string, ci sche.SharedCluster, region *core.RegionInfo, opt
 	var rules []*placement.Rule
 	if err == nil && !b.skipPlacementRulesCheck && b.GetSharedConfig().IsPlacementRulesEnabled() {
 		rules = b.GetRuleManager().GetRulesForApplyRegion(region)
-		b.checkTargetRules = placement.NewRoleChecker(b.GetBasicCluster(), region.GetPeers(), rules, b.GetSharedConfig().IsWitnessAllowed()).IsSatisfied(originLeaderStoreID)
+		b.originRoleChecker = placement.NewRoleChecker(b.GetBasicCluster(), region.GetPeers(), rules, b.GetSharedConfig().IsWitnessAllowed())
+		b.checkTargetRules = b.originRoleChecker.IsSatisfied(originLeaderStoreID)
 		if len(rules) == 0 {
 			err = errors.Errorf("cannot build operator for region match no placement rule")
 		}
@@ -955,6 +957,11 @@ func (b *Builder) allowTargetLeader(peer *metapb.Peer) bool {
 	}
 	if b.forceTargetLeader || b.skipPlacementRulesCheck || len(b.rules) == 0 || (!b.requireTargetRules && !b.checkTargetRules) {
 		return true
+	}
+	if b.targetRoleChecker == nil && b.originRoleChecker.MatchesPeers(b.GetBasicCluster(), b.targetPeers, b.GetSharedConfig().IsWitnessAllowed()) {
+		// A leader-only change can reuse the original matcher. Both matchers use
+		// b.rules; MatchesPeers also rejects changed labels or peer roles.
+		b.targetRoleChecker = b.originRoleChecker
 	}
 	if b.targetRoleChecker == nil {
 		type peerRole struct {

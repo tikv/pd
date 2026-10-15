@@ -26,21 +26,25 @@ import (
 // Peer IDs are deliberately ignored: planned peers may not have IDs yet.
 // IsSatisfied uses private scratch space and is safe for concurrent calls.
 type RoleChecker struct {
-	peers    []rolePeer
-	slots    []PeerRoleType
-	eligible [][]int
-	valid    bool
+	peers          []rolePeer
+	slots          []PeerRoleType
+	eligible       [][]int
+	valid          bool
+	supportWitness bool
 }
 
 type rolePeer struct {
-	storeID uint64
-	canLead bool
+	storeID   uint64
+	store     *core.StoreInfo
+	role      metapb.PeerRole
+	isWitness bool
+	canLead   bool
 }
 
 // NewRoleChecker prepares a complete-role check against the supplied effective
 // rules. Callers must rebuild it when membership, rules or store labels change.
 func NewRoleChecker(stores StoreSet, peers []*metapb.Peer, rules []*Rule, supportWitness bool) *RoleChecker {
-	c := &RoleChecker{}
+	c := &RoleChecker{supportWitness: supportWitness}
 	count := 0
 	for _, rule := range rules {
 		if rule == nil || rule.Count <= 0 || rule.Count > len(peers)-count {
@@ -72,7 +76,7 @@ func NewRoleChecker(stores StoreSet, peers []*metapb.Peer, rules []*Rule, suppor
 		if store == nil {
 			return c
 		}
-		c.peers[i] = rolePeer{storeID: peer.GetStoreId(), canLead: !core.IsLearner(peer) && peer.GetRole() != metapb.PeerRole_DemotingVoter && !peer.GetIsWitness()}
+		c.peers[i] = rolePeer{storeID: peer.GetStoreId(), store: store, role: peer.GetRole(), isWitness: peer.GetIsWitness(), canLead: !core.IsLearner(peer) && peer.GetRole() != metapb.PeerRole_DemotingVoter && !peer.GetIsWitness()}
 		offset := 0
 		for _, rule := range rules {
 			roleOK := core.IsLearner(peer) == (rule.Role == Learner)
@@ -87,6 +91,23 @@ func NewRoleChecker(stores StoreSet, peers []*metapb.Peer, rules []*Rule, suppor
 	}
 	c.valid = true
 	return c
+}
+
+// MatchesPeers reports whether the peer layout, store snapshots and witness
+// option still match this checker. Peer IDs and leadership are not inputs to
+// this comparison. The caller must also keep the effective rules unchanged.
+func (c *RoleChecker) MatchesPeers(stores StoreSet, peers map[uint64]*metapb.Peer, supportWitness bool) bool {
+	if c == nil || !c.valid || c.supportWitness != supportWitness || len(c.peers) != len(peers) {
+		return false
+	}
+	for _, original := range c.peers {
+		peer := peers[original.storeID]
+		if peer == nil || peer.GetStoreId() != original.storeID || peer.GetRole() != original.role ||
+			peer.GetIsWitness() != original.isWitness || stores.GetStore(original.storeID) != original.store {
+			return false
+		}
+	}
+	return true
 }
 
 // IsSatisfied reports whether leaderStoreID and the other peers can fill all
