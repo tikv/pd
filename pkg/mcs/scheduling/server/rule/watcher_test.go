@@ -108,7 +108,7 @@ func TestRegionLabelWatcherReloadsAfterCompaction(t *testing.T) {
 	putRule(keepRule)
 	putRule(deleteRule)
 	re.NoError(rw.initializeRegionLabelWatcher())
-	re.Equal(2, len(regionLabeler.GetAllLabelRules()))
+	re.Len(regionLabeler.GetAllLabelRules(), 2)
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock", "return(true)"))
 	failpointEnabled = true

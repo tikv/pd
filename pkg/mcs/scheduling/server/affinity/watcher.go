@@ -139,6 +139,7 @@ func (w *Watcher) initializeAffinityLabelWatcher(ctx context.Context) error {
 		w.affinityManager.SyncKeyRangesDeleteFromEtcd(ruleID)
 		return nil
 	}
+
 	w.labelWatcher = etcdutil.NewLoopWatcher(
 		ctx, w.wg,
 		w.etcdClient,
