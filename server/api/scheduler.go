@@ -17,7 +17,6 @@ package api
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 	"math"
 	"net/http"
@@ -35,6 +34,7 @@ import (
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -222,50 +222,39 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 			return
 		}
 
-		// The scheduler is created with the first store ID (the persisted
-		// creation args only ever hold a single store, so this part can't be
-		// batched); any remaining stores are then added to it in one batched
-		// config-update call instead of one call per store.
-		toUpdate := storeIDs
-		justCreated := !exist
-		if justCreated {
-			collector(strconv.FormatUint(uint64(storeIDs[0]), 10))
+		if !exist {
+			// Every requested store is encoded into the single persisted
+			// creation arg (see schedulers.EvictLeaderMultiStoreArgs), so
+			// the scheduler is created with all of them in one call. This
+			// keeps creation atomic (one call either adds every requested
+			// store or none of them) and avoids a follow-up scheduler-config
+			// update that, in microservice mode, is watched independently of
+			// scheduler creation and can race with it.
+			ids := make([]uint64, 0, len(storeIDs))
+			for _, id := range storeIDs {
+				ids = append(ids, uint64(id))
+			}
+			if len(ids) == 1 {
+				collector(strconv.FormatUint(ids[0], 10))
+			} else {
+				collector(schedulers.EvictLeaderMultiStoreArgs(ids))
+			}
 			if err := h.AddScheduler(tp, args...); err != nil {
 				h.r.JSON(w, http.StatusBadRequest, err.Error())
 				return
 			}
-			toUpdate = storeIDs[1:]
-		}
-		if len(toUpdate) > 0 {
-			if err := h.RedirectSchedulerUpdateBatch(name, toUpdate); err != nil {
-				if justCreated {
-					// Roll back the scheduler we just created so the whole
-					// "create with N stores" request is atomic: either every
-					// requested store ends up evicted, or none of them do.
-					if rmErr := h.RemoveScheduler(name); rmErr != nil && !errors.ErrorEqual(rmErr, errs.ErrSchedulerNotFound.FastGenByArgs()) {
-						// The scheduler may still be active with only the
-						// first store evicted; surface both failures instead
-						// of silently reporting just the original one.
-						log.Error("failed to roll back partially created evict-leader-scheduler",
-							zap.String("scheduler-name", name), errs.ZapError(rmErr))
-						h.r.JSON(w, http.StatusInternalServerError, fmt.Sprintf(
-							"failed to add stores %v to %s: %s; rolling back the scheduler also failed: %s "+
-								"(store %d may still be evicted; resolve the rollback error above, then retry "+
-								"removing the scheduler)",
-							toUpdate, name, err.Error(), rmErr.Error(), uint64(storeIDs[0])))
-						return
-					}
-				}
-				h.r.JSON(w, http.StatusInternalServerError, err.Error())
-				return
-			}
-			log.Info("update scheduler", zap.String("scheduler-name", name), zap.Any("store-ids", toUpdate))
-		}
-		if exist {
-			h.r.JSON(w, http.StatusOK, "The scheduler has been applied to the store.")
-		} else {
 			h.r.JSON(w, http.StatusOK, "The scheduler is created.")
+			return
 		}
+
+		// The scheduler already exists: add the requested stores to it via
+		// the existing per-store config-update path.
+		if err := h.RedirectSchedulerUpdateBatch(name, storeIDs); err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		log.Info("update scheduler", zap.String("scheduler-name", name), zap.Any("store-ids", storeIDs))
+		h.r.JSON(w, http.StatusOK, "The scheduler has been applied to the store.")
 		return
 	case types.ShuffleHotRegionScheduler:
 		limit := uint64(1)

@@ -47,6 +47,8 @@ type etcdKVBase struct {
 	client *clientv3.Client
 }
 
+var _ ConditionalTxnRunner = (*etcdKVBase)(nil)
+
 // NewEtcdKVBase creates a new etcd kv.
 func NewEtcdKVBase(client *clientv3.Client) *etcdKVBase {
 	return &etcdKVBase{client: client}
@@ -132,6 +134,14 @@ func (kv *etcdKVBase) CreateRawTxn() RawTxn {
 	}
 }
 
+// CreateRawTxnWithContext creates a raw transaction with the caller's context
+// and the same request timeout as CreateRawTxn.
+func (kv *etcdKVBase) CreateRawTxnWithContext(ctx context.Context) RawTxn {
+	return &rawTxnWrapper{
+		inner: NewSlowLogTxnWithContext(ctx, kv.client),
+	}
+}
+
 // SlowLogTxn wraps etcd transaction and log slow one.
 type SlowLogTxn struct {
 	clientv3.Txn
@@ -210,9 +220,20 @@ type etcdTxn struct {
 
 // RunInTxn runs user provided function f in a transaction.
 func (kv *etcdKVBase) RunInTxn(ctx context.Context, f func(txn Txn) error) error {
+	return kv.RunInTxnWithConditions(ctx, nil, f)
+}
+
+// RunInTxnWithConditions runs user provided function f in a transaction with
+// additional etcd comparisons.
+func (kv *etcdKVBase) RunInTxnWithConditions(
+	ctx context.Context,
+	conditions []clientv3.Cmp,
+	f func(txn Txn) error,
+) error {
 	txn := &etcdTxn{
-		kv:  kv,
-		ctx: ctx,
+		kv:         kv,
+		ctx:        ctx,
+		conditions: append([]clientv3.Cmp(nil), conditions...),
 	}
 	err := f(txn)
 	if err != nil {
@@ -239,6 +260,16 @@ func (txn *etcdTxn) Remove(key string) error {
 
 // Load loads the target value from etcd and puts a comparator into conditions.
 func (txn *etcdTxn) Load(key string) (string, error) {
+	return txn.loadValue(key, false)
+}
+
+// LoadWithRevision loads the target value from etcd and compares its mod revision
+// at commit time, keeping large values out of the transaction request.
+func (txn *etcdTxn) LoadWithRevision(key string) (string, error) {
+	return txn.loadValue(key, true)
+}
+
+func (txn *etcdTxn) loadValue(key string, compareRevision bool) (string, error) {
 	resp, err := etcdutil.EtcdKVGetWithContext(txn.ctx, txn.kv.client, key)
 	if err != nil {
 		return "", err
@@ -252,9 +283,13 @@ func (txn *etcdTxn) Load(key string) (string, error) {
 		value = ""
 		condition = clientv3.Compare(clientv3.CreateRevision(key), "=", 0)
 	case 1:
-		// If target key has value, must make sure it stays the same at the time of commit.
 		value = string(resp.Kvs[0].Value)
-		condition = clientv3.Compare(clientv3.Value(key), "=", value)
+		if compareRevision {
+			condition = clientv3.Compare(clientv3.ModRevision(key), "=", resp.Kvs[0].ModRevision)
+		} else {
+			// If target key has value, must make sure it stays the same at the time of commit.
+			condition = clientv3.Compare(clientv3.Value(key), "=", value)
+		}
 	default:
 		// If response contains multiple kvs, error occurred.
 		return "", errs.ErrEtcdKVGetResponse.GenWithStackByArgs(resp.Kvs)
@@ -300,7 +335,9 @@ func (txn *etcdTxn) commit() error {
 }
 
 type rawTxnWrapper struct {
-	inner clientv3.Txn
+	inner   clientv3.Txn
+	thenOps []clientv3.Op
+	elseOps []clientv3.Op
 }
 
 // If implements RawTxn interface for adding conditions to the transaction.
@@ -361,6 +398,7 @@ func convertOps(ops []RawTxnOp) []clientv3.Op {
 func (l *rawTxnWrapper) Then(ops ...RawTxnOp) RawTxn {
 	convertedOps := convertOps(ops)
 	l.inner = l.inner.Then(convertedOps...)
+	l.thenOps = convertedOps
 	return l
 }
 
@@ -369,6 +407,7 @@ func (l *rawTxnWrapper) Then(ops ...RawTxnOp) RawTxn {
 func (l *rawTxnWrapper) Else(ops ...RawTxnOp) RawTxn {
 	convertedOps := convertOps(ops)
 	l.inner = l.inner.Else(convertedOps...)
+	l.elseOps = convertedOps
 	return l
 }
 
@@ -378,16 +417,28 @@ func (l *rawTxnWrapper) Commit() (RawTxnResponse, error) {
 	if err != nil {
 		return RawTxnResponse{}, err
 	}
+	if resp == nil {
+		return RawTxnResponse{}, errs.ErrEtcdTxnResponse.GenWithStackByArgs("nil response")
+	}
+	ops := l.elseOps
+	if resp.Succeeded {
+		ops = l.thenOps
+	}
+	if len(resp.Responses) != len(ops) {
+		return RawTxnResponse{}, errs.ErrEtcdTxnResponse.GenWithStackByArgs(
+			fmt.Sprintf("succeeded: %v, expected %d responses, got %d", resp.Succeeded, len(ops), len(resp.Responses)),
+		)
+	}
 	items := make([]RawTxnResponseItem, 0, len(resp.Responses))
 	for i, rpcRespItem := range resp.Responses {
 		var respItem RawTxnResponseItem
-		if put := rpcRespItem.GetResponsePut(); put != nil {
+		if put := rpcRespItem.GetResponsePut(); ops[i].IsPut() && put != nil {
 			// Put and delete operations of etcd's transaction won't return any previous data. Skip handling it.
 			respItem = RawTxnResponseItem{}
-		} else if del := rpcRespItem.GetResponseDeleteRange(); del != nil {
+		} else if del := rpcRespItem.GetResponseDeleteRange(); ops[i].IsDelete() && del != nil {
 			// Put and delete operations of etcd's transaction won't return any previous data. Skip handling it.
 			respItem = RawTxnResponseItem{}
-		} else if rangeResp := rpcRespItem.GetResponseRange(); rangeResp != nil {
+		} else if rangeResp := rpcRespItem.GetResponseRange(); ops[i].IsGet() && rangeResp != nil {
 			kvs := make([]KeyValuePair, 0, len(rangeResp.Kvs))
 			for _, kv := range rangeResp.Kvs {
 				kvs = append(kvs, KeyValuePair{

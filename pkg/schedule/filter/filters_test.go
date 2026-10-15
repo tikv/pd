@@ -144,12 +144,12 @@ func TestRuleFitFilter(t *testing.T) {
 		filter := newRuleFitFilter("", testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, nil, 1)
 		re.Equal(testCase.sourceRes, filter.Source(testCluster.GetSharedConfig(), testCluster.GetStore(testCase.storeID)).StatusCode)
 		re.Equal(testCase.targetRes, filter.Target(testCluster.GetSharedConfig(), testCluster.GetStore(testCase.storeID)).StatusCode)
-		leaderFilter := newRuleLeaderFitFilter("", testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, 1, true)
+		leaderFilter := newRuleLeaderFitFilter("", testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, nil, 1, true)
 		re.Equal(testCase.targetRes, leaderFilter.Target(testCluster.GetSharedConfig(), testCluster.GetStore(testCase.storeID)).StatusCode)
 	}
 
 	// store-6 is not exist in the peers, so it will not allow transferring leader to store 6.
-	leaderFilter := newRuleLeaderFitFilter("", testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, 1, false)
+	leaderFilter := newRuleLeaderFitFilter("", testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, nil, 1, false)
 	re.False(leaderFilter.Target(testCluster.GetSharedConfig(), testCluster.GetStore(6)).IsOK())
 }
 
@@ -223,7 +223,7 @@ func TestRuleFitFilterWithPlacementRule(t *testing.T) {
 		{StoreId: 5, Id: 4},
 		{StoreId: 6, Id: 5},
 	}}, &metapb.Peer{StoreId: 1, Id: 1})
-	leaderFilter := newRuleLeaderFitFilter("", testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, 1, true)
+	leaderFilter := newRuleLeaderFitFilter("", testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, nil, 1, true)
 	re.Equal(plan.StatusText(plan.StatusStoreNotMatchRule), leaderFilter.Target(testCluster.GetSharedConfig(), testCluster.GetStore(6)).String())
 }
 
@@ -465,6 +465,32 @@ func TestIsolationFilter(t *testing.T) {
 			re.Equal(testCase.targetRes[idx], filter.Target(testCluster.GetSharedConfig(), testCluster.GetStore(store.storeID)).StatusCode)
 		}
 	}
+}
+
+func TestIsolationFilterCaseInsensitive(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := mockconfig.NewTestOptions()
+	testCluster := mockcluster.NewCluster(ctx, opt)
+	testCluster.SetLocationLabels([]string{"zone", "host"})
+	testCluster.AddLabelsStore(1, 1, map[string]string{"zone": "Z1", "host": "h1"})
+	testCluster.AddLabelsStore(2, 1, map[string]string{"zone": "z1", "host": "h2"})
+	testCluster.AddLabelsStore(3, 1, map[string]string{"zone": "z2", "host": "H1"})
+	testCluster.AddLabelsStore(4, 1, map[string]string{"zone": "z2", "host": "h2"})
+	testCluster.AddLabelsStore(5, 1, map[string]string{"zone": "Z2", "host": "h1"})
+
+	regionStores := []*core.StoreInfo{testCluster.GetStore(1)}
+	conf := testCluster.GetSharedConfig()
+	zoneFilter := NewIsolationFilter("", "zone", testCluster.GetLocationLabels(), regionStores)
+	re.False(zoneFilter.Target(conf, testCluster.GetStore(2)).IsOK())
+	re.True(zoneFilter.Target(conf, testCluster.GetStore(3)).IsOK())
+
+	regionStores = []*core.StoreInfo{testCluster.GetStore(3)}
+	hostFilter := NewIsolationFilter("", "host", testCluster.GetLocationLabels(), regionStores)
+	re.False(hostFilter.Target(conf, testCluster.GetStore(5)).IsOK())
+	re.True(hostFilter.Target(conf, testCluster.GetStore(4)).IsOK())
 }
 
 func TestPlacementGuard(t *testing.T) {

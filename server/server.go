@@ -17,6 +17,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -90,6 +91,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
 
@@ -541,7 +543,13 @@ func (s *Server) startServer(ctx context.Context) error {
 	if s.IsKeyspaceGroupEnabled() {
 		s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage, s.client)
 	}
-	s.metaServiceGroupManager = keyspace.NewMetaServiceGroupManager(s.storage, s.cfg.Keyspace.GetMetaServiceGroups())
+	s.metaServiceGroupManager = keyspace.NewMetaServiceGroupManager(
+		s.storage,
+		s.cfg.Keyspace.GetMetaServiceGroups(),
+		func() (*tls.Config, error) {
+			return s.cfg.Security.ToClientTLSConfig()
+		},
+	)
 	s.keyspaceManager = keyspace.NewKeyspaceManager(
 		s.ctx,
 		s.storage,
@@ -563,6 +571,10 @@ func (s *Server) startServer(ctx context.Context) error {
 		log.Info("no metering config provided, the metering writer will not be started")
 	}
 	s.gcStateManager = gc.NewGCStateManager(s.storage.GetGCStateProvider(), s.cfg.PDServerCfg, s.keyspaceManager)
+	s.gcStateManager.SetConfigGetter(s.persistOptions.GetPDServerConfig)
+	if kerneltype.IsNextGen() {
+		s.gcStateManager.SetEtcdClient(s.client)
+	}
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, "", s.cluster)
 	// initial hot_region_storage in here.
 
@@ -622,7 +634,6 @@ func (s *Server) Close() {
 	if s.meteringWriter != nil {
 		s.meteringWriter.Stop()
 	}
-
 	if s.client != nil {
 		if err := s.client.Close(); err != nil {
 			log.Error("close etcd client meet error", errs.ZapError(errs.ErrCloseEtcdClient, err))

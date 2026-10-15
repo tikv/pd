@@ -346,6 +346,7 @@ func forwardRegionHeartbeatToScheduling(rc *cluster.RaftCluster, forwardStream s
 			SplitRegion:     resp.GetSplitRegion(),
 			ChangePeerV2:    resp.GetChangePeerV2(),
 			SwitchWitnesses: resp.GetSwitchWitnesses(),
+			ChangeSplit:     resp.GetChangeSplit(),
 		}
 
 		if err := server.Send(response); err != nil {
