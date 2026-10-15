@@ -180,9 +180,6 @@ func NewManager[T factoryProvider](srv bs.Server) *Manager {
 	})
 	// The second initialization after becoming serving.
 	srv.AddServiceReadyCallback(m.Init)
-	if provider, ok := any(srv).(interface{ AddServiceExitCallback(...func()) }); ok {
-		provider.AddServiceExitCallback(m.cleanupMetricsOnStepDown)
-	}
 	return m
 }
 
@@ -205,43 +202,26 @@ func NewMetadataOnlyManager[T metadataFactoryProvider](srv bs.Server) (*Manager,
 	return m, nil
 }
 
-// This is used for testing only now.
-func (m *Manager) close() {
+// Close stops the manager's leader-scoped workers and waits for them to exit.
+func (m *Manager) Close() {
 	m.stopLeaderWorkers()
 }
 
-// cleanupMetricsOnStepDown stops this term's workers and clears its Prometheus series.
-func (m *Manager) cleanupMetricsOnStepDown() {
-	m.stopLeaderWorkers()
-	m.metrics.resetAll()
-}
-
-// stopLeaderWorkers closes this term's consumption gate, waits for workers, and flushes queued requests.
-func (m *Manager) stopLeaderWorkers() {
+func (m *Manager) stopAcceptingConsumption() {
 	m.consumptionMu.Lock()
-	flushPending := m.acceptingConsumption
 	m.acceptingConsumption = false
 	m.consumptionTermDone = nil
 	m.consumptionMu.Unlock()
+}
+
+// stopLeaderWorkers closes this term's consumption gate and waits for its workers.
+func (m *Manager) stopLeaderWorkers() {
+	m.stopAcceptingConsumption()
 	if m.cancel != nil {
 		m.cancel()
 		m.cancel = nil
 	}
 	m.wg.Wait()
-	if flushPending {
-		m.flushPendingConsumption()
-	}
-}
-
-func (m *Manager) flushPendingConsumption() {
-	for {
-		select {
-		case item := <-m.consumptionDispatcher:
-			m.processConsumption(context.Background(), item)
-		default:
-			return
-		}
-	}
 }
 
 // GetBasicServer returns the basic server.
@@ -349,8 +329,12 @@ func (m *Manager) accessKeyspaceResourceGroupManager(keyspaceID uint32, groupNam
 
 // Init initializes the resource group manager.
 func (m *Manager) Init(ctx context.Context) error {
-	// Stop any previous term and discard consumption it had queued before starting new workers.
+	// Stop any previous term before starting workers for the new term.
 	m.stopLeaderWorkers()
+	m.metrics.resetAll()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if m.enableMetadataWatcher {
 		if err := m.initControllerConfig(); err != nil {
 			return err
@@ -382,6 +366,11 @@ func (m *Manager) Init(ctx context.Context) error {
 		}()
 	}
 	m.consumptionMu.Lock()
+	if err := ctx.Err(); err != nil {
+		m.consumptionMu.Unlock()
+		m.stopLeaderWorkers()
+		return err
+	}
 	m.consumptionTermDone = ctx.Done()
 	m.acceptingConsumption = true
 	m.consumptionMu.Unlock()
@@ -837,13 +826,23 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 		}
 	}()
 
+	resetMetricsOnStepDown := func() {
+		m.stopAcceptingConsumption()
+		m.metrics.resetAll()
+		m.drainPendingConsumption(context.WithoutCancel(ctx))
+		log.Info("resource group manager background metrics flush loop exits")
+	}
 	for {
+		if ctx.Err() != nil {
+			resetMetricsOnStepDown()
+			return
+		}
 		select {
 		case <-ctx.Done():
-			log.Info("resource group manager background metrics flush loop exits")
+			resetMetricsOnStepDown()
 			return
 		case consumptionInfo := <-m.consumptionDispatcher:
-			m.processConsumption(ctx, consumptionInfo)
+			m.processConsumption(ctx, consumptionInfo, true)
 		case <-cleanUpTicker.C:
 			m.cleanUpMetrics(ctx)
 		case <-metricsTicker.C:
@@ -908,7 +907,19 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 	}
 }
 
-func (m *Manager) processConsumption(ctx context.Context, consumptionInfo *consumptionItem) {
+// drainPendingConsumption meters requests accepted by the old term without recreating its metrics.
+func (m *Manager) drainPendingConsumption(ctx context.Context) {
+	for {
+		select {
+		case item := <-m.consumptionDispatcher:
+			m.processConsumption(ctx, item, false)
+		default:
+			return
+		}
+	}
+}
+
+func (m *Manager) processConsumption(ctx context.Context, consumptionInfo *consumptionItem, recordMetrics bool) {
 	if consumptionInfo == nil || consumptionInfo.Consumption == nil {
 		return
 	}
@@ -924,7 +935,9 @@ func (m *Manager) processConsumption(ctx context.Context, consumptionInfo *consu
 	}
 	consumptionInfo.keyspaceName = keyspaceName
 	m.ruCollector.Collect(consumptionInfo)
-	m.metrics.recordConsumption(consumptionInfo, m.GetControllerConfig(), time.Now())
+	if recordMetrics {
+		m.metrics.recordConsumption(consumptionInfo, m.GetControllerConfig(), time.Now())
+	}
 	// TODO: maybe we need to distinguish background ru.
 	if rg, _ := m.GetMutableResourceGroup(keyspaceID, consumptionInfo.resourceGroupName); rg != nil {
 		rg.UpdateRUConsumption(consumptionInfo.Consumption)

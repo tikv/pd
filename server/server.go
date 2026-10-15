@@ -198,8 +198,7 @@ type Server struct {
 	// startCallbacks will be called after the server is started.
 	startCallbacks []func()
 	// leaderCallbacks will be called after the server becomes leader.
-	leaderCallbacks     []func(context.Context) error
-	leaderExitCallbacks []func()
+	leaderCallbacks []func(context.Context) error
 	// closeCallbacks will be called before the server is closed.
 	closeCallbacks []func()
 
@@ -618,6 +617,9 @@ func (s *Server) Close() {
 	s.cgMonitor.StopMonitor()
 
 	s.stopServerLoop()
+	if s.resourceGroupMetadataManager != nil {
+		s.resourceGroupMetadataManager.Close()
+	}
 	if s.gcStateManager != nil {
 		s.gcStateManager.CloseBarrierMetrics()
 	}
@@ -1925,11 +1927,6 @@ func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context) erro
 	s.leaderCallbacks = append(s.leaderCallbacks, callbacks...)
 }
 
-// AddServiceExitCallback adds callbacks that run when the server stops being the leader.
-func (s *Server) AddServiceExitCallback(callbacks ...func()) {
-	s.leaderExitCallbacks = append(s.leaderExitCallbacks, callbacks...)
-}
-
 func memberFailpointEnabled(val failpoint.Value, memberID uint64) bool {
 	if enabled, ok := val.(bool); ok {
 		return enabled
@@ -2062,9 +2059,6 @@ func (s *Server) campaignLeader() {
 		cancel()
 		s.member.Resign()
 		member.ServiceMemberGauge.WithLabelValues(PD).Set(0)
-		for _, cb := range s.leaderExitCallbacks {
-			cb()
-		}
 	}
 	defer resetLeaderOnce.Do(resetLeader)
 

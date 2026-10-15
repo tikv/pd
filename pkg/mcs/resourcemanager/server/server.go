@@ -87,8 +87,7 @@ type Server struct {
 	service *Service
 
 	// primaryCallbacks will be called after the server becomes leader.
-	primaryCallbacks     []func(context.Context) error
-	primaryExitCallbacks []func()
+	primaryCallbacks []func(context.Context) error
 
 	// for service registry
 	serviceID       *discovery.ServiceRegistryEntry
@@ -240,9 +239,6 @@ func (s *Server) campaignLeader(expectedPrimary string) bool {
 		cancel()
 		s.participant.Resign()
 		member.ServiceMemberGauge.WithLabelValues(serviceName).Set(0)
-		for _, cb := range s.primaryExitCallbacks {
-			cb()
-		}
 	}
 	defer resetLeaderOnce.Do(resetLeader)
 
@@ -319,6 +315,9 @@ func (s *Server) Close() {
 	s.CloseClientConns()
 	s.serverLoopCancel()
 	s.serverLoopWg.Wait()
+	if s.service != nil && s.service.manager != nil {
+		s.service.manager.Close()
+	}
 	if s.meteringWriter != nil {
 		s.meteringWriter.Stop()
 	}
@@ -381,11 +380,6 @@ func (s *Server) IsClosed() bool {
 // AddServiceReadyCallback adds callbacks when the server becomes the leader, if there is embedded etcd, or the primary otherwise.
 func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context) error) {
 	s.primaryCallbacks = append(s.primaryCallbacks, callbacks...)
-}
-
-// AddServiceExitCallback adds callbacks that run when the server stops being the primary.
-func (s *Server) AddServiceExitCallback(callbacks ...func()) {
-	s.primaryExitCallbacks = append(s.primaryExitCallbacks, callbacks...)
 }
 
 // GetBackendEndpoints returns the backend endpoints.
