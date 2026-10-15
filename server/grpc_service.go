@@ -16,14 +16,18 @@ package server
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"io"
+	"net"
+	"net/url"
 	"runtime"
 	"runtime/trace"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -822,6 +826,60 @@ func checkStore(rc *cluster.RaftCluster, storeID uint64) *pdpb.Error {
 	return nil
 }
 
+func dialAddress(ctx context.Context, address string) error {
+	if strings.HasPrefix(address, "mock://") {
+		return nil
+	}
+
+	hostPort := address
+	if u, err := url.Parse(address); err == nil && u.Host != "" {
+		hostPort = u.Host
+	}
+	host, port, err := net.SplitHostPort(hostPort)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	if host == "" || port == "" {
+		return errors.Errorf("invalid address %q: empty host or port", hostPort)
+	}
+
+	dialCtx, cancel := context.WithTimeout(ctx, defaultGRPCDialTimeout)
+	defer cancel()
+	conn, err := (&net.Dialer{}).DialContext(dialCtx, "tcp", hostPort)
+	if err == nil {
+		return conn.Close()
+	}
+
+	// TiKV puts the store before it starts listening on its store address, so a
+	// "connection refused" only proves the host rejected the connection at the
+	// TCP layer, i.e. the address is valid but nothing is listening yet. Any
+	// other failure (DNS lookup failure, no route to host, timeout, ...)
+	// indicates the address itself is wrong or unreachable.
+	if stderrors.Is(err, syscall.ECONNREFUSED) {
+		return nil
+	}
+	return errors.WithStack(err)
+}
+
+func validateStoreAddress(ctx context.Context, store *metapb.Store) error {
+	addresses := make(map[string]struct{}, 2)
+	if address := store.GetAddress(); address != "" {
+		addresses[address] = struct{}{}
+	}
+	if address := store.GetStatusAddress(); address != "" {
+		addresses[address] = struct{}{}
+	}
+	if address := store.GetPeerAddress(); address != "" {
+		addresses[address] = struct{}{}
+	}
+	for address := range addresses {
+		if err := dialAddress(ctx, address); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // PutStore implements gRPC PDServer.
 func (s *GrpcServer) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*pdpb.PutStoreResponse, error) {
 	done, err := s.rateLimitCheck()
@@ -871,6 +929,18 @@ func (s *GrpcServer) PutStore(ctx context.Context, request *pdpb.PutStoreRequest
 		return &pdpb.PutStoreResponse{
 			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
+	}
+
+	// TiKV puts the store before listening on its store address, so a dial
+	// failure does not necessarily mean the address is invalid. The check is
+	// handed off to the single background storeAddressValidationLoop instead
+	// of blocking or rejecting the PutStore request; if the queue is full the
+	// check is simply skipped for this store rather than piling up work.
+	select {
+	case s.storeAddressValidationQueue <- store:
+	default:
+		log.Warn("store address validation queue is full, skip checking store address",
+			zap.Uint64("store-id", store.GetId()))
 	}
 
 	log.Info("put store ok", zap.Stringer("store", store))
