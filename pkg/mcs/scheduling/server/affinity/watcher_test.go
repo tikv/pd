@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -26,6 +27,9 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/goleak"
+	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
@@ -35,6 +39,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
@@ -194,6 +199,105 @@ func TestWatcherLoadExistingData(t *testing.T) {
 	re.Equal(uint64(1), groupState.LeaderStoreID)
 	re.Equal([]uint64{1, 2, 3}, groupState.VoterStoreIDs)
 	re.Equal(1, groupState.RangeCount)
+}
+
+func TestAffinityLabelWatcherLogRedact(t *testing.T) {
+	const startKey, endKey = "7365637265742d7374617274", "7365637265742d7a"
+	const secondStartKey, secondEndKey = "7365637265742d7a61", "7365637265742d7a62"
+	const invalidKey = "invalid-affinity-key"
+	ctx, client, clean := prepare(t)
+	defer clean()
+
+	for _, mode := range []struct {
+		name string
+		typ  logutil.RedactInfoLogType
+	}{
+		{"off", logutil.RedactInfoLogOFF},
+		{"on", logutil.RedactInfoLogON},
+		{"marker", logutil.RedactInfoLogMarker},
+	} {
+		t.Run(mode.name, func(t *testing.T) {
+			re := require.New(t)
+			_, err := client.Delete(ctx, keypath.AffinityGroupsPrefix(), clientv3.WithPrefix())
+			re.NoError(err)
+			_, err = client.Delete(ctx, keypath.RegionLabelPathPrefix(), clientv3.WithPrefix())
+			re.NoError(err)
+			fname := testutil.InitTempFileLogger(t, "debug")
+			var (
+				lg    *zap.Logger
+				props *log.ZapProperties
+			)
+			re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, mode.typ))
+			t.Cleanup(func() {
+				re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, logutil.RedactInfoLogOFF))
+			})
+			readLog := func() string {
+				output, err := os.ReadFile(fname)
+				re.NoError(err)
+				return string(output)
+			}
+
+			watchCtx, cancel := context.WithCancel(ctx)
+			t.Cleanup(cancel)
+			group := makeTestGroup("redact-group", 1, []uint64{1, 2, 3})
+			labelRule := makeTestLabelRule(group.ID, startKey, endKey)
+			re.NoError(putGroup(ctx, client, group))
+			re.NoError(putLabelRule(ctx, client, labelRule))
+			manager, watcher, err := setupAffinityManager(watchCtx, client)
+			re.NoError(err)
+			closeWatcher := sync.OnceFunc(watcher.Close)
+			t.Cleanup(closeWatcher)
+			re.Equal(1, manager.GetAffinityGroupState(group.ID).RangeCount)
+
+			// Exercise live updates as well as the initial snapshot logs.
+			labelRule = makeTestLabelRule(group.ID, startKey, endKey, secondStartKey, secondEndKey)
+			re.NoError(putLabelRule(ctx, client, labelRule))
+			testutil.Eventually(re, func() bool {
+				return manager.GetAffinityGroupState(group.ID).RangeCount == 2
+			})
+
+			// Validation errors repeat the invalid key separately from the payload.
+			invalidRule := makeTestLabelRule(group.ID, startKey, invalidKey)
+			re.NoError(putLabelRule(ctx, client, invalidRule))
+			testutil.Eventually(re, func() bool {
+				output := readLog()
+				return strings.Contains(output, "failed to unmarshal affinity label rule") &&
+					strings.Contains(output, "put failed in watch loop")
+			})
+			labelRule = makeTestLabelRule(group.ID, startKey, endKey)
+			re.NoError(putLabelRule(ctx, client, labelRule))
+			testutil.Eventually(re, func() bool {
+				return manager.GetAffinityGroupState(group.ID).RangeCount == 1
+			})
+			closeWatcher()
+
+			output := readLog()
+			for _, msg := range []string{"update affinity label rule", "put successfully in watch loop when loading", "put successfully in watch loop"} {
+				re.Contains(output, msg)
+			}
+			for _, key := range []string{startKey, endKey, secondStartKey, secondEndKey, invalidKey} {
+				if mode.typ == logutil.RedactInfoLogON {
+					re.NotContains(output, key)
+				} else {
+					re.Contains(output, key)
+				}
+			}
+			switch mode.typ {
+			case logutil.RedactInfoLogON:
+				re.Contains(output, "[value=?]")
+				re.Contains(output, "[error=?]")
+			case logutil.RedactInfoLogMarker:
+				re.Contains(output, `[value="‹{`)
+				re.Contains(output, `[error="‹`)
+			}
+			stored, err := client.Get(ctx, keypath.RegionLabelKeyPath(labelRule.ID))
+			re.NoError(err)
+			re.Len(stored.Kvs, 1)
+			labelJSON, err := json.Marshal(labelRule)
+			re.NoError(err)
+			re.JSONEq(string(labelJSON), string(stored.Kvs[0].Value))
+		})
+	}
 }
 
 // TestConcurrentLabelRuleUpdates tests multiple label rule updates happening concurrently.
