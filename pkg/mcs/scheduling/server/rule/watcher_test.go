@@ -68,9 +68,9 @@ func BenchmarkLoadLargeRules(b *testing.B) {
 	ctx, client, clean := prepare(b, true)
 	defer clean()
 
-	b.ResetTimer() // Resets the timer to ignore initialization time in the benchmark
+	// Resets the timer to ignore initialization time in the benchmark
 
-	for range b.N {
+	for b.Loop() {
 		runWatcherLoadLabelRule(ctx, re, client)
 	}
 }
@@ -193,7 +193,7 @@ func BenchmarkRuleSnapshotKeyScan(b *testing.B) {
 	rw := &Watcher{etcdClient: client}
 	runPaged := func(b *testing.B, rangeEnds []string) {
 		b.ReportAllocs()
-		for range b.N {
+		for b.Loop() {
 			scanned := 0
 			revision, err := rw.scanRuleSnapshotKeys(
 				ctx, prefix, rangeEnds, snapshotRevision,
@@ -216,7 +216,7 @@ func BenchmarkRuleSnapshotKeyScan(b *testing.B) {
 	})
 	b.Run("one-shot", func(b *testing.B) {
 		b.ReportAllocs()
-		for range b.N {
+		for b.Loop() {
 			resp, err := etcdutil.EtcdKVGetWithContext(
 				ctx,
 				client,

@@ -16,7 +16,6 @@ package config
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -50,8 +49,7 @@ func TestMain(m *testing.M) {
 
 func TestRateLimitConfigReload(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -148,8 +146,7 @@ func TestGCConcurrencyConfigUpdateAndReload(t *testing.T) {
 
 func TestMetricStorageValidationAtQueryTime(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
 	defer cluster.Destroy()

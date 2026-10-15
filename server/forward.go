@@ -17,6 +17,7 @@ package server
 import (
 	"context"
 	"io"
+	"slices"
 	"strings"
 	"time"
 
@@ -492,12 +493,9 @@ func (s *GrpcServer) isLocalRequest(host string) bool {
 		return true
 	}
 	memberAddrs := s.GetMember().Member().GetClientUrls()
-	for _, addr := range memberAddrs {
-		if isSamePDClientURL(addr, host) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(memberAddrs, func(addr string) bool {
+		return isSamePDClientURL(addr, host)
+	})
 }
 
 // isSamePDClientURL checks whether two HTTP(S) client URLs differ only in

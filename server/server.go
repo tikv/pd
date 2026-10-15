@@ -20,6 +20,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"math"
 	"math/rand/v2"
 	"net/http"
@@ -1492,9 +1493,7 @@ func (s *Server) SetAuditConfig(cfg config.AuditConfig) error {
 func (s *Server) UpdateRateLimitConfig(key, label string, value ratelimit.DimensionConfig) error {
 	cfg := s.GetServiceMiddlewareConfig()
 	rateLimitCfg := make(map[string]ratelimit.DimensionConfig)
-	for label, item := range cfg.RateLimitConfig.LimiterConfig {
-		rateLimitCfg[label] = item
-	}
+	maps.Copy(rateLimitCfg, cfg.RateLimitConfig.LimiterConfig)
 	rateLimitCfg[label] = value
 	return s.UpdateRateLimit(&cfg.RateLimitConfig, key, &rateLimitCfg)
 }
@@ -1541,9 +1540,7 @@ func (s *Server) SetRateLimitConfig(cfg config.RateLimitConfig) error {
 func (s *Server) UpdateGRPCRateLimitConfig(key, label string, value ratelimit.DimensionConfig) error {
 	cfg := s.GetServiceMiddlewareConfig()
 	rateLimitCfg := make(map[string]ratelimit.DimensionConfig)
-	for label, item := range cfg.GRPCRateLimitConfig.LimiterConfig {
-		rateLimitCfg[label] = item
-	}
+	maps.Copy(rateLimitCfg, cfg.GRPCRateLimitConfig.LimiterConfig)
 	rateLimitCfg[label] = value
 	return s.UpdateGRPCRateLimit(&cfg.GRPCRateLimitConfig, key, &rateLimitCfg)
 }
@@ -1937,7 +1934,7 @@ func memberFailpointEnabled(val failpoint.Value, memberID uint64) bool {
 	if !ok {
 		return false
 	}
-	for _, memberIDString := range strings.Split(memberString, ",") {
+	for memberIDString := range strings.SplitSeq(memberString, ",") {
 		id, err := strconv.ParseUint(strings.TrimSpace(memberIDString), 10, 64)
 		if err == nil && id == memberID {
 			return true

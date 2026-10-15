@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	goerrors "errors"
+	"maps"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -958,9 +959,7 @@ func (manager *Manager) updateKeyspaceConfigTxn(
 		if meta.GetConfig() == nil {
 			meta.Config = map[string]string{}
 		}
-		for k, v := range meta.GetConfig() {
-			oldConfig[k] = v
-		}
+		maps.Copy(oldConfig, meta.GetConfig())
 		// Update keyspace config.
 		if err := update(meta); err != nil {
 			return err

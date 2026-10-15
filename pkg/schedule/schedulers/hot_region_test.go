@@ -280,11 +280,11 @@ func TestSplitIfRegionTooHot(t *testing.T) {
 		RegionId:   1,
 		PeriodInMs: 1000,
 		Keys: [][]byte{
-			[]byte(fmt.Sprintf("%21d", 11)),
-			[]byte(fmt.Sprintf("%21d", 12)),
-			[]byte(fmt.Sprintf("%21d", 13)),
-			[]byte(fmt.Sprintf("%21d", 14)),
-			[]byte(fmt.Sprintf("%21d", 15)),
+			fmt.Appendf(nil, "%21d", 11),
+			fmt.Appendf(nil, "%21d", 12),
+			fmt.Appendf(nil, "%21d", 13),
+			fmt.Appendf(nil, "%21d", 14),
+			fmt.Appendf(nil, "%21d", 15),
 		},
 		Stats: &metapb.BucketStats{
 			ReadBytes:  []uint64{10 * units.KiB, 11 * units.KiB, 11 * units.KiB, 10 * units.KiB},
@@ -315,7 +315,7 @@ func TestSplitIfRegionTooHot(t *testing.T) {
 	ops, _ := hb.Schedule(tc, false)
 	re.Len(ops, 1)
 	expectOp, err := operator.CreateSplitRegionOperator(splitHotReadBuckets, tc.GetRegion(1), operator.OpSplit,
-		pdpb.CheckPolicy_USEKEY, [][]byte{[]byte(fmt.Sprintf("%21d", 13))})
+		pdpb.CheckPolicy_USEKEY, [][]byte{fmt.Appendf(nil, "%21d", 13)})
 	re.NoError(err)
 	re.Equal(expectOp.Brief(), ops[0].Brief())
 	re.Equal(expectOp.Kind(), ops[0].Kind())
@@ -336,7 +336,7 @@ func TestSplitIfRegionTooHot(t *testing.T) {
 	ops, _ = hb.Schedule(tc, false)
 	re.Len(ops, 1)
 	expectOp, err = operator.CreateSplitRegionOperator(splitHotReadBuckets, tc.GetRegion(1), operator.OpSplit,
-		pdpb.CheckPolicy_USEKEY, [][]byte{[]byte(fmt.Sprintf("%21d", 12))})
+		pdpb.CheckPolicy_USEKEY, [][]byte{fmt.Appendf(nil, "%21d", 12)})
 	re.NoError(err)
 	re.Equal(expectOp.Brief(), ops[0].Brief())
 	re.Equal(expectOp.Kind(), ops[0].Kind())

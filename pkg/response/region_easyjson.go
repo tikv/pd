@@ -4,6 +4,7 @@ package response
 
 import (
 	json "encoding/json"
+
 	easyjson "github.com/mailru/easyjson"
 	jlexer "github.com/mailru/easyjson/jlexer"
 	jwriter "github.com/mailru/easyjson/jwriter"
@@ -481,7 +482,7 @@ func easyjson75d7afa0EncodeGithubComTikvPdPkgResponse2(out *jwriter.Writer, in R
 			out.RawByte(']')
 		}
 	}
-	if true {
+	{
 		const prefix string = ",\"leader\":"
 		out.RawString(prefix)
 		(in.Leader).MarshalEasyJSON(out)
