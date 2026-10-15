@@ -32,6 +32,7 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -846,28 +847,67 @@ func (suite *evictSlowStoreTestSuite) TestEvictSlowStorePrepare() {
 	re.NoError(err)
 }
 
-func (suite *evictSlowStoreTestSuite) TestEvictSlowStorePrepareAtomic() {
+// TestEvictSlowStorePrepareFailureUndoneByCleanConfig: PrepareConfig applies every mark it
+// can and reports the failures; the CleanConfig that Controller.AddScheduler and
+// AddSchedulerHandler run on that failure then undoes each mark exactly once.
+func (suite *evictSlowStoreTestSuite) TestEvictSlowStorePrepareFailureUndoneByCleanConfig() {
 	re := suite.Require()
 	es2, ok := suite.es.(*evictSlowStoreScheduler)
 	re.True(ok)
 
-	// Network-evicted store 5 is not in the cluster, so marking it fails. Disk-evicted store 1
-	// is marked first and must be rolled back: PrepareConfig's caller does not start the
-	// scheduler on error, so a leaked mark would exclude store 1 from leader transfers with
-	// nothing left to clear it.
-	re.NoError(es2.conf.setEvictedStoresAndPersist([]uint64{1}))
+	// Store 5 is not in the cluster, so pausing and evicting it fails.
+	re.NoError(es2.conf.setEvictedStoresAndPersist([]uint64{1, 2}))
+	es2.conf.PausedNetworkSlowStores = []uint64{3, 5}
 	es2.conf.EvictedNetworkSlowStores = []uint64{5}
 	re.Error(suite.es.PrepareConfig(suite.tc))
-	re.False(suite.tc.GetStore(1).EvictedAsSlowStore())
-	es2.conf.EvictedNetworkSlowStores = []uint64{}
+	re.True(suite.tc.GetStore(1).EvictedAsSlowStore())
+	re.True(suite.tc.GetStore(2).EvictedAsSlowStore())
+	re.False(suite.tc.GetStore(3).AllowLeaderTransferIn())
 
-	// The mark is a balanced counter, so a leak would also survive a later evict/recover
-	// round trip. Verify a subsequent successful prepare/clean cycle leaves it at zero.
+	suite.es.CleanConfig(suite.tc)
+	requireSlowMarkCleared(re, suite.tc, 1, 2)
+	// The pause on store 3 is released exactly once.
+	re.True(suite.tc.GetStore(3).AllowLeaderTransferIn())
+	re.NoError(suite.tc.PauseLeaderTransfer(3, constant.In))
+	re.False(suite.tc.GetStore(3).AllowLeaderTransferIn())
+	suite.tc.ResumeLeaderTransfer(3, constant.In)
+}
+
+// TestEvictSlowStoreCleanConfigReleasesMarksOnPersistFailure: the final cleanup releases
+// every disk-evicted mark even if the empty set cannot be persisted, because nothing runs
+// afterwards to retry. A cleanup during scheduling keeps the set and the marks instead, and
+// the next cycle retries.
+func (suite *evictSlowStoreTestSuite) TestEvictSlowStoreCleanConfigReleasesMarksOnPersistFailure() {
+	re := suite.Require()
+	es2, ok := suite.es.(*evictSlowStoreScheduler)
+	re.True(ok)
+	const persistFail = "github.com/tikv/pd/pkg/schedule/schedulers/persistFail"
+
+	re.NoError(es2.conf.setEvictedStoresAndPersist([]uint64{999, 1, 2}))
+	re.NoError(failpoint.Enable(persistFail, "return(true)"))
+	// Pruning 999 cannot be persisted, so 999 stays in the set and prepare fails; 1 and 2
+	// are still marked and CleanConfig, as run by the controller, must release them.
+	re.Error(suite.es.PrepareConfig(suite.tc))
+	re.True(suite.tc.GetStore(1).EvictedAsSlowStore())
+	re.True(suite.tc.GetStore(2).EvictedAsSlowStore())
+	suite.es.CleanConfig(suite.tc)
+	re.Empty(es2.conf.evictedStores())
+	requireSlowMarkCleared(re, suite.tc, 1, 2)
+	// A repeated final cleanup is a no-op.
+	suite.es.CleanConfig(suite.tc)
+	requireSlowMarkCleared(re, suite.tc, 1, 2)
+	re.NoError(failpoint.Disable(persistFail))
+
 	re.NoError(es2.conf.setEvictedStoresAndPersist([]uint64{1}))
 	re.NoError(suite.es.PrepareConfig(suite.tc))
+	re.NoError(failpoint.Enable(persistFail, "return(true)"))
+	es2.cleanupEvictLeader(suite.tc, false)
+	re.Equal([]uint64{1}, es2.conf.evictedStores())
 	re.True(suite.tc.GetStore(1).EvictedAsSlowStore())
-	es2.cleanupEvictLeader(suite.tc)
-	re.False(suite.tc.GetStore(1).EvictedAsSlowStore())
+	re.NoError(failpoint.Disable(persistFail))
+	es2.cleanupEvictLeader(suite.tc, false)
+	re.Empty(es2.conf.evictedStores())
+	requireSlowMarkCleared(re, suite.tc, 1)
 }
 
 func (suite *evictSlowStoreTestSuite) TestEvictSlowStorePersistFail() {
@@ -1923,7 +1963,7 @@ func TestEvictSlowStorePrepareDoesNotOverwriteConcurrentReload(t *testing.T) {
 	re.NoError(conf.load(&persisted))
 	re.Equal([]uint64{1, 3, 2}, persisted.evictedStoresLocked())
 
-	es.(*evictSlowStoreScheduler).cleanupEvictLeader(tc)
+	es.(*evictSlowStoreScheduler).cleanupEvictLeader(tc, true)
 	requireSlowMarkCleared(re, tc, 1, 2, 3)
 }
 
@@ -1955,9 +1995,18 @@ func TestEvictSlowStoreReloadReconcilesSlowMarks(t *testing.T) {
 	// Disk-evicted ids are not paused; only network slow stores are.
 	re.True(tc.GetStore(3).AllowLeaderTransferIn())
 
+	// An added id that cannot be marked (store 999 is not in the cluster) is dropped and
+	// the applied set is persisted, so no id stays in the set without a mark.
+	re.NoError(st.SaveSchedulerConfig(es.GetName(), []byte(`{"evict-stores":[2],"evict-group-stores":[3,999]}`)))
+	re.NoError(es.ReloadConfig())
+	re.Equal([]uint64{2, 3}, conf.evictedStores())
+	var persisted evictSlowStoreSchedulerConfig
+	re.NoError(conf.load(&persisted))
+	re.Equal([]uint64{2, 3}, persisted.evictedStoresLocked())
+
 	// Reloading the same value changes nothing.
 	re.NoError(es.ReloadConfig())
-	es.(*evictSlowStoreScheduler).cleanupEvictLeader(tc)
+	es.(*evictSlowStoreScheduler).cleanupEvictLeader(tc, true)
 	requireSlowMarkCleared(re, tc, 1, 2, 3)
 }
 

@@ -15,6 +15,7 @@
 package schedulers
 
 import (
+	"errors"
 	"net/http"
 	"slices"
 	"strconv"
@@ -401,8 +402,10 @@ func (conf *evictSlowStoreSchedulerConfig) tryUpdateRecoverStatus(isRecovered bo
 }
 
 // clearEvictedAndPersist releases the whole disk slow store eviction set and
-// returns the ids that were evicted.
-func (conf *evictSlowStoreSchedulerConfig) clearEvictedAndPersist() (oldIDs []uint64, err error) {
+// returns the ids that were evicted. If persisting fails, the set is kept and no
+// ids are returned so the caller can retry, unless force is set: then the
+// in-memory set is cleared anyway and the ids are returned along with the error.
+func (conf *evictSlowStoreSchedulerConfig) clearEvictedAndPersist(force bool) (oldIDs []uint64, err error) {
 	conf.Lock()
 	defer conf.Unlock()
 	oldIDs = conf.evictedStoresLocked()
@@ -414,7 +417,12 @@ func (conf *evictSlowStoreSchedulerConfig) clearEvictedAndPersist() (oldIDs []ui
 		conf.lastSlowStoreCaptureTS = time.Time{}
 	})
 	if err != nil {
-		return nil, err
+		if !force {
+			return nil, err
+		}
+		conf.setEvictedStoresLocked(nil)
+		conf.lastSlowStoreCaptureTS = time.Time{}
+		return oldIDs, err
 	}
 	return oldIDs, nil
 }
@@ -554,22 +562,30 @@ func (s *evictSlowStoreScheduler) ReloadConfig() error {
 	rewrite := newCfg.normalizeEvictedStores()
 
 	oldEvicted := s.conf.evictedStoresLocked()
-	newEvicted := newCfg.evictedStoresLocked()
+	loaded := newCfg.evictedStoresLocked()
+	newEvicted := make([]uint64, 0, len(loaded))
 	for _, id := range oldEvicted {
-		if !slices.Contains(newEvicted, id) {
+		if !slices.Contains(loaded, id) {
 			s.conf.cluster.SlowStoreRecovered(id)
 			evictedSlowStoreStatusGauge.DeleteLabelValues(strconv.FormatUint(id, 10), string(diskSlowStore))
 		}
 	}
-	for _, id := range newEvicted {
+	for _, id := range loaded {
 		if slices.Contains(oldEvicted, id) {
+			newEvicted = append(newEvicted, id)
 			continue
 		}
-		// A missing store keeps its id in the set; reconcileDiskSlowStoreGroup drops it.
+		// An id that cannot be marked (its store is not in the cluster) is dropped, as
+		// PrepareConfig does, rather than kept in the set without a mark: if the store
+		// came back before reconciliation it would be treated as evicted while still
+		// eligible for leaders.
 		if err := s.conf.cluster.SlowStoreEvicted(id); err != nil {
-			log.Warn("failed to evict slow store on config reload", zap.Uint64("store-id", id), zap.Error(err))
+			log.Warn("failed to evict slow store on config reload, dropping it",
+				zap.Uint64("store-id", id), zap.Error(err))
+			rewrite = true
 			continue
 		}
+		newEvicted = append(newEvicted, id)
 		evictedSlowStoreStatusGauge.WithLabelValues(strconv.FormatUint(id, 10), string(diskSlowStore)).Set(1)
 	}
 
@@ -590,8 +606,9 @@ func (s *evictSlowStoreScheduler) ReloadConfig() error {
 	s.conf.EnableNetworkSlowStore = newCfg.EnableNetworkSlowStore
 	s.conf.Batch = newCfg.Batch
 	if rewrite {
-		// The stored value has a multi-id evict-stores; replace it with the normalized
-		// layout so an older PD never observes it.
+		// The stored value has a multi-id evict-stores or an id that was dropped above;
+		// replace it with the applied set in the normalized layout, so an older PD never
+		// observes the multi-id value.
 		return s.conf.save()
 	}
 	return nil
@@ -604,26 +621,14 @@ func (s *evictSlowStoreScheduler) ReloadConfig() error {
 // SlowStoreEvicted, abort Controller.AddScheduler, and keep the scheduler from ever reaching
 // reconcileDiskSlowStoreGroup, which is what drops such ids at runtime.
 //
-// It is atomic: on any failure it undoes the marks it already applied and returns the error,
-// so a caller that aborts (Controller.AddScheduler does not start the scheduler, and hence
-// never runs CleanConfig) cannot leave a store excluded from leader transfers with nothing
-// left to recover it. This matters because slowStoreEvicted is a balanced counter, not a
-// flag: a leaked increment is never cleared by a later evict/recover round trip.
+// It is best effort and does not roll back: every mark is attempted and the errors are
+// returned together. When PrepareConfig fails, Controller.AddScheduler and
+// AddSchedulerHandler call CleanConfig, which undoes every mark for the configured set.
+// A mark only fails when the store is not found, and undoing a missing store is a no-op,
+// so that one CleanConfig keeps the slow-evicted and pause counters balanced. Rolling back
+// here as well would undo the successful marks twice.
 func (s *evictSlowStoreScheduler) PrepareConfig(cluster sche.SchedulerCluster) error {
-	var (
-		evicted []uint64 // stores marked as slow-evicted
-		paused  []uint64 // stores whose inbound leader transfer was paused
-	)
-	rollback := func() {
-		for _, storeID := range paused {
-			cluster.ResumeLeaderTransfer(storeID, constant.In)
-			delete(s.conf.networkSlowStoreRecoverStartAts, storeID)
-		}
-		for _, storeID := range evicted {
-			cluster.SlowStoreRecovered(storeID)
-		}
-	}
-
+	var errs []error
 	var gone []uint64
 	for _, storeID := range s.conf.evictedStores() {
 		if store := cluster.GetStore(storeID); store == nil || store.IsRemoved() {
@@ -631,9 +636,11 @@ func (s *evictSlowStoreScheduler) PrepareConfig(cluster sche.SchedulerCluster) e
 		}
 	}
 	if len(gone) > 0 {
+		// If this persist fails, the ids stay in the set; marking them below is then a no-op
+		// failure for a missing store, or a mark CleanConfig undoes for a removed one.
 		removed, err := s.conf.removeEvictedAndPersist(gone)
 		if err != nil {
-			return err
+			errs = append(errs, err)
 		}
 		for _, storeID := range removed {
 			log.Info("evicted slow store is no longer in the cluster, dropping it", zap.Uint64("store-id", storeID))
@@ -642,33 +649,26 @@ func (s *evictSlowStoreScheduler) PrepareConfig(cluster sche.SchedulerCluster) e
 	}
 	for _, storeID := range s.conf.evictedStores() {
 		if err := cluster.SlowStoreEvicted(storeID); err != nil {
-			rollback()
-			return err
+			errs = append(errs, err)
 		}
-		evicted = append(evicted, storeID)
 	}
 	for _, storeID := range s.conf.getPausedNetworkSlowStores() {
 		s.conf.networkSlowStoreRecoverStartAts[storeID] = nil
 		if err := cluster.PauseLeaderTransfer(storeID, constant.In); err != nil {
-			delete(s.conf.networkSlowStoreRecoverStartAts, storeID)
-			rollback()
-			return err
+			errs = append(errs, err)
 		}
-		paused = append(paused, storeID)
 	}
 	for _, storeID := range s.conf.getEvictNetworkSlowStores() {
 		if err := cluster.SlowStoreEvicted(storeID); err != nil {
-			rollback()
-			return err
+			errs = append(errs, err)
 		}
-		evicted = append(evicted, storeID)
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 // CleanConfig implements the Scheduler interface.
 func (s *evictSlowStoreScheduler) CleanConfig(cluster sche.SchedulerCluster) {
-	s.cleanupEvictLeader(cluster)
+	s.cleanupEvictLeader(cluster, true)
 	networkSlowStores := s.conf.getPausedNetworkSlowStores()
 	s.conf.Lock()
 	defer s.conf.Unlock()
@@ -713,10 +713,16 @@ func (s *evictSlowStoreScheduler) prepareEvictLeader(cluster sche.SchedulerClust
 	return nil
 }
 
-func (s *evictSlowStoreScheduler) cleanupEvictLeader(cluster sche.SchedulerCluster) {
-	evictSlowStores, err := s.conf.clearEvictedAndPersist()
+// cleanupEvictLeader releases every disk-evicted store. During scheduling (final is
+// false) a persist failure keeps the set and the marks so the next cycle retries.
+// From CleanConfig (final is true) nothing runs afterwards to retry, so the marks
+// are released even if the empty set could not be persisted; otherwise the stores
+// would stay excluded from leader transfers after they recover.
+func (s *evictSlowStoreScheduler) cleanupEvictLeader(cluster sche.SchedulerCluster, final bool) {
+	evictSlowStores, err := s.conf.clearEvictedAndPersist(final)
 	if err != nil {
-		log.Info("evict-slow-store-scheduler persist config failed", zap.Uint64s("store-ids", evictSlowStores))
+		log.Info("evict-slow-store-scheduler persist config failed",
+			zap.Uint64s("store-ids", evictSlowStores), zap.Bool("final", final), zap.Error(err))
 	}
 	for _, storeID := range evictSlowStores {
 		cluster.SlowStoreRecovered(storeID)
@@ -1347,7 +1353,7 @@ func (s *evictSlowStoreScheduler) reconcileDiskSlowStoreGroup(cluster sche.Sched
 			return
 		}
 		log.Info("slow store group has been recovered", zap.Uint64s("store-ids", s.conf.evictedStores()))
-		s.cleanupEvictLeader(cluster)
+		s.cleanupEvictLeader(cluster, false)
 		return
 	}
 	if err := s.conf.tryUpdateRecoverStatus(false); err != nil {
