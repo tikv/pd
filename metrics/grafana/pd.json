@@ -5955,6 +5955,110 @@
             "align": false,
             "alignLevel": null
           }
+        },
+        {
+          "datasource": "${DS_TEST-CLUSTER}",
+          "description": "Top 10 distinct sustained hot Regions ranked by the effective first scheduling dimension, including version fallback. Uses the existing hot-degree filter and smoothed loads. Peer lists use the maximum load per Region. CPU uses the scheduler native usage unit. Store filtering applies to the cluster-wide Top 10.",
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 59
+          },
+          "id": 1708,
+          "options": {
+            "showHeader": true,
+            "sortBy": [
+              {
+                "displayName": "Load",
+                "desc": true
+              }
+            ]
+          },
+          "targets": [
+            {
+              "expr": "sort_desc(max by (region, store, dim) (pd_hotspot_top_region_load{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", type=\"write-leader\"}))",
+              "format": "table",
+              "instant": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Top 10 sustained hot Regions (write-leader)",
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true
+                },
+                "indexByName": {
+                  "region": 0,
+                  "store": 1,
+                  "dim": 2,
+                  "Value": 3
+                },
+                "renameByName": {
+                  "region": "Region",
+                  "store": "Store",
+                  "dim": "Dimension",
+                  "Value": "Load"
+                }
+              }
+            }
+          ],
+          "type": "table"
+        },
+        {
+          "datasource": "${DS_TEST-CLUSTER}",
+          "description": "Top 10 distinct sustained hot Regions ranked by the effective first scheduling dimension, including version fallback. Uses the existing hot-degree filter and smoothed loads. Peer lists use the maximum load per Region. CPU uses the scheduler native usage unit. Store filtering applies to the cluster-wide Top 10.",
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 59
+          },
+          "id": 1709,
+          "options": {
+            "showHeader": true,
+            "sortBy": [
+              {
+                "displayName": "Load",
+                "desc": true
+              }
+            ]
+          },
+          "targets": [
+            {
+              "expr": "sort_desc(max by (region, store, dim) (pd_hotspot_top_region_load{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", type=\"write-peer\"}))",
+              "format": "table",
+              "instant": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Top 10 sustained hot Regions (write-peer)",
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true
+                },
+                "indexByName": {
+                  "region": 0,
+                  "store": 1,
+                  "dim": 2,
+                  "Value": 3
+                },
+                "renameByName": {
+                  "region": "Region",
+                  "store": "Store",
+                  "dim": "Dimension",
+                  "Value": "Load"
+                }
+              }
+            }
+          ],
+          "type": "table"
         }
       ],
       "title": "Statistics - hot write",
@@ -6951,6 +7055,58 @@
             "align": false,
             "alignLevel": null
           }
+        },
+        {
+          "datasource": "${DS_TEST-CLUSTER}",
+          "description": "Top 10 distinct sustained hot Regions ranked by the effective first scheduling dimension, including version fallback. Uses the existing hot-degree filter and smoothed loads. Peer lists use the maximum load per Region. CPU uses the scheduler native usage unit. Store filtering applies to the cluster-wide Top 10.",
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 88
+          },
+          "id": 1710,
+          "options": {
+            "showHeader": true,
+            "sortBy": [
+              {
+                "displayName": "Load",
+                "desc": true
+              }
+            ]
+          },
+          "targets": [
+            {
+              "expr": "sort_desc(max by (region, store, dim) (pd_hotspot_top_region_load{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", type=\"read-peer\"}))",
+              "format": "table",
+              "instant": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Top 10 sustained hot Regions (read-peer)",
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true
+                },
+                "indexByName": {
+                  "region": 0,
+                  "store": 1,
+                  "dim": 2,
+                  "Value": 3
+                },
+                "renameByName": {
+                  "region": "Region",
+                  "store": "Store",
+                  "dim": "Dimension",
+                  "Value": "Load"
+                }
+              }
+            }
+          ],
+          "type": "table"
         }
       ],
       "repeat": null,

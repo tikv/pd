@@ -521,12 +521,14 @@ func (c *Coordinator) GetWaitGroup() *sync.WaitGroup {
 func (c *Coordinator) CollectHotSpotMetrics() {
 	stores := c.cluster.GetStores()
 	// Collects hot write region metrics.
-	collectHotMetrics(c.cluster, stores, utils.Write)
+	writeStats := collectHotMetrics(c.cluster, stores, utils.Write)
+	c.schedulers.CollectHotRegionMetrics(utils.Write, writeStats)
 	// Collects hot read region metrics.
-	collectHotMetrics(c.cluster, stores, utils.Read)
+	readStats := collectHotMetrics(c.cluster, stores, utils.Read)
+	c.schedulers.CollectHotRegionMetrics(utils.Read, readStats)
 }
 
-func collectHotMetrics(cluster sche.ClusterInformer, stores []*core.StoreInfo, typ utils.RWType) {
+func collectHotMetrics(cluster sche.ClusterInformer, stores []*core.StoreInfo, typ utils.RWType) map[uint64][]*statistics.HotPeerStat {
 	kind := typ.String()
 	hotPeerStats := cluster.GetHotPeerStats(typ)
 	status := statistics.CollectHotPeerInfos(stores, hotPeerStats) // only returns TotalBytesRate,TotalKeysRate,TotalQueryRate,TotalCPURate,Count
@@ -594,11 +596,13 @@ func collectHotMetrics(cluster sche.ClusterInformer, stores []*core.StoreInfo, t
 			}
 		}
 	}
+	return hotPeerStats
 }
 
 // ResetHotSpotMetrics resets hot spot metrics.
 func ResetHotSpotMetrics() {
 	hotSpotStatusGauge.Reset()
+	schedulers.ResetHotRegionMetrics()
 	schedulers.HotPendingSum.Reset()
 }
 
