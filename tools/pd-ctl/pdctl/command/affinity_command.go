@@ -49,7 +49,7 @@ func NewAffinityCommand() *cobra.Command {
 func newAffinityShowCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "show",
-		Short: "show affinity group state (all groups if no --table-id is specified)",
+		Short: "show affinity group state (all groups if both --table-id and --keyspace-id are omitted)",
 		Run:   affinityShowCommandFunc,
 	}
 	return cmd
@@ -77,10 +77,8 @@ func newAffinityUpdatePeersCommand() *cobra.Command {
 }
 
 func affinityShowCommandFunc(cmd *cobra.Command, _ []string) {
-	tableID, _ := cmd.Flags().GetUint64("table-id")
-
-	// If no table-id is provided, show all affinity groups
-	if tableID == 0 && !cmd.Flags().Changed("keyspace-id") {
+	// Show all groups only when neither table-id nor keyspace-id is provided.
+	if !cmd.Flags().Changed("table-id") && !cmd.Flags().Changed("keyspace-id") {
 		groups, err := PDCli.GetAllAffinityGroups(cmd.Context())
 		if err != nil {
 			cmd.Printf("Failed to get affinity groups: %v\n", err)
