@@ -480,6 +480,12 @@ func (m *GCStateManager) terminateGCStateWatcher(
 	m.terminateGCStateWatcherLocked(watcher, cause, reason)
 }
 
+// TODO: Reconcile missed updates after uncertain etcd commits; see
+// https://github.com/tikv/pd/issues/11360. A timed-out write may commit after
+// cache invalidation or refill, and cache reloads do not publish updates.
+// Watchers may retain older safe points in this recovery corner case,
+// delaying reclamation of data already eligible for GC. The older safe points
+// do not advance the deletion boundary or cause premature deletion.
 func (m *GCStateManager) publishGCStateChangeLocked(change GCStateChange) {
 	for _, watcher := range m.watchers {
 		select {
