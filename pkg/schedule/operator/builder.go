@@ -946,7 +946,7 @@ func (b *Builder) allowTargetLeader(peer *metapb.Peer) bool {
 	if peer == nil || !b.allowLeader(peer, b.forceTargetLeader) {
 		return false
 	}
-	if b.skipPlacementRulesCheck || len(b.rules) == 0 || (!b.requireTargetRules && (!b.checkTargetRules || b.forceTargetLeader)) {
+	if b.forceTargetLeader || b.skipPlacementRulesCheck || len(b.rules) == 0 || (!b.requireTargetRules && !b.checkTargetRules) {
 		return true
 	}
 	if b.targetRoleChecker == nil {

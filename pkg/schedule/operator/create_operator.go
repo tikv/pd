@@ -263,8 +263,9 @@ func newScatterRegionOperator(desc string, ci sche.SharedCluster, origin *core.R
 	}
 
 	builder := NewBuilder(desc, ci, origin)
-	// Scatter preserves placement even when admin requests bypass scheduling limits.
-	builder.requireTargetRules = true
+	// Internal scatter validates its complete target layout even during repair.
+	// Admin scatter retains its explicit force bypass.
+	builder.requireTargetRules = kind&OpAdmin == 0
 	if skipLimitCheck {
 		builder.SetRemoveLightPeer()
 	}
@@ -274,8 +275,8 @@ func newScatterRegionOperator(desc string, ci sche.SharedCluster, origin *core.R
 		SetLeader(leader).
 		SetAddLightPeer()
 	if kind&OpAdmin != 0 {
-		// Admin scatter keeps the historical behavior: force the selected
-		// target leader so manual scatter can bypass leader scheduling limits.
+		// Admin scatter retains its force bypass for leader scheduling limits
+		// and placement rules.
 		builder.EnableForceTargetLeader()
 	}
 	return builder.Build(kind)

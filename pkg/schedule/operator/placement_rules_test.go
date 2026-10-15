@@ -100,8 +100,12 @@ func TestMovePeerChoosesValidFinalLeader(t *testing.T) {
 
 func TestLeaderRuleCheckRetainsExplicitBypassAndRepair(t *testing.T) {
 	tc, region := newLeaderRuleTestCluster(t, true)
+	// Explicit force takes precedence over a caller requiring complete roles.
+	forced := NewBuilder("test", tc, region).SetLeader(2).EnableForceTargetLeader()
+	forced.requireTargetRules = true
 	// Explicit force and skip retain the existing administrative contract.
 	for _, b := range []*Builder{
+		forced,
 		NewBuilder("test", tc, region).SetLeader(2).EnableForceTargetLeader(),
 		NewBuilder("test", tc, region, SkipPlacementRulesCheck).SetLeader(2),
 	} {

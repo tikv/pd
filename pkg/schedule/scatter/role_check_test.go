@@ -74,21 +74,31 @@ func TestScatterAcceptsNewLeaderWithCompleteMembership(t *testing.T) {
 	require.Equal(t, []uint64{4}, got, "scatter must retain the valid new leader")
 }
 
-func TestAdminScatterPreservesCompleteRoles(t *testing.T) {
-	tc, sc, region := roleCheckFixture(t, false)
-	group := "review-admin"
-	for id, count := range map[uint64]int{1: 10, 3: 5} {
-		for range count {
-			sc.ordinaryEngine.selectedLeader.Put(id, group)
-		}
+func TestScatterRetainsForceRoleBypass(t *testing.T) {
+	for _, internal := range []bool{false, true} {
+		t.Run(map[bool]string{false: "admin", true: "internal"}[internal], func(t *testing.T) {
+			tc, sc, region := roleCheckFixture(t, false)
+			group := "force-roles"
+			// Prefer store 2, which can lead only by bypassing complete role checks.
+			for id, count := range map[uint64]int{1: 10, 3: 5} {
+				for range count {
+					sc.ordinaryEngine.selectedLeader.Put(id, group)
+				}
+			}
+			op, err := sc.scatterRegionWithType(region, group, false, internal, nil)
+			require.NoError(t, err)
+			targetPeers, targetLeader := finalPlacementAfterOperator(region, op)
+			require.Len(t, targetPeers, 3)
+			if internal {
+				require.Equal(t, uint64(1), targetLeader)
+			} else {
+				require.NotNil(t, op)
+				require.Equal(t, uint64(2), targetLeader)
+			}
+			target := region.Clone(core.WithLeader(region.GetStorePeer(targetLeader)))
+			require.Equal(t, internal, tc.GetRuleManager().FitRegionWithoutCache(tc, target).IsSatisfied())
+		})
 	}
-	op, err := sc.scatterRegionWithType(region, group, false, false, nil)
-	require.NoError(t, err)
-	targetPeers, targetLeader := finalPlacementAfterOperator(region, op)
-	require.Len(t, targetPeers, 3)
-	require.Equal(t, uint64(1), targetLeader)
-	target := region.Clone(core.WithLeader(region.GetStorePeer(targetLeader)))
-	require.True(t, tc.GetRuleManager().FitRegionWithoutCache(tc, target).IsSatisfied(), "admin scatter must preserve complete role matching")
 }
 
 func TestScatterRoleCandidateExhaustion(t *testing.T) {
@@ -101,9 +111,15 @@ func TestScatterRoleCandidateExhaustion(t *testing.T) {
 	peers := map[uint64]*metapb.Peer{4: {StoreId: 4}, 5: {StoreId: 5}, 6: {StoreId: 6}}
 	candidates, _ := sc.filterAllowedLeaderCandidateStores(region, peers, []uint64{4, 5, 6}, nil, 0)
 	require.Empty(t, candidates)
-	op, err := operator.CreateScatterRegionOperator("test", tc, region, peers, 4, false)
+	op, err := operator.CreateNonAdminScatterRegionOperator("test", tc, region, peers, 4, false)
 	require.Error(t, err)
 	require.Nil(t, op)
+	// The same target remains available to the admin factory through force.
+	op, err = operator.CreateScatterRegionOperator("test", tc, region, peers, 4, false)
+	require.NoError(t, err)
+	require.NotNil(t, op)
+	_, leader := finalPlacementAfterOperator(region, op)
+	require.Equal(t, uint64(4), leader)
 	require.Equal(t, uint64(1), region.GetLeader().GetStoreId())
 	for _, peer := range peers {
 		require.Zero(t, peer.Id)

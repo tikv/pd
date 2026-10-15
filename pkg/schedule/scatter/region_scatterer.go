@@ -813,9 +813,9 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 	var readCPUByStore map[uint64]float64
 	readPoolThreadCount := uint64(0)
 	leaderBlockedByReadPoolPressure := false
-	// Validate all leader candidates against the complete planned membership.
-	// Admin scatter bypasses scheduling limits, but still obeys placement rules.
-	if r.cluster.GetSharedConfig().IsPlacementRulesEnabled() {
+	// Validate internal scatter leaders against the complete planned membership.
+	// Admin scatter retains its force bypass for placement rules.
+	if internalScatter && r.cluster.GetSharedConfig().IsPlacementRulesEnabled() {
 		rules := r.cluster.GetRuleManager().GetRulesForApplyRegion(region)
 		peers := make([]*metapb.Peer, 0, len(targetPeers))
 		for _, peer := range targetPeers {
