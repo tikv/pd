@@ -31,6 +31,8 @@ import (
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
@@ -335,7 +337,43 @@ func (s *gcStateManagerTestSuite) TestGCStateWatchCompatiblePathsPublishOnce() {
 	txnWatcher.Close()
 }
 
-func (s *gcStateManagerTestSuite) TestGCStateWatchDoesNotPublishNoOpOrFailure() {
+func (s *gcStateManagerTestSuite) TestGCStateWatchPublishesNoOpAdvances() {
+	re := s.Require()
+	const keyspaceID = uint32(2)
+	_, err := s.manager.AdvanceTxnSafePoint(keyspaceID, 20, time.Now())
+	re.NoError(err)
+	_, _, err = s.manager.AdvanceGCSafePoint(keyspaceID, 10)
+	re.NoError(err)
+	_, err = s.manager.SetGCBarrier(keyspaceID, "backup", 20, time.Hour, time.Now())
+	re.NoError(err)
+	w, err := s.manager.WatchGCStates(context.Background(), true)
+	re.NoError(err)
+	defer w.Close()
+
+	for _, target := range []uint64{20, 30} {
+		result, err := s.manager.AdvanceTxnSafePoint(keyspaceID, target, time.Now())
+		re.NoError(err)
+		re.Equal(uint64(20), result.OldTxnSafePoint)
+		re.Equal(uint64(20), result.NewTxnSafePoint)
+		re.Len(w.liveCh, 1, "a successful no-op must publish even when blocked by a barrier")
+		changes, err := w.RecvBatch(1)
+		re.NoError(err)
+		re.Equal(GCState{KeyspaceID: keyspaceID, IsKeyspaceLevel: true, TxnSafePoint: 20, GCSafePoint: 10}, mustUpsert(s.T(), changes[0]))
+	}
+	for _, advance := range []func(uint32, uint64) (uint64, uint64, error){s.manager.AdvanceGCSafePoint, s.manager.CompatibleUpdateGCSafePoint} {
+		oldSafePoint, newSafePoint, err := advance(keyspaceID, 10)
+		re.NoError(err)
+		re.Equal(uint64(10), oldSafePoint)
+		re.Equal(uint64(10), newSafePoint)
+		re.Len(w.liveCh, 1, "a successful no-op must publish the complete state")
+		changes, err := w.RecvBatch(1)
+		re.NoError(err)
+		re.Equal(GCState{KeyspaceID: keyspaceID, IsKeyspaceLevel: true, TxnSafePoint: 20, GCSafePoint: 10}, mustUpsert(s.T(), changes[0]))
+	}
+	re.Empty(w.liveCh)
+}
+
+func (s *gcStateManagerTestSuite) TestGCStateWatchDoesNotPublishFailure() {
 	re := s.Require()
 	const keyspaceID = uint32(2)
 	_, err := s.manager.AdvanceTxnSafePoint(keyspaceID, 20, time.Now())
@@ -346,13 +384,105 @@ func (s *gcStateManagerTestSuite) TestGCStateWatchDoesNotPublishNoOpOrFailure() 
 	re.NoError(err)
 	defer w.Close()
 
-	_, err = s.manager.AdvanceTxnSafePoint(keyspaceID, 20, time.Now())
-	re.NoError(err)
-	_, _, err = s.manager.CompatibleUpdateGCSafePoint(keyspaceID, 10)
-	re.NoError(err)
 	_, _, err = s.manager.AdvanceGCSafePoint(keyspaceID, 9)
 	re.ErrorIs(err, errs.ErrDecreasingGCSafePoint)
 	re.Empty(w.liveCh)
+}
+
+// commitErrorKV preserves the real transaction's writes while losing its response.
+type commitErrorKV struct{ kv.Base }
+
+func (store commitErrorKV) CreateRawTxn() kv.RawTxn {
+	return &commitErrorTxn{RawTxn: store.Base.(kv.RawTxnCapable).CreateRawTxn()}
+}
+
+type commitErrorTxn struct{ kv.RawTxn }
+
+func (txn *commitErrorTxn) If(conditions ...kv.RawTxnCondition) kv.RawTxn {
+	txn.RawTxn = txn.RawTxn.If(conditions...)
+	return txn
+}
+
+func (txn *commitErrorTxn) Then(ops ...kv.RawTxnOp) kv.RawTxn {
+	txn.RawTxn = txn.RawTxn.Then(ops...)
+	return txn
+}
+
+func (txn *commitErrorTxn) Else(ops ...kv.RawTxnOp) kv.RawTxn {
+	txn.RawTxn = txn.RawTxn.Else(ops...)
+	return txn
+}
+
+func (txn *commitErrorTxn) Commit() (kv.RawTxnResponse, error) {
+	result, err := txn.RawTxn.Commit()
+	if err != nil || !result.Succeeded {
+		return result, err
+	}
+	return kv.RawTxnResponse{}, context.DeadlineExceeded
+}
+
+func TestGCStateWatchRetryPublishesAfterCommitError(t *testing.T) {
+	const keyspaceID = uint32(2)
+	for _, tc := range []struct {
+		name    string
+		advance func(*GCStateManager) (uint64, uint64, error)
+		want    GCState
+	}{
+		{
+			name: "txn-safe-point",
+			advance: func(m *GCStateManager) (uint64, uint64, error) {
+				result, err := m.AdvanceTxnSafePoint(keyspaceID, 40, time.Now())
+				return result.OldTxnSafePoint, result.NewTxnSafePoint, err
+			},
+			want: GCState{KeyspaceID: keyspaceID, IsKeyspaceLevel: true, TxnSafePoint: 30, GCSafePoint: 10},
+		},
+		{
+			name: "gc-safe-point",
+			advance: func(m *GCStateManager) (uint64, uint64, error) {
+				return m.AdvanceGCSafePoint(keyspaceID, 15)
+			},
+			want: GCState{KeyspaceID: keyspaceID, IsKeyspaceLevel: true, TxnSafePoint: 20, GCSafePoint: 15},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			storage, provider, manager, clean, cancel := newGCStateManagerForTest(t, newGCStateManagerForTestOptions{})
+			defer clean()
+			defer cancel()
+			_, err := manager.AdvanceTxnSafePoint(keyspaceID, 20, time.Now())
+			re.NoError(err)
+			_, _, err = manager.AdvanceGCSafePoint(keyspaceID, 10)
+			re.NoError(err)
+			_, err = manager.SetGCBarrier(keyspaceID, "backup", 30, time.Hour, time.Now())
+			re.NoError(err)
+			w, err := manager.WatchGCStates(context.Background(), true)
+			re.NoError(err)
+			defer w.Close()
+
+			manager.gcMetaStorage = endpoint.NewStorageEndpoint(commitErrorKV{storage.Base}, nil).GetGCStateProvider()
+			_, _, err = tc.advance(manager)
+			manager.gcMetaStorage = provider
+			re.ErrorIs(err, context.DeadlineExceeded)
+			re.Empty(w.liveCh, "an unsuccessful call must not publish even if its write committed")
+			_, cached := manager.gcStateCache.load(keyspaceID)
+			re.False(cached, "a commit error must invalidate the cached state")
+			txnSafePoint, err := provider.LoadTxnSafePoint(keyspaceID)
+			re.NoError(err)
+			re.Equal(tc.want.TxnSafePoint, txnSafePoint)
+			gcSafePoint, err := provider.LoadGCSafePoint(keyspaceID)
+			re.NoError(err)
+			re.Equal(tc.want.GCSafePoint, gcSafePoint)
+
+			oldSafePoint, newSafePoint, err := tc.advance(manager)
+			re.NoError(err)
+			re.Equal(oldSafePoint, newSafePoint, "the retry must succeed without advancing the committed value")
+			re.Len(w.liveCh, 1, "the no-op retry must recover the notification lost with the commit response")
+			changes, err := w.RecvBatch(1)
+			re.NoError(err)
+			re.Equal(tc.want, mustUpsert(t, changes[0]))
+			re.Empty(w.liveCh)
+		})
+	}
 }
 
 func (s *gcStateManagerTestSuite) TestGCStateWatchDoesNotPublishBarrierOnlyChanges() {
