@@ -1118,7 +1118,7 @@ func TestRemovingProgress(t *testing.T) {
 
 	re.NotEmpty(cluster.WaitLeader())
 	leader := cluster.GetLeaderServer()
-	grpcPDClient, conn := testutil.MustNewGrpcClient(re, leader.GetAddr())
+	grpcPDClient, conn := testutil.MustNewGRPCClient(t.Context(), re, leader.GetAddr())
 	defer conn.Close()
 	clusterID := leader.GetClusterID()
 	req := &pdpb.BootstrapRequest{
@@ -1434,7 +1434,7 @@ func TestSendApiWhenRestartRaftCluster(t *testing.T) {
 	re.NotEmpty(cluster.WaitLeader())
 	leader := cluster.GetLeaderServer()
 
-	grpcPDClient, conn := testutil.MustNewGrpcClient(re, leader.GetAddr())
+	grpcPDClient, conn := testutil.MustNewGRPCClient(t.Context(), re, leader.GetAddr())
 	defer conn.Close()
 	clusterID := leader.GetClusterID()
 	req := &pdpb.BootstrapRequest{
@@ -1481,7 +1481,7 @@ func TestPreparingProgress(t *testing.T) {
 
 	re.NotEmpty(cluster.WaitLeader())
 	leader := cluster.GetLeaderServer()
-	grpcPDClient, conn := testutil.MustNewGrpcClient(re, leader.GetAddr())
+	grpcPDClient, conn := testutil.MustNewGRPCClient(t.Context(), re, leader.GetAddr())
 	defer conn.Close()
 	clusterID := leader.GetClusterID()
 	req := &pdpb.BootstrapRequest{
