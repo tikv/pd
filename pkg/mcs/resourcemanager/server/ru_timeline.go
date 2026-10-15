@@ -15,29 +15,33 @@
 package server
 
 import (
-	"maps"
 	"math"
 	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
 )
 
 const (
 	// ruWindowSeconds is the aligned window summarized from the timeline.
 	ruWindowSeconds = 60
 	// ruWindowDelay is how long a closed window waits for regular reports. It
-	// covers both the report interval and any lag of the client clock. It is
-	// therefore also the longest a source may stay silent before it is
-	// considered gone: a longer silence means a missed regular report.
+	// covers both the report interval and any lag of the client clock.
 	ruWindowDelay = 30
 	// ruTimelineSeconds is how long a second stays useful: its window is
 	// published at most a window plus the delay after the second closes, and
 	// a source replays at most this many seconds.
 	ruTimelineSeconds = ruWindowSeconds + ruWindowDelay
 	// ruTimelineClockSkew is how far, in seconds, a client clock may run ahead
-	// of the resource manager before its reported seconds are rejected.
+	// of the resource manager before its reported seconds are dropped.
 	ruTimelineClockSkew = 5
+	// ruSourceSeconds spans every second a flush may still summarize, from the
+	// start of the window holding the replay horizon to the tolerated clock
+	// skew.
+	ruSourceSeconds = ruTimelineSeconds + ruWindowSeconds + ruTimelineClockSkew
 	// ruTimelineMaxSources bounds the retained sources, which hold nearly all
 	// of the timeline's memory.
 	ruTimelineMaxSources = 10000
@@ -56,8 +60,7 @@ type publishedRUSummary struct {
 }
 
 // ruSummaryCollector exposes the latest window of each group as immutable,
-// explicitly timestamped samples when it is complete; an incomplete window
-// leaves the group without samples. Scrapes never advance windows, clear
+// explicitly timestamped samples. Scrapes never advance windows, clear
 // timelines, or perform aggregation.
 type ruSummaryCollector struct {
 	mu                     sync.RWMutex
@@ -71,7 +74,7 @@ func newRUSummaryCollector() *ruSummaryCollector {
 	}
 	return &ruSummaryCollector{
 		results: make(map[trackerKey]publishedRUSummary),
-		peak:    desc("peak_per_second", "Maximum net foreground RRU+WRU that clients confirm in a natural second of the completed minute, summed across clients, in RU/s."),
+		peak:    desc("peak_per_second", "Maximum net foreground RRU+WRU of a natural second in the completed minute, summed over the clients that reported it, in RU/s."),
 		peakAt:  desc("peak_second_timestamp_seconds", "Unix timestamp of the earliest second attaining the minute peak."),
 		rru:     desc("peak_rru_per_second", "RRU contribution in the second attaining the total minute peak."),
 		wru:     desc("peak_wru_per_second", "WRU contribution in the second attaining the total minute peak."),
@@ -100,56 +103,51 @@ func (c *ruSummaryCollector) Collect(ch chan<- prometheus.Metric) {
 	}
 }
 
-var (
-	ruSummaryMetrics        = newRUSummaryCollector()
-	ruTimelineQualityEvents = prometheus.NewCounterVec(prometheus.CounterOpts{
-		Namespace: "resource_manager", Subsystem: "resource_unit", Name: "peak_quality_events_total",
-		Help: "RU timeline data quality events, including violations discovered after publication.",
-	}, []string{"reason"})
-	ruTimelineMissing  = ruTimelineQualityEvents.WithLabelValues("missing_payload")
-	ruTimelineInvalid  = ruTimelineQualityEvents.WithLabelValues("invalid_payload")
-	ruTimelineConflict = ruTimelineQualityEvents.WithLabelValues("conflict")
-	ruTimelineLate     = ruTimelineQualityEvents.WithLabelValues("late")
-	ruTimelineCapacity = ruTimelineQualityEvents.WithLabelValues("capacity")
-)
+var ruSummaryMetrics = newRUSummaryCollector()
 
-func init() { prometheus.MustRegister(ruSummaryMetrics, ruTimelineQualityEvents) }
+func init() { prometheus.MustRegister(ruSummaryMetrics) }
 
 type ruSecondBucket struct {
 	second   int64
 	rru, wru float64
 }
 
-// ruSource holds the seconds one client replays for a group. Its buckets span
-// every second a flush may still summarize, from the start of the window
-// holding the replay horizon to the tolerated clock skew, so an accepted
-// second never overwrites one that is still needed.
+// ruSource holds the seconds one client reports for a group. Seconds are
+// accepted only within the span of its buckets, which ends at the tolerated
+// clock skew ahead of now, so an accepted second never overwrites one that is
+// still to be summarized.
 type ruSource struct {
-	buckets         [ruTimelineSeconds + ruWindowSeconds + ruTimelineClockSkew]ruSecondBucket
-	first, lastSeen int64
+	buckets [ruSourceSeconds]ruSecondBucket
+	// newest is the latest second the source has reported.
+	newest int64
 }
 
 type ruTimelineGroup struct {
 	keyspaceName string
 	sources      map[uint64]*ruSource
-	nextWindow   int64
-	invalid      map[int64]bool
 }
 
-// ruTimeline merges the RU timelines replayed by clients into
-// per-group timelines and publishes each closed window that is complete.
+// ruTimeline merges the RU timelines that clients report into per-group
+// timelines and publishes the busiest second of each closed window. It is best
+// effort: a window sums whatever its clients reported in time, a second that
+// no client reported counts as zero, and a window without any reported second
+// has no sample.
 // All state belongs to backgroundMetricsFlush. Only immutable summaries cross
 // into the scrape goroutines under the collector lock.
 // The resource manager clock only schedules windows, while values come from
-// client seconds. A server clock step therefore delays or withholds windows,
-// and each group's windows still only move forward.
+// client seconds.
 type ruTimeline struct {
 	collector   *ruSummaryCollector
 	groups      map[trackerKey]*ruTimelineGroup
 	sourceCount int
-	// since is the first second observed in this term, or an earlier one
-	// after the clock steps back.
+	// since is the first second of this term.
 	since int64
+	// nextWindow is the start of the next window to publish. Every group
+	// follows this one schedule.
+	nextWindow int64
+	// rejected counts the reports dropped at the source limit since the last
+	// published window.
+	rejected int
 }
 
 func newRUTimeline(c *ruSummaryCollector) *ruTimeline {
@@ -168,186 +166,133 @@ func (t *ruTimeline) reset() {
 	t.collector.mu.Unlock()
 	t.groups = make(map[trackerKey]*ruTimelineGroup)
 	t.sourceCount = 0
-	t.since = 0
-}
-
-func (t *ruTimeline) remove(key trackerKey) {
-	if g := t.groups[key]; g != nil {
-		t.sourceCount -= len(g.sources)
-		delete(t.groups, key)
-	}
-	t.collector.mu.Lock()
-	delete(t.collector.results, key)
-	t.collector.mu.Unlock()
-}
-
-func (g *ruTimelineGroup) invalidate(start, end int64) {
-	for w := max(windowStart(start), g.nextWindow); w <= windowStart(end); w += ruWindowSeconds {
-		g.invalid[w] = true
-	}
+	t.since, t.nextWindow = 0, 0
+	t.rejected = 0
 }
 
 func (t *ruTimeline) record(item *consumptionItem, now time.Time) {
+	payload := item.GetRuBySecond()
 	// TiKV background tasks and TiFlash report RU without seconds; the peak
 	// covers the foreground RU that SQL-layer clients confirm by second.
-	if item.isBackground || item.isTiFlash {
+	if item.isBackground || item.isTiFlash || payload == nil {
 		return
 	}
 	sec := now.Unix()
-	if t.since == 0 || sec < t.since {
-		t.since = sec
+	end := sec + ruTimelineClockSkew
+	first := end - ruSourceSeconds
+	start, buckets := payload.GetStartUnixSec(), payload.GetBuckets()
+	if start >= end || start+int64(len(buckets)) <= first {
+		return
 	}
 	key := trackerKey{item.keyspaceID, item.resourceGroupName}
 	g := t.groups[key]
-	if g == nil {
-		g = &ruTimelineGroup{keyspaceName: item.keyspaceName, sources: make(map[uint64]*ruSource), nextWindow: windowStart(sec), invalid: make(map[int64]bool)}
-		t.groups[key] = g
-		// A newly observed group cannot establish coverage before its first
-		// report. Early in a term, it also cannot know the sources that have
-		// not reported yet, so it withholds windows until any such source
-		// would have missed a regular report.
-		g.invalidate(sec, max(sec, t.since+ruWindowDelay))
+	var source *ruSource
+	if g != nil {
+		source = g.sources[item.clientUniqueID]
 	}
-	source := g.sources[item.clientUniqueID]
-	created := source == nil
-	if created {
-		if t.sourceCount >= ruTimelineMaxSources {
-			// A rejected source has no state to merge or expire, so withhold
-			// every window it may still replay (the backward bound) or leave
-			// unreported before it would have missed a regular report (the
-			// forward bound).
-			ruTimelineCapacity.Inc()
-			g.invalidate(sec-ruTimelineSeconds, sec+ruWindowDelay)
-			return
+	for i := max(first-start, 0); i < min(end-start, int64(len(buckets))); i++ {
+		b := buckets[i]
+		if math.IsNaN(b.GetRru()) || math.IsInf(b.GetRru(), 0) || math.IsNaN(b.GetWru()) || math.IsInf(b.GetWru(), 0) {
+			continue
 		}
-		source = &ruSource{first: sec}
-		g.sources[item.clientUniqueID] = source
-		t.sourceCount++
-	}
-	source.lastSeen = sec
-	payload := item.GetRuBySecond()
-	if payload == nil {
-		// A legacy client cannot attribute its consumption.
-		ruTimelineMissing.Inc()
-		g.invalidate(sec-ruTimelineSeconds, sec)
-		return
-	}
-	// Validate atomically: a malformed suffix must not leave a usable prefix.
-	// Buckets must be closed seconds of the client, allowing for a small clock
-	// skew; those older than retention are skipped below.
-	valid := item.clientUniqueID != 0 && len(payload.Buckets) <= ruTimelineSeconds &&
-		int64(len(payload.Buckets)) <= sec+ruTimelineClockSkew-payload.StartUnixSec
-	if valid {
-		for _, b := range payload.Buckets {
-			if b == nil || math.IsNaN(b.Rru) || math.IsInf(b.Rru, 0) || math.IsNaN(b.Wru) || math.IsInf(b.Wru, 0) {
-				valid = false
-				break
+		if source == nil {
+			if t.sourceCount >= ruTimelineMaxSources {
+				t.rejected++
+				return
 			}
-		}
-	}
-	if !valid {
-		ruTimelineInvalid.Inc()
-		g.invalidate(sec-ruTimelineSeconds, sec)
-		return
-	}
-	for i, b := range payload.Buckets {
-		second := payload.StartUnixSec + int64(i)
-		if second < sec-ruTimelineSeconds {
-			ruTimelineLate.Inc()
-			continue
-		}
-		source.first = min(source.first, second)
-		old := &source.buckets[second%int64(len(source.buckets))]
-		if old.second == second {
-			if old.rru != b.Rru || old.wru != b.Wru {
-				ruTimelineConflict.Inc()
-				g.invalidate(second, second)
+			if g == nil {
+				g = &ruTimelineGroup{keyspaceName: item.keyspaceName, sources: make(map[uint64]*ruSource)}
+				t.groups[key] = g
 			}
-			continue
+			source = &ruSource{}
+			g.sources[item.clientUniqueID] = source
+			t.sourceCount++
 		}
-		if second < g.nextWindow {
-			ruTimelineLate.Inc()
-			continue
-		}
-		*old = ruSecondBucket{second: second, rru: b.Rru, wru: b.Wru}
-	}
-	if created {
-		// The first report may lack the source's earliest replayable seconds,
-		// for example after a client trims its backlog, so the minutes before
-		// its first second cannot be known to be complete.
-		g.invalidate(source.first-ruTimelineSeconds, source.first-1)
+		// A replayed second overwrites the same second from the same client,
+		// so a resent report is never counted twice.
+		second := start + i
+		source.buckets[second%int64(len(source.buckets))] = ruSecondBucket{second: second, rru: b.GetRru(), wru: b.GetWru()}
+		source.newest = max(source.newest, second)
 	}
 }
 
 // summarize sums every source by second and finds the busiest second of the
-// window beginning at start. It reports false when the window cannot be shown
-// complete: it was invalidated, the group has no sources, an observed source
-// misses any of its seconds, or a total is not finite.
+// window beginning at start, counting a second that no source reported as
+// zero. It reports false when no source reported any second of the window.
 func (g *ruTimelineGroup) summarize(start int64) (ruWindowSummary, bool) {
-	end := start + ruWindowSeconds
-	if g.invalid[start] || len(g.sources) == 0 {
+	var (
+		totals   [ruWindowSeconds]ruSecondBucket
+		reported bool
+	)
+	for _, source := range g.sources {
+		for i := range totals {
+			second := start + int64(i)
+			if b := source.buckets[second%int64(len(source.buckets))]; b.second == second {
+				totals[i].rru += b.rru
+				totals[i].wru += b.wru
+				reported = true
+			}
+		}
+	}
+	if !reported {
 		return ruWindowSummary{}, false
 	}
-	var totals [ruWindowSeconds]ruSecondBucket
-	for _, source := range g.sources {
-		if source.first >= end {
-			continue
-		}
-		for second := start; second < end; second++ {
-			b := source.buckets[second%int64(len(source.buckets))]
-			if b.second != second {
-				return ruWindowSummary{}, false
-			}
-			totals[second-start].rru += b.rru
-			totals[second-start].wru += b.wru
-		}
-	}
-	s := ruWindowSummary{end: end, peak: math.Inf(-1)}
+	s := ruWindowSummary{end: start + ruWindowSeconds, peak: math.Inf(-1)}
 	for i, b := range totals {
-		total := b.rru + b.wru
-		if math.IsNaN(total) || math.IsInf(total, 0) {
-			return ruWindowSummary{}, false
-		}
-		if total > s.peak {
+		if total := b.rru + b.wru; total > s.peak && !math.IsInf(total, 0) {
 			s.peak, s.peakAt, s.rru, s.wru = total, start+int64(i), b.rru, b.wru
 		}
 	}
-	return s, true
+	return s, !math.IsInf(s.peak, 0)
 }
 
 func (t *ruTimeline) flush(now time.Time) {
 	sec := now.Unix()
-	for key, g := range t.groups {
-		// Windows beyond retention cannot be verified; skip them after a stall
-		// or a forward clock step.
-		if oldest := windowStart(sec - ruTimelineSeconds); g.nextWindow < oldest {
-			g.nextWindow = oldest
-			maps.DeleteFunc(g.invalid, func(w int64, _ bool) bool { return w < oldest })
-		}
-		for ; g.nextWindow+ruWindowSeconds+ruWindowDelay <= sec; g.nextWindow += ruWindowSeconds {
-			s, ok := g.summarize(g.nextWindow)
-			t.collector.mu.Lock()
-			if ok {
+	// Like a closed window, a new term waits for regular reports before it
+	// publishes, so that its first windows include the unacknowledged seconds
+	// of every reconnected client. Seconds the previous term acknowledged are
+	// not replayed, so those windows may be lower.
+	if t.since == 0 {
+		t.since = sec
+	}
+	if sec < t.since+ruWindowDelay {
+		return
+	}
+	// Publish from the oldest window within the replay horizon, which the
+	// previous term may have left unpublished. After a stall or a forward
+	// clock step, older windows are skipped: they may have lost their seconds,
+	// and only the latest window of a group is exposed anyway.
+	t.nextWindow = max(t.nextWindow, windowStart(sec-ruTimelineSeconds))
+	for ; t.nextWindow+ruWindowSeconds+ruWindowDelay <= sec; t.nextWindow += ruWindowSeconds {
+		t.collector.mu.Lock()
+		for key, g := range t.groups {
+			// A window without any reported second keeps the previous sample
+			// exposed until the silent sources are dropped.
+			if s, ok := g.summarize(t.nextWindow); ok {
 				t.collector.results[key] = publishedRUSummary{keyspaceName: g.keyspaceName, summary: s}
-			} else {
-				// Exposing an older window again would repeat a stale timestamp.
-				delete(t.collector.results, key)
 			}
-			t.collector.mu.Unlock()
-			delete(g.invalid, g.nextWindow)
 		}
-		for k, source := range g.sources {
-			if sec-source.lastSeen > ruWindowDelay {
-				// The source missed a regular report, so its unreported tail
-				// cannot be known. Later windows are judged by the remaining
-				// sources, as for a source that never reported.
-				g.invalidate(source.lastSeen, sec)
-				delete(g.sources, k)
+		t.collector.mu.Unlock()
+		if t.rejected > 0 {
+			log.Warn("RU timeline source limit reached, seconds from new sources are not counted",
+				zap.Int("limit", ruTimelineMaxSources), zap.Int("rejected-reports", t.rejected))
+			t.rejected = 0
+		}
+	}
+	// A source is dropped one window after its last second was published, so
+	// that the last sample of a group stays exposed for a window.
+	for key, g := range t.groups {
+		for id, source := range g.sources {
+			if source.newest < t.nextWindow-ruWindowSeconds {
+				delete(g.sources, id)
 				t.sourceCount--
 			}
 		}
 		if len(g.sources) == 0 {
-			t.remove(key)
+			delete(t.groups, key)
+			t.collector.mu.Lock()
+			delete(t.collector.results, key)
+			t.collector.mu.Unlock()
 		}
 	}
 }

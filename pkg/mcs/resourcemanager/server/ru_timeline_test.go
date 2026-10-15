@@ -17,12 +17,10 @@ package server
 import (
 	"math"
 	"math/rand/v2"
-	"slices"
 	"testing"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
@@ -40,17 +38,12 @@ func timelineReport(client uint64, start int64, values [][2]float64) *consumptio
 	return &consumptionItem{clientUniqueID: client, resourceGroupName: "test", Consumption: &rmpb.Consumption{RuBySecond: &rmpb.RUConsumptionBySecond{StartUnixSec: start, Buckets: buckets}}}
 }
 
-// newWarmTimeline returns a timeline whose clients were already observed
-// before the window starting at testTimelineStart.
-func newWarmTimeline(clients ...uint64) (*ruSummaryCollector, *ruTimeline) {
-	const start = testTimelineStart
+// newTestTimeline returns a timeline whose term began well before the window
+// starting at testTimelineStart.
+func newTestTimeline() (*ruSummaryCollector, *ruTimeline) {
 	c := newRUSummaryCollector()
 	t := newRUTimeline(c)
-	// The term began early enough that no unseen source can still replay.
-	t.since = start - ruWindowSeconds - ruTimelineSeconds
-	for _, client := range clients {
-		t.record(timelineReport(client, start-60, make([][2]float64, 1)), time.Unix(start-59, 0))
-	}
+	t.since = testTimelineStart - 3600
 	return c, t
 }
 
@@ -58,7 +51,7 @@ func TestRUTimelineMergesSources(t *testing.T) {
 	re := require.New(t)
 	const start = testTimelineStart
 	for _, shuffled := range []bool{false, true} {
-		c, timeline := newWarmTimeline(1, 2)
+		c, timeline := newTestTimeline()
 		one, two := make([][2]float64, 60), make([][2]float64, 60)
 		one[10] = [2]float64{100, 0}
 		two[11] = [2]float64{0, 120}
@@ -73,12 +66,13 @@ func TestRUTimelineMergesSources(t *testing.T) {
 		if shuffled {
 			rand.Shuffle(len(reports), func(i, j int) { reports[i], reports[j] = reports[j], reports[i] })
 		}
+		// Every report is resent, as after a failed RPC; it must not count twice.
 		for _, r := range reports {
 			timeline.record(r, time.Unix(start+65, 0))
 			timeline.record(r, time.Unix(start+65, 0))
 		}
 		timeline.flush(time.Unix(start+89, 0))
-		re.NotEqual(start+60, c.results[testTimelineKey].summary.end)
+		re.Empty(c.results)
 		timeline.flush(time.Unix(start+90, 0))
 		got := c.results[testTimelineKey].summary
 		re.Equal(ruWindowSummary{end: start + 60, peak: 150, peakAt: start + 20, rru: 80, wru: 70}, got)
@@ -93,147 +87,234 @@ func TestRUTimelineMergesSources(t *testing.T) {
 		for _, family := range first {
 			re.Equal((start+60)*1000, family.GetMetric()[0].GetTimestampMs())
 		}
-		// A late conflict is observable but never rewrites the published summary.
+		// A late second never rewrites the published summary.
 		one[20][0] = 999
 		timeline.record(timelineReport(1, start, one), time.Unix(start+95, 0))
 		re.Equal(got, c.results[testTimelineKey].summary)
-		timeline.remove(testTimelineKey)
-		empty, err := registry.Gather()
-		re.NoError(err)
-		re.Empty(empty)
 	}
 }
 
-func TestRUTimelineUnavailable(t *testing.T) {
+// TestRUTimelineBestEffort pins that a window sums whatever was reported in
+// time and counts an unreported second as zero.
+func TestRUTimelineBestEffort(t *testing.T) {
 	const start = testTimelineStart
-	for _, scenario := range []string{"gap", "overflow", "conflict", "legacy", "nan", "future-second", "oversized", "new-source", "late-joiner", "capacity", "capacity-tail"} {
-		t.Run(scenario, func(t *testing.T) {
+	full := make([][2]float64, 60)
+	full[10] = [2]float64{10, 20}
+	full[40] = [2]float64{5, 0}
+	for _, tc := range []struct {
+		name string
+		// reports from client 2, recorded after client 1 reported full
+		reports []*consumptionItem
+		want    ruWindowSummary
+	}{
+		{
+			name:    "partial-source",
+			reports: []*consumptionItem{timelineReport(2, start+30, [][2]float64{{40, 0}})},
+			want:    ruWindowSummary{end: start + 60, peak: 40, peakAt: start + 30, rru: 40},
+		},
+		{
+			name:    "gap-in-source",
+			reports: []*consumptionItem{timelineReport(2, start, [][2]float64{{1, 0}}), timelineReport(2, start+40, [][2]float64{{0, 100}})},
+			want:    ruWindowSummary{end: start + 60, peak: 105, peakAt: start + 40, rru: 5, wru: 100},
+		},
+		{
+			name: "non-finite-second",
+			reports: []*consumptionItem{
+				timelineReport(2, start+10, [][2]float64{{math.NaN(), 0}, {math.Inf(1), 0}, {7, 0}}),
+			},
+			want: ruWindowSummary{end: start + 60, peak: 30, peakAt: start + 10, rru: 10, wru: 20},
+		},
+		{
+			name:    "legacy-client",
+			reports: []*consumptionItem{{clientUniqueID: 2, resourceGroupName: "test", Consumption: &rmpb.Consumption{RRU: 1000}}},
+			want:    ruWindowSummary{end: start + 60, peak: 30, peakAt: start + 10, rru: 10, wru: 20},
+		},
+		{
+			// A resent second overwrites the earlier value of the same client.
+			name:    "overwrite",
+			reports: []*consumptionItem{timelineReport(1, start+10, [][2]float64{{50, 0}})},
+			want:    ruWindowSummary{end: start + 60, peak: 50, peakAt: start + 10, rru: 50},
+		},
+		{
+			// The newer report arrives first, as with concurrent reports.
+			name:    "out-of-order",
+			reports: []*consumptionItem{timelineReport(2, start+50, [][2]float64{{0, 1}}), timelineReport(2, start+40, [][2]float64{{90, 0}})},
+			want:    ruWindowSummary{end: start + 60, peak: 95, peakAt: start + 40, rru: 95},
+		},
+		{
+			// A second beyond the tolerated clock skew is dropped instead of
+			// taking the place of a second that is still to be summarized.
+			name:    "future-second",
+			reports: []*consumptionItem{timelineReport(1, start+10+ruSourceSeconds, [][2]float64{{0, 0}})},
+			want:    ruWindowSummary{end: start + 60, peak: 30, peakAt: start + 10, rru: 10, wru: 20},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			re := require.New(t)
-			c, timeline := newWarmTimeline(1)
-			values := make([][2]float64, 60)
-			values[10] = [2]float64{10, 20}
-			report := timelineReport(1, start, values)
-			switch scenario {
-			case "gap":
-				report.RuBySecond.Buckets = report.RuBySecond.Buckets[:59]
-			case "overflow":
-				for _, b := range report.RuBySecond.Buckets {
-					b.Rru, b.Wru = math.MaxFloat64, math.MaxFloat64
-				}
-			case "capacity-tail":
-				// A source rejected within the grace before the window may still
-				// be consuming in it.
-				timeline.sourceCount = ruTimelineMaxSources
-				timeline.record(timelineReport(2, start-ruWindowDelay-1, nil), time.Unix(start-ruWindowDelay, 0))
-			}
-			timeline.record(report, time.Unix(start+65, 0))
-			// Each follow-up would let the window be published if it were ignored.
-			var next *consumptionItem
-			switch scenario {
-			case "conflict":
-				next = timelineReport(1, start+10, [][2]float64{{11, 20}})
-			case "legacy":
-				next = timelineReport(1, start, values)
-				next.RuBySecond = nil
-			case "nan":
-				next = timelineReport(1, start+60, [][2]float64{{math.NaN(), 0}})
-			case "future-second":
-				// Beyond the tolerated clock skew of the client.
-				next = timelineReport(1, start, slices.Concat(values, make([][2]float64, 6+ruTimelineClockSkew+1)))
-			case "oversized":
-				next = timelineReport(1, start-121, slices.Concat(make([][2]float64, 121), values))
-			case "new-source":
-				next = timelineReport(2, start+15, values[15:])
-			case "late-joiner":
-				// A first report trimmed to the next minute hides this one.
-				next = timelineReport(2, start+60, make([][2]float64, 6))
-			case "capacity":
-				timeline.sourceCount = ruTimelineMaxSources
-				next = timelineReport(2, start, values)
-			}
-			missing, invalid := testutil.ToFloat64(ruTimelineMissing), testutil.ToFloat64(ruTimelineInvalid)
-			if next != nil {
-				timeline.record(next, time.Unix(start+66, 0))
-			}
-			if scenario == "legacy" {
-				re.Equal(missing+1, testutil.ToFloat64(ruTimelineMissing))
-				re.Equal(invalid, testutil.ToFloat64(ruTimelineInvalid))
+			c, timeline := newTestTimeline()
+			timeline.record(timelineReport(1, start, full), time.Unix(start+60, 0))
+			for _, r := range tc.reports {
+				timeline.record(r, time.Unix(start+65, 0))
 			}
 			timeline.flush(time.Unix(start+90, 0))
-
-			registry := prometheus.NewRegistry()
-			registry.MustRegister(c)
-			// An incomplete window exposes no sample at all.
-			families, err := registry.Gather()
-			re.NoError(err)
-			re.Empty(families)
+			re.Equal(tc.want, c.results[testTimelineKey].summary)
 		})
 	}
 }
 
-// TestRUTimelineCapacityGrace pins the other side of the capacity-tail
-// scenario: a source rejected more than the grace before a window cannot be
-// consuming in it, so the window still publishes.
-func TestRUTimelineCapacityGrace(t *testing.T) {
+// TestRUTimelinePublishesTimelyReports models clients that report at random
+// intervals, trim, lose and delay their reports. Every published window must
+// equal the sum of the seconds that arrived before it was published, which
+// never exceeds the true total when no second is negative.
+func TestRUTimelinePublishesTimelyReports(t *testing.T) {
 	re := require.New(t)
-	const start = testTimelineStart
-	c, timeline := newWarmTimeline(1)
-	timeline.sourceCount = ruTimelineMaxSources
-	timeline.record(timelineReport(2, start-ruWindowDelay-2, nil), time.Unix(start-ruWindowDelay-1, 0))
-	timeline.record(timelineReport(1, start, make([][2]float64, 60)), time.Unix(start+65, 0))
-	timeline.flush(time.Unix(start+90, 0))
-	re.Equal(start+60, c.results[testTimelineKey].summary.end)
+	const start, clients = testTimelineStart, 4
+	type delivery struct {
+		client uint64
+		report *consumptionItem
+	}
+	rnd := rand.New(rand.NewPCG(1, 2))
+	c, timeline := newTestTimeline()
+	values := map[uint64]map[int64]float64{}
+	arrived := map[uint64]map[int64]int64{}
+	acked, nextReport := map[uint64]int64{}, map[uint64]int64{}
+	deliveries := map[int64][]delivery{}
+	for id := uint64(1); id <= clients; id++ {
+		values[id], arrived[id], acked[id], nextReport[id] = map[int64]float64{}, map[int64]int64{}, start, start
+	}
+	var lastEnd int64
+	published := 0
+	for now := start + 1; now < start+600; now++ {
+		for id := uint64(1); id <= clients; id++ {
+			values[id][now-1] = float64(rnd.IntN(100))
+			if now < nextReport[id] {
+				continue
+			}
+			nextReport[id] = now + 1 + int64(rnd.IntN(20))
+			from := max(acked[id], now-ruTimelineSeconds)
+			if rnd.IntN(5) == 0 {
+				from += int64(rnd.IntN(int(now - from)))
+			}
+			report := make([][2]float64, now-from)
+			for i := range report {
+				report[i][0] = values[id][from+int64(i)]
+			}
+			if rnd.IntN(10) > 0 {
+				at := now + int64(rnd.IntN(45))
+				deliveries[at] = append(deliveries[at], delivery{id, timelineReport(id, from, report)})
+			}
+		}
+		rnd.Shuffle(len(deliveries[now]), func(i, j int) { deliveries[now][i], deliveries[now][j] = deliveries[now][j], deliveries[now][i] })
+		for _, d := range deliveries[now] {
+			timeline.record(d.report, time.Unix(now, 0))
+			seconds := d.report.RuBySecond
+			end := seconds.StartUnixSec + int64(len(seconds.Buckets))
+			for s := seconds.StartUnixSec; s < end; s++ {
+				if _, ok := arrived[d.client][s]; !ok && s >= now+ruTimelineClockSkew-ruSourceSeconds {
+					arrived[d.client][s] = now
+				}
+			}
+			acked[d.client] = max(acked[d.client], end)
+		}
+		timeline.flush(time.Unix(now, 0))
+		got := c.results[testTimelineKey].summary
+		if got.end == lastEnd {
+			continue
+		}
+		re.Greater(got.end, lastEnd, "a window is published once, in order")
+		lastEnd = got.end
+		published++
+		want, truePeak := ruWindowSummary{end: got.end, peak: math.Inf(-1)}, 0.0
+		for s := got.end - ruWindowSeconds; s < got.end; s++ {
+			var total, all float64
+			for id := uint64(1); id <= clients; id++ {
+				if _, ok := arrived[id][s]; ok {
+					total += values[id][s]
+				}
+				all += values[id][s]
+			}
+			if total > want.peak {
+				want.peak, want.peakAt, want.rru = total, s, total
+			}
+			truePeak = max(truePeak, all)
+		}
+		re.Equal(want, got)
+		re.LessOrEqual(got.peak, truePeak)
+	}
+	re.Greater(published, 6)
 }
 
-func TestRUTimelineIgnoresUntimedProducers(t *testing.T) {
+func TestRUTimelineSourceLimit(t *testing.T) {
 	re := require.New(t)
 	const start = testTimelineStart
-	c, timeline := newWarmTimeline(1)
-	timeline.record(timelineReport(1, start, make([][2]float64, 60)), time.Unix(start+65, 0))
-	// TiKV background tasks and TiFlash report aggregates without seconds;
-	// they are outside the peak and neither join nor withhold the group.
-	missing := testutil.ToFloat64(ruTimelineMissing)
-	for _, item := range []*consumptionItem{
-		{clientUniqueID: 7, resourceGroupName: "test", isBackground: true, Consumption: &rmpb.Consumption{RRU: 100}},
-		{clientUniqueID: 8, resourceGroupName: "test", isTiFlash: true, Consumption: &rmpb.Consumption{RRU: 100}},
-	} {
-		timeline.record(item, time.Unix(start+66, 0))
-	}
-	timeline.flush(time.Unix(start+90, 0))
-	re.Equal(missing, testutil.ToFloat64(ruTimelineMissing))
+	c, timeline := newTestTimeline()
+	full := make([][2]float64, 60)
+	full[10] = [2]float64{10, 20}
+	timeline.record(timelineReport(1, start, full), time.Unix(start+60, 0))
+	timeline.sourceCount = ruTimelineMaxSources
+	// A source beyond the limit is not counted; the others still publish.
+	timeline.record(timelineReport(2, start, [][2]float64{{1000, 0}}), time.Unix(start+60, 0))
+	re.Equal(1, timeline.rejected)
 	re.Len(timeline.groups[testTimelineKey].sources, 1)
-	re.Equal(start+60, c.results[testTimelineKey].summary.end)
+	timeline.flush(time.Unix(start+90, 0))
+	re.Equal(ruWindowSummary{end: start + 60, peak: 30, peakAt: start + 10, rru: 10, wru: 20}, c.results[testTimelineKey].summary)
+	re.Zero(timeline.rejected)
+}
+
+func TestRUTimelineCountsForegroundOnly(t *testing.T) {
+	re := require.New(t)
+	const start = testTimelineStart
+	c, timeline := newTestTimeline()
+	timeline.record(timelineReport(1, start, make([][2]float64, 60)), time.Unix(start+65, 0))
+	// The peak covers foreground RU; background and TiFlash requests stay out
+	// of it even if they carried seconds.
+	background, tiflash := timelineReport(7, start, [][2]float64{{100, 0}}), timelineReport(8, start, [][2]float64{{100, 0}})
+	background.isBackground, tiflash.isTiFlash = true, true
+	timeline.record(background, time.Unix(start+66, 0))
+	timeline.record(tiflash, time.Unix(start+66, 0))
+	timeline.flush(time.Unix(start+90, 0))
+	re.Len(timeline.groups[testTimelineKey].sources, 1)
+	re.Equal(ruWindowSummary{end: start + 60, peakAt: start}, c.results[testTimelineKey].summary)
 }
 
 func TestRUTimelineFlushLag(t *testing.T) {
 	re := require.New(t)
 	const start = testTimelineStart
-	c, timeline := newWarmTimeline(1)
+	c, timeline := newTestTimeline()
 	// The flush lags until the oldest window it may still summarize, while
-	// the client clock runs four seconds ahead: its newest accepted second
-	// must not overwrite a second of that window.
-	timeline.record(timelineReport(1, start, make([][2]float64, 60)), time.Unix(start+65, 0))
-	timeline.record(timelineReport(1, start+60, make([][2]float64, 60)), time.Unix(start+125, 0))
+	// the client clock runs four seconds ahead and replays from a minute
+	// earlier: neither its newest nor its oldest seconds may overwrite a
+	// second that is still to be summarized.
+	values := make([][2]float64, 120)
+	values[0] = [2]float64{100, 0}
+	values[100] = [2]float64{200, 0}
+	timeline.record(timelineReport(1, start, values[:60]), time.Unix(start+65, 0))
+	timeline.record(timelineReport(1, start+60, values[60:]), time.Unix(start+125, 0))
 	timeline.record(timelineReport(1, start+120, make([][2]float64, 34)), time.Unix(start+149, 0))
+	timeline.record(timelineReport(1, start-60, make([][2]float64, 60)), time.Unix(start+149, 0))
 	timeline.flush(time.Unix(start+149, 0))
-	re.Equal(start+60, c.results[testTimelineKey].summary.end)
+	re.Equal(ruWindowSummary{end: start + 60, peak: 100, peakAt: start, rru: 100}, c.results[testTimelineKey].summary)
+	timeline.flush(time.Unix(start+150, 0))
+	re.Equal(ruWindowSummary{end: start + 120, peak: 200, peakAt: start + 100, rru: 200}, c.results[testTimelineKey].summary)
 }
 
 func TestRUTimelineToleratesClockSkew(t *testing.T) {
 	re := require.New(t)
 	const start = testTimelineStart
-	c, timeline := newWarmTimeline(1)
+	c, timeline := newTestTimeline()
 	// The client clock runs one second ahead: its last closed second is the
 	// resource manager's current second.
-	timeline.record(timelineReport(1, start, make([][2]float64, 66)), time.Unix(start+65, 0))
+	values := make([][2]float64, 66)
+	values[59] = [2]float64{100, 0}
+	timeline.record(timelineReport(1, start, values), time.Unix(start+65, 0))
 	timeline.flush(time.Unix(start+90, 0))
-	re.Equal(start+60, c.results[testTimelineKey].summary.end)
+	re.Equal(ruWindowSummary{end: start + 60, peak: 100, peakAt: start + 59, rru: 100}, c.results[testTimelineKey].summary)
 }
 
 func TestRUTimelineServerClockStep(t *testing.T) {
 	re := require.New(t)
 	const start = testTimelineStart
-	c, timeline := newWarmTimeline(1)
+	c, timeline := newTestTimeline()
 	values := make([][2]float64, 60)
 	values[10] = [2]float64{10, 20}
 	timeline.record(timelineReport(1, start, values), time.Unix(start+65, 0))
@@ -242,7 +323,7 @@ func TestRUTimelineServerClockStep(t *testing.T) {
 	re.Equal(start+60, published.end)
 
 	// After a backward step, the published window stays put, and seconds from
-	// the client's future are rejected rather than merged early.
+	// the client's future are dropped rather than merged early.
 	timeline.record(timelineReport(1, start+60, make([][2]float64, 60)), time.Unix(start+30, 0))
 	timeline.flush(time.Unix(start+30, 0))
 	re.Equal(published, c.results[testTimelineKey].summary)
@@ -251,123 +332,75 @@ func TestRUTimelineServerClockStep(t *testing.T) {
 	timeline.flush(time.Unix(start+150, 0))
 	re.Equal(ruWindowSummary{end: start + 120, peakAt: start + 60}, c.results[testTimelineKey].summary)
 
-	// After a forward step, a new source only withholds the windows it could
-	// replay, however far the clock jumped.
+	// After a forward step, the timeline resumes at the latest windows.
 	future := start + 365*86400
-	timeline.record(timelineReport(2, future-5, make([][2]float64, 5)), time.Unix(future, 0))
-	re.LessOrEqual(len(timeline.groups[testTimelineKey].invalid), ruTimelineSeconds/ruWindowSeconds+1)
-	// After a backward step, a new group withholds no more windows than early
-	// in a term.
-	past := start - 365*86400
-	report := timelineReport(3, past-5, make([][2]float64, 5))
-	report.resourceGroupName = "other"
-	timeline.record(report, time.Unix(past, 0))
-	re.LessOrEqual(len(timeline.groups[trackerKey{0, "other"}].invalid), ruTimelineSeconds/ruWindowSeconds+1)
+	timeline.record(timelineReport(1, future, make([][2]float64, 5)), time.Unix(future+10, 0))
+	timeline.flush(time.Unix(future+ruWindowSeconds+ruWindowDelay, 0))
+	re.Equal(ruWindowSummary{end: future + ruWindowSeconds, peakAt: future}, c.results[testTimelineKey].summary)
 }
 
-func TestRUTimelineResetWarmup(t *testing.T) {
-	const start = testTimelineStart
-	for _, tc := range []struct {
-		name     string
-		offset   int64 // where the first post-reset report lands within its window
-		withheld int64 // windows withheld after the first one
-	}{
-		{"grace-within-window", 0, 0},
-		{"grace-crosses-window", ruWindowSeconds - ruWindowDelay, 1},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			re := require.New(t)
-			c, timeline := newWarmTimeline(1)
-			timeline.record(timelineReport(1, start, make([][2]float64, 60)), time.Unix(start+65, 0))
-			timeline.flush(time.Unix(start+90, 0))
-			re.NotEmpty(c.results)
-
-			timeline.reset()
-			re.Empty(c.results)
-			// A new term does not know the sources that stayed silent across
-			// the reset, so even a full replay withholds the window of the
-			// first report, and the next one when the 30-second grace for
-			// such sources crosses into it.
-			firstNow := start + 120 + tc.offset
-			base := windowStart(firstNow)
-			timeline.record(timelineReport(1, firstNow-ruTimelineSeconds, make([][2]float64, ruTimelineSeconds)), time.Unix(firstNow, 0))
-			for w := base; w <= base+360; w += ruWindowSeconds {
-				timeline.record(timelineReport(1, w, make([][2]float64, 60)), time.Unix(w+65, 0))
-				timeline.flush(time.Unix(w+90, 0))
-				if w <= base+tc.withheld*ruWindowSeconds {
-					re.Empty(c.results)
-				} else {
-					re.Equal(ruWindowSummary{end: w + 60, peakAt: w}, c.results[testTimelineKey].summary)
-				}
-			}
-		})
-	}
-}
-
-// TestRUTimelineIdleCadenceNoExpiry verifies that a client reporting at the
-// minimum required cadence, once every 20 seconds, never trips the
-// 30-second silence grace: a healthy idle client produces no gaps. It flushes
-// every second as production does; otherwise the check never sees the silence
-// between reports.
-func TestRUTimelineIdleCadenceNoExpiry(t *testing.T) {
+// TestRUTimelineTermStart pins that a new term waits for every client to
+// reconnect, then publishes from the oldest window that replayed seconds can
+// reach, which the previous term may have left unpublished.
+func TestRUTimelineTermStart(t *testing.T) {
 	re := require.New(t)
 	const start = testTimelineStart
-	c, timeline := newWarmTimeline(1)
-	published := make(map[int64]bool)
-	for offset := range int64(301) {
-		now := start + offset
-		if offset%20 == 0 {
-			replay := max(start-60, now-ruTimelineSeconds)
-			timeline.record(timelineReport(1, replay, make([][2]float64, now-replay)), time.Unix(now, 0))
-		}
-		timeline.flush(time.Unix(now, 0))
-		re.Equal(1, timeline.sourceCount)
-		if s, ok := c.results[testTimelineKey]; ok {
-			published[s.summary.end-start] = true
-		}
-	}
-	// Every window after the initial warm-up one publishes; the 20-second
-	// cadence never lets the source miss the 30-second grace and open a gap.
-	re.Equal(map[int64]bool{60: true, 120: true, 180: true, 240: true}, published)
-}
-
-func TestRUTimelineIdleAndRetention(t *testing.T) {
-	re := require.New(t)
-	const start = testTimelineStart
-	c, timeline := newWarmTimeline(1)
+	c, timeline := newTestTimeline()
 	timeline.record(timelineReport(1, start, make([][2]float64, 60)), time.Unix(start+65, 0))
 	timeline.flush(time.Unix(start+90, 0))
-	re.Equal(ruWindowSummary{end: start + 60, peakAt: start}, c.results[testTimelineKey].summary)
-	timeline.flush(time.Unix(start+600, 0))
+	re.NotEmpty(c.results)
+
+	timeline.reset()
+	re.Empty(c.results)
+	now := start + 150
+	replay := make([][2]float64, ruTimelineSeconds)
+	replay[10] = [2]float64{40, 0}
+	timeline.record(timelineReport(1, now-ruTimelineSeconds, replay), time.Unix(now, 0))
+	timeline.flush(time.Unix(now, 0))
+	// Another client reconnects later and replays the same window.
+	replay = make([][2]float64, ruTimelineSeconds+10)
+	replay[10] = [2]float64{25, 0}
+	timeline.record(timelineReport(2, now-ruTimelineSeconds, replay), time.Unix(now+10, 0))
+	timeline.flush(time.Unix(now+ruWindowDelay-1, 0))
+	re.Empty(c.results)
+	timeline.flush(time.Unix(now+ruWindowDelay, 0))
+	re.Equal(ruWindowSummary{end: start + 120, peak: 65, peakAt: start + 70, rru: 65}, c.results[testTimelineKey].summary)
+}
+
+// TestRUTimelineSourceLifecycle pins that windows keep publishing while any
+// client reports, that a silent client's seconds still count in their windows,
+// and that a group goes away only after its last sample was exposed.
+func TestRUTimelineSourceLifecycle(t *testing.T) {
+	re := require.New(t)
+	const start = testTimelineStart
+	c, timeline := newTestTimeline()
+	published := make(map[int64]float64)
+	for offset := range int64(421) {
+		now := start + offset
+		// Client 1 reports every 20 seconds, idle after the first minute.
+		if offset%20 == 0 && offset < 300 {
+			replay := max(start, now-20)
+			values := make([][2]float64, now-replay)
+			for i := range values {
+				if second := replay + int64(i); second < start+60 {
+					values[i] = [2]float64{10, 0}
+				}
+			}
+			timeline.record(timelineReport(1, replay, values), time.Unix(now, 0))
+		}
+		// Client 2 reports a burst in its last second and then stops.
+		if offset == 70 {
+			values := make([][2]float64, 70)
+			values[69] = [2]float64{500, 0}
+			timeline.record(timelineReport(2, start, values), time.Unix(now, 0))
+		}
+		timeline.flush(time.Unix(now, 0))
+		if s, ok := c.results[testTimelineKey]; ok {
+			published[s.summary.end-start] = s.summary.peak
+		}
+	}
+	re.Equal(map[int64]float64{60: 10, 120: 500, 180: 0, 240: 0, 300: 0}, published)
 	re.Empty(timeline.groups)
 	re.Zero(timeline.sourceCount)
 	re.Empty(c.results)
-}
-
-func TestRUTimelineSourceExpiry(t *testing.T) {
-	re := require.New(t)
-	const start = testTimelineStart
-	c, timeline := newWarmTimeline(1, 2)
-	published := make(map[int64]bool)
-	for offset := int64(5); offset <= 405; offset += 20 {
-		now := start + offset
-		replay := max(start-60, now-ruTimelineSeconds)
-		timeline.record(timelineReport(1, replay, make([][2]float64, now-replay)), time.Unix(now, 0))
-		// Client 2 stops reporting; its seconds from start+65 are never known.
-		if offset <= 65 {
-			timeline.record(timelineReport(2, replay, make([][2]float64, now-replay)), time.Unix(now, 0))
-		}
-		timeline.flush(time.Unix(now, 0))
-		if s, ok := c.results[testTimelineKey]; ok {
-			// Only the latest window is exposed, never an older one.
-			re.Equal(timeline.groups[testTimelineKey].nextWindow, s.summary.end)
-			published[s.summary.end-start] = true
-		}
-	}
-	re.Len(timeline.groups[testTimelineKey].sources, 1)
-	// Windows overlapping the unknown tail are withheld until expiry; later
-	// windows are judged by the remaining source alone.
-	// Client 2 last reported at start+65 and expires 30 seconds later, which
-	// withholds only the window ending at start+120.
-	re.Equal(map[int64]bool{60: true, 180: true, 240: true, 300: true, 360: true}, published)
 }
