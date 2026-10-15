@@ -636,6 +636,9 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 
 // Bootstrap implements gRPC PDServer.
 func (s *GrpcServer) Bootstrap(ctx context.Context, request *pdpb.BootstrapRequest) (*pdpb.BootstrapResponse, error) {
+	// Capture the term before checking the role, so a delayed request cannot
+	// adopt a later campaign's context.
+	term := s.leaderTerm.Load()
 	done, err := s.rateLimitCheck()
 	if err != nil {
 		return nil, err
@@ -663,7 +666,10 @@ func (s *GrpcServer) Bootstrap(ctx context.Context, request *pdpb.BootstrapReque
 		}, nil
 	}
 
-	res, err := s.bootstrapCluster(request)
+	if term == nil || term.ctx.Err() != nil {
+		return nil, errs.ErrNotLeader
+	}
+	res, err := s.bootstrapCluster(term.ctx, request)
 	if err != nil {
 		return &pdpb.BootstrapResponse{
 			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),

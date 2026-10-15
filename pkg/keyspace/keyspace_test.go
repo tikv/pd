@@ -121,6 +121,114 @@ func (suite *keyspaceTestSuite) TearDownSuite() {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
 }
 
+func (suite *keyspaceTestSuite) TestBootstrapPreservesExistingKeyspaces() {
+	re := suite.Require()
+	manager := suite.manager
+	created, err := manager.CreateKeyspace(&CreateKeyspaceRequest{Name: "pre-alloc", CreateTime: 123})
+	re.NoError(err)
+	_, err = manager.UpdateKeyspaceState(created.GetName(), keyspacepb.KeyspaceState_DISABLED, 456)
+	re.NoError(err)
+	_, err = manager.UpdateKeyspaceConfig(created.GetName(), []*Mutation{{Op: OpPut, Key: "custom", Value: "preserved"}})
+	re.NoError(err)
+	_, err = manager.UpdateKeyspaceConfig(GetBootstrapKeyspaceName(), []*Mutation{{Op: OpPut, Key: "custom", Value: "reserved"}})
+	re.NoError(err)
+	// Splits and merges move group membership without updating the group ID
+	// in keyspace metadata. Bootstrap must respect the actual membership.
+	re.NoError(manager.kgm.CreateKeyspaceGroups([]*endpoint.KeyspaceGroup{{ID: 1, UserKind: endpoint.Basic.String()}}))
+	re.NoError(manager.kgm.UpdateKeyspaceGroup("0", "1", endpoint.Basic, endpoint.Basic, created.GetId()))
+	before, err := manager.LoadKeyspace(created.GetName())
+	re.NoError(err)
+	re.Equal("0", before.Config[TSOKeyspaceGroupIDKey])
+	reservedBefore, err := manager.LoadKeyspace(GetBootstrapKeyspaceName())
+	re.NoError(err)
+	group0, err := manager.kgm.GetKeyspaceGroupByID(0)
+	re.NoError(err)
+	group1, err := manager.kgm.GetKeyspaceGroupByID(1)
+	re.NoError(err)
+	manager.UpdateConfig(&mockConfig{PreAlloc: []string{created.GetName()}})
+
+	finished := make(chan string, 1)
+	const hook = "github.com/tikv/pd/pkg/keyspace/preAllocKeyspaceFinished"
+	re.NoError(failpoint.EnableCall(hook, func(name string) { finished <- name }))
+	defer func() { re.NoError(failpoint.Disable(hook)) }()
+	// A different group would be chosen for a newly created keyspace.
+	const assignment = "github.com/tikv/pd/pkg/keyspace/assignToSpecificKeyspaceGroup"
+	re.NoError(failpoint.Enable(assignment, "return(1)"))
+	defer func() { re.NoError(failpoint.Disable(assignment)) }()
+	for range 2 {
+		re.NoError(manager.Bootstrap())
+		select {
+		case name := <-finished:
+			re.Equal(created.GetName(), name)
+		case <-time.After(5 * time.Second):
+			suite.FailNow("keyspace initialization did not finish")
+		}
+		after, err := manager.LoadKeyspace(created.GetName())
+		re.NoError(err)
+		re.Equal(before, after)
+		reservedAfter, err := manager.LoadKeyspace(GetBootstrapKeyspaceName())
+		re.NoError(err)
+		re.Equal(reservedBefore, reservedAfter)
+		for _, group := range []*endpoint.KeyspaceGroup{group0, group1} {
+			actual, err := manager.kgm.GetKeyspaceGroupByID(group.ID)
+			re.NoError(err)
+			re.Equal(group, actual)
+		}
+	}
+}
+
+type bootstrapErrorStorage struct {
+	endpoint.KeyspaceStorage
+	saveErr error
+}
+
+func (s *bootstrapErrorStorage) SaveKeyspaceMeta(txn kv.Txn, meta *keyspacepb.KeyspaceMeta) error {
+	if s.saveErr != nil {
+		return s.saveErr
+	}
+	return s.KeyspaceStorage.SaveKeyspaceMeta(txn, meta)
+}
+
+func (suite *keyspaceTestSuite) TestBootstrapRetriesMissingKeyspaces() {
+	re := suite.Require()
+	manager := suite.manager
+	re.NoError(manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		return manager.store.RemoveKeyspace(txn, GetBootstrapKeyspaceID(), GetBootstrapKeyspaceName())
+	}))
+	// Another, less loaded group must not capture the reserved keyspace.
+	re.NoError(manager.kgm.CreateKeyspaceGroups([]*endpoint.KeyspaceGroup{{ID: 1, UserKind: endpoint.Basic.String()}}))
+	store := &bootstrapErrorStorage{KeyspaceStorage: manager.store, saveErr: errs.ErrEtcdTxnConflict.FastGenByArgs()}
+	manager.store = store
+	re.ErrorIs(manager.Bootstrap(), store.saveErr)
+	_, err := manager.LoadKeyspace(GetBootstrapKeyspaceName())
+	re.ErrorIs(err, errs.ErrKeyspaceNotFound)
+	store.saveErr = nil
+	manager.UpdateConfig(&mockConfig{PreAlloc: []string{"missing-pre-alloc"}})
+	finished := make(chan struct{}, 1)
+	const hook = "github.com/tikv/pd/pkg/keyspace/preAllocKeyspaceFinished"
+	re.NoError(failpoint.EnableCall(hook, func(string) { finished <- struct{}{} }))
+	defer func() { re.NoError(failpoint.Disable(hook)) }()
+	re.NoError(manager.Bootstrap())
+	select {
+	case <-finished:
+	case <-time.After(5 * time.Second):
+		suite.FailNow("keyspace initialization did not finish")
+	}
+	reserved, err := manager.LoadKeyspace(GetBootstrapKeyspaceName())
+	re.NoError(err)
+	re.Equal(GetBootstrapKeyspaceID(), reserved.GetId())
+	re.Equal("0", reserved.Config[TSOKeyspaceGroupIDKey])
+	groupID, err := manager.kgm.GetGroupByKeyspaceID(reserved.GetId())
+	re.NoError(err)
+	re.Equal(constant.DefaultKeyspaceGroupID, groupID)
+	prealloc, err := manager.LoadKeyspace("missing-pre-alloc")
+	re.NoError(err)
+	re.Equal(keyspacepb.KeyspaceState_ENABLED, prealloc.State)
+	groupID, err = manager.kgm.GetGroupByKeyspaceID(prealloc.GetId())
+	re.NoError(err)
+	re.Equal(uint32(1), groupID)
+}
+
 func makeCreateKeyspaceRequests(count int) []*CreateKeyspaceRequest {
 	now := time.Now().Unix()
 	requests := make([]*CreateKeyspaceRequest, count)
