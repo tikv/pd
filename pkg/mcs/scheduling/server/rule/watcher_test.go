@@ -63,6 +63,72 @@ func TestLoadLargeRules(t *testing.T) {
 	runWatcherLoadLabelRule(ctx, re, client)
 }
 
+func TestRegionLabelWatcherReloadsAfterCompaction(t *testing.T) {
+	re := require.New(t)
+	ctx, client, clean := prepare(t, false)
+	defer clean()
+
+	fixture := newRuleWatcherTestFixture(t, ctx)
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, fixture.storage, time.Hour)
+	re.NoError(err)
+
+	watcherCtx, cancel := context.WithCancel(ctx)
+	rw := &Watcher{
+		ctx:                   watcherCtx,
+		cancel:                cancel,
+		regionLabelPathPrefix: keypath.RegionLabelPathPrefix(),
+		etcdClient:            client,
+		checkerController:     fixture.checkerController,
+		regionLabeler:         regionLabeler,
+	}
+	failpointEnabled := false
+	defer func() {
+		if failpointEnabled {
+			_ = failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock")
+		}
+		rw.Close()
+	}()
+
+	makeRule := func(id string, ranges ...string) *labeler.LabelRule {
+		return &labeler.LabelRule{
+			ID:       id,
+			Labels:   []labeler.RegionLabel{{Key: "zone", Value: "test"}},
+			RuleType: labeler.KeyRange,
+			Data:     labeler.MakeKeyRanges(ranges...),
+		}
+	}
+	putRule := func(rule *labeler.LabelRule) {
+		value, err := json.Marshal(rule)
+		re.NoError(err)
+		_, err = client.Put(ctx, keypath.RegionLabelKeyPath(rule.ID), string(value))
+		re.NoError(err)
+	}
+	keepRule := makeRule("compaction-keep", "1234", "5678")
+	deleteRule := makeRule("compaction-delete", "9abc", "def0")
+	putRule(keepRule)
+	putRule(deleteRule)
+	re.NoError(rw.initializeRegionLabelWatcher())
+	re.Equal(2, len(regionLabeler.GetAllLabelRules()))
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock", "return(true)"))
+	failpointEnabled = true
+
+	updatedKeepRule := makeRule(keepRule.ID, "1234", "5678", "9abc", "def0")
+	putRule(updatedKeepRule)
+	deleteResp, err := client.Delete(ctx, keypath.RegionLabelKeyPath(deleteRule.ID))
+	re.NoError(err)
+	_, err = client.Compact(ctx, deleteResp.Header.Revision)
+	re.NoError(err)
+
+	testutil.Eventually(re, func() bool {
+		rw.labelWatcher.ForceLoad()
+		updated := regionLabeler.GetLabelRule(keepRule.ID)
+		return updated != nil && len(updated.GetKeyRanges()) == 2 && regionLabeler.GetLabelRule(deleteRule.ID) == nil
+	})
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock"))
+	failpointEnabled = false
+}
+
 func BenchmarkLoadLargeRules(b *testing.B) {
 	re := require.New(b)
 	ctx, client, clean := prepare(b, true)

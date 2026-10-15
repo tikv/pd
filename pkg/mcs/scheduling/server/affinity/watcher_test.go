@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
@@ -194,6 +195,64 @@ func TestWatcherLoadExistingData(t *testing.T) {
 	re.Equal(uint64(1), groupState.LeaderStoreID)
 	re.Equal([]uint64{1, 2, 3}, groupState.VoterStoreIDs)
 	re.Equal(1, groupState.RangeCount)
+}
+
+func TestAffinityLabelWatcherReloadsAfterCompaction(t *testing.T) {
+	re := require.New(t)
+	ctx, client, clean := prepare(t)
+	defer clean()
+
+	keepGroup := makeTestGroup("compaction-keep", 1, []uint64{1})
+	deleteGroup := makeTestGroup("compaction-delete", 2, []uint64{2})
+	keepRule := makeTestLabelRule(keepGroup.ID, "7480000000000000ff0000000000000000f8", "7480000000000000ff1000000000000000f8")
+	deleteRule := makeTestLabelRule(deleteGroup.ID, "7480000000000000ff2000000000000000f8", "7480000000000000ff3000000000000000f8")
+	bufferedRule := makeTestLabelRule("compaction-buffered", "7480000000000000ff4000000000000000f8", "7480000000000000ff5000000000000000f8")
+	re.NoError(putGroup(ctx, client, keepGroup))
+	re.NoError(putGroup(ctx, client, deleteGroup))
+	re.NoError(putLabelRule(ctx, client, keepRule))
+	re.NoError(putLabelRule(ctx, client, deleteRule))
+	re.NoError(putLabelRule(ctx, client, bufferedRule))
+
+	manager, watcher, err := setupAffinityManager(ctx, client)
+	re.NoError(err)
+	failpointEnabled := false
+	defer func() {
+		if failpointEnabled {
+			_ = failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock")
+		}
+		watcher.Close()
+	}()
+
+	re.Equal(1, manager.GetAffinityGroupState(keepGroup.ID).RangeCount)
+	re.Equal(1, manager.GetAffinityGroupState(deleteGroup.ID).RangeCount)
+	re.Contains(manager.GetAllAffinityLabelRuleIDs(), bufferedRule.ID)
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock", "return(true)"))
+	failpointEnabled = true
+
+	updatedKeepRule := makeTestLabelRule(keepGroup.ID,
+		"7480000000000000ff0000000000000000f8", "7480000000000000ff1000000000000000f8",
+		"7480000000000000ff2000000000000000f8", "7480000000000000ff3000000000000000f8",
+	)
+	re.NoError(putLabelRule(ctx, client, updatedKeepRule))
+	_, err = client.Delete(ctx, keypath.RegionLabelKeyPath(deleteRule.ID))
+	re.NoError(err)
+	deleteResp, err := client.Delete(ctx, keypath.RegionLabelKeyPath(bufferedRule.ID))
+	re.NoError(err)
+	_, err = client.Compact(ctx, deleteResp.Header.Revision)
+	re.NoError(err)
+
+	testutil.Eventually(re, func() bool {
+		watcher.labelWatcher.ForceLoad()
+		keepState := manager.GetAffinityGroupState(keepGroup.ID)
+		deleteState := manager.GetAffinityGroupState(deleteGroup.ID)
+		ids := manager.GetAllAffinityLabelRuleIDs()
+		return keepState != nil && keepState.RangeCount == 2 &&
+			deleteState != nil && deleteState.RangeCount == 0 &&
+			len(ids) == 1 && ids[0] == updatedKeepRule.ID
+	})
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock"))
+	failpointEnabled = false
 }
 
 // TestConcurrentLabelRuleUpdates tests multiple label rule updates happening concurrently.
