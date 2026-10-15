@@ -259,6 +259,48 @@ func TestAffinityLabelWatcherReloadsAfterCompaction(t *testing.T) {
 	})
 }
 
+func TestAffinityGroupWatcherReloadsAfterCompaction(t *testing.T) {
+	re := require.New(t)
+	ctx, client, clean := prepare(t)
+	defer clean()
+
+	keepGroup := makeTestGroup("group-compaction-keep", 1, []uint64{1})
+	deleteGroup := makeTestGroup("group-compaction-delete", 2, []uint64{2})
+	re.NoError(putGroup(ctx, client, keepGroup))
+	re.NoError(putGroup(ctx, client, deleteGroup))
+
+	manager, watcher, err := setupAffinityManager(ctx, client)
+	re.NoError(err)
+	failpointEnabled := false
+	defer func() {
+		if failpointEnabled {
+			_ = failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock")
+		}
+		watcher.Close()
+	}()
+
+	re.NotNil(manager.GetAffinityGroupState(keepGroup.ID))
+	re.NotNil(manager.GetAffinityGroupState(deleteGroup.ID))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock", "return(true)"))
+	failpointEnabled = true
+
+	keepGroup.LeaderStoreID = 3
+	re.NoError(putGroup(ctx, client, keepGroup))
+	deleteResp, err := client.Delete(ctx, keypath.AffinityGroupPath(deleteGroup.ID))
+	re.NoError(err)
+	_, err = client.Compact(ctx, deleteResp.Header.Revision)
+	re.NoError(err)
+
+	testutil.Eventually(re, func() bool {
+		watcher.groupWatcher.ForceLoad()
+		keepState := manager.GetAffinityGroupState(keepGroup.ID)
+		return keepState != nil && keepState.LeaderStoreID == keepGroup.LeaderStoreID &&
+			!manager.IsGroupExist(deleteGroup.ID)
+	})
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock"))
+	failpointEnabled = false
+}
+
 // TestConcurrentLabelRuleUpdates tests multiple label rule updates happening concurrently.
 func TestConcurrentLabelRuleUpdates(t *testing.T) {
 	re := require.New(t)

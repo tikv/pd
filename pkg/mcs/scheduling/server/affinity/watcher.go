@@ -111,6 +111,7 @@ func (w *Watcher) initializeGroupWatcher(ctx context.Context) error {
 		func([]*clientv3.Event) error { return nil },
 		true, /* withPrefix */
 	)
+	w.groupWatcher.SetReconcileDeletedKeys()
 	w.groupWatcher.StartWatchLoop()
 	return w.groupWatcher.WaitLoad()
 }
