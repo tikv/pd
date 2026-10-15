@@ -18,12 +18,14 @@ import (
 	"context"
 	"os"
 	"runtime"
+	"slices"
 	"time"
 	"unicode"
 
 	"github.com/grafana/pyroscope-go"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/push"
+	dto "github.com/prometheus/client_model/go"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/log"
@@ -73,7 +75,7 @@ func prometheusPushClient(ctx context.Context, job, addr string, interval time.D
 	defer logutil.LogPanic()
 
 	pusher := push.New(addr, job).
-		Gatherer(prometheus.DefaultGatherer).
+		Gatherer(pushableGatherer(prometheus.DefaultGatherer)).
 		Grouping("instance", instanceName())
 
 	for {
@@ -90,6 +92,20 @@ func prometheusPushClient(ctx context.Context, job, addr string, interval time.D
 			// continue to push metrics
 		}
 	}
+}
+
+// pushableGatherer leaves out the samples that Pushgateway rejects: those with
+// an explicit timestamp, which only a scrape can carry. Pushgateway rejects a
+// whole push that contains any of them.
+func pushableGatherer(g prometheus.Gatherer) prometheus.Gatherer {
+	return prometheus.GathererFunc(func() ([]*dto.MetricFamily, error) {
+		mfs, err := g.Gather()
+		mfs = slices.DeleteFunc(mfs, func(mf *dto.MetricFamily) bool {
+			mf.Metric = slices.DeleteFunc(mf.GetMetric(), func(m *dto.Metric) bool { return m.TimestampMs != nil })
+			return len(mf.GetMetric()) == 0
+		})
+		return mfs, err
+	})
 }
 
 // Push metrics in background.

@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
@@ -85,4 +86,30 @@ func TestCoverage(_ *testing.T) {
 	for _, cfg := range cfgs {
 		Push(ctx, cfg)
 	}
+}
+
+func TestPushableGathererDropsTimestampedSamples(t *testing.T) {
+	re := require.New(t)
+	registry := prometheus.NewRegistry()
+	counter := prometheus.NewCounter(prometheus.CounterOpts{Name: "pushed_total", Help: "pushed"})
+	registry.MustRegister(counter)
+	registry.MustRegister(timestampedCollector{prometheus.NewDesc("scraped_only", "scraped only", nil, nil)})
+	mfs, err := registry.Gather()
+	re.NoError(err)
+	re.Len(mfs, 2)
+	// Pushgateway rejects a whole push that carries any timestamp.
+	mfs, err = pushableGatherer(registry).Gather()
+	re.NoError(err)
+	re.Len(mfs, 1)
+	re.Equal("pushed_total", mfs[0].GetName())
+}
+
+type timestampedCollector struct{ desc *prometheus.Desc }
+
+// Describe implements prometheus.Collector.
+func (c timestampedCollector) Describe(ch chan<- *prometheus.Desc) { ch <- c.desc }
+
+// Collect implements prometheus.Collector.
+func (c timestampedCollector) Collect(ch chan<- prometheus.Metric) {
+	ch <- prometheus.NewMetricWithTimestamp(time.Unix(1, 0), prometheus.MustNewConstMetric(c.desc, prometheus.GaugeValue, 1))
 }
