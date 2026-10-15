@@ -39,10 +39,28 @@ type RegionFit struct {
 
 // Replace return true if the replacement store is fit all constraints and isolation score is not less than the origin.
 func (f *RegionFit) Replace(srcStoreID uint64, dstStore *core.StoreInfo) bool {
+	return f.checkReplacement(srcStoreID, dstStore, f.getRuleFitByStoreID(srcStoreID), nil)
+}
+
+// NewReplacementChecker reuses source isolation statistics across candidates.
+// The fit and its stores must remain immutable for the checker's lifetime.
+// Build a new checker after changing the planned layout or metadata snapshot.
+func (f *RegionFit) NewReplacementChecker(srcStoreID uint64) func(*core.StoreInfo) bool {
+	fit := f.getRuleFitByStoreID(srcStoreID)
+	var isolation *isolationReplacement
+	if fit != nil && fit.Rule.IsolationLevel != "" {
+		stats := newIsolationReplacement(fit, srcStoreID)
+		isolation = &stats
+	}
+	return func(dstStore *core.StoreInfo) bool {
+		return f.checkReplacement(srcStoreID, dstStore, fit, isolation)
+	}
+}
+
+func (f *RegionFit) checkReplacement(srcStoreID uint64, dstStore *core.StoreInfo, fit *RuleFit, isolation *isolationReplacement) bool {
 	if dstStore == nil {
 		return false
 	}
-	fit := f.getRuleFitByStoreID(srcStoreID)
 	// check the target store is fit all constraints.
 	if fit == nil {
 		return false
@@ -66,14 +84,11 @@ func (f *RegionFit) Replace(srcStoreID uint64, dstStore *core.StoreInfo) bool {
 	}
 
 	if fit.Rule.IsolationLevel != "" {
-		stores := slices.Clone(fit.Stores)
-		for i, store := range stores {
-			if store.GetID() == srcStoreID {
-				stores[i] = dstStore
-				break
-			}
+		if isolation == nil {
+			stats := newIsolationReplacement(fit, srcStoreID)
+			isolation = &stats
 		}
-		if !fit.IsIsolationPreserved(&RuleFit{Rule: fit.Rule, Stores: stores}) {
+		if !isolation.allow(dstStore) {
 			return false
 		}
 	}
@@ -495,12 +510,16 @@ func newRuleFit(rule *Rule, peers []*fitPeer, supportWitness bool) *RuleFit {
 
 type fitPeer struct {
 	*metapb.Peer
-	store    *core.StoreInfo
-	isLeader bool
-	selected bool
+	store           *core.StoreInfo
+	isLeader        bool
+	selected        bool
+	relaxLeaderRole bool
 }
 
 func (p *fitPeer) matchRoleStrict(role PeerRoleType) bool {
+	if p.relaxLeaderRole && (role == Leader || role == Follower) {
+		return !core.IsLearner(p.Peer)
+	}
 	switch role {
 	case Voter: // Voter matches either Leader or Follower.
 		return !core.IsLearner(p.Peer)

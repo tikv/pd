@@ -825,7 +825,7 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 	// FIXME: target leader only considers the ordinary stores, maybe we need to consider the
 	// special engine stores if the engine supports to become a leader. But now there is only
 	// one engine, tiflash, which does not support the leader, so don't consider it for now.
-	isolationAllowed := r.scatterIsolationChecker(region, plannedRegion)
+	isolationAllowed := r.scatterIsolationChecker(region, plannedRegion, !internalScatter)
 	var targetLeader, leaderStorePickedCount uint64
 	for len(leaderCandidateStores) > 0 {
 		targetLeader, leaderStorePickedCount = r.selectAvailableLeaderStore(group, region, leaderCandidateStores, ordinaryContext, internalScatter)

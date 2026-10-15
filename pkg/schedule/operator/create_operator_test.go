@@ -1390,3 +1390,33 @@ func (suite *createOperatorTestSuite) TestCreateNonWitnessPeerOperator() {
 		}
 	}
 }
+
+func TestTransferLeaderIsolationTargets(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tc := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	tc.SetEnablePlacementRules(true)
+	for i, host := range []string{"a", "b", "a"} {
+		tc.AddLabelsStore(uint64(i+1), 0, map[string]string{"host": host})
+	}
+	rm := tc.GetRuleManager()
+	leader := rm.GetRule("pd", "default").Clone()
+	leader.Role, leader.Count = placement.Leader, 1
+	require.NoError(t, rm.SetRule(leader))
+	voters := leader.Clone()
+	voters.ID, voters.Role, voters.Count = "voters", placement.Voter, 2
+	voters.LocationLabels, voters.IsolationLevel = []string{"host"}, "host"
+	require.NoError(t, rm.SetRule(voters))
+	region := tc.AddLeaderRegion(1, 1, 2, 3)
+	op, err := CreateTransferLeaderOperator("test", tc, region, 2, nil, OpLeader)
+	require.Error(t, err)
+	require.Nil(t, op)
+	targets := []uint64{2, 3}
+	op, err = CreateTransferLeaderOperator("test", tc, region, 2, targets, OpLeader)
+	require.NoError(t, err)
+	require.NotNil(t, op)
+	step := op.Step(0).(TransferLeader)
+	require.Equal(t, uint64(3), step.ToStore)
+	require.Equal(t, []uint64{3}, step.ToStores)
+	require.Equal(t, []uint64{2, 3}, targets)
+}

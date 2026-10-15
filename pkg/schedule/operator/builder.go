@@ -47,6 +47,7 @@ type Builder struct {
 	regionID        uint64
 	regionEpoch     *metapb.RegionEpoch
 	rules           []*placement.Rule
+	originFit       *placement.RegionFit
 	expectedRoles   map[uint64]placement.PeerRoleType
 	approximateSize int64
 
@@ -140,6 +141,7 @@ func NewBuilder(desc string, ci sche.SharedCluster, region *core.RegionInfo, opt
 	var rules []*placement.Rule
 	if err == nil && !b.skipPlacementRulesCheck && b.GetSharedConfig().IsPlacementRulesEnabled() {
 		fit := b.GetRuleManager().FitRegion(b.GetBasicCluster(), region)
+		b.originFit = fit
 		for _, rf := range fit.RuleFits {
 			rules = append(rules, rf.Rule)
 		}

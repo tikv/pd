@@ -23,6 +23,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
+	"github.com/tikv/pd/pkg/schedule/placement"
 )
 
 func TestPeerMoveDoesNotWorsenDegradedIsolation(t *testing.T) {
@@ -51,4 +52,28 @@ func TestPeerMoveDoesNotWorsenDegradedIsolation(t *testing.T) {
 	guard := NewPlacementSafeguard("review", tc.GetSharedConfig(), tc.GetBasicCluster(), rm, region, tc.GetStore(4), before)
 	require.True(t, guard.Target(tc.GetSharedConfig(), tc.GetStore(7)).IsOK(), "same-quality alternative remains legal")
 	require.False(t, guard.Target(tc.GetSharedConfig(), tc.GetStore(6)).IsOK(), "must reject increasing same-host peer pairs from one to two")
+}
+
+func TestLeaderTransferPreservesOtherRuleIsolation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tc := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	tc.SetEnablePlacementRules(true)
+	for i, host := range []string{"a", "b", "a"} {
+		tc.AddLabelsStore(uint64(i+1), 0, map[string]string{"host": host})
+	}
+	rm := tc.GetRuleManager()
+	leader := rm.GetRule("pd", "default").Clone()
+	leader.Role, leader.Count = placement.Leader, 1
+	require.NoError(t, rm.SetRule(leader))
+	voters := leader.Clone()
+	voters.ID, voters.Role, voters.Count = "voters", placement.Voter, 2
+	voters.LocationLabels, voters.IsolationLevel = []string{"host"}, "host"
+	require.NoError(t, rm.SetRule(voters))
+	region := tc.AddLeaderRegion(1, 1, 2, 3)
+	for _, move := range []bool{false, true} {
+		guard := NewPlacementLeaderSafeguard("test", tc.GetSharedConfig(), tc.GetBasicCluster(), rm, region, tc.GetStore(1), move)
+		require.False(t, guard.Target(tc.GetSharedConfig(), tc.GetStore(2)).IsOK())
+		require.True(t, guard.Target(tc.GetSharedConfig(), tc.GetStore(3)).IsOK())
+	}
 }

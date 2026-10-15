@@ -57,11 +57,11 @@ func TestScatterFinalIsolationAndMetadata(t *testing.T) {
 			rule.IsolationLevel = "host"
 			require.NoError(t, tc.GetRuleManager().SetRule(rule))
 		}
-		require.False(t, sc.scatterIsolationChecker(source, target)(4))
-		require.True(t, sc.scatterIsolationChecker(source, source)(1))
+		require.False(t, sc.scatterIsolationChecker(source, target, false)(4))
+		require.True(t, sc.scatterIsolationChecker(source, source, false)(1))
 	}
 	// Comparisons retain one label snapshot; rebuilding observes changed labels.
-	check := sc.scatterIsolationChecker(source, source)
+	check := sc.scatterIsolationChecker(source, source, false)
 	tc.PutStoreWithLabels(2, "host", "a")
 	require.True(t, check(1))
 	// A rule change after candidate planning is seen by final validation.
@@ -69,7 +69,7 @@ func TestScatterFinalIsolationAndMetadata(t *testing.T) {
 	tc.AddLabelsStore(7, 0, map[string]string{"host": "z"})
 	rule.LabelConstraints = []placement.LabelConstraint{{Key: "host", Op: placement.In, Values: []string{"z"}}}
 	require.NoError(t, tc.GetRuleManager().SetRule(rule))
-	require.False(t, sc.scatterIsolationChecker(source, source)(1))
+	require.False(t, sc.scatterIsolationChecker(source, source, false)(1))
 }
 
 func TestScatterIsolationRetriesLeader(t *testing.T) {
@@ -90,7 +90,7 @@ func TestScatterIsolationRetriesLeader(t *testing.T) {
 			voters.IsolationLevel = "host"
 			require.NoError(t, rm.SetRule(voters))
 			region := tc.AddLeaderRegion(1, 1, 2, 3)
-			check := sc.scatterIsolationChecker(region, region)
+			check := sc.scatterIsolationChecker(region, region, false)
 			require.False(t, check(2))
 			require.True(t, check(3))
 			group := "isolation-retry"
@@ -128,8 +128,73 @@ func TestScatterIsolationIsPerRule(t *testing.T) {
 	source = source.Clone(core.SetPeers(peers))
 	require.True(t, rm.FitRegionWithoutCache(tc, source).IsSatisfied())
 	// The learner may share a host with a voter in another rule.
-	require.True(t, sc.scatterIsolationChecker(source, source)(1))
+	require.True(t, sc.scatterIsolationChecker(source, source, false)(1))
 	target := source.Clone(core.WithReplacePeerStore(2, 4))
-	require.True(t, sc.scatterIsolationChecker(source, target)(1))
+	require.True(t, sc.scatterIsolationChecker(source, target, false)(1))
 	require.Equal(t, metapb.PeerRole_Learner, target.GetStorePeer(3).Role)
+}
+
+func TestScatterForcePreservesIsolationWithoutRequiringLeaderRoles(t *testing.T) {
+	for _, internal := range []bool{false, true} {
+		t.Run(map[bool]string{false: "admin", true: "internal"}[internal], func(t *testing.T) {
+			tc, sc := isolationTestScatter(t, []string{"a", "b", "c"})
+			tc.SetEnablePlacementRules(true)
+			rm := tc.GetRuleManager()
+			leader := rm.GetRule("pd", "default").Clone()
+			leader.Role, leader.Count = placement.Leader, 1
+			require.NoError(t, rm.SetRule(leader))
+			voters := leader.Clone()
+			voters.ID, voters.Role, voters.Count = "voters", placement.Voter, 2
+			voters.LocationLabels, voters.IsolationLevel = []string{"host"}, "host"
+			voters.LabelConstraints = []placement.LabelConstraint{{Key: "host", Op: placement.In, Values: []string{"b", "c"}}}
+			require.NoError(t, rm.SetRule(voters))
+			region := tc.AddLeaderRegion(1, 1, 2, 3)
+			group := "force-role-isolation"
+			for id, count := range map[uint64]int{1: 10, 3: 1} {
+				for range count {
+					sc.ordinaryEngine.selectedLeader.Put(id, group)
+				}
+			}
+			op, err := sc.scatterRegionWithType(region, group, false, internal, nil)
+			require.NoError(t, err)
+			if internal {
+				require.Nil(t, op)
+			} else {
+				require.NotNil(t, op)
+				_, target := finalPlacementAfterOperator(region, op)
+				require.Equal(t, uint64(2), target)
+			}
+		})
+	}
+}
+
+func TestScatterForceStillChecksAllPeers(t *testing.T) {
+	tc, sc := isolationTestScatter(t, []string{"a", "b", "c", "c", "d"})
+	tc.SetEnablePlacementRules(true)
+	rm := tc.GetRuleManager()
+	leader := rm.GetRule("pd", "default").Clone()
+	leader.Role, leader.Count = placement.Leader, 1
+	require.NoError(t, rm.SetRule(leader))
+	voters := leader.Clone()
+	voters.ID, voters.Role, voters.Count = "voters", placement.Voter, 2
+	voters.LocationLabels, voters.IsolationLevel = []string{"host"}, "host"
+	voters.LabelConstraints = []placement.LabelConstraint{{Key: "host", Op: placement.In, Values: []string{"b", "c"}}}
+	require.NoError(t, rm.SetRule(voters))
+	source := tc.AddLeaderRegion(1, 1, 2, 3)
+	require.False(t, sc.scatterIsolationChecker(source, source, false)(2))
+	require.True(t, sc.scatterIsolationChecker(source, source, true)(2))
+	// Relaxing the leader rule must not hide host collisions or orphan peers.
+	collision := source.Clone(core.WithReplacePeerStore(2, 4))
+	require.False(t, sc.scatterIsolationChecker(source, collision, true)(4))
+	orphan := source.Clone(core.WithReplacePeerStore(2, 5))
+	require.False(t, sc.scatterIsolationChecker(source, orphan, true)(5))
+	fewer := source.Clone(core.WithRemoveStorePeer(3))
+	require.False(t, sc.scatterIsolationChecker(source, fewer, true)(2))
+	learner := source.Clone()
+	learner.GetStorePeer(2).Role = metapb.PeerRole_Learner
+	require.False(t, sc.scatterIsolationChecker(source, learner, true)(1))
+	witness := source.Clone()
+	witness.GetStorePeer(2).IsWitness = true
+	require.False(t, sc.scatterIsolationChecker(source, witness, true)(1))
+	require.False(t, sc.scatterIsolationChecker(source, source, true)(99))
 }

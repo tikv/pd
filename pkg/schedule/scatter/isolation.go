@@ -36,7 +36,7 @@ func (s scatterStores) GetStores() []*core.StoreInfo {
 // scatterIsolationChecker compares final layouts with one rules/labels snapshot.
 // Candidate guards only cover the source RuleFit; final matching may reassign
 // peers to other rules. The original fit is reused while trying leader choices.
-func (r *RegionScatterer) scatterIsolationChecker(source, target *core.RegionInfo) func(uint64) bool {
+func (r *RegionScatterer) scatterIsolationChecker(source, target *core.RegionInfo, forceLeader bool) func(uint64) bool {
 	stores := make(scatterStores)
 	for _, region := range []*core.RegionInfo{source, target} {
 		for _, peer := range region.GetPeers() {
@@ -76,7 +76,6 @@ func (r *RegionScatterer) scatterIsolationChecker(source, target *core.RegionInf
 		if leader == nil || !before.IsSatisfied() {
 			return false
 		}
-		after := placement.FitRegionWithRules(stores, target.Clone(core.WithLeader(leader)), rules, witness)
-		return after.IsSatisfied() && before.IsIsolationPreserved(after)
+		return before.IsTargetIsolationPreserved(stores, target.Clone(core.WithLeader(leader)), witness, forceLeader)
 	}
 }
