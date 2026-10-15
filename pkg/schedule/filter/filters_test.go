@@ -467,6 +467,32 @@ func TestIsolationFilter(t *testing.T) {
 	}
 }
 
+func TestIsolationFilterCaseInsensitive(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := mockconfig.NewTestOptions()
+	testCluster := mockcluster.NewCluster(ctx, opt)
+	testCluster.SetLocationLabels([]string{"zone", "host"})
+	testCluster.AddLabelsStore(1, 1, map[string]string{"zone": "Z1", "host": "h1"})
+	testCluster.AddLabelsStore(2, 1, map[string]string{"zone": "z1", "host": "h2"})
+	testCluster.AddLabelsStore(3, 1, map[string]string{"zone": "z2", "host": "H1"})
+	testCluster.AddLabelsStore(4, 1, map[string]string{"zone": "z2", "host": "h2"})
+	testCluster.AddLabelsStore(5, 1, map[string]string{"zone": "Z2", "host": "h1"})
+
+	regionStores := []*core.StoreInfo{testCluster.GetStore(1)}
+	conf := testCluster.GetSharedConfig()
+	zoneFilter := NewIsolationFilter("", "zone", testCluster.GetLocationLabels(), regionStores)
+	re.False(zoneFilter.Target(conf, testCluster.GetStore(2)).IsOK())
+	re.True(zoneFilter.Target(conf, testCluster.GetStore(3)).IsOK())
+
+	regionStores = []*core.StoreInfo{testCluster.GetStore(3)}
+	hostFilter := NewIsolationFilter("", "host", testCluster.GetLocationLabels(), regionStores)
+	re.False(hostFilter.Target(conf, testCluster.GetStore(5)).IsOK())
+	re.True(hostFilter.Target(conf, testCluster.GetStore(4)).IsOK())
+}
+
 func TestPlacementGuard(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())

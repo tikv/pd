@@ -208,7 +208,20 @@ func (oc *Controller) Dispatch(region *core.RegionInfo, source string, recordOpS
 }
 
 func (oc *Controller) checkStaleOperator(op *Operator, step OpStep, region *core.RegionInfo) bool {
-	err := step.CheckInProgress(oc.cluster, oc.config, region)
+	// needStoreHealthCheck is the operator's opt-in permission to also reject
+	// a target that has gone Unhealthy, on top of the unconditional Down
+	// check. Only TransferLeader is ever asked for it: it creates no peer
+	// and no irreversible conf change, so rejecting it on an Unhealthy
+	// target is always safe. AddPeer/AddLearner/BecomeNonWitness stream a
+	// snapshot to the target, and their command is dispatched synchronously
+	// at operator creation -- before any heartbeat-driven check can run --
+	// so by the time this runs, rejecting them on an Unhealthy target can't
+	// undo a conf change that may already be landing and would only orphan
+	// the peer. Safely extending the check to them needs an orphan-cleanup
+	// / replacement design that is a follow-up to #11143.
+	_, isTransferLeader := step.(TransferLeader)
+	needStoreHealthCheck := op.NeedStoreHealthCheck() && isTransferLeader
+	err := step.CheckInProgress(oc.cluster, oc.config, region, needStoreHealthCheck)
 	if err != nil {
 		log.Info("operator is stale", zap.Uint64("region-id", op.RegionID()), errs.ZapError(err))
 		if oc.RemoveOperator(op, StaleStatus) {
