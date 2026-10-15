@@ -87,6 +87,50 @@ func TestAffinityCommands(t *testing.T) {
 	}, &state)
 	re.Equal(partitionGroup, state.ID)
 
+	// Keyspace selection must target only the requested group, including keyspace 0.
+	for _, keyspaceID := range []string{"0", "42", "43", "16777215"} {
+		for _, suffix := range []string{"t_1001", "pt_1001_p3"} {
+			groupID := "_tidb_ks" + keyspaceID + "_" + suffix
+			re.NoError(manager.CreateAffinityGroups([]affinity.GroupKeyRanges{{GroupID: groupID}}))
+			flags := []string{"--keyspace-id", keyspaceID, "--table-id", "1001"}
+			if suffix == "pt_1001_p3" {
+				flags = append(flags, "--partition-id", "3")
+			}
+			for _, action := range []string{"show", "update", "delete"} {
+				args := append([]string{"-u", pdAddr, "config", "affinity", action}, flags...)
+				if action == "update" {
+					args = append(args, "--leader", "1", "--voters", "1,2")
+				}
+				if action == "delete" {
+					out := tests.MustExec(re, ctl.GetRootCmd(), args, nil)
+					re.Contains(out, groupID)
+				} else {
+					tests.MustExec(re, ctl.GetRootCmd(), args, &state)
+					re.Equal(groupID, state.ID)
+					if action == "update" {
+						re.Equal(uint64(1), state.LeaderStoreID)
+						re.ElementsMatch([]uint64{1, 2}, state.VoterStoreIDs)
+					}
+				}
+			}
+			remaining := make(map[string]*pd.AffinityGroupState)
+			tests.MustExec(re, ctl.GetRootCmd(), []string{"-u", pdAddr, "config", "affinity", "show"}, &remaining)
+			re.NotContains(remaining, groupID)
+			re.Contains(remaining, tableGroup)
+			re.Contains(remaining, partitionGroup)
+		}
+	}
+	for _, action := range []string{"show", "update", "delete"} {
+		out := tests.MustExec(re, ctl.GetRootCmd(), []string{
+			"-u", pdAddr, "config", "affinity", action, "--keyspace-id", "42",
+		}, nil)
+		re.Contains(out, "--table-id is required")
+		out = tests.MustExec(re, ctl.GetRootCmd(), []string{
+			"-u", pdAddr, "config", "affinity", action, "--keyspace-id", "16777216", "--table-id", "1001",
+		}, nil)
+		re.Contains(out, "--keyspace-id must be between 0 and 16777215")
+	}
+
 	// update peers for the partitioned table
 	tests.MustExec(re, cmd, []string{
 		"-u", pdAddr, "config", "affinity", "update",
