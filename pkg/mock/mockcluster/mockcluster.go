@@ -65,6 +65,7 @@ type Cluster struct {
 	pendingProcessedRegions map[uint64]struct{}
 	*buckets.HotBucketCache
 	storage.Storage
+	existingKeyspaces map[uint32]struct{}
 }
 
 // NewCluster creates a new Cluster
@@ -80,6 +81,7 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 		KeyRangeManager:         keyrange.NewManager(),
 		pendingProcessedRegions: map[uint64]struct{}{},
 		Storage:                 storage.NewStorageWithMemoryBackend(),
+		existingKeyspaces:       map[uint32]struct{}{},
 	}
 	if c.PersistOptions.GetReplicationConfig().EnablePlacementRules {
 		c.initRuleManager()
@@ -121,21 +123,39 @@ func (mc *Cluster) GetSharedConfig() sc.SharedConfigProvider {
 	return mc.PersistOptions
 }
 
+// AddKeyspace registers the given keyspace IDs as existing, for tests whose
+// code path consults GetKeyspaceIDInRange/KeyspaceExist. No keyspace exists
+// by default.
+func (mc *Cluster) AddKeyspace(ids ...uint32) {
+	for _, id := range ids {
+		mc.existingKeyspaces[id] = struct{}{}
+	}
+}
+
 // GetKeyspaceIDInRange returns the keyspace IDs in the range [startKeyspaceID, endKeyspaceID] with a limit on the number of keyspace IDs returned.
-func (*Cluster) GetKeyspaceIDInRange(startKeyspaceID uint32, endKeyspaceID uint32, limit int) ([]uint32, bool) {
+// No keyspace exists unless registered via AddKeyspace.
+func (mc *Cluster) GetKeyspaceIDInRange(startKeyspaceID uint32, endKeyspaceID uint32, limit int) ([]uint32, bool) {
 	if startKeyspaceID > endKeyspaceID {
 		return nil, false
 	}
-	ret := make([]uint32, 0, limit)
+	ret := make([]uint32, 0, max(limit, 0))
 	for id := startKeyspaceID; id <= endKeyspaceID; id++ {
+		if _, ok := mc.existingKeyspaces[id]; !ok {
+			continue
+		}
 		ret = append(ret, id)
+		if limit > 0 && len(ret) >= limit {
+			break
+		}
 	}
-	return ret, true
+	return ret, len(ret) > 0
 }
 
-// KeyspaceExist checks if a keyspace exists by ID.
-func (*Cluster) KeyspaceExist(id uint32) bool {
-	return id != 1
+// KeyspaceExist checks if a keyspace exists by ID. No keyspace exists unless
+// registered via AddKeyspace.
+func (mc *Cluster) KeyspaceExist(id uint32) bool {
+	_, ok := mc.existingKeyspaces[id]
+	return ok
 }
 
 // GetStorage returns the storage.

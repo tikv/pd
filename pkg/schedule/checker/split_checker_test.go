@@ -85,6 +85,9 @@ func TestKeyspaceSplit(t *testing.T) {
 	regionLabeler := cluster.RegionLabeler
 	sc := NewSplitChecker(cluster, ruleManager, regionLabeler)
 	cluster.AddLeaderStore(1, 1)
+	// Keyspaces 101-105 must exist for GetKeyspaceSplitKeys to generate a
+	// split at their boundaries; mockcluster reports no keyspace by default.
+	cluster.AddKeyspace(101, 102, 103, 104, 105)
 
 	// Test 1: Region within one keyspace - should not split
 	bound100 := keyspace.MakeRegionBound(100)
@@ -132,6 +135,9 @@ func TestKeyspaceSplitMixRange(t *testing.T) {
 	ruleManager := cluster.RuleManager
 	regionLabeler := cluster.RegionLabeler
 	sc := NewSplitChecker(cluster, ruleManager, regionLabeler)
+	// startkey decodes to raw keyspace 402; it must exist for
+	// GetKeyspaceSplitKeys to find a split boundary in [402, MaxValidKeyspaceID).
+	cluster.AddKeyspace(402)
 
 	re.True(keyspace.RegionSpansMultipleKeyspaces(startkey, endKey, sc.cluster.(checkGetter)))
 	keys := keyspace.GetKeyspaceSplitKeys(startkey, endKey, coreconstant.Raw, sc.cluster.(checkGetter))

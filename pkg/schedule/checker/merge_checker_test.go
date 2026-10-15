@@ -792,9 +792,16 @@ func TestAllowMergeCrossTable(t *testing.T) {
 	const (
 		keyspace1 = uint32(42)
 		keyspace2 = uint32(43)
-		tableA    = int64(100)
-		tableB    = int64(101)
-		indexID   = int64(1)
+	)
+	// Both keyspaces must exist for the diff-keyspace cases below to be
+	// recognized as spanning a keyspace boundary; mockcluster reports no
+	// keyspace by default.
+	cluster.AddKeyspace(keyspace1, keyspace2)
+
+	const (
+		tableA  = int64(100)
+		tableB  = int64(101)
+		indexID = int64(1)
 	)
 
 	// Classic keys.
