@@ -29,11 +29,15 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
 	"google.golang.org/grpc"
+	grpcbackoff "google.golang.org/grpc/backoff"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	pb "google.golang.org/grpc/examples/helloworld/helloworld"
 	"google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
+	"google.golang.org/grpc/test/bufconn"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -451,4 +455,377 @@ func TestGRPCDialOption(t *testing.T) {
 	err := cli.updateMember()
 	re.Error(err)
 	re.Greater(time.Since(start), 500*time.Millisecond)
+}
+
+type memberTestPDServer struct {
+	pdpb.UnimplementedPDServer
+	getMembers func() (*pdpb.GetMembersResponse, error)
+}
+
+func (s *memberTestPDServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.GetMembersResponse, error) {
+	return s.getMembers()
+}
+
+func startMemberTestPDServer(t *testing.T, testServer *memberTestPDServer) *bufconn.Listener {
+	t.Helper()
+
+	listener := bufconn.Listen(1024 * 1024)
+	server := grpc.NewServer()
+	pdpb.RegisterPDServer(server, testServer)
+	serveErr := make(chan error, 1)
+	go func() {
+		serveErr <- server.Serve(listener)
+	}()
+	t.Cleanup(func() {
+		server.Stop()
+		require.NoError(t, <-serveErr)
+	})
+	return listener
+}
+
+func TestUpdateMemberWithResultPreservesErrorContract(t *testing.T) {
+	testServer := &memberTestPDServer{}
+	listener := startMemberTestPDServer(t, testServer)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	conn, err := grpc.NewClient(
+		"passthrough:///bufnet",
+		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, conn.Close()) })
+
+	const memberURL = "http://pd.test:2379"
+	testCases := []struct {
+		name         string
+		response     func() (*pdpb.GetMembersResponse, error)
+		availability bool
+	}{
+		{
+			name: "rpc unavailable",
+			response: func() (*pdpb.GetMembersResponse, error) {
+				return nil, status.Error(codes.Unavailable, "dial tcp 192.0.2.1:2379: connection refused")
+			},
+			availability: true,
+		},
+		{
+			name: "response header error",
+			response: func() (*pdpb.GetMembersResponse, error) {
+				return &pdpb.GetMembersResponse{
+					Header: &pdpb.ResponseHeader{ClusterId: 1, Error: &pdpb.Error{Type: pdpb.ErrorType_UNKNOWN, Message: "not ready"}},
+				}, nil
+			},
+		},
+		{
+			name: "cluster id mismatch",
+			response: func() (*pdpb.GetMembersResponse, error) {
+				return validMemberTestResponse(memberURL, 2), nil
+			},
+		},
+		{
+			name: "missing leader",
+			response: func() (*pdpb.GetMembersResponse, error) {
+				response := validMemberTestResponse(memberURL, 1)
+				response.Leader = nil
+				return response, nil
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			testServer.getMembers = testCase.response
+			client := newMemberTestServiceDiscovery(ctx, cancel, memberURL, conn)
+			require.True(t, client.memberAvailabilityFailures.record(time.Now(), memberURL))
+
+			result, structuredErr := client.updateMemberWithResult()
+			compatibilityErr := client.updateMember()
+
+			require.Error(t, structuredErr)
+			require.Equal(t, structuredErr.Error(), compatibilityErr.Error())
+			require.Equal(t, []string{memberURL}, result.failedURLs)
+			require.Equal(t, testCase.availability, result.availabilityFailureCount == 1)
+
+			_, ok := client.memberAvailabilityFailures.summary(time.Now())
+			if testCase.availability {
+				require.True(t, ok)
+			} else {
+				require.False(t, ok)
+			}
+		})
+	}
+}
+
+func TestUpdateMemberRetainsOnlyFailuresObservedBeforeSuccess(t *testing.T) {
+	testServer := &memberTestPDServer{}
+	listener := startMemberTestPDServer(t, testServer)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	conn, err := grpc.NewClient(
+		"passthrough:///bufnet",
+		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, conn.Close()) })
+
+	memberURLs := []string{
+		"http://pd-1.test:2379",
+		"http://pd-2.test:2379",
+		"http://pd-3.test:2379",
+	}
+	members := make([]*pdpb.Member, 0, len(memberURLs))
+	for i, memberURL := range memberURLs {
+		members = append(members, &pdpb.Member{MemberId: uint64(i + 1), ClientUrls: []string{memberURL}})
+	}
+	var calls atomic.Int32
+	testServer.getMembers = func() (*pdpb.GetMembersResponse, error) {
+		if calls.Add(1) == 1 {
+			return nil, status.Error(codes.Unavailable, "transport unavailable")
+		}
+		return &pdpb.GetMembersResponse{
+			Header:  &pdpb.ResponseHeader{ClusterId: 1},
+			Members: members,
+			Leader:  members[1],
+		}, nil
+	}
+
+	client := newMemberTestServiceDiscovery(ctx, cancel, memberURLs[0], conn)
+	client.urls.Store(memberURLs)
+	client.leader.Store(newPDServiceClient(memberURLs[0], memberURLs[0], conn, true))
+	client.apiCandidateNodes = [apiKindCount]*serviceBalancer{
+		newServiceBalancer(emptyErrorFn),
+		newServiceBalancer(regionAPIErrorFn),
+	}
+	for _, memberURL := range memberURLs {
+		client.clientConns.Store(memberURL, conn)
+		require.True(t, client.memberAvailabilityFailures.record(time.Now(), memberURL))
+	}
+
+	result, err := client.updateMemberWithResult()
+	require.NoError(t, err)
+	require.Equal(t, int32(2), calls.Load())
+	require.Equal(t, []string{"http://pd-1.test:2379"}, result.failedURLs)
+
+	summary, ok := client.memberAvailabilityFailures.summary(time.Now())
+	require.True(t, ok)
+	require.Equal(t, []string{"http://pd-1.test:2379"}, summary.failedURLs)
+}
+
+func validMemberTestResponse(memberURL string, clusterID uint64) *pdpb.GetMembersResponse {
+	member := &pdpb.Member{MemberId: 1, ClientUrls: []string{memberURL}}
+	return &pdpb.GetMembersResponse{
+		Header:  &pdpb.ResponseHeader{ClusterId: clusterID},
+		Members: []*pdpb.Member{member},
+		Leader:  member,
+	}
+}
+
+func newMemberTestServiceDiscovery(
+	ctx context.Context,
+	cancel context.CancelFunc,
+	memberURL string,
+	conn *grpc.ClientConn,
+) *serviceDiscovery {
+	client := &serviceDiscovery{
+		ctx:       ctx,
+		cancel:    cancel,
+		callbacks: newServiceCallbacks(),
+		option:    opt.NewOption(),
+		clusterID: 1,
+	}
+	client.urls.Store([]string{memberURL})
+	client.clientConns.Store(memberURL, conn)
+	return client
+}
+
+func TestUpdateMemberLoopDegradedModeSafetySweepAndConnectionRecovery(t *testing.T) {
+	const memberURL = "http://recovering-pd.test:2379"
+	testServer := &memberTestPDServer{
+		getMembers: func() (*pdpb.GetMembersResponse, error) {
+			return validMemberTestResponse(memberURL, 1), nil
+		},
+	}
+	listener := startMemberTestPDServer(t, testServer)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var getMembersCalls atomic.Int32
+	var connectionAvailable atomic.Bool
+	var syntheticMemberResponse atomic.Bool
+	conn, err := grpc.NewClient(
+		"passthrough:///recovering-pd.test:2379",
+		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
+			if !connectionAvailable.Load() {
+				return nil, errors.New("transport unavailable")
+			}
+			return listener.Dial()
+		}),
+		grpc.WithConnectParams(grpc.ConnectParams{
+			Backoff: grpcbackoff.Config{
+				BaseDelay:  10 * time.Millisecond,
+				Multiplier: 1,
+				Jitter:     0,
+				MaxDelay:   10 * time.Millisecond,
+			},
+			MinConnectTimeout: 10 * time.Millisecond,
+		}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithUnaryInterceptor(func(
+			ctx context.Context,
+			method string,
+			req, reply any,
+			cc *grpc.ClientConn,
+			invoker grpc.UnaryInvoker,
+			opts ...grpc.CallOption,
+		) error {
+			if method == "/pdpb.PD/GetMembers" {
+				getMembersCalls.Add(1)
+				if syntheticMemberResponse.Load() {
+					response := validMemberTestResponse(memberURL, 1)
+					*reply.(*pdpb.GetMembersResponse) = *response
+					return nil
+				}
+			}
+			return invoker(ctx, method, req, reply, cc, opts...)
+		}),
+	)
+	require.NoError(t, err)
+
+	client := newMemberTestServiceDiscovery(ctx, cancel, memberURL, conn)
+	client.leader.Store(newPDServiceClient(memberURL, memberURL, conn, true))
+	client.apiCandidateNodes = [apiKindCount]*serviceBalancer{
+		newServiceBalancer(emptyErrorFn),
+		newServiceBalancer(regionAPIErrorFn),
+	}
+	client.checkMembershipCh = make(chan struct{}, 1)
+	memberUpdateCh := make(chan time.Time, 1)
+	loopDone := make(chan struct{})
+	go func() {
+		client.runMemberRefreshLoop(memberUpdateCh)
+		close(loopDone)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-loopDone
+		require.NoError(t, conn.Close())
+	})
+
+	client.ScheduleCheckMemberChanged()
+	require.Eventually(t, func() bool { return getMembersCalls.Load() >= 12 }, 2*time.Second, 10*time.Millisecond)
+	callsAfterInitialBatch := getMembersCalls.Load()
+	require.GreaterOrEqual(t, callsAfterInitialBatch, int32(12))
+
+	for range 100 {
+		client.ScheduleCheckMemberChanged()
+	}
+	require.Never(t, func() bool {
+		return getMembersCalls.Load() != callsAfterInitialBatch
+	}, 300*time.Millisecond, 10*time.Millisecond)
+
+	// A synchronous check is an explicit request and must bypass background suppression.
+	require.Error(t, client.CheckMemberChanged())
+	callsAfterSynchronousCheck := getMembersCalls.Load()
+	require.Equal(t, callsAfterInitialBatch+1, callsAfterSynchronousCheck)
+
+	// The periodic safety sweep must still issue one real membership request
+	// while asynchronous refreshes are suppressed.
+	memberUpdateCh <- time.Now()
+	require.Eventually(t, func() bool {
+		return getMembersCalls.Load() == callsAfterSynchronousCheck+1
+	}, time.Second, 10*time.Millisecond)
+	callsAfterSafetySweep := getMembersCalls.Load()
+
+	for range 100 {
+		client.ScheduleCheckMemberChanged()
+	}
+	require.Never(t, func() bool {
+		return getMembersCalls.Load() != callsAfterSafetySweep
+	}, 300*time.Millisecond, 10*time.Millisecond)
+
+	// A successful safety sweep must leave degraded mode even if the local
+	// connection-state observation has not changed yet.
+	syntheticMemberResponse.Store(true)
+	memberUpdateCh <- time.Now()
+	require.Eventually(t, func() bool {
+		_, failed := client.memberAvailabilityFailures.summary(time.Now())
+		return !failed && getMembersCalls.Load() == callsAfterSafetySweep+1
+	}, time.Second, 10*time.Millisecond)
+	callsAfterSafetyRecovery := getMembersCalls.Load()
+
+	client.ScheduleCheckMemberChanged()
+	require.Eventually(t, func() bool {
+		return getMembersCalls.Load() > callsAfterSafetyRecovery
+	}, time.Second, 10*time.Millisecond)
+
+	// Re-enter degraded mode so the connection-state recovery path is tested
+	// independently from the successful safety sweep above.
+	syntheticMemberResponse.Store(false)
+	callsBeforeSecondFailureBatch := getMembersCalls.Load()
+	client.ScheduleCheckMemberChanged()
+	require.Eventually(t, func() bool {
+		return getMembersCalls.Load() >= callsBeforeSecondFailureBatch+12
+	}, 2*time.Second, 10*time.Millisecond)
+	callsAfterSecondFailureBatch := getMembersCalls.Load()
+	for range 100 {
+		client.ScheduleCheckMemberChanged()
+	}
+	require.Never(t, func() bool {
+		return getMembersCalls.Load() != callsAfterSecondFailureBatch
+	}, 300*time.Millisecond, 10*time.Millisecond)
+
+	// Once the underlying connection becomes usable, connection-state polling
+	// must resume the normal refresh loop without waiting for the periodic sweep.
+	connectionAvailable.Store(true)
+	require.Eventually(t, func() bool {
+		_, failed := client.memberAvailabilityFailures.summary(time.Now())
+		return !failed && getMembersCalls.Load() > callsAfterSecondFailureBatch
+	}, 2*time.Second, 10*time.Millisecond)
+	callsAfterRecovery := getMembersCalls.Load()
+
+	client.ScheduleCheckMemberChanged()
+	require.Eventually(t, func() bool {
+		return getMembersCalls.Load() > callsAfterRecovery
+	}, time.Second, 10*time.Millisecond)
+}
+
+var memberConnectionSnapshotSink memberConnectionSnapshot
+
+func TestMemberConnectionSnapshotReuseDoesNotAllocate(t *testing.T) {
+	conn, err := grpc.NewClient(
+		"passthrough:///pd.test:2379",
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, conn.Close()) })
+
+	urls := []string{
+		"http://pd-1.test:2379",
+		"http://pd-2.test:2379",
+		"http://pd-3.test:2379",
+	}
+	client := &serviceDiscovery{}
+	client.urls.Store(urls)
+	for _, url := range urls {
+		client.clientConns.Store(url, conn)
+	}
+
+	snapshot := client.snapshotMemberConnections(memberConnectionSnapshot{})
+	require.Len(t, snapshot.connections, len(urls))
+	require.True(t, snapshot.connections[1].observed)
+	require.Same(t, conn, snapshot.connections[1].conn)
+
+	client.clientConns.Delete(urls[1])
+	snapshot = client.snapshotMemberConnections(snapshot)
+	require.False(t, snapshot.connections[1].observed)
+	require.Nil(t, snapshot.connections[1].conn)
+	client.clientConns.Store(urls[1], conn)
+	memberConnectionSnapshotSink = snapshot
+
+	allocations := testing.AllocsPerRun(1000, func() {
+		memberConnectionSnapshotSink = client.snapshotMemberConnections(memberConnectionSnapshotSink)
+	})
+	require.Zero(t, allocations)
 }
