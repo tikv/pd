@@ -151,9 +151,7 @@ type ruTimeline struct {
 }
 
 func newRUTimeline(c *ruSummaryCollector) *ruTimeline {
-	t := &ruTimeline{collector: c}
-	t.reset()
-	return t
+	return &ruTimeline{collector: c, groups: make(map[trackerKey]*ruTimelineGroup)}
 }
 
 func windowStart(second int64) int64 {
