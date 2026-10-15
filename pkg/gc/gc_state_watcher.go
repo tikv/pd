@@ -471,6 +471,12 @@ func (m *GCStateManager) terminateGCStateWatcher(
 ) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	// Retirement cancels initial reads before lifecycle cleanup takes this lock.
+	// Preserve leader loss when the canceled reader reaches termination first.
+	if reason == watcherTerminationInitError && m.activeGeneration.Load() != watcher.generation {
+		cause = errs.ErrNotLeader
+		reason = watcherTerminationLeaderLost
+	}
 	m.terminateGCStateWatcherLocked(watcher, cause, reason)
 }
 
