@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -402,7 +403,9 @@ func (m *Manager) CommitBalanceTarget(ctx context.Context, snapshot *BalanceSnap
 		return false, err
 	}
 	if err := m.checkBalanceTargetStores(group.LeaderStoreID, group.VoterStoreIDs); err != nil {
-		return false, nil
+		// The worker logs the rejection and retries with backoff. Do not hide
+		// a temporary target failure as a successful no-op or stable result.
+		return false, fmt.Errorf("affinity target %s rejected: %w", group.ID, err)
 	}
 	var targetToken string
 	err := m.runBalanceTxn(ctx, snapshot.conditions, func(txn kv.Txn) error {

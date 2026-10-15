@@ -19,10 +19,16 @@ import (
 	"encoding/json"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
+
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage"
@@ -59,6 +65,67 @@ func loadBalanceGroup(t *testing.T, manager *Manager, groupID string) Group {
 	var group Group
 	require.NoError(t, json.Unmarshal([]byte(value), &group))
 	return group
+}
+
+func TestBalanceCommitPreparingStoreRemainsAvailable(t *testing.T) {
+	manager := newBalanceRuntimeManager(t)
+	id := seedBalanceGroups(t, manager, []uint64{1})[0]
+	stores := manager.storeSetInformer.(*core.StoresInfo)
+	stores.PutStore(stores.GetStore(4).Clone(core.SetNodeState(metapb.NodeState_Preparing)))
+	snapshot := prepareBalanceCommit(t, manager, id)
+	target := balanceCommitTarget(snapshot, id, 1)
+	target.VoterStoreIDs = []uint64{1, 2, 4}
+
+	committed, err := manager.CommitBalanceTarget(t.Context(), snapshot, target)
+	require.NoError(t, err)
+	require.True(t, committed)
+	require.ElementsMatch(t, target.VoterStoreIDs, loadBalanceGroup(t, manager, id).VoterStoreIDs)
+
+	// A successful commit alone is insufficient: the periodic availability
+	// check must also let the checker execute this target while 4 is Preparing.
+	manager.checkGroupsAvailability()
+	group := manager.GetAffinityGroupState(id)
+	require.True(t, stores.GetStore(4).IsPreparing())
+	require.True(t, group.AffinitySchedulingAllowed)
+	require.Equal(t, PhasePreparing, group.Phase)
+}
+
+func TestBalanceCommitPreparingStoreRejectionRetries(t *testing.T) {
+	for _, tc := range []struct {
+		reason string
+		option core.StoreCreateOption
+	}{
+		{"disconnected", core.SetLastHeartbeatTS(time.Now().Add(-2 * time.Minute))},
+		{"down", core.SetLastHeartbeatTS(time.Now().Add(-2 * time.Hour))},
+		{"low-space", core.SetStoreStats(&pdpb.StoreStats{Capacity: 100, Available: 1, UsedSize: 99})},
+		{"busy", core.SetStoreStats(&pdpb.StoreStats{IsBusy: true})},
+		{"leader-evicted", core.PauseLeaderTransfer(constant.In)},
+		{"removing", core.SetStoreState(metapb.StoreState_Offline, false)},
+		{"removed", core.SetStoreState(metapb.StoreState_Tombstone)},
+	} {
+		t.Run(tc.reason, func(t *testing.T) {
+			manager := newBalanceRuntimeManager(t)
+			id := seedBalanceGroups(t, manager, []uint64{1})[0]
+			stores := manager.storeSetInformer.(*core.StoresInfo)
+			healthy := stores.GetStore(4).Clone(core.SetNodeState(metapb.NodeState_Preparing))
+			stores.PutStore(healthy)
+			snapshot := prepareBalanceCommit(t, manager, id)
+			target := balanceCommitTarget(snapshot, id, 4)
+			target.VoterStoreIDs = []uint64{1, 2, 4}
+			// The store changes after validation, before the final commit check.
+			stores.PutStore(healthy.Clone(tc.option))
+			committed, err := manager.CommitBalanceTarget(t.Context(), snapshot, target)
+			require.False(t, committed)
+			require.ErrorContains(t, err, id)
+			require.ErrorContains(t, err, "store 4 is "+tc.reason)
+			require.NotContains(t, loadBalanceGroup(t, manager, id).VoterStoreIDs, uint64(4))
+
+			stores.PutStore(healthy.Clone(core.SetStoreStats(&pdpb.StoreStats{})))
+			committed, err = manager.CommitBalanceTarget(t.Context(), snapshot, target)
+			require.NoError(t, err)
+			require.True(t, committed, "a rejected commit must be retryable after recovery")
+		})
+	}
 }
 
 type balanceConditionalStorage struct {

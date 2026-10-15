@@ -139,6 +139,59 @@ func TestAffinityBalanceLeaderConvergence(t *testing.T) {
 	require.Equal(t, affinity.PhaseStable, manager.GetAffinityGroupState(target.ID).Phase)
 }
 
+func TestAffinityBalancePreparingScaleOut(t *testing.T) {
+	tc, checker := newAffinityBalanceTestCluster(t, 4)
+	tc.SetEnableUseJointConsensus(false) // ApplyOperator supports non-joint steps.
+	manager := tc.GetAffinityManager()
+	tc.PutStore(tc.GetStore(4).Clone(core.SetNodeState(metapb.NodeState_Preparing), core.SetRegionCount(0)))
+	ids := []string{"_tidb_pt_100_p1", "_tidb_pt_100_p2", "_tidb_pt_100_p3"}
+	keys := []string{"a", "b", "c", "d"}
+	for i, id := range ids {
+		leader := uint64(i + 1)
+		createBalanceGroup(t, manager, id, keys[i], keys[i+1], leader, []uint64{1, 2, 3}, affinity.BalancePolicyAuto)
+		addBalanceRegion(t, tc, manager, leader, keys[i], keys[i+1], leader, 1, 2, 3)
+	}
+	score := func() affinity.BalanceScore {
+		groups := make([]*affinity.Group, 0, len(ids))
+		for _, id := range ids {
+			group := manager.GetAffinityGroupState(id).Group
+			groups = append(groups, &group)
+		}
+		scorer, err := affinity.NewBalanceScorer(groups)
+		require.NoError(t, err)
+		return scorer.Score()
+	}
+	require.Equal(t, affinity.BalanceScore{Leader: 3, Voter: 27}, score())
+	moves := 0
+	for range 4 {
+		before := score()
+		if runAffinityBalanceTask(t, t.Context(), checker, &affinityBalanceTask{}) {
+			break
+		}
+		require.Negative(t, score().Compare(before), "every committed target must strictly improve the score")
+		for i, id := range ids {
+			region := tc.GetRegion(uint64(i + 1))
+			group := manager.GetAffinityGroupState(id)
+			require.True(t, group.AffinitySchedulingAllowed)
+			op := checker.createAffinityOperator(region, group)
+			if op != nil {
+				require.NotZero(t, op.Kind()&operator.OpAffinity)
+				operator.ApplyOperator(tc, op)
+				moves++
+			}
+			region = tc.GetRegion(region.GetID())
+			manager.ObserveBalanceRegion(region)
+			_, aligned := manager.GetAndCacheRegionAffinityGroupState(region)
+			require.True(t, aligned)
+			require.Equal(t, affinity.PhaseStable, manager.GetAffinityGroupState(id).Phase)
+		}
+	}
+	require.Positive(t, moves, "the new store must receive real peer-move operators")
+	require.Equal(t, affinity.BalanceScore{Leader: 3, Voter: 21}, score())
+	require.True(t, tc.GetStore(4).IsPreparing(), "convergence must not depend on a Serving transition")
+	require.Positive(t, tc.GetStore(4).GetRegionCount())
+}
+
 func TestControllerObservesAffinityRegionBeforeRuleRepair(t *testing.T) {
 	tc, _ := newAffinityBalanceTestCluster(t, 3)
 	manager := tc.GetAffinityManager()
@@ -363,6 +416,7 @@ func TestAffinityBalanceAllLeaderLimitsRetryBeforeVoterMoves(t *testing.T) {
 
 func TestAffinityBalanceBusyVoterDestinationRetries(t *testing.T) {
 	tc, checker := newAffinityBalanceTestCluster(t, 4)
+	tc.PutStore(tc.GetStore(4).Clone(core.SetNodeState(metapb.NodeState_Preparing)))
 	manager := tc.GetAffinityManager()
 	createBalanceGroup(t, manager, "_tidb_pt_100_p0", "a", "b", 1, []uint64{1, 2, 3}, affinity.BalancePolicyAuto)
 	createBalanceGroup(t, manager, "_tidb_pt_100_p1", "b", "c", 2, []uint64{1, 2, 3}, affinity.BalancePolicyFixed)
