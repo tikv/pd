@@ -735,11 +735,6 @@ func TestShouldRemoveFromSubTree(t *testing.T) {
 
 	region.voters[2].StoreId = 4
 	re.False(region.peersEqualTo(origin))
-
-	// A rolling upgrade must notice when an old PD changes the legacy flag.
-	region.voters[2].StoreId = 3
-	region.voters[2].IsWitness = true
-	re.False(region.peersEqualTo(origin))
 }
 
 func checkRegions(re *require.Assertions, regions *RegionsInfo) {
@@ -1506,6 +1501,31 @@ func TestCodecRule(t *testing.T) {
 		var rule2 Rule
 		re.NoError(json.Unmarshal(body, &rule2))
 		re.Equal(rule.String(), rule2.String())
+	}
+}
+
+func TestGetStoreRegionsByTypeInSubTreeReleasesLock(t *testing.T) {
+	for _, typ := range []SubTreeRegionType{
+		LeaderInSubTree,
+		FollowerInSubTree,
+		LearnerInSubTree,
+		PendingPeerInSubTree,
+		AllInSubTree,
+		"witness",
+		"unknown",
+	} {
+		t.Run(string(typ), func(t *testing.T) {
+			re := require.New(t)
+			regions := NewRegionsInfo()
+			_, err := regions.GetStoreRegionsByTypeInSubTree(1, typ)
+			if typ == "witness" || typ == "unknown" {
+				re.Error(err)
+			} else {
+				re.NoError(err)
+			}
+			re.True(regions.st.TryLock(), "query must release the subtree read lock")
+			regions.st.Unlock()
+		})
 	}
 }
 

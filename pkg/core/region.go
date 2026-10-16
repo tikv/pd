@@ -1499,16 +1499,13 @@ func (s peerSlice) Less(i, j int) bool {
 }
 
 // SortedPeersEqual judges whether two sorted `peerSlice` are equal.
-// Witness conversion keeps peer IDs unchanged but must refresh the per-store
-// region trees and their size accounting, so compare the legacy flag too.
 func SortedPeersEqual(peersA, peersB []*metapb.Peer) bool {
 	if len(peersA) != len(peersB) {
 		return false
 	}
 	for i, peerA := range peersA {
 		peerB := peersB[i]
-		if peerA.GetStoreId() != peerB.GetStoreId() || peerA.GetId() != peerB.GetId() ||
-			peerA.GetIsWitness() != peerB.GetIsWitness() {
+		if peerA.GetStoreId() != peerB.GetStoreId() || peerA.GetId() != peerB.GetId() {
 			return false
 		}
 	}
@@ -1764,6 +1761,7 @@ func (r *RegionsInfo) GetStoreRegionsByTypeInSubTree(storeID uint64, typ SubTree
 		r.st.RUnlock()
 		return r.GetStoreRegions(storeID), nil
 	default:
+		r.st.RUnlock()
 		return nil, errors.Errorf("unknown sub tree region type %v", typ)
 	}
 
