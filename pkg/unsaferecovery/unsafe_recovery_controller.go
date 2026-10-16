@@ -119,6 +119,7 @@ type cluster interface {
 	ResetRegionCache()
 	AllocID(uint32) (uint64, uint32, error)
 	BuryStore(storeID uint64, forceBury bool) error
+	CancelAllOperators()
 	GetSchedulerConfig() sc.SchedulerConfigProvider
 }
 
@@ -574,7 +575,7 @@ func (u *Controller) changeStage(stage stage) {
 	switch u.stage {
 	case Idle:
 	case CollectReport:
-		// TODO: clean up existing operators
+		u.cluster.CancelAllOperators()
 		output.Info = "Unsafe recovery enters collect report stage"
 		if u.autoDetect {
 			output.Details = append(output.Details, "auto detect mode with no specified Failed stores")

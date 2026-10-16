@@ -462,6 +462,10 @@ func (c *splitScatterController) recordSplitScatterBatch(sourceRegionID, splitVe
 }
 
 func (c *splitScatterController) dispatchSplitScatterRegions() {
+	generation := c.opController.GetOperatorGeneration()
+	if c.cluster.IsSchedulingHalted() {
+		return
+	}
 	now := time.Now()
 	if c.cleanupExpiredPendingSplitScatter() == 0 {
 		return
@@ -564,7 +568,7 @@ func (c *splitScatterController) dispatchSplitScatterRegions() {
 					zap.String("operator-desc", op.Desc()))
 				continue
 			}
-			if !c.opController.AddOperator(op) {
+			if !c.opController.AddOperatorWithGeneration(generation, operator.SchedulingHalted, op) {
 				splitScatterDispatchAddOperatorFailedCounter.Inc()
 				c.delayPendingSplitScatter(pending)
 				log.Info("dispatch internal split scatter add operator failed",
