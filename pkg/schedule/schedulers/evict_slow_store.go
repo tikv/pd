@@ -527,9 +527,9 @@ type evictSlowStoreScheduler struct {
 	*BaseScheduler
 	conf    *evictSlowStoreSchedulerConfig
 	handler http.Handler
-	// evictLeaderRound rotates the evicted store order across Schedule calls. Schedule
-	// runs on a single goroutine, so it needs no lock.
-	evictLeaderRound int
+	// evictLeaderNext is the index in getStores() at which the next schedulerEvictLeader
+	// call starts. Schedule runs on a single goroutine, so it needs no lock.
+	evictLeaderNext int
 }
 
 // ServeHTTP implements the http.Handler interface.
@@ -730,35 +730,53 @@ func (s *evictSlowStoreScheduler) cleanupEvictLeader(cluster sche.SchedulerClust
 	}
 }
 
-// schedulerEvictLeader returns at most batch operators. One scheduleEvictLeaderOnce round
-// yields an operator per evicted store, so with several evicted stores the shared batch loop
-// can overshoot; the result is truncated here. The store order is rotated on every call so
-// the truncation does not always favor the first evicted store.
+// schedulerEvictLeader returns at most batch operators. It visits the evicted stores
+// round-robin, one operator per store per pass, and stops as soon as batch operators
+// exist, so the work per call is bounded by batch rather than by the number of evicted
+// stores (the shared scheduleEvictLeaderBatch builds an operator for every store on each
+// pass). Passes repeat while they still produce new operators, which keeps the
+// single-store behavior of up to batch operators per call. The next call resumes after
+// the last store that produced an operator, so every evicted store gets its turn.
 func (s *evictSlowStoreScheduler) schedulerEvictLeader(cluster sche.SchedulerCluster) []*operator.Operator {
-	s.evictLeaderRound++
-	ops := scheduleEvictLeaderBatch(s.GetName(), cluster, rotatedEvictLeaderStores{
-		evictSlowStoreSchedulerConfig: s.conf,
-		offset:                        s.evictLeaderRound,
-	})
-	if batch := s.conf.getBatch(); len(ops) > batch {
-		ops = ops[:batch]
+	stores := s.conf.getStores()
+	batch := s.conf.getBatch()
+	n := len(stores)
+	if n == 0 {
+		return nil
+	}
+	start := s.evictLeaderNext % n
+	ops := make([]*operator.Operator, 0, batch)
+	for len(ops) < batch {
+		progressed := false
+		for i := range n {
+			if len(ops) >= batch {
+				break
+			}
+			idx := (start + i) % n
+			before := len(ops)
+			ops = uniqueAppendOperator(ops, scheduleEvictLeaderOnce(s.GetName(), cluster,
+				singleEvictLeaderStore{evictSlowStoreSchedulerConfig: s.conf, storeID: stores[idx]})...)
+			if len(ops) > before {
+				progressed = true
+				s.evictLeaderNext = idx + 1
+			}
+		}
+		if !progressed {
+			break
+		}
 	}
 	return ops
 }
 
-// rotatedEvictLeaderStores rotates the evicted store order by offset.
-type rotatedEvictLeaderStores struct {
+// singleEvictLeaderStore narrows the evicted stores to one store, so
+// scheduleEvictLeaderOnce builds at most one operator.
+type singleEvictLeaderStore struct {
 	*evictSlowStoreSchedulerConfig
-	offset int
+	storeID uint64
 }
 
-func (r rotatedEvictLeaderStores) getStores() []uint64 {
-	stores := r.evictSlowStoreSchedulerConfig.getStores()
-	if n := len(stores); n > 1 {
-		k := r.offset % n
-		return slices.Concat(stores[k:], stores[:k])
-	}
-	return stores
+func (s singleEvictLeaderStore) getStores() []uint64 {
+	return []uint64{s.storeID}
 }
 
 // IsScheduleAllowed implements the Scheduler interface.
@@ -1115,10 +1133,17 @@ const minRemainingHealthyDomains = 2
 // eviction is only allowed when every placement rule enforces the same non-empty isolation
 // prefix, so draining a single domain is known to be safe for every region.
 //
+// With placement rules disabled, replica scheduling follows the replication config and the
+// RuleManager can still hold rules that are no longer enforced, so no domain is reported and
+// multiple slow stores keep the conservative do-nothing behavior.
+//
 // This runs on every detection and reconciliation cycle, so it must stay cheap: it delegates
 // to GetIsolationPrefix rather than GetAllRules, which would clone every rule through JSON
 // and sort the result on each call.
 func groupIsolationLabels(cluster sche.SchedulerCluster) ([]string, bool) {
+	if !cluster.GetSchedulerConfig().IsPlacementRulesEnabled() {
+		return nil, false
+	}
 	return cluster.GetRuleManager().GetIsolationPrefix()
 }
 
@@ -1221,16 +1246,18 @@ func hasEnoughHealthyDomains(cluster sche.SchedulerCluster, labels []string, dra
 	return false
 }
 
-// startEvictDiskSlowStores marks the given stores as evicted and records their status.
-func (s *evictSlowStoreScheduler) startEvictDiskSlowStores(cluster sche.SchedulerCluster, stores []*core.StoreInfo) {
+// startEvictDiskSlowStores marks the given stores as evicted and records their status. It
+// reports whether the stores were added.
+func (s *evictSlowStoreScheduler) startEvictDiskSlowStores(cluster sche.SchedulerCluster, stores []*core.StoreInfo) bool {
 	ids := storeIDs(stores)
 	if err := s.prepareEvictLeader(cluster, ids); err != nil {
 		log.Info("prepare for evicting leader failed", zap.Error(err), zap.Uint64s("store-ids", ids))
-		return
+		return false
 	}
 	for _, id := range ids {
 		evictedSlowStoreStatusGauge.WithLabelValues(strconv.FormatUint(id, 10), string(diskSlowStore)).Set(1)
 	}
+	return true
 }
 
 func (s *evictSlowStoreScheduler) scheduleDiskSlowStore(cluster sche.SchedulerCluster) {
@@ -1342,6 +1369,14 @@ func (s *evictSlowStoreScheduler) reconcileDiskSlowStoreGroup(cluster sche.Sched
 		return
 	}
 
+	// Expand before the recovery check: a same-domain store that becomes slow while the
+	// evicted ones wait out recovery-duration must be drained now, not after the window.
+	// Adding it resets the recovery clock, so the group is released only once every
+	// store, including the new one, has been stable for the whole duration.
+	if s.expandLockedDomain(cluster, slowStores, survivorID) {
+		return
+	}
+
 	// Group recovery: release the whole group only when every evicted store has
 	// recovered below the threshold for the recovery duration.
 	if maxScore <= slowStoreRecoverThreshold {
@@ -1360,36 +1395,33 @@ func (s *evictSlowStoreScheduler) reconcileDiskSlowStoreGroup(cluster sche.Sched
 		log.Info("evict-slow-store-scheduler persist config failed", zap.Error(err))
 		return
 	}
+}
 
+// expandLockedDomain adds newly-slow stores in the locked domain to the eviction set and
+// reports whether it added any. survivorID is an evicted store still in the cluster; all
+// evicted stores share its domain by construction.
+func (s *evictSlowStoreScheduler) expandLockedDomain(cluster sche.SchedulerCluster, slowStores []*core.StoreInfo, survivorID uint64) bool {
 	// Resolve the locked domain from a surviving evicted store. If grouping was turned off,
 	// the isolation prefix is no longer well-defined (rules changed), or the locked store no
 	// longer carries the labels, keep draining the current group but do not expand.
-	// survivorID is always set here because isEvictingDiskSlowStore returned true and
-	// every surviving store was visited in the loop above.
 	if !s.conf.isGroupEvictionEnabled() {
-		return
+		return false
 	}
 	labels, ok := groupIsolationLabels(cluster)
 	if !ok {
-		return
+		return false
 	}
 	lockedRef := cluster.GetStore(survivorID)
 	if lockedRef == nil || !hasAllLabels(lockedRef, labels) {
-		return
+		return false
 	}
 
 	// Freeze brake: if any slow store sits outside the locked domain, stop expanding
 	// the eviction set (we never start draining a second domain).
 	for _, store := range slowStores {
 		if !sameLocation(lockedRef, store, labels) {
-			return
+			return false
 		}
-	}
-
-	// Only expand if the topology can still absorb draining the locked domain.
-	// This prevents the single-store → reconcile-add bypass of the domain guard.
-	if !hasEnoughHealthyDomains(cluster, labels, lockedRef) {
-		return
 	}
 
 	// Reconcile: add newly-slow same-domain stores that reached the evict threshold.
@@ -1404,11 +1436,19 @@ func (s *evictSlowStoreScheduler) reconcileDiskSlowStoreGroup(cluster sche.Sched
 			toAdd = append(toAdd, store)
 		}
 	}
-	if len(toAdd) > 0 {
-		log.Info("adding newly-slow stores in the locked domain to eviction",
-			zap.Strings("isolation-labels", labels), zap.Uint64s("store-ids", storeIDs(toAdd)))
-		s.startEvictDiskSlowStores(cluster, toAdd)
+	if len(toAdd) == 0 {
+		return false
 	}
+
+	// Only expand if the topology can still absorb draining the locked domain.
+	// This prevents the single-store → reconcile-add bypass of the domain guard.
+	if !hasEnoughHealthyDomains(cluster, labels, lockedRef) {
+		return false
+	}
+
+	log.Info("adding newly-slow stores in the locked domain to eviction",
+		zap.Strings("isolation-labels", labels), zap.Uint64s("store-ids", storeIDs(toAdd)))
+	return s.startEvictDiskSlowStores(cluster, toAdd)
 }
 
 // newEvictSlowStoreScheduler creates a scheduler that detects and evicts slow stores.

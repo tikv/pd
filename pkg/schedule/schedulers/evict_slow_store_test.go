@@ -2020,3 +2020,110 @@ func requireSlowMarkCleared(re *require.Assertions, tc *mockcluster.Cluster, ids
 		tc.SlowStoreRecovered(id)
 	}
 }
+
+// TestEvictSlowStoreExpandsDuringRecoveryWindow: while the evicted stores wait out
+// recovery-duration, a same-domain store that becomes slow is drained right away, and the
+// group is not released early because the recovery clock restarts.
+func TestEvictSlowStoreExpandsDuringRecoveryWindow(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	tc.AddLabelsStore(1, 0, map[string]string{"zone": "z1", "host": "h1"})
+	tc.AddLabelsStore(2, 0, map[string]string{"zone": "z1", "host": "h2"})
+	tc.AddLabelsStore(3, 0, map[string]string{"zone": "z1", "host": "h3"})
+	tc.AddLabelsStore(4, 0, map[string]string{"zone": "z2", "host": "h4"})
+	tc.AddLabelsStore(5, 0, map[string]string{"zone": "z3", "host": "h5"})
+	for id := uint64(1); id <= 3; id++ {
+		tc.AddLeaderRegion(id, id, 4, 5)
+	}
+
+	es := createTestEvictSlowStoreScheduler(re, oc)
+	enableGroupEviction(re, tc, es, "zone", "zone", "host")
+	conf := es.(*evictSlowStoreScheduler).conf
+
+	setStoreSlowScore(tc, 1, 100)
+	setStoreSlowScore(tc, 2, 100)
+	es.Schedule(tc, false)
+	re.ElementsMatch([]uint64{1, 2}, conf.evictedStores())
+
+	// Both recover and start waiting out the default recovery-duration.
+	setStoreSlowScore(tc, 1, 0)
+	setStoreSlowScore(tc, 2, 0)
+	es.Schedule(tc, false)
+	re.ElementsMatch([]uint64{1, 2}, conf.evictedStores())
+	re.False(conf.readyForRecovery())
+
+	// A third store in the same zone becomes slow inside the window.
+	setStoreSlowScore(tc, 3, 100)
+	es.Schedule(tc, false)
+	re.ElementsMatch([]uint64{1, 2, 3}, conf.evictedStores())
+	re.True(tc.GetStore(3).EvictedAsSlowStore())
+	re.False(conf.readyForRecovery())
+}
+
+// TestEvictSlowStorePlacementRulesDisabledNoGroup: with placement rules disabled the
+// RuleManager keeps rules that are no longer enforced, so they must not authorize group
+// eviction; multiple slow stores keep the conservative do-nothing behavior.
+func TestEvictSlowStorePlacementRulesDisabledNoGroup(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	tc.AddLabelsStore(1, 0, map[string]string{"zone": "z1", "host": "h1"})
+	tc.AddLabelsStore(2, 0, map[string]string{"zone": "z1", "host": "h2"})
+	tc.AddLabelsStore(3, 0, map[string]string{"zone": "z2", "host": "h3"})
+	tc.AddLabelsStore(4, 0, map[string]string{"zone": "z3", "host": "h4"})
+	tc.AddLeaderRegion(1, 1, 3, 4)
+	tc.AddLeaderRegion(2, 2, 3, 4)
+
+	es := createTestEvictSlowStoreScheduler(re, oc)
+	enableGroupEviction(re, tc, es, "zone", "zone", "host")
+	conf := es.(*evictSlowStoreScheduler).conf
+	_, ok := groupIsolationLabels(tc)
+	re.True(ok)
+
+	tc.SetEnablePlacementRules(false)
+	_, ok = groupIsolationLabels(tc)
+	re.False(ok)
+
+	setStoreSlowScore(tc, 1, 100)
+	setStoreSlowScore(tc, 2, 100)
+	ops, _ := es.Schedule(tc, false)
+	re.Empty(ops)
+	re.Empty(conf.evictedStores())
+}
+
+// TestEvictSlowStoreBatchBoundsWorkPerCall: with many evicted stores and a small batch, one
+// call serves only the next batch stores in round-robin order, so it never builds an
+// operator for every evicted store, and consecutive calls cover the whole group.
+func TestEvictSlowStoreBatchBoundsWorkPerCall(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	const n = 20
+	tc.AddLeaderStore(n+1, 0)
+	tc.AddLeaderStore(n+2, 0)
+	evicted := make([]uint64, 0, n)
+	for id := uint64(1); id <= n; id++ {
+		tc.AddLeaderStore(id, 0)
+		tc.AddLeaderRegion(id, id, n+1, n+2)
+		evicted = append(evicted, id)
+	}
+	es := createTestEvictSlowStoreScheduler(re, oc).(*evictSlowStoreScheduler)
+	es.conf.Batch = 3
+	re.NoError(es.conf.setEvictedStoresAndPersist(evicted))
+
+	seen := make(map[uint64]struct{})
+	for call := range 7 {
+		ops := es.schedulerEvictLeader(tc)
+		re.Len(ops, 3)
+		for i, op := range ops {
+			// Region id equals the id of the store that leads it.
+			re.Equal(uint64((call*3+i)%n+1), op.RegionID())
+			seen[op.RegionID()] = struct{}{}
+		}
+	}
+	re.Len(seen, n)
+}
