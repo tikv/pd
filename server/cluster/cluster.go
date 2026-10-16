@@ -1508,6 +1508,7 @@ func (c *RaftCluster) GetBasicCluster() *core.BasicCluster {
 // UpdateStoreLabels updates a store's location labels
 // If 'force' is true, the origin labels will be overwritten with the new one forcibly.
 func (c *RaftCluster) UpdateStoreLabels(storeID uint64, labels []*metapb.StoreLabel, force bool) error {
+	failpoint.InjectCall("beforeStoreLabelsUpdate")
 	c.storeStateLock.Lock(uint32(storeID))
 	defer c.storeStateLock.Unlock(uint32(storeID))
 
@@ -1525,6 +1526,7 @@ func (c *RaftCluster) UpdateStoreLabels(storeID uint64, labels []*metapb.StoreLa
 
 // DeleteStoreLabel updates a store's location labels
 func (c *RaftCluster) DeleteStoreLabel(storeID uint64, labelKey string) error {
+	failpoint.InjectCall("beforeStoreLabelsUpdate")
 	c.storeStateLock.Lock(uint32(storeID))
 	defer c.storeStateLock.Unlock(uint32(storeID))
 
@@ -1555,6 +1557,7 @@ func (c *RaftCluster) DeleteStoreLabel(storeID uint64, labelKey string) error {
 
 // PutMetaStore puts a store.
 func (c *RaftCluster) PutMetaStore(store *metapb.Store) error {
+	failpoint.InjectCall("beforePutStore")
 	storeID := store.GetId()
 	// wasKnown alone isn't enough to decide whether to guard
 	// addStoreLimitInternal against resurrecting a removed entry: a plain
@@ -1588,7 +1591,8 @@ func (c *RaftCluster) PutMetaStore(store *metapb.Store) error {
 	// storage), since there's no prior entry to protect from resurrection.
 	wasKnown := c.GetStore(storeID) != nil
 	failpoint.InjectCall("putMetaStoreAfterWasKnownRead")
-	if err := c.putStoreImpl(store, false); err != nil {
+	// Only a registration may replace or clear the reported protocol range.
+	if err := c.putStoreImpl(store, false, core.SetStoreTxnProtocolVersionRange(store.TxnProtocolVersionRange)); err != nil {
 		return err
 	}
 	c.OnStoreVersionChange()
@@ -1599,7 +1603,9 @@ func (c *RaftCluster) PutMetaStore(store *metapb.Store) error {
 // putStoreImpl puts a store.
 // If 'force' is true, the store's labels will overwrite those labels which already existed in the store.
 // If 'force' is false, the store's labels will merge into those labels which already existed in the store.
-func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool) error {
+// opts carries metadata updates specific to the caller, such as registration-only fields.
+// The caller must hold storeStateLock through the metadata read, persistence and cache update.
+func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool, opts ...core.StoreCreateOption) error {
 	if store.GetId() == 0 {
 		return errors.Errorf("invalid put store %v", store)
 	}
@@ -1632,11 +1638,11 @@ func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool) error {
 		}
 	}
 
-	opts := make([]core.StoreCreateOption, 0)
 	s := c.GetStore(store.GetId())
 	if s == nil {
 		// Add a new store.
-		s = core.NewStoreInfo(store)
+		s = core.NewStoreInfo(store, opts...)
+		opts = nil
 	} else {
 		// Use the given labels to update the store.
 		labels := store.GetLabels()
@@ -1655,6 +1661,7 @@ func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool) error {
 	if err := c.checkStoreLabels(s); err != nil {
 		return err
 	}
+	failpoint.InjectCall("beforePersistStore")
 	return c.setStore(s, opts...)
 }
 
