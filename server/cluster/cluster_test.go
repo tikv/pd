@@ -3652,6 +3652,41 @@ func TestScheduleConfigPersistenceIsSerialized(t *testing.T) {
 	re.Equal(float64(60), reloadedOpt.GetScheduleConfig().DefaultStoreLimit.AddPeer)
 }
 
+func TestInitSchedulersRemovesDeprecatedWitnessConfigs(t *testing.T) {
+	re := require.New(t)
+	tc, co, cleanup := prepare(nil, nil, nil, re)
+	defer cleanup()
+
+	legacy := config.NewConfig()
+	re.NoError(legacy.Adjust(nil, false))
+	re.False(legacy.Schedule.EnableWitness)
+	legacy.Schedule.Schedulers = append(legacy.Schedule.Schedulers,
+		sc.SchedulerConfig{Type: "balance-witness"},
+		sc.SchedulerConfig{Type: "transfer-witness-leader", Disable: true},
+	)
+	re.NoError(tc.storage.SaveConfig(legacy))
+	for _, name := range []string{"balance-witness-scheduler", "transfer-witness-leader-scheduler"} {
+		re.NoError(tc.storage.SaveSchedulerConfig(name, []byte("{}")))
+	}
+	re.NoError(tc.opt.Reload(tc.storage))
+	re.Empty(tc.GetRegions())
+
+	co.InitSchedulers(false)
+
+	names, _, err := tc.storage.LoadAllSchedulerConfigs()
+	re.NoError(err)
+	re.NotContains(names, "balance-witness-scheduler")
+	re.NotContains(names, "transfer-witness-leader-scheduler")
+	re.Contains(names, "balance-region-scheduler")
+	re.Contains(co.GetSchedulersController().GetSchedulerHandlers(), "balance-region-scheduler")
+
+	re.NoError(tc.opt.Reload(tc.storage))
+	for _, scheduler := range tc.GetScheduleConfig().Schedulers {
+		re.NotEqual("balance-witness", scheduler.Type)
+		re.NotEqual("transfer-witness-leader", scheduler.Type)
+	}
+}
+
 func TestInitSchedulersPreservesConcurrentScheduleUpdate(t *testing.T) {
 	re := require.New(t)
 	oldAddPeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)

@@ -293,6 +293,13 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 			return
 		default:
 		}
+		if name == "balance-witness-scheduler" || name == "transfer-witness-leader-scheduler" {
+			// These schedulers may have been configured even when witness was disabled.
+			if err := c.cluster.GetStorage().RemoveSchedulerConfig(name); err != nil {
+				log.Warn("cannot remove deprecated scheduler config", zap.String("scheduler-name", name), errs.ZapError(err))
+			}
+			continue
+		}
 		data := configs[i]
 		typ := schedulers.FindSchedulerTypeByName(name)
 		var cfg sc.SchedulerConfig
