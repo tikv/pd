@@ -17,6 +17,7 @@ package filter
 import (
 	"slices"
 	"strconv"
+	"strings"
 	"sync/atomic"
 
 	"go.uber.org/zap"
@@ -1113,7 +1114,7 @@ func (f *isolationFilter) Target(_ config.SharedConfigProvider, store *core.Stor
 		match := true
 		for idx, constraint := range constrainList {
 			// Check every constraint in constrainList
-			match = store.GetLabelValue(f.locationLabels[idx]) == constraint && match
+			match = strings.EqualFold(store.GetLabelValue(f.locationLabels[idx]), constraint) && match
 		}
 		if len(constrainList) > 0 && match {
 			return statusStoreNotMatchIsolation
