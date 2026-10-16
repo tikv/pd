@@ -155,7 +155,8 @@ func (m *Manager) initGroupLocked(group *Group) {
 			ID:              group.ID,
 			CreateTimestamp: group.CreateTimestamp,
 			LeaderStoreID:   group.LeaderStoreID,
-			VoterStoreIDs:   slices.Clone(group.VoterStoreIDs),
+			VoterStoreIDs:   normalizeVoters(group.VoterStoreIDs),
+			BalancePolicy:   group.BalancePolicy,
 		},
 		availability:        groupDegraded,
 		degradedExpiredAt:   newDegradedExpiredAtFromNow(),
@@ -462,6 +463,10 @@ func (m *Manager) GetAllAffinityGroupStates() []*GroupState {
 
 // SyncGroupFromEtcd synchronizes a group from etcd to the in-memory state.
 func (m *Manager) SyncGroupFromEtcd(group *Group) {
+	// Voter order has no meaning, but affinity comparisons use canonical order.
+	copy := *group
+	copy.VoterStoreIDs = normalizeVoters(group.VoterStoreIDs)
+	group = &copy
 	m.metaMutex.Lock()
 	defer m.metaMutex.Unlock()
 
@@ -470,7 +475,8 @@ func (m *Manager) SyncGroupFromEtcd(group *Group) {
 	existingGroup, exists := m.groups[group.ID]
 	if exists &&
 		existingGroup.LeaderStoreID == group.LeaderStoreID &&
-		slices.Equal(existingGroup.VoterStoreIDs, group.VoterStoreIDs) {
+		slices.Equal(existingGroup.VoterStoreIDs, group.VoterStoreIDs) &&
+		existingGroup.BalancePolicy == group.BalancePolicy {
 		m.RUnlock()
 		return
 	}
@@ -527,6 +533,10 @@ func (m *Manager) SyncGroupFromEtcd(group *Group) {
 		}
 		if !slices.Equal(groupInfo.VoterStoreIDs, group.VoterStoreIDs) {
 			groupInfo.VoterStoreIDs = slices.Clone(group.VoterStoreIDs)
+			changed = true
+		}
+		if groupInfo.BalancePolicy != group.BalancePolicy {
+			groupInfo.BalancePolicy = group.BalancePolicy
 			changed = true
 		}
 
