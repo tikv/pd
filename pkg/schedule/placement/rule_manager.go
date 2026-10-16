@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
-	"slices"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -48,8 +47,6 @@ const (
 	DefaultGroupID = "pd"
 	// DefaultRuleID is the default rule ID.
 	DefaultRuleID = "default"
-	// defaultWitnessRuleID is the default witness rule ID.
-	defaultWitnessRuleID = "witness"
 )
 
 // RuleManager is responsible for the lifecycle of all placement Rules.
@@ -110,41 +107,14 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string, isolat
 	}
 	if len(m.ruleConfig.rules) == 0 {
 		// migrate from old config.
-		var defaultRules []*Rule
-		if m.conf != nil && m.conf.IsWitnessAllowed() && maxReplica >= 3 {
-			// Because maxReplica is actually always an odd number, so directly divided by 2
-			witnessCount := maxReplica / 2
-			defaultRules = append(defaultRules,
-				[]*Rule{
-					{
-						GroupID:        DefaultGroupID,
-						ID:             DefaultRuleID,
-						Role:           Voter,
-						Count:          maxReplica - witnessCount,
-						LocationLabels: locationLabels,
-						IsolationLevel: isolationLevel,
-					},
-					{
-						GroupID:        DefaultGroupID,
-						ID:             defaultWitnessRuleID,
-						Role:           Voter,
-						Count:          witnessCount,
-						IsWitness:      true,
-						LocationLabels: locationLabels,
-						IsolationLevel: isolationLevel,
-					},
-				}...,
-			)
-		} else {
-			defaultRules = append(defaultRules, &Rule{
-				GroupID:        DefaultGroupID,
-				ID:             DefaultRuleID,
-				Role:           Voter,
-				Count:          maxReplica,
-				LocationLabels: locationLabels,
-				IsolationLevel: isolationLevel,
-			})
-		}
+		defaultRules := []*Rule{{
+			GroupID:        DefaultGroupID,
+			ID:             DefaultRuleID,
+			Role:           Voter,
+			Count:          maxReplica,
+			LocationLabels: locationLabels,
+			IsolationLevel: isolationLevel,
+		}}
 		if err := m.storage.RunInTxn(m.ctx, func(txn kv.Txn) (err error) {
 			for _, defaultRule := range defaultRules {
 				if err := m.storage.SaveRule(txn, defaultRule.StoreKey(), defaultRule); err != nil {
@@ -232,8 +202,11 @@ func (m *RuleManager) loadGroups() error {
 	})
 }
 
-// AdjustRule check and adjust rule from client or storage.
+// AdjustRule checks and adjusts a rule from a client or storage.
 func (m *RuleManager) AdjustRule(r *Rule, groupID string) (err error) {
+	if r.IsWitness {
+		return errs.ErrRuleContent.FastGenByArgs("witness peers are no longer supported")
+	}
 	r.StartKey, err = hex.DecodeString(r.StartKeyHex)
 	if err != nil {
 		return errs.ErrHexDecodingString.FastGenByArgs(r.StartKeyHex)
@@ -281,15 +254,9 @@ func (m *RuleManager) AdjustRule(r *Rule, groupID string) (err error) {
 	if r.Role == Leader && r.Count > 1 {
 		return errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("define multiple leaders by count %d", r.Count))
 	}
-	if r.IsWitness && r.Count > m.conf.GetMaxReplicas()/2 {
-		return errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("define too many witness by count %d", r.Count))
-	}
 	for _, c := range r.LabelConstraints {
 		if !validateOp(c.Op) {
 			return errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("invalid op %s", c.Op))
-		}
-		if r.IsWitness && c.Key == core.EngineKey && slices.Contains(c.Values, core.EngineTiFlash) {
-			return errs.ErrRuleContent.FastGenByArgs("witness can't combine with tiflash")
 		}
 	}
 
@@ -483,7 +450,7 @@ func (m *RuleManager) IsRegionFitCached(storeSet StoreSet, region *core.RegionIn
 func (m *RuleManager) FitRegionWithoutCache(storeSet StoreSet, region *core.RegionInfo) (fit *RegionFit) {
 	regionStores := getStoresByRegion(storeSet, region)
 	rules := m.GetRulesForApplyRegion(region)
-	fit = fitRegion(regionStores, region, rules, m.conf.IsWitnessAllowed())
+	fit = fitRegion(regionStores, region, rules)
 	fit.regionStores = regionStores
 	fit.rules = rules
 	return fit
@@ -499,7 +466,7 @@ func (m *RuleManager) FitRegion(storeSet StoreSet, region *core.RegionInfo) (fit
 			return fit
 		}
 	}
-	fit = fitRegion(regionStores, region, rules, m.conf.IsWitnessAllowed())
+	fit = fitRegion(regionStores, region, rules)
 	fit.regionStores = regionStores
 	fit.rules = rules
 	if isCached {
@@ -900,7 +867,7 @@ func checkRule(rule *Rule, stores []*core.StoreInfo) bool {
 	})
 }
 
-// SetKeyType will update keyType for adjustRule()
+// SetKeyType updates the key type used when validating rules.
 func (m *RuleManager) SetKeyType(h string) *RuleManager {
 	m.Lock()
 	defer m.Unlock()

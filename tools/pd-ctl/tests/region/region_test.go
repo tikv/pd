@@ -146,7 +146,6 @@ func (suite *regionTestSuite) checkRegion(cluster *pdTests.TestCluster) {
 		{[]string{"region", "store", "1", "--type=leader"}, getRegionsByType(1, core.LeaderInSubTree)},
 		{[]string{"region", "store", "1", "--type=follower"}, getRegionsByType(1, core.FollowerInSubTree)},
 		{[]string{"region", "store", "1", "--type=learner"}, getRegionsByType(1, core.LearnerInSubTree)},
-		{[]string{"region", "store", "1", "--type=witness"}, getRegionsByType(1, core.WitnessInSubTree)},
 		{[]string{"region", "store", "1", "--type=pending"}, getRegionsByType(1, core.PendingPeerInSubTree)},
 		{[]string{"region", "store", "2", "--type=pending"}, getRegionsByType(2, core.PendingPeerInSubTree)},
 		{[]string{"region", "store", "1", "--type=all"}, []*core.RegionInfo{r1, r2, r3, r4}},

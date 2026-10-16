@@ -71,7 +71,6 @@ type StoreInfo struct {
 	leaderCount            int
 	regionCount            int
 	learnerCount           int
-	witnessCount           int
 	leaderSize             int64
 	regionSize             int64
 	pendingPeerCount       int
@@ -126,7 +125,6 @@ func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
 		leaderCount:         s.leaderCount,
 		regionCount:         s.regionCount,
 		learnerCount:        s.learnerCount,
-		witnessCount:        s.witnessCount,
 		leaderSize:          s.leaderSize,
 		regionSize:          s.regionSize,
 		pendingPeerCount:    s.pendingPeerCount,
@@ -173,7 +171,6 @@ func (s *StoreInfo) ShallowClone(opts ...StoreCreateOption) *StoreInfo {
 		leaderCount:         s.leaderCount,
 		regionCount:         s.regionCount,
 		learnerCount:        s.learnerCount,
-		witnessCount:        s.witnessCount,
 		leaderSize:          s.leaderSize,
 		regionSize:          s.regionSize,
 		pendingPeerCount:    s.pendingPeerCount,
@@ -304,11 +301,6 @@ func (s *StoreInfo) GetNetworkSlowTriggers() uint64 {
 	return s.networkSlowTriggers
 }
 
-// WitnessScore returns the store's witness score.
-func (s *StoreInfo) WitnessScore(delta int64) float64 {
-	return float64(int64(s.GetWitnessCount()) + delta)
-}
-
 // IsSlow checks if the slow score reaches the threshold.
 func (s *StoreInfo) IsSlow() bool {
 	s.mu.RLock()
@@ -393,11 +385,6 @@ func (s *StoreInfo) GetRegionCount() int {
 // GetLearnerCount returns the learner count of the store.
 func (s *StoreInfo) GetLearnerCount() int {
 	return s.learnerCount
-}
-
-// GetWitnessCount returns the witness count of the store.
-func (s *StoreInfo) GetWitnessCount() int {
-	return s.witnessCount
 }
 
 // GetLeaderSize returns the leader size of the store.
@@ -859,19 +846,6 @@ func (s *StoresInfo) GetStoreCount() int {
 	return len(s.stores)
 }
 
-// GetNonWitnessVoterStores returns all Stores that contains the non-witness's voter peer.
-func (s *StoresInfo) GetNonWitnessVoterStores(region *RegionInfo) []*StoreInfo {
-	s.RLock()
-	defer s.RUnlock()
-	var stores []*StoreInfo
-	for id := range region.GetNonWitnessVoters() {
-		if store, ok := s.stores[id]; ok && store != nil {
-			stores = append(stores, store)
-		}
-	}
-	return stores
-}
-
 // GetAvgNetworkSlowScore returns the average network slow score of a store.
 func (s *StoresInfo) GetAvgNetworkSlowScore(storeID uint64) uint64 {
 	s.RLock()
@@ -1070,13 +1044,12 @@ func (s *StoresInfo) DeleteStore(store *StoreInfo) {
 }
 
 // UpdateStoreStatus updates the information of the store.
-func (s *StoresInfo) UpdateStoreStatus(storeID uint64, leaderCount, regionCount, witnessCount, learnerCount, pendingPeerCount int, leaderSize int64, regionSize int64) {
+func (s *StoresInfo) UpdateStoreStatus(storeID uint64, leaderCount, regionCount, learnerCount, pendingPeerCount int, leaderSize int64, regionSize int64) {
 	s.Lock()
 	defer s.Unlock()
 	if store, ok := s.stores[storeID]; ok {
 		newStore := store.ShallowClone(SetLeaderCount(leaderCount),
 			SetRegionCount(regionCount),
-			SetWitnessCount(witnessCount),
 			SetLearnerCount(learnerCount),
 			SetPendingPeerCount(pendingPeerCount),
 			SetLeaderSize(leaderSize),

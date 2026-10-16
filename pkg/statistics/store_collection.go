@@ -46,7 +46,6 @@ const (
 
 	clusterStatusRegionCount     = "region_count"
 	clusterStatusLeaderCount     = "leader_count"
-	clusterStatusWitnessCount    = "witness_count"
 	clusterStatusLearnerCount    = "learner_count"
 	clusterStatusStorageSize     = "storage_size"
 	clusterStatusStorageCapacity = "storage_capacity"
@@ -78,7 +77,6 @@ var storeStatuses = []string{
 var storeStats = []string{
 	clusterStatusRegionCount,
 	clusterStatusLeaderCount,
-	clusterStatusWitnessCount,
 	clusterStatusLearnerCount,
 	clusterStatusStorageSize,
 	clusterStatusStorageCapacity,
@@ -176,7 +174,6 @@ func (s *storeStatistics) observe(store *core.StoreInfo) {
 	clusterStatusGauge.WithLabelValues(clusterStatusStorageCapacity, engine, id).Set(float64(store.GetCapacity()))
 	clusterStatusGauge.WithLabelValues(clusterStatusRegionCount, engine, id).Set(float64(store.GetRegionCount()))
 	clusterStatusGauge.WithLabelValues(clusterStatusLeaderCount, engine, id).Set(float64(store.GetLeaderCount()))
-	clusterStatusGauge.WithLabelValues(clusterStatusWitnessCount, engine, id).Set(float64(store.GetWitnessCount()))
 	clusterStatusGauge.WithLabelValues(clusterStatusLearnerCount, engine, id).Set(float64(store.GetLearnerCount()))
 	limit, ok := store.GetStoreLimit().(*storelimit.SlidingWindows)
 	if ok {
@@ -195,7 +192,6 @@ func (s *storeStatistics) observe(store *core.StoreInfo) {
 	storeStatusGauge.WithLabelValues(storeAddress, id, "region_count").Set(float64(store.GetRegionCount()))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "leader_size").Set(float64(store.GetLeaderSize()))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "leader_count").Set(float64(store.GetLeaderCount()))
-	storeStatusGauge.WithLabelValues(storeAddress, id, "witness_count").Set(float64(store.GetWitnessCount()))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "learner_count").Set(float64(store.GetLearnerCount()))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_available").Set(float64(store.GetAvailable()))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_used").Set(float64(store.GetUsedSize()))

@@ -763,7 +763,9 @@ func (c *TestCluster) runInitialServersWithRetry(maxRetries int) error {
 				if s.State() == Running {
 					_ = s.Stop()
 				}
-				_ = s.Destroy()
+				if err := s.Destroy(); err != nil {
+					return errors.Wrap(err, "failed to destroy server before retry")
+				}
 			}
 
 			// Regenerate all ports before building any server configs. Generate reads

@@ -296,6 +296,38 @@ transfer-leader-in = 30
 	}
 }
 
+func TestRemovedWitnessConfigIsNormalized(t *testing.T) {
+	re := require.New(t)
+	data := []byte(`{
+		"enable-witness":"true",
+		"witness-schedule-limit":8,
+		"schedulers-v2":[
+			{"type":"balance-witness"},
+			{"type":"transfer-witness-leader"},
+			{"type":"balance-region"}
+		]
+	}`)
+
+	var schedule sc.ScheduleConfig
+	re.NoError(json.Unmarshal(data, &schedule))
+	re.True(schedule.EnableWitness)
+	re.Equal(uint64(8), schedule.WitnessScheduleLimit)
+	re.NoError(schedule.MigrateDeprecatedFlagsFromJSON(data))
+	re.False(schedule.EnableWitness)
+	re.Zero(schedule.WitnessScheduleLimit)
+	re.Zero(schedule.SwitchWitnessInterval.Duration)
+	re.Equal(sc.SchedulerConfigs{{Type: "balance-region"}}, schedule.Schedulers)
+
+	cfg := NewConfig()
+	cfg.Schedule.EnableWitness = true
+	cfg.Schedule.WitnessScheduleLimit = 8
+	cfg.Schedule.SwitchWitnessInterval.Duration = time.Hour
+	opt := NewPersistOptions(cfg)
+	re.False(opt.GetScheduleConfig().EnableWitness)
+	re.Zero(opt.GetScheduleConfig().WitnessScheduleLimit)
+	re.Zero(opt.GetScheduleConfig().SwitchWitnessInterval.Duration)
+}
+
 func TestStoreLimitPartialJSONUpdates(t *testing.T) {
 	for _, testCase := range []struct {
 		name     string

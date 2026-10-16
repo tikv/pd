@@ -154,22 +154,21 @@ func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 		for range retryLimit {
 			// Priority pick the region that has a pending peer.
 			// Pending region may mean the disk is overload, remove the pending region firstly.
-			solver.Region = filter.SelectOneRegion(cluster.RandPendingRegions(solver.sourceStoreID(), rs), collector,
-				append(baseRegionFilters, filter.NewRegionWitnessFilter(solver.sourceStoreID()))...)
+			solver.Region = filter.SelectOneRegion(cluster.RandPendingRegions(solver.sourceStoreID(), rs), collector, baseRegionFilters...)
 			if solver.Region == nil {
 				// Then pick the region that has a follower in the source store.
 				solver.Region = filter.SelectOneRegion(cluster.RandFollowerRegions(solver.sourceStoreID(), rs), collector,
-					append(baseRegionFilters, filter.NewRegionWitnessFilter(solver.sourceStoreID()), pendingFilter)...)
+					append(baseRegionFilters, pendingFilter)...)
 			}
 			if solver.Region == nil {
 				// Then pick the region has the leader in the source store.
 				solver.Region = filter.SelectOneRegion(cluster.RandLeaderRegions(solver.sourceStoreID(), rs), collector,
-					append(baseRegionFilters, filter.NewRegionWitnessFilter(solver.sourceStoreID()), pendingFilter)...)
+					append(baseRegionFilters, pendingFilter)...)
 			}
 			if solver.Region == nil {
 				// Finally, pick learner.
 				solver.Region = filter.SelectOneRegion(cluster.RandLearnerRegions(solver.sourceStoreID(), rs), collector,
-					append(baseRegionFilters, filter.NewRegionWitnessFilter(solver.sourceStoreID()), pendingFilter)...)
+					append(baseRegionFilters, pendingFilter)...)
 			}
 			if solver.Region == nil {
 				balanceRegionNoRegionCounter.Inc()

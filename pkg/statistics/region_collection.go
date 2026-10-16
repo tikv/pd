@@ -52,7 +52,6 @@ const (
 	EmptyRegion
 	OversizedRegion
 	UndersizedRegion
-	WitnessLeader
 )
 
 var regionStatisticTypes = []RegionStatisticType{
@@ -65,23 +64,21 @@ var regionStatisticTypes = []RegionStatisticType{
 	EmptyRegion,
 	OversizedRegion,
 	UndersizedRegion,
-	WitnessLeader,
 }
 
 const nonIsolation = "none"
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	regionMissPeerRegionCounter      = regionStatusGauge.WithLabelValues("miss-peer-region-count")
-	regionExtraPeerRegionCounter     = regionStatusGauge.WithLabelValues("extra-peer-region-count")
-	regionDownPeerRegionCounter      = regionStatusGauge.WithLabelValues("down-peer-region-count")
-	regionPendingPeerRegionCounter   = regionStatusGauge.WithLabelValues("pending-peer-region-count")
-	regionOfflinePeerRegionCounter   = regionStatusGauge.WithLabelValues("offline-peer-region-count")
-	regionLearnerPeerRegionCounter   = regionStatusGauge.WithLabelValues("learner-peer-region-count")
-	regionEmptyRegionCounter         = regionStatusGauge.WithLabelValues("empty-region-count")
-	regionOversizedRegionCounter     = regionStatusGauge.WithLabelValues("oversized-region-count")
-	regionUndersizedRegionCounter    = regionStatusGauge.WithLabelValues("undersized-region-count")
-	regionWitnessLeaderRegionCounter = regionStatusGauge.WithLabelValues("witness-leader-region-count")
+	regionMissPeerRegionCounter    = regionStatusGauge.WithLabelValues("miss-peer-region-count")
+	regionExtraPeerRegionCounter   = regionStatusGauge.WithLabelValues("extra-peer-region-count")
+	regionDownPeerRegionCounter    = regionStatusGauge.WithLabelValues("down-peer-region-count")
+	regionPendingPeerRegionCounter = regionStatusGauge.WithLabelValues("pending-peer-region-count")
+	regionOfflinePeerRegionCounter = regionStatusGauge.WithLabelValues("offline-peer-region-count")
+	regionLearnerPeerRegionCounter = regionStatusGauge.WithLabelValues("learner-peer-region-count")
+	regionEmptyRegionCounter       = regionStatusGauge.WithLabelValues("empty-region-count")
+	regionOversizedRegionCounter   = regionStatusGauge.WithLabelValues("oversized-region-count")
+	regionUndersizedRegionCounter  = regionStatusGauge.WithLabelValues("undersized-region-count")
 )
 
 // RegionInfoWithTS is used to record the extra timestamp status of a region.
@@ -225,7 +222,6 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 	regionMaxKeys := int64(r.conf.GetRegionMaxKeys())
 	maxMergeRegionSize := int64(r.conf.GetMaxMergeRegionSize())
 	maxMergeRegionKeys := int64(r.conf.GetMaxMergeRegionKeys())
-	leaderIsWitness := region.GetLeader().GetIsWitness()
 
 	// Better to make sure once any of these conditions changes, it will trigger the heartbeat `save_cache`.
 	// Otherwise, the state may be out-of-date for a long time, which needs another way to apply the change ASAP.
@@ -263,9 +259,6 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 	}
 	if region.NeedMerge(maxMergeRegionSize, maxMergeRegionKeys) {
 		conditions |= UndersizedRegion
-	}
-	if leaderIsWitness {
-		conditions |= WitnessLeader
 	}
 	// Check if the region meets any of the conditions and update the corresponding info.
 	regionID := region.GetID()
@@ -311,8 +304,6 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 		case OversizedRegion:
 			fallthrough
 		case UndersizedRegion:
-			fallthrough
-		case WitnessLeader:
 			info = struct{}{}
 		}
 		r.stats[condition][regionID] = info
@@ -351,7 +342,6 @@ func (r *RegionStatistics) Collect() {
 	regionEmptyRegionCounter.Set(float64(len(r.stats[EmptyRegion])))
 	regionOversizedRegionCounter.Set(float64(len(r.stats[OversizedRegion])))
 	regionUndersizedRegionCounter.Set(float64(len(r.stats[UndersizedRegion])))
-	regionWitnessLeaderRegionCounter.Set(float64(len(r.stats[WitnessLeader])))
 }
 
 // ResetRegionStatsMetrics resets the metrics of the regions' status.
@@ -365,7 +355,6 @@ func ResetRegionStatsMetrics() {
 	regionEmptyRegionCounter.Set(0)
 	regionOversizedRegionCounter.Set(0)
 	regionUndersizedRegionCounter.Set(0)
-	regionWitnessLeaderRegionCounter.Set(0)
 }
 
 // LabelStatistics is the statistics of the level of labels.
