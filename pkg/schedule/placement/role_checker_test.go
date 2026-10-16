@@ -163,3 +163,112 @@ func TestRoleCheckerMatchesPeers(t *testing.T) {
 	require.False(t, absent.MatchesPeers(stores, peers, false))
 	require.False(t, (&RoleChecker{}).MatchesPeers(stores, peers, false))
 }
+
+// Splitting an identical voter rule forces the general matcher without changing
+// the legal assignments. Cover all three-peer Raft-role and witness combinations.
+func TestRoleCheckerSingleVoterEquivalent(t *testing.T) {
+	stores := core.NewBasicCluster()
+	for id := uint64(1); id <= 3; id++ {
+		stores.PutStore(core.NewStoreInfoWithLabel(id, map[string]string{"zone": "A"}))
+	}
+	for state := range 512 {
+		peers := make([]*metapb.Peer, 3)
+		for i := range peers {
+			peers[i] = &metapb.Peer{StoreId: uint64(i + 1), Role: metapb.PeerRole((state >> (2 * i)) & 3), IsWitness: state&(1<<(6+i)) != 0}
+		}
+		for _, supportWitness := range []bool{false, true} {
+			for _, ruleWitness := range []bool{false, true} {
+				rule := &Rule{Role: Voter, Count: 3, IsWitness: ruleWitness}
+				fast := NewRoleChecker(stores, peers, []*Rule{rule}, supportWitness)
+				first, rest := rule.Clone(), rule.Clone()
+				first.Count, rest.Count = 1, 2
+				general := NewRoleChecker(stores, peers, []*Rule{first, rest}, supportWitness)
+				for leader := range uint64(5) {
+					expected := leader >= 1 && leader <= 3
+					for _, peer := range peers {
+						witnessOK := !peer.IsWitness
+						if supportWitness {
+							witnessOK = peer.IsWitness == ruleWitness
+						}
+						expected = expected && !core.IsLearner(peer) && witnessOK
+						if peer.StoreId == leader {
+							expected = expected && peer.Role != metapb.PeerRole_DemotingVoter && !peer.IsWitness
+						}
+					}
+					require.Equal(t, expected, fast.IsSatisfied(leader), "state=%d, support=%v, witness=%v, leader=%d", state, supportWitness, ruleWitness, leader)
+					require.Equal(t, expected, general.IsSatisfied(leader))
+				}
+			}
+		}
+	}
+}
+
+func TestRoleCheckerSingleVoterConstraints(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		change func(*core.BasicCluster, []*metapb.Peer, *Rule)
+		valid  bool
+	}{
+		{name: "unallocated peer IDs", valid: true},
+		{name: "duplicate peer IDs", change: func(_ *core.BasicCluster, peers []*metapb.Peer, _ *Rule) {
+			for _, peer := range peers {
+				peer.Id = 1
+			}
+		}, valid: true},
+		{name: "nil peer", change: func(_ *core.BasicCluster, peers []*metapb.Peer, _ *Rule) { peers[1] = nil }},
+		{name: "zero store ID", change: func(_ *core.BasicCluster, peers []*metapb.Peer, _ *Rule) { peers[1].StoreId = 0 }},
+		{name: "duplicate store ID", change: func(_ *core.BasicCluster, peers []*metapb.Peer, _ *Rule) { peers[1].StoreId = 1 }},
+		{name: "missing store", change: func(_ *core.BasicCluster, peers []*metapb.Peer, _ *Rule) { peers[1].StoreId = 4 }},
+		{name: "too few slots", change: func(_ *core.BasicCluster, _ []*metapb.Peer, rule *Rule) { rule.Count = 2 }},
+		{name: "too many slots", change: func(_ *core.BasicCluster, _ []*metapb.Peer, rule *Rule) { rule.Count = 4 }},
+		{name: "zero slots", change: func(_ *core.BasicCluster, _ []*metapb.Peer, rule *Rule) { rule.Count = 0 }},
+		{name: "negative slots", change: func(_ *core.BasicCluster, _ []*metapb.Peer, rule *Rule) { rule.Count = -1 }},
+		{name: "wrong group", change: func(stores *core.BasicCluster, _ []*metapb.Peer, _ *Rule) {
+			stores.PutStore(core.NewStoreInfoWithLabel(2, map[string]string{"$group": "B"}))
+		}},
+		{name: "missing group", change: func(stores *core.BasicCluster, _ []*metapb.Peer, _ *Rule) {
+			stores.PutStore(core.NewStoreInfoWithLabel(2, nil))
+		}},
+		{name: "uncovered exclusive label", change: func(stores *core.BasicCluster, _ []*metapb.Peer, _ *Rule) {
+			stores.PutStore(core.NewStoreInfoWithLabel(2, map[string]string{"$group": "A", "engine": "tiflash"}))
+		}},
+		{name: "missing exclusive constraint", change: func(_ *core.BasicCluster, _ []*metapb.Peer, rule *Rule) { rule.LabelConstraints = nil }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stores := core.NewBasicCluster()
+			peers := []*metapb.Peer{{StoreId: 1}, {StoreId: 2}, {StoreId: 3}}
+			for _, peer := range peers {
+				stores.PutStore(core.NewStoreInfoWithLabel(peer.StoreId, map[string]string{"$group": "A"}))
+			}
+			rule := &Rule{Role: Voter, Count: 3, LabelConstraints: []LabelConstraint{{Key: "$group", Op: In, Values: []string{"A"}}}}
+			if tc.change != nil {
+				tc.change(stores, peers, rule)
+			}
+			checker := NewRoleChecker(stores, peers, []*Rule{rule}, false)
+			require.Equal(t, tc.valid, checker.IsSatisfied(1))
+			require.False(t, checker.IsSatisfied(0))
+		})
+	}
+}
+
+func TestRoleCheckerEligibilityStorage(t *testing.T) {
+	for _, count := range []int{3, 5, 9, 33} {
+		stores := core.NewBasicCluster()
+		peers := make([]*metapb.Peer, count)
+		for i := range peers {
+			id := uint64(i + 1)
+			stores.PutStore(core.NewStoreInfoWithLabel(id, map[string]string{"zone": "A"}))
+			peers[i] = &metapb.Peer{StoreId: id}
+		}
+		// Both dense overlap and sparse rows must survive backing-slice growth.
+		for _, rules := range [][]*Rule{
+			{{Role: Voter, Count: 1}, {Role: Voter, Count: count - 1}},
+			{{Role: Leader, Count: 1, LabelConstraints: []LabelConstraint{{Key: "zone", Op: In, Values: []string{"B"}}}}, {Role: Voter, Count: count - 1, LabelConstraints: []LabelConstraint{{Key: "zone", Op: In, Values: []string{"A"}}}}},
+		} {
+			stores.PutStore(core.NewStoreInfoWithLabel(1, map[string]string{"zone": "B"}))
+			checker := NewRoleChecker(stores, peers, rules, false)
+			require.True(t, checker.IsSatisfied(1), "peers=%d", count)
+			require.Equal(t, rules[0].Role == Voter, checker.IsSatisfied(2))
+		}
+	}
+}

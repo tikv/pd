@@ -30,6 +30,7 @@ type RoleChecker struct {
 	slots          []PeerRoleType
 	eligible       [][]int
 	valid          bool
+	singleVoter    bool
 	supportWitness bool
 }
 
@@ -55,14 +56,25 @@ func NewRoleChecker(stores StoreSet, peers []*metapb.Peer, rules []*Rule, suppor
 	if count == 0 || count != len(peers) {
 		return c
 	}
-	c.slots = make([]PeerRoleType, 0, count)
-	for _, rule := range rules {
-		for range rule.Count {
-			c.slots = append(c.slots, rule.Role)
+	c.singleVoter = len(rules) == 1 && rules[0].Role == Voter
+	var eligible []int
+	if !c.singleVoter {
+		c.slots = make([]PeerRoleType, 0, count)
+		for _, rule := range rules {
+			for range rule.Count {
+				c.slots = append(c.slots, rule.Role)
+			}
 		}
+		c.eligible = make([][]int, len(peers))
+		// Share backing storage across rows. Small layouts fit in at most 64
+		// edges; larger layouts grow with actual edges to avoid a dense reserve.
+		capacity := count
+		if count <= 8 {
+			capacity *= count
+		}
+		eligible = make([]int, 0, capacity)
 	}
 	c.peers = make([]rolePeer, len(peers))
-	c.eligible = make([][]int, len(peers))
 	seen := make(map[uint64]struct{}, len(peers))
 	for i, peer := range peers {
 		if peer == nil || peer.GetStoreId() == 0 {
@@ -77,16 +89,27 @@ func NewRoleChecker(stores StoreSet, peers []*metapb.Peer, rules []*Rule, suppor
 			return c
 		}
 		c.peers[i] = rolePeer{storeID: peer.GetStoreId(), store: store, role: peer.GetRole(), isWitness: peer.GetIsWitness(), canLead: !core.IsLearner(peer) && peer.GetRole() != metapb.PeerRole_DemotingVoter && !peer.GetIsWitness()}
+		start := len(eligible)
 		offset := 0
 		for _, rule := range rules {
 			roleOK := core.IsLearner(peer) == (rule.Role == Learner)
 			witnessOK := (!supportWitness && !peer.GetIsWitness()) || (supportWitness && peer.GetIsWitness() == rule.IsWitness)
-			if roleOK && witnessOK && MatchLabelConstraints(store, rule.LabelConstraints) {
+			matches := roleOK && witnessOK && MatchLabelConstraints(store, rule.LabelConstraints)
+			if c.singleVoter {
+				// Identical voter slots need no assignment search once every peer
+				// matches. Leader eligibility is still checked by IsSatisfied.
+				if !matches {
+					return c
+				}
+			} else if matches {
 				for j := range rule.Count {
-					c.eligible[i] = append(c.eligible[i], offset+j)
+					eligible = append(eligible, offset+j)
 				}
 			}
 			offset += rule.Count
+		}
+		if !c.singleVoter {
+			c.eligible[i] = eligible[start:len(eligible):len(eligible)]
 		}
 	}
 	c.valid = true
@@ -126,6 +149,9 @@ func (c *RoleChecker) IsSatisfied(leaderStoreID uint64) bool {
 	}
 	if leader < 0 {
 		return false
+	}
+	if c.singleVoter {
+		return true
 	}
 	owners := make([]int, len(c.slots))
 	for i := range owners {
