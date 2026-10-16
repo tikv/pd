@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	sche "github.com/tikv/pd/pkg/schedule/core"
+	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
@@ -85,8 +86,21 @@ type evictSlowStoreSchedulerConfig struct {
 	networkSlowStoreRecoverStartAts map[uint64]*time.Time
 	// Duration gap for recovering the candidate, unit: s.
 	RecoverySec uint64 `json:"recovery-duration"`
-	// EvictedStores is only used by disk slow store scheduler
-	EvictedStores            []uint64 `json:"evict-stores"`
+	// EvictedStores is only used by disk slow store scheduler. It holds at most one id, the
+	// primary evicted store, so it keeps the single-store format that PD versions without
+	// group eviction understand: an older leader restores, drains and recovers exactly that
+	// store, which is a state it can reach on its own. Use evictedStores() for the full set.
+	EvictedStores []uint64 `json:"evict-stores"`
+	// EvictedGroupStores holds the other same-domain stores evicted together with the primary
+	// in EvictedStores. Older PD versions ignore the field and drop it on their next persist,
+	// so they never observe a multi-store eviction. Non-empty only if EvictedStores is.
+	EvictedGroupStores []uint64 `json:"evict-group-stores"`
+	// EnableGroupEviction allows the disk slow store scheduler to evict leaders from every
+	// slow store that shares one isolation domain, instead of only a single store. The
+	// domain is derived from the placement rules (see groupIsolationLabels), so this switch
+	// only opts into the behavior; it never widens what counts as one domain. Disabled by
+	// default.
+	EnableGroupEviction      bool     `json:"enable-group-eviction"`
 	EnableNetworkSlowStore   bool     `json:"enable-network-slow-store"`
 	PausedNetworkSlowStores  []uint64 `json:"paused-network-slow-stores"`
 	EvictedNetworkSlowStores []uint64 `json:"evicted-network-slow-stores"`
@@ -101,6 +115,8 @@ func initEvictSlowStoreSchedulerConfig() *evictSlowStoreSchedulerConfig {
 		lastSlowStoreCaptureTS:          time.Time{},
 		RecoverySec:                     defaultRecoverySec,
 		EvictedStores:                   make([]uint64, 0),
+		EvictedGroupStores:              make([]uint64, 0),
+		EnableGroupEviction:             false,
 		Batch:                           EvictLeaderBatchSize,
 		EnableNetworkSlowStore:          false,
 		PausedNetworkSlowStores:         make([]uint64, 0),
@@ -115,6 +131,8 @@ func (conf *evictSlowStoreSchedulerConfig) persistLocked(updateFn func()) error 
 		oldNetworkSlowStoreRecoverStartAts = make(map[uint64]*time.Time)
 		oldIsRecovered                     = conf.isRecovered
 		oldEvictedStores                   = conf.EvictedStores
+		oldEvictedGroupStores              = conf.EvictedGroupStores
+		oldEnableGroupEviction             = conf.EnableGroupEviction
 		oldPausedNetworkSlowStores         = conf.PausedNetworkSlowStores
 		oldEvictedNetworkSlowStores        = conf.EvictedNetworkSlowStores
 		oldRecoverySec                     = conf.RecoverySec
@@ -129,6 +147,8 @@ func (conf *evictSlowStoreSchedulerConfig) persistLocked(updateFn func()) error 
 		conf.networkSlowStoreRecoverStartAts = oldNetworkSlowStoreRecoverStartAts
 		conf.isRecovered = oldIsRecovered
 		conf.EvictedStores = oldEvictedStores
+		conf.EvictedGroupStores = oldEvictedGroupStores
+		conf.EnableGroupEviction = oldEnableGroupEviction
 		conf.PausedNetworkSlowStores = oldPausedNetworkSlowStores
 		conf.EvictedNetworkSlowStores = oldEvictedNetworkSlowStores
 		conf.RecoverySec = oldRecoverySec
@@ -142,7 +162,7 @@ func (conf *evictSlowStoreSchedulerConfig) getStores() []uint64 {
 	conf.RLock()
 	defer conf.RUnlock()
 
-	return append(conf.EvictedStores, conf.EvictedNetworkSlowStores...)
+	return append(conf.evictedStoresLocked(), conf.EvictedNetworkSlowStores...)
 }
 
 func (*evictSlowStoreSchedulerConfig) getKeyRangesByID(uint64) []keyutil.KeyRange {
@@ -155,13 +175,63 @@ func (conf *evictSlowStoreSchedulerConfig) getBatch() int {
 	return conf.Batch
 }
 
-func (conf *evictSlowStoreSchedulerConfig) evictStore() uint64 {
+// evictedStores returns a copy of the disk slow stores currently being evicted.
+func (conf *evictSlowStoreSchedulerConfig) evictedStores() []uint64 {
 	conf.RLock()
 	defer conf.RUnlock()
-	if len(conf.EvictedStores) == 0 {
-		return 0
+	return conf.evictedStoresLocked()
+}
+
+// evictedStoresLocked returns a copy of the disk slow stores currently being evicted: the
+// primary followed by the rest of its group.
+func (conf *evictSlowStoreSchedulerConfig) evictedStoresLocked() []uint64 {
+	res := make([]uint64, 0, len(conf.EvictedStores)+len(conf.EvictedGroupStores))
+	res = append(res, conf.EvictedStores...)
+	return append(res, conf.EvictedGroupStores...)
+}
+
+// setEvictedStoresLocked replaces the disk slow store eviction set with the deduplicated ids,
+// keeping the persisted layout: the first id is the primary in EvictedStores and the rest go
+// to EvictedGroupStores. Removing the primary therefore promotes the next group member, so
+// an older PD still drains one store of the group instead of none.
+func (conf *evictSlowStoreSchedulerConfig) setEvictedStoresLocked(ids []uint64) {
+	uniq := make([]uint64, 0, len(ids))
+	for _, id := range ids {
+		if !slices.Contains(uniq, id) {
+			uniq = append(uniq, id)
+		}
 	}
-	return conf.EvictedStores[0]
+	if len(uniq) == 0 {
+		conf.EvictedStores = []uint64{}
+		conf.EvictedGroupStores = []uint64{}
+		return
+	}
+	conf.EvictedStores = uniq[:1:1]
+	conf.EvictedGroupStores = append(make([]uint64, 0, len(uniq)-1), uniq[1:]...)
+}
+
+// normalizeEvictedStores rewrites a loaded config into the persisted layout. It also accepts
+// a config whose evict-stores lists several ids, as written by development builds of group
+// eviction. It reports whether the layout changed, in which case the caller must persist the
+// normalized value so an older PD never reads the multi-id evict-stores.
+func (conf *evictSlowStoreSchedulerConfig) normalizeEvictedStores() bool {
+	oldEvicted, oldGroup := conf.EvictedStores, conf.EvictedGroupStores
+	conf.setEvictedStoresLocked(conf.evictedStoresLocked())
+	return !slices.Equal(oldEvicted, conf.EvictedStores) || !slices.Equal(oldGroup, conf.EvictedGroupStores)
+}
+
+// isEvictingDiskSlowStore reports whether any disk slow store is being evicted.
+func (conf *evictSlowStoreSchedulerConfig) isEvictingDiskSlowStore() bool {
+	conf.RLock()
+	defer conf.RUnlock()
+	return len(conf.EvictedStores)+len(conf.EvictedGroupStores) > 0
+}
+
+// isGroupEvictionEnabled reports whether same-domain group eviction is turned on.
+func (conf *evictSlowStoreSchedulerConfig) isGroupEvictionEnabled() bool {
+	conf.RLock()
+	defer conf.RUnlock()
+	return conf.EnableGroupEviction
 }
 
 func (conf *evictSlowStoreSchedulerConfig) getPausedNetworkSlowStores() []uint64 {
@@ -245,13 +315,74 @@ func (conf *evictSlowStoreSchedulerConfig) readyForRecovery() bool {
 	return uint64(time.Since(conf.lastSlowStoreCaptureTS).Seconds()) >= recoverySec
 }
 
-func (conf *evictSlowStoreSchedulerConfig) setStoreAndPersist(id uint64) error {
+// setEvictedStoresAndPersist replaces the disk slow store eviction set with ids
+// and resets the capture timestamp (the group is freshly slow).
+func (conf *evictSlowStoreSchedulerConfig) setEvictedStoresAndPersist(ids []uint64) error {
 	conf.Lock()
 	defer conf.Unlock()
 	return conf.persistLocked(func() {
-		conf.EvictedStores = []uint64{id}
+		conf.setEvictedStoresLocked(ids)
+		// Reset the recovery clock so as for multi store issues we need to wait whole zone is stable
 		conf.lastSlowStoreCaptureTS = time.Now()
 	})
+}
+
+// addEvictedAndPersist appends ids to the disk slow store eviction set and persists it in
+// one critical section, so a concurrent ReloadConfig is never overwritten by a stale
+// snapshot. Ids already in the set are skipped and returned as dup. When anything is added,
+// the capture timestamp is reset (the group is freshly slow).
+func (conf *evictSlowStoreSchedulerConfig) addEvictedAndPersist(ids []uint64) (dup []uint64, err error) {
+	conf.Lock()
+	defer conf.Unlock()
+	next := conf.evictedStoresLocked()
+	for _, id := range ids {
+		if slices.Contains(next, id) {
+			dup = append(dup, id)
+			continue
+		}
+		next = append(next, id)
+	}
+	if len(dup) == len(ids) {
+		return dup, nil
+	}
+	if err := conf.persistLocked(func() {
+		conf.setEvictedStoresLocked(next)
+		// Reset the recovery clock so as for multi store issues we need to wait whole zone is stable
+		conf.lastSlowStoreCaptureTS = time.Now()
+	}); err != nil {
+		return nil, err
+	}
+	return dup, nil
+}
+
+// removeEvictedAndPersist drops the given ids from the eviction set (only those
+// actually present) and returns the ids removed. Used when an evicted store
+// leaves the cluster mid-drain; the remaining group keeps its recovery clock.
+func (conf *evictSlowStoreSchedulerConfig) removeEvictedAndPersist(ids []uint64) (removed []uint64, err error) {
+	conf.Lock()
+	defer conf.Unlock()
+	drop := make(map[uint64]struct{}, len(ids))
+	for _, id := range ids {
+		drop[id] = struct{}{}
+	}
+	all := conf.evictedStoresLocked()
+	kept := make([]uint64, 0, len(all))
+	for _, id := range all {
+		if _, ok := drop[id]; ok {
+			removed = append(removed, id)
+			continue
+		}
+		kept = append(kept, id)
+	}
+	if len(removed) == 0 {
+		return nil, nil
+	}
+	if err = conf.persistLocked(func() {
+		conf.setEvictedStoresLocked(kept)
+	}); err != nil {
+		return nil, err
+	}
+	return removed, nil
 }
 
 func (conf *evictSlowStoreSchedulerConfig) tryUpdateRecoverStatus(isRecovered bool) error {
@@ -270,17 +401,30 @@ func (conf *evictSlowStoreSchedulerConfig) tryUpdateRecoverStatus(isRecovered bo
 	})
 }
 
-func (conf *evictSlowStoreSchedulerConfig) clearEvictedAndPersist() (oldID uint64, err error) {
-	oldID = conf.evictStore()
+// clearEvictedAndPersist releases the whole disk slow store eviction set and
+// returns the ids that were evicted. If persisting fails, the set is kept and no
+// ids are returned so the caller can retry, unless force is set: then the
+// in-memory set is cleared anyway and the ids are returned along with the error.
+func (conf *evictSlowStoreSchedulerConfig) clearEvictedAndPersist(force bool) (oldIDs []uint64, err error) {
 	conf.Lock()
 	defer conf.Unlock()
-	if oldID > 0 {
-		err = conf.persistLocked(func() {
-			conf.EvictedStores = []uint64{}
-			conf.lastSlowStoreCaptureTS = time.Time{}
-		})
+	oldIDs = conf.evictedStoresLocked()
+	if len(oldIDs) == 0 {
+		return nil, nil
 	}
-	return
+	err = conf.persistLocked(func() {
+		conf.setEvictedStoresLocked(nil)
+		conf.lastSlowStoreCaptureTS = time.Time{}
+	})
+	if err != nil {
+		if !force {
+			return nil, err
+		}
+		conf.setEvictedStoresLocked(nil)
+		conf.lastSlowStoreCaptureTS = time.Time{}
+		return oldIDs, err
+	}
+	return oldIDs, nil
 }
 
 type evictSlowStoreHandler struct {
@@ -326,6 +470,12 @@ func (handler *evictSlowStoreHandler) updateConfig(w http.ResponseWriter, r *htt
 		return
 	}
 
+	enableGroupEviction, inputEnableGroupEviction := input["enable-group-eviction"].(bool)
+	if input["enable-group-eviction"] != nil && !inputEnableGroupEviction {
+		handler.rd.JSON(w, http.StatusBadRequest, perrors.New("invalid argument for 'enable-group-eviction'").Error())
+		return
+	}
+
 	handler.config.Lock()
 	defer handler.config.Unlock()
 	recoverySec := uint64(recoveryDurationGapFloat)
@@ -340,6 +490,9 @@ func (handler *evictSlowStoreHandler) updateConfig(w http.ResponseWriter, r *htt
 		if inputEnableNetworkSlowStore {
 			handler.config.EnableNetworkSlowStore = enableNetworkSlowStore
 		}
+		if inputEnableGroupEviction {
+			handler.config.EnableGroupEviction = enableGroupEviction
+		}
 	}); err != nil {
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -348,6 +501,7 @@ func (handler *evictSlowStoreHandler) updateConfig(w http.ResponseWriter, r *htt
 		zap.Uint64("cur-recovery-duration", recoverySec),
 		zap.Float64("cur-batch", batchFloat),
 		zap.Bool("cur-enable-network-slow-store", enableNetworkSlowStore),
+		zap.Bool("cur-enable-group-eviction", enableGroupEviction),
 	)
 
 	handler.rd.JSON(w, http.StatusOK, "Config updated.")
@@ -360,6 +514,8 @@ func (handler *evictSlowStoreHandler) listConfig(w http.ResponseWriter, _ *http.
 		RecoverySec:              handler.config.RecoverySec,
 		Batch:                    handler.config.Batch,
 		EvictedStores:            handler.config.EvictedStores,
+		EvictedGroupStores:       handler.config.EvictedGroupStores,
+		EnableGroupEviction:      handler.config.EnableGroupEviction,
 		EnableNetworkSlowStore:   handler.config.EnableNetworkSlowStore,
 		PausedNetworkSlowStores:  handler.config.PausedNetworkSlowStores,
 		EvictedNetworkSlowStores: handler.config.EvictedNetworkSlowStores,
@@ -371,6 +527,9 @@ type evictSlowStoreScheduler struct {
 	*BaseScheduler
 	conf    *evictSlowStoreSchedulerConfig
 	handler http.Handler
+	// evictLeaderRound rotates the evicted store order across Schedule calls. Schedule
+	// runs on a single goroutine, so it needs no lock.
+	evictLeaderRound int
 }
 
 // ServeHTTP implements the http.Handler interface.
@@ -384,6 +543,11 @@ func (s *evictSlowStoreScheduler) EncodeConfig() ([]byte, error) {
 }
 
 // ReloadConfig implements the Scheduler interface.
+//
+// Disk-evicted stores get the same runtime mark as on every other path (SlowStoreEvicted /
+// SlowStoreRecovered for ids the reload adds / removes), so every id in the eviction set
+// carries exactly one slow-evicted mark no matter how it entered the set. Paused network
+// slow stores keep using the leader-transfer pause.
 func (s *evictSlowStoreScheduler) ReloadConfig() error {
 	s.conf.Lock()
 	defer s.conf.Unlock()
@@ -395,37 +559,96 @@ func (s *evictSlowStoreScheduler) ReloadConfig() error {
 	if newCfg.Batch == 0 {
 		newCfg.Batch = EvictLeaderBatchSize
 	}
-	old := make(map[uint64]struct{})
-	for _, id := range s.conf.EvictedStores {
-		old[id] = struct{}{}
+	rewrite := newCfg.normalizeEvictedStores()
+
+	oldEvicted := s.conf.evictedStoresLocked()
+	loaded := newCfg.evictedStoresLocked()
+	newEvicted := make([]uint64, 0, len(loaded))
+	for _, id := range oldEvicted {
+		if !slices.Contains(loaded, id) {
+			s.conf.cluster.SlowStoreRecovered(id)
+			evictedSlowStoreStatusGauge.DeleteLabelValues(strconv.FormatUint(id, 10), string(diskSlowStore))
+		}
 	}
+	for _, id := range loaded {
+		if slices.Contains(oldEvicted, id) {
+			newEvicted = append(newEvicted, id)
+			continue
+		}
+		// An id that cannot be marked (its store is not in the cluster) is dropped, as
+		// PrepareConfig does, rather than kept in the set without a mark: if the store
+		// came back before reconciliation it would be treated as evicted while still
+		// eligible for leaders.
+		if err := s.conf.cluster.SlowStoreEvicted(id); err != nil {
+			log.Warn("failed to evict slow store on config reload, dropping it",
+				zap.Uint64("store-id", id), zap.Error(err))
+			rewrite = true
+			continue
+		}
+		newEvicted = append(newEvicted, id)
+		evictedSlowStoreStatusGauge.WithLabelValues(strconv.FormatUint(id, 10), string(diskSlowStore)).Set(1)
+	}
+
+	old := make(map[uint64]struct{})
 	for _, id := range s.conf.PausedNetworkSlowStores {
 		old[id] = struct{}{}
 	}
 	new := make(map[uint64]struct{})
-	for _, id := range newCfg.EvictedStores {
-		new[id] = struct{}{}
-	}
 	for _, id := range newCfg.PausedNetworkSlowStores {
 		new[id] = struct{}{}
 	}
 	pauseAndResumeLeaderTransfer(s.conf.cluster, constant.In, old, new)
 	s.conf.RecoverySec = newCfg.RecoverySec
-	s.conf.EvictedStores = newCfg.EvictedStores
+	s.conf.setEvictedStoresLocked(newEvicted)
+	s.conf.EnableGroupEviction = newCfg.EnableGroupEviction
 	s.conf.PausedNetworkSlowStores = newCfg.PausedNetworkSlowStores
 	s.conf.EvictedNetworkSlowStores = newCfg.EvictedNetworkSlowStores
 	s.conf.EnableNetworkSlowStore = newCfg.EnableNetworkSlowStore
 	s.conf.Batch = newCfg.Batch
+	if rewrite {
+		// The stored value has a multi-id evict-stores or an id that was dropped above;
+		// replace it with the applied set in the normalized layout, so an older PD never
+		// observes the multi-id value.
+		return s.conf.save()
+	}
 	return nil
 }
 
 // PrepareConfig implements the Scheduler interface.
+//
+// Disk-evicted stores that are no longer in the cluster (or are removed) are pruned and the
+// surviving set is persisted before anything is marked. Otherwise one stale id would fail
+// SlowStoreEvicted, abort Controller.AddScheduler, and keep the scheduler from ever reaching
+// reconcileDiskSlowStoreGroup, which is what drops such ids at runtime.
+//
+// It is best effort and does not roll back: every mark is attempted and the errors are
+// returned together. When PrepareConfig fails, Controller.AddScheduler and
+// AddSchedulerHandler call CleanConfig, which undoes every mark for the configured set.
+// A mark only fails when the store is not found, and undoing a missing store is a no-op,
+// so that one CleanConfig keeps the slow-evicted and pause counters balanced. Rolling back
+// here as well would undo the successful marks twice.
 func (s *evictSlowStoreScheduler) PrepareConfig(cluster sche.SchedulerCluster) error {
-	errs := make([]error, 0)
-
-	evictStore := s.conf.evictStore()
-	if evictStore != 0 {
-		if err := cluster.SlowStoreEvicted(evictStore); err != nil {
+	var errs []error
+	var gone []uint64
+	for _, storeID := range s.conf.evictedStores() {
+		if store := cluster.GetStore(storeID); store == nil || store.IsRemoved() {
+			gone = append(gone, storeID)
+		}
+	}
+	if len(gone) > 0 {
+		// If this persist fails, the ids stay in the set; marking them below is then a no-op
+		// failure for a missing store, or a mark CleanConfig undoes for a removed one.
+		removed, err := s.conf.removeEvictedAndPersist(gone)
+		if err != nil {
+			errs = append(errs, err)
+		}
+		for _, storeID := range removed {
+			log.Info("evicted slow store is no longer in the cluster, dropping it", zap.Uint64("store-id", storeID))
+			evictedSlowStoreStatusGauge.DeleteLabelValues(strconv.FormatUint(storeID, 10), string(diskSlowStore))
+		}
+	}
+	for _, storeID := range s.conf.evictedStores() {
+		if err := cluster.SlowStoreEvicted(storeID); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -445,7 +668,7 @@ func (s *evictSlowStoreScheduler) PrepareConfig(cluster sche.SchedulerCluster) e
 
 // CleanConfig implements the Scheduler interface.
 func (s *evictSlowStoreScheduler) CleanConfig(cluster sche.SchedulerCluster) {
-	s.cleanupEvictLeader(cluster)
+	s.cleanupEvictLeader(cluster, true)
 	networkSlowStores := s.conf.getPausedNetworkSlowStores()
 	s.conf.Lock()
 	defer s.conf.Unlock()
@@ -454,39 +677,93 @@ func (s *evictSlowStoreScheduler) CleanConfig(cluster sche.SchedulerCluster) {
 	}
 }
 
-func (s *evictSlowStoreScheduler) prepareEvictLeader(cluster sche.SchedulerCluster, storeID uint64) error {
-	if err := cluster.SlowStoreEvicted(storeID); err != nil {
-		log.Info("failed to evict slow store", zap.Uint64("store-id", storeID), zap.Error(err))
-		return err
+// prepareEvictLeader marks the given newly-detected stores as evicted and adds them
+// to the persisted set. On any failure it rolls back the marks it added so the
+// slow-evicted counter stays balanced. A store that is already in the set (for
+// example, added by a concurrent ReloadConfig) already carries the set's mark, so
+// the extra mark made here is undone.
+func (s *evictSlowStoreScheduler) prepareEvictLeader(cluster sche.SchedulerCluster, addIDs []uint64) error {
+	if len(addIDs) == 0 {
+		return nil
+	}
+	marked := make([]uint64, 0, len(addIDs))
+	for _, storeID := range addIDs {
+		if err := cluster.SlowStoreEvicted(storeID); err != nil {
+			log.Info("failed to evict slow store", zap.Uint64("store-id", storeID), zap.Error(err))
+			for _, id := range marked {
+				cluster.SlowStoreRecovered(id)
+			}
+			return err
+		}
+		marked = append(marked, storeID)
 	}
 
-	if err := s.conf.setStoreAndPersist(storeID); err != nil {
-		log.Info("failed to persist evicted slow store", zap.Uint64("store-id", storeID), zap.Error(err))
-		cluster.SlowStoreRecovered(storeID)
+	failpoint.InjectCall("beforeAddEvictedStores")
+	dup, err := s.conf.addEvictedAndPersist(addIDs)
+	if err != nil {
+		log.Info("failed to persist evicted slow store", zap.Uint64s("store-ids", addIDs), zap.Error(err))
+		for _, id := range addIDs {
+			cluster.SlowStoreRecovered(id)
+		}
 		return err
 	}
-
+	for _, id := range dup {
+		cluster.SlowStoreRecovered(id)
+	}
 	return nil
 }
 
-func (s *evictSlowStoreScheduler) cleanupEvictLeader(cluster sche.SchedulerCluster) {
-	evictSlowStore, err := s.conf.clearEvictedAndPersist()
+// cleanupEvictLeader releases every disk-evicted store. During scheduling (final is
+// false) a persist failure keeps the set and the marks so the next cycle retries.
+// From CleanConfig (final is true) nothing runs afterwards to retry, so the marks
+// are released even if the empty set could not be persisted; otherwise the stores
+// would stay excluded from leader transfers after they recover.
+func (s *evictSlowStoreScheduler) cleanupEvictLeader(cluster sche.SchedulerCluster, final bool) {
+	evictSlowStores, err := s.conf.clearEvictedAndPersist(final)
 	if err != nil {
-		log.Info("evict-slow-store-scheduler persist config failed", zap.Uint64("store-id", evictSlowStore))
+		log.Info("evict-slow-store-scheduler persist config failed",
+			zap.Uint64s("store-ids", evictSlowStores), zap.Bool("final", final), zap.Error(err))
 	}
-	if evictSlowStore == 0 {
-		return
+	for _, storeID := range evictSlowStores {
+		cluster.SlowStoreRecovered(storeID)
+		evictedSlowStoreStatusGauge.DeleteLabelValues(strconv.FormatUint(storeID, 10), string(diskSlowStore))
 	}
-	cluster.SlowStoreRecovered(evictSlowStore)
 }
 
+// schedulerEvictLeader returns at most batch operators. One scheduleEvictLeaderOnce round
+// yields an operator per evicted store, so with several evicted stores the shared batch loop
+// can overshoot; the result is truncated here. The store order is rotated on every call so
+// the truncation does not always favor the first evicted store.
 func (s *evictSlowStoreScheduler) schedulerEvictLeader(cluster sche.SchedulerCluster) []*operator.Operator {
-	return scheduleEvictLeaderBatch(s.GetName(), cluster, s.conf)
+	s.evictLeaderRound++
+	ops := scheduleEvictLeaderBatch(s.GetName(), cluster, rotatedEvictLeaderStores{
+		evictSlowStoreSchedulerConfig: s.conf,
+		offset:                        s.evictLeaderRound,
+	})
+	if batch := s.conf.getBatch(); len(ops) > batch {
+		ops = ops[:batch]
+	}
+	return ops
+}
+
+// rotatedEvictLeaderStores rotates the evicted store order by offset.
+type rotatedEvictLeaderStores struct {
+	*evictSlowStoreSchedulerConfig
+	offset int
+}
+
+func (r rotatedEvictLeaderStores) getStores() []uint64 {
+	stores := r.evictSlowStoreSchedulerConfig.getStores()
+	if n := len(stores); n > 1 {
+		k := r.offset % n
+		return slices.Concat(stores[k:], stores[:k])
+	}
+	return stores
 }
 
 // IsScheduleAllowed implements the Scheduler interface.
 func (s *evictSlowStoreScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
-	if s.conf.evictStore() != 0 {
+	if s.conf.isEvictingDiskSlowStore() {
 		allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetSchedulerConfig().GetLeaderScheduleLimit()
 		if !allowed {
 			operator.IncOperatorLimitCounter(s.GetType(), operator.OpLeader)
@@ -828,75 +1105,310 @@ func filterNetworkSlowScores(
 	return filteredScores
 }
 
-func (s *evictSlowStoreScheduler) scheduleDiskSlowStore(cluster sche.SchedulerCluster) {
-	if s.conf.evictStore() != 0 {
-		store := cluster.GetStore(s.conf.evictStore())
-		storeIDStr := strconv.FormatUint(store.GetID(), 10)
-		if store == nil || store.IsRemoved() {
-			// Previous slow store had been removed, remove the scheduler and check
-			// slow node next time.
-			log.Info("slow store has been removed",
-				zap.Uint64("store-id", store.GetID()))
-			evictedSlowStoreStatusGauge.DeleteLabelValues(storeIDStr, string(diskSlowStore))
-			s.cleanupEvictLeader(cluster)
-			return
-		}
-		// recover slow store if its score is below the threshold.
-		if store.GetSlowScore() <= slowStoreRecoverThreshold {
-			if err := s.conf.tryUpdateRecoverStatus(true); err != nil {
-				log.Info("evict-slow-store-scheduler persist config failed", zap.Uint64("store-id", store.GetID()), zap.Error(err))
-				return
-			}
+// minRemainingHealthyDomains is the number of distinct isolation domains (besides the one
+// being drained) that must still be able to host leaders before PD will group-evict. It
+// prevents draining a domain on a too-small topology where all leaders would pile onto a
+// single survivor.
+const minRemainingHealthyDomains = 2
 
-			if !s.conf.readyForRecovery() {
-				return
-			}
+// groupIsolationLabels returns the labels that identify a drainable failure domain. Group
+// eviction is only allowed when every placement rule enforces the same non-empty isolation
+// prefix, so draining a single domain is known to be safe for every region.
+//
+// This runs on every detection and reconciliation cycle, so it must stay cheap: it delegates
+// to GetIsolationPrefix rather than GetAllRules, which would clone every rule through JSON
+// and sort the result on each call.
+func groupIsolationLabels(cluster sche.SchedulerCluster) ([]string, bool) {
+	return cluster.GetRuleManager().GetIsolationPrefix()
+}
 
-			log.Info("slow store has been recovered",
-				zap.Uint64("store-id", store.GetID()))
-			evictedSlowStoreStatusGauge.DeleteLabelValues(storeIDStr, string(diskSlowStore))
-			s.cleanupEvictLeader(cluster)
-			return
-		}
-		// If the slow store is still slow or slow again, we can continue to evict leaders from it.
-		if err := s.conf.tryUpdateRecoverStatus(false); err != nil {
-			log.Info("evict-slow-store-scheduler persist config failed", zap.Uint64("store-id", store.GetID()), zap.Error(err))
-			return
-		}
-		return
-	}
-
-	var slowStore *core.StoreInfo
-
+// collectDiskSlowStores returns the serving/preparing stores that are currently slow.
+func collectDiskSlowStores(cluster sche.SchedulerCluster) []*core.StoreInfo {
+	var slowStores []*core.StoreInfo
 	for _, store := range cluster.GetStores() {
 		if store.IsRemoved() {
 			continue
 		}
-
 		if (store.IsPreparing() || store.IsServing()) && store.IsSlow() {
-			// Do nothing if there is more than one slow store.
-			if slowStore != nil {
-				return
+			slowStores = append(slowStores, store)
+		}
+	}
+	return slowStores
+}
+
+func storeIDs(stores []*core.StoreInfo) []uint64 {
+	ids := make([]uint64, 0, len(stores))
+	for _, store := range stores {
+		ids = append(ids, store.GetID())
+	}
+	return ids
+}
+
+// hasAllLabels reports whether the store has a non-empty value for every label.
+func hasAllLabels(store *core.StoreInfo, labels []string) bool {
+	for _, l := range labels {
+		if store.GetLabelValue(l) == "" {
+			return false
+		}
+	}
+	return true
+}
+
+// sameLocation reports whether store is in the same failure domain as ref for the
+// isolation labels. It requires store to have all labels set, so an unlabeled store is
+// never treated as co-located (CompareLocation alone would treat a missing label as a
+// wildcard match).
+func sameLocation(ref, store *core.StoreInfo, labels []string) bool {
+	return hasAllLabels(store, labels) && ref.CompareLocation(store, labels) == -1
+}
+
+// eligibleHealthyLeaderTargets returns the stores that could actually receive leaders,
+// applying the same target-store checks as a leader transfer (StoreStateFilter with
+// TransferLeader set) so the domain counting matches what the operator layer will accept.
+// It additionally drops:
+//   - non-TiKV stores: a leader can only move to a voter, and TiFlash keeps learners only,
+//     so those stores never appear in the per-region follower candidates that
+//     scheduleEvictLeaderOnce picks from. StoreStateFilter does not check the engine.
+//   - disk-slow stores, which the leader-target filter does not reject either.
+func eligibleHealthyLeaderTargets(cluster sche.SchedulerCluster, stores []*core.StoreInfo) []*core.StoreInfo {
+	candidates := filter.NewCandidates(stores).
+		FilterTarget(
+			cluster.GetSchedulerConfig(),
+			nil,
+			nil,
+			&filter.StoreStateFilter{
+				ActionScope:    types.EvictSlowStoreScheduler.String(),
+				TransferLeader: true,
+				OperatorLevel:  constant.Urgent,
+			},
+		).
+		PickAll()
+
+	healthy := candidates[:0]
+	for _, store := range candidates {
+		if !store.IsTiKV() || store.IsSlow() {
+			continue
+		}
+		healthy = append(healthy, store)
+	}
+	return healthy
+}
+
+// hasEnoughHealthyDomains reports whether at least minRemainingHealthyDomains distinct
+// failure domains (by all isolation labels) other than the drained store's domain still
+// have a store able to host leaders. Domains are deduplicated with CompareLocation so the
+// counting stays consistent with the grouping decision.
+func hasEnoughHealthyDomains(cluster sche.SchedulerCluster, labels []string, drained *core.StoreInfo) bool {
+	reps := make([]*core.StoreInfo, 0, minRemainingHealthyDomains)
+	for _, store := range eligibleHealthyLeaderTargets(cluster, cluster.GetStores()) {
+		if !hasAllLabels(store, labels) || drained.CompareLocation(store, labels) == -1 {
+			continue
+		}
+		isNewDomain := true
+		for _, rep := range reps {
+			if rep.CompareLocation(store, labels) == -1 {
+				isNewDomain = false
+				break
 			}
-			slowStore = store
+		}
+		if isNewDomain {
+			reps = append(reps, store)
+			if len(reps) >= minRemainingHealthyDomains {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// startEvictDiskSlowStores marks the given stores as evicted and records their status.
+func (s *evictSlowStoreScheduler) startEvictDiskSlowStores(cluster sche.SchedulerCluster, stores []*core.StoreInfo) {
+	ids := storeIDs(stores)
+	if err := s.prepareEvictLeader(cluster, ids); err != nil {
+		log.Info("prepare for evicting leader failed", zap.Error(err), zap.Uint64s("store-ids", ids))
+		return
+	}
+	for _, id := range ids {
+		evictedSlowStoreStatusGauge.WithLabelValues(strconv.FormatUint(id, 10), string(diskSlowStore)).Set(1)
+	}
+}
+
+func (s *evictSlowStoreScheduler) scheduleDiskSlowStore(cluster sche.SchedulerCluster) {
+	slowStores := collectDiskSlowStores(cluster)
+
+	if s.conf.isEvictingDiskSlowStore() {
+		s.reconcileDiskSlowStoreGroup(cluster, slowStores)
+		return
+	}
+
+	// Detection: nothing is being evicted yet.
+	if len(slowStores) == 0 {
+		return
+	}
+	if len(slowStores) == 1 {
+		// Single slow store: unchanged behavior.
+		if slowStores[0].GetSlowScore() >= slowStoreEvictThreshold {
+			log.Info("detected slow store, start to evict leaders",
+				zap.Uint64("store-id", slowStores[0].GetID()))
+			s.startEvictDiskSlowStores(cluster, slowStores[:1])
+		}
+		return
+	}
+
+	// Multiple slow stores: group eviction only when it is enabled, the placement rules
+	// define one isolation domain, and every slow store shares that domain.
+	if !s.conf.isGroupEvictionEnabled() {
+		// Grouping disabled; keep the conservative behavior (do nothing for 2+ slow stores).
+		return
+	}
+	labels, ok := groupIsolationLabels(cluster)
+	if !ok {
+		// Placement rules do not uniformly enforce an isolation level; fall back to the
+		// conservative behavior (do nothing for more than one slow store).
+		return
+	}
+	ref := slowStores[0]
+	if !hasAllLabels(ref, labels) {
+		// Reference store is missing an isolation label; cannot determine its domain.
+		return
+	}
+	for _, store := range slowStores[1:] {
+		if !sameLocation(ref, store, labels) {
+			// Slow stores span more than one domain (or one lacks the labels); never
+			// drain across failure domains.
+			return
+		}
+	}
+	if !hasEnoughHealthyDomains(cluster, labels, ref) {
+		return
+	}
+
+	var toEvict []*core.StoreInfo
+	for _, store := range slowStores {
+		if store.GetSlowScore() >= slowStoreEvictThreshold {
+			toEvict = append(toEvict, store)
+		}
+	}
+	if len(toEvict) == 0 {
+		// All same-domain slow stores are still below the evict threshold; wait.
+		return
+	}
+	log.Info("detected slow stores in a single isolation domain, start to evict leaders",
+		zap.Strings("isolation-labels", labels),
+		zap.Uint64s("store-ids", storeIDs(toEvict)))
+	s.startEvictDiskSlowStores(cluster, toEvict)
+}
+
+// reconcileDiskSlowStoreGroup runs each cycle while a domain is being drained: it
+// releases stores that left the cluster, releases the whole group once every
+// evicted store has recovered for the recovery duration, and (unless a slow store
+// has appeared outside the locked domain) adds newly-slow same-domain stores.
+func (s *evictSlowStoreScheduler) reconcileDiskSlowStoreGroup(cluster sche.SchedulerCluster, slowStores []*core.StoreInfo) {
+	evicted := s.conf.evictedStores()
+
+	// Single pass: drop stores that have left the cluster; compute maxScore and pick a
+	// surviving store as the locked-domain reference (all survivors share one domain by
+	// construction) so we only call GetStore once per evicted id.
+	var (
+		gone       []uint64
+		maxScore   uint64
+		survivorID uint64
+	)
+	for _, id := range evicted {
+		store := cluster.GetStore(id)
+		if store == nil || store.IsRemoved() {
+			gone = append(gone, id)
+			continue
+		}
+		if score := store.GetSlowScore(); score > maxScore {
+			maxScore = score
+		}
+		survivorID = id
+	}
+	if len(gone) > 0 {
+		removed, err := s.conf.removeEvictedAndPersist(gone)
+		if err != nil {
+			log.Info("evict-slow-store-scheduler persist config failed", zap.Uint64s("store-ids", gone), zap.Error(err))
+			return
+		}
+		for _, id := range removed {
+			log.Info("evicted slow store has been removed", zap.Uint64("store-id", id))
+			cluster.SlowStoreRecovered(id)
+			evictedSlowStoreStatusGauge.DeleteLabelValues(strconv.FormatUint(id, 10), string(diskSlowStore))
+		}
+	}
+	if !s.conf.isEvictingDiskSlowStore() {
+		// All evicted stores have left the cluster.
+		return
+	}
+
+	// Group recovery: release the whole group only when every evicted store has
+	// recovered below the threshold for the recovery duration.
+	if maxScore <= slowStoreRecoverThreshold {
+		if err := s.conf.tryUpdateRecoverStatus(true); err != nil {
+			log.Info("evict-slow-store-scheduler persist config failed", zap.Error(err))
+			return
+		}
+		if !s.conf.readyForRecovery() {
+			return
+		}
+		log.Info("slow store group has been recovered", zap.Uint64s("store-ids", s.conf.evictedStores()))
+		s.cleanupEvictLeader(cluster, false)
+		return
+	}
+	if err := s.conf.tryUpdateRecoverStatus(false); err != nil {
+		log.Info("evict-slow-store-scheduler persist config failed", zap.Error(err))
+		return
+	}
+
+	// Resolve the locked domain from a surviving evicted store. If grouping was turned off,
+	// the isolation prefix is no longer well-defined (rules changed), or the locked store no
+	// longer carries the labels, keep draining the current group but do not expand.
+	// survivorID is always set here because isEvictingDiskSlowStore returned true and
+	// every surviving store was visited in the loop above.
+	if !s.conf.isGroupEvictionEnabled() {
+		return
+	}
+	labels, ok := groupIsolationLabels(cluster)
+	if !ok {
+		return
+	}
+	lockedRef := cluster.GetStore(survivorID)
+	if lockedRef == nil || !hasAllLabels(lockedRef, labels) {
+		return
+	}
+
+	// Freeze brake: if any slow store sits outside the locked domain, stop expanding
+	// the eviction set (we never start draining a second domain).
+	for _, store := range slowStores {
+		if !sameLocation(lockedRef, store, labels) {
+			return
 		}
 	}
 
-	if slowStore == nil || slowStore.GetSlowScore() < slowStoreEvictThreshold {
+	// Only expand if the topology can still absorb draining the locked domain.
+	// This prevents the single-store → reconcile-add bypass of the domain guard.
+	if !hasEnoughHealthyDomains(cluster, labels, lockedRef) {
 		return
 	}
 
-	// If there is only one slow store, evict leaders from that store.
-	log.Info("detected slow store, start to evict leaders",
-		zap.Uint64("store-id", slowStore.GetID()))
-	err := s.prepareEvictLeader(cluster, slowStore.GetID())
-	if err != nil {
-		log.Info("prepare for evicting leader failed", zap.Error(err), zap.Uint64("store-id", slowStore.GetID()))
-		return
+	// Reconcile: add newly-slow same-domain stores that reached the evict threshold.
+	// EvictedAsSlowStore() is the authoritative "already marked" check; it covers
+	// both disk- and network-evicted stores, so no separate set is needed.
+	var toAdd []*core.StoreInfo
+	for _, store := range slowStores {
+		if store.EvictedAsSlowStore() {
+			continue
+		}
+		if sameLocation(lockedRef, store, labels) && store.GetSlowScore() >= slowStoreEvictThreshold {
+			toAdd = append(toAdd, store)
+		}
 	}
-	// Record the slow store evicted status.
-	storeIDStr := strconv.FormatUint(slowStore.GetID(), 10)
-	evictedSlowStoreStatusGauge.WithLabelValues(storeIDStr, string(diskSlowStore)).Set(1)
+	if len(toAdd) > 0 {
+		log.Info("adding newly-slow stores in the locked domain to eviction",
+			zap.Strings("isolation-labels", labels), zap.Uint64s("store-ids", storeIDs(toAdd)))
+		s.startEvictDiskSlowStores(cluster, toAdd)
+	}
 }
 
 // newEvictSlowStoreScheduler creates a scheduler that detects and evicts slow stores.
