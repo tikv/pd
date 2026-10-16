@@ -127,7 +127,7 @@
 - Do not disable lint/security checks without discussion.
 
 ## Dependencies & Tools
-- Tools live in `.tools/bin`; `make install-tools` installs pinned versions (golangci-lint v2.13.2, etc.).
+- Tools live in `.tools/bin`; `make install-tools` installs pinned versions (golangci-lint v2.14.0, etc.).
 - `tools.go` pins tool deps; avoid adding runtime deps without justification; run `make tidy` after changes and ensure clean diff.
 
 ## Dashboard / UI
