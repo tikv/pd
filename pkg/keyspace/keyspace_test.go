@@ -1225,6 +1225,70 @@ func TestLoadKeyspaceByIDDoesNotClobberConcurrentUpdate(t *testing.T) {
 		"the concurrent update's value must survive; LoadKeyspaceByID's own stale write must have been rejected")
 }
 
+// TestLoadKeyspaceDoesNotClobberConcurrentUpdate mirrors
+// TestLoadKeyspaceByIDDoesNotClobberConcurrentUpdate for LoadKeyspace (the
+// by-name sibling lookup), which had the same unconditional-cache-write race
+// until it was given the same generation guard.
+func TestLoadKeyspaceDoesNotClobberConcurrentUpdate(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	allocator := mockid.NewIDAllocator()
+	kgm := NewKeyspaceGroupManager(ctx, store, nil)
+	manager := NewKeyspaceManager(ctx, store, nil, allocator, &mockConfig{}, kgm, nil)
+	re.NoError(kgm.Bootstrap(ctx))
+	re.NoError(manager.Bootstrap())
+
+	meta := &keyspacepb.KeyspaceMeta{
+		Keyspace:       &keyspacepb.KeyspaceMeta_Id{Id: 82},
+		Name:           "ks82",
+		State:          keyspacepb.KeyspaceState_ARCHIVED,
+		CreatedAt:      time.Now().Unix(),
+		StateChangedAt: time.Now().Unix(),
+	}
+	re.NoError(manager.saveNewKeyspace(meta))
+	// Evict it from cache (but not storage) to force the next lookup onto the
+	// slow-read fallback path.
+	manager.cache.DeleteKeyspace(82)
+
+	reachedFailpoint := make(chan struct{})
+	releaseReader := make(chan struct{})
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/keyspace/loadKeyspaceBeforeCacheWrite", func() {
+		close(reachedFailpoint)
+		<-releaseReader
+	}))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/loadKeyspaceBeforeCacheWrite"))
+	}()
+
+	readerDone := make(chan struct{})
+	var readMeta *keyspacepb.KeyspaceMeta
+	var readErr error
+	go func() {
+		defer close(readerDone)
+		readMeta, readErr = manager.LoadKeyspace("ks82")
+	}()
+
+	// Let the reader's storage read (ARCHIVED) complete and reach the point
+	// just before it would write that stale value to cache, then perform a
+	// real, concurrent state update while it is paused there.
+	<-reachedFailpoint
+	_, err := manager.UpdateKeyspaceStateByID(82, keyspacepb.KeyspaceState_TOMBSTONE, time.Now().Unix())
+	re.NoError(err)
+	close(releaseReader)
+	<-readerDone
+
+	re.NoError(readErr)
+	re.Equal(keyspacepb.KeyspaceState_ARCHIVED, readMeta.GetState(),
+		"the reader itself still reports what it read, which is fine - it started before the update")
+
+	item, ok := manager.cache.getKeyspaceByID(82)
+	re.True(ok)
+	re.Equal(keyspacepb.KeyspaceState_TOMBSTONE, item.state,
+		"the concurrent update's value must survive; LoadKeyspace's own stale write must have been rejected")
+}
+
 // TestBackfillKeyspaceIDRangeDoesNotClobberConcurrentUpdate verifies that a
 // backfillKeyspaceIDRange scan which buffered a stale read of a keyspace,
 // racing a real, concurrent UpdateKeyspaceStateByID for the same keyspace,

@@ -808,6 +808,9 @@ func (manager *Manager) checkBound(key []byte) bool {
 // It returns error if loading or unmarshalling met error or if keyspace does not exist.
 func (manager *Manager) LoadKeyspace(name string) (*keyspacepb.KeyspaceMeta, error) {
 	var meta *keyspacepb.KeyspaceMeta
+	// Capture the generation before the storage read below, for the same
+	// reason LoadKeyspaceByID does - see its comment.
+	generation := manager.cache.Generation()
 	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
 		loaded, id, err := manager.store.LoadKeyspaceID(txn, name)
 		if err != nil {
@@ -826,7 +829,8 @@ func (manager *Manager) LoadKeyspace(name string) (*keyspacepb.KeyspaceMeta, err
 		return nil
 	})
 	if err == nil {
-		manager.cache.Save(meta.GetId(), meta.GetName(), meta.GetState())
+		failpoint.InjectCall("loadKeyspaceBeforeCacheWrite")
+		manager.cache.SaveIfGenerationUnchanged(meta.GetId(), meta.GetName(), meta.GetState(), generation)
 	}
 	if manager.mgm != nil && meta != nil {
 		manager.mgm.AttachEndpoints(meta.GetConfig())
