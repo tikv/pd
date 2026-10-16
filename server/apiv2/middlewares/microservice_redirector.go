@@ -17,6 +17,7 @@ package middlewares
 import (
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -82,6 +83,13 @@ func AffinityMicroserviceRedirector() gin.HandlerFunc {
 			MatchPath:         pdAffinityPath,
 			TargetPath:        targetAffinityPath,
 			TargetServiceName: constant.SchedulingServiceName,
-			MatchMethods:      []string{http.MethodGet},
+			MatchMethods:      []string{http.MethodGet, http.MethodPatch},
+			Filter: func(r *http.Request) bool {
+				if r.Method != http.MethodPatch {
+					return true
+				}
+				parts := strings.Split(strings.TrimPrefix(r.URL.Path, pdAffinityPath+"/"), "/")
+				return len(parts) == 2 && parts[0] != "" && parts[1] == "policy"
+			},
 		})
 }

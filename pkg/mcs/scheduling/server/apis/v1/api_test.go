@@ -46,3 +46,21 @@ func TestGetAllStoresReturnsNotBootstrappedWhenBasicClusterMissing(t *testing.T)
 	re.Equal(http.StatusInternalServerError, resp.Code)
 	re.Contains(resp.Body.String(), "not bootstrapped")
 }
+
+func TestRegisterAffinityPolicyRoute(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	re := require.New(t)
+	engine := gin.New()
+	service := &Service{
+		apiHandlerEngine: engine,
+		root:             engine.Group(APIPathPrefix),
+	}
+	service.RegisterAffinityRouter()
+
+	for _, route := range engine.Routes() {
+		if route.Method == http.MethodPatch && route.Path == APIPathPrefix+"/affinity-groups/:group_id/policy" {
+			return
+		}
+	}
+	re.Fail("affinity policy route is not registered")
+}

@@ -41,6 +41,7 @@ func NewAffinityCommand() *cobra.Command {
 		newAffinityShowCommand(),
 		newAffinityDeleteCommand(),
 		newAffinityUpdatePeersCommand(),
+		newAffinityUpdatePolicyCommand(),
 	)
 	return cmd
 }
@@ -72,6 +73,17 @@ func newAffinityUpdatePeersCommand() *cobra.Command {
 	}
 	cmd.Flags().Uint64("leader", 0, "leader store ID")
 	cmd.Flags().String("voters", "", "comma separated voter store IDs, e.g. 1,2,3")
+	return cmd
+}
+
+func newAffinityUpdatePolicyCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "policy",
+		Short: "set the balance policy for a specific affinity group",
+		Run:   affinityUpdatePolicyCommandFunc,
+	}
+	cmd.Flags().String("balance-policy", "", "balance policy: auto or fixed")
+	_ = cmd.MarkFlagRequired("balance-policy")
 	return cmd
 }
 
@@ -146,6 +158,26 @@ func affinityUpdatePeersCommandFunc(cmd *cobra.Command, _ []string) {
 	state, err := PDCli.UpdateAffinityGroupPeers(cmd.Context(), groupID, leader, voters)
 	if err != nil {
 		cmd.Printf("Failed to update affinity group peers: %v\n", err)
+		return
+	}
+	jsonPrint(cmd, state)
+}
+
+func affinityUpdatePolicyCommandFunc(cmd *cobra.Command, _ []string) {
+	groupID, err := getGroupID(cmd)
+	if err != nil {
+		cmd.Println(err)
+		return
+	}
+
+	policy, _ := cmd.Flags().GetString("balance-policy")
+	if policy != string(affinity.BalancePolicyAuto) && policy != string(affinity.BalancePolicyFixed) {
+		cmd.Printf("balance-policy must be %q or %q\n", affinity.BalancePolicyAuto, affinity.BalancePolicyFixed)
+		return
+	}
+	state, err := PDCli.UpdateAffinityGroupPolicy(cmd.Context(), groupID, policy)
+	if err != nil {
+		cmd.Printf("Failed to update affinity group balance policy: %v\n", err)
 		return
 	}
 	jsonPrint(cmd, state)

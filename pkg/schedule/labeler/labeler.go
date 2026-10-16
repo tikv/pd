@@ -147,6 +147,14 @@ func (l *RegionLabeler) BuildRangeListLocked() {
 	l.ruleIndex.buildRanges()
 }
 
+// GetRevision returns the generation of the in-memory label rules, including
+// watcher updates and expired-label removal.
+func (l *RegionLabeler) GetRevision() uint64 {
+	l.RLock()
+	defer l.RUnlock()
+	return l.ruleIndex.revision
+}
+
 // GetSplitKeys returns all split keys in the range (start, end).
 func (l *RegionLabeler) GetSplitKeys(start, end []byte) [][]byte {
 	l.RLock()
@@ -350,7 +358,7 @@ func (l *RegionLabeler) Patch(patch LabelRulePatch) error {
 			return l.storage.SaveRegionRule(txn, localID, localRule)
 		})
 	}
-	if err := endpoint.RunBatchOpInTxn(l.ctx, l.storage, batch); err != nil {
+	if err := endpoint.RunBatchOpInTxnWithLimit(l.ctx, l.storage, batch, endpoint.MaxAffinityTxnBatchOps); err != nil {
 		return err
 	}
 

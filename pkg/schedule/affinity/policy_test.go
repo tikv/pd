@@ -38,7 +38,6 @@ func TestStoreCondition(t *testing.T) {
 	re.Equal(groupDegraded, storeLeaderEvicted.groupAvailability())
 	re.Equal(groupDegraded, storeBusy.groupAvailability())
 	re.Equal(groupDegraded, storeDisconnected.groupAvailability())
-	re.Equal(groupDegraded, storePreparing.groupAvailability())
 	re.Equal(groupDegraded, storeLowSpace.groupAvailability())
 	re.Equal(groupExpired, storeDown.groupAvailability())
 	re.Equal(groupExpired, storeRemoving.groupAvailability())
@@ -84,7 +83,7 @@ func TestCollectUnavailableStores(t *testing.T) {
 	stores[6] = stores[6].Clone(core.SetStoreStats(&pdpb.StoreStats{IsBusy: true}))
 	// stores[7]: storeDisconnected
 	stores[7] = stores[7].Clone(core.SetLastHeartbeatTS(time.Now().Add(-2 * time.Minute)))
-	// stores[8]: storePreparing
+	// stores[8]: healthy Preparing stores can bootstrap affinity replicas.
 	stores[8] = stores[8].Clone(core.SetNodeState(metapb.NodeState_Preparing))
 	// stores[9]: storeDown
 	stores[9] = stores[9].Clone(core.SetLastHeartbeatTS(time.Now().Add(-2 * time.Hour)))
@@ -106,7 +105,6 @@ func TestCollectUnavailableStores(t *testing.T) {
 		5:  storeLeaderEvicted,
 		6:  storeBusy,
 		7:  storeDisconnected,
-		8:  storePreparing,
 		9:  storeDown,
 		10: storeRemoving,
 		11: storeRemoved,

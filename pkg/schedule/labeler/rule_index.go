@@ -24,6 +24,7 @@ import (
 // authoritative map, generic and keyspaces partition it, and ranges is derived
 // from generic. Its caller must hold RegionLabeler's lock while mutating it.
 type labelRuleIndex struct {
+	revision    uint64
 	rules       map[string]*LabelRule
 	generic     map[string]*LabelRule
 	keyspaces   keyspaceRuleIndex
@@ -37,6 +38,7 @@ func newLabelRuleIndex(rules map[string]*LabelRule) labelRuleIndex {
 		rules = make(map[string]*LabelRule)
 	}
 	index := labelRuleIndex{
+		revision:    1,
 		rules:       rules,
 		generic:     make(map[string]*LabelRule),
 		rangesDirty: true,
@@ -51,6 +53,7 @@ func newLabelRuleIndex(rules map[string]*LabelRule) labelRuleIndex {
 }
 
 func (i *labelRuleIndex) set(rule *LabelRule) {
+	i.revision++
 	if old, ok := i.rules[rule.ID]; ok {
 		if i.keyspaces.Replace(old, rule) {
 			i.rules[rule.ID] = rule
@@ -73,6 +76,7 @@ func (i *labelRuleIndex) delete(id string) {
 	if !ok {
 		return
 	}
+	i.revision++
 	if !i.keyspaces.Remove(id, rule) {
 		delete(i.generic, id)
 		i.rangesDirty = true
@@ -84,6 +88,7 @@ func (i *labelRuleIndex) removeExpiredLabels(rule *LabelRule, now time.Time) boo
 	if !rule.checkAndRemoveExpireLabels(now) {
 		return false
 	}
+	i.revision++
 	// Rebuild on publish to refresh minExpire together with the range view.
 	i.rangesDirty = true
 	return true
