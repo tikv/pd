@@ -86,13 +86,19 @@ func CreateTransferLeaderOperator(desc string, ci sche.SharedCluster, region *co
 	// Check every advertised target, not only the old-TiKV fallback target.
 	if fit := builder.originFit; builder.err == nil && fit != nil {
 		witness := ci.GetSharedConfig().IsWitnessAllowed()
+		// The preferred target can also appear in the list. Reuse its check.
+		targetAllowed := fit.IsLeaderIsolationPreserved(region, targetStoreID, witness)
 		targets := make([]uint64, 0, len(targetStoreIDs))
 		for _, id := range targetStoreIDs {
-			if fit.IsLeaderIsolationPreserved(region, id, witness) {
+			allowed := targetAllowed
+			if id != targetStoreID {
+				allowed = fit.IsLeaderIsolationPreserved(region, id, witness)
+			}
+			if allowed {
 				targets = append(targets, id)
 			}
 		}
-		if !fit.IsLeaderIsolationPreserved(region, targetStoreID, witness) {
+		if !targetAllowed {
 			if len(targets) == 0 {
 				return nil, errors.New("cannot transfer leader: target isolation would degrade")
 			}

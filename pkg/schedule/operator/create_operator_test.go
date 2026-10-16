@@ -1408,15 +1408,37 @@ func TestTransferLeaderIsolationTargets(t *testing.T) {
 	voters.LocationLabels, voters.IsolationLevel = []string{"host"}, "host"
 	require.NoError(t, rm.SetRule(voters))
 	region := tc.AddLeaderRegion(1, 1, 2, 3)
-	op, err := CreateTransferLeaderOperator("test", tc, region, 2, nil, OpLeader)
-	require.Error(t, err)
-	require.Nil(t, op)
-	targets := []uint64{2, 3}
-	op, err = CreateTransferLeaderOperator("test", tc, region, 2, targets, OpLeader)
-	require.NoError(t, err)
-	require.NotNil(t, op)
-	step := op.Step(0).(TransferLeader)
-	require.Equal(t, uint64(3), step.ToStore)
-	require.Equal(t, []uint64{3}, step.ToStores)
-	require.Equal(t, []uint64{2, 3}, targets)
+	for _, tt := range []struct {
+		name        string
+		preferred   uint64
+		targets     []uint64
+		wantLeader  uint64
+		wantTargets []uint64
+	}{
+		{"invalid single", 2, nil, 0, nil},
+		{"valid single", 3, nil, 3, nil},
+		{"fallback", 2, []uint64{2, 3}, 3, []uint64{3}},
+		{"preferred absent", 2, []uint64{3}, 3, []uint64{3}},
+		{"valid preferred absent", 3, []uint64{2}, 3, nil},
+		{"valid preferred present", 3, []uint64{2, 3}, 3, []uint64{3}},
+		{"all rejected", 2, []uint64{2, 99}, 0, nil},
+		{"duplicate rejected", 2, []uint64{2, 3, 2}, 3, []uint64{3}},
+		{"duplicate valid", 3, []uint64{3, 2, 3}, 3, []uint64{3, 3}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			input := slices.Clone(tt.targets)
+			op, err := CreateTransferLeaderOperator("test", tc, region, tt.preferred, input, OpLeader)
+			require.Equal(t, tt.targets, input)
+			if tt.wantLeader == 0 {
+				require.Error(t, err)
+				require.Nil(t, op)
+				return
+			}
+			require.NoError(t, err)
+			require.NotNil(t, op)
+			step := op.Step(0).(TransferLeader)
+			require.Equal(t, tt.wantLeader, step.ToStore)
+			require.Equal(t, tt.wantTargets, step.ToStores)
+		})
+	}
 }
