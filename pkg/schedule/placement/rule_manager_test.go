@@ -152,31 +152,6 @@ func TestAdjustRule(t *testing.T) {
 	re.True(deprecatedRule.IsWitness)
 }
 
-func TestLoadRemovedWitnessRule(t *testing.T) {
-	re := require.New(t)
-	store, _ := newTestManager(t)
-	legacyRule := &Rule{
-		GroupID:   "legacy",
-		ID:        "witness",
-		Role:      Voter,
-		Count:     1,
-		IsWitness: true,
-	}
-	re.NoError(store.RunInTxn(context.Background(), func(txn kv.Txn) error {
-		return store.SaveRule(txn, legacyRule.StoreKey(), legacyRule)
-	}))
-
-	manager := NewRuleManager(context.Background(), store, nil, nil)
-	re.NoError(manager.Initialize(3, nil, "", false))
-	re.False(manager.GetRule(legacyRule.GroupID, legacyRule.ID).IsWitness)
-
-	value, err := store.LoadRule(legacyRule.StoreKey())
-	re.NoError(err)
-	persisted, err := NewRuleFromJSON([]byte(value))
-	re.NoError(err)
-	re.False(persisted.IsWitness)
-}
-
 func TestLeaderCheck(t *testing.T) {
 	re := require.New(t)
 	_, manager := newTestManager(t)

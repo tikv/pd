@@ -185,8 +185,6 @@ func (b *Builder) AddPeer(peer *metapb.Peer) *Builder {
 	}
 	if peer == nil || peer.GetStoreId() == 0 {
 		b.err = errors.Errorf("cannot add nil peer")
-	} else if peer.GetIsWitness() {
-		b.err = errors.Errorf("cannot add peer %s: witness peers are no longer supported", peer)
 	} else if core.IsInJointState(peer) {
 		b.err = errors.Errorf("cannot add peer %s: is in joint state", peer)
 	} else if old, ok := b.targetPeers[peer.GetStoreId()]; ok {
@@ -221,8 +219,6 @@ func (b *Builder) PromoteLearner(storeID uint64) *Builder {
 		b.err = errors.Errorf("cannot promote peer %d: not found", storeID)
 	} else if !core.IsLearner(peer) {
 		b.err = errors.Errorf("cannot promote peer %d: is not learner", storeID)
-	} else if core.IsWitness(peer) {
-		b.err = errors.Errorf("cannot promote peer %d: witness peers are no longer supported", storeID)
 	} else if _, ok := b.unhealthyPeers[storeID]; ok {
 		b.err = errors.Errorf("cannot promote peer %d: unhealthy", storeID)
 	} else {
@@ -279,7 +275,7 @@ func (b *Builder) SetLeaders(storeIDs []uint64) *Builder {
 	sort.Slice(storeIDs, func(i, j int) bool { return storeIDs[i] < storeIDs[j] })
 	for _, storeID := range storeIDs {
 		peer := b.targetPeers[storeID]
-		if peer == nil || core.IsLearner(peer) || peer.GetIsWitness() || b.unhealthyPeers[storeID] != nil {
+		if peer == nil || core.IsLearner(peer) || b.unhealthyPeers[storeID] != nil {
 			continue
 		}
 		b.targetLeaderStoreIDs = append(b.targetLeaderStoreIDs, storeID)
@@ -302,10 +298,6 @@ func (b *Builder) SetPeers(peers map[uint64]*metapb.Peer) *Builder {
 	for key, peer := range peers {
 		if peer == nil || key == 0 || peer.GetStoreId() != key || core.IsInJointState(peer) {
 			b.err = errors.Errorf("setPeers with mismatch peers: %v", peers)
-			return b
-		}
-		if peer.GetIsWitness() {
-			b.err = errors.Errorf("cannot set peer %s: witness peers are no longer supported", peer)
 			return b
 		}
 	}

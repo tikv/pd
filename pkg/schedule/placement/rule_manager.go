@@ -152,8 +152,7 @@ func (m *RuleManager) loadRules() error {
 			toDelete = append(toDelete, k)
 			return
 		}
-		usedDeprecatedWitness := r.IsWitness
-		err = m.AdjustRuleFromStorage(r, "")
+		err = m.AdjustRule(r, "")
 		if err != nil {
 			log.Error("rule is in bad format", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule, err))
 			toDelete = append(toDelete, k)
@@ -168,10 +167,6 @@ func (m *RuleManager) loadRules() error {
 		if k != r.StoreKey() {
 			log.Error("mismatch data key, need to restore", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule))
 			toDelete = append(toDelete, k)
-			toSave = append(toSave, r)
-		} else if usedDeprecatedWitness {
-			// Persist the normalized rule so all PD members converge after a
-			// rolling upgrade.
 			toSave = append(toSave, r)
 		}
 		m.ruleConfig.rules[r.Key()] = r
@@ -207,22 +202,11 @@ func (m *RuleManager) loadGroups() error {
 	})
 }
 
-// AdjustRule checks and adjusts a new or updated rule.
+// AdjustRule checks and adjusts a rule from a client or storage.
 func (m *RuleManager) AdjustRule(r *Rule, groupID string) (err error) {
 	if r.IsWitness {
 		return errs.ErrRuleContent.FastGenByArgs("witness peers are no longer supported")
 	}
-	return m.validateAndAdjustRule(r, groupID)
-}
-
-// AdjustRuleFromStorage checks and adjusts a rule loaded from persistent
-// storage. It normalizes fields from removed features before validation.
-func (m *RuleManager) AdjustRuleFromStorage(r *Rule, groupID string) (err error) {
-	r.IsWitness = false
-	return m.validateAndAdjustRule(r, groupID)
-}
-
-func (m *RuleManager) validateAndAdjustRule(r *Rule, groupID string) (err error) {
 	r.StartKey, err = hex.DecodeString(r.StartKeyHex)
 	if err != nil {
 		return errs.ErrHexDecodingString.FastGenByArgs(r.StartKeyHex)
