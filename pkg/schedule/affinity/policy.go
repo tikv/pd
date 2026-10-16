@@ -293,6 +293,32 @@ func (m *Manager) checkBalanceTargetStores(leaderStoreID uint64, voterStoreIDs [
 	return m.checkHasUnavailableStore(leaderStoreID, voterStoreIDs)
 }
 
+// checkSpecialUseTargetStores mirrors the candidate filter at the commit
+// boundary. Existing voters may already be special-use stores; only stores
+// newly introduced by this target are checked.
+func (m *Manager) checkSpecialUseTargetStores(originalVoterStoreIDs, voterStoreIDs []uint64) error {
+	if m.storeSetInformer == nil {
+		return nil
+	}
+	original := make(map[uint64]struct{}, len(originalVoterStoreIDs))
+	for _, storeID := range originalVoterStoreIDs {
+		original[storeID] = struct{}{}
+	}
+	for _, storeID := range voterStoreIDs {
+		if _, existed := original[storeID]; existed {
+			continue
+		}
+		store := m.storeSetInformer.GetStore(storeID)
+		if store != nil {
+			specialUse := store.GetLabelValue("specialUse")
+			if specialUse == "hotRegion" || specialUse == "reserved" {
+				return errs.ErrAffinityGroupContent.GenWithStackByArgs(fmt.Sprintf("store %d has special use %q", storeID, specialUse))
+			}
+		}
+	}
+	return nil
+}
+
 func checkUnavailableTargetStores(unavailable map[uint64]storeCondition, leaderStoreID uint64, voterStoreIDs []uint64) error {
 	for _, storeID := range voterStoreIDs {
 		condition, ok := unavailable[storeID]

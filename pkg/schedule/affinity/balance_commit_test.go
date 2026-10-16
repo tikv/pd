@@ -128,6 +128,33 @@ func TestBalanceCommitPreparingStoreRejectionRetries(t *testing.T) {
 	}
 }
 
+func TestBalanceCommitRejectsNewSpecialUseVoter(t *testing.T) {
+	manager := newBalanceRuntimeManager(t)
+	id := seedBalanceGroups(t, manager, []uint64{1})[0]
+	snapshot := prepareBalanceCommit(t, manager, id)
+	stores := manager.storeSetInformer.(*core.StoresInfo)
+	// Store 2 is already an existing voter. Its special-use label must not
+	// invalidate a legacy group; store 4 is introduced by this target and must
+	// be rejected at the commit boundary.
+	stores.PutStore(stores.GetStore(2).Clone(core.SetStoreLabels([]*metapb.StoreLabel{{Key: "specialUse", Value: "reserved"}})))
+	stores.PutStore(stores.GetStore(4).Clone(core.SetStoreLabels([]*metapb.StoreLabel{{Key: "specialUse", Value: "reserved"}})))
+	target := balanceCommitTarget(snapshot, id, 1)
+	target.VoterStoreIDs = []uint64{1, 2, 3, 4}
+
+	committed, err := manager.CommitBalanceTarget(t.Context(), snapshot, target)
+	require.False(t, committed)
+	require.ErrorContains(t, err, "store 4 has special use \"reserved\"")
+	require.NotContains(t, loadBalanceGroup(t, manager, id).VoterStoreIDs, uint64(4))
+
+	// Once the newly added store is usable, the same snapshot can retry even
+	// though the pre-existing voter remains special-use.
+	stores.PutStore(stores.GetStore(4).Clone(core.SetStoreLabels(nil)))
+	committed, err = manager.CommitBalanceTarget(t.Context(), snapshot, target)
+	require.NoError(t, err)
+	require.True(t, committed)
+	require.ElementsMatch(t, target.VoterStoreIDs, loadBalanceGroup(t, manager, id).VoterStoreIDs)
+}
+
 type balanceConditionalStorage struct {
 	storage.Storage
 	expected clientv3.Cmp

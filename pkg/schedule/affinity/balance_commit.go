@@ -407,6 +407,9 @@ func (m *Manager) CommitBalanceTarget(ctx context.Context, snapshot *BalanceSnap
 		// a temporary target failure as a successful no-op or stable result.
 		return false, fmt.Errorf("affinity target %s rejected: %w", group.ID, err)
 	}
+	if err := m.checkSpecialUseTargetStores(original.Group.VoterStoreIDs, group.VoterStoreIDs); err != nil {
+		return false, fmt.Errorf("affinity target %s rejected: %w", group.ID, err)
+	}
 	var targetToken string
 	err := m.runBalanceTxn(ctx, snapshot.conditions, func(txn kv.Txn) error {
 		if err := checkBalanceDependencies(txn, snapshot); err != nil {
