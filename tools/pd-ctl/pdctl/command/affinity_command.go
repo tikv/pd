@@ -31,11 +31,12 @@ func NewAffinityCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:               "affinity",
 		Short:             "affinity group commands",
-		Long:              `Manage affinity groups for a single table by table ID and optional partition ID.`,
+		Long:              `Manage affinity groups by table ID, optional partition ID, and optional NextGen keyspace ID.`,
 		PersistentPreRunE: requirePDClient,
 	}
 	cmd.PersistentFlags().Uint64("table-id", 0, "table ID for the affinity group")
 	cmd.PersistentFlags().Uint64("partition-id", 0, "partition ID for partitioned tables")
+	cmd.PersistentFlags().Uint32("keyspace-id", 0, "NextGen keyspace ID (omit for Classic groups)")
 
 	cmd.AddCommand(
 		newAffinityShowCommand(),
@@ -48,7 +49,7 @@ func NewAffinityCommand() *cobra.Command {
 func newAffinityShowCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "show",
-		Short: "show affinity group state (all groups if no --table-id is specified)",
+		Short: "show affinity group state (all groups if both --table-id and --keyspace-id are omitted)",
 		Run:   affinityShowCommandFunc,
 	}
 	return cmd
@@ -76,10 +77,8 @@ func newAffinityUpdatePeersCommand() *cobra.Command {
 }
 
 func affinityShowCommandFunc(cmd *cobra.Command, _ []string) {
-	tableID, _ := cmd.Flags().GetUint64("table-id")
-
-	// If no table-id is provided, show all affinity groups
-	if tableID == 0 {
+	// Show all groups only when neither table-id nor keyspace-id is provided.
+	if !cmd.Flags().Changed("table-id") && !cmd.Flags().Changed("keyspace-id") {
 		groups, err := PDCli.GetAllAffinityGroups(cmd.Context())
 		if err != nil {
 			cmd.Printf("Failed to get affinity groups: %v\n", err)
@@ -158,6 +157,13 @@ func getGroupID(cmd *cobra.Command) (string, error) {
 	}
 	partitionID, _ := cmd.Flags().GetUint64("partition-id")
 	groupID := FormatGroupID(tableID, partitionID)
+	if cmd.Flags().Changed("keyspace-id") {
+		keyspaceID, _ := cmd.Flags().GetUint32("keyspace-id")
+		if keyspaceID > 0xFFFFFF {
+			return "", errors.New("--keyspace-id must be between 0 and 16777215")
+		}
+		groupID = strings.Replace(groupID, "_tidb_", fmt.Sprintf("_tidb_ks%d_", keyspaceID), 1)
+	}
 	if err := affinity.ValidateGroupID(groupID); err != nil {
 		return "", err
 	}
