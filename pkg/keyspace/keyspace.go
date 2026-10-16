@@ -34,7 +34,6 @@ import (
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/schedule/core"
-	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
@@ -108,11 +107,24 @@ type Manager struct {
 	// nextPatrolStartID is the next start id of keyspace assignment patrol.
 	nextPatrolStartID uint32
 	// cached keyspace meta info for each keyspace ID.
-	// TODO: Remove this two maps after the cache fully takes effect and is verified to be stable.
+	// keyspaceNameLookup/keyspaceStateLookup are never read or written to
+	// outside of evictKeyspacesFromCache's Delete calls on this branch -
+	// GetKeyspaceNameByID/GetKeyspaceStateByID read manager.cache directly
+	// instead. Kept only so evictKeyspacesFromCache's deletions stay harmless
+	// no-ops rather than requiring that call site to diverge from upstream.
 	keyspaceNameLookup   sync.Map // store as ID(uint32) -> name(string)
 	keyspaceStateLookup  sync.Map // store as ID(uint32) -> state(keyspacepb.KeyspaceState)
 	cache                *Cache
 	gcBarrierInvalidator atomic.Pointer[func(uint32)]
+	// keyspaceIDRangeMu guards keyspaceIDVerifiedUpTo and the backfill that advances it.
+	keyspaceIDRangeMu syncutil.Mutex
+	// keyspaceIDVerifiedUpTo records that keyspace IDs in [0, keyspaceIDVerifiedUpTo)
+	// have been synced from storage into cache, so GetKeyspaceIDInRange can answer
+	// queries entirely within that prefix from cache alone. It only advances via
+	// backfillKeyspaceIDRange and is reset to 0 by ClearCache. Keyspaces created,
+	// updated, or removed through this Manager keep the cache in sync directly and
+	// do not depend on this watermark.
+	keyspaceIDVerifiedUpTo uint32
 }
 
 // SetGCBarrierInvalidator installs the GC observation lifecycle callback.
@@ -379,6 +391,14 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 				zap.Error(err2),
 			)
 		}
+		// assignGroupAndSaveKeyspace already cached this keyspace before the
+		// split was attempted (see saveNewKeyspace), so it must be evicted here
+		// regardless of err2's outcome: if the rollback above did commit, the
+		// cache entry is now a ghost; if it didn't (or the result is
+		// ambiguous), evicting is still safe, since GetKeyspaceIDInRange's
+		// watermark rollback inside evictKeyspacesFromCache forces a storage
+		// re-check rather than trusting the eviction.
+		manager.evictKeyspacesFromCache([]uint32{newID})
 		return nil, err
 	}
 	tracer.OnSplitRegionFinished()
@@ -523,6 +543,14 @@ func (manager *Manager) CreateKeyspaceByID(request *CreateKeyspaceByIDRequest) (
 				zap.Error(err2),
 			)
 		}
+		// assignGroupAndSaveKeyspace already cached this keyspace before the
+		// split was attempted (see saveNewKeyspace), so it must be evicted here
+		// regardless of err2's outcome: if the rollback above did commit, the
+		// cache entry is now a ghost; if it didn't (or the result is
+		// ambiguous), evicting is still safe, since GetKeyspaceIDInRange's
+		// watermark rollback inside evictKeyspacesFromCache forces a storage
+		// re-check rather than trusting the eviction.
+		manager.evictKeyspacesFromCache([]uint32{id})
 		return nil, err
 	}
 	// enable the keyspace metadata after split.
@@ -580,8 +608,6 @@ func (manager *Manager) saveNewKeyspace(keyspace *keyspacepb.KeyspaceMeta) error
 		return manager.store.SaveKeyspaceMeta(txn, keyspace)
 	})
 	if err == nil {
-		// Update the keyspace name cache only after the transaction commits.
-		manager.keyspaceNameLookup.Store(keyspace.GetId(), keyspace.Name)
 		manager.cache.Save(keyspace.GetId(), keyspace.Name, keyspace.State)
 	}
 	return err
@@ -648,45 +674,54 @@ func (manager *Manager) assignGroupAndSaveKeyspace(assign bool, config *map[stri
 	return nil
 }
 
-// splitKeyspaceRegion add keyspace's boundaries to region label. The corresponding
-// region will then be split by Coordinator's patrolRegion.
+// splitKeyspaceRegion waits for the region at keyspace boundaries to be split.
+// The actual splitting is now handled by the SplitChecker which detects keyspace
+// boundaries by parsing region keys, rather than using label rules.
+//
+// It also still writes the keyspaces/{id} region label rule, purely as a
+// rolling-upgrade compatibility fallback: a scheduling-server primary that
+// predates the keyspace-meta watcher has no other way to learn about a
+// keyspace created while it is primary (see the PR description's rolling
+// upgrade note). An up-to-date primary ignores it, having already learned
+// about the keyspace directly. Unlike the split-wait below, a failure to
+// write this label is treated the same way master always has: it fails
+// keyspace creation outright (the caller rolls everything back), rather than
+// being swallowed, since a legacy primary has no other way to discover this
+// keyspace's boundary if the write is silently skipped. TODO: remove once no
+// supported scheduling-server version predates the watcher.
 func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool, boundType regionBoundType) (err error) {
 	failpoint.Inject("skipSplitRegion", func() {
 		failpoint.Return(nil)
 	})
 
 	start := time.Now()
-	keyspaceRule := buildLabelRule(id, boundType)
-	cl, ok := manager.cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler })
-	if !ok {
-		return errors.New("cluster does not support region label")
-	}
-	err = cl.GetRegionLabeler().SetLabelRule(keyspaceRule)
-	if err != nil {
-		log.Warn("[keyspace] failed to add region label for keyspace",
-			zap.Uint32("keyspace-id", id),
-			zap.Error(err),
-		)
-		return err
-	}
-	defer func() {
-		if err != nil {
-			if err := cl.GetRegionLabeler().DeleteLabelRule(keyspaceRule.ID); err != nil {
-				log.Warn("[keyspace] failed to delete region label for keyspace",
+	if manager.cluster != nil {
+		if regionLabeler := manager.cluster.GetRegionLabeler(); regionLabeler != nil {
+			keyspaceRule := buildLabelRule(id, boundType)
+			if err = regionLabeler.SetLabelRule(keyspaceRule); err != nil {
+				log.Warn("[keyspace] failed to add compatibility region label for keyspace",
 					zap.Uint32("keyspace-id", id),
 					zap.Error(err),
 				)
+				return err
 			}
-			return
+			// If this call ends up failing (e.g. waitKeyspaceRegionSplit
+			// times out below), the caller rolls the keyspace's storage
+			// entries back; the label rule just written must not outlive
+			// that rollback as an orphan pointing at an ID that no longer
+			// exists.
+			defer func() {
+				if err != nil {
+					if delErr := regionLabeler.DeleteLabelRule(keyspaceRule.ID); delErr != nil {
+						log.Warn("[keyspace] failed to delete compatibility region label for keyspace",
+							zap.Uint32("keyspace-id", id),
+							zap.Error(delErr),
+						)
+					}
+				}
+			}()
 		}
-		log.Info("added region label for keyspace",
-			zap.Uint32("keyspace-id", id),
-			zap.Any("label-rule", keyspaceRule),
-			zap.Duration("takes", time.Since(start)),
-			zap.Stringer("key-type", boundType),
-		)
-	}()
-
+	}
 	if waitRegionSplit {
 		err = manager.waitKeyspaceRegionSplit(id, boundType)
 		if err != nil {
@@ -694,9 +729,13 @@ func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool, bou
 				zap.Uint32("keyspace-id", id),
 				zap.Error(err),
 			)
+			return err
 		}
-		return err
 	}
+	log.Info("[keyspace] region split initiated",
+		zap.Uint32("keyspace-id", id),
+		zap.Duration("takes", time.Since(start)),
+	)
 	return nil
 }
 
@@ -769,6 +808,9 @@ func (manager *Manager) checkBound(key []byte) bool {
 // It returns error if loading or unmarshalling met error or if keyspace does not exist.
 func (manager *Manager) LoadKeyspace(name string) (*keyspacepb.KeyspaceMeta, error) {
 	var meta *keyspacepb.KeyspaceMeta
+	// Capture the generation before the storage read below, for the same
+	// reason LoadKeyspaceByID does - see its comment.
+	generation := manager.cache.Generation()
 	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
 		loaded, id, err := manager.store.LoadKeyspaceID(txn, name)
 		if err != nil {
@@ -786,6 +828,10 @@ func (manager *Manager) LoadKeyspace(name string) (*keyspacepb.KeyspaceMeta, err
 		}
 		return nil
 	})
+	if err == nil {
+		failpoint.InjectCall("loadKeyspaceBeforeCacheWrite")
+		manager.cache.SaveIfGenerationUnchanged(meta.GetId(), meta.GetName(), meta.GetState(), generation)
+	}
 	if manager.mgm != nil && meta != nil {
 		manager.mgm.AttachEndpoints(meta.GetConfig())
 	}
@@ -799,6 +845,14 @@ func (manager *Manager) LoadKeyspaceByID(spaceID uint32) (*keyspacepb.KeyspaceMe
 		meta *keyspacepb.KeyspaceMeta
 		err  error
 	)
+	// Capture the generation before the storage read below, so the cache
+	// write below can detect whether a concurrent, authoritative write
+	// (Save or DeleteKeyspace, e.g. from UpdateKeyspaceStateByID) landed
+	// while this read was in flight - see Cache.SaveIfGenerationUnchanged.
+	// This guards every caller of LoadKeyspaceByID at the source, rather
+	// than relying on each caller to re-apply the same guard around its own
+	// now-redundant second write.
+	generation := manager.cache.Generation()
 	err = manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
 		meta, err = manager.store.LoadKeyspaceMeta(txn, spaceID)
 		if err != nil {
@@ -809,6 +863,10 @@ func (manager *Manager) LoadKeyspaceByID(spaceID uint32) (*keyspacepb.KeyspaceMe
 		}
 		return nil
 	})
+	if err == nil {
+		failpoint.InjectCall("loadKeyspaceByIDBeforeCacheWrite")
+		manager.cache.SaveIfGenerationUnchanged(meta.GetId(), meta.GetName(), meta.GetState(), generation)
+	}
 	if manager.mgm != nil && meta != nil {
 		manager.mgm.AttachEndpoints(meta.GetConfig())
 	}
@@ -1011,6 +1069,7 @@ func (manager *Manager) updateKeyspaceConfigTxn(
 		)
 		return nil, err
 	}
+	manager.cache.Save(meta.GetId(), meta.GetName(), meta.GetState())
 	if manager.mgm != nil {
 		manager.mgm.AttachEndpoints(meta.GetConfig())
 	}
@@ -1064,6 +1123,7 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 		)
 		return nil, err
 	}
+	manager.cache.Save(meta.GetId(), meta.GetName(), meta.GetState())
 	if manager.mgm != nil {
 		manager.mgm.AttachEndpoints(meta.GetConfig())
 	}
@@ -1164,8 +1224,30 @@ func (manager *Manager) removeKeyspaceMetadataIfEligible(
 	return metaServiceGroupID, true, false, nil
 }
 
+// evictKeyspacesFromCache removes ids from the keyspace metadata cache. The
+// call sites in tso_keyspace_group.go call this both on confirmed success and
+// on a genuinely ambiguous commit result (the client gave up waiting before
+// learning the outcome) - but not on a definite failure, where the removal is
+// known not to have committed and the cache must be left alone (see
+// TestGCBarrierRemovalInvalidationAfterCommit). In the ambiguous case, a
+// retry cannot always rediscover an already-removed keyspace to evict it
+// again, since group membership may already be gone by the time the retry
+// runs even though the original call reported an error - so eviction has to
+// happen pessimistically there too, meaning some evictions here turn out to
+// be wrong (the removal didn't actually commit after all). That is something
+// GetKeyspaceIDInRange's keyspaceIDVerifiedUpTo watermark cannot tolerate on
+// its own, since it trusts cache absence below the watermark without a
+// storage check. Roll the watermark back to cover any evicted ID below it,
+// under the same lock backfillKeyspaceIDRange uses, so the next query that
+// reaches that far re-verifies against storage instead of trusting a
+// possibly-wrong eviction.
 func (manager *Manager) evictKeyspacesFromCache(ids []uint32) {
+	manager.keyspaceIDRangeMu.Lock()
+	defer manager.keyspaceIDRangeMu.Unlock()
 	for _, id := range ids {
+		if id < manager.keyspaceIDVerifiedUpTo {
+			manager.keyspaceIDVerifiedUpTo = id
+		}
 		manager.keyspaceNameLookup.Delete(id)
 		manager.keyspaceStateLookup.Delete(id)
 		manager.cache.DeleteKeyspace(id)
@@ -1207,6 +1289,7 @@ func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.K
 		)
 		return nil, err
 	}
+	manager.cache.Save(meta.GetId(), meta.GetName(), meta.GetState())
 	log.Info("[keyspace] keyspace state updated",
 		zap.Uint32("keyspace-id", meta.GetId()),
 		zap.String("name", meta.GetName()),
@@ -1268,9 +1351,6 @@ func (manager *Manager) transformKeyspaceState(txn kv.Txn, meta *keyspacepb.Keys
 	// If the operation is legal, update keyspace state and change time.
 	meta.State = newState
 	meta.StateChangedAt = now
-	// Update the keyspace state to the cache.
-	manager.keyspaceStateLookup.Store(meta.GetId(), newState)
-	manager.cache.Save(meta.GetId(), meta.GetName(), newState)
 	return nil
 }
 
@@ -1307,7 +1387,110 @@ func (manager *Manager) GetKeyspaceIDInRange(start, end uint32, limit int) ([]ui
 	if manager == nil {
 		return []uint32{start}, true
 	}
+	manager.backfillKeyspaceIDRange()
 	return manager.cache.GetKeyspaceIDInRange(start, end, limit)
+}
+
+// backfillKeyspaceIDRange scans every keyspace from the current
+// keyspaceIDVerifiedUpTo through constant.MaxValidKeyspaceID into cache, so a
+// GetKeyspaceIDInRange call whose cache lookup would otherwise miss a keyspace
+// that existed before this Manager's cache started tracking it (e.g. right
+// after a PD leader change, or after evictKeyspacesFromCache rolls the
+// watermark back) gets backfilled. Keyspaces created, updated, or removed
+// through this Manager are kept in cache directly by their own call sites and
+// do not rely on this backfill to be discovered.
+//
+// It pages through storage internally (the same technique
+// CountKeyspacesByMetaServiceGroup already uses for its own full scan) purely
+// to bound each individual storage transaction's size, not to bound how much
+// of the range a single call covers: a call always runs the scan through to
+// completion before returning, rather than advancing by one bounded batch and
+// relying on the caller to converge over repeated calls. Keyspace counts are
+// small relative to the ID space, so this is cheap and only runs after a
+// cold start, a leadership change, or the rare ambiguous-removal rollback in
+// evictKeyspacesFromCache - never on the steady-state path, where the
+// watermark is already at constant.MaxValidKeyspaceID+1 and this returns
+// immediately.
+func (manager *Manager) backfillKeyspaceIDRange() {
+	manager.keyspaceIDRangeMu.Lock()
+	defer manager.keyspaceIDRangeMu.Unlock()
+	if manager.keyspaceIDVerifiedUpTo > constant.MaxValidKeyspaceID {
+		return
+	}
+	startID := manager.keyspaceIDVerifiedUpTo
+	// Capture the generation once, before paging through storage below, so
+	// the bulk cache apply at the end can detect whether some other write (a
+	// real create/update/delete, e.g. from UpdateKeyspaceStateByID) landed
+	// anywhere in the scanned range while this scan was in flight. This has
+	// to be all-or-nothing for the whole scan rather than checked per page
+	// or per item: the watermark would otherwise advance past an ID whose
+	// write got rejected, permanently losing it, and the generation bump
+	// that caused a rejection could belong to a wholly unrelated keyspace ID
+	// elsewhere in the range - there is no way to tell "this specific ID is
+	// still stale" from the generation counter alone. So every page read
+	// here is buffered in memory, untouched by cache, and only committed -
+	// atomically with the watermark - if nothing wrote to the cache during
+	// the entire scan; otherwise the whole buffer is discarded and the
+	// watermark is left exactly where it started, relying on the next call
+	// to retry the full range fresh.
+	generation := manager.cache.Generation()
+	var buffered []keyspaceItem
+	verifiedUpTo := startID
+	for {
+		keyspaces, err := manager.LoadRangeKeyspace(startID, etcdutil.MaxEtcdTxnOps)
+		if err != nil {
+			log.Warn("[keyspace] failed to backfill keyspace ID range cache",
+				zap.Uint32("start-id", startID), errs.ZapError(err))
+			break
+		}
+		for _, meta := range keyspaces {
+			buffered = append(buffered, keyspaceItem{keyspaceID: meta.GetId(), name: meta.GetName(), state: meta.GetState()})
+		}
+		if len(keyspaces) < etcdutil.MaxEtcdTxnOps {
+			// Storage has nothing left beyond this page.
+			verifiedUpTo = constant.MaxValidKeyspaceID + 1
+			break
+		}
+		startID = keyspaces[len(keyspaces)-1].GetId() + 1
+		if startID > constant.MaxValidKeyspaceID {
+			// A full page happened to end exactly at the top of the valid ID
+			// space: there is nothing left to load, so stop here instead of
+			// making one more LoadRangeKeyspace call that would only fail
+			// startID's own upper-bound check.
+			verifiedUpTo = constant.MaxValidKeyspaceID + 1
+			break
+		}
+		verifiedUpTo = startID
+	}
+	if len(buffered) == 0 {
+		// Keep whatever progress this call already made (none, if the very
+		// first page failed to load) so a retry does not have to redo pages
+		// that already succeeded.
+		manager.keyspaceIDVerifiedUpTo = verifiedUpTo
+		return
+	}
+	failpoint.InjectCall("backfillKeyspaceIDRangeBeforeApply")
+	if manager.cache.SaveBatchIfGenerationUnchanged(buffered, generation) {
+		manager.keyspaceIDVerifiedUpTo = verifiedUpTo
+	}
+	// If a concurrent write landed during the scan, leave the watermark
+	// unchanged above: the next call must retry the full range fresh rather
+	// than trust a buffer that raced a real update.
+}
+
+// ClearCache empties the keyspace cache and resets the backfill watermark. It must
+// be called whenever this Manager stops being able to trust that its cache reflects
+// every write (e.g. when the owning RaftCluster loses leadership): creates, updates,
+// and deletes are only ever applied on the leader, so a Manager that was not leader
+// for a while cannot tell whether entries it cached earlier (including ones warmed
+// by serving a read while a follower) are still accurate. Clearing both the cache
+// contents and the watermark together avoids leaving the cache trusted-but-empty for
+// a range GetKeyspaceIDInRange would otherwise skip re-verifying.
+func (manager *Manager) ClearCache() {
+	manager.keyspaceIDRangeMu.Lock()
+	defer manager.keyspaceIDRangeMu.Unlock()
+	manager.cache.clearAll()
+	manager.keyspaceIDVerifiedUpTo = 0
 }
 
 // KeyspaceExist checks if a keyspace exists by ID.
@@ -1378,25 +1561,65 @@ func (manager *Manager) GetKeyspaceNameByID(id uint32) (string, error) {
 	if id == constant.NullKeyspaceID {
 		return "", nil
 	}
-	// Try to get the keyspace name from the cache first.
-	name, ok := manager.keyspaceNameLookup.Load(id)
-	if ok {
-		return name.(string), nil
+	if manager == nil {
+		return "", nil
 	}
-	var loadedName string
-	// If the keyspace name is not in the cache, try to get it from the storage.
+	// Try to get the keyspace name from the cache.
+	item, ok := manager.cache.getKeyspaceByID(id)
+	if ok {
+		return item.name, nil
+	}
+	// If the keyspace name is not in the cache, try to get it from the
+	// storage. LoadKeyspaceByID itself guards its own cache write against a
+	// concurrent, authoritative write, so no further generation handling is
+	// needed here.
 	meta, err := manager.LoadKeyspaceByID(id)
 	if err != nil {
 		return "", err
 	}
-	loadedName = meta.GetName()
+	loadedName := meta.GetName()
 	if len(loadedName) == 0 {
 		return "", errors.Errorf("got an empty keyspace name by id %d", id)
 	}
-	// Load or store the keyspace name to the cache.
-	actual, _ := manager.keyspaceNameLookup.LoadOrStore(id, loadedName)
-	manager.cache.Save(id, loadedName, meta.GetState())
-	return actual.(string), nil
+	return loadedName, nil
+}
+
+// UpdateKeyspaceMetaToCache updates keyspace cache from keyspace metadata.
+func (manager *Manager) UpdateKeyspaceMetaToCache(meta *keyspacepb.KeyspaceMeta) {
+	if meta == nil {
+		return
+	}
+	manager.cache.Save(meta.GetId(), meta.GetName(), meta.GetState())
+}
+
+// DeleteKeyspaceMetaFromCache removes a keyspace from cache by ID.
+func (manager *Manager) DeleteKeyspaceMetaFromCache(id uint32) {
+	manager.cache.DeleteKeyspace(id)
+}
+
+// ScanAllKeyspace loads all keyspaces from storage and applies the given function to each keyspace.
+func (manager *Manager) ScanAllKeyspace(fn func(keyspaceID uint32, name string, state keyspacepb.KeyspaceState) bool) {
+	iterator := manager.IterateKeyspaces()
+	for {
+		meta, ok, err := iterator.Next()
+		if err != nil {
+			log.Warn("[keyspace] failed to scan keyspaces", errs.ZapError(err))
+			return
+		}
+		if !ok {
+			return
+		}
+		// Deliberately does not warm the cache here: fn already receives the
+		// scanned (keyspaceID, name, state) directly, and ScanAllKeyspace's
+		// only caller (collectStorageSize's periodic metering loop) only
+		// ever uses those values, never a subsequent cache read - so there
+		// is nothing here that would benefit from the write, only an
+		// unconditional cache.Save racing concurrent, authoritative writers
+		// like UpdateKeyspaceStateByID for no reason.
+		if !fn(meta.GetId(), meta.GetName(), meta.GetState()) {
+			return
+		}
+	}
 }
 
 // GetKeyspaceStateByID gets the keyspace state by ID, which will try to get it from the cache first.
@@ -1405,22 +1628,20 @@ func (manager *Manager) GetKeyspaceStateByID(id uint32) (keyspacepb.KeyspaceStat
 	if id == constant.NullKeyspaceID {
 		return keyspacepb.KeyspaceState_DISABLED, nil
 	}
-	state, ok := manager.keyspaceStateLookup.Load(id)
+	item, ok := manager.cache.getKeyspaceByID(id)
 	if ok {
-		return state.(keyspacepb.KeyspaceState), nil
+		return item.state, nil
 	}
-	var loadedState keyspacepb.KeyspaceState
-	// If the keyspace state is not in the cache, try to get it from the storage.
+	// If the keyspace state is not in the cache, try to get it from the
+	// storage. LoadKeyspaceByID itself guards its own cache write against a
+	// concurrent, authoritative write, so no further generation handling is
+	// needed here.
 	meta, err := manager.LoadKeyspaceByID(id)
 	// Only check wether the keyspace meta is nil, ensure the returned state is as latest as possible.
 	if meta == nil {
 		return keyspacepb.KeyspaceState_DISABLED, err
 	}
-	loadedState = meta.GetState()
-	// Load or store the keyspace state to the cache.
-	actual, _ := manager.keyspaceStateLookup.LoadOrStore(id, loadedState)
-	manager.cache.Save(meta.GetId(), meta.GetName(), loadedState)
-	return actual.(keyspacepb.KeyspaceState), nil
+	return meta.GetState(), nil
 }
 
 // GetEnabledKeyspaceNameByID gets the enabled keyspace name by ID. If the state is not enabled, it will return an error.
