@@ -15,8 +15,10 @@
 package filter
 
 import (
+	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"go.uber.org/zap"
 
@@ -728,6 +730,7 @@ type ruleLeaderFitFilter struct {
 	oldFit           *placement.RegionFit
 	srcLeaderStoreID uint64
 	allowMoveLeader  bool
+	roleChecker      atomic.Pointer[leaderRoleChecker]
 }
 
 // newRuleLeaderFitFilter creates a filter that ensures after transfer leader with new store,
@@ -764,7 +767,7 @@ func (*ruleLeaderFitFilter) Source(config.SharedConfigProvider, *core.StoreInfo)
 }
 
 // Target filters stores when select them as schedule target.
-func (f *ruleLeaderFitFilter) Target(_ config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
+func (f *ruleLeaderFitFilter) Target(conf config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
 	targetStoreID := store.GetID()
 	targetPeer := f.region.GetStorePeer(targetStoreID)
 	if targetPeer == nil && !f.allowMoveLeader {
@@ -774,10 +777,82 @@ func (f *ruleLeaderFitFilter) Target(_ config.SharedConfigProvider, store *core.
 	if targetPeer != nil && targetPeer.IsWitness {
 		return statusStoreNotMatchRule
 	}
-	if f.oldFit.Replace(f.srcLeaderStoreID, store) {
-		return statusOK
+	if !f.oldFit.Replace(f.srcLeaderStoreID, store) {
+		return statusStoreNotMatchRule
 	}
-	return statusStoreNotMatchRule
+	// Preserve complete role matching for a previously satisfied layout.
+	// Unfinished repairs retain the existing incremental checks.
+	if f.oldFit.IsSatisfied() {
+		var roles *placement.RoleChecker
+		if targetPeer == nil {
+			// Moving a peer changes membership, but not the Region's key range.
+			peers := slices.Clone(f.region.GetPeers())
+			for i, peer := range peers {
+				if peer.GetStoreId() == f.srcLeaderStoreID {
+					replacement := *peer
+					replacement.StoreId = targetStoreID
+					peers[i] = &replacement
+				}
+			}
+			rules := f.ruleManager.GetRulesForApplyRegion(f.region)
+			roles = placement.NewRoleChecker(f.cluster, peers, rules, conf.IsWitnessAllowed())
+		} else {
+			roles = f.getRoleChecker(conf.IsWitnessAllowed())
+		}
+		if !roles.IsSatisfied(targetStoreID) {
+			return statusStoreNotMatchRule
+		}
+	}
+	return statusOK
+}
+
+// leaderRoleChecker holds immutable inputs and a matcher for one filter's peers.
+// Metadata changes invalidate it even if the caller reuses the filter.
+type leaderRoleChecker struct {
+	checker        *placement.RoleChecker
+	rules          []*placement.Rule
+	stores         leaderRoleStores
+	supportWitness bool
+}
+
+type leaderRoleStores []*core.StoreInfo
+
+// GetStores returns the captured store snapshots.
+func (s leaderRoleStores) GetStores() []*core.StoreInfo { return s }
+
+// GetStore looks up a store in the captured snapshots.
+func (s leaderRoleStores) GetStore(id uint64) *core.StoreInfo {
+	for _, store := range s {
+		if store != nil && store.GetID() == id {
+			return store
+		}
+	}
+	return nil
+}
+
+func (f *ruleLeaderFitFilter) getRoleChecker(supportWitness bool) *placement.RoleChecker {
+	rules := f.ruleManager.GetRulesForApplyRegion(f.region)
+	cached := f.roleChecker.Load()
+	if cached != nil && cached.supportWitness == supportWitness && slices.Equal(cached.rules, rules) {
+		unchanged := true
+		for i, peer := range f.region.GetPeers() {
+			if f.cluster.GetStore(peer.GetStoreId()) != cached.stores[i] {
+				unchanged = false
+				break
+			}
+		}
+		if unchanged {
+			return cached.checker
+		}
+	}
+	stores := make(leaderRoleStores, len(f.region.GetPeers()))
+	for i, peer := range f.region.GetPeers() {
+		stores[i] = f.cluster.GetStore(peer.GetStoreId())
+	}
+	// Build from the same store snapshots used to validate the next lookup.
+	checker := placement.NewRoleChecker(stores, f.region.GetPeers(), rules, supportWitness)
+	f.roleChecker.Store(&leaderRoleChecker{checker: checker, rules: rules, stores: stores, supportWitness: supportWitness})
+	return checker
 }
 
 type ruleWitnessFitFilter struct {
