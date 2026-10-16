@@ -622,6 +622,9 @@ func (s *Server) Close() {
 	s.cgMonitor.StopMonitor()
 
 	s.stopServerLoop()
+	if s.resourceGroupMetadataManager != nil {
+		s.resourceGroupMetadataManager.Close()
+	}
 	if s.gcStateManager != nil {
 		s.gcStateManager.CloseBarrierMetrics()
 	}

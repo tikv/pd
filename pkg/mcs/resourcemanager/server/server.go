@@ -315,6 +315,9 @@ func (s *Server) Close() {
 	s.CloseClientConns()
 	s.serverLoopCancel()
 	s.serverLoopWg.Wait()
+	if s.service != nil && s.service.manager != nil {
+		s.service.manager.Close()
+	}
 	if s.meteringWriter != nil {
 		s.meteringWriter.Stop()
 	}
