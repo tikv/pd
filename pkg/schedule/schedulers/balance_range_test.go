@@ -552,6 +552,9 @@ func TestAddBalanceRangeJobWithInvalidFieldType(t *testing.T) {
 			re.Equal(http.StatusOK, resp.Code)
 			count++
 			re.Len(conf.jobs, count)
+			var jobID string
+			re.NoError(json.Unmarshal(resp.Body.Bytes(), &jobID))
+			re.Equal(strconv.FormatUint(conf.jobs[count-1].JobID, 10), jobID)
 		} else {
 			re.Equal(http.StatusBadRequest, resp.Code)
 		}

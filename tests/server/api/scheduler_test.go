@@ -989,8 +989,9 @@ func (suite *scheduleTestSuite) checkBalanceRangeAPI(cluster *tests.TestCluster)
 	leaderAddr := cluster.GetLeaderServer().GetAddr()
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1", leaderAddr)
 	// add balance-range-scheduler
-	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/schedulers", data, func(_ []byte, i int, _ http.Header) {
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/schedulers", data, func(body []byte, i int, _ http.Header) {
 		re.Equal(http.StatusOK, i)
+		re.JSONEq(`"0"`, string(body))
 	}))
 
 	// check
@@ -1016,8 +1017,9 @@ func (suite *scheduleTestSuite) checkBalanceRangeAPI(cluster *tests.TestCluster)
 	input["alias"] = "test-sysbench-partition(p2)"
 	data, err = json.Marshal(input)
 	re.NoError(err)
-	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/schedulers", data, func(_ []byte, i int, _ http.Header) {
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/schedulers", data, func(body []byte, i int, _ http.Header) {
 		re.Equal(http.StatusOK, i)
+		re.JSONEq(`"1"`, string(body))
 	}))
 	testutil.Eventually(re, func() bool {
 		resp, err := apiutil.GetJSON(tests.TestDialClient, fmt.Sprintf("%s/scheduler-config/%s/list", urlPrefix, types.BalanceRangeScheduler.String()), nil)

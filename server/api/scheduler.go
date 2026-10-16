@@ -83,7 +83,7 @@ func (h *schedulerHandler) GetSchedulers(w http.ResponseWriter, r *http.Request)
 //	@Accept		json
 //	@Param		body	body	object	true	"json params"
 //	@Produce	json
-//	@Success	200	{string}	string	"The scheduler is created."
+//	@Success	200	{string}	string	"The scheduler is created. For balance-range-scheduler, returns the created job ID as a decimal string."
 //	@Failure	400	{string}	string	"Bad format request."
 //	@Failure	500	{string}	string	"PD server failed to proceed the request."
 //	@Router		/schedulers [post]
@@ -111,7 +111,11 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 
 	switch tp {
 	case types.BalanceRangeScheduler:
-		exist, _ := h.IsSchedulerExisted(name)
+		exist, err := h.IsSchedulerExisted(name)
+		if err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		if exist {
 			handler, err := h.GetSchedulerConfigHandler()
 			if err == nil && handler != nil {
@@ -299,6 +303,10 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 
 	if err := h.AddScheduler(tp, args...); err != nil {
 		h.r.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if tp == types.BalanceRangeScheduler {
+		h.r.JSON(w, http.StatusOK, strconv.FormatUint(schedulers.BalanceRangeFirstJobID, 10))
 		return
 	}
 

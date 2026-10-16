@@ -621,7 +621,7 @@ func schedulersRegister() {
 			if err != nil {
 				return err
 			}
-			id := uint64(0)
+			id := BalanceRangeFirstJobID
 			if len(conf.jobs) > 0 {
 				id = conf.jobs[len(conf.jobs)-1].JobID + 1
 			}
