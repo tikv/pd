@@ -715,6 +715,12 @@ func (f *HotPeerCache) gc() {
 			}
 			f.removeColdPeer(storeID, regionID)
 		}
+		// regionsOfStore can already have been cleared by another store's TTL
+		// cleanup, while this store's cold candidate remains queued. Remove any
+		// such orphaned entries directly from the cold index as well.
+		for regionID := range f.coldPeersOfStore[storeID] {
+			f.removeColdPeer(storeID, regionID)
+		}
 		delete(f.peersOfStore, storeID)
 		delete(f.regionsOfStore, storeID)
 		delete(f.thresholdsOfStore, storeID)

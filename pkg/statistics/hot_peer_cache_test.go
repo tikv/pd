@@ -688,6 +688,52 @@ func TestGcClearsColdItemsOfRemovedRegion(t *testing.T) {
 	}
 }
 
+// TestGcClearsOrphanedColdItemsOfRemovedStore covers a cold candidate whose
+// reverse index was cleared by another store's TTL cleanup before this store
+// was removed from the cluster.
+func TestGcClearsOrphanedColdItemsOfRemovedStore(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster := core.NewBasicCluster()
+	cache := NewHotPeerCache(ctx, cluster, utils.Read)
+	const storeID, regionID uint64 = 1001, 2001
+	peer := &metapb.Peer{Id: 3001, StoreId: storeID}
+	region := core.NewRegionInfo(
+		&metapb.Region{
+			Id:          regionID,
+			Peers:       []*metapb.Peer{peer},
+			RegionEpoch: &metapb.RegionEpoch{ConfVer: 6, Version: 6},
+		},
+		peer,
+		core.SetReportInterval(0, uint64(utils.StoreHeartBeatReportInterval)),
+		core.SetReadBytes(10*units.MiB*uint64(utils.StoreHeartBeatReportInterval)),
+		core.SetReadKeys(10*units.MiB*uint64(utils.StoreHeartBeatReportInterval)),
+		core.SetReadQuery(1024*uint64(utils.StoreHeartBeatReportInterval)),
+	)
+	cluster.PutStore(core.NewStoreInfo(&metapb.Store{Id: storeID}, core.SetLastHeartbeatTS(time.Now())))
+	cluster.PutRegion(region)
+	checkAndUpdate(re, cache, region, 1)
+	reported := map[uint64]struct{}{}
+	stats := cache.checkColdPeerByRegionIDs(storeID, reported, uint64(utils.StoreHeartBeatReportInterval))
+	re.Len(stats, 1)
+	updateFlow(cache, stats)
+	re.Contains(cache.coldPeersOfStore[storeID], regionID)
+
+	// A peer expiring from another store removes the region from both reverse
+	// indexes, but does not remove this store's still-present cold peer.
+	delete(cache.regionsOfStore[storeID], regionID)
+	delete(cache.storesOfRegion, regionID)
+	cluster.DeleteStore(cluster.GetStore(storeID))
+
+	cache.lastGCTime = time.Time{}
+	cache.gc()
+
+	re.NotContains(cache.peersOfStore, storeID)
+	re.NotContains(cache.coldPeersOfStore, storeID)
+	re.Zero(cache.coldPeerSweepQueue.Len())
+}
+
 // TestGcKeepsColdItemsOfLiveRegion: a cold item whose region is still present
 // in the cluster's region table must never be evicted by gc().
 func TestGcKeepsColdItemsOfLiveRegion(t *testing.T) {
