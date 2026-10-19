@@ -50,7 +50,7 @@ func TestHotRegionTopAgainstFullSort(t *testing.T) {
 		for range 1000 {
 			e := hotRegionEntry{regionID: uint64(rng.IntN(100)), storeID: uint64(rng.IntN(10)), load: float64(rng.IntN(100))}
 			top.add(e)
-			if old, ok := best[e.regionID]; e.load > 0 && (!ok || e.hotter(old)) {
+			if old, ok := best[e.regionID]; !ok || e.hotter(old) {
 				best[e.regionID] = e
 			}
 		}
@@ -70,10 +70,105 @@ func TestHotRegionTopAgainstFullSort(t *testing.T) {
 		require.Equal(t, expected[:hotRegionTopN], top.entries[:top.count])
 	}
 	var top hotRegionTop
-	for _, load := range []float64{0, -1, math.NaN(), math.Inf(1), math.Inf(-1)} {
+	for _, load := range []float64{-1, math.NaN(), math.Inf(1), math.Inf(-1)} {
 		top.add(hotRegionEntry{load: load})
 	}
 	require.Zero(t, top.count)
+}
+
+func TestHotRegionTopZeroLoads(t *testing.T) {
+	for _, positive := range []bool{false, true} {
+		t.Run(strconv.FormatBool(positive), func(t *testing.T) {
+			var top hotRegionTop
+			for id := uint64(12); id > 0; id-- {
+				load := float64(0)
+				if positive && id >= 10 {
+					load = float64(id)
+				}
+				top.add(hotRegionEntry{regionID: id, storeID: 2, load: load})
+			}
+			// Equal zero-load replicas still select the smaller Store ID.
+			top.add(hotRegionEntry{regionID: 1, storeID: 1})
+			expected := make([]hotRegionEntry, 0, hotRegionTopN)
+			if positive {
+				for id := uint64(12); id >= 10; id-- {
+					expected = append(expected, hotRegionEntry{regionID: id, storeID: 2, load: float64(id)})
+				}
+			}
+			expected = append(expected, hotRegionEntry{regionID: 1, storeID: 1})
+			for id := uint64(2); len(expected) < hotRegionTopN; id++ {
+				expected = append(expected, hotRegionEntry{regionID: id, storeID: 2})
+			}
+			require.Equal(t, expected, top.entries[:top.count])
+		})
+	}
+}
+
+func TestHotRegionMetricsZeroFirstDimension(t *testing.T) {
+	ResetHotRegionMetrics()
+	t.Cleanup(ResetHotRegionMetrics)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	tc.SetClusterVersion(semver.New("9.0.0"))
+	tc.AddRegionStore(1, 12)
+	tc.AddRegionStore(2, 12)
+	scheduler := newHotScheduler(oc, initHotRegionScheduleConfig())
+	c := NewController(context.Background(), tc, storage.NewStorageWithMemoryBackend(), oc)
+	c.schedulerHandlers[scheduler.GetName()] = scheduler
+	// These sustained-hot read peers qualify on bytes/query, while the
+	// effective first dimension (CPU) is zero for every peer.
+	for id := uint64(1); id <= 12; id++ {
+		tc.AddRegionWithReadInfo(id, 1, 1<<20, 1<<16, 60000, 10, []uint64{2}, 5)
+	}
+	stats := tc.GetHotPeerStats(utils.Read)
+	require.Len(t, stats[1], 12)
+	for _, peer := range stats[1] {
+		require.Positive(t, peer.GetLoad(utils.ByteDim))
+		require.Zero(t, peer.GetLoad(utils.CPUDim))
+	}
+	c.CollectHotRegionMetrics(utils.Read, stats, map[uint64]statistics.StoreKindLoads{
+		1: {utils.StoreReadCPU: 100},
+		2: {utils.StoreReadCPU: 100},
+	})
+	registry := prometheus.NewRegistry()
+	registry.MustRegister(topHotRegionMetrics)
+	families, err := registry.Gather()
+	require.NoError(t, err)
+	require.Len(t, families, 3)
+	for _, family := range families {
+		require.Len(t, family.GetMetric(), hotRegionTopN)
+		for _, metric := range family.GetMetric() {
+			if family.GetName() == "pd_hotspot_top_region_hot_duration_seconds" {
+				require.Equal(t, 50.0, metric.GetGauge().GetValue())
+			} else {
+				require.Zero(t, metric.GetGauge().GetValue())
+			}
+		}
+	}
+	// Region 12 was outside the CPU Top 10. Its history still advances in the
+	// hot cache and is retained when a priority change brings it onto the list.
+	tc.AddRegionWithReadInfo(12, 1, 1<<30, 1<<16, 60000, 10, []uint64{2}, 5)
+	scheduler.conf.Lock()
+	scheduler.conf.ReadPriorities = []string{utils.BytePriority, utils.QueryPriority}
+	scheduler.conf.Unlock()
+	c.CollectHotRegionMetrics(utils.Read, tc.GetHotPeerStats(utils.Read), nil)
+	families, err = registry.Gather()
+	require.NoError(t, err)
+	found := false
+	for _, family := range families {
+		if family.GetName() != "pd_hotspot_top_region_hot_duration_seconds" {
+			continue
+		}
+		for _, metric := range family.GetMetric() {
+			for _, label := range metric.GetLabel() {
+				if label.GetName() == "region" && label.GetValue() == "12" {
+					require.Equal(t, 100.0, metric.GetGauge().GetValue())
+					found = true
+				}
+			}
+		}
+	}
+	require.True(t, found)
 }
 
 func TestCollectHotRegionMetrics(t *testing.T) {
@@ -99,25 +194,27 @@ func TestCollectHotRegionMetrics(t *testing.T) {
 	registry.MustRegister(topHotRegionMetrics)
 	families, err := registry.Gather()
 	require.NoError(t, err)
-	require.Len(t, families, 1)
-	require.Len(t, families[0].GetMetric(), 20)
-	for _, metric := range families[0].GetMetric() {
-		labels := make(map[string]string)
-		for _, label := range metric.GetLabel() {
-			labels[label.GetName()] = label.GetValue()
-		}
-		require.Equal(t, "1", labels["store"])
-		id, err := strconv.ParseUint(labels["region"], 10, 64)
-		require.NoError(t, err)
-		switch labels["type"] {
-		case "write-leader":
-			require.Equal(t, "query", labels["dim"])
-			require.Greater(t, id, uint64(10))
-		case "write-peer":
-			require.Equal(t, "byte", labels["dim"])
-			require.LessOrEqual(t, id, uint64(10))
-		default:
-			t.Fatalf("unexpected type: %s", labels["type"])
+	require.Len(t, families, 2)
+	for _, family := range families {
+		require.Len(t, family.GetMetric(), 20)
+		for _, metric := range family.GetMetric() {
+			labels := make(map[string]string)
+			for _, label := range metric.GetLabel() {
+				labels[label.GetName()] = label.GetValue()
+			}
+			require.Equal(t, "1", labels["store"])
+			id, err := strconv.ParseUint(labels["region"], 10, 64)
+			require.NoError(t, err)
+			switch labels["type"] {
+			case "write-leader":
+				require.Equal(t, "query", labels["dim"])
+				require.Greater(t, id, uint64(10))
+			case "write-peer":
+				require.Equal(t, "byte", labels["dim"])
+				require.LessOrEqual(t, id, uint64(10))
+			default:
+				t.Fatalf("unexpected type: %s", labels["type"])
+			}
 		}
 	}
 	// Updating both write priorities changes their rankings and ratio denominators
@@ -132,7 +229,7 @@ func TestCollectHotRegionMetrics(t *testing.T) {
 	c.CollectHotRegionMetrics(utils.Write, stats, storeLoads)
 	families, err = registry.Gather()
 	require.NoError(t, err)
-	require.Len(t, families, 2)
+	require.Len(t, families, 3)
 	for _, family := range families {
 		require.Len(t, family.GetMetric(), 20)
 		for _, metric := range family.GetMetric() {
@@ -156,7 +253,9 @@ func TestCollectHotRegionMetrics(t *testing.T) {
 			default:
 				t.Fatalf("unexpected type: %s", labels["type"])
 			}
-			if family.GetName() == "pd_hotspot_top_region_store_load_ratio" {
+			if family.GetName() == "pd_hotspot_top_region_hot_duration_seconds" {
+				load = 300
+			} else if family.GetName() == "pd_hotspot_top_region_store_load_ratio" {
 				load /= total
 			}
 			require.InDelta(t, load, metric.GetGauge().GetValue(), 1e-9)
@@ -214,7 +313,7 @@ func TestHotRegionMetricsSustainedAndRead(t *testing.T) {
 	c.CollectHotRegionMetrics(utils.Write, tc.GetHotPeerStats(utils.Write), nil)
 	families, err = registry.Gather()
 	require.NoError(t, err)
-	require.Len(t, families, 1)
+	require.Len(t, families, 2)
 	require.Len(t, families[0].GetMetric(), 2)
 	tc.AddLeaderRegionWithWriteInfo(1, 1, 0, 0, 0, 60, []uint64{2}, 10)
 	c.CollectHotRegionMetrics(utils.Write, tc.GetHotPeerStats(utils.Write), nil)
@@ -231,7 +330,7 @@ func TestHotRegionMetricsSustainedAndRead(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, families[0].GetMetric(), 2)
 	top, _ := selectHotRegions(tc, stats, utils.CPUDim, -1)
-	require.Equal(t, hotRegionEntry{regionID: 1, storeID: 2, load: 20, store: tc.GetStore(2)}, top.entries[0])
+	require.Equal(t, hotRegionEntry{regionID: 1, storeID: 2, load: 20, peer: stats[2][0]}, top.entries[0])
 	tc.PutStore(tc.GetStore(2).Clone(core.SetLastHeartbeatTS(time.Now().Add(-time.Hour))))
 	top, _ = selectHotRegions(tc, stats, utils.CPUDim, -1)
 	require.Equal(t, uint64(2), top.entries[0].regionID)

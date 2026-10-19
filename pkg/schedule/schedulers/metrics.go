@@ -424,12 +424,13 @@ var (
 )
 
 // Keep immutable metric snapshots, rather than a GaugeVec retaining labels for
-// every region ever seen. Scrapes read at most 60 metrics and never scan regions.
+// every region ever seen. Scrapes read at most 90 metrics and never scan regions.
 type hotRegionCollector struct {
 	syncutil.RWMutex
-	loadDesc       *prometheus.Desc
-	storeRatioDesc *prometheus.Desc
-	metrics        [utils.RWTypeLen][]prometheus.Metric
+	loadDesc        *prometheus.Desc
+	storeRatioDesc  *prometheus.Desc
+	hotDurationDesc *prometheus.Desc
+	metrics         [utils.RWTypeLen][]prometheus.Metric
 }
 
 func newHotRegionCollector() *hotRegionCollector {
@@ -443,6 +444,10 @@ func newHotRegionCollector() *hotRegionCollector {
 			"pd_hotspot_top_region_store_load_ratio",
 			"Smoothed hot Region load divided by the Store's rolling total load for the same scheduling type and dimension; a fraction that can exceed 1 when the Region and Store smoothing windows differ.",
 			labels, nil),
+		hotDurationDesc: prometheus.NewDesc(
+			"pd_hotspot_top_region_hot_duration_seconds",
+			"Duration covered by consecutive hot reports for the selected peer across all load dimensions, in seconds. Resets on cold or missing reports, a different Store, or a hot-cache rebuild; time without reports does not advance it.",
+			labels, nil),
 	}
 }
 
@@ -450,6 +455,7 @@ func newHotRegionCollector() *hotRegionCollector {
 func (c *hotRegionCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.loadDesc
 	ch <- c.storeRatioDesc
+	ch <- c.hotDurationDesc
 }
 
 // Collect implements prometheus.Collector.
@@ -515,7 +521,7 @@ type hotRegionEntry struct {
 	regionID uint64
 	storeID  uint64
 	load     float64
-	store    *core.StoreInfo
+	peer     *statistics.HotPeerStat
 }
 
 // hotter gives deterministic ordering, including replicas with equal load.
@@ -539,7 +545,7 @@ type hotRegionTop struct {
 // so retaining a cluster-sized region map is unnecessary. The cutoff rejects
 // most candidates with a single comparison; insertion costs at most ten moves.
 func (t *hotRegionTop) add(e hotRegionEntry) {
-	if e.load <= 0 || math.IsNaN(e.load) || math.IsInf(e.load, 0) {
+	if e.load < 0 || math.IsNaN(e.load) || math.IsInf(e.load, 0) {
 		return
 	}
 	if t.count == hotRegionTopN && !e.hotter(t.entries[t.count-1]) {
@@ -567,7 +573,7 @@ func (t *hotRegionTop) add(e hotRegionEntry) {
 }
 
 // selectHotRegions selects peer and optional leader lists in one pass. A
-// negative dimension disables that list. Only the winning entries retain Store
+// negative dimension disables that list. Only the winning entries retain peer
 // snapshots; no map proportional to the number of Stores is needed.
 func selectHotRegions(cluster sche.SchedulerCluster, stats map[uint64][]*statistics.HotPeerStat, dim, leaderDim int) (peersTop, leadersTop hotRegionTop) {
 	for storeID, peers := range stats {
@@ -576,7 +582,7 @@ func selectHotRegions(cluster sche.SchedulerCluster, stats map[uint64][]*statist
 			continue
 		}
 		for _, peer := range peers {
-			entry := hotRegionEntry{regionID: peer.RegionID, storeID: storeID, store: store}
+			entry := hotRegionEntry{regionID: peer.RegionID, storeID: storeID, peer: peer}
 			if dim >= 0 {
 				entry.load = peer.GetLoad(dim)
 				peersTop.add(entry)
@@ -625,13 +631,16 @@ func (c *Controller) CollectHotRegionMetrics(rw utils.RWType, stats map[uint64][
 	}
 	dim := getDim(peerType)
 	peersTop, leadersTop := selectHotRegions(c.cluster, stats, dim, leaderDim)
-	metrics := make([]prometheus.Metric, 0, 2*(peersTop.count+leadersTop.count))
+	metrics := make([]prometheus.Metric, 0, 3*(peersTop.count+leadersTop.count))
 	appendTop := func(ty resourceType, dim int, top hotRegionTop) {
 		for _, entry := range top.entries[:top.count] {
 			labels := []string{ty.String(), utils.DimToString(dim), strconv.FormatUint(entry.regionID, 10), strconv.FormatUint(entry.storeID, 10)}
 			metrics = append(metrics, prometheus.MustNewConstMetric(topHotRegionMetrics.loadDesc, prometheus.GaugeValue, entry.load,
 				labels...))
-			store := entry.store
+			if duration := entry.peer.GetHotDuration(); duration > 0 {
+				metrics = append(metrics, prometheus.MustNewConstMetric(topHotRegionMetrics.hotDurationDesc, prometheus.GaugeValue, duration.Seconds(), labels...))
+			}
+			store := c.cluster.GetStore(entry.storeID)
 			if store != nil {
 				kind, ok := storeLoadKind(ty, dim, store)
 				if !ok {
