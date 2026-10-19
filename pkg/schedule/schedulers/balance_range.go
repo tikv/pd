@@ -419,6 +419,13 @@ func (s *balanceRangeScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request
 }
 
 func (s *balanceRangeScheduler) isBalanced() bool {
+	if s.job.Rule == core.LeaderScatter && len(s.expectScoreMap) == 1 {
+		// A sole leader target must own every leader. The general rounding
+		// tolerance would otherwise finish a job with one leader still outside.
+		for storeID, expect := range s.expectScoreMap {
+			return s.scoreMap[storeID] == expect
+		}
+	}
 	diff := 0
 	for storeID, score := range s.scoreMap {
 		if expect, ok := s.expectScoreMap[storeID]; ok {
@@ -710,7 +717,7 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 			expectScoreMap[store.GetID()] = count
 		}
 	}
-	if len(sources) <= 1 {
+	if len(sources) == 0 || (len(sources) == 1 && job.Rule != core.LeaderScatter) {
 		return errs.ErrNoStoreToBeSelected.FastGenByArgs()
 	}
 	// storeID <--> score mapping

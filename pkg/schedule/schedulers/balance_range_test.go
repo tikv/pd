@@ -109,9 +109,10 @@ func TestPlacementRule(t *testing.T) {
 		tc.AddLeaderRegionWithRange(uint64(i), strconv.Itoa(starKey), strconv.Itoa(endKey), 1, 2, 3)
 	}
 
-	// only store-1 can match the leader rule
+	// Only store-1 can match the leader rule; its already-balanced job can finish.
 	err := sc.prepare(tc, operator.NewOpInfluence(), job)
-	re.Error(err)
+	re.NoError(err)
+	re.True(sc.isBalanced())
 
 	// all store can match the rules
 	job.Rule = core.PeerScatter
@@ -604,4 +605,53 @@ func TestAddBalanceRangeJobWithInvalidFieldType(t *testing.T) {
 	})
 	re.NoError(err)
 	checkFn(body, false)
+}
+
+func TestBalanceRangeSingleLeaderStoreCompletion(t *testing.T) {
+	for _, leader := range []uint64{1, 2} {
+		t.Run(strconv.FormatUint(leader, 10), func(t *testing.T) {
+			re := require.New(t)
+			cancel, _, tc, oc := prepareSchedulersTest()
+			defer cancel()
+			tc.SetEnablePlacementRules(true)
+			for i, zone := range []string{"A", "B", "B"} {
+				tc.AddLabelsStore(uint64(i+1), 0, map[string]string{"zone": zone})
+			}
+			rm := tc.GetRuleManager()
+			re.NoError(rm.SetRuleGroup(&placement.RuleGroup{ID: "test", Index: 1, Override: true}))
+			re.NoError(rm.SetRules([]*placement.Rule{
+				{GroupID: "test", ID: "leader", Role: placement.Leader, Count: 1, LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: placement.In, Values: []string{"A"}}}},
+				{GroupID: "test", ID: "voters", Role: placement.Voter, Count: 2, LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: placement.In, Values: []string{"B"}}}},
+			}))
+			tc.AddLeaderRegionWithRange(1, "a", "z", 1, 2, 3)
+			region := tc.GetRegion(1)
+			tc.PutRegion(region.Clone(core.WithLeader(region.GetStorePeer(leader))))
+			scheduler, err := CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(),
+				ConfigSliceDecoder(types.BalanceRangeScheduler, []string{"leader-scatter", "tikv", "1h", "first", "a", "z"}))
+			re.NoError(err)
+			sc := scheduler.(*balanceRangeScheduler)
+			first := sc.conf.jobs[0]
+			re.NoError(sc.conf.addJob(&balanceRangeSchedulerJob{Alias: "second", Engine: core.EngineTiKV, Rule: core.LeaderScatter,
+				Ranges: []keyutil.KeyRange{keyutil.NewKeyRange("a", "z")}, Timeout: time.Hour}))
+			second := sc.conf.jobs[1]
+			km := tc.GetKeyRangeManager()
+			if leader == 2 {
+				re.True(sc.IsScheduleAllowed(tc))
+				re.Equal(running, first.Status)
+				re.Equal(pending, second.Status)
+				re.False(sc.isBalanced())
+				re.False(km.IsEmpty())
+				// A subsequent heartbeat reports that the leader has reached its target.
+				tc.PutRegion(region)
+			}
+			re.False(sc.IsScheduleAllowed(tc))
+			re.Equal(finished, first.Status)
+			re.NotNil(first.Finish)
+			re.Equal(pending, second.Status)
+			re.True(km.IsEmpty())
+			re.False(sc.IsScheduleAllowed(tc))
+			re.Equal(finished, second.Status)
+			re.True(km.IsEmpty())
+		})
+	}
 }
