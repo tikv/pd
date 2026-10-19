@@ -18,6 +18,7 @@ import (
 	"crypto/tls"
 	"sync"
 
+	"github.com/pingcap/kvproto/pkg/apipb"
 	"google.golang.org/grpc"
 )
 
@@ -64,6 +65,12 @@ func (*mockServiceDiscovery) GetKeyspaceID() uint32 { return 0 }
 
 // SetKeyspaceID implements the ServiceDiscovery interface.
 func (*mockServiceDiscovery) SetKeyspaceID(uint32) {}
+
+// GetKeyspaceIdentity implements the ServiceDiscovery interface.
+func (*mockServiceDiscovery) GetKeyspaceIdentity() *apipb.KeyspaceIdentity { return nil }
+
+// SetKeyspaceIdentity implements the ServiceDiscovery interface.
+func (*mockServiceDiscovery) SetKeyspaceIdentity(*apipb.KeyspaceIdentity) {}
 
 // GetKeyspaceGroupID implements the ServiceDiscovery interface.
 func (*mockServiceDiscovery) GetKeyspaceGroupID() uint32 { return 0 }

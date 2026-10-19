@@ -16,7 +16,6 @@ package metering
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -25,7 +24,6 @@ import (
 	"go.uber.org/goleak"
 	"go.uber.org/zap"
 
-	"github.com/pingcap/failpoint"
 	"github.com/pingcap/metering_sdk/config"
 	meteringreader "github.com/pingcap/metering_sdk/reader/metering"
 	"github.com/pingcap/metering_sdk/storage"
@@ -485,8 +483,9 @@ func TestMeteringDataReadWriteWithRetry(t *testing.T) {
 		map[string]any{"id": 3, "value": "test3", "timestamp": time.Now().Unix()},
 	}
 
-	// Inject the mock write error with `writeMaxAttempts` times to make sure all the attempts fail.
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/metering/mockWriteError", fmt.Sprintf("return(%d)", writeMaxAttempts)))
+	prevMockWriteErrorHook := mockWriteErrorHook
+	mockWriteErrorHook = func(attempt int) bool { return attempt <= writeMaxAttempts }
+	defer func() { mockWriteErrorHook = prevMockWriteErrorHook }()
 
 	ts := time.Now().Truncate(time.Minute).Unix()
 	// Collect and flush the data.
@@ -499,8 +498,7 @@ func TestMeteringDataReadWriteWithRetry(t *testing.T) {
 	readData := readMeteringData(ctx, re, reader, category, ts)
 	re.Empty(readData)
 
-	// Inject the mock write error with `writeMaxAttempts-1` times to make sure the last attempt will succeed.
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/metering/mockWriteError", fmt.Sprintf("return(%d)", writeMaxAttempts-1)))
+	mockWriteErrorHook = func(attempt int) bool { return attempt < writeMaxAttempts }
 
 	// Collect and flush the data again.
 	for _, data := range testData {
@@ -515,6 +513,4 @@ func TestMeteringDataReadWriteWithRetry(t *testing.T) {
 
 	// Verify the data content.
 	verifyReadData(re, readData, testData)
-
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/metering/mockWriteError"))
 }

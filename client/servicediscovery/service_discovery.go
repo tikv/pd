@@ -35,6 +35,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/apipb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 
@@ -97,6 +98,10 @@ type ServiceDiscovery interface {
 	GetKeyspaceID() uint32
 	// SetKeyspaceID sets the ID of the keyspace
 	SetKeyspaceID(id uint32)
+	// GetKeyspaceIdentity returns the API V3 identity of the keyspace, if any.
+	GetKeyspaceIdentity() *apipb.KeyspaceIdentity
+	// SetKeyspaceIdentity sets the API V3 identity of the keyspace.
+	SetKeyspaceIdentity(identity *apipb.KeyspaceIdentity)
 	// GetKeyspaceGroupID returns the ID of the keyspace group
 	GetKeyspaceGroupID() uint32
 	// GetServiceURLs returns the URLs of the servers providing the service
@@ -448,6 +453,7 @@ type serviceDiscovery struct {
 
 	updateKeyspaceIDFunc UpdateKeyspaceIDFunc
 	keyspaceID           uint32
+	keyspaceIdentity     *apipb.KeyspaceIdentity
 	tlsCfg               *tls.Config
 	// Client option.
 	option *opt.Option
@@ -461,7 +467,7 @@ func NewDefaultServiceDiscovery(
 	urls []string, tlsCfg *tls.Config,
 ) ServiceDiscovery {
 	var wg sync.WaitGroup
-	return NewServiceDiscovery(ctx, cancel, &wg, nil, nil, constants.DefaultKeyspaceID, urls, tlsCfg, opt.NewOption())
+	return NewServiceDiscovery(ctx, cancel, &wg, nil, nil, constants.DefaultKeyspaceID, nil, urls, tlsCfg, opt.NewOption())
 }
 
 // NewServiceDiscovery returns a new service discovery-based client.
@@ -471,6 +477,7 @@ func NewServiceDiscovery(
 	serviceModeUpdateCb func(pdpb.ServiceMode),
 	updateKeyspaceIDFunc UpdateKeyspaceIDFunc,
 	keyspaceID uint32,
+	keyspaceIdentity *apipb.KeyspaceIdentity,
 	urls []string, tlsCfg *tls.Config, option *opt.Option,
 ) ServiceDiscovery {
 	pdsd := &serviceDiscovery{
@@ -482,6 +489,7 @@ func NewServiceDiscovery(
 		callbacks:            newServiceCallbacks(),
 		updateKeyspaceIDFunc: updateKeyspaceIDFunc,
 		keyspaceID:           keyspaceID,
+		keyspaceIdentity:     cloneKeyspaceIdentity(keyspaceIdentity),
 		tlsCfg:               tlsCfg,
 		option:               option,
 		flight:               singleflight.Group{},
@@ -674,6 +682,26 @@ func (c *serviceDiscovery) GetKeyspaceID() uint32 {
 // SetKeyspaceID sets the ID of the keyspace
 func (c *serviceDiscovery) SetKeyspaceID(keyspaceID uint32) {
 	c.keyspaceID = keyspaceID
+}
+
+// GetKeyspaceIdentity returns the API V3 identity of the keyspace, if any.
+func (c *serviceDiscovery) GetKeyspaceIdentity() *apipb.KeyspaceIdentity {
+	return cloneKeyspaceIdentity(c.keyspaceIdentity)
+}
+
+// SetKeyspaceIdentity sets the API V3 identity of the keyspace.
+func (c *serviceDiscovery) SetKeyspaceIdentity(identity *apipb.KeyspaceIdentity) {
+	c.keyspaceIdentity = cloneKeyspaceIdentity(identity)
+}
+
+func cloneKeyspaceIdentity(identity *apipb.KeyspaceIdentity) *apipb.KeyspaceIdentity {
+	if identity == nil {
+		return nil
+	}
+	return &apipb.KeyspaceIdentity{
+		NamespaceId: identity.GetNamespaceId(),
+		KeyspaceId:  identity.GetKeyspaceId(),
+	}
 }
 
 // GetKeyspaceGroupID returns the ID of the keyspace group
