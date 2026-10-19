@@ -321,8 +321,21 @@ func (m *EmbeddedEtcdMember) MoveEtcdLeader(ctx context.Context, old, new uint64
 	return nil
 }
 
+<<<<<<< HEAD
 // GetEtcdLeader returns the etcd leader ID.
 func (m *EmbeddedEtcdMember) GetEtcdLeader() uint64 {
+=======
+// GetEtcdLeader returns the embedded etcd server's cached leader ID, or 0.
+// The value can remain stale while the Ready loop is blocked on storage, so it
+// must not be used alone to decide whether this member may serve (tikv/pd#7780).
+func (m *Member) GetEtcdLeader() uint64 {
+	failpoint.Inject("staleEtcdLeaderView", func(val failpoint.Value) {
+		// Simulate a stale local leader view.
+		if name, ok := val.(string); ok && name == m.Name() {
+			failpoint.Return(m.ID())
+		}
+	})
+>>>>>>> 703f4bb25d (server, member, election: document and test the election client pinning (#11110))
 	return m.etcd.Server.Lead()
 }
 
@@ -347,9 +360,14 @@ func (m *EmbeddedEtcdMember) InitMemberInfo(advertiseClientUrls, advertisePeerUr
 	}
 	m.member = leader
 	m.memberValue = string(data)
+<<<<<<< HEAD
 	m.rootPath = rootPath
 	m.leadership = election.NewLeadership(m.client, m.GetLeaderPath(), "leader election")
 	log.Info("member joining election", zap.Stringer("member-info", m.member), zap.String("root-path", m.rootPath))
+=======
+	m.leadership = election.NewLeadership(m.client, m.GetElectionPath(), "leader election", member.GetName())
+	log.Info("member joining election", zap.Stringer("member-info", m.member))
+>>>>>>> 703f4bb25d (server, member, election: document and test the election client pinning (#11110))
 }
 
 // ResignEtcdLeader resigns current PD's etcd leadership. If nextLeader is empty, all
