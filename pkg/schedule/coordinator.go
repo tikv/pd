@@ -78,6 +78,8 @@ type Coordinator struct {
 	hbStreams         *hbstream.HeartbeatStreams
 	pluginInterface   *PluginInterface
 	diagnosticManager *diagnostic.Manager
+
+	storeLoadsCache map[uint64]statistics.StoreKindLoads
 }
 
 // NewCoordinator creates a new Coordinator.
@@ -460,7 +462,7 @@ func (c *Coordinator) Stop() {
 // GetHotRegionsByType gets hot regions' statistics by RWType.
 func (c *Coordinator) GetHotRegionsByType(typ utils.RWType) *statistics.StoreHotPeersInfos {
 	isTraceFlow := c.cluster.GetSchedulerConfig().IsTraceRegionFlow()
-	storeLoads := c.cluster.GetStoresLoads()
+	storeLoads := c.getStoresLoads()
 	stores := c.cluster.GetStores()
 	hotPeerStats := c.cluster.GetHotPeerStats(typ)
 	infos := statistics.GetHotStatus(stores, storeLoads, hotPeerStats, typ, isTraceFlow)
@@ -520,13 +522,27 @@ func (c *Coordinator) GetWaitGroup() *sync.WaitGroup {
 // CollectHotSpotMetrics collects hot spot metrics.
 func (c *Coordinator) CollectHotSpotMetrics() {
 	stores := c.cluster.GetStores()
-	storeLoads := c.cluster.GetStoresLoads()
+	storeLoads := c.getStoresLoads()
 	// Collects hot write region metrics.
 	writeStats := collectHotMetrics(c.cluster, stores, utils.Write)
 	c.schedulers.CollectHotRegionMetrics(utils.Write, writeStats, storeLoads)
 	// Collects hot read region metrics.
 	readStats := collectHotMetrics(c.cluster, stores, utils.Read)
 	c.schedulers.CollectHotRegionMetrics(utils.Read, readStats, storeLoads)
+}
+
+// getStoresLoads fetches store loads, amortizing the map allocation across
+// repeated periodic calls when the underlying informer supports it.
+func (c *Coordinator) getStoresLoads() map[uint64]statistics.StoreKindLoads {
+	if fetcher, ok := c.cluster.(interface {
+		GetStoresLoadsTo(dst map[uint64]statistics.StoreKindLoads) map[uint64]statistics.StoreKindLoads
+	}); ok {
+		if c.storeLoadsCache == nil {
+			c.storeLoadsCache = make(map[uint64]statistics.StoreKindLoads)
+		}
+		return fetcher.GetStoresLoadsTo(c.storeLoadsCache)
+	}
+	return c.cluster.GetStoresLoads()
 }
 
 func collectHotMetrics(cluster sche.ClusterInformer, stores []*core.StoreInfo, typ utils.RWType) map[uint64][]*statistics.HotPeerStat {

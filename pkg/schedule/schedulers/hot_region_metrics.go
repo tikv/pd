@@ -178,13 +178,18 @@ func (t *hotRegionTop) add(e hotRegionEntry) {
 	t.entries[pos] = e
 }
 
-func selectHotRegions(cluster sche.SchedulerCluster, stats map[uint64][]*statistics.HotPeerStat, dim int, leaderOnly bool) hotRegionTop {
+// selectHotRegions returns the top N hot regions and a snapshot of the valid
+// stores considered, so callers can look up a region's store without issuing a
+// separate lock-protected GetStore call per entry.
+func selectHotRegions(cluster sche.SchedulerCluster, stats map[uint64][]*statistics.HotPeerStat, dim int, leaderOnly bool) (hotRegionTop, map[uint64]*core.StoreInfo) {
 	var top hotRegionTop
+	stores := make(map[uint64]*core.StoreInfo)
 	for storeID, peers := range stats {
 		store := cluster.GetStore(storeID)
 		if store == nil || store.IsRemoved() || store.IsUnhealthy() {
 			continue
 		}
+		stores[storeID] = store
 		for _, peer := range peers {
 			if leaderOnly && !peer.IsLeader() {
 				continue
@@ -192,7 +197,7 @@ func selectHotRegions(cluster sche.SchedulerCluster, stats map[uint64][]*statist
 			top.add(hotRegionEntry{regionID: peer.RegionID, storeID: storeID, load: peer.GetLoad(dim)})
 		}
 	}
-	return top
+	return top, stores
 }
 
 // CollectHotRegionMetrics reuses the already filtered, denoised hot-cache
@@ -218,12 +223,12 @@ func (c *Controller) CollectHotRegionMetrics(rw utils.RWType, stats map[uint64][
 			return
 		}
 		dim := utils.StringToDim(priorities[0])
-		top := selectHotRegions(c.cluster, stats, dim, leaderOnly)
+		top, stores := selectHotRegions(c.cluster, stats, dim, leaderOnly)
 		for _, entry := range top.entries[:top.count] {
 			labels := []string{ty.String(), utils.DimToString(dim), strconv.FormatUint(entry.regionID, 10), strconv.FormatUint(entry.storeID, 10)}
 			metrics = append(metrics, prometheus.MustNewConstMetric(topHotRegionMetrics.loadDesc, prometheus.GaugeValue, entry.load,
 				labels...))
-			store := c.cluster.GetStore(entry.storeID)
+			store := stores[entry.storeID]
 			if store != nil {
 				kind, ok := storeLoadKind(ty, dim, store)
 				if !ok {

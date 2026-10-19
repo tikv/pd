@@ -138,7 +138,7 @@ func TestCollectHotRegionMetrics(t *testing.T) {
 	require.Empty(t, families)
 	// An unavailable store cannot be represented by stale hot-cache entries.
 	tc.PutStore(tc.GetStore(1).Clone(core.SetStoreState(metapb.StoreState_Tombstone)))
-	top := selectHotRegions(tc, stats, utils.QueryDim, true)
+	top, _ := selectHotRegions(tc, stats, utils.QueryDim, true)
 	require.Zero(t, top.count)
 	// Normal controller path, then removal of the scheduler.
 	delete(c.schedulerHandlers, scheduler.GetName())
@@ -191,10 +191,10 @@ func TestHotRegionMetricsSustainedAndRead(t *testing.T) {
 	families, err = registry.Gather()
 	require.NoError(t, err)
 	require.Len(t, families[0].GetMetric(), 2)
-	top := selectHotRegions(tc, stats, utils.CPUDim, false)
+	top, _ := selectHotRegions(tc, stats, utils.CPUDim, false)
 	require.Equal(t, hotRegionEntry{regionID: 1, storeID: 2, load: 20}, top.entries[0])
 	tc.PutStore(tc.GetStore(2).Clone(core.SetLastHeartbeatTS(time.Now().Add(-time.Hour))))
-	top = selectHotRegions(tc, stats, utils.CPUDim, false)
+	top, _ = selectHotRegions(tc, stats, utils.CPUDim, false)
 	require.Equal(t, uint64(2), top.entries[0].regionID)
 	ResetHotRegionMetrics()
 	families, err = registry.Gather()
@@ -318,6 +318,6 @@ func BenchmarkSelectHotRegions(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		selectHotRegions(tc, stats, utils.ByteDim, false)
+		_, _ = selectHotRegions(tc, stats, utils.ByteDim, false)
 	}
 }
