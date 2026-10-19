@@ -618,7 +618,9 @@ func deleteGroupLabelValues(keyspaceName, groupName string) {
 	sampledRequestUnitPerSec.DeleteLabelValues(groupName, keyspaceName)
 	overrideSettings.DeleteLabelValues(groupName, keyspaceName, fillRateLabel)
 	overrideSettings.DeleteLabelValues(groupName, keyspaceName, burstLimitLabel)
-	resourceGroupConfigGauge.DeletePartialMatch(prometheus.Labels{newResourceGroupNameLabel: groupName, keyspaceNameLabel: keyspaceName})
+	resourceGroupConfigGauge.DeleteLabelValues(groupName, priorityLabel, keyspaceName)
+	resourceGroupConfigGauge.DeleteLabelValues(groupName, ruPerSecLabel, keyspaceName)
+	resourceGroupConfigGauge.DeleteLabelValues(groupName, ruCapacityLabel, keyspaceName)
 }
 
 func deleteMaxPerSecLabels(keyspaceName, groupName string) {

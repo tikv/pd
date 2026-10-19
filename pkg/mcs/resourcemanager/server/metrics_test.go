@@ -401,6 +401,32 @@ func TestMetricsResetAllUsesGaugeLabelsWithoutTrackers(t *testing.T) {
 	})
 }
 
+func TestDeleteGroupLabelValuesClearsConfigTypes(t *testing.T) {
+	re := require.New(t)
+	const (
+		keyspaceName = "delete-config-keyspace"
+		groupName    = "delete-config-group"
+		otherGroup   = "keep-config-group"
+	)
+	configTypes := []string{priorityLabel, ruPerSecLabel, ruCapacityLabel}
+	for _, configType := range configTypes {
+		resourceGroupConfigGauge.WithLabelValues(groupName, configType, keyspaceName).Set(1)
+		resourceGroupConfigGauge.WithLabelValues(otherGroup, configType, keyspaceName).Set(2)
+	}
+	t.Cleanup(func() {
+		deleteGroupLabelValues(keyspaceName, groupName)
+		deleteGroupLabelValues(keyspaceName, otherGroup)
+	})
+
+	deleteGroupLabelValues(keyspaceName, groupName)
+
+	for _, configType := range configTypes {
+		re.False(resourceGroupConfigGauge.DeleteLabelValues(groupName, configType, keyspaceName),
+			"config series was not removed: %s", configType)
+		re.Equal(float64(2), testutil.ToFloat64(resourceGroupConfigGauge.WithLabelValues(otherGroup, configType, keyspaceName)))
+	}
+}
+
 func TestCleanupKeepsCrossAZMetricsWhileAnotherRUTypeIsActive(t *testing.T) {
 	re := require.New(t)
 

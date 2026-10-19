@@ -691,7 +691,7 @@ func (m *Manager) getKeyspaceResourceGroupManagers() []*keyspaceResourceGroupMan
 	return krgms
 }
 
-func (m *Manager) dispatchConsumption(req *rmpb.TokenBucketRequest) error {
+func (m *Manager) dispatchConsumption(req *rmpb.TokenBucketRequest, keyspaceName string) error {
 	isBackground := req.GetIsBackground()
 	isTiFlash := req.GetIsTiflash()
 	if isBackground && isTiFlash {
@@ -699,6 +699,7 @@ func (m *Manager) dispatchConsumption(req *rmpb.TokenBucketRequest) error {
 	}
 	item := &consumptionItem{
 		keyspaceID:        ExtractKeyspaceID(req.GetKeyspaceId()),
+		keyspaceName:      keyspaceName,
 		resourceGroupName: req.GetResourceGroupName(),
 		Consumption:       req.GetConsumptionSinceLastRequest(),
 		isBackground:      isBackground,
@@ -829,7 +830,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 	resetMetricsOnStepDown := func() {
 		m.stopAcceptingConsumption()
 		m.metrics.resetAll()
-		m.drainPendingConsumption(context.WithoutCancel(ctx))
+		m.drainPendingConsumption()
 		log.Info("resource group manager background metrics flush loop exits")
 	}
 	for {
@@ -842,7 +843,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			resetMetricsOnStepDown()
 			return
 		case consumptionInfo := <-m.consumptionDispatcher:
-			m.processConsumption(ctx, consumptionInfo, true)
+			m.processConsumption(consumptionInfo, true)
 		case <-cleanUpTicker.C:
 			m.cleanUpMetrics(ctx)
 		case <-metricsTicker.C:
@@ -908,38 +909,27 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 }
 
 // drainPendingConsumption meters requests accepted by the old term without recreating its metrics.
-func (m *Manager) drainPendingConsumption(ctx context.Context) {
+func (m *Manager) drainPendingConsumption() {
 	for {
 		select {
 		case item := <-m.consumptionDispatcher:
-			m.processConsumption(ctx, item, false)
+			m.processConsumption(item, false)
 		default:
 			return
 		}
 	}
 }
 
-func (m *Manager) processConsumption(ctx context.Context, consumptionInfo *consumptionItem, recordMetrics bool) {
+func (m *Manager) processConsumption(consumptionInfo *consumptionItem, recordMetrics bool) {
 	if consumptionInfo == nil || consumptionInfo.Consumption == nil {
 		return
 	}
-	keyspaceID := consumptionInfo.keyspaceID
-	keyspaceName, err := m.getKeyspaceNameByID(ctx, keyspaceID)
-	if err != nil && ctx.Err() != nil {
-		// A report already accepted into the queue must still reach metering
-		// when the leader context is canceled during step-down.
-		keyspaceName, err = m.getKeyspaceNameByID(context.WithoutCancel(ctx), keyspaceID)
-	}
-	if err != nil {
-		return
-	}
-	consumptionInfo.keyspaceName = keyspaceName
 	m.ruCollector.Collect(consumptionInfo)
 	if recordMetrics {
 		m.metrics.recordConsumption(consumptionInfo, m.GetControllerConfig(), time.Now())
 	}
 	// TODO: maybe we need to distinguish background ru.
-	if rg, _ := m.GetMutableResourceGroup(keyspaceID, consumptionInfo.resourceGroupName); rg != nil {
+	if rg, _ := m.GetMutableResourceGroup(consumptionInfo.keyspaceID, consumptionInfo.resourceGroupName); rg != nil {
 		rg.UpdateRUConsumption(consumptionInfo.Consumption)
 	}
 }

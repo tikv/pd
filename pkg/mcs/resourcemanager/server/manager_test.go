@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/gogo/protobuf/proto"
+	"github.com/prometheus/client_golang/prometheus"
 	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/etcd/api/v3/mvccpb"
@@ -268,7 +269,7 @@ func TestManagerInitDoesNotAcceptConsumptionAfterContextCancellation(t *testing.
 	re.False(m.acceptingConsumption)
 	re.Nil(m.consumptionTermDone)
 	m.consumptionMu.RUnlock()
-	re.Error(m.dispatchConsumption(&rmpb.TokenBucketRequest{}))
+	re.Error(m.dispatchConsumption(&rmpb.TokenBucketRequest{}, ""))
 }
 
 func TestLoadKeyspaceResourceGroupsRejectsMismatchedPayloadName(t *testing.T) {
@@ -493,7 +494,9 @@ func checkBackgroundMetricsFlush(ctx context.Context, re *require.Assertions, ma
 		},
 		KeyspaceId: keyspaceIDValue,
 	}
-	err = manager.dispatchConsumption(req)
+	keyspaceName, err := manager.getKeyspaceNameByID(ctx, ExtractKeyspaceID(keyspaceIDValue))
+	re.NoError(err)
+	err = manager.dispatchConsumption(req, keyspaceName)
 	re.NoError(err)
 
 	keyspaceID := ExtractKeyspaceID(req.GetKeyspaceId())
@@ -520,11 +523,12 @@ func TestDispatchConsumptionIncludesOnlyConsumption(t *testing.T) {
 		KeyspaceId: &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: 42}},
 	}
 
-	err := m.dispatchConsumption(req)
+	err := m.dispatchConsumption(req, "test_keyspace")
 	re.NoError(err)
 
 	item := <-m.consumptionDispatcher
 	re.Equal(uint32(42), item.keyspaceID)
+	re.Equal("test_keyspace", item.keyspaceName)
 	re.Equal(req.GetResourceGroupName(), item.resourceGroupName)
 	re.Equal(req.GetConsumptionSinceLastRequest(), item.Consumption)
 }
@@ -684,35 +688,61 @@ func TestMetricsResetOnStepDown(t *testing.T) {
 	keyspaceIDValue := &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: keyspaceID}}
 	prepareKeyspaceName(ctx, re, m, keyspaceIDValue, keyspaceName)
 	m.updateKeyspaceNameLookup(keyspaceID, keyspaceName)
-	m.metrics.recordConsumption(&consumptionItem{
-		keyspaceID:        keyspaceID,
-		keyspaceName:      keyspaceName,
-		resourceGroupName: groupName,
-		Consumption:       &rmpb.Consumption{RRU: 1},
-	}, &ControllerConfig{}, time.Now())
-	m.metrics.setServiceLimitMetric(keyspaceName, 100)
+	t.Cleanup(func() {
+		deleteLabelValues(keyspaceName, groupName, defaultTypeLabel)
+		deleteLabelValues(keyspaceName, DefaultResourceGroupName, defaultTypeLabel)
+		serviceLimit.DeleteLabelValues(keyspaceName)
+	})
 
 	re.NoError(m.Init(ctx))
-	m.consumptionMu.RLock()
-	re.True(m.acceptingConsumption)
-	re.NotNil(m.consumptionTermDone)
-	m.consumptionMu.RUnlock()
+	re.NoError(m.AddResourceGroup(&rmpb.ResourceGroup{
+		Name:       groupName,
+		Mode:       rmpb.GroupMode_RUMode,
+		KeyspaceId: keyspaceIDValue,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 100, BurstLimit: 200}},
+		},
+	}))
+	re.NoError(m.SetKeyspaceServiceLimit(keyspaceID, 100))
+	re.NoError(m.dispatchConsumption(&rmpb.TokenBucketRequest{
+		KeyspaceId:                  keyspaceIDValue,
+		ResourceGroupName:           groupName,
+		ConsumptionSinceLastRequest: &rmpb.Consumption{RRU: 1},
+	}, keyspaceName))
+
+	// Wait for both consumption and the periodic gauges in the live term.
+	// Prometheus children are safe to inspect while the worker updates them.
+	testutil.Eventually(re, func() bool {
+		return promtestutil.ToFloat64(readRequestUnitCost.WithLabelValues(groupName, groupName, defaultTypeLabel, keyspaceName)) == 1 &&
+			promtestutil.ToFloat64(serviceLimit.WithLabelValues(keyspaceName)) == 100 &&
+			promtestutil.ToFloat64(resourceGroupConfigGauge.WithLabelValues(groupName, ruPerSecLabel, keyspaceName)) > 0
+	})
 
 	cancel()
 	m.Close()
 
 	re.Nil(m.cancel)
-	re.Error(m.dispatchConsumption(&rmpb.TokenBucketRequest{}))
+	re.Error(m.dispatchConsumption(&rmpb.TokenBucketRequest{}, ""))
 	re.Empty(m.metrics.consumptionRecordMap)
 	re.Empty(m.metrics.counterMetricsMap)
+	re.Empty(m.metrics.gaugeMetricsMap)
 	re.Empty(m.metrics.maxPerSecTrackerMap)
 	re.Empty(m.metrics.serviceLimitNameSet)
-	re.Zero(promtestutil.ToFloat64(readRequestUnitCost.WithLabelValues(groupName, groupName, defaultTypeLabel, keyspaceName)))
-	re.Zero(promtestutil.ToFloat64(serviceLimit.WithLabelValues(keyspaceName)))
-	t.Cleanup(func() {
-		deleteLabelValues(keyspaceName, groupName, defaultTypeLabel)
-		serviceLimit.DeleteLabelValues(keyspaceName)
-	})
+
+	registry := prometheus.NewRegistry()
+	registry.MustRegister(readRequestUnitCost, writeRequestUnitCost, availableRUCounter,
+		resourceGroupConfigGauge, serviceLimit, readRequestUnitMaxPerSecCost, writeRequestUnitMaxPerSecCost)
+	families, err := registry.Gather()
+	re.NoError(err)
+	for _, family := range families {
+		for _, metric := range family.GetMetric() {
+			for _, label := range metric.GetLabel() {
+				if label.GetName() == keyspaceNameLabel {
+					re.NotEqual(keyspaceName, label.GetValue(), "stale metric series: %s", family.GetName())
+				}
+			}
+		}
+	}
 }
 
 func TestBackgroundMetricsFlushDrainsPendingConsumptionOnStepDown(t *testing.T) {
@@ -725,25 +755,27 @@ func TestBackgroundMetricsFlushDrainsPendingConsumptionOnStepDown(t *testing.T) 
 		groupName    = "step-down-drain-group"
 		keyspaceID   = uint32(510)
 	)
-	m.updateKeyspaceNameLookup(keyspaceID, keyspaceName)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	m.consumptionMu.Lock()
 	m.consumptionTermDone = ctx.Done()
 	m.acceptingConsumption = true
 	m.consumptionMu.Unlock()
-	re.NoError(m.dispatchConsumption(&rmpb.TokenBucketRequest{
-		KeyspaceId:                  &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: keyspaceID}},
-		ResourceGroupName:           groupName,
-		ConsumptionSinceLastRequest: &rmpb.Consumption{RRU: 1},
-	}))
+	// Fill the queue without a worker, storage, or a keyspace-name cache.
+	for range defaultConsumptionChanSize {
+		re.NoError(m.dispatchConsumption(&rmpb.TokenBucketRequest{
+			KeyspaceId:                  &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: keyspaceID}},
+			ResourceGroupName:           groupName,
+			ConsumptionSinceLastRequest: &rmpb.Consumption{RRU: 1},
+		}, keyspaceName))
+	}
 	cancel()
 	m.wg.Add(1)
 	go m.backgroundMetricsFlush(ctx)
 	m.wg.Wait()
 
 	re.Empty(m.consumptionDispatcher)
-	re.Equal(1.0, m.ruCollector.keyspaceRUMetering[keyspaceName].oltpRU)
+	re.Equal(float64(defaultConsumptionChanSize), m.ruCollector.keyspaceRUMetering[keyspaceName].oltpRU)
 	re.Empty(m.metrics.consumptionRecordMap)
 	re.Empty(m.metrics.counterMetricsMap)
 	m.consumptionMu.RLock()
