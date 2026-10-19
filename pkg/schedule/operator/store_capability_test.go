@@ -25,6 +25,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
+	"github.com/tikv/pd/pkg/schedule/hbstream"
 )
 
 func TestLogStoreRejectsConversionsAndIncompatibleOperators(t *testing.T) {
@@ -57,4 +58,91 @@ func TestLogStoreRejectsConversionsAndIncompatibleOperators(t *testing.T) {
 	for _, step := range steps {
 		require.ErrorContains(t, step.CheckInProgress(cluster.GetBasicCluster(), cluster.GetSharedConfig(), region, false), "capability")
 	}
+}
+
+func TestLogStoreFirstCommandCannotBypassCapability(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		step OpStep
+	}{
+		{"add-full-learner", AddLearner{ToStore: 4, PeerID: 40}},
+		{"add-full-voter", AddPeer{ToStore: 4, PeerID: 40}},
+		{"add-witness-on-full", AddLearner{ToStore: 5, PeerID: 50, IsWitness: true}},
+		{"convert-witness", BecomeNonWitness{StoreID: 3, PeerID: 3}},
+		{"convert-full", BecomeWitness{StoreID: 2, PeerID: 2}},
+		{"batch-convert", BatchSwitchWitness{ToNonWitnesses: []BecomeNonWitness{{StoreID: 3, PeerID: 3}}}},
+		{"joint-add-full", ChangePeerV2Enter{PromoteLearners: []PromoteLearner{{ToStore: 4, PeerID: 40}}}},
+		{"transfer-to-witness", TransferLeader{FromStore: 1, ToStore: 3}},
+		{"multi-target-includes-witness", TransferLeader{FromStore: 1, ToStore: 2, ToStores: []uint64{2, 3}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+			for _, id := range []uint64{1, 2, 5} {
+				cluster.AddLabelsStore(id, 1, map[string]string{core.StoreCapabilityLabel: core.FullStoreCapability})
+			}
+			for _, id := range []uint64{3, 4} {
+				cluster.AddLabelsStore(id, 1, map[string]string{core.StoreCapabilityLabel: core.LogOnlyStoreCapability})
+			}
+			peers := []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, IsWitness: true}}
+			region := core.NewRegionInfo(&metapb.Region{Id: 1, RegionEpoch: &metapb.RegionEpoch{}, Peers: peers}, peers[0])
+			cluster.PutRegion(region)
+			streams := hbstream.NewTestHeartbeatStreams(ctx, cluster, false)
+			defer streams.Close()
+			controller := NewController(ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), streams)
+			op := NewTestOperator(region.GetID(), region.GetRegionEpoch(), OpAdmin, tc.step)
+			// AddOperator synchronously sends the first command; no heartbeat
+			// or CheckInProgress has run yet. Neither this nor notifier retries
+			// may send an incompatible command to TiKV.
+			require.False(t, controller.AddOperator(op))
+			require.Zero(t, streams.MsgLength())
+			// The send boundary must also guard callers bypassing admission.
+			controller.SendScheduleCommand(region, tc.step, DispatchFromNotifierQueue)
+			require.Zero(t, streams.MsgLength())
+		})
+	}
+}
+
+func TestLogStoreCommandGuardAllowsCompatibleRepairAndRemoval(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	for _, id := range []uint64{1, 2, 5} {
+		cluster.AddLabelsStore(id, 1, map[string]string{core.StoreCapabilityLabel: core.FullStoreCapability})
+	}
+	for _, id := range []uint64{3, 4} {
+		cluster.AddLabelsStore(id, 1, map[string]string{core.StoreCapabilityLabel: core.LogOnlyStoreCapability})
+	}
+	peers := []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, IsWitness: true}}
+	region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers}, peers[0])
+	streams := hbstream.NewTestHeartbeatStreams(ctx, cluster, false)
+	defer streams.Close()
+	controller := NewController(ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), streams)
+	for _, step := range []OpStep{
+		AddLearner{ToStore: 4, PeerID: 40, IsWitness: true},
+		AddLearner{ToStore: 5, PeerID: 50},
+		TransferLeader{FromStore: 1, ToStore: 2},
+		RemovePeer{FromStore: 3, PeerID: 3},
+	} {
+		controller.SendScheduleCommand(region, step, DispatchFromCreate)
+		require.Equal(t, 1, streams.MsgLength())
+		require.NoError(t, streams.Drain(1))
+	}
+
+	// The source may be a temporary W leader: only the destination must be Full.
+	// This is an ordinary PD transfer, separate from TiKV's typed recovery RPC.
+	recovering := region.Clone(core.WithLeader(region.GetStorePeer(3)))
+	cluster.PutRegion(recovering)
+	op, err := CreateTransferLeaderOperator("transfer-from-witness", cluster, recovering, 2, nil, 0)
+	require.NoError(t, err)
+	require.True(t, controller.AddOperator(op))
+	require.Equal(t, 1, streams.MsgLength())
+	require.NoError(t, streams.Drain(1))
+
+	// Even malformed historical metadata must not prevent retiring the peer.
+	peers[2].IsWitness = false
+	region = core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers}, peers[0])
+	controller.SendScheduleCommand(region, RemovePeer{FromStore: 3, PeerID: 3}, DispatchFromCreate)
+	require.Equal(t, 1, streams.MsgLength())
 }

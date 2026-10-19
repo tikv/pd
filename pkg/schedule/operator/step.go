@@ -148,6 +148,14 @@ func (tl TransferLeader) CheckInProgress(ci *core.BasicCluster, config config.Sh
 			errList = append(errList, errors.New("peer already is a learner"))
 			continue
 		}
+		if core.IsWitness(peer) {
+			errList = append(errList, errors.New("normal leader transfer cannot target a witness"))
+			continue
+		}
+		if err := validatePeerCapability(ci, storeID, false); err != nil {
+			errList = append(errList, err)
+			continue
+		}
 		if err := validateStore(ci, config, storeID, needStoreHealthCheck); err != nil {
 			errList = append(errList, err)
 			continue

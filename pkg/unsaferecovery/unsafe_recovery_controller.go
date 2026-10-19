@@ -236,6 +236,21 @@ func (u *Controller) RemoveFailedStoresWithOptions(
 		return errs.ErrUnsafeRecoveryIsRunning.FastGenByArgs()
 	}
 
+	// The legacy recovery protocol treats every TiKV report as a data replica.
+	// A LogOnly peer can contain a newer log suffix without a data state, so
+	// neither forcing it into a data leader nor preferring an older Full is
+	// safe. Reject before tombstoning any Store or dispatching a recovery plan.
+	stores := u.cluster.GetStores()
+	for _, store := range stores {
+		if store.IsRemoved() || store.IsPhysicallyDestroyed() {
+			continue
+		}
+		capability, err := core.ParseStoreCapability(store.GetMeta())
+		if err != nil || capability == core.LogOnlyStoreCapability {
+			return errs.ErrUnsafeRecoveryInvalidInput.FastGenByArgs("legacy unsafe recovery does not support LogOnly Stores")
+		}
+	}
+
 	if !autoDetect {
 		if len(failedStores) == 0 {
 			return errs.ErrUnsafeRecoveryInvalidInput.FastGenByArgs("no store specified")
@@ -259,7 +274,9 @@ func (u *Controller) RemoveFailedStoresWithOptions(
 	}
 
 	u.reset()
-	for _, s := range u.cluster.GetStores() {
+	// Use the validated snapshot: a Store registering after preflight must not
+	// enter this recovery round with an unchecked data capability.
+	for _, s := range stores {
 		if s.IsRemoved() || s.IsPhysicallyDestroyed() {
 			continue
 		}

@@ -47,3 +47,20 @@ func TestLogStoreCapabilityCannotBeChangedByLabels(t *testing.T) {
 	}, false), "duplicate")
 	re.Equal(core.LogOnlyStoreCapability, cluster.GetStore(1).GetLabelValue(core.StoreCapabilityLabel))
 }
+
+func TestStoreCapabilityIsReservedUnderStrictLabelValidation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_, opt, err := newTestScheduleConfig()
+	require.NoError(t, err)
+	replication := opt.GetReplicationConfig().Clone()
+	replication.StrictlyMatchLabel = true
+	replication.LocationLabels = []string{"zone"}
+	opt.SetReplicationConfig(replication)
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	for i, capability := range []string{core.FullStoreCapability, core.LogOnlyStoreCapability} {
+		meta := newTestStores(2, "6.6.0")[i].GetMeta()
+		meta.Labels = []*metapb.StoreLabel{{Key: "zone", Value: "z1"}, {Key: core.StoreCapabilityLabel, Value: capability}}
+		require.NoError(t, cluster.PutMetaStore(meta))
+	}
+}

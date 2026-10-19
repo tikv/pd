@@ -71,6 +71,13 @@ provide an upstream TiKV witness implementation, minimal Log Store server
 runtime, production resource sizing, or all CSE RecoveringLeader protocol and
 peripheral rollout work.
 
+The legacy PD unsafe recovery protocol is rejected while a non-retired LogOnly
+Store is registered. It assumes every TiKV report can become a data leader or
+host a newly created Full Region. Selecting an older Full instead could discard
+a newer log suffix held by W; supporting this requires a separate recovery
+protocol. This restriction does not affect normal election, W-to-F repair or
+recovery transfer, which continue without PD.
+
 ## Tests
 
 Core, placement/filter, operator, checker, scheduler, bootstrap and Store label

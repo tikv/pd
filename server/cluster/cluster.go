@@ -1705,7 +1705,7 @@ func (c *RaftCluster) checkStoreLabels(s *core.StoreInfo) error {
 	}
 	for _, label := range s.GetLabels() {
 		key := label.GetKey()
-		if key == core.EngineKey || key == core.EngineRoleKey {
+		if key == core.EngineKey || key == core.EngineRoleKey || strings.EqualFold(key, core.StoreCapabilityLabel) {
 			continue
 		}
 		if _, ok := keysSet[key]; !ok {

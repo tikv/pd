@@ -2387,3 +2387,88 @@ func newPeer(storeID, term, lastIndex, committedIndex, appliedIndex uint64) *reg
 		},
 	}
 }
+
+func TestLegacyUnsafeRecoveryRejectsLogOnlyBeforeSideEffects(t *testing.T) {
+	for _, autoDetect := range []bool{false, true} {
+		t.Run(fmt.Sprintf("auto-detect=%t", autoDetect), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+			for _, store := range newTestStores(2, "6.0.0") {
+				cluster.PutStore(store)
+			}
+			cluster.SetStoreDown(1)
+			cluster.SetStoreLabel(2, map[string]string{core.StoreCapabilityLabel: core.LogOnlyStoreCapability})
+			controller := NewController(cluster)
+			err := controller.RemoveFailedStoresWithOptions(map[uint64]struct{}{1: {}}, 60, autoDetect, RemoveFailedStoresOptions{DisableParanoidCheck: true})
+			require.ErrorContains(t, err, "legacy unsafe recovery does not support LogOnly")
+			require.False(t, cluster.GetStore(1).IsRemoved())
+			require.False(t, cluster.GetStore(1).IsPhysicallyDestroyed())
+			require.False(t, controller.IsRunning())
+			require.Empty(t, controller.storeRecoveryPlans)
+			require.Empty(t, controller.storeReports)
+		})
+	}
+}
+
+func TestLegacyUnsafeRecoveryAllowsFullWithRetiredLogOnly(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	for _, store := range newTestStores(2, "6.0.0") {
+		cluster.PutStore(store)
+	}
+	cluster.SetStoreLabel(1, map[string]string{core.StoreCapabilityLabel: core.FullStoreCapability})
+	retired := cluster.GetStore(2).Clone(
+		core.SetStoreLabels([]*metapb.StoreLabel{{Key: core.StoreCapabilityLabel, Value: core.LogOnlyStoreCapability}}),
+		core.SetStoreState(metapb.StoreState_Tombstone),
+	)
+	cluster.PutStore(retired)
+	controller := NewController(cluster)
+	require.NoError(t, controller.RemoveFailedStores(nil, 60, true))
+	require.True(t, controller.IsRunning())
+	require.Contains(t, controller.storeReports, uint64(1))
+	require.NotContains(t, controller.storeReports, uint64(2))
+}
+
+// storeRegisteringDuringRecovery models registration after the first Store
+// snapshot without global failpoints or a timing-dependent concurrent test.
+type storeRegisteringDuringRecovery struct {
+	*mockcluster.Cluster
+	storeReads int
+}
+
+func (c *storeRegisteringDuringRecovery) GetStores() []*core.StoreInfo {
+	stores := c.Cluster.GetStores()
+	c.storeReads++
+	if c.storeReads == 1 {
+		c.AddLabelsStore(3, 0, map[string]string{core.StoreCapabilityLabel: core.LogOnlyStoreCapability})
+	}
+	return stores
+}
+
+func TestLegacyUnsafeRecoveryOnlyIncludesValidatedStoreSnapshot(t *testing.T) {
+	for _, autoDetect := range []bool{false, true} {
+		t.Run(fmt.Sprintf("auto-detect=%t", autoDetect), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			base := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+			for _, store := range newTestStores(2, "6.0.0") {
+				base.PutStore(store)
+			}
+			base.SetStoreDown(1)
+			cluster := &storeRegisteringDuringRecovery{Cluster: base}
+			controller := NewController(cluster)
+			require.NoError(t, controller.RemoveFailedStores(map[uint64]struct{}{1: {}}, 60, autoDetect))
+			require.Equal(t, 1, cluster.storeReads)
+			require.NotNil(t, base.GetStore(3)) // Registration did occur during preflight.
+			require.Len(t, controller.storeReports, 1)
+			require.Contains(t, controller.storeReports, uint64(2))
+			require.NotContains(t, controller.storeReports, uint64(1))
+			require.NotContains(t, controller.storeReports, uint64(3))
+			response := &pdpb.StoreHeartbeatResponse{}
+			controller.HandleStoreHeartbeat(newStoreHeartbeat(3, nil), response)
+			require.Nil(t, response.GetRecoveryPlan())
+		})
+	}
+}
