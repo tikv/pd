@@ -515,6 +515,7 @@ type hotRegionEntry struct {
 	regionID uint64
 	storeID  uint64
 	load     float64
+	store    *core.StoreInfo
 }
 
 // hotter gives deterministic ordering, including replicas with equal load.
@@ -565,57 +566,72 @@ func (t *hotRegionTop) add(e hotRegionEntry) {
 	t.entries[pos] = e
 }
 
-// selectHotRegions returns the top N hot regions and a snapshot of the valid
-// stores considered, so callers can look up a region's store without issuing a
-// separate lock-protected GetStore call per entry.
-func selectHotRegions(cluster sche.SchedulerCluster, stats map[uint64][]*statistics.HotPeerStat, dim int, leaderOnly bool) (hotRegionTop, map[uint64]*core.StoreInfo) {
-	var top hotRegionTop
-	stores := make(map[uint64]*core.StoreInfo)
+// selectHotRegions selects peer and optional leader lists in one pass. A
+// negative dimension disables that list. Only the winning entries retain Store
+// snapshots; no map proportional to the number of Stores is needed.
+func selectHotRegions(cluster sche.SchedulerCluster, stats map[uint64][]*statistics.HotPeerStat, dim, leaderDim int) (peersTop, leadersTop hotRegionTop) {
 	for storeID, peers := range stats {
 		store := cluster.GetStore(storeID)
 		if store == nil || store.IsRemoved() || store.IsUnhealthy() {
 			continue
 		}
-		stores[storeID] = store
 		for _, peer := range peers {
-			if leaderOnly && !peer.IsLeader() {
-				continue
+			entry := hotRegionEntry{regionID: peer.RegionID, storeID: storeID, store: store}
+			if dim >= 0 {
+				entry.load = peer.GetLoad(dim)
+				peersTop.add(entry)
 			}
-			top.add(hotRegionEntry{regionID: peer.RegionID, storeID: storeID, load: peer.GetLoad(dim)})
+			if leaderDim >= 0 && peer.IsLeader() {
+				if leaderDim != dim {
+					entry.load = peer.GetLoad(leaderDim)
+				}
+				leadersTop.add(entry)
+			}
 		}
 	}
-	return top, stores
+	return peersTop, leadersTop
 }
 
 // CollectHotRegionMetrics reuses the already filtered, denoised hot-cache
 // snapshot used by hotspot monitoring. It is independent of scheduling being
 // paused, hitting an operator limit, or producing an operator.
 func (c *Controller) CollectHotRegionMetrics(rw utils.RWType, stats map[uint64][]*statistics.HotPeerStat, storeLoads map[uint64]statistics.StoreKindLoads) {
-	c.RLock()
-	defer c.RUnlock()
-	var scheduler *hotScheduler
-	if controller := c.schedulers[types.BalanceHotRegionScheduler.String()]; controller != nil {
-		scheduler, _ = controller.Scheduler.(*hotScheduler)
-	} else {
-		scheduler, _ = c.schedulerHandlers[types.BalanceHotRegionScheduler.String()].(*hotScheduler)
+	getScheduler := func() *hotScheduler {
+		if controller := c.schedulers[types.BalanceHotRegionScheduler.String()]; controller != nil {
+			scheduler, _ := controller.Scheduler.(*hotScheduler)
+			return scheduler
+		}
+		scheduler, _ := c.schedulerHandlers[types.BalanceHotRegionScheduler.String()].(*hotScheduler)
+		return scheduler
 	}
+	c.RLock()
+	scheduler := getScheduler()
 	if scheduler == nil {
 		topHotRegionMetrics.set(rw, nil)
+		c.RUnlock()
 		return
 	}
-	metrics := make([]prometheus.Metric, 0, 4*hotRegionTopN)
-	appendTop := func(ty resourceType, leaderOnly bool) {
+	c.RUnlock()
+	getDim := func(ty resourceType) int {
 		priorities := scheduler.getPriorities(c.cluster, ty)
 		if len(priorities) == 0 {
-			return
+			return -1
 		}
-		dim := utils.StringToDim(priorities[0])
-		top, stores := selectHotRegions(c.cluster, stats, dim, leaderOnly)
+		return utils.StringToDim(priorities[0])
+	}
+	peerType, leaderDim := readPeer, -1
+	if rw == utils.Write {
+		peerType, leaderDim = writePeer, getDim(writeLeader)
+	}
+	dim := getDim(peerType)
+	peersTop, leadersTop := selectHotRegions(c.cluster, stats, dim, leaderDim)
+	metrics := make([]prometheus.Metric, 0, 2*(peersTop.count+leadersTop.count))
+	appendTop := func(ty resourceType, dim int, top hotRegionTop) {
 		for _, entry := range top.entries[:top.count] {
 			labels := []string{ty.String(), utils.DimToString(dim), strconv.FormatUint(entry.regionID, 10), strconv.FormatUint(entry.storeID, 10)}
 			metrics = append(metrics, prometheus.MustNewConstMetric(topHotRegionMetrics.loadDesc, prometheus.GaugeValue, entry.load,
 				labels...))
-			store := stores[entry.storeID]
+			store := entry.store
 			if store != nil {
 				kind, ok := storeLoadKind(ty, dim, store)
 				if !ok {
@@ -633,11 +649,15 @@ func (c *Controller) CollectHotRegionMetrics(rw utils.RWType, stats map[uint64][
 			}
 		}
 	}
-	if rw == utils.Read {
-		appendTop(readPeer, false)
-	} else {
-		appendTop(writeLeader, true)
-		appendTop(writePeer, false)
+	appendTop(peerType, dim, peersTop)
+	if rw == utils.Write {
+		appendTop(writeLeader, leaderDim, leadersTop)
 	}
-	topHotRegionMetrics.set(rw, metrics)
+	// Removal clears the metrics under the Controller lock. Check identity
+	// again so a completed scan cannot republish a removed scheduler's samples.
+	c.RLock()
+	defer c.RUnlock()
+	if getScheduler() == scheduler {
+		topHotRegionMetrics.set(rw, metrics)
+	}
 }
