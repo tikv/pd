@@ -117,18 +117,24 @@ type GCStateManager struct {
 	gcMetaStorage   endpoint.GCStateProvider
 	cfg             config.PDServerConfig
 	keyspaceManager *keyspace.Manager
+	barrierMetrics  *barrierMetrics
 
 	allKeyspacesGCStatesSingleFlight *syncutil.OrderedSingleFlight[map[uint32]GCState]
 }
 
 // NewGCStateManager creates a GCStateManager of GC and services.
 func NewGCStateManager(store endpoint.GCStateProvider, cfg config.PDServerConfig, keyspaceManager *keyspace.Manager) *GCStateManager {
-	return &GCStateManager{
+	m := &GCStateManager{
 		gcMetaStorage:                    store,
 		cfg:                              cfg,
 		keyspaceManager:                  keyspaceManager,
 		allKeyspacesGCStatesSingleFlight: syncutil.NewOrderedSingleFlight[map[uint32]GCState](),
 	}
+	m.barrierMetrics = newBarrierMetrics(time.Now)
+	if keyspaceManager != nil {
+		keyspaceManager.SetGCBarrierInvalidator(m.barrierMetrics.invalidateKeyspaceMetrics)
+	}
+	return m
 }
 
 type keyspaceNameKeyType struct{}
@@ -149,6 +155,42 @@ func getKeyspaceNameFromCtx(ctx context.Context) string {
 	return "<unknown>"
 }
 
+<<<<<<< HEAD
+=======
+// OnNodeBecomesLeader marks the current PD node as leader for GC state watches.
+func (m *GCStateManager) OnNodeBecomesLeader() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.nodeLeadership.Add(1)
+
+	// Also trigger cache invalidation even when transitioning from follower to leader, as a protection against
+	// potential inconsistent cache state left from the last leadership.
+	m.gcStateCache.clearAll()
+	m.barrierMetrics.clearMetrics()
+	productionBarrierMetrics.current.Store(m.barrierMetrics)
+}
+
+// OnNodeBecomesFollower marks the current PD node as follower and closes all existing GC state watches.
+func (m *GCStateManager) OnNodeBecomesFollower() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.nodeLeadership.Add(-1)
+
+	// Invalidate the cache.
+	m.gcStateCache.clearAll()
+	m.barrierMetrics.clearMetrics()
+	if !m.nodeIsLeader() {
+		productionBarrierMetrics.current.CompareAndSwap(m.barrierMetrics, nil)
+	}
+}
+
+func (m *GCStateManager) nodeIsLeader() bool {
+	return m.nodeLeadership.Load() > 0
+}
+
+>>>>>>> a3f0b17749 (gc: expose old GC barriers through metrics and warnings (#11259))
 // redirectKeyspace checks the given keyspaceID, and returns the actual keyspaceID to operate on.
 //
 // This function also returns the target keyspace name for diagnostic purpose. But note that it returns a user-friendly
@@ -297,11 +339,14 @@ func (m *GCStateManager) advanceGCSafePointImpl(ctx context.Context, keyspaceID 
 // have the responsibility to manage GC. It can only be called on NullKeyspace or keyspaces with keyspace level GC
 // enabled.
 func (m *GCStateManager) AdvanceTxnSafePoint(keyspaceID uint32, target uint64, now time.Time) (AdvanceTxnSafePointResult, error) {
+	observation := &barrierObservation{generation: m.barrierMetrics.generation()}
+	defer observation.logWarnings()
 	keyspaceID, keyspaceNameForDiag, err := m.redirectKeyspace(keyspaceID, false)
 	if err != nil {
 		return AdvanceTxnSafePointResult{}, err
 	}
 	ctx := addKeyspaceNameToCtx(context.Background(), keyspaceNameForDiag)
+	ctx = context.WithValue(ctx, barrierObservationKey{}, observation)
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -328,6 +373,12 @@ func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID
 		blockingBarrier         *endpoint.GCBarrier
 		blockingGlobalBarrier   *endpoint.GlobalGCBarrier
 		blockingMinStartTSOwner *string
+<<<<<<< HEAD
+=======
+		gcSafePoint             uint64
+		observedBarriers        []*endpoint.GCBarrier
+		observedGlobals         []*endpoint.GlobalGCBarrier
+>>>>>>> a3f0b17749 (gc: expose old GC barriers through metrics and warnings (#11259))
 	)
 
 	err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
@@ -346,6 +397,7 @@ func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID
 			return err1
 		}
 
+		observedBarriers = barriers
 		for _, barrier := range barriers {
 			if barrier.BarrierID == keypath.GCWorkerServiceSafePointID {
 				downgradeCompatibleMode = true
@@ -393,6 +445,7 @@ func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID
 		if err2 != nil {
 			return err2
 		}
+		observedGlobals = globals
 		for _, barrier := range globals {
 			if barrier.IsExpired(now) {
 				err1 = wb.DeleteGlobalGCBarrier(barrier.BarrierID)
@@ -423,6 +476,19 @@ func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID
 		return AdvanceTxnSafePointResult{}, err
 	}
 
+<<<<<<< HEAD
+=======
+	if observation, ok := ctx.Value(barrierObservationKey{}).(*barrierObservation); ok {
+		observation.warnings = m.barrierMetrics.observeMetrics(observation.generation, keyspaceID, getKeyspaceNameFromCtx(ctx), observedBarriers, observedGlobals, now)
+	}
+
+	// Update cache.
+	m.gcStateCache.store(keyspaceID, gcStateCacheEntry{
+		TxnSafePoint: newTxnSafePoint,
+		GCSafePoint:  gcSafePoint,
+	})
+
+>>>>>>> a3f0b17749 (gc: expose old GC barriers through metrics and warnings (#11259))
 	blockerDesc := ""
 	simulatedServiceID := ""
 	// Note the order of check blockingGlobalBarrier/blockingMinStartTSOwner/blockingBarrier
@@ -566,6 +632,8 @@ func (m *GCStateManager) setGCBarrierImpl(ctx context.Context, keyspaceID uint32
 		zap.String("barrier-id", barrierID), zap.Uint64("barrier-ts", barrierTS), zap.Duration("ttl", ttl),
 		zap.Stringer("new-gc-barrier", newBarrier))
 
+	m.barrierMetrics.updateMetrics(barrierMetricScope{keyspaceID: keyspaceID}, newBarrier, now)
+
 	return newBarrier, nil
 }
 
@@ -585,6 +653,25 @@ func (m *GCStateManager) DeleteGCBarrier(keyspaceID uint32, barrierID string) (*
 	defer m.mu.Unlock()
 
 	return m.deleteGCBarrierImpl(ctx, keyspaceID, barrierID)
+}
+
+// ForceDeleteServiceGCSafePoint deletes a NullKeyspace service safe point for the legacy HTTP API.
+// It bypasses the normal GC barrier constraints, including the reserved gc_worker ID.
+// Deleting an absent service is successful.
+func (m *GCStateManager) ForceDeleteServiceGCSafePoint(serviceID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+		return wb.DeleteGCBarrier(constant.NullKeyspaceID, serviceID)
+	})
+	if err != nil {
+		return err
+	}
+	// Serialize cleanup with advancement so a pre-deletion barrier load cannot
+	// publish its observation after this successful deletion.
+	m.barrierMetrics.deleteMetrics(barrierMetricScope{keyspaceID: constant.NullKeyspaceID}, serviceID)
+	return nil
 }
 
 func (m *GCStateManager) deleteGCBarrierImpl(ctx context.Context, keyspaceID uint32, barrierID string) (*endpoint.GCBarrier, error) {
@@ -623,6 +710,8 @@ func (m *GCStateManager) deleteGCBarrierImpl(ctx context.Context, keyspaceID uin
 			zap.Uint32("keyspace-id", keyspaceID), zap.String("keyspace-name", getKeyspaceNameFromCtx(ctx)),
 			zap.String("barrier-id", barrierID), zap.Stringer("deleted-gc-barrier", deletedBarrier))
 	}
+
+	m.barrierMetrics.deleteMetrics(barrierMetricScope{keyspaceID: keyspaceID}, barrierID)
 
 	return deletedBarrier, nil
 }
@@ -830,11 +919,14 @@ func (m *GCStateManager) LoadAllGlobalGCBarriers() ([]*endpoint.GlobalGCBarrier,
 //     simulate the case that the service safe point of "gc_worker" is the minimal one, and return a service safe point
 //     with the service ID equals to "gc_worker".
 func (m *GCStateManager) CompatibleUpdateServiceGCSafePoint(keyspaceID uint32, serviceID string, newServiceSafePoint uint64, ttl int64, now time.Time) (minServiceSafePoint *endpoint.ServiceSafePoint, updated bool, err error) {
+	observation := &barrierObservation{generation: m.barrierMetrics.generation()}
+	defer observation.logWarnings()
 	keyspaceID, keyspaceNameForDiag, err := m.redirectKeyspace(keyspaceID, true)
 	if err != nil {
 		return nil, false, err
 	}
 	ctx := addKeyspaceNameToCtx(context.Background(), keyspaceNameForDiag)
+	ctx = context.WithValue(ctx, barrierObservationKey{}, observation)
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -1055,6 +1147,8 @@ func (m *GCStateManager) setGlobalGCBarrierImpl(_ context.Context, barrierID str
 		zap.Duration("ttl", ttl),
 		zap.Stringer("new-gc-barrier", newBarrier))
 
+	m.barrierMetrics.updateMetrics(barrierMetricScope{global: true}, &endpoint.GCBarrier{BarrierID: newBarrier.BarrierID, BarrierTS: newBarrier.BarrierTS, ExpirationTime: newBarrier.ExpirationTime.Time}, now)
+
 	return newBarrier, nil
 }
 
@@ -1095,6 +1189,8 @@ func (m *GCStateManager) deleteGlobalGCBarrierImpl(_ context.Context, barrierID 
 		log.Info("global GC barrier deleted",
 			zap.String("barrier-id", barrierID), zap.Stringer("deleted-gc-barrier", deletedBarrier))
 	}
+
+	m.barrierMetrics.deleteMetrics(barrierMetricScope{global: true}, barrierID)
 
 	return deletedBarrier, nil
 }
