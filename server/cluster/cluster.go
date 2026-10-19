@@ -492,8 +492,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	go c.startProgressGC()
 	go c.runStorageSizeCollector(s.GetMeteringWriter(), c.regionLabeler, s.GetKeyspaceManager())
 
-	s.GetGCStateManager().OnNodeBecomesLeader()
-	c.stopGCStateManager = s.GetGCStateManager().OnNodeBecomesFollower
+	c.stopGCStateManager = s.GetGCStateManager().OnNodeBecomesLeader()
 
 	log.Info("start background jobs completed", zap.Duration("cost", time.Since(backgroundJobsStart)))
 	runnersStart := time.Now()

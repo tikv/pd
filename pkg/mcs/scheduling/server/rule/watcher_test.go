@@ -63,22 +63,95 @@ func TestLoadLargeRules(t *testing.T) {
 	re := require.New(t)
 	ctx, client, clean := prepare(t, true)
 	defer clean()
-	runWatcherLoadLabelRule(ctx, re, client)
+	fixture := newRuleWatcherTestFixture(ctx, t)
+	runWatcherLoadLabelRule(ctx, re, client, fixture.checkerController)
+}
+
+func TestRegionLabelWatcherReloadsAfterCompaction(t *testing.T) {
+	re := require.New(t)
+	ctx, client, clean := prepare(t, false)
+	defer clean()
+
+	fixture := newRuleWatcherTestFixture(ctx, t)
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, fixture.storage, time.Hour)
+	re.NoError(err)
+
+	watcherCtx, cancel := context.WithCancel(ctx)
+	rw := &Watcher{
+		ctx:                   watcherCtx,
+		cancel:                cancel,
+		regionLabelPathPrefix: keypath.RegionLabelPathPrefix(),
+		etcdClient:            client,
+		checkerController:     fixture.checkerController,
+		regionLabeler:         regionLabeler,
+	}
+	failpointEnabled := false
+	defer func() {
+		if failpointEnabled {
+			_ = failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock")
+		}
+		rw.Close()
+	}()
+
+	makeRule := func(id string, ranges ...string) *labeler.LabelRule {
+		return &labeler.LabelRule{
+			ID:       id,
+			Labels:   []labeler.RegionLabel{{Key: "zone", Value: "test"}},
+			RuleType: labeler.KeyRange,
+			Data:     labeler.MakeKeyRanges(ranges...),
+		}
+	}
+	putRule := func(rule *labeler.LabelRule) {
+		value, err := json.Marshal(rule)
+		re.NoError(err)
+		_, err = client.Put(ctx, keypath.RegionLabelKeyPath(rule.ID), string(value))
+		re.NoError(err)
+	}
+	keepRule := makeRule("compaction-keep", "1234", "5678")
+	deleteRule := makeRule("compaction-delete", "9abc", "def0")
+	putRule(keepRule)
+	putRule(deleteRule)
+	re.NoError(rw.initializeRegionLabelWatcher())
+	re.Len(regionLabeler.GetAllLabelRules(), 2)
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock", "return(true)"))
+	failpointEnabled = true
+
+	updatedKeepRule := makeRule(keepRule.ID, "1234", "5678", "9abc", "def0")
+	putRule(updatedKeepRule)
+	deleteResp, err := client.Delete(ctx, keypath.RegionLabelKeyPath(deleteRule.ID))
+	re.NoError(err)
+	_, err = client.Compact(ctx, deleteResp.Header.Revision)
+	re.NoError(err)
+
+	testutil.Eventually(re, func() bool {
+		rw.labelWatcher.ForceLoad()
+		updated := regionLabeler.GetLabelRule(keepRule.ID)
+		return updated != nil && len(updated.GetKeyRanges()) == 2 && regionLabeler.GetLabelRule(deleteRule.ID) == nil
+	})
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock"))
+	failpointEnabled = false
 }
 
 func BenchmarkLoadLargeRules(b *testing.B) {
 	re := require.New(b)
 	ctx, client, clean := prepare(b, true)
 	defer clean()
+	fixture := newRuleWatcherTestFixture(ctx, b)
 
 	b.ResetTimer() // Resets the timer to ignore initialization time in the benchmark
 
 	for range b.N {
-		runWatcherLoadLabelRule(ctx, re, client)
+		runWatcherLoadLabelRule(ctx, re, client, fixture.checkerController)
 	}
 }
 
-func runWatcherLoadLabelRule(ctx context.Context, re *require.Assertions, client *clientv3.Client) {
+func runWatcherLoadLabelRule(
+	ctx context.Context,
+	re *require.Assertions,
+	client *clientv3.Client,
+	checkerController *checker.Controller,
+) {
 	storage := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	labelerManager, err := labeler.NewRegionLabeler(ctx, storage, time.Hour)
 	re.NoError(err)
@@ -91,6 +164,7 @@ func runWatcherLoadLabelRule(ctx context.Context, re *require.Assertions, client
 		regionLabelPathPrefix: keypath.RegionLabelPathPrefix(),
 		etcdClient:            client,
 		ruleStorage:           storage,
+		checkerController:     checkerController,
 		regionLabeler:         labelerManager,
 	}
 	err = rw.initializeRegionLabelWatcher()
@@ -355,7 +429,7 @@ func TestWatcherLogRedact(t *testing.T) {
 
 			watchCtx, cancel := context.WithCancel(ctx)
 			t.Cleanup(cancel)
-			fixture := newRuleWatcherTestFixture(t, watchCtx)
+			fixture := newRuleWatcherTestFixture(watchCtx, t)
 			regionLabeler, err := labeler.NewRegionLabeler(watchCtx, fixture.storage, time.Hour)
 			re.NoError(err)
 			rule := &placement.Rule{
@@ -466,7 +540,7 @@ func TestRuleWatcherReconcilesInitialLoadRetry(t *testing.T) {
 	ctx, client, clean := prepare(t, false)
 	defer clean()
 
-	fixture := newRuleWatcherTestFixture(t, ctx)
+	fixture := newRuleWatcherTestFixture(ctx, t)
 	staleRule := &placement.Rule{GroupID: "g", ID: "stale", Role: placement.Learner, Count: 1}
 	re.NoError(fixture.ruleManager.SetRule(staleRule))
 	defaultRule := fixture.ruleManager.GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
@@ -509,7 +583,7 @@ type ruleWatcherTestFixture struct {
 	checkerController *checker.Controller
 }
 
-func newRuleWatcherTestFixture(t *testing.T, ctx context.Context) *ruleWatcherTestFixture {
+func newRuleWatcherTestFixture(ctx context.Context, t testing.TB) *ruleWatcherTestFixture {
 	re := require.New(t)
 	storage := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	conf := mockconfig.NewTestOptions()
@@ -532,7 +606,7 @@ func TestReconcileRuleSnapshot(t *testing.T) {
 	ctx, client, clean := prepare(t, false)
 	defer clean()
 
-	fixture := newRuleWatcherTestFixture(t, ctx)
+	fixture := newRuleWatcherTestFixture(ctx, t)
 	ruleManager := fixture.ruleManager
 	re.NoError(ruleManager.SetRuleGroup(&placement.RuleGroup{ID: "g", Index: 1}))
 	re.NoError(ruleManager.SetRules([]*placement.Rule{
@@ -654,7 +728,7 @@ func TestRuleWatcherReconcilesNewerSnapshotAfterFailedLiveRuleUpdate(t *testing.
 	ctx, client, clean := prepare(t, false)
 	defer clean()
 
-	fixture := newRuleWatcherTestFixture(t, ctx)
+	fixture := newRuleWatcherTestFixture(ctx, t)
 	ruleManager := fixture.ruleManager
 	re.NoError(ruleManager.SetRule(&placement.Rule{
 		GroupID: "g",

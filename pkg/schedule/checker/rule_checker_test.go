@@ -123,6 +123,33 @@ func (suite *ruleCheckerTestSuite) TestAddRulePeerWithIsolationLevel() {
 	re.Equal(uint64(4), op.Step(0).(operator.AddLearner).ToStore)
 }
 
+func (suite *ruleCheckerTestSuite) TestAddRulePeerWithIsolationLevelCaseInsensitive() {
+	re := suite.Require()
+	suite.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "Z1", "host": "h1"})
+	suite.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z2", "host": "h2"})
+	suite.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z1", "host": "h3"})
+	suite.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2)
+	err := suite.ruleManager.SetRule(&placement.Rule{
+		GroupID:        placement.DefaultGroupID,
+		ID:             "test",
+		Index:          100,
+		Override:       true,
+		Role:           placement.Voter,
+		Count:          3,
+		LocationLabels: []string{"zone", "host"},
+		IsolationLevel: "zone",
+	})
+	re.NoError(err)
+	// Store 3 is in the same zone as store 1, so no store satisfies zone isolation.
+	op := suite.rc.Check(suite.cluster.GetRegion(1))
+	re.Nil(op)
+	suite.cluster.AddLabelsStore(4, 1, map[string]string{"zone": "z3", "host": "h4"})
+	op = suite.rc.Check(suite.cluster.GetRegion(1))
+	re.NotNil(op)
+	re.Equal("add-rule-peer", op.Desc())
+	re.Equal(uint64(4), op.Step(0).(operator.AddLearner).ToStore)
+}
+
 func (suite *ruleCheckerTestSuite) TestReplaceDownPeerWithIsolationLevel() {
 	re := suite.Require()
 	suite.cluster.SetMaxStoreDownTime(100 * time.Millisecond)

@@ -27,6 +27,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sasha-s/go-deadlock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -54,6 +55,9 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	// Deadlock detection stays enabled, but pooled timers cannot cross synctest
+	// bubble boundaries. Set this once before any tests start acquiring locks.
+	deadlock.Opts.TimerPool = deadlock.TimerPoolDisabled
 	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
@@ -116,6 +120,7 @@ func (opt *newGCStateManagerForTestOptions) generateKeyspacesByCount(count int) 
 func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions) (storage *endpoint.StorageEndpoint, provider endpoint.GCStateProvider, gcStateManager *GCStateManager, clean func(), cancel context.CancelFunc) {
 	cfg := config.NewConfig()
 	re := require.New(t)
+	re.NoError(cfg.Adjust(nil, false))
 
 	var etcdClusterOpt etcdutil.TestEtcdClusterOptions
 	etcdClusterOpt.ServerCfgModifier = opt.etcdServerCfgModifier
@@ -570,9 +575,8 @@ func (s *gcStateManagerTestSuite) TestCompatibleUpdateGCSafePointSequentiallyWit
 		return wb.SetGCSafePoint(keyspaceID, 101)
 	})
 	re.NoError(err)
-	oldLeadership := s.manager.nodeLeadership.Load()
-	s.manager.nodeLeadership.Store(0)
-	defer s.manager.nodeLeadership.Store(oldLeadership)
+	oldGeneration := s.manager.activeGeneration.Swap(nil)
+	defer s.manager.activeGeneration.Store(oldGeneration)
 
 	gcSafePoint, err = s.manager.CompatibleLoadGCSafePoint(keyspaceID)
 	re.NoError(err)

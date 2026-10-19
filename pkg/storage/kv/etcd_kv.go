@@ -134,6 +134,14 @@ func (kv *etcdKVBase) CreateRawTxn() RawTxn {
 	}
 }
 
+// CreateRawTxnWithContext creates a raw transaction with the caller's context
+// and the same request timeout as CreateRawTxn.
+func (kv *etcdKVBase) CreateRawTxnWithContext(ctx context.Context) RawTxn {
+	return &rawTxnWrapper{
+		inner: NewSlowLogTxnWithContext(ctx, kv.client),
+	}
+}
+
 // SlowLogTxn wraps etcd transaction and log slow one.
 type SlowLogTxn struct {
 	clientv3.Txn
@@ -327,7 +335,9 @@ func (txn *etcdTxn) commit() error {
 }
 
 type rawTxnWrapper struct {
-	inner clientv3.Txn
+	inner   clientv3.Txn
+	thenOps []clientv3.Op
+	elseOps []clientv3.Op
 }
 
 // If implements RawTxn interface for adding conditions to the transaction.
@@ -388,6 +398,7 @@ func convertOps(ops []RawTxnOp) []clientv3.Op {
 func (l *rawTxnWrapper) Then(ops ...RawTxnOp) RawTxn {
 	convertedOps := convertOps(ops)
 	l.inner = l.inner.Then(convertedOps...)
+	l.thenOps = convertedOps
 	return l
 }
 
@@ -396,6 +407,7 @@ func (l *rawTxnWrapper) Then(ops ...RawTxnOp) RawTxn {
 func (l *rawTxnWrapper) Else(ops ...RawTxnOp) RawTxn {
 	convertedOps := convertOps(ops)
 	l.inner = l.inner.Else(convertedOps...)
+	l.elseOps = convertedOps
 	return l
 }
 
@@ -405,16 +417,28 @@ func (l *rawTxnWrapper) Commit() (RawTxnResponse, error) {
 	if err != nil {
 		return RawTxnResponse{}, err
 	}
+	if resp == nil {
+		return RawTxnResponse{}, errs.ErrEtcdTxnResponse.GenWithStackByArgs("nil response")
+	}
+	ops := l.elseOps
+	if resp.Succeeded {
+		ops = l.thenOps
+	}
+	if len(resp.Responses) != len(ops) {
+		return RawTxnResponse{}, errs.ErrEtcdTxnResponse.GenWithStackByArgs(
+			fmt.Sprintf("succeeded: %v, expected %d responses, got %d", resp.Succeeded, len(ops), len(resp.Responses)),
+		)
+	}
 	items := make([]RawTxnResponseItem, 0, len(resp.Responses))
 	for i, rpcRespItem := range resp.Responses {
 		var respItem RawTxnResponseItem
-		if put := rpcRespItem.GetResponsePut(); put != nil {
+		if put := rpcRespItem.GetResponsePut(); ops[i].IsPut() && put != nil {
 			// Put and delete operations of etcd's transaction won't return any previous data. Skip handling it.
 			respItem = RawTxnResponseItem{}
-		} else if del := rpcRespItem.GetResponseDeleteRange(); del != nil {
+		} else if del := rpcRespItem.GetResponseDeleteRange(); ops[i].IsDelete() && del != nil {
 			// Put and delete operations of etcd's transaction won't return any previous data. Skip handling it.
 			respItem = RawTxnResponseItem{}
-		} else if rangeResp := rpcRespItem.GetResponseRange(); rangeResp != nil {
+		} else if rangeResp := rpcRespItem.GetResponseRange(); ops[i].IsGet() && rangeResp != nil {
 			kvs := make([]KeyValuePair, 0, len(rangeResp.Kvs))
 			for _, kv := range rangeResp.Kvs {
 				kvs = append(kvs, KeyValuePair{
