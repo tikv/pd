@@ -15,6 +15,7 @@
 package config
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"math"
 	"time"
@@ -785,6 +786,46 @@ type SchedulerConfig struct {
 	Args        []string `toml:"args" json:"args"`
 	Disable     bool     `toml:"disable" json:"disable"`
 	ArgsPayload string   `toml:"args-payload" json:"args-payload"`
+}
+
+// MarshalJSON preserves raw scatter-range arguments alongside the legacy strings.
+func (c SchedulerConfig) MarshalJSON() ([]byte, error) {
+	type schedulerConfig SchedulerConfig
+	var argsHex []string
+	if c.Type == types.SchedulerTypeCompatibleMap[types.ScatterRangeScheduler] {
+		argsHex = make([]string, len(c.Args))
+		for i, arg := range c.Args {
+			argsHex[i] = hex.EncodeToString([]byte(arg))
+		}
+	}
+	return json.Marshal(struct {
+		schedulerConfig
+		ArgsHex []string `json:"args-hex,omitempty"`
+	}{schedulerConfig(c), argsHex})
+}
+
+// UnmarshalJSON restores raw scatter-range arguments when their hex form is present.
+func (c *SchedulerConfig) UnmarshalJSON(data []byte) error {
+	type schedulerConfig SchedulerConfig
+	decoded := struct {
+		*schedulerConfig
+		ArgsHex []string `json:"args-hex"`
+	}{schedulerConfig: (*schedulerConfig)(c)}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	if c.Type == types.SchedulerTypeCompatibleMap[types.ScatterRangeScheduler] && decoded.ArgsHex != nil {
+		args := make([]string, len(decoded.ArgsHex))
+		for i, arg := range decoded.ArgsHex {
+			key, err := hex.DecodeString(arg)
+			if err != nil {
+				return err
+			}
+			args[i] = string(key)
+		}
+		c.Args = args
+	}
+	return nil
 }
 
 // DefaultSchedulers are the schedulers be created by default.
