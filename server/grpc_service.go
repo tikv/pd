@@ -1232,7 +1232,13 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 		if store == nil {
 			// As TiKV report buckets just after the region heartbeat, for new created region, PD may receive buckets report before the first region heartbeat is handled.
 			// So we should not return error here.
+<<<<<<< HEAD
 			log.Warn("the store of the bucket in region is not found ", zap.Uint64("region-id", buckets.GetRegionId()))
+=======
+			log.Debug("the store of the bucket in region is not found", zap.Uint64("region-id", buckets.GetRegionId()))
+		} else if store.IsRemoved() {
+			continue
+>>>>>>> a77df243d9 (*: delete per-store metrics when a store is tombstoned (#11127))
 		} else {
 			storeLabel = strconv.FormatUint(store.GetID(), 10)
 			storeAddress = store.GetAddress()
@@ -1348,6 +1354,10 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 		store := rc.GetStore(storeID)
 		if store == nil {
 			return errors.Errorf("invalid store ID %d, not found", storeID)
+		}
+		if store.IsRemoved() {
+			log.Debug("skip region heartbeat from tombstone store", zap.Uint64("store-id", storeID))
+			continue
 		}
 		storeAddress := store.GetAddress()
 

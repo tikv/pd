@@ -47,7 +47,7 @@ func TestCounter(t *testing.T) {
 	re.Equal(1, counter.counter[source][storeStateTombstone][1])
 	// For target action, we only care about targetID (2)
 	re.Equal(1, counter.counter[target][storeStateTombstone][2])
-	counter.Flush()
+	counter.Flush(nil)
 	re.Zero(counter.counter[source][storeStateTombstone][1])
 	re.Zero(counter.counter[target][storeStateTombstone][2])
 }
