@@ -28,6 +28,7 @@ import (
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core"
@@ -307,7 +308,15 @@ func (s *balanceWitnessScheduler) transferWitnessOut(solver *solver, collector *
 	targets := solver.GetNonWitnessVoterStores(solver.Region)
 	finalFilters := s.filters
 	conf := solver.GetSchedulerConfig()
-	if witnessFilter := filter.NewPlacementWitnessSafeguard(s.GetName(), conf, solver.GetBasicCluster(), solver.GetRuleManager(), solver.Region, solver.Source, solver.fit); witnessFilter != nil {
+	if solver.Source.HasFixedPeerCapability() {
+		// A LogOnly Store has no Full data to exchange with another voter.
+		targets = solver.GetStores()
+		finalFilters = slices.Concat(s.filters, []filter.Filter{
+			filter.NewExcludedFilter(s.GetName(), nil, solver.Region.GetStoreIDs()),
+			filter.NewStoreCapabilityFilter(s.GetName(), true),
+			filter.NewPlacementSafeguard(s.GetName(), conf, solver.GetBasicCluster(), solver.GetRuleManager(), solver.Region, solver.Source, solver.fit),
+		})
+	} else if witnessFilter := filter.NewPlacementWitnessSafeguard(s.GetName(), conf, solver.GetBasicCluster(), solver.GetRuleManager(), solver.Region, solver.Source, solver.fit); witnessFilter != nil {
 		finalFilters = slices.Concat(s.filters, []filter.Filter{witnessFilter})
 	}
 	targets = filter.SelectTargetStores(targets, finalFilters, conf, collector, s.filterCounter)
@@ -343,7 +352,14 @@ func (s *balanceWitnessScheduler) createOperator(solver *solver, collector *plan
 	}
 	solver.Step++
 	defer func() { solver.Step-- }()
-	op, err := operator.CreateMoveWitnessOperator(s.GetName(), solver, solver.Region, solver.sourceStoreID(), solver.targetStoreID())
+	var op *operator.Operator
+	var err error
+	if solver.Source.HasFixedPeerCapability() {
+		peer := &metapb.Peer{StoreId: solver.targetStoreID(), IsWitness: true, Role: solver.Region.GetStorePeer(solver.sourceStoreID()).GetRole()}
+		op, err = operator.CreateMovePeerOperator(s.GetName(), solver, solver.Region, operator.OpWitness, solver.sourceStoreID(), peer)
+	} else {
+		op, err = operator.CreateMoveWitnessOperator(s.GetName(), solver, solver.Region, solver.sourceStoreID(), solver.targetStoreID())
+	}
 	if err != nil {
 		log.Debug("fail to create balance witness operator", errs.ZapError(err))
 		return nil

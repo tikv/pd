@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
@@ -84,7 +85,13 @@ func checkBootstrapRequest(req *pdpb.BootstrapRequest) error {
 		return errors.Errorf("invalid first region peer count %d, must be 1 for bootstrap %d", len(peers), clusterID)
 	}
 
+	if _, err := core.ParseStoreCapability(storeMeta); err != nil {
+		return err
+	}
 	peer := peers[0]
+	if !core.NewStoreInfo(storeMeta).SupportsPeerCapability(peer.GetIsWitness()) || core.NewStoreInfo(storeMeta).GetLabelValue(core.StoreCapabilityLabel) == core.LogOnlyStoreCapability {
+		return errors.New("log-only store cannot bootstrap a data Region")
+	}
 	if peer.GetStoreId() != storeMeta.GetId() {
 		return errors.Errorf("invalid peer store id %d != %d for bootstrap %d", peer.GetStoreId(), storeMeta.GetId(), clusterID)
 	}

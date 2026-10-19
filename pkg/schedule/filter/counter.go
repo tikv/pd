@@ -49,6 +49,7 @@ const (
 	storageThreshold
 	distinctScore
 	labelConstraint
+	storeCapability
 	ruleFit
 	ruleLeader
 	engine
@@ -81,6 +82,7 @@ var filters = [filtersLen]string{
 	"storage-threshold-filter",
 	"distinct-filter",
 	"label-constraint-filter",
+	"store-capability-filter",
 	"rule-fit-filter",
 	"rule-fit-leader-filter",
 	"engine-filter",

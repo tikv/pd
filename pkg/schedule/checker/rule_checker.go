@@ -159,7 +159,7 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 				return c.replaceUnexpectedRulePeer(region, rf, fit, peer, downStatus)
 			}
 			// When witness placement rule is enabled, promotes the witness to voter when region has down voter.
-			if isWitnessEnabled(c.cluster) && core.IsVoter(peer) {
+			if isWitnessEnabled(c.cluster) && core.IsVoter(peer) && !c.hasFixedPeerCapabilities(region) {
 				if witness, ok := c.hasAvailableWitness(region, peer); ok {
 					ruleCheckerPromoteWitnessCounter.Inc()
 					return operator.CreateNonWitnessPeerOperator("promote-witness-for-down", c.cluster, region, witness)
@@ -284,7 +284,7 @@ func (c *RuleChecker) replaceUnexpectedRulePeer(region *core.RegionInfo, rf *pla
 		// No matter whether witness placement rule is enabled or disabled, when peer's downtime
 		// exceeds the threshold(30min), quickly add a witness to speed up failover, then promoted
 		// to non-witness gradually to improve availability.
-		if status == "down" {
+		if status == "down" && !c.hasFixedPeerCapabilities(region) {
 			fastFailover = true
 		} else {
 			fastFailover = rf.Rule.IsWitness
@@ -378,6 +378,11 @@ func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.
 	}
 	if region.GetLeader().GetId() == peer.GetId() && rf.Rule.IsWitness {
 		return nil, errs.ErrPeerCannotBeWitness
+	}
+	// Explicit Store capabilities are immutable. Rule changes must add a new
+	// peer on a compatible Store instead of issuing SwitchWitnesses.
+	if store := c.cluster.GetStore(peer.GetStoreId()); store != nil && store.HasFixedPeerCapability() {
+		return nil, nil
 	}
 	if !core.IsWitness(peer) && rf.Rule.IsWitness && isWitnessEnabled(c.cluster) {
 		c.switchWitnessCache.UpdateTTL(c.cluster.GetCheckerConfig().GetSwitchWitnessInterval())
@@ -635,7 +640,8 @@ func (c *RuleChecker) hasAvailableWitness(region *core.RegionInfo, peer *metapb.
 				return false
 			}
 		}
-		return c.cluster.GetStore(witness.GetStoreId()) != nil
+		store := c.cluster.GetStore(witness.GetStoreId())
+		return store != nil && !store.HasFixedPeerCapability() && store.SupportsPeerCapability(false)
 	}
 	downPeers := region.GetDownPeers()
 	for _, witness := range witnesses {
@@ -644,6 +650,15 @@ func (c *RuleChecker) hasAvailableWitness(region *core.RegionInfo, peer *metapb.
 		}
 	}
 	return nil, false
+}
+
+func (c *RuleChecker) hasFixedPeerCapabilities(region *core.RegionInfo) bool {
+	for _, peer := range region.GetPeers() {
+		if store := c.cluster.GetStore(peer.GetStoreId()); store != nil && store.HasFixedPeerCapability() {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *RuleChecker) strategy(region *core.RegionInfo, rule *placement.Rule, fastFailover bool) *ReplicaStrategy {
@@ -655,6 +670,7 @@ func (c *RuleChecker) strategy(region *core.RegionInfo, rule *placement.Rule, fa
 		region:         region,
 		extraFilters:   []filter.Filter{filter.NewLabelConstraintFilter(c.Name(), rule.LabelConstraints)},
 		fastFailover:   fastFailover,
+		isWitness:      fastFailover,
 	}
 }
 

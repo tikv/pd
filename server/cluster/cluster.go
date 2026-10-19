@@ -1600,6 +1600,10 @@ func (c *RaftCluster) PutMetaStore(store *metapb.Store) error {
 // If 'force' is true, the store's labels will overwrite those labels which already existed in the store.
 // If 'force' is false, the store's labels will merge into those labels which already existed in the store.
 func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool) error {
+	// Validate the request before MergeLabels can collapse duplicate declarations.
+	if _, err := core.ParseStoreCapability(store); err != nil {
+		return err
+	}
 	if store.GetId() == 0 {
 		return errors.Errorf("invalid put store %v", store)
 	}
@@ -1651,6 +1655,22 @@ func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool) error {
 			core.SetStoreDeployPath(store.DeployPath))
 		// Update an existed store.
 		s = s.Clone(opts...)
+	}
+	capability, err := core.ParseStoreCapability(s.GetMeta())
+	if err != nil {
+		return err
+	}
+	if old := c.GetStore(store.GetId()); old != nil {
+		previous, err := core.ParseStoreCapability(old.GetMeta())
+		if err != nil {
+			return err
+		}
+		if previous != "" && previous != capability {
+			return errors.New("store capability is immutable; register a new Store identity")
+		}
+		if previous == "" && capability == core.LogOnlyStoreCapability {
+			return errors.New("log-only capability requires a new Store identity")
+		}
 	}
 	if err := c.checkStoreLabels(s); err != nil {
 		return err

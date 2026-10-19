@@ -439,6 +439,10 @@ func (b *Builder) prepareBuild() (string, error) {
 
 	voterCount := 0
 	for _, peer := range b.targetPeers {
+		store := b.GetStore(peer.GetStoreId())
+		if store != nil && !store.SupportsPeerCapability(peer.GetIsWitness()) {
+			return "", errors.Errorf("peer capability conflicts with Store %d", peer.GetStoreId())
+		}
 		if !core.IsLearner(peer) {
 			voterCount++
 		}
@@ -944,6 +948,9 @@ func (b *Builder) allowLeader(peer *metapb.Peer, ignoreClusterLimit bool) bool {
 		return false
 	}
 
+	if !store.SupportsPeerCapability(false) {
+		return false
+	}
 	if ignoreClusterLimit {
 		return true
 	}

@@ -37,6 +37,7 @@ type ReplicaStrategy struct {
 	region         *core.RegionInfo
 	extraFilters   []filter.Filter
 	fastFailover   bool
+	isWitness      bool
 }
 
 // SelectStoreToAdd returns the store to add a replica to a region.
@@ -63,6 +64,7 @@ func (s *ReplicaStrategy) SelectStoreToAdd(coLocationStores []*core.StoreInfo, e
 		level = constant.Urgent
 	}
 	filters := []filter.Filter{
+		filter.NewStoreCapabilityFilter(s.checkerName, s.isWitness),
 		filter.NewExcludedFilter(s.checkerName, nil, s.region.GetStoreIDs()),
 		filter.NewStorageThresholdFilter(s.checkerName),
 		filter.NewSpecialUseFilter(s.checkerName),

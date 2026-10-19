@@ -251,6 +251,9 @@ func (ap AddPeer) Influence(opInfluence *OpInfluence, region *core.RegionInfo) {
 
 // CheckInProgress checks if the step is in the progress of advancing.
 func (ap AddPeer) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo, needStoreHealthCheck bool) error {
+	if err := validatePeerCapability(ci, ap.ToStore, ap.IsWitness); err != nil {
+		return err
+	}
 	if err := validateStore(ci, config, ap.ToStore, needStoreHealthCheck); err != nil {
 		return err
 	}
@@ -305,6 +308,9 @@ func (bw BecomeWitness) IsFinish(region *core.RegionInfo) bool {
 
 // CheckInProgress checks if the step is in the progress of advancing.
 func (bw BecomeWitness) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo, _ bool) error {
+	if err := validatePeerCapability(ci, bw.StoreID, true); err != nil {
+		return err
+	}
 	// BecomeWitness sheds data off the store rather than adding to it, so unlike
 	// AddPeer/AddLearner/BecomeNonWitness it never needs the extra health check.
 	if err := validateStore(ci, config, bw.StoreID, false); err != nil {
@@ -369,6 +375,9 @@ func (bn BecomeNonWitness) IsFinish(region *core.RegionInfo) bool {
 
 // CheckInProgress checks if the step is in the progress of advancing.
 func (bn BecomeNonWitness) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo, needStoreHealthCheck bool) error {
+	if err := validatePeerCapability(ci, bn.StoreID, false); err != nil {
+		return err
+	}
 	if err := validateStore(ci, config, bn.StoreID, needStoreHealthCheck); err != nil {
 		return err
 	}
@@ -538,6 +547,9 @@ func (al AddLearner) IsFinish(region *core.RegionInfo) bool {
 
 // CheckInProgress checks if the step is in the progress of advancing.
 func (al AddLearner) CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo, needStoreHealthCheck bool) error {
+	if err := validatePeerCapability(ci, al.ToStore, al.IsWitness); err != nil {
+		return err
+	}
 	if err := validateStore(ci, config, al.ToStore, needStoreHealthCheck); err != nil {
 		return err
 	}
@@ -623,7 +635,10 @@ func (pl PromoteLearner) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (pl PromoteLearner) CheckInProgress(_ *core.BasicCluster, _ config.SharedConfigProvider, region *core.RegionInfo, _ bool) error {
+func (pl PromoteLearner) CheckInProgress(ci *core.BasicCluster, _ config.SharedConfigProvider, region *core.RegionInfo, _ bool) error {
+	if err := validatePeerCapability(ci, pl.ToStore, pl.IsWitness); err != nil {
+		return err
+	}
 	peer := region.GetStorePeer(pl.ToStore)
 	if peer.GetId() != pl.PeerID {
 		return errors.New("peer does not exist")
@@ -942,9 +957,12 @@ func (cpe ChangePeerV2Enter) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (cpe ChangePeerV2Enter) CheckInProgress(_ *core.BasicCluster, _ config.SharedConfigProvider, region *core.RegionInfo, _ bool) error {
+func (cpe ChangePeerV2Enter) CheckInProgress(ci *core.BasicCluster, _ config.SharedConfigProvider, region *core.RegionInfo, _ bool) error {
 	inJointState, notInJointState := false, false
 	for _, pl := range cpe.PromoteLearners {
+		if err := validatePeerCapability(ci, pl.ToStore, pl.IsWitness); err != nil {
+			return err
+		}
 		peer := region.GetStorePeer(pl.ToStore)
 		if peer.GetId() != pl.PeerID {
 			return errors.New("peer does not exist")
@@ -961,6 +979,9 @@ func (cpe ChangePeerV2Enter) CheckInProgress(_ *core.BasicCluster, _ config.Shar
 		}
 	}
 	for _, dv := range cpe.DemoteVoters {
+		if err := validatePeerCapability(ci, dv.ToStore, dv.IsWitness); err != nil {
+			return err
+		}
 		peer := region.GetStorePeer(dv.ToStore)
 		if peer.GetId() != dv.PeerID {
 			return errors.New("peer does not exist")
@@ -1224,4 +1245,16 @@ func switchWitness(peerID uint64, isWitness bool) *hbstream.Operation {
 			SwitchWitnesses: []*pdpb.SwitchWitness{{PeerId: peerID, IsWitness: isWitness}},
 		},
 	}
+}
+
+// validatePeerCapability is shared by ordinary and joint member operations.
+func validatePeerCapability(ci *core.BasicCluster, storeID uint64, isWitness bool) error {
+	store := ci.GetStore(storeID)
+	if store == nil {
+		return errors.Errorf("store %d does not exist", storeID)
+	}
+	if !store.SupportsPeerCapability(isWitness) {
+		return errors.Errorf("peer capability conflicts with Store %d", storeID)
+	}
+	return nil
 }
