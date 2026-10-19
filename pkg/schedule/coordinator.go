@@ -520,12 +520,13 @@ func (c *Coordinator) GetWaitGroup() *sync.WaitGroup {
 // CollectHotSpotMetrics collects hot spot metrics.
 func (c *Coordinator) CollectHotSpotMetrics() {
 	stores := c.cluster.GetStores()
+	storeLoads := c.cluster.GetStoresLoads()
 	// Collects hot write region metrics.
 	writeStats := collectHotMetrics(c.cluster, stores, utils.Write)
-	c.schedulers.CollectHotRegionMetrics(utils.Write, writeStats)
+	c.schedulers.CollectHotRegionMetrics(utils.Write, writeStats, storeLoads)
 	// Collects hot read region metrics.
 	readStats := collectHotMetrics(c.cluster, stores, utils.Read)
-	c.schedulers.CollectHotRegionMetrics(utils.Read, readStats)
+	c.schedulers.CollectHotRegionMetrics(utils.Read, readStats, storeLoads)
 }
 
 func collectHotMetrics(cluster sche.ClusterInformer, stores []*core.StoreInfo, typ utils.RWType) map[uint64][]*statistics.HotPeerStat {

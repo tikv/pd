@@ -87,7 +87,7 @@ func TestCollectHotRegionMetrics(t *testing.T) {
 		tc.AddLeaderRegionWithWriteInfo(id, 1, 1<<20, 1<<16, id*1000, 60, []uint64{2}, 5)
 	}
 	stats := tc.HotCache.GetHotPeerStats(utils.Write, 1)
-	c.CollectHotRegionMetrics(utils.Write, stats)
+	c.CollectHotRegionMetrics(utils.Write, stats, nil)
 	registry := prometheus.NewRegistry()
 	registry.MustRegister(topHotRegionMetrics)
 	families, err := registry.Gather()
@@ -113,7 +113,7 @@ func TestCollectHotRegionMetrics(t *testing.T) {
 	scheduler.conf.Lock()
 	scheduler.conf.WriteLeaderPriorities = []string{utils.KeyPriority, utils.BytePriority}
 	scheduler.conf.Unlock()
-	c.CollectHotRegionMetrics(utils.Write, stats)
+	c.CollectHotRegionMetrics(utils.Write, stats, nil)
 	topHotRegionMetrics.RLock()
 	snapshot := topHotRegionMetrics.metrics[utils.Write]
 	topHotRegionMetrics.RUnlock()
@@ -129,10 +129,10 @@ func TestCollectHotRegionMetrics(t *testing.T) {
 	}
 	// No new heartbeat samples: collection never changes hot degree.
 	before := stats[1][0].HotDegree
-	c.CollectHotRegionMetrics(utils.Write, stats)
+	c.CollectHotRegionMetrics(utils.Write, stats, nil)
 	require.Equal(t, before, stats[1][0].HotDegree)
 	// No hot peers clears the entire previous snapshot.
-	c.CollectHotRegionMetrics(utils.Write, nil)
+	c.CollectHotRegionMetrics(utils.Write, nil, nil)
 	families, err = registry.Gather()
 	require.NoError(t, err)
 	require.Empty(t, families)
@@ -143,9 +143,9 @@ func TestCollectHotRegionMetrics(t *testing.T) {
 	// Normal controller path, then removal of the scheduler.
 	delete(c.schedulerHandlers, scheduler.GetName())
 	c.schedulers[scheduler.GetName()] = &ScheduleController{Scheduler: scheduler}
-	c.CollectHotRegionMetrics(utils.Write, stats)
+	c.CollectHotRegionMetrics(utils.Write, stats, nil)
 	delete(c.schedulers, scheduler.GetName())
-	c.CollectHotRegionMetrics(utils.Write, stats)
+	c.CollectHotRegionMetrics(utils.Write, stats, nil)
 	families, err = registry.Gather()
 	require.NoError(t, err)
 	require.Empty(t, families)
@@ -167,18 +167,18 @@ func TestHotRegionMetricsSustainedAndRead(t *testing.T) {
 	registry.MustRegister(topHotRegionMetrics)
 	// A single hot heartbeat does not enter the persistent-hot snapshot.
 	tc.AddLeaderRegionWithWriteInfo(1, 1, 1<<20, 1<<16, 1000, 60, []uint64{2}, 1)
-	c.CollectHotRegionMetrics(utils.Write, tc.GetHotPeerStats(utils.Write))
+	c.CollectHotRegionMetrics(utils.Write, tc.GetHotPeerStats(utils.Write), nil)
 	families, err := registry.Gather()
 	require.NoError(t, err)
 	require.Empty(t, families)
 	tc.AddLeaderRegionWithWriteInfo(1, 1, 1<<20, 1<<16, 1000, 60, []uint64{2}, 5)
-	c.CollectHotRegionMetrics(utils.Write, tc.GetHotPeerStats(utils.Write))
+	c.CollectHotRegionMetrics(utils.Write, tc.GetHotPeerStats(utils.Write), nil)
 	families, err = registry.Gather()
 	require.NoError(t, err)
 	require.Len(t, families, 1)
 	require.Len(t, families[0].GetMetric(), 2)
 	tc.AddLeaderRegionWithWriteInfo(1, 1, 0, 0, 0, 60, []uint64{2}, 10)
-	c.CollectHotRegionMetrics(utils.Write, tc.GetHotPeerStats(utils.Write))
+	c.CollectHotRegionMetrics(utils.Write, tc.GetHotPeerStats(utils.Write), nil)
 	families, err = registry.Gather()
 	require.NoError(t, err)
 	require.Empty(t, families)
@@ -187,7 +187,7 @@ func TestHotRegionMetricsSustainedAndRead(t *testing.T) {
 		1: {{RegionID: 1, Loads: []float64{100, 0, 100, 1}}, {RegionID: 2, Loads: []float64{1, 0, 1, 10}}},
 		2: {{RegionID: 1, Loads: []float64{100, 0, 100, 20}}},
 	}
-	c.CollectHotRegionMetrics(utils.Read, stats)
+	c.CollectHotRegionMetrics(utils.Read, stats, nil)
 	families, err = registry.Gather()
 	require.NoError(t, err)
 	require.Len(t, families[0].GetMetric(), 2)
@@ -223,6 +223,72 @@ func TestHotRegionMetricPriorities(t *testing.T) {
 	require.Equal(t, utils.KeyPriority, scheduler.getPriorities(tc, readPeer)[0])
 }
 
+func TestHotRegionStoreLoadRatio(t *testing.T) {
+	ResetHotRegionMetrics()
+	t.Cleanup(ResetHotRegionMetrics)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	tc.SetClusterVersion(semver.New("9.0.0"))
+	tc.AddRegionStore(1, 1)
+	scheduler := newHotScheduler(oc, initHotRegionScheduleConfig())
+	c := NewController(context.Background(), tc, storage.NewStorageWithMemoryBackend(), oc)
+	c.schedulerHandlers[scheduler.GetName()] = scheduler
+	stats := map[uint64][]*statistics.HotPeerStat{
+		1: {{RegionID: 10, Loads: []float64{0, 0, 0, 25}}},
+	}
+	storeLoads := map[uint64]statistics.StoreKindLoads{
+		1: {utils.StoreReadCPU: 100},
+	}
+	registry := prometheus.NewRegistry()
+	registry.MustRegister(topHotRegionMetrics)
+	c.CollectHotRegionMetrics(utils.Read, stats, storeLoads)
+	families, err := registry.Gather()
+	require.NoError(t, err)
+	require.Len(t, families, 2)
+	var ratioFound bool
+	for _, family := range families {
+		if family.GetName() == "pd_hotspot_top_region_store_load_ratio" {
+			ratioFound = true
+			require.Len(t, family.GetMetric(), 1)
+			require.InDelta(t, 0.25, family.GetMetric()[0].GetGauge().GetValue(), 1e-9)
+		}
+	}
+	require.True(t, ratioFound)
+
+	// A missing or zero total Store load leaves the ratio absent instead of
+	// reporting a fabricated zero or infinity.
+	storeLoads[1] = statistics.StoreKindLoads{}
+	c.CollectHotRegionMetrics(utils.Read, stats, storeLoads)
+	families, err = registry.Gather()
+	require.NoError(t, err)
+	require.Len(t, families, 1)
+	require.Equal(t, "pd_hotspot_top_region_load", families[0].GetName())
+
+	for _, test := range []struct {
+		typeValue resourceType
+		dim       int
+		want      utils.StoreLoadKind
+	}{
+		{readPeer, utils.ByteDim, utils.StoreReadBytes},
+		{writeLeader, utils.QueryDim, utils.StoreWriteQuery},
+		{writePeer, utils.KeyDim, utils.StoreWriteKeys},
+		{readPeer, utils.CPUDim, utils.StoreReadCPU},
+	} {
+		kind, ok := storeLoadKind(test.typeValue, test.dim, tc.GetStore(1))
+		require.True(t, ok)
+		require.Equal(t, test.want, kind)
+	}
+	tc.SetStoreLabel(1, map[string]string{core.EngineKey: core.EngineTiFlash})
+	kind, ok := storeLoadKind(writePeer, utils.ByteDim, tc.GetStore(1))
+	require.True(t, ok)
+	require.Equal(t, utils.StoreRegionsWriteBytes, kind)
+	kind, ok = storeLoadKind(writeLeader, utils.KeyDim, tc.GetStore(1))
+	require.True(t, ok)
+	require.Equal(t, utils.StoreRegionsWriteKeys, kind)
+	_, ok = storeLoadKind(writePeer, utils.CPUDim, tc.GetStore(1))
+	require.False(t, ok)
+}
+
 func TestHotRegionCollectorConcurrent(t *testing.T) {
 	collector := newHotRegionCollector()
 	registry := prometheus.NewRegistry()
@@ -231,7 +297,7 @@ func TestHotRegionCollectorConcurrent(t *testing.T) {
 	for range 4 {
 		wg.Go(func() {
 			for range 100 {
-				collector.set(utils.Read, []prometheus.Metric{prometheus.MustNewConstMetric(collector.desc, prometheus.GaugeValue, 1, "read-peer", "cpu", "1", "1")})
+				collector.set(utils.Read, []prometheus.Metric{prometheus.MustNewConstMetric(collector.loadDesc, prometheus.GaugeValue, 1, "read-peer", "cpu", "1", "1")})
 				_, err := registry.Gather()
 				assert.NoError(t, err)
 			}

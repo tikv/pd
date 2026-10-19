@@ -22,24 +22,31 @@ loads prefer the smaller Region ID and then the smaller Store ID. Write-leader
 lists include only leader peers. Removed, missing, or unhealthy Stores are
 excluded. Cache expiry and the existing periodic collection govern freshness.
 
-The new metric is `pd_hotspot_top_region_load{type,dim,region,store}`. Existing
-metrics and APIs are unchanged. Both monolithic PD and the scheduling service
-use the coordinator collection path; API-service mode also supports resolving
-the scheduler through its configuration handler. Pausing scheduling or reaching
-an operator limit does not stop metrics collection. Empty snapshots, scheduler
-removal, and metric resets remove obsolete entries.
+The metrics are `pd_hotspot_top_region_load{type,dim,region,store}` and
+`pd_hotspot_top_region_store_load_ratio{type,dim,region,store}`. The ratio is
+the Region's smoothed load divided by its representative Store's rolling total
+load for the same dimension. The Region and Store statistics use different
+smoothing windows, so the ratio can exceed 1. It is omitted when the Store load
+is missing, non-finite, or zero. Existing APIs and scheduling behavior are
+unchanged. Both monolithic PD and the scheduling service use the coordinator
+collection path; API-service mode also supports resolving the scheduler through
+its configuration handler. Pausing scheduling or reaching an operator limit
+does not stop metrics collection. Empty snapshots, scheduler removal, and metric
+resets remove obsolete entries.
 
 Selection reuses the snapshot collected for existing hotspot metrics. It scans
 only hot peers and keeps a fixed array of ten candidates per list, with a fast
 cutoff check and at most ten comparisons/moves per insertion. Additional
 selection memory is constant, with no Region-sized map or per-candidate
-allocation. Scrapes only read immutable snapshots, containing at most thirty
-samples in total; they do not traverse the hot cache. Snapshot replacement
-releases old labels rather than retaining them in a GaugeVec.
+allocation. Store loads are collected once per periodic pass and shared by the
+read/write selectors. Scrapes only read immutable snapshots, containing at most
+thirty load samples and thirty ratio samples; they do not traverse the hot cache.
+Snapshot replacement releases old labels rather than retaining them in a
+GaugeVec.
 
-The exporter has at most thirty active samples, but TSDB historical cardinality
-still grows when Regions or representative Stores change. Use the instant tables
-for the current list; a range query can contain more than ten historical Regions.
-The Store selector filters the cluster-wide list, rather than recomputing a
-separate Top 10 for that Store. No continuous-hot-key lineage is inferred across
-Region splits or merges.
+The exporter has at most sixty active Top 10 samples across both metrics, but
+TSDB historical cardinality still grows when Regions or representative Stores
+change. Use the instant tables for the current list; a range query can contain
+more than ten historical Regions. The Store selector filters the cluster-wide
+list, rather than recomputing a separate Top 10 for that Store. No
+continuous-hot-key lineage is inferred across Region splits or merges.

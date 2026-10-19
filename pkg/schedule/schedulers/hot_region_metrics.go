@@ -20,6 +20,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/tikv/pd/pkg/core"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/statistics"
@@ -30,18 +31,26 @@ import (
 const hotRegionTopN = 10
 
 // Keep immutable metric snapshots, rather than a GaugeVec retaining labels for
-// every region ever seen. Scrapes read at most 30 metrics and never scan regions.
+// every region ever seen. Scrapes read at most 60 metrics and never scan regions.
 type hotRegionCollector struct {
 	syncutil.RWMutex
-	desc    *prometheus.Desc
-	metrics [utils.RWTypeLen][]prometheus.Metric
+	loadDesc       *prometheus.Desc
+	storeRatioDesc *prometheus.Desc
+	metrics        [utils.RWTypeLen][]prometheus.Metric
 }
 
 func newHotRegionCollector() *hotRegionCollector {
-	return &hotRegionCollector{desc: prometheus.NewDesc(
-		"pd_hotspot_top_region_load",
-		"Smoothed load of the top 10 distinct sustained hot regions per scheduling type; dim specifies the unit (byte/s, key/s, query/s, or native CPU usage). Replicated peer loads are represented by the maximum, not summed.",
-		[]string{"type", "dim", "region", "store"}, nil)}
+	labels := []string{"type", "dim", "region", "store"}
+	return &hotRegionCollector{
+		loadDesc: prometheus.NewDesc(
+			"pd_hotspot_top_region_load",
+			"Smoothed load of the top 10 distinct sustained hot regions per scheduling type; dim specifies the unit (byte/s, key/s, query/s, or native CPU usage). Replicated peer loads are represented by the maximum, not summed.",
+			labels, nil),
+		storeRatioDesc: prometheus.NewDesc(
+			"pd_hotspot_top_region_store_load_ratio",
+			"Smoothed hot Region load divided by the Store's rolling total load for the same scheduling type and dimension; a fraction that can exceed 1 when the Region and Store smoothing windows differ.",
+			labels, nil),
+	}
 }
 
 var topHotRegionMetrics = newHotRegionCollector()
@@ -52,7 +61,8 @@ func init() {
 
 // Describe implements prometheus.Collector.
 func (c *hotRegionCollector) Describe(ch chan<- *prometheus.Desc) {
-	ch <- c.desc
+	ch <- c.loadDesc
+	ch <- c.storeRatioDesc
 }
 
 // Collect implements prometheus.Collector.
@@ -80,6 +90,38 @@ func ResetHotRegionMetrics() {
 	topHotRegionMetrics.Lock()
 	topHotRegionMetrics.metrics = [utils.RWTypeLen][]prometheus.Metric{}
 	topHotRegionMetrics.Unlock()
+}
+
+func storeLoadKind(ty resourceType, dim int, store *core.StoreInfo) (utils.StoreLoadKind, bool) {
+	isRead := ty == readLeader || ty == readPeer
+	switch dim {
+	case utils.ByteDim:
+		if isRead {
+			return utils.StoreReadBytes, true
+		}
+		if store != nil && store.IsTiFlashWrite() {
+			return utils.StoreRegionsWriteBytes, true
+		}
+		return utils.StoreWriteBytes, true
+	case utils.KeyDim:
+		if isRead {
+			return utils.StoreReadKeys, true
+		}
+		if store != nil && store.IsTiFlashWrite() {
+			return utils.StoreRegionsWriteKeys, true
+		}
+		return utils.StoreWriteKeys, true
+	case utils.QueryDim:
+		if isRead {
+			return utils.StoreReadQuery, true
+		}
+		return utils.StoreWriteQuery, true
+	case utils.CPUDim:
+		if isRead {
+			return utils.StoreReadCPU, true
+		}
+	}
+	return 0, false
 }
 
 type hotRegionEntry struct {
@@ -156,7 +198,7 @@ func selectHotRegions(cluster sche.SchedulerCluster, stats map[uint64][]*statist
 // CollectHotRegionMetrics reuses the already filtered, denoised hot-cache
 // snapshot used by hotspot monitoring. It is independent of scheduling being
 // paused, hitting an operator limit, or producing an operator.
-func (c *Controller) CollectHotRegionMetrics(rw utils.RWType, stats map[uint64][]*statistics.HotPeerStat) {
+func (c *Controller) CollectHotRegionMetrics(rw utils.RWType, stats map[uint64][]*statistics.HotPeerStat, storeLoads map[uint64]statistics.StoreKindLoads) {
 	c.RLock()
 	defer c.RUnlock()
 	var scheduler *hotScheduler
@@ -169,7 +211,7 @@ func (c *Controller) CollectHotRegionMetrics(rw utils.RWType, stats map[uint64][
 		topHotRegionMetrics.set(rw, nil)
 		return
 	}
-	metrics := make([]prometheus.Metric, 0, 2*hotRegionTopN)
+	metrics := make([]prometheus.Metric, 0, 4*hotRegionTopN)
 	appendTop := func(ty resourceType, leaderOnly bool) {
 		priorities := scheduler.getPriorities(c.cluster, ty)
 		if len(priorities) == 0 {
@@ -178,8 +220,25 @@ func (c *Controller) CollectHotRegionMetrics(rw utils.RWType, stats map[uint64][
 		dim := utils.StringToDim(priorities[0])
 		top := selectHotRegions(c.cluster, stats, dim, leaderOnly)
 		for _, entry := range top.entries[:top.count] {
-			metrics = append(metrics, prometheus.MustNewConstMetric(topHotRegionMetrics.desc, prometheus.GaugeValue, entry.load,
-				ty.String(), utils.DimToString(dim), strconv.FormatUint(entry.regionID, 10), strconv.FormatUint(entry.storeID, 10)))
+			labels := []string{ty.String(), utils.DimToString(dim), strconv.FormatUint(entry.regionID, 10), strconv.FormatUint(entry.storeID, 10)}
+			metrics = append(metrics, prometheus.MustNewConstMetric(topHotRegionMetrics.loadDesc, prometheus.GaugeValue, entry.load,
+				labels...))
+			store := c.cluster.GetStore(entry.storeID)
+			if store != nil {
+				kind, ok := storeLoadKind(ty, dim, store)
+				if !ok {
+					continue
+				}
+				if storeLoad, exists := storeLoads[entry.storeID]; exists {
+					total := storeLoad[kind]
+					if total > 0 && !math.IsNaN(total) && !math.IsInf(total, 0) {
+						ratio := entry.load / total
+						if !math.IsNaN(ratio) && !math.IsInf(ratio, 0) {
+							metrics = append(metrics, prometheus.MustNewConstMetric(topHotRegionMetrics.storeRatioDesc, prometheus.GaugeValue, ratio, labels...))
+						}
+					}
+				}
+			}
 		}
 	}
 	if rw == utils.Read {
