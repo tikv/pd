@@ -118,16 +118,10 @@ func (h *serviceGCSafepointHandler) GetGCSafePoint(w http.ResponseWriter, _ *htt
 // @Router   /gc/safepoint/{service_id} [delete]
 // @Tags     rule
 func (h *serviceGCSafepointHandler) DeleteGCSafePoint(w http.ResponseWriter, r *http.Request) {
-	// Directly write to the storage and bypassing the existing constraint checks.
+	// Force deletion bypasses the existing constraint checks.
 	// It's risky to do this, but when this HTTP API is used, it usually means that we are already taking risks.
-	provider := h.svr.GetStorage().GetGCStateProvider()
 	serviceID := mux.Vars(r)["service_id"]
-	err := provider.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
-		// As GC barriers and service safe points shares the same data, deleting GC barriers acts the same as deleting
-		// service safe points.
-		err := wb.DeleteGCBarrier(constant.NullKeyspaceID, serviceID)
-		return err
-	})
+	err := h.svr.GetGCStateManager().ForceDeleteServiceGCSafePoint(serviceID)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
