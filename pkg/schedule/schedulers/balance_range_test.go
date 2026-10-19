@@ -31,6 +31,7 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/storelimit"
+	"github.com/tikv/pd/pkg/schedule/checker"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/types"
@@ -641,8 +642,17 @@ func TestBalanceRangeSingleLeaderStoreCompletion(t *testing.T) {
 				re.Equal(pending, second.Status)
 				re.False(sc.isBalanced())
 				re.False(km.IsEmpty())
-				// A subsequent heartbeat reports that the leader has reached its target.
-				tc.PutRegion(region)
+				// The active job must not block the checker from repairing the leader role.
+				cc := checker.NewController(t.Context(), tc, tc.GetCheckerConfig(), oc)
+				ops := cc.CheckRegion(tc.GetRegion(1))
+				re.Len(ops, 1)
+				re.Equal(1, ops[0].Len())
+				step, ok := ops[0].Step(0).(operator.TransferLeader)
+				re.True(ok)
+				re.Equal(uint64(2), step.FromStore)
+				re.Equal(uint64(1), step.ToStore)
+				operator.ApplyOperator(tc, ops[0])
+				re.Equal(uint64(1), tc.GetRegion(1).GetLeader().GetStoreId())
 			}
 			re.False(sc.IsScheduleAllowed(tc))
 			re.Equal(finished, first.Status)
