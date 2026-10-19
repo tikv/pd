@@ -439,6 +439,77 @@ func TestHotRegionMetricsPriorityChange(t *testing.T) {
 	}
 }
 
+func TestHotRegionMetricsAndStoreStats(t *testing.T) {
+	ResetHotRegionMetrics()
+	t.Cleanup(ResetHotRegionMetrics)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	tc.SetClusterVersion(semver.New("9.0.0"))
+	for id := uint64(1); id <= 3; id++ {
+		tc.AddRegionStore(id, 20)
+	}
+	for id := uint64(1); id <= 20; id++ {
+		tc.AddLeaderRegionWithWriteInfo(id, 1, (21-id)<<20, id<<16, 60000, 60, []uint64{2}, 5)
+		tc.AddRegionWithReadInfo(id+20, 1, id<<20, id<<16, 60000, 10, []uint64{2}, 5)
+	}
+	stats := [utils.RWTypeLen]map[uint64][]*statistics.HotPeerStat{
+		utils.Read: tc.GetHotPeerStats(utils.Read), utils.Write: tc.GetHotPeerStats(utils.Write),
+	}
+	storeLoads := make(map[uint64]statistics.StoreKindLoads)
+	for id := uint64(1); id <= 3; id++ {
+		var loads statistics.StoreKindLoads
+		for dim := range loads {
+			loads[dim] = 1e9
+		}
+		storeLoads[id] = loads
+	}
+	scheduler := newHotScheduler(oc, initHotRegionScheduleConfig())
+	c := NewController(t.Context(), tc, storage.NewStorageWithMemoryBackend(), oc)
+	c.schedulerHandlers[scheduler.GetName()] = scheduler
+	registry := prometheus.NewRegistry()
+	registry.MustRegister(topHotRegionMetrics)
+	stores := tc.GetStores()
+	for _, test := range []string{"default", "priority change", "version fallback", "unhealthy Store", "removed Store", "no scheduler", "empty"} {
+		t.Run(test, func(t *testing.T) {
+			switch test {
+			case "priority change":
+				scheduler.conf.Lock()
+				scheduler.conf.ReadPriorities = []string{utils.BytePriority, utils.CPUPriority}
+				scheduler.conf.WritePeerPriorities = []string{utils.KeyPriority, utils.BytePriority}
+				scheduler.conf.WriteLeaderPriorities = []string{utils.BytePriority, utils.KeyPriority}
+				scheduler.conf.Unlock()
+			case "version fallback":
+				scheduler.conf.Lock()
+				scheduler.conf.ReadPriorities = []string{utils.CPUPriority, utils.BytePriority}
+				scheduler.conf.Unlock()
+				tc.SetClusterVersion(semver.New("8.5.6"))
+			case "unhealthy Store":
+				tc.PutStore(tc.GetStore(1).Clone(core.SetLastHeartbeatTS(time.Now().Add(-time.Hour))))
+			case "removed Store":
+				tc.PutStore(tc.GetStore(2).Clone(core.SetStoreState(metapb.StoreState_Tombstone)))
+			case "no scheduler":
+				delete(c.schedulerHandlers, scheduler.GetName())
+			case "empty":
+				stats = [utils.RWTypeLen]map[uint64][]*statistics.HotPeerStat{}
+			}
+			ResetHotRegionMetrics()
+			for _, rw := range []utils.RWType{utils.Read, utils.Write} {
+				c.CollectHotRegionMetrics(rw, stats[rw], storeLoads)
+			}
+			want, err := registry.Gather()
+			require.NoError(t, err)
+			ResetHotRegionMetrics()
+			for _, rw := range []utils.RWType{utils.Read, utils.Write} {
+				summary := c.CollectHotRegionMetricsAndStoreStats(rw, stores, stats[rw], storeLoads)
+				require.Equal(t, statistics.CollectHotPeerInfos(stores, stats[rw]), summary)
+			}
+			got, err := registry.Gather()
+			require.NoError(t, err)
+			require.Equal(t, want, got)
+		})
+	}
+}
+
 func TestHotRegionStoreLoadRatio(t *testing.T) {
 	ResetHotRegionMetrics()
 	t.Cleanup(ResetHotRegionMetrics)
@@ -537,51 +608,60 @@ func (c *hotRegionMetricsBlockingCluster) GetStore(id uint64) *core.StoreInfo {
 }
 
 func TestHotRegionMetricsRemovalDuringCollection(t *testing.T) {
-	ResetHotRegionMetrics()
-	t.Cleanup(ResetHotRegionMetrics)
-	cancel, _, tc, oc := prepareSchedulersTest()
-	defer cancel()
-	tc.SetClusterVersion(semver.New("9.0.0"))
-	tc.AddRegionStore(1, 1)
-	cluster := &hotRegionMetricsBlockingCluster{
-		Cluster: tc, entered: make(chan struct{}), release: make(chan struct{}),
+	for _, fused := range []bool{false, true} {
+		t.Run(strconv.FormatBool(fused), func(t *testing.T) {
+			ResetHotRegionMetrics()
+			t.Cleanup(ResetHotRegionMetrics)
+			cancel, _, tc, oc := prepareSchedulersTest()
+			defer cancel()
+			tc.SetClusterVersion(semver.New("9.0.0"))
+			tc.AddRegionStore(1, 1)
+			cluster := &hotRegionMetricsBlockingCluster{
+				Cluster: tc, entered: make(chan struct{}), release: make(chan struct{}),
+			}
+			scheduler := newHotScheduler(oc, initHotRegionScheduleConfig())
+			backend := storage.NewStorageWithMemoryBackend()
+			scheduler.conf.init(scheduler.GetName(), backend, scheduler.conf)
+			c := NewController(context.Background(), cluster, backend, oc)
+			c.schedulerHandlers[scheduler.GetName()] = scheduler
+			collected := make(chan struct{})
+			unblock := sync.OnceFunc(func() { close(cluster.release) })
+			t.Cleanup(func() {
+				unblock()
+				<-collected
+			})
+			go func() {
+				defer close(collected)
+				stats := map[uint64][]*statistics.HotPeerStat{
+					1: {{RegionID: 1, Loads: []float64{0, 0, 0, 10}}},
+				}
+				if fused {
+					c.CollectHotRegionMetricsAndStoreStats(utils.Read, tc.GetStores(), stats, nil)
+				} else {
+					c.CollectHotRegionMetrics(utils.Read, stats, nil)
+				}
+			}()
+			<-cluster.entered
+			removed := make(chan error, 1)
+			go func() { removed <- c.RemoveSchedulerHandler(scheduler.GetName()) }()
+			select {
+			case err := <-removed:
+				require.NoError(t, err)
+			case <-time.After(5 * time.Second):
+				unblock()
+				<-collected
+				require.NoError(t, <-removed)
+				t.Fatal("scheduler removal waited for the hot Region scan")
+			}
+			unblock()
+			<-collected
+			registry := prometheus.NewRegistry()
+			registry.MustRegister(topHotRegionMetrics)
+			families, err := registry.Gather()
+			require.NoError(t, err)
+			require.Empty(t, families, "collection must not republish a removed scheduler's metrics")
+		})
 	}
-	scheduler := newHotScheduler(oc, initHotRegionScheduleConfig())
-	backend := storage.NewStorageWithMemoryBackend()
-	scheduler.conf.init(scheduler.GetName(), backend, scheduler.conf)
-	c := NewController(context.Background(), cluster, backend, oc)
-	c.schedulerHandlers[scheduler.GetName()] = scheduler
-	collected := make(chan struct{})
-	unblock := sync.OnceFunc(func() { close(cluster.release) })
-	t.Cleanup(func() {
-		unblock()
-		<-collected
-	})
-	go func() {
-		defer close(collected)
-		c.CollectHotRegionMetrics(utils.Read, map[uint64][]*statistics.HotPeerStat{
-			1: {{RegionID: 1, Loads: []float64{0, 0, 0, 10}}},
-		}, nil)
-	}()
-	<-cluster.entered
-	removed := make(chan error, 1)
-	go func() { removed <- c.RemoveSchedulerHandler(scheduler.GetName()) }()
-	select {
-	case err := <-removed:
-		require.NoError(t, err)
-	case <-time.After(5 * time.Second):
-		unblock()
-		<-collected
-		require.NoError(t, <-removed)
-		t.Fatal("scheduler removal waited for the hot Region scan")
-	}
-	unblock()
-	<-collected
-	registry := prometheus.NewRegistry()
-	registry.MustRegister(topHotRegionMetrics)
-	families, err := registry.Gather()
-	require.NoError(t, err)
-	require.Empty(t, families, "collection must not republish a removed scheduler's metrics")
 }
 
 func BenchmarkSelectHotRegions(b *testing.B) {

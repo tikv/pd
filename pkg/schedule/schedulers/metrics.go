@@ -598,10 +598,52 @@ func selectHotRegions(cluster sche.SchedulerCluster, stats map[uint64][]*statist
 	return peersTop, leadersTop
 }
 
-// CollectHotRegionMetrics reuses the already filtered, denoised hot-cache
-// snapshot used by hotspot monitoring. It is independent of scheduling being
+// CollectHotRegionMetrics reuses the already filtered hot-cache statistics
+// used by hotspot monitoring. It is independent of scheduling being
 // paused, hitting an operator limit, or producing an operator.
 func (c *Controller) CollectHotRegionMetrics(rw utils.RWType, stats map[uint64][]*statistics.HotPeerStat, storeLoads map[uint64]statistics.StoreKindLoads) {
+	c.publishHotRegionMetrics(rw, storeLoads, func(dim, leaderDim int) (hotRegionTop, hotRegionTop) {
+		return selectHotRegions(c.cluster, stats, dim, leaderDim)
+	})
+}
+
+// CollectHotRegionMetricsAndStoreStats collects the Top 10 while summing the
+// Store's peer and leader loads. The periodic metrics path uses this to avoid
+// another full scan and additional rolling-load reads for the rankings.
+func (c *Controller) CollectHotRegionMetricsAndStoreStats(rw utils.RWType, stores []*core.StoreInfo, stats map[uint64][]*statistics.HotPeerStat, storeLoads map[uint64]statistics.StoreKindLoads) *statistics.StoreHotPeersInfos {
+	var status *statistics.StoreHotPeersInfos
+	c.publishHotRegionMetrics(rw, storeLoads, func(dim, leaderDim int) (hotRegionTop, hotRegionTop) {
+		var peersTop, leadersTop hotRegionTop
+		status = statistics.CollectHotPeerInfosWithObserver(stores, stats, func(store *core.StoreInfo) func(*statistics.HotPeerStat, statistics.Loads) {
+			storeID := store.GetID()
+			// Check health once per Store, outside the peer loop. The Store
+			// snapshot used for totals may predate a removal or heartbeat.
+			store = c.cluster.GetStore(storeID)
+			if store == nil || store.IsRemoved() || store.IsUnhealthy() {
+				return nil
+			}
+			return func(peer *statistics.HotPeerStat, loads statistics.Loads) {
+				entry := hotRegionEntry{regionID: peer.RegionID, storeID: storeID, peer: peer}
+				if dim >= 0 {
+					entry.load = loads[dim]
+					peersTop.add(entry)
+				}
+				if leaderDim >= 0 && peer.IsLeader() {
+					entry.load = loads[leaderDim]
+					leadersTop.add(entry)
+				}
+			}
+		})
+		return peersTop, leadersTop
+	})
+	if status == nil {
+		// Store totals remain available when the hot scheduler is absent.
+		status = statistics.CollectHotPeerInfos(stores, stats)
+	}
+	return status
+}
+
+func (c *Controller) publishHotRegionMetrics(rw utils.RWType, storeLoads map[uint64]statistics.StoreKindLoads, selectTop func(dim, leaderDim int) (hotRegionTop, hotRegionTop)) {
 	getScheduler := func() *hotScheduler {
 		if controller := c.schedulers[types.BalanceHotRegionScheduler.String()]; controller != nil {
 			scheduler, _ := controller.Scheduler.(*hotScheduler)
@@ -630,7 +672,7 @@ func (c *Controller) CollectHotRegionMetrics(rw utils.RWType, stats map[uint64][
 		peerType, leaderDim = writePeer, getDim(writeLeader)
 	}
 	dim := getDim(peerType)
-	peersTop, leadersTop := selectHotRegions(c.cluster, stats, dim, leaderDim)
+	peersTop, leadersTop := selectTop(dim, leaderDim)
 	metrics := make([]prometheus.Metric, 0, 3*(peersTop.count+leadersTop.count))
 	appendTop := func(ty resourceType, dim int, top hotRegionTop) {
 		for _, entry := range top.entries[:top.count] {

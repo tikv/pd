@@ -525,11 +525,9 @@ func (c *Coordinator) CollectHotSpotMetrics() {
 	stores := c.cluster.GetStores()
 	storeLoads := c.getStoresLoadsForMetrics()
 	// Collects hot write region metrics.
-	writeStats := collectHotMetrics(c.cluster, stores, utils.Write)
-	c.schedulers.CollectHotRegionMetrics(utils.Write, writeStats, storeLoads)
+	c.collectHotMetrics(stores, utils.Write, storeLoads)
 	// Collects hot read region metrics.
-	readStats := collectHotMetrics(c.cluster, stores, utils.Read)
-	c.schedulers.CollectHotRegionMetrics(utils.Read, readStats, storeLoads)
+	c.collectHotMetrics(stores, utils.Read, storeLoads)
 }
 
 // getStoresLoadsForMetrics reuses a buffer owned by the periodic metrics
@@ -546,10 +544,10 @@ func (c *Coordinator) getStoresLoadsForMetrics() map[uint64]statistics.StoreKind
 	return c.cluster.GetStoresLoads()
 }
 
-func collectHotMetrics(cluster sche.ClusterInformer, stores []*core.StoreInfo, typ utils.RWType) map[uint64][]*statistics.HotPeerStat {
+func (c *Coordinator) collectHotMetrics(stores []*core.StoreInfo, typ utils.RWType, storeLoads map[uint64]statistics.StoreKindLoads) {
 	kind := typ.String()
-	hotPeerStats := cluster.GetHotPeerStats(typ)
-	status := statistics.CollectHotPeerInfos(stores, hotPeerStats) // only returns TotalBytesRate,TotalKeysRate,TotalQueryRate,TotalCPURate,Count
+	hotPeerStats := c.cluster.GetHotPeerStats(typ)
+	status := c.schedulers.CollectHotRegionMetricsAndStoreStats(typ, stores, hotPeerStats, storeLoads)
 
 	for _, s := range stores {
 		// TODO: pre-allocate gauge metrics
@@ -609,12 +607,11 @@ func collectHotMetrics(cluster sche.ClusterInformer, stores []*core.StoreInfo, t
 		// IsRemoved(), a tombstoned store sitting in GetStores() for up to 30
 		// days doesn't cost a scan on every tick.
 		if !removed {
-			if store := cluster.GetStore(storeID); store == nil || store.IsRemoved() {
+			if store := c.cluster.GetStore(storeID); store == nil || store.IsRemoved() {
 				DeleteStoreMetrics(storeLabel)
 			}
 		}
 	}
-	return hotPeerStats
 }
 
 // ResetHotSpotMetrics resets hot spot metrics.
