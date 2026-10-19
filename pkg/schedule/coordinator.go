@@ -79,7 +79,8 @@ type Coordinator struct {
 	pluginInterface   *PluginInterface
 	diagnosticManager *diagnostic.Manager
 
-	storeLoadsCache map[uint64]statistics.StoreKindLoads
+	// Only the periodic metrics collector accesses this reusable buffer.
+	metricsStoreLoads map[uint64]statistics.StoreKindLoads
 }
 
 // NewCoordinator creates a new Coordinator.
@@ -462,7 +463,7 @@ func (c *Coordinator) Stop() {
 // GetHotRegionsByType gets hot regions' statistics by RWType.
 func (c *Coordinator) GetHotRegionsByType(typ utils.RWType) *statistics.StoreHotPeersInfos {
 	isTraceFlow := c.cluster.GetSchedulerConfig().IsTraceRegionFlow()
-	storeLoads := c.getStoresLoads()
+	storeLoads := c.cluster.GetStoresLoads()
 	stores := c.cluster.GetStores()
 	hotPeerStats := c.cluster.GetHotPeerStats(typ)
 	infos := statistics.GetHotStatus(stores, storeLoads, hotPeerStats, typ, isTraceFlow)
@@ -522,7 +523,7 @@ func (c *Coordinator) GetWaitGroup() *sync.WaitGroup {
 // CollectHotSpotMetrics collects hot spot metrics.
 func (c *Coordinator) CollectHotSpotMetrics() {
 	stores := c.cluster.GetStores()
-	storeLoads := c.getStoresLoads()
+	storeLoads := c.getStoresLoadsForMetrics()
 	// Collects hot write region metrics.
 	writeStats := collectHotMetrics(c.cluster, stores, utils.Write)
 	c.schedulers.CollectHotRegionMetrics(utils.Write, writeStats, storeLoads)
@@ -531,16 +532,16 @@ func (c *Coordinator) CollectHotSpotMetrics() {
 	c.schedulers.CollectHotRegionMetrics(utils.Read, readStats, storeLoads)
 }
 
-// getStoresLoads fetches store loads, amortizing the map allocation across
-// repeated periodic calls when the underlying informer supports it.
-func (c *Coordinator) getStoresLoads() map[uint64]statistics.StoreKindLoads {
+// getStoresLoadsForMetrics reuses a buffer owned by the periodic metrics
+// collector. Concurrent API callers must obtain independent snapshots instead.
+func (c *Coordinator) getStoresLoadsForMetrics() map[uint64]statistics.StoreKindLoads {
 	if fetcher, ok := c.cluster.(interface {
 		GetStoresLoadsTo(dst map[uint64]statistics.StoreKindLoads) map[uint64]statistics.StoreKindLoads
 	}); ok {
-		if c.storeLoadsCache == nil {
-			c.storeLoadsCache = make(map[uint64]statistics.StoreKindLoads)
+		if c.metricsStoreLoads == nil {
+			c.metricsStoreLoads = make(map[uint64]statistics.StoreKindLoads)
 		}
-		return fetcher.GetStoresLoadsTo(c.storeLoadsCache)
+		return fetcher.GetStoresLoadsTo(c.metricsStoreLoads)
 	}
 	return c.cluster.GetStoresLoads()
 }
