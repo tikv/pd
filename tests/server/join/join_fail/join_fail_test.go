@@ -87,6 +87,6 @@ func TestFailedToStartPDAfterSuccessfulJoin(t *testing.T) {
 	if !pd2.IsLeader() {
 		// Check that PD2 can become the leader.
 		re.NoError(cluster.ResignLeader())
-		re.Equal(cluster.WaitLeader(), pd2.GetConfig().Name)
+		re.Equal(pd2.GetConfig().Name, cluster.WaitLeaderChange("pd1"))
 	}
 }
