@@ -31,12 +31,12 @@ func NewAffinityCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:               "affinity",
 		Short:             "affinity group commands",
-		Long:              `Manage affinity groups by table ID, optional partition ID, and optional NextGen keyspace ID.`,
+		Long:              `Manage affinity groups by table ID, optional partition ID, and optional keyspace ID.`,
 		PersistentPreRunE: requirePDClient,
 	}
 	cmd.PersistentFlags().Uint64("table-id", 0, "table ID for the affinity group")
 	cmd.PersistentFlags().Uint64("partition-id", 0, "partition ID for partitioned tables")
-	cmd.PersistentFlags().Uint32("keyspace-id", 0, "NextGen keyspace ID (omit for Classic groups)")
+	cmd.PersistentFlags().Uint32("keyspace-id", 0, "keyspace ID (omit for Classic groups)")
 
 	cmd.AddCommand(
 		newAffinityShowCommand(),
