@@ -457,7 +457,7 @@ func checkBackgroundMetricsFlush(ctx context.Context, re *require.Assertions, ma
 		},
 		KeyspaceId: keyspaceIDValue,
 	}
-	err = manager.dispatchConsumption(req)
+	err = manager.dispatchConsumption(1, req)
 	re.NoError(err)
 
 	keyspaceID := ExtractKeyspaceID(req.GetKeyspaceId())
@@ -469,6 +469,50 @@ func checkBackgroundMetricsFlush(ctx context.Context, re *require.Assertions, ma
 		return updatedGroup.RUConsumption.RRU == req.ConsumptionSinceLastRequest.RRU &&
 			updatedGroup.RUConsumption.WRU == req.ConsumptionSinceLastRequest.WRU
 	})
+}
+
+// TestBackgroundMetricsFlushResetsRUTimeline pins that the RU timeline belongs
+// to one leadership term: constructing another manager leaves the published
+// peaks alone, and they stop being exposed once the flush loop exits.
+func TestBackgroundMetricsFlushResetsRUTimeline(t *testing.T) {
+	re := require.New(t)
+	const start = testTimelineStart
+	m := newManagerBase(&ControllerConfig{}, ResourceGroupWriteRoleLegacyAll)
+	// Every Manager shares the package-level collector in production, where a
+	// process has one Manager. Tests create several Managers, so give this one
+	// an isolated collector; otherwise another Manager's reset() races with or
+	// clears the map read below.
+	m.metrics.ruTimeline = newRUTimeline(newRUSummaryCollector())
+	timeline := m.metrics.ruTimeline
+	collector := timeline.collector
+	resultsLen := func() int {
+		timeline.collector.mu.RLock()
+		defer timeline.collector.mu.RUnlock()
+		return len(timeline.collector.results)
+	}
+	timeline.since = start - 3600
+	timeline.record(timelineReport(1, start, make([][2]float64, 60)), time.Unix(start+65, 0))
+	timeline.flush(time.Unix(start+90, 0))
+	re.Greater(resultsLen(), 0)
+
+	newManagerBase(&ControllerConfig{}, ResourceGroupWriteRoleLegacyAll)
+	re.Greater(resultsLen(), 0)
+	timeline.rejected = 1
+	timeline.lastRejectLog = time.Now().Unix()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	m.wg.Add(1)
+	go m.backgroundMetricsFlush(ctx)
+	cancel()
+	m.wg.Wait()
+	re.Zero(resultsLen())
+	re.Empty(timeline.groups)
+	re.Zero(timeline.since)
+	re.Zero(timeline.sourceCount)
+	re.Zero(timeline.rejected)
+	re.Zero(timeline.lastRejectLog)
+	re.Same(collector, timeline.collector)
+	re.Same(timeline, m.metrics.ruTimeline)
 }
 
 func TestDispatchConsumptionIncludesOnlyConsumption(t *testing.T) {
@@ -484,10 +528,11 @@ func TestDispatchConsumptionIncludesOnlyConsumption(t *testing.T) {
 		KeyspaceId: &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: 42}},
 	}
 
-	err := m.dispatchConsumption(req)
+	err := m.dispatchConsumption(7, req)
 	re.NoError(err)
 
 	item := <-m.consumptionDispatcher
+	re.Equal(uint64(7), item.clientUniqueID)
 	re.Equal(uint32(42), item.keyspaceID)
 	re.Equal(req.GetResourceGroupName(), item.resourceGroupName)
 	re.Equal(req.GetConsumptionSinceLastRequest(), item.Consumption)
