@@ -793,6 +793,7 @@ func (c *ResourceGroupsController) collectTokenBucketRequests(ctx context.Contex
 		return true
 	})
 	if len(c.run.currentRequests) > 0 {
+		trimRUTimelines(c.run.currentRequests, ruTimelineRequestBudget)
 		c.sendTokenBucketRequests(ctx, c.run.currentRequests, reporters, source, notifyMsg)
 	}
 }

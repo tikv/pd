@@ -16,9 +16,12 @@ package controller
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
+	"github.com/pingcap/log"
+	"go.uber.org/zap"
 )
 
 const (
@@ -26,7 +29,13 @@ const (
 	// The resource manager's 60-second window ends 30 seconds ago, so a second
 	// is useless once it is 90 seconds old.
 	ruTimelineSeconds = 90
+	// ruTimelineRequestBudget caps the serialized size of one token RPC: the
+	// 4 MiB gRPC receive limit minus 128 KiB of transport headroom. The
+	// per-group request fields are part of the same payload.
+	ruTimelineRequestBudget = 4<<20 - 128<<10
 )
+
+var lastTrimWarn atomic.Int64
 
 type ruSecondBucket struct {
 	second   int64
@@ -136,4 +145,88 @@ func (t *ruTimeline) snapshotLocked(now time.Time) *rmpb.RUConsumptionBySecond {
 		})
 	}
 	return &rmpb.RUConsumptionBySecond{StartUnixSec: start, EndUnixSec: end, Buckets: buckets}
+}
+
+// trimRUTimelines keeps the newest non-zero seconds of each request so that
+// the serialized TokenBucketsRequest fits budget. It sizes the whole batch,
+// because the per-group request fields, not only the buckets, can exhaust the
+// 4 MiB gRPC limit at a large group count. Trimmed seconds fall outside the
+// report's coverage and are unreported, not zeros. If even the empty coverage
+// metadata does not fit, the whole RuBySecond field is dropped (nil): those
+// seconds are not acknowledged and the next request resends them. If the
+// requests without any timeline already exceed the limit, the original
+// request was over the limit; this path cannot make it fit.
+func trimRUTimelines(requests []*rmpb.TokenBucketRequest, budget int) {
+	type savedTimeline struct {
+		req     *rmpb.TokenBucketRequest
+		start   int64
+		buckets []*rmpb.RUConsumptionBucket
+	}
+	saved := make([]savedTimeline, 0, len(requests))
+	for _, req := range requests {
+		seconds := req.GetConsumptionSinceLastRequest().GetRuBySecond()
+		if seconds == nil {
+			continue
+		}
+		saved = append(saved, savedTimeline{req, seconds.StartUnixSec, seconds.Buckets})
+	}
+	setLimit := func(limit int) {
+		for _, s := range saved {
+			seconds := s.req.GetConsumptionSinceLastRequest().GetRuBySecond()
+			seconds.StartUnixSec = s.start
+			seconds.Buckets = s.buckets
+			drop := len(s.buckets) - limit
+			if drop <= 0 {
+				continue
+			}
+			if limit <= 0 {
+				// The report becomes an empty interval, which the resource
+				// manager rejects; the seconds are unreported, not zeros.
+				seconds.StartUnixSec = seconds.GetEndUnixSec()
+				seconds.Buckets = nil
+				continue
+			}
+			kept := make([]*rmpb.RUConsumptionBucket, limit)
+			shift := int64(s.buckets[drop].GetOffset())
+			for i, b := range s.buckets[drop:] {
+				kept[i] = &rmpb.RUConsumptionBucket{Rru: b.GetRru(), Wru: b.GetWru(), Offset: b.GetOffset() - uint32(shift)}
+			}
+			seconds.StartUnixSec += shift
+			seconds.Buckets = kept
+		}
+	}
+	batch := &rmpb.TokenBucketsRequest{Requests: requests}
+	// Fast path: normal reports carry few seconds and fit without resizing.
+	if batch.Size() <= budget {
+		return
+	}
+	setLimit(0)
+	if coverageSize := batch.Size(); coverageSize > budget {
+		// The coverage metadata alone does not fit. Drop the whole field so the
+		// per-group wrapper headers disappear too. These seconds are not
+		// acknowledged and will be resent; if the remaining requests still
+		// exceed the limit, the original request was already over it.
+		for _, s := range saved {
+			s.req.GetConsumptionSinceLastRequest().RuBySecond = nil
+		}
+		// Throttle the warning: this function runs on every token request.
+		// CompareAndSwap keeps concurrent controllers from all logging.
+		now := time.Now().Unix()
+		if last := lastTrimWarn.Load(); now-last >= 60 && lastTrimWarn.CompareAndSwap(last, now) {
+			log.Warn("resource group timeline omitted: coverage metadata exceeds the token RPC budget",
+				zap.Int("coverage_size", coverageSize), zap.Int("size_without_timeline", batch.Size()), zap.Int("budget", budget))
+		}
+		return
+	}
+	lo, hi := 0, ruTimelineSeconds
+	for lo < hi {
+		mid := (lo + hi + 1) / 2
+		setLimit(mid)
+		if batch.Size() <= budget {
+			lo = mid
+		} else {
+			hi = mid - 1
+		}
+	}
+	setLimit(lo)
 }
