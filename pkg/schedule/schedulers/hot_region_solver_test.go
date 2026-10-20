@@ -15,7 +15,11 @@
 package schedulers
 
 import (
+	"fmt"
 	"math"
+	"math/rand/v2"
+	"slices"
+	"sort"
 	"testing"
 	"time"
 
@@ -27,6 +31,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/types"
@@ -1166,4 +1171,378 @@ func TestSortHotPeers(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSelectHotPeers(t *testing.T) {
+	for _, count := range []int{0, 1, 9, 10, 11, 100, 10000} {
+		peers := benchmarkHotPeers(1, count)
+		// Include ties and put some of the hottest peers beyond the initial heap.
+		for i, peer := range peers {
+			peer.Loads[utils.CPUDim] = float64(i / 3)
+		}
+		original := make([]*statistics.HotPeerStat, len(peers))
+		copy(original, peers)
+		for dim := range utils.DimLen {
+			expected := append([]*statistics.HotPeerStat(nil), peers...)
+			sort.Slice(expected, func(i, j int) bool {
+				a, b := expected[i], expected[j]
+				if a.GetLoad(dim) == b.GetLoad(dim) {
+					return a.RegionID < b.RegionID
+				}
+				return a.GetLoad(dim) > b.GetLoad(dim)
+			})
+			for _, limit := range []int{0, 1, 10, 1000, count + 1} {
+				t.Run(fmt.Sprintf("peers=%d/dim=%d/limit=%d", count, dim, limit), func(t *testing.T) {
+					selected := selectHotPeers(peers, dim, limit)
+					if min(limit, count) == 0 {
+						require.Empty(t, selected)
+					} else {
+						require.Equal(t, expected[:min(limit, count)], selected)
+					}
+					require.Equal(t, original, peers)
+				})
+			}
+		}
+	}
+}
+
+func TestHotStoreComparison(t *testing.T) {
+	rng := rand.New(rand.NewPCG(1, 2))
+	stores := make([]*statistics.StoreLoadDetail, 20)
+	for i := range stores {
+		detail := benchmarkHotStore(uint64(i+1), nil, statistics.Loads{})
+		for _, load := range []*statistics.StoreLoad{&detail.LoadPred.Current, &detail.LoadPred.Future} {
+			for dim := range utils.DimLen {
+				load.Loads[dim] = float64(rng.IntN(50))
+			}
+			load.HotPeerCount = float64(rng.IntN(5))
+		}
+		stores[i] = detail
+	}
+	// Include equal extrema with different pending influence and peer counts.
+	stores[1].LoadPred.Current = stores[0].LoadPred.Future
+	stores[1].LoadPred.Future = stores[0].LoadPred.Current
+	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
+		for first := range utils.DimLen {
+			for second := range utils.DimLen {
+				bs := &balanceSolver{resourceTy: ty, firstPriority: first, secondPriority: second,
+					maxSrc:   &statistics.StoreLoad{Loads: statistics.Loads{100, 100, 100, 100}},
+					minDst:   &statistics.StoreLoad{},
+					rankStep: &statistics.StoreLoad{Loads: statistics.Loads{10, 10, 10, 10}, HotPeerCount: 2}}
+				for _, a := range stores {
+					for _, b := range stores {
+						for _, source := range []bool{false, true} {
+							expected := slices.Compare(hotStoreComparisonRanks(bs, a, source), hotStoreComparisonRanks(bs, b, source))
+							require.Equal(t, expected, bs.compareStoreLoad(a, b, source))
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+// hotStoreComparisonRanks expresses the original ordering using complete StoreLoad objects.
+func hotStoreComparisonRanks(bs *balanceSolver, detail *statistics.StoreLoadDetail, source bool) []int64 {
+	load, baseline, sign := detail.LoadPred.Max(), bs.minDst, int64(1)
+	if source {
+		load, baseline, sign = detail.LoadPred.Min(), bs.maxSrc, -1
+	}
+	ranks := []int64{}
+	for _, dim := range []int{bs.firstPriority, bs.secondPriority} {
+		ranks = append(ranks, sign*int64((load.Loads[dim]-baseline.Loads[dim])/10))
+	}
+	pending := detail.LoadPred.Diff()
+	if bs.resourceTy == writeLeader {
+		ranks = append(ranks, int64(pending.HotPeerCount/2))
+	}
+	ranks = append(ranks, int64(pending.Loads[bs.firstPriority]/10))
+	if bs.resourceTy == writeLeader {
+		ranks = append(ranks, int64(pending.Loads[bs.secondPriority]/10))
+	}
+	return ranks
+}
+
+func TestHotSolverRegionSnapshotLifetime(t *testing.T) {
+	hot, cluster := prepareHotSolverSearch(t, 4, 8, "revert")
+	bs := newBalanceSolver(hot, cluster, utils.Write, movePeer)
+	hot.searchRevertRegions[writePeer] = true
+	require.Len(t, bs.solve(), 2)
+	// Regions checked before revert search starts may be fetched a second time.
+	// Subsequent combinations reuse their snapshots regardless of source ordering.
+	require.GreaterOrEqual(t, cluster.regionLookups, 32)
+	require.LessOrEqual(t, cluster.regionLookups, 64)
+	require.Nil(t, bs.regionCache)
+	var regions []*core.RegionInfo
+	for _, detail := range hot.stLoadInfos[writePeer] {
+		for _, peer := range detail.HotPeers {
+			region := cluster.SchedulerCluster.GetRegion(peer.RegionID)
+			regions = append(regions, region)
+			cluster.GetBasicCluster().PutRegion(region.Clone(core.WithDownPeers([]*pdpb.PeerStats{{Peer: region.GetLeader(), DownSeconds: 1}})))
+		}
+	}
+	// A subsequent solve sees unhealthy regions instead of reusing the old snapshot.
+	bs = newBalanceSolver(hot, cluster, utils.Write, movePeer)
+	require.Empty(t, bs.solve())
+	require.Nil(t, bs.regionCache)
+	for _, region := range regions {
+		cluster.GetBasicCluster().PutRegion(region)
+	}
+	hot.searchRevertRegions[writePeer] = true
+	require.Len(t, newBalanceSolver(hot, cluster, utils.Write, movePeer).solve(), 2)
+}
+
+func TestHotSolverRegionSnapshotChecksSource(t *testing.T) {
+	hot, cluster := prepareHotSolverSearch(t, 4, 8, "move")
+	peer := hot.stLoadInfos[writePeer][1].HotPeers[0]
+	for _, ty := range []opType{movePeer, transferLeader} {
+		bs := newBalanceSolver(hot, cluster, utils.Write, ty)
+		bs.regionCache = make(map[uint64]hotRegionSnapshot)
+		cluster.regionLookups = 0
+		region, _ := bs.getRegion(peer, 4)
+		require.Nil(t, region)
+		sourceID := uint64(1)
+		if ty == transferLeader {
+			sourceID = 5
+		}
+		region, _ = bs.getRegion(peer, sourceID)
+		require.NotNil(t, region)
+		require.Equal(t, 1, cluster.regionLookups)
+		missing := &statistics.HotPeerStat{RegionID: 999}
+		for range 2 {
+			region, _ = bs.getRegion(missing, sourceID)
+			require.Nil(t, region)
+		}
+		require.Equal(t, 2, cluster.regionLookups)
+	}
+}
+
+func TestHotSolverFindsLatePeer(t *testing.T) {
+	hot, cluster := prepareHotSolverSearch(t, 4, 64, "move")
+	useful := hot.stLoadInfos[writePeer][1].HotPeers[63]
+	useful.Loads = []float64{3.1e6, 1.9e6, 0, 0}
+	for _, detail := range hot.stLoadInfos[writePeer] {
+		for _, peer := range detail.HotPeers {
+			if peer != useful {
+				hot.regionPendings[peer.RegionID] = &pendingInfluence{}
+			}
+		}
+	}
+	bs := newBalanceSolver(hot, cluster, utils.Write, movePeer)
+	bs.maxPeerNum = 4
+	ops := bs.solve()
+	require.Len(t, ops, 1)
+	require.Equal(t, useful.RegionID, ops[0].RegionID())
+}
+
+func TestHotPeerThresholdIncludesPendingPeers(t *testing.T) {
+	peers := make([]*statistics.HotPeerStat, 100)
+	pending := make(map[uint64]*pendingInfluence)
+	for i := range peers {
+		id := uint64(i + 1)
+		peers[i] = &statistics.HotPeerStat{RegionID: id, StoreID: 1, Loads: []float64{float64(100 - i), float64(i)}}
+		if i < 10 {
+			pending[id] = &pendingInfluence{}
+		}
+	}
+	bs := &balanceSolver{
+		sche:             &hotScheduler{baseHotScheduler: &baseHotScheduler{regionPendings: pending}},
+		stLoadDetail:     map[uint64]*statistics.StoreLoadDetail{1: benchmarkHotStore(1, peers, statistics.Loads{})},
+		filteredHotPeers: make(map[uint64][]*statistics.HotPeerStat),
+		nthHotPeer:       make(map[uint64][]*statistics.HotPeerStat),
+		firstPriority:    utils.ByteDim,
+		secondPriority:   utils.KeyDim,
+		maxPeerNum:       4,
+	}
+	// The small-region safeguard uses the whole snapshot, including pending peers.
+	require.Equal(t, float64(91), bs.getNthHotPeer(1, utils.ByteDim).GetLoad(utils.ByteDim))
+	require.Equal(t, float64(90), bs.getNthHotPeer(1, utils.KeyDim).GetLoad(utils.KeyDim))
+	var selected []uint64
+	for _, peer := range bs.getFilteredHotPeers(1) {
+		require.NotContains(t, pending, peer.RegionID)
+		selected = append(selected, peer.RegionID)
+	}
+	require.ElementsMatch(t, []uint64{99, 100}, selected)
+}
+
+var benchmarkHotPeerSelection []*statistics.HotPeerStat
+
+func benchmarkHotPeers(storeID uint64, count int) []*statistics.HotPeerStat {
+	peers := make([]*statistics.HotPeerStat, count)
+	for i := range peers {
+		peers[i] = &statistics.HotPeerStat{
+			StoreID: storeID, RegionID: storeID*1000000 + uint64(i),
+			Loads: []float64{
+				float64((i*7919)%count + 1),
+				float64((i*3571)%count + 1),
+				float64((i*101)%count + 1),
+				float64(i + 1),
+			},
+		}
+	}
+	return peers
+}
+
+func benchmarkHotStore(id uint64, peers []*statistics.HotPeerStat, loads statistics.Loads) *statistics.StoreLoadDetail {
+	detail := &statistics.StoreLoadDetail{
+		StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: core.NewStoreInfoWithLabel(id, nil)},
+		HotPeers:         peers,
+		LoadPred:         (statistics.StoreLoad{Loads: loads}).ToLoadPred(utils.Write, nil),
+	}
+	detail.LoadPred.Expect.Loads = statistics.Loads{15e6, 15e6}
+	detail.LoadPred.Stddev.Loads = statistics.Loads{0.5, 0.5}
+	return detail
+}
+
+func BenchmarkHotPeerSelection(b *testing.B) {
+	for _, count := range []int{100, 1000, 10000} {
+		for _, limit := range []int{10, 1000} {
+			for _, eligiblePercent := range []int{25, 100} {
+				b.Run(fmt.Sprintf("peers=%d/limit=%d/eligible=%d", count, limit, eligiblePercent), func(b *testing.B) {
+					peers := benchmarkHotPeers(1, count)
+					pending := make(map[uint64]*pendingInfluence)
+					for i, peer := range peers {
+						if i%100 >= eligiblePercent {
+							pending[peer.RegionID] = &pendingInfluence{}
+						}
+					}
+					bs := &balanceSolver{
+						sche:           &hotScheduler{baseHotScheduler: &baseHotScheduler{regionPendings: pending}},
+						nthHotPeer:     map[uint64][]*statistics.HotPeerStat{1: make([]*statistics.HotPeerStat, utils.DimLen)},
+						firstPriority:  utils.ByteDim,
+						secondPriority: utils.KeyDim,
+						maxPeerNum:     limit,
+					}
+					detail := benchmarkHotStore(1, peers, statistics.Loads{})
+					b.ReportAllocs()
+					for b.Loop() {
+						benchmarkHotPeerSelection = bs.filterHotPeers(detail)
+					}
+				})
+			}
+		}
+	}
+}
+
+func BenchmarkHotReadSolverPreparation(b *testing.B) {
+	for _, stores := range []int{16, 128} {
+		for _, peers := range []int{100, 1000} {
+			b.Run(fmt.Sprintf("stores=%d/peers=%d", stores, peers), func(b *testing.B) {
+				cancel, _, cluster, controller := prepareSchedulersTest()
+				b.Cleanup(cancel)
+				scheduler, err := CreateScheduler(types.BalanceHotRegionScheduler, controller,
+					storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceHotRegionScheduler, nil))
+				require.NoError(b, err)
+				hot := scheduler.(*hotScheduler)
+				for id := uint64(1); id <= uint64(stores); id++ {
+					detail := benchmarkHotStore(id, benchmarkHotPeers(id, peers), statistics.Loads{15e6, 15e6})
+					hot.stLoadInfos[readLeader][id] = detail
+					hot.stLoadInfos[readPeer][id] = detail
+				}
+				b.ReportAllocs()
+				for b.Loop() {
+					benchmarkBalanceSolvers[0], benchmarkBalanceSolvers[1] = newBalanceReadSolvers(hot, cluster)
+				}
+			})
+		}
+	}
+}
+
+type hotSolverTestCluster struct {
+	sche.SchedulerCluster
+	regionLookups int
+}
+
+func (c *hotSolverTestCluster) GetRegion(id uint64) *core.RegionInfo {
+	c.regionLookups++
+	return c.SchedulerCluster.GetRegion(id)
+}
+
+var benchmarkHotOperators []*operator.Operator
+
+type hotSolverCountingRank struct {
+	rank
+	evaluations int
+}
+
+func (r *hotSolverCountingRank) calcProgressiveRank() {
+	r.evaluations++
+	r.rank.calcProgressiveRank()
+}
+
+func BenchmarkHotSolverSearch(b *testing.B) {
+	for _, stores := range []int{4, 16} {
+		for _, peers := range []int{8, 64} {
+			for _, scenario := range []string{"no-source", "no-destination", "move", "revert"} {
+				b.Run(fmt.Sprintf("stores=%d/peers=%d/%s", stores, peers, scenario), func(b *testing.B) {
+					hot, counted := prepareHotSolverSearch(b, stores, peers, scenario)
+					hot.searchRevertRegions[writePeer] = scenario == "revert"
+					ops := newBalanceSolver(hot, counted, utils.Write, movePeer).solve()
+					switch scenario {
+					case "no-source", "no-destination":
+						require.Empty(b, ops)
+					case "move":
+						require.Len(b, ops, 1)
+					case "revert":
+						require.Len(b, ops, 2)
+					}
+					counted.regionLookups = 0
+					evaluations := 0
+					b.ReportAllocs()
+					for b.Loop() {
+						hot.searchRevertRegions[writePeer] = scenario == "revert"
+						bs := newBalanceSolver(hot, counted, utils.Write, movePeer)
+						rank := &hotSolverCountingRank{rank: bs.rank}
+						bs.rank = rank
+						benchmarkHotOperators = bs.solve()
+						evaluations += rank.evaluations
+					}
+					b.ReportMetric(float64(counted.regionLookups)/float64(b.N), "region-lookups/op")
+					b.ReportMetric(float64(evaluations)/float64(b.N), "candidate-evals/op")
+				})
+			}
+		}
+	}
+}
+
+func prepareHotSolverSearch(tb testing.TB, stores, peers int, scenario string) (*hotScheduler, *hotSolverTestCluster) {
+	cancel, _, cluster, controller := prepareSchedulersTest()
+	tb.Cleanup(cancel)
+	scheduler, err := CreateScheduler(writeType, controller, storage.NewStorageWithMemoryBackend(), nil)
+	require.NoError(tb, err)
+	hot := scheduler.(*hotScheduler)
+	for id := uint64(1); id <= uint64(stores+2); id++ {
+		cluster.AddRegionStore(id, peers)
+	}
+	for id := uint64(1); id <= uint64(stores); id++ {
+		loads, peerLoads := statistics.Loads{20e6, 14e6}, []float64{3e6, 1.8e6, 0, 0}
+		if int(id) > stores/2 {
+			loads, peerLoads = statistics.Loads{10e6, 16e6}, []float64{0.1e6, 2e6, 0, 0}
+		}
+		switch scenario {
+		case "no-source":
+			loads = statistics.Loads{15e6, 15e6}
+		case "no-destination":
+			loads = statistics.Loads{20e6, 20e6}
+		}
+		stats := make([]*statistics.HotPeerStat, peers)
+		for i := range stats {
+			regionID := id*1000000 + uint64(i)
+			regionPeers := []*metapb.Peer{
+				{Id: regionID*10 + 1, StoreId: id},
+				{Id: regionID*10 + 2, StoreId: uint64(stores + 1)},
+				{Id: regionID*10 + 3, StoreId: uint64(stores + 2)},
+			}
+			cluster.PutRegion(core.NewRegionInfo(&metapb.Region{
+				Id: regionID, Peers: regionPeers,
+				StartKey: []byte(fmt.Sprintf("%020d", regionID)),
+				EndKey:   []byte(fmt.Sprintf("%020d", regionID+1)),
+			}, regionPeers[1], core.SetApproximateSize(10)))
+			stats[i] = &statistics.HotPeerStat{RegionID: regionID, StoreID: id, Loads: peerLoads}
+		}
+		detail := benchmarkHotStore(id, stats, loads)
+		detail.StoreInfo = cluster.GetStore(id)
+		hot.stLoadInfos[writePeer][id] = detail
+	}
+	return hot, &hotSolverTestCluster{SchedulerCluster: cluster}
 }
