@@ -341,6 +341,27 @@ func TestForwardTSOWhenPrimaryChanged(t *testing.T) {
 	suite.checkAvailableTSO(re)
 }
 
+func TestForwardTSOWhenPrimaryAddrMissing(t *testing.T) {
+	re := require.New(t)
+	suite := NewPDServiceForward(re)
+	defer suite.ShutDown()
+
+	tc, err := tests.NewTestTSOCluster(suite.ctx, 1, suite.backendEndpoints)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForDefaultPrimaryServing(re)
+	primary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, mcs.TSOServiceName)
+	re.True(exist)
+
+	// Simulate the watcher missing the PUT of the primary: the cached address is gone
+	// and no watch event will bring it back.
+	suite.pdLeader.GetServer().DeleteServicePrimaryAddr(mcs.TSOServiceName)
+	addr, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, mcs.TSOServiceName)
+	re.True(exist)
+	re.Equal(primary, addr)
+	suite.checkAvailableTSO(re)
+}
+
 func TestResignTSOPrimaryForward(t *testing.T) {
 	re := require.New(t)
 	suite := NewPDServiceForward(re)

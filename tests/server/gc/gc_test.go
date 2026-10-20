@@ -29,6 +29,8 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
+	"github.com/tikv/pd/pkg/errs"
+	gcmanager "github.com/tikv/pd/pkg/gc"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -843,9 +845,12 @@ func TestGetGCStateSlowPathReadsLatestStateIfLeaderLostBeforeRead(t *testing.T) 
 	oldLeader := leaderServer.GetConfig().Name
 	req.ExcludeGcBarriers = true
 
-	// Start with no local cache and stop immediately before the slow path. The
-	// request has already passed the initial server-side role check, but after
-	// the transfer the manager must bypass cache and continue with the IO read.
+	// Force a fast-path cache miss even if NextGen startup warmup has already
+	// populated null scope. The request still excludes barriers, and the hook
+	// below pauses after the server-side role check before the slow-path read.
+	const skipCacheFailpoint = "github.com/tikv/pd/pkg/gc/getGCStateSkipCache"
+	re.NoError(failpoint.Enable(skipCacheFailpoint, "return(true)"))
+	defer func() { re.NoError(failpoint.Disable(skipCacheFailpoint)) }()
 	point := enableBlockingFailpoint(re, getGCStateBeforeSlowPathFailpoint)
 	defer point.releaseAndDisable(re)
 
@@ -881,4 +886,140 @@ func TestGetGCStateSlowPathReadsLatestStateIfLeaderLostBeforeRead(t *testing.T) 
 	re.NoError(res.err)
 	re.Nil(res.resp.GetHeader().GetError())
 	re.Equal(uint64(20), res.resp.GetGcState().GetTxnSafePoint())
+}
+
+func TestGetGCStateLeaderTransferRetiresInFlightLoad(t *testing.T) {
+	re := require.New(t)
+	// Observe actual cache stores, including the initial NextGen warmup. Waiting
+	// for that warmup prevents it from racing with the later cache invalidation.
+	const publishedFailpoint = "github.com/tikv/pd/pkg/gc/onGCStateLoadPublished"
+	published := make(chan *gcmanager.GCStateManager, 16)
+	re.NoError(failpoint.EnableCall(publishedFailpoint, func(manager *gcmanager.GCStateManager, id uint32) {
+		if id == constant.NullKeyspaceID {
+			published <- manager
+		}
+	}))
+	defer func() { re.NoError(failpoint.Disable(publishedFailpoint)) }()
+	cluster, req, cleanup := newGCStateLeaderTransitionCluster(t)
+	defer cleanup()
+	oldLeader := cluster.GetLeaderServer()
+	oldManager := oldLeader.GetServer().GetGCStateManager()
+	newLeader := cluster.GetServer(cluster.GetFollower())
+	re.NotNil(newLeader)
+	if kerneltype.IsNextGen() {
+		select {
+		case manager := <-published:
+			re.Same(oldManager, manager)
+		case <-time.After(5 * time.Second):
+			t.Fatal("initial null-scope warmup did not publish")
+		}
+	}
+	_, err := oldManager.AdvanceTxnSafePoint(constant.NullKeyspaceID, 90, time.Now())
+	re.NoError(err)
+	_, _, err = oldManager.AdvanceGCSafePoint(constant.NullKeyspaceID, 70)
+	re.NoError(err)
+	// A rejected real write invalidates both cache paths. Merely forcing a
+	// fast-path miss would still allow the batch loader to find a cached value.
+	_, _, err = oldManager.AdvanceGCSafePoint(constant.NullKeyspaceID, 91)
+	re.Error(err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	read := make(chan struct{})
+	canceled := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	const readFailpoint = "github.com/tikv/pd/pkg/gc/afterGCStateLoadBatchRead"
+	re.NoError(failpoint.EnableCall(readFailpoint, func(loadCtx context.Context, manager *gcmanager.GCStateManager, ids []uint32) {
+		if manager != oldManager || !slices.Contains(ids, constant.NullKeyspaceID) {
+			return
+		}
+		close(read)
+		select {
+		case <-loadCtx.Done():
+			close(canceled)
+		case <-release:
+			return
+		case <-ctx.Done():
+			return
+		}
+		// Keep the successful, old storage result pending even after retirement,
+		// so the test can check joined readers and advance the new leader first.
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+	}))
+	defer func() { re.NoError(failpoint.Disable(readFailpoint)) }()
+	defer unblock()
+	joined := make(chan struct{}, 1)
+	const joinedFailpoint = "github.com/tikv/pd/pkg/gc/onGCStateLoadJoined"
+	re.NoError(failpoint.EnableCall(joinedFailpoint, func(id uint32) {
+		if id == constant.NullKeyspaceID {
+			joined <- struct{}{}
+		}
+	}))
+	defer func() { re.NoError(failpoint.Disable(joinedFailpoint)) }()
+	client, conn := testutil.MustNewGrpcClient(re, oldLeader.GetAddr())
+	defer conn.Close()
+	req.ExcludeGcBarriers = true
+	type result struct {
+		resp *pdpb.GetGCStateResponse
+		err  error
+	}
+	request := func(done chan<- result) {
+		resp, err := client.GetGCState(ctx, req)
+		done <- result{resp: resp, err: err}
+	}
+	wait := func(event <-chan struct{}, description string) {
+		t.Helper()
+		select {
+		case <-event:
+		case <-time.After(5 * time.Second):
+			t.Fatal(description)
+		}
+	}
+	assertRetired := func(done <-chan result) {
+		t.Helper()
+		select {
+		case result := <-done:
+			re.NoError(result.err)
+			re.NotNil(result.resp.GetHeader().GetError())
+			re.Contains(result.resp.GetHeader().GetError().GetMessage(), errs.ErrNotLeader.Error())
+			re.Nil(result.resp.GetGcState())
+		case <-time.After(5 * time.Second):
+			t.Fatal("old-generation reader did not exit after retirement")
+		}
+	}
+	owner := make(chan result, 1)
+	go request(owner)
+	wait(read, "cold batch did not finish its storage read")
+	waiter := make(chan result, 1)
+	go request(waiter)
+	wait(joined, "foreground reader did not join the in-flight batch")
+	re.NoError(oldLeader.ResignLeaderWithRetry())
+	wait(canceled, "RaftCluster.Stop did not cancel the old generation")
+	assertRetired(waiter)
+	// Check the specific successor: the retired node is deliberately still
+	// draining its old load and may not yet report the successor's leadership.
+	re.Eventually(newLeader.IsLeader, 15*time.Second, 10*time.Millisecond)
+	_, err = newLeader.GetServer().GetGCStateManager().AdvanceTxnSafePoint(constant.NullKeyspaceID, 120, time.Now())
+	re.NoError(err)
+	_, _, err = newLeader.GetServer().GetGCStateManager().AdvanceGCSafePoint(constant.NullKeyspaceID, 100)
+	re.NoError(err)
+	unblock()
+	assertRetired(owner)
+	re.Equal(newLeader.GetConfig().Name, cluster.WaitLeader())
+	// Stop must drain the old loader before we inspect the complete publication
+	// history; a fresh value on another node alone would miss a stale old store.
+	re.Nil(oldLeader.GetRaftCluster())
+	for len(published) > 0 {
+		re.NotSame(oldManager, <-published, "retired loader published its old safe-point pair")
+	}
+	fresh, err := getGCStateFromAddr(ctx, re, newLeader.GetAddr(), req)
+	re.NoError(err)
+	re.Nil(fresh.GetHeader().GetError())
+	re.Equal(uint64(120), fresh.GetGcState().GetTxnSafePoint())
+	re.Equal(uint64(100), fresh.GetGcState().GetGcSafePoint())
 }

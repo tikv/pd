@@ -92,6 +92,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
 
@@ -571,6 +572,10 @@ func (s *Server) startServer(ctx context.Context) error {
 		log.Info("no metering config provided, the metering writer will not be started")
 	}
 	s.gcStateManager = gc.NewGCStateManager(s.storage.GetGCStateProvider(), s.cfg.PDServerCfg, s.keyspaceManager)
+	s.gcStateManager.SetConfigGetter(s.persistOptions.GetPDServerConfig)
+	if kerneltype.IsNextGen() {
+		s.gcStateManager.SetEtcdClient(s.client)
+	}
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, "", s.cluster)
 	// initial hot_region_storage in here.
 
@@ -2417,6 +2422,12 @@ func (s *Server) GetServicePrimaryAddr(ctx context.Context, serviceName string) 
 		if v, ok := s.servicePrimaryMap.Load(serviceName); ok {
 			return v.(string), true
 		}
+		// The watcher may have missed the PUT of a new TSO primary (e.g. an etcd watch gap),
+		// so reload from etcd instead of waiting for a watch event that may never come.
+		// ForceLoad is rate-limited, so retrying it on every miss is cheap.
+		if serviceName == mcs.TSOServiceName && s.tsoPrimaryWatcher != nil {
+			s.tsoPrimaryWatcher.ForceLoad()
+		}
 		select {
 		case <-s.ctx.Done():
 			return "", false
@@ -2432,6 +2443,12 @@ func (s *Server) GetServicePrimaryAddr(ctx context.Context, serviceName string) 
 // Note: This function is only used for test.
 func (s *Server) SetServicePrimaryAddr(serviceName, addr string) {
 	s.servicePrimaryMap.Store(serviceName, addr)
+}
+
+// DeleteServicePrimaryAddr deletes the primary address directly.
+// Note: This function is only used for test.
+func (s *Server) DeleteServicePrimaryAddr(serviceName string) {
+	s.servicePrimaryMap.Delete(serviceName)
 }
 
 func (s *Server) initTSOPrimaryWatcher() {
