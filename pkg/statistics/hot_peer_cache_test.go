@@ -943,6 +943,63 @@ func TestRemoveExpireItems(t *testing.T) {
 	re.Zero(hotCacheStatusGauge.DeletePartialMatch(prometheus.Labels{"store": storeTag(store2ID), "type": cache.kind.String()}))
 }
 
+func TestRemoveExpiredPeerPreservesOtherStores(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster := core.NewBasicCluster()
+	cache := NewHotPeerCache(ctx, cluster, utils.Read)
+	cache.topNTTL = time.Hour
+	interval := uint64(utils.Read.ReportInterval())
+	region, err := buildRegion(cluster, utils.Read, 3, interval)
+	re.NoError(err)
+	regionID := region.GetID()
+	expiredStoreID := region.GetPeers()[0].GetStoreId()
+	// Different TTLs make only the first peer expire without relying on sleeps.
+	cache.peersOfStore[expiredStoreID] = utils.NewTopN(utils.DimLen, TopNN, -time.Second)
+	stats := cache.CheckPeerFlow(region, region.GetPeers(), region.GetLoads(), interval)
+	re.Len(stats, 3)
+	for _, stat := range stats {
+		cache.putItem(stat)
+		re.Same(stat, cache.getHotPeerStat(regionID, stat.StoreID))
+		re.Contains(cache.storesOfRegion[regionID], stat.StoreID)
+		re.Contains(cache.regionsOfStore[stat.StoreID], regionID)
+	}
+
+	cache.gc()
+	re.Contains(cache.peersOfStore, expiredStoreID)
+	re.Nil(cache.getHotPeerStat(regionID, expiredStoreID))
+	re.NotContains(cache.storesOfRegion[regionID], expiredStoreID)
+	re.NotContains(cache.regionsOfStore[expiredStoreID], regionID)
+	re.Len(cache.storesOfRegion[regionID], 2)
+	for _, stat := range stats[1:] {
+		re.Same(stat, cache.getHotPeerStat(regionID, stat.StoreID))
+		re.Contains(cache.storesOfRegion[regionID], stat.StoreID)
+		re.Contains(cache.regionsOfStore[stat.StoreID], regionID)
+	}
+
+	// A surviving peer omitted from the next store heartbeat must still cool down.
+	storeID := stats[1].StoreID
+	cold := cache.CheckColdPeer(storeID, map[uint64]*core.RegionInfo{}, interval)
+	re.Len(cold, 1)
+	re.Equal(regionID, cold[0].RegionID)
+	re.Equal(storeID, cold[0].StoreID)
+	re.True(cold[0].inCold)
+	re.Equal(stats[1].AntiCount-1, cold[0].AntiCount)
+	cache.UpdateStat(cold[0])
+	re.True(cache.getHotPeerStat(regionID, storeID).inCold)
+
+	// Region peer removal must also find the surviving peer through the reverse index.
+	removed := cache.CollectExpiredItems(region.Clone(core.WithRemoveStorePeer(storeID)))
+	re.Len(removed, 1)
+	re.Equal(storeID, removed[0].StoreID)
+	re.Equal(utils.Remove, removed[0].actionType)
+	cache.UpdateStat(removed[0])
+	re.Nil(cache.getHotPeerStat(regionID, storeID))
+	re.NotContains(cache.storesOfRegion[regionID], storeID)
+	re.NotContains(cache.regionsOfStore[storeID], regionID)
+}
+
 func TestDifferentReportInterval(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
