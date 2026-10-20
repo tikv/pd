@@ -140,13 +140,13 @@ func (f *HotPeerCache) GetHotPeerStats(minHotDegree int) map[uint64][]*HotPeerSt
 	res := make(map[uint64][]*HotPeerStat)
 	defaultAntiCount := f.kind.DefaultAntiCount()
 	for storeID, peers := range f.peersOfStore {
-		values := peers.GetAll()
-		stat := make([]*HotPeerStat, 0, len(values))
-		for _, v := range values {
+		stat := make([]*HotPeerStat, 0, peers.Len())
+		peers.Range(func(v utils.TopNItem) bool {
 			if peer := v.(*HotPeerStat); peer.HotDegree >= minHotDegree && !peer.inCold && peer.AntiCount == defaultAntiCount {
 				stat = append(stat, peer)
 			}
-		}
+			return true
+		})
 		res[storeID] = stat
 	}
 	return res
