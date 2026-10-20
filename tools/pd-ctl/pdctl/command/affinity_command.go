@@ -156,14 +156,15 @@ func getGroupID(cmd *cobra.Command) (string, error) {
 		return "", errors.New("--table-id is required")
 	}
 	partitionID, _ := cmd.Flags().GetUint64("partition-id")
-	groupID := FormatGroupID(tableID, partitionID)
+	var keyspaceID *uint32
 	if cmd.Flags().Changed("keyspace-id") {
-		keyspaceID, _ := cmd.Flags().GetUint32("keyspace-id")
-		if keyspaceID > 0xFFFFFF {
+		id, _ := cmd.Flags().GetUint32("keyspace-id")
+		if id > 0xFFFFFF {
 			return "", errors.New("--keyspace-id must be between 0 and 16777215")
 		}
-		groupID = strings.Replace(groupID, "_tidb_", fmt.Sprintf("_tidb_ks%d_", keyspaceID), 1)
+		keyspaceID = &id
 	}
+	groupID := formatAffinityGroupID(tableID, partitionID, keyspaceID)
 	if err := affinity.ValidateGroupID(groupID); err != nil {
 		return "", err
 	}
@@ -172,10 +173,18 @@ func getGroupID(cmd *cobra.Command) (string, error) {
 
 // FormatGroupID builds the affinity group ID from table/partition IDs following TiDB convention.
 func FormatGroupID(tableID, partitionID uint64) string {
-	if partitionID > 0 {
-		return fmt.Sprintf("_tidb_pt_%d_p%d", tableID, partitionID)
+	return formatAffinityGroupID(tableID, partitionID, nil)
+}
+
+func formatAffinityGroupID(tableID, partitionID uint64, keyspaceID *uint32) string {
+	prefix := "_tidb_"
+	if keyspaceID != nil {
+		prefix = fmt.Sprintf("_tidb_ks%d_", *keyspaceID)
 	}
-	return fmt.Sprintf("_tidb_t_%d", tableID)
+	if partitionID > 0 {
+		return fmt.Sprintf("%spt_%d_p%d", prefix, tableID, partitionID)
+	}
+	return fmt.Sprintf("%st_%d", prefix, tableID)
 }
 
 func parseUint64List(input string) ([]uint64, error) {
