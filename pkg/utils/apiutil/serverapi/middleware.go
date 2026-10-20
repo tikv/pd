@@ -30,7 +30,6 @@ import (
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
-	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/server"
 )
@@ -147,7 +146,7 @@ func MatchMicroserviceRedirect(
 		if rule.TargetServiceName == constant.SchedulingServiceName && !isServiceIndependent(constant.SchedulingServiceName) {
 			continue
 		}
-		if !strings.HasPrefix(r.URL.Path, rule.MatchPath) || !slice.Contains(rule.MatchMethods, r.Method) {
+		if !strings.HasPrefix(r.URL.Path, rule.MatchPath) || !slices.Contains(rule.MatchMethods, r.Method) {
 			continue
 		}
 		if rule.Filter != nil && !rule.Filter(r) {

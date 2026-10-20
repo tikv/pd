@@ -789,7 +789,7 @@ func EqualWithoutOrder[T comparable](a, b []T) bool {
 		return false
 	}
 	for _, item := range a {
-		if !Contains(b, item) {
+		if !slices.Contains(b, item) {
 			return false
 		}
 	}

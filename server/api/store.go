@@ -34,7 +34,6 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/response"
 	sc "github.com/tikv/pd/pkg/schedule/config"
-	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/server"
 )
@@ -675,7 +674,7 @@ func (h *storesHandler) GetStoresByState(w http.ResponseWriter, r *http.Request)
 	if v, ok := r.URL.Query()["state"]; ok {
 		for _, s := range v {
 			stateName := strings.ToLower(s)
-			if stateName != "" && !slice.Contains(lowerStateName, stateName) {
+			if stateName != "" && !slices.Contains(lowerStateName, stateName) {
 				h.rd.JSON(w, http.StatusBadRequest, "unknown StoreState: "+s)
 				return
 			} else if stateName != "" {
@@ -694,7 +693,7 @@ func (h *storesHandler) GetStoresByState(w http.ResponseWriter, r *http.Request)
 		}
 
 		storeInfo := response.BuildStoreInfo(cfg, store)
-		if queryStates != nil && !slice.Contains(queryStates, strings.ToLower(storeInfo.Store.StateName)) {
+		if queryStates != nil && !slices.Contains(queryStates, strings.ToLower(storeInfo.Store.StateName)) {
 			continue
 		}
 		StoresInfo.Stores = append(StoresInfo.Stores, storeInfo)

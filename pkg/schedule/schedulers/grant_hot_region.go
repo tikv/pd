@@ -17,6 +17,7 @@ package schedulers
 import (
 	"math/rand/v2"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -55,7 +56,7 @@ type grantHotRegionSchedulerConfig struct {
 func (conf *grantHotRegionSchedulerConfig) setStore(leaderID uint64, peers []uint64) {
 	conf.Lock()
 	defer conf.Unlock()
-	if !slice.Contains(peers, leaderID) {
+	if !slices.Contains(peers, leaderID) {
 		peers = append(peers, leaderID)
 	}
 	conf.StoreLeaderID = leaderID

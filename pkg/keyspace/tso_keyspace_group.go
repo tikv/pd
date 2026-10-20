@@ -936,7 +936,7 @@ func (m *GroupManager) GetGroupByKeyspaceID(id uint32) (uint32, error) {
 	defer m.RUnlock()
 	for _, groups := range m.groups {
 		for _, group := range groups.GetAll() {
-			if slice.Contains(group.Keyspaces, id) {
+			if slices.Contains(group.Keyspaces, id) {
 				return group.ID, nil
 			}
 		}
@@ -1150,7 +1150,7 @@ func (m *GroupManager) removeKeyspacesFromGroupSingleTxn(
 			if _, alreadyRemoved := toRemove[keyspaceID]; alreadyRemoved {
 				continue
 			}
-			if !slice.Contains(kg.Keyspaces, keyspaceID) {
+			if !slices.Contains(kg.Keyspaces, keyspaceID) {
 				continue
 			}
 			metaServiceGroupID, removed, _, err := km.tryRemoveKeyspaceMetadata(txn, keyspaceID, nil)
@@ -1244,7 +1244,7 @@ func (m *GroupManager) removeKeyspacesFromGroupSmallBatch(
 				hasMore = true
 				continue
 			}
-			if !slice.Contains(kg.Keyspaces, keyspaceID) {
+			if !slices.Contains(kg.Keyspaces, keyspaceID) {
 				processedIDs = append(processedIDs, keyspaceID)
 				continue
 			}
@@ -1463,7 +1463,7 @@ func (m *GroupManager) updateKeyspaceForGroupLocked(userKind endpoint.UserKind, 
 		changed := false
 		switch mutation {
 		case opAdd:
-			if !slice.Contains(kg.Keyspaces, keyspaceID) {
+			if !slices.Contains(kg.Keyspaces, keyspaceID) {
 				kg.Keyspaces = append(kg.Keyspaces, keyspaceID)
 				changed = true
 			}
@@ -1545,7 +1545,7 @@ func (m *GroupManager) updateKeyspaceGroupWithMembershipLockHeld(
 			return errs.ErrKeyspaceGroupInMerging.FastGenByArgs(uint32(newID))
 		}
 
-		if !slice.Contains(newKG.Keyspaces, keyspaceID) {
+		if !slices.Contains(newKG.Keyspaces, keyspaceID) {
 			newKG.Keyspaces = append(newKG.Keyspaces, keyspaceID)
 			slices.Sort(newKG.Keyspaces)
 		}
@@ -2015,7 +2015,7 @@ func (m *GroupManager) MergeKeyspaceGroups(mergeTargetID uint32, mergeList []uin
 	if (mergeListNum+1)*2 > etcdutil.MaxEtcdTxnOps {
 		return errs.ErrExceedMaxEtcdTxnOps
 	}
-	if slice.Contains(mergeList, constant.DefaultKeyspaceGroupID) {
+	if slices.Contains(mergeList, constant.DefaultKeyspaceGroupID) {
 		return errs.ErrModifyDefaultKeyspaceGroup
 	}
 	var (
