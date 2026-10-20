@@ -164,6 +164,72 @@ func TestRUTimelineConcurrentRecording(t *testing.T) {
 	re.Equal(float64(recorded.Load()), reported)
 }
 
+func sizeOf(req *rmpb.TokenBucketsRequest) int { return req.Size() }
+
+func TestTrimRUTimelines(t *testing.T) {
+	re := require.New(t)
+	request := func(name string, start int64, offsets []uint32) *rmpb.TokenBucketRequest {
+		buckets := make([]*rmpb.RUConsumptionBucket, len(offsets))
+		for i, off := range offsets {
+			buckets[i] = &rmpb.RUConsumptionBucket{Rru: float64(off) + 1, Offset: off}
+		}
+		return &rmpb.TokenBucketRequest{ResourceGroupName: name, ConsumptionSinceLastRequest: &rmpb.Consumption{
+			RuBySecond: &rmpb.RUConsumptionBySecond{StartUnixSec: start, EndUnixSec: start + 90, Buckets: buckets},
+		}}
+	}
+	requests := []*rmpb.TokenBucketRequest{
+		request("a", 100, []uint32{0, 1, 2, 3, 4}),
+		request("b", 200, []uint32{0}),
+		request("idle", 300, nil),
+	}
+	// Keep only the newest two seconds of "a": offsets 3 and 4 become 0 and 1,
+	// values 4 and 5, and the start moves to 103. "b" keeps its only second
+	// and the idle group keeps its zero-bucket watermark.
+	expected := []*rmpb.TokenBucketRequest{
+		request("a", 103, []uint32{0, 1}),
+		request("b", 200, []uint32{0}),
+		request("idle", 300, nil),
+	}
+	expected[0].ConsumptionSinceLastRequest.RuBySecond.Buckets[0].Rru = 4
+	expected[0].ConsumptionSinceLastRequest.RuBySecond.Buckets[1].Rru = 5
+	expected[0].ConsumptionSinceLastRequest.RuBySecond.EndUnixSec = 190
+	budget := (&rmpb.TokenBucketsRequest{Requests: expected}).Size()
+	trimRUTimelines(requests, budget)
+	re.Equal(expected, requests)
+	re.Equal(int64(190), requests[0].ConsumptionSinceLastRequest.RuBySecond.EndUnixSec)
+
+	// A budget for exactly one bucket keeps the newest second s+9, relabels
+	// it to offset 0 and advances the start to 109.
+	oneRequests := []*rmpb.TokenBucketRequest{
+		request("a", 100, []uint32{0, 1, 2, 3, 4}),
+		request("b", 200, []uint32{0}),
+		request("idle", 300, nil),
+	}
+	oneExpected := []*rmpb.TokenBucketRequest{
+		request("a", 104, []uint32{0}),
+		request("b", 200, []uint32{0}),
+		request("idle", 300, nil),
+	}
+	oneExpected[0].ConsumptionSinceLastRequest.RuBySecond.Buckets[0].Rru = 5
+	oneExpected[0].ConsumptionSinceLastRequest.RuBySecond.EndUnixSec = 190
+	trimRUTimelines(oneRequests, (&rmpb.TokenBucketsRequest{Requests: oneExpected}).Size())
+	re.Equal(oneExpected, oneRequests)
+
+	// A zero budget keeps the watermark only: the active groups end their
+	// interval where it ended, while the idle group is unchanged and still
+	// confirms its coverage.
+	watermark := []*rmpb.TokenBucketRequest{
+		{ResourceGroupName: "a", ConsumptionSinceLastRequest: &rmpb.Consumption{RuBySecond: &rmpb.RUConsumptionBySecond{StartUnixSec: 190, EndUnixSec: 190}}},
+		{ResourceGroupName: "b", ConsumptionSinceLastRequest: &rmpb.Consumption{RuBySecond: &rmpb.RUConsumptionBySecond{StartUnixSec: 290, EndUnixSec: 290}}},
+		{ResourceGroupName: "idle", ConsumptionSinceLastRequest: &rmpb.Consumption{RuBySecond: &rmpb.RUConsumptionBySecond{StartUnixSec: 300, EndUnixSec: 390, Buckets: []*rmpb.RUConsumptionBucket{}}}},
+	}
+	trimRUTimelines(requests, (&rmpb.TokenBucketsRequest{Requests: watermark}).Size())
+	re.Equal(watermark, requests)
+	re.Equal(int64(190), requests[0].ConsumptionSinceLastRequest.RuBySecond.EndUnixSec)
+	re.Equal(int64(290), requests[1].ConsumptionSinceLastRequest.RuBySecond.EndUnixSec)
+	re.Equal(int64(300), requests[2].ConsumptionSinceLastRequest.RuBySecond.StartUnixSec)
+}
+
 func timelineTotals(gc *groupCostController) (rru, wru float64) {
 	gc.ruTimeline.mu.Lock()
 	defer gc.ruTimeline.mu.Unlock()
@@ -320,4 +386,128 @@ func TestRUTimelineSparseRoundTrip(t *testing.T) {
 	re.Equal(sent.StartUnixSec, decoded.StartUnixSec)
 	re.Equal(sent.EndUnixSec, decoded.EndUnixSec)
 	re.Equal(sent.Buckets, decoded.Buckets)
+}
+
+func TestTrimRUTimelinesWireBudget(t *testing.T) {
+	re := require.New(t)
+	const groups, seconds = 16000, 90
+	name := "0123456789abcdef0123456789abcdef"
+	requests := make([]*rmpb.TokenBucketRequest, groups)
+	for g := range requests {
+		buckets := make([]*rmpb.RUConsumptionBucket, seconds)
+		for i := range buckets {
+			buckets[i] = &rmpb.RUConsumptionBucket{Rru: 1.5, Wru: 2.5, Offset: uint32(i)}
+		}
+		requests[g] = &rmpb.TokenBucketRequest{
+			ResourceGroupName: name,
+			Request: &rmpb.TokenBucketRequest_RuItems{RuItems: &rmpb.TokenBucketRequest_RequestRU{
+				RequestRU: []*rmpb.RequestUnitItem{
+					{Type: rmpb.RequestUnitType_RU, Value: 100}, {Type: rmpb.RequestUnitType_RU, Value: 101},
+					{Type: rmpb.RequestUnitType_RU, Value: 102},
+				},
+			}},
+			ConsumptionSinceLastRequest: &rmpb.Consumption{
+				RRU: 1, WRU: 2, ReadBytes: 3, WriteBytes: 4, TotalCpuTimeMs: 5, SqlLayerCpuTimeMs: 6,
+				RuBySecond: &rmpb.RUConsumptionBySecond{StartUnixSec: 1800000000, EndUnixSec: 1800000090, Buckets: buckets},
+			},
+		}
+	}
+	full := &rmpb.TokenBucketsRequest{Requests: requests, TargetRequestPeriodMs: 1000, ClientUniqueId: 1}
+	re.Greater(full.Size(), 4<<20, "the unbatched timeline must exceed the gRPC limit")
+	trimRUTimelines(requests, ruTimelineRequestBudget)
+	re.LessOrEqual(full.Size(), 4<<20)
+	re.LessOrEqual(full.Size(), ruTimelineRequestBudget)
+}
+
+func TestTrimRUTimelinesSingleGroupKeepsAllSeconds(t *testing.T) {
+	re := require.New(t)
+	buckets := make([]*rmpb.RUConsumptionBucket, 90)
+	for i := range buckets {
+		buckets[i] = &rmpb.RUConsumptionBucket{Rru: 1, Offset: uint32(i)}
+	}
+	requests := []*rmpb.TokenBucketRequest{{ResourceGroupName: "g", ConsumptionSinceLastRequest: &rmpb.Consumption{
+		RuBySecond: &rmpb.RUConsumptionBySecond{StartUnixSec: 100, EndUnixSec: 190, Buckets: buckets},
+	}}}
+	trimRUTimelines(requests, ruTimelineRequestBudget)
+	re.Len(requests[0].ConsumptionSinceLastRequest.RuBySecond.Buckets, 90)
+}
+
+func TestTrimRUTimelinesFastPathCost(t *testing.T) {
+	const groups = 16000
+	name := "0123456789abcdef0123456789abcdef"
+	requests := make([]*rmpb.TokenBucketRequest, groups)
+	for g := range requests {
+		requests[g] = &rmpb.TokenBucketRequest{
+			ResourceGroupName: name,
+			ConsumptionSinceLastRequest: &rmpb.Consumption{
+				RRU: 1, WRU: 2,
+				RuBySecond: &rmpb.RUConsumptionBySecond{StartUnixSec: 1800000000, EndUnixSec: 1800000002,
+					Buckets: []*rmpb.RUConsumptionBucket{{Rru: 1, Offset: 0}, {Rru: 2, Offset: 1}}},
+			},
+		}
+	}
+	begin := time.Now()
+	trimRUTimelines(requests, ruTimelineRequestBudget)
+	t.Logf("groups=%d no-trim fast path cost=%s", groups, time.Since(begin))
+}
+
+func TestTrimRUTimelinesDropsTimelineField(t *testing.T) {
+	const groups = 29000
+	name := "0123456789abcdef0123456789abcdef"
+	requests := make([]*rmpb.TokenBucketRequest, groups)
+	for g := range requests {
+		requests[g] = &rmpb.TokenBucketRequest{
+			ResourceGroupName: name,
+			Request: &rmpb.TokenBucketRequest_RuItems{RuItems: &rmpb.TokenBucketRequest_RequestRU{
+				RequestRU: []*rmpb.RequestUnitItem{
+					{Type: rmpb.RequestUnitType_RU, Value: 100}, {Type: rmpb.RequestUnitType_RU, Value: 101},
+					{Type: rmpb.RequestUnitType_RU, Value: 102},
+				},
+			}},
+			ConsumptionSinceLastRequest: &rmpb.Consumption{
+				RRU: 1.5, WRU: 2.5, ReadBytes: 1024, WriteBytes: 2048, TotalCpuTimeMs: 10, SqlLayerCpuTimeMs: 5,
+				RuBySecond: &rmpb.RUConsumptionBySecond{StartUnixSec: 1800000000, EndUnixSec: 1800000090,
+					Buckets: []*rmpb.RUConsumptionBucket{{Rru: 1, Offset: 0}}},
+			},
+		}
+	}
+	full := &rmpb.TokenBucketsRequest{Requests: requests, TargetRequestPeriodMs: 1000, ClientUniqueId: 1}
+	base := &rmpb.TokenBucketsRequest{Requests: make([]*rmpb.TokenBucketRequest, groups), TargetRequestPeriodMs: 1000, ClientUniqueId: 1}
+	for i, req := range requests {
+		base.Requests[i] = &rmpb.TokenBucketRequest{ResourceGroupName: req.ResourceGroupName, Request: req.Request,
+			ConsumptionSinceLastRequest: &rmpb.Consumption{RRU: req.ConsumptionSinceLastRequest.RRU, WRU: req.ConsumptionSinceLastRequest.WRU,
+				ReadBytes: req.ConsumptionSinceLastRequest.ReadBytes, WriteBytes: req.ConsumptionSinceLastRequest.WriteBytes,
+				TotalCpuTimeMs: req.ConsumptionSinceLastRequest.TotalCpuTimeMs, SqlLayerCpuTimeMs: req.ConsumptionSinceLastRequest.SqlLayerCpuTimeMs}}
+	}
+	t.Logf("full=%d base=%d budget=%d", full.Size(), base.Size(), ruTimelineRequestBudget)
+	trimRUTimelines(requests, ruTimelineRequestBudget)
+	re := require.New(t)
+	re.LessOrEqual(full.Size(), ruTimelineRequestBudget)
+	for _, req := range requests {
+		re.Nil(req.GetConsumptionSinceLastRequest().GetRuBySecond())
+	}
+}
+
+func TestTrimmedNilTimelineIsNotAcknowledged(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	provider := newMockResourceGroupProvider()
+	provider.On("AcquireTokenBuckets", mock.Anything, mock.Anything).Return([]*rmpb.TokenBucketResponse(nil), nil)
+	c, err := NewResourceGroupController(ctx, 1, provider, nil, constants.NullKeyspaceID)
+	re.NoError(err)
+	gc := createTestGroupCostController(re)
+	start := time.Now().Add(-3 * time.Second)
+	gc.ruTimeline = newRUTimeline(start)
+	gc.ruTimeline.recordLocked(start.Add(time.Second), 1, 0)
+	gc.run.requestInProgress = true
+	req := gc.collectRequestAndConsumption(periodicReport)
+	trimRUTimelines([]*rmpb.TokenBucketRequest{req}, 1)
+	re.Nil(req.GetConsumptionSinceLastRequest().GetRuBySecond())
+	c.sendTokenBucketRequests(ctx, []*rmpb.TokenBucketRequest{req}, []*groupCostController{gc}, FromPeriodReport, notifyMsg{})
+	<-c.tokenResponseChan
+	gc.ruTimeline.mu.Lock()
+	from := gc.ruTimeline.from
+	gc.ruTimeline.mu.Unlock()
+	re.Equal(start.Unix(), from, "a nil timeline is not acknowledged and must be resent")
 }
