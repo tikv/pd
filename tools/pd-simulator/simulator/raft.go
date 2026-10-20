@@ -238,11 +238,11 @@ func (r *RaftEngine) GetRegion(regionID uint64) *core.RegionInfo {
 	return nil
 }
 
-// GetRegionChange returns a list of RegionID for a given store.
+// GetRegionChange returns a snapshot of the changed region IDs for a given store.
 func (r *RaftEngine) GetRegionChange(storeID uint64) []uint64 {
 	r.RLock()
 	defer r.RUnlock()
-	return r.regionChange[storeID]
+	return slices.Clone(r.regionChange[storeID])
 }
 
 // ResetRegionChange resets RegionInfo on a specific store with a given Region ID

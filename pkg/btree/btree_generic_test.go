@@ -457,16 +457,15 @@ const benchmarkTreeSize = 10000
 func BenchmarkInsert(b *testing.B) {
 	insertP := perm(benchmarkTreeSize)
 
-	i := 0
+	var tr *BTreeG[Int]
+	i := len(insertP)
 	for b.Loop() {
-		tr := NewG[Int](*btreeDegree)
-		for _, item := range insertP {
-			tr.ReplaceOrInsert(item)
-			i++
-			if i >= b.N {
-				return
-			}
+		if i == len(insertP) {
+			tr = NewG[Int](*btreeDegree)
+			i = 0
 		}
+		tr.ReplaceOrInsert(insertP[i])
+		i++
 	}
 }
 
@@ -533,22 +532,21 @@ func BenchmarkDelete(b *testing.B) {
 	insertP := perm(benchmarkTreeSize)
 	removeP := perm(benchmarkTreeSize)
 
-	i := 0
+	var tr *BTreeG[Int]
+	i := len(removeP)
 	for b.Loop() {
-		b.StopTimer()
-		tr := NewG[Int](*btreeDegree)
-		for _, v := range insertP {
-			tr.ReplaceOrInsert(v)
-		}
-		b.StartTimer()
-		for _, item := range removeP {
-			tr.Delete(item)
-			i++
-			if i >= b.N {
-				return
+		if i == len(removeP) {
+			b.StopTimer()
+			tr = NewG[Int](*btreeDegree)
+			for _, v := range insertP {
+				tr.ReplaceOrInsert(v)
 			}
+			i = 0
+			b.StartTimer()
 		}
-		if tr.Len() > 0 {
+		tr.Delete(removeP[i])
+		i++
+		if i == len(removeP) && tr.Len() > 0 {
 			panic(tr.Len())
 		}
 	}
@@ -558,21 +556,20 @@ func BenchmarkGet(b *testing.B) {
 	insertP := perm(benchmarkTreeSize)
 	removeP := perm(benchmarkTreeSize)
 
-	i := 0
+	var tr *BTreeG[Int]
+	i := len(removeP)
 	for b.Loop() {
-		b.StopTimer()
-		tr := NewG[Int](*btreeDegree)
-		for _, v := range insertP {
-			tr.ReplaceOrInsert(v)
-		}
-		b.StartTimer()
-		for _, item := range removeP {
-			tr.Get(item)
-			i++
-			if i >= b.N {
-				return
+		if i == len(removeP) {
+			b.StopTimer()
+			tr = NewG[Int](*btreeDegree)
+			for _, v := range insertP {
+				tr.ReplaceOrInsert(v)
 			}
+			i = 0
+			b.StartTimer()
 		}
+		tr.Get(removeP[i])
+		i++
 	}
 }
 
@@ -580,22 +577,21 @@ func BenchmarkGetCloneEachTime(b *testing.B) {
 	insertP := perm(benchmarkTreeSize)
 	removeP := perm(benchmarkTreeSize)
 
-	i := 0
+	var tr *BTreeG[Int]
+	i := len(removeP)
 	for b.Loop() {
-		b.StopTimer()
-		tr := NewG[Int](*btreeDegree)
-		for _, v := range insertP {
-			tr.ReplaceOrInsert(v)
-		}
-		b.StartTimer()
-		for _, item := range removeP {
-			tr = tr.Clone()
-			tr.Get(item)
-			i++
-			if i >= b.N {
-				return
+		if i == len(removeP) {
+			b.StopTimer()
+			tr = NewG[Int](*btreeDegree)
+			for _, v := range insertP {
+				tr.ReplaceOrInsert(v)
 			}
+			i = 0
+			b.StartTimer()
 		}
+		tr = tr.Clone()
+		tr.Get(removeP[i])
+		i++
 	}
 }
 

@@ -3138,6 +3138,7 @@ func benchmarkGetAllKeyspacesGCStatesImpl(b *testing.B, excludeGCBarriers bool, 
 		}
 	} else {
 		b.SetParallelism(parallelism)
+		b.ResetTimer()
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
 				_, err := gcStateManager.GetAllKeyspacesGCStates(context.Background(), excludeGCBarriers)
@@ -3292,6 +3293,7 @@ func benchmarkGetGCStateImpl(b *testing.B, excludeGCBarriers bool, keyspacesCoun
 		}
 	} else {
 		b.SetParallelism(parallelism)
+		b.ResetTimer()
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
 				keyspaceID := rand.Uint32N(uint32(keyspacesCount)) + 1

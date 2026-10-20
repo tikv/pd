@@ -24,6 +24,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1847,6 +1848,48 @@ func TestSyncConfigContext(t *testing.T) {
 	re.False(switchRaftV2)
 	re.False(needPersist)
 	re.Less(time.Since(now), clientTimeout*2)
+}
+
+func TestStoreConfigSyncRetainsStoresAcrossFailures(t *testing.T) {
+	re := require.New(t)
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	tc := newTestCluster(t.Context(), re, opt)
+
+	unavailable := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "store unavailable", http.StatusServiceUnavailable)
+	}))
+	defer unavailable.Close()
+
+	var available atomic.Bool
+	available.Store(true)
+	fallback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if !available.Load() {
+			http.Error(w, "store unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		w.Write([]byte("{}"))
+	}))
+	defer fallback.Close()
+	tc.httpClient = fallback.Client()
+
+	stores := newTestStores(2, "2.0.0")
+	stores[0].GetMeta().StatusAddress = unavailable.Listener.Addr().String()
+	stores[1].GetMeta().StatusAddress = fallback.Listener.Addr().String()
+
+	synced, _, _ := tc.syncStoreConfig(stores)
+	re.True(synced)
+
+	// The worker reuses this slice after a successful fallback.
+	available.Store(false)
+	re.NotPanics(func() {
+		synced, _, _ = tc.syncStoreConfig(stores)
+	})
+	re.False(synced)
+
+	available.Store(true)
+	synced, _, _ = tc.syncStoreConfig(stores)
+	re.True(synced)
 }
 
 func TestStoreConfigSync(t *testing.T) {

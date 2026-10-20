@@ -766,7 +766,7 @@ func (c *RaftCluster) runStoreConfigSync() {
 //   - `switchRaftV2` is true if the config of tikv engine is change to raft-kv2.
 func (c *RaftCluster) syncStoreConfig(stores []*core.StoreInfo) (synced bool, switchRaftV2 bool, needPersist bool) {
 	var err error
-	for index := 0; index < len(stores); index++ {
+	for _, store := range stores {
 		select {
 		case <-c.ctx.Done():
 			log.Info("stop sync store config job due to server shutdown")
@@ -774,7 +774,6 @@ func (c *RaftCluster) syncStoreConfig(stores []*core.StoreInfo) (synced bool, sw
 		default:
 		}
 		// filter out the stores that are tiflash
-		store := stores[index]
 		if !store.IsTiKV() {
 			continue
 		}
@@ -784,12 +783,10 @@ func (c *RaftCluster) syncStoreConfig(stores []*core.StoreInfo) (synced bool, sw
 			continue
 		}
 		// it will try next store if the current store is failed.
-		address := netutil.ResolveLoopBackAddr(stores[index].GetStatusAddress(), stores[index].GetAddress())
+		address := netutil.ResolveLoopBackAddr(store.GetStatusAddress(), store.GetAddress())
 		switchRaftV2, needPersist, err = c.observeStoreConfig(c.ctx, address)
 		if err != nil {
-			// delete the store if it is failed and retry next store.
-			stores = slices.Delete(stores, index, index+1)
-			index--
+			// Keep the caller's cached store list intact while trying the next store.
 			storeSyncConfigEvent.WithLabelValues(address, "fail").Inc()
 			log.Debug("sync store config failed, it will try next store", zap.Error(err))
 			continue
