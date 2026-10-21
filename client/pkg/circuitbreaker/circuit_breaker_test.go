@@ -256,8 +256,10 @@ func TestCircuitBreakerEnabled(t *testing.T) {
 func TestCircuitBreakerMetricsInitializationIsConcurrentSafe(t *testing.T) {
 	// Metrics registration runs once per process, so each invocation needs a fresh process.
 	if os.Getenv("PD_CLIENT_METRICS_TEST") != t.Name() {
+		testBinary, err := os.Executable()
+		require.NoError(t, err)
 		// #nosec G204 -- Re-execute the current test binary without a shell.
-		cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^"+t.Name()+"$", "-test.count=1")
+		cmd := exec.CommandContext(t.Context(), testBinary, "-test.run=^"+t.Name()+"$", "-test.count=1")
 		cmd.Env = append(os.Environ(), "PD_CLIENT_METRICS_TEST="+t.Name())
 		if coverDir := flag.Lookup("test.gocoverdir").Value.String(); coverDir != "" {
 			cmd.Args = append(cmd.Args, "-test.gocoverdir="+coverDir)
