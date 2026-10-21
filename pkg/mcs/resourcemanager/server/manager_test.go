@@ -17,6 +17,7 @@ package server
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"sync"
 	"testing"
@@ -29,6 +30,7 @@ import (
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/goleak"
+	"google.golang.org/grpc"
 
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
@@ -40,6 +42,7 @@ import (
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -129,6 +132,39 @@ type cancelControllerConfigStorage struct {
 	endpoint.ResourceGroupStorage
 	endpoint.KeyspaceStorage
 	cancel context.CancelFunc
+}
+
+type keyspaceLookupStorage struct {
+	endpoint.ResourceGroupStorage
+	endpoint.KeyspaceStorage
+	runInTxn func(context.Context, func(kv.Txn) error) error
+}
+
+func (s keyspaceLookupStorage) RunInTxn(ctx context.Context, fn func(kv.Txn) error) error {
+	return s.runInTxn(ctx, fn)
+}
+
+type tokenBucketTestStream struct {
+	grpc.ServerStream
+	ctx       context.Context
+	request   *rmpb.TokenBucketsRequest
+	responses []*rmpb.TokenBucketsResponse
+}
+
+func (s *tokenBucketTestStream) Context() context.Context { return s.ctx }
+
+func (s *tokenBucketTestStream) Recv() (*rmpb.TokenBucketsRequest, error) {
+	if s.request == nil {
+		return nil, io.EOF
+	}
+	request := s.request
+	s.request = nil
+	return request, nil
+}
+
+func (s *tokenBucketTestStream) Send(response *rmpb.TokenBucketsResponse) error {
+	s.responses = append(s.responses, response)
+	return nil
 }
 
 func (s cancelControllerConfigStorage) LoadControllerConfig() (string, error) {
@@ -269,7 +305,7 @@ func TestManagerInitDoesNotAcceptConsumptionAfterContextCancellation(t *testing.
 	re.False(m.acceptingConsumption)
 	re.Nil(m.consumptionTermDone)
 	m.consumptionMu.RUnlock()
-	re.Error(m.dispatchConsumption(&rmpb.TokenBucketRequest{}, ""))
+	re.Error(m.dispatchConsumption(&rmpb.TokenBucketRequest{}))
 }
 
 func TestLoadKeyspaceResourceGroupsRejectsMismatchedPayloadName(t *testing.T) {
@@ -494,9 +530,7 @@ func checkBackgroundMetricsFlush(ctx context.Context, re *require.Assertions, ma
 		},
 		KeyspaceId: keyspaceIDValue,
 	}
-	keyspaceName, err := manager.getKeyspaceNameByID(ctx, ExtractKeyspaceID(keyspaceIDValue))
-	re.NoError(err)
-	err = manager.dispatchConsumption(req, keyspaceName)
+	err = manager.dispatchConsumption(req)
 	re.NoError(err)
 
 	keyspaceID := ExtractKeyspaceID(req.GetKeyspaceId())
@@ -523,14 +557,66 @@ func TestDispatchConsumptionIncludesOnlyConsumption(t *testing.T) {
 		KeyspaceId: &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: 42}},
 	}
 
-	err := m.dispatchConsumption(req, "test_keyspace")
+	err := m.dispatchConsumption(req)
 	re.NoError(err)
 
 	item := <-m.consumptionDispatcher
 	re.Equal(uint32(42), item.keyspaceID)
-	re.Equal("test_keyspace", item.keyspaceName)
+	re.Empty(item.keyspaceName)
 	re.Equal(req.GetResourceGroupName(), item.resourceGroupName)
 	re.Equal(req.GetConsumptionSinceLastRequest(), item.Consumption)
+}
+
+func TestAcquireTokenBucketsDoesNotReadKeyspaceMetadata(t *testing.T) {
+	re := require.New(t)
+	m := prepareManager()
+	m.srv = &testBasicServer{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	m.acceptingConsumption = true
+	m.consumptionTermDone = ctx.Done()
+
+	lookupCalls := 0
+	m.storage = keyspaceLookupStorage{
+		ResourceGroupStorage: m.storage,
+		KeyspaceStorage:      m.storage,
+		runInTxn: func(context.Context, func(kv.Txn) error) error {
+			lookupCalls++
+			return errors.New("keyspace metadata unavailable")
+		},
+	}
+	requests := make([]*rmpb.TokenBucketRequest, 0, 2)
+	for _, keyspaceID := range []uint32{42, constant.NullKeyspaceID} {
+		requests = append(requests, &rmpb.TokenBucketRequest{
+			KeyspaceId:                  &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: keyspaceID}},
+			ResourceGroupName:           DefaultResourceGroupName,
+			ConsumptionSinceLastRequest: &rmpb.Consumption{RRU: 1},
+			Request: &rmpb.TokenBucketRequest_RuItems{RuItems: &rmpb.TokenBucketRequest_RequestRU{
+				RequestRU: []*rmpb.RequestUnitItem{{Type: rmpb.RequestUnitType_RU, Value: 10}},
+			}},
+		})
+	}
+	stream := &tokenBucketTestStream{
+		ctx: ctx,
+		request: &rmpb.TokenBucketsRequest{
+			Requests:              requests,
+			TargetRequestPeriodMs: 1000,
+			ClientUniqueId:        1,
+		},
+	}
+	service := &Service{ctx: ctx, manager: m}
+	re.NoError(service.AcquireTokenBuckets(stream))
+	re.Zero(lookupCalls)
+	re.Len(stream.responses, 1)
+	re.Len(stream.responses[0].Responses, len(requests))
+	for i, request := range requests {
+		response := stream.responses[0].Responses[i]
+		re.Equal(request.KeyspaceId, response.KeyspaceId)
+		re.NotEmpty(response.GrantedRUTokens)
+		item := <-m.consumptionDispatcher
+		re.Equal(ExtractKeyspaceID(request.KeyspaceId), item.keyspaceID)
+		re.Same(request.ConsumptionSinceLastRequest, item.Consumption)
+	}
 }
 
 // Put a keyspace meta into the storage.
@@ -708,7 +794,7 @@ func TestMetricsResetOnStepDown(t *testing.T) {
 		KeyspaceId:                  keyspaceIDValue,
 		ResourceGroupName:           groupName,
 		ConsumptionSinceLastRequest: &rmpb.Consumption{RRU: 1},
-	}, keyspaceName))
+	}))
 
 	// Wait for both consumption and the periodic gauges in the live term.
 	// Prometheus children are safe to inspect while the worker updates them.
@@ -722,7 +808,7 @@ func TestMetricsResetOnStepDown(t *testing.T) {
 	m.Close()
 
 	re.Nil(m.cancel)
-	re.Error(m.dispatchConsumption(&rmpb.TokenBucketRequest{}, ""))
+	re.Error(m.dispatchConsumption(&rmpb.TokenBucketRequest{}))
 	re.Empty(m.metrics.consumptionRecordMap)
 	re.Empty(m.metrics.counterMetricsMap)
 	re.Empty(m.metrics.gaugeMetricsMap)
@@ -747,7 +833,7 @@ func TestMetricsResetOnStepDown(t *testing.T) {
 
 func TestBackgroundMetricsFlushDrainsPendingConsumptionOnStepDown(t *testing.T) {
 	re := require.New(t)
-	m := newManagerBase(&ControllerConfig{}, ResourceGroupWriteRoleLegacyAll)
+	m := prepareManager()
 	m.srv = &testBasicServer{}
 
 	const (
@@ -757,17 +843,20 @@ func TestBackgroundMetricsFlushDrainsPendingConsumptionOnStepDown(t *testing.T) 
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	prepareKeyspaceName(ctx, re, m, &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: keyspaceID}}, keyspaceName)
 	m.consumptionMu.Lock()
 	m.consumptionTermDone = ctx.Done()
 	m.acceptingConsumption = true
 	m.consumptionMu.Unlock()
-	// Fill the queue without a worker, storage, or a keyspace-name cache.
+	// Fill the queue before any worker has resolved this keyspace's name.
+	re.Empty(m.keyspaceNameLookup)
 	for range defaultConsumptionChanSize {
 		re.NoError(m.dispatchConsumption(&rmpb.TokenBucketRequest{
 			KeyspaceId:                  &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: keyspaceID}},
 			ResourceGroupName:           groupName,
 			ConsumptionSinceLastRequest: &rmpb.Consumption{RRU: 1},
-		}, keyspaceName))
+		}))
 	}
 	cancel()
 	m.wg.Add(1)
@@ -784,6 +873,88 @@ func TestBackgroundMetricsFlushDrainsPendingConsumptionOnStepDown(t *testing.T) 
 	t.Cleanup(func() {
 		deleteLabelValues(keyspaceName, groupName, defaultTypeLabel)
 	})
+}
+
+func TestDrainPendingConsumptionContinuesWithCachedReportsAfterCancellation(t *testing.T) {
+	re := require.New(t)
+	m := prepareManager()
+	const (
+		keyspaceID   = uint32(512)
+		keyspaceName = "cached-drain-keyspace"
+	)
+	m.updateKeyspaceNameLookup(keyspaceID, keyspaceName)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	lookupCalls := 0
+	m.storage = keyspaceLookupStorage{
+		ResourceGroupStorage: m.storage,
+		KeyspaceStorage:      m.storage,
+		runInTxn: func(ctx context.Context, _ func(kv.Txn) error) error {
+			lookupCalls++
+			cancel()
+			<-ctx.Done()
+			return ctx.Err()
+		},
+	}
+	for i := range defaultConsumptionChanSize - 2 {
+		m.consumptionDispatcher <- &consumptionItem{
+			keyspaceID:  uint32(i) + keyspaceID + 1,
+			Consumption: &rmpb.Consumption{RRU: 1},
+		}
+	}
+	m.consumptionDispatcher <- &consumptionItem{keyspaceID: keyspaceID, Consumption: &rmpb.Consumption{RRU: 2}}
+	m.consumptionDispatcher <- &consumptionItem{keyspaceID: constant.NullKeyspaceID, Consumption: &rmpb.Consumption{RRU: 3}}
+
+	m.drainPendingConsumption(ctx, nil)
+
+	re.ErrorIs(ctx.Err(), context.Canceled)
+	re.Equal(1, lookupCalls)
+	re.Empty(m.consumptionDispatcher)
+	re.Len(m.ruCollector.keyspaceRUMetering, 2)
+	re.Equal(2.0, m.ruCollector.keyspaceRUMetering[keyspaceName].oltpRU)
+	re.Equal(3.0, m.ruCollector.keyspaceRUMetering[""].oltpRU)
+	re.Empty(m.metrics.consumptionRecordMap)
+	re.Empty(m.metrics.counterMetricsMap)
+}
+
+func TestBackgroundMetricsFlushRetriesInterruptedConsumptionOnStepDown(t *testing.T) {
+	re := require.New(t)
+	m := prepareManager()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	const keyspaceID = uint32(513)
+	const keyspaceName = "interrupted-drain-keyspace"
+	prepareKeyspaceName(ctx, re, m, &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: keyspaceID}}, keyspaceName)
+	baseStorage := m.storage
+	lookupCalls := 0
+	var drainDeadline time.Time
+	var hasDrainDeadline bool
+	m.storage = keyspaceLookupStorage{
+		ResourceGroupStorage: baseStorage,
+		KeyspaceStorage:      baseStorage,
+		runInTxn: func(lookupCtx context.Context, fn func(kv.Txn) error) error {
+			lookupCalls++
+			if lookupCalls == 1 {
+				cancel()
+				return lookupCtx.Err()
+			}
+			drainDeadline, hasDrainDeadline = lookupCtx.Deadline()
+			return baseStorage.RunInTxn(lookupCtx, fn)
+		},
+	}
+	m.consumptionDispatcher <- &consumptionItem{keyspaceID: keyspaceID, Consumption: &rmpb.Consumption{RRU: 1}}
+	m.wg.Add(1)
+	go m.backgroundMetricsFlush(ctx)
+	m.wg.Wait()
+
+	re.Equal(2, lookupCalls)
+	re.True(hasDrainDeadline)
+	re.Positive(time.Until(drainDeadline))
+	re.LessOrEqual(time.Until(drainDeadline), etcdutil.DefaultRequestTimeout)
+	re.Empty(m.consumptionDispatcher)
+	re.Equal(1.0, m.ruCollector.keyspaceRUMetering[keyspaceName].oltpRU)
+	re.Empty(m.metrics.consumptionRecordMap)
+	re.Empty(m.metrics.counterMetricsMap)
 }
 
 func TestCleanUpMetricsKeepsGroupStateForActiveRUType(t *testing.T) {

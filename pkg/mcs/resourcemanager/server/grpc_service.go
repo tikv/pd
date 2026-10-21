@@ -243,16 +243,8 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 				log.Warn("resource group not found", append(requestFields, zap.Error(err))...)
 				continue
 			}
-			// Resolve labels before accepting the report so step-down can drain
-			// queued metering data without accessing storage.
-			var keyspaceName string
-			if req.GetConsumptionSinceLastRequest() != nil {
-				keyspaceName, err = s.manager.getKeyspaceNameByID(stream.Context(), keyspaceID)
-				if err != nil {
-					return err
-				}
-			}
-			err = s.manager.dispatchConsumption(req, keyspaceName)
+			// Send the consumption to update the metrics.
+			err = s.manager.dispatchConsumption(req)
 			if err != nil {
 				return err
 			}

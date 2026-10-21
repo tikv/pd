@@ -37,6 +37,7 @@ import (
 	"github.com/tikv/pd/pkg/metering"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/jsonutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -691,7 +692,7 @@ func (m *Manager) getKeyspaceResourceGroupManagers() []*keyspaceResourceGroupMan
 	return krgms
 }
 
-func (m *Manager) dispatchConsumption(req *rmpb.TokenBucketRequest, keyspaceName string) error {
+func (m *Manager) dispatchConsumption(req *rmpb.TokenBucketRequest) error {
 	isBackground := req.GetIsBackground()
 	isTiFlash := req.GetIsTiflash()
 	if isBackground && isTiFlash {
@@ -699,7 +700,6 @@ func (m *Manager) dispatchConsumption(req *rmpb.TokenBucketRequest, keyspaceName
 	}
 	item := &consumptionItem{
 		keyspaceID:        ExtractKeyspaceID(req.GetKeyspaceId()),
-		keyspaceName:      keyspaceName,
 		resourceGroupName: req.GetResourceGroupName(),
 		Consumption:       req.GetConsumptionSinceLastRequest(),
 		isBackground:      isBackground,
@@ -732,6 +732,9 @@ func (m *Manager) getKeyspaceNameByID(ctx context.Context, id uint32) (string, e
 	m.RUnlock()
 	if ok {
 		return name, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
 	}
 	var loadedName string
 	// If the keyspace name is not in the cache, try to get it from the storage.
@@ -827,23 +830,30 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 		}
 	}()
 
-	resetMetricsOnStepDown := func() {
+	resetMetricsOnStepDown := func(pending *consumptionItem) {
 		m.stopAcceptingConsumption()
 		m.metrics.resetAll()
-		m.drainPendingConsumption()
+		// Share one lookup budget across the queue, rather than allowing every
+		// uncached report to wait for a full etcd request timeout.
+		drainCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), etcdutil.DefaultRequestTimeout)
+		defer cancel()
+		m.drainPendingConsumption(drainCtx, pending)
 		log.Info("resource group manager background metrics flush loop exits")
 	}
 	for {
 		if ctx.Err() != nil {
-			resetMetricsOnStepDown()
+			resetMetricsOnStepDown(nil)
 			return
 		}
 		select {
 		case <-ctx.Done():
-			resetMetricsOnStepDown()
+			resetMetricsOnStepDown(nil)
 			return
 		case consumptionInfo := <-m.consumptionDispatcher:
-			m.processConsumption(consumptionInfo, true)
+			if err := m.processConsumption(ctx, consumptionInfo, true); err != nil && ctx.Err() != nil {
+				resetMetricsOnStepDown(consumptionInfo)
+				return
+			}
 		case <-cleanUpTicker.C:
 			m.cleanUpMetrics(ctx)
 		case <-metricsTicker.C:
@@ -909,21 +919,32 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 }
 
 // drainPendingConsumption meters requests accepted by the old term without recreating its metrics.
-func (m *Manager) drainPendingConsumption() {
+func (m *Manager) drainPendingConsumption(ctx context.Context, pending *consumptionItem) {
+	failedReports := 0
 	for {
+		if err := m.processConsumption(ctx, pending, false); err != nil {
+			failedReports++
+		}
 		select {
-		case item := <-m.consumptionDispatcher:
-			m.processConsumption(item, false)
+		case pending = <-m.consumptionDispatcher:
 		default:
+			if failedReports > 0 {
+				log.Warn("failed to meter queued consumption during leader step-down", zap.Int("failed-reports", failedReports), zap.Error(ctx.Err()))
+			}
 			return
 		}
 	}
 }
 
-func (m *Manager) processConsumption(consumptionInfo *consumptionItem, recordMetrics bool) {
+func (m *Manager) processConsumption(ctx context.Context, consumptionInfo *consumptionItem, recordMetrics bool) error {
 	if consumptionInfo == nil || consumptionInfo.Consumption == nil {
-		return
+		return nil
 	}
+	keyspaceName, err := m.getKeyspaceNameByID(ctx, consumptionInfo.keyspaceID)
+	if err != nil {
+		return err
+	}
+	consumptionInfo.keyspaceName = keyspaceName
 	m.ruCollector.Collect(consumptionInfo)
 	if recordMetrics {
 		m.metrics.recordConsumption(consumptionInfo, m.GetControllerConfig(), time.Now())
@@ -932,6 +953,7 @@ func (m *Manager) processConsumption(consumptionInfo *consumptionItem, recordMet
 	if rg, _ := m.GetMutableResourceGroup(consumptionInfo.keyspaceID, consumptionInfo.resourceGroupName); rg != nil {
 		rg.UpdateRUConsumption(consumptionInfo.Consumption)
 	}
+	return nil
 }
 
 func (m *Manager) cleanUpMetrics(ctx context.Context) {
