@@ -682,7 +682,9 @@ func TestUpdateMemberLoopDegradedModeSafetySweepAndConnectionRecovery(t *testing
 			opts ...grpc.CallOption,
 		) error {
 			if method == "/pdpb.PD/GetMembers" {
-				getMembersCalls.Add(1)
+				// Count completed calls so a phase change cannot alter an
+				// observed call's outcome.
+				defer getMembersCalls.Add(1)
 				if syntheticMemberResponse.Load() {
 					response := validMemberTestResponse(memberURL, 1)
 					*reply.(*pdpb.GetMembersResponse) = *response
