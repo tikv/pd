@@ -79,7 +79,6 @@ func (s *Service) RegisterRESTHandler(userDefineHandlers map[string]http.Handler
 
 // Tso returns a stream of timestamps
 func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
-	stream = newTsoMetricsStream(stream)
 	ctx, cancel := context.WithCancel(stream.Context())
 	defer cancel()
 	for {
@@ -137,6 +136,9 @@ func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
 func (s *Service) FindGroupByKeyspaceID(
 	_ context.Context, request *tsopb.FindGroupByKeyspaceIDRequest,
 ) (*tsopb.FindGroupByKeyspaceIDResponse, error) {
+	if s.IsClosed() {
+		return nil, errs.ErrNotStarted
+	}
 	respKeyspaceGroup := request.GetHeader().GetKeyspaceGroupId()
 	if errorType, err := s.validRequest(request.GetHeader()); err != nil {
 		return &tsopb.FindGroupByKeyspaceIDResponse{
@@ -199,6 +201,9 @@ func (s *Service) FindGroupByKeyspaceID(
 func (s *Service) GetMinTS(
 	_ context.Context, request *tsopb.GetMinTSRequest,
 ) (*tsopb.GetMinTSResponse, error) {
+	if s.IsClosed() {
+		return nil, errs.ErrNotStarted
+	}
 	respKeyspaceGroup := request.GetHeader().GetKeyspaceGroupId()
 	if errorType, err := s.validRequest(request.GetHeader()); err != nil {
 		return &tsopb.GetMinTSResponse{
@@ -226,7 +231,7 @@ func (s *Service) GetMinTS(
 }
 
 func (s *Service) validRequest(header *tsopb.RequestHeader) (tsopb.ErrorType, error) {
-	if s.IsClosed() || s.keyspaceGroupManager == nil {
+	if s.keyspaceGroupManager == nil {
 		return tsopb.ErrorType_NOT_BOOTSTRAPPED, errs.ErrNotStarted
 	}
 	if header == nil || header.GetClusterId() != keypath.ClusterID() {

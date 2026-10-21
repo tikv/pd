@@ -15,13 +15,19 @@
 package metadataapi
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"reflect"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	//nolint:staticcheck // kvproto is generated against the legacy protobuf runtime.
+	"github.com/golang/protobuf/jsonpb"
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 
@@ -145,7 +151,7 @@ func (s *ConfigService) Register(configEndpoint *gin.RouterGroup) {
 // PostResourceGroup handles POST /config/group.
 func (s *ConfigService) PostResourceGroup(c *gin.Context) {
 	var group rmpb.ResourceGroup
-	if err := c.ShouldBindJSON(&group); err != nil {
+	if err := decodeResourceGroup(c.Request.Body, &group); err != nil {
 		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
@@ -159,7 +165,7 @@ func (s *ConfigService) PostResourceGroup(c *gin.Context) {
 // PutResourceGroup handles PUT /config/group.
 func (s *ConfigService) PutResourceGroup(c *gin.Context) {
 	var group rmpb.ResourceGroup
-	if err := c.ShouldBindJSON(&group); err != nil {
+	if err := decodeResourceGroup(c.Request.Body, &group); err != nil {
 		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
@@ -168,6 +174,185 @@ func (s *ConfigService) PutResourceGroup(c *gin.Context) {
 		return
 	}
 	c.String(http.StatusOK, "Success!")
+}
+
+func decodeResourceGroup(body io.Reader, group *rmpb.ResourceGroup) error {
+	data, err := io.ReadAll(body)
+	if err != nil {
+		return err
+	}
+	var keyspaceID resourceGroupKeyspaceIDJSON
+	legacyGroup := resourceGroupJSON{
+		resourceGroupWithoutKeyspaceID: (*resourceGroupWithoutKeyspaceID)(group),
+		KeyspaceID:                     resourceGroupKeyspaceIDField{value: &keyspaceID},
+		KeyspaceIDCamel:                resourceGroupKeyspaceIDField{value: &keyspaceID},
+	}
+	// Keep the legacy encoding/json behavior for all existing ResourceGroup
+	// fields. In particular, it matches JSON field names case-insensitively.
+	if err := json.Unmarshal(data, &legacyGroup); err != nil {
+		var keyspaceIDErr *resourceGroupKeyspaceIDError
+		if errors.As(err, &keyspaceIDErr) {
+			return keyspaceIDErr
+		}
+		// The updated ResourceGroup contains a protobuf oneof, so clients may
+		// serialize the whole message as protobuf JSON. Retry strictly to
+		// accept enum names and quoted 64-bit integers without silently
+		// dropping fields that belong to neither JSON dialect.
+		*group = rmpb.ResourceGroup{}
+		if protoErr := (&jsonpb.Unmarshaler{}).Unmarshal(bytes.NewReader(data), group); protoErr != nil {
+			return fmt.Errorf("invalid resource group JSON: legacy JSON: %v; protobuf JSON: %w", err, protoErr)
+		}
+		return validateResourceGroupKeyspaceID(group, keyspaceID.raw)
+	}
+	if keyspaceID.raw != nil {
+		decodedKeyspaceID, err := decodeKeyspaceIDJSON(keyspaceID.raw)
+		if err != nil {
+			return err
+		}
+		group.KeyspaceId = decodedKeyspaceID
+	}
+	return validateResourceGroupKeyspaceID(group, keyspaceID.raw)
+}
+
+// resourceGroupWithoutKeyspaceID lets encoding/json decode every legacy field
+// directly. The explicit fields in resourceGroupJSON shadow KeyspaceId, whose
+// protobuf oneof still requires compatibility handling.
+type resourceGroupWithoutKeyspaceID rmpb.ResourceGroup
+
+type resourceGroupJSON struct {
+	*resourceGroupWithoutKeyspaceID
+	KeyspaceID      resourceGroupKeyspaceIDField `json:"keyspace_id"`
+	KeyspaceIDCamel resourceGroupKeyspaceIDField `json:"keyspaceId"`
+}
+
+type resourceGroupKeyspaceIDJSON struct {
+	raw json.RawMessage
+}
+
+type resourceGroupKeyspaceIDField struct {
+	value *resourceGroupKeyspaceIDJSON
+}
+
+// UnmarshalJSON records and normalizes a ResourceGroup keyspace ID without
+// making a second copy of the rest of the request body.
+func (f *resourceGroupKeyspaceIDField) UnmarshalJSON(data []byte) error {
+	if f.value.raw != nil {
+		return &resourceGroupKeyspaceIDError{errors.New("keyspace_id must be set only once")}
+	}
+	raw, err := normalizeKeyspaceIDJSON(data)
+	if err != nil {
+		return &resourceGroupKeyspaceIDError{err}
+	}
+	f.value.raw = raw
+	return nil
+}
+
+type resourceGroupKeyspaceIDError struct {
+	error
+}
+
+type jsonObjectField struct {
+	name  string
+	value json.RawMessage
+}
+
+func decodeJSONObjectFields(data []byte) ([]jsonObjectField, error) {
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(data, &object); err != nil {
+		return nil, err
+	}
+	if object == nil {
+		return nil, errors.New("expected a JSON object")
+	}
+
+	// A map loses duplicate names, so scan the object tokens as well.
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	if _, err := decoder.Token(); err != nil {
+		return nil, err
+	}
+	fields := make([]jsonObjectField, 0, len(object))
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			return nil, err
+		}
+		name, ok := token.(string)
+		if !ok {
+			return nil, errors.New("expected a JSON object field")
+		}
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return nil, err
+		}
+		fields = append(fields, jsonObjectField{name: name, value: value})
+	}
+	if _, err := decoder.Token(); err != nil {
+		return nil, err
+	}
+	return fields, nil
+}
+
+func isJSONNull(data []byte) bool {
+	return bytes.Equal(bytes.TrimSpace(data), []byte("null"))
+}
+
+func normalizeKeyspaceIDJSON(data []byte) (json.RawMessage, error) {
+	if isJSONNull(data) {
+		return data, nil
+	}
+	fields, err := decodeJSONObjectFields(data)
+	if err != nil {
+		return nil, err
+	}
+	normalized := make(map[string]json.RawMessage, len(fields))
+	seenKnownFields := make(map[string]struct{}, 2)
+	for _, field := range fields {
+		name := field.name
+		switch {
+		case strings.EqualFold(name, "value"):
+			name = "value"
+		case strings.EqualFold(name, "keyspace_identity") ||
+			strings.EqualFold(name, "keyspaceIdentity"):
+			name = "keyspace_identity"
+		}
+		if name == "value" || name == "keyspace_identity" {
+			if _, ok := seenKnownFields[name]; ok {
+				return nil, fmt.Errorf("keyspace_id %s must be set only once", name)
+			}
+			seenKnownFields[name] = struct{}{}
+		}
+		normalized[name] = field.value
+	}
+	return json.Marshal(normalized)
+}
+
+func decodeKeyspaceIDJSON(rawKeyspaceID json.RawMessage) (*rmpb.KeyspaceIDValue, error) {
+	data, err := json.Marshal(map[string]json.RawMessage{"keyspace_id": rawKeyspaceID})
+	if err != nil {
+		return nil, err
+	}
+	var group rmpb.ResourceGroup
+	if err := (&jsonpb.Unmarshaler{AllowUnknownFields: true}).Unmarshal(bytes.NewReader(data), &group); err != nil {
+		return nil, err
+	}
+	return group.GetKeyspaceId(), nil
+}
+
+func validateResourceGroupKeyspaceID(group *rmpb.ResourceGroup, rawKeyspaceID json.RawMessage) error {
+	keyspaceID := group.GetKeyspaceId()
+	if keyspaceID == nil {
+		return nil
+	}
+	if _, ok := keyspaceID.GetKeyspace().(*rmpb.KeyspaceIDValue_Value); ok {
+		return nil
+	}
+	// Legacy KeyspaceIDValue encoded value 0 as an empty JSON object.
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(rawKeyspaceID, &fields) == nil && fields != nil && len(fields) == 0 {
+		keyspaceID.Keyspace = &rmpb.KeyspaceIDValue_Value{Value: 0}
+		return nil
+	}
+	return errors.New("keyspace_id must contain a legacy value")
 }
 
 // GetResourceGroup handles GET /config/group/:name.

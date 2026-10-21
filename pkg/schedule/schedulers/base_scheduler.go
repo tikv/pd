@@ -17,6 +17,7 @@ package schedulers
 import (
 	"fmt"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/pingcap/log"
@@ -141,10 +142,5 @@ func (s *BaseScheduler) SetDisable(disable bool) error {
 func (s *BaseScheduler) IsDefault() bool {
 	// Check if the scheduler is in the current DefaultSchedulers list
 	// which dynamically adjusts based on NextGen vs Classic
-	for _, schedulerType := range types.DefaultSchedulers {
-		if s.tp == schedulerType {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(types.DefaultSchedulers, s.tp)
 }

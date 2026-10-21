@@ -55,10 +55,7 @@ func TestSlidingWindow(t *testing.T) {
 	re.Len(s.windows, int(constant.PriorityLevelLen))
 	// capacity:[10, 10, 10, 10]
 	for i, v := range s.windows {
-		cap := capacity >> i
-		if cap < minSnapSize {
-			cap = minSnapSize
-		}
+		cap := max(capacity>>i, minSnapSize)
 		re.Equal(v.capacity, cap)
 	}
 	// case 0: test core.Low level
@@ -88,9 +85,13 @@ func TestSlidingWindow(t *testing.T) {
 	s.Ack(capacity-minSnapSize, SendSnapshot)
 	re.Equal([]int64{capacity - minSnapSize, 0, 0, 0}, s.GetUsed())
 
-	// case 3: skip the type is not the SendSnapshot
-	for range 10 {
-		re.True(s.Take(capacity, AddPeer, constant.Low))
+	// case 3: non-snapshot types bypass the window without changing its usage.
+	used := s.GetUsed()
+	for _, typ := range []Type{AddPeer, RemovePeer, TransferLeaderIn} {
+		re.True(s.Available(capacity, typ, constant.Low))
+		re.True(s.Take(capacity, typ, constant.Low))
+		s.Ack(capacity, typ)
+		re.Equal(used, s.GetUsed())
 	}
 }
 
@@ -168,10 +169,7 @@ func TestFeedback(t *testing.T) {
 			continue
 		}
 		cost := tick - stats.start
-		exec := stats.expectCost
-		if exec < 5 {
-			exec = 5
-		}
+		exec := max(stats.expectCost, 5)
 		err := exec*wait - cost
 		queue.Remove(first)
 		s.Feedback(float64(err))

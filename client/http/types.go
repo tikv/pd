@@ -17,6 +17,7 @@ package http
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
@@ -45,7 +46,7 @@ type ListServiceGCSafepoint struct {
 // ClusterState saves some cluster state information.
 // NOTE: This type sync with https://github.com/tikv/pd/blob/5eae459c01a797cbd0c416054c6f0cad16b8740a/server/cluster/cluster.go#L173
 type ClusterState struct {
-	RaftBootstrapTime time.Time `json:"raft_bootstrap_time,omitempty"`
+	RaftBootstrapTime time.Time `json:"raft_bootstrap_time"`
 	IsInitialized     bool      `json:"is_initialized"`
 	ReplicationStatus string    `json:"replication_status"`
 }
@@ -193,7 +194,7 @@ type HotPeerStatShow struct {
 	QueryRate      float64   `json:"flow_query"`
 	CPURate        float64   `json:"flow_cpu"`
 	AntiCount      int       `json:"anti_count"`
-	LastUpdateTime time.Time `json:"last_update_time,omitempty"`
+	LastUpdateTime time.Time `json:"last_update_time"`
 }
 
 // HistoryHotRegionsRequest wrap the request conditions.
@@ -405,8 +406,8 @@ func (r *Rule) String() string {
 func (r *Rule) Clone() *Rule {
 	var clone Rule
 	_ = json.Unmarshal([]byte(r.String()), &clone)
-	clone.StartKey = append(r.StartKey[:0:0], r.StartKey...)
-	clone.EndKey = append(r.EndKey[:0:0], r.EndKey...)
+	clone.StartKey = slices.Clone(r.StartKey)
+	clone.EndKey = slices.Clone(r.EndKey)
 	return &clone
 }
 
@@ -704,7 +705,7 @@ func (meta *tempKeyspaceMeta) toPB() (*keyspacepb.KeyspaceMeta, error) {
 
 	return &keyspacepb.KeyspaceMeta{
 		Name:           meta.Name,
-		Id:             meta.ID,
+		Keyspace:       &keyspacepb.KeyspaceMeta_Id{Id: meta.ID},
 		Config:         meta.Config,
 		CreatedAt:      meta.CreatedAt,
 		StateChangedAt: meta.StateChangedAt,

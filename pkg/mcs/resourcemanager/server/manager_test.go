@@ -44,7 +44,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 type mockConfigProvider struct{ bs.Server }
@@ -175,8 +175,7 @@ func TestManagerMetadataWatcherLifecycle(t *testing.T) {
 		re := require.New(t)
 		m := prepareMetadataWatcherManager()
 
-		parentCtx, parentCancel := context.WithCancel(context.Background())
-		defer parentCancel()
+		parentCtx := t.Context()
 
 		watcherErr := errors.New("watcher load failed")
 		var capturedCtx context.Context
@@ -209,8 +208,7 @@ func TestManagerMetadataWatcherLifecycle(t *testing.T) {
 		re := require.New(t)
 		m := prepareMetadataWatcherManager()
 
-		parentCtx, parentCancel := context.WithCancel(context.Background())
-		defer parentCancel()
+		parentCtx := t.Context()
 
 		var capturedCtx context.Context
 		withMetadataLoopWatcherFactory(t, func(
@@ -246,11 +244,9 @@ func TestLoadKeyspaceResourceGroupsRejectsMismatchedPayloadName(t *testing.T) {
 	m.storage = memStorage
 
 	group := &rmpb.ResourceGroup{
-		Name: "payload-group",
-		Mode: rmpb.GroupMode_RUMode,
-		KeyspaceId: &rmpb.KeyspaceIDValue{
-			Value: 42,
-		},
+		Name:       "payload-group",
+		Mode:       rmpb.GroupMode_RUMode,
+		KeyspaceId: &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: 42}},
 	}
 	rawGroup, err := proto.Marshal(group)
 	re.NoError(err)
@@ -370,8 +366,7 @@ func TestInitManager(t *testing.T) {
 	m := prepareManager()
 
 	re.Empty(m.getKeyspaceResourceGroupManagers())
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	err := m.Init(ctx)
 	re.NoError(err)
 	// There should only be one null keyspace resource group manager.
@@ -385,14 +380,14 @@ func TestInitManager(t *testing.T) {
 		Name:       "test_group",
 		Mode:       rmpb.GroupMode_RUMode,
 		Priority:   5,
-		KeyspaceId: &rmpb.KeyspaceIDValue{Value: keyspaceID},
+		KeyspaceId: &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: keyspaceID}},
 	}
 	err = m.AddResourceGroup(group)
 	re.NoError(err)
 	// Adding a new keyspace resource group should create a new keyspace resource group manager.
 	krgm = m.getKeyspaceResourceGroupManager(1)
 	re.NotNil(krgm)
-	re.Equal(group.KeyspaceId.Value, krgm.keyspaceID)
+	re.Equal(group.KeyspaceId.GetValue(), krgm.keyspaceID)
 	re.Equal(group.Name, krgm.getMutableResourceGroup(group.Name).Name)
 	// A default resource group should be created for the keyspace as well.
 	defaultGroup := krgm.getMutableResourceGroup(DefaultResourceGroupName)
@@ -422,14 +417,13 @@ func TestBackgroundMetricsFlush(t *testing.T) {
 	re := require.New(t)
 	m := prepareManager()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	err := m.Init(ctx)
 	re.NoError(err)
 	// Test without keyspace ID
 	checkBackgroundMetricsFlush(ctx, re, m, nil)
 	// Test with keyspace ID
-	checkBackgroundMetricsFlush(ctx, re, m, &rmpb.KeyspaceIDValue{Value: 1})
+	checkBackgroundMetricsFlush(ctx, re, m, &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: 1}})
 }
 
 func checkBackgroundMetricsFlush(ctx context.Context, re *require.Assertions, manager *Manager, keyspaceIDValue *rmpb.KeyspaceIDValue) {
@@ -486,7 +480,7 @@ func TestDispatchConsumptionIncludesOnlyConsumption(t *testing.T) {
 			WRU:        8,
 			WriteBytes: 1024,
 		},
-		KeyspaceId: &rmpb.KeyspaceIDValue{Value: 42},
+		KeyspaceId: &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: 42}},
 	}
 
 	err := m.dispatchConsumption(req)
@@ -501,15 +495,15 @@ func TestDispatchConsumptionIncludesOnlyConsumption(t *testing.T) {
 // Put a keyspace meta into the storage.
 func prepareKeyspaceName(ctx context.Context, re *require.Assertions, manager *Manager, keyspaceIDValue *rmpb.KeyspaceIDValue, keyspaceName string) {
 	keyspaceMeta := &keyspacepb.KeyspaceMeta{
-		Id:   ExtractKeyspaceID(keyspaceIDValue),
-		Name: keyspaceName,
+		Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: ExtractKeyspaceID(keyspaceIDValue)},
+		Name:     keyspaceName,
 	}
 	err := manager.storage.RunInTxn(ctx, func(txn kv.Txn) error {
 		err := manager.storage.SaveKeyspaceMeta(txn, keyspaceMeta)
 		if err != nil {
 			return err
 		}
-		return manager.storage.SaveKeyspaceID(txn, keyspaceMeta.Id, keyspaceMeta.Name)
+		return manager.storage.SaveKeyspaceID(txn, keyspaceMeta.GetId(), keyspaceMeta.Name)
 	})
 	re.NoError(err)
 }
@@ -521,15 +515,14 @@ func TestAddAndModifyResourceGroup(t *testing.T) {
 	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
 	m.storage = storage
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	err := m.Init(ctx)
 	re.NoError(err)
 
 	// Test without keyspace ID
 	checkAddAndModifyResourceGroup(re, m, nil)
 	// Test with keyspace ID
-	checkAddAndModifyResourceGroup(re, m, &rmpb.KeyspaceIDValue{Value: 1})
+	checkAddAndModifyResourceGroup(re, m, &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: 1}})
 }
 
 func checkAddAndModifyResourceGroup(re *require.Assertions, manager *Manager, keyspaceIDValue *rmpb.KeyspaceIDValue) {
@@ -569,11 +562,10 @@ func TestCleanUpTicker(t *testing.T) {
 	re := require.New(t)
 	m := prepareManager()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	// Put a keyspace meta.
 	keyspaceID := uint32(1)
-	prepareKeyspaceName(ctx, re, m, &rmpb.KeyspaceIDValue{Value: keyspaceID}, "test_keyspace")
+	prepareKeyspaceName(ctx, re, m, &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: keyspaceID}}, "test_keyspace")
 	// Insert two consumption records manually.
 	m.metrics.consumptionRecordMap[consumptionRecordKey{
 		keyspaceID: keyspaceID,
@@ -615,8 +607,7 @@ func TestKeyspaceServiceLimit(t *testing.T) {
 	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
 	m.storage = storage
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	err := m.Init(ctx)
 	re.NoError(err)
 	// Test the default service limit is 0.0.
@@ -636,10 +627,10 @@ func TestKeyspaceServiceLimit(t *testing.T) {
 				},
 			},
 		},
-		KeyspaceId: &rmpb.KeyspaceIDValue{Value: 1},
+		KeyspaceId: &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: 1}},
 	}
 	// Test the limiter of the non-existing keyspace is nil.
-	limiter = m.GetKeyspaceServiceLimiter(group.KeyspaceId.Value)
+	limiter = m.GetKeyspaceServiceLimiter(group.KeyspaceId.GetValue())
 	re.Nil(limiter)
 	// Test the limiter of the newly created keyspace is 0.0.
 	err = m.AddResourceGroup(group)
@@ -670,15 +661,14 @@ func TestKeyspaceNameLookup(t *testing.T) {
 	re := require.New(t)
 	m := prepareManager()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	err := m.Init(ctx)
 	re.NoError(err)
 	// Get the null keyspace ID by an empty name.
 	idValue, err := m.GetKeyspaceIDByName(ctx, "")
 	re.NoError(err)
 	re.NotNil(idValue)
-	re.Equal(constant.NullKeyspaceID, idValue.Value)
+	re.Equal(constant.NullKeyspaceID, idValue.GetValue())
 	// Get the non-existing keyspace ID by name.
 	idValue, err = m.GetKeyspaceIDByName(ctx, "non-existing-keyspace")
 	re.Error(err)
@@ -692,23 +682,23 @@ func TestKeyspaceNameLookup(t *testing.T) {
 	re.Error(err)
 	re.Empty(name)
 	// Get the keyspace ID by name first, then get the keyspace name by ID.
-	prepareKeyspaceName(ctx, re, m, &rmpb.KeyspaceIDValue{Value: 1}, "test_keyspace")
+	prepareKeyspaceName(ctx, re, m, &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: 1}}, "test_keyspace")
 	idValue, err = m.GetKeyspaceIDByName(ctx, "test_keyspace")
 	re.NoError(err)
 	re.NotNil(idValue)
-	re.Equal(uint32(1), idValue.Value)
+	re.Equal(uint32(1), idValue.GetValue())
 	name, err = m.getKeyspaceNameByID(ctx, 1)
 	re.NoError(err)
 	re.Equal("test_keyspace", name)
 	// Get the keyspace name by ID first, then get the keyspace ID by name.
-	prepareKeyspaceName(ctx, re, m, &rmpb.KeyspaceIDValue{Value: 2}, "test_keyspace_2")
+	prepareKeyspaceName(ctx, re, m, &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: 2}}, "test_keyspace_2")
 	name, err = m.getKeyspaceNameByID(ctx, 2)
 	re.NoError(err)
 	re.Equal("test_keyspace_2", name)
 	idValue, err = m.GetKeyspaceIDByName(ctx, "test_keyspace_2")
 	re.NoError(err)
 	re.NotNil(idValue)
-	re.Equal(uint32(2), idValue.Value)
+	re.Equal(uint32(2), idValue.GetValue())
 }
 
 func TestResourceGroupPersistence(t *testing.T) {
@@ -720,7 +710,7 @@ func TestResourceGroupPersistence(t *testing.T) {
 		Name:       "test_group",
 		Mode:       rmpb.GroupMode_RUMode,
 		Priority:   5,
-		KeyspaceId: &rmpb.KeyspaceIDValue{Value: 1},
+		KeyspaceId: &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: 1}},
 	}
 	err := m.AddResourceGroup(group)
 	re.NoError(err)
@@ -732,8 +722,7 @@ func TestResourceGroupPersistence(t *testing.T) {
 	m = NewManager[*mockConfigProvider](&mockConfigProvider{})
 	m.storage = storage
 	// Initialize the manager.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	err = m.Init(ctx)
 	re.NoError(err)
 	// Check the resource group is loaded from the storage.
@@ -762,8 +751,7 @@ func TestManagerMetadataWriteRoleGates(t *testing.T) {
 		role: ResourceGroupWriteRoleRMTokenOnly,
 	})
 	m.storage = storage.NewStorageWithMemoryBackend()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	re.NoError(m.Init(ctx))
 	re.Equal(ResourceGroupWriteRoleRMTokenOnly, m.GetWriteRole())
 

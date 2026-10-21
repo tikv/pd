@@ -22,18 +22,15 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
-
-	"github.com/tikv/pd/client/pkg/utils/testutil"
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(m)
 }
 
 func TestWatcher(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	watcher := NewWatcher(ctx, 10, "test")
 	var deadlineReached atomic.Bool

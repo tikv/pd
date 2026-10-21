@@ -536,7 +536,7 @@ func newBalanceRangeScheduler(opController *operator.Controller, conf *balanceRa
 func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	balanceRangeCounter.Inc()
 	job := s.job
-	defer s.filterCounter.Flush()
+	defer s.filterCounter.Flush(cluster)
 
 	faultStores := filter.SelectUnavailableTargetStores(s.stores, s.filters, cluster.GetSchedulerConfig(), nil, s.filterCounter)
 	sources := filter.SelectSourceStores(s.stores, s.filters, cluster.GetSchedulerConfig(), nil, s.filterCounter)

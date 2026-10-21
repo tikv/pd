@@ -405,6 +405,11 @@ func (*GrpcServer) WatchGCSafePointV2(_ *pdpb.WatchGCSafePointV2Request, _ pdpb.
 	return status.Errorf(codes.Unimplemented, "WatchGCSafePointV2 is obsolete. Poll GetAllKeyspacesGCStates instead if necessary")
 }
 
+// WatchGCStates is not supported yet.
+func (*GrpcServer) WatchGCStates(_ *pdpb.WatchGCStatesRequest, _ pdpb.PD_WatchGCStatesServer) error {
+	return status.Errorf(codes.Unimplemented, "WatchGCStates is not supported yet")
+}
+
 // GetAllGCSafePointV2 return all gc safe point v2.
 //
 // Deprecated: Use GetAllKeyspacesGCStates instead.
@@ -456,7 +461,9 @@ func (s *GrpcServer) GetAllGCSafePointV2(ctx context.Context, request *pdpb.GetA
 			continue
 		}
 		gcSafePoints = append(gcSafePoints, &pdpb.GCSafePointV2{
-			KeyspaceId:  gcState.KeyspaceID,
+			Keyspace: &pdpb.GCSafePointV2_KeyspaceId{
+				KeyspaceId: gcState.KeyspaceID,
+			},
 			GcSafePoint: gcState.GCSafePoint,
 		})
 	}
@@ -520,7 +527,9 @@ func gcStateToProto(gcState gc.GCState, now time.Time) *pdpb.GCState {
 	}
 	return &pdpb.GCState{
 		KeyspaceScope: &pdpb.KeyspaceScope{
-			KeyspaceId: gcState.KeyspaceID,
+			Keyspace: &pdpb.KeyspaceScope_KeyspaceId{
+				KeyspaceId: gcState.KeyspaceID,
+			},
 		},
 		IsKeyspaceLevelGc: gcState.IsKeyspaceLevel,
 		TxnSafePoint:      gcState.TxnSafePoint,
@@ -705,7 +714,22 @@ func (s *GrpcServer) GetGCState(ctx context.Context, request *pdpb.GetGCStateReq
 		return &pdpb.GetGCStateResponse{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 
-	gcState, err := s.gcStateManager.GetGCState(getKeyspaceID(request.GetKeyspaceScope()), request.GetExcludeGcBarriers())
+	var (
+		gcState          gc.GCState
+		globalGCBarriers []*endpoint.GlobalGCBarrier
+	)
+	keyspaceID := getKeyspaceID(request.GetKeyspaceScope())
+	if request.GetIncludeGlobalGcBarriers() {
+		gcState, globalGCBarriers, err = s.gcStateManager.GetGCStateWithGlobalGCBarriers(
+			keyspaceID,
+			request.GetExcludeGcBarriers(),
+		)
+	} else {
+		gcState, err = s.gcStateManager.GetGCState(
+			keyspaceID,
+			request.GetExcludeGcBarriers(),
+		)
+	}
 	if err != nil {
 		return &pdpb.GetGCStateResponse{
 			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
@@ -714,10 +738,21 @@ func (s *GrpcServer) GetGCState(ctx context.Context, request *pdpb.GetGCStateReq
 
 	failpoint.InjectCall("postGetGCStateCall")
 
-	return &pdpb.GetGCStateResponse{
+	now := time.Now()
+	response := &pdpb.GetGCStateResponse{
 		Header:  grpcutil.WrapHeader(),
-		GcState: gcStateToProto(gcState, time.Now()),
-	}, nil
+		GcState: gcStateToProto(gcState, now),
+	}
+	if request.GetIncludeGlobalGcBarriers() {
+		barriers := make([]*pdpb.GlobalGCBarrierInfo, 0, len(globalGCBarriers))
+		for _, barrier := range globalGCBarriers {
+			barriers = append(barriers, globalGCBarrierToProto(barrier, now))
+		}
+		response.GlobalGcBarriers = &pdpb.GlobalGCBarriersInfo{
+			Barriers: barriers,
+		}
+	}
+	return response, nil
 }
 
 // GetAllKeyspacesGCStates gets the GC states of all keyspaces.

@@ -35,6 +35,9 @@ func TestValidateURLWithScheme(t *testing.T) {
 		{"https://foo", false},
 		{"http://127.0.0.1", false},
 		{"http://127.0.0.1/", false},
+		{"http://[::1]:2379", false},
+		{"http://::1:2379", true},
+		{"http://localhost:80:80", true},
 		{"https://foo.com/bar", false},
 		{"https://foo.com/bar/", false},
 	}

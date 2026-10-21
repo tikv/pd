@@ -178,12 +178,17 @@ PD_PKG := github.com/tikv/pd
 PACKAGES := $(shell go list ./...)
 
 GO_TOOLS_BIN_PATH := $(ROOT_PATH)/.tools/bin
+GOLANGCI_LINT_VERSION := 2.13.2
 PATH := $(GO_TOOLS_BIN_PATH):$(PATH)
 SHELL := env PATH='$(PATH)' GOBIN='$(GO_TOOLS_BIN_PATH)' $(shell which bash)
 
 install-tools:
 	@mkdir -p $(GO_TOOLS_BIN_PATH)
-	@which golangci-lint >/dev/null 2>&1 || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GO_TOOLS_BIN_PATH) v2.6.0
+	@set -o pipefail; \
+	if ! $(GO_TOOLS_BIN_PATH)/golangci-lint version 2>/dev/null | grep -Fq 'version $(GOLANGCI_LINT_VERSION) '; then \
+		curl -sSfL https://golangci-lint.run/install.sh | \
+			sh -s -- -b $(GO_TOOLS_BIN_PATH) v$(GOLANGCI_LINT_VERSION); \
+	fi
 	@which promtool >/dev/null 2>&1 || { \
 		GOWORK=off go mod download github.com/prometheus/prometheus@v0.310.0; \
 		prom_dir=$$(go env GOMODCACHE)/github.com/prometheus/prometheus@v0.310.0; \
@@ -203,6 +208,8 @@ static: install-tools pre-build
 	@ echo "golangci-lint ..."
 	@ golangci-lint run --verbose $(PACKAGE_DIRECTORIES) --allow-parallel-runners
 	@ for mod in $(SUBMODULES); do cd $$mod && $(MAKE) static && cd $(ROOT_PATH) > /dev/null; done
+	@ echo "modernize ..."
+	@ go run golang.org/x/tools/gopls/internal/analysis/modernize/cmd/modernize@v0.18.1 -test ./...
 	@ echo "leakcheck ..."
 	@ leakcheck -exclude-files="tests/server/join/join_test.go" $(PACKAGES)
 	@ echo "promtool ..."

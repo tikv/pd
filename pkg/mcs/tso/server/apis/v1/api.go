@@ -17,6 +17,7 @@ package apis
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -35,6 +36,7 @@ import (
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
+	"github.com/tikv/pd/pkg/mcs/discovery"
 	tsoserver "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
@@ -43,6 +45,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/apiutil/multiservicesapi"
 	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
 const (
@@ -175,11 +178,10 @@ type ResetTSParams struct {
 }
 
 // ResetTS is the http.HandlerFunc of ResetTS
-// FIXME: details of input json body params
 // @Tags     admin
 // @Summary  Reset the ts.
 // @Accept   json
-// @Param    body  body  object  true  "json params"
+// @Param    body  body  ResetTSParams  true  "reset ts parameters"
 // @Produce  json
 // @Success  200  {string}  string  "Reset ts successfully."
 // @Failure  400  {string}  string  "The input is invalid."
@@ -306,13 +308,20 @@ func getConfig(c *gin.Context) {
 	c.IndentedJSON(http.StatusOK, config)
 }
 
+// TransferPrimaryRequest is the request body for /primary/transfer.
+type TransferPrimaryRequest struct {
+	NewPrimary      string  `json:"new_primary"`
+	KeyspaceGroupID *uint32 `json:"keyspace_group_id"`
+}
+
 // transferPrimary transfers the primary member to `new_primary`.
 // @Tags     primary
 // @Summary  Transfer the primary member to `new_primary`.
 // @Produce  json
-// @Param    new_primary        body  string  false  "new primary name"
-// @Param    keyspace_group_id  body  integer false  "keyspace group ID (default: 0)"
-// @Success  200  string  string
+// @Param    body  body  TransferPrimaryRequest  true  "transfer options"
+// @Success  200   {string}  string  "success"
+// @Failure  400   {string}  string  "invalid request"
+// @Failure  500   {string}  string  "internal error"
 // @Router   /primary/transfer [post]
 func transferPrimary(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*tsoserver.Service)
@@ -330,10 +339,7 @@ func transferPrimary(c *gin.Context) {
 		c.String(http.StatusBadRequest, "request body is required")
 		return
 	}
-	var input struct {
-		NewPrimary      string  `json:"new_primary"`
-		KeyspaceGroupID *uint32 `json:"keyspace_group_id"`
-	}
+	var input TransferPrimaryRequest
 	if err := json.Unmarshal(body, &input); err != nil {
 		c.String(http.StatusBadRequest, err.Error())
 		return
@@ -388,29 +394,76 @@ func transferPrimary(c *gin.Context) {
 	c.IndentedJSON(http.StatusOK, "success")
 }
 
+// maxEvictPrimaryRequestBytes caps the /primary/evict request body. The body is a
+// single short string field, so this is generous while still bounding memory
+// against an unbounded or malicious request.
+const maxEvictPrimaryRequestBytes int64 = 4 << 10
+
+// EvictPrimaryRequest is the request body for /primary/evict.
+type EvictPrimaryRequest struct {
+	NewPrimary string `json:"new_primary"`
+}
+
 // evictPrimary transfers away every keyspace group primary currently held by this
-// node, moving each to another member of the same group. It is a best-effort,
-// node-local operation: groups that this node is not serving as primary are
-// skipped, and a failure on one group does not stop the others.
+// node, moving each to another member of the same group. Groups that this node is
+// not serving as primary are skipped.
 //
-// The request is rejected as a whole if this node is the primary of any
-// splitting keyspace group: a split target must campaign on the same TSO node as
-// its split source, but eviction transfers each group to an independently chosen
-// member, which could break that invariant and leave the target keyspaces
-// without a primary. A single TransferPrimary is not atomic and the groups are
-// iterated in no particular order, so the split state is checked for every
-// candidate group up front before transferring anything; otherwise a normal
-// group could be moved before a later splitting group aborts the loop, leaving
-// partial side effects. Since splitting is transient, the caller should retry
-// once it finishes.
+// The request is rejected as a whole, before any group is touched, if this node
+// is the primary of any splitting keyspace group or if new_primary does not
+// identify a member of every candidate group: a split target must campaign on
+// the same TSO node as its split source, but eviction transfers each group to an
+// independently chosen member, which could break that invariant and leave the
+// target keyspaces without a primary; an invalid new_primary would otherwise only
+// be discovered mid-loop, after other groups had already been moved. A single
+// TransferPrimary is not atomic and the groups are iterated in no particular
+// order, so both conditions are checked for every candidate group up front;
+// otherwise a normal group could be moved before a later group aborts the loop,
+// leaving partial side effects. Since splitting is transient, the caller should
+// retry once it finishes. Once past this pre-check, a transfer failure for an
+// individual group (e.g. a transient etcd error) is best-effort and does not stop
+// the others.
 // @Tags     primary
 // @Summary  Evict all keyspace group primaries held by this node.
 // @Produce  json
-// @Success  200  {object}  map[string]string
-// @Failure  500  {object}  map[string]string
+// @Param    body  body  EvictPrimaryRequest  false  "eviction options"
+// @Success  200   {object}  map[string]string
+// @Failure  400   {string}  string  "invalid request"
+// @Failure  413   {string}  string  "request body too large"
+// @Failure  500   {object}  map[string]string
 // @Router   /primary/evict [post]
 func evictPrimary(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*tsoserver.Service)
+
+	body, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, maxEvictPrimaryRequestBytes))
+	if err != nil {
+		status := http.StatusBadRequest
+		var maxBytesError *http.MaxBytesError
+		if errors.As(err, &maxBytesError) {
+			status = http.StatusRequestEntityTooLarge
+		}
+		c.String(status, err.Error())
+		return
+	}
+	var input EvictPrimaryRequest
+	if len(body) > 0 {
+		if err := json.Unmarshal(body, &input); err != nil {
+			c.String(http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	// The node being evicted cannot also be its own replacement: TransferPrimary
+	// treats a target equal to the current primary as a self-transfer and silently
+	// no-ops, which would report "success" while leaving the node undrained. Match
+	// on both name and service address since IsValidPrimaryCandidate and
+	// TransferPrimary accept either as an identifier for new_primary. The address
+	// comparison ignores scheme, like isSamePrimary, so a caller supplying this
+	// node's persisted (possibly pre-migration) address cannot bypass this guard
+	// during the supported HTTP-to-HTTPS transition.
+	if input.NewPrimary != "" && (input.NewPrimary == svr.Name() || typeutil.EqualBaseURLs(input.NewPrimary, svr.GetAdvertiseListenAddr())) {
+		c.String(http.StatusBadRequest, "new_primary must not be the node being evicted")
+		return
+	}
+
 	kgm := svr.GetKeyspaceGroupManager()
 
 	// Collect the keyspace groups this node is currently the primary of. There is
@@ -424,13 +477,34 @@ func evictPrimary(c *gin.Context) {
 		primaryGroupIDs = append(primaryGroupIDs, keyspaceGroupID)
 	}
 
+	// Resolve the service registry once and reuse it for every candidate group
+	// below, instead of re-fetching per group.
+	var entries []discovery.ServiceRegistryEntry
+	if input.NewPrimary != "" {
+		entries, err = discovery.GetMSMembers(mcs.TSOServiceName, svr.GetClient())
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+
 	// Pre-check every candidate group before transferring anything so the
 	// operation is all-or-nothing: reject the whole request if any of them is
-	// splitting, instead of moving some groups first and only then aborting.
+	// splitting or new_primary is not one of its members, instead of moving some
+	// groups first and only then aborting.
 	for _, keyspaceGroupID := range primaryGroupIDs {
-		if group := kgm.GetKeyspaceGroupByID(keyspaceGroupID); group != nil && group.IsSplitting() {
+		group := kgm.GetKeyspaceGroupByID(keyspaceGroupID)
+		if group == nil {
+			continue
+		}
+		if group.IsSplitting() {
 			c.AbortWithStatusJSON(http.StatusInternalServerError,
 				errs.ErrKeyspaceGroupInSplit.FastGenByArgs(keyspaceGroupID).Error())
+			return
+		}
+		if !utils.IsValidPrimaryCandidate(entries, input.NewPrimary, keyspaceGroupMemberMap(group)) {
+			c.String(http.StatusBadRequest,
+				fmt.Sprintf("new_primary %q is not a member of keyspace group %d", input.NewPrimary, keyspaceGroupID))
 			return
 		}
 	}
@@ -458,10 +532,7 @@ func evictPrimary(c *gin.Context) {
 		}
 
 		// only members of the specific group are valid primary candidates.
-		memberMap := make(map[string]bool, len(group.Members))
-		for _, member := range group.Members {
-			memberMap[member.Address] = true
-		}
+		memberMap := keyspaceGroupMemberMap(group)
 
 		participant, ok := allocator.GetMember().(*member.Participant)
 		if !ok {
@@ -471,9 +542,8 @@ func evictPrimary(c *gin.Context) {
 		// has a higher priority for the group, the priority checker will move the
 		// primary back to it, so the eviction does not durably drain the node.
 		// Priority handling is being reworked, so revisit this when needed.
-		// An empty new primary lets TransferPrimary pick a random other member.
 		if err := utils.TransferPrimary(svr.GetClient(), participant,
-			mcs.TSOServiceName, svr.Name(), "", keyspaceGroupID, memberMap); err != nil {
+			mcs.TSOServiceName, svr.Name(), input.NewPrimary, keyspaceGroupID, memberMap); err != nil {
 			log.Warn("failed to evict keyspace group primary",
 				zap.Uint32("keyspace-group-id", keyspaceGroupID), errs.ZapError(err))
 			results[keyspaceGroupID] = err.Error()
@@ -488,6 +558,16 @@ func evictPrimary(c *gin.Context) {
 		return
 	}
 	c.IndentedJSON(http.StatusOK, results)
+}
+
+// keyspaceGroupMemberMap returns the set of service addresses that are members of
+// the group, so callers can filter transfer candidates down to that group.
+func keyspaceGroupMemberMap(group *endpoint.KeyspaceGroup) map[string]bool {
+	memberMap := make(map[string]bool, len(group.Members))
+	for _, member := range group.Members {
+		memberMap[member.Address] = true
+	}
+	return memberMap
 }
 
 // forwardToGroupPrimary forwards the transfer primary request to the primary of

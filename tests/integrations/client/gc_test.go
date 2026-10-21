@@ -59,7 +59,7 @@ func TestServiceSafePointV2Operations(t *testing.T) {
 
 	advanceTxnSafePointReq := &pdpb.AdvanceTxnSafePointRequest{
 		Header:        header,
-		KeyspaceScope: &pdpb.KeyspaceScope{KeyspaceId: ks1.Id},
+		KeyspaceScope: &pdpb.KeyspaceScope{Keyspace: &pdpb.KeyspaceScope_KeyspaceId{KeyspaceId: ks1.GetId()}},
 		Target:        10,
 	}
 	advanceTxnSafePointResp, err := grpcPDClient.AdvanceTxnSafePoint(ctx, advanceTxnSafePointReq)
@@ -73,43 +73,43 @@ func TestServiceSafePointV2Operations(t *testing.T) {
 	defer cli.Close()
 	legacyClientV2, ok := cli.(clientgc.LegacyClientV2)
 	re.True(ok)
-	gcStatesClient := cli.GetGCStatesClient(ks1.Id)
+	gcStatesClient := cli.GetGCStatesClient(ks1.GetId())
 	getGCBarriers := func() []*clientgc.GCBarrierInfo {
 		gcState, err := gcStatesClient.GetGCState(ctx, clientgc.ExcludeGCBarriers(false))
 		re.NoError(err)
-		re.Equal(ks1.Id, gcState.KeyspaceID)
+		re.Equal(ks1.GetId(), gcState.KeyspaceID)
 		gcBarriers, err := gcState.GetGCBarriers()
 		re.NoError(err)
 		return gcBarriers
 	}
 
-	minSafePoint, err := legacyClientV2.GetMinServiceSafePointV2(ctx, ks1.Id)
+	minSafePoint, err := legacyClientV2.GetMinServiceSafePointV2(ctx, ks1.GetId())
 	re.NoError(err)
 	re.Equal(uint64(10), minSafePoint)
 	re.Empty(getGCBarriers())
 
 	for _, ttl := range []int64{0, -1} {
-		minSafePoint, err = legacyClientV2.SetServiceSafePointV2(ctx, ks1.Id, "v2-service-safe-point", ttl, 20)
+		minSafePoint, err = legacyClientV2.SetServiceSafePointV2(ctx, ks1.GetId(), "v2-service-safe-point", ttl, 20)
 		re.Error(err)
 		re.ErrorContains(err, "invalid ttl")
 		re.Equal(uint64(0), minSafePoint)
 	}
 	re.Empty(getGCBarriers())
 
-	minSafePoint, err = legacyClientV2.SetServiceSafePointV2(ctx, ks1.Id, "_reserved_get_min_ssp", 3600, 20)
+	minSafePoint, err = legacyClientV2.SetServiceSafePointV2(ctx, ks1.GetId(), "_reserved_get_min_ssp", 3600, 20)
 	re.Error(err)
 	re.ErrorContains(err, "reserved for GetMinServiceSafePointV2")
 	re.Equal(uint64(0), minSafePoint)
 	re.Empty(getGCBarriers())
 
 	// The safePoint < minSafePoint is rejected, and the returned minSafePoint is still 10.
-	minSafePoint, err = legacyClientV2.SetServiceSafePointV2(ctx, ks1.Id, "v2-service-safe-point", 3600, 5)
+	minSafePoint, err = legacyClientV2.SetServiceSafePointV2(ctx, ks1.GetId(), "v2-service-safe-point", 3600, 5)
 	re.NoError(err)
 	re.Equal(uint64(10), minSafePoint)
 	gcBarriers := getGCBarriers()
 	re.Empty(gcBarriers)
 
-	minSafePoint, err = legacyClientV2.SetServiceSafePointV2(ctx, ks1.Id, "v2-service-safe-point", 3600, 20)
+	minSafePoint, err = legacyClientV2.SetServiceSafePointV2(ctx, ks1.GetId(), "v2-service-safe-point", 3600, 20)
 	re.NoError(err)
 	re.Equal(uint64(10), minSafePoint)
 	gcBarriers = getGCBarriers()
@@ -119,7 +119,7 @@ func TestServiceSafePointV2Operations(t *testing.T) {
 	re.Greater(gcBarriers[0].TTL, 3595*time.Second)
 	re.LessOrEqual(gcBarriers[0].TTL, 3600*time.Second)
 
-	minSafePoint, err = legacyClientV2.DeleteServiceSafePointV2(ctx, ks1.Id, "v2-service-safe-point")
+	minSafePoint, err = legacyClientV2.DeleteServiceSafePointV2(ctx, ks1.GetId(), "v2-service-safe-point")
 	re.NoError(err)
 	re.Equal(uint64(10), minSafePoint)
 	re.Empty(getGCBarriers())

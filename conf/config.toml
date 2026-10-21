@@ -104,10 +104,18 @@
 [pd-server]
 ## The metric storage is the cluster metric storage. This is use for query metric data.
 ## Currently we use prometheus as metric storage, we may use PD/TiKV as metric storage later.
-## For usability, recommended to temporarily set it to the prometheus address, eg: http://127.0.0.1:9090
+## Set it to a reachable Prometheus address, for example: http://prometheus.example.com:9090
+## Metric queries reject loopback, link-local, metadata, unspecified, multicast,
+## and other non-service destinations.
 # metric-storage = ""
 ## There are some values supported: "auto", "none", or a specific address, default: "auto".
 # dashboard-address = "auto"
+## Concurrent metadata scans per GC keyspace index load attempt (range: 1-16).
+## Online changes apply to the next full-load attempt, including retries.
+# gc-keyspace-index-load-concurrency = 4
+## Concurrent GC state reads per initial cache warmup campaign (range: 1-16).
+## Online changes apply to the next campaign, normally on the next leadership term.
+# gc-state-cache-warmup-concurrency = 4
 
 [schedule]
 ## Controls the size limit of Region Merge.

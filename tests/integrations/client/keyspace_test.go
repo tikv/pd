@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"slices"
 	"testing"
 	"time"
 
@@ -30,7 +31,6 @@ import (
 	"github.com/tikv/pd/client/pkg/caller"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
-	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
@@ -176,7 +176,7 @@ func (suite *clientStatelessTestSuite) TestUpdateKeyspaceState() {
 		for _, targetState := range allStates {
 			meta := mustCreateKeyspaceAtState(re, suite.srv, index, originState)
 			updated, err := suite.client.UpdateKeyspaceState(suite.ctx, meta.GetId(), targetState)
-			if slice.Contains(allowedTransitions[originState], targetState) {
+			if slices.Contains(allowedTransitions[originState], targetState) {
 				// If transition is allowed, then update must be successful.
 				re.NoError(err)
 				if originState != targetState {
@@ -305,6 +305,7 @@ func TestProtectedKeyspace(t *testing.T) {
 			cli, err := pd.NewClientWithContext(ctx, caller.TestComponent,
 				leaderServer.GetLeader().GetClientUrls(), pd.SecurityOption{})
 			re.NoError(err)
+			defer cli.Close()
 			_, _, err = cli.GetTS(ctx)
 			re.NoError(err)
 		})

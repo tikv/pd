@@ -22,6 +22,7 @@ import (
 	"math"
 	"math/rand/v2"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -31,6 +32,7 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -78,19 +80,18 @@ const (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 func TestClientLeaderChange(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	re.NoError(err)
 	defer cluster.Destroy()
 
 	endpoints := runServer(re, cluster)
-	endpointsWithWrongURL := append([]string{}, endpoints...)
+	endpointsWithWrongURL := slices.Clone(endpoints)
 	// inject wrong http scheme
 	for i := range endpointsWithWrongURL {
 		endpointsWithWrongURL[i] = "https://" + strings.TrimPrefix(endpointsWithWrongURL[i], "http://")
@@ -144,13 +145,13 @@ func TestClientLeaderChange(t *testing.T) {
 }
 
 func TestLeaderTransferAndMoveCluster(t *testing.T) {
+	as := assert.New(t)
 	re := require.New(t)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
 	defer func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
 	}()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -187,8 +188,9 @@ func TestLeaderTransferAndMoveCluster(t *testing.T) {
 			physical, logical, err := cli.GetTS(context.TODO())
 			if err == nil {
 				ts := tsoutil.ComposeTS(physical, logical)
-				re.True(cluster.CheckTSOUnique(ts))
-				re.Less(lastTS, ts)
+				if !as.True(cluster.CheckTSOUnique(ts)) || !as.Less(lastTS, ts) {
+					return
+				}
 				lastTS = ts
 			}
 			time.Sleep(time.Millisecond)
@@ -198,10 +200,10 @@ func TestLeaderTransferAndMoveCluster(t *testing.T) {
 	// Transfer leader.
 	for range 3 {
 		oldLeaderName := cluster.WaitLeader()
-		err := cluster.GetServer(oldLeaderName).ResignLeader()
+		err := cluster.GetServer(oldLeaderName).ResignLeaderWithRetry()
 		re.NoError(err)
-		newLeaderName := cluster.WaitLeader()
-		re.NotEqual(oldLeaderName, newLeaderName)
+		newLeaderName := cluster.WaitLeaderChange(oldLeaderName)
+		re.NotEmpty(newLeaderName)
 	}
 
 	// ABC->ABCDEF
@@ -232,8 +234,7 @@ func TestLeaderTransferAndMoveCluster(t *testing.T) {
 
 func TestGetTSAfterTransferLeader(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 2)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -249,11 +250,10 @@ func TestGetTSAfterTransferLeader(t *testing.T) {
 		leaderSwitched.Store(true)
 		return nil
 	})
-	err = cluster.GetServer(leader).ResignLeader()
+	err = cluster.GetServer(leader).ResignLeaderWithRetry()
 	re.NoError(err)
-	newLeader := cluster.WaitLeader()
+	newLeader := cluster.WaitLeaderChange(leader)
 	re.NotEmpty(newLeader)
-	re.NotEqual(leader, newLeader)
 	leader = cluster.WaitLeader()
 	re.NotEmpty(leader)
 	err = cli.GetServiceDiscovery().CheckMemberChanged()
@@ -266,9 +266,9 @@ func TestGetTSAfterTransferLeader(t *testing.T) {
 }
 
 func TestTSOFollowerProxy(t *testing.T) {
+	as := assert.New(t)
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -290,15 +290,23 @@ func TestTSOFollowerProxy(t *testing.T) {
 			var lastTS uint64
 			for range tsoRequestRound {
 				physical, logical, err := cli2.GetTS(context.Background())
-				re.NoError(err)
+				if !as.NoError(err) {
+					return
+				}
 				ts := tsoutil.ComposeTS(physical, logical)
-				re.Less(lastTS, ts)
+				if !as.Less(lastTS, ts) {
+					return
+				}
 				lastTS = ts
 				// After requesting with the follower proxy, request with the leader directly.
 				physical, logical, err = cli1.GetTS(context.Background())
-				re.NoError(err)
+				if !as.NoError(err) {
+					return
+				}
 				ts = tsoutil.ComposeTS(physical, logical)
-				re.Less(lastTS, ts)
+				if !as.Less(lastTS, ts) {
+					return
+				}
 				lastTS = ts
 			}
 		}()
@@ -316,7 +324,7 @@ func TestTSOFollowerProxy(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		re.NoError(followerServer.Run())
+		as.NoError(followerServer.Run())
 	}()
 	re.Eventually(func() bool {
 		_, _, err := cli2.GetTS(context.Background())
@@ -343,22 +351,32 @@ func TestTSOFollowerProxy(t *testing.T) {
 				physical, logical, err := cli2.GetTS(context.Background())
 				if err != nil {
 					// It can only be the context canceled error caused by the stale stream cleanup.
-					re.ErrorContains(err, "context canceled")
+					if !as.ErrorContains(err, "context canceled") {
+						return
+					}
 					continue
 				}
-				re.NoError(err)
+				if !as.NoError(err) {
+					return
+				}
 				ts := tsoutil.ComposeTS(physical, logical)
-				re.Less(lastTS, ts)
+				if !as.Less(lastTS, ts) {
+					return
+				}
 				lastTS = ts
 				// After requesting with the follower proxy, request with the leader directly.
 				physical, logical, err = cli1.GetTS(context.Background())
-				re.NoError(err)
+				if !as.NoError(err) {
+					return
+				}
 				ts = tsoutil.ComposeTS(physical, logical)
-				re.Less(lastTS, ts)
+				if !as.Less(lastTS, ts) {
+					return
+				}
 				lastTS = ts
 			}
 			// Ensure at least one request is successful.
-			re.NotEmpty(lastTS)
+			as.NotEmpty(lastTS)
 		}()
 	}
 	wg.Wait()
@@ -367,8 +385,7 @@ func TestTSOFollowerProxy(t *testing.T) {
 func TestTSOFollowerProxyWithTSOService(t *testing.T) {
 	re := require.New(t)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/fastUpdateServiceMode", `return(true)`))
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -393,9 +410,9 @@ func TestTSOFollowerProxyWithTSOService(t *testing.T) {
 
 // TestUnavailableTimeAfterLeaderIsReady is used to test https://github.com/tikv/pd/issues/5207
 func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
+	as := assert.New(t)
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -416,8 +433,9 @@ func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
 				maxUnavailableTime = time.Now()
 				continue
 			}
-			re.NoError(err)
-			re.Less(lastTS, ts)
+			if !as.Less(lastTS, ts) {
+				return
+			}
 			lastTS = ts
 		}
 	}
@@ -429,11 +447,12 @@ func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
 		defer wg.Done()
 		leader := cluster.GetLeaderServer()
 		err := leader.Stop()
-		re.NoError(err)
-		re.NotEmpty(cluster.WaitLeader())
+		if !as.NoError(err) || !as.NotEmpty(cluster.WaitLeader()) {
+			return
+		}
 		leaderReadyTime = time.Now()
 		err = tests.RunServers([]*tests.TestServer{leader})
-		re.NoError(err)
+		as.NoError(err)
 	}()
 	wg.Wait()
 	re.Less(maxUnavailableTime.UnixMilli(), leaderReadyTime.Add(1*time.Second).UnixMilli())
@@ -445,11 +464,16 @@ func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		leader := cluster.GetLeaderServer()
-		re.NoError(failpoint.Enable("github.com/tikv/pd/client/clients/tso/unreachableNetwork", "return(true)"))
+		if !as.NoError(failpoint.Enable("github.com/tikv/pd/client/clients/tso/unreachableNetwork", "return(true)")) {
+			return
+		}
 		err := leader.Stop()
-		re.NoError(err)
-		re.NotEmpty(cluster.WaitLeader())
-		re.NoError(failpoint.Disable("github.com/tikv/pd/client/clients/tso/unreachableNetwork"))
+		if !as.NoError(err) || !as.NotEmpty(cluster.WaitLeader()) {
+			return
+		}
+		if !as.NoError(failpoint.Disable("github.com/tikv/pd/client/clients/tso/unreachableNetwork")) {
+			return
+		}
 		leaderReadyTime = time.Now()
 	}()
 	wg.Wait()
@@ -458,8 +482,7 @@ func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
 
 func TestCustomTimeout(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -533,8 +556,8 @@ func (suite *followerForwardAndHandleTestSuite) SetupSuite() {
 }
 
 func (suite *followerForwardAndHandleTestSuite) TearDownSuite() {
-	suite.cluster.Destroy()
 	suite.clean()
+	suite.cluster.Destroy()
 }
 
 func (suite *followerForwardAndHandleTestSuite) TestGetRegionByFollowerForwarding() {
@@ -613,8 +636,9 @@ func (suite *followerForwardAndHandleTestSuite) TestGetTsoByFollowerForwarding2(
 	})
 
 	lastTS = checkTS(re, cli, lastTS)
-	re.NoError(suite.cluster.GetLeaderServer().ResignLeader())
-	re.NotEmpty(suite.cluster.WaitLeader())
+	oldLeaderName := suite.cluster.WaitLeader()
+	re.NoError(suite.cluster.GetServer(oldLeaderName).ResignLeaderWithRetry())
+	re.NotEmpty(suite.cluster.WaitLeaderChange(oldLeaderName))
 	lastTS = checkTS(re, cli, lastTS)
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/clients/tso/unreachableNetwork"))
@@ -919,8 +943,7 @@ func waitLeader(re *require.Assertions, cli sd.ServiceDiscovery, leader *tests.T
 
 func TestConfigTTLAfterTransferLeader(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -954,9 +977,8 @@ func TestConfigTTLAfterTransferLeader(t *testing.T) {
 			!options.IsLocationReplacementEnabled()
 	})
 	re.NoError(cluster.GetServer(leaderName).ResignLeaderWithRetry())
-	newLeaderName := cluster.WaitLeader()
+	newLeaderName := cluster.WaitLeaderChange(leaderName)
 	re.NotEmpty(newLeaderName)
-	re.NotEqual(leaderName, newLeaderName)
 	leader = cluster.GetServer(newLeaderName)
 	re.NotNil(leader)
 	testutil.Eventually(re, func() bool {
@@ -979,8 +1001,7 @@ func TestConfigTTLAfterTransferLeader(t *testing.T) {
 
 func TestCloseClient(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -1268,7 +1289,11 @@ func (suite *clientStatelessTestSuite) TestGetStore() {
 	re := suite.Require()
 	cluster := suite.srv.GetRaftCluster()
 	re.NotNil(cluster)
-	store := stores[0]
+	// Use stores[3]: this test destructively transitions it through
+	// offline -> tombstone, and stores[0..2] are the ones other tests in
+	// this suite heartbeat regions through (peers[0..2]) and expect to
+	// stay live for the rest of the suite.
+	store := stores[3]
 
 	// Get an up store should be OK.
 	n, err := suite.client.GetStore(context.Background(), store.GetId())
@@ -1420,9 +1445,9 @@ func (suite *clientStatelessTestSuite) TestScatterRegion() {
 }
 
 func TestWatch(t *testing.T) {
+	as := assert.New(t)
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -1445,11 +1470,15 @@ func TestWatch(t *testing.T) {
 				break
 			}
 		}
-		re.Equal(meta_storagepb.Event_PUT, events[0].GetType())
-		re.Equal("1", string(events[0].GetKv().GetValue()))
-		re.Equal(meta_storagepb.Event_PUT, events[1].GetType())
-		re.Equal("2", string(events[1].GetKv().GetValue()))
-		re.Equal(meta_storagepb.Event_DELETE, events[2].GetType())
+		if !as.Len(events, 3) {
+			exit <- struct{}{}
+			return
+		}
+		as.Equal(meta_storagepb.Event_PUT, events[0].GetType())
+		as.Equal("1", string(events[0].GetKv().GetValue()))
+		as.Equal(meta_storagepb.Event_PUT, events[1].GetType())
+		as.Equal("2", string(events[1].GetKv().GetValue()))
+		as.Equal(meta_storagepb.Event_DELETE, events[2].GetType())
 		exit <- struct{}{}
 	}()
 
@@ -1467,8 +1496,7 @@ func TestWatch(t *testing.T) {
 
 func TestPutGet(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -1502,8 +1530,7 @@ func TestPutGet(t *testing.T) {
 // TestClientWatchWithRevision is the same as TestClientWatchWithRevision in global config.
 func TestClientWatchWithRevision(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -1800,8 +1827,7 @@ func (suite *clientStatelessTestSuite) TestBatchScanRegions() {
 func TestGetRegionWithBackoff(t *testing.T) {
 	re := require.New(t)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/rateLimit", "return(true)"))
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
@@ -1852,8 +1878,7 @@ func needRetry(err error) bool {
 
 func TestCircuitBreaker(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
@@ -1908,8 +1933,7 @@ func TestCircuitBreaker(t *testing.T) {
 
 func TestCircuitBreakerOpenAndChangeSettings(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
@@ -1957,8 +1981,7 @@ func TestCircuitBreakerOpenAndChangeSettings(t *testing.T) {
 
 func TestCircuitBreakerHalfOpenAndChangeSettings(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
@@ -1996,8 +2019,7 @@ func TestCircuitBreakerHalfOpenAndChangeSettings(t *testing.T) {
 	re.Error(err)
 	re.Contains(err.Error(), "circuit breaker is open")
 
-	fname := testutil.InitTempFileLogger("info")
-	defer os.RemoveAll(fname)
+	fname := testutil.InitTempFileLogger(t, "info")
 	// wait for cooldown
 	time.Sleep(time.Second)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker"))
@@ -2342,7 +2364,7 @@ func (s *clientStatefulTestSuite) prepareKeyspacesForGCTest() {
 		CreateTime: time.Now().Unix(),
 	})
 	re.NoError(err)
-	re.Equal(uint32(1), ks1.Id)
+	re.Equal(uint32(1), ks1.GetId())
 
 	ks2, err := s.srv.GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{
 		Name:       "ks2",
@@ -2350,7 +2372,7 @@ func (s *clientStatefulTestSuite) prepareKeyspacesForGCTest() {
 		CreateTime: time.Now().Unix(),
 	})
 	re.NoError(err)
-	re.Equal(uint32(2), ks2.Id)
+	re.Equal(uint32(2), ks2.GetId())
 }
 
 func (s *clientStatefulTestSuite) TestAdvanceTxnSafePointBasic() {
@@ -2424,13 +2446,13 @@ func (s *clientStatefulTestSuite) TestAdvanceGCSafePoint() {
 		s.checkGCSafePoint(re, keyspaceID, 5)
 
 		// Disallows going backward.
-		res, err = c.AdvanceGCSafePoint(ctx, 4)
+		_, err = c.AdvanceGCSafePoint(ctx, 4)
 		re.Error(err)
 		re.Contains(err.Error(), "ErrDecreasingGCSafePoint")
 		s.checkGCSafePoint(re, keyspaceID, 5)
 
 		// Disallows exceeding txn safe point.
-		res, err = c.AdvanceGCSafePoint(ctx, 11)
+		_, err = c.AdvanceGCSafePoint(ctx, 11)
 		re.Error(err)
 		re.Contains(err.Error(), "ErrGCSafePointExceedsTxnSafePoint")
 		// Do not change the current value in this case.
@@ -2567,6 +2589,23 @@ func (s *clientStatefulTestSuite) TestGlobalGCBarriers() {
 	s.prepareKeyspacesForGCTest()
 	re := s.Require()
 	ctx := context.Background()
+	type barrierIDAndTS struct {
+		id string
+		ts uint64
+	}
+	sortedBarrierIDsAndTS := func(barriers []*gc.GlobalGCBarrierInfo) []barrierIDAndTS {
+		result := make([]barrierIDAndTS, 0, len(barriers))
+		for _, barrier := range barriers {
+			result = append(result, barrierIDAndTS{
+				id: barrier.BarrierID,
+				ts: barrier.BarrierTS,
+			})
+		}
+		sort.Slice(result, func(i, j int) bool {
+			return result[i].id < result[j].id
+		})
+		return result
+	}
 
 	var clients []gc.GCStatesClient
 	for _, keyspaceID := range []uint32{constants.NullKeyspaceID, 1, 2} {
@@ -2574,10 +2613,50 @@ func (s *clientStatefulTestSuite) TestGlobalGCBarriers() {
 		s.checkGlobalGCBarrier(re, "b1", 0)
 		clients = append(clients, cli)
 	}
+	for _, cli := range clients {
+		state, err := cli.GetGCState(ctx)
+		re.NoError(err)
+		re.False(state.HasGlobalGCBarriers())
+		_, err = state.GetGlobalGCBarriers()
+		re.Error(err)
+
+		state, err = cli.GetGCState(ctx, gc.ExcludeGlobalGCBarriers(false))
+		re.NoError(err)
+		re.True(state.HasGlobalGCBarriers())
+		barriers, err := state.GetGlobalGCBarriers()
+		re.NoError(err)
+		re.Empty(barriers)
+	}
+	_, err := s.srv.GetGCStateManager().SetGlobalGCBarrier(
+		ctx,
+		"expired",
+		1,
+		time.Second,
+		time.Now().Add(-2*time.Second),
+	)
+	re.NoError(err)
+	expectedExpired := []barrierIDAndTS{{id: "expired", ts: 1}}
+	for _, cli := range clients {
+		state, err := cli.GetGCState(ctx, gc.ExcludeGlobalGCBarriers(false))
+		re.NoError(err)
+		re.True(state.HasGlobalGCBarriers())
+		barriers, err := state.GetGlobalGCBarriers()
+		re.NoError(err)
+		re.Equal(expectedExpired, sortedBarrierIDsAndTS(barriers))
+		re.Zero(barriers[0].TTL)
+		re.True(barriers[0].IsExpired())
+	}
+	allStates, err := clients[0].GetAllKeyspacesGCStates(ctx, gc.ExcludeGlobalGCBarriers(false))
+	re.NoError(err)
+	allBarriers, err := allStates.GetGlobalGCBarriers()
+	re.NoError(err)
+	re.Equal(expectedExpired, sortedBarrierIDsAndTS(allBarriers))
 	// It doesn't matter what keyspace SetGlobalGCBarrier API is called on.
 	getCli := func() gc.GCStatesClient {
 		return clients[rand.IntN(len(clients))]
 	}
+	_, err = getCli().DeleteGlobalGCBarrier(ctx, "expired")
+	re.NoError(err)
 
 	b, err := getCli().SetGlobalGCBarrier(ctx, "b1", 10, math.MaxInt64)
 	re.NoError(err)
@@ -2645,6 +2724,50 @@ func (s *clientStatefulTestSuite) TestGlobalGCBarriers() {
 	_, err = getCli().SetGlobalGCBarrier(ctx, "b2", 20, math.MaxInt64)
 	re.NoError(err)
 	s.checkGlobalGCBarrier(re, "b2", 20)
+	expectedBarriers := []barrierIDAndTS{
+		{id: "b1", ts: 22},
+		{id: "b2", ts: 20},
+	}
+	for _, cli := range clients {
+		state, err := cli.GetGCState(ctx, gc.ExcludeGlobalGCBarriers(false))
+		re.NoError(err)
+		re.True(state.HasGlobalGCBarriers())
+		barriers, err := state.GetGlobalGCBarriers()
+		re.NoError(err)
+		re.Equal(expectedBarriers, sortedBarrierIDsAndTS(barriers))
+	}
+
+	_, err = clients[1].SetGCBarrier(ctx, "local-observer", 24, math.MaxInt64)
+	re.NoError(err)
+	state, err := clients[1].GetGCState(
+		ctx,
+		gc.ExcludeGCBarriers(false),
+		gc.ExcludeGlobalGCBarriers(false),
+	)
+	re.NoError(err)
+	re.True(state.HasGCBarriers())
+	localBarriers, err := state.GetGCBarriers()
+	re.NoError(err)
+	re.Len(localBarriers, 1)
+	re.Equal("local-observer", localBarriers[0].BarrierID)
+	re.True(state.HasGlobalGCBarriers())
+	globalBarriers, err := state.GetGlobalGCBarriers()
+	re.NoError(err)
+	re.Equal(expectedBarriers, sortedBarrierIDsAndTS(globalBarriers))
+
+	state, err = clients[1].GetGCState(
+		ctx,
+		gc.ExcludeGCBarriers(true),
+		gc.ExcludeGlobalGCBarriers(false),
+	)
+	re.NoError(err)
+	re.False(state.HasGCBarriers())
+	_, err = state.GetGCBarriers()
+	re.Error(err)
+	re.True(state.HasGlobalGCBarriers())
+	globalBarriers, err = state.GetGlobalGCBarriers()
+	re.NoError(err)
+	re.Equal(expectedBarriers, sortedBarrierIDsAndTS(globalBarriers))
 
 	for _, keyspaceID := range []uint32{constants.NullKeyspaceID, 1, 2} {
 		c := s.client.GetGCInternalController(keyspaceID)
@@ -2711,7 +2834,7 @@ func (s *clientStatefulTestSuite) TestGetAllKeyspaceGCStates() {
 		CreateTime: time.Now().Unix(),
 	})
 	re.NoError(err)
-	re.Equal(uint32(3), ks3.Id)
+	re.Equal(uint32(3), ks3.GetId())
 
 	// Modify some GC states and verify TestGetAllKeyspaceGCStates gets the correct result.
 	cli := s.client.GetGCStatesClient(constants.NullKeyspaceID)
@@ -2771,9 +2894,16 @@ func (s *clientStatefulTestSuite) TestGetAllKeyspaceGCStates() {
 	re.NoError(err)
 	res, err = cli.GetAllKeyspacesGCStates(ctx, gc.ExcludeGCBarriers(false), gc.ExcludeGlobalGCBarriers(false))
 	re.NoError(err)
-	state, ok = res.GCStates[2]
+	state1, ok := res.GCStates[1]
 	re.True(ok)
-	gcBarriers, err = state.GetGCBarriers()
+	re.True(state1.IsKeyspaceLevelGC)
+	state2, ok := res.GCStates[2]
+	re.True(ok)
+	re.True(state2.IsKeyspaceLevelGC)
+	state3, ok := res.GCStates[3]
+	re.True(ok)
+	re.False(state3.IsKeyspaceLevelGC)
+	gcBarriers, err = state2.GetGCBarriers()
 	re.NoError(err)
 	re.Equal("b4", gcBarriers[0].BarrierID)
 	re.Equal(uint64(14), gcBarriers[0].BarrierTS)
@@ -2803,8 +2933,7 @@ func TestDecodeHttpKeyRange(t *testing.T) {
 }
 func TestCreateClientWithKeyspaceCheck(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Keyspace.WaitRegionSplit = false
 	})

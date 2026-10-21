@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -83,6 +84,7 @@ type RegionInfo struct {
 	readKeys                  uint64
 	approximateSize           int64
 	approximateKvSize         int64 // Unit: MiB
+	approximateIAKvSize       int64 // Unit: MiB
 	approximateColumnarKvSize int64 // Unit: MiB
 	approximateKeys           int64
 	interval                  *pdpb.TimeInterval
@@ -190,6 +192,8 @@ const (
 	// EmptyRegionApproximateSize is the region approximate size of an empty region
 	// (heartbeat size <= 1MB).
 	EmptyRegionApproximateSize = 1
+	// EmptyRegionApproximateKeys is the approximate key count of an empty region.
+	EmptyRegionApproximateKeys = 0
 	// ImpossibleFlowSize is an impossible flow size (such as written_bytes, read_keys, etc.)
 	// It may be caused by overflow, refer to https://github.com/tikv/pd/issues/3379.
 	// They need to be filtered so as not to affect downstream.
@@ -201,6 +205,11 @@ const (
 	// InitClusterRegionThreshold is a threshold which represent a new cluster.
 	InitClusterRegionThreshold = 100
 )
+
+// IsEmptyRegion returns whether a region has no meaningful data according to its approximate size and keys.
+func IsEmptyRegion(size, keys int64) bool {
+	return size <= EmptyRegionApproximateSize && keys == EmptyRegionApproximateKeys
+}
 
 // RegionHeartbeatResponse is the interface for region heartbeat response.
 type RegionHeartbeatResponse interface {
@@ -258,6 +267,7 @@ func RegionFromHeartbeat(heartbeat RegionHeartbeatRequest, flowRoundDivisor uint
 	// scheduling service doesn't need the following fields.
 	if h, ok := heartbeat.(*pdpb.RegionHeartbeatRequest); ok {
 		region.approximateKvSize = int64(h.GetApproximateKvSize() / units.MiB)
+		region.approximateIAKvSize = int64(h.GetApproximateIaKvSize() / units.MiB)
 		region.approximateColumnarKvSize = int64(h.GetApproximateColumnarKvSize() / units.MiB)
 		region.replicationStatus = h.GetReplicationStatus()
 		region.cpuStats = h.GetCpuStats()
@@ -294,7 +304,7 @@ func (r *RegionInfo) Inherit(origin *RegionInfo, bucketEnable bool) {
 	// To distinguish between "truly empty region" and "uninitialized statistics", TiKV uses:
 	// - size=0, keys=0: Uninitialized (need to inherit from previous values)
 	// - size=1, keys=0: Truly empty region
-	// - size>1, keys>0: Region has data
+	// - size=1, keys>0 or size>1: Region has data
 	// Ref: https://github.com/tikv/tikv/pull/19181
 	if r.GetApproximateSize() == 0 {
 		if origin != nil {
@@ -335,6 +345,7 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 		readKeys:                  r.readKeys,
 		approximateSize:           r.approximateSize,
 		approximateKvSize:         r.approximateKvSize,
+		approximateIAKvSize:       r.approximateIAKvSize,
 		approximateColumnarKvSize: r.approximateColumnarKvSize,
 		approximateKeys:           r.approximateKeys,
 		interval:                  typeutil.DeepClone(r.interval, TimeIntervalFactory),
@@ -717,6 +728,11 @@ func (r *RegionInfo) GetApproximateKvSize() int64 {
 	return r.approximateKvSize
 }
 
+// GetApproximateIAKvSize returns the approximate IA row-based logical KV size in MiB.
+func (r *RegionInfo) GetApproximateIAKvSize() int64 {
+	return r.approximateIAKvSize
+}
+
 // GetApproximateColumnarKvSize returns the approximate columnar kv size of the region.
 func (r *RegionInfo) GetApproximateColumnarKvSize() int64 {
 	return r.approximateColumnarKvSize
@@ -986,7 +1002,10 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 				return
 			}
 			if region.GetApproximateSize() != origin.GetApproximateSize() ||
-				region.GetApproximateKeys() != origin.GetApproximateKeys() {
+				region.GetApproximateKeys() != origin.GetApproximateKeys() ||
+				region.GetApproximateKvSize() != origin.GetApproximateKvSize() ||
+				region.GetApproximateIAKvSize() != origin.GetApproximateIAKvSize() ||
+				region.GetApproximateColumnarKvSize() != origin.GetApproximateColumnarKvSize() {
 				saveCache = true
 				return
 			}
@@ -1368,7 +1387,7 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo, withOverlaps bool, ol 
 				}
 			}
 			if idx >= 0 {
-				ol = append(ol[:idx], ol[idx+1:]...)
+				ol = slices.Delete(ol, idx, idx+1)
 			}
 			r.tree.remove(origin)
 			// Update the RegionInfo in the regionItem.

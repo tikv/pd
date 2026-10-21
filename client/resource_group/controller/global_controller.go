@@ -147,11 +147,12 @@ var _ ResourceGroupKVInterceptor = (*ResourceGroupsController)(nil)
 
 // ResourceGroupsController implements ResourceGroupKVInterceptor.
 type ResourceGroupsController struct {
-	clientUniqueID   uint64
-	provider         ResourceGroupProvider
-	groupsController sync.Map
-	ruConfig         *RUConfig
-	keyspaceID       uint32
+	clientUniqueID      uint64
+	provider            ResourceGroupProvider
+	groupsController    sync.Map
+	requestSourceStates sync.Map
+	ruConfig            *RUConfig
+	keyspaceID          uint32
 
 	loopCtx    context.Context
 	loopCancel func()
@@ -317,9 +318,6 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 
 		failpoint.Inject("fastCleanup", func() {
 			cleanupTicker.Reset(100 * time.Millisecond)
-			// because of checking `gc.run.consumption` in cleanupTicker,
-			// so should also change the stateUpdateTicker.
-			stateUpdateTicker.Reset(200 * time.Millisecond)
 		})
 		failpoint.Inject("acceleratedReportingPeriod", func() {
 			stateUpdateTicker.Reset(time.Millisecond * 100)
@@ -389,6 +387,10 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			/* channels */
 			case <-c.loopCtx.Done():
 				metrics.ResourceGroupStatusGauge.Reset()
+				c.requestSourceStates.Range(func(_, v any) bool {
+					v.(*requestSourceMetricsState).cleanup()
+					return true
+				})
 				return
 			case <-c.responseDeadlineCh:
 				c.run.inDegradedMode.Store(true)
@@ -438,7 +440,13 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 							continue
 						}
 						// If the resource group is marked as tombstone before, re-create the resource group controller.
-						newGC, err := newGroupCostController(group, c.ruConfig, c.lowTokenNotifyChan, c.tokenBucketUpdateChan)
+						newGC, err := newGroupCostController(
+							group,
+							c.ruConfig,
+							c.lowTokenNotifyChan,
+							c.tokenBucketUpdateChan,
+							c.getOrCreateRequestSourceMetricsState(name),
+						)
 						if err != nil {
 							log.Warn("[resource group controller] re-create resource group cost controller for tombstone failed",
 								zap.String("name", name), zap.Error(err))
@@ -526,6 +534,21 @@ func (c *ResourceGroupsController) loadGroupController(name string) (*groupCostC
 func (c *ResourceGroupsController) loadOrStoreGroupController(name string, gc *groupCostController) (*groupCostController, bool) {
 	tmp, loaded := c.groupsController.LoadOrStore(name, gc)
 	return tmp.(*groupCostController), loaded
+}
+
+func (c *ResourceGroupsController) getOrCreateRequestSourceMetricsState(name string) *requestSourceMetricsState {
+	if state, ok := c.requestSourceStates.Load(name); ok {
+		return state.(*requestSourceMetricsState)
+	}
+	state := newRequestSourceMetricsState(name)
+	actual, _ := c.requestSourceStates.LoadOrStore(name, state)
+	return actual.(*requestSourceMetricsState)
+}
+
+func (c *ResourceGroupsController) cleanupRequestSourceMetricsState(name string) {
+	if v, loaded := c.requestSourceStates.LoadAndDelete(name); loaded {
+		v.(*requestSourceMetricsState).cleanup()
+	}
 }
 
 // NewResourceGroupNotExistErr returns a new error that indicates the resource group does not exist.
@@ -632,13 +655,20 @@ func (c *ResourceGroupsController) tryGetResourceGroupController(
 		return gc, nil
 	}
 	// Initialize the resource group controller.
-	gc, err = newGroupCostController(group, c.ruConfig, c.lowTokenNotifyChan, c.tokenBucketUpdateChan)
+	gc, err = newGroupCostController(
+		group,
+		c.ruConfig,
+		c.lowTokenNotifyChan,
+		c.tokenBucketUpdateChan,
+		c.getOrCreateRequestSourceMetricsState(name),
+	)
 	if err != nil {
 		return nil, err
 	}
 	if !isUseDegradedResourceGroup {
 		// Check again to prevent initializing the same resource group concurrently.
-		_, loaded := c.loadOrStoreGroupController(name, gc)
+		var loaded bool
+		gc, loaded = c.loadOrStoreGroupController(name, gc)
 		if !loaded {
 			metrics.ResourceGroupStatusGauge.WithLabelValues(name, group.Name).Set(1)
 			log.Info("[resource group controller] create resource group cost controller", zap.String("name", name))
@@ -664,15 +694,23 @@ func (c *ResourceGroupsController) tombstoneGroupCostController(name string) {
 		log.Warn("[resource group controller] get default resource group meta for tombstone failed",
 			zap.String("name", name), zap.Error(err))
 		// Directly delete the resource group controller if the default group is not available.
+		c.cleanupRequestSourceMetricsState(name)
 		c.groupsController.Delete(name)
 		return
 	}
 	// Create a default resource group controller for the tombstone resource group independently.
-	gc, err := newGroupCostController(defaultGC.getMeta(), c.ruConfig, c.lowTokenNotifyChan, c.tokenBucketUpdateChan)
+	gc, err := newGroupCostController(
+		defaultGC.getMeta(),
+		c.ruConfig,
+		c.lowTokenNotifyChan,
+		c.tokenBucketUpdateChan,
+		c.getOrCreateRequestSourceMetricsState(name),
+	)
 	if err != nil {
 		log.Warn("[resource group controller] create default resource group cost controller for tombstone failed",
 			zap.String("name", name), zap.Error(err))
 		// Directly delete the resource group controller if the default group controller cannot be created.
+		c.cleanupRequestSourceMetricsState(name)
 		c.groupsController.Delete(name)
 		return
 	}
@@ -688,12 +726,15 @@ func (c *ResourceGroupsController) cleanUpResourceGroup() {
 	c.groupsController.Range(func(key, value any) bool {
 		resourceGroupName := key.(string)
 		gc := value.(*groupCostController)
-		// Check for stale resource groups, which will be deleted when consumption is continuously unchanged.
+		// Check for stale resource groups, which will be deleted when consumption is unchanged
+		// over whole cleanup intervals. Compare with the previous cleanup pass rather than
+		// `gc.run.consumption`, which only reflects the last state update interval.
 		gc.mu.Lock()
 		latestConsumption := *gc.mu.consumption
 		gc.mu.Unlock()
-		if equalRU(latestConsumption, *gc.run.consumption) {
+		if equalRU(latestConsumption, gc.lastCleanupConsumption) {
 			if gc.inactive || gc.tombstone.Load() {
+				c.cleanupRequestSourceMetricsState(resourceGroupName)
 				c.groupsController.Delete(resourceGroupName)
 				metrics.ResourceGroupStatusGauge.DeleteLabelValues(resourceGroupName, resourceGroupName)
 				gc.metrics.deletePagingLabels(resourceGroupName)
@@ -702,6 +743,7 @@ func (c *ResourceGroupsController) cleanUpResourceGroup() {
 			gc.inactive = true
 		} else {
 			gc.inactive = false
+			gc.lastCleanupConsumption = latestConsumption
 		}
 		return true
 	})
@@ -742,9 +784,7 @@ func (c *ResourceGroupsController) collectTokenBucketRequests(ctx context.Contex
 		gc := value.(*groupCostController)
 		request := gc.collectRequestAndConsumption(typ)
 		if request != nil {
-			request.KeyspaceId = &rmpb.KeyspaceIDValue{
-				Value: c.keyspaceID,
-			}
+			request.KeyspaceId = &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: c.keyspaceID}}
 			c.run.currentRequests = append(c.run.currentRequests, request)
 			gc.metrics.tokenRequestCounter.Inc()
 		}
@@ -784,7 +824,10 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 			log.Warn("[resource group controller] slow token bucket request", zap.String("source", source), zap.Duration("cost", time.Since(notifyMsg.startTime)))
 		}
 		logControllerTrace("[resource group controller] token bucket response", zap.Time("now", time.Now()), zap.Any("resp", resp), zap.String("source", source), zap.Duration("latency", latency))
-		c.tokenResponseChan <- resp
+		select {
+		case c.tokenResponseChan <- resp:
+		case <-ctx.Done():
+		}
 	}()
 }
 

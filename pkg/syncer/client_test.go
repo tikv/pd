@@ -37,7 +37,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 // For issue https://github.com/tikv/pd/issues/3936
@@ -90,6 +90,9 @@ func TestErrorCode(t *testing.T) {
 	rc := NewRegionSyncer(server)
 	conn, err := grpcutil.GetClientConn(ctx, "http://127.0.0.1", nil)
 	re.NoError(err)
+	defer func() {
+		re.NoError(conn.Close())
+	}()
 	cancel()
 	_, err = rc.syncRegion(ctx, conn)
 	ev, ok := status.FromError(err)

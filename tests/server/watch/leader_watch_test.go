@@ -30,15 +30,14 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 func TestWatcher(t *testing.T) {
 	// TODO: This test is flaky and needs to be fixed.
 	t.Skip("this test is flaky, need to be fixed")
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) { conf.AutoCompactionRetention = "1s" })
 	defer cluster.Destroy()
 	re.NoError(err)
@@ -76,8 +75,7 @@ func TestWatcher(t *testing.T) {
 
 func TestWatcherCompacted(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) { conf.AutoCompactionRetention = "1s" })
 	defer cluster.Destroy()
 	re.NoError(err)

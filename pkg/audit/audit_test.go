@@ -34,7 +34,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 func TestLabelMatcher(t *testing.T) {
@@ -108,8 +108,7 @@ func TestPrometheusBackend(t *testing.T) {
 func TestLocalLogBackendUsingFile(t *testing.T) {
 	re := require.New(t)
 	backend := NewLocalLogBackend(true)
-	fname := testutil.InitTempFileLogger("info")
-	defer os.RemoveAll(fname)
+	fname := testutil.InitTempFileLogger(t, "info")
 	req, err := http.NewRequest(http.MethodGet, "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
 	re.NoError(err)
 	re.False(backend.ProcessHTTPRequest(req))
@@ -129,12 +128,12 @@ func TestLocalLogBackendUsingFile(t *testing.T) {
 
 func BenchmarkLocalLogAuditUsingTerminal(b *testing.B) {
 	re := require.New(b)
-	b.StopTimer()
+
 	backend := NewLocalLogBackend(true)
 	req, err := http.NewRequest(http.MethodGet, "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
 	re.NoError(err)
-	b.StartTimer()
-	for range b.N {
+
+	for b.Loop() {
 		info := requestutil.GetRequestInfo(req)
 		req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
 		backend.ProcessHTTPRequest(req)
@@ -143,14 +142,13 @@ func BenchmarkLocalLogAuditUsingTerminal(b *testing.B) {
 
 func BenchmarkLocalLogAuditUsingFile(b *testing.B) {
 	re := require.New(b)
-	b.StopTimer()
+
 	backend := NewLocalLogBackend(true)
-	fname := testutil.InitTempFileLogger("info")
-	defer os.RemoveAll(fname)
+	testutil.InitTempFileLogger(b, "info")
 	req, err := http.NewRequest(http.MethodGet, "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
 	re.NoError(err)
-	b.StartTimer()
-	for range b.N {
+
+	for b.Loop() {
 		info := requestutil.GetRequestInfo(req)
 		req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
 		re.True(backend.ProcessHTTPRequest(req))

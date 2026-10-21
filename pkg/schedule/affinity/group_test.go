@@ -15,7 +15,6 @@
 package affinity
 
 import (
-	"context"
 	"strings"
 	"testing"
 	"time"
@@ -55,8 +54,7 @@ func TestGroupState(t *testing.T) {
 
 func TestAdjustGroup(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()

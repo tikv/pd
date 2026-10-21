@@ -16,6 +16,8 @@ package filter
 
 import (
 	"strconv"
+
+	"github.com/tikv/pd/pkg/core"
 )
 
 type action int
@@ -65,6 +67,7 @@ const (
 	storeStateBusy
 	storeStateExceedRemoveLimit
 	storeStateExceedAddLimit
+	storeStateExceedTransferLeaderInLimit
 	storeStateTooManySnapshot
 	storeStateTooManyPendingPeer
 	storeStateRejectLeader
@@ -96,6 +99,7 @@ var filters = [filtersLen]string{
 	"store-state-busy-filter",
 	"store-state-exceed-remove-limit-filter",
 	"store-state-exceed-add-limit-filter",
+	"store-state-exceed-transfer-leader-in-limit-filter",
 	"store-state-too-many-snapshots-filter",
 	"store-state-too-many-pending-peers-filter",
 	"store-state-reject-leader-filter",
@@ -143,14 +147,25 @@ func (c *Counter) inc(action action, filterType filterType, storeID uint64) {
 	c.counter[action][filterType][storeID]++
 }
 
-// Flush flushes the counter to the metrics.
-func (c *Counter) Flush() {
+// Flush flushes the counter to the metrics. storeInformer is used to drop
+// counts for a store that was tombstoned after being counted but before this
+// flush: inc() only sees the store's state at selection time, so without this
+// re-check a store buried in between would have its just-deleted series
+// recreated here. It may be nil (e.g. in tests), in which case no re-check is
+// performed.
+func (c *Counter) Flush(storeInformer core.StoreSetInformer) {
 	for i, actions := range c.counter {
 		actionType := action(i)
 		for j, counters := range actions {
 			filterName := filterType(j).String()
 			for storeID, value := range counters {
 				if value > 0 {
+					counters[storeID] = 0
+					if storeInformer != nil {
+						if store := storeInformer.GetStore(storeID); store == nil || store.IsRemoved() {
+							continue
+						}
+					}
 					storeIDStr := strconv.FormatUint(storeID, 10)
 					switch actionType {
 					case source:
@@ -158,7 +173,6 @@ func (c *Counter) Flush() {
 					case target:
 						filterTargetCounter.WithLabelValues(c.scope, filterName, storeIDStr).Add(float64(value))
 					}
-					counters[storeID] = 0
 				}
 			}
 		}

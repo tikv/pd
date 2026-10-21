@@ -33,8 +33,6 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/tikv/pd/tools/pd-ut/alloc"
 
 	// Set the correct value when it runs inside docker.
@@ -44,6 +42,11 @@ import (
 const (
 	deadlockTag = "deadlock"
 	nextGenTag  = "nextgen"
+	// maxParallelAddrBound mirrors alloc.maxTestAddrMapLen, the shared port
+	// allocator's retained-address cap. A --parallel above it could push the
+	// allocator into its eviction path; values below it are left as the user
+	// requested.
+	maxParallelAddrBound = 4096
 )
 
 // initTags sets up the tags.
@@ -133,6 +136,10 @@ var (
 )
 
 func main() {
+	os.Exit(run())
+}
+
+func run() (exitCode int) {
 	// Initialize tags
 	initTags()
 
@@ -148,7 +155,7 @@ func main() {
 		coverFileTempDir, err = os.MkdirTemp("", "cov")
 		if err != nil {
 			fmt.Println("create temp dir fail", coverFileTempDir)
-			os.Exit(1)
+			return 1
 		}
 		defer os.RemoveAll(coverFileTempDir)
 	}
@@ -162,10 +169,15 @@ func main() {
 		parallel, err = strconv.Atoi(parallelStr)
 		if err != nil {
 			fmt.Println("parse parallel error", err)
-			return
+			return 1
 		}
-		if parallel > procs {
-			fmt.Printf("Recommend to set parallel be same as the GOMAXPROCS=%d\n", procs)
+		// Cap parallelism at the shared allocator's retained-address bound
+		// (see alloc.maxTestAddrMapLen) so a large --parallel can never
+		// trigger the eviction path. Oversubscription below the bound is
+		// left untouched.
+		if parallel > maxParallelAddrBound {
+			fmt.Printf("Clamping --parallel %d to %d to keep the port allocator's eviction bound reachable\n", parallel, maxParallelAddrBound)
+			parallel = maxParallelAddrBound
 		}
 	}
 	workDir, err = os.Getwd()
@@ -173,10 +185,11 @@ func main() {
 		fmt.Println("os.Getwd() error", err)
 	}
 
-	srv := alloc.RunHTTPServer()
+	srv := alloc.RunHTTPServer(context.Background())
 	defer func() {
 		if err := srv.Shutdown(context.Background()); err != nil {
-			log.Fatal("server shutdown error", zap.Error(err))
+			log.Printf("server shutdown error: %v", err)
+			exitCode = 1
 		}
 	}()
 
@@ -213,8 +226,9 @@ func main() {
 		}
 	}
 	if !isSucceed {
-		os.Exit(1)
+		return 1
 	}
+	return 0
 }
 
 func cmdList(args ...string) bool {
@@ -243,6 +257,7 @@ func cmdList(args ...string) bool {
 
 		err := buildTestBinary(pkg)
 		if err != nil {
+			// #nosec G706 -- pd-ut logs developer-selected package names and compiler errors.
 			log.Println("build package error", pkg, err)
 			return false
 		}
@@ -341,6 +356,7 @@ func cmdRun(args ...string) bool {
 		pkg := args[0]
 		err := buildTestBinary(pkg)
 		if err != nil {
+			// #nosec G706 -- pd-ut logs developer-selected package names and compiler errors.
 			log.Println("build package error", pkg, err)
 			return false
 		}
@@ -404,7 +420,10 @@ func cmdRun(args ...string) bool {
 	}
 
 	if coverProfile != "" {
-		collectCoverProfileFile()
+		if err := collectCoverProfileFile(); err != nil {
+			fmt.Println("collect cover profile error:", err)
+			return false
+		}
 	}
 
 	return success
@@ -420,7 +439,7 @@ func runExistingTestCases(pkgs []string) (tasks []task, err error) {
 
 	// read content
 	existPkgs := make(map[string]struct{})
-	for _, line := range strings.Split(string(content), "\n") {
+	for line := range strings.SplitSeq(string(content), "\n") {
 		if len(line) == 0 || strings.Contains(line, "no test files") {
 			continue
 		}
@@ -613,7 +632,7 @@ func (n *numa) runTestCase(pkg string, fn string) testResult {
 		cmd.Stderr = &buf
 
 		start = time.Now()
-		err = cmd.Run()
+		err = runCommandWithTempDir(cmd)
 		if err != nil {
 			var exitError *exec.ExitError
 			if errors.As(err, &exitError) {
@@ -645,6 +664,25 @@ func (n *numa) runTestCase(pkg string, fn string) testResult {
 	res.d = time.Since(start)
 	res.Time = formatDurationAsSeconds(res.d)
 	return res
+}
+
+func runCommandWithTempDir(cmd *exec.Cmd) (err error) {
+	tempDir, err := os.MkdirTemp("", "pd-ut-test-")
+	if err != nil {
+		return fmt.Errorf("create test command temp directory: %w", err)
+	}
+	defer func() {
+		if cleanupErr := os.RemoveAll(tempDir); cleanupErr != nil {
+			err = errors.Join(err, fmt.Errorf("remove test command temp directory: %w", cleanupErr))
+		}
+	}()
+
+	cmd.Env = append(cmd.Environ(),
+		"TMPDIR="+tempDir,
+		"TMP="+tempDir,
+		"TEMP="+tempDir,
+	)
+	return cmd.Run()
 }
 
 func collectTestResults(workers []numa) JUnitTestSuites {
@@ -758,7 +796,7 @@ func generateBuildCache() error {
 }
 
 // buildTestBinaryMulti is much faster than build the test packages one by one.
-func buildTestBinaryMulti(pkgs []string) ([]byte, error) {
+func buildTestBinaryMulti(pkgs []string) (_ []byte, err error) {
 	// staged build, generate the build cache for all the tests first, then generate the test binary.
 	// This way is faster than generating test binaries directly, because the cache can be used.
 	if err := generateBuildCache(); err != nil {
@@ -795,6 +833,11 @@ func buildTestBinaryMulti(pkgs []string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer func() {
+		closeErr := outputFile.Close()
+		removeErr := os.Remove(outputFile.Name())
+		err = errors.Join(err, closeErr, removeErr)
+	}()
 	cmd.Stdout = outputFile
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -806,7 +849,6 @@ func buildTestBinaryMulti(pkgs []string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer outputFile.Close()
 
 	return content, nil
 }
@@ -853,6 +895,7 @@ func testFileFullPath(pkg string) string {
 func listNewTestCases(pkg string) []string {
 	exe := strings.Join([]string{".", testFileName(pkg)}, string(filepath.Separator))
 	// core.test -test.list Test
+	// #nosec G702 -- pd-ut intentionally executes the test binary in the selected package directory.
 	cmd := exec.Command(exe, "-test.list", "Test")
 	cmd.Dir = filepath.Join(workDir, pkg)
 	var buf bytes.Buffer
@@ -883,6 +926,7 @@ func cmdToLines(cmd *exec.Cmd) ([]string, error) {
 // Keep child go commands on the same toolchain as pd-ut itself to avoid
 // mixing PATH's go binary with an auto-downloaded newer toolchain in CI.
 func goCommand(args ...string) *exec.Cmd {
+	// #nosec G702 -- The executable is fixed and all arguments are constructed internally.
 	cmd := exec.Command("go", args...)
 	if toolchain := pdUTToolchain(); toolchain != "" {
 		cmd.Env = append(os.Environ(), "GOTOOLCHAIN="+toolchain)
@@ -912,7 +956,7 @@ func filter(input []string, f func(string) bool) []string {
 }
 
 func shuffle(tasks []task) {
-	for i := 0; i < len(tasks); i++ {
+	for i := range tasks {
 		pos := rand.IntN(len(tasks))
 		tasks[i], tasks[pos] = tasks[pos], tasks[i]
 	}

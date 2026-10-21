@@ -27,6 +27,7 @@ import (
 
 	"github.com/coreos/go-semver/semver"
 	"github.com/docker/go-units"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 	"google.golang.org/grpc/codes"
@@ -62,7 +63,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 const (
@@ -75,8 +76,7 @@ const (
 
 func TestBootstrap(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -116,8 +116,7 @@ func TestBootstrap(t *testing.T) {
 
 func TestDamagedRegion(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -201,8 +200,7 @@ func TestRegionStatistics(t *testing.T) {
 	defer func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
 	}()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestCluster(ctx, 3)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -296,8 +294,7 @@ func TestRegionStatistics(t *testing.T) {
 
 func TestStaleRegion(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -344,8 +341,7 @@ func TestStaleRegion(t *testing.T) {
 // Ref https://github.com/tikv/pd/issues/9221
 func TestConcurrencyGetPutConfig(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -393,8 +389,7 @@ func TestConcurrencyGetPutConfig(t *testing.T) {
 
 func TestGetPutConfig(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -535,7 +530,7 @@ func resetStoreState(re *require.Assertions, rc *cluster.RaftCluster, storeID ui
 		err := rc.SetStoreLimit(storeID, storelimit.RemovePeer, storelimit.Unlimited)
 		re.NoError(err)
 	case metapb.StoreState_Tombstone:
-		rc.RemoveStoreLimit(storeID)
+		re.NoError(rc.RemoveStoreLimit(storeID))
 	default:
 	}
 }
@@ -544,10 +539,20 @@ func testStateAndLimit(re *require.Assertions, clusterID uint64, rc *cluster.Raf
 	// prepare
 	storeID := store.GetId()
 	oc := rc.GetOperatorController()
-	err := rc.SetStoreLimit(storeID, storelimit.AddPeer, 60)
-	re.NoError(err)
-	err = rc.SetStoreLimit(storeID, storelimit.RemovePeer, 60)
-	re.NoError(err)
+	// The store can be left tombstoned by a previous call to this helper (the
+	// tombstone beforeState block runs it twice on the same store). Production
+	// never un-tombstones a store, so don't fake that transition here either --
+	// these SetStoreLimit calls only exist to seed a limit before resetStoreState
+	// below establishes the state this specific case actually wants to test, and
+	// resetStoreState's own Tombstone branch clears any limit anyway, so seeding
+	// one is pointless (and rejected by SetStoreLimit) once the store is already
+	// tombstoned.
+	if store := rc.GetStore(storeID); store == nil || !store.IsRemoved() {
+		err := rc.SetStoreLimit(storeID, storelimit.AddPeer, 60)
+		re.NoError(err)
+		err = rc.SetStoreLimit(storeID, storelimit.RemovePeer, 60)
+		re.NoError(err)
+	}
 	op := operator.NewTestOperator(2, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: storeID, PeerID: 3})
 	oc.AddOperator(op)
 	op = operator.NewTestOperator(2, &metapb.RegionEpoch{}, operator.OpRegion, operator.RemovePeer{FromStore: storeID})
@@ -556,7 +561,7 @@ func testStateAndLimit(re *require.Assertions, clusterID uint64, rc *cluster.Raf
 	resetStoreState(re, rc, store.GetId(), beforeState)
 	_, isOKBefore := rc.GetAllStoresLimit()[storeID]
 	// run
-	err = run(rc)
+	err := run(rc)
 	// judge
 	_, isOKAfter := rc.GetAllStoresLimit()[storeID]
 	if len(expectStates) != 0 {
@@ -633,8 +638,7 @@ func testRemoveStore(re *require.Assertions, clusterID uint64, rc *cluster.RaftC
 // Make sure PD will not panic if it start and stop again and again.
 func TestRaftClusterRestart(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -664,8 +668,7 @@ func TestRaftClusterRestart(t *testing.T) {
 // Make sure PD will not deadlock if it start and stop again and again.
 func TestRaftClusterMultipleRestart(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
 		conf.LeaderLease = 300
 	})
@@ -784,7 +787,7 @@ func TestRaftClusterStartTSOJob(t *testing.T) {
 			err := leaderServer.BootstrapCluster()
 			if err != nil {
 				// If the error is ErrEtcdTxnConflict, it means there is a temporary failure.
-				re.ErrorContains(err, errs.ErrEtcdTxnConflict.GetMsg())
+				assert.ErrorContains(t, err, errs.ErrEtcdTxnConflict.GetMsg())
 			}
 		}()
 	}
@@ -793,8 +796,11 @@ func TestRaftClusterStartTSOJob(t *testing.T) {
 		allocator := leaderServer.GetServer().GetTSOAllocator()
 		return allocator.IsInitialize()
 	})
-	re.NoError(tc.ResignLeader())
-	re.NotEmpty(tc.WaitLeader())
+	// The campaign loop can transfer leadership to a different peer concurrently,
+	// causing this request to time out even though the old leader has stepped down.
+	// Check the completed leader change before checking the old TSO allocator.
+	err = leaderServer.ResignLeader()
+	re.NotEmpty(tc.WaitLeaderChange(name), "resign leader returned: %v", err)
 	testutil.Eventually(re, func() bool {
 		allocator := tc.GetServer(name).GetServer().GetTSOAllocator()
 		return !allocator.IsInitialize()
@@ -809,8 +815,7 @@ func newMetaStore(storeID uint64, addr, version string, state metapb.StoreState,
 
 func TestGetPDMembers(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -833,8 +838,7 @@ func TestGetPDMembers(t *testing.T) {
 
 func TestNotLeader(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestCluster(ctx, 2)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -855,8 +859,7 @@ func TestNotLeader(t *testing.T) {
 
 func TestStoreVersionChange(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -882,8 +885,10 @@ func TestStoreVersionChange(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		resp, err := putStore(grpcPDClient, clusterID, store)
-		re.NoError(err)
-		re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
+		if !assert.NoError(t, err) {
+			return
+		}
+		assert.Equal(t, pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 	}()
 	time.Sleep(100 * time.Millisecond)
 	err = svr.SetClusterVersion("1.0.0")
@@ -897,8 +902,7 @@ func TestStoreVersionChange(t *testing.T) {
 
 func TestConcurrentHandleRegion(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	dashboard.SetCheckInterval(30 * time.Minute)
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
@@ -964,7 +968,10 @@ func TestConcurrentHandleRegion(t *testing.T) {
 		go func(isReceiver bool) {
 			if isReceiver {
 				_, err := stream.Recv()
-				re.NoError(err)
+				if !assert.NoError(t, err) {
+					wg.Done()
+					return
+				}
 				wg.Done()
 			}
 			for {
@@ -974,7 +981,9 @@ func TestConcurrentHandleRegion(t *testing.T) {
 				default:
 					_, err = stream.Recv()
 					if err != nil {
-						re.ErrorContains(err, "code = Canceled")
+						if !assert.ErrorContains(t, err, "code = Canceled") {
+							return
+						}
 					}
 				}
 			}
@@ -989,8 +998,8 @@ func TestConcurrentHandleRegion(t *testing.T) {
 		re.NoError(err)
 		region := &metapb.Region{
 			Id:       regionID,
-			StartKey: []byte(fmt.Sprintf("%5d", i)),
-			EndKey:   []byte(fmt.Sprintf("%5d", i+1)),
+			StartKey: fmt.Appendf(nil, "%5d", i),
+			EndKey:   fmt.Appendf(nil, "%5d", i+1),
 			Peers:    []*metapb.Peer{{Id: peerID, StoreId: stores[0].GetId()}},
 			RegionEpoch: &metapb.RegionEpoch{
 				ConfVer: initEpochConfVer,
@@ -1009,7 +1018,7 @@ func TestConcurrentHandleRegion(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			err := rc.HandleRegionHeartbeat(core.NewRegionInfo(region, region.Peers[0]))
-			re.NoError(err)
+			assert.NoError(t, err)
 		}()
 	}
 	wg.Wait()
@@ -1017,8 +1026,7 @@ func TestConcurrentHandleRegion(t *testing.T) {
 
 func TestSetScheduleOpt(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -1089,8 +1097,7 @@ func TestSetScheduleOpt(t *testing.T) {
 
 func TestLoadClusterInfo(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -1130,8 +1137,8 @@ func TestLoadClusterInfo(t *testing.T) {
 	for i := range uint64(n) {
 		region := &metapb.Region{
 			Id:          i,
-			StartKey:    []byte(fmt.Sprintf("%20d", i)),
-			EndKey:      []byte(fmt.Sprintf("%20d", i+1)),
+			StartKey:    fmt.Appendf(nil, "%20d", i),
+			EndKey:      fmt.Appendf(nil, "%20d", i+1),
 			RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1},
 		}
 		regions = append(regions, region)
@@ -1166,8 +1173,8 @@ func TestLoadClusterInfo(t *testing.T) {
 	for i := range uint64(m) {
 		region := &metapb.Region{
 			Id:          i,
-			StartKey:    []byte(fmt.Sprintf("%20d", i)),
-			EndKey:      []byte(fmt.Sprintf("%20d", i+1)),
+			StartKey:    fmt.Appendf(nil, "%20d", i),
+			EndKey:      fmt.Appendf(nil, "%20d", i+1),
 			RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1},
 		}
 		regions = append(regions, region)
@@ -1182,8 +1189,7 @@ func TestLoadClusterInfo(t *testing.T) {
 
 func TestTiFlashWithPlacementRules(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestCluster(ctx, 1, func(cfg *config.Config, _ string) { cfg.Replication.EnablePlacementRules = false })
 	defer tc.Destroy()
 	re.NoError(err)
@@ -1217,7 +1223,7 @@ func TestTiFlashWithPlacementRules(t *testing.T) {
 	re.NoError(err)
 	re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 	// test TiFlash store limit
-	expect := map[uint64]sc.StoreLimitConfig{11: {AddPeer: 30, RemovePeer: 30}}
+	expect := map[uint64]sc.StoreLimitConfig{11: {AddPeer: 30, RemovePeer: 30, TransferLeaderIn: storelimit.Unlimited}}
 	re.Equal(expect, svr.GetScheduleConfig().StoreLimit)
 
 	// cannot disable placement rules with TiFlash nodes
@@ -1233,8 +1239,7 @@ func TestTiFlashWithPlacementRules(t *testing.T) {
 
 func TestReplicationModeStatus(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
 		conf.ReplicationMode.ReplicationMode = "dr-auto-sync"
 	})
@@ -1336,8 +1341,7 @@ func getClusterConfig(re *require.Assertions, clusterID uint64, grpcPDClient pdp
 
 func TestOfflineStoreLimit(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	dashboard.SetCheckInterval(30 * time.Minute)
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
@@ -1432,8 +1436,7 @@ func TestOfflineStoreLimit(t *testing.T) {
 
 func TestUpgradeStoreLimit(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	dashboard.SetCheckInterval(30 * time.Minute)
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
@@ -1491,8 +1494,7 @@ func TestUpgradeStoreLimit(t *testing.T) {
 
 func TestStaleTermHeartbeat(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	dashboard.SetCheckInterval(30 * time.Minute)
 	tc, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
@@ -1579,8 +1581,7 @@ func TestStaleTermHeartbeat(t *testing.T) {
 
 func TestTransferLeaderForScheduler(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))
 	defer func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
@@ -1763,8 +1764,7 @@ func setMinResolvedTSPersistenceInterval(re *require.Assertions, rc *cluster.Raf
 
 func TestMinResolvedTS(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster.DefaultMinResolvedTSPersistenceInterval = time.Millisecond
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
@@ -1878,8 +1878,7 @@ func TestTransferLeaderBack(t *testing.T) {
 	defer func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
 	}()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestCluster(ctx, 2)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -1945,8 +1944,7 @@ func TestTransferLeaderBack(t *testing.T) {
 
 func TestExternalTimestamp(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -2058,8 +2056,7 @@ func TestExternalTimestamp(t *testing.T) {
 
 func TestPatrolRegionConfigChange(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -2082,8 +2079,7 @@ func TestPatrolRegionConfigChange(t *testing.T) {
 		endKey := []byte(strconv.Itoa(i * 2))
 		tests.MustPutRegion(re, tc, uint64(i), uint64(i%3+1), startKey, endKey)
 	}
-	fname := testutil.InitTempFileLogger("debug")
-	defer os.RemoveAll(fname)
+	fname := testutil.InitTempFileLogger(t, "debug")
 	checkLog(re, fname, "coordinator starts patrol regions")
 
 	// test change patrol region interval
@@ -2121,8 +2117,7 @@ func checkLog(re *require.Assertions, fname, expect string) {
 
 func TestFollowerExitSyncTime(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -2164,8 +2159,7 @@ func TestFollowerExitSyncTime(t *testing.T) {
 
 func TestPutStoreInvalidEngineLabel(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
 	defer tc.Destroy()

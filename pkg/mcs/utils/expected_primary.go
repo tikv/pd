@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
 // GetExpectedPrimaryFlag gets the expected primary flag. A read failure is
@@ -163,10 +164,11 @@ func TransferPrimary(client *clientv3.Client, p *member.Participant, serviceName
 	if err != nil {
 		return err
 	}
+	entries = dedupeByLatestStart(entries)
 
 	if newPrimary != "" {
 		for _, member := range entries {
-			if tsoMembersMap != nil && !tsoMembersMap[member.ServiceAddr] {
+			if !isGroupMember(tsoMembersMap, member.ServiceAddr) {
 				continue
 			}
 			if isSamePrimary(member, newPrimary) && isSamePrimary(member, oldPrimary) {
@@ -186,7 +188,7 @@ func TransferPrimary(client *clientv3.Client, p *member.Participant, serviceName
 	var primaryIDs []string
 	for _, member := range entries {
 		// only members of specific group are valid primary candidates for TSO service.
-		if tsoMembersMap != nil && !tsoMembersMap[member.ServiceAddr] {
+		if !isGroupMember(tsoMembersMap, member.ServiceAddr) {
 			continue
 		}
 		if (newPrimary == "" && !isSamePrimary(member, oldPrimary)) || isSamePrimary(member, newPrimary) {
@@ -234,6 +236,80 @@ func TransferPrimary(client *clientv3.Client, p *member.Participant, serviceName
 	return nil
 }
 
+// isSamePrimary reports whether primary identifies member, by name or by
+// service address. The address comparison ignores scheme so a caller
+// supplying a group's persisted (possibly pre-migration) address still
+// matches during the supported HTTP-to-HTTPS transition (see
+// KeyspaceGroupMember.IsAddressEquivalent, issue #8284).
 func isSamePrimary(member discovery.ServiceRegistryEntry, primary string) bool {
-	return primary != "" && (member.Name == primary || member.ServiceAddr == primary)
+	return primary != "" && (member.Name == primary || typeutil.EqualBaseURLs(member.ServiceAddr, primary))
+}
+
+// isGroupMember reports whether addr belongs to tsoMembersMap, which is keyed by
+// the group's persisted member addresses. A nil map means "no group filter" and
+// always matches. The exact lookup is the fast path; addr comes from the live
+// service registry and can differ from the persisted address only by scheme
+// during a supported HTTP-to-HTTPS transition (see KeyspaceGroupMember's
+// IsAddressEquivalent, issue #8284), so fall back to a scheme-insensitive
+// comparison against every key before concluding addr is not a member.
+func isGroupMember(tsoMembersMap map[string]bool, addr string) bool {
+	if tsoMembersMap == nil {
+		return true
+	}
+	if tsoMembersMap[addr] {
+		return true
+	}
+	for member := range tsoMembersMap {
+		if typeutil.EqualBaseURLs(member, addr) {
+			return true
+		}
+	}
+	return false
+}
+
+// dedupeByLatestStart collapses registry entries that share the same name down
+// to the one with the latest StartTimestamp. During a supported HTTP-to-HTTPS
+// restart, the same logical node's old address can still be registered under
+// its own etcd key (registry keys are keyed by address, not by node identity)
+// until that key's lease expires, so the live registry can transiently list
+// the same node twice under different schemes. Without this, matching by name
+// or by a scheme-insensitive address (see isSamePrimary, isGroupMember) can
+// resolve to both entries at once, letting the stale one be counted as a
+// distinct candidate and possibly be the one randomly selected.
+func dedupeByLatestStart(entries []discovery.ServiceRegistryEntry) []discovery.ServiceRegistryEntry {
+	latest := make(map[string]discovery.ServiceRegistryEntry, len(entries))
+	for _, entry := range entries {
+		existing, ok := latest[entry.Name]
+		if !ok || entry.StartTimestamp > existing.StartTimestamp {
+			latest[entry.Name] = entry
+		}
+	}
+	deduped := make([]discovery.ServiceRegistryEntry, 0, len(latest))
+	for _, entry := range latest {
+		deduped = append(deduped, entry)
+	}
+	return deduped
+}
+
+// IsValidPrimaryCandidate reports whether newPrimary identifies a member of the
+// group represented by tsoMembersMap, given the already-fetched registry entries
+// for the service, so a caller can reject an invalid target up front instead of
+// discovering it only when TransferPrimary itself fails. Callers checking multiple
+// groups for one request should fetch entries once (e.g. via discovery.GetMSMembers)
+// and reuse them here, rather than re-fetching per group. An empty newPrimary
+// always matches: it means "let TransferPrimary pick any member", which is valid
+// for every group.
+func IsValidPrimaryCandidate(entries []discovery.ServiceRegistryEntry, newPrimary string, tsoMembersMap map[string]bool) bool {
+	if newPrimary == "" {
+		return true
+	}
+	for _, member := range entries {
+		if !isGroupMember(tsoMembersMap, member.ServiceAddr) {
+			continue
+		}
+		if isSamePrimary(member, newPrimary) {
+			return true
+		}
+	}
+	return false
 }

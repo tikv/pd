@@ -16,6 +16,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -116,9 +117,8 @@ func (s *heartbeatServer) recv() (*schedulingpb.RegionHeartbeatRequest, error) {
 
 // RegionHeartbeat implements gRPC SchedulingServer.
 func (s *Service) RegionHeartbeat(stream schedulingpb.Scheduling_RegionHeartbeatServer) error {
-	wrappedStream := newRegionHeartbeatMetricsStream(stream)
 	var (
-		server   = &heartbeatServer{stream: wrappedStream}
+		server   = &heartbeatServer{stream: stream}
 		cancel   context.CancelFunc
 		lastBind time.Time
 	)
@@ -149,6 +149,10 @@ func (s *Service) RegionHeartbeat(stream schedulingpb.Scheduling_RegionHeartbeat
 		store := c.GetStore(storeID)
 		if store == nil {
 			return errors.Errorf("invalid store ID %d, not found", storeID)
+		}
+		if store.IsRemoved() {
+			log.Debug("skip region heartbeat from tombstone store", zap.Uint64("store-id", storeID))
+			continue
 		}
 
 		storeAddress := store.GetAddress()
@@ -183,7 +187,6 @@ func (s *Service) RegionHeartbeat(stream schedulingpb.Scheduling_RegionHeartbeat
 
 // RegionBuckets implements gRPC SchedulingServer.
 func (s *Service) RegionBuckets(stream schedulingpb.Scheduling_RegionBucketsServer) error {
-	stream = newRegionBucketsMetricsStream(stream)
 	var cancel context.CancelFunc
 	defer func() {
 		// cancel the forward stream
@@ -222,6 +225,8 @@ func (s *Service) RegionBuckets(stream schedulingpb.Scheduling_RegionBucketsServ
 			// As TiKV report buckets just after the region heartbeat, for new created region, PD may receive buckets report before the first region heartbeat is handled.
 			// So we should not return error here.
 			log.Debug("the store of the bucket in region is not found", zap.Uint64("region-id", buckets.GetRegionId()))
+		} else if store.IsRemoved() {
+			continue
 		} else {
 			storeLabel = strconv.FormatUint(store.GetID(), 10)
 			storeAddress = store.GetAddress()
@@ -259,17 +264,25 @@ func (s *Service) StoreHeartbeat(_ context.Context, request *schedulingpb.StoreH
 		return &schedulingpb.StoreHeartbeatResponse{Header: notBootstrappedHeader()}, nil
 	}
 
-	start := time.Now()
-	if c.GetStore(request.GetStats().GetStoreId()) == nil {
+	storeID := request.GetStats().GetStoreId()
+	if c.GetStore(storeID) == nil {
 		metaWatcher.GetStoreWatcher().ForceLoad()
 	}
 
-	storeID := request.GetStats().GetStoreId()
 	store := c.GetStore(storeID)
-	storeAddress := ""
-	if store != nil {
-		storeAddress = store.GetAddress()
+	if store == nil {
+		return &schedulingpb.StoreHeartbeatResponse{
+			Header: wrapErrorToHeader(schedulingpb.ErrorType_UNKNOWN, fmt.Sprintf("store %v not found", storeID)),
+		}, nil
 	}
+	if store.IsRemoved() {
+		return &schedulingpb.StoreHeartbeatResponse{
+			Header: wrapErrorToHeader(schedulingpb.ErrorType_UNKNOWN, fmt.Sprintf("store %v is tombstone", storeID)),
+		}, nil
+	}
+
+	start := time.Now()
+	storeAddress := store.GetAddress()
 	storeLabel := strconv.FormatUint(storeID, 10)
 	if err := c.HandleStoreHeartbeat(request); err != nil {
 		storeHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "error").Inc()
@@ -415,7 +428,7 @@ func (s *Service) AskBatchSplit(_ context.Context, request *schedulingpb.AskBatc
 				return nil, err
 			}
 			peerIDs := make([]uint64, len(request.Region.Peers))
-			for i := 0; i < len(peerIDs); i++ {
+			for i := range peerIDs {
 				peerIDs[i], _, err = c.AllocID(1)
 				if err != nil {
 					return nil, err
@@ -436,7 +449,7 @@ func (s *Service) AskBatchSplit(_ context.Context, request *schedulingpb.AskBatc
 			curID++
 
 			peerIDs := make([]uint64, len(request.Region.Peers))
-			for j := 0; j < len(peerIDs); j++ {
+			for j := range peerIDs {
 				peerIDs[j] = curID
 				curID++
 			}
@@ -465,8 +478,8 @@ func (s *Service) AskBatchSplit(_ context.Context, request *schedulingpb.AskBatc
 		newRegionIDs := recordRegions[:len(recordRegions)-1]
 		c.GetCoordinator().GetCheckerController().RecordSplitScatterBatch(
 			reqRegion.GetId(),
-			// Wait until PD observes the source region version advanced by the split.
-			reqRegion.GetRegionEpoch().GetVersion()+1,
+			// TiKV assigns every result region oldVersion+len(split requests).
+			reqRegion.GetRegionEpoch().GetVersion()+uint64(len(newRegionIDs)),
 			newRegionIDs,
 		)
 	}

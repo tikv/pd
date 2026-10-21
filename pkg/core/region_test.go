@@ -22,11 +22,14 @@ import (
 	mrand "math/rand/v2"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 	"unsafe"
 
+	"github.com/docker/go-units"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pingcap/failpoint"
@@ -72,6 +75,44 @@ func TestNeedMerge(t *testing.T) {
 		}
 		re.Equal(v.expect, r.NeedMerge(mererSize, mergeKeys))
 	}
+}
+
+func TestIsEmptyRegion(t *testing.T) {
+	tests := []struct {
+		size  int64
+		keys  int64
+		empty bool
+	}{
+		{size: 1, keys: 0, empty: true},
+		{size: 1, keys: 1, empty: false},
+		{size: 1, keys: 2, empty: false},
+		{size: 2, keys: 1, empty: false},
+		{size: 2, keys: 0, empty: false},
+		{size: 0, keys: 0, empty: true},
+	}
+	for _, tt := range tests {
+		require.Equal(t, tt.empty, IsEmptyRegion(tt.size, tt.keys))
+	}
+}
+
+func TestRegionFromHeartbeatIAKVSize(t *testing.T) {
+	re := require.New(t)
+	heartbeat := &pdpb.RegionHeartbeatRequest{
+		Region:              &metapb.Region{},
+		ApproximateKvSize:   100 * units.MiB,
+		ApproximateIaKvSize: 40 * units.MiB,
+	}
+
+	region := RegionFromHeartbeat(heartbeat, 1)
+	re.Equal(int64(100), region.GetApproximateKvSize())
+	re.Equal(int64(40), region.GetApproximateIAKvSize())
+	re.Equal(int64(40), region.Clone().GetApproximateIAKvSize())
+
+	oldHeartbeat := &pdpb.RegionHeartbeatRequest{
+		Region:            &metapb.Region{},
+		ApproximateKvSize: 100 * units.MiB,
+	}
+	re.Zero(RegionFromHeartbeat(oldHeartbeat, 1).GetApproximateIAKvSize())
 }
 
 func TestSortedEqual(t *testing.T) {
@@ -431,6 +472,45 @@ func TestNeedSync(t *testing.T) {
 	}
 }
 
+func TestRegionGuideLogicalStorageSizeChanged(t *testing.T) {
+	regionGuide := GenerateRegionGuideFunc(false)
+	origin := NewRegionInfo(&metapb.Region{Id: 1}, nil)
+	testCases := []struct {
+		name   string
+		update func(*RegionInfo)
+	}{
+		{
+			name: "row-based storage size",
+			update: func(region *RegionInfo) {
+				region.approximateKvSize = 1
+			},
+		},
+		{
+			name: "IA row-based storage size",
+			update: func(region *RegionInfo) {
+				region.approximateIAKvSize = 1
+			},
+		},
+		{
+			name: "columnar storage size",
+			update: func(region *RegionInfo) {
+				region.approximateColumnarKvSize = 1
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			region := origin.Clone()
+			testCase.update(region)
+			saveKV, saveCache, needSync, _ := regionGuide(ContextTODO(), region, origin)
+			require.False(t, saveKV)
+			require.True(t, saveCache)
+			require.False(t, needSync)
+		})
+	}
+}
+
 func TestRegionMap(t *testing.T) {
 	re := require.New(t)
 	rm := make(map[uint64]*regionItem)
@@ -521,12 +601,16 @@ func TestSetRegionConcurrence(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/core/UpdateSubTree", `return()`))
 	regions := NewRegionsInfo()
 	region := NewTestRegionInfo(1, 1, []byte("a"), []byte("b"))
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		_, err := regions.AtomicCheckAndPutRegion(ContextTODO(), region)
-		re.NoError(err)
+		assert.NoError(t, err)
 	}()
 	_, err := regions.AtomicCheckAndPutRegion(ContextTODO(), region)
 	re.NoError(err)
+	wg.Wait()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/core/UpdateSubTree"))
 }
 
@@ -543,8 +627,8 @@ func TestSetRegion(t *testing.T) {
 		region := NewRegionInfo(&metapb.Region{
 			Id:       uint64(i + 1),
 			Peers:    []*metapb.Peer{peer1, peer2, peer3},
-			StartKey: []byte(fmt.Sprintf("%20d", i*10)),
-			EndKey:   []byte(fmt.Sprintf("%20d", (i+1)*10)),
+			StartKey: fmt.Appendf(nil, "%20d", i*10),
+			EndKey:   fmt.Appendf(nil, "%20d", (i+1)*10),
 		}, peer1)
 		origin, overlaps, rangeChanged := regions.SetRegion(region)
 		regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
@@ -556,8 +640,8 @@ func TestSetRegion(t *testing.T) {
 	region := NewRegionInfo(&metapb.Region{
 		Id:       uint64(21),
 		Peers:    []*metapb.Peer{peer1, peer2, peer3},
-		StartKey: []byte(fmt.Sprintf("%20d", 184)),
-		EndKey:   []byte(fmt.Sprintf("%20d", 211)),
+		StartKey: fmt.Appendf(nil, "%20d", 184),
+		EndKey:   fmt.Appendf(nil, "%20d", 211),
 	}, peer1)
 	region.pendingPeers = append(region.pendingPeers, peer3)
 	origin, overlaps, rangeChanged := regions.SetRegion(region)
@@ -574,8 +658,8 @@ func TestSetRegion(t *testing.T) {
 	region = NewRegionInfo(&metapb.Region{
 		Id:       uint64(21),
 		Peers:    []*metapb.Peer{peer1, peer2, peer3},
-		StartKey: []byte(fmt.Sprintf("%20d", 184)),
-		EndKey:   []byte(fmt.Sprintf("%20d", 212)),
+		StartKey: fmt.Appendf(nil, "%20d", 184),
+		EndKey:   fmt.Appendf(nil, "%20d", 212),
 	}, peer1)
 	region.pendingPeers = append(region.pendingPeers, peer3)
 	origin, overlaps, rangeChanged = regions.SetRegion(region)
@@ -585,7 +669,7 @@ func TestSetRegion(t *testing.T) {
 	re.Len(regions.GetRegions(), 97)
 
 	// Test remove overlaps.
-	region = region.Clone(WithStartKey([]byte(fmt.Sprintf("%20d", 175))), WithNewRegionID(201))
+	region = region.Clone(WithStartKey(fmt.Appendf(nil, "%20d", 175)), WithNewRegionID(201))
 	re.NotNil(regions.GetRegion(21))
 	re.NotNil(regions.GetRegion(18))
 	origin, overlaps, rangeChanged = regions.SetRegion(region)
@@ -625,15 +709,15 @@ func TestShouldRemoveFromSubTree(t *testing.T) {
 	region := NewRegionInfo(&metapb.Region{
 		Id:       uint64(1),
 		Peers:    []*metapb.Peer{peer1, peer2, peer4},
-		StartKey: []byte(fmt.Sprintf("%20d", 10)),
-		EndKey:   []byte(fmt.Sprintf("%20d", 20)),
+		StartKey: fmt.Appendf(nil, "%20d", 10),
+		EndKey:   fmt.Appendf(nil, "%20d", 20),
 	}, peer1)
 
 	origin := NewRegionInfo(&metapb.Region{
 		Id:       uint64(1),
 		Peers:    []*metapb.Peer{peer1, peer2, peer3},
-		StartKey: []byte(fmt.Sprintf("%20d", 10)),
-		EndKey:   []byte(fmt.Sprintf("%20d", 20)),
+		StartKey: fmt.Appendf(nil, "%20d", 10),
+		EndKey:   fmt.Appendf(nil, "%20d", 20),
 	}, peer1)
 	re.True(region.peersEqualTo(origin))
 
@@ -714,21 +798,21 @@ func BenchmarkRandomRegion(b *testing.B) {
 			region := NewRegionInfo(&metapb.Region{
 				Id:       uint64(i + 1),
 				Peers:    []*metapb.Peer{peer},
-				StartKey: []byte(fmt.Sprintf("%20d", i)),
-				EndKey:   []byte(fmt.Sprintf("%20d", i+1)),
+				StartKey: fmt.Appendf(nil, "%20d", i),
+				EndKey:   fmt.Appendf(nil, "%20d", i+1),
 			}, peer)
 			origin, overlaps, rangeChanged := regions.SetRegion(region)
 			regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
 		}
 		b.Run(fmt.Sprintf("random region whole range with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
-			for range b.N {
+			for b.Loop() {
 				regions.randLeaderRegion(1, nil)
 			}
 		})
 		b.Run(fmt.Sprintf("random regions whole range with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
-			for range b.N {
+			for b.Loop() {
 				regions.RandLeaderRegions(1, nil)
 			}
 		})
@@ -737,13 +821,13 @@ func BenchmarkRandomRegion(b *testing.B) {
 		}
 		b.Run(fmt.Sprintf("random region single range with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
-			for range b.N {
+			for b.Loop() {
 				regions.randLeaderRegion(1, ranges)
 			}
 		})
 		b.Run(fmt.Sprintf("random regions single range with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
-			for range b.N {
+			for b.Loop() {
 				regions.RandLeaderRegions(1, ranges)
 			}
 		})
@@ -755,13 +839,13 @@ func BenchmarkRandomRegion(b *testing.B) {
 		}
 		b.Run(fmt.Sprintf("random region multiple ranges with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
-			for range b.N {
+			for b.Loop() {
 				regions.randLeaderRegion(1, ranges)
 			}
 		})
 		b.Run(fmt.Sprintf("random regions multiple ranges with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
-			for range b.N {
+			for b.Loop() {
 				regions.RandLeaderRegions(1, ranges)
 			}
 		})
@@ -776,8 +860,8 @@ func BenchmarkRandomSetRegion(b *testing.B) {
 		region := NewRegionInfo(&metapb.Region{
 			Id:       uint64(i + 1),
 			Peers:    []*metapb.Peer{peer},
-			StartKey: []byte(fmt.Sprintf("%20d", i)),
-			EndKey:   []byte(fmt.Sprintf("%20d", i+1)),
+			StartKey: fmt.Appendf(nil, "%20d", i),
+			EndKey:   fmt.Appendf(nil, "%20d", i+1),
 		}, peer)
 		origin, overlaps, rangeChanged := regions.SetRegion(region)
 		regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
@@ -798,14 +882,14 @@ func TestGetRegionSizeByRange(t *testing.T) {
 	nums := 100001
 	for i := range nums {
 		peer := &metapb.Peer{StoreId: 1, Id: uint64(i + 1)}
-		endKey := []byte(fmt.Sprintf("%20d", i+1))
+		endKey := fmt.Appendf(nil, "%20d", i+1)
 		if i == nums-1 {
 			endKey = []byte("")
 		}
 		region := NewRegionInfo(&metapb.Region{
 			Id:       uint64(i + 1),
 			Peers:    []*metapb.Peer{peer},
-			StartKey: []byte(fmt.Sprintf("%20d", i)),
+			StartKey: fmt.Appendf(nil, "%20d", i),
 			EndKey:   endKey,
 		}, peer, SetApproximateSize(10))
 		origin, overlaps, rangeChanged := regions.SetRegion(region)
@@ -829,8 +913,8 @@ func BenchmarkRandomSetRegionWithGetRegionSizeByRange(b *testing.B) {
 		region := NewRegionInfo(&metapb.Region{
 			Id:       uint64(i + 1),
 			Peers:    []*metapb.Peer{peer},
-			StartKey: []byte(fmt.Sprintf("%20d", i)),
-			EndKey:   []byte(fmt.Sprintf("%20d", i+1)),
+			StartKey: fmt.Appendf(nil, "%20d", i),
+			EndKey:   fmt.Appendf(nil, "%20d", i+1),
 		}, peer, SetApproximateSize(10))
 		origin, overlaps, rangeChanged := regions.SetRegion(region)
 		regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
@@ -859,8 +943,8 @@ func BenchmarkRandomSetRegionWithGetRegionSizeByRangeParallel(b *testing.B) {
 		region := NewRegionInfo(&metapb.Region{
 			Id:       uint64(i + 1),
 			Peers:    []*metapb.Peer{peer},
-			StartKey: []byte(fmt.Sprintf("%20d", i)),
-			EndKey:   []byte(fmt.Sprintf("%20d", i+1)),
+			StartKey: fmt.Appendf(nil, "%20d", i),
+			EndKey:   fmt.Appendf(nil, "%20d", i+1),
 		}, peer)
 		origin, overlaps, rangeChanged := regions.SetRegion(region)
 		regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
@@ -950,7 +1034,7 @@ func BenchmarkUpdateSubTreeOrderInsensitive(b *testing.B) {
 		// Update the subtrees from an empty `*RegionsInfo`.
 		b.Run(fmt.Sprintf("from empty with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
-			for range b.N {
+			for b.Loop() {
 				for idx := range items {
 					regions.UpdateSubTreeOrderInsensitive(items[idx])
 				}
@@ -961,7 +1045,7 @@ func BenchmarkUpdateSubTreeOrderInsensitive(b *testing.B) {
 		// which means the regions are completely non-overlapped.
 		b.Run(fmt.Sprintf("from non-overlapped regions with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
-			for range b.N {
+			for b.Loop() {
 				for idx := range items {
 					regions.UpdateSubTreeOrderInsensitive(items[idx])
 				}
@@ -973,7 +1057,7 @@ func BenchmarkUpdateSubTreeOrderInsensitive(b *testing.B) {
 		b.Run(fmt.Sprintf("from overlapped regions with size %d", size), func(b *testing.B) {
 			items = generateRegionItems(size)
 			b.ResetTimer()
-			for range b.N {
+			for b.Loop() {
 				for idx := range items {
 					regions.UpdateSubTreeOrderInsensitive(items[idx])
 				}
@@ -1016,8 +1100,8 @@ func BenchmarkRegionFromHeartbeat(b *testing.B) {
 		DownPeers:       []*pdpb.PeerStats{{Peer: peers[2], DownSeconds: 100}},
 	}
 	flowRoundDivisor := uint64(3)
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		RegionFromHeartbeat(regionReq, flowRoundDivisor)
 	}
 }
@@ -1097,8 +1181,8 @@ func generateTestRegions(count int, storeNum int) []*RegionInfo {
 		region := NewRegionInfo(&metapb.Region{
 			Id:          uint64(i + 1),
 			Peers:       []*metapb.Peer{peer1, peer2, peer3},
-			StartKey:    []byte(fmt.Sprintf("%20d", i*10)),
-			EndKey:      []byte(fmt.Sprintf("%20d", (i+1)*10)),
+			StartKey:    fmt.Appendf(nil, "%20d", i*10),
+			EndKey:      fmt.Appendf(nil, "%20d", (i+1)*10),
 			RegionEpoch: &metapb.RegionEpoch{ConfVer: 100, Version: 100},
 		},
 			peer1,
@@ -1121,8 +1205,8 @@ func TestUpdateRegionEventualConsistency(t *testing.T) {
 	item := NewRegionInfo(&metapb.Region{
 		Id:          uint64(i + 1),
 		Peers:       []*metapb.Peer{peer1, peer2, peer3},
-		StartKey:    []byte(fmt.Sprintf("%20d", i*10)),
-		EndKey:      []byte(fmt.Sprintf("%20d", (i+1)*10)),
+		StartKey:    fmt.Appendf(nil, "%20d", i*10),
+		EndKey:      fmt.Appendf(nil, "%20d", (i+1)*10),
 		RegionEpoch: &metapb.RegionEpoch{ConfVer: 100, Version: 100},
 	},
 		peer1,
@@ -1556,8 +1640,8 @@ func BenchmarkQueryRegions(b *testing.B) {
 
 		for i := range regionSize {
 			peer := &metapb.Peer{StoreId: 1, Id: uint64(i + 1)}
-			startKey := []byte(fmt.Sprintf("%20d", i*10))
-			endKey := []byte(fmt.Sprintf("%20d", (i+1)*10))
+			startKey := fmt.Appendf(nil, "%20d", i*10)
+			endKey := fmt.Appendf(nil, "%20d", (i+1)*10)
 			region := NewRegionInfo(&metapb.Region{
 				Id:       uint64(i + 1),
 				Peers:    []*metapb.Peer{peer},
@@ -1588,21 +1672,21 @@ func BenchmarkQueryRegions(b *testing.B) {
 
 			b.Run(fmt.Sprintf("QueryByKeys_regions=%d_queries=%d", regionSize, querySize), func(b *testing.B) {
 				b.ResetTimer()
-				for range b.N {
+				for b.Loop() {
 					regions.QueryRegions(queryKeys, nil, nil, false)
 				}
 			})
 
 			b.Run(fmt.Sprintf("QueryByPrevKeys_regions=%d_queries=%d", regionSize, querySize), func(b *testing.B) {
 				b.ResetTimer()
-				for range b.N {
+				for b.Loop() {
 					regions.QueryRegions(nil, queryPrevKeys, nil, false)
 				}
 			})
 
 			b.Run(fmt.Sprintf("QueryByIDs_regions=%d_queries=%d", regionSize, querySize), func(b *testing.B) {
 				b.ResetTimer()
-				for range b.N {
+				for b.Loop() {
 					regions.QueryRegions(nil, nil, queryIDs, false)
 				}
 			})
@@ -1613,7 +1697,7 @@ func BenchmarkQueryRegions(b *testing.B) {
 				mixedPrevKeys := queryPrevKeys[:halfSize]
 				mixedIDs := queryIDs[:halfSize]
 				b.ResetTimer()
-				for range b.N {
+				for b.Loop() {
 					regions.QueryRegions(mixedKeys, mixedPrevKeys, mixedIDs, false)
 				}
 			})

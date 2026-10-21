@@ -17,10 +17,12 @@ package endpoint
 import (
 	"context"
 	"encoding/json"
+	"slices"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
-	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -153,12 +155,12 @@ func (kg *KeyspaceGroup) IsMerging() bool {
 
 // IsMergeTarget checks if the keyspace group is in merging state and is the merge target.
 func (kg *KeyspaceGroup) IsMergeTarget() bool {
-	return kg.IsMerging() && !slice.Contains(kg.MergeState.MergeList, kg.ID)
+	return kg.IsMerging() && !slices.Contains(kg.MergeState.MergeList, kg.ID)
 }
 
 // IsMergeSource checks if the keyspace group is in merging state and is the merge source.
 func (kg *KeyspaceGroup) IsMergeSource() bool {
-	return kg.IsMerging() && slice.Contains(kg.MergeState.MergeList, kg.ID)
+	return kg.IsMerging() && slices.Contains(kg.MergeState.MergeList, kg.ID)
 }
 
 // KeyspaceGroupStorage is the interface for keyspace group storage.
@@ -175,7 +177,16 @@ var _ KeyspaceGroupStorage = (*StorageEndpoint)(nil)
 
 // LoadKeyspaceGroup loads the keyspace group by ID.
 func (*StorageEndpoint) LoadKeyspaceGroup(txn kv.Txn, id uint32) (*KeyspaceGroup, error) {
-	value, err := txn.Load(keypath.KeyspaceGroupIDPath(id))
+	key := keypath.KeyspaceGroupIDPath(id)
+	var (
+		value string
+		err   error
+	)
+	if revisionTxn, ok := txn.(kv.RevisionTxn); ok {
+		value, err = revisionTxn.LoadWithRevision(key)
+	} else {
+		value, err = txn.Load(key)
+	}
 	if err != nil || value == "" {
 		return nil, err
 	}
@@ -193,6 +204,9 @@ func (*StorageEndpoint) SaveKeyspaceGroup(txn kv.Txn, kg *KeyspaceGroup) error {
 
 // DeleteKeyspaceGroup deletes the keyspace group.
 func (*StorageEndpoint) DeleteKeyspaceGroup(txn kv.Txn, id uint32) error {
+	if id == constant.DefaultKeyspaceGroupID {
+		return errs.ErrModifyDefaultKeyspaceGroup
+	}
 	return txn.Remove(keypath.KeyspaceGroupIDPath(id))
 }
 

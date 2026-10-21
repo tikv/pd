@@ -15,7 +15,6 @@
 package filter
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -71,8 +70,7 @@ func TestDistinctScoreFilter(t *testing.T) {
 
 func TestLabelConstraintsFilter(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := mockconfig.NewTestOptions()
 	testCluster := mockcluster.NewCluster(ctx, opt)
@@ -102,8 +100,7 @@ func TestLabelConstraintsFilter(t *testing.T) {
 
 func TestRuleFitFilter(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := mockconfig.NewTestOptions()
 	opt.SetPlacementRuleEnabled(false)
@@ -144,19 +141,18 @@ func TestRuleFitFilter(t *testing.T) {
 		filter := newRuleFitFilter("", testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, nil, 1)
 		re.Equal(testCase.sourceRes, filter.Source(testCluster.GetSharedConfig(), testCluster.GetStore(testCase.storeID)).StatusCode)
 		re.Equal(testCase.targetRes, filter.Target(testCluster.GetSharedConfig(), testCluster.GetStore(testCase.storeID)).StatusCode)
-		leaderFilter := newRuleLeaderFitFilter("", testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, 1, true)
+		leaderFilter := newRuleLeaderFitFilter("", testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, nil, 1, true)
 		re.Equal(testCase.targetRes, leaderFilter.Target(testCluster.GetSharedConfig(), testCluster.GetStore(testCase.storeID)).StatusCode)
 	}
 
 	// store-6 is not exist in the peers, so it will not allow transferring leader to store 6.
-	leaderFilter := newRuleLeaderFitFilter("", testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, 1, false)
+	leaderFilter := newRuleLeaderFitFilter("", testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, nil, 1, false)
 	re.False(leaderFilter.Target(testCluster.GetSharedConfig(), testCluster.GetStore(6)).IsOK())
 }
 
 func TestRuleFitFilterWithPlacementRule(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := mockconfig.NewTestOptions()
 	testCluster := mockcluster.NewCluster(ctx, opt)
@@ -223,7 +219,7 @@ func TestRuleFitFilterWithPlacementRule(t *testing.T) {
 		{StoreId: 5, Id: 4},
 		{StoreId: 6, Id: 5},
 	}}, &metapb.Peer{StoreId: 1, Id: 1})
-	leaderFilter := newRuleLeaderFitFilter("", testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, 1, true)
+	leaderFilter := newRuleLeaderFitFilter("", testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, nil, 1, true)
 	re.Equal(plan.StatusText(plan.StatusStoreNotMatchRule), leaderFilter.Target(testCluster.GetSharedConfig(), testCluster.GetStore(6)).String())
 }
 
@@ -246,6 +242,8 @@ func TestStoreStateFilter(t *testing.T) {
 		&StoreStateFilter{MoveRegion: true},
 		&StoreStateFilter{TransferLeader: true, MoveRegion: true},
 		&StoreStateFilter{MoveRegion: true, AllowTemporaryStates: true},
+		&StoreStateFilter{TransferLeader: true, AllowTemporaryStates: true},
+		&StoreStateFilter{TransferLeader: true, OperatorLevel: constant.Urgent},
 	}
 	opt := mockconfig.NewTestOptions()
 	store := core.NewStoreInfoWithLabel(1, map[string]string{})
@@ -268,6 +266,22 @@ func TestStoreStateFilter(t *testing.T) {
 		{2, plan.StatusOK, plan.StatusOK},
 	}
 	check(store, testCases)
+
+	limiter := storelimit.NewStoreRateLimit(0.000001)
+	limitedStore := store.Clone(core.SetStoreLimit(limiter))
+	// Selection observes the budget without reserving it.
+	for range 2 {
+		check(limitedStore, []testCase{{0, plan.StatusOK, plan.StatusOK}})
+	}
+	re.True(limiter.Take(storelimit.RegionInfluence[storelimit.TransferLeaderIn], storelimit.TransferLeaderIn, constant.Medium))
+	check(limitedStore, []testCase{
+		{0, plan.StatusOK, plan.StatusStoreTransferLeaderInLimitThrottled},
+		{1, plan.StatusOK, plan.StatusOK},
+		{2, plan.StatusOK, plan.StatusStoreTransferLeaderInLimitThrottled},
+		{4, plan.StatusOK, plan.StatusOK},
+		{5, plan.StatusOK, plan.StatusStoreTransferLeaderInLimitThrottled},
+	})
+	re.Equal("store-state-exceed-transfer-leader-in-limit-filter", filters[0].Type().String())
 
 	// Disconnected
 	store = store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-5 * time.Minute)))
@@ -380,8 +394,7 @@ func TestStoreStateFilterReason(t *testing.T) {
 
 func TestIsolationFilter(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := mockconfig.NewTestOptions()
 	testCluster := mockcluster.NewCluster(ctx, opt)
@@ -449,10 +462,34 @@ func TestIsolationFilter(t *testing.T) {
 	}
 }
 
+func TestIsolationFilterCaseInsensitive(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+
+	opt := mockconfig.NewTestOptions()
+	testCluster := mockcluster.NewCluster(ctx, opt)
+	testCluster.SetLocationLabels([]string{"zone", "host"})
+	testCluster.AddLabelsStore(1, 1, map[string]string{"zone": "Z1", "host": "h1"})
+	testCluster.AddLabelsStore(2, 1, map[string]string{"zone": "z1", "host": "h2"})
+	testCluster.AddLabelsStore(3, 1, map[string]string{"zone": "z2", "host": "H1"})
+	testCluster.AddLabelsStore(4, 1, map[string]string{"zone": "z2", "host": "h2"})
+	testCluster.AddLabelsStore(5, 1, map[string]string{"zone": "Z2", "host": "h1"})
+
+	regionStores := []*core.StoreInfo{testCluster.GetStore(1)}
+	conf := testCluster.GetSharedConfig()
+	zoneFilter := NewIsolationFilter("", "zone", testCluster.GetLocationLabels(), regionStores)
+	re.False(zoneFilter.Target(conf, testCluster.GetStore(2)).IsOK())
+	re.True(zoneFilter.Target(conf, testCluster.GetStore(3)).IsOK())
+
+	regionStores = []*core.StoreInfo{testCluster.GetStore(3)}
+	hostFilter := NewIsolationFilter("", "host", testCluster.GetLocationLabels(), regionStores)
+	re.False(hostFilter.Target(conf, testCluster.GetStore(5)).IsOK())
+	re.True(hostFilter.Target(conf, testCluster.GetStore(4)).IsOK())
+}
+
 func TestPlacementGuard(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := mockconfig.NewTestOptions()
 	opt.SetPlacementRuleEnabled(false)
@@ -479,8 +516,7 @@ func TestPlacementGuard(t *testing.T) {
 
 func TestSpecialUseFilter(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := mockconfig.NewTestOptions()
 	testCluster := mockcluster.NewCluster(ctx, opt)
@@ -536,8 +572,8 @@ func BenchmarkCloneRegionTest(b *testing.B) {
 		core.SetApproximateSize(50),
 		core.SetApproximateKeys(20),
 	)
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		_ = createRegionForRuleFit(region.GetStartKey(), region.GetEndKey(), region.GetPeers(), region.GetLeader())
 	}
 }

@@ -135,8 +135,7 @@ func mustGetKeyspaceGroupMembers(re *require.Assertions, server *tso.Server) map
 func TestTSOServerStartFirst(t *testing.T) {
 	re := require.New(t)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayStartServerLoop", `return(true)`))
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	cluster, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = []string{"k1", "k2"}
@@ -145,17 +144,14 @@ func TestTSOServerStartFirst(t *testing.T) {
 	defer cluster.Destroy()
 	re.NoError(err)
 	addr := cluster.GetConfig().GetClientURL()
-	ch := make(chan struct{})
-	defer close(ch)
-	clusterCh := make(chan *tests.TestTSOCluster)
-	defer close(clusterCh)
+	type clusterResult struct {
+		cluster *tests.TestTSOCluster
+		err     error
+	}
+	clusterCh := make(chan clusterResult, 1)
 	go func() {
 		tsoCluster, err := tests.NewTestTSOCluster(ctx, 2, addr)
-		re.NoError(err)
-		primary := tsoCluster.WaitForDefaultPrimaryServing(re)
-		re.NotNil(primary)
-		clusterCh <- tsoCluster
-		ch <- struct{}{}
+		clusterCh <- clusterResult{cluster: tsoCluster, err: err}
 	}()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
@@ -164,9 +160,12 @@ func TestTSOServerStartFirst(t *testing.T) {
 	pdLeaderServer := cluster.GetServer(leaderName)
 	re.NoError(pdLeaderServer.BootstrapCluster())
 	re.NoError(err)
-	tsoCluster := <-clusterCh
+	result := <-clusterCh
+	re.NoError(result.err)
+	tsoCluster := result.cluster
 	defer tsoCluster.Destroy()
-	<-ch
+	primary := tsoCluster.WaitForDefaultPrimaryServing(re)
+	re.NotNil(primary)
 
 	time.Sleep(time.Second * 1)
 	input := make(map[string]any)
@@ -200,8 +199,7 @@ func TestTSOServerStartFirst(t *testing.T) {
 
 func TestForwardOnlyTSONoScheduling(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)

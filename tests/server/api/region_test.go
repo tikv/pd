@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
@@ -396,7 +397,7 @@ func (suite *regionTestSuite) checkRegionCheck(cluster *tests.TestCluster) {
 	r4.Adjust()
 	re.Equal(&response.RegionsInfo{Count: 0, Regions: []response.RegionInfo{}}, r4)
 
-	r = r.Clone(core.SetApproximateSize(1))
+	r = r.Clone(core.SetApproximateSize(1), core.SetApproximateKeys(0))
 	tests.MustPutRegionInfo(re, cluster, r)
 	url = fmt.Sprintf("%s/regions/check/%s", urlPrefix, "empty-region")
 	r5 := &response.RegionsInfo{}
@@ -516,15 +517,13 @@ func (suite *regionTestSuite) checkStoreRegions(cluster *tests.TestCluster) {
 		re.Equal(regionIDs[i], r.ID)
 	}
 
-	regionIDs = []uint64{4}
 	url = fmt.Sprintf("%s/regions/store/%d", urlPrefix, 2)
 	r5 := &response.RegionsInfo{}
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, url, r5)
 	re.NoError(err)
-	re.Len(regionIDs, r5.Count)
-	for i, r := range r5.Regions {
-		re.Equal(regionIDs[i], r.ID)
-	}
+	re.Equal(1, r5.Count)
+	re.Len(r5.Regions, 1)
+	re.Equal(uint64(4), r5.Regions[0].ID)
 
 	regionIDs = []uint64{}
 	url = fmt.Sprintf("%s/regions/store/%d", urlPrefix, 3)
@@ -598,6 +597,7 @@ func (suite *regionTestSuite) TestRegionsWithKillRequest() {
 }
 
 func (suite *regionTestSuite) checkRegionsWithKillRequest(cluster *tests.TestCluster) {
+	as := assert.New(suite.T())
 	re := suite.Require()
 	leader := cluster.GetLeaderServer()
 	urlPrefix := leader.GetAddr() + "/pd/api/v1"
@@ -606,8 +606,8 @@ func (suite *regionTestSuite) checkRegionsWithKillRequest(cluster *tests.TestClu
 	regionCount := 100
 	testutil.GenerateTestDataConcurrently(regionCount, func(i int) {
 		r := core.NewTestRegionInfo(uint64(i+2), 1,
-			[]byte(fmt.Sprintf("%09d", i)),
-			[]byte(fmt.Sprintf("%09d", i+1)),
+			fmt.Appendf(nil, "%09d", i),
+			fmt.Appendf(nil, "%09d", i+1),
 			core.SetApproximateKeys(10), core.SetApproximateSize(10))
 		tests.MustPutRegionInfo(re, cluster, r)
 	})
@@ -624,9 +624,13 @@ func (suite *regionTestSuite) checkRegionsWithKillRequest(cluster *tests.TestClu
 				resp.Body.Close()
 			}
 		}()
-		re.Error(err)
-		re.Contains(err.Error(), "context canceled")
-		re.Nil(resp)
+		if err == nil {
+			as.Fail("An error is expected but got nil")
+			doneCh <- struct{}{}
+			return
+		}
+		as.Contains(err.Error(), "context canceled")
+		as.Nil(resp)
 		doneCh <- struct{}{}
 	}()
 	time.Sleep(100 * time.Millisecond) // wait for the request to be sent
@@ -796,8 +800,7 @@ func (suite *regionTestSuite) checkRegionRangeHoles(cluster *tests.TestCluster) 
 
 func BenchmarkGetRegions(b *testing.B) {
 	re := require.New(b)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := b.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -811,8 +814,8 @@ func BenchmarkGetRegions(b *testing.B) {
 	regionCount := 1000000
 	for i := range regionCount {
 		r := core.NewTestRegionInfo(uint64(i+2), 1,
-			[]byte(fmt.Sprintf("%09d", i)),
-			[]byte(fmt.Sprintf("%09d", i+1)),
+			fmt.Appendf(nil, "%09d", i),
+			fmt.Appendf(nil, "%09d", i+1),
 			core.SetApproximateKeys(10), core.SetApproximateSize(10))
 		tests.MustPutRegionInfo(re, cluster, r)
 	}
@@ -824,8 +827,7 @@ func BenchmarkGetRegions(b *testing.B) {
 	re.Equal(regionCount, regions.Count)
 	resp.Body.Close()
 
-	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		resp, err := apiutil.GetJSON(tests.TestDialClient, url, nil)
 		re.NoError(err)
 		resp.Body.Close()

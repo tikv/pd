@@ -166,8 +166,10 @@ type tsoTSOStreamAdapter struct {
 func (s tsoTSOStreamAdapter) Send(clusterID uint64, keyspaceID, keyspaceGroupID uint32, count int64) error {
 	req := &tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{
-			ClusterId:       clusterID,
-			KeyspaceId:      keyspaceID,
+			ClusterId: clusterID,
+			Keyspace: &tsopb.RequestHeader_KeyspaceId{
+				KeyspaceId: keyspaceID,
+			},
 			KeyspaceGroupId: keyspaceGroupID,
 			CalleeId:        s.calleeID,
 		},
@@ -471,11 +473,7 @@ func (s *tsoStream) EstimatedRPCLatency() time.Duration {
 			panic("invalid failpoint value for `tsoStreamSimulateEstimatedRPCLatency`: expected string")
 		}
 	})
-	latencyUs := s.estimatedLatencyMicros.Load()
-	// Limit it at least 100us
-	if latencyUs < 100 {
-		latencyUs = 100
-	}
+	latencyUs := max(s.estimatedLatencyMicros.Load(), 100)
 	return time.Microsecond * time.Duration(latencyUs)
 }
 

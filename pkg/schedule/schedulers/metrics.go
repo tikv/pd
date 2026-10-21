@@ -210,6 +210,22 @@ func init() {
 	prometheus.MustRegister(balanceRangeJobGauge)
 }
 
+// DeleteStoreMetrics deletes the per-store scheduler metrics of a store.
+func DeleteStoreMetrics(storeID string) {
+	opInfluenceStatus.DeletePartialMatch(prometheus.Labels{"store": storeID})
+	balanceWitnessCounter.DeleteLabelValues("move-witness", storeID+"-out")
+	balanceWitnessCounter.DeleteLabelValues("move-witness", storeID+"-in")
+	hotSchedulerResultCounter.DeletePartialMatch(prometheus.Labels{"store": storeID})
+	balanceDirectionCounter.DeletePartialMatch(prometheus.Labels{"store": storeID})
+	hotDirectionCounter.DeletePartialMatch(prometheus.Labels{"store": storeID})
+	evictedSlowStoreStatusGauge.DeletePartialMatch(prometheus.Labels{"store": storeID})
+	evictedStoppingStoreStatusGauge.DeleteLabelValues(storeID)
+	slowStoreTriggerLimitGauge.DeletePartialMatch(prometheus.Labels{"store": storeID})
+	storeSlowTrendEvictedStatusGauge.DeletePartialMatch(prometheus.Labels{"store": storeID})
+	balanceRangeGauge.DeletePartialMatch(prometheus.Labels{"store": storeID})
+	HotPendingSum.DeletePartialMatch(prometheus.Labels{"store": storeID})
+}
+
 func balanceLeaderCounterWithEvent(event string) prometheus.Counter {
 	return schedulerCounter.WithLabelValues(types.BalanceLeaderScheduler.String(), event)
 }
@@ -314,6 +330,8 @@ var (
 	hotSchedulerCreateOperatorFailedCounter = hotRegionCounterWithEvent("create_operator_failed")
 	hotSchedulerNewOperatorCounter          = hotRegionCounterWithEvent("new_operator")
 	hotSchedulerSnapshotSenderLimitCounter  = hotRegionCounterWithEvent("snapshot_sender_limit")
+	// Fallback to engine-wide expectation when a scoped load snapshot is stale.
+	hotSchedulerPlacementScopeFallbackCounter = hotRegionCounterWithEvent("placement_scope_fallback")
 	// hot region counter related with the split region
 	hotSchedulerNotFoundSplitKeysCounter          = hotRegionCounterWithEvent("not_found_split_keys")
 	hotSchedulerRegionBucketsNotHotCounter        = hotRegionCounterWithEvent("region_buckets_not_hot")

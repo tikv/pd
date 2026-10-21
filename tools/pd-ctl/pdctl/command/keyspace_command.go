@@ -86,7 +86,7 @@ func newShowKeyspaceCommand() *cobra.Command {
 
 func showKeyspaceIDCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	resp, err := doRequest(cmd, fmt.Sprintf("%s/id/%s", keyspacePrefix, args[0]), http.MethodGet, http.Header{})
@@ -99,7 +99,7 @@ func showKeyspaceIDCommandFunc(cmd *cobra.Command, args []string) {
 
 func showKeyspaceNameCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	refreshGroupID, err := cmd.Flags().GetBool(nmForceRefreshGroupID)
@@ -137,7 +137,7 @@ func newCreateKeyspaceCommand() *cobra.Command {
 
 func createKeyspaceCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 
@@ -148,8 +148,7 @@ func createKeyspaceCommandFunc(cmd *cobra.Command, args []string) {
 	}
 	config := map[string]string{}
 	for _, flag := range configPairs {
-		kvs := strings.Split(flag, ",")
-		for _, kv := range kvs {
+		for kv := range strings.SplitSeq(flag, ",") {
 			pair := strings.Split(kv, "=")
 			if len(pair) != 2 {
 				cmd.PrintErrf("Failed to create keyspace: invalid kv pair %s\n", kv)
@@ -198,7 +197,7 @@ func newUpdateKeyspaceConfigCommand() *cobra.Command {
 
 func updateKeyspaceConfigCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	configPatch := map[string]*string{}
@@ -208,8 +207,7 @@ func updateKeyspaceConfigCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	for _, flag := range removeFlags {
-		keys := strings.Split(flag, ",")
-		for _, key := range keys {
+		for key := range strings.SplitSeq(flag, ",") {
 			if _, exist := configPatch[key]; exist {
 				cmd.PrintErrf("Failed to update keyspace config: key %s is specified multiple times\n", key)
 				return
@@ -223,8 +221,7 @@ func updateKeyspaceConfigCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	for _, flag := range updateFlags {
-		kvs := strings.Split(flag, ",")
-		for _, kv := range kvs {
+		for kv := range strings.SplitSeq(flag, ",") {
 			pair := strings.Split(kv, "=")
 			if len(pair) != 2 {
 				cmd.PrintErrf("Failed to update keyspace config: invalid kv pair %s\n", kv)
@@ -245,8 +242,7 @@ func updateKeyspaceConfigCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	for _, flag := range expectFlags {
-		kvs := strings.Split(flag, ",")
-		for _, kv := range kvs {
+		for kv := range strings.SplitSeq(flag, ",") {
 			pair := strings.Split(kv, "=")
 			if len(pair) != 2 {
 				cmd.PrintErrf("Failed to update keyspace config: invalid kv pair %s\n", kv)
@@ -265,8 +261,7 @@ func updateKeyspaceConfigCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	for _, flag := range expectAbsentFlags {
-		keys := strings.Split(flag, ",")
-		for _, key := range keys {
+		for key := range strings.SplitSeq(flag, ",") {
 			if _, exist := preconditions[key]; exist {
 				cmd.PrintErrf("Failed to update keyspace config: precondition for key %s is specified multiple times\n", key)
 				return
@@ -301,7 +296,7 @@ func newUpdateKeyspaceStateCommand() *cobra.Command {
 
 func updateKeyspaceStateCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 2 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	params := handlers.UpdateStateParam{
@@ -334,7 +329,7 @@ func newListKeyspaceCommand() *cobra.Command {
 
 func listKeyspaceCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 0 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 
@@ -395,7 +390,7 @@ func newShowKeyspaceRangeCommand() *cobra.Command {
 
 func showKeyspaceRangeByIDCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 
@@ -444,7 +439,7 @@ func showKeyspaceRangeByIDCommandFunc(cmd *cobra.Command, args []string) {
 
 func showKeyspaceRangeByNameCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 
@@ -471,7 +466,7 @@ func showKeyspaceRangeByNameCommandFunc(cmd *cobra.Command, args []string) {
 
 	// Generate key ranges based on raw flag
 	var ranges map[string]string
-	bound := keyspace.MakeRegionBound(keyspaceMeta.Id)
+	bound := keyspace.MakeRegionBound(keyspaceMeta.GetId())
 	if raw {
 		ranges = map[string]string{
 			"start_key": hex.EncodeToString(bound.RawLeftBound),
@@ -512,7 +507,7 @@ func newSetPlacementCommand() *cobra.Command {
 
 func setPlacementCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) < 2 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 
@@ -614,7 +609,7 @@ func newRevertPlacementCommand() *cobra.Command {
 
 func revertPlacementCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 

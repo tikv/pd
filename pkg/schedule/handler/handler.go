@@ -688,7 +688,7 @@ func (h *Handler) AddScatterRegionsOperators(regionIDs []uint64, startKeyHex, en
 	if err != nil {
 		return 0, err
 	}
-	opsCount := 0
+	var opsCount int
 	var failures map[uint64]error
 	// If startKey and endKey are both defined, use them first.
 	if len(startKeyHex) > 0 && len(endKeyHex) > 0 {

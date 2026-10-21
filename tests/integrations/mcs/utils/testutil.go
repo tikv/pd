@@ -19,6 +19,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	pd "github.com/tikv/pd/client"
@@ -72,12 +73,12 @@ func WaitForAllTSOServiceAvailable(
 
 // CheckMultiKeyspacesTSO checks the correctness of TSO for multiple keyspaces.
 func CheckMultiKeyspacesTSO(
-	ctx context.Context, re *require.Assertions,
+	ctx context.Context, as *assert.Assertions,
 	clients []pd.Client, parallelAct func(),
 ) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	wg := sync.WaitGroup{}
+	wg := &sync.WaitGroup{}
 	wg.Add(len(clients))
 	var readyClients atomic.Int64
 
@@ -90,7 +91,7 @@ func CheckMultiKeyspacesTSO(
 				select {
 				case <-ctx.Done():
 					// Make sure the lastTS is not empty
-					re.NotEmpty(lastTS)
+					as.NotEmpty(lastTS)
 					return
 				default:
 				}
@@ -100,7 +101,9 @@ func CheckMultiKeyspacesTSO(
 					continue
 				}
 				ts = tsoutil.ComposeTS(physical, logical)
-				re.Less(lastTS, ts)
+				if !as.Less(lastTS, ts) {
+					return
+				}
 				lastTS = ts
 				if !ready {
 					readyClients.Add(1)
@@ -110,15 +113,19 @@ func CheckMultiKeyspacesTSO(
 		}(client)
 	}
 
-	testutil.Eventually(re, func() bool {
+	if !testutil.EventuallyWithAssert(as, func() bool {
 		return readyClients.Load() == int64(len(clients))
-	})
+	}) {
+		cancel()
+		wg.Wait()
+		return
+	}
 
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		defer cancel()
 		parallelAct()
-		cancel()
 	}()
 
 	wg.Wait()

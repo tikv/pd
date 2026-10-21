@@ -27,6 +27,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -314,7 +315,7 @@ func TestCancel(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		_, err := WaitReservations(ctx2, t3, []*Reservation{r1, r2})
-		re.Error(err)
+		assert.Error(t, err)
 		wg.Done()
 	}()
 	time.Sleep(1 * time.Second)

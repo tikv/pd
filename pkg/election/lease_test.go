@@ -50,8 +50,8 @@ func TestLease(t *testing.T) {
 	defer clean()
 
 	// Create the lease.
-	lease1 := NewLease(client, "test_lease_1")
-	lease2 := NewLease(client, "test_lease_2")
+	lease1 := NewLease(client, "test_lease_1", "test_lease_1")
+	lease2 := NewLease(client, "test_lease_2", "test_lease_2")
 	re.True(lease1.IsExpired())
 	re.True(lease2.IsExpired())
 	re.NoError(lease1.Close())
@@ -103,13 +103,12 @@ func TestLease(t *testing.T) {
 
 func TestLeaseKeepAlive(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
 
 	// Create the lease.
-	lease := NewLease(client, "test_lease")
+	lease := NewLease(client, "test_lease", "test_lease")
 
 	re.NoError(lease.Grant(defaultLeaseTimeout))
 	ch := lease.keepAliveWorker(ctx, 2*time.Second)

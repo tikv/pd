@@ -35,12 +35,11 @@ import (
 	"github.com/tikv/pd/client/opt"
 	cctx "github.com/tikv/pd/client/pkg/connectionctx"
 	"github.com/tikv/pd/client/pkg/retry"
-	"github.com/tikv/pd/client/pkg/utils/testutil"
 	sd "github.com/tikv/pd/client/servicediscovery"
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(m)
 }
 
 type mockTSOServiceProvider struct {
@@ -313,13 +312,7 @@ func (s *testTSODispatcherSuite) testStaticConcurrencyImpl(concurrency int) {
 	// Also note that in current implementation, the tsoStream tries to receive the next result before checking
 	// the `tsoStream.pendingRequests` queue. Changing this behavior may need to update this test.
 	for i := range tokenCount + 3 {
-		expectedPending := tokenCount + 1 - i
-		if expectedPending > tokenCount {
-			expectedPending = tokenCount
-		}
-		if expectedPending < 0 {
-			expectedPending = 0
-		}
+		expectedPending := max(min(tokenCount+1-i, tokenCount), 0)
 
 		// Spin for a while as the dispatcher loop may have not finished sending next batch to pendingRequests
 		spinStart := time.Now()
@@ -429,7 +422,7 @@ func BenchmarkTSODispatcherHandleRequests(b *testing.B) {
 	}()
 
 	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		req := getReq()
 		dispatcher.push(req)
 		_, _, err := req.Wait()

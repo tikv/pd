@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 )
@@ -69,8 +70,7 @@ func TestConcurrencyLimiter2(t *testing.T) {
 	require.Equal(t, uint64(0), limiter.GetRunningTasksNum(), "Expected running tasks to be 0")
 	require.Equal(t, uint64(0), limiter.GetWaitingTasksNum(), "Expected waiting tasks to be 0")
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	// Acquire two tokens
 	token1, err := limiter.AcquireToken(ctx)
@@ -84,7 +84,7 @@ func TestConcurrencyLimiter2(t *testing.T) {
 	// Try to acquire third token, it should not be able to acquire immediately due to limit
 	go func() {
 		_, err := limiter.AcquireToken(ctx)
-		require.NoError(t, err, "Failed to acquire token")
+		assert.NoError(t, err, "Failed to acquire token")
 	}()
 
 	time.Sleep(100 * time.Millisecond) // Give some time for the goroutine to run

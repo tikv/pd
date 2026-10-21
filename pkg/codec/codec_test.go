@@ -15,6 +15,7 @@
 package codec
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -33,6 +34,38 @@ func TestDecodeBytes(t *testing.T) {
 		re.NoError(err)
 		re.Equal(key[:i], string(k))
 	}
+}
+
+func TestKeyspaceBoundaryCodec(t *testing.T) {
+	re := require.New(t)
+	for _, mode := range KeyspaceModes() {
+		prefix := mode
+		boundary := EncodeKeyspaceBoundary(mode, 0x010203)
+		re.Equal(EncodeBytes([]byte{prefix, 0x01, 0x02, 0x03}), Key(boundary[:]))
+
+		decodedMode, id, ok := DecodeKeyspaceKey(boundary[:])
+		re.True(ok)
+		re.Equal(mode, decodedMode)
+		re.Equal(uint32(0x010203), id)
+
+		key := EncodeBytes([]byte{prefix, 0x01, 0x02, 0x03, 'k'})
+		decodedMode, id, ok = DecodeKeyspaceKey(key)
+		re.True(ok)
+		re.Equal(mode, decodedMode)
+		re.Equal(uint32(0x010203), id)
+	}
+
+	rawFence := EncodeKeyspaceBoundary(RawKeyspaceModePrefix, 1<<(8*(KeyspacePrefixLen-1)))
+	txnFence := EncodeKeyspaceBoundary(TxnKeyspaceModePrefix, 1<<(8*(KeyspacePrefixLen-1)))
+	re.Equal(EncodeBytes([]byte{'s', 0, 0, 0}), Key(rawFence[:]))
+	re.Equal(EncodeBytes([]byte{'y', 0, 0, 0}), Key(txnFence[:]))
+
+	_, _, ok := DecodeKeyspaceKey(nil)
+	re.False(ok)
+	_, _, ok = DecodeKeyspaceKey([]byte{'z', 0, 0, 0, 0, 0, 0, 0, keyspacePrefixMarker})
+	re.False(ok)
+	_, _, ok = DecodeKeyspaceKey([]byte{'r', 0, 0, 0, 0, 0, 0, 0, keyspacePrefixMarker - 1})
+	re.False(ok)
 }
 
 func TestTableID(t *testing.T) {
@@ -64,16 +97,16 @@ func TestTableIDWithKeyspacePrefix(t *testing.T) {
 
 	prefix := MakeKeyspacePrefix(TxnKeyspaceModePrefix, keyspaceID)
 	identity := TableIdentity{KeyspaceID: keyspaceID, TableID: tableID, HasKeyspace: true}
-	encoded := EncodeBytes(append(append([]byte{}, prefix...), GenerateTableKey(tableID)...))
+	encoded := EncodeBytes(slices.Concat(prefix, GenerateTableKey(tableID)))
 	re.Equal(identity, encoded.TableIdentity())
 
-	other := EncodeBytes(append(append([]byte{}, prefix...), GenerateTableKey(otherTableID)...))
+	other := EncodeBytes(slices.Concat(prefix, GenerateTableKey(otherTableID)))
 	re.Equal(otherTableID, other.TableIdentity().TableID)
 	re.NotEqual(encoded.TableIdentity(), other.TableIdentity())
 
 	// Same table: record and index keys must still resolve to the same identity.
-	record := EncodeBytes(append(append([]byte{}, prefix...), GenerateRowKey(tableID, 1)...))
-	index := EncodeBytes(append(append([]byte{}, prefix...), GenerateIndexKey(tableID, 7)...))
+	record := EncodeBytes(slices.Concat(prefix, GenerateRowKey(tableID, 1)))
+	index := EncodeBytes(slices.Concat(prefix, GenerateIndexKey(tableID, 7)))
 	re.Equal(identity, record.TableIdentity())
 	re.Equal(identity, index.TableIdentity())
 
@@ -100,11 +133,11 @@ func TestMetaOrTableWithKeyspacePrefix(t *testing.T) {
 	keyspaceID := uint32(7)
 	prefix := MakeKeyspacePrefix(TxnKeyspaceModePrefix, keyspaceID)
 
-	isMeta, id := EncodeBytes(append(append([]byte{}, prefix...), metaPrefix...)).MetaOrTable()
+	isMeta, id := EncodeBytes(slices.Concat(prefix, metaPrefix)).MetaOrTable()
 	re.True(isMeta)
 	re.Equal(int64(0), id)
 
-	isMeta, id = EncodeBytes(append(append([]byte{}, prefix...), GenerateTableKey(tableID)...)).MetaOrTable()
+	isMeta, id = EncodeBytes(slices.Concat(prefix, GenerateTableKey(tableID))).MetaOrTable()
 	re.False(isMeta)
 	re.Equal(tableID, id)
 

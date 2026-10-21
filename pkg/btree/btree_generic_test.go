@@ -44,7 +44,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 // perm returns a random permutation of n Int items in the range [0, n).
@@ -455,19 +455,17 @@ func TestDescendGreaterThanG(t *testing.T) {
 const benchmarkTreeSize = 10000
 
 func BenchmarkInsert(b *testing.B) {
-	b.StopTimer()
 	insertP := perm(benchmarkTreeSize)
-	b.StartTimer()
-	i := 0
-	for i < b.N {
-		tr := NewG[Int](*btreeDegree)
-		for _, item := range insertP {
-			tr.ReplaceOrInsert(item)
-			i++
-			if i >= b.N {
-				return
-			}
+
+	var tr *BTreeG[Int]
+	i := len(insertP)
+	for b.Loop() {
+		if i == len(insertP) {
+			tr = NewG[Int](*btreeDegree)
+			i = 0
 		}
+		tr.ReplaceOrInsert(insertP[i])
+		i++
 	}
 }
 
@@ -531,75 +529,69 @@ func BenchmarkDeleteInsertCloneEachTime(b *testing.B) {
 }
 
 func BenchmarkDelete(b *testing.B) {
-	b.StopTimer()
 	insertP := perm(benchmarkTreeSize)
 	removeP := perm(benchmarkTreeSize)
-	b.StartTimer()
-	i := 0
-	for i < b.N {
-		b.StopTimer()
-		tr := NewG[Int](*btreeDegree)
-		for _, v := range insertP {
-			tr.ReplaceOrInsert(v)
-		}
-		b.StartTimer()
-		for _, item := range removeP {
-			tr.Delete(item)
-			i++
-			if i >= b.N {
-				return
+
+	var tr *BTreeG[Int]
+	i := len(removeP)
+	for b.Loop() {
+		if i == len(removeP) {
+			b.StopTimer()
+			tr = NewG[Int](*btreeDegree)
+			for _, v := range insertP {
+				tr.ReplaceOrInsert(v)
 			}
+			i = 0
+			b.StartTimer()
 		}
-		if tr.Len() > 0 {
+		tr.Delete(removeP[i])
+		i++
+		if i == len(removeP) && tr.Len() > 0 {
 			panic(tr.Len())
 		}
 	}
 }
 
 func BenchmarkGet(b *testing.B) {
-	b.StopTimer()
 	insertP := perm(benchmarkTreeSize)
 	removeP := perm(benchmarkTreeSize)
-	b.StartTimer()
-	i := 0
-	for i < b.N {
-		b.StopTimer()
-		tr := NewG[Int](*btreeDegree)
-		for _, v := range insertP {
-			tr.ReplaceOrInsert(v)
-		}
-		b.StartTimer()
-		for _, item := range removeP {
-			tr.Get(item)
-			i++
-			if i >= b.N {
-				return
+
+	var tr *BTreeG[Int]
+	i := len(removeP)
+	for b.Loop() {
+		if i == len(removeP) {
+			b.StopTimer()
+			tr = NewG[Int](*btreeDegree)
+			for _, v := range insertP {
+				tr.ReplaceOrInsert(v)
 			}
+			i = 0
+			b.StartTimer()
 		}
+		tr.Get(removeP[i])
+		i++
 	}
 }
 
 func BenchmarkGetCloneEachTime(b *testing.B) {
-	b.StopTimer()
 	insertP := perm(benchmarkTreeSize)
 	removeP := perm(benchmarkTreeSize)
-	b.StartTimer()
-	i := 0
-	for i < b.N {
-		b.StopTimer()
-		tr := NewG[Int](*btreeDegree)
-		for _, v := range insertP {
-			tr.ReplaceOrInsert(v)
-		}
-		b.StartTimer()
-		for _, item := range removeP {
-			tr = tr.Clone()
-			tr.Get(item)
-			i++
-			if i >= b.N {
-				return
+
+	var tr *BTreeG[Int]
+	i := len(removeP)
+	for b.Loop() {
+		if i == len(removeP) {
+			b.StopTimer()
+			tr = NewG[Int](*btreeDegree)
+			for _, v := range insertP {
+				tr.ReplaceOrInsert(v)
 			}
+			i = 0
+			b.StartTimer()
 		}
+		tr = tr.Clone()
+		tr.Get(removeP[i])
+		i++
 	}
 }
 
@@ -624,8 +616,8 @@ func BenchmarkAscend(b *testing.B) {
 		tr.ReplaceOrInsert(v)
 	}
 	sort.Sort(byInts(arr))
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		j := 0
 		tr.Ascend(func(item Int) bool {
 			if item != arr[j] {
@@ -644,8 +636,8 @@ func BenchmarkDescend(b *testing.B) {
 		tr.ReplaceOrInsert(v)
 	}
 	sort.Sort(byInts(arr))
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		j := len(arr) - 1
 		tr.Descend(func(item Int) bool {
 			if item != arr[j] {
@@ -664,8 +656,8 @@ func BenchmarkAscendRange(b *testing.B) {
 		tr.ReplaceOrInsert(v)
 	}
 	sort.Sort(byInts(arr))
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		j := 100
 		tr.AscendRange(Int(100), arr[len(arr)-100], func(item Int) bool {
 			if item != arr[j] {
@@ -687,8 +679,8 @@ func BenchmarkDescendRange(b *testing.B) {
 		tr.ReplaceOrInsert(v)
 	}
 	sort.Sort(byInts(arr))
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		j := len(arr) - 100
 		tr.DescendRange(arr[len(arr)-100], Int(100), func(item Int) bool {
 			if item != arr[j] {
@@ -710,8 +702,8 @@ func BenchmarkAscendGreaterOrEqual(b *testing.B) {
 		tr.ReplaceOrInsert(v)
 	}
 	sort.Sort(byInts(arr))
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		j := 100
 		k := 0
 		tr.AscendGreaterOrEqual(Int(100), func(item Int) bool {
@@ -738,8 +730,8 @@ func BenchmarkDescendLessOrEqual(b *testing.B) {
 		tr.ReplaceOrInsert(v)
 	}
 	sort.Sort(byInts(arr))
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		j := len(arr) - 100
 		k := len(arr)
 		tr.DescendLessOrEqual(arr[len(arr)-100], func(item Int) bool {
@@ -829,7 +821,7 @@ func BenchmarkDeleteAndRestore(b *testing.B) {
 		}
 		b.ReportAllocs()
 		b.ResetTimer()
-		for range b.N {
+		for b.Loop() {
 			dels := make([]Int, 0, tr.Len())
 			tr.Ascend(ItemIteratorG[Int](func(b Int) bool {
 				dels = append(dels, b)
@@ -852,7 +844,7 @@ func BenchmarkDeleteAndRestore(b *testing.B) {
 		}
 		b.ReportAllocs()
 		b.ResetTimer()
-		for range b.N {
+		for b.Loop() {
 			dels := make([]Int, 0, tr.Len())
 			tr.Ascend(ItemIteratorG[Int](func(b Int) bool {
 				dels = append(dels, b)
@@ -876,7 +868,7 @@ func BenchmarkDeleteAndRestore(b *testing.B) {
 		}
 		b.ReportAllocs()
 		b.ResetTimer()
-		for range b.N {
+		for b.Loop() {
 			tr.Clear(true)
 			for _, v := range items {
 				tr.ReplaceOrInsert(v)
@@ -890,7 +882,7 @@ func BenchmarkDeleteAndRestore(b *testing.B) {
 		}
 		b.ReportAllocs()
 		b.ResetTimer()
-		for range b.N {
+		for b.Loop() {
 			tr.Clear(true)
 			for _, v := range items {
 				tr.ReplaceOrInsert(v)

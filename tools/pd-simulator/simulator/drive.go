@@ -173,7 +173,11 @@ func (d *Driver) updateNodesClient() error {
 	PDHTTPClient = pdHttp.NewClientWithServiceDiscovery("pd-simulator", SD)
 
 	for _, node := range d.conn.Nodes {
-		node.client = newRetryClient(node)
+		client, err := newRetryClient(node)
+		if err != nil {
+			return err
+		}
+		node.client = client
 	}
 	return nil
 }
@@ -298,7 +302,10 @@ func (d *Driver) RegionsHeartbeat(ctx context.Context) {
 						}
 						// Add halt schedule check to avoid the situation that the leader count is always less than 80%.
 						if leaderCount > int64(float64(d.simConfig.TotalRegion)*0.8) || !haltSchedule.Load() {
-							ChooseToHaltPDSchedule(false)
+							if err := ChooseToHaltPDSchedule(false); err != nil {
+								simutil.Logger.Error("resume PD scheduling failed", zap.Error(err))
+								continue
+							}
 							firstReport = false
 							ticker.Stop()
 							simutil.Logger.Info("first region heartbeat done", zap.Int64("leaderCount", leaderCount), zap.Int("checkRegions", len(regions)))
@@ -345,8 +352,7 @@ func (d *Driver) Start() error {
 		}
 	}
 
-	PutPDConfig(d.pdConfig)
-	return nil
+	return PutPDConfig(d.pdConfig)
 }
 
 // Stop stops all nodes.

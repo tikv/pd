@@ -16,8 +16,8 @@
 package unsaferecovery
 
 import (
-	"context"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -39,7 +39,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 func newStoreHeartbeat(storeID uint64, report *pdpb.StoreReport) *pdpb.StoreHeartbeatRequest {
@@ -136,8 +136,7 @@ func TestFindOverlapPeerWithEmptyRegionsFastPath(t *testing.T) {
 
 func TestRemoveFailedStoresWithOptions(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
@@ -164,8 +163,7 @@ func TestRemoveFailedStoresWithOptions(t *testing.T) {
 
 func TestCreateEmptyRegionDisableParanoidCheck(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
@@ -196,8 +194,7 @@ func TestCreateEmptyRegionDisableParanoidCheck(t *testing.T) {
 
 func TestCreateEmptyRegionTailParanoidCheck(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
@@ -222,8 +219,7 @@ func TestCreateEmptyRegionTailParanoidCheck(t *testing.T) {
 
 func TestCreateEmptyRegionFullRangeParanoidCheck(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
@@ -244,8 +240,7 @@ func TestCreateEmptyRegionFullRangeParanoidCheck(t *testing.T) {
 
 func TestCreateEmptyRegionTailUsesTiKVStore(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
@@ -277,13 +272,7 @@ func hasQuorum(region *metapb.Region, failedStores []uint64) bool {
 		numLiveVoters := 0
 
 		for _, voter := range voters {
-			found := false
-			for _, store := range failedStores {
-				if store == voter.GetStoreId() {
-					found = true
-					break
-				}
-			}
+			found := slices.Contains(failedStores, voter.GetStoreId())
 			if found {
 				numFailedVoters += 1
 			} else {
@@ -347,7 +336,7 @@ func applyRecoveryPlan(re *require.Assertions, storeID uint64, storeReports map[
 	for _, tombstone := range plan.GetTombstones() {
 		for i, report := range reports.PeerReports {
 			if report.GetRegionState().GetRegion().GetId() == tombstone {
-				reports.PeerReports = append(reports.PeerReports[:i], reports.PeerReports[i+1:]...)
+				reports.PeerReports = slices.Delete(reports.PeerReports, i, i+1)
 				break
 			}
 		}
@@ -377,7 +366,7 @@ func applyRecoveryPlan(re *require.Assertions, storeID uint64, storeReports map[
 							if failedVoter.GetId() == peer.GetId() {
 								if peer.Role == metapb.PeerRole_Learner {
 									// Remove learner peers
-									region.Peers = append(region.Peers[:i], region.Peers[i+1:]...)
+									region.Peers = slices.Delete(region.Peers, i, i+1)
 								} else {
 									peer.Role = metapb.PeerRole_Learner
 								}
@@ -424,8 +413,7 @@ func advanceUntilFinished(re *require.Assertions, recoveryController *Controller
 
 func TestFinished(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
@@ -504,8 +492,7 @@ func TestFinished(t *testing.T) {
 
 func TestFailed(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
@@ -597,8 +584,7 @@ func TestFailed(t *testing.T) {
 
 func TestForceLeaderFail(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
@@ -677,8 +663,7 @@ func TestForceLeaderFail(t *testing.T) {
 
 func TestAffectedTableID(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
@@ -718,8 +703,7 @@ func TestAffectedTableID(t *testing.T) {
 
 func TestForceLeaderForCommitMerge(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
@@ -794,8 +778,7 @@ func TestForceLeaderForCommitMerge(t *testing.T) {
 
 func TestAutoDetectMode(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
@@ -847,8 +830,7 @@ func TestAutoDetectMode(t *testing.T) {
 // Failed learner replica store should be considered by auto-detect mode.
 func TestAutoDetectWithOneLearner(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
@@ -876,20 +858,13 @@ func TestAutoDetectWithOneLearner(t *testing.T) {
 	req.StoreReport.Step = recoveryController.step
 	resp := &pdpb.StoreHeartbeatResponse{}
 	recoveryController.HandleStoreHeartbeat(req, resp)
-	hasStore3AsFailedStore := false
-	for _, failedStore := range resp.RecoveryPlan.ForceLeader.FailedStores {
-		if failedStore == 3 {
-			hasStore3AsFailedStore = true
-			break
-		}
-	}
+	hasStore3AsFailedStore := slices.Contains(resp.RecoveryPlan.ForceLeader.FailedStores, 3)
 	re.True(hasStore3AsFailedStore)
 }
 
 func TestOneLearner(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
@@ -943,8 +918,7 @@ func TestOneLearner(t *testing.T) {
 
 func TestTiflashLearnerPeer(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
@@ -1103,7 +1077,7 @@ func TestTiflashLearnerPeer(t *testing.T) {
 						},
 					},
 				}, p)
-				report.PeerReports = append(report.PeerReports[:i], report.PeerReports[i+1:]...)
+				report.PeerReports = slices.Delete(report.PeerReports, i, i+1)
 				break
 			}
 		}
@@ -1117,8 +1091,7 @@ func TestTiflashLearnerPeer(t *testing.T) {
 
 func TestUninitializedPeer(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
@@ -1173,8 +1146,7 @@ func TestUninitializedPeer(t *testing.T) {
 
 func TestJointState(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
@@ -1366,8 +1338,7 @@ func TestJointState(t *testing.T) {
 
 func TestExecutionTimeout(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
@@ -1398,8 +1369,7 @@ func TestExecutionTimeout(t *testing.T) {
 
 func TestNoHeartbeatTimeout(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
@@ -1421,8 +1391,7 @@ func TestNoHeartbeatTimeout(t *testing.T) {
 
 func TestExitForceLeader(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
@@ -1499,8 +1468,7 @@ func TestExitForceLeader(t *testing.T) {
 
 func TestStep(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
@@ -1554,8 +1522,7 @@ func TestStep(t *testing.T) {
 
 func TestOnHealthyRegions(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
@@ -1630,8 +1597,7 @@ func TestOnHealthyRegions(t *testing.T) {
 
 func TestCreateEmptyRegion(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
@@ -1739,8 +1705,7 @@ func TestCreateEmptyRegion(t *testing.T) {
 
 func TestRangeOverlap1(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
@@ -1834,8 +1799,7 @@ func TestRangeOverlap1(t *testing.T) {
 
 func TestRangeOverlap2(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
@@ -1928,8 +1892,7 @@ func TestRangeOverlap2(t *testing.T) {
 
 func TestRemoveFailedStores(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
@@ -1969,8 +1932,7 @@ func TestRemoveFailedStores(t *testing.T) {
 
 func TestAbortFailedStoresRemoval(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
@@ -2006,8 +1968,7 @@ func TestAbortFailedStoresRemoval(t *testing.T) {
 
 func TestUnsafeRecoveryStepIsUniqueAcrossRuns(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
@@ -2038,8 +1999,7 @@ func TestUnsafeRecoveryStepIsUniqueAcrossRuns(t *testing.T) {
 
 func TestRunning(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
@@ -2060,8 +2020,7 @@ func TestRunning(t *testing.T) {
 
 func TestEpochComparison(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
@@ -2162,8 +2121,7 @@ func getTestDeployPath(storeID uint64) string {
 
 func TestTiFlashOrphanedPeerDemote(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
@@ -2288,8 +2246,7 @@ func TestTiFlashOrphanedPeerDemote(t *testing.T) {
 
 func TestSelectLeader(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)

@@ -18,21 +18,32 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
+	"go.etcd.io/etcd/server/v3/embed"
 
+	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
+
+	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/mock/mockid"
+	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
@@ -43,11 +54,481 @@ type errorKeyspaceGroupStorage struct {
 	failOnSaveID uint32
 }
 
+type countingKeyspaceGroupStorage struct {
+	*endpoint.StorageEndpoint
+	loadCount      int
+	saveGroupCount int
+	loadGroupErr   error
+	runInTxnCount  atomic.Int32
+}
+
+type ambiguousCommitKeyspaceGroupStorage struct {
+	*endpoint.StorageEndpoint
+	failNextRun     atomic.Bool
+	failNextRefresh atomic.Bool
+}
+
+func (s *countingKeyspaceGroupStorage) LoadKeyspaceGroup(txn kv.Txn, id uint32) (*endpoint.KeyspaceGroup, error) {
+	s.loadCount++
+	if s.loadGroupErr != nil {
+		return nil, s.loadGroupErr
+	}
+	return s.StorageEndpoint.LoadKeyspaceGroup(txn, id)
+}
+
+func (s *countingKeyspaceGroupStorage) SaveKeyspaceGroup(txn kv.Txn, kg *endpoint.KeyspaceGroup) error {
+	s.saveGroupCount++
+	return s.StorageEndpoint.SaveKeyspaceGroup(txn, kg)
+}
+
+func (s *countingKeyspaceGroupStorage) RunInTxn(ctx context.Context, f func(txn kv.Txn) error) error {
+	s.runInTxnCount.Add(1)
+	return s.StorageEndpoint.RunInTxn(ctx, f)
+}
+
+func (s *ambiguousCommitKeyspaceGroupStorage) RunInTxn(ctx context.Context, f func(txn kv.Txn) error) error {
+	if s.failNextRun.CompareAndSwap(true, false) {
+		if err := s.StorageEndpoint.RunInTxn(ctx, f); err != nil {
+			return err
+		}
+		return context.DeadlineExceeded
+	}
+	if s.failNextRefresh.CompareAndSwap(true, false) {
+		return context.DeadlineExceeded
+	}
+	return s.StorageEndpoint.RunInTxn(ctx, f)
+}
+
 func (s *errorKeyspaceGroupStorage) SaveKeyspaceGroup(txn kv.Txn, kg *endpoint.KeyspaceGroup) error {
 	if s.failOnSaveID != 0 && kg.ID == s.failOnSaveID {
 		return errSaveKeyspaceGroup
 	}
 	return s.StorageEndpoint.SaveKeyspaceGroup(txn, kg)
+}
+
+func getKeyspaceGroupReconcileEntry(
+	state *keyspaceGroupReconcileState,
+	groupID uint32,
+) (keyspaceGroupReconcileEntry, bool) {
+	state.RLock()
+	defer state.RUnlock()
+	entry, ok := state.groups[groupID]
+	return entry, ok
+}
+
+func TestGroupsNeedingAllocationReturnsSortedIDs(t *testing.T) {
+	state := newKeyspaceGroupReconcileState(func() {})
+	state.apply(map[uint32]*keyspaceGroupReconcileEntry{
+		3: {id: 3},
+		1: {id: 1},
+		2: {id: 2},
+	})
+	require.Equal(t, []uint32{1, 2, 3}, state.groupsNeedingAllocation(nil))
+}
+
+func BenchmarkKeyspaceGroupReconcileHealthyPath(b *testing.B) {
+	const keyspaceCount = 1_000_000
+
+	group := &endpoint.KeyspaceGroup{
+		ID:       1,
+		UserKind: endpoint.Standard.String(),
+		Members: []endpoint.KeyspaceGroupMember{
+			{Address: "http://tso-1"},
+			{Address: "http://tso-2"},
+		},
+		Keyspaces: make([]uint32, keyspaceCount),
+	}
+	for i := range group.Keyspaces {
+		group.Keyspaces[i] = uint32(i)
+	}
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	require.NoError(b, store.RunInTxn(b.Context(), func(txn kv.Txn) error {
+		return store.SaveKeyspaceGroup(txn, group)
+	}))
+
+	state := newKeyspaceGroupReconcileState(func() {})
+	state.apply(map[uint32]*keyspaceGroupReconcileEntry{
+		group.ID: {id: group.ID, members: group.Members},
+	})
+	manager := NewKeyspaceGroupManager(b.Context(), store, nil)
+	defer manager.Close()
+	manager.nodesBalancer.Put("http://tso-1")
+	manager.nodesBalancer.Put("http://tso-2")
+
+	b.Run("legacy-full-storage-load", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			groups, err := store.LoadKeyspaceGroups(constant.DefaultKeyspaceGroupID, 0)
+			if err != nil || len(groups) != 1 {
+				b.Fatalf("unexpected load result: groups=%d, err=%v", len(groups), err)
+			}
+		}
+	})
+	b.Run("indexed-healthy-selection", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			tsoNodes := uniqueTSONodes(manager.nodesBalancer.GetAll())
+			if groupIDs := state.groupsNeedingAllocation(tsoNodes); len(groupIDs) != 0 {
+				b.Fatalf("healthy group needs allocation: %v", groupIDs)
+			}
+		}
+	})
+}
+
+func BenchmarkKeyspaceGroupReconcileSelection4096(b *testing.B) {
+	manager := NewKeyspaceGroupManager(
+		b.Context(), endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil), nil,
+	)
+	defer manager.Close()
+	manager.nodesBalancer.Put("http://tso-1")
+	manager.nodesBalancer.Put("http://tso-2")
+
+	members := []endpoint.KeyspaceGroupMember{
+		{Address: "http://tso-1"},
+		{Address: "http://tso-2"},
+	}
+	healthyGroups := make(map[uint32]keyspaceGroupReconcileEntry, mcs.MaxKeyspaceGroupCountInUse)
+	candidateGroups := make(map[uint32]keyspaceGroupReconcileEntry, mcs.MaxKeyspaceGroupCountInUse)
+	for groupID := range mcs.MaxKeyspaceGroupCountInUse {
+		healthyGroups[groupID] = keyspaceGroupReconcileEntry{id: groupID, members: members}
+		candidateGroups[groupID] = keyspaceGroupReconcileEntry{id: groupID}
+	}
+	healthyState := newKeyspaceGroupReconcileState(func() {})
+	healthyState.replace(healthyGroups)
+	candidateState := newKeyspaceGroupReconcileState(func() {})
+	candidateState.replace(candidateGroups)
+
+	run := func(b *testing.B, state *keyspaceGroupReconcileState, expected int) {
+		b.ReportAllocs()
+		for b.Loop() {
+			tsoNodes := uniqueTSONodes(manager.nodesBalancer.GetAll())
+			groupIDs := state.groupsNeedingAllocation(tsoNodes)
+			if len(groupIDs) != expected {
+				b.Fatalf("unexpected candidate count: got %d, want %d", len(groupIDs), expected)
+			}
+		}
+	}
+	b.Run("all-healthy", func(b *testing.B) {
+		run(b, healthyState, 0)
+	})
+	b.Run("all-candidates", func(b *testing.B) {
+		run(b, candidateState, int(mcs.MaxKeyspaceGroupCountInUse))
+	})
+}
+
+func TestReconcileKeyspaceGroupsUsesIndexAndRevalidates(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+
+	baseStore := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	store := &countingKeyspaceGroupStorage{StorageEndpoint: baseStore}
+	manager := NewKeyspaceGroupManager(ctx, store, nil)
+	defer manager.Close()
+	manager.nodesBalancer.Put("http://tso-1")
+	manager.nodesBalancer.Put("http://tso-2")
+	tsoNodes := uniqueTSONodes(manager.nodesBalancer.GetAll())
+	state := newKeyspaceGroupReconcileState(func() {})
+	healthy := keyspaceGroupReconcileEntry{
+		id: 1, members: []endpoint.KeyspaceGroupMember{{Address: "http://tso-1"}, {Address: "http://tso-2"}},
+	}
+	state.apply(map[uint32]*keyspaceGroupReconcileEntry{healthy.id: &healthy})
+	manager.reconcileKeyspaceGroupIDs(ctx, state.groupsNeedingAllocation(tsoNodes))
+	re.Zero(store.loadCount)
+
+	storedGroup := &endpoint.KeyspaceGroup{
+		ID:       2,
+		UserKind: endpoint.Standard.String(),
+		Members:  []endpoint.KeyspaceGroupMember{{Address: "http://tso-1"}, {Address: "http://tso-2"}},
+	}
+	re.NoError(baseStore.RunInTxn(ctx, func(txn kv.Txn) error {
+		return baseStore.SaveKeyspaceGroup(txn, storedGroup)
+	}))
+
+	stale := keyspaceGroupReconcileEntry{
+		id: storedGroup.ID, members: []endpoint.KeyspaceGroupMember{{Address: "http://tso-1"}},
+	}
+	state.apply(map[uint32]*keyspaceGroupReconcileEntry{stale.id: &stale})
+	manager.reconcileKeyspaceGroupIDs(ctx, state.groupsNeedingAllocation(tsoNodes))
+	re.Equal(1, store.loadCount)
+	re.Zero(store.saveGroupCount)
+	re.Equal(storedGroup.Members, manager.groups[endpoint.Standard].Get(storedGroup.ID).Members)
+}
+
+func TestReconcileKeyspaceGroupsScopesErrors(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	re.True(shouldAbortKeyspaceGroupReconcile(fmt.Errorf("wrapped: %w", rpctypes.ErrNoLeader)))
+	re.True(shouldAbortKeyspaceGroupReconcile(fmt.Errorf("wrapped: %w", rpctypes.ErrNoSpace)))
+	re.False(shouldAbortKeyspaceGroupReconcile(fmt.Errorf("wrapped: %w", rpctypes.ErrRequestTooLarge)))
+
+	store := &countingKeyspaceGroupStorage{
+		StorageEndpoint: endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil),
+		loadGroupErr:    errs.ErrEtcdKVGet.Wrap(errors.New("load keyspace group error")).GenWithStackByCause(),
+	}
+	manager := NewKeyspaceGroupManager(ctx, store, nil)
+	defer manager.Close()
+	manager.nodesBalancer.Put("http://tso-1")
+	manager.nodesBalancer.Put("http://tso-2")
+	groupIDs := []uint32{1, 2}
+	manager.reconcileKeyspaceGroupIDs(ctx, groupIDs)
+	re.Equal(1, store.loadCount)
+
+	store.loadCount = 0
+	store.loadGroupErr = errors.New("group error")
+	manager.reconcileKeyspaceGroupIDs(ctx, groupIDs)
+	re.Equal(2, store.loadCount)
+}
+
+func TestAutoSplitPatrolReconcilesLoadedGroups(t *testing.T) {
+	re := require.New(t)
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	group := &endpoint.KeyspaceGroup{
+		ID:        1,
+		UserKind:  endpoint.Standard.String(),
+		Members:   []endpoint.KeyspaceGroupMember{{Address: "http://tso-1"}},
+		Keyspaces: []uint32{42},
+	}
+	re.NoError(store.RunInTxn(t.Context(), func(txn kv.Txn) error {
+		return store.SaveKeyspaceGroup(txn, group)
+	}))
+
+	manager := NewKeyspaceGroupManager(t.Context(), store, nil)
+	defer manager.Close()
+	manager.nodesBalancer.Put("http://tso-1")
+	manager.nodesBalancer.Put("https://tso-1")
+	re.Equal(1, manager.GetNodesCount())
+	_, err := manager.AllocNodesForKeyspaceGroup(
+		group.ID, map[string]struct{}{"http://tso-1": {}}, mcs.DefaultKeyspaceGroupReplicaCount)
+	re.ErrorIs(err, errs.ErrNoAvailableNode)
+
+	manager.nodesBalancer.Put("http://tso-2")
+	re.Equal(2, manager.GetNodesCount())
+	manager.doPatrolKeyspaceGroupSizeForAutoSplit(t.Context())
+
+	got := manager.groups[endpoint.Standard].Get(group.ID)
+	re.Len(got.Members, mcs.DefaultKeyspaceGroupReplicaCount)
+	re.NotEqual(typeutil.TrimScheme(got.Members[0].Address), typeutil.TrimScheme(got.Members[1].Address))
+}
+
+func TestKeyspaceGroupReconcileWatcherTracksExternalChanges(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	store := endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(client), nil)
+	initialGroup := &endpoint.KeyspaceGroup{
+		ID:        1,
+		UserKind:  endpoint.Standard.String(),
+		Members:   []endpoint.KeyspaceGroupMember{{Address: "http://initial-tso"}},
+		Keyspaces: []uint32{41},
+	}
+	re.NoError(store.RunInTxn(t.Context(), func(txn kv.Txn) error {
+		return store.SaveKeyspaceGroup(txn, initialGroup)
+	}))
+	manager := NewKeyspaceGroupManager(t.Context(), store, client)
+	defer manager.Close()
+	re.NoError(manager.Bootstrap(t.Context()))
+	manager.RLock()
+	state := manager.reconcileState
+	manager.RUnlock()
+	re.NotNil(state)
+	findEntry := func(groupID uint32) (keyspaceGroupReconcileEntry, bool) {
+		return getKeyspaceGroupReconcileEntry(state, groupID)
+	}
+	entry, ok := findEntry(initialGroup.ID)
+	re.True(ok)
+	re.Equal(initialGroup.Members, entry.members)
+	manager.RLock()
+	re.Equal(initialGroup, manager.groups[endpoint.Standard].Get(initialGroup.ID))
+	manager.RUnlock()
+
+	group := &endpoint.KeyspaceGroup{
+		ID:        2,
+		UserKind:  endpoint.Standard.String(),
+		Members:   []endpoint.KeyspaceGroupMember{{Address: "http://tso-1"}},
+		Keyspaces: []uint32{42},
+	}
+	re.NoError(store.RunInTxn(t.Context(), func(txn kv.Txn) error {
+		return store.SaveKeyspaceGroup(txn, group)
+	}))
+	re.Eventually(func() bool {
+		entry, ok := findEntry(group.ID)
+		return ok && len(entry.members) == 1 && entry.members[0].Address == "http://tso-1"
+	}, 5*time.Second, 10*time.Millisecond)
+	manager.RLock()
+	re.Nil(manager.groups[endpoint.Standard].Get(group.ID))
+	manager.RUnlock()
+
+	group.UserKind = endpoint.Enterprise.String()
+	group.SplitState = &endpoint.SplitState{SplitSource: group.ID}
+	group.Members = []endpoint.KeyspaceGroupMember{{Address: "http://tso-2"}}
+	group.Keyspaces = []uint32{42, 43}
+	re.NoError(store.RunInTxn(t.Context(), func(txn kv.Txn) error {
+		return store.SaveKeyspaceGroup(txn, group)
+	}))
+	re.Eventually(func() bool {
+		entry, ok := findEntry(group.ID)
+		return ok && entry.transitioning &&
+			len(entry.members) == 1 && entry.members[0].Address == "http://tso-2"
+	}, 5*time.Second, 10*time.Millisecond)
+
+	re.NoError(store.RunInTxn(t.Context(), func(txn kv.Txn) error {
+		return store.DeleteKeyspaceGroup(txn, group.ID)
+	}))
+	re.Eventually(func() bool {
+		_, ok := findEntry(group.ID)
+		return !ok
+	}, 5*time.Second, 10*time.Millisecond)
+}
+
+func TestDeleteDefaultKeyspaceGroupIsRejected(t *testing.T) {
+	re := require.New(t)
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	manager := NewKeyspaceGroupManager(t.Context(), store, nil)
+	defer manager.Close()
+	re.NoError(manager.Bootstrap(t.Context()))
+
+	group, err := manager.DeleteKeyspaceGroupByID(constant.DefaultKeyspaceGroupID)
+	re.Nil(group)
+	re.ErrorIs(err, errs.ErrModifyDefaultKeyspaceGroup)
+
+	err = store.RunInTxn(t.Context(), func(txn kv.Txn) error {
+		return store.DeleteKeyspaceGroup(txn, constant.DefaultKeyspaceGroupID)
+	})
+	re.ErrorIs(err, errs.ErrModifyDefaultKeyspaceGroup)
+	group, err = manager.GetKeyspaceGroupByID(constant.DefaultKeyspaceGroupID)
+	re.NoError(err)
+	re.NotNil(group)
+}
+
+func TestKeyspaceGroupReconcileStateIsTermLocal(t *testing.T) {
+	re := require.New(t)
+	manager := NewKeyspaceGroupManager(t.Context(), endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil), nil)
+	defer manager.Close()
+
+	previousCtx, previousState := manager.beginKeyspaceGroupReconcileTerm(t.Context())
+	_, currentState := manager.beginKeyspaceGroupReconcileTerm(t.Context())
+	select {
+	case <-previousCtx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("previous reconciliation term was not canceled")
+	}
+
+	entry := keyspaceGroupReconcileEntry{
+		id: 1, members: []endpoint.KeyspaceGroupMember{{Address: "http://tso-1"}},
+	}
+	previousState.apply(map[uint32]*keyspaceGroupReconcileEntry{entry.id: &entry})
+	_, ok := getKeyspaceGroupReconcileEntry(currentState, entry.id)
+	re.False(ok)
+
+	currentState.apply(map[uint32]*keyspaceGroupReconcileEntry{entry.id: &entry})
+	got, ok := getKeyspaceGroupReconcileEntry(currentState, entry.id)
+	re.True(ok)
+	re.Equal(entry, got)
+}
+
+func TestDecodeKeyspaceGroupReconcileEntry(t *testing.T) {
+	re := require.New(t)
+	entry, err := decodeKeyspaceGroupReconcileEntry([]byte(
+		`{"id":7,"members":[{"address":"http://tso-1","priority":1}],"keyspaces":[1,2,3]}`,
+	))
+	re.NoError(err)
+	re.Equal(uint32(7), entry.id)
+	re.Equal([]endpoint.KeyspaceGroupMember{{Address: "http://tso-1", Priority: 1}}, entry.members)
+	re.False(entry.transitioning)
+}
+
+func TestKeyspaceGroupOverwriteDoesNotRecreateDeletedGroup(t *testing.T) {
+	re := require.New(t)
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	manager := NewKeyspaceGroupManager(t.Context(), store, nil)
+	defer manager.Close()
+	group := &endpoint.KeyspaceGroup{
+		ID:        1,
+		UserKind:  endpoint.Standard.String(),
+		Keyspaces: []uint32{42},
+	}
+	manager.groups[endpoint.Standard].Put(group)
+
+	err := manager.UpdateKeyspaceForGroup(endpoint.Standard, "1", 43, opAdd)
+	re.ErrorContains(err, errs.ErrKeyspaceGroupNotExists.FastGenByArgs(group.ID).Error())
+	stored, err := manager.GetKeyspaceGroupByID(group.ID)
+	re.NoError(err)
+	re.Nil(stored)
+}
+
+func TestKeyspaceGroupUpdatesRebaseOnStorage(t *testing.T) {
+	t.Run("update one group", func(t *testing.T) {
+		re := require.New(t)
+		store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+		manager := NewKeyspaceGroupManager(t.Context(), store, nil)
+		defer manager.Close()
+
+		storedGroup := &endpoint.KeyspaceGroup{
+			ID:        1,
+			UserKind:  endpoint.Standard.String(),
+			Members:   []endpoint.KeyspaceGroupMember{{Address: "http://latest-tso", Priority: 1}},
+			Keyspaces: []uint32{42, 43},
+		}
+		re.NoError(store.RunInTxn(t.Context(), func(txn kv.Txn) error {
+			return store.SaveKeyspaceGroup(txn, storedGroup)
+		}))
+		manager.groups[endpoint.Standard].Put(&endpoint.KeyspaceGroup{
+			ID:        storedGroup.ID,
+			UserKind:  storedGroup.UserKind,
+			Keyspaces: []uint32{42},
+		})
+
+		re.NoError(manager.UpdateKeyspaceForGroup(endpoint.Standard, "1", 44, opAdd))
+		got, err := manager.GetKeyspaceGroupByID(storedGroup.ID)
+		re.NoError(err)
+		re.Equal([]uint32{42, 43, 44}, got.Keyspaces)
+		re.Equal(storedGroup.Members, got.Members)
+		re.Equal(got, manager.groups[endpoint.Standard].Get(storedGroup.ID))
+	})
+
+	t.Run("move between groups", func(t *testing.T) {
+		re := require.New(t)
+		store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+		manager := NewKeyspaceGroupManager(t.Context(), store, nil)
+		defer manager.Close()
+
+		oldGroup := &endpoint.KeyspaceGroup{
+			ID:        1,
+			UserKind:  endpoint.Standard.String(),
+			Members:   []endpoint.KeyspaceGroupMember{{Address: "http://old-tso", Priority: 1}},
+			Keyspaces: []uint32{42, 43},
+		}
+		newGroup := &endpoint.KeyspaceGroup{
+			ID:        2,
+			UserKind:  endpoint.Standard.String(),
+			Members:   []endpoint.KeyspaceGroupMember{{Address: "http://new-tso", Priority: 2}},
+			Keyspaces: []uint32{44, 45},
+		}
+		re.NoError(store.RunInTxn(t.Context(), func(txn kv.Txn) error {
+			if err := store.SaveKeyspaceGroup(txn, oldGroup); err != nil {
+				return err
+			}
+			return store.SaveKeyspaceGroup(txn, newGroup)
+		}))
+		manager.groups[endpoint.Standard].Put(&endpoint.KeyspaceGroup{
+			ID: oldGroup.ID, UserKind: oldGroup.UserKind, Keyspaces: []uint32{42},
+		})
+		manager.groups[endpoint.Standard].Put(&endpoint.KeyspaceGroup{
+			ID: newGroup.ID, UserKind: newGroup.UserKind, Keyspaces: []uint32{44},
+		})
+
+		re.NoError(manager.UpdateKeyspaceGroup("1", "2", endpoint.Standard, endpoint.Standard, 42))
+		gotOld, err := manager.GetKeyspaceGroupByID(oldGroup.ID)
+		re.NoError(err)
+		gotNew, err := manager.GetKeyspaceGroupByID(newGroup.ID)
+		re.NoError(err)
+		re.Equal([]uint32{43}, gotOld.Keyspaces)
+		re.Equal([]uint32{42, 44, 45}, gotNew.Keyspaces)
+		re.Equal(oldGroup.Members, gotOld.Members)
+		re.Equal(newGroup.Members, gotNew.Members)
+		re.Equal(gotOld, manager.groups[endpoint.Standard].Get(oldGroup.ID))
+		re.Equal(gotNew, manager.groups[endpoint.Standard].Get(newGroup.ID))
+	})
 }
 
 type keyspaceGroupTestSuite struct {
@@ -75,6 +556,748 @@ func (suite *keyspaceGroupTestSuite) SetupTest() {
 
 func (suite *keyspaceGroupTestSuite) TearDownTest() {
 	suite.cancel()
+}
+
+func (suite *keyspaceGroupTestSuite) createArchivedKeyspaces(count int) []uint32 {
+	re := suite.Require()
+	keyspaceIDs := make([]uint32, 0, count)
+	for i := range count {
+		meta, err := suite.kg.CreateKeyspace(&CreateKeyspaceRequest{
+			Name:       fmt.Sprintf("remove-batch-%d", i),
+			Config:     map[string]string{},
+			CreateTime: time.Now().Unix(),
+		})
+		re.NoError(err)
+		_, err = suite.kg.UpdateKeyspaceStateByID(meta.GetId(), keyspacepb.KeyspaceState_DISABLED, time.Now().Unix())
+		re.NoError(err)
+		_, err = suite.kg.UpdateKeyspaceStateByID(meta.GetId(), keyspacepb.KeyspaceState_ARCHIVED, time.Now().Unix())
+		re.NoError(err)
+		keyspaceIDs = append(keyspaceIDs, meta.GetId())
+	}
+	return keyspaceIDs
+}
+
+func TestRemoveKeyspacesFromGroupIsFencedByLeadershipTerm(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+
+	store := storage.NewCoreStorage(storage.NewStorageWithEtcdBackend(client), nil)
+	groupManager := NewKeyspaceGroupManager(ctx, store, nil)
+	defer groupManager.Close()
+	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	keyspaceManager := NewKeyspaceManager(
+		ctx, store, cluster, mockid.NewIDAllocator(), &mockConfig{}, groupManager, nil)
+	re.NoError(groupManager.Bootstrap(ctx))
+
+	leadership := election.NewLeadership(
+		client, "/test/keyspace-removal-leader", "keyspace removal test", "keyspace removal test")
+	re.NoError(leadership.Campaign(60, "same-leader"))
+	defer leadership.Reset()
+
+	keyspaceIDs := make([]uint32, 0, maxKeyspaceRemovalBatchSize+1)
+	for i := range maxKeyspaceRemovalBatchSize + 1 {
+		meta, err := keyspaceManager.CreateKeyspace(&CreateKeyspaceRequest{
+			Name:       fmt.Sprintf("term-fence-%d", i),
+			Config:     map[string]string{},
+			CreateTime: time.Now().Unix(),
+		})
+		re.NoError(err)
+		_, err = keyspaceManager.UpdateKeyspaceStateByID(
+			meta.GetId(), keyspacepb.KeyspaceState_DISABLED, time.Now().Unix())
+		re.NoError(err)
+		_, err = keyspaceManager.UpdateKeyspaceStateByID(
+			meta.GetId(), keyspacepb.KeyspaceState_ARCHIVED, time.Now().Unix())
+		re.NoError(err)
+		keyspaceIDs = append(keyspaceIDs, meta.GetId())
+	}
+
+	batchBoundaryCh := make(chan struct{}, 1)
+	continueCh := make(chan struct{})
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/keyspace/afterRemoveKeyspacesFromGroupBatch", func() {
+		batchBoundaryCh <- struct{}{}
+		select {
+		case <-continueCh:
+		case <-ctx.Done():
+		}
+	}))
+	defer func() {
+		cancel()
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/afterRemoveKeyspacesFromGroupBatch"))
+	}()
+
+	resultCh := make(chan error, 1)
+	go func() {
+		_, err := groupManager.RemoveKeyspacesFromGroup(
+			ctx, constant.DefaultKeyspaceGroupID, keyspaceManager, leadership, keyspaceIDs)
+		resultCh <- err
+	}()
+	select {
+	case <-batchBoundaryCh:
+	case <-time.After(5 * time.Second):
+		re.FailNow("timed out waiting for a keyspace removal batch boundary")
+	}
+
+	oldTerm, ok := leadership.CaptureTerm()
+	re.True(ok)
+	leadership.Reset()
+	re.NoError(leadership.Campaign(60, "same-leader"))
+	newTerm, ok := leadership.CaptureTerm()
+	re.True(ok)
+	re.Equal(oldTerm.LeaderValue(), newTerm.LeaderValue())
+	re.NotEqual(oldTerm.LeaseID(), newTerm.LeaseID())
+	close(continueCh)
+
+	select {
+	case err := <-resultCh:
+		re.ErrorIs(err, errs.ErrEtcdTxnConflict)
+	case <-time.After(5 * time.Second):
+		re.FailNow("timed out waiting for keyspace removal to stop")
+	}
+
+	group, err := groupManager.GetKeyspaceGroupByID(constant.DefaultKeyspaceGroupID)
+	re.NoError(err)
+	removed := 0
+	for _, keyspaceID := range keyspaceIDs {
+		_, err := keyspaceManager.LoadKeyspaceByID(keyspaceID)
+		if errors.Is(err, errs.ErrKeyspaceNotFound) {
+			removed++
+			re.NotContains(group.Keyspaces, keyspaceID)
+			continue
+		}
+		re.NoError(err)
+		re.Contains(group.Keyspaces, keyspaceID)
+	}
+	re.Equal(maxKeyspaceRemovalBatchSize, removed)
+}
+
+func TestRemoveKeyspacesFromGroupRejectsInvalidExecutionContext(t *testing.T) {
+	re := require.New(t)
+	groupManager := &GroupManager{}
+
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := groupManager.RemoveKeyspacesFromGroup(canceledCtx, 0, nil, nil, nil)
+	re.ErrorIs(err, context.Canceled)
+
+	uninitializedLeadership := election.NewLeadership(nil, "/uninitialized", "test", "test")
+	_, err = groupManager.RemoveKeyspacesFromGroup(
+		context.Background(), 0, nil, uninitializedLeadership, nil)
+	re.ErrorContains(err, errs.NotLeaderErr)
+}
+
+func TestRemoveKeyspacesFromGroupStaysWithinEtcdLimits(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, &etcdutil.TestEtcdClusterOptions{
+		ServerCfgModifier: func(cfg *embed.Config) {
+			cfg.MaxTxnOps = etcdutil.MaxEtcdTxnOps
+		},
+	})
+	defer clean()
+
+	store := storage.NewCoreStorage(storage.NewStorageWithEtcdBackend(client), nil)
+	groupManager := NewKeyspaceGroupManager(ctx, store, nil)
+	defer groupManager.Close()
+	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	keyspaceManager := NewKeyspaceManager(
+		ctx, store, cluster, mockid.NewIDAllocator(), &mockConfig{}, groupManager, nil)
+	re.NoError(groupManager.Bootstrap(ctx))
+
+	largeConfigValue := strings.Repeat("x", 32*1024)
+	keyspaceIDs := make([]uint32, 0, maxKeyspaceRemovalBatchSize)
+	for i := range maxKeyspaceRemovalBatchSize {
+		meta, err := keyspaceManager.CreateKeyspace(&CreateKeyspaceRequest{
+			Name:       fmt.Sprintf("etcd-limit-%d", i),
+			Config:     map[string]string{"large": largeConfigValue},
+			CreateTime: time.Now().Unix(),
+		})
+		re.NoError(err)
+		_, err = keyspaceManager.UpdateKeyspaceStateByID(
+			meta.GetId(), keyspacepb.KeyspaceState_DISABLED, time.Now().Unix())
+		re.NoError(err)
+		_, err = keyspaceManager.UpdateKeyspaceStateByID(
+			meta.GetId(), keyspacepb.KeyspaceState_ARCHIVED, time.Now().Unix())
+		re.NoError(err)
+		keyspaceIDs = append(keyspaceIDs, meta.GetId())
+	}
+
+	group, err := groupManager.removeKeyspacesFromGroupWithConditions(
+		ctx, constant.DefaultKeyspaceGroupID, keyspaceManager, keyspaceIDs, nil)
+	re.NoError(err)
+	for _, keyspaceID := range keyspaceIDs {
+		re.NotContains(group.Keyspaces, keyspaceID)
+		_, err := keyspaceManager.LoadKeyspaceByID(keyspaceID)
+		re.ErrorIs(err, errs.ErrKeyspaceNotFound)
+	}
+}
+
+func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupUsesBoundedTransactions() {
+	re := suite.Require()
+	keyspaceCount := maxKeyspaceRemovalBatchSize*2 + 1
+	keyspaceIDs := suite.createArchivedKeyspaces(keyspaceCount)
+	batchBoundaryCh := make(chan struct{}, 2)
+	continueCh := make(chan struct{})
+	stopCh := make(chan struct{})
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/keyspace/afterRemoveKeyspacesFromGroupBatch", func() {
+		batchBoundaryCh <- struct{}{}
+		select {
+		case <-continueCh:
+		case <-stopCh:
+		}
+	}))
+	defer func() {
+		close(stopCh)
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/afterRemoveKeyspacesFromGroupBatch"))
+	}()
+
+	store, ok := suite.kg.store.(*endpoint.StorageEndpoint)
+	re.True(ok)
+	countingStore := &countingKeyspaceGroupStorage{StorageEndpoint: store}
+	suite.kgm.store = countingStore
+
+	type removalResult struct {
+		group *endpoint.KeyspaceGroup
+		err   error
+	}
+	resultCh := make(chan removalResult, 1)
+	go func() {
+		group, err := suite.kgm.removeKeyspacesFromGroupWithConditions(
+			suite.ctx, constant.DefaultKeyspaceGroupID, suite.kg, keyspaceIDs, nil)
+		resultCh <- removalResult{group: group, err: err}
+	}()
+
+	createdKeyspaceIDs := make([]uint32, 0, 2)
+	for i := range 2 {
+		select {
+		case <-batchBoundaryCh:
+		case <-time.After(5 * time.Second):
+			re.FailNow("timed out waiting for a keyspace removal batch boundary")
+		}
+
+		// The manager lock is released between batches so an unrelated keyspace
+		// can be created, while relocation of existing keyspaces remains blocked.
+		managerLocked := suite.kgm.TryLock()
+		re.True(managerLocked)
+		if managerLocked {
+			suite.kgm.Unlock()
+		}
+		membershipMutationLocked := suite.kgm.membershipMutationLock.TryLock()
+		re.False(membershipMutationLocked)
+		if membershipMutationLocked {
+			suite.kgm.membershipMutationLock.Unlock()
+		}
+
+		type createResult struct {
+			meta *keyspacepb.KeyspaceMeta
+			err  error
+		}
+		createResultCh := make(chan createResult, 1)
+		go func() {
+			meta, err := suite.kg.CreateKeyspace(&CreateKeyspaceRequest{
+				Name:       fmt.Sprintf("concurrent-create-%d", i),
+				Config:     map[string]string{},
+				CreateTime: time.Now().Unix(),
+			})
+			createResultCh <- createResult{meta: meta, err: err}
+		}()
+		select {
+		case result := <-createResultCh:
+			re.NoError(result.err)
+			createdKeyspaceIDs = append(createdKeyspaceIDs, result.meta.GetId())
+		case <-time.After(5 * time.Second):
+			re.FailNow("creating a keyspace was blocked between removal batches")
+		}
+		continueCh <- struct{}{}
+	}
+
+	result := <-resultCh
+	re.NoError(result.err)
+	// Three removal transactions plus one group-membership transaction for each
+	// concurrently created keyspace.
+	re.Equal(int32(5), countingStore.runInTxnCount.Load())
+	for _, keyspaceID := range keyspaceIDs {
+		re.NotContains(result.group.Keyspaces, keyspaceID)
+		_, err := suite.kg.LoadKeyspaceByID(keyspaceID)
+		re.ErrorIs(err, errs.ErrKeyspaceNotFound)
+	}
+	for _, keyspaceID := range createdKeyspaceIDs {
+		re.Contains(result.group.Keyspaces, keyspaceID)
+		meta, err := suite.kg.LoadKeyspaceByID(keyspaceID)
+		re.NoError(err)
+		re.Equal(keyspacepb.KeyspaceState_ENABLED, meta.GetState())
+	}
+}
+
+func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupRefreshesCachesAfterAmbiguousCommit() {
+	re := suite.Require()
+	keyspaceIDs := suite.createArchivedKeyspaces(maxKeyspaceRemovalBatchSize + 1)
+	for _, keyspaceID := range keyspaceIDs {
+		keyspaceName, err := suite.kg.GetKeyspaceNameByID(keyspaceID)
+		re.NoError(err)
+		re.NotEmpty(keyspaceName)
+	}
+	re.NoError(suite.kgm.CreateKeyspaceGroups([]*endpoint.KeyspaceGroup{{
+		ID:        1,
+		UserKind:  endpoint.Basic.String(),
+		Keyspaces: []uint32{1_000_001, 1_000_002, 1_000_003},
+	}}))
+
+	store, ok := suite.kgm.store.(*endpoint.StorageEndpoint)
+	re.True(ok)
+	ambiguousStore := &ambiguousCommitKeyspaceGroupStorage{StorageEndpoint: store}
+	ambiguousStore.failNextRun.Store(true)
+	suite.kgm.store = ambiguousStore
+
+	_, err := suite.kgm.removeKeyspacesFromGroupWithConditions(
+		suite.ctx, constant.DefaultKeyspaceGroupID, suite.kg, keyspaceIDs, nil)
+	re.ErrorIs(err, context.DeadlineExceeded)
+	removedIDs := make([]uint32, 0, maxKeyspaceRemovalBatchSize)
+	for _, keyspaceID := range keyspaceIDs {
+		_, err = suite.kg.LoadKeyspaceByID(keyspaceID)
+		if errors.Is(err, errs.ErrKeyspaceNotFound) {
+			removedIDs = append(removedIDs, keyspaceID)
+			continue
+		}
+		re.NoError(err)
+	}
+	re.Len(removedIDs, maxKeyspaceRemovalBatchSize)
+	for _, keyspaceID := range removedIDs {
+		_, err = suite.kgm.GetGroupByKeyspaceID(keyspaceID)
+		re.ErrorIs(err, errs.ErrKeyspaceNotInAnyKeyspaceGroup)
+	}
+	config, err := suite.kgm.GetKeyspaceConfigByKind(endpoint.Basic)
+	re.NoError(err)
+	re.Equal("0", config[TSOKeyspaceGroupIDKey])
+
+	// A retry cannot rediscover the already-removed IDs from group membership,
+	// so the first ambiguous batch must have invalidated their warmed caches.
+	_, err = suite.kgm.removeKeyspacesFromGroupWithConditions(
+		suite.ctx, constant.DefaultKeyspaceGroupID, suite.kg, keyspaceIDs, nil)
+	re.NoError(err)
+	for _, keyspaceID := range keyspaceIDs {
+		name, err := suite.kg.GetKeyspaceNameByID(keyspaceID)
+		re.Empty(name)
+		re.ErrorIs(err, errs.ErrKeyspaceNotFound)
+	}
+}
+
+func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupRetainsCacheWhenRefreshFails() {
+	re := suite.Require()
+	keyspaceID := suite.createArchivedKeyspaces(1)[0]
+
+	store, ok := suite.kgm.store.(*endpoint.StorageEndpoint)
+	re.True(ok)
+	ambiguousStore := &ambiguousCommitKeyspaceGroupStorage{StorageEndpoint: store}
+	ambiguousStore.failNextRun.Store(true)
+	ambiguousStore.failNextRefresh.Store(true)
+	suite.kgm.store = ambiguousStore
+
+	_, err := suite.kgm.removeKeyspacesFromGroupWithConditions(
+		suite.ctx, constant.DefaultKeyspaceGroupID, suite.kg, []uint32{keyspaceID}, nil)
+	re.ErrorIs(err, context.DeadlineExceeded)
+
+	// The authoritative refresh also failed, so keep the previous cache usable
+	// until a later retry can reconcile it from storage.
+	groupID, err := suite.kgm.GetGroupByKeyspaceID(keyspaceID)
+	re.NoError(err)
+	re.Equal(constant.DefaultKeyspaceGroupID, groupID)
+	config, err := suite.kgm.GetKeyspaceConfigByKind(endpoint.Basic)
+	re.NoError(err)
+	re.Equal("0", config[TSOKeyspaceGroupIDKey])
+
+	group, err := suite.kgm.removeKeyspacesFromGroupWithConditions(
+		suite.ctx, constant.DefaultKeyspaceGroupID, suite.kg, []uint32{keyspaceID}, nil)
+	re.NoError(err)
+	re.NotContains(group.Keyspaces, keyspaceID)
+	_, err = suite.kgm.GetGroupByKeyspaceID(keyspaceID)
+	re.ErrorIs(err, errs.ErrKeyspaceNotInAnyKeyspaceGroup)
+}
+
+func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupKeepsSingleTransactionFastPath() {
+	re := suite.Require()
+	keyspaceIDs := suite.createArchivedKeyspaces(maxKeyspaceRemovalBatchSize)
+	store, ok := suite.kg.store.(*endpoint.StorageEndpoint)
+	re.True(ok)
+	countingStore := &countingKeyspaceGroupStorage{StorageEndpoint: store}
+	suite.kgm.store = countingStore
+
+	_, err := suite.kgm.removeKeyspacesFromGroupWithConditions(
+		suite.ctx, constant.DefaultKeyspaceGroupID, suite.kg, keyspaceIDs, nil)
+	re.NoError(err)
+	re.Equal(int32(1), countingStore.runInTxnCount.Load())
+}
+
+func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupFiltersProtectedAndDuplicateIDs() {
+	re := suite.Require()
+	archivedID := suite.createArchivedKeyspaces(1)[0]
+	enabled, err := suite.kg.CreateKeyspace(&CreateKeyspaceRequest{
+		Name:       "filter_enabled2",
+		Config:     map[string]string{},
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+	bootstrapID := GetBootstrapKeyspaceID()
+	missingID := uint32(1_000_000)
+	// Model a stale membership left by older or manually repaired metadata.
+	// Removal must not turn a missing metadata record into a hard failure.
+	re.NoError(suite.kgm.UpdateKeyspaceForGroup(
+		endpoint.Basic, "0", missingID, opAdd))
+
+	group, err := suite.kgm.removeKeyspacesFromGroupWithConditions(
+		suite.ctx,
+		constant.DefaultKeyspaceGroupID,
+		suite.kg,
+		[]uint32{bootstrapID, archivedID, archivedID, enabled.GetId(), missingID},
+		nil,
+	)
+	re.NoError(err)
+	re.Contains(group.Keyspaces, bootstrapID)
+	re.NotContains(group.Keyspaces, archivedID)
+	re.Contains(group.Keyspaces, enabled.GetId())
+	re.Contains(group.Keyspaces, missingID)
+	_, err = suite.kg.LoadKeyspaceByID(archivedID)
+	re.ErrorIs(err, errs.ErrKeyspaceNotFound)
+
+	// Retrying the same mixed request is a no-op: protected, already removed,
+	// enabled, and unknown keyspaces are all preserved or skipped.
+	retryGroup, err := suite.kgm.removeKeyspacesFromGroupWithConditions(
+		suite.ctx,
+		constant.DefaultKeyspaceGroupID,
+		suite.kg,
+		[]uint32{bootstrapID, archivedID, enabled.GetId(), missingID},
+		nil,
+	)
+	re.NoError(err)
+	re.Equal(group.Keyspaces, retryGroup.Keyspaces)
+}
+
+func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupRejectsTransitionalGroups() {
+	re := suite.Require()
+	_, err := suite.kgm.removeKeyspacesFromGroupWithConditions(
+		suite.ctx, 99, suite.kg, []uint32{1000}, nil)
+	re.True(errs.ErrKeyspaceGroupNotExists.Equal(err), err)
+
+	testCases := []struct {
+		name       string
+		group      *endpoint.KeyspaceGroup
+		isExpected func(error) bool
+	}{
+		{
+			name: "splitting",
+			group: &endpoint.KeyspaceGroup{
+				ID:         100,
+				UserKind:   endpoint.Standard.String(),
+				SplitState: &endpoint.SplitState{SplitSource: 100},
+			},
+			isExpected: errs.ErrKeyspaceGroupInSplit.Equal,
+		},
+		{
+			name: "merging",
+			group: &endpoint.KeyspaceGroup{
+				ID:         101,
+				UserKind:   endpoint.Standard.String(),
+				MergeState: &endpoint.MergeState{MergeList: []uint32{102}},
+			},
+			isExpected: errs.ErrKeyspaceGroupInMerging.Equal,
+		},
+	}
+	for _, testCase := range testCases {
+		suite.Run(testCase.name, func() {
+			re := suite.Require()
+			re.NoError(suite.kgm.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+				return suite.kgm.store.SaveKeyspaceGroup(txn, testCase.group)
+			}))
+			_, err := suite.kgm.removeKeyspacesFromGroupWithConditions(
+				suite.ctx, testCase.group.ID, suite.kg, []uint32{1000}, nil)
+			re.True(testCase.isExpected(err), err)
+		})
+	}
+}
+
+func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupPropagatesLoadFailure() {
+	store, ok := suite.kg.store.(*endpoint.StorageEndpoint)
+	suite.Require().True(ok)
+	testCases := []struct {
+		name  string
+		count int
+	}{
+		{name: "single transaction", count: 1},
+		{name: "small batch", count: maxKeyspaceRemovalGuaranteedSingleTxnSize + 1},
+		{name: "large batch", count: maxKeyspaceRemovalBatchSize + 1},
+	}
+	for _, testCase := range testCases {
+		suite.Run(testCase.name, func() {
+			re := suite.Require()
+			loadErr := errors.New("load keyspace group")
+			suite.kgm.store = &countingKeyspaceGroupStorage{
+				StorageEndpoint: store,
+				loadGroupErr:    loadErr,
+			}
+			keyspaceIDs := make([]uint32, testCase.count)
+			for i := range keyspaceIDs {
+				keyspaceIDs[i] = uint32(1000 + i)
+			}
+			_, err := suite.kgm.removeKeyspacesFromGroupWithConditions(
+				suite.ctx, constant.DefaultKeyspaceGroupID, suite.kg, keyspaceIDs, nil)
+			re.ErrorIs(err, loadErr)
+		})
+	}
+}
+
+func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupBoundsDistinctAssignmentUpdates() {
+	re := suite.Require()
+	keyspaceCount := (maxKeyspaceRemovalTxnOps-1)/3 + 1
+	keyspaceIDs := suite.createArchivedKeyspaces(keyspaceCount)
+	for _, keyspaceID := range keyspaceIDs {
+		re.NoError(suite.kg.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+			meta, err := suite.kg.store.LoadKeyspaceMeta(txn, keyspaceID)
+			if err != nil {
+				return err
+			}
+			meta.Config[MetaServiceGroupIDKey] = strconv.FormatUint(uint64(keyspaceID), 10)
+			return suite.kg.store.SaveKeyspaceMeta(txn, meta)
+		}))
+	}
+	store, ok := suite.kg.store.(*endpoint.StorageEndpoint)
+	re.True(ok)
+	countingStore := &countingKeyspaceGroupStorage{StorageEndpoint: store}
+	suite.kgm.store = countingStore
+
+	_, err := suite.kgm.removeKeyspacesFromGroupWithConditions(
+		suite.ctx, constant.DefaultKeyspaceGroupID, suite.kg, keyspaceIDs, nil)
+	re.NoError(err)
+	re.Equal(int32(2), countingStore.runInTxnCount.Load())
+}
+
+func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupFiltersInBatch() {
+	re := suite.Require()
+	archivedID := suite.createArchivedKeyspaces(1)[0]
+	enabled, err := suite.kg.CreateKeyspace(&CreateKeyspaceRequest{
+		Name:       "filter_enabled",
+		Config:     map[string]string{},
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+	bootstrapID := GetBootstrapKeyspaceID()
+	staleMemberID := uint32(100_000)
+	re.NoError(suite.kgm.UpdateKeyspaceForGroup(
+		endpoint.Basic, "0", staleMemberID, opAdd))
+
+	store, ok := suite.kg.store.(*endpoint.StorageEndpoint)
+	re.True(ok)
+	countingStore := &countingKeyspaceGroupStorage{StorageEndpoint: store}
+	suite.kgm.store = countingStore
+	suite.kg.store = countingStore
+
+	keyspaceIDs := make([]uint32, 0, 104)
+	keyspaceIDs = append(keyspaceIDs, bootstrapID, archivedID, enabled.GetId(), archivedID)
+	for i := range 100 {
+		keyspaceIDs = append(keyspaceIDs, uint32(100_000+i))
+	}
+
+	group, err := suite.kgm.removeKeyspacesFromGroupWithConditions(
+		suite.ctx, constant.DefaultKeyspaceGroupID, suite.kg, keyspaceIDs, nil)
+	re.NoError(err)
+	re.Equal(int32(1), countingStore.runInTxnCount.Load())
+	re.Contains(group.Keyspaces, bootstrapID)
+	re.NotContains(group.Keyspaces, archivedID)
+	re.Contains(group.Keyspaces, enabled.GetId())
+	re.Contains(group.Keyspaces, staleMemberID)
+	_, err = suite.kg.LoadKeyspaceByID(archivedID)
+	re.ErrorIs(err, errs.ErrKeyspaceNotFound)
+	_, err = suite.kg.LoadKeyspaceByID(enabled.GetId())
+	re.NoError(err)
+}
+
+func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupDoesNotDeadlockConfigGroupMove() {
+	re := suite.Require()
+	enabled, err := suite.kg.CreateKeyspace(&CreateKeyspaceRequest{
+		Name:       "concurrent_cfg_move",
+		Config:     map[string]string{},
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+	re.NoError(suite.kgm.CreateKeyspaceGroups([]*endpoint.KeyspaceGroup{{
+		ID:       1,
+		UserKind: endpoint.Basic.String(),
+	}}))
+
+	// Hold the per-keyspace metadata lock so the config update and removal reach
+	// their manager-lock boundaries in a deterministic order.
+	suite.kg.metaLock.Lock(enabled.GetId())
+	metaLocked := true
+	defer func() {
+		if metaLocked {
+			suite.kg.metaLock.Unlock(enabled.GetId())
+		}
+	}()
+
+	configResultCh := make(chan error, 1)
+	go func() {
+		_, err := suite.kg.UpdateKeyspaceConfig(enabled.GetName(), []*Mutation{{
+			Op:    OpPut,
+			Key:   TSOKeyspaceGroupIDKey,
+			Value: "1",
+		}})
+		configResultCh <- err
+	}()
+
+	// A group-moving config update must acquire the membership write lock before
+	// waiting for metaLock.
+	re.Eventually(func() bool {
+		locked := suite.kgm.membershipMutationLock.TryLock()
+		if locked {
+			suite.kgm.membershipMutationLock.Unlock()
+		}
+		return !locked
+	}, 5*time.Second, 10*time.Millisecond)
+
+	removalResultCh := make(chan error, 1)
+	go func() {
+		_, err := suite.kgm.removeKeyspacesFromGroupWithConditions(
+			suite.ctx, constant.DefaultKeyspaceGroupID, suite.kg, []uint32{enabled.GetId()}, nil)
+		removalResultCh <- err
+	}()
+
+	// Removal is blocked by the membership lock and therefore cannot hold the
+	// manager lock while waiting for the same keyspace metadata lock.
+	managerLocked := suite.kgm.TryLock()
+	re.True(managerLocked)
+	if managerLocked {
+		suite.kgm.Unlock()
+	}
+
+	suite.kg.metaLock.Unlock(enabled.GetId())
+	metaLocked = false
+	select {
+	case err := <-configResultCh:
+		re.NoError(err)
+	case <-time.After(5 * time.Second):
+		re.FailNow("timed out waiting for the keyspace group config move")
+	}
+	select {
+	case err := <-removalResultCh:
+		re.NoError(err)
+	case <-time.After(5 * time.Second):
+		re.FailNow("timed out waiting for keyspace removal")
+	}
+
+	defaultGroup, err := suite.kgm.GetKeyspaceGroupByID(constant.DefaultKeyspaceGroupID)
+	re.NoError(err)
+	re.NotContains(defaultGroup.Keyspaces, enabled.GetId())
+	targetGroup, err := suite.kgm.GetKeyspaceGroupByID(1)
+	re.NoError(err)
+	re.Contains(targetGroup.Keyspaces, enabled.GetId())
+	meta, err := suite.kg.LoadKeyspaceByID(enabled.GetId())
+	re.NoError(err)
+	re.Equal("1", meta.GetConfig()[TSOKeyspaceGroupIDKey])
+}
+
+func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupStopsAfterCancellation() {
+	re := suite.Require()
+	keyspaceIDs := suite.createArchivedKeyspaces(maxKeyspaceRemovalBatchSize*2 + 1)
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/keyspace/afterRemoveKeyspacesFromGroupBatch", cancel))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/afterRemoveKeyspacesFromGroupBatch"))
+	}()
+
+	store, ok := suite.kg.store.(*endpoint.StorageEndpoint)
+	re.True(ok)
+	countingStore := &countingKeyspaceGroupStorage{StorageEndpoint: store}
+	suite.kgm.store = countingStore
+
+	_, err := suite.kgm.removeKeyspacesFromGroupWithConditions(
+		ctx, constant.DefaultKeyspaceGroupID, suite.kg, keyspaceIDs, nil)
+	re.ErrorIs(err, context.Canceled)
+	re.Equal(int32(1), countingStore.runInTxnCount.Load())
+
+	group, err := suite.kgm.GetKeyspaceGroupByID(constant.DefaultKeyspaceGroupID)
+	re.NoError(err)
+	removed := 0
+	for _, keyspaceID := range keyspaceIDs {
+		_, err := suite.kg.LoadKeyspaceByID(keyspaceID)
+		if errors.Is(err, errs.ErrKeyspaceNotFound) {
+			removed++
+			re.NotContains(group.Keyspaces, keyspaceID)
+			continue
+		}
+		re.NoError(err)
+		re.Contains(group.Keyspaces, keyspaceID)
+	}
+	re.Equal(maxKeyspaceRemovalBatchSize, removed)
+}
+
+func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupAggregatesMetaServiceAssignments() {
+	re := suite.Require()
+	store, ok := suite.kg.store.(*endpoint.StorageEndpoint)
+	re.True(ok)
+	mgm := NewMetaServiceGroupManager(store, map[string]string{"meta-group-1": "127.0.0.1:12379"}, nil)
+	enabled := true
+	re.NoError(mgm.PatchStatus(suite.ctx, "meta-group-1", &MetaServiceGroupStatusPatch{Enabled: &enabled}))
+	suite.kg.mgm = mgm
+
+	keyspaceIDs := suite.createArchivedKeyspaces(2)
+	counts, err := mgm.GetAssignmentCounts(suite.ctx)
+	re.NoError(err)
+	re.Equal(2, counts["meta-group-1"])
+
+	_, err = suite.kgm.removeKeyspacesFromGroupWithConditions(
+		suite.ctx, constant.DefaultKeyspaceGroupID, suite.kg, keyspaceIDs, nil)
+	re.NoError(err)
+	counts, err = mgm.GetAssignmentCounts(suite.ctx)
+	re.NoError(err)
+	re.Zero(counts["meta-group-1"])
+
+	// A manual status reset can make the persisted count lower than the number
+	// of assigned keyspaces. Bulk removal must still clamp the count at zero.
+	keyspaceIDs = suite.createArchivedKeyspaces(2)
+	zero := 0
+	re.NoError(mgm.PatchStatus(
+		suite.ctx, "meta-group-1", &MetaServiceGroupStatusPatch{AssignmentCount: &zero}))
+	_, err = suite.kgm.removeKeyspacesFromGroupWithConditions(
+		suite.ctx, constant.DefaultKeyspaceGroupID, suite.kg, keyspaceIDs, nil)
+	re.NoError(err)
+	counts, err = mgm.GetAssignmentCounts(suite.ctx)
+	re.NoError(err)
+	re.Zero(counts["meta-group-1"])
+}
+
+func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupDoesNotDoubleDecrementDuplicateMember() {
+	re := suite.Require()
+	store, ok := suite.kg.store.(*endpoint.StorageEndpoint)
+	re.True(ok)
+	mgm := NewMetaServiceGroupManager(store, map[string]string{"meta-group-1": "127.0.0.1:12379"}, nil)
+	enabled := true
+	re.NoError(mgm.PatchStatus(suite.ctx, "meta-group-1", &MetaServiceGroupStatusPatch{Enabled: &enabled}))
+	suite.kg.mgm = mgm
+
+	keyspaceIDs := suite.createArchivedKeyspaces(maxKeyspaceRemovalBatchSize + 2)
+	counts, err := mgm.GetAssignmentCounts(suite.ctx)
+	re.NoError(err)
+	re.Equal(maxKeyspaceRemovalBatchSize+2, counts["meta-group-1"])
+
+	requestedIDs := keyspaceIDs[:maxKeyspaceRemovalBatchSize+1]
+	duplicateMembers := make([]uint32, 0, len(requestedIDs)+1)
+	duplicateMembers = append(duplicateMembers, requestedIDs[0])
+	duplicateMembers = append(duplicateMembers, requestedIDs...)
+	re.NoError(suite.kgm.CreateKeyspaceGroups([]*endpoint.KeyspaceGroup{{
+		ID:        1,
+		UserKind:  endpoint.Basic.String(),
+		Keyspaces: duplicateMembers,
+	}}))
+
+	group, err := suite.kgm.removeKeyspacesFromGroupWithConditions(
+		suite.ctx, 1, suite.kg, requestedIDs, nil)
+	re.NoError(err)
+	re.Empty(group.Keyspaces)
+	counts, err = mgm.GetAssignmentCounts(suite.ctx)
+	re.NoError(err)
+	re.Equal(1, counts["meta-group-1"])
 }
 
 func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupOperations() {
@@ -298,12 +1521,9 @@ func (suite *keyspaceGroupTestSuite) TestUpdateKeyspaceGroupRollbackOnSaveError(
 	re.Equal([]uint32{222}, storedNew.Keyspaces)
 }
 
-// TestUpdateKeyspaceGroupRollbackRestoresSortedOrder verifies that when
-// saveKeyspaceGroups fails the rollback at line 610 (slices.Sort) correctly
-// restores oldKG.Keyspaces to sorted order.
-// The existing TestUpdateKeyspaceGroupRollbackOnSaveError only uses a single-element
-// oldKG.Keyspaces, so sorting is a no-op there and does not cover this path.
-func (suite *keyspaceGroupTestSuite) TestUpdateKeyspaceGroupRollbackRestoresSortedOrder() {
+// TestUpdateKeyspaceGroupSaveErrorPreservesSortedCache verifies that a failed
+// storage transaction does not mutate the cached keyspace group.
+func (suite *keyspaceGroupTestSuite) TestUpdateKeyspaceGroupSaveErrorPreservesSortedCache() {
 	re := suite.Require()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -313,8 +1533,6 @@ func (suite *keyspaceGroupTestSuite) TestUpdateKeyspaceGroupRollbackRestoresSort
 	kgm := NewKeyspaceGroupManager(ctx, errorStore, nil)
 	re.NoError(kgm.Bootstrap(ctx))
 
-	// oldKG has multiple keyspaces so that after Remove + append the slice is
-	// temporarily out of order ([100, 300, 222]) and needs Sort to be restored.
 	keyspaceID := uint32(222)
 	keyspaceGroups := []*endpoint.KeyspaceGroup{
 		{
@@ -334,8 +1552,6 @@ func (suite *keyspaceGroupTestSuite) TestUpdateKeyspaceGroupRollbackRestoresSort
 	err := kgm.UpdateKeyspaceGroup("1", "2", endpoint.Standard, endpoint.Standard, keyspaceID)
 	re.ErrorIs(err, errSaveKeyspaceGroup)
 
-	// After rollback oldKG.Keyspaces must be sorted back to [100, 222, 300].
-	// Without the slices.Sort on line 610 it would be [100, 300, 222].
 	oldKG := kgm.groups[endpoint.Standard].Get(1)
 	re.NotNil(oldKG)
 	re.Equal([]uint32{100, keyspaceID, 300}, oldKG.Keyspaces)

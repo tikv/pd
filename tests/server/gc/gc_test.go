@@ -19,6 +19,7 @@ import (
 	"math"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -28,6 +29,8 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
+	"github.com/tikv/pd/pkg/errs"
+	gcmanager "github.com/tikv/pd/pkg/gc"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -40,7 +43,7 @@ import (
 // of these APIs are covered elsewhere.
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 const (
@@ -48,6 +51,12 @@ const (
 	getGCStateBeforeSlowPathFailpoint = "github.com/tikv/pd/pkg/gc/getGCStateBeforeSlowPath"
 	skipCampaignLeaderCheckFailpoint  = "github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"
 )
+
+func makeKeyspaceScope(keyspaceID uint32) *pdpb.KeyspaceScope {
+	return &pdpb.KeyspaceScope{
+		Keyspace: &pdpb.KeyspaceScope_KeyspaceId{KeyspaceId: keyspaceID},
+	}
+}
 
 func newGCStateLeaderTransitionCluster(t *testing.T) (*tests.TestCluster, *pdpb.GetGCStateRequest, func()) {
 	re := require.New(t)
@@ -69,7 +78,7 @@ func newGCStateLeaderTransitionCluster(t *testing.T) (*tests.TestCluster, *pdpb.
 
 	req := &pdpb.GetGCStateRequest{
 		Header:        testutil.NewRequestHeader(leaderServer.GetClusterID()),
-		KeyspaceScope: &pdpb.KeyspaceScope{KeyspaceId: constant.NullKeyspaceID},
+		KeyspaceScope: makeKeyspaceScope(constant.NullKeyspaceID),
 	}
 	cleanup := func() {
 		re.NoError(failpoint.Disable(skipCampaignLeaderCheckFailpoint))
@@ -134,8 +143,7 @@ func (p *blockingFailpoint) releaseAndDisable(re *require.Assertions) {
 
 func TestGCOperations(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Keyspace.WaitRegionSplit = false
 	})
@@ -160,12 +168,43 @@ func TestGCOperations(t *testing.T) {
 	clusterID := leaderServer.GetClusterID()
 	header := testutil.NewRequestHeader(clusterID)
 
+	// This hook is reached only after a successful combined state and global
+	// barrier read. It proves that the default RPC remains on its no-global-read
+	// path while a request that explicitly opts in executes the combined read.
+	var combinedReadCount atomic.Int64
+	combinedReadFailpoint := "github.com/tikv/pd/pkg/gc/" +
+		"getGCStateWithGlobalGCBarriersAfterRead"
+	re.NoError(failpoint.EnableCall(combinedReadFailpoint, func() {
+		combinedReadCount.Add(1)
+	}))
+	defer func() {
+		re.NoError(failpoint.Disable(combinedReadFailpoint))
+	}()
+
+	defaultResp, err := grpcPDClient.GetGCState(ctx, &pdpb.GetGCStateRequest{
+		Header:        header,
+		KeyspaceScope: makeKeyspaceScope(constant.NullKeyspaceID),
+	})
+	re.NoError(err)
+	re.Nil(defaultResp.GetGlobalGcBarriers())
+	re.Zero(combinedReadCount.Load())
+
+	optedInResp, err := grpcPDClient.GetGCState(ctx, &pdpb.GetGCStateRequest{
+		Header:                  header,
+		KeyspaceScope:           makeKeyspaceScope(constant.NullKeyspaceID),
+		IncludeGlobalGcBarriers: true,
+	})
+	re.NoError(err)
+	re.NotNil(optedInResp.GetGlobalGcBarriers())
+	re.Empty(optedInResp.GetGlobalGcBarriers().GetBarriers())
+	re.Equal(int64(1), combinedReadCount.Load())
+
 	testInKeyspace := func(keyspaceID uint32) {
 		{
 			// Successful advancement of txn safe point
 			req := &pdpb.AdvanceTxnSafePointRequest{
 				Header:        header,
-				KeyspaceScope: &pdpb.KeyspaceScope{KeyspaceId: keyspaceID},
+				KeyspaceScope: makeKeyspaceScope(keyspaceID),
 				Target:        10,
 			}
 			resp, err := grpcPDClient.AdvanceTxnSafePoint(ctx, req)
@@ -189,7 +228,7 @@ func TestGCOperations(t *testing.T) {
 			// Successful advancement of GC safe point
 			req := &pdpb.AdvanceGCSafePointRequest{
 				Header:        header,
-				KeyspaceScope: &pdpb.KeyspaceScope{KeyspaceId: keyspaceID},
+				KeyspaceScope: makeKeyspaceScope(keyspaceID),
 				Target:        8,
 			}
 			resp, err := grpcPDClient.AdvanceGCSafePoint(ctx, req)
@@ -212,7 +251,7 @@ func TestGCOperations(t *testing.T) {
 			// Successfully sets a GC barrier
 			req := &pdpb.SetGCBarrierRequest{
 				Header:        header,
-				KeyspaceScope: &pdpb.KeyspaceScope{KeyspaceId: keyspaceID},
+				KeyspaceScope: makeKeyspaceScope(keyspaceID),
 				BarrierId:     "b1",
 				BarrierTs:     15,
 				TtlSeconds:    3600,
@@ -229,7 +268,7 @@ func TestGCOperations(t *testing.T) {
 			// Successfully sets a GC barrier with infinite ttl.
 			req = &pdpb.SetGCBarrierRequest{
 				Header:        header,
-				KeyspaceScope: &pdpb.KeyspaceScope{KeyspaceId: keyspaceID},
+				KeyspaceScope: makeKeyspaceScope(keyspaceID),
 				BarrierId:     "b2",
 				BarrierTs:     14,
 				TtlSeconds:    math.MaxInt64,
@@ -245,7 +284,7 @@ func TestGCOperations(t *testing.T) {
 			// Failed to set a GC barrier (below txn safe point)
 			req = &pdpb.SetGCBarrierRequest{
 				Header:        header,
-				KeyspaceScope: &pdpb.KeyspaceScope{KeyspaceId: keyspaceID},
+				KeyspaceScope: makeKeyspaceScope(keyspaceID),
 				BarrierId:     "b3",
 				BarrierTs:     9,
 				TtlSeconds:    3600,
@@ -261,7 +300,7 @@ func TestGCOperations(t *testing.T) {
 			// Delete a GC barrier
 			req := &pdpb.DeleteGCBarrierRequest{
 				Header:        header,
-				KeyspaceScope: &pdpb.KeyspaceScope{KeyspaceId: keyspaceID},
+				KeyspaceScope: makeKeyspaceScope(keyspaceID),
 				BarrierId:     "b2",
 			}
 			resp, err := grpcPDClient.DeleteGCBarrier(ctx, req)
@@ -277,7 +316,7 @@ func TestGCOperations(t *testing.T) {
 			// Advance txn safe point reports the reason of being blocked
 			req := &pdpb.AdvanceTxnSafePointRequest{
 				Header:        header,
-				KeyspaceScope: &pdpb.KeyspaceScope{KeyspaceId: keyspaceID},
+				KeyspaceScope: makeKeyspaceScope(keyspaceID),
 				Target:        20,
 			}
 			resp, err := grpcPDClient.AdvanceTxnSafePoint(ctx, req)
@@ -293,13 +332,13 @@ func TestGCOperations(t *testing.T) {
 			// Get GC states
 			req := &pdpb.GetGCStateRequest{
 				Header:        header,
-				KeyspaceScope: &pdpb.KeyspaceScope{KeyspaceId: keyspaceID},
+				KeyspaceScope: makeKeyspaceScope(keyspaceID),
 			}
 			resp, err := grpcPDClient.GetGCState(ctx, req)
 			re.NoError(err)
 			re.NotNil(resp.Header)
 			re.Nil(resp.Header.Error)
-			re.Equal(keyspaceID, resp.GetGcState().KeyspaceScope.KeyspaceId)
+			re.Equal(keyspaceID, resp.GetGcState().GetKeyspaceScope().GetKeyspaceId())
 			re.Equal(keyspaceID != constant.NullKeyspaceID, resp.GetGcState().GetIsKeyspaceLevelGc())
 			re.Equal(uint64(15), resp.GetGcState().GetTxnSafePoint())
 			re.Equal(uint64(8), resp.GetGcState().GetGcSafePoint())
@@ -319,7 +358,7 @@ func TestGCOperations(t *testing.T) {
 	}
 
 	testInKeyspace(constant.NullKeyspaceID)
-	testInKeyspace(ks1.Id)
+	testInKeyspace(ks1.GetId())
 
 	req := &pdpb.GetAllKeyspacesGCStatesRequest{
 		Header: header,
@@ -332,16 +371,16 @@ func TestGCOperations(t *testing.T) {
 	re.Len(resp.GetGcStates(), 3)
 	receivedKeyspaceIDs := make([]uint32, 0, 3)
 	for _, gcState := range resp.GetGcStates() {
-		receivedKeyspaceIDs = append(receivedKeyspaceIDs, gcState.KeyspaceScope.KeyspaceId)
+		receivedKeyspaceIDs = append(receivedKeyspaceIDs, gcState.GetKeyspaceScope().GetKeyspaceId())
 	}
 	slices.Sort(receivedKeyspaceIDs)
 
 	// Expected keyspace IDs differ between NextGen and Classic
 	var expectedKeyspaceIDs []uint32
 	if kerneltype.IsNextGen() {
-		expectedKeyspaceIDs = []uint32{ks1.Id, constant.SystemKeyspaceID, constant.NullKeyspaceID}
+		expectedKeyspaceIDs = []uint32{ks1.GetId(), constant.SystemKeyspaceID, constant.NullKeyspaceID}
 	} else {
-		expectedKeyspaceIDs = []uint32{0, ks1.Id, constant.NullKeyspaceID}
+		expectedKeyspaceIDs = []uint32{0, ks1.GetId(), constant.NullKeyspaceID}
 	}
 	re.Equal(expectedKeyspaceIDs, receivedKeyspaceIDs)
 
@@ -352,10 +391,10 @@ func TestGCOperations(t *testing.T) {
 		if kerneltype.IsNextGen() {
 			defaultKeyspaceID = constant.SystemKeyspaceID
 		}
-		if gcState.KeyspaceScope.KeyspaceId == defaultKeyspaceID {
+		if gcState.GetKeyspaceScope().GetKeyspaceId() == defaultKeyspaceID {
 			continue
 		}
-		re.Equal(gcState.KeyspaceScope.KeyspaceId != constant.NullKeyspaceID, gcState.GetIsKeyspaceLevelGc())
+		re.Equal(gcState.GetKeyspaceScope().GetKeyspaceId() != constant.NullKeyspaceID, gcState.GetIsKeyspaceLevelGc())
 		re.Equal(uint64(15), gcState.GetTxnSafePoint())
 		re.Equal(uint64(8), gcState.GetGcSafePoint())
 		re.Len(gcState.GetGcBarriers(), 1)
@@ -375,18 +414,18 @@ func TestGCOperations(t *testing.T) {
 	}
 
 	// Global GC Barrier API
-	for _, keyspaceID := range []uint32{constant.NullKeyspaceID, ks1.Id} {
+	for _, keyspaceID := range []uint32{constant.NullKeyspaceID, ks1.GetId()} {
 		// Cleanup before test
 		req1 := &pdpb.GetGCStateRequest{
 			Header:        header,
-			KeyspaceScope: &pdpb.KeyspaceScope{KeyspaceId: keyspaceID},
+			KeyspaceScope: makeKeyspaceScope(keyspaceID),
 		}
 		resp1, err := grpcPDClient.GetGCState(ctx, req1)
 		re.NoError(err)
 		for _, state := range resp1.GcState.GcBarriers {
 			req := &pdpb.DeleteGCBarrierRequest{
 				Header:        header,
-				KeyspaceScope: &pdpb.KeyspaceScope{KeyspaceId: keyspaceID},
+				KeyspaceScope: makeKeyspaceScope(keyspaceID),
 				BarrierId:     state.BarrierId,
 			}
 			_, err := grpcPDClient.DeleteGCBarrier(ctx, req)
@@ -429,6 +468,87 @@ func TestGCOperations(t *testing.T) {
 		re.Equal(math.MaxInt64, int(resp.GetNewBarrierInfo().GetTtlSeconds()))
 	}
 
+	for _, keyspaceID := range []uint32{constant.NullKeyspaceID, ks1.GetId()} {
+		resp, err := grpcPDClient.GetGCState(ctx, &pdpb.GetGCStateRequest{
+			Header:                  header,
+			KeyspaceScope:           makeKeyspaceScope(keyspaceID),
+			ExcludeGcBarriers:       true,
+			IncludeGlobalGcBarriers: true,
+		})
+		re.NoError(err)
+		re.Len(resp.GetGlobalGcBarriers().GetBarriers(), 2)
+		re.Empty(resp.GetGcState().GetGcBarriers())
+
+		barriers := slices.Clone(resp.GetGlobalGcBarriers().GetBarriers())
+		slices.SortFunc(barriers, func(a, b *pdpb.GlobalGCBarrierInfo) int {
+			if a.GetBarrierId() < b.GetBarrierId() {
+				return -1
+			}
+			if a.GetBarrierId() > b.GetBarrierId() {
+				return 1
+			}
+			return 0
+		})
+		re.Equal("b1", barriers[0].GetBarrierId())
+		re.Equal(uint64(20), barriers[0].GetBarrierTs())
+		re.GreaterOrEqual(barriers[0].GetTtlSeconds(), int64(3595))
+		re.LessOrEqual(barriers[0].GetTtlSeconds(), int64(3600))
+		re.Equal("b2", barriers[1].GetBarrierId())
+		re.Equal(uint64(24), barriers[1].GetBarrierTs())
+		re.Equal(int64(math.MaxInt64), barriers[1].GetTtlSeconds())
+	}
+
+	localObserver, err := grpcPDClient.SetGCBarrier(ctx, &pdpb.SetGCBarrierRequest{
+		Header:        header,
+		KeyspaceScope: makeKeyspaceScope(constant.NullKeyspaceID),
+		BarrierId:     "local-observer",
+		BarrierTs:     26,
+		TtlSeconds:    math.MaxInt64,
+	})
+	re.NoError(err)
+	re.Nil(localObserver.GetHeader().GetError())
+	localAndGlobalResp, err := grpcPDClient.GetGCState(ctx, &pdpb.GetGCStateRequest{
+		Header:                  header,
+		KeyspaceScope:           makeKeyspaceScope(constant.NullKeyspaceID),
+		IncludeGlobalGcBarriers: true,
+	})
+	re.NoError(err)
+	re.Len(localAndGlobalResp.GetGlobalGcBarriers().GetBarriers(), 2)
+	re.Len(localAndGlobalResp.GetGcState().GetGcBarriers(), 1)
+	re.Equal("local-observer", localAndGlobalResp.GetGcState().GetGcBarriers()[0].GetBarrierId())
+
+	_, err = leaderServer.GetServer().GetGCStateManager().SetGlobalGCBarrier(
+		ctx,
+		"expired",
+		25,
+		time.Second,
+		time.Now().Add(-2*time.Second),
+	)
+	re.NoError(err)
+	expiredResp, err := grpcPDClient.GetGCState(ctx, &pdpb.GetGCStateRequest{
+		Header:                  header,
+		KeyspaceScope:           makeKeyspaceScope(constant.NullKeyspaceID),
+		ExcludeGcBarriers:       true,
+		IncludeGlobalGcBarriers: true,
+	})
+	re.NoError(err)
+	barriersWithExpired := slices.Clone(expiredResp.GetGlobalGcBarriers().GetBarriers())
+	slices.SortFunc(barriersWithExpired, func(a, b *pdpb.GlobalGCBarrierInfo) int {
+		if a.GetBarrierId() < b.GetBarrierId() {
+			return -1
+		}
+		if a.GetBarrierId() > b.GetBarrierId() {
+			return 1
+		}
+		return 0
+	})
+	re.Len(barriersWithExpired, 3)
+	re.Equal("b1", barriersWithExpired[0].GetBarrierId())
+	re.Equal("b2", barriersWithExpired[1].GetBarrierId())
+	re.Equal("expired", barriersWithExpired[2].GetBarrierId())
+	re.Equal(uint64(25), barriersWithExpired[2].GetBarrierTs())
+	re.Zero(barriersWithExpired[2].GetTtlSeconds())
+
 	{
 		req := &pdpb.GetAllKeyspacesGCStatesRequest{
 			Header:                  header,
@@ -456,11 +576,11 @@ func TestGCOperations(t *testing.T) {
 		re.Contains(resp.Header.Error.Message, "ErrGlobalGCBarrierTSBehindTxnSafePoint")
 	}
 
-	for _, keyspaceID := range []uint32{constant.NullKeyspaceID, ks1.Id} {
+	for _, keyspaceID := range []uint32{constant.NullKeyspaceID, ks1.GetId()} {
 		// Advance txn safe point reports the reason of being blocked
 		req := &pdpb.AdvanceTxnSafePointRequest{
 			Header:        header,
-			KeyspaceScope: &pdpb.KeyspaceScope{KeyspaceId: keyspaceID},
+			KeyspaceScope: makeKeyspaceScope(keyspaceID),
 			Target:        30,
 		}
 		resp, err := grpcPDClient.AdvanceTxnSafePoint(ctx, req)
@@ -489,11 +609,11 @@ func TestGCOperations(t *testing.T) {
 		re.LessOrEqual(resp.GetDeletedBarrierInfo().GetTtlSeconds(), int64(3600))
 	}
 
-	for _, keyspaceID := range []uint32{constant.NullKeyspaceID, ks1.Id} {
+	for _, keyspaceID := range []uint32{constant.NullKeyspaceID, ks1.GetId()} {
 		// Advance txn safe point reports the reason of being blocked
 		req := &pdpb.AdvanceTxnSafePointRequest{
 			Header:        header,
-			KeyspaceScope: &pdpb.KeyspaceScope{KeyspaceId: keyspaceID},
+			KeyspaceScope: makeKeyspaceScope(keyspaceID),
 			Target:        30,
 		}
 		resp, err := grpcPDClient.AdvanceTxnSafePoint(ctx, req)
@@ -504,6 +624,63 @@ func TestGCOperations(t *testing.T) {
 		re.Equal(uint64(20), resp.GetOldTxnSafePoint())
 		re.Contains(resp.GetBlockerDescription(), "b2")
 	}
+}
+
+func TestGetGCStateGlobalBarriersReturnsReadSnapshot(t *testing.T) {
+	re := require.New(t)
+	cluster, req, cleanup := newGCStateLeaderTransitionCluster(t)
+	defer cleanup()
+
+	leaderServer := cluster.GetLeaderServer()
+	re.NotNil(leaderServer)
+	req.IncludeGlobalGcBarriers = true
+	manager := leaderServer.GetServer().GetGCStateManager()
+	_, err := manager.SetGlobalGCBarrier(
+		context.Background(),
+		"snapshot",
+		100,
+		time.Duration(math.MaxInt64),
+		time.Now(),
+	)
+	re.NoError(err)
+
+	point := enableBlockingFailpoint(re, postGetGCStateCallFailpoint)
+	defer point.releaseAndDisable(re)
+
+	type result struct {
+		resp *pdpb.GetGCStateResponse
+		err  error
+	}
+	resultCh := make(chan result, 1)
+	go func() {
+		resp, err := getGCStateFromAddr(context.Background(), re, leaderServer.GetAddr(), req)
+		resultCh <- result{resp: resp, err: err}
+	}()
+
+	point.wait(re, "after the combined GetGCState read and before response conversion")
+	_, err = manager.SetGlobalGCBarrier(
+		context.Background(),
+		"snapshot",
+		200,
+		time.Duration(math.MaxInt64),
+		time.Now(),
+	)
+	re.NoError(err)
+
+	point.releaseAndDisable(re)
+	select {
+	case res := <-resultCh:
+		re.NoError(res.err)
+		re.Len(res.resp.GetGlobalGcBarriers().GetBarriers(), 1)
+		re.Equal(uint64(100), res.resp.GetGlobalGcBarriers().GetBarriers()[0].GetBarrierTs())
+	case <-time.After(5 * time.Second):
+		re.FailNow("GetGCState did not return after releasing the failpoint")
+	}
+
+	freshResp, err := getGCStateFromAddr(context.Background(), re, leaderServer.GetAddr(), req)
+	re.NoError(err)
+	re.Len(freshResp.GetGlobalGcBarriers().GetBarriers(), 1)
+	re.Equal(uint64(200), freshResp.GetGlobalGcBarriers().GetBarriers()[0].GetBarrierTs())
 }
 
 func TestGetGCStateRejectsOldLeaderAfterTransfer(t *testing.T) {
@@ -668,9 +845,12 @@ func TestGetGCStateSlowPathReadsLatestStateIfLeaderLostBeforeRead(t *testing.T) 
 	oldLeader := leaderServer.GetConfig().Name
 	req.ExcludeGcBarriers = true
 
-	// Start with no local cache and stop immediately before the slow path. The
-	// request has already passed the initial server-side role check, but after
-	// the transfer the manager must bypass cache and continue with the IO read.
+	// Force a fast-path cache miss even if NextGen startup warmup has already
+	// populated null scope. The request still excludes barriers, and the hook
+	// below pauses after the server-side role check before the slow-path read.
+	const skipCacheFailpoint = "github.com/tikv/pd/pkg/gc/getGCStateSkipCache"
+	re.NoError(failpoint.Enable(skipCacheFailpoint, "return(true)"))
+	defer func() { re.NoError(failpoint.Disable(skipCacheFailpoint)) }()
 	point := enableBlockingFailpoint(re, getGCStateBeforeSlowPathFailpoint)
 	defer point.releaseAndDisable(re)
 
@@ -706,4 +886,140 @@ func TestGetGCStateSlowPathReadsLatestStateIfLeaderLostBeforeRead(t *testing.T) 
 	re.NoError(res.err)
 	re.Nil(res.resp.GetHeader().GetError())
 	re.Equal(uint64(20), res.resp.GetGcState().GetTxnSafePoint())
+}
+
+func TestGetGCStateLeaderTransferRetiresInFlightLoad(t *testing.T) {
+	re := require.New(t)
+	// Observe actual cache stores, including the initial NextGen warmup. Waiting
+	// for that warmup prevents it from racing with the later cache invalidation.
+	const publishedFailpoint = "github.com/tikv/pd/pkg/gc/onGCStateLoadPublished"
+	published := make(chan *gcmanager.GCStateManager, 16)
+	re.NoError(failpoint.EnableCall(publishedFailpoint, func(manager *gcmanager.GCStateManager, id uint32) {
+		if id == constant.NullKeyspaceID {
+			published <- manager
+		}
+	}))
+	defer func() { re.NoError(failpoint.Disable(publishedFailpoint)) }()
+	cluster, req, cleanup := newGCStateLeaderTransitionCluster(t)
+	defer cleanup()
+	oldLeader := cluster.GetLeaderServer()
+	oldManager := oldLeader.GetServer().GetGCStateManager()
+	newLeader := cluster.GetServer(cluster.GetFollower())
+	re.NotNil(newLeader)
+	if kerneltype.IsNextGen() {
+		select {
+		case manager := <-published:
+			re.Same(oldManager, manager)
+		case <-time.After(5 * time.Second):
+			t.Fatal("initial null-scope warmup did not publish")
+		}
+	}
+	_, err := oldManager.AdvanceTxnSafePoint(constant.NullKeyspaceID, 90, time.Now())
+	re.NoError(err)
+	_, _, err = oldManager.AdvanceGCSafePoint(constant.NullKeyspaceID, 70)
+	re.NoError(err)
+	// A rejected real write invalidates both cache paths. Merely forcing a
+	// fast-path miss would still allow the batch loader to find a cached value.
+	_, _, err = oldManager.AdvanceGCSafePoint(constant.NullKeyspaceID, 91)
+	re.Error(err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	read := make(chan struct{})
+	canceled := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	const readFailpoint = "github.com/tikv/pd/pkg/gc/afterGCStateLoadBatchRead"
+	re.NoError(failpoint.EnableCall(readFailpoint, func(loadCtx context.Context, manager *gcmanager.GCStateManager, ids []uint32) {
+		if manager != oldManager || !slices.Contains(ids, constant.NullKeyspaceID) {
+			return
+		}
+		close(read)
+		select {
+		case <-loadCtx.Done():
+			close(canceled)
+		case <-release:
+			return
+		case <-ctx.Done():
+			return
+		}
+		// Keep the successful, old storage result pending even after retirement,
+		// so the test can check joined readers and advance the new leader first.
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+	}))
+	defer func() { re.NoError(failpoint.Disable(readFailpoint)) }()
+	defer unblock()
+	joined := make(chan struct{}, 1)
+	const joinedFailpoint = "github.com/tikv/pd/pkg/gc/onGCStateLoadJoined"
+	re.NoError(failpoint.EnableCall(joinedFailpoint, func(id uint32) {
+		if id == constant.NullKeyspaceID {
+			joined <- struct{}{}
+		}
+	}))
+	defer func() { re.NoError(failpoint.Disable(joinedFailpoint)) }()
+	client, conn := testutil.MustNewGrpcClient(re, oldLeader.GetAddr())
+	defer conn.Close()
+	req.ExcludeGcBarriers = true
+	type result struct {
+		resp *pdpb.GetGCStateResponse
+		err  error
+	}
+	request := func(done chan<- result) {
+		resp, err := client.GetGCState(ctx, req)
+		done <- result{resp: resp, err: err}
+	}
+	wait := func(event <-chan struct{}, description string) {
+		t.Helper()
+		select {
+		case <-event:
+		case <-time.After(5 * time.Second):
+			t.Fatal(description)
+		}
+	}
+	assertRetired := func(done <-chan result) {
+		t.Helper()
+		select {
+		case result := <-done:
+			re.NoError(result.err)
+			re.NotNil(result.resp.GetHeader().GetError())
+			re.Contains(result.resp.GetHeader().GetError().GetMessage(), errs.ErrNotLeader.Error())
+			re.Nil(result.resp.GetGcState())
+		case <-time.After(5 * time.Second):
+			t.Fatal("old-generation reader did not exit after retirement")
+		}
+	}
+	owner := make(chan result, 1)
+	go request(owner)
+	wait(read, "cold batch did not finish its storage read")
+	waiter := make(chan result, 1)
+	go request(waiter)
+	wait(joined, "foreground reader did not join the in-flight batch")
+	re.NoError(oldLeader.ResignLeaderWithRetry())
+	wait(canceled, "RaftCluster.Stop did not cancel the old generation")
+	assertRetired(waiter)
+	// Check the specific successor: the retired node is deliberately still
+	// draining its old load and may not yet report the successor's leadership.
+	re.Eventually(newLeader.IsLeader, 15*time.Second, 10*time.Millisecond)
+	_, err = newLeader.GetServer().GetGCStateManager().AdvanceTxnSafePoint(constant.NullKeyspaceID, 120, time.Now())
+	re.NoError(err)
+	_, _, err = newLeader.GetServer().GetGCStateManager().AdvanceGCSafePoint(constant.NullKeyspaceID, 100)
+	re.NoError(err)
+	unblock()
+	assertRetired(owner)
+	re.Equal(newLeader.GetConfig().Name, cluster.WaitLeader())
+	// Stop must drain the old loader before we inspect the complete publication
+	// history; a fresh value on another node alone would miss a stale old store.
+	re.Nil(oldLeader.GetRaftCluster())
+	for len(published) > 0 {
+		re.NotSame(oldManager, <-published, "retired loader published its old safe-point pair")
+	}
+	fresh, err := getGCStateFromAddr(ctx, re, newLeader.GetAddr(), req)
+	re.NoError(err)
+	re.Nil(fresh.GetHeader().GetError())
+	re.Equal(uint64(120), fresh.GetGcState().GetTxnSafePoint())
+	re.Equal(uint64(100), fresh.GetGcState().GetGcSafePoint())
 }

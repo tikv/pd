@@ -15,7 +15,7 @@
 package http
 
 import (
-	"fmt"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -173,7 +173,7 @@ func (ri *requestInfo) WithTargetURL(targetURL string) *requestInfo {
 }
 
 func (ri *requestInfo) getURL(addr string) string {
-	return fmt.Sprintf("%s%s", addr, ri.uri)
+	return strings.TrimRight(addr, "/") + ri.uri
 }
 
 func (ri *requestInfo) logFields() []zap.Field {

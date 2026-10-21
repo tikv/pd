@@ -16,20 +16,25 @@ package kv
 
 import (
 	"context"
+	"slices"
 	"sort"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.etcd.io/etcd/api/v3/etcdserverpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/goleak"
+	"google.golang.org/grpc"
 
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 func TestEtcd(t *testing.T) {
@@ -42,7 +47,16 @@ func TestEtcd(t *testing.T) {
 	testRange(re, kv)
 	testSaveMultiple(re, kv, 20)
 	testLoadConflict(re, kv)
+	testRevisionLoadConflict(re, kv)
+	testRunInTxnWithConditions(re, kv)
 	testRawTxn(re, kv)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	re.ErrorIs(kv.RunInTxn(ctx, func(txn Txn) error {
+		_, err := txn.Load("canceled-key")
+		return err
+	}), context.Canceled)
 }
 
 func TestLevelDB(t *testing.T) {
@@ -93,7 +107,7 @@ func testRange(re *require.Assertions, kv Base) {
 		err := kv.Save(k, k)
 		re.NoError(err)
 	}
-	sortedKeys := append(keys[:0:0], keys...)
+	sortedKeys := slices.Clone(keys)
 	sort.Strings(sortedKeys)
 
 	testCases := []struct {
@@ -169,6 +183,59 @@ func testLoadConflict(re *require.Assertions, kv Base) {
 	}
 	// When other writer exists, loader must error.
 	re.Error(kv.RunInTxn(context.Background(), conflictLoader))
+}
+
+func testRunInTxnWithConditions(re *require.Assertions, kv *etcdKVBase) {
+	const (
+		conditionKey = "conditional-txn-guard"
+		dataKey      = "conditional-txn-data"
+	)
+	re.NoError(kv.Save(conditionKey, "current"))
+	re.NoError(kv.RunInTxnWithConditions(
+		context.Background(),
+		[]clientv3.Cmp{clientv3.Compare(clientv3.Value(conditionKey), "=", "current")},
+		func(txn Txn) error {
+			return txn.Save(dataKey, "committed")
+		},
+	))
+	value, err := kv.Load(dataKey)
+	re.NoError(err)
+	re.Equal("committed", value)
+
+	err = kv.RunInTxnWithConditions(
+		context.Background(),
+		[]clientv3.Cmp{clientv3.Compare(clientv3.Value(conditionKey), "=", "stale")},
+		func(txn Txn) error {
+			return txn.Save(dataKey, "must-not-commit")
+		},
+	)
+	re.ErrorIs(err, errs.ErrEtcdTxnConflict)
+	value, err = kv.Load(dataKey)
+	re.NoError(err)
+	re.Equal("committed", value)
+}
+
+func testRevisionLoadConflict(re *require.Assertions, kv *etcdKVBase) {
+	const (
+		key       = "revision-load-key"
+		resultKey = "revision-load-result"
+	)
+	re.NoError(kv.Save(key, "value"))
+	err := kv.RunInTxn(context.Background(), func(txn Txn) error {
+		value, err := txn.(RevisionTxn).LoadWithRevision(key)
+		if err != nil {
+			return err
+		}
+		re.Equal("value", value)
+		// Rewriting the same value changes only the revision. A revision-based
+		// comparison must still reject the stale transaction.
+		re.NoError(kv.Save(key, value))
+		return txn.Save(resultKey, "must-not-commit")
+	})
+	re.ErrorIs(err, errs.ErrEtcdTxnConflict)
+	value, err := kv.Load(resultKey)
+	re.NoError(err)
+	re.Empty(value)
 }
 
 // nolint:unparam
@@ -405,4 +472,117 @@ func testRawTxn(re *require.Assertions, kv interface {
 		{Key: "txn-k1", CmpType: RawTxnCmpEqual, Value: "v0"},
 		{Key: "txn-k2", CmpType: RawTxnCmpEqual, Value: "v0"},
 	}, false)
+}
+
+func TestRawTxnWithContext(t *testing.T) {
+	started := make(chan struct{}, 1)
+	blocked := false
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, &etcdutil.TestEtcdClusterOptions{
+		ClientCfgModifier: func(config *clientv3.Config) {
+			config.DialOptions = append(config.DialOptions, grpc.WithChainUnaryInterceptor(
+				func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn,
+					invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+					if method != "/etcdserverpb.KV/Txn" || !blocked {
+						return invoker(ctx, method, req, reply, cc, opts...)
+					}
+					select {
+					case started <- struct{}{}:
+					default:
+					}
+					<-ctx.Done()
+					return ctx.Err()
+				},
+			))
+		},
+	})
+	defer clean()
+	re := require.New(t)
+	base := NewEtcdKVBase(client)
+	var capable RawTxnWithContextCapable = base
+	re.NoError(base.Save("context-key", "value"))
+	re.NoError(base.Save("context-empty", ""))
+	response, err := capable.CreateRawTxnWithContext(context.Background()).Then(
+		RawTxnOp{Key: "context-key", OpType: RawTxnOpGet},
+		RawTxnOp{Key: "context-missing", OpType: RawTxnOpGet},
+		RawTxnOp{Key: "context-empty", OpType: RawTxnOpGet},
+	).Commit()
+	re.NoError(err)
+	re.True(response.Succeeded)
+	re.Len(response.Responses, 3)
+	re.Equal([]KeyValuePair{{Key: "context-key", Value: "value"}}, response.Responses[0].KeyValuePairs)
+	re.Empty(response.Responses[1].KeyValuePairs)
+	re.Equal([]KeyValuePair{{Key: "context-empty", Value: ""}}, response.Responses[2].KeyValuePairs)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = capable.CreateRawTxnWithContext(ctx).Then(RawTxnOp{Key: "context-key", OpType: RawTxnOpGet}).Commit()
+	re.ErrorIs(err, context.Canceled)
+
+	blocked = true
+	ctx, cancel = context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := capable.CreateRawTxnWithContext(ctx).Then(RawTxnOp{Key: "context-key", OpType: RawTxnOpGet}).Commit()
+		done <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("read did not start")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		re.ErrorIs(err, context.Canceled)
+	case <-time.After(3 * time.Second):
+		t.Fatal("read ignored cancellation")
+	}
+}
+
+func TestRawTxnWithContextInvalidResponse(t *testing.T) {
+	var corrupt func(*etcdserverpb.TxnResponse)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, &etcdutil.TestEtcdClusterOptions{
+		ClientCfgModifier: func(config *clientv3.Config) {
+			config.DialOptions = append(config.DialOptions, grpc.WithChainUnaryInterceptor(
+				func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn,
+					invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+					err := invoker(ctx, method, req, reply, cc, opts...)
+					if err == nil && method == "/etcdserverpb.KV/Txn" && corrupt != nil {
+						corrupt(reply.(*etcdserverpb.TxnResponse))
+					}
+					return err
+				},
+			))
+		},
+	})
+	defer clean()
+	base := NewEtcdKVBase(client)
+	require.NoError(t, base.Save("response-key", "value"))
+	cases := []struct {
+		name    string
+		corrupt func(*etcdserverpb.TxnResponse)
+	}{
+		{"missing", func(resp *etcdserverpb.TxnResponse) { resp.Responses = nil }},
+		{"extra", func(resp *etcdserverpb.TxnResponse) { resp.Responses = append(resp.Responses, resp.Responses[0]) }},
+		{"wrong type", func(resp *etcdserverpb.TxnResponse) {
+			resp.Responses[0].Response = &etcdserverpb.ResponseOp_ResponsePut{ResponsePut: &etcdserverpb.PutResponse{}}
+		}},
+	}
+	for _, branch := range []string{"then", "else"} {
+		for _, tc := range cases {
+			t.Run(branch+"/"+tc.name, func(t *testing.T) {
+				corrupt = tc.corrupt
+				txn := base.CreateRawTxnWithContext(context.Background())
+				op := RawTxnOp{Key: "response-key", OpType: RawTxnOpGet}
+				if branch == "then" {
+					txn = txn.Then(op)
+				} else {
+					txn = txn.If(RawTxnCondition{Key: "response-key", CmpType: RawTxnCmpNotExists}).Else(op)
+				}
+				_, err := txn.Commit()
+				require.ErrorIs(t, err, errs.ErrEtcdTxnResponse)
+			})
+		}
+	}
 }
