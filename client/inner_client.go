@@ -55,6 +55,8 @@ type innerClient struct {
 
 	// For internal usage.
 	updateTokenConnectionCh chan struct{}
+	tokenConnectionMu       sync.Mutex
+	tokenConnectionCancel   context.CancelFunc
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -210,14 +212,15 @@ func (c *innerClient) resetTSOClientLocked(mode pdpb.ServiceMode) {
 func (c *innerClient) resetResourceManagerDiscoveryLocked(mode pdpb.ServiceMode) {
 	switch mode {
 	case pdpb.ServiceMode_PD_SVC_MODE:
-		if c.resourceManagerDiscovery != nil {
-			c.resourceManagerDiscovery.Close()
-			c.resourceManagerDiscovery = nil
+		if rmDiscovery := c.resourceManagerDiscovery.Load(); rmDiscovery != nil {
+			rmDiscovery.Close()
 		}
+		c.resourceManagerDiscovery.Store(nil)
 	case pdpb.ServiceMode_API_SVC_MODE:
-		c.resourceManagerDiscovery = sd.NewResourceManagerDiscovery(
+		rmDiscovery := sd.NewResourceManagerDiscovery(
 			c.ctx, c.serviceDiscovery.GetClusterID(), c, c.tlsCfg, c.option, c.scheduleUpdateTokenConnection)
-		c.resourceManagerDiscovery.Init()
+		c.resourceManagerDiscovery.Store(rmDiscovery)
+		rmDiscovery.Init()
 	case pdpb.ServiceMode_UNKNOWN_SVC_MODE:
 		log.Warn("[pd] intend to switch to unknown service mode, just return")
 		return
@@ -227,15 +230,52 @@ func (c *innerClient) resetResourceManagerDiscoveryLocked(mode pdpb.ServiceMode)
 func (c *innerClient) getResourceManagerDiscovery() *sd.ResourceManagerDiscovery {
 	c.RLock()
 	defer c.RUnlock()
-	return c.resourceManagerDiscovery
+	return c.resourceManagerDiscovery.Load()
 }
 
+// scheduleUpdateTokenConnection asks the token dispatcher to reconnect to
+// the current endpoint. It is used by the RM discovery reset path, which
+// has already repointed (or cleared) the RM connection, so the active
+// stream must be interrupted; the dispatcher then re-resolves the endpoint.
 func (c *innerClient) scheduleUpdateTokenConnection(string) error {
+	c.cancelTokenConnection()
 	select {
 	case c.updateTokenConnectionCh <- struct{}{}:
 	default:
 	}
 	return nil
+}
+
+// onPDLeaderChanged is the PD service-discovery leader callback. It decides
+// whether a token-connection update is needed after a PD leader switch:
+// while the client serves token streams from the PD-provided resource
+// manager the target has moved, so the in-flight stream is canceled and a
+// reconnect is scheduled. When a standalone resource-manager connection is
+// in use the token target is unchanged, so neither is done. It reads the
+// lock-free RM discovery pointer so it is safe to run while the caller
+// holds the service-mode write lock (setServiceMode -> TSO Setup ->
+// CheckMemberChanged -> switchLeader).
+func (c *innerClient) onPDLeaderChanged(string) error {
+	rmDiscovery := c.resourceManagerDiscovery.Load()
+	if rmDiscovery != nil && rmDiscovery.GetConn() != nil {
+		return nil
+	}
+	c.cancelTokenConnection()
+	select {
+	case c.updateTokenConnectionCh <- struct{}{}:
+	default:
+	}
+	return nil
+}
+
+func (c *innerClient) cancelTokenConnection() {
+	// Interrupt an in-flight request so the dispatcher can reconnect to the
+	// current endpoint instead of waiting on the stale stream.
+	c.tokenConnectionMu.Lock()
+	if c.tokenConnectionCancel != nil {
+		c.tokenConnectionCancel()
+	}
+	c.tokenConnectionMu.Unlock()
 }
 
 type tsoProvider int
@@ -287,7 +327,7 @@ func (c *innerClient) setup() error {
 	}
 
 	// Register callbacks
-	c.serviceDiscovery.AddLeaderSwitchedCallback(c.scheduleUpdateTokenConnection)
+	c.serviceDiscovery.AddLeaderSwitchedCallback(c.onPDLeaderChanged)
 
 	// Create dispatchers
 	c.createTokenDispatcher()
@@ -365,8 +405,8 @@ func (c *innerClient) resourceManagerErrorHandler(err error) {
 	c.RLock()
 	defer c.RUnlock()
 	log.Warn("[resource-manager] resource manager error", zap.Error(err))
-	if c.resourceManagerDiscovery != nil {
-		c.resourceManagerDiscovery.ScheduleUpdateServiceURL()
+	if rmDiscovery := c.resourceManagerDiscovery.Load(); rmDiscovery != nil {
+		rmDiscovery.ScheduleUpdateServiceURL()
 	}
 }
 

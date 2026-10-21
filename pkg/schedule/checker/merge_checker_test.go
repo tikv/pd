@@ -36,6 +36,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -218,7 +219,7 @@ func (suite *mergeCheckerTestSuite) TestBasic() {
 		ID:       "test",
 		Labels:   []labeler.RegionLabel{{Key: mergeOptionLabel, Value: mergeOptionValueDeny}},
 		RuleType: labeler.KeyRange,
-		Data:     makeKeyRanges("", "74"),
+		Data:     keyutil.BuildKeyRangeMaps("", "74"),
 	})
 	re.NoError(err)
 	ops = suite.mc.Check(suite.regions[0])
@@ -466,6 +467,29 @@ func (suite *mergeCheckerTestSuite) TestMatchPeers() {
 }
 
 func (suite *mergeCheckerTestSuite) TestStoreLimitWithMerge() {
+	testCases := []struct {
+		name string
+		size int64
+		keys int64
+		// acceptedOps is the number of accepted operators before store limit rejects the next one.
+		// 0 means the operators are never throttled.
+		acceptedOps int
+	}{
+		// An empty region (size <= 1MB and keys == 0) has no store limit cost.
+		{name: "empty region", size: 1, keys: 0},
+		// A region with size <= 1MB but keys > 0 still has data and is throttled.
+		{name: "small region with keys", size: 1, keys: 1, acceptedOps: 5},
+		// The size of Region is more than 1MB but no more than 20MB.
+		{name: "small region", size: 2, keys: 2, acceptedOps: 5},
+	}
+	for _, testCase := range testCases {
+		suite.Run(testCase.name, func() {
+			suite.checkStoreLimitWithMerge(testCase.size, testCase.keys, testCase.acceptedOps)
+		})
+	}
+}
+
+func (suite *mergeCheckerTestSuite) checkStoreLimitWithMerge(size, keys int64, acceptedOps int) {
 	re := suite.Require()
 	cfg := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, cfg)
@@ -498,14 +522,20 @@ func (suite *mergeCheckerTestSuite) TestStoreLimitWithMerge() {
 			{Id: 111, StoreId: 6},
 		}),
 		core.WithLeader(&metapb.Peer{Id: 109, StoreId: 2}),
+		core.SetApproximateSize(size),
+		core.SetApproximateKeys(keys),
 	)
 
 	// set to a small rate to reduce unstable possibility.
 	tc.SetAllStoresLimit(storelimit.AddPeer, 0.0000001)
 	tc.SetAllStoresLimit(storelimit.RemovePeer, 0.0000001)
 	tc.PutRegion(regions[2])
-	// The size of Region is less or equal than 1MB.
-	for range 50 {
+
+	rounds := acceptedOps
+	if rounds == 0 {
+		rounds = 50
+	}
+	for range rounds {
 		ops := mc.Check(regions[2])
 		re.NotNil(ops)
 		re.True(oc.AddOperator(ops...))
@@ -513,21 +543,7 @@ func (suite *mergeCheckerTestSuite) TestStoreLimitWithMerge() {
 			oc.RemoveOperator(op, operator.ExceedStoreLimit)
 		}
 	}
-	regions[2] = regions[2].Clone(
-		core.SetApproximateSize(2),
-		core.SetApproximateKeys(2),
-	)
-	tc.PutRegion(regions[2])
-	// The size of Region is more than 1MB but no more than 20MB.
-	for range 5 {
-		ops := mc.Check(regions[2])
-		re.NotNil(ops)
-		re.True(oc.AddOperator(ops...))
-		for _, op := range ops {
-			oc.RemoveOperator(op, operator.ExceedStoreLimit)
-		}
-	}
-	{
+	if acceptedOps > 0 {
 		ops := mc.Check(regions[2])
 		re.NotNil(ops)
 		re.False(oc.AddOperator(ops...))
@@ -565,14 +581,6 @@ func (suite *mergeCheckerTestSuite) TestCache() {
 	time.Sleep(time.Second)
 	ops = suite.mc.Check(suite.regions[1])
 	re.NotNil(ops)
-}
-
-func makeKeyRanges(keys ...string) []any {
-	var res []any
-	for i := 0; i < len(keys); i += 2 {
-		res = append(res, map[string]any{"start_key": keys[i], "end_key": keys[i+1]})
-	}
-	return res
 }
 
 func newRegionInfo(id uint64, startKey, endKey string, size, keys int64, leader []uint64, peers ...[]uint64) *core.RegionInfo {

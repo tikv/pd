@@ -24,6 +24,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -79,8 +80,7 @@ func TestMain(m *testing.M) {
 
 func TestStoreHeartbeat(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	opt.GetScheduleConfig().StoreLimitVersion = "v2"
@@ -214,10 +214,30 @@ func TestStoreHeartbeat(t *testing.T) {
 	re.Equal(uint64(1), storeStats[1][0].RegionID)
 }
 
+func TestStoreMutationsRejectTombstoneStore(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	store := newTestStores(1, "2.0.0")[0].Clone(core.SetStoreState(metapb.StoreState_Tombstone))
+	rc.PutStore(store)
+
+	// Unlike the mutation methods below, a heartbeat isn't a request a caller
+	// can retry or react to an error from -- TiKV just keeps sending them.
+	// Matching master's long-standing contract, it's treated as routine and
+	// silently no-op'd rather than rejected (see TestFilterUnhealthyStore).
+	request := &pdpb.StoreHeartbeatRequest{
+		Stats: &pdpb.StoreStats{StoreId: store.GetID()},
+	}
+	re.NoError(rc.HandleStoreHeartbeat(request, &pdpb.StoreHeartbeatResponse{}))
+	re.Error(rc.SetMinResolvedTS(store.GetID(), 1))
+}
+
 func TestFilterUnhealthyStore(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -254,8 +274,7 @@ func TestFilterUnhealthyStore(t *testing.T) {
 
 func TestSetOfflineStore(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -321,8 +340,7 @@ func TestSetOfflineStore(t *testing.T) {
 
 func TestSetOfflineWithReplica(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -359,8 +377,7 @@ func addEvictLeaderScheduler(cluster *RaftCluster, storeID uint64) (evictSchedul
 
 func TestSetOfflineStoreWithEvictLeader(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -387,8 +404,7 @@ func TestSetOfflineStoreWithEvictLeader(t *testing.T) {
 
 func TestRemoveTiFlashStore(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -471,8 +487,7 @@ func TestRemoveTiFlashStore(t *testing.T) {
 
 func TestForceBuryStore(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -490,8 +505,7 @@ func TestForceBuryStore(t *testing.T) {
 
 func TestReuseAddress(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -536,8 +550,7 @@ func getTestDeployPath(storeID uint64) string {
 
 func TestReusePeerAddress(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -674,8 +687,7 @@ func TestReusePeerAddress(t *testing.T) {
 
 func TestUpStore(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -719,8 +731,7 @@ func TestUpStore(t *testing.T) {
 
 func TestRemovingProcess(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -781,8 +792,7 @@ func TestRemovingProcess(t *testing.T) {
 
 func TestDeleteStoreUpdatesClusterVersion(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -817,8 +827,7 @@ func TestDeleteStoreUpdatesClusterVersion(t *testing.T) {
 
 func TestStoreClusterVersion(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -842,8 +851,7 @@ func TestStoreClusterVersion(t *testing.T) {
 
 func TestBucketCompatibility(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -905,8 +913,7 @@ func TestBucketCompatibility(t *testing.T) {
 
 func TestStaleBucketMeta(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -946,8 +953,7 @@ func TestStaleBucketMeta(t *testing.T) {
 
 func TestRegionHeartbeatHotStat(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -1011,8 +1017,7 @@ func TestRegionHeartbeatHotStat(t *testing.T) {
 
 func TestBucketHeartbeat(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -1072,8 +1077,7 @@ func TestBucketHeartbeat(t *testing.T) {
 
 func TestRegionHeartbeat(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -1329,8 +1333,7 @@ func TestRegionHeartbeat(t *testing.T) {
 
 func TestRegionFlowChanged(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -1357,8 +1360,7 @@ func TestRegionFlowChanged(t *testing.T) {
 
 func TestRegionSizeChanged(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -1407,8 +1409,7 @@ func TestRegionSizeChanged(t *testing.T) {
 
 func TestConcurrentReportBucket(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -1439,8 +1440,7 @@ func TestConcurrentReportBucket(t *testing.T) {
 
 func TestConcurrentRegionHeartbeat(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -1478,8 +1478,7 @@ func TestConcurrentRegionHeartbeat(t *testing.T) {
 
 func TestRegionLabelIsolationLevel(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	cfg := opt.GetReplicationConfig()
@@ -1590,8 +1589,7 @@ func heartbeatRegions(re *require.Assertions, cluster *RaftCluster, regions []*c
 
 func TestHeartbeatSplit(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -1634,8 +1632,7 @@ func TestHeartbeatSplit(t *testing.T) {
 
 func TestRegionSplitAndMerge(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -1672,8 +1669,7 @@ func TestRegionSplitAndMerge(t *testing.T) {
 
 func TestOfflineAndMerge(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -1741,8 +1737,7 @@ func TestOfflineAndMerge(t *testing.T) {
 
 func TestStoreConfigUpdate(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -1811,8 +1806,7 @@ func TestStoreConfigUpdate(t *testing.T) {
 
 func TestSyncConfigContext(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -1856,10 +1850,51 @@ func TestSyncConfigContext(t *testing.T) {
 	re.Less(time.Since(now), clientTimeout*2)
 }
 
+func TestStoreConfigSyncRetainsStoresAcrossFailures(t *testing.T) {
+	re := require.New(t)
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	tc := newTestCluster(t.Context(), re, opt)
+
+	unavailable := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "store unavailable", http.StatusServiceUnavailable)
+	}))
+	defer unavailable.Close()
+
+	var available atomic.Bool
+	available.Store(true)
+	fallback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if !available.Load() {
+			http.Error(w, "store unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		w.Write([]byte("{}"))
+	}))
+	defer fallback.Close()
+	tc.httpClient = fallback.Client()
+
+	stores := newTestStores(2, "2.0.0")
+	stores[0].GetMeta().StatusAddress = unavailable.Listener.Addr().String()
+	stores[1].GetMeta().StatusAddress = fallback.Listener.Addr().String()
+
+	synced, _, _ := tc.syncStoreConfig(stores)
+	re.True(synced)
+
+	// The worker reuses this slice after a successful fallback.
+	available.Store(false)
+	re.NotPanics(func() {
+		synced, _, _ = tc.syncStoreConfig(stores)
+	})
+	re.False(synced)
+
+	available.Store(true)
+	synced, _, _ = tc.syncStoreConfig(stores)
+	re.True(synced)
+}
+
 func TestStoreConfigSync(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -1902,8 +1937,7 @@ func TestStoreConfigSync(t *testing.T) {
 
 func TestUpdateStorePendingPeerCount(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -1945,8 +1979,7 @@ func TestUpdateStorePendingPeerCount(t *testing.T) {
 
 func TestCalculateStoreSize1(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -2038,8 +2071,7 @@ func TestCalculateStoreSize1(t *testing.T) {
 
 func TestRegionSizeCacheAcrossStoresAndRules(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -2096,8 +2128,7 @@ func TestRegionSizeCacheAcrossStoresAndRules(t *testing.T) {
 
 func TestStatsRegions(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
 	tc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
@@ -2122,8 +2153,7 @@ func TestStatsRegions(t *testing.T) {
 
 func TestCalculateStoreSize2(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -2237,8 +2267,7 @@ func TestStores(t *testing.T) {
 
 func Test(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	n, np := uint64(10), uint64(3)
 	regions := newTestRegions(n, n, np)
@@ -2249,7 +2278,7 @@ func Test(t *testing.T) {
 
 	for i := range n {
 		region := regions[i]
-		regionKey := []byte(fmt.Sprintf("a%20d", i+1))
+		regionKey := fmt.Appendf(nil, "a%20d", i+1)
 
 		re.Nil(cache.GetRegion(i))
 		re.Nil(cache.GetRegionByKey(regionKey))
@@ -2353,8 +2382,7 @@ func TestCheckStaleRegion(t *testing.T) {
 
 func TestAwakenStore(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -2407,8 +2435,7 @@ func TestAwakenStore(t *testing.T) {
 
 func TestUpdateAndDeleteLabel(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -2607,8 +2634,8 @@ func newTestRegions(n, m, np uint64) []*core.RegionInfo {
 		region := &metapb.Region{
 			Id:          i,
 			Peers:       peers,
-			StartKey:    []byte(fmt.Sprintf("a%20d", i+1)),
-			EndKey:      []byte(fmt.Sprintf("a%20d", i+2)),
+			StartKey:    fmt.Appendf(nil, "a%20d", i+1),
+			EndKey:      fmt.Appendf(nil, "a%20d", i+2),
 			RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 2},
 		}
 		regions = append(regions, core.NewRegionInfo(region, peers[0], core.SetApproximateSize(100), core.SetApproximateKeys(1000)))
@@ -2619,8 +2646,8 @@ func newTestRegions(n, m, np uint64) []*core.RegionInfo {
 func newTestRegionMeta(regionID uint64) *metapb.Region {
 	return &metapb.Region{
 		Id:          regionID,
-		StartKey:    []byte(fmt.Sprintf("%20d", regionID)),
-		EndKey:      []byte(fmt.Sprintf("%20d", regionID+1)),
+		StartKey:    fmt.Appendf(nil, "%20d", regionID),
+		EndKey:      fmt.Appendf(nil, "%20d", regionID+1),
 		RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1},
 	}
 }
@@ -3049,8 +3076,7 @@ func checkRegionAndOperator(re *require.Assertions, tc *testCluster, co *schedul
 
 func TestCheckRegion(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	tc, co, cleanup := prepare(nil, nil, nil, re)
 	hbStreams, opt := co.GetHeartbeatStreams(), tc.opt
@@ -3331,8 +3357,7 @@ func TestStoreLimitChangeRefreshLimiter(t *testing.T) {
 	for _, limitType := range []storelimit.Type{storelimit.AddPeer, storelimit.TransferLeaderIn} {
 		t.Run(limitType.String(), func(t *testing.T) {
 			re := require.New(t)
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
+			ctx := t.Context()
 
 			_, opt, err := newTestScheduleConfig()
 			re.NoError(err)
@@ -3376,8 +3401,7 @@ func TestAddStoreLimitUsesPersistedDefaultStoreLimit(t *testing.T) {
 	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, 15)
 	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.TransferLeaderIn, storelimit.Unlimited)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -3402,6 +3426,141 @@ func TestAddStoreLimitUsesPersistedDefaultStoreLimit(t *testing.T) {
 		Labels: []*metapb.StoreLabel{{Key: core.EngineKey, Value: core.EngineTiFlash}},
 	})
 	re.Equal(sc.StoreLimitConfig{AddPeer: 30, RemovePeer: 30, TransferLeaderIn: storelimit.Unlimited}, opt.GetScheduleConfig().StoreLimit[3])
+}
+
+func TestRemoveTombstoneRecordsKeepsStoreWhenLimitRemovalFails(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	storeStorage := storage.NewStorageWithMemoryBackend()
+	rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storeStorage)
+	store := newTestStores(1, "2.0.0")[0]
+	re.NoError(rc.setStore(store))
+	rc.AddStoreLimit(store.GetMeta())
+	tombstone := store.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
+	re.NoError(rc.setStore(tombstone))
+
+	rc.storage = &failingSaveConfigStorage{Storage: storeStorage}
+
+	re.Error(rc.RemoveTombStoneRecords())
+	re.NotNil(rc.GetStore(store.GetID()))
+	_, ok := opt.GetScheduleConfig().StoreLimit[store.GetID()]
+	re.True(ok)
+	loaded := &metapb.Store{}
+	loadedOK, err := storeStorage.LoadStoreMeta(store.GetID(), loaded)
+	re.NoError(err)
+	re.True(loadedOK)
+	re.Equal(metapb.StoreState_Tombstone, loaded.GetState())
+
+	rc.storage = storeStorage
+	re.NoError(rc.RemoveTombStoneRecords())
+	re.Nil(rc.GetStore(store.GetID()))
+	_, ok = opt.GetScheduleConfig().StoreLimit[store.GetID()]
+	re.False(ok)
+	loadedOK, err = storeStorage.LoadStoreMeta(store.GetID(), loaded)
+	re.NoError(err)
+	re.False(loadedOK)
+}
+
+// TestSetStoreLimitCannotRaceStoreDeletion guards against SetStoreLimit
+// racing deleteStore for the same store: pins deleteStore right after the
+// store's durable metadata and config-limit entries are gone but before it's
+// removed from StoresInfo, the exact window in which SetStoreLimit's guard
+// (store != nil && store.IsRemoved()) can still correctly reject it. This
+// deliberately never lets the race reach full removal (GetStore returning
+// nil) -- that's a separate, already-documented gap (the guard can't tell
+// "never registered" from "already gone" once nil), not what storeStateLock
+// closes here. Racing all the way to nil would make this test flaky in
+// exactly the way it's meant to rule out: the outcome would depend on
+// whether SetStoreLimit's check happens to run before or after
+// c.DeleteStore(store) actually executes.
+func TestSetStoreLimitCannotRaceStoreDeletion(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	storeStorage := storage.NewStorageWithMemoryBackend()
+	rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storeStorage)
+	store := newTestStores(1, "2.0.0")[0]
+	re.NoError(rc.setStore(store))
+	rc.AddStoreLimit(store.GetMeta())
+	tombstone := store.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
+	re.NoError(rc.setStore(tombstone))
+
+	storeID := store.GetID()
+	rc.storeStateLock.Lock(uint32(storeID))
+
+	beforeRemove := make(chan struct{})
+	releaseRemove := make(chan struct{})
+	const beforeRemoveFP = "github.com/tikv/pd/server/cluster/deleteStoreBeforeRemoveFromMap"
+	re.NoError(failpoint.EnableCall(beforeRemoveFP, func() {
+		close(beforeRemove)
+		<-releaseRemove
+	}))
+	defer func() { re.NoError(failpoint.Disable(beforeRemoveFP)) }()
+
+	deleteDone := make(chan error, 1)
+	go func() {
+		deleteDone <- rc.deleteStore(tombstone)
+	}()
+
+	select {
+	case <-beforeRemove:
+	case <-time.After(2 * time.Second):
+		t.Fatal("deleteStore did not reach the pre-removal barrier")
+	}
+
+	// SetStoreLimit's own storeStateLock.Lock() is the very next statement
+	// after this failpoint, with no test-side setup code in between, so
+	// waiting for it first absorbs all scheduling uncertainty -- the
+	// subsequent short window only needs to rule out "blocked on the lock",
+	// not "not yet scheduled" (see assertBlockedThenReleased's doc comment
+	// for the same reasoning).
+	beforeLock := make(chan struct{})
+	const beforeLockFP = "github.com/tikv/pd/server/cluster/setStoreLimitBeforeStateLock"
+	re.NoError(failpoint.EnableCall(beforeLockFP, func() { close(beforeLock) }))
+	defer func() { re.NoError(failpoint.Disable(beforeLockFP)) }()
+
+	setLimitDone := make(chan error, 1)
+	go func() {
+		setLimitDone <- rc.SetStoreLimit(storeID, storelimit.AddPeer, 60)
+	}()
+
+	select {
+	case <-beforeLock:
+	case <-time.After(2 * time.Second):
+		t.Fatal("SetStoreLimit did not reach its lock attempt")
+	}
+
+	select {
+	case err := <-setLimitDone:
+		t.Fatalf("setting a store limit completed before storeStateLock should have been available: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	// deleteStore is still parked at the barrier here (releaseRemove isn't
+	// closed yet), so the store is guaranteed to still be tombstoned-but-
+	// present in StoresInfo when SetStoreLimit's guard runs below -- not a
+	// race against when c.DeleteStore(store) happens to execute.
+	rc.storeStateLock.Unlock(uint32(storeID))
+	re.Error(<-setLimitDone)
+
+	close(releaseRemove)
+	re.NoError(<-deleteDone)
+
+	_, ok := opt.GetScheduleConfig().StoreLimit[storeID]
+	re.False(ok)
+}
+
+type failingSaveConfigStorage struct {
+	storage.Storage
+}
+
+func (*failingSaveConfigStorage) SaveConfig(any) error {
+	return errors.New("save config failed")
 }
 
 type blockingSaveConfigStorage struct {
@@ -3446,8 +3605,7 @@ func (s *blockingSaveConfigStorage) SaveConfig(cfg any) error {
 
 func TestScheduleConfigPersistenceIsSerialized(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -3556,6 +3714,340 @@ func TestInitSchedulersPreservesConcurrentScheduleUpdate(t *testing.T) {
 	re.NoError(err)
 	re.NoError(reloadedOpt.Reload(tc.GetStorage()))
 	re.Equal(float64(60), reloadedOpt.GetScheduleConfig().DefaultStoreLimit.AddPeer)
+}
+
+// TestSetAllStoresLimitDoesNotRestoreRemovedStoreLimit guards against
+// PersistOptions.GetStoreLimit's create-on-miss side effect leaking into
+// SetAllStoresLimit's refreshStoreRateLimit loop. A tombstoned store stays in
+// GetStoreIDs() until its final removal, so that loop still visits it after
+// RemoveStoreLimit has deliberately deleted its config entry; a mutating
+// lookup there would resurrect the entry. No concurrency is needed to trigger
+// this -- it's deterministic within a single goroutine.
+func TestSetAllStoresLimitDoesNotRestoreRemovedStoreLimit(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	backend := storage.NewStorageWithMemoryBackend()
+	rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, backend)
+
+	const storeID = uint64(1)
+	store := core.NewStoreInfo(&metapb.Store{Id: storeID, State: metapb.StoreState_Up})
+	rc.PutStore(store)
+	rc.AddStoreLimit(store.GetMeta())
+
+	rc.PutStore(store.Clone(core.SetStoreState(metapb.StoreState_Tombstone)))
+	re.NoError(rc.RemoveStoreLimit(storeID))
+	_, ok := opt.GetScheduleConfig().StoreLimit[storeID]
+	re.False(ok)
+
+	re.NoError(rc.SetAllStoresLimit(storelimit.AddPeer, 60))
+	_, ok = opt.GetScheduleConfig().StoreLimit[storeID]
+	re.False(ok)
+
+	re.NoError(opt.Persist(backend))
+	_, reloaded, err := newTestScheduleConfig()
+	re.NoError(err)
+	re.NoError(reloaded.Reload(backend))
+	_, ok = reloaded.GetScheduleConfig().StoreLimit[storeID]
+	re.False(ok)
+}
+
+// TestPutMetaStoreDoesNotRestoreRemovedStoreLimit guards against
+// AddStoreLimit recreating a StoreLimit entry for an already-tombstoned
+// store. PutMetaStore calls AddStoreLimit unconditionally after
+// putStoreImpl, and putStoreImpl never resurrects an existing store's
+// State/NodeState -- so a PutStore whose gRPC preflight raced a concurrent
+// BuryStore still lands on a store that's tombstoned by the time
+// AddStoreLimit runs. AddStoreLimit's own `store` argument is the caller's
+// request payload, not the authoritative post-putStoreImpl state, so it
+// can't be used to detect this; the fix re-fetches instead.
+func TestPutMetaStoreDoesNotRestoreRemovedStoreLimit(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	backend := storage.NewStorageWithMemoryBackend()
+	rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, backend)
+
+	store := newTestStores(1, "2.0.0")[0]
+	rc.PutStore(store)
+	rc.AddStoreLimit(store.GetMeta())
+	rc.PutStore(store.Clone(core.SetStoreState(metapb.StoreState_Offline, true)))
+	re.NoError(rc.BuryStore(store.GetID(), false))
+	_, ok := opt.GetScheduleConfig().StoreLimit[store.GetID()]
+	re.False(ok)
+
+	re.NoError(rc.PutMetaStore(store.GetMeta()))
+	re.True(rc.GetStore(store.GetID()).IsRemoved())
+	_, ok = opt.GetScheduleConfig().StoreLimit[store.GetID()]
+	re.False(ok)
+
+	_, reloaded, err := newTestScheduleConfig()
+	re.NoError(err)
+	re.NoError(reloaded.Reload(backend))
+	_, ok = reloaded.GetScheduleConfig().StoreLimit[store.GetID()]
+	re.False(ok)
+}
+
+// assertBlockedThenReleased proves that contend (run in its own goroutine)
+// cannot pass the point instrumented by acquiredFP until release is closed,
+// using only channel ordering -- never wall-clock duration math, which a
+// slow or delayed CI worker can throw off in either direction (see the
+// PutMetaStore/BuryStore race test's history). An earlier version added an
+// intermediate "goroutine has started" signal before this check, but that
+// only proves the goroutine ran its first statement -- it can still be
+// descheduled immediately afterward, before reaching contend's actual lock
+// attempt, reintroducing the same "blocked vs. not-yet-scheduled" ambiguity
+// one step later. There's no channel-based way to prove a goroutine is
+// blocked rather than merely slow, so instead this ties the wait directly to
+// acquiredFP itself with a generous window, matching this package's own
+// established precedent for the same problem
+// (TestScheduleConfigPersistenceIsSerialized's saveStarted wait): any
+// goroutine+channel+timeout test on a preemptible scheduler has some
+// irreducible residual risk, and the accepted way to make it negligible is a
+// generous wait tied to the exact signal of interest, not more intermediate
+// proxy signals. Returns the channel contend's result will arrive on.
+// assertBlockedThenReleased proves that contend (run in its own goroutine)
+// cannot pass the point instrumented by acquiredFP until release is closed,
+// using only channel ordering -- never wall-clock duration math, which a
+// slow or delayed CI worker can throw off in either direction (see the
+// PutMetaStore/BuryStore race test's history). A prior version tied the
+// "is it blocked" check to a generous wait on acquiredFP alone: sound in
+// principle, but the wait had to cover contend's own setup code (e.g. this
+// package's PutStore calls before BuryStore is even entered) as well as
+// ordinary scheduling delay, leaving a wide window where "not yet acquired"
+// could mean "not yet scheduled" rather than "genuinely blocked".
+// beforeLockFP -- a failpoint placed in production code immediately before
+// the storeStateLock.Lock() call itself, with no test-side setup code
+// between the two -- absorbs all of that setup/scheduling uncertainty: once
+// it fires, the only thing separating the goroutine from attempting the lock
+// is the Lock() call itself, so the subsequent "acquiredFP hasn't fired"
+// check only needs a short window, not one sized to cover arbitrary contend
+// setup work. Returns the channel contend's result will arrive on.
+func assertBlockedThenReleased(t *testing.T, re *require.Assertions, beforeLockFP, acquiredFP string, release chan struct{}, contend func() error) <-chan error {
+	t.Helper()
+	beforeLock := make(chan struct{})
+	re.NoError(failpoint.EnableCall(beforeLockFP, func() { close(beforeLock) }))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(beforeLockFP)) })
+
+	acquired := make(chan struct{})
+	re.NoError(failpoint.EnableCall(acquiredFP, func() { close(acquired) }))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(acquiredFP)) })
+
+	done := make(chan error, 1)
+	go func() {
+		done <- contend()
+	}()
+
+	select {
+	case <-beforeLock:
+	case <-time.After(2 * time.Second):
+		t.Fatal(beforeLockFP + " did not fire -- contender did not reach its lock attempt")
+	}
+
+	select {
+	case <-acquired:
+		re.Fail(acquiredFP + " fired before storeStateLock should have been available")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	close(release)
+
+	select {
+	case <-acquired:
+	case <-time.After(2 * time.Second):
+		t.Fatal(acquiredFP + " did not fire after release")
+	}
+
+	return done
+}
+
+// TestPutMetaStoreCannotRaceConcurrentRegistrationAndBury guards against
+// PutMetaStore's wasKnown snapshot going stale: a request that reads
+// wasKnown=false, then pauses before putStoreImpl runs, can't let a second,
+// fully-completed register-then-bury of the same store ID land in between --
+// storeStateLock must serialize the whole thing.
+func TestPutMetaStoreCannotRaceConcurrentRegistrationAndBury(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	backend := storage.NewStorageWithMemoryBackend()
+	rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, backend)
+
+	const storeID = uint64(1)
+	meta := &metapb.Store{
+		Id:      storeID,
+		Address: "mock://tikv-1:1",
+		State:   metapb.StoreState_Up,
+		Version: "2.0.0",
+	}
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	const putFP = "github.com/tikv/pd/server/cluster/putMetaStoreAfterWasKnownRead"
+	re.NoError(failpoint.EnableCall(putFP, func() {
+		close(entered)
+		<-release
+	}))
+	defer func() { re.NoError(failpoint.Disable(putFP)) }()
+
+	putDone := make(chan error, 1)
+	go func() {
+		putDone <- rc.PutMetaStore(meta)
+	}()
+
+	// Wait for PutMetaStore to reach the point right after reading wasKnown --
+	// proof it already holds storeStateLock.
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("PutMetaStore did not reach the wasKnown-read barrier")
+	}
+
+	// A full register-then-bury of the same ID must not be able to acquire
+	// storeStateLock while PutMetaStore holds it.
+	const buryBeforeLockFP = "github.com/tikv/pd/server/cluster/buryStoreBeforeStateLock"
+	const buryFP = "github.com/tikv/pd/server/cluster/buryStoreAfterStateLock"
+	buryDone := assertBlockedThenReleased(t, re, buryBeforeLockFP, buryFP, release, func() error {
+		store := core.NewStoreInfo(&metapb.Store{Id: storeID, State: metapb.StoreState_Up})
+		rc.PutStore(store)
+		rc.PutStore(store.Clone(core.SetStoreState(metapb.StoreState_Offline, true)))
+		return rc.BuryStore(storeID, false)
+	})
+
+	re.NoError(<-putDone)
+	re.NoError(<-buryDone)
+
+	re.True(rc.GetStore(storeID).IsRemoved())
+	_, ok := opt.GetScheduleConfig().StoreLimit[storeID]
+	re.False(ok, "the bury that ran after PutMetaStore released the lock must be the final word on this store's limit")
+}
+
+// TestPutMetaStoreCannotRaceConcurrentManualTombstoneRemoval guards against
+// RemoveTombStoneRecords' deleteStore call resurrecting a store PutMetaStore
+// is mid-flight on: PutMetaStore can correctly read wasKnown=true (the store
+// is still tombstoned at that instant), but if RemoveTombStoneRecords then
+// deletes it before PutMetaStore reaches putStoreImpl, putStoreImpl observes
+// nil and takes the brand-new-store path anyway, durably recreating both the
+// store and its limit despite wasKnown having been read correctly.
+// storeStateLock must serialize the whole thing.
+func TestPutMetaStoreCannotRaceConcurrentManualTombstoneRemoval(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	backend := storage.NewStorageWithMemoryBackend()
+	rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, backend)
+
+	store := newTestStores(1, "2.0.0")[0]
+	rc.PutStore(store)
+	rc.AddStoreLimit(store.GetMeta())
+	rc.PutStore(store.Clone(core.SetStoreState(metapb.StoreState_Offline, true)))
+	re.NoError(rc.BuryStore(store.GetID(), false))
+	_, ok := opt.GetScheduleConfig().StoreLimit[store.GetID()]
+	re.False(ok)
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	const putFP = "github.com/tikv/pd/server/cluster/putMetaStoreAfterWasKnownRead"
+	re.NoError(failpoint.EnableCall(putFP, func() {
+		close(entered)
+		<-release
+	}))
+	defer func() { re.NoError(failpoint.Disable(putFP)) }()
+
+	// Models a request whose gRPC preflight saw this store as known (it still
+	// is -- tombstoned, but not yet manually removed).
+	putDone := make(chan error, 1)
+	go func() {
+		putDone <- rc.PutMetaStore(store.GetMeta())
+	}()
+
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("PutMetaStore did not reach the wasKnown-read barrier")
+	}
+
+	// A manual remove-tombstone for the same store must not be able to
+	// acquire storeStateLock while PutMetaStore holds it.
+	const removeBeforeLockFP = "github.com/tikv/pd/server/cluster/removeTombStoneRecordsBeforeStateLock"
+	const removeFP = "github.com/tikv/pd/server/cluster/removeTombStoneRecordsAfterStateLock"
+	removeDone := assertBlockedThenReleased(t, re, removeBeforeLockFP, removeFP, release, rc.RemoveTombStoneRecords)
+
+	re.NoError(<-putDone)
+	re.NoError(<-removeDone)
+
+	// The manual removal that ran after PutMetaStore released the lock must
+	// be the final word: the store is gone for good, not resurrected.
+	re.Nil(rc.GetStore(store.GetID()))
+	_, ok = opt.GetScheduleConfig().StoreLimit[store.GetID()]
+	re.False(ok)
+}
+
+// TestAdjustNetworkSlowStoreCannotRepublishAfterBury guards against
+// adjustNetworkSlowStore's metric write resurrecting storeTriggerNetworkSlowEvict
+// after a bury that lands between the pre-write removed-store check and the
+// write. This must model a bury that is *not* followed by final deletion in
+// the same call: GetAvgNetworkSlowScore already happens to fall back to 0
+// (and so trips the pre-existing "recovering" branch's own cleanup a few
+// lines down) once a store is fully gone from StoresInfo, which would mask
+// this test from ever exercising the fix under test -- confirmed by running
+// this test with the fix reverted using a bury+delete scenario instead: it
+// still passed, because that unrelated branch cleaned up the series on its
+// own. A tombstoned-but-not-yet-deleted store keeps reporting its last
+// (frozen) score, which stays above the recovery threshold, so nothing else
+// cleans up the write; only the fix's own post-write recheck (which keys off
+// IsRemoved(), not mere absence) does.
+func TestAdjustNetworkSlowStoreCannotRepublishAfterBury(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	defer storeTriggerNetworkSlowEvict.Reset()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	backend := storage.NewStorageWithMemoryBackend()
+	rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, backend)
+
+	stores := newTestStores(2, "2.0.0")
+	for _, s := range stores {
+		rc.PutStore(s)
+	}
+	targetID := stores[0].GetID()
+	// The only other store reports targetID's network as fully problematic,
+	// so its average score alone clears the evict threshold.
+	rc.PutStore(stores[0].Clone(func(s *core.StoreInfo) {
+		s.GetStoreStats().NetworkSlowScores = map[uint64]uint64{stores[1].GetID(): 100}
+	}))
+	re.GreaterOrEqual(rc.GetAvgNetworkSlowScore(targetID), uint64(networkSlowStoreEvictThreshold))
+	rc.PutStore(rc.GetStore(targetID).Clone(core.SetStoreState(metapb.StoreState_Offline, true)))
+
+	const fp = "github.com/tikv/pd/server/cluster/adjustNetworkSlowStoreBeforeWrite"
+	re.NoError(failpoint.EnableCall(fp, func() {
+		// Bury completes entirely within this window, between the pre-write
+		// removed-store check and the write, but final deletion does not --
+		// the store stays in StoresInfo, tombstoned, still reporting its
+		// frozen (high) score.
+		re.NoError(rc.BuryStore(targetID, false))
+	}))
+	defer func() { re.NoError(failpoint.Disable(fp)) }()
+
+	rc.adjustNetworkSlowStore(targetID)
+
+	re.True(rc.GetStore(targetID).IsRemoved())
+	re.GreaterOrEqual(rc.GetAvgNetworkSlowScore(targetID), uint64(networkSlowStoreEvictThreshold),
+		"the store's frozen score must still be high -- otherwise this test isn't exercising the fix, see the unrelated recovering-branch note above")
+	// DeleteLabelValues returns whether it found and removed a series, so a
+	// false return here proves no series exists -- unlike checking
+	// WithLabelValues' value, which would recreate a fresh (zero-valued)
+	// series regardless of whether the old one was ever cleaned up.
+	re.False(storeTriggerNetworkSlowEvict.DeleteLabelValues(strconv.FormatUint(targetID, 10)))
 }
 
 func TestPatrolRegionConcurrency(t *testing.T) {
@@ -3894,8 +4386,7 @@ func TestAddScheduler(t *testing.T) {
 
 func TestPersistScheduler(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	tc, co, cleanup := prepare(nil, nil, func(co *schedule.Coordinator) { co.Run() }, re)
 	hbStreams := co.GetHeartbeatStreams()
@@ -4008,8 +4499,7 @@ func TestPersistScheduler(t *testing.T) {
 
 func TestRemoveScheduler(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	tc, co, cleanup := prepare(func(cfg *sc.ScheduleConfig) {
 		cfg.ReplicaScheduleLimit = 0
@@ -4066,8 +4556,7 @@ func TestRemoveScheduler(t *testing.T) {
 
 func TestRestart(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	tc, co, cleanup := prepare(func(cfg *sc.ScheduleConfig) {
 		// Turn off balance, we test add replica only.
@@ -4328,7 +4817,7 @@ func TestDownStoreLimit(t *testing.T) {
 			Peer:        region.GetStorePeer(1),
 			DownSeconds: 24 * 60 * 60,
 		},
-	}), core.SetApproximateSize(1))
+	}), core.SetApproximateSize(1), core.SetApproximateKeys(0))
 	err = tc.putRegion(region)
 	re.NoError(err)
 	for i := uint64(1); i < 20; i++ {
@@ -4477,8 +4966,7 @@ func TestInterval(t *testing.T) {
 
 func TestConcurrentStoreStats(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -4555,8 +5043,7 @@ func TestConcurrentStoreStats(t *testing.T) {
 
 func TestCheckStoresUpCountWithLowSpace(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -4708,8 +5195,7 @@ func waitNoResponse(re *require.Assertions, stream mockhbstream.HeartbeatStream)
 
 func TestStopDoesNotHoldClusterLockWhileWaitingSchedulingJobs(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -4757,8 +5243,7 @@ func TestStopDoesNotHoldClusterLockWhileWaitingSchedulingJobs(t *testing.T) {
 func BenchmarkHandleStatsAsync(b *testing.B) {
 	re := require.New(b)
 	// Setup: create a new instance of Cluster
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := b.Context()
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
 	c := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
@@ -4778,9 +5263,9 @@ func BenchmarkHandleStatsAsync(b *testing.B) {
 		core.SetReportInterval(0, 10),
 	)
 	// Reset timer after setup
-	b.ResetTimer()
+
 	// Run HandleStatsAsync b.N times
-	for range b.N {
+	for b.Loop() {
 		cluster.HandleStatsAsync(c, region)
 	}
 }
@@ -4788,8 +5273,7 @@ func BenchmarkHandleStatsAsync(b *testing.B) {
 func BenchmarkHandleRegionHeartbeat(b *testing.B) {
 	re := require.New(b)
 	// Setup: create a new instance of Cluster
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := b.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)

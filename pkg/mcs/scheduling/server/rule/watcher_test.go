@@ -60,22 +60,95 @@ func TestLoadLargeRules(t *testing.T) {
 	re := require.New(t)
 	ctx, client, clean := prepare(t, true)
 	defer clean()
-	runWatcherLoadLabelRule(ctx, re, client)
+	fixture := newRuleWatcherTestFixture(ctx, t)
+	runWatcherLoadLabelRule(ctx, re, client, fixture.checkerController)
+}
+
+func TestRegionLabelWatcherReloadsAfterCompaction(t *testing.T) {
+	re := require.New(t)
+	ctx, client, clean := prepare(t, false)
+	defer clean()
+
+	fixture := newRuleWatcherTestFixture(ctx, t)
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, fixture.storage, time.Hour)
+	re.NoError(err)
+
+	watcherCtx, cancel := context.WithCancel(ctx)
+	rw := &Watcher{
+		ctx:                   watcherCtx,
+		cancel:                cancel,
+		regionLabelPathPrefix: keypath.RegionLabelPathPrefix(),
+		etcdClient:            client,
+		checkerController:     fixture.checkerController,
+		regionLabeler:         regionLabeler,
+	}
+	failpointEnabled := false
+	defer func() {
+		if failpointEnabled {
+			_ = failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock")
+		}
+		rw.Close()
+	}()
+
+	makeRule := func(id string, ranges ...string) *labeler.LabelRule {
+		return &labeler.LabelRule{
+			ID:       id,
+			Labels:   []labeler.RegionLabel{{Key: "zone", Value: "test"}},
+			RuleType: labeler.KeyRange,
+			Data:     labeler.MakeKeyRanges(ranges...),
+		}
+	}
+	putRule := func(rule *labeler.LabelRule) {
+		value, err := json.Marshal(rule)
+		re.NoError(err)
+		_, err = client.Put(ctx, keypath.RegionLabelKeyPath(rule.ID), string(value))
+		re.NoError(err)
+	}
+	keepRule := makeRule("compaction-keep", "1234", "5678")
+	deleteRule := makeRule("compaction-delete", "9abc", "def0")
+	putRule(keepRule)
+	putRule(deleteRule)
+	re.NoError(rw.initializeRegionLabelWatcher())
+	re.Len(regionLabeler.GetAllLabelRules(), 2)
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock", "return(true)"))
+	failpointEnabled = true
+
+	updatedKeepRule := makeRule(keepRule.ID, "1234", "5678", "9abc", "def0")
+	putRule(updatedKeepRule)
+	deleteResp, err := client.Delete(ctx, keypath.RegionLabelKeyPath(deleteRule.ID))
+	re.NoError(err)
+	_, err = client.Compact(ctx, deleteResp.Header.Revision)
+	re.NoError(err)
+
+	testutil.Eventually(re, func() bool {
+		rw.labelWatcher.ForceLoad()
+		updated := regionLabeler.GetLabelRule(keepRule.ID)
+		return updated != nil && len(updated.GetKeyRanges()) == 2 && regionLabeler.GetLabelRule(deleteRule.ID) == nil
+	})
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock"))
+	failpointEnabled = false
 }
 
 func BenchmarkLoadLargeRules(b *testing.B) {
 	re := require.New(b)
 	ctx, client, clean := prepare(b, true)
 	defer clean()
+	fixture := newRuleWatcherTestFixture(ctx, b)
 
-	b.ResetTimer() // Resets the timer to ignore initialization time in the benchmark
+	// Resets the timer to ignore initialization time in the benchmark
 
-	for range b.N {
-		runWatcherLoadLabelRule(ctx, re, client)
+	for b.Loop() {
+		runWatcherLoadLabelRule(ctx, re, client, fixture.checkerController)
 	}
 }
 
-func runWatcherLoadLabelRule(ctx context.Context, re *require.Assertions, client *clientv3.Client) {
+func runWatcherLoadLabelRule(
+	ctx context.Context,
+	re *require.Assertions,
+	client *clientv3.Client,
+	checkerController *checker.Controller,
+) {
 	storage := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	labelerManager, err := labeler.NewRegionLabeler(ctx, storage, time.Hour)
 	re.NoError(err)
@@ -88,6 +161,7 @@ func runWatcherLoadLabelRule(ctx context.Context, re *require.Assertions, client
 		regionLabelPathPrefix: keypath.RegionLabelPathPrefix(),
 		etcdClient:            client,
 		ruleStorage:           storage,
+		checkerController:     checkerController,
 		regionLabeler:         labelerManager,
 	}
 	err = rw.initializeRegionLabelWatcher()
@@ -96,12 +170,12 @@ func runWatcherLoadLabelRule(ctx context.Context, re *require.Assertions, client
 	cancel()
 }
 
-func prepare(t require.TestingT, loadLabelRules bool) (context.Context, *clientv3.Client, func()) {
+func prepare(t testing.TB, loadLabelRules bool) (context.Context, *clientv3.Client, func()) {
 	return prepareWithEtcdConfig(t, loadLabelRules, nil)
 }
 
 func prepareWithEtcdConfig(
-	t require.TestingT,
+	t testing.TB,
 	loadLabelRules bool,
 	configure func(*embed.Config),
 ) (context.Context, *clientv3.Client, func()) {
@@ -111,13 +185,25 @@ func prepareWithEtcdConfig(
 	if configure != nil {
 		configure(cfg)
 	}
-	var err error
-	cfg.Dir, err = os.MkdirTemp("", "pd_tests")
-	re.NoError(err)
-	os.RemoveAll(cfg.Dir)
+	cfg.Dir = t.TempDir()
+	re.NoError(os.RemoveAll(cfg.Dir))
 	etcd, err := embed.StartEtcd(cfg)
 	re.NoError(err)
-	client, err := etcdutil.CreateEtcdClient(nil, cfg.ListenClientUrls, etcdutil.TestEtcdClientPurpose, true)
+	var client *clientv3.Client
+	var cleanupOnce sync.Once
+	cleanup := func() {
+		cleanupOnce.Do(func() {
+			cancel()
+			if client != nil {
+				if err := client.Close(); err != nil {
+					t.Errorf("close etcd client: %v", err)
+				}
+			}
+			etcd.Close()
+		})
+	}
+	t.Cleanup(cleanup)
+	client, err = etcdutil.CreateEtcdClient(nil, cfg.ListenClientUrls, etcdutil.TestEtcdClientPurpose, true)
 	re.NoError(err)
 	<-etcd.Server.ReadyNotify()
 
@@ -141,12 +227,7 @@ func prepareWithEtcdConfig(
 		}
 	}
 
-	return ctx, client, func() {
-		cancel()
-		client.Close()
-		etcd.Close()
-		os.RemoveAll(cfg.Dir)
-	}
+	return ctx, client, cleanup
 }
 
 // BenchmarkRuleSnapshotKeyScan compares the current paginated scan with and
@@ -186,7 +267,7 @@ func BenchmarkRuleSnapshotKeyScan(b *testing.B) {
 	rw := &Watcher{etcdClient: client}
 	runPaged := func(b *testing.B, rangeEnds []string) {
 		b.ReportAllocs()
-		for range b.N {
+		for b.Loop() {
 			scanned := 0
 			revision, err := rw.scanRuleSnapshotKeys(
 				ctx, prefix, rangeEnds, snapshotRevision,
@@ -209,7 +290,7 @@ func BenchmarkRuleSnapshotKeyScan(b *testing.B) {
 	})
 	b.Run("one-shot", func(b *testing.B) {
 		b.ReportAllocs()
-		for range b.N {
+		for b.Loop() {
 			resp, err := etcdutil.EtcdKVGetWithContext(
 				ctx,
 				client,
@@ -312,7 +393,7 @@ func TestRuleWatcherReconcilesInitialLoadRetry(t *testing.T) {
 	ctx, client, clean := prepare(t, false)
 	defer clean()
 
-	fixture := newRuleWatcherTestFixture(t, ctx)
+	fixture := newRuleWatcherTestFixture(ctx, t)
 	staleRule := &placement.Rule{GroupID: "g", ID: "stale", Role: placement.Learner, Count: 1}
 	re.NoError(fixture.ruleManager.SetRule(staleRule))
 	defaultRule := fixture.ruleManager.GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
@@ -355,7 +436,7 @@ type ruleWatcherTestFixture struct {
 	checkerController *checker.Controller
 }
 
-func newRuleWatcherTestFixture(t *testing.T, ctx context.Context) *ruleWatcherTestFixture {
+func newRuleWatcherTestFixture(ctx context.Context, t testing.TB) *ruleWatcherTestFixture {
 	re := require.New(t)
 	storage := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	conf := mockconfig.NewTestOptions()
@@ -378,7 +459,7 @@ func TestReconcileRuleSnapshot(t *testing.T) {
 	ctx, client, clean := prepare(t, false)
 	defer clean()
 
-	fixture := newRuleWatcherTestFixture(t, ctx)
+	fixture := newRuleWatcherTestFixture(ctx, t)
 	ruleManager := fixture.ruleManager
 	re.NoError(ruleManager.SetRuleGroup(&placement.RuleGroup{ID: "g", Index: 1}))
 	re.NoError(ruleManager.SetRules([]*placement.Rule{
@@ -500,7 +581,7 @@ func TestRuleWatcherReconcilesNewerSnapshotAfterFailedLiveRuleUpdate(t *testing.
 	ctx, client, clean := prepare(t, false)
 	defer clean()
 
-	fixture := newRuleWatcherTestFixture(t, ctx)
+	fixture := newRuleWatcherTestFixture(ctx, t)
 	ruleManager := fixture.ruleManager
 	re.NoError(ruleManager.SetRule(&placement.Rule{
 		GroupID: "g",
@@ -533,8 +614,7 @@ func TestRuleWatcherReconcilesNewerSnapshotAfterFailedLiveRuleUpdate(t *testing.
 	defer closeWatcher()
 	re.NoError(rw.initializeRuleWatcher())
 
-	logFile := testutil.InitTempFileLogger("info")
-	defer os.RemoveAll(logFile)
+	logFile := testutil.InitTempFileLogger(t, "info")
 	failedRule := ruleManager.GetRule("g", "r")
 	failedRule.LabelConstraints[0].Values = []string{"z2"}
 	failedValue, err := json.Marshal(failedRule)

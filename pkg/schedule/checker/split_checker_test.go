@@ -15,7 +15,6 @@
 package checker
 
 import (
-	"context"
 	"encoding/hex"
 	"testing"
 
@@ -26,14 +25,14 @@ import (
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 func TestSplit(t *testing.T) {
 	re := require.New(t)
 	cfg := mockconfig.NewTestOptions()
 	cfg.GetReplicationConfig().EnablePlacementRules = true
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster := mockcluster.NewCluster(ctx, cfg)
 	ruleManager := cluster.RuleManager
 	regionLabeler := cluster.RegionLabeler
@@ -61,7 +60,7 @@ func TestSplit(t *testing.T) {
 		ID:       "test",
 		Labels:   []labeler.RegionLabel{{Key: "test", Value: "test"}},
 		RuleType: labeler.KeyRange,
-		Data:     makeKeyRanges("bb", "dd"),
+		Data:     keyutil.BuildKeyRangeMaps("bb", "dd"),
 	})
 	re.NoError(err)
 	op = sc.Check(cluster.GetRegion(1))

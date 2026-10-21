@@ -52,8 +52,7 @@ const (
 	//   - ~10s, which smooths the RU/s fluctuations but may not track the spike that quickly.
 	//   - ~20s, which smooths the RU/s fluctuations but can only be used to observe the long-term trend.
 	defaultRUTrackerTimeConstant = 5 * time.Second
-	// minSampledRUPerSec is the minimum RU/s to be sampled by the RU tracker. If it's less than this value,
-	// the sampled RU/s will be treated as 0.
+	// minSampledRUPerSec is the threshold for clearing negligible demand on a zero sample.
 	minSampledRUPerSec = 1.0
 )
 
@@ -531,8 +530,8 @@ func (rt *ruTracker) sample(clientUniqueID uint64, now time.Time, totalRU float6
 	//   2. The decay factor is time-aware, the larger the time delta, the lower the weight of the "old data".
 	decay := math.Exp(-rt.beta * durSeconds)
 	rt.lastEMA = decay*rt.lastEMA + (1-decay)*ruPerSec
-	// If the `lastEMA` is less than `minSampledRUPerSec`, set it to 0 to avoid converging into a very small value.
-	if rt.lastEMA < minSampledRUPerSec {
+	// Clear negligible idle demand without discarding positive fractional samples.
+	if ruPerSec == 0 && rt.lastEMA < minSampledRUPerSec {
 		rt.lastEMA = 0
 	}
 }

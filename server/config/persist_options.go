@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -130,7 +131,10 @@ func (o *PersistOptions) UpdateScheduleConfig(
 // SetSchedulers replaces only the scheduler list on the latest schedule config.
 func (o *PersistOptions) SetSchedulers(schedulers sc.SchedulerConfigs) {
 	o.mutateScheduleConfig(func(next *sc.ScheduleConfig) {
-		next.Schedulers = append(sc.SchedulerConfigs(nil), schedulers...)
+		next.Schedulers = slices.Clone(schedulers)
+		if len(next.Schedulers) == 0 {
+			next.Schedulers = nil
+		}
 	})
 }
 
@@ -324,12 +328,7 @@ var supportedTTLConfigs = []string{
 
 // IsSupportedTTLConfig checks whether a key is a supported config item with ttl
 func IsSupportedTTLConfig(key string) bool {
-	for _, supportedConfig := range supportedTTLConfigs {
-		if key == supportedConfig {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(supportedTTLConfigs, key)
 }
 
 // GetMaxSnapshotCount returns the number of the max snapshot which is allowed to send.
@@ -531,6 +530,28 @@ func (o *PersistOptions) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitCo
 // GetStoreLimitByType returns the limit of a store with a given type.
 func (o *PersistOptions) GetStoreLimitByType(storeID uint64, typ storelimit.Type) (returned float64) {
 	limit := o.GetStoreLimit(storeID)
+	return storeLimitByType(limit, typ)
+}
+
+// PeekStoreLimitByType returns the limit of a store with a given type without
+// the create-on-miss side effect GetStoreLimitByType has: it never adds a
+// StoreLimit entry for storeID, falling back to the config's default in
+// memory only. Callers that refresh in-memory rate limiters for every
+// currently-known store (as opposed to looking up one specific store the
+// caller is about to act on) must use this -- GetStoreLimitByType would
+// otherwise resurrect an entry a concurrent-or-prior RemoveStoreLimit
+// deliberately removed, since a tombstoned store stays in that "known store"
+// set until its final removal.
+func (o *PersistOptions) PeekStoreLimitByType(storeID uint64, typ storelimit.Type) float64 {
+	cfg := o.GetScheduleConfig()
+	limit, ok := cfg.StoreLimit[storeID]
+	if !ok {
+		limit = cfg.GetDefaultStoreLimit()
+	}
+	return storeLimitByType(limit, typ)
+}
+
+func storeLimitByType(limit sc.StoreLimitConfig, typ storelimit.Type) float64 {
 	switch typ {
 	case storelimit.AddPeer:
 		return limit.AddPeer
@@ -763,7 +784,7 @@ func (o *PersistOptions) RemoveSchedulerCfg(tp types.CheckerSchedulerType) {
 					schedulerCfg.Disable = true
 					next.Schedulers[i] = schedulerCfg
 				} else {
-					next.Schedulers = append(next.Schedulers[:i], next.Schedulers[i+1:]...)
+					next.Schedulers = slices.Delete(next.Schedulers, i, i+1)
 				}
 				return
 			}
@@ -871,6 +892,9 @@ func (o *PersistOptions) Reload(storage endpoint.ConfigStorage) error {
 
 	isExist, err := storage.LoadConfig(cfg)
 	if err != nil {
+		return err
+	}
+	if err := cfg.PDServerCfg.validateGCConcurrency(); err != nil {
 		return err
 	}
 	adjustScheduleCfg(&cfg.Schedule)
@@ -1092,6 +1116,11 @@ func (o *PersistOptions) IsEnableRegionBucket() bool {
 // IsRaftKV2 returns true if the raft kv is v2.
 func (o *PersistOptions) IsRaftKV2() bool {
 	return o.GetStoreConfig().IsRaftKV2()
+}
+
+// GetUnifiedReadPoolMaxThreadCount returns TiKV unified read pool max thread count.
+func (o *PersistOptions) GetUnifiedReadPoolMaxThreadCount() uint64 {
+	return o.GetStoreConfig().GetUnifiedReadPoolMaxThreadCount()
 }
 
 // SetRegionBucketEnabled sets if the region bucket is enabled.

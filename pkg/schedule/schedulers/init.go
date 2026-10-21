@@ -147,7 +147,21 @@ func schedulersRegister() {
 
 			id, err := strconv.ParseUint(args[0], 10, 64)
 			if err != nil {
-				return errs.ErrStrconvParseUint.Wrap(err)
+				// args[0] may instead be a comma-joined list of store IDs
+				// (see EvictLeaderMultiStoreArgs), used to create the
+				// scheduler with several stores in one call.
+				ids, ok := parseMultiStoreIDsArg(args[0])
+				if !ok {
+					return errs.ErrStrconvParseUint.Wrap(err)
+				}
+				if len(args) > 1 {
+					return errs.ErrSchedulerConfig.FastGenByArgs("ranges")
+				}
+				for _, id := range ids {
+					conf.StoreIDWithRanges[id] = []keyutil.KeyRange{keyutil.NewKeyRange("", "")}
+				}
+				conf.Batch = EvictLeaderBatchSize
+				return nil
 			}
 
 			ranges, err := getKeyRanges(args[1:])
@@ -240,7 +254,7 @@ func schedulersRegister() {
 			}
 
 			storeIDs := make([]uint64, 0)
-			for _, id := range strings.Split(args[1], ",") {
+			for id := range strings.SplitSeq(args[1], ",") {
 				storeID, err := strconv.ParseUint(id, 10, 64)
 				if err != nil {
 					return errs.ErrStrconvParseUint.Wrap(err)

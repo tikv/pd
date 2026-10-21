@@ -22,6 +22,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -150,8 +151,7 @@ func TestSendTokenBucketRequestsStopsWhenContextIsCanceled(t *testing.T) {
 
 func TestControllerWithTwoGroupRequestConcurrency(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/triggerPeriodicReport", fmt.Sprintf("return(\"%s\")", defaultResourceGroupName)))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/triggerLowRUReport", fmt.Sprintf("return(\"%s\")", "test-group")))
@@ -272,8 +272,7 @@ func TestControllerWithTwoGroupRequestConcurrency(t *testing.T) {
 
 func TestTryGetController(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	mockProvider := newMockResourceGroupProvider()
 	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, constants.NullKeyspaceID)
@@ -335,9 +334,105 @@ func TestTryGetController(t *testing.T) {
 	re.NotEmpty(consumption)
 }
 
-func TestGetResourceGroup(t *testing.T) {
+func TestTryGetControllerConcurrentCreation(t *testing.T) {
+	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	mockProvider := newMockResourceGroupProvider()
+	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, constants.NullKeyspaceID)
+	re.NoError(err)
+	const callers = 32
+	var fetched sync.WaitGroup
+	fetched.Add(callers)
+	group := &rmpb.ResourceGroup{Name: "test-group", Mode: rmpb.GroupMode_RUMode, RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 1000000}}}}
+	// Every caller misses the cache before any of them stores a controller.
+	mockProvider.On("GetResourceGroup", mock.Anything, "test-group", mock.Anything).
+		Run(func(mock.Arguments) {
+			fetched.Done()
+			fetched.Wait()
+		}).
+		Return(group, nil)
+
+	results := make(chan *groupCostController, callers)
+	for range callers {
+		go func() {
+			gc, _ := controller.tryGetResourceGroupController(ctx, "test-group", false)
+			results <- gc
+		}()
+	}
+	gcs := make([]*groupCostController, 0, callers)
+	for range callers {
+		gcs = append(gcs, <-results)
+	}
+	// A caller that loses the race must use the registered controller, or
+	// what it records is never reported.
+	registered, ok := controller.loadGroupController("test-group")
+	re.True(ok)
+	for _, gc := range gcs {
+		re.Same(registered, gc)
+	}
+}
+
+func TestCleanUpResourceGroupJudgesWholeInterval(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	mockProvider := newMockResourceGroupProvider()
+	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, 0)
+	re.NoError(err)
+
+	newGroup := func(name string) *rmpb.ResourceGroup {
+		return &rmpb.ResourceGroup{Name: name, Mode: rmpb.GroupMode_RUMode, RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 1000000}}}}
+	}
+	for _, name := range []string{defaultResourceGroupName, "bursty", "idle", "deleted"} {
+		mockProvider.On("GetResourceGroup", mock.Anything, name, mock.Anything).Return(newGroup(name), nil)
+		_, err = controller.tryGetResourceGroupController(ctx, name, false)
+		re.NoError(err)
+	}
+	controller.tombstoneGroupCostController("deleted")
+
+	requestInfo, responseInfo := NewTestRequestInfo(true, 1, 1, AccessCrossZone), NewTestResponseInfo(1, time.Millisecond, true)
+	consume := func(name string) {
+		gc, err := controller.tryGetResourceGroupController(ctx, name, true)
+		re.NoError(err)
+		_, _, _, _, err = gc.onRequestWaitImpl(ctx, requestInfo)
+		re.NoError(err)
+		_, err = gc.onResponseImpl(requestInfo, responseInfo)
+		re.NoError(err)
+	}
+	// cleanUpAfterIdleSecond simulates a cleanup pass that sees no consumption since the last state update.
+	cleanUpAfterIdleSecond := func() {
+		controller.executeOnAllGroups((*groupCostController).updateRunState)
+		controller.cleanUpResourceGroup()
+	}
+	exists := func(name string) bool {
+		_, ok := controller.loadGroupController(name)
+		return ok
+	}
+
+	// The bursty group consumes during every cleanup interval, the tombstone only during the first one.
+	consume("bursty")
+	consume("deleted")
+	cleanUpAfterIdleSecond()
+	re.True(exists("bursty"))
+	re.True(exists("idle"))
+	re.True(exists("deleted"))
+
+	consume("bursty")
+	cleanUpAfterIdleSecond()
+	re.True(exists("bursty"))
+	re.False(exists("idle"))
+	re.False(exists("deleted"))
+
+	// The bursty group is deleted after two cleanup intervals without consumption.
+	cleanUpAfterIdleSecond()
+	re.True(exists("bursty"))
+	cleanUpAfterIdleSecond()
+	re.False(exists("bursty"))
+}
+
+func TestGetResourceGroup(t *testing.T) {
+	ctx := t.Context()
 
 	newResourceGroup := func(name string, fillRate uint64, burstLimit int64) *rmpb.ResourceGroup {
 		return &rmpb.ResourceGroup{
@@ -637,8 +732,7 @@ func TestGetResourceGroupRuntimeState(t *testing.T) {
 
 func TestTokenBucketsRequestWithKeyspaceID(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	checkKeyspace := func(keyspaceID uint32) {
 		mockProvider := newMockResourceGroupProvider()
@@ -817,8 +911,7 @@ func TestRUVersionFromInitialControllerConfig(t *testing.T) {
 
 func TestRUVersionWatchViaControllerConfig(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	mockProvider := &MockResourceGroupProvider{}
 	mockProvider.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&meta_storagepb.GetResponse{

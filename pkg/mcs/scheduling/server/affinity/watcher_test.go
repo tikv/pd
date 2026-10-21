@@ -27,6 +27,8 @@ import (
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/goleak"
 
+	"github.com/pingcap/failpoint"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/affinity"
@@ -196,6 +198,109 @@ func TestWatcherLoadExistingData(t *testing.T) {
 	re.Equal(1, groupState.RangeCount)
 }
 
+func TestAffinityLabelWatcherReloadsAfterCompaction(t *testing.T) {
+	re := require.New(t)
+	ctx, client, clean := prepare(t)
+	defer clean()
+
+	keepGroup := makeTestGroup("compaction-keep", 1, []uint64{1})
+	deleteGroup := makeTestGroup("compaction-delete", 2, []uint64{2})
+	keepRule := makeTestLabelRule(keepGroup.ID, "7480000000000000ff0000000000000000f8", "7480000000000000ff1000000000000000f8")
+	deleteRule := makeTestLabelRule(deleteGroup.ID, "7480000000000000ff2000000000000000f8", "7480000000000000ff3000000000000000f8")
+	bufferedRule := makeTestLabelRule("compaction-buffered", "7480000000000000ff4000000000000000f8", "7480000000000000ff5000000000000000f8")
+	re.NoError(putGroup(ctx, client, keepGroup))
+	re.NoError(putGroup(ctx, client, deleteGroup))
+	re.NoError(putLabelRule(ctx, client, keepRule))
+	re.NoError(putLabelRule(ctx, client, deleteRule))
+	re.NoError(putLabelRule(ctx, client, bufferedRule))
+
+	manager, watcher, err := setupAffinityManager(ctx, client)
+	re.NoError(err)
+	failpointEnabled := false
+	defer func() {
+		if failpointEnabled {
+			_ = failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock")
+		}
+		watcher.Close()
+	}()
+
+	re.Equal(1, manager.GetAffinityGroupState(keepGroup.ID).RangeCount)
+	re.Equal(1, manager.GetAffinityGroupState(deleteGroup.ID).RangeCount)
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock", "return(true)"))
+	failpointEnabled = true
+
+	updatedKeepRule := makeTestLabelRule(keepGroup.ID,
+		"7480000000000000ff0000000000000000f8", "7480000000000000ff1000000000000000f8",
+		"7480000000000000ff2000000000000000f8", "7480000000000000ff3000000000000000f8",
+	)
+	re.NoError(putLabelRule(ctx, client, updatedKeepRule))
+	_, err = client.Delete(ctx, keypath.RegionLabelKeyPath(deleteRule.ID))
+	re.NoError(err)
+	deleteResp, err := client.Delete(ctx, keypath.RegionLabelKeyPath(bufferedRule.ID))
+	re.NoError(err)
+	_, err = client.Compact(ctx, deleteResp.Header.Revision)
+	re.NoError(err)
+
+	testutil.Eventually(re, func() bool {
+		watcher.labelWatcher.ForceLoad()
+		keepState := manager.GetAffinityGroupState(keepGroup.ID)
+		deleteState := manager.GetAffinityGroupState(deleteGroup.ID)
+		return keepState != nil && keepState.RangeCount == 2 &&
+			deleteState != nil && deleteState.RangeCount == 0
+	})
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock"))
+	failpointEnabled = false
+
+	re.NoError(putGroup(ctx, client, makeTestGroup("compaction-buffered", 3, []uint64{3})))
+	testutil.Eventually(re, func() bool {
+		groupState := manager.GetAffinityGroupState("compaction-buffered")
+		return groupState != nil && groupState.RangeCount == 0
+	})
+}
+
+func TestAffinityGroupWatcherReloadsAfterCompaction(t *testing.T) {
+	re := require.New(t)
+	ctx, client, clean := prepare(t)
+	defer clean()
+
+	keepGroup := makeTestGroup("group-compaction-keep", 1, []uint64{1})
+	deleteGroup := makeTestGroup("group-compaction-delete", 2, []uint64{2})
+	re.NoError(putGroup(ctx, client, keepGroup))
+	re.NoError(putGroup(ctx, client, deleteGroup))
+
+	manager, watcher, err := setupAffinityManager(ctx, client)
+	re.NoError(err)
+	failpointEnabled := false
+	defer func() {
+		if failpointEnabled {
+			_ = failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock")
+		}
+		watcher.Close()
+	}()
+
+	re.NotNil(manager.GetAffinityGroupState(keepGroup.ID))
+	re.NotNil(manager.GetAffinityGroupState(deleteGroup.ID))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock", "return(true)"))
+	failpointEnabled = true
+
+	keepGroup.LeaderStoreID = 3
+	re.NoError(putGroup(ctx, client, keepGroup))
+	deleteResp, err := client.Delete(ctx, keypath.AffinityGroupPath(deleteGroup.ID))
+	re.NoError(err)
+	_, err = client.Compact(ctx, deleteResp.Header.Revision)
+	re.NoError(err)
+
+	testutil.Eventually(re, func() bool {
+		watcher.groupWatcher.ForceLoad()
+		keepState := manager.GetAffinityGroupState(keepGroup.ID)
+		return keepState != nil && keepState.LeaderStoreID == keepGroup.LeaderStoreID &&
+			!manager.IsGroupExist(deleteGroup.ID)
+	})
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock"))
+	failpointEnabled = false
+}
+
 // TestConcurrentLabelRuleUpdates tests multiple label rule updates happening concurrently.
 func TestConcurrentLabelRuleUpdates(t *testing.T) {
 	re := require.New(t)
@@ -304,26 +409,33 @@ func TestLabelRuleBeforeGroup(t *testing.T) {
 	})
 }
 
-func prepare(t require.TestingT) (context.Context, *clientv3.Client, func()) {
+func prepare(t testing.TB) (context.Context, *clientv3.Client, func()) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cfg := etcdutil.NewTestEtcdConfig()
-	var err error
-	cfg.Dir, err = os.MkdirTemp("", "pd_affinity_watcher_tests")
-	re.NoError(err)
-	os.RemoveAll(cfg.Dir)
+	cfg.Dir = t.TempDir()
+	re.NoError(os.RemoveAll(cfg.Dir))
 	etcd, err := embed.StartEtcd(cfg)
 	re.NoError(err)
-	client, err := etcdutil.CreateEtcdClient(nil, cfg.ListenClientUrls, etcdutil.TestEtcdClientPurpose, true)
+	var client *clientv3.Client
+	var cleanupOnce sync.Once
+	cleanup := func() {
+		cleanupOnce.Do(func() {
+			cancel()
+			if client != nil {
+				if err := client.Close(); err != nil {
+					t.Errorf("close etcd client: %v", err)
+				}
+			}
+			etcd.Close()
+		})
+	}
+	t.Cleanup(cleanup)
+	client, err = etcdutil.CreateEtcdClient(nil, cfg.ListenClientUrls, etcdutil.TestEtcdClientPurpose, true)
 	re.NoError(err)
 	<-etcd.Server.ReadyNotify()
 
-	return ctx, client, func() {
-		cancel()
-		etcd.Close()
-		client.Close()
-		os.RemoveAll(cfg.Dir)
-	}
+	return ctx, client, cleanup
 }
 
 // setupAffinityManager creates and initializes an affinity manager and watcher.

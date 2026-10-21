@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/pingcap/failpoint"
@@ -116,6 +117,33 @@ func (suite *ruleCheckerTestSuite) TestAddRulePeerWithIsolationLevel() {
 		IsolationLevel: "rack",
 	})
 	re.NoError(err)
+	op = suite.rc.Check(suite.cluster.GetRegion(1))
+	re.NotNil(op)
+	re.Equal("add-rule-peer", op.Desc())
+	re.Equal(uint64(4), op.Step(0).(operator.AddLearner).ToStore)
+}
+
+func (suite *ruleCheckerTestSuite) TestAddRulePeerWithIsolationLevelCaseInsensitive() {
+	re := suite.Require()
+	suite.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "Z1", "host": "h1"})
+	suite.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z2", "host": "h2"})
+	suite.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z1", "host": "h3"})
+	suite.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2)
+	err := suite.ruleManager.SetRule(&placement.Rule{
+		GroupID:        placement.DefaultGroupID,
+		ID:             "test",
+		Index:          100,
+		Override:       true,
+		Role:           placement.Voter,
+		Count:          3,
+		LocationLabels: []string{"zone", "host"},
+		IsolationLevel: "zone",
+	})
+	re.NoError(err)
+	// Store 3 is in the same zone as store 1, so no store satisfies zone isolation.
+	op := suite.rc.Check(suite.cluster.GetRegion(1))
+	re.Nil(op)
+	suite.cluster.AddLabelsStore(4, 1, map[string]string{"zone": "z3", "host": "h4"})
 	op = suite.rc.Check(suite.cluster.GetRegion(1))
 	re.NotNil(op)
 	re.Equal("add-rule-peer", op.Desc())
@@ -1825,6 +1853,53 @@ func (suite *ruleCheckerTestSuite) TestPreferAddTiFlashLearnerOverOfflinePeer() 
 	re.Equal("replace-rule-offline-peer", op.Desc())
 }
 
+func (suite *ruleCheckerTestSuite) TestPreferAvailableTiFlashLearnerRuleOverOfflinePeer() {
+	re := suite.Require()
+	suite.cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	suite.cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
+	suite.cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
+	suite.cluster.AddLabelsStore(4, 1, map[string]string{"host": "host4", core.EngineKey: core.EngineTiFlash, "zone": "z1"})
+	suite.cluster.AddLabelsStore(5, 1, map[string]string{"host": "host5", core.EngineKey: core.EngineTiFlash, "zone": "z2"})
+	suite.cluster.AddLabelsStore(6, 1, map[string]string{"host": "host6"})
+	suite.cluster.AddLeaderRegion(1, 1, 2, 3)
+	err := suite.ruleManager.SetRule(&placement.Rule{
+		GroupID: placement.DefaultGroupID,
+		ID:      placement.DefaultRuleID,
+		Role:    placement.Voter,
+		Count:   3,
+	})
+	re.NoError(err)
+	err = suite.ruleManager.DeleteRule(placement.DefaultGroupID, "witness")
+	re.NoError(err)
+	for _, rule := range []struct {
+		group string
+		zone  string
+	}{
+		{group: "tiflash-a", zone: "z1"},
+		{group: "tiflash-b", zone: "z2"},
+	} {
+		err = suite.ruleManager.SetRule(&placement.Rule{
+			GroupID: rule.group,
+			ID:      "learner",
+			Role:    placement.Learner,
+			Count:   1,
+			LabelConstraints: []placement.LabelConstraint{
+				{Key: core.EngineKey, Op: placement.In, Values: []string{core.EngineTiFlash}},
+				{Key: "zone", Op: placement.In, Values: []string{rule.zone}},
+			},
+		})
+		re.NoError(err)
+	}
+
+	suite.cluster.SetStoreOffline(2)
+	suite.cluster.SetStoreOffline(4)
+	op := suite.rc.Check(suite.cluster.GetRegion(1))
+	re.NotNil(op)
+	re.Equal("add-rule-peer", op.Desc())
+	addLearner := op.Step(0).(operator.AddLearner)
+	re.Equal(uint64(5), addLearner.ToStore)
+}
+
 func (suite *ruleCheckerTestSuite) TestDoNotPreferTiFlashSwapFitOverOfflinePeer() {
 	re := suite.Require()
 	suite.cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
@@ -2428,7 +2503,7 @@ func makeStores() placement.StoreSet {
 func makeRegion(def string) (*core.RegionInfo, error) {
 	var regionMeta metapb.Region
 	var leader *metapb.Peer
-	for _, peerDef := range strings.Split(def, ",") {
+	for peerDef := range strings.SplitSeq(def, ",") {
 		role, idStr := placement.Follower, peerDef
 		if strings.Contains(peerDef, "_") {
 			splits := strings.Split(peerDef, "_")
@@ -2462,7 +2537,7 @@ func makeRule(def string) (*placement.Rule, error) {
 	}
 	rule.Role = placement.PeerRoleType(splits[1])
 	// only support k=v type constraint
-	for _, c := range strings.Split(splits[2], ",") {
+	for c := range strings.SplitSeq(splits[2], ",") {
 		if c == "" {
 			break
 		}
@@ -2676,4 +2751,24 @@ func (suite *ruleCheckerTestSuite) TestFixBetterLocationEngineConstraint() {
 	region2 := suite.cluster.GetRegion(2)
 	op = suite.rc.Check(region2)
 	re.Empty(op)
+}
+
+func TestRecorderRefreshLooksUpStoreIDNotCount(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	// Store 5 exists and is live -- it's the counter *value* below, not a
+	// store ID. Store 999, the counter's real key, is never registered.
+	cluster.AddRegionStore(5, 0)
+
+	rec := newRecord()
+	rec.offlineLeaderCounter[999] = 5
+	rec.lastUpdateTime = time.Now().Add(-offlineCounterTTL - time.Minute)
+
+	// If refresh's loop bound its range variable to the map value instead of
+	// the key, it would look up store 5 (found, live) instead of store 999
+	// (not found) and wrongly conclude nothing needs cleaning.
+	rec.refresh(cluster)
+
+	re.Empty(rec.offlineLeaderCounter)
 }

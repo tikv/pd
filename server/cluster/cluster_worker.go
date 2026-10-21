@@ -98,7 +98,7 @@ func (c *RaftCluster) HandleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSp
 	}
 
 	peerIDs := make([]uint64, len(request.Region.Peers))
-	for i := 0; i < len(peerIDs); i++ {
+	for i := range peerIDs {
 		if peerIDs[i], _, err = c.id.Alloc(1); err != nil {
 			return nil, err
 		}
@@ -154,7 +154,7 @@ func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 		}
 
 		peerIDs := make([]uint64, len(request.Region.Peers))
-		for i := 0; i < len(peerIDs); i++ {
+		for i := range peerIDs {
 			if peerIDs[i], _, err = c.id.Alloc(1); err != nil {
 				return nil, err
 			}
@@ -183,8 +183,8 @@ func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 	if request.GetReason() == pdpb.SplitReason_LOAD {
 		c.GetCoordinator().GetCheckerController().RecordSplitScatterBatch(
 			reqRegion.GetId(),
-			// Wait until PD observes the source region version advanced by the split.
-			reqRegion.GetRegionEpoch().GetVersion()+1,
+			// TiKV assigns every result region oldVersion+len(split requests).
+			reqRegion.GetRegionEpoch().GetVersion()+uint64(len(newRegionIDs)),
 			newRegionIDs,
 		)
 	}

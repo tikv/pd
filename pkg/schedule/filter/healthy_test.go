@@ -15,7 +15,6 @@
 package filter
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -30,8 +29,7 @@ import (
 
 func TestIsRegionHealthy(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	peers := func(ids ...uint64) []*metapb.Peer {
 		var peers []*metapb.Peer
 		for _, id := range ids {

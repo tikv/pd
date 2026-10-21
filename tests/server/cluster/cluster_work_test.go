@@ -15,12 +15,13 @@
 package cluster_test
 
 import (
-	"sort"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/suite"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
@@ -151,7 +152,16 @@ func (s *raftClusterTestSuite) checkAskSplit(cluster *tests.TestCluster) {
 }
 
 func (s *raftClusterTestSuite) TestPendingProcessedRegions() {
-	s.env.RunTestInNonMicroserviceEnv(s.checkPendingProcessedRegions)
+	re := s.Require()
+	// Keep the batch-split entries pending until the assertion. Use a fresh
+	// environment so no patrol pass is already in flight when it is disabled.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/skipPatrolRegions", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/skipPatrolRegions"))
+	}()
+	env := tests.NewSchedulingTestEnvironment(s.T())
+	defer env.Cleanup()
+	env.RunTestInNonMicroserviceEnv(s.checkPendingProcessedRegions)
 }
 
 func (s *raftClusterTestSuite) checkPendingProcessedRegions(cluster *tests.TestCluster) {
@@ -186,8 +196,8 @@ func (s *raftClusterTestSuite) checkPendingProcessedRegions(cluster *tests.TestC
 	res, err := rc.HandleAskBatchSplit(req)
 	re.NoError(err)
 	ids := []uint64{regions[0].GetMeta().GetId(), res.Ids[0].NewRegionId, res.Ids[1].NewRegionId}
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	slices.Sort(ids)
 	pendingProcessedRegions := rc.GetPendingProcessedRegions()
-	sort.Slice(pendingProcessedRegions, func(i, j int) bool { return pendingProcessedRegions[i] < pendingProcessedRegions[j] })
+	slices.Sort(pendingProcessedRegions)
 	re.Equal(ids, pendingProcessedRegions)
 }

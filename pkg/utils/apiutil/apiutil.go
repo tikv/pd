@@ -27,6 +27,7 @@ import (
 	"net/url"
 	"path"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -43,7 +44,6 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/slice"
 )
 
 const (
@@ -500,6 +500,7 @@ func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		r.URL.Host = url.Host
 		r.URL.Scheme = url.Scheme
 
+		// #nosec G704 -- Callers pass parsed PD member or service-discovery endpoints.
 		resp, err := p.client.Do(r)
 		if err != nil {
 			log.Warn("request failed", errs.ZapError(errs.ErrSendRequest, err))
@@ -559,7 +560,7 @@ func copyHeader(dst, src http.Header) {
 		}
 		values := dst[k]
 		for _, v := range vv {
-			if !slice.Contains(values, v) {
+			if !slices.Contains(values, v) {
 				dst.Add(k, v)
 			}
 		}

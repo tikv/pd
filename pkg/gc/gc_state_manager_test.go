@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"math"
 	"math/rand/v2"
-	"os"
 	"slices"
 	"strconv"
 	"sync"
@@ -28,6 +27,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sasha-s/go-deadlock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -55,6 +55,9 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	// Deadlock detection stays enabled, but pooled timers cannot cross synctest
+	// bubble boundaries. Set this once before any tests start acquiring locks.
+	deadlock.Opts.TimerPool = deadlock.TimerPoolDisabled
 	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
@@ -117,6 +120,7 @@ func (opt *newGCStateManagerForTestOptions) generateKeyspacesByCount(count int) 
 func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions) (storage *endpoint.StorageEndpoint, provider endpoint.GCStateProvider, gcStateManager *GCStateManager, clean func(), cancel context.CancelFunc) {
 	cfg := config.NewConfig()
 	re := require.New(t)
+	re.NoError(cfg.Adjust(nil, false))
 
 	var etcdClusterOpt etcdutil.TestEtcdClusterOptions
 	etcdClusterOpt.ServerCfgModifier = opt.etcdServerCfgModifier
@@ -144,6 +148,7 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 	kgm := keyspace.NewKeyspaceGroupManager(ctx, s, client)
 	keyspaceManager := keyspace.NewKeyspaceManager(ctx, s, mockcluster.NewCluster(ctx, config.NewPersistOptions(cfg)), allocator, &config.KeyspaceConfig{}, kgm, nil)
 	gcStateManager = NewGCStateManager(s.GetGCStateProvider(), cfg.PDServerCfg, keyspaceManager)
+	t.Cleanup(gcStateManager.CloseBarrierMetrics)
 
 	err = kgm.Bootstrap(ctx)
 	re.NoError(err)
@@ -570,9 +575,8 @@ func (s *gcStateManagerTestSuite) TestCompatibleUpdateGCSafePointSequentiallyWit
 		return wb.SetGCSafePoint(keyspaceID, 101)
 	})
 	re.NoError(err)
-	oldLeadership := s.manager.nodeLeadership.Load()
-	s.manager.nodeLeadership.Store(0)
-	defer s.manager.nodeLeadership.Store(oldLeadership)
+	oldGeneration := s.manager.activeGeneration.Swap(nil)
+	defer s.manager.activeGeneration.Store(oldGeneration)
 
 	gcSafePoint, err = s.manager.CompatibleLoadGCSafePoint(keyspaceID)
 	re.NoError(err)
@@ -2076,6 +2080,7 @@ func (s *gcStateManagerTestSuite) TestGetGCStateWithGlobalGCBarriersRejectsRevis
 		s.manager.cfg,
 		s.manager.keyspaceManager,
 	)
+	s.T().Cleanup(otherManager.CloseBarrierMetrics)
 	otherManager.OnNodeBecomesLeader()
 	_, err = otherManager.SetGlobalGCBarrier(
 		ctx,
@@ -3098,8 +3103,7 @@ func TestGetMaxTxnSafePointAmongAllKeyspacesOnTooManyKeyspaces(t *testing.T) {
 
 func benchmarkGetAllKeyspacesGCStatesImpl(b *testing.B, excludeGCBarriers bool, keyspacesCount int, parallelism int) {
 	re := require.New(b)
-	fname := testutil.InitTempFileLogger("info")
-	defer os.Remove(fname)
+	fname := testutil.InitTempFileLogger(b, "info")
 
 	opt := newGCStateManagerForTestOptions{
 		specifyInitialKeyspaces: make([]*keyspace.CreateKeyspaceByIDRequest, 0, keyspacesCount),
@@ -3131,14 +3135,14 @@ func benchmarkGetAllKeyspacesGCStatesImpl(b *testing.B, excludeGCBarriers bool, 
 		clean()
 	}()
 
-	b.ResetTimer()
 	if parallelism == 0 {
-		for range b.N {
+		for b.Loop() {
 			_, err := gcStateManager.GetAllKeyspacesGCStates(context.Background(), excludeGCBarriers)
 			re.NoError(err)
 		}
 	} else {
 		b.SetParallelism(parallelism)
+		b.ResetTimer()
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
 				_, err := gcStateManager.GetAllKeyspacesGCStates(context.Background(), excludeGCBarriers)
@@ -3222,8 +3226,7 @@ func BenchmarkGetAllKeyspacesGCStates_ExcludeGCBarriers_KS100_P128(b *testing.B)
 func benchmarkGetGCStateImpl(b *testing.B, excludeGCBarriers bool, keyspacesCount int, parallelism int, concurrentWriteThreads int) {
 	re := require.New(b)
 
-	fname := testutil.InitTempFileLogger("info")
-	defer os.Remove(fname)
+	fname := testutil.InitTempFileLogger(b, "info")
 
 	opt := newGCStateManagerForTestOptions{
 		specifyInitialKeyspaces: make([]*keyspace.CreateKeyspaceByIDRequest, 0, keyspacesCount),
@@ -3286,15 +3289,15 @@ func benchmarkGetGCStateImpl(b *testing.B, excludeGCBarriers bool, keyspacesCoun
 		wg.Wait()
 	}()
 
-	b.ResetTimer()
 	if parallelism == 0 {
-		for range b.N {
+		for b.Loop() {
 			keyspaceID := rand.Uint32N(uint32(keyspacesCount)) + 1
 			_, err := gcStateManager.GetGCState(keyspaceID, excludeGCBarriers)
 			re.NoError(err)
 		}
 	} else {
 		b.SetParallelism(parallelism)
+		b.ResetTimer()
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
 				keyspaceID := rand.Uint32N(uint32(keyspacesCount)) + 1
