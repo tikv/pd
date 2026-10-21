@@ -525,7 +525,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 			return nil
 		}
 		if err := rw.ruleManager.TryCommitPatchLocked(rw.patch); err != nil {
-			log.Error("failed to commit patch", logutil.ZapRedactString("error", err.Error()))
+			log.Error("failed to commit patch", zap.Error(err))
 			return err
 		}
 		for _, kr := range suspectKeyRanges.Ranges() {

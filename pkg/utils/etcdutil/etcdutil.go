@@ -505,7 +505,7 @@ func (lw *LoopWatcher) StartWatchLoop() {
 					zap.String("key", lw.key),
 					zap.Int64("next-revision", nextRevision),
 					zap.Time("retry-at", time.Now().Add(lw.watchChangeRetryInterval)),
-					logutil.ZapRedactString("error", err.Error()))
+					zap.Error(err))
 				watchStartRevision = nextRevision
 				time.Sleep(lw.watchChangeRetryInterval)
 				failpoint.Inject("updateClient", func() {
@@ -549,7 +549,7 @@ func (lw *LoopWatcher) initFromEtcd(ctx context.Context) int64 {
 		}
 	}
 	if err != nil {
-		log.Warn("meet error when loading in watch loop", zap.String("name", lw.name), zap.String("key", lw.key), logutil.ZapRedactString("error", err.Error()))
+		log.Warn("meet error when loading in watch loop", zap.String("name", lw.name), zap.String("key", lw.key), zap.Error(err))
 	} else {
 		log.Info("load finished in watch loop", zap.String("name", lw.name), zap.String("key", lw.key))
 	}
@@ -615,7 +615,7 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 			loadedRevision, loadErr := lw.load(ctx)
 			if loadErr != nil {
 				log.Warn("force load key failed in watch loop",
-					zap.String("name", lw.name), zap.String("key", lw.key), zap.Int64("revision", revision), logutil.ZapRedactString("error", loadErr.Error()))
+					zap.String("name", lw.name), zap.String("key", lw.key), zap.Int64("revision", revision), zap.Error(loadErr))
 			} else {
 				revision = loadedRevision
 				log.Info("force load key successfully in watch loop",
@@ -674,7 +674,7 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 				goto watchChanLoop
 			}
 			if err := lw.preEventsFn(wresp.Events); err != nil {
-				log.Error("run pre event failed in watch loop", logutil.ZapRedactString("error", err.Error()),
+				log.Error("run pre event failed in watch loop", zap.Error(err),
 					zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
 			}
 			var appliedEvents []*clientv3.Event
@@ -682,7 +682,7 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 				switch event.Type {
 				case clientv3.EventTypePut:
 					if err := lw.putFn(event.Kv); err != nil {
-						log.Error("put failed in watch loop", logutil.ZapRedactString("error", err.Error()),
+						log.Error("put failed in watch loop", zap.Error(err),
 							zap.Int64("revision", revision), zap.String("name", lw.name),
 							zap.String("watch-key", lw.key), zap.ByteString("event-kv-key", event.Kv.Key))
 					} else {
@@ -695,7 +695,7 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 					}
 				case clientv3.EventTypeDelete:
 					if err := lw.deleteFn(event.Kv); err != nil {
-						log.Error("delete failed in watch loop", logutil.ZapRedactString("error", err.Error()),
+						log.Error("delete failed in watch loop", zap.Error(err),
 							zap.Int64("revision", revision), zap.String("name", lw.name),
 							zap.String("watch-key", lw.key), zap.ByteString("event-kv-key", event.Kv.Key))
 					} else {
@@ -708,7 +708,7 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 				}
 			}
 			if err := lw.postEventsFn(wresp.Events); err != nil {
-				log.Error("run post event failed in watch loop", logutil.ZapRedactString("error", err.Error()),
+				log.Error("run post event failed in watch loop", zap.Error(err),
 					zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
 				var reloadFn func(context.Context) (int64, error)
 				if lw.retryOnPostEventError {
@@ -723,7 +723,7 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 				} else if lw.atomicLoadCallbacks {
 					log.Warn("watch callback batch failed, reload from etcd in watch loop",
 						zap.Int64("revision", revision), zap.String("name", lw.name),
-						zap.String("key", lw.key), logutil.ZapRedactString("error", err.Error()))
+						zap.String("key", lw.key), zap.Error(err))
 					reloadFn = lw.load
 				}
 				if reloadFn != nil {
@@ -782,7 +782,7 @@ func (lw *LoopWatcher) reloadWithRetry(
 
 		log.Warn("failed to reload watcher state, retrying",
 			zap.String("name", lw.name), zap.String("key", lw.key),
-			zap.Duration("retry-interval", retryInterval), logutil.ZapRedactString("error", err.Error()))
+			zap.Duration("retry-interval", retryInterval), zap.Error(err))
 		retryTimer := time.NewTimer(retryInterval)
 		select {
 		case <-ctx.Done():
@@ -811,7 +811,7 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 	if err := lw.preEventsFn([]*clientv3.Event{}); err != nil {
 		preErr = err
 		log.Error("run pre event failed in watch loop", zap.String("name", lw.name),
-			zap.String("key", lw.key), logutil.ZapRedactString("error", err.Error()))
+			zap.String("key", lw.key), zap.Error(err))
 	}
 	defer func() {
 		if consistentLoad && lw.atomicLoadCallbacks &&
@@ -820,7 +820,7 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 		}
 		if postErr := lw.postEventsFn([]*clientv3.Event{}); postErr != nil {
 			log.Error("run post event failed in watch loop", zap.String("name", lw.name),
-				zap.String("key", lw.key), logutil.ZapRedactString("error", postErr.Error()))
+				zap.String("key", lw.key), zap.Error(postErr))
 			if consistentLoad && err == nil {
 				err = postErr
 			}
@@ -901,7 +901,7 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 						callbackErr = putErr
 					}
 					log.Warn("put failed in watch loop when loading consistent snapshot", zap.String("name", lw.name), zap.String("watch-key", lw.key),
-						zap.ByteString("key", item.Key), logutil.ZapRedactByteString("value", item.Value), logutil.ZapRedactString("error", putErr.Error()))
+						zap.ByteString("key", item.Key), logutil.ZapRedactByteString("value", item.Value), zap.Error(putErr))
 				} else {
 					if lw.reconcileDeletedKeys {
 						snapshotKeys[string(item.Key)] = struct{}{}
@@ -938,7 +938,7 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 			err = lw.putFn(item)
 			if err != nil {
 				log.Error("put failed in watch loop when loading", zap.String("name", lw.name), zap.String("watch-key", lw.key),
-					zap.ByteString("key", item.Key), logutil.ZapRedactByteString("value", item.Value), logutil.ZapRedactString("error", err.Error()))
+					zap.ByteString("key", item.Key), logutil.ZapRedactByteString("value", item.Value), zap.Error(err))
 			} else {
 				log.Debug("put successfully in watch loop when loading", zap.String("name", lw.name), zap.String("watch-key", lw.key),
 					zap.ByteString("key", item.Key), logutil.ZapRedactByteString("value", item.Value))
@@ -968,7 +968,7 @@ func (lw *LoopWatcher) reconcileLoadedKeys(snapshotKeys map[string]struct{}) ([]
 			}
 			log.Warn("delete failed in watch loop when reconciling loaded keys",
 				zap.String("name", lw.name), zap.String("watch-key", lw.key),
-				zap.String("key", key), logutil.ZapRedactString("error", err.Error()))
+				zap.String("key", key), zap.Error(err))
 			continue
 		}
 		reconciledDeletedKeys = append(reconciledDeletedKeys, key)

@@ -393,7 +393,6 @@ func TestRuleWatcherAllowsEmptyInitialSnapshot(t *testing.T) {
 
 func TestWatcherLogRedact(t *testing.T) {
 	const startKey, endKey = "7365637265742d7374617274", "7365637265742d7a"
-	const invalidPlacementKey, invalidLabelKey = "invalid-placement-key", "invalid-label-key"
 	ctx, client, clean := prepare(t, false)
 	defer clean()
 
@@ -470,54 +469,13 @@ func TestWatcherLogRedact(t *testing.T) {
 					regionLabeler.GetLabelRule(labelRule.ID).Index == 1
 			})
 
-			// Invalid keys also appear in callback errors and snapshot retry errors.
-			invalidRule := rule.Clone()
-			invalidRule.StartKeyHex = invalidPlacementKey
-			_, err = client.Put(ctx, keypath.RuleKeyPath(rule.StoreKey()), invalidRule.String())
-			re.NoError(err)
-			testutil.Eventually(re, func() bool {
-				output := readLog()
-				return strings.Contains(output, "put failed in watch loop") &&
-					strings.Contains(output, "failed to reload watcher state")
-			})
-			rule.Count = 3
-			_, err = client.Put(ctx, keypath.RuleKeyPath(rule.StoreKey()), rule.String())
-			re.NoError(err)
-			testutil.Eventually(re, func() bool {
-				return fixture.ruleManager.GetRule(rule.GroupID, rule.ID).Count == 3
-			})
-
-			invalidLabelRule := *labelRule
-			invalidLabelRule.Data = labeler.MakeKeyRanges(startKey, invalidLabelKey)
-			invalidLabelJSON, err := json.Marshal(&invalidLabelRule)
-			re.NoError(err)
-			labelLogStart := len(readLog())
-			_, err = client.Put(ctx, keypath.RegionLabelKeyPath(labelRule.ID), string(invalidLabelJSON))
-			re.NoError(err)
-			testutil.Eventually(re, func() bool {
-				for line := range strings.SplitSeq(readLog()[labelLogStart:], "\n") {
-					if strings.Contains(line, "put failed in watch loop") &&
-						strings.Contains(line, "[name=scheduling-region-label-watcher]") {
-						return true
-					}
-				}
-				return false
-			})
-			labelRule.Index = 2
-			labelJSON, err = json.Marshal(labelRule)
-			re.NoError(err)
-			_, err = client.Put(ctx, keypath.RegionLabelKeyPath(labelRule.ID), string(labelJSON))
-			re.NoError(err)
-			testutil.Eventually(re, func() bool {
-				return regionLabeler.GetLabelRule(labelRule.ID).Index == 2
-			})
 			closeWatcher()
 
 			output := readLog()
 			for _, msg := range []string{"update placement rule", "update region label rule", "put successfully in watch loop when loading", "put successfully in watch loop"} {
 				re.Contains(output, msg)
 			}
-			for _, key := range []string{startKey, endKey, invalidPlacementKey, invalidLabelKey} {
+			for _, key := range []string{startKey, endKey} {
 				if mode.typ == logutil.RedactInfoLogON {
 					re.NotContains(output, key)
 				} else {
@@ -527,10 +485,8 @@ func TestWatcherLogRedact(t *testing.T) {
 			switch mode.typ {
 			case logutil.RedactInfoLogON:
 				re.Contains(output, "[value=?]")
-				re.Contains(output, "[error=?]")
 			case logutil.RedactInfoLogMarker:
 				re.Contains(output, `[value="‹{`)
-				re.Contains(output, `[error="‹`)
 			}
 			re.Equal(startKey, fixture.ruleManager.GetRule(rule.GroupID, rule.ID).StartKeyHex)
 			re.Equal(endKey, regionLabeler.GetLabelRule(labelRule.ID).GetKeyRanges()[0].EndKeyHex)

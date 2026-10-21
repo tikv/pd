@@ -128,7 +128,7 @@ func (w *Watcher) initializeAffinityLabelWatcher(ctx context.Context) error {
 		log.Info("update affinity label rule", zap.String("key", key), logutil.ZapRedactByteString("value", kv.Value))
 		rule, err := labeler.NewLabelRuleFromJSON(kv.Value)
 		if err != nil {
-			log.Warn("failed to unmarshal affinity label rule", zap.String("key", key), logutil.ZapRedactString("error", err.Error()))
+			log.Warn("failed to unmarshal affinity label rule", zap.String("key", key), zap.Error(err))
 			return err
 		}
 		return w.affinityManager.SyncKeyRangesFromEtcd(rule)

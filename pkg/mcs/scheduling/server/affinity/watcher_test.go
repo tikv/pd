@@ -18,7 +18,6 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -205,7 +204,6 @@ func TestWatcherLoadExistingData(t *testing.T) {
 func TestAffinityLabelWatcherLogRedact(t *testing.T) {
 	const startKey, endKey = "7365637265742d7374617274", "7365637265742d7a"
 	const secondStartKey, secondEndKey = "7365637265742d7a61", "7365637265742d7a62"
-	const invalidKey = "invalid-affinity-key"
 	ctx, client, clean := prepare(t)
 	defer clean()
 
@@ -257,26 +255,13 @@ func TestAffinityLabelWatcherLogRedact(t *testing.T) {
 				return manager.GetAffinityGroupState(group.ID).RangeCount == 2
 			})
 
-			// Validation errors repeat the invalid key separately from the payload.
-			invalidRule := makeTestLabelRule(group.ID, startKey, invalidKey)
-			re.NoError(putLabelRule(ctx, client, invalidRule))
-			testutil.Eventually(re, func() bool {
-				output := readLog()
-				return strings.Contains(output, "failed to unmarshal affinity label rule") &&
-					strings.Contains(output, "put failed in watch loop")
-			})
-			labelRule = makeTestLabelRule(group.ID, startKey, endKey)
-			re.NoError(putLabelRule(ctx, client, labelRule))
-			testutil.Eventually(re, func() bool {
-				return manager.GetAffinityGroupState(group.ID).RangeCount == 1
-			})
 			closeWatcher()
 
 			output := readLog()
 			for _, msg := range []string{"update affinity label rule", "put successfully in watch loop when loading", "put successfully in watch loop"} {
 				re.Contains(output, msg)
 			}
-			for _, key := range []string{startKey, endKey, secondStartKey, secondEndKey, invalidKey} {
+			for _, key := range []string{startKey, endKey, secondStartKey, secondEndKey} {
 				if mode.typ == logutil.RedactInfoLogON {
 					re.NotContains(output, key)
 				} else {
@@ -286,10 +271,8 @@ func TestAffinityLabelWatcherLogRedact(t *testing.T) {
 			switch mode.typ {
 			case logutil.RedactInfoLogON:
 				re.Contains(output, "[value=?]")
-				re.Contains(output, "[error=?]")
 			case logutil.RedactInfoLogMarker:
 				re.Contains(output, `[value="‹{`)
-				re.Contains(output, `[error="‹`)
 			}
 			stored, err := client.Get(ctx, keypath.RegionLabelKeyPath(labelRule.ID))
 			re.NoError(err)

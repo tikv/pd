@@ -328,7 +328,7 @@ func (s *Server) campaignPrimary(expectedPrimary string) {
 	log.Info("triggering the primary callback functions")
 	for _, cb := range s.primaryCallbacks {
 		if err := cb(ctx); err != nil {
-			log.Error("failed to trigger the primary callback functions", logutil.ZapRedactString("error", err.Error()))
+			log.Error("failed to trigger the primary callback functions", errs.ZapError(err))
 			return
 		}
 	}

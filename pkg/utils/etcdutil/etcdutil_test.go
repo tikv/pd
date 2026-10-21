@@ -635,8 +635,7 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadReturnsLifecycleErrors() {
 
 func (suite *loopWatcherTestSuite) TestWatcherLoadLogRedact() {
 	const payload = `{"start_key":"736563726574","end_key":"7a"}`
-	const sensitiveErrorKey = "tenant-sensitive-invalid-key"
-	callbackErr := errors.New("invalid end_key: " + sensitiveErrorKey)
+	callbackErr := errors.New("put callback failed")
 	for _, consistent := range []bool{false, true} {
 		for _, mode := range []struct {
 			name string
@@ -686,17 +685,14 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadLogRedact() {
 				re.NoError(err)
 				re.Contains(string(output), "put successfully in watch loop when loading")
 				re.Contains(string(output), "put failed in watch loop when loading")
+				re.Contains(string(output), `[error="put callback failed"]`)
 				if mode.typ == logutil.RedactInfoLogON {
 					re.Equal(2, strings.Count(string(output), "[value=?]"))
-					re.Contains(string(output), "[error=?]")
 					re.NotContains(string(output), "736563726574")
-					re.NotContains(string(output), sensitiveErrorKey)
 				} else {
 					re.Contains(string(output), "736563726574")
-					re.Contains(string(output), sensitiveErrorKey)
 					if mode.typ == logutil.RedactInfoLogMarker {
 						re.Equal(2, strings.Count(string(output), `[value="‹`))
-						re.Contains(string(output), `[error="‹`)
 					}
 				}
 			})
