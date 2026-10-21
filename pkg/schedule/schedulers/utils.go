@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/plan"
+	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -485,7 +486,11 @@ func calculateRangeCount(c sche.SchedulerCluster, stores []*core.StoreInfo, stor
 	var storeCount float64
 	rules := c.GetRuleManager().GetRulesForApplyRange(startKey, endKey)
 	if r == core.LeaderScatter {
-		return float64(c.GetRegionCount(startKey, endKey)) * rangeLeaderWeight(stores, store, rules)
+		weight := rangeLeaderWeight(stores, store, rules)
+		if weight == 0 {
+			return 0
+		}
+		return float64(c.GetRegionCount(startKey, endKey)) * weight
 	}
 	for _, rule := range rules {
 		if !isSatisfyRole(r, rule.Role) {
@@ -535,6 +540,14 @@ func rangeLeaderWeight(stores []*core.StoreInfo, store *core.StoreInfo, rules []
 			role = placement.Leader
 			break
 		}
+	}
+	// Most stores may be outside this rule range's leader targets. Skip the
+	// candidate scan for them before counting the matching stores.
+	if store.IsRemoving() || store.IsRemoved() || !slice.AnyOf(rules, func(i int) bool {
+		rule := rules[i]
+		return rule.Role == role && !rule.IsWitness && placement.MatchLabelConstraints(store, rule.LabelConstraints)
+	}) {
+		return 0
 	}
 	count := 0
 	eligible := false

@@ -140,6 +140,7 @@ func TestRangeLeaderDemand(t *testing.T) {
 		want  []float64
 	}{
 		{"explicit leader", []*placement.Rule{rule(placement.Leader, 1, "A"), rule(placement.Voter, 2, "B")}, []float64{1, 0, 0}},
+		{"explicit leader after voter", []*placement.Rule{rule(placement.Voter, 2, "B"), rule(placement.Leader, 1, "A")}, []float64{1, 0, 0}},
 		{"single voter", []*placement.Rule{rule(placement.Voter, 3)}, []float64{1.0 / 3, 1.0 / 3, 1.0 / 3}},
 		{"disjoint voters", []*placement.Rule{rule(placement.Voter, 1, "A"), rule(placement.Voter, 2, "B")}, []float64{1.0 / 3, 1.0 / 3, 1.0 / 3}},
 		{"overlapping voters", []*placement.Rule{rule(placement.Voter, 1, "A"), rule(placement.Voter, 2)}, []float64{1.0 / 3, 1.0 / 3, 1.0 / 3}},
@@ -218,4 +219,30 @@ func TestRangeLeaderDemandAcrossRuleRanges(t *testing.T) {
 	for _, store := range tc.GetStores() {
 		re.Equal(1.0, getCountThreshold(tc, tc.GetStores(), store, keyutil.NewKeyRange("a", "z"), core.LeaderScatter))
 	}
+}
+
+func TestRangeLeaderWeightLabelChanges(t *testing.T) {
+	re := require.New(t)
+	stores := []*core.StoreInfo{
+		core.NewStoreInfo(&metapb.Store{Id: 1, Labels: []*metapb.StoreLabel{{Key: "zone", Value: "A"}}}),
+		core.NewStoreInfo(&metapb.Store{Id: 2, Labels: []*metapb.StoreLabel{{Key: "zone", Value: "B"}}}),
+		core.NewStoreInfo(&metapb.Store{Id: 3, Labels: []*metapb.StoreLabel{{Key: "zone", Value: "B"}, {Key: "engine", Value: "tiflash"}}}),
+	}
+	rules := []*placement.Rule{
+		{Role: placement.Leader, Count: 1, LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: placement.In, Values: []string{"A"}}}},
+		{Role: placement.Voter, Count: 2},
+	}
+	check := func(want []float64) {
+		for i, store := range stores {
+			re.Equal(want[i], rangeLeaderWeight(stores, store, rules))
+		}
+	}
+	check([]float64{1, 0, 0})
+	rules[0].LabelConstraints[0].Values = []string{"B"}
+	// The TiFlash store needs an explicit engine constraint to match.
+	check([]float64{0, 1, 0})
+	rules = rules[1:]
+	check([]float64{0.5, 0.5, 0})
+	// Matching labels alone do not make a store part of the supplied population.
+	re.Zero(rangeLeaderWeight(stores[:1], stores[1], rules))
 }
