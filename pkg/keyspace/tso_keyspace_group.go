@@ -1415,8 +1415,6 @@ func (m *GroupManager) removeKeyspacesFromGroupBatch(
 	return kg, processedIDs, hasMore, nil
 }
 
-var failpointOnce sync.Once
-
 // UpdateKeyspaceForGroup updates the keyspace field for the keyspace group.
 func (m *GroupManager) UpdateKeyspaceForGroup(userKind endpoint.UserKind, groupID string, keyspaceID uint32, mutation int) error {
 	if m == nil {
@@ -1432,10 +1430,8 @@ func (m *GroupManager) UpdateKeyspaceForGroup(userKind endpoint.UserKind, groupI
 	}
 
 	failpoint.Inject("externalAllocNode", func(val failpoint.Value) {
-		failpointOnce.Do(func() {
-			addrs := val.(string)
-			_ = m.SetNodesForKeyspaceGroup(constant.DefaultKeyspaceGroupID, strings.Split(addrs, ","))
-		})
+		addrs := val.(string)
+		_ = m.SetNodesForKeyspaceGroup(constant.DefaultKeyspaceGroupID, strings.Split(addrs, ","))
 	})
 	m.Lock()
 	defer m.Unlock()
