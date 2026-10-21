@@ -940,6 +940,7 @@ func (m *Manager) processConsumption(ctx context.Context, consumptionInfo *consu
 	if consumptionInfo == nil || consumptionInfo.Consumption == nil {
 		return nil
 	}
+	failpoint.InjectCall("beforeProcessConsumption", recordMetrics)
 	keyspaceName, err := m.getKeyspaceNameByID(ctx, consumptionInfo.keyspaceID)
 	if err != nil {
 		return err

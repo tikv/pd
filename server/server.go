@@ -242,6 +242,7 @@ type Server struct {
 	tsoPrimaryWatcher                *etcdutil.LoopWatcher
 	schedulingPrimaryWatcher         *etcdutil.LoopWatcher
 	resourceManagerPrimaryWatcher    *etcdutil.LoopWatcher
+	resourceGroupManager             *rm_server.Manager
 	resourceGroupMetadataManager     *rm_server.Manager
 	resourceGroupMetadataManagerOnce sync.Once
 	membersCache                     *membersCache
@@ -316,7 +317,11 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 	runResourceManager := cfg.Microservice.IsResourceManagerFallbackEnabled()
 	s.registry.RegisterService("MetaStorage", ms_server.NewService)
 	if runResourceManager {
-		s.registry.RegisterService("ResourceManager", rm_server.NewService[*Server])
+		s.registry.RegisterService("ResourceManager", func(srv bs.Server) registry.RegistrableService {
+			service := rm_server.NewService[*Server](srv).(*rm_server.Service)
+			s.resourceGroupManager = service.GetManager()
+			return service
+		})
 	} else {
 		// Initialize early to register callbacks before the server starts.
 		s.GetResourceGroupMetadataManager()
@@ -482,7 +487,12 @@ func (s *Server) AddStartCallback(callbacks ...func()) {
 	s.startCallbacks = append(s.startCallbacks, callbacks...)
 }
 
-func (s *Server) startServer(ctx context.Context) error {
+func (s *Server) startServer(ctx context.Context) (retErr error) {
+	defer func() {
+		if retErr != nil {
+			s.meteringWriter.Stop()
+		}
+	}()
 	clusterID, err := endpoint.InitClusterID(s.client)
 	if err != nil {
 		log.Error("failed to init cluster id", errs.ZapError(err))
@@ -560,7 +570,8 @@ func (s *Server) startServer(ctx context.Context) error {
 	)
 	// Only start the metering writer if a valid metering config is provided.
 	if len(s.cfg.Metering.Type) > 0 {
-		s.meteringWriter, err = metering.NewWriter(s.ctx, &s.cfg.Metering, fmt.Sprintf("pd%d", s.GetMember().ID()))
+		// Close stops all producers before the writer performs its final flush.
+		s.meteringWriter, err = metering.NewWriter(context.WithoutCancel(s.ctx), &s.cfg.Metering, fmt.Sprintf("pd%d", s.GetMember().ID()))
 		if err != nil {
 			log.Warn("failed to initialize the metering writer", errs.ZapError(err))
 		} else {
@@ -617,6 +628,9 @@ func (s *Server) Close() {
 	s.cgMonitor.StopMonitor()
 
 	s.stopServerLoop()
+	if s.resourceGroupManager != nil {
+		s.resourceGroupManager.Close()
+	}
 	if s.resourceGroupMetadataManager != nil {
 		s.resourceGroupMetadataManager.Close()
 	}
