@@ -117,6 +117,13 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		if exist {
+			// A previous create may have registered the scheduler but failed to
+			// persist the scheduler list. Persist it again so that a success
+			// response always means the scheduler is persisted.
+			if err := h.PersistScheduleConfig(); err != nil {
+				h.r.JSON(w, http.StatusInternalServerError, err.Error())
+				return
+			}
 			handler, err := h.GetSchedulerConfigHandler()
 			if err == nil && handler != nil {
 				r.URL.Path = path.Join(server.SchedulerConfigHandlerPath, string(types.BalanceRangeScheduler), "job")
@@ -157,7 +164,11 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 			}
 		}
 
-		if err := apiutil.CollectStringOption("alias", input, collector); err != nil {
+		// The slice decoder unescapes the alias, so escape it here to keep the raw
+		// alias, the same as the one stored by the job handler.
+		if err := apiutil.CollectStringOption("alias", input, func(v string) {
+			collector(url.QueryEscape(v))
+		}); err != nil {
 			h.r.JSON(w, http.StatusBadRequest, err.Error())
 			return
 		}

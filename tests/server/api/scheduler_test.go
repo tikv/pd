@@ -1092,4 +1092,47 @@ func (suite *scheduleTestSuite) checkBalanceRangeAPI(cluster *tests.TestCluster)
 	// delete scheduler
 	deleteURL := fmt.Sprintf("%s/schedulers/%s", urlPrefix, types.BalanceRangeScheduler.String())
 	re.NoError(testutil.CheckDelete(tests.TestDialClient, deleteURL, testutil.StatusOK(re)))
+	assertNoScheduler(re, urlPrefix+"/schedulers", types.BalanceRangeScheduler.String())
+
+	// the alias is kept as is on create, so retrying an alias with escape
+	// characters still returns the existing job id
+	input["alias"] = "db.t+1"
+	data, err = json.Marshal(input)
+	re.NoError(err)
+	for range 2 {
+		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/schedulers", data, func(body []byte, i int, _ http.Header) {
+			re.Equal(http.StatusOK, i)
+			re.JSONEq(`"0"`, string(body))
+		}))
+	}
+	testutil.Eventually(re, func() bool {
+		resp, err := apiutil.GetJSON(tests.TestDialClient, fmt.Sprintf("%s/scheduler-config/%s/list", urlPrefix, types.BalanceRangeScheduler.String()), nil)
+		re.NoError(err)
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return false
+		}
+		b, err := io.ReadAll(resp.Body)
+		re.NoError(err)
+		var scheduler []map[string]any
+		re.NoError(json.Unmarshal(b, &scheduler))
+		re.Len(scheduler, 1)
+		re.Equal("db.t+1", scheduler[0]["alias"])
+		return true
+	})
+	re.NoError(testutil.CheckDelete(tests.TestDialClient, deleteURL, testutil.StatusOK(re)))
+	assertNoScheduler(re, urlPrefix+"/schedulers", types.BalanceRangeScheduler.String())
+
+	// retrying after the scheduler list failed to persist persists it again
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/config/persistFail", "return(true)"))
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/schedulers", data, func(_ []byte, i int, _ http.Header) {
+		re.NotEqual(http.StatusOK, i)
+	}))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/config/persistFail"))
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/schedulers", data, func(body []byte, i int, _ http.Header) {
+		re.Equal(http.StatusOK, i)
+		re.JSONEq(`"0"`, string(body))
+	}))
+	suite.assertSchedulerExists(urlPrefix+"/schedulers", types.BalanceRangeScheduler.String())
+	re.NoError(testutil.CheckDelete(tests.TestDialClient, deleteURL, testutil.StatusOK(re)))
 }
