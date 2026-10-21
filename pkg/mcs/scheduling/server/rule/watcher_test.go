@@ -491,10 +491,17 @@ func TestWatcherLogRedact(t *testing.T) {
 			invalidLabelRule.Data = labeler.MakeKeyRanges(startKey, invalidLabelKey)
 			invalidLabelJSON, err := json.Marshal(&invalidLabelRule)
 			re.NoError(err)
+			labelLogStart := len(readLog())
 			_, err = client.Put(ctx, keypath.RegionLabelKeyPath(labelRule.ID), string(invalidLabelJSON))
 			re.NoError(err)
 			testutil.Eventually(re, func() bool {
-				return strings.Count(readLog(), "put failed in watch loop") >= 2
+				for line := range strings.SplitSeq(readLog()[labelLogStart:], "\n") {
+					if strings.Contains(line, "put failed in watch loop") &&
+						strings.Contains(line, "[name=scheduling-region-label-watcher]") {
+						return true
+					}
+				}
+				return false
 			})
 			labelRule.Index = 2
 			labelJSON, err = json.Marshal(labelRule)
