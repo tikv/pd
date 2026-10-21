@@ -257,7 +257,7 @@ func newTSOStream(ctx context.Context, serverURL string, stream grpcTSOStreamAda
 
 		cancel: cancel,
 
-		ongoingRequestCountGauge: metrics.OngoingRequestCountGauge.WithLabelValues(streamID),
+		ongoingRequestCountGauge: metrics.Current().OngoingRequestCountGauge.WithLabelValues(streamID),
 	}
 	s.wg.Add(1)
 	go s.recvLoop(ctx)
@@ -324,7 +324,7 @@ func (s *tsoStream) processRequests(
 		log.Warn("failed to send RPC request through tsoStream", zap.String("stream", s.streamID), zap.Error(err))
 		return nil
 	}
-	metrics.TSOBatchSendLatency.Observe(time.Since(batchStartTime).Seconds())
+	metrics.Current().TSOBatchSendLatency.Observe(time.Since(batchStartTime).Seconds())
 	s.ongoingRequestCountGauge.Set(float64(s.ongoingRequests.Add(1)))
 	return nil
 }
@@ -397,7 +397,7 @@ func (s *tsoStream) recvLoop(ctx context.Context) {
 		micros := math.Exp(filteredValue)
 		s.estimatedLatencyMicros.Store(uint64(micros))
 		// Update the metrics in seconds.
-		metrics.EstimateTSOLatencyGauge.WithLabelValues(s.streamID).Set(micros * 1e-6)
+		metrics.Current().EstimateTSOLatencyGauge.WithLabelValues(s.streamID).Set(micros * 1e-6)
 	}
 
 recvLoop:
@@ -422,13 +422,14 @@ recvLoop:
 
 		latency := time.Since(currentReq.startTime)
 		latencySeconds := latency.Seconds()
+		metricSet := metrics.Current()
 
 		if err != nil {
 			// If a request is pending and error occurs, observe the duration it has cost.
 			// Note that it's also possible that the stream is broken due to network without being requested. In this
 			// case, `Recv` may return an error while no request is pending.
 			if hasReq {
-				metrics.RequestFailedDurationTSO.Observe(latencySeconds)
+				metricSet.RequestFailedDurationTSO.Observe(latencySeconds)
 			}
 			if err == io.EOF {
 				finishWithErr = errors.WithStack(errs.ErrClientTSOStreamClosed)
@@ -441,8 +442,8 @@ recvLoop:
 			break recvLoop
 		}
 
-		metrics.RequestDurationTSO.Observe(latencySeconds)
-		metrics.TSOBatchSize.Observe(float64(res.count))
+		metricSet.RequestDurationTSO.Observe(latencySeconds)
+		metricSet.TSOBatchSize.Observe(float64(res.count))
 		updateEstimatedLatency(currentReq.startTime, latency)
 
 		if res.count != uint32(currentReq.count) {

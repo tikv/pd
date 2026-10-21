@@ -107,7 +107,7 @@ func newTSODispatcher(
 				return batch.NewController[*Request](
 					defaultMaxTSOBatchSize*2,
 					tsoRequestFinisher(0, 0, invalidStreamID),
-					metrics.TSOBestBatchSize,
+					metrics.Current().TSOBestBatchSize,
 				)
 			},
 		},

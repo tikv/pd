@@ -48,6 +48,7 @@ func initMetricsAndRegisteredConsumers(constLabels prometheus.Labels) {
 	defer consumersInitializers.Unlock()
 	initMetrics(constLabels)
 	initLabelValues()
+	publishMetrics()
 	for _, initConsumer := range consumersInitializers.value {
 		initConsumer()
 	}
@@ -449,4 +450,188 @@ func registerMetrics() {
 	prometheus.MustRegister(QueryRegionBestBatchSize)
 	prometheus.MustRegister(QueryRegionBatchSize)
 	prometheus.MustRegister(QueryRegionBatchSendLatency)
+}
+
+// MetricSet contains one generation of client metric handles.
+// Callers must not reassign the fields returned by Current.
+type MetricSet struct {
+	TSOBestBatchSize                          prometheus.Histogram
+	TSOBatchSize                              prometheus.Histogram
+	TSOBatchSendLatency                       prometheus.Histogram
+	TSORetryCount                             prometheus.Histogram
+	RequestForwarded                          *prometheus.GaugeVec
+	OngoingRequestCountGauge                  *prometheus.GaugeVec
+	EstimateTSOLatencyGauge                   *prometheus.GaugeVec
+	QueryRegionBestBatchSize                  prometheus.Histogram
+	QueryRegionBatchSendLatency               prometheus.Histogram
+	CmdDurationTSOWait                        prometheus.Observer
+	CmdDurationTSO                            prometheus.Observer
+	CmdDurationTSOAsyncWait                   prometheus.Observer
+	CmdDurationGetRegion                      prometheus.Observer
+	CmdDurationGetAllMembers                  prometheus.Observer
+	CmdDurationGetPrevRegion                  prometheus.Observer
+	CmdDurationGetRegionByID                  prometheus.Observer
+	CmdDurationScanRegions                    prometheus.Observer
+	CmdDurationBatchScanRegions               prometheus.Observer
+	CmdDurationGetStore                       prometheus.Observer
+	CmdDurationGetAllStores                   prometheus.Observer
+	CmdDurationUpdateGCSafePoint              prometheus.Observer
+	CmdDurationUpdateServiceGCSafePoint       prometheus.Observer
+	CmdDurationScatterRegion                  prometheus.Observer
+	CmdDurationScatterRegions                 prometheus.Observer
+	CmdDurationGetOperator                    prometheus.Observer
+	CmdDurationSplitRegions                   prometheus.Observer
+	CmdDurationSplitAndScatterRegions         prometheus.Observer
+	CmdDurationLoadKeyspace                   prometheus.Observer
+	CmdDurationLoadKeyspaceByID               prometheus.Observer
+	CmdDurationUpdateKeyspaceState            prometheus.Observer
+	CmdDurationGetAllKeyspaces                prometheus.Observer
+	CmdDurationGet                            prometheus.Observer
+	CmdDurationPut                            prometheus.Observer
+	CmdDurationUpdateGCSafePointV2            prometheus.Observer
+	CmdDurationUpdateServiceSafePointV2       prometheus.Observer
+	CmdDurationQueryRegionAsyncWait           prometheus.Observer
+	CmdDurationQueryRegionWait                prometheus.Observer
+	CmdDurationQueryRegion                    prometheus.Observer
+	CmdDurationAdvanceTxnSafePoint            prometheus.Observer
+	CmdDurationAdvanceGCSafePoint             prometheus.Observer
+	CmdDurationSetGCBarrier                   prometheus.Observer
+	CmdDurationDeleteGCBarrier                prometheus.Observer
+	CmdDurationGetGCState                     prometheus.Observer
+	CmdDurationSetGlobalGCBarrier             prometheus.Observer
+	CmdDurationDeleteGlobalGCBarrier          prometheus.Observer
+	CmdDurationGetAllKeyspacesGCStates        prometheus.Observer
+	CmdFailedDurationGetRegion                prometheus.Observer
+	CmdFailedDurationTSOWait                  prometheus.Observer
+	CmdFailedDurationTSO                      prometheus.Observer
+	CmdFailedDurationGetAllMembers            prometheus.Observer
+	CmdFailedDurationGetPrevRegion            prometheus.Observer
+	CmdFailedDurationGetRegionByID            prometheus.Observer
+	CmdFailedDurationScanRegions              prometheus.Observer
+	CmdFailedDurationBatchScanRegions         prometheus.Observer
+	CmdFailedDurationGetStore                 prometheus.Observer
+	CmdFailedDurationGetAllStores             prometheus.Observer
+	CmdFailedDurationUpdateGCSafePoint        prometheus.Observer
+	CmdFailedDurationUpdateServiceGCSafePoint prometheus.Observer
+	CmdFailedDurationLoadKeyspace             prometheus.Observer
+	CmdFailedDurationLoadKeyspaceByID         prometheus.Observer
+	CmdFailedDurationUpdateKeyspaceState      prometheus.Observer
+	CmdFailedDurationGet                      prometheus.Observer
+	CmdFailedDurationPut                      prometheus.Observer
+	CmdFailedDurationUpdateGCSafePointV2      prometheus.Observer
+	CmdFailedDurationUpdateServiceSafePointV2 prometheus.Observer
+	CmdFailedDurationQueryRegionWait          prometheus.Observer
+	CmdFailedDurationQueryRegion              prometheus.Observer
+	CmdFailedDurationAdvanceTxnSafePoint      prometheus.Observer
+	CmdFailedDurationAdvanceGCSafePoint       prometheus.Observer
+	CmdFailedDurationSetGCBarrier             prometheus.Observer
+	CmdFailedDurationDeleteGCBarrier          prometheus.Observer
+	CmdFailedDurationGetGCState               prometheus.Observer
+	CmdFailedDurationSetGlobalGCBarrier       prometheus.Observer
+	CmdFailedDurationDeleteGlobalGCBarrier    prometheus.Observer
+	CmdFailedDurationGetAllKeyspacesGCStates  prometheus.Observer
+	RequestDurationTSO                        prometheus.Observer
+	RequestFailedDurationTSO                  prometheus.Observer
+	RequestDurationQueryRegion                prometheus.Observer
+	RequestFailedDurationQueryRegion          prometheus.Observer
+	QueryRegionBatchSizeTotal                 prometheus.Observer
+	QueryRegionBatchSizeByKeys                prometheus.Observer
+	QueryRegionBatchSizeByPrevKeys            prometheus.Observer
+	QueryRegionBatchSizeByIDs                 prometheus.Observer
+}
+
+var currentMetrics atomic.Pointer[MetricSet]
+
+// Current returns a complete snapshot of the current metric handles.
+// It is safe to call while metrics are initialized and registered.
+func Current() *MetricSet {
+	return currentMetrics.Load()
+}
+
+func publishMetrics() {
+	currentMetrics.Store(&MetricSet{
+		TSOBestBatchSize:                          TSOBestBatchSize,
+		TSOBatchSize:                              TSOBatchSize,
+		TSOBatchSendLatency:                       TSOBatchSendLatency,
+		TSORetryCount:                             TSORetryCount,
+		RequestForwarded:                          RequestForwarded,
+		OngoingRequestCountGauge:                  OngoingRequestCountGauge,
+		EstimateTSOLatencyGauge:                   EstimateTSOLatencyGauge,
+		QueryRegionBestBatchSize:                  QueryRegionBestBatchSize,
+		QueryRegionBatchSendLatency:               QueryRegionBatchSendLatency,
+		CmdDurationTSOWait:                        CmdDurationTSOWait,
+		CmdDurationTSO:                            CmdDurationTSO,
+		CmdDurationTSOAsyncWait:                   CmdDurationTSOAsyncWait,
+		CmdDurationGetRegion:                      CmdDurationGetRegion,
+		CmdDurationGetAllMembers:                  CmdDurationGetAllMembers,
+		CmdDurationGetPrevRegion:                  CmdDurationGetPrevRegion,
+		CmdDurationGetRegionByID:                  CmdDurationGetRegionByID,
+		CmdDurationScanRegions:                    CmdDurationScanRegions,
+		CmdDurationBatchScanRegions:               CmdDurationBatchScanRegions,
+		CmdDurationGetStore:                       CmdDurationGetStore,
+		CmdDurationGetAllStores:                   CmdDurationGetAllStores,
+		CmdDurationUpdateGCSafePoint:              CmdDurationUpdateGCSafePoint,
+		CmdDurationUpdateServiceGCSafePoint:       CmdDurationUpdateServiceGCSafePoint,
+		CmdDurationScatterRegion:                  CmdDurationScatterRegion,
+		CmdDurationScatterRegions:                 CmdDurationScatterRegions,
+		CmdDurationGetOperator:                    CmdDurationGetOperator,
+		CmdDurationSplitRegions:                   CmdDurationSplitRegions,
+		CmdDurationSplitAndScatterRegions:         CmdDurationSplitAndScatterRegions,
+		CmdDurationLoadKeyspace:                   CmdDurationLoadKeyspace,
+		CmdDurationLoadKeyspaceByID:               CmdDurationLoadKeyspaceByID,
+		CmdDurationUpdateKeyspaceState:            CmdDurationUpdateKeyspaceState,
+		CmdDurationGetAllKeyspaces:                CmdDurationGetAllKeyspaces,
+		CmdDurationGet:                            CmdDurationGet,
+		CmdDurationPut:                            CmdDurationPut,
+		CmdDurationUpdateGCSafePointV2:            CmdDurationUpdateGCSafePointV2,
+		CmdDurationUpdateServiceSafePointV2:       CmdDurationUpdateServiceSafePointV2,
+		CmdDurationQueryRegionAsyncWait:           CmdDurationQueryRegionAsyncWait,
+		CmdDurationQueryRegionWait:                CmdDurationQueryRegionWait,
+		CmdDurationQueryRegion:                    CmdDurationQueryRegion,
+		CmdDurationAdvanceTxnSafePoint:            CmdDurationAdvanceTxnSafePoint,
+		CmdDurationAdvanceGCSafePoint:             CmdDurationAdvanceGCSafePoint,
+		CmdDurationSetGCBarrier:                   CmdDurationSetGCBarrier,
+		CmdDurationDeleteGCBarrier:                CmdDurationDeleteGCBarrier,
+		CmdDurationGetGCState:                     CmdDurationGetGCState,
+		CmdDurationSetGlobalGCBarrier:             CmdDurationSetGlobalGCBarrier,
+		CmdDurationDeleteGlobalGCBarrier:          CmdDurationDeleteGlobalGCBarrier,
+		CmdDurationGetAllKeyspacesGCStates:        CmdDurationGetAllKeyspacesGCStates,
+		CmdFailedDurationGetRegion:                CmdFailedDurationGetRegion,
+		CmdFailedDurationTSOWait:                  CmdFailedDurationTSOWait,
+		CmdFailedDurationTSO:                      CmdFailedDurationTSO,
+		CmdFailedDurationGetAllMembers:            CmdFailedDurationGetAllMembers,
+		CmdFailedDurationGetPrevRegion:            CmdFailedDurationGetPrevRegion,
+		CmdFailedDurationGetRegionByID:            CmdFailedDurationGetRegionByID,
+		CmdFailedDurationScanRegions:              CmdFailedDurationScanRegions,
+		CmdFailedDurationBatchScanRegions:         CmdFailedDurationBatchScanRegions,
+		CmdFailedDurationGetStore:                 CmdFailedDurationGetStore,
+		CmdFailedDurationGetAllStores:             CmdFailedDurationGetAllStores,
+		CmdFailedDurationUpdateGCSafePoint:        CmdFailedDurationUpdateGCSafePoint,
+		CmdFailedDurationUpdateServiceGCSafePoint: CmdFailedDurationUpdateServiceGCSafePoint,
+		CmdFailedDurationLoadKeyspace:             CmdFailedDurationLoadKeyspace,
+		CmdFailedDurationLoadKeyspaceByID:         CmdFailedDurationLoadKeyspaceByID,
+		CmdFailedDurationUpdateKeyspaceState:      CmdFailedDurationUpdateKeyspaceState,
+		CmdFailedDurationGet:                      CmdFailedDurationGet,
+		CmdFailedDurationPut:                      CmdFailedDurationPut,
+		CmdFailedDurationUpdateGCSafePointV2:      CmdFailedDurationUpdateGCSafePointV2,
+		CmdFailedDurationUpdateServiceSafePointV2: CmdFailedDurationUpdateServiceSafePointV2,
+		CmdFailedDurationQueryRegionWait:          CmdFailedDurationQueryRegionWait,
+		CmdFailedDurationQueryRegion:              CmdFailedDurationQueryRegion,
+		CmdFailedDurationAdvanceTxnSafePoint:      CmdFailedDurationAdvanceTxnSafePoint,
+		CmdFailedDurationAdvanceGCSafePoint:       CmdFailedDurationAdvanceGCSafePoint,
+		CmdFailedDurationSetGCBarrier:             CmdFailedDurationSetGCBarrier,
+		CmdFailedDurationDeleteGCBarrier:          CmdFailedDurationDeleteGCBarrier,
+		CmdFailedDurationGetGCState:               CmdFailedDurationGetGCState,
+		CmdFailedDurationSetGlobalGCBarrier:       CmdFailedDurationSetGlobalGCBarrier,
+		CmdFailedDurationDeleteGlobalGCBarrier:    CmdFailedDurationDeleteGlobalGCBarrier,
+		CmdFailedDurationGetAllKeyspacesGCStates:  CmdFailedDurationGetAllKeyspacesGCStates,
+		RequestDurationTSO:                        RequestDurationTSO,
+		RequestFailedDurationTSO:                  RequestFailedDurationTSO,
+		RequestDurationQueryRegion:                RequestDurationQueryRegion,
+		RequestFailedDurationQueryRegion:          RequestFailedDurationQueryRegion,
+		QueryRegionBatchSizeTotal:                 QueryRegionBatchSizeTotal,
+		QueryRegionBatchSizeByKeys:                QueryRegionBatchSizeByKeys,
+		QueryRegionBatchSizeByPrevKeys:            QueryRegionBatchSizeByPrevKeys,
+		QueryRegionBatchSizeByIDs:                 QueryRegionBatchSizeByIDs,
+	})
 }

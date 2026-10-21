@@ -14,7 +14,11 @@
 
 package metrics
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"sync/atomic"
+
+	"github.com/prometheus/client_golang/prometheus"
+)
 
 const (
 	namespace             = "resource_manager_client"
@@ -235,6 +239,7 @@ func initMetrics(constLabels prometheus.Labels) {
 			Help:        "Histogram of signed (actual_read_bytes - predicted_read_bytes) for pre-charged coprocessor RPCs. Use bucket series for distribution/quantiles; _sum is non-monotonic because observations can be negative.",
 			ConstLabels: constLabels,
 		}, []string{newResourceGroupNameLabel})
+	publishMetrics()
 }
 
 // InitAndRegisterMetrics initializes and register metrics.
@@ -256,4 +261,56 @@ func InitAndRegisterMetrics(constLabels prometheus.Labels) {
 	prometheus.MustRegister(PagingPrechargeBytesCounter)
 	prometheus.MustRegister(PagingActualBytesCounter)
 	prometheus.MustRegister(PagingPredictionResidualBytes)
+}
+
+// MetricSet contains one generation of client metric handles.
+// Callers must not reassign the fields returned by Current.
+type MetricSet struct {
+	ResourceGroupStatusGauge         *prometheus.GaugeVec
+	SuccessfulRequestDuration        *prometheus.HistogramVec
+	FailedLimitReserveDuration       *prometheus.HistogramVec
+	FailedRequestCounter             *prometheus.CounterVec
+	GroupRunningKVRequestCounter     *prometheus.GaugeVec
+	RequestRetryCounter              *prometheus.CounterVec
+	ResourceGroupTokenRequestCounter *prometheus.CounterVec
+	LowTokenRequestNotifyCounter     *prometheus.CounterVec
+	TokenConsumedHistogram           *prometheus.HistogramVec
+	RequestSourceRUCounter           *prometheus.CounterVec
+	FailedTokenRequestDuration       prometheus.Observer
+	SuccessfulTokenRequestDuration   prometheus.Observer
+	CopReadPrechargeCounter          *prometheus.CounterVec
+	CopReadNoPrechargeCounter        *prometheus.CounterVec
+	PagingPrechargeBytesCounter      *prometheus.CounterVec
+	PagingActualBytesCounter         *prometheus.CounterVec
+	PagingPredictionResidualBytes    *prometheus.HistogramVec
+}
+
+var currentMetrics atomic.Pointer[MetricSet]
+
+// Current returns a complete snapshot of the current metric handles.
+// It is safe to call while metrics are initialized and registered.
+func Current() *MetricSet {
+	return currentMetrics.Load()
+}
+
+func publishMetrics() {
+	currentMetrics.Store(&MetricSet{
+		ResourceGroupStatusGauge:         ResourceGroupStatusGauge,
+		SuccessfulRequestDuration:        SuccessfulRequestDuration,
+		FailedLimitReserveDuration:       FailedLimitReserveDuration,
+		FailedRequestCounter:             FailedRequestCounter,
+		GroupRunningKVRequestCounter:     GroupRunningKVRequestCounter,
+		RequestRetryCounter:              RequestRetryCounter,
+		ResourceGroupTokenRequestCounter: ResourceGroupTokenRequestCounter,
+		LowTokenRequestNotifyCounter:     LowTokenRequestNotifyCounter,
+		TokenConsumedHistogram:           TokenConsumedHistogram,
+		RequestSourceRUCounter:           RequestSourceRUCounter,
+		FailedTokenRequestDuration:       FailedTokenRequestDuration,
+		SuccessfulTokenRequestDuration:   SuccessfulTokenRequestDuration,
+		CopReadPrechargeCounter:          CopReadPrechargeCounter,
+		CopReadNoPrechargeCounter:        CopReadNoPrechargeCounter,
+		PagingPrechargeBytesCounter:      PagingPrechargeBytesCounter,
+		PagingActualBytesCounter:         PagingActualBytesCounter,
+		PagingPredictionResidualBytes:    PagingPredictionResidualBytes,
+	})
 }

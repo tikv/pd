@@ -64,6 +64,7 @@ func (c *client) keyspaceClient() keyspacepb.KeyspaceClient {
 
 // LoadKeyspace loads and returns target keyspace's metadata.
 func (c *client) LoadKeyspace(ctx context.Context, name string) (*keyspacepb.KeyspaceMeta, error) {
+	metricSet := metrics.Current()
 	// Failpoint: return a hardcoded keyspace meta for testing
 	// When enabled, this bypasses the gRPC LoadKeyspace call
 	failpoint.Inject("mockLoadKeyspace", func(val failpoint.Value) {
@@ -90,7 +91,7 @@ func (c *client) LoadKeyspace(ctx context.Context, name string) (*keyspacepb.Key
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { metrics.CmdDurationLoadKeyspace.Observe(time.Since(start).Seconds()) }()
+	defer func() { metricSet.CmdDurationLoadKeyspace.Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	req := &keyspacepb.LoadKeyspaceRequest{
 		Header: c.requestHeader(),
@@ -105,13 +106,13 @@ func (c *client) LoadKeyspace(ctx context.Context, name string) (*keyspacepb.Key
 	cancel()
 
 	if err != nil {
-		metrics.CmdFailedDurationLoadKeyspace.Observe(time.Since(start).Seconds())
+		metricSet.CmdFailedDurationLoadKeyspace.Observe(time.Since(start).Seconds())
 		c.inner.serviceDiscovery.ScheduleCheckMemberChanged()
 		return nil, err
 	}
 
 	if resp.Header.GetError() != nil {
-		metrics.CmdFailedDurationLoadKeyspace.Observe(time.Since(start).Seconds())
+		metricSet.CmdFailedDurationLoadKeyspace.Observe(time.Since(start).Seconds())
 		return nil, errors.Errorf("Load keyspace %s failed: %s", name, resp.Header.GetError().String())
 	}
 
@@ -121,12 +122,13 @@ func (c *client) LoadKeyspace(ctx context.Context, name string) (*keyspacepb.Key
 // LoadKeyspaceByID loads and returns target keyspace's persisted metadata by ID.
 // Unlike LoadKeyspace, a successful call does not guarantee that the keyspace region bounds are ready.
 func (c *client) LoadKeyspaceByID(ctx context.Context, id uint32) (*keyspacepb.KeyspaceMeta, error) {
+	metricSet := metrics.Current()
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("keyspaceClient.LoadKeyspaceByID", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { metrics.CmdDurationLoadKeyspaceByID.Observe(time.Since(start).Seconds()) }()
+	defer func() { metricSet.CmdDurationLoadKeyspaceByID.Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	req := &keyspacepb.LoadKeyspaceByIDRequest{
 		Header:   c.requestHeader(),
@@ -141,13 +143,13 @@ func (c *client) LoadKeyspaceByID(ctx context.Context, id uint32) (*keyspacepb.K
 	cancel()
 
 	if err != nil {
-		metrics.CmdFailedDurationLoadKeyspaceByID.Observe(time.Since(start).Seconds())
+		metricSet.CmdFailedDurationLoadKeyspaceByID.Observe(time.Since(start).Seconds())
 		c.inner.serviceDiscovery.ScheduleCheckMemberChanged()
 		return nil, err
 	}
 
 	if resp.Header.GetError() != nil {
-		metrics.CmdFailedDurationLoadKeyspaceByID.Observe(time.Since(start).Seconds())
+		metricSet.CmdFailedDurationLoadKeyspaceByID.Observe(time.Since(start).Seconds())
 		return nil, errors.Errorf("Load keyspace id %d failed: %s", id, resp.Header.GetError().String())
 	}
 
@@ -165,12 +167,13 @@ func (c *client) LoadKeyspaceByID(ctx context.Context, id uint32) (*keyspacepb.K
 //
 // Updated keyspace meta will be returned.
 func (c *client) UpdateKeyspaceState(ctx context.Context, id uint32, state keyspacepb.KeyspaceState) (*keyspacepb.KeyspaceMeta, error) {
+	metricSet := metrics.Current()
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("keyspaceClient.UpdateKeyspaceState", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { metrics.CmdDurationUpdateKeyspaceState.Observe(time.Since(start).Seconds()) }()
+	defer func() { metricSet.CmdDurationUpdateKeyspaceState.Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	req := &keyspacepb.UpdateKeyspaceStateRequest{
 		Header:   c.requestHeader(),
@@ -186,13 +189,13 @@ func (c *client) UpdateKeyspaceState(ctx context.Context, id uint32, state keysp
 	cancel()
 
 	if err != nil {
-		metrics.CmdFailedDurationUpdateKeyspaceState.Observe(time.Since(start).Seconds())
+		metricSet.CmdFailedDurationUpdateKeyspaceState.Observe(time.Since(start).Seconds())
 		c.inner.serviceDiscovery.ScheduleCheckMemberChanged()
 		return nil, err
 	}
 
 	if resp.Header.GetError() != nil {
-		metrics.CmdFailedDurationUpdateKeyspaceState.Observe(time.Since(start).Seconds())
+		metricSet.CmdFailedDurationUpdateKeyspaceState.Observe(time.Since(start).Seconds())
 		return nil, errors.Errorf("Update state for keyspace id %d failed: %s", id, resp.Header.GetError().String())
 	}
 
@@ -209,12 +212,13 @@ func (*client) WatchKeyspaces(context.Context) (chan []*keyspacepb.KeyspaceMeta,
 
 // GetAllKeyspaces get all keyspaces metadata.
 func (c *client) GetAllKeyspaces(ctx context.Context, startID uint32, limit uint32) ([]*keyspacepb.KeyspaceMeta, error) {
+	metricSet := metrics.Current()
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("keyspaceClient.GetAllKeyspaces", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { metrics.CmdDurationGetAllKeyspaces.Observe(time.Since(start).Seconds()) }()
+	defer func() { metricSet.CmdDurationGetAllKeyspaces.Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	req := &keyspacepb.GetAllKeyspacesRequest{
 		Header:        c.requestHeader(),
@@ -230,13 +234,13 @@ func (c *client) GetAllKeyspaces(ctx context.Context, startID uint32, limit uint
 	cancel()
 
 	if err != nil {
-		metrics.CmdDurationGetAllKeyspaces.Observe(time.Since(start).Seconds())
+		metricSet.CmdDurationGetAllKeyspaces.Observe(time.Since(start).Seconds())
 		c.inner.serviceDiscovery.ScheduleCheckMemberChanged()
 		return nil, err
 	}
 
 	if resp.Header.GetError() != nil {
-		metrics.CmdDurationGetAllKeyspaces.Observe(time.Since(start).Seconds())
+		metricSet.CmdDurationGetAllKeyspaces.Observe(time.Since(start).Seconds())
 		return nil, errors.Errorf("Get all keyspaces metadata failed: %s", resp.Header.GetError().String())
 	}
 

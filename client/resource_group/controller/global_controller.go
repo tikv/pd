@@ -389,7 +389,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 				c.executeOnAllGroups((*groupCostController).resetEmergencyTokenAcquisition)
 			/* channels */
 			case <-c.loopCtx.Done():
-				metrics.ResourceGroupStatusGauge.Reset()
+				metrics.Current().ResourceGroupStatusGauge.Reset()
 				c.requestSourceStates.Range(func(_, v any) bool {
 					v.(*requestSourceMetricsState).cleanup()
 					return true
@@ -672,7 +672,7 @@ func (c *ResourceGroupsController) tryGetResourceGroupController(
 		// Check again to prevent initializing the same resource group concurrently.
 		_, loaded := c.loadOrStoreGroupController(name, gc)
 		if !loaded {
-			metrics.ResourceGroupStatusGauge.WithLabelValues(name, group.Name).Set(1)
+			metrics.Current().ResourceGroupStatusGauge.WithLabelValues(name, group.Name).Set(1)
 			log.Info("[resource group controller] create resource group cost controller", zap.String("name", name))
 		}
 	}
@@ -719,7 +719,7 @@ func (c *ResourceGroupsController) tombstoneGroupCostController(name string) {
 	gc.tombstone.Store(true)
 	c.groupsController.Store(name, gc)
 	// Its metrics will be deleted in the cleanup process.
-	metrics.ResourceGroupStatusGauge.WithLabelValues(name, name).Set(2)
+	metrics.Current().ResourceGroupStatusGauge.WithLabelValues(name, name).Set(2)
 	log.Info("[resource group controller] default resource group controller cost created for tombstone",
 		zap.String("name", name))
 }
@@ -736,7 +736,7 @@ func (c *ResourceGroupsController) cleanUpResourceGroup() {
 			if gc.inactive || gc.tombstone.Load() {
 				c.cleanupRequestSourceMetricsState(resourceGroupName)
 				c.groupsController.Delete(resourceGroupName)
-				metrics.ResourceGroupStatusGauge.DeleteLabelValues(resourceGroupName, resourceGroupName)
+				metrics.Current().ResourceGroupStatusGauge.DeleteLabelValues(resourceGroupName, resourceGroupName)
 				gc.metrics.deletePagingLabels(resourceGroupName)
 				return true
 			}
@@ -815,9 +815,9 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 				log.Warn("[resource group controller] token bucket rpc error", zap.Error(err))
 			}
 			resp = nil
-			metrics.FailedTokenRequestDuration.Observe(latency.Seconds())
+			metrics.Current().FailedTokenRequestDuration.Observe(latency.Seconds())
 		} else {
-			metrics.SuccessfulTokenRequestDuration.Observe(latency.Seconds())
+			metrics.Current().SuccessfulTokenRequestDuration.Observe(latency.Seconds())
 		}
 		if !notifyMsg.startTime.IsZero() && time.Since(notifyMsg.startTime) > slowNotifyFilterDuration {
 			log.Warn("[resource group controller] slow token bucket request", zap.String("source", source), zap.Duration("cost", time.Since(notifyMsg.startTime)))

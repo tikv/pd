@@ -135,7 +135,7 @@ func NewLimiterWithCfg(name string, now time.Time, cfg tokenBucketReconfigureArg
 		reconfiguredCh:      make(chan struct{}),
 	}
 	lim.metrics = &limiterMetricsCollection{
-		lowTokenNotifyCounter: metrics.LowTokenRequestNotifyCounter.WithLabelValues(lim.name),
+		lowTokenNotifyCounter: metrics.Current().LowTokenRequestNotifyCounter.WithLabelValues(lim.name),
 	}
 	log.Debug("new limiter", zap.String("limiter", fmt.Sprintf("%+v", lim)))
 	return lim

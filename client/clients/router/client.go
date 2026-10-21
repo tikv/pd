@@ -225,7 +225,7 @@ func NewClient(
 		batchController: batch.NewController(
 			defaultMaxRouterRequestBatchSize,
 			requestFinisher(nil),
-			metrics.QueryRegionBestBatchSize,
+			metrics.Current().QueryRegionBestBatchSize,
 		),
 	}
 	c.leaderURL.Store(svcDiscovery.GetServingURL())
@@ -756,6 +756,7 @@ func buildQueryRegionRequest(clusterID uint64, requests []*Request) *pdpb.QueryR
 }
 
 func (c *Cli) processRequestsInner(send sendFn, recv recvFn) error {
+	metricSet := metrics.Current()
 	var (
 		requests = c.batchController.GetCollectedRequests()
 		spans    = make([]opentracing.Span, 0, len(requests))
@@ -781,34 +782,34 @@ func (c *Cli) processRequestsInner(send sendFn, recv recvFn) error {
 	start := time.Now()
 	err := send(queryReq)
 	if err != nil {
-		metrics.RequestFailedDurationQueryRegion.Observe(time.Since(start).Seconds())
+		metricSet.RequestFailedDurationQueryRegion.Observe(time.Since(start).Seconds())
 		return err
 	}
-	metrics.QueryRegionBatchSendLatency.Observe(
+	metricSet.QueryRegionBatchSendLatency.Observe(
 		time.Since(
 			c.batchController.GetExtraBatchingStartTime(),
 		).Seconds(),
 	)
 	resp, err := recv()
 	if err != nil {
-		metrics.RequestFailedDurationQueryRegion.Observe(time.Since(start).Seconds())
+		metricSet.RequestFailedDurationQueryRegion.Observe(time.Since(start).Seconds())
 		return err
 	}
-	metrics.RequestDurationQueryRegion.Observe(time.Since(start).Seconds())
-	metrics.QueryRegionBatchSizeTotal.Observe(float64(len(requests)))
+	metricSet.RequestDurationQueryRegion.Observe(time.Since(start).Seconds())
+	metricSet.QueryRegionBatchSizeTotal.Observe(float64(len(requests)))
 	// Currently, header errors can occur due to an unready PD leader or follower,
 	// resulting in either a `NOT_BOOTSTRAPPED` or `REGION_NOT_FOUND` error.
 	if headerErr := resp.GetHeader().GetError(); headerErr != nil {
 		return errors.New(headerErr.String())
 	}
 	if keysLen := len(queryReq.Keys); keysLen > 0 {
-		metrics.QueryRegionBatchSizeByKeys.Observe(float64(keysLen))
+		metricSet.QueryRegionBatchSizeByKeys.Observe(float64(keysLen))
 	}
 	if prevKeysLen := len(queryReq.PrevKeys); prevKeysLen > 0 {
-		metrics.QueryRegionBatchSizeByPrevKeys.Observe(float64(prevKeysLen))
+		metricSet.QueryRegionBatchSizeByPrevKeys.Observe(float64(prevKeysLen))
 	}
 	if idsLen := len(queryReq.Ids); idsLen > 0 {
-		metrics.QueryRegionBatchSizeByIDs.Observe(float64(idsLen))
+		metricSet.QueryRegionBatchSizeByIDs.Observe(float64(idsLen))
 	}
 	c.doneCollectedRequests(resp)
 	return nil

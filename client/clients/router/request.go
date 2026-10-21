@@ -60,20 +60,21 @@ func (req *Request) tryDone(err error) {
 }
 
 func (req *Request) wait() (*Region, error) {
+	metricSet := metrics.Current()
 	start := time.Now()
-	metrics.CmdDurationQueryRegionAsyncWait.Observe(start.Sub(req.start).Seconds())
+	metricSet.CmdDurationQueryRegionAsyncWait.Observe(start.Sub(req.start).Seconds())
 	select {
 	case err := <-req.done:
 		defer req.pool.Put(req)
 		defer trace.StartRegion(req.requestCtx, "pdclient.regionReqDone").End()
 		now := time.Now()
 		if err != nil {
-			metrics.CmdFailedDurationQueryRegionWait.Observe(now.Sub(start).Seconds())
-			metrics.CmdFailedDurationQueryRegion.Observe(now.Sub(req.start).Seconds())
+			metricSet.CmdFailedDurationQueryRegionWait.Observe(now.Sub(start).Seconds())
+			metricSet.CmdFailedDurationQueryRegion.Observe(now.Sub(req.start).Seconds())
 			return nil, errors.WithStack(err)
 		}
-		metrics.CmdDurationQueryRegionWait.Observe(now.Sub(start).Seconds())
-		metrics.CmdDurationQueryRegion.Observe(now.Sub(req.start).Seconds())
+		metricSet.CmdDurationQueryRegionWait.Observe(now.Sub(start).Seconds())
+		metricSet.CmdDurationQueryRegion.Observe(now.Sub(req.start).Seconds())
 		return req.region, nil
 	case <-req.requestCtx.Done():
 		return nil, errors.WithStack(req.requestCtx.Err())
