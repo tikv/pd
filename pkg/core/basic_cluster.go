@@ -35,8 +35,8 @@ func NewBasicCluster() *BasicCluster {
 
 // UpdateStoreStatus updates the information of the store.
 func (bc *BasicCluster) UpdateStoreStatus(storeID uint64) {
-	leaderCount, regionCount, witnessCount, learnerCount, pendingPeerCount, leaderRegionSize, regionSize := bc.GetStoreStats(storeID)
-	bc.StoresInfo.UpdateStoreStatus(storeID, leaderCount, regionCount, witnessCount, learnerCount, pendingPeerCount, leaderRegionSize, regionSize)
+	leaderCount, regionCount, learnerCount, pendingPeerCount, leaderRegionSize, regionSize := bc.GetStoreStats(storeID)
+	bc.StoresInfo.UpdateStoreStatus(storeID, leaderCount, regionCount, learnerCount, pendingPeerCount, leaderRegionSize, regionSize)
 }
 
 /* Regions read operations */
@@ -99,7 +99,6 @@ type RegionSetInformer interface {
 	RandFollowerRegions(storeID uint64, ranges []keyutil.KeyRange) []*RegionInfo
 	RandLeaderRegions(storeID uint64, ranges []keyutil.KeyRange) []*RegionInfo
 	RandLearnerRegions(storeID uint64, ranges []keyutil.KeyRange) []*RegionInfo
-	RandWitnessRegions(storeID uint64, ranges []keyutil.KeyRange) []*RegionInfo
 	RandPendingRegions(storeID uint64, ranges []keyutil.KeyRange) []*RegionInfo
 	GetAverageRegionSize() int64
 	GetStoreRegionCount(storeID uint64) int
@@ -142,7 +141,6 @@ type StoreSetInformer interface {
 	GetStore(id uint64) *StoreInfo
 
 	GetRegionStores(region *RegionInfo) []*StoreInfo
-	GetNonWitnessVoterStores(region *RegionInfo) []*StoreInfo
 	GetFollowerStores(region *RegionInfo) []*StoreInfo
 	GetLeaderStore(region *RegionInfo) *StoreInfo
 	GetAvgNetworkSlowScore(id uint64) uint64

@@ -24,7 +24,6 @@ import (
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/placement"
-	"github.com/tikv/pd/pkg/versioninfo"
 )
 
 // ReplicaStrategy collects some utilities to manipulate region peers. It
@@ -36,7 +35,6 @@ type ReplicaStrategy struct {
 	isolationLevel string
 	region         *core.RegionInfo
 	extraFilters   []filter.Filter
-	fastFailover   bool
 }
 
 // SelectStoreToAdd returns the store to add a replica to a region.
@@ -59,9 +57,6 @@ func (s *ReplicaStrategy) SelectStoreToAdd(coLocationStores []*core.StoreInfo, e
 	// The reason for it is to prevent the non-optimal replica placement due
 	// to the short-term state, resulting in redundant scheduling.
 	level := constant.High
-	if s.fastFailover {
-		level = constant.Urgent
-	}
 	filters := []filter.Filter{
 		filter.NewExcludedFilter(s.checkerName, nil, s.region.GetStoreIDs()),
 		filter.NewStorageThresholdFilter(s.checkerName),
@@ -79,7 +74,7 @@ func (s *ReplicaStrategy) SelectStoreToAdd(coLocationStores []*core.StoreInfo, e
 	}
 
 	isolationComparer := filter.IsolationComparer(s.locationLabels, coLocationStores)
-	strictStateFilter := &filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true, AllowFastFailover: s.fastFailover, OperatorLevel: level}
+	strictStateFilter := &filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true, OperatorLevel: level}
 	targetCandidate := filter.NewCandidates(s.cluster.GetStores()).
 		FilterTarget(s.cluster.GetCheckerConfig(), nil, nil, filters...).
 		KeepTheTopStores(isolationComparer, false) // greater isolation score is better
@@ -144,9 +139,6 @@ func swapStoreToFirst(stores []*core.StoreInfo, id uint64) {
 func (s *ReplicaStrategy) SelectStoreToRemove(coLocationStores []*core.StoreInfo) uint64 {
 	isolationComparer := filter.IsolationComparer(s.locationLabels, coLocationStores)
 	level := constant.High
-	if s.fastFailover {
-		level = constant.Urgent
-	}
 	source := filter.NewCandidates(coLocationStores).
 		FilterSource(s.cluster.GetCheckerConfig(), nil, nil, &filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true, OperatorLevel: level}).
 		KeepTheTopStores(isolationComparer, true).
@@ -161,9 +153,6 @@ func (s *ReplicaStrategy) SelectStoreToRemove(coLocationStores []*core.StoreInfo
 func (s *ReplicaStrategy) selectStoreToRemoveWithTempState(coLocationStores []*core.StoreInfo) (uint64, bool) {
 	isolationComparer := filter.IsolationComparer(s.locationLabels, coLocationStores)
 	level := constant.High
-	if s.fastFailover {
-		level = constant.Urgent
-	}
 	sourceCandidate := filter.NewCandidates(coLocationStores).
 		FilterSource(s.cluster.GetCheckerConfig(), nil, nil, &filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true, AllowTemporaryStates: true, OperatorLevel: level}).
 		KeepTheTopStores(isolationComparer, true)
@@ -215,11 +204,6 @@ func (s *ReplicaStrategy) getBetterLocation(cluster sche.SharedCluster, region *
 		return 0, 0, false
 	}
 	return
-}
-
-func isWitnessEnabled(cluster sche.CheckerCluster) bool {
-	config := cluster.GetCheckerConfig()
-	return versioninfo.IsFeatureSupported(config.GetClusterVersion(), versioninfo.SwitchWitness) && config.IsWitnessAllowed()
 }
 
 func getRuleFitStores(cluster sche.SharedCluster, rf *placement.RuleFit) []*core.StoreInfo {

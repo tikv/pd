@@ -276,7 +276,7 @@ func TestSetCacheDoesNotPromoteStaleFitAfterStoreRemoval(t *testing.T) {
 	}
 	region := mockRegion(3, 0)
 	rules := addExtraRules(0)
-	fit := fitRegion(stores, region, rules, false)
+	fit := fitRegion(stores, region, rules)
 	fit.regionStores = stores
 	fit.rules = rules
 
@@ -328,7 +328,7 @@ func TestSetCachePromotionCannotRaceStoreRemoval(t *testing.T) {
 	}
 	region := mockRegion(3, 0)
 	rules := addExtraRules(0)
-	fit := fitRegion(stores, region, rules, false)
+	fit := fitRegion(stores, region, rules)
 	fit.regionStores = stores
 	fit.rules = rules
 

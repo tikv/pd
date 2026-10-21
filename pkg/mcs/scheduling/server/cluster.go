@@ -871,7 +871,7 @@ func (c *Cluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 		return err
 	}
 	tracer.OnAllStageFinished()
-	c.coordinator.GetOperatorController().Dispatch(region, operator.DispatchFromHeartBeat, c.coordinator.RecordOpStepWithTTL)
+	c.coordinator.GetOperatorController().Dispatch(region, operator.DispatchFromHeartBeat)
 	return nil
 }
 

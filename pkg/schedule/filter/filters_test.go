@@ -133,7 +133,7 @@ func TestRuleFitFilter(t *testing.T) {
 		// store 5 and store 1 is the peers of this region, so it will allow transferring leader to store 3.
 		{5, 1, map[string]string{"zone": "z3"}, plan.StatusOK, plan.StatusOK},
 		{6, 1, map[string]string{"zone": "z4"}, plan.StatusOK, plan.StatusOK},
-		// store 7 and store 1 is the peers of this region, but it's a witness, so it won't allow transferring leader to store 7.
+		// Store 7 has a legacy peer that cannot lead until it is converted.
 		{7, 1, map[string]string{"zone": "z2"}, plan.StatusOK, plan.StatusStoreNotMatchRule},
 	}
 	// Init cluster

@@ -322,8 +322,6 @@ type StoreStateFilter struct {
 	MoveRegion bool
 	// Set true if the scatter move the region
 	ScatterRegion bool
-	// Set true if allows failover (through witness)
-	AllowFastFailover bool
 	// Set true if allows temporary states.
 	AllowTemporaryStates bool
 	// Set the priority level of the filter, it should be same with the operator level.
@@ -518,12 +516,9 @@ func (f *StoreStateFilter) hasRejectLeaderProperty(conf config.SharedConfigProvi
 const (
 	leaderSource = iota
 	regionSource
-	witnessSource
 	leaderTarget
 	regionTarget
-	witnessTarget
 	scatterRegionTarget
-	fastFailoverTarget
 )
 
 func (f *StoreStateFilter) anyConditionMatch(typ int, conf config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
@@ -533,8 +528,6 @@ func (f *StoreStateFilter) anyConditionMatch(typ int, conf config.SharedConfigPr
 		funcs = []conditionFunc{f.isRemoved, f.isDown, f.pauseLeaderTransferOut, f.isDisconnected}
 	case regionSource:
 		funcs = []conditionFunc{f.isBusy, f.exceedRemoveLimit, f.tooManySnapshots}
-	case witnessSource:
-		funcs = []conditionFunc{f.isBusy}
 	case leaderTarget:
 		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.pauseLeaderTransferIn,
 			f.slowStoreEvicted, f.stoppingStoreEvicted, f.slowTrendEvicted, f.isDisconnected, f.isBusy,
@@ -542,11 +535,7 @@ func (f *StoreStateFilter) anyConditionMatch(typ int, conf config.SharedConfigPr
 	case regionTarget:
 		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.isDisconnected, f.isBusy,
 			f.exceedAddLimit, f.tooManySnapshots, f.tooManyPendingPeers}
-	case witnessTarget:
-		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.isDisconnected, f.isBusy}
 	case scatterRegionTarget:
-		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.isDisconnected, f.isBusy}
-	case fastFailoverTarget:
 		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.isDisconnected, f.isBusy}
 	}
 	for _, cf := range funcs {
@@ -581,9 +570,6 @@ func (f *StoreStateFilter) Target(conf config.SharedConfigProvider, store *core.
 		if status = f.anyConditionMatch(leaderTarget, conf, store); !status.IsOK() {
 			return
 		}
-	}
-	if f.MoveRegion && f.AllowFastFailover {
-		return f.anyConditionMatch(fastFailoverTarget, conf, store)
 	}
 	if f.MoveRegion && f.ScatterRegion {
 		if status = f.anyConditionMatch(scatterRegionTarget, conf, store); !status.IsOK() {
@@ -780,62 +766,6 @@ func (f *ruleLeaderFitFilter) Target(_ config.SharedConfigProvider, store *core.
 	return statusStoreNotMatchRule
 }
 
-type ruleWitnessFitFilter struct {
-	scope       string
-	cluster     *core.BasicCluster
-	ruleManager *placement.RuleManager
-	region      *core.RegionInfo
-	oldFit      *placement.RegionFit
-	srcStore    uint64
-}
-
-func newRuleWitnessFitFilter(scope string, cluster *core.BasicCluster, ruleManager *placement.RuleManager,
-	region *core.RegionInfo, oldFit *placement.RegionFit, oldStoreID uint64) Filter {
-	if oldFit == nil {
-		oldFit = ruleManager.FitRegion(cluster, region)
-	}
-	return &ruleWitnessFitFilter{
-		scope:       scope,
-		cluster:     cluster,
-		ruleManager: ruleManager,
-		region:      region,
-		oldFit:      oldFit,
-		srcStore:    oldStoreID,
-	}
-}
-
-// Scope returns the scheduler or the checker which the filter acts on.
-func (f *ruleWitnessFitFilter) Scope() string {
-	return f.scope
-}
-
-// Type returns the name of the filter.
-func (*ruleWitnessFitFilter) Type() filterType {
-	return ruleFit
-}
-
-// Source filters stores when select them as schedule source.
-func (*ruleWitnessFitFilter) Source(config.SharedConfigProvider, *core.StoreInfo) *plan.Status {
-	return statusOK
-}
-
-// Target filters stores when select them as schedule target.
-func (f *ruleWitnessFitFilter) Target(_ config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
-	targetStoreID := store.GetID()
-	targetPeer := f.region.GetStorePeer(targetStoreID)
-	if targetPeer == nil {
-		log.Warn("ruleWitnessFitFilter couldn't find peer on target Store", zap.Uint64("target-store", store.GetID()))
-		return statusStoreNotMatchRule
-	}
-	if targetPeer.Id == f.region.GetLeader().GetId() {
-		return statusStoreNotMatchRule
-	}
-	if f.oldFit.Replace(f.srcStore, store) {
-		return statusOK
-	}
-	return statusStoreNotMatchRule
-}
-
 // NewPlacementSafeguard creates a filter that ensures after replace a peer with new
 // peer, the placement restriction will not become worse.
 func NewPlacementSafeguard(scope string, conf config.SharedConfigProvider, cluster *core.BasicCluster, ruleManager *placement.RuleManager,
@@ -859,17 +789,6 @@ func NewPlacementLeaderSafeguardWithFit(scope string, conf config.SharedConfigPr
 	region *core.RegionInfo, sourceStore *core.StoreInfo, oldFit *placement.RegionFit, allowMoveLeader bool) Filter {
 	if conf.IsPlacementRulesEnabled() {
 		return newRuleLeaderFitFilter(scope, cluster, ruleManager, region, oldFit, sourceStore.GetID(), allowMoveLeader)
-	}
-	return nil
-}
-
-// NewPlacementWitnessSafeguard creates a filter that ensures after transfer a witness with
-// existed peer, the placement restriction will not become worse.
-// Note that it only worked when PlacementRules enabled otherwise it will always permit the sourceStore.
-func NewPlacementWitnessSafeguard(scope string, conf config.SharedConfigProvider, cluster *core.BasicCluster, ruleManager *placement.RuleManager,
-	region *core.RegionInfo, sourceStore *core.StoreInfo, oldFit *placement.RegionFit) Filter {
-	if conf.IsPlacementRulesEnabled() {
-		return newRuleWitnessFitFilter(scope, cluster, ruleManager, region, oldFit, sourceStore.GetID())
 	}
 	return nil
 }

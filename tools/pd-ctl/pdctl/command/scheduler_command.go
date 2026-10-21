@@ -159,8 +159,6 @@ func NewAddSchedulerCommand() *cobra.Command {
 	c.AddCommand(NewEvictSlowStoreSchedulerCommand())
 	c.AddCommand(NewGrantHotRegionSchedulerCommand())
 	c.AddCommand(NewSlowTrendEvictLeaderSchedulerCommand())
-	c.AddCommand(NewBalanceWitnessSchedulerCommand())
-	c.AddCommand(NewTransferWitnessLeaderSchedulerCommand())
 	c.AddCommand(NewBalanceRangeSchedulerCommand())
 	c.AddCommand(NewEvictStoppingStoreSchedulerCommand())
 	return c
@@ -376,16 +374,6 @@ func NewGrantHotRegionSchedulerCommand() *cobra.Command {
 	return c
 }
 
-// NewBalanceWitnessSchedulerCommand returns a command to add a balance-witness-scheduler.
-func NewBalanceWitnessSchedulerCommand() *cobra.Command {
-	c := &cobra.Command{
-		Use:   "balance-witness-scheduler",
-		Short: "add a scheduler to balance witness",
-		Run:   addSchedulerCommandFunc,
-	}
-	return c
-}
-
 // NewBalanceRangeSchedulerCommand returns a command to add a balance-range-scheduler.
 func NewBalanceRangeSchedulerCommand() *cobra.Command {
 	// todo: add deprecated warning if sql support
@@ -395,16 +383,6 @@ func NewBalanceRangeSchedulerCommand() *cobra.Command {
 		Run:   addSchedulerForBalanceRangeCommandFunc,
 	}
 	c.Flags().String("format", "hex", "the key format")
-	return c
-}
-
-// NewTransferWitnessLeaderSchedulerCommand returns a command to add a transfer-witness-leader-scheduler.
-func NewTransferWitnessLeaderSchedulerCommand() *cobra.Command {
-	c := &cobra.Command{
-		Use:   "transfer-witness-leader-scheduler",
-		Short: "add a scheduler to transfer witness leader",
-		Run:   addSchedulerCommandFunc,
-	}
 	return c
 }
 

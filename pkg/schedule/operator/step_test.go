@@ -584,48 +584,6 @@ func (suite *operatorStepTestSuite) TestChangePeerV2Leave() {
 	suite.check(re, cpl, desc, testCases)
 }
 
-func (suite *operatorStepTestSuite) TestSwitchToWitness() {
-	re := suite.Require()
-	step := BecomeWitness{StoreID: 2, PeerID: 2}
-	testCases := []testCase{
-		{
-			[]*metapb.Peer{
-				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
-				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner},
-			},
-			0,
-			false,
-			re.NoError,
-		},
-		{
-			[]*metapb.Peer{
-				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
-				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
-			},
-			0,
-			false,
-			re.NoError,
-		},
-		{
-			[]*metapb.Peer{
-				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
-				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter, IsWitness: true},
-			},
-			1,
-			true,
-			re.NoError,
-		},
-	}
-	suite.check(re, step, "switch peer 2 on store 2 to witness", testCases)
-}
-
-// TestNeedStoreHealthCheck verifies that store 11 (unhealthy but not yet down)
-// only fails CheckInProgress for steps that add data to the target store, and
-// only when the caller opts into needStoreHealthCheck. These are bare step
-// calls with a fixed needStoreHealthCheck value, so they cover "should this
-// step type honor the flag at all" -- not "when is it safe to pass true",
-// which is Controller.checkStaleOperator's job (see
-// TestOperatorControllerKeepsRunningForAddLearnerOnUnhealthyTarget).
 func (suite *operatorStepTestSuite) TestNeedStoreHealthCheck() {
 	re := suite.Require()
 
@@ -652,32 +610,9 @@ func (suite *operatorStepTestSuite) TestNeedStoreHealthCheck() {
 	suite.checkWithHealthCheck(re, al, "add learner peer 11 on store 11",
 		[]testCase{{[]*metapb.Peer{{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter}}, 0, false, re.Error}}, true)
 
-	// BecomeWitness sheds data rather than adding it, so it must ignore
-	// needStoreHealthCheck even when the caller passes true.
-	bw := BecomeWitness{StoreID: 11, PeerID: 11}
-	witnessPeers := []*metapb.Peer{
-		{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
-		{Id: 11, StoreId: 11, Role: metapb.PeerRole_Learner},
-	}
-	suite.checkWithHealthCheck(re, bw, "switch peer 11 on store 11 to witness",
-		[]testCase{{witnessPeers, 0, false, re.NoError}}, true)
-
-	// BecomeNonWitness passes needStoreHealthCheck straight through, same as
-	// AddPeer/AddLearner above -- whether it's actually safe to ask for the
-	// check at all is decided by Controller.checkStaleOperator based on step
-	// type (only TransferLeader is ever asked today), not by the step
-	// itself; see TestOperatorControllerKeepsRunningForAddLearnerOnUnhealthyTarget.
-	bn := BecomeNonWitness{StoreID: 11, PeerID: 11}
-	notFlippedPeers := []*metapb.Peer{
-		{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
-		{Id: 11, StoreId: 11, Role: metapb.PeerRole_Voter, IsWitness: true},
-	}
-	suite.checkWithHealthCheck(re, bn, "switch peer 11 on store 11 to non-witness",
-		[]testCase{{notFlippedPeers, 0, false, re.Error}}, true)
-
 	// PromoteLearner doesn't need the target reachable for raft to commit the
 	// role flip, so it must ignore needStoreHealthCheck even when true, same
-	// as RemovePeer/BecomeWitness/DemoteVoter.
+	// as RemovePeer and DemoteVoter.
 	pl := PromoteLearner{ToStore: 11, PeerID: 11}
 	notPromotedPeers := []*metapb.Peer{
 		{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},

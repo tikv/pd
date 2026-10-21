@@ -46,54 +46,51 @@ const (
 	OpSplit
 	// Initiated by hot region scheduler.
 	OpHotRegion
-	// Include peer addition or removal or switch witness. This means that this operator may take a long time.
+	// Include peer addition or removal. This means that this operator may take a long time.
 	OpRegion
 	// Include leader transfer.
 	OpLeader
-	// Include witness leader transfer.
-	OpWitnessLeader
-	// Include witness transfer.
-	OpWitness
+	_ // Reserved for the removed witness-leader kind.
+	_ // Reserved for the removed witness kind.
 	// Initiated by internal split-scatter dispatcher.
 	OpSplitScatter
 	opMax
 )
 
 var flagToName = map[OpKind]string{
-	OpLeader:        "leader",
-	OpRegion:        "region",
-	OpSplit:         "split",
-	OpAdmin:         "admin",
-	OpHotRegion:     "hot-region",
-	OpReplica:       "replica",
-	OpMerge:         "merge",
-	OpRange:         "range",
-	OpWitness:       "witness",
-	OpWitnessLeader: "witness-leader",
-	OpAffinity:      "affinity",
-	OpSplitScatter:  "split-scatter",
+	OpLeader:       "leader",
+	OpRegion:       "region",
+	OpSplit:        "split",
+	OpAdmin:        "admin",
+	OpHotRegion:    "hot-region",
+	OpReplica:      "replica",
+	OpMerge:        "merge",
+	OpRange:        "range",
+	OpAffinity:     "affinity",
+	OpSplitScatter: "split-scatter",
 }
 
 var nameToFlag = map[string]OpKind{
-	"leader":         OpLeader,
-	"region":         OpRegion,
-	"split":          OpSplit,
-	"admin":          OpAdmin,
-	"hot-region":     OpHotRegion,
-	"replica":        OpReplica,
-	"merge":          OpMerge,
-	"range":          OpRange,
-	"witness-leader": OpWitnessLeader,
-	"affinity":       OpAffinity,
-	"split-scatter":  OpSplitScatter,
+	"leader":        OpLeader,
+	"region":        OpRegion,
+	"split":         OpSplit,
+	"admin":         OpAdmin,
+	"hot-region":    OpHotRegion,
+	"replica":       OpReplica,
+	"merge":         OpMerge,
+	"range":         OpRange,
+	"affinity":      OpAffinity,
+	"split-scatter": OpSplitScatter,
 }
 
 func (k OpKind) String() string {
 	var flagNames []string
 	for flag := OpKind(1); flag < opMax; flag <<= 1 {
-		if k&flag != 0 {
-			flagNames = append(flagNames, flagToName[flag])
+		name, ok := flagToName[flag]
+		if !ok || k&flag == 0 {
+			continue
 		}
+		flagNames = append(flagNames, name)
 	}
 	if len(flagNames) == 0 {
 		return "unknown"

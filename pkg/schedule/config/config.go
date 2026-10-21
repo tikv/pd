@@ -17,6 +17,7 @@ package config
 import (
 	"encoding/json"
 	"math"
+	"slices"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -41,7 +42,6 @@ const (
 	defaultMaxMergeRegionSize        = 54
 	defaultLeaderScheduleLimit       = 4
 	defaultRegionScheduleLimit       = 2048
-	defaultWitnessScheduleLimit      = 4
 	defaultReplicaScheduleLimit      = 64
 	defaultMergeScheduleLimit        = 8
 	defaultHotRegionScheduleLimit    = 4
@@ -67,7 +67,6 @@ const (
 	defaultEnableDiagnostic                = true
 	defaultStrictlyMatchLabel              = false
 	defaultEnablePlacementRules            = true
-	defaultEnableWitness                   = false
 	defaultHaltScheduling                  = false
 
 	defaultRegionScoreFormulaVersion = "v2"
@@ -78,7 +77,6 @@ const (
 
 	// DefaultSplitMergeInterval is the default value of config split merge interval.
 	DefaultSplitMergeInterval      = time.Hour
-	defaultSwitchWitnessInterval   = time.Hour
 	defaultPatrolRegionInterval    = 10 * time.Millisecond
 	defaultMaxStoreDownTime        = 30 * time.Minute
 	defaultHotRegionsWriteInterval = 10 * time.Minute
@@ -114,7 +112,6 @@ const (
 	MaxMergeRegionKeysKey          = "schedule.max-merge-region-keys"
 	LeaderScheduleLimitKey         = "schedule.leader-schedule-limit"
 	RegionScheduleLimitKey         = "schedule.region-schedule-limit"
-	WitnessScheduleLimitKey        = "schedule.witness-schedule-limit"
 	ReplicaRescheduleLimitKey      = "schedule.replica-schedule-limit"
 	MergeScheduleLimitKey          = "schedule.merge-schedule-limit"
 	HotRegionScheduleLimitKey      = "schedule.hot-region-schedule-limit"
@@ -195,7 +192,8 @@ type ScheduleConfig struct {
 	MaxMergeRegionKeys uint64 `toml:"max-merge-region-keys" json:"max-merge-region-keys"`
 	// SplitMergeInterval is the minimum interval time to permit merge after split.
 	SplitMergeInterval typeutil.Duration `toml:"split-merge-interval" json:"split-merge-interval"`
-	// SwitchWitnessInterval is the minimum interval that allows a peer to become a witness again after it is promoted to non-witness.
+	// SwitchWitnessInterval is kept only so old configurations can still be decoded.
+	// Deprecated: witness peers are no longer supported and this value is ignored.
 	SwitchWitnessInterval typeutil.Duration `toml:"switch-witness-interval" json:"switch-witness-interval"`
 	// EnableOneWayMerge is the option to enable one way merge. This means a Region can only be merged into the next region of it.
 	EnableOneWayMerge bool `toml:"enable-one-way-merge" json:"enable-one-way-merge,string"`
@@ -216,7 +214,8 @@ type ScheduleConfig struct {
 	LeaderSchedulePolicy string `toml:"leader-schedule-policy" json:"leader-schedule-policy"`
 	// RegionScheduleLimit is the max coexist region schedules.
 	RegionScheduleLimit uint64 `toml:"region-schedule-limit" json:"region-schedule-limit"`
-	// WitnessScheduleLimit is the max coexist witness schedules.
+	// WitnessScheduleLimit is kept only so old configurations can still be decoded.
+	// Deprecated: witness peers are no longer supported and this value is ignored.
 	WitnessScheduleLimit uint64 `toml:"witness-schedule-limit" json:"witness-schedule-limit"`
 	// ReplicaScheduleLimit is the max coexist replica schedules.
 	ReplicaScheduleLimit uint64 `toml:"replica-schedule-limit" json:"replica-schedule-limit"`
@@ -321,7 +320,8 @@ type ScheduleConfig struct {
 	// EnableDiagnostic is the option to enable using diagnostic
 	EnableDiagnostic bool `toml:"enable-diagnostic" json:"enable-diagnostic,string"`
 
-	// EnableWitness is the option to enable using witness
+	// EnableWitness is kept only so old configurations can still be decoded.
+	// Deprecated: witness peers are no longer supported and this value is ignored.
 	EnableWitness bool `toml:"enable-witness" json:"enable-witness,string"`
 
 	// SlowStoreEvictingAffectedStoreRatioThreshold is the affected ratio threshold when judging a store is slow
@@ -378,7 +378,6 @@ func (c *ScheduleConfig) Adjust(meta *configutil.ConfigMetaData, reloading bool)
 		configutil.AdjustUint64(&c.MaxAffinityMergeRegionSize, defaultMaxAffinityMergeRegionSize)
 	}
 	configutil.AdjustDuration(&c.SplitMergeInterval, DefaultSplitMergeInterval)
-	configutil.AdjustDuration(&c.SwitchWitnessInterval, defaultSwitchWitnessInterval)
 	configutil.AdjustDuration(&c.PatrolRegionInterval, defaultPatrolRegionInterval)
 	configutil.AdjustDuration(&c.MaxStoreDownTime, defaultMaxStoreDownTime)
 	configutil.AdjustDuration(&c.HotRegionsWriteInterval, defaultHotRegionsWriteInterval)
@@ -391,9 +390,6 @@ func (c *ScheduleConfig) Adjust(meta *configutil.ConfigMetaData, reloading bool)
 	}
 	if !meta.IsDefined("region-schedule-limit") {
 		configutil.AdjustUint64(&c.RegionScheduleLimit, defaultRegionScheduleLimit)
-	}
-	if !meta.IsDefined("witness-schedule-limit") {
-		configutil.AdjustUint64(&c.WitnessScheduleLimit, defaultWitnessScheduleLimit)
 	}
 	if !meta.IsDefined("replica-schedule-limit") {
 		configutil.AdjustUint64(&c.ReplicaScheduleLimit, defaultReplicaScheduleLimit)
@@ -453,10 +449,6 @@ func (c *ScheduleConfig) Adjust(meta *configutil.ConfigMetaData, reloading bool)
 		c.EnableDiagnostic = defaultEnableDiagnostic
 	}
 
-	if !meta.IsDefined("enable-witness") {
-		c.EnableWitness = defaultEnableWitness
-	}
-
 	// new cluster:v2, old cluster:v1
 	if !meta.IsDefined("region-score-formula-version") && !reloading {
 		configutil.AdjustString(&c.RegionScoreFormulaVersion, defaultRegionScoreFormulaVersion)
@@ -467,6 +459,7 @@ func (c *ScheduleConfig) Adjust(meta *configutil.ConfigMetaData, reloading bool)
 	}
 
 	adjustSchedulers(&c.Schedulers, DefaultSchedulers)
+	c.MigrateDeprecatedFeatures()
 	defaultStoreLimitMeta := meta.Child("default-store-limit")
 	c.migrateStoreBalanceRate(defaultStoreLimitMeta)
 	c.adjustDefaultStoreLimit(defaultStoreLimitMeta)
@@ -622,6 +615,18 @@ func (c *ScheduleConfig) UnmarshalJSON(data []byte) error {
 // MigrateDeprecatedFlags updates new flags according to deprecated flags.
 func (c *ScheduleConfig) MigrateDeprecatedFlags() {
 	c.applyDeprecatedFlagMigration(true, true, true)
+	c.MigrateDeprecatedFeatures()
+}
+
+// MigrateDeprecatedFeatures drops settings for features that have been
+// removed while keeping their fields decodable during rolling upgrades.
+func (c *ScheduleConfig) MigrateDeprecatedFeatures() {
+	c.SwitchWitnessInterval = typeutil.Duration{}
+	c.WitnessScheduleLimit = 0
+	c.EnableWitness = false
+	c.Schedulers = slices.DeleteFunc(c.Schedulers, func(s SchedulerConfig) bool {
+		return s.Type == "balance-witness" || s.Type == "transfer-witness-leader"
+	})
 }
 
 // MigrateDeprecatedFlagsFromJSON migrates persisted or remote scheduling
@@ -640,6 +645,7 @@ func (c *ScheduleConfig) MigrateDeprecatedFlagsFromJSON(data []byte) error {
 	}
 	c.applyDeprecatedFlagMigration(fields.DefaultStoreLimit.AddPeer != nil,
 		fields.DefaultStoreLimit.RemovePeer != nil, fields.DefaultStoreLimit.TransferLeaderIn != nil)
+	c.MigrateDeprecatedFeatures()
 	// The migration may have changed the default used during JSON decoding.
 	for storeID, data := range fields.StoreLimit {
 		// Full legacy snapshots used zero for omitted peer limits. Only the new

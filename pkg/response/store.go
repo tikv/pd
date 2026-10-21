@@ -52,18 +52,20 @@ type SlowTrend struct {
 
 // StoreStatus contains status about a store.
 type StoreStatus struct {
-	Capacity               typeutil.ByteSize  `json:"capacity"`
-	Available              typeutil.ByteSize  `json:"available"`
-	UsedSize               typeutil.ByteSize  `json:"used_size"`
-	LeaderCount            int                `json:"leader_count"`
-	LeaderWeight           float64            `json:"leader_weight"`
-	LeaderScore            float64            `json:"leader_score"`
-	LeaderSize             int64              `json:"leader_size"`
-	RegionCount            int                `json:"region_count"`
-	RegionWeight           float64            `json:"region_weight"`
-	RegionScore            float64            `json:"region_score"`
-	RegionSize             int64              `json:"region_size"`
-	LearnerCount           int                `json:"learner_count,omitempty"`
+	Capacity     typeutil.ByteSize `json:"capacity"`
+	Available    typeutil.ByteSize `json:"available"`
+	UsedSize     typeutil.ByteSize `json:"used_size"`
+	LeaderCount  int               `json:"leader_count"`
+	LeaderWeight float64           `json:"leader_weight"`
+	LeaderScore  float64           `json:"leader_score"`
+	LeaderSize   int64             `json:"leader_size"`
+	RegionCount  int               `json:"region_count"`
+	RegionWeight float64           `json:"region_weight"`
+	RegionScore  float64           `json:"region_score"`
+	RegionSize   int64             `json:"region_size"`
+	LearnerCount int               `json:"learner_count,omitempty"`
+	// WitnessCount is kept for response compatibility and is always zero.
+	// Deprecated: witness peers are no longer supported.
 	WitnessCount           int                `json:"witness_count,omitempty"`
 	PendingPeerCount       int                `json:"pending_peer_count,omitempty"`
 	SlowScore              uint64             `json:"slow_score,omitempty"`
@@ -117,7 +119,6 @@ func BuildStoreInfo(opt *sc.ScheduleConfig, store *core.StoreInfo) *StoreInfo {
 			RegionScore:            store.RegionScore(opt.RegionScoreFormulaVersion, opt.HighSpaceRatio, opt.LowSpaceRatio, 0),
 			RegionSize:             store.GetRegionSize(),
 			LearnerCount:           store.GetLearnerCount(),
-			WitnessCount:           store.GetWitnessCount(),
 			SlowScore:              store.GetSlowScore(),
 			NetworkSlowScore:       store.GetNetworkSlowScores(),
 			SlowTrend:              slowTrend,

@@ -533,9 +533,7 @@ func (c *AffinityChecker) isRegionPlacementRuleSatisfiedWithBestLocation(region 
 		if len(rf.Rule.LocationLabels) == 0 {
 			continue
 		}
-		isWitness := rf.Rule.IsWitness && isWitnessEnabled(c.cluster)
-		// If the peer to be moved is a witness, since no snapshot is needed, we also reuse the fast failover logic.
-		strategy := c.strategy(region, rf.Rule, isWitness)
+		strategy := c.strategy(region, rf.Rule)
 		_, newStoreID, filterByTempState := strategy.getBetterLocation(c.cluster, region, fit, rf)
 		// filterByTempState being true means a better placement exists but is temporarily unschedulable.
 		// This is also considered not satisfied.
@@ -551,7 +549,7 @@ func (c *AffinityChecker) isRegionPlacementRuleSatisfiedWithBestLocation(region 
 	return true
 }
 
-func (c *AffinityChecker) strategy(region *core.RegionInfo, rule *placement.Rule, fastFailover bool) *ReplicaStrategy {
+func (c *AffinityChecker) strategy(region *core.RegionInfo, rule *placement.Rule) *ReplicaStrategy {
 	return &ReplicaStrategy{
 		checkerName:    c.Name(),
 		cluster:        c.cluster,
@@ -559,6 +557,5 @@ func (c *AffinityChecker) strategy(region *core.RegionInfo, rule *placement.Rule
 		locationLabels: rule.LocationLabels,
 		region:         region,
 		extraFilters:   []filter.Filter{filter.NewLabelConstraintFilter(c.Name(), rule.LabelConstraints)},
-		fastFailover:   fastFailover,
 	}
 }

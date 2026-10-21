@@ -46,8 +46,6 @@ const (
 	BalanceLeaderScheduler CheckerSchedulerType = "balance-leader-scheduler"
 	// BalanceRegionScheduler is balance region scheduler name.
 	BalanceRegionScheduler CheckerSchedulerType = "balance-region-scheduler"
-	// BalanceWitnessScheduler is balance witness scheduler name.
-	BalanceWitnessScheduler CheckerSchedulerType = "balance-witness-scheduler"
 	// EvictLeaderScheduler is evict leader scheduler name.
 	EvictLeaderScheduler CheckerSchedulerType = "evict-leader-scheduler"
 	// EvictSlowStoreScheduler is evict leader scheduler name.
@@ -72,8 +70,6 @@ const (
 	ShuffleLeaderScheduler CheckerSchedulerType = "shuffle-leader-scheduler"
 	// ShuffleRegionScheduler is shuffle region scheduler name.
 	ShuffleRegionScheduler CheckerSchedulerType = "shuffle-region-scheduler"
-	// TransferWitnessLeaderScheduler is transfer witness leader scheduler name.
-	TransferWitnessLeaderScheduler CheckerSchedulerType = "transfer-witness-leader-scheduler"
 	// LabelScheduler is label scheduler name.
 	LabelScheduler CheckerSchedulerType = "label-scheduler"
 	// BalanceRangeScheduler is balance key range scheduler name.
@@ -88,55 +84,50 @@ var (
 	//	It is used for `SchedulerConfig` in the `PersistOptions` and `PersistConfig`.
 	//	These two structs are persisted in the storage, so we need to keep the compatibility.
 	SchedulerTypeCompatibleMap = map[CheckerSchedulerType]string{
-		BalanceLeaderScheduler:         "balance-leader",
-		BalanceRegionScheduler:         "balance-region",
-		BalanceWitnessScheduler:        "balance-witness",
-		EvictLeaderScheduler:           "evict-leader",
-		EvictSlowStoreScheduler:        "evict-slow-store",
-		EvictSlowTrendScheduler:        "evict-slow-trend",
-		EvictStoppingStoreScheduler:    "evict-stopping-store",
-		GrantLeaderScheduler:           "grant-leader",
-		GrantHotRegionScheduler:        "grant-hot-region",
-		BalanceHotRegionScheduler:      "hot-region",
-		RandomMergeScheduler:           "random-merge",
-		ScatterRangeScheduler:          "scatter-range",
-		ShuffleHotRegionScheduler:      "shuffle-hot-region",
-		ShuffleLeaderScheduler:         "shuffle-leader",
-		ShuffleRegionScheduler:         "shuffle-region",
-		TransferWitnessLeaderScheduler: "transfer-witness-leader",
-		LabelScheduler:                 "label",
-		BalanceRangeScheduler:          "balance-range",
+		BalanceLeaderScheduler:      "balance-leader",
+		BalanceRegionScheduler:      "balance-region",
+		EvictLeaderScheduler:        "evict-leader",
+		EvictSlowStoreScheduler:     "evict-slow-store",
+		EvictSlowTrendScheduler:     "evict-slow-trend",
+		EvictStoppingStoreScheduler: "evict-stopping-store",
+		GrantLeaderScheduler:        "grant-leader",
+		GrantHotRegionScheduler:     "grant-hot-region",
+		BalanceHotRegionScheduler:   "hot-region",
+		RandomMergeScheduler:        "random-merge",
+		ScatterRangeScheduler:       "scatter-range",
+		ShuffleHotRegionScheduler:   "shuffle-hot-region",
+		ShuffleLeaderScheduler:      "shuffle-leader",
+		ShuffleRegionScheduler:      "shuffle-region",
+		LabelScheduler:              "label",
+		BalanceRangeScheduler:       "balance-range",
 	}
 
 	// ConvertOldStrToType exists for compatibility.
 	//
 	//	It is used to convert the old scheduler type to `CheckerSchedulerType`.
 	ConvertOldStrToType = map[string]CheckerSchedulerType{
-		"balance-leader":          BalanceLeaderScheduler,
-		"balance-region":          BalanceRegionScheduler,
-		"balance-witness":         BalanceWitnessScheduler,
-		"evict-leader":            EvictLeaderScheduler,
-		"evict-slow-store":        EvictSlowStoreScheduler,
-		"evict-slow-trend":        EvictSlowTrendScheduler,
-		"evict-stopping-store":    EvictStoppingStoreScheduler,
-		"grant-leader":            GrantLeaderScheduler,
-		"grant-hot-region":        GrantHotRegionScheduler,
-		"hot-region":              BalanceHotRegionScheduler,
-		"random-merge":            RandomMergeScheduler,
-		"scatter-range":           ScatterRangeScheduler,
-		"shuffle-hot-region":      ShuffleHotRegionScheduler,
-		"shuffle-leader":          ShuffleLeaderScheduler,
-		"shuffle-region":          ShuffleRegionScheduler,
-		"transfer-witness-leader": TransferWitnessLeaderScheduler,
-		"label":                   LabelScheduler,
-		"balance-range":           BalanceRangeScheduler,
+		"balance-leader":       BalanceLeaderScheduler,
+		"balance-region":       BalanceRegionScheduler,
+		"evict-leader":         EvictLeaderScheduler,
+		"evict-slow-store":     EvictSlowStoreScheduler,
+		"evict-slow-trend":     EvictSlowTrendScheduler,
+		"evict-stopping-store": EvictStoppingStoreScheduler,
+		"grant-leader":         GrantLeaderScheduler,
+		"grant-hot-region":     GrantHotRegionScheduler,
+		"hot-region":           BalanceHotRegionScheduler,
+		"random-merge":         RandomMergeScheduler,
+		"scatter-range":        ScatterRangeScheduler,
+		"shuffle-hot-region":   ShuffleHotRegionScheduler,
+		"shuffle-leader":       ShuffleLeaderScheduler,
+		"shuffle-region":       ShuffleRegionScheduler,
+		"label":                LabelScheduler,
+		"balance-range":        BalanceRangeScheduler,
 	}
 
 	// StringToSchedulerType is a map to convert the scheduler string to the CheckerSchedulerType.
 	StringToSchedulerType = map[string]CheckerSchedulerType{
 		"balance-leader-scheduler":       BalanceLeaderScheduler,
 		"balance-region-scheduler":       BalanceRegionScheduler,
-		"balance-witness-scheduler":      BalanceWitnessScheduler,
 		"evict-leader-scheduler":         EvictLeaderScheduler,
 		"evict-slow-store-scheduler":     EvictSlowStoreScheduler,
 		"evict-slow-trend-scheduler":     EvictSlowTrendScheduler,
@@ -147,13 +138,12 @@ var (
 		"random-merge-scheduler":         RandomMergeScheduler,
 		"scatter-range-scheduler":        ScatterRangeScheduler,
 		// TODO: remove `scatter-range` after remove `NewScatterRangeSchedulerCommand` from pd-ctl
-		"scatter-range":                     ScatterRangeScheduler,
-		"shuffle-hot-region-scheduler":      ShuffleHotRegionScheduler,
-		"shuffle-leader-scheduler":          ShuffleLeaderScheduler,
-		"shuffle-region-scheduler":          ShuffleRegionScheduler,
-		"transfer-witness-leader-scheduler": TransferWitnessLeaderScheduler,
-		"label-scheduler":                   LabelScheduler,
-		"balance-range-scheduler":           BalanceRangeScheduler,
+		"scatter-range":                ScatterRangeScheduler,
+		"shuffle-hot-region-scheduler": ShuffleHotRegionScheduler,
+		"shuffle-leader-scheduler":     ShuffleLeaderScheduler,
+		"shuffle-region-scheduler":     ShuffleRegionScheduler,
+		"label-scheduler":              LabelScheduler,
+		"balance-range-scheduler":      BalanceRangeScheduler,
 	}
 
 	// DefaultSchedulers is the default scheduler types.

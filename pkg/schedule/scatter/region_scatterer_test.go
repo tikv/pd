@@ -1956,9 +1956,9 @@ func scatterOperatorTargets(t testing.TB, region *core.RegionInfo, op *operator.
 	for i := range op.Len() {
 		switch s := op.Step(i).(type) {
 		case operator.AddPeer:
-			targets[s.ToStore] = &metapb.Peer{Id: s.PeerID, StoreId: s.ToStore, IsWitness: s.IsWitness}
+			targets[s.ToStore] = &metapb.Peer{Id: s.PeerID, StoreId: s.ToStore}
 		case operator.AddLearner:
-			targets[s.ToStore] = &metapb.Peer{Id: s.PeerID, StoreId: s.ToStore, Role: metapb.PeerRole_Learner, IsWitness: s.IsWitness}
+			targets[s.ToStore] = &metapb.Peer{Id: s.PeerID, StoreId: s.ToStore, Role: metapb.PeerRole_Learner}
 		case operator.PromoteLearner:
 			targets[s.ToStore].Role = metapb.PeerRole_Voter
 		case operator.ChangePeerV2Enter:
@@ -2226,21 +2226,13 @@ func TestScatterReservesPeerRole(t *testing.T) {
 		name     string
 		source   uint64
 		reserved uint64
-		witness  bool
 	}{
-		{"voter-reserves-learner", 2, 3, false},
-		{"learner-reserves-voter", 3, 2, false},
-		{"voter-reserves-witness", 2, 3, true},
-		{"witness-reserves-voter", 3, 2, true},
+		{"voter-reserves-learner", 2, 3},
+		{"learner-reserves-voter", 3, 2},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			sc, tc, region := newScatterTopologyFixture(t, true, []string{"host"}, [][]string{{"a"}, {"b"}, {"c"}, {"d"}}, 3)
-			if tt.witness {
-				tc.SetEnableWitness(true)
-				region = region.Clone(core.WithWitness(region.GetStorePeer(3).GetId()))
-			} else {
-				region = region.Clone(core.WithRole(region.GetStorePeer(3).GetId(), metapb.PeerRole_Learner))
-			}
+			region = region.Clone(core.WithRole(region.GetStorePeer(3).GetId(), metapb.PeerRole_Learner))
 			original := region.Clone()
 			rm := tc.GetRuleManager()
 			rule := rm.GetRule("pd", "default").Clone()
@@ -2248,9 +2240,6 @@ func TestScatterReservesPeerRole(t *testing.T) {
 			require.NoError(t, rm.SetRule(rule))
 			roleRule := rule.Clone()
 			roleRule.ID, roleRule.Role, roleRule.Count = "learner", placement.Learner, 1
-			if tt.witness {
-				roleRule.ID, roleRule.Role, roleRule.IsWitness = "witness", placement.Voter, true
-			}
 			require.NoError(t, rm.SetRule(roleRule))
 
 			// Process the moving peer first, independently of map iteration order.
@@ -2284,8 +2273,6 @@ func TestScatterReservesPeerRole(t *testing.T) {
 			require.Equal(t, region.GetStorePeer(tt.reserved), targets[tt.reserved])
 			require.Equal(t, region.GetStorePeer(1), targets[1])
 			require.Equal(t, region.GetStorePeer(tt.source).GetRole(), targets[4].GetRole())
-			require.Equal(t, region.GetStorePeer(tt.source).GetIsWitness(), targets[4].GetIsWitness())
-			require.False(t, targets[leader].GetIsWitness())
 			require.Equal(t, original.GetMeta(), region.GetMeta())
 			require.Equal(t, original.GetLeader(), region.GetLeader())
 		})

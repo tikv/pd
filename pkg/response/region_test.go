@@ -81,10 +81,9 @@ func TestEasyJSONCompatibility(t *testing.T) {
 
 	peer := MetaPeer{
 		Peer: &metapb.Peer{
-			Id:        1,
-			StoreId:   10,
-			Role:      metapb.PeerRole_Voter,
-			IsWitness: false,
+			Id:      1,
+			StoreId: 10,
+			Role:    metapb.PeerRole_Voter,
 		},
 		RoleName:  metapb.PeerRole_Voter.String(),
 		IsLearner: false,
