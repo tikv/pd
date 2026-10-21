@@ -150,9 +150,10 @@ func (s *requestSourceMetricsState) cleanup() {
 	if s == nil {
 		return
 	}
-	metricSet := metrics.Current()
+	failpoint.InjectCall("beforeRequestSourceMetricsCleanupLock")
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	metricSet := metrics.Current()
 	s.closed = true
 	// This cleanup assumes there is only one active ResourceGroupsController in the process.
 	// RequestSourceRUCounter is process-global, while this state is controller-local; with
