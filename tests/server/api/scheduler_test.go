@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -993,6 +994,18 @@ func (suite *scheduleTestSuite) checkBalanceRangeAPI(cluster *tests.TestCluster)
 		re.Equal(http.StatusOK, i)
 		re.JSONEq(`"0"`, string(body))
 	}))
+	// retrying the same request returns the existing job id
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/schedulers", data, func(body []byte, i int, _ http.Header) {
+		re.Equal(http.StatusOK, i)
+		re.JSONEq(`"0"`, string(body))
+	}))
+	// the same alias with different parameters is rejected
+	conflictInput := maps.Clone(input)
+	conflictInput["rule"] = "peer-scatter"
+	conflictData, err := json.Marshal(conflictInput)
+	re.NoError(err)
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/schedulers", conflictData,
+		testutil.Status(re, http.StatusBadRequest), testutil.StringContain(re, "job already exists")))
 
 	// check
 	testutil.Eventually(re, func() bool {
@@ -1017,6 +1030,10 @@ func (suite *scheduleTestSuite) checkBalanceRangeAPI(cluster *tests.TestCluster)
 	input["alias"] = "test-sysbench-partition(p2)"
 	data, err = json.Marshal(input)
 	re.NoError(err)
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/schedulers", data, func(body []byte, i int, _ http.Header) {
+		re.Equal(http.StatusOK, i)
+		re.JSONEq(`"1"`, string(body))
+	}))
 	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/schedulers", data, func(body []byte, i int, _ http.Header) {
 		re.Equal(http.StatusOK, i)
 		re.JSONEq(`"1"`, string(body))

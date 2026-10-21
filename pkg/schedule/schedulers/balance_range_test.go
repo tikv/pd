@@ -148,13 +148,14 @@ func TestIsBalanced(t *testing.T) {
 		tc.AddLeaderRegionWithRange(uint64(i+2), fmt.Sprintf("%20d", i), fmt.Sprintf("%20d", i+1), 1, 2, 3)
 	}
 	now := time.Now()
-	re.NoError(sc.conf.addJob(&balanceRangeSchedulerJob{
+	_, err = sc.conf.addJob(&balanceRangeSchedulerJob{
 		Engine:  core.EngineTiKV,
 		Rule:    core.LeaderScatter,
 		Ranges:  []keyutil.KeyRange{keyutil.NewKeyRange("", "")},
 		Start:   &now,
 		Timeout: 10 * time.Minute,
-	}))
+	})
+	re.NoError(err)
 	km := tc.GetKeyRangeManager()
 	re.True(km.IsEmpty())
 	re.True(sc.IsScheduleAllowed(tc))
@@ -430,8 +431,9 @@ func TestCodecConfig(t *testing.T) {
 		Ranges: []keyutil.KeyRange{keyutil.NewKeyRange("a", "b")},
 		JobID:  2,
 	}
-	re.NoError(conf.addJob(job1))
-	re.Error(conf.addJob(job1))
+	jobID, err := conf.addJob(job1)
+	re.NoError(err)
+	re.Equal(uint64(2), jobID)
 	re.NoError(conf.load(&conf1))
 	re.Equal(conf1.jobs, conf.jobs)
 
@@ -477,7 +479,8 @@ func TestJobGC(t *testing.T) {
 	job := &balanceRangeSchedulerJob{
 		Finish: &now,
 	}
-	re.NoError(conf.addJob(job))
+	_, err := conf.addJob(job)
+	re.NoError(err)
 	re.NoError(conf.deleteJob(1))
 	re.NoError(conf.gcLocked())
 	re.Len(conf.jobs, 1)
@@ -486,6 +489,59 @@ func TestJobGC(t *testing.T) {
 	conf.jobs[0].Finish = &expiredTime
 	re.NoError(conf.gcLocked())
 	re.Empty(conf.jobs)
+}
+
+func TestAddJobIdempotent(t *testing.T) {
+	re := require.New(t)
+	conf := &balanceRangeSchedulerConfig{
+		schedulerConfig: &baseSchedulerConfig{},
+		jobs:            make([]*balanceRangeSchedulerJob, 0),
+	}
+	conf.init("test", storage.NewStorageWithMemoryBackend(), conf)
+	newJob := func() *balanceRangeSchedulerJob {
+		return &balanceRangeSchedulerJob{
+			Alias:   "test.t",
+			Engine:  core.EngineTiKV,
+			Rule:    core.LeaderScatter,
+			Timeout: defaultJobTimeout,
+			Ranges:  []keyutil.KeyRange{keyutil.NewKeyRange("a", "b")},
+		}
+	}
+	jobID, err := conf.addJob(newJob())
+	re.NoError(err)
+	re.Equal(uint64(1), jobID)
+
+	// Retrying the same request returns the existing job.
+	jobID, err = conf.addJob(newJob())
+	re.NoError(err)
+	re.Equal(uint64(1), jobID)
+	re.Len(conf.jobs, 1)
+
+	// The same alias with different parameters is rejected.
+	job := newJob()
+	job.Ranges = []keyutil.KeyRange{keyutil.NewKeyRange("a", "c")}
+	_, err = conf.addJob(job)
+	re.ErrorContains(err, "job already exists")
+	job = newJob()
+	job.Engine = core.EngineTiFlash
+	_, err = conf.addJob(job)
+	re.ErrorContains(err, "job already exists")
+	re.Len(conf.jobs, 1)
+
+	// A running job is still matched.
+	conf.jobs[0].Status = running
+	jobID, err = conf.addJob(newJob())
+	re.NoError(err)
+	re.Equal(uint64(1), jobID)
+
+	// Completed jobs are not matched, a new job is created.
+	for i, status := range []JobStatus{finished, cancelled} {
+		conf.jobs[len(conf.jobs)-1].Status = status
+		jobID, err = conf.addJob(newJob())
+		re.NoError(err)
+		re.Equal(uint64(i+2), jobID)
+	}
+	re.Len(conf.jobs, 3)
 }
 
 func TestPersistFail(t *testing.T) {
@@ -510,7 +566,8 @@ func TestPersistFail(t *testing.T) {
 	newJob := &balanceRangeSchedulerJob{
 		Alias: "test.t",
 	}
-	re.ErrorContains(conf.addJob(newJob), errMsg)
+	_, err := conf.addJob(newJob)
+	re.ErrorContains(err, errMsg)
 	re.Len(conf.jobs, 1)
 
 	re.ErrorContains(conf.deleteJob(1), errMsg)
