@@ -39,6 +39,13 @@ func AllOf[T any](s []T, p func(int) bool) bool {
 	return NoneOf(s, np)
 }
 
+// Contains returns true if the given slice contains the value.
+//
+// Deprecated: Use slices.Contains instead.
+func Contains[T comparable](slice []T, value T) bool {
+	return slices.Contains(slice, value)
+}
+
 // Remove removes the value from the slice.
 func Remove[T comparable](slice []T, value T) []T {
 	i, j := 0, 0

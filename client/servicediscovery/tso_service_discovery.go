@@ -795,3 +795,10 @@ func EqualWithoutOrder[T comparable](a, b []T) bool {
 	}
 	return true
 }
+
+// Contains returns true if the given slice contains the value.
+//
+// Deprecated: Use slices.Contains instead.
+func Contains[T comparable](slice []T, value T) bool {
+	return slices.Contains(slice, value)
+}
