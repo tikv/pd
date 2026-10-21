@@ -569,14 +569,15 @@ func (c *serviceDiscovery) runMemberRefreshLoop(memberUpdateCh <-chan time.Time)
 	controller := memberRefreshController{}
 	var connectionStateTicker *time.Ticker
 	var connectionStateCh <-chan time.Time
-	stopConnectionStateTicker := func() {
+	leaveDegraded := func() {
+		controller.leaveDegraded()
 		if connectionStateTicker != nil {
 			connectionStateTicker.Stop()
 			connectionStateTicker = nil
 		}
 		connectionStateCh = nil
 	}
-	defer stopConnectionStateTicker()
+	defer leaveDegraded()
 	startConnectionStateTicker := func() {
 		if connectionStateTicker == nil {
 			connectionStateTicker = time.NewTicker(memberConnectionStateCheckInterval)
@@ -616,8 +617,7 @@ func (c *serviceDiscovery) runMemberRefreshLoop(memberUpdateCh <-chan time.Time)
 				result, err := c.updateMemberWithResult()
 				logBatchFailure(err)
 				if err == nil {
-					controller.leaveDegraded()
-					stopConnectionStateTicker()
+					leaveDegraded()
 					continue
 				}
 				snapshot = c.snapshotMemberConnections(snapshot)
@@ -625,16 +625,14 @@ func (c *serviceDiscovery) runMemberRefreshLoop(memberUpdateCh <-chan time.Time)
 					connectIdleMemberConnections(snapshot)
 					continue
 				}
-				controller.leaveDegraded()
-				stopConnectionStateTicker()
+				leaveDegraded()
 			case <-connectionStateCh:
 				snapshot = c.snapshotMemberConnections(snapshot)
 				if controller.canRemainDegraded(snapshot.urls, snapshot.connections) {
 					connectIdleMemberConnections(snapshot)
 					continue
 				}
-				controller.leaveDegraded()
-				stopConnectionStateTicker()
+				leaveDegraded()
 				drainScheduledCheck()
 			}
 		} else {
@@ -669,8 +667,7 @@ func (c *serviceDiscovery) runMemberRefreshLoop(memberUpdateCh <-chan time.Time)
 				connectIdleMemberConnections(snapshot)
 				break
 			}
-			controller.leaveDegraded()
-			stopConnectionStateTicker()
+			leaveDegraded()
 			drainScheduledCheck()
 		}
 	}
