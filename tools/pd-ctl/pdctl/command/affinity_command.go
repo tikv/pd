@@ -23,6 +23,7 @@ import (
 
 	"github.com/pingcap/errors"
 
+	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/pkg/schedule/affinity"
 )
 
@@ -159,8 +160,8 @@ func getGroupID(cmd *cobra.Command) (string, error) {
 	var keyspaceID *uint32
 	if cmd.Flags().Changed("keyspace-id") {
 		id, _ := cmd.Flags().GetUint32("keyspace-id")
-		if id > 0xFFFFFF {
-			return "", errors.New("--keyspace-id must be between 0 and 16777215")
+		if id > constants.MaxKeyspaceID {
+			return "", errors.Errorf("--keyspace-id must be between %d and %d", constants.DefaultKeyspaceID, constants.MaxKeyspaceID)
 		}
 		keyspaceID = &id
 	}
