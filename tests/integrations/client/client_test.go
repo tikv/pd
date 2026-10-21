@@ -1304,9 +1304,15 @@ func (suite *clientStatelessTestSuite) TestGetStore() {
 	store := stores[3]
 
 	// Get an up store should be OK.
+	// The background check may move it from preparing to serving during the RPC.
+	nodeStateBefore := cluster.GetStore(store.GetId()).GetNodeState()
 	n, err := suite.client.GetStore(context.Background(), store.GetId())
 	re.NoError(err)
+	nodeStateAfter := cluster.GetStore(store.GetId()).GetNodeState()
+	re.Contains([]metapb.NodeState{metapb.NodeState_Preparing, metapb.NodeState_Serving}, n.GetNodeState())
+	re.Contains([]metapb.NodeState{nodeStateBefore, nodeStateAfter}, n.GetNodeState())
 	store.LastHeartbeat = n.LastHeartbeat
+	store.NodeState = n.NodeState
 	re.Equal(store, n)
 
 	actualStores, err := suite.client.GetAllStores(context.Background())
