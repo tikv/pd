@@ -584,7 +584,10 @@ func TestHotRegionCollectorConcurrent(t *testing.T) {
 	for range 4 {
 		wg.Go(func() {
 			for range 100 {
-				collector.set(utils.Read, []prometheus.Metric{prometheus.MustNewConstMetric(collector.loadDesc, prometheus.GaugeValue, 1, "read-peer", "cpu", "1", "1")})
+				collector.set(utils.Read, []hotRegionMetric{{
+					Metric:  prometheus.MustNewConstMetric(collector.loadDesc, prometheus.GaugeValue, 1, "read-peer", "cpu", "1", "1"),
+					storeID: "1",
+				}}, collector.getGeneration())
 				_, err := registry.Gather()
 				assert.NoError(t, err)
 			}

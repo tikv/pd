@@ -225,6 +225,7 @@ func init() {
 
 // DeleteStoreMetrics deletes the per-store scheduler metrics of a store.
 func DeleteStoreMetrics(storeID string) {
+	topHotRegionMetrics.deleteStore(storeID)
 	opInfluenceStatus.DeletePartialMatch(prometheus.Labels{"store": storeID})
 	balanceWitnessCounter.DeleteLabelValues("move-witness", storeID+"-out")
 	balanceWitnessCounter.DeleteLabelValues("move-witness", storeID+"-in")
@@ -423,6 +424,11 @@ var (
 	balancePersistFailedCounter      = balanceRangeCounterWithEvent("persist-failed")
 )
 
+type hotRegionMetric struct {
+	prometheus.Metric
+	storeID string
+}
+
 // Keep immutable metric snapshots, rather than a GaugeVec retaining labels for
 // every region ever seen. Scrapes read at most 90 metrics and never scan regions.
 type hotRegionCollector struct {
@@ -430,7 +436,8 @@ type hotRegionCollector struct {
 	loadDesc        *prometheus.Desc
 	storeRatioDesc  *prometheus.Desc
 	hotDurationDesc *prometheus.Desc
-	metrics         [utils.RWTypeLen][]prometheus.Metric
+	metrics         [utils.RWTypeLen][]hotRegionMetric
+	generation      uint64
 }
 
 func newHotRegionCollector() *hotRegionCollector {
@@ -467,21 +474,47 @@ func (c *hotRegionCollector) Collect(ch chan<- prometheus.Metric) {
 	c.RUnlock()
 	for _, metrics := range snapshot {
 		for _, metric := range metrics {
-			ch <- metric
+			ch <- metric.Metric
 		}
 	}
 }
 
-func (c *hotRegionCollector) set(rw utils.RWType, metrics []prometheus.Metric) {
+func (c *hotRegionCollector) getGeneration() uint64 {
+	c.RLock()
+	defer c.RUnlock()
+	return c.generation
+}
+
+func (c *hotRegionCollector) set(rw utils.RWType, metrics []hotRegionMetric, generation uint64) {
 	c.Lock()
-	c.metrics[rw] = metrics
-	c.Unlock()
+	defer c.Unlock()
+	// A Store deletion or reset invalidates scans started before cleanup.
+	if c.generation == generation {
+		c.metrics[rw] = metrics
+	}
+}
+
+func (c *hotRegionCollector) deleteStore(storeID string) {
+	c.Lock()
+	defer c.Unlock()
+	c.generation++
+	for rw, metrics := range c.metrics {
+		// An in-flight scrape can still hold the old slice.
+		remaining := make([]hotRegionMetric, 0, len(metrics))
+		for _, metric := range metrics {
+			if metric.storeID != storeID {
+				remaining = append(remaining, metric)
+			}
+		}
+		c.metrics[rw] = remaining
+	}
 }
 
 // ResetHotRegionMetrics removes all Top N samples, including on leadership loss.
 func ResetHotRegionMetrics() {
 	topHotRegionMetrics.Lock()
-	topHotRegionMetrics.metrics = [utils.RWTypeLen][]prometheus.Metric{}
+	topHotRegionMetrics.generation++
+	topHotRegionMetrics.metrics = [utils.RWTypeLen][]hotRegionMetric{}
 	topHotRegionMetrics.Unlock()
 }
 
@@ -644,6 +677,7 @@ func (c *Controller) CollectHotRegionMetricsAndStoreStats(rw utils.RWType, store
 }
 
 func (c *Controller) publishHotRegionMetrics(rw utils.RWType, storeLoads map[uint64]statistics.StoreKindLoads, selectTop func(dim, leaderDim int) (hotRegionTop, hotRegionTop)) {
+	generation := topHotRegionMetrics.getGeneration()
 	getScheduler := func() *hotScheduler {
 		if controller := c.schedulers[types.BalanceHotRegionScheduler.String()]; controller != nil {
 			scheduler, _ := controller.Scheduler.(*hotScheduler)
@@ -655,7 +689,7 @@ func (c *Controller) publishHotRegionMetrics(rw utils.RWType, storeLoads map[uin
 	c.RLock()
 	scheduler := getScheduler()
 	if scheduler == nil {
-		topHotRegionMetrics.set(rw, nil)
+		topHotRegionMetrics.set(rw, nil, generation)
 		c.RUnlock()
 		return
 	}
@@ -673,14 +707,19 @@ func (c *Controller) publishHotRegionMetrics(rw utils.RWType, storeLoads map[uin
 	}
 	dim := getDim(peerType)
 	peersTop, leadersTop := selectTop(dim, leaderDim)
-	metrics := make([]prometheus.Metric, 0, 3*(peersTop.count+leadersTop.count))
+	metrics := make([]hotRegionMetric, 0, 3*(peersTop.count+leadersTop.count))
 	appendTop := func(ty resourceType, dim int, top hotRegionTop) {
 		for _, entry := range top.entries[:top.count] {
 			labels := []string{ty.String(), utils.DimToString(dim), strconv.FormatUint(entry.regionID, 10), strconv.FormatUint(entry.storeID, 10)}
-			metrics = append(metrics, prometheus.MustNewConstMetric(topHotRegionMetrics.loadDesc, prometheus.GaugeValue, entry.load,
-				labels...))
+			appendMetric := func(desc *prometheus.Desc, value float64) {
+				metrics = append(metrics, hotRegionMetric{
+					Metric:  prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, value, labels...),
+					storeID: labels[3],
+				})
+			}
+			appendMetric(topHotRegionMetrics.loadDesc, entry.load)
 			if duration := entry.peer.GetHotDuration(); duration > 0 {
-				metrics = append(metrics, prometheus.MustNewConstMetric(topHotRegionMetrics.hotDurationDesc, prometheus.GaugeValue, duration.Seconds(), labels...))
+				appendMetric(topHotRegionMetrics.hotDurationDesc, duration.Seconds())
 			}
 			store := c.cluster.GetStore(entry.storeID)
 			if store != nil {
@@ -693,7 +732,7 @@ func (c *Controller) publishHotRegionMetrics(rw utils.RWType, storeLoads map[uin
 					if total > 0 && !math.IsNaN(total) && !math.IsInf(total, 0) {
 						ratio := entry.load / total
 						if !math.IsNaN(ratio) && !math.IsInf(ratio, 0) {
-							metrics = append(metrics, prometheus.MustNewConstMetric(topHotRegionMetrics.storeRatioDesc, prometheus.GaugeValue, ratio, labels...))
+							appendMetric(topHotRegionMetrics.storeRatioDesc, ratio)
 						}
 					}
 				}
@@ -709,6 +748,6 @@ func (c *Controller) publishHotRegionMetrics(rw utils.RWType, storeLoads map[uin
 	c.RLock()
 	defer c.RUnlock()
 	if getScheduler() == scheduler {
-		topHotRegionMetrics.set(rw, metrics)
+		topHotRegionMetrics.set(rw, metrics, generation)
 	}
 }
