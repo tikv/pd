@@ -28,6 +28,9 @@ import (
 	clientmetrics "github.com/tikv/pd/client/metrics"
 )
 
+// TestServiceDiscoveryMetricsInitializationIsConcurrentSafe covers bundle
+// publication and direct observer access. It does not exercise the getMembers
+// or getClusterInfo request paths.
 func TestServiceDiscoveryMetricsInitializationIsConcurrentSafe(t *testing.T) {
 	// Metrics registration runs once per process, so each invocation needs a fresh process.
 	if os.Getenv("PD_CLIENT_METRICS_TEST") != t.Name() {
