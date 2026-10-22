@@ -1183,7 +1183,7 @@ func TestSelectHotPeers(t *testing.T) {
 		original := make([]*statistics.HotPeerStat, len(peers))
 		copy(original, peers)
 		for dim := range utils.DimLen {
-			expected := append([]*statistics.HotPeerStat(nil), peers...)
+			expected := slices.Clone(peers)
 			sort.Slice(expected, func(i, j int) bool {
 				a, b := expected[i], expected[j]
 				if a.GetLoad(dim) == b.GetLoad(dim) {
@@ -1535,8 +1535,8 @@ func prepareHotSolverSearch(tb testing.TB, stores, peers int, scenario string) (
 			}
 			cluster.PutRegion(core.NewRegionInfo(&metapb.Region{
 				Id: regionID, Peers: regionPeers,
-				StartKey: []byte(fmt.Sprintf("%020d", regionID)),
-				EndKey:   []byte(fmt.Sprintf("%020d", regionID+1)),
+				StartKey: fmt.Appendf(nil, "%020d", regionID),
+				EndKey:   fmt.Appendf(nil, "%020d", regionID+1),
 			}, regionPeers[1], core.SetApproximateSize(10)))
 			stats[i] = &statistics.HotPeerStat{RegionID: regionID, StoreID: id, Loads: peerLoads}
 		}
