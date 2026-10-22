@@ -117,9 +117,13 @@ func newTSODispatcher(
 }
 
 func (td *tsoDispatcher) revokePendingRequests(err error) {
-	for range len(td.tsoRequestCh) {
-		req := <-td.tsoRequestCh
-		req.TryDone(err)
+	for {
+		select {
+		case req := <-td.tsoRequestCh:
+			req.TryDone(err)
+		default:
+			return
+		}
 	}
 }
 
@@ -129,8 +133,27 @@ func (td *tsoDispatcher) close() {
 	td.revokePendingRequests(tsoErr)
 }
 
+// push takes ownership of completing the request, even if it cannot be enqueued.
 func (td *tsoDispatcher) push(request *Request) {
-	td.tsoRequestCh <- request
+	select {
+	case <-request.requestCtx.Done():
+		request.TryDone(request.requestCtx.Err())
+		return
+	case <-request.clientCtx.Done():
+		request.TryDone(request.clientCtx.Err())
+		return
+	case <-td.ctx.Done():
+		request.TryDone(errors.WithStack(errs.ErrClosing))
+		return
+	case td.tsoRequestCh <- request:
+	}
+	failpoint.InjectCall("afterPushTSORequest")
+	// The dispatcher may have exited and drained the queue before this send.
+	// Drain again after cancellation so that a late enqueue is also completed.
+	// Do not access request here: the consumer may already have recycled it.
+	if td.ctx.Err() != nil {
+		td.revokePendingRequests(errors.WithStack(errs.ErrClosing))
+	}
 }
 
 func (td *tsoDispatcher) handleDispatcher(wg *sync.WaitGroup) {
