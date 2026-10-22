@@ -299,7 +299,7 @@ func TestPushToClosedDispatcher(t *testing.T) {
 			td.push(req)
 			select {
 			case err := <-req.done:
-				re.ErrorIs(err, errs.ErrClosing)
+				re.ErrorIs(err, context.Canceled)
 			case <-time.After(time.Second):
 				t.Fatal("request sent to a closed dispatcher was not completed")
 			}
@@ -342,11 +342,7 @@ func TestPushCancellationWithFullQueue(t *testing.T) {
 			}
 			select {
 			case err := <-req.done:
-				if target == "dispatcher" {
-					re.ErrorIs(err, errs.ErrClosing)
-				} else {
-					re.ErrorIs(err, context.Canceled)
-				}
+				re.ErrorIs(err, context.Canceled)
 			default:
 				t.Fatal("canceled request was not completed")
 			}

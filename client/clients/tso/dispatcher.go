@@ -117,6 +117,10 @@ func newTSODispatcher(
 }
 
 func (td *tsoDispatcher) revokePendingRequests(err error) {
+	// Preserve the cancellation error seen by callers when their TSO client is replaced.
+	if ctxErr := td.ctx.Err(); ctxErr != nil {
+		err = errors.WithStack(ctxErr)
+	}
 	for {
 		select {
 		case req := <-td.tsoRequestCh:
@@ -143,7 +147,7 @@ func (td *tsoDispatcher) push(request *Request) {
 		request.TryDone(request.clientCtx.Err())
 		return
 	case <-td.ctx.Done():
-		request.TryDone(errors.WithStack(errs.ErrClosing))
+		request.TryDone(errors.WithStack(td.ctx.Err()))
 		return
 	case td.tsoRequestCh <- request:
 	}
