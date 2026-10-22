@@ -389,6 +389,65 @@ func TestResignTSOPrimaryForward(t *testing.T) {
 	}
 }
 
+// TestGetTSAfterTSOPrimaryChanged checks that a client discovering TSO servers directly
+// resumes soon after the primary changes. The old primary rejects requests or closes its
+// streams before the new one is elected, so the client must not wait a full retry interval
+// after its first attempt misses the new primary.
+func TestGetTSAfterTSOPrimaryChanged(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+	pdLeader := cluster.GetServer(cluster.WaitLeader())
+	re.NoError(pdLeader.BootstrapCluster())
+	tc, err := tests.NewTestTSOCluster(ctx, 3, pdLeader.GetAddr())
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForDefaultPrimaryServing(re)
+
+	client := utils.SetupClientWithKeyspaceID(ctx, re, constant.DefaultKeyspaceID, []string{pdLeader.GetAddr()})
+	defer client.Close()
+	utils.WaitForTSOServiceAvailable(ctx, re, client)
+
+	// Measure the longest gap between two successful GetTS calls across the primary change.
+	checkMaxGap := func(changePrimary func()) {
+		var maxGap time.Duration
+		stop := make(chan struct{})
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			lastSuccess := time.Now()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				if _, _, err := client.GetTS(ctx); err == nil {
+					now := time.Now()
+					maxGap = max(maxGap, now.Sub(lastSuccess))
+					lastSuccess = now
+				}
+			}
+		}()
+		time.Sleep(100 * time.Millisecond)
+		changePrimary()
+		tc.WaitForDefaultPrimaryServing(re)
+		time.Sleep(time.Second)
+		close(stop)
+		<-done
+		re.Less(maxGap, 400*time.Millisecond)
+	}
+	for range 3 {
+		checkMaxGap(func() {
+			re.NoError(tc.ResignPrimary(constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID))
+		})
+	}
+}
+
 func TestResignAPIPrimaryForward(t *testing.T) {
 	re := require.New(t)
 	suite := NewPDServiceForward(re)

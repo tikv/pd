@@ -53,6 +53,10 @@ const (
 	tsoSvcDiscoveryFormat = "/ms/%d/tso/%05d/primary"
 	// initRetryInterval is the rpc retry interval during the initialization phase.
 	initRetryInterval = time.Second
+	// checkMemberMaxRetryInterval and checkMemberMaxRetryTimes bound the retries of
+	// CheckMemberChanged, which callers use after a primary change is detected.
+	checkMemberMaxRetryInterval = 500 * time.Millisecond
+	checkMemberMaxRetryTimes    = 10
 )
 
 var _ ServiceDiscovery = (*tsoServiceDiscovery)(nil)
@@ -251,10 +255,10 @@ func (c *tsoServiceDiscovery) startCheckMemberLoop() {
 			log.Info("[tso] exit check member loop")
 			return
 		}
-		// Make sure queryRetryMaxTimes * queryRetryInterval is far less than memberUpdateInterval,
+		// Make sure MaxRetryTimes * initRetryInterval is far less than memberUpdateInterval,
 		// so that we can speed up the process of tso service discovery when failover happens on the
 		// tso service side and also ensures it won't call updateMember too frequently during normal time.
-		if err := retry.Retry(c.ctx, c.option.MaxRetryTimes, initRetryInterval, c.updateMember); err != nil {
+		if err := c.updateMemberWithBackoff(initRetryInterval, c.option.MaxRetryTimes); err != nil {
 			log.Error("[tso] failed to update member", errs.ZapError(err))
 		}
 	}
@@ -351,11 +355,23 @@ func (c *tsoServiceDiscovery) CheckMemberChanged() error {
 	if err := c.serviceDiscovery.CheckMemberChanged(); err != nil {
 		log.Warn("[tso] failed to check member changed", errs.ZapError(err))
 	}
-	if err := retry.WithConfig(c.ctx, c.updateMember); err != nil {
+	if err := c.updateMemberWithBackoff(checkMemberMaxRetryInterval, checkMemberMaxRetryTimes); err != nil {
 		log.Error("[tso] failed to update member", errs.ZapError(err))
 		return err
 	}
 	return nil
+}
+
+// updateMemberWithBackoff retries updateMember until it succeeds or the total backoff
+// reaches maxRetryTimes*maxInterval. The interval starts from UpdateMemberBackOffBaseTime
+// and doubles up to maxInterval: during a planned primary transfer, the old primary rejects
+// requests before the new primary is elected, so the first query often misses the new
+// primary, which becomes ready tens of milliseconds later.
+func (c *tsoServiceDiscovery) updateMemberWithBackoff(maxInterval time.Duration, maxRetryTimes int) error {
+	// A zero total means retrying forever, so always keep a finite budget.
+	total := time.Duration(max(maxRetryTimes, 1)) * maxInterval
+	bo := retry.InitialBackoffer(UpdateMemberBackOffBaseTime, maxInterval, total)
+	return bo.Exec(c.ctx, c.updateMember)
 }
 
 // ExecAndAddLeaderSwitchedCallback executes the callback once and adds it to the callback list then.
