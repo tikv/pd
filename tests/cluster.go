@@ -233,13 +233,15 @@ func (s *TestServer) ResignLeader() error {
 
 // ResignLeaderWithRetry resigns the leader of the server with retry.
 func (s *TestServer) ResignLeaderWithRetry() (err error) {
-	if !s.IsLeader() {
-		return
-	}
 	// The default timeout of moving an etcd leader is 5 seconds,
 	// set the retry times to 3 will get a maximum of ~15 seconds of trying.
 	const retryCount = 3
 	for retry := range retryCount {
+		// A transfer can succeed even when the previous attempt times out.
+		// Resigning again as a follower would clear its cached new leader.
+		if !s.IsLeader() {
+			return nil
+		}
 		err = s.ResignLeader()
 		if err == nil {
 			return
