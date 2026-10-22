@@ -1161,8 +1161,7 @@ func (suite *operatorControllerTestSuite) TestInvalidStoreId() {
 func TestConcurrentAddOperatorAndSetStoreLimit(t *testing.T) {
 	as := assert.New(t)
 	opt := mockconfig.NewTestOptions()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc := mockcluster.NewCluster(ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false /* no need to run */)
 	oc := NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)

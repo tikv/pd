@@ -15,7 +15,6 @@
 package keyspace
 
 import (
-	"context"
 	"encoding/hex"
 	"math"
 	"strconv"
@@ -93,8 +92,7 @@ func TestMakeRegionBound(t *testing.T) {
 
 func TestMaxKeyspaceLabelRuleSplitKeys(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	regionLabeler, err := labeler.NewRegionLabeler(ctx, endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil), time.Hour)
 	re.NoError(err)
 

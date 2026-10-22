@@ -22,6 +22,7 @@ import (
 	"math"
 	"math/rand/v2"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -84,14 +85,13 @@ func TestMain(m *testing.M) {
 
 func TestClientLeaderChange(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	re.NoError(err)
 	defer cluster.Destroy()
 
 	endpoints := runServer(re, cluster)
-	endpointsWithWrongURL := append([]string{}, endpoints...)
+	endpointsWithWrongURL := slices.Clone(endpoints)
 	// inject wrong http scheme
 	for i := range endpointsWithWrongURL {
 		endpointsWithWrongURL[i] = "https://" + strings.TrimPrefix(endpointsWithWrongURL[i], "http://")
@@ -151,8 +151,7 @@ func TestLeaderTransferAndMoveCluster(t *testing.T) {
 	defer func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
 	}()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -235,8 +234,7 @@ func TestLeaderTransferAndMoveCluster(t *testing.T) {
 
 func TestGetTSAfterTransferLeader(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 2)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -270,8 +268,7 @@ func TestGetTSAfterTransferLeader(t *testing.T) {
 func TestTSOFollowerProxy(t *testing.T) {
 	as := assert.New(t)
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -388,8 +385,7 @@ func TestTSOFollowerProxy(t *testing.T) {
 func TestTSOFollowerProxyWithTSOService(t *testing.T) {
 	re := require.New(t)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/fastUpdateServiceMode", `return(true)`))
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -416,8 +412,7 @@ func TestTSOFollowerProxyWithTSOService(t *testing.T) {
 func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
 	as := assert.New(t)
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -487,8 +482,7 @@ func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
 
 func TestCustomTimeout(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -949,8 +943,7 @@ func waitLeader(re *require.Assertions, cli sd.ServiceDiscovery, leader *tests.T
 
 func TestConfigTTLAfterTransferLeader(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -1008,8 +1001,7 @@ func TestConfigTTLAfterTransferLeader(t *testing.T) {
 
 func TestCloseClient(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -1461,8 +1453,7 @@ func (suite *clientStatelessTestSuite) TestScatterRegion() {
 func TestWatch(t *testing.T) {
 	as := assert.New(t)
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -1511,8 +1502,7 @@ func TestWatch(t *testing.T) {
 
 func TestPutGet(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -1546,8 +1536,7 @@ func TestPutGet(t *testing.T) {
 // TestClientWatchWithRevision is the same as TestClientWatchWithRevision in global config.
 func TestClientWatchWithRevision(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -1844,8 +1833,7 @@ func (suite *clientStatelessTestSuite) TestBatchScanRegions() {
 func TestGetRegionWithBackoff(t *testing.T) {
 	re := require.New(t)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/rateLimit", "return(true)"))
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
@@ -1896,8 +1884,7 @@ func needRetry(err error) bool {
 
 func TestCircuitBreaker(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
@@ -1952,8 +1939,7 @@ func TestCircuitBreaker(t *testing.T) {
 
 func TestCircuitBreakerOpenAndChangeSettings(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
@@ -2001,8 +1987,7 @@ func TestCircuitBreakerOpenAndChangeSettings(t *testing.T) {
 
 func TestCircuitBreakerHalfOpenAndChangeSettings(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
@@ -2954,8 +2939,7 @@ func TestDecodeHttpKeyRange(t *testing.T) {
 }
 func TestCreateClientWithKeyspaceCheck(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Keyspace.WaitRegionSplit = false
 	})

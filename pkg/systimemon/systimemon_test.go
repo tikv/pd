@@ -15,7 +15,6 @@
 package systimemon
 
 import (
-	"context"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -28,8 +27,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestSystimeMonitor(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	var jumpForward int32
 
 	triggered := false

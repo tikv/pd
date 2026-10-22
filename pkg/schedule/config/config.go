@@ -16,7 +16,9 @@ package config
 
 import (
 	"encoding/json"
+	"maps"
 	"math"
+	"slices"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -177,7 +179,7 @@ func adjustSchedulers(v *SchedulerConfigs, defValue SchedulerConfigs) {
 		// Make a copy to avoid changing DefaultSchedulers unexpectedly.
 		// When reloading from storage, the config is passed to json.Unmarshal.
 		// Without clone, the DefaultSchedulers could be overwritten.
-		*v = append(defValue[:0:0], defValue...)
+		*v = slices.Clone(defValue)
 	}
 }
 
@@ -349,13 +351,11 @@ type ScheduleConfig struct {
 
 // Clone returns a cloned scheduling configuration.
 func (c *ScheduleConfig) Clone() *ScheduleConfig {
-	schedulers := append(c.Schedulers[:0:0], c.Schedulers...)
+	schedulers := slices.Clone(c.Schedulers)
 	var storeLimit map[uint64]StoreLimitConfig
 	if c.StoreLimit != nil {
 		storeLimit = make(map[uint64]StoreLimitConfig, len(c.StoreLimit))
-		for k, v := range c.StoreLimit {
-			storeLimit[k] = v
-		}
+		maps.Copy(storeLimit, c.StoreLimit)
 	}
 	cfg := *c
 	cfg.StoreLimit = storeLimit
@@ -847,7 +847,7 @@ type ReplicationConfig struct {
 
 // Clone makes a deep copy of the config.
 func (c *ReplicationConfig) Clone() *ReplicationConfig {
-	locationLabels := append(c.LocationLabels[:0:0], c.LocationLabels...)
+	locationLabels := slices.Clone(c.LocationLabels)
 	cfg := *c
 	cfg.LocationLabels = locationLabels
 	return &cfg

@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"slices"
 	"sync/atomic"
 	"time"
 
@@ -140,13 +141,13 @@ func (f *HotPeerCache) GetHotPeerStats(minHotDegree int) map[uint64][]*HotPeerSt
 	res := make(map[uint64][]*HotPeerStat)
 	defaultAntiCount := f.kind.DefaultAntiCount()
 	for storeID, peers := range f.peersOfStore {
-		values := peers.GetAll()
-		stat := make([]*HotPeerStat, 0, len(values))
-		for _, v := range values {
+		stat := make([]*HotPeerStat, 0, peers.Len())
+		peers.Range(func(v utils.TopNItem) bool {
 			if peer := v.(*HotPeerStat); peer.HotDegree >= minHotDegree && !peer.inCold && peer.AntiCount == defaultAntiCount {
 				stat = append(stat, peer)
 			}
-		}
+			return true
+		})
 		res[storeID] = stat
 	}
 	return res
@@ -437,12 +438,7 @@ func (f *HotPeerCache) findOldHotPeerStatForInheritance(region *hotRegionInfo) (
 
 func (f *HotPeerCache) isOldColdPeer(oldItem *HotPeerStat, storeID uint64) bool {
 	isOldPeer := func() bool {
-		for _, id := range oldItem.stores {
-			if id == storeID {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(oldItem.stores, storeID)
 	}
 	isInHotCache := func() bool {
 		if ids, ok := f.storesOfRegion[oldItem.RegionID]; ok {
@@ -671,13 +667,16 @@ func (f *HotPeerCache) gc() {
 		hotCacheStatusGauge.DeletePartialMatch(prometheus.Labels{"store": storeTag(storeID), "type": f.kind.String()})
 	}
 	// remove expired items
-	for _, peers := range f.peersOfStore {
+	for storeID, peers := range f.peersOfStore {
 		regions := peers.RemoveExpired()
 		for _, regionID := range regions {
-			delete(f.storesOfRegion, regionID)
-			for storeID := range f.regionsOfStore {
-				delete(f.regionsOfStore[storeID], regionID)
+			if stores, ok := f.storesOfRegion[regionID]; ok {
+				delete(stores, storeID)
+				if len(stores) == 0 {
+					delete(f.storesOfRegion, regionID)
+				}
 			}
+			delete(f.regionsOfStore[storeID], regionID)
 		}
 	}
 }

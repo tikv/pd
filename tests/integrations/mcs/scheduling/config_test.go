@@ -17,6 +17,7 @@ package scheduling
 import (
 	"context"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -30,7 +31,6 @@ import (
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/schedule/types"
-	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keyutil"
@@ -173,7 +173,7 @@ func (suite *configTestSuite) TestSchedulerConfigWatch() {
 	testutil.Eventually(re, func() bool {
 		namesFromSchedulingServer, _, err = storage.LoadAllSchedulerConfigs()
 		re.NoError(err)
-		return slice.Contains(namesFromSchedulingServer, types.EvictLeaderScheduler.String())
+		return slices.Contains(namesFromSchedulingServer, types.EvictLeaderScheduler.String())
 	})
 	assertEvictLeaderStoreIDs(re, storage, []uint64{1})
 	// Update the scheduler by adding a store.
@@ -201,7 +201,7 @@ func (suite *configTestSuite) TestSchedulerConfigWatch() {
 	testutil.Eventually(re, func() bool {
 		namesFromSchedulingServer, _, err = storage.LoadAllSchedulerConfigs()
 		re.NoError(err)
-		return !slice.Contains(namesFromSchedulingServer, types.EvictLeaderScheduler.String())
+		return !slices.Contains(namesFromSchedulingServer, types.EvictLeaderScheduler.String())
 	})
 	watcher.Close()
 }

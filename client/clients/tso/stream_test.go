@@ -624,7 +624,7 @@ func BenchmarkTSOStreamSendRecv(b *testing.B) {
 	resCh := make(chan tsoRequestResult, 1)
 
 	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		err := stream.processRequests(1, 1, 1, 1, now, func(result tsoRequestResult, _ uint32, err error) {
 			if err != nil {
 				panic(err)

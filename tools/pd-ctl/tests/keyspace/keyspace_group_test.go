@@ -172,8 +172,7 @@ func TestExternalAllocNodeWhenStart(t *testing.T) {
 		re.NoError(failpoint.Disable(externalAllocNode))
 	})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	keyspaces := make([]string, 0, 10)
 	for i := range 10 {
 		keyspaces = append(keyspaces, fmt.Sprintf("keyspace_%d", i))

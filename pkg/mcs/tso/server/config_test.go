@@ -15,7 +15,6 @@
 package server
 
 import (
-	"context"
 	"strings"
 	"testing"
 	"time"
@@ -102,8 +101,7 @@ max-gap-reset-ts = "1h"
 func TestGetAdvertiseListenHost(t *testing.T) {
 	re := require.New(t)
 
-	ctx, cancelFn := context.WithCancel(context.Background())
-	defer cancelFn()
+	ctx := t.Context()
 
 	tests := []struct {
 		name          string

@@ -98,7 +98,7 @@ func (c *RaftCluster) HandleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSp
 	}
 
 	peerIDs := make([]uint64, len(request.Region.Peers))
-	for i := 0; i < len(peerIDs); i++ {
+	for i := range peerIDs {
 		if peerIDs[i], _, err = c.id.Alloc(1); err != nil {
 			return nil, err
 		}
@@ -154,7 +154,7 @@ func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 		}
 
 		peerIDs := make([]uint64, len(request.Region.Peers))
-		for i := 0; i < len(peerIDs); i++ {
+		for i := range peerIDs {
 			if peerIDs[i], _, err = c.id.Alloc(1); err != nil {
 				return nil, err
 			}

@@ -16,6 +16,7 @@ package server
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"time"
 
@@ -123,7 +124,7 @@ func cloneMember(member *pdpb.Member) *pdpb.Member {
 		return nil
 	}
 	cloned := *member
-	cloned.PeerUrls = append([]string(nil), member.GetPeerUrls()...)
-	cloned.ClientUrls = append([]string(nil), member.GetClientUrls()...)
+	cloned.PeerUrls = slices.Clone(member.GetPeerUrls())
+	cloned.ClientUrls = slices.Clone(member.GetClientUrls())
 	return &cloned
 }
