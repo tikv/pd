@@ -258,7 +258,7 @@ func (c *tsoServiceDiscovery) startCheckMemberLoop() {
 		// Make sure MaxRetryTimes * initRetryInterval is far less than memberUpdateInterval,
 		// so that we can speed up the process of tso service discovery when failover happens on the
 		// tso service side and also ensures it won't call updateMember too frequently during normal time.
-		if err := c.updateMemberWithBackoff(initRetryInterval, c.option.MaxRetryTimes); err != nil {
+		if err := c.updateMemberWithBackoff(c.getPrimaryURL(), initRetryInterval, c.option.MaxRetryTimes); err != nil {
 			log.Error("[tso] failed to update member", errs.ZapError(err))
 		}
 	}
@@ -352,27 +352,39 @@ func (c *tsoServiceDiscovery) ScheduleCheckMemberChanged() {
 // CheckMemberChanged Immediately check if there is any membership change among the primary/secondaries in
 // a primary/secondary configured cluster.
 func (c *tsoServiceDiscovery) CheckMemberChanged() error {
+	// Read the primary before any query so that a switch made by others meanwhile is noticed.
+	oldPrimaryURL := c.getPrimaryURL()
 	if err := c.serviceDiscovery.CheckMemberChanged(); err != nil {
 		log.Warn("[tso] failed to check member changed", errs.ZapError(err))
 	}
-	if err := c.updateMemberWithBackoff(checkMemberMaxRetryInterval, checkMemberMaxRetryTimes); err != nil {
+	if err := c.updateMemberWithBackoff(oldPrimaryURL, checkMemberMaxRetryInterval, checkMemberMaxRetryTimes); err != nil {
 		log.Error("[tso] failed to update member", errs.ZapError(err))
 		return err
 	}
 	return nil
 }
 
-// updateMemberWithBackoff calls updateMember until it succeeds, at most maxRetryTimes
-// times however long each call takes. The interval starts from UpdateMemberBackOffBaseTime
-// and doubles up to maxInterval: during a planned primary transfer, the old primary rejects
-// requests before the new primary is elected, so the first query often misses the new
-// primary, which becomes ready tens of milliseconds later.
+// updateMemberWithBackoff calls updateMember until it succeeds or the primary is no longer
+// oldPrimaryURL, at most maxRetryTimes times however long each call takes. The interval
+// starts from UpdateMemberBackOffBaseTime and doubles up to maxInterval: during a planned
+// primary transfer, the old primary rejects requests before the new primary is elected, so
+// the first query often misses the new primary, which becomes ready tens of milliseconds later.
 //
 // For example, with a maxInterval of 500ms, the waits between attempts are 20ms, 40ms,
 // 80ms, 160ms, 320ms and then 500ms each, so the retries start about 20ms, 60ms, 140ms,
 // 300ms and 620ms after the first attempt, plus the time each attempt takes.
-func (c *tsoServiceDiscovery) updateMemberWithBackoff(maxInterval time.Duration, maxRetryTimes int) error {
-	return execWithBackoff(c.ctx, maxInterval, maxRetryTimes, c.updateMember)
+func (c *tsoServiceDiscovery) updateMemberWithBackoff(
+	oldPrimaryURL string, maxInterval time.Duration, maxRetryTimes int,
+) error {
+	return execWithBackoff(c.ctx, maxInterval, maxRetryTimes, func() error {
+		err := c.updateMember()
+		// Another caller, such as the background check loop, may find the new primary while
+		// the servers queried here still miss it, so stop once the primary has switched.
+		if err != nil && !strings.EqualFold(c.getPrimaryURL(), oldPrimaryURL) {
+			return nil
+		}
+		return err
+	})
 }
 
 // execWithBackoff calls fn until it succeeds, at most maxRetryTimes times. It bounds the
