@@ -37,7 +37,7 @@ func NewAffinityCommand() *cobra.Command {
 	}
 	cmd.PersistentFlags().Uint64("table-id", 0, "table ID for the affinity group")
 	cmd.PersistentFlags().Uint64("partition-id", 0, "partition ID for partitioned tables")
-	cmd.PersistentFlags().Uint32("keyspace-id", 0, "keyspace ID (omit for Classic groups)")
+	cmd.PersistentFlags().Uint32("keyspace-id", 0, "keyspace ID (omit for classical cluster groups)")
 
 	cmd.AddCommand(
 		newAffinityShowCommand(),
@@ -159,7 +159,10 @@ func getGroupID(cmd *cobra.Command) (string, error) {
 	partitionID, _ := cmd.Flags().GetUint64("partition-id")
 	var keyspaceID *uint32
 	if cmd.Flags().Changed("keyspace-id") {
-		id, _ := cmd.Flags().GetUint32("keyspace-id")
+		id, err := cmd.Flags().GetUint32("keyspace-id")
+		if err != nil {
+			return "", errors.Annotate(err, "failed to parse --keyspace-id")
+		}
 		if id > constants.MaxKeyspaceID {
 			return "", errors.Errorf("--keyspace-id must be between %d and %d", constants.DefaultKeyspaceID, constants.MaxKeyspaceID)
 		}
