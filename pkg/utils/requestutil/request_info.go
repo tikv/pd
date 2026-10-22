@@ -15,11 +15,11 @@
 package requestutil
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -47,6 +47,14 @@ func (info *RequestInfo) String() string {
 
 // GetRequestInfo returns request info needed from http.Request
 func GetRequestInfo(r *http.Request) RequestInfo {
+	info := GetRequestInfoWithoutBody(r)
+	info.CaptureBody(r)
+	return info
+}
+
+// GetRequestInfoWithoutBody returns request info without consuming or buffering
+// the request body.
+func GetRequestInfoWithoutBody(r *http.Request) RequestInfo {
 	ip, port := apiutil.GetIPPortFromHTTPRequest(r)
 	return RequestInfo{
 		ServiceLabel:   apiutil.GetRouteName(r),
@@ -55,9 +63,14 @@ func GetRequestInfo(r *http.Request) RequestInfo {
 		IP:             ip,
 		Port:           port,
 		URLParam:       getURLParam(r),
-		BodyParam:      getBodyParam(r),
 		StartTimeStamp: time.Now().Unix(),
 	}
+}
+
+// CaptureBody consumes the request body into BodyParam and restores an
+// equivalent body for the handler.
+func (info *RequestInfo) CaptureBody(r *http.Request) {
+	info.BodyParam = getBodyParam(r)
 }
 
 func getURLParam(r *http.Request) string {
@@ -72,10 +85,12 @@ func getBodyParam(r *http.Request) string {
 	if r.Body == nil {
 		return ""
 	}
-	// http request body is a io.Reader between bytes.Reader and strings.Reader, it only has EOF error
 	buf, _ := io.ReadAll(r.Body)
 	r.Body.Close()
+	// Restore the body from BodyParam so both views share one long-lived backing
+	// store. Restoring from buf would retain a second complete copy until the
+	// handler finishes.
 	bodyParam := string(buf)
-	r.Body = io.NopCloser(bytes.NewBuffer(buf))
+	r.Body = io.NopCloser(strings.NewReader(bodyParam))
 	return bodyParam
 }

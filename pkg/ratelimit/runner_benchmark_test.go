@@ -32,8 +32,8 @@ func BenchmarkConcurrentRunnerDuplicateTask(b *testing.B) {
 	}
 
 	b.ReportAllocs()
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		if err := runner.RunTask(1, "duplicate", noop, WithRetained(true)); err != nil {
 			b.Fatal(err)
 		}
@@ -63,7 +63,7 @@ func BenchmarkConcurrentRunnerBurstRetention(b *testing.B) {
 	_ = NewConcurrentRunner("test", NewConcurrencyLimiter(1), time.Minute)
 	noop := func(context.Context) {}
 	var totalRetainedBytes uint64
-	for range b.N {
+	for b.Loop() {
 		runtime.GC()
 		var before runtime.MemStats
 		runtime.ReadMemStats(&before)

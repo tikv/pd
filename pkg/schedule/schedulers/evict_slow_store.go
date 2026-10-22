@@ -16,6 +16,7 @@ package schedulers
 
 import (
 	"errors"
+	"maps"
 	"net/http"
 	"slices"
 	"strconv"
@@ -120,9 +121,7 @@ func (conf *evictSlowStoreSchedulerConfig) persistLocked(updateFn func()) error 
 		oldRecoverySec                     = conf.RecoverySec
 		oldBatch                           = conf.Batch
 	)
-	for k, v := range conf.networkSlowStoreRecoverStartAts {
-		oldNetworkSlowStoreRecoverStartAts[k] = v
-	}
+	maps.Copy(oldNetworkSlowStoreRecoverStartAts, conf.networkSlowStoreRecoverStartAts)
 	updateFn()
 	if err := conf.save(); err != nil {
 		conf.lastSlowStoreCaptureTS = oldLastSlowStoreCaptureTS

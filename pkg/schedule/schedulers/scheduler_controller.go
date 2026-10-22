@@ -17,6 +17,7 @@ package schedulers
 import (
 	"context"
 	"net/http"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -555,7 +556,7 @@ func (s *ScheduleController) Stop() {
 func (s *ScheduleController) Schedule(diagnosable bool) []*operator.Operator {
 	_, isEvictLeaderScheduler := s.Scheduler.(*evictLeaderScheduler)
 retry:
-	for i := 0; i < maxScheduleRetries; i++ {
+	for i := range maxScheduleRetries {
 		// no need to retry if schedule should stop to speed exit
 		select {
 		case <-s.ctx.Done():
@@ -589,7 +590,7 @@ retry:
 			// Refer: https://docs.pingcap.com/tidb-in-kubernetes/stable/restart-a-tidb-cluster#perform-a-graceful-restart-to-a-single-tikv-pod
 			if labelMgr.ScheduleDisabled(region) && !isEvictLeaderScheduler {
 				denySchedulersByLabelerCounter.Inc()
-				ops = append(ops[:i], ops[i+1:]...)
+				ops = slices.Delete(ops, i, i+1)
 				i--
 			}
 		}
