@@ -35,8 +35,7 @@ import (
 
 func TestSimpleJoin(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	defer cluster.Destroy()
 	re.NoError(err)
@@ -79,8 +78,7 @@ func TestSimpleJoin(t *testing.T) {
 // during its downtime.
 func TestFailedAndDeletedPDJoinsPreviousCluster(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	server.EtcdStartTimeout = 10 * time.Second
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	defer cluster.Destroy()
@@ -112,8 +110,7 @@ func TestFailedAndDeletedPDJoinsPreviousCluster(t *testing.T) {
 // A deleted PD joins the previous cluster.
 func TestDeletedPDJoinsPreviousCluster(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	server.EtcdStartTimeout = 10 * time.Second
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	defer cluster.Destroy()
@@ -144,8 +141,7 @@ func TestDeletedPDJoinsPreviousCluster(t *testing.T) {
 
 func TestFailedPDJoinsPreviousCluster(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	defer cluster.Destroy()
 	re.NoError(err)
@@ -170,8 +166,7 @@ func TestFailedPDJoinsPreviousCluster(t *testing.T) {
 // trigger.
 func TestJoinWithDuplicateClientURL(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
@@ -205,8 +200,7 @@ func TestJoinWithDuplicateClientURL(t *testing.T) {
 // non-linearizable member list so recovery is never blocked on quorum.
 func TestFailedStartRecoveryRejectsDuplicateClientURL(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
@@ -236,8 +230,7 @@ func TestFailedStartRecoveryRejectsDuplicateClientURL(t *testing.T) {
 // A PD joins itself.
 func TestPDJoinsItself(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)

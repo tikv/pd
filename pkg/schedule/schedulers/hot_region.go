@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"net/http"
+	"slices"
 	"strconv"
 	"time"
 
@@ -251,9 +252,9 @@ func (s *hotScheduler) ReloadConfig() error {
 	newCfg := &hotRegionSchedulerConfig{
 		hotRegionSchedulerParam: s.conf.hotRegionSchedulerParam,
 	}
-	newCfg.ReadPriorities = append([]string(nil), s.conf.ReadPriorities...)
-	newCfg.WriteLeaderPriorities = append([]string(nil), s.conf.WriteLeaderPriorities...)
-	newCfg.WritePeerPriorities = append([]string(nil), s.conf.WritePeerPriorities...)
+	newCfg.ReadPriorities = slices.Clone(s.conf.ReadPriorities)
+	newCfg.WriteLeaderPriorities = slices.Clone(s.conf.WriteLeaderPriorities)
+	newCfg.WritePeerPriorities = slices.Clone(s.conf.WritePeerPriorities)
 	if err := s.conf.load(newCfg); err != nil {
 		return err
 	}

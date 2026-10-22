@@ -15,7 +15,6 @@
 package affinity
 
 import (
-	"context"
 	"encoding/hex"
 	"testing"
 	"time"
@@ -34,8 +33,7 @@ import (
 
 func TestKeyRangeOverlapValidation(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
@@ -113,8 +111,7 @@ func TestKeyRangeOverlapValidation(t *testing.T) {
 // Note: Full labeler integration test requires proper JSON serialization handling
 func TestKeyRangeOverlapRebuild(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
@@ -170,8 +167,7 @@ func TestParseKeyRangesFromDataInvalidHex(t *testing.T) {
 
 func TestAffinityPersistenceWithLabeler(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
@@ -226,8 +222,7 @@ func TestAffinityPersistenceWithLabeler(t *testing.T) {
 
 func TestLoadRegionLabelIgnoreUnknownGroup(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
@@ -269,8 +264,7 @@ func TestLoadRegionLabelIgnoreUnknownGroup(t *testing.T) {
 // Note: Full integration with JSON serialization requires additional handling
 func TestLabelRuleIntegration(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
@@ -310,8 +304,7 @@ func TestLabelRuleIntegration(t *testing.T) {
 // when adding key ranges to a group created without initial ranges.
 func TestUpdateAffinityGroupKeyRangesAddToEmptyGroup(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
@@ -345,8 +338,7 @@ func TestUpdateAffinityGroupKeyRangesAddToEmptyGroup(t *testing.T) {
 
 func TestDuplicateRangeAdd(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
@@ -377,8 +369,7 @@ func TestDuplicateRangeAdd(t *testing.T) {
 // TestDeleteAffinityGroupsForceMissing verifies force deletion tolerates missing IDs.
 func TestDeleteAffinityGroupsForceMissing(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
@@ -411,8 +402,7 @@ func TestDeleteAffinityGroupsForceMissing(t *testing.T) {
 // TestSameGroupNonOverlappingAdd ensures adding disjoint ranges to the same group is allowed.
 func TestSameGroupNonOverlappingAdd(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
@@ -447,8 +437,7 @@ func TestSameGroupNonOverlappingAdd(t *testing.T) {
 // Current logic reports overlap (expected current design).
 func TestOverlapDuringMigration(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
@@ -476,8 +465,7 @@ func TestOverlapDuringMigration(t *testing.T) {
 // Scenario: existing [0,10), request removes [0,10) and adds [0,5) for the same group. Current design forbids mixed add/remove same group.
 func TestPartialOverlapSameGroup(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
@@ -509,8 +497,7 @@ func TestPartialOverlapSameGroup(t *testing.T) {
 // vs group B's existing ranges were not being checked.
 func TestNewGroupOverlapWithExistingGroup(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()

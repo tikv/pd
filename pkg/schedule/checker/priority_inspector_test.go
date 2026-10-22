@@ -15,7 +15,6 @@
 package checker
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -28,8 +27,7 @@ import (
 func TestCheckPriorityRegions(t *testing.T) {
 	re := require.New(t)
 	opt := mockconfig.NewTestOptions()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 0)
 	tc.AddRegionStore(2, 0)

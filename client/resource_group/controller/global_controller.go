@@ -667,7 +667,8 @@ func (c *ResourceGroupsController) tryGetResourceGroupController(
 	}
 	if !isUseDegradedResourceGroup {
 		// Check again to prevent initializing the same resource group concurrently.
-		_, loaded := c.loadOrStoreGroupController(name, gc)
+		var loaded bool
+		gc, loaded = c.loadOrStoreGroupController(name, gc)
 		if !loaded {
 			metrics.ResourceGroupStatusGauge.WithLabelValues(name, group.Name).Set(1)
 			log.Info("[resource group controller] create resource group cost controller", zap.String("name", name))

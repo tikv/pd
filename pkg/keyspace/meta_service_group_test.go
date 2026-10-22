@@ -18,6 +18,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"maps"
 	"testing"
 	"time"
 
@@ -318,9 +319,7 @@ func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelyChecksNewGroupHeal
 	re.True(status["healthy"].Enabled)
 
 	updatedGroups := make(map[string]string, len(groups)+1)
-	for groupID, addresses := range groups {
-		updatedGroups[groupID] = addresses
-	}
+	maps.Copy(updatedGroups, groups)
 	updatedGroups["unhealthy"] = endpoint + ",http://127.0.0.1:1"
 	persisted = false
 	err = suite.manager.UpdateGroupsSafely(suite.ctx, updatedGroups, nil, func() error {

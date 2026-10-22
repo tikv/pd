@@ -15,10 +15,10 @@
 package scheduler_test
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1059,8 +1059,7 @@ func TestHotSchedulerUpgrade(t *testing.T) {
 	defer func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/skipStoreConfigSync"))
 	}()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := pdTests.NewTestCluster(ctx, 1)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -1115,7 +1114,7 @@ func TestHotSchedulerUpgrade(t *testing.T) {
 	// after upgrading, we can use query automatically.
 	testutil.Eventually(re, func() bool {
 		tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "list"}, &conf)
-		return slice.Contains(conf["write-leader-priorities"].([]any), "query")
+		return slices.Contains(conf["write-leader-priorities"].([]any), "query")
 	})
 	// cannot set qps as write-peer-priorities
 	echo := tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "write-peer-priorities", "query,byte"}, nil)

@@ -16,6 +16,7 @@ package client_test
 
 import (
 	"context"
+	"slices"
 	"sync"
 
 	"google.golang.org/grpc"
@@ -55,7 +56,7 @@ func (r *regionRPCRecorder) receive(target, method string, request, response any
 func (r *regionRPCRecorder) attempts() []bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return append([]bool(nil), r.leaderAttempts...)
+	return slices.Clone(r.leaderAttempts)
 }
 
 func (r *regionRPCRecorder) unary(

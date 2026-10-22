@@ -15,6 +15,7 @@
 package schedulers
 
 import (
+	"maps"
 	"net/http"
 	"strconv"
 
@@ -70,9 +71,7 @@ func (conf *grantLeaderSchedulerConfig) clone() *grantLeaderSchedulerConfig {
 	conf.RLock()
 	defer conf.RUnlock()
 	newStoreIDWithRanges := make(map[uint64][]keyutil.KeyRange)
-	for k, v := range conf.StoreIDWithRanges {
-		newStoreIDWithRanges[k] = v
-	}
+	maps.Copy(newStoreIDWithRanges, conf.StoreIDWithRanges)
 	return &grantLeaderSchedulerConfig{
 		StoreIDWithRanges: newStoreIDWithRanges,
 	}
@@ -131,9 +130,7 @@ func (conf *grantLeaderSchedulerConfig) getStoreIDWithRanges() map[uint64][]keyu
 	conf.RLock()
 	defer conf.RUnlock()
 	storeIDWithRanges := make(map[uint64][]keyutil.KeyRange)
-	for id, ranges := range conf.StoreIDWithRanges {
-		storeIDWithRanges[id] = ranges
-	}
+	maps.Copy(storeIDWithRanges, conf.StoreIDWithRanges)
 	return storeIDWithRanges
 }
 
