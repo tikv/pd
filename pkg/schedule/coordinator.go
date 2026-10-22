@@ -79,6 +79,9 @@ type Coordinator struct {
 	hbStreams         *hbstream.HeartbeatStreams
 	pluginInterface   *PluginInterface
 	diagnosticManager *diagnostic.Manager
+
+	// Only the periodic metrics collector accesses this reusable buffer.
+	metricsStoreLoads map[uint64]statistics.StoreKindLoads
 }
 
 // NewCoordinator creates a new Coordinator.
@@ -521,16 +524,31 @@ func (c *Coordinator) GetWaitGroup() *sync.WaitGroup {
 // CollectHotSpotMetrics collects hot spot metrics.
 func (c *Coordinator) CollectHotSpotMetrics() {
 	stores := c.cluster.GetStores()
+	storeLoads := c.getStoresLoadsForMetrics()
 	// Collects hot write region metrics.
-	collectHotMetrics(c.cluster, stores, utils.Write)
+	c.collectHotMetrics(stores, utils.Write, storeLoads)
 	// Collects hot read region metrics.
-	collectHotMetrics(c.cluster, stores, utils.Read)
+	c.collectHotMetrics(stores, utils.Read, storeLoads)
 }
 
-func collectHotMetrics(cluster sche.ClusterInformer, stores []*core.StoreInfo, typ utils.RWType) {
+// getStoresLoadsForMetrics reuses a buffer owned by the periodic metrics
+// collector. Concurrent API callers must obtain independent snapshots instead.
+func (c *Coordinator) getStoresLoadsForMetrics() map[uint64]statistics.StoreKindLoads {
+	if fetcher, ok := c.cluster.(interface {
+		GetStoresLoadsTo(dst map[uint64]statistics.StoreKindLoads) map[uint64]statistics.StoreKindLoads
+	}); ok {
+		if c.metricsStoreLoads == nil {
+			c.metricsStoreLoads = make(map[uint64]statistics.StoreKindLoads)
+		}
+		return fetcher.GetStoresLoadsTo(c.metricsStoreLoads)
+	}
+	return c.cluster.GetStoresLoads()
+}
+
+func (c *Coordinator) collectHotMetrics(stores []*core.StoreInfo, typ utils.RWType, storeLoads map[uint64]statistics.StoreKindLoads) {
 	kind := typ.String()
-	hotPeerStats := cluster.GetHotPeerStats(typ)
-	status := statistics.CollectHotPeerInfos(stores, hotPeerStats) // only returns TotalBytesRate,TotalKeysRate,TotalQueryRate,TotalCPURate,Count
+	hotPeerStats := c.cluster.GetHotPeerStats(typ)
+	status := c.schedulers.CollectHotRegionMetricsAndStoreStats(typ, stores, hotPeerStats, storeLoads)
 
 	for _, s := range stores {
 		// TODO: pre-allocate gauge metrics
@@ -590,7 +608,7 @@ func collectHotMetrics(cluster sche.ClusterInformer, stores []*core.StoreInfo, t
 		// IsRemoved(), a tombstoned store sitting in GetStores() for up to 30
 		// days doesn't cost a scan on every tick.
 		if !removed {
-			if store := cluster.GetStore(storeID); store == nil || store.IsRemoved() {
+			if store := c.cluster.GetStore(storeID); store == nil || store.IsRemoved() {
 				DeleteStoreMetrics(storeLabel)
 			}
 		}
@@ -600,6 +618,7 @@ func collectHotMetrics(cluster sche.ClusterInformer, stores []*core.StoreInfo, t
 // ResetHotSpotMetrics resets hot spot metrics.
 func ResetHotSpotMetrics() {
 	hotSpotStatusGauge.Reset()
+	schedulers.ResetHotRegionMetrics()
 	schedulers.HotPendingSum.Reset()
 }
 

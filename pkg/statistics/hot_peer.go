@@ -117,6 +117,10 @@ type HotPeerStat struct {
 	// If the item in storeA is just inherited from storeB,
 	// then other store, such as storeC, will be forbidden to inherit from storeA until the item in storeA is hot.
 	allowInherited bool
+	// Keep the existing hot-load fields at their original offsets. Duration is
+	// read only for selected peers, outside the full hot-peer scan.
+	// Cold or missing reports reset it; time without reports does not advance it.
+	hotDuration time.Duration
 }
 
 // ID returns region ID. Implementing TopNItem.
@@ -154,6 +158,13 @@ func (stat *HotPeerStat) IsNeedCoolDownTransferLeader(minHotDegree int, rwTy uti
 // IsLeader indicates the item belong to the leader.
 func (stat *HotPeerStat) IsLeader() bool {
 	return stat.isLeader
+}
+
+// GetHotDuration returns the observed continuous-hot duration for this peer,
+// across all load dimensions. It resets when the peer becomes cold or moves
+// to another Store, and when the hot cache is rebuilt.
+func (stat *HotPeerStat) GetHotDuration() time.Duration {
+	return stat.hotDuration
 }
 
 // GetActionType returns the item action type.

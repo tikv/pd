@@ -5955,6 +5955,196 @@
             "align": false,
             "alignLevel": null
           }
+        },
+        {
+          "datasource": "${DS_TEST-CLUSTER}",
+          "description": "Top 10 distinct sustained hot Regions ranked by the effective first scheduling dimension, including version fallback. Shows Region load and its share of the selected Store's rolling total load for the same dimension. Region and Store statistics use different smoothing windows, so the share can exceed 100%; it is blank when Store load is unavailable. Peer lists use the maximum load per Region. Store filtering applies to the cluster-wide Top 10. Hot duration covers consecutive reported intervals classified as hot in any dimension on the selected Store. It resets on cold or missing reports, peer migration, or a hot-cache rebuild; time without reports does not advance it. It is independent of Top 10 membership.",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "minWidth": 100
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "store_share"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "percentunit"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Hot duration"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "s"
+                  }
+                ]
+              }
+            ]
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 59
+          },
+          "id": 1708,
+          "options": {
+            "showHeader": true,
+            "sortBy": [
+              {
+                "displayName": "Load",
+                "desc": true
+              }
+            ]
+          },
+          "targets": [
+            {
+              "expr": "sort_desc(max by (region, store, dim, measure) (label_replace(pd_hotspot_top_region_load{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", type=\"write-leader\"}, \"measure\", \"load\", \"__name__\", \".*\") or label_replace(pd_hotspot_top_region_store_load_ratio{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", type=\"write-leader\"}, \"measure\", \"store_share\", \"__name__\", \".*\") or label_replace(pd_hotspot_top_region_hot_duration_seconds{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", type=\"write-leader\"}, \"measure\", \"hot_duration\", \"__name__\", \".*\")))",
+              "format": "time_series",
+              "instant": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Top 10 sustained hot Regions (write-leader)",
+          "transformations": [
+            {
+              "id": "joinByLabels",
+              "options": {
+                "value": "measure"
+              }
+            },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true
+                },
+                "indexByName": {
+                  "region": 0,
+                  "store": 1,
+                  "dim": 2,
+                  "load": 3,
+                  "store_share": 4,
+                  "hot_duration": 5
+                },
+                "renameByName": {
+                  "region": "Region",
+                  "store": "Store",
+                  "dim": "Dimension",
+                  "load": "Load",
+                  "store_share": "Store share",
+                  "hot_duration": "Hot duration"
+                }
+              }
+            }
+          ],
+          "type": "table"
+        },
+        {
+          "datasource": "${DS_TEST-CLUSTER}",
+          "description": "Top 10 distinct sustained hot Regions ranked by the effective first scheduling dimension, including version fallback. Shows Region load and its share of the selected Store's rolling total load for the same dimension. Region and Store statistics use different smoothing windows, so the share can exceed 100%; it is blank when Store load is unavailable. Peer lists use the maximum load per Region. Store filtering applies to the cluster-wide Top 10. Hot duration covers consecutive reported intervals classified as hot in any dimension on the selected Store. It resets on cold or missing reports, peer migration, or a hot-cache rebuild; time without reports does not advance it. It is independent of Top 10 membership.",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "minWidth": 100
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "store_share"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "percentunit"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Hot duration"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "s"
+                  }
+                ]
+              }
+            ]
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 59
+          },
+          "id": 1709,
+          "options": {
+            "showHeader": true,
+            "sortBy": [
+              {
+                "displayName": "Load",
+                "desc": true
+              }
+            ]
+          },
+          "targets": [
+            {
+              "expr": "sort_desc(max by (region, store, dim, measure) (label_replace(pd_hotspot_top_region_load{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", type=\"write-peer\"}, \"measure\", \"load\", \"__name__\", \".*\") or label_replace(pd_hotspot_top_region_store_load_ratio{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", type=\"write-peer\"}, \"measure\", \"store_share\", \"__name__\", \".*\") or label_replace(pd_hotspot_top_region_hot_duration_seconds{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", type=\"write-peer\"}, \"measure\", \"hot_duration\", \"__name__\", \".*\")))",
+              "format": "time_series",
+              "instant": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Top 10 sustained hot Regions (write-peer)",
+          "transformations": [
+            {
+              "id": "joinByLabels",
+              "options": {
+                "value": "measure"
+              }
+            },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true
+                },
+                "indexByName": {
+                  "region": 0,
+                  "store": 1,
+                  "dim": 2,
+                  "load": 3,
+                  "store_share": 4,
+                  "hot_duration": 5
+                },
+                "renameByName": {
+                  "region": "Region",
+                  "store": "Store",
+                  "dim": "Dimension",
+                  "load": "Load",
+                  "store_share": "Store share",
+                  "hot_duration": "Hot duration"
+                }
+              }
+            }
+          ],
+          "type": "table"
         }
       ],
       "title": "Statistics - hot write",
@@ -6951,6 +7141,101 @@
             "align": false,
             "alignLevel": null
           }
+        },
+        {
+          "datasource": "${DS_TEST-CLUSTER}",
+          "description": "Top 10 distinct sustained hot Regions ranked by the effective first scheduling dimension, including version fallback. Shows Region load and its share of the selected Store's rolling total load for the same dimension. Region and Store statistics use different smoothing windows, so the share can exceed 100%; it is blank when Store load is unavailable. Peer lists use the maximum load per Region. Store filtering applies to the cluster-wide Top 10. Hot duration covers consecutive reported intervals classified as hot in any dimension on the selected Store. It resets on cold or missing reports, peer migration, or a hot-cache rebuild; time without reports does not advance it. It is independent of Top 10 membership.",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "minWidth": 100
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "store_share"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "percentunit"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Hot duration"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "s"
+                  }
+                ]
+              }
+            ]
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 88
+          },
+          "id": 1710,
+          "options": {
+            "showHeader": true,
+            "sortBy": [
+              {
+                "displayName": "Load",
+                "desc": true
+              }
+            ]
+          },
+          "targets": [
+            {
+              "expr": "sort_desc(max by (region, store, dim, measure) (label_replace(pd_hotspot_top_region_load{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", type=\"read-peer\"}, \"measure\", \"load\", \"__name__\", \".*\") or label_replace(pd_hotspot_top_region_store_load_ratio{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", type=\"read-peer\"}, \"measure\", \"store_share\", \"__name__\", \".*\") or label_replace(pd_hotspot_top_region_hot_duration_seconds{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", type=\"read-peer\"}, \"measure\", \"hot_duration\", \"__name__\", \".*\")))",
+              "format": "time_series",
+              "instant": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Top 10 sustained hot Regions (read-peer)",
+          "transformations": [
+            {
+              "id": "joinByLabels",
+              "options": {
+                "value": "measure"
+              }
+            },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true
+                },
+                "indexByName": {
+                  "region": 0,
+                  "store": 1,
+                  "dim": 2,
+                  "load": 3,
+                  "store_share": 4,
+                  "hot_duration": 5
+                },
+                "renameByName": {
+                  "region": "Region",
+                  "store": "Store",
+                  "dim": "Dimension",
+                  "load": "Load",
+                  "store_share": "Store share",
+                  "hot_duration": "Hot duration"
+                }
+              }
+            }
+          ],
+          "type": "table"
         }
       ],
       "repeat": null,

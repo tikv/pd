@@ -169,20 +169,24 @@ func (bs *balanceSolver) isSelectedDim(dim int) bool {
 }
 
 func (bs *balanceSolver) getPriorities() []string {
-	querySupport := bs.sche.conf.checkQuerySupport(bs.SchedulerCluster)
-	cpuSupport := bs.sche.conf.checkCPUSupport(bs.SchedulerCluster)
-	// For read, transfer-leader and move-peer have the same priority config
-	// For write, they are different
-	switch bs.resourceTy {
+	return bs.sche.getPriorities(bs.SchedulerCluster, bs.resourceTy)
+}
+
+// getPriorities is shared by scheduling and monitoring, including version fallback.
+func (s *hotScheduler) getPriorities(cluster sche.SchedulerCluster, resourceTy resourceType) []string {
+	querySupport := s.conf.checkQuerySupport(cluster)
+	cpuSupport := s.conf.checkCPUSupport(cluster)
+	s.conf.RLock()
+	defer s.conf.RUnlock()
+	switch resourceTy {
 	case readLeader, readPeer:
-		return adjustPrioritiesConfig(querySupport, cpuSupport, bs.sche.conf.getReadPriorities(), getReadPriorities)
+		return adjustPrioritiesConfig(querySupport, cpuSupport, s.conf.ReadPriorities, getReadPriorities)
 	case writeLeader:
-		return adjustPrioritiesConfig(querySupport, cpuSupport, bs.sche.conf.getWriteLeaderPriorities(), getWriteLeaderPriorities)
+		return adjustPrioritiesConfig(querySupport, cpuSupport, s.conf.WriteLeaderPriorities, getWriteLeaderPriorities)
 	case writePeer:
-		return adjustPrioritiesConfig(querySupport, cpuSupport, bs.sche.conf.getWritePeerPriorities(), getWritePeerPriorities)
+		return adjustPrioritiesConfig(querySupport, cpuSupport, s.conf.WritePeerPriorities, getWritePeerPriorities)
 	}
-	log.Error("illegal type or illegal operator while getting the priority", zap.String("type", bs.rwTy.String()), zap.String("operator", bs.opTy.String()))
-	return []string{}
+	return nil
 }
 
 func newBalanceSolver(sche *hotScheduler, cluster sche.SchedulerCluster, rwTy utils.RWType, opTy opType) *balanceSolver {

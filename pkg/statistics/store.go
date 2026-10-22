@@ -112,15 +112,34 @@ func (s *StoresStats) SetRegionsStats(storeIDs []uint64, writeBytesRates, writeK
 func (s *StoresStats) GetStoresLoads() map[uint64]StoreKindLoads {
 	s.RLock()
 	defer s.RUnlock()
-	res := make(map[uint64]StoreKindLoads, len(s.rollingStoresStats))
+	dst := make(map[uint64]StoreKindLoads, len(s.rollingStoresStats))
+	s.fillStoresLoads(dst)
+	return dst
+}
+
+// GetStoresLoadsTo returns all stores loads, writing into the given
+// destination map so callers can amortize allocation across repeated calls.
+func (s *StoresStats) GetStoresLoadsTo(dst map[uint64]StoreKindLoads) map[uint64]StoreKindLoads {
+	s.RLock()
+	defer s.RUnlock()
+	s.fillStoresLoads(dst)
+	return dst
+}
+
+// fillStoresLoads must be called with s's lock held.
+func (s *StoresStats) fillStoresLoads(dst map[uint64]StoreKindLoads) {
+	for storeID := range dst {
+		if _, ok := s.rollingStoresStats[storeID]; !ok {
+			delete(dst, storeID)
+		}
+	}
 	for storeID, stats := range s.rollingStoresStats {
-		var storeStats StoreKindLoads
+		storeStats := dst[storeID]
 		for i := range utils.StoreLoadCount {
 			storeStats[i] = stats.GetLoad(i)
 		}
-		res[storeID] = storeStats
+		dst[storeID] = storeStats
 	}
-	return res
 }
 
 // GetStoreReadCPURecentMax returns the recent max read CPU usage of a store.
