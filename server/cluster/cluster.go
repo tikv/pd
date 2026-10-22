@@ -385,6 +385,16 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	}
 	initClusterDuration := time.Since(initClusterStart)
 	log.Info("initialize cluster completed", zap.Duration("cost", initClusterDuration))
+	if c.keyspaceManager != nil {
+		// The keyspace cache may have been repopulated by a follower-handle
+		// read (which does not require this node to be running or leader)
+		// at any point since the last Stop, including after some other node
+		// removed or changed a keyspace this node cached while it was not
+		// leader. Clear it again here, symmetric with Stop, so this term
+		// starts trusting the cache only from the point it rebuilds it
+		// itself as leader.
+		c.keyspaceManager.ClearCache()
+	}
 	// We should not manage tso service when bootstrap try to start raft cluster.
 	// It only is controlled by leader election.
 	// Ref: https://github.com/tikv/pd/issues/8836

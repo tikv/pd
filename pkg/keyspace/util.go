@@ -475,16 +475,30 @@ func RegionSpansMultipleKeyspaces(startKey, endKey []byte, checker Checker) bool
 	if checker == nil {
 		return false
 	}
+	endKeyspaceID, endKT, endOK := ExtractKeyspaceID(endKey)
+
 	var startKeyspaceID uint32
 	var startKT regionBoundType
 	var startOK bool
 	if len(startKey) == 0 {
-		startKeyspaceID, startKT, startOK = constant.StartKeyspaceID, rawRegionBound, true
+		// An empty start key only stands in for the left bound of the raw
+		// keyspace block (keyspace 0) when endKey is itself recognizable as
+		// keyspace-prefixed: that is the "first region in a keyspace-aware
+		// cluster" case this synthesizes for. When endKey carries no
+		// keyspace prefix at all - e.g. a classic, unprefixed raw key in a
+		// cluster with no keyspace feature in use - treating the empty
+		// start key as a real keyspace boundary would wrongly pair a
+		// synthesized "known" side against the end key's genuinely unknown
+		// side below, and conservatively (and incorrectly) report spanning
+		// for an ordinary key range that carries no keyspace information on
+		// either side.
+		startOK = endOK
+		if startOK {
+			startKeyspaceID, startKT = constant.StartKeyspaceID, rawRegionBound
+		}
 	} else {
 		startKeyspaceID, startKT, startOK = ExtractKeyspaceID(startKey)
 	}
-
-	endKeyspaceID, endKT, endOK := ExtractKeyspaceID(endKey)
 
 	// If both keys have no recognizable keyspace ID (or the end key is simply
 	// absent), the region carries no keyspace boundary information at all, so it
@@ -513,10 +527,14 @@ func RegionSpansMultipleKeyspaces(startKey, endKey []byte, checker Checker) bool
 	}
 
 	// An absent endKey means the region runs past every later keyspace (+inf).
-	// There is no end keyspace to check, so it spans a boundary iff it starts
-	// inside an existing keyspace. Reaching here, startKey is a txn keyspace key.
+	// It spans a boundary iff any keyspace in [startKeyspaceID,
+	// MaxValidKeyspaceID] still exists - not just startKeyspaceID itself,
+	// since a later keyspace can still be live even after startKeyspaceID
+	// was removed, and the region still runs into it. Reaching here, startKey
+	// is a txn keyspace key.
 	if len(endKey) == 0 {
-		return checker.KeyspaceExist(startKeyspaceID)
+		_, exist := checker.GetKeyspaceIDInRange(startKeyspaceID, constant.MaxValidKeyspaceID, 1)
+		return exist
 	}
 
 	// If end keyspace ID is exactly start keyspace + 1,

@@ -631,6 +631,29 @@ func TestRegionSpansMultipleKeyspaces(t *testing.T) {
 			checker:        specificChecker, // keyspace 200 does not exist
 			expectedResult: false,
 		},
+		{
+			// 100 is gone, but a later keyspace (105) is still live and the
+			// region runs unbounded past it, so it still must be split - not
+			// just checking the start keyspace itself.
+			name:     "empty end key, start keyspace deleted but a later keyspace still exists",
+			startKey: MakeRegionBound(100).TxnLeftBound,
+			endKey:   []byte{},
+			checker: &mockKeyspaceChecker{
+				existingKeyspaces: map[uint32]bool{105: true},
+			},
+			expectedResult: true,
+		},
+		{
+			// An empty startKey only stands for the raw keyspace block's left
+			// bound when endKey is itself keyspace-prefixed. Paired here with
+			// a classic, unprefixed key (no keyspace feature in use on this
+			// side), it must not be treated as spanning.
+			name:           "empty start key paired with a non-keyspace end key",
+			startKey:       []byte{},
+			endKey:         codec.EncodeBytes([]byte{'t', 1, 2, 4}),
+			checker:        allExistChecker,
+			expectedResult: false,
+		},
 	}
 
 	for _, tc := range testCases {
