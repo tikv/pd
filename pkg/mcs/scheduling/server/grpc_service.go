@@ -76,12 +76,12 @@ func NewService(svr bs.Server) registry.RegistrableService {
 // occurs on Send() or Recv(), both endpoints will be closed.
 type heartbeatServer struct {
 	stream schedulingpb.Scheduling_RegionHeartbeatServer
-	closed int32
+	closed atomic.Int32
 }
 
 // Send implements the HeartbeatStream interface.
 func (s *heartbeatServer) Send(m core.RegionHeartbeatResponse) error {
-	if atomic.LoadInt32(&s.closed) == 1 {
+	if s.closed.Load() == 1 {
 		return io.EOF
 	}
 	done := make(chan error, 1)
@@ -94,22 +94,22 @@ func (s *heartbeatServer) Send(m core.RegionHeartbeatResponse) error {
 	select {
 	case err := <-done:
 		if err != nil {
-			atomic.StoreInt32(&s.closed, 1)
+			s.closed.Store(1)
 		}
 		return errors.WithStack(err)
 	case <-timer.C:
-		atomic.StoreInt32(&s.closed, 1)
+		s.closed.Store(1)
 		return errs.ErrSendHeartbeatTimeout
 	}
 }
 
 func (s *heartbeatServer) recv() (*schedulingpb.RegionHeartbeatRequest, error) {
-	if atomic.LoadInt32(&s.closed) == 1 {
+	if s.closed.Load() == 1 {
 		return nil, io.EOF
 	}
 	req, err := s.stream.Recv()
 	if err != nil {
-		atomic.StoreInt32(&s.closed, 1)
+		s.closed.Store(1)
 		return nil, errors.WithStack(err)
 	}
 	return req, nil

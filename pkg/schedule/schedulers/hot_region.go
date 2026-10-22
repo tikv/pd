@@ -92,7 +92,7 @@ func newBaseHotScheduler(
 		regionPendings: make(map[uint64]*pendingInfluence),
 		stHistoryLoads: statistics.NewStoreHistoryLoads(sampleDuration, sampleInterval),
 	}
-	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
+	for ty := range resourceTypeLen {
 		ret.types = append(ret.types, ty)
 		ret.stLoadInfos[ty] = map[uint64]*statistics.StoreLoadDetail{}
 	}
@@ -233,7 +233,7 @@ func newHotScheduler(opController *operator.Controller, conf *hotRegionScheduler
 		baseHotScheduler: base,
 		conf:             conf,
 	}
-	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
+	for ty := range resourceTypeLen {
 		ret.searchRevertRegions[ty] = false
 	}
 	return ret

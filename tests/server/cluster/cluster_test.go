@@ -364,9 +364,7 @@ func TestConcurrencyGetPutConfig(t *testing.T) {
 
 	wg := sync.WaitGroup{}
 	for i := range 10 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for j := range 100 {
 				storeID := peer.GetStoreId()
 				client, conn := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
@@ -382,7 +380,7 @@ func TestConcurrencyGetPutConfig(t *testing.T) {
 				_, err := putStore(grpcPDClient, clusterID, store)
 				re.NoError(err)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -781,15 +779,13 @@ func TestRaftClusterStartTSOJob(t *testing.T) {
 	name = leaderServer.GetLeader().GetName()
 	wg := sync.WaitGroup{}
 	for range 3 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			err := leaderServer.BootstrapCluster()
 			if err != nil {
 				// If the error is ErrEtcdTxnConflict, it means there is a temporary failure.
 				assert.ErrorContains(t, err, errs.ErrEtcdTxnConflict.GetMsg())
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	testutil.Eventually(re, func() bool {
@@ -881,15 +877,14 @@ func TestStoreVersionChange(t *testing.T) {
 	store := newMetaStore(storeID, "mock://tikv-1:1", "2.1.0", metapb.StoreState_Up, getTestDeployPath(storeID))
 	var wg sync.WaitGroup
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/versionChangeConcurrency", `return(true)`))
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		resp, err := putStore(grpcPDClient, clusterID, store)
-		if !assert.NoError(t, err) {
+		if err != nil {
+			t.Errorf("put store: %v", err)
 			return
 		}
 		assert.Equal(t, pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
-	}()
+	})
 	time.Sleep(100 * time.Millisecond)
 	err = svr.SetClusterVersion("1.0.0")
 	re.NoError(err)
@@ -1014,12 +1009,12 @@ func TestConcurrentHandleRegion(t *testing.T) {
 		default:
 		}
 
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			err := rc.HandleRegionHeartbeat(core.NewRegionInfo(region, region.Peers[0]))
-			assert.NoError(t, err)
-		}()
+			if err != nil {
+				t.Errorf("handle region heartbeat: %v", err)
+			}
+		})
 	}
 	wg.Wait()
 }

@@ -224,7 +224,7 @@ func TestBTreeG(t *testing.T) {
 
 func ExampleBTreeG() {
 	tr := NewG[Int](*btreeDegree)
-	for i := Int(0); i < 10; i++ {
+	for i := range Int(10) {
 		tr.ReplaceOrInsert(i)
 	}
 	fmt.Println("len:       ", tr.Len())
@@ -787,13 +787,11 @@ func TestCloneConcurrentOperationsG(t *testing.T) {
 	toRemove := rang(cloneTestSize)[cloneTestSize/2:]
 	for i := range len(trees) / 2 {
 		tree := trees[i]
-		wg.Add(1)
-		go func() {
+		wg.Go(func() {
 			for _, item := range toRemove {
 				tree.Delete(item)
 			}
-			wg.Done()
-		}()
+		})
 	}
 	wg.Wait()
 	t.Log("Checking all values again")

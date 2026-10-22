@@ -81,7 +81,7 @@ type Operator struct {
 	kind             OpKind
 	steps            []OpStep
 	stepsTime        []int64 // step finish time
-	currentStep      int32
+	currentStep      atomic.Int32
 	status           OpStatusTracker
 	level            constant.PriorityLevel
 	Counters         []prometheus.Counter
@@ -152,7 +152,7 @@ func (o *Operator) String() string {
 	}
 	s := fmt.Sprintf("%s {%s} (kind:%s, region:%v(%v, %v), createAt:%s, startAt:%s, currentStep:%v, size:%d, steps:[%s], timeout:[%s])",
 		o.desc, o.brief, o.kind, o.regionID, o.regionEpoch.GetVersion(), o.regionEpoch.GetConfVer(), o.GetCreateTime(),
-		o.GetStartTime(), atomic.LoadInt32(&o.currentStep), o.ApproximateSize, strings.Join(stepStrs, ", "), o.timeout.String())
+		o.GetStartTime(), o.currentStep.Load(), o.ApproximateSize, strings.Join(stepStrs, ", "), o.timeout.String())
 	if o.CheckSuccess() {
 		s += " finished"
 	}
@@ -318,7 +318,7 @@ func (o *Operator) IsEnd() bool {
 
 // CheckSuccess checks if all steps are finished, and update the status.
 func (o *Operator) CheckSuccess() bool {
-	if atomic.LoadInt32(&o.currentStep) >= int32(len(o.steps)) {
+	if o.currentStep.Load() >= int32(len(o.steps)) {
 		return o.status.To(SUCCESS) || o.Status() == SUCCESS
 	}
 	return false
@@ -381,7 +381,7 @@ func (o *Operator) ContainNonWitnessStep() bool {
 // opStep is nil if the i-th step is not found.
 func (o *Operator) getCurrentTimeAndStep() (startTime time.Time, opStep OpStep) {
 	startTime = o.GetStartTime()
-	currentStep := atomic.LoadInt32(&o.currentStep)
+	currentStep := o.currentStep.Load()
 	if int(currentStep) < len(o.steps) {
 		opStep = o.steps[currentStep]
 		// we should use the finished time of the previous step if the first step is finished.
@@ -402,7 +402,7 @@ func (o *Operator) Check(region *core.RegionInfo) OpStep {
 	}
 	// CheckTimeout will call CheckSuccess first
 	defer func() { _ = o.CheckTimeout() }()
-	for step := atomic.LoadInt32(&o.currentStep); int(step) < len(o.steps); step++ {
+	for step := o.currentStep.Load(); int(step) < len(o.steps); step++ {
 		if o.steps[int(step)].IsFinish(region) {
 			current := time.Now()
 			if atomic.CompareAndSwapInt64(&(o.stepsTime[step]), 0, current.UnixNano()) {
@@ -410,7 +410,7 @@ func (o *Operator) Check(region *core.RegionInfo) OpStep {
 				operatorStepDuration.WithLabelValues(reflect.TypeOf(o.steps[int(step)]).Name()).
 					Observe(current.Sub(startTime).Seconds())
 			}
-			atomic.StoreInt32(&o.currentStep, step+1)
+			o.currentStep.Store(step + 1)
 		} else {
 			return o.steps[int(step)]
 		}
@@ -420,7 +420,7 @@ func (o *Operator) Check(region *core.RegionInfo) OpStep {
 
 // ConfVerChanged returns the number of confver has consumed by steps
 func (o *Operator) ConfVerChanged(region *core.RegionInfo) (total uint64) {
-	current := atomic.LoadInt32(&o.currentStep)
+	current := o.currentStep.Load()
 	if current == int32(len(o.steps)) {
 		current--
 	}
@@ -443,7 +443,7 @@ func (o *Operator) GetPriorityLevel() constant.PriorityLevel {
 
 // UnfinishedInfluence calculates the store difference which unfinished operator steps make.
 func (o *Operator) UnfinishedInfluence(opInfluence *OpInfluence, region *core.RegionInfo) {
-	for step := atomic.LoadInt32(&o.currentStep); int(step) < len(o.steps); step++ {
+	for step := o.currentStep.Load(); int(step) < len(o.steps); step++ {
 		if !o.steps[int(step)].IsFinish(region) {
 			o.steps[int(step)].Influence(opInfluence, region)
 		}
@@ -526,7 +526,7 @@ func (o *OpRecord) MarshalJSON() ([]byte, error) {
 
 // Record transfers the operator to OpRecord.
 func (o *Operator) Record(finishTime time.Time) *OpRecord {
-	step := atomic.LoadInt32(&o.currentStep)
+	step := o.currentStep.Load()
 	record := &OpRecord{
 		Operator:   o,
 		FinishTime: finishTime,
