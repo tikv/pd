@@ -634,6 +634,8 @@ func TestRuleManagerLoadRulesLogRedact(t *testing.T) {
 	validRule := &Rule{GroupID: "redact", ID: "valid", StartKeyHex: startKey, EndKeyHex: endKey, Role: Voter, Count: 1}
 	invalidRule := validRule.Clone()
 	invalidRule.ID, invalidRule.Count = "invalid", 0
+	invalidLeaderRule := validRule.Clone()
+	invalidLeaderRule.ID, invalidLeaderRule.Role, invalidLeaderRule.Count = "invalid-leader", Leader, 2
 	invalidStartKeyRule := validRule.Clone()
 	invalidStartKeyRule.ID, invalidStartKeyRule.StartKeyHex = "invalid-start-key", startKey+"zz"
 	invalidEndKeyRule := validRule.Clone()
@@ -667,6 +669,7 @@ func TestRuleManagerLoadRulesLogRedact(t *testing.T) {
 			for key, value := range map[string]string{
 				validRule.StoreKey():           validJSON,
 				invalidRule.StoreKey():         invalidRule.String(),
+				invalidLeaderRule.StoreKey():   invalidLeaderRule.String(),
 				invalidStartKeyRule.StoreKey(): invalidStartKeyRule.String(),
 				invalidEndKeyRule.StoreKey():   invalidEndKeyRule.String(),
 				"malformed":                    validJSON[:len(validJSON)-1],
@@ -685,10 +688,13 @@ func TestRuleManagerLoadRulesLogRedact(t *testing.T) {
 			} {
 				re.Contains(string(output), msg)
 			}
+			for _, reason := range []string{"invalid count 0", "define multiple leaders by count 2"} {
+				re.Contains(string(output), "[PD:placement:ErrLoadRule]load rule failed: [PD:placement:ErrRuleContent]invalid rule content, "+reason)
+			}
 			if mode.typ == logutil.RedactInfoLogON {
 				re.NotContains(string(output), startKey)
 				re.NotContains(string(output), endKey)
-				re.Equal(6, strings.Count(string(output), "[rule-value=?]"))
+				re.Equal(7, strings.Count(string(output), "[rule-value=?]"))
 				re.Contains(string(output), "[PD:placement:ErrLoadRule]load rule failed: ?")
 			} else {
 				re.Contains(string(output), startKey)
@@ -701,11 +707,11 @@ func TestRuleManagerLoadRulesLogRedact(t *testing.T) {
 					re.Contains(string(output), "[PD:placement:ErrLoadRule]load rule failed: "+cause)
 				}
 				if mode.typ == logutil.RedactInfoLogMarker {
-					re.Equal(6, strings.Count(string(output), `[rule-value="‹{`))
+					re.Equal(7, strings.Count(string(output), `[rule-value="‹{`))
 				}
 			}
 
-			for _, key := range []string{invalidRule.StoreKey(), invalidStartKeyRule.StoreKey(), invalidEndKeyRule.StoreKey(), "malformed", "duplicate", "mismatch"} {
+			for _, key := range []string{invalidRule.StoreKey(), invalidLeaderRule.StoreKey(), invalidStartKeyRule.StoreKey(), invalidEndKeyRule.StoreKey(), "malformed", "duplicate", "mismatch"} {
 				value, err := store.LoadRule(key)
 				re.NoError(err)
 				re.Empty(value)
