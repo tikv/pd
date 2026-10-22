@@ -40,8 +40,7 @@ func TestMain(m *testing.M) {
 
 type tsoTestSuite struct {
 	suite.Suite
-	env            *tests.SchedulingTestEnvironment
-	updateInterval time.Duration
+	env *tests.SchedulingTestEnvironment
 }
 
 func TestTSOSuite(t *testing.T) {
@@ -49,10 +48,9 @@ func TestTSOSuite(t *testing.T) {
 }
 
 func (s *tsoTestSuite) SetupSuite() {
-	// Set to max update interval so we can drain the logical part easily later.
-	s.updateInterval = config.MaxTSOUpdatePhysicalInterval
+	// Keep periodic updates infrequent while testing consecutive requests at the logical boundary.
 	s.env = tests.NewSchedulingTestEnvironment(s.T(), func(conf *config.Config, _ string) {
-		conf.TSOUpdatePhysicalInterval = typeutil.Duration{Duration: s.updateInterval}
+		conf.TSOUpdatePhysicalInterval = typeutil.Duration{Duration: config.MaxTSOUpdatePhysicalInterval}
 	})
 	s.env.PDCount = 2
 }
@@ -225,12 +223,11 @@ func (s *tsoTestSuite) checkLogicalOverflow(cluster *tests.TestCluster) {
 	for range 20 {
 		req := &pdpb.TsoRequest{
 			Header: testutil.NewRequestHeader(clusterID),
-			Count:  uint32(count),
+			Count:  count,
 		}
 		re.NoError(tsoClient.Send(req))
 		resp, err := tsoClient.Recv()
 		re.NoError(err)
-		// Check the monotonicity of the timestamp.
 		timestamp := checkAndReturnTimestampResponse(re, req, resp)
 		re.NotNil(timestamp)
 		re.Less(timestamp.GetLogical(), int64(maxLogical))

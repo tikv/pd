@@ -224,8 +224,7 @@ func TestManagerMetadataWatcherLifecycle(t *testing.T) {
 		re := require.New(t)
 		m := prepareMetadataWatcherManager()
 
-		parentCtx, parentCancel := context.WithCancel(context.Background())
-		defer parentCancel()
+		parentCtx := t.Context()
 
 		watcherErr := errors.New("watcher load failed")
 		var capturedCtx context.Context
@@ -258,8 +257,7 @@ func TestManagerMetadataWatcherLifecycle(t *testing.T) {
 		re := require.New(t)
 		m := prepareMetadataWatcherManager()
 
-		parentCtx, parentCancel := context.WithCancel(context.Background())
-		defer parentCancel()
+		parentCtx := t.Context()
 
 		var capturedCtx context.Context
 		withMetadataLoopWatcherFactory(t, func(
@@ -438,8 +436,7 @@ func TestInitManager(t *testing.T) {
 	m := prepareManager()
 
 	re.Empty(m.getKeyspaceResourceGroupManagers())
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	err := m.Init(ctx)
 	re.NoError(err)
 	// There should only be one null keyspace resource group manager.
@@ -490,8 +487,7 @@ func TestBackgroundMetricsFlush(t *testing.T) {
 	re := require.New(t)
 	m := prepareManager()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	err := m.Init(ctx)
 	re.NoError(err)
 	// Test without keyspace ID
@@ -571,8 +567,7 @@ func TestAcquireTokenBucketsDoesNotReadKeyspaceMetadata(t *testing.T) {
 	re := require.New(t)
 	m := prepareManager()
 	m.srv = &testBasicServer{}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	m.acceptingConsumption = true
 	m.consumptionTermDone = ctx.Done()
 
@@ -642,8 +637,7 @@ func TestAddAndModifyResourceGroup(t *testing.T) {
 	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
 	m.storage = storage
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	err := m.Init(ctx)
 	re.NoError(err)
 
@@ -690,8 +684,7 @@ func TestCleanUpMetrics(t *testing.T) {
 	re := require.New(t)
 	m := prepareManager()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	// Put a keyspace meta.
 	keyspaceID := uint32(1)
 	prepareKeyspaceName(ctx, re, m, &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: keyspaceID}}, "test_keyspace")
@@ -741,8 +734,7 @@ func TestManagerInitResetsPreviousMetrics(t *testing.T) {
 	}, &ControllerConfig{}, time.Now())
 	m.metrics.setServiceLimitMetric(keyspaceName, 100)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	re.NoError(m.Init(ctx))
 
 	re.Empty(m.metrics.consumptionRecordMap)
@@ -1008,8 +1000,7 @@ func TestKeyspaceServiceLimit(t *testing.T) {
 	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
 	m.storage = storage
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	err := m.Init(ctx)
 	re.NoError(err)
 	// Test the default service limit is 0.0.
@@ -1063,8 +1054,7 @@ func TestKeyspaceNameLookup(t *testing.T) {
 	re := require.New(t)
 	m := prepareManager()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	err := m.Init(ctx)
 	re.NoError(err)
 	// Get the null keyspace ID by an empty name.
@@ -1125,8 +1115,7 @@ func TestResourceGroupPersistence(t *testing.T) {
 	m = NewManager[*mockConfigProvider](&mockConfigProvider{})
 	m.storage = storage
 	// Initialize the manager.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	err = m.Init(ctx)
 	re.NoError(err)
 	// Check the resource group is loaded from the storage.
@@ -1155,8 +1144,7 @@ func TestManagerMetadataWriteRoleGates(t *testing.T) {
 		role: ResourceGroupWriteRoleRMTokenOnly,
 	})
 	m.storage = storage.NewStorageWithMemoryBackend()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	re.NoError(m.Init(ctx))
 	re.Equal(ResourceGroupWriteRoleRMTokenOnly, m.GetWriteRole())
 

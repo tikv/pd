@@ -606,8 +606,8 @@ func (suite *regionTestSuite) checkRegionsWithKillRequest(cluster *tests.TestClu
 	regionCount := 100
 	testutil.GenerateTestDataConcurrently(regionCount, func(i int) {
 		r := core.NewTestRegionInfo(uint64(i+2), 1,
-			[]byte(fmt.Sprintf("%09d", i)),
-			[]byte(fmt.Sprintf("%09d", i+1)),
+			fmt.Appendf(nil, "%09d", i),
+			fmt.Appendf(nil, "%09d", i+1),
 			core.SetApproximateKeys(10), core.SetApproximateSize(10))
 		tests.MustPutRegionInfo(re, cluster, r)
 	})
@@ -800,8 +800,7 @@ func (suite *regionTestSuite) checkRegionRangeHoles(cluster *tests.TestCluster) 
 
 func BenchmarkGetRegions(b *testing.B) {
 	re := require.New(b)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := b.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -815,8 +814,8 @@ func BenchmarkGetRegions(b *testing.B) {
 	regionCount := 1000000
 	for i := range regionCount {
 		r := core.NewTestRegionInfo(uint64(i+2), 1,
-			[]byte(fmt.Sprintf("%09d", i)),
-			[]byte(fmt.Sprintf("%09d", i+1)),
+			fmt.Appendf(nil, "%09d", i),
+			fmt.Appendf(nil, "%09d", i+1),
 			core.SetApproximateKeys(10), core.SetApproximateSize(10))
 		tests.MustPutRegionInfo(re, cluster, r)
 	}
@@ -828,8 +827,7 @@ func BenchmarkGetRegions(b *testing.B) {
 	re.Equal(regionCount, regions.Count)
 	resp.Body.Close()
 
-	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		resp, err := apiutil.GetJSON(tests.TestDialClient, url, nil)
 		re.NoError(err)
 		resp.Body.Close()

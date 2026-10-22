@@ -45,8 +45,7 @@ import (
 func TestResourceManagerServer(t *testing.T) {
 	re := require.New(t)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	defer cluster.Destroy()
 	re.NoError(err)

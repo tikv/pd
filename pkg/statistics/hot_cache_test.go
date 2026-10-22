@@ -15,7 +15,6 @@
 package statistics
 
 import (
-	"context"
 	"fmt"
 	"runtime"
 	"testing"
@@ -36,8 +35,7 @@ func TestMain(m *testing.M) {
 
 func TestIsHot(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	for i := utils.RWType(0); i < utils.RWTypeLen; i++ {
 		cluster := core.NewBasicCluster()
 		cache := NewHotCache(ctx, cluster)
@@ -58,8 +56,7 @@ func TestIsHot(t *testing.T) {
 func TestRegionFlowTasksMatchOriginalForAnyPeerCount(t *testing.T) {
 	for _, peerCount := range []int{0, 1, 2, 3, 5, 9} {
 		t.Run(fmt.Sprintf("%d-peers", peerCount), func(t *testing.T) {
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
+			ctx := t.Context()
 			previousRegion := newBenchmarkRegion(1, peerCount+1)
 			newCache := func() *HotPeerCache {
 				cluster := core.NewBasicCluster()

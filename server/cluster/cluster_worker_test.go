@@ -15,7 +15,6 @@
 package cluster
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -29,8 +28,7 @@ import (
 
 func TestReportSplit(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -45,8 +43,7 @@ func TestReportSplit(t *testing.T) {
 
 func TestReportBatchSplit(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)

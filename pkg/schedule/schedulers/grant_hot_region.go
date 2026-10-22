@@ -17,6 +17,7 @@ package schedulers
 import (
 	"math/rand/v2"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -55,7 +56,7 @@ type grantHotRegionSchedulerConfig struct {
 func (conf *grantHotRegionSchedulerConfig) setStore(leaderID uint64, peers []uint64) {
 	conf.Lock()
 	defer conf.Unlock()
-	if !slice.Contains(peers, leaderID) {
+	if !slices.Contains(peers, leaderID) {
 		peers = append(peers, leaderID)
 	}
 	conf.StoreLeaderID = leaderID
@@ -181,7 +182,7 @@ func (handler *grantHotRegionHandler) updateConfig(w http.ResponseWriter, r *htt
 		return
 	}
 	storeIDs := make([]uint64, 0)
-	for _, v := range strings.Split(ids, ",") {
+	for v := range strings.SplitSeq(ids, ",") {
 		id, err := strconv.ParseUint(v, 10, 64)
 		if err != nil {
 			handler.rd.JSON(w, http.StatusBadRequest, errs.ErrBytesToUint64)
