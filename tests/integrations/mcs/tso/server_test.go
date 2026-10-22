@@ -341,6 +341,27 @@ func TestForwardTSOWhenPrimaryChanged(t *testing.T) {
 	suite.checkAvailableTSO(re)
 }
 
+func TestForwardTSOWhenPrimaryAddrMissing(t *testing.T) {
+	re := require.New(t)
+	suite := NewPDServiceForward(re)
+	defer suite.ShutDown()
+
+	tc, err := tests.NewTestTSOCluster(suite.ctx, 1, suite.backendEndpoints)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForDefaultPrimaryServing(re)
+	primary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, mcs.TSOServiceName)
+	re.True(exist)
+
+	// Simulate the watcher missing the PUT of the primary: the cached address is gone
+	// and no watch event will bring it back.
+	suite.pdLeader.GetServer().DeleteServicePrimaryAddr(mcs.TSOServiceName)
+	addr, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, mcs.TSOServiceName)
+	re.True(exist)
+	re.Equal(primary, addr)
+	suite.checkAvailableTSO(re)
+}
+
 func TestResignTSOPrimaryForward(t *testing.T) {
 	re := require.New(t)
 	suite := NewPDServiceForward(re)
@@ -579,7 +600,7 @@ func BenchmarkForwardTsoConcurrently(b *testing.B) {
 		b.Run(fmt.Sprintf("clients_%d", clientsNum), func(b *testing.B) {
 			wg := sync.WaitGroup{}
 			b.ResetTimer()
-			for range b.N {
+			for b.Loop() {
 				for i, client := range clients {
 					wg.Add(1)
 					go func() {
@@ -706,8 +727,7 @@ func (suite *CommonTestSuite) TestBootstrapDefaultKeyspaceGroup() {
 func TestTSOServiceSwitch(t *testing.T) {
 	re := require.New(t)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/fastUpdateServiceMode", `return(true)`))
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	tc, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1,
 		func(conf *config.Config, _ string) {
@@ -785,8 +805,7 @@ const modeSwitchPDModeKeyspaceName = "mode_switch_pd_ks"
 
 func TestPDModeSwitchBetweenMicroserviceAndMonolithMultipleTimes(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/skipKeyspaceRegionCheck", "return"))
 	t.Cleanup(func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/server/skipKeyspaceRegionCheck"))

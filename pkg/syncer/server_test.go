@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -297,8 +298,7 @@ func TestIncrementalHistoryReplayOverflowDisconnectsStream(t *testing.T) {
 	re.NotNil(<-stream.sendCh)
 	re.NoError(<-replayDone)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	senderDone := make(chan struct{})
 	go func() {
 		syncer.runDownstreamSender(ctx, "pd-follower", syncStream)
@@ -388,8 +388,7 @@ func TestSyncExitsWhenBroadcastSendFails(t *testing.T) {
 		core.NewBasicCluster(),
 	)
 	syncer := NewRegionSyncer(server)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	stream := newMockSyncRegionsServer()
 	done := make(chan error, 1)
 	go func() {
@@ -445,8 +444,7 @@ func TestCloseAllClientTimesOutBlockedSend(t *testing.T) {
 	)
 	syncer := NewRegionSyncer(server)
 	syncer.sendTimeout = 10 * time.Millisecond
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	stream := newMockSyncRegionsServer()
 	done := make(chan error, 1)
 	go func() {
@@ -518,8 +516,7 @@ func TestBroadcastClosesStreamWhenSendBlocks(t *testing.T) {
 	)
 	syncer := NewRegionSyncer(server)
 	syncer.sendTimeout = 10 * time.Millisecond
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	stream := newMockSyncRegionsServer()
 	done := make(chan error, 1)
 	go func() {
@@ -1056,7 +1053,7 @@ func (s *blockingSendStream) sendCountValue() int {
 func (s *blockingSendStream) sentResponses() []*pdpb.SyncRegionResponse {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return append([]*pdpb.SyncRegionResponse(nil), s.responses...)
+	return slices.Clone(s.responses)
 }
 
 func (s *testServerStream) Send(resp *pdpb.SyncRegionResponse) error {
@@ -1086,7 +1083,7 @@ func (s *testServerStream) lastResponse() *pdpb.SyncRegionResponse {
 func (s *testServerStream) sentResponses() []*pdpb.SyncRegionResponse {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return append([]*pdpb.SyncRegionResponse(nil), s.responses...)
+	return slices.Clone(s.responses)
 }
 
 func newTestRegion(id uint64) *core.RegionInfo {
@@ -1151,8 +1148,7 @@ func TestFullSyncDisconnectsWhenHistoryBufferOverflowsDuringCatchUp(t *testing.T
 	syncer, bc := newTestRegionSyncer(t, newTestSyncRegion(1, 11))
 	syncer.history = newHistoryBufferWithConfig(1, 1, 1, syncer.history.kv)
 	syncer.history.resetWithIndex(100)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	stream := newMockSyncRegionsServer()
 	blockCh := stream.blockSend()
 	done := startTestRegionSync(ctx, syncer, stream)

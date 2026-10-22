@@ -329,8 +329,7 @@ func TestSwitchModeDuringWorkload(t *testing.T) {
 				re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/fastUpdateServiceMode"))
 			})
 
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
+			ctx := t.Context()
 
 			cluster, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 2)
 			re.NoError(err)

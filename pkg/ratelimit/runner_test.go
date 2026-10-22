@@ -28,8 +28,7 @@ import (
 func TestConcurrentRunner(t *testing.T) {
 	t.Run("RunTask", func(t *testing.T) {
 		runner := NewConcurrentRunner("test", NewConcurrencyLimiter(1), time.Second)
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
+		ctx := t.Context()
 		runner.Start(ctx)
 		defer runner.Stop()
 
@@ -52,8 +51,7 @@ func TestConcurrentRunner(t *testing.T) {
 
 	t.Run("MaxPendingDuration", func(t *testing.T) {
 		runner := NewConcurrentRunner("test", NewConcurrencyLimiter(1), 2*time.Millisecond)
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
+		ctx := t.Context()
 		runner.Start(ctx)
 		defer runner.Stop()
 		var wg sync.WaitGroup
@@ -83,8 +81,7 @@ func TestConcurrentRunner(t *testing.T) {
 
 	t.Run("DuplicatedTask", func(t *testing.T) {
 		runner := NewConcurrentRunner("test", NewConcurrencyLimiter(1), time.Minute)
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
+		ctx := t.Context()
 		runner.Start(ctx)
 		defer runner.Stop()
 

@@ -34,8 +34,7 @@ func getAllBucketStats(ctx context.Context, hotCache *HotBucketCache) map[uint64
 
 func TestColdHot(t *testing.T) {
 	re := require.New(t)
-	ctx, cancelFn := context.WithCancel(context.Background())
-	defer cancelFn()
+	ctx := t.Context()
 	hotCache := NewBucketsCache(ctx)
 	testdata := []struct {
 		buckets *metapb.Buckets
@@ -66,8 +65,7 @@ func TestColdHot(t *testing.T) {
 
 func TestCheckBucketsTask(t *testing.T) {
 	re := require.New(t)
-	ctx, cancelFn := context.WithCancel(context.Background())
-	defer cancelFn()
+	ctx := t.Context()
 	hotCache := NewBucketsCache(ctx)
 	// case1: add bucket successfully
 	buckets := newTestBuckets(1, 1, [][]byte{[]byte("10"), []byte("20"), []byte("30")}, 0)
@@ -107,8 +105,7 @@ func TestCheckBucketsTask(t *testing.T) {
 
 func TestCollectBucketStatsTask(t *testing.T) {
 	re := require.New(t)
-	ctx, cancelFn := context.WithCancel(context.Background())
-	defer cancelFn()
+	ctx := t.Context()
 	hotCache := NewBucketsCache(ctx)
 	// case1: add bucket successfully
 	for i := range uint64(10) {

@@ -15,7 +15,6 @@
 package affinity
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -39,8 +38,7 @@ import (
 // TestGetRegionAffinityGroupState tests the GetRegionAffinityGroupState method of Manager.
 func TestGetRegionAffinityGroupState(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
@@ -146,8 +144,7 @@ func TestGetRegionAffinityGroupState(t *testing.T) {
 // TestBasicGroupOperations tests basic group CRUD operations
 func TestBasicGroupOperations(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
@@ -180,8 +177,7 @@ func TestBasicGroupOperations(t *testing.T) {
 // TestSyncLabelRuleBeforeGroup ensures label rules arriving before group sync are applied after group creation.
 func TestSyncLabelRuleBeforeGroup(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
@@ -305,8 +301,7 @@ func TestBalancePolicyValidationAtMetadataEntrypoints(t *testing.T) {
 // TestRegionCountStaleCache documents that RegionCount counts stale cache entries when group changes.
 func TestRegionCountStaleCache(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
@@ -374,8 +369,7 @@ func TestRegionCountStaleCache(t *testing.T) {
 // TestDeleteGroupClearsCache verifies that deleting a group clears all related region caches.
 func TestDeleteGroupClearsCache(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
@@ -437,8 +431,7 @@ func TestDeleteGroupClearsCache(t *testing.T) {
 // TestAvailabilityChangeRegionCount verifies that changing group availability clears region cache.
 func TestAvailabilityChangeRegionCount(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
@@ -499,8 +492,7 @@ func TestAvailabilityChangeRegionCount(t *testing.T) {
 // TestInvalidCacheMultipleTimes verifies that InvalidCache can be called multiple times safely.
 func TestInvalidCacheMultipleTimes(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
@@ -561,8 +553,7 @@ func TestInvalidCacheMultipleTimes(t *testing.T) {
 // Run with: go test -race
 func TestConcurrentOperations(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
@@ -673,8 +664,7 @@ func TestConcurrentOperations(t *testing.T) {
 // TestDegradedExpiration verifies that a degraded group automatically expires after the configured duration.
 func TestDegradedExpiration(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
