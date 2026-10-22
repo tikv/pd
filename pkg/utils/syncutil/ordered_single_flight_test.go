@@ -641,8 +641,7 @@ func BenchmarkOrderedSingleFlightSingleThread(b *testing.B) {
 	noop := func(context.Context) (int, error) { return 0, nil }
 	ctx := context.Background()
 
-	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		_, _ = s.Do(ctx, noop)
 	}
 }

@@ -405,6 +405,11 @@ func (*GrpcServer) WatchGCSafePointV2(_ *pdpb.WatchGCSafePointV2Request, _ pdpb.
 	return status.Errorf(codes.Unimplemented, "WatchGCSafePointV2 is obsolete. Poll GetAllKeyspacesGCStates instead if necessary")
 }
 
+// WatchGCStates is not supported yet.
+func (*GrpcServer) WatchGCStates(_ *pdpb.WatchGCStatesRequest, _ pdpb.PD_WatchGCStatesServer) error {
+	return status.Errorf(codes.Unimplemented, "WatchGCStates is not supported yet")
+}
+
 // GetAllGCSafePointV2 return all gc safe point v2.
 //
 // Deprecated: Use GetAllKeyspacesGCStates instead.

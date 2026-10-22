@@ -15,7 +15,6 @@
 package health_test
 
 import (
-	"context"
 	"encoding/json"
 	"os/exec"
 	"path/filepath"
@@ -36,8 +35,7 @@ import (
 
 func TestHealth(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := pdTests.NewTestCluster(ctx, 3)
 	re.NoError(err)
 	defer tc.Destroy()
@@ -78,8 +76,7 @@ func TestHealth(t *testing.T) {
 
 func TestHealthTLS(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	certPath := t.TempDir()
 	certScript := filepath.Join("..", "cert_opt.sh")
 	if err := exec.Command(certScript, "generate", certPath).Run(); err != nil {

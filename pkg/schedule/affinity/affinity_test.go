@@ -51,8 +51,8 @@ func createGroupForTest(re *require.Assertions, m *Manager, id string, rangeCoun
 	}
 	for i := range rangeCount {
 		gkr.KeyRanges[i] = keyutil.KeyRange{
-			StartKey: []byte(fmt.Sprintf("test-%s-%04d", id, i)),
-			EndKey:   []byte(fmt.Sprintf("test-%s-%04d", id, i+1)),
+			StartKey: fmt.Appendf(nil, "test-%s-%04d", id, i),
+			EndKey:   fmt.Appendf(nil, "test-%s-%04d", id, i+1),
 		}
 	}
 	re.NoError(m.CreateAffinityGroups([]GroupKeyRanges{gkr}))

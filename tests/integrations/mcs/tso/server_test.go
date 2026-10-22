@@ -600,7 +600,7 @@ func BenchmarkForwardTsoConcurrently(b *testing.B) {
 		b.Run(fmt.Sprintf("clients_%d", clientsNum), func(b *testing.B) {
 			wg := sync.WaitGroup{}
 			b.ResetTimer()
-			for range b.N {
+			for b.Loop() {
 				for i, client := range clients {
 					wg.Add(1)
 					go func() {
@@ -727,8 +727,7 @@ func (suite *CommonTestSuite) TestBootstrapDefaultKeyspaceGroup() {
 func TestTSOServiceSwitch(t *testing.T) {
 	re := require.New(t)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/fastUpdateServiceMode", `return(true)`))
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	tc, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1,
 		func(conf *config.Config, _ string) {
@@ -806,8 +805,7 @@ const modeSwitchPDModeKeyspaceName = "mode_switch_pd_ks"
 
 func TestPDModeSwitchBetweenMicroserviceAndMonolithMultipleTimes(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/skipKeyspaceRegionCheck", "return"))
 	t.Cleanup(func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/server/skipKeyspaceRegionCheck"))

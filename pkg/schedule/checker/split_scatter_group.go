@@ -17,6 +17,7 @@ package checker
 import (
 	"bytes"
 	"fmt"
+	"slices"
 
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
@@ -58,7 +59,7 @@ func resolveSplitScatterRangeHintWithKeyspaceValidator(
 		return splitScatterRangeHint{}
 	}
 
-	tablePrefix := append([]byte(nil), codec.GenerateTableKey(tableID)...)
+	tablePrefix := slices.Clone(codec.GenerateTableKey(tableID))
 	tableGroup := makeSplitScatterTableGroup(tableID)
 	if decodedKey.hasKeyspace() {
 		tableGroup = makeSplitScatterKeyspaceTableGroup(decodedKey.keyspaceID, tableID)
@@ -170,7 +171,7 @@ func makeSplitScatterKeyspaceIndexGroup(keyspaceID uint32, tableID, indexID int6
 }
 
 func splitScatterNextPrefix(key []byte) []byte {
-	next := append([]byte(nil), key...)
+	next := slices.Clone(key)
 	for i := len(next) - 1; i >= 0; i-- {
 		if next[i] == 0xFF {
 			continue

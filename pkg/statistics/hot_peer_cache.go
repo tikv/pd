@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"slices"
 	"sync/atomic"
 	"time"
 
@@ -437,12 +438,7 @@ func (f *HotPeerCache) findOldHotPeerStatForInheritance(region *hotRegionInfo) (
 
 func (f *HotPeerCache) isOldColdPeer(oldItem *HotPeerStat, storeID uint64) bool {
 	isOldPeer := func() bool {
-		for _, id := range oldItem.stores {
-			if id == storeID {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(oldItem.stores, storeID)
 	}
 	isInHotCache := func() bool {
 		if ids, ok := f.storesOfRegion[oldItem.RegionID]; ok {

@@ -15,7 +15,6 @@
 package affinity_test
 
 import (
-	"context"
 	"strconv"
 	"testing"
 
@@ -33,8 +32,7 @@ import (
 
 func TestAffinityCommands(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	cluster, err := pdTests.NewTestCluster(ctx, 1)
 	re.NoError(err)

@@ -55,8 +55,7 @@ func TestTLSReloadAtomicReplace(t *testing.T) {
 	testTLSInfoExpired := buildTLSInfo(certExpiredPath, "pd-server")
 	testClientTLSInfo := buildTLSInfo(certPath, "client")
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tmpDir := t.TempDir()
 	re.NoError(os.RemoveAll(tmpDir))
 
@@ -276,8 +275,7 @@ func TestMultiCN(t *testing.T) {
 	testClientTLSInfo := buildTLSInfo(certPath, "client")
 	testTiDBClientTLSInfo := buildTLSInfo(certPath, "tidb-client")
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	clus, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Security.TLSConfig = grpcutil.TLSConfig{

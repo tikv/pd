@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/spf13/pflag"
@@ -125,7 +126,7 @@ func (c *clusterConfig) join() (*serverConfig, error) {
 
 func (c *clusterConfig) cleanup() error {
 	var cleanupErr error
-	servers := append(append([]*serverConfig{}, c.InitialServers...), c.JoinServers...)
+	servers := slices.Concat(c.InitialServers, c.JoinServers)
 	for _, server := range servers {
 		if err := os.RemoveAll(server.DataDir); err != nil && cleanupErr == nil {
 			cleanupErr = fmt.Errorf("remove test server data directory %s: %w", server.DataDir, err)
