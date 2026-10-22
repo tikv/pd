@@ -105,6 +105,9 @@ func (m *Manager) createGroupsWithSkipExisting(changes []GroupKeyRanges, skipExi
 	// Step 0: Validate all groups first (without lock)
 	groups := make([]*Group, 0, len(changes))
 	for _, change := range changes {
+		if err := validateGroupKeyRanges(change); err != nil {
+			return err
+		}
 		group := &Group{
 			ID:              change.GroupID,
 			CreateTimestamp: uint64(time.Now().Unix()),
@@ -215,6 +218,11 @@ func (m *Manager) createGroupsWithSkipExisting(changes []GroupKeyRanges, skipExi
 func (m *Manager) DeleteAffinityGroups(groupIDs []string, force bool) error {
 	if len(groupIDs) == 0 {
 		return errs.ErrAffinityGroupContent.FastGenByArgs("no group ids provided")
+	}
+	for _, groupID := range groupIDs {
+		if err := ValidateGroupID(groupID); err != nil {
+			return err
+		}
 	}
 
 	seen := make(map[string]struct{}, len(groupIDs))
@@ -356,6 +364,14 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affini
 // Currently migration (removing a range from group A and adding the same range to group B in one request)
 // is not supported because add validation checks overlaps against existing ranges before removals are applied.
 func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRanges) error {
+	// Validate the full batch before planning changes, including empty operations.
+	for _, ops := range [][]GroupKeyRanges{addOps, removeOps} {
+		for _, op := range ops {
+			if err := validateGroupKeyRanges(op); err != nil {
+				return err
+			}
+		}
+	}
 	toAdd := make(map[string]GroupKeyRanges, len(addOps))
 	toRemove := make(map[string]GroupKeyRanges, len(removeOps))
 	newAddedLabelRules := make(map[string]*labeler.LabelRule, len(addOps))

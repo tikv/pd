@@ -17,6 +17,7 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -26,9 +27,11 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
+	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -58,6 +61,80 @@ func (suite *affinityHandlerTestSuite) SetupSuite() {
 
 func (suite *affinityHandlerTestSuite) TearDownSuite() {
 	suite.env.Cleanup()
+}
+
+func (suite *affinityHandlerTestSuite) TestNextGenTiDBGroupIDs() {
+	suite.env.RunTest(func(cluster *tests.TestCluster) {
+		re := suite.Require()
+		leader := cluster.GetLeaderServer()
+		manager, err := leader.GetServer().GetAffinityManager()
+		re.NoError(err)
+		const modeFlag = "github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"
+		re.NoError(failpoint.Enable(modeFlag, "return(false)"))
+		legacy := []string{"_tidb_t_1001", "_tidb_pt_1001_p3"}
+		defer func() {
+			re.NoError(failpoint.Enable(modeFlag, "return(false)"))
+			re.NoError(manager.DeleteAffinityGroups(legacy, true))
+			re.NoError(failpoint.Disable(modeFlag))
+		}()
+		for _, id := range legacy {
+			re.NoError(manager.CreateAffinityGroups([]affinity.GroupKeyRanges{{GroupID: id}}))
+		}
+		re.NoError(failpoint.Enable(modeFlag, "return(true)"))
+		url := getAffinityGroupURL(leader.GetAddr())
+		for _, id := range legacy {
+			for _, req := range []struct{ method, path, body string }{
+				{http.MethodPost, "", fmt.Sprintf(`{"affinity_groups":{"%s":{}}}`, id)},
+				{http.MethodPost, "?skip_exist_check=true", fmt.Sprintf(`{"affinity_groups":{"%s":{}}}`, id)},
+				{http.MethodDelete, "/" + id, ""},
+				{http.MethodDelete, "/" + id + "?force=true", ""},
+				{http.MethodDelete, "/" + id + "_missing?force=true", ""},
+				{http.MethodPost, "?delete", fmt.Sprintf(`{"ids":["%s"],"force":true}`, id)},
+				{http.MethodPatch, "", fmt.Sprintf(`{"add":[{"id":"%s","ranges":[]}]}`, id)},
+				{http.MethodPatch, "", fmt.Sprintf(`{"remove":[{"id":"%s","ranges":[]}]}`, id)},
+				{http.MethodPut, "/" + id, `{"leader_store_id":1,"voter_store_ids":[1]}`},
+				{http.MethodGet, "/" + id, ""},
+				{http.MethodGet, "?ids=" + id, ""},
+			} {
+				httpReq, err := http.NewRequest(req.method, url+req.path, strings.NewReader(req.body))
+				re.NoError(err)
+				httpReq.Header.Set("Content-Type", "application/json")
+				resp, err := tests.TestDialClient.Do(httpReq)
+				re.NoError(err)
+				body, err := io.ReadAll(resp.Body)
+				re.NoError(err)
+				re.NoError(resp.Body.Close())
+				re.Equal(http.StatusBadRequest, resp.StatusCode, "%s %s: %s", req.method, req.path, body)
+				re.Contains(string(body), "pd-ctl --keyspace-id")
+				re.Len(manager.GetAllAffinityGroupStates(), len(legacy))
+				re.True(manager.IsGroupExist(id))
+			}
+		}
+		// The same table in two keyspaces can be created and managed independently.
+		status, message := doCreateAffinityGroups(re, leader.GetAddr(), &handlers.CreateAffinityGroupsRequest{
+			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
+				"_tidb_ks42_t_1001": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte("a"), EndKey: []byte("b")}}},
+			},
+		})
+		re.Equal(http.StatusBadRequest, status)
+		re.Contains(message, "key ranges must belong to transaction keyspace 42")
+		re.False(manager.IsGroupExist("_tidb_ks42_t_1001"))
+		for _, keyspaceID := range []uint32{42, 43} {
+			id := fmt.Sprintf("_tidb_ks%d_t_1001", keyspaceID)
+			prefix := codec.MakeKeyspacePrefix(codec.TxnKeyspaceModePrefix, keyspaceID)
+			kr := handlers.AffinityKeyRange{
+				StartKey: codec.EncodeBytes(append(prefix, codec.GenerateTableKey(1001)...)),
+				EndKey:   codec.EncodeBytes(append(prefix, codec.GenerateTableKey(1002)...)),
+			}
+			mustCreateAffinityGroups(re, leader.GetAddr(), &handlers.CreateAffinityGroupsRequest{
+				AffinityGroups: map[string]handlers.CreateAffinityGroupInput{id: {Ranges: []handlers.AffinityKeyRange{kr}}},
+			})
+			mustBatchModifyAffinityGroups(re, leader.GetAddr(), &handlers.BatchModifyAffinityGroupsRequest{
+				Remove: []handlers.GroupRangesModification{{ID: id, Ranges: []handlers.AffinityKeyRange{kr}}},
+			})
+			re.NoError(manager.DeleteAffinityGroups([]string{id}, true))
+		}
+	})
 }
 
 func (suite *affinityHandlerTestSuite) TearDownTest() {
