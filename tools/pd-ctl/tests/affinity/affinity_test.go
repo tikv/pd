@@ -27,7 +27,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	pdTests "github.com/tikv/pd/tests"
 	ctl "github.com/tikv/pd/tools/pd-ctl/pdctl"
-	"github.com/tikv/pd/tools/pd-ctl/pdctl/command"
 	"github.com/tikv/pd/tools/pd-ctl/tests"
 )
 
@@ -55,8 +54,8 @@ func TestAffinityCommands(t *testing.T) {
 	// Pre-create groups so CLI commands can operate on them.
 	const tableID = uint64(1001)
 	const partitionID = uint64(3)
-	tableGroup := command.FormatGroupID(tableID, 0)
-	partitionGroup := command.FormatGroupID(tableID, partitionID)
+	tableGroup := "_tidb_t_1001"
+	partitionGroup := "_tidb_pt_1001_p3"
 	re.NoError(manager.CreateAffinityGroups([]affinity.GroupKeyRanges{
 		{GroupID: tableGroup},
 		{GroupID: partitionGroup},

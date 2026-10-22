@@ -79,7 +79,7 @@ func newAffinityUpdatePeersCommand() *cobra.Command {
 
 func affinityShowCommandFunc(cmd *cobra.Command, _ []string) {
 	// Show all groups only when neither table-id nor keyspace-id is provided.
-	if !cmd.Flags().Changed("table-id") && !cmd.Flags().Changed("keyspace-id") {
+	if !cmd.Flags().Changed("table-id") && !cmd.Flags().Changed("partition-id") && !cmd.Flags().Changed("keyspace-id") {
 		groups, err := PDCli.GetAllAffinityGroups(cmd.Context())
 		if err != nil {
 			cmd.Printf("Failed to get affinity groups: %v\n", err)
