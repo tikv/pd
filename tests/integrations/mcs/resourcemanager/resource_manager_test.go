@@ -2189,7 +2189,11 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupCURDWithKeyspace()
 	re.Equal(server.DefaultResourceGroupName, rgs[0].Name)
 
 	// Get and List resource group with keyspace id
-	rg, err = clientKeyspace.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
+	// Standalone RM reads observe PD metadata writes asynchronously.
+	testutil.Eventually(re, func() bool {
+		rg, err = clientKeyspace.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
+		return err == nil && rg != nil
+	}, testutil.WithTickInterval(50*time.Millisecond))
 	re.NoError(err)
 	re.NotNil(rg)
 	rgs, err = clientKeyspace.ListResourceGroups(suite.ctx, pd.WithRUStats)
@@ -2213,7 +2217,10 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupCURDWithKeyspace()
 	resp, err = clientKeyspace.ModifyResourceGroup(suite.ctx, group)
 	re.NoError(err)
 	re.Contains(resp, "Success!")
-	rg, err = clientKeyspace.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
+	testutil.Eventually(re, func() bool {
+		rg, err = clientKeyspace.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
+		return err == nil && rg.GetRUSettings().GetRU().GetSettings().GetFillRate() == group.RUSettings.RU.Settings.FillRate
+	}, testutil.WithTickInterval(50*time.Millisecond))
 	re.NoError(err)
 	re.Equal(group.RUSettings.RU.Settings.FillRate, rg.RUSettings.RU.Settings.FillRate)
 
@@ -2266,8 +2273,12 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupCURDWithKeyspace()
 	resp, err = clientKeyspace.DeleteResourceGroup(suite.ctx, group.Name)
 	re.NoError(err)
 	re.Contains(resp, "Success!")
-	rg, err = clientKeyspace.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
-	re.EqualError(err, fmt.Sprintf("get resource group %v failed, rpc error: code = Unknown desc = [PD:resourcemanager:ErrGroupNotExists]the %v resource group does not exist", group.Name, group.Name))
+	expectedErr := fmt.Sprintf("get resource group %v failed, rpc error: code = Unknown desc = [PD:resourcemanager:ErrGroupNotExists]the %v resource group does not exist", group.Name, group.Name)
+	testutil.Eventually(re, func() bool {
+		rg, err = clientKeyspace.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
+		return err != nil && err.Error() == expectedErr
+	}, testutil.WithTickInterval(50*time.Millisecond))
+	re.EqualError(err, expectedErr)
 	re.Nil(rg)
 }
 
