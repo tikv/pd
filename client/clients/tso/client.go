@@ -351,10 +351,13 @@ func (c *Cli) tryConnectToTSO(ctx context.Context) error {
 		cc            *grpc.ClientConn
 	)
 
-	ticker := time.NewTicker(constants.RetryInterval)
-	defer ticker.Stop()
+	timer := time.NewTimer(constants.RetryInterval)
+	defer timer.Stop()
 	// Retry several times before falling back to the follower when the network problem happens
 	for range constants.MaxRetryTimes {
+		// The next attempt starts one interval after this one starts, or earlier if the leader
+		// switches, so a slow attempt does not add a full interval on top of itself.
+		timer.Reset(constants.RetryInterval)
 		c.svcDiscovery.ScheduleCheckMemberChanged()
 		leaderSwitched := c.leaderSwitched()
 		cc, url = c.getTSOLeaderClientConn()
@@ -397,9 +400,9 @@ func (c *Cli) tryConnectToTSO(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return err
-		case <-ticker.C:
+		case <-timer.C:
 		case <-leaderSwitched:
-			// Retry with the new leader without waiting for the next tick.
+			// Retry with the new leader without waiting for the interval.
 		}
 	}
 
