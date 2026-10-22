@@ -242,7 +242,7 @@ func TestSyncGroupFromEtcdUpdatesBalancePolicy(t *testing.T) {
 	before := manager.GetAffinityGroupState("policy")
 	re.Equal(PhaseStable, before.Phase)
 
-	input := &Group{ID: "policy", BalancePolicy: BalancePolicyFixed, LeaderStoreID: 1, VoterStoreIDs: []uint64{3, 1, 2}}
+	input := &Group{ID: "policy", CreateTimestamp: before.CreateTimestamp, BalancePolicy: BalancePolicyFixed, LeaderStoreID: 1, VoterStoreIDs: []uint64{3, 1, 2}}
 	manager.SyncGroupFromEtcd(input)
 	re.Equal(BalancePolicyFixed, manager.GetAffinityGroupState("policy").BalancePolicy)
 	re.Equal([]uint64{1, 2, 3}, manager.GetAffinityGroupState("policy").VoterStoreIDs)
