@@ -108,7 +108,7 @@ func NewClient(
 		svcDiscovery:            svcDiscovery,
 		tsoStreamBuilderFactory: factory,
 		leaderSwitchedCh:        make(chan struct{}),
-		conCtxMgr:               cctx.NewManager[*tsoStream](),
+		conCtxMgr:               newConnectionCtxManager(),
 		updateConCtxsCh:         make(chan struct{}, 1),
 		tsoReqPool: &sync.Pool{
 			New: func() any {
@@ -212,6 +212,13 @@ func (c *Cli) getTSOLeaderClientConn() (*grpc.ClientConn, string) {
 		return nil, url
 	}
 	return cc, url
+}
+
+// newConnectionCtxManager creates the manager of TSO streams. A stream replaced by another
+// one fails its pending requests with a retryable error, so that callers like GetTS retry
+// them on the new stream at once.
+func newConnectionCtxManager() *cctx.Manager[*tsoStream] {
+	return cctx.NewManagerWithReplaceHook((*tsoStream).markReplaced)
 }
 
 func (c *Cli) updateTSOLeaderURL(url string) error {
