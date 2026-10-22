@@ -893,6 +893,11 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 	resp, err := cli.AddResourceGroup(suite.ctx, rg)
 	re.NoError(err)
 	re.Contains(resp, "Success!")
+	// The standalone RM reads metadata asynchronously from the PD write path.
+	testutil.Eventually(re, func() bool {
+		group, err := cli.GetResourceGroup(suite.ctx, rg.Name)
+		return err == nil && group != nil
+	}, testutil.WithTickInterval(50*time.Millisecond))
 
 	cfg := &controller.RequestUnitConfig{
 		ReadBaseCost:     1,
@@ -909,6 +914,15 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 		err = rgsController.Stop()
 		re.NoError(err)
 	}()
+
+	// Exceed the local bootstrap budget to wait for a token refill before
+	// measuring steady-state waits. The first background sample may otherwise
+	// observe no demand and leave refilling until the timed batches exhaust it.
+	warmup := controller.NewTestRequestInfo(true, rg.RUSettings.RU.Settings.FillRate, 0, controller.AccessUnknown)
+	_, _, _, _, err = rgsController.OnRequestWait(suite.ctx, rg.Name, warmup)
+	re.NoError(err)
+	_, err = rgsController.OnResponse(rg.Name, warmup, controller.NewTestResponseInfo(0, 0, true))
+	re.NoError(err)
 
 	testCases := []struct {
 		resourceGroupName string
