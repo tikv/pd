@@ -121,6 +121,11 @@ func (m *Manager) initialize() error {
 				zap.Error(errs.ErrLoadRule.Wrap(err)))
 			return
 		}
+		if err := ValidateGroupID(group.ID); err != nil {
+			log.Warn("skipping invalid affinity group during initialization",
+				zap.String("group-id", group.ID), zap.Error(err))
+			return
+		}
 		m.initGroupLocked(group)
 	})
 	if err != nil {
@@ -462,6 +467,14 @@ func (m *Manager) GetAllAffinityGroupStates() []*GroupState {
 
 // SyncGroupFromEtcd synchronizes a group from etcd to the in-memory state.
 func (m *Manager) SyncGroupFromEtcd(group *Group) {
+	if group == nil {
+		return
+	}
+	if err := ValidateGroupID(group.ID); err != nil {
+		log.Warn("skipping invalid affinity group during etcd sync",
+			zap.String("group-id", group.ID), zap.Error(err))
+		return
+	}
 	m.metaMutex.Lock()
 	defer m.metaMutex.Unlock()
 
@@ -558,6 +571,11 @@ func (m *Manager) SyncGroupDeleteFromEtcd(groupID string) {
 func (m *Manager) SyncKeyRangesFromEtcd(labelRule *labeler.LabelRule) error {
 	groupID, isAffinity := parseAffinityGroupIDFromLabelRule(labelRule)
 	if !isAffinity {
+		return nil
+	}
+	if err := ValidateGroupID(groupID); err != nil {
+		log.Warn("skipping invalid affinity key range during etcd sync",
+			zap.String("group-id", groupID), zap.Error(err))
 		return nil
 	}
 

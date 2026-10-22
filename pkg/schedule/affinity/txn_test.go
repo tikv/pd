@@ -130,6 +130,67 @@ func TestNextGenTiDBGroupOperations(t *testing.T) {
 	}
 }
 
+func TestNextGenSkipsLegacyGroupsDuringLoadAndSync(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	store := storage.NewStorageWithMemoryBackend()
+	storeInfos := core.NewStoresInfo()
+	storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: 1}))
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	re.NoError(err)
+
+	const modeFlag = "github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"
+	t.Cleanup(func() { re.NoError(failpoint.Disable(modeFlag)) })
+	re.NoError(failpoint.Enable(modeFlag, "return(false)"))
+	classicManager, err := NewManager(ctx, store, storeInfos, mockconfig.NewTestOptions(), regionLabeler)
+	re.NoError(err)
+	re.NoError(classicManager.CreateAffinityGroups([]GroupKeyRanges{
+		{GroupID: "_tidb_t_1001", KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("b")}}},
+		{GroupID: "_tidb_pt_1001_p3", KeyRanges: []keyutil.KeyRange{{StartKey: []byte("c"), EndKey: []byte("d")}}},
+		{GroupID: "_tidb_ks42_t_1001"},
+	}))
+	re.Len(classicManager.GetAllAffinityGroupStates(), 3)
+	before := make(map[string]string)
+	re.NoError(store.LoadAllAffinityGroups(func(k, v string) { before[k] = v }))
+
+	re.NoError(failpoint.Enable(modeFlag, "return(true)"))
+	nextGenManager, err := NewManager(ctx, store, storeInfos, mockconfig.NewTestOptions(), regionLabeler)
+	re.NoError(err)
+	re.False(nextGenManager.IsGroupExist("_tidb_t_1001"))
+	re.False(nextGenManager.IsGroupExist("_tidb_pt_1001_p3"))
+	re.True(nextGenManager.IsGroupExist("_tidb_ks42_t_1001"))
+	re.Len(nextGenManager.GetAllAffinityGroupStates(), 1)
+	re.Empty(nextGenManager.keyRanges, "legacy groups' ranges must not be loaded")
+
+	for _, id := range []string{"_tidb_t_1001", "_tidb_pt_1001_p3", "_tidb_ks042_t_1001"} {
+		nextGenManager.SyncGroupFromEtcd(&Group{ID: id})
+		re.False(nextGenManager.IsGroupExist(id))
+		re.NoError(nextGenManager.SyncKeyRangesFromEtcd(MakeLabelRule(GroupKeyRanges{
+			GroupID:   id,
+			KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("b")}},
+		})))
+		re.NotContains(nextGenManager.labelRuleBuffer, id)
+	}
+
+	// Valid keyspace-aware labels may arrive before their groups and must still attach.
+	lower := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, 44)
+	upper := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, 45)
+	validRanges := GroupKeyRanges{GroupID: "_tidb_ks44_t_1001", KeyRanges: []keyutil.KeyRange{{StartKey: lower[:], EndKey: upper[:]}}}
+	data, err := json.Marshal(MakeLabelRule(validRanges))
+	re.NoError(err)
+	rule, err := labeler.NewLabelRuleFromJSON(data)
+	re.NoError(err)
+	re.NoError(nextGenManager.SyncKeyRangesFromEtcd(rule))
+	re.Contains(nextGenManager.labelRuleBuffer, validRanges.GroupID)
+	nextGenManager.SyncGroupFromEtcd(&Group{ID: validRanges.GroupID})
+	re.Equal(validRanges, nextGenManager.keyRanges[validRanges.GroupID])
+	re.Equal(1, nextGenManager.GetAffinityGroupState(validRanges.GroupID).RangeCount)
+
+	after := make(map[string]string)
+	re.NoError(store.LoadAllAffinityGroups(func(k, v string) { after[k] = v }))
+	re.Equal(before, after, "skipping invalid groups must not delete persistent metadata")
+}
+
 func TestKeyRangeOverlapValidation(t *testing.T) {
 	re := require.New(t)
 	ctx := t.Context()
