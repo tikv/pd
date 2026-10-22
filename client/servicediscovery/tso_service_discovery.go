@@ -362,8 +362,8 @@ func (c *tsoServiceDiscovery) CheckMemberChanged() error {
 	return nil
 }
 
-// updateMemberWithBackoff retries updateMember until it succeeds or the total backoff
-// reaches maxRetryTimes*maxInterval. The interval starts from UpdateMemberBackOffBaseTime
+// updateMemberWithBackoff calls updateMember until it succeeds, at most maxRetryTimes
+// times however long each call takes. The interval starts from UpdateMemberBackOffBaseTime
 // and doubles up to maxInterval: during a planned primary transfer, the old primary rejects
 // requests before the new primary is elected, so the first query often misses the new
 // primary, which becomes ready tens of milliseconds later.
@@ -372,10 +372,19 @@ func (c *tsoServiceDiscovery) CheckMemberChanged() error {
 // 80ms, 160ms, 320ms and then 500ms each, so the retries start about 20ms, 60ms, 140ms,
 // 300ms and 620ms after the first attempt, plus the time each attempt takes.
 func (c *tsoServiceDiscovery) updateMemberWithBackoff(maxInterval time.Duration, maxRetryTimes int) error {
-	// A zero total means retrying forever, so always keep a finite budget.
-	total := time.Duration(max(maxRetryTimes, 1)) * maxInterval
-	bo := retry.InitialBackoffer(UpdateMemberBackOffBaseTime, maxInterval, total)
-	return bo.Exec(c.ctx, c.updateMember)
+	return execWithBackoff(c.ctx, maxInterval, maxRetryTimes, c.updateMember)
+}
+
+// execWithBackoff calls fn until it succeeds, at most maxRetryTimes times. It bounds the
+// calls instead of the total backoff, which does not count the time each call takes.
+func execWithBackoff(ctx context.Context, maxInterval time.Duration, maxRetryTimes int, fn func() error) error {
+	bo := retry.InitialBackoffer(UpdateMemberBackOffBaseTime, maxInterval, 0)
+	attempts := 0
+	bo.SetRetryableChecker(func(error) bool { return attempts < maxRetryTimes }, true)
+	return bo.Exec(ctx, func() error {
+		attempts++
+		return fn()
+	})
 }
 
 // ExecAndAddLeaderSwitchedCallback executes the callback once and adds it to the callback list then.
