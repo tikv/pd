@@ -261,7 +261,8 @@ func TestShutdownFlushesAcceptedConsumption(t *testing.T) {
 					continue
 				}
 				for _, record := range data.Data {
-					re.Equal("", record[metering.DataClusterIDField])
+					re.IsType("", record[metering.DataClusterIDField])
+					re.Empty(record[metering.DataClusterIDField])
 					ru := record["oltp_ru"].(map[string]any)
 					re.Equal(metering.UnitRU, ru["unit"])
 					totalRU += ru["value"].(float64)
