@@ -72,18 +72,16 @@ func (suite *storeTestSuite) TestStoresList() {
 func (suite *storeTestSuite) checkStoresList(cluster *tests.TestCluster) {
 	re := suite.Require()
 
-	stores := initStores()
-	for _, store := range stores {
-		tests.MustPutStore(re, cluster, store)
-	}
-
-	// Prevent store 6 (offline store) from being auto-tombstoned
-
-	// Enable failpoint to prevent auto-burying stores during the test
+	// Prevent the background checker from burying offline fixtures before assertions.
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/doNotBuryStore", "return(true)"))
 	defer func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/doNotBuryStore"))
 	}()
+
+	stores := initStores()
+	for _, store := range stores {
+		tests.MustPutStore(re, cluster, store)
+	}
 
 	leader := cluster.GetLeaderServer()
 	urlPrefix := leader.GetAddr() + "/pd/api/v1"
