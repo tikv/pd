@@ -126,10 +126,12 @@ func (suite *storeTestSuite) checkStoresList(cluster *tests.TestCluster) {
 	checkStoresInfo(re, info.Stores, stores[2:])
 
 	// down store
+	// Use a serving store so background preparation cannot change the fixture.
 	store := &metapb.Store{
 		Id:            100,
 		Address:       "mock://tikv-100:100",
 		State:         metapb.StoreState_Up,
+		NodeState:     metapb.NodeState_Serving,
 		Version:       versioninfo.MinSupportedVersion(versioninfo.Version2_0).String(),
 		LastHeartbeat: time.Now().UnixNano() - int64(1*time.Hour),
 	}
