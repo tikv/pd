@@ -414,32 +414,46 @@ func TestGetTSAfterTSOPrimaryChanged(t *testing.T) {
 
 	// Measure the longest gap between two successful GetTS calls across the primary change.
 	checkMaxGap := func(changePrimary func()) {
-		var maxGap time.Duration
-		stop := make(chan struct{})
+		roundCtx, roundCancel := context.WithCancel(ctx)
+		var (
+			maxGap      time.Duration
+			lastSuccess time.Time
+		)
+		started := make(chan struct{})
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
-			lastSuccess := time.Now()
-			for {
-				select {
-				case <-stop:
-					return
-				default:
+			for roundCtx.Err() == nil {
+				if _, _, err := client.GetTS(roundCtx); err != nil {
+					continue
 				}
-				if _, _, err := client.GetTS(ctx); err == nil {
-					now := time.Now()
+				now := time.Now()
+				if lastSuccess.IsZero() {
+					close(started)
+				} else {
 					maxGap = max(maxGap, now.Sub(lastSuccess))
-					lastSuccess = now
 				}
+				lastSuccess = now
 			}
 		}()
-		time.Sleep(100 * time.Millisecond)
+		defer func() {
+			roundCancel()
+			<-done
+		}()
+		select {
+		case <-started:
+		case <-time.After(10 * time.Second):
+			re.FailNow("GetTS does not succeed before the primary change")
+		}
+		changedAt := time.Now()
 		changePrimary()
 		tc.WaitForDefaultPrimaryServing(re)
 		time.Sleep(time.Second)
-		close(stop)
+		roundCancel()
 		<-done
-		re.Less(maxGap, 400*time.Millisecond)
+		// A client that never succeeds again after the change leaves the gap open until now.
+		re.True(lastSuccess.After(changedAt))
+		re.Less(max(maxGap, time.Since(lastSuccess)), 400*time.Millisecond)
 	}
 	for range 3 {
 		checkMaxGap(func() {
