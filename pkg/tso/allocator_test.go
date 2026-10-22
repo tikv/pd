@@ -24,6 +24,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/pingcap/failpoint"
+
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -156,4 +158,46 @@ func TestAllocatorIgnoresStaleUpdateFailure(t *testing.T) {
 	testutil.Eventually(re, func() bool { return isSignaled(currentFailure) })
 	testutil.Eventually(re, func() bool { return isSignaled(member.resigned) })
 	re.False(allocator.IsInitialize())
+}
+
+// TestClosingAllocatorReturnsNotLeader checks that a closing allocator, which resets its timestamp
+// before it resigns, fails the requests with the leader-change error, whether it starts to close
+// before or while a request generates the TSO.
+func TestClosingAllocatorReturnsNotLeader(t *testing.T) {
+	re := require.New(t)
+	newAllocator := func() (*Allocator, *staleUpdateElection) {
+		member := &staleUpdateElection{resigned: make(chan struct{})}
+		member.serving.Store(true)
+		allocator := NewAllocator(context.Background(), 1, member, &staleUpdateStorage{}, &TestServiceConfig{
+			TSOUpdatePhysicalInterval: time.Millisecond,
+			TSOSaveInterval:           2 * time.Millisecond,
+			MaxResetTSGap:             time.Hour,
+		})
+		re.NoError(allocator.Initialize())
+		_, err := allocator.GenerateTSO(context.Background(), 1)
+		re.NoError(err)
+		return allocator, member
+	}
+
+	// Closed before the request: the timestamp is reset while the member is still the primary.
+	allocator, _ := newAllocator()
+	allocator.Close()
+	re.False(allocator.IsInitialize())
+	start := time.Now()
+	_, err := allocator.GenerateTSO(context.Background(), 1)
+	re.ErrorContains(err, "not leader")
+	// It fails at once instead of waiting for the timestamp to be initialized again.
+	re.Less(time.Since(start), 200*time.Millisecond)
+
+	// Closed and resigned after the serving check of the request.
+	allocator, member := newAllocator()
+	defer allocator.Close()
+	fp := "github.com/tikv/pd/pkg/tso/afterGenerateTSOServingCheck"
+	re.NoError(failpoint.EnableCall(fp, func() {
+		allocator.Close()
+		member.Resign()
+	}))
+	defer func() { re.NoError(failpoint.Disable(fp)) }()
+	_, err = allocator.GenerateTSO(context.Background(), 1)
+	re.ErrorContains(err, "not leader")
 }
