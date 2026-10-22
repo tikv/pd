@@ -367,6 +367,10 @@ func (c *tsoServiceDiscovery) CheckMemberChanged() error {
 // and doubles up to maxInterval: during a planned primary transfer, the old primary rejects
 // requests before the new primary is elected, so the first query often misses the new
 // primary, which becomes ready tens of milliseconds later.
+//
+// For example, with a maxInterval of 500ms, the waits between attempts are 20ms, 40ms,
+// 80ms, 160ms, 320ms and then 500ms each, so the retries start about 20ms, 60ms, 140ms,
+// 300ms and 620ms after the first attempt, plus the time each attempt takes.
 func (c *tsoServiceDiscovery) updateMemberWithBackoff(maxInterval time.Duration, maxRetryTimes int) error {
 	// A zero total means retrying forever, so always keep a finite budget.
 	total := time.Duration(max(maxRetryTimes, 1)) * maxInterval
