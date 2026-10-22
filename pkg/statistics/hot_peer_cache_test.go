@@ -642,8 +642,7 @@ func TestRemoveFromCache(t *testing.T) {
 // from all stores, with reverse indexes kept consistent.
 func TestGcClearsColdItemsOfRemovedRegion(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster := core.NewBasicCluster()
 	cache := NewHotPeerCache(ctx, cluster, utils.Read)
 	region, err := buildRegion(cluster, utils.Read, 3, uint64(utils.StoreHeartBeatReportInterval))
@@ -691,8 +690,7 @@ func TestGcClearsColdItemsOfRemovedRegion(t *testing.T) {
 // was removed from the cluster.
 func TestGcClearsOrphanedColdItemsOfRemovedStore(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster := core.NewBasicCluster()
 	cache := NewHotPeerCache(ctx, cluster, utils.Read)
 	const storeID, regionID uint64 = 1001, 2001
@@ -736,8 +734,7 @@ func TestGcClearsOrphanedColdItemsOfRemovedStore(t *testing.T) {
 // in the cluster's region table must never be evicted by gc().
 func TestGcKeepsColdItemsOfLiveRegion(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster := core.NewBasicCluster()
 	cache := NewHotPeerCache(ctx, cluster, utils.Read)
 	region, err := buildRegion(cluster, utils.Read, 3, uint64(utils.StoreHeartBeatReportInterval))
@@ -777,8 +774,7 @@ func TestGcKeepsColdItemsOfLiveRegion(t *testing.T) {
 // queued and are reclaimed after stores are removed and added.
 func TestGcColdSweepWithStoreChurn(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster := core.NewBasicCluster()
 	cache := NewHotPeerCache(ctx, cluster, utils.Read)
 
@@ -885,8 +881,7 @@ func TestGcColdSweepWithStoreChurn(t *testing.T) {
 // must not make gc() copy or scan that store's entire TopN heap.
 func TestGcColdSweepUsesBoundedIndex(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster := core.NewBasicCluster()
 	cache := NewHotPeerCache(ctx, cluster, utils.Read)
 
@@ -1261,8 +1256,7 @@ func TestRemoveExpireItems(t *testing.T) {
 
 func TestRemoveExpiredPeerPreservesOtherStores(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster := core.NewBasicCluster()
 	cache := NewHotPeerCache(ctx, cluster, utils.Read)
 	cache.topNTTL = time.Hour
