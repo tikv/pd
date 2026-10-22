@@ -18,6 +18,7 @@ PATH := $(GO_TOOLS_BIN_PATH):$(PATH)
 SHELL := env PATH='$(PATH)' GOBIN='$(GO_TOOLS_BIN_PATH)' $(shell which bash)
 # Resolve auto toolchain once so recursive go commands don't mix tool versions in CI.
 GO_EFFECTIVE_TOOLCHAIN := $(shell GOTOOLCHAIN=auto go env GOVERSION)
+PACKAGES = $(shell GOTOOLCHAIN=$(GO_EFFECTIVE_TOOLCHAIN) go list ./... | grep -v pd-ctl/helper)
 
 install-tools:
 	cd $(ROOT_PATH) && $(MAKE) install-tools
@@ -27,6 +28,8 @@ static: install-tools
 	@ gofmt -s -l -d . 2>&1 | awk '{ print } END { if (NR > 0) { exit 1 } }'
 	@ echo "golangci-lint ..."
 	@ GOTOOLCHAIN=$(GO_EFFECTIVE_TOOLCHAIN) golangci-lint run -c $(ROOT_PATH)/.golangci.yml --verbose ./... --allow-parallel-runners
+	@ echo "modernize ..."
+	@ GOTOOLCHAIN=$(GO_EFFECTIVE_TOOLCHAIN) go run golang.org/x/tools/gopls/internal/analysis/modernize/cmd/modernize@v0.18.1 -test $(PACKAGES)
 
 tidy:
 	@ GOTOOLCHAIN=$(GO_EFFECTIVE_TOOLCHAIN) go mod tidy

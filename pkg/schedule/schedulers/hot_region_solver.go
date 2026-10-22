@@ -419,7 +419,7 @@ func (bs *balanceSolver) tryAddPendingInfluence() bool {
 	// revert peers
 	if bs.best.revertPeerStat != nil && len(bs.ops) > 1 {
 		infl := bs.collectPendingInfluence(bs.best.revertPeerStat)
-		if !bs.sche.tryAddPendingInfluence(bs.ops[1], srcStoreIDs, dstStoreID, infl, maxZombieDur) {
+		if !bs.sche.tryAddPendingInfluence(bs.ops[1], []uint64{dstStoreID}, bs.best.srcStore.GetID(), infl, maxZombieDur) {
 			return false
 		}
 	}
@@ -1570,6 +1570,9 @@ func (bs *balanceSolver) createOperator(region *core.RegionInfo, srcStoreID, dst
 				srcStoreID,
 				dstPeer)
 		}
+	}
+	if op != nil {
+		op.SetStoreHealthCheck(true)
 	}
 	return
 }

@@ -15,7 +15,6 @@
 package cluster
 
 import (
-	"context"
 	"fmt"
 	"sort"
 	"testing"
@@ -37,8 +36,7 @@ import (
 
 func TestCollectStorageSize(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -116,8 +114,7 @@ func TestCollectStorageSize(t *testing.T) {
 // Manager.cache until it is fully removed via RemoveKeyspace.
 func TestCollectStorageSizeExcludesNonEnabledKeyspace(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)

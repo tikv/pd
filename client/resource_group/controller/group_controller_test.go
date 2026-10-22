@@ -1083,8 +1083,7 @@ func TestHandleTokenBucketUpdateEventCanceledByInitCounterNotify(t *testing.T) {
 	counter.notify.mu.Unlock()
 	defer initCounterNotify(counter)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	done := make(chan struct{})
 	go func() {
 		gc.handleTokenBucketUpdateEvent(ctx)
@@ -1115,8 +1114,7 @@ func TestHandleTokenBucketUpdateEventCleansNotifyOnTimer(t *testing.T) {
 	counter.notify.mu.Unlock()
 	defer initCounterNotify(counter)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	done := make(chan struct{})
 	go func() {
 		gc.handleTokenBucketUpdateEvent(ctx)

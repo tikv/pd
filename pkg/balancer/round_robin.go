@@ -15,6 +15,7 @@
 package balancer
 
 import (
+	"slices"
 	"sync/atomic"
 
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -53,7 +54,7 @@ func (r *RoundRobin[T]) GetAll() []T {
 	r.RLock()
 	defer r.RUnlock()
 	// return a copy to avoid data race
-	return append(r.nodes[:0:0], r.nodes...)
+	return slices.Clone(r.nodes)
 }
 
 // Put puts one into balancer.
@@ -73,7 +74,7 @@ func (r *RoundRobin[T]) Delete(node T) {
 	if _, ok := r.exists[node]; ok {
 		for i, n := range r.nodes {
 			if n == node {
-				r.nodes = append(r.nodes[:i], r.nodes[i+1:]...)
+				r.nodes = slices.Delete(r.nodes, i, i+1)
 				delete(r.exists, node)
 				break
 			}

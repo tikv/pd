@@ -17,6 +17,7 @@ package statistics
 import (
 	"context"
 	"math/rand/v2"
+	"slices"
 	"sort"
 	"sync"
 	"testing"
@@ -88,8 +89,7 @@ func TestCache(t *testing.T) {
 
 func TestCheckPeerFlowWithMoreExplicitPeersThanRegionPeers(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster := core.NewBasicCluster()
 	cache := NewHotPeerCache(ctx, cluster, utils.Write)
 	region, err := buildRegion(cluster, utils.Write, 3, 60)
@@ -100,7 +100,7 @@ func TestCheckPeerFlowWithMoreExplicitPeersThanRegionPeers(t *testing.T) {
 	storeID, _, err := getIDAllocator().Alloc(1)
 	re.NoError(err)
 	re.Nil(region.GetStorePeer(storeID))
-	peers := append([]*metapb.Peer{}, region.GetPeers()...)
+	peers := slices.Clone(region.GetPeers())
 	peers = append(peers, &metapb.Peer{Id: peerID, StoreId: storeID})
 	stats := cache.CheckPeerFlow(region, peers, region.GetLoads(), 60)
 	re.Len(stats, len(peers))
@@ -413,8 +413,7 @@ func buildRegion(cluster *core.BasicCluster, kind utils.RWType, peerCount int, i
 
 func TestUpdateHotPeerStat(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster := core.NewBasicCluster()
 	cache := NewHotPeerCache(ctx, cluster, utils.Read)
 	storeID, regionID := uint64(1), uint64(2)
@@ -507,8 +506,7 @@ func TestUpdateHotPeerStat(t *testing.T) {
 
 func TestThresholdWithUpdateHotPeerStat(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	byteRate := utils.MinHotThresholds[utils.RegionReadBytes] * 2
 	expectThreshold := byteRate * HotThresholdRatio
 	testMetrics(ctx, re, 120., byteRate, expectThreshold)
@@ -604,8 +602,7 @@ func testMetrics(ctx context.Context, re *require.Assertions, interval, byteRate
 
 func TestRemoveFromCache(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	peerCount := 3
 	interval := uint64(5)
 	checkers := []check{checkAndUpdate, checkAndUpdateWithOrdering}
@@ -706,8 +703,7 @@ func checkCoolDown(re *require.Assertions, cache *HotPeerCache, region *core.Reg
 func TestCoolDownTransferLeader(t *testing.T) {
 	re := require.New(t)
 	cluster := core.NewBasicCluster()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cache := NewHotPeerCache(ctx, cluster, utils.Read)
 	region, err := buildRegion(cluster, utils.Read, 3, 60)
 	re.NoError(err)
@@ -759,8 +755,7 @@ func TestCoolDownTransferLeader(t *testing.T) {
 // See issue #4510
 func TestCacheInherit(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster := core.NewBasicCluster()
 	cache := NewHotPeerCache(ctx, cluster, utils.Read)
 	region, err := buildRegion(cluster, utils.Read, 3, 10)
@@ -852,8 +847,7 @@ func TestUnstableData(t *testing.T) {
 // Previously, there was a mixed use of dim and kind, which caused inconsistencies in write-related statistics.
 func TestHotPeerCacheTopNThreshold(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	testWithUpdateInterval := func(interval time.Duration) {
 		ThresholdsUpdateInterval = interval
 		cluster := core.NewBasicCluster()
@@ -901,8 +895,7 @@ func TestHotPeerCacheTopNThreshold(t *testing.T) {
 
 func TestRemoveExpireItems(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster := core.NewBasicCluster()
 	cache := NewHotPeerCache(ctx, cluster, utils.Write)
 	cache.topNTTL = 100 * time.Millisecond
@@ -943,10 +936,66 @@ func TestRemoveExpireItems(t *testing.T) {
 	re.Zero(hotCacheStatusGauge.DeletePartialMatch(prometheus.Labels{"store": storeTag(store2ID), "type": cache.kind.String()}))
 }
 
-func TestDifferentReportInterval(t *testing.T) {
+func TestRemoveExpiredPeerPreservesOtherStores(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	cluster := core.NewBasicCluster()
+	cache := NewHotPeerCache(ctx, cluster, utils.Read)
+	cache.topNTTL = time.Hour
+	interval := uint64(utils.Read.ReportInterval())
+	region, err := buildRegion(cluster, utils.Read, 3, interval)
+	re.NoError(err)
+	regionID := region.GetID()
+	expiredStoreID := region.GetPeers()[0].GetStoreId()
+	// Different TTLs make only the first peer expire without relying on sleeps.
+	cache.peersOfStore[expiredStoreID] = utils.NewTopN(utils.DimLen, TopNN, -time.Second)
+	stats := cache.CheckPeerFlow(region, region.GetPeers(), region.GetLoads(), interval)
+	re.Len(stats, 3)
+	for _, stat := range stats {
+		cache.putItem(stat)
+		re.Same(stat, cache.getHotPeerStat(regionID, stat.StoreID))
+		re.Contains(cache.storesOfRegion[regionID], stat.StoreID)
+		re.Contains(cache.regionsOfStore[stat.StoreID], regionID)
+	}
+
+	cache.gc()
+	re.Contains(cache.peersOfStore, expiredStoreID)
+	re.Nil(cache.getHotPeerStat(regionID, expiredStoreID))
+	re.NotContains(cache.storesOfRegion[regionID], expiredStoreID)
+	re.NotContains(cache.regionsOfStore[expiredStoreID], regionID)
+	re.Len(cache.storesOfRegion[regionID], 2)
+	for _, stat := range stats[1:] {
+		re.Same(stat, cache.getHotPeerStat(regionID, stat.StoreID))
+		re.Contains(cache.storesOfRegion[regionID], stat.StoreID)
+		re.Contains(cache.regionsOfStore[stat.StoreID], regionID)
+	}
+
+	// A surviving peer omitted from the next store heartbeat must still cool down.
+	storeID := stats[1].StoreID
+	cold := cache.CheckColdPeer(storeID, map[uint64]*core.RegionInfo{}, interval)
+	re.Len(cold, 1)
+	re.Equal(regionID, cold[0].RegionID)
+	re.Equal(storeID, cold[0].StoreID)
+	re.True(cold[0].inCold)
+	re.Equal(stats[1].AntiCount-1, cold[0].AntiCount)
+	cache.UpdateStat(cold[0])
+	re.True(cache.getHotPeerStat(regionID, storeID).inCold)
+
+	// Region peer removal must also find the surviving peer through the reverse index.
+	removed := cache.CollectExpiredItems(region.Clone(core.WithRemoveStorePeer(storeID)))
+	re.Len(removed, 1)
+	re.Equal(storeID, removed[0].StoreID)
+	re.Equal(utils.Remove, removed[0].actionType)
+	cache.UpdateStat(removed[0])
+	re.Nil(cache.getHotPeerStat(regionID, storeID))
+	re.NotContains(cache.storesOfRegion[regionID], storeID)
+	re.NotContains(cache.regionsOfStore[storeID], regionID)
+}
+
+func TestDifferentReportInterval(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
 	cluster := core.NewBasicCluster()
 	cache := NewHotPeerCache(ctx, cluster, utils.Write)
 	region, err := buildRegion(cluster, utils.Write, 3, 5)
@@ -968,8 +1017,8 @@ func BenchmarkCheckRegionFlow(b *testing.B) {
 	cache := NewHotPeerCache(context.Background(), cluster, utils.Read)
 	region, err := buildRegion(cluster, utils.Read, 3, 10)
 	re.NoError(err)
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		stats := cache.CheckPeerFlow(region, region.GetPeers(), region.GetLoads(), 10)
 		for _, stat := range stats {
 			cache.UpdateStat(stat)

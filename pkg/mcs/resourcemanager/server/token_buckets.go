@@ -15,6 +15,7 @@
 package server
 
 import (
+	"maps"
 	"math"
 	"time"
 
@@ -75,7 +76,7 @@ type GroupTokenBucket struct {
 	// Settings is the setting of TokenBucket.
 	// MaxTokens limits the number of tokens that can be accumulated
 	Settings              *rmpb.TokenLimitSettings `json:"settings,omitempty"`
-	GroupTokenBucketState `json:"state,omitempty"`
+	GroupTokenBucketState `json:"state"`
 }
 
 func (gtb *GroupTokenBucket) getFillRate() float64 {
@@ -201,9 +202,7 @@ func (gts *GroupTokenBucketState) clone() *GroupTokenBucketState {
 	var tokenSlots map[uint64]*tokenSlot
 	if gts.tokenSlots != nil {
 		tokenSlots = make(map[uint64]*tokenSlot)
-		for id, tokens := range gts.tokenSlots {
-			tokenSlots[id] = tokens
-		}
+		maps.Copy(tokenSlots, gts.tokenSlots)
 	}
 
 	var lastUpdate *time.Time
@@ -577,6 +576,14 @@ func (gtb *GroupTokenBucket) request(
 		)
 	}
 	res, trickleDuration := slot.assignSlotTokens(requiredToken, targetPeriodMs)
+	// When the effective group fill rate is unlimited, there is no group rate to
+	// smooth a loan against. Without this, a slot that holds no tokens (new or in
+	// debt) gets the whole target period as trickle, which holds the client to
+	// grant/period. The Service Limit, when set, still applies its own minimum
+	// trickle in RequestRU.
+	if res.Tokens > 0 && gtb.getFillRate() >= UnlimitedRate {
+		trickleDuration = 0
+	}
 	// Inspect the group token bucket and the assigned token result to catch any anomalies.
 	if isAnomaly := gtb.inspectAnomalies(res, slot, []zap.Field{
 		zap.Time("now", now),

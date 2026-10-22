@@ -76,8 +76,7 @@ const (
 
 func TestBootstrap(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -117,8 +116,7 @@ func TestBootstrap(t *testing.T) {
 
 func TestDamagedRegion(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -202,8 +200,7 @@ func TestRegionStatistics(t *testing.T) {
 	defer func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
 	}()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestCluster(ctx, 3)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -297,8 +294,7 @@ func TestRegionStatistics(t *testing.T) {
 
 func TestStaleRegion(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -345,8 +341,7 @@ func TestStaleRegion(t *testing.T) {
 // Ref https://github.com/tikv/pd/issues/9221
 func TestConcurrencyGetPutConfig(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -394,8 +389,7 @@ func TestConcurrencyGetPutConfig(t *testing.T) {
 
 func TestGetPutConfig(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -644,8 +638,7 @@ func testRemoveStore(re *require.Assertions, clusterID uint64, rc *cluster.RaftC
 // Make sure PD will not panic if it start and stop again and again.
 func TestRaftClusterRestart(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -675,8 +668,7 @@ func TestRaftClusterRestart(t *testing.T) {
 // Make sure PD will not deadlock if it start and stop again and again.
 func TestRaftClusterMultipleRestart(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
 		conf.LeaderLease = 300
 	})
@@ -823,8 +815,7 @@ func newMetaStore(storeID uint64, addr, version string, state metapb.StoreState,
 
 func TestGetPDMembers(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -847,8 +838,7 @@ func TestGetPDMembers(t *testing.T) {
 
 func TestNotLeader(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestCluster(ctx, 2)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -869,8 +859,7 @@ func TestNotLeader(t *testing.T) {
 
 func TestStoreVersionChange(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -913,8 +902,7 @@ func TestStoreVersionChange(t *testing.T) {
 
 func TestConcurrentHandleRegion(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	dashboard.SetCheckInterval(30 * time.Minute)
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
@@ -1010,8 +998,8 @@ func TestConcurrentHandleRegion(t *testing.T) {
 		re.NoError(err)
 		region := &metapb.Region{
 			Id:       regionID,
-			StartKey: []byte(fmt.Sprintf("%5d", i)),
-			EndKey:   []byte(fmt.Sprintf("%5d", i+1)),
+			StartKey: fmt.Appendf(nil, "%5d", i),
+			EndKey:   fmt.Appendf(nil, "%5d", i+1),
 			Peers:    []*metapb.Peer{{Id: peerID, StoreId: stores[0].GetId()}},
 			RegionEpoch: &metapb.RegionEpoch{
 				ConfVer: initEpochConfVer,
@@ -1038,8 +1026,7 @@ func TestConcurrentHandleRegion(t *testing.T) {
 
 func TestSetScheduleOpt(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -1110,8 +1097,7 @@ func TestSetScheduleOpt(t *testing.T) {
 
 func TestLoadClusterInfo(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -1151,8 +1137,8 @@ func TestLoadClusterInfo(t *testing.T) {
 	for i := range uint64(n) {
 		region := &metapb.Region{
 			Id:          i,
-			StartKey:    []byte(fmt.Sprintf("%20d", i)),
-			EndKey:      []byte(fmt.Sprintf("%20d", i+1)),
+			StartKey:    fmt.Appendf(nil, "%20d", i),
+			EndKey:      fmt.Appendf(nil, "%20d", i+1),
 			RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1},
 		}
 		regions = append(regions, region)
@@ -1187,8 +1173,8 @@ func TestLoadClusterInfo(t *testing.T) {
 	for i := range uint64(m) {
 		region := &metapb.Region{
 			Id:          i,
-			StartKey:    []byte(fmt.Sprintf("%20d", i)),
-			EndKey:      []byte(fmt.Sprintf("%20d", i+1)),
+			StartKey:    fmt.Appendf(nil, "%20d", i),
+			EndKey:      fmt.Appendf(nil, "%20d", i+1),
 			RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1},
 		}
 		regions = append(regions, region)
@@ -1203,8 +1189,7 @@ func TestLoadClusterInfo(t *testing.T) {
 
 func TestTiFlashWithPlacementRules(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestCluster(ctx, 1, func(cfg *config.Config, _ string) { cfg.Replication.EnablePlacementRules = false })
 	defer tc.Destroy()
 	re.NoError(err)
@@ -1254,8 +1239,7 @@ func TestTiFlashWithPlacementRules(t *testing.T) {
 
 func TestReplicationModeStatus(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
 		conf.ReplicationMode.ReplicationMode = "dr-auto-sync"
 	})
@@ -1357,8 +1341,7 @@ func getClusterConfig(re *require.Assertions, clusterID uint64, grpcPDClient pdp
 
 func TestOfflineStoreLimit(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	dashboard.SetCheckInterval(30 * time.Minute)
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
@@ -1453,8 +1436,7 @@ func TestOfflineStoreLimit(t *testing.T) {
 
 func TestUpgradeStoreLimit(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	dashboard.SetCheckInterval(30 * time.Minute)
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
@@ -1512,8 +1494,7 @@ func TestUpgradeStoreLimit(t *testing.T) {
 
 func TestStaleTermHeartbeat(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	dashboard.SetCheckInterval(30 * time.Minute)
 	tc, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
@@ -1600,8 +1581,7 @@ func TestStaleTermHeartbeat(t *testing.T) {
 
 func TestTransferLeaderForScheduler(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))
 	defer func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
@@ -1784,8 +1764,7 @@ func setMinResolvedTSPersistenceInterval(re *require.Assertions, rc *cluster.Raf
 
 func TestMinResolvedTS(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster.DefaultMinResolvedTSPersistenceInterval = time.Millisecond
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
@@ -1899,8 +1878,7 @@ func TestTransferLeaderBack(t *testing.T) {
 	defer func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
 	}()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestCluster(ctx, 2)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -1966,8 +1944,7 @@ func TestTransferLeaderBack(t *testing.T) {
 
 func TestExternalTimestamp(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -2079,8 +2056,7 @@ func TestExternalTimestamp(t *testing.T) {
 
 func TestPatrolRegionConfigChange(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -2141,8 +2117,7 @@ func checkLog(re *require.Assertions, fname, expect string) {
 
 func TestFollowerExitSyncTime(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -2184,8 +2159,7 @@ func TestFollowerExitSyncTime(t *testing.T) {
 
 func TestPutStoreInvalidEngineLabel(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
 	defer tc.Destroy()

@@ -17,6 +17,7 @@ package keyspace
 import (
 	"context"
 	"fmt"
+	"maps"
 	"math"
 	"strconv"
 	"sync"
@@ -1441,9 +1442,7 @@ func checkCreateByIDRequest(re *require.Assertions, request *CreateKeyspaceByIDR
 func checkMutations(re *require.Assertions, oldConfig, newConfig map[string]string, mutations []*Mutation) {
 	// Copy oldConfig to expected to avoid modifying its content.
 	expected := map[string]string{}
-	for k, v := range oldConfig {
-		expected[k] = v
-	}
+	maps.Copy(expected, oldConfig)
 	for _, mutation := range mutations {
 		switch mutation.Op {
 		case OpPut:
@@ -1709,8 +1708,8 @@ func benchmarkPatrolKeyspaceAssignmentN(
 		re.NoError(err)
 	}
 	// Benchmark the keyspace assignment patrol.
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		err := suite.manager.PatrolKeyspaceAssignment(0, 0)
 		re.NoError(err)
 	}
@@ -1875,8 +1874,7 @@ func TestUpdateKeyspaceStateDoesNotUpdateCacheBeforeCommit(t *testing.T) {
 // failing, while a present group is still assigned normally.
 func TestAssignGroupAndSaveKeyspace(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	kgm := NewKeyspaceGroupManager(ctx, store, nil)
 

@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"slices"
 	"sync/atomic"
 	"time"
 
@@ -437,12 +438,7 @@ func (f *HotPeerCache) findOldHotPeerStatForInheritance(region *hotRegionInfo) (
 
 func (f *HotPeerCache) isOldColdPeer(oldItem *HotPeerStat, storeID uint64) bool {
 	isOldPeer := func() bool {
-		for _, id := range oldItem.stores {
-			if id == storeID {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(oldItem.stores, storeID)
 	}
 	isInHotCache := func() bool {
 		if ids, ok := f.storesOfRegion[oldItem.RegionID]; ok {
@@ -671,13 +667,16 @@ func (f *HotPeerCache) gc() {
 		hotCacheStatusGauge.DeletePartialMatch(prometheus.Labels{"store": storeTag(storeID), "type": f.kind.String()})
 	}
 	// remove expired items
-	for _, peers := range f.peersOfStore {
+	for storeID, peers := range f.peersOfStore {
 		regions := peers.RemoveExpired()
 		for _, regionID := range regions {
-			delete(f.storesOfRegion, regionID)
-			for storeID := range f.regionsOfStore {
-				delete(f.regionsOfStore[storeID], regionID)
+			if stores, ok := f.storesOfRegion[regionID]; ok {
+				delete(stores, storeID)
+				if len(stores) == 0 {
+					delete(f.storesOfRegion, regionID)
+				}
 			}
+			delete(f.regionsOfStore[storeID], regionID)
 		}
 	}
 }

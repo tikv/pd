@@ -118,7 +118,7 @@ type RegionInfo struct {
 	RegionEpoch *metapb.RegionEpoch `json:"epoch,omitempty"`
 	Peers       []MetaPeer          `json:"peers,omitempty"`
 
-	Leader                    MetaPeer      `json:"leader,omitempty"`
+	Leader                    MetaPeer      `json:"leader"`
 	DownPeers                 []PDPeerStats `json:"down_peers,omitempty"`
 	PendingPeers              []MetaPeer    `json:"pending_peers,omitempty"`
 	CPUUsage                  uint64        `json:"cpu_usage"`

@@ -15,9 +15,8 @@
 package core
 
 import (
+	"slices"
 	"sync"
-
-	"github.com/tikv/pd/pkg/slice"
 )
 
 // GetStoreTopoWeight calculates the topology weight of a store based on its labels and the labels of other stores.
@@ -33,7 +32,7 @@ func GetStoreTopoWeight(store *StoreInfo, stores []*StoreInfo, locationLabels []
 	for _, label := range locationLabels {
 		value := getStoreLabelValue(store.GetMeta(), label)
 		if _, ok := topo[value]; ok {
-			if slice.Contains(validLabels, label) {
+			if slices.Contains(validLabels, label) {
 				weight /= float64(len(topo))
 			}
 			topo = topo[value].(map[string]any)

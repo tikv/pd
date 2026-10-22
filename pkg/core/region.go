@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -1386,7 +1387,7 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo, withOverlaps bool, ol 
 				}
 			}
 			if idx >= 0 {
-				ol = append(ol[:idx], ol[idx+1:]...)
+				ol = slices.Delete(ol, idx, idx+1)
 			}
 			r.tree.remove(origin)
 			// Update the RegionInfo in the regionItem.

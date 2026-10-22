@@ -23,7 +23,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -885,9 +885,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 	if oldGroup != nil {
 		oldKeyspaces = oldGroup.Keyspaces
 		// Keep the existing keyspaces sorted to simplify diff calculation
-		sort.Slice(oldKeyspaces, func(i, j int) bool {
-			return oldKeyspaces[i] < oldKeyspaces[j]
-		})
+		slices.Sort(oldKeyspaces)
 		oldKeyspaceLookupTable = oldGroup.KeyspaceLookupTable
 	}
 
@@ -896,9 +894,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 	oldLen, newLen := len(oldKeyspaces), len(newKeyspaces)
 
 	// Sort the keyspaces in ascending order
-	sort.Slice(newKeyspaces, func(i, j int) bool {
-		return newKeyspaces[i] < newKeyspaces[j]
-	})
+	slices.Sort(newKeyspaces)
 
 	// Mostly, the membership has no change, so optimize for this case.
 	sameMembership := true
@@ -1303,7 +1299,7 @@ func (kgm *KeyspaceGroupManager) sendDeleteRequestToKeyspaceGroupsAPI(suffix str
 	var lastErr error
 	var lastResp *http.Response
 	var lastParseErr error
-	for _, endpoint := range strings.Split(kgm.cfg.GetBackendEndpoints(), ",") {
+	for endpoint := range strings.SplitSeq(kgm.cfg.GetBackendEndpoints(), ",") {
 		endpoint = strings.TrimSpace(endpoint)
 		if endpoint == "" {
 			continue
