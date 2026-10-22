@@ -150,17 +150,15 @@ func (s *requestSourceMetricsState) cleanup() {
 	if s == nil {
 		return
 	}
-	failpoint.InjectCall("beforeRequestSourceMetricsCleanupLock")
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	metricSet := metrics.Current()
 	s.closed = true
 	// This cleanup assumes there is only one active ResourceGroupsController in the process.
 	// RequestSourceRUCounter is process-global, while this state is controller-local; with
 	// multiple controllers, deleting a shared label set here would stop the other controllers'
 	// cached counters from being exported.
 	for key := range s.items {
-		metricSet.RequestSourceRUCounter.DeleteLabelValues(
+		metrics.RequestSourceRUCounter.DeleteLabelValues(
 			s.resourceGroupName,
 			key.requestSource,
 			key.ruType,
@@ -171,28 +169,27 @@ func (s *requestSourceMetricsState) cleanup() {
 }
 
 func initMetrics(oldName, name string, sourceState *requestSourceMetricsState) *groupMetricsCollection {
-	metricSet := metrics.Current()
 	const (
 		otherType     = "others"
 		throttledType = "throttled"
 	)
 	return &groupMetricsCollection{
-		successfulRequestDuration:         metricSet.SuccessfulRequestDuration.WithLabelValues(oldName, name),
-		failedLimitReserveDuration:        metricSet.FailedLimitReserveDuration.WithLabelValues(oldName, name),
-		failedRequestCounterWithOthers:    metricSet.FailedRequestCounter.WithLabelValues(oldName, name, otherType),
-		failedRequestCounterWithThrottled: metricSet.FailedRequestCounter.WithLabelValues(oldName, name, throttledType),
-		requestRetryCounter:               metricSet.RequestRetryCounter.WithLabelValues(oldName, name),
-		tokenRequestCounter:               metricSet.ResourceGroupTokenRequestCounter.WithLabelValues(oldName, name),
-		runningKVRequestCounter:           metricSet.GroupRunningKVRequestCounter.WithLabelValues(name),
-		consumeTokenHistogram:             metricSet.TokenConsumedHistogram.WithLabelValues(name),
+		successfulRequestDuration:         metrics.SuccessfulRequestDuration.WithLabelValues(oldName, name),
+		failedLimitReserveDuration:        metrics.FailedLimitReserveDuration.WithLabelValues(oldName, name),
+		failedRequestCounterWithOthers:    metrics.FailedRequestCounter.WithLabelValues(oldName, name, otherType),
+		failedRequestCounterWithThrottled: metrics.FailedRequestCounter.WithLabelValues(oldName, name, throttledType),
+		requestRetryCounter:               metrics.RequestRetryCounter.WithLabelValues(oldName, name),
+		tokenRequestCounter:               metrics.ResourceGroupTokenRequestCounter.WithLabelValues(oldName, name),
+		runningKVRequestCounter:           metrics.GroupRunningKVRequestCounter.WithLabelValues(name),
+		consumeTokenHistogram:             metrics.TokenConsumedHistogram.WithLabelValues(name),
 		sourceState:                       sourceState,
 
-		prechargeCounter:        metricSet.CopReadPrechargeCounter.WithLabelValues(name),
-		prechargeBytesCounter:   metricSet.PagingPrechargeBytesCounter.WithLabelValues(name),
-		actualBytesCounter:      metricSet.PagingActualBytesCounter.WithLabelValues(name),
-		predictionResidualBytes: metricSet.PagingPredictionResidualBytes.WithLabelValues(name),
+		prechargeCounter:        metrics.CopReadPrechargeCounter.WithLabelValues(name),
+		prechargeBytesCounter:   metrics.PagingPrechargeBytesCounter.WithLabelValues(name),
+		actualBytesCounter:      metrics.PagingActualBytesCounter.WithLabelValues(name),
+		predictionResidualBytes: metrics.PagingPredictionResidualBytes.WithLabelValues(name),
 
-		noPrechargeCounter: metricSet.CopReadNoPrechargeCounter.WithLabelValues(name),
+		noPrechargeCounter: metrics.CopReadNoPrechargeCounter.WithLabelValues(name),
 	}
 }
 
@@ -220,7 +217,7 @@ func (mc *groupMetricsCollection) getOrCreateRequestSourceMetric(key requestSour
 	if ok {
 		return metric
 	}
-	metric = metrics.Current().RequestSourceRUCounter.WithLabelValues(
+	metric = metrics.RequestSourceRUCounter.WithLabelValues(
 		mc.sourceState.resourceGroupName,
 		key.requestSource,
 		key.ruType,
@@ -263,12 +260,11 @@ func (mc *groupMetricsCollection) addRequestSourceRUValue(requestSource, ruType 
 // sync with initMetrics — adding a paging metric there must be paired
 // with a deletion here.
 func (*groupMetricsCollection) deletePagingLabels(name string) {
-	metricSet := metrics.Current()
-	metricSet.CopReadPrechargeCounter.DeleteLabelValues(name)
-	metricSet.CopReadNoPrechargeCounter.DeleteLabelValues(name)
-	metricSet.PagingPrechargeBytesCounter.DeleteLabelValues(name)
-	metricSet.PagingActualBytesCounter.DeleteLabelValues(name)
-	metricSet.PagingPredictionResidualBytes.DeleteLabelValues(name)
+	metrics.CopReadPrechargeCounter.DeleteLabelValues(name)
+	metrics.CopReadNoPrechargeCounter.DeleteLabelValues(name)
+	metrics.PagingPrechargeBytesCounter.DeleteLabelValues(name)
+	metrics.PagingActualBytesCounter.DeleteLabelValues(name)
+	metrics.PagingPredictionResidualBytes.DeleteLabelValues(name)
 }
 
 // observePagingRequest records request-boundary cop read pre-charge counters.

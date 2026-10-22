@@ -400,7 +400,7 @@ func (c *Cli) tryConnectToTSO(ctx context.Context) error {
 				}
 				// the goroutine is used to check the network and change back to the original stream
 				go c.checkLeader(ctx, cancel, forwardedHostTrim, addr, url)
-				metrics.Current().RequestForwarded.WithLabelValues(forwardedHostTrim, addr).Set(1)
+				metrics.RequestForwarded.WithLabelValues(forwardedHostTrim, addr).Set(1)
 				return nil
 			}
 			cancel()
@@ -417,7 +417,7 @@ func (c *Cli) checkLeader(
 	defer func() {
 		// cancel the forward stream
 		forwardCancel()
-		metrics.Current().RequestForwarded.WithLabelValues(forwardedHostTrim, addr).Set(0)
+		metrics.RequestForwarded.WithLabelValues(forwardedHostTrim, addr).Set(0)
 	}()
 	cc, u := c.getTSOLeaderClientConn()
 	var healthCli healthpb.HealthClient
@@ -499,7 +499,7 @@ func (c *Cli) tryConnectToTSOWithProxy(ctx context.Context) error {
 			if addr != leaderAddr {
 				forwardedHostTrim := tlsutil.TrimHTTPPrefix(forwardedHost)
 				addrTrim := tlsutil.TrimHTTPPrefix(addr)
-				metrics.Current().RequestForwarded.WithLabelValues(forwardedHostTrim, addrTrim).Set(1)
+				metrics.RequestForwarded.WithLabelValues(forwardedHostTrim, addrTrim).Set(1)
 			}
 			if !c.conCtxMgr.Store(cctx, cancel, addr, stream) {
 				log.Info("[tso] already exists tso stream", zap.String("addr", addr))

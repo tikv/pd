@@ -34,13 +34,12 @@ import (
 // updateGCSafePointV2 update gc safe point for the given keyspace.
 // Only used for handling `UpdateGCSafePoint` in keyspace context, which is a deprecated usage.
 func (c *client) updateGCSafePointV2(ctx context.Context, keyspaceID uint32, safePoint uint64) (uint64, error) {
-	metricSet := metrics.Current()
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.UpdateGCSafePointV2", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { metricSet.CmdDurationUpdateGCSafePointV2.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationUpdateGCSafePointV2.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	//nolint:staticcheck
@@ -57,7 +56,7 @@ func (c *client) updateGCSafePointV2(ctx context.Context, keyspaceID uint32, saf
 	resp, err := protoClient.UpdateGCSafePointV2(ctx, req) //nolint:staticcheck
 	cancel()
 
-	if err = c.respForErr(metricSet.CmdFailedDurationUpdateGCSafePointV2, start, err, resp.GetHeader()); err != nil {
+	if err = c.respForErr(metrics.CmdFailedDurationUpdateGCSafePointV2, start, err, resp.GetHeader()); err != nil {
 		return 0, err
 	}
 	return resp.GetNewSafePoint(), nil
@@ -66,13 +65,12 @@ func (c *client) updateGCSafePointV2(ctx context.Context, keyspaceID uint32, saf
 // updateServiceSafePointV2 update service safe point for the given keyspace.
 // Only used for handling `UpdateServiceGCSafePoint` in keyspace context, which is a deprecated usage.
 func (c *client) updateServiceSafePointV2(ctx context.Context, keyspaceID uint32, serviceID string, ttl int64, safePoint uint64) (uint64, error) {
-	metricSet := metrics.Current()
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.UpdateServiceSafePointV2", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { metricSet.CmdDurationUpdateServiceSafePointV2.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationUpdateServiceSafePointV2.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	//nolint:staticcheck
@@ -90,7 +88,7 @@ func (c *client) updateServiceSafePointV2(ctx context.Context, keyspaceID uint32
 	}
 	resp, err := protoClient.UpdateServiceSafePointV2(ctx, req) //nolint:staticcheck
 	cancel()
-	if err = c.respForErr(metricSet.CmdFailedDurationUpdateServiceSafePointV2, start, err, resp.GetHeader()); err != nil {
+	if err = c.respForErr(metrics.CmdFailedDurationUpdateServiceSafePointV2, start, err, resp.GetHeader()); err != nil {
 		return 0, err
 	}
 	return resp.GetMinSafePoint(), nil
@@ -117,13 +115,12 @@ func wrapKeyspaceScope(keyspaceID uint32) *pdpb.KeyspaceScope {
 
 // AdvanceTxnSafePoint tries to advance the transaction safe point to the target value.
 func (c gcInternalController) AdvanceTxnSafePoint(ctx context.Context, target uint64) (gc.AdvanceTxnSafePointResult, error) {
-	metricSet := metrics.Current()
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.AdvanceTxnSafePoint", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { metricSet.CmdDurationAdvanceTxnSafePoint.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationAdvanceTxnSafePoint.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, c.client.inner.option.Timeout)
 	defer cancel()
@@ -137,7 +134,7 @@ func (c gcInternalController) AdvanceTxnSafePoint(ctx context.Context, target ui
 		return gc.AdvanceTxnSafePointResult{}, errs.ErrClientGetProtoClient
 	}
 	resp, err := protoClient.AdvanceTxnSafePoint(ctx, req)
-	if err = c.client.respForErr(metricSet.CmdFailedDurationAdvanceTxnSafePoint, start, err, resp.GetHeader()); err != nil {
+	if err = c.client.respForErr(metrics.CmdFailedDurationAdvanceTxnSafePoint, start, err, resp.GetHeader()); err != nil {
 		return gc.AdvanceTxnSafePointResult{}, err
 	}
 	return gc.AdvanceTxnSafePointResult{
@@ -150,13 +147,12 @@ func (c gcInternalController) AdvanceTxnSafePoint(ctx context.Context, target ui
 
 // AdvanceGCSafePoint tries to advance the GC safe point to the target value.
 func (c gcInternalController) AdvanceGCSafePoint(ctx context.Context, target uint64) (gc.AdvanceGCSafePointResult, error) {
-	metricSet := metrics.Current()
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.AdvanceGCSafePoint", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { metricSet.CmdDurationAdvanceGCSafePoint.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationAdvanceGCSafePoint.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, c.client.inner.option.Timeout)
 	defer cancel()
@@ -170,7 +166,7 @@ func (c gcInternalController) AdvanceGCSafePoint(ctx context.Context, target uin
 		return gc.AdvanceGCSafePointResult{}, errs.ErrClientGetProtoClient
 	}
 	resp, err := protoClient.AdvanceGCSafePoint(ctx, req)
-	if err = c.client.respForErr(metricSet.CmdFailedDurationAdvanceGCSafePoint, start, err, resp.GetHeader()); err != nil {
+	if err = c.client.respForErr(metrics.CmdFailedDurationAdvanceGCSafePoint, start, err, resp.GetHeader()); err != nil {
 		return gc.AdvanceGCSafePointResult{}, err
 	}
 	return gc.AdvanceGCSafePointResult{
@@ -245,13 +241,12 @@ func pbToGlobalGCBarrierInfo(pb *pdpb.GlobalGCBarrierInfo, reqStartTime time.Tim
 
 // SetGCBarrier sets (creates or updates) a GC barrier.
 func (c gcStatesClient) SetGCBarrier(ctx context.Context, barrierID string, barrierTS uint64, ttl time.Duration) (*gc.GCBarrierInfo, error) {
-	metricSet := metrics.Current()
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.SetGCBarrier", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { metricSet.CmdDurationSetGCBarrier.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationSetGCBarrier.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, c.client.inner.option.Timeout)
 	defer cancel()
@@ -267,7 +262,7 @@ func (c gcStatesClient) SetGCBarrier(ctx context.Context, barrierID string, barr
 		return nil, errs.ErrClientGetProtoClient
 	}
 	resp, err := protoClient.SetGCBarrier(ctx, req)
-	if err = c.client.respForErr(metricSet.CmdFailedDurationSetGCBarrier, start, err, resp.GetHeader()); err != nil {
+	if err = c.client.respForErr(metrics.CmdFailedDurationSetGCBarrier, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
 	return pbToGCBarrierInfo(resp.GetNewBarrierInfo(), start), nil
@@ -275,13 +270,12 @@ func (c gcStatesClient) SetGCBarrier(ctx context.Context, barrierID string, barr
 
 // DeleteGCBarrier deletes a GC barrier.
 func (c gcStatesClient) DeleteGCBarrier(ctx context.Context, barrierID string) (*gc.GCBarrierInfo, error) {
-	metricSet := metrics.Current()
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.DeleteGCBarrier", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { metricSet.CmdDurationDeleteGCBarrier.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationDeleteGCBarrier.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, c.client.inner.option.Timeout)
 	defer cancel()
@@ -295,7 +289,7 @@ func (c gcStatesClient) DeleteGCBarrier(ctx context.Context, barrierID string) (
 		return nil, errs.ErrClientGetProtoClient
 	}
 	resp, err := protoClient.DeleteGCBarrier(ctx, req)
-	if err = c.client.respForErr(metricSet.CmdFailedDurationDeleteGCBarrier, start, err, resp.GetHeader()); err != nil {
+	if err = c.client.respForErr(metrics.CmdFailedDurationDeleteGCBarrier, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
 	return pbToGCBarrierInfo(resp.GetDeletedBarrierInfo(), start), nil
@@ -303,13 +297,12 @@ func (c gcStatesClient) DeleteGCBarrier(ctx context.Context, barrierID string) (
 
 // GetGCState gets the current GC state.
 func (c gcStatesClient) GetGCState(ctx context.Context, opts ...gc.GCStatesAPIOption) (gc.GCState, error) {
-	metricSet := metrics.Current()
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.GetGCState", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { metricSet.CmdDurationGetGCState.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationGetGCState.Observe(time.Since(start).Seconds()) }()
 
 	options := gc.DefaultGCStatesAPIOptions()
 	for _, opt := range opts {
@@ -329,7 +322,7 @@ func (c gcStatesClient) GetGCState(ctx context.Context, opts ...gc.GCStatesAPIOp
 		return gc.GCState{}, errs.ErrClientGetProtoClient
 	}
 	resp, err := protoClient.GetGCState(ctx, req)
-	if err = c.client.respForErr(metricSet.CmdFailedDurationGetGCState, start, err, resp.GetHeader()); err != nil {
+	if err = c.client.respForErr(metrics.CmdFailedDurationGetGCState, start, err, resp.GetHeader()); err != nil {
 		return gc.GCState{}, err
 	}
 
@@ -380,13 +373,12 @@ func pbToGCStateWithGlobalGCBarriers(
 
 // SetGlobalGCBarrier sets (creates or updates) a global GC barrier.
 func (c gcStatesClient) SetGlobalGCBarrier(ctx context.Context, barrierID string, barrierTS uint64, ttl time.Duration) (*gc.GlobalGCBarrierInfo, error) {
-	metricSet := metrics.Current()
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.SetGlobalGCBarrier", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { metricSet.CmdDurationSetGlobalGCBarrier.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationSetGlobalGCBarrier.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, c.client.inner.option.Timeout)
 	defer cancel()
@@ -401,7 +393,7 @@ func (c gcStatesClient) SetGlobalGCBarrier(ctx context.Context, barrierID string
 		return nil, errs.ErrClientGetProtoClient
 	}
 	resp, err := protoClient.SetGlobalGCBarrier(ctx, req)
-	if err = c.client.respForErr(metricSet.CmdFailedDurationSetGlobalGCBarrier, start, err, resp.GetHeader()); err != nil {
+	if err = c.client.respForErr(metrics.CmdFailedDurationSetGlobalGCBarrier, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
 	return pbToGlobalGCBarrierInfo(resp.GetNewBarrierInfo(), start), nil
@@ -409,13 +401,12 @@ func (c gcStatesClient) SetGlobalGCBarrier(ctx context.Context, barrierID string
 
 // DeleteGlobalGCBarrier deletes a GC barrier.
 func (c gcStatesClient) DeleteGlobalGCBarrier(ctx context.Context, barrierID string) (*gc.GlobalGCBarrierInfo, error) {
-	metricSet := metrics.Current()
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.DeleteGlobalGCBarrier", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { metricSet.CmdDurationDeleteGlobalGCBarrier.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationDeleteGlobalGCBarrier.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, c.client.inner.option.Timeout)
 	defer cancel()
@@ -428,7 +419,7 @@ func (c gcStatesClient) DeleteGlobalGCBarrier(ctx context.Context, barrierID str
 		return nil, errs.ErrClientGetProtoClient
 	}
 	resp, err := protoClient.DeleteGlobalGCBarrier(ctx, req)
-	if err = c.client.respForErr(metricSet.CmdFailedDurationDeleteGlobalGCBarrier, start, err, resp.GetHeader()); err != nil {
+	if err = c.client.respForErr(metrics.CmdFailedDurationDeleteGlobalGCBarrier, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
 	return pbToGlobalGCBarrierInfo(resp.GetDeletedBarrierInfo(), start), nil
@@ -436,13 +427,12 @@ func (c gcStatesClient) DeleteGlobalGCBarrier(ctx context.Context, barrierID str
 
 // GetAllKeyspacesGCStates gets the GC states from all keyspaces.
 func (c gcStatesClient) GetAllKeyspacesGCStates(ctx context.Context, opts ...gc.GCStatesAPIOption) (gc.ClusterGCStates, error) {
-	metricSet := metrics.Current()
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.GetAllKeyspacesGCState", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { metricSet.CmdDurationGetAllKeyspacesGCStates.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationGetAllKeyspacesGCStates.Observe(time.Since(start).Seconds()) }()
 
 	options := gc.DefaultGCStatesAPIOptions()
 	for _, opt := range opts {
@@ -462,7 +452,7 @@ func (c gcStatesClient) GetAllKeyspacesGCStates(ctx context.Context, opts ...gc.
 	}
 
 	resp, err := protoClient.GetAllKeyspacesGCStates(ctx, req)
-	if err = c.client.respForErr(metricSet.CmdFailedDurationGetAllKeyspacesGCStates, start, err, resp.GetHeader()); err != nil {
+	if err = c.client.respForErr(metrics.CmdFailedDurationGetAllKeyspacesGCStates, start, err, resp.GetHeader()); err != nil {
 		return gc.ClusterGCStates{}, err
 	}
 

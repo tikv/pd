@@ -507,9 +507,8 @@ func (c *client) UpdateOption(option opt.DynamicOption, value any) error {
 
 // GetAllMembers gets the members Info from PD.
 func (c *client) GetAllMembers(ctx context.Context) (*pdpb.GetMembersResponse, error) {
-	metricSet := metrics.Current()
 	start := time.Now()
-	defer func() { metricSet.CmdDurationGetAllMembers.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationGetAllMembers.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	defer cancel()
@@ -519,7 +518,7 @@ func (c *client) GetAllMembers(ctx context.Context) (*pdpb.GetMembersResponse, e
 		return nil, errs.ErrClientGetProtoClient
 	}
 	resp, err := protoClient.GetMembers(ctx, req)
-	if err = c.respForErr(metricSet.CmdFailedDurationGetAllMembers, start, err, resp.GetHeader()); err != nil {
+	if err = c.respForErr(metrics.CmdFailedDurationGetAllMembers, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
 	return resp, nil
@@ -610,7 +609,7 @@ func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err 
 			}
 		}
 	})
-	metrics.Current().TSORetryCount.Observe(float64(retryCount))
+	metrics.TSORetryCount.Observe(float64(retryCount))
 	return physical, logical, err
 }
 
@@ -680,13 +679,12 @@ func (c *client) getRouterClient() *router.Cli {
 
 // GetRegionFromMember implements the RPCClient interface.
 func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs []string, _ ...opt.GetRegionOption) (*router.Region, error) {
-	metricSet := metrics.Current()
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.GetRegionFromMember", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { metricSet.CmdDurationGetRegion.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationGetRegion.Observe(time.Since(start).Seconds()) }()
 
 	var resp *pdpb.GetRegionResponse
 	for _, url := range memberURLs {
@@ -710,7 +708,7 @@ func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs
 	}
 
 	if resp == nil {
-		metricSet.CmdFailedDurationGetRegion.Observe(time.Since(start).Seconds())
+		metrics.CmdFailedDurationGetRegion.Observe(time.Since(start).Seconds())
 		c.inner.serviceDiscovery.ScheduleCheckMemberChanged()
 		errorMsg := fmt.Sprintf("[pd] can't get region info from member URLs: %+v", memberURLs)
 		return nil, errors.WithStack(errors.New(errorMsg))
@@ -720,13 +718,12 @@ func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs
 
 // GetRegion implements the RPCClient interface.
 func (c *client) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegionOption) (*router.Region, error) {
-	metricSet := metrics.Current()
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.GetRegion", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { metricSet.CmdDurationGetRegion.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationGetRegion.Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	defer cancel()
 
@@ -765,7 +762,7 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegio
 		resp, err = protoClient.GetRegion(cctx, req)
 	}
 
-	if err = c.respForErr(metricSet.CmdFailedDurationGetRegion, start, err, resp.GetHeader()); err != nil {
+	if err = c.respForErr(metrics.CmdFailedDurationGetRegion, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
 	return router.ConvertToRegion(resp), nil
@@ -773,13 +770,12 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegio
 
 // GetPrevRegion implements the RPCClient interface.
 func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...opt.GetRegionOption) (*router.Region, error) {
-	metricSet := metrics.Current()
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.GetPrevRegion", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { metricSet.CmdDurationGetPrevRegion.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationGetPrevRegion.Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	defer cancel()
 
@@ -817,7 +813,7 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...opt.GetR
 		resp, err = protoClient.GetPrevRegion(cctx, req)
 	}
 
-	if err = c.respForErr(metricSet.CmdFailedDurationGetPrevRegion, start, err, resp.GetHeader()); err != nil {
+	if err = c.respForErr(metrics.CmdFailedDurationGetPrevRegion, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
 	return router.ConvertToRegion(resp), nil
@@ -825,13 +821,12 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...opt.GetR
 
 // GetRegionByID implements the RPCClient interface.
 func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...opt.GetRegionOption) (*router.Region, error) {
-	metricSet := metrics.Current()
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.GetRegionByID", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { metricSet.CmdDurationGetRegionByID.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationGetRegionByID.Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	defer cancel()
 
@@ -871,7 +866,7 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...opt
 		resp, err = protoClient.GetRegionByID(cctx, req)
 	}
 
-	if err = c.respForErr(metricSet.CmdFailedDurationGetRegionByID, start, err, resp.GetHeader()); err != nil {
+	if err = c.respForErr(metrics.CmdFailedDurationGetRegionByID, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
 	return router.ConvertToRegion(resp), nil
@@ -879,13 +874,12 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...opt
 
 // ScanRegions implements the RPCClient interface.
 func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int, opts ...opt.GetRegionOption) ([]*router.Region, error) {
-	metricSet := metrics.Current()
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.ScanRegions", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { metricSet.CmdDurationScanRegions.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationScanRegions.Observe(time.Since(start).Seconds()) }()
 
 	var cancel context.CancelFunc
 	scanCtx := ctx
@@ -926,7 +920,7 @@ func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int,
 		resp, err = protoClient.ScanRegions(cctx, req)
 	}
 
-	if err = c.respForErr(metricSet.CmdFailedDurationScanRegions, start, err, resp.GetHeader()); err != nil {
+	if err = c.respForErr(metrics.CmdFailedDurationScanRegions, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
 
@@ -935,13 +929,12 @@ func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int,
 
 // BatchScanRegions implements the RPCClient interface.
 func (c *client) BatchScanRegions(ctx context.Context, ranges []router.KeyRange, limit int, opts ...opt.GetRegionOption) ([]*router.Region, error) {
-	metricSet := metrics.Current()
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.BatchScanRegions", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { metricSet.CmdDurationBatchScanRegions.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationBatchScanRegions.Observe(time.Since(start).Seconds()) }()
 
 	var cancel context.CancelFunc
 	scanCtx := ctx
@@ -990,7 +983,7 @@ func (c *client) BatchScanRegions(ctx context.Context, ranges []router.KeyRange,
 		resp, err = protoClient.BatchScanRegions(cctx, req)
 	}
 
-	if err = c.respForErr(metricSet.CmdFailedDurationBatchScanRegions, start, err, resp.GetHeader()); err != nil {
+	if err = c.respForErr(metrics.CmdFailedDurationBatchScanRegions, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
 
@@ -1045,13 +1038,12 @@ func handleRegionsResponse(resp *pdpb.ScanRegionsResponse) []*router.Region {
 
 // GetStore implements the RPCClient interface.
 func (c *client) GetStore(ctx context.Context, storeID uint64, opts ...opt.GetStoreOption) (*metapb.Store, error) {
-	metricSet := metrics.Current()
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.GetStore", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { metricSet.CmdDurationGetStore.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationGetStore.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	defer cancel()
@@ -1087,7 +1079,7 @@ func (c *client) GetStore(ctx context.Context, storeID uint64, opts ...opt.GetSt
 		resp, err = protoClient.GetStore(cctx, req)
 	}
 
-	if err = c.respForErr(metricSet.CmdFailedDurationGetStore, start, err, resp.GetHeader()); err != nil {
+	if err = c.respForErr(metrics.CmdFailedDurationGetStore, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
 	return handleStoreResponse(resp)
@@ -1106,13 +1098,12 @@ func handleStoreResponse(resp *pdpb.GetStoreResponse) (*metapb.Store, error) {
 
 // GetAllStores implements the RPCClient interface.
 func (c *client) GetAllStores(ctx context.Context, opts ...opt.GetStoreOption) ([]*metapb.Store, error) {
-	metricSet := metrics.Current()
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.GetAllStores", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { metricSet.CmdDurationGetAllStores.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationGetAllStores.Observe(time.Since(start).Seconds()) }()
 	// Applies option
 	option := &opt.GetStoreOp{}
 	for _, opt := range opts {
@@ -1141,7 +1132,7 @@ func (c *client) GetAllStores(ctx context.Context, opts ...opt.GetStoreOption) (
 		resp, err = pdpb.NewPDClient(serviceClient.GetClientConn()).GetAllStores(cctx, req)
 	}
 
-	if err = c.respForErr(metricSet.CmdFailedDurationGetAllStores, start, err, resp.GetHeader()); err != nil {
+	if err = c.respForErr(metrics.CmdFailedDurationGetAllStores, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
 	return resp.GetStores(), nil
@@ -1153,7 +1144,6 @@ func (c *client) GetAllStores(ctx context.Context, opts ...opt.GetStoreOption) (
 // GCWorker of TiDB or any component that is responsible for managing and driving GC. For callers that want to
 // read the current GC safe point, consider using GetGCStates instead.
 func (c *client) UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint64, error) {
-	metricSet := metrics.Current()
 	if c.inner.keyspaceID != constants.NullKeyspaceID {
 		return c.updateGCSafePointV2(ctx, c.inner.keyspaceID, safePoint)
 	}
@@ -1163,7 +1153,7 @@ func (c *client) UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint6
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { metricSet.CmdDurationUpdateGCSafePoint.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationUpdateGCSafePoint.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	defer cancel()
@@ -1177,7 +1167,7 @@ func (c *client) UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint6
 	}
 	resp, err := protoClient.UpdateGCSafePoint(ctx, req)
 
-	if err = c.respForErr(metricSet.CmdFailedDurationUpdateGCSafePoint, start, err, resp.GetHeader()); err != nil {
+	if err = c.respForErr(metrics.CmdFailedDurationUpdateGCSafePoint, start, err, resp.GetHeader()); err != nil {
 		return 0, err
 	}
 	return resp.GetNewSafePoint(), nil
@@ -1190,7 +1180,6 @@ func (c *client) UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint6
 //
 // Deprecated: This API is deprecated and replaced by SetGCBarrier and DeleteGCBarrier.
 func (c *client) UpdateServiceGCSafePoint(ctx context.Context, serviceID string, ttl int64, safePoint uint64) (uint64, error) {
-	metricSet := metrics.Current()
 	if c.inner.keyspaceID != constants.NullKeyspaceID {
 		return c.updateServiceSafePointV2(ctx, c.inner.keyspaceID, serviceID, ttl, safePoint)
 	}
@@ -1201,7 +1190,7 @@ func (c *client) UpdateServiceGCSafePoint(ctx context.Context, serviceID string,
 	}
 
 	start := time.Now()
-	defer func() { metricSet.CmdDurationUpdateServiceGCSafePoint.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationUpdateServiceGCSafePoint.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	defer cancel()
@@ -1217,7 +1206,7 @@ func (c *client) UpdateServiceGCSafePoint(ctx context.Context, serviceID string,
 	}
 	resp, err := protoClient.UpdateServiceGCSafePoint(ctx, req)
 
-	if err = c.respForErr(metricSet.CmdFailedDurationUpdateServiceGCSafePoint, start, err, resp.GetHeader()); err != nil {
+	if err = c.respForErr(metrics.CmdFailedDurationUpdateServiceGCSafePoint, start, err, resp.GetHeader()); err != nil {
 		return 0, err
 	}
 	return resp.GetMinSafePoint(), nil
@@ -1233,9 +1222,8 @@ func (c *client) ScatterRegion(ctx context.Context, regionID uint64) error {
 }
 
 func (c *client) scatterRegionsWithGroup(ctx context.Context, regionID uint64, group string) error {
-	metricSet := metrics.Current()
 	start := time.Now()
-	defer func() { metricSet.CmdDurationScatterRegion.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationScatterRegion.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	defer cancel()
@@ -1269,13 +1257,12 @@ func (c *client) ScatterRegions(ctx context.Context, regionsID []uint64, opts ..
 
 // SplitAndScatterRegions implements the RPCClient interface.
 func (c *client) SplitAndScatterRegions(ctx context.Context, splitKeys [][]byte, opts ...opt.RegionsOption) (*pdpb.SplitAndScatterRegionsResponse, error) {
-	metricSet := metrics.Current()
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.SplitAndScatterRegions", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { metricSet.CmdDurationSplitAndScatterRegions.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationSplitAndScatterRegions.Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	defer cancel()
 	options := &opt.RegionsOp{}
@@ -1298,13 +1285,12 @@ func (c *client) SplitAndScatterRegions(ctx context.Context, splitKeys [][]byte,
 
 // GetOperator implements the RPCClient interface.
 func (c *client) GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOperatorResponse, error) {
-	metricSet := metrics.Current()
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.GetOperator", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { metricSet.CmdDurationGetOperator.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationGetOperator.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	defer cancel()
@@ -1321,13 +1307,12 @@ func (c *client) GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOpe
 
 // SplitRegions split regions by given split keys
 func (c *client) SplitRegions(ctx context.Context, splitKeys [][]byte, opts ...opt.RegionsOption) (*pdpb.SplitRegionsResponse, error) {
-	metricSet := metrics.Current()
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.SplitRegions", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { metricSet.CmdDurationSplitRegions.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationSplitRegions.Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	defer cancel()
 	options := &opt.RegionsOp{}
@@ -1355,9 +1340,8 @@ func (c *client) requestHeader() *pdpb.RequestHeader {
 }
 
 func (c *client) scatterRegionsWithOptions(ctx context.Context, regionsID []uint64, opts ...opt.RegionsOption) (*pdpb.ScatterRegionResponse, error) {
-	metricSet := metrics.Current()
 	start := time.Now()
-	defer func() { metricSet.CmdDurationScatterRegions.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationScatterRegions.Observe(time.Since(start).Seconds()) }()
 	options := &opt.RegionsOp{}
 	for _, opt := range opts {
 		opt(options)

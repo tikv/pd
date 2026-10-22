@@ -226,7 +226,7 @@ func NewClient(
 		batchController: batch.NewController(
 			defaultMaxRouterRequestBatchSize,
 			requestFinisher(nil, nil),
-			metrics.Current().QueryRegionBestBatchSize,
+			metrics.QueryRegionBestBatchSize,
 		),
 	}
 	c.leaderURL.Store(svcDiscovery.GetServingURL())
@@ -817,7 +817,6 @@ func (c *Cli) processRequestsInner(
 	isFollower bool,
 	isLeaderRetryBatch bool,
 ) ([]*Request, error) {
-	metricSet := metrics.Current()
 	var (
 		requests = c.batchController.GetCollectedRequests()
 		spans    = make([]opentracing.Span, 0, len(requests))
@@ -842,29 +841,29 @@ func (c *Cli) processRequestsInner(
 	queryReq := buildQueryRegionRequest(c.svcDiscovery.GetClusterID(), requests)
 	start := time.Now()
 	if err := send(queryReq); err != nil {
-		metricSet.RequestFailedDurationQueryRegion.Observe(time.Since(start).Seconds())
+		metrics.RequestFailedDurationQueryRegion.Observe(time.Since(start).Seconds())
 		return nil, err
 	}
-	metricSet.QueryRegionBatchSendLatency.Observe(
+	metrics.QueryRegionBatchSendLatency.Observe(
 		time.Since(c.batchController.GetExtraBatchingStartTime()).Seconds(),
 	)
 	resp, err := recv()
 	if err != nil {
-		metricSet.RequestFailedDurationQueryRegion.Observe(time.Since(start).Seconds())
+		metrics.RequestFailedDurationQueryRegion.Observe(time.Since(start).Seconds())
 		return nil, err
 	}
-	metricSet.RequestDurationQueryRegion.Observe(time.Since(start).Seconds())
-	metricSet.QueryRegionBatchSizeTotal.Observe(float64(len(requests)))
+	metrics.RequestDurationQueryRegion.Observe(time.Since(start).Seconds())
+	metrics.QueryRegionBatchSizeTotal.Observe(float64(len(requests)))
 	headerErr := resp.GetHeader().GetError()
 	if headerErr == nil {
 		if keysLen := len(queryReq.Keys); keysLen > 0 {
-			metricSet.QueryRegionBatchSizeByKeys.Observe(float64(keysLen))
+			metrics.QueryRegionBatchSizeByKeys.Observe(float64(keysLen))
 		}
 		if prevKeysLen := len(queryReq.PrevKeys); prevKeysLen > 0 {
-			metricSet.QueryRegionBatchSizeByPrevKeys.Observe(float64(prevKeysLen))
+			metrics.QueryRegionBatchSizeByPrevKeys.Observe(float64(prevKeysLen))
 		}
 		if idsLen := len(queryReq.Ids); idsLen > 0 {
-			metricSet.QueryRegionBatchSizeByIDs.Observe(float64(idsLen))
+			metrics.QueryRegionBatchSizeByIDs.Observe(float64(idsLen))
 		}
 	}
 	// Like unary ServiceClient.NeedRetry, use the selected role rather than

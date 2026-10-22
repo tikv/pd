@@ -57,7 +57,6 @@ func getPrefix(key []byte) []byte {
 
 // Put implements the MetaStorageClient interface.
 func (c *innerClient) Put(ctx context.Context, key, value []byte, opts ...opt.MetaStorageOption) (*meta_storagepb.PutResponse, error) {
-	metricSet := metrics.Current()
 	options := &opt.MetaStorageOp{}
 	for _, opt := range opts {
 		opt(options)
@@ -68,7 +67,7 @@ func (c *innerClient) Put(ctx context.Context, key, value []byte, opts ...opt.Me
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { metricSet.CmdDurationPut.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationPut.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, c.option.Timeout)
 	req := &meta_storagepb.PutRequest{
@@ -86,7 +85,7 @@ func (c *innerClient) Put(ctx context.Context, key, value []byte, opts ...opt.Me
 	resp, err := cli.Put(ctx, req)
 	cancel()
 
-	if err = c.respForMetaStorageErr(metricSet.CmdFailedDurationPut, start, err, resp.GetHeader()); err != nil {
+	if err = c.respForMetaStorageErr(metrics.CmdFailedDurationPut, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
 	return resp, nil
@@ -94,7 +93,6 @@ func (c *innerClient) Put(ctx context.Context, key, value []byte, opts ...opt.Me
 
 // Get implements the MetaStorageClient interface.
 func (c *innerClient) Get(ctx context.Context, key []byte, opts ...opt.MetaStorageOption) (*meta_storagepb.GetResponse, error) {
-	metricSet := metrics.Current()
 	options := &opt.MetaStorageOp{}
 	for _, opt := range opts {
 		opt(options)
@@ -108,7 +106,7 @@ func (c *innerClient) Get(ctx context.Context, key []byte, opts ...opt.MetaStora
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { metricSet.CmdDurationGet.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationGet.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, c.option.Timeout)
 	req := &meta_storagepb.GetRequest{
@@ -126,7 +124,7 @@ func (c *innerClient) Get(ctx context.Context, key []byte, opts ...opt.MetaStora
 	resp, err := cli.Get(ctx, req)
 	cancel()
 
-	if err = c.respForMetaStorageErr(metricSet.CmdFailedDurationGet, start, err, resp.GetHeader()); err != nil {
+	if err = c.respForMetaStorageErr(metrics.CmdFailedDurationGet, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
 	return resp, nil

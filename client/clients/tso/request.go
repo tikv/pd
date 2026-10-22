@@ -75,11 +75,10 @@ func (req *Request) Wait() (physical int64, logical int64, err error) {
 
 // waitCtx waits for the TSO result with specified ctx, while not using req.requestCtx.
 func (req *Request) waitCtx(ctx context.Context) (physical int64, logical int64, err error) {
-	metricSet := metrics.Current()
 	// If tso command duration is observed very high, the reason could be it
 	// takes too long for Wait() be called.
 	start := time.Now()
-	metricSet.CmdDurationTSOAsyncWait.Observe(start.Sub(req.start).Seconds())
+	metrics.CmdDurationTSOAsyncWait.Observe(start.Sub(req.start).Seconds())
 	select {
 	case err = <-req.done:
 		defer req.pool.Put(req)
@@ -87,13 +86,13 @@ func (req *Request) waitCtx(ctx context.Context) (physical int64, logical int64,
 		err = errors.WithStack(err)
 		now := time.Now()
 		if err != nil {
-			metricSet.CmdFailedDurationTSOWait.Observe(now.Sub(start).Seconds())
-			metricSet.CmdFailedDurationTSO.Observe(now.Sub(req.start).Seconds())
+			metrics.CmdFailedDurationTSOWait.Observe(now.Sub(start).Seconds())
+			metrics.CmdFailedDurationTSO.Observe(now.Sub(req.start).Seconds())
 			return 0, 0, err
 		}
 		physical, logical = req.physical, req.logical
-		metricSet.CmdDurationTSOWait.Observe(now.Sub(start).Seconds())
-		metricSet.CmdDurationTSO.Observe(now.Sub(req.start).Seconds())
+		metrics.CmdDurationTSOWait.Observe(now.Sub(start).Seconds())
+		metrics.CmdDurationTSO.Observe(now.Sub(req.start).Seconds())
 		return
 	case <-ctx.Done():
 		return 0, 0, errors.WithStack(ctx.Err())

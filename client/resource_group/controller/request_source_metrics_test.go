@@ -16,9 +16,6 @@ package controller
 
 import (
 	"context"
-	"flag"
-	"os"
-	"os/exec"
 	"sync"
 	"testing"
 	"time"
@@ -28,7 +25,6 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/pingcap/failpoint"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 
 	"github.com/tikv/pd/client/errs"
@@ -186,67 +182,6 @@ func TestRequestSourceMetricsConcurrentLazyCreation(t *testing.T) {
 	re.Equal(float64(workers), requestSourceCounterValue(t, sourceMetrics.wruRefund))
 
 	gc.metrics.sourceState.cleanup()
-}
-
-func TestRequestSourceMetricsCleanupDuringInitialization(t *testing.T) {
-	// Each invocation must exercise registration in a fresh process.
-	if os.Getenv("PD_CLIENT_METRICS_TEST") != t.Name() {
-		testBinary, err := os.Executable()
-		require.NoError(t, err)
-		// #nosec G204 -- Re-execute the current test binary without a shell.
-		cmd := exec.CommandContext(t.Context(), testBinary, "-test.run=^"+t.Name()+"$", "-test.count=1")
-		cmd.Env = append(os.Environ(), "PD_CLIENT_METRICS_TEST="+t.Name())
-		if coverDir := flag.Lookup("test.gocoverdir").Value.String(); coverDir != "" {
-			cmd.Args = append(cmd.Args, "-test.gocoverdir="+coverDir)
-		}
-		output, err := cmd.CombinedOutput()
-		require.NoError(t, err, "%s", output)
-		return
-	}
-
-	re := require.New(t)
-	state := newRequestSourceMetricsState("cleanup-during-initialization")
-	metrics := &groupMetricsCollection{sourceState: state}
-	before := controllerMetrics.Current().RequestSourceRUCounter
-	cleanupStarted := make(chan struct{})
-	resumeCleanup := make(chan struct{})
-	cleanupDone := make(chan struct{})
-	releaseCleanup := sync.OnceFunc(func() { close(resumeCleanup) })
-	const fp = "github.com/tikv/pd/client/resource_group/controller/beforeRequestSourceMetricsCleanupLock"
-	re.NoError(failpoint.EnableCall(fp, func() {
-		close(cleanupStarted)
-		<-resumeCleanup
-	}))
-	t.Cleanup(func() {
-		releaseCleanup()
-		<-cleanupDone
-		re.NoError(failpoint.Disable(fp))
-	})
-	go func() {
-		defer close(cleanupDone)
-		state.cleanup()
-	}()
-	re.Eventually(func() bool {
-		select {
-		case <-cleanupStarted:
-			return true
-		default:
-			return false
-		}
-	}, 5*time.Second, time.Millisecond)
-
-	controllerMetrics.InitAndRegisterMetrics(prometheus.Labels{"instance": "test"})
-	current := controllerMetrics.Current().RequestSourceRUCounter
-	re.NotSame(before, current)
-	metrics.addRequestSourceRUDelta("internal_cleanup_init", &rmpb.Consumption{RRU: 1, WRU: 1})
-	re.Equal(2, collectorMetricCount(current))
-
-	releaseCleanup()
-	<-cleanupDone
-	re.Zero(collectorMetricCount(current))
-	re.Empty(state.items)
-	metrics.addRequestSourceRUDelta("internal_after_cleanup", &rmpb.Consumption{RRU: 1, WRU: 1})
-	re.Zero(collectorMetricCount(current))
 }
 
 func TestCleanupResourceGroupRemovesRequestSourceMetrics(t *testing.T) {
