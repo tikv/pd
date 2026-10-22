@@ -216,16 +216,22 @@ func (c *Cli) getTSOLeaderClientConn() (*grpc.ClientConn, string) {
 
 func (c *Cli) updateTSOLeaderURL(url string) error {
 	c.leaderURL.Store(url)
-	c.leaderSwitchedMu.Lock()
-	close(c.leaderSwitchedCh)
-	c.leaderSwitchedCh = make(chan struct{})
-	c.leaderSwitchedMu.Unlock()
+	c.notifyLeaderSwitched()
 	log.Info("[tso] switch the tso leader serving url", zap.String("new-url", url))
 	// Try to create the TSO dispatcher if it is not created yet.
 	c.tryCreateTSODispatcher()
 	// Update the TSO connection contexts after the dispatcher is ready.
 	c.scheduleUpdateTSOConnectionCtxs()
 	return nil
+}
+
+// notifyLeaderSwitched wakes up every goroutine waiting on the channel returned by
+// leaderSwitched. Call it after storing the new leader URL.
+func (c *Cli) notifyLeaderSwitched() {
+	c.leaderSwitchedMu.Lock()
+	defer c.leaderSwitchedMu.Unlock()
+	close(c.leaderSwitchedCh)
+	c.leaderSwitchedCh = make(chan struct{})
 }
 
 // leaderSwitched returns a channel that is closed when the leader URL is updated next time.
