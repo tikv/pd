@@ -16,6 +16,7 @@ package adapter
 
 import (
 	"context"
+	"crypto/tls"
 	"sync"
 	"time"
 
@@ -23,7 +24,9 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/tidb-dashboard/pkg/apiserver"
+	"github.com/pingcap/tidb-dashboard/pkg/config"
 
+	"github.com/tikv/pd/pkg/dashboard/spiffetls"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/server"
@@ -35,6 +38,17 @@ var (
 	CheckInterval = time.Second
 )
 
+type dashboardService interface {
+	IsRunning() bool
+	Start(context.Context) error
+	Stop(context.Context) error
+}
+
+type tlsSource interface {
+	TLSConfig() *tls.Config
+	Close() error
+}
+
 // Manager is used to control dashboard.
 type Manager struct {
 	ctx    context.Context
@@ -42,19 +56,30 @@ type Manager struct {
 	wg     sync.WaitGroup
 
 	srv        *server.Server
-	service    *apiserver.Service
+	service    dashboardService
 	redirector *Redirector
+
+	config          *config.Config
+	spiffeConfig    spiffetls.Config
+	tlsSource       tlsSource
+	newSPIFFESource func(context.Context, spiffetls.Config) (tlsSource, error)
 
 	isLeader bool
 	members  []*pdpb.Member
 }
 
-// NewManager creates a new Manager.
-func NewManager(srv *server.Server, s *apiserver.Service, redirector *Redirector) *Manager {
+// NewManager creates a manager that owns the Dashboard service and its SQL TLS source.
+// The config must be the same instance supplied to the Dashboard service.
+func NewManager(srv *server.Server, s *apiserver.Service, redirector *Redirector, cfg *config.Config) *Manager {
 	return &Manager{
-		srv:        srv,
-		service:    s,
-		redirector: redirector,
+		srv:          srv,
+		service:      s,
+		redirector:   redirector,
+		config:       cfg,
+		spiffeConfig: srv.GetConfig().Dashboard.SPIFFEConfig(),
+		newSPIFFESource: func(ctx context.Context, cfg spiffetls.Config) (tlsSource, error) {
+			return spiffetls.New(ctx, cfg)
+		},
 	}
 }
 
@@ -193,10 +218,26 @@ func (m *Manager) setNewAddress() {
 }
 
 func (m *Manager) startService() {
-	if m.service.IsRunning() {
+	if m.service.IsRunning() || m.ctx.Err() != nil {
 		return
 	}
+	if m.spiffeConfig.Endpoint != "" {
+		ctx, cancel := context.WithTimeout(m.ctx, m.spiffeConfig.Timeout)
+		source, err := m.newSPIFFESource(ctx, m.spiffeConfig)
+		cancel()
+		if err != nil {
+			log.Error("can not initialize dashboard SQL SPIFFE TLS", errs.ZapError(errs.ErrDashboardStart, err))
+			return
+		}
+		m.tlsSource = source
+		m.config.TiDBTLSConfig = source.TLSConfig()
+		if m.ctx.Err() != nil {
+			m.closeTLSSource()
+			return
+		}
+	}
 	if err := m.service.Start(m.ctx); err != nil {
+		m.closeTLSSource()
 		log.Error("can not start dashboard server", errs.ZapError(errs.ErrDashboardStart, err))
 	} else {
 		log.Info("dashboard server is started")
@@ -204,12 +245,27 @@ func (m *Manager) startService() {
 }
 
 func (m *Manager) stopService() {
-	if !m.service.IsRunning() {
+	if m.service.IsRunning() {
+		// Shutdown must finish even after the manager context has been canceled.
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		err := m.service.Stop(ctx)
+		cancel()
+		if err != nil {
+			log.Error("stop dashboard server error", errs.ZapError(errs.ErrDashboardStop, err))
+		} else {
+			log.Info("dashboard server is stopped")
+		}
+	}
+	m.closeTLSSource()
+}
+
+func (m *Manager) closeTLSSource() {
+	if m.tlsSource == nil {
 		return
 	}
-	if err := m.service.Stop(context.Background()); err != nil {
-		log.Error("stop dashboard server error", errs.ZapError(errs.ErrDashboardStop, err))
-	} else {
-		log.Info("dashboard server is stopped")
+	if err := m.tlsSource.Close(); err != nil {
+		log.Error("close dashboard SQL SPIFFE TLS source", errs.ZapError(err))
 	}
+	m.tlsSource = nil
+	m.config.TiDBTLSConfig = nil
 }
