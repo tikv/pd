@@ -23,6 +23,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -395,8 +396,7 @@ func TestResignTSOPrimaryForward(t *testing.T) {
 // after its first attempt misses the new primary.
 func TestGetTSAfterTSOPrimaryChanged(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -414,17 +414,19 @@ func TestGetTSAfterTSOPrimaryChanged(t *testing.T) {
 
 	// Measure the longest gap between two successful GetTS calls across the primary change.
 	checkMaxGap := func(changePrimary func()) {
-		roundCtx, roundCancel := context.WithCancel(ctx)
 		var (
 			maxGap      time.Duration
 			lastSuccess time.Time
+			// Stop between calls instead of canceling an in-flight GetTS, whose request
+			// may be put back to the pool while the dispatcher still holds it.
+			stopped atomic.Bool
 		)
 		started := make(chan struct{})
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
-			for roundCtx.Err() == nil {
-				if _, _, err := client.GetTS(roundCtx); err != nil {
+			for !stopped.Load() {
+				if _, _, err := client.GetTS(ctx); err != nil {
 					continue
 				}
 				now := time.Now()
@@ -437,7 +439,7 @@ func TestGetTSAfterTSOPrimaryChanged(t *testing.T) {
 			}
 		}()
 		defer func() {
-			roundCancel()
+			stopped.Store(true)
 			<-done
 		}()
 		select {
@@ -449,7 +451,7 @@ func TestGetTSAfterTSOPrimaryChanged(t *testing.T) {
 		changePrimary()
 		tc.WaitForDefaultPrimaryServing(re)
 		time.Sleep(time.Second)
-		roundCancel()
+		stopped.Store(true)
 		<-done
 		// A client that never succeeds again after the change leaves the gap open until now.
 		re.True(lastSuccess.After(changedAt))
