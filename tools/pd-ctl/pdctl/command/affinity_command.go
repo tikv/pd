@@ -50,7 +50,7 @@ func NewAffinityCommand() *cobra.Command {
 func newAffinityShowCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "show",
-		Short: "show affinity group state (all groups if both --table-id and --keyspace-id are omitted)",
+		Short: "show affinity group state (all groups if --table-id, --partition-id and --keyspace-id are omitted)",
 		Run:   affinityShowCommandFunc,
 	}
 	return cmd
@@ -78,7 +78,7 @@ func newAffinityUpdatePeersCommand() *cobra.Command {
 }
 
 func affinityShowCommandFunc(cmd *cobra.Command, _ []string) {
-	// Show all groups only when neither table-id nor keyspace-id is provided.
+	// Show all groups only when no target ID flag is provided.
 	if !cmd.Flags().Changed("table-id") && !cmd.Flags().Changed("partition-id") && !cmd.Flags().Changed("keyspace-id") {
 		groups, err := PDCli.GetAllAffinityGroups(cmd.Context())
 		if err != nil {

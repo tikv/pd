@@ -70,6 +70,14 @@ func TestAffinityCommands(t *testing.T) {
 	re.Contains(groups, tableGroup)
 	re.Contains(groups, partitionGroup)
 
+	for _, partitionID := range []string{"0", "3"} {
+		out := tests.MustExec(re, ctl.GetRootCmd(), []string{
+			"-u", pdAddr, "config", "affinity", "show", "--partition-id", partitionID,
+		}, nil)
+		re.Contains(out, "--table-id is required")
+		re.NotContains(out, tableGroup)
+	}
+
 	// show table group
 	var state pd.AffinityGroupState
 	tests.MustExec(re, cmd, []string{
