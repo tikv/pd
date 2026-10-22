@@ -32,6 +32,8 @@ const (
 )
 
 // BalanceScore measures the leader and voter distribution across affinity groups.
+// Each group has equal weight, regardless of its Region count, data size or load.
+// Improving this score can therefore worsen the actual Region distribution.
 type BalanceScore struct {
 	Leader int
 	Voter  int

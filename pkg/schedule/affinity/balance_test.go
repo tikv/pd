@@ -64,6 +64,9 @@ func TestBalanceScorerEvaluatesLeaderAndVoterMoves(t *testing.T) {
 		// The old leader remains a voter while a different voter is replaced.
 		{"leader and voter", BalanceMove{GroupID: "p0", LeaderStoreID: 2, FromStoreID: 3, ToStoreID: 4}, BalanceScore{Leader: 9, Voter: 67}, true},
 		{"worse", BalanceMove{GroupID: "p3", LeaderStoreID: 1}, BalanceScore{Leader: 17, Voter: 75}, false},
+		// Voter gains cannot compensate for a worse leader distribution,
+		// even when Leader+Voter would be smaller.
+		{"voter gain with leader loss", BalanceMove{GroupID: "p3", LeaderStoreID: 1, FromStoreID: 3, ToStoreID: 4}, BalanceScore{Leader: 17, Voter: 67}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			score, improves := scorer.Evaluate(tc.move)
@@ -71,6 +74,19 @@ func TestBalanceScorerEvaluatesLeaderAndVoterMoves(t *testing.T) {
 			require.Equal(t, tc.improves, improves)
 		})
 	}
+}
+
+func TestBalanceScorerLeaderGainTakesPriorityOverVoterLoss(t *testing.T) {
+	scorer, err := NewBalanceScorer([]*Group{
+		{ID: "p0", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}},
+		{ID: "p1", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 4}},
+		{ID: "p2", LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2, 4}},
+	})
+	require.NoError(t, err)
+	require.Equal(t, BalanceScore{Leader: 5, Voter: 23}, scorer.Score())
+	score, improves := scorer.Evaluate(BalanceMove{GroupID: "p0", LeaderStoreID: 4, FromStoreID: 3, ToStoreID: 4})
+	require.True(t, improves)
+	require.Equal(t, BalanceScore{Leader: 3, Voter: 27}, score)
 }
 
 func TestBalanceScorerStrictImprovementsTerminate(t *testing.T) {
@@ -185,6 +201,7 @@ func TestBalanceScorerRejectsInvalidMoveShapes(t *testing.T) {
 		{GroupID: "auto", LeaderStoreID: 2, FromStoreID: 4, ToStoreID: 5},
 		{GroupID: "auto", LeaderStoreID: 2, FromStoreID: 1, ToStoreID: 3},
 		{GroupID: "auto", LeaderStoreID: 1, FromStoreID: 1, ToStoreID: 4},
+		{GroupID: "auto", LeaderStoreID: 6, FromStoreID: 3, ToStoreID: 4},
 	} {
 		_, ok := scorer.Evaluate(move)
 		require.False(t, ok, "move: %+v", move)
