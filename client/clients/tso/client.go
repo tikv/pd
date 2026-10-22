@@ -81,9 +81,13 @@ type Cli struct {
 	svcDiscovery sd.ServiceDiscovery
 	tsoStreamBuilderFactory
 	// leaderURL is the URL of the TSO leader.
-	leaderURL       atomic.Value
-	conCtxMgr       *cctx.Manager[*tsoStream]
-	updateConCtxsCh chan struct{}
+	leaderURL atomic.Value
+	// leaderSwitchedMu protects leaderSwitchedCh, which is closed and replaced after each
+	// update of leaderURL so that every goroutine waiting to reconnect wakes up at once.
+	leaderSwitchedMu sync.Mutex
+	leaderSwitchedCh chan struct{}
+	conCtxMgr        *cctx.Manager[*tsoStream]
+	updateConCtxsCh  chan struct{}
 
 	// tsoReqPool is the pool to recycle `*tsoRequest`.
 	tsoReqPool *sync.Pool
@@ -103,6 +107,7 @@ func NewClient(
 		option:                  option,
 		svcDiscovery:            svcDiscovery,
 		tsoStreamBuilderFactory: factory,
+		leaderSwitchedCh:        make(chan struct{}),
 		conCtxMgr:               cctx.NewManager[*tsoStream](),
 		updateConCtxsCh:         make(chan struct{}, 1),
 		tsoReqPool: &sync.Pool{
@@ -211,12 +216,24 @@ func (c *Cli) getTSOLeaderClientConn() (*grpc.ClientConn, string) {
 
 func (c *Cli) updateTSOLeaderURL(url string) error {
 	c.leaderURL.Store(url)
+	c.leaderSwitchedMu.Lock()
+	close(c.leaderSwitchedCh)
+	c.leaderSwitchedCh = make(chan struct{})
+	c.leaderSwitchedMu.Unlock()
 	log.Info("[tso] switch the tso leader serving url", zap.String("new-url", url))
 	// Try to create the TSO dispatcher if it is not created yet.
 	c.tryCreateTSODispatcher()
 	// Update the TSO connection contexts after the dispatcher is ready.
 	c.scheduleUpdateTSOConnectionCtxs()
 	return nil
+}
+
+// leaderSwitched returns a channel that is closed when the leader URL is updated next time.
+// Get the channel before reading the leader URL so that an update in between is not missed.
+func (c *Cli) leaderSwitched() <-chan struct{} {
+	c.leaderSwitchedMu.Lock()
+	defer c.leaderSwitchedMu.Unlock()
+	return c.leaderSwitchedCh
 }
 
 // backupClientConn gets a grpc client connection of the current reachable and healthy
@@ -333,6 +350,7 @@ func (c *Cli) tryConnectToTSO(ctx context.Context) error {
 	// Retry several times before falling back to the follower when the network problem happens
 	for range constants.MaxRetryTimes {
 		c.svcDiscovery.ScheduleCheckMemberChanged()
+		leaderSwitched := c.leaderSwitched()
 		cc, url = c.getTSOLeaderClientConn()
 		if c.conCtxMgr.Exist(url) {
 			// Just trigger the clean up of the stale connection contexts.
@@ -374,6 +392,8 @@ func (c *Cli) tryConnectToTSO(ctx context.Context) error {
 		case <-ctx.Done():
 			return err
 		case <-ticker.C:
+		case <-leaderSwitched:
+			// Retry with the new leader without waiting for the next tick.
 		}
 	}
 

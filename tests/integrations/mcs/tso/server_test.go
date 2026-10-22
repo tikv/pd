@@ -446,6 +446,12 @@ func TestGetTSAfterTSOPrimaryChanged(t *testing.T) {
 			re.NoError(tc.ResignPrimary(constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID))
 		})
 	}
+	// Shut down the primary as a rolling upgrade does, leaving the last server as the primary.
+	for range 2 {
+		checkMaxGap(func() {
+			tc.DestroyServer(tc.GetPrimaryServer(constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID).GetAddr())
+		})
+	}
 }
 
 func TestResignAPIPrimaryForward(t *testing.T) {
