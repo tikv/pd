@@ -224,7 +224,7 @@ func TestBTreeG(t *testing.T) {
 
 func ExampleBTreeG() {
 	tr := NewG[Int](*btreeDegree)
-	for i := Int(0); i < 10; i++ {
+	for i := range Int(10) {
 		tr.ReplaceOrInsert(i)
 	}
 	fmt.Println("len:       ", tr.Len())
