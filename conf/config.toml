@@ -200,6 +200,16 @@
 ## The path of the certificate private key.
 # tidb-key-path = ""
 
+## Native SPIFFE Workload API mTLS for Dashboard's SQL client. Configure all
+## three identity/endpoint settings together; do not combine with file TLS above.
+## The endpoint must be an absolute Unix socket URI available to the PD process.
+# tidb-spiffe-workload-api-addr = "unix:///spire-agent-socket/spire-agent.sock"
+# tidb-spiffe-workload-api-timeout = "30s"
+## Exact SPIFFE IDs or whole '*' path segments; each '*' matches one segment.
+## Restrict these identities to the intended PD and TiDB workloads.
+# tidb-spiffe-client-id-pattern = "spiffe://example.org/ns/database/sa/pd/*"
+# tidb-spiffe-server-id-pattern = "spiffe://example.org/ns/database/sa/tidb/*"
+
 ## The public path prefix to serve Dashboard URLs. It can be set when Dashboard
 ## is running behind a reverse proxy. Do not configure it if you access
 ## Dashboard directly.
