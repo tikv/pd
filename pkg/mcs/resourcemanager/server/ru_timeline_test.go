@@ -46,10 +46,10 @@ func newTestTimeline() (*ruSummaryCollector, *ruTimeline) {
 	return c, t
 }
 
-func summaryAt(t *testing.T, c *ruSummaryCollector) (ruWindowSummary, bool) {
+func summaryAt(t *testing.T, c *ruSummaryCollector) (ruSecondBucket, bool) {
 	t.Helper()
 	p, ok := c.results[testTimelineKey]
-	return p.summary, ok
+	return p.peak, ok
 }
 
 // A burst stays visible in rolling windows for 60 seconds and then leaves.
@@ -66,7 +66,7 @@ func TestRUTimelineRollingPeak(t *testing.T) {
 	timeline.flush(time.Unix(start+90, 0)) // window [start, start+60)
 	s, ok := summaryAt(t, c)
 	re.True(ok)
-	re.Equal(float64(300), s.peak)
+	re.Equal(start+30, s.second)
 	re.Equal(float64(100), s.rru)
 	re.Equal(float64(200), s.wru)
 
@@ -74,7 +74,7 @@ func TestRUTimelineRollingPeak(t *testing.T) {
 	timeline.flush(time.Unix(start+120, 0)) // window [start+30, start+90)
 	s, ok = summaryAt(t, c)
 	re.True(ok)
-	re.Equal(float64(300), s.peak)
+	re.Equal(float64(300), s.rru+s.wru)
 	g := timeline.groups[testTimelineKey]
 	_, ok = g.summarize(start + 61)
 	re.False(ok, "a window without reported seconds has no sample")
@@ -93,7 +93,50 @@ func TestRUTimelineMergesSources(t *testing.T) {
 	timeline.flush(time.Unix(start+90, 0))
 	s, ok := summaryAt(t, c)
 	re.True(ok)
-	re.Equal(float64(20), s.peak)
+	re.Equal(float64(20), s.rru+s.wru)
+}
+
+// A retried or overlapping report replays seconds the resource manager already
+// holds for the client; they replace the stored value instead of adding to it.
+func TestRUTimelineReplayIsIdempotent(t *testing.T) {
+	re := require.New(t)
+	const start = testTimelineStart
+	c, timeline := newTestTimeline()
+	values := make([][2]float64, 60)
+	values[7] = [2]float64{100, 0}
+	first := timelineReport(1, start, values[:10])
+	timeline.record(first, time.Unix(start+60, 0))
+	// The retry resends the first ten seconds together with the later ones,
+	// and the original report arrives once more afterwards.
+	timeline.record(timelineReport(1, start, values), time.Unix(start+60, 0))
+	timeline.record(first, time.Unix(start+60, 0))
+	timeline.flush(time.Unix(start+90, 0))
+	s, ok := summaryAt(t, c)
+	re.True(ok)
+	re.Equal(start+7, s.second)
+	re.Equal(float64(100), s.rru+s.wru)
+}
+
+// After a client clock rollback restarts its timeline, a report it sent from
+// before the rollback can still arrive later and carry the same labels. Only
+// one value per second is kept: the later report replaces the listed seconds.
+func TestRUTimelineDelayedReportFromBeforeRollback(t *testing.T) {
+	re := require.New(t)
+	const start = testTimelineStart
+	c, timeline := newTestTimeline()
+	current := make([][2]float64, 10)
+	current[1] = [2]float64{5, 0}
+	timeline.record(timelineReport(1, start, current), time.Unix(start+10, 0))
+	// The old report covers [start+1, start+91) and is processed at start+60,
+	// when [start+1, start+65) is inside the receive window.
+	old := make([][2]float64, 90)
+	old[0] = [2]float64{100, 0}
+	timeline.record(timelineReport(1, start+1, old), time.Unix(start+60, 0))
+	timeline.flush(time.Unix(start+90, 0))
+	s, ok := summaryAt(t, c)
+	re.True(ok)
+	re.Equal(start+1, s.second)
+	re.Equal(float64(100), s.rru+s.wru)
 }
 
 func TestRUTimelineIdleWatermark(t *testing.T) {
@@ -107,7 +150,7 @@ func TestRUTimelineIdleWatermark(t *testing.T) {
 	timeline.flush(time.Unix(start+90, 0))
 	s, ok := summaryAt(t, c)
 	re.True(ok, "an idle but covered window publishes zero")
-	re.Zero(s.peak)
+	re.Zero(s.rru + s.wru)
 }
 
 func TestRUTimelineNewTermDelay(t *testing.T) {
@@ -120,11 +163,12 @@ func TestRUTimelineNewTermDelay(t *testing.T) {
 	for i := range values {
 		values[i] = [2]float64{10, 0}
 	}
-	timeline.record(timelineReport(1, start, values), time.Unix(start+60, 0))
+	// The seconds fill the windows of both flushes below.
+	timeline.record(timelineReport(1, start-61, values), time.Unix(start+29, 0))
 	timeline.flush(time.Unix(start+29, 0))
 	_, ok := summaryAt(t, c)
 	re.False(ok, "the first 30 seconds of a term do not publish")
-	timeline.flush(time.Unix(start+90, 0))
+	timeline.flush(time.Unix(start+30, 0))
 	_, ok = summaryAt(t, c)
 	re.True(ok)
 }
@@ -141,7 +185,7 @@ func TestRUTimelineSparseGaps(t *testing.T) {
 	timeline.flush(time.Unix(start+90, 0))
 	s, ok := summaryAt(t, c)
 	re.True(ok)
-	re.Equal(float64(9), s.peak)
+	re.Equal(float64(9), s.rru+s.wru)
 }
 
 func TestRUTimelineRejectsMalformedReports(t *testing.T) {
@@ -285,11 +329,11 @@ func TestRUTimelineLateArrivalVisibility(t *testing.T) {
 	timeline.flush(time.Unix(start+89, 0))
 	s, ok := summaryAt(t, c)
 	re.True(ok)
-	re.Equal(float64(100), s.peak)
+	re.Equal(float64(100), s.rru+s.wru)
 	timeline.flush(time.Unix(start+90, 0))
 	s, ok = summaryAt(t, c)
 	re.True(ok)
-	re.Equal(float64(100), s.peak)
+	re.Equal(float64(100), s.rru+s.wru)
 	// Only two flush instants expose it; by the next window the second is out.
 	timeline.flush(time.Unix(start+91, 0))
 	_, ok = summaryAt(t, c)

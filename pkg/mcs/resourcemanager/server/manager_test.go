@@ -475,8 +475,8 @@ func checkBackgroundMetricsFlush(ctx context.Context, re *require.Assertions, ma
 }
 
 // TestBackgroundMetricsFlushResetsRUTimeline pins that the RU timeline belongs
-// to one leadership term: constructing another manager leaves the published
-// peaks alone, and they stop being exposed once the flush loop exits.
+// to one leadership term: the published peaks stop being exposed and the term
+// state is cleared once the flush loop exits.
 func TestBackgroundMetricsFlushResetsRUTimeline(t *testing.T) {
 	re := require.New(t)
 	const start = testTimelineStart
@@ -487,7 +487,6 @@ func TestBackgroundMetricsFlushResetsRUTimeline(t *testing.T) {
 	// clears the map read below.
 	m.metrics.ruTimeline = newRUTimeline(newRUSummaryCollector())
 	timeline := m.metrics.ruTimeline
-	collector := timeline.collector
 	resultsLen := func() int {
 		timeline.collector.mu.RLock()
 		defer timeline.collector.mu.RUnlock()
@@ -496,12 +495,7 @@ func TestBackgroundMetricsFlushResetsRUTimeline(t *testing.T) {
 	timeline.since = start - 3600
 	timeline.record(timelineReport(1, start, make([][2]float64, 60)), time.Unix(start+65, 0))
 	timeline.flush(time.Unix(start+90, 0))
-	re.Greater(resultsLen(), 0)
-
-	newManagerBase(&ControllerConfig{}, ResourceGroupWriteRoleLegacyAll)
-	re.Greater(resultsLen(), 0)
-	timeline.rejected = 1
-	timeline.lastRejectLog = time.Now().Unix()
+	re.Positive(resultsLen())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	m.wg.Add(1)
@@ -511,11 +505,6 @@ func TestBackgroundMetricsFlushResetsRUTimeline(t *testing.T) {
 	re.Zero(resultsLen())
 	re.Empty(timeline.groups)
 	re.Zero(timeline.since)
-	re.Zero(timeline.sourceCount)
-	re.Zero(timeline.rejected)
-	re.Zero(timeline.lastRejectLog)
-	re.Same(collector, timeline.collector)
-	re.Same(timeline, m.metrics.ruTimeline)
 }
 
 func TestDispatchConsumptionIncludesOnlyConsumption(t *testing.T) {

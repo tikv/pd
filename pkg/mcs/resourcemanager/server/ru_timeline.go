@@ -26,7 +26,7 @@ import (
 )
 
 const (
-	// ruWindowSeconds is the aligned window summarized from the timeline.
+	// ruWindowSeconds is the window summarized from the timeline.
 	ruWindowSeconds = 60
 	// ruWindowDelay is how long a closed window waits for regular reports. It
 	// covers both the report interval and any lag of the client clock.
@@ -47,14 +47,10 @@ const (
 	ruTimelineMaxSources = 10000
 )
 
-// ruWindowSummary describes the busiest second of a closed window.
-type ruWindowSummary struct {
-	peak, rru, wru float64
-}
-
 type publishedRUSummary struct {
 	keyspaceName string
-	summary      ruWindowSummary
+	// peak is the busiest second of the window.
+	peak ruSecondBucket
 }
 
 // ruSummaryCollector exposes each group's busiest second in the trailing
@@ -93,9 +89,9 @@ func (c *ruSummaryCollector) Collect(ch chan<- prometheus.Metric) {
 		emit := func(desc *prometheus.Desc, value float64) {
 			ch <- prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, value, p.keyspaceName, key.groupName)
 		}
-		emit(c.peak, p.summary.peak)
-		emit(c.rru, p.summary.rru)
-		emit(c.wru, p.summary.wru)
+		emit(c.peak, p.peak.rru+p.peak.wru)
+		emit(c.rru, p.peak.rru)
+		emit(c.wru, p.peak.wru)
 	}
 }
 
@@ -168,14 +164,9 @@ func (t *ruTimeline) record(item *consumptionItem, now time.Time) {
 	limit := nowSec + ruTimelineClockSkew
 	first := limit - ruSourceSeconds
 	start, end := payload.GetStartUnixSec(), payload.GetEndUnixSec()
-	if end == 0 {
-		// A report without a watermark cannot say which seconds are zeros; an
-		// old dense report would otherwise stack every bucket on start. The
-		// field is new, so reject it and wait for clients to upgrade.
-		return
-	}
 	if start >= end {
-		// An empty or reversed interval cannot be attributed to a second.
+		// An empty or reversed interval cannot be attributed to a second. A
+		// report without a watermark (end 0) is empty or entirely too late.
 		return
 	}
 	if end <= first || start >= limit {
@@ -250,7 +241,7 @@ func (t *ruTimeline) record(item *consumptionItem, now time.Time) {
 // summarize sums every source by second and finds the busiest second of the
 // window beginning at start, counting a second that no source reported as
 // zero. It reports false when no source reported any second of the window.
-func (g *ruTimelineGroup) summarize(start int64) (ruWindowSummary, bool) {
+func (g *ruTimelineGroup) summarize(start int64) (ruSecondBucket, bool) {
 	var (
 		totals   [ruWindowSeconds]ruSecondBucket
 		reported bool
@@ -266,15 +257,16 @@ func (g *ruTimelineGroup) summarize(start int64) (ruWindowSummary, bool) {
 		}
 	}
 	if !reported {
-		return ruWindowSummary{}, false
+		return ruSecondBucket{}, false
 	}
-	s := ruWindowSummary{peak: math.Inf(-1)}
-	for _, b := range totals {
-		if total := b.rru + b.wru; total > s.peak && !math.IsInf(total, 0) {
-			s.peak, s.rru, s.wru = total, b.rru, b.wru
+	peak, best := ruSecondBucket{}, math.Inf(-1)
+	for i, b := range totals {
+		if total := b.rru + b.wru; total > best && !math.IsInf(total, 0) {
+			b.second = start + int64(i)
+			peak, best = b, total
 		}
 	}
-	return s, !math.IsInf(s.peak, 0)
+	return peak, !math.IsInf(best, 0)
 }
 
 func (t *ruTimeline) flush(now time.Time) {
@@ -291,8 +283,8 @@ func (t *ruTimeline) flush(now time.Time) {
 		start := sec - ruWindowSeconds - ruWindowDelay
 		t.collector.mu.Lock()
 		for key, g := range t.groups {
-			if s, ok := g.summarize(start); ok {
-				t.collector.results[key] = publishedRUSummary{keyspaceName: g.keyspaceName, summary: s}
+			if peak, ok := g.summarize(start); ok {
+				t.collector.results[key] = publishedRUSummary{keyspaceName: g.keyspaceName, peak: peak}
 			} else {
 				// No second in the window was reported (not even a zero
 				// watermark): withdraw the series instead of exposing a stale
