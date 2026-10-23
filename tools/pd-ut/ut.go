@@ -634,8 +634,7 @@ func (n *numa) runTestCase(pkg string, fn string) testResult {
 		start = time.Now()
 		err = runCommandWithTempDir(cmd)
 		if err != nil {
-			var exitError *exec.ExitError
-			if errors.As(err, &exitError) {
+			if _, ok := errors.AsType[*exec.ExitError](err); ok {
 				// Retry 3 times to get rid of the weird error:
 				switch err.Error() {
 				case "signal: segmentation fault (core dumped)":
@@ -875,8 +874,7 @@ func buildTestBinary(pkg string) error {
 func testBinaryExist(pkg string) (bool, error) {
 	_, err := os.Stat(testFileFullPath(pkg))
 	if err != nil {
-		var pathError *os.PathError
-		if errors.As(err, &pathError) {
+		if _, ok := errors.AsType[*os.PathError](err); ok {
 			return false, nil
 		}
 	}
@@ -975,8 +973,7 @@ func withTrace(err error) error {
 	if err == nil {
 		return err
 	}
-	var errStack *errWithStack
-	if errors.As(err, &errStack) {
+	if _, ok := errors.AsType[*errWithStack](err); ok {
 		return err
 	}
 	var stack [4096]byte

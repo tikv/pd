@@ -1157,9 +1157,7 @@ func (suite *httpClientTestSuite) TestRetryOnLeaderChange() {
 	defer cancel()
 
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		bo := retry.InitialBackoffer(100*time.Millisecond, time.Second, 0)
 		client := suite.client.WithBackoffer(bo)
 		for {
@@ -1167,7 +1165,11 @@ func (suite *httpClientTestSuite) TestRetryOnLeaderChange() {
 			if err != nil && strings.Contains(err.Error(), "context canceled") {
 				return
 			}
-			if !as.NoError(err) || !as.Len(healths, 2) {
+			if err != nil {
+				suite.T().Errorf("get health status: %v", err)
+				return
+			}
+			if !as.Len(healths, 2) {
 				return
 			}
 			select {
@@ -1176,7 +1178,7 @@ func (suite *httpClientTestSuite) TestRetryOnLeaderChange() {
 			default:
 			}
 		}
-	}()
+	})
 
 	leader := suite.cluster.GetLeaderServer()
 	re.NotNil(leader)

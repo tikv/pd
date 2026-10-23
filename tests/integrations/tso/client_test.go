@@ -263,8 +263,8 @@ func (suite *tsoClientTestSuite) TestGetTSAsync() {
 					tsFutures[j] = client.GetTSAsync(suite.ctx)
 				}
 				var lastTS uint64 = math.MaxUint64
-				for j := len(tsFutures) - 1; j >= 0; j-- {
-					physical, logical, err := tsFutures[j].Wait()
+				for _, tsFuture := range slices.Backward(tsFutures) {
+					physical, logical, err := tsFuture.Wait()
 					if !as.NoError(err) {
 						return
 					}

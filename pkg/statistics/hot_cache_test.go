@@ -36,7 +36,7 @@ func TestMain(m *testing.M) {
 func TestIsHot(t *testing.T) {
 	re := require.New(t)
 	ctx := t.Context()
-	for i := utils.RWType(0); i < utils.RWTypeLen; i++ {
+	for i := range utils.RWTypeLen {
 		cluster := core.NewBasicCluster()
 		cache := NewHotCache(ctx, cluster)
 		region, err := buildRegion(cluster, i, 3, 60)
