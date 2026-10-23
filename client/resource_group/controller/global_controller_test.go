@@ -336,7 +336,8 @@ func TestTryGetController(t *testing.T) {
 
 func TestTryGetControllerConcurrentCreation(t *testing.T) {
 	re := require.New(t)
-	ctx := t.Context()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	mockProvider := newMockResourceGroupProvider()
 	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, constants.NullKeyspaceID)

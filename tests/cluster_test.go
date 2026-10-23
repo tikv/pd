@@ -16,8 +16,6 @@ package tests
 
 import (
 	"context"
-	"net"
-	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
@@ -164,43 +162,4 @@ func cleanupClusterConfig(t *testing.T, config *clusterConfig) {
 			require.NoError(t, os.RemoveAll(dataDir))
 		})
 	}
-}
-
-func TestRunInitialServersRetriesPortConflict(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	cluster, err := NewTestCluster(ctx, 2)
-	re.NoError(err)
-	defer cluster.Destroy()
-
-	// The first member needs quorum while the second fails to bind. Observe
-	// the second error without waiting for the first startup to time out.
-	conf := cluster.config.InitialServers[1]
-	peerURL, err := url.Parse(conf.PeerURLs)
-	re.NoError(err)
-	listener, err := net.Listen("tcp", peerURL.Host)
-	re.NoError(err)
-	defer listener.Close()
-	conflictingURL := conf.PeerURLs
-
-	result := make(chan error, 1)
-	go func() { result <- cluster.RunInitialServers() }()
-	select {
-	case err := <-result:
-		re.NoError(err)
-	case <-time.After(20 * time.Second):
-		cancel()
-		<-result
-		t.Fatal("startup did not cancel the sibling waiting for quorum")
-	}
-	re.NotEqual(conflictingURL, conf.PeerURLs)
-	for _, s := range cluster.servers {
-		re.Equal(Running, s.State())
-	}
-	// Returning from startup must preserve the lifetime of running servers.
-	re.NotEmpty(cluster.WaitLeader())
-	re.NoError(cluster.StopAll())
-	re.NoError(cluster.RunInitialServers())
-	re.NotEmpty(cluster.WaitLeader())
 }

@@ -357,11 +357,14 @@ func (s *Server) startEtcd(ctx context.Context) (retErr error) {
 		return errs.ErrStartEtcd.Wrap(err).GenWithStackByCause()
 	}
 	cleanup := func() {
-		// Join the failed embedded server before callers retry or remove its data.
+		// NOTE: `embed.Etcd.Close()` can block for a long time in some failure paths
+		// (e.g. when starting a removed member that can never become ready). Avoid
+		// blocking the caller (tests may wait for the start error) by stopping the
+		// server synchronously and closing the embedded etcd asynchronously.
 		if etcd.Server != nil {
 			etcd.Server.Stop()
 		}
-		etcd.Close()
+		go etcd.Close()
 		if s.client != nil {
 			if cerr := s.client.Close(); cerr != nil {
 				log.Error("close etcd client meet error", errs.ZapError(errs.ErrCloseEtcdClient, cerr))
@@ -690,22 +693,11 @@ func (s *Server) IsClosed() bool {
 
 // Run runs the pd server.
 func (s *Server) Run() error {
-	return s.RunWithStartupContext(s.ctx)
-}
-
-// RunWithStartupContext runs the server with a cancelable etcd startup attempt.
-// Canceling ctx does not cancel the server lifetime, so failed starts can retry.
-func (s *Server) RunWithStartupContext(ctx context.Context) error {
-	startupCtx, cancel := context.WithCancel(s.ctx)
-	stop := context.AfterFunc(ctx, cancel)
-	defer stop()
-	defer cancel()
-
 	go systimemon.StartMonitor(s.ctx, time.Now, func() {
 		log.Error("system time jumps backward", errs.ZapError(errs.ErrIncorrectSystemTime))
 		timeJumpBackCounter.Inc()
 	})
-	if err := s.startEtcd(startupCtx); err != nil {
+	if err := s.startEtcd(s.ctx); err != nil {
 		return err
 	}
 

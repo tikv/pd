@@ -178,16 +178,12 @@ func NewTestServer(ctx context.Context, cfg *config.Config, services []string, h
 
 // Run starts to run a TestServer.
 func (s *TestServer) Run() error {
-	return s.runWithStartupContext(context.Background())
-}
-
-func (s *TestServer) runWithStartupContext(ctx context.Context) error {
 	s.Lock()
 	defer s.Unlock()
 	if s.state != Initial && s.state != Stop {
 		return errors.Errorf("server(state%d) cannot run", s.state)
 	}
-	if err := s.server.RunWithStartupContext(ctx); err != nil {
+	if err := s.server.Run(); err != nil {
 		return err
 	}
 	s.state = Running
@@ -703,22 +699,16 @@ func RunServer(server *TestServer) <-chan error {
 
 // RunServers starts to run multiple TestServer.
 func RunServers(servers []*TestServer) error {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	results := make(chan error, len(servers))
-	for _, s := range servers {
-		go func() { results <- s.runWithStartupContext(ctx) }()
+	res := make([]<-chan error, len(servers))
+	for i, s := range servers {
+		res[i] = RunServer(s)
 	}
-	var firstErr error
-	for range servers {
-		if err := <-results; err != nil && firstErr == nil {
-			firstErr = errors.WithStack(err)
-			// A sibling may be waiting for the failed member to form quorum.
-			// Join every startup before retry cleanup takes server locks.
-			cancel()
+	for _, c := range res {
+		if err := <-c; err != nil {
+			return errors.WithStack(err)
 		}
 	}
-	return firstErr
+	return nil
 }
 
 // RunInitialServers starts to run servers in InitialServers.
