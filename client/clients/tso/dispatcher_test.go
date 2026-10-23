@@ -232,6 +232,124 @@ func (s *testTSODispatcherSuite) TestBasic() {
 	s.reqMustNotReady(req)
 }
 
+func (s *testTSODispatcherSuite) TestDispatchRequestCancellationAfterEnqueue() {
+	for _, target := range []string{"request", "client", "tso-client"} {
+		s.Run(target, func() {
+			re := require.New(s.T())
+			requestCtx, cancelRequest := context.WithCancel(context.Background())
+			defer cancelRequest()
+			clientCtx, cancelClient := context.WithCancel(context.Background())
+			defer cancelClient()
+			tsoCtx, cancelTSO := context.WithCancel(context.Background())
+			defer cancelTSO()
+			cancel := map[string]context.CancelFunc{
+				"request": cancelRequest, "client": cancelClient, "tso-client": cancelTSO,
+			}[target]
+			canceledAfterEnqueue := false
+			re.NoError(failpoint.EnableCall("github.com/tikv/pd/client/clients/tso/afterPushTSORequest", func() {
+				cancel()
+				canceledAfterEnqueue = true
+			}))
+			defer func() {
+				re.NoError(failpoint.Disable("github.com/tikv/pd/client/clients/tso/afterPushTSORequest"))
+			}()
+
+			cli := &Cli{ctx: tsoCtx}
+			cli.dispatcher.Store(s.dispatcher)
+			req := s.getReq(requestCtx)
+			req.clientCtx = clientCtx
+			retryable, err := cli.DispatchRequest(req)
+			re.True(canceledAfterEnqueue, "cancellation must happen after the request is enqueued")
+			re.False(retryable)
+			// An enqueue must not report an error that makes innerClient finish it again.
+			re.NoError(err)
+			re.Empty(req.done, "only the dispatcher may complete the enqueued request")
+
+			s.streamInner.generateNext()
+			select {
+			case err = <-req.done:
+				re.NoError(err)
+			case <-time.After(time.Second):
+				s.T().Fatal("dispatcher did not complete the enqueued request")
+			}
+			re.Positive(req.physical)
+			re.Positive(req.logical)
+		})
+	}
+}
+
+func TestPushToClosedDispatcher(t *testing.T) {
+	for _, target := range []string{"before-enqueue", "after-enqueue"} {
+		t.Run(target, func(t *testing.T) {
+			re := require.New(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			td := &tsoDispatcher{ctx: ctx, cancel: cancel, tsoRequestCh: make(chan *Request, 1)}
+			t.Cleanup(td.close)
+			if target == "before-enqueue" {
+				td.close()
+			} else {
+				re.NoError(failpoint.EnableCall("github.com/tikv/pd/client/clients/tso/afterPushTSORequest", func() {
+					td.close()
+				}))
+				t.Cleanup(func() {
+					re.NoError(failpoint.Disable("github.com/tikv/pd/client/clients/tso/afterPushTSORequest"))
+				})
+			}
+			req := &Request{requestCtx: context.Background(), clientCtx: context.Background(), done: make(chan error, 1)}
+			td.push(req)
+			select {
+			case err := <-req.done:
+				re.ErrorIs(err, context.Canceled)
+			case <-time.After(time.Second):
+				t.Fatal("request sent to a closed dispatcher was not completed")
+			}
+			re.Empty(td.tsoRequestCh)
+		})
+	}
+}
+
+func TestPushCancellationWithFullQueue(t *testing.T) {
+	for _, target := range []string{"request", "client", "dispatcher"} {
+		t.Run(target, func(t *testing.T) {
+			re := require.New(t)
+			requestCtx, cancelRequest := context.WithCancel(context.Background())
+			defer cancelRequest()
+			clientCtx, cancelClient := context.WithCancel(context.Background())
+			defer cancelClient()
+			ctx, cancelDispatcher := context.WithCancel(context.Background())
+			td := &tsoDispatcher{ctx: ctx, cancel: cancelDispatcher, tsoRequestCh: make(chan *Request, 1)}
+			// No consumer can free this slot before cleanup.
+			td.tsoRequestCh <- &Request{done: make(chan error, 1)}
+			req := &Request{requestCtx: requestCtx, clientCtx: clientCtx, done: make(chan error, 1)}
+			pushed := make(chan struct{})
+			go func() {
+				td.push(req)
+				close(pushed)
+			}()
+			t.Cleanup(func() {
+				td.close()
+				<-pushed
+				td.revokePendingRequests(errs.ErrClosing)
+			})
+			cancel := map[string]context.CancelFunc{
+				"request": cancelRequest, "client": cancelClient, "dispatcher": cancelDispatcher,
+			}[target]
+			cancel()
+			select {
+			case <-pushed:
+			case <-time.After(time.Second):
+				t.Fatal("enqueue did not stop after cancellation")
+			}
+			select {
+			case err := <-req.done:
+				re.ErrorIs(err, context.Canceled)
+			default:
+				t.Fatal("canceled request was not completed")
+			}
+		})
+	}
+}
+
 func (s *testTSODispatcherSuite) TestHandleProcessRequestErrorRemoveConnOnCalleeMismatch() {
 	svcDiscovery := &countingServiceDiscovery{}
 	td := newTSODispatcher(context.Background(), &mockTSOServiceProvider{
