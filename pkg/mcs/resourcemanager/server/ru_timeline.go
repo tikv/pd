@@ -39,9 +39,9 @@ const (
 	// of the resource manager before its reported seconds are dropped.
 	ruTimelineClockSkew = 5
 	// ruSourceSeconds spans every second a flush may still summarize, from the
-	// start of the window holding the replay horizon to the tolerated clock
-	// skew.
-	ruSourceSeconds = ruTimelineSeconds + ruWindowSeconds + ruTimelineClockSkew
+	// start of the current window to the tolerated clock skew. Windows only
+	// move forward, so an older second is never summarized again.
+	ruSourceSeconds = ruTimelineSeconds + ruTimelineClockSkew
 	// ruTimelineMaxSources bounds the retained sources, which hold nearly all
 	// of the timeline's memory.
 	ruTimelineMaxSources = 10000
@@ -171,10 +171,9 @@ func (t *ruTimeline) record(item *consumptionItem, now time.Time) {
 	}
 	if end <= first || start >= limit {
 		// Too late to be summarized, or too far ahead of the resource manager
-		// clock. The receive window is [now-150, now+5), wider than the
-		// summarized [now-90, now-30): seconds before now-90 are accepted but
-		// never enter a published window. These drops are silent for now; the
-		// TODO is to expose them by reason.
+		// clock. The receive window is [now-90, now+5): a second before now-90
+		// never enters a published window again. These drops are silent for
+		// now; the TODO is to expose them by reason.
 		return
 	}
 	// Only the intersection with the receive window is useful; everything
@@ -300,11 +299,11 @@ func (t *ruTimeline) flush(now time.Time) {
 		t.rejected = 0
 		t.lastRejectLog = sec
 	}
-	// Drop sources that have not reported for the whole retention span, then
+	// Drop sources whose newest second can no longer be summarized, then
 	// groups without sources.
 	for key, g := range t.groups {
 		for id, source := range g.sources {
-			if source.newest < sec-ruWindowSeconds-ruWindowDelay-ruWindowSeconds {
+			if source.newest < sec-ruTimelineSeconds {
 				delete(g.sources, id)
 				t.sourceCount--
 			}
