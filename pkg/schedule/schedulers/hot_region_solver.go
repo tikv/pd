@@ -318,7 +318,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 						useRevertPlacementScope := bs.mayUsePlacementScope(dstStore.IsTiKV())
 						if revertRegion == nil || revertRegion.GetID() == bs.cur.region.GetID() ||
 							!allowRevertRegion(revertRegion, srcStoreID) ||
-							revertFit != nil && !bs.isRevertRegionValid(revertRegion, revertFit) {
+							!bs.isRevertRegionValid(revertRegion, revertFit) {
 							continue
 						}
 						if useRevertPlacementScope {
@@ -839,6 +839,12 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*statistics.StoreLoadDetai
 			moveLeaderFilters := []filter.Filter{
 				&filter.StoreStateFilter{ActionScope: bs.sche.GetName(), MoveRegion: true, OperatorLevel: constant.High},
 				filter.NewHotRegionEvictedTargetFilter(bs.sche.GetName()),
+			}
+			if !bs.GetSchedulerConfig().IsPlacementRulesEnabled() {
+				// Moving the leader to a new store also replaces a peer, so
+				// preserve its location isolation when placement rules are disabled.
+				moveLeaderFilters = append(moveLeaderFilters, filter.NewPlacementSafeguard(bs.sche.GetName(), bs.GetSchedulerConfig(),
+					bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore, bs.curFit))
 			}
 			if leaderFilter := filter.NewPlacementLeaderSafeguardWithFit(bs.sche.GetName(), bs.GetSchedulerConfig(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore, bs.curFit, true /*allowMoveLeader*/); leaderFilter != nil {
 				filters = append(filters, leaderFilter)

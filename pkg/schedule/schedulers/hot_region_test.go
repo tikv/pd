@@ -1688,6 +1688,51 @@ func TestHotReadRegionScheduleByteRateOnly(t *testing.T) {
 	clearPendingInfluence(hb)
 }
 
+func TestHotReadMoveLeaderLocationSafeguard(t *testing.T) {
+	for _, enablePlacementRules := range []bool{false, true} {
+		for _, rankFormula := range []string{"v1", "v2"} {
+			for _, targetHost := range []string{"h2", "h5"} {
+				t.Run(fmt.Sprintf("rules=%t/rank=%s/target-host=%s", enablePlacementRules, rankFormula, targetHost), func(t *testing.T) {
+					re := require.New(t)
+					cancel, _, tc, oc := prepareSchedulersTest()
+					defer cancel()
+					tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+					tc.SetEnablePlacementRules(enablePlacementRules)
+					tc.SetMaxReplicasWithLabel(enablePlacementRules, 3, "host")
+					scheduler, err := CreateScheduler(readType, oc, storage.NewStorageWithMemoryBackend(), nil)
+					re.NoError(err)
+					hb := scheduler.(*hotScheduler)
+					hb.conf.ReadPriorities = []string{utils.BytePriority, utils.KeyPriority}
+					hb.conf.setRankFormulaVersion(rankFormula)
+					hb.conf.setHistorySampleDuration(0)
+
+					for id, host := range map[uint64]string{1: "h1", 2: "h2", 3: "h3", 4: "h4", 5: targetHost} {
+						tc.AddLabelsStore(id, 3, map[string]string{"host": host})
+					}
+					for id, rate := range map[uint64]float64{1: 7.5, 2: 4.9, 3: 3.7, 4: 6, 5: 0} {
+						tc.UpdateStorageReadBytes(id, uint64(rate*units.MiB*utils.StoreHeartBeatReportInterval))
+					}
+					addRegionInfo(tc, utils.Read, []testRegionInfo{
+						{1, []uint64{1, 2, 3}, 512 * units.KiB, 0, 0},
+						{2, []uint64{2, 1, 3}, 511 * units.KiB, 0, 0},
+						{3, []uint64{1, 2, 3}, 510 * units.KiB, 0, 0},
+					})
+
+					ops, _ := hb.Schedule(tc, false)
+					re.Len(ops, 1)
+					if targetHost == "h2" {
+						// Store 5 shares the host of an existing peer. Reject the
+						// replacement, but still allow transfer to an existing peer.
+						operatorutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 1, 3)
+					} else {
+						operatorutil.CheckTransferPeerWithLeaderTransfer(re, ops[0], operator.OpHotRegion, 1, 5)
+					}
+				})
+			}
+		}
+	}
+}
+
 func TestHotReadRegionScheduleSkipsLeaderEvictedMoveLeaderTarget(t *testing.T) {
 	testCases := []struct {
 		name string
