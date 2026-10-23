@@ -187,7 +187,8 @@ func NewKeyspaceManager(
 	return manager
 }
 
-// Bootstrap saves default keyspace info.
+// Bootstrap creates missing reserved and pre-allocated keyspaces. It can be
+// retried on leader changes and preserves existing keyspaces and their groups.
 func (manager *Manager) Bootstrap() error {
 	bootstrapKeyspaceID := GetBootstrapKeyspaceID()
 	bootstrapKeyspaceName := GetBootstrapKeyspaceName()
@@ -199,6 +200,7 @@ func (manager *Manager) Bootstrap() error {
 	preAlloc := manager.config.GetPreAlloc()
 	for _, keyspaceName := range preAlloc {
 		go func() {
+			defer func() { failpoint.InjectCall("preAllocKeyspaceFinished", keyspaceName) }()
 			config, err := manager.kgm.GetKeyspaceConfigByKind(endpoint.Basic)
 			if err != nil {
 				log.Error("[keyspace] failed to get keyspace config for pre-alloc keyspace", zap.String("keyspaceName", keyspaceName), zap.Error(err))
@@ -209,15 +211,12 @@ func (manager *Manager) Bootstrap() error {
 				CreateTime: time.Now().Unix(),
 				Config:     config,
 			}
-			keyspace, err := manager.CreateKeyspace(req)
-			// Ignore the keyspaceExists error for the same reason as saving default keyspace.
+			// CreateKeyspace also assigns the group. An existing keyspace may
+			// have been disabled or moved by a group split/merge, so leave it
+			// untouched instead of assigning it to a newly selected group.
+			_, err = manager.CreateKeyspace(req)
 			if err != nil && err != errs.ErrKeyspaceExists {
 				log.Error("[keyspace] failed to create pre-alloc keyspace", zap.String("keyspaceName", keyspaceName), zap.Error(err))
-				return
-			}
-			if err := manager.kgm.UpdateKeyspaceForGroup(endpoint.Basic, config[TSOKeyspaceGroupIDKey], keyspace.GetId(), opAdd); err != nil {
-				log.Error("[keyspace] failed to update pre-alloc keyspace for group", zap.String("keyspaceName", keyspaceName), zap.Error(err))
-				return
 			}
 		}()
 	}
@@ -225,6 +224,9 @@ func (manager *Manager) Bootstrap() error {
 }
 
 func (manager *Manager) initReserveKeyspace(id uint32, name string) error {
+	if _, err := manager.LoadKeyspace(name); err != errs.ErrKeyspaceNotFound {
+		return err
+	}
 	boundType := manager.getRegionBoundType()
 	// Split Keyspace Region for default/system keyspace.
 	if err := manager.splitKeyspaceRegion(id, false, boundType); err != nil {
@@ -243,6 +245,11 @@ func (manager *Manager) initReserveKeyspace(id uint32, name string) error {
 	if err != nil {
 		return err
 	}
+	if manager.kgm != nil {
+		// GroupManager.Bootstrap reserves this keyspace in the default group.
+		// Recovery must not assign it to another, less loaded group.
+		config[TSOKeyspaceGroupIDKey] = strconv.FormatUint(uint64(constant.DefaultKeyspaceGroupID), 10)
+	}
 
 	config[RegionBoundType] = boundType.String()
 	// It is needed to set for system keyspace in next-gen.
@@ -251,12 +258,11 @@ func (manager *Manager) initReserveKeyspace(id uint32, name string) error {
 	}
 	meta.Config = config
 	err = manager.saveNewKeyspace(meta)
-	// It's possible that default/system keyspace already exists in the storage (e.g. PD restart/recover),
-	// so we ignore the keyspaceExists error.
-	if err != nil && err != errs.ErrKeyspaceExists {
-		return err
+	// A concurrent Bootstrap may have created it since LoadKeyspace.
+	if err == errs.ErrKeyspaceExists {
+		return nil
 	}
-	return manager.kgm.UpdateKeyspaceForGroup(endpoint.Basic, config[TSOKeyspaceGroupIDKey], meta.GetId(), opAdd)
+	return err
 }
 
 // UpdateConfig update keyspace manager's config.
