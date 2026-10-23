@@ -15,9 +15,12 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
@@ -505,6 +508,64 @@ func TestBackgroundMetricsFlushResetsRUTimeline(t *testing.T) {
 	re.Zero(resultsLen())
 	re.Empty(timeline.groups)
 	re.Zero(timeline.since)
+}
+
+// TestBackgroundMetricsFlushPushesRUPeak pins that the push path carries the
+// RU peak and withdraws it from the push target when the term ends.
+func TestBackgroundMetricsFlushPushesRUPeak(t *testing.T) {
+	re := require.New(t)
+	peakName := []byte("resource_manager_resource_unit_peak_per_second_rolling_60s")
+	var (
+		mu      sync.Mutex
+		methods []string
+		pushes  [][]byte
+	)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		// PUT replaces what the pod pushed before; POST would keep the
+		// withdrawn peak on the receiver.
+		methods = append(methods, r.Method)
+		pushes = append(pushes, body)
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	lastPush := func() []byte {
+		mu.Lock()
+		defer mu.Unlock()
+		if len(pushes) == 0 {
+			return nil
+		}
+		return pushes[len(pushes)-1]
+	}
+
+	m := newManagerBase(&ControllerConfig{
+		PushMetricsAddress:  server.URL,
+		PushMetricsInterval: typeutil.Duration{Duration: 50 * time.Millisecond},
+	}, ResourceGroupWriteRoleLegacyAll)
+	// Isolate the collector from the other managers of this package's tests.
+	m.metrics.ruTimeline = newRUTimeline(newRUSummaryCollector())
+	timeline := m.metrics.ruTimeline
+	now := time.Now()
+	timeline.since = now.Unix() - 3600
+	timeline.record(timelineReport(1, now.Unix()-80, make([][2]float64, 60)), now)
+	timeline.flush(now)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	m.wg.Add(1)
+	go m.backgroundMetricsFlush(ctx)
+	testutil.Eventually(re, func() bool {
+		return bytes.Contains(lastPush(), peakName)
+	})
+	cancel()
+	m.wg.Wait()
+	re.NotContains(string(lastPush()), string(peakName))
+	mu.Lock()
+	defer mu.Unlock()
+	for _, method := range methods {
+		re.Equal(http.MethodPut, method)
+	}
 }
 
 func TestDispatchConsumptionIncludesOnlyConsumption(t *testing.T) {
