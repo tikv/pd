@@ -280,17 +280,18 @@ func (t *ruTimeline) flush(now time.Time) {
 	// remove the visible time.
 	if sec >= t.since+ruWindowDelay {
 		start := sec - ruWindowSeconds - ruWindowDelay
-		t.collector.mu.Lock()
+		// Summarize outside the collector lock, so scrapes only wait for the
+		// results to be swapped in. A group without any reported second in the
+		// window (not even a zero watermark) is left out, which withdraws its
+		// series instead of exposing a stale peak until the source is recycled.
+		results := make(map[trackerKey]publishedRUSummary, len(t.groups))
 		for key, g := range t.groups {
 			if peak, ok := g.summarize(start); ok {
-				t.collector.results[key] = publishedRUSummary{keyspaceName: g.keyspaceName, peak: peak}
-			} else {
-				// No second in the window was reported (not even a zero
-				// watermark): withdraw the series instead of exposing a stale
-				// peak until the source is recycled.
-				delete(t.collector.results, key)
+				results[key] = publishedRUSummary{keyspaceName: g.keyspaceName, peak: peak}
 			}
 		}
+		t.collector.mu.Lock()
+		t.collector.results = results
 		t.collector.mu.Unlock()
 	}
 	if t.rejected > 0 && sec-t.lastRejectLog >= 60 {
