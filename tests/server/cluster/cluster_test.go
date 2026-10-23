@@ -1577,6 +1577,12 @@ func TestStaleTermHeartbeat(t *testing.T) {
 func TestTransferLeaderForScheduler(t *testing.T) {
 	re := require.New(t)
 	ctx := t.Context()
+	// Repeated transfers can trigger the campaign frequency check and an extra
+	// etcd leader transfer while this test is transferring leadership back.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", `return(true)`))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
+	}()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))
 	defer func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
@@ -1633,16 +1639,12 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{1, 2})
 
 	// transfer PD leader to another PD
-	err = tc.ResignLeader()
-	re.NoError(err)
-	rc.Stop()
-	leader = tc.WaitLeader()
-	re.NotEmpty(leader)
-	leaderServer = tc.GetLeaderServer()
+	err = leaderServer.ResignLeader()
+	leader = tc.WaitLeaderChange(leader)
+	re.NotEmpty(leader, "resign leader returned: %v", err)
+	leaderServer = tc.GetServer(leader)
 	rc1 := leaderServer.GetRaftCluster()
 	re.NotNil(rc1)
-	err = rc1.Start(leaderServer.GetServer(), false)
-	re.NoError(err)
 
 	// region heartbeat
 	id = leaderServer.GetAllocator()
@@ -1659,16 +1661,12 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{1, 2})
 
 	// transfer PD leader back to the previous PD
-	err = tc.ResignLeader()
-	re.NoError(err)
-	rc1.Stop()
-	leader = tc.WaitLeader()
-	re.NotEmpty(leader)
-	leaderServer = tc.GetLeaderServer()
+	err = leaderServer.ResignLeader()
+	leader = tc.WaitLeaderChange(leader)
+	re.NotEmpty(leader, "resign leader returned: %v", err)
+	leaderServer = tc.GetServer(leader)
 	rc = leaderServer.GetRaftCluster()
 	re.NotNil(rc)
-	err = rc.Start(leaderServer.GetServer(), false)
-	re.NoError(err)
 	// region heartbeat
 	id = leaderServer.GetAllocator()
 	putRegionWithLeader(re, rc, id, 1)
