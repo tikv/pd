@@ -19,9 +19,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"go.uber.org/zap"
+
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
-	"go.uber.org/zap"
 )
 
 const (
@@ -130,10 +131,8 @@ func (t *ruTimeline) snapshot() *rmpb.RUConsumptionBySecond {
 func (t *ruTimeline) snapshotLocked(now time.Time) *rmpb.RUConsumptionBySecond {
 	t.advanceLocked(now)
 	end := now.Unix()
-	start := max(t.from, end-ruTimelineSeconds)
-	if end < start {
-		return &rmpb.RUConsumptionBySecond{StartUnixSec: end, EndUnixSec: end}
-	}
+	// from passes end after a clock rollback, which leaves the report empty.
+	start := min(max(t.from, end-ruTimelineSeconds), end)
 	buckets := make([]*rmpb.RUConsumptionBucket, 0, end-start)
 	for second := start; second < end; second++ {
 		b := t.buckets[second%int64(len(t.buckets))]
@@ -197,7 +196,8 @@ func trimRUTimelines(requests []*rmpb.TokenBucketRequest, budget int) {
 	}
 	batch := &rmpb.TokenBucketsRequest{Requests: requests}
 	// Fast path: normal reports carry few seconds and fit without resizing.
-	if batch.Size() <= budget {
+	// Without any timeline there is nothing to trim.
+	if len(saved) == 0 || batch.Size() <= budget {
 		return
 	}
 	setLimit(0)
