@@ -576,6 +576,7 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegionForMergeRegion()
 }
 
 func (suite *operatorControllerTestSuite) TestConcurrentMergeConflict() {
+	t := suite.T()
 	re := suite.Require()
 
 	opts := mockconfig.NewTestOptions()
@@ -598,20 +599,26 @@ func (suite *operatorControllerTestSuite) TestConcurrentMergeConflict() {
 		cluster.PutRegion(right)
 		wg := &sync.WaitGroup{}
 		for range 5 {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				ops1, err := CreateMergeRegionOperator("merge-region", cluster, left, middle, OpMerge)
-				if !suite.NoError(err) || !suite.Len(ops1, 2) {
+				if err != nil {
+					t.Errorf("create left-middle merge operators: %v", err)
+					return
+				}
+				if !suite.Len(ops1, 2) {
 					return
 				}
 				controller.AddWaitingOperator(ops1...)
 				ops2, err := CreateMergeRegionOperator("merge-region", cluster, middle, right, OpMerge)
-				if !suite.NoError(err) || !suite.Len(ops2, 2) {
+				if err != nil {
+					t.Errorf("create middle-right merge operators: %v", err)
+					return
+				}
+				if !suite.Len(ops2, 2) {
 					return
 				}
 				controller.AddWaitingOperator(ops2...)
-			}()
+			})
 		}
 		wg.Wait()
 		var count int

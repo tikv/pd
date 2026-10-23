@@ -384,11 +384,9 @@ func TestSomeStoresFilteredScatterGroupInConcurrency(t *testing.T) {
 	scatterer := NewRegionScatterer(ctx, tc, oc, tc.AddPendingProcessedRegions)
 	var wg sync.WaitGroup
 	for j := range 10 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			scatterOnce(re, tc, scatterer, fmt.Sprintf("group-%v", j))
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -2083,9 +2081,7 @@ func TestScatterConcurrentPlacementViews(t *testing.T) {
 	results := make(chan error, len(regions))
 	var workers sync.WaitGroup
 	for worker := range 8 {
-		workers.Add(1)
-		go func() {
-			defer workers.Done()
+		workers.Go(func() {
 			for i := worker; i < len(regions); i += 8 {
 				region := regions[i]
 				original := region.Clone()
@@ -2117,7 +2113,7 @@ func TestScatterConcurrentPlacementViews(t *testing.T) {
 				}
 				results <- nil
 			}
-		}()
+		})
 	}
 	workers.Wait()
 	close(results)

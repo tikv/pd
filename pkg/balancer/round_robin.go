@@ -26,7 +26,7 @@ type RoundRobin[T uint32 | string] struct {
 	syncutil.RWMutex
 	nodes  []T
 	exists map[T]struct{}
-	next   uint32
+	next   atomic.Uint32
 }
 
 // NewRoundRobin creates a balancer that selects nodes in a round-robin fashion.
@@ -44,7 +44,7 @@ func (r *RoundRobin[T]) Next() (t T) {
 	if len(r.nodes) == 0 {
 		return
 	}
-	next := atomic.AddUint32(&r.next, 1)
+	next := r.next.Add(1)
 	node := r.nodes[(int(next)-1)%len(r.nodes)]
 	return node
 }

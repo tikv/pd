@@ -270,6 +270,19 @@ func (suite *keyspaceGroupTestSuite) TestSetNodeAndPriorityKeyspaceGroup() {
 	output, err := tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	re.Contains(string(output), "Success!")
+	// Wait for automatic replica repair after setting a single node so its
+	// membership write cannot conflict with the following validation reads.
+	testutil.Eventually(re, func() bool {
+		output, err := tests.ExecuteCommand(cmd, "-u", suite.pdAddr, "keyspace-group", defaultKeyspaceGroupID)
+		if err != nil {
+			return false
+		}
+		var keyspaceGroup endpoint.KeyspaceGroup
+		if err := json.Unmarshal(output, &keyspaceGroup); err != nil {
+			return false
+		}
+		return len(keyspaceGroup.Members) == mcs.DefaultKeyspaceGroupReplicaCount
+	})
 	args = []string{"-u", suite.pdAddr, "keyspace-group", "set-node", defaultKeyspaceGroupID, "", ""}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)

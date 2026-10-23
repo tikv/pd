@@ -22,7 +22,7 @@ import (
 
 func TestIsEndStatus(t *testing.T) {
 	re := require.New(t)
-	for st := OpStatus(0); st < firstEndStatus; st++ {
+	for st := range firstEndStatus {
 		re.False(IsEndStatus(st))
 	}
 	for st := firstEndStatus; st < statusCount; st++ {

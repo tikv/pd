@@ -5027,12 +5027,10 @@ func TestConcurrentStoreStats(t *testing.T) {
 			break
 		}
 		storeID := i + 1
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			cluster.UpdateAllStoreStatus()
 			cluster.checkStores()
-		}()
+		})
 		re.NoError(cluster.RemoveStore(storeID, false))
 		testutil.Eventually(re, func() bool {
 			return metapb.NodeState_Removing == cluster.GetStore(storeID).GetNodeState()
@@ -5212,14 +5210,12 @@ func TestStopDoesNotHoldClusterLockWhileWaitingSchedulingJobs(t *testing.T) {
 	cluster.schedulingController.running = true
 
 	blockedOnClusterLock := make(chan struct{})
-	cluster.schedulingController.wg.Add(1)
-	go func() {
-		defer cluster.schedulingController.wg.Done()
+	cluster.schedulingController.wg.Go(func() {
 		<-cluster.schedulingController.ctx.Done()
 		cluster.RLock()
 		close(blockedOnClusterLock)
 		cluster.RUnlock()
-	}()
+	})
 
 	stopped := make(chan struct{})
 	go func() {

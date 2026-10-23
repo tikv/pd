@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"math"
 	"runtime/trace"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -447,8 +448,8 @@ func (td *tsoDispatcher) processRequests(
 		}
 	}
 	defer func() {
-		for i := len(spans) - 1; i >= 0; i-- {
-			spans[i].Finish()
+		for _, span := range slices.Backward(spans) {
+			span.Finish()
 		}
 		traceRegion.End()
 	}()

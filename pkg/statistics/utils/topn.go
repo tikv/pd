@@ -82,6 +82,20 @@ func (tn *TopN) GetAll() []TopNItem {
 	return tn.topns[0].getAll()
 }
 
+// Range calls f for each item until f returns false, holding the read lock.
+// The callback must not call other methods on tn.
+func (tn *TopN) Range(f func(TopNItem) bool) {
+	tn.rw.RLock()
+	defer tn.rw.RUnlock()
+	for _, items := range [][]TopNItem{tn.topns[0].topn.items, tn.topns[0].rest.items} {
+		for _, item := range items {
+			if !f(item) {
+				return
+			}
+		}
+	}
+}
+
 // Get returns the item with given id, nil if there is no such item.
 func (tn *TopN) Get(id uint64) TopNItem {
 	tn.rw.RLock()
@@ -154,8 +168,9 @@ func (stn *singleTopN) getAllTopN() []TopNItem {
 }
 
 func (stn *singleTopN) getAll() []TopNItem {
-	topn := stn.topn.GetAll()
-	return append(topn, stn.rest.GetAll()...)
+	items := make([]TopNItem, 0, stn.topn.Len()+stn.rest.Len())
+	items = append(items, stn.topn.items...)
+	return append(items, stn.rest.items...)
 }
 
 func (stn *singleTopN) get(id uint64) TopNItem {

@@ -545,15 +545,17 @@ func TestForwardTsoConcurrently(t *testing.T) {
 
 	wg := sync.WaitGroup{}
 	for i := range 3 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			pdClient, err := pd.NewClientWithContext(
 				context.Background(),
 				caller.TestComponent,
 				[]string{suite.backendEndpoints},
 				pd.SecurityOption{})
-			if !as.NoError(err) || !as.NotNil(pdClient) {
+			if err != nil {
+				t.Errorf("create PD client: %v", err)
+				return
+			}
+			if !as.NotNil(pdClient) {
 				return
 			}
 			defer pdClient.Close()
@@ -565,7 +567,7 @@ func TestForwardTsoConcurrently(t *testing.T) {
 					return
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -602,16 +604,18 @@ func BenchmarkForwardTsoConcurrently(b *testing.B) {
 			b.ResetTimer()
 			for b.Loop() {
 				for i, client := range clients {
-					wg.Add(1)
-					go func() {
-						defer wg.Done()
+					wg.Go(func() {
 						for range 1000 {
 							min, err := client.UpdateServiceGCSafePoint(context.Background(), fmt.Sprintf("service-%d", i), 1000, 1) //nolint:staticcheck
-							if !as.NoError(err) || !as.Equal(uint64(0), min) {
+							if err != nil {
+								b.Errorf("update service GC safe point: %v", err)
+								return
+							}
+							if !as.Equal(uint64(0), min) {
 								return
 							}
 						}
-					}()
+					})
 				}
 			}
 			wg.Wait()

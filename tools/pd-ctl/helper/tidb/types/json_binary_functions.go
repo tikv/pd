@@ -210,7 +210,7 @@ func (bj BinaryJSON) GetElemDepth() int {
 	case JSONTypeCodeObject:
 		elemCount := bj.GetElemCount()
 		maxDepth := 0
-		for i := 0; i < elemCount; i++ {
+		for i := range elemCount {
 			obj := bj.objectGetVal(i)
 			depth := obj.GetElemDepth()
 			if depth > maxDepth {
@@ -221,7 +221,7 @@ func (bj BinaryJSON) GetElemDepth() int {
 	case JSONTypeCodeArray:
 		elemCount := bj.GetElemCount()
 		maxDepth := 0
-		for i := 0; i < elemCount; i++ {
+		for i := range elemCount {
 			obj := bj.ArrayGetElem(i)
 			depth := obj.GetElemDepth()
 			if depth > maxDepth {
