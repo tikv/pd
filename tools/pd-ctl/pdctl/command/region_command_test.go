@@ -112,6 +112,26 @@ func TestRegionKeyspaceIDPathWithLimit(t *testing.T) {
 	re.Contains(out.String(), `{"ok":true}`)
 }
 
+func TestRegionKeyspaceIDPathWithBatch(t *testing.T) {
+	re := require.New(t)
+	rt := &captureRegionRoundTripper{body: `{"ok":true}`}
+	oldClient := dialClient
+	dialClient = &http.Client{Transport: rt}
+	defer func() { dialClient = oldClient }()
+
+	cmd := NewRegionWithKeyspaceCommand()
+	cmd.PersistentFlags().String("pd", "http://mock-pd:2379", "")
+	cmd.SetArgs([]string{"id", "1", "0", "--batch", "1024"})
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+
+	re.NoError(cmd.Execute())
+	re.Equal("/pd/api/v1/regions/keyspace/id/1", rt.path)
+	re.Equal("batch=1024&limit=0", rt.rawQuery)
+	re.Contains(out.String(), `{"ok":true}`)
+}
+
 func TestRegionKeyspaceIDTableIDPathWithLimit(t *testing.T) {
 	re := require.New(t)
 	rt := &captureRegionRoundTripper{body: `{"ok":true}`}
@@ -136,6 +156,25 @@ func TestRegionKeyspaceIDTableIDPathWithLimit(t *testing.T) {
 	re.Equal("/pd/api/v1/regions/key", rt.path)
 	re.Equal(query.Encode(), rt.rawQuery)
 	re.Contains(out.String(), `{"ok":true}`)
+}
+
+func TestRegionKeyspaceIDTableIDRejectsBatch(t *testing.T) {
+	re := require.New(t)
+	rt := &captureRegionRoundTripper{body: `{"ok":true}`}
+	oldClient := dialClient
+	dialClient = &http.Client{Transport: rt}
+	defer func() { dialClient = oldClient }()
+
+	cmd := NewRegionWithKeyspaceCommand()
+	cmd.PersistentFlags().String("pd", "http://mock-pd:2379", "")
+	cmd.SetArgs([]string{"id", "1", "table-id", "100", "--batch", "1024"})
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+
+	re.NoError(cmd.Execute())
+	re.Empty(rt.path)
+	re.Contains(out.String(), "--batch is not supported with table-id")
 }
 
 func TestRegionKeyspaceIDInvalidKeyspaceID(t *testing.T) {
@@ -192,6 +231,20 @@ func TestRegionKeyspaceIDInvalidLimit(t *testing.T) {
 
 	re.NoError(cmd.Execute())
 	re.Contains(out.String(), "limit should be a number")
+}
+
+func TestRegionKeyspaceIDInvalidBatch(t *testing.T) {
+	re := require.New(t)
+
+	cmd := NewRegionWithKeyspaceCommand()
+	cmd.PersistentFlags().String("pd", "http://mock-pd:2379", "")
+	cmd.SetArgs([]string{"id", "1", "--batch", "0"})
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+
+	re.NoError(cmd.Execute())
+	re.Contains(out.String(), "batch should be a positive number")
 }
 
 func TestRegionKeyspaceIDWrongTableIDLiteral(t *testing.T) {
