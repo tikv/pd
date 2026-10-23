@@ -15,9 +15,12 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
@@ -456,7 +459,7 @@ func checkBackgroundMetricsFlush(ctx context.Context, re *require.Assertions, ma
 		},
 		KeyspaceId: keyspaceIDValue,
 	}
-	err = manager.dispatchConsumption(req)
+	err = manager.dispatchConsumption(1, req)
 	re.NoError(err)
 
 	keyspaceID := ExtractKeyspaceID(req.GetKeyspaceId())
@@ -468,6 +471,97 @@ func checkBackgroundMetricsFlush(ctx context.Context, re *require.Assertions, ma
 		return updatedGroup.RUConsumption.RRU == req.ConsumptionSinceLastRequest.RRU &&
 			updatedGroup.RUConsumption.WRU == req.ConsumptionSinceLastRequest.WRU
 	})
+}
+
+// TestBackgroundMetricsFlushResetsRUTimeline pins that the RU timeline belongs
+// to one leadership term: the published peaks stop being exposed and the term
+// state is cleared once the flush loop exits.
+func TestBackgroundMetricsFlushResetsRUTimeline(t *testing.T) {
+	re := require.New(t)
+	const start = testTimelineStart
+	m := newManagerBase(&ControllerConfig{}, ResourceGroupWriteRoleLegacyAll)
+	// Every Manager shares the package-level collector in production, where a
+	// process has one Manager. Tests create several Managers, so give this one
+	// an isolated collector; otherwise another Manager's reset() races with or
+	// clears the map read below.
+	m.metrics.ruTimeline = newRUTimeline(newRUSummaryCollector())
+	timeline := m.metrics.ruTimeline
+	resultsLen := func() int {
+		timeline.collector.mu.RLock()
+		defer timeline.collector.mu.RUnlock()
+		return len(timeline.collector.results)
+	}
+	timeline.since = start - 3600
+	timeline.record(timelineReport(1, start, make([][2]float64, 60)), time.Unix(start+65, 0))
+	timeline.flush(time.Unix(start+90, 0))
+	re.Positive(resultsLen())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	m.wg.Add(1)
+	go m.backgroundMetricsFlush(ctx)
+	cancel()
+	m.wg.Wait()
+	re.Zero(resultsLen())
+	re.Empty(timeline.groups)
+	re.Zero(timeline.since)
+}
+
+// TestBackgroundMetricsFlushPushesRUPeak pins that the push path carries the
+// RU peak and withdraws it from the push target when the term ends.
+func TestBackgroundMetricsFlushPushesRUPeak(t *testing.T) {
+	re := require.New(t)
+	peakName := []byte("resource_manager_resource_unit_peak_per_second_rolling_60s")
+	var (
+		mu      sync.Mutex
+		methods []string
+		pushes  [][]byte
+	)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		// PUT replaces what the pod pushed before; POST would keep the
+		// withdrawn peak on the receiver.
+		methods = append(methods, r.Method)
+		pushes = append(pushes, body)
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	lastPush := func() []byte {
+		mu.Lock()
+		defer mu.Unlock()
+		if len(pushes) == 0 {
+			return nil
+		}
+		return pushes[len(pushes)-1]
+	}
+
+	m := newManagerBase(&ControllerConfig{
+		PushMetricsAddress:  server.URL,
+		PushMetricsInterval: typeutil.Duration{Duration: 50 * time.Millisecond},
+	}, ResourceGroupWriteRoleLegacyAll)
+	// Isolate the collector from the other managers of this package's tests.
+	m.metrics.ruTimeline = newRUTimeline(newRUSummaryCollector())
+	timeline := m.metrics.ruTimeline
+	now := time.Now()
+	timeline.since = now.Unix() - 3600
+	timeline.record(timelineReport(1, now.Unix()-80, make([][2]float64, 60)), now)
+	timeline.flush(now)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	m.wg.Add(1)
+	go m.backgroundMetricsFlush(ctx)
+	testutil.Eventually(re, func() bool {
+		return bytes.Contains(lastPush(), peakName)
+	})
+	cancel()
+	m.wg.Wait()
+	re.NotContains(string(lastPush()), string(peakName))
+	mu.Lock()
+	defer mu.Unlock()
+	for _, method := range methods {
+		re.Equal(http.MethodPut, method)
+	}
 }
 
 func TestDispatchConsumptionIncludesOnlyConsumption(t *testing.T) {
@@ -483,10 +577,11 @@ func TestDispatchConsumptionIncludesOnlyConsumption(t *testing.T) {
 		KeyspaceId: &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: 42}},
 	}
 
-	err := m.dispatchConsumption(req)
+	err := m.dispatchConsumption(7, req)
 	re.NoError(err)
 
 	item := <-m.consumptionDispatcher
+	re.Equal(uint64(7), item.clientUniqueID)
 	re.Equal(uint32(42), item.keyspaceID)
 	re.Equal(req.GetResourceGroupName(), item.resourceGroupName)
 	re.Equal(req.GetConsumptionSinceLastRequest(), item.Consumption)
