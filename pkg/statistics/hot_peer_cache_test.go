@@ -939,8 +939,7 @@ func TestRemoveExpireItems(t *testing.T) {
 
 func TestRemoveExpiredPeerPreservesOtherStores(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster := core.NewBasicCluster()
 	cache := NewHotPeerCache(ctx, cluster, utils.Read)
 	cache.topNTTL = time.Hour
