@@ -2006,8 +2006,9 @@ func (suite *resourceManagerClientTestSuite) TestCheckBackgroundJobs() {
 	// Start establishes the watch asynchronously, so retry the update until it is observed.
 	testutil.Eventually(re, func() bool {
 		resp, err := cli.ModifyResourceGroup(suite.ctx, defaultGroup)
-		re.NoError(err)
-		re.Contains(resp, "Success!")
+		if err != nil || !strings.Contains(resp, "Success!") {
+			return false
+		}
 		meta := c.GetActiveResourceGroup(server.DefaultResourceGroupName)
 		if meta != nil && meta.BackgroundSettings != nil {
 			return len(meta.BackgroundSettings.JobTypes) == 2

@@ -317,6 +317,66 @@ func TestMoveLeader(t *testing.T) {
 	})
 }
 
+func TestResignLeaderWithRetry(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		resetPDLeader   bool
+		transferFailure string
+		wantError       bool
+	}{
+		{name: "transfer succeeds"},
+		{name: "PD cache reset", resetPDLeader: true},
+		{name: "retry succeeds", transferFailure: "1*return(true)"},
+		{name: "transfer fails", transferFailure: "return(true)", wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			cluster, err := tests.NewTestCluster(t.Context(), 2)
+			re.NoError(err)
+			defer cluster.Destroy()
+			re.NoError(cluster.RunInitialServers())
+			leaderName := cluster.WaitLeader()
+			re.NotEmpty(leaderName)
+			leader := cluster.GetServer(leaderName)
+			member := leader.GetServer().GetMember()
+
+			// Prevent re-campaigning from repopulating the PD cache after Resign.
+			const fp = "github.com/tikv/pd/server/leaderLoopCheckAgain"
+			re.NoError(failpoint.Enable(fp, fmt.Sprintf(`return("%d")`, member.ID())))
+			defer func() { re.NoError(failpoint.Disable(fp)) }()
+			if tc.resetPDLeader {
+				leader.ResetPDLeader()
+				re.False(leader.IsLeader())
+			}
+			re.Equal(member.ID(), member.GetEtcdLeader())
+			if tc.transferFailure != "" {
+				const transferFP = "github.com/tikv/pd/tests/resignLeaderError"
+				re.NoError(failpoint.Enable(transferFP, tc.transferFailure))
+				defer func() { re.NoError(failpoint.Disable(transferFP)) }()
+			}
+
+			err = leader.ResignLeaderWithRetry()
+			if tc.wantError {
+				re.EqualError(err, "injected leader transfer failure")
+				re.Equal(member.ID(), member.GetEtcdLeader())
+				return
+			}
+
+			re.NoError(err)
+			re.NotZero(member.GetEtcdLeader())
+			re.NotEqual(member.ID(), member.GetEtcdLeader())
+			re.NoError(failpoint.Disable(fp))
+			newLeader := cluster.WaitLeader()
+			re.NotEmpty(newLeader)
+			re.NotEqual(leaderName, newLeader)
+			cachedLeader := leader.GetLeader()
+			re.NotNil(cachedLeader)
+			re.NoError(leader.ResignLeaderWithRetry())
+			re.Same(cachedLeader, leader.GetLeader())
+		})
+	}
+}
+
 func TestCampaignLeaderFrequently(t *testing.T) {
 	re := require.New(t)
 	ctx := t.Context()
