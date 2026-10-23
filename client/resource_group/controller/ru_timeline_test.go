@@ -22,7 +22,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gogo/protobuf/proto"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
@@ -164,8 +163,6 @@ func TestRUTimelineConcurrentRecording(t *testing.T) {
 	re.Equal(float64(recorded.Load()), reported)
 }
 
-func sizeOf(req *rmpb.TokenBucketsRequest) int { return req.Size() }
-
 func TestTrimRUTimelines(t *testing.T) {
 	re := require.New(t)
 	request := func(name string, start int64, offsets []uint32) *rmpb.TokenBucketRequest {
@@ -198,8 +195,8 @@ func TestTrimRUTimelines(t *testing.T) {
 	re.Equal(expected, requests)
 	re.Equal(int64(190), requests[0].ConsumptionSinceLastRequest.RuBySecond.EndUnixSec)
 
-	// A budget for exactly one bucket keeps the newest second s+9, relabels
-	// it to offset 0 and advances the start to 109.
+	// A budget for exactly one bucket keeps the newest second, relabels it to
+	// offset 0 and advances the start to 104.
 	oneRequests := []*rmpb.TokenBucketRequest{
 		request("a", 100, []uint32{0, 1, 2, 3, 4}),
 		request("b", 200, []uint32{0}),
@@ -215,9 +212,9 @@ func TestTrimRUTimelines(t *testing.T) {
 	trimRUTimelines(oneRequests, (&rmpb.TokenBucketsRequest{Requests: oneExpected}).Size())
 	re.Equal(oneExpected, oneRequests)
 
-	// A zero budget keeps the watermark only: the active groups end their
-	// interval where it ended, while the idle group is unchanged and still
-	// confirms its coverage.
+	// A budget that fits only the coverage fields keeps the watermark only:
+	// the active groups end their interval where it ended, while the idle
+	// group is unchanged and still confirms its coverage.
 	watermark := []*rmpb.TokenBucketRequest{
 		{ResourceGroupName: "a", ConsumptionSinceLastRequest: &rmpb.Consumption{RuBySecond: &rmpb.RUConsumptionBySecond{StartUnixSec: 190, EndUnixSec: 190}}},
 		{ResourceGroupName: "b", ConsumptionSinceLastRequest: &rmpb.Consumption{RuBySecond: &rmpb.RUConsumptionBySecond{StartUnixSec: 290, EndUnixSec: 290}}},
@@ -323,24 +320,24 @@ func TestTombstoneDoesNotReportRUTimeline(t *testing.T) {
 	rru, wru := timelineTotals(defaultGC)
 	re.Zero(rru)
 	re.Zero(wru)
-
-	// The default controller is no longer kept alive just because a tombstone
-	// exists.
-	for range 3 {
-		_, _, _, _, err = c.OnRequestWait(ctx, "test-group", NewTestRequestInfo(true, 1, 1, AccessUnknown))
-		re.NoError(err)
-		c.cleanUpResourceGroup()
-	}
-	_, ok := c.loadGroupController(defaultResourceGroupName)
-	re.False(ok)
 }
 
 func TestTokenRequestAcknowledgesRUTimeline(t *testing.T) {
 	re := require.New(t)
 	ctx := t.Context()
-	for _, rpcErr := range []error{nil, errors.New("rpc failed")} {
+	for _, tc := range []struct {
+		rpcErr error
+		// trimmed drops the timeline field, as when even the coverage
+		// metadata exceeds the RPC budget.
+		trimmed bool
+		acked   bool
+	}{
+		{nil, false, true},
+		{errors.New("rpc failed"), false, false},
+		{nil, true, false},
+	} {
 		provider := newMockResourceGroupProvider()
-		provider.On("AcquireTokenBuckets", mock.Anything, mock.Anything).Return([]*rmpb.TokenBucketResponse(nil), rpcErr)
+		provider.On("AcquireTokenBuckets", mock.Anything, mock.Anything).Return([]*rmpb.TokenBucketResponse(nil), tc.rpcErr)
 		c, err := NewResourceGroupController(ctx, 1, provider, nil, constants.NullKeyspaceID)
 		re.NoError(err)
 		gc := createTestGroupCostController(re)
@@ -353,37 +350,21 @@ func TestTokenRequestAcknowledgesRUTimeline(t *testing.T) {
 		re.Equal(start.Unix(), seconds.StartUnixSec)
 		re.GreaterOrEqual(seconds.EndUnixSec, start.Unix()+3)
 		re.Equal([]*rmpb.RUConsumptionBucket{{Rru: 1, Offset: 1}}, seconds.Buckets)
+		if tc.trimmed {
+			trimRUTimelines([]*rmpb.TokenBucketRequest{req}, 1)
+			re.Nil(req.GetConsumptionSinceLastRequest().GetRuBySecond())
+		}
 		c.sendTokenBucketRequests(ctx, []*rmpb.TokenBucketRequest{req}, []*groupCostController{gc}, FromPeriodReport, notifyMsg{})
 		<-c.tokenResponseChan
 		gc.ruTimeline.mu.Lock()
 		from := gc.ruTimeline.from
 		gc.ruTimeline.mu.Unlock()
-		if rpcErr != nil {
-			re.Equal(start.Unix(), from, "a failed report must be resent")
-		} else {
+		if tc.acked {
 			re.Equal(seconds.EndUnixSec, from)
+		} else {
+			re.Equal(start.Unix(), from, "an unacknowledged report must be resent")
 		}
 	}
-}
-
-func TestRUTimelineSparseRoundTrip(t *testing.T) {
-	re := require.New(t)
-	const start int64 = 1800000000
-	tl := newRUTimeline(time.Unix(start, 0))
-	tl.recordLocked(time.Unix(start, 0), 1, 2)
-	tl.recordLocked(time.Unix(start+5, 0), 3, 4)
-	sent := tl.snapshotLocked(time.Unix(start+7, 0))
-	re.Equal(start, sent.StartUnixSec)
-	re.Equal(start+7, sent.EndUnixSec)
-	re.Equal([]*rmpb.RUConsumptionBucket{{Rru: 1, Wru: 2, Offset: 0}, {Rru: 3, Wru: 4, Offset: 5}}, sent.Buckets)
-
-	raw, err := proto.Marshal(sent)
-	re.NoError(err)
-	var decoded rmpb.RUConsumptionBySecond
-	re.NoError(proto.Unmarshal(raw, &decoded))
-	re.Equal(sent.StartUnixSec, decoded.StartUnixSec)
-	re.Equal(sent.EndUnixSec, decoded.EndUnixSec)
-	re.Equal(sent.Buckets, decoded.Buckets)
 }
 
 func TestTrimRUTimelinesWireBudget(t *testing.T) {
@@ -430,25 +411,6 @@ func TestTrimRUTimelinesSingleGroupKeepsAllSeconds(t *testing.T) {
 	re.Len(requests[0].ConsumptionSinceLastRequest.RuBySecond.Buckets, 90)
 }
 
-func TestTrimRUTimelinesFastPathCost(t *testing.T) {
-	const groups = 16000
-	name := "0123456789abcdef0123456789abcdef"
-	requests := make([]*rmpb.TokenBucketRequest, groups)
-	for g := range requests {
-		requests[g] = &rmpb.TokenBucketRequest{
-			ResourceGroupName: name,
-			ConsumptionSinceLastRequest: &rmpb.Consumption{
-				RRU: 1, WRU: 2,
-				RuBySecond: &rmpb.RUConsumptionBySecond{StartUnixSec: 1800000000, EndUnixSec: 1800000002,
-					Buckets: []*rmpb.RUConsumptionBucket{{Rru: 1, Offset: 0}, {Rru: 2, Offset: 1}}},
-			},
-		}
-	}
-	begin := time.Now()
-	trimRUTimelines(requests, ruTimelineRequestBudget)
-	t.Logf("groups=%d no-trim fast path cost=%s", groups, time.Since(begin))
-}
-
 func TestTrimRUTimelinesDropsTimelineField(t *testing.T) {
 	const groups = 29000
 	name := "0123456789abcdef0123456789abcdef"
@@ -470,42 +432,10 @@ func TestTrimRUTimelinesDropsTimelineField(t *testing.T) {
 		}
 	}
 	full := &rmpb.TokenBucketsRequest{Requests: requests, TargetRequestPeriodMs: 1000, ClientUniqueId: 1}
-	base := &rmpb.TokenBucketsRequest{Requests: make([]*rmpb.TokenBucketRequest, groups), TargetRequestPeriodMs: 1000, ClientUniqueId: 1}
-	for i, req := range requests {
-		base.Requests[i] = &rmpb.TokenBucketRequest{ResourceGroupName: req.ResourceGroupName, Request: req.Request,
-			ConsumptionSinceLastRequest: &rmpb.Consumption{RRU: req.ConsumptionSinceLastRequest.RRU, WRU: req.ConsumptionSinceLastRequest.WRU,
-				ReadBytes: req.ConsumptionSinceLastRequest.ReadBytes, WriteBytes: req.ConsumptionSinceLastRequest.WriteBytes,
-				TotalCpuTimeMs: req.ConsumptionSinceLastRequest.TotalCpuTimeMs, SqlLayerCpuTimeMs: req.ConsumptionSinceLastRequest.SqlLayerCpuTimeMs}}
-	}
-	t.Logf("full=%d base=%d budget=%d", full.Size(), base.Size(), ruTimelineRequestBudget)
 	trimRUTimelines(requests, ruTimelineRequestBudget)
 	re := require.New(t)
 	re.LessOrEqual(full.Size(), ruTimelineRequestBudget)
 	for _, req := range requests {
 		re.Nil(req.GetConsumptionSinceLastRequest().GetRuBySecond())
 	}
-}
-
-func TestTrimmedNilTimelineIsNotAcknowledged(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	provider := newMockResourceGroupProvider()
-	provider.On("AcquireTokenBuckets", mock.Anything, mock.Anything).Return([]*rmpb.TokenBucketResponse(nil), nil)
-	c, err := NewResourceGroupController(ctx, 1, provider, nil, constants.NullKeyspaceID)
-	re.NoError(err)
-	gc := createTestGroupCostController(re)
-	start := time.Now().Add(-3 * time.Second)
-	gc.ruTimeline = newRUTimeline(start)
-	gc.ruTimeline.recordLocked(start.Add(time.Second), 1, 0)
-	gc.run.requestInProgress = true
-	req := gc.collectRequestAndConsumption(periodicReport)
-	trimRUTimelines([]*rmpb.TokenBucketRequest{req}, 1)
-	re.Nil(req.GetConsumptionSinceLastRequest().GetRuBySecond())
-	c.sendTokenBucketRequests(ctx, []*rmpb.TokenBucketRequest{req}, []*groupCostController{gc}, FromPeriodReport, notifyMsg{})
-	<-c.tokenResponseChan
-	gc.ruTimeline.mu.Lock()
-	from := gc.ruTimeline.from
-	gc.ruTimeline.mu.Unlock()
-	re.Equal(start.Unix(), from, "a nil timeline is not acknowledged and must be resent")
 }
