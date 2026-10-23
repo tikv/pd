@@ -449,6 +449,19 @@ func TestTrimRUTimelinesSingleGroupKeepsAllSeconds(t *testing.T) {
 	re.Len(requests[0].ConsumptionSinceLastRequest.RuBySecond.Buckets, 90)
 }
 
+func TestTrimRUTimelinesFastPathDoesNotSave(t *testing.T) {
+	re := require.New(t)
+	requests := make([]*rmpb.TokenBucketRequest, 1000)
+	for i := range requests {
+		requests[i] = &rmpb.TokenBucketRequest{ConsumptionSinceLastRequest: &rmpb.Consumption{
+			RuBySecond: &rmpb.RUConsumptionBySecond{StartUnixSec: 100, EndUnixSec: 102,
+				Buckets: []*rmpb.RUConsumptionBucket{{Rru: 1, Offset: 0}}},
+		}}
+	}
+	// A batch within the budget is sent as is, without saving the timelines.
+	re.Zero(testing.AllocsPerRun(10, func() { trimRUTimelines(requests, ruTimelineRequestBudget) }))
+}
+
 func TestTrimRUTimelinesDropsTimelineField(t *testing.T) {
 	const groups = 29000
 	name := "0123456789abcdef0123456789abcdef"
