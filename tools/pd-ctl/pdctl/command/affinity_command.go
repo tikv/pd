@@ -23,6 +23,7 @@ import (
 
 	"github.com/pingcap/errors"
 
+	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/pkg/schedule/affinity"
 )
 
@@ -31,11 +32,12 @@ func NewAffinityCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:               "affinity",
 		Short:             "affinity group commands",
-		Long:              `Manage affinity groups for a single table by table ID and optional partition ID.`,
+		Long:              `Manage affinity groups by table ID, optional partition ID, and optional keyspace ID.`,
 		PersistentPreRunE: requirePDClient,
 	}
 	cmd.PersistentFlags().Uint64("table-id", 0, "table ID for the affinity group")
 	cmd.PersistentFlags().Uint64("partition-id", 0, "partition ID for partitioned tables")
+	cmd.PersistentFlags().Uint32("keyspace-id", 0, "keyspace ID (omit for classical cluster groups)")
 
 	cmd.AddCommand(
 		newAffinityShowCommand(),
@@ -48,7 +50,7 @@ func NewAffinityCommand() *cobra.Command {
 func newAffinityShowCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "show",
-		Short: "show affinity group state (all groups if no --table-id is specified)",
+		Short: "show affinity group state (all groups if --table-id, --partition-id and --keyspace-id are omitted)",
 		Run:   affinityShowCommandFunc,
 	}
 	return cmd
@@ -76,10 +78,8 @@ func newAffinityUpdatePeersCommand() *cobra.Command {
 }
 
 func affinityShowCommandFunc(cmd *cobra.Command, _ []string) {
-	tableID, _ := cmd.Flags().GetUint64("table-id")
-
-	// If no table-id is provided, show all affinity groups
-	if tableID == 0 {
+	// Show all groups only when no target ID flag is provided.
+	if !cmd.Flags().Changed("table-id") && !cmd.Flags().Changed("partition-id") && !cmd.Flags().Changed("keyspace-id") {
 		groups, err := PDCli.GetAllAffinityGroups(cmd.Context())
 		if err != nil {
 			cmd.Printf("Failed to get affinity groups: %v\n", err)
@@ -157,7 +157,18 @@ func getGroupID(cmd *cobra.Command) (string, error) {
 		return "", errors.New("--table-id is required")
 	}
 	partitionID, _ := cmd.Flags().GetUint64("partition-id")
-	groupID := FormatGroupID(tableID, partitionID)
+	var keyspaceID *uint32
+	if cmd.Flags().Changed("keyspace-id") {
+		id, err := cmd.Flags().GetUint32("keyspace-id")
+		if err != nil {
+			return "", errors.Annotate(err, "failed to parse --keyspace-id")
+		}
+		if id > constants.MaxKeyspaceID {
+			return "", errors.Errorf("--keyspace-id must be between %d and %d", constants.DefaultKeyspaceID, constants.MaxKeyspaceID)
+		}
+		keyspaceID = &id
+	}
+	groupID := formatAffinityGroupID(tableID, partitionID, keyspaceID)
 	if err := affinity.ValidateGroupID(groupID); err != nil {
 		return "", err
 	}
@@ -166,10 +177,18 @@ func getGroupID(cmd *cobra.Command) (string, error) {
 
 // FormatGroupID builds the affinity group ID from table/partition IDs following TiDB convention.
 func FormatGroupID(tableID, partitionID uint64) string {
-	if partitionID > 0 {
-		return fmt.Sprintf("_tidb_pt_%d_p%d", tableID, partitionID)
+	return formatAffinityGroupID(tableID, partitionID, nil)
+}
+
+func formatAffinityGroupID(tableID, partitionID uint64, keyspaceID *uint32) string {
+	prefix := "_tidb_"
+	if keyspaceID != nil {
+		prefix = fmt.Sprintf("_tidb_ks%d_", *keyspaceID)
 	}
-	return fmt.Sprintf("_tidb_t_%d", tableID)
+	if partitionID > 0 {
+		return fmt.Sprintf("%spt_%d_p%d", prefix, tableID, partitionID)
+	}
+	return fmt.Sprintf("%st_%d", prefix, tableID)
 }
 
 func parseUint64List(input string) ([]uint64, error) {
