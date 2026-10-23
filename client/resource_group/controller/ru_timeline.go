@@ -38,6 +38,13 @@ const (
 
 var lastTrimWarn atomic.Int64
 
+// ruTimelineReport is the timeline a token request reports, with the
+// generation to acknowledge it with.
+type ruTimelineReport struct {
+	timeline *ruTimeline
+	gen      uint64
+}
+
 type ruSecondBucket struct {
 	second   int64
 	rru, wru float64
@@ -52,8 +59,10 @@ type ruSecondBucket struct {
 // consumption lands in seconds that may already hold earlier consumption, so
 // nothing is reported until the clock passes the latest second observed
 // before it; a reported second never overstates its consumption, and the
-// skipped seconds are never reported. A forward step only relabels later
-// seconds, like clock skew between clients.
+// skipped seconds are never reported. A rollback past every retained second,
+// such as the correction of a large forward jump, starts the timeline over
+// instead of waiting for the clock to catch up. A forward step only relabels
+// later seconds, like clock skew between clients.
 // Methods read the clock while holding mu, so concurrent callers cannot
 // present seconds out of order and be mistaken for a clock rollback.
 type ruTimeline struct {
@@ -66,6 +75,9 @@ type ruTimeline struct {
 	from int64
 	// last is the latest second observed.
 	last int64
+	// gen changes whenever the timeline starts over, so that a report taken
+	// before cannot acknowledge seconds of the new one.
+	gen uint64
 }
 
 func newRUTimeline(now time.Time) *ruTimeline {
@@ -74,10 +86,20 @@ func newRUTimeline(now time.Time) *ruTimeline {
 
 func (t *ruTimeline) advanceLocked(now time.Time) {
 	second := now.Unix()
-	if second < t.last {
+	switch {
+	case second < t.last-ruTimelineSeconds:
+		// No retained second can be reused: start over. The resource manager
+		// keeps one value per second, so for a second it already holds from
+		// before the rollback, or from a report still in flight, one of the
+		// values is kept and the other lost; they are never added up.
+		t.buckets = [len(t.buckets)]ruSecondBucket{}
+		t.from = second
+		t.gen++
+	case second < t.last:
 		// Clock rollback: the seconds recorded before the clock catches up
 		// cannot be attributed safely and are skipped (never reported), which
-		// loses up to the rollback span of RU.
+		// loses up to the rollback span of RU, plus recorded seconds that were
+		// not acknowledged yet.
 		t.from = max(t.from, t.last+1)
 	}
 	t.last = second
@@ -103,29 +125,35 @@ func (t *ruTimeline) recordLocked(now time.Time, rru, wru float64) {
 	bucket.wru += wru
 }
 
-// ack stops reporting the seconds before end, which a successful report
-// carried or trimmed.
-func (t *ruTimeline) ack(end int64) {
+// ack stops reporting the seconds before end, which a successful report of
+// generation gen carried or trimmed. A report taken before the timeline
+// started over acknowledges nothing.
+func (t *ruTimeline) ack(end int64, gen uint64) {
 	if t == nil {
 		return
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.from = max(t.from, end)
+	if gen == t.gen {
+		t.from = max(t.from, end)
+	}
 }
 
 // snapshot copies the unacknowledged closed seconds as a sparse timeline:
 // only non-zero seconds are listed, and end_unix_sec is the watermark that
 // tells the resource manager which seconds are covered by zeros. After a
 // clock rollback it reports no seconds until the clock passes the seconds it
-// can no longer attest to.
-func (t *ruTimeline) snapshot() *rmpb.RUConsumptionBySecond {
+// can no longer attest to. It also returns the generation to acknowledge it
+// with.
+func (t *ruTimeline) snapshot() (*rmpb.RUConsumptionBySecond, uint64) {
 	if t == nil {
-		return nil
+		return nil, 0
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return t.snapshotLocked(time.Now())
+	// Read gen after snapshotLocked, which may start the timeline over.
+	seconds := t.snapshotLocked(time.Now())
+	return seconds, t.gen
 }
 
 func (t *ruTimeline) snapshotLocked(now time.Time) *rmpb.RUConsumptionBySecond {

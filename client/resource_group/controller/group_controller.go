@@ -661,7 +661,6 @@ func (gc *groupCostController) collectRequestAndConsumption(selectTyp selectType
 		return nil
 	}
 	req.ConsumptionSinceLastRequest = updateDeltaConsumption(gc.run.lastRequestConsumption, gc.run.consumption)
-	req.ConsumptionSinceLastRequest.RuBySecond = gc.ruTimeline.snapshot()
 	gc.run.lastRequestTime = time.Now()
 	gc.run.requestInProgress = true
 	return req

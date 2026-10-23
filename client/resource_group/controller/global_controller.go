@@ -780,26 +780,28 @@ func (c *ResourceGroupsController) handleTokenBucketResponse(resp []*rmpb.TokenB
 
 func (c *ResourceGroupsController) collectTokenBucketRequests(ctx context.Context, source string, typ selectType, notifyMsg notifyMsg) {
 	c.run.currentRequests = make([]*rmpb.TokenBucketRequest, 0)
-	var reporters []*groupCostController
+	var reports []ruTimelineReport
 	c.groupsController.Range(func(_, value any) bool {
 		gc := value.(*groupCostController)
 		request := gc.collectRequestAndConsumption(typ)
 		if request != nil {
 			request.KeyspaceId = &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: c.keyspaceID}}
+			report := ruTimelineReport{timeline: gc.ruTimeline}
+			request.ConsumptionSinceLastRequest.RuBySecond, report.gen = gc.ruTimeline.snapshot()
 			c.run.currentRequests = append(c.run.currentRequests, request)
-			reporters = append(reporters, gc)
+			reports = append(reports, report)
 			gc.metrics.tokenRequestCounter.Inc()
 		}
 		return true
 	})
 	if len(c.run.currentRequests) > 0 {
 		trimRUTimelines(c.run.currentRequests, ruTimelineRequestBudget)
-		c.sendTokenBucketRequests(ctx, c.run.currentRequests, reporters, source, notifyMsg)
+		c.sendTokenBucketRequests(ctx, c.run.currentRequests, reports, source, notifyMsg)
 	}
 }
 
-// sendTokenBucketRequests sends requests[i] on behalf of reporters[i].
-func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, requests []*rmpb.TokenBucketRequest, reporters []*groupCostController, source string, notifyMsg notifyMsg) {
+// sendTokenBucketRequests sends requests[i], whose RU timeline is reports[i].
+func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, requests []*rmpb.TokenBucketRequest, reports []ruTimelineReport, source string, notifyMsg notifyMsg) {
 	now := time.Now()
 	req := &rmpb.TokenBucketsRequest{
 		Requests:              requests,
@@ -825,9 +827,9 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 			metrics.SuccessfulTokenRequestDuration.Observe(latency.Seconds())
 			// The resource manager has received these seconds through the
 			// report's coverage watermark, including the implicit zeros.
-			for i, gc := range reporters {
+			for i, report := range reports {
 				if seconds := requests[i].GetConsumptionSinceLastRequest().GetRuBySecond(); seconds != nil {
-					gc.ruTimeline.ack(seconds.GetEndUnixSec())
+					report.timeline.ack(seconds.GetEndUnixSec(), report.gen)
 				}
 			}
 		}

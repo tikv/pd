@@ -69,7 +69,7 @@ func TestRUTimelineIdleWatermark(t *testing.T) {
 	re.Equal(start, idle.StartUnixSec)
 	re.Equal(start+5, idle.EndUnixSec)
 	re.Empty(idle.Buckets)
-	tl.ack(idle.EndUnixSec)
+	tl.ack(idle.EndUnixSec, tl.gen)
 	next := tl.snapshotLocked(time.Unix(start+7, 0))
 	re.Equal(start+5, next.StartUnixSec)
 	re.Equal(start+7, next.EndUnixSec)
@@ -95,6 +95,33 @@ func TestRUTimelineClockRollback(t *testing.T) {
 	re.Empty(resumed.Buckets)
 }
 
+func TestRUTimelineLargeClockRollback(t *testing.T) {
+	re := require.New(t)
+	const start int64 = 1800000000
+	const day = 86400
+	tl := newRUTimeline(time.Unix(start, 0))
+	// The clock jumps a day ahead and a report is sent from there.
+	tl.recordLocked(time.Unix(start+day, 0), 1, 0)
+	jumped := tl.snapshotLocked(time.Unix(start+day+1, 0))
+	// After the clock is corrected, the timeline starts over instead of
+	// waiting a day, and the late acknowledgement of the jumped report does
+	// not skip the new seconds.
+	gen := tl.gen
+	tl.recordLocked(time.Unix(start+10, 0), 2, 0)
+	tl.ack(jumped.EndUnixSec, gen)
+	resumed := tl.snapshotLocked(time.Unix(start+12, 0))
+	re.Equal(start+10, resumed.StartUnixSec)
+	re.Equal(start+12, resumed.EndUnixSec)
+	re.Equal([]*rmpb.RUConsumptionBucket{{Rru: 2, Offset: 0}}, resumed.Buckets)
+
+	// A snapshot can start the timeline over too, and returns the new
+	// generation.
+	gen = tl.gen
+	tl.last = time.Now().Unix() + day
+	_, snapshotGen := tl.snapshot()
+	re.Equal(gen+1, snapshotGen)
+}
+
 func TestRUTimelineAck(t *testing.T) {
 	re := require.New(t)
 	const start int64 = 1800000000
@@ -104,23 +131,24 @@ func TestRUTimelineAck(t *testing.T) {
 	// An unacknowledged report is resent from the same second.
 	re.Equal(start, tl.snapshotLocked(time.Unix(start+3, 0)).StartUnixSec)
 
-	tl.ack(sent.EndUnixSec)
+	tl.ack(sent.EndUnixSec, tl.gen)
 	next := tl.snapshotLocked(time.Unix(start+4, 0))
 	re.Equal(start+2, next.StartUnixSec)
 	re.Equal(start+4, next.EndUnixSec)
 	re.Empty(next.Buckets)
 	// A stale acknowledgement never rewinds the timeline.
-	tl.ack(start + 1)
+	tl.ack(start+1, tl.gen)
 	re.Equal(start+2, tl.snapshotLocked(time.Unix(start+4, 0)).StartUnixSec)
-	// After a clock rollback, acknowledged seconds are not reported again, and
-	// reporting resumes after the latest second observed before the rollback.
+	// After a clock rollback within the retained seconds, acknowledged seconds
+	// are not reported again, and reporting resumes after the latest second
+	// observed before the rollback.
 	sent = tl.snapshotLocked(time.Unix(start+600, 0))
-	tl.ack(sent.EndUnixSec)
-	rolledBack := tl.snapshotLocked(time.Unix(start+300, 0))
-	re.Equal(start+300, rolledBack.StartUnixSec)
-	re.Equal(start+300, rolledBack.EndUnixSec)
+	tl.ack(sent.EndUnixSec, tl.gen)
+	rolledBack := tl.snapshotLocked(time.Unix(start+540, 0))
+	re.Equal(start+540, rolledBack.StartUnixSec)
+	re.Equal(start+540, rolledBack.EndUnixSec)
 	re.Empty(rolledBack.Buckets)
-	re.Empty(tl.snapshotLocked(time.Unix(start+480, 0)).Buckets)
+	re.Empty(tl.snapshotLocked(time.Unix(start+580, 0)).Buckets)
 	resumed := tl.snapshotLocked(time.Unix(start+603, 0))
 	re.Equal(start+601, resumed.StartUnixSec)
 	re.Equal(start+603, resumed.EndUnixSec)
@@ -145,12 +173,11 @@ func TestRUTimelineConcurrentRecording(t *testing.T) {
 	}
 	var reported float64
 	drain := func() {
-		if s := tl.snapshot(); s != nil {
-			for _, b := range s.Buckets {
-				reported += b.Rru
-			}
-			tl.ack(s.EndUnixSec)
+		s, gen := tl.snapshot()
+		for _, b := range s.Buckets {
+			reported += b.Rru
 		}
+		tl.ack(s.EndUnixSec, gen)
 	}
 	for time.Now().Before(end) {
 		drain()
@@ -314,7 +341,8 @@ func TestTombstoneDoesNotReportRUTimeline(t *testing.T) {
 	// A tombstone requests tokens as the default group, but its RU is not
 	// part of any group's peak: it has no timeline of its own.
 	re.Nil(tombstone.ruTimeline)
-	re.Nil(tombstone.ruTimeline.snapshot())
+	seconds, _ := tombstone.ruTimeline.snapshot()
+	re.Nil(seconds)
 	_, _, _, _, err = c.OnRequestWait(ctx, "test-group", NewTestRequestInfo(true, 1, 1, AccessUnknown))
 	re.NoError(err)
 	rru, wru := timelineTotals(defaultGC)
@@ -330,11 +358,14 @@ func TestTokenRequestAcknowledgesRUTimeline(t *testing.T) {
 		// trimmed drops the timeline field, as when even the coverage
 		// metadata exceeds the RPC budget.
 		trimmed bool
-		acked   bool
+		// restarted starts the timeline over while the report is in flight.
+		restarted bool
+		acked     bool
 	}{
-		{nil, false, true},
-		{errors.New("rpc failed"), false, false},
-		{nil, true, false},
+		{nil, false, false, true},
+		{errors.New("rpc failed"), false, false, false},
+		{nil, true, false, false},
+		{nil, false, true, false},
 	} {
 		provider := newMockResourceGroupProvider()
 		provider.On("AcquireTokenBuckets", mock.Anything, mock.Anything).Return([]*rmpb.TokenBucketResponse(nil), tc.rpcErr)
@@ -346,6 +377,8 @@ func TestTokenRequestAcknowledgesRUTimeline(t *testing.T) {
 		gc.ruTimeline.recordLocked(start.Add(time.Second), 1, 0)
 		gc.run.requestInProgress = true
 		req := gc.collectRequestAndConsumption(periodicReport)
+		report := ruTimelineReport{timeline: gc.ruTimeline}
+		req.ConsumptionSinceLastRequest.RuBySecond, report.gen = gc.ruTimeline.snapshot()
 		seconds := req.ConsumptionSinceLastRequest.RuBySecond
 		re.Equal(start.Unix(), seconds.StartUnixSec)
 		re.GreaterOrEqual(seconds.EndUnixSec, start.Unix()+3)
@@ -354,7 +387,10 @@ func TestTokenRequestAcknowledgesRUTimeline(t *testing.T) {
 			trimRUTimelines([]*rmpb.TokenBucketRequest{req}, 1)
 			re.Nil(req.GetConsumptionSinceLastRequest().GetRuBySecond())
 		}
-		c.sendTokenBucketRequests(ctx, []*rmpb.TokenBucketRequest{req}, []*groupCostController{gc}, FromPeriodReport, notifyMsg{})
+		if tc.restarted {
+			gc.ruTimeline.gen++
+		}
+		c.sendTokenBucketRequests(ctx, []*rmpb.TokenBucketRequest{req}, []ruTimelineReport{report}, FromPeriodReport, notifyMsg{})
 		<-c.tokenResponseChan
 		gc.ruTimeline.mu.Lock()
 		from := gc.ruTimeline.from
