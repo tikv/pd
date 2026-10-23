@@ -139,6 +139,23 @@ func TestRUTimelineDelayedReportFromBeforeRollback(t *testing.T) {
 	re.Equal(float64(100), s.rru+s.wru)
 }
 
+// A second older than the current window is never summarized again, so it is
+// not accepted and cannot overwrite a second that shares its slot.
+func TestRUTimelineRejectsSecondsBeforeWindow(t *testing.T) {
+	re := require.New(t)
+	const start = testTimelineStart
+	c, timeline := newTestTimeline()
+	now := time.Unix(start+150, 0)
+	timeline.record(timelineReport(1, start+95, [][2]float64{{7, 0}}), now)
+	// start and start+95 share a slot; start is before the window [now-90, now-30).
+	timeline.record(timelineReport(1, start, [][2]float64{{100, 0}}), now)
+	timeline.flush(now)
+	s, ok := summaryAt(t, c)
+	re.True(ok)
+	re.Equal(start+95, s.second)
+	re.Equal(float64(7), s.rru+s.wru)
+}
+
 func TestRUTimelineIdleWatermark(t *testing.T) {
 	re := require.New(t)
 	const start = testTimelineStart
@@ -309,8 +326,7 @@ func TestRUTimelineWithdrawsStaleSample(t *testing.T) {
 		{100, true, 1},  // window [start+10, start+70)
 		{20, true, 1},   // rollback into the term's initial waiting period
 		{100, true, 1},  // restore the clock
-		{160, false, 1}, // no reported seconds in the window, source still retained
-		{161, false, 0}, // source and group expire without leaving a stale sample
+		{101, false, 0}, // the second leaves the window; source and group expire without leaving a stale sample
 	} {
 		timeline.flush(time.Unix(start+step.offset, 0))
 		_, ok := summaryAt(t, c)
