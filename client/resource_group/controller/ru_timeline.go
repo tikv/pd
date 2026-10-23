@@ -184,6 +184,11 @@ func (t *ruTimeline) snapshotLocked(now time.Time) *rmpb.RUConsumptionBySecond {
 // requests without any timeline already exceed the limit, the original
 // request was over the limit; this path cannot make it fit.
 func trimRUTimelines(requests []*rmpb.TokenBucketRequest, budget int) {
+	batch := &rmpb.TokenBucketsRequest{Requests: requests}
+	// Fast path: normal reports carry few seconds and fit without resizing.
+	if batch.Size() <= budget {
+		return
+	}
 	type savedTimeline struct {
 		req     *rmpb.TokenBucketRequest
 		start   int64
@@ -196,6 +201,10 @@ func trimRUTimelines(requests []*rmpb.TokenBucketRequest, budget int) {
 			continue
 		}
 		saved = append(saved, savedTimeline{req, seconds.StartUnixSec, seconds.Buckets})
+	}
+	// Without any timeline there is nothing to trim.
+	if len(saved) == 0 {
+		return
 	}
 	setLimit := func(limit int) {
 		for _, s := range saved {
@@ -221,12 +230,6 @@ func trimRUTimelines(requests []*rmpb.TokenBucketRequest, budget int) {
 			seconds.StartUnixSec += shift
 			seconds.Buckets = kept
 		}
-	}
-	batch := &rmpb.TokenBucketsRequest{Requests: requests}
-	// Fast path: normal reports carry few seconds and fit without resizing.
-	// Without any timeline there is nothing to trim.
-	if len(saved) == 0 || batch.Size() <= budget {
-		return
 	}
 	setLimit(0)
 	if coverageSize := batch.Size(); coverageSize > budget {
