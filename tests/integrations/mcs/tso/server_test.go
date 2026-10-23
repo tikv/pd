@@ -37,6 +37,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/tsopb"
 
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/opt"
@@ -51,6 +52,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
@@ -133,6 +135,43 @@ func (suite *tsoServerTestSuite) TestTSOServerStartAndStopNormally() {
 	err = testutil.CheckPostJSON(tests.TestDialClient, suite.backendEndpoints+"/pd/api/v1/admin/reset-ts", input,
 		testutil.StatusNotOK(re), testutil.StringContain(re, "invalid tso value"))
 	re.NoError(err)
+}
+
+// TestTSOStreamWhenPrimaryCloses checks that while the TSO primary closes, a TSO stream to it
+// fails with the leader-change error rather than "server not started", so that the client
+// looks for the new primary instead of reconnecting to the closing server.
+func (suite *tsoServerTestSuite) TestTSOStreamWhenPrimaryCloses() {
+	re := suite.Require()
+	s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+	defer cleanup()
+	testutil.Eventually(re, s.IsServing)
+
+	cc, err := grpc.NewClient(strings.TrimPrefix(s.GetAddr(), "http://"), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	re.NoError(err)
+	defer cc.Close()
+	stream, err := tsopb.NewTSOClient(cc).Tso(suite.ctx)
+	re.NoError(err)
+	req := &tsopb.TsoRequest{Header: &tsopb.RequestHeader{ClusterId: keypath.ClusterID()}, Count: 1}
+	re.NoError(stream.Send(req))
+	_, err = stream.Recv()
+	re.NoError(err)
+
+	closed := make(chan struct{})
+	go func() {
+		defer close(closed)
+		s.Close()
+	}()
+	// The stream keeps the gRPC server from stopping gracefully until it fails, so the
+	// requests reach the server through all of Close until the first error.
+	for err == nil {
+		// Once the stream fails, Send only reports io.EOF, and Recv returns its status.
+		_ = stream.Send(req)
+		_, err = stream.Recv()
+	}
+	re.NotContains(err.Error(), "server not started")
+	re.Contains(err.Error(), "not leader")
+	<-closed
+	re.True(s.IsClosed())
 }
 
 func (suite *tsoServerTestSuite) TestParticipantStartWithAdvertiseListenAddr() {
