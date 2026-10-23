@@ -20,8 +20,10 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/unrolled/render"
+	"go.uber.org/zap"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
 	sche "github.com/tikv/pd/pkg/schedule/core"
@@ -257,6 +259,10 @@ func (handler *scatterRangeHandler) updateConfig(w http.ResponseWriter, r *http.
 	if err != nil {
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 	}
+	log.Info("scatter-range-scheduler config is updated",
+		zap.String("range-name", args[0]),
+		zap.String("start-key", args[1]),
+		zap.String("end-key", args[2]))
 	handler.rd.JSON(w, http.StatusOK, nil)
 }
 
