@@ -1222,7 +1222,7 @@ func TestHotStoreComparison(t *testing.T) {
 	// Include equal extrema with different pending influence and peer counts.
 	stores[1].LoadPred.Current = stores[0].LoadPred.Future
 	stores[1].LoadPred.Future = stores[0].LoadPred.Current
-	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
+	for ty := range resourceTypeLen {
 		for first := range utils.DimLen {
 			for second := range utils.DimLen {
 				bs := &balanceSolver{resourceTy: ty, firstPriority: first, secondPriority: second,
