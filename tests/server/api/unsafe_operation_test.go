@@ -17,6 +17,7 @@ package api
 import (
 	"encoding/json"
 	"math"
+	"net/http"
 	"testing"
 	"time"
 
@@ -50,6 +51,20 @@ func (suite *unsafeOperationTestSuite) TearDownTest() {
 
 func (suite *unsafeOperationTestSuite) TestRemoveFailedStores() {
 	suite.env.RunTestInNonMicroserviceEnv(suite.checkRemoveFailedStores)
+}
+
+func (suite *unsafeOperationTestSuite) TestRemoveFailedStoresInMicroserviceEnv() {
+	suite.env.RunTestInMicroserviceEnv(func(cluster *tests.TestCluster) {
+		re := suite.Require()
+		leader := cluster.GetLeaderServer()
+		urlPrefix := leader.GetAddr() + "/pd/api/v1/admin/unsafe"
+		data, err := json.Marshal(map[string]any{"auto-detect": true})
+		re.NoError(err)
+		err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/remove-failed-stores", data,
+			testutil.Status(re, http.StatusNotImplemented),
+			testutil.StringContain(re, "online unsafe recovery is not supported when scheduling service is enabled"))
+		re.NoError(err)
+	})
 }
 
 func (suite *unsafeOperationTestSuite) checkRemoveFailedStores(cluster *tests.TestCluster) {
