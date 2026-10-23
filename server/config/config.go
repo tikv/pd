@@ -37,6 +37,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/metering_sdk/config"
 
+	"github.com/tikv/pd/pkg/dashboard/spiffetls"
 	"github.com/tikv/pd/pkg/errs"
 	rm "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	sc "github.com/tikv/pd/pkg/schedule/config"
@@ -334,6 +335,9 @@ func (c *Config) Parse(flagSet *pflag.FlagSet) error {
 
 // Validate is used to validate if some configurations are right.
 func (c *Config) Validate() error {
+	if err := c.Dashboard.Validate(); err != nil {
+		return fmt.Errorf("invalid dashboard configuration: %w", err)
+	}
 	if c.Join != "" && c.InitialCluster != "" {
 		return errors.New("-initial-cluster and -join can not be provided at the same time")
 	}
@@ -780,19 +784,61 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 
 // DashboardConfig is the configuration for tidb-dashboard.
 type DashboardConfig struct {
-	TiDBCAPath            string `toml:"tidb-cacert-path" json:"tidb-cacert-path"`
-	TiDBCertPath          string `toml:"tidb-cert-path" json:"tidb-cert-path"`
-	TiDBKeyPath           string `toml:"tidb-key-path" json:"tidb-key-path"`
-	PublicPathPrefix      string `toml:"public-path-prefix" json:"public-path-prefix"`
-	TempDir               string `toml:"temp-dir" json:"temp-dir"`
-	InternalProxy         bool   `toml:"internal-proxy" json:"internal-proxy"`
-	EnableTelemetry       bool   `toml:"enable-telemetry" json:"enable-telemetry"`
-	EnableExperimental    bool   `toml:"enable-experimental" json:"enable-experimental"`
-	DisableCustomPromAddr bool   `toml:"disable-custom-prom-addr" json:"disable-custom-prom-addr"`
+	TiDBCAPath   string `toml:"tidb-cacert-path" json:"tidb-cacert-path"`
+	TiDBCertPath string `toml:"tidb-cert-path" json:"tidb-cert-path"`
+	TiDBKeyPath  string `toml:"tidb-key-path" json:"tidb-key-path"`
+	// TiDBSPIFFEWorkloadAPIAddr enables native Workload API TLS for Dashboard SQL connections.
+	TiDBSPIFFEWorkloadAPIAddr string `toml:"tidb-spiffe-workload-api-addr" json:"tidb-spiffe-workload-api-addr"`
+	// TiDBSPIFFEWorkloadAPITimeout bounds initial credential retrieval; zero uses 30 seconds.
+	TiDBSPIFFEWorkloadAPITimeout typeutil.Duration `toml:"tidb-spiffe-workload-api-timeout" json:"tidb-spiffe-workload-api-timeout"`
+	// TiDBSPIFFEClientIDPattern selects the unique PD workload SVID presented to TiDB.
+	TiDBSPIFFEClientIDPattern string `toml:"tidb-spiffe-client-id-pattern" json:"tidb-spiffe-client-id-pattern"`
+	// TiDBSPIFFEServerIDPattern authorizes the TiDB server's SPIFFE identity.
+	TiDBSPIFFEServerIDPattern string `toml:"tidb-spiffe-server-id-pattern" json:"tidb-spiffe-server-id-pattern"`
+	PublicPathPrefix          string `toml:"public-path-prefix" json:"public-path-prefix"`
+	TempDir                   string `toml:"temp-dir" json:"temp-dir"`
+	InternalProxy             bool   `toml:"internal-proxy" json:"internal-proxy"`
+	EnableTelemetry           bool   `toml:"enable-telemetry" json:"enable-telemetry"`
+	EnableExperimental        bool   `toml:"enable-experimental" json:"enable-experimental"`
+	DisableCustomPromAddr     bool   `toml:"disable-custom-prom-addr" json:"disable-custom-prom-addr"`
+}
+
+// SPIFFEConfig returns the Dashboard SQL client's Workload API configuration.
+// Call Validate before using it; the caller owns the resulting source's lifetime.
+func (c *DashboardConfig) SPIFFEConfig() spiffetls.Config {
+	timeout := c.TiDBSPIFFEWorkloadAPITimeout.Duration
+	if timeout == 0 {
+		timeout = 30 * time.Second
+	}
+	return spiffetls.Config{
+		Endpoint:        c.TiDBSPIFFEWorkloadAPIAddr,
+		Timeout:         timeout,
+		ClientIDPattern: c.TiDBSPIFFEClientIDPattern,
+		ServerIDPattern: c.TiDBSPIFFEServerIDPattern,
+	}
+}
+
+// Validate rejects incomplete SPIFFE settings and mixing SPIFFE with file TLS.
+// Empty SPIFFE settings retain the existing Dashboard TLS behavior.
+func (c *DashboardConfig) Validate() error {
+	if c.TiDBSPIFFEWorkloadAPIAddr == "" && c.TiDBSPIFFEClientIDPattern == "" &&
+		c.TiDBSPIFFEServerIDPattern == "" && c.TiDBSPIFFEWorkloadAPITimeout.Duration == 0 {
+		return nil
+	}
+	if c.TiDBCAPath != "" || c.TiDBCertPath != "" || c.TiDBKeyPath != "" {
+		return errors.New("dashboard SPIFFE TLS cannot be combined with certificate-file TLS")
+	}
+	return c.SPIFFEConfig().Validate()
 }
 
 // ToTiDBTLSConfig generates tls config for connecting to TiDB, used by tidb-dashboard.
 func (c *DashboardConfig) ToTiDBTLSConfig() (*tls.Config, error) {
+	if err := c.Validate(); err != nil {
+		return nil, err
+	}
+	if c.TiDBSPIFFEWorkloadAPIAddr != "" {
+		return nil, errors.New("dashboard SPIFFE TLS requires a managed Workload API source")
+	}
 	if (len(c.TiDBCertPath) != 0 && len(c.TiDBKeyPath) != 0) || len(c.TiDBCAPath) != 0 {
 		tlsInfo := transport.TLSInfo{
 			CertFile:      c.TiDBCertPath,
