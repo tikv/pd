@@ -37,6 +37,7 @@ import (
 
 	pdClient "github.com/tikv/pd/client"
 	pd "github.com/tikv/pd/client/http"
+	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/pkg/retry"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/keyspace"
@@ -82,6 +83,8 @@ func TestHTTPClientTestSuiteWithServiceDiscovery(t *testing.T) {
 
 func (suite *httpClientTestSuite) SetupSuite() {
 	re := suite.Require()
+	// Initialize client metrics before background discovery can observe them.
+	metrics.InitAndRegisterMetrics(nil)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
 	suite.ctx, suite.cancelFunc = context.WithCancel(context.Background())
 
