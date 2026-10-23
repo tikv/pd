@@ -34,12 +34,23 @@ type ConnectionCtx[T any] struct {
 type Manager[T any] struct {
 	sync.RWMutex
 	connectionCtxs map[string]*ConnectionCtx[T]
+	// onReplace is called with the stream of a connection context right before the context
+	// is canceled because GC, CleanAllAndStore or an overwriting Store replaces it.
+	onReplace func(T)
 }
 
 // NewManager is used to create a new connection context manager.
 func NewManager[T any]() *Manager[T] {
+	return NewManagerWithReplaceHook[T](nil)
+}
+
+// NewManagerWithReplaceHook creates a connection context manager that calls onReplace with
+// the stream of a connection context before canceling it for being replaced, so that the
+// stream can tell its pending requests to retry with another connection.
+func NewManagerWithReplaceHook[T any](onReplace func(T)) *Manager[T] {
 	return &Manager[T]{
 		connectionCtxs: make(map[string]*ConnectionCtx[T], 3),
+		onReplace:      onReplace,
 	}
 }
 
@@ -71,7 +82,7 @@ func (c *Manager[T]) Store(ctx context.Context, cancel context.CancelFunc, url s
 }
 
 func (c *Manager[T]) storeLocked(ctx context.Context, cancel context.CancelFunc, url string, stream T) {
-	c.releaseLocked(url)
+	c.replaceLocked(url)
 	c.connectionCtxs[url] = &ConnectionCtx[T]{ctx, cancel, url, stream}
 }
 
@@ -105,14 +116,29 @@ func (c *Manager[T]) GC(condition func(url string) bool) {
 func (c *Manager[T]) gcLocked(condition func(url string) bool) {
 	for url := range c.connectionCtxs {
 		if condition(url) {
-			c.releaseLocked(url)
+			c.replaceLocked(url)
 		}
 	}
 }
 
+func (c *Manager[T]) replaceLocked(url string) {
+	cc, ok := c.connectionCtxs[url]
+	if !ok {
+		return
+	}
+	if c.onReplace != nil {
+		c.onReplace(cc.Stream)
+	}
+	c.releaseLocked(url)
+}
+
 // ReleaseAll is used to release all connection contexts.
 func (c *Manager[T]) ReleaseAll() {
-	c.GC(func(string) bool { return true })
+	c.Lock()
+	defer c.Unlock()
+	for url := range c.connectionCtxs {
+		c.releaseLocked(url)
+	}
 }
 
 // Release is used to delete a connection context from the connection context map and release the resources.

@@ -23,6 +23,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -386,6 +387,86 @@ func TestResignTSOPrimaryForward(t *testing.T) {
 		}
 		re.NoError(err)
 		suite.checkAvailableTSO(re)
+	}
+}
+
+// TestGetTSAfterTSOPrimaryChanged checks that a client discovering TSO servers directly
+// resumes soon after the primary changes. The old primary rejects requests or closes its
+// streams before the new one is elected, so the client must not wait a full retry interval
+// after its first attempt misses the new primary.
+func TestGetTSAfterTSOPrimaryChanged(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	cluster, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+	pdLeader := cluster.GetServer(cluster.WaitLeader())
+	re.NoError(pdLeader.BootstrapCluster())
+	tc, err := tests.NewTestTSOCluster(ctx, 3, pdLeader.GetAddr())
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForDefaultPrimaryServing(re)
+
+	client := utils.SetupClientWithKeyspaceID(ctx, re, constant.DefaultKeyspaceID, []string{pdLeader.GetAddr()})
+	defer client.Close()
+	utils.WaitForTSOServiceAvailable(ctx, re, client)
+
+	// Measure the longest gap between two successful GetTS calls across the primary change.
+	checkMaxGap := func(changePrimary func()) {
+		var (
+			maxGap      time.Duration
+			lastSuccess time.Time
+			// Stop between calls instead of canceling an in-flight GetTS, whose request
+			// may be put back to the pool while the dispatcher still holds it.
+			stopped atomic.Bool
+		)
+		started := make(chan struct{})
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			for !stopped.Load() {
+				if _, _, err := client.GetTS(ctx); err != nil {
+					continue
+				}
+				now := time.Now()
+				if lastSuccess.IsZero() {
+					close(started)
+				} else {
+					maxGap = max(maxGap, now.Sub(lastSuccess))
+				}
+				lastSuccess = now
+			}
+		}()
+		defer func() {
+			stopped.Store(true)
+			<-done
+		}()
+		select {
+		case <-started:
+		case <-time.After(10 * time.Second):
+			re.FailNow("GetTS does not succeed before the primary change")
+		}
+		changedAt := time.Now()
+		changePrimary()
+		tc.WaitForDefaultPrimaryServing(re)
+		time.Sleep(time.Second)
+		stopped.Store(true)
+		<-done
+		// A client that never succeeds again after the change leaves the gap open until now.
+		re.True(lastSuccess.After(changedAt))
+		re.Less(max(maxGap, time.Since(lastSuccess)), 400*time.Millisecond)
+	}
+	for range 3 {
+		checkMaxGap(func() {
+			re.NoError(tc.ResignPrimary(constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID))
+		})
+	}
+	// Shut down the primary as a rolling upgrade does, leaving the last server as the primary.
+	for range 2 {
+		checkMaxGap(func() {
+			tc.DestroyServer(tc.GetPrimaryServer(constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID).GetAddr())
+		})
 	}
 }
 
