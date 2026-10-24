@@ -464,26 +464,41 @@ type Checker interface {
 //   - endKey absent (region runs past every later keyspace): spanning iff the
 //     start keyspace still exists;
 //   - endKey sits exactly on startKey's keyspace right bound: not spanning;
-//   - otherwise: spanning iff the start or the end keyspace still exists.
+//   - otherwise: spanning iff any keyspace in [startKeyspaceID, endKeyspaceID]
+//     still exists, not just the two endpoints - a keyspace that lies strictly
+//     between them still means the region must be split.
 //
-// The last rule only looks at the two end keyspaces; keyspaces that lie strictly
-// between them are not inspected. An absent endKey is treated as +inf rather than
-// keyspace MaxValidKeyspaceID, so the result does not depend on the checker
-// implementation's handling of that sentinel ID.
+// An absent endKey is treated as +inf rather than keyspace MaxValidKeyspaceID,
+// so the result does not depend on the checker implementation's handling of
+// that sentinel ID.
 func RegionSpansMultipleKeyspaces(startKey, endKey []byte, checker Checker) bool {
 	if checker == nil {
 		return false
 	}
+	endKeyspaceID, endKT, endOK := ExtractKeyspaceID(endKey)
+
 	var startKeyspaceID uint32
 	var startKT regionBoundType
 	var startOK bool
 	if len(startKey) == 0 {
-		startKeyspaceID, startKT, startOK = constant.StartKeyspaceID, rawRegionBound, true
+		// An empty start key only stands in for the left bound of the raw
+		// keyspace block (keyspace 0) when endKey is itself recognizable as
+		// keyspace-prefixed: that is the "first region in a keyspace-aware
+		// cluster" case this synthesizes for. When endKey carries no
+		// keyspace prefix at all - e.g. a classic, unprefixed raw key in a
+		// cluster with no keyspace feature in use - treating the empty
+		// start key as a real keyspace boundary would wrongly pair a
+		// synthesized "known" side against the end key's genuinely unknown
+		// side below, and conservatively (and incorrectly) report spanning
+		// for an ordinary key range that carries no keyspace information on
+		// either side.
+		startOK = endOK
+		if startOK {
+			startKeyspaceID, startKT = constant.StartKeyspaceID, rawRegionBound
+		}
 	} else {
 		startKeyspaceID, startKT, startOK = ExtractKeyspaceID(startKey)
 	}
-
-	endKeyspaceID, endKT, endOK := ExtractKeyspaceID(endKey)
 
 	// If both keys have no recognizable keyspace ID (or the end key is simply
 	// absent), the region carries no keyspace boundary information at all, so it
@@ -512,10 +527,14 @@ func RegionSpansMultipleKeyspaces(startKey, endKey []byte, checker Checker) bool
 	}
 
 	// An absent endKey means the region runs past every later keyspace (+inf).
-	// There is no end keyspace to check, so it spans a boundary iff it starts
-	// inside an existing keyspace. Reaching here, startKey is a txn keyspace key.
+	// It spans a boundary iff any keyspace in [startKeyspaceID,
+	// MaxValidKeyspaceID] still exists - not just startKeyspaceID itself,
+	// since a later keyspace can still be live even after startKeyspaceID
+	// was removed, and the region still runs into it. Reaching here, startKey
+	// is a txn keyspace key.
 	if len(endKey) == 0 {
-		return checker.KeyspaceExist(startKeyspaceID)
+		_, exist := checker.GetKeyspaceIDInRange(startKeyspaceID, constant.MaxValidKeyspaceID, 1)
+		return exist
 	}
 
 	// If end keyspace ID is exactly start keyspace + 1,
@@ -529,14 +548,58 @@ func RegionSpansMultipleKeyspaces(startKey, endKey []byte, checker Checker) bool
 			return false
 		}
 	}
-	// Check the keyspace existence of startKeyspaceID and endKeyspaceID.
-	//  If both of them do not exist, we consider it does not span multiple keyspaces.
-	startExist := checker.KeyspaceExist(startKeyspaceID)
-	endExist := checker.KeyspaceExist(endKeyspaceID)
-	return startExist || endExist
+	// Check whether any keyspace in [startKeyspaceID, endKeyspaceID] still
+	// exists - not just the two endpoints, since a keyspace that lies strictly
+	// between them (e.g. startKeyspaceID and endKeyspaceID both already
+	// removed, but one in between was not) still means this region spans it.
+	_, exist := checker.GetKeyspaceIDInRange(startKeyspaceID, endKeyspaceID, 1)
+	return exist
 }
 
 const scanLimit = 10
+
+// resolveKeyspaceID reports the keyspace ID that key should be treated as
+// when restricting a keyspace ID range search to boundType's key space. If
+// key encodes a keyspace ID of exactly boundType, that ID is returned.
+// Otherwise key is classified by which side of boundType's key block it
+// falls on: constant.StartKeyspaceID if key sorts before the entire block
+// (e.g. a raw key when boundType is txn), or constant.MaxValidKeyspaceID if
+// it sorts at or after the block (e.g. a txn key when boundType is raw, or a
+// classic non-keyspace key that happens to sort past it). This keeps the
+// resulting [startID, endID] window correct even when a query mixes a real
+// boundType key with a key from another mode or a foreign, non-keyspace
+// encoding, instead of falling back to a role-based default (0 for a start
+// key, MaxValidKeyspaceID for an end key) regardless of where key actually
+// sorts.
+//
+// ok is false only when key cannot be classified at all, i.e. it is not
+// memcomparable-encoded; the caller should keep its own conservative default
+// in that case.
+func resolveKeyspaceID(key []byte, boundType regionBoundType) (id uint32, ok bool) {
+	if ksID, kt, extractOK := ExtractKeyspaceID(key); extractOK {
+		if kt == boundType {
+			return ksID, true
+		}
+		// key is a real keyspace key of the other mode. The raw ('r') key
+		// block always sorts before the txn ('x') key block.
+		if boundType == txnRegionBound {
+			return constant.StartKeyspaceID, true
+		}
+		return constant.MaxValidKeyspaceID, true
+	}
+	_, decoded, err := codec.DecodeBytes(key)
+	if err != nil || len(decoded) == 0 {
+		return 0, false
+	}
+	targetPrefix := codec.TxnKeyspaceModePrefix
+	if boundType == rawRegionBound {
+		targetPrefix = codec.RawKeyspaceModePrefix
+	}
+	if decoded[0] < targetPrefix {
+		return constant.StartKeyspaceID, true
+	}
+	return constant.MaxValidKeyspaceID, true
+}
 
 // GetKeyspaceSplitKeys returns the keys at which the region [startKey, endKey)
 // must be split so that no region spans more than one keyspace. keyType is the
@@ -550,20 +613,46 @@ func GetKeyspaceSplitKeys(startKey, endKey []byte, keyType coreconstant.KeyType,
 
 	// A start key that is empty or not a keyspace key of this mode means the
 	// region begins before any keyspace; an absent or foreign end key means it
-	// runs to the end of this mode's keyspace space.
+	// runs to the end of this mode's keyspace space. See resolveKeyspaceID for
+	// how a key of the other mode, or a non-keyspace key, is classified.
 	startID := constant.StartKeyspaceID
 	if len(startKey) != 0 {
-		if id, kt, ok := ExtractKeyspaceID(startKey); ok && kt == boundType {
+		if id, ok := resolveKeyspaceID(startKey, boundType); ok {
 			startID = id
 		}
 	}
 	endID := constant.MaxValidKeyspaceID
 	if len(endKey) != 0 {
-		if id, kt, ok := ExtractKeyspaceID(endKey); ok && kt == boundType {
+		if id, ok := resolveKeyspaceID(endKey, boundType); ok {
 			endID = id
 		}
 	}
 	if startID >= endID {
+		return nil
+	}
+
+	// No keyspace ID can lie strictly between startID and endID, so the only
+	// possible split point is the boundary they share. Resolve it with two
+	// point lookups instead of a range scan, which would otherwise trigger a
+	// keyspace ID range backfill for a window that can hold no keyspace of
+	// its own.
+	if endID == startID+1 {
+		// endID may be the MaxValidKeyspaceID sentinel used above to mean "runs
+		// to the end of this mode's keyspace space" (an absent or foreign end
+		// key), not a real keyspace ID any Checker implementation was ever
+		// asked to track. Treat it as always present instead of asking the
+		// checker, so the result doesn't depend on how a given implementation
+		// happens to answer for that ID - the same reason
+		// RegionSpansMultipleKeyspaces treats an absent endKey as +inf rather
+		// than routing it through KeyspaceExist(MaxValidKeyspaceID).
+		endExist := endID == constant.MaxValidKeyspaceID || checker.KeyspaceExist(endID)
+		if !checker.KeyspaceExist(startID) && !endExist {
+			return nil
+		}
+		_, boundary := boundType.bounds(MakeRegionBound(startID))
+		if keyutil.Between(startKey, endKey, boundary) {
+			return [][]byte{boundary}
+		}
 		return nil
 	}
 
@@ -603,6 +692,14 @@ func (s *keyspaceItem) Less(than keyspaceItem) bool {
 type Cache struct {
 	syncutil.RWMutex
 	tree *btree.BTreeG[keyspaceItem]
+	// generation counts every mutation (Save, DeleteKeyspace, clearAll) made
+	// to this Cache. It lets a caller that buffered a batch of entries from a
+	// slow storage scan (see SaveBatchIfGenerationUnchanged) detect whether
+	// some other write landed while it was scanning, without needing
+	// storage's own revision: a generation that is unchanged between the
+	// scan's snapshot and its own apply attempt means nothing wrote to this
+	// Cache in between, so the scanned data is trivially still the latest.
+	generation uint64
 }
 
 // NewCache creates a new Cache.
@@ -627,6 +724,7 @@ func (s *Cache) Save(keyspaceID uint32, name string, state keyspacepb.KeyspaceSt
 	defer s.Unlock()
 	item := keyspaceItem{keyspaceID: keyspaceID, name: name, state: state}
 	s.tree.ReplaceOrInsert(item)
+	s.generation++
 }
 
 // DeleteKeyspace deletes a keyspace by ID.
@@ -634,13 +732,59 @@ func (s *Cache) DeleteKeyspace(keyspaceID uint32) {
 	s.Lock()
 	defer s.Unlock()
 	s.tree.Delete(keyspaceItem{keyspaceID: keyspaceID})
+	s.generation++
 }
 
-func (s *Cache) scanAllKeyspaces(f func(keyspaceID uint32, name string) bool) {
+// Generation returns the current value of the mutation counter described on
+// Cache.generation. A caller about to buffer a batch of entries from a slow
+// storage scan should capture this beforehand and pass it to
+// SaveBatchIfGenerationUnchanged.
+func (s *Cache) Generation() uint64 {
+	s.RLock()
+	defer s.RUnlock()
+	return s.generation
+}
+
+// SaveBatchIfGenerationUnchanged saves every item in items the same way Save
+// does, but atomically and only if no mutation has happened since the caller
+// observed expectedGeneration - for a caller (such as backfillKeyspaceIDRange)
+// that buffered a whole range of entries from one storage scan and must apply
+// them all-or-nothing, since the scan could have read some of them before,
+// and others after, a real concurrent write elsewhere in the same range. A
+// per-item generation check would not work for this: the first item's own
+// write would bump the generation, so every later item in the same batch
+// would see a mismatch against the batch's original expectedGeneration and
+// be rejected even though nothing external actually raced it.
+func (s *Cache) SaveBatchIfGenerationUnchanged(items []keyspaceItem, expectedGeneration uint64) bool {
+	s.Lock()
+	defer s.Unlock()
+	if s.generation != expectedGeneration {
+		return false
+	}
+	for _, item := range items {
+		s.tree.ReplaceOrInsert(item)
+	}
+	s.generation++
+	return true
+}
+
+// clearAll empties the cache in place. It must be used instead of replacing
+// the *Cache pointer held by a caller, since the pointer itself may be read
+// concurrently without synchronization.
+func (s *Cache) clearAll() {
+	s.Lock()
+	defer s.Unlock()
+	s.tree = btree.NewG(2, func(i, j keyspaceItem) bool {
+		return i.Less(j)
+	})
+	s.generation++
+}
+
+func (s *Cache) scanAllKeyspaces(f func(keyspaceID uint32, name string, state keyspacepb.KeyspaceState) bool) {
 	s.RLock()
 	defer s.RUnlock()
 	s.tree.Ascend(func(i keyspaceItem) bool {
-		return f(i.keyspaceID, i.name)
+		return f(i.keyspaceID, i.name, i.state)
 	})
 }
 

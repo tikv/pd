@@ -28,6 +28,8 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	"go.etcd.io/etcd/server/v3/embed"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
@@ -102,6 +104,23 @@ func (s *ambiguousCommitKeyspaceGroupStorage) RunInTxn(ctx context.Context, f fu
 func (s *errorKeyspaceGroupStorage) SaveKeyspaceGroup(txn kv.Txn, kg *endpoint.KeyspaceGroup) error {
 	if s.failOnSaveID != 0 && kg.ID == s.failOnSaveID {
 		return errSaveKeyspaceGroup
+	}
+	return s.StorageEndpoint.SaveKeyspaceGroup(txn, kg)
+}
+
+// unavailableOnSaveKeyspaceGroupStorage fails SaveKeyspaceGroup with a
+// transport-shaped grpc error (codes.Unavailable) instead of a plain
+// sentinel, to prove that a callback-phase error is never treated as an
+// ambiguous commit result just because its error code happens to overlap
+// with a genuine commit-phase transport error.
+type unavailableOnSaveKeyspaceGroupStorage struct {
+	*endpoint.StorageEndpoint
+	failOnSaveID uint32
+}
+
+func (s *unavailableOnSaveKeyspaceGroupStorage) SaveKeyspaceGroup(txn kv.Txn, kg *endpoint.KeyspaceGroup) error {
+	if s.failOnSaveID != 0 && kg.ID == s.failOnSaveID {
+		return status.Error(codes.Unavailable, "injected SaveKeyspaceGroup unavailable error")
 	}
 	return s.StorageEndpoint.SaveKeyspaceGroup(txn, kg)
 }

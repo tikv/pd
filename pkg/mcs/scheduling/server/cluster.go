@@ -224,6 +224,16 @@ func (c *Cluster) GetSharedConfig() sc.SharedConfigProvider {
 	return c.persistConfig
 }
 
+// GetKeyspaceIDInRange returns the keyspace IDs in the specified range.
+func (c *Cluster) GetKeyspaceIDInRange(startKeyspaceID, endKeyspaceID uint32, limit int) ([]uint32, bool) {
+	return c.keyspaceCache.GetKeyspaceIDInRange(startKeyspaceID, endKeyspaceID, limit)
+}
+
+// KeyspaceExist checks if a keyspace exists by ID.
+func (c *Cluster) KeyspaceExist(id uint32) bool {
+	return c.keyspaceCache.KeyspaceExist(id)
+}
+
 // GetRuleManager returns the rule manager.
 func (c *Cluster) GetRuleManager() *placement.RuleManager {
 	return c.ruleManager

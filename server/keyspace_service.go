@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
@@ -73,6 +74,14 @@ func (s *KeyspaceServer) LoadKeyspace(_ context.Context, request *keyspacepb.Loa
 	if !manager.CheckKeyspaceRegionBound(meta) {
 		// If the keyspace region is not split yet, we treat it as not found.
 		// To avoid clients using the keyspace before region split is done.
+		// Push the keyspace's boundaries into the suspect key range queue so the
+		// checker re-checks the region promptly instead of waiting for the next
+		// full patrol cycle.
+		if rc := s.GetRaftCluster(); rc != nil {
+			bound := keyspace.MakeRegionBound(meta.GetId())
+			rc.AddSuspectKeyRange(bound.RawLeftBound, bound.RawRightBound)
+			rc.AddSuspectKeyRange(bound.TxnLeftBound, bound.TxnRightBound)
+		}
 		err = errs.ErrKeyspaceNotFound
 		return &keyspacepb.LoadKeyspaceResponse{Header: getErrorHeader(err)}, nil
 	}
