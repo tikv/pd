@@ -258,6 +258,7 @@ func (handler *scatterRangeHandler) updateConfig(w http.ResponseWriter, r *http.
 	err = handler.config.persist()
 	if err != nil {
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
 	}
 	log.Info("scatter-range-scheduler config is updated",
 		zap.String("range-name", args[0]),
