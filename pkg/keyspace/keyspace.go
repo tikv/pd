@@ -805,13 +805,22 @@ func (manager *Manager) checkBound(key []byte) bool {
 	return true
 }
 
-// LoadKeyspace returns the keyspace specified by name.
-// It returns error if loading or unmarshalling met error or if keyspace does not exist.
+// LoadKeyspace returns the keyspace specified by name. It returns error if
+// loading or unmarshalling met error or if keyspace does not exist.
+//
+// It deliberately does not warm the cache: its result is read-only to the
+// caller, and an authoritative writer (e.g. UpdateKeyspaceStateByID) can
+// commit and publish a newer state for this same keyspace while this call's
+// own storage read is already in flight. Publishing this call's result
+// afterward can then land after - and clobber - that newer, already
+// committed write, with no further event to correct it, since a present (if
+// stale) cache entry never triggers a cache-miss fallback for a later
+// reader. Leaving the cache alone here removes that race outright, at the
+// cost of never caching the result of a call to this function specifically -
+// backfillKeyspaceIDRange's batch scan remains the way this manager's cache
+// gets warmed from storage.
 func (manager *Manager) LoadKeyspace(name string) (*keyspacepb.KeyspaceMeta, error) {
 	var meta *keyspacepb.KeyspaceMeta
-	// Capture the generation before the storage read below, for the same
-	// reason LoadKeyspaceByID does - see its comment.
-	generation := manager.cache.Generation()
 	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
 		loaded, id, err := manager.store.LoadKeyspaceID(txn, name)
 		if err != nil {
@@ -829,10 +838,9 @@ func (manager *Manager) LoadKeyspace(name string) (*keyspacepb.KeyspaceMeta, err
 		}
 		return nil
 	})
-	if err == nil {
-		failpoint.InjectCall("loadKeyspaceBeforeCacheWrite")
-		manager.cache.SaveIfGenerationUnchanged(meta.GetId(), meta.GetName(), meta.GetState(), generation)
-	}
+	// Test-only pause point - see LoadKeyspaceByID's identical failpoint for
+	// why.
+	failpoint.InjectCall("loadKeyspaceAfterRead")
 	if manager.mgm != nil && meta != nil {
 		manager.mgm.AttachEndpoints(meta.GetConfig())
 	}
@@ -841,19 +849,12 @@ func (manager *Manager) LoadKeyspace(name string) (*keyspacepb.KeyspaceMeta, err
 
 // LoadKeyspaceByID returns the keyspace specified by id.
 // It returns error if loading or unmarshalling met error or if keyspace does not exist.
+// It deliberately does not warm the cache - see LoadKeyspace's comment for why.
 func (manager *Manager) LoadKeyspaceByID(spaceID uint32) (*keyspacepb.KeyspaceMeta, error) {
 	var (
 		meta *keyspacepb.KeyspaceMeta
 		err  error
 	)
-	// Capture the generation before the storage read below, so the cache
-	// write below can detect whether a concurrent, authoritative write
-	// (Save or DeleteKeyspace, e.g. from UpdateKeyspaceStateByID) landed
-	// while this read was in flight - see Cache.SaveIfGenerationUnchanged.
-	// This guards every caller of LoadKeyspaceByID at the source, rather
-	// than relying on each caller to re-apply the same guard around its own
-	// now-redundant second write.
-	generation := manager.cache.Generation()
 	err = manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
 		meta, err = manager.store.LoadKeyspaceMeta(txn, spaceID)
 		if err != nil {
@@ -864,10 +865,12 @@ func (manager *Manager) LoadKeyspaceByID(spaceID uint32) (*keyspacepb.KeyspaceMe
 		}
 		return nil
 	})
-	if err == nil {
-		failpoint.InjectCall("loadKeyspaceByIDBeforeCacheWrite")
-		manager.cache.SaveIfGenerationUnchanged(meta.GetId(), meta.GetName(), meta.GetState(), generation)
-	}
+	// Test-only pause point, after the read above has already returned its
+	// (possibly soon-to-be-stale) result but before this call returns it to
+	// its own caller - lets a test hold a read "in flight" long enough to run
+	// a real, concurrent, authoritative write and confirm this read cannot
+	// disturb its result, since it never touches the cache at all.
+	failpoint.InjectCall("loadKeyspaceByIDAfterRead")
 	if manager.mgm != nil && meta != nil {
 		manager.mgm.AttachEndpoints(meta.GetConfig())
 	}
@@ -990,6 +993,20 @@ func (manager *Manager) updateKeyspaceConfigTxn(
 
 	var meta *keyspacepb.KeyspaceMeta
 	oldConfig := make(map[string]string)
+	// metaLock is acquired once the id is resolved from name below, and held
+	// through the cache write at the end of this function instead of being
+	// released as soon as the id is resolved - see UpdateKeyspaceStateByID's
+	// comment for why the lock has to outlive the transaction itself. The
+	// lock can only be taken inside txnFunc (the id isn't known before
+	// resolving name), so track it here instead of a plain defer inside
+	// txnFunc, and release it once, on every exit path, below.
+	var lockedID uint32
+	locked := false
+	defer func() {
+		if locked {
+			manager.metaLock.Unlock(lockedID)
+		}
+	}()
 	txnFunc := func(txn kv.Txn) error {
 		// First get KeyspaceID from Name.
 		loaded, id, err := manager.store.LoadKeyspaceID(txn, name)
@@ -1000,7 +1017,8 @@ func (manager *Manager) updateKeyspaceConfigTxn(
 			return errs.ErrKeyspaceNotFound
 		}
 		manager.metaLock.Lock(id)
-		defer manager.metaLock.Unlock(id)
+		lockedID = id
+		locked = true
 		// Load keyspace by id.
 		meta, err = manager.store.LoadKeyspaceMeta(txn, id)
 		if err != nil {
@@ -1059,9 +1077,6 @@ func (manager *Manager) updateKeyspaceConfigTxn(
 		}
 		return nil
 	}
-	// Capture the generation before the storage read inside txnFunc - see
-	// UpdateKeyspaceStateByID's comment for why.
-	generation := manager.cache.Generation()
 	err := manager.runTxnWithMetaGroupLock(txnFunc)
 	if err != nil {
 		log.Warn("[keyspace] failed to update keyspace config",
@@ -1072,7 +1087,7 @@ func (manager *Manager) updateKeyspaceConfigTxn(
 		return nil, err
 	}
 	failpoint.InjectCall("updateKeyspaceConfigBeforeCacheWrite")
-	manager.cache.SaveIfGenerationUnchanged(meta.GetId(), meta.GetName(), meta.GetState(), generation)
+	manager.cache.Save(meta.GetId(), meta.GetName(), meta.GetState())
 	if manager.mgm != nil {
 		manager.mgm.AttachEndpoints(meta.GetConfig())
 	}
@@ -1093,9 +1108,20 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 		return nil, err
 	}
 	var meta *keyspacepb.KeyspaceMeta
-	// Capture the generation before the storage read below - see
-	// UpdateKeyspaceStateByID's comment for why.
-	generation := manager.cache.Generation()
+	// metaLock is acquired once the id is resolved from name below, and held
+	// through the cache write at the end of this function instead of being
+	// released as soon as the id is resolved - see UpdateKeyspaceStateByID's
+	// comment for why the lock has to outlive the transaction itself. The
+	// lock can only be taken inside the closure (the id isn't known before
+	// resolving name), so track it here instead of a plain defer inside the
+	// closure, and release it once, on every exit path, below.
+	var lockedID uint32
+	locked := false
+	defer func() {
+		if locked {
+			manager.metaLock.Unlock(lockedID)
+		}
+	}()
 	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
 		// First get KeyspaceID from Name.
 		loaded, id, err := manager.store.LoadKeyspaceID(txn, name)
@@ -1106,7 +1132,8 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 			return errs.ErrKeyspaceNotFound
 		}
 		manager.metaLock.Lock(id)
-		defer manager.metaLock.Unlock(id)
+		lockedID = id
+		locked = true
 		// Load keyspace by id.
 		meta, err = manager.store.LoadKeyspaceMeta(txn, id)
 		if err != nil {
@@ -1130,7 +1157,7 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 		return nil, err
 	}
 	failpoint.InjectCall("updateKeyspaceStateBeforeCacheWrite")
-	manager.cache.SaveIfGenerationUnchanged(meta.GetId(), meta.GetName(), meta.GetState(), generation)
+	manager.cache.Save(meta.GetId(), meta.GetName(), meta.GetState())
 	if manager.mgm != nil {
 		manager.mgm.AttachEndpoints(meta.GetConfig())
 	}
@@ -1269,20 +1296,20 @@ func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.K
 		log.Warn("[keyspace] failed to update keyspace config", errs.ZapError(err))
 		return nil, err
 	}
+	// metaLock is held from before the storage transaction through the cache
+	// write below, rather than being released as soon as the transaction
+	// commits. That keeps this id's cache publication ordered the same way
+	// its storage commits are ordered: no other call touching this same id's
+	// cache entry (another UpdateKeyspaceStateByID/UpdateKeyspaceState/
+	// updateKeyspaceConfigTxn) can run between this commit and this cache
+	// write, so whichever call's cache write happens last is guaranteed to
+	// also be the call whose storage commit happened last. That makes the
+	// cache write below safe to apply unconditionally.
+	manager.metaLock.Lock(id)
+	defer manager.metaLock.Unlock(id)
 	var meta *keyspacepb.KeyspaceMeta
 	var err error
-	// Capture the generation before metaLock is even acquired below, for the
-	// same reason LoadKeyspaceByID does: metaLock is released once the txn
-	// closure returns, so a concurrent call for this same id (e.g. another
-	// UpdateKeyspaceStateByID, or RemoveKeyspace) can commit and cache its own,
-	// newer state before this call's own cache write below runs. Guarding that
-	// write against the generation observed here, rather than writing
-	// unconditionally, stops this call from clobbering that newer write with
-	// its own now-stale meta.
-	generation := manager.cache.Generation()
 	err = manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
-		manager.metaLock.Lock(id)
-		defer manager.metaLock.Unlock(id)
 		// Load keyspace by id.
 		meta, err = manager.store.LoadKeyspaceMeta(txn, id)
 		if err != nil {
@@ -1306,7 +1333,7 @@ func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.K
 		return nil, err
 	}
 	failpoint.InjectCall("updateKeyspaceStateByIDBeforeCacheWrite")
-	manager.cache.SaveIfGenerationUnchanged(meta.GetId(), meta.GetName(), meta.GetState(), generation)
+	manager.cache.Save(meta.GetId(), meta.GetName(), meta.GetState())
 	log.Info("[keyspace] keyspace state updated",
 		zap.Uint32("keyspace-id", meta.GetId()),
 		zap.String("name", meta.GetName()),
@@ -1586,10 +1613,10 @@ func (manager *Manager) GetKeyspaceNameByID(id uint32) (string, error) {
 	if ok {
 		return item.name, nil
 	}
-	// If the keyspace name is not in the cache, try to get it from the
-	// storage. LoadKeyspaceByID itself guards its own cache write against a
-	// concurrent, authoritative write, so no further generation handling is
-	// needed here.
+	// If the keyspace name is not in the cache, fall back to storage.
+	// LoadKeyspaceByID does not write its result back to the cache - see its
+	// comment - so this miss is not remembered here either; it just answers
+	// this one call from a fresh read.
 	meta, err := manager.LoadKeyspaceByID(id)
 	if err != nil {
 		return "", err
@@ -1649,10 +1676,10 @@ func (manager *Manager) GetKeyspaceStateByID(id uint32) (keyspacepb.KeyspaceStat
 	if ok {
 		return item.state, nil
 	}
-	// If the keyspace state is not in the cache, try to get it from the
-	// storage. LoadKeyspaceByID itself guards its own cache write against a
-	// concurrent, authoritative write, so no further generation handling is
-	// needed here.
+	// If the keyspace state is not in the cache, fall back to storage.
+	// LoadKeyspaceByID does not write its result back to the cache - see its
+	// comment - so this miss is not remembered here either; it just answers
+	// this one call from a fresh read.
 	meta, err := manager.LoadKeyspaceByID(id)
 	// Only check wether the keyspace meta is nil, ensure the returned state is as latest as possible.
 	if meta == nil {

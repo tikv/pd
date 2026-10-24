@@ -693,12 +693,12 @@ type Cache struct {
 	syncutil.RWMutex
 	tree *btree.BTreeG[keyspaceItem]
 	// generation counts every mutation (Save, DeleteKeyspace, clearAll) made
-	// to this Cache. It lets a reader that fell back to a slow storage read
-	// (see SaveIfGenerationUnchanged) detect whether some other write landed
-	// while it was reading, without needing storage's own revision: a
-	// generation that is unchanged between the reader's snapshot and its own
-	// write attempt means nothing wrote to this Cache in between, so the
-	// reader's data is trivially the latest.
+	// to this Cache. It lets a caller that buffered a batch of entries from a
+	// slow storage scan (see SaveBatchIfGenerationUnchanged) detect whether
+	// some other write landed while it was scanning, without needing
+	// storage's own revision: a generation that is unchanged between the
+	// scan's snapshot and its own apply attempt means nothing wrote to this
+	// Cache in between, so the scanned data is trivially still the latest.
 	generation uint64
 }
 
@@ -736,45 +736,25 @@ func (s *Cache) DeleteKeyspace(keyspaceID uint32) {
 }
 
 // Generation returns the current value of the mutation counter described on
-// Cache.generation. A caller about to fall back to a slow storage read should
-// capture this beforehand and pass it to SaveIfGenerationUnchanged.
+// Cache.generation. A caller about to buffer a batch of entries from a slow
+// storage scan should capture this beforehand and pass it to
+// SaveBatchIfGenerationUnchanged.
 func (s *Cache) Generation() uint64 {
 	s.RLock()
 	defer s.RUnlock()
 	return s.generation
 }
 
-// SaveIfGenerationUnchanged saves the keyspace information the same way Save
-// does, but only if no mutation has happened since the caller observed
-// expectedGeneration (typically via Generation, captured before a slow
-// storage read this call's data came from). It reports whether the write was
-// applied. Rejecting a stale write here is always safe to skip, never unsafe
-// to apply: any write that did happen in between - whether a newer Save or a
-// DeleteKeyspace - is authoritative and must not be clobbered by a read that
-// started before it, so that write must just be left alone instead of guessed
-// at or merged with.
-func (s *Cache) SaveIfGenerationUnchanged(keyspaceID uint32, name string, state keyspacepb.KeyspaceState, expectedGeneration uint64) bool {
-	s.Lock()
-	defer s.Unlock()
-	if s.generation != expectedGeneration {
-		return false
-	}
-	item := keyspaceItem{keyspaceID: keyspaceID, name: name, state: state}
-	s.tree.ReplaceOrInsert(item)
-	s.generation++
-	return true
-}
-
 // SaveBatchIfGenerationUnchanged saves every item in items the same way Save
 // does, but atomically and only if no mutation has happened since the caller
-// observed expectedGeneration - mirroring SaveIfGenerationUnchanged's
-// single-item guarantee for a caller (such as backfillKeyspaceIDRange) that
-// buffered a whole range of entries from one storage read and must apply
-// them all-or-nothing. A per-item SaveIfGenerationUnchanged call would not
-// work for this: the first item's own write bumps the generation, so every
-// later item in the same batch would see a mismatch against the batch's
-// original expectedGeneration and be rejected even though nothing external
-// actually raced it.
+// observed expectedGeneration - for a caller (such as backfillKeyspaceIDRange)
+// that buffered a whole range of entries from one storage scan and must apply
+// them all-or-nothing, since the scan could have read some of them before,
+// and others after, a real concurrent write elsewhere in the same range. A
+// per-item generation check would not work for this: the first item's own
+// write would bump the generation, so every later item in the same batch
+// would see a mismatch against the batch's original expectedGeneration and
+// be rejected even though nothing external actually raced it.
 func (s *Cache) SaveBatchIfGenerationUnchanged(items []keyspaceItem, expectedGeneration uint64) bool {
 	s.Lock()
 	defer s.Unlock()

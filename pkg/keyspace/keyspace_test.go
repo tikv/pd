@@ -769,12 +769,12 @@ func (suite *keyspaceTestSuite) TestLoadRangeKeyspace() {
 	re.Error(err)
 }
 
-// TestLoadKeyspacePopulatesCache verifies that LoadKeyspace and LoadKeyspaceByID
-// warm the in-memory cache as a side effect, so a freshly constructed Manager
-// (simulating a process restart) does not need a separate query to make a
-// previously created keyspace visible to cache-only lookups such as
-// GetKeyspaceIDInRange.
-func TestLoadKeyspacePopulatesCache(t *testing.T) {
+// TestLoadKeyspaceDoesNotPopulateCache verifies that LoadKeyspace and
+// LoadKeyspaceByID never write their result back to the cache: the only way
+// to warm this Manager's cache from storage is backfillKeyspaceIDRange's
+// batch scan (or an authoritative write). See LoadKeyspace's comment for why
+// these two deliberately do not warm the cache.
+func TestLoadKeyspaceDoesNotPopulateCache(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -799,18 +799,18 @@ func TestLoadKeyspacePopulatesCache(t *testing.T) {
 	_, ok := fresh.cache.getKeyspaceByID(id)
 	re.False(ok, "freshly constructed Manager should start with an empty cache")
 
-	_, err = fresh.LoadKeyspaceByID(id)
+	meta, err := fresh.LoadKeyspaceByID(id)
 	re.NoError(err)
-	item, ok := fresh.cache.getKeyspaceByID(id)
-	re.True(ok, "LoadKeyspaceByID should populate the cache")
-	re.Equal(id, item.keyspaceID)
+	re.Equal(id, meta.GetId(), "LoadKeyspaceByID must still answer correctly from storage")
+	_, ok = fresh.cache.getKeyspaceByID(id)
+	re.False(ok, "LoadKeyspaceByID must not populate the cache")
 
 	fresh2 := NewKeyspaceManager(ctx, store, nil, allocator, &mockConfig{}, kgm, nil)
-	_, err = fresh2.LoadKeyspace("ks150")
+	meta, err = fresh2.LoadKeyspace("ks150")
 	re.NoError(err)
-	item, ok = fresh2.cache.getKeyspaceByID(id)
-	re.True(ok, "LoadKeyspace should populate the cache")
-	re.Equal(id, item.keyspaceID)
+	re.Equal(id, meta.GetId(), "LoadKeyspace must still answer correctly from storage")
+	_, ok = fresh2.cache.getKeyspaceByID(id)
+	re.False(ok, "LoadKeyspace must not populate the cache")
 }
 
 // TestGetKeyspaceIDInRangeBackfillsFromStorage verifies that a freshly
@@ -1096,11 +1096,12 @@ func TestCreateKeyspaceByIDFailsWhenCompatibilityLabelWriteFails(t *testing.T) {
 	re.Empty(ids)
 }
 
-// TestGetKeyspaceStateByIDDoesNotClobberConcurrentUpdate verifies that a
-// GetKeyspaceStateByID call which fell back to a slow storage read, racing
-// against a real, concurrent UpdateKeyspaceStateByID for the same keyspace,
-// does not overwrite that update's newer cache value with its own stale one.
-func TestGetKeyspaceStateByIDDoesNotClobberConcurrentUpdate(t *testing.T) {
+// TestGetKeyspaceStateByIDFallbackDoesNotRaceConcurrentUpdate verifies that a
+// GetKeyspaceStateByID call which fell back to a slow LoadKeyspaceByID read,
+// racing against a real, concurrent UpdateKeyspaceStateByID for the same
+// keyspace, cannot disturb the update's cache value: LoadKeyspaceByID never
+// touches the cache, so the reader has nothing to clobber with.
+func TestGetKeyspaceStateByIDFallbackDoesNotRaceConcurrentUpdate(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1125,12 +1126,12 @@ func TestGetKeyspaceStateByIDDoesNotClobberConcurrentUpdate(t *testing.T) {
 
 	reachedFailpoint := make(chan struct{})
 	releaseReader := make(chan struct{})
-	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/keyspace/loadKeyspaceByIDBeforeCacheWrite", func() {
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/keyspace/loadKeyspaceByIDAfterRead", func() {
 		close(reachedFailpoint)
 		<-releaseReader
 	}))
 	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/loadKeyspaceByIDBeforeCacheWrite"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/loadKeyspaceByIDAfterRead"))
 	}()
 
 	readerDone := make(chan struct{})
@@ -1141,9 +1142,10 @@ func TestGetKeyspaceStateByIDDoesNotClobberConcurrentUpdate(t *testing.T) {
 		readState, readErr = manager.GetKeyspaceStateByID(80)
 	}()
 
-	// Let the reader's storage read (ARCHIVED) complete and reach the point
-	// just before it would write that stale value to cache, then perform a
-	// real, concurrent state update while it is paused there.
+	// Let the reader's storage read (ARCHIVED) complete and pause right after
+	// it, then perform a real, concurrent state update while it is paused
+	// there - the update does not have to wait for the reader at all, since
+	// the reader never touches metaLock or the cache.
 	<-reachedFailpoint
 	_, err := manager.UpdateKeyspaceStateByID(80, keyspacepb.KeyspaceState_TOMBSTONE, time.Now().Unix())
 	re.NoError(err)
@@ -1157,16 +1159,16 @@ func TestGetKeyspaceStateByIDDoesNotClobberConcurrentUpdate(t *testing.T) {
 	item, ok := manager.cache.getKeyspaceByID(80)
 	re.True(ok)
 	re.Equal(keyspacepb.KeyspaceState_TOMBSTONE, item.state,
-		"the concurrent update's value must survive; the stale reader's write must have been rejected")
+		"the concurrent update's value must survive; the reader never writes to the cache at all")
 }
 
-// TestLoadKeyspaceByIDDoesNotClobberConcurrentUpdate verifies that the
-// generation guard lives in LoadKeyspaceByID itself, protecting every one of
-// its callers (gc_state_manager, keyspace_service, the region/keyspace HTTP
-// handlers, etc.), not just the two callers (GetKeyspaceNameByID and
-// GetKeyspaceStateByID) that used to re-apply the guard around their own,
-// now-redundant second write.
-func TestLoadKeyspaceByIDDoesNotClobberConcurrentUpdate(t *testing.T) {
+// TestLoadKeyspaceByIDConcurrentWithUpdateDoesNotRaceCache verifies the
+// interleaving a stale cache-warming write used to lose to: a LoadKeyspaceByID
+// read in flight, racing a real, concurrent, authoritative UpdateKeyspaceStateByID
+// for the same keyspace. Since LoadKeyspaceByID no longer writes its result
+// back to the cache at all, the update's cache value survives regardless of
+// how the two interleave.
+func TestLoadKeyspaceByIDConcurrentWithUpdateDoesNotRaceCache(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1191,12 +1193,12 @@ func TestLoadKeyspaceByIDDoesNotClobberConcurrentUpdate(t *testing.T) {
 
 	reachedFailpoint := make(chan struct{})
 	releaseReader := make(chan struct{})
-	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/keyspace/loadKeyspaceByIDBeforeCacheWrite", func() {
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/keyspace/loadKeyspaceByIDAfterRead", func() {
 		close(reachedFailpoint)
 		<-releaseReader
 	}))
 	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/loadKeyspaceByIDBeforeCacheWrite"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/loadKeyspaceByIDAfterRead"))
 	}()
 
 	readerDone := make(chan struct{})
@@ -1207,9 +1209,9 @@ func TestLoadKeyspaceByIDDoesNotClobberConcurrentUpdate(t *testing.T) {
 		readMeta, readErr = manager.LoadKeyspaceByID(81)
 	}()
 
-	// Let the reader's storage read (ARCHIVED) complete and reach the point
-	// just before it would write that stale value to cache, then perform a
-	// real, concurrent state update while it is paused there.
+	// Let the reader's storage read (ARCHIVED) complete and pause right after
+	// it, then perform a real, concurrent state update while it is paused
+	// there.
 	<-reachedFailpoint
 	_, err := manager.UpdateKeyspaceStateByID(81, keyspacepb.KeyspaceState_TOMBSTONE, time.Now().Unix())
 	re.NoError(err)
@@ -1223,14 +1225,13 @@ func TestLoadKeyspaceByIDDoesNotClobberConcurrentUpdate(t *testing.T) {
 	item, ok := manager.cache.getKeyspaceByID(81)
 	re.True(ok)
 	re.Equal(keyspacepb.KeyspaceState_TOMBSTONE, item.state,
-		"the concurrent update's value must survive; LoadKeyspaceByID's own stale write must have been rejected")
+		"the concurrent update's value must survive; LoadKeyspaceByID never writes to the cache at all")
 }
 
-// TestLoadKeyspaceDoesNotClobberConcurrentUpdate mirrors
-// TestLoadKeyspaceByIDDoesNotClobberConcurrentUpdate for LoadKeyspace (the
-// by-name sibling lookup), which had the same unconditional-cache-write race
-// until it was given the same generation guard.
-func TestLoadKeyspaceDoesNotClobberConcurrentUpdate(t *testing.T) {
+// TestLoadKeyspaceConcurrentWithUpdateDoesNotRaceCache mirrors
+// TestLoadKeyspaceByIDConcurrentWithUpdateDoesNotRaceCache for LoadKeyspace
+// (the by-name sibling lookup).
+func TestLoadKeyspaceConcurrentWithUpdateDoesNotRaceCache(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1255,12 +1256,12 @@ func TestLoadKeyspaceDoesNotClobberConcurrentUpdate(t *testing.T) {
 
 	reachedFailpoint := make(chan struct{})
 	releaseReader := make(chan struct{})
-	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/keyspace/loadKeyspaceBeforeCacheWrite", func() {
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/keyspace/loadKeyspaceAfterRead", func() {
 		close(reachedFailpoint)
 		<-releaseReader
 	}))
 	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/loadKeyspaceBeforeCacheWrite"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/loadKeyspaceAfterRead"))
 	}()
 
 	readerDone := make(chan struct{})
@@ -1271,9 +1272,9 @@ func TestLoadKeyspaceDoesNotClobberConcurrentUpdate(t *testing.T) {
 		readMeta, readErr = manager.LoadKeyspace("ks82")
 	}()
 
-	// Let the reader's storage read (ARCHIVED) complete and reach the point
-	// just before it would write that stale value to cache, then perform a
-	// real, concurrent state update while it is paused there.
+	// Let the reader's storage read (ARCHIVED) complete and pause right after
+	// it, then perform a real, concurrent state update while it is paused
+	// there.
 	<-reachedFailpoint
 	_, err := manager.UpdateKeyspaceStateByID(82, keyspacepb.KeyspaceState_TOMBSTONE, time.Now().Unix())
 	re.NoError(err)
@@ -1287,15 +1288,16 @@ func TestLoadKeyspaceDoesNotClobberConcurrentUpdate(t *testing.T) {
 	item, ok := manager.cache.getKeyspaceByID(82)
 	re.True(ok)
 	re.Equal(keyspacepb.KeyspaceState_TOMBSTONE, item.state,
-		"the concurrent update's value must survive; LoadKeyspace's own stale write must have been rejected")
+		"the concurrent update's value must survive; LoadKeyspace never writes to the cache at all")
 }
 
-// TestUpdateKeyspaceStateByIDDoesNotClobberConcurrentUpdate verifies that
-// UpdateKeyspaceStateByID's own cache write, staged against the state it
-// itself just committed, does not overwrite a newer state committed by a
-// second, concurrent call for the same keyspace that runs and caches its own
-// result while the first call is paused between its own commit and its own
-// cache write.
+// TestUpdateKeyspaceStateByIDDoesNotClobberConcurrentUpdate verifies that two
+// concurrent, authoritative updates to the same keyspace (UpdateKeyspaceStateByID
+// and its by-name sibling UpdateKeyspaceState) cannot interleave their commits
+// and cache writes: metaLock is now held from before the first call's own
+// transaction all the way through its cache write, so the second call - which
+// needs the same per-id lock - blocks until the first call's cache write has
+// already landed, and only then reads, commits, and publishes on top of it.
 func TestUpdateKeyspaceStateByIDDoesNotClobberConcurrentUpdate(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1329,34 +1331,40 @@ func TestUpdateKeyspaceStateByIDDoesNotClobberConcurrentUpdate(t *testing.T) {
 	firstDone := make(chan struct{})
 	go func() {
 		defer close(firstDone)
-		// DISABLED -> ARCHIVED, pausing just before its own cache write.
+		// DISABLED -> ARCHIVED, pausing (with metaLock still held) just
+		// before its own cache write.
 		_, err := manager.UpdateKeyspaceStateByID(84, keyspacepb.KeyspaceState_ARCHIVED, time.Now().Unix())
 		re.NoError(err)
 	}()
-
-	// Let the first call's commit (ARCHIVED) land in storage and reach the
-	// point just before it would write that value to cache, then perform a
-	// second, real, concurrent transition while it is paused there: storage
-	// already has ARCHIVED, so this commits and caches ARCHIVED -> TOMBSTONE.
-	// Uses the by-name sibling so this second call does not hit the same
-	// failpoint as the first.
 	<-reachedFailpoint
-	_, err := manager.UpdateKeyspaceState("ks84", keyspacepb.KeyspaceState_TOMBSTONE, time.Now().Unix())
-	re.NoError(err)
+
+	// The second call needs the same per-id metaLock the first call is still
+	// holding, so it must run in its own goroutine too: it blocks until the
+	// first call's cache write releases the lock. Uses the by-name sibling so
+	// this second call does not hit the same failpoint as the first.
+	secondDone := make(chan struct{})
+	go func() {
+		defer close(secondDone)
+		_, err := manager.UpdateKeyspaceState("ks84", keyspacepb.KeyspaceState_TOMBSTONE, time.Now().Unix())
+		re.NoError(err)
+	}()
+
+	// Releasing the first call lets it publish ARCHIVED and release the lock,
+	// unblocking the second call, which only then reads ARCHIVED from storage
+	// and commits/publishes TOMBSTONE on top of it.
 	close(releaseFirst)
 	<-firstDone
+	<-secondDone
 
 	item, ok := manager.cache.getKeyspaceByID(84)
 	re.True(ok)
 	re.Equal(keyspacepb.KeyspaceState_TOMBSTONE, item.state,
-		"the concurrent update's value must survive; the first call's own stale write must have been rejected")
+		"the two calls are fully serialized by metaLock, so the second call's commit and cache write always land after the first's")
 }
 
 // TestUpdateKeyspaceStateDoesNotClobberConcurrentUpdate mirrors
 // TestUpdateKeyspaceStateByIDDoesNotClobberConcurrentUpdate for
-// UpdateKeyspaceState (the by-name sibling), which had the same
-// unconditional-cache-write race until it was given the same generation
-// guard.
+// UpdateKeyspaceState (the by-name sibling) pausing first instead.
 func TestUpdateKeyspaceStateDoesNotClobberConcurrentUpdate(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1390,31 +1398,36 @@ func TestUpdateKeyspaceStateDoesNotClobberConcurrentUpdate(t *testing.T) {
 	firstDone := make(chan struct{})
 	go func() {
 		defer close(firstDone)
-		// DISABLED -> ARCHIVED, pausing just before its own cache write.
+		// DISABLED -> ARCHIVED, pausing (with metaLock still held) just
+		// before its own cache write.
 		_, err := manager.UpdateKeyspaceState("ks85", keyspacepb.KeyspaceState_ARCHIVED, time.Now().Unix())
 		re.NoError(err)
 	}()
-
-	// Let the first call's commit (ARCHIVED) land in storage and reach the
-	// point just before it would write that value to cache, then perform a
-	// second, real, concurrent transition while it is paused there.
 	<-reachedFailpoint
-	_, err := manager.UpdateKeyspaceStateByID(85, keyspacepb.KeyspaceState_TOMBSTONE, time.Now().Unix())
-	re.NoError(err)
+
+	secondDone := make(chan struct{})
+	go func() {
+		defer close(secondDone)
+		_, err := manager.UpdateKeyspaceStateByID(85, keyspacepb.KeyspaceState_TOMBSTONE, time.Now().Unix())
+		re.NoError(err)
+	}()
+
 	close(releaseFirst)
 	<-firstDone
+	<-secondDone
 
 	item, ok := manager.cache.getKeyspaceByID(85)
 	re.True(ok)
 	re.Equal(keyspacepb.KeyspaceState_TOMBSTONE, item.state,
-		"the concurrent update's value must survive; the first call's own stale write must have been rejected")
+		"the two calls are fully serialized by metaLock, so the second call's commit and cache write always land after the first's")
 }
 
 // TestUpdateKeyspaceConfigDoesNotClobberConcurrentUpdate verifies that
 // updateKeyspaceConfigTxn's own cache write (shared by UpdateKeyspaceConfig
-// and UpdateKeyspaceConfigWithPreconditions) does not overwrite a newer
-// state committed by a second, concurrent call for the same keyspace while
-// the first call is paused between its own commit and its own cache write.
+// and UpdateKeyspaceConfigWithPreconditions) is fully serialized, via
+// metaLock, against a concurrent UpdateKeyspaceStateByID for the same
+// keyspace, the same way the two UpdateKeyspaceState* siblings are serialized
+// against each other.
 func TestUpdateKeyspaceConfigDoesNotClobberConcurrentUpdate(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1450,25 +1463,29 @@ func TestUpdateKeyspaceConfigDoesNotClobberConcurrentUpdate(t *testing.T) {
 		defer close(firstDone)
 		// Config-only change: the meta this call holds keeps State ENABLED,
 		// the value it read before the concurrent state transition below.
+		// Pauses (with metaLock still held) just before its own cache write.
 		_, err := manager.UpdateKeyspaceConfig("ks86", []*Mutation{
 			{Op: OpPut, Key: "some-key", Value: "some-value"},
 		})
 		re.NoError(err)
 	}()
-
-	// Let the first call's commit land in storage and reach the point just
-	// before it would write its (state-ENABLED) meta to cache, then perform
-	// a real, concurrent state transition while it is paused there.
 	<-reachedFailpoint
-	_, err := manager.UpdateKeyspaceStateByID(86, keyspacepb.KeyspaceState_DISABLED, time.Now().Unix())
-	re.NoError(err)
+
+	secondDone := make(chan struct{})
+	go func() {
+		defer close(secondDone)
+		_, err := manager.UpdateKeyspaceStateByID(86, keyspacepb.KeyspaceState_DISABLED, time.Now().Unix())
+		re.NoError(err)
+	}()
+
 	close(releaseFirst)
 	<-firstDone
+	<-secondDone
 
 	item, ok := manager.cache.getKeyspaceByID(86)
 	re.True(ok)
 	re.Equal(keyspacepb.KeyspaceState_DISABLED, item.state,
-		"the concurrent update's value must survive; the config update's own stale write must have been rejected")
+		"the two calls are fully serialized by metaLock, so the second call's commit and cache write always land after the first's")
 }
 
 // TestBackfillKeyspaceIDRangeDoesNotClobberConcurrentUpdate verifies that a

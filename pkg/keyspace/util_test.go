@@ -1017,68 +1017,6 @@ func TestKeyspaceExists(t *testing.T) {
 	re.False(cache.KeyspaceExist(103))
 }
 
-// TestCacheSaveIfGenerationUnchangedRejectsStaleWriteAfterSave verifies that
-// a write staged against a generation observed before a concurrent Save is
-// rejected, instead of clobbering that Save's newer value.
-func TestCacheSaveIfGenerationUnchangedRejectsStaleWriteAfterSave(t *testing.T) {
-	re := require.New(t)
-	cache := NewCache()
-	cache.Save(100, "ks-100", keyspacepb.KeyspaceState_ENABLED)
-
-	// Simulate a lazy-fill reader that observed the generation before
-	// starting a slow storage read.
-	staleGeneration := cache.Generation()
-
-	// A concurrent, authoritative write lands while the reader was "still
-	// reading" from storage.
-	cache.Save(100, "ks-100", keyspacepb.KeyspaceState_TOMBSTONE)
-
-	applied := cache.SaveIfGenerationUnchanged(100, "ks-100", keyspacepb.KeyspaceState_ENABLED, staleGeneration)
-	re.False(applied, "a write staged against a stale generation must not be applied")
-
-	item, ok := cache.getKeyspaceByID(100)
-	re.True(ok)
-	re.Equal(keyspacepb.KeyspaceState_TOMBSTONE, item.state, "the concurrent write's value must survive untouched")
-}
-
-// TestCacheSaveIfGenerationUnchangedRejectsStaleWriteAfterDelete verifies the
-// same rejection when the concurrent write is a deletion: a stale reader must
-// not resurrect an entry that was legitimately removed while it was reading.
-func TestCacheSaveIfGenerationUnchangedRejectsStaleWriteAfterDelete(t *testing.T) {
-	re := require.New(t)
-	cache := NewCache()
-	cache.Save(100, "ks-100", keyspacepb.KeyspaceState_ARCHIVED)
-
-	staleGeneration := cache.Generation()
-
-	// A concurrent removal deletes the entry while the reader was "still
-	// reading" its now-outdated ARCHIVED value from storage.
-	cache.DeleteKeyspace(100)
-
-	applied := cache.SaveIfGenerationUnchanged(100, "ks-100", keyspacepb.KeyspaceState_ARCHIVED, staleGeneration)
-	re.False(applied, "a write staged against a stale generation must not resurrect a deleted entry")
-
-	_, ok := cache.getKeyspaceByID(100)
-	re.False(ok, "the deletion must survive untouched")
-}
-
-// TestCacheSaveIfGenerationUnchangedAppliesWhenUncontested verifies the
-// common case: when nothing else touched the cache in the meantime, the
-// write proceeds normally.
-func TestCacheSaveIfGenerationUnchangedAppliesWhenUncontested(t *testing.T) {
-	re := require.New(t)
-	cache := NewCache()
-
-	generation := cache.Generation()
-	applied := cache.SaveIfGenerationUnchanged(200, "ks-200", keyspacepb.KeyspaceState_ENABLED, generation)
-	re.True(applied)
-
-	item, ok := cache.getKeyspaceByID(200)
-	re.True(ok)
-	re.Equal("ks-200", item.name)
-	re.Equal(keyspacepb.KeyspaceState_ENABLED, item.state)
-}
-
 func TestGetKeyspaceIDInRange(t *testing.T) {
 	re := require.New(t)
 	cache := NewCache()
