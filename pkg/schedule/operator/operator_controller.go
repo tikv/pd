@@ -24,6 +24,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/eraftpb"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 
@@ -474,6 +476,15 @@ func (oc *Controller) checkAddOperator(isPromoting bool, ops ...*Operator) (bool
 			operatorCounter.WithLabelValues(op.Desc(), "epoch-not-match").Inc()
 			return false, EpochNotMatch
 		}
+		if op.Len() > 0 {
+			useConfChangeV2 := versioninfo.IsFeatureSupported(oc.config.GetClusterVersion(), versioninfo.ConfChangeV2)
+			if cmd := op.Step(0).GetCmd(region, useConfChangeV2); cmd != nil {
+				if err := oc.validateCommandCapability(region, cmd); err != nil {
+					log.Warn("reject incompatible operator", zap.Uint64("region-id", region.GetID()), errs.ZapError(err))
+					return false, StaleStatus
+				}
+			}
+		}
 		if oldi, ok := oc.operators.Load(op.RegionID()); ok && oldi.(*Operator) != nil && !isHigherPriorityOperator(op, oldi.(*Operator)) {
 			old := oldi.(*Operator)
 			log.Debug("already have operator, cancel add operator",
@@ -847,7 +858,57 @@ func (oc *Controller) SendScheduleCommand(region *core.RegionInfo, step OpStep, 
 	if cmd == nil {
 		return
 	}
+	// Creation and notifier dispatch do not run CheckInProgress. Validate the
+	// actual command before every send, including raw administrative operators.
+	// This check deliberately does not change Store health admission semantics.
+	if err := oc.validateCommandCapability(region, cmd); err != nil {
+		log.Warn("reject incompatible scheduling command", zap.Uint64("region-id", region.GetID()), errs.ZapError(err))
+		return
+	}
 	oc.hbStreams.SendMsg(region, cmd)
+}
+
+// validateCommandCapability also protects the first command, which can be sent
+// synchronously before heartbeat-driven CheckInProgress validates the step.
+func (oc *Controller) validateCommandCapability(region *core.RegionInfo, cmd *hbstream.Operation) error {
+	checkChange := func(change *pdpb.ChangePeer) error {
+		if change == nil || change.GetChangeType() == eraftpb.ConfChangeType_RemoveNode {
+			return nil // Removing an incompatible peer must remain possible.
+		}
+		peer := change.GetPeer()
+		return validatePeerCapability(oc.cluster, peer.GetStoreId(), peer.GetIsWitness())
+	}
+	if err := checkChange(cmd.ChangePeer); err != nil {
+		return err
+	}
+	for _, change := range cmd.ChangePeerV2.GetChanges() {
+		if err := checkChange(change); err != nil {
+			return err
+		}
+	}
+	for _, change := range cmd.SwitchWitnesses.GetSwitchWitnesses() {
+		peer := region.GetPeer(change.GetPeerId())
+		if peer == nil {
+			return fmt.Errorf("peer %d does not exist", change.GetPeerId())
+		}
+		if err := validatePeerCapability(oc.cluster, peer.GetStoreId(), change.GetIsWitness()); err != nil {
+			return err
+		}
+	}
+	if transfer := cmd.TransferLeader; transfer != nil {
+		for _, peer := range append([]*metapb.Peer{transfer.GetPeer()}, transfer.GetPeers()...) {
+			if peer == nil {
+				continue
+			}
+			if core.IsWitness(peer) {
+				return fmt.Errorf("normal leader transfer cannot target witness %d", peer.GetId())
+			}
+			if err := validatePeerCapability(oc.cluster, peer.GetStoreId(), false); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (oc *Controller) pushFastOperator(op *Operator) {
