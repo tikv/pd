@@ -424,6 +424,7 @@ func TestLabelerRuleTTL(t *testing.T) {
 	checkRuleInMemoryAndStorage(re, labeler, "rule2", true)
 	re.Nil(labeler.GetLabelRule("rule2"))
 	// rule2 should be physically clear.
+	labeler.checkAndClearExpiredLabels()
 	checkRuleInMemoryAndStorage(re, labeler, "rule2", false)
 
 	re.Empty(labeler.GetRegionLabel(region, "k2"))
