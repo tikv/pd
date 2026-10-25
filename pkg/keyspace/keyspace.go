@@ -1520,6 +1520,15 @@ func (manager *Manager) backfillKeyspaceIDRange() {
 	// If a concurrent write landed during the scan, leave the watermark
 	// unchanged above: the next call must retry the full range fresh rather
 	// than trust a buffer that raced a real update.
+	//
+	// TODO: on a failed apply, the whole [startID, verifiedUpTo) range is
+	// rescanned from scratch even though only one ID in it actually raced.
+	// Cache could track the minimum ID touched since the last apply attempt
+	// (reset on each attempt); a failure could then commit the prefix of
+	// buffered below that ID and advance the watermark there instead of all
+	// the way back to startID, narrowing the next rescan. Not worth the
+	// added Cache state/locking without evidence that backfill conflicts
+	// and full-range rescans are actually frequent enough to matter.
 }
 
 // ClearCache empties the keyspace cache and resets the backfill watermark. It must
