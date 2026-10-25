@@ -370,6 +370,12 @@ func (l *RegionLabeler) Patch(patch LabelRulePatch) error {
 // GetRegionLabel returns the label of the region for a key.
 // If there are multiple rules that match the key, the one with max rule index will be returned.
 func (l *RegionLabeler) GetRegionLabel(region *core.RegionInfo, key string) string {
+	return l.GetRegionLabelWithFilter(region, key, nil)
+}
+
+// GetRegionLabelWithFilter returns the highest-index label whose value passes filter.
+// The filter runs while the labeler's read lock is held and must not mutate or call back into the labeler.
+func (l *RegionLabeler) GetRegionLabelWithFilter(region *core.RegionInfo, key string, filter func(string) bool) string {
 	l.RLock()
 	defer l.RUnlock()
 	now := time.Now()
@@ -388,6 +394,9 @@ func (l *RegionLabeler) GetRegionLabel(region *core.RegionInfo, key string) stri
 				continue
 			}
 			if label.Key == key {
+				if filter != nil && !filter(label.Value) {
+					continue
+				}
 				value, index = label.Value, r.Index
 			}
 		}

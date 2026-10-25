@@ -29,7 +29,9 @@ import (
 	"github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 const (
@@ -390,9 +392,9 @@ func (m *Manager) calcRegionAffinityGroupState(region *core.RegionInfo, saveCach
 	}
 	var cache *regionCache
 	cache, group = m.getCache(region)
-	if cache == nil || group == nil || cache.affinityVer != group.affinityVer || region != cache.region {
-		groupID := m.regionLabeler.GetRegionLabel(region, labelKey)
-		group = m.GetAffinityGroupState(groupID)
+	cacheValid := cache != nil && group != nil && cache.affinityVer == group.affinityVer && region == cache.region
+	if !cacheValid {
+		group = m.findRegionAffinityGroupState(region)
 		if group == nil {
 			return nil, false
 		}
@@ -408,6 +410,31 @@ func (m *Manager) calcRegionAffinityGroupState(region *core.RegionInfo, saveCach
 	}
 
 	return group, cache.isAffinity
+}
+
+func (m *Manager) findRegionAffinityGroupState(region *core.RegionInfo) *GroupState {
+	if !kerneltype.IsNextGen() {
+		return m.GetAffinityGroupState(m.regionLabeler.GetRegionLabel(region, labelKey))
+	}
+
+	m.RLock()
+	defer m.RUnlock()
+
+	regionRange := keyutil.KeyRange{StartKey: region.GetStartKey(), EndKey: region.GetEndKey()}
+	groupID := m.regionLabeler.GetRegionLabelWithFilter(region, labelKey, func(candidateID string) bool {
+		if candidateID == "" || m.groups[candidateID] == nil {
+			return false
+		}
+		return validateGroupKeyRanges(GroupKeyRanges{GroupID: candidateID, KeyRanges: []keyutil.KeyRange{regionRange}}) == nil
+	})
+	if groupID == "" {
+		return nil
+	}
+	groupInfo := m.groups[groupID]
+	if groupInfo == nil {
+		return nil
+	}
+	return newGroupState(groupInfo)
 }
 
 // IsGroupExist checks if a group exists.
@@ -505,6 +532,9 @@ func (m *Manager) SyncGroupFromEtcd(group *Group) {
 
 		if labelRule != nil {
 			gkr, labelErr = extractKeyRangesFromLabelRule(labelRule)
+			if labelErr == nil {
+				labelErr = validateGroupKeyRanges(gkr)
+			}
 		}
 	}
 
@@ -586,6 +616,14 @@ func (m *Manager) SyncKeyRangesFromEtcd(labelRule *labeler.LabelRule) error {
 			zap.String("rule-id", labelRule.ID),
 			zap.Error(err))
 		return err
+	}
+	if err := validateGroupKeyRanges(gkr); err != nil {
+		log.Warn("skipping affinity key range outside its group keyspace during etcd sync",
+			zap.String("group-id", groupID), zap.Error(err))
+		m.metaMutex.Lock()
+		defer m.metaMutex.Unlock()
+		delete(m.labelRuleBuffer, groupID)
+		return nil
 	}
 
 	m.metaMutex.Lock()

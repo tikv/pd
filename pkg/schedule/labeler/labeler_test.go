@@ -272,6 +272,11 @@ func TestIndex(t *testing.T) {
 			re.Equal(testCase.labels[k], labeler.GetRegionLabel(region, k))
 		}
 	}
+	region := core.NewTestRegionInfo(2, 1, []byte("1234"), []byte("5678"))
+	re.Equal("v1", labeler.GetRegionLabel(region, "k1"))
+	re.Equal("v0", labeler.GetRegionLabelWithFilter(region, "k1", func(value string) bool {
+		return value != "v1"
+	}))
 }
 
 func TestSaveLoadRule(t *testing.T) {

@@ -749,6 +749,13 @@ func (m *Manager) loadRegionLabel() error {
 				zap.Error(err))
 			return true
 		}
+		if err := validateGroupKeyRanges(gkr); err != nil {
+			log.Warn("skipping affinity label rule with ranges outside its group keyspace during rebuild",
+				zap.String("rule-id", rule.ID),
+				zap.String("group-id", groupID),
+				zap.Error(err))
+			return true
+		}
 
 		if len(gkr.KeyRanges) > 0 {
 			allRanges = append(allRanges, gkr)
