@@ -137,3 +137,43 @@ func TestGetOrCreateGRPCConnRecreatesShutdownConn(t *testing.T) {
 	re.True(ok)
 	re.Same(newCC, cached)
 }
+
+// TestUnknownServiceErrorFormat pins the message returned by the gRPC server for
+// an unregistered service, which isUnknownServiceError relies on. If it fails
+// after upgrading gRPC, update unknownServiceErrorPrefix accordingly, otherwise
+// the connections reaching another service will never be closed.
+func TestUnknownServiceErrorFormat(t *testing.T) {
+	re := require.New(t)
+	url := startGRPCServer(t, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), dialTimeout)
+	defer cancel()
+	cc, err := GetClientConn(ctx, url, nil)
+	re.NoError(err)
+	defer cc.Close()
+
+	const formatChangedMsg = "gRPC changed the unknown service error format, update unknownServiceErrorPrefix"
+	checkUnknownServiceError := func(err error) {
+		s, ok := status.FromError(err)
+		re.True(ok, formatChangedMsg)
+		re.Equal(codes.Unimplemented, s.Code(), formatChangedMsg)
+		re.Equal(unknownServiceErrorPrefix+"pdpb.PD", s.Message(), formatChangedMsg)
+		re.True(isUnknownServiceError(err, "pdpb.PD"))
+		re.False(isUnknownServiceError(err, "tsopb.TSO"))
+	}
+
+	callCtx, callCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer callCancel()
+	_, err = pdpb.NewPDClient(cc).GetMembers(callCtx, &pdpb.GetMembersRequest{})
+	checkUnknownServiceError(err)
+
+	stream, err := pdpb.NewPDClient(cc).Tso(callCtx)
+	re.NoError(err)
+	_, err = stream.Recv()
+	checkUnknownServiceError(err)
+
+	// An unknown method of a registered service must not be treated as an unknown service.
+	err = cc.Invoke(callCtx, "/grpc.health.v1.Health/NoSuchMethod",
+		&healthpb.HealthCheckRequest{}, &healthpb.HealthCheckResponse{})
+	re.Equal(codes.Unimplemented, status.Code(err))
+	re.False(isUnknownServiceError(err, healthpb.Health_ServiceDesc.ServiceName))
+}
