@@ -614,8 +614,8 @@ func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err 
 }
 
 func isRetryableGetTSError(err error) bool {
-	// A closed TSO stream, such as one replaced by the stream to a new leader, does not mean
-	// that the TSO service fails, so retry on another stream.
+	// A closed TSO stream, such as one evicted when the client switches to a new leader, does
+	// not mean that the TSO service fails, so retry on another stream.
 	return errs.IsLeaderChange(err) || errs.IsCalleeMismatch(err) || errs.ErrClientTSOStreamClosed.Equal(err)
 }
 

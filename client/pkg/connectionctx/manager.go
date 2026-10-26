@@ -34,23 +34,23 @@ type ConnectionCtx[T any] struct {
 type Manager[T any] struct {
 	sync.RWMutex
 	connectionCtxs map[string]*ConnectionCtx[T]
-	// onReplace is called with the stream of a connection context right before the context
-	// is canceled because GC, CleanAllAndStore or an overwriting Store replaces it.
-	onReplace func(T)
+	// onEvict is called with the stream of a connection context right before the context is
+	// canceled because GC, CleanAllAndStore or an overwriting Store evicts it.
+	onEvict func(T)
 }
 
 // NewManager is used to create a new connection context manager.
 func NewManager[T any]() *Manager[T] {
-	return NewManagerWithReplaceHook[T](nil)
+	return NewManagerWithEvictHook[T](nil)
 }
 
-// NewManagerWithReplaceHook creates a connection context manager that calls onReplace with
-// the stream of a connection context before canceling it for being replaced, so that the
-// stream can tell its pending requests to retry with another connection.
-func NewManagerWithReplaceHook[T any](onReplace func(T)) *Manager[T] {
+// NewManagerWithEvictHook creates a connection context manager that calls onEvict with the
+// stream of a connection context before canceling it for being evicted, so that the stream
+// can tell its pending requests to retry with another connection.
+func NewManagerWithEvictHook[T any](onEvict func(T)) *Manager[T] {
 	return &Manager[T]{
 		connectionCtxs: make(map[string]*ConnectionCtx[T], 3),
-		onReplace:      onReplace,
+		onEvict:        onEvict,
 	}
 }
 
@@ -64,6 +64,7 @@ func (c *Manager[T]) Exist(url string) bool {
 
 // Store is used to store the connection context, `overwrite` is used to force the store operation
 // no matter whether the connection context exists before, which is false by default.
+// Overwriting evicts the existing connection context of the url.
 // It returns whether the manager took ownership of ctx/cancel/stream. If false, the caller
 // must cancel ctx to avoid leaking the stream and its associated resources.
 func (c *Manager[T]) Store(ctx context.Context, cancel context.CancelFunc, url string, stream T, overwrite ...bool) bool {
@@ -82,11 +83,11 @@ func (c *Manager[T]) Store(ctx context.Context, cancel context.CancelFunc, url s
 }
 
 func (c *Manager[T]) storeLocked(ctx context.Context, cancel context.CancelFunc, url string, stream T) {
-	c.replaceLocked(url)
+	c.evictLocked(url)
 	c.connectionCtxs[url] = &ConnectionCtx[T]{ctx, cancel, url, stream}
 }
 
-// CleanAllAndStore is used to store the connection context exclusively. It will release
+// CleanAllAndStore is used to store the connection context exclusively. It will evict
 // all other connection contexts.
 // It returns whether the manager took ownership of ctx/cancel/stream. If a connection is
 // already registered with the url it returns false, and the caller must cancel ctx to avoid
@@ -106,7 +107,7 @@ func (c *Manager[T]) CleanAllAndStore(ctx context.Context, cancel context.Cancel
 	return true
 }
 
-// GC is used to release all connection contexts that match the given condition.
+// GC is used to evict all connection contexts that match the given condition.
 func (c *Manager[T]) GC(condition func(url string) bool) {
 	c.Lock()
 	defer c.Unlock()
@@ -116,23 +117,27 @@ func (c *Manager[T]) GC(condition func(url string) bool) {
 func (c *Manager[T]) gcLocked(condition func(url string) bool) {
 	for url := range c.connectionCtxs {
 		if condition(url) {
-			c.replaceLocked(url)
+			c.evictLocked(url)
 		}
 	}
 }
 
-func (c *Manager[T]) replaceLocked(url string) {
+// evictLocked removes a connection context that the manager decides to stop using while its
+// stream may still serve requests. It calls onEvict before canceling the context, so that
+// the stream can fail its pending requests with a retryable error.
+func (c *Manager[T]) evictLocked(url string) {
 	cc, ok := c.connectionCtxs[url]
 	if !ok {
 		return
 	}
-	if c.onReplace != nil {
-		c.onReplace(cc.Stream)
+	if c.onEvict != nil {
+		c.onEvict(cc.Stream)
 	}
 	c.releaseLocked(url)
 }
 
-// ReleaseAll is used to release all connection contexts.
+// ReleaseAll is used to release all connection contexts. It does not evict them, so onEvict
+// is not called.
 func (c *Manager[T]) ReleaseAll() {
 	c.Lock()
 	defer c.Unlock()
@@ -142,12 +147,14 @@ func (c *Manager[T]) ReleaseAll() {
 }
 
 // Release is used to delete a connection context from the connection context map and release the resources.
+// It does not evict the connection context, so onEvict is not called.
 func (c *Manager[T]) Release(url string) {
 	c.Lock()
 	defer c.Unlock()
 	c.releaseLocked(url)
 }
 
+// releaseLocked cancels and deletes a connection context without calling onEvict.
 func (c *Manager[T]) releaseLocked(url string) {
 	cc, ok := c.connectionCtxs[url]
 	if !ok {

@@ -117,16 +117,16 @@ func TestManager(t *testing.T) {
 	re.Empty(manager.connectionCtxs)
 }
 
-func TestReplaceHook(t *testing.T) {
+func TestEvictHook(t *testing.T) {
 	re := require.New(t)
-	var replaced []int
-	manager := NewManagerWithReplaceHook(func(stream int) { replaced = append(replaced, stream) })
+	var evicted []int
+	manager := NewManagerWithEvictHook(func(stream int) { evicted = append(evicted, stream) })
 	store := func(url string, stream int, overwrite bool) context.Context {
 		ctx, cancel := context.WithCancel(context.Background())
 		re.True(manager.Store(ctx, cancel, url, stream, overwrite))
 		return ctx
 	}
-	// GC, CleanAllAndStore and an overwriting Store replace connections: the hook runs
+	// GC, CleanAllAndStore and an overwriting Store evict connections: the hook runs
 	// before they are canceled.
 	ctx1 := store("url1", 1, false)
 	ctx2 := store("url1", 2, true)
@@ -137,11 +137,11 @@ func TestReplaceHook(t *testing.T) {
 	ctx4, cancel4 := context.WithCancel(context.Background())
 	re.True(manager.CleanAllAndStore(ctx4, cancel4, "url4", 4))
 	re.Error(ctx2.Err())
-	re.Equal([]int{1, 3, 2}, replaced)
-	// Release and ReleaseAll do not replace connections.
+	re.Equal([]int{1, 3, 2}, evicted)
+	// Release and ReleaseAll do not evict connections.
 	store("url5", 5, false)
 	manager.Release("url5")
 	manager.ReleaseAll()
 	re.Error(ctx4.Err())
-	re.Equal([]int{1, 3, 2}, replaced)
+	re.Equal([]int{1, 3, 2}, evicted)
 }

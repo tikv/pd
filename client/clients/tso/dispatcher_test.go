@@ -184,7 +184,7 @@ func (s *testTSODispatcherSuite) reqMustReady(req *Request) (physical int64, log
 	return physical, logical
 }
 
-func (s *testTSODispatcherSuite) TestReplaceStreamWithBatchOnIt() {
+func (s *testTSODispatcherSuite) TestEvictStreamWithBatchOnIt() {
 	conCtxMgr := s.dispatcher.provider.getConnectionCtxMgr()
 	// Serve the next batch with a stream bound to the context of its connection, so that
 	// canceling the connection fails the batch on it.
@@ -196,7 +196,7 @@ func (s *testTSODispatcherSuite) TestReplaceStreamWithBatchOnIt() {
 	req := s.sendReq(context.Background())
 	s.reqMustNotReady(req)
 
-	// Replacing the stream fails the batch on it with an error that GetTS retries.
+	// Overwriting the stream evicts it, which fails the batch on it with an error that GetTS retries.
 	newCtx, newCancel := context.WithCancel(context.Background())
 	defer newCancel()
 	newInner := newMockTSOStreamImpl(newCtx, resultModeGenerateOnSignal)

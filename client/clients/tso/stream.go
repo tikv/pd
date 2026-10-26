@@ -223,9 +223,9 @@ type tsoStream struct {
 	// For syncing between sender and receiver to guarantee all requests are finished when closing.
 	state          atomic.Int32
 	stoppedWithErr atomic.Pointer[error]
-	// replaced is set before the stream is canceled for being replaced by another one, so
+	// evicted is set before the connection manager cancels the stream for evicting it, so
 	// that its pending requests fail with a retryable error instead of context.Canceled.
-	replaced atomic.Bool
+	evicted atomic.Bool
 
 	estimatedLatencyMicros atomic.Uint64
 
@@ -433,7 +433,7 @@ recvLoop:
 			if hasReq {
 				metrics.RequestFailedDurationTSO.Observe(latencySeconds)
 			}
-			if err == io.EOF || (ctx.Err() != nil && s.replaced.Load()) {
+			if err == io.EOF || (ctx.Err() != nil && s.evicted.Load()) {
 				finishWithErr = errors.WithStack(errs.ErrClientTSOStreamClosed)
 			} else {
 				finishWithErr = errors.WithStack(err)
@@ -462,15 +462,15 @@ recvLoop:
 	}
 }
 
-// markReplaced marks the stream as replaced by another one. Call it before canceling the stream.
-func (s *tsoStream) markReplaced() {
-	s.replaced.Store(true)
+// markEvicted marks the stream as evicted by the connection manager. Call it before canceling the stream.
+func (s *tsoStream) markEvicted() {
+	s.evicted.Store(true)
 }
 
 // canceledErr returns the error to finish the pending requests with after the stream is canceled.
-// A replaced stream fails them with ErrClientTSOStreamClosed, which callers retry as a leader change.
+// An evicted stream fails them with ErrClientTSOStreamClosed, which callers retry as a leader change.
 func (s *tsoStream) canceledErr() error {
-	if s.replaced.Load() {
+	if s.evicted.Load() {
 		return errors.WithStack(errs.ErrClientTSOStreamClosed)
 	}
 	return context.Canceled

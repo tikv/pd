@@ -214,11 +214,11 @@ func (c *Cli) getTSOLeaderClientConn() (*grpc.ClientConn, string) {
 	return cc, url
 }
 
-// newConnectionCtxManager creates the manager of TSO streams. A stream replaced by another
-// one fails its pending requests with a retryable error, so that callers like GetTS retry
-// them on the new stream at once.
+// newConnectionCtxManager creates the manager of TSO streams. An evicted stream fails its
+// pending requests with a retryable error, so that callers like GetTS retry them on another
+// stream at once.
 func newConnectionCtxManager() *cctx.Manager[*tsoStream] {
-	return cctx.NewManagerWithReplaceHook((*tsoStream).markReplaced)
+	return cctx.NewManagerWithEvictHook((*tsoStream).markEvicted)
 }
 
 func (c *Cli) updateTSOLeaderURL(url string) error {
