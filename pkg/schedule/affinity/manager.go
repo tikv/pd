@@ -151,12 +151,10 @@ func (m *Manager) initGroupLocked(group *Group) {
 		return
 	}
 	m.groups[group.ID] = &runtimeGroupInfo{
-		Group: Group{
-			ID:              group.ID,
-			CreateTimestamp: group.CreateTimestamp,
-			LeaderStoreID:   group.LeaderStoreID,
-			VoterStoreIDs:   slices.Clone(group.VoterStoreIDs),
-		},
+		ID:                  group.ID,
+		CreateTimestamp:     group.CreateTimestamp,
+		LeaderStoreID:       group.LeaderStoreID,
+		VoterStoreIDs:       slices.Clone(group.VoterStoreIDs),
 		availability:        groupDegraded,
 		degradedExpiredAt:   newDegradedExpiredAtFromNow(),
 		AffinityVer:         1,
