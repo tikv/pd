@@ -762,6 +762,21 @@ func TestOperatorCheckDoesNotMoveBack(t *testing.T) {
 	re.Equal(int32(2), op.currentStep.Load())
 }
 
+func TestOperatorTotalInfluenceConcurrently(t *testing.T) {
+	region := newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
+	op := NewTestOperator(1, &metapb.RegionEpoch{}, OpLeader, TransferLeader{FromStore: 1, ToStore: 2})
+	var wg sync.WaitGroup
+	for range 10 {
+		wg.Go(func() {
+			influence := NewOpInfluence()
+			op.TotalInfluence(influence, region)
+			assert.Equal(t, int64(-1), influence.GetStoreInfluence(1).LeaderCount)
+			assert.Equal(t, int64(1), influence.GetStoreInfluence(2).LeaderCount)
+		})
+	}
+	wg.Wait()
+}
+
 func TestOperatorStoreHealthCheck(t *testing.T) {
 	re := require.New(t)
 	op := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, AddPeer{ToStore: 1, PeerID: 1})

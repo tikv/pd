@@ -89,7 +89,7 @@ type Operator struct {
 	additionalInfos  opAdditionalInfo
 	ApproximateSize  int64
 	timeout          time.Duration
-	influence        *OpInfluence
+	influence        atomic.Pointer[OpInfluence]
 	// needStoreHealthCheck marks whether the in-progress check should also
 	// reject a target store that has become unhealthy mid-execution. It is
 	// not set at creation time; callers opt in after the operator is built
@@ -454,18 +454,24 @@ func (o *Operator) UnfinishedInfluence(opInfluence *OpInfluence, region *core.Re
 }
 
 // TotalInfluence calculates the store difference which whole operator steps make.
+// It's safe to be called by multiple goroutine concurrently.
 func (o *Operator) TotalInfluence(opInfluence *OpInfluence, region *core.RegionInfo) {
-	// skip if region is nil and not cache influence.
-	if region == nil && o.influence == nil {
-		return
-	}
-	if o.influence == nil {
-		o.influence = NewOpInfluence()
+	influence := o.influence.Load()
+	if influence == nil {
+		// skip if region is nil and not cache influence.
+		if region == nil {
+			return
+		}
+		// Build the cache completely before publishing it to other callers.
+		influence = NewOpInfluence()
 		for step := range o.steps {
-			o.steps[step].Influence(o.influence, region)
+			o.steps[step].Influence(influence, region)
+		}
+		if !o.influence.CompareAndSwap(nil, influence) {
+			influence = o.influence.Load()
 		}
 	}
-	opInfluence.Add(o.influence)
+	opInfluence.Add(influence)
 }
 
 // OpHistory is used to log and visualize completed operators.
