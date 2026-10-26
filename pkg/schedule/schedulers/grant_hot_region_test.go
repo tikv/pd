@@ -26,6 +26,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/unrolled/render"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
+
+	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
@@ -106,7 +110,11 @@ func TestGrantHotRegionLocationSafeguard(t *testing.T) {
 				scheduler, err := CreateScheduler(types.GrantHotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(),
 					ConfigSliceDecoder(types.GrantHotRegionScheduler, []string{target, target}))
 				re.NoError(err)
+				logCore, logs := observer.New(zap.WarnLevel)
+				restoreLogger := log.ReplaceGlobals(zap.New(logCore), nil)
+				defer restoreLogger()
 				op, err := scheduler.(*grantHotRegionScheduler).transfer(tc, 1, 1, test.isLeader)
+				re.Zero(logs.Len(), "normal scheduling candidates should not emit warnings")
 				if !test.allowed {
 					re.Error(err)
 					re.Nil(op)
