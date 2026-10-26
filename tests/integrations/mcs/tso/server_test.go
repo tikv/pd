@@ -1176,7 +1176,7 @@ func checkTSOMonotonic(ctx context.Context, pdClient pd.Client, globalLastTS *ui
 		}
 		ts := (uint64(physical) << 18) + uint64(logical)
 		if ts <= *globalLastTS {
-			return fmt.Errorf("TSO is not globally increasing: last %d, current %d", globalLastTS, ts)
+			return fmt.Errorf("TSO is not globally increasing: last %d, current %d", *globalLastTS, ts)
 		}
 		*globalLastTS = ts
 	}

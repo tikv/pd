@@ -32,11 +32,9 @@ import (
 func TestGroupState(t *testing.T) {
 	re := require.New(t)
 	group := &GroupState{
-		Group: Group{
-			ID:            "group1",
-			LeaderStoreID: 1,
-			VoterStoreIDs: []uint64{1, 2, 3},
-		},
+		ID:                        "group1",
+		LeaderStoreID:             1,
+		VoterStoreIDs:             []uint64{1, 2, 3},
 		AffinitySchedulingAllowed: true,
 	}
 	// keyRange is unused in this test.
