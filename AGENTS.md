@@ -7,7 +7,7 @@
 
 ## Quick Facts
 - Language: Go modules (root + `client/` submodule).
-- Go version: CI uses 1.27 (install >=1.27).
+- Go version: CI uses 1.27 (install >=1.27.3).
 - Main binaries: `pd-server`, `pd-ctl`, `pd-recover`, tool suite.
 
 ## Build Shortcuts
