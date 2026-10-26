@@ -375,8 +375,7 @@ func shouldAbortKeyspaceGroupReconcile(err error) bool {
 		goerrors.Is(err, errs.ErrNoAvailableNode) {
 		return true
 	}
-	var etcdErr rpctypes.EtcdError
-	if goerrors.As(err, &etcdErr) {
+	if etcdErr, ok := goerrors.AsType[rpctypes.EtcdError](err); ok {
 		if goerrors.Is(err, rpctypes.ErrNotLeader) {
 			return true
 		}

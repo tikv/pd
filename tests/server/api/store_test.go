@@ -72,18 +72,16 @@ func (suite *storeTestSuite) TestStoresList() {
 func (suite *storeTestSuite) checkStoresList(cluster *tests.TestCluster) {
 	re := suite.Require()
 
-	stores := initStores()
-	for _, store := range stores {
-		tests.MustPutStore(re, cluster, store)
-	}
-
-	// Prevent store 6 (offline store) from being auto-tombstoned
-
-	// Enable failpoint to prevent auto-burying stores during the test
+	// Prevent the background checker from burying offline fixtures before assertions.
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/doNotBuryStore", "return(true)"))
 	defer func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/doNotBuryStore"))
 	}()
+
+	stores := initStores()
+	for _, store := range stores {
+		tests.MustPutStore(re, cluster, store)
+	}
 
 	leader := cluster.GetLeaderServer()
 	urlPrefix := leader.GetAddr() + "/pd/api/v1"
@@ -126,10 +124,12 @@ func (suite *storeTestSuite) checkStoresList(cluster *tests.TestCluster) {
 	checkStoresInfo(re, info.Stores, stores[2:])
 
 	// down store
+	// Use a serving store so background preparation cannot change the fixture.
 	store := &metapb.Store{
 		Id:            100,
 		Address:       "mock://tikv-100:100",
 		State:         metapb.StoreState_Up,
+		NodeState:     metapb.NodeState_Serving,
 		Version:       versioninfo.MinSupportedVersion(versioninfo.Version2_0).String(),
 		LastHeartbeat: time.Now().UnixNano() - int64(1*time.Hour),
 	}

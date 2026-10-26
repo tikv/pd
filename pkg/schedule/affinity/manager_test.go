@@ -548,14 +548,12 @@ func TestConcurrentOperations(t *testing.T) {
 	}
 
 	// Goroutine 4: Check availability
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for range 20 {
 			manager.checkGroupsAvailability()
 			time.Sleep(2 * time.Millisecond)
 		}
-	}()
+	})
 
 	// Wait for all goroutines
 	wg.Wait()

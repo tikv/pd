@@ -537,8 +537,7 @@ func (c *splitScatterController) dispatchSplitScatterRegions() {
 		}
 		op, err := c.regionScatterer.ScatterInternal(region, scatterGroup, rangeHint.startKey, rangeHint.endKey)
 		if err != nil {
-			var retryLater *scatter.InternalScatterRetryLater
-			if stderrors.As(err, &retryLater) {
+			if retryLater, ok := stderrors.AsType[*scatter.InternalScatterRetryLater](err); ok {
 				c.delayPendingSplitScatterRetryLater(pending, scatterGroup, retryLater.Reason)
 				continue
 			}

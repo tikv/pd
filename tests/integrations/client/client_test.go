@@ -175,9 +175,7 @@ func TestLeaderTransferAndMoveCluster(t *testing.T) {
 	// Start a goroutine the make sure TS won't fall back.
 	quit := make(chan struct{})
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for {
 			select {
 			case <-quit:
@@ -195,7 +193,7 @@ func TestLeaderTransferAndMoveCluster(t *testing.T) {
 			}
 			time.Sleep(time.Millisecond)
 		}
-	}()
+	})
 
 	// Transfer leader.
 	for range 3 {
@@ -321,11 +319,9 @@ func TestTSOFollowerProxy(t *testing.T) {
 		// error while create stream.
 		ch <- struct{}{}
 	}))
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		as.NoError(followerServer.Run())
-	}()
+	})
 	re.Eventually(func() bool {
 		_, _, err := cli2.GetTS(context.Background())
 		if err == nil {
@@ -872,26 +868,20 @@ func (suite *followerForwardAndHandleTestSuite) TestGetTSFuture() {
 	wg1 := sync.WaitGroup{}
 	wg2 := sync.WaitGroup{}
 	wg3 := sync.WaitGroup{}
-	wg1.Add(1)
-	go func() {
+	wg1.Go(func() {
 		<-time.After(time.Second)
 		for i := range 20 {
 			cancels[i]()
 		}
-		wg1.Done()
-	}()
-	wg2.Add(1)
-	go func() {
+	})
+	wg2.Go(func() {
 		cli.Close()
-		wg2.Done()
-	}()
-	wg3.Add(1)
-	go func() {
+	})
+	wg3.Go(func() {
 		for i := range 20 {
 			cli.GetTSAsync(ctxs[i])
 		}
-		wg3.Done()
-	}()
+	})
 	wg1.Wait()
 	wg2.Wait()
 	wg3.Wait()
@@ -1296,9 +1286,15 @@ func (suite *clientStatelessTestSuite) TestGetStore() {
 	store := stores[3]
 
 	// Get an up store should be OK.
+	// The background check may move it from preparing to serving during the RPC.
+	nodeStateBefore := cluster.GetStore(store.GetId()).GetNodeState()
 	n, err := suite.client.GetStore(context.Background(), store.GetId())
 	re.NoError(err)
+	nodeStateAfter := cluster.GetStore(store.GetId()).GetNodeState()
+	re.Contains([]metapb.NodeState{metapb.NodeState_Preparing, metapb.NodeState_Serving}, n.GetNodeState())
+	re.Contains([]metapb.NodeState{nodeStateBefore, nodeStateAfter}, n.GetNodeState())
 	store.LastHeartbeat = n.LastHeartbeat
+	store.NodeState = n.NodeState
 	re.Equal(store, n)
 
 	actualStores, err := suite.client.GetAllStores(context.Background())

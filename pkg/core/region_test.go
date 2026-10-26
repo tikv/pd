@@ -602,12 +602,10 @@ func TestSetRegionConcurrence(t *testing.T) {
 	regions := NewRegionsInfo()
 	region := NewTestRegionInfo(1, 1, []byte("a"), []byte("b"))
 	wg := &sync.WaitGroup{}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		_, err := regions.AtomicCheckAndPutRegion(ContextTODO(), region)
 		assert.NoError(t, err)
-	}()
+	})
 	_, err := regions.AtomicCheckAndPutRegion(ContextTODO(), region)
 	re.NoError(err)
 	wg.Wait()

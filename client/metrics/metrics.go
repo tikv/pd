@@ -24,7 +24,7 @@ import (
 )
 
 // make sure register metrics only once
-var initialized int32
+var initialized atomic.Int32
 
 func init() {
 	initMetricsAndRegisteredConsumers(prometheus.Labels{})
@@ -55,7 +55,7 @@ func initMetricsAndRegisteredConsumers(constLabels prometheus.Labels) {
 
 // InitAndRegisterMetrics initializes and registers the metrics manually.
 func InitAndRegisterMetrics(constLabels prometheus.Labels) {
-	if atomic.CompareAndSwapInt32(&initialized, 0, 1) {
+	if initialized.CompareAndSwap(0, 1) {
 		// Rebuild metrics and publish them to consumers under the same lock used
 		// for late consumer registration.
 		initMetricsAndRegisteredConsumers(constLabels)

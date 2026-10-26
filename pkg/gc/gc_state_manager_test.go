@@ -101,6 +101,8 @@ type newGCStateManagerForTestOptions struct {
 	serverNodes             int
 	etcdServerCfgModifier   func(cfg *embed.Config)
 	etcdClientCfgModifier   etcdutil.CreateEtcdClientOpt
+	useEnabledKeyspaceIndex bool
+	beforeLeader            func(*clientv3.Client)
 }
 
 func (opt *newGCStateManagerForTestOptions) generateKeyspacesByCount(count int) {
@@ -148,6 +150,9 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 	kgm := keyspace.NewKeyspaceGroupManager(ctx, s, client)
 	keyspaceManager := keyspace.NewKeyspaceManager(ctx, s, mockcluster.NewCluster(ctx, config.NewPersistOptions(cfg)), allocator, &config.KeyspaceConfig{}, kgm, nil)
 	gcStateManager = NewGCStateManager(s.GetGCStateProvider(), cfg.PDServerCfg, keyspaceManager)
+	if opt.useEnabledKeyspaceIndex {
+		gcStateManager.SetEtcdClient(client)
+	}
 	t.Cleanup(gcStateManager.CloseBarrierMetrics)
 
 	err = kgm.Bootstrap(ctx)
@@ -214,7 +219,15 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 		}
 	}
 
-	gcStateManager.OnNodeBecomesLeader()
+	if opt.beforeLeader != nil {
+		opt.beforeLeader(client)
+	}
+	stopGCStateManager := gcStateManager.OnNodeBecomesLeader()
+	originalClean := clean
+	clean = func() {
+		stopGCStateManager()
+		originalClean()
+	}
 
 	return s, s.GetGCStateProvider(), gcStateManager, clean, cancel
 }
@@ -263,8 +276,319 @@ type gcStateCacheAccessCounterSnapshot struct {
 
 func (s *gcStateManagerTestSuite) ensureMarkedLeader() {
 	if !s.manager.nodeIsLeader() {
-		s.manager.OnNodeBecomesLeader()
+		stopGCStateManager := s.manager.OnNodeBecomesLeader()
+		s.T().Cleanup(stopGCStateManager)
 	}
+}
+
+func (s *gcStateManagerTestSuite) TestGCStateWatchRequiresActiveLeadership() {
+	follower := NewGCStateManager(s.provider, s.manager.cfg, s.manager.keyspaceManager)
+	_, err := follower.WatchGCStates(context.Background(), true)
+	s.Require().ErrorIs(err, errs.ErrNotLeader)
+}
+
+func (s *gcStateManagerTestSuite) TestGCStateWatchLeadershipGeneration() {
+	re := s.Require()
+	stopFirst := s.manager.OnNodeBecomesLeader()
+	first, err := s.manager.WatchGCStates(context.Background(), true)
+	re.NoError(err)
+
+	stopSecond := s.manager.OnNodeBecomesLeader()
+	re.ErrorIs(first.Err(), errs.ErrNotLeader)
+	second, err := s.manager.WatchGCStates(context.Background(), true)
+	re.NoError(err)
+
+	stopFirst()
+	re.NoError(second.Err())
+	stopSecond()
+	re.ErrorIs(second.Err(), errs.ErrNotLeader)
+}
+
+func TestGCStateLeadershipClearsCacheBeforeEnablingReads(t *testing.T) {
+	for _, replacingLeader := range []bool{false, true} {
+		name := "follower-promotion"
+		if replacingLeader {
+			name = "leader-replacement"
+		}
+		t.Run(name, func(t *testing.T) {
+			re := require.New(t)
+			_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+			defer clean()
+			provider := endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(client), nil).GetGCStateProvider()
+			manager := NewGCStateManager(provider, config.PDServerConfig{}, nil)
+			defer manager.CloseBarrierMetrics()
+			if replacingLeader {
+				stop := manager.OnNodeBecomesLeader()
+				defer stop()
+			}
+
+			writeSafePoint := func(safePoint uint64) {
+				re.NoError(provider.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+					return wb.SetGCSafePoint(constant.NullKeyspaceID, safePoint)
+				}))
+			}
+			writeSafePoint(100)
+			// Reads can populate the cache even while this manager is a follower.
+			state, err := manager.GetGCState(constant.NullKeyspaceID, true)
+			re.NoError(err)
+			re.Equal(uint64(100), state.GCSafePoint)
+			// Another leader advances storage after the cached read.
+			writeSafePoint(200)
+
+			resetReached := make(chan struct{})
+			releaseReset := make(chan struct{})
+			release := sync.OnceFunc(func() { close(releaseReset) })
+			const hook = "github.com/tikv/pd/pkg/gc/beforeLeaderGCStateCacheReset"
+			re.NoError(failpoint.EnableCall(hook, func() {
+				close(resetReached)
+				<-releaseReset
+			}))
+			defer func() { re.NoError(failpoint.Disable(hook)) }()
+			leaderReady := make(chan struct{})
+			var stopLeader func()
+			go func() {
+				stopLeader = manager.OnNodeBecomesLeader()
+				close(leaderReady)
+			}()
+			defer func() {
+				release()
+				select {
+				case <-leaderReady:
+					stopLeader()
+				case <-time.After(5 * time.Second):
+					t.Error("leadership initialization did not stop")
+				}
+			}()
+			select {
+			case <-resetReached:
+			case <-time.After(5 * time.Second):
+				t.Fatal("leadership initialization did not reach the cache reset")
+			}
+
+			// Cache reads must remain disabled while the stale snapshot is present.
+			safePoint, err := manager.CompatibleLoadGCSafePoint(constant.NullKeyspaceID)
+			re.NoError(err)
+			re.Equal(uint64(200), safePoint)
+			release()
+			select {
+			case <-leaderReady:
+			case <-time.After(5 * time.Second):
+				t.Fatal("leadership initialization did not finish")
+			}
+			re.True(manager.nodeIsLeader())
+			safePoint, err = manager.CompatibleLoadGCSafePoint(constant.NullKeyspaceID)
+			re.NoError(err)
+			re.Equal(uint64(200), safePoint)
+		})
+	}
+}
+
+func (s *gcStateManagerTestSuite) TestGCStateWatchLoadsInitialStatesIncrementally() {
+	re := s.Require()
+	w, err := s.manager.registerGCStateWatcher(context.Background(), false, gcStateWatchConfig{
+		initialBatchSize:    2,
+		initChannelCapacity: 1,
+		liveChannelCapacity: 1,
+	})
+	re.NoError(err)
+	defer w.Close()
+
+	want := make(map[uint32]struct{}, len(s.keyspacePresets.all))
+	for _, keyspaceID := range s.keyspacePresets.all {
+		want[keyspaceID] = struct{}{}
+	}
+	got := make(map[uint32]struct{}, len(want))
+	var batchSizes []int
+	for len(got) < len(want) {
+		changes, err := w.RecvBatch(2)
+		re.NoError(err)
+		batchSizes = append(batchSizes, len(changes))
+		for _, change := range changes {
+			state := mustUpsert(s.T(), change)
+			re.Nil(state.GCBarriers)
+			got[state.KeyspaceID] = struct{}{}
+		}
+	}
+	re.Equal([]int{2, 2, 1}, batchSizes)
+	re.Equal(want, got)
+}
+
+func (s *gcStateManagerTestSuite) TestGCStateWatchSkipsInitialLoading() {
+	re := s.Require()
+	w, err := s.manager.WatchGCStates(context.Background(), true)
+	re.NoError(err)
+	defer w.Close()
+	re.True(w.initDone)
+	select {
+	case batch := <-w.initCh:
+		re.Fail("initial channel was used", "batch: %+v", batch)
+	default:
+	}
+}
+
+func (s *gcStateManagerTestSuite) TestGCStateWatchCanceledBeforeInitialLoaderDoesNotIterate() {
+	re := s.Require()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var iterationStarted atomic.Bool
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/gc/onGetAllKeyspacesGCStatesStart", func() {
+		iterationStarted.Store(true)
+	}))
+	defer func() { re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/gc/onGetAllKeyspacesGCStatesStart")) }()
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/gc/watchGCStatesRegistered", cancel))
+	defer func() { re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/gc/watchGCStatesRegistered")) }()
+
+	// Suppress the automatic loader so this test can model a loader goroutine that
+	// starts only after registration has synchronously canceled its watcher.
+	w, err := s.manager.registerGCStateWatcher(ctx, true, gcStateWatchConfig{initialBatchSize: 1, liveChannelCapacity: 1})
+	re.NoError(err)
+	defer w.Close()
+	re.ErrorIs(w.Err(), context.Canceled)
+
+	s.manager.loadInitialGCStates(w, 1)
+	re.False(iterationStarted.Load())
+}
+
+func (s *gcStateManagerTestSuite) TestGCStateWatchLiveSuppressesPausedInitial() {
+	re := s.Require()
+	const keyspaceID = uint32(2)
+	_, err := s.manager.AdvanceTxnSafePoint(keyspaceID, 10, time.Now())
+	re.NoError(err)
+
+	reached := make(chan struct{})
+	release := make(chan struct{})
+	var reachedOnce, releaseOnce sync.Once
+	releaseLoader := func() { releaseOnce.Do(func() { close(release) }) }
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/gc/watchGCStatesInitialStateLoaded", func(id uint32) {
+		if id == keyspaceID {
+			reachedOnce.Do(func() { close(reached) })
+			<-release
+		}
+	}))
+	defer func() { re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/gc/watchGCStatesInitialStateLoaded")) }()
+	defer releaseLoader()
+
+	w, err := s.manager.registerGCStateWatcher(context.Background(), false, gcStateWatchConfig{initialBatchSize: 1, initChannelCapacity: 16, liveChannelCapacity: 4})
+	re.NoError(err)
+	defer w.Close()
+	select {
+	case <-reached:
+	case <-time.After(5 * time.Second):
+		re.FailNow("initial loader did not reach keyspace 2")
+	}
+
+	_, err = s.manager.AdvanceTxnSafePoint(keyspaceID, 20, time.Now())
+	re.NoError(err)
+	for {
+		changes, err := w.RecvBatch(1)
+		re.NoError(err)
+		state, ok := changes[0].Upsert()
+		if ok && state.KeyspaceID == keyspaceID && state.TxnSafePoint == 20 {
+			break
+		}
+	}
+	releaseLoader()
+
+	re.Eventually(func() bool {
+		for {
+			change, ok, err := w.receiveOne(false)
+			re.NoError(err)
+			if !ok {
+				return w.initDone
+			}
+			state, upsert := change.Upsert()
+			re.False(upsert && state.KeyspaceID == keyspaceID && state.TxnSafePoint == 10)
+		}
+	}, 5*time.Second, 10*time.Millisecond)
+}
+
+func (s *gcStateManagerTestSuite) TestGCStateWatchInitialFailureTerminatesWatcher() {
+	re := s.Require()
+	const errorMessage = "injected initial watch failure"
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/gc/iterateAllKeyspacesGCStatesError", fmt.Sprintf(`return(%q)`, errorMessage)))
+	defer func() { re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/gc/iterateAllKeyspacesGCStatesError")) }()
+
+	w, err := s.manager.WatchGCStates(context.Background(), false)
+	re.NoError(err)
+	_, err = w.RecvBatch(1)
+	re.ErrorContains(err, errorMessage)
+	re.Eventually(func() bool {
+		s.manager.mu.RLock()
+		defer s.manager.mu.RUnlock()
+		_, ok := s.manager.watchers[w.id]
+		return !ok
+	}, 5*time.Second, 10*time.Millisecond)
+}
+
+func (s *gcStateManagerTestSuite) TestGCStateWatchFullInitChannelDoesNotHoldManagerMutex() {
+	re := s.Require()
+	stop := s.manager.OnNodeBecomesLeader()
+	w, err := s.manager.registerGCStateWatcher(context.Background(), false, gcStateWatchConfig{
+		initialBatchSize:    1,
+		initChannelCapacity: 1,
+		liveChannelCapacity: 1,
+	})
+	re.NoError(err)
+	re.Eventually(func() bool { return len(w.initCh) == cap(w.initCh) }, 5*time.Second, 10*time.Millisecond)
+
+	mutationDone := make(chan error, 1)
+	go func() {
+		_, err := s.manager.AdvanceTxnSafePoint(2, 1, time.Now())
+		mutationDone <- err
+	}()
+	select {
+	case err := <-mutationDone:
+		re.NoError(err)
+	case <-time.After(5 * time.Second):
+		re.FailNow("manager mutation blocked behind the initial state loader")
+	}
+
+	teardownDone := make(chan struct{})
+	go func() {
+		stop()
+		close(teardownDone)
+	}()
+	select {
+	case <-teardownDone:
+	case <-time.After(5 * time.Second):
+		re.FailNow("leadership teardown blocked behind the initial state loader")
+	}
+	w.Close()
+	re.Eventually(func() bool {
+		s.manager.mu.RLock()
+		defer s.manager.mu.RUnlock()
+		_, ok := s.manager.watchers[w.id]
+		return !ok
+	}, 5*time.Second, 10*time.Millisecond)
+}
+
+func (s *gcStateManagerTestSuite) TestGCStateWatchConcurrentCloseIsIdempotent() {
+	re := s.Require()
+	stop := s.manager.OnNodeBecomesLeader()
+	w, err := s.manager.WatchGCStates(context.Background(), false)
+	re.NoError(err)
+
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		w.Close()
+	}()
+	go func() {
+		defer wg.Done()
+		s.manager.terminateGCStateWatcher(w, errors.New("initial load failed"), watcherTerminationInitError)
+	}()
+	go func() {
+		defer wg.Done()
+		stop()
+	}()
+	wg.Wait()
+	re.Error(w.Err())
+	s.manager.mu.RLock()
+	_, ok := s.manager.watchers[w.id]
+	s.manager.mu.RUnlock()
+	re.False(ok)
 }
 
 func (s *gcStateManagerTestSuite) trackGCStateCacheAccessCounters() *gcStateCacheAccessCounters {
@@ -828,11 +1152,6 @@ func (s *gcStateManagerTestSuite) getAllGlobalGCBarriers() []*endpoint.GlobalGCB
 	return barriers
 }
 
-// ptime is a helper for getting pointer of time.
-func ptime(t time.Time) *time.Time {
-	return &t
-}
-
 func (s *gcStateManagerTestSuite) TestGCBarriers() {
 	re := s.Require()
 
@@ -846,7 +1165,7 @@ func (s *gcStateManagerTestSuite) TestGCBarriers() {
 	for _, keyspaceID := range s.keyspacePresets.manageable {
 		b, err := s.manager.SetGCBarrier(keyspaceID, "b1", 10, time.Hour, now)
 		re.NoError(err)
-		expected := endpoint.NewGCBarrier("b1", 10, ptime(now.Add(time.Hour)))
+		expected := endpoint.NewGCBarrier("b1", 10, new(now.Add(time.Hour)))
 		re.Equal(expected, b)
 		re.Len(s.getAllGCBarriers(keyspaceID), 1)
 		re.Equal(expected, s.getGCBarrier(keyspaceID, "b1"))
@@ -874,14 +1193,14 @@ func (s *gcStateManagerTestSuite) TestGCBarriers() {
 		// Updating the value of the existing GC barrier
 		b, err = s.manager.SetGCBarrier(keyspaceID, "b1", 15, time.Hour, now)
 		re.NoError(err)
-		expected = endpoint.NewGCBarrier("b1", 15, ptime(now.Add(time.Hour)))
+		expected = endpoint.NewGCBarrier("b1", 15, new(now.Add(time.Hour)))
 		re.Equal(expected, b)
 		re.Len(s.getAllGCBarriers(keyspaceID), 1)
 		re.Equal(expected, s.getGCBarrier(keyspaceID, "b1"))
 
 		b, err = s.manager.SetGCBarrier(keyspaceID, "b1", 15, time.Hour*2, now)
 		re.NoError(err)
-		expected = endpoint.NewGCBarrier("b1", 15, ptime(now.Add(time.Hour*2)))
+		expected = endpoint.NewGCBarrier("b1", 15, new(now.Add(time.Hour*2)))
 		re.Equal(expected, b)
 		re.Len(s.getAllGCBarriers(keyspaceID), 1)
 		re.Equal(expected, s.getGCBarrier(keyspaceID, "b1"))
@@ -889,7 +1208,7 @@ func (s *gcStateManagerTestSuite) TestGCBarriers() {
 		// Allows shrinking the barrier ts.
 		b, err = s.manager.SetGCBarrier(keyspaceID, "b1", 10, time.Hour, now)
 		re.NoError(err)
-		expected = endpoint.NewGCBarrier("b1", 10, ptime(now.Add(time.Hour)))
+		expected = endpoint.NewGCBarrier("b1", 10, new(now.Add(time.Hour)))
 		re.Equal(expected, b)
 		re.Len(s.getAllGCBarriers(keyspaceID), 1)
 		re.Equal(expected, s.getGCBarrier(keyspaceID, "b1"))
@@ -937,9 +1256,9 @@ func (s *gcStateManagerTestSuite) TestGCBarriers() {
 		_, err = s.manager.SetGCBarrier(keyspaceID, "b2", 20, time.Hour, now)
 		re.NoError(err)
 		re.Len(s.getAllGCBarriers(keyspaceID), 2)
-		expected = endpoint.NewGCBarrier("b1", 20, ptime(now.Add(time.Hour)))
+		expected = endpoint.NewGCBarrier("b1", 20, new(now.Add(time.Hour)))
 		re.Equal(expected, s.getGCBarrier(keyspaceID, "b1"))
-		expected = endpoint.NewGCBarrier("b2", 20, ptime(now.Add(time.Hour)))
+		expected = endpoint.NewGCBarrier("b2", 20, new(now.Add(time.Hour)))
 		re.Equal(expected, s.getGCBarrier(keyspaceID, "b2"))
 
 		res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, 25, now)
@@ -955,9 +1274,9 @@ func (s *gcStateManagerTestSuite) TestGCBarriers() {
 		_, err = s.manager.SetGCBarrier(keyspaceID, "b2", 27, time.Hour, now)
 		re.NoError(err)
 		re.Len(s.getAllGCBarriers(keyspaceID), 2)
-		expected = endpoint.NewGCBarrier("b1", 25, ptime(now.Add(time.Hour)))
+		expected = endpoint.NewGCBarrier("b1", 25, new(now.Add(time.Hour)))
 		re.Equal(expected, s.getGCBarrier(keyspaceID, "b1"))
-		expected = endpoint.NewGCBarrier("b2", 27, ptime(now.Add(time.Hour)))
+		expected = endpoint.NewGCBarrier("b2", 27, new(now.Add(time.Hour)))
 		re.Equal(expected, s.getGCBarrier(keyspaceID, "b2"))
 
 		res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, 30, now)
@@ -970,7 +1289,7 @@ func (s *gcStateManagerTestSuite) TestGCBarriers() {
 		// Deleting GC barriers
 		b, err = s.manager.DeleteGCBarrier(keyspaceID, "b1")
 		re.NoError(err)
-		expected = endpoint.NewGCBarrier("b1", 25, ptime(now.Add(time.Hour)))
+		expected = endpoint.NewGCBarrier("b1", 25, new(now.Add(time.Hour)))
 		re.Equal(expected, b)
 		re.Len(s.getAllGCBarriers(keyspaceID), 1)
 
@@ -983,7 +1302,7 @@ func (s *gcStateManagerTestSuite) TestGCBarriers() {
 
 		b, err = s.manager.DeleteGCBarrier(keyspaceID, "b2")
 		re.NoError(err)
-		expected = endpoint.NewGCBarrier("b2", 27, ptime(now.Add(time.Hour)))
+		expected = endpoint.NewGCBarrier("b2", 27, new(now.Add(time.Hour)))
 		re.Equal(expected, b)
 		re.Empty(s.getAllGCBarriers(keyspaceID))
 
@@ -1053,7 +1372,7 @@ func (s *gcStateManagerTestSuite) TestGCBarriers() {
 		// BarrierTS exactly equals to txn safe point is allowed.
 		b, err = s.manager.SetGCBarrier(keyspaceID, "b6", 60, time.Hour, now)
 		re.NoError(err)
-		expected = endpoint.NewGCBarrier("b6", 60, ptime(now.Add(time.Hour)))
+		expected = endpoint.NewGCBarrier("b6", 60, new(now.Add(time.Hour)))
 		re.Equal(expected, b)
 		re.Len(s.getAllGCBarriers(keyspaceID), 1)
 		re.Equal(expected, s.getGCBarrier(keyspaceID, "b6"))
@@ -1068,7 +1387,7 @@ func (s *gcStateManagerTestSuite) TestGCBarriers() {
 	for _, keyspaceID := range slices.Concat(s.keyspacePresets.unifiedGC, s.keyspacePresets.nullSynonyms) {
 		b, err := s.manager.SetGCBarrier(keyspaceID, "b1", 100, time.Hour, now)
 		re.NoError(err)
-		expected := endpoint.NewGCBarrier("b1", 100, ptime(now.Add(time.Hour)))
+		expected := endpoint.NewGCBarrier("b1", 100, new(now.Add(time.Hour)))
 		re.Equal(expected, b)
 		for _, checkingKeyspaceID := range slices.Concat(s.keyspacePresets.unifiedGC, s.keyspacePresets.nullSynonyms) {
 			re.Len(s.getAllGCBarriers(checkingKeyspaceID), 1)
@@ -1103,7 +1422,7 @@ func (s *gcStateManagerTestSuite) TestGCBarriers() {
 	ks2 := s.keyspacePresets.manageable[1]
 	_, err := s.manager.SetGCBarrier(ks1, "b1", 200, time.Hour, now)
 	re.NoError(err)
-	expected := endpoint.NewGCBarrier("b1", 200, ptime(now.Add(time.Hour)))
+	expected := endpoint.NewGCBarrier("b1", 200, new(now.Add(time.Hour)))
 	re.Equal(expected, s.getGCBarrier(ks1, "b1"))
 	re.Nil(s.getGCBarrier(ks2, "b1"))
 	res, err := s.manager.AdvanceTxnSafePoint(ks2, 300, now)
@@ -1121,7 +1440,7 @@ func (s *gcStateManagerTestSuite) TestGlobalGCBarriers() {
 	// Set global GC barrier and read back.
 	b, err := s.manager.SetGlobalGCBarrier(context.Background(), "b1", 10, time.Hour, now)
 	re.NoError(err)
-	expected := endpoint.NewGlobalGCBarrier("b1", 10, ptime(now.Add(time.Hour)))
+	expected := endpoint.NewGlobalGCBarrier("b1", 10, new(now.Add(time.Hour)))
 	re.Equal(expected, b)
 	bs := s.getAllGlobalGCBarriers()
 	re.Len(bs, 1)
@@ -1150,14 +1469,14 @@ func (s *gcStateManagerTestSuite) TestGlobalGCBarriers() {
 	// Updating the value of the existing GC barrier
 	b, err = s.manager.SetGlobalGCBarrier(context.Background(), "b1", 15, time.Hour, now)
 	re.NoError(err)
-	expected = endpoint.NewGlobalGCBarrier("b1", 15, ptime(now.Add(time.Hour)))
+	expected = endpoint.NewGlobalGCBarrier("b1", 15, new(now.Add(time.Hour)))
 	re.Equal(expected, b)
 	re.Len(s.getAllGlobalGCBarriers(), 1)
 	re.Equal(expected, s.getGlobalGCBarrier("b1"))
 
 	b, err = s.manager.SetGlobalGCBarrier(context.Background(), "b1", 15, time.Hour*2, now)
 	re.NoError(err)
-	expected = endpoint.NewGlobalGCBarrier("b1", 15, ptime(now.Add(time.Hour*2)))
+	expected = endpoint.NewGlobalGCBarrier("b1", 15, new(now.Add(time.Hour*2)))
 	re.Equal(expected, b)
 	re.Len(s.getAllGlobalGCBarriers(), 1)
 	re.Equal(expected, s.getGlobalGCBarrier("b1"))
@@ -1165,7 +1484,7 @@ func (s *gcStateManagerTestSuite) TestGlobalGCBarriers() {
 	// Allows shrinking the barrier ts.
 	b, err = s.manager.SetGlobalGCBarrier(context.Background(), "b1", 10, time.Hour, now)
 	re.NoError(err)
-	expected = endpoint.NewGlobalGCBarrier("b1", 10, ptime(now.Add(time.Hour)))
+	expected = endpoint.NewGlobalGCBarrier("b1", 10, new(now.Add(time.Hour)))
 	re.Equal(expected, b)
 	re.Len(s.getAllGlobalGCBarriers(), 1)
 	re.Equal(expected, s.getGlobalGCBarrier("b1"))
@@ -1217,9 +1536,9 @@ func (s *gcStateManagerTestSuite) TestGlobalGCBarriers() {
 	_, err = s.manager.SetGlobalGCBarrier(context.Background(), "b2", 20, time.Hour, now)
 	re.NoError(err)
 	re.Len(s.getAllGlobalGCBarriers(), 2)
-	expected = endpoint.NewGlobalGCBarrier("b1", 20, ptime(now.Add(time.Hour)))
+	expected = endpoint.NewGlobalGCBarrier("b1", 20, new(now.Add(time.Hour)))
 	re.Equal(expected, s.getGlobalGCBarrier("b1"))
-	expected = endpoint.NewGlobalGCBarrier("b2", 20, ptime(now.Add(time.Hour)))
+	expected = endpoint.NewGlobalGCBarrier("b2", 20, new(now.Add(time.Hour)))
 	re.Equal(expected, s.getGlobalGCBarrier("b2"))
 
 	for _, keyspaceID := range s.keyspacePresets.manageable {
@@ -1237,9 +1556,9 @@ func (s *gcStateManagerTestSuite) TestGlobalGCBarriers() {
 	_, err = s.manager.SetGlobalGCBarrier(context.Background(), "b2", 27, time.Hour, now)
 	re.NoError(err)
 	re.Len(s.getAllGlobalGCBarriers(), 2)
-	expected = endpoint.NewGlobalGCBarrier("b1", 25, ptime(now.Add(time.Hour)))
+	expected = endpoint.NewGlobalGCBarrier("b1", 25, new(now.Add(time.Hour)))
 	re.Equal(expected, s.getGlobalGCBarrier("b1"))
-	expected = endpoint.NewGlobalGCBarrier("b2", 27, ptime(now.Add(time.Hour)))
+	expected = endpoint.NewGlobalGCBarrier("b2", 27, new(now.Add(time.Hour)))
 	re.Equal(expected, s.getGlobalGCBarrier("b2"))
 
 	for _, keyspaceID := range s.keyspacePresets.manageable {
@@ -1254,7 +1573,7 @@ func (s *gcStateManagerTestSuite) TestGlobalGCBarriers() {
 	// Deleting GC barriers
 	b, err = s.manager.DeleteGlobalGCBarrier(context.Background(), "b1")
 	re.NoError(err)
-	expected = endpoint.NewGlobalGCBarrier("b1", 25, ptime(now.Add(time.Hour)))
+	expected = endpoint.NewGlobalGCBarrier("b1", 25, new(now.Add(time.Hour)))
 	re.Equal(expected, b)
 	re.Len(s.getAllGlobalGCBarriers(), 1)
 
@@ -1269,7 +1588,7 @@ func (s *gcStateManagerTestSuite) TestGlobalGCBarriers() {
 
 	b, err = s.manager.DeleteGlobalGCBarrier(context.Background(), "b2")
 	re.NoError(err)
-	expected = endpoint.NewGlobalGCBarrier("b2", 27, ptime(now.Add(time.Hour)))
+	expected = endpoint.NewGlobalGCBarrier("b2", 27, new(now.Add(time.Hour)))
 	re.Equal(expected, b)
 	re.Empty(s.getAllGlobalGCBarriers())
 
@@ -1349,7 +1668,7 @@ func (s *gcStateManagerTestSuite) TestGlobalGCBarriers() {
 	// BarrierTS exactly equals to txn safe point is allowed.
 	b, err = s.manager.SetGlobalGCBarrier(context.Background(), "b6", 60, time.Hour, now)
 	re.NoError(err)
-	expected = endpoint.NewGlobalGCBarrier("b6", 60, ptime(now.Add(time.Hour)))
+	expected = endpoint.NewGlobalGCBarrier("b6", 60, new(now.Add(time.Hour)))
 	re.Equal(expected, b)
 	re.Len(s.getAllGlobalGCBarriers(), 1)
 	re.Equal(expected, s.getGlobalGCBarrier("b6"))
@@ -1549,7 +1868,7 @@ func (s *gcStateManagerTestSuite) testServiceGCSafePointCompatibilityImpl(keyspa
 	re.NoError(err)
 	re.False(updated)
 	re.Equal(uint64(10), minSsp.SafePoint)
-	expected = endpoint.NewGCBarrier("svc1", 15, ptime(now.Add(time.Hour)))
+	expected = endpoint.NewGCBarrier("svc1", 15, new(now.Add(time.Hour)))
 	re.Equal(expected, s.getGCBarrier(keyspaceID, "svc1"))
 
 	// Disallow inserting new service safe point before the txn safe point.
@@ -2081,7 +2400,8 @@ func (s *gcStateManagerTestSuite) TestGetGCStateWithGlobalGCBarriersRejectsRevis
 		s.manager.keyspaceManager,
 	)
 	s.T().Cleanup(otherManager.CloseBarrierMetrics)
-	otherManager.OnNodeBecomesLeader()
+	stopOtherManager := otherManager.OnNodeBecomesLeader()
+	defer stopOtherManager()
 	_, err = otherManager.SetGlobalGCBarrier(
 		ctx,
 		"snapshot",
@@ -2199,8 +2519,8 @@ func (s *gcStateManagerTestSuite) TestGetGCState() {
 	re.Equal(uint64(20), state.TxnSafePoint)
 	re.Equal(uint64(15), state.GCSafePoint)
 	re.Equal([]*endpoint.GCBarrier{
-		endpoint.NewGCBarrier("b1", 25, ptime(now.Add(time.Hour))),
-		endpoint.NewGCBarrier("b2", 25, ptime(now.Add(time.Hour*2))),
+		endpoint.NewGCBarrier("b1", 25, new(now.Add(time.Hour))),
+		endpoint.NewGCBarrier("b2", 25, new(now.Add(time.Hour*2))),
 	}, state.GCBarriers)
 
 	state, err = s.manager.GetGCState(2, false)
@@ -2210,7 +2530,7 @@ func (s *gcStateManagerTestSuite) TestGetGCState() {
 	re.Equal(uint64(50), state.TxnSafePoint)
 	re.Equal(uint64(45), state.GCSafePoint)
 	re.Equal([]*endpoint.GCBarrier{
-		endpoint.NewGCBarrier("b1", 55, ptime(now.Add(time.Hour))),
+		endpoint.NewGCBarrier("b1", 55, new(now.Add(time.Hour))),
 		endpoint.NewGCBarrier("b3", 60, nil),
 	}, state.GCBarriers)
 
@@ -2686,7 +3006,7 @@ func (s *gcStateManagerTestSuite) TestSetGCBarrierKeepsWarmSafePointCacheUsable(
 	state, err = s.manager.GetGCState(keyspaceID, false)
 	re.NoError(err)
 	re.Equal([]*endpoint.GCBarrier{
-		endpoint.NewGCBarrier("b1", 30, ptime(now.Add(time.Hour))),
+		endpoint.NewGCBarrier("b1", 30, new(now.Add(time.Hour))),
 	}, state.GCBarriers)
 }
 
