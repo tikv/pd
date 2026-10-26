@@ -410,7 +410,10 @@ func (o *Operator) Check(region *core.RegionInfo) OpStep {
 				operatorStepDuration.WithLabelValues(reflect.TypeOf(o.steps[int(step)]).Name()).
 					Observe(current.Sub(startTime).Seconds())
 			}
-			o.currentStep.Store(step + 1)
+			// Another Check may have advanced the operator with a newer region.
+			// Never move the progress back, or a Check that has seen every step
+			// finish could find the operator unfinished and return no step.
+			o.currentStep.CompareAndSwap(step, step+1)
 		} else {
 			return o.steps[int(step)]
 		}
