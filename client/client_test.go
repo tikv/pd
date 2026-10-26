@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
+	perrors "github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
 	"github.com/tikv/pd/client/opt"
@@ -68,6 +69,18 @@ func TestClientWithRetry(t *testing.T) {
 	re.Less(time.Since(start), time.Second*10)
 }
 
+<<<<<<< HEAD
+=======
+func TestIsRetryableGetTSError(t *testing.T) {
+	re := require.New(t)
+
+	re.True(isRetryableGetTSError(fmt.Errorf("%s", errs.NotLeaderErr)))
+	re.True(isRetryableGetTSError(fmt.Errorf("%s", errs.MismatchCalleeIDErr)))
+	re.True(isRetryableGetTSError(perrors.WithStack(errs.ErrClientTSOStreamClosed)))
+	re.False(isRetryableGetTSError(errors.New("other error")))
+}
+
+>>>>>>> 20939fddc6 (client: recover TSO requests promptly after a TSO primary switch (#11389))
 func TestRoundUpDurationToSeconds(t *testing.T) {
 	re := require.New(t)
 	re.Equal(int64(0), roundUpDurationToSeconds(0))

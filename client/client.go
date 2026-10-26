@@ -608,6 +608,15 @@ func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err 
 	return physical, logical, err
 }
 
+<<<<<<< HEAD
+=======
+func isRetryableGetTSError(err error) bool {
+	// A closed TSO stream, such as one evicted when the client switches to a new leader, does
+	// not mean that the TSO service fails, so retry on another stream.
+	return errs.IsLeaderChange(err) || errs.IsCalleeMismatch(err) || errs.ErrClientTSOStreamClosed.Equal(err)
+}
+
+>>>>>>> 20939fddc6 (client: recover TSO requests promptly after a TSO primary switch (#11389))
 // GetLocalTS implements the TSOClient interface.
 //
 // Deprecated: the Local TSO feature has been deprecated. Regardless of the
