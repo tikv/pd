@@ -57,7 +57,8 @@ type publishedRUSummary struct {
 // 60-second window as a plain gauge. The value is updated by the flush loop;
 // scrapes never advance windows, clear timelines, or perform aggregation.
 type ruSummaryCollector struct {
-	mu             sync.RWMutex
+	mu sync.RWMutex
+	// results is replaced as a whole and never modified once published.
 	results        map[trackerKey]publishedRUSummary
 	peak, rru, wru *prometheus.Desc
 }
@@ -83,9 +84,12 @@ func (c *ruSummaryCollector) Describe(ch chan<- *prometheus.Desc) {
 
 // Collect implements prometheus.Collector.
 func (c *ruSummaryCollector) Collect(ch chan<- prometheus.Metric) {
+	// A published map is never modified, so a slow scrape only holds the lock
+	// to read it and never blocks the flush loop.
 	c.mu.RLock()
-	defer c.mu.RUnlock()
-	for key, p := range c.results {
+	results := c.results
+	c.mu.RUnlock()
+	for key, p := range results {
 		emit := func(desc *prometheus.Desc, value float64) {
 			ch <- prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, value, p.keyspaceName, key.groupName)
 		}
@@ -148,7 +152,7 @@ func newRUTimeline(c *ruSummaryCollector) *ruTimeline {
 
 func (t *ruTimeline) reset() {
 	t.collector.mu.Lock()
-	clear(t.collector.results)
+	t.collector.results = nil
 	t.collector.mu.Unlock()
 	*t = *newRUTimeline(t.collector)
 }

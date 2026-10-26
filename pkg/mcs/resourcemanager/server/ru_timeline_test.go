@@ -282,6 +282,34 @@ func TestRUTimelineNoTimestamp(t *testing.T) {
 	re.Equal(3, count)
 }
 
+// A scrape blocked on its channel holds no lock, so neither the flush loop
+// nor a new term waits for it.
+func TestRUTimelineScrapeHoldsNoLock(t *testing.T) {
+	re := require.New(t)
+	const start = testTimelineStart
+	c, timeline := newTestTimeline()
+	timeline.record(timelineReport(1, start, [][2]float64{{1, 2}}), time.Unix(start+10, 0))
+	timeline.flush(time.Unix(start+90, 0))
+	ch := make(chan prometheus.Metric)
+	collected := make(chan struct{})
+	go func() {
+		c.Collect(ch)
+		close(collected)
+	}()
+	<-ch // the scrape now blocks on its next metric
+	re.True(c.mu.TryLock(), "a blocked scrape must not hold the collector lock")
+	c.mu.Unlock()
+	// Finish the scrape while a new term resets the timeline. The race
+	// detector reports it if the reset modifies the published results.
+	go func() {
+		<-ch
+		<-ch
+	}()
+	timeline.reset()
+	<-collected
+	re.Empty(c.results)
+}
+
 func TestRUTimelineCleansUpSources(t *testing.T) {
 	re := require.New(t)
 	const start = testTimelineStart
