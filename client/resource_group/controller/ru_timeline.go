@@ -161,15 +161,25 @@ func (t *ruTimeline) snapshotLocked(now time.Time) *rmpb.RUConsumptionBySecond {
 	end := now.Unix()
 	// from passes end after a clock rollback, which leaves the report empty.
 	start := min(max(t.from, end-ruTimelineSeconds), end)
-	buckets := make([]*rmpb.RUConsumptionBucket, 0, end-start)
-	for second := start; second < end; second++ {
+	nonZero := func(second int64) (ruSecondBucket, bool) {
 		b := t.buckets[second%int64(len(t.buckets))]
-		if b.second != second || (b.rru == 0 && b.wru == 0) {
-			continue
+		return b, b.second == second && (b.rru != 0 || b.wru != 0)
+	}
+	// Count the non-zero seconds first, so the listed seconds take two
+	// allocations rather than one each.
+	n := 0
+	for second := start; second < end; second++ {
+		if _, ok := nonZero(second); ok {
+			n++
 		}
-		buckets = append(buckets, &rmpb.RUConsumptionBucket{
-			Rru: b.rru, Wru: b.wru, Offset: uint32(second - start),
-		})
+	}
+	values := make([]rmpb.RUConsumptionBucket, 0, n)
+	buckets := make([]*rmpb.RUConsumptionBucket, 0, n)
+	for second := start; second < end; second++ {
+		if b, ok := nonZero(second); ok {
+			values = append(values, rmpb.RUConsumptionBucket{Rru: b.rru, Wru: b.wru, Offset: uint32(second - start)})
+			buckets = append(buckets, &values[len(values)-1])
+		}
 	}
 	return &rmpb.RUConsumptionBySecond{StartUnixSec: start, EndUnixSec: end, Buckets: buckets}
 }
@@ -217,7 +227,7 @@ func trimRUTimelines(requests []*rmpb.TokenBucketRequest, budget int) {
 			}
 			if limit <= 0 {
 				// The report becomes an empty interval, which the resource
-				// manager rejects; the seconds are unreported, not zeros.
+				// manager ignores; the seconds are unreported, not zeros.
 				seconds.StartUnixSec = seconds.GetEndUnixSec()
 				seconds.Buckets = nil
 				continue

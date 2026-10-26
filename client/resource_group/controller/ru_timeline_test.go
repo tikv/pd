@@ -59,6 +59,20 @@ func TestRUTimeline(t *testing.T) {
 	re.Equal([]*rmpb.RUConsumptionBucket{{Rru: 7, Wru: 8, Offset: 88}}, latest.Buckets)
 }
 
+// A report takes a fixed number of allocations however many seconds it lists.
+func TestRUTimelineSnapshotAllocations(t *testing.T) {
+	re := require.New(t)
+	const start int64 = 1800000000
+	idle := newRUTimeline(time.Unix(start, 0))
+	re.Equal(float64(1), testing.AllocsPerRun(10, func() { idle.snapshotLocked(time.Unix(start+90, 0)) }))
+	tl := newRUTimeline(time.Unix(start, 0))
+	for i := range int64(90) {
+		tl.recordLocked(time.Unix(start+i, 0), 1, 1)
+	}
+	re.Len(tl.snapshotLocked(time.Unix(start+90, 0)).Buckets, 90)
+	re.Equal(float64(3), testing.AllocsPerRun(10, func() { tl.snapshotLocked(time.Unix(start+90, 0)) }))
+}
+
 func TestRUTimelineIdleWatermark(t *testing.T) {
 	re := require.New(t)
 	const start int64 = 1800000000
