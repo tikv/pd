@@ -27,9 +27,13 @@ type tsSuite struct {
 
 func TestTS(t *testing.T) {
 	suite.Run(t, &tsSuite{
+<<<<<<< HEAD
 		realClusterSuite: realClusterSuite{
 			suiteName: "ts",
 		},
+=======
+		suiteName: "ts",
+>>>>>>> 6f57b959b1 (*: upgrade Go to 1.27.3 (#11363))
 	})
 }
 
@@ -56,3 +60,13 @@ func (s *tsSuite) TestTS() {
 
 	db.MustClose()
 }
+<<<<<<< HEAD
+=======
+
+func TestMSTS(t *testing.T) {
+	suite.Run(t, &tsSuite{
+		suiteName: "ts",
+		mode:      "ms",
+	})
+}
+>>>>>>> 6f57b959b1 (*: upgrade Go to 1.27.3 (#11363))

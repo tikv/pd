@@ -276,12 +276,21 @@ func NewGroupTokenBucket(resourceGroupName string, tokenBucket *rmpb.TokenBucket
 		return &GroupTokenBucket{}
 	}
 	return &GroupTokenBucket{
+<<<<<<< HEAD
 		Settings: tokenBucket.GetSettings(),
 		GroupTokenBucketState: GroupTokenBucketState{
 			Tokens:            tokenBucket.GetTokens(),
 			resourceGroupName: resourceGroupName,
 			tokenSlots:        make(map[uint64]*tokenSlot),
 		},
+=======
+		Settings:           settings,
+		Tokens:             tokenBucket.GetTokens(),
+		resourceGroupName:  resourceGroupName,
+		tokenSlots:         make(map[uint64]*tokenSlot),
+		overrideFillRate:   -1,
+		overrideBurstLimit: -1,
+>>>>>>> 6f57b959b1 (*: upgrade Go to 1.27.3 (#11363))
 	}
 }
 

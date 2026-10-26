@@ -1,6 +1,10 @@
 module github.com/tikv/pd
 
+<<<<<<< HEAD
 go 1.25.14
+=======
+go 1.27.3
+>>>>>>> 6f57b959b1 (*: upgrade Go to 1.27.3 (#11363))
 
 // When you modify PD cooperatively with kvproto, this will be useful to submit the PR to PD and the PR to
 // kvproto at the same time. You can run `go mod tidy` to make it replaced with go-mod style specification.
@@ -25,6 +29,7 @@ require (
 	github.com/gin-contrib/pprof v1.4.0
 	github.com/gin-gonic/gin v1.11.0
 	github.com/gogo/protobuf v1.3.2
+	github.com/golang/protobuf v1.5.4
 	github.com/google/btree v1.1.2
 	github.com/gorilla/mux v1.7.4
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
@@ -37,10 +42,18 @@ require (
 	github.com/pingcap/kvproto v0.0.0-20260526084754-39498d6b17fc
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
 	github.com/pingcap/sysutil v1.0.1-0.20230407040306-fb007c5aff21
+<<<<<<< HEAD
 	github.com/pingcap/tidb-dashboard v0.0.0-20260731025842-26a85e802b67
 	github.com/prometheus/client_golang v1.20.5
 	github.com/prometheus/common v0.55.0
 	github.com/sasha-s/go-deadlock v0.3.6
+=======
+	github.com/pingcap/tidb-dashboard v0.0.0-20261026035210-a2c7919bad2a
+	github.com/prometheus/client_golang v1.20.5
+	github.com/prometheus/client_model v0.6.1
+	github.com/rleungx/leakcheck v1.1.0
+	github.com/sasha-s/go-deadlock v0.3.9
+>>>>>>> 6f57b959b1 (*: upgrade Go to 1.27.3 (#11363))
 	github.com/shirou/gopsutil/v3 v3.23.3
 	github.com/smallnest/chanx v1.2.1-0.20240521153536-01121e21ff99
 	github.com/soheilhy/cmux v0.1.5
@@ -57,10 +70,15 @@ require (
 	go.etcd.io/etcd/client/v3 v3.5.15
 	go.etcd.io/etcd/server/v3 v3.5.15
 	go.uber.org/goleak v1.3.0
+	go.uber.org/multierr v1.11.0
 	go.uber.org/zap v1.27.0
+<<<<<<< HEAD
 	golang.org/x/exp v0.0.0-20230711005742-c3f37128e5a4
+=======
+	golang.org/x/sync v0.24.0
+>>>>>>> 6f57b959b1 (*: upgrade Go to 1.27.3 (#11363))
 	golang.org/x/time v0.12.0
-	golang.org/x/tools v0.47.0
+	golang.org/x/tools v0.52.0
 	google.golang.org/grpc v1.82.1
 	gotest.tools/gotestsum v1.7.0
 )
@@ -92,7 +110,12 @@ require (
 	github.com/cenkalti/backoff/v4 v4.2.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
+<<<<<<< HEAD
 	github.com/coreos/go-systemd/v22 v22.3.3-0.20220203105225-a9a7ef127534 // indirect
+=======
+	github.com/coreos/go-oidc/v3 v3.21.0 // indirect
+	github.com/coreos/go-systemd/v22 v22.3.2 // indirect
+>>>>>>> 6f57b959b1 (*: upgrade Go to 1.27.3 (#11363))
 	github.com/cpuguy83/go-md2man/v2 v2.0.3 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dnephin/pflag v1.0.7 // indirect
@@ -103,6 +126,7 @@ require (
 	github.com/gabriel-vasile/mimetype v1.4.10 // indirect
 	github.com/ghodss/yaml v1.0.0 // indirect
 	github.com/gin-contrib/sse v1.1.0 // indirect
+	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
@@ -120,7 +144,10 @@ require (
 	github.com/goccy/go-yaml v1.18.0 // indirect
 	github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
 	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
+<<<<<<< HEAD
 	github.com/golang/protobuf v1.5.4 // indirect
+=======
+>>>>>>> 6f57b959b1 (*: upgrade Go to 1.27.3 (#11363))
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/google/pprof v0.0.0-20211122183932-1daafda22083 // indirect
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510 // indirect
@@ -198,18 +225,31 @@ require (
 	go.uber.org/atomic v1.9.0 // indirect
 	go.uber.org/dig v1.9.0 // indirect
 	go.uber.org/fx v1.12.0 // indirect
+<<<<<<< HEAD
 	go.uber.org/multierr v1.11.0
 	golang.org/x/arch v0.20.0 // indirect
 	golang.org/x/crypto v0.53.0 // indirect
+=======
+	golang.org/x/arch v0.22.0 // indirect
+	golang.org/x/crypto v0.58.0 // indirect
+	golang.org/x/exp v0.0.0-20230711005742-c3f37128e5a4 // indirect
+>>>>>>> 6f57b959b1 (*: upgrade Go to 1.27.3 (#11363))
 	golang.org/x/image v0.43.0 // indirect
-	golang.org/x/mod v0.37.0 // indirect
-	golang.org/x/net v0.56.0 // indirect
+	golang.org/x/mod v0.42.0 // indirect
+	golang.org/x/net v0.61.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
+<<<<<<< HEAD
 	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/telemetry v0.0.0-20260625142307-59b4966ccb57 // indirect
 	golang.org/x/term v0.44.0 // indirect
 	golang.org/x/text v0.39.0 // indirect
+=======
+	golang.org/x/sys v0.49.0 // indirect
+	golang.org/x/telemetry v0.0.0-20261009151841-97e8ea77aa2a // indirect
+	golang.org/x/term v0.47.0 // indirect
+	golang.org/x/text v0.43.0 // indirect
+>>>>>>> 6f57b959b1 (*: upgrade Go to 1.27.3 (#11363))
 	google.golang.org/genproto v0.0.0-20240401170217-c3f982113cda // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260414002931-afd174a4e478 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260414002931-afd174a4e478 // indirect

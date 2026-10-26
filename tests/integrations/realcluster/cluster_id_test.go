@@ -32,9 +32,13 @@ type clusterIDSuite struct {
 
 func TestClusterID(t *testing.T) {
 	suite.Run(t, &clusterIDSuite{
+<<<<<<< HEAD
 		realClusterSuite: realClusterSuite{
 			suiteName: "cluster_id",
 		},
+=======
+		suiteName: "cluster_id",
+>>>>>>> 6f57b959b1 (*: upgrade Go to 1.27.3 (#11363))
 	})
 }
 
