@@ -475,7 +475,7 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 
 	c.Microservice.adjust(configMetaData.Child("micro-service"))
 
-	if err := c.Security.Encryption.Adjust(); err != nil {
+	if err := c.Security.Adjust(configMetaData.Child("security")); err != nil {
 		return err
 	}
 

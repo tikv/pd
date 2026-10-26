@@ -19,12 +19,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/BurntSushi/toml"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
 	"github.com/tikv/pd/pkg/core/storelimit"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
@@ -230,5 +232,22 @@ func TestAdjustScheduleConfigDefaultStoreLimit(t *testing.T) {
 				re.Equal(expected.TransferLeaderIn, persistConfig.GetStoreLimitByType(id, storelimit.TransferLeaderIn))
 			}
 		})
+	}
+}
+
+func TestRedactInfoLogDefault(t *testing.T) {
+	re := require.New(t)
+	for _, tc := range []struct {
+		data     string
+		expected logutil.RedactInfoLogType
+	}{
+		{"", logutil.RedactInfoLogON},
+		{"[security]\nredact-info-log = false", logutil.RedactInfoLogOFF},
+	} {
+		cfg := NewConfig()
+		meta, err := toml.Decode(tc.data, cfg)
+		re.NoError(err)
+		re.NoError(cfg.adjust(&meta))
+		re.Equal(tc.expected, cfg.Security.RedactInfoLog, tc.data)
 	}
 }
