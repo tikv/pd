@@ -507,6 +507,29 @@ func TestBackgroundMetricsFlushResetsRUTimeline(t *testing.T) {
 	re.Zero(timeline.since)
 }
 
+// TestInitWaitsForPreviousTerm pins that a term starts only after the previous
+// term's metrics flusher has exited, so the old loop cannot take this term's
+// reports and drop them when it resets the RU timeline.
+func TestInitWaitsForPreviousTerm(t *testing.T) {
+	re := require.New(t)
+	m := prepareManager()
+	// Isolate the collector from the other managers of this package's tests.
+	m.metrics.ruTimeline = newRUTimeline(newRUSummaryCollector())
+	collector := m.metrics.ruTimeline.collector
+	collector.results = map[trackerKey]publishedRUSummary{testTimelineKey: {}}
+	resultsLen := func() int {
+		collector.mu.RLock()
+		defer collector.mu.RUnlock()
+		return len(collector.results)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	re.NoError(m.Init(ctx))
+	cancel()
+	re.NoError(m.Init(t.Context()))
+	re.Zero(resultsLen(), "the previous term must have reset its timeline")
+	m.close()
+}
+
 // TestBackgroundMetricsFlushPushesRUPeak pins that the push path carries the
 // RU peak and withdraws it from the push target when the term ends.
 func TestBackgroundMetricsFlushPushesRUPeak(t *testing.T) {

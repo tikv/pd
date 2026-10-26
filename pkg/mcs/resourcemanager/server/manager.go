@@ -113,9 +113,6 @@ type Manager struct {
 	keyspaceIDLookup map[string]uint32
 	// metrics is the collection of metrics.
 	metrics *metrics
-	// metricsLoopMu serializes backgroundMetricsFlush, since a new leadership
-	// term can start before the previous flusher exits.
-	metricsLoopMu sync.Mutex
 	// ruCollector is used to collect the RU metering data.
 	ruCollector *ruCollector
 }
@@ -317,6 +314,13 @@ func (m *Manager) accessKeyspaceResourceGroupManager(keyspaceID uint32, groupNam
 
 // Init initializes the resource group manager.
 func (m *Manager) Init(ctx context.Context) error {
+	// Let the previous term exit first. Its metrics flusher could otherwise
+	// take this term's reports from the shared queue and drop them when it
+	// resets the RU timeline.
+	if m.cancel != nil {
+		m.cancel()
+	}
+	m.wg.Wait()
 	if m.enableMetadataWatcher {
 		if err := m.initControllerConfig(); err != nil {
 			return err
@@ -758,8 +762,6 @@ func (m *Manager) GetKeyspaceIDByName(ctx context.Context, name string) (*rmpb.K
 func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 	defer logutil.LogPanic()
 	defer m.wg.Done()
-	m.metricsLoopMu.Lock()
-	defer m.metricsLoopMu.Unlock()
 	// The RU timeline belongs to one leadership term.
 	defer m.metrics.ruTimeline.reset()
 	cleanUpTicker := time.NewTicker(metricsCleanupInterval)
@@ -819,7 +821,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			if pushMetricsConfig.address != "" {
 				// Withdraw this term's peaks from the push target; otherwise
 				// the last pushed peak would outlive the term there. Keep it
-				// short: the loop still holds metricsLoopMu.
+				// short: the next term waits for this loop to exit.
 				m.metrics.ruTimeline.reset()
 				finalCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finalPushMetricsTimeout)
 				pushMetrics(finalCtx)
