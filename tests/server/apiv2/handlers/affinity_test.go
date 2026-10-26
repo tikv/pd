@@ -1387,6 +1387,38 @@ func (suite *affinityHandlerTestSuite) TestBatchModifyRemoveNonExistentRange() {
 	})
 }
 
+func (suite *affinityHandlerTestSuite) TestNextGenTiDBGroupIDQueriesMCS() {
+	suite.env.RunTestInMicroserviceEnv(func(cluster *tests.TestCluster) {
+		re := suite.Require()
+		const modeFlag = "github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"
+		re.NoError(failpoint.Enable(modeFlag, "return(true)"))
+		defer func() { re.NoError(failpoint.Disable(modeFlag)) }()
+
+		urls := []string{
+			cluster.GetSchedulingPrimaryServer().GetAddr() + "/scheduling/api/v1/affinity-groups",
+			getAffinityGroupURL(cluster.GetLeaderServer().GetAddr()),
+		}
+		for _, url := range urls {
+			for _, id := range []string{"_tidb_t_123", "_tidb_pt_123_p456"} {
+				for _, path := range []string{"/" + id, "?ids=" + id} {
+					resp, err := tests.TestDialClient.Get(url + path)
+					re.NoError(err)
+					body, err := io.ReadAll(resp.Body)
+					re.NoError(err)
+					re.NoError(resp.Body.Close())
+					re.Equal(http.StatusBadRequest, resp.StatusCode, "%s%s: %s", url, path, body)
+					re.Contains(string(body), "pd-ctl --keyspace-id")
+				}
+			}
+
+			resp, err := tests.TestDialClient.Get(url + "/_tidb_ks42_t_123")
+			re.NoError(err)
+			re.NoError(resp.Body.Close())
+			re.Equal(http.StatusNotFound, resp.StatusCode, url)
+		}
+	})
+}
+
 // TestAffinityForwardedHeader verifies microservice forwarding sets the header and returns the scheduling response.
 func (suite *affinityHandlerTestSuite) TestAffinityForwardedHeader() {
 	suite.env.RunTestInMicroserviceEnv(func(cluster *tests.TestCluster) {
