@@ -29,13 +29,7 @@ type rebootPDSuite struct {
 
 func TestRebootPD(t *testing.T) {
 	suite.Run(t, &rebootPDSuite{
-<<<<<<< HEAD
-		realClusterSuite: realClusterSuite{
-			suiteName: "reboot_pd",
-		},
-=======
 		suiteName: "reboot_pd",
->>>>>>> 6f57b959b1 (*: upgrade Go to 1.27.3 (#11363))
 	})
 }
 

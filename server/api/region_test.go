@@ -254,7 +254,9 @@ func (suite *regionTestSuite) TestStoreRegions() {
 	err = tu.ReadGetJSON(re, testDialClient, url, r5)
 	re.NoError(err)
 	re.Len(regionIDs, r5.Count)
+	re.Len(r5.Regions, len(regionIDs))
 	for i, r := range r5.Regions {
+		// #nosec G602 -- Both response and expected slice lengths are checked above.
 		re.Equal(regionIDs[i], r.ID)
 	}
 

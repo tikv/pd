@@ -42,7 +42,7 @@ func resetSizeCache(obj any) {
 }
 
 func resetSizeCacheRecursive(value reflect.Value) {
-	if value.Kind() == reflect.Ptr {
+	if value.Kind() == reflect.Pointer {
 		value = value.Elem()
 	}
 
@@ -62,7 +62,6 @@ func resetSizeCacheRecursive(value reflect.Value) {
 	}
 }
 
-<<<<<<< HEAD
 func TestClone(t *testing.T) {
 	for i := 0; i <= 10; i++ {
 		var rg ResourceGroup
@@ -71,23 +70,5 @@ func TestClone(t *testing.T) {
 		resetSizeCache(&rg)
 		rgClone := rg.Clone(true)
 		require.EqualValues(t, &rg, rgClone)
-=======
-func TestApplySettingsWithoutTokenPatch(t *testing.T) {
-	re := require.New(t)
-	rg := &ResourceGroup{
-		Name: testResourceGroupName,
-		Mode: rmpb.GroupMode_RUMode,
-		RUSettings: &RequestUnitSettings{
-			RU: &GroupTokenBucket{
-				Settings: &rmpb.TokenLimitSettings{
-					FillRate:   100,
-					BurstLimit: 200,
-				},
-				Tokens:             123.0,
-				overrideFillRate:   -1,
-				overrideBurstLimit: -1,
-			},
-		},
->>>>>>> 6f57b959b1 (*: upgrade Go to 1.27.3 (#11363))
 	}
 }

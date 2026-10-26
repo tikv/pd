@@ -165,16 +165,17 @@ PD_PKG := github.com/tikv/pd
 PACKAGES := $(shell go list ./...)
 
 GO_TOOLS_BIN_PATH := $(ROOT_PATH)/.tools/bin
-<<<<<<< HEAD
-=======
 GOLANGCI_LINT_VERSION := 2.14.0
->>>>>>> 6f57b959b1 (*: upgrade Go to 1.27.3 (#11363))
 PATH := $(GO_TOOLS_BIN_PATH):$(PATH)
 SHELL := env PATH='$(PATH)' GOBIN='$(GO_TOOLS_BIN_PATH)' $(shell which bash)
 
 install-tools:
 	@mkdir -p $(GO_TOOLS_BIN_PATH)
-	@which golangci-lint >/dev/null 2>&1 || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GO_TOOLS_BIN_PATH) v2.6.0
+	@set -o pipefail; \
+	if ! $(GO_TOOLS_BIN_PATH)/golangci-lint version 2>/dev/null | grep -Fq 'version $(GOLANGCI_LINT_VERSION) '; then \
+		curl -sSfL https://golangci-lint.run/install.sh | \
+			sh -s -- -b $(GO_TOOLS_BIN_PATH) v$(GOLANGCI_LINT_VERSION); \
+	fi
 	@grep '_' tools.go | sed 's/"//g' | awk '{print $$2}' | xargs go install
 
 .PHONY: install-tools

@@ -17,13 +17,8 @@ If you're interested in contributing to PD, see [CONTRIBUTING.md](./CONTRIBUTING
 
 ## Build
 
-<<<<<<< HEAD
-1. Make sure [*Go*](https://golang.org/) (version 1.23) is installed.
-2. Use `make` to install PD. `pd-server` will be installed in the `bin` directory.
-=======
 1. Make sure [*Go*](https://golang.org/) (version 1.27.3 or later) is installed.
-2. Run `make` (equivalent to `make build`) to build PD. `pd-server`, `pd-ctl`, and `pd-recover` will be produced in the `bin` directory.
->>>>>>> 6f57b959b1 (*: upgrade Go to 1.27.3 (#11363))
+2. Use `make` to install PD. `pd-server` will be installed in the `bin` directory.
 
 ## Usage
 

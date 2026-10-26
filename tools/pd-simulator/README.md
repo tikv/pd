@@ -4,11 +4,7 @@ pd-simulator is a tool to reproduce some scenarios and evaluate the schedulers' 
 
 ## Build
 
-<<<<<<< HEAD
-1. [Go](https://golang.org/) Version 1.25 or later
-=======
 1. [Go](https://golang.org/) Version 1.27.3 or later
->>>>>>> 6f57b959b1 (*: upgrade Go to 1.27.3 (#11363))
 2. In the root directory of the [PD project](https://github.com/tikv/pd), use the `make simulator` command to compile and generate `bin/pd-simulator`
 
 ## Usage
