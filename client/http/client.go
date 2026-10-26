@@ -192,6 +192,11 @@ func noNeedRetryForRequest(reqInfo *requestInfo, statusCode int) bool {
 	if noNeedRetry(statusCode) {
 		return true
 	}
+	// A 200 means the scheduler has been created, so do not replay the
+	// non-idempotent creation even if the response body cannot be decoded.
+	if reqInfo.name == createSchedulerNameWithInput && statusCode == http.StatusOK {
+		return true
+	}
 	return reqInfo.name == UpdateKeyspaceConfigName && statusCode == http.StatusConflict
 }
 
