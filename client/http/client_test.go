@@ -81,6 +81,14 @@ func TestCreateSchedulerWithInputNoRetryOnUndecodableOK(t *testing.T) {
 	_, err := c.WithBackoffer(bo).CreateSchedulerWithInput(context.Background(), "balance-range-scheduler", map[string]any{})
 	re.Error(err)
 	re.Equal(int32(1), count.Load())
+
+	// The caller's own checker must not replay the request either.
+	count.Store(0)
+	bo = retry.InitialBackoffer(10*time.Millisecond, 50*time.Millisecond, 200*time.Millisecond)
+	bo.SetRetryableChecker(func(error) bool { return true }, true)
+	_, err = c.WithBackoffer(bo).CreateSchedulerWithInput(context.Background(), "balance-range-scheduler", map[string]any{})
+	re.ErrorIs(err, io.ErrUnexpectedEOF)
+	re.Equal(int32(1), count.Load())
 }
 
 func TestPDAllowFollowerHandleHeader(t *testing.T) {
