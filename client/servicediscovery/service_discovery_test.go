@@ -452,3 +452,16 @@ func TestGRPCDialOption(t *testing.T) {
 	re.Error(err)
 	re.Greater(time.Since(start), 500*time.Millisecond)
 }
+
+func TestExecWithBackoffLimitsCalls(t *testing.T) {
+	re := require.New(t)
+	for _, maxRetryTimes := range []int{0, 1, 3} {
+		calls := 0
+		err := execWithBackoff(context.Background(), time.Millisecond, maxRetryTimes, func() error {
+			calls++
+			return errors.New("mock error")
+		})
+		re.Error(err)
+		re.Equal(max(maxRetryTimes, 1), calls)
+	}
+}

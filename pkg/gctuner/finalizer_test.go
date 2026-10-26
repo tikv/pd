@@ -31,14 +31,14 @@ func TestMain(m *testing.M) {
 }
 
 type testState struct {
-	count int32
+	count atomic.Int32
 }
 
 func TestFinalizer(t *testing.T) {
 	maxCount := int32(8)
 	state := &testState{}
 	f := newFinalizer(func() {
-		n := atomic.AddInt32(&state.count, 1)
+		n := state.count.Add(1)
 		if n > maxCount {
 			t.Fatalf("cannot exec finalizer callback after f has been gc")
 		}
@@ -46,16 +46,16 @@ func TestFinalizer(t *testing.T) {
 	for i := int32(1); i <= maxCount; i++ {
 		runtime.GC()
 		time.Sleep(10 * time.Millisecond)
-		require.Equal(t, i, atomic.LoadInt32(&state.count))
+		require.Equal(t, i, state.count.Load())
 	}
 	require.Nil(t, f.ref)
 
 	f.stop()
-	require.Equal(t, maxCount, atomic.LoadInt32(&state.count))
+	require.Equal(t, maxCount, state.count.Load())
 	runtime.GC()
-	require.Equal(t, maxCount, atomic.LoadInt32(&state.count))
+	require.Equal(t, maxCount, state.count.Load())
 	runtime.GC()
-	require.Equal(t, maxCount, atomic.LoadInt32(&state.count))
+	require.Equal(t, maxCount, state.count.Load())
 }
 
 func TestFinalizerStopWaitsForCallback(t *testing.T) {

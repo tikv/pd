@@ -375,8 +375,7 @@ func shouldAbortKeyspaceGroupReconcile(err error) bool {
 		goerrors.Is(err, errs.ErrNoAvailableNode) {
 		return true
 	}
-	var etcdErr rpctypes.EtcdError
-	if goerrors.As(err, &etcdErr) {
+	if etcdErr, ok := goerrors.AsType[rpctypes.EtcdError](err); ok {
 		if goerrors.Is(err, rpctypes.ErrNotLeader) {
 			return true
 		}
@@ -2273,9 +2272,9 @@ func (m *GroupManager) GetKeyspaceGroupPrimaryByID(id uint32) (string, error) {
 }
 
 func parsePrimaryName(name string) string {
-	idx := strings.LastIndex(name, "-")
-	if idx != -1 {
-		return name[:idx]
+	before, _, ok := strings.CutLast(name, "-")
+	if ok {
+		return before
 	}
 	return name
 }

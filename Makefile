@@ -195,7 +195,6 @@ install-tools:
 		(cd $$prom_dir && GOWORK=off go install ./cmd/promtool); \
 	}
 	@grep '_' tools.go | sed 's/"//g' | awk '{print $$2}' | xargs go install
-	@cd tools && go install ./modernize
 
 .PHONY: install-tools
 
@@ -210,7 +209,7 @@ static: install-tools pre-build
 	@ golangci-lint run --verbose $(PACKAGE_DIRECTORIES) --allow-parallel-runners
 	@ for mod in $(SUBMODULES); do cd $$mod && $(MAKE) static && cd $(ROOT_PATH) > /dev/null; done
 	@ echo "modernize ..."
-	@ modernize -test ./...
+	@ go run golang.org/x/tools/go/analysis/passes/modernize/cmd/modernize@v0.52.0 -test ./...
 	@ echo "leakcheck ..."
 	@ leakcheck -exclude-files="tests/server/join/join_test.go" $(PACKAGES)
 	@ echo "promtool ..."

@@ -301,9 +301,7 @@ const (
 // Start starts ResourceGroupController service.
 func (c *ResourceGroupsController) Start(ctx context.Context) {
 	c.loopCtx, c.loopCancel = context.WithCancel(ctx)
-	c.wg.Add(1)
-	go func() {
-		defer c.wg.Done()
+	c.wg.Go(func() {
 		if c.ruConfig.DegradedModeWaitDuration > 0 {
 			c.run.responseDeadline = time.NewTimer(c.ruConfig.DegradedModeWaitDuration)
 			c.run.responseDeadline.Stop()
@@ -508,7 +506,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 				go gc.handleTokenBucketUpdateEvent(c.loopCtx)
 			}
 		}
-	}()
+	})
 }
 
 // Stop stops ResourceGroupController service.
@@ -891,8 +889,8 @@ func (c *ResourceGroupsController) checkBackgroundSettings(ctx context.Context, 
 		return false
 	}
 
-	if idx := strings.LastIndex(requestResource, "_"); idx != -1 {
-		return slices.Contains(bg.JobTypes, requestResource[idx+1:])
+	if _, after, ok := strings.CutLast(requestResource, "_"); ok {
+		return slices.Contains(bg.JobTypes, after)
 	}
 
 	return false

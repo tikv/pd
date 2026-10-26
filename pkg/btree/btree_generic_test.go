@@ -787,13 +787,11 @@ func TestCloneConcurrentOperationsG(t *testing.T) {
 	toRemove := rang(cloneTestSize)[cloneTestSize/2:]
 	for i := range len(trees) / 2 {
 		tree := trees[i]
-		wg.Add(1)
-		go func() {
+		wg.Go(func() {
 			for _, item := range toRemove {
 				tree.Delete(item)
 			}
-			wg.Done()
-		}()
+		})
 	}
 	wg.Wait()
 	t.Log("Checking all values again")

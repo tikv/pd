@@ -882,11 +882,9 @@ func TestRUVersionFromInitialControllerConfig(t *testing.T) {
 
 	// Simulate a provider that returns a controller config with RUVersionPolicy.
 	configWithPolicy := &Config{
-		BaseConfig: BaseConfig{
-			RUVersionPolicy: &RUVersionPolicy{
-				Default:   1,
-				Overrides: map[uint32]RUVersion{42: 3},
-			},
+		RUVersionPolicy: &RUVersionPolicy{
+			Default:   1,
+			Overrides: map[uint32]RUVersion{42: 3},
 		},
 	}
 	configBytes, err := json.Marshal(configWithPolicy)
@@ -928,11 +926,9 @@ func TestRUVersionWatchViaControllerConfig(t *testing.T) {
 
 	// Case 1: Config with RUVersionPolicy containing override for keyspace 42
 	configWithPolicy := &Config{
-		BaseConfig: BaseConfig{
-			RUVersionPolicy: &RUVersionPolicy{
-				Default:   1,
-				Overrides: map[uint32]RUVersion{42: 3},
-			},
+		RUVersionPolicy: &RUVersionPolicy{
+			Default:   1,
+			Overrides: map[uint32]RUVersion{42: 3},
 		},
 	}
 	val, _ := json.Marshal(configWithPolicy)

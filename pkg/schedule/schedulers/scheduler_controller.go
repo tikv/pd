@@ -523,8 +523,8 @@ type ScheduleController struct {
 	nextInterval       time.Duration
 	ctx                context.Context
 	cancel             context.CancelFunc
-	delayAt            int64
-	delayUntil         int64
+	delayAt            atomic.Int64
+	delayUntil         atomic.Int64
 	diagnosticRecorder *DiagnosticRecorder
 }
 
@@ -644,14 +644,14 @@ func (s *ScheduleController) AllowSchedule(diagnosable bool) bool {
 
 // IsPaused returns if a scheduler is paused.
 func (s *ScheduleController) IsPaused() bool {
-	delayUntil := atomic.LoadInt64(&s.delayUntil)
+	delayUntil := s.delayUntil.Load()
 	return time.Now().Unix() < delayUntil
 }
 
 // GetDelayAt returns paused timestamp of a paused scheduler
 func (s *ScheduleController) GetDelayAt() int64 {
 	if s.IsPaused() {
-		return atomic.LoadInt64(&s.delayAt)
+		return s.delayAt.Load()
 	}
 	return 0
 }
@@ -659,15 +659,15 @@ func (s *ScheduleController) GetDelayAt() int64 {
 // GetDelayUntil returns resume timestamp of a paused scheduler
 func (s *ScheduleController) GetDelayUntil() int64 {
 	if s.IsPaused() {
-		return atomic.LoadInt64(&s.delayUntil)
+		return s.delayUntil.Load()
 	}
 	return 0
 }
 
 // SetDelay sets the delay of a scheduler.
 func (s *ScheduleController) SetDelay(delayAt, delayUntil int64) {
-	atomic.StoreInt64(&s.delayAt, delayAt)
-	atomic.StoreInt64(&s.delayUntil, delayUntil)
+	s.delayAt.Store(delayAt)
+	s.delayUntil.Store(delayUntil)
 }
 
 // GetDiagnosticRecorder returns the diagnostic recorder of a scheduler.

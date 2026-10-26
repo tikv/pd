@@ -1008,9 +1008,7 @@ func deleteFollowerRegionCacheConcurrently(re *require.Assertions, follower *tes
 	startCh := make(chan struct{})
 	errCh := make(chan error, requestCount)
 	for range requestCount {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			<-startCh
 			statusCode, body, err := requestDeleteFollowerRegionCache(follower, path)
 			if err != nil {
@@ -1020,7 +1018,7 @@ func deleteFollowerRegionCacheConcurrently(re *require.Assertions, follower *tes
 			if statusCode != http.StatusOK {
 				errCh <- fmt.Errorf("unexpected status %d: %s", statusCode, body)
 			}
-		}()
+		})
 	}
 	close(startCh)
 	wg.Wait()

@@ -787,9 +787,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) dispatchClient(
 		ctx, cancel               = context.WithCancel(suite.ctx)
 		lastPhysical, lastLogical int64
 	)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		defer tsoClient.Close()
 		for {
 			select {
@@ -823,7 +821,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) dispatchClient(
 			}
 			lastPhysical, lastLogical = physical, logical
 		}
-	}()
+	})
 	return func() {
 		// Wait for a while to make sure the client has sent more TSO requests.
 		time.Sleep(time.Second)

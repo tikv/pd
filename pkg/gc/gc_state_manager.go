@@ -211,6 +211,9 @@ type GCStateManager struct {
 	activeGeneration atomic.Pointer[gcStateGeneration]
 	generation       *gcStateGeneration
 	etcdClient       *clientv3.Client
+
+	watchers      map[uint64]*GCStateWatcher
+	nextWatcherID uint64
 }
 
 // NewGCStateManager creates a GCStateManager of GC and services.
@@ -220,6 +223,7 @@ func NewGCStateManager(store endpoint.GCStateProvider, cfg config.PDServerConfig
 		cfg:                              cfg,
 		keyspaceManager:                  keyspaceManager,
 		gcStateCache:                     newGCStateCache(),
+		watchers:                         make(map[uint64]*GCStateWatcher),
 		allKeyspacesGCStatesSingleFlight: syncutil.NewOrderedSingleFlight[map[uint32]GCState](),
 		allKeyspacesGCStatesExcludeGCBarriersSingleFlight: syncutil.NewOrderedSingleFlight[map[uint32]GCState](),
 	}
@@ -385,6 +389,14 @@ func (m *GCStateManager) advanceGCSafePointImpl(ctx context.Context, keyspaceID 
 		TxnSafePoint: txnSafePoint,
 		GCSafePoint:  newGCSafePoint,
 	})
+	// Publish successful no-ops too: a prior transaction may have committed
+	// even though its response failed, leaving watchers behind.
+	m.publishGCStateChangeLocked(NewGCStateUpsert(GCState{
+		KeyspaceID:      keyspaceID,
+		IsKeyspaceLevel: keyspaceID != constant.NullKeyspaceID,
+		TxnSafePoint:    txnSafePoint,
+		GCSafePoint:     newGCSafePoint,
+	}))
 
 	if newGCSafePoint != oldGCSafePoint {
 		log.Info("advanced GC safe point",
@@ -572,6 +584,14 @@ func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID
 		TxnSafePoint: newTxnSafePoint,
 		GCSafePoint:  gcSafePoint,
 	})
+	// Publish successful no-ops too: a prior transaction may have committed
+	// even though its response failed, leaving watchers behind.
+	m.publishGCStateChangeLocked(NewGCStateUpsert(GCState{
+		KeyspaceID:      keyspaceID,
+		IsKeyspaceLevel: keyspaceID != constant.NullKeyspaceID,
+		TxnSafePoint:    newTxnSafePoint,
+		GCSafePoint:     gcSafePoint,
+	}))
 
 	blockerDesc := ""
 	simulatedServiceID := ""

@@ -53,7 +53,7 @@ func newMockTSOServiceProvider(option *opt.Option, createStream func(ctx context
 	return &mockTSOServiceProvider{
 		option:       option,
 		createStream: createStream,
-		conCtxMgr:    cctx.NewManager[*tsoStream](),
+		conCtxMgr:    newConnectionCtxManager(),
 	}
 }
 
@@ -182,6 +182,37 @@ func (s *testTSODispatcherSuite) reqMustReady(req *Request) (physical int64, log
 	physical, logical, err := req.waitTimeout(time.Second)
 	s.re.NoError(err)
 	return physical, logical
+}
+
+func (s *testTSODispatcherSuite) TestEvictStreamWithBatchOnIt() {
+	conCtxMgr := s.dispatcher.provider.getConnectionCtxMgr()
+	// Serve the next batch with a stream bound to the context of its connection, so that
+	// canceling the connection fails the batch on it.
+	oldCtx, oldCancel := context.WithCancel(context.Background())
+	defer oldCancel()
+	oldInner := newMockTSOStreamImpl(oldCtx, resultModeGenerateOnSignal)
+	defer oldInner.stop()
+	s.re.True(conCtxMgr.Store(oldCtx, oldCancel, mockStreamURL, newTSOStream(oldCtx, mockStreamURL, oldInner), true))
+	req := s.sendReq(context.Background())
+	s.reqMustNotReady(req)
+
+	// Overwriting the stream evicts it, which fails the batch on it with an error that GetTS retries.
+	newCtx, newCancel := context.WithCancel(context.Background())
+	defer newCancel()
+	newInner := newMockTSOStreamImpl(newCtx, resultModeGenerateOnSignal)
+	// Keep the timestamps above those already returned by the stream created in SetupTest.
+	newInner.resGenPhysical += 10000
+	defer newInner.stop()
+	s.re.True(conCtxMgr.CleanAllAndStore(newCtx, newCancel, "new-url", newTSOStream(newCtx, "new-url", newInner)))
+	s.re.Error(oldCtx.Err())
+	_, _, err := req.waitTimeout(time.Second)
+	s.re.True(errs.ErrClientTSOStreamClosed.Equal(err), "%v", err)
+
+	// A retried request is served by the new stream.
+	req = s.sendReq(context.Background())
+	s.reqMustNotReady(req)
+	newInner.generateNext()
+	s.reqMustReady(req)
 }
 
 func TestTSODispatcherTestSuite(t *testing.T) {

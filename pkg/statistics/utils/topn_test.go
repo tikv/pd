@@ -28,6 +28,57 @@ type item struct {
 	values []float64
 }
 
+func TestRange(t *testing.T) {
+	tn := NewTopN(1, 2, time.Hour)
+	for i := range uint64(10) {
+		tn.Put(&item{id: i, values: []float64{float64(i)}})
+	}
+	var visited []uint64
+	tn.Range(func(v TopNItem) bool {
+		visited = append(visited, v.ID())
+		return true
+	})
+	require.ElementsMatch(t, []uint64{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, visited)
+	visited = nil
+	tn.Range(func(v TopNItem) bool {
+		visited = append(visited, v.ID())
+		return false
+	})
+	require.Len(t, visited, 1)
+	// An early stop releases the read lock, and GetAll still owns its result slice.
+	tn.Put(&item{id: 10, values: []float64{10}})
+	snapshot := tn.GetAll()
+	id := snapshot[0].ID()
+	snapshot[0] = nil
+	require.NotNil(t, tn.Get(id))
+	tn.Remove(10)
+	require.Len(t, tn.GetAll(), 10)
+}
+
+func TestRangeConcurrentUpdates(t *testing.T) {
+	tn := NewTopN(1, 4, time.Hour)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := range uint64(1000) {
+			id := i % 32
+			tn.Put(&item{id: id, values: []float64{float64(i)}})
+			if i%2 == 0 {
+				tn.Remove(id)
+			}
+		}
+	}()
+	for range 1000 {
+		seen := make(map[uint64]struct{})
+		tn.Range(func(v TopNItem) bool {
+			require.NotContains(t, seen, v.ID())
+			seen[v.ID()] = struct{}{}
+			return true
+		})
+	}
+	<-done
+}
+
 func (it *item) ID() uint64 {
 	return it.id
 }
