@@ -961,7 +961,9 @@ func TestConfigTTLAfterTransferLeader(t *testing.T) {
 	re.NoError(err)
 	resp, err := leader.GetHTTPClient().Post(addr, "application/json", bytes.NewBuffer(postData))
 	re.NoError(err)
-	resp.Body.Close()
+	defer func() {
+		re.NoError(resp.Body.Close())
+	}()
 	re.Equal(http.StatusOK, resp.StatusCode)
 	testutil.Eventually(re, func() bool {
 		options := leader.GetPersistOptions()
