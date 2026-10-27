@@ -94,9 +94,17 @@ func isFailedRecoveryPeer(ci *core.BasicCluster, region *core.RegionInfo, storeI
 	return store != nil && (store.IsRemoving() || store.IsRemoved() || store.IsDisconnected())
 }
 
+// Data readiness governs membership repair separately from size provenance:
+// an empty or historical-sized NORMAL Region can still need its first witness.
+func isDataServiceRecovering(region *core.RegionInfo) bool {
+	status := region.GetRecoveryStatus()
+	return status != nil && (status.GetState() != pdpb.RegionRecoveryState_NORMAL || !status.GetDataServiceReady())
+}
+
 func validateRecoveryStep(ci *core.BasicCluster, region *core.RegionInfo, step OpStep) error {
 	allowed := false
 	status := region.GetRecoveryStatus()
+	repairOnly := isDataServiceRecovering(region)
 	unknownState := status != nil && status.GetState() != pdpb.RegionRecoveryState_NORMAL && status.GetState() != pdpb.RegionRecoveryState_RECOVERING_LEADER
 	if unknownState {
 		switch s := step.(type) {
@@ -111,20 +119,24 @@ func validateRecoveryStep(ci *core.BasicCluster, region *core.RegionInfo, step O
 	}
 	switch s := step.(type) {
 	case AddLearner:
-		allowed = !s.IsWitness
+		allowed = !repairOnly || !s.IsWitness
 	case AddPeer:
-		allowed = !s.IsWitness
+		allowed = !repairOnly || !s.IsWitness
 	case PromoteLearner:
-		allowed = !s.IsWitness
+		allowed = !repairOnly || !s.IsWitness
 	case RemovePeer:
-		allowed = isFailedRecoveryPeer(ci, region, s.FromStore)
+		allowed = !repairOnly || isFailedRecoveryPeer(ci, region, s.FromStore)
+	case BecomeWitness, BecomeNonWitness, BatchSwitchWitness:
+		allowed = !repairOnly
 	case ChangePeerV2Enter:
 		allowed = true
-		for _, p := range s.PromoteLearners {
-			allowed = allowed && !p.IsWitness
-		}
-		for _, p := range s.DemoteVoters {
-			allowed = allowed && !p.IsWitness && isFailedRecoveryPeer(ci, region, p.ToStore)
+		if repairOnly {
+			for _, p := range s.PromoteLearners {
+				allowed = allowed && !p.IsWitness
+			}
+			for _, p := range s.DemoteVoters {
+				allowed = allowed && !p.IsWitness && isFailedRecoveryPeer(ci, region, p.ToStore)
+			}
 		}
 	case ChangePeerV2Leave:
 		allowed = true // Completing an existing joint transition must not deadlock.
@@ -139,8 +151,12 @@ func validateRecoveryCommand(ci *core.BasicCluster, region *core.RegionInfo, cmd
 	if !region.IsRecoverySchedulingBlocked() {
 		return nil
 	}
-	if (cmd.ChangeSplit != nil && cmd.ChangeSplit.GetAutoSplitEnabled()) || cmd.TransferLeader != nil || cmd.Merge != nil || cmd.SplitRegion != nil || cmd.SwitchWitnesses != nil {
+	repairOnly := isDataServiceRecovering(region)
+	if (cmd.ChangeSplit != nil && cmd.ChangeSplit.GetAutoSplitEnabled()) || cmd.TransferLeader != nil || cmd.Merge != nil || cmd.SplitRegion != nil || (repairOnly && cmd.SwitchWitnesses != nil) {
 		return errors.New("conflicting scheduling command is paused during region recovery")
+	}
+	if !repairOnly {
+		return nil // Missing current size must not prevent placement or replica repair.
 	}
 	checkChange := func(change *pdpb.ChangePeer) error {
 		if change == nil {

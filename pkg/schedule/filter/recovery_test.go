@@ -30,11 +30,17 @@ import (
 )
 
 func TestRecoveryFreezesDiscretionaryRegionSelection(t *testing.T) {
-	region := core.NewRegionInfo(&metapb.Region{Id: 1}, nil, core.WithRecoveryStatus(&pdpb.RegionRecoveryStatus{State: pdpb.RegionRecoveryState_RECOVERING_LEADER}))
-	require.False(t, IsRegionHealthy(region))
-	require.False(t, IsRegionHealthyAllowPending(region))
-	require.Equal(t, plan.StatusCode(plan.StatusRegionRecovering), NewRegionDownFilter().Select(region).StatusCode)
-	region = region.Clone(core.WithRecoveryStatus(nil))
+	region := core.NewRegionInfo(&metapb.Region{Id: 1}, nil)
+	for _, status := range []*pdpb.RegionRecoveryStatus{
+		{State: pdpb.RegionRecoveryState_RECOVERING_LEADER},
+		{DataServiceReady: true, SizeSource: pdpb.RegionSizeSource_SIZE_UNKNOWN},
+		{DataServiceReady: true, SizeSource: pdpb.RegionSizeSource_SIZE_HISTORICAL},
+	} {
+		blocked := region.Clone(core.WithRecoveryStatus(status))
+		require.False(t, IsRegionHealthy(blocked))
+		require.False(t, IsRegionHealthyAllowPending(blocked))
+		require.Equal(t, plan.StatusCode(plan.StatusRegionRecovering), NewRegionDownFilter().Select(blocked).StatusCode)
+	}
 	require.True(t, IsRegionHealthy(region))
 	require.True(t, NewRegionDownFilter().Select(region).IsOK())
 }

@@ -131,6 +131,108 @@ func TestRecoveringLeaderCanRepairFullWithoutOrdinaryLeaderTransfer(t *testing.T
 	require.Equal(t, uint64(3), region.GetLeader().GetStoreId())
 }
 
+func TestReadyRegionRepairsWitnessWithoutCurrentSize(t *testing.T) {
+	for _, size := range []struct {
+		name   string
+		source pdpb.RegionSizeSource
+		bytes  int64
+	}{
+		{"empty-unknown", pdpb.RegionSizeSource_SIZE_UNKNOWN, 0},
+		{"historical", pdpb.RegionSizeSource_SIZE_HISTORICAL, 128},
+	} {
+		for _, repairFailed := range []bool{false, true} {
+			scenario := "initial-placement"
+			if repairFailed {
+				scenario = "replace-failed-witness"
+			}
+			t.Run(size.name+"/"+scenario, func(t *testing.T) {
+				cluster, region, controller, streams := newRecoveryOperatorCluster(t)
+				cluster.SetEnableUseJointConsensus(false)
+				region = region.Clone(core.WithLeader(region.GetStorePeer(1)), core.WithDownPeers(nil),
+					core.SetApproximateSize(size.bytes), core.WithRecoveryStatus(&pdpb.RegionRecoveryStatus{
+						State: pdpb.RegionRecoveryState_NORMAL, DataServiceReady: true, SizeSource: size.source,
+					}))
+				var op *Operator
+				var err error
+				target := uint64(3)
+				if repairFailed {
+					target = 5
+					cluster.SetStoreDown(3)
+					region = region.Clone(core.WithDownPeers([]*pdpb.PeerStats{{Peer: region.GetStorePeer(3), DownSeconds: 1800}}))
+					op, err = CreateMovePeerOperator("replace-failed-witness", cluster, region, OpReplica, 3, &metapb.Peer{StoreId: target, IsWitness: true})
+				} else {
+					region = region.Clone(core.WithRemoveStorePeer(3))
+					op, err = CreateAddPeerOperator("add-rule-peer", cluster, region, &metapb.Peer{StoreId: target, IsWitness: true}, OpReplica)
+				}
+				require.NoError(t, err)
+				cluster.PutRegion(region)
+				require.True(t, region.IsRecoverySchedulingBlocked(), "size-based scheduling must remain frozen")
+				require.True(t, controller.AddOperator(op))
+				require.Equal(t, 1, streams.MsgLength())
+				require.NoError(t, streams.Drain(1))
+
+				// Report each membership result and verify the next step is dispatched.
+				for advances := 0; op.Check(region) != nil; advances++ {
+					require.Less(t, advances, op.Len()+1)
+					switch step := op.Check(region).(type) {
+					case AddLearner:
+						require.True(t, step.IsWitness)
+						region = region.Clone(core.WithAddPeer(&metapb.Peer{
+							Id: step.PeerID, StoreId: step.ToStore, Role: metapb.PeerRole_Learner, IsWitness: true,
+						}))
+					case PromoteLearner:
+						require.True(t, step.IsWitness)
+						region = region.Clone(core.WithRole(step.PeerID, metapb.PeerRole_Voter))
+					case RemovePeer:
+						region = region.Clone(core.WithRemoveStorePeer(step.FromStore))
+					default:
+						t.Fatalf("unexpected witness repair step %T", step)
+					}
+					cluster.PutRegion(region)
+					if op.Check(region) != nil {
+						controller.Dispatch(region, DispatchFromHeartBeat, nil)
+						require.Equal(t, 1, streams.MsgLength())
+						require.NoError(t, streams.Drain(1))
+					}
+				}
+				require.Len(t, region.GetPeers(), 3)
+				require.True(t, region.GetStoreVoter(target).GetIsWitness())
+				require.Equal(t, uint64(1), region.GetLeader().GetStoreId())
+			})
+		}
+	}
+}
+
+func TestReadyRegionWithoutCurrentSizeRejectsDiscretionaryOperators(t *testing.T) {
+	for _, source := range []pdpb.RegionSizeSource{pdpb.RegionSizeSource_SIZE_UNKNOWN, pdpb.RegionSizeSource_SIZE_HISTORICAL} {
+		for _, step := range []OpStep{SplitRegion{}, MergeRegion{}, TransferLeader{FromStore: 1, ToStore: 2}} {
+			t.Run(source.String()+"/"+step.String(), func(t *testing.T) {
+				cluster, region, controller, streams := newRecoveryOperatorCluster(t)
+				region = region.Clone(core.WithLeader(region.GetStorePeer(1)), core.WithDownPeers(nil),
+					core.WithRecoveryStatus(&pdpb.RegionRecoveryStatus{DataServiceReady: true, SizeSource: source}))
+				cluster.PutRegion(region)
+				op := NewTestOperator(region.GetID(), region.GetRegionEpoch(), OpAdmin, step)
+				require.False(t, controller.AddOperator(op))
+				controller.SendScheduleCommand(region, step, DispatchFromNotifierQueue)
+				require.Zero(t, streams.MsgLength())
+			})
+		}
+	}
+}
+
+func TestUnreadyNormalRegionStillRejectsWitnessRepair(t *testing.T) {
+	cluster, region, controller, streams := newRecoveryOperatorCluster(t)
+	region = region.Clone(core.WithLeader(region.GetStorePeer(1)), core.WithRecoveryStatus(&pdpb.RegionRecoveryStatus{
+		State: pdpb.RegionRecoveryState_NORMAL, SizeSource: pdpb.RegionSizeSource_SIZE_CURRENT,
+	}))
+	cluster.PutRegion(region)
+	step := AddLearner{ToStore: 5, PeerID: 50, IsWitness: true}
+	op := NewTestOperator(region.GetID(), region.GetRegionEpoch(), OpReplica, step)
+	require.False(t, controller.AddOperator(op))
+	controller.SendScheduleCommand(region, step, DispatchFromCreate)
+	require.Zero(t, streams.MsgLength())
+}
+
 func TestDataNotReadyAlsoFreezesWithoutRecoveringLeaderEnum(t *testing.T) {
 	cluster, region, controller, streams := newRecoveryOperatorCluster(t)
 	region = region.Clone(core.WithLeader(region.GetStorePeer(1)), core.WithRecoveryStatus(&pdpb.RegionRecoveryStatus{State: pdpb.RegionRecoveryState_NORMAL, SizeSource: pdpb.RegionSizeSource_SIZE_CURRENT}))
