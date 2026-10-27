@@ -35,8 +35,10 @@ func newRecoveryOperatorCluster(t *testing.T) (*mockcluster.Cluster, *core.Regio
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
-	_, _, err := cluster.AllocID(10)
-	require.NoError(t, err) // Reserve the manually assigned Region/peer identities.
+	for range 10 {
+		_, _, err := cluster.AllocID(1)
+		require.NoError(t, err)
+	}
 	for _, id := range []uint64{1, 2, 4} {
 		cluster.AddLabelsStore(id, 1, map[string]string{core.StoreCapabilityLabel: core.FullStoreCapability})
 	}

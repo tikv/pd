@@ -47,10 +47,19 @@ Initialization learners retain their Full/LogOnly capability when promoted.
 
 Protocol v2 uses the independent `metapb.Store.log_only_protocol_version` field.
 The immutable Full/LogOnly role label does not advertise software compatibility.
-PD advertises its supported version in `GetClusterInfo`; when Scheduling runs
-independently, this is capped by the active primary's election declaration.
-Missing or stale Scheduling capability returns zero. Upgrade all PD/Scheduling
-instances and participating TiKV/reader components before enabling dedicated W.
+
+`GetMembers` asserts only the responding PD member's runtime version. For each
+`GetClusterInfo` capability round, PD reads fresh etcd membership, probes all
+other members in parallel using bounded `GetMembers` RPCs, and checks membership
+again before accepting the minimum. It never recursively calls `GetClusterInfo`
+or infers support from an alpha software version. When Scheduling runs
+independently, the result is also capped by the active primary's declaration.
+Unknown, unreachable, downgraded or changing members return capability zero.
+This deliberately pauses new controlled membership activations even if a PD
+quorum remains available; existing Raft recovery is independent of this gate.
+Controller capability is non-monotonic and must not be cached indefinitely.
+Upgrade all PD/Scheduling and participating TiKV/reader components before enabling
+new dedicated W groups.
 
 Activating or extending a dedicated LogOnly group requires compatible retained
 members and destinations, including data learners. Old TiFlash/reader processes

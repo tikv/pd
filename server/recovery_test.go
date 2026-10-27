@@ -42,6 +42,8 @@ func TestLogOnlyProtocolVersionFollowsSchedulingPrimary(t *testing.T) {
 		s.schedulingPrimaryCapability.Store(&schedulingpb.Participant{ListenUrls: []string{"http://primary"}, LogOnlyProtocolVersion: version})
 		require.Equal(t, min(core.LogOnlyProtocolVersion, version), s.getLogOnlyProtocolVersion())
 	}
+	s.schedulingPrimaryCapability.Store(&schedulingpb.Participant{ListenUrls: []string{"http://primary"}, LogOnlyProtocolVersion: 0})
+	require.Zero(t, s.getLogOnlyProtocolVersion()) // A downgrade after a positive result is visible.
 	s.servicePrimaryMap.Store(mcs.SchedulingServiceName, "http://new-primary")
 	require.Zero(t, s.getLogOnlyProtocolVersion())
 	s.schedulingPrimaryCapability.Store(nil)

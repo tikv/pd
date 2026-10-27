@@ -251,7 +251,7 @@ func (s *GrpcServer) unaryFollowerMiddleware(ctx context.Context, req request, f
 }
 
 // GetClusterInfo implements gRPC PDServer.
-func (s *GrpcServer) GetClusterInfo(context.Context, *pdpb.GetClusterInfoRequest) (*pdpb.GetClusterInfoResponse, error) {
+func (s *GrpcServer) GetClusterInfo(ctx context.Context, _ *pdpb.GetClusterInfoRequest) (*pdpb.GetClusterInfoResponse, error) {
 	// Here we purposely do not check the cluster ID because the client does not know the correct cluster ID
 	// at startup and needs to get the cluster ID with the first request (i.e. GetMembers).
 	if s.IsClosed() {
@@ -271,7 +271,7 @@ func (s *GrpcServer) GetClusterInfo(context.Context, *pdpb.GetClusterInfoRequest
 		Header:                 grpcutil.WrapHeader(),
 		ServiceModes:           svcModes,
 		TsoUrls:                tsoServiceAddrs,
-		LogOnlyProtocolVersion: s.getLogOnlyProtocolVersion(),
+		LogOnlyProtocolVersion: s.getClusterLogOnlyProtocolVersion(ctx),
 	}, nil
 }
 
@@ -450,6 +450,7 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 		return getMembersErrorResult(err)
 	}
 
+	members = advertiseLocalMemberProtocol(members, s.member.ID())
 	var etcdLeader, pdLeader *pdpb.Member
 	leaderID := s.member.GetEtcdLeader()
 	leader := s.member.GetLeader()
@@ -459,6 +460,7 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 		if err != nil {
 			return getMembersErrorResult(err)
 		}
+		members = advertiseLocalMemberProtocol(members, s.member.ID())
 		leaderID = s.member.GetEtcdLeader()
 		leader = s.member.GetLeader()
 		etcdLeader, pdLeader = findLeadersInMembers(members, leaderID, leader)

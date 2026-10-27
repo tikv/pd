@@ -2942,12 +2942,21 @@ func CheckHealth(client *http.Client, members []*pdpb.Member) map[uint64]*pdpb.M
 	return healthMembers
 }
 
-// GetMembers return a slice of Members.
+// GetMembers returns a slice of Members.
 func GetMembers(etcdClient *clientv3.Client) ([]*pdpb.Member, error) {
 	if etcdClient == nil {
 		return nil, errs.ErrEtcdNotStarted
 	}
-	listResp, err := etcdutil.ListEtcdMembers(etcdClient.Ctx(), etcdClient)
+	return GetMembersWithContext(etcdClient.Ctx(), etcdClient)
+}
+
+// GetMembersWithContext reads the current etcd membership within a caller's
+// deadline, for capability negotiation that cannot use a stale membership list.
+func GetMembersWithContext(ctx context.Context, etcdClient *clientv3.Client) ([]*pdpb.Member, error) {
+	if etcdClient == nil {
+		return nil, errs.ErrEtcdNotStarted
+	}
+	listResp, err := etcdutil.ListEtcdMembers(ctx, etcdClient)
 	if err != nil {
 		return nil, err
 	}
