@@ -2581,6 +2581,10 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 			return nil
 		case res, ok := <-watchChan:
 			if !ok {
+				// Cancellation also closes watchChan, so either select case can win.
+				if ctx.Err() != nil || s.Context().Err() != nil {
+					return nil
+				}
 				return errors.New("watch channel closed unexpectedly")
 			}
 			if res.Err() != nil {
