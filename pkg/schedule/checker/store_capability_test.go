@@ -15,7 +15,6 @@
 package checker
 
 import (
-	"testing"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -119,7 +118,7 @@ func (suite *ruleCheckerTestSuite) TestRecoveringWitnessLeaderStillRepairsFailed
 	}
 }
 
-func (suite *ruleCheckerTestSuite) TestFullOnlyRepairRequiresReportedReaderProtocol(t *testing.T) {
+func (suite *ruleCheckerTestSuite) TestFullOnlyRepairRequiresReportedReaderProtocol() {
 	for id := uint64(1); id <= 4; id++ {
 		suite.cluster.AddLabelsStore(id, 1, map[string]string{})
 		suite.cluster.PutStore(suite.cluster.GetStore(id).Clone(core.SetStoreLogOnlyProtocolVersion(2)))
