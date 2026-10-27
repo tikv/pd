@@ -236,6 +236,40 @@ func TestNextGenRejectsMismatchedAffinityRangesOnLoadAndSync(t *testing.T) {
 		re.False(isAffinity)
 		re.NoError(manager.SyncKeyRangesFromEtcd(regionLabeler.GetLabelRule(GetLabelRuleID(groupID))))
 		re.Empty(manager.keyRanges)
+
+		// A valid ks43 group can reuse the range skipped during recovery.
+		otherRanges := GroupKeyRanges{GroupID: "_tidb_ks43_t_1001", KeyRanges: wrongRanges.KeyRanges}
+		re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{otherRanges}))
+		_, err = manager.UpdateAffinityGroupPeers(otherRanges.GroupID, 1, []uint64{1})
+		re.NoError(err)
+		otherState := manager.GetAffinityGroupState(otherRanges.GroupID)
+		persistedRules := make(map[string]string)
+		re.NoError(store.LoadRegionRules(func(k, v string) { persistedRules[k] = v }))
+		recoveredRule := regionLabeler.GetLabelRule(GetLabelRuleID(groupID))
+		validOp := []GroupKeyRanges{{GroupID: groupID, KeyRanges: []keyutil.KeyRange{testKeyRangeForKeyspace(42)}}}
+		for _, tc := range []struct {
+			name        string
+			add, remove []GroupKeyRanges
+		}{
+			{name: "add", add: validOp},
+			{name: "remove", remove: validOp},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				re := require.New(t)
+				re.ErrorContains(manager.UpdateAffinityGroupKeyRanges(tc.add, tc.remove), "must belong to transaction keyspace 42")
+				re.NotContains(manager.keyRanges, groupID, "updates must not restore skipped ranges")
+				re.Equal(0, manager.GetAffinityGroupState(groupID).RangeCount)
+				re.Equal(recoveredRule, regionLabeler.GetLabelRule(GetLabelRuleID(groupID)))
+				re.Equal(otherRanges, manager.keyRanges[otherRanges.GroupID])
+				re.Equal(otherState, manager.GetAffinityGroupState(otherRanges.GroupID))
+				afterRules := make(map[string]string)
+				re.NoError(store.LoadRegionRules(func(k, v string) { afterRules[k] = v }))
+				re.Equal(persistedRules, afterRules, "rejected updates must not change persisted label rules")
+			})
+		}
+		re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{
+			{GroupID: "_tidb_ks44_t_1001", KeyRanges: []keyutil.KeyRange{testKeyRangeForKeyspace(44)}},
+		}), "rejected updates must not block unrelated groups")
 	})
 
 	t.Run("watcher label first", func(t *testing.T) {

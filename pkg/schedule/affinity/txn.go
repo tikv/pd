@@ -509,7 +509,7 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 func (m *Manager) getCurrentRanges(groupID string) (GroupKeyRanges, error) {
 	// Try cache first
 	if gkr, ok := m.keyRanges[groupID]; ok {
-		return gkr, nil
+		return gkr, validateGroupKeyRanges(gkr)
 	}
 
 	// Parse from label rule
@@ -525,7 +525,13 @@ func (m *Manager) getCurrentRanges(groupID string) (GroupKeyRanges, error) {
 		return GroupKeyRanges{}, errors.Errorf("label rule not found for group %s", groupID)
 	}
 
-	return extractKeyRangesFromLabelRule(labelRule)
+	// Invalid rules skipped during recovery remain in the labeler. Validate
+	// their ranges before an update can merge them back into storage and cache.
+	gkr, err := extractKeyRangesFromLabelRule(labelRule)
+	if err != nil {
+		return GroupKeyRanges{}, err
+	}
+	return gkr, validateGroupKeyRanges(gkr)
 }
 
 // applyRemoveOps filters out ranges that match remove operations.
