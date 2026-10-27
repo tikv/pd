@@ -21,7 +21,6 @@ import (
 	"net/http"
 	"reflect"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/unrolled/render"
@@ -36,7 +35,6 @@ import (
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/utils/apiutil"
-	"github.com/tikv/pd/pkg/utils/jsonutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/reflectutil"
 	"github.com/tikv/pd/server"
@@ -165,111 +163,19 @@ func (h *confHandler) SetConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	schedulePatch := make(map[string]any)
-	for k, v := range conf {
-		key := k
-		if !strings.Contains(k, ".") {
-			key = reflectutil.FindJSONFullTagByChildTag(reflect.TypeFor[config.Config](), k)
-		}
-		if key == "" {
-			h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("config item %s not found", k))
-			return
-		}
-		if strings.HasPrefix(key, "schedule.") {
-			if h.svr.IsTTLConfigExist(key) {
-				h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("need to clean up TTL first for %s", key))
-				return
-			}
-			name := key[strings.LastIndex(key, ".")+1:]
-			if !reflectutil.FindSameFieldByJSON(&cfg.Schedule, map[string]any{name: v}) {
-				h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("config item %s not found", name))
-				return
-			}
-			if _, exists := schedulePatch[name]; exists {
-				h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("config item %s specified more than once", name))
-				return
-			}
-			schedulePatch[name] = v
-			continue
-		}
-		if err := h.updateConfig(cfg, key, v); err != nil {
-			h.rd.JSON(w, http.StatusBadRequest, err.Error())
-			return
-		}
+	updates, err := h.prepareConfigUpdates(cfg, conf)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
 	}
-	if len(schedulePatch) > 0 {
-		// Apply related schedule fields together, so new stores see the new defaults.
-		data, err := json.Marshal(schedulePatch)
-		if err == nil {
-			err = h.svr.PatchScheduleConfig(data)
-		}
-		if err != nil {
+	for _, update := range updates {
+		if err := update(); err != nil {
 			h.rd.JSON(w, http.StatusBadRequest, err.Error())
 			return
 		}
 	}
 
 	h.rd.JSON(w, http.StatusOK, "The config is updated.")
-}
-
-func (h *confHandler) updateConfig(cfg *config.Config, key string, value any) error {
-	kp := strings.Split(key, ".")
-	switch kp[0] {
-	case "schedule":
-		if h.svr.IsTTLConfigExist(key) {
-			return errors.Errorf("need to clean up TTL first for %s", key)
-		}
-		return h.updateSchedule(cfg, kp[len(kp)-1], value)
-	case "replication":
-		return h.updateReplication(cfg, kp[len(kp)-1], value)
-	case "replication-mode":
-		if len(kp) < 2 {
-			return errors.Errorf("cannot update config prefix %s", kp[0])
-		}
-		return h.updateReplicationModeConfig(cfg, kp[1:], value)
-	case "pd-server":
-		return h.updatePDServerConfig(cfg, kp[len(kp)-1], value)
-	case "log":
-		return h.updateLogLevel(kp, value)
-	case "cluster-version":
-		return h.updateClusterVersion(value)
-	case "label-property": // TODO: support changing label-property
-		// todo:  use apiv2 handlers instead to update keyspace related config,
-		// since the logic is more complex and may involve multiple config items update in one request,
-		// e.g. add/remove meta-service group.
-	case "keyspace":
-		return h.updateKeyspaceConfig(kp[len(kp)-1], value)
-	case "micro-service":
-		return h.updateMicroserviceConfig(cfg, kp[len(kp)-1], value)
-	case "controller":
-		return h.updateControllerConfig(kp[len(kp)-1], value)
-	}
-	return errors.Errorf("config prefix %s not found", kp[0])
-}
-
-func (h *confHandler) updateKeyspaceConfig(key string, value any) error {
-	oldCfg := h.svr.GetPersistOptions().GetKeyspaceConfig()
-	newCfg := oldCfg.Clone()
-	updated, found, err := jsonutil.AddKeyValue(newCfg, key, value)
-	if err != nil {
-		return err
-	}
-
-	if !found {
-		return errors.Errorf("config item %s not found", key)
-	}
-
-	if !updated {
-		return nil
-	}
-	// Meta-service group changes must go through the same safe update path as the
-	// dedicated /meta-service-groups endpoint, which holds the manager lock and
-	// rejects removing a group that still has assigned keyspaces. Updating them
-	// via the plain config path would bypass that guard.
-	if key == "meta-service-groups" {
-		return h.updateMetaServiceGroups(oldCfg, newCfg)
-	}
-	return h.svr.SetKeyspaceConfig(oldCfg, newCfg)
 }
 
 func (h *confHandler) updateMetaServiceGroups(oldCfg, newCfg *config.KeyspaceConfig) error {
@@ -299,83 +205,6 @@ func (h *confHandler) updateMetaServiceGroups(oldCfg, newCfg *config.KeyspaceCon
 	}, func() {
 		h.svr.UpdateKeyspaceConfig(newCfg)
 	})
-}
-
-func (h *confHandler) updateMicroserviceConfig(config *config.Config, key string, value any) error {
-	updated, found, err := jsonutil.AddKeyValue(&config.Microservice, key, value)
-	if err != nil {
-		return err
-	}
-
-	if !found {
-		return errors.Errorf("config item %s not found", key)
-	}
-
-	if updated {
-		if key == "enable-resource-manager-fallback" {
-			return errors.Errorf("cannot update config item %s dynamically", key)
-		}
-		err = h.svr.SetMicroserviceConfig(config.Microservice)
-	}
-	return err
-}
-
-func (h *confHandler) updateSchedule(_ *config.Config, key string, value any) error {
-	return h.svr.SetScheduleConfigItem(key, value)
-}
-
-func (h *confHandler) updateReplication(config *config.Config, key string, value any) error {
-	updated, found, err := jsonutil.AddKeyValue(&config.Replication, key, value)
-	if err != nil {
-		return err
-	}
-
-	if !found {
-		return errors.Errorf("config item %s not found", key)
-	}
-
-	if updated {
-		err = h.svr.SetReplicationConfig(config.Replication)
-	}
-	return err
-}
-
-func (h *confHandler) updateReplicationModeConfig(config *config.Config, key []string, value any) error {
-	cfg := make(map[string]any)
-	cfg = getConfigMap(cfg, key, value)
-	data, err := json.Marshal(cfg)
-	if err != nil {
-		return err
-	}
-	updated, found, err := jsonutil.MergeJSONObject(&config.ReplicationMode, data)
-	if err != nil {
-		return err
-	}
-
-	if !found {
-		return errors.Errorf("config item %s not found", key)
-	}
-
-	if updated {
-		err = h.svr.SetReplicationModeConfig(config.ReplicationMode)
-	}
-	return err
-}
-
-func (h *confHandler) updatePDServerConfig(config *config.Config, key string, value any) error {
-	updated, found, err := jsonutil.AddKeyValue(&config.PDServerCfg, key, value)
-	if err != nil {
-		return err
-	}
-
-	if !found {
-		return errors.Errorf("config item %s not found", key)
-	}
-
-	if updated {
-		err = h.svr.SetPDServerConfig(config.PDServerCfg)
-	}
-	return err
 }
 
 func (h *confHandler) updateLogLevel(kp []string, value any) error {

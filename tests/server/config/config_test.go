@@ -21,6 +21,7 @@ import (
 	"io"
 	"net/http"
 	"reflect"
+	"strconv"
 	"testing"
 	"time"
 
@@ -196,6 +197,155 @@ func (suite *configTestSuite) TearDownSuite() {
 
 func (suite *configTestSuite) TestConfigAll() {
 	suite.env.RunTest(suite.checkConfigAll)
+}
+
+func (suite *configTestSuite) TestConfigBatchValidation() {
+	suite.env.RunTest(suite.checkConfigBatchValidation)
+}
+
+func (suite *configTestSuite) checkConfigBatchValidation(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leader := cluster.GetLeaderServer()
+	svr := leader.GetServer()
+	addr := leader.GetAddr() + "/pd/api/v1/config"
+	seed := fmt.Appendf(nil, `{"schedule.merge-schedule-limit":%d}`, svr.GetScheduleConfig().MergeScheduleLimit)
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, addr, seed, testutil.StatusOK(re)))
+	before := svr.GetConfig()
+	ruleManager := svr.GetRaftCluster().GetRuleManager()
+	rulesBefore := ruleManager.GetAllRules()
+	var persistedBefore map[string]any
+	exists, err := svr.GetStorage().LoadConfig(&persistedBefore)
+	re.NoError(err)
+	re.True(exists)
+
+	for _, testCase := range []struct {
+		key   string
+		value any
+		err   string
+	}{
+		{"schedule.schedulers", []map[string]string{{"type": "balance-leader"}}, "config item schedulers not found"},
+		{"unknown-item", true, "not found"},
+		{"replication.unknown-item", 1, "not found"},
+		{"replication.location-labels", 123, "invalid syntax"},
+		{"max-replicas", "invalid", "cannot unmarshal"},
+		{"replication.max-replicas", 0, "invalid count 0"},
+		{"replication.isolation-level", "unknown-label", "isolation-level must be one of location-labels"},
+		{"schedule.high-space-ratio", 1, "low-space-ratio should be larger"},
+		{"pd-server.gc-state-cache-warmup-concurrency", 0, "gc-state-cache-warmup-concurrency must be between"},
+		{"pd-server.dashboard-address", "http://127.0.0.1:1", "is not the client url of any member"},
+		{"replication-mode.replication-mode", "invalid", "invalid replication mode"},
+		{"keyspace.check-region-split-interval", "0s", "check-region-split-interval should between"},
+		{"keyspace.meta-service-groups", map[string]string{"": "http://127.0.0.1:2379"}, "group ID cannot be empty"},
+		{"micro-service.enable-resource-manager-fallback", strconv.FormatBool(!before.Microservice.EnableResourceManagerFallback), "cannot update config item"},
+		{"log.level", "invalid", "log level invalid is illegal"},
+		{"cluster-version", 1, "input value 1 is illegal"},
+		{"controller.enable-controller-trace-log", true, "cannot unmarshal bool"},
+	} {
+		// Repetition exercises different map iteration orders on an unfixed
+		// server. Every otherwise valid item changes its current value.
+		for range 8 {
+			patch := map[string]any{
+				"replication.max-replicas":      before.Replication.MaxReplicas + 1,
+				"pd-server.metric-storage":      "http://127.0.0.1:9999",
+				"schedule.merge-schedule-limit": before.Schedule.MergeScheduleLimit + 1,
+				"log.level":                     "debug",
+			}
+			patch[testCase.key] = testCase.value
+			data, err := json.Marshal(patch)
+			re.NoError(err)
+			re.NoError(testutil.CheckPostJSON(tests.TestDialClient, addr, data,
+				testutil.Status(re, http.StatusBadRequest), testutil.StringContain(re, testCase.err)))
+			re.Equal(before, svr.GetConfig(), "rejected item: %s", testCase.key)
+			re.Equal(rulesBefore, ruleManager.GetAllRules(), "rejected item: %s", testCase.key)
+			var persistedAfter map[string]any
+			exists, err := svr.GetStorage().LoadConfig(&persistedAfter)
+			re.NoError(err)
+			re.True(exists)
+			re.Equal(persistedBefore, persistedAfter, "rejected item: %s", testCase.key)
+		}
+	}
+
+	ttlData := []byte(`{"schedule.max-merge-region-size":100}`)
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, addr+"?ttlSecond=60", ttlData, testutil.StatusOK(re)))
+	defer func() {
+		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, addr+"?ttlSecond=0", ttlData, testutil.StatusOK(re)))
+	}()
+	data, err := json.Marshal(map[string]any{
+		"replication.max-replicas":       before.Replication.MaxReplicas + 1,
+		"schedule.max-merge-region-size": before.Schedule.MaxMergeRegionSize + 1,
+	})
+	re.NoError(err)
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, addr, data,
+		testutil.Status(re, http.StatusBadRequest), testutil.StringContain(re, "need to clean up TTL first")))
+	re.Equal(before, svr.GetConfig())
+	re.Equal(rulesBefore, ruleManager.GetAllRules())
+	var persistedAfter map[string]any
+	exists, err = svr.GetStorage().LoadConfig(&persistedAfter)
+	re.NoError(err)
+	re.True(exists)
+	re.Equal(persistedBefore, persistedAfter)
+}
+
+func (suite *configTestSuite) TestConfigBatchRelatedFields() {
+	suite.env.RunTest(suite.checkConfigBatchRelatedFields)
+}
+
+func (suite *configTestSuite) checkConfigBatchRelatedFields(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leader := cluster.GetLeaderServer()
+	svr := leader.GetServer()
+	addr := leader.GetAddr() + "/pd/api/v1/config"
+	before := svr.GetConfig()
+	post := func(patch map[string]any) {
+		data, err := json.Marshal(patch)
+		re.NoError(err)
+		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, addr, data, testutil.StatusOK(re)))
+	}
+	defer func() {
+		post(map[string]any{
+			"replication.location-labels":          before.Replication.LocationLabels,
+			"replication.isolation-level":          before.Replication.IsolationLevel,
+			"schedule.high-space-ratio":            before.Schedule.HighSpaceRatio,
+			"schedule.low-space-ratio":             before.Schedule.LowSpaceRatio,
+			"schedule.merge-schedule-limit":        before.Schedule.MergeScheduleLimit,
+			"keyspace.wait-region-split-timeout":   before.Keyspace.WaitRegionSplitTimeout.String(),
+			"keyspace.check-region-split-interval": before.Keyspace.CheckRegionSplitInterval.String(),
+		})
+	}()
+	for range 8 {
+		// Alternate complete, valid combinations. Applying isolation-level or
+		// the interval individually can fail against the previous combination.
+		for _, label := range []string{"batch-zone", "batch-rack"} {
+			patch := map[string]any{
+				"location-labels":                      label,
+				"replication.isolation-level":          label,
+				"high-space-ratio":                     0.9,
+				"schedule.low-space-ratio":             0.95,
+				"merge-schedule-limit":                 0,
+				"keyspace.wait-region-split-timeout":   "100ms",
+				"keyspace.check-region-split-interval": "50ms",
+			}
+			if label == "batch-rack" {
+				delete(patch, "location-labels")
+				patch["replication.LOCATION-LABELS"] = label
+			}
+			post(patch)
+			after := svr.GetConfig()
+			re.Equal([]string{label}, []string(after.Replication.LocationLabels))
+			re.Equal(label, after.Replication.IsolationLevel)
+			re.Equal(0.9, after.Schedule.HighSpaceRatio)
+			re.Equal(0.95, after.Schedule.LowSpaceRatio)
+			re.Zero(after.Schedule.MergeScheduleLimit)
+			re.Equal(100*time.Millisecond, after.Keyspace.WaitRegionSplitTimeout.Duration)
+			re.Equal(50*time.Millisecond, after.Keyspace.CheckRegionSplitInterval.Duration)
+			var persisted config.Config
+			exists, err := svr.GetStorage().LoadConfig(&persisted)
+			re.NoError(err)
+			re.True(exists)
+			re.Equal(after.Replication, persisted.Replication)
+			re.Equal(after.Keyspace, persisted.Keyspace)
+		}
+	}
 }
 
 func (suite *configTestSuite) TestKeyspaceConfigUpdate() {

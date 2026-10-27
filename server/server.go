@@ -1374,60 +1374,80 @@ func (s *Server) GetReplicationConfig() *sc.ReplicationConfig {
 	return s.persistOptions.GetReplicationConfig().Clone()
 }
 
-// SetReplicationConfig sets the replication config.
-func (s *Server) SetReplicationConfig(cfg sc.ReplicationConfig) error {
+// ValidateReplicationConfig checks a candidate against the current placement
+// configuration without changing rules or persisting configuration.
+func (s *Server) ValidateReplicationConfig(cfg sc.ReplicationConfig) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
 	old := s.persistOptions.GetReplicationConfig()
-	if cfg.EnablePlacementRules != old.EnablePlacementRules {
+	if !cfg.EnablePlacementRules && !old.EnablePlacementRules {
+		return nil
+	}
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
+	if !cfg.EnablePlacementRules {
+		for _, store := range rc.GetStores() {
+			if !store.IsRemoved() && !store.IsTiKV() {
+				return errors.New("cannot disable placement rules with TiFlash nodes")
+			}
+		}
+		return nil
+	}
+	// Initialization can load or create rules and remains part of the setter.
+	if !rc.GetRuleManager().IsInitialized() {
+		return nil
+	}
+	rule, err := s.replicationRuleForConfig(&cfg, old)
+	if err != nil || rule == nil {
+		return err
+	}
+	rule.Count = int(cfg.MaxReplicas)
+	rule.LocationLabels = cfg.LocationLabels
+	rule.IsolationLevel = cfg.IsolationLevel
+	return rc.GetRuleManager().AdjustRule(rule, "")
+}
+
+func (s *Server) replicationRuleForConfig(cfg, old *sc.ReplicationConfig) (*placement.Rule, error) {
+	if !cfg.EnablePlacementRules ||
+		(cfg.MaxReplicas == old.MaxReplicas && typeutil.AreStringSlicesEqual(cfg.LocationLabels, old.LocationLabels) && cfg.IsolationLevel == old.IsolationLevel) {
+		return nil, nil
+	}
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
+	// Replication settings can update only the unchanged, full-range default rule.
+	rule := rc.GetRuleManager().GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
+	if rule == nil || len(rule.StartKey) != 0 || len(rule.EndKey) != 0 {
+		return nil, errors.New("cannot update MaxReplicas, LocationLabels or IsolationLevel when placement rules feature is enabled and not only default rule exists, please update rule instead")
+	}
+	if rule.Count != int(old.MaxReplicas) || !typeutil.AreStringSlicesEqual(rule.LocationLabels, []string(old.LocationLabels)) || rule.IsolationLevel != old.IsolationLevel {
+		return nil, errors.New("cannot to update replication config, the default rules do not consistent with replication config, please update rule instead")
+	}
+	return rule, nil
+}
+
+// SetReplicationConfig sets the replication config.
+func (s *Server) SetReplicationConfig(cfg sc.ReplicationConfig) error {
+	if err := s.ValidateReplicationConfig(cfg); err != nil {
+		return err
+	}
+	old := s.persistOptions.GetReplicationConfig()
+	if cfg.EnablePlacementRules && !old.EnablePlacementRules {
 		rc := s.GetRaftCluster()
 		if rc == nil {
 			return errs.ErrNotBootstrapped.GenWithStackByArgs()
 		}
-		if cfg.EnablePlacementRules {
-			// initialize rule manager.
-			if err := rc.GetRuleManager().Initialize(int(cfg.MaxReplicas), cfg.LocationLabels, cfg.IsolationLevel, false); err != nil {
-				return err
-			}
-		} else {
-			// NOTE: can be removed after placement rules feature is enabled by default.
-			for _, s := range rc.GetStores() {
-				if !s.IsRemoved() && !s.IsTiKV() {
-					return errors.New("cannot disable placement rules with TiFlash nodes")
-				}
-			}
+		if err := rc.GetRuleManager().Initialize(int(cfg.MaxReplicas), cfg.LocationLabels, cfg.IsolationLevel, false); err != nil {
+			return err
 		}
 	}
-
-	var rule *placement.Rule
-	if cfg.EnablePlacementRules {
-		rc := s.GetRaftCluster()
-		if rc == nil {
-			return errs.ErrNotBootstrapped.GenWithStackByArgs()
-		}
-		// replication.MaxReplicas won't work when placement rule is enabled and not only have one default rule.
-		defaultRule := rc.GetRuleManager().GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
-
-		CheckInDefaultRule := func() error {
-			// replication config won't work when placement rule is enabled and exceeds one default rule
-			if defaultRule == nil ||
-				len(defaultRule.StartKey) != 0 || len(defaultRule.EndKey) != 0 {
-				return errors.New("cannot update MaxReplicas, LocationLabels or IsolationLevel when placement rules feature is enabled and not only default rule exists, please update rule instead")
-			}
-			if defaultRule.Count != int(old.MaxReplicas) || !typeutil.AreStringSlicesEqual(defaultRule.LocationLabels, []string(old.LocationLabels)) || defaultRule.IsolationLevel != old.IsolationLevel {
-				return errors.New("cannot to update replication config, the default rules do not consistent with replication config, please update rule instead")
-			}
-
-			return nil
-		}
-
-		if cfg.MaxReplicas != old.MaxReplicas || !typeutil.AreStringSlicesEqual(cfg.LocationLabels, old.LocationLabels) || cfg.IsolationLevel != old.IsolationLevel {
-			if err := CheckInDefaultRule(); err != nil {
-				return err
-			}
-			rule = defaultRule
-		}
+	rule, err := s.replicationRuleForConfig(&cfg, old)
+	if err != nil {
+		return err
 	}
 
 	if rule != nil {
@@ -1588,8 +1608,9 @@ func (s *Server) GetPDServerConfig() *config.PDServerConfig {
 	return s.persistOptions.GetPDServerConfig().Clone()
 }
 
-// SetPDServerConfig sets the server config.
-func (s *Server) SetPDServerConfig(cfg config.PDServerConfig) error {
+// ValidatePDServerConfig validates and normalizes a candidate without updating
+// the server or its persisted configuration.
+func (s *Server) ValidatePDServerConfig(cfg *config.PDServerConfig) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
@@ -1608,6 +1629,16 @@ func (s *Server) SetPDServerConfig(cfg config.PDServerConfig) error {
 			}
 		}
 	}
+	return nil
+}
+
+// SetPDServerConfig sets the server config.
+func (s *Server) SetPDServerConfig(cfg config.PDServerConfig) error {
+	if err := s.ValidatePDServerConfig(&cfg); err != nil {
+		return err
+	}
+	old := s.persistOptions.GetPDServerConfig()
+
 	s.persistOptions.SetPDServerConfig(&cfg)
 	if err := s.persistOptions.Persist(s.storage); err != nil {
 		s.persistOptions.SetPDServerConfig(old)
