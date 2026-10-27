@@ -154,6 +154,11 @@ func (oc *Controller) Dispatch(region *core.RegionInfo, source string, recordOpS
 		failpoint.Inject("concurrentRemoveOperator", func() {
 			time.Sleep(500 * time.Millisecond)
 		})
+		// addOperatorInner publishes an operator before it starts the operator.
+		// Leave a CREATED operator to the add, which starts it and checks it.
+		if op.Status() == CREATED {
+			return
+		}
 		// Update operator status:
 		// The operator status should be STARTED.
 		// Check will call CheckSuccess and CheckTimeout.
@@ -573,6 +578,8 @@ func (oc *Controller) addOperatorInner(op *Operator) bool {
 		_ = oldOp.Replace()
 		oc.buryOperator(oldOp)
 	}
+
+	failpoint.InjectCall("afterPublishOperator")
 
 	oc.counts.inc(op.SchedulerKind())
 	// Now start the operator after successfully adding it to the map
