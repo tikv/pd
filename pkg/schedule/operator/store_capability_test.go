@@ -103,6 +103,27 @@ func TestLogStoreFirstCommandCannotBypassCapability(t *testing.T) {
 	}
 }
 
+func TestPendingFullTransferCannotFallBackToWitness(t *testing.T) {
+	ctx := t.Context()
+	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	for _, id := range []uint64{1, 2} {
+		cluster.AddLabelsStore(id, 1, map[string]string{core.StoreCapabilityLabel: core.FullStoreCapability})
+	}
+	cluster.AddLabelsStore(3, 1, map[string]string{core.StoreCapabilityLabel: core.LogOnlyStoreCapability})
+	peers := []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, IsWitness: true}}
+	region := core.NewRegionInfo(
+		&metapb.Region{Id: 1, RegionEpoch: &metapb.RegionEpoch{}, Peers: peers},
+		peers[0], core.WithPendingPeers([]*metapb.Peer{peers[1]}),
+	)
+	streams := hbstream.NewTestHeartbeatStreams(ctx, cluster, false)
+	defer streams.Close()
+	controller := NewController(ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), streams)
+	step := TransferLeader{FromStore: 1, ToStore: 2, ToStores: []uint64{2, 3}}
+	// Pending-peer filtering leaves only W; the send boundary still rejects it.
+	controller.SendScheduleCommand(region, step, DispatchFromNotifierQueue)
+	require.Zero(t, streams.MsgLength())
+}
+
 func TestLogStoreCommandGuardAllowsCompatibleRepairAndRemoval(t *testing.T) {
 	ctx := t.Context()
 	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())

@@ -16,6 +16,7 @@ package operator
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -155,6 +156,69 @@ func (suite *operatorStepTestSuite) TestTransferLeader() {
 		},
 	}
 	suite.checkWithHealthCheck(re, step, "transfer leader from store 1 to store 11", testCases, true)
+}
+
+func (suite *operatorStepTestSuite) TestTransferLeaderPendingTargets() {
+	peers := []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3}}
+	region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers}, peers[0])
+	testCases := []struct {
+		name          string
+		toStore       uint64
+		toStores      []uint64
+		pendingStores []uint64
+		wantPeer      uint64
+		wantPeers     []uint64
+	}{
+		{name: "single pending target", toStore: 2, pendingStores: []uint64{2}},
+		{name: "pending primary", toStore: 2, toStores: []uint64{2, 3}, pendingStores: []uint64{2}, wantPeer: 3, wantPeers: []uint64{3}},
+		{name: "pending secondary", toStore: 2, toStores: []uint64{2, 3}, pendingStores: []uint64{3}, wantPeer: 2, wantPeers: []uint64{2}},
+		{name: "all pending", toStore: 2, toStores: []uint64{2, 3}, pendingStores: []uint64{2, 3}},
+		{name: "healthy primary fallback", toStore: 2, toStores: []uint64{3}, pendingStores: []uint64{3}, wantPeer: 2},
+		{name: "missing peers", toStore: 4, toStores: []uint64{4, 2, 3}, pendingStores: []uint64{2}, wantPeer: 3, wantPeers: []uint64{3}},
+		{name: "unchanged healthy targets", toStore: 2, toStores: []uint64{3}, wantPeer: 2, wantPeers: []uint64{3}},
+	}
+	for _, tc := range testCases {
+		suite.Run(tc.name, func() {
+			re := suite.Require()
+			step := TransferLeader{FromStore: 1, ToStore: tc.toStore, ToStores: append([]uint64(nil), tc.toStores...)}
+			pendingPeers := make([]*metapb.Peer, 0, len(tc.pendingStores))
+			for _, storeID := range tc.pendingStores {
+				pendingPeers = append(pendingPeers, region.GetStorePeer(storeID))
+			}
+			pendingRegion := region.Clone(core.WithPendingPeers(pendingPeers))
+			cmd := step.GetCmd(pendingRegion, true)
+			if tc.wantPeer == 0 {
+				re.Nil(cmd)
+			} else {
+				re.NotNil(cmd)
+				re.Equal(tc.wantPeer, cmd.TransferLeader.GetPeer().GetStoreId())
+				re.Len(cmd.TransferLeader.GetPeers(), len(tc.wantPeers))
+				for i, peer := range cmd.TransferLeader.GetPeers() {
+					re.NotNil(peer)
+					re.Equal(tc.wantPeers[i], peer.GetStoreId())
+				}
+			}
+			re.Equal(tc.toStore, step.ToStore)
+			re.Equal(tc.toStores, step.ToStores)
+
+			// Recovery must restore every original candidate on the next attempt.
+			cmd = step.GetCmd(region, true)
+			re.NotNil(cmd)
+			for _, storeID := range tc.pendingStores {
+				if storeID == tc.toStore {
+					re.Equal(storeID, cmd.TransferLeader.GetPeer().GetStoreId())
+				}
+				if slices.Contains(tc.toStores, storeID) {
+					re.Contains(cmd.TransferLeader.GetPeers(), region.GetStorePeer(storeID))
+				}
+			}
+			for _, peer := range peers[1:] {
+				if peer.GetStoreId() == step.ToStore || slices.Contains(step.ToStores, peer.GetStoreId()) {
+					re.True(step.IsFinish(region.Clone(core.WithLeader(peer))))
+				}
+			}
+		})
+	}
 }
 
 func (suite *operatorStepTestSuite) TestAddPeer() {

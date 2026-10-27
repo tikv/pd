@@ -190,13 +190,31 @@ func (TransferLeader) Timeout(regionSize int64) time.Duration {
 
 // GetCmd returns the schedule command for heartbeat response.
 func (tl TransferLeader) GetCmd(region *core.RegionInfo, _ bool) *hbstream.Operation {
+	// Filter each send without changing the targets so pending peers can recover
+	// and an in-flight transfer can still complete the original operator.
+	getNonPendingPeer := func(storeID uint64) *metapb.Peer {
+		peer := region.GetStorePeer(storeID)
+		if peer == nil || region.GetPendingPeer(peer.GetId()) != nil {
+			return nil
+		}
+		return peer
+	}
+	peer := getNonPendingPeer(tl.ToStore)
 	peers := make([]*metapb.Peer, 0, len(tl.ToStores))
 	for _, storeID := range tl.ToStores {
-		peers = append(peers, region.GetStorePeer(storeID))
+		if candidate := getNonPendingPeer(storeID); candidate != nil {
+			peers = append(peers, candidate)
+		}
+	}
+	if peer == nil {
+		if len(peers) == 0 {
+			return nil
+		}
+		peer = peers[0]
 	}
 	return &hbstream.Operation{
 		TransferLeader: &pdpb.TransferLeader{
-			Peer:  region.GetStorePeer(tl.ToStore),
+			Peer:  peer,
 			Peers: peers,
 		},
 	}

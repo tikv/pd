@@ -240,6 +240,78 @@ func (suite *operatorControllerTestSuite) TestFastFailWithUnhealthyStore() {
 	re.True(oc.checkStaleOperator(op, steps[0], region))
 }
 
+func (suite *operatorControllerTestSuite) TestTransferLeaderPendingRecovery() {
+	testCases := []struct {
+		name            string
+		pendingAtCreate bool
+		finishInFlight  bool
+		timeout         bool
+	}{
+		{name: "pending before first send", pendingAtCreate: true},
+		{name: "pending after first send"},
+		{name: "in-flight transfer completes", finishInFlight: true},
+		{name: "pending until timeout", timeout: true},
+	}
+	for _, tc := range testCases {
+		suite.Run(tc.name, func() {
+			re := suite.Require()
+			cluster := mockcluster.NewCluster(suite.ctx, mockconfig.NewTestOptions())
+			stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster, false)
+			defer stream.Close()
+			controller := NewController(suite.ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), stream)
+			cluster.AddLeaderStore(1, 1)
+			cluster.AddLeaderStore(2, 1)
+			cluster.AddLeaderStore(3, 1)
+			region := cluster.AddLeaderRegion(1, 1, 2, 3)
+			target := region.GetStorePeer(2)
+			pendingRegion := region.Clone(core.WithPendingPeers([]*metapb.Peer{target}))
+			op := NewTestOperator(1, region.GetRegionEpoch(), OpLeader, TransferLeader{FromStore: 1, ToStore: 2})
+			op.SetStoreHealthCheck(true)
+			messages := 1
+			if tc.pendingAtCreate {
+				cluster.PutRegion(pendingRegion)
+				messages = 0
+			}
+			re.True(controller.AddOperator(op))
+			re.Equal(messages, stream.MsgLength())
+			startedAt := op.GetStartTime()
+
+			cluster.PutRegion(pendingRegion)
+			for _, source := range []string{DispatchFromHeartBeat, DispatchFromNotifierQueue} {
+				controller.Dispatch(pendingRegion, source, nil)
+				re.Equal(messages, stream.MsgLength())
+				re.Equal(STARTED, op.Status())
+				re.Same(op, controller.GetOperator(region.GetID()))
+				re.Equal(startedAt, op.GetStartTime())
+			}
+
+			if tc.timeout {
+				op.SetStatusReachTime(STARTED, time.Now().Add(-op.timeout-time.Second))
+				controller.Dispatch(pendingRegion, DispatchFromHeartBeat, nil)
+				re.Equal(TIMEOUT, op.Status())
+				re.Nil(controller.GetOperator(region.GetID()))
+				re.Equal(messages, stream.MsgLength())
+				return
+			}
+
+			cluster.PutRegion(region)
+			if !tc.finishInFlight {
+				controller.Dispatch(region, DispatchFromNotifierQueue, nil)
+				messages++
+				re.Equal(messages, stream.MsgLength())
+				re.Same(op, controller.GetOperator(region.GetID()))
+				re.Equal(startedAt, op.GetStartTime())
+			}
+			completedRegion := region.Clone(core.WithLeader(target))
+			cluster.PutRegion(completedRegion)
+			controller.Dispatch(completedRegion, DispatchFromHeartBeat, nil)
+			re.Equal(SUCCESS, op.Status())
+			re.Nil(controller.GetOperator(region.GetID()))
+			re.Equal(messages, stream.MsgLength())
+		})
+	}
+}
+
 // TestOperatorControllerRejectsTransferLeaderOnUnhealthyTarget guards against
 // a blocking point raised in review on tikv/pd#11146: checkStaleOperator must
 // keep rejecting an Unhealthy target for TransferLeader regardless of

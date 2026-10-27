@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -827,4 +828,56 @@ func TestKeyspaceResourceGroupManagerWriteRoleGates(t *testing.T) {
 	}))
 	re.Equal(1, metaOnlySettingsCount)
 	re.Equal(0, metaOnlyStatesCount)
+}
+
+func TestResourceGroupConsumptionPersistsAcrossReload(t *testing.T) {
+	for _, keyspaceID := range []uint32{constant.NullKeyspaceID, 42} {
+		for _, order := range []string{"same_snapshot", "settings_newer", "state_newer", "state_only"} {
+			t.Run(strconv.FormatUint(uint64(keyspaceID), 10)+"/"+order, func(t *testing.T) {
+				re := require.New(t)
+				m := prepareManager()
+				group := &rmpb.ResourceGroup{
+					Name: "persisted-consumption", Mode: rmpb.GroupMode_RUMode,
+					KeyspaceId: &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: keyspaceID}},
+					RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 100, BurstLimit: 1000}}},
+				}
+				re.NoError(m.AddResourceGroup(group))
+				rg, err := m.GetMutableResourceGroup(keyspaceID, group.Name)
+				re.NoError(err)
+				persistState := func() { m.getKeyspaceResourceGroupManager(keyspaceID).persistResourceGroupRunningState() }
+				persistSettings := func() {
+					// Normal metadata updates do not need to include RUStats.
+					group.RUSettings.RU.Settings.FillRate++
+					re.NoError(m.ModifyResourceGroup(group))
+				}
+				rg.UpdateRUConsumption(&rmpb.Consumption{RRU: 3})
+				switch order {
+				case "settings_newer":
+					persistState()
+				case "state_newer":
+					persistSettings()
+				}
+				rg.UpdateRUConsumption(&rmpb.Consumption{RRU: 2})
+				switch order {
+				case "same_snapshot":
+					persistSettings()
+					persistState()
+				case "settings_newer":
+					persistSettings()
+				case "state_newer", "state_only":
+					persistState()
+				}
+				for range 2 {
+					reloaded := prepareManager()
+					reloaded.storage = m.storage
+					re.NoError(reloaded.loadKeyspaceResourceGroups())
+					actual, err := reloaded.GetResourceGroup(keyspaceID, group.Name, true)
+					re.NoError(err)
+					re.Equal(5.0, actual.RUConsumption.RRU)
+					re.Empty(reloaded.ruCollector.Aggregate(), "loading cumulative API stats must not create metering records")
+					m = reloaded
+				}
+			})
+		}
+	}
 }
