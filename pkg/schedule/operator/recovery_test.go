@@ -207,7 +207,7 @@ func TestFullOnlyReaderFloorGuardsBuilderAndDispatch(t *testing.T) {
 func TestOrdinaryTransferChecksDestinationReaderFloorOnly(t *testing.T) {
 	cluster, region, _, _ := newRecoveryOperatorCluster(t)
 	cluster.SetEnablePlacementRules(false)
-	region = region.Clone(core.WithLeader(region.GetStorePeer(1)), core.WithRecoveryStatus(&pdpb.RegionRecoveryStatus{RequiredReaderProtocolVersion: 2, DataServiceReady: true, SizeSource: pdpb.RegionSizeSource_SIZE_CURRENT}))
+	region = region.Clone(core.WithLeader(region.GetStorePeer(1)), core.WithDownPeers(nil), core.WithRecoveryStatus(&pdpb.RegionRecoveryStatus{RequiredReaderProtocolVersion: 2, DataServiceReady: true, SizeSource: pdpb.RegionSizeSource_SIZE_CURRENT}))
 	cluster.PutStore(cluster.GetStore(1).Clone(core.SetStoreLogOnlyProtocolVersion(0)))
 	command := &hbstream.Operation{TransferLeader: &pdpb.TransferLeader{Peer: region.GetStorePeer(2)}}
 	require.NoError(t, ValidateSchedulingCommand(cluster.GetBasicCluster(), region, command))
@@ -217,4 +217,18 @@ func TestOrdinaryTransferChecksDestinationReaderFloorOnly(t *testing.T) {
 	require.ErrorContains(t, ValidateSchedulingCommand(cluster.GetBasicCluster(), region, command), "reader protocol")
 	_, err = CreateTransferLeaderOperator("reject-old-target", cluster, region, 2, nil, OpLeader)
 	require.Error(t, err)
+}
+
+func TestMultiTargetTransferExcludesUnsupportedReaders(t *testing.T) {
+	cluster, region, _, _ := newRecoveryOperatorCluster(t)
+	cluster.SetEnablePlacementRules(false)
+	peers := []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 4, StoreId: 4}}
+	region = core.NewRegionInfo(&metapb.Region{Id: 1, RegionEpoch: &metapb.RegionEpoch{}, Peers: peers}, peers[0],
+		core.WithRecoveryStatus(&pdpb.RegionRecoveryStatus{RequiredReaderProtocolVersion: 2, DataServiceReady: true, SizeSource: pdpb.RegionSizeSource_SIZE_CURRENT}))
+	cluster.PutStore(cluster.GetStore(4).Clone(core.SetStoreLogOnlyProtocolVersion(0)))
+	op, err := CreateTransferLeaderOperator("compatible-eviction-targets", cluster, region, 2, []uint64{2, 4}, OpLeader)
+	require.NoError(t, err)
+	transfer, ok := op.Step(0).(TransferLeader)
+	require.True(t, ok)
+	require.Equal(t, []uint64{2}, transfer.ToStores)
 }

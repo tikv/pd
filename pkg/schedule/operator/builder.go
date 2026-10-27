@@ -44,13 +44,13 @@ import (
 type Builder struct {
 	// basic info
 	sche.SharedCluster
-	desc                          string
-	regionID                      uint64
-	regionEpoch                   *metapb.RegionEpoch
-	rules                         []*placement.Rule
-	expectedRoles                 map[uint64]placement.PeerRoleType
-	approximateSize               int64
-	requiredReaderProtocolVersion uint32
+	desc                        string
+	regionID                    uint64
+	regionEpoch                 *metapb.RegionEpoch
+	rules                       []*placement.Rule
+	expectedRoles               map[uint64]placement.PeerRoleType
+	approximateSize             int64
+	requiredPeerProtocolVersion uint32
 
 	// operation record
 	originPeers          peersMap
@@ -100,13 +100,13 @@ func SkipPlacementRulesCheck(b *Builder) {
 // NewBuilder creates a Builder.
 func NewBuilder(desc string, ci sche.SharedCluster, region *core.RegionInfo, opts ...BuilderOption) *Builder {
 	b := &Builder{
-		desc:                          desc,
-		SharedCluster:                 ci,
-		regionID:                      region.GetID(),
-		regionEpoch:                   region.GetRegionEpoch(),
-		approximateSize:               region.GetApproximateSize(),
-		recoveringLeader:              region.IsRecoveringLeader(),
-		requiredReaderProtocolVersion: region.GetRequiredReaderProtocolVersion(),
+		desc:                        desc,
+		SharedCluster:               ci,
+		regionID:                    region.GetID(),
+		regionEpoch:                 region.GetRegionEpoch(),
+		approximateSize:             region.GetApproximateSize(),
+		recoveringLeader:            region.IsRecoveringLeader(),
+		requiredPeerProtocolVersion: core.RequiredPeerProtocolVersion(ci.GetBasicCluster(), region),
 	}
 
 	// options
@@ -328,6 +328,10 @@ func (b *Builder) SetLeaders(storeIDs []uint64) *Builder {
 		if peer == nil || core.IsLearner(peer) || b.unhealthyPeers[storeID] != nil {
 			continue
 		}
+		store := b.GetStore(storeID)
+		if core.IsWitness(peer) || store == nil || !store.SupportsPeerCapability(false) || store.GetMeta().GetLogOnlyProtocolVersion() < b.requiredPeerProtocolVersion {
+			continue
+		}
 		b.targetLeaderStoreIDs = append(b.targetLeaderStoreIDs, storeID)
 	}
 	// Don't need to check if there's valid target, because `targetLeaderStoreIDs`
@@ -467,7 +471,7 @@ func (b *Builder) prepareBuild() (string, error) {
 		return "", errors.New("cannot create operator: target peers have no voter")
 	}
 	if activatesMembership {
-		if err := core.CheckLogOnlyPeerProtocols(b.GetBasicCluster(), targets, b.requiredReaderProtocolVersion); err != nil {
+		if err := core.CheckLogOnlyPeerProtocols(b.GetBasicCluster(), targets, b.requiredPeerProtocolVersion); err != nil {
 			return "", err
 		}
 	}
@@ -971,7 +975,7 @@ func (b *Builder) allowLeader(peer *metapb.Peer, ignoreClusterLimit bool) bool {
 		return false
 	}
 
-	if !store.SupportsPeerCapability(false) || store.GetMeta().GetLogOnlyProtocolVersion() < b.requiredReaderProtocolVersion {
+	if !store.SupportsPeerCapability(false) || store.GetMeta().GetLogOnlyProtocolVersion() < b.requiredPeerProtocolVersion {
 		return false
 	}
 	if ignoreClusterLimit {

@@ -143,3 +143,8 @@ CSE_LOG_STORE_PD_BINARY=/absolute/path/to/pd-server cargo test --package tests -
 It starts an isolated real PD process and five TiKV nodes backed by shared mock
 S3, installs 2F1W rules, fails a Full and then W, verifies automatic replacements
 on compatible pools, restarts the replacement W and checks acknowledged data.
+
+The matching kvproto baseline also declares the future `WatchGCStates` RPC.
+This PD branch explicitly returns gRPC `Unimplemented` for that stream; the
+existing `GetAllKeyspacesGCStates` polling API remains the supported GC path.
+The protocol dependency update does not claim streaming GC support.

@@ -19,6 +19,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -87,4 +89,11 @@ func TestRecoveryForwardingPreservesReaderFloorWithoutReusingReadiness(t *testin
 	require.Equal(t, []byte("cached"), cached.GetRecoveryStatus().GetSessionId())
 	legacy := cached.Clone(core.WithRecoveryStatus(nil))
 	require.Nil(t, recoveryStatusForForwarding(legacy, nil, legacy))
+}
+
+func TestWatchGCStatesExplicitlyRejectsUnsupportedStreamingProtocol(t *testing.T) {
+	server := &GrpcServer{}
+	err := server.WatchGCStates(nil, nil)
+	require.Equal(t, codes.Unimplemented, status.Code(err))
+	require.Contains(t, err.Error(), "use GetAllKeyspacesGCStates")
 }

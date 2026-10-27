@@ -2551,6 +2551,13 @@ func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlo
 	return &pdpb.LoadGlobalConfigResponse{Items: res, Revision: r.Header.GetRevision()}, nil
 }
 
+// WatchGCStates is not implemented on this PD branch. Clients must continue
+// polling GetAllKeyspacesGCStates; the streaming protocol arrived with kvproto
+// but its state manager and revision-consistent watch are not implemented here.
+func (*GrpcServer) WatchGCStates(*pdpb.WatchGCStatesRequest, pdpb.PD_WatchGCStatesServer) error {
+	return status.Error(codes.Unimplemented, "WatchGCStates is not supported; use GetAllKeyspacesGCStates")
+}
+
 // WatchGlobalConfig will retry on recoverable errors forever until reconnected
 // by Etcd.Watch() as long as the context has not been canceled or timed out.
 // Watch on revision which greater than or equal to the required revision.
