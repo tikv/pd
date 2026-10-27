@@ -17,6 +17,7 @@ package grpcutil
 import (
 	"context"
 	"crypto/tls"
+	"io"
 	"net"
 	"net/url"
 	"sync"
@@ -314,6 +315,20 @@ func closeIfServiceMissing(cc *grpc.ClientConn, service string, err error) {
 	if closeErr := cc.Close(); closeErr != nil {
 		log.Warn("[pd] failed to close grpc clientConn", errs.ZapError(errs.ErrCloseGRPCConn, closeErr))
 	}
+}
+
+// ResolveStreamSendError returns the status of the stream if sending fails with
+// io.EOF, since gRPC only reports why the stream is terminated, e.g., it is
+// rejected for an unknown service, on receiving. Receiving also makes the
+// expected service check observe the status. recv is only called on io.EOF.
+func ResolveStreamSendError(sendErr error, recv func() error) error {
+	if sendErr != io.EOF {
+		return sendErr
+	}
+	if err := recv(); err != nil {
+		return err
+	}
+	return sendErr
 }
 
 // unknownServiceErrorPrefix is the prefix of the message returned by the gRPC

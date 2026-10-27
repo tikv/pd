@@ -55,8 +55,7 @@ func startOtherServiceServer(t *testing.T) string {
 }
 
 func TestServiceDiscoveriesRecreateConnOnMissingService(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	pdDiscovery := &serviceDiscovery{ctx: ctx, option: opt.NewOption()}
 	tsoDiscovery := &tsoServiceDiscovery{ctx: ctx, option: opt.NewOption()}
 	routerDiscovery := &routerServiceDiscovery{ctx: ctx, option: opt.NewOption()}
@@ -120,8 +119,7 @@ func TestServiceDiscoveriesRecreateConnOnMissingService(t *testing.T) {
 
 func TestResourceManagerDiscoveryRecreatesConnOnMissingService(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	url := startOtherServiceServer(t)
 
 	var notifications int
@@ -254,8 +252,7 @@ func TestRouterServiceDiscoveryRecreatesClosedNodeConn(t *testing.T) {
 func TestServiceDiscoverySwitchLeaderRecreatesClosedConn(t *testing.T) {
 	re := require.New(t)
 	url := startOtherServiceServer(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	discovery := &serviceDiscovery{ctx: ctx, option: opt.NewOption(), callbacks: newServiceCallbacks()}
 	defer discovery.clientConns.Range(func(_, cc any) bool {
 		_ = cc.(*grpc.ClientConn).Close()

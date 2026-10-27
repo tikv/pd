@@ -16,6 +16,7 @@ package grpcutil
 
 import (
 	"context"
+	"io"
 	"net"
 	"sync"
 	"testing"
@@ -85,6 +86,53 @@ func TestExpectedServiceClosesConnOnUnknownServiceStream(t *testing.T) {
 	_, err = stream.Recv()
 	re.Equal(codes.Unimplemented, status.Code(err))
 	re.Equal(connectivity.Shutdown, cc.GetState())
+}
+
+// TestExpectedServiceClosesConnOnStreamSendEOF covers a pre-opened stream: once
+// the server rejects it, Send returns io.EOF and only Recv reports the status.
+func TestExpectedServiceClosesConnOnStreamSendEOF(t *testing.T) {
+	re := require.New(t)
+	url := startGRPCServer(t, nil)
+	cc := dialWithExpectedService(t, url, "pdpb.PD")
+
+	stream, err := pdpb.NewPDClient(cc).QueryRegion(t.Context())
+	re.NoError(err)
+	var sendErr error
+	re.Eventually(func() bool {
+		sendErr = stream.Send(&pdpb.QueryRegionRequest{})
+		return sendErr != nil
+	}, 5*time.Second, 10*time.Millisecond)
+	re.ErrorIs(sendErr, io.EOF)
+	re.NotEqual(connectivity.Shutdown, cc.GetState())
+
+	err = ResolveStreamSendError(sendErr, func() error {
+		_, err := stream.Recv()
+		return err
+	})
+	re.Equal(codes.Unimplemented, status.Code(err))
+	re.Equal(connectivity.Shutdown, cc.GetState())
+}
+
+func TestResolveStreamSendError(t *testing.T) {
+	re := require.New(t)
+	recvErr := status.Error(codes.Unimplemented, "unknown service pdpb.PD")
+	recvCalled := false
+	recv := func(err error) func() error {
+		return func() error {
+			recvCalled = true
+			return err
+		}
+	}
+
+	re.NoError(ResolveStreamSendError(nil, recv(recvErr)))
+	re.False(recvCalled)
+	otherErr := status.Error(codes.Unavailable, "unavailable")
+	re.Equal(otherErr, ResolveStreamSendError(otherErr, recv(recvErr)))
+	re.False(recvCalled)
+	re.Equal(recvErr, ResolveStreamSendError(io.EOF, recv(recvErr)))
+	re.True(recvCalled)
+	// Keep io.EOF if the stream status can not be got by receiving.
+	re.Equal(io.EOF, ResolveStreamSendError(io.EOF, recv(nil)))
 }
 
 func TestExpectedServiceKeepsConnOnUnknownMethod(t *testing.T) {

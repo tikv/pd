@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/pkg/utils/grpcutil"
 )
 
 type actionType int
@@ -424,12 +425,16 @@ tokenRequestLoop:
 
 func (c *innerClient) processTokenRequests(stream rmpb.ResourceManager_AcquireTokenBucketsClient, t *tokenRequest) error {
 	req := t.Request
-	if err := stream.Send(req); err != nil {
-		err = errors.WithStack(err)
-		t.done <- err
-		return err
+	var resp *rmpb.TokenBucketsResponse
+	err := stream.Send(req)
+	if err == nil {
+		resp, err = stream.Recv()
+	} else {
+		err = grpcutil.ResolveStreamSendError(err, func() error {
+			_, err := stream.Recv()
+			return err
+		})
 	}
-	resp, err := stream.Recv()
 	if err != nil {
 		c.gRPCErrorHandler(err)
 		c.resourceManagerErrorHandler(err)
