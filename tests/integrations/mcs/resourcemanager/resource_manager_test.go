@@ -329,8 +329,7 @@ func TestSwitchModeDuringWorkload(t *testing.T) {
 				re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/fastUpdateServiceMode"))
 			})
 
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
+			ctx := t.Context()
 
 			cluster, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 2)
 			re.NoError(err)
@@ -894,6 +893,11 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 	resp, err := cli.AddResourceGroup(suite.ctx, rg)
 	re.NoError(err)
 	re.Contains(resp, "Success!")
+	// The standalone RM reads metadata asynchronously from the PD write path.
+	testutil.Eventually(re, func() bool {
+		group, err := cli.GetResourceGroup(suite.ctx, rg.Name)
+		return err == nil && group != nil
+	}, testutil.WithTickInterval(50*time.Millisecond))
 
 	cfg := &controller.RequestUnitConfig{
 		ReadBaseCost:     1,
@@ -910,6 +914,15 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 		err = rgsController.Stop()
 		re.NoError(err)
 	}()
+
+	// Exceed the local bootstrap budget to wait for a token refill before
+	// measuring steady-state waits. The first background sample may otherwise
+	// observe no demand and leave refilling until the timed batches exhaust it.
+	warmup := controller.NewTestRequestInfo(true, rg.RUSettings.RU.Settings.FillRate, 0, controller.AccessUnknown)
+	_, _, _, _, err = rgsController.OnRequestWait(suite.ctx, rg.Name, warmup)
+	re.NoError(err)
+	_, err = rgsController.OnResponse(rg.Name, warmup, controller.NewTestResponseInfo(0, 0, true))
+	re.NoError(err)
 
 	testCases := []struct {
 		resourceGroupName string
@@ -1963,6 +1976,9 @@ func (suite *resourceManagerClientTestSuite) TestCheckBackgroundJobs() {
 	c, err := controller.NewResourceGroupController(suite.ctx, 1, cli, nil, constants.NullKeyspaceID)
 	re.NoError(err)
 	c.Start(suite.ctx)
+	defer func() {
+		re.NoError(c.Stop())
+	}()
 
 	resourceGroupName := enableBackgroundGroup(false)
 	re.False(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_default"))
@@ -1979,18 +1995,20 @@ func (suite *resourceManagerClientTestSuite) TestCheckBackgroundJobs() {
 	re.False(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_ddl"))
 
 	// modify `Default` to check fallback.
-	resp, err = cli.ModifyResourceGroup(suite.ctx, &rmpb.ResourceGroup{
+	defaultGroup := &rmpb.ResourceGroup{
 		Name: server.DefaultResourceGroupName,
 		Mode: rmpb.GroupMode_RUMode,
 		RUSettings: &rmpb.GroupRequestUnitSettings{
 			RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{}},
 		},
 		BackgroundSettings: &rmpb.BackgroundSettings{JobTypes: []string{"lightning", "ddl"}},
-	})
-	re.NoError(err)
-	re.Contains(resp, "Success!")
-	// wait for watch event modify.
+	}
+	// Start establishes the watch asynchronously, so retry the update until it is observed.
 	testutil.Eventually(re, func() bool {
+		resp, err := cli.ModifyResourceGroup(suite.ctx, defaultGroup)
+		if err != nil || !strings.Contains(resp, "Success!") {
+			return false
+		}
 		meta := c.GetActiveResourceGroup(server.DefaultResourceGroupName)
 		if meta != nil && meta.BackgroundSettings != nil {
 			return len(meta.BackgroundSettings.JobTypes) == 2
@@ -2010,9 +2028,6 @@ func (suite *resourceManagerClientTestSuite) TestCheckBackgroundJobs() {
 	re.True(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_lightning"))
 	// test fallback for `"lightning", "ddl"`.
 	re.False(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_ddl"))
-
-	err = c.Stop()
-	re.NoError(err)
 }
 
 func (suite *resourceManagerClientTestSuite) TestResourceGroupControllerConfigChanged() {
@@ -2189,7 +2204,11 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupCURDWithKeyspace()
 	re.Equal(server.DefaultResourceGroupName, rgs[0].Name)
 
 	// Get and List resource group with keyspace id
-	rg, err = clientKeyspace.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
+	// Standalone RM reads observe PD metadata writes asynchronously.
+	testutil.Eventually(re, func() bool {
+		rg, err = clientKeyspace.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
+		return err == nil && rg != nil
+	}, testutil.WithTickInterval(50*time.Millisecond))
 	re.NoError(err)
 	re.NotNil(rg)
 	rgs, err = clientKeyspace.ListResourceGroups(suite.ctx, pd.WithRUStats)
@@ -2213,7 +2232,10 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupCURDWithKeyspace()
 	resp, err = clientKeyspace.ModifyResourceGroup(suite.ctx, group)
 	re.NoError(err)
 	re.Contains(resp, "Success!")
-	rg, err = clientKeyspace.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
+	testutil.Eventually(re, func() bool {
+		rg, err = clientKeyspace.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
+		return err == nil && rg.GetRUSettings().GetRU().GetSettings().GetFillRate() == group.RUSettings.RU.Settings.FillRate
+	}, testutil.WithTickInterval(50*time.Millisecond))
 	re.NoError(err)
 	re.Equal(group.RUSettings.RU.Settings.FillRate, rg.RUSettings.RU.Settings.FillRate)
 
@@ -2266,8 +2288,12 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupCURDWithKeyspace()
 	resp, err = clientKeyspace.DeleteResourceGroup(suite.ctx, group.Name)
 	re.NoError(err)
 	re.Contains(resp, "Success!")
-	rg, err = clientKeyspace.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
-	re.EqualError(err, fmt.Sprintf("get resource group %v failed, rpc error: code = Unknown desc = [PD:resourcemanager:ErrGroupNotExists]the %v resource group does not exist", group.Name, group.Name))
+	expectedErr := fmt.Sprintf("get resource group %v failed, rpc error: code = Unknown desc = [PD:resourcemanager:ErrGroupNotExists]the %v resource group does not exist", group.Name, group.Name)
+	testutil.Eventually(re, func() bool {
+		rg, err = clientKeyspace.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
+		return err != nil && err.Error() == expectedErr
+	}, testutil.WithTickInterval(50*time.Millisecond))
+	re.EqualError(err, expectedErr)
 	re.Nil(rg)
 }
 

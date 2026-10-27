@@ -132,8 +132,7 @@ func TestStoreWeight(t *testing.T) {
 
 func TestTryGetLocalRegionStorage(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	// Memory backend integrated into core storage.
 	defaultStorage := NewStorageWithMemoryBackend()
 	var regionStorage endpoint.RegionStorage = NewStorageWithMemoryBackend()
@@ -218,8 +217,8 @@ func mustSaveRegions(re *require.Assertions, s endpoint.RegionStorage, n int) []
 func newTestRegionMeta(regionID uint64) *metapb.Region {
 	return &metapb.Region{
 		Id:       regionID,
-		StartKey: []byte(fmt.Sprintf("%20d", regionID)),
-		EndKey:   []byte(fmt.Sprintf("%20d", regionID+1)),
+		StartKey: fmt.Appendf(nil, "%20d", regionID),
+		EndKey:   fmt.Appendf(nil, "%20d", regionID+1),
 	}
 }
 

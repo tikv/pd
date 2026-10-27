@@ -24,6 +24,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -79,8 +80,7 @@ func TestMain(m *testing.M) {
 
 func TestStoreHeartbeat(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	opt.GetScheduleConfig().StoreLimitVersion = "v2"
@@ -216,8 +216,7 @@ func TestStoreHeartbeat(t *testing.T) {
 
 func TestStoreMutationsRejectTombstoneStore(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -238,8 +237,7 @@ func TestStoreMutationsRejectTombstoneStore(t *testing.T) {
 
 func TestFilterUnhealthyStore(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -276,8 +274,7 @@ func TestFilterUnhealthyStore(t *testing.T) {
 
 func TestSetOfflineStore(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -343,8 +340,7 @@ func TestSetOfflineStore(t *testing.T) {
 
 func TestSetOfflineWithReplica(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -381,8 +377,7 @@ func addEvictLeaderScheduler(cluster *RaftCluster, storeID uint64) (evictSchedul
 
 func TestSetOfflineStoreWithEvictLeader(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -409,8 +404,7 @@ func TestSetOfflineStoreWithEvictLeader(t *testing.T) {
 
 func TestRemoveTiFlashStore(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -493,8 +487,7 @@ func TestRemoveTiFlashStore(t *testing.T) {
 
 func TestForceBuryStore(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -512,8 +505,7 @@ func TestForceBuryStore(t *testing.T) {
 
 func TestReuseAddress(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -558,8 +550,7 @@ func getTestDeployPath(storeID uint64) string {
 
 func TestReusePeerAddress(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -696,8 +687,7 @@ func TestReusePeerAddress(t *testing.T) {
 
 func TestUpStore(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -741,8 +731,7 @@ func TestUpStore(t *testing.T) {
 
 func TestRemovingProcess(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -803,8 +792,7 @@ func TestRemovingProcess(t *testing.T) {
 
 func TestDeleteStoreUpdatesClusterVersion(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -839,8 +827,7 @@ func TestDeleteStoreUpdatesClusterVersion(t *testing.T) {
 
 func TestStoreClusterVersion(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -864,8 +851,7 @@ func TestStoreClusterVersion(t *testing.T) {
 
 func TestBucketCompatibility(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -927,8 +913,7 @@ func TestBucketCompatibility(t *testing.T) {
 
 func TestStaleBucketMeta(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -968,8 +953,7 @@ func TestStaleBucketMeta(t *testing.T) {
 
 func TestRegionHeartbeatHotStat(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -1033,8 +1017,7 @@ func TestRegionHeartbeatHotStat(t *testing.T) {
 
 func TestBucketHeartbeat(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -1094,8 +1077,7 @@ func TestBucketHeartbeat(t *testing.T) {
 
 func TestRegionHeartbeat(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -1351,8 +1333,7 @@ func TestRegionHeartbeat(t *testing.T) {
 
 func TestRegionFlowChanged(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -1379,8 +1360,7 @@ func TestRegionFlowChanged(t *testing.T) {
 
 func TestRegionSizeChanged(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -1429,8 +1409,7 @@ func TestRegionSizeChanged(t *testing.T) {
 
 func TestConcurrentReportBucket(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -1461,8 +1440,7 @@ func TestConcurrentReportBucket(t *testing.T) {
 
 func TestConcurrentRegionHeartbeat(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -1500,8 +1478,7 @@ func TestConcurrentRegionHeartbeat(t *testing.T) {
 
 func TestRegionLabelIsolationLevel(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	cfg := opt.GetReplicationConfig()
@@ -1612,8 +1589,7 @@ func heartbeatRegions(re *require.Assertions, cluster *RaftCluster, regions []*c
 
 func TestHeartbeatSplit(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -1656,8 +1632,7 @@ func TestHeartbeatSplit(t *testing.T) {
 
 func TestRegionSplitAndMerge(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -1694,8 +1669,7 @@ func TestRegionSplitAndMerge(t *testing.T) {
 
 func TestOfflineAndMerge(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -1763,8 +1737,7 @@ func TestOfflineAndMerge(t *testing.T) {
 
 func TestStoreConfigUpdate(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -1833,8 +1806,7 @@ func TestStoreConfigUpdate(t *testing.T) {
 
 func TestSyncConfigContext(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -1878,10 +1850,51 @@ func TestSyncConfigContext(t *testing.T) {
 	re.Less(time.Since(now), clientTimeout*2)
 }
 
+func TestStoreConfigSyncRetainsStoresAcrossFailures(t *testing.T) {
+	re := require.New(t)
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	tc := newTestCluster(t.Context(), re, opt)
+
+	unavailable := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "store unavailable", http.StatusServiceUnavailable)
+	}))
+	defer unavailable.Close()
+
+	var available atomic.Bool
+	available.Store(true)
+	fallback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if !available.Load() {
+			http.Error(w, "store unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		w.Write([]byte("{}"))
+	}))
+	defer fallback.Close()
+	tc.httpClient = fallback.Client()
+
+	stores := newTestStores(2, "2.0.0")
+	stores[0].GetMeta().StatusAddress = unavailable.Listener.Addr().String()
+	stores[1].GetMeta().StatusAddress = fallback.Listener.Addr().String()
+
+	synced, _, _ := tc.syncStoreConfig(stores)
+	re.True(synced)
+
+	// The worker reuses this slice after a successful fallback.
+	available.Store(false)
+	re.NotPanics(func() {
+		synced, _, _ = tc.syncStoreConfig(stores)
+	})
+	re.False(synced)
+
+	available.Store(true)
+	synced, _, _ = tc.syncStoreConfig(stores)
+	re.True(synced)
+}
+
 func TestStoreConfigSync(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -1924,8 +1937,7 @@ func TestStoreConfigSync(t *testing.T) {
 
 func TestUpdateStorePendingPeerCount(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -1967,8 +1979,7 @@ func TestUpdateStorePendingPeerCount(t *testing.T) {
 
 func TestCalculateStoreSize1(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -2060,8 +2071,7 @@ func TestCalculateStoreSize1(t *testing.T) {
 
 func TestRegionSizeCacheAcrossStoresAndRules(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -2118,8 +2128,7 @@ func TestRegionSizeCacheAcrossStoresAndRules(t *testing.T) {
 
 func TestStatsRegions(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
 	tc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
@@ -2144,8 +2153,7 @@ func TestStatsRegions(t *testing.T) {
 
 func TestCalculateStoreSize2(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -2259,8 +2267,7 @@ func TestStores(t *testing.T) {
 
 func Test(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	n, np := uint64(10), uint64(3)
 	regions := newTestRegions(n, n, np)
@@ -2271,7 +2278,7 @@ func Test(t *testing.T) {
 
 	for i := range n {
 		region := regions[i]
-		regionKey := []byte(fmt.Sprintf("a%20d", i+1))
+		regionKey := fmt.Appendf(nil, "a%20d", i+1)
 
 		re.Nil(cache.GetRegion(i))
 		re.Nil(cache.GetRegionByKey(regionKey))
@@ -2375,8 +2382,7 @@ func TestCheckStaleRegion(t *testing.T) {
 
 func TestAwakenStore(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -2429,8 +2435,7 @@ func TestAwakenStore(t *testing.T) {
 
 func TestUpdateAndDeleteLabel(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -2629,8 +2634,8 @@ func newTestRegions(n, m, np uint64) []*core.RegionInfo {
 		region := &metapb.Region{
 			Id:          i,
 			Peers:       peers,
-			StartKey:    []byte(fmt.Sprintf("a%20d", i+1)),
-			EndKey:      []byte(fmt.Sprintf("a%20d", i+2)),
+			StartKey:    fmt.Appendf(nil, "a%20d", i+1),
+			EndKey:      fmt.Appendf(nil, "a%20d", i+2),
 			RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 2},
 		}
 		regions = append(regions, core.NewRegionInfo(region, peers[0], core.SetApproximateSize(100), core.SetApproximateKeys(1000)))
@@ -2641,8 +2646,8 @@ func newTestRegions(n, m, np uint64) []*core.RegionInfo {
 func newTestRegionMeta(regionID uint64) *metapb.Region {
 	return &metapb.Region{
 		Id:          regionID,
-		StartKey:    []byte(fmt.Sprintf("%20d", regionID)),
-		EndKey:      []byte(fmt.Sprintf("%20d", regionID+1)),
+		StartKey:    fmt.Appendf(nil, "%20d", regionID),
+		EndKey:      fmt.Appendf(nil, "%20d", regionID+1),
 		RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1},
 	}
 }
@@ -3071,8 +3076,7 @@ func checkRegionAndOperator(re *require.Assertions, tc *testCluster, co *schedul
 
 func TestCheckRegion(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	tc, co, cleanup := prepare(nil, nil, nil, re)
 	hbStreams, opt := co.GetHeartbeatStreams(), tc.opt
@@ -3353,8 +3357,7 @@ func TestStoreLimitChangeRefreshLimiter(t *testing.T) {
 	for _, limitType := range []storelimit.Type{storelimit.AddPeer, storelimit.TransferLeaderIn} {
 		t.Run(limitType.String(), func(t *testing.T) {
 			re := require.New(t)
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
+			ctx := t.Context()
 
 			_, opt, err := newTestScheduleConfig()
 			re.NoError(err)
@@ -3398,8 +3401,7 @@ func TestAddStoreLimitUsesPersistedDefaultStoreLimit(t *testing.T) {
 	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, 15)
 	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.TransferLeaderIn, storelimit.Unlimited)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -3428,8 +3430,7 @@ func TestAddStoreLimitUsesPersistedDefaultStoreLimit(t *testing.T) {
 
 func TestRemoveTombstoneRecordsKeepsStoreWhenLimitRemovalFails(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -3477,8 +3478,7 @@ func TestRemoveTombstoneRecordsKeepsStoreWhenLimitRemovalFails(t *testing.T) {
 // c.DeleteStore(store) actually executes.
 func TestSetStoreLimitCannotRaceStoreDeletion(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -3605,8 +3605,7 @@ func (s *blockingSaveConfigStorage) SaveConfig(cfg any) error {
 
 func TestScheduleConfigPersistenceIsSerialized(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -3726,8 +3725,7 @@ func TestInitSchedulersPreservesConcurrentScheduleUpdate(t *testing.T) {
 // this -- it's deterministic within a single goroutine.
 func TestSetAllStoresLimitDoesNotRestoreRemovedStoreLimit(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -3767,8 +3765,7 @@ func TestSetAllStoresLimitDoesNotRestoreRemovedStoreLimit(t *testing.T) {
 // can't be used to detect this; the fix re-fetches instead.
 func TestPutMetaStoreDoesNotRestoreRemovedStoreLimit(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -3875,8 +3872,7 @@ func assertBlockedThenReleased(t *testing.T, re *require.Assertions, beforeLockF
 // storeStateLock must serialize the whole thing.
 func TestPutMetaStoreCannotRaceConcurrentRegistrationAndBury(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -3942,8 +3938,7 @@ func TestPutMetaStoreCannotRaceConcurrentRegistrationAndBury(t *testing.T) {
 // storeStateLock must serialize the whole thing.
 func TestPutMetaStoreCannotRaceConcurrentManualTombstoneRemoval(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -4012,8 +4007,7 @@ func TestPutMetaStoreCannotRaceConcurrentManualTombstoneRemoval(t *testing.T) {
 // IsRemoved(), not mere absence) does.
 func TestAdjustNetworkSlowStoreCannotRepublishAfterBury(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	defer storeTriggerNetworkSlowEvict.Reset()
 
 	_, opt, err := newTestScheduleConfig()
@@ -4392,8 +4386,7 @@ func TestAddScheduler(t *testing.T) {
 
 func TestPersistScheduler(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	tc, co, cleanup := prepare(nil, nil, func(co *schedule.Coordinator) { co.Run() }, re)
 	hbStreams := co.GetHeartbeatStreams()
@@ -4506,8 +4499,7 @@ func TestPersistScheduler(t *testing.T) {
 
 func TestRemoveScheduler(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	tc, co, cleanup := prepare(func(cfg *sc.ScheduleConfig) {
 		cfg.ReplicaScheduleLimit = 0
@@ -4564,8 +4556,7 @@ func TestRemoveScheduler(t *testing.T) {
 
 func TestRestart(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	tc, co, cleanup := prepare(func(cfg *sc.ScheduleConfig) {
 		// Turn off balance, we test add replica only.
@@ -4975,8 +4966,7 @@ func TestInterval(t *testing.T) {
 
 func TestConcurrentStoreStats(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -5037,12 +5027,10 @@ func TestConcurrentStoreStats(t *testing.T) {
 			break
 		}
 		storeID := i + 1
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			cluster.UpdateAllStoreStatus()
 			cluster.checkStores()
-		}()
+		})
 		re.NoError(cluster.RemoveStore(storeID, false))
 		testutil.Eventually(re, func() bool {
 			return metapb.NodeState_Removing == cluster.GetStore(storeID).GetNodeState()
@@ -5053,8 +5041,7 @@ func TestConcurrentStoreStats(t *testing.T) {
 
 func TestCheckStoresUpCountWithLowSpace(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -5206,8 +5193,7 @@ func waitNoResponse(re *require.Assertions, stream mockhbstream.HeartbeatStream)
 
 func TestStopDoesNotHoldClusterLockWhileWaitingSchedulingJobs(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -5224,14 +5210,12 @@ func TestStopDoesNotHoldClusterLockWhileWaitingSchedulingJobs(t *testing.T) {
 	cluster.schedulingController.running = true
 
 	blockedOnClusterLock := make(chan struct{})
-	cluster.schedulingController.wg.Add(1)
-	go func() {
-		defer cluster.schedulingController.wg.Done()
+	cluster.schedulingController.wg.Go(func() {
 		<-cluster.schedulingController.ctx.Done()
 		cluster.RLock()
 		close(blockedOnClusterLock)
 		cluster.RUnlock()
-	}()
+	})
 
 	stopped := make(chan struct{})
 	go func() {
@@ -5255,8 +5239,7 @@ func TestStopDoesNotHoldClusterLockWhileWaitingSchedulingJobs(t *testing.T) {
 func BenchmarkHandleStatsAsync(b *testing.B) {
 	re := require.New(b)
 	// Setup: create a new instance of Cluster
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := b.Context()
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
 	c := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
@@ -5276,9 +5259,9 @@ func BenchmarkHandleStatsAsync(b *testing.B) {
 		core.SetReportInterval(0, 10),
 	)
 	// Reset timer after setup
-	b.ResetTimer()
+
 	// Run HandleStatsAsync b.N times
-	for range b.N {
+	for b.Loop() {
 		cluster.HandleStatsAsync(c, region)
 	}
 }
@@ -5286,8 +5269,7 @@ func BenchmarkHandleStatsAsync(b *testing.B) {
 func BenchmarkHandleRegionHeartbeat(b *testing.B) {
 	re := require.New(b)
 	// Setup: create a new instance of Cluster
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := b.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)

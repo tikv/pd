@@ -614,7 +614,9 @@ func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err 
 }
 
 func isRetryableGetTSError(err error) bool {
-	return errs.IsLeaderChange(err) || errs.IsCalleeMismatch(err)
+	// A closed TSO stream, such as one evicted when the client switches to a new leader, does
+	// not mean that the TSO service fails, so retry on another stream.
+	return errs.IsLeaderChange(err) || errs.IsCalleeMismatch(err) || errs.ErrClientTSOStreamClosed.Equal(err)
 }
 
 // GetLocalTS implements the TSOClient interface.

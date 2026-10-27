@@ -240,6 +240,72 @@ func (suite *operatorControllerTestSuite) TestFastFailWithUnhealthyStore() {
 	re.True(oc.checkStaleOperator(op, steps[0], region))
 }
 
+// TestOperatorControllerRejectsTransferLeaderOnUnhealthyTarget guards against
+// a blocking point raised in review on tikv/pd#11146: checkStaleOperator must
+// keep rejecting an Unhealthy target for TransferLeader regardless of
+// whether its request has already been sent. A leader transfer creates no
+// peer and no irreversible conf change, so if the target goes unhealthy
+// before it becomes leader, cancelling is always safe; leaving the operator
+// running would only retry the request until the Down threshold while
+// holding the scheduling slot.
+func (suite *operatorControllerTestSuite) TestOperatorControllerRejectsTransferLeaderOnUnhealthyTarget() {
+	re := suite.Require()
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(suite.ctx, opt)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc, false /* no need to run */)
+	oc := NewController(suite.ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
+	tc.AddLeaderStore(1, 1)
+	tc.AddLeaderStore(2, 1)
+	tc.AddLeaderStore(3, 1)
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	region := tc.GetRegion(1)
+
+	op := NewTestOperator(1, region.GetRegionEpoch(), OpLeader, TransferLeader{FromStore: 1, ToStore: 2})
+	op.SetStoreHealthCheck(true)
+	re.True(oc.AddOperator(op))
+
+	// Store 2 goes unhealthy after AddOperator already dispatched the
+	// request at creation time. TransferLeader is still cancelled instead of
+	// being left to retry until the Down threshold.
+	tc.SetStoreLastHeartbeatInterval(2, 11*time.Minute)
+	oc.Dispatch(region, DispatchFromHeartBeat, nil)
+	re.Equal(CANCELED, op.Status())
+}
+
+// TestOperatorControllerKeepsRunningForAddLearnerOnUnhealthyTarget documents
+// a deliberate scope boundary raised in review on tikv/pd#11146: opting an
+// AddLearner/AddPeer/BecomeNonWitness operator into SetStoreHealthCheck does
+// not protect it against an Unhealthy target on the real AddOperator path.
+// addOperatorInner dispatches the first step's command synchronously at
+// creation time, before any heartbeat-driven check can run, so
+// checkStaleOperator never gets a chance to reject the target -- even when
+// it was already Unhealthy before the operator was created. Only
+// TransferLeader (see the sibling test above) gets real protection from the
+// flag today; extending it to peer-creating steps needs an orphan-cleanup /
+// replacement design that is a follow-up to #11143.
+func (suite *operatorControllerTestSuite) TestOperatorControllerKeepsRunningForAddLearnerOnUnhealthyTarget() {
+	re := suite.Require()
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(suite.ctx, opt)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc, false /* no need to run */)
+	oc := NewController(suite.ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
+	tc.AddLeaderStore(1, 1)
+	tc.AddLeaderStore(2, 1)
+	tc.AddLeaderStore(3, 1)
+	tc.AddLeaderStore(4, 0)
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	region := tc.GetRegion(1)
+
+	// Store 4 is already Unhealthy before the operator is even created.
+	tc.SetStoreLastHeartbeatInterval(4, 11*time.Minute)
+	op := NewTestOperator(1, region.GetRegionEpoch(), OpRegion, AddLearner{ToStore: 4, PeerID: 4})
+	op.SetStoreHealthCheck(true)
+	re.True(oc.AddOperator(op))
+
+	oc.Dispatch(region, DispatchFromHeartBeat, nil)
+	re.Equal(STARTED, op.Status())
+}
+
 func (suite *operatorControllerTestSuite) TestCheckAddUnexpectedStatus() {
 	re := suite.Require()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/operator/unexpectedOperator"))
@@ -510,6 +576,7 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegionForMergeRegion()
 }
 
 func (suite *operatorControllerTestSuite) TestConcurrentMergeConflict() {
+	t := suite.T()
 	re := suite.Require()
 
 	opts := mockconfig.NewTestOptions()
@@ -532,20 +599,26 @@ func (suite *operatorControllerTestSuite) TestConcurrentMergeConflict() {
 		cluster.PutRegion(right)
 		wg := &sync.WaitGroup{}
 		for range 5 {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				ops1, err := CreateMergeRegionOperator("merge-region", cluster, left, middle, OpMerge)
-				if !suite.NoError(err) || !suite.Len(ops1, 2) {
+				if err != nil {
+					t.Errorf("create left-middle merge operators: %v", err)
+					return
+				}
+				if !suite.Len(ops1, 2) {
 					return
 				}
 				controller.AddWaitingOperator(ops1...)
 				ops2, err := CreateMergeRegionOperator("merge-region", cluster, middle, right, OpMerge)
-				if !suite.NoError(err) || !suite.Len(ops2, 2) {
+				if err != nil {
+					t.Errorf("create middle-right merge operators: %v", err)
+					return
+				}
+				if !suite.Len(ops2, 2) {
 					return
 				}
 				controller.AddWaitingOperator(ops2...)
-			}()
+			})
 		}
 		wg.Wait()
 		var count int
@@ -1095,8 +1168,7 @@ func (suite *operatorControllerTestSuite) TestInvalidStoreId() {
 func TestConcurrentAddOperatorAndSetStoreLimit(t *testing.T) {
 	as := assert.New(t)
 	opt := mockconfig.NewTestOptions()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc := mockcluster.NewCluster(ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false /* no need to run */)
 	oc := NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)

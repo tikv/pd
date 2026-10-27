@@ -140,16 +140,14 @@ func main() {
 
 	coordinator := cases.NewCoordinator(ctx, httpClis, pdClis, etcdClis)
 
-	hcaseStr := strings.Split(httpCases, ",")
-	for _, str := range hcaseStr {
+	for str := range strings.SplitSeq(httpCases, ",") {
 		name, cfg := parseCaseNameAndConfig(str)
 		if len(name) == 0 {
 			continue
 		}
 		_ = coordinator.SetHTTPCase(name, cfg)
 	}
-	gcaseStr := strings.Split(gRPCCases, ",")
-	for _, str := range gcaseStr {
+	for str := range strings.SplitSeq(gRPCCases, ",") {
 		name, cfg := parseCaseNameAndConfig(str)
 		if len(name) == 0 {
 			continue

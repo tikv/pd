@@ -312,12 +312,10 @@ func TestCancel(t *testing.T) {
 	checkTokens(re, lim1, t3, 8)
 	checkTokens(re, lim2, t3, -2)
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
+	wg.Go(func() {
 		_, err := WaitReservations(ctx2, t3, []*Reservation{r1, r2})
 		assert.Error(t, err)
-		wg.Done()
-	}()
+	})
 	time.Sleep(1 * time.Second)
 	cancel2()
 	wg.Wait()
@@ -432,13 +430,11 @@ func testQPSCase(concurrency int, reserveN int64, limit int64) (qps float64, ru 
 	ctx, cancel := context.WithCancel(context.Background())
 
 	var wg sync.WaitGroup
-	var totalRequests int64
+	var totalRequests atomic.Int64
 	start := time.Now()
 
 	for range concurrency {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for {
 				select {
 				case <-ctx.Done():
@@ -452,9 +448,9 @@ func testQPSCase(concurrency int, reserveN int64, limit int64) (qps float64, ru 
 				} else {
 					panic("r not ok")
 				}
-				atomic.AddInt64(&totalRequests, 1)
+				totalRequests.Add(1)
 			}
-		}()
+		})
 	}
 	var vQPS atomic.Value
 	var wait time.Duration
@@ -467,7 +463,7 @@ func testQPSCase(concurrency int, reserveN int64, limit int64) (qps float64, ru 
 				close(ch)
 				break
 			}
-			windowRequests = atomic.SwapInt64(&totalRequests, 0)
+			windowRequests = totalRequests.Swap(0)
 			vQPS.Store(float64(windowRequests))
 			r := lim.Reserve(ctx, 30*time.Second, time.Now(), float64(reserveN))
 			wait = r.Delay()

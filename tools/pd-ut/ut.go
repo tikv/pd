@@ -42,6 +42,11 @@ import (
 const (
 	deadlockTag = "deadlock"
 	nextGenTag  = "nextgen"
+	// maxParallelAddrBound mirrors alloc.maxTestAddrMapLen, the shared port
+	// allocator's retained-address cap. A --parallel above it could push the
+	// allocator into its eviction path; values below it are left as the user
+	// requested.
+	maxParallelAddrBound = 4096
 )
 
 // initTags sets up the tags.
@@ -166,8 +171,13 @@ func run() (exitCode int) {
 			fmt.Println("parse parallel error", err)
 			return 1
 		}
-		if parallel > procs {
-			fmt.Printf("Recommend to set parallel be same as the GOMAXPROCS=%d\n", procs)
+		// Cap parallelism at the shared allocator's retained-address bound
+		// (see alloc.maxTestAddrMapLen) so a large --parallel can never
+		// trigger the eviction path. Oversubscription below the bound is
+		// left untouched.
+		if parallel > maxParallelAddrBound {
+			fmt.Printf("Clamping --parallel %d to %d to keep the port allocator's eviction bound reachable\n", parallel, maxParallelAddrBound)
+			parallel = maxParallelAddrBound
 		}
 	}
 	workDir, err = os.Getwd()
@@ -175,7 +185,7 @@ func run() (exitCode int) {
 		fmt.Println("os.Getwd() error", err)
 	}
 
-	srv := alloc.RunHTTPServer()
+	srv := alloc.RunHTTPServer(context.Background())
 	defer func() {
 		if err := srv.Shutdown(context.Background()); err != nil {
 			log.Printf("server shutdown error: %v", err)
@@ -429,7 +439,7 @@ func runExistingTestCases(pkgs []string) (tasks []task, err error) {
 
 	// read content
 	existPkgs := make(map[string]struct{})
-	for _, line := range strings.Split(string(content), "\n") {
+	for line := range strings.SplitSeq(string(content), "\n") {
 		if len(line) == 0 || strings.Contains(line, "no test files") {
 			continue
 		}
@@ -605,10 +615,8 @@ type testResult struct {
 
 func (n *numa) runTestCase(pkg string, fn string) testResult {
 	res := testResult{
-		JUnitTestCase: JUnitTestCase{
-			ClassName: filepath.Join(modulePath, pkg),
-			Name:      fn,
-		},
+		ClassName: filepath.Join(modulePath, pkg),
+		Name:      fn,
 	}
 
 	var buf bytes.Buffer
@@ -624,8 +632,7 @@ func (n *numa) runTestCase(pkg string, fn string) testResult {
 		start = time.Now()
 		err = runCommandWithTempDir(cmd)
 		if err != nil {
-			var exitError *exec.ExitError
-			if errors.As(err, &exitError) {
+			if _, ok := errors.AsType[*exec.ExitError](err); ok {
 				// Retry 3 times to get rid of the weird error:
 				switch err.Error() {
 				case "signal: segmentation fault (core dumped)":
@@ -865,8 +872,7 @@ func buildTestBinary(pkg string) error {
 func testBinaryExist(pkg string) (bool, error) {
 	_, err := os.Stat(testFileFullPath(pkg))
 	if err != nil {
-		var pathError *os.PathError
-		if errors.As(err, &pathError) {
+		if _, ok := errors.AsType[*os.PathError](err); ok {
 			return false, nil
 		}
 	}
@@ -946,7 +952,7 @@ func filter(input []string, f func(string) bool) []string {
 }
 
 func shuffle(tasks []task) {
-	for i := 0; i < len(tasks); i++ {
+	for i := range tasks {
 		pos := rand.IntN(len(tasks))
 		tasks[i], tasks[pos] = tasks[pos], tasks[i]
 	}
@@ -965,8 +971,7 @@ func withTrace(err error) error {
 	if err == nil {
 		return err
 	}
-	var errStack *errWithStack
-	if errors.As(err, &errStack) {
+	if _, ok := errors.AsType[*errWithStack](err); ok {
 		return err
 	}
 	var stack [4096]byte

@@ -113,9 +113,7 @@ func WithRetained(retained bool) TaskOption {
 // Start starts the runner.
 func (cr *ConcurrentRunner) Start(ctx context.Context) {
 	cr.ctx, cr.cancel = context.WithCancel(ctx)
-	cr.wg.Add(1)
-	go func() {
-		defer cr.wg.Done()
+	cr.wg.Go(func() {
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
 		for {
@@ -149,7 +147,7 @@ func (cr *ConcurrentRunner) Start(ctx context.Context) {
 				cr.maxWaitingDuration.Set(maxDuration.Seconds())
 			}
 		}
-	}()
+	})
 }
 
 func (cr *ConcurrentRunner) run(ctx context.Context, task *Task, token *TaskToken) {

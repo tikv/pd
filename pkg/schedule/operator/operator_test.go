@@ -18,7 +18,6 @@ import (
 	"context"
 	"encoding/json"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -183,7 +182,7 @@ func (suite *operatorTestSuite) TestOperator() {
 	checkSteps(re, op, steps)
 	op.Start()
 	re.Equal(RemovePeer{FromStore: 2}, op.Check(region))
-	re.Equal(int32(2), atomic.LoadInt32(&op.currentStep))
+	re.Equal(int32(2), op.currentStep.Load())
 	re.False(op.CheckTimeout())
 	op.SetStatusReachTime(STARTED, op.GetStartTime().Add(-FastStepWaitTime-2*FastStepWaitTime+time.Second))
 	re.False(op.CheckTimeout())
@@ -203,7 +202,7 @@ func (suite *operatorTestSuite) TestOperator() {
 
 	// case2: check timeout operator will return false not panic.
 	op = NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, TransferLeader{ToStore: 1, FromStore: 4})
-	op.currentStep = 1
+	op.currentStep.Store(1)
 	re.True(op.status.To(STARTED))
 	re.True(op.status.To(TIMEOUT))
 	re.False(op.CheckSuccess())
@@ -392,7 +391,7 @@ func (suite *operatorTestSuite) TestCheckSuccess() {
 		re.False(op.CheckSuccess())
 		re.True(op.Start())
 		re.False(op.CheckSuccess())
-		op.currentStep = int32(len(op.steps))
+		op.currentStep.Store(int32(len(op.steps)))
 		re.True(op.CheckSuccess())
 		re.True(op.CheckSuccess())
 	}
@@ -403,7 +402,7 @@ func (suite *operatorTestSuite) TestCheckSuccess() {
 			RemovePeer{FromStore: 2},
 		}
 		op := NewTestOperator(1, &metapb.RegionEpoch{}, OpLeader|OpRegion, steps...)
-		op.currentStep = int32(len(op.steps))
+		op.currentStep.Store(int32(len(op.steps)))
 		re.Equal(CREATED, op.Status())
 		re.False(op.CheckSuccess())
 		re.True(op.Start())
@@ -423,7 +422,7 @@ func (suite *operatorTestSuite) TestCheckTimeout() {
 		op := NewTestOperator(1, &metapb.RegionEpoch{}, OpLeader|OpRegion, steps...)
 		re.Equal(CREATED, op.Status())
 		re.True(op.Start())
-		op.currentStep = int32(len(op.steps))
+		op.currentStep.Store(int32(len(op.steps)))
 		re.False(op.CheckTimeout())
 		re.Equal(SUCCESS, op.Status())
 	}
@@ -436,7 +435,7 @@ func (suite *operatorTestSuite) TestCheckTimeout() {
 		op := NewTestOperator(1, &metapb.RegionEpoch{}, OpLeader|OpRegion, steps...)
 		re.Equal(CREATED, op.Status())
 		re.True(op.Start())
-		op.currentStep = int32(len(op.steps))
+		op.currentStep.Store(int32(len(op.steps)))
 		op.SetStatusReachTime(STARTED, time.Now().Add(-SlowStepWaitTime))
 		re.False(op.CheckTimeout())
 		re.Equal(SUCCESS, op.Status())
@@ -713,11 +712,20 @@ func TestOperatorCheckConcurrently(t *testing.T) {
 	op.Start()
 	var wg sync.WaitGroup
 	for range 10 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			assert.Nil(t, op.Check(region))
-		}()
+		})
 	}
 	wg.Wait()
+}
+
+func TestOperatorStoreHealthCheck(t *testing.T) {
+	re := require.New(t)
+	op := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, AddPeer{ToStore: 1, PeerID: 1})
+	// Not tied to creation: defaults to false, and can be toggled any time after Build/NewOperator.
+	re.False(op.NeedStoreHealthCheck())
+	op.SetStoreHealthCheck(true)
+	re.True(op.NeedStoreHealthCheck())
+	op.SetStoreHealthCheck(false)
+	re.False(op.NeedStoreHealthCheck())
 }

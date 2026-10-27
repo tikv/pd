@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand/v2"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -42,7 +43,6 @@ import (
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
-	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -263,8 +263,8 @@ func (suite *tsoClientTestSuite) TestGetTSAsync() {
 					tsFutures[j] = client.GetTSAsync(suite.ctx)
 				}
 				var lastTS uint64 = math.MaxUint64
-				for j := len(tsFutures) - 1; j >= 0; j-- {
-					physical, logical, err := tsFutures[j].Wait()
+				for _, tsFuture := range slices.Backward(tsFutures) {
+					physical, logical, err := tsFuture.Wait()
 					if !as.NoError(err) {
 						return
 					}
@@ -284,7 +284,7 @@ func (suite *tsoClientTestSuite) TestDiscoverTSOServiceWithLegacyPath() {
 	re := suite.Require()
 	keyspaceID := uint32(1000000)
 	// Make sure this keyspace ID is not in use somewhere.
-	re.False(slice.Contains(suite.keyspaceIDs, keyspaceID))
+	re.False(slices.Contains(suite.keyspaceIDs, keyspaceID))
 	failpointValue := fmt.Sprintf(`return(%d)`, keyspaceID)
 	// Simulate the case that the server has lower version than the client and returns no tso addrs
 	// in the GetClusterInfo RPC.
@@ -741,8 +741,7 @@ func TestMixedTSODeployment(t *testing.T) {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/skipUpdateServiceMode"))
 	}()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -783,8 +782,7 @@ func TestMixedTSODeployment(t *testing.T) {
 // So we need another cluster to run this test.
 func TestUpgradingPDAndTSOClusters(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	// Create an PD cluster which has 3 servers
 	pdCluster, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 3)
