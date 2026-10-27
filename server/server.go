@@ -1377,35 +1377,48 @@ func (s *Server) GetReplicationConfig() *sc.ReplicationConfig {
 // ValidateReplicationConfig checks a candidate without initializing the rule
 // manager, updating rules, or persisting configuration.
 func (s *Server) ValidateReplicationConfig(cfg sc.ReplicationConfig) error {
+	_, err := s.prepareReplicationConfig(cfg)
+	return err
+}
+
+// prepareReplicationConfig returns the default-rule update, if initialization
+// alone will not apply the candidate. It does not change rules or storage.
+func (s *Server) prepareReplicationConfig(cfg sc.ReplicationConfig) (*placement.Rule, error) {
 	if err := cfg.Validate(); err != nil {
-		return err
+		return nil, err
 	}
 	old := s.persistOptions.GetReplicationConfig()
 	if !cfg.EnablePlacementRules && !old.EnablePlacementRules {
-		return nil
+		return nil, nil
 	}
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return errs.ErrNotBootstrapped.GenWithStackByArgs()
+		return nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
 	}
 	if !cfg.EnablePlacementRules {
-		return checkPlacementRulesDisabled(rc.GetStores())
+		return nil, checkPlacementRulesDisabled(rc.GetStores())
 	}
-	// Initialization may create the default rule and belongs to the setter.
-	if !rc.GetRuleManager().IsInitialized() {
-		return nil
+	manager := rc.GetRuleManager()
+	if !old.EnablePlacementRules {
+		// Initialize creates rules from the candidate only when no rules exist.
+		// Existing rules remain authoritative when the feature is re-enabled.
+		rule := &placement.Rule{
+			GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID, Role: placement.Voter,
+			Count: int(cfg.MaxReplicas), LocationLabels: cfg.LocationLabels, IsolationLevel: cfg.IsolationLevel,
+		}
+		return nil, manager.AdjustRule(rule, "")
 	}
 	if cfg.MaxReplicas == old.MaxReplicas && typeutil.AreStringSlicesEqual(cfg.LocationLabels, old.LocationLabels) && cfg.IsolationLevel == old.IsolationLevel {
-		return nil
+		return nil, nil
 	}
-	rule := rc.GetRuleManager().GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
+	rule := manager.GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
 	if err := checkDefaultReplicationRule(rule, old); err != nil {
-		return err
+		return nil, err
 	}
 	rule.Count = int(cfg.MaxReplicas)
 	rule.LocationLabels = cfg.LocationLabels
 	rule.IsolationLevel = cfg.IsolationLevel
-	return rc.GetRuleManager().AdjustRule(rule, "")
+	return rule, manager.AdjustRule(rule, "")
 }
 
 func checkPlacementRulesDisabled(stores []*core.StoreInfo) error {
@@ -1429,49 +1442,22 @@ func checkDefaultReplicationRule(rule *placement.Rule, old *sc.ReplicationConfig
 
 // SetReplicationConfig sets the replication config.
 func (s *Server) SetReplicationConfig(cfg sc.ReplicationConfig) error {
-	if err := cfg.Validate(); err != nil {
+	rule, err := s.prepareReplicationConfig(cfg)
+	if err != nil {
 		return err
 	}
 	old := s.persistOptions.GetReplicationConfig()
-	if cfg.EnablePlacementRules != old.EnablePlacementRules {
+	if cfg.EnablePlacementRules && !old.EnablePlacementRules {
 		rc := s.GetRaftCluster()
 		if rc == nil {
 			return errs.ErrNotBootstrapped.GenWithStackByArgs()
 		}
-		if cfg.EnablePlacementRules {
-			// initialize rule manager.
-			if err := rc.GetRuleManager().Initialize(int(cfg.MaxReplicas), cfg.LocationLabels, cfg.IsolationLevel, false); err != nil {
-				return err
-			}
-		} else {
-			// NOTE: can be removed after placement rules feature is enabled by default.
-			if err := checkPlacementRulesDisabled(rc.GetStores()); err != nil {
-				return err
-			}
-		}
-	}
-
-	var rule *placement.Rule
-	if cfg.EnablePlacementRules {
-		rc := s.GetRaftCluster()
-		if rc == nil {
-			return errs.ErrNotBootstrapped.GenWithStackByArgs()
-		}
-		// replication.MaxReplicas won't work when placement rule is enabled and not only have one default rule.
-		defaultRule := rc.GetRuleManager().GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
-
-		if cfg.MaxReplicas != old.MaxReplicas || !typeutil.AreStringSlicesEqual(cfg.LocationLabels, old.LocationLabels) || cfg.IsolationLevel != old.IsolationLevel {
-			if err := checkDefaultReplicationRule(defaultRule, old); err != nil {
-				return err
-			}
-			rule = defaultRule
+		if err := rc.GetRuleManager().Initialize(int(cfg.MaxReplicas), cfg.LocationLabels, cfg.IsolationLevel, false); err != nil {
+			return err
 		}
 	}
 
 	if rule != nil {
-		rule.Count = int(cfg.MaxReplicas)
-		rule.LocationLabels = cfg.LocationLabels
-		rule.IsolationLevel = cfg.IsolationLevel
 		rc := s.GetRaftCluster()
 		if rc == nil {
 			return errs.ErrNotBootstrapped.GenWithStackByArgs()

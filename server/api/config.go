@@ -231,10 +231,17 @@ func (h *confHandler) prepareConfigUpdates(cfg *config.Config, conf map[string]a
 			if _, exists := patch[name]; exists && prefix == "schedule" {
 				return nil, errors.Errorf("config item %s specified more than once", name)
 			}
-			// Check each supplied value so another spelling cannot hide a type error.
-			probe := reflect.New(reflect.TypeOf(target).Elem()).Interface()
-			if _, _, err := jsonutil.AddKeyValue(probe, name, value); err != nil {
+			// Merge aliases in sorted key order, preserving disjoint object fields.
+			decodeTarget := target
+			if prefix == "schedule" {
+				decodeTarget = reflect.New(reflect.TypeOf(target).Elem()).Interface()
+			}
+			updated, _, err := jsonutil.AddKeyValue(decodeTarget, name, value)
+			if err != nil {
 				return nil, err
+			}
+			if !updated && prefix != "schedule" {
+				continue
 			}
 		} else {
 			switch prefix {
@@ -289,6 +296,8 @@ func (h *confHandler) prepareConfigUpdates(cfg *config.Config, conf map[string]a
 				if _, _, err := jsonutil.AddKeyValue(&controller, name, value); err != nil {
 					return nil, err
 				}
+				// Forward each alias separately so partial controller objects also merge.
+				name = k
 			default:
 				return nil, errors.Errorf("config prefix %s not found", prefix)
 			}
@@ -297,19 +306,13 @@ func (h *confHandler) prepareConfigUpdates(cfg *config.Config, conf map[string]a
 		updates[prefix] = patch
 	}
 	for _, prefix := range slices.Sorted(maps.Keys(updates)) {
-		target, grouped := targets[prefix]
-		if grouped {
+		if prefix == "schedule" {
 			data, err := json.Marshal(updates[prefix])
 			if err != nil {
 				return nil, err
 			}
-			updated, _, err := jsonutil.MergeJSONObject(target, data)
-			if err != nil {
+			if _, _, err := jsonutil.MergeJSONObject(&cfg.Schedule, data); err != nil {
 				return nil, err
-			}
-			if !updated && prefix != "schedule" {
-				delete(updates, prefix)
-				continue
 			}
 		}
 		var err error
@@ -373,7 +376,7 @@ func (h *confHandler) updateConfig(cfg *config.Config, prefix string, patch map[
 		return h.svr.SetClusterVersion(patch[prefix].(string))
 	case "controller":
 		for _, name := range slices.Sorted(maps.Keys(patch)) {
-			if err := h.updateControllerConfig(name, patch[name]); err != nil {
+			if err := h.updateControllerConfig(name[strings.LastIndex(name, ".")+1:], patch[name]); err != nil {
 				return err
 			}
 		}

@@ -33,9 +33,12 @@ import (
 
 	"github.com/pingcap/log"
 
+	rm "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	cfg "github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	"github.com/tikv/pd/pkg/ratelimit"
 	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -286,6 +289,182 @@ func (suite *configTestSuite) checkConfigBatchValidation(cluster *tests.TestClus
 	re.NoError(err)
 	re.True(exists)
 	re.Equal(persistedBefore, persistedAfter)
+}
+
+func (suite *configTestSuite) TestConfigBatchSchedulerArgs() {
+	suite.env.RunTest(func(cluster *tests.TestCluster) {
+		re := suite.Require()
+		svr := cluster.GetLeaderServer().GetServer()
+		before := svr.GetScheduleConfig()
+		defer func() { re.NoError(svr.SetScheduleConfig(*before)) }()
+		seed := before.Clone()
+		seed.Schedulers = sc.SchedulerConfigs{{Type: "evict-leader", Args: []string{"1"}}}
+		re.NoError(svr.SetScheduleConfig(*seed))
+		var persistedBefore map[string]any
+		exists, err := svr.GetStorage().LoadConfig(&persistedBefore)
+		re.NoError(err)
+		re.True(exists)
+		for _, invalid := range []map[string]any{
+			{"schedule.high-space-ratio": 1},
+			{"controller.ru-version-policy": map[string]int{"default": 0}},
+		} {
+			invalid["schedule.schedulers-v2"] = sc.SchedulerConfigs{{Type: "evict-leader", Args: []string{"2"}}}
+			data, err := json.Marshal(invalid)
+			re.NoError(err)
+			re.NoError(testutil.CheckPostJSON(tests.TestDialClient, cluster.GetLeaderServer().GetAddr()+"/pd/api/v1/config", data,
+				testutil.Status(re, http.StatusBadRequest)))
+			// Compare with an independent value, not another potentially aliased config.
+			re.Equal([]string{"1"}, svr.GetScheduleConfig().Schedulers[0].Args)
+			var persistedAfter map[string]any
+			exists, err := svr.GetStorage().LoadConfig(&persistedAfter)
+			re.NoError(err)
+			re.True(exists)
+			re.Equal(persistedBefore, persistedAfter)
+		}
+	})
+}
+
+func (suite *configTestSuite) TestConfigBatchObjectAliases() {
+	suite.env.RunTest(func(cluster *tests.TestCluster) {
+		re := suite.Require()
+		leader := cluster.GetLeaderServer()
+		svr := leader.GetServer()
+		addr := leader.GetAddr() + "/pd/api/v1/config"
+		before := svr.GetConfig().Keyspace
+		re.Empty(before.MetaServiceGroups)
+		defer func() {
+			re.NoError(testutil.CheckPostJSON(tests.TestDialClient, addr, []byte(`{"keyspace.meta-service-groups":null}`), testutil.StatusOK(re)))
+		}()
+		for _, invalid := range []string{
+			`{"keyspace.meta-service-groups":123,"meta-service-groups":{"alias-b":"http://127.0.0.1:2379"}}`,
+			`{"keyspace.meta-service-groups":{"alias-a":"http://127.0.0.1:2379"},"meta-service-groups":123}`,
+			`{"schedule.merge-schedule-limit":1,"merge-schedule-limit":2}`,
+		} {
+			re.NoError(testutil.CheckPostJSON(tests.TestDialClient, addr, []byte(invalid), testutil.Status(re, http.StatusBadRequest)))
+			re.Equal(before, svr.GetConfig().Keyspace)
+		}
+		data := fmt.Appendf(nil, `{"keyspace.meta-service-groups":{"alias-a":%q},"meta-service-groups":{"alias-b":%q}}`, leader.GetAddr(), leader.GetAddr())
+		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, addr, data, testutil.StatusOK(re)))
+		groups := svr.GetConfig().Keyspace.MetaServiceGroups
+		re.Equal(leader.GetAddr(), groups["alias-a"])
+		re.Equal(leader.GetAddr(), groups["alias-b"])
+		var persisted config.Config
+		exists, err := svr.GetStorage().LoadConfig(&persisted)
+		re.NoError(err)
+		re.True(exists)
+		re.Equal(groups, persisted.Keyspace.MetaServiceGroups)
+
+		controllerURL := leader.GetAddr() + "/resource-manager/api/v1/config/controller"
+		var controller rm.ControllerConfig
+		re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, controllerURL, &controller))
+		defer func() {
+			data, err := json.Marshal(map[string]any{"controller.ru-version-policy": controller.RUVersionPolicy})
+			re.NoError(err)
+			re.NoError(testutil.CheckPostJSON(tests.TestDialClient, addr, data, testutil.StatusOK(re)))
+		}()
+		data = []byte(`{"controller.ru-version-policy":{"default":2},"ru-version-policy":{"overrides":{"42":1}}}`)
+		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, addr, data, testutil.StatusOK(re)))
+		var updated rm.ControllerConfig
+		re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, controllerURL, &updated))
+		re.Equal(rm.RUVersion(2), updated.RUVersionPolicy.Default)
+		re.Equal(rm.RUVersion(1), updated.RUVersionPolicy.Overrides[42])
+	})
+}
+
+func TestConfigBatchEnablePlacementRules(t *testing.T) {
+	for _, testCase := range []struct {
+		name        string
+		witness     bool
+		storedCount int
+	}{
+		{name: "new-rules"},
+		{name: "witness-rules", witness: true},
+		{name: "stored-default", storedCount: 3},
+		{name: "custom-default", storedCount: 5},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			cluster, err := tests.NewTestCluster(t.Context(), 1, func(cfg *config.Config, _ string) {
+				cfg.Keyspace.WaitRegionSplit = false
+				cfg.Replication.EnablePlacementRules = false
+				cfg.Schedule.EnableWitness = testCase.witness
+			})
+			re.NoError(err)
+			defer cluster.Destroy()
+			re.NoError(cluster.RunInitialServers())
+			re.NotEmpty(cluster.WaitLeader())
+			leader := cluster.GetLeaderServer()
+			re.NoError(leader.BootstrapCluster())
+			svr := leader.GetServer()
+			manager := svr.GetRaftCluster().GetRuleManager()
+			re.False(manager.IsInitialized())
+			storage := svr.GetStorage()
+			if testCase.storedCount != 0 {
+				rule := &placement.Rule{GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID, Role: placement.Voter, Count: testCase.storedCount}
+				re.NoError(storage.RunInTxn(t.Context(), func(txn kv.Txn) error { return storage.SaveRule(txn, rule.StoreKey(), rule) }))
+			}
+			re.NoError(svr.SetScheduleConfig(*svr.GetScheduleConfig()))
+			before := svr.GetConfig()
+			var persistedBefore map[string]any
+			exists, err := storage.LoadConfig(&persistedBefore)
+			re.NoError(err)
+			re.True(exists)
+			rulesBefore := make(map[string]string)
+			re.NoError(storage.LoadRules(func(k, v string) { rulesBefore[k] = v }))
+			post := func(count int, status int) {
+				data := fmt.Appendf(nil, `{"pd-server.metric-storage":"http://127.0.0.1:9999","replication.enable-placement-rules":"true","replication.max-replicas":%d,"location-labels":"zone","replication.isolation-level":"zone"}`, count)
+				re.NoError(testutil.CheckPostJSON(tests.TestDialClient, leader.GetAddr()+"/pd/api/v1/config", data, testutil.Status(re, status)))
+			}
+			assertUnchanged := func() {
+				re.False(manager.IsInitialized())
+				re.Equal(before, svr.GetConfig())
+				var persistedAfter map[string]any
+				exists, err := storage.LoadConfig(&persistedAfter)
+				re.NoError(err)
+				re.True(exists)
+				re.Equal(persistedBefore, persistedAfter)
+				rulesAfter := make(map[string]string)
+				re.NoError(storage.LoadRules(func(k, v string) { rulesAfter[k] = v }))
+				re.Equal(rulesBefore, rulesAfter)
+			}
+			post(0, http.StatusBadRequest)
+			assertUnchanged()
+			post(4, http.StatusOK)
+			after := svr.GetConfig()
+			re.True(after.Replication.EnablePlacementRules)
+			re.Equal(uint64(4), after.Replication.MaxReplicas)
+			re.Equal("http://127.0.0.1:9999", after.PDServerCfg.MetricStorage)
+			count := 0
+			for _, rule := range manager.GetAllRules() {
+				count += rule.Count
+				if testCase.storedCount == 0 {
+					re.Equal([]string{"zone"}, rule.LocationLabels)
+					re.Equal("zone", rule.IsolationLevel)
+				}
+			}
+			if testCase.storedCount == 0 {
+				re.Equal(4, count)
+			} else {
+				// Enabling preserves existing rules, including custom replica counts.
+				re.Equal(testCase.storedCount, count)
+				rulesAfter := make(map[string]string)
+				re.NoError(storage.LoadRules(func(k, v string) { rulesAfter[k] = v }))
+				re.Equal(rulesBefore, rulesAfter)
+			}
+			var persisted config.Config
+			exists, err = storage.LoadConfig(&persisted)
+			re.NoError(err)
+			re.True(exists)
+			re.Equal(after.Replication, persisted.Replication)
+			if testCase.name == "new-rules" {
+				data := []byte(`{"replication.enable-placement-rules":"false"}`)
+				re.NoError(testutil.CheckPostJSON(tests.TestDialClient, leader.GetAddr()+"/pd/api/v1/config", data, testutil.StatusOK(re)))
+				post(5, http.StatusOK)
+				re.Equal(uint64(5), svr.GetReplicationConfig().MaxReplicas)
+				re.Equal(4, manager.GetRule(placement.DefaultGroupID, placement.DefaultRuleID).Count)
+			}
+		})
+	}
 }
 
 func (suite *configTestSuite) TestConfigBatchRelatedFields() {
