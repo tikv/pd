@@ -73,3 +73,25 @@ func TestRegionSyncCannotClearObservedReaderProtocolFloor(t *testing.T) {
 		require.False(t, cached.GetRecoveryStatus().GetDataServiceReady())
 	}
 }
+
+func TestDuplicateRecoverySyncStatusFailsClosedAndRetainsReaderFloor(t *testing.T) {
+	peer := &metapb.Peer{Id: 1, StoreId: 1}
+	meta := &metapb.Region{Id: 1, RegionEpoch: &metapb.RegionEpoch{}, Peers: []*metapb.Peer{peer}}
+	basic := core.NewBasicCluster()
+	backend := storage.NewStorageWithMemoryBackend()
+	server := mockserver.NewMockServer(context.Background(), nil, nil, backend, basic)
+	syncer := NewRegionSyncer(server)
+	response := &pdpb.SyncRegionResponse{
+		Regions: []*metapb.Region{meta}, RegionLeaders: []*metapb.Peer{peer},
+		RegionRecoveryInfos: []*pdpb.RegionRecoveryInfo{
+			{RegionId: 1, Status: &pdpb.RegionRecoveryStatus{RequiredReaderProtocolVersion: 3, DataServiceReady: true, SizeSource: pdpb.RegionSizeSource_SIZE_CURRENT}},
+			{RegionId: 1, Status: &pdpb.RegionRecoveryStatus{RequiredReaderProtocolVersion: 2, DataServiceReady: true, SizeSource: pdpb.RegionSizeSource_SIZE_CURRENT}},
+			{RegionId: 1},
+		},
+	}
+	handled, _ := syncer.handleRegionSyncResponse(context.Background(), response, basic, backend, false)
+	require.True(t, handled)
+	region := basic.GetRegion(1)
+	require.Equal(t, uint32(3), region.GetRequiredReaderProtocolVersion())
+	require.True(t, region.IsRecoverySchedulingBlocked())
+}

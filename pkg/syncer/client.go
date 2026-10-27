@@ -112,9 +112,11 @@ func (s *RegionSyncer) handleRegionSyncResponse(
 	regionLeaders := resp.GetRegionLeaders()
 	recoveryByID := make(map[uint64]*pdpb.RegionRecoveryStatus, len(resp.GetRegionRecoveryInfos()))
 	for _, info := range resp.GetRegionRecoveryInfos() {
-		if _, duplicate := recoveryByID[info.GetRegionId()]; duplicate {
-			// A malformed duplicate must not turn a previous blocked state ready.
-			recoveryByID[info.GetRegionId()] = &pdpb.RegionRecoveryStatus{}
+		if previous, duplicate := recoveryByID[info.GetRegionId()]; duplicate {
+			// A malformed duplicate cannot assert readiness or erase a durable floor.
+			recoveryByID[info.GetRegionId()] = &pdpb.RegionRecoveryStatus{
+				RequiredReaderProtocolVersion: max(previous.GetRequiredReaderProtocolVersion(), info.GetStatus().GetRequiredReaderProtocolVersion()),
+			}
 		} else if info.GetStatus() == nil {
 			recoveryByID[info.GetRegionId()] = &pdpb.RegionRecoveryStatus{}
 		} else {
@@ -175,7 +177,13 @@ func (s *RegionSyncer) handleRegionSyncResponse(
 			// no limit for followers.
 		}
 		saveKV, _, _, _ := regionGuide(cctx, region, origin)
-		overlaps := bc.PutRegion(region)
+		// A former sync client may overlap the new leader's heartbeat during a
+		// role change. Revalidate metadata and the reader floor at the cache write.
+		overlaps, err := bc.AtomicCheckAndPutRegion(cctx, region)
+		if err != nil {
+			log.Debug("region sync superseded by a concurrent update", zap.Uint64("region-id", region.GetID()), errs.ZapError(err))
+			continue
+		}
 
 		if saveKV {
 			err = regionStorage.SaveRegion(r)
