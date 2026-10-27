@@ -15,7 +15,6 @@
 package cluster
 
 import (
-	"context"
 	"testing"
 
 	"github.com/gogo/protobuf/proto"
@@ -30,8 +29,7 @@ import (
 )
 
 func TestRecoveryStateBlocksBothSplitAllocationEntrypoints(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	_, opt, err := newTestScheduleConfig()
 	require.NoError(t, err)
 	c := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
@@ -46,8 +44,7 @@ func TestRecoveryStateBlocksBothSplitAllocationEntrypoints(t *testing.T) {
 }
 
 func TestStoreProtocolVersionSurvivesRegistrationAndLabels(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	_, opt, err := newTestScheduleConfig()
 	require.NoError(t, err)
 	c := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
@@ -63,8 +60,7 @@ func TestStoreProtocolVersionSurvivesRegistrationAndLabels(t *testing.T) {
 }
 
 func TestDeclaredProtocolCannotDowngradeAfterLeavingWitnessGroup(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	_, opt, err := newTestScheduleConfig()
 	require.NoError(t, err)
 	c := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())

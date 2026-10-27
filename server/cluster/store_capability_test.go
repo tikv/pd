@@ -15,7 +15,6 @@
 package cluster
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -29,8 +28,7 @@ import (
 
 func TestLogStoreCapabilityCannotBeChangedByLabels(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
 	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
@@ -49,8 +47,7 @@ func TestLogStoreCapabilityCannotBeChangedByLabels(t *testing.T) {
 }
 
 func TestStoreCapabilityIsReservedUnderStrictLabelValidation(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	_, opt, err := newTestScheduleConfig()
 	require.NoError(t, err)
 	replication := opt.GetReplicationConfig().Clone()

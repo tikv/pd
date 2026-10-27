@@ -15,7 +15,6 @@
 package filter
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -58,9 +57,7 @@ func TestReaderProtocolCandidateFilterPreservesLegacyAndRetirement(t *testing.T)
 }
 
 func TestPlacementCandidatesHonorReaderFloorWithoutWitness(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	cluster := mockcluster.NewCluster(t.Context(), mockconfig.NewTestOptions())
 	for id := uint64(1); id <= 4; id++ {
 		cluster.AddLeaderStore(id, 1)
 	}

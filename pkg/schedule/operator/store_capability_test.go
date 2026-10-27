@@ -15,7 +15,6 @@
 package operator
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -29,9 +28,7 @@ import (
 )
 
 func TestLogStoreRejectsConversionsAndIncompatibleOperators(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	cluster := mockcluster.NewCluster(t.Context(), mockconfig.NewTestOptions())
 	cluster.AddLabelsStore(1, 1, map[string]string{core.StoreCapabilityLabel: core.FullStoreCapability})
 	cluster.AddLabelsStore(2, 1, map[string]string{core.StoreCapabilityLabel: core.FullStoreCapability})
 	cluster.AddLabelsStore(3, 1, map[string]string{core.StoreCapabilityLabel: core.LogOnlyStoreCapability})
@@ -76,8 +73,7 @@ func TestLogStoreFirstCommandCannotBypassCapability(t *testing.T) {
 		{"multi-target-includes-witness", TransferLeader{FromStore: 1, ToStore: 2, ToStores: []uint64{2, 3}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
+			ctx := t.Context()
 			cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
 			for _, id := range []uint64{1, 2, 5} {
 				cluster.AddLabelsStore(id, 1, map[string]string{core.StoreCapabilityLabel: core.FullStoreCapability})
@@ -108,8 +104,7 @@ func TestLogStoreFirstCommandCannotBypassCapability(t *testing.T) {
 }
 
 func TestLogStoreCommandGuardAllowsCompatibleRepairAndRemoval(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
 	for _, id := range []uint64{1, 2, 5} {
 		cluster.AddLabelsStore(id, 1, map[string]string{core.StoreCapabilityLabel: core.FullStoreCapability})
