@@ -197,6 +197,7 @@ func (suite *operatorControllerTestSuite) TestFastFailOperator() {
 
 	// transfer leader to an illegal store.
 	op = NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, TransferLeader{ToStore: 5})
+	re.True(op.Start())
 	oc.SetOperator(op)
 	oc.Dispatch(region, DispatchFromHeartBeat, nil)
 	re.Equal(CANCELED, op.Status())
@@ -331,6 +332,37 @@ func (suite *operatorControllerTestSuite) TestConcurrentRemoveOperator() {
 
 	re.Equal(op2, oc.GetOperator(1))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/operator/concurrentRemoveOperator"))
+}
+
+// issue #11404
+func (suite *operatorControllerTestSuite) TestDispatchOperatorOnPublish() {
+	re := suite.Require()
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(suite.ctx, opt)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc, false /* no need to run */)
+	oc := NewController(suite.ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
+	tc.AddLeaderStore(1, 1)
+	tc.AddLeaderStore(2, 0)
+	tc.AddLeaderRegion(1, 1, 2)
+	region := tc.GetRegion(1)
+	// The leader is already on store 1, so the operator finishes on its first check.
+	op := NewTestOperator(1, &metapb.RegionEpoch{}, OpLeader, TransferLeader{FromStore: 2, ToStore: 1})
+
+	// Dispatch a heartbeat as soon as the operator becomes visible, before it starts.
+	fp := "github.com/tikv/pd/pkg/schedule/operator/afterPublishOperator"
+	re.NoError(failpoint.EnableCall(fp, func() {
+		re.Equal(CREATED, op.Status())
+		oc.Dispatch(region, DispatchFromHeartBeat, nil)
+	}))
+	defer func() {
+		re.NoError(failpoint.Disable(fp))
+	}()
+
+	re.True(oc.AddOperator(op))
+	re.Equal(SUCCESS, op.Status())
+	oc.Dispatch(region, DispatchFromHeartBeat, nil)
+	re.Nil(oc.GetOperator(1))
+	re.Zero(oc.OperatorCount(OpLeader))
 }
 
 func (suite *operatorControllerTestSuite) TestPollDispatchRegion() {
