@@ -16,6 +16,13 @@ package server
 
 import (
 	"context"
+<<<<<<< HEAD
+=======
+	"errors"
+	"net/http"
+	"strconv"
+	"sync"
+>>>>>>> 46687461c0 (resource_manager: avoid double counting restored RUStats (#11388))
 	"testing"
 	"time"
 
@@ -423,3 +430,142 @@ func TestResourceGroupPersistence(t *testing.T) {
 	limiter = m.GetKeyspaceServiceLimiter(2)
 	re.Nil(limiter)
 }
+<<<<<<< HEAD
+=======
+
+func TestManagerMetadataWriteRoleGates(t *testing.T) {
+	re := require.New(t)
+	m := NewManager[*mockRoleConfigProvider](&mockRoleConfigProvider{
+		role: ResourceGroupWriteRoleRMTokenOnly,
+	})
+	m.storage = storage.NewStorageWithMemoryBackend()
+	ctx := t.Context()
+	re.NoError(m.Init(ctx))
+	re.Equal(ResourceGroupWriteRoleRMTokenOnly, m.GetWriteRole())
+
+	group := &rmpb.ResourceGroup{
+		Name: "test_group",
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 100}},
+		},
+	}
+	re.ErrorIs(m.AddResourceGroup(group), errMetadataWriteDisabled)
+	re.ErrorIs(m.ModifyResourceGroup(group), errMetadataWriteDisabled)
+	re.ErrorIs(m.DeleteResourceGroup(constant.NullKeyspaceID, group.Name), errMetadataWriteDisabled)
+	re.ErrorIs(m.UpdateControllerConfigItem("request-unit.read-base-cost", 1.0), errMetadataWriteDisabled)
+	re.ErrorIs(m.SetKeyspaceServiceLimit(constant.NullKeyspaceID, 1.0), errMetadataWriteDisabled)
+}
+
+func TestKeyspaceResourceGroupManagerWriteRoleGates(t *testing.T) {
+	re := require.New(t)
+	memStorage := storage.NewStorageWithMemoryBackend()
+	group := &rmpb.ResourceGroup{
+		Name: "test_group",
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 100}},
+		},
+	}
+
+	tokenOnlyKRGM := newKeyspaceResourceGroupManager(1, memStorage, ResourceGroupWriteRoleRMTokenOnly)
+	re.NoError(tokenOnlyKRGM.addResourceGroup(group))
+	modifiedGroup := &rmpb.ResourceGroup{
+		Name: "test_group",
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 200}},
+		},
+	}
+	re.ErrorIs(tokenOnlyKRGM.modifyResourceGroup(modifiedGroup), errMetadataWriteDisabled)
+	re.Equal(float64(100), tokenOnlyKRGM.getResourceGroup(group.GetName(), false).getFillRate())
+	re.ErrorIs(tokenOnlyKRGM.deleteResourceGroup(group.GetName()), errMetadataWriteDisabled)
+	re.NotNil(tokenOnlyKRGM.getResourceGroup(group.GetName(), false))
+
+	var tokenOnlySettingsCount int
+	re.NoError(memStorage.LoadResourceGroupSettings(func(keyspaceID uint32, name, _ string) {
+		if keyspaceID == tokenOnlyKRGM.keyspaceID && name == group.GetName() {
+			tokenOnlySettingsCount++
+		}
+	}))
+	var tokenOnlyStatesCount int
+	re.NoError(memStorage.LoadResourceGroupStates(func(keyspaceID uint32, name, _ string) {
+		if keyspaceID == tokenOnlyKRGM.keyspaceID && name == group.GetName() {
+			tokenOnlyStatesCount++
+		}
+	}))
+	re.Equal(0, tokenOnlySettingsCount)
+	re.Equal(1, tokenOnlyStatesCount)
+
+	metaOnlyKRGM := newKeyspaceResourceGroupManager(2, memStorage, ResourceGroupWriteRolePDMetaOnly)
+	re.NoError(metaOnlyKRGM.addResourceGroup(group))
+	metaOnlyKRGM.persistResourceGroupRunningState()
+
+	var metaOnlySettingsCount int
+	re.NoError(memStorage.LoadResourceGroupSettings(func(keyspaceID uint32, name, _ string) {
+		if keyspaceID == metaOnlyKRGM.keyspaceID && name == group.GetName() {
+			metaOnlySettingsCount++
+		}
+	}))
+	var metaOnlyStatesCount int
+	re.NoError(memStorage.LoadResourceGroupStates(func(keyspaceID uint32, name, _ string) {
+		if keyspaceID == metaOnlyKRGM.keyspaceID && name == group.GetName() {
+			metaOnlyStatesCount++
+		}
+	}))
+	re.Equal(1, metaOnlySettingsCount)
+	re.Equal(0, metaOnlyStatesCount)
+}
+
+func TestResourceGroupConsumptionPersistsAcrossReload(t *testing.T) {
+	for _, keyspaceID := range []uint32{constant.NullKeyspaceID, 42} {
+		for _, order := range []string{"same_snapshot", "settings_newer", "state_newer", "state_only"} {
+			t.Run(strconv.FormatUint(uint64(keyspaceID), 10)+"/"+order, func(t *testing.T) {
+				re := require.New(t)
+				m := prepareManager()
+				group := &rmpb.ResourceGroup{
+					Name: "persisted-consumption", Mode: rmpb.GroupMode_RUMode,
+					KeyspaceId: &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: keyspaceID}},
+					RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 100, BurstLimit: 1000}}},
+				}
+				re.NoError(m.AddResourceGroup(group))
+				rg, err := m.GetMutableResourceGroup(keyspaceID, group.Name)
+				re.NoError(err)
+				persistState := func() { m.getKeyspaceResourceGroupManager(keyspaceID).persistResourceGroupRunningState() }
+				persistSettings := func() {
+					// Normal metadata updates do not need to include RUStats.
+					group.RUSettings.RU.Settings.FillRate++
+					re.NoError(m.ModifyResourceGroup(group))
+				}
+				rg.UpdateRUConsumption(&rmpb.Consumption{RRU: 3})
+				switch order {
+				case "settings_newer":
+					persistState()
+				case "state_newer":
+					persistSettings()
+				}
+				rg.UpdateRUConsumption(&rmpb.Consumption{RRU: 2})
+				switch order {
+				case "same_snapshot":
+					persistSettings()
+					persistState()
+				case "settings_newer":
+					persistSettings()
+				case "state_newer", "state_only":
+					persistState()
+				}
+				for range 2 {
+					reloaded := prepareManager()
+					reloaded.storage = m.storage
+					re.NoError(reloaded.loadKeyspaceResourceGroups())
+					actual, err := reloaded.GetResourceGroup(keyspaceID, group.Name, true)
+					re.NoError(err)
+					re.Equal(5.0, actual.RUConsumption.RRU)
+					re.Empty(reloaded.ruCollector.Aggregate(), "loading cumulative API stats must not create metering records")
+					m = reloaded
+				}
+			})
+		}
+	}
+}
+>>>>>>> 46687461c0 (resource_manager: avoid double counting restored RUStats (#11388))
