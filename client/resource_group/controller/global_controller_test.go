@@ -306,8 +306,7 @@ func TestTryGetController(t *testing.T) {
 
 func TestCleanupResourceGroupMetrics(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	mockProvider := newMockResourceGroupProvider()
 	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, constants.NullKeyspaceID)
