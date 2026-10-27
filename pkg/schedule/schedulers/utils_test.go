@@ -187,18 +187,18 @@ func TestRangeLeaderWeightUnavailableStores(t *testing.T) {
 		core.NewStoreInfo(&metapb.Store{Id: 3, NodeState: metapb.NodeState_Removed}),
 	}
 	rules := []*placement.Rule{{Role: placement.Voter, Count: 3}}
-	re.Equal(1.0, rangeLeaderWeight(stores, stores[0], rules))
-	re.Zero(rangeLeaderWeight(stores, stores[1], rules))
-	re.Zero(rangeLeaderWeight(stores, stores[2], rules))
-	re.Zero(rangeLeaderWeight(stores[:0], stores[0], rules))
+	re.Equal(1.0, rangeLeaderWeight(stores, stores[0], rules, true))
+	re.Zero(rangeLeaderWeight(stores, stores[1], rules, true))
+	re.Zero(rangeLeaderWeight(stores, stores[2], rules, true))
+	re.Zero(rangeLeaderWeight(stores[:0], stores[0], rules, true))
 	rules[0].IsWitness = true
-	re.Zero(rangeLeaderWeight(stores, stores[0], rules))
+	re.Zero(rangeLeaderWeight(stores, stores[0], rules, true))
 	// An unavailable explicit leader rule must not fall back to voter stores.
 	rules = []*placement.Rule{
 		{Role: placement.Leader, Count: 1, LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: placement.In, Values: []string{"missing"}}}},
 		{Role: placement.Voter, Count: 2},
 	}
-	re.Zero(rangeLeaderWeight(stores, stores[0], rules))
+	re.Zero(rangeLeaderWeight(stores, stores[0], rules, true))
 }
 
 func TestRangeLeaderDemandAcrossRuleRanges(t *testing.T) {
@@ -234,7 +234,7 @@ func TestRangeLeaderWeightLabelChanges(t *testing.T) {
 	}
 	check := func(want []float64) {
 		for i, store := range stores {
-			re.Equal(want[i], rangeLeaderWeight(stores, store, rules))
+			re.Equal(want[i], rangeLeaderWeight(stores, store, rules, true))
 		}
 	}
 	check([]float64{1, 0, 0})
@@ -244,5 +244,40 @@ func TestRangeLeaderWeightLabelChanges(t *testing.T) {
 	rules = rules[1:]
 	check([]float64{0.5, 0.5, 0})
 	// Matching labels alone do not make a store part of the supplied population.
-	re.Zero(rangeLeaderWeight(stores[:1], stores[1], rules))
+	re.Zero(rangeLeaderWeight(stores[:1], stores[1], rules, true))
+}
+
+func TestRangeLeaderDemandWitnessSetting(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		t.Run(strconv.FormatBool(enabled), func(t *testing.T) {
+			re := require.New(t)
+			cancel, _, tc, _ := prepareSchedulersTest()
+			defer cancel()
+			tc.SetEnablePlacementRules(true)
+			tc.SetEnableWitness(enabled)
+			for i, zone := range []string{"A", "B", "B"} {
+				tc.AddLabelsStore(uint64(i+1), 0, map[string]string{"zone": zone})
+			}
+			rm := tc.GetRuleManager()
+			re.NoError(rm.SetRuleGroup(&placement.RuleGroup{ID: "test", Index: 1, Override: true}))
+			re.NoError(rm.SetRules([]*placement.Rule{
+				{GroupID: "test", ID: "witness", Role: placement.Voter, Count: 1, IsWitness: true, LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: placement.In, Values: []string{"A"}}}},
+				{GroupID: "test", ID: "voters", Role: placement.Voter, Count: 2, LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: placement.In, Values: []string{"B"}}}},
+			}))
+			tc.AddLeaderRegion(1, 2, 1, 3)
+			region := tc.GetRegion(1)
+			if enabled {
+				region = region.Clone(core.WithWitnesses([]*metapb.Peer{region.GetStorePeer(1)}))
+				tc.PutRegion(region)
+			}
+			re.True(rm.FitRegionWithoutCache(tc, region).IsSatisfied())
+			want := []float64{1.0 / 3, 1.0 / 3, 1.0 / 3}
+			if enabled {
+				want = []float64{0, 0.5, 0.5}
+			}
+			for i, expected := range want {
+				re.InDelta(expected, getCountThreshold(tc, tc.GetStores(), tc.GetStore(uint64(i+1)), keyutil.KeyRange{}, core.LeaderScatter), 1e-9)
+			}
+		})
+	}
 }

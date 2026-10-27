@@ -665,3 +665,31 @@ func TestBalanceRangeSingleLeaderStoreCompletion(t *testing.T) {
 		})
 	}
 }
+
+func TestBalanceRangeDisabledWitnessLeaderCompletion(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	tc.SetEnablePlacementRules(true)
+	tc.SetEnableWitness(false)
+	for i, zone := range []string{"A", "B", "B"} {
+		tc.AddLabelsStore(uint64(i+1), 0, map[string]string{"zone": zone})
+	}
+	rm := tc.GetRuleManager()
+	re.NoError(rm.SetRuleGroup(&placement.RuleGroup{ID: "test", Index: 1, Override: true}))
+	re.NoError(rm.SetRules([]*placement.Rule{
+		{GroupID: "test", ID: "witness", Role: placement.Voter, Count: 1, IsWitness: true, LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: placement.In, Values: []string{"A"}}}},
+		{GroupID: "test", ID: "followers", Role: placement.Follower, Count: 2, LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: placement.In, Values: []string{"B"}}}},
+	}))
+	tc.AddLeaderRegionWithRange(1, "a", "z", 1, 2, 3)
+	re.True(rm.FitRegionWithoutCache(tc, tc.GetRegion(1)).IsSatisfied())
+	scheduler, err := CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigSliceDecoder(types.BalanceRangeScheduler, []string{"leader-scatter", "tikv", "1h", "witness-disabled", "a", "z"}))
+	re.NoError(err)
+	sc := scheduler.(*balanceRangeScheduler)
+	re.NoError(sc.prepare(tc, operator.NewOpInfluence(), sc.conf.jobs[0]))
+	re.Equal(map[uint64]float64{1: 1}, sc.expectScoreMap)
+	re.False(sc.IsScheduleAllowed(tc))
+	re.Equal(finished, sc.conf.jobs[0].Status)
+	re.True(tc.GetKeyRangeManager().IsEmpty())
+}

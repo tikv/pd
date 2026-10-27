@@ -486,7 +486,7 @@ func calculateRangeCount(c sche.SchedulerCluster, stores []*core.StoreInfo, stor
 	var storeCount float64
 	rules := c.GetRuleManager().GetRulesForApplyRange(startKey, endKey)
 	if r == core.LeaderScatter {
-		weight := rangeLeaderWeight(stores, store, rules)
+		weight := rangeLeaderWeight(stores, store, rules, c.GetSchedulerConfig().IsWitnessAllowed())
 		if weight == 0 {
 			return 0
 		}
@@ -533,7 +533,8 @@ func calculateRangeCount(c sche.SchedulerCluster, stores []*core.StoreInfo, stor
 // rangeLeaderWeight distributes one leader demand across the union of eligible
 // stores. An explicit leader rule takes precedence over voter rules. Rule counts
 // describe replica demand, so they do not multiply or weight leader demand.
-func rangeLeaderWeight(stores []*core.StoreInfo, store *core.StoreInfo, rules []*placement.Rule) float64 {
+// Witness rules exclude leader candidates only when witness support is enabled.
+func rangeLeaderWeight(stores []*core.StoreInfo, store *core.StoreInfo, rules []*placement.Rule, supportWitness bool) float64 {
 	role := placement.Voter
 	for _, rule := range rules {
 		if rule.Role == placement.Leader {
@@ -545,7 +546,7 @@ func rangeLeaderWeight(stores []*core.StoreInfo, store *core.StoreInfo, rules []
 	// candidate scan for them before counting the matching stores.
 	if store.IsRemoving() || store.IsRemoved() || !slice.AnyOf(rules, func(i int) bool {
 		rule := rules[i]
-		return rule.Role == role && !rule.IsWitness && placement.MatchLabelConstraints(store, rule.LabelConstraints)
+		return rule.Role == role && (!supportWitness || !rule.IsWitness) && placement.MatchLabelConstraints(store, rule.LabelConstraints)
 	}) {
 		return 0
 	}
@@ -556,7 +557,7 @@ func rangeLeaderWeight(stores []*core.StoreInfo, store *core.StoreInfo, rules []
 			continue
 		}
 		for _, rule := range rules {
-			if rule.Role != role || rule.IsWitness || !placement.MatchLabelConstraints(candidate, rule.LabelConstraints) {
+			if rule.Role != role || (supportWitness && rule.IsWitness) || !placement.MatchLabelConstraints(candidate, rule.LabelConstraints) {
 				continue
 			}
 			count++
