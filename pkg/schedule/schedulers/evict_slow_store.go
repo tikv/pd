@@ -316,7 +316,9 @@ func (conf *evictSlowStoreSchedulerConfig) readyForRecovery() bool {
 }
 
 // setEvictedStoresAndPersist replaces the disk slow store eviction set with ids
-// and resets the capture timestamp (the group is freshly slow).
+// and resets the recovery clock (the group is freshly slow): the capture timestamp
+// and the recovered flag, so the next cycle in which every member is healthy starts
+// a full recovery window from then.
 func (conf *evictSlowStoreSchedulerConfig) setEvictedStoresAndPersist(ids []uint64) error {
 	conf.Lock()
 	defer conf.Unlock()
@@ -324,13 +326,16 @@ func (conf *evictSlowStoreSchedulerConfig) setEvictedStoresAndPersist(ids []uint
 		conf.setEvictedStoresLocked(ids)
 		// Reset the recovery clock so as for multi store issues we need to wait whole zone is stable
 		conf.lastSlowStoreCaptureTS = time.Now()
+		conf.isRecovered = false
 	})
 }
 
 // addEvictedAndPersist appends ids to the disk slow store eviction set and persists it in
 // one critical section, so a concurrent ReloadConfig is never overwritten by a stale
 // snapshot. Ids already in the set are skipped and returned as dup. When anything is added,
-// the capture timestamp is reset (the group is freshly slow).
+// the recovery clock is reset (the group is freshly slow): the capture timestamp and the
+// recovered flag. Leaving the flag set while the group was recovering would let a later
+// cycle skip the transition back to recovered and release the group without a new window.
 func (conf *evictSlowStoreSchedulerConfig) addEvictedAndPersist(ids []uint64) (dup []uint64, err error) {
 	conf.Lock()
 	defer conf.Unlock()
@@ -349,6 +354,7 @@ func (conf *evictSlowStoreSchedulerConfig) addEvictedAndPersist(ids []uint64) (d
 		conf.setEvictedStoresLocked(next)
 		// Reset the recovery clock so as for multi store issues we need to wait whole zone is stable
 		conf.lastSlowStoreCaptureTS = time.Now()
+		conf.isRecovered = false
 	}); err != nil {
 		return nil, err
 	}

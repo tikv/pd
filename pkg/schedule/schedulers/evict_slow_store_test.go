@@ -2127,3 +2127,91 @@ func TestEvictSlowStoreBatchBoundsWorkPerCall(t *testing.T) {
 	}
 	re.Len(seen, n)
 }
+
+// backdateRecoveryClock simulates the scheduler not running for longer than
+// recovery-duration, e.g. while it is paused or held back by the leader schedule limit.
+func backdateRecoveryClock(conf *evictSlowStoreSchedulerConfig) {
+	conf.Lock()
+	defer conf.Unlock()
+	conf.lastSlowStoreCaptureTS = time.Now().Add(-2 * time.Duration(conf.RecoverySec) * time.Second)
+}
+
+// TestEvictSlowStoreRecoveryWindowRestartsAfterGroupAdd: a store added while the group is
+// recovering puts the group back into the slow state, so even if the next run comes after
+// recovery-duration and the new member is healthy by then, a fresh window starts instead of
+// the group being released at once.
+func TestEvictSlowStoreRecoveryWindowRestartsAfterGroupAdd(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	tc.AddLabelsStore(1, 0, map[string]string{"zone": "z1", "host": "h1"})
+	tc.AddLabelsStore(2, 0, map[string]string{"zone": "z1", "host": "h2"})
+	tc.AddLabelsStore(3, 0, map[string]string{"zone": "z1", "host": "h3"})
+	tc.AddLabelsStore(4, 0, map[string]string{"zone": "z2", "host": "h4"})
+	tc.AddLabelsStore(5, 0, map[string]string{"zone": "z3", "host": "h5"})
+	for id := uint64(1); id <= 3; id++ {
+		tc.AddLeaderRegion(id, id, 4, 5)
+	}
+
+	es := createTestEvictSlowStoreScheduler(re, oc)
+	enableGroupEviction(re, tc, es, "zone", "zone", "host")
+	conf := es.(*evictSlowStoreScheduler).conf
+
+	setStoreSlowScore(tc, 1, 100)
+	setStoreSlowScore(tc, 2, 100)
+	es.Schedule(tc, false)
+	re.ElementsMatch([]uint64{1, 2}, conf.evictedStores())
+
+	setStoreSlowScore(tc, 1, 0)
+	setStoreSlowScore(tc, 2, 0)
+	es.Schedule(tc, false) // the group starts waiting out recovery-duration
+
+	setStoreSlowScore(tc, 3, 100)
+	es.Schedule(tc, false)
+	re.ElementsMatch([]uint64{1, 2, 3}, conf.evictedStores())
+
+	// The next run comes late and store 3 has recovered in between.
+	backdateRecoveryClock(conf)
+	setStoreSlowScore(tc, 3, 0)
+	es.Schedule(tc, false)
+	re.ElementsMatch([]uint64{1, 2, 3}, conf.evictedStores())
+	re.False(conf.readyForRecovery())
+	re.True(tc.GetStore(3).EvictedAsSlowStore())
+}
+
+// TestEvictSlowStoreRecoveryWindowRestartsAfterReEvict: a store evicted again after an
+// earlier recovery gets a full recovery window, even if the next run comes late.
+func TestEvictSlowStoreRecoveryWindowRestartsAfterReEvict(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	tc.AddLeaderStore(1, 0)
+	tc.AddLeaderStore(2, 0)
+	tc.AddLeaderStore(3, 0)
+	tc.AddLeaderRegion(1, 1, 2, 3)
+
+	es := createTestEvictSlowStoreScheduler(re, oc)
+	conf := es.(*evictSlowStoreScheduler).conf
+
+	setStoreSlowScore(tc, 1, 100)
+	es.Schedule(tc, false)
+	re.Equal([]uint64{1}, conf.evictedStores())
+	setStoreSlowScore(tc, 1, 0)
+	es.Schedule(tc, false) // recovered, waiting
+	backdateRecoveryClock(conf)
+	es.Schedule(tc, false) // window elapsed: released
+	re.Empty(conf.evictedStores())
+
+	setStoreSlowScore(tc, 1, 100)
+	es.Schedule(tc, false)
+	re.Equal([]uint64{1}, conf.evictedStores())
+
+	backdateRecoveryClock(conf)
+	setStoreSlowScore(tc, 1, 0)
+	es.Schedule(tc, false)
+	re.Equal([]uint64{1}, conf.evictedStores())
+	re.False(conf.readyForRecovery())
+	re.True(tc.GetStore(1).EvictedAsSlowStore())
+}
