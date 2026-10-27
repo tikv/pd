@@ -320,10 +320,21 @@ func (h *Handler) GetSchedulerConfigHandler() (http.Handler, error) {
 		return nil, err
 	}
 	mux := http.NewServeMux()
-	for name, handler := range c.GetSchedulerHandlers() {
+	handlers := c.GetSchedulerHandlers()
+	for name, handler := range handlers {
 		prefix := path.Join(SchedulerConfigHandlerPath, name)
 		urlPath := prefix + "/"
 		mux.Handle(urlPath, http.StripPrefix(prefix, handler))
+	}
+	// The scheduling service treats 404 of this API as the PD doesn't support it,
+	// so a missing balance-range-scheduler must return another code.
+	if _, ok := handlers[types.BalanceRangeScheduler.String()]; !ok {
+		mux.HandleFunc(path.Join(SchedulerConfigHandlerPath, types.BalanceRangeScheduler.String(), "job", "status"),
+			func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+				w.WriteHeader(http.StatusConflict)
+				_ = json.NewEncoder(w).Encode(errs.ErrSchedulerNotFound.FastGenByArgs().Error())
+			})
 	}
 	return mux, nil
 }

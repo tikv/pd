@@ -15,6 +15,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -968,6 +969,29 @@ func isSchedulerPaused(re *require.Assertions, urlPrefix, name string) bool {
 		}
 	}
 	return false
+}
+
+func (suite *scheduleTestSuite) TestBalanceRangeJobStatusWithoutScheduler() {
+	suite.te.RunTest(suite.checkBalanceRangeJobStatusWithoutScheduler)
+}
+
+func (suite *scheduleTestSuite) checkBalanceRangeJobStatusWithoutScheduler(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leaderAddr := cluster.GetLeaderServer().GetAddr()
+	put := func(subPath string, body string) int {
+		req, err := http.NewRequest(http.MethodPut, fmt.Sprintf("%s%s/%s/%s", leaderAddr,
+			server.SchedulerConfigHandlerPath, types.BalanceRangeScheduler.String(), subPath), bytes.NewBufferString(body))
+		re.NoError(err)
+		req.Header.Set(apiutil.XForbiddenForwardToMicroserviceHeader, "true")
+		resp, err := tests.TestDialClient.Do(req)
+		re.NoError(err)
+		defer resp.Body.Close()
+		return resp.StatusCode
+	}
+	// 404 means the PD doesn't support the API, so a missing scheduler must return another code.
+	re.Equal(http.StatusConflict, put("job/status", `{"job-id":0,"status":"running"}`))
+	// other APIs of the missing scheduler are not affected
+	re.Equal(http.StatusNotFound, put("job", `{}`))
 }
 
 func (suite *scheduleTestSuite) TestBalanceRangeAPI() {
