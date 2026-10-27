@@ -30,16 +30,99 @@ import (
 	"go.etcd.io/etcd/client/pkg/v3/transport"
 	"google.golang.org/grpc"
 
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
+	"github.com/pingcap/kvproto/pkg/meta_storagepb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
+
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/netutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
 
 var certScript = strings.Join([]string{".", "cert_opt.sh"}, string(filepath.Separator))
+
+func TestTLSWatchServerClose(t *testing.T) {
+	re := require.New(t)
+	certPath := t.TempDir()
+	generateCerts(re, certPath)
+	tlsInfo := buildTLSInfo(certPath, "pd-server")
+	cluster, err := tests.NewTestCluster(t.Context(), 1, func(conf *config.Config, _ string) {
+		conf.Security.TLSConfig = grpcutil.TLSConfig{KeyPath: tlsInfo.KeyFile, CertPath: tlsInfo.CertFile, CAPath: tlsInfo.TrustedCAFile}
+		conf.AdvertiseClientUrls = strings.ReplaceAll(conf.AdvertiseClientUrls, "http", "https")
+		conf.ClientUrls = strings.ReplaceAll(conf.ClientUrls, "http", "https")
+		conf.AdvertisePeerUrls = strings.ReplaceAll(conf.AdvertisePeerUrls, "http", "https")
+		conf.PeerUrls = strings.ReplaceAll(conf.PeerUrls, "http", "https")
+		conf.InitialCluster = strings.ReplaceAll(conf.InitialCluster, "http", "https")
+	})
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+	name := cluster.WaitLeader()
+	re.NotEmpty(name)
+	re.NoError(cluster.GetServer(name).BootstrapCluster())
+	srv := cluster.GetServer(name).GetServer()
+	tlsConfig, err := srv.GetConfig().Security.ToClientTLSConfig()
+	re.NoError(err)
+	conn, err := grpcutil.GetClientConn(t.Context(), srv.GetAddr(), tlsConfig)
+	re.NoError(err)
+	defer conn.Close()
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	keyspaces, err := keyspacepb.NewKeyspaceClient(conn).WatchKeyspaces(ctx, &keyspacepb.WatchKeyspacesRequest{Header: testutil.NewRequestHeader(keypath.ClusterID())})
+	re.NoError(err)
+	snapshot, err := keyspaces.Recv()
+	re.NoError(err)
+	re.NotEmpty(snapshot.Keyspaces)
+
+	put, err := srv.GetClient().Put(ctx, globalConfigPath+"tls-shutdown", "value")
+	re.NoError(err)
+	configWatch, err := pdpb.NewPDClient(conn).WatchGlobalConfig(ctx, &pdpb.WatchGlobalConfigRequest{ConfigPath: globalConfigPath, Revision: put.Header.Revision})
+	re.NoError(err)
+	configResponse, err := configWatch.Recv()
+	re.NoError(err)
+	re.GreaterOrEqual(configResponse.Revision, put.Header.Revision)
+	re.NotEmpty(configResponse.Changes)
+	re.Equal([]byte("value"), configResponse.Changes[0].Payload)
+	metaWatch, err := meta_storagepb.NewMetaStorageClient(conn).Watch(ctx, &meta_storagepb.WatchRequest{Key: []byte(globalConfigPath + "tls-shutdown"), StartRevision: put.Header.Revision})
+	re.NoError(err)
+	metaResponse, err := metaWatch.Recv()
+	re.NoError(err)
+	re.Len(metaResponse.Events, 1)
+	re.Equal([]byte("value"), metaResponse.Events[0].Kv.Value)
+
+	// All clients stay connected with live contexts while the server closes.
+	closed := make(chan struct{})
+	go func() {
+		srv.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-time.After(10 * time.Second):
+		cancel()
+		re.FailNow("TLS watch streams blocked Server.Close")
+	}
+	re.NoError(ctx.Err())
+	for err == nil {
+		_, err = keyspaces.Recv()
+	}
+	re.Error(err)
+	for err = nil; err == nil; {
+		_, err = configWatch.Recv()
+	}
+	re.Error(err)
+	for err = nil; err == nil; {
+		_, err = metaWatch.Recv()
+	}
+	re.Error(err)
+	re.NoError(ctx.Err())
+}
 
 // TestTLSReloadAtomicReplace ensures server reloads expired/valid certs
 // when all certs are atomically replaced by directory renaming.

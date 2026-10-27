@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"go.etcd.io/etcd/api/v3/etcdserverpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -91,15 +92,10 @@ func (s *Service) Watch(req *meta_storagepb.WatchRequest, server meta_storagepb.
 	defer cancel()
 	stop := context.AfterFunc(s.ctx, cancel)
 	defer stop()
-	var options []clientv3.OpOption
 	key := string(req.GetKey())
-	var startRevision int64
-	if endKey := req.GetRangeEnd(); endKey != nil {
-		options = append(options, clientv3.WithRange(string(endKey)))
-	}
+	startRevision := req.GetStartRevision()
 	log.Info("watch request", zap.String("key", key), zap.String("range-end", string(req.GetRangeEnd())), zap.Int64("start-revision", req.GetStartRevision()))
-	if startRevision = req.GetStartRevision(); startRevision != 0 {
-		options = append(options, clientv3.WithRev(startRevision))
+	if startRevision != 0 {
 		failpoint.Inject("watchChannelError", func(val failpoint.Value) {
 			if rev, ok := val.(int); ok && startRevision <= int64(rev) {
 				if _, err := s.manager.client.Compact(s.ctx, int64(rev)); err != nil {
@@ -108,14 +104,11 @@ func (s *Service) Watch(req *meta_storagepb.WatchRequest, server meta_storagepb.
 			}
 		})
 	}
-	if prevKv := req.GetPrevKv(); prevKv {
-		options = append(options, clientv3.WithPrevKV())
-	}
 	cli := s.manager.GetClient()
-	return grpcutil.ForwardEtcdWatch(ctx, func(ctx context.Context) clientv3.WatchChan {
-		return cli.Watch(ctx, key, options...)
-	}, func(res clientv3.WatchResponse) error {
-		if err := res.Err(); err != nil {
+	return grpcutil.ForwardEtcdWatch(ctx, cli, etcdserverpb.WatchCreateRequest{
+		Key: req.GetKey(), RangeEnd: req.GetRangeEnd(), StartRevision: startRevision, PrevKv: req.GetPrevKv(),
+	}, func(res *etcdserverpb.WatchResponse, err error) error {
+		if err != nil {
 			log.Warn("watch channel failed", zap.Error(err))
 			var resp meta_storagepb.WatchResponse
 			if startRevision < res.CompactRevision {
@@ -130,7 +123,6 @@ func (s *Service) Watch(req *meta_storagepb.WatchRequest, server meta_storagepb.
 				log.Warn("failed to send watch error response", zap.Error(err))
 				return err
 			}
-			// Err() indicates that this WatchResponse holds a channel-closing error.
 			return err
 		}
 

@@ -32,17 +32,102 @@ type keyspaceWatchStream struct {
 	grpc.ServerStream
 	ctx      context.Context
 	snapshot chan struct{}
+	send     func(*keyspacepb.WatchKeyspacesResponse) error
 }
 
 func (s *keyspaceWatchStream) Context() context.Context { return s.ctx }
 
-func (s *keyspaceWatchStream) Send(*keyspacepb.WatchKeyspacesResponse) error {
+func (s *keyspaceWatchStream) Send(response *keyspacepb.WatchKeyspacesResponse) error {
+	if s.send != nil {
+		return s.send(response)
+	}
 	select {
 	case s.snapshot <- struct{}{}:
 	case <-s.ctx.Done():
 		return s.ctx.Err()
 	}
 	return nil
+}
+
+func (suite *keyspaceTestSuite) TestWatchKeyspacesServerClose() {
+	re := suite.Require()
+	service := &server.KeyspaceServer{GrpcServer: &server.GrpcServer{Server: suite.server.GetServer()}}
+	request := &keyspacepb.WatchKeyspacesRequest{Header: testutil.NewRequestHeader(suite.server.GetClusterID())}
+	ctx, cancel := context.WithCancel(suite.T().Context())
+	defer cancel()
+	stream := &keyspaceWatchStream{ctx: ctx, snapshot: make(chan struct{}, 1)}
+	result := make(chan error, 1)
+	go func() { result <- service.WatchKeyspaces(request, stream) }()
+	select {
+	case <-stream.snapshot:
+	case <-time.After(5 * time.Second):
+		re.FailNow("initial keyspace snapshot was not sent")
+	}
+	closed := make(chan struct{})
+	go func() {
+		suite.server.GetServer().Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		suite.cancel()
+		re.FailNow("idle keyspace watch blocked Server.Close")
+	}
+	select {
+	case err := <-result:
+		re.NoError(err)
+	case <-time.After(5 * time.Second):
+		re.FailNow("keyspace watch survived Server.Close")
+	}
+}
+
+func (suite *keyspaceTestSuite) TestWatchKeyspacesServerCloseDuringInitialSend() {
+	re := suite.Require()
+	srv := suite.server.GetServer()
+	service := &server.KeyspaceServer{GrpcServer: &server.GrpcServer{Server: srv}}
+	request := &keyspacepb.WatchKeyspacesRequest{Header: testutil.NewRequestHeader(suite.server.GetClusterID())}
+	ctx, cancel := context.WithCancel(suite.T().Context())
+	defer cancel()
+	// Model a Send that only unblocks when shutdown reaches transport teardown.
+	// The server loop must finish before this close callback can run.
+	srv.AddCloseCallback(cancel)
+	started, finished := make(chan struct{}), make(chan struct{})
+	stream := &keyspaceWatchStream{ctx: ctx, send: func(*keyspacepb.WatchKeyspacesResponse) error {
+		close(started)
+		defer close(finished)
+		<-ctx.Done()
+		return ctx.Err()
+	}}
+	result := make(chan error, 1)
+	go func() { result <- service.WatchKeyspaces(request, stream) }()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		re.FailNow("initial keyspace snapshot was not sent")
+	}
+	closed := make(chan struct{})
+	go func() {
+		srv.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		cancel()
+		suite.cancel()
+		re.FailNow("initial snapshot send blocked Server.Close")
+	}
+	select {
+	case <-result:
+	case <-time.After(5 * time.Second):
+		re.FailNow("keyspace watch survived transport teardown")
+	}
+	select {
+	case <-finished:
+	default:
+		re.FailNow("keyspace handler returned before its sender stopped")
+	}
 }
 
 func (suite *keyspaceTestSuite) TestWatchKeyspacesCancellation() {

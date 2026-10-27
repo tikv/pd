@@ -16,6 +16,7 @@ package server
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
@@ -111,8 +112,12 @@ func (s *KeyspaceServer) WatchKeyspaces(request *keyspacepb.WatchKeyspacesReques
 	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return err
 	}
-	ctx, cancel := context.WithCancel(s.Context())
-	defer cancel()
+	ctx, cancel := context.WithCancel(s.LoopContext())
+	var watchWG sync.WaitGroup
+	defer func() {
+		cancel()
+		watchWG.Wait()
+	}()
 	stop := context.AfterFunc(stream.Context(), cancel)
 	defer stop()
 	startKey := keypath.KeyspaceMetaPrefix()
@@ -149,7 +154,7 @@ func (s *KeyspaceServer) WatchKeyspaces(request *keyspacepb.WatchKeyspacesReques
 
 	watcher := etcdutil.NewLoopWatcher(
 		ctx,
-		&s.serverLoopWg,
+		&watchWG,
 		s.client,
 		"keyspace-server-watcher",
 		startKey,

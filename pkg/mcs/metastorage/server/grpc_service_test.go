@@ -17,6 +17,8 @@ package server
 import (
 	"context"
 	"errors"
+	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -94,4 +96,97 @@ func TestWatchPreservesRevisionAndPreviousValue(t *testing.T) {
 	re.NotNil(compacted)
 	re.Equal(meta_storagepb.ErrorType_DATA_COMPACTED, compacted.Header.Error.Type)
 	re.Equal(deleted.Header.Revision, compacted.CompactRevision)
+}
+
+func TestWatchSlowConsumerPreservesEvents(t *testing.T) {
+	re := require.New(t)
+	_, client, cleanup := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer cleanup()
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	put, err := client.Put(ctx, "watch/slow", "0")
+	re.NoError(err)
+	service := &Service{ctx: ctx, manager: &Manager{srv: &watchServingServer{}, client: client}}
+	started, released := make(chan struct{}), make(chan struct{})
+	var release sync.Once
+	defer release.Do(func() { close(released) })
+	const updates = 256
+	completed := errors.New("received all updates")
+	var events []*meta_storagepb.Event
+	result := make(chan error, 1)
+	go func() {
+		result <- service.Watch(&meta_storagepb.WatchRequest{Key: []byte("watch/slow"), StartRevision: put.Header.Revision, PrevKv: true}, &metaWatchStream{ctx: ctx, send: func(response *meta_storagepb.WatchResponse) error {
+			if len(events) == 0 {
+				close(started)
+				select {
+				case <-released:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+			events = append(events, response.Events...)
+			if len(events) >= updates+1 {
+				return completed
+			}
+			return nil
+		}})
+	}()
+	select {
+	case <-started:
+	case <-ctx.Done():
+		t.Fatal("initial watch response was not sent")
+	}
+	for i := 1; i <= updates; i++ {
+		_, err := client.Put(ctx, "watch/slow", strconv.Itoa(i))
+		re.NoError(err)
+	}
+	release.Do(func() { close(released) })
+	select {
+	case err := <-result:
+		re.ErrorIs(err, completed)
+	case <-ctx.Done():
+		t.Fatal("slow consumer did not receive all updates")
+	}
+	re.Len(events, updates+1)
+	for i, event := range events {
+		re.Equal(strconv.Itoa(i), string(event.Kv.Value))
+		if i > 0 {
+			re.Greater(event.Kv.ModRevision, events[i-1].Kv.ModRevision)
+			re.Equal(strconv.Itoa(i-1), string(event.PrevKv.Value))
+		}
+	}
+}
+
+func TestWatchLargeHistoricalResponse(t *testing.T) {
+	re := require.New(t)
+	_, client, cleanup := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer cleanup()
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	const count = 20
+	value := string(make([]byte, 1<<20))
+	var firstRevision int64
+	for i := range count {
+		put, err := client.Put(ctx, "watch/history/"+strconv.Itoa(i), value)
+		re.NoError(err)
+		if i == 0 {
+			firstRevision = put.Header.Revision
+		}
+	}
+	service := &Service{ctx: ctx, manager: &Manager{srv: &watchServingServer{}, client: client}}
+	completed := errors.New("received historical batch")
+	var events []*meta_storagepb.Event
+	err := service.Watch(&meta_storagepb.WatchRequest{
+		Key: []byte("watch/history/"), RangeEnd: []byte(clientv3.GetPrefixRangeEnd("watch/history/")), StartRevision: firstRevision,
+	}, &metaWatchStream{ctx: ctx, send: func(response *meta_storagepb.WatchResponse) error {
+		events = response.Events
+		return completed
+	}})
+	re.ErrorIs(err, completed)
+	re.Len(events, count)
+	for i, event := range events {
+		re.Equal("watch/history/"+strconv.Itoa(i), string(event.Kv.Key))
+		re.Equal(value, string(event.Kv.Value))
+		re.Equal(firstRevision+int64(i), event.Kv.ModRevision)
+	}
 }

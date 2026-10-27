@@ -26,6 +26,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"go.etcd.io/etcd/api/v3/etcdserverpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -2573,24 +2574,23 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 	// If the revision is compacted, will meet required revision has been compacted error.
 	// - If required revision < CompactRevision, we need to reload all configs to avoid losing data.
 	// - If required revision >= CompactRevision, just keep watching.
-	// Use WithPrevKV() to get the previous key-value pair when get Delete Event.
-	return grpcutil.ForwardEtcdWatch(ctx, func(ctx context.Context) clientv3.WatchChan {
-		return s.client.Watch(ctx, configPath, clientv3.WithPrefix(), clientv3.WithRev(revision), clientv3.WithPrevKV())
-	}, func(res clientv3.WatchResponse) error {
-		if res.Err() != nil {
+	// Request previous values to populate delete events.
+	return grpcutil.ForwardEtcdWatch(ctx, s.client, etcdserverpb.WatchCreateRequest{
+		Key: []byte(configPath), RangeEnd: []byte(clientv3.GetPrefixRangeEnd(configPath)), StartRevision: revision, PrevKv: true,
+	}, func(res *etcdserverpb.WatchResponse, watchErr error) error {
+		if watchErr != nil {
 			var resp pdpb.WatchGlobalConfigResponse
 			if revision < res.CompactRevision {
 				resp.Header = grpcutil.WrapErrorToHeader(pdpb.ErrorType_DATA_COMPACTED,
 					fmt.Sprintf("required watch revision: %d is smaller than current compact/min revision %d.", revision, res.CompactRevision))
 			} else {
 				resp.Header = grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
-					fmt.Sprintf("watch channel meet other error %s.", res.Err().Error()))
+					fmt.Sprintf("watch channel meet other error %s.", watchErr.Error()))
 			}
 			if err := server.Send(&resp); err != nil {
 				return err
 			}
-			// Err() indicates that this WatchResponse holds a channel-closing error.
-			return res.Err()
+			return watchErr
 		}
 		revision = res.Header.GetRevision()
 
