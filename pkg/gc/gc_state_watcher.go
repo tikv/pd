@@ -120,6 +120,7 @@ type GCStateWatcher struct {
 }
 
 func newGCStateWatcher(parent context.Context, cfg gcStateWatchConfig, skipLoadingInitial bool) *GCStateWatcher {
+	failpoint.InjectCall("watchGCStatesLiveChannelCapacity", &cfg.liveChannelCapacity)
 	ctx, cancel := context.WithCancelCause(parent)
 	watcher := &GCStateWatcher{
 		ctx:      ctx,
