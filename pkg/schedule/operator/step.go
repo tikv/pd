@@ -118,10 +118,8 @@ func (tl TransferLeader) String() string {
 
 // IsFinish checks if current step is finished.
 func (tl TransferLeader) IsFinish(region *core.RegionInfo) bool {
-	for _, storeID := range tl.ToStores {
-		if region.GetLeader().GetStoreId() == storeID {
-			return true
-		}
+	if slices.Contains(tl.ToStores, region.GetLeader().GetStoreId()) {
+		return true
 	}
 	return region.GetLeader().GetStoreId() == tl.ToStore
 }
@@ -1194,19 +1192,13 @@ func validateStore(ci *core.BasicCluster, config config.SharedConfigProvider, id
 
 func slowStepWaitDuration(regionSize int64) time.Duration {
 	seconds := DefaultSlowExecutorRate * regionSize
-	wait := time.Duration(seconds) * time.Second
-	if wait < SlowStepWaitTime {
-		wait = SlowStepWaitTime
-	}
+	wait := max(time.Duration(seconds)*time.Second, SlowStepWaitTime)
 	return wait
 }
 
 func fastStepWaitDuration(regionSize int64) time.Duration {
 	seconds := int64(DefaultFastExecutorRate * float64(regionSize))
-	wait := time.Duration(seconds) * time.Second
-	if wait < FastStepWaitTime {
-		wait = FastStepWaitTime
-	}
+	wait := max(time.Duration(seconds)*time.Second, FastStepWaitTime)
 	return wait
 }
 

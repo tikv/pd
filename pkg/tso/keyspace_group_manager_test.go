@@ -22,7 +22,7 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"reflect"
-	"sort"
+	"slices"
 	"strconv"
 	"sync"
 	"testing"
@@ -122,8 +122,7 @@ func TestFinishSplitKeyspaceGroupDoesNotBlockStateReads(t *testing.T) {
 		}),
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	kgm = &KeyspaceGroupManager{
 		ctx:        ctx,
 		httpClient: client,
@@ -854,10 +853,7 @@ func (suite *keyspaceGroupManagerTestSuite) runTestLoadKeyspaceGroupsAssignment(
 		go func(startID int) {
 			defer wg.Done()
 
-			endID := startID + step
-			if endID > numberOfKeyspaceGroupsToAdd {
-				endID = numberOfKeyspaceGroupsToAdd
-			}
+			endID := min(startID+step, numberOfKeyspaceGroupsToAdd)
 
 			for j := startID; j < endID; j++ {
 				assignToMe := false
@@ -898,9 +894,7 @@ func (suite *keyspaceGroupManagerTestSuite) runTestLoadKeyspaceGroupsAssignment(
 
 	// Verify the keyspace group assignment.
 	// Sort the keyspaces in ascending order
-	sort.Slice(expectedGroupIDs, func(i, j int) bool {
-		return expectedGroupIDs[i] < expectedGroupIDs[j]
-	})
+	slices.Sort(expectedGroupIDs)
 	assignedGroupIDs := collectAssignedKeyspaceGroupIDs(re, mgr)
 	re.Equal(expectedGroupIDs, assignedGroupIDs)
 }
@@ -1041,9 +1035,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestUpdateKeyspaceGroupMembership() 
 	oldGroup := &endpoint.KeyspaceGroup{ID: groupID, Keyspaces: []uint32{}}
 	newGroup := &endpoint.KeyspaceGroup{ID: groupID, Keyspaces: []uint32{}}
 	kgm := &KeyspaceGroupManager{
-		state: state{
-			keyspaceLookupTable: make(map[uint32]uint32),
-		}}
+		keyspaceLookupTable: make(map[uint32]uint32)}
 
 	kgm.updateKeyspaceGroupMembership(oldGroup, newGroup, true)
 	verifyLocalKeyspaceLookupTable(re, newGroup.KeyspaceLookupTable, newGroup.Keyspaces)
@@ -1897,9 +1889,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestStaleCache() {
 	oldGroup := &endpoint.KeyspaceGroup{ID: groupID, Keyspaces: []uint32{}}
 	newGroup := &endpoint.KeyspaceGroup{ID: groupID, Keyspaces: []uint32{1, 2, 3, 10, 6}}
 	kgm := &KeyspaceGroupManager{
-		state: state{
-			keyspaceLookupTable: make(map[uint32]uint32),
-		},
+		keyspaceLookupTable: make(map[uint32]uint32),
 	}
 
 	kgm.updateKeyspaceGroupMembership(oldGroup, newGroup, true)

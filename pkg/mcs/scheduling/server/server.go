@@ -85,7 +85,7 @@ type Server struct {
 	diagnosticspb.DiagnosticsServer
 
 	// Server state. 0 is not running, 1 is running.
-	isRunning int64
+	isRunning atomic.Int64
 
 	serverLoopCtx    context.Context
 	serverLoopCancel func()
@@ -376,7 +376,7 @@ func (s *Server) campaignPrimary(expectedPrimary string) {
 
 // Close closes the server.
 func (s *Server) Close() {
-	if !atomic.CompareAndSwapInt64(&s.isRunning, 1, 0) {
+	if !s.isRunning.CompareAndSwap(1, 0) {
 		// server is already closed
 		return
 	}
@@ -412,7 +412,7 @@ func (s *Server) IsServing() bool {
 
 // IsClosed checks if the server loop is closed
 func (s *Server) IsClosed() bool {
-	return s != nil && atomic.LoadInt64(&s.isRunning) == 0
+	return s != nil && s.isRunning.Load() == 0
 }
 
 // AddServiceReadyCallback adds callbacks when the server becomes the primary.
@@ -521,7 +521,7 @@ func (s *Server) startServer() (err error) {
 		cb()
 	}
 
-	atomic.StoreInt64(&s.isRunning, 1)
+	s.isRunning.Store(1)
 	return nil
 }
 

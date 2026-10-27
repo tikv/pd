@@ -70,8 +70,7 @@ func TestConcurrencyLimiter2(t *testing.T) {
 	require.Equal(t, uint64(0), limiter.GetRunningTasksNum(), "Expected running tasks to be 0")
 	require.Equal(t, uint64(0), limiter.GetWaitingTasksNum(), "Expected waiting tasks to be 0")
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	// Acquire two tokens
 	token1, err := limiter.AcquireToken(ctx)

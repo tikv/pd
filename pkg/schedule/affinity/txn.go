@@ -475,9 +475,7 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 	// Step 5: Save the Group and Label information in memory.
 	plan.Apply()
 
-	for groupID, currentRanges := range toAdd {
-		m.keyRanges[groupID] = currentRanges
-	}
+	maps.Copy(m.keyRanges, toAdd)
 	for groupID, currentRanges := range toRemove {
 		if len(currentRanges.KeyRanges) > 0 {
 			m.keyRanges[groupID] = currentRanges

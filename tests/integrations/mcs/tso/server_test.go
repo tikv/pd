@@ -23,6 +23,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -341,6 +342,27 @@ func TestForwardTSOWhenPrimaryChanged(t *testing.T) {
 	suite.checkAvailableTSO(re)
 }
 
+func TestForwardTSOWhenPrimaryAddrMissing(t *testing.T) {
+	re := require.New(t)
+	suite := NewPDServiceForward(re)
+	defer suite.ShutDown()
+
+	tc, err := tests.NewTestTSOCluster(suite.ctx, 1, suite.backendEndpoints)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForDefaultPrimaryServing(re)
+	primary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, mcs.TSOServiceName)
+	re.True(exist)
+
+	// Simulate the watcher missing the PUT of the primary: the cached address is gone
+	// and no watch event will bring it back.
+	suite.pdLeader.GetServer().DeleteServicePrimaryAddr(mcs.TSOServiceName)
+	addr, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, mcs.TSOServiceName)
+	re.True(exist)
+	re.Equal(primary, addr)
+	suite.checkAvailableTSO(re)
+}
+
 func TestResignTSOPrimaryForward(t *testing.T) {
 	re := require.New(t)
 	suite := NewPDServiceForward(re)
@@ -365,6 +387,86 @@ func TestResignTSOPrimaryForward(t *testing.T) {
 		}
 		re.NoError(err)
 		suite.checkAvailableTSO(re)
+	}
+}
+
+// TestGetTSAfterTSOPrimaryChanged checks that a client discovering TSO servers directly
+// resumes soon after the primary changes. The old primary rejects requests or closes its
+// streams before the new one is elected, so the client must not wait a full retry interval
+// after its first attempt misses the new primary.
+func TestGetTSAfterTSOPrimaryChanged(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	cluster, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+	pdLeader := cluster.GetServer(cluster.WaitLeader())
+	re.NoError(pdLeader.BootstrapCluster())
+	tc, err := tests.NewTestTSOCluster(ctx, 3, pdLeader.GetAddr())
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForDefaultPrimaryServing(re)
+
+	client := utils.SetupClientWithKeyspaceID(ctx, re, constant.DefaultKeyspaceID, []string{pdLeader.GetAddr()})
+	defer client.Close()
+	utils.WaitForTSOServiceAvailable(ctx, re, client)
+
+	// Measure the longest gap between two successful GetTS calls across the primary change.
+	checkMaxGap := func(changePrimary func()) {
+		var (
+			maxGap      time.Duration
+			lastSuccess time.Time
+			// Stop between calls instead of canceling an in-flight GetTS, whose request
+			// may be put back to the pool while the dispatcher still holds it.
+			stopped atomic.Bool
+		)
+		started := make(chan struct{})
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			for !stopped.Load() {
+				if _, _, err := client.GetTS(ctx); err != nil {
+					continue
+				}
+				now := time.Now()
+				if lastSuccess.IsZero() {
+					close(started)
+				} else {
+					maxGap = max(maxGap, now.Sub(lastSuccess))
+				}
+				lastSuccess = now
+			}
+		}()
+		defer func() {
+			stopped.Store(true)
+			<-done
+		}()
+		select {
+		case <-started:
+		case <-time.After(10 * time.Second):
+			re.FailNow("GetTS does not succeed before the primary change")
+		}
+		changedAt := time.Now()
+		changePrimary()
+		tc.WaitForDefaultPrimaryServing(re)
+		time.Sleep(time.Second)
+		stopped.Store(true)
+		<-done
+		// A client that never succeeds again after the change leaves the gap open until now.
+		re.True(lastSuccess.After(changedAt))
+		re.Less(max(maxGap, time.Since(lastSuccess)), 400*time.Millisecond)
+	}
+	for range 3 {
+		checkMaxGap(func() {
+			re.NoError(tc.ResignPrimary(constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID))
+		})
+	}
+	// Shut down the primary as a rolling upgrade does, leaving the last server as the primary.
+	for range 2 {
+		checkMaxGap(func() {
+			tc.DestroyServer(tc.GetPrimaryServer(constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID).GetAddr())
+		})
 	}
 }
 
@@ -524,15 +626,17 @@ func TestForwardTsoConcurrently(t *testing.T) {
 
 	wg := sync.WaitGroup{}
 	for i := range 3 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			pdClient, err := pd.NewClientWithContext(
 				context.Background(),
 				caller.TestComponent,
 				[]string{suite.backendEndpoints},
 				pd.SecurityOption{})
-			if !as.NoError(err) || !as.NotNil(pdClient) {
+			if err != nil {
+				t.Errorf("create PD client: %v", err)
+				return
+			}
+			if !as.NotNil(pdClient) {
 				return
 			}
 			defer pdClient.Close()
@@ -544,7 +648,7 @@ func TestForwardTsoConcurrently(t *testing.T) {
 					return
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -579,18 +683,20 @@ func BenchmarkForwardTsoConcurrently(b *testing.B) {
 		b.Run(fmt.Sprintf("clients_%d", clientsNum), func(b *testing.B) {
 			wg := sync.WaitGroup{}
 			b.ResetTimer()
-			for range b.N {
+			for b.Loop() {
 				for i, client := range clients {
-					wg.Add(1)
-					go func() {
-						defer wg.Done()
+					wg.Go(func() {
 						for range 1000 {
 							min, err := client.UpdateServiceGCSafePoint(context.Background(), fmt.Sprintf("service-%d", i), 1000, 1) //nolint:staticcheck
-							if !as.NoError(err) || !as.Equal(uint64(0), min) {
+							if err != nil {
+								b.Errorf("update service GC safe point: %v", err)
+								return
+							}
+							if !as.Equal(uint64(0), min) {
 								return
 							}
 						}
-					}()
+					})
 				}
 			}
 			wg.Wait()
@@ -706,8 +812,7 @@ func (suite *CommonTestSuite) TestBootstrapDefaultKeyspaceGroup() {
 func TestTSOServiceSwitch(t *testing.T) {
 	re := require.New(t)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/fastUpdateServiceMode", `return(true)`))
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	tc, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1,
 		func(conf *config.Config, _ string) {
@@ -785,8 +890,7 @@ const modeSwitchPDModeKeyspaceName = "mode_switch_pd_ks"
 
 func TestPDModeSwitchBetweenMicroserviceAndMonolithMultipleTimes(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/skipKeyspaceRegionCheck", "return"))
 	t.Cleanup(func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/server/skipKeyspaceRegionCheck"))
@@ -1072,7 +1176,7 @@ func checkTSOMonotonic(ctx context.Context, pdClient pd.Client, globalLastTS *ui
 		}
 		ts := (uint64(physical) << 18) + uint64(logical)
 		if ts <= *globalLastTS {
-			return fmt.Errorf("TSO is not globally increasing: last %d, current %d", globalLastTS, ts)
+			return fmt.Errorf("TSO is not globally increasing: last %d, current %d", *globalLastTS, ts)
 		}
 		*globalLastTS = ts
 	}

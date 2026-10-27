@@ -15,6 +15,7 @@
 package codec
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -96,16 +97,16 @@ func TestTableIDWithKeyspacePrefix(t *testing.T) {
 
 	prefix := MakeKeyspacePrefix(TxnKeyspaceModePrefix, keyspaceID)
 	identity := TableIdentity{KeyspaceID: keyspaceID, TableID: tableID, HasKeyspace: true}
-	encoded := EncodeBytes(append(append([]byte{}, prefix...), GenerateTableKey(tableID)...))
+	encoded := EncodeBytes(slices.Concat(prefix, GenerateTableKey(tableID)))
 	re.Equal(identity, encoded.TableIdentity())
 
-	other := EncodeBytes(append(append([]byte{}, prefix...), GenerateTableKey(otherTableID)...))
+	other := EncodeBytes(slices.Concat(prefix, GenerateTableKey(otherTableID)))
 	re.Equal(otherTableID, other.TableIdentity().TableID)
 	re.NotEqual(encoded.TableIdentity(), other.TableIdentity())
 
 	// Same table: record and index keys must still resolve to the same identity.
-	record := EncodeBytes(append(append([]byte{}, prefix...), GenerateRowKey(tableID, 1)...))
-	index := EncodeBytes(append(append([]byte{}, prefix...), GenerateIndexKey(tableID, 7)...))
+	record := EncodeBytes(slices.Concat(prefix, GenerateRowKey(tableID, 1)))
+	index := EncodeBytes(slices.Concat(prefix, GenerateIndexKey(tableID, 7)))
 	re.Equal(identity, record.TableIdentity())
 	re.Equal(identity, index.TableIdentity())
 
@@ -132,11 +133,11 @@ func TestMetaOrTableWithKeyspacePrefix(t *testing.T) {
 	keyspaceID := uint32(7)
 	prefix := MakeKeyspacePrefix(TxnKeyspaceModePrefix, keyspaceID)
 
-	isMeta, id := EncodeBytes(append(append([]byte{}, prefix...), metaPrefix...)).MetaOrTable()
+	isMeta, id := EncodeBytes(slices.Concat(prefix, metaPrefix)).MetaOrTable()
 	re.True(isMeta)
 	re.Equal(int64(0), id)
 
-	isMeta, id = EncodeBytes(append(append([]byte{}, prefix...), GenerateTableKey(tableID)...)).MetaOrTable()
+	isMeta, id = EncodeBytes(slices.Concat(prefix, GenerateTableKey(tableID))).MetaOrTable()
 	re.False(isMeta)
 	re.Equal(tableID, id)
 

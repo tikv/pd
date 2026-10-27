@@ -15,7 +15,6 @@
 package api
 
 import (
-	"context"
 	"io"
 	"os"
 	"testing"
@@ -42,8 +41,7 @@ func TestGetVersion(t *testing.T) {
 	})
 	os.Stdout = temp
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
 	defer cluster.Destroy()

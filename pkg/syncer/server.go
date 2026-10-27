@@ -17,6 +17,7 @@ package syncer
 import (
 	"context"
 	"io"
+	"maps"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -791,9 +792,7 @@ func (s *RegionSyncer) sendRegionSyncResponseWithOptions(
 func (s *RegionSyncer) closeAllClient() {
 	s.mu.RLock()
 	streams := make(map[string]*regionSyncStream, len(s.mu.streams))
-	for name, sender := range s.mu.streams {
-		streams[name] = sender
-	}
+	maps.Copy(streams, s.mu.streams)
 	s.mu.RUnlock()
 
 	for _, sender := range streams {
