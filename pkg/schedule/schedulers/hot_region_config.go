@@ -361,7 +361,7 @@ func (conf *hotRegionSchedulerConfig) getHistorySampleInterval() time.Duration {
 	return conf.HistorySampleInterval.Duration
 }
 
-func (conf *hotRegionSchedulerConfig) getHistorySampleConfig() (time.Duration, time.Duration) {
+func (conf *hotRegionSchedulerConfig) getHistorySampleConfig() (duration, interval time.Duration) {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.HistorySampleDuration.Duration, conf.HistorySampleInterval.Duration
@@ -456,13 +456,11 @@ func (conf *hotRegionSchedulerParam) validateLocked() error {
 	if duration < 0 {
 		return errs.ErrSchedulerConfig.FastGenByArgs("history-sample-duration should be nonnegative")
 	}
-	if interval <= 0 {
-		return errs.ErrSchedulerConfig.FastGenByArgs("history-sample-interval should be positive")
+	if interval < 0 {
+		return errs.ErrSchedulerConfig.FastGenByArgs("history-sample-interval should be nonnegative")
 	}
-	if duration > 0 && duration < interval {
-		return errs.ErrSchedulerConfig.FastGenByArgs("history-sample-duration should be at least history-sample-interval, or zero to disable history")
-	}
-	if duration/interval > statistics.MaxHistorySampleCount {
+	// A zero interval uses the legacy fixed-size buffer; a shorter duration produces no samples.
+	if interval > 0 && duration/interval > statistics.MaxHistorySampleCount {
 		return errs.ErrSchedulerConfig.FastGenByArgs(fmt.Sprintf("history sample count should not exceed %d", statistics.MaxHistorySampleCount))
 	}
 	for _, item := range []struct {
@@ -490,14 +488,22 @@ func (conf *hotRegionSchedulerParam) validateLocked() error {
 		{"cpu-rate-rank-step-ratio", conf.CPURateRankStepRatio},
 		{"count-rank-step-ratio", conf.CountRankStepRatio},
 		{"great-dec-ratio", conf.GreatDecRatio},
-		{"minor-dec-ratio", conf.MinorDecRatio},
 	} {
 		if !(item.value > 0 && item.value <= 1) {
 			return errs.ErrSchedulerConfig.FastGenByArgs(item.name + " should be finite and in range (0, 1]")
 		}
 	}
-	if conf.GreatDecRatio > conf.MinorDecRatio {
-		return errs.ErrSchedulerConfig.FastGenByArgs("great-dec-ratio should not exceed minor-dec-ratio")
+	if math.IsNaN(conf.MinorDecRatio) || math.IsInf(conf.MinorDecRatio, 0) {
+		return errs.ErrSchedulerConfig.FastGenByArgs("minor-dec-ratio should be finite")
+	}
+	// The empty version selects v1. V2 does not use the minor decline ratio.
+	if conf.RankFormulaVersion != "v2" {
+		if !(conf.MinorDecRatio > 0 && conf.MinorDecRatio <= 1) {
+			return errs.ErrSchedulerConfig.FastGenByArgs("minor-dec-ratio should be in range (0, 1]")
+		}
+		if conf.GreatDecRatio > conf.MinorDecRatio {
+			return errs.ErrSchedulerConfig.FastGenByArgs("great-dec-ratio should not exceed minor-dec-ratio")
+		}
 	}
 	if _, err := isPriorityValid(conf.ReadPriorities); err != nil {
 		return err

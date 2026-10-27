@@ -42,8 +42,6 @@ func TestHotRegionConfigRejectsUnsafeUpdates(t *testing.T) {
 	}{
 		{`{"history-sample-duration":"-1m"}`, "history-sample-duration"},
 		{`{"history-sample-interval":"-1s"}`, "history-sample-interval"},
-		{`{"history-sample-interval":"0s"}`, "history-sample-interval"},
-		{`{"history-sample-duration":"1s","history-sample-interval":"2s"}`, "history-sample-duration"},
 		{`{"history-sample-duration":"2562047h47m16.854775807s","history-sample-interval":"1ns"}`, "history sample count"},
 		{fmt.Sprintf(`{"history-sample-duration":"%dns","history-sample-interval":"1ns"}`, statistics.MaxHistorySampleCount+1), "history sample count"},
 		{`{"max-peer-number":-1}`, "max-peer-number"},
@@ -56,8 +54,9 @@ func TestHotRegionConfigRejectsUnsafeUpdates(t *testing.T) {
 		{`{"cpu-rate-rank-step-ratio":0}`, "cpu-rate-rank-step-ratio"},
 		{`{"count-rank-step-ratio":1.01}`, "count-rank-step-ratio"},
 		{`{"great-dec-ratio":0}`, "great-dec-ratio"},
-		{`{"minor-dec-ratio":1.01}`, "minor-dec-ratio"},
-		{`{"great-dec-ratio":0.99,"minor-dec-ratio":0.95}`, "great-dec-ratio"},
+		{`{"rank-formula-version":"v1","minor-dec-ratio":1.01}`, "minor-dec-ratio"},
+		{`{"rank-formula-version":"v1","great-dec-ratio":0.99,"minor-dec-ratio":0.95}`, "great-dec-ratio"},
+		{`{"rank-formula-version":"","great-dec-ratio":0.99,"minor-dec-ratio":0.95}`, "great-dec-ratio"},
 		{`{"min-hot-byte-rate":-1}`, "min-hot-byte-rate"},
 		{`{"min-hot-key-rate":-1}`, "min-hot-key-rate"},
 		{`{"min-hot-query-rate":-1}`, "min-hot-query-rate"},
@@ -126,6 +125,86 @@ func TestHotRegionConfigNumericBoundaries(t *testing.T) {
 			re.GreaterOrEqual(conf.getStoreStatZombieDuration(), time.Duration(0))
 			re.GreaterOrEqual(conf.getRegionsStatZombieDuration(), time.Duration(0))
 		})
+	}
+}
+
+func TestHotRegionConfigPreservesCompatibleSettings(t *testing.T) {
+	cancel, _, _, oc := prepareSchedulersTest()
+	defer cancel()
+	for _, body := range []string{
+		`{"history-sample-duration":"0s","history-sample-interval":"0s"}`,
+		`{"history-sample-duration":"5m","history-sample-interval":"0s"}`,
+		`{"history-sample-duration":"1s","history-sample-interval":"2s"}`,
+		`{"rank-formula-version":"v2","great-dec-ratio":0.95,"minor-dec-ratio":0.9}`,
+		`{"rank-formula-version":"v2","minor-dec-ratio":0}`,
+		`{"rank-formula-version":"v2","minor-dec-ratio":1.01}`,
+	} {
+		t.Run(body, func(t *testing.T) {
+			re := require.New(t)
+			conf := initHotRegionScheduleConfig()
+			re.NoError(json.Unmarshal([]byte(body), conf))
+			conf.MinHotByteRate = 321
+			conf.ReadPriorities = []string{"key", "byte"}
+			payload, err := EncodeConfig(conf)
+			re.NoError(err)
+			store := storage.NewStorageWithMemoryBackend()
+			scheduler, err := CreateScheduler(types.BalanceHotRegionScheduler, oc, store, ConfigSliceDecoder(types.BalanceHotRegionScheduler, nil))
+			re.NoError(err)
+			response := httptest.NewRecorder()
+			scheduler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/config", strings.NewReader(string(payload))))
+			re.Equal(http.StatusOK, response.Code, response.Body.String())
+
+			// A partial update must retain the compatible settings and unrelated tuning.
+			response = httptest.NewRecorder()
+			scheduler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/config", strings.NewReader(`{"max-peer-number":123}`)))
+			re.Equal(http.StatusOK, response.Code, response.Body.String())
+			conf.MaxPeerNum = 123
+			expected, err := EncodeConfig(conf)
+			re.NoError(err)
+			persisted, err := store.LoadSchedulerConfig(scheduler.GetName())
+			re.NoError(err)
+			re.JSONEq(string(expected), persisted)
+
+			// Reload and startup must restore the saved settings instead of falling back to defaults.
+			hot := scheduler.(*hotScheduler)
+			hot.conf.Lock()
+			hot.conf.MinHotByteRate = 999
+			hot.conf.Unlock()
+			re.NoError(hot.ReloadConfig())
+			reloaded, err := hot.EncodeConfig()
+			re.NoError(err)
+			re.JSONEq(string(expected), string(reloaded))
+			restored, err := CreateScheduler(types.BalanceHotRegionScheduler, oc, store, ConfigJSONDecoder([]byte(persisted)))
+			re.NoError(err)
+			reloaded, err = restored.EncodeConfig()
+			re.NoError(err)
+			re.JSONEq(string(expected), string(reloaded))
+		})
+	}
+}
+
+func TestHotRegionConfigRejectsInvalidRankVersionSwitch(t *testing.T) {
+	re := require.New(t)
+	cancel, _, _, oc := prepareSchedulersTest()
+	defer cancel()
+	store := storage.NewStorageWithMemoryBackend()
+	scheduler, err := CreateScheduler(types.BalanceHotRegionScheduler, oc, store,
+		ConfigJSONDecoder([]byte(`{"rank-formula-version":"v2","minor-dec-ratio":0.9}`)))
+	re.NoError(err)
+	before, err := scheduler.EncodeConfig()
+	re.NoError(err)
+	re.NoError(store.SaveSchedulerConfig(scheduler.GetName(), before))
+	for _, body := range []string{`{"rank-formula-version":"v1"}`, `{"rank-formula-version":""}`} {
+		response := httptest.NewRecorder()
+		scheduler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/config", strings.NewReader(body)))
+		re.Equal(http.StatusBadRequest, response.Code)
+		re.Contains(response.Body.String(), "great-dec-ratio")
+		after, err := scheduler.EncodeConfig()
+		re.NoError(err)
+		re.JSONEq(string(before), string(after))
+		persisted, err := store.LoadSchedulerConfig(scheduler.GetName())
+		re.NoError(err)
+		re.JSONEq(string(before), persisted)
 	}
 }
 
