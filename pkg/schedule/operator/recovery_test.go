@@ -220,10 +220,10 @@ func TestOrdinaryTransferChecksDestinationReaderFloorOnly(t *testing.T) {
 }
 
 func TestMultiTargetTransferExcludesUnsupportedReaders(t *testing.T) {
-	cluster, region, _, _ := newRecoveryOperatorCluster(t)
+	cluster, _, _, _ := newRecoveryOperatorCluster(t)
 	cluster.SetEnablePlacementRules(false)
 	peers := []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 4, StoreId: 4}}
-	region = core.NewRegionInfo(&metapb.Region{Id: 1, RegionEpoch: &metapb.RegionEpoch{}, Peers: peers}, peers[0],
+	region := core.NewRegionInfo(&metapb.Region{Id: 1, RegionEpoch: &metapb.RegionEpoch{}, Peers: peers}, peers[0],
 		core.WithRecoveryStatus(&pdpb.RegionRecoveryStatus{RequiredReaderProtocolVersion: 2, DataServiceReady: true, SizeSource: pdpb.RegionSizeSource_SIZE_CURRENT}))
 	cluster.PutStore(cluster.GetStore(4).Clone(core.SetStoreLogOnlyProtocolVersion(0)))
 	op, err := CreateTransferLeaderOperator("compatible-eviction-targets", cluster, region, 2, []uint64{2, 4}, OpLeader)

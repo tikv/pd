@@ -124,3 +124,16 @@ func TestConcurrentHeartbeatCannotOverwriteNewReaderProtocolFloor(t *testing.T) 
 	_, err = regions.CheckAndPutRootTree(ContextTODO(), pending)
 	require.NoError(t, err)
 }
+
+func TestMetadataReloadRetainsReaderFloorWithoutDeletingValidRegion(t *testing.T) {
+	peer := &metapb.Peer{Id: 1, StoreId: 1}
+	meta := &metapb.Region{Id: 1, RegionEpoch: &metapb.RegionEpoch{}, Peers: []*metapb.Peer{peer}}
+	regions := NewRegionsInfo()
+	modern := NewRegionInfo(meta, peer, WithRecoveryStatus(&pdpb.RegionRecoveryStatus{RequiredReaderProtocolVersion: 2}))
+	regions.SetRegion(modern)
+	loaded := NewRegionInfo(meta, nil, SetSource(Storage))
+	require.Empty(t, regions.CheckAndPutRegion(loaded), "valid metadata must not enter the storage loader deletion list")
+	require.Equal(t, uint32(2), regions.GetRegion(1).GetRequiredReaderProtocolVersion())
+	require.True(t, regions.GetRegion(1).IsRecoverySchedulingBlocked())
+	require.Nil(t, loaded.GetRecoveryStatus(), "cache publication must not mutate the caller's input")
+}

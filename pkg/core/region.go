@@ -1126,14 +1126,18 @@ func (r *RegionsInfo) CheckAndPutRegion(region *RegionInfo) []*RegionInfo {
 		ols = r.tree.overlaps(&regionItem{RegionInfo: region})
 	}
 	err := check(region, origin, ols)
-	if err == nil && origin != nil && region.GetRequiredReaderProtocolVersion() < origin.GetRequiredReaderProtocolVersion() {
-		err = errors.New("region reader protocol requirement changed; retry heartbeat")
-	}
 	if err != nil {
 		log.Debug("region is stale", zap.Stringer("origin", origin.GetMeta()), errs.ZapError(err))
 		// return the state region to delete.
 		r.t.Unlock()
 		return []*RegionInfo{region}
+	}
+	// Storage metadata contains no recovery report. Retain the durable floor
+	// without returning a valid Region to the loader's deletion list or mutating
+	// an input that another consumer may already be reading.
+	if origin != nil && region.GetRequiredReaderProtocolVersion() < origin.GetRequiredReaderProtocolVersion() {
+		region = region.Clone()
+		region.InheritReaderProtocolVersion(origin)
 	}
 	origin, overlaps, rangeChanged := r.setRegionLocked(region, true, ols...)
 	r.t.Unlock()
