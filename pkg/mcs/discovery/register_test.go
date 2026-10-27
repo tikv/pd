@@ -91,6 +91,69 @@ func TestRegister(t *testing.T) {
 	etcd.Close()
 }
 
+func TestRevokeLeaseAfterRequestEnds(t *testing.T) {
+	for _, contextErr := range []error{context.Canceled, context.DeadlineExceeded} {
+		t.Run(contextErr.Error(), func(t *testing.T) {
+			re := require.New(t)
+			_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+			defer clean()
+
+			ctx := t.Context()
+			sr := NewServiceRegister(ctx, client, "test_service", "127.0.0.1:1", "instance", 60)
+			defer sr.cancel()
+			lease, err := client.Grant(ctx, 60)
+			re.NoError(err)
+			// A registration write can commit before its caller observes a timeout.
+			_, err = client.Put(ctx, sr.key, sr.value, clientv3.WithLease(lease.ID))
+			re.NoError(err)
+			resp, err := client.Get(ctx, sr.key)
+			re.NoError(err)
+			re.Len(resp.Kvs, 1)
+
+			var requestCtx context.Context
+			var cancel context.CancelFunc
+			if contextErr == context.Canceled {
+				requestCtx, cancel = context.WithCancel(ctx)
+				cancel()
+			} else {
+				requestCtx, cancel = context.WithDeadline(ctx, time.Now().Add(-time.Second))
+			}
+			defer cancel()
+			re.ErrorIs(requestCtx.Err(), contextErr)
+			sr.revokeLease(requestCtx, lease.ID)
+
+			resp, err = client.Get(ctx, sr.key)
+			re.NoError(err)
+			re.Empty(resp.Kvs)
+			ttl, err := client.TimeToLive(ctx, lease.ID)
+			re.NoError(err)
+			re.Equal(int64(-1), ttl.TTL)
+		})
+	}
+}
+
+func TestRegisterLeaseExpiresWithoutDeregister(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+
+	ctx := t.Context()
+	sr := NewServiceRegister(ctx, client, "test_service", "127.0.0.1:1", "instance", DefaultLeaseInSeconds)
+	defer sr.cancel()
+	re.NoError(sr.Register())
+	resp, err := client.Get(ctx, sr.key)
+	re.NoError(err)
+	re.Len(resp.Kvs, 1)
+
+	// Simulate a crash: stop keepalive without actively deregistering the key.
+	sr.cancel()
+	sr.wg.Wait()
+	testutil.Eventually(re, func() bool {
+		resp, err := client.Get(ctx, sr.key)
+		return err == nil && len(resp.Kvs) == 0
+	})
+}
+
 func TestRegisterConflict(t *testing.T) {
 	re := require.New(t)
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)

@@ -343,6 +343,9 @@ func (sr *ServiceRegister) observeContendedLease(ctx context.Context, existingLe
 // revokeLease revokes the lease in a best-effort manner to avoid leaking it
 // when the registration fails.
 func (sr *ServiceRegister) revokeLease(ctx context.Context, leaseID clientv3.LeaseID) {
+	// Cleanup must outlive a failed request, but still have a bounded lifetime.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), etcdutil.DefaultRequestTimeout)
+	defer cancel()
 	if _, err := sr.cli.Revoke(ctx, leaseID); err != nil {
 		log.Warn("revoke the lease failed", zap.String("key", sr.key), zap.Error(err))
 	}
