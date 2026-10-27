@@ -57,10 +57,8 @@ func TestBalanceLeaderSchedulerConfigClone(t *testing.T) {
 	keyRanges1, err := getKeyRanges([]string{"a", "b", "c", "d"})
 	re.NoError(err)
 	conf := &balanceLeaderSchedulerConfig{
-		balanceLeaderSchedulerParam: balanceLeaderSchedulerParam{
-			Ranges: keyRanges1,
-			Batch:  10,
-		},
+		Ranges: keyRanges1,
+		Batch:  10,
 	}
 	conf2 := conf.clone()
 	re.Equal(conf.Batch, conf2.Batch)
@@ -694,8 +692,8 @@ func checkBalanceLeaderLimit(re *require.Assertions, enablePlacementRules bool) 
 		regions = append(regions, &metapb.Region{
 			Id:       id + 4,
 			Peers:    peers,
-			StartKey: []byte(fmt.Sprintf("s_%02d", i)),
-			EndKey:   []byte(fmt.Sprintf("s_%02d", i+1)),
+			StartKey: fmt.Appendf(nil, "s_%02d", i),
+			EndKey:   fmt.Appendf(nil, "s_%02d", i+1),
 		})
 		id += 4
 	}
@@ -752,8 +750,8 @@ func BenchmarkCandidateStores(b *testing.B) {
 		leaderCount := int(rand.Int32N(10000))
 		tc.AddLeaderStore(id, leaderCount)
 	}
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		updateAndResortStoresInCandidateStores(tc)
 	}
 }

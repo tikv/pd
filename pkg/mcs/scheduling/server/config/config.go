@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -294,7 +295,10 @@ func (o *PersistConfig) SetSchedulers(schedulers sc.SchedulerConfigs) {
 	defer o.scheduleMu.Unlock()
 
 	next := o.GetScheduleConfig().Clone()
-	next.Schedulers = append(sc.SchedulerConfigs(nil), schedulers...)
+	next.Schedulers = slices.Clone(schedulers)
+	if len(next.Schedulers) == 0 {
+		next.Schedulers = nil
+	}
 	o.installScheduleConfig(next)
 }
 

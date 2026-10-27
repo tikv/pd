@@ -67,8 +67,7 @@ func TestSendAndGetComponent(t *testing.T) {
 		return mux, info, nil
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	cluster, err := tests.NewTestClusterWithHandlers(ctx, 1, []server.HandlerBuilder{handler})
 	re.NoError(err)
@@ -115,8 +114,7 @@ func TestRegionNoProxyHeader(t *testing.T) {
 		return mux, info, nil
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	cluster, err := tests.NewTestClusterWithHandlers(ctx, 1, []server.HandlerBuilder{handler})
 	re.NoError(err)

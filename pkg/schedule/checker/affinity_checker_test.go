@@ -90,8 +90,7 @@ func deleteAffinityGroupForTest(manager *affinity.Manager, groupID string, force
 
 func TestAffinityCheckerInvalidCache(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
@@ -133,8 +132,7 @@ func TestAffinityCheckerInvalidCache(t *testing.T) {
 
 func TestAffinityCheckerTransferLeader(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
@@ -166,8 +164,7 @@ func TestAffinityCheckerTransferLeader(t *testing.T) {
 
 func TestAffinityCheckerMovePeer(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
@@ -200,8 +197,7 @@ func TestAffinityCheckerMovePeer(t *testing.T) {
 
 func TestAffinityCheckerPaused(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
@@ -243,8 +239,7 @@ func TestAffinityCheckerPaused(t *testing.T) {
 // Manager detects unhealthy store -> invalidates group -> checker skips operators -> store recovers -> checker creates operators
 func TestAffinityCheckerGroupState(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
@@ -309,8 +304,7 @@ func TestAffinityCheckerGroupState(t *testing.T) {
 // TestAffinityAvailabilityCheckWithOfflineStore tests that groups are invalidated when stores go offline.
 func TestAffinityAvailabilityCheckWithOfflineStore(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/affinity/changeAvailabilityCheckInterval", "return(true)"))
 	defer func() {
@@ -360,8 +354,7 @@ func TestAffinityAvailabilityCheckWithOfflineStore(t *testing.T) {
 // TestAffinityAvailabilityCheckWithUnhealthyStores tests behavior when stores go unhealthy.
 func TestAffinityAvailabilityCheckWithUnhealthyStores(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/affinity/changeAvailabilityCheckInterval", "return(true)"))
 	defer func() {
@@ -469,8 +462,7 @@ func TestAffinityAvailabilityCheckWithUnhealthyStores(t *testing.T) {
 // TestAffinityCheckerNoOperatorWhenAligned tests that no operator is created when region matches group.
 func TestAffinityCheckerNoOperatorWhenAligned(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
@@ -499,8 +491,7 @@ func TestAffinityCheckerNoOperatorWhenAligned(t *testing.T) {
 // TestAffinityCheckerTransferLeaderWithoutPeer tests leader transfer when target store has no peer.
 func TestAffinityCheckerTransferLeaderWithoutPeer(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
@@ -534,8 +525,7 @@ func TestAffinityCheckerTransferLeaderWithoutPeer(t *testing.T) {
 // TestAffinityCheckerMultipleGroups tests checker with multiple affinity groups.
 func TestAffinityCheckerMultipleGroups(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
@@ -594,8 +584,7 @@ func TestAffinityCheckerMultipleGroups(t *testing.T) {
 // TestAffinityCheckerRegionWithoutGroup tests that checker ignores regions not in any group.
 func TestAffinityCheckerRegionWithoutGroup(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
@@ -627,8 +616,7 @@ func TestAffinityCheckerRegionWithoutGroup(t *testing.T) {
 // TestAffinityCheckerConcurrentGroupDeletion tests checker behavior during group deletion.
 func TestAffinityCheckerConcurrentGroupDeletion(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
@@ -665,8 +653,7 @@ func TestAffinityCheckerConcurrentGroupDeletion(t *testing.T) {
 // TestAffinityMergeCheckBasic tests basic merge functionality for affinity regions.
 func TestAffinityMergeCheckBasic(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
 	opt.SetMaxAffinityMergeRegionSize(20) // Small size to trigger merge
@@ -721,8 +708,7 @@ func TestAffinityMergeCheckBasic(t *testing.T) {
 // TestAffinityCheckerMergePath ensures affinity merge path is triggered from Check when region is already in affinity.
 func TestAffinityCheckerMergePath(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
@@ -767,8 +753,7 @@ func TestAffinityCheckerMergePath(t *testing.T) {
 // TestAffinityMergeCheckNoTarget tests merge when no valid target exists.
 func TestAffinityMergeCheckNoTarget(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
@@ -803,8 +788,7 @@ func TestAffinityMergeCheckNoTarget(t *testing.T) {
 // TestAffinityMergeCheckDifferentGroups tests that regions in different groups don't merge.
 func TestAffinityMergeCheckDifferentGroups(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
@@ -863,8 +847,7 @@ func TestAffinityMergeCheckDifferentGroups(t *testing.T) {
 // TestAffinityMergeCheckRegionTooLarge tests that large regions don't merge.
 func TestAffinityMergeCheckRegionTooLarge(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
 	opt.SetMaxAffinityMergeRegionSize(60)
@@ -916,8 +899,7 @@ func TestAffinityMergeCheckRegionTooLarge(t *testing.T) {
 // TestAffinityMergeCheckAdjacentNotAffinity tests that non-affinity adjacent regions don't merge.
 func TestAffinityMergeCheckAdjacentNotAffinity(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
 	opt.SetMaxAffinityMergeRegionSize(20)
@@ -969,8 +951,7 @@ func TestAffinityMergeCheckAdjacentNotAffinity(t *testing.T) {
 // TestAffinityMergeCheckNotAffinityRegion tests that non-affinity regions don't merge.
 func TestAffinityMergeCheckNotAffinityRegion(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
 	opt.SetMaxAffinityMergeRegionSize(20)
@@ -1006,8 +987,7 @@ func TestAffinityMergeCheckNotAffinityRegion(t *testing.T) {
 // TestAffinityMergeCheckUnhealthyRegion tests that unhealthy regions don't merge.
 func TestAffinityMergeCheckUnhealthyRegion(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
 	opt.SetMaxAffinityMergeRegionSize(20)
@@ -1057,8 +1037,7 @@ func TestAffinityMergeCheckUnhealthyRegion(t *testing.T) {
 // TestAffinityMergeCheckBothDirections tests that merge can happen in both directions when one-way merge is disabled.
 func TestAffinityMergeCheckBothDirections(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
 	opt.SetMaxAffinityMergeRegionSize(20)
@@ -1118,8 +1097,7 @@ func TestAffinityMergeCheckBothDirections(t *testing.T) {
 // TestAffinityMergeCheckTargetTooBig tests that merging regions whose combined size exceeds the max limit is disallowed.
 func TestAffinityMergeCheckTargetTooBig(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
 	opt.SetMaxAffinityMergeRegionSize(60)
@@ -1169,8 +1147,7 @@ func TestAffinityMergeCheckTargetTooBig(t *testing.T) {
 // even if the global max merge size is larger.
 func TestAffinityMergeCheckRespectsAffinityLimit(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
 	opt.SetMaxAffinityMergeRegionSize(20) // Smaller than the default MaxMergeRegionSize (54)
@@ -1215,8 +1192,7 @@ func TestAffinityMergeCheckRespectsAffinityLimit(t *testing.T) {
 }
 
 func TestAffinityMergeCheckDisabledByZeroConfig(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	cases := []struct {
 		name              string
@@ -1277,8 +1253,7 @@ func TestAffinityMergeCheckDisabledByZeroConfig(t *testing.T) {
 // TestAffinityMergeCheckAdjacentUnhealthy tests that merging is blocked if the adjacent region is unhealthy.
 func TestAffinityMergeCheckAdjacentUnhealthy(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
 	opt.SetMaxAffinityMergeRegionSize(20)
@@ -1340,8 +1315,7 @@ func TestAffinityMergeCheckAdjacentUnhealthy(t *testing.T) {
 // This tests the combo operator's ability to handle complex transformations.
 func TestAffinityCheckerComplexMove(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
@@ -1381,8 +1355,7 @@ func TestAffinityCheckerComplexMove(t *testing.T) {
 // TestAffinityCheckerPartialOverlap tests when current and expected peers partially overlap.
 func TestAffinityCheckerPartialOverlap(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
@@ -1417,8 +1390,7 @@ func TestAffinityCheckerPartialOverlap(t *testing.T) {
 // TestAffinityCheckerOnlyLeaderTransfer tests when only leader transfer is needed (no peer changes).
 func TestAffinityCheckerOnlyLeaderTransfer(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
@@ -1453,8 +1425,7 @@ func TestAffinityCheckerOnlyLeaderTransfer(t *testing.T) {
 // TestAffinityCheckerOnlyPeerChange tests when only peer changes are needed (no leader transfer).
 func TestAffinityCheckerOnlyPeerChange(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
@@ -1493,8 +1464,7 @@ func TestAffinityCheckerOnlyPeerChange(t *testing.T) {
 // TestAffinityCheckerSameStoreOrder tests when voter stores are in different order.
 func TestAffinityCheckerSameStoreOrder(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
@@ -1527,8 +1497,7 @@ func TestAffinityCheckerSameStoreOrder(t *testing.T) {
 // when the region's replica count matches both placement rules and affinity group requirements.
 func TestAffinityCheckerReplicaCountMatch(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
@@ -1611,8 +1580,7 @@ func TestAffinityCheckerReplicaCountMatch(t *testing.T) {
 // TestAffinityCheckerRegionNoLeader tests region without leader.
 func TestAffinityCheckerRegionNoLeader(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
@@ -1646,8 +1614,7 @@ func TestAffinityCheckerRegionNoLeader(t *testing.T) {
 // TestAffinityCheckerUnhealthyRegion tests that regions with down peers are skipped.
 func TestAffinityCheckerUnhealthyRegion(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
@@ -1685,8 +1652,7 @@ func TestAffinityCheckerUnhealthyRegion(t *testing.T) {
 // TestAffinityCheckerPreserveLearners tests that existing learner peers are preserved.
 func TestAffinityCheckerPreserveLearners(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
@@ -1790,8 +1756,7 @@ func verifyLearnersPreserved(re *require.Assertions, op *operator.Operator, lear
 // TestAffinityCheckerPreserveLearnersWithPeerChange tests learner preservation when peers change.
 func TestAffinityCheckerPreserveLearnersWithPeerChange(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
@@ -1855,8 +1820,7 @@ func TestAffinityCheckerPreserveLearnersWithPeerChange(t *testing.T) {
 // TestAffinityCheckerMultipleLearners tests preserving multiple learner peers.
 func TestAffinityCheckerMultipleLearners(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
@@ -1925,8 +1889,7 @@ func TestAffinityCheckerMultipleLearners(t *testing.T) {
 // the checker returns nil and logs the conflict.
 func TestAffinityCheckerLearnerVoterConflict(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
@@ -1971,8 +1934,7 @@ func TestAffinityCheckerLearnerVoterConflict(t *testing.T) {
 // TestAffinityCheckerGroupScheduleDisallowed verifies group state that forbids affinity scheduling is respected.
 func TestAffinityCheckerGroupScheduleDisallowed(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/affinity/changeAvailabilityCheckInterval", "return(true)"))
 	defer func() {
@@ -2019,8 +1981,7 @@ func TestAffinityCheckerGroupScheduleDisallowed(t *testing.T) {
 // don't satisfy placement rules, the checker keeps the group schedulable by normalizing it to the valid Region peers.
 func TestAffinityCheckerNormalizeGroupWhenPlacementRuleMismatch(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
@@ -2061,8 +2022,7 @@ func TestAffinityCheckerNormalizeGroupWhenPlacementRuleMismatch(t *testing.T) {
 // TestAffinityCheckerTargetStoreEvictLeader tests that operator is not created when target store has evict-leader.
 func TestAffinityCheckerTargetStoreEvictLeader(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
@@ -2094,8 +2054,7 @@ func TestAffinityCheckerTargetStoreEvictLeader(t *testing.T) {
 // TestAffinityCheckerTargetStoreRejectLeader tests that operator is not created when target store has reject-leader label.
 func TestAffinityCheckerTargetStoreRejectLeader(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
@@ -2128,8 +2087,7 @@ func TestAffinityCheckerTargetStoreRejectLeader(t *testing.T) {
 // TestAffinityCheckerRegionHasBetterLocation tests how the checker handles a Region where isRegionPlacementRuleSatisfiedWithBestLocation returns false.
 func TestAffinityCheckerRegionHasBetterLocation(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
 	opt.SetLocationLabels([]string{"region", "zone", "host"})
@@ -2201,8 +2159,7 @@ func TestAffinityCheckerRegionHasBetterLocation(t *testing.T) {
 
 func TestAffinityBestLocationFilteredByTemporarySourceState(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
 	opt.SetLocationLabels([]string{"region", "zone", "host"})
@@ -2243,8 +2200,7 @@ func TestAffinityBestLocationFilteredByTemporarySourceState(t *testing.T) {
 // placement-rule replicated when a strictly better location still exists.
 func TestAffinityStrictCheckDivergesFromIsRegionReplicated(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := mockconfig.NewTestOptions()
 	opt.SetLocationLabels([]string{"zone", "host"})
@@ -2269,8 +2225,7 @@ func TestAffinityStrictCheckDivergesFromIsRegionReplicated(t *testing.T) {
 // TestAffinityMergeCheckPeerStoreMismatch tests that merge is rejected when peer stores don't match.
 func TestAffinityMergeCheckPeerStoreMismatch(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
 	opt.SetMaxAffinityMergeRegionSize(20)
@@ -2320,8 +2275,7 @@ func TestAffinityMergeCheckPeerStoreMismatch(t *testing.T) {
 // TestAffinityMergeCheckAdjacentAbnormalReplica tests that merge is rejected when adjacent region has abnormal replica count.
 func TestAffinityMergeCheckAdjacentAbnormalReplica(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
 	opt.SetMaxAffinityMergeRegionSize(20)
@@ -2371,8 +2325,7 @@ func TestAffinityMergeCheckAdjacentAbnormalReplica(t *testing.T) {
 // TestAffinityMergeCheckPlacementSplitKeys tests that merge is rejected when placement rules require split.
 func TestAffinityMergeCheckPlacementSplitKeys(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
 	opt.SetMaxAffinityMergeRegionSize(20)
@@ -2433,8 +2386,7 @@ func TestAffinityMergeCheckPlacementSplitKeys(t *testing.T) {
 // TestAffinityMergeCheckLabelerSplitKeys tests that merge is rejected when region labeler requires split.
 func TestAffinityMergeCheckLabelerSplitKeys(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
 	opt.SetMaxAffinityMergeRegionSize(20)
@@ -2492,8 +2444,7 @@ func TestAffinityMergeCheckLabelerSplitKeys(t *testing.T) {
 
 func TestCloneRegionWithPeerStores(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)

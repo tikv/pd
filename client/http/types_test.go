@@ -17,9 +17,35 @@ package http
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestTimestampJSONFields(t *testing.T) {
+	for _, timestamp := range []time.Time{{}, time.Unix(1, 0).UTC()} {
+		for _, testCase := range []struct {
+			name  string
+			value any
+			field string
+		}{
+			{"cluster_state", ClusterState{RaftBootstrapTime: timestamp}, "raft_bootstrap_time"},
+			{"hot_peer", HotPeerStatShow{LastUpdateTime: timestamp}, "last_update_time"},
+		} {
+			t.Run(testCase.name+"/"+timestamp.String(), func(t *testing.T) {
+				re := require.New(t)
+				encoded, err := json.Marshal(testCase.value)
+				re.NoError(err)
+				var fields map[string]json.RawMessage
+				re.NoError(json.Unmarshal(encoded, &fields))
+				re.Contains(fields, testCase.field)
+				expected, err := timestamp.MarshalJSON()
+				re.NoError(err)
+				re.JSONEq(string(expected), string(fields[testCase.field]))
+			})
+		}
+	}
+}
 
 func TestMergeRegionsInfo(t *testing.T) {
 	re := require.New(t)

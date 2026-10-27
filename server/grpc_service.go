@@ -86,7 +86,7 @@ type GrpcServer struct {
 // occurs on Send() or Recv(), both endpoints will be closed.
 type tsoServer struct {
 	stream pdpb.PD_TsoServer
-	closed int32
+	closed atomic.Int32
 }
 
 type pdpbTSORequest struct {
@@ -96,7 +96,7 @@ type pdpbTSORequest struct {
 
 // Send wraps Send() of PD_TsoServer.
 func (s *tsoServer) Send(m *pdpb.TsoResponse) error {
-	if atomic.LoadInt32(&s.closed) == 1 {
+	if s.closed.Load() == 1 {
 		return io.EOF
 	}
 	done := make(chan error, 1)
@@ -113,17 +113,17 @@ func (s *tsoServer) Send(m *pdpb.TsoResponse) error {
 	select {
 	case err := <-done:
 		if err != nil {
-			atomic.StoreInt32(&s.closed, 1)
+			s.closed.Store(1)
 		}
 		return errors.WithStack(err)
 	case <-timer.C:
-		atomic.StoreInt32(&s.closed, 1)
+		s.closed.Store(1)
 		return errs.ErrForwardTSOTimeout
 	}
 }
 
 func (s *tsoServer) recv(timeout time.Duration) (*pdpb.TsoRequest, error) {
-	if atomic.LoadInt32(&s.closed) == 1 {
+	if s.closed.Load() == 1 {
 		return nil, io.EOF
 	}
 	failpoint.Inject("tsoProxyRecvFromClientTimeout", func(val failpoint.Value) {
@@ -142,12 +142,12 @@ func (s *tsoServer) recv(timeout time.Duration) (*pdpb.TsoRequest, error) {
 	select {
 	case req := <-requestCh:
 		if req.err != nil {
-			atomic.StoreInt32(&s.closed, 1)
+			s.closed.Store(1)
 			return nil, errors.WithStack(req.err)
 		}
 		return req.request, nil
 	case <-timer.C:
-		atomic.StoreInt32(&s.closed, 1)
+		s.closed.Store(1)
 		return nil, errs.ErrTSOProxyRecvFromClientTimeout
 	}
 }
@@ -156,12 +156,12 @@ func (s *tsoServer) recv(timeout time.Duration) (*pdpb.TsoRequest, error) {
 // occurs on Send() or Recv(), both endpoints will be closed.
 type heartbeatServer struct {
 	stream pdpb.PD_RegionHeartbeatServer
-	closed int32
+	closed atomic.Int32
 }
 
 // Send wraps Send() of PD_RegionHeartbeatServer.
 func (s *heartbeatServer) Send(m core.RegionHeartbeatResponse) error {
-	if atomic.LoadInt32(&s.closed) == 1 {
+	if s.closed.Load() == 1 {
 		return io.EOF
 	}
 	done := make(chan error, 1)
@@ -174,23 +174,23 @@ func (s *heartbeatServer) Send(m core.RegionHeartbeatResponse) error {
 	select {
 	case err := <-done:
 		if err != nil {
-			atomic.StoreInt32(&s.closed, 1)
+			s.closed.Store(1)
 		}
 		return errors.WithStack(err)
 	case <-timer.C:
-		atomic.StoreInt32(&s.closed, 1)
+		s.closed.Store(1)
 		return errs.ErrSendHeartbeatTimeout
 	}
 }
 
 // Recv wraps Recv() of PD_RegionHeartbeatServer.
 func (s *heartbeatServer) Recv() (*pdpb.RegionHeartbeatRequest, error) {
-	if atomic.LoadInt32(&s.closed) == 1 {
+	if s.closed.Load() == 1 {
 		return nil, io.EOF
 	}
 	req, err := s.stream.Recv()
 	if err != nil {
-		atomic.StoreInt32(&s.closed, 1)
+		s.closed.Store(1)
 		return nil, errors.WithStack(err)
 	}
 	return req, nil
@@ -1050,11 +1050,11 @@ func (s *GrpcServer) updateSchedulingClient(ctx context.Context) (*schedulingCli
 // occurs on SendAndClose() or Recv(), both endpoints will be closed.
 type bucketHeartbeatServer struct {
 	stream pdpb.PD_ReportBucketsServer
-	closed int32
+	closed atomic.Int32
 }
 
 func (b *bucketHeartbeatServer) send(bucket *pdpb.ReportBucketsResponse) error {
-	if atomic.LoadInt32(&b.closed) == 1 {
+	if b.closed.Load() == 1 {
 		return errs.ErrStreamClosed
 	}
 	done := make(chan error, 1)
@@ -1067,22 +1067,22 @@ func (b *bucketHeartbeatServer) send(bucket *pdpb.ReportBucketsResponse) error {
 	select {
 	case err := <-done:
 		if err != nil {
-			atomic.StoreInt32(&b.closed, 1)
+			b.closed.Store(1)
 		}
 		return err
 	case <-timer.C:
-		atomic.StoreInt32(&b.closed, 1)
+		b.closed.Store(1)
 		return errs.ErrSendHeartbeatTimeout
 	}
 }
 
 func (b *bucketHeartbeatServer) recv() (*pdpb.ReportBucketsRequest, error) {
-	if atomic.LoadInt32(&b.closed) == 1 {
+	if b.closed.Load() == 1 {
 		return nil, io.EOF
 	}
 	req, err := b.stream.Recv()
 	if err != nil {
-		atomic.StoreInt32(&b.closed, 1)
+		b.closed.Store(1)
 		return nil, errors.WithStack(err)
 	}
 	return req, nil

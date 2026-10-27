@@ -149,12 +149,10 @@ func TestMembersCacheSingleflight(t *testing.T) {
 	var wg sync.WaitGroup
 	errCh := make(chan error, concurrency)
 	for range concurrency {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			_, err := cache.get(false, load)
 			errCh <- err
-		}()
+		})
 	}
 	<-started
 	close(release)

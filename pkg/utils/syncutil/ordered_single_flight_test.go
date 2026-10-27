@@ -16,6 +16,7 @@ package syncutil
 
 import (
 	"context"
+	stderrors "errors"
 	"math/rand/v2"
 	"runtime/pprof"
 	"strconv"
@@ -553,9 +554,7 @@ func TestOrderedSingleFightRandom(t *testing.T) {
 	}
 
 	// One goroutine to monotonically increase the current value.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for {
 			select {
 			case <-ctx.Done():
@@ -564,7 +563,7 @@ func TestOrderedSingleFightRandom(t *testing.T) {
 			}
 			currentValue.Add(1)
 		}
-	}()
+	})
 
 	type result struct {
 		v   int64
@@ -572,10 +571,7 @@ func TestOrderedSingleFightRandom(t *testing.T) {
 	}
 
 	for range concurrency {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			for {
 				select {
 				case <-ctx.Done():
@@ -608,15 +604,13 @@ func TestOrderedSingleFightRandom(t *testing.T) {
 
 					if shouldCancel {
 						// It might finish before the cancel takes effect.
-						if r.err != nil {
-							if !as.ErrorIs(r.err, context.Canceled) {
-								return
-							}
-						}
-					} else {
-						if !as.NoError(r.err) {
+						if r.err != nil && !stderrors.Is(r.err, context.Canceled) {
+							t.Errorf("expected cancellation, got %v", r.err)
 							return
 						}
+					} else if r.err != nil {
+						t.Errorf("unexpected error: %v", r.err)
+						return
 					}
 
 					// Check the strong order if the invocation is successful
@@ -632,7 +626,7 @@ func TestOrderedSingleFightRandom(t *testing.T) {
 					return
 				}
 			}
-		}()
+		})
 	}
 }
 
@@ -641,8 +635,7 @@ func BenchmarkOrderedSingleFlightSingleThread(b *testing.B) {
 	noop := func(context.Context) (int, error) { return 0, nil }
 	ctx := context.Background()
 
-	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		_, _ = s.Do(ctx, noop)
 	}
 }

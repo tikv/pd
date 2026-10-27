@@ -21,17 +21,17 @@ import (
 
 // PauseController sets and stores delay time in checkers.
 type PauseController struct {
-	delayUntil int64
+	delayUntil atomic.Int64
 }
 
 // IsPaused check if checker is paused
 func (c *PauseController) IsPaused() bool {
-	delayUntil := atomic.LoadInt64(&c.delayUntil)
+	delayUntil := c.delayUntil.Load()
 	return time.Now().Unix() < delayUntil
 }
 
 // PauseOrResume pause or resume the checker
 func (c *PauseController) PauseOrResume(t int64) {
 	delayUntil := time.Now().Unix() + t
-	atomic.StoreInt64(&c.delayUntil, delayUntil)
+	c.delayUntil.Store(delayUntil)
 }
