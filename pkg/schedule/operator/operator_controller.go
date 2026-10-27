@@ -837,16 +837,15 @@ func (oc *Controller) GetOperatorsOfKind(mask OpKind) []*Operator {
 
 // SendScheduleCommand sends a command to the region.
 func (oc *Controller) SendScheduleCommand(region *core.RegionInfo, step OpStep, source string) {
-	log.Info("send schedule command",
-		zap.Uint64("region-id", region.GetID()),
-		zap.Stringer("step", step),
-		zap.String("source", source))
-
 	useConfChangeV2 := versioninfo.IsFeatureSupported(oc.config.GetClusterVersion(), versioninfo.ConfChangeV2)
 	cmd := step.GetCmd(region, useConfChangeV2)
 	if cmd == nil {
 		return
 	}
+	log.Info("send schedule command",
+		zap.Uint64("region-id", region.GetID()),
+		zap.Stringer("step", step),
+		zap.String("source", source))
 	oc.hbStreams.SendMsg(region, cmd)
 }
 
