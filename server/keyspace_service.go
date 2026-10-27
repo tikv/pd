@@ -113,6 +113,8 @@ func (s *KeyspaceServer) WatchKeyspaces(request *keyspacepb.WatchKeyspacesReques
 	}
 	ctx, cancel := context.WithCancel(s.Context())
 	defer cancel()
+	stop := context.AfterFunc(stream.Context(), cancel)
+	defer stop()
 	startKey := keypath.KeyspaceMetaPrefix()
 
 	keyspaces := make([]*keyspacepb.KeyspaceMeta, 0)
@@ -133,10 +135,7 @@ func (s *KeyspaceServer) WatchKeyspaces(request *keyspacepb.WatchKeyspacesReques
 			return nil
 		}
 		defer func() {
-			for i := range keyspaces {
-				keyspaces[i] = nil // avoid memory leak
-			}
-			keyspaces = keyspaces[:0]
+			keyspaces = nil
 		}()
 		err := stream.Send(&keyspacepb.WatchKeyspacesResponse{
 			Header:    grpcutil.WrapHeader(),

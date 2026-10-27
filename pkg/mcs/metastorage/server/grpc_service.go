@@ -23,7 +23,6 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
-	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/meta_storagepb"
 	"github.com/pingcap/log"
@@ -32,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/registry"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
@@ -89,6 +89,8 @@ func (s *Service) Watch(req *meta_storagepb.WatchRequest, server meta_storagepb.
 	}
 	ctx, cancel := context.WithCancel(server.Context())
 	defer cancel()
+	stop := context.AfterFunc(s.ctx, cancel)
+	defer stop()
 	var options []clientv3.OpOption
 	key := string(req.GetKey())
 	var startRevision int64
@@ -110,61 +112,53 @@ func (s *Service) Watch(req *meta_storagepb.WatchRequest, server meta_storagepb.
 		options = append(options, clientv3.WithPrevKV())
 	}
 	cli := s.manager.GetClient()
-	watchChan := cli.Watch(ctx, key, options...)
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-s.ctx.Done():
-			return nil
-		case res, ok := <-watchChan:
-			if !ok {
-				return errors.New("watch channel closed unexpectedly")
+	return grpcutil.ForwardEtcdWatch(ctx, func(ctx context.Context) clientv3.WatchChan {
+		return cli.Watch(ctx, key, options...)
+	}, func(res clientv3.WatchResponse) error {
+		if err := res.Err(); err != nil {
+			log.Warn("watch channel failed", zap.Error(err))
+			var resp meta_storagepb.WatchResponse
+			if startRevision < res.CompactRevision {
+				resp.Header = wrapErrorAndRevision(res.Header.GetRevision(), meta_storagepb.ErrorType_DATA_COMPACTED,
+					fmt.Sprintf("required watch revision: %d is smaller than current compact/min revision %d.", startRevision, res.CompactRevision))
+				resp.CompactRevision = res.CompactRevision
+			} else {
+				resp.Header = wrapErrorAndRevision(res.Header.GetRevision(), meta_storagepb.ErrorType_UNKNOWN,
+					fmt.Sprintf("watch channel meet other error %s.", err.Error()))
 			}
-			if err := res.Err(); err != nil {
-				log.Warn("watch channel failed", zap.Error(err))
-				var resp meta_storagepb.WatchResponse
-				if startRevision < res.CompactRevision {
-					resp.Header = wrapErrorAndRevision(res.Header.GetRevision(), meta_storagepb.ErrorType_DATA_COMPACTED,
-						fmt.Sprintf("required watch revision: %d is smaller than current compact/min revision %d.", startRevision, res.CompactRevision))
-					resp.CompactRevision = res.CompactRevision
-				} else {
-					resp.Header = wrapErrorAndRevision(res.Header.GetRevision(), meta_storagepb.ErrorType_UNKNOWN,
-						fmt.Sprintf("watch channel meet other error %s.", err.Error()))
-				}
-				if err := server.Send(&resp); err != nil {
-					log.Warn("failed to send watch error response", zap.Error(err))
-					return err
-				}
-				// Err() indicates that this WatchResponse holds a channel-closing error.
+			if err := server.Send(&resp); err != nil {
+				log.Warn("failed to send watch error response", zap.Error(err))
 				return err
 			}
+			// Err() indicates that this WatchResponse holds a channel-closing error.
+			return err
+		}
 
-			events := make([]*meta_storagepb.Event, len(res.Events))
-			for i, e := range res.Events {
-				event := &meta_storagepb.Event{Kv: &meta_storagepb.KeyValue{
-					Key:            e.Kv.Key,
-					Value:          e.Kv.Value,
-					ModRevision:    e.Kv.ModRevision,
-					CreateRevision: e.Kv.CreateRevision,
-					Version:        e.Kv.Version,
-					Lease:          e.Kv.Lease,
-				}, Type: meta_storagepb.Event_EventType(e.Type)}
-				if e.PrevKv != nil {
-					event.PrevKv = &meta_storagepb.KeyValue{Key: e.PrevKv.Key, Value: e.PrevKv.Value}
-				}
-				events[i] = event
+		events := make([]*meta_storagepb.Event, len(res.Events))
+		for i, e := range res.Events {
+			event := &meta_storagepb.Event{Kv: &meta_storagepb.KeyValue{
+				Key:            e.Kv.Key,
+				Value:          e.Kv.Value,
+				ModRevision:    e.Kv.ModRevision,
+				CreateRevision: e.Kv.CreateRevision,
+				Version:        e.Kv.Version,
+				Lease:          e.Kv.Lease,
+			}, Type: meta_storagepb.Event_EventType(e.Type)}
+			if e.PrevKv != nil {
+				event.PrevKv = &meta_storagepb.KeyValue{Key: e.PrevKv.Key, Value: e.PrevKv.Value}
 			}
-			if len(events) > 0 {
-				if err := server.Send(&meta_storagepb.WatchResponse{
-					Header: &meta_storagepb.ResponseHeader{ClusterId: keypath.ClusterID(), Revision: res.Header.GetRevision()},
-					Events: events, CompactRevision: res.CompactRevision}); err != nil {
-					log.Warn("failed to send watch response", zap.Error(err))
-					return err
-				}
+			events[i] = event
+		}
+		if len(events) > 0 {
+			if err := server.Send(&meta_storagepb.WatchResponse{
+				Header: &meta_storagepb.ResponseHeader{ClusterId: keypath.ClusterID(), Revision: res.Header.GetRevision()},
+				Events: events, CompactRevision: res.CompactRevision}); err != nil {
+				log.Warn("failed to send watch response", zap.Error(err))
+				return err
 			}
 		}
-	}
+		return nil
+	})
 }
 
 // Get gets the key-value pair with a given key.

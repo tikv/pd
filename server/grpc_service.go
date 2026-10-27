@@ -2567,64 +2567,58 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 	}
 	ctx, cancel := context.WithCancel(server.Context())
 	defer cancel()
+	stop := context.AfterFunc(s.Context(), cancel)
+	defer stop()
 	revision := req.GetRevision()
 	// If the revision is compacted, will meet required revision has been compacted error.
 	// - If required revision < CompactRevision, we need to reload all configs to avoid losing data.
 	// - If required revision >= CompactRevision, just keep watching.
 	// Use WithPrevKV() to get the previous key-value pair when get Delete Event.
-	watchChan := s.client.Watch(ctx, configPath, clientv3.WithPrefix(), clientv3.WithRev(revision), clientv3.WithPrevKV())
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-s.Context().Done():
-			return nil
-		case res, ok := <-watchChan:
-			if !ok {
-				return errors.New("watch channel closed unexpectedly")
+	return grpcutil.ForwardEtcdWatch(ctx, func(ctx context.Context) clientv3.WatchChan {
+		return s.client.Watch(ctx, configPath, clientv3.WithPrefix(), clientv3.WithRev(revision), clientv3.WithPrevKV())
+	}, func(res clientv3.WatchResponse) error {
+		if res.Err() != nil {
+			var resp pdpb.WatchGlobalConfigResponse
+			if revision < res.CompactRevision {
+				resp.Header = grpcutil.WrapErrorToHeader(pdpb.ErrorType_DATA_COMPACTED,
+					fmt.Sprintf("required watch revision: %d is smaller than current compact/min revision %d.", revision, res.CompactRevision))
+			} else {
+				resp.Header = grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
+					fmt.Sprintf("watch channel meet other error %s.", res.Err().Error()))
 			}
-			if res.Err() != nil {
-				var resp pdpb.WatchGlobalConfigResponse
-				if revision < res.CompactRevision {
-					resp.Header = grpcutil.WrapErrorToHeader(pdpb.ErrorType_DATA_COMPACTED,
-						fmt.Sprintf("required watch revision: %d is smaller than current compact/min revision %d.", revision, res.CompactRevision))
+			if err := server.Send(&resp); err != nil {
+				return err
+			}
+			// Err() indicates that this WatchResponse holds a channel-closing error.
+			return res.Err()
+		}
+		revision = res.Header.GetRevision()
+
+		cfgs := make([]*pdpb.GlobalConfigItem, 0, len(res.Events))
+		for _, e := range res.Events {
+			// Since item value needs to support marshal of different struct types,
+			// it should be set to `Payload bytes` instead of `Value string`.
+			switch e.Type {
+			case clientv3.EventTypePut:
+				cfgs = append(cfgs, &pdpb.GlobalConfigItem{Name: string(e.Kv.Key), Payload: e.Kv.Value, Kind: pdpb.EventType(e.Type)})
+			case clientv3.EventTypeDelete:
+				if e.PrevKv != nil {
+					cfgs = append(cfgs, &pdpb.GlobalConfigItem{Name: string(e.Kv.Key), Payload: e.PrevKv.Value, Kind: pdpb.EventType(e.Type)})
 				} else {
-					resp.Header = grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
-						fmt.Sprintf("watch channel meet other error %s.", res.Err().Error()))
-				}
-				if err := server.Send(&resp); err != nil {
-					return err
-				}
-				// Err() indicates that this WatchResponse holds a channel-closing error.
-				return res.Err()
-			}
-			revision = res.Header.GetRevision()
-
-			cfgs := make([]*pdpb.GlobalConfigItem, 0, len(res.Events))
-			for _, e := range res.Events {
-				// Since item value needs to support marshal of different struct types,
-				// it should be set to `Payload bytes` instead of `Value string`.
-				switch e.Type {
-				case clientv3.EventTypePut:
-					cfgs = append(cfgs, &pdpb.GlobalConfigItem{Name: string(e.Kv.Key), Payload: e.Kv.Value, Kind: pdpb.EventType(e.Type)})
-				case clientv3.EventTypeDelete:
-					if e.PrevKv != nil {
-						cfgs = append(cfgs, &pdpb.GlobalConfigItem{Name: string(e.Kv.Key), Payload: e.PrevKv.Value, Kind: pdpb.EventType(e.Type)})
-					} else {
-						// Prev-kv is compacted means there must have been a delete event before this event,
-						// which means that this is just a duplicated event, so we can just ignore it.
-						log.Info("previous key-value pair has been compacted", zap.String("required-key", string(e.Kv.Key)))
-					}
-				}
-			}
-
-			if len(cfgs) > 0 {
-				if err := server.Send(&pdpb.WatchGlobalConfigResponse{Changes: cfgs, Revision: res.Header.GetRevision()}); err != nil {
-					return err
+					// Prev-kv is compacted means there must have been a delete event before this event,
+					// which means that this is just a duplicated event, so we can just ignore it.
+					log.Info("previous key-value pair has been compacted", zap.String("required-key", string(e.Kv.Key)))
 				}
 			}
 		}
-	}
+
+		if len(cfgs) > 0 {
+			if err := server.Send(&pdpb.WatchGlobalConfigResponse{Changes: cfgs, Revision: res.Header.GetRevision()}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // Evict the leaders when the store is damaged. Damaged regions are emergency errors
