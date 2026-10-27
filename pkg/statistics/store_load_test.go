@@ -15,6 +15,7 @@
 package statistics
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -63,6 +64,45 @@ func TestHistoryLoads(t *testing.T) {
 	historyLoads = NewStoreHistoryLoads(0, 0)
 	historyLoads.Add(1, rwTp, kind, loads)
 	re.Empty(historyLoads.Get(1, rwTp, kind)[0])
+}
+
+func TestHistoryLoadsAllocationBounds(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		duration time.Duration
+		interval time.Duration
+		samples  int
+	}{
+		{"negative duration", -time.Minute, time.Second, 0},
+		{"negative interval", time.Minute, -time.Second, 0},
+		{"both negative", -time.Minute, -time.Second, 0},
+		{"disabled", 0, time.Second, 0},
+		{"zero interval", DefaultHistorySampleDuration, 0, 10},
+		{"sample limit", MaxHistorySampleCount * time.Nanosecond, time.Nanosecond, MaxHistorySampleCount},
+		{"over sample limit", (MaxHistorySampleCount + 1) * time.Nanosecond, time.Nanosecond, MaxHistorySampleCount},
+		{"maximum duration", time.Duration(math.MaxInt64), time.Nanosecond, MaxHistorySampleCount},
+		{"minimum duration", time.Duration(math.MinInt64), time.Nanosecond, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			history := NewStoreHistoryLoads(tc.duration, tc.interval)
+			for range 2 {
+				re.NotPanics(func() {
+					history.Add(1, utils.Read, constant.LeaderKind, Loads{1, 2, 3, 4})
+				})
+			}
+			for _, loads := range history.Get(1, utils.Read, constant.LeaderKind) {
+				re.Len(loads, tc.samples)
+			}
+			updated := NewStoreHistoryLoads(DefaultHistorySampleDuration, DefaultHistorySampleInterval).UpdateConfig(tc.duration, tc.interval)
+			for range 2 {
+				updated.Add(1, utils.Read, constant.LeaderKind, Loads{1, 2, 3, 4})
+			}
+			for _, loads := range updated.Get(1, utils.Read, constant.LeaderKind) {
+				re.Len(loads, tc.samples)
+			}
+		})
+	}
 }
 
 func TestHistoryGCDoesNotReaddRemovedStore(t *testing.T) {

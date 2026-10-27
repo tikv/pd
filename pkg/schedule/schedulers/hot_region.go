@@ -227,8 +227,8 @@ type hotScheduler struct {
 }
 
 func newHotScheduler(opController *operator.Controller, conf *hotRegionSchedulerConfig) *hotScheduler {
-	base := newBaseHotScheduler(opController, conf.getHistorySampleDuration(),
-		conf.getHistorySampleInterval(), conf)
+	duration, interval := conf.getHistorySampleConfig()
+	base := newBaseHotScheduler(opController, duration, interval, conf)
 	ret := &hotScheduler{
 		baseHotScheduler: base,
 		conf:             conf,
@@ -324,7 +324,8 @@ func (s *hotScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*opera
 func (s *hotScheduler) dispatch(typ resourceType, cluster sche.SchedulerCluster) (ops []*operator.Operator) {
 	s.Lock()
 	defer s.Unlock()
-	s.updateHistoryLoadConfig(s.conf.getHistorySampleDuration(), s.conf.getHistorySampleInterval())
+	duration, interval := s.conf.getHistorySampleConfig()
+	s.updateHistoryLoadConfig(duration, interval)
 	s.prepareForBalance(typ, cluster)
 	// isForbidRWType can not be move earlier to support to use api and metrics.
 	switch typ {

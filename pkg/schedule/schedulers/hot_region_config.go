@@ -17,7 +17,9 @@ package schedulers
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"slices"
 	"time"
@@ -353,16 +355,16 @@ func (conf *hotRegionSchedulerConfig) getRankFormulaVersion() string {
 	return conf.getRankFormulaVersionLocked()
 }
 
-func (conf *hotRegionSchedulerConfig) getHistorySampleDuration() time.Duration {
-	conf.RLock()
-	defer conf.RUnlock()
-	return conf.HistorySampleDuration.Duration
-}
-
 func (conf *hotRegionSchedulerConfig) getHistorySampleInterval() time.Duration {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.HistorySampleInterval.Duration
+}
+
+func (conf *hotRegionSchedulerConfig) getHistorySampleConfig() (time.Duration, time.Duration) {
+	conf.RLock()
+	defer conf.RUnlock()
+	return conf.HistorySampleDuration.Duration, conf.HistorySampleInterval.Duration
 }
 
 // nolint: unused, unparam
@@ -442,6 +444,61 @@ func isPriorityValid(priorities []string) (map[string]bool, error) {
 }
 
 func (conf *hotRegionSchedulerParam) validateLocked() error {
+	if conf.MaxPeerNum <= 0 {
+		return errs.ErrSchedulerConfig.FastGenByArgs("max-peer-number should be positive")
+	}
+	// Region heartbeats have the longer interval, so this also bounds the store-stat lifetime.
+	maxZombieRounds := int(math.MaxInt64 / (utils.RegionHeartBeatReportInterval * time.Second))
+	if conf.MaxZombieRounds < 0 || conf.MaxZombieRounds > maxZombieRounds {
+		return errs.ErrSchedulerConfig.FastGenByArgs(fmt.Sprintf("max-zombie-rounds should be in range [0, %d]", maxZombieRounds))
+	}
+	duration, interval := conf.HistorySampleDuration.Duration, conf.HistorySampleInterval.Duration
+	if duration < 0 {
+		return errs.ErrSchedulerConfig.FastGenByArgs("history-sample-duration should be nonnegative")
+	}
+	if interval <= 0 {
+		return errs.ErrSchedulerConfig.FastGenByArgs("history-sample-interval should be positive")
+	}
+	if duration > 0 && duration < interval {
+		return errs.ErrSchedulerConfig.FastGenByArgs("history-sample-duration should be at least history-sample-interval, or zero to disable history")
+	}
+	if duration/interval > statistics.MaxHistorySampleCount {
+		return errs.ErrSchedulerConfig.FastGenByArgs(fmt.Sprintf("history sample count should not exceed %d", statistics.MaxHistorySampleCount))
+	}
+	for _, item := range []struct {
+		name  string
+		value float64
+	}{
+		{"min-hot-byte-rate", conf.MinHotByteRate},
+		{"min-hot-key-rate", conf.MinHotKeyRate},
+		{"min-hot-query-rate", conf.MinHotQueryRate},
+		{"min-hot-cpu-rate", conf.MinHotCPURate},
+		{"src-tolerance-ratio", conf.SrcToleranceRatio},
+		{"dst-tolerance-ratio", conf.DstToleranceRatio},
+	} {
+		if math.IsNaN(item.value) || math.IsInf(item.value, 0) || item.value < 0 {
+			return errs.ErrSchedulerConfig.FastGenByArgs(item.name + " should be finite and nonnegative")
+		}
+	}
+	for _, item := range []struct {
+		name  string
+		value float64
+	}{
+		{"byte-rate-rank-step-ratio", conf.ByteRateRankStepRatio},
+		{"key-rate-rank-step-ratio", conf.KeyRateRankStepRatio},
+		{"query-rate-rank-step-ratio", conf.QueryRateRankStepRatio},
+		{"cpu-rate-rank-step-ratio", conf.CPURateRankStepRatio},
+		{"count-rank-step-ratio", conf.CountRankStepRatio},
+		{"great-dec-ratio", conf.GreatDecRatio},
+		{"minor-dec-ratio", conf.MinorDecRatio},
+	} {
+		if !(item.value > 0 && item.value <= 1) {
+			return errs.ErrSchedulerConfig.FastGenByArgs(item.name + " should be finite and in range (0, 1]")
+		}
+	}
+	if conf.GreatDecRatio > conf.MinorDecRatio {
+		return errs.ErrSchedulerConfig.FastGenByArgs("great-dec-ratio should not exceed minor-dec-ratio")
+	}
 	if _, err := isPriorityValid(conf.ReadPriorities); err != nil {
 		return err
 	}
@@ -466,10 +523,10 @@ func (conf *hotRegionSchedulerParam) validateLocked() error {
 		conf.ForbidRWType != "none" && conf.ForbidRWType != "" {
 		return errs.ErrSchedulerConfig.FastGenByArgs("invalid forbid-rw-type")
 	}
-	if conf.PendingWeight < defaultPendingWeight {
-		return errs.ErrSchedulerConfig.FastGenByArgs("invalid pending-weight, should be at least 1")
+	if math.IsNaN(conf.PendingWeight) || math.IsInf(conf.PendingWeight, 0) || conf.PendingWeight < defaultPendingWeight {
+		return errs.ErrSchedulerConfig.FastGenByArgs("invalid pending-weight, should be finite and at least 1")
 	}
-	if conf.SplitThresholds < 0.01 || conf.SplitThresholds > 1.0 {
+	if math.IsNaN(conf.SplitThresholds) || conf.SplitThresholds < 0.01 || conf.SplitThresholds > 1.0 {
 		return errs.ErrSchedulerConfig.FastGenByArgs("invalid split-thresholds, should be in range [0.01, 1.0]")
 	}
 	return nil

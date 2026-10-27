@@ -325,6 +325,8 @@ const (
 	DefaultHistorySampleInterval = 30 * time.Second
 	// DefaultHistorySampleDuration  is the duration for saving history load.
 	DefaultHistorySampleDuration = 5 * time.Minute
+	// MaxHistorySampleCount bounds each history dimension to 8 KiB per store and resource type.
+	MaxHistorySampleCount = 1024
 )
 
 // StoreHistoryLoads records the history load of a store.
@@ -354,10 +356,10 @@ func (s *StoreHistoryLoads) Add(storeID uint64, rwTp utils.RWType, kind constant
 	load, ok := s.loads[rwTp][kind][storeID]
 	if !ok {
 		size := int(DefaultHistorySampleDuration / DefaultHistorySampleInterval)
-		if s.sampleInterval != 0 {
-			size = int(s.sampleDuration / s.sampleInterval)
+		if s.sampleInterval > 0 {
+			size = int(min(s.sampleDuration/s.sampleInterval, MaxHistorySampleCount))
 		}
-		if s.sampleDuration == 0 {
+		if s.sampleDuration <= 0 || s.sampleInterval < 0 {
 			size = 0
 		}
 		load = newStoreHistoryLoad(size, s.sampleInterval)
@@ -416,7 +418,7 @@ type storeHistoryLoad struct {
 
 func newStoreHistoryLoad(size int, sampleInterval time.Duration) *storeHistoryLoad {
 	return &storeHistoryLoad{
-		size:           size,
+		size:           min(max(size, 0), MaxHistorySampleCount),
 		sampleInterval: sampleInterval,
 	}
 }
