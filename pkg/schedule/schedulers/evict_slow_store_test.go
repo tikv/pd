@@ -1286,7 +1286,8 @@ func TestEvictSlowStoreCrossZoneNoEvict(t *testing.T) {
 }
 
 // TestEvictSlowStoreNoIsolationRule: without uniform rule isolation, 2+ slow stores
-// fall back to the conservative do-nothing behavior.
+// fall back to the conservative do-nothing behavior. Group eviction is enabled, so the
+// missing isolation rule is the only thing that keeps the stores from being evicted.
 func TestEvictSlowStoreNoIsolationRule(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
@@ -1302,6 +1303,10 @@ func TestEvictSlowStoreNoIsolationRule(t *testing.T) {
 
 	es := createTestEvictSlowStoreScheduler(re, oc)
 	conf := es.(*evictSlowStoreScheduler).conf
+	// Enable grouping directly: enableGroupEviction would also install an isolation rule.
+	conf.EnableGroupEviction = true
+	_, ok := groupIsolationLabels(tc)
+	re.False(ok)
 
 	setStoreSlowScore(tc, 1, 100)
 	setStoreSlowScore(tc, 2, 100)
@@ -1309,6 +1314,8 @@ func TestEvictSlowStoreNoIsolationRule(t *testing.T) {
 	ops, _ := es.Schedule(tc, false)
 	re.Empty(ops)
 	re.Empty(conf.evictedStores())
+	re.False(tc.GetStore(1).EvictedAsSlowStore())
+	re.False(tc.GetStore(2).EvictedAsSlowStore())
 }
 
 // TestEvictSlowStoreGroupEvictionDisabled: group eviction is off by default, so even with
