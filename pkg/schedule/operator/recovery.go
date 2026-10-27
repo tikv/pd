@@ -17,6 +17,7 @@ package operator
 import (
 	"fmt"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -102,7 +103,7 @@ func validateRecoveryStep(ci *core.BasicCluster, region *core.RegionInfo, step O
 				return nil
 			}
 		}
-		return fmt.Errorf("unknown recovery state blocks membership activation")
+		return errors.New("unknown recovery state blocks membership activation")
 	}
 	switch s := step.(type) {
 	case AddLearner:
@@ -135,7 +136,7 @@ func validateRecoveryCommand(ci *core.BasicCluster, region *core.RegionInfo, cmd
 		return nil
 	}
 	if (cmd.ChangeSplit != nil && cmd.ChangeSplit.GetAutoSplitEnabled()) || cmd.TransferLeader != nil || cmd.Merge != nil || cmd.SplitRegion != nil || cmd.SwitchWitnesses != nil {
-		return fmt.Errorf("conflicting scheduling command is paused during region recovery")
+		return errors.New("conflicting scheduling command is paused during region recovery")
 	}
 	checkChange := func(change *pdpb.ChangePeer) error {
 		if change == nil {
@@ -146,24 +147,24 @@ func validateRecoveryCommand(ci *core.BasicCluster, region *core.RegionInfo, cmd
 			if isFailedRecoveryPeer(ci, region, peer.GetStoreId()) {
 				return nil
 			}
-			return fmt.Errorf("cannot remove a healthy peer during region recovery")
+			return errors.New("cannot remove a healthy peer during region recovery")
 		}
 		status := region.GetRecoveryStatus()
 		if status != nil && status.GetState() != pdpb.RegionRecoveryState_NORMAL && status.GetState() != pdpb.RegionRecoveryState_RECOVERING_LEADER {
-			return fmt.Errorf("unknown recovery state blocks membership activation")
+			return errors.New("unknown recovery state blocks membership activation")
 		}
 		if peer.GetIsWitness() {
-			return fmt.Errorf("only Full replica repair is allowed during region recovery")
+			return errors.New("only Full replica repair is allowed during region recovery")
 		}
 		existing := region.GetStorePeer(peer.GetStoreId())
 		if existing != nil && existing.GetIsWitness() {
-			return fmt.Errorf("cannot convert witness during region recovery")
+			return errors.New("cannot convert witness during region recovery")
 		}
 		if change.GetChangeType() == eraftpb.ConfChangeType_AddNode && existing == nil {
-			return fmt.Errorf("full repair must initialize a learner before promotion")
+			return errors.New("full repair must initialize a learner before promotion")
 		}
 		if change.GetChangeType() == eraftpb.ConfChangeType_AddLearnerNode && existing != nil && !core.IsLearner(existing) && !isFailedRecoveryPeer(ci, region, peer.GetStoreId()) {
-			return fmt.Errorf("cannot demote a healthy voter during region recovery")
+			return errors.New("cannot demote a healthy voter during region recovery")
 		}
 		return nil
 	}

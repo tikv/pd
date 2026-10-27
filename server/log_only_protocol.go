@@ -55,7 +55,7 @@ func (s *GrpcServer) getClusterLogOnlyProtocolVersion(ctx context.Context) uint3
 			return cluster.GetMembersWithContext(ctx, s.GetClient())
 		},
 		s.queryPDMemberProtocol)
-	return min(version, s.Server.getLogOnlyProtocolVersion())
+	return min(version, s.getLogOnlyProtocolVersion())
 }
 
 func negotiatePDMemberProtocol(ctx context.Context, selfID uint64,

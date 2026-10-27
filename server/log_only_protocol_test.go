@@ -66,7 +66,12 @@ func TestRuntimeMemberProofDoesNotTrustLeaderOrAlphaVersion(t *testing.T) {
 
 func TestPDMemberProtocolNegotiationIsParallelAndNotPositivelyCached(t *testing.T) {
 	members := capabilityTestMembers(1, 2, 3)
-	loader := func(context.Context) ([]*pdpb.Member, error) { return members, nil }
+	loader := func(ctx context.Context) ([]*pdpb.Member, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return members, nil
+	}
 	started := make(chan uint64, 2)
 	release := make(chan struct{})
 	probe := func(ctx context.Context, member *pdpb.Member) (uint32, error) {
