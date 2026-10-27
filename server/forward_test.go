@@ -50,6 +50,7 @@ func TestForwardSchedulingHeartbeatChangeSplit(t *testing.T) {
 				TargetPeer:  &metapb.Peer{Id: 5, StoreId: 6},
 				ChangeSplit: testCase.changeSplit,
 			}
+			rc.PutRegion(core.NewRegionInfo(&metapb.Region{Id: response.GetRegionId(), RegionEpoch: response.GetRegionEpoch(), Peers: []*metapb.Peer{response.GetTargetPeer()}}, response.GetTargetPeer()))
 			source := &testSchedulingHeartbeatClient{response: response}
 			destination := &testPDHeartbeatServer{}
 			errCh := make(chan error, 1)

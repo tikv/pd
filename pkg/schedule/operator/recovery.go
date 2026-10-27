@@ -160,7 +160,7 @@ func validateRecoveryCommand(ci *core.BasicCluster, region *core.RegionInfo, cmd
 			return fmt.Errorf("cannot convert witness during region recovery")
 		}
 		if change.GetChangeType() == eraftpb.ConfChangeType_AddNode && existing == nil {
-			return fmt.Errorf("Full repair must initialize a learner before promotion")
+			return fmt.Errorf("full repair must initialize a learner before promotion")
 		}
 		if change.GetChangeType() == eraftpb.ConfChangeType_AddLearnerNode && existing != nil && !core.IsLearner(existing) && !isFailedRecoveryPeer(ci, region, peer.GetStoreId()) {
 			return fmt.Errorf("cannot demote a healthy voter during region recovery")

@@ -110,7 +110,7 @@ func CheckLogOnlyPeerProtocols(stores StoreSetInformer, peers []*metapb.Peer) er
 	for _, peer := range peers {
 		store := stores.GetStore(peer.GetStoreId())
 		if store == nil || store.GetMeta().GetLogOnlyProtocolVersion() < LogOnlyProtocolVersion {
-			return errors.Errorf("Store %d does not support LogOnly protocol %d", peer.GetStoreId(), LogOnlyProtocolVersion)
+			return errors.Errorf("store %d does not support LogOnly protocol %d", peer.GetStoreId(), LogOnlyProtocolVersion)
 		}
 	}
 	return nil

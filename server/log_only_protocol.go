@@ -150,17 +150,17 @@ func (s *GrpcServer) queryPDMemberProtocol(ctx context.Context, member *pdpb.Mem
 		return runtimeMemberProtocolVersion(member.GetMemberId(), keypath.ClusterID(), response)
 	}
 	if lastError == nil {
-		lastError = errors.New("PD member has no reachable client URL")
+		lastError = errors.New("pd member has no reachable client URL")
 	}
 	return 0, lastError
 }
 
 func runtimeMemberProtocolVersion(memberID, clusterID uint64, response *pdpb.GetMembersResponse) (uint32, error) {
 	if response == nil || response.GetHeader().GetClusterId() != clusterID {
-		return 0, errors.New("PD member capability response has an invalid cluster ID")
+		return 0, errors.New("pd member capability response has an invalid cluster ID")
 	}
 	if response.GetHeader().GetError() != nil && response.GetHeader().GetError().GetType() != pdpb.ErrorType_OK {
-		return 0, errors.New("PD member capability query failed")
+		return 0, errors.New("pd member capability query failed")
 	}
 	found := false
 	var version uint32
@@ -174,7 +174,7 @@ func runtimeMemberProtocolVersion(memberID, clusterID uint64, response *pdpb.Get
 		found, version = true, member.GetLogOnlyProtocolVersion()
 	}
 	if !found {
-		return 0, errors.New("PD member did not declare its own capability")
+		return 0, errors.New("pd member did not declare its own capability")
 	}
 	return version, nil
 }
