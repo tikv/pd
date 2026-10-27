@@ -1,0 +1,82 @@
+// Copyright 2026 TiKV Project Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package core
+
+import (
+	"testing"
+
+	"github.com/gogo/protobuf/proto"
+	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/schedulingpb"
+)
+
+func TestRegionRecoveryStatusControlsScheduling(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		status  *pdpb.RegionRecoveryStatus
+		blocked bool
+	}{
+		{"legacy", nil, false},
+		{"ready", &pdpb.RegionRecoveryStatus{State: pdpb.RegionRecoveryState_NORMAL, DataServiceReady: true, SizeSource: pdpb.RegionSizeSource_SIZE_CURRENT}, false},
+		{"recovering", &pdpb.RegionRecoveryStatus{State: pdpb.RegionRecoveryState_RECOVERING_LEADER, SizeSource: pdpb.RegionSizeSource_SIZE_HISTORICAL}, true},
+		{"not-ready", &pdpb.RegionRecoveryStatus{SizeSource: pdpb.RegionSizeSource_SIZE_CURRENT}, true},
+		{"historical-size", &pdpb.RegionRecoveryStatus{DataServiceReady: true, SizeSource: pdpb.RegionSizeSource_SIZE_HISTORICAL}, true},
+		{"future-state", &pdpb.RegionRecoveryStatus{State: pdpb.RegionRecoveryState(99), DataServiceReady: true, SizeSource: pdpb.RegionSizeSource_SIZE_CURRENT}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			region := NewRegionInfo(&metapb.Region{Id: 1}, nil, WithRecoveryStatus(tc.status))
+			require.Equal(t, tc.blocked, region.IsRecoverySchedulingBlocked())
+			require.True(t, proto.Equal(tc.status, region.Clone().GetRecoveryStatus()))
+		})
+	}
+}
+
+func TestRegionRecoveryStatusSurvivesBothHeartbeatTypes(t *testing.T) {
+	status := &pdpb.RegionRecoveryStatus{State: pdpb.RegionRecoveryState_RECOVERING_LEADER, SizeSource: pdpb.RegionSizeSource_SIZE_HISTORICAL, TargetPeerId: 2, SessionId: []byte("session")}
+	for _, heartbeat := range []RegionHeartbeatRequest{
+		&pdpb.RegionHeartbeatRequest{Region: &metapb.Region{Id: 1}, RecoveryStatus: status},
+		&schedulingpb.RegionHeartbeatRequest{Region: &metapb.Region{Id: 1}, RecoveryStatus: status},
+	} {
+		region := RegionFromHeartbeat(heartbeat, 0)
+		require.True(t, region.IsRecoveringLeader())
+		require.True(t, proto.Equal(status, region.GetRecoveryStatus()))
+	}
+	region := NewRegionInfo(&metapb.Region{Id: 1}, nil)
+	legacy := NewStoreInfo(&metapb.Store{Id: 1})
+	require.Nil(t, NormalizeRegionRecoveryStatus(region, legacy).GetRecoveryStatus())
+	modern := NewStoreInfo(&metapb.Store{Id: 1, LogOnlyProtocolVersion: LogOnlyProtocolVersion})
+	require.True(t, NormalizeRegionRecoveryStatus(region, modern).IsRecoverySchedulingBlocked())
+}
+
+func TestRegionRecoveryStatusChangesRefreshCacheAndRejectStaleTerm(t *testing.T) {
+	peer := &metapb.Peer{Id: 1, StoreId: 1, IsWitness: true}
+	meta := &metapb.Region{Id: 1, RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1}, Peers: []*metapb.Peer{peer}}
+	origin := NewRegionInfo(meta, peer)
+	current := origin.Clone(WithRecoveryStatus(&pdpb.RegionRecoveryStatus{State: pdpb.RegionRecoveryState_RECOVERING_LEADER}))
+	current.term = 10
+	_, saveCache, sync, _ := GenerateRegionGuideFunc(false)(ContextTODO(), current, origin)
+	require.True(t, saveCache)
+	require.True(t, sync)
+	regions := NewRegionsInfo()
+	regions.SetRegion(current)
+	stale := origin.Clone()
+	stale.term = 9
+	_, _, err := regions.PreCheckPutRegion(stale)
+	require.Error(t, err)
+	require.True(t, regions.GetRegion(1).IsRecoveringLeader())
+}

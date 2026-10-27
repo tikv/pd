@@ -110,6 +110,17 @@ func (s *RegionSyncer) handleRegionSyncResponse(
 	regions := resp.GetRegions()
 	buckets := resp.GetBuckets()
 	regionLeaders := resp.GetRegionLeaders()
+	recoveryByID := make(map[uint64]*pdpb.RegionRecoveryStatus, len(resp.GetRegionRecoveryInfos()))
+	for _, info := range resp.GetRegionRecoveryInfos() {
+		if _, duplicate := recoveryByID[info.GetRegionId()]; duplicate {
+			// A malformed duplicate must not turn a previous blocked state ready.
+			recoveryByID[info.GetRegionId()] = &pdpb.RegionRecoveryStatus{}
+		} else if info.GetStatus() == nil {
+			recoveryByID[info.GetRegionId()] = &pdpb.RegionRecoveryStatus{}
+		} else {
+			recoveryByID[info.GetRegionId()] = info.GetStatus()
+		}
+	}
 	startFullSync := !fullSyncing && !s.IsRunning() && resp.GetStartIndex() == 0 && len(regions) > 0
 	inFullSync := fullSyncing || startFullSync
 	// During a full sync, intermediate data frames carry a positional
@@ -145,7 +156,11 @@ func (s *RegionSyncer) handleRegionSyncResponse(
 		if hasBuckets {
 			opts = append(opts, core.SetBuckets(buckets[i]))
 		}
+		if status := recoveryByID[r.GetId()]; status != nil {
+			opts = append(opts, core.WithRecoveryStatus(status))
+		}
 		region = core.NewRegionInfo(r, regionLeader, opts...)
+		region = core.NormalizeRegionRecoveryStatus(region, bc.GetStore(regionLeader.GetStoreId()))
 
 		origin, _, err := bc.PreCheckPutRegion(region)
 		if err != nil {

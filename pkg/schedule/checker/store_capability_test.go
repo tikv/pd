@@ -34,6 +34,7 @@ func (suite *ruleCheckerTestSuite) prepareHeterogeneousRegion() *core.RegionInfo
 		suite.cluster.AddLabelsStore(id, 1, map[string]string{
 			core.StoreCapabilityLabel: capability, "store-class": pool,
 		})
+		suite.cluster.PutStore(suite.cluster.GetStore(id).Clone(core.SetStoreLogOnlyProtocolVersion(core.LogOnlyProtocolVersion)))
 	}
 	suite.cluster.AddLeaderRegion(1, 1, 2, 3)
 	region := suite.cluster.GetRegion(1)
@@ -95,4 +96,24 @@ func (suite *ruleCheckerTestSuite) TestLogStoreMissingFullCapacityDoesNotAddWitn
 	// Disabling old witness scheduling must not turn the existing W into Full.
 	suite.cluster.SetEnableWitness(false)
 	suite.Nil(suite.rc.Check(region))
+}
+
+func (suite *ruleCheckerTestSuite) TestRecoveringWitnessLeaderStillRepairsFailedFull() {
+	region := suite.prepareHeterogeneousRegion()
+	suite.cluster.SetStoreDown(2)
+	suite.cluster.SetStoreLastHeartbeatInterval(2, 31*time.Minute)
+	region = region.Clone(core.WithLeader(region.GetStorePeer(3)),
+		core.WithRecoveryStatus(&pdpb.RegionRecoveryStatus{State: pdpb.RegionRecoveryState_RECOVERING_LEADER, SizeSource: pdpb.RegionSizeSource_SIZE_HISTORICAL}),
+		core.WithDownPeers([]*pdpb.PeerStats{{Peer: region.GetStorePeer(2), DownSeconds: 1900}}))
+	suite.cluster.PutRegion(region)
+	op := suite.rc.Check(region)
+	suite.Require().NotNil(op)
+	add, ok := op.Step(0).(operator.AddLearner)
+	suite.Require().True(ok)
+	suite.Equal(uint64(4), add.ToStore)
+	suite.False(add.IsWitness)
+	for i := range op.Len() {
+		_, transfer := op.Step(i).(operator.TransferLeader)
+		suite.False(transfer)
+	}
 }

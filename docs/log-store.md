@@ -43,6 +43,38 @@ It supersedes the lower-priority default group without changing the legacy
 capability must match. A label edit cannot authorize Full data on a Log Store.
 Initialization learners retain their Full/LogOnly capability when promoted.
 
+## Recovery protocol and rollout
+
+Protocol v2 uses the independent `metapb.Store.log_only_protocol_version` field.
+The immutable Full/LogOnly role label does not advertise software compatibility.
+PD advertises its supported version in `GetClusterInfo`; when Scheduling runs
+independently, this is capped by the active primary's election declaration.
+Missing or stale Scheduling capability returns zero. Upgrade all PD/Scheduling
+instances and participating TiKV/reader components before enabling dedicated W.
+
+Activating or extending a dedicated LogOnly group requires compatible retained
+members and destinations, including data learners. Old TiFlash/reader processes
+without a v2 declaration are not automatically certified by being non-voters.
+Legacy groups keep their existing behavior. Cleanup, leaving joint state and
+removing W to return to a Full-only group remain available. A Store identity that declared protocol v2 keeps that minimum (including data
+readers) even after returning to 3F: topology
+rollback does not prove that old readers can consume persisted DFS object copies.
+Software/reader rollback requires a separate controlled migration or replacement
+procedure, not clearing the protocol declaration.
+
+A leader reports `RegionRecoveryStatus` with explicit state, data-service
+readiness, current/historical size provenance, selected Full and session ID.
+PD preserves this report through Scheduling forwarding and sparse Region sync.
+A v2 leader omitting its status is treated as not ready. Legacy absence remains
+legacy behavior; labels and zero size are not used to infer recovery state.
+
+During recovery or unready/historical-size reports, PD pauses discretionary
+balance, split, merge and ordinary leader transfer. Full initialization,
+promotion, safe retirement of failed peers and completion of a joint transition
+remain possible. A recovering W retains control leadership while Full repair is
+built; it never becomes a new ordinary leader-transfer destination. TiKV owns the
+typed recovery handoff and validates its target/session and data readiness.
+
 ## Repair and migration
 
 - A failed Full is replaced on compatible Full hardware, after the normal Store

@@ -98,6 +98,11 @@ func WithLearners(learners []*metapb.Peer) RegionCreateOption {
 	}
 }
 
+// WithRecoveryStatus sets the explicit recovery report used by scheduling.
+func WithRecoveryStatus(status *pdpb.RegionRecoveryStatus) RegionCreateOption {
+	return func(region *RegionInfo) { region.recoveryStatus = status }
+}
+
 // WithLeader sets the leader for the region.
 func WithLeader(leader *metapb.Peer) RegionCreateOption {
 	return func(region *RegionInfo) {

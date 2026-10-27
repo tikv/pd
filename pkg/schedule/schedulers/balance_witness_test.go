@@ -150,6 +150,9 @@ func (suite *balanceWitnessSchedulerTestSuite) TestLogStoreBalanceMigratesWitnes
 	for _, id := range []uint64{3, 4} {
 		suite.tc.SetStoreLabel(id, map[string]string{core.StoreCapabilityLabel: core.LogOnlyStoreCapability})
 	}
+	for _, id := range []uint64{1, 2, 3, 4} {
+		suite.tc.PutStore(suite.tc.GetStore(id).Clone(core.SetStoreLogOnlyProtocolVersion(core.LogOnlyProtocolVersion)))
+	}
 	suite.Require().NoError(suite.tc.SetRules([]*placement.Rule{
 		{GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID, Role: placement.Voter, Count: 2},
 		{GroupID: placement.DefaultGroupID, ID: "log", Role: placement.Voter, Count: 1, IsWitness: true},

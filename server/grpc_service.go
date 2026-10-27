@@ -268,9 +268,10 @@ func (s *GrpcServer) GetClusterInfo(context.Context, *pdpb.GetClusterInfoRequest
 	}
 
 	return &pdpb.GetClusterInfoResponse{
-		Header:       grpcutil.WrapHeader(),
-		ServiceModes: svcModes,
-		TsoUrls:      tsoServiceAddrs,
+		Header:                 grpcutil.WrapHeader(),
+		ServiceModes:           svcModes,
+		TsoUrls:                tsoServiceAddrs,
+		LogOnlyProtocolVersion: s.getLogOnlyProtocolVersion(),
 	}, nil
 }
 
@@ -1475,6 +1476,7 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 					SenderId:  request.GetHeader().GetSenderId(),
 				},
 				Region:          request.GetRegion(),
+				RecoveryStatus:  request.GetRecoveryStatus(),
 				Leader:          request.GetLeader(),
 				DownPeers:       request.GetDownPeers(),
 				PendingPeers:    request.GetPendingPeers(),

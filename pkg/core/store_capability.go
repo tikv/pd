@@ -82,3 +82,36 @@ func (s *StoreInfo) HasFixedPeerCapability() bool {
 	capability, err := ParseStoreCapability(s.GetMeta())
 	return err != nil || capability != ""
 }
+
+// HasDedicatedLogOnlyPeer reports whether a peer group uses fixed-role LogOnly
+// hardware, independently of legacy witness groups and their protocol version.
+func HasDedicatedLogOnlyPeer(stores StoreSetInformer, peers []*metapb.Peer) bool {
+	for _, peer := range peers {
+		store := stores.GetStore(peer.GetStoreId())
+		if peer.GetIsWitness() && store != nil && store.GetLabelValue(StoreCapabilityLabel) == LogOnlyStoreCapability {
+			return true
+		}
+	}
+	return false
+}
+
+// CheckLogOnlyPeerProtocols validates the complete target group when dedicated
+// LogOnly membership is activated. Learners also need explicit compatibility;
+// retaining an unadvertised data reader is not proof of safe snapshot handling.
+func CheckLogOnlyPeerProtocols(stores StoreSetInformer, peers []*metapb.Peer) error {
+	for _, peer := range peers {
+		if peer.GetIsWitness() && stores.GetStore(peer.GetStoreId()) == nil {
+			return errors.Errorf("cannot verify protocol for unknown witness Store %d", peer.GetStoreId())
+		}
+	}
+	if !HasDedicatedLogOnlyPeer(stores, peers) {
+		return nil
+	}
+	for _, peer := range peers {
+		store := stores.GetStore(peer.GetStoreId())
+		if store == nil || store.GetMeta().GetLogOnlyProtocolVersion() < LogOnlyProtocolVersion {
+			return errors.Errorf("Store %d does not support LogOnly protocol %d", peer.GetStoreId(), LogOnlyProtocolVersion)
+		}
+	}
+	return nil
+}

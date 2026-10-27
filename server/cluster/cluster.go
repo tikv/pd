@@ -1650,6 +1650,7 @@ func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool) error {
 		opts = append(opts,
 			core.SetStoreAddress(store.Address, store.StatusAddress, store.PeerAddress),
 			core.SetStoreVersion(store.GitHash, store.Version),
+			core.SetStoreLogOnlyProtocolVersion(store.GetLogOnlyProtocolVersion()),
 			core.SetStoreLabels(labels),
 			core.SetStoreStartTime(store.StartTimestamp),
 			core.SetStoreDeployPath(store.DeployPath))
@@ -1661,6 +1662,9 @@ func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool) error {
 		return err
 	}
 	if old := c.GetStore(store.GetId()); old != nil {
+		if old.GetMeta().GetLogOnlyProtocolVersion() >= core.LogOnlyProtocolVersion && s.GetMeta().GetLogOnlyProtocolVersion() < core.LogOnlyProtocolVersion {
+			return errors.New("cannot downgrade a declared LogOnly protocol; register a new Store identity through controlled replacement")
+		}
 		previous, err := core.ParseStoreCapability(old.GetMeta())
 		if err != nil {
 			return err

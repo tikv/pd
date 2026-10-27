@@ -85,6 +85,9 @@ func TestLogStoreFirstCommandCannotBypassCapability(t *testing.T) {
 			for _, id := range []uint64{3, 4} {
 				cluster.AddLabelsStore(id, 1, map[string]string{core.StoreCapabilityLabel: core.LogOnlyStoreCapability})
 			}
+			for _, store := range cluster.GetStores() {
+				cluster.PutStore(store.Clone(core.SetStoreLogOnlyProtocolVersion(core.LogOnlyProtocolVersion)))
+			}
 			peers := []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, IsWitness: true}}
 			region := core.NewRegionInfo(&metapb.Region{Id: 1, RegionEpoch: &metapb.RegionEpoch{}, Peers: peers}, peers[0])
 			cluster.PutRegion(region)
@@ -113,6 +116,9 @@ func TestLogStoreCommandGuardAllowsCompatibleRepairAndRemoval(t *testing.T) {
 	}
 	for _, id := range []uint64{3, 4} {
 		cluster.AddLabelsStore(id, 1, map[string]string{core.StoreCapabilityLabel: core.LogOnlyStoreCapability})
+	}
+	for _, store := range cluster.GetStores() {
+		cluster.PutStore(store.Clone(core.SetStoreLogOnlyProtocolVersion(core.LogOnlyProtocolVersion)))
 	}
 	peers := []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, IsWitness: true}}
 	region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers}, peers[0])

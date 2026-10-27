@@ -493,9 +493,10 @@ func (s *Server) startServer() (err error) {
 		ServiceName: constant.SchedulingServiceName,
 	})
 	p := &schedulingpb.Participant{
-		Name:       uniqueName,
-		Id:         uniqueID, // id is unique among all participants
-		ListenUrls: []string{s.cfg.GetAdvertiseListenAddr()},
+		Name:                   uniqueName,
+		Id:                     uniqueID, // id is unique among all participants
+		ListenUrls:             []string{s.cfg.GetAdvertiseListenAddr()},
+		LogOnlyProtocolVersion: core.LogOnlyProtocolVersion,
 	}
 	s.participant.InitInfo(p, constant.SchedulingServiceName+" primary election")
 

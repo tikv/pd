@@ -193,13 +193,14 @@ func fitRegion(stores []*core.StoreInfo, region *core.RegionInfo, rules []*Rule,
 }
 
 type fitWorker struct {
-	stores         []*core.StoreInfo
-	bestFit        RegionFit  // update during execution
-	peers          []*fitPeer // p.selected is updated during execution.
-	rules          []*Rule
-	supportWitness bool
-	needIsolation  bool
-	exit           bool
+	stores           []*core.StoreInfo
+	bestFit          RegionFit  // update during execution
+	peers            []*fitPeer // p.selected is updated during execution.
+	rules            []*Rule
+	supportWitness   bool
+	recoveringLeader bool
+	needIsolation    bool
+	exit             bool
 }
 
 func newFitPeer(stores []*core.StoreInfo, region *core.RegionInfo, fitPeers []*metapb.Peer) []*fitPeer {
@@ -224,12 +225,13 @@ func newFitWorker(stores []*core.StoreInfo, region *core.RegionInfo, rules []*Ru
 		return si > sj || (si == sj && peers[i].GetId() < peers[j].GetId())
 	})
 	return &fitWorker{
-		stores:         stores,
-		bestFit:        RegionFit{RuleFits: make([]*RuleFit, len(rules))},
-		peers:          peers,
-		needIsolation:  needIsolation(rules),
-		rules:          rules,
-		supportWitness: supportWitness,
+		stores:           stores,
+		bestFit:          RegionFit{RuleFits: make([]*RuleFit, len(rules))},
+		peers:            peers,
+		needIsolation:    needIsolation(rules),
+		rules:            rules,
+		supportWitness:   supportWitness,
+		recoveringLeader: region.IsRecoveringLeader(),
 	}
 }
 
@@ -262,7 +264,7 @@ func (w *fitWorker) fitRule(index int) bool {
 		// 3. Don't select leader as witness.
 		// 4. Not selected by other rules.
 		for _, p := range w.peers {
-			if !p.selected && p.store.SupportsPeerCapability(w.rules[index].IsWitness) && MatchLabelConstraints(p.store, w.rules[index].LabelConstraints) && (!p.isLeader || !w.supportWitness || !w.rules[index].IsWitness) {
+			if !p.selected && p.store.SupportsPeerCapability(w.rules[index].IsWitness) && MatchLabelConstraints(p.store, w.rules[index].LabelConstraints) && (!p.isLeader || !w.supportWitness || !w.rules[index].IsWitness || w.recoveringLeader) {
 				candidates = append(candidates, p)
 			}
 		}

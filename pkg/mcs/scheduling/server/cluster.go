@@ -846,6 +846,7 @@ func (c *Cluster) IsBackgroundJobsRunning() bool {
 
 // HandleRegionHeartbeat processes RegionInfo reports from client.
 func (c *Cluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
+	region = core.NormalizeRegionRecoveryStatus(region, c.GetStore(region.GetLeader().GetStoreId()))
 	tracer := core.NewNoopHeartbeatProcessTracer()
 	if c.persistConfig.GetScheduleConfig().EnableHeartbeatBreakdownMetrics {
 		tracer = core.NewHeartbeatProcessTracer()

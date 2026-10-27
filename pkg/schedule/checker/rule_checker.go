@@ -188,6 +188,9 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 			return op, nil
 		}
 	}
+	if region.IsRecoverySchedulingBlocked() {
+		return nil, nil
+	}
 	return c.fixBetterLocation(region, fit, rf)
 }
 

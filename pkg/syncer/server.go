@@ -448,8 +448,12 @@ func buildSyncRegionResponse(startIndex uint64, records []*core.RegionInfo) *pdp
 	stats := make([]*pdpb.RegionStat, len(records))
 	leaders := make([]*metapb.Peer, len(records))
 	buckets := make([]*metapb.Buckets, len(records))
+	recoveryInfos := make([]*pdpb.RegionRecoveryInfo, 0, len(records))
 	for i, r := range records {
 		regions[i] = r.GetMeta()
+		if status := r.GetRecoveryStatus(); status != nil {
+			recoveryInfos = append(recoveryInfos, &pdpb.RegionRecoveryInfo{RegionId: r.GetID(), Status: status})
+		}
 		stats[i] = r.GetStat()
 		leader := &metapb.Peer{}
 		if r.GetLeader() != nil {
@@ -463,12 +467,13 @@ func buildSyncRegionResponse(startIndex uint64, records []*core.RegionInfo) *pdp
 		buckets[i] = bucket
 	}
 	return &pdpb.SyncRegionResponse{
-		Header:        &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
-		Regions:       regions,
-		StartIndex:    startIndex,
-		RegionStats:   stats,
-		RegionLeaders: leaders,
-		Buckets:       buckets,
+		Header:              &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
+		Regions:             regions,
+		RegionRecoveryInfos: recoveryInfos,
+		StartIndex:          startIndex,
+		RegionStats:         stats,
+		RegionLeaders:       leaders,
+		Buckets:             buckets,
 	}
 }
 
@@ -498,6 +503,7 @@ func (s *RegionSyncer) syncFullRegionsLocked(ctx context.Context, name string, s
 	stats := make([]*pdpb.RegionStat, 0, maxSyncRegionBatchSize)
 	leaders := make([]*metapb.Peer, 0, maxSyncRegionBatchSize)
 	buckets := make([]*metapb.Buckets, 0, maxSyncRegionBatchSize)
+	recoveryInfos := make([]*pdpb.RegionRecoveryInfo, 0, maxSyncRegionBatchSize)
 	for syncedIndex, r := range regions {
 		select {
 		case <-ctx.Done():
@@ -510,6 +516,9 @@ func (s *RegionSyncer) syncFullRegionsLocked(ctx context.Context, name string, s
 		}
 		failpoint.Label("doSync")
 		metas = append(metas, r.GetMeta())
+		if status := r.GetRecoveryStatus(); status != nil {
+			recoveryInfos = append(recoveryInfos, &pdpb.RegionRecoveryInfo{RegionId: r.GetID(), Status: status})
+		}
 		stats = append(stats, r.GetStat())
 		leader := &metapb.Peer{}
 		if r.GetLeader() != nil {
@@ -525,12 +534,13 @@ func (s *RegionSyncer) syncFullRegionsLocked(ctx context.Context, name string, s
 			continue
 		}
 		resp := &pdpb.SyncRegionResponse{
-			Header:        &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
-			Regions:       metas,
-			StartIndex:    uint64(lastIndex),
-			RegionStats:   stats,
-			RegionLeaders: leaders,
-			Buckets:       buckets,
+			Header:              &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
+			Regions:             metas,
+			RegionRecoveryInfos: recoveryInfos,
+			StartIndex:          uint64(lastIndex),
+			RegionStats:         stats,
+			RegionLeaders:       leaders,
+			Buckets:             buckets,
 		}
 		if err := syncStream.checkOpen(); err != nil {
 			return err
@@ -548,6 +558,7 @@ func (s *RegionSyncer) syncFullRegionsLocked(ctx context.Context, name string, s
 		stats = stats[:0]
 		leaders = leaders[:0]
 		buckets = buckets[:0]
+		recoveryInfos = recoveryInfos[:0]
 	}
 	log.Info("requested server has completed full synchronization with server",
 		zap.String("requested-server", name), zap.String("server", s.server.Name()), zap.Duration("cost", time.Since(start)))

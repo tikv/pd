@@ -49,3 +49,24 @@ func TestStoreCapabilityAdmission(t *testing.T) {
 	}})
 	require.ErrorContains(t, err, "duplicate")
 }
+
+func TestDedicatedLogOnlyActivationRequiresEveryMemberProtocol(t *testing.T) {
+	cluster := NewBasicCluster()
+	for _, id := range []uint64{1, 2, 3, 4} {
+		labels := []*metapb.StoreLabel{{Key: StoreCapabilityLabel, Value: FullStoreCapability}}
+		if id == 3 {
+			labels[0].Value = LogOnlyStoreCapability
+		}
+		cluster.PutStore(NewStoreInfo(&metapb.Store{Id: id, Labels: labels, LogOnlyProtocolVersion: LogOnlyProtocolVersion}))
+	}
+	peers := []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, IsWitness: true}}
+	require.NoError(t, CheckLogOnlyPeerProtocols(cluster, peers))
+	cluster.PutStore(cluster.GetStore(1).Clone(SetStoreLogOnlyProtocolVersion(0)))
+	require.ErrorContains(t, CheckLogOnlyPeerProtocols(cluster, peers), "Store 1")
+	// Returning to an ordinary Full group does not require legacy Stores to v2.
+	require.NoError(t, CheckLogOnlyPeerProtocols(cluster, peers[:2]))
+	cluster.PutStore(cluster.GetStore(1).Clone(SetStoreLogOnlyProtocolVersion(LogOnlyProtocolVersion)))
+	cluster.PutStore(cluster.GetStore(4).Clone(SetStoreLogOnlyProtocolVersion(0)))
+	withReader := append(peers, &metapb.Peer{Id: 4, StoreId: 4, Role: metapb.PeerRole_Learner})
+	require.ErrorContains(t, CheckLogOnlyPeerProtocols(cluster, withReader), "Store 4")
+}

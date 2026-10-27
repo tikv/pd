@@ -49,3 +49,35 @@ func (f storeCapabilityFilter) Target(_ config.SharedConfigProvider, store *core
 	}
 	return statusStoreNotMatchRule
 }
+
+type logOnlyProtocolFilter struct {
+	scope     string
+	required  bool
+	isWitness bool
+}
+
+// NewLogOnlyProtocolFilter preserves legacy groups while requiring advertised
+// protocol compatibility for candidates entering a dedicated LogOnly group.
+func NewLogOnlyProtocolFilter(scope string, required, isWitness bool) Filter {
+	return logOnlyProtocolFilter{scope: scope, required: required, isWitness: isWitness}
+}
+
+// Scope returns the scheduling component applying the protocol check.
+func (f logOnlyProtocolFilter) Scope() string { return f.scope }
+
+// Type returns the protocol rejection metric category.
+func (logOnlyProtocolFilter) Type() filterType { return storeProtocol }
+
+// Source permits retiring unsupported peers.
+func (logOnlyProtocolFilter) Source(config.SharedConfigProvider, *core.StoreInfo) *plan.Status {
+	return statusOK
+}
+
+// Target checks software compatibility separately from hardware capability.
+func (f logOnlyProtocolFilter) Target(_ config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
+	if (f.required || (f.isWitness && store.GetLabelValue(core.StoreCapabilityLabel) == core.LogOnlyStoreCapability)) &&
+		store.GetMeta().GetLogOnlyProtocolVersion() < core.LogOnlyProtocolVersion {
+		return statusStoreNotMatchRule
+	}
+	return statusOK
+}

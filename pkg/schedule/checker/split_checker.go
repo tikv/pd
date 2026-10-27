@@ -51,6 +51,9 @@ func (*SplitChecker) GetType() string {
 // Check checks whether the region need to split and returns Operator to fix.
 func (c *SplitChecker) Check(region *core.RegionInfo) *operator.Operator {
 	splitCheckerCounter.Inc()
+	if region.IsRecoverySchedulingBlocked() {
+		return nil
+	}
 
 	if c.IsPaused() {
 		splitCheckerPausedCounter.Inc()

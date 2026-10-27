@@ -46,6 +46,7 @@ var (
 	// region filter status
 	statusRegionPendingPeer                 = plan.NewStatus(plan.StatusRegionUnhealthy)
 	statusRegionDownPeer                    = plan.NewStatus(plan.StatusRegionUnhealthy)
+	statusRegionRecovering                  = plan.NewStatus(plan.StatusRegionRecovering)
 	statusRegionEmpty                       = plan.NewStatus(plan.StatusRegionEmpty)
 	statusRegionNotMatchRule                = plan.NewStatus(plan.StatusRegionNotMatchRule)
 	statusRegionNotReplicated               = plan.NewStatus(plan.StatusRegionNotReplicated)

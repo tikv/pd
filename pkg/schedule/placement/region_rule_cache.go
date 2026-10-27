@@ -362,7 +362,7 @@ func ValidateStores(stores []*core.StoreInfo) bool {
 
 // ValidateRegion checks whether region is healthy
 func ValidateRegion(region *core.RegionInfo) bool {
-	return region != nil && region.GetLeader() != nil && len(region.GetDownPeers()) == 0 && region.GetRegionEpoch() != nil
+	return region != nil && !region.IsRecoverySchedulingBlocked() && region.GetLeader() != nil && len(region.GetDownPeers()) == 0 && region.GetRegionEpoch() != nil
 }
 
 // ValidateFit checks whether regionFit is valid

@@ -264,3 +264,6 @@ require (
 // which will cause several different tests to fail. So this is a temporary workaround to use the old version of `testify`.
 // TODO: fix those flasky tests introduced by the behavior change of `Eventually` and `EventuallyWithT` assertions.
 replace github.com/stretchr/testify => github.com/stretchr/testify v1.10.0
+
+// Protocol v2: https://github.com/pingcap/kvproto/pull/1565
+replace github.com/pingcap/kvproto => github.com/jiadebin/kvproto v0.0.0-20261027044000-94bf20d97bd4

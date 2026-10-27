@@ -253,3 +253,13 @@ func splitScatterPendingMetricValue(t *testing.T) float64 {
 	require.FailNow(t, "split scatter pending metric not found")
 	return 0
 }
+
+func TestAskBatchSplitRejectsRecoveringRegion(t *testing.T) {
+	svc, cluster, _ := newTestSchedulingServiceForSplit(t)
+	region := newAffinitySplitTestRegion().Clone(core.WithRecoveryStatus(&pdpb.RegionRecoveryStatus{State: pdpb.RegionRecoveryState_RECOVERING_LEADER}))
+	cluster.PutRegion(region)
+	response, err := svc.AskBatchSplit(context.Background(), &schedulingpb.AskBatchSplitRequest{Region: region.GetMeta(), SplitCount: 1})
+	require.NoError(t, err)
+	require.Contains(t, response.GetHeader().GetError().GetMessage(), "paused during recovery")
+	require.Empty(t, response.GetIds())
+}

@@ -65,14 +65,15 @@ func errRegionIsStale(region *metapb.Region, origin *metapb.Region) error {
 // the properties are Read-Only once created except buckets.
 // the `buckets` could be modified by the request `report buckets` with greater version.
 type RegionInfo struct {
-	meta         *metapb.Region
-	learners     []*metapb.Peer
-	witnesses    []*metapb.Peer
-	voters       []*metapb.Peer
-	leader       *metapb.Peer
-	downPeers    []*pdpb.PeerStats
-	pendingPeers []*metapb.Peer
-	term         uint64
+	meta           *metapb.Region
+	learners       []*metapb.Peer
+	witnesses      []*metapb.Peer
+	voters         []*metapb.Peer
+	leader         *metapb.Peer
+	recoveryStatus *pdpb.RegionRecoveryStatus
+	downPeers      []*pdpb.PeerStats
+	pendingPeers   []*metapb.Peer
+	term           uint64
 	// cpuUsage is deprecated and will be removed in the future.
 	// We should use `cpuStats` instead.
 	cpuUsage                  uint64
@@ -218,6 +219,7 @@ type RegionHeartbeatResponse interface {
 
 // RegionHeartbeatRequest is the interface for region heartbeat request.
 type RegionHeartbeatRequest interface {
+	GetRecoveryStatus() *pdpb.RegionRecoveryStatus
 	GetTerm() uint64
 	GetRegion() *metapb.Region
 	GetLeader() *metapb.Peer
@@ -248,6 +250,7 @@ func RegionFromHeartbeat(heartbeat RegionHeartbeatRequest, flowRoundDivisor uint
 		term:             heartbeat.GetTerm(),
 		meta:             heartbeat.GetRegion(),
 		leader:           heartbeat.GetLeader(),
+		recoveryStatus:   heartbeat.GetRecoveryStatus(),
 		downPeers:        heartbeat.GetDownPeers(),
 		pendingPeers:     heartbeat.GetPendingPeers(),
 		writtenBytes:     heartbeat.GetBytesWritten(),
@@ -334,6 +337,7 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 		term:                      r.term,
 		meta:                      typeutil.DeepClone(r.meta, RegionFactory),
 		leader:                    typeutil.DeepClone(r.leader, RegionPeerFactory),
+		recoveryStatus:            r.recoveryStatus,
 		downPeers:                 downPeers,
 		pendingPeers:              pendingPeers,
 		cpuUsage:                  r.cpuUsage,
@@ -958,6 +962,9 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 					)
 				}
 				// We check it first and do not return because the log is important for us to investigate,
+				saveCache, needSync = true, true
+			}
+			if !proto.Equal(region.GetRecoveryStatus(), origin.GetRecoveryStatus()) {
 				saveCache, needSync = true, true
 			}
 			if len(region.GetPeers()) != len(origin.GetPeers()) {

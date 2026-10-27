@@ -394,6 +394,9 @@ func (s *Service) AskBatchSplit(_ context.Context, request *schedulingpb.AskBatc
 		return nil, errs.ErrSchedulerTiKVSplitDisabled.FastGenByArgs()
 	}
 	reqRegion := request.GetRegion()
+	if region := c.GetRegion(reqRegion.GetId()); region != nil && region.IsRecoverySchedulingBlocked() {
+		return &schedulingpb.AskBatchSplitResponse{Header: wrapErrorToHeader(schedulingpb.ErrorType_UNKNOWN, "region split is paused during recovery")}, nil
+	}
 	splitCount := request.GetSplitCount()
 	err := c.ValidRegion(reqRegion)
 	if err != nil {
