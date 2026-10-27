@@ -29,7 +29,7 @@ func TestRecoveryFreezesDiscretionaryRegionSelection(t *testing.T) {
 	region := core.NewRegionInfo(&metapb.Region{Id: 1}, nil, core.WithRecoveryStatus(&pdpb.RegionRecoveryStatus{State: pdpb.RegionRecoveryState_RECOVERING_LEADER}))
 	require.False(t, IsRegionHealthy(region))
 	require.False(t, IsRegionHealthyAllowPending(region))
-	require.Equal(t, plan.StatusRegionRecovering, NewRegionDownFilter().Select(region).StatusCode)
+	require.Equal(t, plan.StatusCode(plan.StatusRegionRecovering), NewRegionDownFilter().Select(region).StatusCode)
 	region = region.Clone(core.WithRecoveryStatus(nil))
 	require.True(t, IsRegionHealthy(region))
 	require.True(t, NewRegionDownFilter().Select(region).IsOK())

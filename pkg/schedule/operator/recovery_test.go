@@ -35,6 +35,8 @@ func newRecoveryOperatorCluster(t *testing.T) (*mockcluster.Cluster, *core.Regio
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	_, _, err := cluster.AllocID(10)
+	require.NoError(t, err) // Reserve the manually assigned Region/peer identities.
 	for _, id := range []uint64{1, 2, 4} {
 		cluster.AddLabelsStore(id, 1, map[string]string{core.StoreCapabilityLabel: core.FullStoreCapability})
 	}
@@ -94,7 +96,28 @@ func TestRecoveringLeaderCanRepairFullWithoutOrdinaryLeaderTransfer(t *testing.T
 	// Each later membership step is revalidated against the reported state.
 	for advances := 0; op.Check(region) != nil; advances++ {
 		require.Less(t, advances, op.Len()+1, "repair operator must make bounded progress")
-		region = ApplyOperatorStep(region, op)
+		switch step := op.Check(region).(type) {
+		case ChangePeerV2Enter:
+			opts := make([]core.RegionCreateOption, 0, len(step.PromoteLearners)+len(step.DemoteVoters))
+			for _, peer := range step.PromoteLearners {
+				opts = append(opts, core.WithRole(peer.PeerID, metapb.PeerRole_IncomingVoter))
+			}
+			for _, peer := range step.DemoteVoters {
+				opts = append(opts, core.WithRole(peer.PeerID, metapb.PeerRole_DemotingVoter))
+			}
+			region = region.Clone(opts...)
+		case ChangePeerV2Leave:
+			opts := make([]core.RegionCreateOption, 0, len(step.PromoteLearners)+len(step.DemoteVoters))
+			for _, peer := range step.PromoteLearners {
+				opts = append(opts, core.WithRole(peer.PeerID, metapb.PeerRole_Voter))
+			}
+			for _, peer := range step.DemoteVoters {
+				opts = append(opts, core.WithRole(peer.PeerID, metapb.PeerRole_Learner))
+			}
+			region = region.Clone(opts...)
+		default:
+			region = ApplyOperatorStep(region, op)
+		}
 		cluster.PutRegion(region)
 		controller.Dispatch(region, DispatchFromHeartBeat, nil)
 		if streams.MsgLength() > 0 {
