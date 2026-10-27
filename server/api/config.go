@@ -18,9 +18,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"reflect"
+	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/unrolled/render"
@@ -35,8 +38,10 @@ import (
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/jsonutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/reflectutil"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 )
@@ -163,19 +168,206 @@ func (h *confHandler) SetConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	oldKeyspace := h.svr.GetPersistOptions().GetKeyspaceConfig()
+	cfg.Keyspace = *oldKeyspace.Clone()
 	updates, err := h.prepareConfigUpdates(cfg, conf)
 	if err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	for _, update := range updates {
-		if err := update(); err != nil {
-			h.rd.JSON(w, http.StatusBadRequest, err.Error())
-			return
+	// Validate every configuration group before invoking any setters. Separate
+	// persistence writes and remote service calls are still not a transaction.
+	prefixes := slices.Sorted(maps.Keys(updates))
+	for _, dryRun := range []bool{true, false} {
+		for _, prefix := range prefixes {
+			if err := h.updateConfig(cfg, prefix, updates[prefix], oldKeyspace, dryRun); err != nil {
+				h.rd.JSON(w, http.StatusBadRequest, err.Error())
+				return
+			}
 		}
 	}
 
 	h.rd.JSON(w, http.StatusOK, "The config is updated.")
+}
+
+// prepareConfigUpdates merges related fields into a private candidate, without
+// validating intermediate combinations or changing the running configuration.
+func (h *confHandler) prepareConfigUpdates(cfg *config.Config, conf map[string]any) (map[string]map[string]any, error) {
+	oldFallback := cfg.Microservice.EnableResourceManagerFallback
+	targets := map[string]any{
+		"schedule": &cfg.Schedule, "replication": &cfg.Replication,
+		"pd-server": &cfg.PDServerCfg, "keyspace": &cfg.Keyspace,
+		"micro-service": &cfg.Microservice,
+	}
+	updates := make(map[string]map[string]any)
+	for _, k := range slices.Sorted(maps.Keys(conf)) {
+		value, key := conf[k], k
+		if !strings.Contains(k, ".") {
+			key = reflectutil.FindJSONFullTagByChildTag(reflect.TypeFor[config.Config](), k)
+		}
+		if key == "" {
+			return nil, errors.Errorf("config item %s not found", k)
+		}
+		path := strings.Split(key, ".")
+		prefix, name := path[0], path[len(path)-1]
+		patch := updates[prefix]
+		if patch == nil {
+			patch = make(map[string]any)
+		}
+		target, grouped := targets[prefix]
+		if grouped {
+			if prefix == "schedule" {
+				if h.svr.IsTTLConfigExist(key) {
+					return nil, errors.Errorf("need to clean up TTL first for %s", key)
+				}
+			} else {
+				// Preserve encoding/json's case-insensitive matching in legacy setters.
+				for field := range reflect.TypeOf(target).Elem().Fields() {
+					tag, _, _ := strings.Cut(field.Tag.Get("json"), ",")
+					if strings.EqualFold(tag, name) {
+						name = tag
+						break
+					}
+				}
+			}
+			if !reflectutil.FindSameFieldByJSON(target, map[string]any{name: value}) {
+				return nil, errors.Errorf("config item %s not found", name)
+			}
+			if _, exists := patch[name]; exists && prefix == "schedule" {
+				return nil, errors.Errorf("config item %s specified more than once", name)
+			}
+			// Check each supplied value so another spelling cannot hide a type error.
+			probe := reflect.New(reflect.TypeOf(target).Elem()).Interface()
+			if _, _, err := jsonutil.AddKeyValue(probe, name, value); err != nil {
+				return nil, err
+			}
+		} else {
+			switch prefix {
+			case "replication-mode":
+				if len(path) < 2 {
+					return nil, errors.Errorf("cannot update config prefix %s", prefix)
+				}
+				data, err := json.Marshal(getConfigMap(make(map[string]any), path[1:], value))
+				if err != nil {
+					return nil, err
+				}
+				updated, found, err := jsonutil.MergeJSONObject(&cfg.ReplicationMode, data)
+				if err != nil {
+					return nil, err
+				}
+				if !found {
+					return nil, errors.Errorf("config item %s not found", name)
+				}
+				if !updated {
+					continue
+				}
+			case "log":
+				if err := h.updateLogLevel(path, value, true); err != nil {
+					return nil, err
+				}
+			case "cluster-version":
+				if err := h.updateClusterVersion(value, true); err != nil {
+					return nil, err
+				}
+				name = prefix
+			case "controller":
+				if err := h.updateControllerConfig(name, value, true); err != nil {
+					return nil, err
+				}
+			default:
+				return nil, errors.Errorf("config prefix %s not found", prefix)
+			}
+		}
+		patch[name] = value
+		updates[prefix] = patch
+	}
+	for prefix, target := range targets {
+		patch, ok := updates[prefix]
+		if !ok {
+			continue
+		}
+		data, err := json.Marshal(patch)
+		if err != nil {
+			return nil, err
+		}
+		updated, _, err := jsonutil.MergeJSONObject(target, data)
+		if err != nil {
+			return nil, err
+		}
+		if !updated && prefix != "schedule" {
+			delete(updates, prefix)
+		}
+	}
+	if cfg.Microservice.EnableResourceManagerFallback != oldFallback {
+		return nil, errors.New("cannot update config item enable-resource-manager-fallback dynamically")
+	}
+	return updates, nil
+}
+
+func (h *confHandler) updateConfig(cfg *config.Config, prefix string, patch map[string]any, oldKeyspace *config.KeyspaceConfig, dryRun bool) error {
+	switch prefix {
+	case "schedule":
+		if dryRun {
+			if err := cfg.Schedule.Validate(); err != nil {
+				return err
+			}
+			return cfg.Schedule.Deprecated()
+		}
+		data, err := json.Marshal(patch)
+		if err != nil {
+			return err
+		}
+		// Patch the latest schedule configuration under its persistence lock.
+		return h.svr.PatchScheduleConfig(data)
+	case "replication":
+		if dryRun {
+			return h.svr.ValidateReplicationConfig(cfg.Replication)
+		}
+		return h.svr.SetReplicationConfig(cfg.Replication)
+	case "replication-mode":
+		if dryRun {
+			if config.NormalizeReplicationMode(cfg.ReplicationMode.ReplicationMode) == "" {
+				return errors.Errorf("invalid replication mode: %v", cfg.ReplicationMode.ReplicationMode)
+			}
+			return nil
+		}
+		return h.svr.SetReplicationModeConfig(cfg.ReplicationMode)
+	case "pd-server":
+		if dryRun {
+			return h.svr.ValidatePDServerConfig(&cfg.PDServerCfg)
+		}
+		return h.svr.SetPDServerConfig(cfg.PDServerCfg)
+	case "keyspace":
+		_, groupsChanged := patch["meta-service-groups"]
+		if dryRun {
+			if err := cfg.Keyspace.Validate(); err != nil {
+				return err
+			}
+			if groupsChanged {
+				return config.AdjustMetaServiceGroups(cfg.Keyspace.MetaServiceGroups)
+			}
+			return nil
+		}
+		if groupsChanged {
+			return h.updateMetaServiceGroups(oldKeyspace, &cfg.Keyspace)
+		}
+		return h.svr.SetKeyspaceConfig(oldKeyspace, &cfg.Keyspace)
+	case "micro-service":
+		if !dryRun {
+			return h.svr.SetMicroserviceConfig(cfg.Microservice)
+		}
+	case "log":
+		return h.updateLogLevel([]string{"log", "level"}, patch["level"], dryRun)
+	case "cluster-version":
+		return h.updateClusterVersion(patch[prefix], dryRun)
+	case "controller":
+		for _, name := range slices.Sorted(maps.Keys(patch)) {
+			if err := h.updateControllerConfig(name, patch[name], dryRun); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (h *confHandler) updateMetaServiceGroups(oldCfg, newCfg *config.KeyspaceConfig) error {
@@ -207,11 +399,17 @@ func (h *confHandler) updateMetaServiceGroups(oldCfg, newCfg *config.KeyspaceCon
 	})
 }
 
-func (h *confHandler) updateLogLevel(kp []string, value any) error {
+func (h *confHandler) updateLogLevel(kp []string, value any, dryRun bool) error {
 	if len(kp) != 2 || kp[1] != "level" {
 		return errors.Errorf("only support changing log level")
 	}
 	if level, ok := value.(string); ok {
+		if !logutil.IsLevelLegal(level) {
+			return errors.Errorf("log level %s is illegal", level)
+		}
+		if dryRun {
+			return nil
+		}
 		err := h.svr.SetLogLevel(level)
 		if err != nil {
 			return err
@@ -222,8 +420,12 @@ func (h *confHandler) updateLogLevel(kp []string, value any) error {
 	return errors.Errorf("input value %v is illegal", value)
 }
 
-func (h *confHandler) updateClusterVersion(value any) error {
+func (h *confHandler) updateClusterVersion(value any, dryRun bool) error {
 	if version, ok := value.(string); ok {
+		if dryRun {
+			_, err := versioninfo.ParseVersion(version)
+			return err
+		}
 		err := h.svr.SetClusterVersion(version)
 		if err != nil {
 			return err
@@ -556,7 +758,7 @@ func unmarshalRemoteConfig(data []byte) (*config.Config, error) {
 	return &cfg, nil
 }
 
-func (h *confHandler) updateControllerConfig(key string, value any) error {
+func (h *confHandler) updateControllerConfig(key string, value any, dryRun bool) error {
 	k := reflectutil.FindJSONFullTagByChildTag(reflect.TypeFor[rm.ControllerConfig](), key)
 	if k == "" {
 		return errors.Errorf("controller config item %s not found", key)
@@ -564,6 +766,12 @@ func (h *confHandler) updateControllerConfig(key string, value any) error {
 	// Don't allow updating child items, only allow updating top-level items.
 	if k != key {
 		return errors.Errorf("can't update controller child item %s, only top-level items are allowed", key)
+	}
+	if dryRun {
+		// Use a fresh value to avoid changing pointers in the live configuration.
+		var cfg rm.ControllerConfig
+		_, _, err := jsonutil.AddKeyValue(&cfg, key, value)
+		return err
 	}
 	addrs := h.svr.GetMember().GetServingUrls()
 	if len(addrs) == 0 {

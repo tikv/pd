@@ -241,9 +241,11 @@ func (suite *configTestSuite) checkConfigBatchValidation(cluster *tests.TestClus
 		{"cluster-version", 1, "input value 1 is illegal"},
 		{"controller.enable-controller-trace-log", true, "cannot unmarshal bool"},
 	} {
-		// Repetition exercises different map iteration orders on an unfixed
-		// server. Every otherwise valid item changes its current value.
-		for range 8 {
+		attempts := 1
+		if testCase.key == "schedule.schedulers" {
+			attempts = 8 // Exercise map iteration order for the original reproducer.
+		}
+		for range attempts {
 			patch := map[string]any{
 				"replication.max-replicas":      before.Replication.MaxReplicas + 1,
 				"pd-server.metric-storage":      "http://127.0.0.1:9999",
@@ -312,39 +314,37 @@ func (suite *configTestSuite) checkConfigBatchRelatedFields(cluster *tests.TestC
 			"keyspace.check-region-split-interval": before.Keyspace.CheckRegionSplitInterval.String(),
 		})
 	}()
-	for range 8 {
-		// Alternate complete, valid combinations. Applying isolation-level or
-		// the interval individually can fail against the previous combination.
-		for _, label := range []string{"batch-zone", "batch-rack"} {
-			patch := map[string]any{
-				"location-labels":                      label,
-				"replication.isolation-level":          label,
-				"high-space-ratio":                     0.9,
-				"schedule.low-space-ratio":             0.95,
-				"merge-schedule-limit":                 0,
-				"keyspace.wait-region-split-timeout":   "100ms",
-				"keyspace.check-region-split-interval": "50ms",
-			}
-			if label == "batch-rack" {
-				delete(patch, "location-labels")
-				patch["replication.LOCATION-LABELS"] = label
-			}
-			post(patch)
-			after := svr.GetConfig()
-			re.Equal([]string{label}, []string(after.Replication.LocationLabels))
-			re.Equal(label, after.Replication.IsolationLevel)
-			re.Equal(0.9, after.Schedule.HighSpaceRatio)
-			re.Equal(0.95, after.Schedule.LowSpaceRatio)
-			re.Zero(after.Schedule.MergeScheduleLimit)
-			re.Equal(100*time.Millisecond, after.Keyspace.WaitRegionSplitTimeout.Duration)
-			re.Equal(50*time.Millisecond, after.Keyspace.CheckRegionSplitInterval.Duration)
-			var persisted config.Config
-			exists, err := svr.GetStorage().LoadConfig(&persisted)
-			re.NoError(err)
-			re.True(exists)
-			re.Equal(after.Replication, persisted.Replication)
-			re.Equal(after.Keyspace, persisted.Keyspace)
+	// Alternate complete, valid combinations. Applying isolation-level or
+	// the interval individually can fail against the previous combination.
+	for _, label := range []string{"batch-zone", "batch-rack"} {
+		patch := map[string]any{
+			"location-labels":                      label,
+			"replication.isolation-level":          label,
+			"high-space-ratio":                     0.9,
+			"schedule.low-space-ratio":             0.95,
+			"merge-schedule-limit":                 0,
+			"keyspace.wait-region-split-timeout":   "100ms",
+			"keyspace.check-region-split-interval": "50ms",
 		}
+		if label == "batch-rack" {
+			delete(patch, "location-labels")
+			patch["replication.LOCATION-LABELS"] = label
+		}
+		post(patch)
+		after := svr.GetConfig()
+		re.Equal([]string{label}, []string(after.Replication.LocationLabels))
+		re.Equal(label, after.Replication.IsolationLevel)
+		re.Equal(0.9, after.Schedule.HighSpaceRatio)
+		re.Equal(0.95, after.Schedule.LowSpaceRatio)
+		re.Zero(after.Schedule.MergeScheduleLimit)
+		re.Equal(100*time.Millisecond, after.Keyspace.WaitRegionSplitTimeout.Duration)
+		re.Equal(50*time.Millisecond, after.Keyspace.CheckRegionSplitInterval.Duration)
+		var persisted config.Config
+		exists, err := svr.GetStorage().LoadConfig(&persisted)
+		re.NoError(err)
+		re.True(exists)
+		re.Equal(after.Replication, persisted.Replication)
+		re.Equal(after.Keyspace, persisted.Keyspace)
 	}
 }
 

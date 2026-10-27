@@ -1374,80 +1374,76 @@ func (s *Server) GetReplicationConfig() *sc.ReplicationConfig {
 	return s.persistOptions.GetReplicationConfig().Clone()
 }
 
-// ValidateReplicationConfig checks a candidate against the current placement
-// configuration without changing rules or persisting configuration.
+// ValidateReplicationConfig checks configuration and placement rules without
+// initializing the rule manager, updating rules, or persisting configuration.
 func (s *Server) ValidateReplicationConfig(cfg sc.ReplicationConfig) error {
-	if err := cfg.Validate(); err != nil {
-		return err
-	}
-	old := s.persistOptions.GetReplicationConfig()
-	if !cfg.EnablePlacementRules && !old.EnablePlacementRules {
-		return nil
-	}
-	rc := s.GetRaftCluster()
-	if rc == nil {
-		return errs.ErrNotBootstrapped.GenWithStackByArgs()
-	}
-	if !cfg.EnablePlacementRules {
-		for _, store := range rc.GetStores() {
-			if !store.IsRemoved() && !store.IsTiKV() {
-				return errors.New("cannot disable placement rules with TiFlash nodes")
-			}
-		}
-		return nil
-	}
-	// Initialization can load or create rules and remains part of the setter.
-	if !rc.GetRuleManager().IsInitialized() {
-		return nil
-	}
-	rule, err := s.replicationRuleForConfig(&cfg, old)
-	if err != nil || rule == nil {
-		return err
-	}
-	rule.Count = int(cfg.MaxReplicas)
-	rule.LocationLabels = cfg.LocationLabels
-	rule.IsolationLevel = cfg.IsolationLevel
-	return rc.GetRuleManager().AdjustRule(rule, "")
-}
-
-func (s *Server) replicationRuleForConfig(cfg, old *sc.ReplicationConfig) (*placement.Rule, error) {
-	if !cfg.EnablePlacementRules ||
-		(cfg.MaxReplicas == old.MaxReplicas && typeutil.AreStringSlicesEqual(cfg.LocationLabels, old.LocationLabels) && cfg.IsolationLevel == old.IsolationLevel) {
-		return nil, nil
-	}
-	rc := s.GetRaftCluster()
-	if rc == nil {
-		return nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
-	}
-	// Replication settings can update only the unchanged, full-range default rule.
-	rule := rc.GetRuleManager().GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
-	if rule == nil || len(rule.StartKey) != 0 || len(rule.EndKey) != 0 {
-		return nil, errors.New("cannot update MaxReplicas, LocationLabels or IsolationLevel when placement rules feature is enabled and not only default rule exists, please update rule instead")
-	}
-	if rule.Count != int(old.MaxReplicas) || !typeutil.AreStringSlicesEqual(rule.LocationLabels, []string(old.LocationLabels)) || rule.IsolationLevel != old.IsolationLevel {
-		return nil, errors.New("cannot to update replication config, the default rules do not consistent with replication config, please update rule instead")
-	}
-	return rule, nil
+	return s.setReplicationConfigInner(cfg, true)
 }
 
 // SetReplicationConfig sets the replication config.
 func (s *Server) SetReplicationConfig(cfg sc.ReplicationConfig) error {
-	if err := s.ValidateReplicationConfig(cfg); err != nil {
+	return s.setReplicationConfigInner(cfg, false)
+}
+
+func (s *Server) setReplicationConfigInner(cfg sc.ReplicationConfig, dryRun bool) error {
+	if err := cfg.Validate(); err != nil {
 		return err
 	}
 	old := s.persistOptions.GetReplicationConfig()
-	if cfg.EnablePlacementRules && !old.EnablePlacementRules {
+	if cfg.EnablePlacementRules != old.EnablePlacementRules {
 		rc := s.GetRaftCluster()
 		if rc == nil {
 			return errs.ErrNotBootstrapped.GenWithStackByArgs()
 		}
-		if err := rc.GetRuleManager().Initialize(int(cfg.MaxReplicas), cfg.LocationLabels, cfg.IsolationLevel, false); err != nil {
-			return err
+		if cfg.EnablePlacementRules {
+			// initialize rule manager.
+			if !dryRun {
+				if err := rc.GetRuleManager().Initialize(int(cfg.MaxReplicas), cfg.LocationLabels, cfg.IsolationLevel, false); err != nil {
+					return err
+				}
+			}
+		} else {
+			// NOTE: can be removed after placement rules feature is enabled by default.
+			for _, s := range rc.GetStores() {
+				if !s.IsRemoved() && !s.IsTiKV() {
+					return errors.New("cannot disable placement rules with TiFlash nodes")
+				}
+			}
 		}
 	}
-	rule, err := s.replicationRuleForConfig(&cfg, old)
-	if err != nil {
-		return err
+
+	var rule *placement.Rule
+	if cfg.EnablePlacementRules {
+		rc := s.GetRaftCluster()
+		if rc == nil {
+			return errs.ErrNotBootstrapped.GenWithStackByArgs()
+		}
+		// Initialization belongs to the apply phase and may create the default rule.
+		if dryRun && !rc.GetRuleManager().IsInitialized() {
+			return nil
+		}
+		// replication.MaxReplicas won't work when placement rule is enabled and not only have one default rule.
+		defaultRule := rc.GetRuleManager().GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
+
+		CheckInDefaultRule := func() error {
+			// replication config won't work when placement rule is enabled and exceeds one default rule
+			if defaultRule == nil ||
+				len(defaultRule.StartKey) != 0 || len(defaultRule.EndKey) != 0 {
+				return errors.New("cannot update MaxReplicas, LocationLabels or IsolationLevel when placement rules feature is enabled and not only default rule exists, please update rule instead")
+			}
+			if defaultRule.Count != int(old.MaxReplicas) || !typeutil.AreStringSlicesEqual(defaultRule.LocationLabels, []string(old.LocationLabels)) || defaultRule.IsolationLevel != old.IsolationLevel {
+				return errors.New("cannot to update replication config, the default rules do not consistent with replication config, please update rule instead")
+			}
+
+			return nil
+		}
+
+		if cfg.MaxReplicas != old.MaxReplicas || !typeutil.AreStringSlicesEqual(cfg.LocationLabels, old.LocationLabels) || cfg.IsolationLevel != old.IsolationLevel {
+			if err := CheckInDefaultRule(); err != nil {
+				return err
+			}
+			rule = defaultRule
+		}
 	}
 
 	if rule != nil {
@@ -1458,11 +1454,18 @@ func (s *Server) SetReplicationConfig(cfg sc.ReplicationConfig) error {
 		if rc == nil {
 			return errs.ErrNotBootstrapped.GenWithStackByArgs()
 		}
+		if dryRun {
+			return rc.GetRuleManager().AdjustRule(rule, "")
+		}
 		if err := rc.GetRuleManager().SetRule(rule); err != nil {
 			log.Error("failed to update rule count",
 				errs.ZapError(err))
 			return err
 		}
+	}
+
+	if dryRun {
+		return nil
 	}
 
 	s.persistOptions.SetReplicationConfig(&cfg)
