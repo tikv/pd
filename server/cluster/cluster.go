@@ -1651,6 +1651,7 @@ func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool) error {
 			core.SetStoreAddress(store.Address, store.StatusAddress, store.PeerAddress),
 			core.SetStoreVersion(store.GitHash, store.Version),
 			core.SetStoreLogOnlyProtocolVersion(store.GetLogOnlyProtocolVersion()),
+			core.SetStoreTxnProtocolVersionRange(store.GetTxnProtocolVersionRange()),
 			core.SetStoreLabels(labels),
 			core.SetStoreStartTime(store.StartTimestamp),
 			core.SetStoreDeployPath(store.DeployPath))

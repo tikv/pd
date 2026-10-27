@@ -55,9 +55,11 @@ func TestStoreProtocolVersionSurvivesRegistrationAndLabels(t *testing.T) {
 	require.NoError(t, c.PutMetaStore(meta))
 	meta = proto.Clone(meta).(*metapb.Store)
 	meta.LogOnlyProtocolVersion = core.LogOnlyProtocolVersion
+	meta.TxnProtocolVersionRange = &metapb.TxnProtocolVersionRange{Min: 1, Max: 2}
 	require.NoError(t, c.PutMetaStore(meta))
 	require.NoError(t, c.UpdateStoreLabels(1, []*metapb.StoreLabel{{Key: "zone", Value: "z1"}}, false))
 	require.Equal(t, core.LogOnlyProtocolVersion, c.GetStore(1).GetMeta().GetLogOnlyProtocolVersion())
+	require.True(t, proto.Equal(meta.GetTxnProtocolVersionRange(), c.GetStore(1).GetMeta().GetTxnProtocolVersionRange()))
 }
 
 func TestDeclaredProtocolCannotDowngradeAfterLeavingWitnessGroup(t *testing.T) {

@@ -1478,7 +1478,7 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 					SenderId:  request.GetHeader().GetSenderId(),
 				},
 				Region:          request.GetRegion(),
-				RecoveryStatus:  request.GetRecoveryStatus(),
+				RecoveryStatus:  recoveryStatusForForwarding(region, store, rc.GetRegion(region.GetID())),
 				Leader:          request.GetLeader(),
 				DownPeers:       request.GetDownPeers(),
 				PendingPeers:    request.GetPendingPeers(),

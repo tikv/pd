@@ -52,13 +52,13 @@ func (f storeCapabilityFilter) Target(_ config.SharedConfigProvider, store *core
 
 type logOnlyProtocolFilter struct {
 	scope     string
-	required  bool
+	required  uint32
 	isWitness bool
 }
 
 // NewLogOnlyProtocolFilter preserves legacy groups while requiring advertised
 // protocol compatibility for candidates entering a dedicated LogOnly group.
-func NewLogOnlyProtocolFilter(scope string, required, isWitness bool) Filter {
+func NewLogOnlyProtocolFilter(scope string, required uint32, isWitness bool) Filter {
 	return logOnlyProtocolFilter{scope: scope, required: required, isWitness: isWitness}
 }
 
@@ -75,8 +75,11 @@ func (logOnlyProtocolFilter) Source(config.SharedConfigProvider, *core.StoreInfo
 
 // Target checks software compatibility separately from hardware capability.
 func (f logOnlyProtocolFilter) Target(_ config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
-	if (f.required || (f.isWitness && store.GetLabelValue(core.StoreCapabilityLabel) == core.LogOnlyStoreCapability)) &&
-		store.GetMeta().GetLogOnlyProtocolVersion() < core.LogOnlyProtocolVersion {
+	minimum := f.required
+	if f.isWitness && store.GetLabelValue(core.StoreCapabilityLabel) == core.LogOnlyStoreCapability {
+		minimum = max(minimum, core.LogOnlyProtocolVersion)
+	}
+	if store.GetMeta().GetLogOnlyProtocolVersion() < minimum {
 		return statusStoreNotMatchRule
 	}
 	return statusOK

@@ -266,4 +266,4 @@ require (
 replace github.com/stretchr/testify => github.com/stretchr/testify v1.10.0
 
 // Protocol v2: https://github.com/pingcap/kvproto/pull/1565
-replace github.com/pingcap/kvproto => github.com/jiadebin/kvproto v0.0.0-20261027045804-5b95242e89e1
+replace github.com/pingcap/kvproto => github.com/jiadebin/kvproto v0.0.0-20261027053349-e42c16d22718

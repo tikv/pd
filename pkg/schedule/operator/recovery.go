@@ -65,6 +65,10 @@ func ValidateSchedulingCommand(ci *core.BasicCluster, region *core.RegionInfo, c
 			if err := validatePeerCapability(ci, peer.GetStoreId(), false); err != nil {
 				return err
 			}
+			store := ci.GetStore(peer.GetStoreId())
+			if store == nil || store.GetMeta().GetLogOnlyProtocolVersion() < core.RequiredPeerProtocolVersion(ci, region) {
+				return fmt.Errorf("leader target Store %d does not support required reader protocol", peer.GetStoreId())
+			}
 		}
 	}
 	if err := validateCommandPeerProtocols(ci, region, cmd); err != nil {
@@ -221,5 +225,5 @@ func validateCommandPeerProtocols(ci *core.BasicCluster, region *core.RegionInfo
 	for _, peer := range peers {
 		targets = append(targets, peer)
 	}
-	return core.CheckLogOnlyPeerProtocols(ci, targets)
+	return core.CheckLogOnlyPeerProtocols(ci, targets, region.GetRequiredReaderProtocolVersion())
 }

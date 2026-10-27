@@ -15,6 +15,7 @@
 package filter
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -23,6 +24,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/mock/mockcluster"
+	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/plan"
 )
 
@@ -34,4 +37,37 @@ func TestRecoveryFreezesDiscretionaryRegionSelection(t *testing.T) {
 	region = region.Clone(core.WithRecoveryStatus(nil))
 	require.True(t, IsRegionHealthy(region))
 	require.True(t, NewRegionDownFilter().Select(region).IsOK())
+}
+
+func TestReaderProtocolCandidateFilterPreservesLegacyAndRetirement(t *testing.T) {
+	legacy := core.NewStoreInfo(&metapb.Store{Id: 1})
+	modern := legacy.Clone(core.SetStoreLogOnlyProtocolVersion(2))
+	required := NewLogOnlyProtocolFilter("reader-floor", 2, false)
+	require.False(t, required.Target(nil, legacy).IsOK())
+	require.True(t, required.Target(nil, modern).IsOK())
+	require.True(t, required.Source(nil, legacy).IsOK())
+	require.True(t, NewLogOnlyProtocolFilter("legacy", 0, false).Target(nil, legacy).IsOK())
+	dedicated := core.NewStoreInfoWithLabel(2, map[string]string{core.StoreCapabilityLabel: core.LogOnlyStoreCapability})
+	require.False(t, NewLogOnlyProtocolFilter("new-witness", 0, true).Target(nil, dedicated).IsOK())
+}
+
+func TestPlacementCandidatesHonorReaderFloorWithoutWitness(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	for id := uint64(1); id <= 4; id++ {
+		cluster.AddLeaderStore(id, 1)
+	}
+	cluster.AddLeaderRegion(1, 1, 2, 3)
+	region := cluster.GetRegion(1).Clone(core.WithRecoveryStatus(&pdpb.RegionRecoveryStatus{RequiredReaderProtocolVersion: 2}))
+	for _, f := range []Filter{
+		newRuleFitFilter("reader", cluster.GetBasicCluster(), cluster.GetRuleManager(), region, nil, 1),
+		newRuleLeaderFitFilter("reader", cluster.GetBasicCluster(), cluster.GetRuleManager(), region, nil, 1, true),
+		newRuleWitnessFitFilter("reader", cluster.GetBasicCluster(), cluster.GetRuleManager(), region, nil, 1),
+	} {
+		require.False(t, f.Target(cluster.GetSharedConfig(), cluster.GetStore(2)).IsOK())
+	}
+	region = region.Clone(core.WithRecoveryStatus(nil))
+	f := newRuleLeaderFitFilter("legacy", cluster.GetBasicCluster(), cluster.GetRuleManager(), region, nil, 1, true)
+	require.True(t, f.Target(cluster.GetSharedConfig(), cluster.GetStore(2)).IsOK())
 }

@@ -52,3 +52,24 @@ func TestSparseRecoveryStatusSurvivesRegionSyncAndPreservesLegacyAbsence(t *test
 	require.True(t, proto.Equal(status, basic.GetRegion(2).GetRecoveryStatus()))
 	require.True(t, basic.GetRegion(2).IsRecoverySchedulingBlocked())
 }
+
+func TestRegionSyncCannotClearObservedReaderProtocolFloor(t *testing.T) {
+	peer := &metapb.Peer{Id: 1, StoreId: 1}
+	meta := &metapb.Region{Id: 1, RegionEpoch: &metapb.RegionEpoch{}, Peers: []*metapb.Peer{peer}}
+	basic := core.NewBasicCluster()
+	backend := storage.NewStorageWithMemoryBackend()
+	server := mockserver.NewMockServer(context.Background(), nil, nil, backend, basic)
+	syncer := NewRegionSyncer(server)
+	initial := core.NewRegionInfo(meta, peer, core.WithRecoveryStatus(&pdpb.RegionRecoveryStatus{RequiredReaderProtocolVersion: 2, DataServiceReady: true, SizeSource: pdpb.RegionSizeSource_SIZE_CURRENT}))
+	basic.PutRegion(initial)
+	for _, status := range []*pdpb.RegionRecoveryStatus{nil, {RequiredReaderProtocolVersion: 1, State: pdpb.RegionRecoveryState_RECOVERING_LEADER, SessionId: []byte("new")}} {
+		report := core.NewRegionInfo(meta, peer, core.WithRecoveryStatus(status))
+		handled, _ := syncer.handleRegionSyncResponse(context.Background(), buildSyncRegionResponse(0, []*core.RegionInfo{report}), basic, backend, false)
+		require.True(t, handled)
+		cached := basic.GetRegion(1)
+		require.Equal(t, uint32(2), cached.GetRequiredReaderProtocolVersion())
+		require.Equal(t, status.GetState(), cached.GetRecoveryStatus().GetState())
+		require.Equal(t, status.GetSessionId(), cached.GetRecoveryStatus().GetSessionId())
+		require.False(t, cached.GetRecoveryStatus().GetDataServiceReady())
+	}
+}

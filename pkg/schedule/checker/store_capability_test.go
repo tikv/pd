@@ -15,6 +15,7 @@
 package checker
 
 import (
+	"testing"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -116,4 +117,25 @@ func (suite *ruleCheckerTestSuite) TestRecoveringWitnessLeaderStillRepairsFailed
 		_, transfer := op.Step(i).(operator.TransferLeader)
 		suite.False(transfer)
 	}
+}
+
+func (suite *ruleCheckerTestSuite) TestFullOnlyRepairRequiresReportedReaderProtocol(t *testing.T) {
+	for id := uint64(1); id <= 4; id++ {
+		suite.cluster.AddLabelsStore(id, 1, map[string]string{})
+		suite.cluster.PutStore(suite.cluster.GetStore(id).Clone(core.SetStoreLogOnlyProtocolVersion(2)))
+	}
+	suite.cluster.AddLeaderRegion(1, 1, 2)
+	region := suite.cluster.GetRegion(1).Clone(core.WithRecoveryStatus(&pdpb.RegionRecoveryStatus{RequiredReaderProtocolVersion: 2, DataServiceReady: true, SizeSource: pdpb.RegionSizeSource_SIZE_CURRENT}))
+	suite.cluster.PutRegion(region)
+	for _, id := range []uint64{3, 4} {
+		suite.cluster.PutStore(suite.cluster.GetStore(id).Clone(core.SetStoreLogOnlyProtocolVersion(0)))
+	}
+	suite.Nil(suite.rc.Check(region))
+	suite.cluster.PutStore(suite.cluster.GetStore(4).Clone(core.SetStoreLogOnlyProtocolVersion(2)))
+	op := suite.rc.Check(region)
+	suite.Require().NotNil(op)
+	add, ok := op.Step(0).(operator.AddLearner)
+	suite.Require().True(ok)
+	suite.Equal(uint64(4), add.ToStore)
+	suite.False(add.IsWitness)
 }

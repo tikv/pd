@@ -65,7 +65,7 @@ func (s *ReplicaStrategy) SelectStoreToAdd(coLocationStores []*core.StoreInfo, e
 	}
 	filters := []filter.Filter{
 		filter.NewStoreCapabilityFilter(s.checkerName, s.isWitness),
-		filter.NewLogOnlyProtocolFilter(s.checkerName, core.HasDedicatedLogOnlyPeer(s.cluster.GetBasicCluster(), s.region.GetPeers()), s.isWitness),
+		filter.NewLogOnlyProtocolFilter(s.checkerName, core.RequiredPeerProtocolVersion(s.cluster.GetBasicCluster(), s.region), s.isWitness),
 		filter.NewExcludedFilter(s.checkerName, nil, s.region.GetStoreIDs()),
 		filter.NewStorageThresholdFilter(s.checkerName),
 		filter.NewSpecialUseFilter(s.checkerName),

@@ -71,3 +71,20 @@ func TestForwardedSchedulingResponseCannotBypassRecoveryState(t *testing.T) {
 	response.TargetPeer = peers[0]
 	require.ErrorContains(t, validateForwardedSchedulingCommand(c.GetBasicCluster(), region, response), "stale")
 }
+
+func TestRecoveryForwardingPreservesReaderFloorWithoutReusingReadiness(t *testing.T) {
+	cached := core.NewRegionInfo(&metapb.Region{Id: 1}, nil, core.WithRecoveryStatus(&pdpb.RegionRecoveryStatus{RequiredReaderProtocolVersion: 2, DataServiceReady: true, SizeSource: pdpb.RegionSizeSource_SIZE_CURRENT, SessionId: []byte("cached")}))
+	for _, status := range []*pdpb.RegionRecoveryStatus{nil, {RequiredReaderProtocolVersion: 1, State: pdpb.RegionRecoveryState_RECOVERING_LEADER, SizeSource: pdpb.RegionSizeSource_SIZE_HISTORICAL, SessionId: []byte("reported")}} {
+		report := cached.Clone(core.WithRecoveryStatus(status))
+		forwarded := recoveryStatusForForwarding(report, nil, cached)
+		require.Equal(t, uint32(2), forwarded.GetRequiredReaderProtocolVersion())
+		require.Equal(t, status.GetState(), forwarded.GetState())
+		require.Equal(t, status.GetDataServiceReady(), forwarded.GetDataServiceReady())
+		require.Equal(t, status.GetSizeSource(), forwarded.GetSizeSource())
+		require.Equal(t, status.GetSessionId(), forwarded.GetSessionId())
+		require.Same(t, status, report.GetRecoveryStatus())
+	}
+	require.Equal(t, []byte("cached"), cached.GetRecoveryStatus().GetSessionId())
+	legacy := cached.Clone(core.WithRecoveryStatus(nil))
+	require.Nil(t, recoveryStatusForForwarding(legacy, nil, legacy))
+}

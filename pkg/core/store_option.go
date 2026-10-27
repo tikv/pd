@@ -48,6 +48,15 @@ func SetStoreLogOnlyProtocolVersion(version uint32) StoreCreateOption {
 	}
 }
 
+// SetStoreTxnProtocolVersionRange records the Store's transaction protocol bounds.
+func SetStoreTxnProtocolVersionRange(versionRange *metapb.TxnProtocolVersionRange) StoreCreateOption {
+	return func(store *StoreInfo) {
+		meta := typeutil.DeepClone(store.meta, StoreFactory)
+		meta.TxnProtocolVersionRange = versionRange
+		store.meta = meta
+	}
+}
+
 // SetStoreLabels sets the labels for the store.
 func SetStoreLabels(labels []*metapb.StoreLabel) StoreCreateOption {
 	return func(store *StoreInfo) {

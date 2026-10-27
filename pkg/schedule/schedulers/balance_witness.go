@@ -314,7 +314,7 @@ func (s *balanceWitnessScheduler) transferWitnessOut(solver *solver, collector *
 		finalFilters = slices.Concat(s.filters, []filter.Filter{
 			filter.NewExcludedFilter(s.GetName(), nil, solver.Region.GetStoreIDs()),
 			filter.NewStoreCapabilityFilter(s.GetName(), true),
-			filter.NewLogOnlyProtocolFilter(s.GetName(), true, true),
+			filter.NewLogOnlyProtocolFilter(s.GetName(), core.RequiredPeerProtocolVersion(solver.GetBasicCluster(), solver.Region), true),
 			filter.NewPlacementSafeguard(s.GetName(), conf, solver.GetBasicCluster(), solver.GetRuleManager(), solver.Region, solver.Source, solver.fit),
 		})
 	} else if witnessFilter := filter.NewPlacementWitnessSafeguard(s.GetName(), conf, solver.GetBasicCluster(), solver.GetRuleManager(), solver.Region, solver.Source, solver.fit); witnessFilter != nil {

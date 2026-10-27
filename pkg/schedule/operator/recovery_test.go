@@ -171,3 +171,50 @@ func TestUnknownRecoveryStateCannotActivateMembership(t *testing.T) {
 	controller.SendScheduleCommand(region, AddLearner{ToStore: 4, PeerID: 40}, DispatchFromCreate)
 	require.Zero(t, streams.MsgLength())
 }
+
+func TestFullOnlyReaderFloorGuardsBuilderAndDispatch(t *testing.T) {
+	cluster, _, controller, streams := newRecoveryOperatorCluster(t)
+	cluster.SetEnablePlacementRules(false)
+	peers := []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}}
+	region := core.NewRegionInfo(&metapb.Region{Id: 1, RegionEpoch: &metapb.RegionEpoch{}, Peers: peers}, peers[0],
+		core.WithRecoveryStatus(&pdpb.RegionRecoveryStatus{RequiredReaderProtocolVersion: 2, DataServiceReady: true, SizeSource: pdpb.RegionSizeSource_SIZE_CURRENT}))
+	cluster.PutRegion(region)
+	cluster.PutStore(cluster.GetStore(4).Clone(core.SetStoreLogOnlyProtocolVersion(0)))
+	_, err := CreateAddPeerOperator("replace-full-after-witness-removal", cluster, region, &metapb.Peer{StoreId: 4}, OpReplica)
+	require.ErrorContains(t, err, "protocol")
+	op := NewTestOperator(region.GetID(), region.GetRegionEpoch(), OpAdmin, AddLearner{ToStore: 4, PeerID: 40})
+	require.False(t, controller.AddOperator(op))
+	controller.SendScheduleCommand(region, AddLearner{ToStore: 4, PeerID: 40}, DispatchFromCreate)
+	require.Zero(t, streams.MsgLength())
+	// Upgrading the genuine Full destination permits repair without W.
+	cluster.PutStore(cluster.GetStore(4).Clone(core.SetStoreLogOnlyProtocolVersion(2)))
+	_, err = CreateAddPeerOperator("compatible-full", cluster, region, &metapb.Peer{StoreId: 4}, OpReplica)
+	require.NoError(t, err)
+	controller.SendScheduleCommand(region, AddLearner{ToStore: 4, PeerID: 40}, DispatchFromCreate)
+	require.Equal(t, 1, streams.MsgLength())
+	require.NoError(t, streams.Drain(1))
+	// Legacy Full-only groups that never enabled immutable DFS copies are unchanged.
+	legacy := region.Clone(core.WithRecoveryStatus(nil))
+	cluster.PutStore(cluster.GetStore(4).Clone(core.SetStoreLogOnlyProtocolVersion(0)))
+	_, err = CreateAddPeerOperator("legacy-full", cluster, legacy, &metapb.Peer{StoreId: 4}, OpReplica)
+	require.NoError(t, err)
+	// Pure cleanup does not depend on retained reader compatibility.
+	cluster.PutStore(cluster.GetStore(2).Clone(core.SetStoreLogOnlyProtocolVersion(0)))
+	_, err = CreateRemovePeerOperator("retire-incompatible-full", cluster, OpAdmin, region, 2)
+	require.NoError(t, err)
+}
+
+func TestOrdinaryTransferChecksDestinationReaderFloorOnly(t *testing.T) {
+	cluster, region, _, _ := newRecoveryOperatorCluster(t)
+	cluster.SetEnablePlacementRules(false)
+	region = region.Clone(core.WithLeader(region.GetStorePeer(1)), core.WithRecoveryStatus(&pdpb.RegionRecoveryStatus{RequiredReaderProtocolVersion: 2, DataServiceReady: true, SizeSource: pdpb.RegionSizeSource_SIZE_CURRENT}))
+	cluster.PutStore(cluster.GetStore(1).Clone(core.SetStoreLogOnlyProtocolVersion(0)))
+	command := &hbstream.Operation{TransferLeader: &pdpb.TransferLeader{Peer: region.GetStorePeer(2)}}
+	require.NoError(t, ValidateSchedulingCommand(cluster.GetBasicCluster(), region, command))
+	_, err := CreateTransferLeaderOperator("leave-old-source", cluster, region, 2, nil, OpLeader)
+	require.NoError(t, err)
+	cluster.PutStore(cluster.GetStore(2).Clone(core.SetStoreLogOnlyProtocolVersion(0)))
+	require.ErrorContains(t, ValidateSchedulingCommand(cluster.GetBasicCluster(), region, command), "reader protocol")
+	_, err = CreateTransferLeaderOperator("reject-old-target", cluster, region, 2, nil, OpLeader)
+	require.Error(t, err)
+}

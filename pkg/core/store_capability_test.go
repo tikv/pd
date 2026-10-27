@@ -20,6 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
 func TestStoreCapabilityAdmission(t *testing.T) {
@@ -60,13 +61,28 @@ func TestDedicatedLogOnlyActivationRequiresEveryMemberProtocol(t *testing.T) {
 		cluster.PutStore(NewStoreInfo(&metapb.Store{Id: id, Labels: labels, LogOnlyProtocolVersion: LogOnlyProtocolVersion}))
 	}
 	peers := []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, IsWitness: true}}
-	require.NoError(t, CheckLogOnlyPeerProtocols(cluster, peers))
+	require.NoError(t, CheckLogOnlyPeerProtocols(cluster, peers, 0))
 	cluster.PutStore(cluster.GetStore(1).Clone(SetStoreLogOnlyProtocolVersion(0)))
-	require.ErrorContains(t, CheckLogOnlyPeerProtocols(cluster, peers), "store 1")
+	require.ErrorContains(t, CheckLogOnlyPeerProtocols(cluster, peers, 0), "store 1")
 	// Returning to an ordinary Full group does not require legacy Stores to v2.
-	require.NoError(t, CheckLogOnlyPeerProtocols(cluster, peers[:2]))
+	require.NoError(t, CheckLogOnlyPeerProtocols(cluster, peers[:2], 0))
 	cluster.PutStore(cluster.GetStore(1).Clone(SetStoreLogOnlyProtocolVersion(LogOnlyProtocolVersion)))
 	cluster.PutStore(cluster.GetStore(4).Clone(SetStoreLogOnlyProtocolVersion(0)))
 	withReader := append(peers, &metapb.Peer{Id: 4, StoreId: 4, Role: metapb.PeerRole_Learner})
-	require.ErrorContains(t, CheckLogOnlyPeerProtocols(cluster, withReader), "store 4")
+	require.ErrorContains(t, CheckLogOnlyPeerProtocols(cluster, withReader, 0), "store 4")
+}
+
+func TestFullOnlyGroupUsesDurableReaderProtocolFloor(t *testing.T) {
+	cluster := NewBasicCluster()
+	peers := []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}}
+	for _, peer := range peers {
+		cluster.PutStore(NewStoreInfo(&metapb.Store{Id: peer.StoreId, LogOnlyProtocolVersion: LogOnlyProtocolVersion}))
+	}
+	region := NewRegionInfo(&metapb.Region{Id: 1, Peers: peers}, peers[0], WithRecoveryStatus(&pdpb.RegionRecoveryStatus{RequiredReaderProtocolVersion: 3}))
+	require.Equal(t, uint32(3), RequiredPeerProtocolVersion(cluster, region))
+	require.ErrorContains(t, CheckLogOnlyPeerProtocols(cluster, peers, 3), "protocol 3")
+	require.NoError(t, CheckLogOnlyPeerProtocols(cluster, peers, 2))
+	cluster.PutStore(cluster.GetStore(3).Clone(SetStoreLogOnlyProtocolVersion(0)))
+	require.ErrorContains(t, CheckLogOnlyPeerProtocols(cluster, peers, 2), "store 3")
+	require.NoError(t, CheckLogOnlyPeerProtocols(cluster, peers, 0))
 }

@@ -167,6 +167,7 @@ func (s *RegionSyncer) handleRegionSyncResponse(
 			log.Debug("region is stale", zap.Stringer("origin", origin.GetMeta()), errs.ZapError(err))
 			continue
 		}
+		region.InheritReaderProtocolVersion(origin)
 		cctx := &core.MetaProcessContext{
 			Context:    ctx,
 			TaskRunner: ratelimit.NewSyncRunner(),

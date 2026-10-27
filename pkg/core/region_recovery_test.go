@@ -80,3 +80,47 @@ func TestRegionRecoveryStatusChangesRefreshCacheAndRejectStaleTerm(t *testing.T)
 	require.Error(t, err)
 	require.True(t, regions.GetRegion(1).IsRecoveringLeader())
 }
+
+func TestReaderProtocolFloorSurvivesMissingAndLowerReports(t *testing.T) {
+	origin := NewRegionInfo(&metapb.Region{Id: 1}, nil, WithRecoveryStatus(&pdpb.RegionRecoveryStatus{RequiredReaderProtocolVersion: 2, DataServiceReady: true, SizeSource: pdpb.RegionSizeSource_SIZE_CURRENT, SessionId: []byte("old")}))
+	for _, reported := range []*pdpb.RegionRecoveryStatus{nil, {RequiredReaderProtocolVersion: 1, State: pdpb.RegionRecoveryState_RECOVERING_LEADER, SizeSource: pdpb.RegionSizeSource_SIZE_HISTORICAL, SessionId: []byte("new")}} {
+		reportedFloor := reported.GetRequiredReaderProtocolVersion()
+		current := origin.Clone(WithRecoveryStatus(reported))
+		current.Inherit(origin, false)
+		require.Equal(t, uint32(2), current.GetRequiredReaderProtocolVersion())
+		require.Equal(t, reported.GetState(), current.GetRecoveryStatus().GetState())
+		require.Equal(t, reported.GetSizeSource(), current.GetRecoveryStatus().GetSizeSource())
+		require.Equal(t, reported.GetDataServiceReady(), current.GetRecoveryStatus().GetDataServiceReady())
+		require.Equal(t, reported.GetSessionId(), current.GetRecoveryStatus().GetSessionId())
+		require.Equal(t, reportedFloor, reported.GetRequiredReaderProtocolVersion(), "inherit must not mutate the input message")
+	}
+	higher := origin.Clone(WithRecoveryStatus(&pdpb.RegionRecoveryStatus{RequiredReaderProtocolVersion: 3}))
+	higher.InheritReaderProtocolVersion(origin)
+	require.Equal(t, uint32(3), higher.GetRequiredReaderProtocolVersion())
+	// Raising only the durable floor is still a cache/sync change.
+	legacy := origin.Clone(WithRecoveryStatus(nil))
+	_, cache, sync, _ := GenerateRegionGuideFunc(false)(ContextTODO(), origin, legacy)
+	require.True(t, cache)
+	require.True(t, sync)
+}
+
+func TestConcurrentHeartbeatCannotOverwriteNewReaderProtocolFloor(t *testing.T) {
+	peer := &metapb.Peer{Id: 1, StoreId: 1}
+	legacy := NewRegionInfo(&metapb.Region{Id: 1, RegionEpoch: &metapb.RegionEpoch{}, Peers: []*metapb.Peer{peer}}, peer)
+	regions := NewRegionsInfo()
+	regions.SetRegion(legacy)
+	pending := legacy.Clone()
+	pending.Inherit(legacy, false)
+	modern := legacy.Clone(WithRecoveryStatus(&pdpb.RegionRecoveryStatus{RequiredReaderProtocolVersion: 2}))
+	_, err := regions.CheckAndPutRootTree(ContextTODO(), modern)
+	require.NoError(t, err)
+	_, err = regions.CheckAndPutRootTree(ContextTODO(), pending)
+	require.ErrorContains(t, err, "reader protocol requirement changed")
+	_, err = regions.AtomicCheckAndPutRegion(ContextTODO(), pending)
+	require.ErrorContains(t, err, "reader protocol requirement changed")
+	require.Equal(t, uint32(2), regions.GetRegion(1).GetRequiredReaderProtocolVersion())
+	// A retried report inherits the new requirement before publication.
+	pending.Inherit(regions.GetRegion(1), false)
+	_, err = regions.CheckAndPutRootTree(ContextTODO(), pending)
+	require.NoError(t, err)
+}

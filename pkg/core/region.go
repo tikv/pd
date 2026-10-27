@@ -296,6 +296,7 @@ func RegionFromHeartbeat(heartbeat RegionHeartbeatRequest, flowRoundDivisor uint
 // correct approximate size, keys and buckets by the previous size if here exists a reported RegionInfo.
 // See https://github.com/tikv/tikv/issues/11114
 func (r *RegionInfo) Inherit(origin *RegionInfo, bucketEnable bool) {
+	r.InheritReaderProtocolVersion(origin)
 	// Background:
 	// There are scenarios where TiKV reports size=0 and keys=0, which doesn't necessarily mean
 	// the region is empty, but rather that the statistics haven't been calculated yet:
@@ -1125,6 +1126,9 @@ func (r *RegionsInfo) CheckAndPutRegion(region *RegionInfo) []*RegionInfo {
 		ols = r.tree.overlaps(&regionItem{RegionInfo: region})
 	}
 	err := check(region, origin, ols)
+	if err == nil && origin != nil && region.GetRequiredReaderProtocolVersion() < origin.GetRequiredReaderProtocolVersion() {
+		err = errors.New("region reader protocol requirement changed; retry heartbeat")
+	}
 	if err != nil {
 		log.Debug("region is stale", zap.Stringer("origin", origin.GetMeta()), errs.ZapError(err))
 		// return the state region to delete.
@@ -1162,6 +1166,9 @@ func (r *RegionsInfo) AtomicCheckAndPutRegion(ctx *MetaProcessContext, region *R
 	}
 	tracer.OnCheckOverlapsFinished()
 	err := check(region, origin, ols)
+	if err == nil && origin != nil && region.GetRequiredReaderProtocolVersion() < origin.GetRequiredReaderProtocolVersion() {
+		err = errors.New("region reader protocol requirement changed; retry heartbeat")
+	}
 	if err != nil {
 		r.t.Unlock()
 		tracer.OnValidateRegionFinished()
@@ -1188,6 +1195,9 @@ func (r *RegionsInfo) CheckAndPutRootTree(ctx *MetaProcessContext, region *Regio
 	}
 	tracer.OnCheckOverlapsFinished()
 	err := check(region, origin, ols)
+	if err == nil && origin != nil && region.GetRequiredReaderProtocolVersion() < origin.GetRequiredReaderProtocolVersion() {
+		err = errors.New("region reader protocol requirement changed; retry heartbeat")
+	}
 	if err != nil {
 		r.t.Unlock()
 		tracer.OnValidateRegionFinished()

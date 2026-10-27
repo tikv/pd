@@ -10,7 +10,7 @@ TiKV declares its local, restart-fixed `raftstore.store-capability` as a reserve
 Store metadata label `cse-store-capability`. PD recognizes `full-v1` and
 `log-only-v1`; an absent label preserves legacy witness behavior. Unknown versions
 and duplicate declarations are rejected. This uses existing Store metadata and
-does not require a kvproto change. Explicit declarations cannot be changed or
+is independent of the new software protocol fields. Explicit declarations cannot be changed or
 removed by Store label updates, including force replacement and reboot
 registration. A legacy Store may declare Full on upgrade; a LogOnly Store must
 register with a new identity. LogOnly Stores cannot bootstrap a data Region.
@@ -74,6 +74,16 @@ procedure, not clearing the protocol declaration.
 A leader reports `RegionRecoveryStatus` with explicit state, data-service
 readiness, current/historical size provenance, selected Full and session ID.
 PD preserves this report through Scheduling forwarding and sparse Region sync.
+`required_reader_protocol_version` is a durable DFS requirement reported by TiKV,
+not a value inferred from Store labels or the presence of W. It remains after
+returning to 3F while immutable object copies require compatible readers. PD
+retains the highest observed floor across later heartbeats and Region sync,
+without inheriting readiness, size provenance or recovery session. Candidate
+selection, operator construction and actual dispatch require the maximum of
+this floor and the dedicated W group protocol for new or promoted readers,
+including learners. Ordinary leader transfers check the destination; retiring
+an old source and pure membership cleanup remain available. No protocol-floor
+reset is supported without a separate durable DFS migration procedure.
 A v2 leader omitting its status is treated as not ready. Legacy absence remains
 legacy behavior; labels and zero size are not used to infer recovery state.
 

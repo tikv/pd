@@ -95,22 +95,35 @@ func HasDedicatedLogOnlyPeer(stores StoreSetInformer, peers []*metapb.Peer) bool
 	return false
 }
 
-// CheckLogOnlyPeerProtocols validates the complete target group when dedicated
-// LogOnly membership is activated. Learners also need explicit compatibility;
-// retaining an unadvertised data reader is not proof of safe snapshot handling.
-func CheckLogOnlyPeerProtocols(stores StoreSetInformer, peers []*metapb.Peer) error {
+// RequiredPeerProtocolVersion combines the Region's durable reader requirement
+// with the protocol required by its current dedicated LogOnly membership.
+func RequiredPeerProtocolVersion(stores StoreSetInformer, region *RegionInfo) uint32 {
+	minimum := region.GetRequiredReaderProtocolVersion()
+	if HasDedicatedLogOnlyPeer(stores, region.GetPeers()) {
+		minimum = max(minimum, LogOnlyProtocolVersion)
+	}
+	return minimum
+}
+
+// CheckLogOnlyPeerProtocols validates the complete target group on membership
+// activation. Learners are readers too. A durable reader requirement outlives
+// dedicated LogOnly membership and cannot be inferred from Store capability.
+func CheckLogOnlyPeerProtocols(stores StoreSetInformer, peers []*metapb.Peer, minimum uint32) error {
 	for _, peer := range peers {
 		if peer.GetIsWitness() && stores.GetStore(peer.GetStoreId()) == nil {
 			return errors.Errorf("cannot verify protocol for unknown witness Store %d", peer.GetStoreId())
 		}
 	}
-	if !HasDedicatedLogOnlyPeer(stores, peers) {
+	if HasDedicatedLogOnlyPeer(stores, peers) {
+		minimum = max(minimum, LogOnlyProtocolVersion)
+	}
+	if minimum == 0 {
 		return nil
 	}
 	for _, peer := range peers {
 		store := stores.GetStore(peer.GetStoreId())
-		if store == nil || store.GetMeta().GetLogOnlyProtocolVersion() < LogOnlyProtocolVersion {
-			return errors.Errorf("store %d does not support LogOnly protocol %d", peer.GetStoreId(), LogOnlyProtocolVersion)
+		if store == nil || store.GetMeta().GetLogOnlyProtocolVersion() < minimum {
+			return errors.Errorf("store %d does not support LogOnly protocol %d", peer.GetStoreId(), minimum)
 		}
 	}
 	return nil
