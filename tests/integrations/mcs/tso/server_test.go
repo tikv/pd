@@ -749,17 +749,15 @@ func (suite *CommonTestSuite) SetupSuite() {
 
 func (suite *CommonTestSuite) TearDownSuite() {
 	re := suite.Require()
+	defer suite.cancel()
+	defer suite.cluster.Destroy()
 	suite.tsoCluster.Destroy()
 	etcdClient := suite.pdLeader.GetEtcdClient()
-	endpoints, err := discovery.Discover(etcdClient, mcs.TSOServiceName)
-	re.NoError(err)
-	if len(endpoints) != 0 {
-		endpoints, err = discovery.Discover(etcdClient, mcs.TSOServiceName)
-		re.NoError(err)
-		re.Empty(endpoints)
-	}
-	suite.cluster.Destroy()
-	suite.cancel()
+	// A timed-out lease renewal can leave an entry until its lease expires.
+	testutil.Eventually(re, func() bool {
+		endpoints, err := discovery.Discover(etcdClient, mcs.TSOServiceName)
+		return err == nil && len(endpoints) == 0
+	})
 }
 
 func (suite *CommonTestSuite) TestAdvertiseAddr() {
