@@ -2348,9 +2348,7 @@ func newPeer(storeID, term, lastIndex, committedIndex, appliedIndex uint64) *reg
 func TestLegacyUnsafeRecoveryRejectsLogOnlyBeforeSideEffects(t *testing.T) {
 	for _, autoDetect := range []bool{false, true} {
 		t.Run(fmt.Sprintf("auto-detect=%t", autoDetect), func(t *testing.T) {
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+			cluster := mockcluster.NewCluster(t.Context(), mockconfig.NewTestOptions())
 			for _, store := range newTestStores(2, "6.0.0") {
 				cluster.PutStore(store)
 			}
@@ -2369,9 +2367,7 @@ func TestLegacyUnsafeRecoveryRejectsLogOnlyBeforeSideEffects(t *testing.T) {
 }
 
 func TestLegacyUnsafeRecoveryAllowsFullWithRetiredLogOnly(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	cluster := mockcluster.NewCluster(t.Context(), mockconfig.NewTestOptions())
 	for _, store := range newTestStores(2, "6.0.0") {
 		cluster.PutStore(store)
 	}
@@ -2407,9 +2403,7 @@ func (c *storeRegisteringDuringRecovery) GetStores() []*core.StoreInfo {
 func TestLegacyUnsafeRecoveryOnlyIncludesValidatedStoreSnapshot(t *testing.T) {
 	for _, autoDetect := range []bool{false, true} {
 		t.Run(fmt.Sprintf("auto-detect=%t", autoDetect), func(t *testing.T) {
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			base := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+			base := mockcluster.NewCluster(t.Context(), mockconfig.NewTestOptions())
 			for _, store := range newTestStores(2, "6.0.0") {
 				base.PutStore(store)
 			}

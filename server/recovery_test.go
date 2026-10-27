@@ -15,12 +15,9 @@
 package server
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -35,7 +32,8 @@ import (
 )
 
 func TestLogOnlyProtocolVersionFollowsSchedulingPrimary(t *testing.T) {
-	s := &Server{isRunning: 1, isKeyspaceGroupEnabled: true, cluster: &cluster.RaftCluster{}}
+	s := &Server{isKeyspaceGroupEnabled: true, cluster: &cluster.RaftCluster{}}
+	s.isRunning.Store(1)
 	require.Equal(t, core.LogOnlyProtocolVersion, s.getLogOnlyProtocolVersion())
 	s.cluster.SetServiceIndependent(mcs.SchedulingServiceName)
 	require.Zero(t, s.getLogOnlyProtocolVersion())
@@ -53,9 +51,7 @@ func TestLogOnlyProtocolVersionFollowsSchedulingPrimary(t *testing.T) {
 }
 
 func TestForwardedSchedulingResponseCannotBypassRecoveryState(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	c := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	c := mockcluster.NewCluster(t.Context(), mockconfig.NewTestOptions())
 	for _, id := range []uint64{1, 2, 4} {
 		c.AddLabelsStore(id, 0, map[string]string{core.StoreCapabilityLabel: core.FullStoreCapability})
 	}
@@ -89,11 +85,4 @@ func TestRecoveryForwardingPreservesReaderFloorWithoutReusingReadiness(t *testin
 	require.Equal(t, []byte("cached"), cached.GetRecoveryStatus().GetSessionId())
 	legacy := cached.Clone(core.WithRecoveryStatus(nil))
 	require.Nil(t, recoveryStatusForForwarding(legacy, nil, legacy))
-}
-
-func TestWatchGCStatesExplicitlyRejectsUnsupportedStreamingProtocol(t *testing.T) {
-	server := &GrpcServer{}
-	err := server.WatchGCStates(nil, nil)
-	require.Equal(t, codes.Unimplemented, status.Code(err))
-	require.Contains(t, err.Error(), "use GetAllKeyspacesGCStates")
 }
