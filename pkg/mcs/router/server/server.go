@@ -135,7 +135,6 @@ func (s *Server) startServerLoop() {
 	s.regionSyncer.wg.Add(2)
 	go s.regionSyncer.syncLoop()
 	go s.regionSyncer.updatePDMemberLoop()
-	s.regionSyncer.startSyncWithLeader()
 }
 
 // Close closes the server.
