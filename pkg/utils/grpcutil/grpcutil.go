@@ -34,6 +34,7 @@ import (
 	"google.golang.org/grpc/metadata"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
@@ -43,6 +44,7 @@ import (
 // ServeHTTPWithContext interrupts HTTP writes when ctx is canceled. Waiting for
 // the cancellation callback keeps it from accessing w after ServeHTTP returns.
 func ServeHTTPWithContext(ctx context.Context, handler http.Handler, w http.ResponseWriter, r *http.Request) {
+	failpoint.InjectCall("watchHTTPResponseWriter", r.URL.Path, &w)
 	done := make(chan struct{})
 	stop := context.AfterFunc(ctx, func() {
 		defer close(done)

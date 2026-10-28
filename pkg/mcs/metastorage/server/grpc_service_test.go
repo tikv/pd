@@ -17,12 +17,15 @@ package server
 import (
 	"context"
 	"errors"
+	"net"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.etcd.io/etcd/api/v3/etcdserverpb"
 	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/goleak"
@@ -53,6 +56,213 @@ func (s *metaWatchStream) Context() context.Context { return s.ctx }
 
 func (s *metaWatchStream) Send(response *meta_storagepb.WatchResponse) error {
 	return s.send(response)
+}
+
+// watchRelay forwards real etcd responses and holds the first stream at the
+// selected boundary, keeping later responses off the connection being cut.
+type watchRelay struct {
+	etcdserverpb.UnimplementedWatchServer
+	client   etcdserverpb.WatchClient
+	created  bool
+	resume   chan struct{}
+	requests chan int64
+	attempts atomic.Int64
+}
+
+func (s *watchRelay) Watch(stream etcdserverpb.Watch_WatchServer) error {
+	request, err := stream.Recv()
+	if err != nil {
+		return err
+	}
+	first := s.attempts.Add(1) == 1
+	select {
+	case s.requests <- request.GetCreateRequest().StartRevision:
+	case <-stream.Context().Done():
+		return stream.Context().Err()
+	}
+	if !first {
+		select {
+		case <-s.resume:
+		case <-stream.Context().Done():
+			return stream.Context().Err()
+		}
+	}
+	upstream, err := s.client.Watch(stream.Context())
+	if err != nil {
+		return err
+	}
+	if err := upstream.Send(request); err != nil {
+		return err
+	}
+	for {
+		response, err := upstream.Recv()
+		if err != nil {
+			return err
+		}
+		if err := stream.Send(response); err != nil {
+			return err
+		}
+		if first && ((s.created && response.Created) || (!s.created && len(response.Events) > 0)) {
+			<-stream.Context().Done()
+			return stream.Context().Err()
+		}
+	}
+}
+
+type observedWatchStream struct {
+	grpc.ClientStream
+	observe func(*etcdserverpb.WatchResponse)
+}
+
+func (s *observedWatchStream) RecvMsg(message any) error {
+	if err := s.ClientStream.RecvMsg(message); err != nil {
+		return err
+	}
+	s.observe(message.(*etcdserverpb.WatchResponse))
+	return nil
+}
+
+func TestWatchResumesAfterConnectionLoss(t *testing.T) {
+	for _, name := range []string{"before first event", "between historical batches", "compacted while disconnected"} {
+		t.Run(name, func(t *testing.T) {
+			re := require.New(t)
+			_, client, cleanup := etcdutil.NewTestEtcdCluster(t, 1, nil)
+			defer cleanup()
+			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+			defer cancel()
+			var revisions []int64
+			write := func() {
+				value := strconv.Itoa(len(revisions))
+				response, err := client.Txn(ctx).Then(clientv3.OpPut("watch/reconnect/a", value), clientv3.OpPut("watch/reconnect/b", value)).Commit()
+				re.NoError(err)
+				revisions = append(revisions, response.Header.Revision)
+			}
+			var startRevision int64
+			if name == "between historical batches" {
+				// etcd sends at most 1000 historical revisions in one batch.
+				for range 1002 {
+					write()
+				}
+				startRevision = revisions[0]
+			}
+			relay := &watchRelay{
+				client: etcdserverpb.NewWatchClient(client.ActiveConnection()), created: startRevision == 0,
+				resume: make(chan struct{}), requests: make(chan int64, 4),
+			}
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			re.NoError(err)
+			server := grpc.NewServer()
+			etcdserverpb.RegisterWatchServer(server, relay)
+			defer server.Stop()
+			go func() { _ = server.Serve(listener) }()
+			observed := make(chan *etcdserverpb.WatchResponse, 1)
+			var connection atomic.Pointer[net.TCPConn]
+			var attempts atomic.Int64
+			watchClient, err := clientv3.New(clientv3.Config{
+				Endpoints: []string{listener.Addr().String()}, DialTimeout: 5 * time.Second,
+				DialOptions: []grpc.DialOption{
+					grpc.WithContextDialer(func(ctx context.Context, address string) (net.Conn, error) {
+						conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", address)
+						if err == nil {
+							connection.Store(conn.(*net.TCPConn))
+						}
+						return conn, err
+					}),
+					grpc.WithChainStreamInterceptor(func(ctx context.Context, desc *grpc.StreamDesc, conn *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+						stream, err := streamer(ctx, desc, conn, method, opts...)
+						if err != nil || attempts.Add(1) != 1 {
+							return stream, err
+						}
+						return &observedWatchStream{ClientStream: stream, observe: func(response *etcdserverpb.WatchResponse) {
+							if (relay.created && response.Created) || (!relay.created && len(response.Events) > 0) {
+								observed <- response
+							}
+						}}, nil
+					}),
+				},
+			})
+			re.NoError(err)
+			defer watchClient.Close()
+			service := &Service{ctx: ctx, manager: &Manager{srv: &watchServingServer{}, client: watchClient}}
+			completed := errors.New("received all revisions")
+			var events []*meta_storagepb.Event
+			var compacted *meta_storagepb.WatchResponse
+			expectedEvents := (len(revisions) + 1) * 2
+			result := make(chan error, 1)
+			go func() {
+				result <- service.Watch(&meta_storagepb.WatchRequest{
+					Key: []byte("watch/reconnect/"), RangeEnd: []byte(clientv3.GetPrefixRangeEnd("watch/reconnect/")), StartRevision: startRevision, PrevKv: true,
+				}, &metaWatchStream{ctx: ctx, send: func(response *meta_storagepb.WatchResponse) error {
+					if response.Header.GetError() != nil {
+						compacted = response
+					}
+					events = append(events, response.Events...)
+					if len(events) == expectedEvents {
+						return completed
+					}
+					return nil
+				}})
+			}()
+			var boundary *etcdserverpb.WatchResponse
+			select {
+			case boundary = <-observed:
+			case <-ctx.Done():
+				t.Fatal("watch did not reach the disconnect boundary")
+			}
+			nextRevision := boundary.Header.Revision + 1
+			if len(boundary.Events) > 0 {
+				nextRevision = boundary.Events[len(boundary.Events)-1].Kv.ModRevision + 1
+				re.Less(nextRevision, boundary.Header.Revision)
+			}
+			re.NoError(connection.Load().Close())
+			write()
+			if name == "compacted while disconnected" {
+				write()
+				_, err := client.Compact(ctx, revisions[len(revisions)-1])
+				re.NoError(err)
+			}
+			close(relay.resume)
+			for _, revision := range []int64{startRevision, nextRevision} {
+				select {
+				case requested := <-relay.requests:
+					re.Equal(revision, requested)
+				case <-ctx.Done():
+					t.Fatal("watch did not issue its expected revision request")
+				}
+			}
+			select {
+			case err := <-result:
+				if name == "compacted while disconnected" {
+					re.ErrorIs(err, rpctypes.ErrCompacted)
+				} else {
+					re.ErrorIs(err, completed)
+				}
+			case <-ctx.Done():
+				t.Fatal("watch did not recover after its TCP connection closed")
+			}
+			re.GreaterOrEqual(attempts.Load(), int64(2))
+			if name == "compacted while disconnected" {
+				re.Empty(events)
+				re.NotNil(compacted)
+				re.Equal(meta_storagepb.ErrorType_DATA_COMPACTED, compacted.Header.Error.Type)
+				re.Equal(revisions[len(revisions)-1], compacted.CompactRevision)
+				return
+			}
+			re.Len(events, len(revisions)*2)
+			for i, revision := range revisions {
+				for j, key := range []string{"watch/reconnect/a", "watch/reconnect/b"} {
+					event := events[i*2+j]
+					re.Equal(meta_storagepb.Event_PUT, event.Type)
+					re.Equal(key, string(event.Kv.Key))
+					re.Equal(strconv.Itoa(i), string(event.Kv.Value))
+					re.Equal(revision, event.Kv.ModRevision)
+					if i > 0 {
+						re.Equal(strconv.Itoa(i-1), string(event.PrevKv.Value))
+					}
+				}
+			}
+		})
+	}
 }
 
 func TestWatchPreservesRevisionAndPreviousValue(t *testing.T) {

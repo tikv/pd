@@ -23,13 +23,16 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/gogo/protobuf/proto"
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/etcd/client/pkg/v3/transport"
 	"google.golang.org/grpc"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/meta_storagepb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -41,13 +44,15 @@ import (
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/netutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
 
 var certScript = strings.Join([]string{".", "cert_opt.sh"}, string(filepath.Separator))
 
-func TestTLSWatchServerClose(t *testing.T) {
+func newTLSWatchTestServer(t *testing.T) *server.Server {
+	t.Helper()
 	re := require.New(t)
 	certPath := t.TempDir()
 	generateCerts(re, certPath)
@@ -61,12 +66,17 @@ func TestTLSWatchServerClose(t *testing.T) {
 		conf.InitialCluster = strings.ReplaceAll(conf.InitialCluster, "http", "https")
 	})
 	re.NoError(err)
-	defer cluster.Destroy()
+	t.Cleanup(cluster.Destroy)
 	re.NoError(cluster.RunInitialServers())
 	name := cluster.WaitLeader()
 	re.NotEmpty(name)
 	re.NoError(cluster.GetServer(name).BootstrapCluster())
-	srv := cluster.GetServer(name).GetServer()
+	return cluster.GetServer(name).GetServer()
+}
+
+func TestTLSWatchServerClose(t *testing.T) {
+	re := require.New(t)
+	srv := newTLSWatchTestServer(t)
 	tlsConfig, err := srv.GetConfig().Security.ToClientTLSConfig()
 	re.NoError(err)
 	conn, err := grpcutil.GetClientConn(t.Context(), srv.GetAddr(), tlsConfig)
@@ -122,6 +132,121 @@ func TestTLSWatchServerClose(t *testing.T) {
 	}
 	re.Error(err)
 	re.NoError(ctx.Err())
+}
+
+type watchResponseWriter struct {
+	http.ResponseWriter
+	started  chan struct{}
+	finished chan struct{}
+	once     *sync.Once
+}
+
+func (w *watchResponseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+func (w *watchResponseWriter) Flush() { w.ResponseWriter.(http.Flusher).Flush() }
+
+func (w *watchResponseWriter) Write(data []byte) (int, error) {
+	observed := false
+	if len(data) > 64<<10 {
+		w.once.Do(func() {
+			observed = true
+			close(w.started)
+		})
+	}
+	if observed {
+		defer close(w.finished)
+	}
+	return w.ResponseWriter.Write(data)
+}
+
+func TestTLSWatchServerCloseBlockedSend(t *testing.T) {
+	for _, method := range []string{"/keyspacepb.Keyspace/WatchKeyspaces", "/pdpb.PD/WatchGlobalConfig", "/meta_storagepb.MetaStorage/Watch"} {
+		t.Run(method, func(t *testing.T) {
+			re := require.New(t)
+			started, finished := make(chan struct{}), make(chan struct{})
+			var once sync.Once
+			const point = "github.com/tikv/pd/pkg/utils/grpcutil/watchHTTPResponseWriter"
+			re.NoError(failpoint.EnableCall(point, func(path string, writer *http.ResponseWriter) {
+				if path == method {
+					*writer = &watchResponseWriter{ResponseWriter: *writer, started: started, finished: finished, once: &once}
+				}
+			}))
+			t.Cleanup(func() { re.NoError(failpoint.Disable(point)) })
+			srv := newTLSWatchTestServer(t)
+			tlsConfig, err := srv.GetConfig().Security.ToClientTLSConfig()
+			re.NoError(err)
+			// Disable adaptive window growth so a single large response blocks even
+			// though the client transport continues reading frames from its socket.
+			conn, err := grpcutil.GetClientConn(t.Context(), srv.GetAddr(), tlsConfig,
+				grpc.WithStaticStreamWindowSize(64<<10), grpc.WithStaticConnWindowSize(1<<20))
+			re.NoError(err)
+			defer conn.Close()
+			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+			defer cancel()
+			value := strings.Repeat("x", 1<<20)
+			key := globalConfigPath + "tls-blocked"
+			put, err := srv.GetClient().Put(ctx, key, value)
+			re.NoError(err)
+			var stream grpc.ClientStream
+			var response proto.Message
+			switch method {
+			case "/keyspacepb.Keyspace/WatchKeyspaces":
+				response = &keyspacepb.WatchKeyspacesResponse{}
+				meta := &keyspacepb.KeyspaceMeta{
+					Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 42}, Name: "tls-blocked", State: keyspacepb.KeyspaceState_ENABLED,
+					Config: map[string]string{"watch-test-payload": value},
+				}
+				data, err := proto.Marshal(meta)
+				re.NoError(err)
+				_, err = srv.GetClient().Put(ctx, keypath.KeyspaceMetaPath(meta.GetId()), string(data))
+				re.NoError(err)
+				stream, err = keyspacepb.NewKeyspaceClient(conn).WatchKeyspaces(ctx, &keyspacepb.WatchKeyspacesRequest{Header: testutil.NewRequestHeader(keypath.ClusterID())})
+				re.NoError(err)
+			case "/pdpb.PD/WatchGlobalConfig":
+				response = &pdpb.WatchGlobalConfigResponse{}
+				stream, err = pdpb.NewPDClient(conn).WatchGlobalConfig(ctx, &pdpb.WatchGlobalConfigRequest{ConfigPath: globalConfigPath, Revision: put.Header.Revision})
+				re.NoError(err)
+			case "/meta_storagepb.MetaStorage/Watch":
+				response = &meta_storagepb.WatchResponse{}
+				stream, err = meta_storagepb.NewMetaStorageClient(conn).Watch(ctx, &meta_storagepb.WatchRequest{Key: []byte(key), StartRevision: put.Header.Revision})
+				re.NoError(err)
+			}
+			select {
+			case <-started:
+			case <-ctx.Done():
+				t.Fatal("TLS watch did not enter the large response write")
+			}
+			select {
+			case <-finished:
+				t.Fatal("large response write completed without client reads")
+			case <-time.After(100 * time.Millisecond):
+			}
+			closed := make(chan struct{})
+			go func() {
+				srv.Close()
+				close(closed)
+			}()
+			select {
+			case <-closed:
+			case <-time.After(10 * time.Second):
+				cancel()
+				select {
+				case <-closed:
+				case <-time.After(5 * time.Second):
+					t.Fatal("Server.Close did not finish after client cancellation")
+				}
+				t.Fatal("blocked TLS response write prevented Server.Close")
+			}
+			re.NoError(ctx.Err())
+			select {
+			case <-finished:
+			default:
+				t.Fatal("TLS response writer survived Server.Close")
+			}
+			re.Error(stream.RecvMsg(response))
+			re.NoError(ctx.Err())
+		})
+	}
 }
 
 // TestTLSReloadAtomicReplace ensures server reloads expired/valid certs
