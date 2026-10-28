@@ -150,6 +150,8 @@ func NewCluster(
 		cancel()
 		return nil, err
 	}
+	// PD stores the affinity targets this service decides, like all other affinity metadata.
+	affinityManager.SetTargetWriter(mcsaffinity.NewTargetWriter(httpClient, backendAddress))
 	c := &Cluster{
 		ctx:               ctx,
 		cancel:            cancel,

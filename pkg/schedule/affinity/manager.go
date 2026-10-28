@@ -65,6 +65,9 @@ type Manager struct {
 	storeSetInformer core.StoreSetInformer
 	conf             config.SharedConfigProvider
 	regionLabeler    *labeler.RegionLabeler // region labeler for syncing key ranges
+	// targetWriter writes the targets this Manager decides when it does not own the storage,
+	// as in the scheduling service. When it is nil, the Manager writes its own storage.
+	targetWriter TargetWriter
 
 	// The following members are protected by RWMutex.
 	affinityRegionCount int
@@ -518,19 +521,25 @@ func (m *Manager) SyncGroupFromEtcd(group *Group) {
 		// Once group created, the buffer must be deleted.
 		delete(m.labelRuleBuffer, group.ID)
 	} else {
-		changed := false
-		if groupInfo.LeaderStoreID != group.LeaderStoreID {
-			groupInfo.LeaderStoreID = group.LeaderStoreID
-			changed = true
-		}
-		if !slices.Equal(groupInfo.VoterStoreIDs, group.VoterStoreIDs) {
-			groupInfo.VoterStoreIDs = slices.Clone(group.VoterStoreIDs)
-			changed = true
-		}
+		m.syncGroupTargetLocked(groupInfo, group)
+	}
+}
 
-		if changed {
-			m.resetCountLocked(groupInfo)
-		}
+// syncGroupTargetLocked replaces the in-memory target with the target of the stored group.
+// Both metaMutex and the write lock of RWMutex must be held.
+func (m *Manager) syncGroupTargetLocked(groupInfo *runtimeGroupInfo, group *Group) {
+	changed := false
+	if groupInfo.LeaderStoreID != group.LeaderStoreID {
+		groupInfo.LeaderStoreID = group.LeaderStoreID
+		changed = true
+	}
+	if !slices.Equal(groupInfo.VoterStoreIDs, group.VoterStoreIDs) {
+		groupInfo.VoterStoreIDs = slices.Clone(group.VoterStoreIDs)
+		changed = true
+	}
+
+	if changed {
+		m.resetCountLocked(groupInfo)
 	}
 }
 
