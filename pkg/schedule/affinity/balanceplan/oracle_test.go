@@ -16,7 +16,6 @@ package balanceplan
 
 import (
 	"flag"
-	"fmt"
 	"math"
 	"math/rand/v2"
 	"slices"
@@ -25,25 +24,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// oracleCases is the number of random cases per rule shape. Regular runs use
-// 100 (about 12 s); the full check uses 400 (about 45 s):
-//
-//	go test ./pkg/schedule/affinity/balanceplan -run TestOracle -args -oracle-cases=400
+// Use -args -oracle-cases=400 for the full check; regular runs use 100 per shape.
 var oracleCases = flag.Int("oracle-cases", 100, "random cases per rule shape in TestOracleBoundChooserAndLegality")
 
-// The oracle below is independent of the planner: legality uses PD's
-// placement isolation formula (pairwise, base 100, first differing label) and
-// accepts a peer set only when no other candidate set of the same rule scores
-// higher, which is what the best-location check demands.
-
 type shape struct {
-	name    string
-	zones   int // top-level label values
-	hosts   int // stores per zone (second label level); 0 = no second level
-	depth   int // label levels used by the rule
-	counts  []int
-	roles   []Role
-	overlap bool // rules draw candidates from all stores, so they overlap
+	name                string
+	zones, hosts, depth int
+	counts              []int
+	roles               []Role
+	overlap             bool // rules draw candidates from all stores
 }
 
 var shapes = []shape{
@@ -59,6 +48,7 @@ var shapes = []shape{
 	{name: "2 voter rules overlap", zones: 2, hosts: 3, depth: 1, counts: []int{2, 1}, roles: []Role{RoleVoter, RoleVoter}, overlap: true},
 }
 
+// Independent PD isolation score: pairwise, base 100, first differing label.
 func isolationScore(loc [][]int32, stores []int, depth int) float64 {
 	var score float64
 	for i, a := range stores {
@@ -75,29 +65,25 @@ func isolationScore(loc [][]int32, stores []int, depth int) float64 {
 }
 
 func combinations(xs []int, k int, f func([]int)) {
-	sel := make([]int, 0, k)
-	var rec func(int)
-	rec = func(i int) {
+	var rec func(int, []int)
+	rec = func(i int, sel []int) {
 		if len(sel) == k {
 			f(slices.Clone(sel))
 			return
 		}
 		for j := i; j <= len(xs)-(k-len(sel)); j++ {
-			sel = append(sel, xs[j])
-			rec(j + 1)
-			sel = sel[:len(sel)-1]
+			rec(j+1, append(sel, xs[j]))
 		}
 	}
-	rec(0)
+	rec(0, make([]int, 0, k))
 }
 
 type oracleTarget struct {
-	voters []int
-	rules  []int
-	leader int
+	voters, rules []int
+	leader        int
 }
 
-// legalTargets enumerates every legal target of group g of the input.
+// legalTargets enumerates all targets with maximal isolation for every rule.
 func legalTargets(in *Input, gi int) []oracleTarget {
 	g := &in.Groups[gi]
 	per := make([][][]int, len(g.Rules))
@@ -109,30 +95,22 @@ func legalTargets(in *Input, gi int) []oracleTarget {
 			}
 		}
 		slices.Sort(cands)
-		depth := r.depth()
 		best := -1.0
-		var sets [][]int
 		combinations(cands, r.Count, func(c []int) {
-			score := isolationScore(r.Location, c, depth)
+			score := isolationScore(r.Location, c, r.depth())
 			if score > best {
-				best, sets = score, nil
+				best, per[ri] = score, nil
 			}
 			if score == best {
-				sets = append(sets, c)
+				per[ri] = append(per[ri], c)
 			}
 		})
-		per[ri] = sets
 	}
 	var out []oracleTarget
 	var rec func(int, []int, []int)
 	rec = func(ri int, voters, rules []int) {
 		if ri == len(g.Rules) {
-			for _, f := range g.Forced {
-				if !slices.Contains(voters, f) {
-					return
-				}
-			}
-			if g.LeaderPinned && !slices.Contains(voters, g.Leader) {
+			if slices.ContainsFunc(g.Forced, func(s int) bool { return !slices.Contains(voters, s) }) {
 				return
 			}
 			for k, s := range voters {
@@ -242,6 +220,29 @@ func scoreOf(in *Input, voters [][]int, leaders []int) Score {
 	return out
 }
 
+// matchesTarget also checks the chooser's rule assignment when rules is non-nil.
+func matchesTarget(legal []oracleTarget, voters, rules []int, leader int) bool {
+	return slices.ContainsFunc(legal, func(o oracleTarget) bool {
+		if o.leader != leader || !sameSet(o.voters, voters) || rules != nil && len(rules) != len(voters) {
+			return false
+		}
+		for k, ri := range rules {
+			if o.rules[slices.Index(o.voters, voters[k])] != ri {
+				return false
+			}
+		}
+		return true
+	})
+}
+
+func choiceCost(v, l []int, voters []int, leader int) Score {
+	out := Score{Leader: int64(l[leader])}
+	for _, s := range voters {
+		out.Voter += int64(v[s])
+	}
+	return out
+}
+
 func TestOracleBoundChooserAndLegality(t *testing.T) {
 	rng := rand.New(rand.NewPCG(20261027, 7))
 	for _, sh := range shapes {
@@ -262,57 +263,35 @@ func TestOracleBoundChooserAndLegality(t *testing.T) {
 				continue
 			}
 			cases++
-			// Exhaustive optimum over all legal layouts.
 			minV, minL := int64(math.MaxInt64), int64(math.MaxInt64)
 			opt := Score{math.MaxInt64, math.MaxInt64}
-			idx := make([]int, len(in.Groups))
-			for {
-				voters, leaders := make([][]int, len(idx)), make([]int, len(idx))
-				for gi, k := range idx {
-					voters[gi], leaders[gi] = legal[gi][k].voters, legal[gi][k].leader
+			var enumerate func(int, [][]int, []int)
+			enumerate = func(gi int, voters [][]int, leaders []int) {
+				if gi < len(legal) {
+					for _, o := range legal[gi] {
+						enumerate(gi+1, append(voters, o.voters), append(leaders, o.leader))
+					}
+					return
 				}
 				s := scoreOf(in, voters, leaders)
 				minV, minL = min(minV, s.Voter), min(minL, s.Leader)
 				if s.Less(opt) {
 					opt = s
 				}
-				gi := 0
-				for gi < len(idx) {
-					idx[gi]++
-					if idx[gi] < len(legal[gi]) {
-						break
-					}
-					idx[gi] = 0
-					gi++
-				}
-				if gi == len(idx) {
-					break
-				}
 			}
+			enumerate(0, nil, nil)
 			r := Plan(in, Options{Seed: uint64(cases)})
-			name := fmt.Sprintf("%s case %d", sh.name, cases)
+			re := require.New(t)
 			for gi := range in.Groups {
-				found := slices.ContainsFunc(legal[gi], func(o oracleTarget) bool {
-					return o.leader == r.Leaders[gi] && sameSet(o.voters, r.Voters[gi])
-				})
-				if !found {
-					g := in.Groups[gi]
-					t.Logf("stores=%d loc=%v", in.Stores, g.Rules[0].Location)
-					for ri, rr := range g.Rules {
-						t.Logf("rule %d role=%d count=%d stores=%v", ri, rr.Role, rr.Count, rr.Stores)
-					}
-					t.Logf("voters=%v ruleOf=%v leader=%d forced=%v pinned=%v canLead=%v", g.Voters, g.RuleOf, g.Leader, g.Forced, g.LeaderPinned, g.CanLead)
-					t.Logf("legal=%v", legal[gi])
-				}
-				require.True(t, found, "%s group %d: illegal %v/%d", name, gi, r.Voters[gi], r.Leaders[gi])
+				re.True(matchesTarget(legal[gi], r.Voters[gi], nil, r.Leaders[gi]), "%s case %d group %d: illegal %v/%d", sh.name, cases, gi, r.Voters[gi], r.Leaders[gi])
 			}
-			require.Equal(t, scoreOf(in, r.Voters, r.Leaders), r.Score, name)
-			require.False(t, r.Baseline.Less(r.Score), name)
-			require.LessOrEqual(t, r.Bound.Voter, minV, "%s: voter bound above optimum", name)
-			require.LessOrEqual(t, r.Bound.Leader, minL, "%s: leader bound above optimum", name)
+			re.Equal(scoreOf(in, r.Voters, r.Leaders), r.Score, "%s case %d", sh.name, cases)
+			re.False(r.Baseline.Less(r.Score), "%s case %d", sh.name, cases)
+			re.LessOrEqual(r.Bound.Voter, minV, "%s case %d: voter bound above optimum", sh.name, cases)
+			re.LessOrEqual(r.Bound.Leader, minL, "%s case %d: leader bound above optimum", sh.name, cases)
 			if r.Stop == StopBound {
 				boundStops++
-				require.Equal(t, opt, r.Score, "%s: stopped at bound but not optimal", name)
+				re.Equal(opt, r.Score, "%s case %d: stopped at bound but not optimal", sh.name, cases)
 			}
 			if r.Score == opt {
 				optimal++
@@ -321,30 +300,22 @@ func TestOracleBoundChooserAndLegality(t *testing.T) {
 			p := newPlanner(in, Options{Sweeps: 1, WorkBudget: DefaultWorkBudget})
 			for gi := range p.gs {
 				g := &p.gs[gi]
-				g.startV = slices.Clone(g.cur)
-				g.startLd = g.lead
+				g.startV, g.startLd = slices.Clone(g.cur), g.lead
 				for _, s := range g.cur {
 					p.v[s]--
 				}
 				p.l[g.lead]--
-				best := [2]int64{math.MaxInt64, math.MaxInt64}
+				best := Score{math.MaxInt64, math.MaxInt64}
 				for _, o := range legal[gi] {
-					var sv int64
-					for _, s := range o.voters {
-						sv += int64(p.v[s])
-					}
-					if c := [2]int64{sv, int64(p.l[o.leader])}; c[0] < best[0] || c[0] == best[0] && c[1] < best[1] {
+					if c := choiceCost(p.v, p.l, o.voters, o.leader); c.Less(best) {
 						best = c
 					}
 				}
 				voters, rules, leader, ok := p.choose(g, nil)
-				require.True(t, ok, "%s group %d: chooser found nothing", name, gi)
-				require.True(t, p.legal(g, voters, rules, leader), name)
-				var sv int64
-				for _, s := range voters {
-					sv += int64(p.v[s])
-				}
-				require.Equal(t, [2]int64{sv, int64(p.l[leader])}, best, "%s group %d: chooser not optimal", name, gi)
+				re.True(ok, "%s case %d group %d: chooser found nothing", sh.name, cases, gi)
+				re.Len(rules, len(voters))
+				re.True(matchesTarget(legal[gi], voters, rules, leader), "%s case %d group %d: illegal choice", sh.name, cases, gi)
+				re.Equal(best, choiceCost(p.v, p.l, voters, leader), "%s case %d group %d: chooser not optimal", sh.name, cases, gi)
 				chooserChecks++
 				for _, s := range g.cur {
 					p.v[s]++
