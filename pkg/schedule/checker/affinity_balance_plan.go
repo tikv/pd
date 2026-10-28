@@ -90,7 +90,7 @@ func (c *AffinityChecker) planBalanceTargets(ctx context.Context, snapshot *affi
 		checked := make(map[uint64]balanceCheckedRegion)
 		failed := false
 		for _, target := range targets {
-			group := plan.groups[slices.IndexFunc(plan.groups, func(g *affinity.GroupState) bool { return g.ID == target.ID })]
+			group := snapshot.Group(target.ID)
 			status, learners := c.validateBalancePlanTarget(ctx, snapshot, group, target, checked)
 			if err := ctx.Err(); err != nil {
 				return balancePlanResult{}, err

@@ -209,6 +209,15 @@ func (m *Manager) GetBalanceSnapshot(tableID TableID, counts BalanceCounts) *Bal
 	return snapshot
 }
 
+// Group returns the group with the given ID, or nil if the snapshot has none.
+func (s *BalanceSnapshot) Group(id string) *GroupState {
+	i, found := slices.BinarySearchFunc(s.Groups, id, func(g *GroupState, id string) int { return strings.Compare(g.ID, id) })
+	if !found {
+		return nil
+	}
+	return s.Groups[i]
+}
+
 // balanceStores returns the IDs of the up TiKV stores in ascending order.
 func (m *Manager) balanceStores() []uint64 {
 	var ids []uint64
@@ -230,12 +239,12 @@ func (m *Manager) balanceStores() []uint64 {
 func (m *Manager) CommitBalanceTargets(ctx context.Context, snapshot *BalanceSnapshot, targets []*Group) ([]string, error) {
 	groupTargets := make([]GroupTarget, 0, len(targets))
 	for _, target := range targets {
-		i := slices.IndexFunc(snapshot.Groups, func(group *GroupState) bool { return group.ID == target.ID })
-		if i < 0 {
+		group := snapshot.Group(target.ID)
+		if group == nil {
 			return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(target.ID)
 		}
 		groupTargets = append(groupTargets, GroupTarget{
-			Expected:      snapshot.Groups[i].Group,
+			Expected:      group.Group,
 			LeaderStoreID: target.LeaderStoreID,
 			VoterStoreIDs: target.VoterStoreIDs,
 		})

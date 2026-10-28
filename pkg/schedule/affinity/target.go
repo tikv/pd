@@ -227,8 +227,12 @@ func (m *Manager) sendGroupTargets(ctx context.Context, targets []GroupTarget) (
 
 	m.metaMutex.Lock()
 	defer m.metaMutex.Unlock()
+	writtenIDs := make(map[string]struct{}, len(written))
+	for _, id := range written {
+		writtenIDs[id] = struct{}{}
+	}
 	for _, target := range targets {
-		if !slices.Contains(written, target.Expected.ID) {
+		if _, ok := writtenIDs[target.Expected.ID]; !ok {
 			continue
 		}
 		current := m.GetAffinityGroupState(target.Expected.ID)

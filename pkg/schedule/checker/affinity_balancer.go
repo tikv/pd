@@ -178,11 +178,15 @@ func (b *affinityBalancer) step(ctx context.Context, id affinity.TableID, counts
 // moveBalanceCounts moves the written targets from their original stores to
 // their new ones in counts.
 func moveBalanceCounts(counts affinity.BalanceCounts, snapshot *affinity.BalanceSnapshot, targets []*affinity.Group, written []string) {
+	writtenIDs := make(map[string]struct{}, len(written))
+	for _, id := range written {
+		writtenIDs[id] = struct{}{}
+	}
 	for _, target := range targets {
-		if !slices.Contains(written, target.ID) {
+		if _, ok := writtenIDs[target.ID]; !ok {
 			continue
 		}
-		original := snapshot.Groups[slices.IndexFunc(snapshot.Groups, func(g *affinity.GroupState) bool { return g.ID == target.ID })]
+		original := snapshot.Group(target.ID)
 		counts.Leader[original.LeaderStoreID]--
 		counts.Leader[target.LeaderStoreID]++
 		for _, id := range original.VoterStoreIDs {
