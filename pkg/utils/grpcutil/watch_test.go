@@ -41,6 +41,12 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
+func forwardEtcdWatchTest(ctx context.Context, client etcdserverpb.WatchClient, request etcdserverpb.WatchCreateRequest, send func(*etcdserverpb.WatchResponse, error) error) error {
+	return forwardEtcdWatchWithRetry(ctx, func(ctx context.Context) (etcdWatchStream, error) {
+		return openEtcdWatchStream(ctx, client)
+	}, request, send)
+}
+
 type watchTestClient struct {
 	watch func(context.Context) (etcdserverpb.Watch_WatchClient, error)
 }
@@ -119,7 +125,7 @@ func TestForwardEtcdWatchResumes(t *testing.T) {
 				}, nil
 			}}
 			var delivered []int64
-			err := forwardEtcdWatchWithRetry(t.Context(), client, etcdserverpb.WatchCreateRequest{Key: []byte("key"), StartRevision: test.start}, func(response *etcdserverpb.WatchResponse, err error) error {
+			err := forwardEtcdWatchTest(t.Context(), client, etcdserverpb.WatchCreateRequest{Key: []byte("key"), StartRevision: test.start}, func(response *etcdserverpb.WatchResponse, err error) error {
 				re.NoError(err)
 				for _, event := range response.Events {
 					delivered = append(delivered, event.Kv.ModRevision)
@@ -165,7 +171,7 @@ func TestForwardEtcdWatchTerminalErrors(t *testing.T) {
 					recv: func() (*etcdserverpb.WatchResponse, error) { return test.response, nil },
 				}, nil
 			}}
-			err := forwardEtcdWatchWithRetry(t.Context(), client, etcdserverpb.WatchCreateRequest{}, func(response *etcdserverpb.WatchResponse, err error) error {
+			err := forwardEtcdWatchTest(t.Context(), client, etcdserverpb.WatchCreateRequest{}, func(response *etcdserverpb.WatchResponse, err error) error {
 				sends++
 				re.Same(test.response, response)
 				re.Equal(test.err.Error(), err.Error())
@@ -189,7 +195,7 @@ func TestForwardEtcdWatchSendError(t *testing.T) {
 			recv: func() (*etcdserverpb.WatchResponse, error) { return watchTestResponse(1), nil },
 		}, nil
 	}}
-	err := forwardEtcdWatchWithRetry(t.Context(), client, etcdserverpb.WatchCreateRequest{}, func(*etcdserverpb.WatchResponse, error) error { return expected })
+	err := forwardEtcdWatchTest(t.Context(), client, etcdserverpb.WatchCreateRequest{}, func(*etcdserverpb.WatchResponse, error) error { return expected })
 	re.ErrorIs(err, expected)
 	re.Equal(1, opens)
 }
@@ -204,7 +210,7 @@ func TestForwardEtcdWatchSendEOF(t *testing.T) {
 		}, nil
 	}}
 	var reported error
-	err := forwardEtcdWatchWithRetry(t.Context(), client, etcdserverpb.WatchCreateRequest{}, func(response *etcdserverpb.WatchResponse, err error) error {
+	err := forwardEtcdWatchTest(t.Context(), client, etcdserverpb.WatchCreateRequest{}, func(response *etcdserverpb.WatchResponse, err error) error {
 		re.True(response.Canceled)
 		reported = err
 		return nil
@@ -229,7 +235,7 @@ func TestForwardEtcdWatchCancellation(t *testing.T) {
 	}}
 	result := make(chan error, 1)
 	go func() {
-		result <- forwardEtcdWatchWithRetry(ctx, client, etcdserverpb.WatchCreateRequest{}, func(*etcdserverpb.WatchResponse, error) error { return nil })
+		result <- forwardEtcdWatchTest(ctx, client, etcdserverpb.WatchCreateRequest{}, func(*etcdserverpb.WatchResponse, error) error { return nil })
 	}()
 	<-started
 	cancel()
@@ -257,7 +263,7 @@ func (s *blockedWatchTestServer) WatchGlobalConfig(_ *pdpb.WatchGlobalConfigRequ
 			},
 		}, nil
 	}}
-	err := forwardEtcdWatchWithRetry(stream.Context(), client, etcdserverpb.WatchCreateRequest{}, func(response *etcdserverpb.WatchResponse, _ error) error {
+	err := forwardEtcdWatchTest(stream.Context(), client, etcdserverpb.WatchCreateRequest{}, func(response *etcdserverpb.WatchResponse, _ error) error {
 		s.sending <- response.Header.Revision
 		return stream.Send(&pdpb.WatchGlobalConfigResponse{Changes: []*pdpb.GlobalConfigItem{{Payload: response.Events[0].Kv.Value}}})
 	})

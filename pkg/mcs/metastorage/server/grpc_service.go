@@ -32,7 +32,6 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/registry"
 	"github.com/tikv/pd/pkg/utils/apiutil"
-	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
@@ -105,7 +104,7 @@ func (s *Service) Watch(req *meta_storagepb.WatchRequest, server meta_storagepb.
 		})
 	}
 	cli := s.manager.GetClient()
-	return grpcutil.ForwardEtcdWatch(ctx, cli, etcdserverpb.WatchCreateRequest{
+	return s.manager.watchForwarder.Forward(ctx, cli, etcdserverpb.WatchCreateRequest{
 		Key: req.GetKey(), RangeEnd: req.GetRangeEnd(), StartRevision: startRevision, PrevKv: req.GetPrevKv(),
 	}, func(res *etcdserverpb.WatchResponse, err error) error {
 		if err != nil {

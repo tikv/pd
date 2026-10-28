@@ -159,7 +159,8 @@ type Server struct {
 	// for PD leader election.
 	member *member.Member
 	// etcd client
-	client *clientv3.Client
+	client             *clientv3.Client
+	etcdWatchForwarder grpcutil.EtcdWatchForwarder
 	// electionClient is used for leader election.
 	electionClient *clientv3.Client
 	// http client

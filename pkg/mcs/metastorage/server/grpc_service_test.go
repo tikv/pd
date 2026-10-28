@@ -112,13 +112,26 @@ func (s *watchRelay) Watch(stream etcdserverpb.Watch_WatchServer) error {
 type observedWatchStream struct {
 	grpc.ClientStream
 	observe func(*etcdserverpb.WatchResponse)
+	sent    func(*etcdserverpb.WatchRequest)
 }
 
 func (s *observedWatchStream) RecvMsg(message any) error {
 	if err := s.ClientStream.RecvMsg(message); err != nil {
 		return err
 	}
-	s.observe(message.(*etcdserverpb.WatchResponse))
+	if s.observe != nil {
+		s.observe(message.(*etcdserverpb.WatchResponse))
+	}
+	return nil
+}
+
+func (s *observedWatchStream) SendMsg(message any) error {
+	if err := s.ClientStream.SendMsg(message); err != nil {
+		return err
+	}
+	if s.sent != nil {
+		s.sent(message.(*etcdserverpb.WatchRequest))
+	}
 	return nil
 }
 
@@ -309,33 +322,202 @@ func TestWatchPreservesRevisionAndPreviousValue(t *testing.T) {
 }
 
 func TestWatchSlowConsumerPreservesEvents(t *testing.T) {
+	for _, compacted := range []bool{false, true} {
+		t.Run("compacted="+strconv.FormatBool(compacted), func(t *testing.T) {
+			re := require.New(t)
+			_, client, cleanup := etcdutil.NewTestEtcdCluster(t, 1, nil)
+			defer cleanup()
+			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+			defer cancel()
+			var streams atomic.Int64
+			paused := make(chan struct{})
+			var pauseOnce sync.Once
+			watchClient, err := clientv3.New(clientv3.Config{
+				Endpoints: client.Endpoints(), DialTimeout: 5 * time.Second,
+				DialOptions: []grpc.DialOption{grpc.WithChainStreamInterceptor(func(ctx context.Context, desc *grpc.StreamDesc, conn *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+					stream, err := streamer(ctx, desc, conn, method, opts...)
+					if err != nil || method != "/etcdserverpb.Watch/Watch" {
+						return stream, err
+					}
+					streams.Add(1)
+					return &observedWatchStream{ClientStream: stream, sent: func(request *etcdserverpb.WatchRequest) {
+						if request.GetCancelRequest().GetWatchId() == 1 {
+							pauseOnce.Do(func() { close(paused) })
+						}
+					}}, nil
+				})},
+			})
+			re.NoError(err)
+			defer watchClient.Close()
+			put, err := client.Put(ctx, "watch/slow", "0")
+			re.NoError(err)
+			service := &Service{ctx: ctx, manager: &Manager{srv: &watchServingServer{}, client: watchClient}}
+			const watchers, slowWatchers, updates = 32, 16, 256
+			started, caughtUp := make(chan struct{}, watchers), make(chan int, watchers)
+			released := make(chan struct{})
+			var release sync.Once
+			defer release.Do(func() { close(released) })
+			completed := errors.New("received all updates")
+			compactedResponses := make([]*meta_storagepb.WatchResponse, slowWatchers)
+			events := make([][]*meta_storagepb.Event, watchers)
+			results := make(chan error, watchers)
+			start := func(index int) {
+				go func() {
+					results <- service.Watch(&meta_storagepb.WatchRequest{Key: []byte("watch/slow"), StartRevision: put.Header.Revision, PrevKv: true}, &metaWatchStream{ctx: ctx, send: func(response *meta_storagepb.WatchResponse) error {
+						if index < slowWatchers && response.Header.GetError() != nil {
+							compactedResponses[index] = response
+						}
+						if len(events[index]) == 0 {
+							started <- struct{}{}
+							if index < slowWatchers {
+								select {
+								case <-released:
+								case <-ctx.Done():
+									return ctx.Err()
+								}
+							}
+						}
+						events[index] = append(events[index], response.Events...)
+						for _, event := range response.Events {
+							if string(event.Kv.Value) == strconv.Itoa(updates-1) {
+								caughtUp <- index
+							}
+						}
+						if len(events[index]) >= updates+1 {
+							return completed
+						}
+						return nil
+					}})
+				}()
+				select {
+				case <-started:
+				case <-ctx.Done():
+					t.Fatal("initial watch response was not sent")
+				}
+			}
+			// Register the blocked sender first so its upstream WatchId is known.
+			for i := range watchers {
+				start(i)
+			}
+			re.Equal(int64(1), streams.Load(), "concurrent watches must share their upstream RPC")
+			for i := 1; i < updates; i++ {
+				_, err := client.Put(ctx, "watch/slow", strconv.Itoa(i))
+				re.NoError(err)
+			}
+			select {
+			case <-paused:
+			case <-ctx.Done():
+				t.Fatal("blocked consumer was not paused upstream")
+			}
+			for range watchers - slowWatchers {
+				select {
+				case index := <-caughtUp:
+					re.GreaterOrEqual(index, slowWatchers, "healthy senders must catch up while slow senders are blocked")
+				case <-ctx.Done():
+					t.Fatal("slow consumer blocked a healthy consumer")
+				}
+			}
+			re.Equal(int64(1), streams.Load(), "pausing one watch must not close the shared RPC")
+			remaining := watchers
+			if compacted {
+				current, err := client.Get(ctx, "watch/slow")
+				re.NoError(err)
+				_, err = client.Compact(ctx, current.Header.Revision)
+				re.NoError(err)
+			}
+			release.Do(func() { close(released) })
+			if compacted {
+				for range slowWatchers {
+					select {
+					case err := <-results:
+						re.ErrorIs(err, rpctypes.ErrCompacted)
+					case <-ctx.Done():
+						t.Fatal("paused watch did not report compacted history")
+					}
+				}
+				for index, response := range compactedResponses {
+					re.NotNil(response)
+					re.Equal(meta_storagepb.ErrorType_DATA_COMPACTED, response.Header.GetError().GetType())
+					re.Len(events[index], 1)
+				}
+				remaining -= slowWatchers
+			} else {
+				for range slowWatchers {
+					select {
+					case index := <-caughtUp:
+						re.Less(index, slowWatchers)
+					case <-ctx.Done():
+						t.Fatal("slow consumer did not replay its backlog")
+					}
+				}
+			}
+			_, err = client.Put(ctx, "watch/slow", strconv.Itoa(updates))
+			re.NoError(err)
+			for range remaining {
+				select {
+				case err := <-results:
+					re.ErrorIs(err, completed)
+				case <-ctx.Done():
+					t.Fatal("watch did not receive all updates")
+				}
+			}
+			for index, received := range events {
+				if compacted && index < slowWatchers {
+					continue
+				}
+				re.Len(received, updates+1)
+				for i, event := range received {
+					re.Equal(strconv.Itoa(i), string(event.Kv.Value))
+					if i > 0 {
+						re.Greater(event.Kv.ModRevision, received[i-1].Kv.ModRevision)
+						re.Equal(strconv.Itoa(i-1), string(event.PrevKv.Value))
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestWatchPermissionFailureDoesNotInterruptOtherWatches(t *testing.T) {
 	re := require.New(t)
 	_, client, cleanup := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer cleanup()
-	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	put, err := client.Put(ctx, "watch/slow", "0")
+	_, err := client.UserAdd(ctx, "root", "root-password")
 	re.NoError(err)
-	service := &Service{ctx: ctx, manager: &Manager{srv: &watchServingServer{}, client: client}}
-	started, released := make(chan struct{}), make(chan struct{})
-	var release sync.Once
-	defer release.Do(func() { close(released) })
-	const updates = 256
-	completed := errors.New("received all updates")
-	var events []*meta_storagepb.Event
+	_, err = client.UserGrantRole(ctx, "root", "root")
+	re.NoError(err)
+	_, err = client.UserAdd(ctx, "watcher", "watch-password")
+	re.NoError(err)
+	_, err = client.RoleAdd(ctx, "watch-reader")
+	re.NoError(err)
+	_, err = client.RoleGrantPermission(ctx, "watch-reader", "watch/allowed", "", clientv3.PermissionType(clientv3.PermRead))
+	re.NoError(err)
+	_, err = client.UserGrantRole(ctx, "watcher", "watch-reader")
+	re.NoError(err)
+	put, err := client.Put(ctx, "watch/allowed", "before")
+	re.NoError(err)
+	_, err = client.AuthEnable(ctx)
+	re.NoError(err)
+	root, err := clientv3.New(clientv3.Config{Endpoints: client.Endpoints(), Username: "root", Password: "root-password", DialTimeout: 5 * time.Second})
+	re.NoError(err)
+	defer root.Close()
+	watchClient, err := clientv3.New(clientv3.Config{Endpoints: client.Endpoints(), Username: "watcher", Password: "watch-password", DialTimeout: 5 * time.Second})
+	re.NoError(err)
+	defer watchClient.Close()
+	service := &Service{ctx: ctx, manager: &Manager{srv: &watchServingServer{}, client: watchClient}}
+	started := make(chan struct{})
 	result := make(chan error, 1)
+	completed := errors.New("received authorized update")
+	var events []*meta_storagepb.Event
 	go func() {
-		result <- service.Watch(&meta_storagepb.WatchRequest{Key: []byte("watch/slow"), StartRevision: put.Header.Revision, PrevKv: true}, &metaWatchStream{ctx: ctx, send: func(response *meta_storagepb.WatchResponse) error {
-			if len(events) == 0 {
-				close(started)
-				select {
-				case <-released:
-				case <-ctx.Done():
-					return ctx.Err()
-				}
-			}
+		result <- service.Watch(&meta_storagepb.WatchRequest{Key: []byte("watch/allowed"), StartRevision: put.Header.Revision}, &metaWatchStream{ctx: ctx, send: func(response *meta_storagepb.WatchResponse) error {
 			events = append(events, response.Events...)
-			if len(events) >= updates+1 {
+			if len(events) == 1 {
+				close(started)
+			}
+			if len(events) == 2 {
 				return completed
 			}
 			return nil
@@ -344,27 +526,27 @@ func TestWatchSlowConsumerPreservesEvents(t *testing.T) {
 	select {
 	case <-started:
 	case <-ctx.Done():
-		t.Fatal("initial watch response was not sent")
+		t.Fatal("authorized watch did not start")
 	}
-	for i := 1; i <= updates; i++ {
-		_, err := client.Put(ctx, "watch/slow", strconv.Itoa(i))
-		re.NoError(err)
-	}
-	release.Do(func() { close(released) })
+	var denied *meta_storagepb.WatchResponse
+	err = service.Watch(&meta_storagepb.WatchRequest{Key: []byte("watch/denied")}, &metaWatchStream{ctx: ctx, send: func(response *meta_storagepb.WatchResponse) error {
+		denied = response
+		return nil
+	}})
+	re.ErrorContains(err, "permission denied")
+	re.NotNil(denied)
+	re.Equal(meta_storagepb.ErrorType_UNKNOWN, denied.Header.GetError().GetType())
+	_, err = root.Put(ctx, "watch/allowed", "after")
+	re.NoError(err)
 	select {
 	case err := <-result:
 		re.ErrorIs(err, completed)
 	case <-ctx.Done():
-		t.Fatal("slow consumer did not receive all updates")
+		t.Fatal("permission failure interrupted another watch")
 	}
-	re.Len(events, updates+1)
-	for i, event := range events {
-		re.Equal(strconv.Itoa(i), string(event.Kv.Value))
-		if i > 0 {
-			re.Greater(event.Kv.ModRevision, events[i-1].Kv.ModRevision)
-			re.Equal(strconv.Itoa(i-1), string(event.PrevKv.Value))
-		}
-	}
+	re.Len(events, 2)
+	re.Equal("before", string(events[0].Kv.Value))
+	re.Equal("after", string(events[1].Kv.Value))
 }
 
 func TestWatchLargeHistoricalResponse(t *testing.T) {

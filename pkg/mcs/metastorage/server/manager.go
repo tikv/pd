@@ -21,12 +21,14 @@ import (
 	"github.com/pingcap/log"
 
 	bs "github.com/tikv/pd/pkg/basicserver"
+	"github.com/tikv/pd/pkg/utils/grpcutil"
 )
 
 // Manager is the manager of meta storage.
 type Manager struct {
-	srv    bs.Server
-	client *clientv3.Client
+	srv            bs.Server
+	client         *clientv3.Client
+	watchForwarder grpcutil.EtcdWatchForwarder
 }
 
 // NewManager returns a new Manager.
