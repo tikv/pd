@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
@@ -672,6 +673,66 @@ func TestOperatorCheckConcurrently(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			re.Nil(op.Check(region))
+		}()
+	}
+	wg.Wait()
+}
+
+// pausedAddPeer pauses IsFinish on the given region until resume is closed.
+type pausedAddPeer struct {
+	AddPeer
+	region  *core.RegionInfo
+	entered chan struct{}
+	resume  chan struct{}
+}
+
+func (s pausedAddPeer) IsFinish(region *core.RegionInfo) bool {
+	if region == s.region {
+		close(s.entered)
+		<-s.resume
+	}
+	return s.AddPeer.IsFinish(region)
+}
+
+// TestOperatorCheckDoesNotMoveBack checks that a Check with an older region does not move the
+// progress back after a Check with a newer region has finished the operator.
+func TestOperatorCheckDoesNotMoveBack(t *testing.T) {
+	re := require.New(t)
+	older := newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
+	newer := older.Clone(core.WithLeader(older.GetStorePeer(2)))
+	entered, resume := make(chan struct{}), make(chan struct{})
+	addPeer := pausedAddPeer{AddPeer: AddPeer{ToStore: 2, PeerID: 2}, region: older, entered: entered, resume: resume}
+	op := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, addPeer, TransferLeader{FromStore: 1, ToStore: 2})
+	re.True(op.Start())
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		// It finds the first step finished, then is paused before advancing the progress.
+		op.Check(older)
+	}()
+	<-entered
+	step := op.Check(newer)
+	close(resume)
+	<-done
+
+	re.Nil(step)
+	re.Equal(SUCCESS, op.Status())
+	re.Equal(int32(2), atomic.LoadInt32(&op.currentStep))
+}
+
+func TestOperatorTotalInfluenceConcurrently(t *testing.T) {
+	region := newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
+	op := NewTestOperator(1, &metapb.RegionEpoch{}, OpLeader, TransferLeader{FromStore: 1, ToStore: 2})
+	var wg sync.WaitGroup
+	for range 10 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			influence := NewOpInfluence()
+			op.TotalInfluence(*influence, region)
+			assert.Equal(t, int64(-1), influence.GetStoreInfluence(1).LeaderCount)
+			assert.Equal(t, int64(1), influence.GetStoreInfluence(2).LeaderCount)
 		}()
 	}
 	wg.Wait()
