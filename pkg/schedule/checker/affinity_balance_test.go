@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -227,6 +228,10 @@ func TestAffinityBalanceLearnerInLaterRegion(t *testing.T) {
 	later = later.Clone(core.WithRemoveStorePeer(6), core.WithAddPeer(learner))
 	f.PutRegion(later)
 	re.True(f.step())
+	// The TiFlash store holds a learner of every Region and is never a voter target.
+	for _, group := range f.snapshot().Groups {
+		re.NotContains(group.VoterStoreIDs, uint64(6))
+	}
 	target := f.affinityManager.GetAffinityGroupState(blocked)
 	re.NotContains(target.VoterStoreIDs, uint64(4))
 	re.Contains(f.affinityManager.GetAffinityGroupState(ids[1-groupIndex]).VoterStoreIDs, uint64(4))
@@ -296,6 +301,25 @@ func TestAffinityBalanceRetries(t *testing.T) {
 			re.False(f.step())
 			re.Equal(before.Groups, f.snapshot().Groups)
 			re.WithinDuration(time.Now().Add(30*time.Second), f.balancer.idle[balanceTestTable].until, 2*time.Second)
+			if reason == "converging" {
+				// The worker plans the table again only once the record expires.
+				b := f.balancer
+				expire := func() {
+					idle := b.idle[balanceTestTable]
+					idle.until = time.Now().Add(-time.Second)
+					b.idle[balanceTestTable] = idle
+				}
+				b.enqueue(ids[0])
+				idle := b.idle[balanceTestTable]
+				re.False(b.balance(t.Context()))
+				re.Equal(idle, b.idle[balanceTestTable])
+				expire()
+				re.False(b.balance(t.Context()))
+				re.WithinDuration(time.Now().Add(30*time.Second), b.idle[balanceTestTable].until, 2*time.Second)
+				f.settle()
+				expire()
+				re.True(b.balance(t.Context()))
+			}
 			if reason == "busy" || reason == "store limit" {
 				f.SetStoreBusy(4, false)
 				f.SetStoreLimit(4, storelimit.AddPeer, storelimit.Unlimited)
@@ -358,18 +382,33 @@ func (c *affinityBalanceScanCluster) BatchScanRegions(ranges *keyutil.KeyRanges,
 }
 
 func TestAffinityBalanceCommitRejectsChangedInputs(t *testing.T) {
-	for _, change := range []string{"rule", "conf version", "split", "limit", "pause", "halt", "placement disabled", "cancel"} {
+	for _, change := range []string{"rule", "conf version", "split", "merge", "add learner", "remove learner", "later group",
+		"limit", "pause", "halt", "placement disabled", "cancel"} {
 		t.Run(change, func(t *testing.T) {
 			re := require.New(t)
 			f := newAffinityBalanceTest(t, 3)
-			ids := f.seed("100", 1, 1, 1)
-			f.policy(affinity.BalancePolicyFixed, ids[1])
+			leaders := []uint64{1, 1}
+			if change == "later group" {
+				leaders = append(leaders, 1)
+			}
+			ids := f.seed("100", 1, leaders...)
+			if change != "later group" {
+				f.policy(affinity.BalancePolicyFixed, ids[1])
+			}
+			learner := &metapb.Peer{Id: 100, StoreId: 4, Role: metapb.PeerRole_Learner}
+			if strings.HasSuffix(change, "learner") {
+				f.AddRegionStore(4, 10)
+			}
+			if change == "remove learner" {
+				re.NoError(f.ruleManager.SetRule(&placement.Rule{GroupID: placement.DefaultGroupID, ID: "learner", Role: placement.Learner, Count: 1}))
+				f.PutRegion(f.GetRegion(1).Clone(core.WithAddPeer(learner), core.WithIncConfVer()))
+			}
 			snapshot, revision := f.snapshot(), f.ruleManager.GetRevision()
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			res, err := f.planBalanceTargets(ctx, snapshot)
 			re.NoError(err)
-			re.Len(res.targets, 1)
+			re.Len(res.targets, len(leaders)-1)
 			called := false
 			f.cluster = &affinityBalanceScanCluster{CheckerCluster: f.Cluster, beforeFinal: func() {
 				re.False(called)
@@ -385,6 +424,15 @@ func TestAffinityBalanceCommitRejectsChangedInputs(t *testing.T) {
 					mid := append(slices.Clone(region.GetStartKey()), 'm')
 					f.PutRegion(region.Clone(core.WithEndKey(mid), core.WithIncVersion()))
 					f.PutRegion(region.Clone(core.WithNewRegionID(3), core.WithStartKey(mid), core.WithIncVersion()))
+				case "merge":
+					f.PutRegion(region.Clone(core.WithEndKey(f.GetRegion(2).GetEndKey()), core.WithIncVersion()))
+				case "add learner":
+					f.PutRegion(region.Clone(core.WithAddPeer(learner), core.WithIncConfVer()))
+				case "remove learner":
+					f.PutRegion(region.Clone(core.WithRemoveStorePeer(4), core.WithIncConfVer()))
+				case "later group":
+					later := f.GetRegion(uint64(slices.Index(ids, res.targets[1].ID) + 1))
+					f.PutRegion(later.Clone(core.WithIncConfVer()))
 				case "limit":
 					f.SetAffinityScheduleLimit(0)
 				case "pause":

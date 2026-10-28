@@ -276,3 +276,32 @@ func TestCommitBalanceTargetsChunks(t *testing.T) {
 		})
 	}
 }
+
+// TestCommitBalanceTargetsAfterLostReply checks a commit that succeeded but
+// returned an error: the next plan, decided from the stale memory, is not
+// written and refreshes the memory, so that the plan after it is written.
+func TestCommitBalanceTargetsAfterLostReply(t *testing.T) {
+	re := require.New(t)
+	m, store := newTargetTestManager(t)
+	const id = "_tidb_pt_100_p0"
+	re.NoError(m.CreateAffinityGroups([]GroupKeyRanges{{GroupID: id}}))
+	lost := &lostReplyStorage{AffinityStorage: m.storage, lose: true}
+	m.storage = lost
+	commit := func(leader uint64) ([]string, error) {
+		snapshot := m.GetBalanceSnapshot("_tidb_pt_100", m.GetBalanceCounts())
+		target := targetFor(m, id, leader, 1, 2, 3)
+		return m.CommitBalanceTargets(t.Context(), snapshot, []*Group{target.result(&target.Expected)})
+	}
+	_, err := commit(1)
+	re.Error(err)
+	re.Equal(uint64(1), loadStoredGroup(re, store, id).LeaderStoreID)
+	re.Zero(m.GetAffinityGroupState(id).LeaderStoreID)
+	written, err := commit(2)
+	re.NoError(err)
+	re.Empty(written)
+	re.Equal(uint64(1), m.GetAffinityGroupState(id).LeaderStoreID)
+	written, err = commit(2)
+	re.NoError(err)
+	re.Equal([]string{id}, written)
+	re.Equal(uint64(2), loadStoredGroup(re, store, id).LeaderStoreID)
+}
