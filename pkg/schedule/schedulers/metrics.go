@@ -21,7 +21,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/tikv/pd/pkg/core"
-	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
@@ -603,41 +602,6 @@ func (t *hotRegionTop) add(e hotRegionEntry) {
 	}
 	copy(t.entries[pos+1:t.count], t.entries[pos:t.count-1])
 	t.entries[pos] = e
-}
-
-// selectHotRegions selects peer and optional leader lists in one pass. A
-// negative dimension disables that list. Only the winning entries retain peer
-// snapshots; no map proportional to the number of Stores is needed.
-func selectHotRegions(cluster sche.SchedulerCluster, stats map[uint64][]*statistics.HotPeerStat, dim, leaderDim int) (peersTop, leadersTop hotRegionTop) {
-	for storeID, peers := range stats {
-		store := cluster.GetStore(storeID)
-		if store == nil || store.IsRemoved() || store.IsUnhealthy() {
-			continue
-		}
-		for _, peer := range peers {
-			entry := hotRegionEntry{regionID: peer.RegionID, storeID: storeID, peer: peer}
-			if dim >= 0 {
-				entry.load = peer.GetLoad(dim)
-				peersTop.add(entry)
-			}
-			if leaderDim >= 0 && peer.IsLeader() {
-				if leaderDim != dim {
-					entry.load = peer.GetLoad(leaderDim)
-				}
-				leadersTop.add(entry)
-			}
-		}
-	}
-	return peersTop, leadersTop
-}
-
-// CollectHotRegionMetrics reuses the already filtered hot-cache statistics
-// used by hotspot monitoring. It is independent of scheduling being
-// paused, hitting an operator limit, or producing an operator.
-func (c *Controller) CollectHotRegionMetrics(rw utils.RWType, stats map[uint64][]*statistics.HotPeerStat, storeLoads map[uint64]statistics.StoreKindLoads) {
-	c.publishHotRegionMetrics(rw, storeLoads, func(dim, leaderDim int) (hotRegionTop, hotRegionTop) {
-		return selectHotRegions(c.cluster, stats, dim, leaderDim)
-	})
 }
 
 // CollectHotRegionMetricsAndStoreStats collects the Top 10 while summing the

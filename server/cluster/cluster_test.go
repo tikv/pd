@@ -2990,6 +2990,35 @@ func TestCollectMetricsConcurrent(t *testing.T) {
 	wg.Wait()
 }
 
+func TestGetStoresLoadsTo(t *testing.T) {
+	rc := &RaftCluster{schedulingController: &schedulingController{
+		hotStat: &statistics.HotStat{StoresStats: statistics.NewStoresStats()},
+	}}
+	// The Coordinator discovers buffer reuse through the real RaftCluster.
+	fetcher, ok := any(rc).(interface {
+		GetStoresLoadsTo(map[uint64]statistics.StoreKindLoads) map[uint64]statistics.StoreKindLoads
+	})
+	require.True(t, ok, "standalone PD must expose reusable Store load snapshots")
+	rc.hotStat.SetRegionsStats([]uint64{1, 2}, []float64{100, 200}, []float64{10, 20})
+	dst := map[uint64]statistics.StoreKindLoads{99: {utils.StoreRegionsWriteBytes: 999}}
+	loads := fetcher.GetStoresLoadsTo(dst)
+	require.Equal(t, rc.GetStoresLoads(), loads)
+	require.NotContains(t, loads, uint64(99))
+	snapshot := rc.GetStoresLoads()
+	// Mutating the destination proves reuse and must not affect API snapshots.
+	dst[99] = statistics.StoreKindLoads{utils.StoreRegionsWriteBytes: 999}
+	require.Contains(t, loads, uint64(99))
+	require.NotContains(t, snapshot, uint64(99))
+	rc.hotStat.RemoveRollingStoreStats(1)
+	rc.hotStat.SetRegionsStats([]uint64{2}, []float64{300}, []float64{30})
+	loads = fetcher.GetStoresLoadsTo(dst)
+	require.Equal(t, rc.GetStoresLoads(), loads)
+	require.Len(t, loads, 1)
+	require.Equal(t, 300.0, loads[2][utils.StoreRegionsWriteBytes])
+	require.Len(t, snapshot, 2)
+	require.Equal(t, 200.0, snapshot[2][utils.StoreRegionsWriteBytes])
+}
+
 func TestCollectMetrics(t *testing.T) {
 	re := require.New(t)
 
