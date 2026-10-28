@@ -349,7 +349,7 @@ func TestLoadRulesLogRedact(t *testing.T) {
 			} {
 				re.NoError(memory.Save(keypath.RegionLabelKeyPath(key), value))
 			}
-			labeler := &RegionLabeler{storage: store, ctx: context.Background()}
+			labeler := &RegionLabeler{storage: store, ctx: t.Context()}
 			re.NoError(labeler.loadRules())
 
 			output, err := os.ReadFile(fname)
