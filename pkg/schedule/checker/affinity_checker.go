@@ -50,11 +50,12 @@ type AffinityChecker struct {
 	conf             config.CheckerConfigProvider
 	recentMergeCache *cache.TTLUint64
 	startTime        time.Time
+	balancer         *affinityBalancer
 }
 
 // NewAffinityChecker create an affinity checker.
 func NewAffinityChecker(ctx context.Context, cluster sche.CheckerCluster, conf config.CheckerConfigProvider) *AffinityChecker {
-	return &AffinityChecker{
+	c := &AffinityChecker{
 		cluster:          cluster,
 		ruleManager:      cluster.GetRuleManager(),
 		affinityManager:  cluster.GetAffinityManager(),
@@ -62,6 +63,10 @@ func NewAffinityChecker(ctx context.Context, cluster sche.CheckerCluster, conf c
 		recentMergeCache: cache.NewIDTTL(ctx, gcInterval, recentMergeTTL),
 		startTime:        time.Now(),
 	}
+	if c.affinityManager != nil {
+		c.balancer = newAffinityBalancer(ctx, c)
+	}
+	return c
 }
 
 // GetType return AffinityChecker's type.
@@ -155,6 +160,12 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	if group == nil || !group.AffinitySchedulingAllowed {
 		affinityCheckerGroupSchedulingDisabledCounter.Inc()
 		return nil
+	}
+
+	// Once a group is stable, register its table with the balancer, which plans
+	// the targets of the whole table in the background.
+	if group.BalancePolicy != affinity.BalancePolicyFixed && group.Phase == affinity.PhaseStable {
+		c.balancer.enqueue(group.ID)
 	}
 
 	// For a Region already in affinity, try to merge it with neighboring affinity Regions.
