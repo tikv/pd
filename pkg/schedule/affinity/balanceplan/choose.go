@@ -166,6 +166,9 @@ func (p *planner) choose(g *groupState, exclude []bool) (voters, rules []int, le
 	}
 	rs := ruleSearch{p: p}
 	for _, host := range hosts {
+		if rs.done() {
+			break
+		}
 		p.assignForced(g, forced, make([][]int, len(g.Rules)), &rs, func(must [][]int) {
 			if g.LeaderPinned && !slices.Contains(must[host], g.Leader) {
 				return
@@ -195,7 +198,9 @@ func (p *planner) choose(g *groupState, exclude []bool) (voters, rules []int, le
 func (p *planner) assignForced(g *groupState, forced []int, must [][]int, rs *ruleSearch, f func([][]int)) {
 	rs.steps++
 	if len(forced) == 0 {
-		f(must)
+		if !rs.done() {
+			f(must)
+		}
 		return
 	}
 	s := forced[0]
