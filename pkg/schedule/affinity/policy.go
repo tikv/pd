@@ -48,7 +48,6 @@ const (
 	storeLeaderEvicted
 	storeBusy
 	storeDisconnected
-	storePreparing
 	storeLowSpace
 	degradedBoundary
 
@@ -68,8 +67,6 @@ func (c storeCondition) String() string {
 		return "busy"
 	case storeDisconnected:
 		return "disconnected"
-	case storePreparing:
-		return "preparing"
 	case storeLowSpace:
 		return "low-space"
 	case storeDown:
@@ -159,10 +156,8 @@ func (m *Manager) startAvailabilityCheckLoop() {
 }
 
 // checkGroupsAvailability checks the condition of stores and invalidates groups with unavailable stores.
+// It keeps the conditions current for groups created after an empty interval.
 func (m *Manager) checkGroupsAvailability() {
-	if !m.IsAvailable() {
-		return
-	}
 	m.applyStoreConditions(m.collectUnavailableStores())
 	m.collectMetrics()
 }
@@ -192,21 +187,24 @@ func (m *Manager) collectUnavailableStores() map[uint64]storeCondition {
 		case store.IsUnhealthy():
 			unavailableStores[store.GetID()] = storeDown
 
-		// Then the conditions that will mark the group as degraded
+		// Then the conditions that will mark the group as degraded, from the most
+		// severe. A store in several conditions takes the most severe one, so that
+		// a disconnected store that is also stopping degrades every group with a
+		// voter on it, not only the groups whose leader is on it.
+		case store.IsLowSpace(lowSpaceRatio):
+			unavailableStores[store.GetID()] = storeLowSpace
+		case store.IsDisconnected():
+			unavailableStores[store.GetID()] = storeDisconnected
+		case store.IsBusy():
+			unavailableStores[store.GetID()] = storeBusy
 		case !store.AllowLeaderTransferIn() || m.conf.CheckLabelProperty(config.RejectLeader, store.GetLabels()) ||
 			store.EvictedAsSlowStore() || store.EvictedAsStoppingStore() || store.IsEvictedAsSlowTrend():
 			unavailableStores[store.GetID()] = storeLeaderEvicted
-		case store.IsBusy():
-			unavailableStores[store.GetID()] = storeBusy
-		case store.IsDisconnected():
-			unavailableStores[store.GetID()] = storeDisconnected
-		case store.IsLowSpace(lowSpaceRatio):
-			unavailableStores[store.GetID()] = storeLowSpace
-		case store.IsPreparing():
-			unavailableStores[store.GetID()] = storePreparing
 		}
 		// Note: We intentionally do NOT check:
 		// - IsSlow(): Performance issue, not availability issue
+		// - IsPreparing(): A new store must receive replicas before it becomes Serving,
+		//   so it can be in a target, for example after a scale-out.
 	}
 	return unavailableStores
 }
@@ -246,7 +244,7 @@ func (m *Manager) applyStoreConditions(unavailableStores map[uint64]storeConditi
 	}
 	m.Unlock()
 
-	if len(unavailableStores) > 0 {
+	if len(unavailableStores) > 0 && availableGroupCount+unavailableGroupCount > 0 {
 		log.Warn("affinity groups invalidated due to unavailable stores",
 			zap.Int("unavailable-store-count", len(unavailableStores)),
 			zap.Int("unavailable-group-count", unavailableGroupCount),
