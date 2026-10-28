@@ -89,29 +89,7 @@ type Operator struct {
 	additionalInfos  opAdditionalInfo
 	ApproximateSize  int64
 	timeout          time.Duration
-<<<<<<< HEAD
-	influence        *OpInfluence
-=======
 	influence        atomic.Pointer[OpInfluence]
-	// needStoreHealthCheck marks whether the in-progress check should also
-	// reject a target store that has become unhealthy mid-execution. It is
-	// not set at creation time; callers opt in after the operator is built
-	// (see SetStoreHealthCheck), similar to additionalInfos.
-	needStoreHealthCheck atomic.Bool
-}
-
-// SetStoreHealthCheck marks whether the operator's in-progress steps should
-// additionally reject a target store that has become unhealthy. It can be
-// called at any time after the operator is created.
-func (o *Operator) SetStoreHealthCheck(need bool) {
-	o.needStoreHealthCheck.Store(need)
-}
-
-// NeedStoreHealthCheck returns whether the operator's in-progress steps
-// should additionally reject a target store that has become unhealthy.
-func (o *Operator) NeedStoreHealthCheck() bool {
-	return o.needStoreHealthCheck.Load()
->>>>>>> 43e68535a3 (operator: never dispatch a step-less STARTED operator (#11405))
 }
 
 // NewOperator creates a new operator.
@@ -414,14 +392,10 @@ func (o *Operator) Check(region *core.RegionInfo) OpStep {
 				operatorStepDuration.WithLabelValues(reflect.TypeOf(o.steps[int(step)]).Name()).
 					Observe(current.Sub(startTime).Seconds())
 			}
-<<<<<<< HEAD
-			atomic.StoreInt32(&o.currentStep, step+1)
-=======
 			// Another Check may have advanced the operator with a newer region.
 			// Never move the progress back, or a Check that has seen every step
 			// finish could find the operator unfinished and return no step.
-			o.currentStep.CompareAndSwap(step, step+1)
->>>>>>> 43e68535a3 (operator: never dispatch a step-less STARTED operator (#11405))
+			atomic.CompareAndSwapInt32(&o.currentStep, step, step+1)
 		} else {
 			return o.steps[int(step)]
 		}
