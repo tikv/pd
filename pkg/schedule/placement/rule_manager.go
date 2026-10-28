@@ -65,6 +65,9 @@ type RuleManager struct {
 	// storeLoadRestrictions caches ruleConfig.mayRestrictStoreLoad as bits for
 	// the hot scheduler's lock-free fast path.
 	storeLoadRestrictions atomic.Uint32
+	// revision increases after every committed rule or rule group change, so
+	// that a consumer can tell whether rules changed without reading them.
+	revision atomic.Uint64
 
 	// used for rule validation
 	keyType          string
@@ -571,7 +574,13 @@ func (m *RuleManager) TryCommitPatchLocked(patch *RuleConfigPatch) error {
 	patch.commit()
 	m.updateStoreLoadRestrictions()
 	m.ruleList = ruleList
+	m.revision.Add(1)
 	return nil
+}
+
+// GetRevision returns the revision of the committed rules and rule groups.
+func (m *RuleManager) GetRevision() uint64 {
+	return m.revision.Load()
 }
 
 func (m *RuleManager) savePatch(p *ruleConfig) error {

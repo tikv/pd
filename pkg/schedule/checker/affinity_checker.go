@@ -521,10 +521,23 @@ func (c *AffinityChecker) isRegionPlacementRuleSatisfiedWithBestLocation(region 
 	} else {
 		fit = c.ruleManager.FitRegionWithoutCache(c.cluster, region)
 	}
+	return c.regionPlacementBestLocation(region, fit) == bestLocationSatisfied
+}
 
+type bestLocationStatus uint8
+
+const (
+	bestLocationSatisfied bestLocationStatus = iota
+	bestLocationRejected
+	// bestLocationTemporarilyBlocked means that a better location exists but is temporarily unschedulable.
+	bestLocationTemporarilyBlocked
+)
+
+// regionPlacementBestLocation checks the fit of a Region as isRegionPlacementRuleSatisfiedWithBestLocation does.
+func (c *AffinityChecker) regionPlacementBestLocation(region *core.RegionInfo, fit *placement.RegionFit) bestLocationStatus {
 	// Check region is satisfied
 	if fit == nil || !fit.IsSatisfied() {
-		return false
+		return bestLocationRejected
 	}
 
 	// Check whether all peers covered by the rules are at the best isolation level.
@@ -539,16 +552,19 @@ func (c *AffinityChecker) isRegionPlacementRuleSatisfiedWithBestLocation(region 
 		_, newStoreID, filterByTempState := strategy.getBetterLocation(c.cluster, region, fit, rf)
 		// filterByTempState being true means a better placement exists but is temporarily unschedulable.
 		// This is also considered not satisfied.
-		if newStoreID != 0 || filterByTempState {
-			return false
+		if filterByTempState {
+			return bestLocationTemporarilyBlocked
+		}
+		if newStoreID != 0 {
+			return bestLocationRejected
 		}
 		// If the isolation level does not meet the requirement, it is also considered not to be at the best location.
 		if !statistics.IsRegionLabelIsolationSatisfied(rf.Stores, rf.Rule.LocationLabels, rf.Rule.IsolationLevel) {
-			return false
+			return bestLocationRejected
 		}
 	}
 
-	return true
+	return bestLocationSatisfied
 }
 
 func (c *AffinityChecker) strategy(region *core.RegionInfo, rule *placement.Rule, fastFailover bool) *ReplicaStrategy {
