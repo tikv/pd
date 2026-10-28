@@ -3668,6 +3668,66 @@ func TestScheduleConfigPersistenceIsSerialized(t *testing.T) {
 	re.Equal(float64(60), reloadedOpt.GetScheduleConfig().DefaultStoreLimit.AddPeer)
 }
 
+func TestInitSchedulersPreservesRejectedConfig(t *testing.T) {
+	for _, needRun := range []bool{true, false} {
+		for _, invalid := range []string{
+			`"history-sample-duration":"1h","history-sample-interval":"1s"`,
+			`"history-sample-duration":"-1m"`,
+			`"max-peer-number":0`,
+			`"max-zombie-rounds":-1`,
+			`"byte-rate-rank-step-ratio":0`,
+		} {
+			t.Run(fmt.Sprintf("run=%t/%s", needRun, invalid), func(t *testing.T) {
+				re := require.New(t)
+				tc, co, cleanup := prepare(nil, nil, nil, re)
+				defer cleanup()
+				name := types.BalanceHotRegionScheduler.String()
+				payload := []byte(`{"min-hot-byte-rate":321,"read-priorities":["key","byte"],` + invalid + `}`)
+				re.NoError(tc.storage.SaveSchedulerConfig(name, payload))
+				_, err := schedulers.CreateScheduler(types.BalanceHotRegionScheduler, co.GetOperatorController(),
+					tc.storage, schedulers.ConfigJSONDecoder(payload))
+				re.Error(err)
+				expectedSchedulers := tc.GetScheduleConfig().Clone().Schedulers
+
+				// Repeated initialization must preserve both the saved tuning and its enabled entry.
+				for range 2 {
+					co.InitSchedulers(needRun)
+					saved, err := tc.storage.LoadSchedulerConfig(name)
+					re.NoError(err)
+					re.Equal(string(payload), saved)
+					re.Equal(expectedSchedulers, tc.GetScheduleConfig().Schedulers)
+					_, reloadedOpt, err := newTestScheduleConfig()
+					re.NoError(err)
+					re.NoError(reloadedOpt.Reload(tc.storage))
+					re.Equal(expectedSchedulers, reloadedOpt.GetSchedulers())
+					handlers := co.GetSchedulersController().GetSchedulerHandlers()
+					re.NotContains(handlers, name)
+					re.Contains(handlers, types.BalanceRegionScheduler.String())
+				}
+
+				// Correcting the incompatible values allows restoration with unrelated tuning intact.
+				payload = []byte(`{"min-hot-byte-rate":321,"read-priorities":["key","byte"],"history-sample-duration":"1h","history-sample-interval":"30s"}`)
+				re.NoError(tc.storage.SaveSchedulerConfig(name, payload))
+				co.InitSchedulers(needRun)
+				re.Contains(co.GetSchedulersController().GetSchedulerHandlers(), name)
+				saved, err := tc.storage.LoadSchedulerConfig(name)
+				re.NoError(err)
+				var restored struct {
+					MinHotByteRate        float64  `json:"min-hot-byte-rate"`
+					ReadPriorities        []string `json:"read-priorities"`
+					HistorySampleDuration string   `json:"history-sample-duration"`
+					HistorySampleInterval string   `json:"history-sample-interval"`
+				}
+				re.NoError(json.Unmarshal([]byte(saved), &restored))
+				re.Equal(float64(321), restored.MinHotByteRate)
+				re.Equal([]string{"key", "byte"}, restored.ReadPriorities)
+				re.Equal("1h0m0s", restored.HistorySampleDuration)
+				re.Equal("30s", restored.HistorySampleInterval)
+			})
+		}
+	}
+}
+
 func TestInitSchedulersPreservesConcurrentScheduleUpdate(t *testing.T) {
 	re := require.New(t)
 	oldAddPeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)

@@ -284,8 +284,10 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 		log.Fatal("cannot load schedulers' config", errs.ZapError(err))
 	}
 	scheduleCfg := c.cluster.GetSchedulerConfig().GetScheduleConfig().Clone()
+	independentConfigs := make(map[string]struct{}, len(scheduleNames))
 	// The new way to create scheduler with the independent configuration.
 	for i, name := range scheduleNames {
+		independentConfigs[name] = struct{}{}
 		select {
 		case <-c.ctx.Done():
 			log.Info("InitSchedulers context cancelled",
@@ -314,7 +316,8 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 		s, err := schedulers.CreateScheduler(types.ConvertOldStrToType[cfg.Type], c.opController,
 			c.cluster.GetStorage(), schedulers.ConfigJSONDecoder([]byte(data)), c.schedulers.RemoveScheduler)
 		if err != nil {
-			log.Error("can not create scheduler with independent configuration", zap.String("scheduler-name", name), zap.Strings("scheduler-args", cfg.Args), errs.ZapError(err))
+			log.Error("can not create scheduler with independent configuration; scheduler remains stopped and saved configuration is preserved",
+				zap.String("scheduler-name", name), zap.Strings("scheduler-args", cfg.Args), errs.ZapError(err))
 			continue
 		}
 		if needRun {
@@ -358,6 +361,14 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 				zap.Strings("scheduler-args", schedulerCfg.Args), errs.ZapError(err))
 			continue
 		}
+		// Independent configs are authoritative even when restoration fails. Falling
+		// back to defaults would overwrite the saved tuning. Keep the legacy entry
+		// so a later initialization can retry after the config is corrected.
+		if _, ok := independentConfigs[s.GetName()]; ok {
+			scheduleCfg.Schedulers[k] = schedulerCfg
+			k++
+			continue
+		}
 
 		if needRun {
 			log.Info("create scheduler", zap.String("scheduler-name", s.GetName()),
@@ -382,7 +393,7 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 		}
 	}
 
-	// Removes the invalid scheduler config and persist.
+	// Remove invalid legacy entries, retain independently configured schedulers, and persist.
 	scheduleCfg.Schedulers = scheduleCfg.Schedulers[:k]
 	validSchedulers := slices.Clone(scheduleCfg.Schedulers)
 	c.cluster.GetSchedulerConfig().SetSchedulers(validSchedulers)
