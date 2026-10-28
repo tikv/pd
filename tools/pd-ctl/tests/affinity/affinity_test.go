@@ -25,6 +25,7 @@ import (
 
 	pd "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/pkg/schedule/affinity"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 	pdTests "github.com/tikv/pd/tests"
 	ctl "github.com/tikv/pd/tools/pd-ctl/pdctl"
 	"github.com/tikv/pd/tools/pd-ctl/tests"
@@ -56,6 +57,12 @@ func TestAffinityCommands(t *testing.T) {
 	const partitionID = uint64(3)
 	tableGroup := "_tidb_t_1001"
 	partitionGroup := "_tidb_pt_1001_p3"
+	targetFlags := []string{"--table-id", strconv.FormatUint(tableID, 10)}
+	if kerneltype.IsNextGen() {
+		tableGroup = "_tidb_ks1_t_1001"
+		partitionGroup = "_tidb_ks1_pt_1001_p3"
+		targetFlags = append(targetFlags, "--keyspace-id", "1")
+	}
 	re.NoError(manager.CreateAffinityGroups([]affinity.GroupKeyRanges{
 		{GroupID: tableGroup},
 		{GroupID: partitionGroup},
@@ -70,28 +77,25 @@ func TestAffinityCommands(t *testing.T) {
 	re.Contains(groups, tableGroup)
 	re.Contains(groups, partitionGroup)
 
-	for _, partitionID := range []string{"0", "3"} {
-		out := tests.MustExec(re, ctl.GetRootCmd(), []string{
-			"-u", pdAddr, "config", "affinity", "show", "--partition-id", partitionID,
-		}, nil)
-		re.Contains(out, "--table-id is required")
-		re.NotContains(out, tableGroup)
-	}
+	// Explicit zero retains the legacy list-all behavior without a scope selector.
+	zeroGroups := make(map[string]*pd.AffinityGroupState)
+	tests.MustExec(re, ctl.GetRootCmd(), []string{
+		"-u", pdAddr, "config", "affinity", "show", "--table-id", "0",
+	}, &zeroGroups)
+	re.Equal(groups, zeroGroups)
 
 	// show table group
 	var state pd.AffinityGroupState
-	tests.MustExec(re, cmd, []string{
+	tests.MustExec(re, cmd, append([]string{
 		"-u", pdAddr, "config", "affinity", "show",
-		"--table-id", strconv.FormatUint(tableID, 10),
-	}, &state)
+	}, targetFlags...), &state)
 	re.Equal(tableGroup, state.ID)
 
 	// show partitioned table group
-	tests.MustExec(re, cmd, []string{
+	tests.MustExec(re, cmd, append([]string{
 		"-u", pdAddr, "config", "affinity", "show",
-		"--table-id", strconv.FormatUint(tableID, 10),
 		"--partition-id", strconv.FormatUint(partitionID, 10),
-	}, &state)
+	}, targetFlags...), &state)
 	re.Equal(partitionGroup, state.ID)
 
 	// Keep groups with identical table/partition IDs in multiple keyspaces alive
@@ -106,6 +110,11 @@ func TestAffinityCommands(t *testing.T) {
 	}
 	expectedGroups := make(map[string]*pd.AffinityGroupState)
 	tests.MustExec(re, ctl.GetRootCmd(), []string{"-u", pdAddr, "config", "affinity", "show"}, &expectedGroups)
+	zeroGroups = make(map[string]*pd.AffinityGroupState)
+	tests.MustExec(re, ctl.GetRootCmd(), []string{
+		"-u", pdAddr, "config", "affinity", "show", "--table-id", "0",
+	}, &zeroGroups)
+	re.Equal(expectedGroups, zeroGroups)
 
 	// Keyspace selection must target only the requested group, including keyspace 0.
 	for _, keyspaceID := range []string{"0", "42", "43", "16777215"} {
@@ -150,37 +159,58 @@ func TestAffinityCommands(t *testing.T) {
 		}
 	}
 	for _, action := range []string{"show", "update", "delete"} {
-		out := tests.MustExec(re, ctl.GetRootCmd(), []string{
-			"-u", pdAddr, "config", "affinity", action, "--table-id", "0",
-		}, nil)
-		re.Contains(out, "--table-id is required")
-		out = tests.MustExec(re, ctl.GetRootCmd(), []string{
-			"-u", pdAddr, "config", "affinity", action, "--keyspace-id", "42",
-		}, nil)
-		re.Contains(out, "--table-id is required")
-		out = tests.MustExec(re, ctl.GetRootCmd(), []string{
+		invalidTargets := [][]string{
+			{"--keyspace-id", "0"},
+			{"--keyspace-id", "42"},
+			{"--partition-id", "0"},
+			{"--partition-id", "3"},
+		}
+		if action != "show" {
+			invalidTargets = append(invalidTargets, nil)
+		}
+		for _, flags := range invalidTargets {
+			for _, tableFlags := range [][]string{nil, {"--table-id", "0"}} {
+				args := append([]string{"-u", pdAddr, "config", "affinity", action}, flags...)
+				args = append(args, tableFlags...)
+				out, err := tests.ExecuteCommand(ctl.GetRootCmd(), args...)
+				re.ErrorContains(err, "--table-id is required", "%v", args)
+				re.NotContains(string(out), tableGroup)
+			}
+		}
+		_, err := tests.ExecuteCommand(ctl.GetRootCmd(), []string{
 			"-u", pdAddr, "config", "affinity", action, "--keyspace-id", "16777216", "--table-id", "1001",
-		}, nil)
-		re.Contains(out, "--keyspace-id must be between 0 and 16777215")
+		}...)
+		re.ErrorContains(err, "--keyspace-id must be between 0 and 16777215")
+	}
+	for _, tc := range []struct {
+		flags []string
+		err   string
+	}{
+		{nil, "leader is required"},
+		{[]string{"--leader", "1"}, "voters is required"},
+		{[]string{"--leader", "1", "--voters", "invalid"}, "failed to parse voters"},
+	} {
+		args := append([]string{"-u", pdAddr, "config", "affinity", "update"}, targetFlags...)
+		args = append(args, tc.flags...)
+		_, err := tests.ExecuteCommand(ctl.GetRootCmd(), args...)
+		re.ErrorContains(err, tc.err)
 	}
 
 	// update peers for the partitioned table
-	tests.MustExec(re, cmd, []string{
+	tests.MustExec(re, cmd, append([]string{
 		"-u", pdAddr, "config", "affinity", "update",
-		"--table-id", strconv.FormatUint(tableID, 10),
 		"--partition-id", strconv.FormatUint(partitionID, 10),
 		"--leader", "1",
 		"--voters", "1,2",
-	}, &state)
+	}, targetFlags...), &state)
 	re.Equal(uint64(1), state.LeaderStoreID)
 	re.ElementsMatch([]uint64{1, 2}, state.VoterStoreIDs)
 
 	// delete the normal table group
 	cmd = ctl.GetRootCmd() // reset cmd to clean args
-	out := tests.MustExec(re, cmd, []string{
+	out := tests.MustExec(re, cmd, append([]string{
 		"-u", pdAddr, "config", "affinity", "delete",
-		"--table-id", strconv.FormatUint(tableID, 10),
-	}, nil)
+	}, targetFlags...), nil)
 	re.Contains(out, tableGroup)
 
 	// ensure only the partition group remains.

@@ -50,8 +50,9 @@ func NewAffinityCommand() *cobra.Command {
 func newAffinityShowCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "show",
-		Short: "show affinity group state (all groups if --table-id, --partition-id and --keyspace-id are omitted)",
-		Run:   affinityShowCommandFunc,
+		Short: "show affinity group state",
+		Long:  "Show all affinity groups when --table-id is omitted or 0 and neither --partition-id nor --keyspace-id is specified. Otherwise, a nonzero --table-id is required.",
+		RunE:  affinityShowCommandFunc,
 	}
 	return cmd
 }
@@ -60,7 +61,7 @@ func newAffinityDeleteCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "delete",
 		Short: "delete the affinity group for the target ID",
-		Run:   affinityDeleteCommandFunc,
+		RunE:  affinityDeleteCommandFunc,
 	}
 	cmd.Flags().Bool("force", false, "force delete the affinity group even if it has key ranges")
 	return cmd
@@ -70,85 +71,82 @@ func newAffinityUpdatePeersCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "update",
 		Short: "update leader and voters for a specific affinity group",
-		Run:   affinityUpdatePeersCommandFunc,
+		RunE:  affinityUpdatePeersCommandFunc,
 	}
 	cmd.Flags().Uint64("leader", 0, "leader store ID")
 	cmd.Flags().String("voters", "", "comma separated voter store IDs, e.g. 1,2,3")
 	return cmd
 }
 
-func affinityShowCommandFunc(cmd *cobra.Command, _ []string) {
-	// Show all groups only when no target ID flag is provided.
-	if !cmd.Flags().Changed("table-id") && !cmd.Flags().Changed("partition-id") && !cmd.Flags().Changed("keyspace-id") {
+func affinityShowCommandFunc(cmd *cobra.Command, _ []string) error {
+	tableID, err := cmd.Flags().GetUint64("table-id")
+	if err != nil {
+		return err
+	}
+	// Preserve zero as the legacy list-all sentinel unless a scope is selected.
+	if tableID == 0 && !cmd.Flags().Changed("partition-id") && !cmd.Flags().Changed("keyspace-id") {
 		groups, err := PDCli.GetAllAffinityGroups(cmd.Context())
 		if err != nil {
-			cmd.Printf("Failed to get affinity groups: %v\n", err)
-			return
+			return errors.Annotate(err, "failed to get affinity groups")
 		}
 		jsonPrint(cmd, groups)
-		return
+		return nil
 	}
 
 	// Otherwise, show the specific affinity group
 	groupID, err := getGroupID(cmd)
 	if err != nil {
-		cmd.Println(err)
-		return
+		return err
 	}
 
 	state, err := PDCli.GetAffinityGroup(cmd.Context(), groupID)
 	if err != nil {
-		cmd.Printf("Failed to show affinity group %s: %v\n", groupID, err)
-		return
+		return errors.Annotatef(err, "failed to show affinity group %s", groupID)
 	}
 	jsonPrint(cmd, state)
+	return nil
 }
 
-func affinityDeleteCommandFunc(cmd *cobra.Command, _ []string) {
+func affinityDeleteCommandFunc(cmd *cobra.Command, _ []string) error {
 	groupID, err := getGroupID(cmd)
 	if err != nil {
-		cmd.Println(err)
-		return
+		return err
 	}
 
 	force, _ := cmd.Flags().GetBool("force")
 	if err := PDCli.DeleteAffinityGroup(cmd.Context(), groupID, force); err != nil {
-		cmd.Printf("Failed to delete affinity group: %v\n", err)
-		return
+		return errors.Annotate(err, "failed to delete affinity group")
 	}
 	cmd.Printf("Affinity group %s deleted\n", groupID)
+	return nil
 }
 
-func affinityUpdatePeersCommandFunc(cmd *cobra.Command, _ []string) {
+func affinityUpdatePeersCommandFunc(cmd *cobra.Command, _ []string) error {
 	groupID, err := getGroupID(cmd)
 	if err != nil {
-		cmd.Println(err)
-		return
+		return err
 	}
 
 	leader, _ := cmd.Flags().GetUint64("leader")
 	if leader == 0 {
-		cmd.Println("leader is required")
-		return
+		return errors.New("leader is required")
 	}
 
 	voterStr, _ := cmd.Flags().GetString("voters")
 	voters, err := parseUint64List(voterStr)
 	if err != nil {
-		cmd.Printf("Failed to parse voters: %v\n", err)
-		return
+		return errors.Annotate(err, "failed to parse voters")
 	}
 	if len(voters) == 0 {
-		cmd.Println("voters is required")
-		return
+		return errors.New("voters is required")
 	}
 
 	state, err := PDCli.UpdateAffinityGroupPeers(cmd.Context(), groupID, leader, voters)
 	if err != nil {
-		cmd.Printf("Failed to update affinity group peers: %v\n", err)
-		return
+		return errors.Annotate(err, "failed to update affinity group peers")
 	}
 	jsonPrint(cmd, state)
+	return nil
 }
 
 func getGroupID(cmd *cobra.Command) (string, error) {
