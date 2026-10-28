@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
@@ -676,8 +677,6 @@ func TestOperatorCheckConcurrently(t *testing.T) {
 	}
 	wg.Wait()
 }
-<<<<<<< HEAD
-=======
 
 // pausedAddPeer pauses IsFinish on the given region until resume is closed.
 type pausedAddPeer struct {
@@ -702,7 +701,7 @@ func TestOperatorCheckDoesNotMoveBack(t *testing.T) {
 	older := newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
 	newer := older.Clone(core.WithLeader(older.GetStorePeer(2)))
 	entered, resume := make(chan struct{}), make(chan struct{})
-	addPeer := pausedAddPeer{ToStore: 2, PeerID: 2, region: older, entered: entered, resume: resume}
+	addPeer := pausedAddPeer{AddPeer: AddPeer{ToStore: 2, PeerID: 2}, region: older, entered: entered, resume: resume}
 	op := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, addPeer, TransferLeader{FromStore: 1, ToStore: 2})
 	re.True(op.Start())
 
@@ -719,7 +718,7 @@ func TestOperatorCheckDoesNotMoveBack(t *testing.T) {
 
 	re.Nil(step)
 	re.Equal(SUCCESS, op.Status())
-	re.Equal(int32(2), op.currentStep.Load())
+	re.Equal(int32(2), atomic.LoadInt32(&op.currentStep))
 }
 
 func TestOperatorTotalInfluenceConcurrently(t *testing.T) {
@@ -727,24 +726,14 @@ func TestOperatorTotalInfluenceConcurrently(t *testing.T) {
 	op := NewTestOperator(1, &metapb.RegionEpoch{}, OpLeader, TransferLeader{FromStore: 1, ToStore: 2})
 	var wg sync.WaitGroup
 	for range 10 {
-		wg.Go(func() {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
 			influence := NewOpInfluence()
-			op.TotalInfluence(influence, region)
+			op.TotalInfluence(*influence, region)
 			assert.Equal(t, int64(-1), influence.GetStoreInfluence(1).LeaderCount)
 			assert.Equal(t, int64(1), influence.GetStoreInfluence(2).LeaderCount)
-		})
+		}()
 	}
 	wg.Wait()
 }
-
-func TestOperatorStoreHealthCheck(t *testing.T) {
-	re := require.New(t)
-	op := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, AddPeer{ToStore: 1, PeerID: 1})
-	// Not tied to creation: defaults to false, and can be toggled any time after Build/NewOperator.
-	re.False(op.NeedStoreHealthCheck())
-	op.SetStoreHealthCheck(true)
-	re.True(op.NeedStoreHealthCheck())
-	op.SetStoreHealthCheck(false)
-	re.False(op.NeedStoreHealthCheck())
-}
->>>>>>> 43e68535a3 (operator: never dispatch a step-less STARTED operator (#11405))
