@@ -15,6 +15,7 @@
 package affinity
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -24,6 +25,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
@@ -31,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
@@ -347,6 +350,56 @@ func TestUpdateAffinityGroupPolicy(t *testing.T) {
 	re.ErrorIs(err, errs.ErrAffinityGroupContent)
 	_, err = manager.UpdateAffinityGroupPolicy("missing", BalancePolicyFixed)
 	re.ErrorIs(err, errs.ErrAffinityGroupNotFound)
+
+	// A commit that returned an error leaves memory behind storage. Policy and
+	// peer updates keep the stored fields that they do not change.
+	lost := &lostReplyStorage{AffinityStorage: store}
+	manager.storage = lost
+	stored := func() Group {
+		value, err := store.LoadAffinityGroup("policy")
+		re.NoError(err)
+		var group Group
+		re.NoError(json.Unmarshal([]byte(value), &group))
+		return group
+	}
+	lost.lose = true
+	_, err = manager.UpdateAffinityGroupPeers("policy", 2, []uint64{1, 2, 3})
+	re.Error(err)
+	_, err = manager.UpdateAffinityGroupPolicy("policy", BalancePolicyFixed)
+	re.NoError(err)
+	re.Equal(uint64(2), stored().LeaderStoreID)
+	re.Equal(uint64(2), manager.GetAffinityGroupState("policy").LeaderStoreID)
+
+	lost.lose = true
+	_, err = manager.UpdateAffinityGroupPolicy("policy", BalancePolicyAuto)
+	re.Error(err)
+	_, err = manager.UpdateAffinityGroupPeers("policy", 3, []uint64{1, 2, 3})
+	re.NoError(err)
+	re.Equal(BalancePolicyAuto, stored().BalancePolicy)
+	re.Equal(BalancePolicyAuto, manager.GetAffinityGroupState("policy").BalancePolicy)
+
+	// The stored policy is checked even if memory already has the requested one.
+	lost.lose = true
+	_, err = manager.UpdateAffinityGroupPolicy("policy", BalancePolicyFixed)
+	re.Error(err)
+	_, err = manager.UpdateAffinityGroupPolicy("policy", BalancePolicyAuto)
+	re.NoError(err)
+	re.Equal(BalancePolicyAuto, stored().BalancePolicy)
+}
+
+// lostReplyStorage returns an error after a transaction commits, like a reply
+// lost on its way back.
+type lostReplyStorage struct {
+	endpoint.AffinityStorage
+	lose bool
+}
+
+func (s *lostReplyStorage) RunInTxn(ctx context.Context, f func(kv.Txn) error) error {
+	if err := s.AffinityStorage.RunInTxn(ctx, f); err != nil || !s.lose {
+		return err
+	}
+	s.lose = false
+	return errors.New("reply lost")
 }
 
 // TestRegionCountStaleCache documents that RegionCount counts stale cache entries when group changes.
