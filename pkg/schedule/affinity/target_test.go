@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 func newTargetTestManager(t *testing.T) (*Manager, storage.Storage) {
@@ -118,6 +119,44 @@ func TestUpdateAffinityGroupTargets(t *testing.T) {
 	re.NoError(err)
 	re.Equal([]string{id}, written)
 	re.Equal(uint64(3), loadStoredGroup(re, store, id).LeaderStoreID)
+}
+
+// TestSyncRecreatedAffinityGroup checks that a group deleted and created again
+// with the same ID replaces the old instance, both when the scheduling service
+// reloads it and when a conflicting write refreshes it. The new instance keeps
+// the old target, so only its create timestamp tells them apart.
+func TestSyncRecreatedAffinityGroup(t *testing.T) {
+	for _, reload := range []bool{true, false} {
+		t.Run(fmt.Sprintf("reload=%t", reload), func(t *testing.T) {
+			re := require.New(t)
+			manager, store := newTargetTestManager(t)
+			old := &Group{ID: "g", CreateTimestamp: 1, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}}
+			manager.SyncGroupFromEtcd(old)
+			ranges := GroupKeyRanges{GroupID: old.ID, KeyRanges: []keyutil.KeyRange{nonOverlappingRange}}
+			re.NoError(manager.UpdateAffinityGroupKeyRanges([]GroupKeyRanges{ranges}, nil))
+			manager.RestoreAffinityGroup(old.ID)
+			_, isAffinity := manager.GetAndCacheRegionAffinityGroupState(generateRegionForTest(10, old.VoterStoreIDs, ranges.KeyRanges[0]))
+			re.True(isAffinity)
+
+			recreated := *old
+			recreated.CreateTimestamp = 2
+			re.NoError(store.RunInTxn(t.Context(), func(txn kv.Txn) error { return store.SaveAffinityGroup(txn, old.ID, &recreated) }))
+			if reload {
+				manager.SyncGroupFromEtcd(&recreated)
+			} else {
+				written, err := manager.UpdateAffinityGroupTargets([]GroupTarget{targetFor(manager, old.ID, 2, 1, 2, 3)})
+				re.NoError(err)
+				re.Empty(written)
+			}
+			state := manager.GetAffinityGroupState(old.ID)
+			re.Equal(recreated, state.Group)
+			re.Zero(state.RegionCount)
+			re.Equal(1, state.RangeCount)
+			written, err := manager.UpdateAffinityGroupTargets([]GroupTarget{targetFor(manager, old.ID, 2, 1, 2, 3)})
+			re.NoError(err)
+			re.Equal([]string{old.ID}, written)
+		})
+	}
 }
 
 func TestUpdateAffinityGroupTargetsRejectsInvalidInput(t *testing.T) {

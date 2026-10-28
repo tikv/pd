@@ -68,7 +68,7 @@ func (m *Manager) SetTargetWriter(w TargetWriter) {
 // their expected values and returns the IDs of the written groups. Targets are
 // committed in chunks that each fit in one etcd transaction, and a written group
 // becomes available. A group whose stored value differs is not written; its
-// in-memory target is refreshed from storage instead.
+// in-memory group is refreshed from storage instead.
 func (m *Manager) UpdateAffinityGroupTargets(targets []GroupTarget) ([]string, error) {
 	if len(targets) == 0 {
 		return nil, errs.ErrEmptyRequest.FastGenByArgs("no targets provided")
@@ -177,13 +177,14 @@ func (m *Manager) updateGroupTargetsLocked(targets []GroupTarget) ([]string, err
 	return written, nil
 }
 
-// refreshGroupTargetLocked makes the in-memory target match the stored group,
+// refreshGroupTargetLocked makes the in-memory group match the stored group,
 // for example after a commit whose result was unknown. metaMutex must be held.
 func (m *Manager) refreshGroupTargetLocked(stored *Group) {
 	m.Lock()
 	defer m.Unlock()
 	groupInfo, ok := m.groups[stored.ID]
-	if !ok || (groupInfo.LeaderStoreID == stored.LeaderStoreID &&
+	if !ok || (groupInfo.CreateTimestamp == stored.CreateTimestamp &&
+		groupInfo.LeaderStoreID == stored.LeaderStoreID &&
 		slices.Equal(sortedStoreIDs(groupInfo.VoterStoreIDs), stored.VoterStoreIDs)) {
 		return
 	}
