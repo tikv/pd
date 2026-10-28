@@ -26,7 +26,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"go.etcd.io/etcd/api/v3/etcdserverpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -2575,9 +2574,7 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 	// - If required revision < CompactRevision, we need to reload all configs to avoid losing data.
 	// - If required revision >= CompactRevision, just keep watching.
 	// Request previous values to populate delete events.
-	return s.etcdWatchForwarder.Forward(ctx, s.client, etcdserverpb.WatchCreateRequest{
-		Key: []byte(configPath), RangeEnd: []byte(clientv3.GetPrefixRangeEnd(configPath)), StartRevision: revision, PrevKv: true,
-	}, func(res *etcdserverpb.WatchResponse, watchErr error) error {
+	return grpcutil.ForwardEtcdWatch(ctx, s.client, configPath, revision, func(res clientv3.WatchResponse, watchErr error) error {
 		if watchErr != nil {
 			var resp pdpb.WatchGlobalConfigResponse
 			if revision < res.CompactRevision {
@@ -2618,7 +2615,7 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 			}
 		}
 		return nil
-	})
+	}, clientv3.WithPrefix(), clientv3.WithPrevKV())
 }
 
 // Evict the leaders when the store is damaged. Damaged regions are emergency errors

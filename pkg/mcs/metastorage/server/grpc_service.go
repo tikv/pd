@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"net/http"
 
-	"go.etcd.io/etcd/api/v3/etcdserverpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -32,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/registry"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
@@ -104,9 +104,11 @@ func (s *Service) Watch(req *meta_storagepb.WatchRequest, server meta_storagepb.
 		})
 	}
 	cli := s.manager.GetClient()
-	return s.manager.watchForwarder.Forward(ctx, cli, etcdserverpb.WatchCreateRequest{
-		Key: req.GetKey(), RangeEnd: req.GetRangeEnd(), StartRevision: startRevision, PrevKv: req.GetPrevKv(),
-	}, func(res *etcdserverpb.WatchResponse, err error) error {
+	opts := []clientv3.OpOption{clientv3.WithRange(string(req.GetRangeEnd()))}
+	if req.GetPrevKv() {
+		opts = append(opts, clientv3.WithPrevKV())
+	}
+	return grpcutil.ForwardEtcdWatch(ctx, cli, key, startRevision, func(res clientv3.WatchResponse, err error) error {
 		if err != nil {
 			log.Warn("watch channel failed", zap.Error(err))
 			var resp meta_storagepb.WatchResponse
@@ -149,7 +151,7 @@ func (s *Service) Watch(req *meta_storagepb.WatchRequest, server meta_storagepb.
 			}
 		}
 		return nil
-	})
+	}, opts...)
 }
 
 // Get gets the key-value pair with a given key.

@@ -158,6 +158,10 @@ func TestWatchResumesAfterConnectionLoss(t *testing.T) {
 				}
 				startRevision = revisions[0]
 			}
+			if startRevision == 0 {
+				_, err := client.Put(ctx, "watch/reconnect/a", "existing")
+				re.NoError(err)
+			}
 			relay := &watchRelay{
 				client: etcdserverpb.NewWatchClient(client.ActiveConnection()), created: startRevision == 0,
 				resume: make(chan struct{}), requests: make(chan int64, 4),
@@ -235,10 +239,16 @@ func TestWatchResumesAfterConnectionLoss(t *testing.T) {
 				re.NoError(err)
 			}
 			close(relay.resume)
-			for _, revision := range []int64{startRevision, nextRevision} {
+			for attempt := range 2 {
 				select {
 				case requested := <-relay.requests:
-					re.Equal(revision, requested)
+					if attempt == 0 {
+						re.Equal(startRevision, requested)
+					} else {
+						// Native retries may replay an earlier revision. The full
+						// downstream event assertions below reject gaps and duplicates.
+						re.LessOrEqual(requested, nextRevision)
+					}
 				case <-ctx.Done():
 					t.Fatal("watch did not issue its expected revision request")
 				}
@@ -341,7 +351,7 @@ func TestWatchSlowConsumerPreservesEvents(t *testing.T) {
 					}
 					streams.Add(1)
 					return &observedWatchStream{ClientStream: stream, sent: func(request *etcdserverpb.WatchRequest) {
-						if request.GetCancelRequest().GetWatchId() == 1 {
+						if canceled := request.GetCancelRequest(); canceled != nil && canceled.WatchId < 16 {
 							pauseOnce.Do(func() { close(paused) })
 						}
 					}}, nil
@@ -395,7 +405,7 @@ func TestWatchSlowConsumerPreservesEvents(t *testing.T) {
 					t.Fatal("initial watch response was not sent")
 				}
 			}
-			// Register the blocked sender first so its upstream WatchId is known.
+			// Register the blocked senders before the healthy senders.
 			for i := range watchers {
 				start(i)
 			}
@@ -438,7 +448,15 @@ func TestWatchSlowConsumerPreservesEvents(t *testing.T) {
 				for index, response := range compactedResponses {
 					re.NotNil(response)
 					re.Equal(meta_storagepb.ErrorType_DATA_COMPACTED, response.Header.GetError().GetType())
-					re.Len(events[index], 1)
+					re.NotEmpty(events[index])
+					re.Less(len(events[index]), updates+1)
+					for i, event := range events[index] {
+						re.Equal(strconv.Itoa(i), string(event.Kv.Value))
+						if i > 0 {
+							re.Greater(event.Kv.ModRevision, events[index][i-1].Kv.ModRevision)
+							re.Equal(strconv.Itoa(i-1), string(event.PrevKv.Value))
+						}
+					}
 				}
 				remaining -= slowWatchers
 			} else {
