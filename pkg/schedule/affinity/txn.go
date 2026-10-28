@@ -17,6 +17,7 @@ package affinity
 import (
 	"bytes"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"slices"
@@ -32,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
@@ -327,16 +329,35 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affini
 	}
 
 	// Step 2: Save the Group in storage.
-	group.LeaderStoreID = leaderStoreID
-	group.VoterStoreIDs = slices.Clone(voterStoreIDs)
 	if err := m.storage.RunInTxn(m.ctx, func(txn kv.Txn) error {
+		if affinityVer == 0 {
+			stored, err := loadAffinityGroupInTxn(txn, groupID)
+			if err != nil {
+				return err
+			}
+			group.Group = *stored
+		}
+		group.LeaderStoreID = leaderStoreID
+		group.VoterStoreIDs = slices.Clone(voterStoreIDs)
 		return m.storage.SaveAffinityGroup(txn, groupID, &group.Group)
 	}); err != nil {
 		return nil, err
 	}
 
 	// Step 3: Save the information in memory.
-	return m.updateGroupPeers(groupID, leaderStoreID, voterStoreIDs)
+	if affinityVer != 0 {
+		return m.updateGroupPeers(groupID, leaderStoreID, voterStoreIDs)
+	}
+	m.Lock()
+	defer m.Unlock()
+	groupInfo, ok := m.groups[groupID]
+	if !ok {
+		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
+	}
+	groupInfo.Group = group.Group
+	groupInfo.SetAvailability(groupAvailable)
+	m.resetCountLocked(groupInfo)
+	return newGroupState(groupInfo), nil
 }
 
 // updateObservedGroupPeers sets a target observed from a healthy Region. The
@@ -414,7 +435,7 @@ func (m *Manager) observedGroupTargetLocked(groupID string, affinityVer uint64, 
 }
 
 // UpdateAffinityGroupPolicy updates the balance policy of an affinity group.
-// It changes only the policy and keeps the target and the runtime state.
+// It preserves the runtime state unless the stored target differs from memory.
 func (m *Manager) UpdateAffinityGroupPolicy(groupID string, policy BalancePolicy) (*GroupState, error) {
 	if policy == "" {
 		policy = BalancePolicyAuto
@@ -425,17 +446,21 @@ func (m *Manager) UpdateAffinityGroupPolicy(groupID string, policy BalancePolicy
 
 	m.metaMutex.Lock()
 	defer m.metaMutex.Unlock()
-	group := m.GetAffinityGroupState(groupID)
-	if group == nil {
+	if !m.IsGroupExist(groupID) {
 		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
 	}
-	if group.BalancePolicy == policy {
-		return group, nil
-	}
-	updated := group.Group
-	updated.BalancePolicy = policy
+	var updated *Group
 	if err := m.storage.RunInTxn(m.ctx, func(txn kv.Txn) error {
-		return m.storage.SaveAffinityGroup(txn, groupID, &updated)
+		var err error
+		updated, err = loadAffinityGroupInTxn(txn, groupID)
+		if err != nil {
+			return err
+		}
+		if updated.BalancePolicy == policy {
+			return nil
+		}
+		updated.BalancePolicy = policy
+		return m.storage.SaveAffinityGroup(txn, groupID, updated)
 	}); err != nil {
 		return nil, err
 	}
@@ -446,8 +471,28 @@ func (m *Manager) UpdateAffinityGroupPolicy(groupID string, policy BalancePolicy
 	if !ok {
 		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
 	}
-	groupInfo.BalancePolicy = policy
+	if groupInfo.LeaderStoreID != updated.LeaderStoreID || !slices.Equal(groupInfo.VoterStoreIDs, updated.VoterStoreIDs) {
+		groupInfo.SetAvailability(groupAvailable)
+		m.resetCountLocked(groupInfo)
+	}
+	groupInfo.Group = *updated
 	return newGroupState(groupInfo), nil
+}
+
+func loadAffinityGroupInTxn(txn kv.Txn, groupID string) (*Group, error) {
+	value, err := txn.Load(keypath.AffinityGroupPath(groupID))
+	if err != nil {
+		return nil, err
+	}
+	if value == "" {
+		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
+	}
+	var group Group
+	if err := json.Unmarshal([]byte(value), &group); err != nil {
+		return nil, errors.WithStack(err)
+	}
+	group.VoterStoreIDs = sortedStoreIDs(group.VoterStoreIDs)
+	return &group, nil
 }
 
 // UpdateAffinityGroupKeyRanges batch modifies key ranges for multiple affinity groups.
