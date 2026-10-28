@@ -220,6 +220,29 @@ func (f *HotPeerCache) collectExpiredItemsForRegion(region *hotRegionInfo) []*Ho
 	return items
 }
 
+func (f *HotPeerCache) updateReadLeader(region *hotRegionInfo) {
+	if f.kind != utils.Read {
+		return
+	}
+	var now time.Time
+	for storeID := range f.storesOfRegion[region.id()] {
+		oldItem := f.getOldHotPeerStat(region.id(), storeID)
+		isLeader := storeID == region.leaderStoreID
+		if oldItem == nil || oldItem.isLeader == isLeader {
+			continue
+		}
+		if now.IsZero() {
+			now = time.Now()
+		}
+		// Preserve the rolling statistics and leave previously returned items unchanged.
+		item := *oldItem
+		item.isLeader = isLeader
+		item.lastTransferLeaderTime = now
+		item.actionType = utils.Update
+		f.UpdateStat(&item)
+	}
+}
+
 // CheckPeerFlow checks the flow information of a peer.
 // Notice: CheckPeerFlow couldn't be used concurrently.
 // CheckPeerFlow will update oldItem's rollingLoads into newItem, thus we should use write lock here.

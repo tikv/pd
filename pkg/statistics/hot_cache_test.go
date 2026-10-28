@@ -53,6 +53,123 @@ func TestIsHot(t *testing.T) {
 	}
 }
 
+func TestRegionHeartbeatUpdatesReadLeader(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		hotStores       []uint64
+		removeOldLeader bool
+		noLeader        bool
+	}{
+		{name: "both-leaders-hot", hotStores: []uint64{1, 2, 3}},
+		{name: "only-old-leader-hot", hotStores: []uint64{1, 3}},
+		{name: "only-new-leader-hot", hotStores: []uint64{2, 3}},
+		{name: "old-leader-removed", hotStores: []uint64{1, 2, 3}, removeOldLeader: true},
+		{name: "no-leader", hotStores: []uint64{1, 2, 3}, noLeader: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			cluster := core.NewBasicCluster()
+			region := newBenchmarkRegion(1, 3)
+			for _, peer := range region.GetPeers() {
+				cluster.PutStore(core.NewStoreInfo(&metapb.Store{Id: peer.GetStoreId()}))
+			}
+			cache := NewHotCache(t.Context(), cluster)
+			loads := make([]float64, utils.RegionStatCount)
+			loads[utils.RegionReadBytes] = 1 << 20
+			loads[utils.RegionReadKeys] = 1024
+			loads[utils.RegionReadQueryNum] = 512
+			for _, storeID := range tc.hotStores {
+				re.True(cache.CheckReadPeerAsync(region, region.GetStorePeer(storeID), loads, utils.StoreHeartBeatReportInterval))
+			}
+			before := cache.GetHotPeerStats(utils.Read, 0)
+			for _, storeID := range tc.hotStores {
+				re.Len(before[storeID], 1)
+				re.Equal(storeID == 1, before[storeID][0].IsLeader())
+			}
+
+			leader := region.GetStorePeer(2)
+			if tc.noLeader {
+				leader = nil
+			}
+			region = region.Clone(core.WithLeader(leader))
+			if tc.removeOldLeader {
+				region = region.Clone(core.WithRemoveStorePeer(1))
+			}
+			cache.CheckRegionFlowAsync(region)
+			after := cache.GetHotPeerStats(utils.Read, 0)
+			for _, storeID := range tc.hotStores {
+				oldItem := before[storeID][0]
+				re.Equal(storeID == 1, oldItem.IsLeader(), "previously returned stats must stay unchanged")
+				if tc.removeOldLeader && storeID == 1 {
+					re.Empty(after[storeID])
+					continue
+				}
+				re.Len(after[storeID], 1)
+				item := after[storeID][0]
+				re.Equal(storeID == leader.GetStoreId(), item.IsLeader())
+				re.Equal(oldItem.Loads, item.Loads)
+				re.Equal(oldItem.HotDegree, item.HotDegree)
+				re.Equal(oldItem.AntiCount, item.AntiCount)
+				re.Same(oldItem.rollingLoads[0], item.rollingLoads[0])
+				if item.IsLeader() != oldItem.IsLeader() {
+					re.True(item.IsNeedCoolDownTransferLeader(3, utils.Read))
+				} else {
+					re.Same(oldItem, item)
+				}
+			}
+			for _, peer := range region.GetPeers() {
+				if before[peer.GetStoreId()] == nil {
+					re.Empty(after[peer.GetStoreId()], "region heartbeats must not create read statistics")
+				}
+			}
+
+			cache.CheckRegionFlowAsync(region)
+			re.Equal(after, cache.GetHotPeerStats(utils.Read, 0), "unchanged heartbeats must preserve cooldown")
+			for _, storeID := range tc.hotStores {
+				if region.GetStorePeer(storeID) == nil {
+					continue
+				}
+				re.True(cache.CheckReadPeerAsync(region, region.GetStorePeer(storeID), loads, utils.StoreHeartBeatReportInterval))
+			}
+			for storeID, stats := range cache.GetHotPeerStats(utils.Read, 0) {
+				if len(stats) > 0 {
+					re.Equal(after[storeID][0].lastTransferLeaderTime, stats[0].lastTransferLeaderTime)
+				}
+			}
+		})
+	}
+}
+
+func TestRegionHeartbeatUpdatesWriteLeader(t *testing.T) {
+	re := require.New(t)
+	cluster := core.NewBasicCluster()
+	region := newBenchmarkRegion(1, 3)
+	for _, peer := range region.GetPeers() {
+		cluster.PutStore(core.NewStoreInfo(&metapb.Store{Id: peer.GetStoreId()}))
+	}
+	cache := NewHotCache(t.Context(), cluster)
+	cache.CheckRegionFlowAsync(region)
+	before := cache.GetHotPeerStats(utils.Write, 0)
+	region = region.Clone(core.WithLeader(region.GetStorePeer(2)))
+	cache.CheckRegionFlowAsync(region)
+	after := cache.GetHotPeerStats(utils.Write, 0)
+	for _, peer := range region.GetPeers() {
+		storeID := peer.GetStoreId()
+		re.Len(before[storeID], 1)
+		re.Len(after[storeID], 1)
+		item := after[storeID][0]
+		re.Equal(storeID == 2, item.IsLeader())
+		re.True(item.IsNeedCoolDownTransferLeader(3, utils.Write))
+		re.Equal(before[storeID][0].HotDegree, item.HotDegree, "the first write sample after a leader transfer must be skipped")
+	}
+	cache.CheckRegionFlowAsync(region)
+	for storeID, stats := range cache.GetHotPeerStats(utils.Write, 0) {
+		re.Len(stats, 1)
+		re.Equal(after[storeID][0].HotDegree+1, stats[0].HotDegree)
+		re.Equal(after[storeID][0].lastTransferLeaderTime, stats[0].lastTransferLeaderTime)
+	}
+}
+
 func TestRegionFlowTasksMatchOriginalForAnyPeerCount(t *testing.T) {
 	for _, peerCount := range []int{0, 1, 2, 3, 5, 9} {
 		t.Run(fmt.Sprintf("%d-peers", peerCount), func(t *testing.T) {

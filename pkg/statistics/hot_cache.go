@@ -73,16 +73,16 @@ func (w *HotCache) CheckReadAsync(task func(cache *HotPeerCache)) bool {
 	}
 }
 
-// CheckRegionFlowAsync checks the expired read and write items and the write
+// CheckRegionFlowAsync checks expired items, read peer leadership, and write
 // flow for a region asynchronously while retaining only immutable metadata.
 func (w *HotCache) CheckRegionFlowAsync(region *core.RegionInfo) {
-	checkExpiredTask, checkWritePeerTask := newRegionFlowTasks(region)
-	w.CheckWriteAsync(checkExpiredTask)
-	w.CheckReadAsync(checkExpiredTask)
+	checkRegionTask, checkWritePeerTask := newRegionFlowTasks(region)
+	w.CheckWriteAsync(checkRegionTask)
+	w.CheckReadAsync(checkRegionTask)
 	w.CheckWriteAsync(checkWritePeerTask)
 }
 
-func newRegionFlowTasks(region *core.RegionInfo) (checkExpiredTask, checkWritePeerTask func(*HotPeerCache)) {
+func newRegionFlowTasks(region *core.RegionInfo) (checkRegionTask, checkWritePeerTask func(*HotPeerCache)) {
 	regionInfo := hotRegionInfo{
 		meta:          region.GetMeta(),
 		leaderStoreID: region.GetLeader().GetStoreId(),
@@ -92,7 +92,7 @@ func newRegionFlowTasks(region *core.RegionInfo) (checkExpiredTask, checkWritePe
 	writtenBytes := region.GetBytesWritten()
 	writtenKeys := region.GetKeysWritten()
 	writeQueryNum := region.GetWriteQueryNum()
-	return newExpiredRegionTask(regionInfo.meta), newWriteRegionTask(
+	return newRegionMetadataTask(regionInfo.meta, regionInfo.leaderStoreID), newWriteRegionTask(
 		regionInfo.meta,
 		regionInfo.leaderStoreID,
 		interval,
@@ -102,13 +102,14 @@ func newRegionFlowTasks(region *core.RegionInfo) (checkExpiredTask, checkWritePe
 	)
 }
 
-func newExpiredRegionTask(meta *metapb.Region) func(*HotPeerCache) {
+func newRegionMetadataTask(meta *metapb.Region, leaderStoreID uint64) func(*HotPeerCache) {
 	return func(cache *HotPeerCache) {
-		regionInfo := hotRegionInfo{meta: meta}
+		regionInfo := hotRegionInfo{meta: meta, leaderStoreID: leaderStoreID}
 		expiredStats := cache.collectExpiredItemsForRegion(&regionInfo)
 		for _, stat := range expiredStats {
 			cache.UpdateStat(stat)
 		}
+		cache.updateReadLeader(&regionInfo)
 	}
 }
 
