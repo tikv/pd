@@ -27,9 +27,11 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
@@ -210,6 +212,141 @@ func TestSyncLabelRuleBeforeGroup(t *testing.T) {
 	state := manager.GetAffinityGroupState(gkr.GroupID)
 	re.NotNil(state)
 	re.Equal(1, state.RangeCount)
+}
+
+func TestSyncGroupFromEtcdUpdatesBalancePolicy(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+
+	store := storage.NewStorageWithMemoryBackend()
+	storeInfos := core.NewStoresInfo()
+	for id := uint64(1); id <= 3; id++ {
+		storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: id, Address: fmt.Sprintf("test%d", id)}))
+	}
+	conf := mockconfig.NewTestOptions()
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	re.NoError(err)
+	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	re.NoError(err)
+
+	ranges := createGroupForTest(re, manager, "policy", 1)
+	_, err = manager.UpdateAffinityGroupPeers("policy", 1, []uint64{1, 2, 3})
+	re.NoError(err)
+	region := generateRegionForTest(1, []uint64{1, 2, 3}, ranges[0])
+	_, isAffinity := manager.GetAndCacheRegionAffinityGroupState(region)
+	re.True(isAffinity)
+	before := manager.GetAffinityGroupState("policy")
+	re.Equal(PhaseStable, before.Phase)
+
+	input := &Group{ID: "policy", CreateTimestamp: before.CreateTimestamp, BalancePolicy: BalancePolicyFixed, LeaderStoreID: 1, VoterStoreIDs: []uint64{3, 1, 2}}
+	manager.SyncGroupFromEtcd(input)
+	re.Equal(BalancePolicyFixed, manager.GetAffinityGroupState("policy").BalancePolicy)
+	re.Equal([]uint64{1, 2, 3}, manager.GetAffinityGroupState("policy").VoterStoreIDs)
+	re.Equal([]uint64{3, 1, 2}, input.VoterStoreIDs, "watcher input must not be mutated")
+	for _, policy := range []BalancePolicy{BalancePolicyFixed, BalancePolicyAuto} {
+		updated := *input
+		updated.BalancePolicy = policy
+		manager.SyncGroupFromEtcd(&updated)
+		after := manager.GetAffinityGroupState("policy")
+		re.Equal(policy, after.BalancePolicy)
+		re.Equal(PhaseStable, after.Phase)
+		re.Equal(before.affinityVer, after.affinityVer)
+		re.Equal(before.AffinityRegionCount, after.AffinityRegionCount)
+		re.Equal(before.RegionCount, after.RegionCount)
+		manager.RLock()
+		count := manager.affinityRegionCount
+		manager.RUnlock()
+		re.Equal(1, count)
+	}
+	updated, err := manager.updateAffinityGroupPeersWithAffinityVer("policy", before.affinityVer, 2, before.VoterStoreIDs)
+	re.NoError(err)
+	re.Equal(uint64(2), updated.LeaderStoreID, "policy-only updates must not discard an in-flight peer update")
+}
+
+func TestBalancePolicyValidationAtMetadataEntrypoints(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	store := storage.NewStorageWithMemoryBackend()
+	for _, group := range []*Group{
+		{ID: "empty"},
+		{ID: "auto", BalancePolicy: BalancePolicyAuto},
+		{ID: "fixed", BalancePolicy: BalancePolicyFixed},
+		{ID: "invalid", BalancePolicy: BalancePolicy("manual")},
+	} {
+		re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error {
+			return store.SaveAffinityGroup(txn, group.ID, group)
+		}))
+	}
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	re.NoError(err)
+	manager, err := NewManager(ctx, store, core.NewStoresInfo(), mockconfig.NewTestOptions(), regionLabeler)
+	re.NoError(err)
+	re.Equal(3, manager.GetAffinityGroupCount())
+	re.Nil(manager.GetAffinityGroupState("invalid"))
+	for _, policy := range []BalancePolicy{"", BalancePolicyAuto, BalancePolicyFixed} {
+		group := &Group{ID: "watch", BalancePolicy: policy}
+		re.NoError(manager.AdjustGroup(group))
+		manager.SyncGroupFromEtcd(group)
+		re.Equal(policy, manager.GetAffinityGroupState("watch").BalancePolicy)
+	}
+	invalid := &Group{ID: "invalid", BalancePolicy: BalancePolicy("manual")}
+	re.ErrorIs(manager.AdjustGroup(invalid), errs.ErrAffinityGroupContent)
+	manager.SyncGroupFromEtcd(invalid)
+	re.Nil(manager.GetAffinityGroupState("invalid"))
+	invalid.ID = "watch"
+	manager.SyncGroupFromEtcd(invalid)
+	re.Equal(BalancePolicyFixed, manager.GetAffinityGroupState("watch").BalancePolicy)
+}
+
+func TestUpdateAffinityGroupPolicy(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	store := storage.NewStorageWithMemoryBackend()
+	storeInfos := core.NewStoresInfo()
+	for id := uint64(1); id <= 3; id++ {
+		storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: id, Address: fmt.Sprintf("test%d", id)}))
+	}
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	re.NoError(err)
+	manager, err := NewManager(ctx, store, storeInfos, mockconfig.NewTestOptions(), regionLabeler)
+	re.NoError(err)
+
+	ranges := createGroupForTest(re, manager, "policy", 1)
+	_, err = manager.UpdateAffinityGroupPeers("policy", 1, []uint64{1, 2, 3})
+	re.NoError(err)
+	_, isAffinity := manager.GetAndCacheRegionAffinityGroupState(generateRegionForTest(1, []uint64{1, 2, 3}, ranges[0]))
+	re.True(isAffinity)
+	before := manager.GetAffinityGroupState("policy")
+	re.Equal(PhaseStable, before.Phase)
+
+	for _, policy := range []BalancePolicy{BalancePolicyFixed, BalancePolicyFixed, "", BalancePolicyAuto} {
+		state, err := manager.UpdateAffinityGroupPolicy("policy", policy)
+		re.NoError(err)
+		want := policy
+		if want == "" {
+			want = BalancePolicyAuto
+		}
+		re.Equal(want, state.BalancePolicy)
+		// The target and the runtime state are kept.
+		re.Equal(before.LeaderStoreID, state.LeaderStoreID)
+		re.Equal(before.VoterStoreIDs, state.VoterStoreIDs)
+		re.Equal(PhaseStable, state.Phase)
+		re.Equal(before.affinityVer, state.affinityVer)
+		re.Equal(before.AffinityRegionCount, state.AffinityRegionCount)
+		// The policy is persisted with the target.
+		value, err := store.LoadAffinityGroup("policy")
+		re.NoError(err)
+		var persisted Group
+		re.NoError(json.Unmarshal([]byte(value), &persisted))
+		re.Equal(want, persisted.BalancePolicy)
+		re.Equal(before.LeaderStoreID, persisted.LeaderStoreID)
+		re.Equal(before.VoterStoreIDs, persisted.VoterStoreIDs)
+	}
+
+	_, err = manager.UpdateAffinityGroupPolicy("policy", BalancePolicy("manual"))
+	re.ErrorIs(err, errs.ErrAffinityGroupContent)
+	_, err = manager.UpdateAffinityGroupPolicy("missing", BalancePolicyFixed)
+	re.ErrorIs(err, errs.ErrAffinityGroupNotFound)
 }
 
 // TestRegionCountStaleCache documents that RegionCount counts stale cache entries when group changes.

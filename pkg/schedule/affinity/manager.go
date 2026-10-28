@@ -121,6 +121,11 @@ func (m *Manager) initialize() error {
 				zap.Error(errs.ErrLoadRule.Wrap(err)))
 			return
 		}
+		if err := validateBalancePolicy(group.BalancePolicy); err != nil {
+			log.Warn("invalid affinity group balance policy from storage, skipping",
+				zap.String("key", k), zap.Error(err))
+			return
+		}
 		m.initGroupLocked(group)
 	})
 	if err != nil {
@@ -154,7 +159,8 @@ func (m *Manager) initGroupLocked(group *Group) {
 		ID:                  group.ID,
 		CreateTimestamp:     group.CreateTimestamp,
 		LeaderStoreID:       group.LeaderStoreID,
-		VoterStoreIDs:       slices.Clone(group.VoterStoreIDs),
+		VoterStoreIDs:       normalizeVoters(group.VoterStoreIDs),
+		BalancePolicy:       group.BalancePolicy,
 		availability:        groupDegraded,
 		degradedExpiredAt:   newDegradedExpiredAtFromNow(),
 		AffinityVer:         1,
@@ -460,6 +466,15 @@ func (m *Manager) GetAllAffinityGroupStates() []*GroupState {
 
 // SyncGroupFromEtcd synchronizes a group from etcd to the in-memory state.
 func (m *Manager) SyncGroupFromEtcd(group *Group) {
+	if err := validateBalancePolicy(group.BalancePolicy); err != nil {
+		log.Warn("invalid affinity group balance policy from etcd, skipping",
+			zap.String("group-id", group.ID), zap.Error(err))
+		return
+	}
+	// Voter order has no meaning, but affinity comparisons use canonical order.
+	clonedGroup := *group
+	clonedGroup.VoterStoreIDs = normalizeVoters(group.VoterStoreIDs)
+	group = &clonedGroup
 	m.metaMutex.Lock()
 	defer m.metaMutex.Unlock()
 
@@ -468,7 +483,8 @@ func (m *Manager) SyncGroupFromEtcd(group *Group) {
 	existingGroup, exists := m.groups[group.ID]
 	if exists &&
 		existingGroup.LeaderStoreID == group.LeaderStoreID &&
-		slices.Equal(existingGroup.VoterStoreIDs, group.VoterStoreIDs) {
+		slices.Equal(existingGroup.VoterStoreIDs, group.VoterStoreIDs) &&
+		existingGroup.BalancePolicy == group.BalancePolicy {
 		m.RUnlock()
 		return
 	}
@@ -526,6 +542,9 @@ func (m *Manager) SyncGroupFromEtcd(group *Group) {
 		if !slices.Equal(groupInfo.VoterStoreIDs, group.VoterStoreIDs) {
 			groupInfo.VoterStoreIDs = slices.Clone(group.VoterStoreIDs)
 			changed = true
+		}
+		if groupInfo.BalancePolicy != group.BalancePolicy {
+			groupInfo.BalancePolicy = group.BalancePolicy
 		}
 
 		if changed {

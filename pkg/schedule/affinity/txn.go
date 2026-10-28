@@ -351,6 +351,43 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affini
 	return m.updateGroupPeers(groupID, leaderStoreID, voterStoreIDs)
 }
 
+// UpdateAffinityGroupPolicy updates the balance policy of an affinity group.
+// It changes only the policy and keeps the target and the runtime state.
+func (m *Manager) UpdateAffinityGroupPolicy(groupID string, policy BalancePolicy) (*GroupState, error) {
+	if policy == "" {
+		policy = BalancePolicyAuto
+	}
+	if err := validateBalancePolicy(policy); err != nil {
+		return nil, err
+	}
+
+	m.metaMutex.Lock()
+	defer m.metaMutex.Unlock()
+	group := m.GetAffinityGroupState(groupID)
+	if group == nil {
+		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
+	}
+	if group.BalancePolicy == policy {
+		return group, nil
+	}
+	updated := group.Group
+	updated.BalancePolicy = policy
+	if err := m.storage.RunInTxn(m.ctx, func(txn kv.Txn) error {
+		return m.storage.SaveAffinityGroup(txn, groupID, &updated)
+	}); err != nil {
+		return nil, err
+	}
+
+	m.Lock()
+	defer m.Unlock()
+	groupInfo, ok := m.groups[groupID]
+	if !ok {
+		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
+	}
+	groupInfo.BalancePolicy = policy
+	return newGroupState(groupInfo), nil
+}
+
 // UpdateAffinityGroupKeyRanges batch modifies key ranges for multiple affinity groups.
 // Note: Validates add and remove operations separately, then applies both atomically in a single transaction.
 // Currently migration (removing a range from group A and adding the same range to group B in one request)
