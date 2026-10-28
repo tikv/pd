@@ -115,7 +115,8 @@ func (suite *regionLabelTestSuite) TestGetSet() {
 func makeKeyRanges(keys ...string) []any {
 	var res []any
 	for i := 0; i < len(keys); i += 2 {
-		res = append(res, map[string]any{"start_key": keys[i], "end_key": keys[i+1]})
+		pair := [2]string(keys[i:])
+		res = append(res, map[string]any{"start_key": pair[0], "end_key": pair[1]})
 	}
 	return res
 }

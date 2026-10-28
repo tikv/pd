@@ -71,12 +71,10 @@ func NewNode(s *cases.Store, config *sc.SimConfig) (*Node, error) {
 		State:   s.Status,
 	}
 	stats := &info.StoreStats{
-		StoreStats: pdpb.StoreStats{
-			StoreId:   s.ID,
-			Capacity:  uint64(config.RaftStore.Capacity),
-			StartTime: uint32(time.Now().Unix()),
-			Available: uint64(config.RaftStore.Capacity),
-		},
+		StoreId:   s.ID,
+		Capacity:  uint64(config.RaftStore.Capacity),
+		StartTime: uint32(time.Now().Unix()),
+		Available: uint64(config.RaftStore.Capacity),
 	}
 
 	ratio := config.Speed()
