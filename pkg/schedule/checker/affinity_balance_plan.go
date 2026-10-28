@@ -22,6 +22,10 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/schedule/affinity/balanceplan"
@@ -39,6 +43,26 @@ const (
 	maxBalanceValidationRounds = 10
 )
 
+type balancePlanGroupKind uint8
+
+const (
+	balanceGroupMutable balancePlanGroupKind = iota
+	balanceGroupFixed
+	balanceGroupUnready
+	balanceGroupUnsupported
+)
+
+type balanceCommitReason string
+
+const (
+	balanceCommitRegionsChanged balanceCommitReason = "regions-changed"
+	balanceCommitDisallowed     balanceCommitReason = "balance-disallowed"
+	balanceCommitRulesChanged   balanceCommitReason = "rules-changed"
+	balanceCommitCanceled       balanceCommitReason = "canceled"
+	balanceCommitAllConflicted  balanceCommitReason = "all-conflicted"
+	balanceCommitError          balanceCommitReason = "error"
+)
+
 // balancePlan is the planner input of a table and the mapping back to it.
 type balancePlan struct {
 	input  balanceplan.Input
@@ -47,7 +71,8 @@ type balancePlan struct {
 	// retry reports an input that may change without a metadata change: an
 	// auto group is still moving to its target, or a store action was
 	// temporarily blocked.
-	retry bool
+	retry       bool
+	groupCounts [4]int // indexed by balancePlanGroupKind
 }
 
 // balancePlanResult is a validated plan.
@@ -57,6 +82,15 @@ type balancePlanResult struct {
 	checked map[uint64]balanceCheckedRegion
 	// retry reports that the table may improve soon without a metadata change.
 	retry bool
+	// planner and groupCounts describe the last round; work, visits and durations
+	// include every round, including a canceled or rejected round.
+	planner          balanceplan.Result
+	groupCounts      [4]int
+	stops            []balanceplan.StopReason
+	work             int64
+	visits           int
+	planDuration     time.Duration
+	validateDuration time.Duration
 }
 
 // balanceCheckedRegion is a Region that a target was validated against.
@@ -70,30 +104,50 @@ type balanceCheckedRegion struct {
 // that hold learners of its Regions, or kept unchanged if no learner is to
 // blame. It returns a validated plan that improves the table, or no targets.
 func (c *AffinityChecker) planBalanceTargets(ctx context.Context, snapshot *affinity.BalanceSnapshot) (balancePlanResult, error) {
+	var res balancePlanResult
 	exclude := make(map[string][]uint64)
-	pinned := make(map[string]bool)
-	var retry bool
+	pinned := make(map[string]balancePlanGroupKind)
 	for range maxBalanceValidationRounds {
 		plan := c.balancePlanInput(snapshot, exclude, pinned)
-		retry = retry || plan.retry
+		res.retry = res.retry || plan.retry
+		res.groupCounts = plan.groupCounts
+		start := time.Now()
 		result := balanceplan.Plan(&plan.input, balanceplan.Options{
 			Seed:   snapshot.Version,
 			Cancel: func() bool { return ctx.Err() != nil },
 		})
+		res.planDuration += time.Since(start)
+		res.planner = result
+		res.stops = append(res.stops, result.Stop)
+		res.work += result.Work
+		res.visits += result.Visits
 		if err := ctx.Err(); err != nil {
-			return balancePlanResult{}, err
+			return res, err
 		}
 		if !result.Score.Less(result.Baseline) {
-			return balancePlanResult{retry: retry}, nil
+			return res, nil
 		}
 		targets := plan.changedTargets(&result)
 		checked := make(map[uint64]balanceCheckedRegion)
 		failed := false
+		start = time.Now()
 		for _, target := range targets {
 			group := snapshot.Group(target.ID)
 			status, learners := c.validateBalancePlanTarget(ctx, snapshot, group, target, checked)
 			if err := ctx.Err(); err != nil {
-				return balancePlanResult{}, err
+				res.validateDuration += time.Since(start)
+				return res, err
+			}
+			if status != balanceAllowed {
+				statusName := "rejected"
+				switch status {
+				case balanceTemporarilyBlocked:
+					statusName = "temporarily-blocked"
+				case balanceUnready:
+					statusName = "unready"
+				}
+				log.Debug("affinity balance target rejected", zap.String("group-id", target.ID),
+					zap.String("status", statusName), zap.Uint64s("excluded-learner-stores", learners))
 			}
 			switch {
 			case status == balanceAllowed:
@@ -101,33 +155,55 @@ func (c *AffinityChecker) planBalanceTargets(ctx context.Context, snapshot *affi
 			case len(learners) > 0:
 				exclude[target.ID] = append(exclude[target.ID], learners...)
 			default:
-				pinned[target.ID] = true
-				retry = retry || status != balanceRejected
+				pinned[target.ID] = balanceGroupUnsupported
+				if status != balanceRejected {
+					pinned[target.ID] = balanceGroupUnready
+				}
+				res.retry = res.retry || status != balanceRejected
 			}
 			failed = true
 		}
+		res.validateDuration += time.Since(start)
 		if !failed {
-			return balancePlanResult{targets: targets, checked: checked, retry: retry}, nil
+			res.targets, res.checked = targets, checked
+			return res, nil
 		}
 	}
-	return balancePlanResult{retry: true}, nil
+	res.retry = true
+	return res, nil
 }
 
 // commitBalancePlan writes a validated plan if the Regions of the changed
 // groups are still as they were validated, balancing is still allowed and the
 // placement rules have not changed since revision. It returns the IDs of the
-// written groups.
-func (c *AffinityChecker) commitBalancePlan(ctx context.Context, snapshot *affinity.BalanceSnapshot, res balancePlanResult, revision uint64) ([]string, error) {
+// written groups and the reason if no target was written or the commit failed.
+func (c *AffinityChecker) commitBalancePlan(ctx context.Context, snapshot *affinity.BalanceSnapshot, res balancePlanResult, revision uint64) ([]string, balanceCommitReason, error) {
 	// The scan may take a while, so the gates are checked after it, right
 	// before the write.
 	regionsUnchanged := c.verifyBalanceRegions(snapshot, res.targets, res.checked)
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, balanceCommitCanceled, err
 	}
-	if !regionsUnchanged || !c.balanceAllowed() || c.ruleManager.GetRevision() != revision {
-		return nil, nil
+	if !regionsUnchanged {
+		return nil, balanceCommitRegionsChanged, nil
 	}
-	return c.affinityManager.CommitBalanceTargets(ctx, snapshot, res.targets)
+	if !c.balanceAllowed() {
+		return nil, balanceCommitDisallowed, nil
+	}
+	if c.ruleManager.GetRevision() != revision {
+		return nil, balanceCommitRulesChanged, nil
+	}
+	written, err := c.affinityManager.CommitBalanceTargets(ctx, snapshot, res.targets)
+	if err != nil {
+		if ctx.Err() != nil {
+			return written, balanceCommitCanceled, err
+		}
+		return written, balanceCommitError, err
+	}
+	if len(written) == 0 {
+		return written, balanceCommitAllConflicted, nil
+	}
+	return written, "", nil
 }
 
 // validateBalancePlanTarget checks the store actions of a changed group and,
@@ -211,7 +287,7 @@ func balanceCreatingTable(snapshot *affinity.BalanceSnapshot, now time.Time) boo
 // balancePlanInput turns a table snapshot into planner input. A group may
 // change only if it is auto, available and stable, and the planner can model
 // its rules; the targets of the other groups are counted as they are.
-func (c *AffinityChecker) balancePlanInput(snapshot *affinity.BalanceSnapshot, exclude map[string][]uint64, pinned map[string]bool) *balancePlan {
+func (c *AffinityChecker) balancePlanInput(snapshot *affinity.BalanceSnapshot, exclude map[string][]uint64, pinned map[string]balancePlanGroupKind) *balancePlan {
 	plan := &balancePlan{}
 	ids := slices.Clone(snapshot.Stores)
 	for _, group := range snapshot.Groups {
@@ -263,8 +339,12 @@ func (c *AffinityChecker) balancePlanInput(snapshot *affinity.BalanceSnapshot, e
 		if group.BalancePolicy != affinity.BalancePolicyFixed && group.AffinitySchedulingAllowed && group.Phase == affinity.PhasePreparing {
 			plan.retry = true
 		}
-		g, ok := c.balancePlanGroup(group, snapshot.Ranges[group.ID], rules, index, canLead, allowed)
-		if ok && !pinned[group.ID] {
+		g, kind := c.balancePlanGroup(group, snapshot.Ranges[group.ID], rules, index, canLead, allowed)
+		if pinnedKind, ok := pinned[group.ID]; kind == balanceGroupMutable && ok {
+			kind = pinnedKind
+		}
+		plan.groupCounts[kind]++
+		if kind == balanceGroupMutable {
 			for _, id := range exclude[group.ID] {
 				if i, known := index[id]; known {
 					g.Exclude = append(g.Exclude, i)
@@ -284,33 +364,36 @@ func (c *AffinityChecker) balancePlanInput(snapshot *affinity.BalanceSnapshot, e
 	return plan
 }
 
-// balancePlanGroup describes a group that may change, or reports false.
+// balancePlanGroup describes a group that may change, or classifies why it cannot.
 func (c *AffinityChecker) balancePlanGroup(group *affinity.GroupState, ranges affinity.GroupKeyRanges, rules *balanceRuleCache,
-	index map[uint64]int, canLead []bool, allowed func(id uint64, leader, source bool) bool) (balanceplan.Group, bool) {
-	if group.BalancePolicy == affinity.BalancePolicyFixed || !group.AffinitySchedulingAllowed || group.Phase != affinity.PhaseStable ||
+	index map[uint64]int, canLead []bool, allowed func(id uint64, leader, source bool) bool) (balanceplan.Group, balancePlanGroupKind) {
+	if group.BalancePolicy == affinity.BalancePolicyFixed {
+		return balanceplan.Group{}, balanceGroupFixed
+	}
+	if !group.AffinitySchedulingAllowed || group.Phase != affinity.PhaseStable ||
 		group.LeaderStoreID == 0 || len(group.VoterStoreIDs) == 0 {
-		return balanceplan.Group{}, false
+		return balanceplan.Group{}, balanceGroupUnready
 	}
 	voterRules, ok := c.balanceGroupRules(ranges)
 	if !ok {
-		return balanceplan.Group{}, false
+		return balanceplan.Group{}, balanceGroupUnsupported
 	}
 	ruleOf, ok := c.balanceRuleOf(group, ranges, voterRules)
 	if !ok {
-		return balanceplan.Group{}, false
+		return balanceplan.Group{}, balanceGroupUnsupported
 	}
 	g := balanceplan.Group{Leader: index[group.LeaderStoreID], CanLead: canLead, RuleOf: ruleOf}
 	for _, r := range voterRules {
 		rule, ok := rules.get(r)
 		if !ok {
-			return balanceplan.Group{}, false
+			return balanceplan.Group{}, balanceGroupUnsupported
 		}
 		g.Rules = append(g.Rules, rule)
 	}
 	for k, id := range group.VoterStoreIDs {
 		// The location labels of the current voters must be known too.
 		if !rules.located(voterRules[ruleOf[k]], id) {
-			return balanceplan.Group{}, false
+			return balanceplan.Group{}, balanceGroupUnsupported
 		}
 		g.Voters = append(g.Voters, index[id])
 		if !allowed(id, false, true) {
@@ -318,7 +401,7 @@ func (c *AffinityChecker) balancePlanGroup(group *affinity.GroupState, ranges af
 		}
 	}
 	g.LeaderPinned = !allowed(group.LeaderStoreID, true, true)
-	return g, true
+	return g, balanceGroupMutable
 }
 
 // balanceGroupRules returns the voter rules of a group. The planner models

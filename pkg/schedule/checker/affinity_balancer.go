@@ -99,7 +99,9 @@ func (b *affinityBalancer) run(ctx context.Context) {
 // balance plans every registered table that is not idle and reports whether
 // any target was written.
 func (b *affinityBalancer) balance(ctx context.Context) bool {
-	if !b.checker.balanceAllowed() {
+	allowed := b.checker.balanceAllowed()
+	defer b.collectTableMetrics(!allowed)
+	if !allowed {
 		return false
 	}
 	manager := b.checker.affinityManager
@@ -143,22 +145,49 @@ func (b *affinityBalancer) balance(ctx context.Context) bool {
 // step plans a table and writes the plan. It reports whether any target was
 // written. A table that has nothing to write is recorded idle.
 func (b *affinityBalancer) step(ctx context.Context, id affinity.TableID, counts affinity.BalanceCounts) (bool, error) {
+	start := time.Now()
+	result := "skipped"
+	var res balancePlanResult
+	var version uint64
+	var groups, numWritten int
+	var commitDuration time.Duration
+	defer func() {
+		duration := time.Since(start)
+		recordAffinityBalanceStepMetrics(result, &res, duration, commitDuration, numWritten)
+		if ce := log.L().Check(zap.DebugLevel, "planned affinity table"); ce != nil {
+			ce.Write(zap.String("table-id", string(id)), zap.Uint64("version", version), zap.String("result", result),
+				zap.Int("groups", groups), zap.Int("mutable", res.groupCounts[balanceGroupMutable]),
+				zap.Int("fixed", res.groupCounts[balanceGroupFixed]), zap.Int("unready", res.groupCounts[balanceGroupUnready]),
+				zap.Int("unsupported", res.groupCounts[balanceGroupUnsupported]),
+				zap.Any("baseline", res.planner.Baseline), zap.Any("score", res.planner.Score), zap.Any("bound", res.planner.Bound),
+				zap.String("stop", string(res.planner.Stop)), zap.Int64("work", res.work), zap.Int("visits", res.visits),
+				zap.Int("rounds", len(res.stops)), zap.Duration("duration", duration))
+		}
+	}()
 	c := b.checker
 	if !c.balanceAllowed() || !c.affinityManager.IsBalanceTableEligible(id) {
 		return false, nil
 	}
 	revision := c.ruleManager.GetRevision()
 	snapshot := c.affinityManager.GetBalanceSnapshot(id, counts)
-	if snapshot == nil || balanceCreatingTable(snapshot, time.Now()) {
+	if snapshot == nil {
 		return false, nil
 	}
+	version, groups = snapshot.Version, len(snapshot.Groups)
+	if balanceCreatingTable(snapshot, time.Now()) {
+		result = affinityBalanceCreating
+		return false, nil
+	}
+	result = affinityBalanceError
 	res, err := c.planBalanceTargets(ctx, snapshot)
 	if err != nil {
 		return false, err
 	}
 	if len(res.targets) == 0 {
+		result = affinityBalanceNoImprovement
 		wait := affinityBalanceIdleRetry
 		if res.retry {
+			result = affinityBalanceBlocked
 			wait = affinityBalanceBusyRetry
 		}
 		b.mu.Lock()
@@ -166,11 +195,25 @@ func (b *affinityBalancer) step(ctx context.Context, id affinity.TableID, counts
 		b.mu.Unlock()
 		return false, nil
 	}
-	written, err := c.commitBalancePlan(ctx, snapshot, res, revision)
+	commitStart := time.Now()
+	written, reason, err := c.commitBalancePlan(ctx, snapshot, res, revision)
+	commitDuration = time.Since(commitStart)
+	numWritten = len(written)
 	moveBalanceCounts(counts, snapshot, res.targets, written)
 	if len(written) > 0 {
 		log.Info("balanced affinity table", zap.String("table-id", string(id)),
-			zap.Int("planned", len(res.targets)), zap.Int("written", len(written)))
+			zap.Int("planned", len(res.targets)), zap.Int("written", len(written)), zap.Uint64("version", version),
+			zap.Any("baseline", res.planner.Baseline), zap.Any("score", res.planner.Score), zap.Any("bound", res.planner.Bound),
+			zap.String("stop", string(res.planner.Stop)), zap.Int("changed", res.planner.Changed), zap.Duration("duration", time.Since(start)))
+	} else {
+		log.Info("affinity balance plan not written", zap.String("table-id", string(id)),
+			zap.Int("planned", len(res.targets)), zap.String("reason", string(reason)))
+	}
+	if err == nil {
+		result = affinityBalanceRejected
+		if len(written) > 0 {
+			result = affinityBalanceWritten
+		}
 	}
 	return len(written) > 0, err
 }

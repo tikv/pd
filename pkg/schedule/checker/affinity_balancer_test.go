@@ -18,9 +18,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
 	"github.com/tikv/pd/pkg/schedule/affinity"
+	"github.com/tikv/pd/pkg/schedule/affinity/balanceplan"
 )
 
 func (f *affinityBalanceTest) settle() {
@@ -41,14 +43,26 @@ func TestAffinityBalancerIdleLifecycle(t *testing.T) {
 	ids := f.seed("100", 1, 1, 1, 2)
 	f.policy(affinity.BalancePolicyFixed, ids[1:]...)
 	before := f.snapshot()
+	written := testutil.ToFloat64(affinityBalancePlanCounters[affinityBalanceWritten])
+	plannedTargets := testutil.ToFloat64(affinityBalanceTargetsPlanned)
+	writtenTargets := testutil.ToFloat64(affinityBalanceTargetsWritten)
+	stops := testutil.ToFloat64(affinityBalancePlannerStops[balanceplan.StopBound])
 	re.True(f.step())
+	re.Equal(1.0, testutil.ToFloat64(affinityBalancePlanCounters[affinityBalanceWritten])-written)
+	re.Equal(1.0, testutil.ToFloat64(affinityBalanceTargetsPlanned)-plannedTargets)
+	re.Equal(1.0, testutil.ToFloat64(affinityBalanceTargetsWritten)-writtenTargets)
+	re.Equal(1.0, testutil.ToFloat64(affinityBalancePlannerStops[balanceplan.StopBound])-stops)
 	re.Equal([2]int{27, 3}, balanceTableScore(f.affinityManager, balanceTestTable))
 	f.settle()
 	b, m := f.balancer, f.affinityManager
 	b.enqueue(ids[0])
 	for _, id := range []uint64{4, 5} {
 		// An optimal table is idle; a new store alone does not invalidate it.
+		noImprovement := testutil.ToFloat64(affinityBalancePlanCounters[affinityBalanceNoImprovement])
 		re.False(b.balance(t.Context()))
+		re.Equal(1.0, testutil.ToFloat64(affinityBalancePlanCounters[affinityBalanceNoImprovement])-noImprovement)
+		re.Equal(1.0, testutil.ToFloat64(affinityBalanceTablesRegistered))
+		re.Equal(1.0, testutil.ToFloat64(affinityBalanceTablesIdle))
 		idle := b.idle[balanceTestTable]
 		version, _ := m.GetBalanceVersion(balanceTestTable)
 		re.Equal(version, idle.version)
@@ -56,6 +70,7 @@ func TestAffinityBalancerIdleLifecycle(t *testing.T) {
 		f.AddRegionStore(id, 10)
 		f.SetStoreUp(id)
 		re.False(b.balance(t.Context()))
+		re.Equal(1.0, testutil.ToFloat64(affinityBalancePlanCounters[affinityBalanceNoImprovement])-noImprovement)
 		re.Equal(idle, b.idle[balanceTestTable])
 		if id == 4 {
 			f.policy(affinity.BalancePolicyFixed, ids[0])
@@ -76,6 +91,8 @@ func TestAffinityBalancerIdleLifecycle(t *testing.T) {
 	re.False(b.balance(t.Context()))
 	re.Empty(b.tables)
 	re.Empty(b.idle)
+	re.Zero(testutil.ToFloat64(affinityBalanceTablesRegistered))
+	re.Zero(testutil.ToFloat64(affinityBalanceTablesIdle))
 }
 
 func TestAffinityBalancerBatchAndDisabledTables(t *testing.T) {
@@ -97,8 +114,11 @@ func TestAffinityBalancerBatchAndDisabledTables(t *testing.T) {
 			case "placement rules disabled":
 				f.SetPlacementRuleEnabled(false)
 			}
+			disabled := testutil.ToFloat64(affinityBalancePlanCounters[affinityBalanceDisabled])
 			re.False(f.balancer.balance(t.Context()))
 			re.False(f.step())
+			re.Equal(1.0, testutil.ToFloat64(affinityBalancePlanCounters[affinityBalanceDisabled])-disabled)
+			re.Equal(2.0, testutil.ToFloat64(affinityBalanceTablesRegistered))
 			re.Len(f.balancer.tables, 2)
 			re.Equal(map[uint64]int{1: 4}, f.affinityManager.GetBalanceCounts().Leader)
 			f.SetAffinityScheduleLimit(4)
@@ -112,4 +132,15 @@ func TestAffinityBalancerBatchAndDisabledTables(t *testing.T) {
 			re.Equal(map[uint64]int{1: 2, 2: 1, 3: 1}, f.affinityManager.GetBalanceCounts().Leader)
 		})
 	}
+}
+
+func TestAffinityBalancerCreating(t *testing.T) {
+	re := require.New(t)
+	f := newAffinityBalanceTest(t, 3)
+	f.seed("100", 1, 1)
+	re.NoError(f.affinityManager.CreateAffinityGroups([]affinity.GroupKeyRanges{{GroupID: "_tidb_pt_100_p1"}}))
+	creating := testutil.ToFloat64(affinityBalancePlanCounters[affinityBalanceCreating])
+	re.False(f.step())
+	re.Equal(1.0, testutil.ToFloat64(affinityBalancePlanCounters[affinityBalanceCreating])-creating)
+	re.Empty(f.balancer.idle)
 }

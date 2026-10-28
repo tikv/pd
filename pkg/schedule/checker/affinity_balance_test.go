@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -298,7 +299,9 @@ func TestAffinityBalanceRetries(t *testing.T) {
 				re.False(f.GetStore(4).IsAvailable(storelimit.AddPeer, constant.Medium))
 			}
 			before := f.snapshot()
+			blocked := testutil.ToFloat64(affinityBalancePlanCounters[affinityBalanceBlocked])
 			re.False(f.step())
+			re.Equal(1.0, testutil.ToFloat64(affinityBalancePlanCounters[affinityBalanceBlocked])-blocked)
 			re.Equal(before.Groups, f.snapshot().Groups)
 			re.WithinDuration(time.Now().Add(30*time.Second), f.balancer.idle[balanceTestTable].until, 2*time.Second)
 			if reason == "converging" {
@@ -383,7 +386,7 @@ func (c *affinityBalanceScanCluster) BatchScanRegions(ranges *keyutil.KeyRanges,
 
 func TestAffinityBalanceCommitRejectsChangedInputs(t *testing.T) {
 	for _, change := range []string{"rule", "conf version", "split", "merge", "add learner", "remove learner", "later group",
-		"limit", "pause", "halt", "placement disabled", "cancel"} {
+		"limit", "pause", "halt", "placement disabled", "policy", "cancel"} {
 		t.Run(change, func(t *testing.T) {
 			re := require.New(t)
 			f := newAffinityBalanceTest(t, 3)
@@ -403,7 +406,7 @@ func TestAffinityBalanceCommitRejectsChangedInputs(t *testing.T) {
 				re.NoError(f.ruleManager.SetRule(&placement.Rule{GroupID: placement.DefaultGroupID, ID: "learner", Role: placement.Learner, Count: 1}))
 				f.PutRegion(f.GetRegion(1).Clone(core.WithAddPeer(learner), core.WithIncConfVer()))
 			}
-			snapshot, revision := f.snapshot(), f.ruleManager.GetRevision()
+			snapshot := f.snapshot()
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			res, err := f.planBalanceTargets(ctx, snapshot)
@@ -441,18 +444,33 @@ func TestAffinityBalanceCommitRejectsChangedInputs(t *testing.T) {
 					f.SetHaltScheduling(true, "test")
 				case "placement disabled":
 					f.SetEnablePlacementRules(false)
+				case "policy":
+					f.policy(affinity.BalancePolicyFixed, ids[0])
 				case "cancel":
 					cancel()
 				}
 			}}
-			written, err := f.commitBalancePlan(ctx, snapshot, res, revision)
+			result := affinityBalanceRejected
+			if change == "cancel" {
+				result = affinityBalanceError
+			}
+			plans := testutil.ToFloat64(affinityBalancePlanCounters[result])
+			plannedTargets := testutil.ToFloat64(affinityBalanceTargetsPlanned)
+			writtenTargets := testutil.ToFloat64(affinityBalanceTargetsWritten)
+			written, err := f.balancer.step(ctx, balanceTestTable, snapshot.Counts)
 			if change == "cancel" {
 				re.ErrorIs(err, context.Canceled)
 			} else {
 				re.NoError(err)
 			}
 			re.True(called)
-			re.Empty(written)
+			re.False(written)
+			re.Equal(1.0, testutil.ToFloat64(affinityBalancePlanCounters[result])-plans)
+			re.Equal(float64(len(res.targets)), testutil.ToFloat64(affinityBalanceTargetsPlanned)-plannedTargets)
+			re.Equal(writtenTargets, testutil.ToFloat64(affinityBalanceTargetsWritten))
+			if change == "policy" {
+				snapshot.Groups[0].BalancePolicy = affinity.BalancePolicyFixed
+			}
 			re.Equal(snapshot.Groups, f.snapshot().Groups)
 		})
 	}
