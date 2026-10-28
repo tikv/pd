@@ -127,6 +127,11 @@ func (m *Manager) initialize() error {
 				zap.Error(errs.ErrLoadRule.Wrap(err)))
 			return
 		}
+		if err := validateBalancePolicy(group.BalancePolicy); err != nil {
+			log.Warn("invalid affinity group balance policy from storage, skipping",
+				zap.String("key", k), zap.Error(err))
+			return
+		}
 		m.initGroupLocked(group)
 	})
 	if err != nil {
@@ -160,7 +165,8 @@ func (m *Manager) initGroupLocked(group *Group) {
 		ID:                  group.ID,
 		CreateTimestamp:     group.CreateTimestamp,
 		LeaderStoreID:       group.LeaderStoreID,
-		VoterStoreIDs:       slices.Clone(group.VoterStoreIDs),
+		VoterStoreIDs:       sortedStoreIDs(group.VoterStoreIDs),
+		BalancePolicy:       group.BalancePolicy,
 		availability:        groupDegraded,
 		degradedExpiredAt:   newDegradedExpiredAtFromNow(),
 		AffinityVer:         1,
@@ -488,13 +494,23 @@ func (m *Manager) GetAllAffinityGroupStates() []*GroupState {
 
 // SyncGroupFromEtcd synchronizes a group from etcd to the in-memory state.
 func (m *Manager) SyncGroupFromEtcd(group *Group) {
+	if err := validateBalancePolicy(group.BalancePolicy); err != nil {
+		log.Warn("invalid affinity group balance policy from etcd, skipping",
+			zap.String("group-id", group.ID), zap.Error(err))
+		return
+	}
+	// Voter order has no meaning, but affinity comparisons use canonical order.
+	clonedGroup := *group
+	clonedGroup.VoterStoreIDs = sortedStoreIDs(group.VoterStoreIDs)
+	group = &clonedGroup
 	m.metaMutex.Lock()
 	defer m.metaMutex.Unlock()
 
-	// Fast path: avoid taking write lock if nothing changes.
+	// Fast path: avoid taking write lock if nothing changes. The policy is also
+	// compared as written, so that memory keeps the stored value.
 	m.RLock()
 	existingGroup, exists := m.groups[group.ID]
-	if exists && sameStoredGroup(&existingGroup.Group, group) {
+	if exists && sameStoredGroup(&existingGroup.Group, group) && existingGroup.BalancePolicy == group.BalancePolicy {
 		m.RUnlock()
 		return
 	}
@@ -548,9 +564,11 @@ func (m *Manager) SyncGroupFromEtcd(group *Group) {
 	}
 }
 
-// syncGroupTargetLocked syncs the stored target, replacing the runtime group if it was recreated.
-// A changed target takes the availability that the store conditions known now give, as when
+// syncGroupTargetLocked replaces the in-memory target and policy with those of
+// the stored group, and replaces the runtime group if it was recreated. A changed
+// target takes the availability that the store conditions known now give, as when
 // an admin sets it through PD, or a write whose result was unknown committed it.
+// A policy change keeps the counts, because it does not change Region affinity.
 // Both metaMutex and the write lock of RWMutex must be held.
 func (m *Manager) syncGroupTargetLocked(groupInfo *runtimeGroupInfo, group *Group) {
 	if groupInfo.CreateTimestamp != group.CreateTimestamp {
@@ -560,7 +578,7 @@ func (m *Manager) syncGroupTargetLocked(groupInfo *runtimeGroupInfo, group *Grou
 		m.updateGroupLabelRuleLockedWithCount(group.ID, groupInfo.LabelRule, groupInfo.RangeCount, false)
 		return
 	}
-
+	groupInfo.BalancePolicy = group.BalancePolicy
 	changed := false
 	if groupInfo.LeaderStoreID != group.LeaderStoreID {
 		groupInfo.LeaderStoreID = group.LeaderStoreID

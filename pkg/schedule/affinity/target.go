@@ -234,8 +234,20 @@ func (t *GroupTarget) result(stored *Group) *Group {
 func sameStoredGroup(a, b *Group) bool {
 	return a.ID == b.ID &&
 		a.CreateTimestamp == b.CreateTimestamp &&
+		sameBalancePolicy(a.BalancePolicy, b.BalancePolicy) &&
 		a.LeaderStoreID == b.LeaderStoreID &&
 		slices.Equal(sortedStoreIDs(a.VoterStoreIDs), sortedStoreIDs(b.VoterStoreIDs))
+}
+
+// sameBalancePolicy compares policies, where an empty policy means auto.
+func sameBalancePolicy(a, b BalancePolicy) bool {
+	if a == "" {
+		a = BalancePolicyAuto
+	}
+	if b == "" {
+		b = BalancePolicyAuto
+	}
+	return a == b
 }
 
 func sortedStoreIDs(ids []uint64) []uint64 {

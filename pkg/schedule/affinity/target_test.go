@@ -450,3 +450,20 @@ func TestUpdateAffinityGroupTargetsWithEtcd(t *testing.T) {
 		re.Equal(uint64(1), loadStoredGroup(re, store, id).LeaderStoreID)
 	}
 }
+
+// TestUpdateAffinityGroupTargetsChecksPolicy checks that a target decided before
+// a policy change is not written.
+func TestUpdateAffinityGroupTargetsChecksPolicy(t *testing.T) {
+	re := require.New(t)
+	manager, store := newTargetTestManager(t)
+	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "g"}}))
+	target := targetFor(manager, "g", 1, 1, 2, 3)
+	_, err := manager.UpdateAffinityGroupPolicy("g", BalancePolicyFixed)
+	re.NoError(err)
+
+	written, err := manager.UpdateAffinityGroupTargets([]GroupTarget{target})
+	re.NoError(err)
+	re.Empty(written)
+	re.Zero(loadStoredGroup(re, store, "g").LeaderStoreID)
+	re.Equal(BalancePolicyFixed, manager.GetAffinityGroupState("g").BalancePolicy)
+}
