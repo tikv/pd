@@ -109,6 +109,9 @@ type HotPeerStat struct {
 	actionType utils.ActionType
 	// isLeader is true means that the region has a leader on this store.
 	isLeader bool
+	// readLeaderStoreID is the latest leader reported by a region metadata task.
+	// A nil value means no region metadata task has updated this read statistic.
+	readLeaderStoreID *uint64
 	// lastTransferLeaderTime is used to cool down frequent transfer leader.
 	lastTransferLeaderTime time.Time
 	// If the peer didn't been send by store heartbeat when it is already stored as hot peer stat,

@@ -225,21 +225,29 @@ func (f *HotPeerCache) updateReadLeader(region *hotRegionInfo) {
 		return
 	}
 	var now time.Time
+	var leaderStoreID *uint64
 	for storeID := range f.storesOfRegion[region.id()] {
 		oldItem := f.getOldHotPeerStat(region.id(), storeID)
 		isLeader := storeID == region.leaderStoreID
-		if oldItem == nil || oldItem.isLeader == isLeader {
+		if oldItem == nil || oldItem.readLeaderStoreID != nil && *oldItem.readLeaderStoreID == region.leaderStoreID {
 			continue
-		}
-		if now.IsZero() {
-			now = time.Now()
 		}
 		// Preserve the rolling statistics and leave previously returned items unchanged.
 		item := *oldItem
 		item.isLeader = isLeader
-		item.lastTransferLeaderTime = now
+		if leaderStoreID == nil {
+			leaderStoreID = new(uint64)
+			*leaderStoreID = region.leaderStoreID
+		}
+		item.readLeaderStoreID = leaderStoreID
+		if oldItem.isLeader != isLeader {
+			if now.IsZero() {
+				now = time.Now()
+			}
+			item.lastTransferLeaderTime = now
+		}
 		item.actionType = utils.Update
-		f.UpdateStat(&item)
+		f.peersOfStore[storeID].Update(&item)
 	}
 }
 
@@ -541,6 +549,7 @@ func (f *HotPeerCache) getHotPeerStat(regionID, storeID uint64) *HotPeerStat {
 
 func (f *HotPeerCache) updateHotPeerStat(region *hotRegionInfo, newItem, oldItem *HotPeerStat, deltaLoads []float64, interval time.Duration, source utils.SourceKind) *HotPeerStat {
 	regionStats := f.kind.RegionStats()
+	newItem.readLeaderStoreID = oldItem.readLeaderStoreID
 
 	if source == utils.Inherit {
 		for _, dim := range oldItem.rollingLoads {

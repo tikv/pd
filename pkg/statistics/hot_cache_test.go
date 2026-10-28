@@ -18,7 +18,10 @@ import (
 	"fmt"
 	"runtime"
 	"testing"
+	"testing/synctest"
+	"time"
 
+	"github.com/sasha-s/go-deadlock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
@@ -30,6 +33,8 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	// Keep deadlock detection enabled without reusing timers across synctest bubbles.
+	deadlock.Opts.TimerPool = deadlock.TimerPoolDisabled
 	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
@@ -114,7 +119,7 @@ func TestRegionHeartbeatUpdatesReadLeader(t *testing.T) {
 				if item.IsLeader() != oldItem.IsLeader() {
 					re.True(item.IsNeedCoolDownTransferLeader(3, utils.Read))
 				} else {
-					re.Same(oldItem, item)
+					re.Equal(oldItem.lastTransferLeaderTime, item.lastTransferLeaderTime)
 				}
 			}
 			for _, peer := range region.GetPeers() {
@@ -138,6 +143,105 @@ func TestRegionHeartbeatUpdatesReadLeader(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRegionMetadataPreservesReadSampleTTL(t *testing.T) {
+	for _, transfers := range []int{0, 1, 2} {
+		t.Run(fmt.Sprintf("transfers=%d", transfers), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				cluster, cache, region, _ := newHotReadCache(t, []uint64{1, 2, 3})
+				time.Sleep(20 * time.Second)
+				for i := range transfers {
+					region = region.Clone(core.WithLeader(region.GetStorePeer(uint64(i + 2))))
+					cache.CheckRegionFlowAsync(region)
+					_ = cache.GetHotPeerStats(utils.Read, 0)
+				}
+				cluster.PutRegion(region)
+				time.Sleep(11 * time.Second)
+				cache.CollectMetrics()
+				for _, stats := range cache.GetHotPeerStats(utils.Read, 0) {
+					require.Empty(t, stats, "region metadata must not extend the read sample TTL")
+				}
+			})
+		})
+	}
+}
+
+func TestReadSampleRefreshesTTLAfterLeaderTransfer(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		_, cache, region, loads := newHotReadCache(t, []uint64{1, 2})
+		time.Sleep(20 * time.Second)
+		region = region.Clone(core.WithLeader(region.GetStorePeer(2)))
+		cache.CheckRegionFlowAsync(region)
+		require.True(t, cache.CheckReadPeerAsync(region, region.GetStorePeer(2), loads, utils.StoreHeartBeatReportInterval))
+		_ = cache.GetHotPeerStats(utils.Read, 0)
+		time.Sleep(11 * time.Second)
+		cache.CollectMetrics()
+		after := cache.GetHotPeerStats(utils.Read, 0)
+		require.Empty(t, after[1])
+		require.Len(t, after[2], 1, "a new read sample must refresh its own TTL")
+		time.Sleep(31 * time.Second)
+		cache.CollectMetrics()
+		require.Empty(t, cache.GetHotPeerStats(utils.Read, 0)[2])
+	})
+}
+
+func TestStaleReadSnapshotPreservesRegionLeader(t *testing.T) {
+	for _, hotStores := range [][]uint64{{1, 2, 3}, {1}, {2}, {3}} {
+		for _, storeID := range []uint64{1, 2, 3} {
+			for _, leaderID := range []uint64{0, 2} {
+				t.Run(fmt.Sprintf("hot=%v/store=%d/leader=%d", hotStores, storeID, leaderID), func(t *testing.T) {
+					cluster, cache, oldRegion, loads := newHotReadCache(t, hotStores)
+					region := oldRegion.Clone(core.WithLeader(oldRegion.GetStorePeer(leaderID)))
+					cache.CheckRegionFlowAsync(region)
+					afterMetadata := cache.GetHotPeerStats(utils.Read, 0)
+					// The region task can run before the root tree publishes the new leader.
+					storeSnapshot := cluster.GetRegion(region.GetID())
+					require.True(t, cache.CheckReadPeerAsync(storeSnapshot, storeSnapshot.GetStorePeer(storeID), loads, utils.StoreHeartBeatReportInterval))
+					afterStore := cache.GetHotPeerStats(utils.Read, 0)
+					require.Len(t, afterStore[storeID], 1)
+					for id, stats := range afterStore {
+						for _, stat := range stats {
+							require.Equal(t, id == leaderID, stat.IsLeader(), "a stale read snapshot must not overwrite region leadership")
+							if before := afterMetadata[id]; len(before) > 0 {
+								require.Equal(t, before[0].lastTransferLeaderTime, stat.lastTransferLeaderTime)
+								if id == storeID {
+									require.Equal(t, before[0].HotDegree+1, stat.HotDegree, "the read sample must still be counted")
+								}
+							}
+						}
+						for _, stat := range afterMetadata[id] {
+							require.Equal(t, id == leaderID, stat.IsLeader(), "previously returned stats must stay unchanged")
+						}
+					}
+					cluster.PutRegion(region)
+					cache.CheckRegionFlowAsync(region)
+					require.Equal(t, afterStore, cache.GetHotPeerStats(utils.Read, 0))
+				})
+			}
+		}
+	}
+}
+
+func newHotReadCache(t *testing.T, hotStores []uint64) (*core.BasicCluster, *HotCache, *core.RegionInfo, []float64) {
+	t.Helper()
+	cluster := core.NewBasicCluster()
+	region := newBenchmarkRegion(1, 3)
+	for _, peer := range region.GetPeers() {
+		cluster.PutStore(core.NewStoreInfo(&metapb.Store{Id: peer.GetStoreId()}))
+	}
+	cluster.PutRegion(region)
+	cache := NewHotCache(t.Context(), cluster)
+	loads := make([]float64, utils.RegionStatCount)
+	loads[utils.RegionReadBytes] = 1 << 20
+	for _, storeID := range hotStores {
+		require.True(t, cache.CheckReadPeerAsync(region, region.GetStorePeer(storeID), loads, utils.StoreHeartBeatReportInterval))
+	}
+	before := cache.GetHotPeerStats(utils.Read, 0)
+	for _, storeID := range hotStores {
+		require.Len(t, before[storeID], 1)
+	}
+	return cluster, cache, region, loads
 }
 
 func TestRegionHeartbeatUpdatesWriteLeader(t *testing.T) {

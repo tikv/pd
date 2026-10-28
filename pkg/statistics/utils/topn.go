@@ -114,6 +114,20 @@ func (tn *TopN) Put(item TopNItem) (isUpdate bool) {
 	return
 }
 
+// Update replaces an existing item without refreshing its TTL.
+// It returns false if the item is absent.
+func (tn *TopN) Update(item TopNItem) bool {
+	tn.rw.Lock()
+	defer tn.rw.Unlock()
+	if tn.topns[0].get(item.ID()) == nil {
+		return false
+	}
+	for _, stn := range tn.topns {
+		stn.put(item)
+	}
+	return true
+}
+
 // RemoveExpired deletes all expired items.
 func (tn *TopN) RemoveExpired() []uint64 {
 	tn.rw.Lock()

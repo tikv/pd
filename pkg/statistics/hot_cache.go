@@ -139,8 +139,19 @@ func newReadPeerTask(region *core.RegionInfo, peer *metapb.Peer, loads []float64
 	storeID := peer.GetStoreId()
 	return func(cache *HotPeerCache) {
 		regionInfo := hotRegionInfo{meta: meta, leaderStoreID: leaderStoreID}
+		// Region metadata tasks run on the same queue and may already have
+		// observed a newer leader than this store heartbeat's region snapshot.
+		var readLeaderStoreID *uint64
+		for id := range cache.storesOfRegion[meta.GetId()] {
+			if item := cache.getOldHotPeerStat(meta.GetId(), id); item != nil && item.readLeaderStoreID != nil {
+				readLeaderStoreID = item.readLeaderStoreID
+				regionInfo.leaderStoreID = *readLeaderStoreID
+				break
+			}
+		}
 		stats := cache.checkPeerFlowForRegion(&regionInfo, []uint64{storeID}, loads, interval)
 		for _, stat := range stats {
+			stat.readLeaderStoreID = readLeaderStoreID
 			cache.UpdateStat(stat)
 		}
 	}
