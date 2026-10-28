@@ -345,8 +345,8 @@ func checkColdPeerForReportedRegions[T any](f *HotPeerCache, storeID uint64, rep
 			deltaLoads := make([]float64, utils.RegionStatCount)
 			thresholds := f.calcHotThresholds(storeID)
 			source := utils.Direct
-			for i, loads := range thresholds {
-				deltaLoads[i] = loads * float64(interval)
+			for dim, kind := range f.kind.RegionStats() {
+				deltaLoads[kind] = thresholds[dim] * float64(interval)
 			}
 			stat := f.updateHotPeerStat(nil, newItem, oldItem, deltaLoads, time.Duration(interval)*time.Second, source)
 			if stat != nil {
