@@ -205,7 +205,7 @@ func TestNextGenRejectsMismatchedAffinityRangesOnLoadAndSync(t *testing.T) {
 	const modeFlag = "github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"
 	t.Cleanup(func() { re.NoError(failpoint.Disable(modeFlag)) })
 	const groupID = "_tidb_ks42_t_1001"
-	wrongRanges := GroupKeyRanges{GroupID: groupID, KeyRanges: []keyutil.KeyRange{testKeyRangeForKeyspace(43)}}
+	wrongRanges := GroupKeyRanges{GroupID: groupID, KeyRanges: []keyutil.KeyRange{testKeyRangeForKeyspace(42), testKeyRangeForKeyspace(43)}}
 
 	t.Run("load", func(t *testing.T) {
 		re := require.New(t)
@@ -218,6 +218,9 @@ func TestNextGenRejectsMismatchedAffinityRangesOnLoadAndSync(t *testing.T) {
 		classicManager, err := NewManager(ctx, store, storeInfos, mockconfig.NewTestOptions(), regionLabeler)
 		re.NoError(err)
 		re.NoError(classicManager.CreateAffinityGroups([]GroupKeyRanges{wrongRanges}))
+		invalidRule := MakeLabelRule(wrongRanges)
+		invalidRule.Index = 5
+		re.NoError(regionLabeler.SetLabelRule(invalidRule))
 		_, err = classicManager.UpdateAffinityGroupPeers(groupID, 1, []uint64{1})
 		re.NoError(err)
 		region := generateRegionForTest(21, []uint64{1}, wrongRanges.KeyRanges[0])
@@ -232,16 +235,20 @@ func TestNextGenRejectsMismatchedAffinityRangesOnLoadAndSync(t *testing.T) {
 		re.True(manager.IsGroupExist(groupID))
 		re.Empty(manager.keyRanges)
 		state, isAffinity = manager.GetRegionAffinityGroupState(region)
-		re.Nil(state, "a ks43 region must not be assigned to a ks42 group")
+		re.Nil(state, "a rule with any invalid range must be inactive in every keyspace")
 		re.False(isAffinity)
 		re.NoError(manager.SyncKeyRangesFromEtcd(regionLabeler.GetLabelRule(GetLabelRuleID(groupID))))
 		re.Empty(manager.keyRanges)
 
-		// A valid ks43 group can reuse the range skipped during recovery.
-		otherRanges := GroupKeyRanges{GroupID: "_tidb_ks43_t_1001", KeyRanges: wrongRanges.KeyRanges}
+		// A valid ks42 group can reuse the valid portion of the skipped rule.
+		otherRanges := GroupKeyRanges{GroupID: "_tidb_ks42_t_1002", KeyRanges: wrongRanges.KeyRanges[:1]}
 		re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{otherRanges}))
 		_, err = manager.UpdateAffinityGroupPeers(otherRanges.GroupID, 1, []uint64{1})
 		re.NoError(err)
+		state, isAffinity = manager.GetRegionAffinityGroupState(region)
+		re.NotNil(state)
+		re.Equal(otherRanges.GroupID, state.ID, "the invalid higher-index rule must not shadow a valid group")
+		re.True(isAffinity)
 		otherState := manager.GetAffinityGroupState(otherRanges.GroupID)
 		persistedRules := make(map[string]string)
 		re.NoError(store.LoadRegionRules(func(k, v string) { persistedRules[k] = v }))
@@ -334,7 +341,7 @@ func TestNextGenRejectsMismatchedRuntimeAffinityLabel(t *testing.T) {
 	t.Cleanup(func() { re.NoError(failpoint.Disable(modeFlag)) })
 	const groupID = "_tidb_ks42_t_1001"
 	correctRanges := GroupKeyRanges{GroupID: groupID, KeyRanges: []keyutil.KeyRange{testKeyRangeForKeyspace(42)}}
-	wrongRanges := GroupKeyRanges{GroupID: groupID, KeyRanges: []keyutil.KeyRange{testKeyRangeForKeyspace(43)}}
+	wrongRanges := GroupKeyRanges{GroupID: groupID, KeyRanges: []keyutil.KeyRange{testKeyRangeForKeyspace(42), testKeyRangeForKeyspace(43)}}
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
 	storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: 1}))
@@ -352,7 +359,7 @@ func TestNextGenRejectsMismatchedRuntimeAffinityLabel(t *testing.T) {
 	re.Equal(groupID, state.ID)
 	re.True(isAffinity)
 
-	wrongRegion := generateRegionForTest(24, []uint64{1}, wrongRanges.KeyRanges[0])
+	wrongRegion := generateRegionForTest(24, []uint64{1}, wrongRanges.KeyRanges[1])
 	re.NoError(regionLabeler.SetLabelRule(MakeLabelRule(wrongRanges)))
 	re.Equal(groupID, regionLabeler.GetRegionLabel(wrongRegion, labelKey), "the generic labeler API accepts this write")
 	state, isAffinity = manager.GetRegionAffinityGroupState(wrongRegion)
@@ -363,9 +370,12 @@ func TestNextGenRejectsMismatchedRuntimeAffinityLabel(t *testing.T) {
 	re.False(isAffinity)
 	cache, _ := manager.getCache(wrongRegion)
 	re.Nil(cache)
+	state, isAffinity = manager.GetRegionAffinityGroupState(correctRegion)
+	re.Nil(state, "the valid portion of a mixed-keyspace rule must also be inactive")
+	re.False(isAffinity)
 	re.Equal(correctRanges, manager.keyRanges[groupID])
 	re.NoError(manager.SyncKeyRangesFromEtcd(regionLabeler.GetLabelRule(GetLabelRuleID(groupID))))
-	re.Equal(correctRanges, manager.keyRanges[groupID], "invalid synced ranges must not replace the valid cache")
+	re.NotContains(manager.keyRanges, groupID, "invalid rules must not reserve ranges in the overlap cache")
 	state, isAffinity = manager.GetRegionAffinityGroupState(wrongRegion)
 	re.Nil(state)
 	re.False(isAffinity)
@@ -379,6 +389,89 @@ func TestNextGenRejectsMismatchedRuntimeAffinityLabel(t *testing.T) {
 	re.NotNil(state)
 	re.Equal(customRanges.GroupID, state.ID)
 	re.True(isAffinity)
+}
+
+func TestNextGenInvalidAffinityRuleClearsCache(t *testing.T) {
+	const modeFlag = "github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"
+	require.NoError(t, failpoint.Enable(modeFlag, "return(true)"))
+	t.Cleanup(func() { require.NoError(t, failpoint.Disable(modeFlag)) })
+	for _, labelerFirst := range []bool{true, false} {
+		t.Run(fmt.Sprintf("labeler first=%t", labelerFirst), func(t *testing.T) {
+			re := require.New(t)
+			store := storage.NewStorageWithMemoryBackend()
+			stores := core.NewStoresInfo()
+			stores.PutStore(core.NewStoreInfo(&metapb.Store{Id: 1}))
+			regionLabeler, err := labeler.NewRegionLabeler(t.Context(), store, time.Second*5)
+			re.NoError(err)
+			manager, err := NewManager(t.Context(), store, stores, mockconfig.NewTestOptions(), regionLabeler)
+			re.NoError(err)
+			valid := GroupKeyRanges{GroupID: "_tidb_ks42_t_1001", KeyRanges: []keyutil.KeyRange{testKeyRangeForKeyspace(42)}}
+			re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{valid}))
+			_, err = manager.UpdateAffinityGroupPeers(valid.GroupID, 1, []uint64{1})
+			re.NoError(err)
+			region := generateRegionForTest(26, []uint64{1}, valid.KeyRanges[0])
+			state, isAffinity := manager.GetAndCacheRegionAffinityGroupState(region)
+			re.NotNil(state)
+			re.True(isAffinity)
+			cache, _ := manager.getCache(region)
+			re.NotNil(cache)
+
+			mixed := GroupKeyRanges{GroupID: valid.GroupID, KeyRanges: []keyutil.KeyRange{testKeyRangeForKeyspace(42), testKeyRangeForKeyspace(43)}}
+			// Watchers receive independently decoded, adjusted rules.
+			data, err := json.Marshal(MakeLabelRule(mixed))
+			re.NoError(err)
+			invalidRule, err := labeler.NewLabelRuleFromJSON(data)
+			re.NoError(err)
+			if labelerFirst {
+				re.NoError(regionLabeler.SetLabelRule(MakeLabelRule(mixed)))
+			}
+			re.NoError(manager.SyncKeyRangesFromEtcd(invalidRule))
+			re.NotContains(manager.keyRanges, valid.GroupID)
+			re.Zero(manager.GetAffinityGroupState(valid.GroupID).RangeCount)
+			cache, _ = manager.getCache(region)
+			re.Nil(cache)
+			state, isAffinity = manager.GetAndCacheRegionAffinityGroupState(region)
+			re.Nil(state, "the labeler may still contain the old valid rule")
+			re.False(isAffinity)
+			if !labelerFirst {
+				re.NoError(regionLabeler.SetLabelRule(MakeLabelRule(mixed)))
+			}
+			state, isAffinity = manager.GetAndCacheRegionAffinityGroupState(region)
+			re.Nil(state)
+			re.False(isAffinity)
+
+			re.NoError(regionLabeler.SetLabelRule(MakeLabelRule(valid)))
+			re.NoError(manager.SyncKeyRangesFromEtcd(regionLabeler.GetLabelRule(GetLabelRuleID(valid.GroupID))))
+			state, isAffinity = manager.GetAndCacheRegionAffinityGroupState(region)
+			re.NotNil(state)
+			re.Equal(valid.GroupID, state.ID)
+			re.True(isAffinity, "a fully valid replacement must restore affinity")
+		})
+	}
+}
+
+func TestNextGenAffinityLookupDoesNotHoldManagerLock(t *testing.T) {
+	re := require.New(t)
+	const modeFlag = "github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"
+	re.NoError(failpoint.Enable(modeFlag, "return(true)"))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(modeFlag)) })
+	store := storage.NewStorageWithMemoryBackend()
+	regionLabeler, err := labeler.NewRegionLabeler(t.Context(), store, time.Second*5)
+	re.NoError(err)
+	manager := &Manager{regionLabeler: regionLabeler, groups: make(map[string]*runtimeGroupInfo)}
+	const lookupHook = "github.com/tikv/pd/pkg/schedule/affinity/beforeRegionLabelLookup"
+	called, unlocked := false, false
+	re.NoError(failpoint.EnableCall(lookupHook, func() {
+		called = true
+		unlocked = manager.TryLock()
+		if unlocked {
+			manager.Unlock()
+		}
+	}))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(lookupHook)) })
+	manager.findRegionAffinityGroupState(generateRegionForTest(27, []uint64{1}, testKeyRangeForKeyspace(42)))
+	re.True(called)
+	re.True(unlocked, "waiting for the labeler must not block manager writers")
 }
 
 func TestNextGenLegacyLabelDoesNotShadowCanonicalGroup(t *testing.T) {

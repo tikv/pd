@@ -22,6 +22,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core"
@@ -417,24 +418,32 @@ func (m *Manager) findRegionAffinityGroupState(region *core.RegionInfo) *GroupSt
 		return m.GetAffinityGroupState(m.regionLabeler.GetRegionLabel(region, labelKey))
 	}
 
-	m.RLock()
-	defer m.RUnlock()
-
 	regionRange := keyutil.KeyRange{StartKey: region.GetStartKey(), EndKey: region.GetEndKey()}
-	groupID := m.regionLabeler.GetRegionLabelWithFilter(region, labelKey, func(candidateID string) bool {
-		if candidateID == "" || m.groups[candidateID] == nil {
+	failpoint.InjectCall("beforeRegionLabelLookup")
+	candidates := m.regionLabeler.GetRegionLabelValues(region, labelKey, func(rule *labeler.LabelRule, groupID string) bool {
+		// Reject the whole rule, including valid fragments of mixed-keyspace rules.
+		ranges, err := parseKeyRangesFromData(rule.GetKeyRanges(), groupID)
+		if err != nil {
 			return false
 		}
-		return validateGroupKeyRanges(GroupKeyRanges{GroupID: candidateID, KeyRanges: []keyutil.KeyRange{regionRange}}) == nil
+		ranges.KeyRanges = append(ranges.KeyRanges, regionRange)
+		return validateGroupKeyRanges(ranges) == nil
 	})
-	if groupID == "" {
-		return nil
+
+	m.RLock()
+	defer m.RUnlock()
+	for _, groupID := range candidates {
+		groupInfo := m.groups[groupID]
+		if groupInfo == nil {
+			continue
+		}
+		// The affinity watcher may invalidate a rule before the labeler catches up.
+		if _, scoped, _ := parseGroupID(groupID); scoped && groupInfo.LabelRule == nil {
+			continue
+		}
+		return newGroupState(groupInfo)
 	}
-	groupInfo := m.groups[groupID]
-	if groupInfo == nil {
-		return nil
-	}
-	return newGroupState(groupInfo)
+	return nil
 }
 
 // IsGroupExist checks if a group exists.
@@ -620,9 +629,8 @@ func (m *Manager) SyncKeyRangesFromEtcd(labelRule *labeler.LabelRule) error {
 	if err := validateGroupKeyRanges(gkr); err != nil {
 		log.Warn("skipping affinity key range outside its group keyspace during etcd sync",
 			zap.String("group-id", groupID), zap.Error(err))
-		m.metaMutex.Lock()
-		defer m.metaMutex.Unlock()
-		delete(m.labelRuleBuffer, groupID)
+		// Invalidate runtime state without changing the persisted rule.
+		m.SyncKeyRangesDeleteFromEtcd(labelRule.ID)
 		return nil
 	}
 

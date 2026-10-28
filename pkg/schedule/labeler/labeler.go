@@ -15,7 +15,9 @@
 package labeler
 
 import (
+	"cmp"
 	"context"
+	"slices"
 	"strings"
 	"time"
 
@@ -370,12 +372,6 @@ func (l *RegionLabeler) Patch(patch LabelRulePatch) error {
 // GetRegionLabel returns the label of the region for a key.
 // If there are multiple rules that match the key, the one with max rule index will be returned.
 func (l *RegionLabeler) GetRegionLabel(region *core.RegionInfo, key string) string {
-	return l.GetRegionLabelWithFilter(region, key, nil)
-}
-
-// GetRegionLabelWithFilter returns the highest-index label whose value passes filter.
-// The filter runs while the labeler's read lock is held and must not mutate or call back into the labeler.
-func (l *RegionLabeler) GetRegionLabelWithFilter(region *core.RegionInfo, key string, filter func(string) bool) string {
 	l.RLock()
 	defer l.RUnlock()
 	now := time.Now()
@@ -394,9 +390,6 @@ func (l *RegionLabeler) GetRegionLabelWithFilter(region *core.RegionInfo, key st
 				continue
 			}
 			if label.Key == key {
-				if filter != nil && !filter(label.Value) {
-					continue
-				}
 				value, index = label.Value, r.Index
 			}
 		}
@@ -408,6 +401,45 @@ func (l *RegionLabeler) GetRegionLabelWithFilter(region *core.RegionInfo, key st
 		applyRule(keyspaceRule)
 	}
 	return value
+}
+
+// GetRegionLabelValues returns matching label values in descending rule-index order.
+// The filter runs under the labeler's read lock; it must not mutate rules or acquire other locks.
+func (l *RegionLabeler) GetRegionLabelValues(region *core.RegionInfo, key string, filter func(*LabelRule, string) bool) []string {
+	l.RLock()
+	defer l.RUnlock()
+	rules, keyspaceRule, ok := l.ruleIndex.getRangeRules(region.GetStartKey(), region.GetEndKey())
+	if !ok {
+		return nil
+	}
+	type candidate struct {
+		value string
+		index int
+	}
+	var candidates []candidate
+	now := time.Now()
+	applyRule := func(rule *LabelRule) {
+		for i := len(rule.Labels) - 1; i >= 0; i-- {
+			label := rule.Labels[i]
+			if label.Key == key && !label.expireBefore(now) && (filter == nil || filter(rule, label.Value)) {
+				candidates = append(candidates, candidate{value: label.Value, index: rule.Index})
+			}
+		}
+	}
+	for _, rule := range rules {
+		applyRule(rule.(*LabelRule))
+	}
+	if keyspaceRule != nil {
+		applyRule(keyspaceRule)
+	}
+	slices.SortStableFunc(candidates, func(a, b candidate) int {
+		return cmp.Compare(b.index, a.index)
+	})
+	values := make([]string, len(candidates))
+	for i, candidate := range candidates {
+		values[i] = candidate.value
+	}
+	return values
 }
 
 // ScheduleDisabled returns true if the region is labeled with schedule-disabled.

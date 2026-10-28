@@ -274,7 +274,8 @@ func TestIndex(t *testing.T) {
 	}
 	region := core.NewTestRegionInfo(2, 1, []byte("1234"), []byte("5678"))
 	re.Equal("v1", labeler.GetRegionLabel(region, "k1"))
-	re.Equal("v0", labeler.GetRegionLabelWithFilter(region, "k1", func(value string) bool {
+	re.Equal([]string{"v1", "v0"}, labeler.GetRegionLabelValues(region, "k1", nil))
+	re.Equal([]string{"v0"}, labeler.GetRegionLabelValues(region, "k1", func(_ *LabelRule, value string) bool {
 		return value != "v1"
 	}))
 }
@@ -433,6 +434,8 @@ func TestLabelerRuleTTL(t *testing.T) {
 	assertLabelerCounts(2, 2)
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/labeler/regionLabelExpireSub1Minute"))
+	re.Empty(labeler.GetRegionLabelValues(region, "k2", nil))
+	re.Equal([]string{"v3"}, labeler.GetRegionLabelValues(region, "k3", nil))
 	// rule2 should be existed since `GetRegionLabels` won't clear it physically.
 	checkRuleInMemoryAndStorage(re, labeler, "rule2", true)
 	re.Nil(labeler.GetLabelRule("rule2"))
