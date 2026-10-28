@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -32,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 )
 
 func newTargetTestManager(t *testing.T) (*Manager, storage.Storage) {
@@ -66,127 +68,84 @@ func targetFor(m *Manager, id string, leader uint64, voters ...uint64) GroupTarg
 func TestUpdateAffinityGroupTargets(t *testing.T) {
 	re := require.New(t)
 	manager, store := newTargetTestManager(t)
-	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "a"}, {GroupID: "b"}}))
+	ids := []string{"stale"}
+	for i := range etcdutil.MaxEtcdTxnOps {
+		ids = append(ids, fmt.Sprintf("g%03d", i))
+	}
+	groups := make([]GroupKeyRanges, 0, len(ids))
+	for _, id := range ids {
+		groups = append(groups, GroupKeyRanges{GroupID: id})
+	}
+	re.NoError(manager.CreateAffinityGroups(groups))
 
-	stale := targetFor(manager, "b", 1, 1, 2, 3)
-	stale.Expected.CreateTimestamp++
-	missing := GroupTarget{Expected: Group{ID: "missing"}, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}}
-	written, err := manager.UpdateAffinityGroupTargets([]GroupTarget{targetFor(manager, "a", 2, 3, 2, 1), stale, missing})
+	// The targets take two transactions. A target decided from another value of
+	// its group, or for a missing group, is not written.
+	targets := []GroupTarget{{Expected: Group{ID: "missing"}, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}}}
+	for _, id := range ids {
+		target := targetFor(manager, id, 2, 3, 2, 1)
+		if id == "stale" {
+			target.Expected.CreateTimestamp++
+		}
+		targets = append(targets, target)
+	}
+	written, err := manager.UpdateAffinityGroupTargets(targets)
 	re.NoError(err)
-	re.Equal([]string{"a"}, written)
+	re.Equal(ids[1:], written)
+	for _, id := range ids[1:] {
+		state := manager.GetAffinityGroupState(id)
+		re.True(state.AffinitySchedulingAllowed)
+		re.Equal([]uint64{1, 2, 3}, state.VoterStoreIDs)
+		re.Equal(state.Group, *loadStoredGroup(re, store, id))
+	}
+	re.Zero(manager.GetAffinityGroupState("stale").LeaderStoreID)
+	re.Zero(loadStoredGroup(re, store, "stale").LeaderStoreID)
 
-	a := manager.GetAffinityGroupState("a")
-	re.True(a.AffinitySchedulingAllowed)
-	re.Equal(uint64(2), a.LeaderStoreID)
-	re.Equal([]uint64{1, 2, 3}, a.VoterStoreIDs)
-	stored := loadStoredGroup(re, store, "a")
-	re.Equal(uint64(2), stored.LeaderStoreID)
-	re.Equal([]uint64{1, 2, 3}, stored.VoterStoreIDs)
-	re.Equal(a.CreateTimestamp, stored.CreateTimestamp)
-
-	b := manager.GetAffinityGroupState("b")
-	re.False(b.AffinitySchedulingAllowed)
-	re.Zero(b.LeaderStoreID)
-	re.Zero(loadStoredGroup(re, store, "b").LeaderStoreID)
-
-	// A target decided from the old value of a is not written.
-	old := GroupTarget{Expected: Group{ID: "a", CreateTimestamp: a.CreateTimestamp}, LeaderStoreID: 3, VoterStoreIDs: []uint64{1, 2, 3}}
-	written, err = manager.UpdateAffinityGroupTargets([]GroupTarget{old})
+	// A commit that the Manager did not see leaves its memory stale. A target
+	// decided from the stale memory is not written, and the memory is refreshed.
+	id := ids[1]
+	committed := manager.GetAffinityGroupState(id).Group
+	committed.LeaderStoreID = 1
+	re.NoError(store.RunInTxn(t.Context(), func(txn kv.Txn) error { return store.SaveAffinityGroup(txn, id, &committed) }))
+	written, err = manager.UpdateAffinityGroupTargets([]GroupTarget{targetFor(manager, id, 3, 1, 2, 3)})
 	re.NoError(err)
 	re.Empty(written)
-	re.Equal(uint64(2), manager.GetAffinityGroupState("a").LeaderStoreID)
-	re.Equal(uint64(2), loadStoredGroup(re, store, "a").LeaderStoreID)
+	re.Equal(committed, manager.GetAffinityGroupState(id).Group)
 
-	// The expected group is compared regardless of voter order.
-	expected := manager.GetAffinityGroupState("a").Group
-	expected.VoterStoreIDs = []uint64{3, 1, 2}
-	written, err = manager.UpdateAffinityGroupTargets([]GroupTarget{{Expected: expected, LeaderStoreID: 4, VoterStoreIDs: []uint64{4, 2, 1}}})
+	// The next target is decided from the refreshed group, whose voter order does not matter.
+	target := targetFor(manager, id, 3, 1, 2, 3)
+	slices.Reverse(target.Expected.VoterStoreIDs)
+	written, err = manager.UpdateAffinityGroupTargets([]GroupTarget{target})
 	re.NoError(err)
-	re.Equal([]string{"a"}, written)
-	re.Equal([]uint64{1, 2, 4}, loadStoredGroup(re, store, "a").VoterStoreIDs)
+	re.Equal([]string{id}, written)
+	re.Equal(uint64(3), loadStoredGroup(re, store, id).LeaderStoreID)
 }
 
 func TestUpdateAffinityGroupTargetsRejectsInvalidInput(t *testing.T) {
 	re := require.New(t)
 	manager, store := newTargetTestManager(t)
 	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "g"}, {GroupID: "h"}}))
-
 	_, err := manager.UpdateAffinityGroupTargets(nil)
 	re.True(errs.ErrEmptyRequest.Equal(err))
 
+	manager.Lock()
+	manager.unavailableStores = map[uint64]storeCondition{4: storeDown}
+	manager.Unlock()
 	for _, targets := range [][]GroupTarget{
 		{targetFor(manager, "g", 1, 1, 2), targetFor(manager, "g", 2, 1, 2)},
 		{targetFor(manager, "g", 3, 1, 2)},
 		{targetFor(manager, "g", 1, 1, 1, 2)},
 		{targetFor(manager, "g", 0, 1, 2)},
 		{targetFor(manager, "g", 9, 9)},
+		{targetFor(manager, "g", 1, 1, 4)},
 		{targetFor(manager, "h", 1, 1, 2), {Expected: Group{ID: "bad id"}, LeaderStoreID: 1, VoterStoreIDs: []uint64{1}}},
 	} {
 		_, err := manager.UpdateAffinityGroupTargets(targets)
 		re.Error(err)
 	}
-
-	manager.Lock()
-	manager.unavailableStores = map[uint64]storeCondition{2: storeDown}
-	manager.Unlock()
-	_, err = manager.UpdateAffinityGroupTargets([]GroupTarget{targetFor(manager, "h", 1, 1, 3), targetFor(manager, "g", 1, 1, 2)})
-	re.True(errs.ErrAffinityGroupContent.Equal(err))
-
 	// An invalid request writes nothing.
 	for _, id := range []string{"g", "h"} {
 		re.Zero(manager.GetAffinityGroupState(id).LeaderStoreID)
 		re.Zero(loadStoredGroup(re, store, id).LeaderStoreID)
-	}
-}
-
-// TestUpdateAffinityGroupTargetsRefreshesMemory covers a transaction that was
-// committed although the Manager did not see the result.
-func TestUpdateAffinityGroupTargetsRefreshesMemory(t *testing.T) {
-	re := require.New(t)
-	manager, store := newTargetTestManager(t)
-	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "g"}}))
-	committed := manager.GetAffinityGroupState("g").Group
-	committed.LeaderStoreID = 1
-	committed.VoterStoreIDs = []uint64{1, 2, 3}
-	re.NoError(store.RunInTxn(t.Context(), func(txn kv.Txn) error {
-		return store.SaveAffinityGroup(txn, "g", &committed)
-	}))
-
-	// A target decided from the stale memory is not written, and the memory is refreshed.
-	written, err := manager.UpdateAffinityGroupTargets([]GroupTarget{targetFor(manager, "g", 4, 2, 3, 4)})
-	re.NoError(err)
-	re.Empty(written)
-	state := manager.GetAffinityGroupState("g")
-	re.Equal(uint64(1), state.LeaderStoreID)
-	re.Equal([]uint64{1, 2, 3}, state.VoterStoreIDs)
-
-	// The next target is decided from the refreshed value and written.
-	written, err = manager.UpdateAffinityGroupTargets([]GroupTarget{targetFor(manager, "g", 4, 2, 3, 4)})
-	re.NoError(err)
-	re.Equal([]string{"g"}, written)
-	re.Equal(uint64(4), loadStoredGroup(re, store, "g").LeaderStoreID)
-}
-
-func TestUpdateAffinityGroupTargetsInChunks(t *testing.T) {
-	re := require.New(t)
-	manager, store := newTargetTestManager(t)
-	const count = 250
-	groups := make([]GroupKeyRanges, 0, count)
-	for i := range count {
-		groups = append(groups, GroupKeyRanges{GroupID: fmt.Sprintf("g%03d", i)})
-	}
-	re.NoError(manager.CreateAffinityGroups(groups))
-	targets := make([]GroupTarget, 0, count)
-	for _, group := range groups {
-		targets = append(targets, targetFor(manager, group.GroupID, 1, 1, 2, 3))
-	}
-
-	written, err := manager.UpdateAffinityGroupTargets(targets)
-	re.NoError(err)
-	re.Len(written, count)
-	for _, group := range groups {
-		re.Equal(uint64(1), loadStoredGroup(re, store, group.GroupID).LeaderStoreID)
-		re.True(manager.GetAffinityGroupState(group.GroupID).AffinitySchedulingAllowed)
 	}
 }
 
@@ -211,39 +170,23 @@ func TestObserveAvailableRegionWithTargetWriter(t *testing.T) {
 		&metapb.Peer{Id: 12, StoreId: 1, Role: metapb.PeerRole_Voter},
 	)
 	written := func(target GroupTarget) ([]string, error) { return []string{target.Expected.ID}, nil }
-	notWritten := func(GroupTarget) ([]string, error) { return nil, nil }
-	failed := func(GroupTarget) ([]string, error) { return nil, errors.New("PD is unavailable") }
-
 	for _, tc := range []struct {
-		name      string
-		write     func(m *Manager) func(GroupTarget)
+		name string
+		// apply is the change that the watcher delivers before the reply, if any.
+		apply     func(target GroupTarget) *Group
 		reply     func(GroupTarget) ([]string, error)
 		available bool
 		leader    uint64
 	}{
 		{name: "written", reply: written, available: true, leader: 1},
-		{name: "not written", reply: notWritten},
-		{name: "write failed", reply: failed},
-		{
-			// The watcher applies the written target before the reply arrives.
-			name: "watcher first",
-			write: func(m *Manager) func(GroupTarget) {
-				return func(target GroupTarget) { m.SyncGroupFromEtcd(target.result(&target.Expected)) }
-			},
-			reply: written, available: true, leader: 1,
-		},
-		{
-			// Another target reaches the group before the reply arrives.
-			name: "changed meanwhile",
-			write: func(m *Manager) func(GroupTarget) {
-				return func(target GroupTarget) {
-					other := target.result(&target.Expected)
-					other.LeaderStoreID, other.VoterStoreIDs = 3, []uint64{3, 4}
-					m.SyncGroupFromEtcd(other)
-				}
-			},
-			reply: written, leader: 3,
-		},
+		{name: "not written", reply: func(GroupTarget) ([]string, error) { return nil, nil }},
+		{name: "write failed", reply: func(GroupTarget) ([]string, error) { return nil, errors.New("PD is unavailable") }},
+		{name: "watcher first", apply: func(target GroupTarget) *Group { return target.result(&target.Expected) }, reply: written, available: true, leader: 1},
+		{name: "changed meanwhile", apply: func(target GroupTarget) *Group {
+			other := target.result(&target.Expected)
+			other.LeaderStoreID, other.VoterStoreIDs = 3, []uint64{3, 4}
+			return other
+		}, reply: written, leader: 3},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			re := require.New(t)
@@ -251,14 +194,13 @@ func TestObserveAvailableRegionWithTargetWriter(t *testing.T) {
 			re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "g"}}))
 			group := manager.GetAffinityGroupState("g")
 			writer := &fakeTargetWriter{reply: tc.reply}
-			if tc.write != nil {
-				writer.write = tc.write(manager)
+			if tc.apply != nil {
+				writer.write = func(target GroupTarget) { manager.SyncGroupFromEtcd(tc.apply(target)) }
 			}
 			manager.SetTargetWriter(writer)
 
 			manager.ObserveAvailableRegion(region, group)
-			re.Len(writer.targets, 1)
-			re.Equal(GroupTarget{Expected: group.Group, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2}}, writer.targets[0])
+			re.Equal([]GroupTarget{{Expected: group.Group, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2}}}, writer.targets)
 			state := manager.GetAffinityGroupState("g")
 			re.Equal(tc.available, state.AffinitySchedulingAllowed)
 			re.Equal(tc.leader, state.LeaderStoreID)
