@@ -159,7 +159,7 @@ func (m *Manager) initGroupLocked(group *Group) {
 		ID:                  group.ID,
 		CreateTimestamp:     group.CreateTimestamp,
 		LeaderStoreID:       group.LeaderStoreID,
-		VoterStoreIDs:       normalizeVoters(group.VoterStoreIDs),
+		VoterStoreIDs:       sortedStoreIDs(group.VoterStoreIDs),
 		BalancePolicy:       group.BalancePolicy,
 		availability:        groupDegraded,
 		degradedExpiredAt:   newDegradedExpiredAtFromNow(),
@@ -473,7 +473,7 @@ func (m *Manager) SyncGroupFromEtcd(group *Group) {
 	}
 	// Voter order has no meaning, but affinity comparisons use canonical order.
 	clonedGroup := *group
-	clonedGroup.VoterStoreIDs = normalizeVoters(group.VoterStoreIDs)
+	clonedGroup.VoterStoreIDs = sortedStoreIDs(group.VoterStoreIDs)
 	group = &clonedGroup
 	m.metaMutex.Lock()
 	defer m.metaMutex.Unlock()

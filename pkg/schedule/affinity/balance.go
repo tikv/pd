@@ -26,8 +26,11 @@ const (
 	BalancePolicyFixed BalancePolicy = "fixed"
 )
 
-func normalizeVoters(voters []uint64) []uint64 {
-	result := slices.Clone(voters)
-	slices.Sort(result)
-	return result
+func sortedStoreIDs(ids []uint64) []uint64 {
+	if len(ids) == 0 {
+		return nil
+	}
+	sorted := slices.Clone(ids)
+	slices.Sort(sorted)
+	return sorted
 }
