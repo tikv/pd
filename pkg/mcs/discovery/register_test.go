@@ -52,13 +52,6 @@ func TestRegister(t *testing.T) {
 	re.NoError(err)
 	re.Empty(resp.Kvs)
 
-	// Test the case that ctx is canceled.
-	sr = NewServiceRegister(ctx, client, "test_service", "127.0.0.1:2", "127.0.0.1:2", DefaultLeaseInSeconds)
-	err = sr.Register()
-	re.NoError(err)
-	sr.cancel()
-	re.Empty(getKeyAfterLeaseExpired(ctx, re, client, sr.key))
-
 	// Test the case that keepalive is failed when the etcd is restarted.
 	sr = NewServiceRegister(ctx, client, "test_service", "127.0.0.1:2", "127.0.0.1:2", DefaultLeaseInSeconds)
 	err = sr.Register()

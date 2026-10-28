@@ -20,6 +20,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -68,6 +69,48 @@ func TestRegionSyncerCanceledRetryDoesNotEnqueue(t *testing.T) {
 	syncer.cancelFunc()
 	syncer.startSyncWithLeader()
 	re.Empty(syncer.reconnectCh)
+}
+
+func TestRegionSyncerJoinsPreviousStream(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		ctx, cancel := context.WithCancel(t.Context())
+		// A canceled context reaches stream cleanup without dialing a real server.
+		cancel()
+		syncer := NewRegionSyncer(ctx, nil, nil, nil, "test", "")
+		syncer.pdLeaderAddr.Store("http://127.0.0.1:1")
+		release := make(chan struct{})
+		var releaseOnce sync.Once
+		events := make(chan string, 2)
+		var first atomic.Bool
+		const hook = "github.com/tikv/pd/pkg/mcs/router/server/beforeRegionSyncStreamDone"
+		re.NoError(failpoint.EnableCall(hook, func(context.Context) {
+			if first.CompareAndSwap(false, true) {
+				<-release
+				events <- "previous stream finished"
+			}
+		}))
+		defer func() {
+			releaseOnce.Do(func() { close(release) })
+			syncer.Stop()
+			re.NoError(failpoint.Disable(hook))
+		}()
+		syncer.startSyncWithLeader()
+		synctest.Wait()
+		re.True(first.Load(), "the previous stream must reach cleanup")
+		go func() {
+			syncer.stopSync()
+			events <- "replacement started"
+			syncer.startSyncWithLeader()
+		}()
+		synctest.Wait()
+		re.Empty(events, "replacement startup must wait for previous stream cleanup")
+		releaseOnce.Do(func() { close(release) })
+		synctest.Wait()
+		re.Equal("previous stream finished", <-events)
+		re.Equal("replacement started", <-events)
+	})
 }
 
 type retryRegionSyncServer struct {
