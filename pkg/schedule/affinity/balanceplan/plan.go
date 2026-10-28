@@ -586,15 +586,15 @@ func (p *planner) greedy(seed uint64) ([][]int, []int, Score) {
 	return bestV, bestL, best
 }
 
-// visit replaces one group's complete target and reports a change.
+// visit replaces one group's target and reports a change.
 func (p *planner) visit(g *groupState) bool {
-	p.visits++
 	for _, s := range g.cur {
 		p.v[s]--
 	}
 	p.l[g.lead]--
+	t, r, leader, ok := p.choose(g, nil)
 	changed := false
-	if t, r, leader, ok := p.choose(g, nil); ok {
+	if ok {
 		changed = leader != g.lead || !sameSet(t, g.cur)
 		g.cur, g.curRule, g.lead = t, r, leader
 	}
@@ -602,6 +602,10 @@ func (p *planner) visit(g *groupState) bool {
 		p.v[s]++
 	}
 	p.l[g.lead]++
+	if !ok {
+		return p.visitLeader(g)
+	}
+	p.visits++
 	return changed
 }
 

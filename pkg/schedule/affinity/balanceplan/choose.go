@@ -284,8 +284,10 @@ func (p *planner) searchRules(g *groupState, exclude []bool, host int, must, for
 }
 
 // pickRule selects one rule's stores, with the leader when host is set. The
-// selection must be as isolated as the rule allows over all its candidates,
-// which is what the best-location check demands.
+// selection must reach the rule's best isolation over all its candidates.
+// This is stricter than PD's best-location check, which accounts for stores
+// occupied by other rules. Competing rules may have no complete target that
+// meets their independent optima; visit then keeps voters and only picks a leader.
 func (p *planner) pickRule(g *groupState, ri int, exclude []bool, must, forbid []int, host bool) (choice, bool) {
 	r := g.Rules[ri]
 	var skip func(int) bool
