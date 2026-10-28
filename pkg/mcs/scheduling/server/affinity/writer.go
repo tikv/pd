@@ -21,6 +21,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -40,6 +41,10 @@ const (
 type TargetWriter struct {
 	httpClient *http.Client
 	endpoints  []string
+	timeout    time.Duration
+	// first is the index of the endpoint that handled the last request. It is
+	// tried first, so that an unreachable endpoint does not delay every write.
+	first atomic.Int64
 }
 
 var _ affinity.TargetWriter = (*TargetWriter)(nil)
@@ -53,23 +58,27 @@ func NewTargetWriter(httpClient *http.Client, backendEndpoints string) *TargetWr
 			endpoints = append(endpoints, strings.TrimSuffix(endpoint, "/"))
 		}
 	}
-	return &TargetWriter{httpClient: httpClient, endpoints: endpoints}
+	return &TargetWriter{httpClient: httpClient, endpoints: endpoints, timeout: writeTimeout}
 }
 
 // WriteGroupTargets implements affinity.TargetWriter. It tries the PD endpoints
-// in order until one of them handles the request. Retrying on another endpoint
-// is safe because PD writes a target only if its group is unchanged.
+// in turn, starting from the one that handled the last request, until one of
+// them handles this request. Retrying on another endpoint is safe because PD
+// writes a target only if its group is unchanged.
 func (w *TargetWriter) WriteGroupTargets(ctx context.Context, targets []affinity.GroupTarget) ([]string, error) {
 	body, err := json.Marshal(&affinity.GroupTargetsRequest{Targets: targets})
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 	err = errors.New("no PD endpoint")
-	for _, endpoint := range w.endpoints {
+	first := int(w.first.Load())
+	for i := range w.endpoints {
+		index := (first + i) % len(w.endpoints)
 		var written []string
 		var retry bool
-		written, retry, err = w.write(ctx, endpoint, body)
+		written, retry, err = w.write(ctx, w.endpoints[index], body)
 		if err == nil || !retry {
+			w.first.Store(int64(index))
 			return written, err
 		}
 	}
@@ -77,10 +86,12 @@ func (w *TargetWriter) WriteGroupTargets(ctx context.Context, targets []affinity
 }
 
 // write sends one request and reports whether another endpoint may succeed.
+// A failure to reach the endpoint, including a timeout, may succeed on another
+// endpoint unless ctx is done.
 func (w *TargetWriter) write(ctx context.Context, endpoint string, body []byte) (written []string, retry bool, err error) {
-	ctx, cancel := context.WithTimeout(ctx, writeTimeout)
+	reqCtx, cancel := context.WithTimeout(ctx, w.timeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint+groupTargetsPath, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, endpoint+groupTargetsPath, bytes.NewReader(body))
 	if err != nil {
 		return nil, false, errors.Trace(err)
 	}
@@ -92,7 +103,7 @@ func (w *TargetWriter) write(ctx context.Context, endpoint string, body []byte) 
 	defer resp.Body.Close()
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, true, errors.Trace(err)
+		return nil, ctx.Err() == nil, errors.Trace(err)
 	}
 	if resp.StatusCode != http.StatusOK {
 		err := errors.Errorf("write affinity group targets to %s: %s %s", endpoint, resp.Status, bytes.TrimSpace(data))

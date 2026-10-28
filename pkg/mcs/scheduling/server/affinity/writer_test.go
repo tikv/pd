@@ -15,11 +15,15 @@
 package affinity
 
 import (
+	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -80,4 +84,39 @@ func TestTargetWriter(t *testing.T) {
 
 	_, err = NewTargetWriter(http.DefaultClient, "").WriteGroupTargets(t.Context(), targets)
 	re.Error(err)
+}
+
+func TestTargetWriterTimeout(t *testing.T) {
+	re := require.New(t)
+	targets := []affinity.GroupTarget{{Expected: affinity.Group{ID: "g"}, LeaderStoreID: 1, VoterStoreIDs: []uint64{1}}}
+	var hangCalls atomic.Int32
+	hang := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		hangCalls.Add(1)
+		// The server notices that the client is gone only after the body is read.
+		_, _ = io.Copy(io.Discard, r.Body)
+		<-r.Context().Done()
+	}))
+	t.Cleanup(hang.Close)
+	var okCalls int
+	ok := targetServer(t, http.StatusOK, &okCalls).URL
+
+	// An endpoint that times out is skipped, and the endpoint that handled the
+	// request is tried first afterwards.
+	writer := NewTargetWriter(http.DefaultClient, hang.URL+","+ok)
+	writer.timeout = 100 * time.Millisecond
+	for range 2 {
+		written, err := writer.WriteGroupTargets(t.Context(), targets)
+		re.NoError(err)
+		re.Equal([]string{"g"}, written)
+	}
+	re.Equal(int32(1), hangCalls.Load())
+	re.Equal(2, okCalls)
+
+	// Once the caller gives up, no other endpoint is tried.
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+	_, err := NewTargetWriter(http.DefaultClient, hang.URL+","+ok).WriteGroupTargets(ctx, targets)
+	re.ErrorIs(err, context.DeadlineExceeded)
+	re.Equal(int32(2), hangCalls.Load())
+	re.Equal(2, okCalls)
 }
