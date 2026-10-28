@@ -30,15 +30,11 @@ import (
 	"github.com/tikv/pd/pkg/schedule/affinity"
 )
 
-func targetServer(t *testing.T, status int, calls *int) *httptest.Server {
+func targetServer(t *testing.T, status int, calls *atomic.Int32) string {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		*calls++
-		if r.Method != http.MethodPost || r.URL.Path != groupTargetsPath {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
+		calls.Add(1)
 		var req affinity.GroupTargetsRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.Targets) == 0 {
+		if r.Method != http.MethodPost || r.URL.Path != groupTargetsPath || json.NewDecoder(r.Body).Decode(&req) != nil || len(req.Targets) == 0 {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
@@ -49,47 +45,16 @@ func targetServer(t *testing.T, status int, calls *int) *httptest.Server {
 		_ = json.NewEncoder(w).Encode(&affinity.GroupTargetsResponse{WrittenGroupIDs: []string{req.Targets[0].Expected.ID}})
 	}))
 	t.Cleanup(server.Close)
-	return server
+	return server.URL
 }
 
 func TestTargetWriter(t *testing.T) {
 	re := require.New(t)
-	targets := []affinity.GroupTarget{{
-		Expected:      affinity.Group{ID: "g", CreateTimestamp: 1},
-		LeaderStoreID: 1,
-		VoterStoreIDs: []uint64{1, 2, 3},
-	}}
-	var okCalls, badCalls, failCalls int
-	ok := targetServer(t, http.StatusOK, &okCalls).URL
-	bad := targetServer(t, http.StatusBadRequest, &badCalls).URL
-	fail := targetServer(t, http.StatusInternalServerError, &failCalls).URL
-	down := httptest.NewServer(http.NotFoundHandler())
-	downURL := down.URL
-	down.Close()
-
-	// A closed endpoint and a server error are skipped.
-	writer := NewTargetWriter(http.DefaultClient, strings.Join([]string{downURL, fail + "/", ok}, ", "))
-	written, err := writer.WriteGroupTargets(t.Context(), targets)
-	re.NoError(err)
-	re.Equal([]string{"g"}, written)
-	re.Equal(1, failCalls)
-	re.Equal(1, okCalls)
-
-	// A rejected request is not sent to other endpoints.
-	writer = NewTargetWriter(http.DefaultClient, bad+","+ok)
-	_, err = writer.WriteGroupTargets(t.Context(), targets)
-	re.ErrorContains(err, "400")
-	re.Equal(1, badCalls)
-	re.Equal(1, okCalls)
-
-	_, err = NewTargetWriter(http.DefaultClient, "").WriteGroupTargets(t.Context(), targets)
-	re.Error(err)
-}
-
-func TestTargetWriterTimeout(t *testing.T) {
-	re := require.New(t)
 	targets := []affinity.GroupTarget{{Expected: affinity.Group{ID: "g"}, LeaderStoreID: 1, VoterStoreIDs: []uint64{1}}}
-	var hangCalls atomic.Int32
+	var okCalls, badCalls, failCalls, hangCalls atomic.Int32
+	ok := targetServer(t, http.StatusOK, &okCalls)
+	bad := targetServer(t, http.StatusBadRequest, &badCalls)
+	fail := targetServer(t, http.StatusInternalServerError, &failCalls)
 	hang := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		hangCalls.Add(1)
 		// The server notices that the client is gone only after the body is read.
@@ -97,26 +62,32 @@ func TestTargetWriterTimeout(t *testing.T) {
 		<-r.Context().Done()
 	}))
 	t.Cleanup(hang.Close)
-	var okCalls int
-	ok := targetServer(t, http.StatusOK, &okCalls).URL
+	down := httptest.NewServer(http.NotFoundHandler())
+	down.Close()
 
-	// An endpoint that times out is skipped, and the endpoint that handled the
-	// request is tried first afterwards.
-	writer := NewTargetWriter(http.DefaultClient, hang.URL+","+ok)
+	// A closed endpoint, a timeout and a server error move on to the next
+	// endpoint, and the endpoint that handled the request is tried first afterwards.
+	writer := NewTargetWriter(http.DefaultClient, strings.Join([]string{down.URL, hang.URL, fail + "/", ok}, ", "))
 	writer.timeout = 100 * time.Millisecond
 	for range 2 {
 		written, err := writer.WriteGroupTargets(t.Context(), targets)
 		re.NoError(err)
 		re.Equal([]string{"g"}, written)
 	}
-	re.Equal(int32(1), hangCalls.Load())
-	re.Equal(2, okCalls)
+	re.Equal([]int32{1, 1, 2}, []int32{hangCalls.Load(), failCalls.Load(), okCalls.Load()})
 
-	// Once the caller gives up, no other endpoint is tried.
+	// A rejected request is not sent to other endpoints.
+	_, err := NewTargetWriter(http.DefaultClient, bad+","+ok).WriteGroupTargets(t.Context(), targets)
+	re.ErrorContains(err, "400")
+	re.Equal([]int32{1, 2}, []int32{badCalls.Load(), okCalls.Load()})
+
+	// Once the caller's context is done, no other endpoint is tried.
 	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
 	defer cancel()
-	_, err := NewTargetWriter(http.DefaultClient, hang.URL+","+ok).WriteGroupTargets(ctx, targets)
+	_, err = NewTargetWriter(http.DefaultClient, hang.URL+","+ok).WriteGroupTargets(ctx, targets)
 	re.ErrorIs(err, context.DeadlineExceeded)
-	re.Equal(int32(2), hangCalls.Load())
-	re.Equal(2, okCalls)
+	re.Equal([]int32{2, 2}, []int32{hangCalls.Load(), okCalls.Load()})
+
+	_, err = NewTargetWriter(http.DefaultClient, "").WriteGroupTargets(t.Context(), targets)
+	re.Error(err)
 }

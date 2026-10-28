@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/errors"
 
 	"github.com/tikv/pd/pkg/schedule/affinity"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 )
 
 const (
@@ -91,12 +92,7 @@ func (w *TargetWriter) WriteGroupTargets(ctx context.Context, targets []affinity
 func (w *TargetWriter) write(ctx context.Context, endpoint string, body []byte) (written []string, retry bool, err error) {
 	reqCtx, cancel := context.WithTimeout(ctx, w.timeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, endpoint+groupTargetsPath, bytes.NewReader(body))
-	if err != nil {
-		return nil, false, errors.Trace(err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := w.httpClient.Do(req)
+	resp, err := apiutil.PostJSONWithContext(reqCtx, w.httpClient, endpoint+groupTargetsPath, body)
 	if err != nil {
 		return nil, ctx.Err() == nil, errors.Trace(err)
 	}

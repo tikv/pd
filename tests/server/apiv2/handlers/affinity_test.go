@@ -1340,24 +1340,18 @@ func (suite *affinityHandlerTestSuite) TestAffinityForwardedHeader() {
 	})
 }
 
-// doUpdateAffinityGroupTargets writes group targets and returns the status code and the response body.
-func doUpdateAffinityGroupTargets(re *require.Assertions, serverAddr string, targets ...affinity.GroupTarget) (int, []byte) {
+// updateAffinityGroupTargets writes group targets and returns the status code and the written groups.
+func updateAffinityGroupTargets(re *require.Assertions, serverAddr string, targets ...affinity.GroupTarget) (int, []string) {
 	data, err := json.Marshal(&affinity.GroupTargetsRequest{Targets: targets})
 	re.NoError(err)
 	resp, err := tests.TestDialClient.Post(getAffinityGroupURL(serverAddr, "targets"), "application/json", bytes.NewReader(data))
 	re.NoError(err)
 	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	re.NoError(err)
-	return resp.StatusCode, body
-}
-
-func mustUpdateAffinityGroupTargets(re *require.Assertions, serverAddr string, targets ...affinity.GroupTarget) []string {
-	status, body := doUpdateAffinityGroupTargets(re, serverAddr, targets...)
-	re.Equal(http.StatusOK, status, string(body))
 	var result affinity.GroupTargetsResponse
-	re.NoError(json.Unmarshal(body, &result))
-	return result.WrittenGroupIDs
+	if resp.StatusCode == http.StatusOK {
+		re.NoError(json.NewDecoder(resp.Body).Decode(&result))
+	}
+	return resp.StatusCode, result.WrittenGroupIDs
 }
 
 func (suite *affinityHandlerTestSuite) TestAffinityGroupTargets() {
@@ -1374,16 +1368,18 @@ func (suite *affinityHandlerTestSuite) TestAffinityGroupTargets() {
 		}
 		expected := mustGetAffinityGroup(re, serverAddr, "targets").Group
 
-		written := mustUpdateAffinityGroupTargets(re, serverAddr,
+		status, written := updateAffinityGroupTargets(re, serverAddr,
 			affinity.GroupTarget{Expected: expected, LeaderStoreID: 2, VoterStoreIDs: []uint64{3, 2, 1}})
+		re.Equal(http.StatusOK, status)
 		re.Equal([]string{"targets"}, written)
 		state := mustGetAffinityGroup(re, serverAddr, "targets")
 		re.Equal(uint64(2), state.LeaderStoreID)
 		re.Equal([]uint64{1, 2, 3}, state.VoterStoreIDs)
 
 		// A target decided from the old group is not written.
-		written = mustUpdateAffinityGroupTargets(re, serverAddr,
+		status, written = updateAffinityGroupTargets(re, serverAddr,
 			affinity.GroupTarget{Expected: expected, LeaderStoreID: 3, VoterStoreIDs: []uint64{1, 2, 3}})
+		re.Equal(http.StatusOK, status)
 		re.Empty(written)
 		re.Equal(uint64(2), mustGetAffinityGroup(re, serverAddr, "targets").LeaderStoreID)
 
@@ -1392,8 +1388,8 @@ func (suite *affinityHandlerTestSuite) TestAffinityGroupTargets() {
 			{{Expected: state.Group, LeaderStoreID: 4, VoterStoreIDs: []uint64{1, 2, 3}}},
 			{{Expected: state.Group, LeaderStoreID: 9, VoterStoreIDs: []uint64{9}}},
 		} {
-			status, body := doUpdateAffinityGroupTargets(re, serverAddr, targets...)
-			re.Equal(http.StatusBadRequest, status, string(body))
+			status, _ := updateAffinityGroupTargets(re, serverAddr, targets...)
+			re.Equal(http.StatusBadRequest, status)
 		}
 	})
 }
@@ -1404,23 +1400,15 @@ func (suite *affinityHandlerTestSuite) TestAffinityFirstWinInMicroservice() {
 	suite.env.RunTestInMicroserviceEnv(func(cluster *tests.TestCluster) {
 		re := suite.Require()
 		leader := cluster.GetLeaderServer()
-		serverAddr := leader.GetAddr()
-		mustCreateAffinityGroups(re, serverAddr, &handlers.CreateAffinityGroupsRequest{
+		mustCreateAffinityGroups(re, leader.GetAddr(), &handlers.CreateAffinityGroupsRequest{
 			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
 				"mcs-first-win": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{}, EndKey: []byte{}}}},
 			},
 		})
 		mustPutHealthyStore(re, cluster, &metapb.Store{Id: 1, State: metapb.StoreState_Up, NodeState: metapb.NodeState_Serving})
 
-		region := core.NewRegionInfo(
-			&metapb.Region{
-				Id:       100,
-				StartKey: []byte(""),
-				EndKey:   []byte("ffff"),
-				Peers:    []*metapb.Peer{{Id: 11, StoreId: 1, Role: metapb.PeerRole_Voter}},
-			},
-			&metapb.Peer{Id: 11, StoreId: 1, Role: metapb.PeerRole_Voter},
-		)
+		peer := &metapb.Peer{Id: 11, StoreId: 1, Role: metapb.PeerRole_Voter}
+		region := core.NewRegionInfo(&metapb.Region{Id: 100, EndKey: []byte("ffff"), Peers: []*metapb.Peer{peer}}, peer)
 		manager := cluster.GetSchedulingPrimaryServer().GetCluster().GetAffinityManager()
 		testutil.Eventually(re, func() bool {
 			group := manager.GetAffinityGroupState("mcs-first-win")
