@@ -470,6 +470,7 @@ func (m *Manager) SyncGroupFromEtcd(group *Group) {
 	m.RLock()
 	existingGroup, exists := m.groups[group.ID]
 	if exists &&
+		existingGroup.CreateTimestamp == group.CreateTimestamp &&
 		existingGroup.LeaderStoreID == group.LeaderStoreID &&
 		slices.Equal(existingGroup.VoterStoreIDs, group.VoterStoreIDs) {
 		m.RUnlock()
@@ -525,9 +526,17 @@ func (m *Manager) SyncGroupFromEtcd(group *Group) {
 	}
 }
 
-// syncGroupTargetLocked replaces the in-memory target with the target of the stored group.
+// syncGroupTargetLocked syncs the stored target, replacing the runtime group if it was recreated.
 // Both metaMutex and the write lock of RWMutex must be held.
 func (m *Manager) syncGroupTargetLocked(groupInfo *runtimeGroupInfo, group *Group) {
+	if groupInfo.CreateTimestamp != group.CreateTimestamp {
+		m.deleteGroupLocked(group.ID)
+		m.initGroupLocked(group)
+		// The label watcher will not resend an unchanged rule for the new instance.
+		m.updateGroupLabelRuleLockedWithCount(group.ID, groupInfo.LabelRule, groupInfo.RangeCount, false)
+		return
+	}
+
 	changed := false
 	if groupInfo.LeaderStoreID != group.LeaderStoreID {
 		groupInfo.LeaderStoreID = group.LeaderStoreID
