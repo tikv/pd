@@ -389,27 +389,9 @@ func (m *Manager) updateObservedGroupPeers(groupID string, affinityVer uint64, l
 	}
 	m.metaMutex.Unlock()
 
-	// Send the target without holding metaMutex, so that a slow PD does not block the watcher.
-	written, err := m.targetWriter.WriteGroupTargets(m.ctx, []GroupTarget{*target})
-	if err != nil {
-		targetWriteFailureCounter.Inc()
-		log.Warn("failed to write affinity group target", zap.String("group-id", groupID), errs.ZapError(err))
+	if _, err := m.sendGroupTargets(m.ctx, []GroupTarget{*target}); err != nil {
 		return nil, err
 	}
-
-	m.metaMutex.Lock()
-	defer m.metaMutex.Unlock()
-	current := m.GetAffinityGroupState(groupID)
-	if len(written) == 0 || current == nil {
-		return current, nil
-	}
-	// Publish the target unless another change has reached the group. The
-	// watcher may have applied the target already.
-	result := target.result(&target.Expected)
-	if !sameStoredGroup(&current.Group, &target.Expected) && !sameStoredGroup(&current.Group, result) {
-		return current, nil
-	}
-	m.publishGroupTargetLocked(result)
 	return m.GetAffinityGroupState(groupID), nil
 }
 
@@ -491,6 +473,9 @@ func (m *Manager) UpdateAffinityGroupPolicy(groupID string, policy BalancePolicy
 		// them again only when they change.
 		groupInfo.SetAvailability(calcGroupAvailability(m.unavailableStores, updated.LeaderStoreID, updated.VoterStoreIDs))
 		m.resetCountLocked(groupInfo)
+	}
+	if groupInfo.BalancePolicy != updated.BalancePolicy {
+		m.touchBalanceTableLocked(groupID)
 	}
 	groupInfo.Group = *updated
 	return newGroupState(groupInfo), nil

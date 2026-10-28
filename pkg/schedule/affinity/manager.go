@@ -77,6 +77,8 @@ type Manager struct {
 	// storeConditionsKnown is set once the availability check has recorded the
 	// store conditions. Until then, a group read with a target stays degraded.
 	storeConditionsKnown bool
+	balanceTables        map[TableID]*balanceTable // {table_id} -> balanceTable
+	lastBalanceVersion   uint64
 
 	// The following members are protected by metaMutex only, not protected by RWMutex.
 	// keyRanges cached in memory to reduce labeler lock contention
@@ -101,6 +103,7 @@ func NewManager(ctx context.Context, storage endpoint.AffinityStorage, storeSetI
 		groups:              make(map[string]*runtimeGroupInfo),
 		regions:             make(map[uint64]regionCache),
 		unavailableStores:   make(map[uint64]storeCondition),
+		balanceTables:       make(map[TableID]*balanceTable),
 		keyRanges:           make(map[string]GroupKeyRanges),
 		labelRuleBuffer:     make(map[string]*labeler.LabelRule),
 	}
@@ -175,6 +178,7 @@ func (m *Manager) initGroupLocked(group *Group) {
 		RangeCount:          0,
 	}
 	m.groups[group.ID] = groupInfo
+	m.touchBalanceTableLocked(group.ID)
 	// A group read with a target, for example by the watcher, can be used once
 	// its stores are known to be available. The first availability check sets
 	// the groups loaded before it.
@@ -229,6 +233,7 @@ func (m *Manager) resetCountLocked(groupInfo *runtimeGroupInfo) {
 	m.affinityRegionCount -= groupInfo.AffinityRegionCount
 	groupInfo.AffinityRegionCount = 0
 	groupInfo.AffinityVer++
+	m.touchBalanceTableLocked(groupInfo.ID)
 }
 
 // updateGroupPeers sets the target of a group, with the availability that the
@@ -332,6 +337,7 @@ func (m *Manager) clearGroupCacheLocked(groupID string) {
 func (m *Manager) deleteGroupLocked(groupID string) {
 	m.clearGroupCacheLocked(groupID)
 	delete(m.groups, groupID)
+	m.removeBalanceGroupLocked(groupID)
 }
 
 func (m *Manager) deleteGroups(groupIDs []string) {
@@ -576,7 +582,10 @@ func (m *Manager) syncGroupTargetLocked(groupInfo *runtimeGroupInfo, group *Grou
 		m.updateGroupLabelRuleLockedWithCount(group.ID, groupInfo.LabelRule, groupInfo.RangeCount, false)
 		return
 	}
-	groupInfo.BalancePolicy = group.BalancePolicy
+	if groupInfo.BalancePolicy != group.BalancePolicy {
+		groupInfo.BalancePolicy = group.BalancePolicy
+		m.touchBalanceTableLocked(groupInfo.ID)
+	}
 	changed := false
 	if groupInfo.LeaderStoreID != group.LeaderStoreID {
 		groupInfo.LeaderStoreID = group.LeaderStoreID
