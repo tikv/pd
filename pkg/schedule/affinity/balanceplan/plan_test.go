@@ -143,6 +143,28 @@ func TestOverlappingRulesFindImprovement(t *testing.T) {
 	}
 }
 
+func TestOverlappingIsolationAllowsLeaderBalance(t *testing.T) {
+	re := require.New(t)
+	in := general(2, 4, 4, 1)
+	rule := in.Groups[0].Rules[0]
+	rule.Count, rule.Location[3][0] = 2, 1
+	other := *rule
+	for i := range in.Groups {
+		in.Groups[i].Rules, in.Groups[i].RuleOf = []*Rule{rule, &other}, []int{0, 0, 1, 1}
+	}
+	r := Plan(in, Options{})
+	re.Equal(Score{16, 4}, r.Baseline)
+	re.Equal(Score{16, 2}, r.Score)
+	changed := 0
+	for i, g := range in.Groups {
+		re.Equal(g.Voters, r.Voters[i])
+		if r.Leaders[i] != g.Leader {
+			changed++
+		}
+	}
+	re.Equal(1, changed)
+}
+
 // Nine location levels are accepted by PD; the planner must not panic.
 func TestDeepLocationLabels(t *testing.T) {
 	re := require.New(t)
@@ -163,12 +185,19 @@ func TestUnsupportedGroupsStayFixed(t *testing.T) {
 	re := require.New(t)
 	in := general(3, 40, 15, 3)
 	in.Groups[1].Voters, in.Groups[1].RuleOf = in.Groups[1].Voters[:3], in.Groups[1].RuleOf[:3]
+	deep := general(1, 40, 3, 3).Groups[0]
+	for s := range deep.Rules[0].Location {
+		deep.Rules[0].Location[s] = make([]int32, maxDepth+1)
+	}
+	in.Groups = append(in.Groups, deep)
 	r := Plan(in, Options{})
 	re.Equal(StopNoGroups, r.Stop)
 	for i := range in.Groups {
 		re.Equal(in.Groups[i].Voters, r.Voters[i])
 		re.Equal(in.Groups[i].Leader, r.Leaders[i])
 	}
+	in.Groups = []Group{deep}
+	re.Equal(StopNoGroups, Plan(in, Options{}).Stop)
 }
 
 // General isolation must count candidate scans and respect the work budget.
