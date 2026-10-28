@@ -48,7 +48,6 @@ const (
 	storeLeaderEvicted
 	storeBusy
 	storeDisconnected
-	storePreparing
 	storeLowSpace
 	degradedBoundary
 
@@ -68,8 +67,6 @@ func (c storeCondition) String() string {
 		return "busy"
 	case storeDisconnected:
 		return "disconnected"
-	case storePreparing:
-		return "preparing"
 	case storeLowSpace:
 		return "low-space"
 	case storeDown:
@@ -206,11 +203,11 @@ func (m *Manager) collectUnavailableStores() map[uint64]storeCondition {
 			unavailableStores[store.GetID()] = storeDisconnected
 		case store.IsLowSpace(lowSpaceRatio):
 			unavailableStores[store.GetID()] = storeLowSpace
-		case store.IsPreparing():
-			unavailableStores[store.GetID()] = storePreparing
 		}
 		// Note: We intentionally do NOT check:
 		// - IsSlow(): Performance issue, not availability issue
+		// - IsPreparing(): A new store must receive replicas before it becomes Serving,
+		//   so it can be in a target, for example after a scale-out.
 	}
 	return unavailableStores
 }
