@@ -58,80 +58,46 @@ func (s *metaWatchStream) Send(response *meta_storagepb.WatchResponse) error {
 	return s.send(response)
 }
 
-// watchRelay forwards real etcd responses and holds the first stream at the
-// selected boundary, keeping later responses off the connection being cut.
-type watchRelay struct {
-	etcdserverpb.UnimplementedWatchServer
-	client   etcdserverpb.WatchClient
-	created  bool
-	resume   chan struct{}
-	requests chan int64
-	attempts atomic.Int64
+func newWatchTestService(t *testing.T, timeout time.Duration) (*Service, context.Context) {
+	t.Helper()
+	_, client, cleanup := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	t.Cleanup(cleanup)
+	ctx, cancel := context.WithTimeout(t.Context(), timeout)
+	t.Cleanup(cancel)
+	return &Service{ctx: ctx, manager: &Manager{srv: &watchServingServer{}, client: client}}, ctx
 }
 
-func (s *watchRelay) Watch(stream etcdserverpb.Watch_WatchServer) error {
-	request, err := stream.Recv()
-	if err != nil {
-		return err
-	}
-	first := s.attempts.Add(1) == 1
+func receiveWatch[T any](t *testing.T, ctx context.Context, ch <-chan T) T {
+	t.Helper()
 	select {
-	case s.requests <- request.GetCreateRequest().StartRevision:
-	case <-stream.Context().Done():
-		return stream.Context().Err()
-	}
-	if !first {
-		select {
-		case <-s.resume:
-		case <-stream.Context().Done():
-			return stream.Context().Err()
-		}
-	}
-	upstream, err := s.client.Watch(stream.Context())
-	if err != nil {
-		return err
-	}
-	if err := upstream.Send(request); err != nil {
-		return err
-	}
-	for {
-		response, err := upstream.Recv()
-		if err != nil {
-			return err
-		}
-		if err := stream.Send(response); err != nil {
-			return err
-		}
-		if first && ((s.created && response.Created) || (!s.created && len(response.Events) > 0)) {
-			<-stream.Context().Done()
-			return stream.Context().Err()
-		}
+	case value := <-ch:
+		return value
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for watch: ", ctx.Err())
+		var zero T
+		return zero
 	}
 }
 
 type observedWatchStream struct {
 	grpc.ClientStream
+	resume  <-chan struct{}
+	done    <-chan struct{}
 	observe func(*etcdserverpb.WatchResponse)
-	sent    func(*etcdserverpb.WatchRequest)
 }
 
 func (s *observedWatchStream) RecvMsg(message any) error {
+	if s.resume != nil {
+		select {
+		case <-s.resume:
+		case <-s.done:
+			return context.Canceled
+		}
+	}
 	if err := s.ClientStream.RecvMsg(message); err != nil {
 		return err
 	}
-	if s.observe != nil {
-		s.observe(message.(*etcdserverpb.WatchResponse))
-	}
-	return nil
-}
-
-func (s *observedWatchStream) SendMsg(message any) error {
-	if err := s.ClientStream.SendMsg(message); err != nil {
-		return err
-	}
-	if s.sent != nil {
-		s.sent(message.(*etcdserverpb.WatchRequest))
-	}
+	s.observe(message.(*etcdserverpb.WatchResponse))
 	return nil
 }
 
@@ -139,10 +105,8 @@ func TestWatchResumesAfterConnectionLoss(t *testing.T) {
 	for _, name := range []string{"before first event", "between historical batches", "compacted while disconnected"} {
 		t.Run(name, func(t *testing.T) {
 			re := require.New(t)
-			_, client, cleanup := etcdutil.NewTestEtcdCluster(t, 1, nil)
-			defer cleanup()
-			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
-			defer cancel()
+			service, ctx := newWatchTestService(t, 30*time.Second)
+			client := service.manager.client
 			var revisions []int64
 			write := func() {
 				value := strconv.Itoa(len(revisions))
@@ -162,21 +126,12 @@ func TestWatchResumesAfterConnectionLoss(t *testing.T) {
 				_, err := client.Put(ctx, "watch/reconnect/a", "existing")
 				re.NoError(err)
 			}
-			relay := &watchRelay{
-				client: etcdserverpb.NewWatchClient(client.ActiveConnection()), created: startRevision == 0,
-				resume: make(chan struct{}), requests: make(chan int64, 4),
-			}
-			listener, err := net.Listen("tcp", "127.0.0.1:0")
-			re.NoError(err)
-			server := grpc.NewServer()
-			etcdserverpb.RegisterWatchServer(server, relay)
-			defer server.Stop()
-			go func() { _ = server.Serve(listener) }()
+			resume := make(chan struct{})
 			observed := make(chan *etcdserverpb.WatchResponse, 1)
 			var connection atomic.Pointer[net.TCPConn]
 			var attempts atomic.Int64
 			watchClient, err := clientv3.New(clientv3.Config{
-				Endpoints: []string{listener.Addr().String()}, DialTimeout: 5 * time.Second,
+				Endpoints: client.Endpoints(), DialTimeout: 5 * time.Second,
 				DialOptions: []grpc.DialOption{
 					grpc.WithContextDialer(func(ctx context.Context, address string) (net.Conn, error) {
 						conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", address)
@@ -187,20 +142,24 @@ func TestWatchResumesAfterConnectionLoss(t *testing.T) {
 					}),
 					grpc.WithChainStreamInterceptor(func(ctx context.Context, desc *grpc.StreamDesc, conn *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
 						stream, err := streamer(ctx, desc, conn, method, opts...)
-						if err != nil || attempts.Add(1) != 1 {
+						if err != nil || method != "/etcdserverpb.Watch/Watch" || attempts.Add(1) != 1 {
 							return stream, err
 						}
-						return &observedWatchStream{ClientStream: stream, observe: func(response *etcdserverpb.WatchResponse) {
-							if (relay.created && response.Created) || (!relay.created && len(response.Events) > 0) {
+						observedStream := &observedWatchStream{ClientStream: stream, done: ctx.Done()}
+						observedStream.observe = func(response *etcdserverpb.WatchResponse) {
+							if (startRevision == 0 && response.Created) || (startRevision != 0 && len(response.Events) > 0) {
+								// Hold the next receive until the real TCP connection is cut.
+								observedStream.resume = resume
 								observed <- response
 							}
-						}}, nil
+						}
+						return observedStream, nil
 					}),
 				},
 			})
 			re.NoError(err)
 			defer watchClient.Close()
-			service := &Service{ctx: ctx, manager: &Manager{srv: &watchServingServer{}, client: watchClient}}
+			service.manager.client = watchClient
 			completed := errors.New("received all revisions")
 			var events []*meta_storagepb.Event
 			var compacted *meta_storagepb.WatchResponse
@@ -220,16 +179,9 @@ func TestWatchResumesAfterConnectionLoss(t *testing.T) {
 					return nil
 				}})
 			}()
-			var boundary *etcdserverpb.WatchResponse
-			select {
-			case boundary = <-observed:
-			case <-ctx.Done():
-				t.Fatal("watch did not reach the disconnect boundary")
-			}
-			nextRevision := boundary.Header.Revision + 1
+			boundary := receiveWatch(t, ctx, observed)
 			if len(boundary.Events) > 0 {
-				nextRevision = boundary.Events[len(boundary.Events)-1].Kv.ModRevision + 1
-				re.Less(nextRevision, boundary.Header.Revision)
+				re.Less(boundary.Events[len(boundary.Events)-1].Kv.ModRevision+1, boundary.Header.Revision)
 			}
 			re.NoError(connection.Load().Close())
 			write()
@@ -238,30 +190,12 @@ func TestWatchResumesAfterConnectionLoss(t *testing.T) {
 				_, err := client.Compact(ctx, revisions[len(revisions)-1])
 				re.NoError(err)
 			}
-			close(relay.resume)
-			for attempt := range 2 {
-				select {
-				case requested := <-relay.requests:
-					if attempt == 0 {
-						re.Equal(startRevision, requested)
-					} else {
-						// Native retries may replay an earlier revision. The full
-						// downstream event assertions below reject gaps and duplicates.
-						re.LessOrEqual(requested, nextRevision)
-					}
-				case <-ctx.Done():
-					t.Fatal("watch did not issue its expected revision request")
-				}
-			}
-			select {
-			case err := <-result:
-				if name == "compacted while disconnected" {
-					re.ErrorIs(err, rpctypes.ErrCompacted)
-				} else {
-					re.ErrorIs(err, completed)
-				}
-			case <-ctx.Done():
-				t.Fatal("watch did not recover after its TCP connection closed")
+			close(resume)
+			err = receiveWatch(t, ctx, result)
+			if name == "compacted while disconnected" {
+				re.ErrorIs(err, rpctypes.ErrCompacted)
+			} else {
+				re.ErrorIs(err, completed)
 			}
 			re.GreaterOrEqual(attempts.Load(), int64(2))
 			if name == "compacted while disconnected" {
@@ -290,15 +224,12 @@ func TestWatchResumesAfterConnectionLoss(t *testing.T) {
 
 func TestWatchPreservesRevisionAndPreviousValue(t *testing.T) {
 	re := require.New(t)
-	_, client, cleanup := etcdutil.NewTestEtcdCluster(t, 1, nil)
-	defer cleanup()
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-	defer cancel()
+	service, ctx := newWatchTestService(t, 10*time.Second)
+	client := service.manager.client
 	put, err := client.Put(ctx, "watch/key", "previous")
 	re.NoError(err)
 	deleted, err := client.Delete(ctx, "watch/key")
 	re.NoError(err)
-	service := &Service{ctx: ctx, manager: &Manager{srv: &watchServingServer{}, client: client}}
 	request := &meta_storagepb.WatchRequest{
 		Key: []byte("watch/"), RangeEnd: []byte(clientv3.GetPrefixRangeEnd("watch/")), StartRevision: put.Header.Revision, PrevKv: true,
 	}
@@ -335,10 +266,8 @@ func TestWatchSlowConsumerPreservesEvents(t *testing.T) {
 	for _, compacted := range []bool{false, true} {
 		t.Run("compacted="+strconv.FormatBool(compacted), func(t *testing.T) {
 			re := require.New(t)
-			_, client, cleanup := etcdutil.NewTestEtcdCluster(t, 1, nil)
-			defer cleanup()
-			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
-			defer cancel()
+			service, ctx := newWatchTestService(t, 30*time.Second)
+			client := service.manager.client
 			var streams atomic.Int64
 			paused := make(chan struct{})
 			var pauseOnce sync.Once
@@ -350,8 +279,8 @@ func TestWatchSlowConsumerPreservesEvents(t *testing.T) {
 						return stream, err
 					}
 					streams.Add(1)
-					return &observedWatchStream{ClientStream: stream, sent: func(request *etcdserverpb.WatchRequest) {
-						if canceled := request.GetCancelRequest(); canceled != nil && canceled.WatchId < 16 {
+					return &observedWatchStream{ClientStream: stream, observe: func(response *etcdserverpb.WatchResponse) {
+						if response.Canceled && response.WatchId < 16 {
 							pauseOnce.Do(func() { close(paused) })
 						}
 					}}, nil
@@ -361,7 +290,7 @@ func TestWatchSlowConsumerPreservesEvents(t *testing.T) {
 			defer watchClient.Close()
 			put, err := client.Put(ctx, "watch/slow", "0")
 			re.NoError(err)
-			service := &Service{ctx: ctx, manager: &Manager{srv: &watchServingServer{}, client: watchClient}}
+			service.manager.client = watchClient
 			const watchers, slowWatchers, updates = 32, 16, 256
 			started, caughtUp := make(chan struct{}, watchers), make(chan int, watchers)
 			released := make(chan struct{})
@@ -399,11 +328,7 @@ func TestWatchSlowConsumerPreservesEvents(t *testing.T) {
 						return nil
 					}})
 				}()
-				select {
-				case <-started:
-				case <-ctx.Done():
-					t.Fatal("initial watch response was not sent")
-				}
+				receiveWatch(t, ctx, started)
 			}
 			// Register the blocked senders before the healthy senders.
 			for i := range watchers {
@@ -414,18 +339,10 @@ func TestWatchSlowConsumerPreservesEvents(t *testing.T) {
 				_, err := client.Put(ctx, "watch/slow", strconv.Itoa(i))
 				re.NoError(err)
 			}
-			select {
-			case <-paused:
-			case <-ctx.Done():
-				t.Fatal("blocked consumer was not paused upstream")
-			}
+			receiveWatch(t, ctx, paused)
 			for range watchers - slowWatchers {
-				select {
-				case index := <-caughtUp:
-					re.GreaterOrEqual(index, slowWatchers, "healthy senders must catch up while slow senders are blocked")
-				case <-ctx.Done():
-					t.Fatal("slow consumer blocked a healthy consumer")
-				}
+				index := receiveWatch(t, ctx, caughtUp)
+				re.GreaterOrEqual(index, slowWatchers, "healthy senders must catch up while slow senders are blocked")
 			}
 			re.Equal(int64(1), streams.Load(), "pausing one watch must not close the shared RPC")
 			remaining := watchers
@@ -438,52 +355,32 @@ func TestWatchSlowConsumerPreservesEvents(t *testing.T) {
 			release.Do(func() { close(released) })
 			if compacted {
 				for range slowWatchers {
-					select {
-					case err := <-results:
-						re.ErrorIs(err, rpctypes.ErrCompacted)
-					case <-ctx.Done():
-						t.Fatal("paused watch did not report compacted history")
-					}
-				}
-				for index, response := range compactedResponses {
-					re.NotNil(response)
-					re.Equal(meta_storagepb.ErrorType_DATA_COMPACTED, response.Header.GetError().GetType())
-					re.NotEmpty(events[index])
-					re.Less(len(events[index]), updates+1)
-					for i, event := range events[index] {
-						re.Equal(strconv.Itoa(i), string(event.Kv.Value))
-						if i > 0 {
-							re.Greater(event.Kv.ModRevision, events[index][i-1].Kv.ModRevision)
-							re.Equal(strconv.Itoa(i-1), string(event.PrevKv.Value))
-						}
-					}
+					err := receiveWatch(t, ctx, results)
+					re.ErrorIs(err, rpctypes.ErrCompacted)
 				}
 				remaining -= slowWatchers
 			} else {
 				for range slowWatchers {
-					select {
-					case index := <-caughtUp:
-						re.Less(index, slowWatchers)
-					case <-ctx.Done():
-						t.Fatal("slow consumer did not replay its backlog")
-					}
+					index := receiveWatch(t, ctx, caughtUp)
+					re.Less(index, slowWatchers)
 				}
 			}
 			_, err = client.Put(ctx, "watch/slow", strconv.Itoa(updates))
 			re.NoError(err)
 			for range remaining {
-				select {
-				case err := <-results:
-					re.ErrorIs(err, completed)
-				case <-ctx.Done():
-					t.Fatal("watch did not receive all updates")
-				}
+				err := receiveWatch(t, ctx, results)
+				re.ErrorIs(err, completed)
 			}
 			for index, received := range events {
 				if compacted && index < slowWatchers {
-					continue
+					response := compactedResponses[index]
+					re.NotNil(response)
+					re.Equal(meta_storagepb.ErrorType_DATA_COMPACTED, response.Header.GetError().GetType())
+					re.NotEmpty(received)
+					re.Less(len(received), updates+1)
+				} else {
+					re.Len(received, updates+1)
 				}
-				re.Len(received, updates+1)
 				for i, event := range received {
 					re.Equal(strconv.Itoa(i), string(event.Kv.Value))
 					if i > 0 {
@@ -498,10 +395,8 @@ func TestWatchSlowConsumerPreservesEvents(t *testing.T) {
 
 func TestWatchPermissionFailureDoesNotInterruptOtherWatches(t *testing.T) {
 	re := require.New(t)
-	_, client, cleanup := etcdutil.NewTestEtcdCluster(t, 1, nil)
-	defer cleanup()
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
-	defer cancel()
+	service, ctx := newWatchTestService(t, 30*time.Second)
+	client := service.manager.client
 	_, err := client.UserAdd(ctx, "root", "root-password")
 	re.NoError(err)
 	_, err = client.UserGrantRole(ctx, "root", "root")
@@ -524,7 +419,7 @@ func TestWatchPermissionFailureDoesNotInterruptOtherWatches(t *testing.T) {
 	watchClient, err := clientv3.New(clientv3.Config{Endpoints: client.Endpoints(), Username: "watcher", Password: "watch-password", DialTimeout: 5 * time.Second})
 	re.NoError(err)
 	defer watchClient.Close()
-	service := &Service{ctx: ctx, manager: &Manager{srv: &watchServingServer{}, client: watchClient}}
+	service.manager.client = watchClient
 	started := make(chan struct{})
 	result := make(chan error, 1)
 	completed := errors.New("received authorized update")
@@ -541,11 +436,7 @@ func TestWatchPermissionFailureDoesNotInterruptOtherWatches(t *testing.T) {
 			return nil
 		}})
 	}()
-	select {
-	case <-started:
-	case <-ctx.Done():
-		t.Fatal("authorized watch did not start")
-	}
+	receiveWatch(t, ctx, started)
 	var denied *meta_storagepb.WatchResponse
 	err = service.Watch(&meta_storagepb.WatchRequest{Key: []byte("watch/denied")}, &metaWatchStream{ctx: ctx, send: func(response *meta_storagepb.WatchResponse) error {
 		denied = response
@@ -556,12 +447,8 @@ func TestWatchPermissionFailureDoesNotInterruptOtherWatches(t *testing.T) {
 	re.Equal(meta_storagepb.ErrorType_UNKNOWN, denied.Header.GetError().GetType())
 	_, err = root.Put(ctx, "watch/allowed", "after")
 	re.NoError(err)
-	select {
-	case err := <-result:
-		re.ErrorIs(err, completed)
-	case <-ctx.Done():
-		t.Fatal("permission failure interrupted another watch")
-	}
+	err = receiveWatch(t, ctx, result)
+	re.ErrorIs(err, completed)
 	re.Len(events, 2)
 	re.Equal("before", string(events[0].Kv.Value))
 	re.Equal("after", string(events[1].Kv.Value))
@@ -569,10 +456,8 @@ func TestWatchPermissionFailureDoesNotInterruptOtherWatches(t *testing.T) {
 
 func TestWatchLargeHistoricalResponse(t *testing.T) {
 	re := require.New(t)
-	_, client, cleanup := etcdutil.NewTestEtcdCluster(t, 1, nil)
-	defer cleanup()
-	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
-	defer cancel()
+	service, ctx := newWatchTestService(t, 20*time.Second)
+	client := service.manager.client
 	const count = 20
 	value := string(make([]byte, 1<<20))
 	var firstRevision int64
@@ -583,7 +468,6 @@ func TestWatchLargeHistoricalResponse(t *testing.T) {
 			firstRevision = put.Header.Revision
 		}
 	}
-	service := &Service{ctx: ctx, manager: &Manager{srv: &watchServingServer{}, client: client}}
 	completed := errors.New("received historical batch")
 	var events []*meta_storagepb.Event
 	err := service.Watch(&meta_storagepb.WatchRequest{

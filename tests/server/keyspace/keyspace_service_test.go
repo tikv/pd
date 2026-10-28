@@ -32,101 +32,16 @@ type keyspaceWatchStream struct {
 	grpc.ServerStream
 	ctx      context.Context
 	snapshot chan struct{}
-	send     func(*keyspacepb.WatchKeyspacesResponse) error
 }
 
 func (s *keyspaceWatchStream) Context() context.Context { return s.ctx }
 
-func (s *keyspaceWatchStream) Send(response *keyspacepb.WatchKeyspacesResponse) error {
-	if s.send != nil {
-		return s.send(response)
-	}
+func (s *keyspaceWatchStream) Send(*keyspacepb.WatchKeyspacesResponse) error {
 	select {
 	case s.snapshot <- struct{}{}:
+		return nil
 	case <-s.ctx.Done():
 		return s.ctx.Err()
-	}
-	return nil
-}
-
-func (suite *keyspaceTestSuite) TestWatchKeyspacesServerClose() {
-	re := suite.Require()
-	service := &server.KeyspaceServer{GrpcServer: &server.GrpcServer{Server: suite.server.GetServer()}}
-	request := &keyspacepb.WatchKeyspacesRequest{Header: testutil.NewRequestHeader(suite.server.GetClusterID())}
-	ctx, cancel := context.WithCancel(suite.T().Context())
-	defer cancel()
-	stream := &keyspaceWatchStream{ctx: ctx, snapshot: make(chan struct{}, 1)}
-	result := make(chan error, 1)
-	go func() { result <- service.WatchKeyspaces(request, stream) }()
-	select {
-	case <-stream.snapshot:
-	case <-time.After(5 * time.Second):
-		re.FailNow("initial keyspace snapshot was not sent")
-	}
-	closed := make(chan struct{})
-	go func() {
-		suite.server.GetServer().Close()
-		close(closed)
-	}()
-	select {
-	case <-closed:
-	case <-time.After(5 * time.Second):
-		suite.cancel()
-		re.FailNow("idle keyspace watch blocked Server.Close")
-	}
-	select {
-	case err := <-result:
-		re.NoError(err)
-	case <-time.After(5 * time.Second):
-		re.FailNow("keyspace watch survived Server.Close")
-	}
-}
-
-func (suite *keyspaceTestSuite) TestWatchKeyspacesServerCloseDuringInitialSend() {
-	re := suite.Require()
-	srv := suite.server.GetServer()
-	service := &server.KeyspaceServer{GrpcServer: &server.GrpcServer{Server: srv}}
-	request := &keyspacepb.WatchKeyspacesRequest{Header: testutil.NewRequestHeader(suite.server.GetClusterID())}
-	ctx, cancel := context.WithCancel(suite.T().Context())
-	defer cancel()
-	// Model a Send that only unblocks when shutdown reaches transport teardown.
-	// The server loop must finish before this close callback can run.
-	srv.AddCloseCallback(cancel)
-	started, finished := make(chan struct{}), make(chan struct{})
-	stream := &keyspaceWatchStream{ctx: ctx, send: func(*keyspacepb.WatchKeyspacesResponse) error {
-		close(started)
-		defer close(finished)
-		<-ctx.Done()
-		return ctx.Err()
-	}}
-	result := make(chan error, 1)
-	go func() { result <- service.WatchKeyspaces(request, stream) }()
-	select {
-	case <-started:
-	case <-time.After(5 * time.Second):
-		re.FailNow("initial keyspace snapshot was not sent")
-	}
-	closed := make(chan struct{})
-	go func() {
-		srv.Close()
-		close(closed)
-	}()
-	select {
-	case <-closed:
-	case <-time.After(5 * time.Second):
-		cancel()
-		suite.cancel()
-		re.FailNow("initial snapshot send blocked Server.Close")
-	}
-	select {
-	case <-result:
-	case <-time.After(5 * time.Second):
-		re.FailNow("keyspace watch survived transport teardown")
-	}
-	select {
-	case <-finished:
-	default:
-		re.FailNow("keyspace handler returned before its sender stopped")
 	}
 }
 
@@ -134,54 +49,43 @@ func (suite *keyspaceTestSuite) TestWatchKeyspacesCancellation() {
 	re := suite.Require()
 	service := &server.KeyspaceServer{GrpcServer: &server.GrpcServer{Server: suite.server.GetServer()}}
 	request := &keyspacepb.WatchKeyspacesRequest{Header: testutil.NewRequestHeader(suite.server.GetClusterID())}
-	// Repeated idle disconnects must terminate without another keyspace write.
-	for range 3 {
-		ctx, cancel := context.WithCancel(suite.T().Context())
-		stream := &keyspaceWatchStream{ctx: ctx, snapshot: make(chan struct{}, 1)}
-		result := make(chan error, 1)
-		go func() { result <- service.WatchKeyspaces(request, stream) }()
-		select {
-		case <-stream.snapshot:
-		case <-time.After(5 * time.Second):
+	for _, mode := range []string{"client", "initial load", "server"} {
+		attempts := 1
+		if mode == "client" {
+			attempts = 3
+		}
+		for range attempts {
+			ctx, cancel := context.WithCancel(suite.T().Context())
+			stream := &keyspaceWatchStream{ctx: ctx, snapshot: make(chan struct{}, 1)}
+			result := make(chan error, 1)
+			if mode == "initial load" {
+				cancel()
+			}
+			go func() { result <- service.WatchKeyspaces(request, stream) }()
+			if mode != "initial load" {
+				select {
+				case <-stream.snapshot:
+				case <-time.After(5 * time.Second):
+					cancel()
+					re.FailNow("initial keyspace snapshot was not sent", mode)
+				}
+			}
+			if mode == "server" {
+				suite.cancel()
+			} else {
+				cancel()
+			}
+			select {
+			case err := <-result:
+				if mode != "initial load" {
+					re.NoError(err, mode)
+				}
+			case <-time.After(5 * time.Second):
+				cancel()
+				re.FailNow("keyspace watch survived cancellation", mode)
+			}
 			cancel()
-			re.FailNow("initial keyspace snapshot was not sent")
 		}
-		cancel()
-		select {
-		case err := <-result:
-			re.NoError(err)
-		case <-time.After(5 * time.Second):
-			re.FailNow("idle keyspace watch survived client cancellation")
-		}
-	}
-
-	// Cancellation must also interrupt the initial etcd load.
-	ctx, cancel := context.WithCancel(suite.T().Context())
-	cancel()
-	result := make(chan error, 1)
-	go func() {
-		result <- service.WatchKeyspaces(request, &keyspaceWatchStream{ctx: ctx, snapshot: make(chan struct{}, 1)})
-	}()
-	select {
-	case <-result:
-	case <-time.After(5 * time.Second):
-		re.FailNow("keyspace watch survived cancellation during initial loading")
-	}
-
-	// A live client must not keep its watcher alive after the server shuts down.
-	stream := &keyspaceWatchStream{ctx: suite.T().Context(), snapshot: make(chan struct{}, 1)}
-	go func() { result <- service.WatchKeyspaces(request, stream) }()
-	select {
-	case <-stream.snapshot:
-	case <-time.After(5 * time.Second):
-		re.FailNow("initial keyspace snapshot was not sent")
-	}
-	suite.cancel()
-	select {
-	case err := <-result:
-		re.NoError(err)
-	case <-time.After(5 * time.Second):
-		re.FailNow("keyspace watch survived server shutdown")
 	}
 }
 

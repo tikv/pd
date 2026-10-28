@@ -74,66 +74,6 @@ func newTLSWatchTestServer(t *testing.T) *server.Server {
 	return cluster.GetServer(name).GetServer()
 }
 
-func TestTLSWatchServerClose(t *testing.T) {
-	re := require.New(t)
-	srv := newTLSWatchTestServer(t)
-	tlsConfig, err := srv.GetConfig().Security.ToClientTLSConfig()
-	re.NoError(err)
-	conn, err := grpcutil.GetClientConn(t.Context(), srv.GetAddr(), tlsConfig)
-	re.NoError(err)
-	defer conn.Close()
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
-	defer cancel()
-	keyspaces, err := keyspacepb.NewKeyspaceClient(conn).WatchKeyspaces(ctx, &keyspacepb.WatchKeyspacesRequest{Header: testutil.NewRequestHeader(keypath.ClusterID())})
-	re.NoError(err)
-	snapshot, err := keyspaces.Recv()
-	re.NoError(err)
-	re.NotEmpty(snapshot.Keyspaces)
-
-	put, err := srv.GetClient().Put(ctx, globalConfigPath+"tls-shutdown", "value")
-	re.NoError(err)
-	configWatch, err := pdpb.NewPDClient(conn).WatchGlobalConfig(ctx, &pdpb.WatchGlobalConfigRequest{ConfigPath: globalConfigPath, Revision: put.Header.Revision})
-	re.NoError(err)
-	configResponse, err := configWatch.Recv()
-	re.NoError(err)
-	re.GreaterOrEqual(configResponse.Revision, put.Header.Revision)
-	re.NotEmpty(configResponse.Changes)
-	re.Equal([]byte("value"), configResponse.Changes[0].Payload)
-	metaWatch, err := meta_storagepb.NewMetaStorageClient(conn).Watch(ctx, &meta_storagepb.WatchRequest{Key: []byte(globalConfigPath + "tls-shutdown"), StartRevision: put.Header.Revision})
-	re.NoError(err)
-	metaResponse, err := metaWatch.Recv()
-	re.NoError(err)
-	re.Len(metaResponse.Events, 1)
-	re.Equal([]byte("value"), metaResponse.Events[0].Kv.Value)
-
-	// All clients stay connected with live contexts while the server closes.
-	closed := make(chan struct{})
-	go func() {
-		srv.Close()
-		close(closed)
-	}()
-	select {
-	case <-closed:
-	case <-time.After(10 * time.Second):
-		cancel()
-		re.FailNow("TLS watch streams blocked Server.Close")
-	}
-	re.NoError(ctx.Err())
-	for err == nil {
-		_, err = keyspaces.Recv()
-	}
-	re.Error(err)
-	for err = nil; err == nil; {
-		_, err = configWatch.Recv()
-	}
-	re.Error(err)
-	for err = nil; err == nil; {
-		_, err = metaWatch.Recv()
-	}
-	re.Error(err)
-	re.NoError(ctx.Err())
-}
-
 type watchResponseWriter struct {
 	http.ResponseWriter
 	started  chan struct{}
@@ -159,8 +99,8 @@ func (w *watchResponseWriter) Write(data []byte) (int, error) {
 	return w.ResponseWriter.Write(data)
 }
 
-func TestTLSWatchServerCloseBlockedSend(t *testing.T) {
-	for _, method := range []string{"/keyspacepb.Keyspace/WatchKeyspaces", "/pdpb.PD/WatchGlobalConfig", "/meta_storagepb.MetaStorage/Watch"} {
+func TestTLSWatchServerClose(t *testing.T) {
+	for _, method := range []string{"idle", "/keyspacepb.Keyspace/WatchKeyspaces", "/pdpb.PD/WatchGlobalConfig", "/meta_storagepb.MetaStorage/Watch"} {
 		t.Run(method, func(t *testing.T) {
 			re := require.New(t)
 			started, finished := make(chan struct{}), make(chan struct{})
@@ -175,51 +115,66 @@ func TestTLSWatchServerCloseBlockedSend(t *testing.T) {
 			srv := newTLSWatchTestServer(t)
 			tlsConfig, err := srv.GetConfig().Security.ToClientTLSConfig()
 			re.NoError(err)
-			// Disable adaptive window growth so a single large response blocks even
-			// though the client transport continues reading frames from its socket.
+			// Fixed flow-control windows keep large responses blocked until read.
 			conn, err := grpcutil.GetClientConn(t.Context(), srv.GetAddr(), tlsConfig,
 				grpc.WithStaticStreamWindowSize(64<<10), grpc.WithStaticConnWindowSize(1<<20))
 			re.NoError(err)
 			defer conn.Close()
 			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 			defer cancel()
-			value := strings.Repeat("x", 1<<20)
-			key := globalConfigPath + "tls-blocked"
+			value := "value"
+			if method != "idle" {
+				value = strings.Repeat("x", 1<<20)
+			}
+			key := globalConfigPath + "tls-shutdown"
 			put, err := srv.GetClient().Put(ctx, key, value)
 			re.NoError(err)
-			var stream grpc.ClientStream
-			var response proto.Message
-			switch method {
-			case "/keyspacepb.Keyspace/WatchKeyspaces":
-				response = &keyspacepb.WatchKeyspacesResponse{}
-				meta := &keyspacepb.KeyspaceMeta{
-					Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 42}, Name: "tls-blocked", State: keyspacepb.KeyspaceState_ENABLED,
-					Config: map[string]string{"watch-test-payload": value},
+			meta := &keyspacepb.KeyspaceMeta{
+				Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 42}, Name: "tls-shutdown", State: keyspacepb.KeyspaceState_ENABLED,
+				Config: map[string]string{"watch-test-payload": value},
+			}
+			data, err := proto.Marshal(meta)
+			re.NoError(err)
+			_, err = srv.GetClient().Put(ctx, keypath.KeyspaceMetaPath(meta.GetId()), string(data))
+			re.NoError(err)
+			keyspaces, err := keyspacepb.NewKeyspaceClient(conn).WatchKeyspaces(ctx, &keyspacepb.WatchKeyspacesRequest{Header: testutil.NewRequestHeader(keypath.ClusterID())})
+			re.NoError(err)
+			configs, err := pdpb.NewPDClient(conn).WatchGlobalConfig(ctx, &pdpb.WatchGlobalConfigRequest{ConfigPath: globalConfigPath, Revision: put.Header.Revision})
+			re.NoError(err)
+			metas, err := meta_storagepb.NewMetaStorageClient(conn).Watch(ctx, &meta_storagepb.WatchRequest{Key: []byte(key), StartRevision: put.Header.Revision})
+			re.NoError(err)
+			streams := []struct {
+				method  string
+				stream  grpc.ClientStream
+				message proto.Message
+			}{
+				{"/keyspacepb.Keyspace/WatchKeyspaces", keyspaces, &keyspacepb.WatchKeyspacesResponse{}},
+				{"/pdpb.PD/WatchGlobalConfig", configs, &pdpb.WatchGlobalConfigResponse{}},
+				{"/meta_storagepb.MetaStorage/Watch", metas, &meta_storagepb.WatchResponse{}},
+			}
+			if method == "idle" {
+				for _, stream := range streams {
+					re.NoError(stream.stream.RecvMsg(stream.message))
 				}
-				data, err := proto.Marshal(meta)
-				re.NoError(err)
-				_, err = srv.GetClient().Put(ctx, keypath.KeyspaceMetaPath(meta.GetId()), string(data))
-				re.NoError(err)
-				stream, err = keyspacepb.NewKeyspaceClient(conn).WatchKeyspaces(ctx, &keyspacepb.WatchKeyspacesRequest{Header: testutil.NewRequestHeader(keypath.ClusterID())})
-				re.NoError(err)
-			case "/pdpb.PD/WatchGlobalConfig":
-				response = &pdpb.WatchGlobalConfigResponse{}
-				stream, err = pdpb.NewPDClient(conn).WatchGlobalConfig(ctx, &pdpb.WatchGlobalConfigRequest{ConfigPath: globalConfigPath, Revision: put.Header.Revision})
-				re.NoError(err)
-			case "/meta_storagepb.MetaStorage/Watch":
-				response = &meta_storagepb.WatchResponse{}
-				stream, err = meta_storagepb.NewMetaStorageClient(conn).Watch(ctx, &meta_storagepb.WatchRequest{Key: []byte(key), StartRevision: put.Header.Revision})
-				re.NoError(err)
-			}
-			select {
-			case <-started:
-			case <-ctx.Done():
-				t.Fatal("TLS watch did not enter the large response write")
-			}
-			select {
-			case <-finished:
-				t.Fatal("large response write completed without client reads")
-			case <-time.After(100 * time.Millisecond):
+				re.NotEmpty(streams[0].message.(*keyspacepb.WatchKeyspacesResponse).Keyspaces)
+				configResponse := streams[1].message.(*pdpb.WatchGlobalConfigResponse)
+				re.GreaterOrEqual(configResponse.Revision, put.Header.Revision)
+				re.Len(configResponse.Changes, 1)
+				re.Equal([]byte(value), configResponse.Changes[0].Payload)
+				metaResponse := streams[2].message.(*meta_storagepb.WatchResponse)
+				re.Len(metaResponse.Events, 1)
+				re.Equal([]byte(value), metaResponse.Events[0].Kv.Value)
+			} else {
+				select {
+				case <-started:
+				case <-ctx.Done():
+					t.Fatal("TLS watch did not enter the large response write")
+				}
+				select {
+				case <-finished:
+					t.Fatal("large response write completed without client reads")
+				case <-time.After(100 * time.Millisecond):
+				}
 			}
 			closed := make(chan struct{})
 			go func() {
@@ -235,15 +190,26 @@ func TestTLSWatchServerCloseBlockedSend(t *testing.T) {
 				case <-time.After(5 * time.Second):
 					t.Fatal("Server.Close did not finish after client cancellation")
 				}
-				t.Fatal("blocked TLS response write prevented Server.Close")
+				t.Fatal("live TLS watch streams blocked Server.Close")
 			}
 			re.NoError(ctx.Err())
-			select {
-			case <-finished:
-			default:
-				t.Fatal("TLS response writer survived Server.Close")
+			if method != "idle" {
+				select {
+				case <-finished:
+				default:
+					t.Fatal("TLS response writer survived Server.Close")
+				}
 			}
-			re.Error(stream.RecvMsg(response))
+			for _, stream := range streams {
+				if method == stream.method {
+					re.Error(stream.stream.RecvMsg(stream.message))
+					continue
+				}
+				for err = nil; err == nil; {
+					err = stream.stream.RecvMsg(stream.message)
+				}
+				re.Error(err)
+			}
 			re.NoError(ctx.Err())
 		})
 	}
