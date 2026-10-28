@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	sche "github.com/tikv/pd/pkg/schedule/core"
+	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -306,6 +307,46 @@ func TestAffinityBalanceRetries(t *testing.T) {
 	}
 }
 
+func TestAffinityBalanceRechecksStoreFilters(t *testing.T) {
+	for _, reason := range []string{"busy", "store limit", "special use", "low space"} {
+		t.Run(reason, func(t *testing.T) {
+			re := require.New(t)
+			f := newAffinityBalanceTest(t, 5)
+			ids := f.seed("100", 1, 1, 2)
+			f.policy(affinity.BalancePolicyFixed, ids[1])
+			current := f.affinityManager.GetAffinityGroupState(ids[0])
+			target := current.Group
+			target.VoterStoreIDs = []uint64{1, 2, 4}
+			check, action := f.balanceStoreActionChecker(), balanceStoreAction{id: 4}
+			re.Equal(balanceAllowed, check(action))
+			re.Equal(balanceAllowed, f.balanceTargetExecutionStatus(&current.Group, &target))
+			want := balanceTemporarilyBlocked
+			switch reason {
+			case "busy":
+				f.SetStoreBusy(4, true)
+			case "store limit":
+				f.SetStoreLimit(4, storelimit.AddPeer, 0.00006)
+				f.ResetStoreLimit(4, storelimit.AddPeer, 0.000001)
+				re.True(f.GetStore(4).GetStoreLimit().Take(storelimit.RegionInfluence[storelimit.AddPeer], storelimit.AddPeer, constant.Medium))
+			case "special use":
+				f.SetStoreLabel(4, map[string]string{filter.SpecialUseKey: filter.SpecialUseReserved})
+				want = balanceRejected
+			case "low space":
+				f.UpdateRegionCount(4, core.InitClusterRegionThreshold)
+				f.UpdateStorageRatio(4, 0.9, 0.1)
+				re.True(f.GetStore(4).IsLowSpace(f.GetLowSpaceRatio()))
+				want = balanceRejected
+			}
+			re.Equal(balanceAllowed, check(action))
+			re.Equal(want, f.balanceTargetExecutionStatus(&current.Group, &target))
+			re.True(f.step())
+			for _, group := range f.snapshot().Groups {
+				re.NotContains(group.VoterStoreIDs, uint64(4))
+			}
+		})
+	}
+}
+
 type affinityBalanceScanCluster struct {
 	sche.CheckerCluster
 	beforeFinal func()
@@ -390,6 +431,34 @@ func TestAffinityBalanceModelsLeaderAndFollowerRules(t *testing.T) {
 		region := cloneRegionWithReplacePeerStores(f.GetRegion(uint64(i+1)), group.LeaderStoreID, group.VoterStoreIDs...)
 		fit := f.ruleManager.FitRegionWithoutCache(f.Cluster, region)
 		re.Equal(bestLocationSatisfied, f.regionPlacementBestLocation(region, fit))
+	}
+}
+
+func TestAffinityBalanceOverlappingRulesAllowLeaderBalance(t *testing.T) {
+	re := require.New(t)
+	f := newAffinityBalanceTest(t, 4, "a", "a", "a", "b")
+	rule := f.ruleManager.GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
+	rule.Count = 2
+	re.NoError(f.ruleManager.SetRule(rule))
+	second := rule.Clone()
+	second.ID, second.Index = "second", 1
+	re.NoError(f.ruleManager.SetRule(second))
+	for i := range 2 {
+		id := fmt.Sprintf("_tidb_pt_100_p%d", i)
+		f.group(id, uint64(i+1), 1, []uint64{1, 2, 3, 4}, fmt.Sprintf("k%d", i), fmt.Sprintf("k%d", i+1))
+		group, region := f.affinityManager.GetAffinityGroupState(id), f.GetRegion(uint64(i+1))
+		fit, status := f.validateBalanceCurrentRegion(group, region)
+		re.Equal(balanceAllowed, status)
+		re.True(fit.IsSatisfied())
+		target := group.Group
+		target.LeaderStoreID = 2
+		re.Equal(balanceAllowed, f.validateBalanceTarget(&target, region, fit))
+	}
+	re.Equal([2]int{16, 4}, balanceTableScore(f.affinityManager, balanceTestTable))
+	re.True(f.step())
+	re.Equal([2]int{16, 2}, balanceTableScore(f.affinityManager, balanceTestTable))
+	for _, group := range f.snapshot().Groups {
+		re.Equal([]uint64{1, 2, 3, 4}, group.VoterStoreIDs)
 	}
 }
 
