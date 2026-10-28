@@ -290,6 +290,39 @@ func TestForcedAssignmentsAreBounded(t *testing.T) {
 	}
 }
 
+func TestUnforcedSearchRespectsStop(t *testing.T) {
+	const stores, rules = 300, 30
+	for _, stop := range []StopReason{StopCanceled, StopBudget} {
+		t.Run(string(stop), func(t *testing.T) {
+			re := require.New(t)
+			in := general(1, stores, rules, 1)
+			g := &in.Groups[0]
+			all := g.Rules[0].Stores
+			g.Rules = nil
+			for ri := range rules {
+				g.Rules = append(g.Rules, &Rule{Count: 1, Stores: all})
+				g.RuleOf[ri], in.BaseVoters[ri] = ri, 1
+			}
+			in.BaseLeaders[0] = 1
+			checks := 0
+			opt := Options{Cancel: func() bool {
+				checks++
+				return stop == StopCanceled && checks >= 2
+			}}
+			if stop == StopBudget {
+				opt.WorkBudget = 1000
+			}
+			r := Plan(in, opt)
+			t.Logf("visits=%d work=%d checks=%d stop=%s", r.Visits, r.Work, checks, r.Stop)
+			re.Equal(stop, r.Stop)
+			re.Equal(1, r.Visits)
+			// Allow one complete root, its isolation calculation, and the
+			// leader-only fallback when the interrupted search finds no target.
+			re.LessOrEqual(r.Work, int64(2*rules*stores+rules))
+		})
+	}
+}
+
 // initialize places groups in input order using only the preceding groups' loads.
 func initialize(in *Input) {
 	placed := &Input{Stores: in.Stores, BaseVoters: slices.Clone(in.BaseVoters), BaseLeaders: slices.Clone(in.BaseLeaders)}
