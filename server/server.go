@@ -355,7 +355,6 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 	s.etcdCfg = etcdCfg
 	s.lg = cfg.Logger
 	s.logProps = cfg.LogProps
-	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
 	return s, nil
 }
 
@@ -704,6 +703,8 @@ func (s *Server) IsClosed() bool {
 
 // Run runs the pd server.
 func (s *Server) Run() error {
+	// Renew the loop context on restart, before etcd starts serving watches.
+	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
 	go systimemon.StartMonitor(s.ctx, time.Now, func() {
 		log.Error("system time jumps backward", errs.ZapError(errs.ErrIncorrectSystemTime))
 		timeJumpBackCounter.Inc()
