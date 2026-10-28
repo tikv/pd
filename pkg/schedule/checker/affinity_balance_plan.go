@@ -113,11 +113,18 @@ func (c *AffinityChecker) planBalanceTargets(ctx context.Context, snapshot *affi
 	return balancePlanResult{retry: true}, nil
 }
 
-// commitBalancePlan writes a validated plan if the placement rules have not
-// changed since revision and the Regions of the changed groups are still as
-// they were validated. It returns the IDs of the written groups.
+// commitBalancePlan writes a validated plan if the Regions of the changed
+// groups are still as they were validated, balancing is still allowed and the
+// placement rules have not changed since revision. It returns the IDs of the
+// written groups.
 func (c *AffinityChecker) commitBalancePlan(ctx context.Context, snapshot *affinity.BalanceSnapshot, res balancePlanResult, revision uint64) ([]string, error) {
-	if !c.balanceAllowed() || c.ruleManager.GetRevision() != revision || !c.verifyBalanceRegions(snapshot, res.targets, res.checked) {
+	// The scan may take a while, so the gates are checked after it, right
+	// before the write.
+	regionsUnchanged := c.verifyBalanceRegions(snapshot, res.targets, res.checked)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if !regionsUnchanged || !c.balanceAllowed() || c.ruleManager.GetRevision() != revision {
 		return nil, nil
 	}
 	return c.affinityManager.CommitBalanceTargets(ctx, snapshot, res.targets)

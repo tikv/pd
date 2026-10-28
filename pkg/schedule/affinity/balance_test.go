@@ -15,6 +15,8 @@
 package affinity
 
 import (
+	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -23,7 +25,9 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
@@ -197,6 +201,78 @@ func TestCommitBalanceTargets(t *testing.T) {
 			re.Equal(want, state.Group)
 			re.Equal(allowed, state.AffinitySchedulingAllowed)
 			re.Equal(stored, *loadStoredGroup(re, store, id))
+		})
+	}
+}
+
+type balanceChunkStorage struct {
+	endpoint.AffinityStorage
+	run func(context.Context, func(kv.Txn) error) error
+}
+
+func (s *balanceChunkStorage) RunInTxn(ctx context.Context, f func(kv.Txn) error) error {
+	return s.run(ctx, f)
+}
+
+func TestCommitBalanceTargetsChunks(t *testing.T) {
+	for _, scenario := range []string{"failure", "cancellation"} {
+		t.Run(scenario, func(t *testing.T) {
+			re := require.New(t)
+			m, store := newTargetTestManager(t)
+			groups := make([]GroupKeyRanges, etcdutil.MaxEtcdTxnOps+1)
+			for i := range groups {
+				groups[i].GroupID = fmt.Sprintf("_tidb_pt_100_p%d", i)
+			}
+			re.NoError(m.CreateAffinityGroups(groups))
+			snapshot := m.GetBalanceSnapshot("_tidb_pt_100", m.GetBalanceCounts())
+			targets, ids := make([]*Group, 0, len(groups)), make([]string, 0, len(groups))
+			for _, group := range snapshot.Groups {
+				target := targetFor(m, group.ID, 1, 1, 2, 3)
+				targets = append(targets, target.result(&target.Expected))
+				ids = append(ids, group.ID)
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			writeErr := errors.New("second chunk failed")
+			calls := 0
+			m.storage = &balanceChunkStorage{AffinityStorage: m.storage, run: func(txnCtx context.Context, f func(kv.Txn) error) error {
+				calls++
+				re.Same(ctx, txnCtx)
+				if calls == 2 {
+					return writeErr
+				}
+				err := store.RunInTxn(txnCtx, f)
+				if err == nil && scenario == "cancellation" {
+					cancel()
+				}
+				return err
+			}}
+			wantErr, wantCalls := writeErr, 2
+			if scenario == "cancellation" {
+				wantErr, wantCalls = context.Canceled, 1
+			}
+			written, err := m.CommitBalanceTargets(ctx, snapshot, targets)
+			re.ErrorIs(err, wantErr)
+			re.Equal(wantCalls, calls)
+			re.Equal(ids[:etcdutil.MaxEtcdTxnOps], written)
+			re.NoError(m.ctx.Err())
+			for i, target := range targets {
+				want := target
+				if i >= etcdutil.MaxEtcdTxnOps {
+					want = &snapshot.Groups[i].Group
+				}
+				re.Equal(*want, *loadStoredGroup(re, store, target.ID))
+				re.Equal(*want, m.GetAffinityGroupState(target.ID).Group)
+			}
+			if scenario == "failure" {
+				snapshot = m.GetBalanceSnapshot(snapshot.TableID, m.GetBalanceCounts())
+				written, err = m.CommitBalanceTargets(ctx, snapshot, targets[etcdutil.MaxEtcdTxnOps:])
+				re.NoError(err)
+				re.Equal(ids[etcdutil.MaxEtcdTxnOps:], written)
+				last := targets[len(targets)-1]
+				re.Equal(*last, *loadStoredGroup(re, store, last.ID))
+				re.Equal(*last, m.GetAffinityGroupState(last.ID).Group)
+			}
 		})
 	}
 }

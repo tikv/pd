@@ -76,6 +76,10 @@ func (m *Manager) SetTargetWriter(w TargetWriter) {
 // unavailable is skipped, because the scheduling service that decided it may not
 // know it yet; an invalid target fails the whole request.
 func (m *Manager) UpdateAffinityGroupTargets(targets []GroupTarget) ([]string, error) {
+	return m.updateGroupTargetsInChunks(m.ctx, targets)
+}
+
+func (m *Manager) updateGroupTargetsInChunks(ctx context.Context, targets []GroupTarget) ([]string, error) {
 	if len(targets) == 0 {
 		return nil, errs.ErrEmptyRequest.FastGenByArgs("no targets provided")
 	}
@@ -100,7 +104,10 @@ func (m *Manager) UpdateAffinityGroupTargets(targets []GroupTarget) ([]string, e
 
 	written := make([]string, 0, len(adjusted))
 	for chunk := range slices.Chunk(adjusted, etcdutil.MaxEtcdTxnOps) {
-		ids, err := m.updateGroupTargets(chunk)
+		if err := ctx.Err(); err != nil {
+			return written, err
+		}
+		ids, err := m.updateGroupTargets(ctx, chunk)
 		written = append(written, ids...)
 		if err != nil {
 			return written, err
@@ -126,21 +133,21 @@ func (m *Manager) adjustGroupTarget(target GroupTarget) (GroupTarget, error) {
 	return target, nil
 }
 
-func (m *Manager) updateGroupTargets(targets []GroupTarget) ([]string, error) {
+func (m *Manager) updateGroupTargets(ctx context.Context, targets []GroupTarget) ([]string, error) {
 	m.metaMutex.Lock()
 	defer m.metaMutex.Unlock()
-	return m.updateGroupTargetsLocked(targets)
+	return m.updateGroupTargetsLocked(ctx, targets)
 }
 
 // updateGroupTargetsLocked writes adjusted targets in one transaction. The
 // transaction loads every stored group, so it fails if any of them changes
 // before the commit. metaMutex must be held.
-func (m *Manager) updateGroupTargetsLocked(targets []GroupTarget) ([]string, error) {
+func (m *Manager) updateGroupTargetsLocked(ctx context.Context, targets []GroupTarget) ([]string, error) {
 	// stored is the group loaded for each target, and saved the group that holds
 	// its target after the commit, if it is written.
 	stored := make([]*Group, len(targets))
 	saved := make([]*Group, len(targets))
-	err := m.storage.RunInTxn(m.ctx, func(txn kv.Txn) error {
+	err := m.storage.RunInTxn(ctx, func(txn kv.Txn) error {
 		for i, target := range targets {
 			value, err := m.storage.LoadAffinityGroupInTxn(txn, target.Expected.ID)
 			if err != nil {

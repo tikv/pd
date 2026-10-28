@@ -382,7 +382,7 @@ func (m *Manager) updateObservedGroupPeers(groupID string, affinityVer uint64, l
 	}
 	if m.targetWriter == nil {
 		defer m.metaMutex.Unlock()
-		if _, err := m.updateGroupTargetsLocked([]GroupTarget{*target}); err != nil {
+		if _, err := m.updateGroupTargetsLocked(m.ctx, []GroupTarget{*target}); err != nil {
 			return nil, err
 		}
 		return m.GetAffinityGroupState(groupID), nil

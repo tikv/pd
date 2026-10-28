@@ -15,6 +15,7 @@
 package checker
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"testing"
@@ -316,33 +317,52 @@ func (c *affinityBalanceScanCluster) BatchScanRegions(ranges *keyutil.KeyRanges,
 }
 
 func TestAffinityBalanceCommitRejectsChangedInputs(t *testing.T) {
-	for _, change := range []string{"rule", "conf version", "split"} {
+	for _, change := range []string{"rule", "conf version", "split", "limit", "pause", "halt", "placement disabled", "cancel"} {
 		t.Run(change, func(t *testing.T) {
 			re := require.New(t)
 			f := newAffinityBalanceTest(t, 3)
 			ids := f.seed("100", 1, 1, 1)
 			f.policy(affinity.BalancePolicyFixed, ids[1])
 			snapshot, revision := f.snapshot(), f.ruleManager.GetRevision()
-			res, err := f.planBalanceTargets(t.Context(), snapshot)
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			res, err := f.planBalanceTargets(ctx, snapshot)
 			re.NoError(err)
 			re.Len(res.targets, 1)
-			if change == "rule" {
-				rule := f.ruleManager.GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
-				re.NoError(f.ruleManager.SetRule(rule))
+			called := false
+			f.cluster = &affinityBalanceScanCluster{CheckerCluster: f.Cluster, beforeFinal: func() {
+				re.False(called)
+				called = true
+				region := f.GetRegion(1)
+				switch change {
+				case "rule":
+					rule := f.ruleManager.GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
+					re.NoError(f.ruleManager.SetRule(rule))
+				case "conf version":
+					f.PutRegion(region.Clone(core.WithIncConfVer()))
+				case "split":
+					mid := append(slices.Clone(region.GetStartKey()), 'm')
+					f.PutRegion(region.Clone(core.WithEndKey(mid), core.WithIncVersion()))
+					f.PutRegion(region.Clone(core.WithNewRegionID(3), core.WithStartKey(mid), core.WithIncVersion()))
+				case "limit":
+					f.SetAffinityScheduleLimit(0)
+				case "pause":
+					f.PauseOrResume(60)
+				case "halt":
+					f.SetHaltScheduling(true, "test")
+				case "placement disabled":
+					f.SetEnablePlacementRules(false)
+				case "cancel":
+					cancel()
+				}
+			}}
+			written, err := f.commitBalancePlan(ctx, snapshot, res, revision)
+			if change == "cancel" {
+				re.ErrorIs(err, context.Canceled)
 			} else {
-				f.cluster = &affinityBalanceScanCluster{CheckerCluster: f.Cluster, beforeFinal: func() {
-					region := f.GetRegion(1)
-					if change == "split" {
-						mid := append(slices.Clone(region.GetStartKey()), 'm')
-						f.PutRegion(region.Clone(core.WithEndKey(mid), core.WithIncVersion()))
-						f.PutRegion(region.Clone(core.WithNewRegionID(3), core.WithStartKey(mid), core.WithIncVersion()))
-					} else {
-						f.PutRegion(region.Clone(core.WithIncConfVer()))
-					}
-				}}
+				re.NoError(err)
 			}
-			written, err := f.commitBalancePlan(t.Context(), snapshot, res, revision)
-			re.NoError(err)
+			re.True(called)
 			re.Empty(written)
 			re.Equal(snapshot.Groups, f.snapshot().Groups)
 		})
