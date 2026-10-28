@@ -2222,3 +2222,38 @@ func TestEvictSlowStoreRecoveryWindowRestartsAfterReEvict(t *testing.T) {
 	re.False(conf.readyForRecovery())
 	re.True(tc.GetStore(1).EvictedAsSlowStore())
 }
+
+// TestEvictSlowStoreHealthyDomainsUseLiveStores: the cluster passed to Schedule caches
+// GetStores() for the whole call, and network slow-store handling earlier in that call can
+// pause leader transfer into a store. The healthy-domain count must see that pause, or a
+// domain whose only store was just paused would still admit a group drain.
+func TestEvictSlowStoreHealthyDomainsUseLiveStores(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	tc.AddLabelsStore(1, 0, map[string]string{"zone": "z1", "host": "h1"})
+	tc.AddLabelsStore(2, 0, map[string]string{"zone": "z1", "host": "h2"})
+	tc.AddLabelsStore(3, 0, map[string]string{"zone": "z2", "host": "h3"})
+	tc.AddLabelsStore(4, 0, map[string]string{"zone": "z3", "host": "h4"})
+	tc.AddLeaderRegion(1, 1, 3, 4)
+	tc.AddLeaderRegion(2, 2, 3, 4)
+
+	es := createTestEvictSlowStoreScheduler(re, oc).(*evictSlowStoreScheduler)
+	enableGroupEviction(re, tc, es, "zone", "zone", "host")
+	setStoreSlowScore(tc, 1, 100)
+	setStoreSlowScore(tc, 2, 100)
+
+	// The snapshot is taken first; store 4, the only store in z3, is then paused as network
+	// detection would do earlier in the same Schedule call. Only z2 can take leaders.
+	cache := newCacheCluster(tc)
+	re.NoError(tc.PauseLeaderTransfer(4, constant.In))
+	es.scheduleDiskSlowStore(cache)
+	re.Empty(es.conf.evictedStores())
+	re.False(tc.GetStore(1).EvictedAsSlowStore())
+
+	// With store 4 available again the same setup is admitted.
+	tc.ResumeLeaderTransfer(4, constant.In)
+	es.scheduleDiskSlowStore(newCacheCluster(tc))
+	re.ElementsMatch([]uint64{1, 2}, es.conf.evictedStores())
+}

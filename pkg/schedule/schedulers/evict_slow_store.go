@@ -1153,10 +1153,26 @@ func groupIsolationLabels(cluster sche.SchedulerCluster) ([]string, bool) {
 	return cluster.GetRuleManager().GetIsolationPrefix()
 }
 
+// liveStores returns the current info of every store. The cluster passed to Schedule caches
+// GetStores() at the start of the call (cacheCluster), while network slow-store handling
+// earlier in the same call can pause or evict a store, which replaces its StoreInfo. The
+// disk path must see those changes, so it re-reads each store with GetStore, which is not
+// cached.
+func liveStores(cluster sche.SchedulerCluster) []*core.StoreInfo {
+	snapshot := cluster.GetStores()
+	stores := make([]*core.StoreInfo, 0, len(snapshot))
+	for _, store := range snapshot {
+		if current := cluster.GetStore(store.GetID()); current != nil {
+			stores = append(stores, current)
+		}
+	}
+	return stores
+}
+
 // collectDiskSlowStores returns the serving/preparing stores that are currently slow.
 func collectDiskSlowStores(cluster sche.SchedulerCluster) []*core.StoreInfo {
 	var slowStores []*core.StoreInfo
-	for _, store := range cluster.GetStores() {
+	for _, store := range liveStores(cluster) {
 		if store.IsRemoved() {
 			continue
 		}
@@ -1231,7 +1247,7 @@ func eligibleHealthyLeaderTargets(cluster sche.SchedulerCluster, stores []*core.
 // counting stays consistent with the grouping decision.
 func hasEnoughHealthyDomains(cluster sche.SchedulerCluster, labels []string, drained *core.StoreInfo) bool {
 	reps := make([]*core.StoreInfo, 0, minRemainingHealthyDomains)
-	for _, store := range eligibleHealthyLeaderTargets(cluster, cluster.GetStores()) {
+	for _, store := range eligibleHealthyLeaderTargets(cluster, liveStores(cluster)) {
 		if !hasAllLabels(store, labels) || drained.CompareLocation(store, labels) == -1 {
 			continue
 		}
