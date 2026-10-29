@@ -429,6 +429,13 @@ func (m *Manager) observedGroupTargetLocked(groupID string, affinityVer uint64, 
 	if !group.RegularSchedulingAllowed && !slices.Equal(voterStoreIDs, group.VoterStoreIDs) {
 		return nil, group, nil
 	}
+	// Leaders move away while a store restarts. A fixed group keeps its target
+	// until it expires, so while it is degraded a Region can only confirm the
+	// target. The policy is read here, under metaMutex, because a policy update
+	// keeps affinityVer.
+	if group.BalancePolicy.IsFixed() && !group.RegularSchedulingAllowed && leaderStoreID != group.LeaderStoreID {
+		return nil, group, nil
+	}
 	expected := group.Group
 	expected.VoterStoreIDs = sortedStoreIDs(expected.VoterStoreIDs)
 	return &GroupTarget{Expected: expected, LeaderStoreID: leaderStoreID, VoterStoreIDs: voterStoreIDs}, group, nil
