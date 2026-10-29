@@ -83,7 +83,7 @@ func TestRegionFlowTasksMatchOriginalForAnyPeerCount(t *testing.T) {
 			region := newBenchmarkRegion(1, peerCount)
 
 			originalExpired, originalWrite := newOriginalRegionFlowTasks(region)
-			compactExpired, compactWrite := newRegionFlowTasks(region)
+			compactExpired, compactWrite := newRegionFlowTasks(region, previousRegion)
 			originalExpired(originalCache)
 			originalWrite(originalCache)
 			compactExpired(compactCache)
@@ -115,7 +115,9 @@ func BenchmarkPendingRegionHeartbeatTasks(b *testing.B) {
 				runPendingRegionHeartbeatTaskBenchmark(b, peerCount, newOriginalRegionFlowTasks)
 			})
 			b.Run("retain-region-meta", func(b *testing.B) {
-				runPendingRegionHeartbeatTaskBenchmark(b, peerCount, newRegionFlowTasks)
+				runPendingRegionHeartbeatTaskBenchmark(b, peerCount, func(region *core.RegionInfo) (func(*HotPeerCache), func(*HotPeerCache)) {
+					return newRegionFlowTasks(region, nil)
+				})
 			})
 		})
 	}

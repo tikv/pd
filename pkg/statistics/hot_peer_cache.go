@@ -80,6 +80,8 @@ type thresholds struct {
 type hotRegionInfo struct {
 	meta          *metapb.Region
 	leaderStoreID uint64
+	// leaderTransferred is captured before the region heartbeat is published.
+	leaderTransferred bool
 }
 
 type coldPeerKey struct {
@@ -272,6 +274,11 @@ func (f *HotPeerCache) checkPeerFlowForRegion(region *hotRegionInfo, peerStoreID
 		}
 		// check new item whether is hot
 		if oldItem == nil {
+			// The first write sample after a transfer can contain historical
+			// writes. Do not admit it or let it influence adaptive thresholds.
+			if f.kind == utils.Write && region.leaderTransferred {
+				continue
+			}
 			regionStats := f.kind.RegionStats()
 			thresholds := f.calcHotThresholds(storeID)
 			isHot := slice.AnyOf(regionStats, func(i int) bool {
@@ -469,6 +476,9 @@ func (f *HotPeerCache) isOldColdPeer(oldItem *HotPeerStat, storeID uint64) bool 
 func (f *HotPeerCache) justTransferLeader(region *hotRegionInfo, oldItem *HotPeerStat) bool {
 	if region == nil {
 		return false
+	}
+	if f.kind == utils.Write && region.leaderTransferred {
+		return true
 	}
 	if oldItem.isLeader { // old item is not nil according to the function
 		return oldItem.StoreID != region.leaderStoreID

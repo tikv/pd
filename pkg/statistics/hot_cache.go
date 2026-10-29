@@ -76,16 +76,24 @@ func (w *HotCache) CheckReadAsync(task func(cache *HotPeerCache)) bool {
 // CheckRegionFlowAsync checks the expired read and write items and the write
 // flow for a region asynchronously while retaining only immutable metadata.
 func (w *HotCache) CheckRegionFlowAsync(region *core.RegionInfo) {
-	checkExpiredTask, checkWritePeerTask := newRegionFlowTasks(region)
+	// Snapshot the previous leader before the heartbeat publishes new metadata.
+	// The write worker may run after that publication and cold regions have no
+	// hot-cache entry from which to detect a transfer.
+	origin := w.writeCache.cluster.GetRegion(region.GetID())
+	checkExpiredTask, checkWritePeerTask := newRegionFlowTasks(region, origin)
 	w.CheckWriteAsync(checkExpiredTask)
 	w.CheckReadAsync(checkExpiredTask)
 	w.CheckWriteAsync(checkWritePeerTask)
 }
 
-func newRegionFlowTasks(region *core.RegionInfo) (checkExpiredTask, checkWritePeerTask func(*HotPeerCache)) {
+func newRegionFlowTasks(region, origin *core.RegionInfo) (checkExpiredTask, checkWritePeerTask func(*HotPeerCache)) {
 	regionInfo := hotRegionInfo{
 		meta:          region.GetMeta(),
 		leaderStoreID: region.GetLeader().GetStoreId(),
+	}
+	if origin != nil {
+		previousLeader := origin.GetLeader().GetStoreId()
+		regionInfo.leaderTransferred = previousLeader != 0 && regionInfo.leaderStoreID != 0 && previousLeader != regionInfo.leaderStoreID
 	}
 	reportInterval := region.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
@@ -93,8 +101,7 @@ func newRegionFlowTasks(region *core.RegionInfo) (checkExpiredTask, checkWritePe
 	writtenKeys := region.GetKeysWritten()
 	writeQueryNum := region.GetWriteQueryNum()
 	return newExpiredRegionTask(regionInfo.meta), newWriteRegionTask(
-		regionInfo.meta,
-		regionInfo.leaderStoreID,
+		regionInfo,
 		interval,
 		writtenBytes,
 		writtenKeys,
@@ -112,9 +119,8 @@ func newExpiredRegionTask(meta *metapb.Region) func(*HotPeerCache) {
 	}
 }
 
-func newWriteRegionTask(meta *metapb.Region, leaderStoreID, interval, writtenBytes, writtenKeys, writeQueryNum uint64) func(*HotPeerCache) {
+func newWriteRegionTask(regionInfo hotRegionInfo, interval, writtenBytes, writtenKeys, writeQueryNum uint64) func(*HotPeerCache) {
 	return func(cache *HotPeerCache) {
-		regionInfo := hotRegionInfo{meta: meta, leaderStoreID: leaderStoreID}
 		var loads [utils.RegionStatCount]float64
 		loads[utils.RegionWriteBytes] = float64(writtenBytes)
 		loads[utils.RegionWriteKeys] = float64(writtenKeys)
