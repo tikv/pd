@@ -30,9 +30,11 @@ Add a private min-start-ts loading helper to `pkg/gc/tidb_min_start_ts.go`. Its 
 | Input | Backend or result |
 | --- | --- |
 | Redirected NullKeyspace | Existing PD provider |
-| Keyspace without `meta_service_group_id` | Existing PD provider |
+| Keyspace with absent or empty `meta_service_group_id` | Existing PD provider |
 | Keyspace with a valid group ID | Client from `MetaServiceGroupManager.GetEtcdClient` |
-| Present but invalid group ID, unknown group, or unavailable manager for a configured group | Error |
+| Nonempty invalid group ID, unknown group, or unavailable manager for a configured group | Error |
+
+An empty group ID follows PD's existing unassignment and endpoint-attachment semantics. This does not introduce support for moving a running TiDB between backends.
 
 For a group client, wrap `kv.NewEtcdKVBase(client)` in `endpoint.NewStorageEndpoint(..., nil)` and call its existing `GCStateProvider.CompatibleLoadTiDBMinStartTS`. These small wrappers borrow the cached client and do not own or close it. Keep using the existing full keyspace prefix exactly once, the existing uint64 parser, and the existing bounded `etcdutil` range read. Do not cache min-start-ts results.
 

@@ -322,8 +322,8 @@ func TestBarrierMetricsRegistrationAndLeadership(t *testing.T) {
 	now := time.Unix(2_000_000_000, 0)
 	cfg := config.NewConfig()
 	require.NoError(t, cfg.Adjust(nil, false))
-	first := NewGCStateManager(endpoint.GCStateProvider{}, cfg.PDServerCfg, nil)
-	second := NewGCStateManager(endpoint.GCStateProvider{}, cfg.PDServerCfg, nil)
+	first := NewGCStateManager(endpoint.GCStateProvider{}, cfg.PDServerCfg, nil, nil)
+	second := NewGCStateManager(endpoint.GCStateProvider{}, cfg.PDServerCfg, nil, nil)
 	first.barrierMetrics.now = func() time.Time { return now }
 	second.barrierMetrics.now = func() time.Time { return now }
 	t.Cleanup(first.CloseBarrierMetrics)
@@ -388,7 +388,7 @@ func TestBarrierMetricsConcurrentLifecycleAndScrapes(t *testing.T) {
 
 func TestBarrierMetricsManagerFixedWarningAge(t *testing.T) {
 	now := time.Unix(2_000_000_000, 0)
-	m := NewGCStateManager(endpoint.GCStateProvider{}, config.PDServerConfig{}, nil)
+	m := NewGCStateManager(endpoint.GCStateProvider{}, config.PDServerConfig{}, nil, nil)
 	barriers := []*endpoint.GCBarrier{endpoint.NewGCBarrier("old", uint64(now.Add(-48*time.Hour).UnixMilli())<<18, nil)}
 	require.Len(t, m.barrierMetrics.observeMetrics(m.barrierMetrics.generation(), 42, "tenant-a", barriers, nil, now), 1, "barriers older than 24 hours must warn without configuration")
 }

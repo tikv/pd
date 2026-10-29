@@ -191,12 +191,13 @@ type GCStateManager struct {
 	// concurrent operations happen on a single PD leader) it doesn't need to cause conflicts in etcd transactions
 	// layer. It can be more efficient and avoid failures due to transaction conflict in most cases.
 	// The etcd transactions is still necessary considering the possibility of rare cases like PD leader changes.
-	mu              syncutil.RWMutex
-	gcMetaStorage   endpoint.GCStateProvider
-	cfg             config.PDServerConfig
-	getConfig       func() *config.PDServerConfig
-	keyspaceManager *keyspace.Manager
-	barrierMetrics  *barrierMetrics
+	mu                      syncutil.RWMutex
+	gcMetaStorage           endpoint.GCStateProvider
+	cfg                     config.PDServerConfig
+	getConfig               func() *config.PDServerConfig
+	keyspaceManager         *keyspace.Manager
+	metaServiceGroupManager *keyspace.MetaServiceGroupManager
+	barrierMetrics          *barrierMetrics
 
 	// A read/write - update cache procedure must be done while holding the outer mutex `GCStateManager.mu`.
 	// A read-only operation can be done on gcStateCache directly without locking `GCStateManager.mu`.
@@ -217,11 +218,12 @@ type GCStateManager struct {
 }
 
 // NewGCStateManager creates a GCStateManager of GC and services.
-func NewGCStateManager(store endpoint.GCStateProvider, cfg config.PDServerConfig, keyspaceManager *keyspace.Manager) *GCStateManager {
+func NewGCStateManager(store endpoint.GCStateProvider, cfg config.PDServerConfig, keyspaceManager *keyspace.Manager, metaServiceGroupManager *keyspace.MetaServiceGroupManager) *GCStateManager {
 	m := &GCStateManager{
 		gcMetaStorage:                    store,
 		cfg:                              cfg,
 		keyspaceManager:                  keyspaceManager,
+		metaServiceGroupManager:          metaServiceGroupManager,
 		gcStateCache:                     newGCStateCache(),
 		watchers:                         make(map[uint64]*GCStateWatcher),
 		allKeyspacesGCStatesSingleFlight: syncutil.NewOrderedSingleFlight[map[uint32]GCState](),
@@ -266,27 +268,32 @@ func getKeyspaceNameFromCtx(ctx context.Context) string {
 // string only for diagnostic purposes (it returns "<null_keyspace>" for NullKeyspaceID). DO NOT use it as the key for
 // identifying a keyspace.
 func (m *GCStateManager) redirectKeyspace(keyspaceID uint32, isUserAPI bool) (uint32, string, error) {
+	id, name, _, err := m.redirectKeyspaceWithMeta(keyspaceID, isUserAPI)
+	return id, name, err
+}
+
+func (m *GCStateManager) redirectKeyspaceWithMeta(keyspaceID uint32, isUserAPI bool) (uint32, string, *keyspacepb.KeyspaceMeta, error) {
 	// Regard it as NullKeyspaceID if the given one is invalid (exceeds the valid range of keyspace id), no matter
 	// whether it exactly matches the NullKeyspaceID.
 	if keyspaceID & ^constant.ValidKeyspaceIDMask != 0 {
-		return constant.NullKeyspaceID, "<null_keyspace>", nil
+		return constant.NullKeyspaceID, "<null_keyspace>", nil, nil
 	}
 
 	keyspaceMeta, err := m.keyspaceManager.LoadKeyspaceByID(keyspaceID)
 	if err != nil {
-		return 0, "", err
+		return 0, "", nil, err
 	}
 	if keyspaceMeta.Config[keyspace.GCManagementType] != keyspace.KeyspaceLevelGC {
 		if isUserAPI {
 			// The user API is expected to always work. Operate on the state of unified GC instead.
-			return constant.NullKeyspaceID, "<null_keyspace>", nil
+			return constant.NullKeyspaceID, "<null_keyspace>", nil, nil
 		}
 		// Internal API should never be called on keyspaces without keyspace level GC. They won't perform any active
 		// GC operation and will be managed by the unified GC.
-		return 0, "", errs.ErrGCOnInvalidKeyspace.GenWithStackByArgs(keyspaceMeta.GetName(), keyspaceID)
+		return 0, "", nil, errs.ErrGCOnInvalidKeyspace.GenWithStackByArgs(keyspaceMeta.GetName(), keyspaceID)
 	}
 
-	return keyspaceID, keyspaceMeta.GetName(), nil
+	return keyspaceID, keyspaceMeta.GetName(), keyspaceMeta, nil
 }
 
 // CompatibleLoadGCSafePoint loads current GC safe point from storage for the legacy GC API `GetGCSafePoint`.
@@ -433,7 +440,7 @@ func (m *GCStateManager) advanceGCSafePointImpl(ctx context.Context, keyspaceID 
 func (m *GCStateManager) AdvanceTxnSafePoint(keyspaceID uint32, target uint64, now time.Time) (AdvanceTxnSafePointResult, error) {
 	observation := &barrierObservation{generation: m.barrierMetrics.generation()}
 	defer observation.logWarnings()
-	keyspaceID, keyspaceNameForDiag, err := m.redirectKeyspace(keyspaceID, false)
+	keyspaceID, keyspaceNameForDiag, keyspaceMeta, err := m.redirectKeyspaceWithMeta(keyspaceID, false)
 	if err != nil {
 		return AdvanceTxnSafePointResult{}, err
 	}
@@ -443,12 +450,12 @@ func (m *GCStateManager) AdvanceTxnSafePoint(keyspaceID uint32, target uint64, n
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	return m.advanceTxnSafePointImpl(ctx, keyspaceID, target, now)
+	return m.advanceTxnSafePointImpl(ctx, keyspaceID, keyspaceMeta, target, now)
 }
 
 // advanceTxnSafePointImpl is the internal implementation of AdvanceTxnSafePoint, assuming keyspaceID has been checked
 // and the mutex has been acquired.
-func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID uint32, target uint64, now time.Time) (AdvanceTxnSafePointResult, error) {
+func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID uint32, keyspaceMeta *keyspacepb.KeyspaceMeta, target uint64, now time.Time) (AdvanceTxnSafePointResult, error) {
 	// Marks whether it's needed to provide the compatibility for old versions.
 	//
 	// In old versions, every time TiDB performs GC, it updates the service safe point of "gc_worker" new txn safe
@@ -520,7 +527,7 @@ func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID
 		}
 
 		// Compatible with old TiDB nodes that use TiDBMinStartTS to block GC.
-		ownerKey, minStartTS, err1 := m.gcMetaStorage.CompatibleLoadTiDBMinStartTS(keyspaceID)
+		ownerKey, minStartTS, err1 := m.loadTiDBMinStartTS(keyspaceID, keyspaceMeta)
 		if err1 != nil {
 			return err1
 		}
@@ -1183,7 +1190,7 @@ func (m *GCStateManager) LoadAllGlobalGCBarriers() ([]*endpoint.GlobalGCBarrier,
 func (m *GCStateManager) CompatibleUpdateServiceGCSafePoint(keyspaceID uint32, serviceID string, newServiceSafePoint uint64, ttl int64, now time.Time) (minServiceSafePoint *endpoint.ServiceSafePoint, updated bool, err error) {
 	observation := &barrierObservation{generation: m.barrierMetrics.generation()}
 	defer observation.logWarnings()
-	keyspaceID, keyspaceNameForDiag, err := m.redirectKeyspace(keyspaceID, true)
+	keyspaceID, keyspaceNameForDiag, keyspaceMeta, err := m.redirectKeyspaceWithMeta(keyspaceID, true)
 	if err != nil {
 		return nil, false, err
 	}
@@ -1199,7 +1206,7 @@ func (m *GCStateManager) CompatibleUpdateServiceGCSafePoint(keyspaceID uint32, s
 			return nil, false, errors.New("TTL of gc_worker's service safe point must be infinity")
 		}
 
-		res, err := m.advanceTxnSafePointImpl(ctx, keyspaceID, newServiceSafePoint, now)
+		res, err := m.advanceTxnSafePointImpl(ctx, keyspaceID, keyspaceMeta, newServiceSafePoint, now)
 		if err != nil {
 			return nil, false, err
 		}
