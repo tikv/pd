@@ -136,12 +136,13 @@ func TestUpdateAffinityGroupTargets(t *testing.T) {
 }
 
 // TestSyncRecreatedAffinityGroup checks that a group deleted and created again
-// with the same ID replaces the old instance, both when the scheduling service
-// reloads it and when a conflicting write refreshes it. The new instance keeps
-// the old target, so only its create timestamp tells them apart.
+// with the same ID replaces the old instance, when the scheduling service
+// reloads it, when a conflicting write refreshes it and when a policy or peers
+// update finds it in storage. The new instance keeps the old target, so only
+// its create timestamp tells them apart.
 func TestSyncRecreatedAffinityGroup(t *testing.T) {
-	for _, reload := range []bool{true, false} {
-		t.Run(fmt.Sprintf("reload=%t", reload), func(t *testing.T) {
+	for _, path := range []string{"reload", "refresh", "policy", "peers"} {
+		t.Run(path, func(t *testing.T) {
 			re := require.New(t)
 			manager, store := newTargetTestManager(t)
 			old := &Group{ID: "g", CreateTimestamp: 1, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}}
@@ -155,13 +156,21 @@ func TestSyncRecreatedAffinityGroup(t *testing.T) {
 			recreated := *old
 			recreated.CreateTimestamp = 2
 			re.NoError(store.RunInTxn(t.Context(), func(txn kv.Txn) error { return store.SaveAffinityGroup(txn, old.ID, &recreated) }))
-			if reload {
+			var err error
+			switch path {
+			case "reload":
 				manager.SyncGroupFromEtcd(&recreated)
-			} else {
-				written, err := manager.UpdateAffinityGroupTargets([]GroupTarget{targetFor(manager, old.ID, 2, 1, 2, 3)})
-				re.NoError(err)
+			case "refresh":
+				var written []string
+				written, err = manager.UpdateAffinityGroupTargets([]GroupTarget{targetFor(manager, old.ID, 2, 1, 2, 3)})
 				re.Empty(written)
+			case "policy":
+				_, err = manager.UpdateAffinityGroupPolicy(old.ID, BalancePolicyFixed)
+				recreated.BalancePolicy = BalancePolicyFixed
+			case "peers":
+				_, err = manager.UpdateAffinityGroupPeers(old.ID, 1, []uint64{1, 2, 3})
 			}
+			re.NoError(err)
 			state := manager.GetAffinityGroupState(old.ID)
 			re.Equal(recreated, state.Group)
 			re.Zero(state.RegionCount)

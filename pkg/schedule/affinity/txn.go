@@ -330,13 +330,11 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affini
 
 	// Step 2: Save the Group in storage.
 	if err := m.storage.RunInTxn(m.ctx, func(txn kv.Txn) error {
-		if affinityVer == 0 {
-			stored, err := loadAffinityGroupInTxn(txn, groupID)
-			if err != nil {
-				return err
-			}
-			group.Group = *stored
+		stored, err := loadAffinityGroupInTxn(txn, groupID)
+		if err != nil {
+			return err
 		}
+		group.Group = *stored
 		group.LeaderStoreID = leaderStoreID
 		group.VoterStoreIDs = slices.Clone(voterStoreIDs)
 		return m.storage.SaveAffinityGroup(txn, groupID, &group.Group)
@@ -345,14 +343,16 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affini
 	}
 
 	// Step 3: Save the information in memory.
-	if affinityVer != 0 {
-		return m.updateGroupPeers(groupID, leaderStoreID, voterStoreIDs)
-	}
 	m.Lock()
 	defer m.Unlock()
 	groupInfo, ok := m.groups[groupID]
 	if !ok {
 		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
+	}
+	if groupInfo.CreateTimestamp != group.CreateTimestamp {
+		// The group was deleted and created again in storage.
+		m.syncGroupTargetLocked(groupInfo, &group.Group)
+		groupInfo = m.groups[groupID]
 	}
 	groupInfo.Group = group.Group
 	groupInfo.SetAvailability(groupAvailable)
@@ -470,6 +470,11 @@ func (m *Manager) UpdateAffinityGroupPolicy(groupID string, policy BalancePolicy
 	groupInfo, ok := m.groups[groupID]
 	if !ok {
 		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
+	}
+	if groupInfo.CreateTimestamp != updated.CreateTimestamp {
+		// The group was deleted and created again in storage.
+		m.syncGroupTargetLocked(groupInfo, updated)
+		return newGroupState(m.groups[groupID]), nil
 	}
 	if groupInfo.LeaderStoreID != updated.LeaderStoreID || !slices.Equal(groupInfo.VoterStoreIDs, updated.VoterStoreIDs) {
 		// A write whose result was unknown committed this target. Check it against
