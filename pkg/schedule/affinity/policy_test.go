@@ -202,6 +202,71 @@ func TestObserveAvailableRegion(t *testing.T) {
 	re.True(state.AffinitySchedulingAllowed)
 }
 
+func TestObserveAvailableRegionKeepsFixedTarget(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+
+	store := storage.NewStorageWithMemoryBackend()
+	storeInfos := core.NewStoresInfo()
+	for _, id := range []uint64{1, 2} {
+		s := core.NewStoreInfo(&metapb.Store{Id: id, Address: fmt.Sprintf("s%d", id), NodeState: metapb.NodeState_Serving})
+		storeInfos.PutStore(s.Clone(core.SetLastHeartbeatTS(time.Now())))
+	}
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	re.NoError(err)
+	manager, err := NewManager(ctx, store, storeInfos, mockconfig.NewTestOptions(), regionLabeler)
+	re.NoError(err)
+	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "g"}}))
+
+	// Both Regions have voters on stores 1 and 2, with the leader on the given store.
+	newRegion := func(id, leaderStoreID uint64) *core.RegionInfo {
+		peers := []*metapb.Peer{
+			{Id: id + 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+			{Id: id + 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+		}
+		return core.NewRegionInfo(&metapb.Region{Id: id, Peers: peers}, peers[leaderStoreID-1])
+	}
+	leaderOn1, leaderOn2 := newRegion(10, 1), newRegion(20, 2)
+	observe := func(region *core.RegionInfo) *GroupState {
+		manager.ObserveAvailableRegion(region, manager.GetAffinityGroupState("g"))
+		return manager.GetAffinityGroupState("g")
+	}
+	setPolicy := func(policy BalancePolicy) {
+		_, err := manager.UpdateAffinityGroupPolicy("g", policy)
+		re.NoError(err)
+	}
+
+	// A fixed group without a target takes the layout of the first Region.
+	setPolicy(BalancePolicyFixed)
+	state := observe(leaderOn1)
+	re.True(state.AffinitySchedulingAllowed)
+	re.Equal(uint64(1), state.LeaderStoreID)
+
+	// A degraded fixed group keeps its leader, and a Region with the same layout
+	// confirms the target.
+	manager.DegradeAffinityGroup("g")
+	state = observe(leaderOn2)
+	re.False(state.AffinitySchedulingAllowed)
+	re.Equal(uint64(1), state.LeaderStoreID)
+	state = observe(leaderOn1)
+	re.True(state.AffinitySchedulingAllowed)
+	re.Equal(uint64(1), state.LeaderStoreID)
+
+	// A degraded auto group takes the leader of the Region.
+	setPolicy(BalancePolicyAuto)
+	manager.DegradeAffinityGroup("g")
+	state = observe(leaderOn2)
+	re.True(state.AffinitySchedulingAllowed)
+	re.Equal(uint64(2), state.LeaderStoreID)
+
+	// An expired fixed group takes a new target.
+	setPolicy(BalancePolicyFixed)
+	manager.ExpireAffinityGroup("g")
+	state = observe(leaderOn1)
+	re.True(state.AffinitySchedulingAllowed)
+	re.Equal(uint64(1), state.LeaderStoreID)
+}
+
 func TestAvailabilityCheckInvalidatesGroup(t *testing.T) {
 	re := require.New(t)
 	ctx := t.Context()
