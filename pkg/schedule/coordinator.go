@@ -316,6 +316,9 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 		s, err := schedulers.CreateScheduler(types.ConvertOldStrToType[cfg.Type], c.opController,
 			c.cluster.GetStorage(), schedulers.ConfigJSONDecoder([]byte(data)), c.schedulers.RemoveScheduler)
 		if err != nil {
+			if types.ConvertOldStrToType[cfg.Type] == types.BalanceHotRegionScheduler {
+				c.schedulers.AddSchedulerConfigHandler(name, types.BalanceHotRegionScheduler, needRun, cfg.Args...)
+			}
 			log.Error("can not create scheduler with independent configuration; scheduler remains stopped and saved configuration is preserved",
 				zap.String("scheduler-name", name), zap.Strings("scheduler-args", cfg.Args), errs.ZapError(err))
 			continue

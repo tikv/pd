@@ -16,12 +16,16 @@ package schedulers
 
 import (
 	"context"
+	"encoding/json"
+	"maps"
 	"net/http"
 	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/gorilla/mux"
+	"github.com/unrolled/render"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/log"
@@ -34,6 +38,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
@@ -57,18 +62,21 @@ type Controller struct {
 	// schedulerHandlers is used to manage the HTTP handlers of schedulers,
 	// which will only be initialized and used in the microservice env now.
 	schedulerHandlers map[string]http.Handler
-	opController      *operator.Controller
+	// Rejected persisted configs remain editable without running a scheduler.
+	rejectedConfigHandlers map[string]*rejectedSchedulerConfigHandler
+	opController           *operator.Controller
 }
 
 // NewController creates a scheduler controller.
 func NewController(ctx context.Context, cluster sche.SchedulerCluster, storage endpoint.ConfigStorage, opController *operator.Controller) *Controller {
 	return &Controller{
-		ctx:               ctx,
-		cluster:           cluster,
-		storage:           storage,
-		schedulers:        make(map[string]*ScheduleController),
-		schedulerHandlers: make(map[string]http.Handler),
-		opController:      opController,
+		ctx:                    ctx,
+		cluster:                cluster,
+		storage:                storage,
+		schedulers:             make(map[string]*ScheduleController),
+		schedulerHandlers:      make(map[string]http.Handler),
+		rejectedConfigHandlers: make(map[string]*rejectedSchedulerConfigHandler),
+		opController:           opController,
 	}
 }
 
@@ -101,14 +109,113 @@ func (c *Controller) GetSchedulerNames() []string {
 func (c *Controller) GetSchedulerHandlers() map[string]http.Handler {
 	c.RLock()
 	defer c.RUnlock()
-	if len(c.schedulerHandlers) > 0 {
-		return c.schedulerHandlers
-	}
-	handlers := make(map[string]http.Handler, len(c.schedulers))
+	handlers := make(map[string]http.Handler, len(c.schedulers)+len(c.schedulerHandlers)+len(c.rejectedConfigHandlers))
 	for name, scheduler := range c.schedulers {
 		handlers[name] = scheduler.Scheduler
 	}
+	maps.Copy(handlers, c.schedulerHandlers)
+	for name, handler := range c.rejectedConfigHandlers {
+		handlers[name] = handler
+	}
 	return handlers
+}
+
+// AddSchedulerConfigHandler keeps a rejected persisted config available for repair.
+func (c *Controller) AddSchedulerConfigHandler(name string, typ types.CheckerSchedulerType, needRun bool, args ...string) {
+	c.Lock()
+	defer c.Unlock()
+	if c.schedulers[name] != nil || c.schedulerHandlers[name] != nil || c.rejectedConfigHandlers[name] != nil {
+		return
+	}
+	c.rejectedConfigHandlers[name] = &rejectedSchedulerConfigHandler{
+		controller: c, name: name, typ: typ, needRun: needRun, args: slices.Clone(args),
+	}
+}
+
+type rejectedSchedulerConfigHandler struct {
+	controller *Controller
+	name       string
+	typ        types.CheckerSchedulerType
+	needRun    bool
+	args       []string
+}
+
+func (h *rejectedSchedulerConfigHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	rd := render.New(render.Options{IndentJSON: true})
+	router := mux.NewRouter()
+	router.HandleFunc("/list", func(w http.ResponseWriter, _ *http.Request) {
+		data, err := h.controller.storage.LoadSchedulerConfig(h.name)
+		if err != nil {
+			rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		rd.JSON(w, http.StatusOK, json.RawMessage(data))
+	}).Methods(http.MethodGet)
+	router.HandleFunc("/config", func(w http.ResponseWriter, r *http.Request) {
+		var patch map[string]json.RawMessage
+		if err := apiutil.ReadJSONRespondError(rd, w, r.Body, &patch); err != nil {
+			return
+		}
+		h.controller.Lock()
+		defer h.controller.Unlock()
+		if h.controller.rejectedConfigHandlers[h.name] != h {
+			rd.JSON(w, http.StatusConflict, "scheduler configuration has changed; retry the request")
+			return
+		}
+		if err := h.restoreLocked(patch); err != nil {
+			rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		rd.Text(w, http.StatusOK, "Config is updated.")
+	}).Methods(http.MethodPost)
+	router.ServeHTTP(w, r)
+}
+
+// restoreLocked validates the merged saved config before registering or persisting it.
+func (h *rejectedSchedulerConfigHandler) restoreLocked(patch map[string]json.RawMessage) error {
+	c := h.controller
+	data, err := c.storage.LoadSchedulerConfig(h.name)
+	if err != nil {
+		return err
+	}
+	var conf map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(data), &conf); err != nil {
+		return err
+	}
+	if conf == nil {
+		return errs.ErrSchedulerConfig.FastGenByArgs("saved scheduler config must be an object")
+	}
+	maps.Copy(conf, patch)
+	merged, err := json.Marshal(conf)
+	if err != nil {
+		return err
+	}
+	remove := c.RemoveScheduler
+	if !h.needRun {
+		remove = c.RemoveSchedulerHandler
+	}
+	scheduler, err := CreateScheduler(h.typ, c.opController, c.storage, ConfigJSONDecoder(merged), remove)
+	if err != nil {
+		return err
+	}
+	if h.needRun {
+		return c.addSchedulerLocked(scheduler, h.args...)
+	}
+	return c.addSchedulerHandlerLocked(scheduler, h.args...)
+}
+
+func (c *Controller) removeRejectedSchedulerLocked(name string) error {
+	handler := c.rejectedConfigHandlers[name]
+	conf := c.cluster.GetSchedulerConfig()
+	conf.RemoveSchedulerCfg(handler.typ)
+	if err := conf.Persist(c.storage); err != nil {
+		return err
+	}
+	if err := c.storage.RemoveSchedulerConfig(name); err != nil {
+		return err
+	}
+	delete(c.rejectedConfigHandlers, name)
+	return nil
 }
 
 // CollectSchedulerMetrics collects metrics of all schedulers.
@@ -162,7 +269,13 @@ func ResetSchedulerMetrics() {
 func (c *Controller) AddSchedulerHandler(scheduler Scheduler, args ...string) error {
 	c.Lock()
 	defer c.Unlock()
+	if handler := c.rejectedConfigHandlers[scheduler.GetName()]; handler != nil {
+		return handler.restoreLocked(nil)
+	}
+	return c.addSchedulerHandlerLocked(scheduler, args...)
+}
 
+func (c *Controller) addSchedulerHandlerLocked(scheduler Scheduler, args ...string) error {
 	name := scheduler.GetName()
 	if _, ok := c.schedulerHandlers[name]; ok {
 		return errs.ErrSchedulerExisted.FastGenByArgs()
@@ -210,6 +323,7 @@ func (c *Controller) AddSchedulerHandler(scheduler Scheduler, args ...string) er
 		return err
 	}
 	c.schedulerHandlers[name] = scheduler
+	delete(c.rejectedConfigHandlers, name)
 	c.cluster.GetSchedulerConfig().AddSchedulerCfg(scheduler.GetType(), args)
 	return nil
 }
@@ -220,6 +334,9 @@ func (c *Controller) RemoveSchedulerHandler(name string) error {
 	defer c.Unlock()
 	if c.cluster == nil {
 		return errs.ErrNotBootstrapped.FastGenByArgs()
+	}
+	if c.rejectedConfigHandlers[name] != nil {
+		return c.removeRejectedSchedulerLocked(name)
 	}
 	s, ok := c.schedulerHandlers[name]
 	if !ok {
@@ -252,7 +369,13 @@ func (c *Controller) RemoveSchedulerHandler(name string) error {
 func (c *Controller) AddScheduler(scheduler Scheduler, args ...string) error {
 	c.Lock()
 	defer c.Unlock()
+	if handler := c.rejectedConfigHandlers[scheduler.GetName()]; handler != nil {
+		return handler.restoreLocked(nil)
+	}
+	return c.addSchedulerLocked(scheduler, args...)
+}
 
+func (c *Controller) addSchedulerLocked(scheduler Scheduler, args ...string) error {
 	name := scheduler.GetName()
 	if _, ok := c.schedulers[name]; ok {
 		return errs.ErrSchedulerExisted.FastGenByArgs()
@@ -285,6 +408,7 @@ func (c *Controller) AddScheduler(scheduler Scheduler, args ...string) error {
 	c.wg.Add(1)
 	go c.runScheduler(s)
 	c.schedulers[s.GetName()] = s
+	delete(c.rejectedConfigHandlers, name)
 	c.cluster.GetSchedulerConfig().AddSchedulerCfg(s.GetType(), args)
 	return nil
 }
@@ -295,6 +419,9 @@ func (c *Controller) RemoveScheduler(name string) error {
 	defer c.Unlock()
 	if c.cluster == nil {
 		return errs.ErrNotBootstrapped.FastGenByArgs()
+	}
+	if c.rejectedConfigHandlers[name] != nil {
+		return c.removeRejectedSchedulerLocked(name)
 	}
 	s, ok := c.schedulers[name]
 	if !ok {
@@ -357,12 +484,17 @@ func (c *Controller) PauseOrResumeScheduler(name string, t int64) error {
 
 // ReloadSchedulerConfig reloads a scheduler's config if it exists.
 func (c *Controller) ReloadSchedulerConfig(name string) error {
-	c.RLock()
+	c.Lock()
 	if c.cluster == nil {
-		c.RUnlock()
+		c.Unlock()
 		return errs.ErrNotBootstrapped.FastGenByArgs()
 	}
-	c.RUnlock()
+	if handler := c.rejectedConfigHandlers[name]; handler != nil {
+		err := handler.restoreLocked(nil)
+		c.Unlock()
+		return err
+	}
+	c.Unlock()
 	if exist, _ := c.IsSchedulerExisted(name); !exist {
 		return errs.ErrSchedulerNotFound.FastGenByArgs()
 	}
@@ -410,6 +542,9 @@ func (c *Controller) IsSchedulerDisabled(name string) (bool, error) {
 	if c.cluster == nil {
 		return false, errs.ErrNotBootstrapped.FastGenByArgs()
 	}
+	if handler := c.rejectedConfigHandlers[name]; handler != nil {
+		return c.cluster.GetSchedulerConfig().IsSchedulerDisabled(handler.typ), nil
+	}
 	s, ok := c.schedulers[name]
 	if !ok {
 		return false, errs.ErrSchedulerNotFound.FastGenByArgs()
@@ -426,7 +561,7 @@ func (c *Controller) IsSchedulerExisted(name string) (bool, error) {
 	}
 	_, existScheduler := c.schedulers[name]
 	_, existHandler := c.schedulerHandlers[name]
-	if !existScheduler && !existHandler {
+	if !existScheduler && !existHandler && c.rejectedConfigHandlers[name] == nil {
 		return false, errs.ErrSchedulerNotFound.FastGenByArgs()
 	}
 	return true, nil

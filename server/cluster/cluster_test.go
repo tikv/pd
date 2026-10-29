@@ -3701,7 +3701,8 @@ func TestInitSchedulersPreservesRejectedConfig(t *testing.T) {
 					re.NoError(reloadedOpt.Reload(tc.storage))
 					re.Equal(expectedSchedulers, reloadedOpt.GetSchedulers())
 					handlers := co.GetSchedulersController().GetSchedulerHandlers()
-					re.NotContains(handlers, name)
+					re.Contains(handlers, name)
+					re.Nil(co.GetSchedulersController().GetScheduler(name))
 					re.Contains(handlers, types.BalanceRegionScheduler.String())
 				}
 
@@ -3723,6 +3724,105 @@ func TestInitSchedulersPreservesRejectedConfig(t *testing.T) {
 				re.Equal([]string{"key", "byte"}, restored.ReadPriorities)
 				re.Equal("1h0m0s", restored.HistorySampleDuration)
 				re.Equal("30s", restored.HistorySampleInterval)
+			})
+		}
+	}
+}
+
+func TestInitSchedulersRestoresLegacyV2GreatDecRatio(t *testing.T) {
+	for _, needRun := range []bool{true, false} {
+		for _, ratio := range []float64{-1, 0, 2} {
+			t.Run(fmt.Sprintf("run=%t/ratio=%g", needRun, ratio), func(t *testing.T) {
+				re := require.New(t)
+				tc, co, cleanup := prepare(nil, nil, nil, re)
+				defer cleanup()
+				name := types.BalanceHotRegionScheduler.String()
+				payload := fmt.Appendf(nil,
+					`{"rank-formula-version":"v2","great-dec-ratio":%g,"min-hot-byte-rate":321,"read-priorities":["key","byte"]}`, ratio)
+				re.NoError(tc.storage.SaveSchedulerConfig(name, payload))
+				co.InitSchedulers(needRun)
+				handlers := co.GetSchedulersController().GetSchedulerHandlers()
+				re.Contains(handlers, name)
+				if needRun {
+					re.NotNil(co.GetSchedulersController().GetScheduler(name))
+				}
+				restored, ok := handlers[name].(schedulers.Scheduler)
+				re.True(ok)
+				active, err := restored.EncodeConfig()
+				re.NoError(err)
+				saved, err := tc.storage.LoadSchedulerConfig(name)
+				re.NoError(err)
+				for _, data := range [][]byte{active, []byte(saved)} {
+					var config struct {
+						GreatDecRatio  float64  `json:"great-dec-ratio"`
+						MinHotByteRate float64  `json:"min-hot-byte-rate"`
+						ReadPriorities []string `json:"read-priorities"`
+					}
+					re.NoError(json.Unmarshal(data, &config))
+					re.InDelta(ratio, config.GreatDecRatio, 1e-12)
+					re.Equal(float64(321), config.MinHotByteRate)
+					re.Equal([]string{"key", "byte"}, config.ReadPriorities)
+				}
+			})
+		}
+	}
+}
+
+func TestInitSchedulersRejectedConfigLifecycle(t *testing.T) {
+	for _, needRun := range []bool{true, false} {
+		for _, action := range []string{"reload", "remove"} {
+			t.Run(fmt.Sprintf("run=%t/%s", needRun, action), func(t *testing.T) {
+				re := require.New(t)
+				tc, co, cleanup := prepare(nil, nil, nil, re)
+				defer cleanup()
+				name := types.BalanceHotRegionScheduler.String()
+				payload := []byte(`{"min-hot-byte-rate":321,"history-sample-duration":"1h","history-sample-interval":"1s"}`)
+				re.NoError(tc.storage.SaveSchedulerConfig(name, payload))
+				co.InitSchedulers(needRun)
+				controller := co.GetSchedulersController()
+				re.Contains(controller.GetSchedulerHandlers(), name)
+				re.Nil(controller.GetScheduler(name))
+
+				// Re-adding must not replace the saved config with defaults.
+				fallback, err := schedulers.CreateScheduler(types.BalanceHotRegionScheduler, co.GetOperatorController(),
+					tc.storage, schedulers.ConfigSliceDecoder(types.BalanceHotRegionScheduler, nil))
+				re.NoError(err)
+				if needRun {
+					re.Error(controller.AddScheduler(fallback))
+				} else {
+					re.Error(controller.AddSchedulerHandler(fallback))
+				}
+				saved, err := tc.storage.LoadSchedulerConfig(name)
+				re.NoError(err)
+				re.Equal(string(payload), saved)
+
+				if action == "remove" {
+					if needRun {
+						re.NoError(controller.RemoveScheduler(name))
+					} else {
+						re.NoError(controller.RemoveSchedulerHandler(name))
+					}
+					re.NotContains(controller.GetSchedulerHandlers(), name)
+					saved, err = tc.storage.LoadSchedulerConfig(name)
+					re.NoError(err)
+					re.Empty(saved)
+					return
+				}
+
+				// The scheduling-service watcher uses this path after PD saves a repair.
+				re.NoError(tc.storage.SaveSchedulerConfig(name,
+					[]byte(`{"min-hot-byte-rate":321,"history-sample-duration":"1h","history-sample-interval":"30s"}`)))
+				re.NoError(controller.ReloadSchedulerConfig(name))
+				handler := controller.GetSchedulerHandlers()[name]
+				restored, ok := handler.(schedulers.Scheduler)
+				re.True(ok)
+				if needRun {
+					re.NotNil(controller.GetScheduler(name))
+				}
+				active, err := restored.EncodeConfig()
+				re.NoError(err)
+				re.Contains(string(active), `"min-hot-byte-rate":321`)
+				re.Contains(string(active), `"history-sample-interval":"30s"`)
 			})
 		}
 	}

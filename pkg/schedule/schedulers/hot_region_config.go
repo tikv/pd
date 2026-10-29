@@ -487,11 +487,15 @@ func (conf *hotRegionSchedulerParam) validateLocked() error {
 		{"query-rate-rank-step-ratio", conf.QueryRateRankStepRatio},
 		{"cpu-rate-rank-step-ratio", conf.CPURateRankStepRatio},
 		{"count-rank-step-ratio", conf.CountRankStepRatio},
-		{"great-dec-ratio", conf.GreatDecRatio},
 	} {
 		if !(item.value > 0 && item.value <= 1) {
 			return errs.ErrSchedulerConfig.FastGenByArgs(item.name + " should be finite and in range (0, 1]")
 		}
+	}
+	// V2 clamps finite values to [0.7, 0.95], including legacy values outside (0, 1].
+	if math.IsNaN(conf.GreatDecRatio) || math.IsInf(conf.GreatDecRatio, 0) ||
+		(conf.RankFormulaVersion != "v2" && !(conf.GreatDecRatio > 0 && conf.GreatDecRatio <= 1)) {
+		return errs.ErrSchedulerConfig.FastGenByArgs("great-dec-ratio should be finite and in range (0, 1] for v1")
 	}
 	if math.IsNaN(conf.MinorDecRatio) || math.IsInf(conf.MinorDecRatio, 0) {
 		return errs.ErrSchedulerConfig.FastGenByArgs("minor-dec-ratio should be finite")
