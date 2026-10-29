@@ -150,19 +150,13 @@ func (c *Config) Adjust() {
 // DefaultConfig returns the default resource manager controller configuration.
 func DefaultConfig() *Config {
 	return &Config{
-		BaseConfig: BaseConfig{
-			DegradedModeWaitDuration: NewDuration(defaultDegradedModeWaitDuration),
-			RequestUnit:              DefaultRequestUnitConfig(),
-			EnableControllerTraceLog: false,
-			LTBMaxWaitDuration:       NewDuration(defaultMaxWaitDuration),
-			LTBTokenRPCMaxDelay:      NewDuration(defaultLTBTokenRPCMaxDelay),
-		},
-		LocalBucketConfig: LocalBucketConfig{
-			TokenRPCParams: TokenRPCParams{
-				WaitRetryInterval: NewDuration(defaultWaitRetryInterval),
-				WaitRetryTimes:    defaultWaitRetryTimes,
-			},
-		},
+		DegradedModeWaitDuration: NewDuration(defaultDegradedModeWaitDuration),
+		RequestUnit:              DefaultRequestUnitConfig(),
+		EnableControllerTraceLog: false,
+		LTBMaxWaitDuration:       NewDuration(defaultMaxWaitDuration),
+		LTBTokenRPCMaxDelay:      NewDuration(defaultLTBTokenRPCMaxDelay),
+		WaitRetryInterval:        NewDuration(defaultWaitRetryInterval),
+		WaitRetryTimes:           defaultWaitRetryTimes,
 	}
 }
 

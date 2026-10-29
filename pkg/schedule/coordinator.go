@@ -16,6 +16,7 @@ package schedule
 
 import (
 	"context"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -383,7 +384,7 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 
 	// Removes the invalid scheduler config and persist.
 	scheduleCfg.Schedulers = scheduleCfg.Schedulers[:k]
-	validSchedulers := append(sc.SchedulerConfigs(nil), scheduleCfg.Schedulers...)
+	validSchedulers := slices.Clone(scheduleCfg.Schedulers)
 	c.cluster.GetSchedulerConfig().SetSchedulers(validSchedulers)
 	if err := c.cluster.GetSchedulerConfig().Persist(c.cluster.GetStorage()); err != nil {
 		log.Error("cannot persist schedule config", errs.ZapError(err))

@@ -81,6 +81,7 @@ func (m *GCStateManager) OnNodeBecomesLeader() func() {
 		previous.waitRuntime()
 	}
 	m.mu.Lock()
+	m.terminateAllGCStateWatchersLocked(errs.ErrNotLeader, watcherTerminationLeaderLost)
 	ctx, cancel := context.WithCancel(context.Background())
 	generation := &gcStateGeneration{
 		done:    make(chan struct{}),
@@ -130,6 +131,7 @@ func (m *GCStateManager) stopGCStateGeneration(generation *gcStateGeneration) {
 	m.lifecycleMu.Lock()
 	m.mu.Lock()
 	if m.generation == generation {
+		m.terminateAllGCStateWatchersLocked(errs.ErrNotLeader, watcherTerminationLeaderLost)
 		m.generation = nil
 		m.gcStateCache.clearAll()
 		m.barrierMetrics.clearMetrics()

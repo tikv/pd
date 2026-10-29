@@ -169,10 +169,11 @@ func summaryStoresLoadByEngine(
 		var peerLoadSum Loads
 		// For hot leaders, we need to calculate the sum of the leader's write and read flow rather than the all peers.
 		for _, peer := range filterHotPeers(kind, storeHotPeers[id]) {
+			peer = peer.Clone()
 			for dim := range utils.DimLen {
-				peerLoadSum[dim] += peer.GetLoad(dim)
+				peerLoadSum[dim] += peer.Loads[dim]
 			}
-			hotPeers = append(hotPeers, peer.Clone())
+			hotPeers = append(hotPeers, peer)
 		}
 		currentLoads := collector.getLoads(storeLoads, peerLoadSum, rwTy, kind)
 

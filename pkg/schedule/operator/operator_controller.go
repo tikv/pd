@@ -154,6 +154,11 @@ func (oc *Controller) Dispatch(region *core.RegionInfo, source string, recordOpS
 		failpoint.Inject("concurrentRemoveOperator", func() {
 			time.Sleep(500 * time.Millisecond)
 		})
+		// addOperatorInner publishes an operator before it starts the operator.
+		// Leave a CREATED operator to the add, which starts it and checks it.
+		if op.Status() == CREATED {
+			return
+		}
 		// Update operator status:
 		// The operator status should be STARTED.
 		// Check will call CheckSuccess and CheckTimeout.
@@ -574,6 +579,8 @@ func (oc *Controller) addOperatorInner(op *Operator) bool {
 		oc.buryOperator(oldOp)
 	}
 
+	failpoint.InjectCall("afterPublishOperator")
+
 	oc.counts.inc(op.SchedulerKind())
 	// Now start the operator after successfully adding it to the map
 	if !op.Start() {
@@ -837,16 +844,15 @@ func (oc *Controller) GetOperatorsOfKind(mask OpKind) []*Operator {
 
 // SendScheduleCommand sends a command to the region.
 func (oc *Controller) SendScheduleCommand(region *core.RegionInfo, step OpStep, source string) {
-	log.Info("send schedule command",
-		zap.Uint64("region-id", region.GetID()),
-		zap.Stringer("step", step),
-		zap.String("source", source))
-
 	useConfChangeV2 := versioninfo.IsFeatureSupported(oc.config.GetClusterVersion(), versioninfo.ConfChangeV2)
 	cmd := step.GetCmd(region, useConfChangeV2)
 	if cmd == nil {
 		return
 	}
+	log.Info("send schedule command",
+		zap.Uint64("region-id", region.GetID()),
+		zap.Stringer("step", step),
+		zap.String("source", source))
 	oc.hbStreams.SendMsg(region, cmd)
 }
 

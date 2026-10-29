@@ -35,7 +35,6 @@ import (
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	schedulerpkg "github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/schedule/types"
-	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
@@ -854,7 +853,7 @@ func (suite *scheduleTestSuite) testPauseOrResume(re *require.Assertions, urlPre
 	var schedulers []string
 	err := testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &schedulers)
 	re.NoError(err)
-	if !slice.Contains(schedulers, createdName) {
+	if !slices.Contains(schedulers, createdName) {
 		err := testutil.CheckPostJSON(tests.TestDialClient, urlPrefix, body, testutil.StatusOK(re))
 		re.NoError(err)
 	}
@@ -943,7 +942,7 @@ func (suite *scheduleTestSuite) assertSchedulerExists(urlPrefix string, schedule
 		err := testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &schedulers,
 			testutil.StatusOK(re))
 		re.NoError(err)
-		return slice.Contains(schedulers, scheduler)
+		return slices.Contains(schedulers, scheduler)
 	})
 }
 
@@ -953,7 +952,7 @@ func assertNoScheduler(re *require.Assertions, urlPrefix string, scheduler strin
 		err := testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &schedulers,
 			testutil.StatusOK(re))
 		re.NoError(err)
-		return !slice.Contains(schedulers, scheduler)
+		return !slices.Contains(schedulers, scheduler)
 	})
 }
 
@@ -962,12 +961,7 @@ func isSchedulerPaused(re *require.Assertions, urlPrefix, name string) bool {
 	err := testutil.ReadGetJSON(re, tests.TestDialClient, fmt.Sprintf("%s?status=paused", urlPrefix), &schedulers,
 		testutil.StatusOK(re))
 	re.NoError(err)
-	for _, scheduler := range schedulers {
-		if scheduler == name {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(schedulers, name)
 }
 
 func (suite *scheduleTestSuite) TestBalanceRangeAPI() {

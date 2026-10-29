@@ -22,6 +22,7 @@ import (
 	"math"
 	"math/rand/v2"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -84,14 +85,13 @@ func TestMain(m *testing.M) {
 
 func TestClientLeaderChange(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	re.NoError(err)
 	defer cluster.Destroy()
 
 	endpoints := runServer(re, cluster)
-	endpointsWithWrongURL := append([]string{}, endpoints...)
+	endpointsWithWrongURL := slices.Clone(endpoints)
 	// inject wrong http scheme
 	for i := range endpointsWithWrongURL {
 		endpointsWithWrongURL[i] = "https://" + strings.TrimPrefix(endpointsWithWrongURL[i], "http://")
@@ -151,8 +151,7 @@ func TestLeaderTransferAndMoveCluster(t *testing.T) {
 	defer func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
 	}()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -176,9 +175,7 @@ func TestLeaderTransferAndMoveCluster(t *testing.T) {
 	// Start a goroutine the make sure TS won't fall back.
 	quit := make(chan struct{})
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for {
 			select {
 			case <-quit:
@@ -196,7 +193,7 @@ func TestLeaderTransferAndMoveCluster(t *testing.T) {
 			}
 			time.Sleep(time.Millisecond)
 		}
-	}()
+	})
 
 	// Transfer leader.
 	for range 3 {
@@ -235,8 +232,7 @@ func TestLeaderTransferAndMoveCluster(t *testing.T) {
 
 func TestGetTSAfterTransferLeader(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 2)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -270,8 +266,7 @@ func TestGetTSAfterTransferLeader(t *testing.T) {
 func TestTSOFollowerProxy(t *testing.T) {
 	as := assert.New(t)
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -324,11 +319,9 @@ func TestTSOFollowerProxy(t *testing.T) {
 		// error while create stream.
 		ch <- struct{}{}
 	}))
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		as.NoError(followerServer.Run())
-	}()
+	})
 	re.Eventually(func() bool {
 		_, _, err := cli2.GetTS(context.Background())
 		if err == nil {
@@ -388,8 +381,7 @@ func TestTSOFollowerProxy(t *testing.T) {
 func TestTSOFollowerProxyWithTSOService(t *testing.T) {
 	re := require.New(t)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/fastUpdateServiceMode", `return(true)`))
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -416,8 +408,7 @@ func TestTSOFollowerProxyWithTSOService(t *testing.T) {
 func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
 	as := assert.New(t)
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -487,8 +478,7 @@ func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
 
 func TestCustomTimeout(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -878,26 +868,20 @@ func (suite *followerForwardAndHandleTestSuite) TestGetTSFuture() {
 	wg1 := sync.WaitGroup{}
 	wg2 := sync.WaitGroup{}
 	wg3 := sync.WaitGroup{}
-	wg1.Add(1)
-	go func() {
+	wg1.Go(func() {
 		<-time.After(time.Second)
 		for i := range 20 {
 			cancels[i]()
 		}
-		wg1.Done()
-	}()
-	wg2.Add(1)
-	go func() {
+	})
+	wg2.Go(func() {
 		cli.Close()
-		wg2.Done()
-	}()
-	wg3.Add(1)
-	go func() {
+	})
+	wg3.Go(func() {
 		for i := range 20 {
 			cli.GetTSAsync(ctxs[i])
 		}
-		wg3.Done()
-	}()
+	})
 	wg1.Wait()
 	wg2.Wait()
 	wg3.Wait()
@@ -949,8 +933,7 @@ func waitLeader(re *require.Assertions, cli sd.ServiceDiscovery, leader *tests.T
 
 func TestConfigTTLAfterTransferLeader(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -1008,8 +991,7 @@ func TestConfigTTLAfterTransferLeader(t *testing.T) {
 
 func TestCloseClient(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -1304,9 +1286,15 @@ func (suite *clientStatelessTestSuite) TestGetStore() {
 	store := stores[3]
 
 	// Get an up store should be OK.
+	// The background check may move it from preparing to serving during the RPC.
+	nodeStateBefore := cluster.GetStore(store.GetId()).GetNodeState()
 	n, err := suite.client.GetStore(context.Background(), store.GetId())
 	re.NoError(err)
+	nodeStateAfter := cluster.GetStore(store.GetId()).GetNodeState()
+	re.Contains([]metapb.NodeState{metapb.NodeState_Preparing, metapb.NodeState_Serving}, n.GetNodeState())
+	re.Contains([]metapb.NodeState{nodeStateBefore, nodeStateAfter}, n.GetNodeState())
 	store.LastHeartbeat = n.LastHeartbeat
+	store.NodeState = n.NodeState
 	re.Equal(store, n)
 
 	actualStores, err := suite.client.GetAllStores(context.Background())
@@ -1455,8 +1443,7 @@ func (suite *clientStatelessTestSuite) TestScatterRegion() {
 func TestWatch(t *testing.T) {
 	as := assert.New(t)
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -1505,8 +1492,7 @@ func TestWatch(t *testing.T) {
 
 func TestPutGet(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -1540,8 +1526,7 @@ func TestPutGet(t *testing.T) {
 // TestClientWatchWithRevision is the same as TestClientWatchWithRevision in global config.
 func TestClientWatchWithRevision(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -1838,8 +1823,7 @@ func (suite *clientStatelessTestSuite) TestBatchScanRegions() {
 func TestGetRegionWithBackoff(t *testing.T) {
 	re := require.New(t)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/rateLimit", "return(true)"))
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
@@ -1890,8 +1874,7 @@ func needRetry(err error) bool {
 
 func TestCircuitBreaker(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
@@ -1946,8 +1929,7 @@ func TestCircuitBreaker(t *testing.T) {
 
 func TestCircuitBreakerOpenAndChangeSettings(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
@@ -1995,8 +1977,7 @@ func TestCircuitBreakerOpenAndChangeSettings(t *testing.T) {
 
 func TestCircuitBreakerHalfOpenAndChangeSettings(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
@@ -2948,8 +2929,7 @@ func TestDecodeHttpKeyRange(t *testing.T) {
 }
 func TestCreateClientWithKeyspaceCheck(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Keyspace.WaitRegionSplit = false
 	})

@@ -17,6 +17,7 @@ package scatter
 import (
 	"context"
 	"fmt"
+	"maps"
 	"math"
 	"strconv"
 	"sync"
@@ -146,9 +147,7 @@ func newLocalSelectedStores() *localSelectedStores {
 
 func cloneDistribution(distribution map[uint64]uint64) map[uint64]uint64 {
 	cloned := make(map[uint64]uint64, len(distribution))
-	for id, count := range distribution {
-		cloned[id] = count
-	}
+	maps.Copy(cloned, distribution)
 	return cloned
 }
 

@@ -42,15 +42,15 @@ type testStruct3 struct {
 func TestFindJSONFullTagByChildTag(t *testing.T) {
 	re := require.New(t)
 	key := "enable"
-	result := FindJSONFullTagByChildTag(reflect.TypeOf(testStruct1{}), key)
+	result := FindJSONFullTagByChildTag(reflect.TypeFor[testStruct1](), key)
 	re.Equal("object.action.enable", result)
 
 	key = "action"
-	result = FindJSONFullTagByChildTag(reflect.TypeOf(testStruct1{}), key)
+	result = FindJSONFullTagByChildTag(reflect.TypeFor[testStruct1](), key)
 	re.Equal("object.action", result)
 
 	key = "disable"
-	result = FindJSONFullTagByChildTag(reflect.TypeOf(testStruct1{}), key)
+	result = FindJSONFullTagByChildTag(reflect.TypeFor[testStruct1](), key)
 	re.Empty(result)
 }
 

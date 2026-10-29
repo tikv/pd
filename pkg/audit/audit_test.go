@@ -28,7 +28,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
+	"go.uber.org/zap"
 
+	"github.com/pingcap/log"
+
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/requestutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
@@ -126,14 +130,44 @@ func TestLocalLogBackendUsingFile(t *testing.T) {
 	)
 }
 
+func TestLocalLogBackendRedact(t *testing.T) {
+	re := require.New(t)
+	var (
+		lg    *zap.Logger
+		props *log.ZapProperties
+	)
+	re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, logutil.RedactInfoLogON))
+	defer func() {
+		re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, logutil.RedactInfoLogOFF))
+	}()
+	backend := NewLocalLogBackend(true)
+	fname := testutil.InitTempFileLogger(t, "info")
+	body := `{"id":"test","data":[{"start_key":"7480000000000000ff","end_key":"7480000000000001ff"}]}`
+	req, err := http.NewRequest(http.MethodPost, "http://127.0.0.1:2379/test?key=7480000000000000ff", strings.NewReader(body))
+	re.NoError(err)
+	info := requestutil.GetRequestInfo(req)
+	req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
+	re.True(backend.ProcessHTTPRequest(req))
+	b, err := os.ReadFile(fname)
+	re.NoError(err)
+	output := strings.SplitN(string(b), "]", 4)
+	re.Equal(
+		fmt.Sprintf(" [\"audit log\"] [service-info=\"{ServiceLabel:, Method:HTTP/1.1/POST:/test, CallerID:anonymous, IP:, Port:, "+
+			"StartTime:%s, URLParam:?, BodyParam:?}\"]\n",
+			time.Unix(info.StartTimeStamp, 0).String()),
+		output[3],
+	)
+	re.NotContains(string(b), "7480000000000000ff")
+}
+
 func BenchmarkLocalLogAuditUsingTerminal(b *testing.B) {
 	re := require.New(b)
-	b.StopTimer()
+
 	backend := NewLocalLogBackend(true)
 	req, err := http.NewRequest(http.MethodGet, "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
 	re.NoError(err)
-	b.StartTimer()
-	for range b.N {
+
+	for b.Loop() {
 		info := requestutil.GetRequestInfo(req)
 		req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
 		backend.ProcessHTTPRequest(req)
@@ -142,13 +176,13 @@ func BenchmarkLocalLogAuditUsingTerminal(b *testing.B) {
 
 func BenchmarkLocalLogAuditUsingFile(b *testing.B) {
 	re := require.New(b)
-	b.StopTimer()
+
 	backend := NewLocalLogBackend(true)
 	testutil.InitTempFileLogger(b, "info")
 	req, err := http.NewRequest(http.MethodGet, "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
 	re.NoError(err)
-	b.StartTimer()
-	for range b.N {
+
+	for b.Loop() {
 		info := requestutil.GetRequestInfo(req)
 		req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
 		re.True(backend.ProcessHTTPRequest(req))

@@ -800,8 +800,8 @@ func (suite *serverTestSuite) TestStoreLimit() {
 			Region: &metapb.Region{
 				Id:       i,
 				Peers:    peers,
-				StartKey: []byte(fmt.Sprintf("t%d", i)),
-				EndKey:   []byte(fmt.Sprintf("t%d", i+1)),
+				StartKey: fmt.Appendf(nil, "t%d", i),
+				EndKey:   fmt.Appendf(nil, "t%d", i+1),
 			},
 			Leader:          leaderPeer,
 			ApproximateSize: 10 * units.MiB,
@@ -1071,8 +1071,8 @@ func (suite *serverTestSuite) TestPrepareChecker() {
 			Region: &metapb.Region{
 				Id:       i,
 				Peers:    peers,
-				StartKey: []byte(fmt.Sprintf("k%d", i)),
-				EndKey:   []byte(fmt.Sprintf("k%d", i+1)),
+				StartKey: fmt.Appendf(nil, "k%d", i),
+				EndKey:   fmt.Appendf(nil, "k%d", i+1),
 			},
 			Leader:          leaderPeer,
 			ApproximateSize: 10 * units.MiB,
@@ -1124,8 +1124,8 @@ func (suite *serverTestSuite) TestPrepareChecker() {
 			Region: &metapb.Region{
 				Id:       i,
 				Peers:    peers,
-				StartKey: []byte(fmt.Sprintf("k%d", i)),
-				EndKey:   []byte(fmt.Sprintf("k%d", i+1)),
+				StartKey: fmt.Appendf(nil, "k%d", i),
+				EndKey:   fmt.Appendf(nil, "k%d", i+1),
 			},
 			Leader:          leaderPeer,
 			ApproximateSize: 10 * units.MiB,
@@ -1153,8 +1153,8 @@ func (suite *serverTestSuite) TestPrepareChecker() {
 			Region: &metapb.Region{
 				Id:       i,
 				Peers:    peers,
-				StartKey: []byte(fmt.Sprintf("k%d", i)),
-				EndKey:   []byte(fmt.Sprintf("k%d", i+1)),
+				StartKey: fmt.Appendf(nil, "k%d", i),
+				EndKey:   fmt.Appendf(nil, "k%d", i+1),
 			},
 			Leader:          leaderPeer,
 			ApproximateSize: 10 * units.MiB,
@@ -1571,11 +1571,13 @@ func (suite *serverTestSuite) checkConcurrentAllocatedID(re *require.Assertions,
 	var wg sync.WaitGroup
 	var allocatedIDs sync.Map
 	for range 100 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			resp, err := grpcPDClient.AskBatchSplit(suite.ctx, req)
-			if !as.NoError(err) || !as.Empty(resp.GetHeader().GetError()) {
+			if err != nil {
+				suite.T().Errorf("ask batch split: %v", err)
+				return
+			}
+			if !as.Empty(resp.GetHeader().GetError()) {
 				return
 			}
 			for _, id := range resp.GetIds() {
@@ -1592,7 +1594,7 @@ func (suite *serverTestSuite) checkConcurrentAllocatedID(re *require.Assertions,
 					allocatedIDs.Store(peer, struct{}{})
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	var len int

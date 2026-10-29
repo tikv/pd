@@ -15,6 +15,7 @@
 package schedulers
 
 import (
+	"container/heap"
 	"math"
 	stdslices "slices"
 	"sort"
@@ -56,6 +57,8 @@ type balanceSolver struct {
 	cur *solution
 	// curFit is the placement-rule fit for the current region.
 	curFit *placement.RegionFit
+	// regionCache reuses region snapshots and placement fits within one solve.
+	regionCache map[uint64]hotRegionSnapshot
 	// curScope and revertScope contain placement-scoped load statistics. A nil
 	// scope uses the existing engine-wide statistics.
 	curScope                          *placementLoadScope
@@ -90,6 +93,11 @@ type balanceSolver struct {
 type placementScopeKey struct {
 	ruleScope string
 	isTiKV    bool
+}
+
+type hotRegionSnapshot struct {
+	region *core.RegionInfo
+	fit    *placement.RegionFit
 }
 
 type placementLoadScope struct {
@@ -140,8 +148,6 @@ func (bs *balanceSolver) init() {
 		bs.maxSrc = statistics.MaxLoad(bs.maxSrc, detail.LoadPred.Min())
 		bs.minDst = statistics.MinLoad(bs.minDst, detail.LoadPred.Max())
 		maxCur = statistics.MaxLoad(maxCur, &detail.LoadPred.Current)
-		bs.nthHotPeer[detail.GetID()] = make([]*statistics.HotPeerStat, utils.DimLen)
-		bs.filteredHotPeers[detail.GetID()] = bs.filterHotPeers(detail)
 	}
 
 	rankStepRatios := []float64{
@@ -210,6 +216,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 		return nil
 	}
 	bs.cur = &solution{}
+	defer func() { bs.regionCache = nil }()
 	tryUpdateBestSolution := func() {
 		if label, ok := bs.filterUniformStore(); ok {
 			bs.skipCounter(label).Inc()
@@ -252,7 +259,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 			sourceFailure = globalSourceFailure
 		}
 		checkedRegion := false
-		for _, mainPeerStat := range bs.filteredHotPeers[srcStoreID] {
+		for _, mainPeerStat := range bs.getFilteredHotPeers(srcStoreID) {
 			region, fit := bs.getRegion(mainPeerStat, srcStoreID)
 			if region == nil {
 				continue
@@ -299,9 +306,14 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 				bs.calcProgressiveRank()
 				tryUpdateBestSolution()
 				if bs.needSearchRevertRegions() {
+					if bs.regionCache == nil {
+						bs.regionCache = map[uint64]hotRegionSnapshot{
+							bs.cur.region.GetID(): {region: bs.cur.region, fit: bs.curFit},
+						}
+					}
 					hotSchedulerSearchRevertRegionsCounter.Inc()
 					dstStoreID := dstStore.GetID()
-					for _, revertPeerStat := range bs.filteredHotPeers[dstStoreID] {
+					for _, revertPeerStat := range bs.getFilteredHotPeers(dstStoreID) {
 						revertRegion, revertFit := bs.getRegion(revertPeerStat, dstStoreID)
 						useRevertPlacementScope := bs.mayUsePlacementScope(dstStore.IsTiKV())
 						if revertRegion == nil || revertRegion.GetID() == bs.cur.region.GetID() ||
@@ -419,7 +431,7 @@ func (bs *balanceSolver) tryAddPendingInfluence() bool {
 	// revert peers
 	if bs.best.revertPeerStat != nil && len(bs.ops) > 1 {
 		infl := bs.collectPendingInfluence(bs.best.revertPeerStat)
-		if !bs.sche.tryAddPendingInfluence(bs.ops[1], srcStoreIDs, dstStoreID, infl, maxZombieDur) {
+		if !bs.sche.tryAddPendingInfluence(bs.ops[1], []uint64{dstStoreID}, bs.best.srcStore.GetID(), infl, maxZombieDur) {
 			return false
 		}
 	}
@@ -583,7 +595,7 @@ func (bs *balanceSolver) checkSrcHistoryLoadsByPriorityAndTolerance(current, exp
 // The returned hotPeer count in controlled by `max-peer-number`.
 func (bs *balanceSolver) filterHotPeers(storeLoad *statistics.StoreLoadDetail) []*statistics.HotPeerStat {
 	hotPeers := storeLoad.HotPeers
-	ret := make([]*statistics.HotPeerStat, 0, len(hotPeers))
+	var ret []*statistics.HotPeerStat
 	appendItem := func(item *statistics.HotPeerStat) {
 		if _, ok := bs.sche.regionPendings[item.ID()]; !ok && !item.IsNeedCoolDownTransferLeader(bs.minHotDegree, bs.rwTy) {
 			// no in pending operator and no need cool down after transfer leader
@@ -593,19 +605,18 @@ func (bs *balanceSolver) filterHotPeers(storeLoad *statistics.StoreLoadDetail) [
 
 	var firstSort, secondSort []*statistics.HotPeerStat
 	if len(hotPeers) >= topnPosition || len(hotPeers) > bs.maxPeerNum {
-		firstSort = make([]*statistics.HotPeerStat, len(hotPeers))
-		copy(firstSort, hotPeers)
-		sort.Slice(firstSort, func(i, j int) bool {
-			return firstSort[i].GetLoad(bs.firstPriority) > firstSort[j].GetLoad(bs.firstPriority)
-		})
-		secondSort = make([]*statistics.HotPeerStat, len(hotPeers))
-		copy(secondSort, hotPeers)
-		sort.Slice(secondSort, func(i, j int) bool {
-			return secondSort[i].GetLoad(bs.secondPriority) > secondSort[j].GetLoad(bs.secondPriority)
-		})
+		limit := topnPosition
+		if len(hotPeers) > bs.maxPeerNum {
+			limit = max(limit, bs.maxPeerNum)
+		}
+		firstSort = selectHotPeers(hotPeers, bs.firstPriority, limit)
+		secondSort = selectHotPeers(hotPeers, bs.secondPriority, limit)
 	}
 	if len(hotPeers) >= topnPosition {
 		storeID := storeLoad.GetID()
+		if bs.nthHotPeer[storeID] == nil {
+			bs.nthHotPeer[storeID] = make([]*statistics.HotPeerStat, utils.DimLen)
+		}
 		bs.nthHotPeer[storeID][bs.firstPriority] = firstSort[topnPosition-1]
 		bs.nthHotPeer[storeID][bs.secondPriority] = secondSort[topnPosition-1]
 	}
@@ -618,10 +629,82 @@ func (bs *balanceSolver) filterHotPeers(storeLoad *statistics.StoreLoadDetail) [
 		return ret
 	}
 
+	ret = make([]*statistics.HotPeerStat, 0, len(hotPeers))
 	for _, peer := range hotPeers {
 		appendItem(peer)
 	}
 	return ret
+}
+
+func (bs *balanceSolver) getFilteredHotPeers(storeID uint64) []*statistics.HotPeerStat {
+	if peers, ok := bs.filteredHotPeers[storeID]; ok {
+		return peers
+	}
+	detail := bs.stLoadDetail[storeID]
+	if detail == nil {
+		return nil
+	}
+	peers := bs.filterHotPeers(detail)
+	bs.filteredHotPeers[storeID] = peers
+	return peers
+}
+
+func (bs *balanceSolver) getNthHotPeer(storeID uint64, dim int) *statistics.HotPeerStat {
+	bs.getFilteredHotPeers(storeID)
+	if peers := bs.nthHotPeer[storeID]; peers != nil {
+		return peers[dim]
+	}
+	return nil
+}
+
+// selectHotPeers sorts only the hottest limit peers, leaving the load snapshot intact.
+func selectHotPeers(peers []*statistics.HotPeerStat, dim, limit int) []*statistics.HotPeerStat {
+	limit = min(limit, len(peers))
+	if limit <= 0 {
+		return nil
+	}
+	h := &hotPeerHeap{dim: dim, peers: make([]*statistics.HotPeerStat, limit)}
+	copy(h.peers, peers[:limit])
+	heap.Init(h)
+	for _, peer := range peers[limit:] {
+		if h.lessPeer(h.peers[0], peer) {
+			h.peers[0] = peer
+			heap.Fix(h, 0)
+		}
+	}
+	sort.Slice(h.peers, func(i, j int) bool { return h.Less(j, i) })
+	return h.peers
+}
+
+type hotPeerHeap struct {
+	dim   int
+	peers []*statistics.HotPeerStat
+}
+
+func (h *hotPeerHeap) Len() int { return len(h.peers) }
+
+func (h *hotPeerHeap) lessPeer(a, b *statistics.HotPeerStat) bool {
+	left, right := a.GetLoad(h.dim), b.GetLoad(h.dim)
+	if left == right {
+		return a.RegionID > b.RegionID
+	}
+	return left < right
+}
+
+func (h *hotPeerHeap) Less(i, j int) bool { return h.lessPeer(h.peers[i], h.peers[j]) }
+
+func (h *hotPeerHeap) Swap(i, j int) { h.peers[i], h.peers[j] = h.peers[j], h.peers[i] }
+
+// Push adds a peer to the heap.
+func (h *hotPeerHeap) Push(v any) { h.peers = append(h.peers, v.(*statistics.HotPeerStat)) }
+
+// Pop removes the last peer from the heap.
+func (h *hotPeerHeap) Pop() any {
+	last := len(h.peers) - 1
+	peer := h.peers[last]
+	h.peers[last] = nil
+	h.peers = h.peers[:last]
+	return peer
 }
 
 func sortHotPeers[T any](firstSort, secondSort []*T, maxPeerNum int) map[*T]struct{} {
@@ -682,9 +765,18 @@ func (bs *balanceSolver) isRegionAvailable(region *core.RegionInfo) (*placement.
 }
 
 func (bs *balanceSolver) getRegion(peerStat *statistics.HotPeerStat, storeID uint64) (*core.RegionInfo, *placement.RegionFit) {
-	region := bs.GetRegion(peerStat.ID())
-	fit, available := bs.isRegionAvailable(region)
-	if !available {
+	snapshot, ok := bs.regionCache[peerStat.ID()]
+	if !ok {
+		region := bs.GetRegion(peerStat.ID())
+		if fit, available := bs.isRegionAvailable(region); available {
+			snapshot = hotRegionSnapshot{region: region, fit: fit}
+		}
+		if bs.regionCache != nil {
+			bs.regionCache[peerStat.ID()] = snapshot
+		}
+	}
+	region, fit := snapshot.region, snapshot.fit
+	if region == nil {
 		return nil, nil
 	}
 
@@ -1244,34 +1336,7 @@ var dimToStep = [utils.DimLen]float64{
 // 2. compare detail1 and detail2 by first priority and second priority, we pick the larger one to speed up the convergence;
 // 3. if the first priority and second priority are equal, we pick the store with the smaller difference between current and future to minimize oscillations.
 func (bs *balanceSolver) compareSrcStore(detail1, detail2 *statistics.StoreLoadDetail) int {
-	if detail1 != detail2 {
-		var lpCmp storeLPCmp
-		if bs.resourceTy == writeLeader {
-			lpCmp = sliceLPCmp(
-				minLPCmp(negLoadCmp(sliceLoadCmp(
-					stLdRankCmp(stLdRate(bs.firstPriority), stepRank(bs.maxSrc.Loads[bs.firstPriority], bs.rankStep.Loads[bs.firstPriority])),
-					stLdRankCmp(stLdRate(bs.secondPriority), stepRank(bs.maxSrc.Loads[bs.secondPriority], bs.rankStep.Loads[bs.secondPriority])),
-				))),
-				diffCmp(sliceLoadCmp(
-					stLdRankCmp(stLdCount, stepRank(0, bs.rankStep.HotPeerCount)),
-					stLdRankCmp(stLdRate(bs.firstPriority), stepRank(0, bs.rankStep.Loads[bs.firstPriority])),
-					stLdRankCmp(stLdRate(bs.secondPriority), stepRank(0, bs.rankStep.Loads[bs.secondPriority])),
-				)),
-			)
-		} else {
-			lpCmp = sliceLPCmp(
-				minLPCmp(negLoadCmp(sliceLoadCmp(
-					stLdRankCmp(stLdRate(bs.firstPriority), stepRank(bs.maxSrc.Loads[bs.firstPriority], bs.rankStep.Loads[bs.firstPriority])),
-					stLdRankCmp(stLdRate(bs.secondPriority), stepRank(bs.maxSrc.Loads[bs.secondPriority], bs.rankStep.Loads[bs.secondPriority])),
-				))),
-				diffCmp(
-					stLdRankCmp(stLdRate(bs.firstPriority), stepRank(0, bs.rankStep.Loads[bs.firstPriority])),
-				),
-			)
-		}
-		return lpCmp(detail1.LoadPred, detail2.LoadPred)
-	}
-	return 0
+	return bs.compareStoreLoad(detail1, detail2, true)
 }
 
 // compareDstStore compares the destination store of detail1, detail2, the result is:
@@ -1283,32 +1348,45 @@ func (bs *balanceSolver) compareSrcStore(detail1, detail2 *statistics.StoreLoadD
 // 2. compare detail1 and detail2 by first priority and second priority, we pick the smaller one to speed up the convergence;
 // 3. if the first priority and second priority are equal, we pick the store with the smaller difference between current and future to minimize oscillations.
 func (bs *balanceSolver) compareDstStore(detail1, detail2 *statistics.StoreLoadDetail) int {
-	if detail1 != detail2 {
-		// compare destination store
-		var lpCmp storeLPCmp
-		if bs.resourceTy == writeLeader {
-			lpCmp = sliceLPCmp(
-				maxLPCmp(sliceLoadCmp(
-					stLdRankCmp(stLdRate(bs.firstPriority), stepRank(bs.minDst.Loads[bs.firstPriority], bs.rankStep.Loads[bs.firstPriority])),
-					stLdRankCmp(stLdRate(bs.secondPriority), stepRank(bs.minDst.Loads[bs.secondPriority], bs.rankStep.Loads[bs.secondPriority])),
-				)),
-				diffCmp(sliceLoadCmp(
-					stLdRankCmp(stLdCount, stepRank(0, bs.rankStep.HotPeerCount)),
-					stLdRankCmp(stLdRate(bs.firstPriority), stepRank(0, bs.rankStep.Loads[bs.firstPriority])),
-					stLdRankCmp(stLdRate(bs.secondPriority), stepRank(0, bs.rankStep.Loads[bs.secondPriority])),
-				)))
-		} else {
-			lpCmp = sliceLPCmp(
-				maxLPCmp(sliceLoadCmp(
-					stLdRankCmp(stLdRate(bs.firstPriority), stepRank(bs.minDst.Loads[bs.firstPriority], bs.rankStep.Loads[bs.firstPriority])),
-					stLdRankCmp(stLdRate(bs.secondPriority), stepRank(bs.minDst.Loads[bs.secondPriority], bs.rankStep.Loads[bs.secondPriority])),
-				)),
-				diffCmp(
-					stLdRankCmp(stLdRate(bs.firstPriority), stepRank(0, bs.rankStep.Loads[bs.firstPriority])),
-				),
-			)
+	return bs.compareStoreLoad(detail1, detail2, false)
+}
+
+func (bs *balanceSolver) compareStoreLoad(detail1, detail2 *statistics.StoreLoadDetail, source bool) int {
+	if detail1 == detail2 {
+		return 0
+	}
+	lp1, lp2 := detail1.LoadPred, detail2.LoadPred
+	extreme, baseline := math.Max, bs.minDst
+	if source {
+		extreme, baseline = math.Min, bs.maxSrc
+	}
+	priorities := [2]int{bs.firstPriority, bs.secondPriority}
+	for _, dim := range priorities {
+		r := rankCmp(extreme(lp1.Current.Loads[dim], lp1.Future.Loads[dim]),
+			extreme(lp2.Current.Loads[dim], lp2.Future.Loads[dim]),
+			stepRank(baseline.Loads[dim], bs.rankStep.Loads[dim]))
+		if source {
+			r = -r
 		}
-		return lpCmp(detail1.LoadPred, detail2.LoadPred)
+		if r != 0 {
+			return r
+		}
+	}
+	// Keep the existing pending-load tie breakers without constructing full loads.
+	if bs.resourceTy == writeLeader {
+		if r := rankCmp(math.Abs(lp1.Current.HotPeerCount-lp1.Future.HotPeerCount),
+			math.Abs(lp2.Current.HotPeerCount-lp2.Future.HotPeerCount), stepRank(0, bs.rankStep.HotPeerCount)); r != 0 {
+			return r
+		}
+	}
+	for _, dim := range priorities {
+		if r := rankCmp(math.Abs(lp1.Current.Loads[dim]-lp1.Future.Loads[dim]),
+			math.Abs(lp2.Current.Loads[dim]-lp2.Future.Loads[dim]), stepRank(0, bs.rankStep.Loads[dim])); r != 0 {
+			return r
+		}
+		if bs.resourceTy != writeLeader {
+			break
+		}
 	}
 	return 0
 }
