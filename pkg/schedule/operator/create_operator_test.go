@@ -23,10 +23,12 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/zap"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
@@ -35,6 +37,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 )
 
@@ -175,6 +178,75 @@ func (suite *createOperatorTestSuite) TestCreateSplitRegionOperator() {
 				suite.T().Errorf("unexpected type: %s", step.String())
 			}
 		}
+	}
+}
+
+func (suite *createOperatorTestSuite) TestCreateSplitRegionOperatorRedactKeys() {
+	re := suite.Require()
+	peers := []*metapb.Peer{
+		{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+		{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+		{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
+	}
+	startKey, endKey, splitKey := []byte("a"), []byte("z"), []byte("synthetic-key")
+	region := core.NewRegionInfo(&metapb.Region{
+		Id:       1,
+		StartKey: startKey,
+		EndKey:   endKey,
+		Peers:    peers,
+	}, peers[0])
+
+	setupRedactLogger := func(redactInfoLogType logutil.RedactInfoLogType) {
+		var (
+			lg    *zap.Logger
+			props *log.ZapProperties
+		)
+		re.NoError(logutil.SetupLogger(&log.Config{Level: "info"}, &lg, &props, redactInfoLogType))
+	}
+	defer setupRedactLogger(logutil.RedactInfoLogOFF)
+
+	testCases := []struct {
+		redactInfoLogType logutil.RedactInfoLogType
+		expectedSplitKey  string
+		expectedStartKey  string
+		expectedEndKey    string
+	}{
+		{
+			redactInfoLogType: logutil.RedactInfoLogOFF,
+			expectedSplitKey:  "73796E7468657469632D6B6579",
+			expectedStartKey:  "61",
+			expectedEndKey:    "7A",
+		},
+		{
+			redactInfoLogType: logutil.RedactInfoLogON,
+			expectedSplitKey:  "?",
+			expectedStartKey:  "?",
+			expectedEndKey:    "?",
+		},
+		{
+			redactInfoLogType: logutil.RedactInfoLogMarker,
+			expectedSplitKey:  "‹73796E7468657469632D6B6579›",
+			expectedStartKey:  "‹61›",
+			expectedEndKey:    "‹7A›",
+		},
+	}
+	for _, testCase := range testCases {
+		setupRedactLogger(testCase.redactInfoLogType)
+		op, err := CreateSplitRegionOperator("test", region, OpSplit, pdpb.CheckPolicy_USEKEY, [][]byte{splitKey})
+		re.NoError(err)
+		re.Equal("split: region 1 use policy USEKEY and keys ["+testCase.expectedSplitKey+"]", op.Brief())
+		info, ok := op.GetAdditionalInfo("region-start-key")
+		re.True(ok)
+		re.Equal(testCase.expectedStartKey, info)
+		info, ok = op.GetAdditionalInfo("region-end-key")
+		re.True(ok)
+		re.Equal(testCase.expectedEndKey, info)
+		// The redaction only affects the presentation, the step still carries the raw keys.
+		step, ok := op.Step(0).(SplitRegion)
+		re.True(ok)
+		re.Equal(startKey, step.StartKey)
+		re.Equal(endKey, step.EndKey)
+		re.Equal([][]byte{splitKey}, step.SplitKeys)
 	}
 }
 
