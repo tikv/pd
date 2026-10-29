@@ -38,9 +38,13 @@ import (
 )
 
 func newTargetTestManager(t *testing.T) (*Manager, storage.Storage) {
+	store := storage.NewStorageWithMemoryBackend()
+	return newTargetTestManagerWithStorage(t, store), store
+}
+
+func newTargetTestManagerWithStorage(t *testing.T, store storage.Storage) *Manager {
 	re := require.New(t)
 	ctx := t.Context()
-	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
 	for id := uint64(1); id <= 4; id++ {
 		storeInfo := core.NewStoreInfo(&metapb.Store{Id: id, Address: fmt.Sprintf("s%d", id), NodeState: metapb.NodeState_Serving})
@@ -50,7 +54,7 @@ func newTargetTestManager(t *testing.T) (*Manager, storage.Storage) {
 	re.NoError(err)
 	manager, err := NewManager(ctx, store, storeInfos, mockconfig.NewTestOptions(), regionLabeler)
 	re.NoError(err)
-	return manager, store
+	return manager
 }
 
 func loadStoredGroup(re *require.Assertions, store storage.Storage, id string) *Group {
@@ -229,11 +233,12 @@ func TestObserveAvailableRegionWithTargetWriter(t *testing.T) {
 		{name: "not written", reply: func(GroupTarget) ([]string, error) { return nil, nil }},
 		{name: "write failed", reply: func(GroupTarget) ([]string, error) { return nil, errors.New("PD is unavailable") }},
 		{name: "watcher first", apply: func(target GroupTarget) *Group { return target.result(&target.Expected) }, reply: written, available: true, leader: 1},
+		// A target that the watcher delivers is used, while the written one is not published.
 		{name: "changed meanwhile", apply: func(target GroupTarget) *Group {
 			other := target.result(&target.Expected)
 			other.LeaderStoreID, other.VoterStoreIDs = 3, []uint64{3, 4}
 			return other
-		}, reply: written, leader: 3},
+		}, reply: written, available: true, leader: 3},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			re := require.New(t)
@@ -255,4 +260,68 @@ func TestObserveAvailableRegionWithTargetWriter(t *testing.T) {
 			re.Zero(loadStoredGroup(re, store, "g").LeaderStoreID)
 		})
 	}
+}
+
+// TestTargetAvailability checks that a group takes the availability of its target
+// from the store conditions known when the target is set, because the
+// availability check applies the conditions only when they change.
+func TestTargetAvailability(t *testing.T) {
+	allowed := func(m *Manager, id string) bool { return m.GetAffinityGroupState(id).AffinitySchedulingAllowed }
+
+	t.Run("loaded", func(t *testing.T) {
+		re := require.New(t)
+		store := storage.NewStorageWithMemoryBackend()
+		group := &Group{ID: "g", CreateTimestamp: 1, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}}
+		re.NoError(store.RunInTxn(t.Context(), func(txn kv.Txn) error { return store.SaveAffinityGroup(txn, group.ID, group) }))
+		manager := newTargetTestManagerWithStorage(t, store)
+		re.False(allowed(manager, "g"))
+		// The first check sets the loaded group, although no store condition changed.
+		manager.checkGroupsAvailability()
+		re.True(allowed(manager, "g"))
+	})
+
+	t.Run("synced", func(t *testing.T) {
+		re := require.New(t)
+		manager, _ := newTargetTestManager(t)
+		manager.applyStoreConditions(map[uint64]storeCondition{})
+		group := &Group{ID: "g", CreateTimestamp: 1, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}}
+		manager.SyncGroupFromEtcd(group)
+		re.True(allowed(manager, "g"))
+
+		// An admin target that reaches an expired group through the watcher is used.
+		manager.ExpireAffinityGroup("g")
+		group.VoterStoreIDs = []uint64{1, 2, 4}
+		manager.SyncGroupFromEtcd(group)
+		re.True(allowed(manager, "g"))
+
+		// A target synced with an unavailable store is not.
+		manager.applyStoreConditions(map[uint64]storeCondition{3: storeRemoving})
+		group.VoterStoreIDs = []uint64{1, 2, 3}
+		manager.SyncGroupFromEtcd(group)
+		re.False(allowed(manager, "g"))
+		re.True(manager.GetAffinityGroupState("g").RegularSchedulingAllowed)
+		recreated := &Group{ID: "g", CreateTimestamp: 2, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 4}}
+		manager.SyncGroupFromEtcd(recreated)
+		re.True(allowed(manager, "g"))
+	})
+
+	t.Run("written", func(t *testing.T) {
+		re := require.New(t)
+		manager, _ := newTargetTestManager(t)
+		re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "g"}}))
+		// Store 2 starts to be removed while the target is written.
+		manager.SetTargetWriter(&fakeTargetWriter{
+			write: func(GroupTarget) { manager.applyStoreConditions(map[uint64]storeCondition{2: storeRemoving}) },
+			reply: func(target GroupTarget) ([]string, error) { return []string{target.Expected.ID}, nil },
+		})
+		region := core.NewRegionInfo(
+			&metapb.Region{Id: 10, Peers: []*metapb.Peer{{Id: 11, StoreId: 2, Role: metapb.PeerRole_Voter}, {Id: 12, StoreId: 1, Role: metapb.PeerRole_Voter}}},
+			&metapb.Peer{Id: 12, StoreId: 1, Role: metapb.PeerRole_Voter},
+		)
+		manager.ObserveAvailableRegion(region, manager.GetAffinityGroupState("g"))
+		state := manager.GetAffinityGroupState("g")
+		re.Equal([]uint64{1, 2}, state.VoterStoreIDs)
+		re.False(state.AffinitySchedulingAllowed)
+		re.True(state.RegularSchedulingAllowed)
+	})
 }
