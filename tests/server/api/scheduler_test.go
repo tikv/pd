@@ -102,6 +102,43 @@ func TestLegacyHotRegionConfigRemainsEditableThroughAPI(t *testing.T) {
 	})
 }
 
+func TestInvalidIndependentSchedulerConfigFallsBackThroughAPI(t *testing.T) {
+	re := require.New(t)
+	env := tests.NewSchedulingTestEnvironment(t)
+	env.SkipBootstrap = true
+	defer env.Cleanup()
+	env.RunTestInNonMicroserviceEnv(func(cluster *tests.TestCluster) {
+		leader := cluster.GetLeaderServer()
+		store := leader.GetServer().GetStorage()
+		name := types.BalanceLeaderScheduler.String()
+		re.NoError(store.SaveSchedulerConfig(name, []byte(`{"batch":"invalid"}`)))
+		re.NoError(leader.BootstrapCluster())
+		rc := leader.GetRaftCluster()
+		re.NotNil(rc)
+		rc.SetPrepared()
+		co := rc.GetCoordinator()
+		testutil.Eventually(re, co.AreSchedulersInitialized)
+		re.NotNil(co.GetSchedulersController().GetScheduler(name))
+
+		configURL := leader.GetAddr() + server.SchedulerConfigHandlerPath + "/" + name
+		var config struct {
+			Batch int `json:"batch"`
+		}
+		re.NoError(testutil.CheckGetJSON(tests.TestDialClient, configURL+"/list", nil,
+			testutil.StatusOK(re), testutil.ExtractJSON(re, &config)))
+		re.Equal(schedulerpkg.BalanceLeaderBatchSize, config.Batch)
+		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, configURL+"/config",
+			[]byte(`{"batch":7}`), testutil.StatusOK(re)))
+		re.NoError(testutil.CheckGetJSON(tests.TestDialClient, configURL+"/list", nil,
+			testutil.StatusOK(re), testutil.ExtractJSON(re, &config)))
+		re.Equal(7, config.Batch)
+		saved, err := store.LoadSchedulerConfig(name)
+		re.NoError(err)
+		re.NoError(json.Unmarshal([]byte(saved), &config))
+		re.Equal(7, config.Batch)
+	})
+}
+
 type scheduleTestSuite struct {
 	suite.Suite
 	te  *tests.SchedulingTestEnvironment

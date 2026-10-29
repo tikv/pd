@@ -3669,6 +3669,70 @@ func TestScheduleConfigPersistenceIsSerialized(t *testing.T) {
 	re.Equal(float64(60), reloadedOpt.GetScheduleConfig().DefaultStoreLimit.AddPeer)
 }
 
+func TestInitSchedulersRestoresLegacyFallback(t *testing.T) {
+	for _, needRun := range []bool{true, false} {
+		for _, test := range []struct {
+			name     string
+			typ      types.CheckerSchedulerType
+			config   string
+			disabled bool
+			batch    int
+		}{
+			{"malformed leader", types.BalanceLeaderScheduler, `{"batch":`, false, schedulers.BalanceLeaderBatchSize},
+			{"invalid leader field", types.BalanceLeaderScheduler, `{"batch":"invalid"}`, false, schedulers.BalanceLeaderBatchSize},
+			{"invalid region field", types.BalanceRegionScheduler, `{"ranges":false}`, false, 0},
+			{"valid leader tuning", types.BalanceLeaderScheduler, `{"batch":17}`, false, 17},
+			{"disabled leader", types.BalanceLeaderScheduler, `{"batch":"invalid"}`, true, 0},
+		} {
+			t.Run(fmt.Sprintf("run=%t/%s", needRun, test.name), func(t *testing.T) {
+				re := require.New(t)
+				tc, co, cleanup := prepare(func(cfg *sc.ScheduleConfig) {
+					for i := range cfg.Schedulers {
+						if cfg.Schedulers[i].Type == types.SchedulerTypeCompatibleMap[test.typ] {
+							cfg.Schedulers[i].Disable = test.disabled
+						}
+					}
+				}, nil, nil, re)
+				defer cleanup()
+				name := test.typ.String()
+				re.NoError(tc.storage.SaveSchedulerConfig(name, []byte(test.config)))
+				expectedSchedulers := tc.GetScheduleConfig().Clone().Schedulers
+				for range 2 {
+					co.InitSchedulers(needRun)
+					handlers := co.GetSchedulersController().GetSchedulerHandlers()
+					saved, err := tc.storage.LoadSchedulerConfig(name)
+					re.NoError(err)
+					re.Equal(expectedSchedulers, tc.GetScheduleConfig().Schedulers)
+					if test.disabled {
+						re.NotContains(handlers, name)
+						re.Nil(co.GetSchedulersController().GetScheduler(name))
+						re.Equal(test.config, saved)
+						continue
+					}
+					restored, ok := handlers[name].(schedulers.Scheduler)
+					re.True(ok, "scheduler must be registered after restoration")
+					if needRun {
+						re.NotNil(co.GetSchedulersController().GetScheduler(name))
+					}
+					active, err := restored.EncodeConfig()
+					re.NoError(err)
+					re.JSONEq(string(active), saved)
+					_, err = schedulers.CreateScheduler(test.typ, co.GetOperatorController(),
+						tc.storage, schedulers.ConfigJSONDecoder([]byte(saved)))
+					re.NoError(err)
+					if test.batch != 0 {
+						var config struct {
+							Batch int `json:"batch"`
+						}
+						re.NoError(json.Unmarshal([]byte(saved), &config))
+						re.Equal(test.batch, config.Batch)
+					}
+				}
+			})
+		}
+	}
+}
+
 func TestInitSchedulersNormalizesLegacyConfig(t *testing.T) {
 	for _, needRun := range []bool{true, false} {
 		for _, legacy := range []string{
