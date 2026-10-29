@@ -102,15 +102,23 @@ func TestUpdateAffinityGroupTargets(t *testing.T) {
 	re.Zero(loadStoredGroup(re, store, "stale").LeaderStoreID)
 
 	// A commit that the Manager did not see leaves its memory stale. A target
-	// decided from the stale memory is not written, and the memory is refreshed.
+	// decided from the stale memory is not written, and the memory is refreshed
+	// with the availability that the store conditions known now give.
 	id := ids[1]
 	committed := manager.GetAffinityGroupState(id).Group
 	committed.LeaderStoreID = 1
 	re.NoError(store.RunInTxn(t.Context(), func(txn kv.Txn) error { return store.SaveAffinityGroup(txn, id, &committed) }))
+	manager.Lock()
+	manager.unavailableStores = map[uint64]storeCondition{1: storeLeaderEvicted}
+	manager.Unlock()
 	written, err = manager.UpdateAffinityGroupTargets([]GroupTarget{targetFor(manager, id, 3, 1, 2, 3)})
 	re.NoError(err)
 	re.Empty(written)
 	re.Equal(committed, manager.GetAffinityGroupState(id).Group)
+	re.False(manager.GetAffinityGroupState(id).AffinitySchedulingAllowed)
+	manager.Lock()
+	manager.unavailableStores = map[uint64]storeCondition{}
+	manager.Unlock()
 
 	// The next target is decided from the refreshed group, whose voter order does not matter.
 	target := targetFor(manager, id, 3, 1, 2, 3)

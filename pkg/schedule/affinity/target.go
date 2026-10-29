@@ -192,7 +192,16 @@ func (m *Manager) refreshGroupTargetLocked(stored *Group) {
 		zap.String("group-id", stored.ID),
 		zap.Uint64("leader-store-id", stored.LeaderStoreID),
 		zap.Uint64s("voter-store-ids", stored.VoterStoreIDs))
+	sameInstance := groupInfo.CreateTimestamp == stored.CreateTimestamp
+	targetChanged := groupInfo.LeaderStoreID != stored.LeaderStoreID ||
+		!slices.Equal(sortedStoreIDs(groupInfo.VoterStoreIDs), stored.VoterStoreIDs)
 	m.syncGroupTargetLocked(groupInfo, stored)
+	if sameInstance && targetChanged {
+		// A write whose result was unknown committed this target. Check it against
+		// the store conditions known now, because the availability check applies
+		// them again only when they change.
+		groupInfo.SetAvailability(calcGroupAvailability(m.unavailableStores, stored.LeaderStoreID, stored.VoterStoreIDs))
+	}
 }
 
 // result returns the stored group after the target is written to it.
