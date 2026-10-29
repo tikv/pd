@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -50,8 +51,9 @@ const (
 	tickPerSecond             = time.Second
 
 	pushMetricsTimeout = 10 * time.Second
-	// finalPushMetricsTimeout bounds the push when a term ends.
-	finalPushMetricsTimeout = 3 * time.Second
+	// withdrawMetricsTimeout bounds deleting the pushed metrics, which a term
+	// end waits for.
+	withdrawMetricsTimeout = 3 * time.Second
 )
 
 type pushMetricsConfig struct {
@@ -791,17 +793,19 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			pushMetricsTicker.Stop()
 		}
 	}()
+	podName := os.Getenv("HOSTNAME")
+	if podName == "" {
+		podName = "default"
+	}
+	pusher := func(address string) *push.Pusher {
+		return push.New(address, "resource_group_svc").Grouping("pod", podName)
+	}
 	pushMetrics := func(ctx context.Context) {
-		podName := os.Getenv("HOSTNAME")
-		if podName == "" {
-			podName = "default"
-		}
 		pushCtx, cancel := context.WithTimeout(ctx, pushMetricsTimeout)
 		start := time.Now()
 		// A push replaces everything this pod pushed before, so peaks the
 		// timeline withdraws disappear from the push target as well.
-		err := push.New(pushMetricsConfig.address, "resource_group_svc").
-			Grouping("pod", podName).
+		err := pusher(pushMetricsConfig.address).
 			Collector(readRequestUnitCost).
 			Collector(writeRequestUnitCost).
 			Collector(sqlLayerRequestUnitCost).
@@ -813,19 +817,23 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 		}
 		pushRUMetricsDuration.Observe(time.Since(start).Seconds())
 	}
+	// withdrawMetrics deletes everything this pod pushed to address. A
+	// Pushgateway keeps a group until it is replaced or deleted, so a target
+	// that is no longer pushed to would otherwise expose the last peak as a
+	// current value.
+	withdrawMetrics := func(address string) {
+		err := pusher(address).Client(&http.Client{Timeout: withdrawMetricsTimeout}).Delete()
+		if err != nil {
+			log.Warn("withdraw pushed metrics failed", zap.String("address", address), zap.Error(err))
+		}
+	}
 
 	for {
 		select {
 		case <-ctx.Done():
 			log.Info("resource group manager background metrics flush loop exits")
 			if pushMetricsConfig.address != "" {
-				// Withdraw this term's peaks from the push target; otherwise
-				// the last pushed peak would outlive the term there. Keep it
-				// short: the next term waits for this loop to exit.
-				m.metrics.ruTimeline.reset()
-				finalCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finalPushMetricsTimeout)
-				pushMetrics(finalCtx)
-				cancel()
+				withdrawMetrics(pushMetricsConfig.address)
 			}
 			return
 		case consumptionInfo := <-m.consumptionDispatcher:
@@ -901,6 +909,9 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			}
 			newPushMetricsConfig := getPushMetricsConfig(m.GetControllerConfig())
 			if pushMetricsConfig != newPushMetricsConfig {
+				if old := pushMetricsConfig.address; old != "" && old != newPushMetricsConfig.address {
+					withdrawMetrics(old)
+				}
 				pushMetricsTicker = pushMetricsConfig.syncPushMetricsTicker(
 					newPushMetricsConfig,
 					pushMetricsTicker,
