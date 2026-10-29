@@ -82,6 +82,10 @@ func (suite *configTestSuite) TestConfigWatch() {
 	re := suite.Require()
 
 	// Make sure the config is persisted before the watcher is created.
+	persistOpts := suite.pdLeaderServer.GetPersistOptions()
+	persistOpts.SetLabelPropertyConfig(sc.LabelPropertyConfig{
+		sc.RejectLeader: {{Key: "zone", Value: "us-west"}},
+	})
 	persistConfig(re, suite.pdLeaderServer)
 	// Create a config watcher.
 	watcher, err := config.NewWatcher(
@@ -95,11 +99,11 @@ func (suite *configTestSuite) TestConfigWatch() {
 	re.Equal(uint64(sc.DefaultMaxReplicas), watcher.GetReplicationConfig().MaxReplicas)
 	re.Equal(sc.DefaultSplitMergeInterval, watcher.GetScheduleConfig().SplitMergeInterval.Duration)
 	re.Equal("0.0.0", watcher.GetClusterVersion().String())
+	re.True(watcher.CheckLabelProperty(sc.RejectLeader, []*metapb.StoreLabel{{Key: "zone", Value: "us-west"}}))
 	// Update the config and check if the scheduling config watcher can get the latest value.
 	testutil.Eventually(re, func() bool {
 		return watcher.GetReplicationConfig().MaxReplicas == 3
 	})
-	persistOpts := suite.pdLeaderServer.GetPersistOptions()
 	persistOpts.SetMaxReplicas(5)
 	persistConfig(re, suite.pdLeaderServer)
 	testutil.Eventually(re, func() bool {
