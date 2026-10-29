@@ -370,6 +370,9 @@ func (m *RuleManager) GetAllRules() []*Rule {
 // effective rule agrees on, which names one isolation domain (see Rule.isolationPrefix). It
 // reports false when any effective rule enforces no isolation level, when a rule's isolation
 // level is not one of its location labels, when rules disagree, or when no rule applies.
+// It also reports false when any effective rule's role is not Voter or Leader: a leader may
+// only move to a store matching a Voter or Leader rule, so with Follower or Learner rules some
+// domains may hold no legal leader destination.
 //
 // It walks the per-range applyRules rather than the persisted rule set, so a rule that is
 // overridden everywhere cannot veto the result. Every range has to agree because a caller
@@ -387,6 +390,9 @@ func (m *RuleManager) GetIsolationPrefix() ([]string, bool) {
 	found := false
 	for _, rr := range m.ruleList.ranges {
 		for _, r := range rr.applyRules {
+			if r.Role != Voter && r.Role != Leader {
+				return nil, false
+			}
 			prefix, ok := r.isolationPrefix()
 			if !ok {
 				return nil, false

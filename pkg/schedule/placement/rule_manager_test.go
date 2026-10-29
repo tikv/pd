@@ -422,6 +422,21 @@ func TestGetIsolationPrefix(t *testing.T) {
 	labels, ok = manager.GetIsolationPrefix()
 	re.True(ok)
 	re.Equal([]string{"zone", "rack"}, labels)
+
+	// A Leader rule can take leaders, so it keeps the prefix.
+	leader := rule("override", "leader", "rack", "zone", "rack", "host")
+	leader.Role, leader.Count = Leader, 1
+	re.NoError(manager.SetRule(leader))
+	labels, ok = manager.GetIsolationPrefix()
+	re.True(ok)
+	re.Equal([]string{"zone", "rack"}, labels)
+
+	// A Follower rule cannot take leaders, so it vetoes the result even when it agrees.
+	follower := rule("override", "follower", "rack", "zone", "rack", "host")
+	follower.Role, follower.Count = Follower, 1
+	re.NoError(manager.SetRule(follower))
+	_, ok = manager.GetIsolationPrefix()
+	re.False(ok)
 }
 
 func TestGroupConfig(t *testing.T) {

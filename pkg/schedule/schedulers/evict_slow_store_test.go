@@ -1318,6 +1318,55 @@ func TestEvictSlowStoreNoIsolationRule(t *testing.T) {
 	re.False(tc.GetStore(2).EvictedAsSlowStore())
 }
 
+// TestEvictSlowStoreFollowerRuleNoGroup: voters are limited to z1 and z2 and z3 holds only a
+// follower, so z3 cannot take leaders and draining z1 would leave a single destination zone.
+// Every rule isolates by zone, but the follower rule must still disable grouping.
+func TestEvictSlowStoreFollowerRuleNoGroup(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	tc.AddLabelsStore(1, 0, map[string]string{"zone": "z1", "host": "h1"})
+	tc.AddLabelsStore(2, 0, map[string]string{"zone": "z1", "host": "h2"})
+	tc.AddLabelsStore(3, 0, map[string]string{"zone": "z2", "host": "h3"})
+	tc.AddLabelsStore(4, 0, map[string]string{"zone": "z3", "host": "h4"})
+	tc.AddLeaderRegion(1, 1, 3, 4)
+	tc.AddLeaderRegion(2, 2, 3, 4)
+	re.NoError(tc.SetRule(&placement.Rule{
+		GroupID:          placement.DefaultGroupID,
+		ID:               placement.DefaultRuleID,
+		Role:             placement.Voter,
+		Count:            2,
+		LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: placement.In, Values: []string{"z1", "z2"}}},
+		LocationLabels:   []string{"zone", "host"},
+		IsolationLevel:   "zone",
+	}))
+	re.NoError(tc.SetRule(&placement.Rule{
+		GroupID:          placement.DefaultGroupID,
+		ID:               "follower",
+		Role:             placement.Follower,
+		Count:            1,
+		LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: placement.In, Values: []string{"z3"}}},
+		LocationLabels:   []string{"zone", "host"},
+		IsolationLevel:   "zone",
+	}))
+
+	es := createTestEvictSlowStoreScheduler(re, oc)
+	conf := es.(*evictSlowStoreScheduler).conf
+	conf.EnableGroupEviction = true
+	_, ok := groupIsolationLabels(tc)
+	re.False(ok)
+
+	setStoreSlowScore(tc, 1, 100)
+	setStoreSlowScore(tc, 2, 100)
+
+	ops, _ := es.Schedule(tc, false)
+	re.Empty(ops)
+	re.Empty(conf.evictedStores())
+	re.False(tc.GetStore(1).EvictedAsSlowStore())
+	re.False(tc.GetStore(2).EvictedAsSlowStore())
+}
+
 // TestEvictSlowStoreGroupEvictionDisabled: group eviction is off by default, so even with
 // uniform zone isolation 2+ slow stores keep the conservative do-nothing behavior.
 func TestEvictSlowStoreGroupEvictionDisabled(t *testing.T) {
