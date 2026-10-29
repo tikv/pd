@@ -24,6 +24,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
@@ -340,6 +341,161 @@ func TestDeleteGroupClearsCache(t *testing.T) {
 	re.False(exists1After, "region 100 should be removed from global cache")
 	re.False(exists2After, "region 200 should be removed from global cache")
 	re.Zero(globalAffinityCount, "global affinity region count should be 0")
+}
+
+// TestLookupRacingWithLabelRuleChange verifies that a lookup which reads the region labeler
+// before a label rule change does not cache its outdated result.
+func TestLookupRacingWithLabelRuleChange(t *testing.T) {
+	const lookupHook = "github.com/tikv/pd/pkg/schedule/affinity/afterRegionLabelLookup"
+	const groupID = "g"
+	oldRange := keyutil.KeyRange{StartKey: []byte("a"), EndKey: []byte("b")}
+	otherRange := keyutil.KeyRange{StartKey: []byte("c"), EndKey: []byte("d")}
+	testCases := []struct {
+		name   string
+		ranges []keyutil.KeyRange
+		change func(re *require.Assertions, m *Manager)
+	}{
+		{
+			name:   "remove key range",
+			ranges: []keyutil.KeyRange{oldRange, otherRange},
+			change: func(re *require.Assertions, m *Manager) {
+				re.NoError(m.UpdateAffinityGroupKeyRanges(nil, []GroupKeyRanges{
+					{GroupID: groupID, KeyRanges: []keyutil.KeyRange{oldRange}},
+				}))
+			},
+		},
+		{
+			name:   "recreate group with another key range",
+			ranges: []keyutil.KeyRange{oldRange},
+			change: func(re *require.Assertions, m *Manager) {
+				re.NoError(m.DeleteAffinityGroups([]string{groupID}, true))
+				re.NoError(m.CreateAffinityGroups([]GroupKeyRanges{
+					{GroupID: groupID, KeyRanges: []keyutil.KeyRange{otherRange}},
+				}))
+			},
+		},
+		{
+			// In the scheduling service, the region label watcher updates the labeler and then clears the cache.
+			name:   "update region labeler in scheduling service",
+			ranges: []keyutil.KeyRange{oldRange, otherRange},
+			change: func(re *require.Assertions, m *Manager) {
+				re.NoError(m.regionLabeler.SetLabelRule(MakeLabelRule(GroupKeyRanges{
+					GroupID: groupID, KeyRanges: []keyutil.KeyRange{otherRange},
+				})))
+				m.InvalidCacheByLabelRules([]string{GetLabelRuleID(groupID)})
+			},
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			ctx := t.Context()
+			store := storage.NewStorageWithMemoryBackend()
+			storeInfos := core.NewStoresInfo()
+			storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: 1, Address: "s1"}, core.SetLastHeartbeatTS(time.Now())))
+			regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+			re.NoError(err)
+			manager, err := NewManager(ctx, store, storeInfos, mockconfig.NewTestOptions(), regionLabeler)
+			re.NoError(err)
+			re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: groupID, KeyRanges: tc.ranges}}))
+			_, err = manager.UpdateAffinityGroupPeers(groupID, 1, []uint64{1})
+			re.NoError(err)
+			region := generateRegionForTest(100, []uint64{1}, oldRange)
+
+			changed := false
+			// Change the group after the lookup reads the labeler but before it reads the group.
+			re.NoError(failpoint.EnableCall(lookupHook, func() {
+				if !changed {
+					changed = true
+					tc.change(re, manager)
+				}
+			}))
+			defer func() { re.NoError(failpoint.Disable(lookupHook)) }()
+			manager.GetAndCacheRegionAffinityGroupState(region)
+			re.True(changed)
+
+			cache, _ := manager.getCache(region)
+			re.Nil(cache, "the outdated lookup result must not be cached")
+			group := manager.GetAffinityGroupState(groupID)
+			re.Zero(group.RegionCount)
+			re.Zero(group.AffinityRegionCount)
+			state, _ := manager.GetAndCacheRegionAffinityGroupState(region)
+			re.Nil(state, "the region is no longer covered by the group")
+		})
+	}
+}
+
+// TestInvalidCacheByLabelRules verifies that the Region cache and counts are correct after the scheduling
+// service applies a label rule change to the Manager and the region labeler, in either order.
+func TestInvalidCacheByLabelRules(t *testing.T) {
+	const groupID = "g"
+	oldRange := keyutil.KeyRange{StartKey: []byte("a"), EndKey: []byte("b")}
+	otherRange := keyutil.KeyRange{StartKey: []byte("c"), EndKey: []byte("d")}
+	testCases := []struct {
+		name         string
+		managerFirst bool
+	}{
+		{name: "manager first", managerFirst: true},
+		{name: "region labeler first", managerFirst: false},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			ctx := t.Context()
+			store := storage.NewStorageWithMemoryBackend()
+			storeInfos := core.NewStoresInfo()
+			storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: 1, Address: "s1"}, core.SetLastHeartbeatTS(time.Now())))
+			regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+			re.NoError(err)
+			manager, err := NewManager(ctx, store, storeInfos, mockconfig.NewTestOptions(), regionLabeler)
+			re.NoError(err)
+
+			// syncManager applies a label rule to the Manager as the affinity label watcher does.
+			syncManager := func(ranges ...keyutil.KeyRange) {
+				b, err := json.Marshal(MakeLabelRule(GroupKeyRanges{GroupID: groupID, KeyRanges: ranges}))
+				re.NoError(err)
+				labelRule, err := labeler.NewLabelRuleFromJSON(b)
+				re.NoError(err)
+				re.NoError(manager.SyncKeyRangesFromEtcd(labelRule))
+			}
+			// syncRegionLabeler applies a label rule to the region labeler as the region label watcher does.
+			syncRegionLabeler := func(ranges ...keyutil.KeyRange) {
+				re.NoError(regionLabeler.SetLabelRule(MakeLabelRule(GroupKeyRanges{GroupID: groupID, KeyRanges: ranges})))
+				manager.InvalidCacheByLabelRules([]string{GetLabelRuleID(groupID)})
+			}
+			manager.SyncGroupFromEtcd(&Group{ID: groupID, LeaderStoreID: 1, VoterStoreIDs: []uint64{1}})
+			manager.RestoreAffinityGroup(groupID)
+			syncRegionLabeler(oldRange, otherRange)
+			syncManager(oldRange, otherRange)
+			region := generateRegionForTest(100, []uint64{1}, oldRange)
+			state, isAffinity := manager.GetAndCacheRegionAffinityGroupState(region)
+			re.NotNil(state)
+			re.True(isAffinity)
+			group := manager.GetAffinityGroupState(groupID)
+			re.Equal(1, group.RegionCount)
+			re.Equal(1, group.AffinityRegionCount)
+
+			// Remove oldRange.
+			if tc.managerFirst {
+				syncManager(otherRange)
+				state, _ = manager.GetAndCacheRegionAffinityGroupState(region)
+				re.NotNil(state, "the region labeler still has the old label rule")
+				syncRegionLabeler(otherRange)
+			} else {
+				syncRegionLabeler(otherRange)
+				state, _ = manager.GetAndCacheRegionAffinityGroupState(region)
+				re.Nil(state)
+				syncManager(otherRange)
+			}
+			cache, _ := manager.getCache(region)
+			re.Nil(cache)
+			group = manager.GetAffinityGroupState(groupID)
+			re.Zero(group.RegionCount)
+			re.Zero(group.AffinityRegionCount)
+			state, _ = manager.GetAndCacheRegionAffinityGroupState(region)
+			re.Nil(state)
+		})
+	}
 }
 
 // TestAvailabilityChangeRegionCount verifies that changing group availability clears region cache.
