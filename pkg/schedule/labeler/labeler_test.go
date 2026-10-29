@@ -19,18 +19,32 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
+<<<<<<< HEAD
 	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
+=======
+	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
+	"go.uber.org/zap"
+
+	"github.com/pingcap/failpoint"
+	"github.com/pingcap/log"
+
+>>>>>>> 57f40aae7b (*: redact region keys and request bodies in logs (#11347))
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
@@ -272,6 +286,80 @@ func TestSaveLoadRule(t *testing.T) {
 	for _, r := range rules {
 		r2 := labeler.GetLabelRule(r.ID)
 		expectSameRules(re, r2, r)
+	}
+}
+
+func TestLoadRulesLogRedact(t *testing.T) {
+	const startKey, endKey = "7480000000000000ff", "7480000000000001ff"
+	rule := &LabelRule{
+		ID: "valid", Labels: []RegionLabel{{Key: "k1", Value: "v1"}}, RuleType: KeyRange, Data: MakeKeyRanges(startKey, endKey),
+	}
+	validJSON, err := json.Marshal(rule)
+	require.NoError(t, err)
+	invalidRule := *rule
+	invalidRule.ID, invalidRule.Labels = "invalid", nil
+	invalidJSON, err := json.Marshal(&invalidRule)
+	require.NoError(t, err)
+
+	for _, mode := range []struct {
+		name string
+		typ  logutil.RedactInfoLogType
+	}{
+		{"off", logutil.RedactInfoLogOFF},
+		{"on", logutil.RedactInfoLogON},
+		{"marker", logutil.RedactInfoLogMarker},
+	} {
+		t.Run(mode.name, func(t *testing.T) {
+			re := require.New(t)
+			fname := testutil.InitTempFileLogger(t, "info")
+			var (
+				lg    *zap.Logger
+				props *log.ZapProperties
+			)
+			re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, mode.typ))
+			t.Cleanup(func() {
+				re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, logutil.RedactInfoLogOFF))
+			})
+
+			memory := kv.NewMemoryKV()
+			store := endpoint.NewStorageEndpoint(memory, nil)
+			for key, value := range map[string]string{
+				"valid": string(validJSON), "invalid": string(invalidJSON), "malformed": string(validJSON[:len(validJSON)-1]),
+			} {
+				re.NoError(memory.Save(keypath.RegionLabelKeyPath(key), value))
+			}
+			labeler := &RegionLabeler{storage: store, ctx: t.Context()}
+			re.NoError(labeler.loadRules())
+
+			output, err := os.ReadFile(fname)
+			re.NoError(err)
+			re.Contains(string(output), "failed to adjust label rule")
+			re.Contains(string(output), "failed to unmarshal label rule value")
+			if mode.typ == logutil.RedactInfoLogON {
+				re.NotContains(string(output), startKey)
+				re.NotContains(string(output), endKey)
+				re.Equal(2, strings.Count(string(output), "[rule-value=?]"))
+			} else {
+				re.Contains(string(output), startKey)
+				re.Contains(string(output), endKey)
+				if mode.typ == logutil.RedactInfoLogMarker {
+					re.Equal(2, strings.Count(string(output), `[rule-value="‹{`))
+				}
+			}
+
+			re.Len(labeler.GetAllLabelRules(), 1)
+			loaded := labeler.GetLabelRule(rule.ID)
+			re.NotNil(loaded)
+			re.Equal(rule.ID, loaded.ID)
+			for _, key := range []string{"invalid", "malformed"} {
+				value, err := memory.Load(keypath.RegionLabelKeyPath(key))
+				re.NoError(err)
+				re.Empty(value)
+			}
+			value, err := memory.Load(keypath.RegionLabelKeyPath(rule.ID))
+			re.NoError(err)
+			re.JSONEq(string(validJSON), value)
+		})
 	}
 }
 

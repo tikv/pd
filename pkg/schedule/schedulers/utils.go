@@ -495,7 +495,7 @@ func calculateRangeCount(c sche.SchedulerCluster, stores []*core.StoreInfo, stor
 			logutil.ZapRedactString("start-key", string(core.HexRegionKey(startKey))),
 			logutil.ZapRedactString("end-key", string(core.HexRegionKey(endKey))),
 			zap.Uint64("store-id", store.GetID()),
-			zap.String("rule", rule.String()),
+			logutil.ZapRedactString("rule", rule.String()),
 			zap.Int("region-count", regionCount),
 			zap.Float64("weight", weight),
 			zap.Float64("store-count", storeCount),

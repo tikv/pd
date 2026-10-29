@@ -22,11 +22,24 @@ import (
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
+<<<<<<< HEAD
+=======
+	"os"
+	"strconv"
+>>>>>>> 57f40aae7b (*: redact region keys and request bodies in logs (#11347))
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/docker/go-units"
+<<<<<<< HEAD
+=======
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
+	"go.uber.org/zap"
+
+>>>>>>> 57f40aae7b (*: redact region keys and request bodies in logs (#11347))
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/eraftpb"
@@ -40,6 +53,7 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
+	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/mock/mockhbstream"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/progress"
@@ -1819,6 +1833,92 @@ func TestRegionSizeCacheAcrossStoresAndRules(t *testing.T) {
 	re.Equal(2, loadCounts[regionSizeCacheKey{startKey: "a", endKey: "m"}])
 }
 
+<<<<<<< HEAD
+=======
+func TestCalculateRangeLogRedact(t *testing.T) {
+	for _, mode := range []struct {
+		name string
+		typ  logutil.RedactInfoLogType
+	}{
+		{"off", logutil.RedactInfoLogOFF},
+		{"on", logutil.RedactInfoLogON},
+		{"marker", logutil.RedactInfoLogMarker},
+	} {
+		t.Run(mode.name, func(t *testing.T) {
+			re := require.New(t)
+			manager := placement.NewRuleManager(context.Background(), storage.NewStorageWithMemoryBackend(), nil, mockconfig.NewTestOptions())
+			re.NoError(manager.Initialize(1, nil, "", false))
+			rule := &placement.Rule{
+				GroupID: placement.DefaultGroupID, ID: "range", Index: 1, Override: true,
+				StartKeyHex: "6161", EndKeyHex: "7a7a", Role: placement.Voter, Count: 1,
+			}
+			re.NoError(manager.SetRule(rule))
+			cluster := &RaftCluster{ruleManager: manager}
+			store := core.NewStoreInfo(&metapb.Store{Id: 1})
+			regionSizes := newRegionSizeCache(func(startKey, endKey []byte) int64 {
+				re.Equal([]byte("ab"), startKey)
+				re.Equal([]byte("zy"), endKey)
+				return 100
+			})
+
+			fname := testutil.InitTempFileLogger(t, "debug")
+			var (
+				lg    *zap.Logger
+				props *log.ZapProperties
+			)
+			re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, mode.typ))
+			t.Cleanup(func() {
+				re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, logutil.RedactInfoLogOFF))
+			})
+			// Use a subrange so unredacted rule boundaries cannot hide behind range fields.
+			re.Equal(100.0, cluster.calculateRange([]*core.StoreInfo{store}, store, []byte("ab"), []byte("zy"), regionSizes))
+
+			output, err := os.ReadFile(fname)
+			re.NoError(err)
+			re.Contains(string(output), "calculate range result")
+			if mode.typ == logutil.RedactInfoLogON {
+				re.Contains(string(output), "[rule=?]")
+				re.NotContains(string(output), rule.StartKeyHex)
+				re.NotContains(string(output), rule.EndKeyHex)
+			} else {
+				re.Contains(string(output), rule.StartKeyHex)
+				re.Contains(string(output), rule.EndKeyHex)
+				if mode.typ == logutil.RedactInfoLogMarker {
+					re.Contains(string(output), `[rule="‹{`)
+				}
+			}
+			re.Equal("6161", rule.StartKeyHex)
+			re.Equal("7a7a", rule.EndKeyHex)
+		})
+	}
+}
+
+func TestStatsRegions(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	tc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	count := 10000
+	regions := newTestRegions(uint64(count), 3, 3)
+	for _, region := range regions {
+		err = tc.putRegion(region)
+		re.NoError(err)
+	}
+
+	stats := tc.GetRegionStatsByRange([]byte(""), []byte(""))
+	re.Equal(count, stats.Count)
+	stats = tc.GetHotRegionStatusByRange([]byte(""), []byte(""), "tikv")
+	re.Equal(count, stats.Count)
+
+	midKey := regions[count/2].GetStartKey()
+	stats = tc.GetRegionStatsByRange(midKey, []byte(""))
+	re.Equal(count/2, stats.Count)
+	stats = tc.GetHotRegionStatusByRange(midKey, []byte(""), "tikv")
+	re.Equal(count/2, stats.Count)
+}
+
+>>>>>>> 57f40aae7b (*: redact region keys and request bodies in logs (#11347))
 func TestCalculateStoreSize2(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())

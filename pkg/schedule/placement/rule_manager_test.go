@@ -17,16 +17,30 @@ package placement
 import (
 	"context"
 	"encoding/hex"
+	"os"
+	"strings"
 	"testing"
 
+<<<<<<< HEAD
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
+=======
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/log"
+
+>>>>>>> 57f40aae7b (*: redact region keys and request bodies in logs (#11347))
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
 func newTestManager(t *testing.T, enableWitness bool) (endpoint.RuleStorage, *RuleManager) {
@@ -499,4 +513,171 @@ func dhex(hk string) []byte {
 		panic("decode fail")
 	}
 	return k
+}
+
+func TestRuleManagerLogRedact(t *testing.T) {
+	re := require.New(t)
+	_, manager := newTestManager(t, false)
+	fname := testutil.InitTempFileLogger(t, "info")
+	var (
+		lg    *zap.Logger
+		props *log.ZapProperties
+	)
+	defer func() {
+		re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, logutil.RedactInfoLogOFF))
+	}()
+
+	const startKey, endKey = "7480000000000000ff", "7480000000000001ff"
+	newRule := func(id string) *Rule {
+		return &Rule{GroupID: "redact", ID: id, StartKeyHex: startKey, EndKeyHex: endKey, Role: Voter, Count: 1}
+	}
+	applyAll := func() {
+		re.NoError(manager.SetRule(newRule("r1")))
+		re.NoError(manager.SetRules([]*Rule{newRule("r2")}))
+		re.NoError(manager.Batch([]RuleOp{{Rule: newRule("r3"), Action: RuleOpAdd}}))
+		re.NoError(manager.SetGroupBundle(GroupBundle{ID: "redact", Rules: []*Rule{newRule("r4")}}))
+		re.NoError(manager.SetAllGroupBundles([]GroupBundle{
+			{ID: DefaultGroupID, Rules: []*Rule{{GroupID: DefaultGroupID, ID: DefaultRuleID, Role: Voter, Count: 3}}},
+			{ID: "redact", Rules: []*Rule{newRule("r5")}},
+		}, true))
+	}
+	readLog := func() string {
+		b, err := os.ReadFile(fname)
+		re.NoError(err)
+		re.NoError(os.Truncate(fname, 0))
+		return string(b)
+	}
+	logMsgs := []string{
+		`"placement rule updated"`, `"placement rules updated"`, `"group is reset"`, `"full config reset"`,
+	}
+
+	// Redaction off: the rule content, including keys, is logged as before.
+	applyAll()
+	output := readLog()
+	for _, msg := range logMsgs {
+		re.Contains(output, msg)
+	}
+	re.Contains(output, startKey)
+	re.Contains(output, endKey)
+
+	// Redaction on: the keys must not appear in the log.
+	re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, logutil.RedactInfoLogON))
+	applyAll()
+	output = readLog()
+	for _, msg := range logMsgs {
+		re.Contains(output, msg)
+	}
+	re.NotContains(output, startKey)
+	re.NotContains(output, endKey)
+	re.Contains(output, "[rule=?]")
+	re.Contains(output, "[rules=?]")
+	re.Contains(output, "[batch=?]")
+	re.Contains(output, "[group=?]")
+	re.Contains(output, "[config=?]")
+
+	// Redaction marker: the rule content is enclosed in markers.
+	re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, logutil.RedactInfoLogMarker))
+	re.NoError(manager.SetRule(newRule("r1")))
+	re.Contains(readLog(), `[rule="‹{`)
+}
+
+func TestRuleManagerLoadRulesLogRedact(t *testing.T) {
+	const startKey, endKey = "7480000000000000ff", "7480000000000001ff"
+	validRule := &Rule{GroupID: "redact", ID: "valid", StartKeyHex: startKey, EndKeyHex: endKey, Role: Voter, Count: 1}
+	invalidRule := validRule.Clone()
+	invalidRule.ID, invalidRule.Count = "invalid", 0
+	invalidLeaderRule := validRule.Clone()
+	invalidLeaderRule.ID, invalidLeaderRule.Role, invalidLeaderRule.Count = "invalid-leader", Leader, 2
+	invalidStartKeyRule := validRule.Clone()
+	invalidStartKeyRule.ID, invalidStartKeyRule.StartKeyHex = "invalid-start-key", startKey+"zz"
+	invalidEndKeyRule := validRule.Clone()
+	invalidEndKeyRule.ID, invalidEndKeyRule.EndKeyHex = "invalid-end-key", endKey+"zz"
+	mismatchRule := validRule.Clone()
+	mismatchRule.ID = "mismatch"
+	validJSON := validRule.String()
+
+	for _, mode := range []struct {
+		name string
+		typ  logutil.RedactInfoLogType
+	}{
+		{"off", logutil.RedactInfoLogOFF},
+		{"on", logutil.RedactInfoLogON},
+		{"marker", logutil.RedactInfoLogMarker},
+	} {
+		t.Run(mode.name, func(t *testing.T) {
+			re := require.New(t)
+			fname := testutil.InitTempFileLogger(t, "info")
+			var (
+				lg    *zap.Logger
+				props *log.ZapProperties
+			)
+			re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, mode.typ))
+			t.Cleanup(func() {
+				re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, logutil.RedactInfoLogOFF))
+			})
+
+			memory := kv.NewMemoryKV()
+			store := endpoint.NewStorageEndpoint(memory, nil)
+			for key, value := range map[string]string{
+				validRule.StoreKey():           validJSON,
+				invalidRule.StoreKey():         invalidRule.String(),
+				invalidLeaderRule.StoreKey():   invalidLeaderRule.String(),
+				invalidStartKeyRule.StoreKey(): invalidStartKeyRule.String(),
+				invalidEndKeyRule.StoreKey():   invalidEndKeyRule.String(),
+				"malformed":                    validJSON[:len(validJSON)-1],
+				"duplicate":                    validJSON,
+				"mismatch":                     mismatchRule.String(),
+			} {
+				re.NoError(memory.Save(keypath.RuleKeyPath(key), value))
+			}
+			manager := NewRuleManager(context.Background(), store, nil, nil)
+			re.NoError(manager.loadRules())
+
+			output, err := os.ReadFile(fname)
+			re.NoError(err)
+			for _, msg := range []string{
+				"failed to unmarshal rule value", "rule is in bad format", "duplicated rule key", "mismatch data key, need to restore",
+			} {
+				re.Contains(string(output), msg)
+			}
+			for _, reason := range []string{"invalid count 0", "define multiple leaders by count 2"} {
+				re.Contains(string(output), "[PD:placement:ErrLoadRule]load rule failed: [PD:placement:ErrRuleContent]invalid rule content, "+reason)
+			}
+			if mode.typ == logutil.RedactInfoLogON {
+				re.NotContains(string(output), startKey)
+				re.NotContains(string(output), endKey)
+				re.Equal(7, strings.Count(string(output), "[rule-value=?]"))
+				re.Contains(string(output), "[PD:placement:ErrLoadRule]load rule failed: ?")
+			} else {
+				re.Contains(string(output), startKey)
+				re.Contains(string(output), endKey)
+				for _, key := range []string{invalidStartKeyRule.StartKeyHex, invalidEndKeyRule.EndKeyHex} {
+					cause := "[PD:hex:ErrHexDecodingString]decode string " + key + " error"
+					if mode.typ == logutil.RedactInfoLogMarker {
+						cause = "‹" + cause + "›"
+					}
+					re.Contains(string(output), "[PD:placement:ErrLoadRule]load rule failed: "+cause)
+				}
+				if mode.typ == logutil.RedactInfoLogMarker {
+					re.Equal(7, strings.Count(string(output), `[rule-value="‹{`))
+				}
+			}
+
+			for _, key := range []string{invalidRule.StoreKey(), invalidLeaderRule.StoreKey(), invalidStartKeyRule.StoreKey(), invalidEndKeyRule.StoreKey(), "malformed", "duplicate", "mismatch"} {
+				value, err := store.LoadRule(key)
+				re.NoError(err)
+				re.Empty(value)
+			}
+			re.Equal(2, manager.GetRulesCount())
+			for _, rule := range []*Rule{validRule, mismatchRule} {
+				loaded := manager.GetRule(rule.GroupID, rule.ID)
+				re.NotNil(loaded)
+				re.Equal(startKey, loaded.StartKeyHex)
+				re.Equal(endKey, loaded.EndKeyHex)
+				value, err := store.LoadRule(rule.StoreKey())
+				re.NoError(err)
+				re.Equal(rule.String(), value)
+			}
+		})
+	}
 }
