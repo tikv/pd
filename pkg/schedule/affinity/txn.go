@@ -377,12 +377,13 @@ func (m *Manager) updateObservedGroupPeers(groupID string, affinityVer uint64, l
 		return current, nil
 	}
 	// Publish the target unless another change has reached the group. The
-	// watcher may have applied the target already, but it does not make the
-	// group available.
-	if !sameStoredGroup(&current.Group, &target.Expected) && !sameStoredGroup(&current.Group, target.result(&target.Expected)) {
+	// watcher may have applied the target already.
+	result := target.result(&target.Expected)
+	if !sameStoredGroup(&current.Group, &target.Expected) && !sameStoredGroup(&current.Group, result) {
 		return current, nil
 	}
-	return m.updateGroupPeers(groupID, leaderStoreID, voterStoreIDs)
+	m.publishGroupTargetLocked(result)
+	return m.GetAffinityGroupState(groupID), nil
 }
 
 // observedGroupTargetLocked returns the target to write for an observed layout,
