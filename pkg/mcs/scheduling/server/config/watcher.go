@@ -162,8 +162,9 @@ func (cw *Watcher) updateConfig(kv *mvccpb.KeyValue) error {
 }
 
 func (cw *Watcher) initializeConfigWatcher() error {
+	// PD only overwrites the config key and never deletes it, so a deletion
+	// keeps the last applied config.
 	deleteFn := func(*mvccpb.KeyValue) error {
-		cw.SetLabelPropertyConfig(nil)
 		return nil
 	}
 	cw.configWatcher = etcdutil.NewLoopWatcher(
