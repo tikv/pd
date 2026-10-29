@@ -68,10 +68,11 @@ type Watcher struct {
 }
 
 type persistedConfig struct {
-	ClusterVersion semver.Version       `json:"cluster-version"`
-	Schedule       sc.ScheduleConfig    `json:"schedule"`
-	Replication    sc.ReplicationConfig `json:"replication"`
-	Store          sc.StoreConfig       `json:"store"`
+	ClusterVersion semver.Version         `json:"cluster-version"`
+	Schedule       sc.ScheduleConfig      `json:"schedule"`
+	Replication    sc.ReplicationConfig   `json:"replication"`
+	LabelProperty  sc.LabelPropertyConfig `json:"label-property"`
+	Store          sc.StoreConfig         `json:"store"`
 }
 
 // UnmarshalJSON consumes persisted schedule-field presence while decoding, so
@@ -141,25 +142,28 @@ func (cw *Watcher) getSchedulersController() *schedulers.Controller {
 	return sc.(*schedulers.Controller)
 }
 
-func (cw *Watcher) initializeConfigWatcher() error {
-	putFn := func(kv *mvccpb.KeyValue) error {
-		cfg := &persistedConfig{
-			Schedule: sc.ScheduleConfig{DefaultStoreLimit: sc.DefaultStoreLimitConfig()},
-		}
-		if err := json.Unmarshal(kv.Value, cfg); err != nil {
-			log.Warn("failed to unmarshal scheduling config entry",
-				zap.String("event-kv-key", string(kv.Key)), zap.Error(err))
-			return err
-		}
-		log.Info("update scheduling config", zap.Reflect("new", cfg))
-		AdjustScheduleCfg(&cfg.Schedule)
-		cw.SetClusterVersion(&cfg.ClusterVersion)
-		cw.SetScheduleConfig(&cfg.Schedule)
-		cw.SetReplicationConfig(&cfg.Replication)
-		cw.SetStoreConfig(&cfg.Store)
-		return nil
+func (cw *Watcher) updateConfig(kv *mvccpb.KeyValue) error {
+	cfg := &persistedConfig{
+		Schedule: sc.ScheduleConfig{DefaultStoreLimit: sc.DefaultStoreLimitConfig()},
 	}
+	if err := json.Unmarshal(kv.Value, cfg); err != nil {
+		log.Warn("failed to unmarshal scheduling config entry",
+			zap.String("event-kv-key", string(kv.Key)), zap.Error(err))
+		return err
+	}
+	log.Info("update scheduling config", zap.Reflect("new", cfg))
+	AdjustScheduleCfg(&cfg.Schedule)
+	cw.SetClusterVersion(&cfg.ClusterVersion)
+	cw.SetScheduleConfig(&cfg.Schedule)
+	cw.SetReplicationConfig(&cfg.Replication)
+	cw.SetLabelPropertyConfig(cfg.LabelProperty)
+	cw.SetStoreConfig(&cfg.Store)
+	return nil
+}
+
+func (cw *Watcher) initializeConfigWatcher() error {
 	deleteFn := func(*mvccpb.KeyValue) error {
+		cw.SetLabelPropertyConfig(nil)
 		return nil
 	}
 	cw.configWatcher = etcdutil.NewLoopWatcher(
@@ -169,7 +173,7 @@ func (cw *Watcher) initializeConfigWatcher() error {
 		// Watch configuration JSON
 		keypath.ConfigPath(),
 		func([]*clientv3.Event) error { return nil },
-		putFn, deleteFn,
+		cw.updateConfig, deleteFn,
 		func([]*clientv3.Event) error { return nil },
 		false, /* withPrefix */
 	)

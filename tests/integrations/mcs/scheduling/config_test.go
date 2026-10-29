@@ -124,6 +124,18 @@ func (suite *configTestSuite) TestConfigWatch() {
 	testutil.Eventually(re, func() bool {
 		return watcher.GetClusterVersion().String() == "4.0.0"
 	})
+	persistOpts.SetLabelPropertyConfig(sc.LabelPropertyConfig{
+		sc.RejectLeader: {{Key: "engine", Value: "tiflash"}},
+	})
+	persistConfig(re, suite.pdLeaderServer)
+	testutil.Eventually(re, func() bool {
+		return watcher.CheckLabelProperty(sc.RejectLeader, []*metapb.StoreLabel{{Key: "engine", Value: "tiflash"}})
+	})
+	persistOpts.SetLabelPropertyConfig(sc.LabelPropertyConfig{})
+	persistConfig(re, suite.pdLeaderServer)
+	testutil.Eventually(re, func() bool {
+		return !watcher.CheckLabelProperty(sc.RejectLeader, []*metapb.StoreLabel{{Key: "engine", Value: "tiflash"}})
+	})
 	watcher.Close()
 }
 
