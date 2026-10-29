@@ -160,11 +160,7 @@ func (m *Manager) checkGroupsAvailability() {
 	if !m.IsAvailable() {
 		return
 	}
-	unavailableStores := m.collectUnavailableStores()
-	isUnavailableStoresChanged, groupAvailabilityChanges := m.getGroupAvailabilityChanges(unavailableStores)
-	if isUnavailableStoresChanged {
-		m.setGroupAvailabilityChanges(unavailableStores, groupAvailabilityChanges)
-	}
+	m.applyStoreConditions(m.collectUnavailableStores())
 	m.collectMetrics()
 }
 
@@ -215,21 +211,24 @@ func (m *Manager) collectUnavailableStores() map[uint64]storeCondition {
 	return unavailableStores
 }
 
-func (m *Manager) getGroupAvailabilityChanges(unavailableStores map[uint64]storeCondition) (isUnavailableStoresChanged bool, groupAvailabilityChanges map[string]groupAvailability) {
-	groupAvailabilityChanges = make(map[string]groupAvailability)
-	availableGroupCount := 0
-	unavailableGroupCount := 0
-
-	// Validate whether unavailableStores has changed.
+// applyStoreConditions records the store conditions. If they changed, or are
+// recorded for the first time, it sets the availability of every group from its
+// target and reports true. It computes and applies the availability under the
+// write lock, so that a target written meanwhile is checked against the new
+// conditions instead of being overwritten by a result computed for the old one.
+func (m *Manager) applyStoreConditions(unavailableStores map[uint64]storeCondition) bool {
 	m.RLock()
-	isUnavailableStoresChanged = !maps.Equal(unavailableStores, m.unavailableStores)
-	if !isUnavailableStoresChanged {
-		m.RUnlock()
-		return false, nil
+	unchanged := m.storeConditionsKnown && maps.Equal(unavailableStores, m.unavailableStores)
+	m.RUnlock()
+	if unchanged {
+		return false
 	}
 
-	// Analyze which Groups have changed availability
-	// Collect log messages to print after releasing lock
+	availableGroupCount := 0
+	unavailableGroupCount := 0
+	m.Lock()
+	m.unavailableStores = unavailableStores
+	m.storeConditionsKnown = true
 	for _, groupInfo := range m.groups {
 		availability := groupInfo.GetAvailability()
 
@@ -242,7 +241,7 @@ func (m *Manager) getGroupAvailabilityChanges(unavailableStores map[uint64]store
 		// Only Groups in the available or degraded status can be changed automatically.
 		newAvailability := calcGroupAvailability(unavailableStores, groupInfo.LeaderStoreID, groupInfo.VoterStoreIDs)
 		if availability != newAvailability {
-			groupAvailabilityChanges[groupInfo.ID] = newAvailability
+			m.updateGroupAvailabilityLocked(groupInfo.ID, newAvailability)
 		}
 		if newAvailability == groupAvailable {
 			availableGroupCount++
@@ -250,7 +249,7 @@ func (m *Manager) getGroupAvailabilityChanges(unavailableStores map[uint64]store
 			unavailableGroupCount++
 		}
 	}
-	m.RUnlock()
+	m.Unlock()
 
 	if len(unavailableStores) > 0 {
 		log.Warn("affinity groups invalidated due to unavailable stores",
@@ -258,17 +257,7 @@ func (m *Manager) getGroupAvailabilityChanges(unavailableStores map[uint64]store
 			zap.Int("unavailable-group-count", unavailableGroupCount),
 			zap.Int("available-group-count", availableGroupCount))
 	}
-
-	return
-}
-
-func (m *Manager) setGroupAvailabilityChanges(unavailableStores map[uint64]storeCondition, groupAvailabilityChanges map[string]groupAvailability) {
-	m.Lock()
-	defer m.Unlock()
-	m.unavailableStores = unavailableStores
-	for groupID, availability := range groupAvailabilityChanges {
-		m.updateGroupAvailabilityLocked(groupID, availability)
-	}
+	return true
 }
 
 func (m *Manager) checkHasUnavailableStore(leaderStoreID uint64, voterStoreIDs []uint64) error {

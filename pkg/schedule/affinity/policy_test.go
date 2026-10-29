@@ -234,9 +234,7 @@ func TestAvailabilityCheckInvalidatesGroup(t *testing.T) {
 
 	// Simulate store 2 unavailable.
 	unavailable := map[uint64]storeCondition{2: storeRemoved}
-	isUnavailableStoresChanged, groupAvailabilityChanges := manager.getGroupAvailabilityChanges(unavailable)
-	re.True(isUnavailableStoresChanged)
-	manager.setGroupAvailabilityChanges(unavailable, groupAvailabilityChanges)
+	re.True(manager.applyStoreConditions(unavailable))
 
 	state2 := manager.GetAffinityGroupState("avail")
 	re.NotNil(state2)
@@ -420,17 +418,13 @@ func TestGroupAvailabilityPriority(t *testing.T) {
 
 	// evict-leader on leader -> degraded
 	unavailable := map[uint64]storeCondition{1: storeLeaderEvicted}
-	changed, changes := manager.getGroupAvailabilityChanges(unavailable)
-	re.True(changed)
-	manager.setGroupAvailabilityChanges(unavailable, changes)
+	re.True(manager.applyStoreConditions(unavailable))
 	groupInfo := getGroupForTest(re, manager, "leader-only")
 	re.Equal(groupDegraded, groupInfo.GetAvailability())
 
 	// evict-leader only on follower should not change availability
 	unavailable = map[uint64]storeCondition{2: storeLeaderEvicted}
-	changed, changes = manager.getGroupAvailabilityChanges(unavailable)
-	re.True(changed)
-	manager.setGroupAvailabilityChanges(unavailable, changes)
+	re.True(manager.applyStoreConditions(unavailable))
 	groupInfo = getGroupForTest(re, manager, "leader-only")
 	re.Equal(groupAvailable, groupInfo.GetAvailability())
 
@@ -442,9 +436,7 @@ func TestGroupAvailabilityPriority(t *testing.T) {
 		1: storeDisconnected, // degraded
 		2: storeRemoved,      // expired
 	}
-	changed, changes = manager.getGroupAvailabilityChanges(unavailable)
-	re.True(changed)
-	manager.setGroupAvailabilityChanges(unavailable, changes)
+	re.True(manager.applyStoreConditions(unavailable))
 	groupInfo = getGroupForTest(re, manager, "priority")
 	re.Equal(groupExpired, groupInfo.GetAvailability())
 }
@@ -467,8 +459,7 @@ func TestObserveAvailableRegionOnPreparingStore(t *testing.T) {
 	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "g"}}))
 	unavailable := manager.collectUnavailableStores()
 	re.Empty(unavailable)
-	_, changes := manager.getGroupAvailabilityChanges(unavailable)
-	manager.setGroupAvailabilityChanges(unavailable, changes)
+	manager.applyStoreConditions(unavailable)
 
 	region := core.NewRegionInfo(
 		&metapb.Region{Id: 10, Peers: []*metapb.Peer{{Id: 11, StoreId: 1}, {Id: 12, StoreId: 2}}},

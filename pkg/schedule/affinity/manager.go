@@ -74,6 +74,9 @@ type Manager struct {
 	groups              map[string]*runtimeGroupInfo // {group_id} -> runtimeGroupInfo
 	regions             map[uint64]regionCache       // {region_id} -> regionCache
 	unavailableStores   map[uint64]storeCondition    // {store_id} -> storeCondition
+	// storeConditionsKnown is set once the availability check has recorded the
+	// store conditions. Until then, a group read with a target stays degraded.
+	storeConditionsKnown bool
 
 	// The following members are protected by metaMutex only, not protected by RWMutex.
 	// keyRanges cached in memory to reduce labeler lock contention
@@ -153,7 +156,7 @@ func (m *Manager) initGroupLocked(group *Group) {
 		log.Error("group already initialized", zap.String("group-id", group.ID))
 		return
 	}
-	m.groups[group.ID] = &runtimeGroupInfo{
+	groupInfo := &runtimeGroupInfo{
 		ID:                  group.ID,
 		CreateTimestamp:     group.CreateTimestamp,
 		LeaderStoreID:       group.LeaderStoreID,
@@ -166,6 +169,24 @@ func (m *Manager) initGroupLocked(group *Group) {
 		LabelRule:           nil,
 		RangeCount:          0,
 	}
+	m.groups[group.ID] = groupInfo
+	// A group read with a target, for example by the watcher, can be used once
+	// its stores are known to be available. The first availability check sets
+	// the groups loaded before it.
+	if m.storeConditionsKnown {
+		m.setTargetAvailabilityLocked(groupInfo)
+	}
+}
+
+// setTargetAvailabilityLocked sets the availability of a group with a target from
+// the store conditions known now. It is needed whenever the target changes,
+// because the availability check applies the conditions only when they change.
+// The write lock of RWMutex must be held.
+func (m *Manager) setTargetAvailabilityLocked(groupInfo *runtimeGroupInfo) {
+	if groupInfo.LeaderStoreID == 0 || len(groupInfo.VoterStoreIDs) == 0 {
+		return
+	}
+	groupInfo.SetAvailability(calcGroupAvailability(m.unavailableStores, groupInfo.LeaderStoreID, groupInfo.VoterStoreIDs))
 }
 
 func (m *Manager) noGroupsExist(groups []*Group) error {
@@ -205,6 +226,8 @@ func (m *Manager) resetCountLocked(groupInfo *runtimeGroupInfo) {
 	groupInfo.AffinityVer++
 }
 
+// updateGroupPeers sets the target of a group, with the availability that the
+// store conditions known now give.
 func (m *Manager) updateGroupPeers(groupID string, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
 	m.Lock()
 	defer m.Unlock()
@@ -214,9 +237,11 @@ func (m *Manager) updateGroupPeers(groupID string, leaderStoreID uint64, voterSt
 		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
 	}
 
-	groupInfo.SetAvailability(groupAvailable)
 	groupInfo.LeaderStoreID = leaderStoreID
 	groupInfo.VoterStoreIDs = slices.Clone(voterStoreIDs)
+	// A store may have become unavailable since the target was checked, while it
+	// was written.
+	m.setTargetAvailabilityLocked(groupInfo)
 	m.resetCountLocked(groupInfo)
 
 	return newGroupState(groupInfo), nil
@@ -527,6 +552,8 @@ func (m *Manager) SyncGroupFromEtcd(group *Group) {
 }
 
 // syncGroupTargetLocked syncs the stored target, replacing the runtime group if it was recreated.
+// A changed target takes the availability that the store conditions known now give, as when
+// an admin sets it through PD, or a write whose result was unknown committed it.
 // Both metaMutex and the write lock of RWMutex must be held.
 func (m *Manager) syncGroupTargetLocked(groupInfo *runtimeGroupInfo, group *Group) {
 	if groupInfo.CreateTimestamp != group.CreateTimestamp {
@@ -548,6 +575,7 @@ func (m *Manager) syncGroupTargetLocked(groupInfo *runtimeGroupInfo, group *Grou
 	}
 
 	if changed {
+		m.setTargetAvailabilityLocked(groupInfo)
 		m.resetCountLocked(groupInfo)
 	}
 }
