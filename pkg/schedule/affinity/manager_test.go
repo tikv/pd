@@ -796,3 +796,34 @@ func TestDegradedExpiration(t *testing.T) {
 	re.NotNil(groupState2)
 	re.False(groupState2.AffinitySchedulingAllowed)
 }
+
+// TestSyncGroupPrefersBufferedLabelRule checks that a group synced after its
+// label rule takes the buffered rule, even if the region labeler, which another
+// watcher syncs, still holds an older rule of the group.
+func TestSyncGroupPrefersBufferedLabelRule(t *testing.T) {
+	re := require.New(t)
+	const groupID = "g"
+	newer := GroupKeyRanges{GroupID: groupID, KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("b")}}}
+	older := GroupKeyRanges{GroupID: groupID, KeyRanges: []keyutil.KeyRange{{StartKey: []byte("b"), EndKey: []byte("c")}}}
+	store := storage.NewStorageWithMemoryBackend()
+	stores := core.NewStoresInfo()
+	stores.PutStore(core.NewStoreInfo(&metapb.Store{Id: 1}))
+	regionLabeler, err := labeler.NewRegionLabeler(t.Context(), store, time.Second*5)
+	re.NoError(err)
+	manager, err := NewManager(t.Context(), store, stores, mockconfig.NewTestOptions(), regionLabeler)
+	re.NoError(err)
+
+	re.NoError(regionLabeler.SetLabelRule(MakeLabelRule(older)))
+	// The affinity watcher decodes its own copy of the newer rule.
+	data, err := json.Marshal(MakeLabelRule(newer))
+	re.NoError(err)
+	rule, err := labeler.NewLabelRuleFromJSON(data)
+	re.NoError(err)
+	re.NoError(manager.SyncKeyRangesFromEtcd(rule))
+	re.Contains(manager.labelRuleBuffer, groupID)
+
+	manager.SyncGroupFromEtcd(&Group{ID: groupID, LeaderStoreID: 1, VoterStoreIDs: []uint64{1}})
+	re.NotContains(manager.labelRuleBuffer, groupID)
+	re.Equal(newer, manager.keyRanges[groupID])
+	re.Equal(1, manager.GetAffinityGroupState(groupID).RangeCount)
+}

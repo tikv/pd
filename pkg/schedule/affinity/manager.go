@@ -496,11 +496,12 @@ func (m *Manager) SyncGroupFromEtcd(group *Group) {
 		labelErr  error
 	)
 	if !exists {
-		labelRule = m.regionLabeler.GetLabelRule(GetLabelRuleID(group.ID))
-
-		// If regionLabeler has not been synchronized but SyncKeyRangesFromEtcd has already run, read from the buffer.
+		// Prefer the rule buffered by SyncKeyRangesFromEtcd, which later events from
+		// the same watcher update. The labeler is synced by another watcher and may
+		// still hold an older rule that no later affinity event corrects.
+		labelRule = m.labelRuleBuffer[group.ID]
 		if labelRule == nil {
-			labelRule = m.labelRuleBuffer[group.ID]
+			labelRule = m.regionLabeler.GetLabelRule(GetLabelRuleID(group.ID))
 		}
 
 		if labelRule != nil {
