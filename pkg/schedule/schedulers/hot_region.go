@@ -42,7 +42,7 @@ const (
 	splitHotWriteBuckets    = "split-hot-write-region"
 	splitProgressiveRank    = 5
 	minHotScheduleInterval  = time.Second
-	maxHotScheduleInterval  = 20 * time.Second
+	maxHotScheduleInterval  = 10 * time.Second
 	defaultPendingWeight    = 1.0
 	defaultPendingAmpFactor = 2.0
 	defaultStddevThreshold  = 0.1

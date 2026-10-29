@@ -110,7 +110,7 @@ func TestHotScheduleIntervalBackoff(t *testing.T) {
 		}
 		re.LessOrEqual(interval, maxHotScheduleInterval)
 	}
-	re.Equal(maxHotScheduleInterval, sc.GetInterval())
+	re.Equal(10*time.Second, sc.GetInterval())
 
 	// New hot work is scheduled on the next round and restores the minimum interval.
 	for id := uint64(1); id <= 3; id++ {
