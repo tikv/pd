@@ -167,8 +167,12 @@ func (m *Manager) updateGroupTargetsLocked(ctx context.Context, targets []GroupT
 			switch {
 			case sameStoredGroup(group, &target.Expected):
 				saved[i] = target.result(group)
-				if err := m.storage.SaveAffinityGroup(txn, group.ID, saved[i]); err != nil {
-					return err
+				// A stored group that already holds the target, as when a Region
+				// confirms the current target, is not written again.
+				if !sameStoredGroup(saved[i], group) {
+					if err := m.storage.SaveAffinityGroup(txn, group.ID, saved[i]); err != nil {
+						return err
+					}
 				}
 			case sameStoredGroup(group, target.result(&target.Expected)):
 				// An earlier request with this target committed.
