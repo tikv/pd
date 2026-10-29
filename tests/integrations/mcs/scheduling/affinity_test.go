@@ -154,7 +154,7 @@ func TestAffinityFirstWinTargetWriteUnavailable(t *testing.T) {
 	testutil.Eventually(re, func() bool {
 		heartbeat()
 		return failures.Load() > 0 && counter() > before &&
-			logs.FilterLevelExact(zap.WarnLevel).FilterMessage("failed to write affinity group target").FilterField(zap.String("group-id", groupID)).Len() > 0
+			logs.FilterLevelExact(zap.WarnLevel).FilterMessage("failed to write affinity group targets").FilterField(zap.Int("target-count", 1)).Len() > 0
 	})
 	re.NotNil(cluster.GetRegion(100), "Region heartbeats must still reach scheduling")
 	response, err := primary.GetHTTPClient().Get(leader.GetAddr() + "/health")
