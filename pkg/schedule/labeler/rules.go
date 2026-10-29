@@ -54,6 +54,9 @@ type LabelRule struct {
 	RuleType  string        `json:"rule_type"`
 	Data      any           `json:"data"`
 	minExpire *time.Time
+	// boundStartKey and boundEndKey cover all key ranges in Data. They are set
+	// by checkAndAdjust.
+	boundStartKey, boundEndKey []byte
 }
 
 func (rule *LabelRule) String() string {
@@ -97,6 +100,15 @@ func (rule *LabelRule) GetKeyRanges() []*KeyRangeRule {
 		return nil
 	}
 	return rs
+}
+
+// KeyRangeBounds returns the smallest start key and the largest end key of the
+// key ranges. An empty end key means at least one range is unbounded. The
+// bounds are computed when the rule is validated, for example by
+// NewLabelRuleFromJSON or RegionLabeler.SetLabelRule. An unvalidated rule
+// returns empty bounds, which cover the whole key space.
+func (rule *LabelRule) KeyRangeBounds() (startKey, endKey []byte) {
+	return rule.boundStartKey, rule.boundEndKey
 }
 
 // NewLabelRuleFromJSON creates a label rule from the JSON data.
@@ -228,8 +240,9 @@ func (rule *LabelRule) checkAndAdjust() error {
 
 	// TODO: change it to switch statement once we support more types.
 	if rule.RuleType == KeyRange {
-		var err error
-		rule.Data, err = initKeyRangeRulesFromLabelRuleData(rule.Data)
+		ranges, err := initKeyRangeRulesFromLabelRuleData(rule.Data)
+		rule.Data = ranges
+		rule.boundStartKey, rule.boundEndKey = keyRangeRulesBounds(ranges)
 		return err
 	}
 	log.Error("invalid rule type", zap.String("rule-type", rule.RuleType))
@@ -261,6 +274,20 @@ func initKeyRangeRulesFromLabelRuleData(data any) ([]*KeyRangeRule, error) {
 		rs = append(rs, rr)
 	}
 	return rs, nil
+}
+
+// keyRangeRulesBounds returns the smallest start key and the largest end key,
+// where an empty end key is unbounded.
+func keyRangeRulesBounds(ranges []*KeyRangeRule) (startKey, endKey []byte) {
+	for i, r := range ranges {
+		if i == 0 || bytes.Compare(r.StartKey, startKey) < 0 {
+			startKey = r.StartKey
+		}
+		if i == 0 || len(endKey) > 0 && (len(r.EndKey) == 0 || bytes.Compare(r.EndKey, endKey) > 0) {
+			endKey = r.EndKey
+		}
+	}
+	return startKey, endKey
 }
 
 // initAndAdjustKeyRangeRule inits and adjusts the KeyRangeRule from one item in `LabelRule.Data`

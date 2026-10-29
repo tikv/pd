@@ -98,6 +98,56 @@ func TestAdjustRule2(t *testing.T) {
 	}
 }
 
+func TestLabelRuleKeyRangeBounds(t *testing.T) {
+	re := require.New(t)
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	ctx := t.Context()
+	labeler, err := NewRegionLabeler(ctx, store, time.Hour)
+	re.NoError(err)
+	testCases := []struct {
+		keys       []string
+		start, end string
+	}{
+		{keys: []string{"1234", "5678"}, start: "1234", end: "5678"},
+		{keys: []string{"56ab", "78cd", "12ab", "34cd"}, start: "12ab", end: "78cd"},
+		{keys: []string{"12ab", "34cd", "56ab", ""}, start: "12ab", end: ""},
+		{keys: []string{"56ab", "", "12ab", "34cd"}, start: "12ab", end: ""},
+		{keys: []string{"56ab", "78cd", "", "34cd"}, start: "", end: "78cd"},
+	}
+	for i, testCase := range testCases {
+		newRule := func() *LabelRule {
+			return &LabelRule{
+				ID:       fmt.Sprintf("rule%d", i),
+				Labels:   []RegionLabel{{Key: "k1", Value: "v1"}, {Key: "k2", Value: "v2", TTL: "1h"}},
+				RuleType: "key-range",
+				Data:     MakeKeyRanges(testCase.keys...),
+			}
+		}
+		rule := newRule()
+		re.NoError(rule.checkAndAdjust())
+		data, err := json.Marshal(newRule())
+		re.NoError(err)
+		decoded, err := NewLabelRuleFromJSON(data)
+		re.NoError(err)
+		re.NoError(labeler.SetLabelRule(newRule()))
+		// Dropping expired labels returns a copy of the rule.
+		filtered := filterExpiredLabels(rule, time.Now().Add(2*time.Hour))
+		re.NotSame(rule, filtered)
+		re.Len(filtered.Labels, 1)
+		for _, r := range []*LabelRule{rule, decoded, filtered, labeler.GetLabelRule(rule.ID)} {
+			start, end := r.KeyRangeBounds()
+			re.Equal(testCase.start, hex.EncodeToString(start), testCase.keys)
+			re.Equal(testCase.end, hex.EncodeToString(end), testCase.keys)
+		}
+	}
+	// Rules loaded from storage have the same bounds.
+	labeler, err = NewRegionLabeler(ctx, store, time.Hour)
+	re.NoError(err)
+	start, end := labeler.GetLabelRule("rule3").KeyRangeBounds()
+	re.Equal("12ab", hex.EncodeToString(start))
+	re.Empty(end)
+}
+
 func TestGetSetRule(t *testing.T) {
 	re := require.New(t)
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)

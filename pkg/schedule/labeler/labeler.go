@@ -182,11 +182,13 @@ func filterExpiredLabels(rule *LabelRule, now time.Time) *LabelRule {
 		return nil
 	}
 	return &LabelRule{
-		ID:       rule.ID,
-		Index:    rule.Index,
-		RuleType: rule.RuleType,
-		Data:     rule.Data,
-		Labels:   labels,
+		ID:            rule.ID,
+		Index:         rule.Index,
+		RuleType:      rule.RuleType,
+		Data:          rule.Data,
+		Labels:        labels,
+		boundStartKey: rule.boundStartKey,
+		boundEndKey:   rule.boundEndKey,
 	}
 }
 

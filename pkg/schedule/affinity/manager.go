@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/config"
@@ -421,13 +422,21 @@ func (m *Manager) findRegionAffinityGroupState(region *core.RegionInfo) *GroupSt
 	regionRange := keyutil.KeyRange{StartKey: region.GetStartKey(), EndKey: region.GetEndKey()}
 	failpoint.InjectCall("beforeRegionLabelLookup")
 	candidates := m.regionLabeler.GetRegionLabelValues(region, labelKey, func(rule *labeler.LabelRule, groupID string) bool {
-		// Reject the whole rule, including valid fragments of mixed-keyspace rules.
-		ranges, err := parseKeyRangesFromData(rule.GetKeyRanges(), groupID)
+		keyspaceID, scoped, err := parseGroupID(groupID)
 		if err != nil {
 			return false
 		}
-		ranges.KeyRanges = append(ranges.KeyRanges, regionRange)
-		return validateGroupKeyRanges(ranges) == nil
+		if !scoped {
+			return true
+		}
+		lower := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, keyspaceID)
+		upper := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, keyspaceID+1)
+		// Reject the whole rule, including valid fragments of mixed-keyspace rules.
+		// The labeler rejects bounded ranges whose end key is not greater than the
+		// start key, so checking the bounds of all ranges checks every range.
+		startKey, endKey := rule.KeyRangeBounds()
+		return keyRangeInKeyspace(regionRange.StartKey, regionRange.EndKey, lower[:], upper[:]) &&
+			keyRangeInKeyspace(startKey, endKey, lower[:], upper[:])
 	})
 
 	m.RLock()
@@ -438,8 +447,10 @@ func (m *Manager) findRegionAffinityGroupState(region *core.RegionInfo) *GroupSt
 			continue
 		}
 		// The affinity watcher may invalidate a rule before the labeler catches up.
-		if _, scoped, _ := parseGroupID(groupID); scoped && groupInfo.LabelRule == nil {
-			continue
+		if groupInfo.LabelRule == nil {
+			if _, scoped, _ := parseGroupID(groupID); scoped {
+				continue
+			}
 		}
 		return newGroupState(groupInfo)
 	}

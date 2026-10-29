@@ -391,6 +391,53 @@ func TestNextGenRejectsMismatchedRuntimeAffinityLabel(t *testing.T) {
 	re.True(isAffinity)
 }
 
+func TestNextGenRuntimeAffinityLabelRangeEdges(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	const modeFlag = "github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"
+	re.NoError(failpoint.Enable(modeFlag, "return(true)"))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(modeFlag)) })
+	store := storage.NewStorageWithMemoryBackend()
+	storeInfos := core.NewStoresInfo()
+	storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: 1}))
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	re.NoError(err)
+	manager, err := NewManager(ctx, store, storeInfos, mockconfig.NewTestOptions(), regionLabeler)
+	re.NoError(err)
+	const groupID = "_tidb_ks42_t_1001"
+	keyRange := testKeyRangeForKeyspace(42)
+	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: groupID, KeyRanges: []keyutil.KeyRange{keyRange}}}))
+	_, err = manager.UpdateAffinityGroupPeers(groupID, 1, []uint64{1})
+	re.NoError(err)
+	region := generateRegionForTest(31, []uint64{1}, keyRange)
+	lower := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, 42)
+	upper := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, 43)
+	// The generic labeler API accepts these rules; the runtime lookup decides validity.
+	for _, tc := range []struct {
+		name   string
+		ranges []keyutil.KeyRange
+		valid  bool
+	}{
+		{"unordered ranges", []keyutil.KeyRange{{StartKey: keyRange.EndKey, EndKey: upper[:]}, {StartKey: lower[:], EndKey: keyRange.EndKey}}, true},
+		{"unbounded end", []keyutil.KeyRange{keyRange, {StartKey: keyRange.EndKey}}, false},
+		{"unbounded end first", []keyutil.KeyRange{{StartKey: keyRange.EndKey}, keyRange}, false},
+		{"later range before keyspace", []keyutil.KeyRange{keyRange, testKeyRangeForKeyspace(41)}, false},
+		{"first range after keyspace", []keyutil.KeyRange{testKeyRangeForKeyspace(43), keyRange}, false},
+		{"whole keyspace", []keyutil.KeyRange{{StartKey: lower[:], EndKey: upper[:]}}, true},
+		{"single range", []keyutil.KeyRange{keyRange}, true},
+	} {
+		re.NoError(regionLabeler.SetLabelRule(MakeLabelRule(GroupKeyRanges{GroupID: groupID, KeyRanges: tc.ranges})), tc.name)
+		state, isAffinity := manager.GetRegionAffinityGroupState(region)
+		re.Equal(tc.valid, isAffinity, tc.name)
+		if tc.valid {
+			re.NotNil(state, tc.name)
+			re.Equal(groupID, state.ID, tc.name)
+		} else {
+			re.Nil(state, tc.name)
+		}
+	}
+}
+
 func TestNextGenInvalidAffinityRuleClearsCache(t *testing.T) {
 	const modeFlag = "github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"
 	require.NoError(t, failpoint.Enable(modeFlag, "return(true)"))

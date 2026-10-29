@@ -362,13 +362,19 @@ func validateGroupKeyRanges(group GroupKeyRanges) error {
 	}
 	lower := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, keyspaceID)
 	upper := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, keyspaceID+1)
-	// PD receives memcomparable region boundaries. The exclusive upper bound
-	// may be the next keyspace boundary, including the fencepost for the last ID.
 	for _, kr := range group.KeyRanges {
-		if len(kr.EndKey) == 0 || bytes.Compare(kr.StartKey, lower[:]) < 0 ||
-			bytes.Compare(kr.StartKey, kr.EndKey) >= 0 || bytes.Compare(kr.EndKey, upper[:]) > 0 {
+		if !keyRangeInKeyspace(kr.StartKey, kr.EndKey, lower[:], upper[:]) {
 			return errs.ErrAffinityGroupContent.FastGenByArgs(fmt.Sprintf("affinity group %s key ranges must belong to transaction keyspace %d", group.GroupID, keyspaceID))
 		}
 	}
 	return nil
+}
+
+// keyRangeInKeyspace reports whether [startKey, endKey) lies within the
+// keyspace boundaries [lower, upper]. PD receives memcomparable region
+// boundaries. The exclusive upper bound may be the next keyspace boundary,
+// including the fencepost for the last ID.
+func keyRangeInKeyspace(startKey, endKey, lower, upper []byte) bool {
+	return len(endKey) > 0 && bytes.Compare(startKey, lower) >= 0 &&
+		bytes.Compare(startKey, endKey) < 0 && bytes.Compare(endKey, upper) <= 0
 }
