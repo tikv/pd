@@ -319,6 +319,8 @@ type GroupKeyRanges struct {
 }
 
 // ValidateGroupID checks the ID format and requires keyspace-aware TiDB IDs in NextGen.
+// It is checked where requests enter PD. Stored groups are loaded and synced
+// without it, so that the overlap checks keep seeing their ranges.
 func ValidateGroupID(id string) error {
 	_, _, err := parseGroupID(id)
 	return err
@@ -362,19 +364,13 @@ func validateGroupKeyRanges(group GroupKeyRanges) error {
 	}
 	lower := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, keyspaceID)
 	upper := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, keyspaceID+1)
+	// PD receives memcomparable region boundaries. The exclusive upper bound
+	// may be the next keyspace boundary, including the fencepost for the last ID.
 	for _, kr := range group.KeyRanges {
-		if !keyRangeInKeyspace(kr.StartKey, kr.EndKey, lower[:], upper[:]) {
+		if len(kr.EndKey) == 0 || bytes.Compare(kr.StartKey, lower[:]) < 0 ||
+			bytes.Compare(kr.StartKey, kr.EndKey) >= 0 || bytes.Compare(kr.EndKey, upper[:]) > 0 {
 			return errs.ErrAffinityGroupContent.FastGenByArgs(fmt.Sprintf("affinity group %s key ranges must belong to transaction keyspace %d", group.GroupID, keyspaceID))
 		}
 	}
 	return nil
-}
-
-// keyRangeInKeyspace reports whether [startKey, endKey) lies within the
-// keyspace boundaries [lower, upper]. PD receives memcomparable region
-// boundaries. The exclusive upper bound may be the next keyspace boundary,
-// including the fencepost for the last ID.
-func keyRangeInKeyspace(startKey, endKey, lower, upper []byte) bool {
-	return len(endKey) > 0 && bytes.Compare(startKey, lower) >= 0 &&
-		bytes.Compare(startKey, endKey) < 0 && bytes.Compare(endKey, upper) <= 0
 }

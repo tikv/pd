@@ -15,9 +15,7 @@
 package labeler
 
 import (
-	"cmp"
 	"context"
-	"slices"
 	"strings"
 	"time"
 
@@ -182,13 +180,11 @@ func filterExpiredLabels(rule *LabelRule, now time.Time) *LabelRule {
 		return nil
 	}
 	return &LabelRule{
-		ID:            rule.ID,
-		Index:         rule.Index,
-		RuleType:      rule.RuleType,
-		Data:          rule.Data,
-		Labels:        labels,
-		boundStartKey: rule.boundStartKey,
-		boundEndKey:   rule.boundEndKey,
+		ID:       rule.ID,
+		Index:    rule.Index,
+		RuleType: rule.RuleType,
+		Data:     rule.Data,
+		Labels:   labels,
 	}
 }
 
@@ -403,44 +399,6 @@ func (l *RegionLabeler) GetRegionLabel(region *core.RegionInfo, key string) stri
 		applyRule(keyspaceRule)
 	}
 	return value
-}
-
-// GetRegionLabelValues returns matching label values in descending rule-index order.
-// The filter runs under the labeler's read lock; it must not mutate rules or acquire other locks.
-func (l *RegionLabeler) GetRegionLabelValues(region *core.RegionInfo, key string, filter func(*LabelRule, string) bool) []string {
-	l.RLock()
-	defer l.RUnlock()
-	rules, keyspaceRule, ok := l.ruleIndex.getRangeRules(region.GetStartKey(), region.GetEndKey())
-	if !ok {
-		return nil
-	}
-	type candidate struct {
-		value string
-		index int
-	}
-	var candidates []candidate
-	now := time.Now()
-	applyRule := func(rule *LabelRule) {
-		for _, label := range slices.Backward(rule.Labels) {
-			if label.Key == key && !label.expireBefore(now) && (filter == nil || filter(rule, label.Value)) {
-				candidates = append(candidates, candidate{value: label.Value, index: rule.Index})
-			}
-		}
-	}
-	for _, rule := range rules {
-		applyRule(rule.(*LabelRule))
-	}
-	if keyspaceRule != nil {
-		applyRule(keyspaceRule)
-	}
-	slices.SortStableFunc(candidates, func(a, b candidate) int {
-		return cmp.Compare(b.index, a.index)
-	})
-	values := make([]string, len(candidates))
-	for i, candidate := range candidates {
-		values[i] = candidate.value
-	}
-	return values
 }
 
 // ScheduleDisabled returns true if the region is labeled with schedule-disabled.
