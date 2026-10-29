@@ -17,6 +17,7 @@ package affinity
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -26,12 +27,8 @@ import (
 	"go.uber.org/goleak"
 	"go.uber.org/zap"
 
-<<<<<<< HEAD
-=======
-	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 
->>>>>>> 57f40aae7b (*: redact region keys and request bodies in logs (#11347))
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/affinity"
@@ -202,8 +199,6 @@ func TestWatcherLoadExistingData(t *testing.T) {
 	re.Equal(1, groupState.RangeCount)
 }
 
-<<<<<<< HEAD
-=======
 func TestAffinityLabelWatcherLogRedact(t *testing.T) {
 	const startKey, endKey = "7365637265742d7374617274", "7365637265742d7a"
 	const secondStartKey, secondEndKey = "7365637265742d7a61", "7365637265742d7a62"
@@ -220,11 +215,11 @@ func TestAffinityLabelWatcherLogRedact(t *testing.T) {
 	} {
 		t.Run(mode.name, func(t *testing.T) {
 			re := require.New(t)
-			_, err := client.Delete(ctx, keypath.AffinityGroupsPrefix(), clientv3.WithPrefix())
+			_, err := client.Delete(ctx, keypath.AffinityGroupsPathPrefix(), clientv3.WithPrefix())
 			re.NoError(err)
 			_, err = client.Delete(ctx, keypath.RegionLabelPathPrefix(), clientv3.WithPrefix())
 			re.NoError(err)
-			fname := testutil.InitTempFileLogger(t, "debug")
+			fname := testutil.InitTempFileLogger("debug")
 			var (
 				lg    *zap.Logger
 				props *log.ZapProperties
@@ -277,7 +272,7 @@ func TestAffinityLabelWatcherLogRedact(t *testing.T) {
 			case logutil.RedactInfoLogMarker:
 				re.Contains(output, `[value="‹{`)
 			}
-			stored, err := client.Get(ctx, keypath.RegionLabelKeyPath(labelRule.ID))
+			stored, err := client.Get(ctx, keypath.RegionLabelPathPrefix()+"/"+labelRule.ID)
 			re.NoError(err)
 			re.Len(stored.Kvs, 1)
 			labelJSON, err := json.Marshal(labelRule)
@@ -287,110 +282,6 @@ func TestAffinityLabelWatcherLogRedact(t *testing.T) {
 	}
 }
 
-func TestAffinityLabelWatcherReloadsAfterCompaction(t *testing.T) {
-	re := require.New(t)
-	ctx, client, clean := prepare(t)
-	defer clean()
-
-	keepGroup := makeTestGroup("compaction-keep", 1, []uint64{1})
-	deleteGroup := makeTestGroup("compaction-delete", 2, []uint64{2})
-	keepRule := makeTestLabelRule(keepGroup.ID, "7480000000000000ff0000000000000000f8", "7480000000000000ff1000000000000000f8")
-	deleteRule := makeTestLabelRule(deleteGroup.ID, "7480000000000000ff2000000000000000f8", "7480000000000000ff3000000000000000f8")
-	bufferedRule := makeTestLabelRule("compaction-buffered", "7480000000000000ff4000000000000000f8", "7480000000000000ff5000000000000000f8")
-	re.NoError(putGroup(ctx, client, keepGroup))
-	re.NoError(putGroup(ctx, client, deleteGroup))
-	re.NoError(putLabelRule(ctx, client, keepRule))
-	re.NoError(putLabelRule(ctx, client, deleteRule))
-	re.NoError(putLabelRule(ctx, client, bufferedRule))
-
-	manager, watcher, err := setupAffinityManager(ctx, client)
-	re.NoError(err)
-	failpointEnabled := false
-	defer func() {
-		if failpointEnabled {
-			_ = failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock")
-		}
-		watcher.Close()
-	}()
-
-	re.Equal(1, manager.GetAffinityGroupState(keepGroup.ID).RangeCount)
-	re.Equal(1, manager.GetAffinityGroupState(deleteGroup.ID).RangeCount)
-
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock", "return(true)"))
-	failpointEnabled = true
-
-	updatedKeepRule := makeTestLabelRule(keepGroup.ID,
-		"7480000000000000ff0000000000000000f8", "7480000000000000ff1000000000000000f8",
-		"7480000000000000ff2000000000000000f8", "7480000000000000ff3000000000000000f8",
-	)
-	re.NoError(putLabelRule(ctx, client, updatedKeepRule))
-	_, err = client.Delete(ctx, keypath.RegionLabelKeyPath(deleteRule.ID))
-	re.NoError(err)
-	deleteResp, err := client.Delete(ctx, keypath.RegionLabelKeyPath(bufferedRule.ID))
-	re.NoError(err)
-	_, err = client.Compact(ctx, deleteResp.Header.Revision)
-	re.NoError(err)
-
-	testutil.Eventually(re, func() bool {
-		watcher.labelWatcher.ForceLoad()
-		keepState := manager.GetAffinityGroupState(keepGroup.ID)
-		deleteState := manager.GetAffinityGroupState(deleteGroup.ID)
-		return keepState != nil && keepState.RangeCount == 2 &&
-			deleteState != nil && deleteState.RangeCount == 0
-	})
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock"))
-	failpointEnabled = false
-
-	re.NoError(putGroup(ctx, client, makeTestGroup("compaction-buffered", 3, []uint64{3})))
-	testutil.Eventually(re, func() bool {
-		groupState := manager.GetAffinityGroupState("compaction-buffered")
-		return groupState != nil && groupState.RangeCount == 0
-	})
-}
-
-func TestAffinityGroupWatcherReloadsAfterCompaction(t *testing.T) {
-	re := require.New(t)
-	ctx, client, clean := prepare(t)
-	defer clean()
-
-	keepGroup := makeTestGroup("group-compaction-keep", 1, []uint64{1})
-	deleteGroup := makeTestGroup("group-compaction-delete", 2, []uint64{2})
-	re.NoError(putGroup(ctx, client, keepGroup))
-	re.NoError(putGroup(ctx, client, deleteGroup))
-
-	manager, watcher, err := setupAffinityManager(ctx, client)
-	re.NoError(err)
-	failpointEnabled := false
-	defer func() {
-		if failpointEnabled {
-			_ = failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock")
-		}
-		watcher.Close()
-	}()
-
-	re.NotNil(manager.GetAffinityGroupState(keepGroup.ID))
-	re.NotNil(manager.GetAffinityGroupState(deleteGroup.ID))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock", "return(true)"))
-	failpointEnabled = true
-
-	keepGroup.LeaderStoreID = 3
-	re.NoError(putGroup(ctx, client, keepGroup))
-	deleteResp, err := client.Delete(ctx, keypath.AffinityGroupPath(deleteGroup.ID))
-	re.NoError(err)
-	_, err = client.Compact(ctx, deleteResp.Header.Revision)
-	re.NoError(err)
-
-	testutil.Eventually(re, func() bool {
-		watcher.groupWatcher.ForceLoad()
-		keepState := manager.GetAffinityGroupState(keepGroup.ID)
-		return keepState != nil && keepState.LeaderStoreID == keepGroup.LeaderStoreID &&
-			!manager.IsGroupExist(deleteGroup.ID)
-	})
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock"))
-	failpointEnabled = false
-}
-
->>>>>>> 57f40aae7b (*: redact region keys and request bodies in logs (#11347))
 // TestConcurrentLabelRuleUpdates tests multiple label rule updates happening concurrently.
 func TestConcurrentLabelRuleUpdates(t *testing.T) {
 	re := require.New(t)

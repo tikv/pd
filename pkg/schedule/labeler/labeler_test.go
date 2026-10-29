@@ -26,18 +26,9 @@ import (
 	"testing"
 	"time"
 
-<<<<<<< HEAD
-	"github.com/pingcap/failpoint"
-	"github.com/stretchr/testify/require"
-=======
-	"github.com/stretchr/testify/require"
-	"go.uber.org/goleak"
-	"go.uber.org/zap"
-
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
-
->>>>>>> 57f40aae7b (*: redact region keys and request bodies in logs (#11347))
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -46,6 +37,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"go.uber.org/zap"
 )
 
 func TestAdjustRule(t *testing.T) {
@@ -311,7 +303,7 @@ func TestLoadRulesLogRedact(t *testing.T) {
 	} {
 		t.Run(mode.name, func(t *testing.T) {
 			re := require.New(t)
-			fname := testutil.InitTempFileLogger(t, "info")
+			fname := testutil.InitTempFileLogger("info")
 			var (
 				lg    *zap.Logger
 				props *log.ZapProperties
@@ -328,7 +320,7 @@ func TestLoadRulesLogRedact(t *testing.T) {
 			} {
 				re.NoError(memory.Save(keypath.RegionLabelKeyPath(key), value))
 			}
-			labeler := &RegionLabeler{storage: store, ctx: t.Context()}
+			labeler := &RegionLabeler{storage: store, labelRules: make(map[string]*LabelRule), ctx: t.Context()}
 			re.NoError(labeler.loadRules())
 
 			output, err := os.ReadFile(fname)

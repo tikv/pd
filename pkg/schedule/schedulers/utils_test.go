@@ -15,29 +15,17 @@
 package schedulers
 
 import (
-<<<<<<< HEAD
-	"testing"
-
-	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/core"
-=======
 	"os"
-	"strconv"
 	"testing"
-
-	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
-
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/placement"
-	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
->>>>>>> 57f40aae7b (*: redact region keys and request bodies in logs (#11347))
+	"go.uber.org/zap"
 )
 
 func TestCalculateRangeCountLogRedact(t *testing.T) {
@@ -62,7 +50,7 @@ func TestCalculateRangeCountLogRedact(t *testing.T) {
 			// Use a subrange so unredacted rule boundaries cannot hide behind range fields.
 			cluster.AddLeaderRegionWithRange(1, "ab", "zy", 1)
 
-			fname := testutil.InitTempFileLogger(t, "debug")
+			fname := testutil.InitTempFileLogger("debug")
 			var (
 				lg    *zap.Logger
 				props *log.ZapProperties

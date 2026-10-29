@@ -21,17 +21,9 @@ import (
 	"strings"
 	"testing"
 
-<<<<<<< HEAD
-	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/stretchr/testify/require"
-=======
-	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
-
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
-
->>>>>>> 57f40aae7b (*: redact region keys and request bodies in logs (#11347))
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
@@ -41,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"go.uber.org/zap"
 )
 
 func newTestManager(t *testing.T, enableWitness bool) (endpoint.RuleStorage, *RuleManager) {
@@ -518,7 +511,7 @@ func dhex(hk string) []byte {
 func TestRuleManagerLogRedact(t *testing.T) {
 	re := require.New(t)
 	_, manager := newTestManager(t, false)
-	fname := testutil.InitTempFileLogger(t, "info")
+	fname := testutil.InitTempFileLogger("info")
 	var (
 		lg    *zap.Logger
 		props *log.ZapProperties
@@ -606,7 +599,7 @@ func TestRuleManagerLoadRulesLogRedact(t *testing.T) {
 	} {
 		t.Run(mode.name, func(t *testing.T) {
 			re := require.New(t)
-			fname := testutil.InitTempFileLogger(t, "info")
+			fname := testutil.InitTempFileLogger("info")
 			var (
 				lg    *zap.Logger
 				props *log.ZapProperties

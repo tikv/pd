@@ -20,16 +20,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/require"
-<<<<<<< HEAD
-=======
-	"go.uber.org/goleak"
-	"go.uber.org/zap"
-
 	"github.com/pingcap/log"
-
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/utils/logutil"
->>>>>>> 57f40aae7b (*: redact region keys and request bodies in logs (#11347))
+	"go.uber.org/zap"
 )
 
 func TestRequestInfo(t *testing.T) {

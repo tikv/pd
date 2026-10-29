@@ -27,13 +27,10 @@ import (
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/keyutil"
-<<<<<<< HEAD
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
-=======
-	"github.com/tikv/pd/pkg/utils/logutil"
->>>>>>> 57f40aae7b (*: redact region keys and request bodies in logs (#11347))
 )
 
 // Watcher is used to watch the PD API server for any Placement Rule changes.
@@ -124,11 +121,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 	putFn := func(kv *mvccpb.KeyValue) error {
 		key := string(kv.Key)
 		if strings.HasPrefix(key, rw.rulesPathPrefix) {
-<<<<<<< HEAD
-			log.Info("update placement rule", zap.String("key", key), zap.String("value", string(kv.Value)))
-=======
-			log.Debug("update placement rule", zap.String("key", key), logutil.ZapRedactByteString("value", kv.Value))
->>>>>>> 57f40aae7b (*: redact region keys and request bodies in logs (#11347))
+			log.Info("update placement rule", zap.String("key", key), logutil.ZapRedactByteString("value", kv.Value))
 			rule, err := placement.NewRuleFromJSON(kv.Value)
 			if err != nil {
 				return err

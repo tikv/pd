@@ -24,20 +24,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/stretchr/testify/require"
-<<<<<<< HEAD
-=======
-	"go.uber.org/goleak"
-	"go.uber.org/zap"
-
-	"github.com/pingcap/log"
-
 	"github.com/tikv/pd/pkg/utils/logutil"
->>>>>>> 57f40aae7b (*: redact region keys and request bodies in logs (#11347))
 	"github.com/tikv/pd/pkg/utils/requestutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"go.uber.org/zap"
 )
 
 func TestLabelMatcher(t *testing.T) {
@@ -137,7 +131,7 @@ func TestLocalLogBackendRedact(t *testing.T) {
 		re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, logutil.RedactInfoLogOFF))
 	}()
 	backend := NewLocalLogBackend(true)
-	fname := testutil.InitTempFileLogger(t, "info")
+	fname := testutil.InitTempFileLogger("info")
 	body := `{"id":"test","data":[{"start_key":"7480000000000000ff","end_key":"7480000000000001ff"}]}`
 	req, err := http.NewRequest(http.MethodPost, "http://127.0.0.1:2379/test?key=7480000000000000ff", strings.NewReader(body))
 	re.NoError(err)

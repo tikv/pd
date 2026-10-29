@@ -17,6 +17,7 @@ package etcdutil
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand"
@@ -29,8 +30,10 @@ import (
 	"time"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -40,19 +43,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/goleak"
-<<<<<<< HEAD
-=======
 	"go.uber.org/zap"
-	"google.golang.org/grpc"
-
-	"github.com/pingcap/failpoint"
-	"github.com/pingcap/log"
-
-	"github.com/tikv/pd/pkg/utils/logutil"
-	"github.com/tikv/pd/pkg/utils/syncutil"
-	"github.com/tikv/pd/pkg/utils/tempurl"
-	"github.com/tikv/pd/pkg/utils/testutil"
->>>>>>> 57f40aae7b (*: redact region keys and request bodies in logs (#11347))
 )
 
 func TestMain(m *testing.M) {
@@ -462,301 +453,68 @@ func (suite *loopWatcherTestSuite) TestLoadNoExistedKey() {
 	re.Empty(cache)
 }
 
-<<<<<<< HEAD
-=======
-func (suite *loopWatcherTestSuite) TestWatcherLoadInitializesEmptyReconciliationSnapshot() {
-	re := suite.Require()
-	watcher := NewLoopWatcher(
-		suite.ctx,
-		&suite.wg,
-		suite.client,
-		"test",
-		"TestWatcherLoadInitializesEmptyReconciliationSnapshot",
-		func([]*clientv3.Event) error { return nil },
-		func(*mvccpb.KeyValue) error { return nil },
-		func(*mvccpb.KeyValue) error { return nil },
-		func([]*clientv3.Event) error { return nil },
-		false, /* withPrefix */
-	)
-	watcher.SetReconcileDeletedKeys()
-
-	revision, err := watcher.load(suite.ctx)
-	re.NoError(err)
-	re.Positive(revision)
-	re.NotNil(watcher.loadedKeys)
-	re.Empty(watcher.loadedKeys)
-}
-
-func (suite *loopWatcherTestSuite) TestInitialLoadFailsWhenContextCanceled() {
-	re := suite.Require()
-	ctx, cancel := context.WithCancel(suite.ctx)
-	cancel()
-	watcher := NewLoopWatcher(
-		ctx,
-		&suite.wg,
-		suite.client,
-		"test",
-		"TestInitialLoadFailsWhenContextCanceled",
-		func([]*clientv3.Event) error { return nil },
-		func(*mvccpb.KeyValue) error { return nil },
-		func(*mvccpb.KeyValue) error { return nil },
-		func([]*clientv3.Event) error { return nil },
-		false, /* withPrefix */
-	)
-	watcher.StartWatchLoop()
-	re.Error(watcher.WaitLoad())
-}
-
-func (suite *loopWatcherTestSuite) TestWatcherLoadCancelsInFlightRequest() {
-	re := suite.Require()
-	requestStarted := make(chan struct{}, 1)
-	client, err := CreateEtcdClient(nil, suite.config.ListenClientUrls, TestEtcdClientPurpose, false,
-		func(config *clientv3.Config) {
-			config.DialOptions = append(config.DialOptions, grpc.WithChainUnaryInterceptor(
-				func(
-					ctx context.Context, method string, req, reply any,
-					cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption,
-				) error {
-					if method != "/etcdserverpb.KV/Range" {
-						return invoker(ctx, method, req, reply, cc, opts...)
-					}
-					select {
-					case requestStarted <- struct{}{}:
-					default:
-					}
-					<-ctx.Done()
-					return ctx.Err()
-				},
-			))
-		})
-	re.NoError(err)
-	defer client.Close()
-
-	ctx, cancel := context.WithCancel(suite.ctx)
-	defer cancel()
-	watcher := NewLoopWatcher(
-		ctx,
-		&suite.wg,
-		client,
-		"test",
-		"TestWatcherLoadCancelsInFlightRequest",
-		func([]*clientv3.Event) error { return nil },
-		func(*mvccpb.KeyValue) error { return nil },
-		func(*mvccpb.KeyValue) error { return nil },
-		func([]*clientv3.Event) error { return nil },
-		false, /* withPrefix */
-	)
-	loadDone := make(chan error, 1)
-	go func() {
-		_, err := watcher.load(ctx)
-		loadDone <- err
-	}()
-
-	select {
-	case <-requestStarted:
-	case <-time.After(3 * time.Second):
-		suite.T().Fatal("watcher did not start loading from etcd")
-	}
-	cancel()
-	select {
-	case err := <-loadDone:
-		re.ErrorIs(err, context.Canceled)
-	case <-time.After(3 * time.Second):
-		suite.T().Fatal("watcher did not cancel the in-flight etcd request")
-	}
-}
-
-func (suite *loopWatcherTestSuite) TestWatcherLoadReturnsLifecycleErrors() {
-	suite.Run("pre callback", func() {
-		re := suite.Require()
-		preErr := errors.New("pre callback failed")
-		postCalled := false
-		watcher := NewLoopWatcher(
-			suite.ctx,
-			&suite.wg,
-			suite.client,
-			"test",
-			"TestWatcherLoadReturnsLifecycleErrors/pre",
-			func([]*clientv3.Event) error { return preErr },
-			func(*mvccpb.KeyValue) error {
-				re.Fail("put callback should not be called")
-				return nil
-			},
-			func(*mvccpb.KeyValue) error { return nil },
-			func([]*clientv3.Event) error {
-				postCalled = true
-				return nil
-			},
-			true, /* withPrefix */
-		)
-		watcher.SetReloadOnCompaction()
-
-		_, err := watcher.load(suite.ctx)
-		re.ErrorIs(err, preErr)
-		re.True(postCalled)
-	})
-
-	suite.Run("post callback", func() {
-		re := suite.Require()
-		postErr := errors.New("post callback failed")
-		watcher := NewLoopWatcher(
-			suite.ctx,
-			&suite.wg,
-			suite.client,
-			"test",
-			"TestWatcherLoadReturnsLifecycleErrors/post",
-			func([]*clientv3.Event) error { return nil },
-			func(*mvccpb.KeyValue) error { return nil },
-			func(*mvccpb.KeyValue) error { return nil },
-			func([]*clientv3.Event) error { return postErr },
-			true, /* withPrefix */
-		)
-		watcher.SetReloadOnCompaction()
-
-		_, err := watcher.load(suite.ctx)
-		re.ErrorIs(err, postErr)
-	})
-}
-
 func (suite *loopWatcherTestSuite) TestWatcherLoadLogRedact() {
 	const payload = `{"start_key":"736563726574","end_key":"7a"}`
 	callbackErr := errors.New("put callback failed")
-	for _, consistent := range []bool{false, true} {
-		for _, mode := range []struct {
-			name string
-			typ  logutil.RedactInfoLogType
-		}{
-			{"off", logutil.RedactInfoLogOFF},
-			{"on", logutil.RedactInfoLogON},
-			{"marker", logutil.RedactInfoLogMarker},
-		} {
-			suite.Run(fmt.Sprintf("consistent-%t/%s", consistent, mode.name), func() {
-				re := suite.Require()
-				prefix := suite.T().Name() + "/"
-				suite.put(re, prefix+"a", payload)
-				suite.put(re, prefix+"b", payload)
-				values := make([]string, 0, 2)
-				watcher := NewLoopWatcher(
-					suite.ctx, &suite.wg, suite.client, "redact", prefix,
-					func([]*clientv3.Event) error { return nil },
-					func(kv *mvccpb.KeyValue) error {
-						values = append(values, string(kv.Value))
-						if string(kv.Key) == prefix+"b" {
-							return callbackErr
-						}
-						return nil
-					},
-					func(*mvccpb.KeyValue) error { return nil },
-					func([]*clientv3.Event) error { return nil },
-					true, /* withPrefix */
-				)
-				if consistent {
-					watcher.SetConsistentLoad()
-				}
-				fname := testutil.InitTempFileLogger(suite.T(), "debug")
-				var (
-					lg    *zap.Logger
-					props *log.ZapProperties
-				)
-				re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, mode.typ))
-				suite.T().Cleanup(func() {
-					re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, logutil.RedactInfoLogOFF))
-				})
-
-				_, err := watcher.load(suite.ctx)
-				re.Same(callbackErr, err)
-				re.Equal([]string{payload, payload}, values)
-				output, err := os.ReadFile(fname)
-				re.NoError(err)
-				re.Contains(string(output), "put successfully in watch loop when loading")
-				re.Contains(string(output), "put failed in watch loop when loading")
-				re.Contains(string(output), `[error="put callback failed"]`)
-				if mode.typ == logutil.RedactInfoLogON {
-					re.Equal(2, strings.Count(string(output), "[value=?]"))
-					re.NotContains(string(output), "736563726574")
-				} else {
-					re.Contains(string(output), "736563726574")
-					if mode.typ == logutil.RedactInfoLogMarker {
-						re.Equal(2, strings.Count(string(output), `[value="‹`))
-					}
-				}
-			})
-		}
-	}
-}
-
-func (suite *loopWatcherTestSuite) TestWatcherLoadKeepsDefaultCallbackSemantics() {
-	preErr := errors.New("pre callback failed")
-	firstPutErr := errors.New("first put callback failed")
-	lastPutErr := errors.New("last put callback failed")
-	postErr := errors.New("post callback failed")
-	tests := []struct {
-		name                            string
-		preErr, firstPutErr, lastPutErr error
-		postErr, expectedErr            error
+	for _, mode := range []struct {
+		name string
+		typ  logutil.RedactInfoLogType
 	}{
-		{
-			name:        "overwritten-errors",
-			preErr:      preErr,
-			firstPutErr: firstPutErr,
-			postErr:     postErr,
-		},
-		{
-			name:        "final-put-error",
-			lastPutErr:  lastPutErr,
-			expectedErr: lastPutErr,
-		},
-	}
-	for _, test := range tests {
-		suite.Run(test.name, func() {
+		{"off", logutil.RedactInfoLogOFF},
+		{"on", logutil.RedactInfoLogON},
+		{"marker", logutil.RedactInfoLogMarker},
+	} {
+		suite.Run(mode.name, func() {
 			re := suite.Require()
-			prefix := "TestWatcherLoadKeepsDefaultCallbackSemantics/" + test.name + "/"
-			for _, suffix := range []string{"a", "b", "c"} {
-				suite.put(re, prefix+suffix, "value")
-			}
-
-			processed := make([]string, 0, 3)
-			postCalls := 0
+			prefix := suite.T().Name() + "/"
+			suite.put(re, prefix+"a", payload)
+			suite.put(re, prefix+"b", payload)
+			values := make([]string, 0, 2)
 			watcher := NewLoopWatcher(
-				suite.ctx,
-				&suite.wg,
-				suite.client,
-				"test",
-				prefix,
-				func([]*clientv3.Event) error { return test.preErr },
+				suite.ctx, &suite.wg, suite.client, "redact", prefix,
+				func([]*clientv3.Event) error { return nil },
 				func(kv *mvccpb.KeyValue) error {
-					key := string(kv.Key)
-					processed = append(processed, key)
-					switch key {
-					case prefix + "a":
-						return test.firstPutErr
-					case prefix + "c":
-						return test.lastPutErr
+					values = append(values, string(kv.Value))
+					if string(kv.Key) == prefix+"b" {
+						return callbackErr
 					}
 					return nil
 				},
 				func(*mvccpb.KeyValue) error { return nil },
-				func([]*clientv3.Event) error {
-					postCalls++
-					return test.postErr
-				},
+				func([]*clientv3.Event) error { return nil },
 				true, /* withPrefix */
 			)
-			watcher.SetLoadBatchSize(1)
+			fname := testutil.InitTempFileLogger("debug")
+			var (
+				lg    *zap.Logger
+				props *log.ZapProperties
+			)
+			re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, mode.typ))
+			suite.T().Cleanup(func() {
+				re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, logutil.RedactInfoLogOFF))
+			})
 
 			_, err := watcher.load(suite.ctx)
-			if test.expectedErr == nil {
-				re.NoError(err)
+			re.Same(callbackErr, err)
+			re.Equal([]string{payload, payload}, values)
+			output, err := os.ReadFile(fname)
+			re.NoError(err)
+			re.Contains(string(output), "put successfully in watch loop when loading")
+			re.Contains(string(output), "put failed in watch loop when loading")
+			re.Contains(string(output), `[error="put callback failed"]`)
+			if mode.typ == logutil.RedactInfoLogON {
+				re.Equal(2, strings.Count(string(output), "[value=?]"))
+				re.NotContains(string(output), "736563726574")
 			} else {
-				re.ErrorIs(err, test.expectedErr)
+				re.Contains(string(output), "736563726574")
+				if mode.typ == logutil.RedactInfoLogMarker {
+					re.Equal(2, strings.Count(string(output), `[value="‹`))
+				}
 			}
-			re.Equal([]string{prefix + "a", prefix + "b", prefix + "c"}, processed)
-			re.Equal(1, postCalls)
 		})
 	}
 }
 
->>>>>>> 57f40aae7b (*: redact region keys and request bodies in logs (#11347))
 func (suite *loopWatcherTestSuite) TestLoadWithLimitChange() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/meetEtcdError", `return()`))
