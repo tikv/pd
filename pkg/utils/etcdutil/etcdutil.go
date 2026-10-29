@@ -691,7 +691,7 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 						}
 						log.Debug("put successfully in watch loop", zap.String("name", lw.name),
 							zap.ByteString("key", event.Kv.Key),
-							zap.ByteString("value", event.Kv.Value))
+							logutil.ZapRedactByteString("value", event.Kv.Value))
 					}
 				case clientv3.EventTypeDelete:
 					if err := lw.deleteFn(event.Kv); err != nil {
@@ -901,13 +901,13 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 						callbackErr = putErr
 					}
 					log.Warn("put failed in watch loop when loading consistent snapshot", zap.String("name", lw.name), zap.String("watch-key", lw.key),
-						zap.ByteString("key", item.Key), zap.ByteString("value", item.Value), zap.Error(putErr))
+						zap.ByteString("key", item.Key), logutil.ZapRedactByteString("value", item.Value), zap.Error(putErr))
 				} else {
 					if lw.reconcileDeletedKeys {
 						snapshotKeys[string(item.Key)] = struct{}{}
 					}
 					log.Debug("put successfully in watch loop when loading", zap.String("name", lw.name), zap.String("watch-key", lw.key),
-						zap.ByteString("key", item.Key), zap.ByteString("value", item.Value))
+						zap.ByteString("key", item.Key), logutil.ZapRedactByteString("value", item.Value))
 				}
 			}
 			// Note: if there are no keys in etcd, the resp.More is false. It also means the load is finished.
@@ -938,10 +938,10 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 			err = lw.putFn(item)
 			if err != nil {
 				log.Error("put failed in watch loop when loading", zap.String("name", lw.name), zap.String("watch-key", lw.key),
-					zap.ByteString("key", item.Key), zap.ByteString("value", item.Value), zap.Error(err))
+					zap.ByteString("key", item.Key), logutil.ZapRedactByteString("value", item.Value), zap.Error(err))
 			} else {
 				log.Debug("put successfully in watch loop when loading", zap.String("name", lw.name), zap.String("watch-key", lw.key),
-					zap.ByteString("key", item.Key), zap.ByteString("value", item.Value))
+					zap.ByteString("key", item.Key), logutil.ZapRedactByteString("value", item.Value))
 			}
 		}
 		// Note: if there are no keys in etcd, the resp.More is false. It also means the load is finished.
