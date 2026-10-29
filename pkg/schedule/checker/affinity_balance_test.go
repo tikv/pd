@@ -456,7 +456,7 @@ func (c *affinityBalanceScanCluster) BatchScanRegions(ranges *keyutil.KeyRanges,
 
 func TestAffinityBalanceCommitRejectsChangedInputs(t *testing.T) {
 	for _, change := range []string{"rule", "conf version", "split", "merge", "add learner", "remove learner", "later group",
-		"limit", "pause", "halt", "placement disabled", "policy", "cancel"} {
+		"limit", "pause", "halt", "placement disabled", "policy", "fixed target", "cancel"} {
 		t.Run(change, func(t *testing.T) {
 			re := require.New(t)
 			f := newAffinityBalanceTest(t, 3)
@@ -516,6 +516,10 @@ func TestAffinityBalanceCommitRejectsChangedInputs(t *testing.T) {
 					f.SetEnablePlacementRules(false)
 				case "policy":
 					f.policy(affinity.BalancePolicyFixed, ids[0])
+				case "fixed target":
+					_, err := f.affinityManager.UpdateAffinityGroupPeers(ids[1], res.targets[0].LeaderStoreID, []uint64{1, 2, 3})
+					re.NoError(err)
+					snapshot.Groups[1] = f.affinityManager.GetAffinityGroupState(ids[1])
 				case "cancel":
 					cancel()
 				}
@@ -544,6 +548,43 @@ func TestAffinityBalanceCommitRejectsChangedInputs(t *testing.T) {
 			re.Equal(snapshot.Groups, f.snapshot().Groups)
 		})
 	}
+}
+
+func TestAffinityBalanceCommitRejectsChangedTable(t *testing.T) {
+	re := require.New(t)
+	f := newAffinityBalanceTest(t, 3)
+	ids := f.seed("100", 1, 1, 1)
+	f.policy(affinity.BalancePolicyFixed, ids[1])
+	snapshot := f.snapshot()
+	revision := f.ruleManager.GetRevision()
+	res, err := f.planBalanceTargets(t.Context(), snapshot)
+	re.NoError(err)
+	re.Len(res.targets, 1)
+	re.Equal(ids[0], res.targets[0].ID)
+	re.NotEqual(uint64(1), res.targets[0].LeaderStoreID)
+	called := false
+	var changedVersion uint64
+	f.cluster = &affinityBalanceScanCluster{CheckerCluster: f.Cluster, beforeFinal: func() {
+		re.False(called)
+		called = true
+		_, err := f.affinityManager.UpdateAffinityGroupPeers(ids[1], res.targets[0].LeaderStoreID, []uint64{1, 2, 3})
+		re.NoError(err)
+		var ok bool
+		changedVersion, ok = f.affinityManager.GetBalanceVersion(balanceTestTable)
+		re.True(ok)
+		re.Greater(changedVersion, snapshot.Version)
+	}}
+	written, reason, err := f.commitBalancePlan(t.Context(), snapshot, res, revision)
+	re.NoError(err)
+	re.True(called)
+	re.Empty(written)
+	re.Equal(balanceCommitTableChanged, reason)
+	re.Equal(snapshot.Group(ids[0]), f.affinityManager.GetAffinityGroupState(ids[0]))
+	re.Equal(res.targets[0].LeaderStoreID, f.affinityManager.GetAffinityGroupState(ids[1]).LeaderStoreID)
+	re.Equal([2]int{12, 2}, balanceTableScore(f.affinityManager, balanceTestTable))
+	version, ok := f.affinityManager.GetBalanceVersion(balanceTestTable)
+	re.True(ok)
+	re.Equal(changedVersion, version)
 }
 
 func TestAffinityBalanceModelsLeaderAndFollowerRules(t *testing.T) {

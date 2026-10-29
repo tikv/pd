@@ -58,6 +58,7 @@ const (
 	balanceCommitRegionsChanged balanceCommitReason = "regions-changed"
 	balanceCommitDisallowed     balanceCommitReason = "balance-disallowed"
 	balanceCommitRulesChanged   balanceCommitReason = "rules-changed"
+	balanceCommitTableChanged   balanceCommitReason = "table-changed"
 	balanceCommitCanceled       balanceCommitReason = "canceled"
 	balanceCommitAllConflicted  balanceCommitReason = "all-conflicted"
 	balanceCommitError          balanceCommitReason = "error"
@@ -175,8 +176,9 @@ func (c *AffinityChecker) planBalanceTargets(ctx context.Context, snapshot *affi
 
 // commitBalancePlan writes a validated plan if the Regions of the changed
 // groups are still as they were validated, balancing is still allowed and the
-// placement rules have not changed since revision. It returns the IDs of the
-// written groups and the reason if no target was written or the commit failed.
+// placement rules and table metadata have not changed since planning. It returns
+// the IDs of the written groups and the reason if no target was written or the
+// commit failed.
 func (c *AffinityChecker) commitBalancePlan(ctx context.Context, snapshot *affinity.BalanceSnapshot, res balancePlanResult, revision uint64) ([]string, balanceCommitReason, error) {
 	// The scan may take a while, so the gates are checked after it, right
 	// before the write.
@@ -192,6 +194,9 @@ func (c *AffinityChecker) commitBalancePlan(ctx context.Context, snapshot *affin
 	}
 	if c.ruleManager.GetRevision() != revision {
 		return nil, balanceCommitRulesChanged, nil
+	}
+	if version, ok := c.affinityManager.GetBalanceVersion(snapshot.TableID); !ok || version != snapshot.Version {
+		return nil, balanceCommitTableChanged, nil
 	}
 	written, err := c.affinityManager.CommitBalanceTargets(ctx, snapshot, res.targets)
 	if err != nil {
