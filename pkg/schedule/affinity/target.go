@@ -54,7 +54,9 @@ type GroupTargetsResponse struct {
 // storage, such as the Manager of the scheduling service.
 type TargetWriter interface {
 	// WriteGroupTargets writes the targets whose groups still equal their
-	// expected values and returns the IDs of the written groups.
+	// expected values and returns the IDs of the written groups. If it fails
+	// partway, it returns the IDs of the groups written before the failure with
+	// the error.
 	WriteGroupTargets(ctx context.Context, targets []GroupTarget) ([]string, error)
 }
 

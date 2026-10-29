@@ -343,30 +343,35 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affini
 // target is written only if the stored group still equals the group it was
 // observed for. Without a target writer the Manager writes its own storage.
 // Otherwise it sends the target to the writer, which stores it in PD for the
-// scheduling service, and publishes it once written.
+// scheduling service, and publishes it once written. A Region with the layout
+// of the current target, for example after the group was loaded, only confirms
+// the target, which is not written again.
 func (m *Manager) updateObservedGroupPeers(groupID string, affinityVer uint64, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
+	m.metaMutex.Lock()
+	target, group, err := m.observedGroupTargetLocked(groupID, affinityVer, leaderStoreID, voterStoreIDs)
+	if target == nil {
+		m.metaMutex.Unlock()
+		return group, err
+	}
+	if target.LeaderStoreID == target.Expected.LeaderStoreID && slices.Equal(target.VoterStoreIDs, target.Expected.VoterStoreIDs) {
+		m.publishGroupTargetLocked(&target.Expected)
+		m.metaMutex.Unlock()
+		return m.GetAffinityGroupState(groupID), nil
+	}
 	if m.targetWriter == nil {
-		m.metaMutex.Lock()
 		defer m.metaMutex.Unlock()
-		target, group, err := m.observedGroupTargetLocked(groupID, affinityVer, leaderStoreID, voterStoreIDs)
-		if target == nil {
-			return group, err
-		}
 		if _, err := m.updateGroupTargetsLocked([]GroupTarget{*target}); err != nil {
 			return nil, err
 		}
 		return m.GetAffinityGroupState(groupID), nil
 	}
-
-	m.metaMutex.Lock()
-	target, group, err := m.observedGroupTargetLocked(groupID, affinityVer, leaderStoreID, voterStoreIDs)
 	m.metaMutex.Unlock()
-	if target == nil {
-		return group, err
-	}
+
 	// Send the target without holding metaMutex, so that a slow PD does not block the watcher.
 	written, err := m.targetWriter.WriteGroupTargets(m.ctx, []GroupTarget{*target})
 	if err != nil {
+		targetWriteFailureCounter.Inc()
+		log.Warn("failed to write affinity group target", zap.String("group-id", groupID), errs.ZapError(err))
 		return nil, err
 	}
 

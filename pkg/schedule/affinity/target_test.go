@@ -26,6 +26,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
@@ -267,10 +268,11 @@ func TestObserveAvailableRegionWithTargetWriter(t *testing.T) {
 		reply     func(GroupTarget) ([]string, error)
 		available bool
 		leader    uint64
+		failed    bool
 	}{
 		{name: "written", reply: written, available: true, leader: 1},
 		{name: "not written", reply: func(GroupTarget) ([]string, error) { return nil, nil }},
-		{name: "write failed", reply: func(GroupTarget) ([]string, error) { return nil, errors.New("PD is unavailable") }},
+		{name: "write failed", reply: func(GroupTarget) ([]string, error) { return nil, errors.New("PD is unavailable") }, failed: true},
 		{name: "watcher first", apply: func(target GroupTarget) *Group { return target.result(&target.Expected) }, reply: written, available: true, leader: 1},
 		// A target that the watcher delivers is used, while the written one is not published.
 		{name: "changed meanwhile", apply: func(target GroupTarget) *Group {
@@ -290,8 +292,10 @@ func TestObserveAvailableRegionWithTargetWriter(t *testing.T) {
 			}
 			manager.SetTargetWriter(writer)
 
+			failures := testutil.ToFloat64(targetWriteFailureCounter)
 			manager.ObserveAvailableRegion(region, group)
 			re.Equal([]GroupTarget{{Expected: group.Group, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2}}}, writer.targets)
+			re.Equal(tc.failed, testutil.ToFloat64(targetWriteFailureCounter) > failures)
 			state := manager.GetAffinityGroupState("g")
 			re.Equal(tc.available, state.AffinitySchedulingAllowed)
 			re.Equal(tc.leader, state.LeaderStoreID)
@@ -363,4 +367,26 @@ func TestTargetAvailability(t *testing.T) {
 		re.False(state.AffinitySchedulingAllowed)
 		re.True(state.RegularSchedulingAllowed)
 	})
+}
+
+// TestObserveAvailableRegionConfirmsTarget checks that a Region with the layout
+// of the target of a degraded group confirms the target without writing it.
+func TestObserveAvailableRegionConfirmsTarget(t *testing.T) {
+	re := require.New(t)
+	manager, _ := newTargetTestManager(t)
+	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "g"}}))
+	_, err := manager.UpdateAffinityGroupTargets([]GroupTarget{targetFor(manager, "g", 1, 1, 2)})
+	re.NoError(err)
+	writer := &fakeTargetWriter{reply: func(GroupTarget) ([]string, error) { return nil, errors.New("unexpected write") }}
+	manager.SetTargetWriter(writer)
+	manager.DegradeAffinityGroup("g")
+	re.False(manager.GetAffinityGroupState("g").AffinitySchedulingAllowed)
+
+	region := core.NewRegionInfo(
+		&metapb.Region{Id: 10, Peers: []*metapb.Peer{{Id: 11, StoreId: 2, Role: metapb.PeerRole_Voter}, {Id: 12, StoreId: 1, Role: metapb.PeerRole_Voter}}},
+		&metapb.Peer{Id: 12, StoreId: 1, Role: metapb.PeerRole_Voter},
+	)
+	manager.ObserveAvailableRegion(region, manager.GetAffinityGroupState("g"))
+	re.Empty(writer.targets)
+	re.True(manager.GetAffinityGroupState("g").AffinitySchedulingAllowed)
 }
