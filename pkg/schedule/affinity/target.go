@@ -228,7 +228,9 @@ func (t *GroupTarget) result(stored *Group) *Group {
 	return &group
 }
 
-// sameStoredGroup reports whether two persisted groups are the same. Voter order does not matter.
+// sameStoredGroup reports whether two persisted groups are the same. Voter order
+// does not matter. It is the only comparison of persisted groups, so that a field
+// added to Group is compared everywhere.
 func sameStoredGroup(a, b *Group) bool {
 	return a.ID == b.ID &&
 		a.CreateTimestamp == b.CreateTimestamp &&
