@@ -43,13 +43,11 @@ func TestMetaServiceGroupClientLifecycle(t *testing.T) {
 	// Disabled groups still serve existing assignments; concurrent borrowers share one client.
 	clients := make([]*clientv3.Client, 16)
 	errs := make([]error, len(clients))
-	var wg sync.WaitGroup
+	wg := &sync.WaitGroup{}
 	for i := range clients {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			clients[i], errs[i] = manager.GetEtcdClient("g")
-		}()
+		})
 	}
 	wg.Wait()
 	for i, client := range clients {
