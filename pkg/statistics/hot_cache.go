@@ -79,7 +79,7 @@ func (w *HotCache) CheckReadAsync(task func(cache *HotPeerCache)) bool {
 	}
 }
 
-func (w *HotCache) enqueueReadMetadata(task func(*HotPeerCache)) bool {
+func (w *HotCache) enqueueReadTask(task func(*HotPeerCache)) bool {
 	select {
 	case w.readTaskSlots <- struct{}{}:
 	case <-w.ctx.Done():
@@ -100,7 +100,7 @@ func (w *HotCache) enqueueReadMetadata(task func(*HotPeerCache)) bool {
 func (w *HotCache) CheckRegionFlowAsync(region *core.RegionInfo) {
 	checkRegionTask, checkWritePeerTask := newRegionFlowTasks(region)
 	w.CheckWriteAsync(checkRegionTask)
-	if !w.enqueueReadMetadata(checkRegionTask) {
+	if !w.enqueueReadTask(checkRegionTask) {
 		return
 	}
 	w.CheckWriteAsync(checkWritePeerTask)
@@ -380,6 +380,25 @@ func (w *HotCache) GetThresholds(kind utils.RWType, storeID uint64) []float64 {
 // CleanCache cleans the cache.
 // This is used for test purpose.
 func (w *HotCache) CleanCache() {
-	w.writeCache.removeAllItem()
-	w.readCache.removeAllItem()
+	done := make(chan struct{}, 2)
+	clean := func(cache *HotPeerCache) {
+		cache.removeAllItem()
+		done <- struct{}{}
+	}
+	// Cleanup must run after pending tasks on each cache's owning worker.
+	select {
+	case w.writeCache.taskQueue.In <- clean:
+	case <-w.ctx.Done():
+		return
+	}
+	if !w.enqueueReadTask(clean) {
+		return
+	}
+	for range 2 {
+		select {
+		case <-done:
+		case <-w.ctx.Done():
+			return
+		}
+	}
 }

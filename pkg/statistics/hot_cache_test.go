@@ -60,6 +60,114 @@ func TestIsHot(t *testing.T) {
 	}
 }
 
+func TestCleanCacheWaitsForPendingTasks(t *testing.T) {
+	for kind := range utils.RWTypeLen {
+		t.Run(kind.String(), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				_, cache, region, _ := newHotReadCache(t, []uint64{1, 2})
+				cache.CheckRegionFlowAsync(region)
+				require.Len(t, cache.GetHotPeerStats(utils.Write, 0)[1], 1)
+				started, release := make(chan struct{}), make(chan struct{})
+				t.Cleanup(func() {
+					select {
+					case <-release:
+					default:
+						close(release)
+					}
+				})
+				block := func(*HotPeerCache) {
+					close(started)
+					<-release
+				}
+				if kind == utils.Read {
+					require.True(t, cache.CheckReadAsync(block))
+				} else {
+					require.True(t, cache.CheckWriteAsync(block))
+				}
+				<-started
+				cache.CheckRegionFlowAsync(region.Clone(core.WithLeader(region.GetStorePeer(2))))
+				if kind == utils.Read {
+					_ = cache.GetHotPeerStats(utils.Write, 0)
+				} else {
+					_ = cache.GetHotPeerStats(utils.Read, 0)
+				}
+				done := make(chan struct{})
+				go func() {
+					cache.CleanCache()
+					close(done)
+				}()
+				synctest.Wait()
+				select {
+				case <-done:
+					t.Fatal("cleanup returned before pending cache tasks finished")
+				default:
+				}
+				close(release)
+				<-done
+				for kind := range utils.RWTypeLen {
+					for _, stats := range cache.GetHotPeerStats(kind, 0) {
+						require.Empty(t, stats, "cleanup must remove statistics from earlier tasks")
+					}
+				}
+				require.Empty(t, cache.readCache.pendingReadLeaders)
+				cache.CleanCache()
+			})
+		})
+	}
+}
+
+func TestCleanCacheCancellation(t *testing.T) {
+	for _, stage := range []string{"write-input", "read-input", "read-capacity", "execution"} {
+		t.Run(stage, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				cache := NewHotCache(ctx, core.NewBasicCluster())
+				cache.readTaskSlots = make(chan struct{}, 1)
+				if stage == "write-input" || stage == "read-input" {
+					peerCache := cache.writeCache
+					if stage == "read-input" {
+						peerCache = cache.readCache
+					}
+					queue := peerCache.taskQueue
+					peerCache.taskQueue = &chanx.UnboundedChan[func(*HotPeerCache)]{
+						In:  make(chan func(*HotPeerCache)),
+						Out: queue.Out,
+					}
+					defer func() { peerCache.taskQueue = queue }()
+				} else {
+					started, release := make(chan struct{}), make(chan struct{})
+					defer close(release)
+					require.True(t, cache.CheckReadAsync(func(*HotPeerCache) {
+						close(started)
+						<-release
+					}))
+					<-started
+					if stage == "read-capacity" {
+						require.True(t, cache.CheckReadAsync(nil))
+					}
+				}
+				done := make(chan struct{})
+				go func() {
+					cache.CleanCache()
+					close(done)
+				}()
+				synctest.Wait()
+				select {
+				case <-done:
+					t.Fatal("cleanup must wait for pending work or cancellation")
+				default:
+				}
+				cancel()
+				<-done
+				if stage == "read-input" {
+					require.Empty(t, cache.readTaskSlots, "canceled admission must release its reservation")
+				}
+			})
+		})
+	}
+}
+
 func TestRegionHeartbeatUpdatesReadLeader(t *testing.T) {
 	for _, tc := range []struct {
 		name            string
