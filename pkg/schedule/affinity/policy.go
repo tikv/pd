@@ -193,16 +193,19 @@ func (m *Manager) collectUnavailableStores() map[uint64]storeCondition {
 		case store.IsUnhealthy():
 			unavailableStores[store.GetID()] = storeDown
 
-		// Then the conditions that will mark the group as degraded
+		// Then the conditions that will mark the group as degraded, from the most
+		// severe. A store in several conditions takes the most severe one, so that
+		// a disconnected store that is also stopping degrades every group with a
+		// voter on it, not only the groups whose leader is on it.
+		case store.IsLowSpace(lowSpaceRatio):
+			unavailableStores[store.GetID()] = storeLowSpace
+		case store.IsDisconnected():
+			unavailableStores[store.GetID()] = storeDisconnected
+		case store.IsBusy():
+			unavailableStores[store.GetID()] = storeBusy
 		case !store.AllowLeaderTransferIn() || m.conf.CheckLabelProperty(config.RejectLeader, store.GetLabels()) ||
 			store.EvictedAsSlowStore() || store.EvictedAsStoppingStore() || store.IsEvictedAsSlowTrend():
 			unavailableStores[store.GetID()] = storeLeaderEvicted
-		case store.IsBusy():
-			unavailableStores[store.GetID()] = storeBusy
-		case store.IsDisconnected():
-			unavailableStores[store.GetID()] = storeDisconnected
-		case store.IsLowSpace(lowSpaceRatio):
-			unavailableStores[store.GetID()] = storeLowSpace
 		}
 		// Note: We intentionally do NOT check:
 		// - IsSlow(): Performance issue, not availability issue

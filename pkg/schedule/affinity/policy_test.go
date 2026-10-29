@@ -16,7 +16,6 @@ package affinity
 
 import (
 	"fmt"
-	"maps"
 	"testing"
 	"time"
 
@@ -61,7 +60,7 @@ func TestCollectUnavailableStores(t *testing.T) {
 	manager, err := NewManager(ctx, memoryStorage, storeInfos, conf, regionLabeler)
 	re.NoError(err)
 
-	stores := make([]*core.StoreInfo, 12)
+	stores := make([]*core.StoreInfo, 14)
 	for i := range stores {
 		stores[i] = core.NewStoreInfo(&metapb.Store{
 			Id:        uint64(i),
@@ -89,6 +88,9 @@ func TestCollectUnavailableStores(t *testing.T) {
 	stores[10] = stores[10].Clone(core.SetStoreState(metapb.StoreState_Offline, false))
 	// stores[11]: storeRemoved
 	stores[11] = stores[11].Clone(core.SetStoreState(metapb.StoreState_Tombstone))
+	// stores[12..13]: a store in several conditions takes the most severe one.
+	stores[12] = stores[12].Clone(core.StoppingStoreEvicted(), core.SetLastHeartbeatTS(time.Now().Add(-2*time.Minute)))
+	stores[13] = stores[13].Clone(core.SetStoreStats(&pdpb.StoreStats{IsBusy: true}), core.SetLastHeartbeatTS(time.Now().Add(-2*time.Minute)))
 
 	for _, store := range stores {
 		storeInfos.PutStore(store)
@@ -106,8 +108,10 @@ func TestCollectUnavailableStores(t *testing.T) {
 		9:  storeDown,
 		10: storeRemoving,
 		11: storeRemoved,
+		12: storeDisconnected,
+		13: storeDisconnected,
 	}
-	re.True(maps.Equal(expected, actual))
+	re.Equal(expected, actual)
 }
 
 func TestObserveAvailableRegion(t *testing.T) {
