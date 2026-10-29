@@ -37,6 +37,7 @@ import (
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
+	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/schedule/checker"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -45,6 +46,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
@@ -131,6 +133,60 @@ func TestRegionLabelWatcherReloadsAfterCompaction(t *testing.T) {
 	})
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock"))
 	failpointEnabled = false
+}
+
+func TestRegionLabelWatcherClearsAffinityCache(t *testing.T) {
+	re := require.New(t)
+	ctx, client, clean := prepare(t, false)
+	defer clean()
+
+	fixture := newRuleWatcherTestFixture(ctx, t)
+	affinityManager := fixture.cluster.GetAffinityManager()
+	watcherCtx, cancel := context.WithCancel(ctx)
+	rw := &Watcher{
+		ctx:                   watcherCtx,
+		cancel:                cancel,
+		regionLabelPathPrefix: keypath.RegionLabelPathPrefix(),
+		etcdClient:            client,
+		checkerController:     fixture.checkerController,
+		regionLabeler:         fixture.cluster.GetRegionLabeler(),
+		affinityManager:       affinityManager,
+	}
+	defer rw.Close()
+
+	const groupID = "g"
+	oldRange := keyutil.KeyRange{StartKey: []byte("a"), EndKey: []byte("b")}
+	otherRange := keyutil.KeyRange{StartKey: []byte("c"), EndKey: []byte("d")}
+	makeRule := func(ranges ...keyutil.KeyRange) []byte {
+		value, err := json.Marshal(affinity.MakeLabelRule(affinity.GroupKeyRanges{GroupID: groupID, KeyRanges: ranges}))
+		re.NoError(err)
+		return value
+	}
+	ruleKey := keypath.RegionLabelKeyPath(affinity.GetLabelRuleID(groupID))
+	_, err := client.Put(ctx, ruleKey, string(makeRule(oldRange, otherRange)))
+	re.NoError(err)
+	re.NoError(rw.initializeRegionLabelWatcher())
+	affinityManager.SyncGroupFromEtcd(&affinity.Group{ID: groupID, LeaderStoreID: 1, VoterStoreIDs: []uint64{1}})
+	affinityManager.RestoreAffinityGroup(groupID)
+	fixture.cluster.AddLeaderRegionWithRange(100, "a", "b", 1)
+	region := fixture.cluster.GetRegion(100)
+
+	// The affinity label watcher removes oldRange before the region label watcher.
+	newRule := makeRule(otherRange)
+	labelRule, err := labeler.NewLabelRuleFromJSON(newRule)
+	re.NoError(err)
+	re.NoError(affinityManager.SyncKeyRangesFromEtcd(labelRule))
+	group, _ := affinityManager.GetAndCacheRegionAffinityGroupState(region)
+	re.NotNil(group, "the region labeler still has the old label rule")
+	re.Equal(1, affinityManager.GetAffinityGroupState(groupID).RegionCount)
+
+	_, err = client.Put(ctx, ruleKey, string(newRule))
+	re.NoError(err)
+	testutil.Eventually(re, func() bool {
+		return affinityManager.GetAffinityGroupState(groupID).RegionCount == 0
+	})
+	group, _ = affinityManager.GetAndCacheRegionAffinityGroupState(region)
+	re.Nil(group)
 }
 
 func BenchmarkLoadLargeRules(b *testing.B) {
@@ -448,7 +504,7 @@ func TestWatcherLogRedact(t *testing.T) {
 				clientv3.OpPut(keypath.RegionLabelKeyPath(labelRule.ID), string(labelJSON)),
 			).Commit()
 			re.NoError(err)
-			watcher, err := NewWatcher(watchCtx, client, fixture.storage, fixture.checkerController, fixture.ruleManager, regionLabeler)
+			watcher, err := NewWatcher(watchCtx, client, fixture.storage, fixture.checkerController, fixture.ruleManager, regionLabeler, nil)
 			re.NoError(err)
 			closeWatcher := sync.OnceFunc(watcher.Close)
 			t.Cleanup(closeWatcher)
