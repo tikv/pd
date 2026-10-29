@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -3708,12 +3709,18 @@ func TestInitSchedulersNormalizesLegacyConfig(t *testing.T) {
 						tc.storage, schedulers.ConfigJSONDecoder([]byte(saved)))
 					re.NoError(err)
 					var config struct {
-						MinHotByteRate float64  `json:"min-hot-byte-rate"`
-						ReadPriorities []string `json:"read-priorities"`
+						MinHotByteRate        float64  `json:"min-hot-byte-rate"`
+						ReadPriorities        []string `json:"read-priorities"`
+						HistorySampleDuration string   `json:"history-sample-duration"`
+						HistorySampleInterval string   `json:"history-sample-interval"`
 					}
 					re.NoError(json.Unmarshal([]byte(saved), &config))
 					re.Equal(float64(321), config.MinHotByteRate)
 					re.Equal([]string{"key", "byte"}, config.ReadPriorities)
+					if strings.Contains(legacy, `"history-sample-interval":"1s"`) {
+						re.Equal("1h0m0s", config.HistorySampleDuration)
+						re.Equal("1s", config.HistorySampleInterval)
+					}
 					re.Equal(expectedSchedulers, tc.GetScheduleConfig().Schedulers)
 					_, reloadedOpt, err := newTestScheduleConfig()
 					re.NoError(err)

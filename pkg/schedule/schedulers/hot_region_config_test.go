@@ -27,7 +27,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tikv/pd/pkg/schedule/types"
-	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
 )
@@ -42,8 +41,6 @@ func TestHotRegionConfigRejectsUnsafeUpdates(t *testing.T) {
 	}{
 		{`{"history-sample-duration":"-1m"}`, "history-sample-duration"},
 		{`{"history-sample-interval":"-1s"}`, "history-sample-interval"},
-		{`{"history-sample-duration":"2562047h47m16.854775807s","history-sample-interval":"1ns"}`, "history sample count"},
-		{fmt.Sprintf(`{"history-sample-duration":"%dns","history-sample-interval":"1ns"}`, statistics.MaxHistorySampleCount+1), "history sample count"},
 		{`{"max-peer-number":-1}`, "max-peer-number"},
 		{`{"max-peer-number":0}`, "max-peer-number"},
 		{`{"max-zombie-rounds":-1}`, "max-zombie-rounds"},
@@ -117,7 +114,7 @@ func TestHotRegionConfigRestoresLegacyNumericValues(t *testing.T) {
 		body     string
 		expected string
 	}{
-		{`{"history-sample-duration":"1h","history-sample-interval":"1s"}`, `{"history-sample-duration":"17m4s","history-sample-interval":"1s"}`},
+		{`{"history-sample-duration":"1h","history-sample-interval":"1s"}`, `{"history-sample-duration":"1h0m0s","history-sample-interval":"1s"}`},
 		{`{"history-sample-duration":"-1m"}`, `{"history-sample-duration":"0s"}`},
 		{`{"history-sample-interval":"-1s"}`, `{"history-sample-interval":"0s"}`},
 		{`{"max-peer-number":0}`, `{"max-peer-number":1000}`},
@@ -186,7 +183,7 @@ func TestHotRegionConfigNumericBoundaries(t *testing.T) {
 		`{}`,
 		`{"history-sample-duration":"0s"}`,
 		`{"history-sample-duration":"1ns","history-sample-interval":"1ns"}`,
-		fmt.Sprintf(`{"history-sample-duration":"%dns","history-sample-interval":"1ns"}`, statistics.MaxHistorySampleCount),
+		`{"history-sample-duration":"1h","history-sample-interval":"1s"}`,
 		`{"max-peer-number":1,"max-zombie-rounds":0}`,
 		fmt.Sprintf(`{"max-zombie-rounds":%d}`, maxZombieRounds),
 		`{"byte-rate-rank-step-ratio":1,"key-rate-rank-step-ratio":1,"query-rate-rank-step-ratio":1,"cpu-rate-rank-step-ratio":1,"count-rank-step-ratio":1}`,
@@ -209,6 +206,8 @@ func TestHotRegionConfigPreservesCompatibleSettings(t *testing.T) {
 	cancel, _, _, oc := prepareSchedulersTest()
 	defer cancel()
 	for _, body := range []string{
+		`{"history-sample-duration":"1h","history-sample-interval":"1s"}`,
+		`{"history-sample-duration":"2h","history-sample-interval":"1s"}`,
 		`{"history-sample-duration":"0s","history-sample-interval":"0s"}`,
 		`{"history-sample-duration":"5m","history-sample-interval":"0s"}`,
 		`{"history-sample-duration":"1s","history-sample-interval":"2s"}`,

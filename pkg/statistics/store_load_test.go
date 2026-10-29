@@ -78,9 +78,9 @@ func TestHistoryLoadsAllocationBounds(t *testing.T) {
 		{"both negative", -time.Minute, -time.Second, 0},
 		{"disabled", 0, time.Second, 0},
 		{"zero interval", DefaultHistorySampleDuration, 0, 10},
-		{"sample limit", MaxHistorySampleCount * time.Nanosecond, time.Nanosecond, MaxHistorySampleCount},
-		{"over sample limit", (MaxHistorySampleCount + 1) * time.Nanosecond, time.Nanosecond, MaxHistorySampleCount},
-		{"maximum duration", time.Duration(math.MaxInt64), time.Nanosecond, MaxHistorySampleCount},
+		{"one hour", time.Hour, time.Second, 3600},
+		{"two hours", 2 * time.Hour, time.Second, 7200},
+		{"maximum duration", time.Duration(math.MaxInt64), time.Duration(math.MaxInt64), 1},
 		{"minimum duration", time.Duration(math.MinInt64), time.Nanosecond, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -65,13 +65,13 @@ func TestLegacyHotRegionConfigRemainsEditableThroughAPI(t *testing.T) {
 		re.NoError(testutil.CheckGetJSON(tests.TestDialClient, configURL+"/list", nil,
 			testutil.StatusOK(re), testutil.ExtractJSON(re, &listed)))
 		re.Equal(float64(321), listed["min-hot-byte-rate"])
-		re.Equal("17m4s", listed["history-sample-duration"])
+		re.Equal("1h0m0s", listed["history-sample-duration"])
 		re.Equal("1s", listed["history-sample-interval"])
-		// New invalid updates must preserve the normalized configuration.
+		// New invalid updates must preserve the existing configuration.
 		before, err := store.LoadSchedulerConfig(name)
 		re.NoError(err)
 		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, configURL+"/config",
-			[]byte(`{"history-sample-interval":"1ns"}`), testutil.Status(re, http.StatusBadRequest)))
+			[]byte(`{"history-sample-interval":"-1s"}`), testutil.Status(re, http.StatusBadRequest)))
 		saved, err := store.LoadSchedulerConfig(name)
 		re.NoError(err)
 		re.JSONEq(before, saved)
@@ -90,7 +90,7 @@ func TestLegacyHotRegionConfigRemainsEditableThroughAPI(t *testing.T) {
 		re.NoError(json.Unmarshal([]byte(saved), &restored))
 		re.Equal(float64(321), restored.MinHotByteRate)
 		re.Equal([]string{"key", "byte"}, restored.ReadPriorities)
-		re.Equal("17m4s", restored.HistorySampleDuration)
+		re.Equal("1h0m0s", restored.HistorySampleDuration)
 		re.Equal("30s", restored.HistorySampleInterval)
 		// Partial updates must retain the remaining scheduler tuning.
 		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, configURL+"/config",

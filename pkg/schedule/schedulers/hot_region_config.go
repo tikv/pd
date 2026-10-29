@@ -459,10 +459,6 @@ func (conf *hotRegionSchedulerParam) validateLocked() error {
 	if interval < 0 {
 		return errs.ErrSchedulerConfig.FastGenByArgs("history-sample-interval should be nonnegative")
 	}
-	// A zero interval uses the legacy fixed-size buffer; a shorter duration produces no samples.
-	if interval > 0 && duration/interval > statistics.MaxHistorySampleCount {
-		return errs.ErrSchedulerConfig.FastGenByArgs(fmt.Sprintf("history sample count should not exceed %d", statistics.MaxHistorySampleCount))
-	}
 	for _, item := range []struct {
 		name  string
 		value float64
@@ -555,14 +551,8 @@ func (conf *hotRegionSchedulerConfig) adjustLegacyConfig() error {
 	}
 	maxZombieRounds := int(math.MaxInt64 / (utils.RegionHeartBeatReportInterval * time.Second))
 	conf.MaxZombieRounds = min(max(conf.MaxZombieRounds, 0), maxZombieRounds)
-	duration := max(conf.HistorySampleDuration.Duration, 0)
-	interval := max(conf.HistorySampleInterval.Duration, 0)
-	if interval > 0 && duration/interval > statistics.MaxHistorySampleCount {
-		// This product cannot overflow because it is smaller than duration.
-		duration = interval * statistics.MaxHistorySampleCount
-	}
-	conf.HistorySampleDuration.Duration = duration
-	conf.HistorySampleInterval.Duration = interval
+	conf.HistorySampleDuration.Duration = max(conf.HistorySampleDuration.Duration, 0)
+	conf.HistorySampleInterval.Duration = max(conf.HistorySampleInterval.Duration, 0)
 	for _, value := range []*float64{
 		&conf.MinHotByteRate, &conf.MinHotKeyRate, &conf.MinHotQueryRate, &conf.MinHotCPURate,
 		&conf.SrcToleranceRatio, &conf.DstToleranceRatio,
