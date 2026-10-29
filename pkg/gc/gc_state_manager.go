@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -630,6 +631,27 @@ func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID
 	}
 	m.logAdvancingTxnSafePoint(ctx, keyspaceID, result, minBlocker, downgradeCompatibleMode)
 	return result, nil
+}
+
+// loadTiDBMinStartTS routes only TiDB's report read; GC state writes remain on PD's provider.
+func (m *GCStateManager) loadTiDBMinStartTS(keyspaceID uint32, meta *keyspacepb.KeyspaceMeta) (string, uint64, error) {
+	groupID := meta.GetConfig()[keyspace.MetaServiceGroupIDKey]
+	if keyspaceID == constant.NullKeyspaceID || groupID == "" {
+		return m.gcMetaStorage.CompatibleLoadTiDBMinStartTS(keyspaceID)
+	}
+	if !config.IsValidMetaServiceGroupID(groupID) {
+		return "", 0, fmt.Errorf("invalid meta-service group ID %q", groupID)
+	}
+	if m.metaServiceGroupManager == nil {
+		return "", 0, fmt.Errorf("meta-service group manager unavailable for group %s", groupID)
+	}
+	client, err := m.metaServiceGroupManager.GetEtcdClient(groupID)
+	if err != nil {
+		return "", 0, err
+	}
+	// This provider borrows the cached client and is used only for this read.
+	provider := endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(client), nil).GetGCStateProvider()
+	return provider.CompatibleLoadTiDBMinStartTS(keyspaceID)
 }
 
 func (*GCStateManager) logAdvancingTxnSafePoint(ctx context.Context, keyspaceID uint32, result AdvanceTxnSafePointResult, minBlocker uint64, downgradeCompatibleMode bool) {
