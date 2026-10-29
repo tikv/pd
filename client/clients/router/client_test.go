@@ -17,6 +17,7 @@ package router
 import (
 	"context"
 	"errors"
+	"io"
 	"math"
 	"testing"
 	"time"
@@ -24,6 +25,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -428,6 +431,23 @@ func TestLeaderRetryBatchDoesNotRetryAgain(t *testing.T) {
 	re.NoError(<-req.done)
 	re.Nil(req.region)
 	re.Len(leaderStream.requests, 1)
+}
+
+func TestProcessRequestsReturnsStreamStatusAfterSendEOF(t *testing.T) {
+	re := require.New(t)
+	req := newTestRequest(context.Background())
+	req.id = 1
+	// A server that does not implement QueryRegion aborts the stream, so send
+	// may return io.EOF while the actual status is only available from recv.
+	stream := &queryRegionTestStream{
+		sendErr: io.EOF,
+		recvErr: status.Error(codes.Unimplemented, "unknown method QueryRegion for service pdpb.PD"),
+	}
+	client := newQueryRegionTestClient(t, []*Request{req})
+
+	retryRequests, err := client.processRequestsInner(stream.Send, stream.Recv, false, false)
+	re.Empty(retryRequests)
+	re.Equal(codes.Unimplemented, status.Code(err))
 }
 
 func TestDispatcherIsolatesLeaderRetryBatch(t *testing.T) {

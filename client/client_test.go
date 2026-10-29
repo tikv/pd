@@ -19,20 +19,28 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	perrors "github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
+	"github.com/tikv/pd/client/clients/router"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
 	"github.com/tikv/pd/client/pkg/utils/tsoutil"
+	sd "github.com/tikv/pd/client/servicediscovery"
 )
 
 func TestMain(m *testing.M) {
@@ -186,4 +194,101 @@ func TestIsKeyspaceUsingKeyspaceLevelGC(t *testing.T) {
 			require.Equal(t, test.want, got)
 		})
 	}
+}
+
+func TestIsQueryRegionUnimplemented(t *testing.T) {
+	re := require.New(t)
+	unimplementedErr := status.Error(codes.Unimplemented, "unknown method QueryRegion for service pdpb.PD")
+	re.True(isQueryRegionUnimplemented(unimplementedErr))
+	// The router client wraps the stream error with a stack.
+	re.True(isQueryRegionUnimplemented(perrors.WithStack(unimplementedErr)))
+	re.False(isQueryRegionUnimplemented(nil))
+	re.False(isQueryRegionUnimplemented(status.Error(codes.Unavailable, "unavailable")))
+	re.False(isQueryRegionUnimplemented(perrors.WithStack(errs.ErrClientRouterConnectionTimeout)))
+}
+
+// testLegacyRegionServer serves the unary Region RPCs but does not implement
+// QueryRegion, like a PD server that predates it.
+type testLegacyRegionServer struct {
+	pdpb.UnimplementedPDServer
+	leader *pdpb.Member
+	region *pdpb.GetRegionResponse
+
+	getRegionCount     atomic.Int32
+	getPrevRegionCount atomic.Int32
+	getRegionByIDCount atomic.Int32
+}
+
+func (s *testLegacyRegionServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.GetMembersResponse, error) {
+	return &pdpb.GetMembersResponse{
+		Header:  &pdpb.ResponseHeader{},
+		Members: []*pdpb.Member{s.leader},
+		Leader:  s.leader,
+	}, nil
+}
+
+func (s *testLegacyRegionServer) GetRegion(context.Context, *pdpb.GetRegionRequest) (*pdpb.GetRegionResponse, error) {
+	s.getRegionCount.Add(1)
+	return s.region, nil
+}
+
+func (s *testLegacyRegionServer) GetPrevRegion(context.Context, *pdpb.GetRegionRequest) (*pdpb.GetRegionResponse, error) {
+	s.getPrevRegionCount.Add(1)
+	return s.region, nil
+}
+
+func (s *testLegacyRegionServer) GetRegionByID(context.Context, *pdpb.GetRegionByIDRequest) (*pdpb.GetRegionResponse, error) {
+	s.getRegionByIDCount.Add(1)
+	return s.region, nil
+}
+
+func TestRegionQueriesFallBackWhenQueryRegionIsUnimplemented(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	re.NoError(err)
+	url := "http://" + listener.Addr().String()
+	regionServer := &testLegacyRegionServer{
+		leader: &pdpb.Member{MemberId: 1, ClientUrls: []string{url}},
+		region: &pdpb.GetRegionResponse{
+			Header: &pdpb.ResponseHeader{},
+			Region: &metapb.Region{Id: 2, StartKey: []byte("a"), EndKey: []byte("z")},
+			Leader: &metapb.Peer{Id: 3, StoreId: 4},
+		},
+	}
+	server := grpc.NewServer()
+	pdpb.RegisterPDServer(server, regionServer)
+	go func() { _ = server.Serve(listener) }()
+	defer server.Stop()
+
+	discovery := sd.NewDefaultServiceDiscovery(ctx, cancel, []string{url}, nil)
+	defer discovery.Close()
+	re.NoError(discovery.CheckMemberChanged())
+	option := opt.NewOption()
+	option.InitMetrics = false
+	routerClient := router.NewClient(ctx, discovery, nil, option)
+	defer routerClient.Close()
+	cli := &client{
+		inner: &innerClient{
+			serviceDiscovery: discovery,
+			routerClient:     routerClient,
+			ctx:              ctx,
+			option:           option,
+		},
+	}
+
+	region, err := cli.GetRegion(ctx, []byte("b"))
+	re.NoError(err)
+	re.Equal(uint64(2), region.Meta.GetId())
+	re.Equal(int32(1), regionServer.getRegionCount.Load())
+	region, err = cli.GetPrevRegion(ctx, []byte("z"))
+	re.NoError(err)
+	re.Equal(uint64(2), region.Meta.GetId())
+	re.Equal(int32(1), regionServer.getPrevRegionCount.Load())
+	region, err = cli.GetRegionByID(ctx, 2)
+	re.NoError(err)
+	re.Equal(uint64(2), region.Meta.GetId())
+	re.Equal(int32(1), regionServer.getRegionByIDCount.Load())
 }
