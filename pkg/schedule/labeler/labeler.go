@@ -421,8 +421,7 @@ func (l *RegionLabeler) GetRegionLabelValues(region *core.RegionInfo, key string
 	var candidates []candidate
 	now := time.Now()
 	applyRule := func(rule *LabelRule) {
-		for i := len(rule.Labels) - 1; i >= 0; i-- {
-			label := rule.Labels[i]
+		for _, label := range slices.Backward(rule.Labels) {
 			if label.Key == key && !label.expireBefore(now) && (filter == nil || filter(rule, label.Value)) {
 				candidates = append(candidates, candidate{value: label.Value, index: rule.Index})
 			}
