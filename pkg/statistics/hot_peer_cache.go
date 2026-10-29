@@ -122,6 +122,9 @@ type HotPeerCache struct {
 	peersOfStore   map[uint64]*utils.TopN         // storeID -> hot peers
 	storesOfRegion map[uint64]map[uint64]struct{} // regionID -> storeIDs
 	regionsOfStore map[uint64]map[uint64]struct{} // storeID -> regionIDs
+	// pendingReadLeaders outlives read samples while the root tree has not yet
+	// published leadership already observed by a region metadata task.
+	pendingReadLeaders map[uint64]*uint64
 	// coldPeersOfStore indexes cold peers by store and keeps each candidate's
 	// position in coldPeerSweepQueue. This lets gc() visit a bounded batch
 	// without scanning or copying a store's full TopN.
@@ -137,16 +140,17 @@ type HotPeerCache struct {
 // NewHotPeerCache creates a HotPeerCache
 func NewHotPeerCache(ctx context.Context, cluster *core.BasicCluster, kind utils.RWType) *HotPeerCache {
 	return &HotPeerCache{
-		kind:              kind,
-		cluster:           cluster,
-		peersOfStore:      make(map[uint64]*utils.TopN),
-		storesOfRegion:    make(map[uint64]map[uint64]struct{}),
-		regionsOfStore:    make(map[uint64]map[uint64]struct{}),
-		coldPeersOfStore:  make(map[uint64]map[uint64]*list.Element),
-		taskQueue:         chanx.NewUnboundedChan[func(*HotPeerCache)](ctx, queueCap),
-		thresholdsOfStore: make(map[uint64]*thresholds),
-		topNTTL:           time.Duration(3*kind.ReportInterval()) * time.Second,
-		metrics:           make(map[uint64][utils.ActionTypeLen]prometheus.Gauge),
+		kind:               kind,
+		cluster:            cluster,
+		peersOfStore:       make(map[uint64]*utils.TopN),
+		storesOfRegion:     make(map[uint64]map[uint64]struct{}),
+		regionsOfStore:     make(map[uint64]map[uint64]struct{}),
+		pendingReadLeaders: make(map[uint64]*uint64),
+		coldPeersOfStore:   make(map[uint64]map[uint64]*list.Element),
+		taskQueue:          chanx.NewUnboundedChan[func(*HotPeerCache)](ctx, queueCap),
+		thresholdsOfStore:  make(map[uint64]*thresholds),
+		topNTTL:            time.Duration(3*kind.ReportInterval()) * time.Second,
+		metrics:            make(map[uint64][utils.ActionTypeLen]prometheus.Gauge),
 	}
 }
 
@@ -224,12 +228,32 @@ func (f *HotPeerCache) updateReadLeader(region *hotRegionInfo) {
 	if f.kind != utils.Read {
 		return
 	}
+	leaderTransferred := false
+	for storeID := range f.storesOfRegion[region.id()] {
+		oldItem := f.getOldHotPeerStat(region.id(), storeID)
+		if oldItem != nil && (oldItem.isLeader != (storeID == region.leaderStoreID) ||
+			oldItem.readLeaderStoreID != nil && *oldItem.readLeaderStoreID != region.leaderStoreID) {
+			leaderTransferred = true
+			break
+		}
+	}
 	var now time.Time
 	var leaderStoreID *uint64
+	current := f.cluster.GetRegion(region.id())
+	if current == nil || current.GetLeader().GetStoreId() != region.leaderStoreID {
+		leaderStoreID = f.pendingReadLeaders[region.id()]
+		if leaderStoreID == nil || *leaderStoreID != region.leaderStoreID {
+			leaderStoreID = new(uint64)
+			*leaderStoreID = region.leaderStoreID
+		}
+		f.pendingReadLeaders[region.id()] = leaderStoreID
+	} else {
+		delete(f.pendingReadLeaders, region.id())
+	}
 	for storeID := range f.storesOfRegion[region.id()] {
 		oldItem := f.getOldHotPeerStat(region.id(), storeID)
 		isLeader := storeID == region.leaderStoreID
-		if oldItem == nil || oldItem.readLeaderStoreID != nil && *oldItem.readLeaderStoreID == region.leaderStoreID {
+		if oldItem == nil || !leaderTransferred && oldItem.readLeaderStoreID != nil && *oldItem.readLeaderStoreID == region.leaderStoreID {
 			continue
 		}
 		// Preserve the rolling statistics and leave previously returned items unchanged.
@@ -240,7 +264,7 @@ func (f *HotPeerCache) updateReadLeader(region *hotRegionInfo) {
 			*leaderStoreID = region.leaderStoreID
 		}
 		item.readLeaderStoreID = leaderStoreID
-		if oldItem.isLeader != isLeader {
+		if leaderTransferred {
 			if now.IsZero() {
 				now = time.Now()
 			}
@@ -782,6 +806,12 @@ func (f *HotPeerCache) gc() {
 			f.removeColdPeer(storeID, regionID)
 		}
 	}
+	for regionID, leaderStoreID := range f.pendingReadLeaders {
+		current := f.cluster.GetRegion(regionID)
+		if current == nil || current.GetLeader().GetStoreId() == *leaderStoreID {
+			delete(f.pendingReadLeaders, regionID)
+		}
+	}
 }
 
 // sweepColdPeers checks at most limit cold peers per call. Live candidates are
@@ -834,6 +864,7 @@ func (f *HotPeerCache) removeAllItem() {
 			f.UpdateStat(item)
 		}
 	}
+	clear(f.pendingReadLeaders)
 }
 
 func coldItem(newItem, oldItem *HotPeerStat) {

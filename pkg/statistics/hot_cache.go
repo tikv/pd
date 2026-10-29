@@ -33,14 +33,17 @@ type HotCache struct {
 	ctx        context.Context
 	writeCache *HotPeerCache
 	readCache  *HotPeerCache
+	// readTaskSlots bounds pending read tasks, including metadata that must not be dropped.
+	readTaskSlots chan struct{}
 }
 
 // NewHotCache creates a new hot spot cache.
 func NewHotCache(ctx context.Context, cluster *core.BasicCluster) *HotCache {
 	w := &HotCache{
-		ctx:        ctx,
-		writeCache: NewHotPeerCache(ctx, cluster, utils.Write),
-		readCache:  NewHotPeerCache(ctx, cluster, utils.Read),
+		ctx:           ctx,
+		writeCache:    NewHotPeerCache(ctx, cluster, utils.Write),
+		readCache:     NewHotPeerCache(ctx, cluster, utils.Read),
+		readTaskSlots: make(chan struct{}, chanMaxLength),
 	}
 	go w.updateItems(w.readCache.taskQueue, w.runReadTask)
 	go w.updateItems(w.writeCache.taskQueue, w.runWriteTask)
@@ -62,23 +65,44 @@ func (w *HotCache) CheckWriteAsync(task func(cache *HotPeerCache)) bool {
 
 // CheckReadAsync puts the flowItem into queue, and check it asynchronously
 func (w *HotCache) CheckReadAsync(task func(cache *HotPeerCache)) bool {
-	if w.readCache.taskQueue.Len() > chanMaxLength {
+	select {
+	case w.readTaskSlots <- struct{}{}:
+	default:
 		return false
 	}
 	select {
 	case w.readCache.taskQueue.In <- task:
 		return true
 	default:
+		<-w.readTaskSlots
+		return false
+	}
+}
+
+func (w *HotCache) enqueueReadMetadata(task func(*HotPeerCache)) bool {
+	select {
+	case w.readTaskSlots <- struct{}{}:
+	case <-w.ctx.Done():
+		return false
+	}
+	select {
+	case w.readCache.taskQueue.In <- task:
+		return true
+	case <-w.ctx.Done():
+		<-w.readTaskSlots
 		return false
 	}
 }
 
 // CheckRegionFlowAsync checks expired items, read peer leadership, and write
 // flow for a region asynchronously while retaining only immutable metadata.
+// It waits for read queue capacity so leader metadata is not dropped.
 func (w *HotCache) CheckRegionFlowAsync(region *core.RegionInfo) {
 	checkRegionTask, checkWritePeerTask := newRegionFlowTasks(region)
 	w.CheckWriteAsync(checkRegionTask)
-	w.CheckReadAsync(checkRegionTask)
+	if !w.enqueueReadMetadata(checkRegionTask) {
+		return
+	}
 	w.CheckWriteAsync(checkWritePeerTask)
 }
 
@@ -105,11 +129,11 @@ func newRegionFlowTasks(region *core.RegionInfo) (checkRegionTask, checkWritePee
 func newRegionMetadataTask(meta *metapb.Region, leaderStoreID uint64) func(*HotPeerCache) {
 	return func(cache *HotPeerCache) {
 		regionInfo := hotRegionInfo{meta: meta, leaderStoreID: leaderStoreID}
+		cache.updateReadLeader(&regionInfo)
 		expiredStats := cache.collectExpiredItemsForRegion(&regionInfo)
 		for _, stat := range expiredStats {
 			cache.UpdateStat(stat)
 		}
-		cache.updateReadLeader(&regionInfo)
 	}
 }
 
@@ -141,13 +165,20 @@ func newReadPeerTask(region *core.RegionInfo, peer *metapb.Peer, loads []float64
 		regionInfo := hotRegionInfo{meta: meta, leaderStoreID: leaderStoreID}
 		// Region metadata tasks run on the same queue and may already have
 		// observed a newer leader than this store heartbeat's region snapshot.
-		var readLeaderStoreID *uint64
-		for id := range cache.storesOfRegion[meta.GetId()] {
-			if item := cache.getOldHotPeerStat(meta.GetId(), id); item != nil && item.readLeaderStoreID != nil {
-				readLeaderStoreID = item.readLeaderStoreID
-				regionInfo.leaderStoreID = *readLeaderStoreID
-				break
+		readLeaderStoreID := cache.pendingReadLeaders[meta.GetId()]
+		if readLeaderStoreID == nil {
+			for id := range cache.storesOfRegion[meta.GetId()] {
+				if item := cache.getOldHotPeerStat(meta.GetId(), id); item != nil && item.readLeaderStoreID != nil {
+					readLeaderStoreID = item.readLeaderStoreID
+					break
+				}
 			}
+		}
+		if readLeaderStoreID != nil {
+			regionInfo.leaderStoreID = *readLeaderStoreID
+		} else if current := cache.cluster.GetRegion(meta.GetId()); current != nil {
+			// All read samples may have expired since this snapshot was captured.
+			regionInfo.leaderStoreID = current.GetLeader().GetStoreId()
 		}
 		stats := cache.checkPeerFlowForRegion(&regionInfo, []uint64{storeID}, loads, interval)
 		for _, stat := range stats {
@@ -275,13 +306,17 @@ func (w *HotCache) updateItems(queue *chanx.UnboundedChan[func(*HotPeerCache)], 
 		select {
 		case <-w.ctx.Done():
 			return
-		case task := <-queue.Out:
+		case task, ok := <-queue.Out:
+			if !ok {
+				return
+			}
 			runTask(task)
 		}
 	}
 }
 
 func (w *HotCache) runReadTask(task func(cache *HotPeerCache)) {
+	<-w.readTaskSlots
 	if task != nil {
 		// TODO: do we need a run-task timeout to protect the queue won't be stuck by a task?
 		task(w.readCache)
