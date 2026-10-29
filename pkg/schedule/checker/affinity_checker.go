@@ -164,7 +164,7 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 
 	// Once a group is stable, register its table with the balancer, which plans
 	// the targets of the whole table in the background.
-	if group.BalancePolicy != affinity.BalancePolicyFixed && group.Phase == affinity.PhaseStable {
+	if !group.BalancePolicy.IsFixed() && group.Phase == affinity.PhaseStable {
 		c.balancer.enqueue(group.ID)
 	}
 

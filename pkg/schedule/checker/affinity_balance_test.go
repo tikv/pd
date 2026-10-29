@@ -243,14 +243,15 @@ func TestAffinityBalanceLearnerInLaterRegion(t *testing.T) {
 }
 
 func TestAffinityBalanceKeepsUnmodelledGroups(t *testing.T) {
-	for _, reason := range []string{"same rules", "different rules", "missing label"} {
+	for _, reason := range []string{"same rules", "different rules", "missing label", "unknown policy"} {
 		t.Run(reason, func(t *testing.T) {
 			re := require.New(t)
 			f := newAffinityBalanceTest(t, 5, "a", "b", "c", "a", "")
 			voters := []uint64{1, 2, 3}
-			if reason == "missing label" {
+			switch reason {
+			case "missing label":
 				voters = []uint64{1, 2, 5}
-			} else {
+			case "same rules", "different rules":
 				rule := f.ruleManager.GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
 				rule.ID, rule.Index, rule.Override = "subrange", 1, true
 				rule.StartKeyHex, rule.EndKeyHex = "61", "62"
@@ -261,6 +262,12 @@ func TestAffinityBalanceKeepsUnmodelledGroups(t *testing.T) {
 			}
 			f.group("_tidb_pt_100_p0", 1, 1, voters, "a", "b", "c")
 			f.group("_tidb_pt_100_p1", 3, 1, []uint64{1, 2, 3}, "d", "e")
+			if reason == "unknown policy" {
+				// A policy that a newer version writes keeps the target like fixed.
+				group := f.affinityManager.GetAffinityGroupState("_tidb_pt_100_p0").Group
+				group.BalancePolicy = "manual"
+				f.affinityManager.SyncGroupFromEtcd(&group)
+			}
 			before := f.snapshot()
 			re.True(f.step())
 			re.Equal(before.Groups[0].Group, f.affinityManager.GetAffinityGroupState(before.Groups[0].ID).Group)

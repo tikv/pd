@@ -126,7 +126,7 @@ func (m *Manager) IsBalanceTableEligible(tableID TableID) bool {
 		return false
 	}
 	for id := range table.groups {
-		if group := m.groups[id]; group != nil && group.BalancePolicy != BalancePolicyFixed {
+		if group := m.groups[id]; group != nil && !group.BalancePolicy.IsFixed() {
 			return true
 		}
 	}

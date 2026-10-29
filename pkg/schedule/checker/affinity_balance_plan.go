@@ -276,7 +276,7 @@ func sameBalanceRegion(a, b *core.RegionInfo) bool {
 // created within affinityBalanceCreateGrace and has no target yet.
 func balanceCreatingTable(snapshot *affinity.BalanceSnapshot, now time.Time) bool {
 	for _, group := range snapshot.Groups {
-		if group.BalancePolicy != affinity.BalancePolicyFixed && len(group.VoterStoreIDs) == 0 &&
+		if !group.BalancePolicy.IsFixed() && len(group.VoterStoreIDs) == 0 &&
 			now.Sub(time.Unix(int64(group.CreateTimestamp), 0)) < affinityBalanceCreateGrace {
 			return true
 		}
@@ -336,7 +336,7 @@ func (c *AffinityChecker) balancePlanInput(snapshot *affinity.BalanceSnapshot, e
 		if group.LeaderStoreID != 0 {
 			in.OtherLeaders[index[group.LeaderStoreID]]--
 		}
-		if group.BalancePolicy != affinity.BalancePolicyFixed && group.AffinitySchedulingAllowed && group.Phase == affinity.PhasePreparing {
+		if !group.BalancePolicy.IsFixed() && group.AffinitySchedulingAllowed && group.Phase == affinity.PhasePreparing {
 			plan.retry = true
 		}
 		g, kind := c.balancePlanGroup(group, snapshot.Ranges[group.ID], rules, index, canLead, allowed)
@@ -367,7 +367,7 @@ func (c *AffinityChecker) balancePlanInput(snapshot *affinity.BalanceSnapshot, e
 // balancePlanGroup describes a group that may change, or classifies why it cannot.
 func (c *AffinityChecker) balancePlanGroup(group *affinity.GroupState, ranges affinity.GroupKeyRanges, rules *balanceRuleCache,
 	index map[uint64]int, canLead []bool, allowed func(id uint64, leader, source bool) bool) (balanceplan.Group, balancePlanGroupKind) {
-	if group.BalancePolicy == affinity.BalancePolicyFixed {
+	if group.BalancePolicy.IsFixed() {
 		return balanceplan.Group{}, balanceGroupFixed
 	}
 	if !group.AffinitySchedulingAllowed || group.Phase != affinity.PhaseStable ||
