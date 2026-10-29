@@ -1119,8 +1119,7 @@ func commitResultIsAmbiguous(err error) bool {
 	if goerrors.Is(err, context.DeadlineExceeded) || goerrors.Is(err, context.Canceled) {
 		return true
 	}
-	var etcdErr rpctypes.EtcdError
-	if goerrors.As(err, &etcdErr) {
+	if etcdErr, ok := goerrors.AsType[rpctypes.EtcdError](err); ok {
 		switch etcdErr.Code() {
 		case codes.Canceled, codes.DeadlineExceeded, codes.Unavailable, codes.DataLoss, codes.Internal:
 			return true

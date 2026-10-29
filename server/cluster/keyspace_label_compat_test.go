@@ -15,7 +15,6 @@
 package cluster
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -35,8 +34,7 @@ import (
 // keyspace-meta watcher and so has no other way to learn about the keyspace.
 func TestCreateKeyspaceWritesCompatibilityLabelRule(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -75,8 +73,7 @@ func TestCreateKeyspaceWritesCompatibilityLabelRule(t *testing.T) {
 // pointing at an ID that no longer exists.
 func TestCreateKeyspaceCleansUpCompatibilityLabelRuleOnFailure(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)

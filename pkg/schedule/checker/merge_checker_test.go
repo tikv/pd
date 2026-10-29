@@ -654,8 +654,7 @@ func (c *mockClusterWithKeyspaceManager) KeyspaceExist(id uint32) bool {
 
 func TestNotMergeAfterSplit(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cfg := mockconfig.NewTestOptions()
 	cluster := &mockClusterWithKeyspaceManager{
 		Cluster: mockcluster.NewCluster(ctx, cfg),
@@ -705,8 +704,7 @@ func testNoMerge(re *require.Assertions, cluster *mockClusterWithKeyspaceManager
 
 func TestKeyspaceMerge(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cfg := mockconfig.NewTestOptions()
 	cluster := &mockClusterWithKeyspaceManager{
 		Cluster: mockcluster.NewCluster(ctx, cfg),

@@ -776,8 +776,7 @@ func (suite *keyspaceTestSuite) TestLoadRangeKeyspace() {
 // these two deliberately do not warm the cache.
 func TestLoadKeyspaceDoesNotPopulateCache(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	allocator := mockid.NewIDAllocator()
 	kgm := NewKeyspaceGroupManager(ctx, store, nil)
@@ -820,8 +819,7 @@ func TestLoadKeyspaceDoesNotPopulateCache(t *testing.T) {
 // storage rather than only trusting whatever happens to already be cached.
 func TestGetKeyspaceIDInRangeBackfillsFromStorage(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	allocator := mockid.NewIDAllocator()
 	kgm := NewKeyspaceGroupManager(ctx, store, nil)
@@ -858,8 +856,7 @@ func TestGetKeyspaceIDInRangeBackfillsFromStorage(t *testing.T) {
 // and that the watermark reaches full completion after that one call.
 func TestGetKeyspaceIDInRangeBackfillScansToCompletion(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	allocator := mockid.NewIDAllocator()
 	kgm := NewKeyspaceGroupManager(ctx, store, nil)
@@ -891,8 +888,7 @@ func TestGetKeyspaceIDInRangeBackfillScansToCompletion(t *testing.T) {
 // correctly (by re-backfilling) afterward.
 func TestManagerClearCache(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	allocator := mockid.NewIDAllocator()
 	kgm := NewKeyspaceGroupManager(ctx, store, nil)
@@ -935,8 +931,7 @@ func TestManagerClearCache(t *testing.T) {
 // result.
 func TestEvictKeyspacesFromCacheRollsBackVerifiedWatermark(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	allocator := mockid.NewIDAllocator()
 	kgm := NewKeyspaceGroupManager(ctx, store, nil)
@@ -978,8 +973,7 @@ func TestEvictKeyspacesFromCacheRollsBackVerifiedWatermark(t *testing.T) {
 // must both agree the keyspace does not exist, the same as storage.
 func TestCreateKeyspaceByIDEvictsCacheAfterSplitTimeout(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	allocator := mockid.NewIDAllocator()
 	kgm := NewKeyspaceGroupManager(ctx, store, nil)
@@ -1011,8 +1005,7 @@ func TestCreateKeyspaceByIDEvictsCacheAfterSplitTimeout(t *testing.T) {
 // CreateKeyspace, which has its own, separately-written rollback block.
 func TestCreateKeyspaceEvictsCacheAfterSplitTimeout(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	allocator := mockid.NewIDAllocator()
 	kgm := NewKeyspaceGroupManager(ctx, store, nil)
@@ -1061,8 +1054,7 @@ func (*failingRuleStorage) SaveRegionRule(kv.Txn, string, any) error {
 // other way to learn this keyspace's boundary if the write is skipped.
 func TestCreateKeyspaceByIDFailsWhenCompatibilityLabelWriteFails(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	allocator := mockid.NewIDAllocator()
 	kgm := NewKeyspaceGroupManager(ctx, store, nil)
@@ -1103,8 +1095,7 @@ func TestCreateKeyspaceByIDFailsWhenCompatibilityLabelWriteFails(t *testing.T) {
 // touches the cache, so the reader has nothing to clobber with.
 func TestGetKeyspaceStateByIDFallbackDoesNotRaceConcurrentUpdate(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	allocator := mockid.NewIDAllocator()
 	kgm := NewKeyspaceGroupManager(ctx, store, nil)
@@ -1170,8 +1161,7 @@ func TestGetKeyspaceStateByIDFallbackDoesNotRaceConcurrentUpdate(t *testing.T) {
 // how the two interleave.
 func TestLoadKeyspaceByIDConcurrentWithUpdateDoesNotRaceCache(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	allocator := mockid.NewIDAllocator()
 	kgm := NewKeyspaceGroupManager(ctx, store, nil)
@@ -1233,8 +1223,7 @@ func TestLoadKeyspaceByIDConcurrentWithUpdateDoesNotRaceCache(t *testing.T) {
 // (the by-name sibling lookup).
 func TestLoadKeyspaceConcurrentWithUpdateDoesNotRaceCache(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	allocator := mockid.NewIDAllocator()
 	kgm := NewKeyspaceGroupManager(ctx, store, nil)
@@ -1300,8 +1289,7 @@ func TestLoadKeyspaceConcurrentWithUpdateDoesNotRaceCache(t *testing.T) {
 // already landed, and only then reads, commits, and publishes on top of it.
 func TestUpdateKeyspaceStateByIDDoesNotClobberConcurrentUpdate(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	allocator := mockid.NewIDAllocator()
 	kgm := NewKeyspaceGroupManager(ctx, store, nil)
@@ -1367,8 +1355,7 @@ func TestUpdateKeyspaceStateByIDDoesNotClobberConcurrentUpdate(t *testing.T) {
 // UpdateKeyspaceState (the by-name sibling) pausing first instead.
 func TestUpdateKeyspaceStateDoesNotClobberConcurrentUpdate(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	allocator := mockid.NewIDAllocator()
 	kgm := NewKeyspaceGroupManager(ctx, store, nil)
@@ -1430,8 +1417,7 @@ func TestUpdateKeyspaceStateDoesNotClobberConcurrentUpdate(t *testing.T) {
 // against each other.
 func TestUpdateKeyspaceConfigDoesNotClobberConcurrentUpdate(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	allocator := mockid.NewIDAllocator()
 	kgm := NewKeyspaceGroupManager(ctx, store, nil)
@@ -1497,8 +1483,7 @@ func TestUpdateKeyspaceConfigDoesNotClobberConcurrentUpdate(t *testing.T) {
 // trusting the rejected buffer.
 func TestBackfillKeyspaceIDRangeDoesNotClobberConcurrentUpdate(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	allocator := mockid.NewIDAllocator()
 	kgm := NewKeyspaceGroupManager(ctx, store, nil)
@@ -2039,8 +2024,7 @@ func (suite *keyspaceTestSuite) TestRemoveKeyspaceCleansCache() {
 
 func TestUpdateKeyspaceStateDoesNotUpdateCacheBeforeCommit(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	kgm := NewKeyspaceGroupManager(ctx, store, nil)
 	manager := NewKeyspaceManager(ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{}, kgm, nil)
