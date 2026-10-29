@@ -287,6 +287,9 @@ func (krgm *keyspaceResourceGroupManager) modifyResourceGroup(group *rmpb.Resour
 	if err != nil {
 		return err
 	}
+	// The patch may turn a bounded group into a burstable one, so the burst
+	// limit needs to be invalidated again if there is an active service limit.
+	krgm.syncBurstabilityWithServiceLimit(curGroup)
 	return curGroup.persistSettings(krgm.keyspaceID, krgm.storage)
 }
 
