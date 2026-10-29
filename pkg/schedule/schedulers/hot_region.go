@@ -301,8 +301,8 @@ func (*hotScheduler) GetMinInterval() time.Duration {
 }
 
 // GetNextInterval implements the Scheduler interface.
-func (s *hotScheduler) GetNextInterval(time.Duration) time.Duration {
-	return intervalGrow(s.GetMinInterval(), maxHotScheduleInterval, exponentialGrowth)
+func (*hotScheduler) GetNextInterval(interval time.Duration) time.Duration {
+	return intervalGrow(interval, maxHotScheduleInterval, exponentialGrowth)
 }
 
 // IsScheduleAllowed implements the Scheduler interface.

@@ -15,6 +15,7 @@
 package schedulers
 
 import (
+	"context"
 	"encoding/hex"
 	"fmt"
 	"math"
@@ -84,6 +85,50 @@ func clearPendingInfluence(h *hotScheduler) {
 func newTestRegion(id uint64) *core.RegionInfo {
 	peers := []*metapb.Peer{{Id: id*100 + 1, StoreId: 1}, {Id: id*100 + 2, StoreId: 2}, {Id: id*100 + 3, StoreId: 3}}
 	return core.NewRegionInfo(&metapb.Region{Id: id, Peers: peers}, peers[0])
+}
+
+func TestHotScheduleIntervalBackoff(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	hb := newHotReadScheduler(oc, initHotRegionScheduleConfig())
+	hb.types = []resourceType{readLeader}
+	hb.conf.ReadPriorities = []string{utils.BytePriority, utils.KeyPriority}
+	hb.conf.setHistorySampleDuration(0)
+	sc := NewScheduleController(context.Background(), tc, oc, hb)
+	defer sc.Stop()
+	re.Equal(minHotScheduleInterval, sc.GetInterval())
+
+	for range 20 {
+		previous := sc.GetInterval()
+		re.Empty(sc.Schedule(false))
+		interval := sc.GetInterval()
+		if previous < maxHotScheduleInterval {
+			re.Greater(interval, previous)
+		} else {
+			re.Equal(maxHotScheduleInterval, interval)
+		}
+		re.LessOrEqual(interval, maxHotScheduleInterval)
+	}
+	re.Equal(maxHotScheduleInterval, sc.GetInterval())
+
+	// New hot work is scheduled on the next round and restores the minimum interval.
+	for id := uint64(1); id <= 3; id++ {
+		tc.AddRegionStore(id, 1)
+		tc.UpdateStorageReadStats(id, 0, 0)
+	}
+	tc.UpdateStorageReadStats(1, 20*units.MiB*utils.StoreHeartBeatReportInterval, 0)
+	addRegionLeaderReadInfo(tc, []testRegionInfo{
+		{1, []uint64{1, 2, 3}, 5 * units.MiB, 0, 0},
+	})
+	ops := sc.Schedule(false)
+	re.Len(ops, 1)
+	operatorutil.CheckTransferLeaderFrom(re, ops[0], operator.OpHotRegion, 1)
+	re.Equal(minHotScheduleInterval, sc.GetInterval())
+
+	// Pending work leaves no new operator, so backoff starts again from the minimum.
+	re.Empty(sc.Schedule(false))
+	re.Equal(1300*time.Millisecond, sc.GetInterval())
 }
 
 func TestUpgrade(t *testing.T) {
