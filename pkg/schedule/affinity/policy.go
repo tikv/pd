@@ -127,6 +127,13 @@ func (m *Manager) ObserveAvailableRegion(region *core.RegionInfo, group *GroupSt
 		return
 	}
 	leaderStoreID := region.GetLeader().GetStoreId()
+	// Leaders move away while a store restarts. A fixed group keeps its target
+	// until it expires, so while it is degraded a Region can only confirm the
+	// target. RegularSchedulingAllowed is false for a group that has a target
+	// and has not expired.
+	if group.BalancePolicy.IsFixed() && !group.RegularSchedulingAllowed && leaderStoreID != group.LeaderStoreID {
+		return
+	}
 	voterStoreIDs := make([]uint64, len(region.GetVoters()))
 	for i, voter := range region.GetVoters() {
 		voterStoreIDs[i] = voter.GetStoreId()
