@@ -15,7 +15,6 @@
 package operator
 
 import (
-	"context"
 	"fmt"
 	"strconv"
 	"testing"
@@ -35,9 +34,7 @@ func BenchmarkTargetLeaderRoles(b *testing.B) {
 				mode = "complete"
 			}
 			b.Run(fmt.Sprintf("peers%d/%s", n, mode), func(b *testing.B) {
-				ctx, cancel := context.WithCancel(context.Background())
-				defer cancel()
-				tc := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+				tc := mockcluster.NewCluster(b.Context(), mockconfig.NewTestOptions())
 				tc.SetEnablePlacementRules(true)
 				followers := make([]uint64, 0, n-1)
 				for i := 1; i <= n; i++ {
