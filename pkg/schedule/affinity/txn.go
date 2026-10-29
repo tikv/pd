@@ -355,7 +355,8 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affini
 		groupInfo = m.groups[groupID]
 	}
 	groupInfo.Group = group.Group
-	groupInfo.SetAvailability(groupAvailable)
+	// A store may have become unavailable since the target was checked.
+	m.setTargetAvailabilityLocked(groupInfo)
 	m.resetCountLocked(groupInfo)
 	return newGroupState(groupInfo), nil
 }
