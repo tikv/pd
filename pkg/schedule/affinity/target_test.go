@@ -428,6 +428,42 @@ func TestSameStoredGroupComparesEveryField(t *testing.T) {
 	}
 }
 
+// TestSyncGroupFromEtcdKeepsEveryField checks that a group synced from etcd
+// reaches memory with every persisted field, so that a field added to Group is
+// not left out of memory. Otherwise every target written for the group would
+// be rejected, because it would carry the old value as its expected group.
+func TestSyncGroupFromEtcdKeepsEveryField(t *testing.T) {
+	typ := reflect.TypeFor[Group]()
+	for i := range typ.NumField() {
+		name := typ.Field(i).Name
+		if name == "ID" {
+			continue
+		}
+		t.Run(name, func(t *testing.T) {
+			re := require.New(t)
+			manager, _ := newTargetTestManager(t)
+			base := Group{ID: "g", CreateTimestamp: 1, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2}}
+			manager.SyncGroupFromEtcd(&base)
+			changed := base
+			changed.VoterStoreIDs = slices.Clone(base.VoterStoreIDs)
+			field := reflect.ValueOf(&changed).Elem().Field(i)
+			switch field.Kind() {
+			case reflect.String:
+				field.SetString(field.String() + "x")
+			case reflect.Uint64:
+				field.SetUint(field.Uint() + 1)
+			case reflect.Slice:
+				field.Set(reflect.Append(field, reflect.ValueOf(uint64(3))))
+			default:
+				re.Failf("unexpected field", "field %s has kind %s", name, field.Kind())
+			}
+			manager.SyncGroupFromEtcd(&changed)
+			got := manager.GetAffinityGroupState("g").Group
+			re.Truef(sameStoredGroup(&got, &changed), "memory %+v, stored %+v", got, changed)
+		})
+	}
+}
+
 // TestUpdateAffinityGroupTargetsWithEtcd checks that a write of more targets than
 // one etcd transaction can hold succeeds on etcd, which limits the operations of
 // a transaction.

@@ -75,7 +75,9 @@ type Manager struct {
 	regions             map[uint64]regionCache       // {region_id} -> regionCache
 	unavailableStores   map[uint64]storeCondition    // {store_id} -> storeCondition
 	// storeConditionsKnown is set once the availability check has recorded the
-	// store conditions. Until then, a group read with a target stays degraded.
+	// store conditions. Until then, a group loaded or recreated with a target
+	// stays degraded, while a target that is written, synced or confirmed uses
+	// the conditions recorded so far. The first check sets every group.
 	storeConditionsKnown bool
 	balanceTables        map[TableID]*balanceTable // {table_id} -> balanceTable
 	lastBalanceVersion   uint64
