@@ -187,5 +187,30 @@ func (suite *regionLabelTestSuite) TestAffinityRuleWriteProtection() {
 		re.NoError(testutil.CheckDelete(tests.TestDialClient, affinityURL+"/"+groupID+"?force=true", testutil.StatusOK(re)))
 		re.NoError(testutil.CheckGetJSON(tests.TestDialClient, ruleURL, nil, testutil.Status(re, http.StatusNotFound)))
 		re.NoError(testutil.CheckDelete(tests.TestDialClient, prefix+"/rule/"+ordinary.ID, testutil.StatusOK(re)))
+
+		// A rule with another ID and the affinity label, such as one created before
+		// this protection, cannot be replaced but can still be deleted.
+		for _, deleteRule := range []func(id string) error{
+			func(id string) error {
+				return testutil.CheckDelete(tests.TestDialClient, prefix+"/rule/"+id, testutil.StatusOK(re))
+			},
+			func(id string) error {
+				patch, marshalErr := json.Marshal(labeler.LabelRulePatch{DeleteRules: []string{id}})
+				re.NoError(marshalErr)
+				return testutil.CheckPatchJSON(tests.TestDialClient, prefix+"/rules", patch, testutil.StatusOK(re))
+			},
+		} {
+			leftover := &labeler.LabelRule{
+				ID: "affinity-leftover", Labels: []labeler.RegionLabel{{Key: affinity.AffinityLabelKey, Value: "leftover"}},
+				RuleType: labeler.KeyRange, Data: keyutil.BuildKeyRangeMaps("50", "60"),
+			}
+			re.NoError(leader.GetRaftCluster().GetRegionLabeler().SetLabelRule(leftover))
+			replacement := &labeler.LabelRule{ID: leftover.ID, Labels: ordinary.Labels, RuleType: labeler.KeyRange, Data: ordinary.Data}
+			data, err = json.Marshal(replacement)
+			re.NoError(err)
+			re.NoError(testutil.CheckPostJSON(tests.TestDialClient, prefix+"/rule", data, testutil.Status(re, http.StatusBadRequest)))
+			re.NoError(deleteRule(leftover.ID))
+			re.NoError(testutil.CheckGetJSON(tests.TestDialClient, prefix+"/rule/"+leftover.ID, nil, testutil.Status(re, http.StatusNotFound)))
+		}
 	})
 }

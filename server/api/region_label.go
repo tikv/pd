@@ -52,8 +52,21 @@ func rejectAffinityLabelRule(rule *labeler.LabelRule) error {
 	return nil
 }
 
+// rejectAffinityLabelID rejects replacing a rule that has the affinity rule ID
+// prefix or that already carries the affinity label.
 func rejectAffinityLabelID(id string, lookup func(string) *labeler.LabelRule) error {
 	if strings.HasPrefix(id, affinity.LabelRuleIDPrefix) || lookup != nil && isAffinityLabelRule(lookup(id)) {
+		return errs.ErrAffinityLabelProtected.FastGenByArgs()
+	}
+	return nil
+}
+
+// rejectAffinityRuleDeletion rejects deleting a rule with the affinity rule ID
+// prefix, which only the affinity API deletes. A rule with another ID and the
+// affinity label can be deleted: the affinity API never creates such a rule, so
+// it is a leftover that this API must still be able to remove.
+func rejectAffinityRuleDeletion(id string) error {
+	if strings.HasPrefix(id, affinity.LabelRuleIDPrefix) {
 		return errs.ErrAffinityLabelProtected.FastGenByArgs()
 	}
 	return nil
@@ -71,7 +84,7 @@ func validateRegionLabelPatch(patch labeler.LabelRulePatch, lookup func(string) 
 		}
 	}
 	for _, id := range patch.DeleteRules {
-		if err := rejectAffinityLabelID(id, lookup); err != nil {
+		if err := rejectAffinityRuleDeletion(id); err != nil {
 			return err
 		}
 	}
@@ -203,7 +216,7 @@ func (h *regionLabelHandler) DeleteRegionLabelRule(w http.ResponseWriter, r *htt
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := rejectAffinityLabelID(id, cluster.GetRegionLabeler().GetLabelRule); err != nil {
+	if err := rejectAffinityRuleDeletion(id); err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}

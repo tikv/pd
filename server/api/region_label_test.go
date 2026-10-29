@@ -46,10 +46,17 @@ func TestRegionLabelPatchProtectsExistingAffinityRule(t *testing.T) {
 		return nil
 	}
 	require.ErrorIs(t, rejectAffinityLabelID(existing.ID, lookup), errs.ErrAffinityLabelProtected)
-	for _, patch := range []labeler.LabelRulePatch{
-		{SetRules: []*labeler.LabelRule{{ID: "ordinary"}, {ID: existing.ID}}},
-		{SetRules: []*labeler.LabelRule{{ID: "ordinary"}}, DeleteRules: []string{existing.ID}},
-	} {
-		require.ErrorIs(t, validateRegionLabelPatch(patch, lookup), errs.ErrAffinityLabelProtected)
-	}
+	require.ErrorIs(t, validateRegionLabelPatch(labeler.LabelRulePatch{
+		SetRules: []*labeler.LabelRule{{ID: "ordinary"}, {ID: existing.ID}},
+	}, lookup), errs.ErrAffinityLabelProtected)
+	// The affinity API never creates a rule with another ID and the affinity
+	// label, so such a rule can be deleted, unlike one with the affinity prefix.
+	require.NoError(t, validateRegionLabelPatch(labeler.LabelRulePatch{
+		SetRules: []*labeler.LabelRule{{ID: "ordinary"}}, DeleteRules: []string{existing.ID},
+	}, lookup))
+	require.NoError(t, rejectAffinityRuleDeletion(existing.ID))
+	require.ErrorIs(t, rejectAffinityRuleDeletion("affinity_group/g"), errs.ErrAffinityLabelProtected)
+	require.ErrorIs(t, validateRegionLabelPatch(labeler.LabelRulePatch{
+		DeleteRules: []string{existing.ID, "affinity_group/g"},
+	}, lookup), errs.ErrAffinityLabelProtected)
 }
