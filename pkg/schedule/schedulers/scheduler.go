@@ -111,6 +111,20 @@ func ConfigJSONDecoder(data []byte) ConfigDecoder {
 	}
 }
 
+// ConfigJSONDecoderForRestore decodes persisted configuration and adjusts legacy
+// hot-region values before applying the current validation rules.
+func ConfigJSONDecoderForRestore(data []byte) ConfigDecoder {
+	return func(v any) error {
+		if err := DecodeConfig(data, v); err != nil {
+			return err
+		}
+		if conf, ok := v.(*hotRegionSchedulerConfig); ok {
+			return conf.adjustLegacyConfig()
+		}
+		return nil
+	}
+}
+
 // ConfigSliceDecoder the default decode for the config.
 func ConfigSliceDecoder(typ types.CheckerSchedulerType, args []string) ConfigDecoder {
 	builder, ok := schedulerArgsToDecoder[typ]

@@ -41,7 +41,7 @@ import (
 	"github.com/tikv/pd/tests"
 )
 
-func TestRejectedHotRegionConfigCanBeRepairedThroughAPI(t *testing.T) {
+func TestLegacyHotRegionConfigRemainsEditableThroughAPI(t *testing.T) {
 	re := require.New(t)
 	env := tests.NewSchedulingTestEnvironment(t)
 	env.SkipBootstrap = true
@@ -58,28 +58,27 @@ func TestRejectedHotRegionConfigCanBeRepairedThroughAPI(t *testing.T) {
 		rc.SetPrepared()
 		co := rc.GetCoordinator()
 		testutil.Eventually(re, co.AreSchedulersInitialized)
-		re.Nil(co.GetSchedulersController().GetScheduler(name))
+		re.NotNil(co.GetSchedulersController().GetScheduler(name))
 
 		configURL := leader.GetAddr() + server.SchedulerConfigHandlerPath + "/" + name
 		var listed map[string]any
 		re.NoError(testutil.CheckGetJSON(tests.TestDialClient, configURL+"/list", nil,
 			testutil.StatusOK(re), testutil.ExtractJSON(re, &listed)))
 		re.Equal(float64(321), listed["min-hot-byte-rate"])
-		// Invalid repairs and re-adding must leave the original blob untouched.
+		re.Equal("17m4s", listed["history-sample-duration"])
+		re.Equal("1s", listed["history-sample-interval"])
+		// New invalid updates must preserve the normalized configuration.
+		before, err := store.LoadSchedulerConfig(name)
+		re.NoError(err)
 		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, configURL+"/config",
 			[]byte(`{"history-sample-interval":"1ns"}`), testutil.Status(re, http.StatusBadRequest)))
-		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, leader.GetAddr()+"/pd/api/v1/schedulers",
-			[]byte(`{"name":"balance-hot-region-scheduler"}`), testutil.Status(re, http.StatusBadRequest)))
 		saved, err := store.LoadSchedulerConfig(name)
 		re.NoError(err)
-		re.JSONEq(string(legacy), saved)
-		re.Nil(co.GetSchedulersController().GetScheduler(name))
+		re.JSONEq(before, saved)
+		re.NotNil(co.GetSchedulersController().GetScheduler(name))
 
 		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, configURL+"/config",
 			[]byte(`{"history-sample-interval":"30s"}`), testutil.StatusOK(re)))
-		testutil.Eventually(re, func() bool {
-			return co.GetSchedulersController().GetScheduler(name) != nil
-		})
 		saved, err = store.LoadSchedulerConfig(name)
 		re.NoError(err)
 		var restored struct {
@@ -91,9 +90,9 @@ func TestRejectedHotRegionConfigCanBeRepairedThroughAPI(t *testing.T) {
 		re.NoError(json.Unmarshal([]byte(saved), &restored))
 		re.Equal(float64(321), restored.MinHotByteRate)
 		re.Equal([]string{"key", "byte"}, restored.ReadPriorities)
-		re.Equal("1h0m0s", restored.HistorySampleDuration)
+		re.Equal("17m4s", restored.HistorySampleDuration)
 		re.Equal("30s", restored.HistorySampleInterval)
-		// Later requests must use the restored scheduler's ordinary config handler.
+		// Partial updates must retain the remaining scheduler tuning.
 		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, configURL+"/config",
 			[]byte(`{"max-peer-number":123}`), testutil.StatusOK(re)))
 		re.NoError(testutil.CheckGetJSON(tests.TestDialClient, configURL+"/list", nil,

@@ -542,6 +542,63 @@ func (conf *hotRegionSchedulerParam) validateLocked() error {
 	return nil
 }
 
+// adjustLegacyConfig keeps previously accepted numeric settings from preventing
+// startup or reload. New configurations and online updates still use strict validation.
+func (conf *hotRegionSchedulerConfig) adjustLegacyConfig() error {
+	validationErr := conf.validateLocked()
+	if validationErr == nil {
+		return nil
+	}
+	defaults := initHotRegionScheduleConfig()
+	if conf.MaxPeerNum <= 0 {
+		conf.MaxPeerNum = defaults.MaxPeerNum
+	}
+	maxZombieRounds := int(math.MaxInt64 / (utils.RegionHeartBeatReportInterval * time.Second))
+	conf.MaxZombieRounds = min(max(conf.MaxZombieRounds, 0), maxZombieRounds)
+	duration := max(conf.HistorySampleDuration.Duration, 0)
+	interval := max(conf.HistorySampleInterval.Duration, 0)
+	if interval > 0 && duration/interval > statistics.MaxHistorySampleCount {
+		// This product cannot overflow because it is smaller than duration.
+		duration = interval * statistics.MaxHistorySampleCount
+	}
+	conf.HistorySampleDuration.Duration = duration
+	conf.HistorySampleInterval.Duration = interval
+	for _, value := range []*float64{
+		&conf.MinHotByteRate, &conf.MinHotKeyRate, &conf.MinHotQueryRate, &conf.MinHotCPURate,
+		&conf.SrcToleranceRatio, &conf.DstToleranceRatio,
+	} {
+		*value = max(*value, 0)
+	}
+	for _, item := range []struct {
+		value    *float64
+		fallback float64
+	}{
+		{&conf.ByteRateRankStepRatio, defaults.ByteRateRankStepRatio},
+		{&conf.KeyRateRankStepRatio, defaults.KeyRateRankStepRatio},
+		{&conf.QueryRateRankStepRatio, defaults.QueryRateRankStepRatio},
+		{&conf.CPURateRankStepRatio, defaults.CPURateRankStepRatio},
+		{&conf.CountRankStepRatio, defaults.CountRankStepRatio},
+	} {
+		if !(*item.value > 0 && *item.value <= 1) {
+			*item.value = item.fallback
+		}
+	}
+	if conf.RankFormulaVersion != "v2" {
+		if !(conf.GreatDecRatio > 0 && conf.GreatDecRatio <= 1) {
+			conf.GreatDecRatio = defaults.GreatDecRatio
+		}
+		if !(conf.MinorDecRatio > 0 && conf.MinorDecRatio <= 1) {
+			conf.MinorDecRatio = defaults.MinorDecRatio
+		}
+		conf.GreatDecRatio = min(conf.GreatDecRatio, conf.MinorDecRatio)
+	}
+	if err := conf.validateLocked(); err != nil {
+		return err
+	}
+	log.Warn("adjusted legacy hot-region scheduler configuration to safe values", errs.ZapError(validationErr))
+	return nil
+}
+
 func (conf *hotRegionSchedulerConfig) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 	conf.Lock()
 	defer conf.Unlock()
