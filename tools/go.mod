@@ -259,4 +259,4 @@ require (
 replace github.com/stretchr/testify => github.com/stretchr/testify v1.10.0
 
 // Keep the standalone module on the same LogOnly wire schema as the PD root.
-replace github.com/pingcap/kvproto => github.com/jiadebin/kvproto v0.0.0-20261027053349-e42c16d22718
+replace github.com/pingcap/kvproto => github.com/jiadebin/kvproto v0.0.0-20261029081732-446f21c1ccac
