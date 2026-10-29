@@ -427,6 +427,8 @@ var (
 	affinityCheckerUnhealthyRegionCounter         = checkerCounter.WithLabelValues(affinityChecker, "unhealthy-region")
 	affinityCheckerAbnormalReplicaCounter         = checkerCounter.WithLabelValues(affinityChecker, "abnormal-replica")
 	affinityCheckerLearnerPeerConflictCounter     = checkerCounter.WithLabelValues(affinityChecker, "learner-peer-conflict")
+	affinityCheckerTargetStoreRejectedCounter     = checkerCounter.WithLabelValues(affinityChecker, "target-store-rejected")
+	affinityCheckerTargetStoreBlockedCounter      = checkerCounter.WithLabelValues(affinityChecker, "target-store-blocked")
 
 	// Affinity merge checker metrics
 	affinityMergeCheckerCounter                     = checkerCounter.WithLabelValues(affinityChecker, "merge-check")

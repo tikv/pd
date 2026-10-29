@@ -374,6 +374,62 @@ func TestAffinityBalanceRechecksStoreFilters(t *testing.T) {
 	}
 }
 
+// TestAffinityOperatorTargetStores tests that no operator moves a Region to a
+// new voter or leader store that cannot take it now, as the rule checker and the
+// balance schedulers skip such stores.
+func TestAffinityOperatorTargetStores(t *testing.T) {
+	removing := func(f *affinityBalanceTest, id uint64) {
+		f.PutStore(f.GetStore(id).Clone(core.SetNodeState(metapb.NodeState_Removing)))
+	}
+	busy := func(f *affinityBalanceTest, id uint64) { f.SetStoreBusy(id, true) }
+	for _, tc := range []struct {
+		name              string
+		leader, temporary bool
+		set               func(f *affinityBalanceTest, id uint64)
+	}{
+		{name: "removing", set: removing},
+		{name: "down", set: func(f *affinityBalanceTest, id uint64) { f.SetStoreDown(id) }},
+		{name: "special use", set: func(f *affinityBalanceTest, id uint64) {
+			f.SetStoreLabel(id, map[string]string{filter.SpecialUseKey: filter.SpecialUseReserved})
+		}},
+		{name: "low space", set: func(f *affinityBalanceTest, id uint64) {
+			f.UpdateRegionCount(id, core.InitClusterRegionThreshold)
+			f.UpdateStorageRatio(id, 0.9, 0.1)
+		}},
+		{name: "busy", temporary: true, set: busy},
+		{name: "store limit", temporary: true, set: func(f *affinityBalanceTest, id uint64) {
+			f.SetStoreLimit(id, storelimit.AddPeer, 0.00006)
+			f.ResetStoreLimit(id, storelimit.AddPeer, 0.000001)
+			f.GetStore(id).GetStoreLimit().Take(storelimit.RegionInfluence[storelimit.AddPeer], storelimit.AddPeer, constant.Medium)
+		}},
+		{name: "leader removing", leader: true, set: removing},
+		{name: "leader busy", leader: true, temporary: true, set: busy},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			f := newAffinityBalanceTest(t, 4)
+			ids := f.seed("100", 1, 1)
+			// Move a voter from store 3 to store 4, or the leader to store 2.
+			leader, voters, store := uint64(1), []uint64{1, 2, 4}, uint64(4)
+			if tc.leader {
+				leader, voters, store = 2, []uint64{1, 2, 3}, 2
+			}
+			_, err := f.affinityManager.UpdateAffinityGroupPeers(ids[0], leader, voters)
+			re.NoError(err)
+			region, group := f.GetRegion(1), f.affinityManager.GetAffinityGroupState(ids[0])
+			re.NotNil(f.createAffinityOperator(region, group))
+			counter := affinityCheckerTargetStoreRejectedCounter
+			if tc.temporary {
+				counter = affinityCheckerTargetStoreBlockedCounter
+			}
+			before := testutil.ToFloat64(counter)
+			tc.set(f, store)
+			re.Nil(f.createAffinityOperator(region, group))
+			re.Equal(1.0, testutil.ToFloat64(counter)-before)
+		})
+	}
+}
+
 type affinityBalanceScanCluster struct {
 	sche.CheckerCluster
 	beforeFinal func()

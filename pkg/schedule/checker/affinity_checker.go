@@ -262,6 +262,18 @@ func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group 
 	} else {
 		return nil
 	}
+	if status := c.affinityTargetStoreStatus(region, group); status != balanceAllowed {
+		if status == balanceRejected {
+			affinityCheckerTargetStoreRejectedCounter.Inc()
+		} else {
+			affinityCheckerTargetStoreBlockedCounter.Inc()
+		}
+		log.Debug("affinity target stores cannot take the region now",
+			zap.Uint64("region-id", region.GetID()),
+			zap.String("group-id", group.ID),
+			zap.Bool("temporary", status == balanceTemporarilyBlocked))
+		return nil
+	}
 
 	// Determine operator kind based on whether leader needs to change
 	kind := operator.OpAffinity
@@ -281,6 +293,35 @@ func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group 
 	}
 
 	return op
+}
+
+// affinityTargetStoreStatus checks the stores that moving region to the target
+// of group adds: a new leader with the filters of a leader transfer, and each
+// new voter with those of a new peer, as the balance schedulers and the rule
+// checker do. A busy store or a store limit blocks the move only for now; the
+// availability check later degrades or expires a group whose target has a
+// removing, down or low-space store.
+func (c *AffinityChecker) affinityTargetStoreStatus(region *core.RegionInfo, group *affinity.GroupState) balanceStatus {
+	status := balanceAllowed
+	check := func(id uint64, leader bool) {
+		switch c.balanceStoreActionStatus(id, leader, false) {
+		case balanceRejected:
+			status = balanceRejected
+		case balanceTemporarilyBlocked:
+			if status == balanceAllowed {
+				status = balanceTemporarilyBlocked
+			}
+		}
+	}
+	if region.GetLeader().GetStoreId() != group.LeaderStoreID {
+		check(group.LeaderStoreID, true)
+	}
+	for _, id := range group.VoterStoreIDs {
+		if region.GetStorePeer(id) == nil {
+			check(id, false)
+		}
+	}
+	return status
 }
 
 // mergeCheck verifies if a region can be merged with its adjacent regions within the same affinity group.
