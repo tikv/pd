@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"runtime"
+	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -274,118 +275,201 @@ func TestRegionMetadataPreservesReadSampleTTL(t *testing.T) {
 	}
 }
 
-func TestRegionMetadataWaitsForReadQueueInput(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		_, cache, region, loads := newHotReadCache(t, []uint64{1, 2, 3})
-		cache.CheckRegionFlowAsync(region)
-		_ = cache.GetHotPeerStats(utils.Read, 0)
-		queue := cache.readCache.taskQueue
-		input := make(chan func(*HotPeerCache))
-		cache.readCache.taskQueue = &chanx.UnboundedChan[func(*HotPeerCache)]{In: input, Out: queue.Out}
-		defer func() { cache.readCache.taskQueue = queue }()
-		region = region.Clone(core.WithLeader(region.GetStorePeer(2)))
-		require.False(t, cache.CheckReadPeerAsync(region, region.GetStorePeer(2), loads, utils.StoreHeartBeatReportInterval))
-		done := make(chan struct{})
-		go func() {
-			cache.CheckRegionFlowAsync(region)
-			close(done)
-		}()
-		synctest.Wait()
-		select {
-		case <-done:
-			t.Fatal("the region metadata task was dropped while its queue input was unavailable")
-		default:
-		}
-		task := <-input
-		<-done
-		cache.readCache.taskQueue = queue
-		cache.runReadTask(task)
-		after := cache.GetHotPeerStats(utils.Read, 0)
-		for storeID, stats := range after {
-			require.Len(t, stats, 1)
-			require.Equal(t, storeID == 2, stats[0].IsLeader())
-		}
-	})
-}
-
-func TestRegionMetadataWaitsForReadQueueCapacity(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		_, cache, region, _ := newHotReadCache(t, []uint64{1, 2, 3})
-		cache.readTaskSlots = make(chan struct{}, 1)
-		started, release := make(chan struct{}), make(chan struct{})
-		t.Cleanup(func() {
-			select {
-			case <-release:
-			default:
-				close(release)
-			}
-		})
-		require.True(t, cache.CheckReadAsync(func(*HotPeerCache) {
-			close(started)
-			<-release
-		}))
-		<-started
-		require.True(t, cache.CheckReadAsync(nil))
-		require.False(t, cache.CheckReadAsync(nil), "ordinary tasks must still respect the capacity limit")
-		region = region.Clone(core.WithLeader(region.GetStorePeer(2)))
-		done := make(chan struct{})
-		go func() {
-			cache.CheckRegionFlowAsync(region)
-			close(done)
-		}()
-		synctest.Wait()
-		select {
-		case <-done:
-			t.Fatal("region metadata must wait for capacity instead of being dropped")
-		default:
-		}
-		close(release)
-		synctest.Wait()
-		<-done
-		for storeID, stats := range cache.GetHotPeerStats(utils.Read, 0) {
-			require.Len(t, stats, 1)
-			require.Equal(t, storeID == 2, stats[0].IsLeader())
-		}
-		require.Empty(t, cache.readTaskSlots)
-	})
-}
-
-func TestRegionMetadataAdmissionCancellation(t *testing.T) {
-	for _, full := range []bool{false, true} {
-		t.Run(fmt.Sprintf("full=%t", full), func(t *testing.T) {
+func TestRegionMetadataPressureDoesNotBlockHeartbeats(t *testing.T) {
+	for _, stage := range []string{"input", "capacity"} {
+		t.Run(stage, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				ctx, cancel := context.WithCancel(t.Context())
-				defer cancel()
-				cache := NewHotCache(ctx, core.NewBasicCluster())
-				cache.readTaskSlots = make(chan struct{}, 1)
+				cluster, cache, region, loads := newHotReadCache(t, []uint64{1, 2, 3})
+				cache.CheckRegionFlowAsync(region)
+				before := cache.GetHotPeerStats(utils.Write, 0)
+				_ = cache.GetHotPeerStats(utils.Read, 0)
 				queue := cache.readCache.taskQueue
-				input := make(chan func(*HotPeerCache))
-				cache.readCache.taskQueue = &chanx.UnboundedChan[func(*HotPeerCache)]{In: input, Out: queue.Out}
-				defer func() { cache.readCache.taskQueue = queue }()
-				if full {
-					cache.readTaskSlots <- struct{}{}
+				var input chan func(*HotPeerCache)
+				var release chan struct{}
+				if stage == "input" {
+					input = make(chan func(*HotPeerCache))
+					cache.readCache.taskQueue = &chanx.UnboundedChan[func(*HotPeerCache)]{In: input, Out: queue.Out}
+				} else {
+					cache.readTaskSlots = make(chan struct{}, 1)
+					started := make(chan struct{})
+					release = make(chan struct{})
+					require.True(t, cache.CheckReadAsync(func(*HotPeerCache) {
+						close(started)
+						<-release
+					}))
+					<-started
+					require.True(t, cache.CheckReadAsync(nil))
 				}
+				updated := region.Clone(core.SetWrittenBytes(2 << 20))
 				done := make(chan struct{})
+				t.Cleanup(func() {
+					if stage == "input" {
+						select {
+						case task := <-input:
+							cache.runReadTask(task)
+						case <-done:
+						}
+						<-done
+						cache.readCache.taskQueue = queue
+					} else {
+						select {
+						case <-release:
+						default:
+							close(release)
+						}
+						<-done
+					}
+				})
 				go func() {
-					cache.CheckRegionFlowAsync(newBenchmarkRegion(1, 3))
+					cache.CheckRegionFlowAsync(updated)
+					// Both heartbeat implementations publish the region after handling statistics.
+					cluster.PutRegion(updated)
 					close(done)
 				}()
 				synctest.Wait()
+				afterWrite := cache.GetHotPeerStats(utils.Write, 0)
+				require.Greater(t, afterWrite[1][0].HotDegree, before[1][0].HotDegree,
+					"read pressure must not delay healthy write sampling")
+				require.Same(t, updated, cluster.GetRegion(region.GetID()),
+					"read pressure must not hold up region publication")
 				select {
 				case <-done:
-					t.Fatal("metadata admission must wait until the queue is ready or canceled")
 				default:
+					t.Fatal("read metadata admission blocked the heartbeat caller")
 				}
-				cancel()
+				require.False(t, cache.CheckReadPeerAsync(region, region.GetStorePeer(1), loads, utils.StoreHeartBeatReportInterval),
+					"ordinary samples must still respect read queue pressure")
+				// Keep the root at leader 1 to prove delivery, rather than root-tree recovery.
+				cache.CheckRegionFlowAsync(updated.Clone(core.WithLeader(updated.GetStorePeer(2))))
 				synctest.Wait()
-				<-done
-				if full {
-					<-cache.readTaskSlots
+				if stage == "input" {
+					// The metadata wakeup must work even without any accepted read tasks.
+					after := cache.readCache.GetHotPeerStats(0)
+					require.False(t, after[1][0].IsLeader())
+					require.True(t, after[2][0].IsLeader())
+					cache.readCache.taskQueue = queue
+				} else {
+					close(release)
+					synctest.Wait()
 				}
-				require.Empty(t, cache.readTaskSlots, "canceled admission must release its reservation")
+				require.True(t, cache.CheckReadPeerAsync(updated, updated.GetStorePeer(1), loads, utils.StoreHeartBeatReportInterval))
+				synctest.Wait()
+				after := cache.GetHotPeerStats(utils.Read, 0)
+				require.False(t, after[1][0].IsLeader(), "a later stale snapshot must not undo delivered metadata")
+				require.True(t, after[2][0].IsLeader())
 			})
 		})
 	}
+}
+
+func TestCoalescedReadMetadataPreservesTransferCooldown(t *testing.T) {
+	for _, transferAway := range []bool{false, true} {
+		t.Run(fmt.Sprintf("transfer-away=%t", transferAway), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				cluster, cache, region, loads := newHotReadCache(t, []uint64{1, 2, 3})
+				region = withHeartbeatTerm(region, 10)
+				cluster.PutRegion(region)
+				cache.CheckRegionFlowAsync(region)
+				_ = cache.GetHotPeerStats(utils.Read, 0)
+				release := blockHotReadWorker(t, cache)
+				intermediate := region
+				if transferAway {
+					intermediate = region.Clone(core.WithLeader(region.GetStorePeer(2)))
+				}
+				cache.CheckRegionFlowAsync(withHeartbeatTerm(intermediate, 11))
+				cache.CheckRegionFlowAsync(withHeartbeatTerm(region, 12))
+				stale := withHeartbeatTerm(region.Clone(core.WithLeader(region.GetStorePeer(2))), 11)
+				cache.CheckRegionFlowAsync(stale)
+				release()
+				synctest.Wait()
+				after := cache.GetHotPeerStats(utils.Read, 0)
+				for storeID, stats := range after {
+					require.Len(t, stats, 1)
+					require.Equal(t, storeID == 1, stats[0].IsLeader(), "older metadata must not replace the coalesced newer term")
+					require.Equal(t, transferAway, stats[0].IsNeedCoolDownTransferLeader(3, utils.Read),
+						"a coalesced transfer away and back must cool down unchanged followers")
+					require.Equal(t, after[1][0].lastTransferLeaderTime, stats[0].lastTransferLeaderTime)
+				}
+				cache.CheckRegionFlowAsync(stale)
+				require.True(t, cache.CheckReadPeerAsync(region, region.GetStorePeer(3), loads, utils.StoreHeartBeatReportInterval))
+				later := cache.GetHotPeerStats(utils.Read, 0)
+				for storeID, stats := range later {
+					require.Equal(t, storeID == 1, stats[0].IsLeader())
+					require.Equal(t, after[storeID][0].lastTransferLeaderTime, stats[0].lastTransferLeaderTime)
+				}
+			})
+		})
+	}
+}
+
+func TestCoalescedReadMetadataRejectsStaleTransfers(t *testing.T) {
+	for _, published := range []bool{false, true} {
+		t.Run(fmt.Sprintf("published=%t", published), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				cluster, cache, region, _ := newHotReadCache(t, []uint64{1, 2, 3})
+				if published {
+					cluster.PutRegion(withHeartbeatTerm(region, 12))
+				} else {
+					cluster.PutRegion(withHeartbeatTerm(region, 10))
+				}
+				cache.CheckRegionFlowAsync(withHeartbeatTerm(region, 12))
+				before := cache.GetHotPeerStats(utils.Read, 0)
+				release := blockHotReadWorker(t, cache)
+				cache.CheckRegionFlowAsync(withHeartbeatTerm(region.Clone(core.WithLeader(region.GetStorePeer(2))), 11))
+				cache.CheckRegionFlowAsync(withHeartbeatTerm(region, 12))
+				release()
+				synctest.Wait()
+				require.Equal(t, before, cache.GetHotPeerStats(utils.Read, 0),
+					"coalescing rejected metadata must not start a transfer cooldown")
+			})
+		})
+	}
+}
+
+func TestCoalescedReadMetadataPreservesUnknownTerm(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		_, cache, region, _ := newHotReadCache(t, []uint64{1, 2, 3})
+		cache.CheckRegionFlowAsync(withHeartbeatTerm(region, 12))
+		_ = cache.GetHotPeerStats(utils.Read, 0)
+		release := blockHotReadWorker(t, cache)
+		cache.CheckRegionFlowAsync(region)
+		cache.CheckRegionFlowAsync(withHeartbeatTerm(region.Clone(core.WithLeader(region.GetStorePeer(2))), 11))
+		release()
+		synctest.Wait()
+		after := cache.GetHotPeerStats(utils.Read, 0)
+		require.False(t, after[1][0].IsLeader())
+		require.True(t, after[2][0].IsLeader(), "an unknown term must retain the original version-reset semantics")
+	})
+}
+
+func TestCoalescedReadMetadataPreservesPeerRemoval(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		_, cache, region, _ := newHotReadCache(t, []uint64{1, 2, 3})
+		cache.CheckRegionFlowAsync(region)
+		_ = cache.GetHotPeerStats(utils.Read, 0)
+		release := blockHotReadWorker(t, cache)
+		cache.CheckRegionFlowAsync(region.Clone(core.WithRemoveStorePeer(3), core.WithIncConfVer()))
+		cache.CheckRegionFlowAsync(region.Clone(core.SetRegionConfVer(region.GetRegionEpoch().GetConfVer() + 2)))
+		release()
+		synctest.Wait()
+		after := cache.GetHotPeerStats(utils.Read, 0)
+		require.Len(t, after[1], 1)
+		require.Len(t, after[2], 1)
+		require.Empty(t, after[3], "readding a peer must not resurrect its removed read sample")
+	})
+}
+
+func blockHotReadWorker(t *testing.T, cache *HotCache) func() {
+	t.Helper()
+	started, release := make(chan struct{}), make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(unblock)
+	require.True(t, cache.CheckReadAsync(func(*HotPeerCache) {
+		close(started)
+		<-release
+	}))
+	<-started
+	return unblock
 }
 
 func TestRegionTransferCoolsDownAllReadPeers(t *testing.T) {

@@ -24,6 +24,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 const chanMaxLength = 6000000
@@ -33,19 +34,33 @@ type HotCache struct {
 	ctx        context.Context
 	writeCache *HotPeerCache
 	readCache  *HotPeerCache
-	// readTaskSlots bounds pending read tasks, including metadata that must not be dropped.
+	// readTaskSlots bounds pending read sampling and query tasks.
 	readTaskSlots chan struct{}
+	// Region metadata is coalesced separately so read sampling pressure cannot
+	// hold up region publication on the heartbeat path.
+	regionMetaMu      syncutil.Mutex
+	regionMetaUpdates map[uint64]regionMetadataUpdate
+	regionMetaReady   chan struct{}
+}
+
+type regionMetadataUpdate struct {
+	meta          *metapb.Region
+	leaderStoreID uint64
+	term          uint64
+	previous      *regionMetadataUpdate
 }
 
 // NewHotCache creates a new hot spot cache.
 func NewHotCache(ctx context.Context, cluster *core.BasicCluster) *HotCache {
 	w := &HotCache{
-		ctx:           ctx,
-		writeCache:    NewHotPeerCache(ctx, cluster, utils.Write),
-		readCache:     NewHotPeerCache(ctx, cluster, utils.Read),
-		readTaskSlots: make(chan struct{}, chanMaxLength),
+		ctx:               ctx,
+		writeCache:        NewHotPeerCache(ctx, cluster, utils.Write),
+		readCache:         NewHotPeerCache(ctx, cluster, utils.Read),
+		readTaskSlots:     make(chan struct{}, chanMaxLength),
+		regionMetaUpdates: make(map[uint64]regionMetadataUpdate),
+		regionMetaReady:   make(chan struct{}, 1),
 	}
-	go w.updateItems(w.readCache.taskQueue, w.runReadTask)
+	go w.updateReadItems(w.readCache.taskQueue)
 	go w.updateItems(w.writeCache.taskQueue, w.runWriteTask)
 	return w
 }
@@ -96,14 +111,42 @@ func (w *HotCache) enqueueReadTask(task func(*HotPeerCache)) bool {
 
 // CheckRegionFlowAsync checks expired items, read peer leadership, and write
 // flow for a region asynchronously while retaining only immutable metadata.
-// It waits for read queue capacity so leader metadata is not dropped.
 func (w *HotCache) CheckRegionFlowAsync(region *core.RegionInfo) {
 	checkRegionTask, checkWritePeerTask := newRegionFlowTasks(region)
 	w.CheckWriteAsync(checkRegionTask)
-	if !w.enqueueReadTask(checkRegionTask) {
-		return
-	}
+	w.enqueueReadRegionMetadata(region)
 	w.CheckWriteAsync(checkWritePeerTask)
+}
+
+func (w *HotCache) enqueueReadRegionMetadata(region *core.RegionInfo) {
+	update := regionMetadataUpdate{
+		meta:          region.GetMeta(),
+		leaderStoreID: region.GetLeader().GetStoreId(),
+		term:          region.GetTerm(),
+	}
+	w.regionMetaMu.Lock()
+	previous, exists := w.regionMetaUpdates[region.GetID()]
+	if !exists || update.term == 0 || update.term >= previous.term {
+		if exists {
+			// Fold repeated metadata, but preserve leader and peer changes and
+			// transitions to or from an unknown term for the worker's guards.
+			if previous.leaderStoreID == update.leaderStoreID && (previous.term == 0) == (update.term == 0) &&
+				previous.meta.GetRegionEpoch().GetVersion() == update.meta.GetRegionEpoch().GetVersion() &&
+				previous.meta.GetRegionEpoch().GetConfVer() == update.meta.GetRegionEpoch().GetConfVer() &&
+				core.SortedPeersEqual(previous.meta.GetPeers(), update.meta.GetPeers()) {
+				update.previous = previous.previous
+			} else {
+				retained := previous
+				update.previous = &retained
+			}
+		}
+		w.regionMetaUpdates[region.GetID()] = update
+	}
+	w.regionMetaMu.Unlock()
+	select {
+	case w.regionMetaReady <- struct{}{}:
+	default:
+	}
 }
 
 func newRegionFlowTasks(region *core.RegionInfo) (checkRegionTask, checkWritePeerTask func(*HotPeerCache)) {
@@ -128,15 +171,41 @@ func newRegionFlowTasks(region *core.RegionInfo) (checkRegionTask, checkWritePee
 
 func newRegionMetadataTask(meta *metapb.Region, leaderStoreID, term uint64) func(*HotPeerCache) {
 	return func(cache *HotPeerCache) {
-		regionInfo := hotRegionInfo{meta: meta, leaderStoreID: leaderStoreID}
-		if !cache.updateReadLeader(&regionInfo, term) {
+		applyRegionMetadata(cache, meta, leaderStoreID, term)
+	}
+}
+
+func applyRegionMetadata(cache *HotPeerCache, meta *metapb.Region, leaderStoreID, term uint64) {
+	regionInfo := hotRegionInfo{meta: meta, leaderStoreID: leaderStoreID}
+	if !cache.updateReadLeader(&regionInfo, term) {
+		return
+	}
+	expiredStats := cache.collectExpiredItemsForRegion(&regionInfo)
+	for _, stat := range expiredStats {
+		cache.UpdateStat(stat)
+	}
+}
+
+func (u regionMetadataUpdate) apply(ctx context.Context, cache *HotPeerCache) {
+	// Reverse the retained transitions so the owning worker applies them in
+	// arrival order without recursion or an extra temporary slice.
+	var first *regionMetadataUpdate
+	for item := u.previous; item != nil; {
+		if ctx.Err() != nil {
 			return
 		}
-		expiredStats := cache.collectExpiredItemsForRegion(&regionInfo)
-		for _, stat := range expiredStats {
-			cache.UpdateStat(stat)
-		}
+		next := item.previous
+		item.previous = first
+		first = item
+		item = next
 	}
+	for item := first; item != nil; item = item.previous {
+		if ctx.Err() != nil {
+			return
+		}
+		applyRegionMetadata(cache, item.meta, item.leaderStoreID, item.term)
+	}
+	applyRegionMetadata(cache, u.meta, u.leaderStoreID, u.term)
 }
 
 func newWriteRegionTask(meta *metapb.Region, leaderStoreID, interval, writtenBytes, writtenKeys, writeQueryNum uint64) func(*HotPeerCache) {
@@ -299,6 +368,51 @@ func (w *HotCache) CollectMetrics() {
 // ResetHotCacheStatusMetrics resets the hot cache metrics.
 func ResetHotCacheStatusMetrics() {
 	hotCacheStatusGauge.Reset()
+}
+
+func (w *HotCache) updateReadItems(queue *chanx.UnboundedChan[func(*HotPeerCache)]) {
+	defer logutil.LogPanic()
+
+	batch := make(map[uint64]regionMetadataUpdate)
+	for {
+		select {
+		case <-w.ctx.Done():
+			return
+		case <-w.regionMetaReady:
+			batch = w.applyReadRegionMetadata(batch)
+		case task, ok := <-queue.Out:
+			if !ok {
+				return
+			}
+			// Metadata received before this sample, query or cleanup must be
+			// applied first, even if its wakeup has not been selected yet.
+			select {
+			case <-w.regionMetaReady:
+				batch = w.applyReadRegionMetadata(batch)
+			default:
+			}
+			w.runReadTask(task)
+		}
+	}
+}
+
+func (w *HotCache) applyReadRegionMetadata(spare map[uint64]regionMetadataUpdate) map[uint64]regionMetadataUpdate {
+	w.regionMetaMu.Lock()
+	batch := w.regionMetaUpdates
+	if len(batch) == 0 {
+		w.regionMetaMu.Unlock()
+		return spare
+	}
+	w.regionMetaUpdates = spare
+	w.regionMetaMu.Unlock()
+	for _, update := range batch {
+		if w.ctx.Err() != nil {
+			break
+		}
+		update.apply(w.ctx, w.readCache)
+	}
+	clear(batch)
+	return batch
 }
 
 func (w *HotCache) updateItems(queue *chanx.UnboundedChan[func(*HotPeerCache)], runTask func(task func(*HotPeerCache))) {
