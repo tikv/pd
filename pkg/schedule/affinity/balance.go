@@ -235,9 +235,11 @@ func (m *Manager) balanceStores() []uint64 {
 // CommitBalanceTargets writes targets planned from snapshot and returns the
 // IDs of the written groups. A target is written only if its stored group
 // still equals the group in snapshot. Targets whose stored groups changed are
-// skipped while the remaining targets are written. A partially written plan
-// can leave the table less balanced than before; the next round replans from
-// the latest stored state.
+// skipped while the remaining targets are written. Only the changed groups are
+// compared: another group of the table can still change after the final
+// checks, for example when an admin updates the peers of a fixed group. With a
+// partially written plan or such a change, this round may not improve the
+// table; the next round replans from the latest state.
 func (m *Manager) CommitBalanceTargets(ctx context.Context, snapshot *BalanceSnapshot, targets []*Group) ([]string, error) {
 	groupTargets := make([]GroupTarget, 0, len(targets))
 	for _, target := range targets {

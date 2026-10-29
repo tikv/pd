@@ -178,7 +178,10 @@ func (c *AffinityChecker) planBalanceTargets(ctx context.Context, snapshot *affi
 // groups are still as they were validated, balancing is still allowed and the
 // placement rules and table metadata have not changed since planning. It returns
 // the IDs of the written groups and the reason if no target was written or the
-// commit failed.
+// commit failed. The checks run right before the write, but not atomically with
+// it. A change in between, such as an admin update of a fixed group of the
+// table, can leave this round without improvement; the next round replans from
+// the latest state.
 func (c *AffinityChecker) commitBalancePlan(ctx context.Context, snapshot *affinity.BalanceSnapshot, res balancePlanResult, revision uint64) ([]string, balanceCommitReason, error) {
 	// The scan may take a while, so the gates are checked after it, right
 	// before the write.
