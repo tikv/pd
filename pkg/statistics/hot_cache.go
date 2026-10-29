@@ -125,15 +125,22 @@ func (w *HotCache) enqueueReadRegionMetadata(region *core.RegionInfo) {
 		term:          region.GetTerm(),
 	}
 	w.regionMetaMu.Lock()
+	// Validate at admission: the root can legitimately advance before the read
+	// worker replays an already accepted transfer or peer removal.
+	recreated := core.IsRegionRecreated(update.meta)
+	if !recreated && update.term > 0 {
+		if current := w.readCache.cluster.GetRegion(region.GetID()); current != nil && update.term < current.GetTerm() {
+			w.regionMetaMu.Unlock()
+			return
+		}
+	}
 	previous, exists := w.regionMetaUpdates[region.GetID()]
-	if !exists || update.term == 0 || update.term >= previous.term {
+	if !exists || recreated || update.term == 0 || update.term >= previous.term {
 		if exists {
 			// Fold repeated metadata, but preserve leader and peer changes and
 			// transitions to or from an unknown term for the worker's guards.
 			if previous.leaderStoreID == update.leaderStoreID && (previous.term == 0) == (update.term == 0) &&
-				previous.meta.GetRegionEpoch().GetVersion() == update.meta.GetRegionEpoch().GetVersion() &&
-				previous.meta.GetRegionEpoch().GetConfVer() == update.meta.GetRegionEpoch().GetConfVer() &&
-				core.SortedPeersEqual(previous.meta.GetPeers(), update.meta.GetPeers()) {
+				sameReadRegionMetadata(previous.meta, update.meta) {
 				update.previous = previous.previous
 			} else {
 				retained := previous
@@ -232,10 +239,11 @@ func newReadPeerTask(region *core.RegionInfo, peer *metapb.Peer, loads []float64
 	meta := region.GetMeta()
 	leaderStoreID := region.GetLeader().GetStoreId()
 	storeID := peer.GetStoreId()
+	peerID := peer.GetId()
 	return func(cache *HotPeerCache) {
 		regionInfo := hotRegionInfo{meta: meta, leaderStoreID: leaderStoreID}
-		// Region metadata tasks run on the same queue and may already have
-		// observed a newer leader than this store heartbeat's region snapshot.
+		// Prioritized metadata may have removed this peer after the sample was
+		// admitted, even if its newer root-tree entry has not been published.
 		readLeader := cache.pendingReadLeaders[meta.GetId()]
 		if readLeader == nil {
 			for id := range cache.storesOfRegion[meta.GetId()] {
@@ -246,10 +254,22 @@ func newReadPeerTask(region *core.RegionInfo, peer *metapb.Peer, loads []float64
 			}
 		}
 		if readLeader != nil {
+			regionInfo.meta = readLeader.meta
 			regionInfo.leaderStoreID = readLeader.storeID
 		} else if current := cache.cluster.GetRegion(meta.GetId()); current != nil {
 			// All read samples may have expired since this snapshot was captured.
+			regionInfo.meta = current.GetMeta()
 			regionInfo.leaderStoreID = current.GetLeader().GetStoreId()
+		}
+		validPeer := false
+		for _, currentPeer := range regionInfo.meta.GetPeers() {
+			if currentPeer.GetStoreId() == storeID && currentPeer.GetId() == peerID {
+				validPeer = true
+				break
+			}
+		}
+		if !validPeer {
+			return
 		}
 		stats := cache.checkPeerFlowForRegion(&regionInfo, []uint64{storeID}, loads, interval)
 		for _, stat := range stats {
@@ -405,6 +425,7 @@ func (w *HotCache) applyReadRegionMetadata(spare map[uint64]regionMetadataUpdate
 	}
 	w.regionMetaUpdates = spare
 	w.regionMetaMu.Unlock()
+	previousGC := w.readCache.lastGCTime
 	for _, update := range batch {
 		if w.ctx.Err() != nil {
 			break
@@ -412,7 +433,27 @@ func (w *HotCache) applyReadRegionMetadata(spare map[uint64]regionMetadataUpdate
 		update.apply(w.ctx, w.readCache)
 	}
 	clear(batch)
+	if w.readCache.lastGCTime != previousGC {
+		w.gcPendingReadLeaders()
+	}
 	return batch
+}
+
+func (w *HotCache) gcPendingReadLeaders() {
+	// Run only on the read owner, outside metadata replay. Admission and this
+	// root check share the lock so queued older metadata cannot outlive the
+	// processed term that rejects it.
+	for regionID, readLeader := range w.readCache.pendingReadLeaders {
+		w.regionMetaMu.Lock()
+		if _, pending := w.regionMetaUpdates[regionID]; !pending {
+			current := w.readCache.cluster.GetRegion(regionID)
+			if current == nil || current.GetLeader().GetStoreId() == readLeader.storeID && current.GetTerm() >= readLeader.term &&
+				sameReadRegionMetadata(current.GetMeta(), readLeader.meta) {
+				delete(w.readCache.pendingReadLeaders, regionID)
+			}
+		}
+		w.regionMetaMu.Unlock()
+	}
 }
 
 func (w *HotCache) updateItems(queue *chanx.UnboundedChan[func(*HotPeerCache)], runTask func(task func(*HotPeerCache))) {
@@ -435,7 +476,11 @@ func (w *HotCache) runReadTask(task func(cache *HotPeerCache)) {
 	<-w.readTaskSlots
 	if task != nil {
 		// TODO: do we need a run-task timeout to protect the queue won't be stuck by a task?
+		previousGC := w.readCache.lastGCTime
 		task(w.readCache)
+		if w.readCache.lastGCTime != previousGC {
+			w.gcPendingReadLeaders()
+		}
 	}
 }
 

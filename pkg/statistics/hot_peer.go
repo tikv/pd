@@ -20,6 +20,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/movingaverage"
@@ -92,6 +93,7 @@ func (d *dimStat) clone() *dimStat {
 }
 
 type readLeaderInfo struct {
+	meta    *metapb.Region
 	storeID uint64
 	term    uint64
 }
@@ -114,7 +116,7 @@ type HotPeerStat struct {
 	actionType utils.ActionType
 	// isLeader is true means that the region has a leader on this store.
 	isLeader bool
-	// readLeader is the latest leader and term reported by a region metadata task.
+	// readLeader is the latest peer metadata, leader and term processed by the read worker.
 	// A nil value means no region metadata task has updated this read statistic.
 	readLeader *readLeaderInfo
 	// lastTransferLeaderTime is used to cool down frequent transfer leader.

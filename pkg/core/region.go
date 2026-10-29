@@ -864,13 +864,18 @@ func (r *RegionInfo) isInvolved(startKey, endKey []byte) bool {
 }
 
 func (r *RegionInfo) isRegionRecreated() bool {
+	return IsRegionRecreated(r.meta)
+}
+
+// IsRegionRecreated reports whether metadata matches core's online unsafe-recovery exception.
+func IsRegionRecreated(meta *metapb.Region) bool {
 	// Regions recreated by online unsafe recover have both ver and conf ver equal to 1. To
 	// prevent stale bootstrap region (first region in a cluster which covers the entire key
 	// range) from reporting stale info, we exclude regions that covers the entire key range
 	// here. Technically, it is possible for unsafe recover to recreate such region, but that
 	// means the entire key range is unavailable, and we don't expect unsafe recover to perform
 	// better than recreating the cluster.
-	return r.GetRegionEpoch().GetVersion() == 1 && r.GetRegionEpoch().GetConfVer() == 1 && (len(r.GetStartKey()) != 0 || len(r.GetEndKey()) != 0)
+	return meta.GetRegionEpoch().GetVersion() == 1 && meta.GetRegionEpoch().GetConfVer() == 1 && (len(meta.GetStartKey()) != 0 || len(meta.GetEndKey()) != 0)
 }
 
 func (r *RegionInfo) contain(key []byte) bool {

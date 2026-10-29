@@ -224,21 +224,29 @@ func (f *HotPeerCache) collectExpiredItemsForRegion(region *hotRegionInfo) []*Ho
 	return items
 }
 
+func sameReadRegionMetadata(a, b *metapb.Region) bool {
+	return a == b || a.GetRegionEpoch().GetVersion() == b.GetRegionEpoch().GetVersion() &&
+		a.GetRegionEpoch().GetConfVer() == b.GetRegionEpoch().GetConfVer() &&
+		core.SortedPeersEqual(a.GetPeers(), b.GetPeers())
+}
+
 func (f *HotPeerCache) updateReadLeader(region *hotRegionInfo, term uint64) bool {
 	if f.kind != utils.Read {
 		return true
 	}
 	current := f.cluster.GetRegion(region.id())
 	readLeader := f.pendingReadLeaders[region.id()]
-	// Heartbeats from different leader streams can reach this queue out of order.
-	// As in core's heartbeat validation, term zero means the term is unknown.
-	if term > 0 && (current != nil && term < current.GetTerm() || readLeader != nil && term < readLeader.term) {
+	// Admission rejects metadata older than the root. Here compare only with
+	// already processed metadata so accepted history survives root publication.
+	// Recovery recreates the region with a fresh epoch and may reset its term.
+	recreated := core.IsRegionRecreated(region.meta)
+	if !recreated && term > 0 && readLeader != nil && term < readLeader.term {
 		return false
 	}
 	leaderTransferred := false
 	for storeID := range f.storesOfRegion[region.id()] {
 		oldItem := f.getOldHotPeerStat(region.id(), storeID)
-		if oldItem != nil && oldItem.readLeader != nil && term > 0 && term < oldItem.readLeader.term {
+		if oldItem != nil && oldItem.readLeader != nil && !recreated && term > 0 && term < oldItem.readLeader.term {
 			return false
 		}
 		if oldItem != nil && (oldItem.isLeader != (storeID == region.leaderStoreID) ||
@@ -247,12 +255,12 @@ func (f *HotPeerCache) updateReadLeader(region *hotRegionInfo, term uint64) bool
 		}
 	}
 	var now time.Time
-	if readLeader != nil && (readLeader.storeID != region.leaderStoreID || readLeader.term != term) {
+	if readLeader != nil && (readLeader.storeID != region.leaderStoreID || readLeader.term != term || !sameReadRegionMetadata(readLeader.meta, region.meta)) {
 		readLeader = nil
 	}
-	if current == nil || current.GetLeader().GetStoreId() != region.leaderStoreID || current.GetTerm() < term {
+	if current == nil || current.GetLeader().GetStoreId() != region.leaderStoreID || current.GetTerm() < term || !sameReadRegionMetadata(current.GetMeta(), region.meta) {
 		if readLeader == nil {
-			readLeader = &readLeaderInfo{storeID: region.leaderStoreID, term: term}
+			readLeader = &readLeaderInfo{meta: region.meta, storeID: region.leaderStoreID, term: term}
 		}
 		f.pendingReadLeaders[region.id()] = readLeader
 	} else {
@@ -262,14 +270,15 @@ func (f *HotPeerCache) updateReadLeader(region *hotRegionInfo, term uint64) bool
 		oldItem := f.getOldHotPeerStat(region.id(), storeID)
 		isLeader := storeID == region.leaderStoreID
 		if oldItem == nil || !leaderTransferred && oldItem.readLeader != nil &&
-			oldItem.readLeader.storeID == region.leaderStoreID && oldItem.readLeader.term == term {
+			oldItem.readLeader.storeID == region.leaderStoreID && oldItem.readLeader.term == term &&
+			sameReadRegionMetadata(oldItem.readLeader.meta, region.meta) {
 			continue
 		}
 		// Preserve the rolling statistics and leave previously returned items unchanged.
 		item := *oldItem
 		item.isLeader = isLeader
 		if readLeader == nil {
-			readLeader = &readLeaderInfo{storeID: region.leaderStoreID, term: term}
+			readLeader = &readLeaderInfo{meta: region.meta, storeID: region.leaderStoreID, term: term}
 		}
 		item.readLeader = readLeader
 		if leaderTransferred {
@@ -813,12 +822,6 @@ func (f *HotPeerCache) gc() {
 			// A region reclaimed by the TopN TTL is no longer a cold candidate;
 			// drop it from the cold index for the owning store.
 			f.removeColdPeer(storeID, regionID)
-		}
-	}
-	for regionID, readLeader := range f.pendingReadLeaders {
-		current := f.cluster.GetRegion(regionID)
-		if current == nil || current.GetLeader().GetStoreId() == readLeader.storeID && current.GetTerm() >= readLeader.term {
-			delete(f.pendingReadLeaders, regionID)
 		}
 	}
 }
