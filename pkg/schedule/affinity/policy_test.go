@@ -263,6 +263,17 @@ func TestObserveAvailableRegionKeepsFixedTarget(t *testing.T) {
 	state = observe(leaderOn1)
 	re.True(state.AffinitySchedulingAllowed)
 	re.Equal(uint64(1), state.LeaderStoreID)
+
+	// An observation of an auto group does not move the leader once the policy
+	// is fixed. A policy update keeps the version that the observation carries.
+	setPolicy(BalancePolicyAuto)
+	manager.DegradeAffinityGroup("g")
+	stale := manager.GetAffinityGroupState("g")
+	setPolicy(BalancePolicyFixed)
+	manager.ObserveAvailableRegion(leaderOn2, stale)
+	state = manager.GetAffinityGroupState("g")
+	re.False(state.AffinitySchedulingAllowed)
+	re.Equal(uint64(1), state.LeaderStoreID)
 }
 
 func TestAvailabilityCheckInvalidatesGroup(t *testing.T) {

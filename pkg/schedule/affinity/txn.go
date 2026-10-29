@@ -338,6 +338,13 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affini
 		if !group.RegularSchedulingAllowed && !slices.Equal(voterStoreIDs, group.VoterStoreIDs) {
 			return group, nil
 		}
+		// Leaders move away while a store restarts. A fixed group keeps its target
+		// until it expires, so while it is degraded a Region can only confirm the
+		// target. The policy is read here, under metaMutex, because a policy update
+		// keeps affinityVer.
+		if group.BalancePolicy.IsFixed() && !group.RegularSchedulingAllowed && leaderStoreID != group.LeaderStoreID {
+			return group, nil
+		}
 	}
 
 	// Step 2: Save the Group in storage.
