@@ -344,8 +344,8 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affini
 // observed for. Without a target writer the Manager writes its own storage.
 // Otherwise it sends the target to the writer, which stores it in PD for the
 // scheduling service, and publishes it once written. A Region with the layout
-// of the current target, for example after the group was loaded, only confirms
-// the target, which is not written again.
+// of the current target, for example after the group was loaded, confirms the
+// target without writing it again.
 func (m *Manager) updateObservedGroupPeers(groupID string, affinityVer uint64, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
 	m.metaMutex.Lock()
 	target, group, err := m.observedGroupTargetLocked(groupID, affinityVer, leaderStoreID, voterStoreIDs)
@@ -353,7 +353,11 @@ func (m *Manager) updateObservedGroupPeers(groupID string, affinityVer uint64, l
 		m.metaMutex.Unlock()
 		return group, err
 	}
-	if target.LeaderStoreID == target.Expected.LeaderStoreID && slices.Equal(target.VoterStoreIDs, target.Expected.VoterStoreIDs) {
+	// With a target writer, the watcher keeps memory in line with storage, so the
+	// current target is confirmed in memory. Without one, a write whose result was
+	// unknown may have stored another target, so the confirmation below checks the
+	// stored group in the transaction, which writes nothing if it holds the target.
+	if m.targetWriter != nil && target.LeaderStoreID == target.Expected.LeaderStoreID && slices.Equal(target.VoterStoreIDs, target.Expected.VoterStoreIDs) {
 		m.publishGroupTargetLocked(&target.Expected)
 		m.metaMutex.Unlock()
 		return m.GetAffinityGroupState(groupID), nil
