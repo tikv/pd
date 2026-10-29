@@ -22,7 +22,9 @@ type BalancePolicy string
 const (
 	// BalancePolicyAuto allows the group's placement to be improved.
 	BalancePolicyAuto BalancePolicy = "auto"
-	// BalancePolicyFixed keeps the group's placement unchanged.
+	// BalancePolicyFixed keeps the group's target until the group expires: the
+	// balancer does not change it, and while the group is degraded a Region can
+	// only confirm it. An expired group takes a new target by first-win.
 	BalancePolicyFixed BalancePolicy = "fixed"
 )
 

@@ -97,7 +97,9 @@ type Group struct {
 	LeaderStoreID uint64 `json:"leader_store_id,omitempty"`
 	// VoterStoreIDs indicates which stores Voters should be on.
 	VoterStoreIDs []uint64 `json:"voter_store_ids,omitempty"`
-	// BalancePolicy controls whether the balance planner may improve this group.
+	// BalancePolicy controls whether the balance planner may improve this group,
+	// and whether first-win may move the target of the group while it is
+	// degraded, see BalancePolicyFixed.
 	// An empty value is treated as auto for backward compatibility.
 	BalancePolicy BalancePolicy `json:"balance_policy,omitempty"`
 }

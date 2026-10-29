@@ -576,11 +576,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityUpdatePolicy() {
 			re.Equal(policy, state.BalancePolicy)
 			re.Equal(uint64(1), state.LeaderStoreID, "a policy update keeps the target")
 			re.Equal([]uint64{1}, state.VoterStoreIDs)
-			// Reads may be served by the scheduling service, which follows etcd.
-			testutil.Eventually(re, func() bool {
-				statusCode, _ := doGetAffinityGroup(re, serverAddr, "policy")
-				return statusCode == http.StatusOK && mustGetAffinityGroup(re, serverAddr, "policy").BalancePolicy == policy
-			})
+			re.Equal(policy, mustGetAffinityGroup(re, serverAddr, "policy").BalancePolicy)
 		}
 
 		// A body without the policy, for example with a misspelled field, does not reset it.
