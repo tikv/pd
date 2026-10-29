@@ -665,11 +665,25 @@ func (c *PDServerConfig) validateGCConcurrency() error {
 }
 
 // StoreLabel is the config item of LabelPropertyConfig.
-type StoreLabel = sc.StoreLabel
+type StoreLabel struct {
+	Key   string `toml:"key" json:"key"`
+	Value string `toml:"value" json:"value"`
+}
 
 // LabelPropertyConfig is the config section to set properties to store labels.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
-type LabelPropertyConfig = sc.LabelPropertyConfig
+type LabelPropertyConfig map[string][]StoreLabel
+
+// Clone returns a cloned label property configuration.
+func (c LabelPropertyConfig) Clone() LabelPropertyConfig {
+	m := make(map[string][]StoreLabel, len(c))
+	for k, sl := range c {
+		sl2 := make([]StoreLabel, 0, len(sl))
+		sl2 = append(sl2, sl...)
+		m[k] = sl2
+	}
+	return m
+}
 
 // GetLease returns the leader lease.
 func (c *Config) GetLease() int64 {

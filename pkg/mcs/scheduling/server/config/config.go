@@ -199,7 +199,6 @@ type PersistConfig struct {
 	clusterVersion unsafe.Pointer
 	schedule       atomic.Value
 	replication    atomic.Value
-	labelProperty  atomic.Value
 	storeConfig    atomic.Value
 	// schedulersUpdatingNotifier is used to notify that the schedulers have been updated.
 	// Store as `chan struct{}`.
@@ -212,7 +211,6 @@ func NewPersistConfig(cfg *Config, ttl *cache.TTLString) *PersistConfig {
 	o.SetClusterVersion(&cfg.ClusterVersion)
 	o.schedule.Store(&cfg.Schedule)
 	o.replication.Store(&cfg.Replication)
-	o.labelProperty.Store(sc.LabelPropertyConfig{})
 	// storeConfig will be fetched from TiKV by PD,
 	// so we just set an empty value here first.
 	o.storeConfig.Store(&sc.StoreConfig{})
@@ -325,28 +323,6 @@ func (o *PersistConfig) GetReplicationConfig() *sc.ReplicationConfig {
 // SetReplicationConfig sets the PD replication configuration.
 func (o *PersistConfig) SetReplicationConfig(cfg *sc.ReplicationConfig) {
 	o.replication.Store(cfg)
-}
-
-// GetLabelPropertyConfig returns the label property configuration.
-func (o *PersistConfig) GetLabelPropertyConfig() sc.LabelPropertyConfig {
-	return o.labelProperty.Load().(sc.LabelPropertyConfig)
-}
-
-// SetLabelPropertyConfig sets the label property configuration.
-func (o *PersistConfig) SetLabelPropertyConfig(cfg sc.LabelPropertyConfig) {
-	o.labelProperty.Store(cfg)
-}
-
-// CheckLabelProperty checks if the label property is satisfied.
-func (o *PersistConfig) CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool {
-	for _, cfg := range o.GetLabelPropertyConfig()[typ] {
-		for _, label := range labels {
-			if label.Key == cfg.Key && label.Value == cfg.Value {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 // SetStoreConfig sets the TiKV store configuration.
@@ -763,6 +739,11 @@ func (*PersistConfig) AddSchedulerCfg(types.CheckerSchedulerType, []string) {}
 // RemoveSchedulerCfg removes the scheduler configurations.
 // This method is a no-op since we only use configurations derived from one-way synchronization from PD now.
 func (*PersistConfig) RemoveSchedulerCfg(types.CheckerSchedulerType) {}
+
+// CheckLabelProperty checks if the label property is satisfied.
+func (*PersistConfig) CheckLabelProperty(string, []*metapb.StoreLabel) bool {
+	return false
+}
 
 // IsTraceRegionFlow returns if the region flow is tracing.
 // If the accuracy cannot reach 0.1 MB, it is considered not.
