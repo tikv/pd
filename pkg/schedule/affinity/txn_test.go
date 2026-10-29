@@ -497,6 +497,71 @@ func TestNextGenInvalidAffinityRuleClearsCache(t *testing.T) {
 	}
 }
 
+func TestNextGenSyncGroupPrefersBufferedLabelRule(t *testing.T) {
+	const modeFlag = "github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"
+	require.NoError(t, failpoint.Enable(modeFlag, "return(true)"))
+	t.Cleanup(func() { require.NoError(t, failpoint.Disable(modeFlag)) })
+	const groupID = "_tidb_ks42_t_1001"
+	keyRange := testKeyRangeForKeyspace(42)
+	upper := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, 43)
+	valid := GroupKeyRanges{GroupID: groupID, KeyRanges: []keyutil.KeyRange{keyRange}}
+	mixed := GroupKeyRanges{GroupID: groupID, KeyRanges: []keyutil.KeyRange{keyRange, testKeyRangeForKeyspace(43)}}
+	// Watchers receive independently decoded, adjusted rules.
+	watcherRule := func(re *require.Assertions, gkr GroupKeyRanges) *labeler.LabelRule {
+		data, err := json.Marshal(MakeLabelRule(gkr))
+		re.NoError(err)
+		rule, err := labeler.NewLabelRuleFromJSON(data)
+		re.NoError(err)
+		return rule
+	}
+	// The labeler is synced by another watcher and may still hold an older rule
+	// when the group arrives after its buffered rule.
+	for _, tc := range []struct {
+		name  string
+		stale GroupKeyRanges
+	}{
+		{"stale invalid rule", mixed},
+		{"stale valid rule", GroupKeyRanges{GroupID: groupID, KeyRanges: []keyutil.KeyRange{{StartKey: keyRange.EndKey, EndKey: upper[:]}}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			store := storage.NewStorageWithMemoryBackend()
+			stores := core.NewStoresInfo()
+			stores.PutStore(core.NewStoreInfo(&metapb.Store{Id: 1}))
+			regionLabeler, err := labeler.NewRegionLabeler(t.Context(), store, time.Second*5)
+			re.NoError(err)
+			manager, err := NewManager(t.Context(), store, stores, mockconfig.NewTestOptions(), regionLabeler)
+			re.NoError(err)
+			re.NoError(regionLabeler.SetLabelRule(MakeLabelRule(tc.stale)))
+			re.NoError(manager.SyncKeyRangesFromEtcd(watcherRule(re, valid)))
+			re.Contains(manager.labelRuleBuffer, groupID)
+			manager.SyncGroupFromEtcd(&Group{ID: groupID, LeaderStoreID: 1, VoterStoreIDs: []uint64{1}})
+			re.NotContains(manager.labelRuleBuffer, groupID)
+			re.Equal(valid, manager.keyRanges[groupID])
+			re.Equal(1, manager.GetAffinityGroupState(groupID).RangeCount)
+			re.NoError(regionLabeler.SetLabelRule(MakeLabelRule(valid)))
+			region := generateRegionForTest(28, []uint64{1}, keyRange)
+			state, _ := manager.GetAndCacheRegionAffinityGroupState(region)
+			re.NotNil(state)
+			re.Equal(groupID, state.ID)
+
+			// Later invalid and delete events still deactivate the group.
+			re.NoError(manager.SyncKeyRangesFromEtcd(watcherRule(re, mixed)))
+			re.NotContains(manager.keyRanges, groupID)
+			re.Zero(manager.GetAffinityGroupState(groupID).RangeCount)
+			state, _ = manager.GetAndCacheRegionAffinityGroupState(region)
+			re.Nil(state, "the labeler may still contain the valid rule")
+			re.NoError(manager.SyncKeyRangesFromEtcd(watcherRule(re, valid)))
+			re.Equal(valid, manager.keyRanges[groupID])
+			manager.SyncKeyRangesDeleteFromEtcd(GetLabelRuleID(groupID))
+			re.NotContains(manager.keyRanges, groupID)
+			re.Zero(manager.GetAffinityGroupState(groupID).RangeCount)
+			state, _ = manager.GetAndCacheRegionAffinityGroupState(region)
+			re.Nil(state)
+		})
+	}
+}
+
 func TestNextGenAffinityLookupDoesNotHoldManagerLock(t *testing.T) {
 	re := require.New(t)
 	const modeFlag = "github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"
