@@ -210,6 +210,31 @@ func TestModifyResourceGroup(t *testing.T) {
 	re.Error(err)
 }
 
+func TestModifyResourceGroupSyncsBurstabilityWithServiceLimit(t *testing.T) {
+	re := require.New(t)
+
+	krgm := newKeyspaceResourceGroupManager(1, storage.NewStorageWithMemoryBackend())
+	krgm.setServiceLimit(100)
+
+	// A bounded group does not need the burst limit override.
+	re.NoError(krgm.addResourceGroup(newTestResourceGroup("test_group", 8, 50, 200)))
+	group := krgm.getMutableResourceGroup("test_group")
+	re.Equal(int64(-1), group.getOverrideBurstLimit())
+	re.Equal(int64(200), group.getBurstLimit())
+
+	// Modifying the group to be burstable should apply the service limit as its burst limit.
+	re.NoError(krgm.modifyResourceGroup(newTestResourceGroup("test_group", 8, 50, -1)))
+	re.Same(group, krgm.getMutableResourceGroup("test_group"))
+	re.Equal(int64(-1), group.getBurstLimit(true))
+	re.Equal(int64(100), group.getOverrideBurstLimit())
+	re.Equal(int64(100), group.getBurstLimit())
+
+	// The override is cleaned up once the service limit is removed.
+	krgm.setServiceLimit(0)
+	re.Equal(int64(-1), group.getOverrideBurstLimit())
+	re.Equal(int64(-1), group.getBurstLimit())
+}
+
 func TestDeleteResourceGroupBehavior(t *testing.T) {
 	t.Run("removes_group_and_tracker_from_cache", func(t *testing.T) {
 		re := require.New(t)
