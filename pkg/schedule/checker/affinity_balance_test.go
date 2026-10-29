@@ -411,6 +411,13 @@ func TestAffinityOperatorTargetStores(t *testing.T) {
 		}},
 		{name: "leader removing", leader: true, set: removing},
 		{name: "leader busy", leader: true, temporary: true, set: busy},
+		{name: "reject-leader", leader: true, set: func(f *affinityBalanceTest, id uint64) {
+			f.SetStoreLabel(id, map[string]string{"leader": "reject"})
+			f.SetLabelProperty("reject-leader", "leader", "reject")
+		}},
+		{name: "evict-leader", leader: true, set: func(f *affinityBalanceTest, id uint64) {
+			require.NoError(f.tb, f.PauseLeaderTransfer(id, constant.In))
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			re := require.New(t)

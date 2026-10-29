@@ -257,6 +257,11 @@ func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group 
 	// Skip building if target leader store currently disallows leader in (e.g., evict-leader / reject-leader).
 	if targetLeader := c.cluster.GetStore(group.LeaderStoreID); targetLeader != nil {
 		if !targetLeader.AllowLeaderTransferIn() || c.conf.CheckLabelProperty(config.RejectLeader, targetLeader.GetLabels()) {
+			affinityCheckerTargetStoreRejectedCounter.Inc()
+			log.Debug("affinity target stores cannot take the region now",
+				zap.Uint64("region-id", region.GetID()),
+				zap.String("group-id", group.ID),
+				zap.Bool("temporary", false))
 			return nil
 		}
 	} else {
