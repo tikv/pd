@@ -435,13 +435,14 @@ func (m *Manager) observedGroupTargetLocked(groupID string, affinityVer uint64, 
 }
 
 // UpdateAffinityGroupPolicy updates the balance policy of an affinity group.
-// It preserves the runtime state unless the stored target differs from memory.
+// The policy must be auto or fixed. It preserves the runtime state unless the
+// stored target differs from memory.
 func (m *Manager) UpdateAffinityGroupPolicy(groupID string, policy BalancePolicy) (*GroupState, error) {
-	if policy == "" {
-		policy = BalancePolicyAuto
-	}
-	if err := validateBalancePolicy(policy); err != nil {
-		return nil, err
+	// An empty policy reads as auto in a stored group, but a request must name
+	// one, so that a body without the field does not reset the policy.
+	if policy != BalancePolicyAuto && policy != BalancePolicyFixed {
+		return nil, errs.ErrAffinityGroupContent.FastGenByArgs(
+			fmt.Sprintf("invalid balance policy %q, it must be %q or %q", policy, BalancePolicyAuto, BalancePolicyFixed))
 	}
 
 	m.metaMutex.Lock()

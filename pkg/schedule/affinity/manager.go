@@ -128,9 +128,8 @@ func (m *Manager) initialize() error {
 			return
 		}
 		if err := validateBalancePolicy(group.BalancePolicy); err != nil {
-			log.Warn("invalid affinity group balance policy from storage, skipping",
+			log.Warn("unknown affinity group balance policy from storage, the group keeps its target",
 				zap.String("key", k), zap.Error(err))
-			return
 		}
 		m.initGroupLocked(group)
 	})
@@ -495,9 +494,8 @@ func (m *Manager) GetAllAffinityGroupStates() []*GroupState {
 // SyncGroupFromEtcd synchronizes a group from etcd to the in-memory state.
 func (m *Manager) SyncGroupFromEtcd(group *Group) {
 	if err := validateBalancePolicy(group.BalancePolicy); err != nil {
-		log.Warn("invalid affinity group balance policy from etcd, skipping",
+		log.Warn("unknown affinity group balance policy from etcd, the group keeps its target",
 			zap.String("group-id", group.ID), zap.Error(err))
-		return
 	}
 	// Voter order has no meaning, but affinity comparisons use canonical order.
 	clonedGroup := *group

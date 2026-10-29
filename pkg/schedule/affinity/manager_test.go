@@ -284,21 +284,22 @@ func TestBalancePolicyValidationAtMetadataEntrypoints(t *testing.T) {
 	re.NoError(err)
 	manager, err := NewManager(ctx, store, core.NewStoresInfo(), mockconfig.NewTestOptions(), regionLabeler)
 	re.NoError(err)
-	re.Equal(3, manager.GetAffinityGroupCount())
-	re.Nil(manager.GetAffinityGroupState("invalid"))
-	for _, policy := range []BalancePolicy{"", BalancePolicyAuto, BalancePolicyFixed} {
+	// A group with an unknown policy, for example one that a newer version
+	// writes, is still loaded and keeps its target.
+	re.Equal(4, manager.GetAffinityGroupCount())
+	for id, fixed := range map[string]bool{"empty": false, "auto": false, "fixed": true, "invalid": true} {
+		re.Equal(fixed, manager.GetAffinityGroupState(id).BalancePolicy.IsFixed(), id)
+	}
+	for _, policy := range []BalancePolicy{"", BalancePolicyAuto, BalancePolicyFixed, BalancePolicy("manual")} {
 		group := &Group{ID: "watch", BalancePolicy: policy}
-		re.NoError(manager.AdjustGroup(group))
 		manager.SyncGroupFromEtcd(group)
 		re.Equal(policy, manager.GetAffinityGroupState("watch").BalancePolicy)
+		if policy == "manual" {
+			re.ErrorIs(manager.AdjustGroup(group), errs.ErrAffinityGroupContent)
+		} else {
+			re.NoError(manager.AdjustGroup(group))
+		}
 	}
-	invalid := &Group{ID: "invalid", BalancePolicy: BalancePolicy("manual")}
-	re.ErrorIs(manager.AdjustGroup(invalid), errs.ErrAffinityGroupContent)
-	manager.SyncGroupFromEtcd(invalid)
-	re.Nil(manager.GetAffinityGroupState("invalid"))
-	invalid.ID = "watch"
-	manager.SyncGroupFromEtcd(invalid)
-	re.Equal(BalancePolicyFixed, manager.GetAffinityGroupState("watch").BalancePolicy)
 }
 
 func TestUpdateAffinityGroupPolicy(t *testing.T) {
@@ -322,13 +323,10 @@ func TestUpdateAffinityGroupPolicy(t *testing.T) {
 	before := manager.GetAffinityGroupState("policy")
 	re.Equal(PhaseStable, before.Phase)
 
-	for _, policy := range []BalancePolicy{BalancePolicyFixed, BalancePolicyFixed, "", BalancePolicyAuto} {
+	for _, policy := range []BalancePolicy{BalancePolicyFixed, BalancePolicyFixed, BalancePolicyAuto} {
 		state, err := manager.UpdateAffinityGroupPolicy("policy", policy)
 		re.NoError(err)
 		want := policy
-		if want == "" {
-			want = BalancePolicyAuto
-		}
 		re.Equal(want, state.BalancePolicy)
 		// The target and the runtime state are kept.
 		re.Equal(before.LeaderStoreID, state.LeaderStoreID)
@@ -346,8 +344,12 @@ func TestUpdateAffinityGroupPolicy(t *testing.T) {
 		re.Equal(before.VoterStoreIDs, persisted.VoterStoreIDs)
 	}
 
-	_, err = manager.UpdateAffinityGroupPolicy("policy", BalancePolicy("manual"))
-	re.ErrorIs(err, errs.ErrAffinityGroupContent)
+	// A request must name a valid policy; an empty one does not reset it.
+	for _, policy := range []BalancePolicy{"", BalancePolicy("manual")} {
+		_, err = manager.UpdateAffinityGroupPolicy("policy", policy)
+		re.ErrorIs(err, errs.ErrAffinityGroupContent)
+		re.Equal(BalancePolicyAuto, manager.GetAffinityGroupState("policy").BalancePolicy)
+	}
 	_, err = manager.UpdateAffinityGroupPolicy("missing", BalancePolicyFixed)
 	re.ErrorIs(err, errs.ErrAffinityGroupNotFound)
 

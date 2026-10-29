@@ -570,7 +570,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityUpdatePolicy() {
 		mustPutHealthyStore(re, cluster, &metapb.Store{Id: 1, State: metapb.StoreState_Up, NodeState: metapb.NodeState_Serving})
 		mustUpdateAffinityGroupPeers(re, serverAddr, "policy", &handlers.UpdateAffinityGroupPeersRequest{LeaderStoreID: 1, VoterStoreIDs: []uint64{1}})
 
-		for _, policy := range []affinity.BalancePolicy{affinity.BalancePolicyFixed, affinity.BalancePolicyAuto} {
+		for _, policy := range []affinity.BalancePolicy{affinity.BalancePolicyAuto, affinity.BalancePolicyFixed} {
 			statusCode, state, errorMsg := doUpdateAffinityGroupPolicy(re, serverAddr, "policy", policy)
 			re.Equal(http.StatusOK, statusCode, errorMsg)
 			re.Equal(policy, state.BalancePolicy)
@@ -583,10 +583,14 @@ func (suite *affinityHandlerTestSuite) TestAffinityUpdatePolicy() {
 			})
 		}
 
-		statusCode, _, errorMsg := doUpdateAffinityGroupPolicy(re, serverAddr, "policy", affinity.BalancePolicy("manual"))
-		re.Equal(http.StatusBadRequest, statusCode)
-		re.Contains(errorMsg, "invalid balance policy")
-		statusCode, _, _ = doUpdateAffinityGroupPolicy(re, serverAddr, "missing", affinity.BalancePolicyFixed)
+		// A body without the policy, for example with a misspelled field, does not reset it.
+		for _, policy := range []affinity.BalancePolicy{"", affinity.BalancePolicy("manual")} {
+			statusCode, _, errorMsg := doUpdateAffinityGroupPolicy(re, serverAddr, "policy", policy)
+			re.Equal(http.StatusBadRequest, statusCode)
+			re.Contains(errorMsg, "invalid balance policy")
+		}
+		re.Equal(affinity.BalancePolicyFixed, mustGetAffinityGroup(re, serverAddr, "policy").BalancePolicy)
+		statusCode, _, _ := doUpdateAffinityGroupPolicy(re, serverAddr, "missing", affinity.BalancePolicyFixed)
 		re.Equal(http.StatusNotFound, statusCode)
 	})
 }
