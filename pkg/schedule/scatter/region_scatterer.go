@@ -748,7 +748,7 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 		for _, peer := range peers {
 			failpoint.InjectCall("scatterPeerOrder", &peer)
 			if _, ok := selectedStores[peer.GetStoreId()]; ok {
-				if collectLeaderCandidates && allowScatterLeader(peer) {
+				if collectLeaderCandidates && allowScatterLeader(oldFit, internalScatter, peer) {
 					leaderCandidateStores = append(leaderCandidateStores, peer.GetStoreId())
 				}
 				// It is both sourcePeer and targetPeer itself, no need to select.
@@ -779,7 +779,7 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 						moveScatterPeer(plannedRegion, peer.GetId(), newPeer.GetStoreId())
 						plannedFit = nil
 					}
-					if collectLeaderCandidates && allowScatterLeader(peer) {
+					if collectLeaderCandidates && allowScatterLeader(oldFit, internalScatter, peer) {
 						leaderCandidateStores = append(leaderCandidateStores, newPeer.GetStoreId())
 					}
 					break
@@ -1000,10 +1000,21 @@ func (r *RegionScatterer) isAllowedLeaderSource(storeID uint64) bool {
 		Len() > 0
 }
 
-// Candidate eligibility does not fix a peer to its original RuleFit.
-// Complete target matching below decides which rule can own each peer.
-func allowScatterLeader(peer *metapb.Peer) bool {
-	return !core.IsLearner(peer) && peer.GetRole() != metapb.PeerRole_DemotingVoter && !peer.IsWitness
+// Internal scatter does not fix a peer to its original RuleFit: complete target
+// matching decides which rule can own each peer. Admin scatter skips that
+// matching, so it keeps the original Leader/Voter RuleFit requirement.
+func allowScatterLeader(fit *placement.RegionFit, internalScatter bool, peer *metapb.Peer) bool {
+	if core.IsLearner(peer) || peer.GetRole() == metapb.PeerRole_DemotingVoter || peer.IsWitness {
+		return false
+	}
+	if internalScatter {
+		return true
+	}
+	peerFit := fit.GetRuleFit(peer.GetId())
+	if peerFit == nil || peerFit.Rule == nil || peerFit.Rule.IsWitness {
+		return false
+	}
+	return peerFit.Rule.Role == placement.Voter || peerFit.Rule.Role == placement.Leader
 }
 
 // moveScatterPeer updates only the selected peer in a request-owned layout.

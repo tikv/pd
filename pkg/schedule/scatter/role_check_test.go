@@ -157,8 +157,40 @@ func TestScatterCanReassignFollowerRule(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, op)
 			_, leader := finalPlacementAfterOperator(region, op)
-			require.Equal(t, uint64(3), leader)
+			expected := uint64(3)
+			if !internal {
+				// Admin scatter keeps the original RuleFit role requirement.
+				expected = 2
+			}
+			require.Equal(t, expected, leader)
 			require.True(t, rm.FitRegionWithoutCache(tc, region.Clone(core.WithLeader(region.GetStorePeer(leader)))).IsSatisfied())
+		})
+	}
+}
+
+func TestScatterKeepsLeaderOffFollowerRule(t *testing.T) {
+	for _, internal := range []bool{false, true} {
+		t.Run(map[bool]string{false: "admin", true: "internal"}[internal], func(t *testing.T) {
+			tc, sc, region := roleCheckFixture(t, false)
+			rm := tc.GetRuleManager()
+			leader := rm.GetRule("pd", "default").Clone()
+			leader.LabelConstraints = []placement.LabelConstraint{{Key: "zone", Op: placement.In, Values: []string{"A"}}}
+			require.NoError(t, rm.SetRule(leader))
+			followers := rm.GetRule("pd", "voters").Clone()
+			followers.Role = placement.Follower
+			require.NoError(t, rm.SetRule(followers))
+			require.True(t, rm.FitRegionWithoutCache(tc, region).IsSatisfied())
+			// Prefer store 2, whose peer is fitted to a Follower rule in zone B.
+			for id, count := range map[uint64]int{1: 10, 3: 5} {
+				for range count {
+					sc.ordinaryEngine.selectedLeader.Put(id, "follower-rule")
+				}
+			}
+			op, err := sc.scatterRegionWithType(region, "follower-rule", false, internal, nil)
+			require.NoError(t, err)
+			_, targetLeader := finalPlacementAfterOperator(region, op)
+			require.Equal(t, uint64(1), targetLeader)
+			require.True(t, rm.FitRegionWithoutCache(tc, region.Clone(core.WithLeader(region.GetStorePeer(targetLeader)))).IsSatisfied())
 		})
 	}
 }
