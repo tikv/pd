@@ -26,6 +26,13 @@ const (
 	BalancePolicyFixed BalancePolicy = "fixed"
 )
 
+// IsFixed reports whether a group with policy p keeps its target. An empty
+// policy means auto. Any other value, such as one that a newer version writes,
+// keeps the target like fixed.
+func (p BalancePolicy) IsFixed() bool {
+	return p != "" && p != BalancePolicyAuto
+}
+
 func sortedStoreIDs(ids []uint64) []uint64 {
 	if len(ids) == 0 {
 		return nil
