@@ -116,7 +116,7 @@ func newRegionFlowTasks(region *core.RegionInfo) (checkRegionTask, checkWritePee
 	writtenBytes := region.GetBytesWritten()
 	writtenKeys := region.GetKeysWritten()
 	writeQueryNum := region.GetWriteQueryNum()
-	return newRegionMetadataTask(regionInfo.meta, regionInfo.leaderStoreID), newWriteRegionTask(
+	return newRegionMetadataTask(regionInfo.meta, regionInfo.leaderStoreID, region.GetTerm()), newWriteRegionTask(
 		regionInfo.meta,
 		regionInfo.leaderStoreID,
 		interval,
@@ -126,10 +126,12 @@ func newRegionFlowTasks(region *core.RegionInfo) (checkRegionTask, checkWritePee
 	)
 }
 
-func newRegionMetadataTask(meta *metapb.Region, leaderStoreID uint64) func(*HotPeerCache) {
+func newRegionMetadataTask(meta *metapb.Region, leaderStoreID, term uint64) func(*HotPeerCache) {
 	return func(cache *HotPeerCache) {
 		regionInfo := hotRegionInfo{meta: meta, leaderStoreID: leaderStoreID}
-		cache.updateReadLeader(&regionInfo)
+		if !cache.updateReadLeader(&regionInfo, term) {
+			return
+		}
 		expiredStats := cache.collectExpiredItemsForRegion(&regionInfo)
 		for _, stat := range expiredStats {
 			cache.UpdateStat(stat)
@@ -165,24 +167,24 @@ func newReadPeerTask(region *core.RegionInfo, peer *metapb.Peer, loads []float64
 		regionInfo := hotRegionInfo{meta: meta, leaderStoreID: leaderStoreID}
 		// Region metadata tasks run on the same queue and may already have
 		// observed a newer leader than this store heartbeat's region snapshot.
-		readLeaderStoreID := cache.pendingReadLeaders[meta.GetId()]
-		if readLeaderStoreID == nil {
+		readLeader := cache.pendingReadLeaders[meta.GetId()]
+		if readLeader == nil {
 			for id := range cache.storesOfRegion[meta.GetId()] {
-				if item := cache.getOldHotPeerStat(meta.GetId(), id); item != nil && item.readLeaderStoreID != nil {
-					readLeaderStoreID = item.readLeaderStoreID
+				if item := cache.getOldHotPeerStat(meta.GetId(), id); item != nil && item.readLeader != nil {
+					readLeader = item.readLeader
 					break
 				}
 			}
 		}
-		if readLeaderStoreID != nil {
-			regionInfo.leaderStoreID = *readLeaderStoreID
+		if readLeader != nil {
+			regionInfo.leaderStoreID = readLeader.storeID
 		} else if current := cache.cluster.GetRegion(meta.GetId()); current != nil {
 			// All read samples may have expired since this snapshot was captured.
 			regionInfo.leaderStoreID = current.GetLeader().GetStoreId()
 		}
 		stats := cache.checkPeerFlowForRegion(&regionInfo, []uint64{storeID}, loads, interval)
 		for _, stat := range stats {
-			stat.readLeaderStoreID = readLeaderStoreID
+			stat.readLeader = readLeader
 			cache.UpdateStat(stat)
 		}
 	}

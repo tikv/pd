@@ -124,7 +124,7 @@ type HotPeerCache struct {
 	regionsOfStore map[uint64]map[uint64]struct{} // storeID -> regionIDs
 	// pendingReadLeaders outlives read samples while the root tree has not yet
 	// published leadership already observed by a region metadata task.
-	pendingReadLeaders map[uint64]*uint64
+	pendingReadLeaders map[uint64]*readLeaderInfo
 	// coldPeersOfStore indexes cold peers by store and keeps each candidate's
 	// position in coldPeerSweepQueue. This lets gc() visit a bounded batch
 	// without scanning or copying a store's full TopN.
@@ -145,7 +145,7 @@ func NewHotPeerCache(ctx context.Context, cluster *core.BasicCluster, kind utils
 		peersOfStore:       make(map[uint64]*utils.TopN),
 		storesOfRegion:     make(map[uint64]map[uint64]struct{}),
 		regionsOfStore:     make(map[uint64]map[uint64]struct{}),
-		pendingReadLeaders: make(map[uint64]*uint64),
+		pendingReadLeaders: make(map[uint64]*readLeaderInfo),
 		coldPeersOfStore:   make(map[uint64]map[uint64]*list.Element),
 		taskQueue:          chanx.NewUnboundedChan[func(*HotPeerCache)](ctx, queueCap),
 		thresholdsOfStore:  make(map[uint64]*thresholds),
@@ -224,46 +224,54 @@ func (f *HotPeerCache) collectExpiredItemsForRegion(region *hotRegionInfo) []*Ho
 	return items
 }
 
-func (f *HotPeerCache) updateReadLeader(region *hotRegionInfo) {
+func (f *HotPeerCache) updateReadLeader(region *hotRegionInfo, term uint64) bool {
 	if f.kind != utils.Read {
-		return
+		return true
+	}
+	current := f.cluster.GetRegion(region.id())
+	readLeader := f.pendingReadLeaders[region.id()]
+	// Heartbeats from different leader streams can reach this queue out of order.
+	// As in core's heartbeat validation, term zero means the term is unknown.
+	if term > 0 && (current != nil && term < current.GetTerm() || readLeader != nil && term < readLeader.term) {
+		return false
 	}
 	leaderTransferred := false
 	for storeID := range f.storesOfRegion[region.id()] {
 		oldItem := f.getOldHotPeerStat(region.id(), storeID)
+		if oldItem != nil && oldItem.readLeader != nil && term > 0 && term < oldItem.readLeader.term {
+			return false
+		}
 		if oldItem != nil && (oldItem.isLeader != (storeID == region.leaderStoreID) ||
-			oldItem.readLeaderStoreID != nil && *oldItem.readLeaderStoreID != region.leaderStoreID) {
+			oldItem.readLeader != nil && oldItem.readLeader.storeID != region.leaderStoreID) {
 			leaderTransferred = true
-			break
 		}
 	}
 	var now time.Time
-	var leaderStoreID *uint64
-	current := f.cluster.GetRegion(region.id())
-	if current == nil || current.GetLeader().GetStoreId() != region.leaderStoreID {
-		leaderStoreID = f.pendingReadLeaders[region.id()]
-		if leaderStoreID == nil || *leaderStoreID != region.leaderStoreID {
-			leaderStoreID = new(uint64)
-			*leaderStoreID = region.leaderStoreID
+	if readLeader != nil && (readLeader.storeID != region.leaderStoreID || readLeader.term != term) {
+		readLeader = nil
+	}
+	if current == nil || current.GetLeader().GetStoreId() != region.leaderStoreID || current.GetTerm() < term {
+		if readLeader == nil {
+			readLeader = &readLeaderInfo{storeID: region.leaderStoreID, term: term}
 		}
-		f.pendingReadLeaders[region.id()] = leaderStoreID
+		f.pendingReadLeaders[region.id()] = readLeader
 	} else {
 		delete(f.pendingReadLeaders, region.id())
 	}
 	for storeID := range f.storesOfRegion[region.id()] {
 		oldItem := f.getOldHotPeerStat(region.id(), storeID)
 		isLeader := storeID == region.leaderStoreID
-		if oldItem == nil || !leaderTransferred && oldItem.readLeaderStoreID != nil && *oldItem.readLeaderStoreID == region.leaderStoreID {
+		if oldItem == nil || !leaderTransferred && oldItem.readLeader != nil &&
+			oldItem.readLeader.storeID == region.leaderStoreID && oldItem.readLeader.term == term {
 			continue
 		}
 		// Preserve the rolling statistics and leave previously returned items unchanged.
 		item := *oldItem
 		item.isLeader = isLeader
-		if leaderStoreID == nil {
-			leaderStoreID = new(uint64)
-			*leaderStoreID = region.leaderStoreID
+		if readLeader == nil {
+			readLeader = &readLeaderInfo{storeID: region.leaderStoreID, term: term}
 		}
-		item.readLeaderStoreID = leaderStoreID
+		item.readLeader = readLeader
 		if leaderTransferred {
 			if now.IsZero() {
 				now = time.Now()
@@ -273,6 +281,7 @@ func (f *HotPeerCache) updateReadLeader(region *hotRegionInfo) {
 		item.actionType = utils.Update
 		f.peersOfStore[storeID].Update(&item)
 	}
+	return true
 }
 
 // CheckPeerFlow checks the flow information of a peer.
@@ -573,7 +582,7 @@ func (f *HotPeerCache) getHotPeerStat(regionID, storeID uint64) *HotPeerStat {
 
 func (f *HotPeerCache) updateHotPeerStat(region *hotRegionInfo, newItem, oldItem *HotPeerStat, deltaLoads []float64, interval time.Duration, source utils.SourceKind) *HotPeerStat {
 	regionStats := f.kind.RegionStats()
-	newItem.readLeaderStoreID = oldItem.readLeaderStoreID
+	newItem.readLeader = oldItem.readLeader
 
 	if source == utils.Inherit {
 		for _, dim := range oldItem.rollingLoads {
@@ -806,9 +815,9 @@ func (f *HotPeerCache) gc() {
 			f.removeColdPeer(storeID, regionID)
 		}
 	}
-	for regionID, leaderStoreID := range f.pendingReadLeaders {
+	for regionID, readLeader := range f.pendingReadLeaders {
 		current := f.cluster.GetRegion(regionID)
-		if current == nil || current.GetLeader().GetStoreId() == *leaderStoreID {
+		if current == nil || current.GetLeader().GetStoreId() == readLeader.storeID && current.GetTerm() >= readLeader.term {
 			delete(f.pendingReadLeaders, regionID)
 		}
 	}

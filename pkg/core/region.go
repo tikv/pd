@@ -928,6 +928,9 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 		} else {
 			r := region.GetRegionEpoch()
 			o := origin.GetRegionEpoch()
+			if region.GetTerm() > origin.GetTerm() {
+				saveCache = true
+			}
 			if r.GetVersion() > o.GetVersion() {
 				if log.GetLevel() <= zap.InfoLevel {
 					info("region Version changed",

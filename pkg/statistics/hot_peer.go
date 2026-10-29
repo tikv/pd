@@ -91,6 +91,11 @@ func (d *dimStat) clone() *dimStat {
 	}
 }
 
+type readLeaderInfo struct {
+	storeID uint64
+	term    uint64
+}
+
 // HotPeerStat records each hot peer's statistics
 type HotPeerStat struct {
 	StoreID  uint64 `json:"store_id"`
@@ -109,9 +114,9 @@ type HotPeerStat struct {
 	actionType utils.ActionType
 	// isLeader is true means that the region has a leader on this store.
 	isLeader bool
-	// readLeaderStoreID is the latest leader reported by a region metadata task.
+	// readLeader is the latest leader and term reported by a region metadata task.
 	// A nil value means no region metadata task has updated this read statistic.
-	readLeaderStoreID *uint64
+	readLeader *readLeaderInfo
 	// lastTransferLeaderTime is used to cool down frequent transfer leader.
 	lastTransferLeaderTime time.Time
 	// If the peer didn't been send by store heartbeat when it is already stored as hot peer stat,

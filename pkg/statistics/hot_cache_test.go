@@ -28,6 +28,7 @@ import (
 	"go.uber.org/goleak"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/statistics/utils"
@@ -540,6 +541,89 @@ func TestStaleReadSnapshotPreservesRegionLeader(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestStaleRegionHeartbeatPreservesReadLeader(t *testing.T) {
+	for _, published := range []bool{false, true} {
+		for _, expired := range []bool{false, true} {
+			t.Run(fmt.Sprintf("published=%t/expired=%t", published, expired), func(t *testing.T) {
+				synctest.Test(t, func(t *testing.T) {
+					cluster, cache, region, loads := newHotReadCache(t, []uint64{1, 2, 3})
+					oldRegion := withHeartbeatTerm(region, 10)
+					cluster.PutRegion(oldRegion)
+					newRegion := withHeartbeatTerm(region.Clone(core.WithLeader(region.GetStorePeer(2))), 11)
+					cache.CheckRegionFlowAsync(newRegion)
+					before := cache.GetHotPeerStats(utils.Read, 0)
+					if published {
+						cluster.PutRegion(newRegion)
+					}
+					if expired {
+						time.Sleep(31 * time.Second)
+						cache.CollectMetrics()
+						for _, stats := range cache.GetHotPeerStats(utils.Read, 0) {
+							require.Empty(t, stats)
+						}
+					}
+					// The old heartbeat passed precheck before the new heartbeat,
+					// but was delayed before admitting its metadata task.
+					cache.CheckRegionFlowAsync(oldRegion)
+					after := cache.GetHotPeerStats(utils.Read, 0)
+					if !expired {
+						require.Equal(t, before, after, "older metadata must preserve leader roles and cooldowns")
+					}
+					require.True(t, cache.CheckReadPeerAsync(oldRegion, oldRegion.GetStorePeer(1), loads, utils.StoreHeartBeatReportInterval))
+					after = cache.GetHotPeerStats(utils.Read, 0)
+					require.Len(t, after[1], 1)
+					require.False(t, after[1][0].IsLeader(), "older metadata must not override the observed leader")
+				})
+			})
+		}
+	}
+}
+
+func TestPendingReadLeaderPreservesTerm(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cluster, cache, region, loads := newHotReadCache(t, []uint64{1, 2})
+		cluster.PutRegion(withHeartbeatTerm(region, 10))
+		cache.CheckRegionFlowAsync(withHeartbeatTerm(region, 12))
+		_ = cache.GetHotPeerStats(utils.Read, 0)
+		time.Sleep(31 * time.Second)
+		cache.CollectMetrics()
+		for _, stats := range cache.GetHotPeerStats(utils.Read, 0) {
+			require.Empty(t, stats)
+		}
+		staleRegion := withHeartbeatTerm(region.Clone(core.WithLeader(region.GetStorePeer(2))), 11)
+		cache.CheckRegionFlowAsync(staleRegion)
+		require.True(t, cache.CheckReadPeerAsync(region, region.GetStorePeer(1), loads, utils.StoreHeartBeatReportInterval))
+		after := cache.GetHotPeerStats(utils.Read, 0)
+		require.Len(t, after[1], 1)
+		require.True(t, after[1][0].IsLeader(), "sample expiry must not erase the newer term with an unchanged leader")
+		cluster.PutRegion(withHeartbeatTerm(region, 12))
+		time.Sleep(31 * time.Second)
+		cache.CollectMetrics()
+		_ = cache.GetHotPeerStats(utils.Read, 0)
+		require.Empty(t, cache.readCache.pendingReadLeaders, "published terms must release pending leader metadata")
+	})
+}
+
+func TestRegionMetadataWithUnknownTerm(t *testing.T) {
+	cluster, cache, region, _ := newHotReadCache(t, []uint64{1, 2})
+	cluster.PutRegion(withHeartbeatTerm(region, 10))
+	cache.CheckRegionFlowAsync(withHeartbeatTerm(region, 10))
+	_ = cache.GetHotPeerStats(utils.Read, 0)
+	cache.CheckRegionFlowAsync(region.Clone(core.WithLeader(region.GetStorePeer(2))))
+	after := cache.GetHotPeerStats(utils.Read, 0)
+	require.False(t, after[1][0].IsLeader())
+	require.True(t, after[2][0].IsLeader(), "term zero must retain core heartbeat compatibility")
+}
+
+func withHeartbeatTerm(region *core.RegionInfo, term uint64) *core.RegionInfo {
+	return core.RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{
+		Region:   region.GetMeta(),
+		Leader:   region.GetLeader(),
+		Term:     term,
+		Interval: region.GetInterval(),
+	}, 0)
 }
 
 func newHotReadCache(t *testing.T, hotStores []uint64) (*core.BasicCluster, *HotCache, *core.RegionInfo, []float64) {

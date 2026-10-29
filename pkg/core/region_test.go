@@ -472,6 +472,23 @@ func TestNeedSync(t *testing.T) {
 	}
 }
 
+func TestRegionGuideTermChanged(t *testing.T) {
+	origin := NewTestRegionInfo(1, 1, nil, nil)
+	origin.term = 10
+	guide := GenerateRegionGuideFunc(false)
+	for _, term := range []uint64{0, 10, 11} {
+		t.Run(strconv.FormatUint(term, 10), func(t *testing.T) {
+			region := origin.Clone()
+			region.term = term
+			saveKV, saveCache, needSync, retained := guide(ContextTODO(), region, origin)
+			require.False(t, saveKV)
+			require.Equal(t, term > origin.term, saveCache)
+			require.False(t, needSync)
+			require.False(t, retained)
+		})
+	}
+}
+
 func TestRegionGuideLogicalStorageSizeChanged(t *testing.T) {
 	regionGuide := GenerateRegionGuideFunc(false)
 	origin := NewRegionInfo(&metapb.Region{Id: 1}, nil)
