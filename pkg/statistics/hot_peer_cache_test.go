@@ -96,6 +96,49 @@ func TestHotPeerDuration(t *testing.T) {
 	}
 }
 
+func TestHotPeerDurationStoreOutage(t *testing.T) {
+	cluster := core.NewBasicCluster()
+	cache := NewHotPeerCache(t.Context(), cluster, utils.Read)
+	interval := uint64(utils.Read.ReportInterval())
+	window := time.Duration(interval) * time.Second
+	region, err := buildRegion(cluster, utils.Read, 3, interval)
+	require.NoError(t, err)
+	storeID := region.GetPeers()[0].GetStoreId()
+	report := func() {
+		stats := cache.CheckPeerFlow(region, region.GetPeers()[:1], region.GetLoads(), interval)
+		require.Len(t, stats, 1)
+		cache.UpdateStat(stats[0])
+	}
+	duration := func() time.Duration {
+		stats := cache.GetHotPeerStats(0)[storeID]
+		require.Len(t, stats, 1)
+		return stats[0].GetHotDuration()
+	}
+	report()
+	report()
+	require.Equal(t, 2*window, duration())
+
+	store := cluster.GetStore(storeID)
+	cluster.PutStore(store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-time.Hour))))
+	require.True(t, cluster.GetStore(storeID).IsUnhealthy())
+	// No Store heartbeat arrives during the outage. Reading the cached snapshot
+	// must neither count the outage as hot time nor treat it as an omitted peer.
+	for range 3 {
+		require.Equal(t, 2*window, duration())
+	}
+	cluster.PutStore(store.Clone(core.SetLastHeartbeatTS(time.Now())))
+	report()
+	require.Equal(t, 3*window, duration())
+
+	// A received Store heartbeat that omits this peer resets its hot episode.
+	cold := cache.CheckColdPeer(storeID, map[uint64]*core.RegionInfo{}, interval)
+	require.Len(t, cold, 1)
+	cache.UpdateStat(cold[0])
+	require.Zero(t, cache.getHotPeerStat(region.GetID(), storeID).GetHotDuration())
+	report()
+	require.Equal(t, window, duration())
+}
+
 func TestHotPeerDurationLeaderTransfer(t *testing.T) {
 	cache := NewHotPeerCache(t.Context(), core.NewBasicCluster(), utils.Write)
 	window := cache.interval()

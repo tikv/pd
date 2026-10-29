@@ -119,7 +119,9 @@ type HotPeerStat struct {
 	allowInherited bool
 	// Keep the existing hot-load fields at their original offsets. Duration is
 	// read only for selected peers, outside the full hot-peer scan.
-	// Cold or missing reports reset it; time without reports does not advance it.
+	// Accumulate reported hot intervals for this peer on this Store. A cold report,
+	// omission from a received Store heartbeat, or a move to another Store resets it.
+	// Without reports it pauses, then resumes on the next hot report if still cached.
 	hotDuration time.Duration
 }
 
@@ -160,9 +162,11 @@ func (stat *HotPeerStat) IsLeader() bool {
 	return stat.isLeader
 }
 
-// GetHotDuration returns the observed continuous-hot duration for this peer,
-// across all load dimensions. It resets when the peer becomes cold or moves
-// to another Store, and when the hot cache is rebuilt.
+// GetHotDuration returns the sum of consecutive reported hot intervals for this
+// peer on one Store, with hotness determined across all load dimensions. A cold
+// report or omission from a received Store heartbeat resets it, as does moving
+// to another Store or rebuilding the hot cache. When no report arrives, duration
+// pauses and resumes on the next hot report while the peer remains cached.
 func (stat *HotPeerStat) GetHotDuration() time.Duration {
 	return stat.hotDuration
 }

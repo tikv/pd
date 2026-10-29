@@ -430,6 +430,8 @@ type hotRegionMetric struct {
 
 // Keep immutable metric snapshots, rather than a GaugeVec retaining labels for
 // every region ever seen. Scrapes read at most 90 metrics and never scan regions.
+// This bounds active series; changing Region labels still adds historical series
+// in Prometheus. Use instant tables or topk queries instead of per-Region lines.
 type hotRegionCollector struct {
 	syncutil.RWMutex
 	loadDesc        *prometheus.Desc
@@ -452,7 +454,7 @@ func newHotRegionCollector() *hotRegionCollector {
 			labels, nil),
 		hotDurationDesc: prometheus.NewDesc(
 			"pd_hotspot_top_region_hot_duration_seconds",
-			"Duration covered by consecutive hot reports for the selected peer across all load dimensions, in seconds. Resets on cold or missing reports, a different Store, or a hot-cache rebuild; time without reports does not advance it.",
+			"Sum of consecutive reported hot intervals for the selected peer on one Store across all load dimensions, in seconds. Resets on cold reports, omission from a received Store heartbeat, a different Store, or a hot-cache rebuild. Without reports it pauses, then resumes on the next hot report while still cached.",
 			labels, nil),
 	}
 }
