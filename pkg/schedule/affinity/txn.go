@@ -410,7 +410,10 @@ func (m *Manager) UpdateAffinityGroupPolicy(groupID string, policy BalancePolicy
 		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
 	}
 	if groupInfo.LeaderStoreID != updated.LeaderStoreID || !slices.Equal(groupInfo.VoterStoreIDs, updated.VoterStoreIDs) {
-		groupInfo.SetAvailability(groupAvailable)
+		// A write whose result was unknown committed this target. Check it against
+		// the store conditions known now, because the availability check applies
+		// them again only when they change.
+		groupInfo.SetAvailability(calcGroupAvailability(m.unavailableStores, updated.LeaderStoreID, updated.VoterStoreIDs))
 		m.resetCountLocked(groupInfo)
 	}
 	groupInfo.Group = *updated

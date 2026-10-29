@@ -365,10 +365,18 @@ func TestUpdateAffinityGroupPolicy(t *testing.T) {
 	lost.lose = true
 	_, err = manager.UpdateAffinityGroupPeers("policy", 2, []uint64{1, 2, 3})
 	re.Error(err)
+	// The stored target is checked against the store conditions known now.
+	manager.Lock()
+	manager.unavailableStores = map[uint64]storeCondition{2: storeLeaderEvicted}
+	manager.Unlock()
 	_, err = manager.UpdateAffinityGroupPolicy("policy", BalancePolicyFixed)
 	re.NoError(err)
 	re.Equal(uint64(2), stored().LeaderStoreID)
 	re.Equal(uint64(2), manager.GetAffinityGroupState("policy").LeaderStoreID)
+	re.False(manager.GetAffinityGroupState("policy").AffinitySchedulingAllowed)
+	manager.Lock()
+	manager.unavailableStores = map[uint64]storeCondition{}
+	manager.Unlock()
 
 	lost.lose = true
 	_, err = manager.UpdateAffinityGroupPolicy("policy", BalancePolicyAuto)
