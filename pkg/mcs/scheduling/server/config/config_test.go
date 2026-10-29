@@ -20,7 +20,10 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.etcd.io/etcd/api/v3/mvccpb"
 	"go.uber.org/goleak"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core/storelimit"
 	sc "github.com/tikv/pd/pkg/schedule/config"
@@ -229,6 +232,127 @@ func TestAdjustScheduleConfigDefaultStoreLimit(t *testing.T) {
 				re.Equal(expected, persistConfig.GetStoreLimit(id))
 				re.Equal(expected.TransferLeaderIn, persistConfig.GetStoreLimitByType(id, storelimit.TransferLeaderIn))
 			}
+		})
+	}
+}
+
+func TestPersistConfigCheckLabelProperty(t *testing.T) {
+	re := require.New(t)
+	persistConfig := NewPersistConfig(&Config{}, nil)
+	labels := []*metapb.StoreLabel{{Key: "zone", Value: "cn1"}, {Key: "engine", Value: "tiflash"}}
+
+	re.False(persistConfig.CheckLabelProperty(sc.RejectLeader, labels))
+	persistConfig.SetLabelPropertyConfig(sc.LabelPropertyConfig{
+		sc.RejectLeader: {
+			{Key: "zone", Value: "cn2"},
+			{Key: "engine", Value: "tiflash"},
+		},
+		"other": {{Key: "disk", Value: "hdd"}},
+	})
+	for _, testCase := range []struct {
+		name     string
+		property string
+		labels   []*metapb.StoreLabel
+		expected bool
+	}{
+		{
+			name:     "any configured label matches any store label",
+			property: sc.RejectLeader,
+			labels:   labels,
+			expected: true,
+		},
+		{
+			name:     "key matches but value differs",
+			property: sc.RejectLeader,
+			labels:   []*metapb.StoreLabel{{Key: "engine", Value: "tikv"}},
+		},
+		{
+			name:     "value matches but key differs",
+			property: sc.RejectLeader,
+			labels:   []*metapb.StoreLabel{{Key: "other", Value: "tiflash"}},
+		},
+		{
+			name:     "key and value match different store labels",
+			property: sc.RejectLeader,
+			labels:   []*metapb.StoreLabel{{Key: "engine", Value: "tikv"}, {Key: "other", Value: "tiflash"}},
+		},
+		{
+			name:     "case sensitive key",
+			property: sc.RejectLeader,
+			labels:   []*metapb.StoreLabel{{Key: "Engine", Value: "tiflash"}},
+		},
+		{
+			name:     "case sensitive value",
+			property: sc.RejectLeader,
+			labels:   []*metapb.StoreLabel{{Key: "engine", Value: "TiFlash"}},
+		},
+		{
+			name:     "unknown property",
+			property: "unknown",
+			labels:   labels,
+		},
+		{
+			name:     "another property",
+			property: "other",
+			labels:   []*metapb.StoreLabel{{Key: "disk", Value: "hdd"}},
+			expected: true,
+		},
+		{
+			name:     "no store labels",
+			property: sc.RejectLeader,
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.expected, persistConfig.CheckLabelProperty(testCase.property, testCase.labels))
+		})
+	}
+
+	persistConfig.SetLabelPropertyConfig(sc.LabelPropertyConfig{})
+	re.False(persistConfig.CheckLabelProperty(sc.RejectLeader, labels))
+	persistConfig.SetLabelPropertyConfig(nil)
+	re.False(persistConfig.CheckLabelProperty(sc.RejectLeader, labels))
+}
+
+func TestWatcherConfigLabelProperty(t *testing.T) {
+	for _, testCase := range []struct {
+		name     string
+		config   string
+		expected bool
+	}{
+		{
+			name:     "replace property labels",
+			config:   `{"label-property":{"reject-leader":[{"key":"zone","value":"cn1"}]}}`,
+			expected: true,
+		},
+		{
+			name:   "remove property",
+			config: `{"label-property":{"other":[{"key":"engine","value":"tiflash"}]}}`,
+		},
+		{
+			name:   "empty config",
+			config: `{"label-property":{}}`,
+		},
+		{
+			name:   "null config",
+			config: `{"label-property":null}`,
+		},
+		{
+			name:   "missing config",
+			config: `{}`,
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			watcher := &Watcher{PersistConfig: NewPersistConfig(&Config{}, nil)}
+			labels := []*metapb.StoreLabel{{Key: "engine", Value: "tiflash"}}
+			re.NoError(watcher.updateConfig(&mvccpb.KeyValue{
+				Value: []byte(`{"label-property":{"reject-leader":[{"key":"engine","value":"tiflash"}]}}`),
+			}))
+			re.True(watcher.CheckLabelProperty(sc.RejectLeader, labels))
+
+			re.NoError(watcher.updateConfig(&mvccpb.KeyValue{Value: []byte(testCase.config)}))
+			re.False(watcher.CheckLabelProperty(sc.RejectLeader, labels))
+			re.Equal(testCase.expected, watcher.CheckLabelProperty(sc.RejectLeader, []*metapb.StoreLabel{{Key: "zone", Value: "cn1"}}))
 		})
 	}
 }
