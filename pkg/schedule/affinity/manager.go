@@ -236,27 +236,6 @@ func (m *Manager) resetCountLocked(groupInfo *runtimeGroupInfo) {
 	m.touchBalanceTableLocked(groupInfo.ID)
 }
 
-// updateGroupPeers sets the target of a group, with the availability that the
-// store conditions known now give.
-func (m *Manager) updateGroupPeers(groupID string, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
-	m.Lock()
-	defer m.Unlock()
-
-	groupInfo, ok := m.groups[groupID]
-	if !ok {
-		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
-	}
-
-	groupInfo.LeaderStoreID = leaderStoreID
-	groupInfo.VoterStoreIDs = slices.Clone(voterStoreIDs)
-	// A store may have become unavailable since the target was checked, while it
-	// was written.
-	m.setTargetAvailabilityLocked(groupInfo)
-	m.resetCountLocked(groupInfo)
-
-	return newGroupState(groupInfo), nil
-}
-
 func (m *Manager) updateGroupAvailabilityLocked(groupID string, availability groupAvailability) {
 	groupInfo, ok := m.groups[groupID]
 	if !ok {
