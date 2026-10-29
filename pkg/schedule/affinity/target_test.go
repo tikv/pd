@@ -187,7 +187,6 @@ func TestUpdateAffinityGroupTargetsRejectsInvalidInput(t *testing.T) {
 		{targetFor(manager, "g", 1, 1, 1, 2)},
 		{targetFor(manager, "g", 0, 1, 2)},
 		{targetFor(manager, "g", 9, 9)},
-		{targetFor(manager, "g", 1, 1, 4)},
 		{targetFor(manager, "h", 1, 1, 2), {Expected: Group{ID: "bad id"}, LeaderStoreID: 1, VoterStoreIDs: []uint64{1}}},
 	} {
 		_, err := manager.UpdateAffinityGroupTargets(targets)
@@ -198,6 +197,46 @@ func TestUpdateAffinityGroupTargetsRejectsInvalidInput(t *testing.T) {
 		re.Zero(manager.GetAffinityGroupState(id).LeaderStoreID)
 		re.Zero(loadStoredGroup(re, store, id).LeaderStoreID)
 	}
+
+	// A target with a store that PD knows to be unavailable is skipped, and the
+	// others are written.
+	written, err := manager.UpdateAffinityGroupTargets([]GroupTarget{targetFor(manager, "g", 1, 1, 4), targetFor(manager, "h", 1, 1, 2)})
+	re.NoError(err)
+	re.Equal([]string{"h"}, written)
+	re.Zero(loadStoredGroup(re, store, "g").LeaderStoreID)
+	re.Equal(uint64(1), loadStoredGroup(re, store, "h").LeaderStoreID)
+}
+
+// TestUpdateAffinityGroupTargetsPublishesStoredGroup checks that a written target
+// is reported again when its request is repeated, and that the in-memory group
+// takes the whole stored group, including a newer instance that PD has not seen.
+func TestUpdateAffinityGroupTargetsPublishesStoredGroup(t *testing.T) {
+	re := require.New(t)
+	manager, store := newTargetTestManager(t)
+	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "g"}, {GroupID: "h"}}))
+
+	// A request repeated after its reply was lost reports the target as written.
+	target := targetFor(manager, "g", 1, 1, 2, 3)
+	for range 2 {
+		written, err := manager.UpdateAffinityGroupTargets([]GroupTarget{target})
+		re.NoError(err)
+		re.Equal([]string{"g"}, written)
+		re.True(manager.GetAffinityGroupState("g").AffinitySchedulingAllowed)
+	}
+	re.Equal(manager.GetAffinityGroupState("g").Group, *loadStoredGroup(re, store, "g"))
+
+	// The group was recreated in storage, and the scheduling service decided the
+	// target from the new instance.
+	recreated := manager.GetAffinityGroupState("h").Group
+	recreated.CreateTimestamp++
+	re.NoError(store.RunInTxn(t.Context(), func(txn kv.Txn) error { return store.SaveAffinityGroup(txn, "h", &recreated) }))
+	written, err := manager.UpdateAffinityGroupTargets([]GroupTarget{{Expected: recreated, LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2, 3}}})
+	re.NoError(err)
+	re.Equal([]string{"h"}, written)
+	state := manager.GetAffinityGroupState("h")
+	re.Equal(*loadStoredGroup(re, store, "h"), state.Group)
+	re.Equal(recreated.CreateTimestamp, state.CreateTimestamp)
+	re.True(state.AffinitySchedulingAllowed)
 }
 
 type fakeTargetWriter struct {

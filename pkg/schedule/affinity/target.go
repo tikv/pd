@@ -67,8 +67,12 @@ func (m *Manager) SetTargetWriter(w TargetWriter) {
 // UpdateAffinityGroupTargets writes the targets whose stored groups still equal
 // their expected values and returns the IDs of the written groups. Targets are
 // committed in chunks that each fit in one etcd transaction, and a written group
-// becomes available. A group whose stored value differs is not written; its
-// in-memory group is refreshed from storage instead.
+// takes the availability of its target. A target that is already stored, for
+// example by an earlier request whose reply was lost, is reported as written. A
+// group whose stored value differs is not written; its in-memory group is
+// refreshed from storage instead. A target with a store that PD knows to be
+// unavailable is skipped, because the scheduling service that decided it may not
+// know it yet; an invalid target fails the whole request.
 func (m *Manager) UpdateAffinityGroupTargets(targets []GroupTarget) ([]string, error) {
 	if len(targets) == 0 {
 		return nil, errs.ErrEmptyRequest.FastGenByArgs("no targets provided")
@@ -80,14 +84,19 @@ func (m *Manager) UpdateAffinityGroupTargets(targets []GroupTarget) ([]string, e
 			return nil, errs.ErrAffinityGroupContent.FastGenByArgs("duplicate group " + target.Expected.ID)
 		}
 		seen[target.Expected.ID] = struct{}{}
-		target, err := m.adjustGroupTarget(target)
+		adjustedTarget, err := m.adjustGroupTarget(target)
 		if err != nil {
 			return nil, err
 		}
-		adjusted = append(adjusted, target)
+		if err := m.checkHasUnavailableStore(adjustedTarget.LeaderStoreID, adjustedTarget.VoterStoreIDs); err != nil {
+			log.Info("skip affinity group target with an unavailable store",
+				zap.String("group-id", target.Expected.ID), errs.ZapError(err))
+			continue
+		}
+		adjusted = append(adjusted, adjustedTarget)
 	}
 
-	var written []string
+	written := make([]string, 0, len(adjusted))
 	for chunk := range slices.Chunk(adjusted, etcdutil.MaxEtcdTxnOps) {
 		ids, err := m.updateGroupTargets(chunk)
 		written = append(written, ids...)
@@ -110,9 +119,6 @@ func (m *Manager) adjustGroupTarget(target GroupTarget) (GroupTarget, error) {
 	}); err != nil {
 		return GroupTarget{}, err
 	}
-	if err := m.checkHasUnavailableStore(target.LeaderStoreID, target.VoterStoreIDs); err != nil {
-		return GroupTarget{}, err
-	}
 	target.Expected.VoterStoreIDs = sortedStoreIDs(target.Expected.VoterStoreIDs)
 	target.VoterStoreIDs = sortedStoreIDs(target.VoterStoreIDs)
 	return target, nil
@@ -128,10 +134,12 @@ func (m *Manager) updateGroupTargets(targets []GroupTarget) ([]string, error) {
 // transaction loads every stored group, so it fails if any of them changes
 // before the commit. metaMutex must be held.
 func (m *Manager) updateGroupTargetsLocked(targets []GroupTarget) ([]string, error) {
+	// stored is the group loaded for each target, and saved the group that holds
+	// its target after the commit, if it is written.
 	stored := make([]*Group, len(targets))
+	saved := make([]*Group, len(targets))
 	err := m.storage.RunInTxn(m.ctx, func(txn kv.Txn) error {
 		for i, target := range targets {
-			stored[i] = nil
 			value, err := m.storage.LoadAffinityGroupInTxn(txn, target.Expected.ID)
 			if err != nil {
 				return err
@@ -147,11 +155,15 @@ func (m *Manager) updateGroupTargetsLocked(targets []GroupTarget) ([]string, err
 			}
 			group.VoterStoreIDs = sortedStoreIDs(group.VoterStoreIDs)
 			stored[i] = group
-			if !sameStoredGroup(group, &target.Expected) {
-				continue
-			}
-			if err := m.storage.SaveAffinityGroup(txn, group.ID, target.result(group)); err != nil {
-				return err
+			switch {
+			case sameStoredGroup(group, &target.Expected):
+				saved[i] = target.result(group)
+				if err := m.storage.SaveAffinityGroup(txn, group.ID, saved[i]); err != nil {
+					return err
+				}
+			case sameStoredGroup(group, target.result(&target.Expected)):
+				// An earlier request with this target committed.
+				saved[i] = group
 			}
 		}
 		return nil
@@ -163,18 +175,31 @@ func (m *Manager) updateGroupTargetsLocked(targets []GroupTarget) ([]string, err
 	written := make([]string, 0, len(targets))
 	for i, target := range targets {
 		switch {
-		case stored[i] == nil:
-		case sameStoredGroup(stored[i], &target.Expected):
+		case saved[i] != nil:
 			written = append(written, target.Expected.ID)
-			if _, err := m.updateGroupPeers(target.Expected.ID, target.LeaderStoreID, target.VoterStoreIDs); err != nil {
-				log.Warn("written affinity group target is not in memory",
-					zap.String("group-id", target.Expected.ID), zap.Error(err))
-			}
-		default:
+			m.publishGroupTargetLocked(saved[i])
+		case stored[i] != nil:
 			m.refreshGroupTargetLocked(stored[i])
 		}
 	}
 	return written, nil
+}
+
+// publishGroupTargetLocked makes the in-memory group equal a stored group whose
+// target was just written, replacing the runtime group if it was recreated, and
+// sets its availability from the store conditions known now. metaMutex must be held.
+func (m *Manager) publishGroupTargetLocked(stored *Group) {
+	m.Lock()
+	defer m.Unlock()
+	groupInfo, ok := m.groups[stored.ID]
+	if !ok {
+		log.Warn("written affinity group target is not in memory", zap.String("group-id", stored.ID))
+		return
+	}
+	m.syncGroupTargetLocked(groupInfo, stored)
+	groupInfo = m.groups[stored.ID]
+	m.setTargetAvailabilityLocked(groupInfo)
+	m.resetCountLocked(groupInfo)
 }
 
 // refreshGroupTargetLocked makes the in-memory group match the stored group,
