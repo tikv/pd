@@ -34,8 +34,6 @@ type HotCache struct {
 	ctx        context.Context
 	writeCache *HotPeerCache
 	readCache  *HotPeerCache
-	// readTaskSlots bounds pending read sampling and query tasks.
-	readTaskSlots chan struct{}
 	// Region metadata is coalesced separately so read sampling pressure cannot
 	// hold up region publication on the heartbeat path.
 	regionMetaMu      syncutil.Mutex
@@ -56,7 +54,6 @@ func NewHotCache(ctx context.Context, cluster *core.BasicCluster) *HotCache {
 		ctx:               ctx,
 		writeCache:        NewHotPeerCache(ctx, cluster, utils.Write),
 		readCache:         NewHotPeerCache(ctx, cluster, utils.Read),
-		readTaskSlots:     make(chan struct{}, chanMaxLength),
 		regionMetaUpdates: make(map[uint64]regionMetadataUpdate),
 		regionMetaReady:   make(chan struct{}, 1),
 	}
@@ -80,31 +77,13 @@ func (w *HotCache) CheckWriteAsync(task func(cache *HotPeerCache)) bool {
 
 // CheckReadAsync puts the flowItem into queue, and check it asynchronously
 func (w *HotCache) CheckReadAsync(task func(cache *HotPeerCache)) bool {
-	select {
-	case w.readTaskSlots <- struct{}{}:
-	default:
+	if w.readCache.taskQueue.Len() > chanMaxLength {
 		return false
 	}
 	select {
 	case w.readCache.taskQueue.In <- task:
 		return true
 	default:
-		<-w.readTaskSlots
-		return false
-	}
-}
-
-func (w *HotCache) enqueueReadTask(task func(*HotPeerCache)) bool {
-	select {
-	case w.readTaskSlots <- struct{}{}:
-	case <-w.ctx.Done():
-		return false
-	}
-	select {
-	case w.readCache.taskQueue.In <- task:
-		return true
-	case <-w.ctx.Done():
-		<-w.readTaskSlots
 		return false
 	}
 }
@@ -473,7 +452,6 @@ func (w *HotCache) updateItems(queue *chanx.UnboundedChan[func(*HotPeerCache)], 
 }
 
 func (w *HotCache) runReadTask(task func(cache *HotPeerCache)) {
-	<-w.readTaskSlots
 	if task != nil {
 		// TODO: do we need a run-task timeout to protect the queue won't be stuck by a task?
 		previousGC := w.readCache.lastGCTime
@@ -552,7 +530,9 @@ func (w *HotCache) CleanCache() {
 	case <-w.ctx.Done():
 		return
 	}
-	if !w.enqueueReadTask(clean) {
+	select {
+	case w.readCache.taskQueue.In <- clean:
+	case <-w.ctx.Done():
 		return
 	}
 	for range 2 {
