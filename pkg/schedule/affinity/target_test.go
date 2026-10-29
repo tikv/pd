@@ -18,15 +18,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"slices"
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/prometheus/client_golang/prometheus/testutil"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
@@ -389,4 +390,63 @@ func TestObserveAvailableRegionConfirmsTarget(t *testing.T) {
 	manager.ObserveAvailableRegion(region, manager.GetAffinityGroupState("g"))
 	re.Empty(writer.targets)
 	re.True(manager.GetAffinityGroupState("g").AffinitySchedulingAllowed)
+}
+
+// TestSameStoredGroupComparesEveryField checks that sameStoredGroup compares every
+// persisted field, so that a field added to Group is not left out.
+func TestSameStoredGroupComparesEveryField(t *testing.T) {
+	re := require.New(t)
+	base := Group{ID: "g", CreateTimestamp: 1, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2}}
+	reordered := base
+	reordered.VoterStoreIDs = []uint64{2, 1}
+	re.True(sameStoredGroup(&base, &reordered))
+	typ := reflect.TypeFor[Group]()
+	for i := range typ.NumField() {
+		changed := base
+		changed.VoterStoreIDs = slices.Clone(base.VoterStoreIDs)
+		field := reflect.ValueOf(&changed).Elem().Field(i)
+		switch field.Kind() {
+		case reflect.String:
+			field.SetString(field.String() + "x")
+		case reflect.Uint64:
+			field.SetUint(field.Uint() + 1)
+		case reflect.Slice:
+			field.Set(reflect.Append(field, reflect.ValueOf(uint64(3))))
+		default:
+			re.Failf("unexpected field", "field %s has kind %s", typ.Field(i).Name, field.Kind())
+		}
+		re.False(sameStoredGroup(&base, &changed), typ.Field(i).Name)
+	}
+}
+
+// TestUpdateAffinityGroupTargetsWithEtcd checks that a write of more targets than
+// one etcd transaction can hold succeeds on etcd, which limits the operations of
+// a transaction.
+func TestUpdateAffinityGroupTargetsWithEtcd(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	store := storage.NewStorageWithEtcdBackend(client)
+	manager := newTargetTestManagerWithStorage(t, store)
+	ids := make([]string, etcdutil.MaxEtcdTxnOps+2)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("g%03d", i)
+	}
+	for chunk := range slices.Chunk(ids, 32) {
+		groups := make([]GroupKeyRanges, 0, len(chunk))
+		for _, id := range chunk {
+			groups = append(groups, GroupKeyRanges{GroupID: id})
+		}
+		re.NoError(manager.CreateAffinityGroups(groups))
+	}
+	targets := make([]GroupTarget, 0, len(ids))
+	for _, id := range ids {
+		targets = append(targets, targetFor(manager, id, 1, 1, 2, 3))
+	}
+	written, err := manager.UpdateAffinityGroupTargets(targets)
+	re.NoError(err)
+	re.Equal(ids, written)
+	for _, id := range ids {
+		re.Equal(uint64(1), loadStoredGroup(re, store, id).LeaderStoreID)
+	}
 }

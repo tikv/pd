@@ -494,10 +494,7 @@ func (m *Manager) SyncGroupFromEtcd(group *Group) {
 	// Fast path: avoid taking write lock if nothing changes.
 	m.RLock()
 	existingGroup, exists := m.groups[group.ID]
-	if exists &&
-		existingGroup.CreateTimestamp == group.CreateTimestamp &&
-		existingGroup.LeaderStoreID == group.LeaderStoreID &&
-		slices.Equal(existingGroup.VoterStoreIDs, group.VoterStoreIDs) {
+	if exists && sameStoredGroup(&existingGroup.Group, group) {
 		m.RUnlock()
 		return
 	}
