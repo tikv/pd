@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -28,6 +29,7 @@ import (
 
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 )
 
 const (
@@ -62,11 +64,26 @@ func NewTargetWriter(httpClient *http.Client, backendEndpoints string) *TargetWr
 	return &TargetWriter{httpClient: httpClient, endpoints: endpoints, timeout: writeTimeout}
 }
 
-// WriteGroupTargets implements affinity.TargetWriter. It tries the PD endpoints
-// in turn, starting from the one that handled the last request, until one of
-// them handles this request. Retrying on another endpoint is safe because PD
-// writes a target only if its group is unchanged.
+// WriteGroupTargets implements affinity.TargetWriter. It sends the targets in
+// requests that each fit in one etcd transaction, so that the time a request
+// takes does not grow with the number of targets.
 func (w *TargetWriter) WriteGroupTargets(ctx context.Context, targets []affinity.GroupTarget) ([]string, error) {
+	var written []string
+	for chunk := range slices.Chunk(targets, etcdutil.MaxEtcdTxnOps) {
+		ids, err := w.writeTargets(ctx, chunk)
+		written = append(written, ids...)
+		if err != nil {
+			return written, err
+		}
+	}
+	return written, nil
+}
+
+// writeTargets sends one request. It tries the PD endpoints in turn, starting
+// from the one that handled the last request, until one of them handles the
+// request. Retrying on another endpoint is safe because PD writes a target only
+// if its group is unchanged, and reports a target that is already stored.
+func (w *TargetWriter) writeTargets(ctx context.Context, targets []affinity.GroupTarget) ([]string, error) {
 	body, err := json.Marshal(&affinity.GroupTargetsRequest{Targets: targets})
 	if err != nil {
 		return nil, errors.Trace(err)

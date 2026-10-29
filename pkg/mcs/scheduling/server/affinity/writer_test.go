@@ -17,10 +17,12 @@ package affinity
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -28,6 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tikv/pd/pkg/schedule/affinity"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 )
 
 func targetServer(t *testing.T, status int, calls *atomic.Int32) string {
@@ -90,4 +93,57 @@ func TestTargetWriter(t *testing.T) {
 
 	_, err = NewTargetWriter(http.DefaultClient, "").WriteGroupTargets(t.Context(), targets)
 	re.Error(err)
+}
+
+// TestTargetWriterSplitsRequests checks that the writer sends targets in requests
+// that each fit in one etcd transaction, and that a failed request returns the
+// groups written by the earlier ones.
+func TestTargetWriterSplitsRequests(t *testing.T) {
+	re := require.New(t)
+	var (
+		mu    sync.Mutex
+		sizes []int
+		fail  atomic.Int32 // the request that fails, counted from 1, or 0 for none
+	)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req affinity.GroupTargetsRequest
+		if json.NewDecoder(r.Body).Decode(&req) != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		mu.Lock()
+		sizes = append(sizes, len(req.Targets))
+		n := len(sizes)
+		mu.Unlock()
+		if int32(n) == fail.Load() {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		ids := make([]string, 0, len(req.Targets))
+		for _, target := range req.Targets {
+			ids = append(ids, target.Expected.ID)
+		}
+		_ = json.NewEncoder(w).Encode(&affinity.GroupTargetsResponse{WrittenGroupIDs: ids})
+	}))
+	t.Cleanup(server.Close)
+
+	targets := make([]affinity.GroupTarget, etcdutil.MaxEtcdTxnOps+2)
+	ids := make([]string, len(targets))
+	for i := range targets {
+		ids[i] = fmt.Sprintf("g%03d", i)
+		targets[i] = affinity.GroupTarget{Expected: affinity.Group{ID: ids[i]}, LeaderStoreID: 1, VoterStoreIDs: []uint64{1}}
+	}
+	writer := NewTargetWriter(http.DefaultClient, server.URL)
+	written, err := writer.WriteGroupTargets(t.Context(), targets)
+	re.NoError(err)
+	re.Equal(ids, written)
+	re.Equal([]int{etcdutil.MaxEtcdTxnOps, 2}, sizes)
+
+	mu.Lock()
+	sizes = nil
+	mu.Unlock()
+	fail.Store(2)
+	written, err = writer.WriteGroupTargets(t.Context(), targets)
+	re.ErrorContains(err, "400")
+	re.Equal(ids[:etcdutil.MaxEtcdTxnOps], written)
 }
