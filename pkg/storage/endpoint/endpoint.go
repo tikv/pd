@@ -15,6 +15,7 @@
 package endpoint
 
 import (
+	"context"
 	"encoding/json"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -55,6 +56,14 @@ func (se *StorageEndpoint) createRawTxn() (kv.RawTxn, error) {
 		return nil, errors.New("storage endpoint does not support raw transaction")
 	}
 	return rawTxnCapable.CreateRawTxn(), nil
+}
+
+func (se *StorageEndpoint) createRawTxnWithContext(ctx context.Context) (kv.RawTxn, error) {
+	rawTxnCapable, ok := se.Base.(kv.RawTxnWithContextCapable)
+	if !ok {
+		return nil, errors.New("storage endpoint does not support raw transaction with context")
+	}
+	return rawTxnCapable.CreateRawTxnWithContext(ctx), nil
 }
 
 // loadJSON loads a specific key from the StorageEndpoint, and parses it as JSON into type T.
