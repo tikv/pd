@@ -291,6 +291,30 @@ func doUpdateAffinityGroupPeers(re *require.Assertions, serverAddr, groupID stri
 	return resp.StatusCode, errorMsg
 }
 
+// doUpdateAffinityGroupPolicy updates the balance policy of a group and
+// returns the status code and the group state or the error message.
+func doUpdateAffinityGroupPolicy(re *require.Assertions, serverAddr, groupID string, policy affinity.BalancePolicy) (int, *affinity.GroupState, string) {
+	data, err := json.Marshal(&handlers.UpdateAffinityGroupPolicyRequest{BalancePolicy: policy})
+	re.NoError(err)
+	httpReq, err := http.NewRequest(http.MethodPatch, getAffinityGroupURL(serverAddr, groupID, "policy"), bytes.NewReader(data))
+	re.NoError(err)
+	resp, err := tests.TestDialClient.Do(httpReq)
+	re.NoError(err)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	re.NoError(err)
+	if resp.StatusCode != http.StatusOK {
+		var errorMsg string
+		if err := json.Unmarshal(body, &errorMsg); err != nil {
+			errorMsg = string(body)
+		}
+		return resp.StatusCode, nil, errorMsg
+	}
+	var state affinity.GroupState
+	re.NoError(json.Unmarshal(body, &state))
+	return resp.StatusCode, &state, ""
+}
+
 // mustDeleteAffinityGroup deletes an affinity group and expects success.
 func mustDeleteAffinityGroup(re *require.Assertions, serverAddr, groupID string, force bool) {
 	url := getAffinityGroupURL(serverAddr, groupID)
@@ -530,6 +554,40 @@ func (suite *affinityHandlerTestSuite) TestAffinityBatchModifySameGroupInAddAndR
 		re.Equal(http.StatusBadRequest, statusCode)
 		re.Contains(errorMsg, "patch-success")
 		re.Contains(errorMsg, "cannot appear in both add and remove")
+	})
+}
+
+func (suite *affinityHandlerTestSuite) TestAffinityUpdatePolicy() {
+	suite.env.RunTest(func(cluster *tests.TestCluster) {
+		re := suite.Require()
+		serverAddr := cluster.GetLeaderServer().GetAddr()
+		createReq := handlers.CreateAffinityGroupsRequest{
+			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
+				"policy": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x00}, EndKey: []byte{0x10}}}},
+			},
+		}
+		mustCreateAffinityGroups(re, serverAddr, &createReq)
+		mustPutHealthyStore(re, cluster, &metapb.Store{Id: 1, State: metapb.StoreState_Up, NodeState: metapb.NodeState_Serving})
+		mustUpdateAffinityGroupPeers(re, serverAddr, "policy", &handlers.UpdateAffinityGroupPeersRequest{LeaderStoreID: 1, VoterStoreIDs: []uint64{1}})
+
+		for _, policy := range []affinity.BalancePolicy{affinity.BalancePolicyAuto, affinity.BalancePolicyFixed} {
+			statusCode, state, errorMsg := doUpdateAffinityGroupPolicy(re, serverAddr, "policy", policy)
+			re.Equal(http.StatusOK, statusCode, errorMsg)
+			re.Equal(policy, state.BalancePolicy)
+			re.Equal(uint64(1), state.LeaderStoreID, "a policy update keeps the target")
+			re.Equal([]uint64{1}, state.VoterStoreIDs)
+			re.Equal(policy, mustGetAffinityGroup(re, serverAddr, "policy").BalancePolicy)
+		}
+
+		// A body without the policy, for example with a misspelled field, does not reset it.
+		for _, policy := range []affinity.BalancePolicy{"", affinity.BalancePolicy("manual")} {
+			statusCode, _, errorMsg := doUpdateAffinityGroupPolicy(re, serverAddr, "policy", policy)
+			re.Equal(http.StatusBadRequest, statusCode)
+			re.Contains(errorMsg, "invalid balance policy")
+		}
+		re.Equal(affinity.BalancePolicyFixed, mustGetAffinityGroup(re, serverAddr, "policy").BalancePolicy)
+		statusCode, _, _ := doUpdateAffinityGroupPolicy(re, serverAddr, "missing", affinity.BalancePolicyFixed)
+		re.Equal(http.StatusNotFound, statusCode)
 	})
 }
 
