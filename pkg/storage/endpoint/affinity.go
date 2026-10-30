@@ -28,6 +28,9 @@ type AffinityStorage interface {
 	// LoadAllAffinityGroups loads all affinity groups, passing raw key/value strings to the callback.
 	LoadAllAffinityGroups(f func(k, v string)) error
 
+	// LoadAffinityGroupInTxn loads a single affinity group as a raw JSON string within a transaction.
+	// In an etcd transaction, the commit fails if the value changes after it is loaded.
+	LoadAffinityGroupInTxn(txn kv.Txn, groupID string) (string, error)
 	// SaveAffinityGroup saves an affinity group within a transaction.
 	SaveAffinityGroup(txn kv.Txn, groupID string, group any) error
 	// DeleteAffinityGroup deletes an affinity group within a transaction.
@@ -38,6 +41,11 @@ type AffinityStorage interface {
 }
 
 var _ AffinityStorage = (*StorageEndpoint)(nil)
+
+// LoadAffinityGroupInTxn loads an affinity group configuration as a raw string within a transaction.
+func (*StorageEndpoint) LoadAffinityGroupInTxn(txn kv.Txn, groupID string) (string, error) {
+	return txn.Load(keypath.AffinityGroupPath(groupID))
+}
 
 // SaveAffinityGroup stores an affinity group configuration to storage.
 func (*StorageEndpoint) SaveAffinityGroup(txn kv.Txn, groupID string, group any) error {

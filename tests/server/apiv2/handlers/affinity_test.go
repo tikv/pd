@@ -1339,3 +1339,96 @@ func (suite *affinityHandlerTestSuite) TestAffinityForwardedHeader() {
 		re.Contains(result.AffinityGroups, "header-check")
 	})
 }
+
+// updateAffinityGroupTargets writes group targets and returns the status code and the written groups.
+func updateAffinityGroupTargets(re *require.Assertions, serverAddr string, targets ...affinity.GroupTarget) (int, []string) {
+	data, err := json.Marshal(&affinity.GroupTargetsRequest{Targets: targets})
+	re.NoError(err)
+	resp, err := tests.TestDialClient.Post(getAffinityGroupURL(serverAddr, "targets"), "application/json", bytes.NewReader(data))
+	re.NoError(err)
+	defer resp.Body.Close()
+	var result affinity.GroupTargetsResponse
+	if resp.StatusCode == http.StatusOK {
+		re.NoError(json.NewDecoder(resp.Body).Decode(&result))
+	}
+	return resp.StatusCode, result.WrittenGroupIDs
+}
+
+func (suite *affinityHandlerTestSuite) TestAffinityGroupTargets() {
+	suite.env.RunTest(func(cluster *tests.TestCluster) {
+		re := suite.Require()
+		serverAddr := cluster.GetLeaderServer().GetAddr()
+		mustCreateAffinityGroups(re, serverAddr, &handlers.CreateAffinityGroupsRequest{
+			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
+				"targets": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x20}, EndKey: []byte{0x30}}}},
+			},
+		})
+		for id := uint64(1); id <= 3; id++ {
+			mustPutHealthyStore(re, cluster, &metapb.Store{Id: id, State: metapb.StoreState_Up, NodeState: metapb.NodeState_Serving})
+		}
+		expected := mustGetAffinityGroup(re, serverAddr, "targets").Group
+
+		status, written := updateAffinityGroupTargets(re, serverAddr,
+			affinity.GroupTarget{Expected: expected, LeaderStoreID: 2, VoterStoreIDs: []uint64{3, 2, 1}})
+		re.Equal(http.StatusOK, status)
+		re.Equal([]string{"targets"}, written)
+		state := mustGetAffinityGroup(re, serverAddr, "targets")
+		re.Equal(uint64(2), state.LeaderStoreID)
+		re.Equal([]uint64{1, 2, 3}, state.VoterStoreIDs)
+
+		// A target decided from the old group is not written.
+		status, written = updateAffinityGroupTargets(re, serverAddr,
+			affinity.GroupTarget{Expected: expected, LeaderStoreID: 3, VoterStoreIDs: []uint64{1, 2, 3}})
+		re.Equal(http.StatusOK, status)
+		re.Empty(written)
+		re.Equal(uint64(2), mustGetAffinityGroup(re, serverAddr, "targets").LeaderStoreID)
+
+		for _, targets := range [][]affinity.GroupTarget{
+			nil,
+			{{Expected: state.Group, LeaderStoreID: 4, VoterStoreIDs: []uint64{1, 2, 3}}},
+			{{Expected: state.Group, LeaderStoreID: 9, VoterStoreIDs: []uint64{9}}},
+		} {
+			status, _ := updateAffinityGroupTargets(re, serverAddr, targets...)
+			re.Equal(http.StatusBadRequest, status)
+		}
+	})
+}
+
+// TestAffinityFirstWinInMicroservice checks that a target set by first-win in the
+// scheduling service is stored by PD.
+func (suite *affinityHandlerTestSuite) TestAffinityFirstWinInMicroservice() {
+	suite.env.RunTestInMicroserviceEnv(func(cluster *tests.TestCluster) {
+		re := suite.Require()
+		leader := cluster.GetLeaderServer()
+		mustCreateAffinityGroups(re, leader.GetAddr(), &handlers.CreateAffinityGroupsRequest{
+			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
+				"mcs-first-win": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{}, EndKey: []byte{}}}},
+			},
+		})
+		mustPutHealthyStore(re, cluster, &metapb.Store{Id: 1, State: metapb.StoreState_Up, NodeState: metapb.NodeState_Serving})
+
+		peer := &metapb.Peer{Id: 11, StoreId: 1, Role: metapb.PeerRole_Voter}
+		region := core.NewRegionInfo(&metapb.Region{Id: 100, EndKey: []byte("ffff"), Peers: []*metapb.Peer{peer}}, peer)
+		manager := cluster.GetSchedulingPrimaryServer().GetCluster().GetAffinityManager()
+		testutil.Eventually(re, func() bool {
+			group := manager.GetAffinityGroupState("mcs-first-win")
+			if group == nil {
+				return false
+			}
+			manager.ObserveAvailableRegion(region, group)
+			state, _ := manager.GetAndCacheRegionAffinityGroupState(region)
+			return state != nil && state.AffinitySchedulingAllowed
+		})
+
+		// PD stores the target and keeps it in memory.
+		value, err := leader.GetServer().GetStorage().LoadAffinityGroup("mcs-first-win")
+		re.NoError(err)
+		stored := &affinity.Group{}
+		re.NoError(json.Unmarshal([]byte(value), stored))
+		re.Equal(uint64(1), stored.LeaderStoreID)
+		re.Equal([]uint64{1}, stored.VoterStoreIDs)
+		pdManager, err := leader.GetServer().GetAffinityManager()
+		re.NoError(err)
+		re.Equal(uint64(1), pdManager.GetAffinityGroupState("mcs-first-win").LeaderStoreID)
+	})
+}

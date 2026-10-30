@@ -297,6 +297,7 @@ func (m *Manager) UpdateAffinityGroupPeers(groupID string, leaderStoreID uint64,
 // If affinityVer is non-zero (0 indicates an admin operation and is enforced)
 //   - Its equality will be checked.
 //   - Group must not change voterStoreIDs while it is not in the expired status.
+//   - The target is written only if the stored group has not changed, see updateObservedGroupPeers.
 func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affinityVer uint64, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
 	// Step 0: Validate the correctness of leaderStoreID and voterStoreIDs.
 	if leaderStoreID == 0 || len(voterStoreIDs) == 0 {
@@ -312,30 +313,17 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affini
 	if err := m.checkHasUnavailableStore(leaderStoreID, voterStoreIDs); err != nil {
 		return nil, err
 	}
+	voterStoreIDs = sortedStoreIDs(voterStoreIDs)
+	if affinityVer != 0 {
+		return m.updateObservedGroupPeers(groupID, affinityVer, leaderStoreID, voterStoreIDs)
+	}
 
-	// Step 1: Check whether the Group exists and validate.
+	// Step 1: Check whether the Group exists.
 	m.metaMutex.Lock()
 	defer m.metaMutex.Unlock()
 	group := m.GetAffinityGroupState(groupID)
 	if group == nil {
 		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
-	}
-
-	voterStoreIDs = slices.Clone(voterStoreIDs)
-	slices.Sort(voterStoreIDs)
-	// When affinityVer is non-zero, it indicates a non-admin operation and triggers additional checks.
-	// Note: if the check fails, no changes are applied. The existing Group is returned as-is without error.
-	if affinityVer != 0 {
-		// If affinityVer is not equal, the update may come from stale statistics and will be ignored.
-		if group.affinityVer != affinityVer {
-			return group, nil
-		}
-		// Group must not change voterStoreIDs while it is not in the expired status. Changing only leaderStoreID is allowed.
-		// RegularSchedulingAllowed == IsExpired
-		// The VoterStoreIDs are already sorted, so they can be compared directly
-		if !group.RegularSchedulingAllowed && !slices.Equal(voterStoreIDs, group.VoterStoreIDs) {
-			return group, nil
-		}
 	}
 
 	// Step 2: Save the Group in storage.
@@ -349,6 +337,84 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affini
 
 	// Step 3: Save the information in memory.
 	return m.updateGroupPeers(groupID, leaderStoreID, voterStoreIDs)
+}
+
+// updateObservedGroupPeers sets a target observed from a healthy Region. The
+// target is written only if the stored group still equals the group it was
+// observed for. Without a target writer the Manager writes its own storage.
+// Otherwise it sends the target to the writer, which stores it in PD for the
+// scheduling service, and publishes it once written. A Region with the layout
+// of the current target, for example after the group was loaded, confirms the
+// target without writing it again.
+func (m *Manager) updateObservedGroupPeers(groupID string, affinityVer uint64, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
+	m.metaMutex.Lock()
+	target, group, err := m.observedGroupTargetLocked(groupID, affinityVer, leaderStoreID, voterStoreIDs)
+	if target == nil {
+		m.metaMutex.Unlock()
+		return group, err
+	}
+	// With a target writer, the watcher keeps memory in line with storage, so the
+	// current target is confirmed in memory. Without one, a write whose result was
+	// unknown may have stored another target, so the confirmation below checks the
+	// stored group in the transaction, which writes nothing if it holds the target.
+	if m.targetWriter != nil && target.LeaderStoreID == target.Expected.LeaderStoreID && slices.Equal(target.VoterStoreIDs, target.Expected.VoterStoreIDs) {
+		m.publishGroupTargetLocked(&target.Expected)
+		m.metaMutex.Unlock()
+		return m.GetAffinityGroupState(groupID), nil
+	}
+	if m.targetWriter == nil {
+		defer m.metaMutex.Unlock()
+		if _, err := m.updateGroupTargetsLocked([]GroupTarget{*target}); err != nil {
+			return nil, err
+		}
+		return m.GetAffinityGroupState(groupID), nil
+	}
+	m.metaMutex.Unlock()
+
+	// Send the target without holding metaMutex, so that a slow PD does not block the watcher.
+	written, err := m.targetWriter.WriteGroupTargets(m.ctx, []GroupTarget{*target})
+	if err != nil {
+		targetWriteFailureCounter.Inc()
+		log.Warn("failed to write affinity group target", zap.String("group-id", groupID), errs.ZapError(err))
+		return nil, err
+	}
+
+	m.metaMutex.Lock()
+	defer m.metaMutex.Unlock()
+	current := m.GetAffinityGroupState(groupID)
+	if len(written) == 0 || current == nil {
+		return current, nil
+	}
+	// Publish the target unless another change has reached the group. The
+	// watcher may have applied the target already.
+	result := target.result(&target.Expected)
+	if !sameStoredGroup(&current.Group, &target.Expected) && !sameStoredGroup(&current.Group, result) {
+		return current, nil
+	}
+	m.publishGroupTargetLocked(result)
+	return m.GetAffinityGroupState(groupID), nil
+}
+
+// observedGroupTargetLocked returns the target to write for an observed layout,
+// or nil with the current group if the observation should be ignored. metaMutex must be held.
+func (m *Manager) observedGroupTargetLocked(groupID string, affinityVer uint64, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupTarget, *GroupState, error) {
+	group := m.GetAffinityGroupState(groupID)
+	if group == nil {
+		return nil, nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
+	}
+	// If affinityVer is not equal, the update may come from stale statistics and will be ignored.
+	if group.affinityVer != affinityVer {
+		return nil, group, nil
+	}
+	// Group must not change voterStoreIDs while it is not in the expired status. Changing only leaderStoreID is allowed.
+	// RegularSchedulingAllowed == IsExpired
+	// The VoterStoreIDs are already sorted, so they can be compared directly
+	if !group.RegularSchedulingAllowed && !slices.Equal(voterStoreIDs, group.VoterStoreIDs) {
+		return nil, group, nil
+	}
+	expected := group.Group
+	expected.VoterStoreIDs = sortedStoreIDs(expected.VoterStoreIDs)
+	return &GroupTarget{Expected: expected, LeaderStoreID: leaderStoreID, VoterStoreIDs: voterStoreIDs}, group, nil
 }
 
 // UpdateAffinityGroupKeyRanges batch modifies key ranges for multiple affinity groups.
