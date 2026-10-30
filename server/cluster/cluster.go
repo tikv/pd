@@ -1158,19 +1158,9 @@ func (c *RaftCluster) GetUnsafeRecoveryController() *unsaferecovery.Controller {
 func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest, resp *pdpb.StoreHeartbeatResponse) error {
 	stats := heartbeat.GetStats()
 	storeID := stats.GetStoreId()
-	// storeStateLock only needs to cover this initial read: it makes the
-	// IsRemoved() check atomic with checkStore/BuryStore's own state
-	// transitions for this store, and putStoreLocked (below, via PutStore)
-	// tolerates a store that's since been fully removed by skipping the
-	// write instead of dereferencing a missing entry -- so there's no need
-	// to hold the lock through the rest of this handler (in particular,
-	// SaveStoreMeta's etcd round trip, which would otherwise make
-	// checkStore/BuryStore for this store wait out a write this path
-	// already paid for before the lock existed). The tradeoff: a
-	// concurrent full removal landing after this unlock and before
-	// SaveStoreMeta runs can still let a stale heartbeat re-persist this
-	// store's metadata, with nothing left to clean it up afterward -- a
-	// narrow, known residual of the same shape as SetStoreLimit's.
+	// Keep the metadata read, persistence and cache update atomic with store
+	// registration and state changes. Otherwise a heartbeat could persist an
+	// old protocol range after a registration has replaced or cleared it.
 	c.storeStateLock.Lock(uint32(storeID))
 	store := c.GetStore(storeID)
 	if store == nil {
@@ -1192,8 +1182,6 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 		}
 		return nil
 	}
-	c.storeStateLock.Unlock(uint32(storeID))
-
 	limit := store.GetStoreLimit()
 	version := c.opt.GetStoreLimitVersion()
 	opts := make([]core.StoreCreateOption, 0)
@@ -1228,6 +1216,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 			zap.Uint64("available", newStore.GetAvailable()))
 	}
 	if newStore.NeedPersist() && c.storage != nil {
+		failpoint.InjectCall("beforePersistStoreHeartbeat")
 		if err := c.storage.SaveStoreMeta(newStore.GetMeta()); err != nil {
 			log.Error("failed to persist store", zap.Uint64("store-id", storeID), errs.ZapError(err))
 		} else {
@@ -1239,6 +1228,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 	// NodeState_Removing.
 	resp.State = store.GetNodeState()
 	c.PutStore(newStore, opts...)
+	c.storeStateLock.Unlock(uint32(storeID))
 	var (
 		reportedRegions map[uint64]struct{}
 		interval        uint64
@@ -1503,6 +1493,7 @@ func (c *RaftCluster) GetBasicCluster() *core.BasicCluster {
 // UpdateStoreLabels updates a store's location labels
 // If 'force' is true, the origin labels will be overwritten with the new one forcibly.
 func (c *RaftCluster) UpdateStoreLabels(storeID uint64, labels []*metapb.StoreLabel, force bool) error {
+	failpoint.InjectCall("beforeStoreLabelsUpdate")
 	c.storeStateLock.Lock(uint32(storeID))
 	defer c.storeStateLock.Unlock(uint32(storeID))
 
@@ -1520,6 +1511,7 @@ func (c *RaftCluster) UpdateStoreLabels(storeID uint64, labels []*metapb.StoreLa
 
 // DeleteStoreLabel updates a store's location labels
 func (c *RaftCluster) DeleteStoreLabel(storeID uint64, labelKey string) error {
+	failpoint.InjectCall("beforeStoreLabelsUpdate")
 	c.storeStateLock.Lock(uint32(storeID))
 	defer c.storeStateLock.Unlock(uint32(storeID))
 
@@ -1550,6 +1542,7 @@ func (c *RaftCluster) DeleteStoreLabel(storeID uint64, labelKey string) error {
 
 // PutMetaStore puts a store.
 func (c *RaftCluster) PutMetaStore(store *metapb.Store) error {
+	failpoint.InjectCall("beforePutStore")
 	storeID := store.GetId()
 	// wasKnown alone isn't enough to decide whether to guard
 	// addStoreLimitInternal against resurrecting a removed entry: a plain
@@ -1583,7 +1576,8 @@ func (c *RaftCluster) PutMetaStore(store *metapb.Store) error {
 	// storage), since there's no prior entry to protect from resurrection.
 	wasKnown := c.GetStore(storeID) != nil
 	failpoint.InjectCall("putMetaStoreAfterWasKnownRead")
-	if err := c.putStoreImpl(store, false); err != nil {
+	// Only a registration may replace or clear the reported protocol range.
+	if err := c.putStoreImpl(store, false, core.SetStoreTxnProtocolVersionRange(store.GetTxnProtocolVersionRange())); err != nil {
 		return err
 	}
 	c.OnStoreVersionChange()
@@ -1594,7 +1588,9 @@ func (c *RaftCluster) PutMetaStore(store *metapb.Store) error {
 // putStoreImpl puts a store.
 // If 'force' is true, the store's labels will overwrite those labels which already existed in the store.
 // If 'force' is false, the store's labels will merge into those labels which already existed in the store.
-func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool) error {
+// opts carries metadata updates specific to the caller, such as registration-only fields.
+// The caller must hold storeStateLock through the metadata read, persistence and cache update.
+func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool, opts ...core.StoreCreateOption) error {
 	if store.GetId() == 0 {
 		return errors.Errorf("invalid put store %v", store)
 	}
@@ -1627,11 +1623,11 @@ func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool) error {
 		}
 	}
 
-	opts := make([]core.StoreCreateOption, 0)
 	s := c.GetStore(store.GetId())
 	if s == nil {
 		// Add a new store.
-		s = core.NewStoreInfo(store)
+		s = core.NewStoreInfo(store, opts...)
+		opts = nil
 	} else {
 		// Use the given labels to update the store.
 		labels := store.GetLabels()
@@ -1650,6 +1646,7 @@ func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool) error {
 	if err := c.checkStoreLabels(s); err != nil {
 		return err
 	}
+	failpoint.InjectCall("beforePersistStore")
 	return c.setStore(s, opts...)
 }
 
