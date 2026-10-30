@@ -32,6 +32,7 @@ import (
 
 // GetEtcdClient returns the shared client for a meta-service group, including disabled groups.
 // The manager owns the client; callers must not close it or change its endpoints.
+// Configuration changes may close a borrowed client; callers must handle the resulting errors.
 func (m *MetaServiceGroupManager) GetEtcdClient(groupID string) (*clientv3.Client, error) {
 	m.Lock()
 	defer m.Unlock()
@@ -88,6 +89,15 @@ func parseMetaServiceGroupEndpoints(addresses string) ([]string, error) {
 	return endpoints, nil
 }
 
+func metaServiceGroupEndpointScheme(endpoint string) string {
+	scheme, _, explicit := strings.Cut(endpoint, "://")
+	if !explicit {
+		// Unlike explicit HTTP, etcd uses the supplied TLS config for scheme-less endpoints.
+		return ""
+	}
+	return strings.ToLower(scheme)
+}
+
 // reconcileEtcdClientsLocked applies configuration to borrowed clients under the manager lock.
 func (m *MetaServiceGroupManager) reconcileEtcdClientsLocked(groups map[string]string) {
 	for groupID, client := range m.etcdClients {
@@ -96,11 +106,14 @@ func (m *MetaServiceGroupManager) reconcileEtcdClientsLocked(groups map[string]s
 			continue
 		}
 		endpoints, err := parseMetaServiceGroupEndpoints(addresses)
-		if exists && err == nil {
+		// etcd selects transport credentials from the first endpoint when creating the
+		// connection. SetEndpoints updates the resolver but cannot change those credentials.
+		if exists && err == nil && metaServiceGroupEndpointScheme(client.Endpoints()[0]) == metaServiceGroupEndpointScheme(endpoints[0]) {
 			client.SetEndpoints(endpoints...)
 			continue
 		}
-		// Invalid replacement configuration must not leave a stale backend readable.
+		// Changed credential requirements need a fresh client. Deleted groups and invalid
+		// replacement configuration must not leave a stale backend readable either.
 		if err := client.Close(); err != nil {
 			log.Warn("failed to close meta-service group client", zap.String("group-id", groupID), zap.Error(err))
 		}
