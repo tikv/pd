@@ -16,8 +16,13 @@ require (
 	github.com/stretchr/testify v1.9.0
 	go.uber.org/goleak v1.1.11
 	go.uber.org/zap v1.24.0
+<<<<<<< HEAD
 	golang.org/x/exp v0.0.0-20230711005742-c3f37128e5a4
 	google.golang.org/grpc v1.82.1
+=======
+	golang.org/x/sync v0.24.0
+	google.golang.org/grpc v1.83.2
+>>>>>>> 705492a9cc (*: upgrade otel and grpc dependencies for security issues (#11456))
 	google.golang.org/grpc/examples v0.0.0-20231221225426-4f03f3ff32c9
 )
 
@@ -39,7 +44,12 @@ require (
 	golang.org/x/net v0.61.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
+<<<<<<< HEAD
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260414002931-afd174a4e478 // indirect
+=======
+	golang.org/x/tools v0.52.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
+>>>>>>> 705492a9cc (*: upgrade otel and grpc dependencies for security issues (#11456))
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
