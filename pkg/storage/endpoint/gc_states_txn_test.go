@@ -16,6 +16,7 @@ package endpoint
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -177,5 +178,76 @@ func TestGCStateReadOnlyTransactionRevision(t *testing.T) {
 		re.NoError(err)
 		re.Equal(before.Kvs, after.Kvs)
 		re.Equal(before.Header.Revision, after.Header.Revision)
+	}
+}
+
+func TestGCStateTransactionKeyspaceRevision(t *testing.T) {
+	re := require.New(t)
+	ctx := context.Background()
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	store := NewStorageEndpoint(kv.NewEtcdKVBase(client), nil)
+	provider := store.GetGCStateProvider()
+	metadataKey := keypath.KeyspaceMetaPath(1)
+	for _, revision := range []int64{0, -1} {
+		re.Error(provider.RunInGCStateTransaction(func(wb *GCStateWriteBatch) error { return wb.ExpectKeyspaceMetaRevision(1, revision) }))
+	}
+	for _, readOnly := range []bool{false, true} {
+		for _, changed := range []bool{false, true} {
+			name := fmt.Sprintf("read-only=%v/changed=%v", readOnly, changed)
+			t.Run(name, func(t *testing.T) {
+				re := require.New(t)
+				re.NoError(store.Save(metadataKey, "group-a"))
+				re.NoError(provider.RunInGCStateTransaction(func(wb *GCStateWriteBatch) error {
+					if err := wb.SetTxnSafePoint(1, 50); err != nil {
+						return err
+					}
+					return wb.SetGCBarrier(1, NewGCBarrier("expired", 60, nil))
+				}))
+				beforeBarrier, err := store.Load(keypath.GCBarrierPath(1, "expired"))
+				re.NoError(err)
+				beforeRevision, err := store.Load(keypath.GCStateRevisionPath())
+				re.NoError(err)
+				response, err := client.Get(ctx, metadataKey)
+				re.NoError(err)
+				err = provider.RunInGCStateTransaction(func(wb *GCStateWriteBatch) error {
+					if err := wb.ExpectKeyspaceMetaRevision(1, response.Kvs[0].ModRevision); err != nil {
+						return err
+					}
+					if changed {
+						if err := store.Save(metadataKey, "group-b"); err != nil {
+							return err
+						}
+					}
+					if readOnly {
+						return nil
+					}
+					if err := wb.SetTxnSafePoint(1, 200); err != nil {
+						return err
+					}
+					return wb.DeleteGCBarrier(1, "expired")
+				})
+				if changed {
+					re.True(errors.ErrorEqual(err, errs.ErrEtcdTxnConflict), "%v", err)
+				} else {
+					re.NoError(err)
+				}
+				safePoint, err := provider.LoadTxnSafePoint(1)
+				re.NoError(err)
+				barrier, err := store.Load(keypath.GCBarrierPath(1, "expired"))
+				re.NoError(err)
+				revision, err := store.Load(keypath.GCStateRevisionPath())
+				re.NoError(err)
+				if changed || readOnly {
+					re.Equal(uint64(50), safePoint)
+					re.Equal(beforeBarrier, barrier)
+					re.Equal(beforeRevision, revision)
+				} else {
+					re.Equal(uint64(200), safePoint)
+					re.Empty(barrier)
+					re.NotEqual(beforeRevision, revision)
+				}
+			})
+		}
 	}
 }

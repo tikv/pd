@@ -571,7 +571,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	} else {
 		log.Info("no metering config provided, the metering writer will not be started")
 	}
-	s.gcStateManager = gc.NewGCStateManager(s.storage.GetGCStateProvider(), s.cfg.PDServerCfg, s.keyspaceManager)
+	s.gcStateManager = gc.NewGCStateManager(s.storage.GetGCStateProvider(), s.cfg.PDServerCfg, s.keyspaceManager, s.metaServiceGroupManager)
 	s.gcStateManager.SetConfigGetter(s.persistOptions.GetPDServerConfig)
 	if kerneltype.IsNextGen() {
 		s.gcStateManager.SetEtcdClient(s.client)
@@ -623,6 +623,11 @@ func (s *Server) Close() {
 	s.cgMonitor.StopMonitor()
 
 	s.stopServerLoop()
+	if s.metaServiceGroupManager != nil {
+		if err := s.metaServiceGroupManager.Close(); err != nil {
+			log.Error("close meta-service group manager failed", zap.Error(err))
+		}
+	}
 	if s.gcStateManager != nil {
 		s.gcStateManager.CloseBarrierMetrics()
 	}

@@ -42,6 +42,7 @@ const (
 type KeyspaceStorage interface {
 	SaveKeyspaceMeta(txn kv.Txn, meta *keyspacepb.KeyspaceMeta) error
 	LoadKeyspaceMeta(txn kv.Txn, id uint32) (*keyspacepb.KeyspaceMeta, error)
+	LoadKeyspaceMetaWithRevision(ctx context.Context, id uint32) (*keyspacepb.KeyspaceMeta, int64, error)
 	SaveKeyspaceID(txn kv.Txn, id uint32, name string) error
 	LoadKeyspaceID(txn kv.Txn, name string) (bool, uint32, error)
 	RemoveKeyspace(txn kv.Txn, id uint32, name string) error
@@ -84,6 +85,38 @@ func (*StorageEndpoint) LoadKeyspaceMeta(txn kv.Txn, id uint32) (*keyspacepb.Key
 		return nil, errs.ErrProtoUnmarshal.Wrap(err).GenWithStackByCause()
 	}
 	return meta, nil
+}
+
+// LoadKeyspaceMetaWithRevision loads metadata and its modification revision in one linearizable read.
+// Missing or empty metadata returns nil, matching LoadKeyspaceMeta.
+func (se *StorageEndpoint) LoadKeyspaceMetaWithRevision(ctx context.Context, id uint32) (*keyspacepb.KeyspaceMeta, int64, error) {
+	txn, err := se.createRawTxnWithContext(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	key := keypath.KeyspaceMetaPath(id)
+	response, err := txn.Then(kv.RawTxnOp{Key: key, OpType: kv.RawTxnOpGet}).Commit()
+	if err != nil {
+		return nil, 0, err
+	}
+	if !response.Succeeded || len(response.Responses) != 1 {
+		return nil, 0, errs.ErrEtcdTxnResponse.GenWithStackByArgs("invalid keyspace metadata response")
+	}
+	pairs := response.Responses[0].KeyValuePairs
+	if len(pairs) == 0 {
+		return nil, 0, nil
+	}
+	if len(pairs) != 1 || pairs[0].Key != key || pairs[0].ModRevision <= 0 {
+		return nil, 0, errs.ErrEtcdTxnResponse.GenWithStackByArgs("invalid keyspace metadata key or revision")
+	}
+	if pairs[0].Value == "" {
+		return nil, pairs[0].ModRevision, nil
+	}
+	meta := &keyspacepb.KeyspaceMeta{}
+	if err := proto.Unmarshal([]byte(pairs[0].Value), meta); err != nil {
+		return nil, 0, errs.ErrProtoUnmarshal.Wrap(err).GenWithStackByCause()
+	}
+	return meta, pairs[0].ModRevision, nil
 }
 
 // SaveKeyspaceID saves keyspace ID to the path specified by keyspace name.

@@ -270,7 +270,8 @@ func newGCStateProvider(storage *StorageEndpoint) GCStateProvider {
 // GCStateWriteBatch is the batch of write operations within a GCStateTransaction, which can be started by calling
 // GCStateProvider.RunInGCStateTransaction.
 type GCStateWriteBatch struct {
-	ops []kv.RawTxnOp
+	ops        []kv.RawTxnOp
+	conditions []kv.RawTxnCondition
 }
 
 // LoadGCSafePoint loads current GC safe point of the given keyspaceID from storage.
@@ -506,7 +507,8 @@ func (p GCStateProvider) RunInGCStateTransaction(f func(wb *GCStateWriteBatch) e
 	if err != nil {
 		return errors.AddStack(err)
 	}
-	result, err := txn.If(condition).Then(ops...).Commit()
+	conditions := append(wb.conditions, condition)
+	result, err := txn.If(conditions...).Then(ops...).Commit()
 	if err != nil {
 		return errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByArgs()
 	}
@@ -533,6 +535,17 @@ func (p GCStateProvider) CompatibleLoadAllServiceGCSafePoints(keyspaceID uint32)
 	}
 
 	return keys, ssps, nil
+}
+
+// ExpectKeyspaceMetaRevision stages a metadata revision check that runs atomically with the GC writes at commit.
+func (wb *GCStateWriteBatch) ExpectKeyspaceMetaRevision(keyspaceID uint32, revision int64) error {
+	if revision <= 0 {
+		return errors.New("keyspace metadata revision must be positive")
+	}
+	wb.conditions = append(wb.conditions, kv.RawTxnCondition{
+		Key: keypath.KeyspaceMetaPath(keyspaceID), CmpType: kv.RawTxnCmpModRevisionEqual, ModRevision: revision,
+	})
+	return nil
 }
 
 // writeJSON marshals the given data into JSON and writes it to the given key.

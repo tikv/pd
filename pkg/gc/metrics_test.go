@@ -93,6 +93,7 @@ type barrierMetricsTestKV struct {
 	kv.Base
 	fail          bool
 	beforeCommit  func()
+	afterCommit   func()
 	loads, ranges int
 }
 
@@ -128,7 +129,11 @@ func (t *barrierMetricsTestTxn) Commit() (kv.RawTxnResponse, error) {
 	if t.store.fail {
 		return kv.RawTxnResponse{Succeeded: false}, nil
 	}
-	return t.RawTxn.Commit()
+	response, err := t.RawTxn.Commit()
+	if err == nil && response.Succeeded && t.store.afterCommit != nil {
+		t.store.afterCommit()
+	}
+	return response, err
 }
 
 func (s *gcStateManagerTestSuite) TestBarrierMetricsKVLeaderColdRead() {
@@ -322,8 +327,8 @@ func TestBarrierMetricsRegistrationAndLeadership(t *testing.T) {
 	now := time.Unix(2_000_000_000, 0)
 	cfg := config.NewConfig()
 	require.NoError(t, cfg.Adjust(nil, false))
-	first := NewGCStateManager(endpoint.GCStateProvider{}, cfg.PDServerCfg, nil)
-	second := NewGCStateManager(endpoint.GCStateProvider{}, cfg.PDServerCfg, nil)
+	first := NewGCStateManager(endpoint.GCStateProvider{}, cfg.PDServerCfg, nil, nil)
+	second := NewGCStateManager(endpoint.GCStateProvider{}, cfg.PDServerCfg, nil, nil)
 	first.barrierMetrics.now = func() time.Time { return now }
 	second.barrierMetrics.now = func() time.Time { return now }
 	t.Cleanup(first.CloseBarrierMetrics)
@@ -388,7 +393,7 @@ func TestBarrierMetricsConcurrentLifecycleAndScrapes(t *testing.T) {
 
 func TestBarrierMetricsManagerFixedWarningAge(t *testing.T) {
 	now := time.Unix(2_000_000_000, 0)
-	m := NewGCStateManager(endpoint.GCStateProvider{}, config.PDServerConfig{}, nil)
+	m := NewGCStateManager(endpoint.GCStateProvider{}, config.PDServerConfig{}, nil, nil)
 	barriers := []*endpoint.GCBarrier{endpoint.NewGCBarrier("old", uint64(now.Add(-48*time.Hour).UnixMilli())<<18, nil)}
 	require.Len(t, m.barrierMetrics.observeMetrics(m.barrierMetrics.generation(), 42, "tenant-a", barriers, nil, now), 1, "barriers older than 24 hours must warn without configuration")
 }
@@ -573,9 +578,9 @@ func (s *gcStateManagerTestSuite) TestBarrierMetricsDisabledKeyspace() {
 	defer restore()
 	counted := &barrierMetricsTestKV{Base: s.storage.Base}
 	m.gcMetaStorage = endpoint.NewStorageEndpoint(counted, nil).GetGCStateProvider()
-	// State changes after metadata resolution, including another keyspace's,
-	// must not fence an otherwise successful observation.
-	counted.beforeCommit = func() {
+	// State changes after a successful commit, including another keyspace's,
+	// must not fence the observation. Changes before commit now conflict.
+	counted.afterCommit = func() {
 		_, err := m.keyspaceManager.UpdateKeyspaceStateByID(2, keyspacepb.KeyspaceState_ENABLED, now.Unix())
 		re.NoError(err)
 		_, err = m.keyspaceManager.UpdateKeyspaceStateByID(2, keyspacepb.KeyspaceState_DISABLED, now.Unix())
@@ -587,7 +592,7 @@ func (s *gcStateManagerTestSuite) TestBarrierMetricsDisabledKeyspace() {
 	re.NoError(err)
 	re.Equal(map[string]float64{"keyspace/2/old": 1_999_712_000, "global//global": 1_999_712_000}, gatherBarrierMetrics(s.T(), registry))
 	re.Len(logs.FilterMessage("GC barrier timestamp is too old").All(), 2)
-	counted.beforeCommit = nil
+	counted.afterCommit = nil
 	// Compatibility gc_worker advancement must discover the same disabled scope.
 	m.OnNodeBecomesLeader()
 	_, _, err = m.CompatibleUpdateServiceGCSafePoint(2, "gc_worker", ts, math.MaxInt64, now)
@@ -889,9 +894,9 @@ func (s *gcStateManagerTestSuite) TestBarrierMetricsRemovalFencesInflightPublica
 	re.NoError(groupManager.CreateKeyspaceGroups([]*endpoint.KeyspaceGroup{{ID: 101, UserKind: endpoint.Standard.String(), Keyspaces: []uint32{2}}}))
 	counted := &barrierMetricsTestKV{Base: s.storage.Base}
 	m.gcMetaStorage = endpoint.NewStorageEndpoint(counted, nil).GetGCStateProvider()
-	// Remove metadata after it was resolved and the GC transaction loaded its
-	// barriers. The successful GC commit must not restore the removed sample.
-	counted.beforeCommit = func() {
+	// Remove metadata after the GC commit succeeds but before metrics publication.
+	// The successful advancement must not restore the removed sample.
+	counted.afterCommit = func() {
 		_, err := groupManager.RemoveKeyspacesFromGroup(context.Background(), 101, m.keyspaceManager, nil, []uint32{2})
 		re.NoError(err)
 		re.Equal(map[string]float64{"global//global": 1_999_712_000}, gatherBarrierMetrics(s.T(), registry))
@@ -903,7 +908,7 @@ func (s *gcStateManagerTestSuite) TestBarrierMetricsRemovalFencesInflightPublica
 	advance()
 	re.Equal(map[string]float64{"global//global": 1_999_712_000}, gatherBarrierMetrics(s.T(), registry))
 	re.Empty(logs.FilterMessage("GC barrier timestamp is too old").All())
-	counted.beforeCommit = nil
+	counted.afterCommit = nil
 	_, err = m.AdvanceTxnSafePoint(2, ts, now)
 	re.Error(err)
 }

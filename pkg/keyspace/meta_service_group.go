@@ -45,6 +45,8 @@ type MetaServiceGroupManager struct {
 	// metaServiceGroups is the available external meta-service groups.
 	// The key is the meta-service group name, and the value is the corresponding endpoint.
 	metaServiceGroups map[string]string
+	etcdClients       map[string]*clientv3.Client
+	closed            bool
 	// keyspaceAssignmentCounter, when set, returns the actual number of keyspaces
 	// assigned to each of the given groups by scanning keyspace metadata. It is
 	// the authoritative source for the delete guard so a stale persisted counter
@@ -427,6 +429,7 @@ func (m *MetaServiceGroupManager) persistGroupsLocked(
 	if err := persist(); err != nil {
 		return err
 	}
+	m.reconcileEtcdClientsLocked(metaServiceGroups)
 	m.metaServiceGroups = cloneMetaServiceGroups(metaServiceGroups)
 	// Clear the persisted status for deleted groups so re-adding a group with
 	// the same ID does not inherit a stale assignment count or enabled state,
@@ -485,6 +488,7 @@ func (m *MetaServiceGroupManager) assignedKeyspaceCounts(ctx context.Context, gr
 func (m *MetaServiceGroupManager) updateGroups(metaServiceGroups map[string]string) {
 	m.Lock()
 	defer m.Unlock()
+	m.reconcileEtcdClientsLocked(metaServiceGroups)
 	m.metaServiceGroups = cloneMetaServiceGroups(metaServiceGroups)
 }
 

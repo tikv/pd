@@ -103,6 +103,7 @@ type newGCStateManagerForTestOptions struct {
 	etcdClientCfgModifier   etcdutil.CreateEtcdClientOpt
 	useEnabledKeyspaceIndex bool
 	beforeLeader            func(*clientv3.Client)
+	metaServiceGroups       map[string]string
 }
 
 func (opt *newGCStateManagerForTestOptions) generateKeyspacesByCount(count int) {
@@ -148,8 +149,17 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	kgm := keyspace.NewKeyspaceGroupManager(ctx, s, client)
-	keyspaceManager := keyspace.NewKeyspaceManager(ctx, s, mockcluster.NewCluster(ctx, config.NewPersistOptions(cfg)), allocator, &config.KeyspaceConfig{}, kgm, nil)
-	gcStateManager = NewGCStateManager(s.GetGCStateProvider(), cfg.PDServerCfg, keyspaceManager)
+	var mgm *keyspace.MetaServiceGroupManager
+	if len(opt.metaServiceGroups) > 0 {
+		mgm = keyspace.NewMetaServiceGroupManager(s, opt.metaServiceGroups, nil)
+		t.Cleanup(func() { re.NoError(mgm.Close()) })
+		for groupID := range opt.metaServiceGroups {
+			enabled := true
+			re.NoError(mgm.PatchStatus(ctx, groupID, &keyspace.MetaServiceGroupStatusPatch{Enabled: &enabled}))
+		}
+	}
+	keyspaceManager := keyspace.NewKeyspaceManager(ctx, s, mockcluster.NewCluster(ctx, config.NewPersistOptions(cfg)), allocator, &config.KeyspaceConfig{}, kgm, mgm)
+	gcStateManager = NewGCStateManager(s.GetGCStateProvider(), cfg.PDServerCfg, keyspaceManager, mgm)
 	if opt.useEnabledKeyspaceIndex {
 		gcStateManager.SetEtcdClient(client)
 	}
@@ -282,7 +292,7 @@ func (s *gcStateManagerTestSuite) ensureMarkedLeader() {
 }
 
 func (s *gcStateManagerTestSuite) TestGCStateWatchRequiresActiveLeadership() {
-	follower := NewGCStateManager(s.provider, s.manager.cfg, s.manager.keyspaceManager)
+	follower := NewGCStateManager(s.provider, s.manager.cfg, s.manager.keyspaceManager, nil)
 	_, err := follower.WatchGCStates(context.Background(), true)
 	s.Require().ErrorIs(err, errs.ErrNotLeader)
 }
@@ -315,7 +325,7 @@ func TestGCStateLeadershipClearsCacheBeforeEnablingReads(t *testing.T) {
 			_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 			defer clean()
 			provider := endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(client), nil).GetGCStateProvider()
-			manager := NewGCStateManager(provider, config.PDServerConfig{}, nil)
+			manager := NewGCStateManager(provider, config.PDServerConfig{}, nil, nil)
 			defer manager.CloseBarrierMetrics()
 			if replacingLeader {
 				stop := manager.OnNodeBecomesLeader()
@@ -2398,6 +2408,7 @@ func (s *gcStateManagerTestSuite) TestGetGCStateWithGlobalGCBarriersRejectsRevis
 		s.provider,
 		s.manager.cfg,
 		s.manager.keyspaceManager,
+		nil,
 	)
 	s.T().Cleanup(otherManager.CloseBarrierMetrics)
 	stopOtherManager := otherManager.OnNodeBecomesLeader()
