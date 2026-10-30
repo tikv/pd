@@ -92,6 +92,11 @@ type placementScopeKey struct {
 	isTiKV    bool
 }
 
+type revertLocationKey struct {
+	region        *core.RegionInfo
+	sourceStoreID uint64
+}
+
 type placementLoadScope struct {
 	expect     statistics.StoreLoad
 	stddev     statistics.StoreLoad
@@ -244,6 +249,11 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 	for _, srcStore := range bs.filterSrcStores() {
 		bs.cur.srcStore = srcStore
 		srcStoreID := srcStore.GetID()
+		// The reverse target is fixed while scanning this source store.
+		var revertLocationCache map[revertLocationKey]bool
+		if bs.opTy == movePeer && !bs.GetSchedulerConfig().IsPlacementRulesEnabled() && len(bs.GetSchedulerConfig().GetLocationLabels()) > 0 {
+			revertLocationCache = make(map[revertLocationKey]bool)
+		}
 		usePlacementScope := bs.beginSourcePlacement(srcStore.IsTiKV())
 		sourceResultRecorded := !usePlacementScope
 		var globalSourceFailure, sourceFailure string
@@ -306,7 +316,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 						useRevertPlacementScope := bs.mayUsePlacementScope(dstStore.IsTiKV())
 						if revertRegion == nil || revertRegion.GetID() == bs.cur.region.GetID() ||
 							!allowRevertRegion(revertRegion, srcStoreID) ||
-							!bs.isRevertRegionValid(revertRegion, revertFit) {
+							!bs.isRevertRegionValid(revertRegion, revertFit, revertLocationCache) {
 							continue
 						}
 						if useRevertPlacementScope {
@@ -790,8 +800,17 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*statistics.StoreLoadDetai
 	return bs.pickDstStores(filters, candidates)
 }
 
-func (bs *balanceSolver) isRevertRegionValid(region *core.RegionInfo, fit *placement.RegionFit) bool {
+func (bs *balanceSolver) isRevertRegionValid(region *core.RegionInfo, fit *placement.RegionFit, locationCache map[revertLocationKey]bool) bool {
+	if bs.GetSchedulerConfig().IsPlacementRulesEnabled() {
+		locationCache = nil
+	} else if len(bs.GetSchedulerConfig().GetLocationLabels()) == 0 {
+		return true
+	}
 	source, target := bs.cur.dstStore.StoreInfo, bs.cur.srcStore.StoreInfo
+	key := revertLocationKey{region: region, sourceStoreID: source.GetID()}
+	if valid, ok := locationCache[key]; ok {
+		return valid
+	}
 	var safeguard filter.Filter
 	switch bs.opTy {
 	case movePeer:
@@ -801,7 +820,11 @@ func (bs *balanceSolver) isRevertRegionValid(region *core.RegionInfo, fit *place
 		safeguard = filter.NewPlacementLeaderSafeguardWithFit(bs.sche.GetName(), bs.GetSchedulerConfig(), bs.GetBasicCluster(),
 			bs.GetRuleManager(), region, source, fit, bs.rwTy == utils.Read)
 	}
-	return safeguard == nil || safeguard.Target(bs.GetSchedulerConfig(), target).IsOK()
+	valid := safeguard == nil || safeguard.Target(bs.GetSchedulerConfig(), target).IsOK()
+	if locationCache != nil {
+		locationCache[key] = valid
+	}
+	return valid
 }
 
 func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*statistics.StoreLoadDetail) map[uint64]*statistics.StoreLoadDetail {
