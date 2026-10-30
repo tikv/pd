@@ -38,6 +38,7 @@ import (
 
 	"github.com/tikv/pd/pkg/cluster"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
 	mcsaffinity "github.com/tikv/pd/pkg/mcs/scheduling/server/affinity"
@@ -343,11 +344,34 @@ func (c *Cluster) SetRuntimeResources(
 	c.ruleWatcher = ruleWatcher
 	c.affinityWatcher = affinityWatcher
 	c.keyspaceWatcher = keyspaceWatcher
+	configWatcher.SetOnScheduleConfigUpdated(c.RefreshStoreRateLimits)
+	c.RefreshStoreRateLimits()
 	metaWatcher.SetOnStoreTombstoned(func(storeID uint64) {
 		c.hotStat.RemoveRollingStoreStats(storeID)
 		c.ruleManager.RemoveStoreCache(storeID)
 		DeleteStoreMetrics(strconv.FormatUint(storeID, 10))
 	})
+}
+
+// RefreshStoreRateLimits applies the configured limits to existing in-memory
+// store limiters.
+func (c *Cluster) RefreshStoreRateLimits() {
+	for _, store := range c.GetStores() {
+		limit, ok := store.GetStoreLimit().(*storelimit.StoreRateLimit)
+		if !ok {
+			continue
+		}
+		for _, limitType := range []storelimit.Type{
+			storelimit.AddPeer,
+			storelimit.RemovePeer,
+			storelimit.TransferLeaderIn,
+		} {
+			ratePerSec := c.persistConfig.GetStoreLimitByType(store.GetID(), limitType) / operator.StoreBalanceBaseTime
+			if limit.Rate(limitType) != ratePerSec {
+				c.ResetStoreLimit(store.GetID(), limitType, ratePerSec)
+			}
+		}
+	}
 }
 
 func (c *Cluster) stopCluster() {
