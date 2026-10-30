@@ -25,6 +25,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -337,7 +338,6 @@ func TestCancelErrorOfReservation(t *testing.T) {
 }
 
 func TestQPS(t *testing.T) {
-	re := require.New(t)
 	cases := []struct {
 		concurrency int
 		reserveN    int64
@@ -348,10 +348,13 @@ func TestQPS(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(fmt.Sprintf("concurrency=%d,reserveN=%d,limit=%d", tc.concurrency, tc.reserveN, tc.ruPerSec), func(t *testing.T) {
-			qps, ruSec, waitTime := testQPSCase(tc.concurrency, tc.reserveN, tc.ruPerSec)
-			t.Log(fmt.Printf("QPS: %.2f, RU: %.2f, new request need wait  %s\n", qps, ruSec, waitTime))
-			re.LessOrEqual(math.Abs(float64(tc.ruPerSec)-ruSec), float64(100)*float64(tc.reserveN))
-			re.LessOrEqual(math.Abs(float64(tc.ruPerSec)/float64(tc.reserveN)-qps), float64(100))
+			synctest.Test(t, func(t *testing.T) {
+				re := require.New(t)
+				qps, ruSec, waitTime := testQPSCase(tc.concurrency, tc.reserveN, tc.ruPerSec)
+				t.Logf("QPS: %.2f, RU: %.2f, new request needs to wait %s", qps, ruSec, waitTime)
+				re.LessOrEqual(math.Abs(float64(tc.ruPerSec)-ruSec), float64(100)*float64(tc.reserveN))
+				re.LessOrEqual(math.Abs(float64(tc.ruPerSec)/float64(tc.reserveN)-qps), float64(100))
+			})
 		})
 	}
 }
@@ -456,18 +459,21 @@ func testQPSCase(concurrency int, reserveN int64, limit int64) (qps float64, ru 
 	var wait time.Duration
 	ch := make(chan struct{})
 	go func() {
-		var windowRequests int64
+		lastSample := start
 		for {
-			elapsed := time.Since(start)
-			if elapsed >= testCaseRunTime {
+			now := time.Now()
+			if now.Sub(start) >= testCaseRunTime {
 				close(ch)
 				break
 			}
-			windowRequests = totalRequests.Swap(0)
-			vQPS.Store(float64(windowRequests))
+			if elapsed := now.Sub(lastSample); elapsed > 0 {
+				vQPS.Store(float64(totalRequests.Swap(0)) / elapsed.Seconds())
+			}
+			lastSample = now
 			r := lim.Reserve(ctx, 30*time.Second, time.Now(), float64(reserveN))
 			wait = r.Delay()
-			time.Sleep(1 * time.Second)
+			// Settle all reservations at the boundary before sampling the next window.
+			synctest.Sleep(time.Second)
 		}
 	}()
 	<-ch

@@ -275,6 +275,12 @@ func (suite *storeTestSuite) checkStoreLimitRemainsAvailableDuringRollingUpgrade
 func (suite *storeTestSuite) checkGetAllLimit(cluster *tests.TestCluster) {
 	re := suite.Require()
 
+	// Keep the offline store and its limit until all filter assertions finish.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/doNotBuryStore", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/doNotBuryStore"))
+	}()
+
 	for _, store := range initStores() {
 		tests.MustPutStore(re, cluster, store)
 	}

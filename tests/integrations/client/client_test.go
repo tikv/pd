@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand/v2"
+	"net/http"
 	"os"
 	"slices"
 	"sort"
@@ -943,7 +944,8 @@ func TestConfigTTLAfterTransferLeader(t *testing.T) {
 	re.NotEmpty(leaderName)
 	leader := cluster.GetServer(leaderName)
 	re.NoError(leader.BootstrapCluster())
-	addr := fmt.Sprintf("%s/pd/api/v1/config?ttlSecond=5", leader.GetAddr())
+	// Keep the temporary values alive through configuration writes and leader transfer.
+	addr := fmt.Sprintf("%s/pd/api/v1/config?ttlSecond=300", leader.GetAddr())
 	postData, err := json.Marshal(map[string]any{
 		"schedule.max-snapshot-count":             999,
 		"schedule.enable-location-replacement":    false,
@@ -958,8 +960,11 @@ func TestConfigTTLAfterTransferLeader(t *testing.T) {
 	})
 	re.NoError(err)
 	resp, err := leader.GetHTTPClient().Post(addr, "application/json", bytes.NewBuffer(postData))
-	resp.Body.Close()
 	re.NoError(err)
+	defer func() {
+		re.NoError(resp.Body.Close())
+	}()
+	re.Equal(http.StatusOK, resp.StatusCode)
 	testutil.Eventually(re, func() bool {
 		options := leader.GetPersistOptions()
 		return options != nil &&

@@ -1531,6 +1531,7 @@ func waitWatchGCStatesSignal(t *testing.T, signal <-chan struct{}, message strin
 }
 
 func TestWatchGCStatesBlockedSendCleansUpPublicHandler(t *testing.T) {
+	const liveQueueCapacity = 1
 	for _, tc := range []struct {
 		name      string
 		reason    string
@@ -1544,6 +1545,11 @@ func TestWatchGCStatesBlockedSendCleansUpPublicHandler(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			re := require.New(t)
+			if tc.name == "slow consumer" {
+				const capacityPoint = "github.com/tikv/pd/pkg/gc/watchGCStatesLiveChannelCapacity"
+				re.NoError(failpoint.EnableCall(capacityPoint, func(capacity *int) { *capacity = liveQueueCapacity }))
+				t.Cleanup(func() { re.NoError(failpoint.Disable(capacityPoint)) })
+			}
 			if tc.name == "stalled send" {
 				const timeoutPoint = "github.com/tikv/pd/server/watchGCStatesSendTimeout"
 				re.NoError(failpoint.EnableCall(timeoutPoint, func(timeout *time.Duration) { *timeout = time.Second }))
@@ -1605,9 +1611,8 @@ func TestWatchGCStatesBlockedSendCleansUpPublicHandler(t *testing.T) {
 				stop := manager.OnNodeBecomesLeader()
 				t.Cleanup(stop)
 			} else if tc.name == "slow consumer" {
-				// The sending worker cannot receive these 1025 updates, overflowing
-				// the default live queue's 1024 slots.
-				for target := uint64(11); target <= 1035; target++ {
+				// Overflow the small live queue while the sending worker is blocked.
+				for target := uint64(11); target <= 11+liveQueueCapacity; target++ {
 					res, err := manager.AdvanceTxnSafePoint(constant.NullKeyspaceID, target, time.Now())
 					re.NoError(err)
 					re.Equal(target, res.NewTxnSafePoint)
