@@ -15,17 +15,22 @@
 package affinity
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"regexp"
 	"slices"
+	"strconv"
+	"strings"
 	"time"
 
+	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/keyutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 // groupAvailability is an enum that represents the Group’s availability lifecycle.
@@ -82,6 +87,9 @@ const (
 // Valid id must be non-empty and 64 characters or fewer and consist only of letters (a-z, A-Z),
 // numbers (0-9), hyphens (-), and underscores (_).
 var idRegexp = regexp.MustCompile("^[-A-Za-z0-9_]{1,64}$")
+
+// TiDB owns this namespace. Other applications may still use custom IDs.
+var tidbKeyspaceIDRegexp = regexp.MustCompile(`^_tidb_ks(0|[1-9][0-9]*)_(?:t_([1-9][0-9]*)|pt_([1-9][0-9]*)_p([1-9][0-9]*))$`)
 
 // Group defines an affinity group. Regions belonging to it will tend to have the same distribution.
 // NOTE: This type is exported by HTTP API and persisted in storage. Please pay more attention when modifying it.
@@ -308,10 +316,59 @@ type GroupKeyRanges struct {
 	GroupID   string
 }
 
-// ValidateGroupID checks the ID format.
+// ValidateGroupID checks the ID format and requires keyspace-aware TiDB IDs in NextGen.
+// It is checked where requests enter PD. Stored groups are loaded and synced
+// without it, so that the overlap checks keep seeing their ranges.
 func ValidateGroupID(id string) error {
-	if idRegexp.MatchString(id) {
-		return nil
+	_, _, err := parseGroupID(id)
+	return err
+}
+
+func parseGroupID(id string) (uint32, bool, error) {
+	if !idRegexp.MatchString(id) {
+		return 0, false, errs.ErrInvalidGroupID.GenWithStackByArgs(id)
 	}
-	return errs.ErrInvalidGroupID.GenWithStackByArgs(id)
+	if !kerneltype.IsNextGen() {
+		return 0, false, nil
+	}
+	if strings.HasPrefix(id, "_tidb_t_") || strings.HasPrefix(id, "_tidb_pt_") {
+		return 0, false, errs.ErrAffinityGroupContent.FastGenByArgs("nextgen requires keyspace-aware TiDB affinity group IDs; use a keyspace-aware TiDB or pd-ctl --keyspace-id")
+	}
+	if !strings.HasPrefix(id, "_tidb_ks") {
+		return 0, false, nil
+	}
+	parts := tidbKeyspaceIDRegexp.FindStringSubmatch(id)
+	if parts == nil {
+		return 0, false, errs.ErrInvalidGroupID.GenWithStackByArgs(id)
+	}
+	keyspaceID, err := strconv.ParseUint(parts[1], 10, 24)
+	if err != nil {
+		return 0, false, errs.ErrInvalidGroupID.GenWithStackByArgs(id)
+	}
+	for _, objectID := range parts[2:] {
+		if objectID != "" {
+			if _, err := strconv.ParseInt(objectID, 10, 64); err != nil {
+				return 0, false, errs.ErrInvalidGroupID.GenWithStackByArgs(id)
+			}
+		}
+	}
+	return uint32(keyspaceID), true, nil
+}
+
+func validateGroupKeyRanges(group GroupKeyRanges) error {
+	keyspaceID, scoped, err := parseGroupID(group.GroupID)
+	if err != nil || !scoped {
+		return err
+	}
+	lower := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, keyspaceID)
+	upper := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, keyspaceID+1)
+	// PD receives memcomparable region boundaries. The exclusive upper bound
+	// may be the next keyspace boundary, including the fencepost for the last ID.
+	for _, kr := range group.KeyRanges {
+		if len(kr.EndKey) == 0 || bytes.Compare(kr.StartKey, lower[:]) < 0 ||
+			bytes.Compare(kr.StartKey, kr.EndKey) >= 0 || bytes.Compare(kr.EndKey, upper[:]) > 0 {
+			return errs.ErrAffinityGroupContent.FastGenByArgs(fmt.Sprintf("affinity group %s key ranges must belong to transaction keyspace %d", group.GroupID, keyspaceID))
+		}
+	}
+	return nil
 }

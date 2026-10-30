@@ -16,13 +16,17 @@ package affinity
 
 import (
 	"encoding/hex"
+	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 
+	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/labeler"
@@ -30,6 +34,101 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
+
+func TestNextGenTiDBGroupOperations(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	store := storage.NewStorageWithMemoryBackend()
+	storeInfos := core.NewStoresInfo()
+	storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: 1}))
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	re.NoError(err)
+	manager, err := NewManager(ctx, store, storeInfos, mockconfig.NewTestOptions(), regionLabeler)
+	re.NoError(err)
+	const modeFlag = "github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"
+	re.NoError(failpoint.Enable(modeFlag, "return(false)"))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(modeFlag)) })
+	// Seed legacy groups to exercise validation before skip-existing shortcuts.
+	legacy := []string{"_tidb_t_1001", "_tidb_pt_1001_p3"}
+	for _, id := range legacy {
+		re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: id}}))
+		_, err := manager.UpdateAffinityGroupPeers(id, 1, []uint64{1})
+		re.NoError(err)
+		_, err = manager.CheckAndGetAffinityGroupState(id)
+		re.NoError(err)
+		op := []GroupKeyRanges{{GroupID: id, KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("b")}}}}
+		re.NoError(manager.UpdateAffinityGroupKeyRanges(op, nil))
+		re.NoError(manager.UpdateAffinityGroupKeyRanges(nil, op))
+		re.NoError(manager.DeleteAffinityGroups([]string{id}, true))
+		re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: id}}))
+	}
+	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "custom_group"}}))
+	re.NoError(failpoint.Enable(modeFlag, "return(true)"))
+	snapshot := func() string {
+		persisted := make(map[string]string)
+		re.NoError(store.LoadAllAffinityGroups(func(k, v string) { persisted[k] = v }))
+		data, err := json.Marshal([]any{persisted, manager.keyRanges})
+		re.NoError(err)
+		return string(data)
+	}
+	before := snapshot()
+	for _, id := range legacy {
+		for _, create := range []func([]GroupKeyRanges) error{manager.CreateAffinityGroups, manager.CreateAffinityGroupsIfNotExists} {
+			re.ErrorContains(create([]GroupKeyRanges{{GroupID: "new_group"}, {GroupID: id}}), "pd-ctl --keyspace-id")
+			re.False(manager.IsGroupExist("new_group"))
+		}
+		for _, force := range []bool{false, true} {
+			re.ErrorContains(manager.DeleteAffinityGroups([]string{"custom_group", id}, force), "pd-ctl --keyspace-id")
+			re.ErrorContains(manager.DeleteAffinityGroups([]string{id + "_missing"}, force), "pd-ctl --keyspace-id")
+		}
+		_, err := manager.UpdateAffinityGroupPeers(id, 1, []uint64{1})
+		re.ErrorContains(err, "pd-ctl --keyspace-id")
+		_, err = manager.CheckAndGetAffinityGroupState(id)
+		re.ErrorContains(err, "pd-ctl --keyspace-id")
+		_, err = CollectGroupStates(manager, []string{"custom_group", id})
+		re.ErrorContains(err, "pd-ctl --keyspace-id")
+		for _, ranges := range [][]keyutil.KeyRange{nil, {{StartKey: []byte("a"), EndKey: []byte("b")}}} {
+			op := []GroupKeyRanges{{GroupID: id, KeyRanges: ranges}}
+			re.ErrorContains(manager.UpdateAffinityGroupKeyRanges(op, nil), "pd-ctl --keyspace-id")
+			re.ErrorContains(manager.UpdateAffinityGroupKeyRanges(nil, op), "pd-ctl --keyspace-id")
+		}
+		re.Equal(before, snapshot(), "rejected requests must not change persistent groups or ranges")
+	}
+	// Identical table IDs remain independent across keyspaces, including both bounds.
+	for _, keyspaceID := range []uint32{0, 42, 43, 16777215} {
+		id := fmt.Sprintf("_tidb_ks%d_t_1001", keyspaceID)
+		rangeForKeyspace := func(tableID int64) keyutil.KeyRange {
+			prefix := codec.MakeKeyspacePrefix(codec.TxnKeyspaceModePrefix, keyspaceID)
+			return keyutil.KeyRange{
+				StartKey: codec.EncodeBytes(append(prefix, codec.GenerateTableKey(tableID)...)),
+				EndKey:   codec.EncodeBytes(append(prefix, codec.GenerateTableKey(tableID+1)...)),
+			}
+		}
+		group := GroupKeyRanges{GroupID: id, KeyRanges: []keyutil.KeyRange{rangeForKeyspace(1001)}}
+		re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{group}))
+		_, err := manager.UpdateAffinityGroupPeers(id, 1, []uint64{1})
+		re.NoError(err)
+		state, err := manager.CheckAndGetAffinityGroupState(id)
+		re.NoError(err)
+		re.Equal(uint64(1), state.LeaderStoreID)
+		op := []GroupKeyRanges{{GroupID: id, KeyRanges: []keyutil.KeyRange{rangeForKeyspace(1002)}}}
+		re.NoError(manager.UpdateAffinityGroupKeyRanges(op, nil))
+		re.NoError(manager.UpdateAffinityGroupKeyRanges(nil, op))
+		wrongRange := GroupKeyRanges{GroupID: id, KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("b")}}}
+		before := snapshot()
+		re.Error(manager.CreateAffinityGroupsIfNotExists([]GroupKeyRanges{wrongRange}))
+		re.Error(manager.UpdateAffinityGroupKeyRanges([]GroupKeyRanges{wrongRange}, nil))
+		re.Error(manager.UpdateAffinityGroupKeyRanges(nil, []GroupKeyRanges{wrongRange}))
+		re.Equal(before, snapshot())
+	}
+	re.NoError(manager.DeleteAffinityGroups([]string{"_tidb_ks42_t_1001"}, true))
+	for _, id := range []string{"_tidb_ks0_t_1001", "_tidb_ks43_t_1001", "_tidb_ks16777215_t_1001"} {
+		state, err := manager.CheckAndGetAffinityGroupState(id)
+		re.NoError(err)
+		re.Equal(uint64(1), state.LeaderStoreID)
+		re.Len(manager.keyRanges[id].KeyRanges, 1)
+	}
+}
 
 func TestKeyRangeOverlapValidation(t *testing.T) {
 	re := require.New(t)
