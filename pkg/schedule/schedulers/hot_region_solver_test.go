@@ -20,6 +20,7 @@ import (
 	"math/rand/v2"
 	"slices"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -1039,7 +1040,116 @@ func TestRevertRegionPlacementSafeguard(t *testing.T) {
 		srcStore: &statistics.StoreLoadDetail{StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: tc.GetStore(1)}},
 		dstStore: &statistics.StoreLoadDetail{StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: tc.GetStore(2)}},
 	}
-	re.False(bs.isRevertRegionValid(region, fit))
+	re.False(bs.isRevertRegionValid(region, fit, nil))
+	// Placement Rules must still be checked if enabled during a source scan.
+	cache := map[revertLocationKey]bool{{region: region, sourceStoreID: 2}: true}
+	re.False(bs.isRevertRegionValid(region, fit, cache))
+}
+
+func prepareRevertLocationSolver(tb testing.TB, labels []string) (*balanceSolver, []*core.RegionInfo) {
+	tb.Helper()
+	cancel, _, tc, oc := prepareSchedulersTest()
+	tb.Cleanup(cancel)
+	tc.SetEnablePlacementRules(false)
+	tc.SetLocationLabels(labels)
+	for id, location := range map[uint64]string{1: "a", 2: "b", 3: "a", 4: "c", 5: "d"} {
+		tc.AddLabelsStore(id, 1, map[string]string{"zone": location, "rack": location, "host": location})
+	}
+	scheduler, err := CreateScheduler(writeType, oc, storage.NewStorageWithMemoryBackend(), nil)
+	require.NoError(tb, err)
+	bs := newBalanceSolver(scheduler.(*hotScheduler), tc, utils.Write, movePeer)
+	bs.cur = &solution{
+		srcStore: &statistics.StoreLoadDetail{StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: tc.GetStore(1)}},
+		dstStore: &statistics.StoreLoadDetail{StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: tc.GetStore(2)}},
+	}
+	return bs, []*core.RegionInfo{
+		tc.AddLeaderRegion(1, 2, 4, 5),
+		tc.AddLeaderRegion(2, 2, 3, 4),
+	}
+}
+
+func TestRevertRegionLocationCache(t *testing.T) {
+	re := require.New(t)
+	bs, regions := prepareRevertLocationSolver(t, []string{"host"})
+	cache := make(map[revertLocationKey]bool)
+	for range 2 {
+		re.True(bs.isRevertRegionValid(regions[0], nil, cache))
+		re.False(bs.isRevertRegionValid(regions[1], nil, cache))
+	}
+	re.Len(cache, 2)
+
+	// The same Region ID can acquire a different layout during the scan.
+	updated := regions[0].Clone(core.SetPeers(regions[1].GetPeers()))
+	re.False(bs.isRevertRegionValid(updated, nil, cache))
+
+	// Replacing another peer in the same Region needs an independent result.
+	bs.cur.dstStore.StoreInfo = bs.GetStore(3)
+	re.True(bs.isRevertRegionValid(regions[1], nil, cache))
+	re.Len(cache, 4)
+
+	// A new main source store starts a new cache for its reverse target.
+	bs.cur.srcStore.StoreInfo = bs.GetStore(5)
+	bs.cur.dstStore.StoreInfo = bs.GetStore(2)
+	cache = make(map[revertLocationKey]bool)
+	re.True(bs.isRevertRegionValid(regions[1], nil, cache))
+	re.Len(cache, 1)
+}
+
+func TestRevertRegionLocationWithoutLabels(t *testing.T) {
+	re := require.New(t)
+	bs, regions := prepareRevertLocationSolver(t, nil)
+	cache := make(map[revertLocationKey]bool)
+	for _, region := range regions {
+		re.True(bs.isRevertRegionValid(region, nil, cache))
+	}
+	re.Empty(cache)
+}
+
+func BenchmarkRevertRegionLocationSafeguard(b *testing.B) {
+	for _, labels := range [][]string{nil, {"host"}, {"zone", "rack", "host"}} {
+		name := strings.Join(labels, ",")
+		if len(labels) == 0 {
+			name = "no-labels"
+		}
+		b.Run(name, func(b *testing.B) {
+			bs, templates := prepareRevertLocationSolver(b, labels)
+			regions := make([]*core.RegionInfo, 1000)
+			for i := range regions {
+				regions[i] = templates[i%len(templates)].Clone(core.WithNewRegionID(uint64(i + 1)))
+			}
+			for _, cached := range []bool{false, true} {
+				mode := "uncached"
+				if cached {
+					mode = "cached"
+				}
+				b.Run(mode, func(b *testing.B) {
+					b.ReportAllocs()
+					// One iteration scans 1000 reverse Regions for 1000 main Regions.
+					for b.Loop() {
+						var cache map[revertLocationKey]bool
+						if cached && len(labels) > 0 {
+							cache = make(map[revertLocationKey]bool)
+						}
+						allowed := 0
+						for range 1000 {
+							for _, region := range regions {
+								if bs.isRevertRegionValid(region, nil, cache) {
+									allowed++
+								}
+							}
+						}
+						expected := 500000
+						if len(labels) == 0 {
+							expected = 1000000
+						}
+						if allowed != expected {
+							b.Fatalf("expected %d allowed candidates, got %d", expected, allowed)
+						}
+					}
+				})
+			}
+		})
+	}
 }
 
 func TestBucketFirstStat(t *testing.T) {
