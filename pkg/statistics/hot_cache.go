@@ -19,6 +19,7 @@ import (
 
 	"github.com/smallnest/chanx"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
@@ -36,9 +37,10 @@ type HotCache struct {
 	readCache  *HotPeerCache
 	// Region metadata is coalesced separately so read sampling pressure cannot
 	// hold up region publication on the heartbeat path.
-	regionMetaMu      syncutil.Mutex
-	regionMetaUpdates map[uint64]regionMetadataUpdate
-	regionMetaReady   chan struct{}
+	regionMetaMu       syncutil.Mutex
+	regionMetaUpdates  map[uint64]regionMetadataUpdate
+	regionMetaInFlight map[uint64]regionMetadataUpdate
+	regionMetaReady    chan struct{}
 }
 
 type regionMetadataUpdate struct {
@@ -109,7 +111,13 @@ func (w *HotCache) enqueueReadRegionMetadata(region *core.RegionInfo) {
 		return
 	}
 	previous, exists := w.regionMetaUpdates[region.GetID()]
-	if !exists || !isReadRegionMetadataStale(update.meta, update.term, previous.meta, previous.term) {
+	latest := previous
+	if !exists {
+		latest = w.regionMetaInFlight[region.GetID()]
+	}
+	// The detached batch still fences admission until replay finishes. The
+	// root can catch up before replay, leaving no cold-cache version marker.
+	if latest.meta == nil || !isReadRegionMetadataStale(update.meta, update.term, latest.meta, latest.term) {
 		if exists {
 			update.previous = previous.previous
 			// Fold repeated metadata while retaining significant transitions.
@@ -374,7 +382,9 @@ func (w *HotCache) applyReadRegionMetadata(spare map[uint64]regionMetadataUpdate
 		return spare
 	}
 	w.regionMetaUpdates = spare
+	w.regionMetaInFlight = batch
 	w.regionMetaMu.Unlock()
+	failpoint.InjectCall("afterReadRegionMetadataBatchSwap")
 	previousGC := w.readCache.lastGCTime
 	for _, update := range batch {
 		if w.ctx.Err() != nil {
@@ -382,6 +392,9 @@ func (w *HotCache) applyReadRegionMetadata(spare map[uint64]regionMetadataUpdate
 		}
 		update.apply(w.ctx, w.readCache)
 	}
+	w.regionMetaMu.Lock()
+	w.regionMetaInFlight = nil
+	w.regionMetaMu.Unlock()
 	clear(batch)
 	if w.readCache.lastGCTime != previousGC {
 		w.gcReadMetadata()

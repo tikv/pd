@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
@@ -546,6 +547,71 @@ func TestRecreatedRegionResetsReadLeader(t *testing.T) {
 				})
 			})
 		}
+	}
+}
+
+func TestInFlightReadMetadataRejectsStaleHeartbeat(t *testing.T) {
+	for _, tc := range []struct {
+		name                  string
+		epoch                 string
+		originalTerm, newTerm uint64
+		staleTerm             uint64
+	}{
+		{name: "term", originalTerm: 10, newTerm: 11, staleTerm: 10},
+		{name: "confver", epoch: "confver", originalTerm: 10, newTerm: 10, staleTerm: 10},
+		{name: "confver-newer-term", epoch: "confver", originalTerm: 10, newTerm: 10, staleTerm: 11},
+		{name: "confver-unknown-term", epoch: "confver"},
+		{name: "version", epoch: "version", originalTerm: 10, newTerm: 10, staleTerm: 10},
+		{name: "version-newer-term", epoch: "version", originalTerm: 10, newTerm: 10, staleTerm: 11},
+		{name: "version-unknown-term", epoch: "version"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				cluster, cache, original, loads := newHotReadCache(t, nil)
+				original = withHeartbeatTerm(original, tc.originalTerm)
+				cluster.PutRegion(original)
+				latest := withHeartbeatTerm(original.Clone(core.WithLeader(original.GetStorePeer(2))), tc.newTerm)
+				storeID := uint64(1)
+				if tc.epoch != "" {
+					cluster.PutStore(core.NewStoreInfo(&metapb.Store{Id: 4}))
+					increment := core.WithIncConfVer()
+					if tc.epoch == "version" {
+						increment = core.WithIncVersion()
+					}
+					latest = latest.Clone(core.WithRemoveStorePeer(3), core.WithAddPeer(&metapb.Peer{Id: 4, StoreId: 4}), increment)
+					storeID = 4
+				}
+				started, release := make(chan struct{}), make(chan struct{})
+				unblock := sync.OnceFunc(func() { close(release) })
+				fp := "github.com/tikv/pd/pkg/statistics/afterReadRegionMetadataBatchSwap"
+				require.NoError(t, failpoint.EnableCall(fp, sync.OnceFunc(func() {
+					close(started)
+					<-release
+				})))
+				t.Cleanup(func() {
+					unblock()
+					require.NoError(t, failpoint.Disable(fp))
+				})
+				cache.CheckRegionFlowAsync(latest)
+				<-started
+				stale := withHeartbeatTerm(original, tc.staleTerm)
+				_, _, err := cluster.PreCheckPutRegion(stale)
+				require.NoError(t, err, "the older heartbeat must pass admission against the old root")
+				cache.CheckRegionFlowAsync(stale)
+				_, err = cluster.CheckAndPutRootTree(core.ContextTODO(), latest)
+				require.NoError(t, err)
+				unblock()
+				_ = cache.GetHotPeerStats(utils.Read, 0)
+				_, err = cluster.CheckAndPutRootTree(core.ContextTODO(), stale)
+				require.Error(t, err, "final root validation must reject the delayed heartbeat")
+				for range 3 {
+					require.True(t, cache.CheckReadPeerAsync(latest, latest.GetStorePeer(storeID), loads, utils.StoreHeartBeatReportInterval))
+				}
+				after := cache.GetHotPeerStats(utils.Read, 0)
+				require.Len(t, after[storeID], 1, "current peer samples must survive an older detached heartbeat")
+				require.False(t, after[storeID][0].IsLeader(), "older metadata must not roll back leadership")
+			})
+		})
 	}
 }
 
