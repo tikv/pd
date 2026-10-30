@@ -83,7 +83,7 @@ func (h *schedulerHandler) GetSchedulers(w http.ResponseWriter, r *http.Request)
 //	@Accept		json
 //	@Param		body	body	object	true	"json params"
 //	@Produce	json
-//	@Success	200	{string}	string	"The scheduler is created."
+//	@Success	200	{string}	string	"The scheduler is created. For balance-range-scheduler, returns the created job ID as a decimal string."
 //	@Failure	400	{string}	string	"Bad format request."
 //	@Failure	500	{string}	string	"PD server failed to proceed the request."
 //	@Router		/schedulers [post]
@@ -111,8 +111,19 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 
 	switch tp {
 	case types.BalanceRangeScheduler:
-		exist, _ := h.IsSchedulerExisted(name)
+		exist, err := h.IsSchedulerExisted(name)
+		if err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		if exist {
+			// A previous create may have registered the scheduler but failed to
+			// persist the scheduler list. Persist it again so that a success
+			// response always means the scheduler is persisted.
+			if err := h.PersistScheduleConfig(); err != nil {
+				h.r.JSON(w, http.StatusInternalServerError, err.Error())
+				return
+			}
 			handler, err := h.GetSchedulerConfigHandler()
 			if err == nil && handler != nil {
 				r.URL.Path = path.Join(server.SchedulerConfigHandlerPath, string(types.BalanceRangeScheduler), "job")
@@ -153,7 +164,11 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 			}
 		}
 
-		if err := apiutil.CollectStringOption("alias", input, collector); err != nil {
+		// The slice decoder unescapes the alias, so escape it here to keep the raw
+		// alias, the same as the one stored by the job handler.
+		if err := apiutil.CollectStringOption("alias", input, func(v string) {
+			collector(url.QueryEscape(v))
+		}); err != nil {
 			h.r.JSON(w, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -299,6 +314,10 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 
 	if err := h.AddScheduler(tp, args...); err != nil {
 		h.r.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if tp == types.BalanceRangeScheduler {
+		h.r.JSON(w, http.StatusOK, strconv.FormatUint(schedulers.BalanceRangeFirstJobID, 10))
 		return
 	}
 

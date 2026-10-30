@@ -179,7 +179,22 @@ func (ci *clientInner) requestWithRetry(
 		// Backoffer also needs to check the status code to determine whether to retry.
 		return err != nil && !noNeedRetryForRequest(reqInfo, statusCode)
 	}, false)
-	return bo.Exec(ctx, execFunc)
+	// The checker above may be ignored if the caller has set its own, so stop
+	// the backoffer here once the request has taken effect on the server.
+	var committedErr error
+	err = bo.Exec(ctx, func() error {
+		if execErr := execFunc(); execErr != nil {
+			if !isCommittedResponse(reqInfo, statusCode) {
+				return execErr
+			}
+			committedErr = execErr
+		}
+		return nil
+	})
+	if committedErr != nil {
+		return committedErr
+	}
+	return err
 }
 
 func noNeedRetry(statusCode int) bool {
@@ -189,10 +204,18 @@ func noNeedRetry(statusCode int) bool {
 }
 
 func noNeedRetryForRequest(reqInfo *requestInfo, statusCode int) bool {
-	if noNeedRetry(statusCode) {
+	if noNeedRetry(statusCode) || isCommittedResponse(reqInfo, statusCode) {
 		return true
 	}
 	return reqInfo.name == UpdateKeyspaceConfigName && statusCode == http.StatusConflict
+}
+
+// isCommittedResponse reports whether the request has taken effect on the
+// server and must not be replayed. A 200 means the scheduler has been created,
+// so do not replay the non-idempotent creation even if the response body
+// cannot be decoded.
+func isCommittedResponse(reqInfo *requestInfo, statusCode int) bool {
+	return reqInfo.name == createSchedulerNameWithInput && statusCode == http.StatusOK
 }
 
 func (ci *clientInner) doRequest(
