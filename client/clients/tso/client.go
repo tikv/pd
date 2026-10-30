@@ -145,6 +145,7 @@ func (c *Cli) GetRequestPool() *sync.Pool {
 // Setup initializes the TSO client.
 func (c *Cli) Setup() {
 	// Daemon goroutine to update the connectionCtxs periodically and handle the `connectionCtxs` update event.
+	c.wg.Add(1)
 	go c.connectionCtxsUpdater()
 	if err := c.svcDiscovery.CheckMemberChanged(); err != nil {
 		log.Warn("[tso] failed to check member changed", errs.ZapError(err))
@@ -278,6 +279,7 @@ func (c *Cli) backupClientConn() (*grpc.ClientConn, string) {
 
 // connectionCtxsUpdater updates the `connectionCtxs` regularly.
 func (c *Cli) connectionCtxsUpdater() {
+	defer c.wg.Done()
 	log.Info("[tso] start tso connection contexts updater")
 
 	var updateTicker = &time.Ticker{}
@@ -435,6 +437,7 @@ func (c *Cli) tryConnectToTSO(ctx context.Context) error {
 					return nil
 				}
 				// the goroutine is used to check the network and change back to the original stream
+				c.wg.Add(1)
 				go c.checkLeader(ctx, cancel, forwardedHostTrim, addr, url)
 				metrics.RequestForwarded.WithLabelValues(forwardedHostTrim, addr).Set(1)
 				return nil
@@ -450,6 +453,7 @@ func (c *Cli) checkLeader(
 	forwardCancel context.CancelFunc,
 	forwardedHostTrim, addr, url string,
 ) {
+	defer c.wg.Done()
 	defer func() {
 		// cancel the forward stream
 		forwardCancel()

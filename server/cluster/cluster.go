@@ -1348,7 +1348,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 	region.Inherit(origin, c.GetStoreConfig().IsEnableRegionBucket())
 
 	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
-		cluster.HandleStatsAsync(c, region)
+		cluster.HandleStatsWithOriginAsync(c, region, origin)
 	}
 	tracer.OnAsyncHotStatsFinished()
 	hasRegionStats := c.regionStats != nil
@@ -2226,7 +2226,7 @@ func (c *RaftCluster) calculateRange(
 			logutil.ZapRedactString("start-key", string(core.HexRegionKey(startKey))),
 			logutil.ZapRedactString("end-key", string(core.HexRegionKey(endKey))),
 			zap.Uint64("store-id", store.GetID()),
-			zap.String("rule", rule.String()),
+			logutil.ZapRedactString("rule", rule.String()),
 			zap.Int64("region-size", ruleRegionSize),
 			zap.Float64("weight", weight),
 			zap.Float64("store-size", storeSize),

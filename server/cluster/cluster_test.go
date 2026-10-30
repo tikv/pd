@@ -22,6 +22,7 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -32,6 +33,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
+	"go.uber.org/zap"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -46,6 +48,7 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
+	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/mock/mockhbstream"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/progress"
@@ -2197,6 +2200,64 @@ func TestRegionSizeCacheAcrossStoresAndRules(t *testing.T) {
 	nextRoundRegionSizes := newRegionSizeCache(loader)
 	re.Equal(threshold1, cluster.getThreshold(stores, cluster.GetStore(1), &kr, nextRoundRegionSizes))
 	re.Equal(2, loadCounts[regionSizeCacheKey{startKey: "a", endKey: "m"}])
+}
+
+func TestCalculateRangeLogRedact(t *testing.T) {
+	for _, mode := range []struct {
+		name string
+		typ  logutil.RedactInfoLogType
+	}{
+		{"off", logutil.RedactInfoLogOFF},
+		{"on", logutil.RedactInfoLogON},
+		{"marker", logutil.RedactInfoLogMarker},
+	} {
+		t.Run(mode.name, func(t *testing.T) {
+			re := require.New(t)
+			manager := placement.NewRuleManager(context.Background(), storage.NewStorageWithMemoryBackend(), nil, mockconfig.NewTestOptions())
+			re.NoError(manager.Initialize(1, nil, "", false))
+			rule := &placement.Rule{
+				GroupID: placement.DefaultGroupID, ID: "range", Index: 1, Override: true,
+				StartKeyHex: "6161", EndKeyHex: "7a7a", Role: placement.Voter, Count: 1,
+			}
+			re.NoError(manager.SetRule(rule))
+			cluster := &RaftCluster{ruleManager: manager}
+			store := core.NewStoreInfo(&metapb.Store{Id: 1})
+			regionSizes := newRegionSizeCache(func(startKey, endKey []byte) int64 {
+				re.Equal([]byte("ab"), startKey)
+				re.Equal([]byte("zy"), endKey)
+				return 100
+			})
+
+			fname := testutil.InitTempFileLogger(t, "debug")
+			var (
+				lg    *zap.Logger
+				props *log.ZapProperties
+			)
+			re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, mode.typ))
+			t.Cleanup(func() {
+				re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, logutil.RedactInfoLogOFF))
+			})
+			// Use a subrange so unredacted rule boundaries cannot hide behind range fields.
+			re.Equal(100.0, cluster.calculateRange([]*core.StoreInfo{store}, store, []byte("ab"), []byte("zy"), regionSizes))
+
+			output, err := os.ReadFile(fname)
+			re.NoError(err)
+			re.Contains(string(output), "calculate range result")
+			if mode.typ == logutil.RedactInfoLogON {
+				re.Contains(string(output), "[rule=?]")
+				re.NotContains(string(output), rule.StartKeyHex)
+				re.NotContains(string(output), rule.EndKeyHex)
+			} else {
+				re.Contains(string(output), rule.StartKeyHex)
+				re.Contains(string(output), rule.EndKeyHex)
+				if mode.typ == logutil.RedactInfoLogMarker {
+					re.Contains(string(output), `[rule="‹{`)
+				}
+			}
+			re.Equal("6161", rule.StartKeyHex)
+			re.Equal("7a7a", rule.EndKeyHex)
+		})
+	}
 }
 
 func TestStatsRegions(t *testing.T) {

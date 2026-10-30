@@ -933,9 +933,6 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 		} else {
 			r := region.GetRegionEpoch()
 			o := origin.GetRegionEpoch()
-			if region.GetTerm() > origin.GetTerm() {
-				saveCache = true
-			}
 			if r.GetVersion() > o.GetVersion() {
 				if log.GetLevel() <= zap.InfoLevel {
 					info("region Version changed",
@@ -968,6 +965,10 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 				}
 				// We check it first and do not return because the log is important for us to investigate,
 				saveCache, needSync = true, true
+			}
+			// Remember elections even when the leader and rounded flow are unchanged.
+			if region.GetTerm() > origin.GetTerm() {
+				saveCache = true
 			}
 			if len(region.GetPeers()) != len(origin.GetPeers()) {
 				saveKV, saveCache = true, true

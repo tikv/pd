@@ -473,16 +473,26 @@ func TestNeedSync(t *testing.T) {
 }
 
 func TestRegionGuideTermChanged(t *testing.T) {
-	origin := NewTestRegionInfo(1, 1, nil, nil)
-	origin.term = 10
-	guide := GenerateRegionGuideFunc(false)
-	for _, term := range []uint64{0, 10, 11} {
-		t.Run(strconv.FormatUint(term, 10), func(t *testing.T) {
+	regionGuide := GenerateRegionGuideFunc(false)
+	for _, tc := range []struct {
+		name             string
+		originTerm, term uint64
+		saveCache        bool
+	}{
+		{name: "unknown-terms"},
+		{name: "first-known-term", term: 10, saveCache: true},
+		{name: "unchanged-term", originTerm: 10, term: 10},
+		{name: "new-term", originTerm: 10, term: 12, saveCache: true},
+		{name: "unknown-current-term", originTerm: 10},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			origin := NewRegionInfo(&metapb.Region{Id: 1}, &metapb.Peer{Id: 1, StoreId: 1})
+			origin.term = tc.originTerm
 			region := origin.Clone()
-			region.term = term
-			saveKV, saveCache, needSync, retained := guide(ContextTODO(), region, origin)
+			region.term = tc.term
+			saveKV, saveCache, needSync, retained := regionGuide(ContextTODO(), region, origin)
 			require.False(t, saveKV)
-			require.Equal(t, term > origin.term, saveCache)
+			require.Equal(t, tc.saveCache, saveCache)
 			require.False(t, needSync)
 			require.False(t, retained)
 		})
