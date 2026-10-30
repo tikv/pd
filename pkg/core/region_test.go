@@ -472,6 +472,33 @@ func TestNeedSync(t *testing.T) {
 	}
 }
 
+func TestRegionGuideTermChanged(t *testing.T) {
+	regionGuide := GenerateRegionGuideFunc(false)
+	for _, tc := range []struct {
+		name             string
+		originTerm, term uint64
+		saveCache        bool
+	}{
+		{name: "unknown-terms"},
+		{name: "first-known-term", term: 10, saveCache: true},
+		{name: "unchanged-term", originTerm: 10, term: 10},
+		{name: "new-term", originTerm: 10, term: 12, saveCache: true},
+		{name: "unknown-current-term", originTerm: 10},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			origin := NewRegionInfo(&metapb.Region{Id: 1}, &metapb.Peer{Id: 1, StoreId: 1})
+			origin.term = tc.originTerm
+			region := origin.Clone()
+			region.term = tc.term
+			saveKV, saveCache, needSync, retained := regionGuide(ContextTODO(), region, origin)
+			require.False(t, saveKV)
+			require.Equal(t, tc.saveCache, saveCache)
+			require.False(t, needSync)
+			require.False(t, retained)
+		})
+	}
+}
+
 func TestRegionGuideLogicalStorageSizeChanged(t *testing.T) {
 	regionGuide := GenerateRegionGuideFunc(false)
 	origin := NewRegionInfo(&metapb.Region{Id: 1}, nil)

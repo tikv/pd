@@ -95,7 +95,10 @@ func newRegionFlowTasks(region, origin *core.RegionInfo) (checkExpiredTask, chec
 	}
 	if origin != nil {
 		previousLeader := origin.GetLeader().GetStoreId()
-		regionInfo.leaderTransferred = previousLeader != 0 && regionInfo.leaderStoreID != 0 && previousLeader != regionInfo.leaderStoreID
+		// A leader can leave and return between heartbeats observed by PD.
+		termIncreased := origin.GetTerm() != 0 && region.GetTerm() > origin.GetTerm()
+		regionInfo.leaderTransferred = previousLeader != 0 && regionInfo.leaderStoreID != 0 &&
+			(previousLeader != regionInfo.leaderStoreID || termIncreased)
 	}
 	reportInterval := region.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
