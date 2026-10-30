@@ -28,7 +28,7 @@ func IsRegionHealthy(region *core.RegionInfo) bool {
 // IsRegionHealthyAllowPending checks if a region is healthy for scheduling.
 // Differs from IsRegionHealthy, it allows the region to have pending peers.
 func IsRegionHealthyAllowPending(region *core.RegionInfo) bool {
-	return !hasDownPeers(region)
+	return !region.IsRecoverySchedulingBlocked() && !hasDownPeers(region)
 }
 
 func hasPendingPeers(region *core.RegionInfo) bool {

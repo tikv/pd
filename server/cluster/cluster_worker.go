@@ -38,6 +38,7 @@ import (
 
 // HandleRegionHeartbeat processes RegionInfo reports from client.
 func (c *RaftCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
+	region = core.NormalizeRegionRecoveryStatus(region, c.GetStore(region.GetLeader().GetStoreId()))
 	tracer := core.NewNoopHeartbeatProcessTracer()
 	if c.GetScheduleConfig().EnableHeartbeatBreakdownMetrics {
 		tracer = core.NewHeartbeatProcessTracer()
@@ -83,6 +84,9 @@ func (c *RaftCluster) HandleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSp
 		return nil, errs.ErrSchedulerTiKVSplitDisabled.FastGenByArgs()
 	}
 	reqRegion := request.GetRegion()
+	if region := c.GetRegion(reqRegion.GetId()); region != nil && region.IsRecoverySchedulingBlocked() {
+		return nil, errors.New("region split is paused during recovery")
+	}
 	err := c.ValidRegion(reqRegion)
 	if err != nil {
 		return nil, err
@@ -128,6 +132,9 @@ func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 		return nil, errs.ErrSchedulerTiKVSplitDisabled.FastGenByArgs()
 	}
 	reqRegion := request.GetRegion()
+	if region := c.GetRegion(reqRegion.GetId()); region != nil && region.IsRecoverySchedulingBlocked() {
+		return nil, errors.New("region split is paused during recovery")
+	}
 	splitCount := request.GetSplitCount()
 	err := c.ValidRegion(reqRegion)
 	if err != nil {

@@ -110,6 +110,19 @@ func (s *RegionSyncer) handleRegionSyncResponse(
 	regions := resp.GetRegions()
 	buckets := resp.GetBuckets()
 	regionLeaders := resp.GetRegionLeaders()
+	recoveryByID := make(map[uint64]*pdpb.RegionRecoveryStatus, len(resp.GetRegionRecoveryInfos()))
+	for _, info := range resp.GetRegionRecoveryInfos() {
+		if previous, duplicate := recoveryByID[info.GetRegionId()]; duplicate {
+			// A malformed duplicate cannot assert readiness or erase a durable floor.
+			recoveryByID[info.GetRegionId()] = &pdpb.RegionRecoveryStatus{
+				RequiredReaderProtocolVersion: max(previous.GetRequiredReaderProtocolVersion(), info.GetStatus().GetRequiredReaderProtocolVersion()),
+			}
+		} else if info.GetStatus() == nil {
+			recoveryByID[info.GetRegionId()] = &pdpb.RegionRecoveryStatus{}
+		} else {
+			recoveryByID[info.GetRegionId()] = info.GetStatus()
+		}
+	}
 	startFullSync := !fullSyncing && !s.IsRunning() && resp.GetStartIndex() == 0 && len(regions) > 0
 	inFullSync := fullSyncing || startFullSync
 	// During a full sync, intermediate data frames carry a positional
@@ -145,13 +158,18 @@ func (s *RegionSyncer) handleRegionSyncResponse(
 		if hasBuckets {
 			opts = append(opts, core.SetBuckets(buckets[i]))
 		}
+		if status := recoveryByID[r.GetId()]; status != nil {
+			opts = append(opts, core.WithRecoveryStatus(status))
+		}
 		region = core.NewRegionInfo(r, regionLeader, opts...)
+		region = core.NormalizeRegionRecoveryStatus(region, bc.GetStore(regionLeader.GetStoreId()))
 
 		origin, _, err := bc.PreCheckPutRegion(region)
 		if err != nil {
 			log.Debug("region is stale", zap.Stringer("origin", origin.GetMeta()), errs.ZapError(err))
 			continue
 		}
+		region.InheritReaderProtocolVersion(origin)
 		cctx := &core.MetaProcessContext{
 			Context:    ctx,
 			TaskRunner: ratelimit.NewSyncRunner(),
@@ -159,7 +177,13 @@ func (s *RegionSyncer) handleRegionSyncResponse(
 			// no limit for followers.
 		}
 		saveKV, _, _, _ := regionGuide(cctx, region, origin)
-		overlaps := bc.PutRegion(region)
+		// A former sync client may overlap the new leader's heartbeat during a
+		// role change. Revalidate metadata and the reader floor at the cache write.
+		overlaps, err := bc.AtomicCheckAndPutRegion(cctx, region)
+		if err != nil {
+			log.Debug("region sync superseded by a concurrent update", zap.Uint64("region-id", region.GetID()), errs.ZapError(err))
+			continue
+		}
 
 		if saveKV {
 			err = regionStorage.SaveRegion(r)

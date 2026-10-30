@@ -20,6 +20,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -134,5 +135,37 @@ func (suite *balanceWitnessSchedulerTestSuite) TestTransferWitnessOut() {
 	re.Len(regions, 3)
 	for _, count := range targets {
 		re.Zero(count)
+	}
+}
+
+func (suite *balanceWitnessSchedulerTestSuite) TestLogStoreBalanceMigratesWitness() {
+	suite.tc.SetEnableWitness(true)
+	suite.tc.AddLeaderStore(1, 1)
+	suite.tc.AddLeaderStore(2, 1)
+	suite.tc.AddWitnessStore(3, 100)
+	suite.tc.AddWitnessStore(4, 0)
+	for _, id := range []uint64{1, 2} {
+		suite.tc.SetStoreLabel(id, map[string]string{core.StoreCapabilityLabel: core.FullStoreCapability})
+	}
+	for _, id := range []uint64{3, 4} {
+		suite.tc.SetStoreLabel(id, map[string]string{core.StoreCapabilityLabel: core.LogOnlyStoreCapability})
+	}
+	for _, id := range []uint64{1, 2, 3, 4} {
+		suite.tc.PutStore(suite.tc.GetStore(id).Clone(core.SetStoreLogOnlyProtocolVersion(core.LogOnlyProtocolVersion)))
+	}
+	suite.Require().NoError(suite.tc.SetRules([]*placement.Rule{
+		{GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID, Role: placement.Voter, Count: 2},
+		{GroupID: placement.DefaultGroupID, ID: "log", Role: placement.Voter, Count: 1, IsWitness: true},
+	}))
+	suite.tc.AddLeaderRegionWithWitness(1, 1, []uint64{2, 3}, 3)
+	ops := suite.schedule()
+	suite.Require().Len(ops, 1)
+	add, ok := ops[0].Step(0).(operator.AddLearner)
+	suite.Require().True(ok)
+	suite.Equal(uint64(4), add.ToStore)
+	suite.True(add.IsWitness)
+	for i := range ops[0].Len() {
+		_, switchToFull := ops[0].Step(i).(operator.BecomeNonWitness)
+		suite.False(switchToFull)
 	}
 }

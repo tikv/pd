@@ -39,6 +39,24 @@ func SetStoreAddress(address, statusAddress, peerAddress string) StoreCreateOpti
 	}
 }
 
+// SetStoreLogOnlyProtocolVersion records the Store's negotiated protocol.
+func SetStoreLogOnlyProtocolVersion(version uint32) StoreCreateOption {
+	return func(store *StoreInfo) {
+		meta := typeutil.DeepClone(store.meta, StoreFactory)
+		meta.LogOnlyProtocolVersion = version
+		store.meta = meta
+	}
+}
+
+// SetStoreTxnProtocolVersionRange records the Store's transaction protocol bounds.
+func SetStoreTxnProtocolVersionRange(versionRange *metapb.TxnProtocolVersionRange) StoreCreateOption {
+	return func(store *StoreInfo) {
+		meta := typeutil.DeepClone(store.meta, StoreFactory)
+		meta.TxnProtocolVersionRange = versionRange
+		store.meta = meta
+	}
+}
+
 // SetStoreLabels sets the labels for the store.
 func SetStoreLabels(labels []*metapb.StoreLabel) StoreCreateOption {
 	return func(store *StoreInfo) {

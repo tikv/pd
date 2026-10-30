@@ -95,6 +95,9 @@ func NewRegionDownFilter() RegionFilter {
 
 // Select implements the RegionFilter interface.
 func (*regionDownFilter) Select(region *core.RegionInfo) *plan.Status {
+	if region.IsRecoverySchedulingBlocked() {
+		return statusRegionRecovering
+	}
 	if hasDownPeers(region) {
 		return statusRegionDownPeer
 	}

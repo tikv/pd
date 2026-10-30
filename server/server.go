@@ -50,6 +50,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/resource_manager"
+	"github.com/pingcap/kvproto/pkg/schedulingpb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
@@ -241,6 +242,7 @@ type Server struct {
 	registry                         *registry.ServiceRegistry
 	isKeyspaceGroupEnabled           bool
 	servicePrimaryMap                sync.Map /* Store as map[string]string */
+	schedulingPrimaryCapability      atomic.Pointer[schedulingpb.Participant]
 	tsoPrimaryWatcher                *etcdutil.LoopWatcher
 	schedulingPrimaryWatcher         *etcdutil.LoopWatcher
 	resourceManagerPrimaryWatcher    *etcdutil.LoopWatcher
@@ -904,7 +906,9 @@ func (s *Server) GetClientScheme() string {
 
 // GetMemberInfo returns the server member information.
 func (s *Server) GetMemberInfo() *pdpb.Member {
-	return typeutil.DeepClone(s.member.Member(), core.MemberFactory)
+	member := typeutil.DeepClone(s.member.Member(), core.MemberFactory)
+	member.LogOnlyProtocolVersion = core.LogOnlyProtocolVersion
+	return member
 }
 
 // GetHandler returns the handler for API.
@@ -2439,6 +2443,23 @@ func (s *Server) GetServicePrimaryAddr(ctx context.Context, serviceName string) 
 	return "", false
 }
 
+// getLogOnlyProtocolVersion negotiates with the active Scheduling primary.
+// Missing or mismatched election metadata cannot authorize new LogOnly peers.
+func (s *Server) getLogOnlyProtocolVersion() uint32 {
+	if !s.IsServiceIndependent(mcs.SchedulingServiceName) {
+		return core.LogOnlyProtocolVersion
+	}
+	primary := s.schedulingPrimaryCapability.Load()
+	if primary == nil || len(primary.GetListenUrls()) == 0 {
+		return 0
+	}
+	address, ok := s.servicePrimaryMap.Load(mcs.SchedulingServiceName)
+	if !ok || address.(string) != primary.GetListenUrls()[0] {
+		return 0
+	}
+	return min(core.LogOnlyProtocolVersion, primary.GetLogOnlyProtocolVersion())
+}
+
 // SetServicePrimaryAddr sets the primary address directly.
 // Note: This function is only used for test.
 func (s *Server) SetServicePrimaryAddr(serviceName, addr string) {
@@ -2485,6 +2506,9 @@ func (s *Server) initServicePrimaryWatcher(serviceName string, primaryKey string
 		if err := proto.Unmarshal(kv.Value, primary); err != nil {
 			return err
 		}
+		if participant, ok := primary.(*schedulingpb.Participant); ok {
+			s.schedulingPrimaryCapability.Store(participant)
+		}
 		listenUrls := primary.GetListenUrls()
 		if len(listenUrls) > 0 {
 			// listenUrls[0] is the primary service endpoint of the keyspace group
@@ -2501,6 +2525,9 @@ func (s *Server) initServicePrimaryWatcher(serviceName string, primaryKey string
 		}
 		log.Info("delete service primary", zap.String("service-name", serviceName), zap.String("old-primary", oldPrimary))
 		s.servicePrimaryMap.Delete(serviceName)
+		if serviceName == mcs.SchedulingServiceName {
+			s.schedulingPrimaryCapability.Store(nil)
+		}
 		return nil
 	}
 	name := fmt.Sprintf("%s-primary-watcher", serviceName)

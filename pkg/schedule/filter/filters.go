@@ -714,6 +714,13 @@ func (*ruleFitFilter) Source(config.SharedConfigProvider, *core.StoreInfo) *plan
 // RegionA:[1,2,3], move peer1 --> peer2 will not allow, because it's count not match the rule.
 // but transfer role peer1 --> peer2, it will support.
 func (f *ruleFitFilter) Target(_ config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
+	if store.GetMeta().GetLogOnlyProtocolVersion() < core.RequiredPeerProtocolVersion(f.cluster, f.region) {
+		return statusStoreNotMatchRule
+	}
+	peer := f.region.GetStorePeer(f.srcStore)
+	if peer != nil && !store.SupportsPeerCapability(peer.GetIsWitness()) {
+		return statusStoreNotMatchRule
+	}
 	if f.oldFit.Replace(f.srcStore, store) {
 		return statusOK
 	}
@@ -765,6 +772,12 @@ func (*ruleLeaderFitFilter) Source(config.SharedConfigProvider, *core.StoreInfo)
 
 // Target filters stores when select them as schedule target.
 func (f *ruleLeaderFitFilter) Target(_ config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
+	if store.GetMeta().GetLogOnlyProtocolVersion() < core.RequiredPeerProtocolVersion(f.cluster, f.region) {
+		return statusStoreNotMatchRule
+	}
+	if !store.SupportsPeerCapability(false) {
+		return statusStoreNotMatchRule
+	}
 	targetStoreID := store.GetID()
 	targetPeer := f.region.GetStorePeer(targetStoreID)
 	if targetPeer == nil && !f.allowMoveLeader {
@@ -821,6 +834,9 @@ func (*ruleWitnessFitFilter) Source(config.SharedConfigProvider, *core.StoreInfo
 
 // Target filters stores when select them as schedule target.
 func (f *ruleWitnessFitFilter) Target(_ config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
+	if store.GetMeta().GetLogOnlyProtocolVersion() < core.RequiredPeerProtocolVersion(f.cluster, f.region) {
+		return statusStoreNotMatchRule
+	}
 	targetStoreID := store.GetID()
 	targetPeer := f.region.GetStorePeer(targetStoreID)
 	if targetPeer == nil {

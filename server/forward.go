@@ -33,10 +33,13 @@ import (
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/schedule/hbstream"
+	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -333,6 +336,13 @@ func forwardRegionHeartbeatToScheduling(rc *cluster.RaftCluster, forwardStream s
 				}
 			}
 		}
+		if resp.GetChangePeer() != nil || resp.GetTransferLeader() != nil || resp.GetMerge() != nil || resp.GetSplitRegion() != nil || resp.GetChangePeerV2() != nil || resp.GetSwitchWitnesses() != nil || resp.GetChangeSplit() != nil {
+			region := rc.GetRegion(resp.GetRegionId())
+			if err := validateForwardedSchedulingCommand(rc.GetBasicCluster(), region, resp); err != nil {
+				log.Warn("reject forwarded scheduling command", zap.Uint64("region-id", resp.GetRegionId()), errs.ZapError(err))
+				continue
+			}
+		}
 		response := &pdpb.RegionHeartbeatResponse{
 			Header: &pdpb.ResponseHeader{
 				ClusterId: resp.GetHeader().GetClusterId(),
@@ -626,6 +636,20 @@ func (s *GrpcServer) getTSOForwardStream(forwardedHost string) (*streamWrapper, 
 	}
 	s.tsoClientPool.clients[forwardedHost] = forwardStream
 	return forwardStream, nil
+}
+
+// Validate again at the API forwarding boundary, where the current heartbeat
+// cache may be newer than an independent Scheduling service's view.
+func validateForwardedSchedulingCommand(ci *core.BasicCluster, region *core.RegionInfo, response *schedulingpb.RegionHeartbeatResponse) error {
+	if region == nil || region.GetLeader().GetId() != response.GetTargetPeer().GetId() {
+		return errors.New("scheduling response targets a stale Region leader")
+	}
+	return operator.ValidateSchedulingCommand(ci, region, &hbstream.Operation{
+		ChangePeer: response.GetChangePeer(), TransferLeader: response.GetTransferLeader(),
+		Merge: response.GetMerge(), SplitRegion: response.GetSplitRegion(),
+		ChangePeerV2: response.GetChangePeerV2(), SwitchWitnesses: response.GetSwitchWitnesses(),
+		ChangeSplit: response.GetChangeSplit(),
+	})
 }
 
 // forwardWatchGCStates keeps one subscription to the requested leader. A failed

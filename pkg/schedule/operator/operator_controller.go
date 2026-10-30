@@ -479,6 +479,23 @@ func (oc *Controller) checkAddOperator(isPromoting bool, ops ...*Operator) (bool
 			operatorCounter.WithLabelValues(op.Desc(), "epoch-not-match").Inc()
 			return false, EpochNotMatch
 		}
+		if region.IsRecoverySchedulingBlocked() {
+			for i := range op.Len() {
+				if err := validateRecoveryStep(oc.cluster, region, op.Step(i)); err != nil {
+					log.Debug("pause operator during region recovery", zap.Uint64("region-id", region.GetID()), errs.ZapError(err))
+					return false, StaleStatus
+				}
+			}
+		}
+		if op.Len() > 0 {
+			useConfChangeV2 := versioninfo.IsFeatureSupported(oc.config.GetClusterVersion(), versioninfo.ConfChangeV2)
+			if cmd := op.Step(0).GetCmd(region, useConfChangeV2); cmd != nil {
+				if err := ValidateSchedulingCommand(oc.cluster, region, cmd); err != nil {
+					log.Warn("reject incompatible operator", zap.Uint64("region-id", region.GetID()), errs.ZapError(err))
+					return false, StaleStatus
+				}
+			}
+		}
 		if oldi, ok := oc.operators.Load(op.RegionID()); ok && oldi.(*Operator) != nil && !isHigherPriorityOperator(op, oldi.(*Operator)) {
 			old := oldi.(*Operator)
 			log.Debug("already have operator, cancel add operator",
@@ -847,6 +864,13 @@ func (oc *Controller) SendScheduleCommand(region *core.RegionInfo, step OpStep, 
 	useConfChangeV2 := versioninfo.IsFeatureSupported(oc.config.GetClusterVersion(), versioninfo.ConfChangeV2)
 	cmd := step.GetCmd(region, useConfChangeV2)
 	if cmd == nil {
+		return
+	}
+	// Creation and notifier dispatch do not run CheckInProgress. Validate the
+	// actual command before every send, including raw administrative operators.
+	// This check deliberately does not change Store health admission semantics.
+	if err := ValidateSchedulingCommand(oc.cluster, region, cmd); err != nil {
+		log.Warn("reject incompatible scheduling command", zap.Uint64("region-id", region.GetID()), errs.ZapError(err))
 		return
 	}
 	log.Info("send schedule command",

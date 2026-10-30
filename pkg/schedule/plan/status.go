@@ -98,6 +98,8 @@ const (
 	StatusRegionSendSnapshotThrottled
 	// StatusRegionAffinity indicates that the Region is in an affinity state and therefore should not be scheduled.
 	StatusRegionAffinity
+	// StatusRegionRecovering pauses discretionary scheduling until data and size are ready.
+	StatusRegionRecovering
 )
 
 const (
@@ -142,6 +144,7 @@ var statusText = map[StatusCode]string{
 	StatusRegionNotMatchRule:  "RegionNotMatchRule",
 	StatusRegionNoLeader:      "RegionNoLeader",
 	StatusRegionAffinity:      "RegionAffinity",
+	StatusRegionRecovering:    "RegionRecovering",
 
 	// non-filter
 	StatusNoTargetRegion:    "NoTargetRegion",

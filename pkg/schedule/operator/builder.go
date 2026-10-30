@@ -44,12 +44,13 @@ import (
 type Builder struct {
 	// basic info
 	sche.SharedCluster
-	desc            string
-	regionID        uint64
-	regionEpoch     *metapb.RegionEpoch
-	rules           []*placement.Rule
-	expectedRoles   map[uint64]placement.PeerRoleType
-	approximateSize int64
+	desc                        string
+	regionID                    uint64
+	regionEpoch                 *metapb.RegionEpoch
+	rules                       []*placement.Rule
+	expectedRoles               map[uint64]placement.PeerRoleType
+	approximateSize             int64
+	requiredPeerProtocolVersion uint32
 
 	// operation record
 	originPeers          peersMap
@@ -69,6 +70,7 @@ type Builder struct {
 	removeLightPeer   bool
 	addLightPeer      bool
 	forceTargetLeader bool
+	recoveringLeader  bool
 
 	// intermediate states
 	currentPeers                                 peersMap
@@ -98,11 +100,13 @@ func SkipPlacementRulesCheck(b *Builder) {
 // NewBuilder creates a Builder.
 func NewBuilder(desc string, ci sche.SharedCluster, region *core.RegionInfo, opts ...BuilderOption) *Builder {
 	b := &Builder{
-		desc:            desc,
-		SharedCluster:   ci,
-		regionID:        region.GetID(),
-		regionEpoch:     region.GetRegionEpoch(),
-		approximateSize: region.GetApproximateSize(),
+		desc:                        desc,
+		SharedCluster:               ci,
+		regionID:                    region.GetID(),
+		regionEpoch:                 region.GetRegionEpoch(),
+		approximateSize:             region.GetApproximateSize(),
+		recoveringLeader:            region.IsRecoveringLeader(),
+		requiredPeerProtocolVersion: core.RequiredPeerProtocolVersion(ci.GetBasicCluster(), region),
 	}
 
 	// options
@@ -170,6 +174,9 @@ func NewBuilder(desc string, ci sche.SharedCluster, region *core.RegionInfo, opt
 // IsAllowedLeaderTarget checks whether the peer can be selected as a
 // non-forced target leader by the operator builder.
 func IsAllowedLeaderTarget(ci sche.SharedCluster, region *core.RegionInfo, peer *metapb.Peer) bool {
+	if core.IsWitness(peer) {
+		return false
+	}
 	b := NewBuilder("check-target-leader", ci, region)
 	if b.err != nil {
 		return false
@@ -321,6 +328,10 @@ func (b *Builder) SetLeaders(storeIDs []uint64) *Builder {
 		if peer == nil || core.IsLearner(peer) || b.unhealthyPeers[storeID] != nil {
 			continue
 		}
+		store := b.GetStore(storeID)
+		if core.IsWitness(peer) || store == nil || !store.SupportsPeerCapability(false) || store.GetMeta().GetLogOnlyProtocolVersion() < b.requiredPeerProtocolVersion {
+			continue
+		}
 		b.targetLeaderStoreIDs = append(b.targetLeaderStoreIDs, storeID)
 	}
 	// Don't need to check if there's valid target, because `targetLeaderStoreIDs`
@@ -437,14 +448,32 @@ func (b *Builder) prepareBuild() (string, error) {
 	b.toNonWitness = newPeersMap()
 	b.toPromoteNonWitness = newPeersMap()
 
+	activatesMembership := false
+	targets := make([]*metapb.Peer, 0, len(b.targetPeers))
+	for _, peer := range b.targetPeers {
+		targets = append(targets, peer)
+		previous := b.originPeers[peer.GetStoreId()]
+		if previous == nil || (!previous.GetIsWitness() && peer.GetIsWitness()) || (core.IsLearner(previous) && !core.IsLearner(peer)) {
+			activatesMembership = true
+		}
+	}
 	voterCount := 0
 	for _, peer := range b.targetPeers {
+		store := b.GetStore(peer.GetStoreId())
+		if store != nil && !store.SupportsPeerCapability(peer.GetIsWitness()) {
+			return "", errors.Errorf("peer capability conflicts with Store %d", peer.GetStoreId())
+		}
 		if !core.IsLearner(peer) {
 			voterCount++
 		}
 	}
 	if voterCount == 0 {
 		return "", errors.New("cannot create operator: target peers have no voter")
+	}
+	if activatesMembership {
+		if err := core.CheckLogOnlyPeerProtocols(b.GetBasicCluster(), targets, b.requiredPeerProtocolVersion); err != nil {
+			return "", err
+		}
 	}
 
 	// Diff `originPeers` and `targetPeers` to initialize `toAdd`, `toRemove`, `toPromote`, `toDemote`,
@@ -932,7 +961,9 @@ func (b *Builder) allowLeader(peer *metapb.Peer, ignoreClusterLimit bool) bool {
 	}
 
 	if peer.IsWitness {
-		return false
+		// A recovering W may retain control leadership while a replacement Full
+		// is initialized. It is never eligible as a new transfer destination.
+		return b.recoveringLeader && peer.GetStoreId() == b.originLeaderStoreID && peer.GetStoreId() == b.currentLeaderStoreID
 	}
 
 	// store does not exist
@@ -944,6 +975,9 @@ func (b *Builder) allowLeader(peer *metapb.Peer, ignoreClusterLimit bool) bool {
 		return false
 	}
 
+	if !store.SupportsPeerCapability(false) || store.GetMeta().GetLogOnlyProtocolVersion() < b.requiredPeerProtocolVersion {
+		return false
+	}
 	if ignoreClusterLimit {
 		return true
 	}

@@ -1595,6 +1595,10 @@ func (c *RaftCluster) PutMetaStore(store *metapb.Store) error {
 // If 'force' is true, the store's labels will overwrite those labels which already existed in the store.
 // If 'force' is false, the store's labels will merge into those labels which already existed in the store.
 func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool) error {
+	// Validate the request before MergeLabels can collapse duplicate declarations.
+	if _, err := core.ParseStoreCapability(store); err != nil {
+		return err
+	}
 	if store.GetId() == 0 {
 		return errors.Errorf("invalid put store %v", store)
 	}
@@ -1641,11 +1645,32 @@ func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool) error {
 		opts = append(opts,
 			core.SetStoreAddress(store.Address, store.StatusAddress, store.PeerAddress),
 			core.SetStoreVersion(store.GitHash, store.Version),
+			core.SetStoreLogOnlyProtocolVersion(store.GetLogOnlyProtocolVersion()),
+			core.SetStoreTxnProtocolVersionRange(store.GetTxnProtocolVersionRange()),
 			core.SetStoreLabels(labels),
 			core.SetStoreStartTime(store.StartTimestamp),
 			core.SetStoreDeployPath(store.DeployPath))
 		// Update an existed store.
 		s = s.Clone(opts...)
+	}
+	capability, err := core.ParseStoreCapability(s.GetMeta())
+	if err != nil {
+		return err
+	}
+	if old := c.GetStore(store.GetId()); old != nil {
+		if old.GetMeta().GetLogOnlyProtocolVersion() >= core.LogOnlyProtocolVersion && s.GetMeta().GetLogOnlyProtocolVersion() < core.LogOnlyProtocolVersion {
+			return errors.New("cannot downgrade a declared LogOnly protocol; register a new Store identity through controlled replacement")
+		}
+		previous, err := core.ParseStoreCapability(old.GetMeta())
+		if err != nil {
+			return err
+		}
+		if previous != "" && previous != capability {
+			return errors.New("store capability is immutable; register a new Store identity")
+		}
+		if previous == "" && capability == core.LogOnlyStoreCapability {
+			return errors.New("log-only capability requires a new Store identity")
+		}
 	}
 	if err := c.checkStoreLabels(s); err != nil {
 		return err
@@ -1680,7 +1705,7 @@ func (c *RaftCluster) checkStoreLabels(s *core.StoreInfo) error {
 	}
 	for _, label := range s.GetLabels() {
 		key := label.GetKey()
-		if key == core.EngineKey || key == core.EngineRoleKey {
+		if key == core.EngineKey || key == core.EngineRoleKey || strings.EqualFold(key, core.StoreCapabilityLabel) {
 			continue
 		}
 		if _, ok := keysSet[key]; !ok {
@@ -2913,12 +2938,21 @@ func CheckHealth(client *http.Client, members []*pdpb.Member) map[uint64]*pdpb.M
 	return healthMembers
 }
 
-// GetMembers return a slice of Members.
+// GetMembers returns a slice of Members.
 func GetMembers(etcdClient *clientv3.Client) ([]*pdpb.Member, error) {
 	if etcdClient == nil {
 		return nil, errs.ErrEtcdNotStarted
 	}
-	listResp, err := etcdutil.ListEtcdMembers(etcdClient.Ctx(), etcdClient)
+	return GetMembersWithContext(etcdClient.Ctx(), etcdClient)
+}
+
+// GetMembersWithContext reads the current etcd membership within a caller's
+// deadline, for capability negotiation that cannot use a stale membership list.
+func GetMembersWithContext(ctx context.Context, etcdClient *clientv3.Client) ([]*pdpb.Member, error) {
+	if etcdClient == nil {
+		return nil, errs.ErrEtcdNotStarted
+	}
+	listResp, err := etcdutil.ListEtcdMembers(ctx, etcdClient)
 	if err != nil {
 		return nil, err
 	}

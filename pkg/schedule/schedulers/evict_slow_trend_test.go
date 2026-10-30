@@ -99,7 +99,8 @@ func (suite *evictSlowTrendTestSuite) TestEvictSlowTrendBasicFuncs() {
 	re.Zero(es2.conf.lastCandidateCapturedSecs())
 	re.False(es2.conf.readyForRecovery())
 	recoverTS := lastCapturedCandidate.recoverTS
-	re.True(recoverTS.After(lastCapturedCandidate.captureTS))
+	// Both timestamps may share a clock tick; recovery must not precede capture.
+	re.False(recoverTS.Before(lastCapturedCandidate.captureTS))
 	// Pop captured store 1 and mark it has recovered.
 	time.Sleep(50 * time.Millisecond)
 	re.Equal(es2.conf.popCandidate(true), store.GetID())

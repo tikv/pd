@@ -66,14 +66,15 @@ func errRegionIsStale(region *metapb.Region, origin *metapb.Region) error {
 // the properties are Read-Only once created except buckets.
 // the `buckets` could be modified by the request `report buckets` with greater version.
 type RegionInfo struct {
-	meta         *metapb.Region
-	learners     []*metapb.Peer
-	witnesses    []*metapb.Peer
-	voters       []*metapb.Peer
-	leader       *metapb.Peer
-	downPeers    []*pdpb.PeerStats
-	pendingPeers []*metapb.Peer
-	term         uint64
+	meta           *metapb.Region
+	learners       []*metapb.Peer
+	witnesses      []*metapb.Peer
+	voters         []*metapb.Peer
+	leader         *metapb.Peer
+	recoveryStatus *pdpb.RegionRecoveryStatus
+	downPeers      []*pdpb.PeerStats
+	pendingPeers   []*metapb.Peer
+	term           uint64
 	// cpuUsage is deprecated and will be removed in the future.
 	// We should use `cpuStats` instead.
 	cpuUsage                  uint64
@@ -219,6 +220,7 @@ type RegionHeartbeatResponse interface {
 
 // RegionHeartbeatRequest is the interface for region heartbeat request.
 type RegionHeartbeatRequest interface {
+	GetRecoveryStatus() *pdpb.RegionRecoveryStatus
 	GetTerm() uint64
 	GetRegion() *metapb.Region
 	GetLeader() *metapb.Peer
@@ -249,6 +251,7 @@ func RegionFromHeartbeat(heartbeat RegionHeartbeatRequest, flowRoundDivisor uint
 		term:             heartbeat.GetTerm(),
 		meta:             heartbeat.GetRegion(),
 		leader:           heartbeat.GetLeader(),
+		recoveryStatus:   heartbeat.GetRecoveryStatus(),
 		downPeers:        heartbeat.GetDownPeers(),
 		pendingPeers:     heartbeat.GetPendingPeers(),
 		writtenBytes:     heartbeat.GetBytesWritten(),
@@ -294,6 +297,7 @@ func RegionFromHeartbeat(heartbeat RegionHeartbeatRequest, flowRoundDivisor uint
 // correct approximate size, keys and buckets by the previous size if here exists a reported RegionInfo.
 // See https://github.com/tikv/tikv/issues/11114
 func (r *RegionInfo) Inherit(origin *RegionInfo, bucketEnable bool) {
+	r.InheritReaderProtocolVersion(origin)
 	// Background:
 	// There are scenarios where TiKV reports size=0 and keys=0, which doesn't necessarily mean
 	// the region is empty, but rather that the statistics haven't been calculated yet:
@@ -335,6 +339,7 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 		term:                      r.term,
 		meta:                      typeutil.DeepClone(r.meta, RegionFactory),
 		leader:                    typeutil.DeepClone(r.leader, RegionPeerFactory),
+		recoveryStatus:            r.recoveryStatus,
 		downPeers:                 downPeers,
 		pendingPeers:              pendingPeers,
 		cpuUsage:                  r.cpuUsage,
@@ -961,6 +966,9 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 				// We check it first and do not return because the log is important for us to investigate,
 				saveCache, needSync = true, true
 			}
+			if !proto.Equal(region.GetRecoveryStatus(), origin.GetRecoveryStatus()) {
+				saveCache, needSync = true, true
+			}
 			if len(region.GetPeers()) != len(origin.GetPeers()) {
 				saveKV, saveCache = true, true
 				return
@@ -1125,6 +1133,13 @@ func (r *RegionsInfo) CheckAndPutRegion(region *RegionInfo) []*RegionInfo {
 		r.t.Unlock()
 		return []*RegionInfo{region}
 	}
+	// Storage metadata contains no recovery report. Retain the durable floor
+	// without returning a valid Region to the loader's deletion list or mutating
+	// an input that another consumer may already be reading.
+	if origin != nil && region.GetRequiredReaderProtocolVersion() < origin.GetRequiredReaderProtocolVersion() {
+		region = region.Clone()
+		region.InheritReaderProtocolVersion(origin)
+	}
 	origin, overlaps, rangeChanged := r.setRegionLocked(region, true, ols...)
 	r.t.Unlock()
 	r.UpdateSubTree(region, origin, overlaps, rangeChanged)
@@ -1156,6 +1171,9 @@ func (r *RegionsInfo) AtomicCheckAndPutRegion(ctx *MetaProcessContext, region *R
 	}
 	tracer.OnCheckOverlapsFinished()
 	err := check(region, origin, ols)
+	if err == nil && origin != nil && region.GetRequiredReaderProtocolVersion() < origin.GetRequiredReaderProtocolVersion() {
+		err = errors.New("region reader protocol requirement changed; retry heartbeat")
+	}
 	if err != nil {
 		r.t.Unlock()
 		tracer.OnValidateRegionFinished()
@@ -1182,6 +1200,9 @@ func (r *RegionsInfo) CheckAndPutRootTree(ctx *MetaProcessContext, region *Regio
 	}
 	tracer.OnCheckOverlapsFinished()
 	err := check(region, origin, ols)
+	if err == nil && origin != nil && region.GetRequiredReaderProtocolVersion() < origin.GetRequiredReaderProtocolVersion() {
+		err = errors.New("region reader protocol requirement changed; retry heartbeat")
+	}
 	if err != nil {
 		r.t.Unlock()
 		tracer.OnValidateRegionFinished()
