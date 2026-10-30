@@ -729,3 +729,19 @@ func TestRuleManagerLoadRulesLogRedact(t *testing.T) {
 		})
 	}
 }
+
+func TestRuleManagerRevision(t *testing.T) {
+	re := require.New(t)
+	_, manager := newTestManager(t, false)
+	revision := manager.GetRevision()
+	rule := manager.GetRule(DefaultGroupID, DefaultRuleID)
+	rule.Count++
+	re.NoError(manager.SetRule(rule))
+	re.Greater(manager.GetRevision(), revision)
+	revision = manager.GetRevision()
+	re.NoError(manager.SetRuleGroup(&RuleGroup{ID: DefaultGroupID, Index: 1}))
+	re.Greater(manager.GetRevision(), revision)
+	revision = manager.GetRevision()
+	re.Error(manager.DeleteRule(DefaultGroupID, DefaultRuleID))
+	re.Equal(revision, manager.GetRevision(), "a failed update keeps the revision")
+}

@@ -65,12 +65,22 @@ type Manager struct {
 	storeSetInformer core.StoreSetInformer
 	conf             config.SharedConfigProvider
 	regionLabeler    *labeler.RegionLabeler // region labeler for syncing key ranges
+	// targetWriter writes the targets this Manager decides when it does not own the storage,
+	// as in the scheduling service. When it is nil, the Manager writes its own storage.
+	targetWriter TargetWriter
 
 	// The following members are protected by RWMutex.
 	affinityRegionCount int
 	groups              map[string]*runtimeGroupInfo // {group_id} -> runtimeGroupInfo
 	regions             map[uint64]regionCache       // {region_id} -> regionCache
 	unavailableStores   map[uint64]storeCondition    // {store_id} -> storeCondition
+	// storeConditionsKnown is set once the availability check has recorded the
+	// store conditions. Until then, a group loaded or recreated with a target
+	// stays degraded, while a target that is written, synced or confirmed uses
+	// the conditions recorded so far. The first check sets every group.
+	storeConditionsKnown bool
+	balanceTables        map[TableID]*balanceTable // {table_id} -> balanceTable
+	lastBalanceVersion   uint64
 
 	// The following members are protected by metaMutex only, not protected by RWMutex.
 	// keyRanges cached in memory to reduce labeler lock contention
@@ -95,6 +105,7 @@ func NewManager(ctx context.Context, storage endpoint.AffinityStorage, storeSetI
 		groups:              make(map[string]*runtimeGroupInfo),
 		regions:             make(map[uint64]regionCache),
 		unavailableStores:   make(map[uint64]storeCondition),
+		balanceTables:       make(map[TableID]*balanceTable),
 		keyRanges:           make(map[string]GroupKeyRanges),
 		labelRuleBuffer:     make(map[string]*labeler.LabelRule),
 	}
@@ -120,6 +131,10 @@ func (m *Manager) initialize() error {
 				zap.String("key", k),
 				zap.Error(errs.ErrLoadRule.Wrap(err)))
 			return
+		}
+		if err := validateBalancePolicy(group.BalancePolicy); err != nil {
+			log.Warn("unknown affinity group balance policy from storage, the group keeps its target",
+				zap.String("key", k), zap.Error(err))
 		}
 		m.initGroupLocked(group)
 	})
@@ -150,11 +165,12 @@ func (m *Manager) initGroupLocked(group *Group) {
 		log.Error("group already initialized", zap.String("group-id", group.ID))
 		return
 	}
-	m.groups[group.ID] = &runtimeGroupInfo{
+	groupInfo := &runtimeGroupInfo{
 		ID:                  group.ID,
 		CreateTimestamp:     group.CreateTimestamp,
 		LeaderStoreID:       group.LeaderStoreID,
-		VoterStoreIDs:       slices.Clone(group.VoterStoreIDs),
+		VoterStoreIDs:       sortedStoreIDs(group.VoterStoreIDs),
+		BalancePolicy:       group.BalancePolicy,
 		availability:        groupDegraded,
 		degradedExpiredAt:   newDegradedExpiredAtFromNow(),
 		AffinityVer:         1,
@@ -163,6 +179,25 @@ func (m *Manager) initGroupLocked(group *Group) {
 		LabelRule:           nil,
 		RangeCount:          0,
 	}
+	m.groups[group.ID] = groupInfo
+	m.touchBalanceTableLocked(group.ID)
+	// A group read with a target, for example by the watcher, can be used once
+	// its stores are known to be available. The first availability check sets
+	// the groups loaded before it.
+	if m.storeConditionsKnown {
+		m.setTargetAvailabilityLocked(groupInfo)
+	}
+}
+
+// setTargetAvailabilityLocked sets the availability of a group with a target from
+// the store conditions known now. It is needed whenever the target changes,
+// because the availability check applies the conditions only when they change.
+// The write lock of RWMutex must be held.
+func (m *Manager) setTargetAvailabilityLocked(groupInfo *runtimeGroupInfo) {
+	if groupInfo.LeaderStoreID == 0 || len(groupInfo.VoterStoreIDs) == 0 {
+		return
+	}
+	groupInfo.SetAvailability(calcGroupAvailability(m.unavailableStores, groupInfo.LeaderStoreID, groupInfo.VoterStoreIDs))
 }
 
 func (m *Manager) noGroupsExist(groups []*Group) error {
@@ -200,23 +235,7 @@ func (m *Manager) resetCountLocked(groupInfo *runtimeGroupInfo) {
 	m.affinityRegionCount -= groupInfo.AffinityRegionCount
 	groupInfo.AffinityRegionCount = 0
 	groupInfo.AffinityVer++
-}
-
-func (m *Manager) updateGroupPeers(groupID string, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
-	m.Lock()
-	defer m.Unlock()
-
-	groupInfo, ok := m.groups[groupID]
-	if !ok {
-		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
-	}
-
-	groupInfo.SetAvailability(groupAvailable)
-	groupInfo.LeaderStoreID = leaderStoreID
-	groupInfo.VoterStoreIDs = slices.Clone(voterStoreIDs)
-	m.resetCountLocked(groupInfo)
-
-	return newGroupState(groupInfo), nil
+	m.touchBalanceTableLocked(groupInfo.ID)
 }
 
 func (m *Manager) updateGroupAvailabilityLocked(groupID string, availability groupAvailability) {
@@ -299,6 +318,7 @@ func (m *Manager) clearGroupCacheLocked(groupID string) {
 func (m *Manager) deleteGroupLocked(groupID string) {
 	m.clearGroupCacheLocked(groupID)
 	delete(m.groups, groupID)
+	m.removeBalanceGroupLocked(groupID)
 }
 
 func (m *Manager) deleteGroups(groupIDs []string) {
@@ -460,15 +480,22 @@ func (m *Manager) GetAllAffinityGroupStates() []*GroupState {
 
 // SyncGroupFromEtcd synchronizes a group from etcd to the in-memory state.
 func (m *Manager) SyncGroupFromEtcd(group *Group) {
+	if err := validateBalancePolicy(group.BalancePolicy); err != nil {
+		log.Warn("unknown affinity group balance policy from etcd, the group keeps its target",
+			zap.String("group-id", group.ID), zap.Error(err))
+	}
+	// Voter order has no meaning, but affinity comparisons use canonical order.
+	clonedGroup := *group
+	clonedGroup.VoterStoreIDs = sortedStoreIDs(group.VoterStoreIDs)
+	group = &clonedGroup
 	m.metaMutex.Lock()
 	defer m.metaMutex.Unlock()
 
-	// Fast path: avoid taking write lock if nothing changes.
+	// Fast path: avoid taking write lock if nothing changes. The policy is also
+	// compared as written, so that memory keeps the stored value.
 	m.RLock()
 	existingGroup, exists := m.groups[group.ID]
-	if exists &&
-		existingGroup.LeaderStoreID == group.LeaderStoreID &&
-		slices.Equal(existingGroup.VoterStoreIDs, group.VoterStoreIDs) {
+	if exists && sameStoredGroup(&existingGroup.Group, group) && existingGroup.BalancePolicy == group.BalancePolicy {
 		m.RUnlock()
 		return
 	}
@@ -518,19 +545,41 @@ func (m *Manager) SyncGroupFromEtcd(group *Group) {
 		// Once group created, the buffer must be deleted.
 		delete(m.labelRuleBuffer, group.ID)
 	} else {
-		changed := false
-		if groupInfo.LeaderStoreID != group.LeaderStoreID {
-			groupInfo.LeaderStoreID = group.LeaderStoreID
-			changed = true
-		}
-		if !slices.Equal(groupInfo.VoterStoreIDs, group.VoterStoreIDs) {
-			groupInfo.VoterStoreIDs = slices.Clone(group.VoterStoreIDs)
-			changed = true
-		}
+		m.syncGroupTargetLocked(groupInfo, group)
+	}
+}
 
-		if changed {
-			m.resetCountLocked(groupInfo)
-		}
+// syncGroupTargetLocked replaces the in-memory target and policy with those of
+// the stored group, and replaces the runtime group if it was recreated. A changed
+// target takes the availability that the store conditions known now give, as when
+// an admin sets it through PD, or a write whose result was unknown committed it.
+// A policy change keeps the counts, because it does not change Region affinity.
+// Both metaMutex and the write lock of RWMutex must be held.
+func (m *Manager) syncGroupTargetLocked(groupInfo *runtimeGroupInfo, group *Group) {
+	if groupInfo.CreateTimestamp != group.CreateTimestamp {
+		m.deleteGroupLocked(group.ID)
+		m.initGroupLocked(group)
+		// The label watcher will not resend an unchanged rule for the new instance.
+		m.updateGroupLabelRuleLockedWithCount(group.ID, groupInfo.LabelRule, groupInfo.RangeCount, false)
+		return
+	}
+	if groupInfo.BalancePolicy != group.BalancePolicy {
+		groupInfo.BalancePolicy = group.BalancePolicy
+		m.touchBalanceTableLocked(groupInfo.ID)
+	}
+	changed := false
+	if groupInfo.LeaderStoreID != group.LeaderStoreID {
+		groupInfo.LeaderStoreID = group.LeaderStoreID
+		changed = true
+	}
+	if !slices.Equal(groupInfo.VoterStoreIDs, group.VoterStoreIDs) {
+		groupInfo.VoterStoreIDs = slices.Clone(group.VoterStoreIDs)
+		changed = true
+	}
+
+	if changed {
+		m.setTargetAvailabilityLocked(groupInfo)
+		m.resetCountLocked(groupInfo)
 	}
 }
 

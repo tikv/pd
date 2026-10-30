@@ -24,6 +24,14 @@ var (
 			Name:      "status",
 			Help:      "Status of the affinity manager.",
 		}, []string{"type"})
+
+	targetWriteFailureCounter = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "affinity",
+			Name:      "target_write_failures_total",
+			Help:      "Counter of affinity group targets that the scheduling service failed to send to PD.",
+		})
 )
 
 var (
@@ -36,4 +44,5 @@ var (
 
 func init() {
 	prometheus.MustRegister(affinityStatusGauge)
+	prometheus.MustRegister(targetWriteFailureCounter)
 }
