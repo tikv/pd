@@ -135,8 +135,7 @@ func mustGetKeyspaceGroupMembers(re *require.Assertions, server *tso.Server) map
 func TestTSOServerStartFirst(t *testing.T) {
 	re := require.New(t)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayStartServerLoop", `return(true)`))
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	cluster, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = []string{"k1", "k2"}
@@ -200,8 +199,7 @@ func TestTSOServerStartFirst(t *testing.T) {
 
 func TestForwardOnlyTSONoScheduling(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)

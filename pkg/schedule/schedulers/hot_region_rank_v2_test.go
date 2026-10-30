@@ -142,6 +142,31 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimFirst(t *testing.T) {
 	operatorutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 2, 5)
 	operatorutil.CheckTransferPeer(re, ops[1], operator.OpHotRegion, 5, 2)
 	re.True(hb.searchRevertRegions[writePeer])
+
+	re.Len(hb.regionPendings, 2)
+	mainPending := hb.regionPendings[ops[0].RegionID()]
+	re.NotNil(mainPending)
+	re.Equal([]uint64{2}, mainPending.froms)
+	re.Equal(uint64(5), mainPending.to)
+	revertPending := hb.regionPendings[ops[1].RegionID()]
+	re.NotNil(revertPending)
+	re.Equal([]uint64{5}, revertPending.froms)
+	re.Equal(uint64(2), revertPending.to)
+
+	// The reverse move offsets the main move's pending load and peer count.
+	storeInfos := statistics.SummaryStoreInfos(tc.GetStores())
+	hb.summaryPendingInfluence(tc, storeInfos)
+	re.NotNil(storeInfos[2].PendingSum)
+	re.NotNil(storeInfos[5].PendingSum)
+	re.InDelta(-2.9*units.MiB, storeInfos[2].PendingSum.Loads[utils.RegionWriteBytes], 1)
+	re.InDelta(0.2*units.MiB, storeInfos[2].PendingSum.Loads[utils.RegionWriteKeys], 1)
+	re.InDelta(2.9*units.MiB, storeInfos[5].PendingSum.Loads[utils.RegionWriteBytes], 1)
+	re.InDelta(-0.2*units.MiB, storeInfos[5].PendingSum.Loads[utils.RegionWriteKeys], 1)
+	re.Zero(storeInfos[2].PendingSum.HotPeerCount)
+	re.Zero(storeInfos[5].PendingSum.HotPeerCount)
+	for _, storeID := range []uint64{1, 3, 4} {
+		re.Nil(storeInfos[storeID].PendingSum)
+	}
 	clearPendingInfluence(hb)
 }
 

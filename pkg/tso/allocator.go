@@ -156,6 +156,12 @@ func (a *Allocator) Close() {
 func (a *Allocator) Initialize() error {
 	a.timestampStateMu.Lock()
 	defer a.timestampStateMu.Unlock()
+	// Refuse to initialize once the allocator starts to close. An Initialize that has passed
+	// this check finishes before the reset, which takes timestampStateMu after the context is
+	// canceled, so the closing allocator still ends up reset.
+	if a.ctx.Err() != nil {
+		return a.notLeaderErr()
+	}
 	a.tsoAllocatorRoleGauge.Set(1)
 	if err := a.timestampOracle.syncTimestamp(); err != nil {
 		return err
@@ -219,13 +225,25 @@ func (a *Allocator) SetTSO(tso uint64, ignoreSmaller, skipUpperBoundCheck bool) 
 // GenerateTSO is used to generate the given number of TSOs. Make sure you have initialized the TSO allocator before calling this method.
 func (a *Allocator) GenerateTSO(ctx context.Context, count uint32) (pdpb.Timestamp, error) {
 	defer trace.StartRegion(ctx, "Allocator.GenerateTSO").End()
-	if !a.isServing() {
-		// "leader" is not suitable name, but we keep it for compatibility.
-		a.getMetrics().notLeaderEvent.Inc()
-		return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs(fmt.Sprintf("requested pd %s of cluster", errs.NotLeaderErr))
+	// A closing allocator resets its timestamp before it resigns, so treat it as not serving
+	// once it starts to close, and let the clients look for the new primary.
+	if !a.isServing() || a.ctx.Err() != nil {
+		return pdpb.Timestamp{}, a.notLeaderErr()
 	}
+	failpoint.InjectCall("afterGenerateTSOServingCheck")
+	ts, err := a.timestampOracle.getTS(ctx, count)
+	// The allocator may also start to close while generating the TSO.
+	if err != nil && a.ctx.Err() != nil {
+		return pdpb.Timestamp{}, a.notLeaderErr()
+	}
+	return ts, err
+}
 
-	return a.timestampOracle.getTS(ctx, count)
+// notLeaderErr returns the leader-change error, which makes the clients look for the new primary.
+func (a *Allocator) notLeaderErr() error {
+	// "leader" is not suitable name, but we keep it for compatibility.
+	a.getMetrics().notLeaderEvent.Inc()
+	return errs.ErrGenerateTimestamp.FastGenByArgs(fmt.Sprintf("requested pd %s of cluster", errs.NotLeaderErr))
 }
 
 // Reset is used to reset the TSO allocator, it will also reset the leadership if the `resetLeadership` flag is true.

@@ -30,8 +30,7 @@ func TestMain(m *testing.M) {
 
 func TestWatcher(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	watcher := NewWatcher(ctx, 10, "test")
 	var deadlineReached atomic.Bool

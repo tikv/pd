@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"testing"
 	"time"
 
@@ -38,7 +39,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/handler"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
-	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -185,7 +185,7 @@ func (suite *apiTestSuite) checkAPIForward(cluster *tests.TestCluster) {
 		err = testutil.ReadGetJSON(re, tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "schedulers"), &respSlice,
 			testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 		re.NoError(err)
-		return slice.Contains(respSlice, "balance-leader-scheduler")
+		return slices.Contains(respSlice, "balance-leader-scheduler")
 	})
 
 	postScheduler := func(delay int) {

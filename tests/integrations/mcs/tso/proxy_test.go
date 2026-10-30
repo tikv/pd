@@ -304,7 +304,7 @@ func (s *tsoProxyTestSuite) TestTSOProxyRecvFromTSOTimeout() {
 }
 
 func cleanupGRPCStreams(cleanupFuncs []testutil.CleanupFunc) {
-	for i := 0; i < len(cleanupFuncs); i++ {
+	for i := range cleanupFuncs {
 		if cleanupFuncs[i] != nil {
 			cleanupFuncs[i]()
 			cleanupFuncs[i] = nil
@@ -537,7 +537,7 @@ func benchmarkTSOProxyNClients(clientCount int, b *testing.B) {
 			builder.WriteString("SequentialClients_")
 		}
 		b.Run(fmt.Sprintf("%s_%dReqsPerClient", builder.String(), t.requestsPerClient), func(b *testing.B) {
-			for range b.N {
+			for b.Loop() {
 				err := tsoProxy(suite.defaultReq, streams, t.concurrentClient, t.requestsPerClient)
 				re.NoError(err)
 			}

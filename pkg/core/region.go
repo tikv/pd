@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -1029,10 +1030,10 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 // RWLockStats is a read-write lock with statistics.
 type RWLockStats struct {
 	syncutil.RWMutex
-	totalWaitTime     int64
-	lockCount         int64
-	lastLockCount     int64
-	lastTotalWaitTime int64
+	totalWaitTime     atomic.Int64
+	lockCount         atomic.Int64
+	lastLockCount     atomic.Int64
+	lastTotalWaitTime atomic.Int64
 }
 
 // Lock locks the lock and records the waiting time.
@@ -1040,8 +1041,8 @@ func (l *RWLockStats) Lock() {
 	startTime := time.Now()
 	l.RWMutex.Lock()
 	elapsed := time.Since(startTime).Nanoseconds()
-	atomic.AddInt64(&l.totalWaitTime, elapsed)
-	atomic.AddInt64(&l.lockCount, 1)
+	l.totalWaitTime.Add(elapsed)
+	l.lockCount.Add(1)
 }
 
 // Unlock unlocks the lock.
@@ -1054,8 +1055,8 @@ func (l *RWLockStats) RLock() {
 	startTime := time.Now()
 	l.RWMutex.RLock()
 	elapsed := time.Since(startTime).Nanoseconds()
-	atomic.AddInt64(&l.totalWaitTime, elapsed)
-	atomic.AddInt64(&l.lockCount, 1)
+	l.totalWaitTime.Add(elapsed)
+	l.lockCount.Add(1)
 }
 
 // RUnlock unlocks the lock for reading.
@@ -1386,7 +1387,7 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo, withOverlaps bool, ol 
 				}
 			}
 			if idx >= 0 {
-				ol = append(ol[:idx], ol[idx+1:]...)
+				ol = slices.Delete(ol, idx, idx+1)
 			}
 			r.tree.remove(origin)
 			// Update the RegionInfo in the regionItem.
@@ -2286,23 +2287,23 @@ const defaultPollInterval = 15 * time.Second
 
 // CollectWaitLockMetrics collects the metrics of waiting time for lock
 func (r *RegionsInfo) CollectWaitLockMetrics() {
-	regionsLockTotalWaitTime := atomic.LoadInt64(&r.t.totalWaitTime)
-	regionsLockCount := atomic.LoadInt64(&r.t.lockCount)
+	regionsLockTotalWaitTime := r.t.totalWaitTime.Load()
+	regionsLockCount := r.t.lockCount.Load()
 
-	lastRegionsLockTotalWaitTime := atomic.LoadInt64(&r.t.lastTotalWaitTime)
-	lastsRegionsLockCount := atomic.LoadInt64(&r.t.lastLockCount)
+	lastRegionsLockTotalWaitTime := r.t.lastTotalWaitTime.Load()
+	lastsRegionsLockCount := r.t.lastLockCount.Load()
 
-	subRegionsLockTotalWaitTime := atomic.LoadInt64(&r.st.totalWaitTime)
-	subRegionsLockCount := atomic.LoadInt64(&r.st.lockCount)
+	subRegionsLockTotalWaitTime := r.st.totalWaitTime.Load()
+	subRegionsLockCount := r.st.lockCount.Load()
 
-	lastSubRegionsLockTotalWaitTime := atomic.LoadInt64(&r.st.lastTotalWaitTime)
-	lastSubRegionsLockCount := atomic.LoadInt64(&r.st.lastLockCount)
+	lastSubRegionsLockTotalWaitTime := r.st.lastTotalWaitTime.Load()
+	lastSubRegionsLockCount := r.st.lastLockCount.Load()
 
 	// update last metrics
-	atomic.StoreInt64(&r.t.lastTotalWaitTime, regionsLockTotalWaitTime)
-	atomic.StoreInt64(&r.t.lastLockCount, regionsLockCount)
-	atomic.StoreInt64(&r.st.lastTotalWaitTime, subRegionsLockTotalWaitTime)
-	atomic.StoreInt64(&r.st.lastLockCount, subRegionsLockCount)
+	r.t.lastTotalWaitTime.Store(regionsLockTotalWaitTime)
+	r.t.lastLockCount.Store(regionsLockCount)
+	r.st.lastTotalWaitTime.Store(subRegionsLockTotalWaitTime)
+	r.st.lastLockCount.Store(subRegionsLockCount)
 
 	// skip invalid situation like initial status
 	if lastRegionsLockTotalWaitTime == 0 || lastsRegionsLockCount == 0 || lastSubRegionsLockTotalWaitTime == 0 || lastSubRegionsLockCount == 0 ||

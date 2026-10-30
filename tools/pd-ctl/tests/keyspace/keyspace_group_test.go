@@ -23,6 +23,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/pingcap/failpoint"
@@ -161,24 +162,57 @@ func (suite *keyspaceGroupTestSuite) TestSplitKeyspaceGroup() {
 	suite.checkKeyspaceContains(uint32(newKeyspaceGroupID), 222, 333)
 }
 
-func (suite *keyspaceGroupTestSuite) TestExternalAllocNodeWhenStart() {
-	re := suite.Require()
-	// external alloc node for keyspace group, when keyspace manager update keyspace info to keyspace group
-	// we hope the keyspace group can be updated correctly.
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/externalAllocNode", `return("127.0.0.1:2379,127.0.0.1:2380")`))
-	cmd := ctl.GetRootCmd()
-	// check keyspace group information.
-	defaultKeyspaceGroupID := strconv.FormatUint(uint64(constant.DefaultKeyspaceGroupID), 10)
-	args := []string{"-u", suite.pdAddr, "keyspace-group"}
-	testutil.Eventually(re, func() bool {
-		output, err := tests.ExecuteCommand(cmd, append(args, defaultKeyspaceGroupID)...)
-		re.NoError(err)
-		var keyspaceGroup endpoint.KeyspaceGroup
-		err = json.Unmarshal(output, &keyspaceGroup)
-		re.NoError(err)
-		return len(keyspaceGroup.Keyspaces) == suite.keyspaceCount+1 && len(keyspaceGroup.Members) == 2
+func TestExternalAllocNodeWhenStart(t *testing.T) {
+	re := require.New(t)
+	// Inject the external allocation before startup so preallocation exercises
+	// UpdateKeyspaceForGroup with members already stored in etcd.
+	const externalAllocNode = "github.com/tikv/pd/pkg/keyspace/externalAllocNode"
+	re.NoError(failpoint.Enable(externalAllocNode, `1*return("127.0.0.1:2379,127.0.0.1:2380")`))
+	t.Cleanup(func() {
+		re.NoError(failpoint.Disable(externalAllocNode))
 	})
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/externalAllocNode"))
+
+	ctx := t.Context()
+	keyspaces := make([]string, 0, 10)
+	for i := range 10 {
+		keyspaces = append(keyspaces, fmt.Sprintf("keyspace_%d", i))
+	}
+	cluster, err := pdTests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(conf *config.Config, _ string) {
+		conf.Keyspace.PreAlloc = keyspaces
+		conf.Keyspace.WaitRegionSplit = false
+	})
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+	cluster.WaitLeader()
+	leaderServer := cluster.GetLeaderServer()
+	re.NoError(leaderServer.BootstrapCluster())
+
+	cmd := ctl.GetRootCmd()
+	defaultKeyspaceGroupID := strconv.FormatUint(uint64(constant.DefaultKeyspaceGroupID), 10)
+	args := []string{"-u", leaderServer.GetAddr(), "keyspace-group", defaultKeyspaceGroupID}
+	var output []byte
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Logf("last pd-ctl output: %s", output)
+		}
+	})
+	testutil.Eventually(re, func() bool {
+		output, err = tests.ExecuteCommand(cmd, args...)
+		if err != nil {
+			return false
+		}
+		var keyspaceGroup endpoint.KeyspaceGroup
+		if err = json.Unmarshal(output, &keyspaceGroup); err != nil {
+			return false
+		}
+		return len(keyspaceGroup.Keyspaces) == len(keyspaces)+1 &&
+			slices.Contains(keyspaceGroup.Keyspaces, constant.DefaultKeyspaceID) &&
+			slices.Equal(keyspaceGroup.Members, []endpoint.KeyspaceGroupMember{
+				{Address: "127.0.0.1:2379", Priority: mcs.DefaultKeyspaceGroupReplicaPriority},
+				{Address: "127.0.0.1:2380", Priority: mcs.DefaultKeyspaceGroupReplicaPriority},
+			})
+	})
 }
 
 func (suite *keyspaceGroupTestSuite) TestSetNodeAndPriorityKeyspaceGroup() {
@@ -236,6 +270,19 @@ func (suite *keyspaceGroupTestSuite) TestSetNodeAndPriorityKeyspaceGroup() {
 	output, err := tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	re.Contains(string(output), "Success!")
+	// Wait for automatic replica repair after setting a single node so its
+	// membership write cannot conflict with the following validation reads.
+	testutil.Eventually(re, func() bool {
+		output, err := tests.ExecuteCommand(cmd, "-u", suite.pdAddr, "keyspace-group", defaultKeyspaceGroupID)
+		if err != nil {
+			return false
+		}
+		var keyspaceGroup endpoint.KeyspaceGroup
+		if err := json.Unmarshal(output, &keyspaceGroup); err != nil {
+			return false
+		}
+		return len(keyspaceGroup.Members) == mcs.DefaultKeyspaceGroupReplicaCount
+	})
 	args = []string{"-u", suite.pdAddr, "keyspace-group", "set-node", defaultKeyspaceGroupID, "", ""}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)

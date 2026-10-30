@@ -169,7 +169,7 @@ func (h *confHandler) SetConfig(w http.ResponseWriter, r *http.Request) {
 	for k, v := range conf {
 		key := k
 		if !strings.Contains(k, ".") {
-			key = reflectutil.FindJSONFullTagByChildTag(reflect.TypeOf(config.Config{}), k)
+			key = reflectutil.FindJSONFullTagByChildTag(reflect.TypeFor[config.Config](), k)
 		}
 		if key == "" {
 			h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("config item %s not found", k))
@@ -728,7 +728,7 @@ func unmarshalRemoteConfig(data []byte) (*config.Config, error) {
 }
 
 func (h *confHandler) updateControllerConfig(key string, value any) error {
-	k := reflectutil.FindJSONFullTagByChildTag(reflect.TypeOf(rm.ControllerConfig{}), key)
+	k := reflectutil.FindJSONFullTagByChildTag(reflect.TypeFor[rm.ControllerConfig](), key)
 	if k == "" {
 		return errors.Errorf("controller config item %s not found", key)
 	}

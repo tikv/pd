@@ -15,8 +15,7 @@
 package cache
 
 import (
-	"context"
-	"sort"
+	"slices"
 	"testing"
 	"time"
 
@@ -32,8 +31,7 @@ func TestMain(m *testing.M) {
 
 func TestExpireRegionCache(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cache := NewIDTTL(ctx, 10*time.Millisecond, 20*time.Millisecond)
 	// Test Pop
 	cache.PutWithTTL(9, "9", 50*time.Millisecond)
@@ -120,8 +118,8 @@ func TestExpireRegionCache(t *testing.T) {
 }
 
 func sortIDs(ids []uint64) []uint64 {
-	ids = append(ids[:0:0], ids...)
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	ids = slices.Clone(ids)
+	slices.Sort(ids)
 	return ids
 }
 

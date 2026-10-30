@@ -17,6 +17,7 @@ package syncer_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -38,8 +39,7 @@ func TestMain(m *testing.M) {
 
 func TestRegionSyncer(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/storage/levelDBStorageFastFlush", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/syncer/noFastExitSync", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/syncer/disableClientStreaming", `return(true)`))
@@ -176,7 +176,7 @@ func TestRegionSyncer(t *testing.T) {
 	regionLen = len(regions)
 
 	// change the statistics of regions
-	for i := 0; i < len(regions); i++ {
+	for i := range regions {
 		idx := uint64(i)
 		regions[i] = regions[i].Clone(
 			core.SetWrittenBytes(idx+10),
@@ -188,7 +188,7 @@ func TestRegionSyncer(t *testing.T) {
 	}
 
 	// change the leader of region
-	for i := 0; i < len(regions); i++ {
+	for i := range regions {
 		regions[i] = regions[i].Clone(core.WithLeader(regions[i].GetPeers()[1]))
 		err = rc.HandleRegionHeartbeat(regions[i])
 		re.NoError(err)
@@ -221,8 +221,7 @@ func TestRegionSyncer(t *testing.T) {
 
 func TestRegionSyncerReconnectsAfterLeaderSendFailure(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/storage/levelDBStorageFastFlush", `return(true)`))
 	defer func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/storage/levelDBStorageFastFlush"))
@@ -268,12 +267,7 @@ func TestRegionSyncerReconnectsAfterLeaderSendFailure(t *testing.T) {
 	testutil.Eventually(re, sendFailInjected.Load)
 
 	testutil.Eventually(re, func() bool {
-		for _, name := range rc.GetRegionSyncer().GetAllDownstreamNames() {
-			if name == followerName {
-				return false
-			}
-		}
-		return true
+		return !slices.Contains(rc.GetRegionSyncer().GetAllDownstreamNames(), followerName)
 	})
 
 	re.True(cluster.WaitRegionSyncerClientsReady(2))
@@ -299,8 +293,7 @@ func waitRegionSynced(re *require.Assertions, followerServer *tests.TestServer, 
 
 func TestFullSyncWithAddMember(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) { conf.PDServerCfg.UseRegionStorage = true })
 	defer cluster.Destroy()
 	re.NoError(err)
@@ -346,8 +339,7 @@ func TestFullSyncWithAddMember(t *testing.T) {
 
 func TestPrepareChecker(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))
 	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) { conf.PDServerCfg.UseRegionStorage = true })
 	defer cluster.Destroy()

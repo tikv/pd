@@ -507,6 +507,8 @@ func TestPagingPrechargeDoesNotEnterReportedRequestConsumption(t *testing.T) {
 	re.NotNil(report)
 	re.InDelta(baseCost, report.GetConsumptionSinceLastRequest().GetRRU(), 1e-6,
 		"reported request consumption must keep metering aligned with master and exclude predicted-read reservation")
+	timelineRRU, _ := timelineTotals(gc)
+	re.InDelta(baseCost, timelineRRU, 1e-6)
 }
 
 func TestPagingPrechargeRefundDoesNotEnterReportedResponseConsumption(t *testing.T) {
@@ -547,6 +549,9 @@ func TestPagingPrechargeRefundDoesNotEnterReportedResponseConsumption(t *testing
 	expectedReportedResponseRU := float64(cfg.ReadBytesCost) * float64(actualReadBytes)
 	re.InDelta(expectedReportedResponseRU, responseReport.GetConsumptionSinceLastRequest().GetRRU(), 1e-6,
 		"reported response consumption must expose actual read usage, not the paging refund")
+	timelineRRU, _ := timelineTotals(gc)
+	baseCost := float64(cfg.ReadBaseCost) + float64(cfg.ReadPerBatchBaseCost)*defaultAvgBatchProportion
+	re.InDelta(baseCost+expectedReportedResponseRU, timelineRRU, 1e-6)
 	re.GreaterOrEqual(responseReport.GetConsumptionSinceLastRequest().GetRRU(), 0.0)
 }
 
@@ -1083,8 +1088,7 @@ func TestHandleTokenBucketUpdateEventCanceledByInitCounterNotify(t *testing.T) {
 	counter.notify.mu.Unlock()
 	defer initCounterNotify(counter)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	done := make(chan struct{})
 	go func() {
 		gc.handleTokenBucketUpdateEvent(ctx)
@@ -1115,8 +1119,7 @@ func TestHandleTokenBucketUpdateEventCleansNotifyOnTimer(t *testing.T) {
 	counter.notify.mu.Unlock()
 	defer initCounterNotify(counter)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	done := make(chan struct{})
 	go func() {
 		gc.handleTokenBucketUpdateEvent(ctx)

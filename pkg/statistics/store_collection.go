@@ -224,8 +224,10 @@ func ObserveHotStat(store *core.StoreInfo, stats *StoresStats) {
 	storeAddress := store.GetAddress()
 	id := strconv.FormatUint(store.GetID(), 10)
 	storeFlowStats := stats.GetRollingStoreStats(store.GetID())
-	if storeFlowStats == nil {
-		return
+	if storeFlowStats == nil || store.IsDisconnected() {
+		// Keep publishing zero loads while heartbeats are missing, even after
+		// unhealthy stores have been removed from the statistics cache.
+		storeFlowStats = newRollingStoreStats()
 	}
 
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_write_rate_bytes").Set(storeFlowStats.GetLoad(utils.StoreWriteBytes))

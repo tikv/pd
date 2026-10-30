@@ -15,6 +15,7 @@
 package server
 
 import (
+	"maps"
 	"math"
 	"time"
 
@@ -75,7 +76,7 @@ type GroupTokenBucket struct {
 	// Settings is the setting of TokenBucket.
 	// MaxTokens limits the number of tokens that can be accumulated
 	Settings              *rmpb.TokenLimitSettings `json:"settings,omitempty"`
-	GroupTokenBucketState `json:"state,omitempty"`
+	GroupTokenBucketState `json:"state"`
 }
 
 func (gtb *GroupTokenBucket) getFillRate() float64 {
@@ -201,9 +202,7 @@ func (gts *GroupTokenBucketState) clone() *GroupTokenBucketState {
 	var tokenSlots map[uint64]*tokenSlot
 	if gts.tokenSlots != nil {
 		tokenSlots = make(map[uint64]*tokenSlot)
-		for id, tokens := range gts.tokenSlots {
-			tokenSlots[id] = tokens
-		}
+		maps.Copy(tokenSlots, gts.tokenSlots)
 	}
 
 	var lastUpdate *time.Time
@@ -429,14 +428,12 @@ func NewGroupTokenBucket(resourceGroupName string, tokenBucket *rmpb.TokenBucket
 	}
 	settings := proto.Clone(tokenBucket.GetSettings()).(*rmpb.TokenLimitSettings)
 	return &GroupTokenBucket{
-		Settings: settings,
-		GroupTokenBucketState: GroupTokenBucketState{
-			Tokens:             tokenBucket.GetTokens(),
-			resourceGroupName:  resourceGroupName,
-			tokenSlots:         make(map[uint64]*tokenSlot),
-			overrideFillRate:   -1,
-			overrideBurstLimit: -1,
-		},
+		Settings:           settings,
+		Tokens:             tokenBucket.GetTokens(),
+		resourceGroupName:  resourceGroupName,
+		tokenSlots:         make(map[uint64]*tokenSlot),
+		overrideFillRate:   -1,
+		overrideBurstLimit: -1,
 	}
 }
 

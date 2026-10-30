@@ -30,7 +30,7 @@ func TestMain(m *testing.M) {
 }
 
 func BenchmarkDeepClone(b *testing.B) {
-	for range b.N {
+	for b.Loop() {
 		src := &metapb.Region{Id: 1}
 		dst := typeutil.DeepClone(src, RegionFactory)
 		dst.Id = 1
@@ -42,7 +42,7 @@ func BenchmarkProtoClone(b *testing.B) {
 		dst := proto.Clone(src).(*metapb.Region)
 		return dst
 	}
-	for range b.N {
+	for b.Loop() {
 		src := &metapb.Region{Id: 1}
 		dst := clone(src)
 		dst.Id = 1
