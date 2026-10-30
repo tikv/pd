@@ -503,6 +503,10 @@ func (handler *evictLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	log.Info("evict-leader-scheduler config is updated",
+		zap.Uint64s("store-ids", ids),
+		zap.Bool("explicit-ranges", hasRanges),
+		zap.Int("batch", batch))
 	handler.rd.JSON(w, http.StatusOK, "The scheduler has been applied to the store.")
 }
 
