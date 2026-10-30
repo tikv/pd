@@ -592,7 +592,7 @@ func (s *Server) startCluster(ctx context.Context) error {
 	am := cluster.GetAffinityManager()
 	configWatcher.SetSchedulersController(cluster.GetCoordinator().GetSchedulersController())
 	ruleWatcher, err = rule.NewWatcher(ctx, s.GetClient(), cluster.GetStorage(),
-		cluster.GetCoordinator().GetCheckerController(), cluster.GetRuleManager(), cluster.GetRegionLabeler())
+		cluster.GetCoordinator().GetCheckerController(), cluster.GetRuleManager(), cluster.GetRegionLabeler(), am)
 	if err != nil {
 		return err
 	}
