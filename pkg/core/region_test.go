@@ -1438,6 +1438,35 @@ func TestScanRegionLimit(t *testing.T) {
 	}
 }
 
+func TestGetRegionsByIDsReusesBuffer(t *testing.T) {
+	regions := NewRegionsInfo()
+	for id := uint64(1); id <= RegionQueryBatchSize+1; id++ {
+		regions.PutRegion(NewTestRegionInfo(id, 1, []byte(fmt.Sprintf("%04d", id)), []byte(fmt.Sprintf("%04d", id+1))))
+	}
+	ids := []uint64{0}
+	for id := uint64(RegionQueryBatchSize + 1); id > 0; id-- {
+		ids = append(ids, id)
+	}
+	ids = append(ids, 1)
+	buffer := make([]*RegionInfo, len(ids))
+	result := regions.GetRegionsByIDs(ids, buffer)
+	require.Same(t, &buffer[0], &result[0])
+	require.Len(t, result, len(ids))
+	for i, id := range ids {
+		if id == 0 {
+			require.Nil(t, result[i])
+		} else {
+			require.Same(t, regions.GetRegion(id), result[i])
+		}
+	}
+	result = regions.GetRegionsByIDs([]uint64{1, 0}, result)
+	require.Len(t, result, 2)
+	require.Same(t, &buffer[0], &result[0])
+	require.Same(t, regions.GetRegion(1), result[0])
+	require.Nil(t, result[1])
+	require.Empty(t, regions.GetRegionsByIDs(nil, result))
+}
+
 func TestQueryRegions(t *testing.T) {
 	re := require.New(t)
 	regions := NewRegionsInfo()

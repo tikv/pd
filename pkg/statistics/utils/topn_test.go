@@ -18,6 +18,7 @@ import (
 	"math/rand/v2"
 	"sort"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -155,6 +156,33 @@ func TestPut(t *testing.T) {
 		re.Equal(i, it.id)
 		re.Equal(-float64(i), it.values[0])
 	}
+}
+
+func TestUpdatePreservesTTL(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		tn := NewTopN(2, 1, 30*time.Second)
+		first := &item{id: 1, values: []float64{1, 3}}
+		second := &item{id: 2, values: []float64{2, 2}}
+		tn.Put(first)
+		tn.Put(second)
+		time.Sleep(20 * time.Second)
+		updated := &item{id: 1, values: []float64{3, 1}}
+		require.True(t, tn.Update(updated))
+		require.Same(t, updated, tn.Get(1))
+		require.Same(t, updated, tn.GetTopNMin(0))
+		require.Same(t, second, tn.GetTopNMin(1))
+		require.Equal(t, []float64{1, 3}, first.values)
+		require.False(t, tn.Update(&item{id: 3, values: []float64{4, 4}}))
+		require.Nil(t, tn.Get(3))
+		require.Equal(t, 2, tn.Len())
+		time.Sleep(11 * time.Second)
+		require.NotEmpty(t, tn.RemoveExpired())
+		require.Zero(t, tn.Len())
+		require.Empty(t, tn.GetAll())
+		for dim := range 2 {
+			require.Empty(t, tn.GetAllTopN(dim))
+		}
+	})
 }
 
 func putPerm(re *require.Assertions, tn *TopN, total int, f func(x int) float64, isUpdate bool) {

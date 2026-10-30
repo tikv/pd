@@ -51,8 +51,8 @@ const (
 	randomRegionMaxRetry = 10
 	// ScanRegionLimit is the default limit for the number of regions to scan in a region scan request.
 	ScanRegionLimit = 1000
-	// batchSearchSize is the default size for the number of IDs/keys/prevKeys to search in a batch.
-	batchSearchSize = 128
+	// RegionQueryBatchSize bounds the number of IDs/keys/prevKeys searched under one root lock.
+	RegionQueryBatchSize = 128
 	// CollectFactor is the factor to collect the count of region.
 	CollectFactor = 0.9
 )
@@ -864,13 +864,18 @@ func (r *RegionInfo) isInvolved(startKey, endKey []byte) bool {
 }
 
 func (r *RegionInfo) isRegionRecreated() bool {
+	return IsRegionRecreated(r.meta)
+}
+
+// IsRegionRecreated reports whether metadata matches core's online unsafe-recovery exception.
+func IsRegionRecreated(meta *metapb.Region) bool {
 	// Regions recreated by online unsafe recover have both ver and conf ver equal to 1. To
 	// prevent stale bootstrap region (first region in a cluster which covers the entire key
 	// range) from reporting stale info, we exclude regions that covers the entire key range
 	// here. Technically, it is possible for unsafe recover to recreate such region, but that
 	// means the entire key range is unavailable, and we don't expect unsafe recover to perform
 	// better than recreating the cluster.
-	return r.GetRegionEpoch().GetVersion() == 1 && r.GetRegionEpoch().GetConfVer() == 1 && (len(r.GetStartKey()) != 0 || len(r.GetEndKey()) != 0)
+	return meta.GetRegionEpoch().GetVersion() == 1 && meta.GetRegionEpoch().GetConfVer() == 1 && (len(meta.GetStartKey()) != 0 || len(meta.GetEndKey()) != 0)
 }
 
 func (r *RegionInfo) contain(key []byte) bool {
@@ -1672,7 +1677,7 @@ func (r *RegionsInfo) QueryRegions(
 			idsToQuery = append(idsToQuery, id)
 		}
 		// Batch query the regions by IDs to reduce lock contention.
-		regions := r.getRegionsByIDs(idsToQuery)
+		regions := r.GetRegionsByIDs(idsToQuery, nil)
 		for i, id := range idsToQuery {
 			region := regions[i]
 			if region == nil {
@@ -1701,7 +1706,7 @@ func (r *RegionsInfo) getRegionsByKeys(keys [][]byte) []*RegionInfo {
 	regions := make([]*RegionInfo, 0, len(keys))
 	// Split the keys into multiple batches, and search each batch separately.
 	// This is to avoid the lock contention on the `regionTree`.
-	for _, batch := range slice.SplitIntoBatches(keys, batchSearchSize) {
+	for _, batch := range slice.SplitIntoBatches(keys, RegionQueryBatchSize) {
 		r.t.RLock()
 		results := r.tree.searchByKeys(batch)
 		r.t.RUnlock()
@@ -1712,7 +1717,7 @@ func (r *RegionsInfo) getRegionsByKeys(keys [][]byte) []*RegionInfo {
 
 func (r *RegionsInfo) getRegionsByPrevKeys(prevKeys [][]byte) []*RegionInfo {
 	regions := make([]*RegionInfo, 0, len(prevKeys))
-	for _, batch := range slice.SplitIntoBatches(prevKeys, batchSearchSize) {
+	for _, batch := range slice.SplitIntoBatches(prevKeys, RegionQueryBatchSize) {
 		r.t.RLock()
 		results := r.tree.searchByPrevKeys(batch)
 		r.t.RUnlock()
@@ -1721,10 +1726,16 @@ func (r *RegionsInfo) getRegionsByPrevKeys(prevKeys [][]byte) []*RegionInfo {
 	return regions
 }
 
-// getRegionsByIDs searches RegionInfo from regionMap by IDs in batch.
-func (r *RegionsInfo) getRegionsByIDs(ids []uint64) []*RegionInfo {
-	regions := make([]*RegionInfo, 0, len(ids))
-	for _, batch := range slice.SplitIntoBatches(ids, batchSearchSize) {
+// GetRegionsByIDs returns regions in ID order, using nil for missing regions.
+// It reuses the supplied buffer, replacing its contents.
+// Root locking is split into bounded batches to let heartbeat publication proceed.
+func (r *RegionsInfo) GetRegionsByIDs(ids []uint64, regions []*RegionInfo) []*RegionInfo {
+	regions = regions[:0]
+	if cap(regions) < len(ids) {
+		regions = make([]*RegionInfo, 0, len(ids))
+	}
+	for start := 0; start < len(ids); start += RegionQueryBatchSize {
+		batch := ids[start:min(start+RegionQueryBatchSize, len(ids))]
 		r.t.RLock()
 		for _, id := range batch {
 			regions = append(regions, r.getRegionLocked(id))

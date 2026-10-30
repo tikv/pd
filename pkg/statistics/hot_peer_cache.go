@@ -84,6 +84,38 @@ type hotRegionInfo struct {
 	leaderTransferred bool
 }
 
+type readRegionTransition struct {
+	meta    *metapb.Region
+	storeID uint64
+	term    uint64
+}
+
+type readRegionMetadata struct {
+	readRegionTransition
+	// The root observed at admission bounds the lifetime of optimistic metadata.
+	// Keep only immutable metadata, rather than retaining a full RegionInfo.
+	rootMeta   *metapb.Region
+	rootLeader *metapb.Peer
+	rootTerm   uint64
+}
+
+func newReadRegionMetadata(region, root *core.RegionInfo) readRegionMetadata {
+	metadata := readRegionMetadata{meta: region.GetMeta(), storeID: region.GetLeader().GetStoreId(), term: region.GetTerm()}
+	if root != nil {
+		metadata.rootMeta = root.GetMeta()
+		metadata.rootLeader = root.GetLeader()
+		metadata.rootTerm = root.GetTerm()
+	}
+	return metadata
+}
+
+func (r *readRegionMetadata) rootChanged(root *core.RegionInfo) bool {
+	if root == nil {
+		return r.rootMeta != nil
+	}
+	return r.rootMeta != root.GetMeta() || r.rootLeader != root.GetLeader() || r.rootTerm != root.GetTerm()
+}
+
 type coldPeerKey struct {
 	storeID  uint64
 	regionID uint64
@@ -124,6 +156,8 @@ type HotPeerCache struct {
 	peersOfStore   map[uint64]*utils.TopN         // storeID -> hot peers
 	storesOfRegion map[uint64]map[uint64]struct{} // regionID -> storeIDs
 	regionsOfStore map[uint64]map[uint64]struct{} // storeID -> regionIDs
+	// readMetadata keeps one observed snapshot per hot or not-yet-published region.
+	readMetadata map[uint64]*readRegionMetadata
 	// coldPeersOfStore indexes cold peers by store and keeps each candidate's
 	// position in coldPeerSweepQueue. This lets gc() visit a bounded batch
 	// without scanning or copying a store's full TopN.
@@ -144,6 +178,7 @@ func NewHotPeerCache(ctx context.Context, cluster *core.BasicCluster, kind utils
 		peersOfStore:      make(map[uint64]*utils.TopN),
 		storesOfRegion:    make(map[uint64]map[uint64]struct{}),
 		regionsOfStore:    make(map[uint64]map[uint64]struct{}),
+		readMetadata:      make(map[uint64]*readRegionMetadata),
 		coldPeersOfStore:  make(map[uint64]map[uint64]*list.Element),
 		taskQueue:         chanx.NewUnboundedChan[func(*HotPeerCache)](ctx, queueCap),
 		thresholdsOfStore: make(map[uint64]*thresholds),
@@ -155,6 +190,31 @@ func NewHotPeerCache(ctx context.Context, cluster *core.BasicCluster, kind utils
 // GetHotPeerStats returns the read or write statistics for hot regions.
 // It returns a map where the keys are store IDs and the values are slices of HotPeerStat.
 func (f *HotPeerCache) GetHotPeerStats(minHotDegree int) map[uint64][]*HotPeerStat {
+	if f.kind == utils.Read && len(f.readMetadata) > 0 {
+		var ids [core.RegionQueryBatchSize]uint64
+		var metadata [core.RegionQueryBatchSize]*readRegionMetadata
+		var roots [core.RegionQueryBatchSize]*core.RegionInfo
+		count := 0
+		reconcile := func() {
+			regions := f.cluster.GetRegionsByIDs(ids[:count], roots[:0])
+			for i, current := range regions {
+				f.reconcileReadMetadataWithRoot(ids[i], metadata[i], current)
+			}
+			count = 0
+		}
+		for regionID := range f.storesOfRegion {
+			if previous := f.readMetadata[regionID]; previous != nil {
+				ids[count], metadata[count] = regionID, previous
+				count++
+				if count == len(ids) {
+					reconcile()
+				}
+			}
+		}
+		if count > 0 {
+			reconcile()
+		}
+	}
 	res := make(map[uint64][]*HotPeerStat)
 	defaultAntiCount := f.kind.DefaultAntiCount()
 	for storeID, peers := range f.peersOfStore {
@@ -220,6 +280,90 @@ func (f *HotPeerCache) collectExpiredItemsForRegion(region *hotRegionInfo) []*Ho
 		}
 	}
 	return items
+}
+
+func sameReadRegionMetadata(a, b *metapb.Region) bool {
+	return a == b || a.GetRegionEpoch().GetVersion() == b.GetRegionEpoch().GetVersion() &&
+		a.GetRegionEpoch().GetConfVer() == b.GetRegionEpoch().GetConfVer() &&
+		core.SortedPeersEqual(a.GetPeers(), b.GetPeers())
+}
+
+// isReadRegionMetadataStale follows core's term and epoch ordering, including
+// unknown terms and the online unsafe-recovery exception.
+func isReadRegionMetadataStale(meta *metapb.Region, term uint64, previous *metapb.Region, previousTerm uint64) bool {
+	epoch, previousEpoch := meta.GetRegionEpoch(), previous.GetRegionEpoch()
+	return (term > 0 && term < previousTerm || epoch.GetVersion() < previousEpoch.GetVersion() ||
+		epoch.GetConfVer() < previousEpoch.GetConfVer()) && !core.IsRegionRecreated(meta)
+}
+
+func (f *HotPeerCache) updateReadLeader(metadata readRegionMetadata) bool {
+	if f.kind != utils.Read {
+		return true
+	}
+	region := &hotRegionInfo{meta: metadata.meta, leaderStoreID: metadata.storeID}
+	term := metadata.term
+	previous := f.readMetadata[region.id()]
+	current := f.cluster.GetRegion(region.id())
+	published := current != nil && current.GetMeta() == region.meta && current.GetTerm() == term && current.GetLeader().GetStoreId() == region.leaderStoreID
+	// Final root acceptance takes precedence over an optimistic higher term.
+	if previous != nil && (!published || !previous.rootChanged(current)) && isReadRegionMetadataStale(region.meta, term, previous.meta, previous.term) {
+		return false
+	}
+	leaderTransferred := previous != nil && previous.storeID != region.leaderStoreID
+	for storeID := range f.storesOfRegion[region.id()] {
+		if item := f.getOldHotPeerStat(region.id(), storeID); item != nil && item.isLeader != (storeID == region.leaderStoreID) {
+			leaderTransferred = true
+		}
+	}
+	if previous != nil || len(f.storesOfRegion[region.id()]) > 0 || current == nil ||
+		current.GetLeader().GetStoreId() != region.leaderStoreID || current.GetTerm() < term || !sameReadRegionMetadata(current.GetMeta(), region.meta) {
+		if previous == nil {
+			previous = &readRegionMetadata{}
+			f.readMetadata[region.id()] = previous
+		}
+		*previous = metadata
+	}
+	var now time.Time
+	for storeID := range f.storesOfRegion[region.id()] {
+		oldItem := f.getOldHotPeerStat(region.id(), storeID)
+		isLeader := storeID == region.leaderStoreID
+		if oldItem == nil || !leaderTransferred && oldItem.isLeader == isLeader {
+			continue
+		}
+		// Preserve sample TTL, rolling statistics and previously returned snapshots.
+		item := *oldItem
+		item.isLeader = isLeader
+		if leaderTransferred {
+			if now.IsZero() {
+				now = time.Now()
+			}
+			item.lastTransferLeaderTime = now
+		}
+		item.actionType = utils.Update
+		f.peersOfStore[storeID].Update(&item)
+	}
+	return true
+}
+
+func (f *HotPeerCache) reconcileReadMetadata(regionID uint64) *readRegionMetadata {
+	previous := f.readMetadata[regionID]
+	if previous == nil {
+		return nil
+	}
+	return f.reconcileReadMetadataWithRoot(regionID, previous, f.cluster.GetRegion(regionID))
+}
+
+func (f *HotPeerCache) reconcileReadMetadataWithRoot(regionID uint64, previous *readRegionMetadata, current *core.RegionInfo) *readRegionMetadata {
+	if previous.rootChanged(current) {
+		if current == nil {
+			delete(f.readMetadata, regionID)
+			return nil
+		}
+		// Admission precedes final validation and the unchanged-heartbeat return.
+		// Once the root advances, it resolves both rejected and skipped metadata.
+		applyRegionMetadata(f, newReadRegionMetadata(current, current))
+	}
+	return previous
 }
 
 // CheckPeerFlow checks the flow information of a peer.
@@ -332,6 +476,7 @@ func checkColdPeerForReportedRegions[T any](f *HotPeerCache, storeID uint64, rep
 	for regionID := range previousHotStat {
 		// If it's not reported, we need to update the original information.
 		if _, ok := reportedRegions[regionID]; !ok {
+			f.reconcileReadMetadata(regionID)
 			oldItem := f.getOldHotPeerStat(regionID, storeID)
 			// The region is not hot in the store, do nothing.
 			if oldItem == nil {
@@ -518,6 +663,9 @@ func (f *HotPeerCache) isRegionHotWithPeer(region *core.RegionInfo, peer *metapb
 }
 
 func (f *HotPeerCache) getHotPeerStat(regionID, storeID uint64) *HotPeerStat {
+	if f.kind == utils.Read {
+		f.reconcileReadMetadata(regionID)
+	}
 	if peers, ok := f.peersOfStore[storeID]; ok {
 		if stat := peers.Get(regionID); stat != nil {
 			return stat.(*HotPeerStat)
@@ -812,6 +960,7 @@ func (f *HotPeerCache) removeAllItem() {
 			f.UpdateStat(item)
 		}
 	}
+	clear(f.readMetadata)
 }
 
 func coldItem(newItem, oldItem *HotPeerStat) {
