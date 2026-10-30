@@ -26,12 +26,17 @@ import (
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
+	pingcaperrors "github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
+
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/server/config"
 )
 
 func newMetaServiceGroupGCFixture(t *testing.T) (*endpoint.StorageEndpoint, *GCStateManager, *clientv3.Client, func()) {
@@ -232,4 +237,181 @@ func TestMetaServiceGroupMinStartTSFailure(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestMetaServiceGroupRoutingRevision(t *testing.T) {
+	for _, tc := range []struct {
+		name, hook, initialGroup, finalGroup string
+		legacy, restoreGroup, unrelated      bool
+	}{
+		{name: "after-metadata", hook: "txnSafePointKeyspaceLoaded", initialGroup: "group-a", finalGroup: "group-b"},
+		{name: "after-report", hook: "txnSafePointMinStartTSLoaded", initialGroup: "group-a", finalGroup: "group-b"},
+		{name: "legacy-after-report", hook: "txnSafePointMinStartTSLoaded", initialGroup: "group-a", finalGroup: "group-b", legacy: true},
+		{name: "ABA", hook: "txnSafePointMinStartTSLoaded", initialGroup: "group-a", finalGroup: "group-a", restoreGroup: true},
+		{name: "unassigned-to-assigned", hook: "txnSafePointKeyspaceLoaded", finalGroup: "group-b"},
+		{name: "assigned-to-unassigned", hook: "txnSafePointMinStartTSLoaded", initialGroup: "group-a"},
+		{name: "unrelated-config", hook: "txnSafePointMinStartTSLoaded", initialGroup: "group-a", finalGroup: "group-a", unrelated: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			ctx := context.Background()
+			groups := make(map[string]string)
+			clients := make(map[string]*clientv3.Client)
+			for _, group := range []string{"group-a", "group-b"} {
+				_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+				t.Cleanup(clean)
+				groups[group] = strings.Join(client.Endpoints(), ",")
+				clients[group] = client
+			}
+			opt := newGCStateManagerForTestOptions{metaServiceGroups: groups}
+			opt.generateKeyspacesByCount(1)
+			storage, provider, manager, clean, cancel := newGCStateManagerForTest(t, opt)
+			t.Cleanup(clean)
+			t.Cleanup(cancel)
+			assign := func(group string) {
+				_, err := manager.keyspaceManager.UpdateKeyspaceConfig("ks1", []*keyspace.Mutation{{Op: keyspace.OpPut, Key: keyspace.MetaServiceGroupIDKey, Value: group}})
+				re.NoError(err)
+			}
+			assign(tc.initialGroup)
+			now := time.Now()
+			_, err := manager.AdvanceTxnSafePoint(1, 50, now)
+			re.NoError(err)
+			_, err = manager.SetGCBarrier(1, "expired", 60, time.Second, now.Add(-time.Minute))
+			re.NoError(err)
+			barrierPath := keypath.GCBarrierPath(1, "expired")
+			beforeBarrier, err := storage.Load(barrierPath)
+			re.NoError(err)
+			re.NotEmpty(beforeBarrier)
+			beforeRevision, err := storage.Load(keypath.GCStateRevisionPath())
+			re.NoError(err)
+			reportKey := keypath.CompatibleTiDBMinStartTSPrefix(1) + "tidb-routing"
+			if tc.finalGroup == "" {
+				re.NoError(storage.Save(reportKey, "100"))
+			} else {
+				client := clients[tc.finalGroup]
+				lease, err := client.Grant(ctx, 60)
+				re.NoError(err)
+				_, err = client.Put(ctx, reportKey, "100", clientv3.WithLease(lease.ID))
+				re.NoError(err)
+			}
+			watcher, err := manager.WatchGCStates(ctx, true)
+			re.NoError(err)
+			defer watcher.Close()
+			hook := "github.com/tikv/pd/pkg/gc/" + tc.hook
+			mutated := false
+			re.NoError(failpoint.EnableCall(hook, func() {
+				mutated = true
+				if tc.unrelated {
+					_, err := manager.keyspaceManager.UpdateKeyspaceConfig("ks1", []*keyspace.Mutation{{Op: keyspace.OpPut, Key: "unrelated-config", Value: "changed"}})
+					re.NoError(err)
+				} else {
+					if tc.restoreGroup {
+						assign("group-b")
+					}
+					assign(tc.finalGroup)
+				}
+			}))
+			defer func() { re.NoError(failpoint.Disable(hook)) }()
+			advance := func() (uint64, error) {
+				if tc.legacy {
+					minimum, updated, err := manager.CompatibleUpdateServiceGCSafePoint(1, keypath.GCWorkerServiceSafePointID, 200, math.MaxInt64, now)
+					if err != nil {
+						re.False(updated)
+						re.Nil(minimum)
+						return 0, err
+					}
+					return minimum.SafePoint, nil
+				}
+				result, err := manager.AdvanceTxnSafePoint(1, 200, now)
+				return result.NewTxnSafePoint, err
+			}
+			_, err = advance()
+			re.True(mutated, "the routing mutation must run before commit")
+			re.True(pingcaperrors.ErrorEqual(err, errs.ErrEtcdTxnConflict), "stale routing must conflict, got %v", err)
+			re.NoError(failpoint.Disable(hook))
+			persisted, err := provider.LoadTxnSafePoint(1)
+			re.NoError(err)
+			re.Equal(uint64(50), persisted)
+			barrier, err := storage.Load(barrierPath)
+			re.NoError(err)
+			re.Equal(beforeBarrier, barrier)
+			revision, err := storage.Load(keypath.GCStateRevisionPath())
+			re.NoError(err)
+			re.Equal(beforeRevision, revision)
+			_, published, err := watcher.receiveOne(false)
+			re.NoError(err)
+			re.False(published, "a rejected advancement must not publish a GC state")
+			safePoint, err := advance()
+			re.NoError(err)
+			re.Equal(uint64(100), safePoint)
+			change, published, err := watcher.receiveOne(false)
+			re.NoError(err)
+			re.True(published)
+			state, upsert := change.Upsert()
+			re.True(upsert)
+			re.Equal(uint64(100), state.TxnSafePoint)
+		})
+	}
+}
+
+func TestTxnSafePointRoutingRevisionScopes(t *testing.T) {
+	t.Run("direct-null-without-keyspace-manager", func(t *testing.T) {
+		re := require.New(t)
+		_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+		defer clean()
+		storage := endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(client), nil)
+		manager := NewGCStateManager(storage.GetGCStateProvider(), config.PDServerConfig{}, nil, nil)
+		defer manager.CloseBarrierMetrics()
+		re.NoError(storage.Save(keypath.CompatibleTiDBMinStartTSPrefix(constant.NullKeyspaceID)+"tidb-local", "100"))
+		for _, id := range []uint32{constant.NullKeyspaceID, constant.ValidKeyspaceIDMask + 1} {
+			result, err := manager.AdvanceTxnSafePoint(id, 200, time.Now())
+			re.NoError(err)
+			re.Equal(uint64(100), result.NewTxnSafePoint)
+			minimum, _, err := manager.CompatibleUpdateServiceGCSafePoint(id, keypath.GCWorkerServiceSafePointID, 200, math.MaxInt64, time.Now())
+			re.NoError(err)
+			re.Equal(uint64(100), minimum.SafePoint)
+		}
+	})
+	t.Run("legacy-unified-guards-source-keyspace", func(t *testing.T) {
+		re := require.New(t)
+		opt := newGCStateManagerForTestOptions{}
+		opt.generateKeyspacesByCount(1)
+		opt.specifyInitialKeyspaces[0].Config[keyspace.GCManagementType] = "unified"
+		storage, provider, manager, clean, cancel := newGCStateManagerForTest(t, opt)
+		defer clean()
+		defer cancel()
+		now := time.Now()
+		_, err := manager.AdvanceTxnSafePoint(constant.NullKeyspaceID, 50, now)
+		re.NoError(err)
+		re.NoError(storage.Save(keypath.CompatibleTiDBMinStartTSPrefix(constant.NullKeyspaceID)+"tidb-local", "100"))
+		re.NoError(storage.Save(keypath.CompatibleTiDBMinStartTSPrefix(1)+"wrong-scope", "20"))
+		beforeRevision, err := storage.Load(keypath.GCStateRevisionPath())
+		re.NoError(err)
+		hook := "github.com/tikv/pd/pkg/gc/txnSafePointMinStartTSLoaded"
+		mutated := false
+		re.NoError(failpoint.EnableCall(hook, func() {
+			mutated = true
+			_, err := manager.keyspaceManager.UpdateKeyspaceConfig("ks1", []*keyspace.Mutation{{Op: keyspace.OpPut, Key: "unrelated-config", Value: "changed"}})
+			re.NoError(err)
+		}))
+		defer func() { re.NoError(failpoint.Disable(hook)) }()
+		_, updated, err := manager.CompatibleUpdateServiceGCSafePoint(1, keypath.GCWorkerServiceSafePointID, 200, math.MaxInt64, now)
+		re.True(mutated)
+		re.False(updated)
+		re.True(pingcaperrors.ErrorEqual(err, errs.ErrEtcdTxnConflict), "%v", err)
+		re.NoError(failpoint.Disable(hook))
+		safePoint, err := provider.LoadTxnSafePoint(constant.NullKeyspaceID)
+		re.NoError(err)
+		re.Equal(uint64(50), safePoint)
+		revision, err := storage.Load(keypath.GCStateRevisionPath())
+		re.NoError(err)
+		re.Equal(beforeRevision, revision)
+		minimum, updated, err := manager.CompatibleUpdateServiceGCSafePoint(1, keypath.GCWorkerServiceSafePointID, 200, math.MaxInt64, now)
+		re.NoError(err)
+		re.True(updated)
+		re.Equal(uint64(100), minimum.SafePoint)
+		safePoint, err = provider.LoadTxnSafePoint(1)
+		re.NoError(err)
+		re.Zero(safePoint, "the redirected request must only write unified GC state")
+	})
 }

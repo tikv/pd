@@ -269,32 +269,47 @@ func getKeyspaceNameFromCtx(ctx context.Context) string {
 // string only for diagnostic purposes (it returns "<null_keyspace>" for NullKeyspaceID). DO NOT use it as the key for
 // identifying a keyspace.
 func (m *GCStateManager) redirectKeyspace(keyspaceID uint32, isUserAPI bool) (uint32, string, error) {
-	id, name, _, err := m.redirectKeyspaceWithMeta(keyspaceID, isUserAPI)
-	return id, name, err
+	// Regard IDs outside the valid range as NullKeyspace, including NullKeyspaceID itself.
+	if keyspaceID & ^constant.ValidKeyspaceIDMask != 0 {
+		return constant.NullKeyspaceID, "<null_keyspace>", nil
+	}
+	meta, err := m.keyspaceManager.LoadKeyspaceByID(keyspaceID)
+	if err != nil {
+		return 0, "", err
+	}
+	return gcKeyspaceScope(keyspaceID, meta, isUserAPI)
 }
 
-func (m *GCStateManager) redirectKeyspaceWithMeta(keyspaceID uint32, isUserAPI bool) (uint32, string, *keyspacepb.KeyspaceMeta, error) {
-	// Regard it as NullKeyspaceID if the given one is invalid (exceeds the valid range of keyspace id), no matter
-	// whether it exactly matches the NullKeyspaceID.
-	if keyspaceID & ^constant.ValidKeyspaceIDMask != 0 {
-		return constant.NullKeyspaceID, "<null_keyspace>", nil, nil
-	}
+// txnSafePointKeyspace retains the original metadata identity even when the effective GC scope is NullKeyspace.
+type txnSafePointKeyspace struct {
+	sourceID uint32
+	meta     *keyspacepb.KeyspaceMeta
+	revision int64
+}
 
-	keyspaceMeta, err := m.keyspaceManager.LoadKeyspaceByID(keyspaceID)
-	if err != nil {
-		return 0, "", nil, err
+func (m *GCStateManager) loadTxnSafePointKeyspace(ctx context.Context, keyspaceID uint32, isUserAPI bool) (uint32, string, txnSafePointKeyspace, error) {
+	if keyspaceID & ^constant.ValidKeyspaceIDMask != 0 {
+		return constant.NullKeyspaceID, "<null_keyspace>", txnSafePointKeyspace{}, nil
 	}
-	if keyspaceMeta.Config[keyspace.GCManagementType] != keyspace.KeyspaceLevelGC {
+	meta, revision, err := m.keyspaceManager.LoadKeyspaceByIDWithRevision(ctx, keyspaceID)
+	if err != nil {
+		return 0, "", txnSafePointKeyspace{}, err
+	}
+	id, name, err := gcKeyspaceScope(keyspaceID, meta, isUserAPI)
+	return id, name, txnSafePointKeyspace{sourceID: keyspaceID, meta: meta, revision: revision}, err
+}
+
+func gcKeyspaceScope(keyspaceID uint32, meta *keyspacepb.KeyspaceMeta, isUserAPI bool) (uint32, string, error) {
+	if meta.Config[keyspace.GCManagementType] != keyspace.KeyspaceLevelGC {
 		if isUserAPI {
 			// The user API is expected to always work. Operate on the state of unified GC instead.
-			return constant.NullKeyspaceID, "<null_keyspace>", nil, nil
+			return constant.NullKeyspaceID, "<null_keyspace>", nil
 		}
 		// Internal API should never be called on keyspaces without keyspace level GC. They won't perform any active
 		// GC operation and will be managed by the unified GC.
-		return 0, "", nil, errs.ErrGCOnInvalidKeyspace.GenWithStackByArgs(keyspaceMeta.GetName(), keyspaceID)
+		return 0, "", errs.ErrGCOnInvalidKeyspace.GenWithStackByArgs(meta.GetName(), keyspaceID)
 	}
-
-	return keyspaceID, keyspaceMeta.GetName(), keyspaceMeta, nil
+	return keyspaceID, meta.GetName(), nil
 }
 
 // CompatibleLoadGCSafePoint loads current GC safe point from storage for the legacy GC API `GetGCSafePoint`.
@@ -441,11 +456,12 @@ func (m *GCStateManager) advanceGCSafePointImpl(ctx context.Context, keyspaceID 
 func (m *GCStateManager) AdvanceTxnSafePoint(keyspaceID uint32, target uint64, now time.Time) (AdvanceTxnSafePointResult, error) {
 	observation := &barrierObservation{generation: m.barrierMetrics.generation()}
 	defer observation.logWarnings()
-	keyspaceID, keyspaceNameForDiag, keyspaceMeta, err := m.redirectKeyspaceWithMeta(keyspaceID, false)
+	ctx := context.Background()
+	keyspaceID, keyspaceNameForDiag, keyspaceMeta, err := m.loadTxnSafePointKeyspace(ctx, keyspaceID, false)
 	if err != nil {
 		return AdvanceTxnSafePointResult{}, err
 	}
-	ctx := addKeyspaceNameToCtx(context.Background(), keyspaceNameForDiag)
+	ctx = addKeyspaceNameToCtx(ctx, keyspaceNameForDiag)
 	ctx = context.WithValue(ctx, barrierObservationKey{}, observation)
 
 	m.mu.Lock()
@@ -456,7 +472,8 @@ func (m *GCStateManager) AdvanceTxnSafePoint(keyspaceID uint32, target uint64, n
 
 // advanceTxnSafePointImpl is the internal implementation of AdvanceTxnSafePoint, assuming keyspaceID has been checked
 // and the mutex has been acquired.
-func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID uint32, keyspaceMeta *keyspacepb.KeyspaceMeta, target uint64, now time.Time) (AdvanceTxnSafePointResult, error) {
+func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID uint32, keyspaceMeta txnSafePointKeyspace, target uint64, now time.Time) (AdvanceTxnSafePointResult, error) {
+	failpoint.InjectCall("txnSafePointKeyspaceLoaded")
 	// Marks whether it's needed to provide the compatibility for old versions.
 	//
 	// In old versions, every time TiDB performs GC, it updates the service safe point of "gc_worker" new txn safe
@@ -479,6 +496,11 @@ func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID
 	)
 
 	err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+		if keyspaceMeta.meta != nil {
+			if err := wb.ExpectKeyspaceMetaRevision(keyspaceMeta.sourceID, keyspaceMeta.revision); err != nil {
+				return err
+			}
+		}
 		var err1 error
 		oldTxnSafePoint, err1 = m.gcMetaStorage.LoadTxnSafePoint(keyspaceID)
 		if err1 != nil {
@@ -528,10 +550,11 @@ func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID
 		}
 
 		// Compatible with old TiDB nodes that use TiDBMinStartTS to block GC.
-		ownerKey, minStartTS, err1 := m.loadTiDBMinStartTS(keyspaceID, keyspaceMeta)
+		ownerKey, minStartTS, err1 := m.loadTiDBMinStartTS(keyspaceID, keyspaceMeta.meta)
 		if err1 != nil {
 			return err1
 		}
+		failpoint.InjectCall("txnSafePointMinStartTSLoaded")
 
 		if minStartTS != 0 && len(ownerKey) != 0 && minStartTS < minBlocker {
 			// Note that txn safe point is defined inclusive: snapshots that exactly equals to the txn safe point are
@@ -1212,11 +1235,18 @@ func (m *GCStateManager) LoadAllGlobalGCBarriers() ([]*endpoint.GlobalGCBarrier,
 func (m *GCStateManager) CompatibleUpdateServiceGCSafePoint(keyspaceID uint32, serviceID string, newServiceSafePoint uint64, ttl int64, now time.Time) (minServiceSafePoint *endpoint.ServiceSafePoint, updated bool, err error) {
 	observation := &barrierObservation{generation: m.barrierMetrics.generation()}
 	defer observation.logWarnings()
-	keyspaceID, keyspaceNameForDiag, keyspaceMeta, err := m.redirectKeyspaceWithMeta(keyspaceID, true)
+	ctx := context.Background()
+	var keyspaceNameForDiag string
+	var keyspaceMeta txnSafePointKeyspace
+	if serviceID == keypath.GCWorkerServiceSafePointID {
+		keyspaceID, keyspaceNameForDiag, keyspaceMeta, err = m.loadTxnSafePointKeyspace(ctx, keyspaceID, true)
+	} else {
+		keyspaceID, keyspaceNameForDiag, err = m.redirectKeyspace(keyspaceID, true)
+	}
 	if err != nil {
 		return nil, false, err
 	}
-	ctx := addKeyspaceNameToCtx(context.Background(), keyspaceNameForDiag)
+	ctx = addKeyspaceNameToCtx(ctx, keyspaceNameForDiag)
 	ctx = context.WithValue(ctx, barrierObservationKey{}, observation)
 
 	m.mu.Lock()
