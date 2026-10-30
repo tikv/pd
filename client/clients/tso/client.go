@@ -81,9 +81,13 @@ type Cli struct {
 	svcDiscovery sd.ServiceDiscovery
 	tsoStreamBuilderFactory
 	// leaderURL is the URL of the TSO leader.
-	leaderURL       atomic.Value
-	conCtxMgr       *cctx.Manager[*tsoStream]
-	updateConCtxsCh chan struct{}
+	leaderURL atomic.Value
+	// leaderSwitchedMu protects leaderSwitchedCh, which is closed and replaced after each
+	// update of leaderURL so that every goroutine waiting to reconnect wakes up at once.
+	leaderSwitchedMu sync.Mutex
+	leaderSwitchedCh chan struct{}
+	conCtxMgr        *cctx.Manager[*tsoStream]
+	updateConCtxsCh  chan struct{}
 
 	// tsoReqPool is the pool to recycle `*tsoRequest`.
 	tsoReqPool *sync.Pool
@@ -103,7 +107,8 @@ func NewClient(
 		option:                  option,
 		svcDiscovery:            svcDiscovery,
 		tsoStreamBuilderFactory: factory,
-		conCtxMgr:               cctx.NewManager[*tsoStream](),
+		leaderSwitchedCh:        make(chan struct{}),
+		conCtxMgr:               newConnectionCtxManager(),
 		updateConCtxsCh:         make(chan struct{}, 1),
 		tsoReqPool: &sync.Pool{
 			New: func() any {
@@ -140,6 +145,7 @@ func (c *Cli) GetRequestPool() *sync.Pool {
 // Setup initializes the TSO client.
 func (c *Cli) Setup() {
 	// Daemon goroutine to update the connectionCtxs periodically and handle the `connectionCtxs` update event.
+	c.wg.Add(1)
 	go c.connectionCtxsUpdater()
 	if err := c.svcDiscovery.CheckMemberChanged(); err != nil {
 		log.Warn("[tso] failed to check member changed", errs.ZapError(err))
@@ -209,14 +215,39 @@ func (c *Cli) getTSOLeaderClientConn() (*grpc.ClientConn, string) {
 	return cc, url
 }
 
+// newConnectionCtxManager creates the manager of TSO streams. An evicted stream fails its
+// pending requests with a retryable error, so that callers like GetTS retry them on another
+// stream at once.
+func newConnectionCtxManager() *cctx.Manager[*tsoStream] {
+	return cctx.NewManagerWithEvictHook((*tsoStream).markEvicted)
+}
+
 func (c *Cli) updateTSOLeaderURL(url string) error {
 	c.leaderURL.Store(url)
+	c.notifyLeaderSwitched()
 	log.Info("[tso] switch the tso leader serving url", zap.String("new-url", url))
 	// Try to create the TSO dispatcher if it is not created yet.
 	c.tryCreateTSODispatcher()
 	// Update the TSO connection contexts after the dispatcher is ready.
 	c.scheduleUpdateTSOConnectionCtxs()
 	return nil
+}
+
+// notifyLeaderSwitched wakes up every goroutine waiting on the channel returned by
+// leaderSwitched. Call it after storing the new leader URL.
+func (c *Cli) notifyLeaderSwitched() {
+	c.leaderSwitchedMu.Lock()
+	defer c.leaderSwitchedMu.Unlock()
+	close(c.leaderSwitchedCh)
+	c.leaderSwitchedCh = make(chan struct{})
+}
+
+// leaderSwitched returns a channel that is closed when the leader URL is updated next time.
+// Get the channel before reading the leader URL so that an update in between is not missed.
+func (c *Cli) leaderSwitched() <-chan struct{} {
+	c.leaderSwitchedMu.Lock()
+	defer c.leaderSwitchedMu.Unlock()
+	return c.leaderSwitchedCh
 }
 
 // backupClientConn gets a grpc client connection of the current reachable and healthy
@@ -248,6 +279,7 @@ func (c *Cli) backupClientConn() (*grpc.ClientConn, string) {
 
 // connectionCtxsUpdater updates the `connectionCtxs` regularly.
 func (c *Cli) connectionCtxsUpdater() {
+	defer c.wg.Done()
 	log.Info("[tso] start tso connection contexts updater")
 
 	var updateTicker = &time.Ticker{}
@@ -328,11 +360,15 @@ func (c *Cli) tryConnectToTSO(ctx context.Context) error {
 		cc            *grpc.ClientConn
 	)
 
-	ticker := time.NewTicker(constants.RetryInterval)
-	defer ticker.Stop()
+	timer := time.NewTimer(constants.RetryInterval)
+	defer timer.Stop()
 	// Retry several times before falling back to the follower when the network problem happens
 	for range constants.MaxRetryTimes {
+		// The next attempt starts one interval after this one starts, or earlier if the leader
+		// switches, so a slow attempt does not add a full interval on top of itself.
+		timer.Reset(constants.RetryInterval)
 		c.svcDiscovery.ScheduleCheckMemberChanged()
+		leaderSwitched := c.leaderSwitched()
 		cc, url = c.getTSOLeaderClientConn()
 		if c.conCtxMgr.Exist(url) {
 			// Just trigger the clean up of the stale connection contexts.
@@ -373,7 +409,9 @@ func (c *Cli) tryConnectToTSO(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return err
-		case <-ticker.C:
+		case <-timer.C:
+		case <-leaderSwitched:
+			// Retry with the new leader without waiting for the interval.
 		}
 	}
 
@@ -399,6 +437,7 @@ func (c *Cli) tryConnectToTSO(ctx context.Context) error {
 					return nil
 				}
 				// the goroutine is used to check the network and change back to the original stream
+				c.wg.Add(1)
 				go c.checkLeader(ctx, cancel, forwardedHostTrim, addr, url)
 				metrics.RequestForwarded.WithLabelValues(forwardedHostTrim, addr).Set(1)
 				return nil
@@ -414,6 +453,7 @@ func (c *Cli) checkLeader(
 	forwardCancel context.CancelFunc,
 	forwardedHostTrim, addr, url string,
 ) {
+	defer c.wg.Done()
 	defer func() {
 		// cancel the forward stream
 		forwardCancel()

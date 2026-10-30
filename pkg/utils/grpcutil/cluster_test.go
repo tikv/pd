@@ -15,15 +15,20 @@
 package grpcutil
 
 import (
+	"os"
 	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/zap"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
 type clusterSuite struct {
@@ -214,5 +219,45 @@ func (suite *clusterSuite) TestGetRegionByPreKey() {
 				re.Nil(resp.GetRegion())
 			}
 		})
+	}
+}
+
+func (suite *clusterSuite) TestGetRegionNilLogRedact() {
+	re := suite.Require()
+	fname := testutil.InitTempFileLogger(suite.T(), "info")
+	var (
+		lg    *zap.Logger
+		props *log.ZapProperties
+	)
+	defer func() {
+		re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, logutil.RedactInfoLogOFF))
+	}()
+	// "e" is not covered by any region.
+	request := &pdpb.GetRegionRequest{RegionKey: []byte("e-secret-key")}
+	getRegionNil := func(isFollower bool) string {
+		resp, err := GetRegion(suite.rc, request, isFollower)
+		re.NoError(err)
+		re.Nil(resp.GetRegion())
+		b, err := os.ReadFile(fname)
+		re.NoError(err)
+		re.NoError(os.Truncate(fname, 0))
+		return string(b)
+	}
+
+	for _, isFollower := range []bool{true, false} {
+		// Redaction off: the key is logged as before.
+		re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, logutil.RedactInfoLogOFF))
+		re.Contains(getRegionNil(isFollower), "[key=e-secret-key]")
+
+		// Redaction on: the key must not appear in the log.
+		re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, logutil.RedactInfoLogON))
+		output := getRegionNil(isFollower)
+		re.Contains(output, "get region nil")
+		re.Contains(output, "[key=?]")
+		re.NotContains(output, "e-secret-key")
+
+		// Redaction marker: the key is enclosed in markers.
+		re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, logutil.RedactInfoLogMarker))
+		re.Contains(getRegionNil(isFollower), "[key=‹e-secret-key›]")
 	}
 }

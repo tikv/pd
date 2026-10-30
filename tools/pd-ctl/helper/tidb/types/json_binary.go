@@ -260,7 +260,7 @@ func (bj BinaryJSON) GetOpaqueFieldType() byte {
 func (bj BinaryJSON) GetKeys() BinaryJSON {
 	count := bj.GetElemCount()
 	ret := make([]BinaryJSON, 0, count)
-	for i := 0; i < count; i++ {
+	for i := range count {
 		ret = append(ret, CreateBinaryJSON(string(bj.objectGetKey(i))))
 	}
 	return buildBinaryJSONArray(ret)
@@ -369,7 +369,7 @@ func (bj BinaryJSON) marshalFloat64To(buf []byte) ([]byte, error) {
 func (bj BinaryJSON) marshalArrayTo(buf []byte) ([]byte, error) {
 	elemCount := int(jsonEndian.Uint32(bj.Value))
 	buf = append(buf, '[')
-	for i := 0; i < elemCount; i++ {
+	for i := range elemCount {
 		if i != 0 {
 			buf = append(buf, ", "...)
 		}
@@ -385,7 +385,7 @@ func (bj BinaryJSON) marshalArrayTo(buf []byte) ([]byte, error) {
 func (bj BinaryJSON) marshalObjTo(buf []byte) ([]byte, error) {
 	elemCount := int(jsonEndian.Uint32(bj.Value))
 	buf = append(buf, '{')
-	for i := 0; i < elemCount; i++ {
+	for i := range elemCount {
 		if i != 0 {
 			buf = append(buf, ", "...)
 		}
@@ -587,7 +587,7 @@ func (bj BinaryJSON) HashValue(buf []byte) []byte {
 		buf = append(buf, bj.TypeCode)
 		elemCount := int(jsonEndian.Uint32(bj.Value))
 		buf = append(buf, bj.Value[0:dataSizeOff]...)
-		for i := 0; i < elemCount; i++ {
+		for i := range elemCount {
 			buf = bj.ArrayGetElem(i).HashValue(buf)
 		}
 	case JSONTypeCodeObject:
@@ -596,7 +596,7 @@ func (bj BinaryJSON) HashValue(buf []byte) []byte {
 		buf = append(buf, bj.TypeCode)
 		elemCount := int(jsonEndian.Uint32(bj.Value))
 		buf = append(buf, bj.Value[0:dataSizeOff]...)
-		for i := 0; i < elemCount; i++ {
+		for i := range elemCount {
 			keyJSON := CreateBinaryJSON(string(bj.objectGetKey(i)))
 			buf = append(buf, keyJSON.Value...)
 			buf = bj.objectGetVal(i).HashValue(buf)
@@ -723,10 +723,10 @@ func appendZero(buf []byte, length int) []byte {
 	var tmp [8]byte
 	rem := length % 8
 	loop := length / 8
-	for i := 0; i < loop; i++ {
+	for range loop {
 		buf = append(buf, tmp[:]...)
 	}
-	for i := 0; i < rem; i++ {
+	for range rem {
 		buf = append(buf, 0)
 	}
 	return buf

@@ -18,6 +18,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"maps"
 	"math"
 	"strings"
 	"sync"
@@ -318,9 +319,7 @@ func (m *MetaServiceGroupManager) GetGroups() map[string]string {
 	m.RLock()
 	defer m.RUnlock()
 	groups := make(map[string]string, len(m.metaServiceGroups))
-	for id, endpoints := range m.metaServiceGroups {
-		groups[id] = endpoints
-	}
+	maps.Copy(groups, m.metaServiceGroups)
 	return groups
 }
 
@@ -494,8 +493,6 @@ func cloneMetaServiceGroups(metaServiceGroups map[string]string) map[string]stri
 		return nil
 	}
 	cloned := make(map[string]string, len(metaServiceGroups))
-	for groupID, addresses := range metaServiceGroups {
-		cloned[groupID] = addresses
-	}
+	maps.Copy(cloned, metaServiceGroups)
 	return cloned
 }

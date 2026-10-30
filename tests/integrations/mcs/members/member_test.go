@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -775,7 +776,7 @@ func (suite *memberTestSuite) TestEvictPrimaryRejectedForInvalidCandidate() {
 		})
 
 		// Concentrate every group's primary on target.
-		allIDs := append(append([]uint32{}, normalIDs...), restrictedID)
+		allIDs := append(slices.Clone(normalIDs), restrictedID)
 		for _, id := range allIDs {
 			transferData, err := json.Marshal(map[string]any{
 				"new_primary":       target.Name(),

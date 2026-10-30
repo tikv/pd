@@ -61,7 +61,7 @@ func makeStores() StoreSet {
 func makeRegion(def string) (*core.RegionInfo, error) {
 	var regionMeta metapb.Region
 	var leader *metapb.Peer
-	for _, peerDef := range strings.Split(def, ",") {
+	for peerDef := range strings.SplitSeq(def, ",") {
 		role, idStr := Follower, peerDef
 		if strings.Contains(peerDef, "_") {
 			splits := strings.Split(peerDef, "_")
@@ -95,7 +95,7 @@ func makeRule(def string) (*Rule, error) {
 
 	rule.Role = PeerRoleType(splits[1])
 	// only support k=v type constraint
-	for _, c := range strings.Split(splits[2], ",") {
+	for c := range strings.SplitSeq(splits[2], ",") {
 		if c == "" {
 			break
 		}

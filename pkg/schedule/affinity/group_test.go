@@ -15,7 +15,6 @@
 package affinity
 
 import (
-	"context"
 	"strings"
 	"testing"
 	"time"
@@ -33,11 +32,9 @@ import (
 func TestGroupState(t *testing.T) {
 	re := require.New(t)
 	group := &GroupState{
-		Group: Group{
-			ID:            "group1",
-			LeaderStoreID: 1,
-			VoterStoreIDs: []uint64{1, 2, 3},
-		},
+		ID:                        "group1",
+		LeaderStoreID:             1,
+		VoterStoreIDs:             []uint64{1, 2, 3},
 		AffinitySchedulingAllowed: true,
 	}
 	// keyRange is unused in this test.
@@ -55,8 +52,7 @@ func TestGroupState(t *testing.T) {
 
 func TestAdjustGroup(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()

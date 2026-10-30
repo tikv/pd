@@ -15,15 +15,16 @@
 package statistics
 
 import (
-	"context"
 	"fmt"
 	"runtime"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/statistics/utils"
@@ -36,9 +37,8 @@ func TestMain(m *testing.M) {
 
 func TestIsHot(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	for i := utils.RWType(0); i < utils.RWTypeLen; i++ {
+	ctx := t.Context()
+	for i := range utils.RWTypeLen {
 		cluster := core.NewBasicCluster()
 		cache := NewHotCache(ctx, cluster)
 		region, err := buildRegion(cluster, i, 3, 60)
@@ -58,8 +58,7 @@ func TestIsHot(t *testing.T) {
 func TestRegionFlowTasksMatchOriginalForAnyPeerCount(t *testing.T) {
 	for _, peerCount := range []int{0, 1, 2, 3, 5, 9} {
 		t.Run(fmt.Sprintf("%d-peers", peerCount), func(t *testing.T) {
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
+			ctx := t.Context()
 			previousRegion := newBenchmarkRegion(1, peerCount+1)
 			newCache := func() *HotPeerCache {
 				cluster := core.NewBasicCluster()
@@ -86,7 +85,7 @@ func TestRegionFlowTasksMatchOriginalForAnyPeerCount(t *testing.T) {
 			region := newBenchmarkRegion(1, peerCount)
 
 			originalExpired, originalWrite := newOriginalRegionFlowTasks(region)
-			compactExpired, compactWrite := newRegionFlowTasks(region)
+			compactExpired, compactWrite := newRegionFlowTasks(region, previousRegion)
 			originalExpired(originalCache)
 			originalWrite(originalCache)
 			compactExpired(compactCache)
@@ -118,7 +117,9 @@ func BenchmarkPendingRegionHeartbeatTasks(b *testing.B) {
 				runPendingRegionHeartbeatTaskBenchmark(b, peerCount, newOriginalRegionFlowTasks)
 			})
 			b.Run("retain-region-meta", func(b *testing.B) {
-				runPendingRegionHeartbeatTaskBenchmark(b, peerCount, newRegionFlowTasks)
+				runPendingRegionHeartbeatTaskBenchmark(b, peerCount, func(region *core.RegionInfo) (func(*HotPeerCache), func(*HotPeerCache)) {
+					return newRegionFlowTasks(region, nil)
+				})
 			})
 		})
 	}
@@ -197,4 +198,247 @@ func newBenchmarkRegion(regionID uint64, peerCount int) *core.RegionInfo {
 		core.SetWrittenKeys(1024),
 		core.SetReportInterval(0, utils.RegionHeartBeatReportInterval),
 	)
+}
+
+func newWriteTransferTestRegion(id, writtenBytes, interval, term uint64) *core.RegionInfo {
+	peers := make([]*metapb.Peer, 3)
+	for i := range peers {
+		peers[i] = &metapb.Peer{Id: id*10 + uint64(i) + 1, StoreId: (id+uint64(i))%5 + 1}
+	}
+	return core.RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{
+		Region: &metapb.Region{
+			Id: id, Peers: peers,
+			StartKey: []byte(fmt.Sprintf("%08d", id)),
+			EndKey:   []byte(fmt.Sprintf("%08d", id+1)),
+		},
+		Leader: peers[0], Term: term, BytesWritten: writtenBytes,
+		Interval: &pdpb.TimeInterval{EndTimestamp: interval},
+	}, 0)
+}
+
+func newWriteTransferTestCache(t *testing.T) (*HotCache, *core.BasicCluster) {
+	t.Helper()
+	cluster := core.NewBasicCluster()
+	for id := uint64(1); id <= 5; id++ {
+		cluster.PutStore(core.NewStoreInfo(&metapb.Store{Id: id}))
+	}
+	return NewHotCache(t.Context(), cluster), cluster
+}
+
+func TestColdRegionLeaderTransferDoesNotRaiseWriteThreshold(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		historicalBytes   uint64
+		returnToSameStore bool
+	}{
+		{name: "new-leader-idle"},
+		{name: "new-leader-historical-writes", historicalBytes: 2 << 20},
+		{name: "returning-leader-idle", returnToSameStore: true},
+		{name: "returning-leader-historical-writes", historicalBytes: 2 << 20, returnToSameStore: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			cache, cluster := newWriteTransferTestCache(t)
+			// Both heartbeat handlers submit statistics before publishing the region.
+			report := func(region *core.RegionInfo) {
+				cache.CheckRegionFlowWithOriginAsync(region, cluster.GetRegion(region.GetID()))
+				cluster.PutRegion(region)
+			}
+			countSteadyPeers := func() int {
+				count := 0
+				for _, peers := range cache.GetHotPeerStats(utils.Write, 3) {
+					for _, peer := range peers {
+						if peer.RegionID >= 10000 {
+							count++
+						}
+					}
+				}
+				return count
+			}
+			steady := make([]*core.RegionInfo, 32)
+			for i := range steady {
+				steady[i] = newWriteTransferTestRegion(uint64(10000+i), 2400*60, 60, 10)
+			}
+			for range 12 {
+				for _, region := range steady {
+					report(region)
+				}
+			}
+			re.Equal(96, countSteadyPeers())
+
+			cold := make([]*core.RegionInfo, 128)
+			for i := range cold {
+				cold[i] = newWriteTransferTestRegion(uint64(i+1), 0, 60, 10)
+				report(cold[i])
+			}
+			re.Equal(96, countSteadyPeers())
+			for _, region := range cold {
+				// A returning leader reports writes accumulated before the idle period.
+				moved := newWriteTransferTestRegion(region.GetID(), tc.historicalBytes, 500, 12)
+				if !tc.returnToSameStore {
+					moved = moved.Clone(core.WithLeader(region.GetPeers()[1]))
+				}
+				report(moved)
+			}
+			thresholds := make(chan map[uint64]float64, 1)
+			re.True(cache.CheckWriteAsync(func(writeCache *HotPeerCache) {
+				// Let the usual threshold refresh occur before another cold report.
+				for _, threshold := range writeCache.thresholdsOfStore {
+					threshold.updatedTime = time.Now().Add(-2 * ThresholdsUpdateInterval)
+				}
+				rates := make(map[uint64]float64)
+				for id := uint64(1); id <= 5; id++ {
+					rates[id] = writeCache.calcHotThresholds(id)[utils.ByteDim]
+				}
+				thresholds <- rates
+			}))
+			rates := <-thresholds
+			t.Logf("historical_bytes=%d thresholds=%v", tc.historicalBytes, rates)
+			for _, region := range steady {
+				report(region)
+			}
+			re.Equal(96, countSteadyPeers(), "inactive regions must not cool continuously hot peers after a leader transfer")
+			for _, rate := range rates {
+				re.Equal(1024.0, rate)
+			}
+		})
+	}
+}
+
+func TestWriteRegionLeaderTransferSample(t *testing.T) {
+	for _, tc := range []struct {
+		name                                                     string
+		known, unknownLeader, cached, sameLeader, explicitOrigin bool
+		skipSample                                               bool
+		originTerm, term                                         uint64
+	}{
+		{name: "cold-transfer", known: true, skipSample: true},
+		{name: "hot-transfer", known: true, cached: true, skipSample: true},
+		{name: "new-region"},
+		{name: "unknown-leader", known: true, unknownLeader: true},
+		{name: "unchanged-leader", known: true, sameLeader: true},
+		{name: "cold-transfer-with-origin", known: true, explicitOrigin: true, skipSample: true},
+		{name: "hot-transfer-with-origin", known: true, cached: true, explicitOrigin: true, skipSample: true},
+		{name: "new-region-with-origin", explicitOrigin: true},
+		{name: "unknown-leader-with-origin", known: true, unknownLeader: true, explicitOrigin: true},
+		{name: "unchanged-leader-with-origin", known: true, sameLeader: true, explicitOrigin: true},
+		{name: "cold-returning-leader", known: true, sameLeader: true, originTerm: 10, term: 12, skipSample: true},
+		{name: "hot-returning-leader", known: true, cached: true, sameLeader: true, originTerm: 10, term: 12, skipSample: true},
+		{name: "cold-returning-leader-with-origin", known: true, sameLeader: true, explicitOrigin: true, originTerm: 10, term: 12, skipSample: true},
+		{name: "hot-returning-leader-with-origin", known: true, cached: true, sameLeader: true, explicitOrigin: true, originTerm: 10, term: 12, skipSample: true},
+		{name: "unchanged-term", known: true, sameLeader: true, originTerm: 10, term: 10},
+		{name: "unknown-origin-term", known: true, sameLeader: true, term: 12},
+		{name: "unknown-current-term", known: true, sameLeader: true, originTerm: 10},
+		{name: "new-region-with-term", sameLeader: true, term: 12},
+		{name: "unknown-leader-with-term", known: true, unknownLeader: true, sameLeader: true, originTerm: 10, term: 12},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			cache, cluster := newWriteTransferTestCache(t)
+			report := func(region *core.RegionInfo) {
+				if tc.explicitOrigin {
+					cache.CheckRegionFlowWithOriginAsync(region, cluster.GetRegion(region.GetID()))
+				} else {
+					cache.CheckRegionFlowAsync(region)
+				}
+			}
+			region := newWriteTransferTestRegion(1, 8000*60, 60, tc.originTerm)
+			if tc.known {
+				origin := region
+				if tc.unknownLeader {
+					origin = origin.Clone(core.WithLeader(nil))
+				}
+				cluster.PutRegion(origin)
+			}
+			if tc.cached {
+				for range 3 {
+					report(region)
+				}
+			}
+			old := cache.GetHotPeerStat(utils.Write, region.GetID(), region.GetPeers()[0].GetStoreId())
+			oldDegree := 0
+			if old != nil {
+				oldDegree = old.HotDegree
+			}
+
+			// Publish the new leader before the queued sample runs. Transfer
+			// detection must use the heartbeat's original metadata snapshot.
+			entered, release := make(chan struct{}), make(chan struct{})
+			re.True(cache.CheckWriteAsync(func(*HotPeerCache) {
+				close(entered)
+				select {
+				case <-release:
+				case <-t.Context().Done():
+				}
+			}))
+			<-entered
+			moved := newWriteTransferTestRegion(1, 2<<20, 500, tc.term)
+			if !tc.sameLeader {
+				moved = moved.Clone(core.WithLeader(region.GetPeers()[1]))
+			}
+			report(moved)
+			cluster.PutRegion(moved)
+			close(release)
+
+			for _, peer := range moved.GetPeers() {
+				stat := cache.GetHotPeerStat(utils.Write, moved.GetID(), peer.GetStoreId())
+				switch {
+				case tc.skipSample && !tc.cached:
+					re.Nil(stat, "a stale first sample must not create a cache entry")
+				case tc.skipSample:
+					re.NotNil(stat)
+					re.Equal(oldDegree, stat.HotDegree)
+					re.Equal(8000.0, stat.GetLoad(utils.ByteDim))
+					re.Equal(peer.GetStoreId() == moved.GetLeader().GetStoreId(), stat.IsLeader())
+				default:
+					re.NotNil(stat, "valid new hot regions must still be admitted")
+				}
+			}
+			fresh := moved.Clone(core.SetWrittenBytes(8000*60), core.SetReportInterval(500, 560))
+			report(fresh)
+			cluster.PutRegion(fresh)
+			stat := cache.GetHotPeerStat(utils.Write, fresh.GetID(), fresh.GetLeader().GetStoreId())
+			re.NotNil(stat)
+			if tc.cached {
+				re.Equal(oldDegree+1, stat.HotDegree, "the second sample must not be skipped again")
+			}
+			for range 3 {
+				report(fresh)
+			}
+			re.Len(cache.GetHotPeerStats(utils.Write, 3), 3, "fresh sustained writes must become schedulable")
+		})
+	}
+}
+
+func TestWriteRegionTermChangeSkipsOnlyFirstSample(t *testing.T) {
+	for _, writtenBytes := range []uint64{0, 8000 * 60} {
+		t.Run(fmt.Sprintf("written-bytes-%d", writtenBytes), func(t *testing.T) {
+			re := require.New(t)
+			cache, cluster := newWriteTransferTestCache(t)
+			guide := core.GenerateRegionGuideFunc(false)
+			report := func(region *core.RegionInfo) {
+				origin, _, err := cluster.PreCheckPutRegion(region)
+				re.NoError(err)
+				region.Inherit(origin, false)
+				cache.CheckRegionFlowWithOriginAsync(region, origin)
+				_, saveCache, _, _ := guide(core.ContextTODO(), region, origin)
+				if saveCache {
+					cluster.PutRegion(region)
+				}
+			}
+			origin := newWriteTransferTestRegion(1, writtenBytes, 60, 10)
+			report(origin)
+			// Only the term changes. Neither the leader nor write flow forces
+			// the heartbeat handler to publish another region snapshot.
+			moved := newWriteTransferTestRegion(1, writtenBytes, 60, 12)
+			report(moved)
+			re.Equal(uint64(12), cluster.GetRegion(1).GetTerm())
+			// Identical fresh samples must use the updated term and enter TopN.
+			fresh := moved.Clone(core.SetWrittenBytes(8000 * 60))
+			for range 4 {
+				report(fresh)
+			}
+			re.Len(cache.GetHotPeerStats(utils.Write, 3), 3)
+		})
+	}
 }

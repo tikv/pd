@@ -15,7 +15,6 @@
 package unsafe_operation_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -27,8 +26,7 @@ import (
 
 func TestRemoveFailedStores(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := pdTests.NewTestCluster(ctx, 1)
 	re.NoError(err)
 	defer cluster.Destroy()

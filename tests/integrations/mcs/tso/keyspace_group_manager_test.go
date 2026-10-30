@@ -787,9 +787,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) dispatchClient(
 		ctx, cancel               = context.WithCancel(suite.ctx)
 		lastPhysical, lastLogical int64
 	)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		defer tsoClient.Close()
 		for {
 			select {
@@ -823,7 +821,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) dispatchClient(
 			}
 			lastPhysical, lastLogical = physical, logical
 		}
-	}()
+	})
 	return func() {
 		// Wait for a while to make sure the client has sent more TSO requests.
 		time.Sleep(time.Second)
@@ -864,8 +862,7 @@ func waitFinishAllocNodes(re *require.Assertions, server *tests.TestServer, grou
 
 func TestTwiceSplitKeyspaceGroup(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller", `return(true)`))
 
@@ -1062,8 +1059,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupMergeBeforeIn
 // See https://github.com/tikv/pd/issues/6748
 func TestGetTSOImmediately(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastPrimaryPriorityCheck", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller", `return(true)`))

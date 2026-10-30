@@ -186,8 +186,7 @@ func TestRequestSourceMetricsConcurrentLazyCreation(t *testing.T) {
 
 func TestCleanupResourceGroupRemovesRequestSourceMetrics(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	mockProvider := newMockResourceGroupProvider()
 	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, 0)
@@ -240,8 +239,7 @@ func TestCleanupResourceGroupRemovesRequestSourceMetrics(t *testing.T) {
 
 func TestCleanupDoesNotReexportExistingCachedHandle(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	mockProvider := newMockResourceGroupProvider()
 	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, 0)
@@ -300,8 +298,7 @@ func TestCleanupDoesNotReexportExistingCachedHandle(t *testing.T) {
 
 func TestCleanupPreventsRecreateRequestSourceMetrics(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	mockProvider := newMockResourceGroupProvider()
 	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, 0)
@@ -359,8 +356,7 @@ func TestCleanupPreventsRecreateRequestSourceMetrics(t *testing.T) {
 
 func TestTombstoneCleanupRemovesExistingRequestSourceMetrics(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	mockProvider := newMockResourceGroupProvider()
 	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, 0)
@@ -420,8 +416,7 @@ func TestTombstoneCleanupRemovesExistingRequestSourceMetrics(t *testing.T) {
 
 func TestRevivedResourceGroupCleanupRemovesExistingRequestSourceMetrics(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	mockProvider := newMockResourceGroupProvider()
 	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, 0)
@@ -500,8 +495,7 @@ func TestRevivedResourceGroupCleanupRemovesExistingRequestSourceMetrics(t *testi
 // so that a newly created gc can record metrics normally.
 func TestGetOrCreateAfterCleanupReturnsFreshState(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	mockProvider := newMockResourceGroupProvider()
 	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, 0)
@@ -586,8 +580,7 @@ func TestGetOrCreateAfterCleanupReturnsFreshState(t *testing.T) {
 // the new gc records metrics successfully.
 func TestCleanupThenRecreateViaFullPath(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	mockProvider := newMockResourceGroupProvider()
 	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, 0)
@@ -657,8 +650,7 @@ func TestCleanupThenRecreateViaFullPath(t *testing.T) {
 // from the vec, and post-stop addRequestSourceRUDelta does not re-register series.
 func TestStopCleansUpRequestSourceMetricsState(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	mockProvider := newMockResourceGroupProvider()
 	c, err := NewResourceGroupController(ctx, 1, mockProvider, nil, 0)

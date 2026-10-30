@@ -58,6 +58,14 @@ func (se *StorageEndpoint) createRawTxn() (kv.RawTxn, error) {
 	return rawTxnCapable.CreateRawTxn(), nil
 }
 
+func (se *StorageEndpoint) createRawTxnWithContext(ctx context.Context) (kv.RawTxn, error) {
+	rawTxnCapable, ok := se.Base.(kv.RawTxnWithContextCapable)
+	if !ok {
+		return nil, errors.New("storage endpoint does not support raw transaction with context")
+	}
+	return rawTxnCapable.CreateRawTxnWithContext(ctx), nil
+}
+
 // RunInTxnWithConditions runs f in a transaction with additional etcd
 // comparisons. Backends without conditional transaction support may still run
 // transactions that have no additional conditions.

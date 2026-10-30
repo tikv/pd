@@ -15,6 +15,7 @@
 package schedulers
 
 import (
+	"context"
 	"encoding/hex"
 	"fmt"
 	"math"
@@ -84,6 +85,50 @@ func clearPendingInfluence(h *hotScheduler) {
 func newTestRegion(id uint64) *core.RegionInfo {
 	peers := []*metapb.Peer{{Id: id*100 + 1, StoreId: 1}, {Id: id*100 + 2, StoreId: 2}, {Id: id*100 + 3, StoreId: 3}}
 	return core.NewRegionInfo(&metapb.Region{Id: id, Peers: peers}, peers[0])
+}
+
+func TestHotScheduleIntervalBackoff(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	hb := newHotReadScheduler(oc, initHotRegionScheduleConfig())
+	hb.types = []resourceType{readLeader}
+	hb.conf.ReadPriorities = []string{utils.BytePriority, utils.KeyPriority}
+	hb.conf.setHistorySampleDuration(0)
+	sc := NewScheduleController(context.Background(), tc, oc, hb)
+	defer sc.Stop()
+	re.Equal(minHotScheduleInterval, sc.GetInterval())
+
+	for range 20 {
+		previous := sc.GetInterval()
+		re.Empty(sc.Schedule(false))
+		interval := sc.GetInterval()
+		if previous < maxHotScheduleInterval {
+			re.Greater(interval, previous)
+		} else {
+			re.Equal(maxHotScheduleInterval, interval)
+		}
+		re.LessOrEqual(interval, maxHotScheduleInterval)
+	}
+	re.Equal(10*time.Second, sc.GetInterval())
+
+	// New hot work is scheduled on the next round and restores the minimum interval.
+	for id := uint64(1); id <= 3; id++ {
+		tc.AddRegionStore(id, 1)
+		tc.UpdateStorageReadStats(id, 0, 0)
+	}
+	tc.UpdateStorageReadStats(1, 20*units.MiB*utils.StoreHeartBeatReportInterval, 0)
+	addRegionLeaderReadInfo(tc, []testRegionInfo{
+		{1, []uint64{1, 2, 3}, 5 * units.MiB, 0, 0},
+	})
+	ops := sc.Schedule(false)
+	re.Len(ops, 1)
+	operatorutil.CheckTransferLeaderFrom(re, ops[0], operator.OpHotRegion, 1)
+	re.Equal(minHotScheduleInterval, sc.GetInterval())
+
+	// Pending work leaves no new operator, so backoff starts again from the minimum.
+	re.Empty(sc.Schedule(false))
+	re.Equal(1300*time.Millisecond, sc.GetInterval())
 }
 
 func TestUpgrade(t *testing.T) {
@@ -280,11 +325,11 @@ func TestSplitIfRegionTooHot(t *testing.T) {
 		RegionId:   1,
 		PeriodInMs: 1000,
 		Keys: [][]byte{
-			[]byte(fmt.Sprintf("%21d", 11)),
-			[]byte(fmt.Sprintf("%21d", 12)),
-			[]byte(fmt.Sprintf("%21d", 13)),
-			[]byte(fmt.Sprintf("%21d", 14)),
-			[]byte(fmt.Sprintf("%21d", 15)),
+			fmt.Appendf(nil, "%21d", 11),
+			fmt.Appendf(nil, "%21d", 12),
+			fmt.Appendf(nil, "%21d", 13),
+			fmt.Appendf(nil, "%21d", 14),
+			fmt.Appendf(nil, "%21d", 15),
 		},
 		Stats: &metapb.BucketStats{
 			ReadBytes:  []uint64{10 * units.KiB, 11 * units.KiB, 11 * units.KiB, 10 * units.KiB},
@@ -315,7 +360,7 @@ func TestSplitIfRegionTooHot(t *testing.T) {
 	ops, _ := hb.Schedule(tc, false)
 	re.Len(ops, 1)
 	expectOp, err := operator.CreateSplitRegionOperator(splitHotReadBuckets, tc.GetRegion(1), operator.OpSplit,
-		pdpb.CheckPolicy_USEKEY, [][]byte{[]byte(fmt.Sprintf("%21d", 13))})
+		pdpb.CheckPolicy_USEKEY, [][]byte{fmt.Appendf(nil, "%21d", 13)})
 	re.NoError(err)
 	re.Equal(expectOp.Brief(), ops[0].Brief())
 	re.Equal(expectOp.Kind(), ops[0].Kind())
@@ -336,7 +381,7 @@ func TestSplitIfRegionTooHot(t *testing.T) {
 	ops, _ = hb.Schedule(tc, false)
 	re.Len(ops, 1)
 	expectOp, err = operator.CreateSplitRegionOperator(splitHotReadBuckets, tc.GetRegion(1), operator.OpSplit,
-		pdpb.CheckPolicy_USEKEY, [][]byte{[]byte(fmt.Sprintf("%21d", 12))})
+		pdpb.CheckPolicy_USEKEY, [][]byte{fmt.Appendf(nil, "%21d", 12)})
 	re.NoError(err)
 	re.Equal(expectOp.Brief(), ops[0].Brief())
 	re.Equal(expectOp.Kind(), ops[0].Kind())
@@ -400,6 +445,7 @@ func checkHotWriteRegionPlacement(re *require.Assertions, enablePlacementRules b
 	re.NotEmpty(ops)
 	re.NotContains(ops[0].Step(1).String(), "transfer leader")
 	operatorutil.CheckTransferPeerWithLeaderTransfer(re, ops[0], operator.OpHotRegion, 1, 2)
+	re.True(ops[0].NeedStoreHealthCheck())
 	clearPendingInfluence(hb.(*hotScheduler))
 
 	err = tc.SetRule(&placement.Rule{

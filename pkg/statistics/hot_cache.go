@@ -76,16 +76,29 @@ func (w *HotCache) CheckReadAsync(task func(cache *HotPeerCache)) bool {
 // CheckRegionFlowAsync checks the expired read and write items and the write
 // flow for a region asynchronously while retaining only immutable metadata.
 func (w *HotCache) CheckRegionFlowAsync(region *core.RegionInfo) {
-	checkExpiredTask, checkWritePeerTask := newRegionFlowTasks(region)
+	w.CheckRegionFlowWithOriginAsync(region, w.writeCache.cluster.GetRegion(region.GetID()))
+}
+
+// CheckRegionFlowWithOriginAsync uses the previous region snapshot from heartbeat
+// validation. The snapshot must precede publication of the new region metadata.
+func (w *HotCache) CheckRegionFlowWithOriginAsync(region, origin *core.RegionInfo) {
+	checkExpiredTask, checkWritePeerTask := newRegionFlowTasks(region, origin)
 	w.CheckWriteAsync(checkExpiredTask)
 	w.CheckReadAsync(checkExpiredTask)
 	w.CheckWriteAsync(checkWritePeerTask)
 }
 
-func newRegionFlowTasks(region *core.RegionInfo) (checkExpiredTask, checkWritePeerTask func(*HotPeerCache)) {
+func newRegionFlowTasks(region, origin *core.RegionInfo) (checkExpiredTask, checkWritePeerTask func(*HotPeerCache)) {
 	regionInfo := hotRegionInfo{
 		meta:          region.GetMeta(),
 		leaderStoreID: region.GetLeader().GetStoreId(),
+	}
+	if origin != nil {
+		previousLeader := origin.GetLeader().GetStoreId()
+		// A leader can leave and return between heartbeats observed by PD.
+		termIncreased := origin.GetTerm() != 0 && region.GetTerm() > origin.GetTerm()
+		regionInfo.leaderTransferred = previousLeader != 0 && regionInfo.leaderStoreID != 0 &&
+			(previousLeader != regionInfo.leaderStoreID || termIncreased)
 	}
 	reportInterval := region.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
@@ -93,8 +106,7 @@ func newRegionFlowTasks(region *core.RegionInfo) (checkExpiredTask, checkWritePe
 	writtenKeys := region.GetKeysWritten()
 	writeQueryNum := region.GetWriteQueryNum()
 	return newExpiredRegionTask(regionInfo.meta), newWriteRegionTask(
-		regionInfo.meta,
-		regionInfo.leaderStoreID,
+		regionInfo,
 		interval,
 		writtenBytes,
 		writtenKeys,
@@ -112,14 +124,15 @@ func newExpiredRegionTask(meta *metapb.Region) func(*HotPeerCache) {
 	}
 }
 
-func newWriteRegionTask(meta *metapb.Region, leaderStoreID, interval, writtenBytes, writtenKeys, writeQueryNum uint64) func(*HotPeerCache) {
+func newWriteRegionTask(regionInfo hotRegionInfo, interval, writtenBytes, writtenKeys, writeQueryNum uint64) func(*HotPeerCache) {
 	return func(cache *HotPeerCache) {
-		regionInfo := hotRegionInfo{meta: meta, leaderStoreID: leaderStoreID}
+		// Keep the captured snapshot by value to avoid an allocation per heartbeat.
+		region := regionInfo
 		var loads [utils.RegionStatCount]float64
 		loads[utils.RegionWriteBytes] = float64(writtenBytes)
 		loads[utils.RegionWriteKeys] = float64(writtenKeys)
 		loads[utils.RegionWriteQueryNum] = float64(writeQueryNum)
-		stats := cache.checkPeerFlowForRegion(&regionInfo, nil, loads[:], interval)
+		stats := cache.checkPeerFlowForRegion(&region, nil, loads[:], interval)
 		for _, stat := range stats {
 			cache.UpdateStat(stat)
 		}

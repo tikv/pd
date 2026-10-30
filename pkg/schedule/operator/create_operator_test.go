@@ -1274,8 +1274,7 @@ func (suite *createOperatorTestSuite) TestNonAdminScatterDoesNotForceTargetLeade
 // Ref https://github.com/tikv/pd/issues/5401
 func TestCreateLeaveJointStateOperatorWithoutFitRules(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)

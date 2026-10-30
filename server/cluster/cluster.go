@@ -23,6 +23,7 @@ import (
 	"math"
 	"net/http"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -230,7 +231,7 @@ func (c *RaftCluster) SetOnStoreBuried(fn func(storeID string)) {
 // - This type is exported by HTTP API. Please pay more attention when modifying it.
 // - Need to sync with client/http/types.go#ClusterStatus
 type Status struct {
-	RaftBootstrapTime time.Time `json:"raft_bootstrap_time,omitempty"`
+	RaftBootstrapTime time.Time `json:"raft_bootstrap_time"`
 	IsInitialized     bool      `json:"is_initialized"`
 	ReplicationStatus string    `json:"replication_status"`
 }
@@ -492,8 +493,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	go c.startProgressGC()
 	go c.runStorageSizeCollector(s.GetMeteringWriter(), c.regionLabeler, s.GetKeyspaceManager())
 
-	s.GetGCStateManager().OnNodeBecomesLeader()
-	c.stopGCStateManager = s.GetGCStateManager().OnNodeBecomesFollower
+	c.stopGCStateManager = s.GetGCStateManager().OnNodeBecomesLeader()
 
 	log.Info("start background jobs completed", zap.Duration("cost", time.Since(backgroundJobsStart)))
 	runnersStart := time.Now()
@@ -765,7 +765,7 @@ func (c *RaftCluster) runStoreConfigSync() {
 //   - `switchRaftV2` is true if the config of tikv engine is change to raft-kv2.
 func (c *RaftCluster) syncStoreConfig(stores []*core.StoreInfo) (synced bool, switchRaftV2 bool, needPersist bool) {
 	var err error
-	for index := 0; index < len(stores); index++ {
+	for _, store := range stores {
 		select {
 		case <-c.ctx.Done():
 			log.Info("stop sync store config job due to server shutdown")
@@ -773,7 +773,6 @@ func (c *RaftCluster) syncStoreConfig(stores []*core.StoreInfo) (synced bool, sw
 		default:
 		}
 		// filter out the stores that are tiflash
-		store := stores[index]
 		if !store.IsTiKV() {
 			continue
 		}
@@ -783,12 +782,10 @@ func (c *RaftCluster) syncStoreConfig(stores []*core.StoreInfo) (synced bool, sw
 			continue
 		}
 		// it will try next store if the current store is failed.
-		address := netutil.ResolveLoopBackAddr(stores[index].GetStatusAddress(), stores[index].GetAddress())
+		address := netutil.ResolveLoopBackAddr(store.GetStatusAddress(), store.GetAddress())
 		switchRaftV2, needPersist, err = c.observeStoreConfig(c.ctx, address)
 		if err != nil {
-			// delete the store if it is failed and retry next store.
-			stores = append(stores[:index], stores[index+1:]...)
-			index--
+			// Keep the caller's cached store list intact while trying the next store.
 			storeSyncConfigEvent.WithLabelValues(address, "fail").Inc()
 			log.Debug("sync store config failed, it will try next store", zap.Error(err))
 			continue
@@ -1289,10 +1286,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 	for _, stat := range stats.GetSnapshotStats() {
 		// the duration of snapshot is the sum between to send and generate snapshot.
 		// notice: to enlarge the limit in time, we reset the executing duration when it less than the minSnapshotDurationSec.
-		dur := stat.GetSendDurationSec() + stat.GetGenerateDurationSec()
-		if dur < minSnapshotDurationSec {
-			dur = minSnapshotDurationSec
-		}
+		dur := max(stat.GetSendDurationSec()+stat.GetGenerateDurationSec(), minSnapshotDurationSec)
 		// This error is the diff between the executing duration and the waiting duration.
 		// The waiting duration is the total duration minus the executing duration.
 		// so e=executing_duration-waiting_duration=executing_duration-(total_duration-executing_duration)=2*executing_duration-total_duration
@@ -1354,7 +1348,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 	region.Inherit(origin, c.GetStoreConfig().IsEnableRegionBucket())
 
 	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
-		cluster.HandleStatsAsync(c, region)
+		cluster.HandleStatsWithOriginAsync(c, region, origin)
 	}
 	tracer.OnAsyncHotStatsFinished()
 	hasRegionStats := c.regionStats != nil
@@ -2232,7 +2226,7 @@ func (c *RaftCluster) calculateRange(
 			logutil.ZapRedactString("start-key", string(core.HexRegionKey(startKey))),
 			logutil.ZapRedactString("end-key", string(core.HexRegionKey(endKey))),
 			zap.Uint64("store-id", store.GetID()),
-			zap.String("rule", rule.String()),
+			logutil.ZapRedactString("rule", rule.String()),
 			zap.Int64("region-size", ruleRegionSize),
 			zap.Float64("weight", weight),
 			zap.Float64("store-size", storeSize),
@@ -2950,10 +2944,8 @@ func IsClientURL(addr string, etcdClient *clientv3.Client) bool {
 		return false
 	}
 	for _, member := range members {
-		for _, u := range member.GetClientUrls() {
-			if u == addr {
-				return true
-			}
+		if slices.Contains(member.GetClientUrls(), addr) {
+			return true
 		}
 	}
 	return false

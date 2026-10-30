@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"net/http"
+	"slices"
 	"strconv"
 	"time"
 
@@ -41,7 +42,7 @@ const (
 	splitHotWriteBuckets    = "split-hot-write-region"
 	splitProgressiveRank    = 5
 	minHotScheduleInterval  = time.Second
-	maxHotScheduleInterval  = 20 * time.Second
+	maxHotScheduleInterval  = 10 * time.Second
 	defaultPendingWeight    = 1.0
 	defaultPendingAmpFactor = 2.0
 	defaultStddevThreshold  = 0.1
@@ -91,7 +92,7 @@ func newBaseHotScheduler(
 		regionPendings: make(map[uint64]*pendingInfluence),
 		stHistoryLoads: statistics.NewStoreHistoryLoads(sampleDuration, sampleInterval),
 	}
-	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
+	for ty := range resourceTypeLen {
 		ret.types = append(ret.types, ty)
 		ret.stLoadInfos[ty] = map[uint64]*statistics.StoreLoadDetail{}
 	}
@@ -232,7 +233,7 @@ func newHotScheduler(opController *operator.Controller, conf *hotRegionScheduler
 		baseHotScheduler: base,
 		conf:             conf,
 	}
-	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
+	for ty := range resourceTypeLen {
 		ret.searchRevertRegions[ty] = false
 	}
 	return ret
@@ -251,9 +252,9 @@ func (s *hotScheduler) ReloadConfig() error {
 	newCfg := &hotRegionSchedulerConfig{
 		hotRegionSchedulerParam: s.conf.hotRegionSchedulerParam,
 	}
-	newCfg.ReadPriorities = append([]string(nil), s.conf.ReadPriorities...)
-	newCfg.WriteLeaderPriorities = append([]string(nil), s.conf.WriteLeaderPriorities...)
-	newCfg.WritePeerPriorities = append([]string(nil), s.conf.WritePeerPriorities...)
+	newCfg.ReadPriorities = slices.Clone(s.conf.ReadPriorities)
+	newCfg.WriteLeaderPriorities = slices.Clone(s.conf.WriteLeaderPriorities)
+	newCfg.WritePeerPriorities = slices.Clone(s.conf.WritePeerPriorities)
 	if err := s.conf.load(newCfg); err != nil {
 		return err
 	}
@@ -300,8 +301,8 @@ func (*hotScheduler) GetMinInterval() time.Duration {
 }
 
 // GetNextInterval implements the Scheduler interface.
-func (s *hotScheduler) GetNextInterval(time.Duration) time.Duration {
-	return intervalGrow(s.GetMinInterval(), maxHotScheduleInterval, exponentialGrowth)
+func (*hotScheduler) GetNextInterval(interval time.Duration) time.Duration {
+	return intervalGrow(interval, maxHotScheduleInterval, exponentialGrowth)
 }
 
 // IsScheduleAllowed implements the Scheduler interface.
