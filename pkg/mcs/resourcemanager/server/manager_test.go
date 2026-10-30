@@ -15,9 +15,12 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"sync"
 	"testing"
@@ -457,7 +460,7 @@ func checkBackgroundMetricsFlush(ctx context.Context, re *require.Assertions, ma
 		},
 		KeyspaceId: keyspaceIDValue,
 	}
-	err = manager.dispatchConsumption(req)
+	err = manager.dispatchConsumption(1, req)
 	re.NoError(err)
 
 	keyspaceID := ExtractKeyspaceID(req.GetKeyspaceId())
@@ -469,6 +472,172 @@ func checkBackgroundMetricsFlush(ctx context.Context, re *require.Assertions, ma
 		return updatedGroup.RUConsumption.RRU == req.ConsumptionSinceLastRequest.RRU &&
 			updatedGroup.RUConsumption.WRU == req.ConsumptionSinceLastRequest.WRU
 	})
+}
+
+// TestBackgroundMetricsFlushResetsRUTimeline pins that the RU timeline belongs
+// to one leadership term: the published peaks stop being exposed and the term
+// state is cleared once the flush loop exits.
+func TestBackgroundMetricsFlushResetsRUTimeline(t *testing.T) {
+	re := require.New(t)
+	const start = testTimelineStart
+	m := newManagerBase(&ControllerConfig{}, ResourceGroupWriteRoleLegacyAll)
+	// Every Manager shares the package-level collector in production, where a
+	// process has one Manager. Tests create several Managers, so give this one
+	// an isolated collector; otherwise another Manager's reset() races with or
+	// clears the map read below.
+	m.metrics.ruTimeline = newRUTimeline(newRUSummaryCollector())
+	timeline := m.metrics.ruTimeline
+	resultsLen := func() int {
+		timeline.collector.mu.RLock()
+		defer timeline.collector.mu.RUnlock()
+		return len(timeline.collector.results)
+	}
+	timeline.since = start - 3600
+	timeline.record(timelineReport(1, start, make([][2]float64, 60)), time.Unix(start+65, 0))
+	timeline.flush(time.Unix(start+90, 0))
+	re.Positive(resultsLen())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	m.wg.Add(1)
+	go m.backgroundMetricsFlush(ctx)
+	cancel()
+	m.wg.Wait()
+	re.Zero(resultsLen())
+	re.Empty(timeline.groups)
+	re.Zero(timeline.since)
+}
+
+// TestInitWaitsForPreviousTerm pins that a term starts only after the previous
+// term's metrics flusher has exited, so the old loop cannot take this term's
+// reports and drop them when it resets the RU timeline.
+func TestInitWaitsForPreviousTerm(t *testing.T) {
+	re := require.New(t)
+	m := prepareManager()
+	// Isolate the collector from the other managers of this package's tests.
+	m.metrics.ruTimeline = newRUTimeline(newRUSummaryCollector())
+	collector := m.metrics.ruTimeline.collector
+	collector.results = map[trackerKey]publishedRUSummary{testTimelineKey: {}}
+	resultsLen := func() int {
+		collector.mu.RLock()
+		defer collector.mu.RUnlock()
+		return len(collector.results)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	re.NoError(m.Init(ctx))
+	cancel()
+	re.NoError(m.Init(t.Context()))
+	re.Zero(resultsLen(), "the previous term must have reset its timeline")
+	m.close()
+}
+
+// TestBackgroundMetricsFlushPushesRUPeak pins that the push path carries the
+// RU peak and withdraws it from the push target when the term ends.
+type pushRequest struct {
+	method, path string
+	body         []byte
+}
+
+type pushTarget struct {
+	*httptest.Server
+	mu       sync.Mutex
+	requests []pushRequest
+}
+
+func newPushTarget() *pushTarget {
+	target := &pushTarget{}
+	target.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		target.mu.Lock()
+		target.requests = append(target.requests, pushRequest{r.Method, r.URL.Path, body})
+		target.mu.Unlock()
+		if r.Method == http.MethodDelete {
+			w.WriteHeader(http.StatusAccepted)
+		}
+	}))
+	return target
+}
+
+func (t *pushTarget) last() pushRequest {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if len(t.requests) == 0 {
+		return pushRequest{}
+	}
+	return t.requests[len(t.requests)-1]
+}
+
+func (t *pushTarget) methods() []string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	methods := make([]string, 0, len(t.requests))
+	for _, r := range t.requests {
+		methods = append(methods, r.method)
+	}
+	return methods
+}
+
+func TestBackgroundMetricsFlushWithdrawsPushedMetrics(t *testing.T) {
+	re := require.New(t)
+	peakName := []byte("resource_manager_resource_unit_peak_per_second_rolling_60s")
+	t.Setenv("HOSTNAME", "rm-0")
+	groupPath := "/metrics/job/resource_group_svc/pod/rm-0"
+	first, second := newPushTarget(), newPushTarget()
+	defer first.Close()
+	defer second.Close()
+
+	m := newManagerBase(&ControllerConfig{
+		PushMetricsAddress:  first.URL,
+		PushMetricsInterval: typeutil.Duration{Duration: 50 * time.Millisecond},
+	}, ResourceGroupWriteRoleLegacyAll)
+	setPush := func(address string, interval time.Duration) {
+		m.Lock()
+		m.controllerConfig.PushMetricsAddress = address
+		m.controllerConfig.PushMetricsInterval = typeutil.Duration{Duration: interval}
+		m.Unlock()
+	}
+	// Isolate the collector from the other managers of this package's tests.
+	m.metrics.ruTimeline = newRUTimeline(newRUSummaryCollector())
+	timeline := m.metrics.ruTimeline
+	now := time.Now()
+	timeline.since = now.Unix() - 3600
+	timeline.record(timelineReport(1, now.Unix()-80, make([][2]float64, 60)), now)
+	timeline.flush(now)
+	pushedPeak := func(target *pushTarget) func() bool {
+		return func() bool {
+			last := target.last()
+			// PUT replaces what the pod pushed before; POST would keep a
+			// withdrawn peak on the receiver.
+			return last.method == http.MethodPut && last.path == groupPath && bytes.Contains(last.body, peakName)
+		}
+	}
+	withdrawn := func(target *pushTarget) func() bool {
+		return func() bool {
+			last := target.last()
+			return last.method == http.MethodDelete && last.path == groupPath
+		}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	m.wg.Add(1)
+	go m.backgroundMetricsFlush(ctx)
+	testutil.Eventually(re, pushedPeak(first))
+	// Changing only the interval keeps the target.
+	setPush(first.URL, 40*time.Millisecond)
+	time.Sleep(1500 * time.Millisecond)
+	re.NotContains(first.methods(), http.MethodDelete)
+	// Moving to another target withdraws everything from the old one.
+	setPush(second.URL, 40*time.Millisecond)
+	testutil.Eventually(re, pushedPeak(second))
+	re.True(withdrawn(first)())
+	// So does disabling the push.
+	setPush("", 0)
+	testutil.Eventually(re, withdrawn(second))
+	// And ending the term.
+	setPush(first.URL, 40*time.Millisecond)
+	testutil.Eventually(re, pushedPeak(first))
+	cancel()
+	m.wg.Wait()
+	re.True(withdrawn(first)())
 }
 
 func TestDispatchConsumptionIncludesOnlyConsumption(t *testing.T) {
@@ -484,10 +653,11 @@ func TestDispatchConsumptionIncludesOnlyConsumption(t *testing.T) {
 		KeyspaceId: &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: 42}},
 	}
 
-	err := m.dispatchConsumption(req)
+	err := m.dispatchConsumption(7, req)
 	re.NoError(err)
 
 	item := <-m.consumptionDispatcher
+	re.Equal(uint64(7), item.clientUniqueID)
 	re.Equal(uint32(42), item.keyspaceID)
 	re.Equal(req.GetResourceGroupName(), item.resourceGroupName)
 	re.Equal(req.GetConsumptionSinceLastRequest(), item.Consumption)

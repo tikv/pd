@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -50,6 +51,9 @@ const (
 	tickPerSecond             = time.Second
 
 	pushMetricsTimeout = 10 * time.Second
+	// withdrawMetricsTimeout bounds deleting the pushed metrics, which a term
+	// end waits for.
+	withdrawMetricsTimeout = 3 * time.Second
 )
 
 type pushMetricsConfig struct {
@@ -312,6 +316,13 @@ func (m *Manager) accessKeyspaceResourceGroupManager(keyspaceID uint32, groupNam
 
 // Init initializes the resource group manager.
 func (m *Manager) Init(ctx context.Context) error {
+	// Let the previous term exit first. Its metrics flusher could otherwise
+	// take this term's reports from the shared queue and drop them when it
+	// resets the RU timeline.
+	if m.cancel != nil {
+		m.cancel()
+	}
+	m.wg.Wait()
 	if m.enableMetadataWatcher {
 		if err := m.initControllerConfig(); err != nil {
 			return err
@@ -659,13 +670,14 @@ func (m *Manager) getKeyspaceResourceGroupManagers() []*keyspaceResourceGroupMan
 	return krgms
 }
 
-func (m *Manager) dispatchConsumption(req *rmpb.TokenBucketRequest) error {
+func (m *Manager) dispatchConsumption(clientUniqueID uint64, req *rmpb.TokenBucketRequest) error {
 	isBackground := req.GetIsBackground()
 	isTiFlash := req.GetIsTiflash()
 	if isBackground && isTiFlash {
 		return errors.New("background and tiflash cannot be true at the same time")
 	}
 	m.consumptionDispatcher <- &consumptionItem{
+		clientUniqueID:    clientUniqueID,
 		keyspaceID:        ExtractKeyspaceID(req.GetKeyspaceId()),
 		resourceGroupName: req.GetResourceGroupName(),
 		Consumption:       req.GetConsumptionSinceLastRequest(),
@@ -752,6 +764,8 @@ func (m *Manager) GetKeyspaceIDByName(ctx context.Context, name string) (*rmpb.K
 func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 	defer logutil.LogPanic()
 	defer m.wg.Done()
+	// The RU timeline belongs to one leadership term.
+	defer m.metrics.ruTimeline.reset()
 	cleanUpTicker := time.NewTicker(metricsCleanupInterval)
 	defer cleanUpTicker.Stop()
 	metricsTicker := time.NewTicker(tickPerSecond)
@@ -779,11 +793,48 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			pushMetricsTicker.Stop()
 		}
 	}()
+	podName := os.Getenv("HOSTNAME")
+	if podName == "" {
+		podName = "default"
+	}
+	pusher := func(address string) *push.Pusher {
+		return push.New(address, "resource_group_svc").Grouping("pod", podName)
+	}
+	pushMetrics := func(ctx context.Context) {
+		pushCtx, cancel := context.WithTimeout(ctx, pushMetricsTimeout)
+		start := time.Now()
+		// A push replaces everything this pod pushed before, so peaks the
+		// timeline withdraws disappear from the push target as well.
+		err := pusher(pushMetricsConfig.address).
+			Collector(readRequestUnitCost).
+			Collector(writeRequestUnitCost).
+			Collector(sqlLayerRequestUnitCost).
+			Collector(m.metrics.ruTimeline.collector).
+			PushContext(pushCtx)
+		cancel()
+		if err != nil {
+			log.Warn("push metrics to Prometheus failed", zap.Error(err))
+		}
+		pushRUMetricsDuration.Observe(time.Since(start).Seconds())
+	}
+	// withdrawMetrics deletes everything this pod pushed to address. A
+	// Pushgateway keeps a group until it is replaced or deleted, so a target
+	// that is no longer pushed to would otherwise expose the last peak as a
+	// current value.
+	withdrawMetrics := func(address string) {
+		err := pusher(address).Client(&http.Client{Timeout: withdrawMetricsTimeout}).Delete()
+		if err != nil {
+			log.Warn("withdraw pushed metrics failed", zap.String("address", address), zap.Error(err))
+		}
+	}
 
 	for {
 		select {
 		case <-ctx.Done():
 			log.Info("resource group manager background metrics flush loop exits")
+			if pushMetricsConfig.address != "" {
+				withdrawMetrics(pushMetricsConfig.address)
+			}
 			return
 		case consumptionInfo := <-m.consumptionDispatcher:
 			if consumptionInfo == nil || consumptionInfo.Consumption == nil {
@@ -832,6 +883,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				}
 			}
 		case <-metricsTicker.C:
+			m.metrics.ruTimeline.flush(time.Now())
 			// Prevent from holding the lock too long when there're many keyspaces and resource groups.
 			for _, krgm := range m.getKeyspaceResourceGroupManagers() {
 				// Conciliate the fill rates.
@@ -857,6 +909,9 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			}
 			newPushMetricsConfig := getPushMetricsConfig(m.GetControllerConfig())
 			if pushMetricsConfig != newPushMetricsConfig {
+				if old := pushMetricsConfig.address; old != "" && old != newPushMetricsConfig.address {
+					withdrawMetrics(old)
+				}
 				pushMetricsTicker = pushMetricsConfig.syncPushMetricsTicker(
 					newPushMetricsConfig,
 					pushMetricsTicker,
@@ -872,23 +927,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			if pushMetricsConfig.address == "" {
 				continue
 			}
-			podName := os.Getenv("HOSTNAME")
-			if podName == "" {
-				podName = "default"
-			}
-			pushCtx, cancel := context.WithTimeout(ctx, pushMetricsTimeout)
-			start := time.Now()
-			err := push.New(pushMetricsConfig.address, "resource_group_svc").
-				Grouping("pod", podName).
-				Collector(readRequestUnitCost).
-				Collector(writeRequestUnitCost).
-				Collector(sqlLayerRequestUnitCost).
-				PushContext(pushCtx)
-			cancel()
-			if err != nil {
-				log.Warn("push metrics to Prometheus failed", zap.Error(err))
-			}
-			pushRUMetricsDuration.Observe(time.Since(start).Seconds())
+			pushMetrics(ctx)
 		}
 	}
 }
