@@ -41,6 +41,13 @@ func HandleStatsAsync(c Cluster, region *core.RegionInfo) {
 	c.GetCoordinator().GetSchedulersController().CheckTransferWitnessLeader(region)
 }
 
+// HandleStatsWithOriginAsync handles flow using the previous region snapshot
+// already obtained by heartbeat validation, avoiding another region tree lookup.
+func HandleStatsWithOriginAsync(c Cluster, region, origin *core.RegionInfo) {
+	c.GetHotStat().CheckRegionFlowWithOriginAsync(region, origin)
+	c.GetCoordinator().GetSchedulersController().CheckTransferWitnessLeader(region)
+}
+
 // HandleOverlaps handles the overlap regions.
 func HandleOverlaps(ctx context.Context, c Cluster, overlaps []*core.RegionInfo) {
 	regionStats := c.GetRegionStats()

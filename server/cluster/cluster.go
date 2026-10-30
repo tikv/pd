@@ -1348,7 +1348,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 	region.Inherit(origin, c.GetStoreConfig().IsEnableRegionBucket())
 
 	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
-		cluster.HandleStatsAsync(c, region)
+		cluster.HandleStatsWithOriginAsync(c, region, origin)
 	}
 	tracer.OnAsyncHotStatsFinished()
 	hasRegionStats := c.regionStats != nil
