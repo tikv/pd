@@ -991,6 +991,15 @@ func TestConfigClone(t *testing.T) {
 	err = schedule.Adjust(emptyConfigMetaData, false)
 	re.NoError(err)
 	re.Equal(schedule, schedule.Clone())
+	schedule.Schedulers = sc.SchedulerConfigs{{Type: "evict-leader", Args: []string{"1"}}}
+	clonedSchedule := schedule.Clone()
+	re.Equal(schedule, clonedSchedule)
+	clonedSchedule.Schedulers[0].Args[0] = "2"
+	re.Equal("1", schedule.Schedulers[0].Args[0])
+	opt := NewPersistOptions(cfg)
+	opt.SetSchedulers(schedule.Schedulers)
+	schedule.Schedulers[0].Args[0] = "3"
+	re.Equal("1", opt.GetSchedulers()[0].Args[0])
 
 	replication := &sc.ReplicationConfig{}
 	err = replication.Adjust(emptyConfigMetaData)
