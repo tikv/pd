@@ -82,6 +82,12 @@ type hotRegionInfo struct {
 	leaderStoreID uint64
 }
 
+type readRegionMetadata struct {
+	meta    *metapb.Region
+	storeID uint64
+	term    uint64
+}
+
 type coldPeerKey struct {
 	storeID  uint64
 	regionID uint64
@@ -122,9 +128,8 @@ type HotPeerCache struct {
 	peersOfStore   map[uint64]*utils.TopN         // storeID -> hot peers
 	storesOfRegion map[uint64]map[uint64]struct{} // regionID -> storeIDs
 	regionsOfStore map[uint64]map[uint64]struct{} // storeID -> regionIDs
-	// pendingReadLeaders outlives read samples while the root tree has not yet
-	// published leadership already observed by a region metadata task.
-	pendingReadLeaders map[uint64]*readLeaderInfo
+	// readMetadata keeps one observed snapshot per hot or not-yet-published region.
+	readMetadata map[uint64]*readRegionMetadata
 	// coldPeersOfStore indexes cold peers by store and keeps each candidate's
 	// position in coldPeerSweepQueue. This lets gc() visit a bounded batch
 	// without scanning or copying a store's full TopN.
@@ -140,17 +145,17 @@ type HotPeerCache struct {
 // NewHotPeerCache creates a HotPeerCache
 func NewHotPeerCache(ctx context.Context, cluster *core.BasicCluster, kind utils.RWType) *HotPeerCache {
 	return &HotPeerCache{
-		kind:               kind,
-		cluster:            cluster,
-		peersOfStore:       make(map[uint64]*utils.TopN),
-		storesOfRegion:     make(map[uint64]map[uint64]struct{}),
-		regionsOfStore:     make(map[uint64]map[uint64]struct{}),
-		pendingReadLeaders: make(map[uint64]*readLeaderInfo),
-		coldPeersOfStore:   make(map[uint64]map[uint64]*list.Element),
-		taskQueue:          chanx.NewUnboundedChan[func(*HotPeerCache)](ctx, queueCap),
-		thresholdsOfStore:  make(map[uint64]*thresholds),
-		topNTTL:            time.Duration(3*kind.ReportInterval()) * time.Second,
-		metrics:            make(map[uint64][utils.ActionTypeLen]prometheus.Gauge),
+		kind:              kind,
+		cluster:           cluster,
+		peersOfStore:      make(map[uint64]*utils.TopN),
+		storesOfRegion:    make(map[uint64]map[uint64]struct{}),
+		regionsOfStore:    make(map[uint64]map[uint64]struct{}),
+		readMetadata:      make(map[uint64]*readRegionMetadata),
+		coldPeersOfStore:  make(map[uint64]map[uint64]*list.Element),
+		taskQueue:         chanx.NewUnboundedChan[func(*HotPeerCache)](ctx, queueCap),
+		thresholdsOfStore: make(map[uint64]*thresholds),
+		topNTTL:           time.Duration(3*kind.ReportInterval()) * time.Second,
+		metrics:           make(map[uint64][utils.ActionTypeLen]prometheus.Gauge),
 	}
 }
 
@@ -242,51 +247,33 @@ func (f *HotPeerCache) updateReadLeader(region *hotRegionInfo, term uint64) bool
 	if f.kind != utils.Read {
 		return true
 	}
-	current := f.cluster.GetRegion(region.id())
-	readLeader := f.pendingReadLeaders[region.id()]
-	// Admission rejects metadata older than the root. Here compare only with
-	// already processed metadata so accepted history survives root publication.
-	if readLeader != nil && isReadRegionMetadataStale(region.meta, term, readLeader.meta, readLeader.term) {
+	previous := f.readMetadata[region.id()]
+	if previous != nil && isReadRegionMetadataStale(region.meta, term, previous.meta, previous.term) {
 		return false
 	}
-	leaderTransferred := false
+	leaderTransferred := previous != nil && previous.storeID != region.leaderStoreID
 	for storeID := range f.storesOfRegion[region.id()] {
-		oldItem := f.getOldHotPeerStat(region.id(), storeID)
-		if oldItem != nil && oldItem.readLeader != nil && isReadRegionMetadataStale(region.meta, term, oldItem.readLeader.meta, oldItem.readLeader.term) {
-			return false
-		}
-		if oldItem != nil && (oldItem.isLeader != (storeID == region.leaderStoreID) ||
-			oldItem.readLeader != nil && oldItem.readLeader.storeID != region.leaderStoreID) {
+		if item := f.getOldHotPeerStat(region.id(), storeID); item != nil && item.isLeader != (storeID == region.leaderStoreID) {
 			leaderTransferred = true
 		}
 	}
-	var now time.Time
-	if readLeader != nil && (readLeader.storeID != region.leaderStoreID || readLeader.term != term || !sameReadRegionMetadata(readLeader.meta, region.meta)) {
-		readLeader = nil
-	}
-	if current == nil || current.GetLeader().GetStoreId() != region.leaderStoreID || current.GetTerm() < term || !sameReadRegionMetadata(current.GetMeta(), region.meta) {
-		if readLeader == nil {
-			readLeader = &readLeaderInfo{meta: region.meta, storeID: region.leaderStoreID, term: term}
+	current := f.cluster.GetRegion(region.id())
+	if previous != nil || len(f.storesOfRegion[region.id()]) > 0 || current == nil ||
+		current.GetLeader().GetStoreId() != region.leaderStoreID || current.GetTerm() < term || !sameReadRegionMetadata(current.GetMeta(), region.meta) {
+		if previous == nil || previous.storeID != region.leaderStoreID || previous.term != term || !sameReadRegionMetadata(previous.meta, region.meta) {
+			f.readMetadata[region.id()] = &readRegionMetadata{meta: region.meta, storeID: region.leaderStoreID, term: term}
 		}
-		f.pendingReadLeaders[region.id()] = readLeader
-	} else {
-		delete(f.pendingReadLeaders, region.id())
 	}
+	var now time.Time
 	for storeID := range f.storesOfRegion[region.id()] {
 		oldItem := f.getOldHotPeerStat(region.id(), storeID)
 		isLeader := storeID == region.leaderStoreID
-		if oldItem == nil || !leaderTransferred && oldItem.readLeader != nil &&
-			oldItem.readLeader.storeID == region.leaderStoreID && oldItem.readLeader.term == term &&
-			sameReadRegionMetadata(oldItem.readLeader.meta, region.meta) {
+		if oldItem == nil || !leaderTransferred && oldItem.isLeader == isLeader {
 			continue
 		}
-		// Preserve the rolling statistics and leave previously returned items unchanged.
+		// Preserve sample TTL, rolling statistics and previously returned snapshots.
 		item := *oldItem
 		item.isLeader = isLeader
-		if readLeader == nil {
-			readLeader = &readLeaderInfo{meta: region.meta, storeID: region.leaderStoreID, term: term}
-		}
-		item.readLeader = readLeader
 		if leaderTransferred {
 			if now.IsZero() {
 				now = time.Now()
@@ -597,7 +584,6 @@ func (f *HotPeerCache) getHotPeerStat(regionID, storeID uint64) *HotPeerStat {
 
 func (f *HotPeerCache) updateHotPeerStat(region *hotRegionInfo, newItem, oldItem *HotPeerStat, deltaLoads []float64, interval time.Duration, source utils.SourceKind) *HotPeerStat {
 	regionStats := f.kind.RegionStats()
-	newItem.readLeader = oldItem.readLeader
 
 	if source == utils.Inherit {
 		for _, dim := range oldItem.rollingLoads {
@@ -882,7 +868,7 @@ func (f *HotPeerCache) removeAllItem() {
 			f.UpdateStat(item)
 		}
 	}
-	clear(f.pendingReadLeaders)
+	clear(f.readMetadata)
 }
 
 func coldItem(newItem, oldItem *HotPeerStat) {
