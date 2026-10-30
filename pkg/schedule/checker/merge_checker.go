@@ -237,6 +237,20 @@ func AllowMerge(cluster sche.SharedCluster, region, adjacent *core.RegionInfo) b
 		return false
 	}
 
+	if manager := cluster.GetAffinityManager(); manager != nil && cluster.GetSharedConfig().GetAffinityScheduleLimit() > 0 {
+		var checkedGroup string
+		for _, r := range []*core.RegionInfo{region, adjacent} {
+			group, _ := manager.GetRegionAffinityGroupState(r)
+			if group == nil || group.RegularSchedulingAllowed || group.ID == checkedGroup {
+				continue
+			}
+			if !group.AffinitySchedulingAllowed || !affinityGroupRegionsReady(cluster, group, true) {
+				return false
+			}
+			checkedGroup = group.ID
+		}
+	}
+
 	// The interface probe is used here to get the rule manager and region
 	// labeler because AllowMerge is also used by the random merge scheduler,
 	// where it is not easy to get references to concrete objects.
