@@ -37,6 +37,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/schedulingpb"
 
+	coreconstant "github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
@@ -893,6 +894,23 @@ func (suite *serverTestSuite) TestStoreLimit() {
 			operator.TransferLeader{FromStore: 1, ToStore: 2})
 		checkOperatorSuccess(re, oc, op)
 	}
+
+	// Exhaust an existing limiter, then verify that a scheduling config update
+	// refreshes it before the next admission check.
+	err = leaderServer.GetRaftCluster().SetStoreLimit(2, storelimit.AddPeer, 30)
+	re.NoError(err)
+	waitSyncFinish(re, tc, storelimit.AddPeer, 30)
+	store := tc.GetPrimaryServer().GetCluster().GetStore(2)
+	re.True(store.GetStoreLimit().Take(storelimit.RegionInfluence[storelimit.AddPeer], storelimit.AddPeer, coreconstant.Medium))
+	re.False(store.IsAvailable(storelimit.AddPeer, coreconstant.Medium))
+	err = leaderServer.GetRaftCluster().SetStoreLimit(2, storelimit.AddPeer, 120)
+	re.NoError(err)
+	waitSyncFinish(re, tc, storelimit.AddPeer, 120)
+	testutil.Eventually(re, func() bool {
+		store := tc.GetPrimaryServer().GetCluster().GetStore(2)
+		limit, ok := store.GetStoreLimit().(*storelimit.StoreRateLimit)
+		return ok && limit.Rate(storelimit.AddPeer) == 2.0 && store.IsAvailable(storelimit.AddPeer, coreconstant.Medium)
+	})
 }
 
 func checkOperatorSuccess(re *require.Assertions, oc *operator.Controller, op *operator.Operator) {

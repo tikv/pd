@@ -65,6 +65,9 @@ type Watcher struct {
 	// schedulersController is used to trigger the scheduler's config reloading.
 	// Store as `*schedulers.Controller`.
 	schedulersController atomic.Value
+	// onScheduleConfigUpdated is late-bound after the initial config load because
+	// the watcher is created before the scheduling cluster owns its runtime resources.
+	onScheduleConfigUpdated atomic.Pointer[func()]
 }
 
 type persistedConfig struct {
@@ -133,6 +136,18 @@ func (cw *Watcher) SetSchedulersController(sc *schedulers.Controller) {
 	cw.schedulersController.Store(sc)
 }
 
+// SetOnScheduleConfigUpdated sets the callback invoked after the schedule
+// configuration is updated.
+func (cw *Watcher) SetOnScheduleConfigUpdated(fn func()) {
+	cw.onScheduleConfigUpdated.Store(&fn)
+}
+
+func (cw *Watcher) notifyScheduleConfigUpdated() {
+	if fn := cw.onScheduleConfigUpdated.Load(); fn != nil {
+		(*fn)()
+	}
+}
+
 func (cw *Watcher) getSchedulersController() *schedulers.Controller {
 	sc := cw.schedulersController.Load()
 	if sc == nil {
@@ -157,6 +172,7 @@ func (cw *Watcher) initializeConfigWatcher() error {
 		cw.SetScheduleConfig(&cfg.Schedule)
 		cw.SetReplicationConfig(&cfg.Replication)
 		cw.SetStoreConfig(&cfg.Store)
+		cw.notifyScheduleConfigUpdated()
 		return nil
 	}
 	deleteFn := func(*mvccpb.KeyValue) error {
