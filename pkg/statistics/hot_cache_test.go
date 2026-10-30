@@ -550,6 +550,51 @@ func TestRecreatedRegionResetsReadLeader(t *testing.T) {
 	}
 }
 
+func TestReadMetadataReconcilesMultipleBatches(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cluster := core.NewBasicCluster()
+		for storeID := uint64(1); storeID <= 3; storeID++ {
+			cluster.PutStore(core.NewStoreInfo(&metapb.Store{Id: storeID}))
+		}
+		cache := NewHotCache(t.Context(), cluster)
+		loads := make([]float64, utils.RegionStatCount)
+		loads[utils.RegionReadBytes] = 1 << 20
+		regions := make([]*core.RegionInfo, 0, core.RegionQueryBatchSize+1)
+		for i := 0; i <= core.RegionQueryBatchSize; i++ {
+			region := newBenchmarkRegion(uint64(i+1), 3).Clone(
+				core.SetRegionVersion(10), core.SetRegionConfVer(10),
+				core.WithStartKey([]byte(fmt.Sprintf("%04d", i))), core.WithEndKey([]byte(fmt.Sprintf("%04d", i+1))),
+			)
+			regions = append(regions, region)
+			cluster.PutRegion(region)
+			storeID := uint64(1)
+			if i%2 == 0 {
+				storeID = 3
+			}
+			require.True(t, cache.CheckReadPeerAsync(region, region.GetStorePeer(storeID), loads, utils.StoreHeartBeatReportInterval))
+		}
+		before := cache.GetHotPeerStats(utils.Read, 0)
+		require.Len(t, before[1], core.RegionQueryBatchSize/2)
+		require.Len(t, before[3], core.RegionQueryBatchSize/2+1)
+		for _, region := range regions {
+			cache.CheckRegionFlowAsync(region)
+		}
+		_ = cache.GetHotPeerStats(utils.Read, 0)
+		for _, region := range regions {
+			cluster.PutRegion(region.Clone(core.WithLeader(region.GetStorePeer(2)), core.WithRemoveStorePeer(3), core.WithIncConfVer()))
+		}
+		after := cache.GetHotPeerStats(utils.Read, 0)
+		require.Empty(t, after[3], "root reconciliation must remove obsolete peers across batch boundaries")
+		require.Len(t, after[1], len(before[1]))
+		for _, stat := range after[1] {
+			require.False(t, stat.IsLeader(), "all remaining hot peers must follow published leaders without new samples")
+		}
+		for _, stat := range before[1] {
+			require.True(t, stat.IsLeader(), "reconciliation must preserve previously returned snapshots")
+		}
+	})
+}
+
 func TestConcurrentReadMetadataFollowsAcceptedRoot(t *testing.T) {
 	for _, epoch := range []string{"confver", "version"} {
 		for _, coalesced := range []bool{false, true} {

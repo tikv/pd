@@ -51,8 +51,8 @@ const (
 	randomRegionMaxRetry = 10
 	// ScanRegionLimit is the default limit for the number of regions to scan in a region scan request.
 	ScanRegionLimit = 1000
-	// batchSearchSize is the default size for the number of IDs/keys/prevKeys to search in a batch.
-	batchSearchSize = 128
+	// RegionQueryBatchSize bounds the number of IDs/keys/prevKeys searched under one root lock.
+	RegionQueryBatchSize = 128
 	// CollectFactor is the factor to collect the count of region.
 	CollectFactor = 0.9
 )
@@ -1677,7 +1677,7 @@ func (r *RegionsInfo) QueryRegions(
 			idsToQuery = append(idsToQuery, id)
 		}
 		// Batch query the regions by IDs to reduce lock contention.
-		regions := r.GetRegionsByIDs(idsToQuery)
+		regions := r.GetRegionsByIDs(idsToQuery, nil)
 		for i, id := range idsToQuery {
 			region := regions[i]
 			if region == nil {
@@ -1706,7 +1706,7 @@ func (r *RegionsInfo) getRegionsByKeys(keys [][]byte) []*RegionInfo {
 	regions := make([]*RegionInfo, 0, len(keys))
 	// Split the keys into multiple batches, and search each batch separately.
 	// This is to avoid the lock contention on the `regionTree`.
-	for _, batch := range slice.SplitIntoBatches(keys, batchSearchSize) {
+	for _, batch := range slice.SplitIntoBatches(keys, RegionQueryBatchSize) {
 		r.t.RLock()
 		results := r.tree.searchByKeys(batch)
 		r.t.RUnlock()
@@ -1717,7 +1717,7 @@ func (r *RegionsInfo) getRegionsByKeys(keys [][]byte) []*RegionInfo {
 
 func (r *RegionsInfo) getRegionsByPrevKeys(prevKeys [][]byte) []*RegionInfo {
 	regions := make([]*RegionInfo, 0, len(prevKeys))
-	for _, batch := range slice.SplitIntoBatches(prevKeys, batchSearchSize) {
+	for _, batch := range slice.SplitIntoBatches(prevKeys, RegionQueryBatchSize) {
 		r.t.RLock()
 		results := r.tree.searchByPrevKeys(batch)
 		r.t.RUnlock()
@@ -1727,10 +1727,15 @@ func (r *RegionsInfo) getRegionsByPrevKeys(prevKeys [][]byte) []*RegionInfo {
 }
 
 // GetRegionsByIDs returns regions in ID order, using nil for missing regions.
+// It reuses the supplied buffer, replacing its contents.
 // Root locking is split into bounded batches to let heartbeat publication proceed.
-func (r *RegionsInfo) GetRegionsByIDs(ids []uint64) []*RegionInfo {
-	regions := make([]*RegionInfo, 0, len(ids))
-	for _, batch := range slice.SplitIntoBatches(ids, batchSearchSize) {
+func (r *RegionsInfo) GetRegionsByIDs(ids []uint64, regions []*RegionInfo) []*RegionInfo {
+	regions = regions[:0]
+	if cap(regions) < len(ids) {
+		regions = make([]*RegionInfo, 0, len(ids))
+	}
+	for start := 0; start < len(ids); start += RegionQueryBatchSize {
+		batch := ids[start:min(start+RegionQueryBatchSize, len(ids))]
 		r.t.RLock()
 		for _, id := range batch {
 			regions = append(regions, r.getRegionLocked(id))

@@ -94,16 +94,16 @@ type readRegionMetadata struct {
 	readRegionTransition
 	// The root observed at admission bounds the lifetime of optimistic metadata.
 	// Keep only immutable metadata, rather than retaining a full RegionInfo.
-	rootMeta    *metapb.Region
-	rootStoreID uint64
-	rootTerm    uint64
+	rootMeta   *metapb.Region
+	rootLeader *metapb.Peer
+	rootTerm   uint64
 }
 
 func newReadRegionMetadata(region, root *core.RegionInfo) readRegionMetadata {
 	metadata := readRegionMetadata{meta: region.GetMeta(), storeID: region.GetLeader().GetStoreId(), term: region.GetTerm()}
 	if root != nil {
 		metadata.rootMeta = root.GetMeta()
-		metadata.rootStoreID = root.GetLeader().GetStoreId()
+		metadata.rootLeader = root.GetLeader()
 		metadata.rootTerm = root.GetTerm()
 	}
 	return metadata
@@ -113,7 +113,7 @@ func (r *readRegionMetadata) rootChanged(root *core.RegionInfo) bool {
 	if root == nil {
 		return r.rootMeta != nil
 	}
-	return r.rootMeta != root.GetMeta() || r.rootStoreID != root.GetLeader().GetStoreId() || r.rootTerm != root.GetTerm()
+	return r.rootMeta != root.GetMeta() || r.rootLeader != root.GetLeader() || r.rootTerm != root.GetTerm()
 }
 
 type coldPeerKey struct {
@@ -191,15 +191,28 @@ func NewHotPeerCache(ctx context.Context, cluster *core.BasicCluster, kind utils
 // It returns a map where the keys are store IDs and the values are slices of HotPeerStat.
 func (f *HotPeerCache) GetHotPeerStats(minHotDegree int) map[uint64][]*HotPeerStat {
 	if f.kind == utils.Read && len(f.readMetadata) > 0 {
-		ids := make([]uint64, 0, min(len(f.storesOfRegion), len(f.readMetadata)))
+		var ids [core.RegionQueryBatchSize]uint64
+		var metadata [core.RegionQueryBatchSize]*readRegionMetadata
+		var roots [core.RegionQueryBatchSize]*core.RegionInfo
+		count := 0
+		reconcile := func() {
+			regions := f.cluster.GetRegionsByIDs(ids[:count], roots[:0])
+			for i, current := range regions {
+				f.reconcileReadMetadataWithRoot(ids[i], metadata[i], current)
+			}
+			count = 0
+		}
 		for regionID := range f.storesOfRegion {
-			if f.readMetadata[regionID] != nil {
-				ids = append(ids, regionID)
+			if previous := f.readMetadata[regionID]; previous != nil {
+				ids[count], metadata[count] = regionID, previous
+				count++
+				if count == len(ids) {
+					reconcile()
+				}
 			}
 		}
-		regions := f.cluster.GetRegionsByIDs(ids)
-		for i, regionID := range ids {
-			f.reconcileReadMetadataWithRoot(regionID, f.readMetadata[regionID], regions[i])
+		if count > 0 {
+			reconcile()
 		}
 	}
 	res := make(map[uint64][]*HotPeerStat)
