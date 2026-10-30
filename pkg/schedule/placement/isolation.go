@@ -108,6 +108,31 @@ func (f *RegionFit) checkTargetIsolation(stores []*core.StoreInfo, target *core.
 	return after.IsSatisfied() && f.IsIsolationPreserved(after)
 }
 
+// IsFinalIsolationPreserved checks the complete layout of an operator built
+// from this fit, including its final leader, which can change rule assignment.
+// Only configured isolation levels are compared, by conflicts; candidate
+// safeguards keep the weighted score check. Incomplete source fits and rules
+// whose peer count changes keep their existing repair behavior.
+func (f *RegionFit) IsFinalIsolationPreserved(stores StoreSet, target *core.RegionInfo, supportWitness bool) bool {
+	if !f.IsSatisfied() || !hasIsolationLevel(f.rules) {
+		return true
+	}
+	after := fitRegion(getStoresByRegion(stores, target), target, f.rules, supportWitness)
+	for i, before := range f.RuleFits {
+		if i >= len(after.RuleFits) {
+			return true
+		}
+		rf := after.RuleFits[i]
+		if rf == nil || before.Rule != rf.Rule || len(before.Peers) != len(rf.Peers) {
+			continue
+		}
+		if !before.IsIsolationPreserved(rf) {
+			return false
+		}
+	}
+	return true
+}
+
 // IsLeaderIsolationPreserved checks rule reassignment after a leader transfer.
 // With no leader-specific rules, changing leadership cannot change the fit.
 // Incomplete source fits keep their existing repair admission behavior.
