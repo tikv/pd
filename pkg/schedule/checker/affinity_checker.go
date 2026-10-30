@@ -309,6 +309,10 @@ func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group 
 		return nil, false
 	}
 
+	if op, ready := c.prepareAffinityPeerMove(region, group); !ready {
+		return op, false
+	}
+
 	// Determine operator kind based on whether leader needs to change
 	kind := operator.OpAffinity
 	if currentLeaderStoreID != group.LeaderStoreID {
@@ -397,6 +401,11 @@ func (c *AffinityChecker) mergeCheck(region *core.RegionInfo, group *affinity.Gr
 	maxKeys := maxSize * config.RegionSizeToKeysRatio
 	if !region.NeedMerge(maxSize, maxKeys) {
 		affinityMergeCheckerNoNeedCounter.Inc()
+		return nil
+	}
+
+	// Already moved children must remain separate until the whole group is ready.
+	if !affinityGroupRegionsReady(c.cluster, group, true) {
 		return nil
 	}
 
