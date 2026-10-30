@@ -1676,7 +1676,7 @@ func (r *RegionsInfo) QueryRegions(
 			idsToQuery = append(idsToQuery, id)
 		}
 		// Batch query the regions by IDs to reduce lock contention.
-		regions := r.getRegionsByIDs(idsToQuery)
+		regions := r.GetRegionsByIDs(idsToQuery)
 		for i, id := range idsToQuery {
 			region := regions[i]
 			if region == nil {
@@ -1725,8 +1725,9 @@ func (r *RegionsInfo) getRegionsByPrevKeys(prevKeys [][]byte) []*RegionInfo {
 	return regions
 }
 
-// getRegionsByIDs searches RegionInfo from regionMap by IDs in batch.
-func (r *RegionsInfo) getRegionsByIDs(ids []uint64) []*RegionInfo {
+// GetRegionsByIDs returns regions in ID order, using nil for missing regions.
+// Root locking is split into bounded batches to let heartbeat publication proceed.
+func (r *RegionsInfo) GetRegionsByIDs(ids []uint64) []*RegionInfo {
 	regions := make([]*RegionInfo, 0, len(ids))
 	for _, batch := range slice.SplitIntoBatches(ids, batchSearchSize) {
 		r.t.RLock()

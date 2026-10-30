@@ -82,10 +82,36 @@ type hotRegionInfo struct {
 	leaderStoreID uint64
 }
 
-type readRegionMetadata struct {
+type readRegionTransition struct {
 	meta    *metapb.Region
 	storeID uint64
 	term    uint64
+}
+
+type readRegionMetadata struct {
+	readRegionTransition
+	// The root observed at admission bounds the lifetime of optimistic metadata.
+	// Keep only immutable metadata, rather than retaining a full RegionInfo.
+	rootMeta    *metapb.Region
+	rootStoreID uint64
+	rootTerm    uint64
+}
+
+func newReadRegionMetadata(region, root *core.RegionInfo) readRegionMetadata {
+	metadata := readRegionMetadata{meta: region.GetMeta(), storeID: region.GetLeader().GetStoreId(), term: region.GetTerm()}
+	if root != nil {
+		metadata.rootMeta = root.GetMeta()
+		metadata.rootStoreID = root.GetLeader().GetStoreId()
+		metadata.rootTerm = root.GetTerm()
+	}
+	return metadata
+}
+
+func (r *readRegionMetadata) rootChanged(root *core.RegionInfo) bool {
+	if root == nil {
+		return r.rootMeta != nil
+	}
+	return r.rootMeta != root.GetMeta() || r.rootStoreID != root.GetLeader().GetStoreId() || r.rootTerm != root.GetTerm()
 }
 
 type coldPeerKey struct {
@@ -162,6 +188,18 @@ func NewHotPeerCache(ctx context.Context, cluster *core.BasicCluster, kind utils
 // GetHotPeerStats returns the read or write statistics for hot regions.
 // It returns a map where the keys are store IDs and the values are slices of HotPeerStat.
 func (f *HotPeerCache) GetHotPeerStats(minHotDegree int) map[uint64][]*HotPeerStat {
+	if f.kind == utils.Read && len(f.readMetadata) > 0 {
+		ids := make([]uint64, 0, min(len(f.storesOfRegion), len(f.readMetadata)))
+		for regionID := range f.storesOfRegion {
+			if f.readMetadata[regionID] != nil {
+				ids = append(ids, regionID)
+			}
+		}
+		regions := f.cluster.GetRegionsByIDs(ids)
+		for i, regionID := range ids {
+			f.reconcileReadMetadataWithRoot(regionID, f.readMetadata[regionID], regions[i])
+		}
+	}
 	res := make(map[uint64][]*HotPeerStat)
 	defaultAntiCount := f.kind.DefaultAntiCount()
 	for storeID, peers := range f.peersOfStore {
@@ -243,12 +281,17 @@ func isReadRegionMetadataStale(meta *metapb.Region, term uint64, previous *metap
 		epoch.GetConfVer() < previousEpoch.GetConfVer()) && !core.IsRegionRecreated(meta)
 }
 
-func (f *HotPeerCache) updateReadLeader(region *hotRegionInfo, term uint64) bool {
+func (f *HotPeerCache) updateReadLeader(metadata readRegionMetadata) bool {
 	if f.kind != utils.Read {
 		return true
 	}
+	region := &hotRegionInfo{meta: metadata.meta, leaderStoreID: metadata.storeID}
+	term := metadata.term
 	previous := f.readMetadata[region.id()]
-	if previous != nil && isReadRegionMetadataStale(region.meta, term, previous.meta, previous.term) {
+	current := f.cluster.GetRegion(region.id())
+	published := current != nil && current.GetMeta() == region.meta && current.GetTerm() == term && current.GetLeader().GetStoreId() == region.leaderStoreID
+	// Final root acceptance takes precedence over an optimistic higher term.
+	if previous != nil && (!published || !previous.rootChanged(current)) && isReadRegionMetadataStale(region.meta, term, previous.meta, previous.term) {
 		return false
 	}
 	leaderTransferred := previous != nil && previous.storeID != region.leaderStoreID
@@ -257,12 +300,13 @@ func (f *HotPeerCache) updateReadLeader(region *hotRegionInfo, term uint64) bool
 			leaderTransferred = true
 		}
 	}
-	current := f.cluster.GetRegion(region.id())
 	if previous != nil || len(f.storesOfRegion[region.id()]) > 0 || current == nil ||
 		current.GetLeader().GetStoreId() != region.leaderStoreID || current.GetTerm() < term || !sameReadRegionMetadata(current.GetMeta(), region.meta) {
-		if previous == nil || previous.storeID != region.leaderStoreID || previous.term != term || !sameReadRegionMetadata(previous.meta, region.meta) {
-			f.readMetadata[region.id()] = &readRegionMetadata{meta: region.meta, storeID: region.leaderStoreID, term: term}
+		if previous == nil {
+			previous = &readRegionMetadata{}
+			f.readMetadata[region.id()] = previous
 		}
+		*previous = metadata
 	}
 	var now time.Time
 	for storeID := range f.storesOfRegion[region.id()] {
@@ -284,6 +328,27 @@ func (f *HotPeerCache) updateReadLeader(region *hotRegionInfo, term uint64) bool
 		f.peersOfStore[storeID].Update(&item)
 	}
 	return true
+}
+
+func (f *HotPeerCache) reconcileReadMetadata(regionID uint64) *readRegionMetadata {
+	previous := f.readMetadata[regionID]
+	if previous == nil {
+		return nil
+	}
+	return f.reconcileReadMetadataWithRoot(regionID, previous, f.cluster.GetRegion(regionID))
+}
+
+func (f *HotPeerCache) reconcileReadMetadataWithRoot(regionID uint64, previous *readRegionMetadata, current *core.RegionInfo) *readRegionMetadata {
+	if previous.rootChanged(current) {
+		if current == nil {
+			delete(f.readMetadata, regionID)
+			return nil
+		}
+		// Admission precedes final validation and the unchanged-heartbeat return.
+		// Once the root advances, it resolves both rejected and skipped metadata.
+		applyRegionMetadata(f, newReadRegionMetadata(current, current))
+	}
+	return previous
 }
 
 // CheckPeerFlow checks the flow information of a peer.
@@ -391,6 +456,7 @@ func checkColdPeerForReportedRegions[T any](f *HotPeerCache, storeID uint64, rep
 	for regionID := range previousHotStat {
 		// If it's not reported, we need to update the original information.
 		if _, ok := reportedRegions[regionID]; !ok {
+			f.reconcileReadMetadata(regionID)
 			oldItem := f.getOldHotPeerStat(regionID, storeID)
 			// The region is not hot in the store, do nothing.
 			if oldItem == nil {
@@ -574,6 +640,9 @@ func (f *HotPeerCache) isRegionHotWithPeer(region *core.RegionInfo, peer *metapb
 }
 
 func (f *HotPeerCache) getHotPeerStat(regionID, storeID uint64) *HotPeerStat {
+	if f.kind == utils.Read {
+		f.reconcileReadMetadata(regionID)
+	}
 	if peers, ok := f.peersOfStore[storeID]; ok {
 		if stat := peers.Get(regionID); stat != nil {
 			return stat.(*HotPeerStat)

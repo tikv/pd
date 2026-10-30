@@ -550,6 +550,109 @@ func TestRecreatedRegionResetsReadLeader(t *testing.T) {
 	}
 }
 
+func TestConcurrentReadMetadataFollowsAcceptedRoot(t *testing.T) {
+	for _, epoch := range []string{"confver", "version"} {
+		for _, coalesced := range []bool{false, true} {
+			t.Run(fmt.Sprintf("epoch=%s/coalesced=%t", epoch, coalesced), func(t *testing.T) {
+				synctest.Test(t, func(t *testing.T) {
+					cluster, cache, initial, loads := newHotReadCache(t, []uint64{1, 2, 3})
+					initial = withHeartbeatTerm(initial, 10)
+					cluster.PutRegion(initial)
+					cache.CheckRegionFlowAsync(initial)
+					_ = cache.GetHotPeerStats(utils.Read, 0)
+					cluster.PutStore(core.NewStoreInfo(&metapb.Store{Id: 4}))
+					increment := core.WithIncConfVer()
+					if epoch == "version" {
+						increment = core.WithIncVersion()
+					}
+					higherTerm := withHeartbeatTerm(initial, 12)
+					accepted := withHeartbeatTerm(initial.Clone(core.WithLeader(initial.GetStorePeer(2)),
+						core.WithRemoveStorePeer(3), core.WithAddPeer(&metapb.Peer{Id: 104, StoreId: 4}), increment), 11)
+					for _, region := range []*core.RegionInfo{higherTerm, accepted} {
+						_, _, err := cluster.PreCheckPutRegion(region)
+						require.NoError(t, err)
+					}
+					var release func()
+					if coalesced {
+						release = blockHotReadWorker(t, cache)
+					}
+					cache.CheckRegionFlowAsync(higherTerm)
+					if !coalesced {
+						_ = cache.GetHotPeerStats(utils.Read, 0)
+					}
+					cache.CheckRegionFlowAsync(accepted)
+					_, err := cluster.CheckAndPutRootTree(core.ContextTODO(), accepted)
+					require.NoError(t, err)
+					_, err = cluster.CheckAndPutRootTree(core.ContextTODO(), higherTerm)
+					require.Error(t, err, "a higher term does not make an obsolete epoch valid")
+					if coalesced {
+						release()
+					}
+					// Queries must converge even before any new read samples arrive.
+					stat := cache.GetHotPeerStat(utils.Read, initial.GetID(), 1)
+					require.NotNil(t, stat)
+					require.False(t, stat.IsLeader())
+					require.Empty(t, cache.GetHotPeerStats(utils.Read, 0)[3])
+					for range 3 {
+						require.True(t, cache.CheckReadPeerAsync(accepted, accepted.GetStorePeer(4), loads, utils.StoreHeartBeatReportInterval))
+					}
+					after := cache.GetHotPeerStats(utils.Read, 0)
+					require.Len(t, after[4], 1, "rejected metadata must not suppress samples from the accepted peer")
+					require.True(t, after[2][0].IsLeader())
+				})
+			})
+		}
+	}
+}
+
+func TestUnknownTermPublicationRestoresReadLeader(t *testing.T) {
+	for _, tc := range []struct{ publishBeforeReplay, intermediateRoot bool }{{}, {publishBeforeReplay: true}, {intermediateRoot: true}} {
+		t.Run(fmt.Sprintf("publish-before-replay=%t/intermediate-root=%t", tc.publishBeforeReplay, tc.intermediateRoot), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				cluster, cache, initial, loads := newHotReadCache(t, []uint64{1, 2, 3})
+				cache.CheckRegionFlowAsync(initial)
+				_ = cache.GetHotPeerStats(utils.Read, 0)
+				release := blockHotReadWorker(t, cache)
+				newLeader := initial.Clone(core.WithLeader(initial.GetStorePeer(2)))
+				for _, region := range []*core.RegionInfo{newLeader, initial} {
+					_, _, err := cluster.PreCheckPutRegion(region)
+					require.NoError(t, err)
+					cache.CheckRegionFlowAsync(region)
+				}
+				_, saveCache, _, _ := core.GenerateRegionGuideFunc(false)(core.ContextTODO(), initial, cluster.GetRegion(initial.GetID()))
+				require.False(t, saveCache, "the unchanged heartbeat returns without publishing")
+				if !tc.publishBeforeReplay {
+					release()
+					_ = cache.GetHotPeerStats(utils.Read, 0)
+				}
+				if tc.intermediateRoot {
+					progress := initial.Clone(core.SetWrittenBytes(2 << 20))
+					cache.CheckRegionFlowAsync(progress)
+					_, err := cluster.CheckAndPutRootTree(core.ContextTODO(), progress)
+					require.NoError(t, err)
+					_ = cache.GetHotPeerStats(utils.Read, 0)
+				}
+				_, err := cluster.CheckAndPutRootTree(core.ContextTODO(), newLeader)
+				require.NoError(t, err)
+				if tc.publishBeforeReplay {
+					release()
+				}
+				after := cache.GetHotPeerStats(utils.Read, 0)
+				require.False(t, after[1][0].IsLeader(), "queries must follow publication without waiting for read samples")
+				require.True(t, after[2][0].IsLeader())
+				for range 3 {
+					for _, peer := range newLeader.GetPeers() {
+						require.True(t, cache.CheckReadPeerAsync(newLeader, peer, loads, utils.StoreHeartBeatReportInterval))
+					}
+				}
+				after = cache.GetHotPeerStats(utils.Read, 0)
+				require.False(t, after[1][0].IsLeader())
+				require.True(t, after[2][0].IsLeader(), "fresh samples must retain the published leader")
+			})
+		})
+	}
+}
+
 func TestInFlightReadMetadataRejectsStaleHeartbeat(t *testing.T) {
 	for _, tc := range []struct {
 		name                  string

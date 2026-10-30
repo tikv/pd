@@ -45,7 +45,7 @@ type HotCache struct {
 
 type regionMetadataUpdate struct {
 	readRegionMetadata
-	previous []readRegionMetadata
+	previous []readRegionTransition
 }
 
 // NewHotCache creates a new hot spot cache.
@@ -98,18 +98,15 @@ func (w *HotCache) CheckRegionFlowAsync(region *core.RegionInfo) {
 }
 
 func (w *HotCache) enqueueReadRegionMetadata(region *core.RegionInfo) {
-	update := regionMetadataUpdate{
-		meta:    region.GetMeta(),
-		storeID: region.GetLeader().GetStoreId(),
-		term:    region.GetTerm(),
-	}
 	w.regionMetaMu.Lock()
 	// Validate at admission: the root can legitimately advance before the read
 	// worker replays an already accepted transfer or peer removal.
-	if _, _, err := w.readCache.cluster.PreCheckPutRegion(region); err != nil {
+	root, _, err := w.readCache.cluster.PreCheckPutRegion(region)
+	if err != nil {
 		w.regionMetaMu.Unlock()
 		return
 	}
+	update := regionMetadataUpdate{readRegionMetadata: newReadRegionMetadata(region, root)}
 	previous, exists := w.regionMetaUpdates[region.GetID()]
 	latest := previous
 	if !exists {
@@ -123,7 +120,7 @@ func (w *HotCache) enqueueReadRegionMetadata(region *core.RegionInfo) {
 			// Fold repeated metadata while retaining significant transitions.
 			if previous.storeID != update.storeID || (previous.term == 0) != (update.term == 0) ||
 				!sameReadRegionMetadata(previous.meta, update.meta) {
-				update.previous = append(update.previous, previous.readRegionMetadata)
+				update.previous = append(update.previous, previous.readRegionTransition)
 			}
 		}
 		w.regionMetaUpdates[region.GetID()] = update
@@ -157,13 +154,13 @@ func newRegionFlowTasks(region *core.RegionInfo) (checkRegionTask, checkWritePee
 
 func newRegionMetadataTask(meta *metapb.Region, leaderStoreID, term uint64) func(*HotPeerCache) {
 	return func(cache *HotPeerCache) {
-		applyRegionMetadata(cache, meta, leaderStoreID, term)
+		applyRegionMetadata(cache, readRegionMetadata{meta: meta, storeID: leaderStoreID, term: term})
 	}
 }
 
-func applyRegionMetadata(cache *HotPeerCache, meta *metapb.Region, leaderStoreID, term uint64) {
-	regionInfo := hotRegionInfo{meta: meta, leaderStoreID: leaderStoreID}
-	if !cache.updateReadLeader(&regionInfo, term) {
+func applyRegionMetadata(cache *HotPeerCache, metadata readRegionMetadata) {
+	regionInfo := hotRegionInfo{meta: metadata.meta, leaderStoreID: metadata.storeID}
+	if !cache.updateReadLeader(metadata) {
 		return
 	}
 	expiredStats := cache.collectExpiredItemsForRegion(&regionInfo)
@@ -177,9 +174,12 @@ func (u regionMetadataUpdate) apply(ctx context.Context, cache *HotPeerCache) {
 		if ctx.Err() != nil {
 			return
 		}
-		applyRegionMetadata(cache, item.meta, item.storeID, item.term)
+		metadata := u.readRegionMetadata
+		metadata.readRegionTransition = item
+		applyRegionMetadata(cache, metadata)
 	}
-	applyRegionMetadata(cache, u.meta, u.storeID, u.term)
+	applyRegionMetadata(cache, u.readRegionMetadata)
+	cache.reconcileReadMetadata(u.meta.GetId())
 }
 
 func newWriteRegionTask(meta *metapb.Region, leaderStoreID, interval, writtenBytes, writtenKeys, writeQueryNum uint64) func(*HotPeerCache) {
@@ -211,7 +211,7 @@ func newReadPeerTask(region *core.RegionInfo, peer *metapb.Peer, loads []float64
 		regionInfo := hotRegionInfo{meta: meta, leaderStoreID: leaderStoreID}
 		// Prioritized metadata may have removed this peer after the sample was
 		// admitted, even if its newer root-tree entry has not been published.
-		readLeader := cache.readMetadata[meta.GetId()]
+		readLeader := cache.reconcileReadMetadata(meta.GetId())
 		if readLeader != nil {
 			regionInfo.meta = readLeader.meta
 			regionInfo.leaderStoreID = readLeader.storeID
