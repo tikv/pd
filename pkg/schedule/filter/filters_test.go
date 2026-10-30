@@ -579,8 +579,7 @@ func BenchmarkCloneRegionTest(b *testing.B) {
 }
 
 func TestPeerMovePreservesConfiguredIsolation(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
 	tc.SetEnablePlacementRules(true)
 	for i, path := range [][]string{{"A", "a"}, {"A", "b"}, {"A", "c"}, {"B", "d"}, {"B", "d"}, {"B", "e"}, {"A", "b"}} {

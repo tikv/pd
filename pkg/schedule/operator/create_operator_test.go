@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/hex"
 	"slices"
+	"strconv"
 	"testing"
 	"time"
 
@@ -1440,4 +1441,33 @@ func TestTransferLeaderIsolationTargets(t *testing.T) {
 			require.Equal(t, tt.wantTargets, step.ToStores)
 		})
 	}
+}
+
+func TestTransferLeaderIgnoresWeightedScoreWithoutIsolationLevel(t *testing.T) {
+	tc := mockcluster.NewCluster(t.Context(), mockconfig.NewTestOptions())
+	tc.SetEnablePlacementRules(true)
+	for i, zone := range []string{"z1", "z1", "z2"} {
+		tc.AddLabelsStore(uint64(i+1), 0, map[string]string{"zone": zone, "host": strconv.Itoa(i + 1)})
+	}
+	rm := tc.GetRuleManager()
+	leader := rm.GetRule("pd", "default").Clone()
+	leader.Role, leader.Count = placement.Leader, 1
+	leader.LocationLabels = []string{"zone", "host"}
+	require.NoError(t, rm.SetRule(leader))
+	voters := leader.Clone()
+	voters.ID, voters.Role, voters.Count = "voters", placement.Voter, 2
+	require.NoError(t, rm.SetRule(voters))
+	region := tc.AddLeaderRegion(1, 1, 2, 3)
+
+	// Moving the leader to store 3 lowers the voter rule's weighted score, but
+	// no peer moves and no IsolationLevel is configured.
+	op, err := CreateTransferLeaderOperator("test", tc, region, 3, []uint64{3}, OpLeader)
+	require.NoError(t, err)
+	require.Equal(t, uint64(3), op.Step(0).(TransferLeader).ToStore)
+
+	// A configured level still rejects new conflicts: voters 1 and 2 share z1.
+	voters.IsolationLevel = "zone"
+	require.NoError(t, rm.SetRule(voters))
+	_, err = CreateTransferLeaderOperator("test", tc, region, 3, []uint64{3}, OpLeader)
+	require.Error(t, err)
 }
