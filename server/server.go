@@ -1634,6 +1634,7 @@ func (s *Server) SetLabelPropertyConfig(cfg config.LabelPropertyConfig) error {
 		return err
 	}
 	log.Info("label property config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
+	s.warnUnsupportedLabelProperty()
 	return nil
 }
 
@@ -1653,7 +1654,17 @@ func (s *Server) SetLabelProperty(typ, labelKey, labelValue string) error {
 	}
 
 	log.Info("label property config is updated", zap.Reflect("config", s.persistOptions.GetLabelPropertyConfig()))
+	s.warnUnsupportedLabelProperty()
 	return nil
+}
+
+// warnUnsupportedLabelProperty logs a warning when the scheduling service,
+// which ignores label-property, schedules the cluster.
+func (s *Server) warnUnsupportedLabelProperty() {
+	if s.IsServiceIndependent(mcs.SchedulingServiceName) {
+		log.Warn("label-property is deprecated and the scheduling service ignores it, use placement rules or evict-leader-scheduler instead",
+			zap.Reflect("config", s.persistOptions.GetLabelPropertyConfig()))
+	}
 }
 
 // DeleteLabelProperty deletes a label property config.
