@@ -29,6 +29,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
@@ -423,6 +424,25 @@ func (m *Manager) GetAffinityGroupState(id string) *GroupState {
 		return newGroupState(groupInfo)
 	}
 	return nil
+}
+
+// GetAffinityGroupKeyRanges returns a copy of the ranges if the group's target
+// and ranges still match the supplied state. An obsolete state returns no ranges.
+func (m *Manager) GetAffinityGroupKeyRanges(group *GroupState) GroupKeyRanges {
+	m.metaMutex.Lock()
+	defer m.metaMutex.Unlock()
+	m.RLock()
+	defer m.RUnlock()
+	current := m.groups[group.ID]
+	if current == nil || current != group.groupInfoPtr || current.AffinityVer != group.affinityVer {
+		return GroupKeyRanges{}
+	}
+	ranges := m.keyRanges[group.ID]
+	result := GroupKeyRanges{GroupID: group.ID, KeyRanges: make([]keyutil.KeyRange, 0, len(ranges.KeyRanges))}
+	for _, r := range ranges.KeyRanges {
+		result.KeyRanges = append(result.KeyRanges, keyutil.KeyRange{StartKey: slices.Clone(r.StartKey), EndKey: slices.Clone(r.EndKey)})
+	}
+	return result
 }
 
 // CheckAndGetAffinityGroupState returns the group state after validating the ID and presence.
