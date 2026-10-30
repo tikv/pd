@@ -106,15 +106,12 @@ func (w *HotCache) enqueueReadRegionMetadata(region *core.RegionInfo) {
 	w.regionMetaMu.Lock()
 	// Validate at admission: the root can legitimately advance before the read
 	// worker replays an already accepted transfer or peer removal.
-	recreated := core.IsRegionRecreated(update.meta)
-	if !recreated && update.term > 0 {
-		if current := w.readCache.cluster.GetRegion(region.GetID()); current != nil && update.term < current.GetTerm() {
-			w.regionMetaMu.Unlock()
-			return
-		}
+	if _, _, err := w.readCache.cluster.PreCheckPutRegion(region); err != nil {
+		w.regionMetaMu.Unlock()
+		return
 	}
 	previous, exists := w.regionMetaUpdates[region.GetID()]
-	if !exists || recreated || update.term == 0 || update.term >= previous.term {
+	if !exists || !isReadRegionMetadataStale(update.meta, update.term, previous.meta, previous.term) {
 		if exists {
 			// Fold repeated metadata, but preserve leader and peer changes and
 			// transitions to or from an unknown term for the worker's guards.
@@ -472,11 +469,28 @@ func (w *HotCache) runWriteTask(task func(cache *HotPeerCache)) {
 // Update updates the cache.
 // This is used for mockcluster, for test purpose.
 func (w *HotCache) Update(item *HotPeerStat, kind utils.RWType) {
+	var peerCache *HotPeerCache
 	switch kind {
 	case utils.Write:
-		w.writeCache.UpdateStat(item)
+		peerCache = w.writeCache
 	case utils.Read:
-		w.readCache.UpdateStat(item)
+		peerCache = w.readCache
+	default:
+		return
+	}
+	done := make(chan struct{})
+	// Keep mock updates synchronous while preserving the worker's ownership.
+	select {
+	case peerCache.taskQueue.In <- func(cache *HotPeerCache) {
+		cache.UpdateStat(item)
+		close(done)
+	}:
+	case <-w.ctx.Done():
+		return
+	}
+	select {
+	case <-done:
+	case <-w.ctx.Done():
 	}
 }
 

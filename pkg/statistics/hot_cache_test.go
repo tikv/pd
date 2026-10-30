@@ -62,6 +62,34 @@ func TestIsHot(t *testing.T) {
 	}
 }
 
+func TestUpdateWaitsForCacheWorker(t *testing.T) {
+	for kind := range utils.RWTypeLen {
+		t.Run(kind.String(), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				_, cache, region, _ := newHotReadCache(t, []uint64{1, 2})
+				cache.CheckRegionFlowAsync(region)
+				item := *cache.GetHotPeerStat(kind, region.GetID(), 1)
+				item.HotDegree++
+				release := blockHotCacheWorker(t, cache, kind)
+				done := make(chan struct{})
+				go func() {
+					cache.Update(&item, kind)
+					close(done)
+				}()
+				synctest.Wait()
+				select {
+				case <-done:
+					t.Fatal("synchronous updates must wait for the owning worker")
+				default:
+				}
+				release()
+				<-done
+				require.Equal(t, item.HotDegree, cache.GetHotPeerStat(kind, region.GetID(), 1).HotDegree)
+			})
+		})
+	}
+}
+
 func TestCleanCacheWaitsForPendingTasks(t *testing.T) {
 	for kind := range utils.RWTypeLen {
 		t.Run(kind.String(), func(t *testing.T) {
@@ -710,6 +738,89 @@ func TestStaleRegionHeartbeatPreservesReadLeader(t *testing.T) {
 					require.False(t, after[1][0].IsLeader(), "older metadata must not override the observed leader")
 				})
 			})
+		}
+	}
+}
+
+func TestStaleRegionEpochPreservesReadPeers(t *testing.T) {
+	for _, epoch := range []string{"confver", "version"} {
+		for _, terms := range [][2]uint64{{0, 0}, {10, 10}, {10, 11}} {
+			for _, tc := range []struct {
+				name      string
+				published bool
+				coalesced bool
+				expired   bool
+			}{
+				{name: "root", published: true},
+				{name: "processed"},
+				{name: "coalesced", coalesced: true},
+				{name: "published-coalesced", published: true, coalesced: true},
+				{name: "expired-root", published: true, expired: true},
+				{name: "expired-processed", expired: true},
+			} {
+				t.Run(fmt.Sprintf("%s/terms=%v/%s", epoch, terms, tc.name), func(t *testing.T) {
+					synctest.Test(t, func(t *testing.T) {
+						cluster, cache, original, loads := newHotReadCache(t, []uint64{1, 2, 3})
+						original = withHeartbeatTerm(original, terms[0])
+						cluster.PutRegion(original)
+						cache.CheckRegionFlowAsync(original)
+						_ = cache.GetHotPeerStats(utils.Read, 0)
+						stale := withHeartbeatTerm(original, terms[1])
+						// The old heartbeat passes precheck before the peer replacement.
+						_, _, err := cluster.PreCheckPutRegion(stale)
+						require.NoError(t, err)
+						cluster.PutStore(core.NewStoreInfo(&metapb.Store{Id: 4}))
+						increment := core.WithIncConfVer()
+						if epoch == "version" {
+							increment = core.WithIncVersion()
+						}
+						newer := original.Clone(core.WithRemoveStorePeer(3), core.WithAddPeer(&metapb.Peer{Id: 4, StoreId: 4}), increment)
+						publish := func() {
+							_, err := cluster.CheckAndPutRootTree(&core.MetaProcessContext{Tracer: core.NewNoopHeartbeatProcessTracer()}, newer)
+							require.NoError(t, err)
+						}
+						var release func()
+						if tc.coalesced {
+							release = blockHotReadWorker(t, cache)
+						}
+						cache.CheckRegionFlowAsync(newer)
+						if tc.published {
+							publish()
+						}
+						if !tc.coalesced {
+							_ = cache.GetHotPeerStats(utils.Read, 0)
+						}
+						if tc.expired {
+							time.Sleep(31 * time.Second)
+							cache.CollectMetrics()
+							for _, stats := range cache.GetHotPeerStats(utils.Read, 0) {
+								require.Empty(t, stats)
+							}
+						}
+						cache.CheckRegionFlowAsync(stale)
+						if tc.coalesced {
+							release()
+							synctest.Wait()
+						}
+						_ = cache.GetHotPeerStats(utils.Read, 0)
+						if !tc.published {
+							publish()
+						}
+						_, err = cluster.CheckAndPutRootTree(&core.MetaProcessContext{Tracer: core.NewNoopHeartbeatProcessTracer()}, stale)
+						require.Error(t, err, "core must reject the obsolete epoch")
+						for range 3 {
+							for _, peer := range newer.GetPeers() {
+								require.True(t, cache.CheckReadPeerAsync(newer, peer, loads, utils.StoreHeartBeatReportInterval))
+							}
+						}
+						// An old store snapshot must not restore the removed peer either.
+						require.True(t, cache.CheckReadPeerAsync(original, original.GetStorePeer(3), loads, utils.StoreHeartBeatReportInterval))
+						after := cache.GetHotPeerStats(utils.Read, 0)
+						require.Len(t, after[4], 1, "rejected metadata must not suppress current peer samples")
+						require.Empty(t, after[3], "rejected metadata must not restore a removed peer")
+					})
+				})
+			}
 		}
 	}
 }

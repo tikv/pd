@@ -230,6 +230,14 @@ func sameReadRegionMetadata(a, b *metapb.Region) bool {
 		core.SortedPeersEqual(a.GetPeers(), b.GetPeers())
 }
 
+// isReadRegionMetadataStale follows core's term and epoch ordering, including
+// unknown terms and the online unsafe-recovery exception.
+func isReadRegionMetadataStale(meta *metapb.Region, term uint64, previous *metapb.Region, previousTerm uint64) bool {
+	epoch, previousEpoch := meta.GetRegionEpoch(), previous.GetRegionEpoch()
+	return (term > 0 && term < previousTerm || epoch.GetVersion() < previousEpoch.GetVersion() ||
+		epoch.GetConfVer() < previousEpoch.GetConfVer()) && !core.IsRegionRecreated(meta)
+}
+
 func (f *HotPeerCache) updateReadLeader(region *hotRegionInfo, term uint64) bool {
 	if f.kind != utils.Read {
 		return true
@@ -238,15 +246,13 @@ func (f *HotPeerCache) updateReadLeader(region *hotRegionInfo, term uint64) bool
 	readLeader := f.pendingReadLeaders[region.id()]
 	// Admission rejects metadata older than the root. Here compare only with
 	// already processed metadata so accepted history survives root publication.
-	// Recovery recreates the region with a fresh epoch and may reset its term.
-	recreated := core.IsRegionRecreated(region.meta)
-	if !recreated && term > 0 && readLeader != nil && term < readLeader.term {
+	if readLeader != nil && isReadRegionMetadataStale(region.meta, term, readLeader.meta, readLeader.term) {
 		return false
 	}
 	leaderTransferred := false
 	for storeID := range f.storesOfRegion[region.id()] {
 		oldItem := f.getOldHotPeerStat(region.id(), storeID)
-		if oldItem != nil && oldItem.readLeader != nil && !recreated && term > 0 && term < oldItem.readLeader.term {
+		if oldItem != nil && oldItem.readLeader != nil && isReadRegionMetadataStale(region.meta, term, oldItem.readLeader.meta, oldItem.readLeader.term) {
 			return false
 		}
 		if oldItem != nil && (oldItem.isLeader != (storeID == region.leaderStoreID) ||

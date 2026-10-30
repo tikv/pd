@@ -1452,7 +1452,7 @@ func TestConcurrentRegionHeartbeat(t *testing.T) {
 	heartbeatRegions(re, cluster, regions)
 
 	// Merge regions manually
-	source, target := regions[0], regions[1]
+	source, target := regions[0].Clone(), regions[1].Clone()
 	target.GetMeta().StartKey = []byte{}
 	target.GetMeta().EndKey = []byte{}
 	source.GetMeta().GetRegionEpoch().Version++
@@ -1461,18 +1461,23 @@ func TestConcurrentRegionHeartbeat(t *testing.T) {
 	}
 	target.GetMeta().GetRegionEpoch().Version++
 
-	var wg sync.WaitGroup
-	wg.Add(1)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/concurrentRegionHeartbeat", "return(true)"))
+	started, release := make(chan struct{}), make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(unblock)
+	processCtx := core.ContextTODO()
+	processCtx.Tracer = &blockingPreCheckTracer{
+		RegionHeartbeatProcessTracer: processCtx.Tracer,
+		started:                      started,
+		release:                      release,
+	}
+	result := make(chan error, 1)
 	go func() {
-		defer wg.Done()
-		err := cluster.processRegionHeartbeat(core.ContextTODO(), source)
-		assert.NoError(t, err)
+		result <- cluster.processRegionHeartbeat(processCtx, source)
 	}()
-	time.Sleep(100 * time.Millisecond)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/concurrentRegionHeartbeat"))
+	<-started
 	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), target))
-	wg.Wait()
+	unblock()
+	re.ErrorContains(<-result, "region is stale", "the final validation must reject the delayed source heartbeat")
 	checkRegion(re, cluster.GetRegionByKey([]byte{}), target)
 }
 
