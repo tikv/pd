@@ -20,7 +20,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/utils/logutil"
+	"go.uber.org/zap"
 )
 
 func TestRequestInfo(t *testing.T) {
@@ -62,4 +65,88 @@ func TestEndTime(t *testing.T) {
 	re.NotNil(result)
 	re.True(ok)
 	re.Equal(timeNow, result)
+}
+
+func setRedactInfoLogForTest(t *testing.T, redactInfoLog logutil.RedactInfoLogType) {
+	re := require.New(t)
+	var (
+		lg    *zap.Logger
+		props *log.ZapProperties
+	)
+	re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, redactInfoLog))
+	t.Cleanup(func() {
+		re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, logutil.RedactInfoLogOFF))
+	})
+}
+
+func TestRequestInfoStringRedact(t *testing.T) {
+	re := require.New(t)
+	info := RequestInfo{
+		ServiceLabel:   "SetRegionLabelRule",
+		Method:         "HTTP/1.1/POST:/pd/api/v1/config/region-label/rule",
+		CallerID:       "pdctl",
+		IP:             "localhost",
+		Port:           "2379",
+		URLParam:       `{"key":["7480000000000000ff"]}`,
+		BodyParam:      `{"id":"test","data":[{"start_key":"7480000000000000ff","end_key":"7480000000000001ff"}]}`,
+		StartTimeStamp: time.Now().Unix(),
+	}
+	originalURLParam, originalBodyParam := info.URLParam, info.BodyParam
+	prefix := "{ServiceLabel:SetRegionLabelRule, Method:HTTP/1.1/POST:/pd/api/v1/config/region-label/rule, " +
+		"CallerID:pdctl, IP:localhost, Port:2379, StartTime:" + time.Unix(info.StartTimeStamp, 0).String()
+
+	// Redaction off: identical to the raw values.
+	re.Equal(prefix+", URLParam:"+info.URLParam+", BodyParam:"+info.BodyParam+"}", info.String())
+
+	setRedactInfoLogForTest(t, logutil.RedactInfoLogON)
+	s := info.String()
+	re.Equal(prefix+", URLParam:?, BodyParam:?}", s)
+	re.NotContains(s, "7480000000000000ff")
+
+	setRedactInfoLogForTest(t, logutil.RedactInfoLogMarker)
+	re.Equal(prefix+", URLParam:‹"+info.URLParam+"›, BodyParam:‹"+info.BodyParam+"›}", info.String())
+
+	// The raw fields themselves are left untouched.
+	re.Equal(originalURLParam, info.URLParam)
+	re.Equal(originalBodyParam, info.BodyParam)
+}
+
+func TestRequestInfoStringRedactEmptyFields(t *testing.T) {
+	for _, mode := range []struct {
+		name      string
+		redact    logutil.RedactInfoLogType
+		wantQuery string
+		wantBody  string
+	}{
+		{name: "off", redact: logutil.RedactInfoLogOFF, wantQuery: "query-secret", wantBody: "body-secret"},
+		{name: "on", redact: logutil.RedactInfoLogON, wantQuery: "?", wantBody: "?"},
+		{name: "marker", redact: logutil.RedactInfoLogMarker, wantQuery: "‹query-secret›", wantBody: "‹body-secret›"},
+	} {
+		t.Run(mode.name, func(t *testing.T) {
+			re := require.New(t)
+			setRedactInfoLogForTest(t, mode.redact)
+			for _, testCase := range []struct {
+				name     string
+				urlParam string
+				body     string
+				want     string
+			}{
+				{name: "both empty", want: ", URLParam:, BodyParam:}"},
+				{name: "empty body", urlParam: "query-secret", want: ", URLParam:" + mode.wantQuery + ", BodyParam:}"},
+				{name: "empty query", body: "body-secret", want: ", URLParam:, BodyParam:" + mode.wantBody + "}"},
+			} {
+				info := RequestInfo{URLParam: testCase.urlParam, BodyParam: testCase.body}
+				re.Contains(info.String(), testCase.want, testCase.name)
+				re.Equal(testCase.urlParam, info.URLParam, testCase.name)
+				re.Equal(testCase.body, info.BodyParam, testCase.name)
+			}
+
+			req, err := http.NewRequest(http.MethodGet, "http://127.0.0.1:2379/test", nil)
+			re.NoError(err)
+			info := GetRequestInfo(req)
+			re.JSONEq("{}", info.URLParam)
+			re.Empty(info.BodyParam)
+			re.Contains(info.String(), ", BodyParam:}")
+		})
+	}
 }

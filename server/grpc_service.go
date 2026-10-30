@@ -1516,7 +1516,7 @@ func (s *GrpcServer) GetRegion(ctx context.Context, request *pdpb.GetRegionReque
 		}
 		region = rc.GetRegionByKey(request.GetRegionKey())
 		if region == nil {
-			log.Warn("follower get region nil", zap.String("key", string(request.GetRegionKey())))
+			log.Warn("follower get region nil", logutil.ZapRedactString("key", string(request.GetRegionKey())))
 			return &pdpb.GetRegionResponse{Header: regionNotFound()}, nil
 		}
 	} else {
@@ -1526,7 +1526,7 @@ func (s *GrpcServer) GetRegion(ctx context.Context, request *pdpb.GetRegionReque
 		}
 		region = rc.GetRegionByKey(request.GetRegionKey())
 		if region == nil {
-			log.Warn("leader get region nil", zap.String("key", string(request.GetRegionKey())))
+			log.Warn("leader get region nil", logutil.ZapRedactString("key", string(request.GetRegionKey())))
 			return &pdpb.GetRegionResponse{Header: wrapHeader()}, nil
 		}
 	}

@@ -17,6 +17,7 @@ package etcdutil
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand"
@@ -29,8 +30,10 @@ import (
 	"time"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -40,6 +43,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/goleak"
+	"go.uber.org/zap"
 )
 
 func TestMain(m *testing.M) {
@@ -447,6 +451,68 @@ func (suite *loopWatcherTestSuite) TestLoadNoExistedKey() {
 	err := watcher.WaitLoad()
 	re.NoError(err) // although no key, watcher returns no error
 	re.Empty(cache)
+}
+
+func (suite *loopWatcherTestSuite) TestWatcherLoadLogRedact() {
+	const payload = `{"start_key":"736563726574","end_key":"7a"}`
+	callbackErr := errors.New("put callback failed")
+	for _, mode := range []struct {
+		name string
+		typ  logutil.RedactInfoLogType
+	}{
+		{"off", logutil.RedactInfoLogOFF},
+		{"on", logutil.RedactInfoLogON},
+		{"marker", logutil.RedactInfoLogMarker},
+	} {
+		suite.Run(mode.name, func() {
+			re := suite.Require()
+			prefix := suite.T().Name() + "/"
+			suite.put(re, prefix+"a", payload)
+			suite.put(re, prefix+"b", payload)
+			values := make([]string, 0, 2)
+			watcher := NewLoopWatcher(
+				suite.ctx, &suite.wg, suite.client, "redact", prefix,
+				func([]*clientv3.Event) error { return nil },
+				func(kv *mvccpb.KeyValue) error {
+					values = append(values, string(kv.Value))
+					if string(kv.Key) == prefix+"b" {
+						return callbackErr
+					}
+					return nil
+				},
+				func(*mvccpb.KeyValue) error { return nil },
+				func([]*clientv3.Event) error { return nil },
+				true, /* withPrefix */
+			)
+			fname := testutil.InitTempFileLogger("debug")
+			var (
+				lg    *zap.Logger
+				props *log.ZapProperties
+			)
+			re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, mode.typ))
+			suite.T().Cleanup(func() {
+				re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, logutil.RedactInfoLogOFF))
+			})
+
+			_, err := watcher.load(suite.ctx)
+			re.Same(callbackErr, err)
+			re.Equal([]string{payload, payload}, values)
+			output, err := os.ReadFile(fname)
+			re.NoError(err)
+			re.Contains(string(output), "put successfully in watch loop when loading")
+			re.Contains(string(output), "put failed in watch loop when loading")
+			re.Contains(string(output), `[error="put callback failed"]`)
+			if mode.typ == logutil.RedactInfoLogON {
+				re.Equal(2, strings.Count(string(output), "[value=?]"))
+				re.NotContains(string(output), "736563726574")
+			} else {
+				re.Contains(string(output), "736563726574")
+				if mode.typ == logutil.RedactInfoLogMarker {
+					re.Equal(2, strings.Count(string(output), `[value="‹`))
+				}
+			}
+		})
+	}
 }
 
 func (suite *loopWatcherTestSuite) TestLoadWithLimitChange() {
