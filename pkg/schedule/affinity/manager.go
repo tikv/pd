@@ -33,8 +33,9 @@ import (
 )
 
 const (
-	// labelKey is the key for affinity group id in region label.
-	labelKey = "affinity_group"
+	// AffinityLabelKey is reserved for rules managed by the affinity API.
+	AffinityLabelKey = "affinity_group"
+	labelKey         = AffinityLabelKey
 	// defaultDegradedExpirationSeconds is the default expiration time for a degraded group.
 	// After a group becomes degraded , it will automatically
 	// expire after this duration if the stores don't recover.

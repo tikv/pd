@@ -585,4 +585,5 @@ var (
 	ErrEmptyRequest           = errors.Normalize("%s", errors.RFCCodeText("PD:affinity:ErrEmptyRequest"))
 	ErrInvalidGroupID         = errors.Normalize("invalid group id %s: should contain only letters (a-z, A-Z), numbers (0-9), hyphens (-) and underscores (_), and be 1-64 characters long", errors.RFCCodeText("PD:affinity:ErrInvalidGroupID"))
 	ErrInvalidKeyFormat       = errors.Normalize("invalid hex %s key '%s' for group '%s'", errors.RFCCodeText("PD:affinity:ErrInvalidKeyFormat"))
+	ErrAffinityLabelProtected = errors.Normalize("affinity label rules must be changed through the affinity API", errors.RFCCodeText("PD:affinity:ErrAffinityLabelProtected"))
 )

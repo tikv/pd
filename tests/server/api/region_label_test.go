@@ -25,9 +25,11 @@ import (
 
 	"github.com/pingcap/failpoint"
 
+	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/tests"
 )
 
@@ -114,4 +116,101 @@ func (suite *regionLabelTestSuite) checkGetSet(cluster *tests.TestCluster) {
 
 	err = testutil.CheckDelete(tests.TestDialClient, urlPrefix+"/rule/no-exist", testutil.Status(re, http.StatusNotFound))
 	re.NoError(err)
+}
+
+func (suite *regionLabelTestSuite) TestAffinityRuleWriteProtection() {
+	suite.env.RunTest(func(cluster *tests.TestCluster) {
+		re := suite.Require()
+		leader := cluster.GetLeaderServer()
+		prefix := leader.GetAddr() + "/pd/api/v1/config/region-label"
+		affinityURL := leader.GetAddr() + "/pd/api/v2/affinity-groups"
+		const groupID = "protected-group"
+		ruleID := affinity.GetLabelRuleID(groupID)
+		ruleURL := prefix + "/rule/" + url.QueryEscape(ruleID)
+		data, err := json.Marshal(handlers.CreateAffinityGroupsRequest{
+			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
+				groupID: {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x10}, EndKey: []byte{0x20}}}},
+			},
+		})
+		re.NoError(err)
+		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, affinityURL, data, testutil.StatusOK(re)))
+		var original labeler.LabelRule
+		re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, ruleURL, &original))
+
+		ordinary := &labeler.LabelRule{
+			ID: "ordinary-protected-batch", Labels: []labeler.RegionLabel{{Key: "k", Value: "v"}},
+			RuleType: labeler.KeyRange, Data: keyutil.BuildKeyRangeMaps("30", "40"),
+		}
+		data, err = json.Marshal(ordinary)
+		re.NoError(err)
+		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, prefix+"/rule", data, testutil.StatusOK(re)))
+
+		for _, rule := range []*labeler.LabelRule{
+			{ID: affinity.GetLabelRuleID("missing"), Labels: ordinary.Labels, RuleType: labeler.KeyRange, Data: ordinary.Data},
+			{ID: "affinity-alias", Labels: []labeler.RegionLabel{{Key: affinity.AffinityLabelKey, Value: groupID, TTL: "1h"}}, RuleType: labeler.KeyRange, Data: ordinary.Data},
+			{ID: ruleID, Labels: ordinary.Labels, RuleType: labeler.KeyRange, Data: ordinary.Data},
+		} {
+			data, err = json.Marshal(rule)
+			re.NoError(err)
+			re.NoError(testutil.CheckPostJSON(tests.TestDialClient, prefix+"/rule", data,
+				testutil.Status(re, http.StatusBadRequest), testutil.StringContain(re, "affinity API")))
+		}
+		re.NoError(testutil.CheckDelete(tests.TestDialClient, ruleURL, testutil.Status(re, http.StatusBadRequest)))
+
+		// Both the earlier set and the earlier delete must be rejected with the batch.
+		for _, patch := range []labeler.LabelRulePatch{
+			{SetRules: []*labeler.LabelRule{
+				{ID: "ordinary-rejected-batch", Labels: ordinary.Labels, RuleType: labeler.KeyRange, Data: ordinary.Data},
+				{ID: ruleID, Labels: ordinary.Labels, RuleType: labeler.KeyRange, Data: ordinary.Data},
+			}},
+			{DeleteRules: []string{ordinary.ID, ruleID}},
+		} {
+			data, err = json.Marshal(patch)
+			re.NoError(err)
+			re.NoError(testutil.CheckPatchJSON(tests.TestDialClient, prefix+"/rules", data, testutil.Status(re, http.StatusBadRequest)))
+		}
+		re.NoError(testutil.CheckGetJSON(tests.TestDialClient, prefix+"/rule/ordinary-rejected-batch", nil, testutil.Status(re, http.StatusNotFound)))
+		var kept labeler.LabelRule
+		re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, prefix+"/rule/"+ordinary.ID, &kept))
+		re.Equal(ordinary.ID, kept.ID)
+		re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, ruleURL, &kept))
+		re.Equal(original, kept)
+
+		// The owning API can still update ranges and delete its rule.
+		data, err = json.Marshal(handlers.BatchModifyAffinityGroupsRequest{
+			Add: []handlers.GroupRangesModification{{ID: groupID, Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x20}, EndKey: []byte{0x30}}}}},
+		})
+		re.NoError(err)
+		re.NoError(testutil.CheckPatchJSON(tests.TestDialClient, affinityURL, data, testutil.StatusOK(re)))
+		re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, ruleURL, &kept))
+		re.Len(kept.Data, 2)
+		re.NoError(testutil.CheckDelete(tests.TestDialClient, affinityURL+"/"+groupID+"?force=true", testutil.StatusOK(re)))
+		re.NoError(testutil.CheckGetJSON(tests.TestDialClient, ruleURL, nil, testutil.Status(re, http.StatusNotFound)))
+		re.NoError(testutil.CheckDelete(tests.TestDialClient, prefix+"/rule/"+ordinary.ID, testutil.StatusOK(re)))
+
+		// A rule with another ID and the affinity label, such as one created before
+		// this protection, cannot be replaced but can still be deleted.
+		for _, deleteRule := range []func(id string) error{
+			func(id string) error {
+				return testutil.CheckDelete(tests.TestDialClient, prefix+"/rule/"+id, testutil.StatusOK(re))
+			},
+			func(id string) error {
+				patch, marshalErr := json.Marshal(labeler.LabelRulePatch{DeleteRules: []string{id}})
+				re.NoError(marshalErr)
+				return testutil.CheckPatchJSON(tests.TestDialClient, prefix+"/rules", patch, testutil.StatusOK(re))
+			},
+		} {
+			leftover := &labeler.LabelRule{
+				ID: "affinity-leftover", Labels: []labeler.RegionLabel{{Key: affinity.AffinityLabelKey, Value: "leftover"}},
+				RuleType: labeler.KeyRange, Data: keyutil.BuildKeyRangeMaps("50", "60"),
+			}
+			re.NoError(leader.GetRaftCluster().GetRegionLabeler().SetLabelRule(leftover))
+			replacement := &labeler.LabelRule{ID: leftover.ID, Labels: ordinary.Labels, RuleType: labeler.KeyRange, Data: ordinary.Data}
+			data, err = json.Marshal(replacement)
+			re.NoError(err)
+			re.NoError(testutil.CheckPostJSON(tests.TestDialClient, prefix+"/rule", data, testutil.Status(re, http.StatusBadRequest)))
+			re.NoError(deleteRule(leftover.ID))
+			re.NoError(testutil.CheckGetJSON(tests.TestDialClient, prefix+"/rule/"+leftover.ID, nil, testutil.Status(re, http.StatusNotFound)))
+		}
+	})
 }
