@@ -167,6 +167,8 @@ type serviceModeKeeper struct {
 func (k *serviceModeKeeper) close() {
 	k.Lock()
 	defer k.Unlock()
+	// Stop TSO connection updates before closing the discovery's connections.
+	k.tsoClient.Close()
 	if k.tsoSvcDiscovery != nil {
 		k.tsoSvcDiscovery.Close()
 		k.tsoSvcDiscovery = nil
@@ -178,8 +180,6 @@ func (k *serviceModeKeeper) close() {
 	if k.msDiscovery != nil {
 		k.msDiscovery.Close()
 	}
-
-	k.tsoClient.Close()
 }
 
 type client struct {
