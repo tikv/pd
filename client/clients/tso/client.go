@@ -628,16 +628,8 @@ func (c *Cli) DispatchRequest(request *Request) (bool, error) {
 		})
 		c.getDispatcher().push(request)
 	}
-	// Check the contexts again to make sure the request is not been sent to a closed dispatcher.
-	// Never retry on these conditions to prevent unexpected data race.
-	select {
-	case <-request.requestCtx.Done():
-		return false, request.requestCtx.Err()
-	case <-request.clientCtx.Done():
-		return false, request.clientCtx.Err()
-	case <-c.ctx.Done():
-		return false, c.ctx.Err()
-	default:
-	}
+	// The dispatcher owns the request after push, including cancellation and shutdown.
+	// Returning an error here would let the caller complete and recycle it while the
+	// dispatcher may still be using it.
 	return false, nil
 }

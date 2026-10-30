@@ -2260,9 +2260,9 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupCURDWithKeyspace()
 		TargetRequestPeriodMs: 1000,
 		ClientUniqueId:        1,
 	}
-	_, err = clientKeyspace.AcquireTokenBuckets(suite.ctx, req)
+	tokenResponses, err := clientKeyspace.AcquireTokenBuckets(suite.ctx, req)
 	re.NoError(err)
-	time.Sleep(10 * time.Millisecond)
+	re.Empty(tokenResponses)
 	rg, err = clientKeyspace.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
 	re.NoError(err)
 	re.NotEqual(rg.RUStats, testConsumption)
@@ -2271,8 +2271,11 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupCURDWithKeyspace()
 	req.Requests[0].KeyspaceId = &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: keyspaceID}}
 	_, err = clientKeyspace.AcquireTokenBuckets(suite.ctx, req)
 	re.NoError(err)
-	time.Sleep(10 * time.Millisecond)
-	rg, err = clientKeyspace.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
+	// Consumption is processed asynchronously after the token request is accepted.
+	testutil.Eventually(re, func() bool {
+		rg, err = clientKeyspace.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
+		return err == nil && reflect.DeepEqual(rg.GetRUStats(), testConsumption)
+	})
 	re.NoError(err)
 	re.Equal(rg.RUStats, testConsumption)
 
