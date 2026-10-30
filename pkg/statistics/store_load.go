@@ -354,11 +354,15 @@ func (s *StoreHistoryLoads) Add(storeID uint64, rwTp utils.RWType, kind constant
 	load, ok := s.loads[rwTp][kind][storeID]
 	if !ok {
 		size := int(DefaultHistorySampleDuration / DefaultHistorySampleInterval)
-		if s.sampleInterval != 0 {
-			size = int(s.sampleDuration / s.sampleInterval)
-		}
-		if s.sampleDuration == 0 {
+		if s.sampleDuration <= 0 || s.sampleInterval < 0 {
 			size = 0
+		} else if s.sampleInterval > 0 {
+			samples := s.sampleDuration / s.sampleInterval
+			size = int(samples)
+			if time.Duration(size) != samples {
+				// Disable history if the count cannot be represented on this platform.
+				size = 0
+			}
 		}
 		load = newStoreHistoryLoad(size, s.sampleInterval)
 		s.loads[rwTp][kind][storeID] = load
@@ -416,7 +420,7 @@ type storeHistoryLoad struct {
 
 func newStoreHistoryLoad(size int, sampleInterval time.Duration) *storeHistoryLoad {
 	return &storeHistoryLoad{
-		size:           size,
+		size:           max(size, 0),
 		sampleInterval: sampleInterval,
 	}
 }

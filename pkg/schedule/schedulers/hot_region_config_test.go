@@ -15,12 +15,310 @@
 package schedulers
 
 import (
+	"encoding/json"
+	"fmt"
+	"math"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/statistics/utils"
+	"github.com/tikv/pd/pkg/storage"
 )
+
+func TestHotRegionConfigRejectsUnsafeUpdates(t *testing.T) {
+	cancel, _, _, oc := prepareSchedulersTest()
+	defer cancel()
+	maxZombieRounds := int(math.MaxInt64 / (utils.RegionHeartBeatReportInterval * time.Second))
+	cases := []struct {
+		body  string
+		field string
+	}{
+		{`{"history-sample-duration":"-1m"}`, "history-sample-duration"},
+		{`{"history-sample-interval":"-1s"}`, "history-sample-interval"},
+		{`{"max-peer-number":-1}`, "max-peer-number"},
+		{`{"max-peer-number":0}`, "max-peer-number"},
+		{`{"max-zombie-rounds":-1}`, "max-zombie-rounds"},
+		{fmt.Sprintf(`{"max-zombie-rounds":%d}`, maxZombieRounds+1), "max-zombie-rounds"},
+		{`{"byte-rate-rank-step-ratio":0}`, "byte-rate-rank-step-ratio"},
+		{`{"key-rate-rank-step-ratio":-0.01}`, "key-rate-rank-step-ratio"},
+		{`{"query-rate-rank-step-ratio":0}`, "query-rate-rank-step-ratio"},
+		{`{"cpu-rate-rank-step-ratio":0}`, "cpu-rate-rank-step-ratio"},
+		{`{"count-rank-step-ratio":1.01}`, "count-rank-step-ratio"},
+		{`{"rank-formula-version":"v1","great-dec-ratio":0}`, "great-dec-ratio"},
+		{`{"rank-formula-version":"v1","great-dec-ratio":-1}`, "great-dec-ratio"},
+		{`{"rank-formula-version":"v1","great-dec-ratio":2}`, "great-dec-ratio"},
+		{`{"rank-formula-version":"","great-dec-ratio":0}`, "great-dec-ratio"},
+		{`{"rank-formula-version":"v1","minor-dec-ratio":1.01}`, "minor-dec-ratio"},
+		{`{"rank-formula-version":"v1","great-dec-ratio":0.99,"minor-dec-ratio":0.95}`, "great-dec-ratio"},
+		{`{"rank-formula-version":"","great-dec-ratio":0.99,"minor-dec-ratio":0.95}`, "great-dec-ratio"},
+		{`{"min-hot-byte-rate":-1}`, "min-hot-byte-rate"},
+		{`{"min-hot-key-rate":-1}`, "min-hot-key-rate"},
+		{`{"min-hot-query-rate":-1}`, "min-hot-query-rate"},
+		{`{"min-hot-cpu-rate":-1}`, "min-hot-cpu-rate"},
+		{`{"src-tolerance-ratio":-1}`, "src-tolerance-ratio"},
+		{`{"dst-tolerance-ratio":-1}`, "dst-tolerance-ratio"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.body, func(t *testing.T) {
+			re := require.New(t)
+			store := storage.NewStorageWithMemoryBackend()
+			_, err := CreateScheduler(types.BalanceHotRegionScheduler, oc, store, ConfigJSONDecoder([]byte(tc.body)))
+			re.ErrorContains(err, tc.field)
+
+			scheduler, err := CreateScheduler(types.BalanceHotRegionScheduler, oc, store, ConfigSliceDecoder(types.BalanceHotRegionScheduler, nil))
+			re.NoError(err)
+			before, err := scheduler.EncodeConfig()
+			re.NoError(err)
+			re.NoError(store.SaveSchedulerConfig(scheduler.GetName(), before))
+
+			// Include a valid change to verify that rejection preserves the entire config.
+			var update map[string]any
+			re.NoError(json.Unmarshal([]byte(tc.body), &update))
+			update["read-priorities"] = []string{"key", "byte"}
+			payload, err := json.Marshal(update)
+			re.NoError(err)
+			response := httptest.NewRecorder()
+			scheduler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/config", strings.NewReader(string(payload))))
+			re.Equal(http.StatusBadRequest, response.Code)
+			re.Contains(response.Body.String(), tc.field)
+			after, err := scheduler.EncodeConfig()
+			re.NoError(err)
+			re.JSONEq(string(before), string(after))
+			persisted, err := store.LoadSchedulerConfig(scheduler.GetName())
+			re.NoError(err)
+			re.JSONEq(string(before), persisted)
+
+			// An older writer may persist these values during a rolling upgrade.
+			re.NoError(store.SaveSchedulerConfig(scheduler.GetName(), payload))
+			re.NoError(scheduler.ReloadConfig())
+			re.NoError(scheduler.(*hotScheduler).conf.validateLocked())
+			re.Equal([]string{"key", "byte"}, scheduler.(*hotScheduler).conf.ReadPriorities)
+			restored, err := CreateScheduler(types.BalanceHotRegionScheduler, oc, store, ConfigJSONDecoderForRestore(payload))
+			re.NoError(err)
+			re.NoError(restored.(*hotScheduler).conf.validateLocked())
+		})
+	}
+}
+
+func TestHotRegionConfigRestoresLegacyNumericValues(t *testing.T) {
+	cancel, _, _, oc := prepareSchedulersTest()
+	defer cancel()
+	maxZombieRounds := int(math.MaxInt64 / (utils.RegionHeartBeatReportInterval * time.Second))
+	for _, tc := range []struct {
+		body     string
+		expected string
+	}{
+		{`{"history-sample-duration":"1h","history-sample-interval":"1s"}`, `{"history-sample-duration":"1h0m0s","history-sample-interval":"1s"}`},
+		{`{"history-sample-duration":"-1m"}`, `{"history-sample-duration":"0s"}`},
+		{`{"history-sample-interval":"-1s"}`, `{"history-sample-interval":"0s"}`},
+		{`{"max-peer-number":0}`, `{"max-peer-number":1000}`},
+		{`{"max-zombie-rounds":-1}`, `{"max-zombie-rounds":0}`},
+		{fmt.Sprintf(`{"max-zombie-rounds":%d}`, maxZombieRounds+1), fmt.Sprintf(`{"max-zombie-rounds":%d}`, maxZombieRounds)},
+		{`{"byte-rate-rank-step-ratio":0,"count-rank-step-ratio":2}`, `{"byte-rate-rank-step-ratio":0.05,"count-rank-step-ratio":0.01}`},
+		{`{"min-hot-key-rate":-1,"src-tolerance-ratio":-1}`, `{"min-hot-key-rate":0,"src-tolerance-ratio":0}`},
+		{`{"rank-formula-version":"v1","great-dec-ratio":0,"minor-dec-ratio":2}`, `{"great-dec-ratio":0.95,"minor-dec-ratio":0.99}`},
+		{`{"rank-formula-version":"v1","great-dec-ratio":0.99,"minor-dec-ratio":0.95}`, `{"great-dec-ratio":0.95,"minor-dec-ratio":0.95}`},
+	} {
+		t.Run(tc.body, func(t *testing.T) {
+			re := require.New(t)
+			conf := initHotRegionScheduleConfig()
+			conf.MinHotByteRate = 321
+			conf.ReadPriorities = []string{"key", "byte"}
+			re.NoError(json.Unmarshal([]byte(tc.body), conf))
+			payload, err := EncodeConfig(conf)
+			re.NoError(err)
+			scheduler, err := CreateScheduler(types.BalanceHotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigJSONDecoderForRestore(payload))
+			re.NoError(err)
+			hot := scheduler.(*hotScheduler)
+			re.NoError(hot.conf.validateLocked())
+			re.Equal(float64(321), hot.conf.MinHotByteRate)
+			re.Equal([]string{"key", "byte"}, hot.conf.ReadPriorities)
+			encoded, err := hot.EncodeConfig()
+			re.NoError(err)
+			var actual, expected map[string]json.RawMessage
+			re.NoError(json.Unmarshal(encoded, &actual))
+			re.NoError(json.Unmarshal([]byte(tc.expected), &expected))
+			for field, value := range expected {
+				re.JSONEq(string(value), string(actual[field]), field)
+			}
+		})
+	}
+}
+
+func TestHotRegionConfigRestoreKeepsExistingValidation(t *testing.T) {
+	cancel, _, _, oc := prepareSchedulersTest()
+	defer cancel()
+	for _, body := range []string{
+		`{"pending-weight":0}`, `{"split-thresholds":2}`, `{"rank-formula-version":"v3"}`,
+		`{"read-priorities":["unknown","byte"]}`, `{"write-peer-priorities":["query","byte"]}`,
+		`{"history-sample-duration":"not-a-duration"}`, `{"max-peer-number":`,
+	} {
+		t.Run(body, func(t *testing.T) {
+			re := require.New(t)
+			store := storage.NewStorageWithMemoryBackend()
+			_, err := CreateScheduler(types.BalanceHotRegionScheduler, oc, store, ConfigJSONDecoderForRestore([]byte(body)))
+			re.Error(err)
+			scheduler, err := CreateScheduler(types.BalanceHotRegionScheduler, oc, store, ConfigSliceDecoder(types.BalanceHotRegionScheduler, nil))
+			re.NoError(err)
+			before, err := scheduler.EncodeConfig()
+			re.NoError(err)
+			re.NoError(store.SaveSchedulerConfig(scheduler.GetName(), []byte(body)))
+			re.Error(scheduler.ReloadConfig())
+			after, err := scheduler.EncodeConfig()
+			re.NoError(err)
+			re.JSONEq(string(before), string(after))
+		})
+	}
+}
+
+func TestHotRegionConfigNumericBoundaries(t *testing.T) {
+	maxZombieRounds := int(math.MaxInt64 / (utils.RegionHeartBeatReportInterval * time.Second))
+	for _, body := range []string{
+		`{}`,
+		`{"history-sample-duration":"0s"}`,
+		`{"history-sample-duration":"1ns","history-sample-interval":"1ns"}`,
+		`{"history-sample-duration":"1h","history-sample-interval":"1s"}`,
+		`{"max-peer-number":1,"max-zombie-rounds":0}`,
+		fmt.Sprintf(`{"max-zombie-rounds":%d}`, maxZombieRounds),
+		`{"byte-rate-rank-step-ratio":1,"key-rate-rank-step-ratio":1,"query-rate-rank-step-ratio":1,"cpu-rate-rank-step-ratio":1,"count-rank-step-ratio":1}`,
+		`{"great-dec-ratio":1,"minor-dec-ratio":1}`,
+		`{"great-dec-ratio":0.01,"minor-dec-ratio":0.01}`,
+		`{"min-hot-byte-rate":0,"min-hot-key-rate":0,"min-hot-query-rate":0,"min-hot-cpu-rate":0,"src-tolerance-ratio":0,"dst-tolerance-ratio":0}`,
+	} {
+		t.Run(body, func(t *testing.T) {
+			re := require.New(t)
+			conf := initHotRegionScheduleConfig()
+			re.NoError(json.Unmarshal([]byte(body), conf))
+			re.NoError(conf.validateLocked())
+			re.GreaterOrEqual(conf.getStoreStatZombieDuration(), time.Duration(0))
+			re.GreaterOrEqual(conf.getRegionsStatZombieDuration(), time.Duration(0))
+		})
+	}
+}
+
+func TestHotRegionConfigPreservesCompatibleSettings(t *testing.T) {
+	cancel, _, _, oc := prepareSchedulersTest()
+	defer cancel()
+	for _, body := range []string{
+		`{"history-sample-duration":"1h","history-sample-interval":"1s"}`,
+		`{"history-sample-duration":"2h","history-sample-interval":"1s"}`,
+		`{"history-sample-duration":"0s","history-sample-interval":"0s"}`,
+		`{"history-sample-duration":"5m","history-sample-interval":"0s"}`,
+		`{"history-sample-duration":"1s","history-sample-interval":"2s"}`,
+		`{"rank-formula-version":"v2","great-dec-ratio":0.95,"minor-dec-ratio":0.9}`,
+		`{"rank-formula-version":"v2","great-dec-ratio":-1}`,
+		`{"rank-formula-version":"v2","great-dec-ratio":0}`,
+		`{"rank-formula-version":"v2","great-dec-ratio":2}`,
+		`{"rank-formula-version":"v2","minor-dec-ratio":0}`,
+		`{"rank-formula-version":"v2","minor-dec-ratio":1.01}`,
+	} {
+		t.Run(body, func(t *testing.T) {
+			re := require.New(t)
+			conf := initHotRegionScheduleConfig()
+			re.NoError(json.Unmarshal([]byte(body), conf))
+			conf.MinHotByteRate = 321
+			conf.ReadPriorities = []string{"key", "byte"}
+			payload, err := EncodeConfig(conf)
+			re.NoError(err)
+			store := storage.NewStorageWithMemoryBackend()
+			scheduler, err := CreateScheduler(types.BalanceHotRegionScheduler, oc, store, ConfigSliceDecoder(types.BalanceHotRegionScheduler, nil))
+			re.NoError(err)
+			response := httptest.NewRecorder()
+			scheduler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/config", strings.NewReader(string(payload))))
+			re.Equal(http.StatusOK, response.Code, response.Body.String())
+
+			// A partial update must retain the compatible settings and unrelated tuning.
+			response = httptest.NewRecorder()
+			scheduler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/config", strings.NewReader(`{"max-peer-number":123}`)))
+			re.Equal(http.StatusOK, response.Code, response.Body.String())
+			conf.MaxPeerNum = 123
+			expected, err := EncodeConfig(conf)
+			re.NoError(err)
+			persisted, err := store.LoadSchedulerConfig(scheduler.GetName())
+			re.NoError(err)
+			re.JSONEq(string(expected), persisted)
+
+			// Reload and startup must restore the saved settings instead of falling back to defaults.
+			hot := scheduler.(*hotScheduler)
+			hot.conf.Lock()
+			hot.conf.MinHotByteRate = 999
+			hot.conf.Unlock()
+			re.NoError(hot.ReloadConfig())
+			reloaded, err := hot.EncodeConfig()
+			re.NoError(err)
+			re.JSONEq(string(expected), string(reloaded))
+			restored, err := CreateScheduler(types.BalanceHotRegionScheduler, oc, store, ConfigJSONDecoder([]byte(persisted)))
+			re.NoError(err)
+			reloaded, err = restored.EncodeConfig()
+			re.NoError(err)
+			re.JSONEq(string(expected), string(reloaded))
+		})
+	}
+}
+
+func TestHotRegionConfigRejectsInvalidRankVersionSwitch(t *testing.T) {
+	re := require.New(t)
+	cancel, _, _, oc := prepareSchedulersTest()
+	defer cancel()
+	store := storage.NewStorageWithMemoryBackend()
+	scheduler, err := CreateScheduler(types.BalanceHotRegionScheduler, oc, store,
+		ConfigJSONDecoder([]byte(`{"rank-formula-version":"v2","minor-dec-ratio":0.9}`)))
+	re.NoError(err)
+	before, err := scheduler.EncodeConfig()
+	re.NoError(err)
+	re.NoError(store.SaveSchedulerConfig(scheduler.GetName(), before))
+	for _, body := range []string{`{"rank-formula-version":"v1"}`, `{"rank-formula-version":""}`} {
+		response := httptest.NewRecorder()
+		scheduler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/config", strings.NewReader(body)))
+		re.Equal(http.StatusBadRequest, response.Code)
+		re.Contains(response.Body.String(), "great-dec-ratio")
+		after, err := scheduler.EncodeConfig()
+		re.NoError(err)
+		re.JSONEq(string(before), string(after))
+		persisted, err := store.LoadSchedulerConfig(scheduler.GetName())
+		re.NoError(err)
+		re.JSONEq(string(before), persisted)
+	}
+}
+
+func TestHotRegionConfigRejectsNonFiniteNumbers(t *testing.T) {
+	for _, value := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+		conf := initHotRegionScheduleConfig()
+		for _, field := range []struct {
+			name  string
+			value *float64
+		}{
+			{"min-hot-byte-rate", &conf.MinHotByteRate},
+			{"min-hot-key-rate", &conf.MinHotKeyRate},
+			{"min-hot-query-rate", &conf.MinHotQueryRate},
+			{"min-hot-cpu-rate", &conf.MinHotCPURate},
+			{"src-tolerance-ratio", &conf.SrcToleranceRatio},
+			{"dst-tolerance-ratio", &conf.DstToleranceRatio},
+			{"byte-rate-rank-step-ratio", &conf.ByteRateRankStepRatio},
+			{"key-rate-rank-step-ratio", &conf.KeyRateRankStepRatio},
+			{"query-rate-rank-step-ratio", &conf.QueryRateRankStepRatio},
+			{"cpu-rate-rank-step-ratio", &conf.CPURateRankStepRatio},
+			{"count-rank-step-ratio", &conf.CountRankStepRatio},
+			{"great-dec-ratio", &conf.GreatDecRatio},
+			{"minor-dec-ratio", &conf.MinorDecRatio},
+			{"pending-weight", &conf.PendingWeight},
+			{"split-thresholds", &conf.SplitThresholds},
+		} {
+			t.Run(fmt.Sprintf("%s/%v", field.name, value), func(t *testing.T) {
+				previous := *field.value
+				*field.value = value
+				require.ErrorContains(t, conf.validateLocked(), field.name)
+				*field.value = previous
+			})
+		}
+	}
+}
 
 func TestAdjustPrioritiesConfigCPUFallback(t *testing.T) {
 	re := require.New(t)
