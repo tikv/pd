@@ -15,8 +15,6 @@
 package placement
 
 import (
-	"slices"
-
 	"github.com/tikv/pd/pkg/core"
 )
 
@@ -31,16 +29,9 @@ type isolationReplacement struct {
 	valid     bool
 }
 
-func newIsolationReplacement(fit *RuleFit, source uint64) isolationReplacement {
-	if fit == nil || fit.Rule.IsolationLevel == "" {
-		return isolationReplacement{}
-	}
-	c := isolationReplacement{stores: fit.Stores, source: -1}
-	level := slices.Index(fit.Rule.LocationLabels, fit.Rule.IsolationLevel)
-	if level < 0 {
-		return c
-	}
-	c.labels = fit.Rule.LocationLabels[:level+1]
+// newIsolationReplacement requires labels from Rule.isolationLabels.
+func newIsolationReplacement(fit *RuleFit, labels []string, source uint64) isolationReplacement {
+	c := isolationReplacement{stores: fit.Stores, labels: labels, source: -1}
 	c.degrees = make([]int, len(c.stores))
 	for i, store := range c.stores {
 		if store == nil {
@@ -120,6 +111,8 @@ func (f *RegionFit) checkTargetIsolation(stores []*core.StoreInfo, target *core.
 // IsLeaderIsolationPreserved checks rule reassignment after a leader transfer.
 // With no leader-specific rules, changing leadership cannot change the fit.
 // Incomplete source fits keep their existing repair admission behavior.
+// A transfer moves no peer, so only rules with an IsolationLevel are compared,
+// by conflicts rather than by the weighted score.
 func (f *RegionFit) IsLeaderIsolationPreserved(region *core.RegionInfo, leaderStore uint64, supportWitness bool) bool {
 	if leaderStore == region.GetLeader().GetStoreId() || !f.IsSatisfied() {
 		return true
@@ -135,8 +128,9 @@ func (f *RegionFit) IsLeaderIsolationPreserved(region *core.RegionInfo, leaderSt
 			break
 		}
 	}
-	if !sensitive || !needIsolation(f.rules) {
+	if !sensitive || !hasIsolationLevel(f.rules) {
 		return true
 	}
-	return f.checkTargetIsolation(f.regionStores, region.Clone(core.WithLeader(leader)), supportWitness, false)
+	after := fitRegion(f.regionStores, region.Clone(core.WithLeader(leader)), f.rules, supportWitness)
+	return after.IsSatisfied() && f.isIsolationPreserved(after, false)
 }

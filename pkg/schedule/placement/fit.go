@@ -48,9 +48,11 @@ func (f *RegionFit) Replace(srcStoreID uint64, dstStore *core.StoreInfo) bool {
 func (f *RegionFit) NewReplacementChecker(srcStoreID uint64) func(*core.StoreInfo) bool {
 	fit := f.getRuleFitByStoreID(srcStoreID)
 	var isolation *isolationReplacement
-	if fit != nil && fit.Rule.IsolationLevel != "" {
-		stats := newIsolationReplacement(fit, srcStoreID)
-		isolation = &stats
+	if fit != nil {
+		if labels := fit.Rule.isolationLabels(); labels != nil {
+			stats := newIsolationReplacement(fit, labels, srcStoreID)
+			isolation = &stats
+		}
 	}
 	return func(dstStore *core.StoreInfo) bool {
 		return f.checkReplacement(srcStoreID, dstStore, fit, isolation)
@@ -83,14 +85,14 @@ func (f *RegionFit) checkReplacement(srcStoreID uint64, dstStore *core.StoreInfo
 		return false
 	}
 
-	if fit.Rule.IsolationLevel != "" {
-		if isolation == nil {
-			stats := newIsolationReplacement(fit, srcStoreID)
+	if isolation == nil {
+		if labels := fit.Rule.isolationLabels(); labels != nil {
+			stats := newIsolationReplacement(fit, labels, srcStoreID)
 			isolation = &stats
 		}
-		if !isolation.allow(dstStore) {
-			return false
-		}
+	}
+	if isolation != nil && !isolation.allow(dstStore) {
+		return false
 	}
 
 	score := isolationStoreScore(srcStoreID, dstStore, fit.Stores, fit.Rule.LocationLabels)
@@ -176,18 +178,37 @@ func (f *RuleFit) IsSatisfied() bool {
 	return len(f.Peers) == f.Rule.Count && len(f.PeersWithDifferentRole) == 0
 }
 
+// isolationLabels returns the location labels up to the configured isolation
+// level. Rule validation accepts a level that is absent from LocationLabels;
+// treat it as unset instead of rejecting every scheduling change for the rule.
+func (r *Rule) isolationLabels() []string {
+	if r.IsolationLevel == "" {
+		return nil
+	}
+	level := slices.Index(r.LocationLabels, r.IsolationLevel)
+	if level < 0 {
+		return nil
+	}
+	return r.LocationLabels[:level+1]
+}
+
+func hasIsolationLevel(rules []*Rule) bool {
+	for _, rule := range rules {
+		if rule.isolationLabels() != nil {
+			return true
+		}
+	}
+	return false
+}
+
 // IsIsolationSatisfied reports whether each pair of stores is separated at or
 // above the rule's configured isolation level. It does not impose a default
 // level or compare the weighted isolation score.
 func (f *RuleFit) IsIsolationSatisfied() bool {
-	if f.Rule.IsolationLevel == "" {
+	labels := f.Rule.isolationLabels()
+	if labels == nil {
 		return true
 	}
-	level := slices.Index(f.Rule.LocationLabels, f.Rule.IsolationLevel)
-	if level < 0 {
-		return false
-	}
-	labels := f.Rule.LocationLabels[:level+1]
 	for i, store := range f.Stores {
 		if store == nil {
 			return false
@@ -207,17 +228,13 @@ func (f *RuleFit) IsIsolationSatisfied() bool {
 // Missing labels use CompareLocation's conservative pairwise semantics; they
 // are not grouped under a synthetic host name. Different rules are independent.
 func (f *RuleFit) IsIsolationPreserved(target *RuleFit) bool {
-	if f.Rule.IsolationLevel == "" {
+	labels := f.Rule.isolationLabels()
+	if labels == nil {
 		return true
 	}
 	if target == nil || len(f.Stores) != len(target.Stores) {
 		return false
 	}
-	level := slices.Index(f.Rule.LocationLabels, f.Rule.IsolationLevel)
-	if level < 0 {
-		return false
-	}
-	labels := f.Rule.LocationLabels[:level+1]
 	beforePairs, beforeMax, beforeOK := isolationConflicts(f.Stores, labels)
 	afterPairs, afterMax, afterOK := isolationConflicts(target.Stores, labels)
 	return beforeOK && afterOK && afterPairs <= beforePairs && afterMax <= beforeMax
@@ -250,13 +267,20 @@ func isolationConflicts(stores []*core.StoreInfo, labels []string) (pairs, maxPe
 // IsIsolationPreserved checks complete fits made with the same effective rules.
 // It is for fixed-size scheduling, not replica-count-changing repairs.
 func (f *RegionFit) IsIsolationPreserved(target *RegionFit) bool {
+	return f.isIsolationPreserved(target, true)
+}
+
+// isIsolationPreserved optionally keeps the weighted score check. Leader
+// transfers skip it: they move no peer, so a lower score only reflects how
+// peers are assigned to rules, not a change in replica locations.
+func (f *RegionFit) isIsolationPreserved(target *RegionFit, checkScore bool) bool {
 	if target == nil || len(f.RuleFits) != len(target.RuleFits) {
 		return false
 	}
 	for i, before := range f.RuleFits {
 		after := target.RuleFits[i]
 		if before.Rule != after.Rule || len(before.Peers) != len(after.Peers) ||
-			after.IsolationScore < before.IsolationScore || !before.IsIsolationPreserved(after) {
+			(checkScore && after.IsolationScore < before.IsolationScore) || !before.IsIsolationPreserved(after) {
 			return false
 		}
 	}
