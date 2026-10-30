@@ -221,6 +221,33 @@ func (suite *operatorControllerTestSuite) TestFastFailOperator() {
 	re.Nil(oc.GetOperator(region.GetID()))
 }
 
+func (suite *operatorControllerTestSuite) TestFastOperatorInfluenceKeepsAllOperatorsOfRegion() {
+	re := suite.Require()
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(suite.ctx, opt)
+	oc := NewController(suite.ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), nil)
+	for i := uint64(1); i <= 4; i++ {
+		tc.AddLeaderStore(i, 1)
+	}
+	tc.AddLeaderRegion(1, 1, 2, 3)
+
+	// Two fast move-peer operators of the same region: 1 -> 4 and 2 -> 5.
+	tc.AddLeaderStore(5, 1)
+	oc.pushFastOperator(NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion,
+		AddPeer{ToStore: 4, PeerID: 10}, RemovePeer{FromStore: 1}))
+	oc.pushFastOperator(NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion,
+		AddPeer{ToStore: 5, PeerID: 11}, RemovePeer{FromStore: 2}))
+
+	influence := NewOpInfluence()
+	oc.GetFastOpInfluence(tc.GetBasicCluster(), influence)
+	for _, id := range []uint64{4, 5} {
+		re.Equal(int64(1), influence.GetStoreInfluence(id).RegionCount)
+	}
+	for _, id := range []uint64{1, 2} {
+		re.Equal(int64(-1), influence.GetStoreInfluence(id).RegionCount)
+	}
+}
+
 // Issue 3353
 func (suite *operatorControllerTestSuite) TestFastFailWithUnhealthyStore() {
 	re := suite.Require()
