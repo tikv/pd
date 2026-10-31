@@ -37,7 +37,7 @@
 ##   - false: disable redact log.
 ##   - true: enable redact log, which will replace the sensitive information with "?".
 ##   - "MARKER": enable redact log, which will use single guillemets ‹› to enclose the sensitive information.
-# redact-info-log = false
+# redact-info-log = true
 
 [security.encryption]
 ## Encryption method to use for PD data. One of "plaintext", "aes128-ctr", "aes192-ctr" and "aes256-ctr".

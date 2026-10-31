@@ -85,10 +85,18 @@ type SecurityConfig struct {
 	grpcutil.TLSConfig
 	// RedactInfoLog indicates that whether to enable the log redaction. It can be the following values:
 	//   - false: disable redact log.
-	//   - true: enable redact log, which will replace the sensitive information with "?".
+	//   - true: enable redact log, which will replace the sensitive information with "?". This is the default.
 	//   - "MARKER": enable redact log, which will use single guillemets ‹› to enclose the sensitive information.
 	RedactInfoLog logutil.RedactInfoLogType `toml:"redact-info-log" json:"redact-info-log"`
 	Encryption    encryption.Config         `toml:"encryption" json:"encryption"`
+}
+
+// Adjust adjusts the security configuration.
+func (s *SecurityConfig) Adjust(meta *ConfigMetaData) error {
+	if !meta.IsDefined("redact-info-log") {
+		s.RedactInfoLog = logutil.RedactInfoLogON
+	}
+	return s.Encryption.Adjust()
 }
 
 // PrintConfigCheckMsg prints the message about configuration checks.

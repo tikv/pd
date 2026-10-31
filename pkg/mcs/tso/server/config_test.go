@@ -24,6 +24,7 @@ import (
 	"go.uber.org/goleak"
 
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
@@ -155,5 +156,22 @@ func TestGetAdvertiseListenHost(t *testing.T) {
 				re.Equal(tt.expectedHost, svr.advertiseListenHost)
 			}
 		})
+	}
+}
+
+func TestRedactInfoLogDefault(t *testing.T) {
+	re := require.New(t)
+	for _, tc := range []struct {
+		data     string
+		expected logutil.RedactInfoLogType
+	}{
+		{"", logutil.RedactInfoLogON},
+		{"[security]\nredact-info-log = false", logutil.RedactInfoLogOFF},
+	} {
+		cfg := NewConfig()
+		meta, err := toml.Decode(tc.data, cfg)
+		re.NoError(err)
+		re.NoError(cfg.Adjust(&meta))
+		re.Equal(tc.expected, cfg.Security.RedactInfoLog, tc.data)
 	}
 }
