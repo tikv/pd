@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -70,7 +71,12 @@ type CircuitBreaker struct {
 
 	sync.RWMutex
 	state *State
+	// Metrics are rebound by a registration callback that can run while the
+	// breaker is serving requests, so publish the related handles together.
+	metrics atomic.Pointer[circuitBreakerMetrics]
+}
 
+type circuitBreakerMetrics struct {
 	successCounter  prometheus.Counter
 	errorCounter    prometheus.Counter
 	overloadCounter prometheus.Counter
@@ -110,18 +116,18 @@ func NewCircuitBreaker(name string, st Settings) *CircuitBreaker {
 	cb.config = &st
 	cb.state = cb.newState(time.Now(), StateClosed)
 
-	m.RegisterConsumer(func() {
-		registerMetrics(cb)
-	})
+	m.RegisterConsumer(cb.initMetrics)
 	return cb
 }
 
-func registerMetrics(cb *CircuitBreaker) {
+func (cb *CircuitBreaker) initMetrics() {
 	metricName := replacer.Replace(cb.name)
-	cb.successCounter = m.CircuitBreakerCounters.WithLabelValues(metricName, "success")
-	cb.errorCounter = m.CircuitBreakerCounters.WithLabelValues(metricName, "error")
-	cb.overloadCounter = m.CircuitBreakerCounters.WithLabelValues(metricName, "overload")
-	cb.fastFailCounter = m.CircuitBreakerCounters.WithLabelValues(metricName, "fast_fail")
+	cb.metrics.Store(&circuitBreakerMetrics{
+		successCounter:  m.CircuitBreakerCounters.WithLabelValues(metricName, "success"),
+		errorCounter:    m.CircuitBreakerCounters.WithLabelValues(metricName, "error"),
+		overloadCounter: m.CircuitBreakerCounters.WithLabelValues(metricName, "overload"),
+		fastFailCounter: m.CircuitBreakerCounters.WithLabelValues(metricName, "fast_fail"),
+	})
 }
 
 // IsEnabled returns true if the circuit breaker is enabled.
@@ -147,7 +153,7 @@ func (cb *CircuitBreaker) ChangeSettings(apply func(config *Settings)) {
 func (cb *CircuitBreaker) Execute(call func() (Overloading, error)) error {
 	state, err := cb.onRequest()
 	if err != nil {
-		cb.fastFailCounter.Inc()
+		cb.metrics.Load().fastFailCounter.Inc()
 		return err
 	}
 
@@ -185,16 +191,17 @@ func (cb *CircuitBreaker) onResult(state *State, overloaded Overloading) {
 }
 
 func (cb *CircuitBreaker) emitMetric(overloaded Overloading, err error) {
+	metrics := cb.metrics.Load()
 	switch overloaded {
 	case No:
-		cb.successCounter.Inc()
+		metrics.successCounter.Inc()
 	case Yes:
-		cb.overloadCounter.Inc()
+		metrics.overloadCounter.Inc()
 	default:
 		panic("unknown state")
 	}
 	if err != nil {
-		cb.errorCounter.Inc()
+		metrics.errorCounter.Inc()
 	}
 }
 
