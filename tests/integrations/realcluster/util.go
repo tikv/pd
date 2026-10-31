@@ -34,6 +34,7 @@ func ExtractPhysical(ts uint64) int64 {
 }
 
 func runCommand(name string, args ...string) error {
+	// #nosec G702 -- The test harness intentionally executes developer-selected cluster commands.
 	cmd := exec.Command(name, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
