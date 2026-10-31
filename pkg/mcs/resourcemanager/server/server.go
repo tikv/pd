@@ -315,6 +315,9 @@ func (s *Server) Close() {
 	s.CloseClientConns()
 	s.serverLoopCancel()
 	s.serverLoopWg.Wait()
+	if s.service != nil && s.service.manager != nil {
+		s.service.manager.Close()
+	}
 	if s.meteringWriter != nil {
 		s.meteringWriter.Stop()
 	}
@@ -444,7 +447,8 @@ func (s *Server) startServer() (err error) {
 	}
 	// Only start the metering writer if a valid metering config is provided.
 	if len(s.cfg.Metering.Type) > 0 {
-		s.meteringWriter, err = metering.NewWriter(s.Context(), &s.cfg.Metering, fmt.Sprintf("pd%d", s.participant.ID()))
+		// Close drains accepted consumption before stopping the writer.
+		s.meteringWriter, err = metering.NewWriter(context.WithoutCancel(s.Context()), &s.cfg.Metering, fmt.Sprintf("pd%d", s.participant.ID()))
 		if err != nil {
 			log.Warn("failed to initialize the metering writer", errs.ZapError(err))
 		} else {
