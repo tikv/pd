@@ -19,6 +19,7 @@ import (
 	"math/rand/v2"
 	"testing"
 
+	"github.com/elliotchance/pie/v2"
 	"github.com/stretchr/testify/require"
 )
 
@@ -43,6 +44,26 @@ func checkAdd(re *require.Assertions, ma MovingAvg, data []float64, expected []f
 		ma.Add(x)
 		re.Equal(x, ma.GetInstantaneous())
 		re.LessOrEqual(math.Abs(ma.Get()-expected[i]), 1e-7)
+	}
+}
+
+// checkMedianAdd checks MedianFilter Add works properly.
+func checkMedianAdd(re *require.Assertions, ma *MedianFilter, n int, rate float64) {
+	statsMedianFunc := func(a []float64) float64 {
+		median := pie.Median(a)
+		return median
+	}
+
+	var rand = rand.New(rand.NewSource(time.Now().UnixNano()))
+	last := rand.Float64()
+	for i := 0; i < n; i++ {
+		if rand.Float64() < rate {
+			last = rand.Float64()
+		}
+		ma.Add(last)
+		result1 := ma.Get()
+		result2 := statsMedianFunc(ma.GetAll())
+		re.LessOrEqual(math.Abs(result1-result2), 1e-7)
 	}
 }
 
@@ -81,6 +102,48 @@ func TestMedianFilter(t *testing.T) {
 	checkReset(re, mf, empty)
 	checkAdd(re, mf, data, expected)
 	checkSet(re, mf, data, expected)
+}
+
+func TestMedianFilterAdd(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
+	var empty float64 = 0
+	data := []float64{2, 4, 2, 800, 600, 6, 3, 3, 3, 3, 3, 3, 3, 3, 3}
+	expected := []float64{2, 3, 2, 3, 4, 5, 4, 3.5, 3, 3, 3, 3, 3, 3, 3}
+
+	mf := NewMedianFilter(10)
+	re.Equal(empty, mf.Get())
+	checkAdd(re, mf, data, expected)
+}
+
+func TestMedianFilterResultByStatsMedian(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
+	var empty float64 = 0
+
+	mf := NewMedianFilter(10)
+	re.Equal(empty, mf.Get())
+	checkMedianAdd(re, mf, 100000, 0.4)
+
+	mf = NewMedianFilter(5)
+	re.Equal(empty, mf.Get())
+	checkMedianAdd(re, mf, 1000000, 0.5)
+
+	mf = NewMedianFilter(10)
+	re.Equal(empty, mf.Get())
+	checkMedianAdd(re, mf, 100000, 1)
+
+	mf = NewMedianFilter(5)
+	re.Equal(empty, mf.Get())
+	checkMedianAdd(re, mf, 100000, 1)
+
+	mf = NewMedianFilter(1)
+	re.Equal(empty, mf.Get())
+	checkMedianAdd(re, mf, 100, 1)
+
+	mf = NewMedianFilter(1000)
+	re.Equal(empty, mf.Get())
+	checkMedianAdd(re, mf, 100000, 0.2)
 }
 
 type testCase struct {
