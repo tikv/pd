@@ -2345,3 +2345,44 @@ func TestEvictSlowStoreConfigUpdateKeepsPersistedEvictions(t *testing.T) {
 	re.Equal(5, serviceConf.getBatch())
 	re.True(tc.GetStore(1).EvictedAsSlowStore())
 }
+
+// TestEvictSlowStoreHealthyDomainsMatchVoterRule: voters are limited to z1-z3, so the healthy
+// z4 store can never hold a leader. With z1 drained and z3 unavailable only z2 is left, and the
+// group drain must not be admitted.
+func TestEvictSlowStoreHealthyDomainsMatchVoterRule(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	tc.AddLabelsStore(1, 0, map[string]string{"zone": "z1", "host": "h1"})
+	tc.AddLabelsStore(2, 0, map[string]string{"zone": "z1", "host": "h2"})
+	tc.AddLabelsStore(3, 0, map[string]string{"zone": "z2", "host": "h3"})
+	tc.AddLabelsStore(4, 0, map[string]string{"zone": "z3", "host": "h4"})
+	tc.AddLabelsStore(5, 0, map[string]string{"zone": "z4", "host": "h5"})
+	tc.AddLeaderRegion(1, 1, 3, 4)
+	tc.AddLeaderRegion(2, 2, 3, 4)
+	re.NoError(tc.SetRule(&placement.Rule{
+		GroupID:          placement.DefaultGroupID,
+		ID:               placement.DefaultRuleID,
+		Role:             placement.Voter,
+		Count:            3,
+		LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: placement.In, Values: []string{"z1", "z2", "z3"}}},
+		LocationLabels:   []string{"zone", "host"},
+		IsolationLevel:   "zone",
+	}))
+
+	es := createTestEvictSlowStoreScheduler(re, oc).(*evictSlowStoreScheduler)
+	es.conf.EnableGroupEviction = true
+	setStoreSlowScore(tc, 1, 100)
+	setStoreSlowScore(tc, 2, 100)
+
+	re.NoError(tc.PauseLeaderTransfer(4, constant.In))
+	es.scheduleDiskSlowStore(tc)
+	re.Empty(es.conf.evictedStores())
+	re.False(tc.GetStore(1).EvictedAsSlowStore())
+
+	// With z3 available again, z2 and z3 can take leaders and the drain is admitted.
+	tc.ResumeLeaderTransfer(4, constant.In)
+	es.scheduleDiskSlowStore(tc)
+	re.ElementsMatch([]uint64{1, 2}, es.conf.evictedStores())
+}

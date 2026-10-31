@@ -439,6 +439,28 @@ func TestGetIsolationPrefix(t *testing.T) {
 	re.False(ok)
 }
 
+func TestMatchLeaderRule(t *testing.T) {
+	re := require.New(t)
+	_, manager := newTestManager(t, false)
+	z1 := core.NewStoreInfoWithLabel(1, map[string]string{"zone": "z1"})
+	z3 := core.NewStoreInfoWithLabel(3, map[string]string{"zone": "z3"})
+
+	// The default rule has no constraints, so every store can hold a leader.
+	re.True(manager.MatchLeaderRule(z3))
+
+	// Voters limited to z1/z2: a z3 store cannot, and a follower rule for z3 does not change it.
+	re.NoError(manager.SetRule(&Rule{
+		GroupID: DefaultGroupID, ID: DefaultRuleID, Role: Voter, Count: 2,
+		LabelConstraints: []LabelConstraint{{Key: "zone", Op: In, Values: []string{"z1", "z2"}}},
+	}))
+	re.NoError(manager.SetRule(&Rule{
+		GroupID: DefaultGroupID, ID: "follower", Role: Follower, Count: 1,
+		LabelConstraints: []LabelConstraint{{Key: "zone", Op: In, Values: []string{"z3"}}},
+	}))
+	re.True(manager.MatchLeaderRule(z1))
+	re.False(manager.MatchLeaderRule(z3))
+}
+
 func TestGroupConfig(t *testing.T) {
 	re := require.New(t)
 	_, manager := newTestManager(t, false)

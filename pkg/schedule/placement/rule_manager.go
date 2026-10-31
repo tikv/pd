@@ -413,6 +413,23 @@ func (m *RuleManager) GetIsolationPrefix() ([]string, bool) {
 	return slices.Clone(labels), true
 }
 
+// MatchLeaderRule reports whether the store matches the label constraints of some effective
+// Voter or Leader rule, which is what operator.Builder requires of a leader's store. It does
+// not check which key ranges the matching rule covers. Like GetIsolationPrefix it reads the
+// rules in place, without cloning.
+func (m *RuleManager) MatchLeaderRule(store *core.StoreInfo) bool {
+	m.RLock()
+	defer m.RUnlock()
+	for _, rr := range m.ruleList.ranges {
+		for _, r := range rr.applyRules {
+			if (r.Role == Voter || r.Role == Leader) && MatchLabelConstraints(store, r.LabelConstraints) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // GetRulesCount returns the number of rules.
 func (m *RuleManager) GetRulesCount() int {
 	m.RLock()

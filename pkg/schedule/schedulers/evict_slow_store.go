@@ -1234,6 +1234,8 @@ func sameLocation(ref, store *core.StoreInfo, labels []string) bool {
 //     so those stores never appear in the per-region follower candidates that
 //     scheduleEvictLeaderOnce picks from. StoreStateFilter does not check the engine.
 //   - disk-slow stores, which the leader-target filter does not reject either.
+//   - stores that match no Voter or Leader rule, which operator.Builder never lets hold a
+//     leader.
 func eligibleHealthyLeaderTargets(cluster sche.SchedulerCluster, stores []*core.StoreInfo) []*core.StoreInfo {
 	candidates := filter.NewCandidates(stores).
 		FilterTarget(
@@ -1248,9 +1250,10 @@ func eligibleHealthyLeaderTargets(cluster sche.SchedulerCluster, stores []*core.
 		).
 		PickAll()
 
+	ruleManager := cluster.GetRuleManager()
 	healthy := candidates[:0]
 	for _, store := range candidates {
-		if !store.IsTiKV() || store.IsSlow() {
+		if !store.IsTiKV() || store.IsSlow() || !ruleManager.MatchLeaderRule(store) {
 			continue
 		}
 		healthy = append(healthy, store)
