@@ -528,6 +528,10 @@ func (f *HotPeerCache) getHotPeerStat(regionID, storeID uint64) *HotPeerStat {
 
 func (f *HotPeerCache) updateHotPeerStat(region *hotRegionInfo, newItem, oldItem *HotPeerStat, deltaLoads []float64, interval time.Duration, source utils.SourceKind) *HotPeerStat {
 	regionStats := f.kind.RegionStats()
+	newItem.hotDuration = interval
+	if source == utils.Direct && newItem.StoreID == oldItem.StoreID {
+		newItem.hotDuration += oldItem.hotDuration
+	}
 
 	if source == utils.Inherit {
 		for _, dim := range oldItem.rollingLoads {
@@ -551,6 +555,11 @@ func (f *HotPeerCache) updateHotPeerStat(region *hotRegionInfo, newItem, oldItem
 		// For read stat, as the stat is send by store heartbeat, the first heartbeat won't be skipped.
 		if f.kind == utils.Write {
 			inheritItem(newItem, oldItem)
+			// This report is skipped, so it cannot extend the observed duration.
+			newItem.hotDuration = 0
+			if newItem.StoreID == oldItem.StoreID {
+				newItem.hotDuration = oldItem.hotDuration
+			}
 			return newItem
 		}
 	} else {
@@ -575,6 +584,7 @@ func (f *HotPeerCache) updateHotPeerStat(region *hotRegionInfo, newItem, oldItem
 			if f.isOldColdPeer(oldItem, newItem.StoreID) {
 				if newItem.isHot(thresholds) {
 					initItem(newItem, f.kind.DefaultAntiCount())
+					newItem.hotDuration = interval
 				} else {
 					newItem.actionType = utils.Remove
 				}
@@ -588,11 +598,15 @@ func (f *HotPeerCache) updateHotPeerStat(region *hotRegionInfo, newItem, oldItem
 		}
 		newItem.clearLastAverage()
 	}
+	if newItem.inCold {
+		newItem.hotDuration = 0
+	}
 	return newItem
 }
 
 func (f *HotPeerCache) updateNewHotPeerStat(newItem *HotPeerStat, deltaLoads []float64, interval time.Duration) *HotPeerStat {
 	regionStats := f.kind.RegionStats()
+	newItem.hotDuration = interval
 	// interval is not 0 which is guaranteed by the caller.
 	if interval.Seconds() >= float64(f.kind.ReportInterval()) {
 		initItem(newItem, f.kind.DefaultAntiCount())
@@ -815,6 +829,7 @@ func (f *HotPeerCache) removeAllItem() {
 }
 
 func coldItem(newItem, oldItem *HotPeerStat) {
+	newItem.hotDuration = 0
 	newItem.HotDegree = oldItem.HotDegree - 1
 	newItem.AntiCount = oldItem.AntiCount - 1
 	if newItem.AntiCount <= 0 {

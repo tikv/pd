@@ -55,6 +55,105 @@ type testCacheCase struct {
 	actionType utils.ActionType
 }
 
+func TestHotPeerDuration(t *testing.T) {
+	for _, kind := range []utils.RWType{utils.Read, utils.Write} {
+		t.Run(kind.String(), func(t *testing.T) {
+			cache := NewHotPeerCache(t.Context(), core.NewBasicCluster(), kind)
+			window := cache.interval()
+			report := func(old *HotPeerStat, store uint64, interval time.Duration, hot, missing bool, source utils.SourceKind) *HotPeerStat {
+				loads := make([]float64, utils.RegionStatCount)
+				if hot {
+					loads[kind.RegionStats()[utils.ByteDim]] = float64(1<<20) * interval.Seconds()
+				}
+				item := &HotPeerStat{RegionID: 1, StoreID: store, inCold: missing,
+					Loads: kind.GetLoadRates(loads, uint64(interval.Seconds())), actionType: utils.Update}
+				if old == nil {
+					return cache.updateNewHotPeerStat(item, loads, interval)
+				}
+				return cache.updateHotPeerStat(nil, item, old, loads, interval, source)
+			}
+			first := report(nil, 1, window, true, false, utils.Direct)
+			require.Equal(t, window, first.GetHotDuration())
+			next := report(first, 1, window, true, false, utils.Direct)
+			require.Equal(t, 2*window, next.GetHotDuration())
+			require.Equal(t, next.GetHotDuration(), next.Clone().GetHotDuration())
+			cold := report(next, 1, window, false, false, utils.Direct)
+			require.Zero(t, cold.GetHotDuration())
+			require.Equal(t, 2*window, next.GetHotDuration(), "published snapshots must remain immutable")
+			recovered := report(cold, 1, window, true, false, utils.Direct)
+			require.Equal(t, window, recovered.GetHotDuration())
+			// Missing reports reset immediately, even before a complete window.
+			missing := report(recovered, 1, window/2, false, true, utils.Direct)
+			require.Zero(t, missing.GetHotDuration())
+			partial := report(missing, 1, window/5, true, false, utils.Direct)
+			resumed := report(partial, 1, window*3/10, true, false, utils.Direct)
+			require.Equal(t, window/2, resumed.GetHotDuration())
+			moved := report(next, 2, window, true, false, utils.Inherit)
+			require.Equal(t, window, moved.GetHotDuration(), "a different Store must not inherit duration")
+			rebuilt := report(nil, 1, window, true, false, utils.Direct)
+			require.Equal(t, window, rebuilt.GetHotDuration())
+		})
+	}
+}
+
+func TestHotPeerDurationStoreOutage(t *testing.T) {
+	cluster := core.NewBasicCluster()
+	cache := NewHotPeerCache(t.Context(), cluster, utils.Read)
+	interval := uint64(utils.Read.ReportInterval())
+	window := time.Duration(interval) * time.Second
+	region, err := buildRegion(cluster, utils.Read, 3, interval)
+	require.NoError(t, err)
+	storeID := region.GetPeers()[0].GetStoreId()
+	report := func() {
+		stats := cache.CheckPeerFlow(region, region.GetPeers()[:1], region.GetLoads(), interval)
+		require.Len(t, stats, 1)
+		cache.UpdateStat(stats[0])
+	}
+	duration := func() time.Duration {
+		stats := cache.GetHotPeerStats(0)[storeID]
+		require.Len(t, stats, 1)
+		return stats[0].GetHotDuration()
+	}
+	report()
+	report()
+	require.Equal(t, 2*window, duration())
+
+	store := cluster.GetStore(storeID)
+	cluster.PutStore(store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-time.Hour))))
+	require.True(t, cluster.GetStore(storeID).IsUnhealthy())
+	// No Store heartbeat arrives during the outage. Reading the cached snapshot
+	// must neither count the outage as hot time nor treat it as an omitted peer.
+	for range 3 {
+		require.Equal(t, 2*window, duration())
+	}
+	cluster.PutStore(store.Clone(core.SetLastHeartbeatTS(time.Now())))
+	report()
+	require.Equal(t, 3*window, duration())
+
+	// A received Store heartbeat that omits this peer resets its hot episode.
+	cold := cache.CheckColdPeer(storeID, map[uint64]*core.RegionInfo{}, interval)
+	require.Len(t, cold, 1)
+	cache.UpdateStat(cold[0])
+	require.Zero(t, cache.getHotPeerStat(region.GetID(), storeID).GetHotDuration())
+	report()
+	require.Equal(t, window, duration())
+}
+
+func TestHotPeerDurationLeaderTransfer(t *testing.T) {
+	cache := NewHotPeerCache(t.Context(), core.NewBasicCluster(), utils.Write)
+	window := cache.interval()
+	old := cache.updateNewHotPeerStat(&HotPeerStat{RegionID: 1, StoreID: 1, isLeader: true},
+		make([]float64, utils.RegionStatCount), window)
+	region := newHotRegionInfo(core.NewRegionInfo(&metapb.Region{Id: 1}, &metapb.Peer{StoreId: 2}))
+	// The first write report after transfer is skipped, so it must not add time.
+	next := cache.updateHotPeerStat(region, &HotPeerStat{RegionID: 1, StoreID: 1}, old,
+		make([]float64, utils.RegionStatCount), window, utils.Direct)
+	require.Equal(t, window, next.GetHotDuration())
+	moved := cache.updateHotPeerStat(region, &HotPeerStat{RegionID: 1, StoreID: 3}, old,
+		make([]float64, utils.RegionStatCount), window, utils.Inherit)
+	require.Zero(t, moved.GetHotDuration())
+}
+
 func TestCache(t *testing.T) {
 	re := require.New(t)
 	tests := []*testCacheCase{

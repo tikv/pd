@@ -15,12 +15,23 @@
 package schedulers
 
 import (
+	"math"
+	"strconv"
+
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/statistics"
+	"github.com/tikv/pd/pkg/statistics/utils"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
+const hotRegionTopN = 10
+
 var (
+	topHotRegionMetrics = newHotRegionCollector()
+
 	schedulerStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
@@ -208,10 +219,12 @@ func init() {
 	prometheus.MustRegister(HotPendingSum)
 	prometheus.MustRegister(balanceRangeGauge)
 	prometheus.MustRegister(balanceRangeJobGauge)
+	prometheus.MustRegister(topHotRegionMetrics)
 }
 
 // DeleteStoreMetrics deletes the per-store scheduler metrics of a store.
 func DeleteStoreMetrics(storeID string) {
+	topHotRegionMetrics.deleteStore(storeID)
 	opInfluenceStatus.DeletePartialMatch(prometheus.Labels{"store": storeID})
 	balanceWitnessCounter.DeleteLabelValues("move-witness", storeID+"-out")
 	balanceWitnessCounter.DeleteLabelValues("move-witness", storeID+"-in")
@@ -409,3 +422,298 @@ var (
 	balanceRangeBalancedCounter      = balanceRangeCounterWithEvent("balanced")
 	balancePersistFailedCounter      = balanceRangeCounterWithEvent("persist-failed")
 )
+
+type hotRegionMetric struct {
+	prometheus.Metric
+	storeID string
+}
+
+// Keep immutable metric snapshots, rather than a GaugeVec retaining labels for
+// every region ever seen. Scrapes read at most 90 metrics and never scan regions.
+// This bounds active series; changing Region labels still adds historical series
+// in Prometheus. Use instant tables or topk queries instead of per-Region lines.
+type hotRegionCollector struct {
+	syncutil.RWMutex
+	loadDesc        *prometheus.Desc
+	storeRatioDesc  *prometheus.Desc
+	hotDurationDesc *prometheus.Desc
+	metrics         [utils.RWTypeLen][]hotRegionMetric
+	generation      uint64
+}
+
+func newHotRegionCollector() *hotRegionCollector {
+	labels := []string{"type", "dim", "region", "store"}
+	return &hotRegionCollector{
+		loadDesc: prometheus.NewDesc(
+			"pd_hotspot_top_region_load",
+			"Smoothed load of the top 10 distinct sustained hot regions per scheduling type; dim specifies the unit (byte/s, key/s, query/s, or native CPU usage). Replicated peer loads are represented by the maximum, not summed.",
+			labels, nil),
+		storeRatioDesc: prometheus.NewDesc(
+			"pd_hotspot_top_region_store_load_ratio",
+			"Smoothed hot Region load divided by the Store's rolling total load for the same scheduling type and dimension; a fraction that can exceed 1 when the Region and Store smoothing windows differ.",
+			labels, nil),
+		hotDurationDesc: prometheus.NewDesc(
+			"pd_hotspot_top_region_hot_duration_seconds",
+			"Sum of consecutive reported hot intervals for the selected peer on one Store across all load dimensions, in seconds. Resets on cold reports, omission from a received Store heartbeat, a different Store, or a hot-cache rebuild. Without reports it pauses, then resumes on the next hot report while still cached.",
+			labels, nil),
+	}
+}
+
+// Describe implements prometheus.Collector.
+func (c *hotRegionCollector) Describe(ch chan<- *prometheus.Desc) {
+	ch <- c.loadDesc
+	ch <- c.storeRatioDesc
+	ch <- c.hotDurationDesc
+}
+
+// Collect implements prometheus.Collector.
+func (c *hotRegionCollector) Collect(ch chan<- prometheus.Metric) {
+	// The slices and metrics are immutable after publication. Release the lock
+	// before sending so a slow scrape cannot block the periodic producer.
+	c.RLock()
+	snapshot := c.metrics
+	c.RUnlock()
+	for _, metrics := range snapshot {
+		for _, metric := range metrics {
+			ch <- metric.Metric
+		}
+	}
+}
+
+func (c *hotRegionCollector) getGeneration() uint64 {
+	c.RLock()
+	defer c.RUnlock()
+	return c.generation
+}
+
+func (c *hotRegionCollector) set(rw utils.RWType, metrics []hotRegionMetric, generation uint64) {
+	c.Lock()
+	defer c.Unlock()
+	// A Store deletion or reset invalidates scans started before cleanup.
+	if c.generation == generation {
+		c.metrics[rw] = metrics
+	}
+}
+
+func (c *hotRegionCollector) deleteStore(storeID string) {
+	c.Lock()
+	defer c.Unlock()
+	c.generation++
+	for rw, metrics := range c.metrics {
+		// An in-flight scrape can still hold the old slice.
+		remaining := make([]hotRegionMetric, 0, len(metrics))
+		for _, metric := range metrics {
+			if metric.storeID != storeID {
+				remaining = append(remaining, metric)
+			}
+		}
+		c.metrics[rw] = remaining
+	}
+}
+
+// ResetHotRegionMetrics removes all Top N samples, including on leadership loss.
+func ResetHotRegionMetrics() {
+	topHotRegionMetrics.Lock()
+	topHotRegionMetrics.generation++
+	topHotRegionMetrics.metrics = [utils.RWTypeLen][]hotRegionMetric{}
+	topHotRegionMetrics.Unlock()
+}
+
+func storeLoadKind(ty resourceType, dim int, store *core.StoreInfo) (utils.StoreLoadKind, bool) {
+	isRead := ty == readLeader || ty == readPeer
+	switch dim {
+	case utils.ByteDim:
+		if isRead {
+			return utils.StoreReadBytes, true
+		}
+		if store != nil && store.IsTiFlashWrite() {
+			return utils.StoreRegionsWriteBytes, true
+		}
+		return utils.StoreWriteBytes, true
+	case utils.KeyDim:
+		if isRead {
+			return utils.StoreReadKeys, true
+		}
+		if store != nil && store.IsTiFlashWrite() {
+			return utils.StoreRegionsWriteKeys, true
+		}
+		return utils.StoreWriteKeys, true
+	case utils.QueryDim:
+		if isRead {
+			return utils.StoreReadQuery, true
+		}
+		return utils.StoreWriteQuery, true
+	case utils.CPUDim:
+		if isRead {
+			return utils.StoreReadCPU, true
+		}
+	}
+	return 0, false
+}
+
+type hotRegionEntry struct {
+	regionID uint64
+	storeID  uint64
+	load     float64
+	peer     *statistics.HotPeerStat
+}
+
+// hotter gives deterministic ordering, including replicas with equal load.
+func (e hotRegionEntry) hotter(other hotRegionEntry) bool {
+	if e.load != other.load {
+		return e.load > other.load
+	}
+	if e.regionID != other.regionID {
+		return e.regionID < other.regionID
+	}
+	return e.storeID < other.storeID
+}
+
+type hotRegionTop struct {
+	entries [hotRegionTopN]hotRegionEntry
+	count   int
+}
+
+// add keeps only ten entries, ordered hottest first. Deduplication also uses
+// only these ten entries: a discarded replica cannot exceed the current cutoff,
+// so retaining a cluster-sized region map is unnecessary. The cutoff rejects
+// most candidates with a single comparison; insertion costs at most ten moves.
+func (t *hotRegionTop) add(e hotRegionEntry) {
+	if e.load < 0 || math.IsNaN(e.load) || math.IsInf(e.load, 0) {
+		return
+	}
+	if t.count == hotRegionTopN && !e.hotter(t.entries[t.count-1]) {
+		return
+	}
+	for i := 0; i < t.count; i++ {
+		if t.entries[i].regionID == e.regionID {
+			if !e.hotter(t.entries[i]) {
+				return
+			}
+			copy(t.entries[i:], t.entries[i+1:t.count])
+			t.count--
+			break
+		}
+	}
+	pos := 0
+	for pos < t.count && !e.hotter(t.entries[pos]) {
+		pos++
+	}
+	if t.count < hotRegionTopN {
+		t.count++
+	}
+	copy(t.entries[pos+1:t.count], t.entries[pos:t.count-1])
+	t.entries[pos] = e
+}
+
+// CollectHotRegionMetricsAndStoreStats collects the Top 10 while summing the
+// Store's peer and leader loads. The periodic metrics path uses this to avoid
+// another full scan and additional rolling-load reads for the rankings.
+func (c *Controller) CollectHotRegionMetricsAndStoreStats(rw utils.RWType, stores []*core.StoreInfo, stats map[uint64][]*statistics.HotPeerStat, storeLoads map[uint64]statistics.StoreKindLoads) *statistics.StoreHotPeersInfos {
+	var status *statistics.StoreHotPeersInfos
+	c.publishHotRegionMetrics(rw, storeLoads, func(dim, leaderDim int) (hotRegionTop, hotRegionTop) {
+		var peersTop, leadersTop hotRegionTop
+		status = statistics.CollectHotPeerInfosWithObserver(stores, stats, func(store *core.StoreInfo) func(*statistics.HotPeerStat, statistics.Loads) {
+			storeID := store.GetID()
+			// Check health once per Store, outside the peer loop. The Store
+			// snapshot used for totals may predate a removal or heartbeat.
+			store = c.cluster.GetStore(storeID)
+			if store == nil || store.IsRemoved() || store.IsUnhealthy() {
+				return nil
+			}
+			return func(peer *statistics.HotPeerStat, loads statistics.Loads) {
+				entry := hotRegionEntry{regionID: peer.RegionID, storeID: storeID, peer: peer}
+				if dim >= 0 {
+					entry.load = loads[dim]
+					peersTop.add(entry)
+				}
+				if leaderDim >= 0 && peer.IsLeader() {
+					entry.load = loads[leaderDim]
+					leadersTop.add(entry)
+				}
+			}
+		})
+		return peersTop, leadersTop
+	})
+	if status == nil {
+		// Store totals remain available when the hot scheduler is absent.
+		status = statistics.CollectHotPeerInfos(stores, stats)
+	}
+	return status
+}
+
+func (c *Controller) publishHotRegionMetrics(rw utils.RWType, storeLoads map[uint64]statistics.StoreKindLoads, selectTop func(dim, leaderDim int) (hotRegionTop, hotRegionTop)) {
+	generation := topHotRegionMetrics.getGeneration()
+	getScheduler := func() *hotScheduler {
+		if controller := c.schedulers[types.BalanceHotRegionScheduler.String()]; controller != nil {
+			scheduler, _ := controller.Scheduler.(*hotScheduler)
+			return scheduler
+		}
+		scheduler, _ := c.schedulerHandlers[types.BalanceHotRegionScheduler.String()].(*hotScheduler)
+		return scheduler
+	}
+	c.RLock()
+	scheduler := getScheduler()
+	if scheduler == nil {
+		topHotRegionMetrics.set(rw, nil, generation)
+		c.RUnlock()
+		return
+	}
+	c.RUnlock()
+	getDim := func(ty resourceType) int {
+		priorities := scheduler.getPriorities(c.cluster, ty)
+		if len(priorities) == 0 {
+			return -1
+		}
+		return utils.StringToDim(priorities[0])
+	}
+	peerType, leaderDim := readPeer, -1
+	if rw == utils.Write {
+		peerType, leaderDim = writePeer, getDim(writeLeader)
+	}
+	dim := getDim(peerType)
+	peersTop, leadersTop := selectTop(dim, leaderDim)
+	metrics := make([]hotRegionMetric, 0, 3*(peersTop.count+leadersTop.count))
+	appendTop := func(ty resourceType, dim int, top hotRegionTop) {
+		for _, entry := range top.entries[:top.count] {
+			labels := []string{ty.String(), utils.DimToString(dim), strconv.FormatUint(entry.regionID, 10), strconv.FormatUint(entry.storeID, 10)}
+			appendMetric := func(desc *prometheus.Desc, value float64) {
+				metrics = append(metrics, hotRegionMetric{
+					Metric:  prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, value, labels...),
+					storeID: labels[3],
+				})
+			}
+			appendMetric(topHotRegionMetrics.loadDesc, entry.load)
+			if duration := entry.peer.GetHotDuration(); duration > 0 {
+				appendMetric(topHotRegionMetrics.hotDurationDesc, duration.Seconds())
+			}
+			store := c.cluster.GetStore(entry.storeID)
+			if store != nil {
+				kind, ok := storeLoadKind(ty, dim, store)
+				if !ok {
+					continue
+				}
+				if storeLoad, exists := storeLoads[entry.storeID]; exists {
+					total := storeLoad[kind]
+					if total > 0 && !math.IsNaN(total) && !math.IsInf(total, 0) {
+						ratio := entry.load / total
+						if !math.IsNaN(ratio) && !math.IsInf(ratio, 0) {
+							appendMetric(topHotRegionMetrics.storeRatioDesc, ratio)
+						}
+					}
+				}
+			}
+		}
+	}
+	appendTop(peerType, dim, peersTop)
+	if rw == utils.Write {
+		appendTop(writeLeader, leaderDim, leadersTop)
+	}
+	// Removal clears the metrics under the Controller lock. Check identity
+	// again so a completed scan cannot republish a removed scheduler's samples.
+	c.RLock()
+	defer c.RUnlock()
+	if getScheduler() == scheduler {
+		topHotRegionMetrics.set(rw, metrics, generation)
+	}
+}

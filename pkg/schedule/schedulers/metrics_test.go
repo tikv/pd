@@ -1,0 +1,875 @@
+// Copyright 2026 TiKV Project Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package schedulers
+
+import (
+	"context"
+	"math"
+	"math/rand/v2"
+	"net/http"
+	"net/http/httptest"
+	"slices"
+	"strconv"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/coreos/go-semver/semver"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
+
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/mock/mockcluster"
+	"github.com/tikv/pd/pkg/statistics"
+	"github.com/tikv/pd/pkg/statistics/utils"
+	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/versioninfo"
+)
+
+func TestHotRegionTopAgainstFullSort(t *testing.T) {
+	rng := rand.New(rand.NewPCG(1, 2))
+	for range 100 {
+		var top hotRegionTop
+		best := make(map[uint64]hotRegionEntry)
+		for range 1000 {
+			e := hotRegionEntry{regionID: uint64(rng.IntN(100)), storeID: uint64(rng.IntN(10)), load: float64(rng.IntN(100))}
+			top.add(e)
+			if old, ok := best[e.regionID]; !ok || e.hotter(old) {
+				best[e.regionID] = e
+			}
+		}
+		expected := make([]hotRegionEntry, 0, len(best))
+		for _, e := range best {
+			expected = append(expected, e)
+		}
+		slices.SortFunc(expected, func(a, b hotRegionEntry) int {
+			if a.hotter(b) {
+				return -1
+			}
+			if b.hotter(a) {
+				return 1
+			}
+			return 0
+		})
+		require.Equal(t, expected[:hotRegionTopN], top.entries[:top.count])
+	}
+	var top hotRegionTop
+	for _, load := range []float64{-1, math.NaN(), math.Inf(1), math.Inf(-1)} {
+		top.add(hotRegionEntry{load: load})
+	}
+	require.Zero(t, top.count)
+}
+
+func TestHotRegionTopZeroLoads(t *testing.T) {
+	for _, positive := range []bool{false, true} {
+		t.Run(strconv.FormatBool(positive), func(t *testing.T) {
+			var top hotRegionTop
+			for id := uint64(12); id > 0; id-- {
+				load := float64(0)
+				if positive && id >= 10 {
+					load = float64(id)
+				}
+				top.add(hotRegionEntry{regionID: id, storeID: 2, load: load})
+			}
+			// Equal zero-load replicas still select the smaller Store ID.
+			top.add(hotRegionEntry{regionID: 1, storeID: 1})
+			expected := make([]hotRegionEntry, 0, hotRegionTopN)
+			if positive {
+				for id := uint64(12); id >= 10; id-- {
+					expected = append(expected, hotRegionEntry{regionID: id, storeID: 2, load: float64(id)})
+				}
+			}
+			expected = append(expected, hotRegionEntry{regionID: 1, storeID: 1})
+			for id := uint64(2); len(expected) < hotRegionTopN; id++ {
+				expected = append(expected, hotRegionEntry{regionID: id, storeID: 2})
+			}
+			require.Equal(t, expected, top.entries[:top.count])
+		})
+	}
+}
+
+func TestHotRegionMetricsZeroFirstDimension(t *testing.T) {
+	ResetHotRegionMetrics()
+	t.Cleanup(ResetHotRegionMetrics)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	tc.SetClusterVersion(semver.New("9.0.0"))
+	tc.AddRegionStore(1, 12)
+	tc.AddRegionStore(2, 12)
+	scheduler := newHotScheduler(oc, initHotRegionScheduleConfig())
+	c := NewController(context.Background(), tc, storage.NewStorageWithMemoryBackend(), oc)
+	c.schedulerHandlers[scheduler.GetName()] = scheduler
+	// These sustained-hot read peers qualify on bytes/query, while the
+	// effective first dimension (CPU) is zero for every peer.
+	for id := uint64(1); id <= 12; id++ {
+		tc.AddRegionWithReadInfo(id, 1, 1<<20, 1<<16, 60000, 10, []uint64{2}, 5)
+	}
+	stats := tc.GetHotPeerStats(utils.Read)
+	require.Len(t, stats[1], 12)
+	for _, peer := range stats[1] {
+		require.Positive(t, peer.GetLoad(utils.ByteDim))
+		require.Zero(t, peer.GetLoad(utils.CPUDim))
+	}
+	c.CollectHotRegionMetricsAndStoreStats(utils.Read, tc.GetStores(), stats, map[uint64]statistics.StoreKindLoads{
+		1: {utils.StoreReadCPU: 100},
+		2: {utils.StoreReadCPU: 100},
+	})
+	registry := prometheus.NewRegistry()
+	registry.MustRegister(topHotRegionMetrics)
+	families, err := registry.Gather()
+	require.NoError(t, err)
+	require.Len(t, families, 3)
+	for _, family := range families {
+		require.Len(t, family.GetMetric(), hotRegionTopN)
+		for _, metric := range family.GetMetric() {
+			if family.GetName() == "pd_hotspot_top_region_hot_duration_seconds" {
+				require.Equal(t, 50.0, metric.GetGauge().GetValue())
+			} else {
+				require.Zero(t, metric.GetGauge().GetValue())
+			}
+		}
+	}
+	// Region 12 was outside the CPU Top 10. Its history still advances in the
+	// hot cache and is retained when a priority change brings it onto the list.
+	tc.AddRegionWithReadInfo(12, 1, 1<<30, 1<<16, 60000, 10, []uint64{2}, 5)
+	scheduler.conf.Lock()
+	scheduler.conf.ReadPriorities = []string{utils.BytePriority, utils.QueryPriority}
+	scheduler.conf.Unlock()
+	c.CollectHotRegionMetricsAndStoreStats(utils.Read, tc.GetStores(), tc.GetHotPeerStats(utils.Read), nil)
+	families, err = registry.Gather()
+	require.NoError(t, err)
+	found := false
+	for _, family := range families {
+		if family.GetName() != "pd_hotspot_top_region_hot_duration_seconds" {
+			continue
+		}
+		for _, metric := range family.GetMetric() {
+			for _, label := range metric.GetLabel() {
+				if label.GetName() == "region" && label.GetValue() == "12" {
+					require.Equal(t, 100.0, metric.GetGauge().GetValue())
+					found = true
+				}
+			}
+		}
+	}
+	require.True(t, found)
+}
+
+func TestCollectHotRegionMetrics(t *testing.T) {
+	ResetHotRegionMetrics()
+	t.Cleanup(ResetHotRegionMetrics)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	tc.SetClusterVersion(semver.New("9.0.0"))
+	tc.AddRegionStore(1, 20)
+	tc.AddRegionStore(2, 20)
+	scheduler := newHotScheduler(oc, initHotRegionScheduleConfig())
+	backend := storage.NewStorageWithMemoryBackend()
+	scheduler.conf.init(scheduler.GetName(), backend, scheduler.conf)
+	c := NewController(context.Background(), tc, backend, oc)
+	// PD API-service mode uses handlers; scheduling service uses controllers.
+	c.schedulerHandlers[scheduler.GetName()] = scheduler
+	for id := uint64(1); id <= 20; id++ {
+		tc.AddLeaderRegionWithWriteInfo(id, 1, (21-id)<<20, id<<16, id*1000, 60, []uint64{2}, 5)
+	}
+	stats := tc.HotCache.GetHotPeerStats(utils.Write, 1)
+	c.CollectHotRegionMetricsAndStoreStats(utils.Write, tc.GetStores(), stats, nil)
+	registry := prometheus.NewRegistry()
+	registry.MustRegister(topHotRegionMetrics)
+	families, err := registry.Gather()
+	require.NoError(t, err)
+	require.Len(t, families, 2)
+	for _, family := range families {
+		require.Len(t, family.GetMetric(), 20)
+		for _, metric := range family.GetMetric() {
+			labels := make(map[string]string)
+			for _, label := range metric.GetLabel() {
+				labels[label.GetName()] = label.GetValue()
+			}
+			require.Equal(t, "1", labels["store"])
+			id, err := strconv.ParseUint(labels["region"], 10, 64)
+			require.NoError(t, err)
+			switch labels["type"] {
+			case "write-leader":
+				require.Equal(t, "query", labels["dim"])
+				require.Greater(t, id, uint64(10))
+			case "write-peer":
+				require.Equal(t, "byte", labels["dim"])
+				require.LessOrEqual(t, id, uint64(10))
+			default:
+				t.Fatalf("unexpected type: %s", labels["type"])
+			}
+		}
+	}
+	// Updating both write priorities changes their rankings and ratio denominators
+	// independently, and replaces samples carrying the previous dimensions.
+	response := httptest.NewRecorder()
+	scheduler.conf.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/config", strings.NewReader(
+		`{"write-leader-priorities":["byte","query"],"write-peer-priorities":["key","byte"]}`)))
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	storeLoads := map[uint64]statistics.StoreKindLoads{
+		1: {utils.StoreWriteBytes: 100 << 20, utils.StoreWriteKeys: 100 << 16},
+	}
+	c.CollectHotRegionMetricsAndStoreStats(utils.Write, tc.GetStores(), stats, storeLoads)
+	families, err = registry.Gather()
+	require.NoError(t, err)
+	require.Len(t, families, 3)
+	for _, family := range families {
+		require.Len(t, family.GetMetric(), 20)
+		for _, metric := range family.GetMetric() {
+			labels := make(map[string]string)
+			for _, label := range metric.GetLabel() {
+				labels[label.GetName()] = label.GetValue()
+			}
+			id, err := strconv.ParseUint(labels["region"], 10, 64)
+			require.NoError(t, err)
+			require.Equal(t, "1", labels["store"])
+			var load, total float64
+			switch labels["type"] {
+			case "write-leader":
+				require.Equal(t, "byte", labels["dim"])
+				require.LessOrEqual(t, id, uint64(10))
+				load, total = math.Round(float64((21-id)<<20)/60), 100<<20
+			case "write-peer":
+				require.Equal(t, "key", labels["dim"])
+				require.Greater(t, id, uint64(10))
+				load, total = math.Round(float64(id<<16)/60), 100<<16
+			default:
+				t.Fatalf("unexpected type: %s", labels["type"])
+			}
+			if family.GetName() == "pd_hotspot_top_region_hot_duration_seconds" {
+				load = 300
+			} else if family.GetName() == "pd_hotspot_top_region_store_load_ratio" {
+				load /= total
+			}
+			require.InDelta(t, load, metric.GetGauge().GetValue(), 1e-9)
+		}
+	}
+	// Matching write priorities publish the same Regions for peers and leaders.
+	scheduler.conf.Lock()
+	scheduler.conf.WriteLeaderPriorities = []string{utils.KeyPriority, utils.BytePriority}
+	scheduler.conf.Unlock()
+	c.CollectHotRegionMetricsAndStoreStats(utils.Write, tc.GetStores(), stats, nil)
+	families, err = registry.Gather()
+	require.NoError(t, err)
+	require.Len(t, families, 2)
+	for _, family := range families {
+		require.Len(t, family.GetMetric(), 2*hotRegionTopN)
+		for _, metric := range family.GetMetric() {
+			for _, label := range metric.GetLabel() {
+				switch label.GetName() {
+				case "dim":
+					require.Equal(t, "key", label.GetValue())
+				case "region":
+					id, err := strconv.ParseUint(label.GetValue(), 10, 64)
+					require.NoError(t, err)
+					require.Greater(t, id, uint64(10))
+				}
+			}
+		}
+	}
+	// No new heartbeat samples: collection never changes hot degree.
+	before := stats[1][0].HotDegree
+	c.CollectHotRegionMetricsAndStoreStats(utils.Write, tc.GetStores(), stats, nil)
+	require.Equal(t, before, stats[1][0].HotDegree)
+	// No hot peers clears the entire previous snapshot.
+	c.CollectHotRegionMetricsAndStoreStats(utils.Write, tc.GetStores(), nil, nil)
+	families, err = registry.Gather()
+	require.NoError(t, err)
+	require.Empty(t, families)
+	// Removing the leader Store retains only the healthy follower replicas.
+	tc.PutStore(tc.GetStore(1).Clone(core.SetStoreState(metapb.StoreState_Tombstone)))
+	c.CollectHotRegionMetricsAndStoreStats(utils.Write, tc.GetStores(), stats, nil)
+	families, err = registry.Gather()
+	require.NoError(t, err)
+	require.Len(t, families, 2)
+	for _, family := range families {
+		require.Len(t, family.GetMetric(), hotRegionTopN)
+		for _, metric := range family.GetMetric() {
+			for _, label := range metric.GetLabel() {
+				switch label.GetName() {
+				case "store":
+					require.Equal(t, "2", label.GetValue())
+				case "type":
+					require.Equal(t, "write-peer", label.GetValue())
+				}
+			}
+		}
+	}
+	// Normal controller path, then removal of the scheduler.
+	delete(c.schedulerHandlers, scheduler.GetName())
+	c.schedulers[scheduler.GetName()] = &ScheduleController{Scheduler: scheduler}
+	c.CollectHotRegionMetricsAndStoreStats(utils.Write, tc.GetStores(), stats, nil)
+	delete(c.schedulers, scheduler.GetName())
+	c.CollectHotRegionMetricsAndStoreStats(utils.Write, tc.GetStores(), stats, nil)
+	families, err = registry.Gather()
+	require.NoError(t, err)
+	require.Empty(t, families)
+}
+
+func TestHotRegionMetricsSustainedAndRead(t *testing.T) {
+	ResetHotRegionMetrics()
+	t.Cleanup(ResetHotRegionMetrics)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	tc.SetClusterVersion(semver.New("9.0.0"))
+	tc.SetHotRegionCacheHitsThreshold(3)
+	tc.AddRegionStore(1, 20)
+	tc.AddRegionStore(2, 20)
+	scheduler := newHotScheduler(oc, initHotRegionScheduleConfig())
+	c := NewController(context.Background(), tc, storage.NewStorageWithMemoryBackend(), oc)
+	c.schedulerHandlers[scheduler.GetName()] = scheduler
+	registry := prometheus.NewRegistry()
+	registry.MustRegister(topHotRegionMetrics)
+	// A single hot heartbeat does not enter the persistent-hot snapshot.
+	tc.AddLeaderRegionWithWriteInfo(1, 1, 1<<20, 1<<16, 1000, 60, []uint64{2}, 1)
+	c.CollectHotRegionMetricsAndStoreStats(utils.Write, tc.GetStores(), tc.GetHotPeerStats(utils.Write), nil)
+	families, err := registry.Gather()
+	require.NoError(t, err)
+	require.Empty(t, families)
+	tc.AddLeaderRegionWithWriteInfo(1, 1, 1<<20, 1<<16, 1000, 60, []uint64{2}, 5)
+	c.CollectHotRegionMetricsAndStoreStats(utils.Write, tc.GetStores(), tc.GetHotPeerStats(utils.Write), nil)
+	families, err = registry.Gather()
+	require.NoError(t, err)
+	require.Len(t, families, 2)
+	require.Len(t, families[0].GetMetric(), 2)
+	tc.AddLeaderRegionWithWriteInfo(1, 1, 0, 0, 0, 60, []uint64{2}, 10)
+	c.CollectHotRegionMetricsAndStoreStats(utils.Write, tc.GetStores(), tc.GetHotPeerStats(utils.Write), nil)
+	families, err = registry.Gather()
+	require.NoError(t, err)
+	require.Empty(t, families)
+	// Read ranks by CPU, including follower peers, taking the hottest replica.
+	stats := map[uint64][]*statistics.HotPeerStat{
+		1: {{RegionID: 1, Loads: []float64{100, 0, 100, 1}}, {RegionID: 2, Loads: []float64{1, 0, 1, 10}}},
+		2: {{RegionID: 1, Loads: []float64{100, 0, 100, 20}}},
+	}
+	c.CollectHotRegionMetricsAndStoreStats(utils.Read, tc.GetStores(), stats, nil)
+	families, err = registry.Gather()
+	require.NoError(t, err)
+	require.Len(t, families[0].GetMetric(), 2)
+	requireReadLoads := func(expected map[string]float64) {
+		t.Helper()
+		loads := make(map[string]float64)
+		for _, metric := range families[0].GetMetric() {
+			var region, store string
+			for _, label := range metric.GetLabel() {
+				switch label.GetName() {
+				case "region":
+					region = label.GetValue()
+				case "store":
+					store = label.GetValue()
+				}
+			}
+			loads[region+"/"+store] = metric.GetGauge().GetValue()
+		}
+		require.Equal(t, expected, loads)
+	}
+	requireReadLoads(map[string]float64{"1/2": 20, "2/1": 10})
+	tc.PutStore(tc.GetStore(2).Clone(core.SetLastHeartbeatTS(time.Now().Add(-time.Hour))))
+	c.CollectHotRegionMetricsAndStoreStats(utils.Read, tc.GetStores(), stats, nil)
+	families, err = registry.Gather()
+	require.NoError(t, err)
+	requireReadLoads(map[string]float64{"1/1": 1, "2/1": 10})
+	ResetHotRegionMetrics()
+	families, err = registry.Gather()
+	require.NoError(t, err)
+	require.Empty(t, families)
+}
+
+func TestHotRegionMetricPriorities(t *testing.T) {
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	scheduler := newHotScheduler(oc, initHotRegionScheduleConfig())
+	for _, test := range []struct{ version, read, leader, peer string }{
+		{"4.0.0", "byte", "key", "byte"},
+		{"8.5.6", "query", "query", "byte"},
+		{"9.0.0", "cpu", "query", "byte"},
+	} {
+		tc.SetClusterVersion(semver.New(test.version))
+		require.Equal(t, test.read, scheduler.getPriorities(tc, readPeer)[0])
+		require.Equal(t, test.leader, scheduler.getPriorities(tc, writeLeader)[0])
+		require.Equal(t, test.peer, scheduler.getPriorities(tc, writePeer)[0])
+	}
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.HotScheduleWithQuery))
+	scheduler.conf.Lock()
+	scheduler.conf.ReadPriorities = []string{utils.KeyPriority, utils.BytePriority}
+	scheduler.conf.Unlock()
+	require.Equal(t, utils.KeyPriority, scheduler.getPriorities(tc, readPeer)[0])
+}
+
+func TestHotRegionMetricsPriorityChange(t *testing.T) {
+	ResetHotRegionMetrics()
+	t.Cleanup(ResetHotRegionMetrics)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	tc.SetClusterVersion(semver.New("9.0.0"))
+	tc.AddRegionStore(1, 11)
+	scheduler := newHotScheduler(oc, initHotRegionScheduleConfig())
+	backend := storage.NewStorageWithMemoryBackend()
+	scheduler.conf.init(scheduler.GetName(), backend, scheduler.conf)
+	c := NewController(context.Background(), tc, backend, oc)
+	c.schedulerHandlers[scheduler.GetName()] = scheduler
+	stats := map[uint64][]*statistics.HotPeerStat{1: {}}
+	for id := uint64(1); id <= 11; id++ {
+		// CPU and byte loads select different sets of ten Regions.
+		stats[1] = append(stats[1], &statistics.HotPeerStat{
+			RegionID: id, Loads: []float64{float64(id), 0, float64(2 * id), float64(12 - id)},
+		})
+	}
+	storeLoads := map[uint64]statistics.StoreKindLoads{
+		1: {utils.StoreReadBytes: 1000, utils.StoreReadQuery: 10000, utils.StoreReadCPU: 100},
+	}
+	registry := prometheus.NewRegistry()
+	registry.MustRegister(topHotRegionMetrics)
+	for _, test := range []struct {
+		name, config, version, dim string
+		excluded                   uint64
+		total                      float64
+	}{
+		{name: "default", dim: "cpu", excluded: 11, total: 100},
+		{name: "update", config: `{"read-priorities":["byte","cpu"]}`, dim: "byte", excluded: 1, total: 1000},
+		{name: "restore", config: `{"read-priorities":["cpu","byte"]}`, dim: "cpu", excluded: 11, total: 100},
+		{name: "version fallback", version: "8.5.6", dim: "query", excluded: 1, total: 10000},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if test.config != "" {
+				// Use the same configuration endpoint as pd-ctl.
+				response := httptest.NewRecorder()
+				scheduler.conf.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/config", strings.NewReader(test.config)))
+				require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+			}
+			if test.version != "" {
+				tc.SetClusterVersion(semver.New(test.version))
+			}
+			c.CollectHotRegionMetricsAndStoreStats(utils.Read, tc.GetStores(), stats, storeLoads)
+			families, err := registry.Gather()
+			require.NoError(t, err)
+			require.Len(t, families, 2)
+			for _, family := range families {
+				require.Len(t, family.GetMetric(), hotRegionTopN)
+				for _, metric := range family.GetMetric() {
+					labels := make(map[string]string)
+					for _, label := range metric.GetLabel() {
+						labels[label.GetName()] = label.GetValue()
+					}
+					require.Equal(t, test.dim, labels["dim"])
+					require.Equal(t, "read-peer", labels["type"])
+					require.Equal(t, "1", labels["store"])
+					id, err := strconv.ParseUint(labels["region"], 10, 64)
+					require.NoError(t, err)
+					require.NotEqual(t, test.excluded, id)
+					load := float64(id)
+					switch test.dim {
+					case "cpu":
+						load = float64(12 - id)
+					case "query":
+						load = float64(2 * id)
+					}
+					if family.GetName() == "pd_hotspot_top_region_store_load_ratio" {
+						load /= test.total
+					}
+					require.InDelta(t, load, metric.GetGauge().GetValue(), 1e-9)
+				}
+			}
+		})
+	}
+}
+
+func TestHotRegionMetricsAndStoreStats(t *testing.T) {
+	ResetHotRegionMetrics()
+	t.Cleanup(ResetHotRegionMetrics)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	tc.SetClusterVersion(semver.New("9.0.0"))
+	for id := uint64(1); id <= 3; id++ {
+		tc.AddRegionStore(id, 20)
+	}
+	for id := uint64(1); id <= 20; id++ {
+		tc.AddLeaderRegionWithWriteInfo(id, 1, (21-id)<<20, id<<16, 60000, 60, []uint64{2}, 5)
+		tc.AddRegionWithReadInfo(id+20, 1, id<<20, id<<16, 60000, 10, []uint64{2}, 5)
+	}
+	stats := [utils.RWTypeLen]map[uint64][]*statistics.HotPeerStat{
+		utils.Read: tc.GetHotPeerStats(utils.Read), utils.Write: tc.GetHotPeerStats(utils.Write),
+	}
+	storeLoads := make(map[uint64]statistics.StoreKindLoads)
+	for id := uint64(1); id <= 3; id++ {
+		var loads statistics.StoreKindLoads
+		for dim := range loads {
+			loads[dim] = 1e9
+		}
+		storeLoads[id] = loads
+	}
+	scheduler := newHotScheduler(oc, initHotRegionScheduleConfig())
+	c := NewController(t.Context(), tc, storage.NewStorageWithMemoryBackend(), oc)
+	c.schedulerHandlers[scheduler.GetName()] = scheduler
+	registry := prometheus.NewRegistry()
+	registry.MustRegister(topHotRegionMetrics)
+	stores := tc.GetStores()
+	for _, test := range []string{"default", "priority change", "version fallback", "unhealthy Store", "removed Store", "no scheduler", "empty"} {
+		t.Run(test, func(t *testing.T) {
+			switch test {
+			case "priority change":
+				scheduler.conf.Lock()
+				scheduler.conf.ReadPriorities = []string{utils.BytePriority, utils.CPUPriority}
+				scheduler.conf.WritePeerPriorities = []string{utils.KeyPriority, utils.BytePriority}
+				scheduler.conf.WriteLeaderPriorities = []string{utils.BytePriority, utils.KeyPriority}
+				scheduler.conf.Unlock()
+			case "version fallback":
+				scheduler.conf.Lock()
+				scheduler.conf.ReadPriorities = []string{utils.CPUPriority, utils.BytePriority}
+				scheduler.conf.Unlock()
+				tc.SetClusterVersion(semver.New("8.5.6"))
+			case "unhealthy Store":
+				tc.PutStore(tc.GetStore(1).Clone(core.SetLastHeartbeatTS(time.Now().Add(-time.Hour))))
+			case "removed Store":
+				tc.PutStore(tc.GetStore(2).Clone(core.SetStoreState(metapb.StoreState_Tombstone)))
+			case "no scheduler":
+				delete(c.schedulerHandlers, scheduler.GetName())
+			case "empty":
+				stats = [utils.RWTypeLen]map[uint64][]*statistics.HotPeerStat{}
+			}
+			ResetHotRegionMetrics()
+			for _, rw := range []utils.RWType{utils.Read, utils.Write} {
+				summary := c.CollectHotRegionMetricsAndStoreStats(rw, stores, stats[rw], storeLoads)
+				require.Equal(t, statistics.CollectHotPeerInfos(stores, stats[rw]), summary)
+			}
+			got, err := registry.Gather()
+			require.NoError(t, err)
+			if test == "removed Store" || test == "no scheduler" || test == "empty" {
+				require.Empty(t, got)
+			} else {
+				require.NotEmpty(t, got)
+			}
+		})
+	}
+}
+
+func TestHotRegionStoreLoadRatio(t *testing.T) {
+	ResetHotRegionMetrics()
+	t.Cleanup(ResetHotRegionMetrics)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	tc.SetClusterVersion(semver.New("9.0.0"))
+	tc.AddRegionStore(1, 1)
+	scheduler := newHotScheduler(oc, initHotRegionScheduleConfig())
+	c := NewController(context.Background(), tc, storage.NewStorageWithMemoryBackend(), oc)
+	c.schedulerHandlers[scheduler.GetName()] = scheduler
+	stats := map[uint64][]*statistics.HotPeerStat{
+		1: {{RegionID: 10, Loads: []float64{0, 0, 0, 25}}},
+	}
+	storeLoads := map[uint64]statistics.StoreKindLoads{
+		1: {utils.StoreReadCPU: 100},
+	}
+	registry := prometheus.NewRegistry()
+	registry.MustRegister(topHotRegionMetrics)
+	c.CollectHotRegionMetricsAndStoreStats(utils.Read, tc.GetStores(), stats, storeLoads)
+	families, err := registry.Gather()
+	require.NoError(t, err)
+	require.Len(t, families, 2)
+	var ratioFound bool
+	for _, family := range families {
+		if family.GetName() == "pd_hotspot_top_region_store_load_ratio" {
+			ratioFound = true
+			require.Len(t, family.GetMetric(), 1)
+			require.InDelta(t, 0.25, family.GetMetric()[0].GetGauge().GetValue(), 1e-9)
+		}
+	}
+	require.True(t, ratioFound)
+
+	// A missing or zero total Store load leaves the ratio absent instead of
+	// reporting a fabricated zero or infinity.
+	storeLoads[1] = statistics.StoreKindLoads{}
+	c.CollectHotRegionMetricsAndStoreStats(utils.Read, tc.GetStores(), stats, storeLoads)
+	families, err = registry.Gather()
+	require.NoError(t, err)
+	require.Len(t, families, 1)
+	require.Equal(t, "pd_hotspot_top_region_load", families[0].GetName())
+
+	for _, test := range []struct {
+		typeValue resourceType
+		dim       int
+		want      utils.StoreLoadKind
+	}{
+		{readPeer, utils.ByteDim, utils.StoreReadBytes},
+		{writeLeader, utils.QueryDim, utils.StoreWriteQuery},
+		{writePeer, utils.KeyDim, utils.StoreWriteKeys},
+		{readPeer, utils.CPUDim, utils.StoreReadCPU},
+	} {
+		kind, ok := storeLoadKind(test.typeValue, test.dim, tc.GetStore(1))
+		require.True(t, ok)
+		require.Equal(t, test.want, kind)
+	}
+	tc.SetStoreLabel(1, map[string]string{core.EngineKey: core.EngineTiFlash})
+	kind, ok := storeLoadKind(writePeer, utils.ByteDim, tc.GetStore(1))
+	require.True(t, ok)
+	require.Equal(t, utils.StoreRegionsWriteBytes, kind)
+	kind, ok = storeLoadKind(writeLeader, utils.KeyDim, tc.GetStore(1))
+	require.True(t, ok)
+	require.Equal(t, utils.StoreRegionsWriteKeys, kind)
+	_, ok = storeLoadKind(writePeer, utils.CPUDim, tc.GetStore(1))
+	require.False(t, ok)
+}
+
+func TestHotRegionCollectorConcurrent(t *testing.T) {
+	collector := newHotRegionCollector()
+	registry := prometheus.NewRegistry()
+	registry.MustRegister(collector)
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Go(func() {
+			for range 100 {
+				collector.set(utils.Read, []hotRegionMetric{{
+					Metric:  prometheus.MustNewConstMetric(collector.loadDesc, prometheus.GaugeValue, 1, "read-peer", "cpu", "1", "1"),
+					storeID: "1",
+				}}, collector.getGeneration())
+				_, err := registry.Gather()
+				assert.NoError(t, err)
+			}
+		})
+	}
+	wg.Wait()
+}
+
+type hotRegionMetricsBlockingCluster struct {
+	*mockcluster.Cluster
+	entered, release chan struct{}
+	once             sync.Once
+}
+
+func (c *hotRegionMetricsBlockingCluster) GetStore(id uint64) *core.StoreInfo {
+	c.once.Do(func() {
+		close(c.entered)
+		<-c.release
+	})
+	return c.Cluster.GetStore(id)
+}
+
+func TestHotRegionMetricsRemovalDuringCollection(t *testing.T) {
+	ResetHotRegionMetrics()
+	t.Cleanup(ResetHotRegionMetrics)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	tc.SetClusterVersion(semver.New("9.0.0"))
+	tc.AddRegionStore(1, 1)
+	cluster := &hotRegionMetricsBlockingCluster{
+		Cluster: tc, entered: make(chan struct{}), release: make(chan struct{}),
+	}
+	scheduler := newHotScheduler(oc, initHotRegionScheduleConfig())
+	backend := storage.NewStorageWithMemoryBackend()
+	scheduler.conf.init(scheduler.GetName(), backend, scheduler.conf)
+	c := NewController(context.Background(), cluster, backend, oc)
+	c.schedulerHandlers[scheduler.GetName()] = scheduler
+	collected := make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(cluster.release) })
+	t.Cleanup(func() {
+		unblock()
+		<-collected
+	})
+	go func() {
+		defer close(collected)
+		stats := map[uint64][]*statistics.HotPeerStat{
+			1: {{RegionID: 1, Loads: []float64{0, 0, 0, 10}}},
+		}
+		c.CollectHotRegionMetricsAndStoreStats(utils.Read, tc.GetStores(), stats, nil)
+	}()
+	<-cluster.entered
+	removed := make(chan error, 1)
+	go func() { removed <- c.RemoveSchedulerHandler(scheduler.GetName()) }()
+	select {
+	case err := <-removed:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		unblock()
+		<-collected
+		require.NoError(t, <-removed)
+		t.Fatal("scheduler removal waited for the hot Region scan")
+	}
+	unblock()
+	<-collected
+	registry := prometheus.NewRegistry()
+	registry.MustRegister(topHotRegionMetrics)
+	families, err := registry.Gather()
+	require.NoError(t, err)
+	require.Empty(t, families, "collection must not republish a removed scheduler's metrics")
+}
+
+func prepareHotRegionStoreMetricsTest(t *testing.T) (*mockcluster.Cluster, *Controller, map[uint64]statistics.StoreKindLoads, *prometheus.Registry) {
+	t.Helper()
+	ResetHotRegionMetrics()
+	t.Cleanup(ResetHotRegionMetrics)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	t.Cleanup(cancel)
+	tc.SetClusterVersion(semver.New("9.0.0"))
+	storeLoads := make(map[uint64]statistics.StoreKindLoads)
+	for id := uint64(1); id <= 2; id++ {
+		tc.AddRegionStore(id, 1)
+		tc.AddRegionWithReadInfo(id, id, 1<<20, 1<<16, 1000, 10, nil, 5)
+		tc.AddLeaderRegionWithWriteInfo(id, id, 1<<20, 1<<16, 1000, 60, nil, 5)
+		storeLoads[id] = statistics.StoreKindLoads{
+			utils.StoreReadCPU: 100, utils.StoreWriteBytes: 100 << 20, utils.StoreWriteQuery: 1000,
+		}
+	}
+	scheduler := newHotScheduler(oc, initHotRegionScheduleConfig())
+	c := NewController(context.Background(), tc, storage.NewStorageWithMemoryBackend(), oc)
+	c.schedulerHandlers[scheduler.GetName()] = scheduler
+	for _, rw := range []utils.RWType{utils.Read, utils.Write} {
+		c.CollectHotRegionMetricsAndStoreStats(rw, tc.GetStores(), tc.GetHotPeerStats(rw), storeLoads)
+	}
+	registry := prometheus.NewRegistry()
+	registry.MustRegister(topHotRegionMetrics)
+	requireHotRegionMetricStores(t, registry, "1", "2")
+	return tc, c, storeLoads, registry
+}
+
+func requireHotRegionMetricStores(t *testing.T, registry *prometheus.Registry, stores ...string) {
+	t.Helper()
+	families, err := registry.Gather()
+	require.NoError(t, err)
+	if len(stores) == 0 {
+		require.Empty(t, families)
+		return
+	}
+	require.Len(t, families, 3, "load, Store share and hot duration must all be present")
+	var expected []string
+	for _, store := range stores {
+		for _, typ := range []string{"read-peer", "write-peer", "write-leader"} {
+			expected = append(expected, store+"/"+typ)
+		}
+	}
+	for _, family := range families {
+		var actual []string
+		for _, metric := range family.GetMetric() {
+			var store, typ string
+			for _, label := range metric.GetLabel() {
+				switch label.GetName() {
+				case "store":
+					store = label.GetValue()
+				case "type":
+					typ = label.GetValue()
+				}
+			}
+			actual = append(actual, store+"/"+typ)
+		}
+		require.ElementsMatch(t, expected, actual, family.GetName())
+	}
+}
+
+func TestHotRegionMetricsDeleteStore(t *testing.T) {
+	_, _, _, registry := prepareHotRegionStoreMetricsTest(t)
+	// Collect copies slice headers before releasing the collector lock. Keep
+	// those slices to verify that Store cleanup cannot mutate a running scrape.
+	topHotRegionMetrics.RLock()
+	snapshots := topHotRegionMetrics.metrics
+	readBefore := slices.Clone(snapshots[utils.Read])
+	writeBefore := slices.Clone(snapshots[utils.Write])
+	topHotRegionMetrics.RUnlock()
+	DeleteStoreMetrics("1")
+	requireHotRegionMetricStores(t, registry, "2")
+	require.Equal(t, readBefore, snapshots[utils.Read])
+	require.Equal(t, writeBefore, snapshots[utils.Write])
+	DeleteStoreMetrics("1")
+	DeleteStoreMetrics("99")
+	requireHotRegionMetricStores(t, registry, "2")
+	DeleteStoreMetrics("2")
+	requireHotRegionMetricStores(t, registry)
+}
+
+type hotRegionMetricsStoreRemovalCluster struct {
+	*mockcluster.Cluster
+	entered, release chan struct{}
+	calls            int
+}
+
+func (c *hotRegionMetricsStoreRemovalCluster) GetStore(id uint64) *core.StoreInfo {
+	store := c.Cluster.GetStore(id)
+	if id == 1 {
+		c.calls++
+		// The first lookup selects the Store; the second builds the selected
+		// peer's metrics. Return the captured Store after cleanup to exercise
+		// publication of a scan that has already accepted the removed Store.
+		if c.calls == 2 {
+			close(c.entered)
+			<-c.release
+		}
+	}
+	return store
+}
+
+func TestHotRegionMetricsStoreRemovalDuringCollection(t *testing.T) {
+	for _, rw := range []utils.RWType{utils.Read, utils.Write} {
+		for _, tombstone := range []bool{false, true} {
+			t.Run(rw.String()+"/tombstone="+strconv.FormatBool(tombstone), func(t *testing.T) {
+				tc, c, storeLoads, registry := prepareHotRegionStoreMetricsTest(t)
+				cluster := &hotRegionMetricsStoreRemovalCluster{
+					Cluster: tc, entered: make(chan struct{}), release: make(chan struct{}),
+				}
+				c.cluster = cluster
+				collected := make(chan struct{})
+				unblock := sync.OnceFunc(func() { close(cluster.release) })
+				t.Cleanup(func() {
+					unblock()
+					<-collected
+				})
+				go func() {
+					defer close(collected)
+					stats := tc.GetHotPeerStats(rw)
+					c.CollectHotRegionMetricsAndStoreStats(rw, tc.GetStores(), stats, storeLoads)
+				}()
+				<-cluster.entered
+				if tombstone {
+					tc.PutStore(tc.GetStore(1).Clone(core.SetStoreState(metapb.StoreState_Tombstone)))
+				} else {
+					tc.DeleteStore(tc.GetStore(1))
+				}
+				DeleteStoreMetrics("1")
+				unblock()
+				<-collected
+				requireHotRegionMetricStores(t, registry, "2")
+				// A later refresh must still publish surviving Stores normally.
+				for _, nextRW := range []utils.RWType{utils.Read, utils.Write} {
+					c.CollectHotRegionMetricsAndStoreStats(nextRW, tc.GetStores(), tc.GetHotPeerStats(nextRW), storeLoads)
+				}
+				requireHotRegionMetricStores(t, registry, "2")
+			})
+		}
+	}
+}
+
+func BenchmarkCollectHotRegionMetricsAndStoreStats(b *testing.B) {
+	ResetHotRegionMetrics()
+	b.Cleanup(ResetHotRegionMetrics)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	tc.AddRegionStore(1, 10000)
+	peers := make([]*statistics.HotPeerStat, 10000)
+	for i := range peers {
+		peers[i] = &statistics.HotPeerStat{RegionID: uint64(i + 1), Loads: []float64{float64((i * 7919) % 10000), 0, 0, 0}}
+	}
+	stats := map[uint64][]*statistics.HotPeerStat{1: peers}
+	scheduler := newHotScheduler(oc, initHotRegionScheduleConfig())
+	scheduler.conf.ReadPriorities = []string{utils.BytePriority, utils.QueryPriority}
+	c := NewController(b.Context(), tc, storage.NewStorageWithMemoryBackend(), oc)
+	c.schedulerHandlers[scheduler.GetName()] = scheduler
+	stores := tc.GetStores()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		c.CollectHotRegionMetricsAndStoreStats(utils.Read, stores, stats, nil)
+	}
+}
