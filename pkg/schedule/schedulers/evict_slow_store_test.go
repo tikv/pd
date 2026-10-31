@@ -2306,3 +2306,42 @@ func TestEvictSlowStoreHealthyDomainsUseLiveStores(t *testing.T) {
 	es.scheduleDiskSlowStore(newCacheCluster(tc))
 	re.ElementsMatch([]uint64{1, 2}, es.conf.evictedStores())
 }
+
+// TestEvictSlowStoreConfigUpdateKeepsPersistedEvictions: in scheduling MCS, PD serves config
+// updates from a handler-only copy that never reloads. Updating batch through it must keep the
+// eviction the scheduling service persisted, or the service's reload would release the store
+// before it recovers.
+func TestEvictSlowStoreConfigUpdateKeepsPersistedEvictions(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	tc.AddLeaderStore(1, 10)
+	tc.AddLeaderStore(2, 0)
+	tc.AddLeaderStore(3, 0)
+	tc.AddLeaderRegion(1, 1, 2, 3)
+
+	st := storage.NewStorageWithMemoryBackend()
+	service, err := CreateScheduler(types.EvictSlowStoreScheduler, oc, st, ConfigSliceDecoder(types.EvictSlowStoreScheduler, []string{}), nil)
+	re.NoError(err)
+	handlerOnly, err := CreateScheduler(types.EvictSlowStoreScheduler, oc, st, ConfigSliceDecoder(types.EvictSlowStoreScheduler, []string{}), nil)
+	re.NoError(err)
+
+	setStoreSlowScore(tc, 1, 100)
+	service.Schedule(tc, false)
+	serviceConf := service.(*evictSlowStoreScheduler).conf
+	re.Equal([]uint64{1}, serviceConf.evictedStores())
+	re.Empty(handlerOnly.(*evictSlowStoreScheduler).conf.evictedStores())
+
+	body, err := json.Marshal(map[string]any{"batch": 5})
+	re.NoError(err)
+	resp := httptest.NewRecorder()
+	handlerOnly.ServeHTTP(resp, httptest.NewRequest(http.MethodPost, "/config", bytes.NewReader(body)))
+	re.Equal(http.StatusOK, resp.Code)
+
+	// The service's config watcher reloads the saved config.
+	re.NoError(service.ReloadConfig())
+	re.Equal([]uint64{1}, serviceConf.evictedStores())
+	re.Equal(5, serviceConf.getBatch())
+	re.True(tc.GetStore(1).EvictedAsSlowStore())
+}

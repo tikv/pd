@@ -486,7 +486,24 @@ func (handler *evictSlowStoreHandler) updateConfig(w http.ResponseWriter, r *htt
 	defer handler.config.Unlock()
 	recoverySec := uint64(recoveryDurationGapFloat)
 
+	// In scheduling MCS, PD serves this handler from a handler-only copy that is never
+	// reloaded, so its eviction sets can be stale. Save the persisted sets, which the running
+	// scheduler owns, so a config update cannot drop the service's evictions.
+	stored := &evictSlowStoreSchedulerConfig{}
+	loadErr := handler.config.load(stored)
+	if loadErr != nil {
+		log.Warn("failed to load persisted evict-slow-store config, keeping in-memory evictions", zap.Error(loadErr))
+	} else {
+		stored.normalizeEvictedStores()
+	}
+
 	if err := handler.config.persistLocked(func() {
+		if loadErr == nil {
+			handler.config.EvictedStores = stored.EvictedStores
+			handler.config.EvictedGroupStores = stored.EvictedGroupStores
+			handler.config.PausedNetworkSlowStores = stored.PausedNetworkSlowStores
+			handler.config.EvictedNetworkSlowStores = stored.EvictedNetworkSlowStores
+		}
 		if inputRecoveryDuration {
 			handler.config.RecoverySec = recoverySec
 		}
