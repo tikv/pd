@@ -983,9 +983,7 @@ func TestServiceMiddlewareConfig(t *testing.T) {
 	pdTests.MustPutStore(re, cluster, store)
 
 	conf := config.ServiceMiddlewareConfig{
-		AuditConfig: config.AuditConfig{
-			EnableAudit: true,
-		},
+		EnableAudit: true,
 		RateLimitConfig: config.RateLimitConfig{
 			EnableRateLimit: true,
 			LimiterConfig:   make(map[string]ratelimit.DimensionConfig),

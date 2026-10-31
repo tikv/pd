@@ -120,7 +120,8 @@ func (s *TSODispatcher) dispatch(
 	}
 	defer cancel()
 
-	requests := make([]Request, maxMergeRequests+1)
+	// A batch can contain the dequeued request plus a full queue.
+	requests := make([]Request, 0, maxMergeRequests+2)
 	needUpdateServicePrimaryAddr := len(tsoPrimaryWatchers) > 0 && tsoPrimaryWatchers[0] != nil
 	noProxyRequestsTimer := time.NewTimer(tsoProxyStreamIdleTimeout)
 	for {
@@ -132,9 +133,9 @@ func (s *TSODispatcher) dispatch(
 		select {
 		case first := <-tsoQueue.requestCh:
 			pendingTSOReqCount := len(tsoQueue.requestCh) + 1
-			requests[0] = first
+			requests = append(requests[:0], first)
 			for i := 1; i < pendingTSOReqCount; i++ {
-				requests[i] = <-tsoQueue.requestCh
+				requests = append(requests, <-tsoQueue.requestCh)
 			}
 			done := make(chan struct{})
 			dl := NewTSDeadline(DefaultTSOProxyTimeout, done, cancel)

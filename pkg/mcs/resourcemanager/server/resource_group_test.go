@@ -42,7 +42,7 @@ func resetSizeCache(obj any) {
 }
 
 func resetSizeCacheRecursive(value reflect.Value) {
-	if value.Kind() == reflect.Ptr {
+	if value.Kind() == reflect.Pointer {
 		value = value.Elem()
 	}
 
