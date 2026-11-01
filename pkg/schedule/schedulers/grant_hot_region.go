@@ -289,6 +289,10 @@ func (s *grantHotRegionScheduler) transfer(cluster sche.SchedulerCluster, region
 		log.Error("failed to get the source store", zap.Uint64("store-id", srcStoreID), errs.ZapError(errs.ErrGetSourceStore))
 		return nil, errs.ErrStoreNotFound
 	}
+	srcPeer := srcRegion.GetStorePeer(srcStoreID)
+	if srcPeer == nil {
+		return nil, errs.ErrRegionAbnormalPeer.FastGenByArgs(regionID)
+	}
 	filters := []filter.Filter{
 		filter.NewPlacementSafeguard(s.GetName(), cluster.GetSchedulerConfig(), cluster.GetBasicCluster(), cluster.GetRuleManager(), srcRegion, srcStore, nil),
 	}
@@ -316,12 +320,8 @@ func (s *grantHotRegionScheduler) transfer(cluster sche.SchedulerCluster, region
 		return nil, errs.ErrCheckerNotFound
 	}
 
-	srcPeer := srcStore.GetMeta()
-	if srcPeer == nil {
-		return nil, errs.ErrStoreNotFound
-	}
 	i := rand.Int() % len(destStoreIDs)
-	dstStore := &metapb.Peer{StoreId: destStoreIDs[i]}
+	dstStore := &metapb.Peer{StoreId: destStoreIDs[i], Role: srcPeer.GetRole()}
 
 	if isLeader {
 		op, err = operator.CreateTransferLeaderOperator(s.GetName()+"-leader", cluster, srcRegion, dstStore.StoreId, []uint64{}, operator.OpLeader)
