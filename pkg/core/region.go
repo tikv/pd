@@ -1073,8 +1073,6 @@ type RegionsInfo struct {
 	t            RWLockStats
 	tree         *regionTree
 	regions      map[uint64]*regionItem // regionID -> regionInfo
-	listeners    map[uint64]func(origin, region *RegionInfo)
-	nextListener uint64
 	st           RWLockStats
 	subRegions   map[uint64]*regionItem // regionID -> regionInfo
 	leaders      map[uint64]*regionTree // storeID -> sub regionTree
@@ -1098,32 +1096,6 @@ func NewRegionsInfo() *RegionsInfo {
 		witnesses:    make(map[uint64]*regionTree),
 		pendingPeers: make(map[uint64]*regionTree),
 		overlapTree:  newRegionTreeWithCountRef(),
-	}
-}
-
-// SubscribeRegionUpdates observes accepted root changes in publication order.
-// A nil region denotes removal. The callback runs under the root lock and must
-// not access RegionsInfo or wait for background work. The returned function
-// removes the subscription.
-func (r *RegionsInfo) SubscribeRegionUpdates(listener func(origin, region *RegionInfo)) func() {
-	r.t.Lock()
-	if r.listeners == nil {
-		r.listeners = make(map[uint64]func(origin, region *RegionInfo))
-	}
-	id := r.nextListener
-	r.nextListener++
-	r.listeners[id] = listener
-	r.t.Unlock()
-	return func() {
-		r.t.Lock()
-		delete(r.listeners, id)
-		r.t.Unlock()
-	}
-}
-
-func (r *RegionsInfo) notifyRegionUpdateLocked(origin, region *RegionInfo) {
-	for _, listener := range r.listeners {
-		listener(origin, region)
 	}
 }
 
@@ -1429,7 +1401,6 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo, withOverlaps bool, ol 
 			r.tree.updateStat(origin, region)
 			// Update the RegionInfo in the regionItem.
 			item.RegionInfo = region
-			r.notifyRegionUpdateLocked(origin, region)
 			return origin, nil, rangeChanged
 		}
 	} else {
@@ -1442,10 +1413,8 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo, withOverlaps bool, ol 
 		overlaps = r.tree.update(item, withOverlaps, ol...)
 		for _, old := range overlaps {
 			delete(r.regions, old.GetID())
-			r.notifyRegionUpdateLocked(old, nil)
 		}
 	}
-	r.notifyRegionUpdateLocked(origin, region)
 	// return rangeChanged to prevent duplicated calculation
 	return origin, overlaps, rangeChanged
 }
@@ -1510,23 +1479,14 @@ func (r *RegionsInfo) GetOverlaps(region *RegionInfo) []*RegionInfo {
 func (r *RegionsInfo) RemoveRegion(region *RegionInfo) {
 	r.t.Lock()
 	defer r.t.Unlock()
-	origin := r.getRegionLocked(region.GetID())
 	// Remove from tree and regions.
 	r.tree.remove(region)
 	delete(r.regions, region.GetID())
-	if origin != nil {
-		r.notifyRegionUpdateLocked(origin, nil)
-	}
 }
 
 // ResetRegionCache resets the regions info.
 func (r *RegionsInfo) ResetRegionCache() {
 	r.t.Lock()
-	if len(r.listeners) > 0 {
-		for _, item := range r.regions {
-			r.notifyRegionUpdateLocked(item.RegionInfo, nil)
-		}
-	}
 	r.tree = newRegionTreeWithCountRef()
 	r.regions = make(map[uint64]*regionItem)
 	r.t.Unlock()

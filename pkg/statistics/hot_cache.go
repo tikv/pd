@@ -57,10 +57,34 @@ func NewHotCache(ctx context.Context, cluster *core.BasicCluster) *HotCache {
 		regionMetaUpdates: make(map[uint64]regionMetadataUpdate),
 		regionMetaReady:   make(chan struct{}, 1),
 	}
-	unsubscribe := cluster.SubscribeRegionUpdates(w.enqueueReadRegionMetadata)
-	go w.updateReadItems(w.readCache.taskQueue, unsubscribe)
+	go w.updateReadItems(w.readCache.taskQueue)
 	go w.updateItems(w.writeCache.taskQueue, w.runWriteTask)
 	return w
+}
+
+// UpdateRegion validates and publishes a region, then queues its read metadata.
+// Publication and coalescing share a lock so concurrent heartbeats preserve
+// intermediate transfers and removals without blocking on the read task queue.
+func (w *HotCache) UpdateRegion(ctx *core.MetaProcessContext, region *core.RegionInfo) ([]*core.RegionInfo, error) {
+	w.regionMetaMu.Lock()
+	cluster := w.readCache.cluster
+	origin := cluster.GetRegion(region.GetID())
+	overlaps, err := cluster.CheckAndPutRootTree(ctx, region)
+	changed := false
+	if err == nil {
+		for _, old := range overlaps {
+			changed = w.enqueueReadRegionMetadataLocked(old, nil) || changed
+		}
+		changed = w.enqueueReadRegionMetadataLocked(origin, region) || changed
+	}
+	w.regionMetaMu.Unlock()
+	if changed {
+		select {
+		case w.regionMetaReady <- struct{}{}:
+		default:
+		}
+	}
+	return overlaps, err
 }
 
 // CheckWriteAsync puts the flowItem into queue, and check it asynchronously
@@ -103,11 +127,11 @@ func (w *HotCache) CheckRegionFlowWithOriginAsync(region, origin *core.RegionInf
 	w.CheckWriteAsync(checkWritePeerTask)
 }
 
-func (w *HotCache) enqueueReadRegionMetadata(origin, region *core.RegionInfo) {
+func (w *HotCache) enqueueReadRegionMetadataLocked(origin, region *core.RegionInfo) bool {
 	if w.ctx.Err() != nil || origin != nil && region != nil &&
 		origin.GetLeader().GetStoreId() == region.GetLeader().GetStoreId() &&
 		core.SortedPeersEqual(origin.GetPeers(), region.GetPeers()) {
-		return
+		return false
 	}
 	meta := region.GetMeta()
 	regionID, leaderStoreID, previousLeader := meta.GetId(), uint64(0), uint64(0)
@@ -119,7 +143,6 @@ func (w *HotCache) enqueueReadRegionMetadata(origin, region *core.RegionInfo) {
 	if origin != nil {
 		previousLeader = origin.GetLeader().GetStoreId()
 	}
-	w.regionMetaMu.Lock()
 	update, exists := w.regionMetaUpdates[regionID]
 	peers := meta.GetPeers()
 	if !exists {
@@ -135,11 +158,7 @@ func (w *HotCache) enqueueReadRegionMetadata(origin, region *core.RegionInfo) {
 	update.leaderStoreID = leaderStoreID
 	update.leaderTransferred = update.leaderTransferred || origin != nil && previousLeader != leaderStoreID
 	w.regionMetaUpdates[regionID] = update
-	w.regionMetaMu.Unlock()
-	select {
-	case w.regionMetaReady <- struct{}{}:
-	default:
-	}
+	return true
 }
 
 // The intersection bounds pending state by the first update's peer count and
@@ -196,7 +215,13 @@ func newExpiredRegionTask(meta *metapb.Region) func(*HotPeerCache) {
 }
 
 func (u regionMetadataUpdate) apply(cache *HotPeerCache) {
-	retained := hotRegionInfo{meta: &metapb.Region{Id: u.regionID, Peers: u.retainedPeers}}
+	peers := u.retainedPeers
+	if previous := cache.readMetadata[u.regionID]; previous != nil {
+		// Direct root changes can precede this heartbeat's origin snapshot.
+		// Invalidate old physical peers before replacing their cached metadata.
+		peers = intersectReadPeers(previous.meta.GetPeers(), peers)
+	}
+	retained := hotRegionInfo{meta: &metapb.Region{Id: u.regionID, Peers: peers}}
 	for _, stat := range cache.collectExpiredItemsForRegion(&retained) {
 		cache.UpdateStat(stat)
 	}
@@ -227,7 +252,8 @@ func newWriteRegionTask(regionInfo hotRegionInfo, interval, writtenBytes, writte
 func (w *HotCache) CheckReadPeerAsync(region *core.RegionInfo, peer *metapb.Peer, loads []float64, interval uint64) bool {
 	regionID, storeID, peerID := region.GetID(), peer.GetStoreId(), peer.GetId()
 	return w.CheckReadAsync(func(cache *HotPeerCache) {
-		regionInfo := w.readRegionForSample(regionID)
+		failpoint.InjectCall("beforeReadRegionMetadata")
+		regionInfo := w.readRegionMetadata(regionID)
 		if regionInfo == nil {
 			return
 		}
@@ -245,33 +271,43 @@ func (w *HotCache) CheckReadPeerAsync(region *core.RegionInfo, peer *metapb.Peer
 		}
 		if len(cache.storesOfRegion[regionID]) == 0 {
 			delete(cache.readMetadata, regionID)
+		} else {
+			cache.readMetadata[regionID] = regionInfo
 		}
 	})
 }
 
-func (w *HotCache) readRegionForSample(regionID uint64) *hotRegionInfo {
-	// Read the root before draining notifications. Any publication visible here
-	// has already notified us; later publications will be applied after this sample.
-	current := w.readCache.cluster.GetRegion(regionID)
-	failpoint.InjectCall("afterReadRegionRootSnapshot")
+// Read the root and drain its pending metadata under the publication lock so
+// a sample cannot restore peers removed by an accepted heartbeat.
+func (w *HotCache) readRegionMetadata(regionID uint64) *hotRegionInfo {
 	w.regionMetaMu.Lock()
+	current := w.readCache.cluster.GetRegion(regionID)
 	update, pending := w.regionMetaUpdates[regionID]
 	delete(w.regionMetaUpdates, regionID)
 	w.regionMetaMu.Unlock()
 	if pending {
 		update.apply(w.readCache)
-		if update.meta == nil {
-			return nil
+	}
+	if current == nil {
+		if w.readCache.readMetadata[regionID] != nil {
+			regionMetadataUpdate{regionID: regionID}.apply(w.readCache)
 		}
-	} else if metadata := w.readCache.readMetadata[regionID]; metadata != nil {
-		return metadata
-	} else if current != nil {
-		update.hotRegionInfo = hotRegionInfo{meta: current.GetMeta(), leaderStoreID: current.GetLeader().GetStoreId()}
-	} else {
 		return nil
 	}
-	metadata := &hotRegionInfo{meta: update.meta, leaderStoreID: update.leaderStoreID}
-	w.readCache.readMetadata[regionID] = metadata
+	previous := w.readCache.readMetadata[regionID]
+	if previous != nil && previous.leaderStoreID == current.GetLeader().GetStoreId() &&
+		core.SortedPeersEqual(previous.meta.GetPeers(), current.GetPeers()) {
+		return previous
+	}
+	metadata := newHotRegionInfo(current)
+	update = regionMetadataUpdate{hotRegionInfo: *metadata, regionID: regionID, retainedPeers: current.GetPeers()}
+	if previous != nil {
+		update.leaderTransferred = previous.leaderStoreID != metadata.leaderStoreID
+	}
+	update.apply(w.readCache)
+	if len(w.readCache.storesOfRegion[regionID]) > 0 {
+		w.readCache.readMetadata[regionID] = metadata
+	}
 	return metadata
 }
 
@@ -386,9 +422,8 @@ func ResetHotCacheStatusMetrics() {
 	hotCacheStatusGauge.Reset()
 }
 
-func (w *HotCache) updateReadItems(queue *chanx.UnboundedChan[func(*HotPeerCache)], unsubscribe func()) {
+func (w *HotCache) updateReadItems(queue *chanx.UnboundedChan[func(*HotPeerCache)]) {
 	defer logutil.LogPanic()
-	defer unsubscribe()
 
 	batch := make(map[uint64]regionMetadataUpdate)
 	for {

@@ -95,10 +95,11 @@ func TestSyncCacheHelpersFollowPendingMetadata(t *testing.T) {
 	for _, operation := range []string{"sample", "expiry", "threshold"} {
 		t.Run(operation, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				cluster, cache, region, loads := newHotReadCache(t, []uint64{1, 2, 3})
+				_, cache, region, loads := newHotReadCache(t, []uint64{1, 2, 3})
 				release := blockHotReadWorker(t, cache)
 				latest := region.Clone(core.WithRemoveStorePeer(3), core.WithIncConfVer())
-				cluster.PutRegion(latest)
+				_, err := cache.UpdateRegion(core.ContextTODO(), latest)
+				require.NoError(t, err)
 				done := make(chan struct{})
 				var expired []*HotPeerStat
 				go func() {
@@ -131,13 +132,14 @@ func TestCleanCacheWaitsForPendingTasks(t *testing.T) {
 	for kind := range utils.RWTypeLen {
 		t.Run(kind.String(), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				cluster, cache, region, _ := newHotReadCache(t, []uint64{1, 2})
+				_, cache, region, _ := newHotReadCache(t, []uint64{1, 2})
 				cache.CheckRegionFlowAsync(region)
 				require.Len(t, cache.GetHotPeerStats(utils.Write, 0)[1], 1)
 				release := blockHotCacheWorker(t, cache, kind)
 				updated := region.Clone(core.WithLeader(region.GetStorePeer(2)))
 				cache.CheckRegionFlowAsync(updated)
-				cluster.PutRegion(updated)
+				_, err := cache.UpdateRegion(core.ContextTODO(), updated)
+				require.NoError(t, err)
 				if kind == utils.Read {
 					_ = cache.GetHotPeerStats(utils.Write, 0)
 				} else {
@@ -242,7 +244,8 @@ func TestRegionHeartbeatUpdatesReadLeader(t *testing.T) {
 				region = region.Clone(core.WithRemoveStorePeer(1))
 			}
 			cache.CheckRegionFlowAsync(region)
-			cluster.PutRegion(region)
+			_, err := cache.UpdateRegion(core.ContextTODO(), region)
+			require.NoError(t, err)
 			after := cache.GetHotPeerStats(utils.Read, 0)
 			for _, storeID := range tc.hotStores {
 				oldItem := before[storeID][0]
@@ -315,7 +318,8 @@ func TestRegionMetadataPressureDoesNotBlockHeartbeats(t *testing.T) {
 				updated := region.Clone(core.SetWrittenBytes(2 << 20))
 				cache.CheckRegionFlowAsync(updated)
 				// Both heartbeat implementations publish after handling statistics.
-				cluster.PutRegion(updated)
+				_, err := cache.UpdateRegion(core.ContextTODO(), updated)
+				require.NoError(t, err)
 				synctest.Wait()
 				require.Greater(t, cache.GetHotPeerStats(utils.Write, 0)[1][0].HotDegree, before[1][0].HotDegree)
 				require.Same(t, updated, cluster.GetRegion(region.GetID()), "read pressure must not hold up region publication")
@@ -323,7 +327,8 @@ func TestRegionMetadataPressureDoesNotBlockHeartbeats(t *testing.T) {
 				// No sample tasks can enter, so publication must wake the read worker.
 				transferred := updated.Clone(core.WithLeader(updated.GetStorePeer(2)))
 				cache.CheckRegionFlowAsync(transferred)
-				cluster.PutRegion(transferred)
+				_, err = cache.UpdateRegion(core.ContextTODO(), transferred)
+				require.NoError(t, err)
 				synctest.Wait()
 				after := cache.readCache.GetHotPeerStats(0)
 				require.False(t, after[1][0].IsLeader())
@@ -342,10 +347,11 @@ func TestReadMetadataLifetime(t *testing.T) {
 	for _, freshSample := range []bool{false, true} {
 		t.Run(fmt.Sprintf("fresh-sample=%t", freshSample), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				cluster, cache, old, loads := newHotReadCache(t, []uint64{1, 2})
+				_, cache, old, loads := newHotReadCache(t, []uint64{1, 2})
 				time.Sleep(20 * time.Second)
 				current := old.Clone(core.WithLeader(old.GetStorePeer(2)))
-				cluster.PutRegion(current)
+				_, err := cache.UpdateRegion(core.ContextTODO(), current)
+				require.NoError(t, err)
 				if freshSample {
 					require.True(t, cache.CheckReadPeerAsync(old, old.GetStorePeer(2), loads, utils.StoreHeartBeatReportInterval))
 				}
@@ -375,19 +381,22 @@ func TestCoalescedReadMetadataPreservesTransitions(t *testing.T) {
 	for _, peerID := range []uint64{3, 100} {
 		t.Run(fmt.Sprintf("readded-peer=%d", peerID), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				cluster, cache, initial, loads := newHotReadCache(t, []uint64{1, 2, 3})
+				_, cache, initial, loads := newHotReadCache(t, []uint64{1, 2, 3})
 				release := blockHotReadWorker(t, cache)
 				if peerID != initial.GetStorePeer(3).GetId() {
 					require.True(t, cache.CheckReadPeerAsync(initial, initial.GetStorePeer(3), loads, utils.StoreHeartBeatReportInterval))
 				}
 				region := initial.Clone(core.WithRemoveStorePeer(3), core.WithIncConfVer())
-				cluster.PutRegion(region)
+				_, err := cache.UpdateRegion(core.ContextTODO(), region)
+				require.NoError(t, err)
 				for i := range 1000 {
 					region = region.Clone(core.WithLeader(region.GetStorePeer(uint64(i%2 + 1))))
-					cluster.PutRegion(region)
+					_, err = cache.UpdateRegion(core.ContextTODO(), region)
+					require.NoError(t, err)
 				}
 				region = region.Clone(core.WithLeader(initial.GetStorePeer(1)), core.WithAddPeer(&metapb.Peer{Id: peerID, StoreId: 3}), core.WithIncConfVer())
-				cluster.PutRegion(region)
+				_, err = cache.UpdateRegion(core.ContextTODO(), region)
+				require.NoError(t, err)
 				require.Len(t, cache.regionMetaUpdates, 1)
 				require.Len(t, cache.regionMetaUpdates[region.GetID()].retainedPeers, 2, "pending state must retain peer intersection, not transition history")
 				release()
@@ -406,13 +415,13 @@ func TestCoalescedReadMetadataPreservesTransitions(t *testing.T) {
 }
 
 func TestUnpublishedRegionMetadataPreservesReadCache(t *testing.T) {
-	cluster, cache, initial, _ := newHotReadCache(t, []uint64{1, 2, 3})
+	_, cache, initial, _ := newHotReadCache(t, []uint64{1, 2, 3})
 	before := cache.GetHotPeerStats(utils.Read, 0)
 	updated := initial.Clone(core.WithLeader(initial.GetStorePeer(2)), core.WithRemoveStorePeer(3),
 		core.WithIncConfVer(), core.WithEndKey([]byte("z")), core.WithIncVersion())
 	cache.CheckRegionFlowAsync(updated)
 	require.Equal(t, before, cache.GetHotPeerStats(utils.Read, 0), "unpublished heartbeats must not change read roles, cooldowns or membership")
-	_, err := cluster.CheckAndPutRootTree(core.ContextTODO(), updated)
+	_, err := cache.UpdateRegion(core.ContextTODO(), updated)
 	require.NoError(t, err)
 	after := cache.GetHotPeerStats(utils.Read, 0)
 	require.False(t, after[1][0].IsLeader())
@@ -437,11 +446,11 @@ func TestRejectedRegionMetadataPreservesReadCache(t *testing.T) {
 					initial = initial.Clone(core.WithIncConfVer())
 				}
 			}
-			_, err = cluster.CheckAndPutRootTree(core.ContextTODO(), latest)
+			_, err = cache.UpdateRegion(core.ContextTODO(), latest)
 			require.NoError(t, err)
 			before := cache.GetHotPeerStats(utils.Read, 0)
 			cache.CheckRegionFlowAsync(initial)
-			_, err = cluster.CheckAndPutRootTree(core.ContextTODO(), initial)
+			_, err = cache.UpdateRegion(core.ContextTODO(), initial)
 			require.Error(t, err)
 			require.Equal(t, before, cache.GetHotPeerStats(utils.Read, 0))
 			require.True(t, cache.CheckReadPeerAsync(initial, initial.GetStorePeer(3), loads, utils.StoreHeartBeatReportInterval))
@@ -464,7 +473,7 @@ func TestOverlapRejectionPreservesReadMetadata(t *testing.T) {
 	cache.CheckRegionFlowAsync(merged)
 	_, err = cluster.CheckAndPutRootTree(core.ContextTODO(), neighbor.Clone(core.SetRegionVersion(12)))
 	require.NoError(t, err)
-	_, err = cluster.CheckAndPutRootTree(core.ContextTODO(), merged)
+	_, err = cache.UpdateRegion(core.ContextTODO(), merged)
 	require.Error(t, err)
 	require.Same(t, initial, cluster.GetRegion(initial.GetID()))
 	require.Equal(t, before, cache.GetHotPeerStats(utils.Read, 0), "rejected overlap metadata must preserve all read statistics")
@@ -475,7 +484,7 @@ func TestOverlapRejectionPreservesReadMetadata(t *testing.T) {
 
 func TestAcceptedReadMetadataAcrossDetachedBatches(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		cluster, cache, initial, _ := newHotReadCache(t, []uint64{1, 2, 3})
+		_, cache, initial, _ := newHotReadCache(t, []uint64{1, 2, 3})
 		started, release := make(chan struct{}), make(chan struct{})
 		unblock := sync.OnceFunc(func() { close(release) })
 		fp := "github.com/tikv/pd/pkg/statistics/afterReadRegionMetadataBatchSwap"
@@ -487,10 +496,12 @@ func TestAcceptedReadMetadataAcrossDetachedBatches(t *testing.T) {
 			unblock()
 			require.NoError(t, failpoint.Disable(fp))
 		})
-		cluster.PutRegion(initial.Clone(core.WithLeader(initial.GetStorePeer(2))))
+		_, err := cache.UpdateRegion(core.ContextTODO(), initial.Clone(core.WithLeader(initial.GetStorePeer(2))))
+		require.NoError(t, err)
 		<-started
 		latest := initial.Clone(core.WithLeader(initial.GetStorePeer(3)))
-		cluster.PutRegion(latest)
+		_, err = cache.UpdateRegion(core.ContextTODO(), latest)
+		require.NoError(t, err)
 		unblock()
 		after := cache.GetHotPeerStats(utils.Read, 0)
 		for storeID, stats := range after {
@@ -499,12 +510,12 @@ func TestAcceptedReadMetadataAcrossDetachedBatches(t *testing.T) {
 	})
 }
 
-func TestReadSampleDrainsPublicationsAfterRootSnapshot(t *testing.T) {
+func TestReadSampleUsesAcceptedPeerBeforeSampling(t *testing.T) {
 	for _, replaced := range []bool{false, true} {
 		t.Run(fmt.Sprintf("replaced=%t", replaced), func(t *testing.T) {
 			cluster, cache, initial, loads := newHotReadCache(t, nil)
 			latest := initial.Clone(core.WithRemoveStorePeer(3), core.WithAddPeer(&metapb.Peer{Id: 100, StoreId: 3}), core.WithIncConfVer())
-			fp := "github.com/tikv/pd/pkg/statistics/afterReadRegionRootSnapshot"
+			fp := "github.com/tikv/pd/pkg/statistics/beforeReadRegionMetadata"
 			require.NoError(t, failpoint.EnableCall(fp, sync.OnceFunc(func() { cluster.PutRegion(latest) })))
 			t.Cleanup(func() { require.NoError(t, failpoint.Disable(fp)) })
 			peer := initial.GetStorePeer(3)
@@ -513,7 +524,7 @@ func TestReadSampleDrainsPublicationsAfterRootSnapshot(t *testing.T) {
 			}
 			require.True(t, cache.CheckReadPeerAsync(initial, peer, loads, utils.StoreHeartBeatReportInterval))
 			after := cache.GetHotPeerStats(utils.Read, 0)
-			require.Same(t, latest, cluster.GetRegion(initial.GetID()), "publication must occur inside sample preparation")
+			require.Same(t, latest, cluster.GetRegion(initial.GetID()), "publication must occur before the sample reads accepted metadata")
 			if replaced {
 				require.Len(t, after[3], 1, "later metadata application must preserve the replacement's fresh sample")
 			} else {
@@ -524,9 +535,9 @@ func TestReadSampleDrainsPublicationsAfterRootSnapshot(t *testing.T) {
 }
 
 func TestReadMetadataRemovalAndRecovery(t *testing.T) {
-	for _, change := range []string{"unknown-term", "recreated", "removed", "reset"} {
+	for _, change := range []string{"unknown-term", "recreated", "removed", "reset", "replaced-before-heartbeat"} {
 		t.Run(change, func(t *testing.T) {
-			cluster, cache, initial, loads := newHotReadCache(t, []uint64{1, 2})
+			cluster, cache, initial, loads := newHotReadCache(t, []uint64{1, 2, 3})
 			initial = withHeartbeatTerm(initial, 100)
 			cluster.PutRegion(initial)
 			latest := initial.Clone(core.WithLeader(initial.GetStorePeer(2)))
@@ -535,20 +546,30 @@ func TestReadMetadataRemovalAndRecovery(t *testing.T) {
 				latest = withHeartbeatTerm(latest, 0)
 			case "recreated":
 				latest = withHeartbeatTerm(latest.Clone(core.SetRegionVersion(1), core.SetRegionConfVer(1)), 1)
+			case "replaced-before-heartbeat":
+				replaced := initial.Clone(core.WithRemoveStorePeer(3), core.WithAddPeer(&metapb.Peer{Id: 100, StoreId: 3}), core.WithIncConfVer())
+				cluster.PutRegion(replaced)
+				latest = replaced.Clone(core.WithLeader(replaced.GetStorePeer(2)))
 			case "removed":
 				cluster.RemoveRegion(initial)
 			case "reset":
 				cluster.ResetRegionCache()
 			}
 			if change == "removed" || change == "reset" {
-				require.Empty(t, cache.GetHotPeerStats(utils.Read, 0)[1])
 				require.True(t, cache.CheckReadPeerAsync(initial, initial.GetStorePeer(1), loads, utils.StoreHeartBeatReportInterval))
 				require.Empty(t, cache.GetHotPeerStats(utils.Read, 0)[1], "removed regions must not accept delayed samples")
 				require.Empty(t, cache.readCache.readMetadata)
 			} else {
-				_, err := cluster.CheckAndPutRootTree(core.ContextTODO(), latest)
+				_, err := cache.UpdateRegion(core.ContextTODO(), latest)
 				require.NoError(t, err)
 				require.True(t, cache.GetHotPeerStat(utils.Read, latest.GetID(), 2).IsLeader())
+				if change == "replaced-before-heartbeat" {
+					require.Empty(t, cache.GetHotPeerStats(utils.Read, 0)[3], "later heartbeats must not hide an earlier physical peer replacement")
+					require.True(t, cache.CheckReadPeerAsync(initial, initial.GetStorePeer(3), loads, utils.StoreHeartBeatReportInterval))
+					require.Empty(t, cache.GetHotPeerStats(utils.Read, 0)[3], "old peer samples must not resurrect the replacement")
+					require.True(t, cache.CheckReadPeerAsync(latest, latest.GetStorePeer(3), loads, utils.StoreHeartBeatReportInterval))
+					require.Len(t, cache.GetHotPeerStats(utils.Read, 0)[3], 1, "the replacement must accept a fresh sample")
+				}
 			}
 		})
 	}
@@ -726,7 +747,7 @@ func BenchmarkReadRegionPublication(b *testing.B) {
 					b.Fatal(err)
 				}
 				cache.CheckRegionFlowWithOriginAsync(region, origin)
-				if _, err := cluster.CheckAndPutRootTree(core.ContextTODO(), region); err != nil {
+				if _, err := cache.UpdateRegion(core.ContextTODO(), region); err != nil {
 					b.Fatal(err)
 				}
 				if i%64 == 0 {
