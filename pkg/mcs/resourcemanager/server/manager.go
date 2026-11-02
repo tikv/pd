@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -50,6 +51,9 @@ const (
 	tickPerSecond             = time.Second
 
 	pushMetricsTimeout = 10 * time.Second
+	// withdrawMetricsTimeout bounds deleting the pushed metrics, which a term
+	// end waits for.
+	withdrawMetricsTimeout = 3 * time.Second
 )
 
 type pushMetricsConfig struct {
@@ -871,6 +875,9 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			}
 			newPushMetricsConfig := getPushMetricsConfig(m.GetControllerConfig())
 			if pushMetricsConfig != newPushMetricsConfig {
+				if old := pushMetricsConfig.address; old != "" && old != newPushMetricsConfig.address {
+					withdrawPushedMetrics(old)
+				}
 				pushMetricsTicker = pushMetricsConfig.syncPushMetricsTicker(
 					newPushMetricsConfig,
 					pushMetricsTicker,
@@ -886,17 +893,15 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			if pushMetricsConfig.address == "" {
 				continue
 			}
-			podName := os.Getenv("HOSTNAME")
-			if podName == "" {
-				podName = "default"
-			}
 			pushCtx, cancel := context.WithTimeout(ctx, pushMetricsTimeout)
 			start := time.Now()
-			err := push.New(pushMetricsConfig.address, "resource_group_svc").
-				Grouping("pod", podName).
+			// A push replaces everything this pod pushed before, so peaks the
+			// timeline withdraws disappear from the push target as well.
+			err := newMetricsPusher(pushMetricsConfig.address).
 				Collector(readRequestUnitCost).
 				Collector(writeRequestUnitCost).
 				Collector(sqlLayerRequestUnitCost).
+				Collector(ruPeakPerSec).
 				PushContext(pushCtx)
 			cancel()
 			if err != nil {
@@ -905,5 +910,27 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			pushRUMetricsDuration.Observe(time.Since(start).Seconds())
 		}
 	}
+	if pushMetricsConfig.address != "" {
+		withdrawPushedMetrics(pushMetricsConfig.address)
+	}
 	log.Info("resource group manager background metrics flush loop exits")
+}
+
+func newMetricsPusher(address string) *push.Pusher {
+	podName := os.Getenv("HOSTNAME")
+	if podName == "" {
+		podName = "default"
+	}
+	return push.New(address, "resource_group_svc").Grouping("pod", podName)
+}
+
+// withdrawPushedMetrics deletes everything this pod pushed to address. A
+// Pushgateway keeps a group until it is replaced or deleted, so a target that
+// is no longer pushed to would otherwise expose the last peak as a current
+// value.
+func withdrawPushedMetrics(address string) {
+	err := newMetricsPusher(address).Client(&http.Client{Timeout: withdrawMetricsTimeout}).Delete()
+	if err != nil {
+		log.Warn("withdraw pushed metrics failed", zap.String("address", address), zap.Error(err))
+	}
 }
