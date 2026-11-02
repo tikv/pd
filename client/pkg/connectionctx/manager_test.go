@@ -17,7 +17,9 @@ package connectionctx
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
@@ -144,4 +146,92 @@ func TestEvictHook(t *testing.T) {
 	manager.ReleaseAll()
 	re.Error(ctx4.Err())
 	re.Equal([]int{1, 3, 2}, evicted)
+}
+
+func TestStoreWakesAllWaiters(t *testing.T) {
+	manager := NewManager[int]()
+	t.Cleanup(manager.ReleaseAll)
+	updated := manager.Updated()
+	results := make(chan int, 32)
+	for range cap(results) {
+		go func() {
+			select {
+			case <-updated:
+				if cc := manager.GetConnectionCtx("leader"); cc != nil {
+					results <- cc.Stream
+				}
+			case <-t.Context().Done():
+			}
+		}()
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	require.True(t, manager.Store(ctx, cancel, "leader", 42))
+	for range cap(results) {
+		select {
+		case value := <-results:
+			require.Equal(t, 42, value)
+		case <-time.After(time.Second):
+			t.Fatal("a waiter did not observe the stored connection")
+		}
+	}
+}
+
+func TestStoreNotificationGenerations(t *testing.T) {
+	manager := NewManager[int]()
+	t.Cleanup(manager.ReleaseAll)
+	for _, exclusive := range []bool{false, true} {
+		updated := manager.Updated()
+		ctx, cancel := context.WithCancel(t.Context())
+		var stored bool
+		if exclusive {
+			stored = manager.CleanAllAndStore(ctx, cancel, "new-leader", 2)
+		} else {
+			stored = manager.Store(ctx, cancel, "old-leader", 1)
+		}
+		require.True(t, stored)
+		select {
+		case <-updated:
+		default:
+			t.Fatal("a successful store did not wake waiters")
+		}
+	}
+	updated := manager.Updated()
+	ctx, cancel := context.WithCancel(t.Context())
+	require.False(t, manager.Store(ctx, cancel, "new-leader", 3))
+	require.False(t, manager.CleanAllAndStore(ctx, cancel, "new-leader", 3))
+	cancel()
+	select {
+	case <-updated:
+		t.Fatal("a rejected store woke waiters")
+	default:
+	}
+	ctx, cancel = context.WithCancel(t.Context())
+	require.True(t, manager.Store(ctx, cancel, "new-leader", 3, true))
+	select {
+	case <-updated:
+		require.Equal(t, 3, manager.GetConnectionCtx("new-leader").Stream)
+	default:
+		t.Fatal("a replacement did not wake waiters")
+	}
+}
+
+func TestConcurrentStoreNotifications(t *testing.T) {
+	manager := NewManager[int]()
+	t.Cleanup(manager.ReleaseAll)
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Go(func() {
+			for range 100 {
+				updated := manager.Updated()
+				ctx, cancel := context.WithCancel(t.Context())
+				manager.Store(ctx, cancel, "leader", 1, true)
+				select {
+				case <-updated:
+				case <-t.Context().Done():
+					return
+				}
+			}
+		})
+	}
+	wg.Wait()
 }
