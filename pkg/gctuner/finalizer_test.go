@@ -37,16 +37,27 @@ type testState struct {
 func TestFinalizer(t *testing.T) {
 	maxCount := int32(8)
 	state := &testState{}
+	completed := make(chan struct{}, 1)
 	f := newFinalizer(func() {
 		n := state.count.Add(1)
 		if n > maxCount {
 			t.Fatalf("cannot exec finalizer callback after f has been gc")
 		}
+		completed <- struct{}{}
 	})
 	for i := int32(1); i <= maxCount; i++ {
 		runtime.GC()
-		time.Sleep(10 * time.Millisecond)
-		require.Equal(t, i, state.count.Load())
+		select {
+		case <-completed:
+		case <-time.After(5 * time.Second):
+			t.Fatal("finalizer callback did not finish")
+		}
+		// Wait for the handler to rearm the finalizer before the next GC.
+		func() {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			require.Equal(t, i, state.count.Load())
+		}()
 	}
 	require.Nil(t, f.ref)
 
