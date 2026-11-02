@@ -65,6 +65,7 @@ func TestFinalizer(t *testing.T) {
 	require.Nil(t, f.ref)
 
 	f.stop()
+	finalizerHandler(&finalizerRef{parent: f})
 	require.Equal(t, maxCount, state.count.Load())
 	runtime.GC()
 	require.Equal(t, maxCount, state.count.Load())
