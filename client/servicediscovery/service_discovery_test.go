@@ -554,6 +554,67 @@ func TestUpdateMemberFastResponseUsesSingleProbe(t *testing.T) {
 	require.Zero(t, followerCalls.Load())
 }
 
+func TestUpdateMemberHealthySlowResponseUsesSingleProbe(t *testing.T) {
+	var followerCalls atomic.Int32
+	follower := startMemberProbeTestServer(t, func(context.Context) (*pdpb.GetMembersResponse, error) {
+		followerCalls.Add(1)
+		return nil, status.Error(codes.Unavailable, "unavailable")
+	})
+	var response atomic.Pointer[pdpb.GetMembersResponse]
+	leaderURL := startMemberProbeTestServer(t, func(ctx context.Context) (*pdpb.GetMembersResponse, error) {
+		timer := time.NewTimer(150 * time.Millisecond)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+			return response.Load(), nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	})
+	leader := &pdpb.Member{MemberId: 1, ClientUrls: []string{leaderURL}}
+	response.Store(&pdpb.GetMembersResponse{
+		Header: &pdpb.ResponseHeader{ClusterId: 42}, Members: []*pdpb.Member{leader}, Leader: leader,
+	})
+	cli := newMemberProbeTestDiscovery(t, []string{leaderURL, follower}, leaderURL)
+	_, err := cli.getMembers(cli.ctx, leaderURL, UpdateMemberTimeout)
+	require.NoError(t, err)
+	require.NoError(t, cli.updateMember())
+	cli.Close()
+	require.Zero(t, followerCalls.Load(), "a healthy slow response should not trigger an extra membership RPC")
+}
+
+func TestUpdateMemberStopsAfterFirstHedge(t *testing.T) {
+	blocked := startMemberProbeTestServer(t, func(ctx context.Context) (*pdpb.GetMembersResponse, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+	leaderURL := startMemberProbeTestLeader(t)
+	unused := startMemberProbeTestServer(t, func(context.Context) (*pdpb.GetMembersResponse, error) {
+		return nil, status.Error(codes.Unavailable, "unavailable")
+	})
+	unusedURL, err := url.Parse(unused)
+	require.NoError(t, err)
+	var unusedCalls atomic.Int32
+	cli := newMemberProbeTestDiscovery(t, []string{blocked, leaderURL, unused}, blocked)
+	cli.option.GRPCDialOptions = []grpc.DialOption{grpc.WithUnaryInterceptor(func(
+		ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption,
+	) error {
+		if cc.Target() == unusedURL.Host {
+			unusedCalls.Add(1)
+		}
+		return invoker(ctx, method, req, reply, cc, opts...)
+	})}
+	_, err = cli.getMembers(cli.ctx, leaderURL, UpdateMemberTimeout)
+	require.NoError(t, err)
+	_, err = cli.getMembers(cli.ctx, unused, UpdateMemberTimeout)
+	require.Error(t, err)
+	unusedCalls.Store(0)
+	require.NoError(t, cli.updateMember())
+	require.Equal(t, leaderURL, cli.getLeaderURL())
+	cli.Close()
+	require.Zero(t, unusedCalls.Load(), "a reachable backup should prevent probing the remaining endpoint")
+}
+
 func TestUpdateMemberRejectsInvalidResponses(t *testing.T) {
 	for _, foreign := range []bool{true, false} {
 		name := "missing-leader"

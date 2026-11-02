@@ -60,8 +60,10 @@ const (
 	// Use a shorter timeout to recover faster from network isolation.
 	UpdateMemberTimeout = time.Second
 
-	// Hedge slow membership requests without adding probes to the fast path.
-	memberUpdateHedgeDelay    = 20 * time.Millisecond
+	// Leave headroom for healthy requests during client bursts before probing
+	// other endpoints, while keeping recovery below the per-endpoint timeout.
+	memberUpdateHedgeDelay    = 200 * time.Millisecond
+	memberUpdateHedgeInterval = 20 * time.Millisecond
 	maxConcurrentMemberProbes = 3
 	serviceModeUpdateInterval = 3 * time.Second
 )
@@ -956,8 +958,12 @@ func (c *serviceDiscovery) updateMember() error {
 			select {
 			case result = <-results:
 			default:
-				for next < len(urls) && pending < maxConcurrentMemberProbes {
+				if next < len(urls) && pending < maxConcurrentMemberProbes {
 					startNext()
+				}
+				// Give a reachable backup time to reply before probing another.
+				if next < len(urls) && pending < maxConcurrentMemberProbes {
+					hedge.Reset(memberUpdateHedgeInterval)
 				}
 				continue
 			}
