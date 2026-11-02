@@ -52,7 +52,7 @@ func TestAffinityBalancerIdleLifecycle(t *testing.T) {
 	re.Equal(1.0, testutil.ToFloat64(affinityBalanceTargetsPlanned)-plannedTargets)
 	re.Equal(1.0, testutil.ToFloat64(affinityBalanceTargetsWritten)-writtenTargets)
 	re.Equal(1.0, testutil.ToFloat64(affinityBalancePlannerStops[balanceplan.StopBound])-stops)
-	re.Equal([2]int{27, 3}, balanceTableScore(f.affinityManager, balanceTestTable))
+	re.Equal([2]int{27, 3}, balanceTableScore(f.affinityManager, balanceTestTable()))
 	f.settle()
 	b, m := f.balancer, f.affinityManager
 	b.enqueue(ids[0])
@@ -63,21 +63,21 @@ func TestAffinityBalancerIdleLifecycle(t *testing.T) {
 		re.Equal(1.0, testutil.ToFloat64(affinityBalancePlanCounters[affinityBalanceNoImprovement])-noImprovement)
 		re.Equal(1.0, testutil.ToFloat64(affinityBalanceTablesRegistered))
 		re.Equal(1.0, testutil.ToFloat64(affinityBalanceTablesIdle))
-		idle := b.idle[balanceTestTable]
-		version, _ := m.GetBalanceVersion(balanceTestTable)
+		idle := b.idle[balanceTestTable()]
+		version, _ := m.GetBalanceVersion(balanceTestTable())
 		re.Equal(version, idle.version)
 		re.WithinDuration(time.Now().Add(5*time.Minute), idle.until, 2*time.Second)
 		f.AddRegionStore(id, 10)
 		f.SetStoreUp(id)
 		re.False(b.balance(t.Context()))
 		re.Equal(1.0, testutil.ToFloat64(affinityBalancePlanCounters[affinityBalanceNoImprovement])-noImprovement)
-		re.Equal(idle, b.idle[balanceTestTable])
+		re.Equal(idle, b.idle[balanceTestTable()])
 		if id == 4 {
 			f.policy(affinity.BalancePolicyFixed, ids[0])
 			f.policy(affinity.BalancePolicyAuto, ids[0])
 		} else {
 			idle.until = time.Now().Add(-time.Second)
-			b.idle[balanceTestTable] = idle
+			b.idle[balanceTestTable()] = idle
 		}
 		re.True(b.balance(t.Context()))
 		re.Positive(m.GetBalanceCounts().Voter[id])
@@ -126,7 +126,7 @@ func TestAffinityBalancerBatchAndDisabledTables(t *testing.T) {
 			f.SetHaltScheduling(false, "test")
 			f.SetPlacementRuleEnabled(true)
 			re.True(f.balancer.balance(t.Context()))
-			for _, table := range []affinity.TableID{balanceTestTable, "_tidb_pt_200"} {
+			for _, table := range []affinity.TableID{balanceTestTable(), affinity.TableID(balanceTestGroupID("_tidb_pt_200"))} {
 				re.Equal([2]int{12, 2}, balanceTableScore(f.affinityManager, table))
 			}
 			re.Equal(map[uint64]int{1: 2, 2: 1, 3: 1}, f.affinityManager.GetBalanceCounts().Leader)
@@ -138,7 +138,7 @@ func TestAffinityBalancerCreating(t *testing.T) {
 	re := require.New(t)
 	f := newAffinityBalanceTest(t, 3)
 	f.seed("100", 1, 1)
-	re.NoError(f.affinityManager.CreateAffinityGroups([]affinity.GroupKeyRanges{{GroupID: "_tidb_pt_100_p1"}}))
+	re.NoError(f.affinityManager.CreateAffinityGroups([]affinity.GroupKeyRanges{{GroupID: balanceTestGroupID("_tidb_pt_100_p2")}}))
 	creating := testutil.ToFloat64(affinityBalancePlanCounters[affinityBalanceCreating])
 	re.False(f.step())
 	re.Equal(1.0, testutil.ToFloat64(affinityBalancePlanCounters[affinityBalanceCreating])-creating)

@@ -41,12 +41,13 @@ func newMissingHeartbeatBalanceTest(t *testing.T) (*affinityBalanceTest, *core.R
 	t.Helper()
 	re := require.New(t)
 	f := newAffinityBalanceTest(t, 3)
-	group := &affinity.Group{ID: "_tidb_pt_100_p0", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}}
-	re.NoError(createAffinityGroupForTest(f.affinityManager, group, []byte("a"), []byte("c")))
-	f.AddLeaderRegionWithRange(1, "a", "b", 1, 2, 3)
-	f.group("_tidb_pt_100_p1", 3, 1, []uint64{1, 2, 3}, "d", "e")
-	f.group("_tidb_pt_100_p2", 4, 2, []uint64{1, 2, 3}, "f", "g")
-	f.policy(affinity.BalancePolicyFixed, "_tidb_pt_100_p1", "_tidb_pt_100_p2")
+	group := &affinity.Group{ID: balanceTestGroupID("_tidb_pt_100_p1"), LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}}
+	re.NoError(createAffinityGroupForTest(f.affinityManager, group, []byte(balanceTestKey("a")), []byte(balanceTestKey("c"))))
+	f.AddLeaderRegionWithRange(1, balanceTestKey("a"), balanceTestKey("b"), 1, 2, 3)
+	f.PutRegion(f.GetRegion(1).Clone(core.SetApproximateSize(1)))
+	f.group(balanceTestGroupID("_tidb_pt_100_p2"), 3, 1, []uint64{1, 2, 3}, "d", "e")
+	f.group(balanceTestGroupID("_tidb_pt_100_p3"), 4, 2, []uint64{1, 2, 3}, "f", "g")
+	f.policy(affinity.BalancePolicyFixed, balanceTestGroupID("_tidb_pt_100_p2"), balanceTestGroupID("_tidb_pt_100_p3"))
 	for _, region := range f.GetRegions() {
 		region = region.Clone(core.SetSource(core.Heartbeat))
 		f.PutRegion(region)
@@ -54,7 +55,7 @@ func newMissingHeartbeatBalanceTest(t *testing.T) (*affinityBalanceTest, *core.R
 	}
 	// This Region has never entered the cluster cache; the reported [a,b)
 	// Region keeps its original boundaries throughout the test.
-	missing := f.GetRegion(1).Clone(core.WithNewRegionID(2), core.WithStartKey([]byte("b")), core.WithEndKey([]byte("c")), core.SetSource(core.Heartbeat))
+	missing := f.GetRegion(1).Clone(core.WithNewRegionID(2), core.WithStartKey([]byte(balanceTestKey("b"))), core.WithEndKey([]byte(balanceTestKey("c"))), core.SetSource(core.Heartbeat))
 	writer := &heartbeatTargetWriter{}
 	f.affinityManager.SetTargetWriter(writer)
 	return f, missing, writer
@@ -65,7 +66,7 @@ func TestAffinityBalanceWaitsForMissingRegionHeartbeat(t *testing.T) {
 	f, missing, writer := newMissingHeartbeatBalanceTest(t)
 	re.Nil(f.GetRegion(missing.GetID()))
 	before := f.snapshot()
-	group := before.Group("_tidb_pt_100_p0")
+	group := before.Group(balanceTestGroupID("_tidb_pt_100_p1"))
 	target := group.Group
 	target.LeaderStoreID = 3
 	status, _ := f.validateBalancePlanTarget(t.Context(), before, group, &target, make(map[uint64]balanceCheckedRegion))
