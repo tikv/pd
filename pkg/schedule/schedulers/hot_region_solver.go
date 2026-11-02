@@ -850,7 +850,7 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*statistics.StoreLoadDetai
 				&filter.StoreStateFilter{ActionScope: bs.sche.GetName(), MoveRegion: true, OperatorLevel: constant.High},
 				filter.NewHotRegionEvictedTargetFilter(bs.sche.GetName()),
 			}
-			if !bs.GetSchedulerConfig().IsPlacementRulesEnabled() {
+			if !bs.GetSchedulerConfig().IsPlacementRulesEnabled() && len(bs.GetSchedulerConfig().GetLocationLabels()) > 0 {
 				// Moving the leader to a new store also replaces a peer, so
 				// preserve its location isolation when placement rules are disabled.
 				moveLeaderFilters = append(moveLeaderFilters, filter.NewPlacementSafeguard(bs.sche.GetName(), bs.GetSchedulerConfig(),

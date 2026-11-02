@@ -1691,14 +1691,23 @@ func TestHotReadRegionScheduleByteRateOnly(t *testing.T) {
 func TestHotReadMoveLeaderLocationSafeguard(t *testing.T) {
 	for _, enablePlacementRules := range []bool{false, true} {
 		for _, rankFormula := range []string{"v1", "v2"} {
-			for _, targetHost := range []string{"h2", "h5"} {
-				t.Run(fmt.Sprintf("rules=%t/rank=%s/target-host=%s", enablePlacementRules, rankFormula, targetHost), func(t *testing.T) {
+			for _, testCase := range []struct {
+				locationLabels []string
+				targetHost     string
+			}{
+				{nil, "h2"},
+				{nil, "h5"},
+				{[]string{"host"}, "h2"},
+				{[]string{"host"}, "h5"},
+			} {
+				t.Run(fmt.Sprintf("rules=%t/rank=%s/labels=%v/target-host=%s", enablePlacementRules, rankFormula, testCase.locationLabels, testCase.targetHost), func(t *testing.T) {
 					re := require.New(t)
 					cancel, _, tc, oc := prepareSchedulersTest()
 					defer cancel()
 					tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 					tc.SetEnablePlacementRules(enablePlacementRules)
 					tc.SetMaxReplicasWithLabel(enablePlacementRules, 3, "host")
+					tc.SetLocationLabels(testCase.locationLabels)
 					scheduler, err := CreateScheduler(readType, oc, storage.NewStorageWithMemoryBackend(), nil)
 					re.NoError(err)
 					hb := scheduler.(*hotScheduler)
@@ -1706,7 +1715,7 @@ func TestHotReadMoveLeaderLocationSafeguard(t *testing.T) {
 					hb.conf.setRankFormulaVersion(rankFormula)
 					hb.conf.setHistorySampleDuration(0)
 
-					for id, host := range map[uint64]string{1: "h1", 2: "h2", 3: "h3", 4: "h4", 5: targetHost} {
+					for id, host := range map[uint64]string{1: "h1", 2: "h2", 3: "h3", 4: "h4", 5: testCase.targetHost} {
 						tc.AddLabelsStore(id, 3, map[string]string{"host": host})
 					}
 					for id, rate := range map[uint64]float64{1: 7.5, 2: 4.9, 3: 3.7, 4: 6, 5: 0} {
@@ -1720,7 +1729,7 @@ func TestHotReadMoveLeaderLocationSafeguard(t *testing.T) {
 
 					ops, _ := hb.Schedule(tc, false)
 					re.Len(ops, 1)
-					if targetHost == "h2" {
+					if testCase.targetHost == "h2" && (enablePlacementRules || len(testCase.locationLabels) > 0) {
 						// Store 5 shares the host of an existing peer. Reject the
 						// replacement, but still allow transfer to an existing peer.
 						operatorutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 1, 3)

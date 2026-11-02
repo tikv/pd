@@ -1105,6 +1105,53 @@ func TestRevertRegionLocationWithoutLabels(t *testing.T) {
 	re.Empty(cache)
 }
 
+func BenchmarkHotReadFilterDstStores(b *testing.B) {
+	for _, labels := range [][]string{nil, {"host"}} {
+		name := "no-labels"
+		if len(labels) > 0 {
+			name = "host"
+		}
+		b.Run(name, func(b *testing.B) {
+			cancel, _, tc, oc := prepareSchedulersTest()
+			b.Cleanup(cancel)
+			tc.SetEnablePlacementRules(false)
+			tc.SetLocationLabels(labels)
+			for id := uint64(1); id <= 16; id++ {
+				tc.AddLabelsStore(id, 1, map[string]string{"host": fmt.Sprintf("h%d", id)})
+			}
+			peers := tc.AddRegionWithReadInfo(1, 1, units.MiB*utils.StoreHeartBeatReportInterval, 0, 0,
+				utils.StoreHeartBeatReportInterval, []uint64{2, 3})
+			scheduler, err := CreateScheduler(readType, oc, storage.NewStorageWithMemoryBackend(), nil)
+			require.NoError(b, err)
+			hot := scheduler.(*hotScheduler)
+			hot.conf.ReadPriorities = []string{utils.BytePriority, utils.KeyPriority}
+			bs := newBalanceSolver(hot, tc, utils.Read, transferLeader)
+			for id := uint64(1); id <= 16; id++ {
+				detail := &statistics.StoreLoadDetail{
+					StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: tc.GetStore(id)},
+					LoadPred:         (statistics.StoreLoad{}).ToLoadPred(utils.Read, nil),
+				}
+				detail.LoadPred.Expect.Loads = statistics.Loads{1, 1}
+				bs.stLoadDetail[id] = detail
+			}
+			bs.cur = &solution{srcStore: bs.stLoadDetail[1], region: tc.GetRegion(1)}
+			for _, peer := range peers {
+				if peer.IsLeader() {
+					bs.cur.mainPeerStat = peer
+				}
+			}
+			require.NotNil(b, bs.cur.mainPeerStat)
+			require.Len(b, bs.filterDstStores(), 15)
+			b.ReportAllocs()
+			for b.Loop() {
+				if candidates := bs.filterDstStores(); len(candidates) != 15 {
+					b.Fatalf("expected 15 candidate stores, got %d", len(candidates))
+				}
+			}
+		})
+	}
+}
+
 func BenchmarkRevertRegionLocationSafeguard(b *testing.B) {
 	for _, labels := range [][]string{nil, {"host"}, {"zone", "rack", "host"}} {
 		name := strings.Join(labels, ",")
