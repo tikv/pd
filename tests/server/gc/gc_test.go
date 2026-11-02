@@ -34,7 +34,6 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
-	"github.com/tikv/pd/pkg/errs"
 	gcmanager "github.com/tikv/pd/pkg/gc"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
@@ -1070,7 +1069,89 @@ func TestGetGCStateSlowPathReadsLatestStateIfLeaderLostBeforeRead(t *testing.T) 
 	re.Equal(uint64(20), res.resp.GetGcState().GetTxnSafePoint())
 }
 
+func TestGCReadApplicationErrorsRemainInHeader(t *testing.T) {
+	cluster := newWatchGCStatesCluster(t, 1, true)
+	leader := cluster.GetLeaderServer()
+	client := newWatchGCStatesClient(t, leader.GetAddr())
+	header := testutil.NewRequestHeader(leader.GetClusterID())
+	const iteratorError = "github.com/tikv/pd/pkg/gc/iterateAllKeyspacesGCStatesError"
+	require.NoError(t, failpoint.Enable(iteratorError, `return("storage read failed")`))
+	defer func() { require.NoError(t, failpoint.Disable(iteratorError)) }()
+	for _, testCase := range []struct {
+		name string
+		read func() (*pdpb.ResponseHeader, error)
+	}{
+		{
+			name: "GetGCState",
+			read: func() (*pdpb.ResponseHeader, error) {
+				resp, err := client.GetGCState(t.Context(), &pdpb.GetGCStateRequest{
+					Header: header, KeyspaceScope: makeKeyspaceScope(100000),
+				})
+				return resp.GetHeader(), err
+			},
+		},
+		{
+			name: "GetAllKeyspacesGCStates",
+			read: func() (*pdpb.ResponseHeader, error) {
+				resp, err := client.GetAllKeyspacesGCStates(t.Context(), &pdpb.GetAllKeyspacesGCStatesRequest{Header: header})
+				return resp.GetHeader(), err
+			},
+		},
+		{
+			name: "GetAllGCSafePointV2",
+			read: func() (*pdpb.ResponseHeader, error) {
+				//nolint:staticcheck
+				resp, err := client.GetAllGCSafePointV2(t.Context(), &pdpb.GetAllGCSafePointV2Request{Header: header})
+				return resp.GetHeader(), err
+			},
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			header, err := testCase.read()
+			require.NoError(t, err)
+			require.NotNil(t, header.GetError())
+			require.Equal(t, pdpb.ErrorType_UNKNOWN, header.GetError().GetType())
+		})
+	}
+}
+
 func TestGetGCStateLeaderTransferRetiresInFlightLoad(t *testing.T) {
+	for _, testCase := range []struct {
+		name string
+		read func(context.Context, pdpb.PDClient, *pdpb.GetGCStateRequest) (any, error)
+	}{
+		{
+			name: "GetGCState",
+			read: func(ctx context.Context, client pdpb.PDClient, req *pdpb.GetGCStateRequest) (any, error) {
+				return client.GetGCState(ctx, req)
+			},
+		},
+		{
+			name: "GetAllKeyspacesGCStates",
+			read: func(ctx context.Context, client pdpb.PDClient, req *pdpb.GetGCStateRequest) (any, error) {
+				return client.GetAllKeyspacesGCStates(ctx, &pdpb.GetAllKeyspacesGCStatesRequest{
+					Header:                  req.GetHeader(),
+					ExcludeGcBarriers:       true,
+					ExcludeGlobalGcBarriers: true,
+				})
+			},
+		},
+		{
+			name: "GetAllGCSafePointV2",
+			read: func(ctx context.Context, client pdpb.PDClient, req *pdpb.GetGCStateRequest) (any, error) {
+				//nolint:staticcheck
+				return client.GetAllGCSafePointV2(ctx, &pdpb.GetAllGCSafePointV2Request{Header: req.GetHeader()})
+			},
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			testGCReadLeaderTransferRetiresInFlightLoad(t, testCase.read)
+		})
+	}
+}
+
+func testGCReadLeaderTransferRetiresInFlightLoad(t *testing.T, readRPC func(context.Context, pdpb.PDClient, *pdpb.GetGCStateRequest) (any, error)) {
+	t.Helper()
 	re := require.New(t)
 	// Observe actual cache stores, including the initial NextGen warmup. Waiting
 	// for that warmup prevents it from racing with the later cache invalidation.
@@ -1147,12 +1228,8 @@ func TestGetGCStateLeaderTransferRetiresInFlightLoad(t *testing.T) {
 	defer conn.Close()
 	req.ExcludeGcBarriers = true
 	type result struct {
-		resp *pdpb.GetGCStateResponse
+		resp any
 		err  error
-	}
-	request := func(done chan<- result) {
-		resp, err := client.GetGCState(ctx, req)
-		done <- result{resp: resp, err: err}
 	}
 	wait := func(event <-chan struct{}, description string) {
 		t.Helper()
@@ -1166,19 +1243,23 @@ func TestGetGCStateLeaderTransferRetiresInFlightLoad(t *testing.T) {
 		t.Helper()
 		select {
 		case result := <-done:
-			re.NoError(result.err)
-			re.NotNil(result.resp.GetHeader().GetError())
-			re.Contains(result.resp.GetHeader().GetError().GetMessage(), errs.ErrNotLeader.Error())
-			re.Nil(result.resp.GetGcState())
+			re.Equal(codes.Unavailable, status.Code(result.err))
+			re.Nil(result.resp)
 		case <-time.After(5 * time.Second):
 			t.Fatal("old-generation reader did not exit after retirement")
 		}
 	}
 	owner := make(chan result, 1)
-	go request(owner)
+	go func() {
+		resp, err := readRPC(ctx, client, req)
+		owner <- result{resp: resp, err: err}
+	}()
 	wait(read, "cold batch did not finish its storage read")
 	waiter := make(chan result, 1)
-	go request(waiter)
+	go func() {
+		resp, err := client.GetGCState(ctx, req)
+		waiter <- result{resp: resp, err: err}
+	}()
 	wait(joined, "foreground reader did not join the in-flight batch")
 	re.NoError(oldLeader.ResignLeaderWithRetry())
 	wait(canceled, "RaftCluster.Stop did not cancel the old generation")
