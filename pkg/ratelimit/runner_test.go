@@ -100,3 +100,62 @@ func TestConcurrentRunner(t *testing.T) {
 		require.Greater(t, updatedSubmitted, lastSubmitted)
 	})
 }
+
+func TestConcurrentRunnerStopWhileWaitingForToken(t *testing.T) {
+	limiter := NewConcurrencyLimiter(1)
+	token, err := limiter.AcquireToken(context.Background())
+	require.NoError(t, err)
+	defer limiter.ReleaseToken(token)
+
+	runner := NewConcurrentRunner("stop-while-waiting", limiter, time.Second)
+	runner.Start(context.Background())
+	t.Cleanup(runner.Stop)
+	runner.taskChan <- &Task{f: func(context.Context) {
+		t.Error("task ran without a limiter token")
+	}}
+	require.Eventually(t, func() bool {
+		return limiter.GetWaitingTasksNum() == 1
+	}, time.Second, time.Millisecond)
+
+	stopped := make(chan struct{})
+	go func() {
+		runner.Stop()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		t.Fatal("runner did not cancel token acquisition")
+	}
+	require.Zero(t, limiter.GetWaitingTasksNum())
+}
+
+func TestConcurrentRunnerReleasesTokenOnCancellation(t *testing.T) {
+	limiter := NewConcurrencyLimiter(1)
+	runner := NewConcurrentRunner("cancel-after-acquisition", limiter, time.Second)
+	runner.Start(context.Background())
+	t.Cleanup(runner.Stop)
+
+	token, err := limiter.AcquireToken(runner.ctx)
+	require.NoError(t, err)
+	// Stop after acquisition, before the worker starts running.
+	runner.Stop()
+	runner.run(runner.ctx, &Task{f: func(context.Context) {
+		t.Error("canceled task ran")
+	}}, token)
+	require.Zero(t, limiter.GetRunningTasksNum())
+
+	runner.Start(context.Background())
+	ran := make(chan struct{})
+	runner.taskChan <- &Task{name: "after-restart", f: func(context.Context) {
+		close(ran)
+	}}
+	select {
+	case <-ran:
+	case <-time.After(time.Second):
+		t.Fatal("runner did not reuse the released token")
+	}
+	require.Eventually(t, func() bool {
+		return limiter.GetRunningTasksNum() == 0
+	}, time.Second, time.Millisecond)
+}

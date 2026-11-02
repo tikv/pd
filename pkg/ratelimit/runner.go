@@ -117,7 +117,7 @@ func (cr *ConcurrentRunner) Start(ctx context.Context) {
 			select {
 			case task := <-cr.taskChan:
 				if cr.limiter != nil {
-					token, err := cr.limiter.AcquireToken(context.Background())
+					token, err := cr.limiter.AcquireToken(cr.ctx)
 					if err != nil {
 						continue
 					}
@@ -149,16 +149,18 @@ func (cr *ConcurrentRunner) Start(ctx context.Context) {
 
 func (cr *ConcurrentRunner) run(ctx context.Context, task *Task, token *TaskToken) {
 	start := time.Now()
+	if token != nil {
+		defer func() {
+			cr.limiter.ReleaseToken(token)
+			cr.processPendingTasks()
+		}()
+	}
 	select {
 	case <-ctx.Done():
 		return
 	default:
 	}
 	task.f(ctx)
-	if token != nil {
-		cr.limiter.ReleaseToken(token)
-		cr.processPendingTasks()
-	}
 	runnerTaskExecutionDuration.WithLabelValues(cr.name, task.name).Observe(time.Since(start).Seconds())
 	runnerSucceededTasks.WithLabelValues(cr.name, task.name).Inc()
 }
