@@ -225,6 +225,13 @@ tsoBatchLoop:
 			}
 			// Check stream and retry if necessary.
 			if stream == nil {
+				failpoint.InjectCall("beforeSubscribeTSOStreamUpdates")
+				// Subscribe before checking again: the background updater may publish a
+				// stream between the first lookup and this subscription.
+				updated := conCtxMgr.Updated()
+				if conCtxMgr.RandomlyPick() != nil {
+					continue streamChoosingLoop
+				}
 				log.Info("[tso] tso stream is not ready")
 				if provider.updateConnectionCtxs(ctx) {
 					continue streamChoosingLoop
@@ -244,6 +251,9 @@ tsoBatchLoop:
 					td.cancelCollectedRequests(tsoBatchController, invalidStreamID, errors.WithStack(err))
 					timer.Stop()
 					continue tsoBatchLoop
+				case <-updated:
+					timer.Stop()
+					continue streamChoosingLoop
 				case <-timer.C:
 					timer.Stop()
 					continue streamChoosingLoop
