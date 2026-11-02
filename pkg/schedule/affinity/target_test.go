@@ -76,42 +76,29 @@ func targetFor(m *Manager, id string, leader uint64, voters ...uint64) GroupTarg
 func TestUpdateAffinityGroupTargets(t *testing.T) {
 	re := require.New(t)
 	manager, store := newTargetTestManager(t)
-	ids := []string{"stale"}
-	for i := range etcdutil.MaxEtcdTxnOps {
-		ids = append(ids, fmt.Sprintf("g%03d", i))
-	}
-	groups := make([]GroupKeyRanges, 0, len(ids))
-	for _, id := range ids {
-		groups = append(groups, GroupKeyRanges{GroupID: id})
-	}
-	re.NoError(manager.CreateAffinityGroups(groups))
+	const id = "g"
+	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "stale"}, {GroupID: id}}))
 
-	// The targets take two transactions. A target decided from another value of
-	// its group, or for a missing group, is not written.
-	targets := []GroupTarget{{Expected: Group{ID: "missing"}, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}}}
-	for _, id := range ids {
-		target := targetFor(manager, id, 2, 3, 2, 1)
-		if id == "stale" {
-			target.Expected.CreateTimestamp++
-		}
-		targets = append(targets, target)
-	}
-	written, err := manager.UpdateAffinityGroupTargets(targets)
+	// A target for a missing or changed group is not written.
+	stale := targetFor(manager, "stale", 2, 3, 2, 1)
+	stale.Expected.CreateTimestamp++
+	written, err := manager.UpdateAffinityGroupTargets([]GroupTarget{
+		{Expected: Group{ID: "missing"}, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}},
+		stale,
+		targetFor(manager, id, 2, 3, 2, 1),
+	})
 	re.NoError(err)
-	re.Equal(ids[1:], written)
-	for _, id := range ids[1:] {
-		state := manager.GetAffinityGroupState(id)
-		re.True(state.AffinitySchedulingAllowed)
-		re.Equal([]uint64{1, 2, 3}, state.VoterStoreIDs)
-		re.Equal(state.Group, *loadStoredGroup(re, store, id))
-	}
+	re.Equal([]string{id}, written)
+	state := manager.GetAffinityGroupState(id)
+	re.True(state.AffinitySchedulingAllowed)
+	re.Equal([]uint64{1, 2, 3}, state.VoterStoreIDs)
+	re.Equal(state.Group, *loadStoredGroup(re, store, id))
 	re.Zero(manager.GetAffinityGroupState("stale").LeaderStoreID)
 	re.Zero(loadStoredGroup(re, store, "stale").LeaderStoreID)
 
 	// A commit that the Manager did not see leaves its memory stale. A target
 	// decided from the stale memory is not written, and the memory is refreshed
 	// with the availability that the store conditions known now give.
-	id := ids[1]
 	committed := manager.GetAffinityGroupState(id).Group
 	committed.LeaderStoreID = 1
 	re.NoError(store.RunInTxn(t.Context(), func(txn kv.Txn) error { return store.SaveAffinityGroup(txn, id, &committed) }))
@@ -267,10 +254,7 @@ func (w *fakeTargetWriter) WriteGroupTargets(_ context.Context, targets []GroupT
 }
 
 func TestObserveAvailableRegionWithTargetWriter(t *testing.T) {
-	region := core.NewRegionInfo(
-		&metapb.Region{Id: 10, Peers: []*metapb.Peer{{Id: 11, StoreId: 2, Role: metapb.PeerRole_Voter}, {Id: 12, StoreId: 1, Role: metapb.PeerRole_Voter}}},
-		&metapb.Peer{Id: 12, StoreId: 1, Role: metapb.PeerRole_Voter},
-	)
+	region := generateRegionForTest(10, []uint64{1, 2}, nonOverlappingRange)
 	written := func(target GroupTarget) ([]string, error) { return []string{target.Expected.ID}, nil }
 	for _, tc := range []struct {
 		name string
@@ -284,10 +268,10 @@ func TestObserveAvailableRegionWithTargetWriter(t *testing.T) {
 		{name: "written", reply: written, available: true, leader: 1},
 		{name: "not written", reply: func(GroupTarget) ([]string, error) { return nil, nil }},
 		{name: "write failed", reply: func(GroupTarget) ([]string, error) { return nil, errors.New("PD is unavailable") }, failed: true},
-		{name: "watcher first", apply: func(target GroupTarget) *Group { return target.result(&target.Expected) }, reply: written, available: true, leader: 1},
+		{name: "watcher first", apply: func(target GroupTarget) *Group { return target.result() }, reply: written, available: true, leader: 1},
 		// A target that the watcher delivers is used, while the written one is not published.
 		{name: "changed meanwhile", apply: func(target GroupTarget) *Group {
-			other := target.result(&target.Expected)
+			other := target.result()
 			other.LeaderStoreID, other.VoterStoreIDs = 3, []uint64{3, 4}
 			return other
 		}, reply: written, available: true, leader: 3},
@@ -368,10 +352,7 @@ func TestTargetAvailability(t *testing.T) {
 			write: func(GroupTarget) { manager.applyStoreConditions(map[uint64]storeCondition{2: storeRemoving}) },
 			reply: func(target GroupTarget) ([]string, error) { return []string{target.Expected.ID}, nil },
 		})
-		region := core.NewRegionInfo(
-			&metapb.Region{Id: 10, Peers: []*metapb.Peer{{Id: 11, StoreId: 2, Role: metapb.PeerRole_Voter}, {Id: 12, StoreId: 1, Role: metapb.PeerRole_Voter}}},
-			&metapb.Peer{Id: 12, StoreId: 1, Role: metapb.PeerRole_Voter},
-		)
+		region := generateRegionForTest(10, []uint64{1, 2}, nonOverlappingRange)
 		manager.ObserveAvailableRegion(region, manager.GetAffinityGroupState("g"))
 		state := manager.GetAffinityGroupState("g")
 		re.Equal([]uint64{1, 2}, state.VoterStoreIDs)
@@ -393,58 +374,22 @@ func TestObserveAvailableRegionConfirmsTarget(t *testing.T) {
 	manager.DegradeAffinityGroup("g")
 	re.False(manager.GetAffinityGroupState("g").AffinitySchedulingAllowed)
 
-	region := core.NewRegionInfo(
-		&metapb.Region{Id: 10, Peers: []*metapb.Peer{{Id: 11, StoreId: 2, Role: metapb.PeerRole_Voter}, {Id: 12, StoreId: 1, Role: metapb.PeerRole_Voter}}},
-		&metapb.Peer{Id: 12, StoreId: 1, Role: metapb.PeerRole_Voter},
-	)
+	region := generateRegionForTest(10, []uint64{1, 2}, nonOverlappingRange)
 	manager.ObserveAvailableRegion(region, manager.GetAffinityGroupState("g"))
 	re.Empty(writer.targets)
 	re.True(manager.GetAffinityGroupState("g").AffinitySchedulingAllowed)
 }
 
-// TestSameStoredGroupComparesEveryField checks that sameStoredGroup compares every
-// persisted field, so that a field added to Group is not left out.
-func TestSameStoredGroupComparesEveryField(t *testing.T) {
-	re := require.New(t)
+// TestStoredGroupFields checks comparison and synchronization of every persisted field.
+func TestStoredGroupFields(t *testing.T) {
 	base := Group{ID: "g", CreateTimestamp: 1, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2}}
 	reordered := base
 	reordered.VoterStoreIDs = []uint64{2, 1}
-	re.True(sameStoredGroup(&base, &reordered))
+	require.True(t, sameStoredGroup(&base, &reordered))
 	typ := reflect.TypeFor[Group]()
 	for i := range typ.NumField() {
-		changed := base
-		changed.VoterStoreIDs = slices.Clone(base.VoterStoreIDs)
-		field := reflect.ValueOf(&changed).Elem().Field(i)
-		switch field.Kind() {
-		case reflect.String:
-			field.SetString(field.String() + "x")
-		case reflect.Uint64:
-			field.SetUint(field.Uint() + 1)
-		case reflect.Slice:
-			field.Set(reflect.Append(field, reflect.ValueOf(uint64(3))))
-		default:
-			re.Failf("unexpected field", "field %s has kind %s", typ.Field(i).Name, field.Kind())
-		}
-		re.False(sameStoredGroup(&base, &changed), typ.Field(i).Name)
-	}
-}
-
-// TestSyncGroupFromEtcdKeepsEveryField checks that a group synced from etcd
-// reaches memory with every persisted field, so that a field added to Group is
-// not left out of memory. Otherwise every target written for the group would
-// be rejected, because it would carry the old value as its expected group.
-func TestSyncGroupFromEtcdKeepsEveryField(t *testing.T) {
-	typ := reflect.TypeFor[Group]()
-	for i := range typ.NumField() {
-		name := typ.Field(i).Name
-		if name == "ID" {
-			continue
-		}
-		t.Run(name, func(t *testing.T) {
+		t.Run(typ.Field(i).Name, func(t *testing.T) {
 			re := require.New(t)
-			manager, _ := newTargetTestManager(t)
-			base := Group{ID: "g", CreateTimestamp: 1, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2}}
-			manager.SyncGroupFromEtcd(&base)
 			changed := base
 			changed.VoterStoreIDs = slices.Clone(base.VoterStoreIDs)
 			field := reflect.ValueOf(&changed).Elem().Field(i)
@@ -456,11 +401,15 @@ func TestSyncGroupFromEtcdKeepsEveryField(t *testing.T) {
 			case reflect.Slice:
 				field.Set(reflect.Append(field, reflect.ValueOf(uint64(3))))
 			default:
-				re.Failf("unexpected field", "field %s has kind %s", name, field.Kind())
+				re.Failf("unexpected field", "field %s has kind %s", typ.Field(i).Name, field.Kind())
 			}
-			manager.SyncGroupFromEtcd(&changed)
-			got := manager.GetAffinityGroupState("g").Group
-			re.Truef(sameStoredGroup(&got, &changed), "memory %+v, stored %+v", got, changed)
+			re.False(sameStoredGroup(&base, &changed))
+			if typ.Field(i).Name != "ID" {
+				manager, _ := newTargetTestManager(t)
+				manager.SyncGroupFromEtcd(&base)
+				manager.SyncGroupFromEtcd(&changed)
+				re.Equal(changed, manager.GetAffinityGroupState(base.ID).Group)
+			}
 		})
 	}
 }

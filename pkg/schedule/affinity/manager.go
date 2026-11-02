@@ -563,21 +563,18 @@ func (m *Manager) syncGroupTargetLocked(groupInfo *runtimeGroupInfo, group *Grou
 		m.updateGroupLabelRuleLockedWithCount(group.ID, groupInfo.LabelRule, groupInfo.RangeCount, false)
 		return
 	}
-	if groupInfo.BalancePolicy != group.BalancePolicy {
-		groupInfo.BalancePolicy = group.BalancePolicy
+	// Publishing a normalized target also normalizes the voter order in memory.
+	if sameStoredGroup(&groupInfo.Group, group) && groupInfo.BalancePolicy == group.BalancePolicy && slices.Equal(groupInfo.VoterStoreIDs, group.VoterStoreIDs) {
+		return
+	}
+	policyChanged := groupInfo.BalancePolicy != group.BalancePolicy
+	targetChanged := groupInfo.LeaderStoreID != group.LeaderStoreID || !slices.Equal(groupInfo.VoterStoreIDs, group.VoterStoreIDs)
+	groupInfo.Group = *group
+	groupInfo.VoterStoreIDs = slices.Clone(group.VoterStoreIDs)
+	if policyChanged {
 		m.touchBalanceTableLocked(groupInfo.ID)
 	}
-	changed := false
-	if groupInfo.LeaderStoreID != group.LeaderStoreID {
-		groupInfo.LeaderStoreID = group.LeaderStoreID
-		changed = true
-	}
-	if !slices.Equal(groupInfo.VoterStoreIDs, group.VoterStoreIDs) {
-		groupInfo.VoterStoreIDs = slices.Clone(group.VoterStoreIDs)
-		changed = true
-	}
-
-	if changed {
+	if targetChanged {
 		m.setTargetAvailabilityLocked(groupInfo)
 		m.resetCountLocked(groupInfo)
 	}

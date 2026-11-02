@@ -228,7 +228,7 @@ func TestCommitBalanceTargetsChunks(t *testing.T) {
 			targets, ids := make([]*Group, 0, len(groups)), make([]string, 0, len(groups))
 			for _, group := range snapshot.Groups {
 				target := targetFor(m, group.ID, 1, 1, 2, 3)
-				targets = append(targets, target.result(&target.Expected))
+				targets = append(targets, target.result())
 				ids = append(ids, group.ID)
 			}
 			ctx, cancel := context.WithCancel(t.Context())
@@ -290,7 +290,7 @@ func TestCommitBalanceTargetsAfterLostReply(t *testing.T) {
 	commit := func(leader uint64) ([]string, error) {
 		snapshot := m.GetBalanceSnapshot("_tidb_pt_100", m.GetBalanceCounts())
 		target := targetFor(m, id, leader, 1, 2, 3)
-		return m.CommitBalanceTargets(t.Context(), snapshot, []*Group{target.result(&target.Expected)})
+		return m.CommitBalanceTargets(t.Context(), snapshot, []*Group{target.result()})
 	}
 	_, err := commit(1)
 	re.Error(err)

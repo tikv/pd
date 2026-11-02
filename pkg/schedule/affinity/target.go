@@ -164,19 +164,16 @@ func (m *Manager) updateGroupTargetsLocked(ctx context.Context, targets []GroupT
 			}
 			group.VoterStoreIDs = sortedStoreIDs(group.VoterStoreIDs)
 			stored[i] = group
+			result := target.result()
 			switch {
-			case sameStoredGroup(group, &target.Expected):
-				saved[i] = target.result(group)
-				// A stored group that already holds the target, as when a Region
-				// confirms the current target, is not written again.
-				if !sameStoredGroup(saved[i], group) {
-					if err := m.storage.SaveAffinityGroup(txn, group.ID, saved[i]); err != nil {
-						return err
-					}
-				}
-			case sameStoredGroup(group, target.result(&target.Expected)):
-				// An earlier request with this target committed.
+			case sameStoredGroup(group, result):
+				// The target is already stored, including after a lost reply.
 				saved[i] = group
+			case sameStoredGroup(group, &target.Expected):
+				if err := m.storage.SaveAffinityGroup(txn, group.ID, result); err != nil {
+					return err
+				}
+				saved[i] = result
 			}
 		}
 		return nil
@@ -241,7 +238,7 @@ func (m *Manager) sendGroupTargets(ctx context.Context, targets []GroupTarget) (
 		}
 		current := m.GetAffinityGroupState(target.Expected.ID)
 		// The watcher may have applied the target already.
-		result := target.result(&target.Expected)
+		result := target.result()
 		if current == nil || !sameStoredGroup(&current.Group, &target.Expected) && !sameStoredGroup(&current.Group, result) {
 			continue
 		}
@@ -266,9 +263,9 @@ func (m *Manager) refreshGroupTargetLocked(stored *Group) {
 	m.syncGroupTargetLocked(groupInfo, stored)
 }
 
-// result returns the stored group after the target is written to it.
-func (t *GroupTarget) result(stored *Group) *Group {
-	group := *stored
+// result returns the expected group with the target applied.
+func (t *GroupTarget) result() *Group {
+	group := t.Expected
 	group.LeaderStoreID = t.LeaderStoreID
 	group.VoterStoreIDs = slices.Clone(t.VoterStoreIDs)
 	return &group

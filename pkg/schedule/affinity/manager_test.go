@@ -266,6 +266,40 @@ func TestSyncGroupFromEtcdUpdatesBalancePolicy(t *testing.T) {
 	re.Equal(uint64(2), updated.LeaderStoreID, "policy-only updates must not discard an in-flight peer update")
 }
 
+func TestSyncGroupPolicyKeepsRuntimeState(t *testing.T) {
+	re := require.New(t)
+	manager, _ := newTargetTestManager(t)
+	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "g", KeyRanges: []keyutil.KeyRange{nonOverlappingRange}}}))
+	_, err := manager.UpdateAffinityGroupPeers("g", 1, []uint64{1, 2, 3})
+	re.NoError(err)
+	_, isAffinity := manager.GetAndCacheRegionAffinityGroupState(generateRegionForTest(1, []uint64{1, 2, 3}, nonOverlappingRange))
+	re.True(isAffinity)
+	before := manager.GetAffinityGroupState("g")
+	re.Equal(1, before.AffinityRegionCount)
+
+	// A policy update must not recompute availability from newly known conditions.
+	manager.Lock()
+	manager.unavailableStores[1] = storeDown
+	manager.Unlock()
+	updated := before.Group
+	updated.BalancePolicy = BalancePolicyFixed
+	manager.SyncGroupFromEtcd(&updated)
+	after := manager.GetAffinityGroupState("g")
+	re.Equal(BalancePolicyFixed, after.BalancePolicy)
+	re.Equal(before.affinityVer, after.affinityVer)
+	re.Equal(before.AffinityRegionCount, after.AffinityRegionCount)
+	re.Equal(before.RegionCount, after.RegionCount)
+	re.Equal(before.AffinitySchedulingAllowed, after.AffinitySchedulingAllowed)
+
+	// Changing the target still resets Region affinity and applies the conditions.
+	updated.LeaderStoreID = 2
+	manager.SyncGroupFromEtcd(&updated)
+	after = manager.GetAffinityGroupState("g")
+	re.Greater(after.affinityVer, before.affinityVer)
+	re.Zero(after.AffinityRegionCount)
+	re.False(after.AffinitySchedulingAllowed)
+}
+
 func TestBalancePolicyValidationAtMetadataEntrypoints(t *testing.T) {
 	re := require.New(t)
 	ctx := t.Context()

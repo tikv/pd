@@ -343,22 +343,8 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affini
 	}
 
 	// Step 3: Save the information in memory.
-	m.Lock()
-	defer m.Unlock()
-	groupInfo, ok := m.groups[groupID]
-	if !ok {
-		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
-	}
-	if groupInfo.CreateTimestamp != group.CreateTimestamp {
-		// The group was deleted and created again in storage.
-		m.syncGroupTargetLocked(groupInfo, &group.Group)
-		groupInfo = m.groups[groupID]
-	}
-	groupInfo.Group = group.Group
-	// A store may have become unavailable since the target was checked.
-	m.setTargetAvailabilityLocked(groupInfo)
-	m.resetCountLocked(groupInfo)
-	return newGroupState(groupInfo), nil
+	m.publishGroupTargetLocked(&group.Group)
+	return m.GetAffinityGroupState(groupID), nil
 }
 
 // updateObservedGroupPeers sets a target observed from a healthy Region. The
@@ -396,6 +382,7 @@ func (m *Manager) updateObservedGroupPeers(groupID string, affinityVer uint64, l
 	if _, err := m.sendGroupTargets(m.ctx, []GroupTarget{*target}); err != nil {
 		return nil, err
 	}
+
 	return m.GetAffinityGroupState(groupID), nil
 }
 
