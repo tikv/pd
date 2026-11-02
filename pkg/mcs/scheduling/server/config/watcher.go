@@ -30,8 +30,11 @@ import (
 
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -56,6 +59,8 @@ type Watcher struct {
 	ttlConfigWatcher       *etcdutil.LoopWatcher
 	schedulerConfigWatcher *etcdutil.LoopWatcher
 
+	basicCluster *core.BasicCluster
+
 	// Some data, like the global schedule config, should be loaded into `PersistConfig`.
 	*PersistConfig
 	// Some data, like the scheduler configs, should be loaded into the storage
@@ -65,9 +70,6 @@ type Watcher struct {
 	// schedulersController is used to trigger the scheduler's config reloading.
 	// Store as `*schedulers.Controller`.
 	schedulersController atomic.Value
-	// onScheduleConfigUpdated is late-bound after the initial config load because
-	// the watcher is created before the scheduling cluster owns its runtime resources.
-	onScheduleConfigUpdated atomic.Pointer[func()]
 }
 
 type persistedConfig struct {
@@ -101,6 +103,7 @@ func NewWatcher(
 	ctx context.Context,
 	etcdClient *clientv3.Client,
 	persistConfig *PersistConfig,
+	basicCluster *core.BasicCluster,
 	storage storage.Storage,
 ) (*Watcher, error) {
 	ctx, cancel := context.WithCancel(ctx)
@@ -111,6 +114,7 @@ func NewWatcher(
 		schedulerConfigPathPrefix: keypath.SchedulerConfigPathPrefix(),
 		etcdClient:                etcdClient,
 		PersistConfig:             persistConfig,
+		basicCluster:              basicCluster,
 		storage:                   storage,
 	}
 	err := cw.initializeConfigWatcher()
@@ -134,18 +138,6 @@ func NewWatcher(
 // SetSchedulersController sets the schedulers controller.
 func (cw *Watcher) SetSchedulersController(sc *schedulers.Controller) {
 	cw.schedulersController.Store(sc)
-}
-
-// SetOnScheduleConfigUpdated sets the callback invoked after the schedule
-// configuration is updated.
-func (cw *Watcher) SetOnScheduleConfigUpdated(fn func()) {
-	cw.onScheduleConfigUpdated.Store(&fn)
-}
-
-func (cw *Watcher) notifyScheduleConfigUpdated() {
-	if fn := cw.onScheduleConfigUpdated.Load(); fn != nil {
-		(*fn)()
-	}
 }
 
 func (cw *Watcher) getSchedulersController() *schedulers.Controller {
@@ -172,7 +164,7 @@ func (cw *Watcher) initializeConfigWatcher() error {
 		cw.SetScheduleConfig(&cfg.Schedule)
 		cw.SetReplicationConfig(&cfg.Replication)
 		cw.SetStoreConfig(&cfg.Store)
-		cw.notifyScheduleConfigUpdated()
+		cw.refreshStoreRateLimits(&cfg.Schedule)
 		return nil
 	}
 	deleteFn := func(*mvccpb.KeyValue) error {
@@ -192,6 +184,23 @@ func (cw *Watcher) initializeConfigWatcher() error {
 	cw.configWatcher.SetReloadOnCompaction()
 	cw.configWatcher.StartWatchLoop()
 	return cw.configWatcher.WaitLoad()
+}
+
+func (cw *Watcher) refreshStoreRateLimits(cfg *sc.ScheduleConfig) {
+	for _, store := range cw.basicCluster.GetStores() {
+		limit, ok := store.GetStoreLimit().(*storelimit.StoreRateLimit)
+		if !ok {
+			continue
+		}
+		// Read without recreating missing entries, including tombstoned stores.
+		storeLimit, ok := cfg.StoreLimit[store.GetID()]
+		if !ok {
+			storeLimit = cfg.GetDefaultStoreLimit()
+		}
+		limit.Reset(storeLimit.AddPeer/operator.StoreBalanceBaseTime, storelimit.AddPeer)
+		limit.Reset(storeLimit.RemovePeer/operator.StoreBalanceBaseTime, storelimit.RemovePeer)
+		limit.Reset(storeLimit.TransferLeaderIn/operator.StoreBalanceBaseTime, storelimit.TransferLeaderIn)
+	}
 }
 
 func (cw *Watcher) initializeTTLConfigWatcher() error {

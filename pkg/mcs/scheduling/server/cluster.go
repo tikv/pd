@@ -38,7 +38,6 @@ import (
 
 	"github.com/tikv/pd/pkg/cluster"
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
 	mcsaffinity "github.com/tikv/pd/pkg/mcs/scheduling/server/affinity"
@@ -344,44 +343,11 @@ func (c *Cluster) SetRuntimeResources(
 	c.ruleWatcher = ruleWatcher
 	c.affinityWatcher = affinityWatcher
 	c.keyspaceWatcher = keyspaceWatcher
-	configWatcher.SetOnScheduleConfigUpdated(c.RefreshStoreRateLimits)
-	c.RefreshStoreRateLimits()
 	metaWatcher.SetOnStoreTombstoned(func(storeID uint64) {
 		c.hotStat.RemoveRollingStoreStats(storeID)
 		c.ruleManager.RemoveStoreCache(storeID)
 		DeleteStoreMetrics(strconv.FormatUint(storeID, 10))
 	})
-}
-
-// RefreshStoreRateLimits applies the configured limits to existing in-memory
-// store limiters.
-func (c *Cluster) RefreshStoreRateLimits() {
-	cfg := c.persistConfig.GetScheduleConfig()
-	for _, store := range c.GetStores() {
-		limit, ok := store.GetStoreLimit().(*storelimit.StoreRateLimit)
-		if !ok {
-			continue
-		}
-		// Read without creating missing entries, including those removed for
-		// tombstoned stores that are still present in the cluster.
-		storeLimit, ok := cfg.StoreLimit[store.GetID()]
-		if !ok {
-			storeLimit = cfg.GetDefaultStoreLimit()
-		}
-		for _, limitConfig := range []struct {
-			typ        storelimit.Type
-			ratePerMin float64
-		}{
-			{storelimit.AddPeer, storeLimit.AddPeer},
-			{storelimit.RemovePeer, storeLimit.RemovePeer},
-			{storelimit.TransferLeaderIn, storeLimit.TransferLeaderIn},
-		} {
-			ratePerSec := limitConfig.ratePerMin / operator.StoreBalanceBaseTime
-			if limit.Rate(limitConfig.typ) != ratePerSec {
-				c.ResetStoreLimit(store.GetID(), limitConfig.typ, ratePerSec)
-			}
-		}
-	}
 }
 
 func (c *Cluster) stopCluster() {

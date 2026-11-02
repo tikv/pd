@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server
+package config
 
 import (
 	"testing"
@@ -25,14 +25,13 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
-	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 )
 
 func TestRefreshStoreRateLimits(t *testing.T) {
 	re := require.New(t)
 	initialRate := 0.00006
-	persistConfig := config.NewPersistConfig(&config.Config{
+	persistConfig := NewPersistConfig(&Config{
 		Schedule: sc.ScheduleConfig{
 			StoreLimit: map[uint64]sc.StoreLimitConfig{1: {
 				AddPeer:          initialRate,
@@ -42,7 +41,7 @@ func TestRefreshStoreRateLimits(t *testing.T) {
 		},
 	}, nil)
 	basicCluster := core.NewBasicCluster()
-	limiter := storelimit.NewStoreRateLimit(0.000001)
+	limiter := storelimit.NewStoreRateLimit(initialRate / 60)
 	store := core.NewStoreInfo(
 		&metapb.Store{Id: 1},
 		core.SetLastHeartbeatTS(time.Now()),
@@ -53,7 +52,11 @@ func TestRefreshStoreRateLimits(t *testing.T) {
 		re.False(store.IsAvailable(typ, constant.Medium))
 	}
 	basicCluster.PutStore(store)
-	cluster := &Cluster{BasicCluster: basicCluster, persistConfig: persistConfig}
+	watcher := &Watcher{basicCluster: basicCluster}
+	watcher.refreshStoreRateLimits(persistConfig.GetScheduleConfig())
+	for _, typ := range []storelimit.Type{storelimit.AddPeer, storelimit.RemovePeer, storelimit.TransferLeaderIn} {
+		re.False(store.IsAvailable(typ, constant.Medium), typ.String())
+	}
 
 	updated := persistConfig.GetScheduleConfig().Clone()
 	updated.StoreLimit[1] = sc.StoreLimitConfig{
@@ -62,8 +65,8 @@ func TestRefreshStoreRateLimits(t *testing.T) {
 		TransferLeaderIn: storelimit.Unlimited,
 	}
 	persistConfig.SetScheduleConfig(updated)
-	cluster.RefreshStoreRateLimits()
-	store = cluster.GetStore(1)
+	watcher.refreshStoreRateLimits(persistConfig.GetScheduleConfig())
+	store = basicCluster.GetStore(1)
 	limit, ok := store.GetStoreLimit().(*storelimit.StoreRateLimit)
 	re.True(ok)
 	for _, typ := range []storelimit.Type{storelimit.AddPeer, storelimit.RemovePeer, storelimit.TransferLeaderIn} {
@@ -90,7 +93,7 @@ func TestRefreshStoreRateLimitsPreservesConfig(t *testing.T) {
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			re := require.New(t)
-			cfg := &config.Config{Schedule: sc.ScheduleConfig{
+			cfg := &Config{Schedule: sc.ScheduleConfig{
 				DefaultStoreLimit: sc.StoreLimitConfig{
 					AddPeer:          30,
 					RemovePeer:       60,
@@ -99,19 +102,19 @@ func TestRefreshStoreRateLimitsPreservesConfig(t *testing.T) {
 				StoreLimit: testCase.storeLimit,
 			}}
 			expected := cfg.Schedule.Clone()
-			persistConfig := config.NewPersistConfig(cfg, nil)
+			persistConfig := NewPersistConfig(cfg, nil)
 			basicCluster := core.NewBasicCluster()
 			basicCluster.PutStore(core.NewStoreInfo(&metapb.Store{Id: 1}))
 			// Tombstoned stores remain in the cluster after PD removes their
 			// store-limit entry. Refreshing must not recreate that entry.
 			basicCluster.PutStore(core.NewStoreInfo(&metapb.Store{Id: 2, NodeState: metapb.NodeState_Removed}))
-			cluster := &Cluster{BasicCluster: basicCluster, persistConfig: persistConfig}
+			watcher := &Watcher{basicCluster: basicCluster}
 
-			cluster.RefreshStoreRateLimits()
+			watcher.refreshStoreRateLimits(persistConfig.GetScheduleConfig())
 
 			re.Same(&cfg.Schedule, persistConfig.GetScheduleConfig())
 			re.Equal(expected, persistConfig.GetScheduleConfig())
-			for _, store := range cluster.GetStores() {
+			for _, store := range basicCluster.GetStores() {
 				limit, ok := store.GetStoreLimit().(*storelimit.StoreRateLimit)
 				re.True(ok)
 				expectedLimit, ok := expected.StoreLimit[store.GetID()]
