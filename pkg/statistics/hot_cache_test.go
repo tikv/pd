@@ -343,6 +343,57 @@ func TestRegionMetadataPressureDoesNotBlockHeartbeats(t *testing.T) {
 	}
 }
 
+type pausedRegionPublicationTracer struct {
+	core.RegionHeartbeatProcessTracer
+	published chan struct{}
+	release   <-chan struct{}
+}
+
+func (tracer *pausedRegionPublicationTracer) OnSetRegionFinished() {
+	close(tracer.published)
+	<-tracer.release
+}
+
+func TestReadSampleDoesNotWaitForUnchangedPublication(t *testing.T) {
+	_, cache, region, loads := newHotReadCache(t, []uint64{1, 2})
+	before := cache.GetHotPeerStat(utils.Read, region.GetID(), 1)
+	updated := region.Clone(core.SetWrittenBytes(2 << 20))
+	published, release := make(chan struct{}), make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
+	defer unblock()
+	ctx := core.ContextTODO()
+	ctx.Tracer = &pausedRegionPublicationTracer{
+		RegionHeartbeatProcessTracer: ctx.Tracer,
+		published:                    published,
+		release:                      release,
+	}
+	publication := make(chan error, 1)
+	go func() {
+		_, err := cache.UpdateRegion(ctx, updated)
+		publication <- err
+	}()
+	<-published
+	require.True(t, cache.CheckReadPeerAsync(region, region.GetStorePeer(1), loads, utils.StoreHeartBeatReportInterval))
+	sampled := make(chan struct{})
+	go func() {
+		_ = cache.GetHotPeerStat(utils.Read, region.GetID(), 1)
+		close(sampled)
+	}()
+	testutil.Eventually(require.New(t), func() bool {
+		select {
+		case <-sampled:
+			return true
+		default:
+			return false
+		}
+	})
+	unblock()
+	require.NoError(t, <-publication)
+	after := cache.GetHotPeerStat(utils.Read, region.GetID(), 1)
+	require.True(t, after.IsLeader())
+	require.Equal(t, before.HotDegree+1, after.HotDegree)
+}
+
 func TestReadMetadataLifetime(t *testing.T) {
 	for _, freshSample := range []bool{false, true} {
 		t.Run(fmt.Sprintf("fresh-sample=%t", freshSample), func(t *testing.T) {
@@ -412,6 +463,38 @@ func TestCoalescedReadMetadataPreservesTransitions(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestReadSampleAfterPeerRemovalAndReturn(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		_, cache, initial, loads := newHotReadCache(t, []uint64{1, 2, 3})
+		started, release := make(chan struct{}), make(chan struct{})
+		unblock := sync.OnceFunc(func() { close(release) })
+		fp := "github.com/tikv/pd/pkg/statistics/beforeReadRegionMetadata"
+		require.NoError(t, failpoint.EnableCall(fp, sync.OnceFunc(func() {
+			close(started)
+			<-release
+		})))
+		t.Cleanup(func() {
+			unblock()
+			require.NoError(t, failpoint.Disable(fp))
+		})
+		require.True(t, cache.CheckReadPeerAsync(initial, initial.GetStorePeer(3), loads, utils.StoreHeartBeatReportInterval))
+		<-started
+		removed := initial.Clone(core.WithRemoveStorePeer(3), core.WithIncConfVer(),
+			core.WithLeader(initial.GetStorePeer(2)))
+		_, err := cache.UpdateRegion(core.ContextTODO(), removed)
+		require.NoError(t, err)
+		returned := removed.Clone(core.WithAddPeer(initial.GetStorePeer(3)), core.WithIncConfVer(),
+			core.WithLeader(initial.GetStorePeer(1)))
+		_, err = cache.UpdateRegion(core.ContextTODO(), returned)
+		require.NoError(t, err)
+		unblock()
+		after := cache.GetHotPeerStats(utils.Read, 0)
+		require.Len(t, after[3], 1, "pending removals must be applied before admitting a fresh sample")
+		require.False(t, after[3][0].IsLeader())
+		require.True(t, after[1][0].IsNeedCoolDownTransferLeader(3, utils.Read))
+	})
 }
 
 func TestUnpublishedRegionMetadataPreservesReadCache(t *testing.T) {

@@ -1177,6 +1177,13 @@ func (r *RegionsInfo) AtomicCheckAndPutRegion(ctx *MetaProcessContext, region *R
 // CheckAndPutRootTree checks if the region is valid to put to the root, if valid then return error.
 // Usually used with CheckAndPutSubTree together.
 func (r *RegionsInfo) CheckAndPutRootTree(ctx *MetaProcessContext, region *RegionInfo) ([]*RegionInfo, error) {
+	_, overlaps, err := r.CheckAndPutRootTreeWithOrigin(ctx, region)
+	return overlaps, err
+}
+
+// CheckAndPutRootTreeWithOrigin publishes a valid region and returns its previous
+// snapshot from the same atomic update.
+func (r *RegionsInfo) CheckAndPutRootTreeWithOrigin(ctx *MetaProcessContext, region *RegionInfo) (*RegionInfo, []*RegionInfo, error) {
 	tracer := ctx.Tracer
 	r.t.Lock()
 	var ols []*RegionInfo
@@ -1189,13 +1196,13 @@ func (r *RegionsInfo) CheckAndPutRootTree(ctx *MetaProcessContext, region *Regio
 	if err != nil {
 		r.t.Unlock()
 		tracer.OnValidateRegionFinished()
-		return nil, err
+		return nil, nil, err
 	}
 	tracer.OnValidateRegionFinished()
 	_, overlaps, _ := r.setRegionLocked(region, true, ols...)
 	r.t.Unlock()
 	tracer.OnSetRegionFinished()
-	return overlaps, nil
+	return origin, overlaps, nil
 }
 
 // CheckAndPutSubTree checks if the region is valid to put to the sub tree, if valid then return error.

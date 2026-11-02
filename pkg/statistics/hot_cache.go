@@ -68,8 +68,7 @@ func NewHotCache(ctx context.Context, cluster *core.BasicCluster) *HotCache {
 func (w *HotCache) UpdateRegion(ctx *core.MetaProcessContext, region *core.RegionInfo) ([]*core.RegionInfo, error) {
 	w.regionMetaMu.Lock()
 	cluster := w.readCache.cluster
-	origin := cluster.GetRegion(region.GetID())
-	overlaps, err := cluster.CheckAndPutRootTree(ctx, region)
+	origin, overlaps, err := cluster.CheckAndPutRootTreeWithOrigin(ctx, region)
 	changed := false
 	if err == nil {
 		for _, old := range overlaps {
@@ -77,13 +76,15 @@ func (w *HotCache) UpdateRegion(ctx *core.MetaProcessContext, region *core.Regio
 		}
 		changed = w.enqueueReadRegionMetadataLocked(origin, region) || changed
 	}
-	w.regionMetaMu.Unlock()
 	if changed {
+		// Notify before another publication can acquire the lock, so a transfer
+		// away and back cannot leave matching snapshots without a pending wakeup.
 		select {
 		case w.regionMetaReady <- struct{}{}:
 		default:
 		}
 	}
+	w.regionMetaMu.Unlock()
 	return overlaps, err
 }
 
@@ -165,7 +166,7 @@ func (w *HotCache) enqueueReadRegionMetadataLocked(origin, region *core.RegionIn
 // remembers removals even if a peer is readded before the read worker runs.
 func intersectReadPeers(previous, current []*metapb.Peer) []*metapb.Peer {
 	if core.SortedPeersEqual(previous, current) {
-		return previous
+		return current
 	}
 	peers := make([]*metapb.Peer, 0, min(len(previous), len(current)))
 	for _, old := range previous {
@@ -277,9 +278,18 @@ func (w *HotCache) CheckReadPeerAsync(region *core.RegionInfo, peer *metapb.Peer
 	})
 }
 
-// Read the root and drain its pending metadata under the publication lock so
-// a sample cannot restore peers removed by an accepted heartbeat.
+// Reconcile read samples with accepted metadata before checking their peers.
 func (w *HotCache) readRegionMetadata(regionID uint64) *hotRegionInfo {
+	previous := w.readCache.readMetadata[regionID]
+	// Consumed notifications are applied by this worker before sampling. A
+	// matching snapshot is reusable when no new notification is pending.
+	if previous != nil {
+		current := w.readCache.cluster.GetRegion(regionID)
+		if current != nil && previous.leaderStoreID == current.GetLeader().GetStoreId() &&
+			core.SortedPeersEqual(previous.meta.GetPeers(), current.GetPeers()) && len(w.regionMetaReady) == 0 {
+			return previous
+		}
+	}
 	w.regionMetaMu.Lock()
 	current := w.readCache.cluster.GetRegion(regionID)
 	update, pending := w.regionMetaUpdates[regionID]
@@ -294,7 +304,7 @@ func (w *HotCache) readRegionMetadata(regionID uint64) *hotRegionInfo {
 		}
 		return nil
 	}
-	previous := w.readCache.readMetadata[regionID]
+	previous = w.readCache.readMetadata[regionID]
 	if previous != nil && previous.leaderStoreID == current.GetLeader().GetStoreId() &&
 		core.SortedPeersEqual(previous.meta.GetPeers(), current.GetPeers()) {
 		return previous
