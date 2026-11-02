@@ -51,8 +51,8 @@ const (
 	randomRegionMaxRetry = 10
 	// ScanRegionLimit is the default limit for the number of regions to scan in a region scan request.
 	ScanRegionLimit = 1000
-	// RegionQueryBatchSize bounds the number of IDs/keys/prevKeys searched under one root lock.
-	RegionQueryBatchSize = 128
+	// batchSearchSize is the default size for the number of IDs/keys/prevKeys to search in a batch.
+	batchSearchSize = 128
 	// CollectFactor is the factor to collect the count of region.
 	CollectFactor = 0.9
 )
@@ -864,18 +864,13 @@ func (r *RegionInfo) isInvolved(startKey, endKey []byte) bool {
 }
 
 func (r *RegionInfo) isRegionRecreated() bool {
-	return IsRegionRecreated(r.meta)
-}
-
-// IsRegionRecreated reports whether metadata matches core's online unsafe-recovery exception.
-func IsRegionRecreated(meta *metapb.Region) bool {
 	// Regions recreated by online unsafe recover have both ver and conf ver equal to 1. To
 	// prevent stale bootstrap region (first region in a cluster which covers the entire key
 	// range) from reporting stale info, we exclude regions that covers the entire key range
 	// here. Technically, it is possible for unsafe recover to recreate such region, but that
 	// means the entire key range is unavailable, and we don't expect unsafe recover to perform
 	// better than recreating the cluster.
-	return meta.GetRegionEpoch().GetVersion() == 1 && meta.GetRegionEpoch().GetConfVer() == 1 && (len(meta.GetStartKey()) != 0 || len(meta.GetEndKey()) != 0)
+	return r.GetRegionEpoch().GetVersion() == 1 && r.GetRegionEpoch().GetConfVer() == 1 && (len(r.GetStartKey()) != 0 || len(r.GetEndKey()) != 0)
 }
 
 func (r *RegionInfo) contain(key []byte) bool {
@@ -1078,6 +1073,8 @@ type RegionsInfo struct {
 	t            RWLockStats
 	tree         *regionTree
 	regions      map[uint64]*regionItem // regionID -> regionInfo
+	listeners    map[uint64]func(origin, region *RegionInfo)
+	nextListener uint64
 	st           RWLockStats
 	subRegions   map[uint64]*regionItem // regionID -> regionInfo
 	leaders      map[uint64]*regionTree // storeID -> sub regionTree
@@ -1101,6 +1098,32 @@ func NewRegionsInfo() *RegionsInfo {
 		witnesses:    make(map[uint64]*regionTree),
 		pendingPeers: make(map[uint64]*regionTree),
 		overlapTree:  newRegionTreeWithCountRef(),
+	}
+}
+
+// SubscribeRegionUpdates observes accepted root changes in publication order.
+// A nil region denotes removal. The callback runs under the root lock and must
+// not access RegionsInfo or wait for background work. The returned function
+// removes the subscription.
+func (r *RegionsInfo) SubscribeRegionUpdates(listener func(origin, region *RegionInfo)) func() {
+	r.t.Lock()
+	if r.listeners == nil {
+		r.listeners = make(map[uint64]func(origin, region *RegionInfo))
+	}
+	id := r.nextListener
+	r.nextListener++
+	r.listeners[id] = listener
+	r.t.Unlock()
+	return func() {
+		r.t.Lock()
+		delete(r.listeners, id)
+		r.t.Unlock()
+	}
+}
+
+func (r *RegionsInfo) notifyRegionUpdateLocked(origin, region *RegionInfo) {
+	for _, listener := range r.listeners {
+		listener(origin, region)
 	}
 }
 
@@ -1406,6 +1429,7 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo, withOverlaps bool, ol 
 			r.tree.updateStat(origin, region)
 			// Update the RegionInfo in the regionItem.
 			item.RegionInfo = region
+			r.notifyRegionUpdateLocked(origin, region)
 			return origin, nil, rangeChanged
 		}
 	} else {
@@ -1418,8 +1442,10 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo, withOverlaps bool, ol 
 		overlaps = r.tree.update(item, withOverlaps, ol...)
 		for _, old := range overlaps {
 			delete(r.regions, old.GetID())
+			r.notifyRegionUpdateLocked(old, nil)
 		}
 	}
+	r.notifyRegionUpdateLocked(origin, region)
 	// return rangeChanged to prevent duplicated calculation
 	return origin, overlaps, rangeChanged
 }
@@ -1484,14 +1510,23 @@ func (r *RegionsInfo) GetOverlaps(region *RegionInfo) []*RegionInfo {
 func (r *RegionsInfo) RemoveRegion(region *RegionInfo) {
 	r.t.Lock()
 	defer r.t.Unlock()
+	origin := r.getRegionLocked(region.GetID())
 	// Remove from tree and regions.
 	r.tree.remove(region)
 	delete(r.regions, region.GetID())
+	if origin != nil {
+		r.notifyRegionUpdateLocked(origin, nil)
+	}
 }
 
 // ResetRegionCache resets the regions info.
 func (r *RegionsInfo) ResetRegionCache() {
 	r.t.Lock()
+	if len(r.listeners) > 0 {
+		for _, item := range r.regions {
+			r.notifyRegionUpdateLocked(item.RegionInfo, nil)
+		}
+	}
 	r.tree = newRegionTreeWithCountRef()
 	r.regions = make(map[uint64]*regionItem)
 	r.t.Unlock()
@@ -1677,7 +1712,7 @@ func (r *RegionsInfo) QueryRegions(
 			idsToQuery = append(idsToQuery, id)
 		}
 		// Batch query the regions by IDs to reduce lock contention.
-		regions := r.GetRegionsByIDs(idsToQuery, nil)
+		regions := r.getRegionsByIDs(idsToQuery)
 		for i, id := range idsToQuery {
 			region := regions[i]
 			if region == nil {
@@ -1706,7 +1741,7 @@ func (r *RegionsInfo) getRegionsByKeys(keys [][]byte) []*RegionInfo {
 	regions := make([]*RegionInfo, 0, len(keys))
 	// Split the keys into multiple batches, and search each batch separately.
 	// This is to avoid the lock contention on the `regionTree`.
-	for _, batch := range slice.SplitIntoBatches(keys, RegionQueryBatchSize) {
+	for _, batch := range slice.SplitIntoBatches(keys, batchSearchSize) {
 		r.t.RLock()
 		results := r.tree.searchByKeys(batch)
 		r.t.RUnlock()
@@ -1717,7 +1752,7 @@ func (r *RegionsInfo) getRegionsByKeys(keys [][]byte) []*RegionInfo {
 
 func (r *RegionsInfo) getRegionsByPrevKeys(prevKeys [][]byte) []*RegionInfo {
 	regions := make([]*RegionInfo, 0, len(prevKeys))
-	for _, batch := range slice.SplitIntoBatches(prevKeys, RegionQueryBatchSize) {
+	for _, batch := range slice.SplitIntoBatches(prevKeys, batchSearchSize) {
 		r.t.RLock()
 		results := r.tree.searchByPrevKeys(batch)
 		r.t.RUnlock()
@@ -1726,16 +1761,10 @@ func (r *RegionsInfo) getRegionsByPrevKeys(prevKeys [][]byte) []*RegionInfo {
 	return regions
 }
 
-// GetRegionsByIDs returns regions in ID order, using nil for missing regions.
-// It reuses the supplied buffer, replacing its contents.
-// Root locking is split into bounded batches to let heartbeat publication proceed.
-func (r *RegionsInfo) GetRegionsByIDs(ids []uint64, regions []*RegionInfo) []*RegionInfo {
-	regions = regions[:0]
-	if cap(regions) < len(ids) {
-		regions = make([]*RegionInfo, 0, len(ids))
-	}
-	for start := 0; start < len(ids); start += RegionQueryBatchSize {
-		batch := ids[start:min(start+RegionQueryBatchSize, len(ids))]
+// getRegionsByIDs searches RegionInfo from regionMap by IDs in batch.
+func (r *RegionsInfo) getRegionsByIDs(ids []uint64) []*RegionInfo {
+	regions := make([]*RegionInfo, 0, len(ids))
+	for _, batch := range slice.SplitIntoBatches(ids, batchSearchSize) {
 		r.t.RLock()
 		for _, id := range batch {
 			regions = append(regions, r.getRegionLocked(id))

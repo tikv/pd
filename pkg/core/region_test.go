@@ -538,6 +538,44 @@ func TestRegionGuideLogicalStorageSizeChanged(t *testing.T) {
 	}
 }
 
+func TestRegionUpdateSubscriptions(t *testing.T) {
+	regions := NewRegionsInfo()
+	type update struct{ origin, region *RegionInfo }
+	var updates []update
+	stop := regions.SubscribeRegionUpdates(func(origin, region *RegionInfo) {
+		updates = append(updates, update{origin, region})
+	})
+	defer stop()
+	var otherUpdates int
+	stopOther := regions.SubscribeRegionUpdates(func(_, _ *RegionInfo) { otherUpdates++ })
+	defer stopOther()
+	initial := NewRegionInfo(&metapb.Region{
+		Id: 1, StartKey: []byte("a"), EndKey: []byte("b"),
+		RegionEpoch: &metapb.RegionEpoch{Version: 10, ConfVer: 10},
+	}, nil)
+	regions.PutRegion(initial)
+	latest := initial.Clone(WithIncVersion())
+	_, err := regions.CheckAndPutRootTree(ContextTODO(), latest)
+	require.NoError(t, err)
+	_, err = regions.CheckAndPutRootTree(ContextTODO(), initial)
+	require.Error(t, err)
+	require.Equal(t, []update{{nil, initial}, {initial, latest}}, updates, "rejected metadata must not notify listeners")
+	stopOther()
+	replacement := latest.Clone(WithNewRegionID(2), WithIncVersion())
+	_, err = regions.AtomicCheckAndPutRegion(ContextTODO(), replacement)
+	require.NoError(t, err)
+	require.Equal(t, []update{{latest, nil}, {nil, replacement}}, updates[2:], "overlap removal must precede replacement publication")
+	regions.RemoveRegion(replacement)
+	require.Equal(t, update{replacement, nil}, updates[4])
+	regions.CheckAndPutRegion(initial)
+	regions.ResetRegionCache()
+	require.Equal(t, []update{{nil, initial}, {initial, nil}}, updates[5:])
+	require.Equal(t, 2, otherUpdates, "unsubscribing one listener must preserve the other")
+	stop()
+	regions.PutRegion(initial)
+	require.Len(t, updates, 7, "unsubscription must be idempotent and stop notifications")
+}
+
 func TestRegionMap(t *testing.T) {
 	re := require.New(t)
 	rm := make(map[uint64]*regionItem)
@@ -1436,35 +1474,6 @@ func TestScanRegionLimit(t *testing.T) {
 		re.NoError(err)
 		re.Len(resp, limit)
 	}
-}
-
-func TestGetRegionsByIDsReusesBuffer(t *testing.T) {
-	regions := NewRegionsInfo()
-	for id := uint64(1); id <= RegionQueryBatchSize+1; id++ {
-		regions.PutRegion(NewTestRegionInfo(id, 1, []byte(fmt.Sprintf("%04d", id)), []byte(fmt.Sprintf("%04d", id+1))))
-	}
-	ids := []uint64{0}
-	for id := uint64(RegionQueryBatchSize + 1); id > 0; id-- {
-		ids = append(ids, id)
-	}
-	ids = append(ids, 1)
-	buffer := make([]*RegionInfo, len(ids))
-	result := regions.GetRegionsByIDs(ids, buffer)
-	require.Same(t, &buffer[0], &result[0])
-	require.Len(t, result, len(ids))
-	for i, id := range ids {
-		if id == 0 {
-			require.Nil(t, result[i])
-		} else {
-			require.Same(t, regions.GetRegion(id), result[i])
-		}
-	}
-	result = regions.GetRegionsByIDs([]uint64{1, 0}, result)
-	require.Len(t, result, 2)
-	require.Same(t, &buffer[0], &result[0])
-	require.Same(t, regions.GetRegion(1), result[0])
-	require.Nil(t, result[1])
-	require.Empty(t, regions.GetRegionsByIDs(nil, result))
 }
 
 func TestQueryRegions(t *testing.T) {
