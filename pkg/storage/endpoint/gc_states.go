@@ -548,6 +548,18 @@ func (wb *GCStateWriteBatch) ExpectKeyspaceMetaRevision(keyspaceID uint32, revis
 	return nil
 }
 
+// ExpectConfigRevision stages a config revision check that runs atomically with the GC writes.
+// Revision zero guards the absence of persisted config during file-config initialization.
+func (wb *GCStateWriteBatch) ExpectConfigRevision(revision int64) error {
+	if revision < 0 {
+		return errors.New("config revision must not be negative")
+	}
+	wb.conditions = append(wb.conditions, kv.RawTxnCondition{
+		Key: keypath.ConfigPath(), CmpType: kv.RawTxnCmpModRevisionEqual, ModRevision: revision,
+	})
+	return nil
+}
+
 // writeJSON marshals the given data into JSON and writes it to the given key.
 func (wb *GCStateWriteBatch) writeJSON(key string, data any) error {
 	value, err := json.Marshal(data)

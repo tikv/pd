@@ -15,12 +15,14 @@
 package endpoint
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
@@ -28,6 +30,7 @@ import (
 type ConfigStorage interface {
 	// Persisted config will be stored in the storage.
 	LoadConfig(cfg any) (bool, error)
+	LoadConfigWithRevision(ctx context.Context, cfg any) (int64, error)
 	SaveConfig(cfg any) error
 	// Each scheduler has its own customized config, so we need to store them separately.
 	LoadAllSchedulerConfigs() ([]string, []string, error)
@@ -49,6 +52,34 @@ func (se *StorageEndpoint) LoadConfig(cfg any) (bool, error) {
 		return false, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByCause()
 	}
 	return true, nil
+}
+
+// LoadConfigWithRevision loads config and its modification revision in one linearizable read.
+// A zero revision means the config key is absent; an existing empty or invalid value is an error.
+func (se *StorageEndpoint) LoadConfigWithRevision(ctx context.Context, cfg any) (int64, error) {
+	txn, err := se.createRawTxnWithContext(ctx)
+	if err != nil {
+		return 0, err
+	}
+	key := keypath.ConfigPath()
+	response, err := txn.Then(kv.RawTxnOp{Key: key, OpType: kv.RawTxnOpGet}).Commit()
+	if err != nil {
+		return 0, err
+	}
+	if !response.Succeeded || len(response.Responses) != 1 {
+		return 0, errs.ErrEtcdTxnResponse.GenWithStackByArgs("invalid config response")
+	}
+	pairs := response.Responses[0].KeyValuePairs
+	if len(pairs) == 0 {
+		return 0, nil
+	}
+	if len(pairs) != 1 || pairs[0].Key != key || pairs[0].ModRevision <= 0 {
+		return 0, errs.ErrEtcdTxnResponse.GenWithStackByArgs("invalid config key or revision")
+	}
+	if err := json.Unmarshal([]byte(pairs[0].Value), cfg); err != nil {
+		return 0, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByCause()
+	}
+	return pairs[0].ModRevision, nil
 }
 
 // SaveConfig stores marshallable cfg to the keypath.Config.

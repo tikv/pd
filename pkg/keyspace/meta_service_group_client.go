@@ -15,6 +15,7 @@
 package keyspace
 
 import (
+	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -28,6 +29,7 @@ import (
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/server/config"
 )
 
 // GetEtcdClient returns the shared client for a meta-service group, including disabled groups.
@@ -36,6 +38,44 @@ import (
 func (m *MetaServiceGroupManager) GetEtcdClient(groupID string) (*clientv3.Client, error) {
 	m.Lock()
 	defer m.Unlock()
+	return m.getEtcdClientLocked(groupID)
+}
+
+// GetEtcdClientWithConfigRevision returns a client whose endpoints match a persisted config snapshot.
+// The returned revision must be checked when committing writes based on reads from the client.
+// Revision zero uses the initial file config and requires the config key to remain absent.
+// A stale local config fails closed until it is reloaded. Borrowed clients are never retargeted.
+func (m *MetaServiceGroupManager) GetEtcdClientWithConfigRevision(ctx context.Context, groupID string) (*clientv3.Client, int64, error) {
+	var cfg struct {
+		Keyspace config.KeyspaceConfig `json:"keyspace"`
+	}
+	revision, err := m.store.LoadConfigWithRevision(ctx, &cfg)
+	if err != nil {
+		return nil, 0, err
+	}
+	m.Lock()
+	defer m.Unlock()
+	groups := cfg.Keyspace.MetaServiceGroups
+	if revision == 0 {
+		if m.hasPersistedConfig {
+			return nil, 0, errors.New("persisted meta-service group config disappeared")
+		}
+		groups = m.initialMetaServiceGroups
+	} else {
+		m.hasPersistedConfig = true
+	}
+	addresses, ok := groups[groupID]
+	if !ok {
+		return nil, 0, fmt.Errorf("%w: %s", errs.ErrUnknownMetaServiceGroup, groupID)
+	}
+	if current, exists := m.metaServiceGroups[groupID]; !exists || current != addresses {
+		return nil, 0, errs.ErrEtcdTxnConflict.GenWithStackByArgs()
+	}
+	client, err := m.getEtcdClientLocked(groupID)
+	return client, revision, err
+}
+
+func (m *MetaServiceGroupManager) getEtcdClientLocked(groupID string) (*clientv3.Client, error) {
 	if m.closed {
 		return nil, errors.New("meta-service group manager is closed")
 	}
@@ -89,15 +129,6 @@ func parseMetaServiceGroupEndpoints(addresses string) ([]string, error) {
 	return endpoints, nil
 }
 
-func metaServiceGroupEndpointScheme(endpoint string) string {
-	scheme, _, explicit := strings.Cut(endpoint, "://")
-	if !explicit {
-		// Unlike explicit HTTP, etcd uses the supplied TLS config for scheme-less endpoints.
-		return ""
-	}
-	return strings.ToLower(scheme)
-}
-
 // reconcileEtcdClientsLocked applies configuration to borrowed clients under the manager lock.
 func (m *MetaServiceGroupManager) reconcileEtcdClientsLocked(groups map[string]string) {
 	for groupID, client := range m.etcdClients {
@@ -105,15 +136,9 @@ func (m *MetaServiceGroupManager) reconcileEtcdClientsLocked(groups map[string]s
 		if exists && addresses == m.metaServiceGroups[groupID] {
 			continue
 		}
-		endpoints, err := parseMetaServiceGroupEndpoints(addresses)
-		// etcd selects transport credentials from the first endpoint when creating the
-		// connection. SetEndpoints updates the resolver but cannot change those credentials.
-		if exists && err == nil && metaServiceGroupEndpointScheme(client.Endpoints()[0]) == metaServiceGroupEndpointScheme(endpoints[0]) {
-			client.SetEndpoints(endpoints...)
-			continue
-		}
-		// Changed credential requirements need a fresh client. Deleted groups and invalid
-		// replacement configuration must not leave a stale backend readable either.
+		// A borrower may have paired this client's endpoints with a persisted config
+		// revision. Never retarget it, even for a same-protocol change or a stale reload.
+		// Closing also prevents deleted or invalid replacement routes from remaining usable.
 		if err := client.Close(); err != nil {
 			log.Warn("failed to close meta-service group client", zap.String("group-id", groupID), zap.Error(err))
 		}

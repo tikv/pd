@@ -550,7 +550,7 @@ func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID
 		}
 
 		// Compatible with old TiDB nodes that use TiDBMinStartTS to block GC.
-		ownerKey, minStartTS, err1 := m.loadTiDBMinStartTS(keyspaceID, keyspaceMeta.meta)
+		ownerKey, minStartTS, err1 := m.loadTiDBMinStartTS(ctx, keyspaceID, keyspaceMeta.meta, wb)
 		if err1 != nil {
 			return err1
 		}
@@ -657,7 +657,7 @@ func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID
 }
 
 // loadTiDBMinStartTS routes only TiDB's report read; GC state writes remain on PD's provider.
-func (m *GCStateManager) loadTiDBMinStartTS(keyspaceID uint32, meta *keyspacepb.KeyspaceMeta) (string, uint64, error) {
+func (m *GCStateManager) loadTiDBMinStartTS(ctx context.Context, keyspaceID uint32, meta *keyspacepb.KeyspaceMeta, wb *endpoint.GCStateWriteBatch) (string, uint64, error) {
 	groupID := meta.GetConfig()[keyspace.MetaServiceGroupIDKey]
 	if keyspaceID == constant.NullKeyspaceID || groupID == "" {
 		return m.gcMetaStorage.CompatibleLoadTiDBMinStartTS(keyspaceID)
@@ -668,8 +668,11 @@ func (m *GCStateManager) loadTiDBMinStartTS(keyspaceID uint32, meta *keyspacepb.
 	if m.metaServiceGroupManager == nil {
 		return "", 0, fmt.Errorf("meta-service group manager unavailable for group %s", groupID)
 	}
-	client, err := m.metaServiceGroupManager.GetEtcdClient(groupID)
+	client, revision, err := m.metaServiceGroupManager.GetEtcdClientWithConfigRevision(ctx, groupID)
 	if err != nil {
+		return "", 0, err
+	}
+	if err := wb.ExpectConfigRevision(revision); err != nil {
 		return "", 0, err
 	}
 	// This provider borrows the cached client and is used only for this read.

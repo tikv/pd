@@ -34,8 +34,70 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/tempurl"
+	"github.com/tikv/pd/server/config"
 )
+
+func TestMetaServiceGroupClientConfigSnapshot(t *testing.T) {
+	re := require.New(t)
+	ctx := context.Background()
+	_, pdClient, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	t.Cleanup(clean)
+	store := endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(pdClient), nil)
+	groups := make([]map[string]string, 0, 2)
+	for range 2 {
+		_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+		t.Cleanup(clean)
+		groups = append(groups, map[string]string{"g": strings.Join(client.Endpoints(), ",")})
+		_, err := client.Put(ctx, "report", groups[len(groups)-1]["g"])
+		re.NoError(err)
+	}
+	manager := NewMetaServiceGroupManager(store, groups[0], nil)
+	t.Cleanup(func() { re.NoError(manager.Close()) })
+	// Initial file config is usable while the persistent config key is absent.
+	initial, revision, err := manager.GetEtcdClientWithConfigRevision(ctx, "g")
+	re.NoError(err)
+	re.Zero(revision)
+	cfg := &config.Config{Keyspace: config.KeyspaceConfig{MetaServiceGroups: groups[1]}}
+	re.NoError(store.SaveConfig(cfg))
+	_, _, err = manager.GetEtcdClientWithConfigRevision(ctx, "g")
+	re.Error(err, "a fresh config revision must not be paired with stale cached endpoints")
+	manager.updateGroups(groups[1])
+	re.ErrorIs(initial.Ctx().Err(), context.Canceled)
+	selected, revision, err := manager.GetEtcdClientWithConfigRevision(ctx, "g")
+	re.NoError(err)
+	re.Positive(revision)
+	response, err := pdClient.Get(ctx, keypath.ConfigPath())
+	re.NoError(err)
+	re.Equal(response.Kvs[0].ModRevision, revision)
+	read, err := selected.Get(ctx, "report")
+	re.NoError(err)
+	re.Equal(groups[1]["g"], string(read.Kvs[0].Value))
+
+	// A stale local reload has no persistent write for the final GC compare to catch.
+	// It must close the selected client without changing that client's backend.
+	manager.updateGroups(groups[0])
+	re.ErrorIs(selected.Ctx().Err(), context.Canceled)
+	re.Equal(strings.Split(groups[1]["g"], ","), selected.Endpoints())
+	_, err = selected.Get(ctx, "report")
+	re.Error(err)
+	_, _, err = manager.GetEtcdClientWithConfigRevision(ctx, "g")
+	re.Error(err)
+	manager.updateGroups(groups[1])
+	replacement, sameRevision, err := manager.GetEtcdClientWithConfigRevision(ctx, "g")
+	re.NoError(err)
+	re.Equal(revision, sameRevision)
+	re.NotSame(selected, replacement)
+	read, err = replacement.Get(ctx, "report")
+	re.NoError(err)
+	re.Equal(groups[1]["g"], string(read.Kvs[0].Value))
+
+	// Once persistent config has been observed, deletion cannot re-enable file fallback.
+	re.NoError(store.Remove(keypath.ConfigPath()))
+	_, _, err = manager.GetEtcdClientWithConfigRevision(ctx, "g")
+	re.ErrorContains(err, "disappeared")
+}
 
 func TestMetaServiceGroupClientLifecycle(t *testing.T) {
 	re := require.New(t)
@@ -65,12 +127,22 @@ func TestMetaServiceGroupClientLifecycle(t *testing.T) {
 	_, err := client.Put(ctx, "test", "value")
 	re.NoError(err)
 
-	// Both configuration application paths reconcile the same cached client.
+	// A configuration change closes borrowed clients instead of redirecting them.
 	manager.updateGroups(map[string]string{"g": addresses[1]})
-	re.Equal([]string{addresses[1]}, client.Endpoints())
-	re.NoError(manager.UpdateGroupsSafely(ctx, map[string]string{"g": addresses[0]}, nil, func() error { return nil }, nil))
+	re.ErrorIs(client.Ctx().Err(), context.Canceled)
 	re.Equal([]string{addresses[0]}, client.Endpoints())
+	replacement, err := manager.GetEtcdClient("g")
+	re.NoError(err)
+	re.Equal([]string{addresses[1]}, replacement.Endpoints())
+	re.NoError(manager.UpdateGroupsSafely(ctx, map[string]string{"g": addresses[0]}, nil, func() error { return nil }, nil))
+	re.ErrorIs(replacement.Ctx().Err(), context.Canceled)
 	reused, err := manager.GetEtcdClient("g")
+	re.NoError(err)
+	re.NotSame(client, reused)
+	client = reused
+	// Unchanged configuration keeps the shared client usable.
+	manager.updateGroups(map[string]string{"g": addresses[0]})
+	reused, err = manager.GetEtcdClient("g")
 	re.NoError(err)
 	re.Same(client, reused)
 	response, err := client.Get(ctx, "test")
@@ -86,7 +158,7 @@ func TestMetaServiceGroupClientLifecycle(t *testing.T) {
 	re.Error(err)
 
 	manager.updateGroups(map[string]string{"g": strings.Join(addresses, ",")})
-	replacement, err := manager.GetEtcdClient("g")
+	replacement, err = manager.GetEtcdClient("g")
 	re.NoError(err)
 	re.NotSame(client, replacement)
 	manager.updateGroups(nil)
@@ -179,15 +251,15 @@ func TestMetaServiceGroupClientTransport(t *testing.T) {
 	}
 	for _, tc := range []struct {
 		name, before, after string
-		plain, reuse, local bool
+		plain, local        bool
 	}{
 		{name: "http-to-https", before: httpEndpoint, after: httpsEndpoint},
 		{name: "https-to-http", before: httpsEndpoint, after: httpEndpoint},
 		{name: "http-to-unspecified-tls", before: httpEndpoint, after: urls[1].Host},
 		{name: "unspecified-tls-to-http", before: urls[1].Host, after: httpEndpoint},
 		{name: "unspecified-plain-to-https", before: urls[0].Host, after: httpsEndpoint, plain: true},
-		{name: "https-address-change", before: httpsEndpoint, after: otherHTTPS, reuse: true},
-		{name: "unspecified-tls-address-change", before: urls[1].Host, after: urls[2].Host, reuse: true},
+		{name: "https-address-change", before: httpsEndpoint, after: otherHTTPS},
+		{name: "unspecified-tls-address-change", before: urls[1].Host, after: urls[2].Host},
 		{name: "local-https-to-http", before: httpsEndpoint, after: httpEndpoint, local: true},
 		{name: "mixed-first-endpoint-change", before: httpEndpoint + "," + httpsEndpoint, after: httpsEndpoint + "," + httpEndpoint},
 	} {
@@ -221,18 +293,13 @@ func TestMetaServiceGroupClientTransport(t *testing.T) {
 			updated, err := manager.GetEtcdClient("g")
 			re.NoError(err)
 			read(t, updated)
-			if tc.reuse {
-				re.Same(old, updated)
-				re.NoError(old.Ctx().Err())
-			} else {
-				re.NotSame(old, updated)
-				re.ErrorIs(old.Ctx().Err(), context.Canceled)
-				select {
-				case _, open := <-watch:
-					re.False(open, "closing the client must release borrowed watches")
-				case <-ctx.Done():
-					t.Fatal(ctx.Err())
-				}
+			re.NotSame(old, updated)
+			re.ErrorIs(old.Ctx().Err(), context.Canceled)
+			select {
+			case _, open := <-watch:
+				re.False(open, "closing the client must release borrowed watches")
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
 			}
 		})
 	}

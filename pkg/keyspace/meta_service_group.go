@@ -47,6 +47,9 @@ type MetaServiceGroupManager struct {
 	metaServiceGroups map[string]string
 	etcdClients       map[string]*clientv3.Client
 	closed            bool
+	// Initial file config is usable only before persisted config has been observed.
+	initialMetaServiceGroups map[string]string
+	hasPersistedConfig       bool
 	// keyspaceAssignmentCounter, when set, returns the actual number of keyspaces
 	// assigned to each of the given groups by scanning keyspace metadata. It is
 	// the authoritative source for the delete guard so a stale persisted counter
@@ -68,9 +71,10 @@ func NewMetaServiceGroupManager(
 	tlsConfigLoader func() (*tls.Config, error),
 ) *MetaServiceGroupManager {
 	return &MetaServiceGroupManager{
-		store:             store,
-		tlsConfigLoader:   tlsConfigLoader,
-		metaServiceGroups: cloneMetaServiceGroups(metaServiceGroups),
+		store:                    store,
+		tlsConfigLoader:          tlsConfigLoader,
+		metaServiceGroups:        cloneMetaServiceGroups(metaServiceGroups),
+		initialMetaServiceGroups: cloneMetaServiceGroups(metaServiceGroups),
 	}
 }
 
