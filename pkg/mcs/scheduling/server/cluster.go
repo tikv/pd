@@ -356,19 +356,29 @@ func (c *Cluster) SetRuntimeResources(
 // RefreshStoreRateLimits applies the configured limits to existing in-memory
 // store limiters.
 func (c *Cluster) RefreshStoreRateLimits() {
+	cfg := c.persistConfig.GetScheduleConfig()
 	for _, store := range c.GetStores() {
 		limit, ok := store.GetStoreLimit().(*storelimit.StoreRateLimit)
 		if !ok {
 			continue
 		}
-		for _, limitType := range []storelimit.Type{
-			storelimit.AddPeer,
-			storelimit.RemovePeer,
-			storelimit.TransferLeaderIn,
+		// Read without creating missing entries, including those removed for
+		// tombstoned stores that are still present in the cluster.
+		storeLimit, ok := cfg.StoreLimit[store.GetID()]
+		if !ok {
+			storeLimit = cfg.GetDefaultStoreLimit()
+		}
+		for _, limitConfig := range []struct {
+			typ        storelimit.Type
+			ratePerMin float64
+		}{
+			{storelimit.AddPeer, storeLimit.AddPeer},
+			{storelimit.RemovePeer, storeLimit.RemovePeer},
+			{storelimit.TransferLeaderIn, storeLimit.TransferLeaderIn},
 		} {
-			ratePerSec := c.persistConfig.GetStoreLimitByType(store.GetID(), limitType) / operator.StoreBalanceBaseTime
-			if limit.Rate(limitType) != ratePerSec {
-				c.ResetStoreLimit(store.GetID(), limitType, ratePerSec)
+			ratePerSec := limitConfig.ratePerMin / operator.StoreBalanceBaseTime
+			if limit.Rate(limitConfig.typ) != ratePerSec {
+				c.ResetStoreLimit(store.GetID(), limitConfig.typ, ratePerSec)
 			}
 		}
 	}

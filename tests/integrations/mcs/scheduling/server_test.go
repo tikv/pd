@@ -900,6 +900,11 @@ func (suite *serverTestSuite) TestStoreLimit() {
 	err = leaderServer.GetRaftCluster().SetStoreLimit(2, storelimit.AddPeer, 30)
 	re.NoError(err)
 	waitSyncFinish(re, tc, storelimit.AddPeer, 30)
+	testutil.Eventually(re, func() bool {
+		store := tc.GetPrimaryServer().GetCluster().GetStore(2)
+		limit, ok := store.GetStoreLimit().(*storelimit.StoreRateLimit)
+		return ok && limit.Rate(storelimit.AddPeer) == 0.5
+	})
 	store := tc.GetPrimaryServer().GetCluster().GetStore(2)
 	re.True(store.GetStoreLimit().Take(storelimit.RegionInfluence[storelimit.AddPeer], storelimit.AddPeer, coreconstant.Medium))
 	re.False(store.IsAvailable(storelimit.AddPeer, coreconstant.Medium))

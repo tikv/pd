@@ -71,3 +71,57 @@ func TestRefreshStoreRateLimits(t *testing.T) {
 		re.True(store.IsAvailable(typ, constant.Medium), typ.String())
 	}
 }
+
+func TestRefreshStoreRateLimitsPreservesConfig(t *testing.T) {
+	for _, testCase := range []struct {
+		name       string
+		storeLimit map[uint64]sc.StoreLimitConfig
+	}{
+		{name: "nil store limits"},
+		{name: "empty store limits", storeLimit: map[uint64]sc.StoreLimitConfig{}},
+		{
+			name: "explicit store limits",
+			storeLimit: map[uint64]sc.StoreLimitConfig{1: {
+				AddPeer:          120,
+				RemovePeer:       180,
+				TransferLeaderIn: 240,
+			}},
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			cfg := &config.Config{Schedule: sc.ScheduleConfig{
+				DefaultStoreLimit: sc.StoreLimitConfig{
+					AddPeer:          30,
+					RemovePeer:       60,
+					TransferLeaderIn: 120,
+				},
+				StoreLimit: testCase.storeLimit,
+			}}
+			expected := cfg.Schedule.Clone()
+			persistConfig := config.NewPersistConfig(cfg, nil)
+			basicCluster := core.NewBasicCluster()
+			basicCluster.PutStore(core.NewStoreInfo(&metapb.Store{Id: 1}))
+			// Tombstoned stores remain in the cluster after PD removes their
+			// store-limit entry. Refreshing must not recreate that entry.
+			basicCluster.PutStore(core.NewStoreInfo(&metapb.Store{Id: 2, NodeState: metapb.NodeState_Removed}))
+			cluster := &Cluster{BasicCluster: basicCluster, persistConfig: persistConfig}
+
+			cluster.RefreshStoreRateLimits()
+
+			re.Same(&cfg.Schedule, persistConfig.GetScheduleConfig())
+			re.Equal(expected, persistConfig.GetScheduleConfig())
+			for _, store := range cluster.GetStores() {
+				limit, ok := store.GetStoreLimit().(*storelimit.StoreRateLimit)
+				re.True(ok)
+				expectedLimit, ok := expected.StoreLimit[store.GetID()]
+				if !ok {
+					expectedLimit = expected.GetDefaultStoreLimit()
+				}
+				re.Equal(expectedLimit.AddPeer/60, limit.Rate(storelimit.AddPeer))
+				re.Equal(expectedLimit.RemovePeer/60, limit.Rate(storelimit.RemovePeer))
+				re.Equal(expectedLimit.TransferLeaderIn/60, limit.Rate(storelimit.TransferLeaderIn))
+			}
+		})
+	}
+}
