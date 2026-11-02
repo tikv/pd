@@ -1739,6 +1739,7 @@ func getAllAffinityGroups(c *gin.Context) {
 // @Param    group_id  path  string  true  "The group id of the affinity group"
 // @Produce  json
 // @Success  200  {object}  *affinity.GroupState
+// @Failure  400  {string}  string  "The input is invalid."
 // @Failure  404  {string}  string  "Affinity group not found."
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /affinity-groups/{group_id} [get]
@@ -1751,7 +1752,7 @@ func getAffinityGroup(c *gin.Context) {
 	groupState, err := manager.CheckAndGetAffinityGroupState(groupID)
 	if err != nil {
 		switch {
-		case errs.ErrInvalidGroupID.Equal(err):
+		case errs.ErrInvalidGroupID.Equal(err), errs.ErrAffinityGroupContent.Equal(err):
 			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
 		case errs.ErrAffinityGroupNotFound.Equal(err):
 			c.AbortWithStatusJSON(http.StatusNotFound, err.Error())
