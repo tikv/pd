@@ -650,6 +650,98 @@ func TestConcurrentReadMetadataFollowsAcceptedRoot(t *testing.T) {
 	}
 }
 
+func TestOverlapRejectionRestoresReadMetadata(t *testing.T) {
+	for _, coalesced := range []bool{false, true} {
+		for _, consumer := range []string{"single", "bulk", "sample"} {
+			t.Run(fmt.Sprintf("coalesced=%t/consumer=%s", coalesced, consumer), func(t *testing.T) {
+				synctest.Test(t, func(t *testing.T) {
+					cluster, cache, initial, loads := newHotReadCache(t, []uint64{1, 2, 3},
+						core.WithStartKey([]byte("a")), core.WithEndKey([]byte("b")))
+					initial = withHeartbeatTerm(initial, 10)
+					cluster.PutRegion(initial)
+					cache.CheckRegionFlowAsync(initial)
+					before := cache.GetHotPeerStats(utils.Read, 0)
+					neighbor := newBenchmarkRegion(2, 3).Clone(core.SetRegionVersion(10), core.SetRegionConfVer(10),
+						core.WithStartKey([]byte("b")), core.WithEndKey([]byte("d")))
+					cluster.PutRegion(neighbor)
+					// This merged snapshot passes admission before the overlapping region advances.
+					merged := withHeartbeatTerm(initial.Clone(core.WithEndKey([]byte("d")), core.WithIncVersion(),
+						core.WithLeader(initial.GetStorePeer(2)), core.WithRemoveStorePeer(3), core.WithIncConfVer()), 12)
+					newer := neighbor.Clone(core.SetRegionVersion(12))
+					for _, region := range []*core.RegionInfo{merged, newer} {
+						_, _, err := cluster.PreCheckPutRegion(region)
+						require.NoError(t, err)
+					}
+					var release func()
+					if coalesced {
+						release = blockHotReadWorker(t, cache)
+					}
+					time.Sleep(20 * time.Second)
+					cache.CheckRegionFlowAsync(merged)
+					if !coalesced {
+						observed := cache.GetHotPeerStats(utils.Read, 0)
+						require.True(t, observed[2][0].IsLeader(), "valid unpublished metadata must remain visible")
+						require.Empty(t, observed[3])
+					}
+					_, err := cluster.CheckAndPutRootTree(core.ContextTODO(), newer)
+					require.NoError(t, err)
+					_, err = cluster.CheckAndPutRootTree(core.ContextTODO(), merged)
+					require.Error(t, err, "the newer overlapping region must reject the merged snapshot")
+					require.Same(t, initial, cluster.GetRegion(initial.GetID()), "rejection need not advance this region's root")
+					if coalesced {
+						release()
+					}
+					switch consumer {
+					case "single":
+						require.True(t, cache.GetHotPeerStat(utils.Read, initial.GetID(), 1).IsLeader())
+					case "bulk":
+						require.True(t, cache.GetHotPeerStats(utils.Read, 0)[1][0].IsLeader())
+					case "sample":
+						require.True(t, cache.CheckReadPeerAsync(initial, initial.GetStorePeer(1), loads, utils.StoreHeartBeatReportInterval))
+					}
+					after := cache.GetHotPeerStats(utils.Read, 0)
+					require.True(t, after[1][0].IsLeader())
+					require.False(t, after[2][0].IsLeader())
+					require.True(t, before[1][0].IsLeader(), "reconciliation must preserve returned snapshots")
+					require.Equal(t, before[2][0].Loads, after[2][0].Loads)
+					require.Equal(t, before[2][0].HotDegree, after[2][0].HotDegree)
+					if consumer == "sample" {
+						require.True(t, cache.CheckReadPeerAsync(initial, initial.GetStorePeer(3), loads, utils.StoreHeartBeatReportInterval))
+						require.Len(t, cache.GetHotPeerStats(utils.Read, 0)[3], 1, "rejected membership must not discard current peer samples")
+					}
+					time.Sleep(11 * time.Second)
+					cache.CollectMetrics()
+					require.Empty(t, cache.GetHotPeerStats(utils.Read, 0)[2], "reconciliation must not renew sample TTL")
+				})
+			})
+		}
+	}
+}
+
+func TestUnpublishedRangeChangePreservesReadMetadata(t *testing.T) {
+	cluster, cache, initial, loads := newHotReadCache(t, []uint64{1, 2},
+		core.WithStartKey([]byte("b")), core.WithEndKey([]byte("d")))
+	initial = withHeartbeatTerm(initial, 10)
+	cluster.PutRegion(initial)
+	cache.CheckRegionFlowAsync(initial)
+	_ = cache.GetHotPeerStats(utils.Read, 0)
+	neighbor := newBenchmarkRegion(2, 3).Clone(core.SetRegionVersion(10), core.SetRegionConfVer(10),
+		core.WithStartKey([]byte("a")), core.WithEndKey([]byte("b")))
+	cluster.PutRegion(neighbor)
+	merged := withHeartbeatTerm(initial.Clone(core.WithStartKey([]byte("a")), core.WithIncVersion(),
+		core.WithLeader(initial.GetStorePeer(2))), 12)
+	cache.CheckRegionFlowAsync(merged)
+	require.Same(t, initial, cluster.GetRegion(initial.GetID()))
+	require.True(t, cache.GetHotPeerStat(utils.Read, initial.GetID(), 2).IsLeader())
+	require.True(t, cache.CheckReadPeerAsync(initial, initial.GetStorePeer(1), loads, utils.StoreHeartBeatReportInterval))
+	after := cache.GetHotPeerStats(utils.Read, 0)
+	require.False(t, after[1][0].IsLeader(), "a valid pending range change must still fence older read snapshots")
+	require.True(t, after[2][0].IsLeader())
+	_, err := cluster.CheckAndPutRootTree(core.ContextTODO(), merged)
+	require.NoError(t, err)
+	require.Equal(t, after, cache.GetHotPeerStats(utils.Read, 0), "successful publication must preserve the observed cooldown")
+}
+
 func TestUnknownTermPublicationRestoresReadLeader(t *testing.T) {
 	for _, tc := range []struct{ publishBeforeReplay, intermediateRoot bool }{{}, {publishBeforeReplay: true}, {intermediateRoot: true}} {
 		t.Run(fmt.Sprintf("publish-before-replay=%t/intermediate-root=%t", tc.publishBeforeReplay, tc.intermediateRoot), func(t *testing.T) {

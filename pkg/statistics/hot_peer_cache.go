@@ -15,6 +15,7 @@
 package statistics
 
 import (
+	"bytes"
 	"container/list"
 	"context"
 	"fmt"
@@ -354,16 +355,28 @@ func (f *HotPeerCache) reconcileReadMetadata(regionID uint64) *readRegionMetadat
 }
 
 func (f *HotPeerCache) reconcileReadMetadataWithRoot(regionID uint64, previous *readRegionMetadata, current *core.RegionInfo) *readRegionMetadata {
-	if previous.rootChanged(current) {
-		if current == nil {
-			delete(f.readMetadata, regionID)
-			return nil
+	if !previous.rootChanged(current) {
+		if current != nil && bytes.Equal(previous.meta.GetStartKey(), current.GetStartKey()) &&
+			bytes.Equal(previous.meta.GetEndKey(), current.GetEndKey()) {
+			return previous
 		}
-		// Admission precedes final validation and the unchanged-heartbeat return.
-		// Once the root advances, it resolves both rejected and skipped metadata.
-		applyRegionMetadata(f, newReadRegionMetadata(current, current))
+		// A changed range can be rejected by a newer overlapping region without
+		// changing this region's root. Recheck its epochs before trusting it.
+		root, _, err := f.cluster.PreCheckPutRegion(core.NewRegionInfo(previous.meta, nil))
+		if err == nil {
+			return previous
+		}
+		current = root
+		// The rejected marker must no longer fence the root's older term or epoch.
+		delete(f.readMetadata, regionID)
 	}
-	return previous
+	if current == nil {
+		delete(f.readMetadata, regionID)
+		return nil
+	}
+	// Admission precedes final validation and the unchanged-heartbeat return.
+	applyRegionMetadata(f, newReadRegionMetadata(current, current))
+	return f.readMetadata[regionID]
 }
 
 // CheckPeerFlow checks the flow information of a peer.
