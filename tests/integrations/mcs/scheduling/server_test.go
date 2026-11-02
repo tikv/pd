@@ -897,13 +897,14 @@ func (suite *serverTestSuite) TestStoreLimit() {
 
 	// Exhaust an existing limiter, then verify that a scheduling config update
 	// refreshes it before the next admission check.
-	err = leaderServer.GetRaftCluster().SetStoreLimit(2, storelimit.AddPeer, 30)
+	const exhaustedRate = 0.00006
+	err = leaderServer.GetRaftCluster().SetStoreLimit(2, storelimit.AddPeer, exhaustedRate)
 	re.NoError(err)
-	waitSyncFinish(re, tc, storelimit.AddPeer, 30)
+	waitSyncFinish(re, tc, storelimit.AddPeer, exhaustedRate)
 	testutil.Eventually(re, func() bool {
 		store := tc.GetPrimaryServer().GetCluster().GetStore(2)
 		limit, ok := store.GetStoreLimit().(*storelimit.StoreRateLimit)
-		return ok && limit.Rate(storelimit.AddPeer) == 0.5
+		return ok && limit.Rate(storelimit.AddPeer) == exhaustedRate/60
 	})
 	store := tc.GetPrimaryServer().GetCluster().GetStore(2)
 	re.True(store.GetStoreLimit().Take(storelimit.RegionInfluence[storelimit.AddPeer], storelimit.AddPeer, coreconstant.Medium))
@@ -916,6 +917,54 @@ func (suite *serverTestSuite) TestStoreLimit() {
 		limit, ok := store.GetStoreLimit().(*storelimit.StoreRateLimit)
 		return ok && limit.Rate(storelimit.AddPeer) == 2.0 && store.IsAvailable(storelimit.AddPeer, coreconstant.Medium)
 	})
+}
+
+func (suite *serverTestSuite) TestStoreLimitInitialLoad() {
+	re := suite.Require()
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetAddr())
+	defer conn.Close()
+	resp, err := grpcPDClient.PutStore(suite.ctx, &pdpb.PutStoreRequest{
+		Header: testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
+		Store: &metapb.Store{
+			Id:      2,
+			Address: "mock://tikv-2:2",
+			State:   metapb.StoreState_Up,
+			Version: "7.0.0",
+		},
+	})
+	re.NoError(err)
+	re.Empty(resp.GetHeader().GetError())
+	limits := []struct {
+		typ  storelimit.Type
+		rate float64
+	}{
+		{storelimit.AddPeer, 120},
+		{storelimit.RemovePeer, 180},
+		{storelimit.TransferLeaderIn, 240},
+	}
+	for _, limit := range limits {
+		re.NoError(suite.pdLeader.GetRaftCluster().SetStoreLimit(2, limit.typ, limit.rate))
+	}
+
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
+	re.NoError(err)
+	defer tc.Destroy()
+	// WaitForPrimaryServing sends Region heartbeats that can trigger admission
+	// and lazily refresh limiters, masking a missing initial watcher refresh.
+	testutil.Eventually(re, func() bool { return tc.GetPrimaryServer() != nil }, testutil.WithWaitFor(10*time.Second))
+	store := tc.GetPrimaryServer().GetCluster().GetStore(2)
+	re.NotNil(store)
+	limiter, ok := store.GetStoreLimit().(*storelimit.StoreRateLimit)
+	re.True(ok)
+	for _, limit := range limits {
+		re.Equal(limit.rate/60, limiter.Rate(limit.typ), limit.typ.String())
+	}
+
+	for _, limit := range limits {
+		rate := limit.rate + 180
+		re.NoError(suite.pdLeader.GetRaftCluster().SetStoreLimit(2, limit.typ, rate))
+		testutil.Eventually(re, func() bool { return limiter.Rate(limit.typ) == rate/60 })
+	}
 }
 
 func checkOperatorSuccess(re *require.Assertions, oc *operator.Controller, op *operator.Operator) {
