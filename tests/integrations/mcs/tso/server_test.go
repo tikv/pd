@@ -925,6 +925,7 @@ func TestTSOServiceSwitch(t *testing.T) {
 	testutil.Eventually(re, func() bool {
 		return pdLeader.GetServer().GetTSOAllocator().IsInitialize()
 	})
+	utils.WaitForTSOServiceAvailable(ctx, re, pdClient)
 
 	// Verify PD is now providing TSO service and timestamps are monotonically increasing
 	re.NoError(checkTSOMonotonic(ctx, pdClient, &globalLastTS, 10))
