@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/gogo/protobuf/proto"
+	"github.com/sasha-s/go-deadlock"
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -46,6 +47,8 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	// Pooled timers cannot cross synctest bubble boundaries.
+	deadlock.Opts.TimerPool = deadlock.TimerPoolDisabled
 	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
