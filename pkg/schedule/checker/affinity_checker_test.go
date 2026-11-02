@@ -248,8 +248,11 @@ func TestAffinityCheckerGroupState(t *testing.T) {
 	tc.AddRegionStore(2, 10)
 	tc.AddRegionStore(3, 10)
 	tc.AddRegionStore(4, 10)
-	tc.AddLeaderRegion(100, 4, 2, 3)
-	tc.AddLeaderRegion(200, 1, 2, 3)
+	tc.AddLeaderRegionWithRange(100, "", "m", 4, 2, 3)
+	tc.AddLeaderRegionWithRange(200, "m", "", 1, 2, 3)
+	for _, id := range []uint64{100, 200} {
+		tc.PutRegion(tc.GetRegion(id).Clone(core.SetApproximateSize(10)))
+	}
 
 	affinityManager := tc.GetAffinityManager()
 	affinityChecker := newTestAffinityChecker(ctx, tc, opt)
@@ -2113,8 +2116,9 @@ func TestAffinityCheckerRegionHasBetterLocation(t *testing.T) {
 	re.NoError(err)
 
 	// No scheduling is generated because the source Region is not at the best location.
-	tc.AddLeaderRegion(100, 1, 3, 4)
-	region := tc.GetRegion(100)
+	tc.AddLeaderRegionWithRange(100, "", "a", 1, 3, 4)
+	region := tc.GetRegion(100).Clone(core.SetApproximateSize(10))
+	tc.PutRegion(region)
 	re.False(checker.isRegionPlacementRuleSatisfiedWithBestLocation(region, true))
 	ops := checker.Check(region)
 	re.Nil(ops)
@@ -2125,8 +2129,9 @@ func TestAffinityCheckerRegionHasBetterLocation(t *testing.T) {
 	// Because the Group’s currently specified Peers are not at the best location,
 	// they are cleared and replaced with the source Region’s Peers.
 	// In this case, no scheduling is generated, but the Peers are updated.
-	tc.AddLeaderRegion(200, 1, 4, 5)
-	region = tc.GetRegion(200)
+	tc.AddLeaderRegionWithRange(200, "a", "b", 1, 4, 5)
+	region = tc.GetRegion(200).Clone(core.SetApproximateSize(10))
+	tc.PutRegion(region)
 	re.True(checker.isRegionPlacementRuleSatisfiedWithBestLocation(region, false))
 	ops = checker.Check(region)
 	re.Nil(ops)
@@ -2135,8 +2140,9 @@ func TestAffinityCheckerRegionHasBetterLocation(t *testing.T) {
 	re.Equal([]uint64{1, 4, 5}, groupState.VoterStoreIDs)
 
 	// When both the source Region and the target Region are at the best location, scheduling is generated.
-	tc.AddLeaderRegion(300, 1, 4, 6)
-	region = tc.GetRegion(300)
+	tc.AddLeaderRegionWithRange(300, "b", "", 1, 4, 6)
+	region = tc.GetRegion(300).Clone(core.SetApproximateSize(10))
+	tc.PutRegion(region)
 	re.True(checker.isRegionPlacementRuleSatisfiedWithBestLocation(region, true))
 	ops = checker.Check(region)
 	re.NotNil(ops)
