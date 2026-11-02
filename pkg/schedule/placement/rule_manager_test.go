@@ -17,6 +17,7 @@ package placement
 import (
 	"context"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -31,8 +32,10 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
+	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -728,4 +731,63 @@ func TestRuleManagerLoadRulesLogRedact(t *testing.T) {
 			}
 		})
 	}
+}
+
+func BenchmarkRuleManagerInitialize(b *testing.B) {
+	for _, tables := range []int{3000, 10000, 30000} {
+		b.Run(fmt.Sprintf("tables=%d/rules=%d", tables, tables*3), func(b *testing.B) {
+			runRuleManagerInitializeBenchmark(b, tables)
+		})
+	}
+}
+
+func runRuleManagerInitializeBenchmark(b *testing.B, tables int) {
+	re := require.New(b)
+	_, client, clean := etcdutil.NewTestEtcdCluster(b, 1, nil)
+	defer clean()
+	store := storage.NewStorageWithEtcdBackend(client)
+	saveTableRules(re, store, tables)
+
+	stores := core.NewBasicCluster()
+	for i, zone := range []string{"z1", "z2", "z3"} {
+		stores.PutStore(core.NewStoreInfoWithLabel(uint64(i+1), map[string]string{"zone": zone}))
+	}
+
+	var manager *RuleManager
+	for b.Loop() {
+		manager = NewRuleManager(context.Background(), store, stores, mockconfig.NewTestOptions())
+		re.NoError(manager.Initialize(3, []string{"zone"}, "", false))
+	}
+	re.Len(manager.GetAllRules(), tables*3+1)
+	re.Len(manager.GetRuleGroups(), tables+1)
+}
+
+// saveTableRules saves the rules TiDB creates for tables bound to a placement
+// policy: a group plus a leader, a voter and a follower rule for each table.
+func saveTableRules(re *require.Assertions, store endpoint.RuleStorage, tables int) {
+	defaultRule := &Rule{GroupID: DefaultGroupID, ID: DefaultRuleID, Role: Voter, Count: 3, LocationLabels: []string{"zone"}}
+	batch := []func(kv.Txn) error{
+		func(txn kv.Txn) error { return store.SaveRule(txn, defaultRule.StoreKey(), defaultRule) },
+	}
+	for i := range tables {
+		tableID := int64(100 + i)
+		group := &RuleGroup{ID: fmt.Sprintf("TiDB_DDL_%d", tableID), Index: 40, Override: true}
+		batch = append(batch, func(txn kv.Txn) error { return store.SaveRuleGroup(txn, group.ID, group) })
+		startKey := hex.EncodeToString(codec.EncodeBytes(codec.GenerateTableKey(tableID)))
+		endKey := hex.EncodeToString(codec.EncodeBytes(codec.GenerateTableKey(tableID + 1)))
+		for j, role := range []PeerRoleType{Leader, Voter, Follower} {
+			rule := &Rule{
+				GroupID:          group.ID,
+				ID:               fmt.Sprintf("table_rule_%d_%d", tableID, j),
+				Index:            40,
+				StartKeyHex:      startKey,
+				EndKeyHex:        endKey,
+				Role:             role,
+				Count:            1,
+				LabelConstraints: []LabelConstraint{{Key: "zone", Op: In, Values: []string{fmt.Sprintf("z%d", j+1)}}},
+			}
+			batch = append(batch, func(txn kv.Txn) error { return store.SaveRule(txn, rule.StoreKey(), rule) })
+		}
+	}
+	re.NoError(endpoint.RunBatchOpInTxn(context.Background(), store, batch))
 }
