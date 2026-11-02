@@ -3606,7 +3606,7 @@ func benchmarkGetGCStateImpl(b *testing.B, excludeGCBarriers bool, keyspacesCoun
 				keyspaceID := rand.Uint32N(uint32(keyspacesCount)) + 1
 				_, err := gcStateManager.AdvanceTxnSafePoint(keyspaceID, nextTxnSafePoint, time.Now())
 				if err != nil {
-					if errors.ErrorEqual(err, errs.ErrDecreasingTxnSafePoint) {
+					if errors.ErrorEqual(err, errs.ErrDecreasingTxnSafePoint) || errors.ErrorEqual(err, errs.ErrEtcdTxnConflict) {
 						continue
 					}
 					b.Error(err)

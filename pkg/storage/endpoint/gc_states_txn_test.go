@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/errors"
 
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
@@ -246,6 +247,94 @@ func TestGCStateTransactionKeyspaceRevision(t *testing.T) {
 					re.Equal(uint64(200), safePoint)
 					re.Empty(barrier)
 					re.NotEqual(beforeRevision, revision)
+				}
+			})
+		}
+	}
+}
+
+func TestGCStateTransactionTxnSafePointRevision(t *testing.T) {
+	re := require.New(t)
+	ctx := context.Background()
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	store := NewStorageEndpoint(kv.NewEtcdKVBase(client), nil)
+	provider := store.GetGCStateProvider()
+	re.Error(provider.RunInGCStateTransaction(func(wb *GCStateWriteBatch) error {
+		return wb.ExpectTxnSafePointRevision(1, -1)
+	}))
+	for _, scope := range []uint32{1, constant.NullKeyspaceID} {
+		for _, tc := range []struct {
+			name                        string
+			initialized, changed, other bool
+		}{
+			{name: "missing"},
+			{name: "existing", initialized: true},
+			{name: "concurrent-create", changed: true},
+			{name: "same-value-put", initialized: true, changed: true},
+			{name: "unrelated-scope", initialized: true, changed: true, other: true},
+		} {
+			t.Run(fmt.Sprintf("scope=%d/%s", scope, tc.name), func(t *testing.T) {
+				re := require.New(t)
+				re.NoError(store.Remove(keypath.TxnSafePointPath(scope)))
+				re.NoError(provider.RunInGCStateTransaction(func(wb *GCStateWriteBatch) error {
+					if tc.initialized {
+						if err := wb.SetTxnSafePoint(scope, 50); err != nil {
+							return err
+						}
+					}
+					return wb.SetGCBarrier(scope, NewGCBarrier("expired", 60, nil))
+				}))
+				revision, err := provider.LoadTxnSafePointRevision(ctx, scope)
+				re.NoError(err)
+				if tc.initialized {
+					re.Positive(revision)
+				} else {
+					re.Zero(revision)
+				}
+				beforeRevision, err := store.Load(keypath.GCStateRevisionPath())
+				re.NoError(err)
+				beforeBarrier, err := store.Load(keypath.GCBarrierPath(scope, "expired"))
+				re.NoError(err)
+				err = provider.RunInGCStateTransaction(func(wb *GCStateWriteBatch) error {
+					if err := wb.ExpectTxnSafePointRevision(scope, revision); err != nil {
+						return err
+					}
+					if tc.changed {
+						changedScope := scope
+						if tc.other {
+							changedScope = 2
+						}
+						// Bypass the GC revision so only the scope's ModRevision can detect this write.
+						if err := store.Save(keypath.TxnSafePointPath(changedScope), "50"); err != nil {
+							return err
+						}
+					}
+					if err := wb.SetTxnSafePoint(scope, 200); err != nil {
+						return err
+					}
+					return wb.DeleteGCBarrier(scope, "expired")
+				})
+				conflict := tc.changed && !tc.other
+				if conflict {
+					re.True(errors.ErrorEqual(err, errs.ErrEtcdTxnConflict), "got %v", err)
+				} else {
+					re.NoError(err)
+				}
+				safePoint, err := provider.LoadTxnSafePoint(scope)
+				re.NoError(err)
+				barrier, err := store.Load(keypath.GCBarrierPath(scope, "expired"))
+				re.NoError(err)
+				afterRevision, err := store.Load(keypath.GCStateRevisionPath())
+				re.NoError(err)
+				if conflict {
+					re.Equal(uint64(50), safePoint)
+					re.Equal(beforeBarrier, barrier)
+					re.Equal(beforeRevision, afterRevision)
+				} else {
+					re.Equal(uint64(200), safePoint)
+					re.Empty(barrier)
+					re.NotEqual(beforeRevision, afterRevision)
 				}
 			})
 		}

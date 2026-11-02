@@ -91,10 +91,10 @@ func gatherBarrierMetricNames(t testing.TB, registry prometheus.Gatherer) map[st
 // boundary, allowing assertions about failure publication and added storage IO.
 type barrierMetricsTestKV struct {
 	kv.Base
-	fail          bool
-	beforeCommit  func()
-	afterCommit   func()
-	loads, ranges int
+	failReads, failWrites bool
+	beforeCommit          func()
+	afterCommit           func()
+	loads, ranges         int
 }
 
 func (s *barrierMetricsTestKV) Load(key string) (string, error) { s.loads++; return s.Base.Load(key) }
@@ -111,7 +111,8 @@ func (s *barrierMetricsTestKV) CreateRawTxnWithContext(ctx context.Context) kv.R
 
 type barrierMetricsTestTxn struct {
 	kv.RawTxn
-	store *barrierMetricsTestKV
+	store     *barrierMetricsTestKV
+	hasWrites bool
 }
 
 func (t *barrierMetricsTestTxn) If(conditions ...kv.RawTxnCondition) kv.RawTxn {
@@ -119,6 +120,9 @@ func (t *barrierMetricsTestTxn) If(conditions ...kv.RawTxnCondition) kv.RawTxn {
 	return t
 }
 func (t *barrierMetricsTestTxn) Then(ops ...kv.RawTxnOp) kv.RawTxn {
+	for _, op := range ops {
+		t.hasWrites = t.hasWrites || op.OpType == kv.RawTxnOpPut || op.OpType == kv.RawTxnOpDelete
+	}
 	t.RawTxn = t.RawTxn.Then(ops...)
 	return t
 }
@@ -126,11 +130,11 @@ func (t *barrierMetricsTestTxn) Commit() (kv.RawTxnResponse, error) {
 	if t.store.beforeCommit != nil {
 		t.store.beforeCommit()
 	}
-	if t.store.fail {
+	if (t.hasWrites && t.store.failWrites) || (!t.hasWrites && t.store.failReads) {
 		return kv.RawTxnResponse{Succeeded: false}, nil
 	}
 	response, err := t.RawTxn.Commit()
-	if err == nil && response.Succeeded && t.store.afterCommit != nil {
+	if err == nil && response.Succeeded && t.hasWrites && t.store.afterCommit != nil {
 		t.store.afterCommit()
 	}
 	return response, err
@@ -155,12 +159,12 @@ func (s *gcStateManagerTestSuite) TestBarrierMetricsKVLeaderColdRead() {
 	re.Equal(expected, state)
 
 	s.manager.OnNodeBecomesLeader()
-	wrapped.fail = true
+	wrapped.failReads = true
 	_, err = s.manager.GetGCState(2, true)
 	re.ErrorContains(err, "invalid GC safe point batch response")
 	_, cached = s.manager.gcStateCache.load(2)
 	re.False(cached, "failed reads must not populate the cache")
-	wrapped.fail = false
+	wrapped.failReads = false
 	state, err = s.manager.GetGCState(2, true)
 	re.NoError(err)
 	re.Equal(expected, state)
@@ -515,7 +519,7 @@ func (s *gcStateManagerTestSuite) TestBarrierMetricsAdvancementAndWrites() {
 	_, err = s.manager.AdvanceTxnSafePoint(2, ts(0), now)
 	re.NoError(err)
 	re.Equal(expected, gatherBarrierMetrics(s.T(), registry))
-	counted.fail = true
+	counted.failWrites = true
 	_, err = s.manager.SetGCBarrier(2, "hidden", ts(time.Hour), time.Duration(math.MaxInt64), now)
 	re.Error(err)
 	_, err = s.manager.DeleteGCBarrier(2, "oldest")
@@ -528,9 +532,9 @@ func (s *gcStateManagerTestSuite) TestBarrierMetricsAdvancementAndWrites() {
 	// Storage changes visible to a failed advancement must not replace cached data.
 	re.NoError(s.provider.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error { return wb.DeleteGCBarrier(2, "hidden") }))
 	_, err = s.manager.AdvanceTxnSafePoint(2, ts(0), now)
-	re.Error(err)
+	re.ErrorIs(err, errs.ErrEtcdTxnConflict)
 	re.Equal(expected, gatherBarrierMetrics(s.T(), registry))
-	counted.fail = false
+	counted.failWrites = false
 	_, err = s.manager.AdvanceTxnSafePoint(2, ts(0), now)
 	re.NoError(err)
 	delete(expected, "keyspace/2/hidden")
@@ -616,13 +620,13 @@ func (s *gcStateManagerTestSuite) TestBarrierMetricsWarningCommitAndTTL() {
 	core, logs := observer.New(zapcore.WarnLevel)
 	restore := log.ReplaceGlobals(zap.New(core), nil)
 	defer restore()
-	counted := &barrierMetricsTestKV{Base: s.storage.Base, fail: true}
+	counted := &barrierMetricsTestKV{Base: s.storage.Base, failWrites: true}
 	m.gcMetaStorage = endpoint.NewStorageEndpoint(counted, nil).GetGCStateProvider()
 	_, err = m.AdvanceTxnSafePoint(2, ts, now)
-	re.Error(err)
+	re.ErrorIs(err, errs.ErrEtcdTxnConflict)
 	re.Empty(logs.FilterMessage("GC barrier timestamp is too old").All())
 	re.Empty(gatherBarrierMetrics(s.T(), registry))
-	counted.fail = false
+	counted.failWrites = false
 	_, err = m.AdvanceTxnSafePoint(2, ts, now)
 	re.NoError(err)
 	warnings := logs.FilterMessage("GC barrier timestamp is too old").All()
@@ -692,11 +696,11 @@ func (s *gcStateManagerTestSuite) TestBarrierMetricsForceDeleteServiceGCSafePoin
 	re.Equal(expected, gatherBarrierMetrics(s.T(), registry))
 	re.Len(logs.FilterMessage("GC barrier timestamp is too old").All(), 1)
 
-	counted := &barrierMetricsTestKV{Base: s.storage.Base, fail: true}
+	counted := &barrierMetricsTestKV{Base: s.storage.Base, failWrites: true}
 	m.gcMetaStorage = endpoint.NewStorageEndpoint(counted, nil).GetGCStateProvider()
 	re.Error(m.ForceDeleteServiceGCSafePoint("force-delete"))
 	re.Equal(expected, gatherBarrierMetrics(s.T(), registry), "failed commit must retain the observation")
-	counted.fail = false
+	counted.failWrites = false
 	_, err = m.AdvanceTxnSafePoint(constant.NullKeyspaceID, ts, now)
 	re.NoError(err)
 	re.Len(logs.FilterMessage("GC barrier timestamp is too old").All(), 1, "failed deletion must retain warning suppression")

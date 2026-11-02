@@ -464,16 +464,19 @@ func (m *GCStateManager) AdvanceTxnSafePoint(keyspaceID uint32, target uint64, n
 	ctx = addKeyspaceNameToCtx(ctx, keyspaceNameForDiag)
 	ctx = context.WithValue(ctx, barrierObservationKey{}, observation)
 
+	prepared, err := m.prepareTxnSafePoint(ctx, keyspaceID, keyspaceMeta)
+	if err != nil {
+		return AdvanceTxnSafePointResult{}, err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	return m.advanceTxnSafePointImpl(ctx, keyspaceID, keyspaceMeta, target, now)
+	return m.advanceTxnSafePointImpl(ctx, keyspaceID, prepared, target, now)
 }
 
 // advanceTxnSafePointImpl is the internal implementation of AdvanceTxnSafePoint, assuming keyspaceID has been checked
-// and the mutex has been acquired.
-func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID uint32, keyspaceMeta txnSafePointKeyspace, target uint64, now time.Time) (AdvanceTxnSafePointResult, error) {
-	failpoint.InjectCall("txnSafePointKeyspaceLoaded")
+// and its report prepared, and the mutex has been acquired.
+func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID uint32, prepared txnSafePointPreparation, target uint64, now time.Time) (AdvanceTxnSafePointResult, error) {
 	// Marks whether it's needed to provide the compatibility for old versions.
 	//
 	// In old versions, every time TiDB performs GC, it updates the service safe point of "gc_worker" new txn safe
@@ -496,10 +499,19 @@ func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID
 	)
 
 	err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+		keyspaceMeta := prepared.keyspace
 		if keyspaceMeta.meta != nil {
 			if err := wb.ExpectKeyspaceMetaRevision(keyspaceMeta.sourceID, keyspaceMeta.revision); err != nil {
 				return err
 			}
+		}
+		if prepared.configRevision != nil {
+			if err := wb.ExpectConfigRevision(*prepared.configRevision); err != nil {
+				return err
+			}
+		}
+		if err := wb.ExpectTxnSafePointRevision(keyspaceID, prepared.revision); err != nil {
+			return err
 		}
 		var err1 error
 		oldTxnSafePoint, err1 = m.gcMetaStorage.LoadTxnSafePoint(keyspaceID)
@@ -550,12 +562,7 @@ func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID
 		}
 
 		// Compatible with old TiDB nodes that use TiDBMinStartTS to block GC.
-		ownerKey, minStartTS, err1 := m.loadTiDBMinStartTS(ctx, keyspaceID, keyspaceMeta.meta, wb)
-		if err1 != nil {
-			return err1
-		}
-		failpoint.InjectCall("txnSafePointMinStartTSLoaded")
-
+		ownerKey, minStartTS := prepared.minStartTSOwner, prepared.minStartTS
 		if minStartTS != 0 && len(ownerKey) != 0 && minStartTS < minBlocker {
 			// Note that txn safe point is defined inclusive: snapshots that exactly equals to the txn safe point are
 			// considered valid.
@@ -594,6 +601,7 @@ func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID
 				return err1
 			}
 		}
+		// Keep the Put for successful no-ops too: its revision invalidates older prepared reports.
 		return wb.SetTxnSafePoint(keyspaceID, newTxnSafePoint)
 	})
 	if err != nil {
@@ -656,28 +664,48 @@ func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID
 	return result, nil
 }
 
-// loadTiDBMinStartTS routes only TiDB's report read; GC state writes remain on PD's provider.
-func (m *GCStateManager) loadTiDBMinStartTS(ctx context.Context, keyspaceID uint32, meta *keyspacepb.KeyspaceMeta, wb *endpoint.GCStateWriteBatch) (string, uint64, error) {
-	groupID := meta.GetConfig()[keyspace.MetaServiceGroupIDKey]
-	if keyspaceID == constant.NullKeyspaceID || groupID == "" {
-		return m.gcMetaStorage.CompatibleLoadTiDBMinStartTS(keyspaceID)
-	}
-	if !config.IsValidMetaServiceGroupID(groupID) {
-		return "", 0, fmt.Errorf("invalid meta-service group ID %q", groupID)
-	}
-	if m.metaServiceGroupManager == nil {
-		return "", 0, fmt.Errorf("meta-service group manager unavailable for group %s", groupID)
-	}
-	client, revision, err := m.metaServiceGroupManager.GetEtcdClientWithConfigRevision(ctx, groupID)
+// txnSafePointPreparation binds a report to the routing and GC scope revisions observed before reading it.
+type txnSafePointPreparation struct {
+	keyspace        txnSafePointKeyspace
+	revision        int64
+	configRevision  *int64
+	minStartTSOwner string
+	minStartTS      uint64
+}
+
+// prepareTxnSafePoint performs report I/O without holding the GC mutex. Only the report read is routed to a group;
+// the scope revision and all GC writes use PD storage, including for requests redirected to unified GC.
+func (m *GCStateManager) prepareTxnSafePoint(ctx context.Context, keyspaceID uint32, keyspaceMeta txnSafePointKeyspace) (txnSafePointPreparation, error) {
+	prepared := txnSafePointPreparation{keyspace: keyspaceMeta}
+	failpoint.InjectCall("txnSafePointKeyspaceLoaded")
+	revision, err := m.gcMetaStorage.LoadTxnSafePointRevision(ctx, keyspaceID)
 	if err != nil {
-		return "", 0, err
+		return prepared, err
 	}
-	if err := wb.ExpectConfigRevision(revision); err != nil {
-		return "", 0, err
+	prepared.revision = revision
+	provider := m.gcMetaStorage
+	groupID := keyspaceMeta.meta.GetConfig()[keyspace.MetaServiceGroupIDKey]
+	if keyspaceID != constant.NullKeyspaceID && groupID != "" {
+		if !config.IsValidMetaServiceGroupID(groupID) {
+			return prepared, fmt.Errorf("invalid meta-service group ID %q", groupID)
+		}
+		if m.metaServiceGroupManager == nil {
+			return prepared, fmt.Errorf("meta-service group manager unavailable for group %s", groupID)
+		}
+		client, revision, err := m.metaServiceGroupManager.GetEtcdClientWithConfigRevision(ctx, groupID)
+		if err != nil {
+			return prepared, err
+		}
+		prepared.configRevision = &revision
+		// This provider borrows the cached client and is used only for this read.
+		provider = endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(client), nil).GetGCStateProvider()
 	}
-	// This provider borrows the cached client and is used only for this read.
-	provider := endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(client), nil).GetGCStateProvider()
-	return provider.CompatibleLoadTiDBMinStartTS(keyspaceID)
+	prepared.minStartTSOwner, prepared.minStartTS, err = provider.CompatibleLoadTiDBMinStartTS(keyspaceID)
+	if err != nil {
+		return prepared, err
+	}
+	failpoint.InjectCall("txnSafePointMinStartTSLoaded")
+	return prepared, nil
 }
 
 func (*GCStateManager) logAdvancingTxnSafePoint(ctx context.Context, keyspaceID uint32, result AdvanceTxnSafePointResult, minBlocker uint64, downgradeCompatibleMode bool) {
@@ -1252,16 +1280,22 @@ func (m *GCStateManager) CompatibleUpdateServiceGCSafePoint(keyspaceID uint32, s
 	ctx = addKeyspaceNameToCtx(ctx, keyspaceNameForDiag)
 	ctx = context.WithValue(ctx, barrierObservationKey{}, observation)
 
+	var prepared txnSafePointPreparation
+	if serviceID == keypath.GCWorkerServiceSafePointID {
+		if ttl != math.MaxInt64 {
+			return nil, false, errors.New("TTL of gc_worker's service safe point must be infinity")
+		}
+		prepared, err = m.prepareTxnSafePoint(ctx, keyspaceID, keyspaceMeta)
+		if err != nil {
+			return nil, false, err
+		}
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	switch {
 	case serviceID == keypath.GCWorkerServiceSafePointID:
-		if ttl != math.MaxInt64 {
-			return nil, false, errors.New("TTL of gc_worker's service safe point must be infinity")
-		}
-
-		res, err := m.advanceTxnSafePointImpl(ctx, keyspaceID, keyspaceMeta, newServiceSafePoint, now)
+		res, err := m.advanceTxnSafePointImpl(ctx, keyspaceID, prepared, newServiceSafePoint, now)
 		if err != nil {
 			return nil, false, err
 		}

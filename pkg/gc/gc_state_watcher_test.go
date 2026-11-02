@@ -396,7 +396,14 @@ func (store commitErrorKV) CreateRawTxn() kv.RawTxn {
 	return &commitErrorTxn{RawTxn: store.Base.(kv.RawTxnCapable).CreateRawTxn()}
 }
 
-type commitErrorTxn struct{ kv.RawTxn }
+func (store commitErrorKV) CreateRawTxnWithContext(ctx context.Context) kv.RawTxn {
+	return &commitErrorTxn{RawTxn: store.Base.(kv.RawTxnWithContextCapable).CreateRawTxnWithContext(ctx)}
+}
+
+type commitErrorTxn struct {
+	kv.RawTxn
+	hasWrites bool
+}
 
 func (txn *commitErrorTxn) If(conditions ...kv.RawTxnCondition) kv.RawTxn {
 	txn.RawTxn = txn.RawTxn.If(conditions...)
@@ -404,6 +411,9 @@ func (txn *commitErrorTxn) If(conditions ...kv.RawTxnCondition) kv.RawTxn {
 }
 
 func (txn *commitErrorTxn) Then(ops ...kv.RawTxnOp) kv.RawTxn {
+	for _, op := range ops {
+		txn.hasWrites = txn.hasWrites || op.OpType == kv.RawTxnOpPut || op.OpType == kv.RawTxnOpDelete
+	}
 	txn.RawTxn = txn.RawTxn.Then(ops...)
 	return txn
 }
@@ -415,7 +425,7 @@ func (txn *commitErrorTxn) Else(ops ...kv.RawTxnOp) kv.RawTxn {
 
 func (txn *commitErrorTxn) Commit() (kv.RawTxnResponse, error) {
 	result, err := txn.RawTxn.Commit()
-	if err != nil || !result.Succeeded {
+	if err != nil || !result.Succeeded || !txn.hasWrites {
 		return result, err
 	}
 	return kv.RawTxnResponse{}, context.DeadlineExceeded

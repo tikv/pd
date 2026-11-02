@@ -15,6 +15,7 @@
 package endpoint
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -344,6 +345,31 @@ func (p GCStateProvider) LoadTxnSafePoint(keyspaceID uint32) (uint64, error) {
 	return decodeTxnSafePoint(value)
 }
 
+// LoadTxnSafePointRevision loads the modification revision of the scope's txn safe point in a linearizable read.
+// A missing txn safe point has revision zero.
+func (p GCStateProvider) LoadTxnSafePointRevision(ctx context.Context, keyspaceID uint32) (int64, error) {
+	txn, err := p.storage.createRawTxnWithContext(ctx)
+	if err != nil {
+		return 0, err
+	}
+	key := keypath.TxnSafePointPath(keyspaceID)
+	response, err := txn.Then(kv.RawTxnOp{Key: key, OpType: kv.RawTxnOpGet}).Commit()
+	if err != nil {
+		return 0, err
+	}
+	if !response.Succeeded || len(response.Responses) != 1 {
+		return 0, errs.ErrEtcdTxnResponse.GenWithStackByArgs("invalid txn safe point response")
+	}
+	pairs := response.Responses[0].KeyValuePairs
+	if len(pairs) == 0 {
+		return 0, nil
+	}
+	if len(pairs) != 1 || pairs[0].Key != key || pairs[0].ModRevision <= 0 {
+		return 0, errs.ErrEtcdTxnResponse.GenWithStackByArgs("invalid txn safe point key or revision")
+	}
+	return pairs[0].ModRevision, nil
+}
+
 func decodeTxnSafePoint(value string) (uint64, error) {
 	if value == "" {
 		return 0, nil
@@ -556,6 +582,18 @@ func (wb *GCStateWriteBatch) ExpectConfigRevision(revision int64) error {
 	}
 	wb.conditions = append(wb.conditions, kv.RawTxnCondition{
 		Key: keypath.ConfigPath(), CmpType: kv.RawTxnCmpModRevisionEqual, ModRevision: revision,
+	})
+	return nil
+}
+
+// ExpectTxnSafePointRevision rejects reports prepared before another advancement in the same GC scope.
+// Revision zero guards a txn safe point that did not exist before the report read.
+func (wb *GCStateWriteBatch) ExpectTxnSafePointRevision(keyspaceID uint32, revision int64) error {
+	if revision < 0 {
+		return errors.New("txn safe point revision must not be negative")
+	}
+	wb.conditions = append(wb.conditions, kv.RawTxnCondition{
+		Key: keypath.TxnSafePointPath(keyspaceID), CmpType: kv.RawTxnCmpModRevisionEqual, ModRevision: revision,
 	})
 	return nil
 }

@@ -20,6 +20,8 @@ import (
 	"errors"
 	"math"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -140,6 +142,233 @@ func TestMetaServiceGroupMinStartTSIsolation(t *testing.T) {
 	re.Equal(uint64(150), result.NewTxnSafePoint)
 }
 
+func TestMetaServiceGroupReportReadDoesNotBlockOtherScopes(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		name := "modern"
+		if legacy {
+			name = "legacy"
+		}
+		t.Run(name, func(t *testing.T) {
+			re := require.New(t)
+			ctx := context.Background()
+			_, manager, groupClient, _ := newMetaServiceGroupGCFixture(t)
+			_, err := groupClient.Put(ctx, keypath.CompatibleTiDBMinStartTSPrefix(1)+"tidb-group", "160")
+			re.NoError(err)
+			now := time.Now()
+			reached, resume := make(chan struct{}), make(chan struct{})
+			release := sync.OnceFunc(func() { close(resume) })
+			var paused atomic.Bool
+			hook := "github.com/tikv/pd/pkg/gc/txnSafePointMinStartTSLoaded"
+			re.NoError(failpoint.EnableCall(hook, func() {
+				if paused.CompareAndSwap(false, true) {
+					close(reached)
+					<-resume
+				}
+			}))
+			t.Cleanup(func() { re.NoError(failpoint.Disable(hook)) })
+			blockedDone := make(chan struct{})
+			var blockedSafePoint uint64
+			var blockedErr error
+			go func() {
+				defer close(blockedDone)
+				if legacy {
+					var minimum *endpoint.ServiceSafePoint
+					minimum, _, blockedErr = manager.CompatibleUpdateServiceGCSafePoint(1, keypath.GCWorkerServiceSafePointID, 200, math.MaxInt64, now)
+					if blockedErr == nil {
+						blockedSafePoint = minimum.SafePoint
+					}
+				} else {
+					var result AdvanceTxnSafePointResult
+					result, blockedErr = manager.AdvanceTxnSafePoint(1, 200, now)
+					blockedSafePoint = result.NewTxnSafePoint
+				}
+			}()
+			t.Cleanup(func() {
+				release()
+				<-blockedDone
+			})
+			select {
+			case <-reached:
+			case <-time.After(5 * time.Second):
+				t.Fatal("group report read did not reach the pause")
+			}
+
+			healthyDone := make(chan struct{})
+			var healthyResult AdvanceTxnSafePointResult
+			var healthyErr error
+			go func() {
+				defer close(healthyDone)
+				_, healthyErr = manager.SetGCBarrier(constant.NullKeyspaceID, "healthy-local", 120, time.Hour, now)
+				if healthyErr != nil {
+					return
+				}
+				_, healthyErr = manager.SetGlobalGCBarrier(ctx, "healthy-global", 140, time.Hour, now)
+				if healthyErr != nil {
+					return
+				}
+				healthyResult, healthyErr = manager.AdvanceTxnSafePoint(constant.NullKeyspaceID, 200, now)
+			}()
+			t.Cleanup(func() {
+				release()
+				<-healthyDone
+			})
+			select {
+			case <-healthyDone:
+				re.NoError(healthyErr)
+				re.Equal(uint64(120), healthyResult.NewTxnSafePoint)
+			case <-time.After(5 * time.Second):
+				t.Fatal("group report read blocked unrelated GC barrier updates and advancement")
+			}
+			release()
+			<-blockedDone
+			re.NoError(blockedErr)
+			re.Equal(uint64(140), blockedSafePoint, "the global barrier installed during preparation must block group A")
+		})
+	}
+}
+
+func TestTxnSafePointRejectsStalePreparedReport(t *testing.T) {
+	for _, tc := range []struct {
+		name                  string
+		legacy, unified, noOp bool
+		initial               uint64
+	}{
+		{name: "modern-after-legacy-advance", initial: 50},
+		{name: "legacy-after-modern-advance", legacy: true, initial: 50},
+		{name: "modern-after-legacy-no-op", noOp: true, initial: 50},
+		{name: "legacy-after-modern-no-op", legacy: true, noOp: true, initial: 50},
+		{name: "unified-after-modern-advance", legacy: true, unified: true, initial: 50},
+		{name: "unified-after-modern-no-op", legacy: true, unified: true, noOp: true, initial: 50},
+		{name: "missing-safe-point"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			ctx := context.Background()
+			opt := newGCStateManagerForTestOptions{}
+			opt.generateKeyspacesByCount(1)
+			scope := uint32(1)
+			if tc.unified {
+				opt.specifyInitialKeyspaces[0].Config[keyspace.GCManagementType] = "unified"
+				scope = constant.NullKeyspaceID
+			}
+			storage, provider, manager, clean, cancel := newGCStateManagerForTest(t, opt)
+			t.Cleanup(clean)
+			t.Cleanup(cancel)
+			now := time.Now()
+			if tc.initial != 0 {
+				_, err := manager.AdvanceTxnSafePoint(scope, tc.initial, now)
+				re.NoError(err)
+			}
+			reportKey := keypath.CompatibleTiDBMinStartTSPrefix(scope) + "tidb-local"
+			re.NoError(storage.Save(reportKey, "200"))
+			watcher, err := manager.WatchGCStates(ctx, true)
+			re.NoError(err)
+			t.Cleanup(watcher.Close)
+			reached, resume := make(chan struct{}), make(chan struct{})
+			release := sync.OnceFunc(func() { close(resume) })
+			var paused atomic.Bool
+			hook := "github.com/tikv/pd/pkg/gc/txnSafePointMinStartTSLoaded"
+			re.NoError(failpoint.EnableCall(hook, func() {
+				if paused.CompareAndSwap(false, true) {
+					close(reached)
+					<-resume
+				}
+			}))
+			t.Cleanup(func() { re.NoError(failpoint.Disable(hook)) })
+			done := make(chan struct{})
+			var staleErr error
+			go func() {
+				defer close(done)
+				if tc.legacy {
+					_, _, staleErr = manager.CompatibleUpdateServiceGCSafePoint(1, keypath.GCWorkerServiceSafePointID, 200, math.MaxInt64, now)
+				} else {
+					_, staleErr = manager.AdvanceTxnSafePoint(1, 200, now)
+				}
+			}()
+			t.Cleanup(func() {
+				release()
+				<-done
+			})
+			select {
+			case <-reached:
+			case <-time.After(5 * time.Second):
+				t.Fatal("stale report read did not reach the pause")
+			}
+
+			// A newer report and a successful advancement invalidate the pending report,
+			// even if the advancement writes the same txn safe point.
+			re.NoError(storage.Save(reportKey, "100"))
+			current := uint64(100)
+			if tc.noOp {
+				current = tc.initial
+			}
+			competingDone := make(chan struct{})
+			var competingSafePoint uint64
+			var competingUpdated bool
+			var competingErr error
+			go func() {
+				defer close(competingDone)
+				if tc.legacy {
+					var result AdvanceTxnSafePointResult
+					result, competingErr = manager.AdvanceTxnSafePoint(scope, current, now)
+					competingSafePoint = result.NewTxnSafePoint
+					competingUpdated = result.OldTxnSafePoint != result.NewTxnSafePoint
+				} else {
+					var minimum *endpoint.ServiceSafePoint
+					minimum, competingUpdated, competingErr = manager.CompatibleUpdateServiceGCSafePoint(scope, keypath.GCWorkerServiceSafePointID, current, math.MaxInt64, now)
+					if competingErr == nil {
+						competingSafePoint = minimum.SafePoint
+					}
+				}
+			}()
+			t.Cleanup(func() {
+				release()
+				<-competingDone
+			})
+			select {
+			case <-competingDone:
+			case <-time.After(5 * time.Second):
+				t.Fatal("pending report blocked the competing advancement")
+			}
+			re.NoError(competingErr)
+			re.Equal(current, competingSafePoint)
+			re.Equal(!tc.noOp, competingUpdated)
+			_, published, err := watcher.receiveOne(false)
+			re.NoError(err)
+			re.True(published, "the competing advancement must publish, including a successful no-op")
+			_, err = manager.SetGCBarrier(scope, "expired", 150, time.Second, now.Add(-time.Minute))
+			re.NoError(err)
+			barrierPath := keypath.GCBarrierPath(scope, "expired")
+			beforeBarrier, err := storage.Load(barrierPath)
+			re.NoError(err)
+			re.NotEmpty(beforeBarrier)
+			beforeRevision, err := storage.Load(keypath.GCStateRevisionPath())
+			re.NoError(err)
+
+			release()
+			<-done
+			re.True(pingcaperrors.ErrorEqual(staleErr, errs.ErrEtcdTxnConflict), "stale report must conflict, got %v", staleErr)
+			persisted, err := provider.LoadTxnSafePoint(scope)
+			re.NoError(err)
+			re.Equal(current, persisted)
+			afterBarrier, err := storage.Load(barrierPath)
+			re.NoError(err)
+			re.Equal(beforeBarrier, afterBarrier)
+			afterRevision, err := storage.Load(keypath.GCStateRevisionPath())
+			re.NoError(err)
+			re.Equal(beforeRevision, afterRevision)
+			_, published, err = watcher.receiveOne(false)
+			re.NoError(err)
+			re.False(published, "a stale report must not publish a GC state")
+			if tc.unified {
+				persisted, err = provider.LoadTxnSafePoint(1)
+				re.NoError(err)
+				re.Zero(persisted, "the source keyspace must remain untouched")
+			}
+		})
+	}
+}
+
 func TestMetaServiceGroupMinStartTSLocalFallback(t *testing.T) {
 	re := require.New(t)
 	storage, manager, groupClient, _ := newMetaServiceGroupGCFixture(t)
@@ -175,7 +404,7 @@ func TestMetaServiceGroupMinStartTSFailure(t *testing.T) {
 			re.NoError(err)
 			_, err = manager.SetGCBarrier(1, "expired", 60, time.Second, now.Add(-time.Minute))
 			re.NoError(err)
-			// The report failure happens after lazy deletion has been staged in the write batch.
+			// A report failure must leave expired barriers and the GC revision unchanged.
 			barrierPath := keypath.GCBarrierPath(1, "expired")
 			barrier, err := storage.Load(barrierPath)
 			re.NoError(err)
@@ -218,6 +447,9 @@ func TestMetaServiceGroupMinStartTSFailure(t *testing.T) {
 			if failure == "missing-manager" {
 				manager.metaServiceGroupManager = nil
 			}
+			watcher, err := manager.WatchGCStates(ctx, true)
+			re.NoError(err)
+			t.Cleanup(watcher.Close)
 			for _, legacy := range []bool{false, true} {
 				if legacy {
 					_, _, err = manager.CompatibleUpdateServiceGCSafePoint(1, keypath.GCWorkerServiceSafePointID, 200, math.MaxInt64, now)
@@ -234,6 +466,9 @@ func TestMetaServiceGroupMinStartTSFailure(t *testing.T) {
 				afterRevision, err := storage.Load(keypath.GCStateRevisionPath())
 				re.NoError(err)
 				re.Equal(revision, afterRevision)
+				_, published, err := watcher.receiveOne(false)
+				re.NoError(err)
+				re.False(published, "a report failure must not publish a GC state")
 			}
 		})
 	}
