@@ -20,14 +20,18 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
+	"github.com/sasha-s/go-deadlock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 )
 
 func TestMain(m *testing.M) {
+	// Deadlock detection stays enabled; its timers must not cross synctest bubbles.
+	deadlock.Opts.TimerPool = deadlock.TimerPoolDisabled
 	goleak.VerifyTestMain(m)
 }
 
@@ -103,30 +107,32 @@ func TestConcurrencyLimiter2(t *testing.T) {
 }
 
 func TestConcurrencyLimiterAcquire(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
 
-	limiter := NewConcurrencyLimiter(20)
-	sum := int64(0)
-	start := time.Now()
-	wg := &sync.WaitGroup{}
-	wg.Add(100)
-	for i := range 100 {
-		go func(i int) {
-			defer wg.Done()
-			token, err := limiter.AcquireToken(ctx)
-			if err != nil {
-				fmt.Printf("Task %d failed to acquire: %v\n", i, err)
-				return
-			}
-			defer limiter.ReleaseToken(token)
-			// simulate takes some time
-			time.Sleep(10 * time.Millisecond)
-			atomic.AddInt64(&sum, 1)
-		}(i)
-	}
-	wg.Wait()
-	// We should have 20 tasks running concurrently, so it should take at least 50ms to complete
-	require.GreaterOrEqual(t, time.Since(start).Milliseconds(), int64(50))
-	require.Equal(t, int64(100), sum)
+		limiter := NewConcurrencyLimiter(20)
+		sum := int64(0)
+		start := time.Now()
+		wg := &sync.WaitGroup{}
+		wg.Add(100)
+		for i := range 100 {
+			go func(i int) {
+				defer wg.Done()
+				token, err := limiter.AcquireToken(ctx)
+				if err != nil {
+					fmt.Printf("Task %d failed to acquire: %v\n", i, err)
+					return
+				}
+				defer limiter.ReleaseToken(token)
+				// simulate takes some time
+				time.Sleep(10 * time.Millisecond)
+				atomic.AddInt64(&sum, 1)
+			}(i)
+		}
+		wg.Wait()
+		// We should have 20 tasks running concurrently, so it should take at least 50ms to complete
+		require.GreaterOrEqual(t, time.Since(start).Milliseconds(), int64(50))
+		require.Equal(t, int64(100), sum)
+	})
 }

@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/gogo/protobuf/proto"
+	"github.com/sasha-s/go-deadlock"
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -45,6 +46,8 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	// Deadlock detection stays enabled; its timers must not cross synctest bubbles.
+	deadlock.Opts.TimerPool = deadlock.TimerPoolDisabled
 	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 

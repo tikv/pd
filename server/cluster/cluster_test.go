@@ -27,9 +27,11 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/docker/go-units"
+	"github.com/sasha-s/go-deadlock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
@@ -78,6 +80,8 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	// Deadlock detection stays enabled; its timers must not cross synctest bubbles.
+	deadlock.Opts.TimerPool = deadlock.TimerPoolDisabled
 	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
@@ -1427,16 +1431,34 @@ func TestConcurrentReportBucket(t *testing.T) {
 	bucket2 := &metapb.Buckets{RegionId: 1, Version: 2}
 	var wg sync.WaitGroup
 	wg.Add(1)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/core/concurrentBucketHeartbeat", "return(true)"))
+	entered := make(chan struct{})
+	unblock := make(chan struct{})
+	release := sync.OnceFunc(func() { close(unblock) })
+	var blocked atomic.Bool
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/core/concurrentBucketHeartbeat", func() {
+		if blocked.CompareAndSwap(false, true) {
+			close(entered)
+			<-unblock
+		}
+	}))
 	go func() {
 		defer wg.Done()
 		_, err := cluster.processRegionBuckets(bucket1)
 		assert.NoError(t, err)
 	}()
-	time.Sleep(100 * time.Millisecond)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/core/concurrentBucketHeartbeat"))
+	t.Cleanup(func() {
+		release()
+		wg.Wait()
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/core/concurrentBucketHeartbeat"))
+	})
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("heartbeat did not reach the concurrent update hook")
+	}
 	_, err = cluster.processRegionBuckets(bucket2)
 	re.NoError(err)
+	release()
 	wg.Wait()
 	re.Equal(bucket1, cluster.GetRegion(1).GetBuckets())
 }
@@ -1454,8 +1476,8 @@ func TestConcurrentRegionHeartbeat(t *testing.T) {
 	regions = core.SplitRegions(regions)
 	heartbeatRegions(re, cluster, regions)
 
-	// Merge regions manually
-	source, target := regions[0], regions[1]
+	// Clone incoming updates so changing their epochs does not also change the cache.
+	source, target := regions[0].Clone(), regions[1].Clone()
 	target.GetMeta().StartKey = []byte{}
 	target.GetMeta().EndKey = []byte{}
 	source.GetMeta().GetRegionEpoch().Version++
@@ -1466,15 +1488,34 @@ func TestConcurrentRegionHeartbeat(t *testing.T) {
 
 	var wg sync.WaitGroup
 	wg.Add(1)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/concurrentRegionHeartbeat", "return(true)"))
+	entered := make(chan struct{})
+	unblock := make(chan struct{})
+	release := sync.OnceFunc(func() { close(unblock) })
+	var blocked atomic.Bool
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/server/cluster/concurrentRegionHeartbeat", func() {
+		if blocked.CompareAndSwap(false, true) {
+			close(entered)
+			<-unblock
+		}
+	}))
 	go func() {
 		defer wg.Done()
 		err := cluster.processRegionHeartbeat(core.ContextTODO(), source)
-		assert.NoError(t, err)
+		// The newer overlapping heartbeat wins before this update resumes.
+		assert.ErrorContains(t, err, "region is stale")
 	}()
-	time.Sleep(100 * time.Millisecond)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/concurrentRegionHeartbeat"))
+	t.Cleanup(func() {
+		release()
+		wg.Wait()
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/concurrentRegionHeartbeat"))
+	})
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("heartbeat did not reach the concurrent update hook")
+	}
 	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), target))
+	release()
 	wg.Wait()
 	checkRegion(re, cluster.GetRegionByKey([]byte{}), target)
 }
@@ -4759,58 +4800,62 @@ func TestOperatorCount(t *testing.T) {
 }
 
 func TestStoreOverloaded(t *testing.T) {
-	re := require.New(t)
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
 
-	tc, co, cleanup := prepare(nil, nil, nil, re)
-	defer cleanup()
-	oc := co.GetOperatorController()
-	lb, err := schedulers.CreateScheduler(types.BalanceRegionScheduler, oc, tc.storage, schedulers.ConfigSliceDecoder(types.BalanceRegionScheduler, []string{"", ""}))
-	re.NoError(err)
-	opt := tc.GetOpts()
-	re.NoError(tc.addRegionStore(4, 100))
-	re.NoError(tc.addRegionStore(3, 100))
-	re.NoError(tc.addRegionStore(2, 100))
-	re.NoError(tc.addRegionStore(1, 10))
-	re.NoError(tc.addLeaderRegion(1, 2, 3, 4))
-	region := tc.GetRegion(1).Clone(core.SetApproximateSize(60))
-	err = tc.putRegion(region)
-	re.NoError(err)
-	start := time.Now()
-	{
-		ops, _ := lb.Schedule(tc, false /* dryRun */)
-		re.Len(ops, 1)
-		op1 := ops[0]
-		re.NotNil(op1)
-		re.True(oc.AddOperator(op1))
-		re.True(oc.RemoveOperator(op1))
-	}
-	for {
-		time.Sleep(time.Millisecond * 10)
-		ops, _ := lb.Schedule(tc, false /* dryRun */)
-		if time.Since(start) > time.Second {
-			break
+		tc, co, cleanup := prepare(nil, nil, nil, re)
+		defer cleanup()
+		oc := co.GetOperatorController()
+		lb, err := schedulers.CreateScheduler(types.BalanceRegionScheduler, oc, tc.storage, schedulers.ConfigSliceDecoder(types.BalanceRegionScheduler, []string{"", ""}))
+		re.NoError(err)
+		opt := tc.GetOpts()
+		re.NoError(tc.addRegionStore(4, 100))
+		re.NoError(tc.addRegionStore(3, 100))
+		re.NoError(tc.addRegionStore(2, 100))
+		re.NoError(tc.addRegionStore(1, 10))
+		re.NoError(tc.addLeaderRegion(1, 2, 3, 4))
+		region := tc.GetRegion(1).Clone(core.SetApproximateSize(60))
+		err = tc.putRegion(region)
+		re.NoError(err)
+		start := time.Now()
+		{
+			ops, _ := lb.Schedule(tc, false /* dryRun */)
+			re.Len(ops, 1)
+			op1 := ops[0]
+			re.NotNil(op1)
+			re.True(oc.AddOperator(op1))
+			re.True(oc.RemoveOperator(op1))
 		}
-		re.Empty(ops)
-	}
+		// Sample just beyond each interval so the final sample is past the refill deadline.
+		synctest.Sleep(time.Nanosecond)
+		for {
+			synctest.Sleep(time.Millisecond * 10)
+			ops, _ := lb.Schedule(tc, false /* dryRun */)
+			if time.Since(start) > time.Second {
+				break
+			}
+			re.Empty(ops)
+		}
 
-	// reset all stores' limit
-	// scheduling one time needs 1/10 seconds
-	opt.SetAllStoresLimit(storelimit.AddPeer, 600)
-	opt.SetAllStoresLimit(storelimit.RemovePeer, 600)
-	time.Sleep(time.Second)
-	for range 10 {
-		ops, _ := lb.Schedule(tc, false /* dryRun */)
-		re.Len(ops, 1)
-		op := ops[0]
-		re.True(oc.AddOperator(op))
-		re.True(oc.RemoveOperator(op))
-	}
-	// sleep 1 seconds to make sure that the token is filled up
-	time.Sleep(time.Second)
-	for range 100 {
-		ops, _ := lb.Schedule(tc, false /* dryRun */)
-		re.NotEmpty(ops)
-	}
+		// reset all stores' limit
+		// scheduling one time needs 1/10 seconds
+		opt.SetAllStoresLimit(storelimit.AddPeer, 600)
+		opt.SetAllStoresLimit(storelimit.RemovePeer, 600)
+		synctest.Sleep(time.Second)
+		for range 10 {
+			ops, _ := lb.Schedule(tc, false /* dryRun */)
+			re.Len(ops, 1)
+			op := ops[0]
+			re.True(oc.AddOperator(op))
+			re.True(oc.RemoveOperator(op))
+		}
+		// sleep 1 seconds to make sure that the token is filled up
+		synctest.Sleep(time.Second)
+		for range 100 {
+			ops, _ := lb.Schedule(tc, false /* dryRun */)
+			re.NotEmpty(ops)
+		}
+	})
 }
 
 func TestStoreOverloadedWithReplace(t *testing.T) {

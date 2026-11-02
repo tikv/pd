@@ -806,7 +806,10 @@ func (suite *redirectorTestSuite) TestXForwardedFor() {
 	re.NoError(err)
 	defer resp.Body.Close()
 	re.Equal(http.StatusOK, resp.StatusCode)
-	time.Sleep(1 * time.Second)
+	testutil.Eventually(re, func() bool {
+		b, err := os.ReadFile(fname)
+		return err == nil && strings.Contains(string(b), "/pd/api/v1/regions")
+	})
 	b, err := os.ReadFile(fname)
 	re.NoError(err)
 	l := string(b)
@@ -1177,7 +1180,10 @@ func TestRemovingProgress(t *testing.T) {
 	sendRequest(re, leader.GetAddr()+"/pd/api/v1/store/1", http.MethodDelete, http.StatusOK)
 	sendRequest(re, leader.GetAddr()+"/pd/api/v1/store/2", http.MethodDelete, http.StatusOK)
 
-	time.Sleep(100 * time.Millisecond) // wait for the removing progress to be created
+	testutil.Eventually(re, func() bool {
+		_, err := leader.GetRaftCluster().GetProgressByAction("removing")
+		return err == nil
+	})
 	// size is not changed.
 	output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?action=removing", http.MethodGet, http.StatusOK)
 	var p api.Progress

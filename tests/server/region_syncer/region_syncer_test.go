@@ -20,12 +20,13 @@ import (
 	"slices"
 	"sync/atomic"
 	"testing"
-	"time"
 
+	"github.com/gogo/protobuf/proto"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -88,9 +89,8 @@ func TestRegionSyncer(t *testing.T) {
 	close(mockSyncFull)
 
 	checkRegions := func(expectedRegions []*core.RegionInfo) {
-		// ensure flush to region storage, we use a duration larger than the
-		// region storage flush rate limit (3s).
-		time.Sleep(4 * time.Second)
+		waitRegionsPersisted(re, leaderServer, expectedRegions)
+		waitRegionsPersisted(re, followerServer, expectedRegions)
 
 		// test All regions have been synchronized to the cache of followerServer
 		re.NotNil(followerServer)
@@ -311,8 +311,7 @@ func TestFullSyncWithAddMember(t *testing.T) {
 		err = rc.HandleRegionHeartbeat(region)
 		re.NoError(err)
 	}
-	// ensure flush to region storage
-	time.Sleep(3 * time.Second)
+	waitRegionsPersisted(re, leaderServer, regions)
 	// restart pd1
 	err = leaderServer.Stop()
 	re.NoError(err)
@@ -359,8 +358,8 @@ func TestPrepareChecker(t *testing.T) {
 		re.NoError(err)
 	}
 
-	// ensure flush to region storage
-	time.Sleep(3 * time.Second)
+	waitRegionsPersisted(re, leaderServer, regions)
+	testutil.Eventually(re, leaderServer.GetRaftCluster().IsPrepared)
 	re.True(leaderServer.GetRaftCluster().IsPrepared())
 
 	// join new PD
@@ -420,8 +419,8 @@ func TestPrepareCheckerWithTransferLeader(t *testing.T) {
 		err = rc.HandleRegionHeartbeat(region)
 		re.NoError(err)
 	}
-	// ensure flush to region storage
-	time.Sleep(3 * time.Second)
+	waitRegionsPersisted(re, leaderServer, regions)
+	testutil.Eventually(re, leaderServer.GetRaftCluster().IsPrepared)
 	re.True(leaderServer.GetRaftCluster().IsPrepared())
 
 	// join new PD
@@ -449,4 +448,17 @@ func TestPrepareCheckerWithTransferLeader(t *testing.T) {
 	rc = cluster.GetLeaderServer().GetServer().GetRaftCluster()
 	re.True(rc.IsPrepared())
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
+}
+
+func waitRegionsPersisted(re *require.Assertions, server *tests.TestServer, regions []*core.RegionInfo) {
+	testutil.Eventually(re, func() bool {
+		for _, region := range regions {
+			var stored metapb.Region
+			ok, err := server.GetServer().GetStorage().LoadRegion(region.GetID(), &stored)
+			if err != nil || !ok || !proto.Equal(&stored, region.GetMeta()) {
+				return false
+			}
+		}
+		return true
+	})
 }

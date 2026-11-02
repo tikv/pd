@@ -19,11 +19,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sasha-s/go-deadlock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 )
 
 func TestMain(m *testing.M) {
+	// Deadlock detection stays enabled; its timers must not cross synctest bubbles.
+	deadlock.Opts.TimerPool = deadlock.TimerPoolDisabled
 	goleak.VerifyTestMain(m)
 }
 

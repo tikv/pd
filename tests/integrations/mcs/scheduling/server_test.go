@@ -45,6 +45,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/tests"
 )
 
@@ -138,7 +139,6 @@ func (suite *serverTestSuite) TestAllocIDAfterLeaderChange() {
 	re.NotEmpty(leaderName)
 	suite.pdLeader = suite.cluster.GetServer(leaderName)
 	suite.backendEndpoints = suite.pdLeader.GetAddr()
-	time.Sleep(time.Second)
 	id1 := retryAllocID(re, cluster)
 	re.Greater(id1, id)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember"))
@@ -352,7 +352,6 @@ func (suite *serverTestSuite) TestDisableSchedulingServiceFallback() {
 	err = leaderServer.SetMicroserviceConfig(*conf)
 	re.NoError(err)
 	tc.GetPrimaryServer().Close()
-	time.Sleep(time.Second)
 	testutil.Eventually(re, func() bool {
 		return !suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
 	})
@@ -1071,8 +1070,8 @@ func (suite *serverTestSuite) TestPrepareChecker() {
 			Region: &metapb.Region{
 				Id:       i,
 				Peers:    peers,
-				StartKey: fmt.Appendf(nil, "k%d", i),
-				EndKey:   fmt.Appendf(nil, "k%d", i+1),
+				StartKey: fmt.Appendf(nil, "k%03d", i),
+				EndKey:   fmt.Appendf(nil, "k%03d", i+1),
 			},
 			Leader:          leaderPeer,
 			ApproximateSize: 10 * units.MiB,
@@ -1106,6 +1105,10 @@ func (suite *serverTestSuite) TestPrepareChecker() {
 	// Get the new primary server
 	primary2 := tc.GetPrimaryServer()
 	re.NotNil(primary2)
+	testutil.Eventually(re, func() bool {
+		addr, exists := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, constant.SchedulingServiceName)
+		return exists && addr == primary2.GetAddr()
+	})
 
 	// Get the current cluster components
 	cluster2 := primary2.GetCluster()
@@ -1124,8 +1127,8 @@ func (suite *serverTestSuite) TestPrepareChecker() {
 			Region: &metapb.Region{
 				Id:       i,
 				Peers:    peers,
-				StartKey: fmt.Appendf(nil, "k%d", i),
-				EndKey:   fmt.Appendf(nil, "k%d", i+1),
+				StartKey: fmt.Appendf(nil, "k%03d", i),
+				EndKey:   fmt.Appendf(nil, "k%03d", i+1),
 			},
 			Leader:          leaderPeer,
 			ApproximateSize: 10 * units.MiB,
@@ -1135,8 +1138,9 @@ func (suite *serverTestSuite) TestPrepareChecker() {
 		re.NoError(err)
 	}
 
-	// Wait a bit to ensure the prepare checker has time to process the incoming heartbeats
-	time.Sleep(2 * time.Second)
+	testutil.Eventually(re, func() bool {
+		return cluster2.GetNotFromStorageRegionsCnt() == 50
+	})
 
 	// The prepare checker should still be checking and potentially not satisfied
 	shouldRun := coordinator2.ShouldRun()
@@ -1153,8 +1157,8 @@ func (suite *serverTestSuite) TestPrepareChecker() {
 			Region: &metapb.Region{
 				Id:       i,
 				Peers:    peers,
-				StartKey: fmt.Appendf(nil, "k%d", i),
-				EndKey:   fmt.Appendf(nil, "k%d", i+1),
+				StartKey: fmt.Appendf(nil, "k%03d", i),
+				EndKey:   fmt.Appendf(nil, "k%03d", i+1),
 			},
 			Leader:          leaderPeer,
 			ApproximateSize: 10 * units.MiB,
@@ -1203,7 +1207,21 @@ func (suite *serverTestSuite) TestOnlineProgress() {
 		err = rc.HandleRegionHeartbeat(region)
 		re.NoError(err)
 	}
-	time.Sleep(2 * time.Second)
+
+	statsUpdated := make(chan struct{})
+	notifyStatsUpdated := sync.OnceFunc(func() { close(statsUpdated) })
+	const statsHook = "github.com/tikv/pd/server/cluster/afterUpdateStoreStats"
+	re.NoError(failpoint.EnableCall(statsHook, func(updated *cluster.RaftCluster) {
+		if updated == rc {
+			notifyStatsUpdated()
+		}
+	}))
+	defer func() { re.NoError(failpoint.Disable(statsHook)) }()
+	select {
+	case <-statsUpdated:
+	case <-time.After(5 * time.Second):
+		suite.T().Fatal("store statistics were not updated after the region heartbeats")
+	}
 
 	// add a new store
 	resp, err := s.PutStore(
@@ -1220,9 +1238,13 @@ func (suite *serverTestSuite) TestOnlineProgress() {
 	re.NoError(err)
 	re.Empty(resp.GetHeader().GetError())
 
-	time.Sleep(2 * time.Second)
+	testutil.Eventually(re, func() bool {
+		_, err := rc.GetProgressByID(4)
+		return err == nil
+	})
 	for i, r := range regions {
 		if i < 50 {
+			r = r.Clone()
 			r.GetMeta().Peers[2].StoreId = 4
 			r.GetMeta().RegionEpoch.ConfVer = 2
 			r.GetMeta().RegionEpoch.Version = 2
@@ -1230,7 +1252,10 @@ func (suite *serverTestSuite) TestOnlineProgress() {
 			re.NoError(err)
 		}
 	}
-	time.Sleep(2 * time.Second)
+	testutil.Eventually(re, func() bool {
+		p, err := rc.GetProgressByID(4)
+		return err == nil && p.ProgressPercent != 0 && p.CurrentSpeed != 0 && p.LeftSecond != 0
+	})
 	p, err := rc.GetProgressByID(4)
 	re.Equal("preparing", string(p.Action))
 	re.NotEmpty(p.ProgressPercent)
@@ -1679,8 +1704,16 @@ func (suite *serverTestSuite) TestForwardSplitRegion() {
 	}
 
 	go func() {
-		// make sure the region heartbeat is sent after the SplitRegions request
-		time.Sleep(time.Second)
+		// Wait for the split operator to reach the heartbeat stream.
+		for {
+			resp, err := stream.Recv()
+			if !as.NoError(err) {
+				return
+			}
+			if resp.GetSplitRegion() != nil {
+				break
+			}
+		}
 
 		regionReq = &pdpb.RegionHeartbeatRequest{
 			Header: testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),

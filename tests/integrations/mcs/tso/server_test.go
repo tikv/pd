@@ -357,9 +357,12 @@ func TestForwardTSOWhenPrimaryChanged(t *testing.T) {
 
 	// can use the tso-related interface with new primary
 	tc.DestroyServer(oldPrimary)
-	time.Sleep(time.Duration(mcs.DefaultLease) * time.Second) // wait for leader lease timeout
 	tc.WaitForDefaultPrimaryServing(re)
-	primary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, mcs.TSOServiceName)
+	var primary string
+	testutil.Eventually(re, func() bool {
+		primary, exist = suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, mcs.TSOServiceName)
+		return exist && primary != oldPrimary
+	})
 	re.True(exist)
 	re.NotEqual(oldPrimary, primary)
 	suite.checkAvailableTSO(re)
@@ -374,8 +377,10 @@ func TestForwardTSOWhenPrimaryChanged(t *testing.T) {
 		}
 	}
 	tc.WaitForDefaultPrimaryServing(re)
-	time.Sleep(time.Duration(mcs.DefaultLease) * time.Second) // wait for leader lease timeout
-	primary, exist = suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, mcs.TSOServiceName)
+	testutil.Eventually(re, func() bool {
+		primary, exist = suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, mcs.TSOServiceName)
+		return exist && primary == oldPrimary
+	})
 	re.True(exist)
 	re.Equal(oldPrimary, primary)
 	suite.checkAvailableTSO(re)
@@ -916,8 +921,10 @@ func TestTSOServiceSwitch(t *testing.T) {
 	err = pdLeader.GetServer().SetMicroserviceConfig(*cfg)
 	re.NoError(err)
 
-	// Wait for PD to detect the change
-	time.Sleep(300 * time.Millisecond)
+	// Wait for PD to initialize its allocator after the configuration change.
+	testutil.Eventually(re, func() bool {
+		return pdLeader.GetServer().GetTSOAllocator().IsInitialize()
+	})
 
 	// Verify PD is now providing TSO service and timestamps are monotonically increasing
 	re.NoError(checkTSOMonotonic(ctx, pdClient, &globalLastTS, 10))

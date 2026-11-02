@@ -472,9 +472,7 @@ func (s *Server) initMember(ctx context.Context, etcd *embed.Etcd) error {
 			}
 		}
 	}
-	failpoint.Inject("memberNil", func() {
-		time.Sleep(1500 * time.Millisecond)
-	})
+	failpoint.InjectCall("memberNil")
 	s.member = member.NewMember(etcd, s.electionClient, etcdServerID)
 	return nil
 }

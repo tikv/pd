@@ -106,7 +106,10 @@ func (suite *apiTestSuite) checkGetCheckerByName(cluster *tests.TestCluster) {
 		// resumed
 		err = co.PauseOrResumeChecker(name, 1)
 		re.NoError(err)
-		time.Sleep(time.Second)
+		testutil.Eventually(re, func() bool {
+			paused, err := co.IsCheckerPaused(name)
+			return err == nil && !paused
+		})
 		resp = make(map[string]any)
 		err = testutil.ReadGetJSON(re, tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, name), &resp)
 		re.NoError(err)

@@ -22,11 +22,13 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/coreos/go-semver/semver"
 	"github.com/docker/go-units"
+	"github.com/gogo/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
@@ -235,8 +237,18 @@ func TestRegionStatistics(t *testing.T) {
 	regions := rc.GetRegionStatsByType(statistics.LearnerPeer)
 	re.Len(regions, 1)
 
-	// wait for sync region
-	time.Sleep(1000 * time.Millisecond)
+	testutil.Eventually(re, func() bool {
+		for name, server := range tc.GetServers() {
+			if name == leaderName {
+				continue
+			}
+			synced := server.GetServer().GetBasicCluster().GetRegion(region.Id)
+			if synced == nil || !proto.Equal(synced.GetMeta(), region) {
+				return false
+			}
+		}
+		return true
+	})
 
 	re.NoError(leaderServer.ResignLeader())
 	re.NotEqual(tc.WaitLeader(), leaderName)
@@ -876,7 +888,21 @@ func TestStoreVersionChange(t *testing.T) {
 	re.NoError(err)
 	store := newMetaStore(storeID, "mock://tikv-1:1", "2.1.0", metapb.StoreState_Up, getTestDeployPath(storeID))
 	var wg sync.WaitGroup
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/versionChangeConcurrency", `return(true)`))
+	entered := make(chan struct{})
+	unblock := make(chan struct{})
+	release := sync.OnceFunc(func() { close(unblock) })
+	var blocked atomic.Bool
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/server/cluster/versionChangeConcurrency", func() {
+		if blocked.CompareAndSwap(false, true) {
+			close(entered)
+			<-unblock
+		}
+	}))
+	defer func() {
+		release()
+		wg.Wait()
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/versionChangeConcurrency"))
+	}()
 	wg.Go(func() {
 		resp, err := putStore(grpcPDClient, clusterID, store)
 		if err != nil {
@@ -885,14 +911,18 @@ func TestStoreVersionChange(t *testing.T) {
 		}
 		assert.Equal(t, pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 	})
-	time.Sleep(100 * time.Millisecond)
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("store-version update did not reach the concurrent write boundary")
+	}
 	err = svr.SetClusterVersion("1.0.0")
 	re.NoError(err)
+	release()
 	wg.Wait()
 	v, err := semver.NewVersion("1.0.0")
 	re.NoError(err)
 	re.Equal(*v, svr.GetClusterVersion())
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/versionChangeConcurrency"))
 }
 
 func TestConcurrentHandleRegion(t *testing.T) {
@@ -1722,7 +1752,9 @@ func putRegionWithLeader(re *require.Assertions, rc *cluster.RaftCluster, id id.
 		re.NoError(err)
 	}
 
-	time.Sleep(50 * time.Millisecond)
+	testutil.Eventually(re, func() bool {
+		return rc.GetStore(storeID).GetLeaderCount() == 3
+	})
 	re.Equal(3, rc.GetStore(storeID).GetLeaderCount())
 }
 
@@ -1960,7 +1992,6 @@ func TestExternalTimestamp(t *testing.T) {
 	re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 	id := leaderServer.GetAllocator()
 	putRegionWithLeader(re, rc, id, 1)
-	time.Sleep(100 * time.Millisecond)
 
 	ts := uint64(233)
 	{ // case1: set external timestamp
@@ -2134,7 +2165,7 @@ func TestFollowerExitSyncTime(t *testing.T) {
 	)
 	s := syncer.NewRegionSyncer(server)
 	s.StartSyncWithLeader(leaderServer.GetAddr())
-	time.Sleep(time.Second)
+	testutil.Eventually(re, s.IsRunning)
 
 	// Record the time when exiting sync
 	startTime := time.Now()

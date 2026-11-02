@@ -23,6 +23,7 @@ import (
 	"net/url"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -253,42 +254,45 @@ func (suite *serviceClientTestSuite) TestServiceClient() {
 	re.False(grpcutil.IsFollowerHandleEnabled(ctx4, metadata.FromOutgoingContext))
 	re.Empty(grpcutil.GetForwardedHost(ctx4, metadata.FromOutgoingContext))
 
-	followerAPIClient := newPDServiceAPIClient(follower, regionAPIErrorFn)
-	leaderAPIClient := newPDServiceAPIClient(leader, regionAPIErrorFn)
+	synctest.Test(suite.T(), func(t *testing.T) {
+		re := require.New(t)
+		followerAPIClient := newPDServiceAPIClient(follower, regionAPIErrorFn)
+		leaderAPIClient := newPDServiceAPIClient(leader, regionAPIErrorFn)
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/fastCheckAvailable", "return(true)"))
+		re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/fastCheckAvailable", "return(true)"))
 
-	re.True(followerAPIClient.Available())
-	re.True(leaderAPIClient.Available())
-	pdErr1 := &pdpb.Error{
-		Type: pdpb.ErrorType_UNKNOWN,
-	}
-	pdErr2 := &pdpb.Error{
-		Type: pdpb.ErrorType_REGION_NOT_FOUND,
-	}
-	err = errors.New("error")
-	re.True(followerAPIClient.NeedRetry(pdErr1, nil))
-	re.False(leaderAPIClient.NeedRetry(pdErr1, nil))
-	re.True(followerAPIClient.Available())
-	re.True(leaderAPIClient.Available())
+		re.True(followerAPIClient.Available())
+		re.True(leaderAPIClient.Available())
+		pdErr1 := &pdpb.Error{
+			Type: pdpb.ErrorType_UNKNOWN,
+		}
+		pdErr2 := &pdpb.Error{
+			Type: pdpb.ErrorType_REGION_NOT_FOUND,
+		}
+		err := errors.New("error")
+		re.True(followerAPIClient.NeedRetry(pdErr1, nil))
+		re.False(leaderAPIClient.NeedRetry(pdErr1, nil))
+		re.True(followerAPIClient.Available())
+		re.True(leaderAPIClient.Available())
 
-	re.True(followerAPIClient.NeedRetry(pdErr2, nil))
-	re.False(leaderAPIClient.NeedRetry(pdErr2, nil))
-	re.False(followerAPIClient.Available())
-	re.True(leaderAPIClient.Available())
-	followerAPIClient.(*serviceAPIClient).markAsAvailable()
-	leaderAPIClient.(*serviceAPIClient).markAsAvailable()
-	re.False(followerAPIClient.Available())
-	time.Sleep(time.Millisecond * 100)
-	followerAPIClient.(*serviceAPIClient).markAsAvailable()
-	re.True(followerAPIClient.Available())
+		re.True(followerAPIClient.NeedRetry(pdErr2, nil))
+		re.False(leaderAPIClient.NeedRetry(pdErr2, nil))
+		re.False(followerAPIClient.Available())
+		re.True(leaderAPIClient.Available())
+		followerAPIClient.(*serviceAPIClient).markAsAvailable()
+		leaderAPIClient.(*serviceAPIClient).markAsAvailable()
+		re.False(followerAPIClient.Available())
+		synctest.Sleep(100*time.Millisecond + time.Nanosecond)
+		followerAPIClient.(*serviceAPIClient).markAsAvailable()
+		re.True(followerAPIClient.Available())
 
-	re.True(followerAPIClient.NeedRetry(nil, err))
-	re.False(leaderAPIClient.NeedRetry(nil, err))
-	re.True(followerAPIClient.Available())
-	re.True(leaderAPIClient.Available())
+		re.True(followerAPIClient.NeedRetry(nil, err))
+		re.False(leaderAPIClient.NeedRetry(nil, err))
+		re.True(followerAPIClient.Available())
+		re.True(leaderAPIClient.Available())
 
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/fastCheckAvailable"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/fastCheckAvailable"))
+	})
 }
 
 func (suite *serviceClientTestSuite) TestServiceClientBalancer() {

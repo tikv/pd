@@ -57,7 +57,10 @@ func TestRegister(t *testing.T) {
 	err = sr.Register()
 	re.NoError(err)
 	sr.cancel()
-	re.Empty(getKeyAfterLeaseExpired(ctx, re, client, sr.key))
+	testutil.Eventually(re, func() bool {
+		resp, err := client.Get(ctx, sr.key)
+		return err == nil && len(resp.Kvs) == 0
+	})
 
 	// Test the case that keepalive is failed when the etcd is restarted.
 	sr = NewServiceRegister(ctx, client, "test_service", "127.0.0.1:2", "127.0.0.1:2", DefaultLeaseInSeconds)

@@ -25,6 +25,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -281,46 +282,53 @@ func TestNotify(t *testing.T) {
 }
 
 func TestCancel(t *testing.T) {
-	resetTime()
-	ctx := context.Background()
-	ctx1, cancel1 := context.WithDeadline(ctx, t2)
-	re := require.New(t)
-	nc := make(chan notifyMsg, 1)
-	lim1 := NewLimiter(t0, 1, 0, 10, nc)
-	lim2 := NewLimiter(t0, 1, 0, 0, nc)
+	saved := [...]time.Time{t0, t1, t2, t3, t4, t5, t6, t7, t8}
+	defer func() {
+		t0, t1, t2, t3, t4, t5, t6, t7, t8 = saved[0], saved[1], saved[2], saved[3], saved[4], saved[5], saved[6], saved[7], saved[8]
+	}()
 
-	r1 := runReserveMax(t, lim1, request{t0, 5, t0, true})
-	checkTokens(re, lim1, t0, 5)
-	r1.CancelAt(t1)
-	checkTokens(re, lim1, t1, 11)
+	synctest.Test(t, func(t *testing.T) {
+		resetTime()
+		ctx := context.Background()
+		ctx1, cancel1 := context.WithDeadline(ctx, t2)
+		re := require.New(t)
+		nc := make(chan notifyMsg, 1)
+		lim1 := NewLimiter(t0, 1, 0, 10, nc)
+		lim2 := NewLimiter(t0, 1, 0, 0, nc)
 
-	r1 = lim1.Reserve(ctx, InfDuration, t1, 5)
-	r2 := lim2.Reserve(ctx1, InfDuration, t1, 5)
-	checkTokens(re, lim1, t2, 7)
-	checkTokens(re, lim2, t2, 2)
-	d, err := WaitReservations(ctx, t2, []*Reservation{r1, r2})
-	re.Error(err)
-	re.Equal(4*time.Second, d)
-	re.Contains(err.Error(), "estimated wait time 4s, ltb state is 1.00:-4.00")
-	checkTokens(re, lim1, t3, 13)
-	checkTokens(re, lim2, t3, 3)
-	cancel1()
+		r1 := runReserveMax(t, lim1, request{t0, 5, t0, true})
+		checkTokens(re, lim1, t0, 5)
+		r1.CancelAt(t1)
+		checkTokens(re, lim1, t1, 11)
 
-	ctx2, cancel2 := context.WithCancel(ctx)
-	r1 = lim1.Reserve(ctx, InfDuration, t3, 5)
-	r2 = lim2.Reserve(ctx2, InfDuration, t3, 5)
-	checkTokens(re, lim1, t3, 8)
-	checkTokens(re, lim2, t3, -2)
-	var wg sync.WaitGroup
-	wg.Go(func() {
-		_, err := WaitReservations(ctx2, t3, []*Reservation{r1, r2})
-		assert.Error(t, err)
+		r1 = lim1.Reserve(ctx, InfDuration, t1, 5)
+		r2 := lim2.Reserve(ctx1, InfDuration, t1, 5)
+		checkTokens(re, lim1, t2, 7)
+		checkTokens(re, lim2, t2, 2)
+		d, err := WaitReservations(ctx, t2, []*Reservation{r1, r2})
+		re.Error(err)
+		re.Equal(4*time.Second, d)
+		re.Contains(err.Error(), "estimated wait time 4s, ltb state is 1.00:-4.00")
+		checkTokens(re, lim1, t3, 13)
+		checkTokens(re, lim2, t3, 3)
+		cancel1()
+
+		ctx2, cancel2 := context.WithCancel(ctx)
+		r1 = lim1.Reserve(ctx, InfDuration, t3, 5)
+		r2 = lim2.Reserve(ctx2, InfDuration, t3, 5)
+		checkTokens(re, lim1, t3, 8)
+		checkTokens(re, lim2, t3, -2)
+		var wg sync.WaitGroup
+		wg.Go(func() {
+			_, err := WaitReservations(ctx2, t3, []*Reservation{r1, r2})
+			assert.Error(t, err)
+		})
+		synctest.Sleep(1 * time.Second)
+		cancel2()
+		wg.Wait()
+		checkTokens(re, lim1, t5, 15)
+		checkTokens(re, lim2, t5, 5)
 	})
-	time.Sleep(1 * time.Second)
-	cancel2()
-	wg.Wait()
-	checkTokens(re, lim1, t5, 15)
-	checkTokens(re, lim2, t5, 5)
 }
 
 func TestCancelErrorOfReservation(t *testing.T) {

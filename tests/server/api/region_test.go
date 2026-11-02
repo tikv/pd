@@ -24,6 +24,7 @@ import (
 	"reflect"
 	"sort"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -613,10 +614,17 @@ func (suite *regionTestSuite) checkRegionsWithKillRequest(cluster *tests.TestClu
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	re.NoError(err)
 	doneCh := make(chan struct{}, 1)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/api/slowRequest", "return(true)"))
+	requestStarted := make(chan struct{})
+	notifyStarted := sync.OnceFunc(func() { close(requestStarted) })
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/server/api/slowRequest", func(ctx context.Context) {
+		notifyStarted()
+		<-ctx.Done()
+	}))
+	defer func() { re.NoError(failpoint.Disable("github.com/tikv/pd/server/api/slowRequest")) }()
 	go func() {
 		resp, err := tests.TestDialClient.Do(req)
 		defer func() {
@@ -633,11 +641,14 @@ func (suite *regionTestSuite) checkRegionsWithKillRequest(cluster *tests.TestClu
 		as.Nil(resp)
 		doneCh <- struct{}{}
 	}()
-	time.Sleep(100 * time.Millisecond) // wait for the request to be sent
+	select {
+	case <-requestStarted:
+	case <-time.After(5 * time.Second):
+		re.FailNow("request did not reach the server")
+	}
 	cancel()
 	<-doneCh
 	close(doneCh)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/api/slowRequest"))
 }
 
 func (suite *regionTestSuite) TestRegionKey() {

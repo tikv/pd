@@ -19,8 +19,10 @@ import (
 	"fmt"
 	"slices"
 	"testing"
+	"testing/synctest"
 	"time"
 
+	"github.com/sasha-s/go-deadlock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
@@ -39,6 +41,8 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	// Deadlock detection stays enabled; its timers must not cross synctest bubbles.
+	deadlock.Opts.TimerPool = deadlock.TimerPoolDisabled
 	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
@@ -1337,56 +1341,60 @@ func TestJointState(t *testing.T) {
 }
 
 func TestExecutionTimeout(t *testing.T) {
-	re := require.New(t)
-	ctx := t.Context()
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		ctx := t.Context()
 
-	opts := mockconfig.NewTestOptions()
-	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
-	coordinator.Run()
-	for _, store := range newTestStores(3, "6.0.0") {
-		cluster.PutStore(store)
-	}
-	recoveryController := NewController(cluster)
-	re.NoError(recoveryController.RemoveFailedStores(map[uint64]struct{}{
-		2: {},
-		3: {},
-	}, 1, false))
+		opts := mockconfig.NewTestOptions()
+		cluster := mockcluster.NewCluster(ctx, opts)
+		coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
+		coordinator.Run()
+		for _, store := range newTestStores(3, "6.0.0") {
+			cluster.PutStore(store)
+		}
+		recoveryController := NewController(cluster)
+		re.NoError(recoveryController.RemoveFailedStores(map[uint64]struct{}{
+			2: {},
+			3: {},
+		}, 1, false))
 
-	time.Sleep(time.Second)
-	req := newStoreHeartbeat(1, nil)
-	resp := &pdpb.StoreHeartbeatResponse{}
-	recoveryController.HandleStoreHeartbeat(req, resp)
-	re.Equal(ExitForceLeader, recoveryController.GetStage())
-	req.StoreReport = &pdpb.StoreReport{Step: recoveryController.step}
-	recoveryController.HandleStoreHeartbeat(req, resp)
-	re.Equal(Failed, recoveryController.GetStage())
+		synctest.Sleep(time.Second + time.Nanosecond)
+		req := newStoreHeartbeat(1, nil)
+		resp := &pdpb.StoreHeartbeatResponse{}
+		recoveryController.HandleStoreHeartbeat(req, resp)
+		re.Equal(ExitForceLeader, recoveryController.GetStage())
+		req.StoreReport = &pdpb.StoreReport{Step: recoveryController.step}
+		recoveryController.HandleStoreHeartbeat(req, resp)
+		re.Equal(Failed, recoveryController.GetStage())
 
-	output := recoveryController.Show()
-	re.Len(output, 3)
-	re.Contains(output[1].Details[0], "triggered by error: Exceeds timeout")
+		output := recoveryController.Show()
+		re.Len(output, 3)
+		re.Contains(output[1].Details[0], "triggered by error: Exceeds timeout")
+	})
 }
 
 func TestNoHeartbeatTimeout(t *testing.T) {
-	re := require.New(t)
-	ctx := t.Context()
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		ctx := t.Context()
 
-	opts := mockconfig.NewTestOptions()
-	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
-	coordinator.Run()
-	for _, store := range newTestStores(3, "6.0.0") {
-		cluster.PutStore(store)
-	}
-	recoveryController := NewController(cluster)
-	re.NoError(recoveryController.RemoveFailedStores(map[uint64]struct{}{
-		2: {},
-		3: {},
-	}, 1, false))
+		opts := mockconfig.NewTestOptions()
+		cluster := mockcluster.NewCluster(ctx, opts)
+		coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
+		coordinator.Run()
+		for _, store := range newTestStores(3, "6.0.0") {
+			cluster.PutStore(store)
+		}
+		recoveryController := NewController(cluster)
+		re.NoError(recoveryController.RemoveFailedStores(map[uint64]struct{}{
+			2: {},
+			3: {},
+		}, 1, false))
 
-	time.Sleep(time.Second)
-	recoveryController.Show()
-	re.Equal(ExitForceLeader, recoveryController.GetStage())
+		synctest.Sleep(time.Second + time.Nanosecond)
+		recoveryController.Show()
+		re.Equal(ExitForceLeader, recoveryController.GetStage())
+	})
 }
 
 func TestExitForceLeader(t *testing.T) {

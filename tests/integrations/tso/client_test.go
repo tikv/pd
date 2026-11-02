@@ -352,7 +352,18 @@ func (suite *tsoClientTestSuite) TestGetMinTS() {
 	wg.Wait()
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/unreachableNetwork1", "return(true)"))
-	time.Sleep(time.Second)
+	testutil.Eventually(re, func() bool {
+		clients := suite.clients[0].GetServiceDiscovery().GetAllServiceClients()
+		if len(clients) == 0 {
+			return false
+		}
+		for _, client := range clients {
+			if client.Available() {
+				return false
+			}
+		}
+		return true
+	})
 	testutil.Eventually(re, func() bool {
 		var err error
 		_, _, err = suite.clients[0].GetMinTS(suite.ctx)

@@ -18,7 +18,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -122,7 +121,14 @@ func testGetStatus(re *require.Assertions, cluster *tests.TestCluster, name stri
 	re.NoError(err)
 	err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/"+name, pauseArgs, testutil.StatusOK(re))
 	re.NoError(err)
-	time.Sleep(time.Second)
+	coordinator := cluster.GetLeaderServer().GetRaftCluster().GetCoordinator()
+	if primary := cluster.GetSchedulingPrimaryServer(); primary != nil {
+		coordinator = primary.GetCoordinator()
+	}
+	testutil.Eventually(re, func() bool {
+		paused, err := coordinator.IsCheckerPaused(name)
+		return err == nil && !paused
+	})
 	resp = make(map[string]any)
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, name), &resp)
 	re.NoError(err)
@@ -148,7 +154,14 @@ func testPauseOrResume(re *require.Assertions, cluster *tests.TestCluster, name 
 	re.NoError(err)
 	err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/"+name, pauseArgs, testutil.StatusOK(re))
 	re.NoError(err)
-	time.Sleep(time.Second)
+	coordinator := cluster.GetLeaderServer().GetRaftCluster().GetCoordinator()
+	if primary := cluster.GetSchedulingPrimaryServer(); primary != nil {
+		coordinator = primary.GetCoordinator()
+	}
+	testutil.Eventually(re, func() bool {
+		paused, err := coordinator.IsCheckerPaused(name)
+		return err == nil && !paused
+	})
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, name), &resp)
 	re.NoError(err)
 	re.False(resp["paused"].(bool))

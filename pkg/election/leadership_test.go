@@ -20,8 +20,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
+	"github.com/sasha-s/go-deadlock"
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
@@ -34,6 +36,8 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	// Deadlock detection stays enabled; its timers must not cross synctest bubbles.
+	deadlock.Opts.TimerPool = deadlock.TimerPoolDisabled
 	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
@@ -59,8 +63,7 @@ func TestLeadership(t *testing.T) {
 	// leadership2 failed, so the check should return false
 	re.False(leadership2.Check())
 
-	// Sleep longer than the defaultLeaseTimeout to wait for the lease expires
-	time.Sleep((defaultLeaseTimeout + 1) * time.Second)
+	testutil.Eventually(re, func() bool { return !leadership1.Check() })
 
 	re.False(leadership1.Check())
 	re.False(leadership2.Check())
@@ -300,42 +303,48 @@ func TestExitWatch(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/fastTick", "return(true)"))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick", "return(true)"))
 	// Case1: close the client before the watch loop starts
-	checkExitWatch(t, leaderKey, func(_ *embed.Etcd, client *clientv3.Client) func() {
+	checkExitWatch(t, leaderKey, func(_ *embed.Etcd, client *clientv3.Client, _ <-chan struct{}) func() {
 		re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/delayWatcher", `pause`))
 		client.Close()
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/delayWatcher"))
 		return func() {}
 	})
 	// Case2: close the client when the watch loop is running
-	checkExitWatch(t, leaderKey, func(_ *embed.Etcd, client *clientv3.Client) func() {
-		// Wait for the watch loop to start
-		time.Sleep(500 * time.Millisecond)
+	checkExitWatch(t, leaderKey, func(_ *embed.Etcd, client *clientv3.Client, started <-chan struct{}) func() {
+		select {
+		case <-started:
+		case <-time.After(5 * time.Second):
+			t.Fatal("leader watch did not start")
+		}
 		client.Close()
 		return func() {}
 	})
 	// Case3: delete the leader key
-	checkExitWatch(t, leaderKey, func(_ *embed.Etcd, client *clientv3.Client) func() {
+	checkExitWatch(t, leaderKey, func(_ *embed.Etcd, client *clientv3.Client, _ <-chan struct{}) func() {
 		leaderKey := leaderKey
 		_, err := client.Delete(context.Background(), leaderKey)
 		re.NoError(err)
 		return func() {}
 	})
 	// Case4: close the server before the watch loop starts
-	checkExitWatch(t, leaderKey, func(server *embed.Etcd, _ *clientv3.Client) func() {
+	checkExitWatch(t, leaderKey, func(server *embed.Etcd, _ *clientv3.Client, _ <-chan struct{}) func() {
 		re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/delayWatcher", `pause`))
 		server.Close()
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/delayWatcher"))
 		return func() {}
 	})
 	// Case5: close the server when the watch loop is running
-	checkExitWatch(t, leaderKey, func(server *embed.Etcd, _ *clientv3.Client) func() {
-		// Wait for the watch loop to start
-		time.Sleep(500 * time.Millisecond)
+	checkExitWatch(t, leaderKey, func(server *embed.Etcd, _ *clientv3.Client, started <-chan struct{}) func() {
+		select {
+		case <-started:
+		case <-time.After(5 * time.Second):
+			t.Fatal("leader watch did not start")
+		}
 		server.Close()
 		return func() {}
 	})
 	// Case6: transfer leader without client reconnection.
-	checkExitWatch(t, leaderKey, func(server *embed.Etcd, client *clientv3.Client) func() {
+	checkExitWatch(t, leaderKey, func(server *embed.Etcd, client *clientv3.Client, _ <-chan struct{}) func() {
 		cfg1 := server.Config()
 		etcd2 := etcdutil.MustAddEtcdMember(t, &cfg1, client)
 		cfg2 := etcd2.Config()
@@ -359,7 +368,7 @@ func TestExitWatch(t *testing.T) {
 		}
 	})
 	// Case7: loss the quorum when the watch loop is running
-	checkExitWatch(t, leaderKey, func(server *embed.Etcd, client *clientv3.Client) func() {
+	checkExitWatch(t, leaderKey, func(server *embed.Etcd, client *clientv3.Client, _ <-chan struct{}) func() {
 		cfg1 := server.Config()
 		etcd2 := etcdutil.MustAddEtcdMember(t, &cfg1, client)
 		cfg2 := etcd2.Config()
@@ -380,7 +389,7 @@ func TestExitWatch(t *testing.T) {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick"))
 }
 
-func checkExitWatch(t *testing.T, leaderKey string, injectFunc func(server *embed.Etcd, client *clientv3.Client) func()) {
+func checkExitWatch(t *testing.T, leaderKey string, injectFunc func(server *embed.Etcd, client *clientv3.Client, started <-chan struct{}) func()) {
 	re := require.New(t)
 	servers, client1, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
@@ -394,13 +403,18 @@ func checkExitWatch(t *testing.T, leaderKey string, injectFunc func(server *embe
 	re.NoError(err)
 	resp, err := client2.Get(context.Background(), leaderKey)
 	re.NoError(err)
+	started := make(chan struct{})
+	notifyStarted := sync.OnceFunc(func() { close(started) })
+	const hook = "github.com/tikv/pd/pkg/election/watchLeaderReady"
+	re.NoError(failpoint.EnableCall(hook, notifyStarted))
+	defer func() { re.NoError(failpoint.Disable(hook)) }()
 	done := make(chan struct{})
 	go func() {
 		leadership2.Watch(context.Background(), resp.Header.Revision)
 		done <- struct{}{}
 	}()
 
-	cleanFunc := injectFunc(servers[0], client2)
+	cleanFunc := injectFunc(servers[0], client2, started)
 	defer cleanFunc()
 
 	testutil.Eventually(re, func() bool {
@@ -460,34 +474,36 @@ func TestRequestProgress(t *testing.T) {
 }
 
 func TestCampaignTimes(t *testing.T) {
-	re := require.New(t)
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
 	leadership := NewLeadership(client, "test_leader", "test_leader", "test_leader")
 
-	// all the campaign times are within the timeout.
-	campaignTimesRecordTimeout = 10 * time.Second
-	defer func() {
-		campaignTimesRecordTimeout = 5 * time.Minute
-	}()
-	for range 3 {
-		leadership.AddCampaignTimes()
-		time.Sleep(100 * time.Millisecond)
-	}
-	re.Equal(3, leadership.GetCampaignTimesNum())
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		// all the campaign times are within the timeout.
+		campaignTimesRecordTimeout = 10 * time.Second
+		defer func() {
+			campaignTimesRecordTimeout = 5 * time.Minute
+		}()
+		for range 3 {
+			leadership.AddCampaignTimes()
+			synctest.Sleep(100*time.Millisecond + time.Nanosecond)
+		}
+		re.Equal(3, leadership.GetCampaignTimesNum())
 
-	// only the last 2 records are valid.
-	campaignTimesRecordTimeout = 200 * time.Millisecond
-	for range 3 {
-		leadership.AddCampaignTimes()
-		time.Sleep(100 * time.Millisecond)
-	}
-	re.Equal(2, leadership.GetCampaignTimesNum())
+		// only the last 2 records are valid.
+		campaignTimesRecordTimeout = 200 * time.Millisecond
+		for range 3 {
+			leadership.AddCampaignTimes()
+			synctest.Sleep(100*time.Millisecond + time.Nanosecond)
+		}
+		re.Equal(2, leadership.GetCampaignTimesNum())
 
-	time.Sleep(200 * time.Millisecond)
-	// need to wait for the next addCampaignTimes to update the campaign time.
-	re.Equal(2, leadership.GetCampaignTimesNum())
-	// check campaign leader frequency.
-	leadership.AddCampaignTimes()
-	re.Equal(1, leadership.GetCampaignTimesNum())
+		synctest.Sleep(200*time.Millisecond + time.Nanosecond)
+		// need to wait for the next addCampaignTimes to update the campaign time.
+		re.Equal(2, leadership.GetCampaignTimesNum())
+		// check campaign leader frequency.
+		leadership.AddCampaignTimes()
+		re.Equal(1, leadership.GetCampaignTimesNum())
+	})
 }

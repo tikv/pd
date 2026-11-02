@@ -21,8 +21,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -135,6 +135,7 @@ func mustGetKeyspaceGroupMembers(re *require.Assertions, server *tso.Server) map
 func TestTSOServerStartFirst(t *testing.T) {
 	re := require.New(t)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayStartServerLoop", `return(true)`))
+	t.Cleanup(func() { re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServerLoop")) })
 	ctx := t.Context()
 
 	cluster, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(conf *config.Config, _ string) {
@@ -167,7 +168,14 @@ func TestTSOServerStartFirst(t *testing.T) {
 	primary := tsoCluster.WaitForDefaultPrimaryServing(re)
 	re.NotNil(primary)
 
-	time.Sleep(time.Second * 1)
+	testutil.Eventually(re, func() bool {
+		group, err := pdLeaderServer.GetServer().GetKeyspaceGroupManager().GetKeyspaceGroupByID(constant.DefaultKeyspaceGroupID)
+		if err != nil || group == nil || len(group.Members) != 2 || !slices.Contains(group.Keyspaces, uint32(2)) {
+			return false
+		}
+		_, group, _, _, err = primary.GetKeyspaceGroupManager().FindGroupByKeyspaceID(2)
+		return err == nil && group != nil && slices.Contains(group.Keyspaces, uint32(2))
+	})
 	input := make(map[string]any)
 	input["new-id"] = 1
 	input["keyspaces"] = []uint32{2}
@@ -193,8 +201,6 @@ func TestTSOServerStartFirst(t *testing.T) {
 	re.NoError(json.Unmarshal(data, &group))
 	re.Len(group.Keyspaces, 2)
 	re.Len(group.Members, 2)
-
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServerLoop"))
 }
 
 func TestForwardOnlyTSONoScheduling(t *testing.T) {
