@@ -20,6 +20,7 @@ package window
 import (
 	"math"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -34,7 +35,6 @@ func getRollingPolicy() *RollingPolicy {
 }
 
 func TestRollingPolicy_Add(t *testing.T) {
-	re := require.New(t)
 	// test func timespan return real span
 	tests := []struct {
 		timeSleep []int
@@ -47,7 +47,6 @@ func TestRollingPolicy_Add(t *testing.T) {
 			points:    []float64{1, 1},
 		},
 		{
-			// In CI, the actual sleep time may be more than 100 (timeSleep = 94).
 			timeSleep: []int{94, 250},
 			offset:    []int{0, 0},
 			points:    []float64{1, 1},
@@ -60,84 +59,92 @@ func TestRollingPolicy_Add(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		t.Run("test policy add", func(_ *testing.T) {
-			var totalTS, lastOffset int
-			timeSleep := test.timeSleep
-			beginTime := time.Now()
-			policy := getRollingPolicy()
-			points := make([]float64, defaultSize)
-			asExpected := true
-			for i, n := range timeSleep {
-				totalTS += n
-				time.Sleep(time.Duration(n) * time.Millisecond)
-				point := test.points[i]
-				offset := int(time.Since(beginTime)/defaultBucketDuration) % defaultSize
-				points[i] += point
-				policy.Add(point)
-				if offset != test.offset[i] {
-					asExpected = false
-				}
-				if asExpected {
-					re.Lessf(math.Abs(point-policy.window.buckets[offset].Points[0]), 1e-6,
+		t.Run("test policy add", func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				re := require.New(t)
+				var totalTS, lastOffset int
+				timeSleep := test.timeSleep
+				beginTime := time.Now()
+				policy := getRollingPolicy()
+				points := make([]float64, defaultSize)
+				asExpected := true
+				for i, n := range timeSleep {
+					totalTS += n
+					synctest.Sleep(time.Duration(n) * time.Millisecond)
+					point := test.points[i]
+					offset := int(time.Since(beginTime)/defaultBucketDuration) % defaultSize
+					points[i] += point
+					policy.Add(point)
+					if offset != test.offset[i] {
+						asExpected = false
+					}
+					if asExpected {
+						re.Lessf(math.Abs(point-policy.window.buckets[offset].Points[0]), 1e-6,
+							"error, time since last append: %vms, last offset: %v", totalTS, lastOffset)
+					}
+					re.Lessf(math.Abs(points[i]-policy.window.buckets[offset].Points[0]), 1e-6,
 						"error, time since last append: %vms, last offset: %v", totalTS, lastOffset)
+					lastOffset = offset
 				}
-				re.Lessf(math.Abs(points[i]-policy.window.buckets[offset].Points[0]), 1e-6,
-					"error, time since last append: %vms, last offset: %v", totalTS, lastOffset)
-				lastOffset = offset
-			}
+			})
 		})
 	}
 }
 
 func TestRollingPolicy_AddWithTimespan(t *testing.T) {
-	re := require.New(t)
 	t.Run("timespan < bucket number", func(t *testing.T) {
-		policy := getRollingPolicy()
-		// bucket 0
-		policy.Add(0)
-		// bucket 1
-		time.Sleep(101 * time.Millisecond)
-		policy.Add(1)
-		re.Equal(1, int(policy.window.buckets[1].Points[0]))
-		// bucket 2
-		time.Sleep(101 * time.Millisecond)
-		policy.Add(2)
-		// bucket 1
-		time.Sleep(201 * time.Millisecond)
-		policy.Add(4)
+		synctest.Test(t, func(t *testing.T) {
+			re := require.New(t)
+			policy := getRollingPolicy()
+			// bucket 0
+			policy.Add(0)
+			// bucket 1
+			synctest.Sleep(101 * time.Millisecond)
+			policy.Add(1)
+			re.Equal(1, int(policy.window.buckets[1].Points[0]))
+			// bucket 2
+			synctest.Sleep(101 * time.Millisecond)
+			policy.Add(2)
+			// bucket 1
+			synctest.Sleep(201 * time.Millisecond)
+			policy.Add(4)
 
-		for _, bkt := range policy.window.buckets {
-			t.Logf("%+v", bkt)
-		}
+			for _, bkt := range policy.window.buckets {
+				t.Logf("%+v", bkt)
+			}
 
-		re.Empty(policy.window.buckets[0].Points)
-		re.Equal(4, int(policy.window.buckets[1].Points[0]))
-		re.Equal(2, int(policy.window.buckets[2].Points[0]))
+			re.Empty(policy.window.buckets[0].Points)
+			re.Equal(4, int(policy.window.buckets[1].Points[0]))
+			re.Equal(2, int(policy.window.buckets[2].Points[0]))
+		})
 	})
 
 	t.Run("timespan > bucket number", func(t *testing.T) {
-		policy := getRollingPolicy()
+		synctest.Test(t, func(t *testing.T) {
+			re := require.New(t)
+			policy := getRollingPolicy()
 
-		// bucket 0
-		policy.Add(0)
-		// bucket 1
-		time.Sleep(101 * time.Millisecond)
-		policy.Add(1)
-		policy.Add(1)
-		re.Equal(2, int(policy.window.buckets[1].Points[0]))
-		// bucket 2
-		time.Sleep(101 * time.Millisecond)
-		policy.Add(2)
-		// bucket 1
-		time.Sleep(501 * time.Millisecond)
-		policy.Add(4)
+			// bucket 0
+			policy.Add(0)
+			// bucket 1
+			synctest.Sleep(101 * time.Millisecond)
+			policy.Add(1)
+			policy.Add(1)
+			re.Equal(2, int(policy.window.buckets[1].Points[0]))
+			// bucket 2
+			synctest.Sleep(101 * time.Millisecond)
+			policy.Add(2)
+			// bucket 1
+			synctest.Sleep(501 * time.Millisecond)
+			policy.Add(4)
 
-		for _, bkt := range policy.window.buckets {
-			t.Logf("%+v", bkt)
-		}
+			for _, bkt := range policy.window.buckets {
+				t.Logf("%+v", bkt)
+			}
 
-		re.Empty(policy.window.buckets[0].Points)
-		re.Equal(4, int(policy.window.buckets[1].Points[0]))
-		re.Empty(policy.window.buckets[2].Points)
+			re.Empty(policy.window.buckets[0].Points)
+			re.Equal(4, int(policy.window.buckets[1].Points[0]))
+			re.Empty(policy.window.buckets[2].Points)
+		})
 	})
 }
