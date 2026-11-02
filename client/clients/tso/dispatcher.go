@@ -229,7 +229,7 @@ tsoBatchLoop:
 				// Subscribe before checking again: the background updater may publish a
 				// stream between the first lookup and this subscription.
 				updated := conCtxMgr.Updated()
-				if conCtxMgr.RandomlyPick() != nil {
+				if conCtxMgr.Size() > 0 {
 					continue streamChoosingLoop
 				}
 				log.Info("[tso] tso stream is not ready")

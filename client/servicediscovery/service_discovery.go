@@ -60,6 +60,9 @@ const (
 	// Use a shorter timeout to recover faster from network isolation.
 	UpdateMemberTimeout = time.Second
 
+	// Hedge slow membership requests without adding probes to the fast path.
+	memberUpdateHedgeDelay    = 20 * time.Millisecond
+	maxConcurrentMemberProbes = 3
 	serviceModeUpdateInterval = 3 * time.Second
 )
 
@@ -454,6 +457,12 @@ type serviceDiscovery struct {
 	option *opt.Option
 
 	flight singleflight.Group
+
+	memberProbeMu     sync.Mutex
+	memberProbeCtx    context.Context
+	memberProbeCancel context.CancelFunc
+	memberProbeWg     sync.WaitGroup
+	memberProbeClosed bool
 }
 
 // NewDefaultServiceDiscovery returns a new default service discovery-based client.
@@ -652,6 +661,13 @@ func (c *serviceDiscovery) Close() {
 	}
 	c.closeOnce.Do(func() {
 		log.Info("[pd] close service discovery client")
+		c.memberProbeMu.Lock()
+		c.memberProbeClosed = true
+		if c.memberProbeCancel != nil {
+			c.memberProbeCancel()
+		}
+		c.memberProbeMu.Unlock()
+		c.memberProbeWg.Wait()
 		c.clientConns.Range(func(key, cc any) bool {
 			if err := cc.(*grpc.ClientConn).Close(); err != nil {
 				log.Warn("[pd] failed to close grpc clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
@@ -890,8 +906,64 @@ func (c *serviceDiscovery) checkServiceModeChanged() error {
 }
 
 func (c *serviceDiscovery) updateMember() error {
-	for _, url := range c.GetServiceURLs() {
-		members, err := c.getMembers(c.ctx, url, UpdateMemberTimeout)
+	urls := c.GetServiceURLs()
+	if len(urls) == 0 {
+		return errs.ErrClientGetMember.FastGenByArgs()
+	}
+	type probeResult struct {
+		url     string
+		members *pdpb.GetMembersResponse
+		err     error
+	}
+	results := make(chan probeResult, min(len(urls), maxConcurrentMemberProbes))
+	probe := func(url string) bool {
+		c.memberProbeMu.Lock()
+		defer c.memberProbeMu.Unlock()
+		if c.memberProbeClosed || c.ctx.Err() != nil {
+			return false
+		}
+		if c.memberProbeCtx == nil {
+			c.memberProbeCtx, c.memberProbeCancel = context.WithCancel(c.ctx)
+		}
+		ctx := c.memberProbeCtx
+		c.memberProbeWg.Go(func() {
+			members, err := c.getMembers(ctx, url, UpdateMemberTimeout)
+			results <- probeResult{url, members, err}
+		})
+		return true
+	}
+	// Losing probes keep their context until timeout or Close: getMembers shares
+	// RPCs by URL, so canceling one waiter can otherwise cancel another caller's RPC.
+	// Buffer outstanding replies so probes can finish after this refresh returns.
+	pending, next := 0, 0
+	startNext := func() {
+		if probe(urls[next]) {
+			pending++
+		}
+		next++
+	}
+	startNext()
+	hedge := time.NewTimer(memberUpdateHedgeDelay)
+	defer hedge.Stop()
+	hedged := false
+	for pending > 0 {
+		var result probeResult
+		select {
+		case result = <-results:
+		case <-hedge.C:
+			hedged = true
+			// Prefer a reply already queued before starting extra requests.
+			select {
+			case result = <-results:
+			default:
+				for next < len(urls) && pending < maxConcurrentMemberProbes {
+					startNext()
+				}
+				continue
+			}
+		}
+		pending--
+		url, members, err := result.url, result.members, result.err
 		// Check the cluster ID.
 		updatedClusterID := members.GetHeader().GetClusterId()
 		if err == nil && updatedClusterID != c.clusterID {
@@ -912,6 +984,9 @@ func (c *serviceDiscovery) updateMember() error {
 			case <-c.ctx.Done():
 				return errors.WithStack(err)
 			default:
+				for next < len(urls) && (pending == 0 || hedged && pending < maxConcurrentMemberProbes) {
+					startNext()
+				}
 				continue
 			}
 		}
@@ -961,7 +1036,7 @@ func (c *serviceDiscovery) getClusterInfo(ctx context.Context, url string, timeo
 func (c *serviceDiscovery) getMembers(ctx context.Context, url string, timeout time.Duration) (*pdpb.GetMembersResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	cc, err := c.GetOrCreateGRPCConn(url)
+	cc, err := grpcutil.GetOrCreateGRPCConn(ctx, &c.clientConns, url, c.tlsCfg, c.option.GRPCDialOptions...)
 	if err != nil {
 		return nil, err
 	}
