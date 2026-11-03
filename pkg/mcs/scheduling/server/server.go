@@ -204,7 +204,10 @@ func (s *Server) updatePDMemberLoop() {
 				log.Info("member is not started yet", zap.String("member-id", strconv.FormatUint(ep.GetID(), 16)), errs.ZapError(err))
 				continue
 			}
-			status, err := s.GetClient().Status(ctx, ep.ClientURLs[0])
+			// A stopped member must not block discovering the next PD leader.
+			statusCtx, statusCancel := context.WithTimeout(ctx, requestTimeout)
+			status, err := s.GetClient().Status(statusCtx, ep.ClientURLs[0])
+			statusCancel()
 			if err != nil {
 				log.Info("failed to get status of member", zap.String("member-id", strconv.FormatUint(ep.ID, 16)), zap.String("endpoint", ep.ClientURLs[0]), errs.ZapError(err))
 				continue
