@@ -85,12 +85,16 @@ func TestLoadKeyspaceMetaWithRevision(t *testing.T) {
 	for _, missing := range []string{"missing", "empty"} {
 		t.Run(missing, func(t *testing.T) {
 			re := require.New(t)
+			var expectedRevision int64
 			if missing == "empty" {
-				re.NoError(store.Save(keypath.KeyspaceMetaPath(2), ""))
+				response, err := client.Put(ctx, keypath.KeyspaceMetaPath(2), "")
+				re.NoError(err)
+				expectedRevision = response.Header.Revision
 			}
-			loaded, _, err := store.LoadKeyspaceMetaWithRevision(ctx, 2)
+			loaded, revision, err := store.LoadKeyspaceMetaWithRevision(ctx, 2)
 			re.NoError(err)
 			re.Nil(loaded)
+			re.Equal(expectedRevision, revision)
 		})
 	}
 	re.NoError(store.Save(keypath.KeyspaceMetaPath(2), "invalid-protobuf"))

@@ -90,18 +90,7 @@ func (m *MetaServiceGroupManager) getEtcdClientLocked(groupID string) (*clientv3
 	if err != nil {
 		return nil, fmt.Errorf("meta-service group %s: %w", groupID, err)
 	}
-	var tlsConfig *tls.Config
-	if m.tlsConfigLoader != nil {
-		tlsConfig, err = m.tlsConfigLoader()
-		if err != nil {
-			return nil, fmt.Errorf("meta-service group %s TLS config: %w", groupID, err)
-		}
-	}
-	client, err := clientv3.New(clientv3.Config{
-		Endpoints:   endpoints,
-		DialTimeout: etcdutil.DefaultRequestTimeout,
-		TLS:         tlsConfig,
-	})
+	client, err := m.newEtcdClient(endpoints)
 	if err != nil {
 		return nil, fmt.Errorf("meta-service group %s client: %w", groupID, err)
 	}
@@ -110,6 +99,23 @@ func (m *MetaServiceGroupManager) getEtcdClientLocked(groupID string) (*clientv3
 	}
 	m.etcdClients[groupID] = client
 	return client, nil
+}
+
+// newEtcdClient applies the shared transport settings. The caller owns the client.
+func (m *MetaServiceGroupManager) newEtcdClient(endpoints []string) (*clientv3.Client, error) {
+	var tlsConfig *tls.Config
+	if m.tlsConfigLoader != nil {
+		var err error
+		tlsConfig, err = m.tlsConfigLoader()
+		if err != nil {
+			return nil, fmt.Errorf("failed to load TLS config: %w", err)
+		}
+	}
+	return clientv3.New(clientv3.Config{
+		Endpoints:   endpoints,
+		DialTimeout: etcdutil.DefaultRequestTimeout,
+		TLS:         tlsConfig,
+	})
 }
 
 func parseMetaServiceGroupEndpoints(addresses string) ([]string, error) {

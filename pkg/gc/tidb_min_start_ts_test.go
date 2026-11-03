@@ -57,6 +57,22 @@ func newMetaServiceGroupGCFixture(t *testing.T) (*endpoint.StorageEndpoint, *GCS
 	return storage, manager, groupClient, servers[0].Close
 }
 
+// advanceRoutingTestSafePoint advances keyspace 1 toward 200 through the selected API.
+func advanceRoutingTestSafePoint(t *testing.T, manager *GCStateManager, legacy bool, now time.Time) (uint64, error) {
+	t.Helper()
+	if legacy {
+		minimum, updated, err := manager.CompatibleUpdateServiceGCSafePoint(1, keypath.GCWorkerServiceSafePointID, 200, math.MaxInt64, now)
+		if err != nil {
+			require.False(t, updated)
+			require.Nil(t, minimum)
+			return 0, err
+		}
+		return minimum.SafePoint, nil
+	}
+	result, err := manager.AdvanceTxnSafePoint(1, 200, now)
+	return result.NewTxnSafePoint, err
+}
+
 func TestMetaServiceGroupMinStartTS(t *testing.T) {
 	re := require.New(t)
 	ctx := context.Background()
@@ -547,20 +563,7 @@ func TestMetaServiceGroupRoutingRevision(t *testing.T) {
 				}
 			}))
 			defer func() { re.NoError(failpoint.Disable(hook)) }()
-			advance := func() (uint64, error) {
-				if tc.legacy {
-					minimum, updated, err := manager.CompatibleUpdateServiceGCSafePoint(1, keypath.GCWorkerServiceSafePointID, 200, math.MaxInt64, now)
-					if err != nil {
-						re.False(updated)
-						re.Nil(minimum)
-						return 0, err
-					}
-					return minimum.SafePoint, nil
-				}
-				result, err := manager.AdvanceTxnSafePoint(1, 200, now)
-				return result.NewTxnSafePoint, err
-			}
-			_, err = advance()
+			_, err = advanceRoutingTestSafePoint(t, manager, tc.legacy, now)
 			re.True(mutated, "the routing mutation must run before commit")
 			re.True(pingcaperrors.ErrorEqual(err, errs.ErrEtcdTxnConflict), "stale routing must conflict, got %v", err)
 			re.NoError(failpoint.Disable(hook))
@@ -576,7 +579,7 @@ func TestMetaServiceGroupRoutingRevision(t *testing.T) {
 			_, published, err := watcher.receiveOne(false)
 			re.NoError(err)
 			re.False(published, "a rejected advancement must not publish a GC state")
-			safePoint, err := advance()
+			safePoint, err := advanceRoutingTestSafePoint(t, manager, tc.legacy, now)
 			re.NoError(err)
 			re.Equal(uint64(100), safePoint)
 			change, published, err := watcher.receiveOne(false)

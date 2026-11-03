@@ -371,20 +371,7 @@ func (m *MetaServiceGroupManager) checkNewGroupsHealth(ctx context.Context, meta
 	for groupID, addresses := range groups {
 		endpoints := splitMetaServiceGroupEndpoints(addresses)
 		for _, endpoint := range endpoints {
-			var tlsConfig *tls.Config
-			if m.tlsConfigLoader != nil {
-				var err error
-				tlsConfig, err = m.tlsConfigLoader()
-				if err != nil {
-					return fmt.Errorf("%w: group %s endpoint %s: failed to load TLS config: %v",
-						errs.ErrMetaServiceGroupUnhealthy, groupID, endpoint, err)
-				}
-			}
-			client, err := clientv3.New(clientv3.Config{
-				Endpoints:   []string{endpoint},
-				DialTimeout: etcdutil.DefaultRequestTimeout,
-				TLS:         tlsConfig,
-			})
+			client, err := m.newEtcdClient([]string{endpoint})
 			if err != nil {
 				return fmt.Errorf("%w: group %s endpoint %s: %v", errs.ErrMetaServiceGroupUnhealthy, groupID, endpoint, err)
 			}

@@ -101,20 +101,7 @@ func TestMetaServiceGroupConfigRevision(t *testing.T) {
 				}
 			}))
 			defer func() { re.NoError(failpoint.Disable(hook)) }()
-			advance := func() (uint64, error) {
-				if tc.legacy {
-					minimum, updated, err := manager.CompatibleUpdateServiceGCSafePoint(1, keypath.GCWorkerServiceSafePointID, 200, math.MaxInt64, now)
-					if err != nil {
-						re.False(updated)
-						re.Nil(minimum)
-						return 0, err
-					}
-					return minimum.SafePoint, nil
-				}
-				result, err := manager.AdvanceTxnSafePoint(1, 200, now)
-				return result.NewTxnSafePoint, err
-			}
-			_, err = advance()
+			_, err = advanceRoutingTestSafePoint(t, manager, tc.legacy, now)
 			re.True(changed)
 			re.True(errors.ErrorEqual(err, errs.ErrEtcdTxnConflict), "config changed after report read: %v", err)
 			re.NoError(failpoint.Disable(hook))
@@ -129,7 +116,7 @@ func TestMetaServiceGroupConfigRevision(t *testing.T) {
 			if tc.restore || tc.unrelated {
 				update(replacement)
 			}
-			result, err := advance()
+			result, err := advanceRoutingTestSafePoint(t, manager, tc.legacy, now)
 			re.NoError(err)
 			re.Equal(uint64(100), result)
 			if tc.legacy {
