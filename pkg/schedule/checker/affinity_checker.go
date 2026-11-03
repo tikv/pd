@@ -59,6 +59,7 @@ type AffinityChecker struct {
 	affinityManager  *affinity.Manager
 	conf             config.CheckerConfigProvider
 	recentMergeCache *cache.TTLUint64
+	splitAttempts    cache.Cache
 	startTime        time.Time
 	balancer         *affinityBalancer
 }
@@ -71,6 +72,7 @@ func NewAffinityChecker(ctx context.Context, cluster sche.CheckerCluster, conf c
 		affinityManager:  cluster.GetAffinityManager(),
 		conf:             conf,
 		recentMergeCache: cache.NewIDTTL(ctx, gcInterval, recentMergeTTL),
+		splitAttempts:    cache.NewCache(affinitySplitCacheSize, cache.LRUCache),
 		startTime:        time.Now(),
 	}
 	if c.affinityManager != nil {

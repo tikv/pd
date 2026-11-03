@@ -383,6 +383,7 @@ var (
 	affinityCheckerLearnerPeerConflictCounter     = checkerCounter.WithLabelValues(affinityChecker, "learner-peer-conflict")
 	affinityCheckerTargetStoreRejectedCounter     = checkerCounter.WithLabelValues(affinityChecker, "target-store-rejected")
 	affinityCheckerTargetStoreBlockedCounter      = checkerCounter.WithLabelValues(affinityChecker, "target-store-blocked")
+	affinityCheckerSplitTimeoutCounter            = checkerCounter.WithLabelValues(affinityChecker, "split-timeout-fallback")
 
 	// Affinity merge checker metrics
 	affinityMergeCheckerCounter                     = checkerCounter.WithLabelValues(affinityChecker, "merge-check")
