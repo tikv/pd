@@ -150,8 +150,18 @@ func (suite *regionLabelTestSuite) TestAffinityRuleWriteProtection() {
 		protectedErrorChecks := []func([]byte, int, http.Header){
 			testutil.Status(re, http.StatusBadRequest),
 			testutil.WithHeader(re, "TiDB-Error-Code", errcode.InvalidInputCode.CodeStr().String()),
-			testutil.StringContain(re, "PD:affinity:ErrAffinityLabelProtected"),
-			testutil.StringContain(re, "affinity API"),
+			func(body []byte, _ int, _ http.Header) {
+				var response struct {
+					Code string          `json:"code"`
+					Msg  string          `json:"msg"`
+					Data json.RawMessage `json:"data"`
+				}
+				re.NoError(json.Unmarshal(body, &response))
+				re.Equal("input", response.Code)
+				re.Contains(response.Msg, "PD:affinity:ErrAffinityLabelProtected")
+				re.Contains(response.Msg, "affinity API")
+				re.NotNil(response.Data)
+			},
 		}
 
 		for _, rule := range []*labeler.LabelRule{
@@ -209,6 +219,19 @@ func (suite *regionLabelTestSuite) TestAffinityRuleWriteProtection() {
 		}
 		re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, ruleURL, &kept))
 		re.Equal(original, kept)
+
+		// The owning API can still update its protected label rule's ranges.
+		data, err = json.Marshal(handlers.BatchModifyAffinityGroupsRequest{
+			Add: []handlers.GroupRangesModification{
+				{ID: groupID, Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x20}, EndKey: []byte{0x30}}}},
+			},
+		})
+		re.NoError(err)
+		re.NoError(testutil.CheckPatchJSON(tests.TestDialClient, affinityURL, data, testutil.StatusOK(re)))
+		re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, ruleURL, &kept))
+		re.Equal(original.Labels, kept.Labels)
+		re.ElementsMatch(keyutil.BuildKeyRangeMaps("10", "20", "20", "30"), kept.Data)
+
 		re.NoError(testutil.CheckDelete(tests.TestDialClient, affinityURL+"/"+groupID+"?force=true", testutil.StatusOK(re)))
 		re.NoError(testutil.CheckGetJSON(tests.TestDialClient, ruleURL, nil, testutil.Status(re, http.StatusNotFound)))
 		re.NoError(testutil.CheckDelete(tests.TestDialClient, prefix+"/rule/"+ordinary.ID, testutil.StatusOK(re)))
