@@ -144,6 +144,7 @@ func GetClientConn(ctx context.Context, addr string, tlsCfg *tls.Config, do ...g
 		},
 	})
 	do = append(do, opt, backoffOpts)
+	//nolint:staticcheck // DialContext preserves the blocking dial options and context cancellation supported by this helper.
 	cc, err := grpc.DialContext(ctx, u.Host, do...)
 	if err != nil {
 		return nil, errs.ErrGRPCDial.Wrap(err).GenWithStackByCause()
