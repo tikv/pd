@@ -22,7 +22,6 @@ import (
 	"net/http"
 	"slices"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -42,26 +41,18 @@ const (
 // stores them like every other affinity write. The watcher then delivers the
 // stored groups back to the scheduling service.
 type TargetWriter struct {
-	httpClient *http.Client
-	endpoints  []string
-	timeout    time.Duration
-	// first is the index of the endpoint that handled the last request. It is
-	// tried first, so that an unreachable endpoint does not delay every write.
-	first atomic.Int64
+	httpClient   *http.Client
+	getLeaderURL func() (string, error)
+	onFailure    func()
+	timeout      time.Duration
 }
 
 var _ affinity.TargetWriter = (*TargetWriter)(nil)
 
-// NewTargetWriter creates a TargetWriter that sends requests to the PD endpoints,
-// given as a comma-separated list.
-func NewTargetWriter(httpClient *http.Client, backendEndpoints string) *TargetWriter {
-	var endpoints []string
-	for endpoint := range strings.SplitSeq(backendEndpoints, ",") {
-		if endpoint = strings.TrimSpace(endpoint); endpoint != "" {
-			endpoints = append(endpoints, strings.TrimSuffix(endpoint, "/"))
-		}
-	}
-	return &TargetWriter{httpClient: httpClient, endpoints: endpoints, timeout: writeTimeout}
+// NewTargetWriter creates a TargetWriter that sends requests to the tracked PD
+// leader and calls onFailure to refresh membership after a failed write.
+func NewTargetWriter(httpClient *http.Client, getLeaderURL func() (string, error), onFailure func()) *TargetWriter {
+	return &TargetWriter{httpClient: httpClient, getLeaderURL: getLeaderURL, onFailure: onFailure, timeout: writeTimeout}
 }
 
 // WriteGroupTargets implements affinity.TargetWriter. It sends the targets in
@@ -73,58 +64,41 @@ func (w *TargetWriter) WriteGroupTargets(ctx context.Context, targets []affinity
 		ids, err := w.writeTargets(ctx, chunk)
 		written = append(written, ids...)
 		if err != nil {
+			w.onFailure()
 			return written, err
 		}
 	}
 	return written, nil
 }
 
-// writeTargets sends one request. It tries the PD endpoints in turn, starting
-// from the one that handled the last request, until one of them handles the
-// request. Retrying on another endpoint is safe because PD writes a target only
-// if its group is unchanged, and reports a target that is already stored.
+// writeTargets sends one request to the tracked PD leader. If it has become a
+// follower, the v2 API Redirector forwards the request to the leader, adding one hop.
 func (w *TargetWriter) writeTargets(ctx context.Context, targets []affinity.GroupTarget) ([]string, error) {
+	leaderURL, err := w.getLeaderURL()
+	if err != nil {
+		return nil, err
+	}
 	body, err := json.Marshal(&affinity.GroupTargetsRequest{Targets: targets})
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	err = errors.New("no PD endpoint")
-	first := int(w.first.Load())
-	for i := range w.endpoints {
-		index := (first + i) % len(w.endpoints)
-		var written []string
-		var retry bool
-		written, retry, err = w.write(ctx, w.endpoints[index], body)
-		if err == nil || !retry {
-			w.first.Store(int64(index))
-			return written, err
-		}
-	}
-	return nil, err
-}
-
-// write sends one request and reports whether another endpoint may succeed.
-// A failure to reach the endpoint, including a timeout, may succeed on another
-// endpoint unless ctx is done.
-func (w *TargetWriter) write(ctx context.Context, endpoint string, body []byte) (written []string, retry bool, err error) {
 	reqCtx, cancel := context.WithTimeout(ctx, w.timeout)
 	defer cancel()
-	resp, err := apiutil.PostJSONWithContext(reqCtx, w.httpClient, endpoint+groupTargetsPath, body)
+	resp, err := apiutil.PostJSONWithContext(reqCtx, w.httpClient, strings.TrimSuffix(leaderURL, "/")+groupTargetsPath, body)
 	if err != nil {
-		return nil, ctx.Err() == nil, errors.Trace(err)
-	}
-	defer resp.Body.Close()
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, ctx.Err() == nil, errors.Trace(err)
+		return nil, errors.Trace(err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		err := errors.Errorf("write affinity group targets to %s: %s %s", endpoint, resp.Status, bytes.TrimSpace(data))
-		return nil, resp.StatusCode >= http.StatusInternalServerError, err
+		defer resp.Body.Close()
+		data, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		return nil, errors.Errorf("write affinity group targets to %s: %s %s", leaderURL, resp.Status, bytes.TrimSpace(data))
 	}
 	var result affinity.GroupTargetsResponse
-	if err := json.Unmarshal(data, &result); err != nil {
-		return nil, false, errors.Annotate(err, "decode affinity group targets response")
+	if err := apiutil.ReadJSON(resp.Body, &result); err != nil {
+		return nil, errors.Annotate(err, "decode affinity group targets response")
 	}
-	return result.WrittenGroupIDs, false, nil
+	return result.WrittenGroupIDs, nil
 }

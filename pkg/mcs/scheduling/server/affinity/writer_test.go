@@ -21,13 +21,14 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/errors"
 
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -43,6 +44,7 @@ func targetServer(t *testing.T, status int, calls *atomic.Int32) string {
 		}
 		if status != http.StatusOK {
 			w.WriteHeader(status)
+			_, _ = io.WriteString(w, "target write rejected")
 			return
 		}
 		_ = json.NewEncoder(w).Encode(&affinity.GroupTargetsResponse{WrittenGroupIDs: []string{req.Targets[0].Expected.ID}})
@@ -54,12 +56,29 @@ func targetServer(t *testing.T, status int, calls *atomic.Int32) string {
 func TestTargetWriter(t *testing.T) {
 	re := require.New(t)
 	targets := []affinity.GroupTarget{{Expected: affinity.Group{ID: "g"}, LeaderStoreID: 1, VoterStoreIDs: []uint64{1}}}
-	var okCalls, badCalls, failCalls, hangCalls atomic.Int32
+	var okCalls, nextCalls atomic.Int32
 	ok := targetServer(t, http.StatusOK, &okCalls)
+	next := targetServer(t, http.StatusOK, &nextCalls)
+	leaderURL := ok + "/"
+	var failures int
+	writer := NewTargetWriter(http.DefaultClient, func() (string, error) { return leaderURL, nil }, func() { failures++ })
+	for _, url := range []string{ok + "/", next} {
+		leaderURL = url
+		written, err := writer.WriteGroupTargets(t.Context(), targets)
+		re.NoError(err)
+		re.Equal([]string{"g"}, written)
+	}
+	re.Equal(int32(1), okCalls.Load())
+	re.Equal(int32(1), nextCalls.Load())
+	re.Zero(failures)
+}
+
+func TestTargetWriterFailures(t *testing.T) {
+	targets := []affinity.GroupTarget{{Expected: affinity.Group{ID: "g"}, LeaderStoreID: 1, VoterStoreIDs: []uint64{1}}}
+	var badCalls, failCalls atomic.Int32
 	bad := targetServer(t, http.StatusBadRequest, &badCalls)
-	fail := targetServer(t, http.StatusInternalServerError, &failCalls)
+	fail := targetServer(t, http.StatusServiceUnavailable, &failCalls)
 	hang := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		hangCalls.Add(1)
 		// The server notices that the client is gone only after the body is read.
 		_, _ = io.Copy(io.Discard, r.Body)
 		<-r.Context().Done()
@@ -67,32 +86,46 @@ func TestTargetWriter(t *testing.T) {
 	t.Cleanup(hang.Close)
 	down := httptest.NewServer(http.NotFoundHandler())
 	down.Close()
-
-	// A closed endpoint, a timeout and a server error move on to the next
-	// endpoint, and the endpoint that handled the request is tried first afterwards.
-	writer := NewTargetWriter(http.DefaultClient, strings.Join([]string{down.URL, hang.URL, fail + "/", ok}, ", "))
-	writer.timeout = 100 * time.Millisecond
-	for range 2 {
-		written, err := writer.WriteGroupTargets(t.Context(), targets)
-		re.NoError(err)
-		re.Equal([]string{"g"}, written)
+	invalid := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "invalid JSON")
+	}))
+	t.Cleanup(invalid.Close)
+	for _, tc := range []struct {
+		name      string
+		url       string
+		leaderErr error
+		wantError string
+	}{
+		{name: "no leader", leaderErr: errors.New("PD leader is not found"), wantError: "PD leader is not found"},
+		{name: "unreachable", url: down.URL, wantError: "connect"},
+		{name: "timeout", url: hang.URL, wantError: "context deadline exceeded"},
+		{name: "bad request", url: bad, wantError: "400 Bad Request target write rejected"},
+		{name: "unavailable", url: fail, wantError: "503 Service Unavailable target write rejected"},
+		{name: "invalid response", url: invalid.URL, wantError: "decode affinity group targets response"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			var failures int
+			writer := NewTargetWriter(http.DefaultClient, func() (string, error) { return tc.url, tc.leaderErr }, func() { failures++ })
+			writer.timeout = 100 * time.Millisecond
+			written, err := writer.WriteGroupTargets(t.Context(), targets)
+			re.ErrorContains(err, tc.wantError)
+			re.Empty(written)
+			re.Equal(1, failures)
+		})
 	}
-	re.Equal([]int32{1, 1, 2}, []int32{hangCalls.Load(), failCalls.Load(), okCalls.Load()})
-
-	// A rejected request is not sent to other endpoints.
-	_, err := NewTargetWriter(http.DefaultClient, bad+","+ok).WriteGroupTargets(t.Context(), targets)
-	re.ErrorContains(err, "400")
-	re.Equal([]int32{1, 2}, []int32{badCalls.Load(), okCalls.Load()})
-
-	// Once the caller's context is done, no other endpoint is tried.
-	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
-	defer cancel()
-	_, err = NewTargetWriter(http.DefaultClient, hang.URL+","+ok).WriteGroupTargets(ctx, targets)
-	re.ErrorIs(err, context.DeadlineExceeded)
-	re.Equal([]int32{2, 2}, []int32{hangCalls.Load(), okCalls.Load()})
-
-	_, err = NewTargetWriter(http.DefaultClient, "").WriteGroupTargets(t.Context(), targets)
-	re.Error(err)
+	t.Run("canceled", func(t *testing.T) {
+		re := require.New(t)
+		var failures int
+		writer := NewTargetWriter(http.DefaultClient, func() (string, error) { return hang.URL, nil }, func() { failures++ })
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		_, err := writer.WriteGroupTargets(ctx, targets)
+		re.ErrorIs(err, context.Canceled)
+		re.Equal(1, failures)
+	})
+	require.Equal(t, int32(1), badCalls.Load())
+	require.Equal(t, int32(1), failCalls.Load())
 }
 
 // TestTargetWriterSplitsRequests checks that the writer sends targets in requests
@@ -133,11 +166,13 @@ func TestTargetWriterSplitsRequests(t *testing.T) {
 		ids[i] = fmt.Sprintf("g%03d", i)
 		targets[i] = affinity.GroupTarget{Expected: affinity.Group{ID: ids[i]}, LeaderStoreID: 1, VoterStoreIDs: []uint64{1}}
 	}
-	writer := NewTargetWriter(http.DefaultClient, server.URL)
+	var failures int
+	writer := NewTargetWriter(http.DefaultClient, func() (string, error) { return server.URL, nil }, func() { failures++ })
 	written, err := writer.WriteGroupTargets(t.Context(), targets)
 	re.NoError(err)
 	re.Equal(ids, written)
 	re.Equal([]int{etcdutil.MaxEtcdTxnOps, 2}, sizes)
+	re.Zero(failures)
 
 	mu.Lock()
 	sizes = nil
@@ -146,4 +181,5 @@ func TestTargetWriterSplitsRequests(t *testing.T) {
 	written, err = writer.WriteGroupTargets(t.Context(), targets)
 	re.ErrorContains(err, "400")
 	re.Equal(ids[:etcdutil.MaxEtcdTxnOps], written)
+	re.Equal(1, failures)
 }

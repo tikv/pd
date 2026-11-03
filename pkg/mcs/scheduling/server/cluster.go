@@ -96,7 +96,7 @@ type Cluster struct {
 	keyspaceCache     *keyspace.Cache
 	coordinator       *schedule.Coordinator
 	checkMembershipCh chan struct{}
-	pdLeader          atomic.Value
+	pdLeader          atomic.Pointer[pdLeaderClient]
 	running           atomic.Bool
 
 	backendAddress string
@@ -108,6 +108,11 @@ type Cluster struct {
 	miscRunner ratelimit.Runner
 	// logRunner is used to process the log asynchronously.
 	logRunner ratelimit.Runner
+}
+
+type pdLeaderClient struct {
+	client pdpb.PDClient
+	url    string
 }
 
 const (
@@ -150,8 +155,6 @@ func NewCluster(
 		cancel()
 		return nil, err
 	}
-	// PD stores the affinity targets this service decides, like all other affinity metadata.
-	affinityManager.SetTargetWriter(mcsaffinity.NewTargetWriter(httpClient, backendAddress))
 	c := &Cluster{
 		ctx:               ctx,
 		cancel:            cancel,
@@ -175,6 +178,8 @@ func NewCluster(
 		miscRunner:      ratelimit.NewConcurrentRunner(miscTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
 		logRunner:       ratelimit.NewConcurrentRunner(logTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
 	}
+	// PD stores the affinity targets this service decides, like all other affinity metadata.
+	affinityManager.SetTargetWriter(mcsaffinity.NewTargetWriter(httpClient, c.getPDLeaderURL, c.triggerMembershipCheck))
 
 	c.coordinator = schedule.NewCoordinator(ctx, c, hbStreams)
 	err = c.ruleManager.Initialize(persistConfig.GetMaxReplicas(), persistConfig.GetLocationLabels(), persistConfig.GetIsolationLevel(), true)
@@ -438,7 +443,15 @@ func (c *Cluster) getPDLeaderClient() (pdpb.PDClient, error) {
 		c.triggerMembershipCheck()
 		return nil, errors.New("PD leader is not found")
 	}
-	return cli.(pdpb.PDClient), nil
+	return cli.client, nil
+}
+
+func (c *Cluster) getPDLeaderURL() (string, error) {
+	leader := c.pdLeader.Load()
+	if leader == nil || leader.url == "" {
+		return "", errors.New("PD leader is not found")
+	}
+	return leader.url, nil
 }
 
 func (c *Cluster) triggerMembershipCheck() {
@@ -448,10 +461,10 @@ func (c *Cluster) triggerMembershipCheck() {
 	}
 }
 
-// SwitchPDLeader switches the PD leader.
-func (c *Cluster) SwitchPDLeader(new pdpb.PDClient) bool {
+// SwitchPDLeader switches the PD leader's gRPC client and HTTP URL together.
+func (c *Cluster) SwitchPDLeader(new pdpb.PDClient, clientURL string) bool {
 	old := c.pdLeader.Load()
-	return c.pdLeader.CompareAndSwap(old, new)
+	return c.pdLeader.CompareAndSwap(old, &pdLeaderClient{client: new, url: clientURL})
 }
 
 func trySend(notifier chan struct{}) {

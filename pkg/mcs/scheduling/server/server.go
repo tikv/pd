@@ -221,7 +221,7 @@ func (s *Server) updatePDMemberLoop() {
 				}
 				cluster := s.GetCluster()
 				if cluster != nil {
-					if cluster.SwitchPDLeader(pdpb.NewPDClient(cc)) {
+					if cluster.SwitchPDLeader(pdpb.NewPDClient(cc), ep.ClientURLs[0]) {
 						if status.Leader != curLeader {
 							log.Info("switch PD leader", zap.String("leader-id", strconv.FormatUint(ep.ID, 16)), zap.String("endpoint", ep.ClientURLs[0]))
 						}
