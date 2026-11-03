@@ -69,6 +69,7 @@ import (
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/syncer"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/unsaferecovery"
@@ -1158,9 +1159,12 @@ func (c *RaftCluster) GetUnsafeRecoveryController() *unsaferecovery.Controller {
 func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest, resp *pdpb.StoreHeartbeatResponse) error {
 	stats := heartbeat.GetStats()
 	storeID := stats.GetStoreId()
-	// Keep the metadata read, persistence and cache update atomic with store
-	// registration and state changes. Otherwise a heartbeat could persist an
-	// old protocol range after a registration has replaced or cleared it.
+	// Hold storeStateLock from the removed-store check through cache publication
+	// to serialize that update with registration and state changes. Release it
+	// before etcd I/O so resolved-TS reports and store scans do not wait on
+	// heartbeat persistence. persistStoreHeartbeat conditionally patches the
+	// stored record and skips missing/tombstoned stores, preventing this heartbeat
+	// from restoring deleted metadata or an outdated protocol range.
 	c.storeStateLock.Lock(uint32(storeID))
 	store := c.GetStore(storeID)
 	if store == nil {
@@ -1215,20 +1219,16 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 			zap.Uint64("capacity", newStore.GetCapacity()),
 			zap.Uint64("available", newStore.GetAvailable()))
 	}
-	if newStore.NeedPersist() && c.storage != nil {
-		failpoint.InjectCall("beforePersistStoreHeartbeat")
-		if err := c.storage.SaveStoreMeta(newStore.GetMeta()); err != nil {
-			log.Error("failed to persist store", zap.Uint64("store-id", storeID), errs.ZapError(err))
-		} else {
-			opts = append(opts, core.SetLastPersistTime(nowTime))
-		}
-	}
+	persist := newStore.NeedPersist() && c.storage != nil
 	// Supply NodeState in the response to help the store handle special cases
 	// more conveniently, such as avoiding calling `remove_peer` redundantly under
 	// NodeState_Removing.
 	resp.State = store.GetNodeState()
 	c.PutStore(newStore, opts...)
 	c.storeStateLock.Unlock(uint32(storeID))
+	if persist {
+		c.persistStoreHeartbeat(storeID, nowTime)
+	}
 	var (
 		reportedRegions map[uint64]struct{}
 		interval        uint64
@@ -1294,6 +1294,64 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 	}
 	c.adjustNetworkSlowStore(storeID)
 	return nil
+}
+
+func (c *RaftCluster) persistStoreHeartbeat(storeID uint64, heartbeatTime time.Time) {
+	ctx, cancel := context.WithTimeout(c.ctx, etcdutil.DefaultRequestTimeout)
+	defer cancel()
+	persisted := false
+	err := c.storage.RunInTxn(ctx, func(txn kv.Txn) error {
+		key := keypath.StorePath(storeID)
+		var value string
+		var err error
+		if revisionTxn, ok := txn.(kv.RevisionTxn); ok {
+			value, err = revisionTxn.LoadWithRevision(key)
+		} else {
+			value, err = txn.Load(key)
+		}
+		if err != nil || value == "" {
+			return err
+		}
+		store := &metapb.Store{}
+		if err := store.Unmarshal([]byte(value)); err != nil {
+			return errs.ErrProtoUnmarshal.Wrap(err).GenWithStackByCause()
+		}
+		if store.GetState() == metapb.StoreState_Tombstone || store.GetNodeState() == metapb.NodeState_Removed {
+			return nil
+		}
+		// Patch the persisted record, keeping registrations and state changes
+		// intact. The transaction rejects a concurrent write or deletion.
+		store.LastHeartbeat = max(store.GetLastHeartbeat(), heartbeatTime.UnixNano())
+		data, err := store.Marshal()
+		if err != nil {
+			return errs.ErrProtoMarshal.Wrap(err).GenWithStackByCause()
+		}
+		if err := txn.Save(key, string(data)); err != nil {
+			return err
+		}
+		persisted = true
+		failpoint.InjectCall("beforePersistStoreHeartbeat")
+		return nil
+	})
+	if err != nil {
+		if !errorspkg.Is(err, errs.ErrEtcdTxnConflict) {
+			log.Error("failed to persist store heartbeat", zap.Uint64("store-id", storeID), errs.ZapError(err))
+		}
+		return
+	}
+	if !persisted {
+		return
+	}
+
+	c.storeStateLock.Lock(uint32(storeID))
+	defer c.storeStateLock.Unlock(uint32(storeID))
+	store := c.GetStore(storeID)
+	if store == nil || store.IsRemoved() || !store.GetLastHeartbeatTS().Equal(heartbeatTime) {
+		return
+	}
+	// A newer heartbeat owns its own persistence result. Do not let an older
+	// completion move the successful persistence timestamp backwards.
+	c.PutStore(store, core.SetLastPersistTime(heartbeatTime))
 }
 
 // processRegionBuckets updates the bucket information. The first return value

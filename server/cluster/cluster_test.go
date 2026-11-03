@@ -64,6 +64,7 @@ import (
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
@@ -225,76 +226,79 @@ func TestStoreHeartbeatPreserveConcurrentTxnProtocolVersionRange(t *testing.T) {
 	} {
 		t.Run(versionRange.name, func(t *testing.T) {
 			re := require.New(t)
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			defer cancel()
+			_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+			defer clean()
 			_, opt, err := newTestScheduleConfig()
 			re.NoError(err)
-			cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
-			meta := newTestStores(1, "2.0.0")[0].GetMeta()
+			cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithEtcdBackend(client))
+			stores := newTestStores(2, "2.0.0")
+			meta := stores[0].GetMeta()
 			meta.TxnProtocolVersionRange = &metapb.TxnProtocolVersionRange{Max: 2}
 			re.NoError(cluster.PutMetaStore(meta))
+			stores[1].GetMeta().NodeState = metapb.NodeState_Preparing
+			re.NoError(cluster.PutMetaStore(stores[1].GetMeta()))
 
-			// Stop the heartbeat after its metadata snapshot has been built.
-			// Registration must wait until that snapshot is persisted and the
-			// heartbeat options have been applied to the cache.
+			// Stop the heartbeat after its transaction reads the persisted record.
+			// Registration, resolved-TS reports and the entire store scan must
+			// complete while persistence is still blocked.
 			reached := make(chan struct{})
 			resume := make(chan struct{})
-			var resumeOnce sync.Once
-			resumeHeartbeat := func() { resumeOnce.Do(func() { close(resume) }) }
-			const heartbeatName = "github.com/tikv/pd/server/cluster/beforePersistStoreHeartbeat"
-			re.NoError(failpoint.EnableCall(heartbeatName, func() {
+			resumeHeartbeat := sync.OnceFunc(func() { close(resume) })
+			const name = "github.com/tikv/pd/server/cluster/beforePersistStoreHeartbeat"
+			re.NoError(failpoint.EnableCall(name, func() {
 				close(reached)
 				select {
 				case <-resume:
 				case <-ctx.Done():
 				}
 			}))
-			t.Cleanup(func() { re.NoError(failpoint.Disable(heartbeatName)) })
+			t.Cleanup(func() { re.NoError(failpoint.Disable(name)) })
 
 			wg := &sync.WaitGroup{}
 			defer wg.Wait()
 			defer resumeHeartbeat()
-			heartbeatDone := make(chan error, 1)
-			wg.Go(func() {
-				heartbeatDone <- cluster.HandleStoreHeartbeat(&pdpb.StoreHeartbeatRequest{
+			wait := func(done <-chan error) {
+				t.Helper()
+				select {
+				case err := <-done:
+					re.NoError(err)
+				case <-ctx.Done():
+					t.Fatal("store operation blocked on heartbeat persistence")
+				}
+				re.NoError(ctx.Err())
+			}
+			heartbeat := func() error {
+				return cluster.HandleStoreHeartbeat(&pdpb.StoreHeartbeatRequest{
 					Stats: &pdpb.StoreStats{StoreId: 1, Capacity: 100, Available: 50},
 				}, &pdpb.StoreHeartbeatResponse{})
-			})
+			}
+			heartbeatDone := make(chan error, 1)
+			wg.Go(func() { heartbeatDone <- heartbeat() })
 			select {
 			case <-reached:
 			case <-ctx.Done():
 				t.Fatal("heartbeat did not reach persistence")
 			}
 
-			started := make(chan struct{})
-			const putName = "github.com/tikv/pd/server/cluster/beforePutStore"
-			re.NoError(failpoint.EnableCall(putName, func() { close(started) }))
-			t.Cleanup(func() { re.NoError(failpoint.Disable(putName)) })
-			registrationDone := make(chan error, 1)
+			progressDone := make(chan error, 1)
 			wg.Go(func() {
+				if err := cluster.SetMinResolvedTS(1, 123); err != nil {
+					progressDone <- err
+					return
+				}
+				cluster.checkStores()
 				registration := typeutil.DeepClone(meta, core.StoreFactory)
 				registration.TxnProtocolVersionRange = versionRange.value
-				registrationDone <- cluster.PutMetaStore(registration)
+				progressDone <- cluster.PutMetaStore(registration)
 			})
-			select {
-			case <-started:
-			case <-ctx.Done():
-				t.Fatal("registration did not start")
-			}
-			select {
-			case err := <-registrationDone:
-				t.Fatalf("registration completed before the heartbeat was released: %v", err)
-			case <-time.After(50 * time.Millisecond):
-			}
+			wait(progressDone)
+			re.Equal(uint64(123), cluster.GetStore(1).GetMinResolvedTS())
+			re.True(cluster.GetStore(2).IsServing())
+
 			resumeHeartbeat()
-			for _, done := range []<-chan error{heartbeatDone, registrationDone} {
-				select {
-				case err := <-done:
-					re.NoError(err)
-				case <-ctx.Done():
-					t.Fatal("store update did not finish")
-				}
-			}
+			wait(heartbeatDone)
 
 			persisted := &metapb.Store{}
 			ok, err := cluster.storage.LoadStoreMeta(1, persisted)
@@ -306,6 +310,30 @@ func TestStoreHeartbeatPreserveConcurrentTxnProtocolVersionRange(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestStoreHeartbeatDoesNotRestoreDeletedStore(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	cluster := newTestRaftCluster(t.Context(), mockid.NewIDAllocator(), opt, storage.NewStorageWithEtcdBackend(client))
+	re.NoError(cluster.PutMetaStore(newTestStores(1, "2.0.0")[0].GetMeta()))
+	const name = "github.com/tikv/pd/server/cluster/beforePersistStoreHeartbeat"
+	re.NoError(failpoint.EnableCall(name, func() {
+		re.NoError(cluster.RemoveStore(1, true))
+		re.NoError(cluster.BuryStore(1, false))
+		re.NoError(cluster.RemoveTombStoneRecords())
+	}))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(name)) })
+	re.NoError(cluster.HandleStoreHeartbeat(&pdpb.StoreHeartbeatRequest{
+		Stats: &pdpb.StoreStats{StoreId: 1, Capacity: 100, Available: 50},
+	}, &pdpb.StoreHeartbeatResponse{}))
+	re.Nil(cluster.GetStore(1))
+	ok, err := cluster.storage.LoadStoreMeta(1, &metapb.Store{})
+	re.NoError(err)
+	re.False(ok)
 }
 
 func TestStoreMutationsRejectTombstoneStore(t *testing.T) {
