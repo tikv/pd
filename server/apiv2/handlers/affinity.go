@@ -485,6 +485,7 @@ func GetAllAffinityGroups(c *gin.Context) {
 //	@Param		group_id	path	string	true	"The group id of the affinity group"
 //	@Produce	json
 //	@Success	200	{object}	*affinity.GroupState
+//	@Failure	400	{string}	string	"Invalid affinity group ID."
 //	@Failure	404	{string}	string	"Affinity group not found."
 //	@Failure	500	{string}	string	"PD server failed to proceed the request."
 //	@Router		/affinity-groups/{group_id} [get]
