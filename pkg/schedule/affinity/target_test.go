@@ -257,24 +257,14 @@ func TestObserveAvailableRegionWithTargetWriter(t *testing.T) {
 	region := generateRegionForTest(10, []uint64{1, 2}, nonOverlappingRange)
 	written := func(target GroupTarget) ([]string, error) { return []string{target.Expected.ID}, nil }
 	for _, tc := range []struct {
-		name string
-		// apply is the change that the watcher delivers before the reply, if any.
-		apply     func(target GroupTarget) *Group
-		reply     func(GroupTarget) ([]string, error)
-		available bool
-		leader    uint64
-		failed    bool
+		name    string
+		reply   func(GroupTarget) ([]string, error)
+		written bool
+		failed  bool
 	}{
-		{name: "written", reply: written, available: true, leader: 1},
+		{name: "written", reply: written, written: true},
 		{name: "not written", reply: func(GroupTarget) ([]string, error) { return nil, nil }},
 		{name: "write failed", reply: func(GroupTarget) ([]string, error) { return nil, errors.New("PD is unavailable") }, failed: true},
-		{name: "watcher first", apply: func(target GroupTarget) *Group { return target.result() }, reply: written, available: true, leader: 1},
-		// A target that the watcher delivers is used, while the written one is not published.
-		{name: "changed meanwhile", apply: func(target GroupTarget) *Group {
-			other := target.result()
-			other.LeaderStoreID, other.VoterStoreIDs = 3, []uint64{3, 4}
-			return other
-		}, reply: written, available: true, leader: 3},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			re := require.New(t)
@@ -282,9 +272,6 @@ func TestObserveAvailableRegionWithTargetWriter(t *testing.T) {
 			re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "g"}}))
 			group := manager.GetAffinityGroupState("g")
 			writer := &fakeTargetWriter{reply: tc.reply}
-			if tc.apply != nil {
-				writer.write = func(target GroupTarget) { manager.SyncGroupFromEtcd(tc.apply(target)) }
-			}
 			manager.SetTargetWriter(writer)
 
 			failures := testutil.ToFloat64(targetWriteFailureCounter)
@@ -292,10 +279,16 @@ func TestObserveAvailableRegionWithTargetWriter(t *testing.T) {
 			re.Equal([]GroupTarget{{Expected: group.Group, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2}}}, writer.targets)
 			re.Equal(tc.failed, testutil.ToFloat64(targetWriteFailureCounter) > failures)
 			state := manager.GetAffinityGroupState("g")
-			re.Equal(tc.available, state.AffinitySchedulingAllowed)
-			re.Equal(tc.leader, state.LeaderStoreID)
+			re.Equal(group.Group, state.Group, "the reply must not publish the target")
+			re.False(state.AffinitySchedulingAllowed)
 			// The writer stores the target; the Manager does not write its own storage.
 			re.Zero(loadStoredGroup(re, store, "g").LeaderStoreID)
+			if tc.written {
+				manager.SyncGroupFromEtcd(writer.targets[0].result())
+				state = manager.GetAffinityGroupState("g")
+				re.Equal(*writer.targets[0].result(), state.Group)
+				re.True(state.AffinitySchedulingAllowed)
+			}
 		})
 	}
 }
@@ -354,6 +347,8 @@ func TestTargetAvailability(t *testing.T) {
 		})
 		region := generateRegionForTest(10, []uint64{1, 2}, nonOverlappingRange)
 		manager.ObserveAvailableRegion(region, manager.GetAffinityGroupState("g"))
+		writer := manager.targetWriter.(*fakeTargetWriter)
+		manager.SyncGroupFromEtcd(writer.targets[0].result())
 		state := manager.GetAffinityGroupState("g")
 		re.Equal([]uint64{1, 2}, state.VoterStoreIDs)
 		re.False(state.AffinitySchedulingAllowed)

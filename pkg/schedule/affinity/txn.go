@@ -351,9 +351,9 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affini
 // target is written only if the stored group still equals the group it was
 // observed for. Without a target writer the Manager writes its own storage.
 // Otherwise it sends the target to the writer, which stores it in PD for the
-// scheduling service, and publishes it once written. A Region with the layout
-// of the current target, for example after the group was loaded, confirms the
-// target without writing it again.
+// scheduling service. The watcher syncs the stored target back into memory.
+// A Region with the layout of the current target, for example after the group
+// was loaded, confirms the target without writing it again.
 func (m *Manager) updateObservedGroupPeers(groupID string, affinityVer uint64, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
 	m.metaMutex.Lock()
 	target, group, err := m.observedGroupTargetLocked(groupID, affinityVer, leaderStoreID, voterStoreIDs)
@@ -379,10 +379,14 @@ func (m *Manager) updateObservedGroupPeers(groupID string, affinityVer uint64, l
 	}
 	m.metaMutex.Unlock()
 
-	if _, err := m.sendGroupTargets(m.ctx, []GroupTarget{*target}); err != nil {
+	// Send the target without holding metaMutex, so that a slow PD does not block the watcher.
+	written, err := m.targetWriter.WriteGroupTargets(m.ctx, []GroupTarget{*target})
+	if err != nil {
+		targetWriteFailureCounter.Inc()
+		log.Warn("failed to write affinity group targets",
+			zap.Int("target-count", 1), zap.Int("written-count", len(written)), errs.ZapError(err))
 		return nil, err
 	}
-
 	return m.GetAffinityGroupState(groupID), nil
 }
 

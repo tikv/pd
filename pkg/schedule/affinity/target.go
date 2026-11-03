@@ -51,7 +51,8 @@ type GroupTargetsResponse struct {
 }
 
 // TargetWriter writes the targets decided by a Manager that does not own the
-// storage, such as the Manager of the scheduling service.
+// storage, such as the Manager of the scheduling service. The watcher syncs
+// written targets back into the Manager; the response does not publish them.
 type TargetWriter interface {
 	// WriteGroupTargets writes the targets whose groups still equal their
 	// expected values and returns the IDs of the written groups. If it fails
