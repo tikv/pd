@@ -17,6 +17,7 @@ package api
 import (
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -45,47 +46,15 @@ func isAffinityLabelRule(rule *labeler.LabelRule) bool {
 	return false
 }
 
-func rejectAffinityLabelRule(rule *labeler.LabelRule) error {
-	if isAffinityLabelRule(rule) {
+func validateRegionLabelPatch(patch labeler.LabelRulePatch) error {
+	if slices.ContainsFunc(patch.SetRules, isAffinityLabelRule) {
 		return errs.ErrAffinityLabelProtected.FastGenByArgs()
 	}
-	return nil
-}
-
-// rejectAffinityLabelID rejects replacing a rule that has the affinity rule ID
-// prefix or that already carries the affinity label.
-func rejectAffinityLabelID(id string, lookup func(string) *labeler.LabelRule) error {
-	if strings.HasPrefix(id, affinity.LabelRuleIDPrefix) || lookup != nil && isAffinityLabelRule(lookup(id)) {
-		return errs.ErrAffinityLabelProtected.FastGenByArgs()
-	}
-	return nil
-}
-
-// rejectAffinityRuleDeletion rejects deleting a rule with the affinity rule ID
-// prefix, which only the affinity API deletes. A rule with another ID and the
-// affinity label can be deleted: the affinity API never creates such a rule, so
-// it is a leftover that this API must still be able to remove.
-func rejectAffinityRuleDeletion(id string) error {
-	if strings.HasPrefix(id, affinity.LabelRuleIDPrefix) {
-		return errs.ErrAffinityLabelProtected.FastGenByArgs()
-	}
-	return nil
-}
-
-func validateRegionLabelPatch(patch labeler.LabelRulePatch, lookup func(string) *labeler.LabelRule) error {
-	for _, rule := range patch.SetRules {
-		if rule != nil {
-			if err := rejectAffinityLabelRule(rule); err != nil {
-				return err
-			}
-			if err := rejectAffinityLabelID(rule.ID, lookup); err != nil {
-				return err
-			}
-		}
-	}
+	// Only prefixed IDs belong to the affinity manager. Custom IDs with a
+	// legacy affinity label remain removable through the region-label API.
 	for _, id := range patch.DeleteRules {
-		if err := rejectAffinityRuleDeletion(id); err != nil {
-			return err
+		if strings.HasPrefix(id, affinity.LabelRuleIDPrefix) {
+			return errs.ErrAffinityLabelProtected.FastGenByArgs()
 		}
 	}
 	return nil
@@ -134,7 +103,7 @@ func (h *regionLabelHandler) PatchRegionLabelRules(w http.ResponseWriter, r *htt
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &patch); err != nil {
 		return
 	}
-	if err := validateRegionLabelPatch(patch, cluster.GetRegionLabeler().GetLabelRule); err != nil {
+	if err := validateRegionLabelPatch(patch); err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -216,8 +185,8 @@ func (h *regionLabelHandler) DeleteRegionLabelRule(w http.ResponseWriter, r *htt
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := rejectAffinityRuleDeletion(id); err != nil {
-		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+	if strings.HasPrefix(id, affinity.LabelRuleIDPrefix) {
+		h.rd.JSON(w, http.StatusBadRequest, errs.ErrAffinityLabelProtected.FastGenByArgs().Error())
 		return
 	}
 	err = cluster.GetRegionLabeler().DeleteLabelRule(id)
@@ -250,12 +219,8 @@ func (h *regionLabelHandler) SetRegionLabelRule(w http.ResponseWriter, r *http.R
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &rule); err != nil {
 		return
 	}
-	if err := rejectAffinityLabelRule(&rule); err != nil {
-		h.rd.JSON(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if err := rejectAffinityLabelID(rule.ID, cluster.GetRegionLabeler().GetLabelRule); err != nil {
-		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+	if isAffinityLabelRule(&rule) {
+		h.rd.JSON(w, http.StatusBadRequest, errs.ErrAffinityLabelProtected.FastGenByArgs().Error())
 		return
 	}
 	if err := cluster.GetRegionLabeler().SetLabelRule(&rule); err != nil {

@@ -234,7 +234,7 @@ func TestLoadRegionLabelIgnoreUnknownGroup(t *testing.T) {
 	plan := regionLabeler.NewPlan()
 	rule := &labeler.LabelRule{
 		ID:       GetLabelRuleID("ghost"),
-		Labels:   []labeler.RegionLabel{{Key: labelKey, Value: "ghost"}},
+		Labels:   []labeler.RegionLabel{{Key: AffinityLabelKey, Value: "ghost"}},
 		RuleType: labeler.KeyRange,
 		Data: []any{
 			map[string]any{"start_key": hex.EncodeToString([]byte{0x01}), "end_key": hex.EncodeToString([]byte{0x02})},

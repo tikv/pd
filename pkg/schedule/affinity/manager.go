@@ -35,7 +35,6 @@ import (
 const (
 	// AffinityLabelKey is reserved for rules managed by the affinity API.
 	AffinityLabelKey = "affinity_group"
-	labelKey         = AffinityLabelKey
 	// defaultDegradedExpirationSeconds is the default expiration time for a degraded group.
 	// After a group becomes degraded , it will automatically
 	// expire after this duration if the stores don't recover.
@@ -385,7 +384,7 @@ func (m *Manager) calcRegionAffinityGroupState(region *core.RegionInfo, saveCach
 	var cache *regionCache
 	cache, group = m.getCache(region)
 	if cache == nil || group == nil || cache.affinityVer != group.affinityVer || region != cache.region {
-		groupID := m.regionLabeler.GetRegionLabel(region, labelKey)
+		groupID := m.regionLabeler.GetRegionLabel(region, AffinityLabelKey)
 		group = m.GetAffinityGroupState(groupID)
 		if group == nil {
 			return nil, false
