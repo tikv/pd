@@ -16,6 +16,7 @@ package scheduling
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
@@ -182,4 +183,97 @@ func TestAffinityFirstWinTargetWriteUnavailable(t *testing.T) {
 			stored.String() == pdGroup.String() && stored.String() == schedulingGroup.String()
 	}, testutil.WithWaitFor(30*time.Second))
 	re.Equal([]uint64{1, 2, 3}, loadStored().VoterStoreIDs)
+}
+
+func TestAffinityFirstWinAfterPDLeaderStops(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", "return(true)"))
+	t.Cleanup(func() { re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker")) })
+	pd, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 3, func(c *config.Config, _ string) {
+		c.Schedule.AffinityScheduleLimit = 4
+	})
+	re.NoError(err)
+	t.Cleanup(pd.Destroy)
+	re.NoError(pd.RunInitialServers())
+	leader := firstMemberPDLeader(t, pd)
+	leaderName := pd.WaitLeader()
+	re.NotEmpty(leaderName)
+	re.NoError(leader.BootstrapCluster())
+	tc, err := tests.NewTestSchedulingCluster(ctx, 1, pd)
+	re.NoError(err)
+	t.Cleanup(tc.Destroy)
+	primary := tc.WaitForPrimaryServing(re)
+	pd.SetSchedulingCluster(tc)
+	cluster := primary.GetCluster()
+	cluster.SetPrepared()
+	for id := uint64(1); id <= 3; id++ {
+		tests.MustPutStore(re, pd, &metapb.Store{Id: id, State: metapb.StoreState_Up, NodeState: metapb.NodeState_Serving})
+	}
+	manager := cluster.GetAffinityManager()
+	// Establish membership before the experiment, independently of a failed
+	// target write that might otherwise discover the initial leader.
+	testutil.Eventually(re, func() bool {
+		_, _, err := cluster.AllocID(1)
+		return err == nil
+	})
+	firstWin := func(id uint64, start, end string) {
+		groupID := fmt.Sprintf("leader-switch-%d", id)
+		pdManager, err := leader.GetServer().GetAffinityManager()
+		re.NoError(err)
+		// As in C08, avoid the bootstrap keyspace label boundaries.
+		re.NoError(pdManager.CreateAffinityGroups([]affinity.GroupKeyRanges{{GroupID: groupID,
+			KeyRanges: []keyutil.KeyRange{{StartKey: []byte(start), EndKey: []byte(end)}},
+		}}))
+		testutil.Eventually(re, func() bool {
+			g := manager.GetAffinityGroupState(groupID)
+			return g != nil && g.RangeCount == 1 && cluster.GetStore(3) != nil
+		})
+		// Reconnect to the new PD leader after stopping the previous one.
+		client, conn := testutil.MustNewGrpcClient(re, leader.GetAddr())
+		defer func() { re.NoError(conn.Close()) }()
+		stream, err := client.RegionHeartbeat(ctx)
+		re.NoError(err)
+		defer func() { _ = stream.CloseSend() }()
+		peers := []*metapb.Peer{{Id: id*10 + 1, StoreId: 1}, {Id: id*10 + 2, StoreId: 2}, {Id: id*10 + 3, StoreId: 3}}
+		testutil.Eventually(re, func() bool {
+			re.NoError(stream.Send(&pdpb.RegionHeartbeatRequest{
+				Header: testutil.NewRequestHeader(leader.GetClusterID()),
+				Region: &metapb.Region{Id: id, StartKey: []byte(start), EndKey: []byte(end),
+					RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1}, Peers: peers},
+				Leader: peers[0], ApproximateSize: 1, ApproximateKeys: 1,
+			}))
+			value, err := leader.GetServer().GetStorage().LoadAffinityGroup(groupID)
+			re.NoError(err)
+			var stored affinity.Group
+			re.NoError(json.Unmarshal([]byte(value), &stored))
+			pdGroup := pdManager.GetAffinityGroupState(groupID)
+			schedulingGroup := manager.GetAffinityGroupState(groupID)
+			return stored.LeaderStoreID == 1 && len(stored.VoterStoreIDs) == 3 &&
+				pdGroup != nil && schedulingGroup != nil && pdGroup.AffinitySchedulingAllowed && schedulingGroup.AffinitySchedulingAllowed &&
+				stored.String() == pdGroup.String() && stored.String() == schedulingGroup.String()
+		}, testutil.WithWaitFor(20*time.Second))
+	}
+	// A successful write establishes that scheduling has learned the old URL.
+	firstWin(100, "b", "c")
+	writeFailures := func() float64 {
+		metrics, err := prometheus.DefaultGatherer.Gather()
+		re.NoError(err)
+		for _, metric := range metrics {
+			if metric.GetName() == "pd_affinity_target_write_failures_total" {
+				return metric.GetMetric()[0].GetCounter().GetValue()
+			}
+		}
+		re.FailNow("target write failure metric not registered")
+		return 0
+	}
+	before := writeFailures()
+	re.NoError(leader.Stop())
+	newLeaderName := pd.WaitLeaderChange(leaderName)
+	re.NotEmpty(newLeaderName)
+	leader = pd.GetServer(newLeaderName)
+	// Do not enable fastUpdateMember: failed writes must refresh membership
+	// before the default one-minute membership ticker can rescue the write.
+	firstWin(101, "d", "e")
+	re.Greater(writeFailures(), before, "writing to the stopped leader must trigger membership refresh")
 }
