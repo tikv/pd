@@ -778,7 +778,7 @@ func TestAffinityMergeCheckNoTarget(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group, region1.GetStartKey(), region1.GetEndKey())
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
 
 	// MergeCheck should return nil (no adjacent regions)
@@ -889,7 +889,7 @@ func TestAffinityMergeCheckRegionTooLarge(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group, region1.GetStartKey(), region2.GetEndKey())
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
 
 	// MergeCheck should return nil (region1 is too large)
@@ -941,7 +941,7 @@ func TestAffinityMergeCheckAdjacentNotAffinity(t *testing.T) {
 		LeaderStoreID: 1, // Expect leader on store 1
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group, region1.GetStartKey(), region2.GetEndKey())
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
 
 	// MergeCheck should return nil (region2 is not affinity-compliant due to wrong leader)
@@ -977,7 +977,7 @@ func TestAffinityMergeCheckNotAffinityRegion(t *testing.T) {
 		LeaderStoreID: 1, // Expect leader on store 1
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group, region1.GetStartKey(), region1.GetEndKey())
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
 
 	// MergeCheck should return nil (region doesn't satisfy affinity requirements)
@@ -1027,7 +1027,7 @@ func TestAffinityMergeCheckUnhealthyRegion(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group, region1.GetStartKey(), region1.GetEndKey())
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
 
 	// MergeCheck should return nil (region is unhealthy)
@@ -1136,7 +1136,7 @@ func TestAffinityMergeCheckTargetTooBig(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group, region1.GetStartKey(), region2.GetEndKey())
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
 
 	// MergeCheck should return nil because the combined size (70) exceeds the limit (60)
@@ -1185,7 +1185,7 @@ func TestAffinityMergeCheckRespectsAffinityLimit(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group, region1.GetStartKey(), region2.GetEndKey())
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
 
 	groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
@@ -1242,7 +1242,7 @@ func TestAffinityMergeCheckDisabledByZeroConfig(t *testing.T) {
 				LeaderStoreID: 1,
 				VoterStoreIDs: []uint64{1, 2, 3},
 			}
-			err := createAffinityGroupForTest(affinityManager, group, region1.GetStartKey(), region2.GetEndKey())
+			err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 			re.NoError(err)
 
 			groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
@@ -1304,7 +1304,7 @@ func TestAffinityMergeCheckAdjacentUnhealthy(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group, region1.GetStartKey(), region2.GetEndKey())
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
 
 	// MergeCheck should return nil (Adjacent region is unhealthy)
@@ -2268,7 +2268,7 @@ func TestAffinityMergeCheckPeerStoreMismatch(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group, region1.GetStartKey(), region2.GetEndKey())
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
 
 	// MergeCheck should return nil because peer stores don't match
@@ -2318,7 +2318,7 @@ func TestAffinityMergeCheckAdjacentAbnormalReplica(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group, region1.GetStartKey(), region2.GetEndKey())
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
 
 	// MergeCheck should return nil because adjacent region has abnormal replica count
@@ -2379,7 +2379,7 @@ func TestAffinityMergeCheckPlacementSplitKeys(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err = createAffinityGroupForTest(affinityManager, group, region1.GetStartKey(), region2.GetEndKey())
+	err = createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
 
 	// MergeCheck should return nil because placement rules require split at key "b"
@@ -2438,7 +2438,7 @@ func TestAffinityMergeCheckLabelerSplitKeys(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err = createAffinityGroupForTest(affinityManager, group, region1.GetStartKey(), region2.GetEndKey())
+	err = createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
 
 	// MergeCheck should return nil because region labeler requires split at key "b"

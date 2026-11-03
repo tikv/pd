@@ -237,7 +237,8 @@ func AllowMerge(cluster sche.SharedCluster, region, adjacent *core.RegionInfo) b
 		return false
 	}
 
-	if manager := cluster.GetAffinityManager(); manager != nil && cluster.GetSharedConfig().GetAffinityScheduleLimit() > 0 {
+	if manager := cluster.GetAffinityManager(); manager != nil && cluster.GetSharedConfig().IsPlacementRulesEnabled() &&
+		cluster.GetSharedConfig().GetAffinityScheduleLimit() > 0 {
 		var checkedGroup string
 		for _, r := range []*core.RegionInfo{region, adjacent} {
 			group, _ := manager.GetRegionAffinityGroupState(r)

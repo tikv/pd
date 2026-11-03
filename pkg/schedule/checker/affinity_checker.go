@@ -315,11 +315,6 @@ func (c *AffinityChecker) mergeCheck(region *core.RegionInfo, group *affinity.Gr
 		return nil
 	}
 
-	// Already moved children must remain separate until the whole group is ready.
-	if !affinityGroupRegionsReady(c.cluster, group, true) {
-		return nil
-	}
-
 	// Get adjacent regions
 	prev, next := c.cluster.GetAdjacentRegions(region)
 	var target *core.RegionInfo
@@ -348,6 +343,11 @@ func (c *AffinityChecker) mergeCheck(region *core.RegionInfo, group *affinity.Gr
 	if region.GetApproximateSize()+target.GetApproximateSize() > maxSize ||
 		region.GetApproximateKeys()+target.GetApproximateKeys() > maxKeys {
 		affinityMergeCheckerTargetTooBigCounter.Inc()
+		return nil
+	}
+
+	// Already moved children must remain separate until the whole group is ready.
+	if !affinityGroupRegionsReady(c.cluster, group, true) {
 		return nil
 	}
 

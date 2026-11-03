@@ -139,6 +139,48 @@ func TestGetRegionAffinityGroupState(t *testing.T) {
 	}
 }
 
+func TestAffinityGroupKeyRangesSnapshot(t *testing.T) {
+	re := require.New(t)
+	store := storage.NewStorageWithMemoryBackend()
+	stores := core.NewStoresInfo()
+	for id := uint64(1); id <= 3; id++ {
+		stores.PutStore(core.NewStoreInfo(&metapb.Store{Id: id}, core.SetLastHeartbeatTS(time.Now())))
+	}
+	regionLabeler, err := labeler.NewRegionLabeler(t.Context(), store, 5*time.Second)
+	re.NoError(err)
+	manager, err := NewManager(t.Context(), store, stores, mockconfig.NewTestOptions(), regionLabeler)
+	re.NoError(err)
+	ranges := GroupKeyRanges{GroupID: "g", KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("b")}}}
+	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{ranges}))
+	_, err = manager.UpdateAffinityGroupPeers("g", 1, []uint64{1, 2, 3})
+	re.NoError(err)
+	group := manager.GetAffinityGroupState("g")
+	copy := manager.GetAffinityGroupKeyRanges(group)
+	re.Equal(ranges, copy)
+	copy.KeyRanges[0].StartKey[0] = 'x'
+	copy.KeyRanges[0].EndKey[0] = 'y'
+	copy.KeyRanges[0] = keyutil.KeyRange{}
+	re.Equal(ranges, manager.GetAffinityGroupKeyRanges(group), "callers cannot mutate the manager's ranges")
+
+	_, err = manager.UpdateAffinityGroupPeers("g", 2, []uint64{1, 2, 3})
+	re.NoError(err)
+	re.Empty(manager.GetAffinityGroupKeyRanges(group).KeyRanges, "an old target cannot authorize a move or merge")
+
+	group = manager.GetAffinityGroupState("g")
+	added := GroupKeyRanges{GroupID: "g", KeyRanges: []keyutil.KeyRange{{StartKey: []byte("c"), EndKey: []byte("d")}}}
+	re.NoError(manager.UpdateAffinityGroupKeyRanges([]GroupKeyRanges{added}, nil))
+	re.Empty(manager.GetAffinityGroupKeyRanges(group).KeyRanges, "coverage must be checked again when ranges change")
+	group = manager.GetAffinityGroupState("g")
+	re.Len(manager.GetAffinityGroupKeyRanges(group).KeyRanges, 2)
+	re.NoError(manager.DeleteAffinityGroups([]string{"g"}, true))
+	re.Empty(manager.GetAffinityGroupKeyRanges(group).KeyRanges)
+	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{ranges}))
+	_, err = manager.UpdateAffinityGroupPeers("g", 2, []uint64{1, 2, 3})
+	re.NoError(err)
+	re.Empty(manager.GetAffinityGroupKeyRanges(group).KeyRanges, "a recreated group invalidates the old state")
+	re.Equal(ranges, manager.GetAffinityGroupKeyRanges(manager.GetAffinityGroupState("g")))
+}
+
 // TestBasicGroupOperations tests basic group CRUD operations
 func TestBasicGroupOperations(t *testing.T) {
 	re := require.New(t)
