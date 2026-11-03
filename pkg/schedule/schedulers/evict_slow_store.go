@@ -34,6 +34,7 @@ import (
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -1170,25 +1171,12 @@ func groupIsolationLabels(cluster sche.SchedulerCluster) ([]string, bool) {
 	return cluster.GetRuleManager().GetIsolationPrefix()
 }
 
-// liveStores returns the current info of every store. The cluster passed to Schedule caches
-// GetStores() at the start of the call (cacheCluster), while network slow-store handling
-// earlier in the same call can pause or evict a store, which replaces its StoreInfo. The
-// disk path must see those changes, so it re-reads each store with GetStore, which is not
-// cached.
-func liveStores(cluster sche.SchedulerCluster) []*core.StoreInfo {
-	snapshot := cluster.GetStores()
-	stores := make([]*core.StoreInfo, 0, len(snapshot))
-	for _, store := range snapshot {
-		if current := cluster.GetStore(store.GetID()); current != nil {
-			stores = append(stores, current)
-		}
-	}
-	return stores
-}
-
-// collectDiskSlowStores returns the serving/preparing stores that are currently slow. It
-// filters the cached GetStores() snapshot and re-reads only the matches with GetStore (see
-// liveStores), so callers see marks applied earlier in the same Schedule call without a
+// collectDiskSlowStores returns the serving/preparing stores that are currently slow.
+//
+// The cluster passed to Schedule caches GetStores() at the start of the call (cacheCluster),
+// while network slow-store handling earlier in the same call can pause or evict a store,
+// which replaces its StoreInfo. The disk path must see those changes, so it filters the
+// snapshot and re-reads only the matches with GetStore, which is not cached. That avoids a
 // locked lookup per store.
 func collectDiskSlowStores(cluster sche.SchedulerCluster) []*core.StoreInfo {
 	isSlow := func(store *core.StoreInfo) bool {
@@ -1232,63 +1220,73 @@ func sameLocation(ref, store *core.StoreInfo, labels []string) bool {
 	return hasAllLabels(store, labels) && ref.CompareLocation(store, labels) == -1
 }
 
-// eligibleHealthyLeaderTargets returns the stores that could actually receive leaders,
-// applying the same target-store checks as a leader transfer (StoreStateFilter with
-// TransferLeader set) so the domain counting matches what the operator layer will accept.
-// It additionally drops:
+// isHealthyLeaderTarget reports whether the store could actually receive leaders, applying
+// the same target-store checks as a leader transfer (StoreStateFilter with TransferLeader
+// set) so the domain counting matches what the operator layer will accept. It additionally
+// rejects:
 //   - non-TiKV stores: a leader can only move to a voter, and TiFlash keeps learners only,
 //     so those stores never appear in the per-region follower candidates that
 //     scheduleEvictLeaderOnce picks from. StoreStateFilter does not check the engine.
 //   - disk-slow stores, which the leader-target filter does not reject either.
-//   - stores that match no Voter or Leader rule, which operator.Builder never lets hold a
-//     leader.
-func eligibleHealthyLeaderTargets(cluster sche.SchedulerCluster, stores []*core.StoreInfo) []*core.StoreInfo {
-	candidates := filter.NewCandidates(stores).
-		FilterTarget(
-			cluster.GetSchedulerConfig(),
-			nil,
-			nil,
-			&filter.StoreStateFilter{
-				ActionScope:    types.EvictSlowStoreScheduler.String(),
-				TransferLeader: true,
-				OperatorLevel:  constant.Urgent,
-			},
-		).
-		PickAll()
-
-	ruleManager := cluster.GetRuleManager()
-	healthy := candidates[:0]
-	for _, store := range candidates {
-		if !store.IsTiKV() || store.IsSlow() || !ruleManager.MatchLeaderRule(store) {
-			continue
-		}
-		healthy = append(healthy, store)
+//   - stores that match none of leaderConstraints, the label constraints of the Voter and
+//     Leader rules, which operator.Builder requires of a leader's store.
+func isHealthyLeaderTarget(cluster sche.SchedulerCluster, store *core.StoreInfo, leaderConstraints [][]placement.LabelConstraint) bool {
+	stateFilter := &filter.StoreStateFilter{
+		ActionScope:    types.EvictSlowStoreScheduler.String(),
+		TransferLeader: true,
+		OperatorLevel:  constant.Urgent,
 	}
-	return healthy
+	if !stateFilter.Target(cluster.GetSchedulerConfig(), store).IsOK() || !store.IsTiKV() || store.IsSlow() {
+		return false
+	}
+	for _, constraints := range leaderConstraints {
+		if placement.MatchLabelConstraints(store, constraints) {
+			return true
+		}
+	}
+	return false
 }
 
 // hasEnoughHealthyDomains reports whether at least minRemainingHealthyDomains distinct
 // failure domains (by all isolation labels) other than the drained store's domain still
 // have a store able to host leaders. Domains are deduplicated with CompareLocation so the
 // counting stays consistent with the grouping decision.
+//
+// It runs on every admission and expansion attempt, so it checks stores lazily: the cheap
+// label and domain checks on the cached snapshot come first, the live store (see
+// collectDiskSlowStores) and the leader-target checks only for a store in a domain not
+// counted yet, and it stops at the last domain it needs.
 func hasEnoughHealthyDomains(cluster sche.SchedulerCluster, labels []string, drained *core.StoreInfo) bool {
+	var leaderConstraints [][]placement.LabelConstraint
+	loaded := false
 	reps := make([]*core.StoreInfo, 0, minRemainingHealthyDomains)
-	for _, store := range eligibleHealthyLeaderTargets(cluster, liveStores(cluster)) {
+	for _, store := range cluster.GetStores() {
 		if !hasAllLabels(store, labels) || drained.CompareLocation(store, labels) == -1 {
 			continue
 		}
-		isNewDomain := true
+		counted := false
 		for _, rep := range reps {
 			if rep.CompareLocation(store, labels) == -1 {
-				isNewDomain = false
+				counted = true
 				break
 			}
 		}
-		if isNewDomain {
-			reps = append(reps, store)
-			if len(reps) >= minRemainingHealthyDomains {
-				return true
-			}
+		if counted {
+			continue
+		}
+		current := cluster.GetStore(store.GetID())
+		if current == nil {
+			continue
+		}
+		if !loaded {
+			leaderConstraints, loaded = cluster.GetRuleManager().GetLeaderRuleConstraints(), true
+		}
+		if !isHealthyLeaderTarget(cluster, current, leaderConstraints) {
+			continue
+		}
+		reps = append(reps, current)
+		if len(reps) >= minRemainingHealthyDomains {
+			return true
 		}
 	}
 	return false

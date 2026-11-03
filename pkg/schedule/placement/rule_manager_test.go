@@ -439,26 +439,32 @@ func TestGetIsolationPrefix(t *testing.T) {
 	re.False(ok)
 }
 
-func TestMatchLeaderRule(t *testing.T) {
+func TestGetLeaderRuleConstraints(t *testing.T) {
 	re := require.New(t)
 	_, manager := newTestManager(t, false)
-	z1 := core.NewStoreInfoWithLabel(1, map[string]string{"zone": "z1"})
-	z3 := core.NewStoreInfoWithLabel(3, map[string]string{"zone": "z3"})
 
 	// The default rule has no constraints, so every store can hold a leader.
-	re.True(manager.MatchLeaderRule(z3))
+	re.Equal([][]LabelConstraint{nil}, manager.GetLeaderRuleConstraints())
 
-	// Voters limited to z1/z2: a z3 store cannot, and a follower rule for z3 does not change it.
+	// Voters limited to z1/z2; a follower rule for z3 adds no leader constraints.
+	voters := []LabelConstraint{{Key: "zone", Op: In, Values: []string{"z1", "z2"}}}
 	re.NoError(manager.SetRule(&Rule{
-		GroupID: DefaultGroupID, ID: DefaultRuleID, Role: Voter, Count: 2,
-		LabelConstraints: []LabelConstraint{{Key: "zone", Op: In, Values: []string{"z1", "z2"}}},
+		GroupID: DefaultGroupID, ID: DefaultRuleID, Role: Voter, Count: 2, LabelConstraints: voters,
 	}))
 	re.NoError(manager.SetRule(&Rule{
 		GroupID: DefaultGroupID, ID: "follower", Role: Follower, Count: 1,
 		LabelConstraints: []LabelConstraint{{Key: "zone", Op: In, Values: []string{"z3"}}},
 	}))
-	re.True(manager.MatchLeaderRule(z1))
-	re.False(manager.MatchLeaderRule(z3))
+	re.Equal([][]LabelConstraint{voters}, manager.GetLeaderRuleConstraints())
+
+	// A ranged pool splits the key space, so the default rule applies to several ranges; it is
+	// still reported once.
+	pool := []LabelConstraint{{Key: "zone", Op: In, Values: []string{"z4"}}}
+	re.NoError(manager.SetRule(&Rule{
+		GroupID: "pool", ID: "pool", Role: Leader, Count: 1, StartKeyHex: "a1", EndKeyHex: "b1",
+		LabelConstraints: pool,
+	}))
+	re.ElementsMatch([][]LabelConstraint{voters, pool}, manager.GetLeaderRuleConstraints())
 }
 
 func TestGroupConfig(t *testing.T) {

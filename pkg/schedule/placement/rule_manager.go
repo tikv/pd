@@ -413,21 +413,27 @@ func (m *RuleManager) GetIsolationPrefix() ([]string, bool) {
 	return slices.Clone(labels), true
 }
 
-// MatchLeaderRule reports whether the store matches the label constraints of some effective
-// Voter or Leader rule, which is what operator.Builder requires of a leader's store. It does
-// not check which key ranges the matching rule covers. Like GetIsolationPrefix it reads the
-// rules in place, without cloning.
-func (m *RuleManager) MatchLeaderRule(store *core.StoreInfo) bool {
+// GetLeaderRuleConstraints returns the label constraints of every distinct effective Voter or
+// Leader rule. operator.Builder only lets a store hold a leader if it matches one of them. It
+// does not report which key ranges each rule covers. Like GetIsolationPrefix it walks the
+// per-range rules once without cloning, so the returned slices alias live rules and must not
+// be modified.
+func (m *RuleManager) GetLeaderRuleConstraints() [][]LabelConstraint {
 	m.RLock()
 	defer m.RUnlock()
+	// Ranges share *Rule pointers, so a few distinct rules repeat across many entries.
+	var seen []*Rule
+	var constraints [][]LabelConstraint
 	for _, rr := range m.ruleList.ranges {
 		for _, r := range rr.applyRules {
-			if (r.Role == Voter || r.Role == Leader) && MatchLabelConstraints(store, r.LabelConstraints) {
-				return true
+			if (r.Role != Voter && r.Role != Leader) || slices.Contains(seen, r) {
+				continue
 			}
+			seen = append(seen, r)
+			constraints = append(constraints, r.LabelConstraints)
 		}
 	}
-	return false
+	return constraints
 }
 
 // GetRulesCount returns the number of rules.
