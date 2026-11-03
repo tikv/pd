@@ -23,6 +23,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -473,32 +474,34 @@ func setWatchGCStatesSendTimeout(t *testing.T, timeout time.Duration) {
 }
 
 func TestServeWatchGCStatesIdleAfterSend(t *testing.T) {
-	const sendTimeout = 100 * time.Millisecond
-	setWatchGCStatesSendTimeout(t, sendTimeout)
-	ctx, cancel := context.WithCancelCause(context.Background())
-	receiver := &cancelableGCStateReceiver{
-		ctx: ctx, cancel: cancel, changes: []gc.GCStateChange{gc.NewGCStateRemoved(7)},
-		receiveStarted: make(chan struct{}), receiveExited: make(chan struct{}),
-	}
-	stream := &fakeWatchGCStatesServer{ctx: ctx}
-	handlerDone := make(chan struct{})
-	var handlerErr error
-	t.Cleanup(func() {
+	synctest.Test(t, func(t *testing.T) {
+		const sendTimeout = 100 * time.Millisecond
+		setWatchGCStatesSendTimeout(t, sendTimeout)
+		ctx, cancel := context.WithCancelCause(context.Background())
+		receiver := &cancelableGCStateReceiver{
+			ctx: ctx, cancel: cancel, changes: []gc.GCStateChange{gc.NewGCStateRemoved(7)},
+			receiveStarted: make(chan struct{}), receiveExited: make(chan struct{}),
+		}
+		stream := &fakeWatchGCStatesServer{ctx: ctx}
+		handlerDone := make(chan struct{})
+		var handlerErr error
+		t.Cleanup(func() {
+			cancel(context.Canceled)
+			waitWatchGCStatesSignal(t, handlerDone, "idle handler did not clean up")
+			waitWatchGCStatesSignal(t, receiver.receiveExited, "idle receiver did not clean up")
+		})
+		go func() { defer close(handlerDone); handlerErr = serveWatchGCStates(receiver, stream, 1024) }()
+		waitWatchGCStatesSignal(t, receiver.receiveStarted, "handler did not finish sending")
+		select {
+		case <-handlerDone:
+			require.FailNow(t, "idle watch terminated", "%v", handlerErr)
+		case <-time.After(2 * sendTimeout):
+		}
 		cancel(context.Canceled)
-		waitWatchGCStatesSignal(t, handlerDone, "idle handler did not clean up")
-		waitWatchGCStatesSignal(t, receiver.receiveExited, "idle receiver did not clean up")
+		waitWatchGCStatesSignal(t, handlerDone, "idle handler did not return after cancellation")
+		require.Equal(t, codes.Canceled, status.Code(handlerErr))
+		require.Len(t, stream.sent, 1)
 	})
-	go func() { defer close(handlerDone); handlerErr = serveWatchGCStates(receiver, stream, 1024) }()
-	waitWatchGCStatesSignal(t, receiver.receiveStarted, "handler did not finish sending")
-	select {
-	case <-handlerDone:
-		require.FailNow(t, "idle watch terminated", "%v", handlerErr)
-	case <-time.After(2 * sendTimeout):
-	}
-	cancel(context.Canceled)
-	waitWatchGCStatesSignal(t, handlerDone, "idle handler did not return after cancellation")
-	require.Equal(t, codes.Canceled, status.Code(handlerErr))
-	require.Len(t, stream.sent, 1)
 }
 
 func TestWatchGCStatesTransportProgressingInitial(t *testing.T) {

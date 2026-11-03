@@ -21,9 +21,11 @@ import (
 	"strconv"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
+	"github.com/sasha-s/go-deadlock"
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -45,6 +47,8 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	// Pooled timers cannot cross synctest bubble boundaries.
+	deadlock.Opts.TimerPool = deadlock.TimerPoolDisabled
 	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
@@ -560,45 +564,47 @@ func checkAddAndModifyResourceGroup(re *require.Assertions, manager *Manager, ke
 }
 
 func TestCleanUpTicker(t *testing.T) {
-	re := require.New(t)
-	m := prepareManager()
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		m := prepareManager()
 
-	ctx := t.Context()
-	// Put a keyspace meta.
-	keyspaceID := uint32(1)
-	prepareKeyspaceName(ctx, re, m, &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: keyspaceID}}, "test_keyspace")
-	// Insert two consumption records manually.
-	m.metrics.consumptionRecordMap[consumptionRecordKey{
-		keyspaceID: keyspaceID,
-		groupName:  "test_group_1",
-		ruType:     defaultTypeLabel,
-	}] = time.Now().Add(-metricsCleanupTimeout * 2)
-	m.metrics.consumptionRecordMap[consumptionRecordKey{
-		keyspaceID: keyspaceID,
-		groupName:  "test_group_2",
-		ruType:     defaultTypeLabel,
-	}] = time.Now().Add(-metricsCleanupTimeout / 2)
-	// Start the background metrics flush loop.
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/fastCleanupTicker", `return(true)`))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/fastCleanupTicker"))
-	}()
-	err := m.Init(ctx)
-	re.NoError(err)
-	// Ensure the cleanup ticker is triggered.
-	time.Sleep(200 * time.Millisecond)
-	// Close the manager to avoid the data race.
-	m.close()
+		ctx := t.Context()
+		// Put a keyspace meta.
+		keyspaceID := uint32(1)
+		prepareKeyspaceName(ctx, re, m, &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: keyspaceID}}, "test_keyspace")
+		// Insert two consumption records manually.
+		m.metrics.consumptionRecordMap[consumptionRecordKey{
+			keyspaceID: keyspaceID,
+			groupName:  "test_group_1",
+			ruType:     defaultTypeLabel,
+		}] = time.Now().Add(-metricsCleanupTimeout * 2)
+		m.metrics.consumptionRecordMap[consumptionRecordKey{
+			keyspaceID: keyspaceID,
+			groupName:  "test_group_2",
+			ruType:     defaultTypeLabel,
+		}] = time.Now().Add(-metricsCleanupTimeout / 2)
+		// Start the background metrics flush loop.
+		re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/fastCleanupTicker", `return(true)`))
+		defer func() {
+			re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/fastCleanupTicker"))
+		}()
+		err := m.Init(ctx)
+		re.NoError(err)
+		// Ensure the cleanup ticker is triggered.
+		synctest.Sleep(200 * time.Millisecond)
+		// Close the manager to avoid the data race.
+		m.close()
 
-	re.Len(m.metrics.consumptionRecordMap, 1)
-	re.Contains(m.metrics.consumptionRecordMap, consumptionRecordKey{
-		keyspaceID: keyspaceID,
-		groupName:  "test_group_2",
-		ruType:     defaultTypeLabel,
+		re.Len(m.metrics.consumptionRecordMap, 1)
+		re.Contains(m.metrics.consumptionRecordMap, consumptionRecordKey{
+			keyspaceID: keyspaceID,
+			groupName:  "test_group_2",
+			ruType:     defaultTypeLabel,
+		})
+		keyspaceName, err := m.getKeyspaceNameByID(ctx, keyspaceID)
+		re.NoError(err)
+		re.Equal("test_keyspace", keyspaceName)
 	})
-	keyspaceName, err := m.getKeyspaceNameByID(ctx, keyspaceID)
-	re.NoError(err)
-	re.Equal("test_keyspace", keyspaceName)
 }
 
 func TestKeyspaceServiceLimit(t *testing.T) {
