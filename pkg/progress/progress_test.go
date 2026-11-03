@@ -17,6 +17,7 @@ package progress
 import (
 	"math"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -36,55 +37,57 @@ func (m *mockPatrolRegionsDurationGetter) GetPatrolRegionsDuration() time.Durati
 }
 
 func TestProgress(t *testing.T) {
-	var (
-		re             = require.New(t)
-		storeID        = uint64(1)
-		storeID2       = uint64(2)
-		updateInterval = time.Second
-		m              = NewManager(&mockPatrolRegionsDurationGetter{10 * time.Second}, updateInterval)
-	)
+	synctest.Test(t, func(t *testing.T) {
+		var (
+			re             = require.New(t)
+			storeID        = uint64(1)
+			storeID2       = uint64(2)
+			updateInterval = time.Second
+			m              = NewManager(&mockPatrolRegionsDurationGetter{10 * time.Second}, updateInterval)
+		)
 
-	// test add progress
-	m.addProgress(storeID, preparingAction, 10, 100)
-	p := m.GetProgressByStoreID(storeID)
-	re.Equal(preparingAction, p.Action)
-	re.Equal(0.1, p.ProgressPercent)
-	re.Equal(math.MaxFloat64, p.LeftSecond)
-	re.Equal(0.0, p.CurrentSpeed)
-	p2 := m.GetProgressByStoreID(storeID)
-	re.Equal(p2, p)
+		// test add progress
+		m.addProgress(storeID, preparingAction, 10, 100)
+		p := m.GetProgressByStoreID(storeID)
+		re.Equal(preparingAction, p.Action)
+		re.Equal(0.1, p.ProgressPercent)
+		re.Equal(math.MaxFloat64, p.LeftSecond)
+		re.Equal(0.0, p.CurrentSpeed)
+		p2 := m.GetProgressByStoreID(storeID)
+		re.Equal(p2, p)
 
-	m.updateStoreProgress(storeID2, preparingAction, 20, 100)
-	p = m.GetProgressByStoreID(storeID2)
-	re.Equal(preparingAction, p.Action)
-	re.Equal(0.2, p.ProgressPercent)
-	re.Equal(math.MaxFloat64, p.LeftSecond)
-	re.Equal(0.0, p.CurrentSpeed)
-	p2 = m.GetProgressByStoreID(storeID2)
-	re.Equal(p2, p)
+		m.updateStoreProgress(storeID2, preparingAction, 20, 100)
+		p = m.GetProgressByStoreID(storeID2)
+		re.Equal(preparingAction, p.Action)
+		re.Equal(0.2, p.ProgressPercent)
+		re.Equal(math.MaxFloat64, p.LeftSecond)
+		re.Equal(0.0, p.CurrentSpeed)
+		p2 = m.GetProgressByStoreID(storeID2)
+		re.Equal(p2, p)
 
-	// test update progress
-	m.updateStoreProgress(storeID, preparingAction, 30, 100)
-	p = m.GetProgressByStoreID(storeID)
-	re.Equal(preparingAction, p.Action)
-	re.Equal(0.3, p.ProgressPercent)
-	re.Equal(20.0, p.CurrentSpeed)
-	re.Equal(3.50, p.LeftSecond)
+		// test update progress
+		m.updateStoreProgress(storeID, preparingAction, 30, 100)
+		p = m.GetProgressByStoreID(storeID)
+		re.Equal(preparingAction, p.Action)
+		re.Equal(0.3, p.ProgressPercent)
+		re.Equal(20.0, p.CurrentSpeed)
+		re.Equal(3.50, p.LeftSecond)
 
-	m.updateStoreProgress(storeID2, preparingAction, 30, 100)
-	p = m.GetProgressByStoreID(storeID2)
-	re.Equal(preparingAction, p.Action)
-	re.Equal(0.3, p.ProgressPercent)
-	re.Equal(10.0, p.CurrentSpeed)
-	re.Equal(7.0, p.LeftSecond)
+		m.updateStoreProgress(storeID2, preparingAction, 30, 100)
+		p = m.GetProgressByStoreID(storeID2)
+		re.Equal(preparingAction, p.Action)
+		re.Equal(0.3, p.ProgressPercent)
+		re.Equal(10.0, p.CurrentSpeed)
+		re.Equal(7.0, p.LeftSecond)
 
-	// test gc progress
-	m.markProgressAsFinished(storeID)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/progress/gcExpiredTime", `return("100ms")`))
-	time.Sleep(200 * time.Millisecond)
-	m.gcCompletedProgress()
-	re.Nil(m.GetProgressByStoreID(storeID))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/progress/gcExpiredTime"))
+		// test gc progress
+		m.markProgressAsFinished(storeID)
+		re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/progress/gcExpiredTime", `return("100ms")`))
+		synctest.Sleep(200 * time.Millisecond)
+		m.gcCompletedProgress()
+		re.Nil(m.GetProgressByStoreID(storeID))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/progress/gcExpiredTime"))
+	})
 }
 
 func TestOnlineAndOffline(t *testing.T) {

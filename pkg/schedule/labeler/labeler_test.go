@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/sasha-s/go-deadlock"
@@ -44,7 +45,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	// Deadlock detection stays enabled; its timers must not cross synctest bubbles.
+	// Pooled timers cannot cross synctest bubble boundaries.
 	deadlock.Opts.TimerPool = deadlock.TimerPoolDisabled
 	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
@@ -559,51 +560,53 @@ func checkRuleInMemoryAndStorage(re *require.Assertions, labeler *RegionLabeler,
 }
 
 func TestGC(t *testing.T) {
-	re := require.New(t)
-	// set gcInterval to 1 hour.
-	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	ctx := t.Context()
-	labeler, err := NewRegionLabeler(ctx, store, time.Hour)
-	re.NoError(err)
-	ttls := []string{"1ms", "1ms", "1ms", "5ms", "5ms", "10ms", "1h", "24h"}
-	start, err := hex.DecodeString("1234")
-	re.NoError(err)
-	end, err := hex.DecodeString("5678")
-	re.NoError(err)
-	region := core.NewTestRegionInfo(1, 1, start, end)
-	// the region has no label rule at the beginning.
-	re.Empty(labeler.GetRegionLabels(region))
-
-	labels := make([]RegionLabel, 0, len(ttls))
-	for id, ttl := range ttls {
-		labels = append(labels, RegionLabel{Key: fmt.Sprintf("k%d", id), Value: fmt.Sprintf("v%d", id), TTL: ttl})
-		rule := &LabelRule{
-			ID:       fmt.Sprintf("rule%d", id),
-			Labels:   labels,
-			RuleType: "key-range",
-			Data:     MakeKeyRanges("1234", "5678")}
-		err := labeler.SetLabelRule(rule)
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		// set gcInterval to 1 hour.
+		store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+		ctx := t.Context()
+		labeler, err := NewRegionLabeler(ctx, store, time.Hour)
 		re.NoError(err)
-	}
+		ttls := []string{"1ms", "1ms", "1ms", "5ms", "5ms", "10ms", "1h", "24h"}
+		start, err := hex.DecodeString("1234")
+		re.NoError(err)
+		end, err := hex.DecodeString("5678")
+		re.NoError(err)
+		region := core.NewTestRegionInfo(1, 1, start, end)
+		// the region has no label rule at the beginning.
+		re.Empty(labeler.GetRegionLabels(region))
 
-	re.Len(labeler.ruleIndex.rules, len(ttls))
-
-	// check all rules until some rule expired.
-	for {
-		time.Sleep(time.Millisecond * 5)
-		labels := labeler.GetRegionLabels(region)
-		if len(labels) != len(ttls) {
-			break
+		labels := make([]RegionLabel, 0, len(ttls))
+		for id, ttl := range ttls {
+			labels = append(labels, RegionLabel{Key: fmt.Sprintf("k%d", id), Value: fmt.Sprintf("v%d", id), TTL: ttl})
+			rule := &LabelRule{
+				ID:       fmt.Sprintf("rule%d", id),
+				Labels:   labels,
+				RuleType: "key-range",
+				Data:     MakeKeyRanges("1234", "5678")}
+			err := labeler.SetLabelRule(rule)
+			re.NoError(err)
 		}
-	}
 
-	// no rule was cleared because the gc interval is big.
-	re.Len(labeler.ruleIndex.rules, len(ttls))
+		re.Len(labeler.ruleIndex.rules, len(ttls))
 
-	labeler.checkAndClearExpiredLabels()
+		// check all rules until some rule expired.
+		for {
+			synctest.Sleep(time.Millisecond * 5)
+			labels := labeler.GetRegionLabels(region)
+			if len(labels) != len(ttls) {
+				break
+			}
+		}
 
-	labeler.RLock()
-	currentRuleLen := len(labeler.ruleIndex.rules)
-	labeler.RUnlock()
-	re.LessOrEqual(currentRuleLen, 5)
+		// no rule was cleared because the gc interval is big.
+		re.Len(labeler.ruleIndex.rules, len(ttls))
+
+		labeler.checkAndClearExpiredLabels()
+
+		labeler.RLock()
+		currentRuleLen := len(labeler.ruleIndex.rules)
+		labeler.RUnlock()
+		re.LessOrEqual(currentRuleLen, 5)
+	})
 }
