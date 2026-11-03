@@ -1186,15 +1186,21 @@ func liveStores(cluster sche.SchedulerCluster) []*core.StoreInfo {
 	return stores
 }
 
-// collectDiskSlowStores returns the serving/preparing stores that are currently slow.
+// collectDiskSlowStores returns the serving/preparing stores that are currently slow. It
+// filters the cached GetStores() snapshot and re-reads only the matches with GetStore (see
+// liveStores), so callers see marks applied earlier in the same Schedule call without a
+// locked lookup per store.
 func collectDiskSlowStores(cluster sche.SchedulerCluster) []*core.StoreInfo {
+	isSlow := func(store *core.StoreInfo) bool {
+		return !store.IsRemoved() && (store.IsPreparing() || store.IsServing()) && store.IsSlow()
+	}
 	var slowStores []*core.StoreInfo
-	for _, store := range liveStores(cluster) {
-		if store.IsRemoved() {
+	for _, store := range cluster.GetStores() {
+		if !isSlow(store) {
 			continue
 		}
-		if (store.IsPreparing() || store.IsServing()) && store.IsSlow() {
-			slowStores = append(slowStores, store)
+		if current := cluster.GetStore(store.GetID()); current != nil && isSlow(current) {
+			slowStores = append(slowStores, current)
 		}
 	}
 	return slowStores
@@ -1303,14 +1309,13 @@ func (s *evictSlowStoreScheduler) startEvictDiskSlowStores(cluster sche.Schedule
 }
 
 func (s *evictSlowStoreScheduler) scheduleDiskSlowStore(cluster sche.SchedulerCluster) {
-	slowStores := collectDiskSlowStores(cluster)
-
 	if s.conf.isEvictingDiskSlowStore() {
-		s.reconcileDiskSlowStoreGroup(cluster, slowStores)
+		s.reconcileDiskSlowStoreGroup(cluster)
 		return
 	}
 
 	// Detection: nothing is being evicted yet.
+	slowStores := collectDiskSlowStores(cluster)
 	if len(slowStores) == 0 {
 		return
 	}
@@ -1372,7 +1377,7 @@ func (s *evictSlowStoreScheduler) scheduleDiskSlowStore(cluster sche.SchedulerCl
 // releases stores that left the cluster, releases the whole group once every
 // evicted store has recovered for the recovery duration, and (unless a slow store
 // has appeared outside the locked domain) adds newly-slow same-domain stores.
-func (s *evictSlowStoreScheduler) reconcileDiskSlowStoreGroup(cluster sche.SchedulerCluster, slowStores []*core.StoreInfo) {
+func (s *evictSlowStoreScheduler) reconcileDiskSlowStoreGroup(cluster sche.SchedulerCluster) {
 	evicted := s.conf.evictedStores()
 
 	// Single pass: drop stores that have left the cluster; compute maxScore and pick a
@@ -1415,7 +1420,7 @@ func (s *evictSlowStoreScheduler) reconcileDiskSlowStoreGroup(cluster sche.Sched
 	// evicted ones wait out recovery-duration must be drained now, not after the window.
 	// Adding it resets the recovery clock, so the group is released only once every
 	// store, including the new one, has been stable for the whole duration.
-	if s.expandLockedDomain(cluster, slowStores, survivorID) {
+	if s.expandLockedDomain(cluster, survivorID) {
 		return
 	}
 
@@ -1442,7 +1447,7 @@ func (s *evictSlowStoreScheduler) reconcileDiskSlowStoreGroup(cluster sche.Sched
 // expandLockedDomain adds newly-slow stores in the locked domain to the eviction set and
 // reports whether it added any. survivorID is an evicted store still in the cluster; all
 // evicted stores share its domain by construction.
-func (s *evictSlowStoreScheduler) expandLockedDomain(cluster sche.SchedulerCluster, slowStores []*core.StoreInfo, survivorID uint64) bool {
+func (s *evictSlowStoreScheduler) expandLockedDomain(cluster sche.SchedulerCluster, survivorID uint64) bool {
 	// Resolve the locked domain from a surviving evicted store. If grouping was turned off,
 	// the isolation prefix is no longer well-defined (rules changed), or the locked store no
 	// longer carries the labels, keep draining the current group but do not expand.
@@ -1460,6 +1465,7 @@ func (s *evictSlowStoreScheduler) expandLockedDomain(cluster sche.SchedulerClust
 
 	// Freeze brake: if any slow store sits outside the locked domain, stop expanding
 	// the eviction set (we never start draining a second domain).
+	slowStores := collectDiskSlowStores(cluster)
 	for _, store := range slowStores {
 		if !sameLocation(lockedRef, store, labels) {
 			return false

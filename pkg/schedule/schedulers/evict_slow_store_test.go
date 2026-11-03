@@ -2386,3 +2386,32 @@ func TestEvictSlowStoreHealthyDomainsMatchVoterRule(t *testing.T) {
 	es.scheduleDiskSlowStore(tc)
 	re.ElementsMatch([]uint64{1, 2}, es.conf.evictedStores())
 }
+
+// TestEvictSlowStoreExpansionSeesLiveMarks: the slow stores used for expansion come from the
+// cached GetStores() snapshot, but a store evicted by network detection earlier in the same
+// Schedule call is already marked and must not be added to the disk group again.
+func TestEvictSlowStoreExpansionSeesLiveMarks(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	tc.AddLabelsStore(1, 0, map[string]string{"zone": "z1", "host": "h1"})
+	tc.AddLabelsStore(2, 0, map[string]string{"zone": "z1", "host": "h2"})
+	tc.AddLabelsStore(3, 0, map[string]string{"zone": "z2", "host": "h3"})
+	tc.AddLabelsStore(4, 0, map[string]string{"zone": "z3", "host": "h4"})
+	tc.AddLeaderRegion(1, 1, 3, 4)
+	tc.AddLeaderRegion(2, 2, 3, 4)
+
+	es := createTestEvictSlowStoreScheduler(re, oc).(*evictSlowStoreScheduler)
+	enableGroupEviction(re, tc, es, "zone", "zone", "host")
+	setStoreSlowScore(tc, 1, 100)
+	es.scheduleDiskSlowStore(tc)
+	re.Equal([]uint64{1}, es.conf.evictedStores())
+
+	// Store 2 becomes slow; the snapshot is taken, then network detection marks it.
+	setStoreSlowScore(tc, 2, 100)
+	cache := newCacheCluster(tc)
+	re.NoError(tc.SlowStoreEvicted(2))
+	es.scheduleDiskSlowStore(cache)
+	re.Equal([]uint64{1}, es.conf.evictedStores())
+}
