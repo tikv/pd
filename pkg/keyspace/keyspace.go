@@ -1088,6 +1088,10 @@ func (manager *Manager) updateKeyspaceConfigTxn(
 	}
 	failpoint.InjectCall("updateKeyspaceConfigBeforeCacheWrite")
 	manager.cache.Save(meta.GetId(), meta.GetName(), meta.GetState())
+	manager.metaLock.Unlock(lockedID)
+	locked = false
+	// AttachEndpoints takes mgm.RLock. Do not hold metaLock here: another
+	// config update can already hold mgm.RLock while waiting for metaLock.
 	if manager.mgm != nil {
 		manager.mgm.AttachEndpoints(meta.GetConfig())
 	}
@@ -1158,6 +1162,8 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 	}
 	failpoint.InjectCall("updateKeyspaceStateBeforeCacheWrite")
 	manager.cache.Save(meta.GetId(), meta.GetName(), meta.GetState())
+	manager.metaLock.Unlock(lockedID)
+	locked = false
 	if manager.mgm != nil {
 		manager.mgm.AttachEndpoints(meta.GetConfig())
 	}
@@ -1306,7 +1312,8 @@ func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.K
 	// also be the call whose storage commit happened last. That makes the
 	// cache write below safe to apply unconditionally.
 	manager.metaLock.Lock(id)
-	defer manager.metaLock.Unlock(id)
+	unlockMeta := sync.OnceFunc(func() { manager.metaLock.Unlock(id) })
+	defer unlockMeta()
 	var meta *keyspacepb.KeyspaceMeta
 	var err error
 	err = manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
@@ -1334,6 +1341,9 @@ func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.K
 	}
 	failpoint.InjectCall("updateKeyspaceStateByIDBeforeCacheWrite")
 	manager.cache.Save(meta.GetId(), meta.GetName(), meta.GetState())
+	// Cache publication must stay ordered with the transaction, but endpoint
+	// attachment must not acquire mgm.RLock while still holding metaLock.
+	unlockMeta()
 	log.Info("[keyspace] keyspace state updated",
 		zap.Uint32("keyspace-id", meta.GetId()),
 		zap.String("name", meta.GetName()),

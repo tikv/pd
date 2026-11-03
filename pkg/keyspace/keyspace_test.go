@@ -1474,6 +1474,105 @@ func TestUpdateKeyspaceConfigDoesNotClobberConcurrentUpdate(t *testing.T) {
 		"the two calls are fully serialized by metaLock, so the second call's commit and cache write always land after the first's")
 }
 
+func TestKeyspaceUpdatesReleaseMetaLockBeforeAttachEndpoints(t *testing.T) {
+	testCases := []struct {
+		name      string
+		failpoint string
+		update    func(*Manager) (*keyspacepb.KeyspaceMeta, error)
+	}{
+		{
+			name:      "state by ID",
+			failpoint: "updateKeyspaceStateByIDBeforeCacheWrite",
+			update: func(manager *Manager) (*keyspacepb.KeyspaceMeta, error) {
+				return manager.UpdateKeyspaceStateByID(87, keyspacepb.KeyspaceState_DISABLED, time.Now().Unix())
+			},
+		},
+		{
+			name:      "state by name",
+			failpoint: "updateKeyspaceStateBeforeCacheWrite",
+			update: func(manager *Manager) (*keyspacepb.KeyspaceMeta, error) {
+				return manager.UpdateKeyspaceState("ks87", keyspacepb.KeyspaceState_DISABLED, time.Now().Unix())
+			},
+		},
+		{
+			name:      "config",
+			failpoint: "updateKeyspaceConfigBeforeCacheWrite",
+			update: func(manager *Manager) (*keyspacepb.KeyspaceMeta, error) {
+				return manager.UpdateKeyspaceConfig("ks87", []*Mutation{{Op: OpPut, Key: "test", Value: "value"}})
+			},
+		},
+		{
+			name:      "config with preconditions",
+			failpoint: "updateKeyspaceConfigBeforeCacheWrite",
+			update: func(manager *Manager) (*keyspacepb.KeyspaceMeta, error) {
+				return manager.UpdateKeyspaceConfigWithPreconditions("ks87", []*Mutation{{Op: OpPut, Key: "test", Value: "value"}}, map[string]*string{"test": nil})
+			},
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+			manager := NewKeyspaceManager(t.Context(), store, nil, mockid.NewIDAllocator(), &mockConfig{}, nil, nil)
+			meta := &keyspacepb.KeyspaceMeta{
+				Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 87},
+				Name:     "ks87",
+				State:    keyspacepb.KeyspaceState_ENABLED,
+				Config:   map[string]string{MetaServiceGroupIDKey: "g1"},
+			}
+			re.NoError(manager.saveNewKeyspace(meta))
+			manager.mgm = NewMetaServiceGroupManager(store, map[string]string{"g1": "addr1"}, nil)
+
+			reached := make(chan struct{})
+			release := make(chan struct{})
+			fp := "github.com/tikv/pd/pkg/keyspace/" + tc.failpoint
+			re.NoError(failpoint.EnableCall(fp, func() {
+				close(reached)
+				<-release
+			}))
+			t.Cleanup(func() { re.NoError(failpoint.Disable(fp)) })
+			done := make(chan error, 1)
+			go func() {
+				updated, err := tc.update(manager)
+				if err == nil && updated.GetConfig()[MetaServiceGroupAddressesKey] != "addr1" {
+					err = errors.New("missing meta-service group endpoints")
+				}
+				done <- err
+			}()
+			<-reached
+
+			// Block AttachEndpoints on the group lock after the transaction has
+			// completed. A competing metadata operation must still be able to
+			// acquire metaLock once the cache write has finished; otherwise it
+			// can hold mgm.RLock while waiting for metaLock and deadlock with a
+			// queued group writer and this call's AttachEndpoints.
+			manager.mgm.Lock()
+			acquired := make(chan struct{})
+			go func() {
+				manager.metaLock.Lock(87)
+				defer manager.metaLock.Unlock(87)
+				close(acquired)
+			}()
+			t.Cleanup(func() {
+				manager.mgm.Unlock()
+				re.NoError(<-done)
+				<-acquired
+			})
+			close(release)
+			select {
+			case <-acquired:
+				item, ok := manager.cache.getKeyspaceByID(87)
+				re.True(ok)
+				if tc.name == "state by ID" || tc.name == "state by name" {
+					re.Equal(keyspacepb.KeyspaceState_DISABLED, item.state)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("metadata lock is held while attaching endpoints")
+			}
+		})
+	}
+}
+
 // TestBackfillKeyspaceIDRangeDoesNotClobberConcurrentUpdate verifies that a
 // backfillKeyspaceIDRange scan which buffered a stale read of a keyspace,
 // racing a real, concurrent UpdateKeyspaceStateByID for the same keyspace,

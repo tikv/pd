@@ -15,6 +15,7 @@
 package keyspace
 
 import (
+	"bytes"
 	"encoding/hex"
 	"math"
 	"strconv"
@@ -917,6 +918,30 @@ func TestGetKeyspaceSplitKeysForeignModeKeys(t *testing.T) {
 func deeperTxnKey(id uint32, suffix ...byte) []byte {
 	payload := append(codec.MakeKeyspacePrefix(codec.TxnKeyspaceModePrefix, id), suffix...)
 	return codec.EncodeBytes(payload)
+}
+
+func TestGetKeyspaceSplitKeysAdjacentIDsWithSyntheticStart(t *testing.T) {
+	checker := &mockKeyspaceChecker{existingKeyspaces: map[uint32]bool{0: true, 1: true}}
+	for _, keyType := range []coreconstant.KeyType{coreconstant.Raw, coreconstant.Txn} {
+		t.Run(keyType.String(), func(t *testing.T) {
+			boundType := keyTypeToRegionBoundType(keyType)
+			left, right := boundType.bounds(MakeRegionBound(0))
+			endPrefix := codec.RawKeyspaceModePrefix
+			if keyType == coreconstant.Txn {
+				endPrefix = codec.TxnKeyspaceModePrefix
+			}
+			for _, start := range [][]byte{nil, codec.EncodeBytes([]byte("a")), MakeRegionBound(10).RawLeftBound} {
+				if bytes.Compare(start, left) >= 0 {
+					continue
+				}
+				// An end at keyspace 1's left bound must not hide keyspace 0's
+				// left bound. An end inside keyspace 1 needs both boundaries.
+				require.Equal(t, [][]byte{left}, GetKeyspaceSplitKeys(start, right, keyType, checker))
+				end := codec.EncodeBytes(append(codec.MakeKeyspacePrefix(endPrefix, 1), 'a'))
+				require.Equal(t, [][]byte{left, right}, GetKeyspaceSplitKeys(start, end, keyType, checker))
+			}
+		})
+	}
 }
 
 func TestGetKeyspaceSplitKeysAdjacentIDsSkipsRangeScan(t *testing.T) {

@@ -631,11 +631,9 @@ func GetKeyspaceSplitKeys(startKey, endKey []byte, keyType coreconstant.KeyType,
 		return nil
 	}
 
-	// No keyspace ID can lie strictly between startID and endID, so the only
-	// possible split point is the boundary they share. Resolve it with two
-	// point lookups instead of a range scan, which would otherwise trigger a
-	// keyspace ID range backfill for a window that can hold no keyspace of
-	// its own.
+	// No keyspace ID can lie strictly between startID and endID. Use point
+	// lookups instead of a range scan, but include startID's left bound too:
+	// startID can be a synthetic 0 for a key before this mode's keyspace block.
 	if endID == startID+1 {
 		// endID may be the MaxValidKeyspaceID sentinel used above to mean "runs
 		// to the end of this mode's keyspace space" (an absent or foreign end
@@ -646,14 +644,19 @@ func GetKeyspaceSplitKeys(startKey, endKey []byte, keyType coreconstant.KeyType,
 		// RegionSpansMultipleKeyspaces treats an absent endKey as +inf rather
 		// than routing it through KeyspaceExist(MaxValidKeyspaceID).
 		endExist := endID == constant.MaxValidKeyspaceID || checker.KeyspaceExist(endID)
-		if !checker.KeyspaceExist(startID) && !endExist {
+		startExist := checker.KeyspaceExist(startID)
+		if !startExist && !endExist {
 			return nil
 		}
-		_, boundary := boundType.bounds(MakeRegionBound(startID))
-		if keyutil.Between(startKey, endKey, boundary) {
-			return [][]byte{boundary}
+		left, boundary := boundType.bounds(MakeRegionBound(startID))
+		var splitKeys [][]byte
+		if startExist && keyutil.Between(startKey, endKey, left) {
+			splitKeys = append(splitKeys, left)
 		}
-		return nil
+		if keyutil.Between(startKey, endKey, boundary) {
+			splitKeys = append(splitKeys, boundary)
+		}
+		return splitKeys
 	}
 
 	ids, ok := checker.GetKeyspaceIDInRange(startID, endID, scanLimit)
