@@ -16,9 +16,18 @@ package election
 
 import (
 	"context"
+	"strings"
 	"sync/atomic"
 	"time"
 
+<<<<<<< HEAD
+=======
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+
+	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
+>>>>>>> 703f4bb25d (server, member, election: document and test the election client pinning (#11110))
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -38,7 +47,13 @@ const (
 // The way to gain and maintain leadership is to update and keep the lease alive continuously.
 type Lease struct {
 	// purpose is used to show what this election for
+<<<<<<< HEAD
 	Purpose string
+=======
+	purpose string
+	// name scopes test failpoints to one member.
+	name string
+>>>>>>> 703f4bb25d (server, member, election: document and test the election client pinning (#11110))
 	// etcd client and lease
 	client *clientv3.Client
 	lease  clientv3.Lease
@@ -49,14 +64,55 @@ type Lease struct {
 }
 
 // NewLease creates a new Lease instance.
-func NewLease(client *clientv3.Client, purpose string) *Lease {
+func NewLease(client *clientv3.Client, purpose, name string) *Lease {
 	return &Lease{
+<<<<<<< HEAD
 		Purpose: purpose,
+=======
+		purpose: purpose,
+		name:    name,
+>>>>>>> 703f4bb25d (server, member, election: document and test the election client pinning (#11110))
 		client:  client,
 		lease:   clientv3.NewLease(client),
 	}
 }
 
+<<<<<<< HEAD
+=======
+// matchesFailpointTarget matches "<purpose>@<name>" for member-scoped failpoints.
+func (l *Lease) matchesFailpointTarget(val failpoint.Value) bool {
+	target, ok := val.(string)
+	if !ok {
+		return false
+	}
+	purpose, name, found := strings.Cut(target, "@")
+	if !found {
+		return false
+	}
+	return purpose == l.purpose && name == l.name
+}
+
+func (l *Lease) setID(id clientv3.LeaseID) {
+	if l == nil {
+		return
+	}
+	l.id.Store(id)
+}
+
+// GetID returns the underlying etcd lease ID. It returns 0 if the lease has not
+// been granted yet.
+func (l *Lease) GetID() clientv3.LeaseID {
+	if l == nil {
+		return 0
+	}
+	loaded := l.id.Load()
+	if loaded == nil {
+		return 0
+	}
+	return loaded.(clientv3.LeaseID)
+}
+
+>>>>>>> 703f4bb25d (server, member, election: document and test the election client pinning (#11110))
 // Grant uses `lease.Grant` to initialize the lease and expireTime.
 func (l *Lease) Grant(leaseTimeout int64) error {
 	if l == nil {
@@ -167,9 +223,37 @@ func (l *Lease) keepAliveWorker(ctx context.Context, interval time.Duration) <-c
 				defer logutil.LogPanic()
 				ctx1, cancel := context.WithTimeout(ctx, l.leaseTimeout)
 				defer cancel()
+<<<<<<< HEAD
 				var leaseID clientv3.LeaseID
 				if l.ID.Load() != nil {
 					leaseID = l.ID.Load().(clientv3.LeaseID)
+=======
+				// Record the start time of the `KeepAliveOnce` request to track the request duration
+				// and calculate the tick interval between consecutive `KeepAliveOnce` requests later.
+				requestStart := time.Now()
+				lastRequestStart, _ := lastTime.Swap(requestStart).(time.Time)
+				res, err := l.lease.KeepAliveOnce(ctx1, l.GetID())
+				failpoint.Inject("keepAliveFailed", func(val failpoint.Value) {
+					// Inject after the request so etcd keeps the lease alive while
+					// the caller observes renewal failure.
+					if l.matchesFailpointTarget(val) {
+						res, err = nil, errors.New("keep alive failed")
+					}
+				})
+
+				// Record the duration of the `KeepAliveOnce` request.
+				l.metrics.observeKeepAliveRequestDurationMetrics(time.Since(requestStart), err)
+				// Record the interval between the consecutive `KeepAliveOnce` requests.
+				tickInterval := requestStart.Sub(lastRequestStart)
+				l.metrics.tickInterval.Observe(tickInterval.Seconds())
+				// If the interval is too long, log a warning to indicate the potential runtime schedule delay.
+				if tickInterval > interval*2 {
+					logger.Warn("the interval between keeping alive lease is too long",
+						zap.Time("start", start),
+						zap.Time("current-time", requestStart),
+						zap.Time("last-time", lastRequestStart),
+						zap.Duration("tick-interval", tickInterval))
+>>>>>>> 703f4bb25d (server, member, election: document and test the election client pinning (#11110))
 				}
 				res, err := l.lease.KeepAliveOnce(ctx1, leaseID)
 				if err != nil {
