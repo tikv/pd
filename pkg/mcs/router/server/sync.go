@@ -238,7 +238,6 @@ func (s *RegionSyncer) sync(ctx context.Context, leaderAddr string) {
 			default:
 			}
 		}
-		failpoint.InjectCall("beforeRegionSyncStreamDone", ctx)
 		logutil.LogPanic()
 		s.wg.Done()
 	}()
