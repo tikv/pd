@@ -24,6 +24,8 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/unrolled/render"
 
+	"github.com/pingcap/errcode"
+
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/schedule/labeler"
@@ -104,7 +106,7 @@ func (h *regionLabelHandler) PatchRegionLabelRules(w http.ResponseWriter, r *htt
 		return
 	}
 	if err := validateRegionLabelPatch(patch); err != nil {
-		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(err))
 		return
 	}
 	if err := cluster.GetRegionLabeler().Patch(patch); err != nil {
@@ -186,7 +188,7 @@ func (h *regionLabelHandler) DeleteRegionLabelRule(w http.ResponseWriter, r *htt
 		return
 	}
 	if strings.HasPrefix(id, affinity.LabelRuleIDPrefix) {
-		h.rd.JSON(w, http.StatusBadRequest, errs.ErrAffinityLabelProtected.FastGenByArgs().Error())
+		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errs.ErrAffinityLabelProtected.FastGenByArgs()))
 		return
 	}
 	err = cluster.GetRegionLabeler().DeleteLabelRule(id)
@@ -220,7 +222,7 @@ func (h *regionLabelHandler) SetRegionLabelRule(w http.ResponseWriter, r *http.R
 		return
 	}
 	if isAffinityLabelRule(&rule) {
-		h.rd.JSON(w, http.StatusBadRequest, errs.ErrAffinityLabelProtected.FastGenByArgs().Error())
+		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errs.ErrAffinityLabelProtected.FastGenByArgs()))
 		return
 	}
 	if err := cluster.GetRegionLabeler().SetLabelRule(&rule); err != nil {

@@ -23,6 +23,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
+	"github.com/pingcap/errcode"
 	"github.com/pingcap/failpoint"
 
 	"github.com/tikv/pd/pkg/schedule/affinity"
@@ -146,6 +147,12 @@ func (suite *regionLabelTestSuite) TestAffinityRuleWriteProtection() {
 		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, prefix+"/rule", data, testutil.StatusOK(re)))
 		unwritten := *ordinary
 		unwritten.ID = "ordinary-rejected-batch"
+		protectedErrorChecks := []func([]byte, int, http.Header){
+			testutil.Status(re, http.StatusBadRequest),
+			testutil.WithHeader(re, "TiDB-Error-Code", errcode.InvalidInputCode.CodeStr().String()),
+			testutil.StringContain(re, "PD:affinity:ErrAffinityLabelProtected"),
+			testutil.StringContain(re, "affinity API"),
+		}
 
 		for _, rule := range []*labeler.LabelRule{
 			{ID: affinity.GetLabelRuleID("missing"), Labels: ordinary.Labels, RuleType: labeler.KeyRange, Data: ordinary.Data},
@@ -154,17 +161,16 @@ func (suite *regionLabelTestSuite) TestAffinityRuleWriteProtection() {
 		} {
 			data, err = json.Marshal(rule)
 			re.NoError(err)
-			re.NoError(testutil.CheckPostJSON(tests.TestDialClient, prefix+"/rule", data,
-				testutil.Status(re, http.StatusBadRequest), testutil.StringContain(re, "affinity API")))
+			re.NoError(testutil.CheckPostJSON(tests.TestDialClient, prefix+"/rule", data, protectedErrorChecks...))
 			// Reject ordinary writes and deletions in the same batch too.
 			data, err = json.Marshal(labeler.LabelRulePatch{SetRules: []*labeler.LabelRule{&unwritten, rule}, DeleteRules: []string{ordinary.ID}})
 			re.NoError(err)
-			re.NoError(testutil.CheckPatchJSON(tests.TestDialClient, prefix+"/rules", data, testutil.Status(re, http.StatusBadRequest)))
+			re.NoError(testutil.CheckPatchJSON(tests.TestDialClient, prefix+"/rules", data, protectedErrorChecks...))
 		}
-		re.NoError(testutil.CheckDelete(tests.TestDialClient, ruleURL, testutil.Status(re, http.StatusBadRequest)))
+		re.NoError(testutil.CheckDelete(tests.TestDialClient, ruleURL, protectedErrorChecks...))
 		data, err = json.Marshal(labeler.LabelRulePatch{SetRules: []*labeler.LabelRule{&unwritten}, DeleteRules: []string{ordinary.ID, ruleID}})
 		re.NoError(err)
-		re.NoError(testutil.CheckPatchJSON(tests.TestDialClient, prefix+"/rules", data, testutil.Status(re, http.StatusBadRequest)))
+		re.NoError(testutil.CheckPatchJSON(tests.TestDialClient, prefix+"/rules", data, protectedErrorChecks...))
 		re.NoError(testutil.CheckGetJSON(tests.TestDialClient, prefix+"/rule/ordinary-rejected-batch", nil, testutil.Status(re, http.StatusNotFound)))
 		var kept labeler.LabelRule
 		re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, prefix+"/rule/"+ordinary.ID, &kept))
