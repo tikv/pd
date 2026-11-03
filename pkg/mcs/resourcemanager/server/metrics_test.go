@@ -331,3 +331,146 @@ func TestMaxPerSecCostTracker(t *testing.T) {
 		}
 	}
 }
+
+func TestMetricsResetAllClearsMapsAndLabelValues(t *testing.T) {
+	re := require.New(t)
+
+	const (
+		keyspaceName = "reset-all-keyspace"
+		groupName    = "reset-all-group"
+		keyspaceID   = uint32(505)
+	)
+
+	m := newMetrics()
+	m.recordConsumption(&consumptionItem{
+		keyspaceID:        keyspaceID,
+		keyspaceName:      keyspaceName,
+		resourceGroupName: groupName,
+		Consumption: &rmpb.Consumption{
+			RRU:                     10,
+			WRU:                     5,
+			ReadCrossAzTrafficBytes: 12,
+		},
+	}, &ControllerConfig{}, time.Now())
+	m.setServiceLimitMetric(keyspaceName, 100)
+	re.NotEmpty(m.consumptionRecordMap)
+	re.NotEmpty(m.counterMetricsMap)
+	re.NotEmpty(m.maxPerSecTrackerMap)
+
+	m.resetAll()
+
+	re.Empty(m.consumptionRecordMap)
+	re.Empty(m.counterMetricsMap)
+	re.Empty(m.gaugeMetricsMap)
+	re.Empty(m.maxPerSecTrackerMap)
+	// The label values registered by recordConsumption should have been
+	// removed from the registry; re-creating the counter below starts
+	// from zero instead of accumulating on the stale value.
+	re.Equal(float64(0), testutil.ToFloat64(
+		m.getCounterMetrics(keyspaceID, keyspaceName, groupName, defaultTypeLabel).RRUMetrics,
+	))
+	re.Equal(float64(0), testutil.ToFloat64(
+		crossAZTrafficCost.WithLabelValues(groupName, "read", keyspaceName),
+	))
+	re.Equal(float64(0), testutil.ToFloat64(serviceLimit.WithLabelValues(keyspaceName)))
+	t.Cleanup(func() {
+		deleteLabelValues(keyspaceName, groupName, defaultTypeLabel)
+		serviceLimit.DeleteLabelValues(keyspaceName)
+	})
+}
+
+func TestMetricsResetAllUsesGaugeLabelsWithoutTrackers(t *testing.T) {
+	re := require.New(t)
+
+	const (
+		keyspaceName = "reset-all-fallback-keyspace"
+		groupName    = "reset-all-fallback-group"
+		keyspaceID   = uint32(506)
+	)
+
+	m := newMetrics()
+	m.getGaugeMetrics(keyspaceID, keyspaceName, groupName).availableRUCounter.Set(1)
+	re.Empty(m.maxPerSecTrackerMap)
+
+	m.resetAll()
+
+	re.Empty(m.gaugeMetricsMap)
+	re.Equal(float64(0), testutil.ToFloat64(availableRUCounter.WithLabelValues(groupName, groupName, keyspaceName)))
+	t.Cleanup(func() {
+		deleteLabelValues(keyspaceName, groupName, defaultTypeLabel)
+	})
+}
+
+func TestDeleteGroupLabelValuesClearsConfigTypes(t *testing.T) {
+	re := require.New(t)
+	const (
+		keyspaceName = "delete-config-keyspace"
+		groupName    = "delete-config-group"
+		otherGroup   = "keep-config-group"
+	)
+	configTypes := []string{priorityLabel, ruPerSecLabel, ruCapacityLabel}
+	for _, configType := range configTypes {
+		resourceGroupConfigGauge.WithLabelValues(groupName, configType, keyspaceName).Set(1)
+		resourceGroupConfigGauge.WithLabelValues(otherGroup, configType, keyspaceName).Set(2)
+	}
+	t.Cleanup(func() {
+		deleteGroupLabelValues(keyspaceName, groupName)
+		deleteGroupLabelValues(keyspaceName, otherGroup)
+	})
+
+	deleteGroupLabelValues(keyspaceName, groupName)
+
+	for _, configType := range configTypes {
+		re.False(resourceGroupConfigGauge.DeleteLabelValues(groupName, configType, keyspaceName),
+			"config series was not removed: %s", configType)
+		re.Equal(float64(2), testutil.ToFloat64(resourceGroupConfigGauge.WithLabelValues(otherGroup, configType, keyspaceName)))
+	}
+}
+
+func TestCleanupKeepsCrossAZMetricsWhileAnotherRUTypeIsActive(t *testing.T) {
+	re := require.New(t)
+
+	const (
+		keyspaceName = "cross-az-cleanup-keyspace"
+		groupName    = "cross-az-cleanup-group"
+		keyspaceID   = uint32(508)
+	)
+	m := newMetrics()
+	defaultMetrics := m.getCounterMetrics(keyspaceID, keyspaceName, groupName, defaultTypeLabel)
+	backgroundMetrics := m.getCounterMetrics(keyspaceID, keyspaceName, groupName, backgroundTypeLabel)
+	defaultMetrics.ReadCrossAZTrafficMetrics.Add(3)
+	backgroundMetrics.ReadCrossAZTrafficMetrics.Add(7)
+	defaultMetrics.RRUMetrics.Add(3)
+	backgroundMetrics.RRUMetrics.Add(7)
+	defaultMetrics.SQLLayerRUMetrics.Add(3)
+	backgroundMetrics.SQLLayerRUMetrics.Add(7)
+	defaultMetrics.ReadRequestCountMetrics.Add(3)
+	backgroundMetrics.ReadRequestCountMetrics.Add(7)
+	m.getGaugeMetrics(keyspaceID, keyspaceName, groupName).availableRUCounter.Set(1)
+	tracker := m.getMaxPerSecTracker(keyspaceID, keyspaceName, groupName)
+	staleRecord := consumptionRecordKey{keyspaceID: keyspaceID, groupName: groupName, ruType: defaultTypeLabel}
+	activeRecord := consumptionRecordKey{keyspaceID: keyspaceID, groupName: groupName, ruType: backgroundTypeLabel}
+	m.insertConsumptionRecord(keyspaceID, groupName, defaultTypeLabel, time.Now().Add(-metricsCleanupTimeout*2))
+	m.insertConsumptionRecord(keyspaceID, groupName, backgroundTypeLabel, time.Now())
+
+	m.cleanupStaleRecord(staleRecord, keyspaceName, false)
+	re.Equal(float64(0), testutil.ToFloat64(readRequestUnitCost.WithLabelValues(groupName, groupName, defaultTypeLabel, keyspaceName)))
+	re.Equal(float64(7), testutil.ToFloat64(readRequestUnitCost.WithLabelValues(groupName, groupName, backgroundTypeLabel, keyspaceName)))
+	re.Equal(float64(10), testutil.ToFloat64(crossAZTrafficCost.WithLabelValues(groupName, "read", keyspaceName)))
+	re.Equal(float64(10), testutil.ToFloat64(sqlLayerRequestUnitCost.WithLabelValues(groupName, groupName, keyspaceName)))
+	re.Equal(float64(10), testutil.ToFloat64(requestCount.WithLabelValues(groupName, groupName, readTypeLabel, keyspaceName)))
+	re.Equal(float64(1), testutil.ToFloat64(availableRUCounter.WithLabelValues(groupName, groupName, keyspaceName)))
+	re.Same(tracker, m.maxPerSecTrackerMap[trackerKey{keyspaceID, groupName}])
+
+	m.cleanupStaleRecord(activeRecord, keyspaceName, true)
+	re.Equal(float64(0), testutil.ToFloat64(crossAZTrafficCost.WithLabelValues(groupName, "read", keyspaceName)))
+	re.Equal(float64(0), testutil.ToFloat64(sqlLayerRequestUnitCost.WithLabelValues(groupName, groupName, keyspaceName)))
+	re.Equal(float64(0), testutil.ToFloat64(requestCount.WithLabelValues(groupName, groupName, readTypeLabel, keyspaceName)))
+	re.Equal(float64(0), testutil.ToFloat64(availableRUCounter.WithLabelValues(groupName, groupName, keyspaceName)))
+	re.NotContains(m.maxPerSecTrackerMap, trackerKey{keyspaceID, groupName})
+	re.Empty(m.gaugeMetricsMap)
+	t.Cleanup(func() {
+		deleteLabelValues(keyspaceName, groupName, defaultTypeLabel)
+		deleteLabelValues(keyspaceName, groupName, backgroundTypeLabel)
+	})
+}

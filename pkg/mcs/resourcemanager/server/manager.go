@@ -37,6 +37,7 @@ import (
 	"github.com/tikv/pd/pkg/metering"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/jsonutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -105,6 +106,9 @@ type Manager struct {
 	// consumptionChan is used to send the consumption
 	// info to the background metrics flusher.
 	consumptionDispatcher chan *consumptionItem
+	consumptionMu         sync.RWMutex
+	acceptingConsumption  bool
+	consumptionTermDone   <-chan struct{}
 	// cached keyspace name for each keyspace ID.
 	keyspaceNameLookup map[uint32]string
 	// used to get the keyspace ID by name.
@@ -199,10 +203,24 @@ func NewMetadataOnlyManager[T metadataFactoryProvider](srv bs.Server) (*Manager,
 	return m, nil
 }
 
-// This is used for testing only now.
-func (m *Manager) close() {
+// Close stops the manager's leader-scoped workers and waits for them to exit.
+func (m *Manager) Close() {
+	m.stopLeaderWorkers()
+}
+
+func (m *Manager) stopAcceptingConsumption() {
+	m.consumptionMu.Lock()
+	m.acceptingConsumption = false
+	m.consumptionTermDone = nil
+	m.consumptionMu.Unlock()
+}
+
+// stopLeaderWorkers closes this term's consumption gate and waits for its workers.
+func (m *Manager) stopLeaderWorkers() {
+	m.stopAcceptingConsumption()
 	if m.cancel != nil {
 		m.cancel()
+		m.cancel = nil
 	}
 	m.wg.Wait()
 }
@@ -312,6 +330,12 @@ func (m *Manager) accessKeyspaceResourceGroupManager(keyspaceID uint32, groupNam
 
 // Init initializes the resource group manager.
 func (m *Manager) Init(ctx context.Context) error {
+	// Stop any previous term before starting workers for the new term.
+	m.stopLeaderWorkers()
+	m.metrics.resetAll()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if m.enableMetadataWatcher {
 		if err := m.initControllerConfig(); err != nil {
 			return err
@@ -342,6 +366,15 @@ func (m *Manager) Init(ctx context.Context) error {
 			m.persistLoop(ctx)
 		}()
 	}
+	m.consumptionMu.Lock()
+	if err := ctx.Err(); err != nil {
+		m.consumptionMu.Unlock()
+		m.stopLeaderWorkers()
+		return err
+	}
+	m.consumptionTermDone = ctx.Done()
+	m.acceptingConsumption = true
+	m.consumptionMu.Unlock()
 	// TODO: Add a goroutine to loadKeyspaceResourceGroups periodically to avoid
 	// the resource group exists gap between PD server and resource manager service
 	// during redirection.
@@ -665,13 +698,27 @@ func (m *Manager) dispatchConsumption(req *rmpb.TokenBucketRequest) error {
 	if isBackground && isTiFlash {
 		return errors.New("background and tiflash cannot be true at the same time")
 	}
-	m.consumptionDispatcher <- &consumptionItem{
+	item := &consumptionItem{
 		keyspaceID:        ExtractKeyspaceID(req.GetKeyspaceId()),
 		resourceGroupName: req.GetResourceGroupName(),
 		Consumption:       req.GetConsumptionSinceLastRequest(),
 		isBackground:      isBackground,
 		isTiFlash:         isTiFlash,
 	}
+	m.consumptionMu.RLock()
+	defer m.consumptionMu.RUnlock()
+	if m.srv != nil {
+		if !m.acceptingConsumption {
+			return errs.ErrNotLeader
+		}
+		select {
+		case m.consumptionDispatcher <- item:
+			return nil
+		case <-m.consumptionTermDone:
+			return errs.ErrNotLeader
+		}
+	}
+	m.consumptionDispatcher <- item
 	return nil
 }
 
@@ -685,6 +732,9 @@ func (m *Manager) getKeyspaceNameByID(ctx context.Context, id uint32) (string, e
 	m.RUnlock()
 	if ok {
 		return name, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
 	}
 	var loadedName string
 	// If the keyspace name is not in the cache, try to get it from the storage.
@@ -780,57 +830,32 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 		}
 	}()
 
+	resetMetricsOnStepDown := func(pending *consumptionItem) {
+		m.stopAcceptingConsumption()
+		m.metrics.resetAll()
+		// Share one lookup budget across the queue, rather than allowing every
+		// uncached report to wait for a full etcd request timeout.
+		drainCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), etcdutil.DefaultRequestTimeout)
+		defer cancel()
+		m.drainPendingConsumption(drainCtx, pending)
+		log.Info("resource group manager background metrics flush loop exits")
+	}
 	for {
+		if ctx.Err() != nil {
+			resetMetricsOnStepDown(nil)
+			return
+		}
 		select {
 		case <-ctx.Done():
-			log.Info("resource group manager background metrics flush loop exits")
+			resetMetricsOnStepDown(nil)
 			return
 		case consumptionInfo := <-m.consumptionDispatcher:
-			if consumptionInfo == nil || consumptionInfo.Consumption == nil {
-				continue
-			}
-			keyspaceID := consumptionInfo.keyspaceID
-			keyspaceName, err := m.getKeyspaceNameByID(ctx, keyspaceID)
-			if err != nil {
-				continue
-			}
-			consumptionInfo.keyspaceName = keyspaceName
-			m.ruCollector.Collect(consumptionInfo)
-			m.metrics.recordConsumption(consumptionInfo, m.GetControllerConfig(), time.Now())
-			// TODO: maybe we need to distinguish background ru.
-			if rg, _ := m.GetMutableResourceGroup(keyspaceID, consumptionInfo.resourceGroupName); rg != nil {
-				rg.UpdateRUConsumption(consumptionInfo.Consumption)
+			if err := m.processConsumption(ctx, consumptionInfo, true); err != nil && ctx.Err() != nil {
+				resetMetricsOnStepDown(consumptionInfo)
+				return
 			}
 		case <-cleanUpTicker.C:
-			// Clean up the metrics that have not been updated for a long time.
-			for r, lastTime := range m.metrics.consumptionRecordMap {
-				if time.Since(lastTime) <= metricsCleanupTimeout {
-					continue
-				}
-				keyspaceName, err := m.getKeyspaceNameByID(ctx, r.keyspaceID)
-				if err != nil {
-					continue
-				}
-				m.metrics.cleanupAllMetrics(r, keyspaceName)
-				m.ruCollector.remove(keyspaceName)
-			}
-			// Clean up the stale RU trackers.
-			for _, krgm := range m.getKeyspaceResourceGroupManagers() {
-				for _, group := range krgm.getResourceGroupList(false, true) {
-					grt := krgm.getGroupRUTracker(group.Name)
-					if grt == nil {
-						continue
-					}
-					if staleClientUniqueIDs := grt.cleanupStaleRUTrackers(); len(staleClientUniqueIDs) > 0 {
-						log.Info("cleaned up stale ru trackers",
-							zap.Uint32("keyspace-id", krgm.keyspaceID),
-							zap.String("group-name", group.Name),
-							zap.Int("stale-client-unique-ids-count", len(staleClientUniqueIDs)),
-							zap.Uint64s("stale-client-unique-ids", staleClientUniqueIDs),
-						)
-					}
-				}
-			}
+			m.cleanUpMetrics(ctx)
 		case <-metricsTicker.C:
 			// Prevent from holding the lock too long when there're many keyspaces and resource groups.
 			for _, krgm := range m.getKeyspaceResourceGroupManagers() {
@@ -841,7 +866,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				if err != nil {
 					continue
 				}
-				setOrRemoveServiceLimitMetrics(keyspaceName, krgm.getServiceLimiter().getServiceLimit())
+				m.metrics.setServiceLimitMetric(keyspaceName, krgm.getServiceLimiter().getServiceLimit())
 
 				for _, group := range krgm.getResourceGroupList(true, true) {
 					groupName := group.Name
@@ -889,6 +914,91 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				log.Warn("push metrics to Prometheus failed", zap.Error(err))
 			}
 			pushRUMetricsDuration.Observe(time.Since(start).Seconds())
+		}
+	}
+}
+
+// drainPendingConsumption meters requests accepted by the old term without recreating its metrics.
+func (m *Manager) drainPendingConsumption(ctx context.Context, pending *consumptionItem) {
+	failedReports := 0
+	for {
+		if err := m.processConsumption(ctx, pending, false); err != nil {
+			failedReports++
+		}
+		select {
+		case pending = <-m.consumptionDispatcher:
+		default:
+			if failedReports > 0 {
+				log.Warn("failed to meter queued consumption during leader step-down", zap.Int("failed-reports", failedReports), zap.Error(ctx.Err()))
+			}
+			return
+		}
+	}
+}
+
+func (m *Manager) processConsumption(ctx context.Context, consumptionInfo *consumptionItem, recordMetrics bool) error {
+	if consumptionInfo == nil || consumptionInfo.Consumption == nil {
+		return nil
+	}
+	failpoint.InjectCall("beforeProcessConsumption", recordMetrics)
+	keyspaceName, err := m.getKeyspaceNameByID(ctx, consumptionInfo.keyspaceID)
+	if err != nil {
+		return err
+	}
+	consumptionInfo.keyspaceName = keyspaceName
+	m.ruCollector.Collect(consumptionInfo)
+	if recordMetrics {
+		m.metrics.recordConsumption(consumptionInfo, m.GetControllerConfig(), time.Now())
+	}
+	// TODO: maybe we need to distinguish background ru.
+	if rg, _ := m.GetMutableResourceGroup(consumptionInfo.keyspaceID, consumptionInfo.resourceGroupName); rg != nil {
+		rg.UpdateRUConsumption(consumptionInfo.Consumption)
+	}
+	return nil
+}
+
+func (m *Manager) cleanUpMetrics(ctx context.Context) {
+	// Count records by group and keyspace once so each stale record can be
+	// removed without rescanning the full record map.
+	groupRecordCount := make(map[trackerKey]int, len(m.metrics.consumptionRecordMap))
+	keyspaceRecordCount := make(map[uint32]int, len(m.metrics.consumptionRecordMap))
+	staleRecords := make([]consumptionRecordKey, 0)
+	for r, lastTime := range m.metrics.consumptionRecordMap {
+		groupRecordCount[trackerKey{r.keyspaceID, r.groupName}]++
+		keyspaceRecordCount[r.keyspaceID]++
+		if time.Since(lastTime) <= metricsCleanupTimeout {
+			continue
+		}
+		staleRecords = append(staleRecords, r)
+	}
+	for _, r := range staleRecords {
+		keyspaceName, err := m.getKeyspaceNameByID(ctx, r.keyspaceID)
+		if err != nil {
+			continue
+		}
+		groupKey := trackerKey{r.keyspaceID, r.groupName}
+		groupRecordCount[groupKey]--
+		keyspaceRecordCount[r.keyspaceID]--
+		m.metrics.cleanupStaleRecord(r, keyspaceName, groupRecordCount[groupKey] == 0)
+		if keyspaceRecordCount[r.keyspaceID] == 0 {
+			m.ruCollector.remove(keyspaceName)
+		}
+	}
+	// Clean up the stale RU trackers.
+	for _, krgm := range m.getKeyspaceResourceGroupManagers() {
+		for _, group := range krgm.getResourceGroupList(false, true) {
+			grt := krgm.getGroupRUTracker(group.Name)
+			if grt == nil {
+				continue
+			}
+			if staleClientUniqueIDs := grt.cleanupStaleRUTrackers(); len(staleClientUniqueIDs) > 0 {
+				log.Info("cleaned up stale ru trackers",
+					zap.Uint32("keyspace-id", krgm.keyspaceID),
+					zap.String("group-name", group.Name),
+					zap.Int("stale-client-unique-ids-count", len(staleClientUniqueIDs)),
+					zap.Uint64s("stale-client-unique-ids", staleClientUniqueIDs),
+				)
+			}
 		}
 	}
 }
