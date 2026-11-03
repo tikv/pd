@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"math/rand/v2"
@@ -50,6 +51,7 @@ import (
 	"github.com/tikv/pd/client/clients/gc"
 	"github.com/tikv/pd/client/clients/router"
 	"github.com/tikv/pd/client/constants"
+	clierrs "github.com/tikv/pd/client/errs"
 	pdHttp "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
@@ -1914,10 +1916,15 @@ func TestCircuitBreaker(t *testing.T) {
 	re.Error(err)
 	re.Contains(err.Error(), "circuit breaker is open")
 
-	// wait cooldown
-	time.Sleep(time.Second)
+	var region *router.Region
+	testutil.Eventually(re, func() bool {
+		region, err = cli.GetRegion(ctx, []byte("a"))
+		return !errors.Is(err, clierrs.ErrCircuitBreakerOpen)
+	})
+	re.NoError(err)
+	re.NotNil(region)
 
-	for range 10 {
+	for range 9 {
 		region, err := cli.GetRegion(ctx, []byte("a"))
 		re.NoError(err)
 		re.NotNil(region)
@@ -2013,11 +2020,12 @@ func TestCircuitBreakerHalfOpenAndChangeSettings(t *testing.T) {
 	re.Contains(err.Error(), "circuit breaker is open")
 
 	fname := testutil.InitTempFileLogger(t, "info")
-	// wait for cooldown
-	time.Sleep(time.Second)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker"))
-	// trigger circuit breaker state to be half open
-	_, err = cli.GetRegion(ctx, []byte("a"))
+	// The first request admitted after cooldown enters the half-open state.
+	testutil.Eventually(re, func() bool {
+		_, err = cli.GetRegion(ctx, []byte("a"))
+		return !errors.Is(err, clierrs.ErrCircuitBreakerOpen)
+	})
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
 		b, err := os.ReadFile(fname)
