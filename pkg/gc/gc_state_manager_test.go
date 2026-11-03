@@ -3279,10 +3279,7 @@ func (s *gcStateManagerTestSuite) TestGetAllKeyspacesGCStatesDifferentParameters
 		// batch and receive a result for the wrong parameter.
 		go callOnce("third", firstExcludeGCBarriers)
 
-		deadline := time.Now().Add(time.Second)
-		for executionCount.Load() < 2 && time.Now().Before(deadline) {
-			time.Sleep(10 * time.Millisecond)
-		}
+		re.Eventually(func() bool { return executionCount.Load() >= 2 }, time.Second, 10*time.Millisecond)
 		re.Equal(
 			int64(2),
 			executionCount.Load(),

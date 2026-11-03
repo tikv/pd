@@ -715,8 +715,10 @@ func (suite *serverTestSuite) TestForwardReportBuckets() {
 		err = bucketStream.Send(bucketReq)
 		re.NoError(err)
 
-		// Wait a bit between requests to simulate real streaming
-		time.Sleep(100 * time.Millisecond)
+		testutil.Eventually(re, func() bool {
+			region := tc.GetPrimaryServer().GetCluster().GetRegion(10)
+			return region != nil && region.GetBuckets() != nil && region.GetBuckets().GetVersion() == version
+		})
 	}
 
 	// Close the stream (ReportBuckets is fire-and-forget)

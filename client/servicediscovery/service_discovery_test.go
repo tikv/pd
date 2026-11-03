@@ -159,25 +159,21 @@ func (suite *serviceClientTestSuite) SetupSuite() {
 	suite.followerServer = newTestServer(false)
 	go suite.leaderServer.run()
 	go suite.followerServer.run()
-	for range 10 {
-		leaderConn, err1 := grpc.Dial(suite.leaderServer.addr, grpc.WithTransportCredentials(insecure.NewCredentials()))     //nolint:staticcheck
-		followerConn, err2 := grpc.Dial(suite.followerServer.addr, grpc.WithTransportCredentials(insecure.NewCredentials())) //nolint:staticcheck
-		if err1 == nil && err2 == nil {
-			suite.followerClient = newPDServiceClient(
-				tlsutil.ModifyURLScheme(suite.followerServer.addr, nil),
-				tlsutil.ModifyURLScheme(suite.leaderServer.addr, nil),
-				followerConn, false)
-			suite.leaderClient = newPDServiceClient(
-				tlsutil.ModifyURLScheme(suite.leaderServer.addr, nil),
-				tlsutil.ModifyURLScheme(suite.leaderServer.addr, nil),
-				leaderConn, true)
-			suite.followerServer.server.leaderConn = suite.leaderClient.GetClientConn()
-			suite.followerServer.server.leaderAddr = suite.leaderClient.GetURL()
-			return
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	suite.Require().NotNil(suite.leaderClient)
+	re := suite.Require()
+	leaderConn, err := grpc.Dial(suite.leaderServer.addr, grpc.WithTransportCredentials(insecure.NewCredentials())) //nolint:staticcheck
+	re.NoError(err)
+	followerConn, err := grpc.Dial(suite.followerServer.addr, grpc.WithTransportCredentials(insecure.NewCredentials())) //nolint:staticcheck
+	re.NoError(err)
+	suite.followerClient = newPDServiceClient(
+		tlsutil.ModifyURLScheme(suite.followerServer.addr, nil),
+		tlsutil.ModifyURLScheme(suite.leaderServer.addr, nil),
+		followerConn, false)
+	suite.leaderClient = newPDServiceClient(
+		tlsutil.ModifyURLScheme(suite.leaderServer.addr, nil),
+		tlsutil.ModifyURLScheme(suite.leaderServer.addr, nil),
+		leaderConn, true)
+	suite.followerServer.server.leaderConn = suite.leaderClient.GetClientConn()
+	suite.followerServer.server.leaderAddr = suite.leaderClient.GetURL()
 }
 
 func (suite *serviceClientTestSuite) TearDownTest() {

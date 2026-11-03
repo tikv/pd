@@ -97,8 +97,8 @@ func TestLease(t *testing.T) {
 	}()
 	defer cancel()
 
-	// Wait for a timeout.
-	time.Sleep((defaultLeaseTimeout + 1) * time.Second)
+	// The lease must stay alive beyond its original TTL.
+	re.Never(lease1.IsExpired, (defaultLeaseTimeout+1)*time.Second, 10*time.Millisecond)
 	re.False(lease1.IsExpired())
 	// Drain in-flight keepalive responses before waiting for the closed lease to expire.
 	re.NoError(lease1.Close())

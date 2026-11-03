@@ -1816,9 +1816,19 @@ func (suite *resourceManagerClientTestSuite) TestResourceManagerClientDegradedMo
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/acquireFailed"))
 		re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/degradedModeRU"))
 	}()
+	degraded := make(chan struct{})
+	notifyDegraded := sync.OnceFunc(func() { close(degraded) })
+	const degradedHook = "github.com/tikv/pd/client/resource_group/controller/degradedModeApplied"
+	re.NoError(failpoint.EnableCall(degradedHook, func(name string) {
+		if name == groupName {
+			notifyDegraded()
+		}
+	}))
+	defer func() { re.NoError(failpoint.Disable(degradedHook)) }()
 	controller, err := controller.NewResourceGroupController(suite.ctx, 1, cli, cfg, constants.NullKeyspaceID)
 	re.NoError(err)
 	controller.Start(suite.ctx)
+	defer func() { re.NoError(controller.Stop()) }()
 	tc := tokenConsumptionPerSecond{
 		rruTokensAtATime: 0,
 		wruTokensAtATime: 10000,
@@ -1829,7 +1839,11 @@ func (suite *resourceManagerClientTestSuite) TestResourceManagerClientDegradedMo
 	}
 	_, _, _, _, err = controller.OnRequestWait(suite.ctx, groupName, tc.makeWriteRequest())
 	re.NoError(err)
-	time.Sleep(time.Second * 2)
+	select {
+	case <-degraded:
+	case <-time.After(2 * time.Second):
+		suite.T().Fatal("resource group did not apply degraded mode")
+	}
 	beginTime := time.Now()
 	// This is used to make sure resource group in lowRU.
 	for range 100 {
@@ -1841,10 +1855,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceManagerClientDegradedMo
 		re.NoError(err)
 	}
 	endTime := time.Now()
-	// we can not check `inDegradedMode` because of data race.
 	re.True(endTime.Before(beginTime.Add(time.Second)))
-	err = controller.Stop()
-	re.NoError(err)
 }
 
 func (suite *resourceManagerClientTestSuite) TestLoadRequestUnitConfig() {

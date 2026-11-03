@@ -571,6 +571,8 @@ func TestBroadcastClosesStreamWhenSendBlocks(t *testing.T) {
 func TestSendRegionSyncResponseSerializesStreamSendAfterTimeout(t *testing.T) {
 	re := require.New(t)
 	stream := newBlockingSendStream(1)
+	unblock := sync.OnceFunc(stream.unblockSend)
+	defer unblock()
 	syncStream := newRegionSyncStream(stream, 10)
 	syncer := newTestRegionSyncerWithStreams(t, map[string]*regionSyncStream{
 		"pd2": syncStream,
@@ -593,7 +595,7 @@ func TestSendRegionSyncResponseSerializesStreamSendAfterTimeout(t *testing.T) {
 	}()
 	<-closeSendStarted
 
-	time.Sleep(20 * time.Millisecond)
+	re.Never(func() bool { return stream.sendCountValue() != 1 }, 20*time.Millisecond, time.Millisecond)
 	re.Equal(1, stream.sendCountValue())
 	select {
 	case err := <-closeSendDone:
@@ -602,7 +604,7 @@ func TestSendRegionSyncResponseSerializesStreamSendAfterTimeout(t *testing.T) {
 	default:
 	}
 
-	stream.unblockSend()
+	unblock()
 	var closeSendErr error
 	testutil.Eventually(re, func() bool {
 		select {

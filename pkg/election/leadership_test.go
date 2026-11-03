@@ -77,8 +77,8 @@ func TestLeadership(t *testing.T) {
 	defer cancel()
 	go leadership1.Keep(ctx)
 
-	// Sleep longer than the defaultLeaseTimeout
-	time.Sleep((defaultLeaseTimeout + 1) * time.Second)
+	// Renewals must preserve leadership beyond the original lease TTL.
+	re.Never(func() bool { return !leadership1.Check() }, (defaultLeaseTimeout+1)*time.Second, 10*time.Millisecond)
 
 	re.True(leadership1.Check())
 	re.False(leadership2.Check())
@@ -92,8 +92,7 @@ func TestLeadership(t *testing.T) {
 	defer cancel()
 	go leadership2.Keep(ctx)
 
-	// Sleep longer than the defaultLeaseTimeout
-	time.Sleep((defaultLeaseTimeout + 1) * time.Second)
+	re.Never(func() bool { return !leadership2.Check() }, (defaultLeaseTimeout+1)*time.Second, 10*time.Millisecond)
 
 	re.False(leadership1.Check())
 	re.True(leadership2.Check())

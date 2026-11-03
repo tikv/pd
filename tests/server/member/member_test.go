@@ -543,7 +543,9 @@ func TestPDLeaderStepsDownWhenLeaseIsLostWithStaleEtcdLeaderView(t *testing.T) {
 	})
 
 	// Negative control: a stale view alone must not end a term with a valid lease.
-	time.Sleep(2 * time.Second)
+	re.Never(func() bool {
+		return !oldLeader.IsServing() || cluster.GetLeader() != oldLeaderName
+	}, 2*time.Second, 10*time.Millisecond)
 	re.True(oldLeader.IsServing())
 	re.Equal(oldLeaderName, cluster.GetLeader())
 
