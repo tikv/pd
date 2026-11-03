@@ -1634,8 +1634,7 @@ func (c *RaftCluster) PutMetaStore(store *metapb.Store) error {
 	// storage), since there's no prior entry to protect from resurrection.
 	wasKnown := c.GetStore(storeID) != nil
 	failpoint.InjectCall("putMetaStoreAfterWasKnownRead")
-	// Only a registration may replace or clear the reported protocol range.
-	if err := c.putStoreImpl(store, false, core.SetStoreTxnProtocolVersionRange(store.GetTxnProtocolVersionRange())); err != nil {
+	if err := c.putStoreImpl(store, false); err != nil {
 		return err
 	}
 	c.OnStoreVersionChange()
@@ -1646,9 +1645,8 @@ func (c *RaftCluster) PutMetaStore(store *metapb.Store) error {
 // putStoreImpl puts a store.
 // If 'force' is true, the store's labels will overwrite those labels which already existed in the store.
 // If 'force' is false, the store's labels will merge into those labels which already existed in the store.
-// opts carries metadata updates specific to the caller, such as registration-only fields.
 // The caller must hold storeStateLock through the metadata read, persistence and cache update.
-func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool, opts ...core.StoreCreateOption) error {
+func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool) error {
 	if store.GetId() == 0 {
 		return errors.Errorf("invalid put store %v", store)
 	}
@@ -1681,11 +1679,11 @@ func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool, opts ...core
 		}
 	}
 
+	var opts []core.StoreCreateOption
 	s := c.GetStore(store.GetId())
 	if s == nil {
 		// Add a new store.
-		s = core.NewStoreInfo(store, opts...)
-		opts = nil
+		s = core.NewStoreInfo(store)
 	} else {
 		// Use the given labels to update the store.
 		labels := store.GetLabels()
@@ -1695,6 +1693,7 @@ func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool, opts ...core
 		opts = append(opts,
 			core.SetStoreAddress(store.Address, store.StatusAddress, store.PeerAddress),
 			core.SetStoreVersion(store.GitHash, store.Version),
+			core.SetStoreTxnProtocolVersionRange(store.GetTxnProtocolVersionRange()),
 			core.SetStoreLabels(labels),
 			core.SetStoreStartTime(store.StartTimestamp),
 			core.SetStoreDeployPath(store.DeployPath))
