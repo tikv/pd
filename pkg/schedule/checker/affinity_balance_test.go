@@ -614,6 +614,27 @@ func TestAffinityBalanceCommitAllowsOtherGroupChanges(t *testing.T) {
 	version, ok := f.affinityManager.GetBalanceVersion(balanceTestTable())
 	re.True(ok)
 	re.Greater(version, changedVersion)
+
+	// Once Regions reach their targets, the next round can improve the table
+	// without moving the fixed group that changed during the previous commit.
+	f.cluster = f.Cluster
+	f.settle()
+	fixed := f.affinityManager.GetAffinityGroupState(ids[1]).Group
+	snapshot = f.snapshot()
+	res, err = f.planBalanceTargets(t.Context(), snapshot)
+	re.NoError(err)
+	re.Len(res.targets, 1)
+	re.Equal(ids[0], res.targets[0].ID)
+	written, reason, err = f.commitBalancePlan(t.Context(), snapshot, res, f.ruleManager.GetRevision())
+	re.NoError(err)
+	re.Empty(reason)
+	re.Equal([]string{ids[0]}, written)
+	score := balanceTableScore(f.affinityManager, balanceTestTable())
+	re.LessOrEqual(score[0], 12)
+	if score[0] == 12 {
+		re.LessOrEqual(score[1], 2)
+	}
+	re.Equal(fixed, f.affinityManager.GetAffinityGroupState(ids[1]).Group)
 }
 
 func TestAffinityBalanceModelsLeaderAndFollowerRules(t *testing.T) {
