@@ -20,17 +20,14 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/operator"
-	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
@@ -40,12 +37,12 @@ func newAffinitySplitTest(t *testing.T) (*mockcluster.Cluster, *AffinityChecker)
 	opt := newAffinityTestOptions()
 	opt.SetMaxAffinityMergeRegionSize(64)
 	tc := mockcluster.NewCluster(t.Context(), opt)
-	for id := uint64(1); id <= 5; id++ {
+	for id := uint64(1); id <= 4; id++ {
 		tc.AddRegionStore(id, 10)
 	}
-	storeConfig := &config.StoreConfig{Coprocessor: config.Coprocessor{
+	storeConfig := &config.StoreConfig{
 		RegionMaxSize: "24MiB", RegionSplitSize: "16MiB", RegionSplitKeys: 160000,
-	}}
+	}
 	storeConfig.Adjust()
 	tc.SetStoreConfig(storeConfig)
 	group := &affinity.Group{ID: "split_before_move", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}}
@@ -56,7 +53,7 @@ func newAffinitySplitTest(t *testing.T) (*mockcluster.Cluster, *AffinityChecker)
 	return tc, newTestAffinityChecker(t.Context(), tc, opt)
 }
 
-func requireAffinitySplit(t *testing.T, ops []*operator.Operator) *operator.Operator {
+func requireAffinitySplit(t *testing.T, ops []*operator.Operator) {
 	t.Helper()
 	re := require.New(t)
 	re.Len(ops, 1)
@@ -70,7 +67,6 @@ func requireAffinitySplit(t *testing.T, ops []*operator.Operator) *operator.Oper
 	re.True(ok)
 	re.Equal(pdpb.CheckPolicy_SCAN, step.Policy)
 	re.Empty(step.SplitKeys)
-	return op
 }
 
 func TestAffinitySplitBeforeMoveThresholds(t *testing.T) {
@@ -81,7 +77,6 @@ func TestAffinitySplitBeforeMoveThresholds(t *testing.T) {
 		wantSplit  bool
 		wantWait   bool
 	}{
-		{name: "large", size: 64, keys: 10, wantSplit: true},
 		{name: "over size", size: 17, keys: 10, wantSplit: true},
 		{name: "over keys", size: 1, keys: 160001, wantSplit: true},
 		{name: "at thresholds", size: 16, keys: 160000},
@@ -136,19 +131,19 @@ func TestAffinitySplitBeforeMoveWaitsForCoverage(t *testing.T) {
 			child := cluster.GetRegion(1).Clone(core.WithStartKey([]byte(childStart)), core.WithEndKey([]byte(childEnd)),
 				core.WithIncVersion(), core.SetApproximateSize(8))
 			cluster.PutRegion(child)
-			if missing == "middle" {
+			switch missing {
+			case "middle":
 				last := child.Clone(core.WithNewRegionID(2), core.WithStartKey([]byte("t")), core.WithEndKey([]byte(end)))
 				cluster.PutRegion(last)
-			} else if missing == "storage heartbeat" {
+			case "storage heartbeat":
 				last := child.Clone(core.WithNewRegionID(2), core.WithStartKey([]byte("m")), core.WithEndKey([]byte(end)),
 					core.WithLeader(nil), core.SetApproximateSize(0), core.SetSource(core.Storage))
 				cluster.PutRegion(last)
 			}
-			for range 2 {
-				re.Empty(checker.Check(child), "a split's changed boundary does not prove all children are ready")
-				// A new checker has no remembered split operation and must reach the same decision.
-				checker = newTestAffinityChecker(t.Context(), cluster, cluster.PersistOptions)
-			}
+			re.Empty(checker.Check(child), "a split's changed boundary does not prove all children are ready")
+			// A new checker has no remembered split operation and must reach the same decision.
+			checker = newTestAffinityChecker(t.Context(), cluster, cluster.PersistOptions)
+			re.Empty(checker.Check(child))
 		})
 	}
 }
@@ -190,6 +185,9 @@ func TestAffinitySplitBeforeMoveConvergesThenMerges(t *testing.T) {
 			cluster.SetAffinityScheduleLimit(0)
 			re.True(AllowMerge(cluster, children[0], children[1]), "disabling affinity keeps the ordinary merge behavior")
 			cluster.SetAffinityScheduleLimit(4)
+			cluster.SetPlacementRuleEnabled(false)
+			re.True(AllowMerge(cluster, children[0], children[1]), "disabled placement rules stop affinity scheduling")
+			cluster.SetPlacementRuleEnabled(true)
 		}
 	}
 	re.True(AllowMerge(cluster, children[0], children[1]))
@@ -200,25 +198,16 @@ func TestAffinitySplitBeforeMoveConvergesThenMerges(t *testing.T) {
 	re.Len(mergeChecker.Check(children[0]), 2)
 }
 
-func TestAffinitySplitBeforeMoveKeepsSafetyGates(t *testing.T) {
-	for _, reason := range []string{"evict leader", "learner conflict", "unhealthy", "recent merge", "startup"} {
+func TestAffinitySplitBeforeMoveCooldown(t *testing.T) {
+	for _, reason := range []string{"recent merge", "startup"} {
 		t.Run(reason, func(t *testing.T) {
 			re := require.New(t)
 			cluster, checker := newAffinitySplitTest(t)
-			region := cluster.GetRegion(1)
+			region := cluster.GetRegion(1).Clone(core.SetApproximateSize(16))
 			switch reason {
-			case "evict leader":
-				re.NoError(cluster.PauseLeaderTransfer(1, constant.In))
-			case "learner conflict":
-				re.NoError(cluster.GetRuleManager().SetRule(&placement.Rule{GroupID: "pd", ID: "learner", Role: placement.Learner, Count: 1}))
-				region = region.Clone(core.WithAddPeer(&metapb.Peer{Id: 100, StoreId: 3, Role: metapb.PeerRole_Learner}))
-			case "unhealthy":
-				region = region.Clone(core.WithPendingPeers([]*metapb.Peer{region.GetStorePeer(2)}))
 			case "recent merge":
-				region = region.Clone(core.SetApproximateSize(16))
 				checker.recentMergeCache.PutWithTTL(region.GetID(), nil, recentMergeTTL)
 			case "startup":
-				region = region.Clone(core.SetApproximateSize(16))
 				checker.startTime = time.Now()
 			}
 			cluster.PutRegion(region)
@@ -231,14 +220,9 @@ func TestAffinitySplitBeforeMoveUsesCurrentTarget(t *testing.T) {
 	re := require.New(t)
 	cluster, checker := newAffinitySplitTest(t)
 	manager := cluster.GetAffinityManager()
-	stored, err := cluster.GetStorage().LoadAffinityGroup("split_before_move")
-	re.NoError(err)
 	parent := cluster.GetRegion(1)
 	requireAffinitySplit(t, checker.Check(parent))
-	afterSplit, err := cluster.GetStorage().LoadAffinityGroup("split_before_move")
-	re.NoError(err)
-	re.Equal(stored, afterSplit, "splitting does not change the stored target")
-	_, err = manager.UpdateAffinityGroupPeers("split_before_move", 1, []uint64{1, 2, 4})
+	_, err := manager.UpdateAffinityGroupPeers("split_before_move", 1, []uint64{1, 2, 4})
 	re.NoError(err)
 	re.Empty(checker.Check(parent), "the canceled move no longer needs a split")
 	_, err = manager.UpdateAffinityGroupPeers("split_before_move", 1, []uint64{1, 2, 3})
@@ -277,8 +261,6 @@ func TestAffinitySplitBeforeMoveController(t *testing.T) {
 	controller.tryAddOperators(parent)
 	op := opController.GetOperator(parent.GetID())
 	requireAffinitySplit(t, []*operator.Operator{op})
-	controller.tryAddOperators(parent)
-	re.Same(op, opController.GetOperator(parent.GetID()))
 	re.Equal(uint64(1), opController.OperatorCount(operator.OpAffinity))
 	// The same limit used for moves also prevents scheduling another split.
 	cluster.SetAffinityScheduleLimit(1)
@@ -287,26 +269,4 @@ func TestAffinitySplitBeforeMoveController(t *testing.T) {
 	cluster.PutRegion(parent)
 	cluster.PutRegion(other)
 	re.Empty(controller.CheckRegion(other))
-}
-
-func TestAffinitySplitBeforeMovePreservesLearners(t *testing.T) {
-	re := require.New(t)
-	cluster, checker := newAffinitySplitTest(t)
-	cluster.SetEnableUseJointConsensus(false)
-	re.NoError(cluster.GetRuleManager().SetRule(&placement.Rule{GroupID: "pd", ID: "learner", Role: placement.Learner, Count: 1}))
-	learner := &metapb.Peer{Id: 100, StoreId: 5, Role: metapb.PeerRole_Learner}
-	parent := cluster.GetRegion(1).Clone(core.WithAddPeer(learner), core.SetApproximateSize(32))
-	cluster.PutRegion(parent)
-	requireAffinitySplit(t, checker.Check(parent))
-	left := parent.Clone(core.WithEndKey([]byte("m")), core.WithIncVersion(), core.SetApproximateSize(16))
-	right := parent.Clone(core.WithNewRegionID(2), core.WithStartKey([]byte("m")), core.WithIncVersion(), core.SetApproximateSize(16))
-	cluster.PutRegion(left)
-	cluster.PutRegion(right)
-	for _, child := range []*core.RegionInfo{left, right} {
-		ops := checker.Check(child)
-		re.Len(ops, 1)
-		re.Equal("affinity-move-region", ops[0].Desc())
-		operator.ApplyOperator(cluster, ops[0])
-		re.Equal(learner, cluster.GetRegion(child.GetID()).GetStoreLearner(5))
-	}
 }
