@@ -60,11 +60,6 @@ const (
 	// Use a shorter timeout to recover faster from network isolation.
 	UpdateMemberTimeout = time.Second
 
-	// Leave headroom for healthy requests during client bursts before probing
-	// other endpoints, while keeping recovery below the per-endpoint timeout.
-	memberUpdateHedgeDelay    = 200 * time.Millisecond
-	memberUpdateHedgeInterval = 20 * time.Millisecond
-	maxConcurrentMemberProbes = 3
 	serviceModeUpdateInterval = 3 * time.Second
 )
 
@@ -908,68 +903,10 @@ func (c *serviceDiscovery) checkServiceModeChanged() error {
 }
 
 func (c *serviceDiscovery) updateMember() error {
-	urls := c.GetServiceURLs()
-	if len(urls) == 0 {
-		return errs.ErrClientGetMember.FastGenByArgs()
-	}
-	type probeResult struct {
-		url     string
-		members *pdpb.GetMembersResponse
-		err     error
-	}
-	results := make(chan probeResult, min(len(urls), maxConcurrentMemberProbes))
-	probe := func(url string) bool {
-		c.memberProbeMu.Lock()
-		defer c.memberProbeMu.Unlock()
-		if c.memberProbeClosed || c.ctx.Err() != nil {
-			return false
-		}
-		if c.memberProbeCtx == nil {
-			c.memberProbeCtx, c.memberProbeCancel = context.WithCancel(c.ctx)
-		}
-		ctx := c.memberProbeCtx
-		c.memberProbeWg.Go(func() {
-			members, err := c.getMembers(ctx, url, UpdateMemberTimeout)
-			results <- probeResult{url, members, err}
-		})
-		return true
-	}
-	// Losing probes keep their context until timeout or Close: getMembers shares
-	// RPCs by URL, so canceling one waiter can otherwise cancel another caller's RPC.
-	// Buffer outstanding replies so probes can finish after this refresh returns.
-	pending, next := 0, 0
-	startNext := func() {
-		if probe(urls[next]) {
-			pending++
-		}
-		next++
-	}
-	startNext()
-	hedge := time.NewTimer(memberUpdateHedgeDelay)
-	defer hedge.Stop()
-	hedged := false
-	for pending > 0 {
-		var result probeResult
-		select {
-		case result = <-results:
-		case <-hedge.C:
-			hedged = true
-			// Prefer a reply already queued before starting extra requests.
-			select {
-			case result = <-results:
-			default:
-				if next < len(urls) && pending < maxConcurrentMemberProbes {
-					startNext()
-				}
-				// Give a reachable backup time to reply before probing another.
-				if next < len(urls) && pending < maxConcurrentMemberProbes {
-					hedge.Reset(memberUpdateHedgeInterval)
-				}
-				continue
-			}
-		}
-		pending--
-		url, members, err := result.url, result.members, result.err
+	// A slow healthy endpoint must not fan out membership RPCs during client bursts.
+	// Advance only after a response fails validation, an RPC fails, or its timeout expires.
+	for _, url := range c.GetServiceURLs() {
+		members, err := c.probeMember(url)
 		// Check the cluster ID.
 		updatedClusterID := members.GetHeader().GetClusterId()
 		if err == nil && updatedClusterID != c.clusterID {
@@ -990,9 +927,6 @@ func (c *serviceDiscovery) updateMember() error {
 			case <-c.ctx.Done():
 				return errors.WithStack(err)
 			default:
-				for next < len(urls) && (pending == 0 || hedged && pending < maxConcurrentMemberProbes) {
-					startNext()
-				}
 				continue
 			}
 		}
@@ -1001,6 +935,25 @@ func (c *serviceDiscovery) updateMember() error {
 		return c.updateServiceClient(members.GetMembers(), members.GetLeader())
 	}
 	return errs.ErrClientGetMember.FastGenByArgs()
+}
+
+func (c *serviceDiscovery) probeMember(url string) (*pdpb.GetMembersResponse, error) {
+	c.memberProbeMu.Lock()
+	if c.memberProbeClosed || c.ctx.Err() != nil {
+		c.memberProbeMu.Unlock()
+		return nil, context.Canceled
+	}
+	if c.memberProbeCtx == nil {
+		c.memberProbeCtx, c.memberProbeCancel = context.WithCancel(c.ctx)
+	}
+	ctx := c.memberProbeCtx
+	c.memberProbeWg.Add(1)
+	c.memberProbeMu.Unlock()
+	defer c.memberProbeWg.Done()
+
+	// Close cancels this discovery's calls without canceling its owner's context.
+	// Each call keeps its own timeout when sharing a GetMembers RPC with another waiter.
+	return c.getMembers(ctx, url, UpdateMemberTimeout)
 }
 
 func (c *serviceDiscovery) getClusterInfo(ctx context.Context, url string, timeout time.Duration) (*pdpb.GetClusterInfoResponse, error) {

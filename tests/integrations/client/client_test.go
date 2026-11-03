@@ -162,7 +162,7 @@ func TestMemberDiscoveryClientBurst(t *testing.T) {
 			}
 
 			for sample := range repeats {
-				for _, scenario := range []string{"healthy-fast", "healthy-30ms", "healthy-30ms-cold-cache", "leader-change-unresponsive-first"} {
+				for _, scenario := range []string{"healthy-fast", "healthy-30ms", "healthy-300ms", "healthy-30ms-cold-cache", "leader-change-unresponsive-first"} {
 					t.Run(scenario+"/"+strconv.Itoa(sample), func(t *testing.T) {
 						re := require.New(t)
 						if scenario == "leader-change-unresponsive-first" {
@@ -193,6 +193,8 @@ func TestMemberDiscoveryClientBurst(t *testing.T) {
 						mode := int32(0)
 						if strings.HasPrefix(scenario, "healthy-30ms") {
 							mode = 1
+						} else if scenario == "healthy-300ms" {
+							mode = 3
 						} else if scenario == "leader-change-unresponsive-first" {
 							mode = 2
 						}
@@ -320,10 +322,14 @@ func (r *memberLoadRecorder) unary(ctx context.Context, method string, request, 
 	}
 	r.sent.Add(1)
 	err := invoke(ctx, method, request, response, conn, opts...)
-	if mode == 1 && err == nil {
+	if (mode == 1 || mode == 3) && err == nil {
 		// Delay delivery of the actual server response, preserving real
 		// GetMembers, server caching and etcd calls underneath.
-		timer := time.NewTimer(30 * time.Millisecond)
+		delay := 30 * time.Millisecond
+		if mode == 3 {
+			delay = 300 * time.Millisecond
+		}
+		timer := time.NewTimer(delay)
 		defer timer.Stop()
 		select {
 		case <-timer.C:

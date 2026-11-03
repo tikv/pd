@@ -27,6 +27,10 @@ import (
 	"go.uber.org/goleak"
 	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
@@ -36,6 +40,7 @@ import (
 	"github.com/tikv/pd/client/opt"
 	cctx "github.com/tikv/pd/client/pkg/connectionctx"
 	"github.com/tikv/pd/client/pkg/retry"
+	"github.com/tikv/pd/client/pkg/utils/grpcutil"
 	sd "github.com/tikv/pd/client/servicediscovery"
 )
 
@@ -225,6 +230,8 @@ type countingServiceDiscovery struct {
 	scheduleCount atomic.Int32
 	checkCount    atomic.Int32
 	conn          *grpc.ClientConn
+	conns         map[string]*grpc.ClientConn
+	backupURLs    []string
 	onSchedule    func()
 	servingURL    string
 }
@@ -239,11 +246,14 @@ func (*countingServiceDiscovery) GetServiceURLs() []string                      
 func (*countingServiceDiscovery) GetServingEndpointClientConn() *grpc.ClientConn     { return nil }
 func (*countingServiceDiscovery) GetClientConns() *sync.Map                          { return &sync.Map{} }
 func (s *countingServiceDiscovery) GetServingURL() string                            { return s.servingURL }
-func (*countingServiceDiscovery) GetBackupURLs() []string                            { return nil }
+func (s *countingServiceDiscovery) GetBackupURLs() []string                          { return s.backupURLs }
 func (*countingServiceDiscovery) GetServiceClient() sd.ServiceClient                 { return nil }
 func (*countingServiceDiscovery) GetServiceClientByKind(sd.APIKind) sd.ServiceClient { return nil }
 func (*countingServiceDiscovery) GetAllServiceClients() []sd.ServiceClient           { return nil }
-func (s *countingServiceDiscovery) GetOrCreateGRPCConn(string) (*grpc.ClientConn, error) {
+func (s *countingServiceDiscovery) GetOrCreateGRPCConn(url string) (*grpc.ClientConn, error) {
+	if s.conns != nil {
+		return s.conns[url], nil
+	}
 	return s.conn, nil
 }
 func (s *countingServiceDiscovery) RemoveClientConn(string) { s.removeCount.Add(1) }
@@ -354,6 +364,64 @@ func TestTSOReconnectFailureRefreshesBeforeBackoff(t *testing.T) {
 	require.ErrorIs(t, client.tryConnectToTSO(client.ctx), errConnect)
 	require.Equal(t, int32(1), svc.scheduleCount.Load())
 	require.Equal(t, 1, builds)
+}
+
+func TestTSOReconnectTimeoutFallsBackToFollower(t *testing.T) {
+	const leaderURL, backupURL = "leader", "backup"
+	newHealthConn := func(url string, servingStatus healthpb.HealthCheckResponse_ServingStatus) *grpc.ClientConn {
+		conn, err := grpc.NewClient(url,
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithUnaryInterceptor(func(_ context.Context, _ string, _, reply any,
+				_ *grpc.ClientConn, _ grpc.UnaryInvoker, _ ...grpc.CallOption,
+			) error {
+				reply.(*healthpb.HealthCheckResponse).Status = servingStatus
+				return nil
+			}))
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, conn.Close()) })
+		return conn
+	}
+	svc := &countingServiceDiscovery{
+		servingURL: leaderURL,
+		backupURLs: []string{backupURL},
+		conns: map[string]*grpc.ClientConn{
+			leaderURL: newHealthConn(leaderURL, healthpb.HealthCheckResponse_NOT_SERVING),
+			backupURL: newHealthConn(backupURL, healthpb.HealthCheckResponse_SERVING),
+		},
+	}
+	var directBuilds int
+	builder := reconnectTestBuilder(func(ctx context.Context, cancel context.CancelFunc, _ time.Duration) (*tsoStream, error) {
+		if forwardedHost := grpcutil.GetForwardedHost(ctx, metadata.FromOutgoingContext); forwardedHost != "" {
+			require.Equal(t, leaderURL, forwardedHost)
+			return newTSOStream(ctx, backupURL, newMockTSOStreamImpl(ctx, resultModeGenerated)), nil
+		}
+		directBuilds++
+		// Trigger the production build timeout immediately, then return the same
+		// gRPC cancellation error as a connection that remains unavailable.
+		done := make(chan struct{})
+		go checkStreamTimeout(ctx, cancel, done, 0)
+		<-ctx.Done()
+		done <- struct{}{}
+		return nil, status.FromContextError(ctx.Err()).Err()
+	})
+	option := opt.NewOption()
+	option.EnableForwarding = true
+	client := NewClient(t.Context(), option, svc, builder)
+	client.leaderURL.Store(leaderURL)
+	t.Cleanup(func() {
+		client.cancel()
+		client.wg.Wait()
+		client.conCtxMgr.ReleaseAll()
+	})
+
+	require.NoError(t, client.tryConnectToTSO(client.ctx))
+	require.Equal(t, constants.MaxRetryTimes, directBuilds)
+	require.False(t, client.conCtxMgr.Exist(leaderURL))
+	require.True(t, client.conCtxMgr.Exist(backupURL))
+	_, req := startRecoveryDispatcher(t, client)
+	physical, _, err := req.waitTimeout(time.Second)
+	require.NoError(t, err)
+	require.Positive(t, physical)
 }
 
 func TestTSORecoveryRefreshesOnRequestErrors(t *testing.T) {

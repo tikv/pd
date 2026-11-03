@@ -412,7 +412,12 @@ func (c *Cli) tryConnectToTSO(ctx context.Context) error {
 				stream, err = c.tsoStreamBuilderFactory.makeBuilder(cc).build(cctx, cancel, c.option.Timeout)
 				if !c.finishStreamBuild(cctx) {
 					cancel()
-					stream, err = nil, context.Canceled
+					stream = nil
+					// Keep the builder's gRPC status so connection timeouts still
+					// count as network errors when deciding whether to forward.
+					if err == nil {
+						err = context.Canceled
+					}
 				}
 			} else {
 				err = context.Canceled

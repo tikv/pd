@@ -522,22 +522,22 @@ func newMemberProbeTestDiscovery(t *testing.T, urls []string, leaderURL string) 
 	return cli
 }
 
-func TestUpdateMemberBypassesUnresponsiveEndpoints(t *testing.T) {
+func TestUpdateMemberWaitsForTimeoutBeforeFallback(t *testing.T) {
 	blocked := func(ctx context.Context) (*pdpb.GetMembersResponse, error) {
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}
 	oldLeader := startMemberProbeTestServer(t, blocked)
-	follower := startMemberProbeTestServer(t, blocked)
 	leaderURL := startMemberProbeTestLeader(t)
-	cli := newMemberProbeTestDiscovery(t, []string{oldLeader, follower, leaderURL}, oldLeader)
+	cli := newMemberProbeTestDiscovery(t, []string{oldLeader, leaderURL}, oldLeader)
 	start := time.Now()
 	err := cli.updateMember()
 	elapsed := time.Since(start)
 	require.NoError(t, err)
 	require.Equal(t, leaderURL, cli.getLeaderURL())
-	t.Logf("membership_recovery_ms=%.3f", float64(elapsed)/float64(time.Millisecond))
-	require.Less(t, elapsed, UpdateMemberTimeout/4, "healthy endpoint was blocked behind an unresponsive endpoint")
+	// Silent endpoints retain the per-endpoint timeout: speculative requests would
+	// also fan out slow but healthy refreshes during a client burst.
+	require.GreaterOrEqual(t, elapsed, UpdateMemberTimeout)
 }
 
 func TestUpdateMemberFastResponseUsesSingleProbe(t *testing.T) {
@@ -562,7 +562,7 @@ func TestUpdateMemberHealthySlowResponseUsesSingleProbe(t *testing.T) {
 	})
 	var response atomic.Pointer[pdpb.GetMembersResponse]
 	leaderURL := startMemberProbeTestServer(t, func(ctx context.Context) (*pdpb.GetMembersResponse, error) {
-		timer := time.NewTimer(150 * time.Millisecond)
+		timer := time.NewTimer(300 * time.Millisecond)
 		defer timer.Stop()
 		select {
 		case <-timer.C:
@@ -583,10 +583,9 @@ func TestUpdateMemberHealthySlowResponseUsesSingleProbe(t *testing.T) {
 	require.Zero(t, followerCalls.Load(), "a healthy slow response should not trigger an extra membership RPC")
 }
 
-func TestUpdateMemberStopsAfterFirstHedge(t *testing.T) {
-	blocked := startMemberProbeTestServer(t, func(ctx context.Context) (*pdpb.GetMembersResponse, error) {
-		<-ctx.Done()
-		return nil, ctx.Err()
+func TestUpdateMemberStopsAfterFirstSuccessfulEndpoint(t *testing.T) {
+	unavailable := startMemberProbeTestServer(t, func(context.Context) (*pdpb.GetMembersResponse, error) {
+		return nil, status.Error(codes.Unavailable, "unavailable")
 	})
 	leaderURL := startMemberProbeTestLeader(t)
 	unused := startMemberProbeTestServer(t, func(context.Context) (*pdpb.GetMembersResponse, error) {
@@ -595,7 +594,7 @@ func TestUpdateMemberStopsAfterFirstHedge(t *testing.T) {
 	unusedURL, err := url.Parse(unused)
 	require.NoError(t, err)
 	var unusedCalls atomic.Int32
-	cli := newMemberProbeTestDiscovery(t, []string{blocked, leaderURL, unused}, blocked)
+	cli := newMemberProbeTestDiscovery(t, []string{unavailable, leaderURL, unused}, unavailable)
 	cli.option.GRPCDialOptions = []grpc.DialOption{grpc.WithUnaryInterceptor(func(
 		ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption,
 	) error {
@@ -646,37 +645,73 @@ func TestUpdateMemberConcurrentRefreshAndClose(t *testing.T) {
 		cancelOnce.Do(func() { close(canceled) })
 		return nil, ctx.Err()
 	})
-	leaderURL := startMemberProbeTestLeader(t)
-	cli := newMemberProbeTestDiscovery(t, []string{blocked, leaderURL}, blocked)
+	cli := newMemberProbeTestDiscovery(t, []string{blocked}, blocked)
 	finished := make(chan error, 2)
 	for range cap(finished) {
 		go func() { finished <- cli.updateMember() }()
 	}
-	for range cap(finished) {
-		select {
-		case err := <-finished:
-			require.NoError(t, err)
-		case <-time.After(UpdateMemberTimeout / 2):
-			t.Fatal("concurrent refresh did not recover")
-		}
-	}
 	select {
 	case <-started:
-	default:
+	case <-time.After(time.Second):
 		t.Fatal("the slow shared RPC was not reached")
-	}
-	select {
-	case <-canceled:
-		t.Fatal("a successful refresh canceled another waiter's shared RPC")
-	default:
 	}
 	cli.Close()
 	require.NoError(t, cli.ctx.Err(), "closing discovery must not cancel its owner's context")
+	for range cap(finished) {
+		select {
+		case err := <-finished:
+			require.Error(t, err)
+		case <-time.After(time.Second):
+			t.Fatal("concurrent refresh did not exit after Close")
+		}
+	}
 	select {
 	case <-canceled:
 	case <-time.After(time.Second):
 		t.Fatal("Close did not cancel its outstanding membership probes")
 	}
+}
+
+func TestUpdateMemberSharedRPCSurvivesWaiterTimeout(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var startOnce sync.Once
+	var calls atomic.Int32
+	var response atomic.Pointer[pdpb.GetMembersResponse]
+	leaderURL := startMemberProbeTestServer(t, func(ctx context.Context) (*pdpb.GetMembersResponse, error) {
+		calls.Add(1)
+		startOnce.Do(func() { close(started) })
+		select {
+		case <-release:
+			return response.Load(), nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	})
+	leader := &pdpb.Member{MemberId: 1, ClientUrls: []string{leaderURL}}
+	response.Store(&pdpb.GetMembersResponse{
+		Header: &pdpb.ResponseHeader{ClusterId: 42}, Members: []*pdpb.Member{leader}, Leader: leader,
+	})
+	cli := newMemberProbeTestDiscovery(t, []string{leaderURL}, leaderURL)
+	finished := make(chan error, 1)
+	go func() { finished <- cli.updateMember() }()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("the shared RPC was not reached")
+	}
+	// This waiter joins the blocked refresh, then times out without canceling
+	// the shared RPC owned by the refresh.
+	_, err := cli.getMembers(t.Context(), leaderURL, 50*time.Millisecond)
+	require.Error(t, err)
+	close(release)
+	select {
+	case err := <-finished:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("the refresh did not finish after releasing its shared RPC")
+	}
+	require.Equal(t, int32(1), calls.Load())
 }
 
 func TestUpdateMemberCloseCancelsBlockingDial(t *testing.T) {
@@ -717,36 +752,28 @@ func TestUpdateMemberCloseCancelsBlockingDial(t *testing.T) {
 	require.NoError(t, cli.ctx.Err())
 }
 
-func TestUpdateMemberBoundsProbeConcurrency(t *testing.T) {
-	started := make(chan struct{}, 4)
-	var active, maximum atomic.Int32
-	blocked := func(ctx context.Context) (*pdpb.GetMembersResponse, error) {
-		n := active.Add(1)
-		defer active.Add(-1)
-		for old := maximum.Load(); n > old; old = maximum.Load() {
-			if maximum.CompareAndSwap(old, n) {
-				break
-			}
-		}
-		started <- struct{}{}
+func TestUpdateMemberCancellationStopsEndpointProgression(t *testing.T) {
+	started := make(chan struct{})
+	blocked := startMemberProbeTestServer(t, func(ctx context.Context) (*pdpb.GetMembersResponse, error) {
+		close(started)
 		<-ctx.Done()
 		return nil, ctx.Err()
-	}
-	urls := make([]string, cap(started))
-	for i := range urls {
-		urls[i] = startMemberProbeTestServer(t, blocked)
-	}
-	cli := newMemberProbeTestDiscovery(t, urls, "")
+	})
+	var unusedCalls atomic.Int32
+	unused := startMemberProbeTestServer(t, func(context.Context) (*pdpb.GetMembersResponse, error) {
+		unusedCalls.Add(1)
+		return nil, status.Error(codes.Unavailable, "unavailable")
+	})
+	cli := newMemberProbeTestDiscovery(t, []string{blocked, unused}, "")
 	finished := make(chan error, 1)
 	go func() { finished <- cli.updateMember() }()
-	for range 3 {
-		select {
-		case <-started:
-		case <-time.After(UpdateMemberTimeout / 2):
-			t.Fatal("hedged probes did not start")
-		}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("membership refresh did not start")
 	}
 	cli.cancel()
 	require.Error(t, <-finished)
-	require.LessOrEqual(t, maximum.Load(), int32(3))
+	cli.Close()
+	require.Zero(t, unusedCalls.Load())
 }
