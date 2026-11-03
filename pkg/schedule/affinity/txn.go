@@ -379,12 +379,7 @@ func (m *Manager) updateObservedGroupPeers(groupID string, affinityVer uint64, l
 	}
 	m.metaMutex.Unlock()
 
-	// Send the target without holding metaMutex, so that a slow PD does not block the watcher.
-	written, err := m.targetWriter.WriteGroupTargets(m.ctx, []GroupTarget{*target})
-	if err != nil {
-		targetWriteFailureCounter.Inc()
-		log.Warn("failed to write affinity group targets",
-			zap.Int("target-count", 1), zap.Int("written-count", len(written)), errs.ZapError(err))
+	if _, err := m.sendGroupTargets(m.ctx, []GroupTarget{*target}); err != nil {
 		return nil, err
 	}
 	return m.GetAffinityGroupState(groupID), nil

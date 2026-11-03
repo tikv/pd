@@ -140,7 +140,7 @@ func TestBalanceTableLifecycle(t *testing.T) {
 
 func TestCommitBalanceTargets(t *testing.T) {
 	writeErr := errors.New("writer unavailable")
-	for _, scenario := range []string{"stored", "admin", "fixed", "recreated", "writer", "watched", "superseded", "error"} {
+	for _, scenario := range []string{"stored", "admin", "fixed", "recreated", "writer", "watched", "superseded", "error", "partial"} {
 		t.Run(scenario, func(t *testing.T) {
 			re := require.New(t)
 			m, store := newTargetTestManager(t)
@@ -166,11 +166,14 @@ func TestCommitBalanceTargets(t *testing.T) {
 				re.NoError(m.CreateAffinityGroups([]GroupKeyRanges{{GroupID: id}}))
 				_, err := m.UpdateAffinityGroupPeers(id, 1, []uint64{1, 2, 3})
 				re.NoError(err)
-			case "writer", "watched", "superseded", "error":
+			case "writer", "watched", "superseded", "error", "partial":
 				stored = expected
 				m.SetTargetWriter(&fakeTargetWriter{reply: func(GroupTarget) ([]string, error) {
 					if scenario == "error" {
 						return nil, writeErr
+					}
+					if scenario == "partial" {
+						return []string{id}, writeErr
 					}
 					return []string{id}, nil
 				}, write: func(g GroupTarget) {
@@ -187,11 +190,13 @@ func TestCommitBalanceTargets(t *testing.T) {
 			} else if scenario == "superseded" {
 				// The watcher delivers another target, which is used instead.
 				want.LeaderStoreID, want.VoterStoreIDs = 4, []uint64{1, 3, 4}
+			} else if scenario == "writer" || scenario == "partial" {
+				want, allowed = expected, false
 			} else if scenario == "error" {
 				want, allowed, wantWritten = expected, false, nil
 			}
 			written, err := m.CommitBalanceTargets(t.Context(), snapshot, []*Group{&target})
-			if scenario == "error" {
+			if scenario == "error" || scenario == "partial" {
 				re.ErrorIs(err, writeErr)
 			} else {
 				re.NoError(err)
@@ -201,6 +206,13 @@ func TestCommitBalanceTargets(t *testing.T) {
 			re.Equal(want, state.Group)
 			re.Equal(allowed, state.AffinitySchedulingAllowed)
 			re.Equal(stored, *loadStoredGroup(re, store, id))
+			if scenario == "writer" || scenario == "partial" {
+				// The reply only reports persisted IDs; the watcher publishes them.
+				m.SyncGroupFromEtcd(&target)
+				state = m.GetAffinityGroupState(id)
+				re.Equal(target, state.Group)
+				re.True(state.AffinitySchedulingAllowed)
+			}
 		})
 	}
 }

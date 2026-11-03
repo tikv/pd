@@ -214,10 +214,8 @@ func (m *Manager) publishGroupTargetLocked(stored *Group) {
 }
 
 // sendGroupTargets sends targets to the target writer and returns the IDs of
-// the written groups. A written target is published unless another change has
-// reached its group meanwhile. If the writer fails partway, the targets written
-// before the failure are published and returned with the error. metaMutex must
-// not be held.
+// the written groups, including any written before a failure. The watcher syncs
+// the stored targets back into memory. metaMutex must not be held.
 func (m *Manager) sendGroupTargets(ctx context.Context, targets []GroupTarget) ([]string, error) {
 	// Send the targets without holding metaMutex, so that a slow PD does not block the watcher.
 	written, err := m.targetWriter.WriteGroupTargets(ctx, targets)
@@ -225,25 +223,6 @@ func (m *Manager) sendGroupTargets(ctx context.Context, targets []GroupTarget) (
 		targetWriteFailureCounter.Inc()
 		log.Warn("failed to write affinity group targets",
 			zap.Int("target-count", len(targets)), zap.Int("written-count", len(written)), errs.ZapError(err))
-	}
-
-	m.metaMutex.Lock()
-	defer m.metaMutex.Unlock()
-	writtenIDs := make(map[string]struct{}, len(written))
-	for _, id := range written {
-		writtenIDs[id] = struct{}{}
-	}
-	for _, target := range targets {
-		if _, ok := writtenIDs[target.Expected.ID]; !ok {
-			continue
-		}
-		current := m.GetAffinityGroupState(target.Expected.ID)
-		// The watcher may have applied the target already.
-		result := target.result()
-		if current == nil || !sameStoredGroup(&current.Group, &target.Expected) && !sameStoredGroup(&current.Group, result) {
-			continue
-		}
-		m.publishGroupTargetLocked(result)
 	}
 	return written, err
 }
