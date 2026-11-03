@@ -265,6 +265,9 @@ tsoBatchLoop:
 				// Set `stream` to nil and remove this stream from the `connectionCtxs` due to being canceled.
 				conCtxMgr.Release(streamURL)
 				stream = nil
+				if ctx.Err() == nil && streamURL == svcDiscovery.GetServingURL() {
+					svcDiscovery.ScheduleCheckMemberChanged()
+				}
 				continue
 			default:
 			}
@@ -389,7 +392,15 @@ func (td *tsoDispatcher) handleProcessRequestError(
 	case errs.IsCalleeMismatch(err):
 		// If the callee ID mismatches, the existing gRPC connection is stale and must be recreated.
 		svcDiscovery.RemoveClientConn(streamURL)
+		svcDiscovery.ScheduleCheckMemberChanged()
 	case errs.IsLeaderChange(err):
+		// An old direct stream can fail after discovery has selected a new leader.
+		option := td.provider.getOption()
+		leaderURL := svcDiscovery.GetServingURL()
+		if !option.EnableForwarding && !option.GetEnableTSOFollowerProxy() && leaderURL != "" && leaderURL != streamURL {
+			svcDiscovery.ScheduleCheckMemberChanged()
+			break
+		}
 		// If the leader changed, we better call `CheckMemberChanged` blockingly to
 		// ensure the next round of TSO requests can be sent to the new leader.
 		if err := bo.Exec(ctx, svcDiscovery.CheckMemberChanged); err != nil {
