@@ -20,6 +20,7 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -466,111 +467,113 @@ func TestInvalidCacheMultipleTimes(t *testing.T) {
 // TestConcurrentOperations verifies concurrent operations don't cause race conditions.
 // Run with: go test -race
 func TestConcurrentOperations(t *testing.T) {
-	re := require.New(t)
-	ctx := t.Context()
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		ctx := t.Context()
 
-	store := storage.NewStorageWithMemoryBackend()
-	storeInfos := core.NewStoresInfo()
-	for i := 1; i <= 5; i++ {
-		storeInfo := core.NewStoreInfo(&metapb.Store{Id: uint64(i), Address: fmt.Sprintf("s%d", i), NodeState: metapb.NodeState_Serving})
-		storeInfo = storeInfo.Clone(core.SetLastHeartbeatTS(time.Now()))
-		storeInfos.PutStore(storeInfo)
-	}
+		store := storage.NewStorageWithMemoryBackend()
+		storeInfos := core.NewStoresInfo()
+		for i := 1; i <= 5; i++ {
+			storeInfo := core.NewStoreInfo(&metapb.Store{Id: uint64(i), Address: fmt.Sprintf("s%d", i), NodeState: metapb.NodeState_Serving})
+			storeInfo = storeInfo.Clone(core.SetLastHeartbeatTS(time.Now()))
+			storeInfos.PutStore(storeInfo)
+		}
 
-	conf := mockconfig.NewTestOptions()
-	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
-	re.NoError(err)
-	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
-	re.NoError(err)
-
-	// Create initial groups
-	groups := make([][]keyutil.KeyRange, 3)
-	for i := range 3 {
-		groupID := fmt.Sprintf("concurrent-group-%d", i)
-		groups[i] = createGroupForTest(re, manager, groupID, 10)
-		_, err = manager.UpdateAffinityGroupPeers(groupID, 1, []uint64{1, 2, 3})
+		conf := mockconfig.NewTestOptions()
+		regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
 		re.NoError(err)
-	}
+		manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+		re.NoError(err)
 
-	// Create test regions
-	regions := make([]*core.RegionInfo, 10)
-	for i := range uint64(10) {
-		regions[i] = generateRegionForTest(100+i, []uint64{1, 2, 3}, groups[i%3][i])
-	}
+		// Create initial groups
+		groups := make([][]keyutil.KeyRange, 3)
+		for i := range 3 {
+			groupID := fmt.Sprintf("concurrent-group-%d", i)
+			groups[i] = createGroupForTest(re, manager, groupID, 10)
+			_, err = manager.UpdateAffinityGroupPeers(groupID, 1, []uint64{1, 2, 3})
+			re.NoError(err)
+		}
 
-	// Run concurrent operations
-	var wg sync.WaitGroup
-	errChan := make(chan error, 100)
+		// Create test regions
+		regions := make([]*core.RegionInfo, 10)
+		for i := range uint64(10) {
+			regions[i] = generateRegionForTest(100+i, []uint64{1, 2, 3}, groups[i%3][i])
+		}
 
-	// Goroutine 1: Read operations
-	for i := range 10 {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			for range 50 {
-				region := regions[idx%len(regions)]
-				_, _ = manager.GetRegionAffinityGroupState(region)
-				groupID := fmt.Sprintf("concurrent-group-%d", idx%3)
-				_ = manager.GetAffinityGroupState(groupID)
-				_ = manager.IsGroupExist(groupID)
-			}
-		}(i)
-	}
+		// Run concurrent operations
+		var wg sync.WaitGroup
+		errChan := make(chan error, 100)
 
-	// Goroutine 2: Update peers
-	for i := range 3 {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			groupID := fmt.Sprintf("concurrent-group-%d", idx)
-			for j := range 10 {
-				_, err := manager.UpdateAffinityGroupPeers(groupID, uint64((j%3)+1), []uint64{1, 2, 3})
-				if err != nil {
-					errChan <- err
-					return
+		// Goroutine 1: Read operations
+		for i := range 10 {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				for range 50 {
+					region := regions[idx%len(regions)]
+					_, _ = manager.GetRegionAffinityGroupState(region)
+					groupID := fmt.Sprintf("concurrent-group-%d", idx%3)
+					_ = manager.GetAffinityGroupState(groupID)
+					_ = manager.IsGroupExist(groupID)
 				}
-				time.Sleep(time.Millisecond)
-			}
-		}(i)
-	}
+			}(i)
+		}
 
-	// Goroutine 3: InvalidCache operations
-	for i := range 5 {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			for j := range 30 {
-				regionID := uint64(100 + (idx*2+j)%10)
-				manager.InvalidCache(regionID)
-				time.Sleep(time.Millisecond)
-			}
-		}(i)
-	}
+		// Goroutine 2: Update peers
+		for i := range 3 {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				groupID := fmt.Sprintf("concurrent-group-%d", idx)
+				for j := range 10 {
+					_, err := manager.UpdateAffinityGroupPeers(groupID, uint64((j%3)+1), []uint64{1, 2, 3})
+					if err != nil {
+						errChan <- err
+						return
+					}
+					time.Sleep(time.Millisecond)
+				}
+			}(i)
+		}
 
-	// Goroutine 4: Check availability
-	wg.Go(func() {
-		for range 20 {
-			manager.checkGroupsAvailability()
-			time.Sleep(2 * time.Millisecond)
+		// Goroutine 3: InvalidCache operations
+		for i := range 5 {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				for j := range 30 {
+					regionID := uint64(100 + (idx*2+j)%10)
+					manager.InvalidCache(regionID)
+					time.Sleep(time.Millisecond)
+				}
+			}(i)
+		}
+
+		// Goroutine 4: Check availability
+		wg.Go(func() {
+			for range 20 {
+				manager.checkGroupsAvailability()
+				time.Sleep(2 * time.Millisecond)
+			}
+		})
+
+		// Wait for all goroutines
+		wg.Wait()
+		close(errChan)
+
+		// Check for errors
+		for err := range errChan {
+			re.NoError(err, "concurrent operation failed")
+		}
+
+		// Verify final state is consistent
+		for i := range 3 {
+			groupID := fmt.Sprintf("concurrent-group-%d", i)
+			re.True(manager.IsGroupExist(groupID))
+			state := manager.GetAffinityGroupState(groupID)
+			re.NotNil(state)
 		}
 	})
-
-	// Wait for all goroutines
-	wg.Wait()
-	close(errChan)
-
-	// Check for errors
-	for err := range errChan {
-		re.NoError(err, "concurrent operation failed")
-	}
-
-	// Verify final state is consistent
-	for i := range 3 {
-		groupID := fmt.Sprintf("concurrent-group-%d", i)
-		re.True(manager.IsGroupExist(groupID))
-		state := manager.GetAffinityGroupState(groupID)
-		re.NotNil(state)
-	}
 }
 
 // TestDegradedExpiration verifies that a degraded group automatically expires after the configured duration.

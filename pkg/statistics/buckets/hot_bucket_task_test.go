@@ -19,6 +19,7 @@ import (
 	"math"
 	"strconv"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -33,93 +34,99 @@ func getAllBucketStats(ctx context.Context, hotCache *HotBucketCache) map[uint64
 }
 
 func TestColdHot(t *testing.T) {
-	re := require.New(t)
-	ctx := t.Context()
-	hotCache := NewBucketsCache(ctx)
-	testdata := []struct {
-		buckets *metapb.Buckets
-		isHot   bool
-	}{{
-		buckets: newTestBuckets(1, 1, [][]byte{[]byte("10"), []byte("20")}, 0),
-		isHot:   false,
-	}, {
-		buckets: newTestBuckets(2, 1, [][]byte{[]byte("20"), []byte("30")}, math.MaxUint64),
-		isHot:   true,
-	}}
-	for _, v := range testdata {
-		for i := range 20 {
-			task := NewCheckPeerTask(v.buckets)
-			re.True(hotCache.CheckAsync(task))
-			hotBuckets := getAllBucketStats(ctx, hotCache)
-			time.Sleep(time.Millisecond * 10)
-			item := hotBuckets[v.buckets.RegionId]
-			re.NotNil(item)
-			if v.isHot {
-				re.Equal(i+1, item[0].HotDegree)
-			} else {
-				re.Equal(-i-1, item[0].HotDegree)
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		ctx := t.Context()
+		hotCache := NewBucketsCache(ctx)
+		testdata := []struct {
+			buckets *metapb.Buckets
+			isHot   bool
+		}{{
+			buckets: newTestBuckets(1, 1, [][]byte{[]byte("10"), []byte("20")}, 0),
+			isHot:   false,
+		}, {
+			buckets: newTestBuckets(2, 1, [][]byte{[]byte("20"), []byte("30")}, math.MaxUint64),
+			isHot:   true,
+		}}
+		for _, v := range testdata {
+			for i := range 20 {
+				task := NewCheckPeerTask(v.buckets)
+				re.True(hotCache.CheckAsync(task))
+				hotBuckets := getAllBucketStats(ctx, hotCache)
+				synctest.Sleep(time.Millisecond * 10)
+				item := hotBuckets[v.buckets.RegionId]
+				re.NotNil(item)
+				if v.isHot {
+					re.Equal(i+1, item[0].HotDegree)
+				} else {
+					re.Equal(-i-1, item[0].HotDegree)
+				}
 			}
 		}
-	}
+	})
 }
 
 func TestCheckBucketsTask(t *testing.T) {
-	re := require.New(t)
-	ctx := t.Context()
-	hotCache := NewBucketsCache(ctx)
-	// case1: add bucket successfully
-	buckets := newTestBuckets(1, 1, [][]byte{[]byte("10"), []byte("20"), []byte("30")}, 0)
-	task := NewCheckPeerTask(buckets)
-	re.True(hotCache.CheckAsync(task))
-	time.Sleep(time.Millisecond * 10)
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		ctx := t.Context()
+		hotCache := NewBucketsCache(ctx)
+		// case1: add bucket successfully
+		buckets := newTestBuckets(1, 1, [][]byte{[]byte("10"), []byte("20"), []byte("30")}, 0)
+		task := NewCheckPeerTask(buckets)
+		re.True(hotCache.CheckAsync(task))
+		synctest.Sleep(time.Millisecond * 10)
 
-	hotBuckets := getAllBucketStats(ctx, hotCache)
-	re.Len(hotBuckets, 1)
-	item := hotBuckets[uint64(1)]
-	re.NotNil(item)
+		hotBuckets := getAllBucketStats(ctx, hotCache)
+		re.Len(hotBuckets, 1)
+		item := hotBuckets[uint64(1)]
+		re.NotNil(item)
 
-	re.Len(item, 2)
-	re.Equal(-1, item[0].HotDegree)
-	re.Equal(-1, item[1].HotDegree)
+		re.Len(item, 2)
+		re.Equal(-1, item[0].HotDegree)
+		re.Equal(-1, item[1].HotDegree)
 
-	// case2: add bucket successful and the hot degree should inherit from the old one.
-	buckets = newTestBuckets(2, 1, [][]byte{[]byte("20"), []byte("30")}, 0)
-	task = NewCheckPeerTask(buckets)
-	re.True(hotCache.CheckAsync(task))
-	hotBuckets = getAllBucketStats(ctx, hotCache)
-	time.Sleep(time.Millisecond * 10)
-	item = hotBuckets[uint64(2)]
-	re.Len(item, 1)
-	re.Equal(-2, item[0].HotDegree)
+		// case2: add bucket successful and the hot degree should inherit from the old one.
+		buckets = newTestBuckets(2, 1, [][]byte{[]byte("20"), []byte("30")}, 0)
+		task = NewCheckPeerTask(buckets)
+		re.True(hotCache.CheckAsync(task))
+		hotBuckets = getAllBucketStats(ctx, hotCache)
+		synctest.Sleep(time.Millisecond * 10)
+		item = hotBuckets[uint64(2)]
+		re.Len(item, 1)
+		re.Equal(-2, item[0].HotDegree)
 
-	// case3: add bucket successful and the hot degree should inherit from the old one.
-	buckets = newTestBuckets(1, 1, [][]byte{[]byte("10"), []byte("20")}, 0)
-	task = NewCheckPeerTask(buckets)
-	re.True(hotCache.CheckAsync(task))
-	hotBuckets = getAllBucketStats(ctx, hotCache)
-	time.Sleep(time.Millisecond * 10)
-	item = hotBuckets[uint64(1)]
-	re.Len(item, 1)
-	re.Equal(-2, item[0].HotDegree)
+		// case3: add bucket successful and the hot degree should inherit from the old one.
+		buckets = newTestBuckets(1, 1, [][]byte{[]byte("10"), []byte("20")}, 0)
+		task = NewCheckPeerTask(buckets)
+		re.True(hotCache.CheckAsync(task))
+		hotBuckets = getAllBucketStats(ctx, hotCache)
+		synctest.Sleep(time.Millisecond * 10)
+		item = hotBuckets[uint64(1)]
+		re.Len(item, 1)
+		re.Equal(-2, item[0].HotDegree)
+	})
 }
 
 func TestCollectBucketStatsTask(t *testing.T) {
-	re := require.New(t)
-	ctx := t.Context()
-	hotCache := NewBucketsCache(ctx)
-	// case1: add bucket successfully
-	for i := range uint64(10) {
-		buckets := convertToBucketTreeItem(newTestBuckets(i, 1, [][]byte{[]byte(strconv.FormatUint(i*10, 10)),
-			[]byte(strconv.FormatUint((i+1)*10, 10))}, 0))
-		hotCache.putItem(buckets, hotCache.getBucketsByKeyRange(buckets.startKey, buckets.endKey))
-	}
-	time.Sleep(time.Millisecond * 10)
-	task := NewCollectBucketStatsTask(-100)
-	re.True(hotCache.CheckAsync(task))
-	stats := task.WaitRet(ctx)
-	re.Len(stats, 10)
-	task = NewCollectBucketStatsTask(1)
-	re.True(hotCache.CheckAsync(task))
-	stats = task.WaitRet(ctx)
-	re.Empty(stats)
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		ctx := t.Context()
+		hotCache := NewBucketsCache(ctx)
+		// case1: add bucket successfully
+		for i := range uint64(10) {
+			buckets := convertToBucketTreeItem(newTestBuckets(i, 1, [][]byte{[]byte(strconv.FormatUint(i*10, 10)),
+				[]byte(strconv.FormatUint((i+1)*10, 10))}, 0))
+			hotCache.putItem(buckets, hotCache.getBucketsByKeyRange(buckets.startKey, buckets.endKey))
+		}
+		synctest.Sleep(time.Millisecond * 10)
+		task := NewCollectBucketStatsTask(-100)
+		re.True(hotCache.CheckAsync(task))
+		stats := task.WaitRet(ctx)
+		re.Len(stats, 10)
+		task = NewCollectBucketStatsTask(1)
+		re.True(hotCache.CheckAsync(task))
+		stats = task.WaitRet(ctx)
+		re.Empty(stats)
+	})
 }
