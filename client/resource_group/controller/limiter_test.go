@@ -405,29 +405,31 @@ func TestReconfiguredCh(t *testing.T) {
 }
 
 func TestReconfiguredChWakesMultipleWaiters(t *testing.T) {
-	nc := make(chan notifyMsg, 1)
-	lim := NewLimiter(t0, 1, 0, 0, nc)
+	synctest.Test(t, func(t *testing.T) {
+		nc := make(chan notifyMsg, 1)
+		lim := NewLimiter(t0, 1, 0, 0, nc)
 
-	const numWaiters = 5
-	ch := lim.GetReconfiguredCh()
-	wokenUp := make(chan struct{}, numWaiters)
+		const numWaiters = 5
+		ch := lim.GetReconfiguredCh()
+		wokenUp := make(chan struct{}, numWaiters)
 
-	var wg sync.WaitGroup
-	for range numWaiters {
-		wg.Go(func() {
-			select {
-			case <-ch:
-				wokenUp <- struct{}{}
-			case <-time.After(2 * time.Second):
-			}
-		})
-	}
+		var wg sync.WaitGroup
+		for range numWaiters {
+			wg.Go(func() {
+				select {
+				case <-ch:
+					wokenUp <- struct{}{}
+				case <-time.After(2 * time.Second):
+				}
+			})
+		}
 
-	// Close by reconfiguring.
-	lim.Reconfigure(t1, tokenBucketReconfigureArgs{newTokens: 10, newFillRate: 1})
-	wg.Wait()
+		// Close by reconfiguring.
+		lim.Reconfigure(t1, tokenBucketReconfigureArgs{newTokens: 10, newFillRate: 1})
+		wg.Wait()
 
-	require.Len(t, wokenUp, numWaiters)
+		require.Len(t, wokenUp, numWaiters)
+	})
 }
 
 const testCaseRunTime = 4 * time.Second

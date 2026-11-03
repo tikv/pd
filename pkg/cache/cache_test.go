@@ -17,6 +17,7 @@ package cache
 import (
 	"slices"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/sasha-s/go-deadlock"
@@ -33,91 +34,93 @@ func TestMain(m *testing.M) {
 }
 
 func TestExpireRegionCache(t *testing.T) {
-	re := require.New(t)
-	ctx := t.Context()
-	cache := NewIDTTL(ctx, 10*time.Millisecond, 20*time.Millisecond)
-	// Test Pop
-	cache.PutWithTTL(9, "9", 50*time.Millisecond)
-	cache.PutWithTTL(10, "10", 50*time.Millisecond)
-	re.Equal(2, cache.Len())
-	k, v, success := cache.pop()
-	re.True(success)
-	re.Equal(1, cache.Len())
-	k2, v2, success := cache.pop()
-	re.True(success)
-	// we can't ensure the order which the key/value pop from cache, so we save into a map
-	kvMap := map[uint64]string{
-		9:  "9",
-		10: "10",
-	}
-	expV, ok := kvMap[k.(uint64)]
-	re.True(ok)
-	re.Equal(expV, v.(string))
-	expV, ok = kvMap[k2.(uint64)]
-	re.True(ok)
-	re.Equal(expV, v2.(string))
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		ctx := t.Context()
+		cache := NewIDTTL(ctx, 10*time.Millisecond, 20*time.Millisecond)
+		// Test Pop
+		cache.PutWithTTL(9, "9", 50*time.Millisecond)
+		cache.PutWithTTL(10, "10", 50*time.Millisecond)
+		re.Equal(2, cache.Len())
+		k, v, success := cache.pop()
+		re.True(success)
+		re.Equal(1, cache.Len())
+		k2, v2, success := cache.pop()
+		re.True(success)
+		// we can't ensure the order which the key/value pop from cache, so we save into a map
+		kvMap := map[uint64]string{
+			9:  "9",
+			10: "10",
+		}
+		expV, ok := kvMap[k.(uint64)]
+		re.True(ok)
+		re.Equal(expV, v.(string))
+		expV, ok = kvMap[k2.(uint64)]
+		re.True(ok)
+		re.Equal(expV, v2.(string))
 
-	cache.PutWithTTL(11, "11", 10*time.Millisecond)
-	time.Sleep(50 * time.Millisecond)
-	k, v, success = cache.pop()
-	re.False(success)
-	re.Nil(k)
-	re.Nil(v)
+		cache.PutWithTTL(11, "11", 10*time.Millisecond)
+		synctest.Sleep(50 * time.Millisecond)
+		k, v, success = cache.pop()
+		re.False(success)
+		re.Nil(k)
+		re.Nil(v)
 
-	// Test Get
-	cache.PutWithTTL(1, 1, 10*time.Millisecond)
-	cache.PutWithTTL(2, "v2", 50*time.Millisecond)
-	cache.PutWithTTL(3, 3.0, 50*time.Millisecond)
+		// Test Get
+		cache.PutWithTTL(1, 1, 10*time.Millisecond)
+		cache.PutWithTTL(2, "v2", 50*time.Millisecond)
+		cache.PutWithTTL(3, 3.0, 50*time.Millisecond)
 
-	value, ok := cache.Get(1)
-	re.True(ok)
-	re.Equal(1, value)
+		value, ok := cache.Get(1)
+		re.True(ok)
+		re.Equal(1, value)
 
-	value, ok = cache.Get(2)
-	re.True(ok)
-	re.Equal("v2", value)
+		value, ok = cache.Get(2)
+		re.True(ok)
+		re.Equal("v2", value)
 
-	value, ok = cache.Get(3)
-	re.True(ok)
-	re.Equal(3.0, value)
+		value, ok = cache.Get(3)
+		re.True(ok)
+		re.Equal(3.0, value)
 
-	re.Equal(3, cache.Len())
+		re.Equal(3, cache.Len())
 
-	re.Equal([]uint64{1, 2, 3}, sortIDs(cache.GetAllID()))
+		re.Equal([]uint64{1, 2, 3}, sortIDs(cache.GetAllID()))
 
-	// after 20ms, the key 1 will be expired
-	time.Sleep(20 * time.Millisecond)
+		// after 20ms, the key 1 will be expired
+		synctest.Sleep(20 * time.Millisecond)
 
-	value, ok = cache.Get(1)
-	re.False(ok)
-	re.Nil(value)
+		value, ok = cache.Get(1)
+		re.False(ok)
+		re.Nil(value)
 
-	value, ok = cache.Get(2)
-	re.True(ok)
-	re.Equal("v2", value)
+		value, ok = cache.Get(2)
+		re.True(ok)
+		re.Equal("v2", value)
 
-	value, ok = cache.Get(3)
-	re.True(ok)
-	re.Equal(3.0, value)
+		value, ok = cache.Get(3)
+		re.True(ok)
+		re.Equal(3.0, value)
 
-	testutil.Eventually(re, func() bool {
-		// we can't ensure whether gc is executed, so we check the length of cache in a loop.
-		return cache.Len() == 2
-	}, testutil.WithWaitFor(50*time.Millisecond), testutil.WithTickInterval(time.Millisecond))
-	re.Equal([]uint64{2, 3}, sortIDs(cache.GetAllID()))
+		testutil.Eventually(re, func() bool {
+			// we can't ensure whether gc is executed, so we check the length of cache in a loop.
+			return cache.Len() == 2
+		}, testutil.WithWaitFor(50*time.Millisecond), testutil.WithTickInterval(time.Millisecond))
+		re.Equal([]uint64{2, 3}, sortIDs(cache.GetAllID()))
 
-	cache.Remove(2)
+		cache.Remove(2)
 
-	value, ok = cache.Get(2)
-	re.False(ok)
-	re.Nil(value)
+		value, ok = cache.Get(2)
+		re.False(ok)
+		re.Nil(value)
 
-	value, ok = cache.Get(3)
-	re.True(ok)
-	re.Equal(3.0, value)
+		value, ok = cache.Get(3)
+		re.True(ok)
+		re.Equal(3.0, value)
 
-	re.Equal(1, cache.Len())
-	re.Equal([]uint64{3}, sortIDs(cache.GetAllID()))
+		re.Equal(1, cache.Len())
+		re.Equal([]uint64{3}, sortIDs(cache.GetAllID()))
+	})
 }
 
 func sortIDs(ids []uint64) []uint64 {

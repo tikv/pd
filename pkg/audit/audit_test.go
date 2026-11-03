@@ -69,10 +69,11 @@ func TestPrometheusBackend(t *testing.T) {
 			Help:      "Total number of service requests for audit test",
 		}, []string{"service", "method", "caller_id"})
 
-	prometheus.MustRegister(serviceAuditHistogramTest)
-	prometheus.MustRegister(serviceAuditCounterTest)
+	registry := prometheus.NewRegistry()
+	registry.MustRegister(serviceAuditHistogramTest)
+	registry.MustRegister(serviceAuditCounterTest)
 
-	ts := httptest.NewServer(promhttp.Handler())
+	ts := httptest.NewServer(promhttp.HandlerFor(registry, promhttp.HandlerOpts{}))
 	defer ts.Close()
 
 	backend := NewPrometheusBackend(serviceAuditHistogramTest, serviceAuditCounterTest, true)
@@ -95,8 +96,6 @@ func TestPrometheusBackend(t *testing.T) {
 	req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
 	re.True(backend.ProcessHTTPRequest(req))
 
-	// For test, sleep time needs longer than the push interval
-	time.Sleep(time.Second)
 	req, err = http.NewRequest(http.MethodGet, ts.URL, http.NoBody)
 	re.NoError(err)
 	resp, err := http.DefaultClient.Do(req)

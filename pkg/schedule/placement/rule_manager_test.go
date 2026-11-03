@@ -385,6 +385,95 @@ func TestRangeGap(t *testing.T) {
 	re.Error(err)
 }
 
+func TestGetIsolationPrefix(t *testing.T) {
+	re := require.New(t)
+
+	rule := func(group, id, isolationLevel string, locationLabels ...string) *Rule {
+		return &Rule{
+			GroupID:        group,
+			ID:             id,
+			Role:           Voter,
+			Count:          3,
+			LocationLabels: locationLabels,
+			IsolationLevel: isolationLevel,
+		}
+	}
+
+	// The default rule carries no isolation level, so nothing is isolated yet.
+	_, manager := newTestManager(t, false)
+	_, ok := manager.GetIsolationPrefix()
+	re.False(ok)
+
+	// A single rule yields the prefix up to its isolation level.
+	re.NoError(manager.SetRule(rule(DefaultGroupID, DefaultRuleID, "rack", "zone", "rack", "host")))
+	labels, ok := manager.GetIsolationPrefix()
+	re.True(ok)
+	re.Equal([]string{"zone", "rack"}, labels)
+
+	// A second rule that disagrees vetoes the result.
+	re.NoError(manager.SetRule(rule(DefaultGroupID, "conflict", "zone", "zone", "rack", "host")))
+	_, ok = manager.GetIsolationPrefix()
+	re.False(ok)
+
+	// The same conflicting rule stays persisted but is overridden by a higher-index group,
+	// so it no longer applies to any range and must not affect the prefix.
+	re.NoError(manager.SetRuleGroup(&RuleGroup{ID: "override", Index: 100, Override: true}))
+	re.NoError(manager.SetRule(rule("override", "1", "rack", "zone", "rack", "host")))
+	re.NotNil(manager.GetRule(DefaultGroupID, "conflict"))
+	labels, ok = manager.GetIsolationPrefix()
+	re.True(ok)
+	re.Equal([]string{"zone", "rack"}, labels)
+
+	// Mutating the returned slice must not corrupt the rule it was derived from.
+	labels[0] = "mutated"
+	labels, ok = manager.GetIsolationPrefix()
+	re.True(ok)
+	re.Equal([]string{"zone", "rack"}, labels)
+
+	// A Leader rule can take leaders, so it keeps the prefix.
+	leader := rule("override", "leader", "rack", "zone", "rack", "host")
+	leader.Role, leader.Count = Leader, 1
+	re.NoError(manager.SetRule(leader))
+	labels, ok = manager.GetIsolationPrefix()
+	re.True(ok)
+	re.Equal([]string{"zone", "rack"}, labels)
+
+	// A Follower rule cannot take leaders, so it vetoes the result even when it agrees.
+	follower := rule("override", "follower", "rack", "zone", "rack", "host")
+	follower.Role, follower.Count = Follower, 1
+	re.NoError(manager.SetRule(follower))
+	_, ok = manager.GetIsolationPrefix()
+	re.False(ok)
+}
+
+func TestGetLeaderRuleConstraints(t *testing.T) {
+	re := require.New(t)
+	_, manager := newTestManager(t, false)
+
+	// The default rule has no constraints, so every store can hold a leader.
+	re.Equal([][]LabelConstraint{nil}, manager.GetLeaderRuleConstraints())
+
+	// Voters limited to z1/z2; a follower rule for z3 adds no leader constraints.
+	voters := []LabelConstraint{{Key: "zone", Op: In, Values: []string{"z1", "z2"}}}
+	re.NoError(manager.SetRule(&Rule{
+		GroupID: DefaultGroupID, ID: DefaultRuleID, Role: Voter, Count: 2, LabelConstraints: voters,
+	}))
+	re.NoError(manager.SetRule(&Rule{
+		GroupID: DefaultGroupID, ID: "follower", Role: Follower, Count: 1,
+		LabelConstraints: []LabelConstraint{{Key: "zone", Op: In, Values: []string{"z3"}}},
+	}))
+	re.Equal([][]LabelConstraint{voters}, manager.GetLeaderRuleConstraints())
+
+	// A ranged pool splits the key space, so the default rule applies to several ranges; it is
+	// still reported once.
+	pool := []LabelConstraint{{Key: "zone", Op: In, Values: []string{"z4"}}}
+	re.NoError(manager.SetRule(&Rule{
+		GroupID: "pool", ID: "pool", Role: Leader, Count: 1, StartKeyHex: "a1", EndKeyHex: "b1",
+		LabelConstraints: pool,
+	}))
+	re.ElementsMatch([][]LabelConstraint{voters, pool}, manager.GetLeaderRuleConstraints())
+}
+
 func TestGroupConfig(t *testing.T) {
 	re := require.New(t)
 	_, manager := newTestManager(t, false)
