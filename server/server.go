@@ -232,7 +232,7 @@ type Server struct {
 
 	grpcServiceRateLimiter *ratelimit.Controller
 	grpcServiceLabels      map[string]struct{}
-	grpcServer             *grpc.Server
+	grpcServer             atomic.Pointer[grpc.Server]
 
 	serviceAuditBackendLabels map[string]*audit.BackendLabels
 
@@ -324,7 +324,17 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 		s.GetResourceGroupMetadataManager()
 	}
 	// Register the micro services REST path.
+	if etcdCfg.UserHandlers == nil {
+		etcdCfg.UserHandlers = make(map[string]http.Handler)
+	}
 	s.registry.InstallAllRESTHandler(s, etcdCfg.UserHandlers)
+	// TLS shares the HTTP listener with gRPC. Abort blocked HTTP/2 writes when
+	// shutting down, before embedded etcd waits for its HTTP and gRPC handlers.
+	for _, path := range []string{"/keyspacepb.Keyspace/WatchKeyspaces", "/pdpb.PD/WatchGlobalConfig", "/meta_storagepb.MetaStorage/Watch"} {
+		etcdCfg.UserHandlers[path] = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			grpcutil.ServeHTTPWithContext(s.LoopContext(), s.grpcServer.Load(), w, r)
+		})
+	}
 
 	etcdCfg.ServiceRegister = func(gs *grpc.Server) {
 		grpcServer := &GrpcServer{Server: s}
@@ -340,7 +350,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 		}
 		// Register the micro services GRPC service.
 		s.registry.InstallAllGRPCServices(s, gs)
-		s.grpcServer = gs
+		s.grpcServer.Store(gs)
 	}
 	s.etcdCfg = etcdCfg
 	s.lg = cfg.Logger
@@ -421,7 +431,7 @@ func (s *Server) startEtcd(ctx context.Context) (retErr error) {
 }
 
 func (s *Server) initGRPCServiceLabels() {
-	for name, serviceInfo := range s.grpcServer.GetServiceInfo() {
+	for name, serviceInfo := range s.grpcServer.Load().GetServiceInfo() {
 		if name == gRPCServiceName {
 			for _, methodInfo := range serviceInfo.Methods {
 				s.grpcServiceLabels[methodInfo.Name] = struct{}{}
@@ -693,6 +703,8 @@ func (s *Server) IsClosed() bool {
 
 // Run runs the pd server.
 func (s *Server) Run() error {
+	// Renew the loop context on restart, before etcd starts serving watches.
+	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
 	go systimemon.StartMonitor(s.ctx, time.Now, func() {
 		log.Error("system time jumps backward", errs.ZapError(errs.ErrIncorrectSystemTime))
 		timeJumpBackCounter.Inc()
@@ -710,7 +722,7 @@ func (s *Server) Run() error {
 	failpoint.Inject("delayStartServerLoop", func() {
 		time.Sleep(2 * time.Second)
 	})
-	s.startServerLoop(s.ctx)
+	s.startServerLoop()
 
 	return nil
 }
@@ -735,8 +747,7 @@ func (s *Server) LoopContext() context.Context {
 	return s.serverLoopCtx
 }
 
-func (s *Server) startServerLoop(ctx context.Context) {
-	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(ctx)
+func (s *Server) startServerLoop() {
 	s.serverLoopWg.Add(4)
 	go s.leaderLoop()
 	go s.etcdLeaderLoop()

@@ -19,6 +19,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"io"
+	"net/http"
 	"net/url"
 	"strings"
 	"time"
@@ -33,11 +34,31 @@ import (
 	"google.golang.org/grpc/metadata"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/logutil"
 )
+
+// ServeHTTPWithContext interrupts HTTP writes when ctx is canceled. Waiting for
+// the cancellation callback keeps it from accessing w after ServeHTTP returns.
+func ServeHTTPWithContext(ctx context.Context, handler http.Handler, w http.ResponseWriter, r *http.Request) {
+	failpoint.InjectCall("watchHTTPResponseWriter", r.URL.Path, &w)
+	done := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		defer close(done)
+		if err := http.NewResponseController(w).SetWriteDeadline(time.Now()); err != nil {
+			log.Warn("failed to interrupt HTTP stream write", zap.Error(err))
+		}
+	})
+	defer func() {
+		if !stop() {
+			<-done
+		}
+	}()
+	handler.ServeHTTP(w, r)
+}
 
 const (
 	// ForwardMetadataKey is used to record the forwarded host of PD.
