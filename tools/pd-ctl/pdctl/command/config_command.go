@@ -184,7 +184,7 @@ func NewSetConfigCommand() *cobra.Command {
 func NewSetLabelPropertyCommand() *cobra.Command {
 	sc := &cobra.Command{
 		Use:   "label-property <type> <key> <value>",
-		Short: "set a label property config item, which is deprecated and not supported by the scheduling microservice",
+		Short: "set a label property config item, which is deprecated and not supported by the scheduling microservice; use placement rules or evict-leader-scheduler instead",
 		Run:   setLabelPropertyConfigCommandFunc,
 	}
 	return sc
