@@ -18,10 +18,12 @@ import (
 	"testing"
 	"time"
 
+	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
+	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/schedule/affinity"
@@ -103,6 +105,181 @@ func TestAffinitySplitBeforeMoveThresholds(t *testing.T) {
 				re.Equal("affinity-move-region", ops[0].Desc())
 				re.Zero(ops[0].Kind() & operator.OpSplit)
 			}
+		})
+	}
+}
+
+func ageAffinitySplitAttempt(t *testing.T, checker *AffinityChecker, regionID uint64, wait time.Duration) {
+	t.Helper()
+	value, ok := checker.splitAttempts.Get(regionID)
+	require.True(t, ok)
+	attempt := value.(affinitySplitAttempt)
+	attempt.startedAt = time.Now().Add(-wait)
+	checker.splitAttempts.Put(regionID, attempt)
+}
+
+func TestAffinitySplitBeforeMoveFallback(t *testing.T) {
+	originalTimeout := affinitySplitWaitTimeout
+	affinitySplitWaitTimeout = time.Minute
+	t.Cleanup(func() { affinitySplitWaitTimeout = originalTimeout })
+
+	for _, tc := range []struct {
+		name       string
+		size, keys int64
+	}{
+		{name: "over size", size: 64, keys: 10},
+		{name: "over keys", size: 1, keys: 160001},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			cluster, checker := newAffinitySplitTest(t)
+			region := cluster.GetRegion(1).Clone(core.SetApproximateSize(tc.size), core.SetApproximateKeys(tc.keys))
+			cluster.PutRegion(region)
+			before := promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter)
+			requireAffinitySplit(t, checker.Check(region))
+
+			ageAffinitySplitAttempt(t, checker, region.GetID(), affinitySplitWaitTimeout/2)
+			firstAttempt, ok := checker.splitAttempts.Get(region.GetID())
+			re.True(ok)
+			requireAffinitySplit(t, checker.Check(region))
+			retried, ok := checker.splitAttempts.Get(region.GetID())
+			re.True(ok)
+			re.Equal(firstAttempt.(affinitySplitAttempt).startedAt, retried.(affinitySplitAttempt).startedAt,
+				"retrying the same epoch must not reset the wait")
+			re.Equal(before, promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter))
+
+			ageAffinitySplitAttempt(t, checker, region.GetID(), affinitySplitWaitTimeout+time.Second)
+			// A peer configuration change does not change the split epoch version.
+			region = region.Clone(core.WithIncConfVer())
+			cluster.PutRegion(region)
+			ops := checker.Check(region)
+			re.Len(ops, 1)
+			re.Equal("affinity-move-region", ops[0].Desc())
+			re.Zero(ops[0].Kind() & operator.OpSplit)
+			re.Equal(before+1, promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter))
+		})
+	}
+}
+
+func TestAffinitySplitBeforeMoveFallbackEpoch(t *testing.T) {
+	re := require.New(t)
+	cluster, checker := newAffinitySplitTest(t)
+	region := cluster.GetRegion(1)
+	before := promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter)
+	requireAffinitySplit(t, checker.Check(region))
+	ageAffinitySplitAttempt(t, checker, region.GetID(), affinitySplitWaitTimeout+time.Second)
+
+	region = region.Clone(core.WithIncVersion())
+	cluster.PutRegion(region)
+	resetAt := time.Now()
+	requireAffinitySplit(t, checker.Check(region))
+	value, ok := checker.splitAttempts.Get(region.GetID())
+	re.True(ok)
+	attempt := value.(affinitySplitAttempt)
+	re.Equal(region.GetRegionEpoch().GetVersion(), attempt.version)
+	re.False(attempt.startedAt.Before(resetAt), "the new epoch must start a fresh wait")
+	re.Equal(before, promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter))
+
+	ageAffinitySplitAttempt(t, checker, region.GetID(), affinitySplitWaitTimeout+time.Second)
+	ops := checker.Check(region)
+	re.Len(ops, 1)
+	re.Equal("affinity-move-region", ops[0].Desc())
+	re.Equal(before+1, promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter))
+}
+
+func TestAffinitySplitBeforeMoveFallbackKeepsGates(t *testing.T) {
+	for _, reason := range []string{"recent merge", "startup", "incomplete coverage"} {
+		t.Run(reason, func(t *testing.T) {
+			re := require.New(t)
+			cluster, checker := newAffinitySplitTest(t)
+			region := cluster.GetRegion(1)
+			before := promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter)
+			requireAffinitySplit(t, checker.Check(region))
+			ageAffinitySplitAttempt(t, checker, region.GetID(), affinitySplitWaitTimeout+time.Second)
+			switch reason {
+			case "recent merge":
+				checker.recentMergeCache.Put(region.GetID(), nil)
+			case "startup":
+				checker.startTime = time.Now()
+			case "incomplete coverage":
+				re.NoError(cluster.GetAffinityManager().UpdateAffinityGroupKeyRanges([]affinity.GroupKeyRanges{{
+					GroupID:   "split_before_move",
+					KeyRanges: []keyutil.KeyRange{{StartKey: []byte("za"), EndKey: []byte("zz")}},
+				}}, nil))
+			}
+			re.Empty(checker.Check(region))
+			re.Equal(before, promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter),
+				"a blocked fallback must not be counted")
+
+			switch reason {
+			case "recent merge":
+				checker.recentMergeCache.Remove(region.GetID())
+			case "startup":
+				checker.startTime = time.Now().Add(-2 * recentMergeTTL)
+			case "incomplete coverage":
+				cluster.PutRegion(region.Clone(core.WithNewRegionID(2), core.WithStartKey([]byte("za")),
+					core.WithEndKey([]byte("zz")), core.SetApproximateSize(8)))
+			}
+			ops := checker.Check(region)
+			re.Len(ops, 1)
+			re.Equal("affinity-move-region", ops[0].Desc())
+			re.Equal(before+1, promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter))
+		})
+	}
+}
+
+func TestAffinitySplitBeforeMoveFallbackSplitSucceeds(t *testing.T) {
+	re := require.New(t)
+	cluster, checker := newAffinitySplitTest(t)
+	region := cluster.GetRegion(1).Clone(core.SetApproximateSize(32))
+	cluster.PutRegion(region)
+	before := promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter)
+	requireAffinitySplit(t, checker.Check(region))
+	ageAffinitySplitAttempt(t, checker, region.GetID(), affinitySplitWaitTimeout/2)
+
+	left := region.Clone(core.WithEndKey([]byte("m")), core.WithIncVersion(), core.SetApproximateSize(16))
+	right := region.Clone(core.WithNewRegionID(2), core.WithStartKey([]byte("m")), core.WithIncVersion(), core.SetApproximateSize(16))
+	cluster.PutRegion(left)
+	re.Empty(checker.Check(left), "the small child still waits for its sibling heartbeat")
+	cluster.PutRegion(right)
+	for _, child := range []*core.RegionInfo{left, right} {
+		ops := checker.Check(child)
+		re.Len(ops, 1)
+		re.Equal("affinity-move-region", ops[0].Desc())
+	}
+	re.Equal(before, promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter))
+}
+
+func TestAffinitySplitBeforeMoveFallbackCache(t *testing.T) {
+	for _, reason := range []string{"expired", "evicted"} {
+		t.Run(reason, func(t *testing.T) {
+			re := require.New(t)
+			cluster, checker := newAffinitySplitTest(t)
+			checker.splitAttempts = cache.NewCache(2, cache.LRUCache)
+			region := cluster.GetRegion(1)
+			before := promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter)
+			requireAffinitySplit(t, checker.Check(region))
+			ageAffinitySplitAttempt(t, checker, region.GetID(), affinitySplitWaitTimeout+time.Second)
+			switch reason {
+			case "expired":
+				value, ok := checker.splitAttempts.Get(region.GetID())
+				re.True(ok)
+				attempt := value.(affinitySplitAttempt)
+				attempt.expiresAt = time.Now().Add(-time.Second)
+				checker.splitAttempts.Put(region.GetID(), attempt)
+			case "evicted":
+				group := cluster.GetAffinityManager().GetAffinityGroupState("split_before_move")
+				for id := uint64(2); id <= 3; id++ {
+					op, ready := checker.prepareAffinityPeerMove(region.Clone(core.WithNewRegionID(id)), group)
+					re.False(ready)
+					requireAffinitySplit(t, []*operator.Operator{op})
+				}
+				re.Equal(2, checker.splitAttempts.Len())
+				_, ok := checker.splitAttempts.Peek(region.GetID())
+				re.False(ok)
+			}
+			requireAffinitySplit(t, checker.Check(region))
+			re.Equal(before, promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter))
 		})
 	}
 }

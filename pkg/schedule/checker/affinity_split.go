@@ -33,9 +33,28 @@ import (
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
-// prepareAffinityPeerMove returns a split or waits instead of adding a voter
-// when the reported size or keys exceed TiKV's ordinary split thresholds. SCAN
-// asks TiKV to find a half split; each child is checked again on a later patrol.
+const (
+	// SplitRegion.Timeout is max(60s, 0.6s * size in MiB). The checker skips
+	// Regions with an operator, so a 1 GiB Region may wait about 10 minutes
+	// for its split operator to time out. We intentionally do not cancel it early.
+	defaultAffinitySplitWaitTimeout = 5 * time.Minute
+	affinitySplitCacheSize          = 10000
+	// Expire idle attempts on access. Active retries refresh this TTL without
+	// resetting the first attempt; the LRU also bounds memory for idle entries.
+	affinitySplitCacheTTL = time.Hour
+)
+
+var affinitySplitWaitTimeout = defaultAffinitySplitWaitTimeout
+
+type affinitySplitAttempt struct {
+	version   uint64
+	startedAt time.Time
+	expiresAt time.Time
+}
+
+// prepareAffinityPeerMove requests a SCAN split before adding a voter when size
+// or keys exceed TiKV's ordinary split thresholds. Each child is checked again
+// on a later patrol; an unchanged epoch can move after the split wait timeout.
 func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group *affinity.GroupState) (*operator.Operator, bool) {
 	if !slices.ContainsFunc(group.VoterStoreIDs, func(id uint64) bool { return region.GetStorePeer(id) == nil }) {
 		return nil, true
@@ -50,16 +69,34 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 		return wait("unknown-size")
 	}
 	storeConfig := c.cluster.GetStoreConfig()
+	var splitWait time.Duration
 	if uint64(region.GetApproximateSize()) > storeConfig.GetRegionSplitSize() ||
 		uint64(region.GetApproximateKeys()) > storeConfig.GetRegionSplitKeys() {
-		op, err := operator.CreateSplitRegionOperator("affinity-split-region", region,
-			operator.OpAffinity|operator.OpSplit, pdpb.CheckPolicy_SCAN, nil)
-		if err != nil {
-			affinityCheckerCreateOpFailedCounter.Inc()
-			log.Debug("create affinity split region operator failed", zap.Uint64("region-id", region.GetID()),
-				zap.String("group-id", group.ID), errs.ZapError(err))
+		now := time.Now()
+		attempt := affinitySplitAttempt{version: region.GetRegionEpoch().GetVersion(), startedAt: now}
+		if value, ok := c.splitAttempts.Get(region.GetID()); ok {
+			previous := value.(affinitySplitAttempt)
+			if previous.version == attempt.version && now.Before(previous.expiresAt) {
+				attempt = previous
+			}
 		}
-		return op, false
+		attempt.expiresAt = now.Add(affinitySplitCacheTTL)
+		splitWait = now.Sub(attempt.startedAt)
+		if splitWait <= affinitySplitWaitTimeout {
+			op, err := operator.CreateSplitRegionOperator("affinity-split-region", region,
+				operator.OpAffinity|operator.OpSplit, pdpb.CheckPolicy_SCAN, nil)
+			if err != nil {
+				affinityCheckerCreateOpFailedCounter.Inc()
+				log.Debug("create affinity split region operator failed", zap.Uint64("region-id", region.GetID()),
+					zap.String("group-id", group.ID), errs.ZapError(err))
+				return nil, false
+			}
+			c.splitAttempts.Put(region.GetID(), attempt)
+			return op, false
+		}
+		c.splitAttempts.Put(region.GetID(), attempt)
+	} else {
+		c.splitAttempts.Remove(region.GetID())
 	}
 	// Merges can leave a positive but stale size. Reuse the merge cooldown;
 	// after a restart its cache is gone, so allow the same time for statistics.
@@ -70,6 +107,14 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 	// Check the persisted group ranges too, including after a checker restart.
 	if !affinityGroupRegionsReady(c.cluster, group, false) {
 		return wait("incomplete-region-heartbeats")
+	}
+	if splitWait > affinitySplitWaitTimeout {
+		// The engine may have no split key at all. Eventually allow convergence,
+		// accepting the same large snapshot as a move without a preliminary split.
+		log.Info("allow affinity peer move after split wait timeout", zap.Uint64("region-id", region.GetID()),
+			zap.String("group-id", group.ID), zap.Int64("size", region.GetApproximateSize()),
+			zap.Int64("keys", region.GetApproximateKeys()), zap.Duration("wait-duration", splitWait))
+		affinityCheckerSplitTimeoutCounter.Inc()
 	}
 	return nil, true
 }
