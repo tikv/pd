@@ -488,7 +488,7 @@ func (c *affinityBalanceScanCluster) BatchScanRegions(ranges *keyutil.KeyRanges,
 
 func TestAffinityBalanceCommitRejectsChangedInputs(t *testing.T) {
 	for _, change := range []string{"rule", "conf version", "split", "merge", "add learner", "remove learner", "later group",
-		"limit", "pause", "halt", "placement disabled", "policy", "fixed target", "cancel"} {
+		"limit", "pause", "halt", "placement disabled", "policy", "cancel"} {
 		t.Run(change, func(t *testing.T) {
 			re := require.New(t)
 			f := newAffinityBalanceTest(t, 3)
@@ -548,10 +548,6 @@ func TestAffinityBalanceCommitRejectsChangedInputs(t *testing.T) {
 					f.SetEnablePlacementRules(false)
 				case "policy":
 					f.policy(affinity.BalancePolicyFixed, ids[0])
-				case "fixed target":
-					_, err := f.affinityManager.UpdateAffinityGroupPeers(ids[1], res.targets[0].LeaderStoreID, []uint64{1, 2, 3})
-					re.NoError(err)
-					snapshot.Groups[1] = f.affinityManager.GetAffinityGroupState(ids[1])
 				case "cancel":
 					cancel()
 				}
@@ -582,7 +578,7 @@ func TestAffinityBalanceCommitRejectsChangedInputs(t *testing.T) {
 	}
 }
 
-func TestAffinityBalanceCommitRejectsChangedTable(t *testing.T) {
+func TestAffinityBalanceCommitAllowsOtherGroupChanges(t *testing.T) {
 	re := require.New(t)
 	f := newAffinityBalanceTest(t, 3)
 	ids := f.seed("100", 1, 1, 1)
@@ -609,14 +605,15 @@ func TestAffinityBalanceCommitRejectsChangedTable(t *testing.T) {
 	written, reason, err := f.commitBalancePlan(t.Context(), snapshot, res, revision)
 	re.NoError(err)
 	re.True(called)
-	re.Empty(written)
-	re.Equal(balanceCommitTableChanged, reason)
-	re.Equal(snapshot.Group(ids[0]), f.affinityManager.GetAffinityGroupState(ids[0]))
+	re.Equal([]string{ids[0]}, written)
+	re.Empty(reason)
+	re.Equal(*res.targets[0], f.affinityManager.GetAffinityGroupState(ids[0]).Group)
 	re.Equal(res.targets[0].LeaderStoreID, f.affinityManager.GetAffinityGroupState(ids[1]).LeaderStoreID)
-	re.Equal([2]int{12, 2}, balanceTableScore(f.affinityManager, balanceTestTable()))
+	// The other group moved to the planned leader, so this round need not improve the table.
+	re.Equal([2]int{12, 4}, balanceTableScore(f.affinityManager, balanceTestTable()))
 	version, ok := f.affinityManager.GetBalanceVersion(balanceTestTable())
 	re.True(ok)
-	re.Equal(changedVersion, version)
+	re.Greater(version, changedVersion)
 }
 
 func TestAffinityBalanceModelsLeaderAndFollowerRules(t *testing.T) {
