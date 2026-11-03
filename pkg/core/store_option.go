@@ -263,10 +263,12 @@ func SetLastHeartbeatTS(lastHeartbeatTS time.Time) StoreCreateOption {
 	}
 }
 
-// SetLastPersistTime updates the time of last persistent.
+// SetLastPersistTime advances the time of the last successful persistence.
 func SetLastPersistTime(lastPersist time.Time) StoreCreateOption {
 	return func(store *StoreInfo) {
-		store.lastPersistTime = lastPersist
+		if lastPersist.After(store.lastPersistTime) {
+			store.lastPersistTime = lastPersist
+		}
 	}
 }
 

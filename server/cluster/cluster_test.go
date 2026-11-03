@@ -312,6 +312,51 @@ func TestStoreHeartbeatPreserveConcurrentTxnProtocolVersionRange(t *testing.T) {
 	}
 }
 
+func TestStoreHeartbeatPersistenceProgress(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	cluster := newTestRaftCluster(t.Context(), mockid.NewIDAllocator(), opt, storage.NewStorageWithEtcdBackend(client))
+	re.NoError(cluster.PutMetaStore(newTestStores(1, "2.0.0")[0].GetMeta()))
+
+	var firstHeartbeat, newerHeartbeat time.Time
+	const name = "github.com/tikv/pd/server/cluster/beforePersistStoreHeartbeat"
+	re.NoError(failpoint.EnableCall(name, sync.OnceFunc(func() {
+		// Simulate a newer heartbeat reaching the cache before the first
+		// heartbeat's transaction commits, without changing the stored record.
+		cluster.storeStateLock.Lock(1)
+		defer cluster.storeStateLock.Unlock(1)
+		store := cluster.GetStore(1)
+		firstHeartbeat = store.GetLastHeartbeatTS()
+		newerHeartbeat = firstHeartbeat.Add(time.Second)
+		cluster.PutStore(store, core.SetLastHeartbeatTS(newerHeartbeat))
+	})))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(name)) })
+	re.NoError(cluster.HandleStoreHeartbeat(&pdpb.StoreHeartbeatRequest{
+		Stats: &pdpb.StoreStats{StoreId: 1, Capacity: 100, Available: 50},
+	}, &pdpb.StoreHeartbeatResponse{}))
+
+	persisted := &metapb.Store{}
+	ok, err := cluster.storage.LoadStoreMeta(1, persisted)
+	re.NoError(err)
+	re.True(ok)
+	re.Equal(firstHeartbeat.UnixNano(), persisted.GetLastHeartbeat())
+	store := cluster.GetStore(1)
+	re.Equal(newerHeartbeat, store.GetLastHeartbeatTS())
+	re.False(store.NeedPersist(), "a successful commit must advance the persistence interval")
+	// Only the first heartbeat was persisted, so the interval starts there.
+	re.True(store.Clone(core.SetLastHeartbeatTS(firstHeartbeat.Add(5*time.Minute + time.Nanosecond))).NeedPersist())
+
+	// A successful older attempt must not undo a newer attempt's progress.
+	cluster.persistStoreHeartbeat(1, newerHeartbeat)
+	cluster.persistStoreHeartbeat(1, firstHeartbeat)
+	store = cluster.GetStore(1)
+	re.False(store.Clone(core.SetLastHeartbeatTS(newerHeartbeat.Add(5 * time.Minute))).NeedPersist())
+	re.True(store.Clone(core.SetLastHeartbeatTS(newerHeartbeat.Add(5*time.Minute + time.Nanosecond))).NeedPersist())
+}
+
 func TestStoreHeartbeatDoesNotRestoreDeletedStore(t *testing.T) {
 	re := require.New(t)
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)

@@ -1346,11 +1346,11 @@ func (c *RaftCluster) persistStoreHeartbeat(storeID uint64, heartbeatTime time.T
 	c.storeStateLock.Lock(uint32(storeID))
 	defer c.storeStateLock.Unlock(uint32(storeID))
 	store := c.GetStore(storeID)
-	if store == nil || store.IsRemoved() || !store.GetLastHeartbeatTS().Equal(heartbeatTime) {
+	if store == nil || store.IsRemoved() {
 		return
 	}
-	// A newer heartbeat owns its own persistence result. Do not let an older
-	// completion move the successful persistence timestamp backwards.
+	// Record successful persistence even if a newer heartbeat has arrived.
+	// SetLastPersistTime prevents out-of-order completions from moving it backwards.
 	c.PutStore(store, core.SetLastPersistTime(heartbeatTime))
 }
 
