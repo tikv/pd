@@ -199,9 +199,23 @@ func schedulersRegister() {
 		if err := decoder(conf); err != nil {
 			return nil, err
 		}
+<<<<<<< HEAD
+=======
+		if conf.Batch == 0 {
+			conf.Batch = EvictLeaderBatchSize
+		}
+		rewrite := conf.normalizeEvictedStores()
+>>>>>>> 6fd398ce93 (scheduler, evict-slow-store allow draining multiple store from AZ (#11047))
 		conf.cluster = opController.GetCluster()
 		sche := newEvictSlowStoreScheduler(opController, conf)
 		conf.init(sche.GetName(), storage, conf)
+		if rewrite {
+			// Replace a stored multi-id evict-stores with the normalized layout so an
+			// older PD never observes it.
+			if err := conf.save(); err != nil {
+				return nil, err
+			}
+		}
 		return sche, nil
 	})
 
