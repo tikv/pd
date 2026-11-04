@@ -17,6 +17,7 @@ package checker
 import (
 	"context"
 	"encoding/json"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -124,10 +125,15 @@ func TestAffinityBalanceExecutionAfterRegionChanges(t *testing.T) {
 					err     error
 				}
 				firstWins := make(chan firstWin, 1)
+				var firstWinCount atomic.Int32
 				f.affinityManager.SetTargetWriter(balanceExecutionTargetWriter{write: func(targets []affinity.GroupTarget) ([]string, error) {
+					firstWinCount.Add(1)
 					expired := f.affinityManager.GetAffinityGroupState(id)
 					ids, err := f.affinityManager.UpdateAffinityGroupTargets(targets)
-					firstWins <- firstWin{expired: expired, targets: targets, err: err}
+					select {
+					case firstWins <- firstWin{expired: expired, targets: targets, err: err}:
+					default:
+					}
 					return ids, err
 				}})
 				re.Empty(f.Check(region))
@@ -157,6 +163,7 @@ func TestAffinityBalanceExecutionAfterRegionChanges(t *testing.T) {
 				var stored affinity.Group
 				re.NoError(json.Unmarshal([]byte(raw), &stored))
 				re.Equal(learned.Group, stored)
+				re.Equal(int32(1), firstWinCount.Load())
 			})
 		}
 	}
