@@ -228,13 +228,14 @@ func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group 
 	// we can safely assume all existing learners should be preserved
 	for _, learner := range region.GetLearners() {
 		storeID := learner.GetStoreId()
-		// Only add learner if it's not already in the voters list
-		// (in case there's a conflict, voters take precedence)
 		if existingRole, exists := roles[storeID]; !exists {
 			roles[storeID] = placement.Learner
 		} else if existingRole != placement.Learner {
 			affinityCheckerLearnerPeerConflictCounter.Inc()
-			log.Debug("learner peer conflicts with affinity voter, voter takes precedence",
+			// The learner must be preserved, so let first-win relearn a target
+			// from a healthy Region instead of retrying an impossible peer move.
+			c.affinityManager.ExpireAffinityGroup(group.ID)
+			log.Debug("expire affinity group after learner-voter conflict",
 				zap.Uint64("region-id", region.GetID()),
 				zap.String("group-id", group.ID),
 				zap.Uint64("store-id", storeID),
