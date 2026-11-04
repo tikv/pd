@@ -43,9 +43,10 @@ const (
 var affinitySplitWaitTimeout = defaultAffinitySplitWaitTimeout
 
 type affinitySplitAttempt struct {
-	version   uint64
-	startedAt time.Time
-	expiresAt time.Time
+	version          uint64
+	startedAt        time.Time
+	expiresAt        time.Time
+	fallbackReported bool
 }
 
 // prepareAffinityPeerMove requests a SCAN split before adding a voter when size
@@ -66,11 +67,14 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 		return wait("unknown-size")
 	}
 	storeConfig := c.cluster.GetStoreConfig()
-	var splitWait time.Duration
+	var (
+		attempt   affinitySplitAttempt
+		splitWait time.Duration
+	)
 	if uint64(region.GetApproximateSize()) > storeConfig.GetRegionSplitSize() ||
 		uint64(region.GetApproximateKeys()) > storeConfig.GetRegionSplitKeys() {
 		now := time.Now()
-		attempt := affinitySplitAttempt{version: region.GetRegionEpoch().GetVersion(), startedAt: now}
+		attempt = affinitySplitAttempt{version: region.GetRegionEpoch().GetVersion(), startedAt: now}
 		if value, ok := c.splitAttempts.Get(region.GetID()); ok {
 			previous := value.(affinitySplitAttempt)
 			if previous.version == attempt.version && now.Before(previous.expiresAt) {
@@ -100,13 +104,16 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 	if time.Since(c.startTime) < recentMergeTTL || c.recentMergeCache.Exists(region.GetID()) {
 		return wait("recent-merge-or-startup")
 	}
-	if splitWait > affinitySplitWaitTimeout {
-		// The engine may have no split key at all. Eventually allow convergence,
-		// accepting the same large snapshot as a move without a preliminary split.
+	// The engine may have no split key at all, so a timed-out attempt moves
+	// without a preliminary split and accepts the large snapshot. Report it once:
+	// later patrols evaluate the same attempt again until a move adds the voter.
+	if splitWait > affinitySplitWaitTimeout && !attempt.fallbackReported {
 		log.Info("allow affinity peer move after split wait timeout", zap.Uint64("region-id", region.GetID()),
 			zap.String("group-id", group.ID), zap.Int64("size", region.GetApproximateSize()),
 			zap.Int64("keys", region.GetApproximateKeys()), zap.Duration("wait-duration", splitWait))
 		affinityCheckerSplitTimeoutCounter.Inc()
+		attempt.fallbackReported = true
+		c.splitAttempts.Put(region.GetID(), attempt)
 	}
 	return nil, true
 }
