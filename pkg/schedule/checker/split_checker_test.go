@@ -20,8 +20,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/tikv/pd/pkg/codec"
 	coreconstant "github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/labeler"
@@ -138,4 +140,80 @@ func TestKeyspaceSplitMixRange(t *testing.T) {
 	re.True(keyspace.RegionSpansMultipleKeyspaces(startkey, endKey, sc.cluster.(checkGetter)))
 	keys := keyspace.GetKeyspaceSplitKeys(startkey, endKey, coreconstant.Raw, sc.cluster.(checkGetter))
 	re.NotEmpty(keys)
+}
+
+func TestKeyspaceSplitExtremeBounds(t *testing.T) {
+	for _, keyType := range []coreconstant.KeyType{coreconstant.Raw, coreconstant.Txn} {
+		t.Run(keyType.String(), func(t *testing.T) {
+			prefix := codec.RawKeyspaceModePrefix
+			if keyType == coreconstant.Txn {
+				prefix = codec.TxnKeyspaceModePrefix
+			}
+			left := func(id uint32) []byte {
+				key := codec.EncodeKeyspaceBoundary(prefix, id)
+				return key[:]
+			}
+			inside := func(id uint32) []byte {
+				return codec.EncodeBytes(append(codec.MakeKeyspacePrefix(prefix, id), 'k'))
+			}
+			testCases := []struct {
+				name     string
+				id       uint32
+				start    []byte
+				end      []byte
+				expected [][]byte
+			}{
+				{
+					name:     "non-keyspace endpoints enclosing a live keyspace",
+					id:       101,
+					start:    codec.EncodeBytes([]byte("a")),
+					end:      codec.EncodeBytes([]byte("z")),
+					expected: [][]byte{left(101), left(102)},
+				},
+				{
+					name:     "negative infinity to inside the first keyspace",
+					id:       0,
+					end:      inside(0),
+					expected: [][]byte{left(0)},
+				},
+				{
+					name:     "inside the last keyspace to positive infinity",
+					id:       constant.MaxValidKeyspaceID,
+					start:    inside(constant.MaxValidKeyspaceID),
+					expected: [][]byte{left(constant.MaxValidKeyspaceID + 1)},
+				},
+			}
+			for _, tc := range testCases {
+				t.Run(tc.name, func(t *testing.T) {
+					re := require.New(t)
+					cfg := mockconfig.NewTestOptions()
+					cfg.GetPDServerConfig().KeyType = keyType.String()
+					cluster := mockcluster.NewCluster(t.Context(), cfg)
+					cluster.AddLeaderStore(1, 1)
+					sc := NewSplitChecker(cluster, cluster.RuleManager, cluster.RegionLabeler)
+					cluster.AddLeaderRegionWithRange(1, string(tc.start), string(tc.end), 1)
+					region := cluster.GetRegion(1)
+					// With no metadata or compatibility labels, no split is needed.
+					re.Empty(cluster.GetAllLabelRules())
+					re.Nil(sc.Check(region))
+					cluster.AddKeyspace(tc.id)
+					re.True(keyspace.RegionSpansMultipleKeyspaces(tc.start, tc.end, cluster))
+					op := sc.Check(region)
+					re.NotNil(op)
+					re.Equal("keyspace-split-region", op.Desc())
+					re.Equal(tc.expected, op.Step(0).(operator.SplitRegion).SplitKeys)
+					// A later patrol must not depend on a compatibility label either.
+					re.NotNil(sc.Check(region))
+					// Once split at these boundaries, none of the resulting regions
+					// should be split again in the configured mode.
+					start := tc.start
+					for _, end := range append(tc.expected, tc.end) {
+						cluster.AddLeaderRegionWithRange(2, string(start), string(end), 1)
+						re.Nil(sc.Check(cluster.GetRegion(2)))
+						start = end
+					}
+				})
+			}
+		})
+	}
 }

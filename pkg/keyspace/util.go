@@ -20,6 +20,7 @@ import (
 	"encoding/hex"
 	"regexp"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -451,154 +452,39 @@ type Checker interface {
 	KeyspaceExist(keyspaceID uint32) bool
 }
 
-// RegionSpansMultipleKeyspaces checks whether the region [startKey, endKey)
-// (endKey exclusive) crosses a keyspace boundary. It returns false when nil
-// checker is passed.
-//
-// The decision, in order:
-//   - both keys carry no keyspace prefix (or endKey is absent): not spanning;
-//   - exactly one key carries no keyspace prefix: conservatively spanning, since
-//     the boundary cannot be determined;
-//   - same keyspace ID and same mode (raw/txn): not spanning;
-//   - raw startKey with txn endKey: spanning (crosses the raw/txn boundary);
-//   - endKey absent (region runs past every later keyspace): spanning iff the
-//     start keyspace still exists;
-//   - endKey sits exactly on startKey's keyspace right bound: not spanning;
-//   - otherwise: spanning iff any keyspace in [startKeyspaceID, endKeyspaceID]
-//     still exists, not just the two endpoints - a keyspace that lies strictly
-//     between them still means the region must be split.
-//
-// An absent endKey is treated as +inf rather than keyspace MaxValidKeyspaceID,
-// so the result does not depend on the checker implementation's handling of
-// that sentinel ID.
+// RegionSpansMultipleKeyspaces reports whether a live raw or txn keyspace has a
+// boundary strictly inside [startKey, endKey). Empty endpoints represent negative
+// and positive infinity, respectively, not keyspace IDs. A nil checker returns false.
 func RegionSpansMultipleKeyspaces(startKey, endKey []byte, checker Checker) bool {
 	if checker == nil {
 		return false
 	}
-	endKeyspaceID, endKT, endOK := ExtractKeyspaceID(endKey)
-
-	var startKeyspaceID uint32
-	var startKT regionBoundType
-	var startOK bool
-	if len(startKey) == 0 {
-		// An empty start key only stands in for the left bound of the raw
-		// keyspace block (keyspace 0) when endKey is itself recognizable as
-		// keyspace-prefixed: that is the "first region in a keyspace-aware
-		// cluster" case this synthesizes for. When endKey carries no
-		// keyspace prefix at all - e.g. a classic, unprefixed raw key in a
-		// cluster with no keyspace feature in use - treating the empty
-		// start key as a real keyspace boundary would wrongly pair a
-		// synthesized "known" side against the end key's genuinely unknown
-		// side below, and conservatively (and incorrectly) report spanning
-		// for an ordinary key range that carries no keyspace information on
-		// either side.
-		startOK = endOK
-		if startOK {
-			startKeyspaceID, startKT = constant.StartKeyspaceID, rawRegionBound
-		}
-	} else {
-		startKeyspaceID, startKT, startOK = ExtractKeyspaceID(startKey)
-	}
-
-	// If both keys have no recognizable keyspace ID (or the end key is simply
-	// absent), the region carries no keyspace boundary information at all, so it
-	// does not span multiple keyspaces.
-	if !startOK && (!endOK || len(endKey) == 0) {
-		return false
-	}
-
-	// If exactly one side has an unknown key type, conservatively consider it spans multiple keyspaces to avoid potential data corruption.
-	// This can happen when the key is not in the expected format, or when there is a hole in keyspace allocation.
-	// For example, if startKey has valid keyspace ID but endKey is invalid, we cannot determine the keyspace boundary,
-	// thus we consider it spans multiple keyspaces to be safe.
-	if !startOK || !endOK {
-		return true
-	}
-
-	// If the keyspace ids are same and key types are same, it does not span multiple keyspaces even if the key is invalid.
-	if startKeyspaceID == endKeyspaceID && startKT == endKT {
-		return false
-	}
-	// If startKey is raw key and endKey is txn key, it must span multiple keyspaces, because raw key usually the rightmost key and the txn the smallest key.
-	// So it must cross the boundary between raw keyspace and txn keyspace, which means it spans multiple keyspaces.
-	// such as this ['r200','x100'], it may cross keyspace (200, MaxValidKeyspaceID]
-	if startKT == rawRegionBound && endKT == txnRegionBound {
-		return true
-	}
-
-	// An absent endKey means the region runs past every later keyspace (+inf).
-	// It spans a boundary iff any keyspace in [startKeyspaceID,
-	// MaxValidKeyspaceID] still exists - not just startKeyspaceID itself,
-	// since a later keyspace can still be live even after startKeyspaceID
-	// was removed, and the region still runs into it. Reaching here, startKey
-	// is a txn keyspace key.
-	if len(endKey) == 0 {
-		_, exist := checker.GetKeyspaceIDInRange(startKeyspaceID, constant.MaxValidKeyspaceID, 1)
-		return exist
-	}
-
-	// If end keyspace ID is exactly start keyspace + 1,
-	// check if endKey is at the exact boundary (right bound of startKeyspace)
-	// If yes, the region is [startKey, rightBound of startKeyspace) which is within one keyspace.
-	if endKeyspaceID == startKeyspaceID+1 {
-		startBound := MakeRegionBound(startKeyspaceID)
-		// it means the region is [startKey, rightBound of startKeyspace)
-		// which is still within one keyspace
-		if string(endKey) == string(startBound.TxnRightBound) || string(endKey) == string(startBound.RawRightBound) {
-			return false
-		}
-	}
-	// Check whether any keyspace in [startKeyspaceID, endKeyspaceID] still
-	// exists - not just the two endpoints, since a keyspace that lies strictly
-	// between them (e.g. startKeyspaceID and endKeyspaceID both already
-	// removed, but one in between was not) still means this region spans it.
-	_, exist := checker.GetKeyspaceIDInRange(startKeyspaceID, endKeyspaceID, 1)
-	return exist
+	return len(findKeyspaceBoundaryKeys(startKey, endKey, rawRegionBound, checker)) > 0 ||
+		len(findKeyspaceBoundaryKeys(startKey, endKey, txnRegionBound, checker)) > 0
 }
 
 const scanLimit = 10
 
-// resolveKeyspaceID reports the keyspace ID that key should be treated as
-// when restricting a keyspace ID range search to boundType's key space. If
-// key encodes a keyspace ID of exactly boundType, that ID is returned.
-// Otherwise key is classified by which side of boundType's key block it
-// falls on: constant.StartKeyspaceID if key sorts before the entire block
-// (e.g. a raw key when boundType is txn), or constant.MaxValidKeyspaceID if
-// it sorts at or after the block (e.g. a txn key when boundType is raw, or a
-// classic non-keyspace key that happens to sort past it). This keeps the
-// resulting [startID, endID] window correct even when a query mixes a real
-// boundType key with a key from another mode or a foreign, non-keyspace
-// encoding, instead of falling back to a role-based default (0 for a start
-// key, MaxValidKeyspaceID for an end key) regardless of where key actually
-// sorts.
-//
-// ok is false only when key cannot be classified at all, i.e. it is not
-// memcomparable-encoded; the caller should keep its own conservative default
-// in that case.
-func resolveKeyspaceID(key []byte, boundType regionBoundType) (id uint32, ok bool) {
+// resolveKeyspaceID finds the ID whose left bound is at or immediately before
+// a nonempty key inside boundType's keyspace block. IDs only bound the metadata
+// lookup; the caller must still compare actual boundaries with the region keys.
+func resolveKeyspaceID(key []byte, boundType regionBoundType) uint32 {
 	if ksID, kt, extractOK := ExtractKeyspaceID(key); extractOK {
 		if kt == boundType {
-			return ksID, true
+			return ksID
 		}
-		// key is a real keyspace key of the other mode. The raw ('r') key
-		// block always sorts before the txn ('x') key block.
-		if boundType == txnRegionBound {
-			return constant.StartKeyspaceID, true
-		}
-		return constant.MaxValidKeyspaceID, true
 	}
-	_, decoded, err := codec.DecodeBytes(key)
-	if err != nil || len(decoded) == 0 {
-		return 0, false
-	}
-	targetPrefix := codec.TxnKeyspaceModePrefix
+	// A partial prefix need not decode as a full keyspace key. Resolve it by
+	// byte order too, so a bounded metadata scan cannot skip matching IDs.
+	prefix := codec.TxnKeyspaceModePrefix
 	if boundType == rawRegionBound {
-		targetPrefix = codec.RawKeyspaceModePrefix
+		prefix = codec.RawKeyspaceModePrefix
 	}
-	if decoded[0] < targetPrefix {
-		return constant.StartKeyspaceID, true
-	}
-	return constant.MaxValidKeyspaceID, true
+	next := sort.Search(int(constant.MaxValidKeyspaceID)+1, func(id int) bool {
+		left := codec.EncodeKeyspaceBoundary(prefix, uint32(id))
+		return bytes.Compare(left[:], key) > 0
+	})
+	return uint32(max(next-1, 0))
 }
 
 // GetKeyspaceSplitKeys returns the keys at which the region [startKey, endKey)
@@ -609,59 +495,48 @@ func GetKeyspaceSplitKeys(startKey, endKey []byte, keyType coreconstant.KeyType,
 	if checker == nil {
 		return nil
 	}
-	boundType := keyTypeToRegionBoundType(keyType)
+	return findKeyspaceBoundaryKeys(startKey, endKey, keyTypeToRegionBoundType(keyType), checker)
+}
 
-	// A start key that is empty or not a keyspace key of this mode means the
-	// region begins before any keyspace; an absent or foreign end key means it
-	// runs to the end of this mode's keyspace space. See resolveKeyspaceID for
-	// how a key of the other mode, or a non-keyspace key, is classified.
+func findKeyspaceBoundaryKeys(startKey, endKey []byte, boundType regionBoundType, checker Checker) [][]byte {
+	if len(endKey) > 0 && bytes.Compare(startKey, endKey) >= 0 {
+		return nil
+	}
+	blockLeft, _ := boundType.bounds(MakeRegionBound(constant.StartKeyspaceID))
+	_, blockRight := boundType.bounds(MakeRegionBound(constant.MaxValidKeyspaceID))
+	if (len(endKey) > 0 && bytes.Compare(endKey, blockLeft) <= 0) || bytes.Compare(startKey, blockRight) >= 0 {
+		return nil
+	}
+	// Clip the metadata lookup to this mode's block without replacing infinite
+	// or foreign endpoints by real keys. In particular, ID 0 and MaxValidKeyspaceID
+	// remain valid IDs, never sentinels for negative or positive infinity.
 	startID := constant.StartKeyspaceID
-	if len(startKey) != 0 {
-		if id, ok := resolveKeyspaceID(startKey, boundType); ok {
-			startID = id
-		}
+	if bytes.Compare(startKey, blockLeft) > 0 {
+		startID = resolveKeyspaceID(startKey, boundType)
 	}
 	endID := constant.MaxValidKeyspaceID
-	if len(endKey) != 0 {
-		if id, ok := resolveKeyspaceID(endKey, boundType); ok {
-			endID = id
-		}
+	if len(endKey) > 0 && bytes.Compare(endKey, blockRight) < 0 {
+		endID = resolveKeyspaceID(endKey, boundType)
 	}
-	if startID >= endID {
+	left, right := boundType.bounds(MakeRegionBound(startID))
+	// Most patrols visit regions already confined to one keyspace. Check their
+	// actual bounds before any metadata lookup, including an end at right.
+	if bytes.Compare(startKey, left) >= 0 && len(endKey) > 0 && bytes.Compare(endKey, right) <= 0 {
 		return nil
 	}
 
-	// No keyspace ID can lie strictly between startID and endID. Use point
-	// lookups instead of a range scan, but include startID's left bound too:
-	// startID can be a synthetic 0 for a key before this mode's keyspace block.
-	if endID == startID+1 {
-		// endID may be the MaxValidKeyspaceID sentinel used above to mean "runs
-		// to the end of this mode's keyspace space" (an absent or foreign end
-		// key), not a real keyspace ID any Checker implementation was ever
-		// asked to track. Treat it as always present instead of asking the
-		// checker, so the result doesn't depend on how a given implementation
-		// happens to answer for that ID - the same reason
-		// RegionSpansMultipleKeyspaces treats an absent endKey as +inf rather
-		// than routing it through KeyspaceExist(MaxValidKeyspaceID).
-		endExist := endID == constant.MaxValidKeyspaceID || checker.KeyspaceExist(endID)
-		startExist := checker.KeyspaceExist(startID)
-		if !startExist && !endExist {
-			return nil
+	var ids []uint32
+	if endID-startID <= 1 {
+		// Same-ID and adjacent-ID windows need at most two point lookups, even
+		// if an endpoint is outside the block. Do not invent a live max ID.
+		if checker.KeyspaceExist(startID) {
+			ids = append(ids, startID)
 		}
-		left, boundary := boundType.bounds(MakeRegionBound(startID))
-		var splitKeys [][]byte
-		if startExist && keyutil.Between(startKey, endKey, left) {
-			splitKeys = append(splitKeys, left)
+		if endID != startID && checker.KeyspaceExist(endID) {
+			ids = append(ids, endID)
 		}
-		if keyutil.Between(startKey, endKey, boundary) {
-			splitKeys = append(splitKeys, boundary)
-		}
-		return splitKeys
-	}
-
-	ids, ok := checker.GetKeyspaceIDInRange(startID, endID, scanLimit)
-	if !ok || len(ids) == 0 {
-		return nil
+	} else {
+		ids, _ = checker.GetKeyspaceIDInRange(startID, endID, scanLimit)
 	}
 	var splitKeys [][]byte
 	for _, id := range ids {

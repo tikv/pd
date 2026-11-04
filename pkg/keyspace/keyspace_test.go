@@ -883,6 +883,25 @@ func TestGetKeyspaceIDInRangeBackfillScansToCompletion(t *testing.T) {
 		"a single call should scan all of storage to completion, not just up to the queried end")
 }
 
+func TestMaxKeyspaceIDExistsOnlyWithMetadata(t *testing.T) {
+	re := require.New(t)
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	manager := NewKeyspaceManager(t.Context(), store, nil, mockid.NewIDAllocator(), &mockConfig{}, nil, nil)
+	id := constant.MaxValidKeyspaceID
+	re.False(manager.KeyspaceExist(id), "the max valid ID is not an infinity sentinel")
+	re.NoError(manager.saveNewKeyspace(&keyspacepb.KeyspaceMeta{
+		Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: id},
+		Name:     "max-id",
+		State:    keyspacepb.KeyspaceState_ARCHIVED,
+	}))
+	re.True(manager.KeyspaceExist(id))
+	manager.ClearCache()
+	re.True(manager.KeyspaceExist(id), "a live max ID must also be found through storage fallback")
+	_, err := manager.UpdateKeyspaceStateByID(id, keyspacepb.KeyspaceState_TOMBSTONE, time.Now().Unix())
+	re.NoError(err)
+	re.False(manager.KeyspaceExist(id), "the max ID follows the same tombstone semantics as other IDs")
+}
+
 // TestManagerClearCache verifies that ClearCache empties the cache and resets
 // the backfill watermark together, and that GetKeyspaceIDInRange still works
 // correctly (by re-backfilling) afterward.

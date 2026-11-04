@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"math"
+	"slices"
 	"strconv"
 	"testing"
 	"time"
@@ -489,7 +490,7 @@ func (m *mockKeyspaceChecker) KeyspaceExist(id uint32) bool {
 }
 
 func (m *mockKeyspaceChecker) GetKeyspaceIDInRange(start, end uint32, limit int) ([]uint32, bool) {
-	if start >= end {
+	if start > end {
 		return nil, false
 	}
 	if m.allExist {
@@ -595,11 +596,11 @@ func TestRegionSpansMultipleKeyspaces(t *testing.T) {
 			expectedResult: true,
 		},
 		{
-			name:           "start key has a valid keyspace id, end key is classical - ambiguous, should span",
+			name:           "reversed key interval does not span",
 			startKey:       MakeRegionBound(100).TxnLeftBound,
 			endKey:         codec.EncodeBytes([]byte{'t', 1, 2, 3}),
 			checker:        allExistChecker,
-			expectedResult: true,
+			expectedResult: false,
 		},
 		{
 			name:           "span deleted keyspace but still cross two existing keyspaces - should span",
@@ -645,14 +646,18 @@ func TestRegionSpansMultipleKeyspaces(t *testing.T) {
 			expectedResult: true,
 		},
 		{
-			// An empty startKey only stands for the raw keyspace block's left
-			// bound when endKey is itself keyspace-prefixed. Paired here with
-			// a classic, unprefixed key (no keyspace feature in use on this
-			// side), it must not be treated as spanning.
-			name:           "empty start key paired with a non-keyspace end key",
+			// Even without a keyspace-prefixed endpoint, this range encloses
+			// live raw keyspaces before the classical ('t') key.
+			name:           "empty start key paired with a non-keyspace end key encloses raw keyspaces",
 			startKey:       []byte{},
 			endKey:         codec.EncodeBytes([]byte{'t', 1, 2, 4}),
 			checker:        allExistChecker,
+			expectedResult: true,
+		},
+		{
+			name:           "empty start key paired with a non-keyspace end key without metadata",
+			endKey:         codec.EncodeBytes([]byte{'t', 1, 2, 4}),
+			checker:        &mockKeyspaceChecker{existingKeyspaces: map[uint32]bool{}},
 			expectedResult: false,
 		},
 	}
@@ -676,6 +681,69 @@ func TestRegionSpansMultipleKeyspacesWithMissingEndpoints(t *testing.T) {
 	start := MakeRegionBound(100).TxnLeftBound
 	end := MakeRegionBound(102).TxnRightBound // encoded endpoint ID is 103
 	require.True(t, RegionSpansMultipleKeyspaces(start, end, checker))
+}
+
+func TestKeyspaceBoundaryChecksMatchMetadata(t *testing.T) {
+	cache := NewCache()
+	ids := []uint32{0, 1, 101, constant.MaxValidKeyspaceID}
+	endpoints := [][]byte{nil, codec.EncodeBytes([]byte("a")), codec.EncodeBytes([]byte("c")), codec.EncodeBytes([]byte("t")), codec.EncodeBytes([]byte("z"))}
+	for _, id := range ids {
+		cache.Save(id, "test", keyspacepb.KeyspaceState_ENABLED)
+		bound := MakeRegionBound(id)
+		endpoints = append(endpoints, bound.RawLeftBound, bound.RawRightBound, bound.TxnLeftBound, bound.TxnRightBound)
+		for _, prefix := range []byte{codec.RawKeyspaceModePrefix, codec.TxnKeyspaceModePrefix} {
+			endpoints = append(endpoints, codec.EncodeBytes(append(codec.MakeKeyspacePrefix(prefix, id), 'k')))
+		}
+	}
+	cache.Save(102, "tombstone", keyspacepb.KeyspaceState_TOMBSTONE)
+	for _, start := range endpoints {
+		for _, end := range endpoints {
+			if len(end) > 0 && bytes.Compare(start, end) >= 0 {
+				continue
+			}
+			expectedSpan := false
+			for _, keyType := range []coreconstant.KeyType{coreconstant.Raw, coreconstant.Txn} {
+				var expected [][]byte
+				for _, id := range ids {
+					left, right := keyTypeToRegionBoundType(keyType).bounds(MakeRegionBound(id))
+					for _, boundary := range [][]byte{left, right} {
+						if bytes.Compare(start, boundary) < 0 && (len(end) == 0 || bytes.Compare(boundary, end) < 0) {
+							expected = append(expected, boundary)
+						}
+					}
+				}
+				slices.SortFunc(expected, bytes.Compare)
+				expected = slices.CompactFunc(expected, bytes.Equal)
+				require.Equal(t, expected, GetKeyspaceSplitKeys(start, end, keyType, cache),
+					"start=%x end=%x mode=%s", start, end, keyType)
+				expectedSpan = expectedSpan || len(expected) > 0
+			}
+			require.Equal(t, expectedSpan, RegionSpansMultipleKeyspaces(start, end, cache), "start=%x end=%x", start, end)
+		}
+	}
+}
+
+func TestKeyspaceSplitPartialPrefixes(t *testing.T) {
+	cache := NewCache()
+	cache.Save(1<<16, "inside", keyspacepb.KeyspaceState_ENABLED)
+	// More than scanLimit live IDs above the region must not hide the ID inside
+	// it when an endpoint contains only a partial keyspace prefix.
+	for i := range scanLimit + 1 {
+		cache.Save(3<<16+uint32(i), "outside", keyspacepb.KeyspaceState_ENABLED)
+	}
+	for _, keyType := range []coreconstant.KeyType{coreconstant.Raw, coreconstant.Txn} {
+		t.Run(keyType.String(), func(t *testing.T) {
+			prefix := codec.RawKeyspaceModePrefix
+			if keyType == coreconstant.Txn {
+				prefix = codec.TxnKeyspaceModePrefix
+			}
+			start := codec.EncodeBytes([]byte{prefix, 1})
+			end := codec.EncodeBytes([]byte{prefix, 2})
+			left, right := keyTypeToRegionBoundType(keyType).bounds(MakeRegionBound(1 << 16))
+			require.True(t, RegionSpansMultipleKeyspaces(start, end, cache))
+			require.Equal(t, [][]byte{left, right}, GetKeyspaceSplitKeys(start, end, keyType, cache))
+		})
+	}
 }
 
 func TestGetKeyspaceSplitKeys(t *testing.T) {
@@ -1002,29 +1070,33 @@ func TestGetKeyspaceSplitKeysAdjacentIDsSkipsRangeScan(t *testing.T) {
 	}
 }
 
-// TestGetKeyspaceSplitKeysAdjacentIDsIgnoreMaxSentinelExistence verifies that
-// the adjacent-ID shortcut's result does not depend on how a Checker
-// implementation answers KeyspaceExist(MaxValidKeyspaceID). endID lands on
-// that sentinel whenever the end key is empty or classified as sorting past
-// the target mode's key block - it is never a real keyspace ID any Checker
-// was asked to track - so a Checker (like the real MCS scheduling-server
-// implementation) that answers false for it must not change the outcome
-// compared to one (like the real Manager implementation) that hardcodes true.
-func TestGetKeyspaceSplitKeysAdjacentIDsIgnoreMaxSentinelExistence(t *testing.T) {
-	re := require.New(t)
-
-	// startID resolves to MaxValidKeyspaceID-1 and, since endKey is empty,
-	// endID defaults to the MaxValidKeyspaceID sentinel: adjacent IDs.
+func TestGetKeyspaceSplitKeysAdjacentIDsAtMax(t *testing.T) {
 	startKey := deeperTxnKey(constant.MaxValidKeyspaceID-1, 5, 5)
 	boundary := MakeRegionBound(constant.MaxValidKeyspaceID - 1).TxnRightBound
-
-	// The checker does not know about the start keyspace and, like the real
-	// MCS Checker, has no entry for the MaxValidKeyspaceID sentinel either.
-	checker := &existOnlyChecker{}
-
-	splitKeys := GetKeyspaceSplitKeys(startKey, []byte{}, coreconstant.Txn, checker)
-	re.Equal([][]byte{boundary}, splitKeys,
-		"the split point must not be dropped just because the checker doesn't recognize the MaxValidKeyspaceID sentinel as existing")
+	lastBoundary := MakeRegionBound(constant.MaxValidKeyspaceID).TxnRightBound
+	testCases := []struct {
+		name     string
+		existing map[uint32]bool
+		expected [][]byte
+	}{
+		{name: "no metadata"},
+		{
+			name:     "lower keyspace exists",
+			existing: map[uint32]bool{constant.MaxValidKeyspaceID - 1: true},
+			expected: [][]byte{boundary},
+		},
+		{
+			name:     "max ID is a real keyspace with two boundaries",
+			existing: map[uint32]bool{constant.MaxValidKeyspaceID: true},
+			expected: [][]byte{boundary, lastBoundary},
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			checker := &existOnlyChecker{existing: tc.existing}
+			require.Equal(t, tc.expected, GetKeyspaceSplitKeys(startKey, nil, coreconstant.Txn, checker))
+		})
+	}
 }
 
 func TestKeyspaceExists(t *testing.T) {

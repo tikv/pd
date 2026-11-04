@@ -17,6 +17,7 @@ package mockcluster
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"time"
 
@@ -139,14 +140,17 @@ func (mc *Cluster) GetKeyspaceIDInRange(startKeyspaceID uint32, endKeyspaceID ui
 		return nil, false
 	}
 	ret := make([]uint32, 0, max(limit, 0))
-	for id := startKeyspaceID; id <= endKeyspaceID; id++ {
-		if _, ok := mc.existingKeyspaces[id]; !ok {
-			continue
+	// Wide region ranges can cover the entire 24-bit ID space. Iterate only
+	// registered IDs and match the real cache's descending range semantics.
+	for id := range mc.existingKeyspaces {
+		if id >= startKeyspaceID && id <= endKeyspaceID {
+			ret = append(ret, id)
 		}
-		ret = append(ret, id)
-		if limit > 0 && len(ret) >= limit {
-			break
-		}
+	}
+	slices.Sort(ret)
+	slices.Reverse(ret)
+	if limit > 0 && len(ret) > limit {
+		ret = ret[:limit]
 	}
 	return ret, len(ret) > 0
 }

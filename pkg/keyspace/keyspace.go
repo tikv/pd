@@ -1561,9 +1561,6 @@ func (manager *Manager) KeyspaceExist(id uint32) bool {
 	if id == constant.NullKeyspaceID {
 		return true
 	}
-	if id == constant.MaxValidKeyspaceID {
-		return true
-	}
 	if manager == nil {
 		return true
 	}
