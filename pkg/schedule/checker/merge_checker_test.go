@@ -25,11 +25,14 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/storelimit"
+	"github.com/tikv/pd/pkg/keyspace"
+	keyspaceconstant "github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/config"
@@ -605,6 +608,9 @@ func newRegionInfo(id uint64, startKey, endKey string, size, keys int64, leader 
 }
 
 func TestAllowMergeCrossTable(t *testing.T) {
+	const modeFlag = "github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"
+	require.NoError(t, failpoint.Enable(modeFlag, "return(false)"))
+	t.Cleanup(func() { require.NoError(t, failpoint.Disable(modeFlag)) })
 	ctx := t.Context()
 	cfg := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, cfg)
@@ -693,6 +699,116 @@ func TestAllowMergeCrossTable(t *testing.T) {
 			re.Equal(tc.expectAllow, AllowMerge(cluster, regionA, regionB))
 		})
 	}
+}
+
+func TestAllowMergeKeyspace(t *testing.T) {
+	const modeFlag = "github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"
+	require.NoError(t, failpoint.Enable(modeFlag, "return(true)"))
+	t.Cleanup(func() { require.NoError(t, failpoint.Disable(modeFlag)) })
+	for _, mode := range codec.KeyspaceModes() {
+		t.Run(string(mode), func(t *testing.T) {
+			cluster := mockcluster.NewCluster(t.Context(), mockconfig.NewTestOptions())
+			cluster.SetEnableCrossTableMerge(true)
+			// Both placement and label rules have been removed by reclamation.
+			boundary := func(id uint32) []byte {
+				key := codec.EncodeKeyspaceBoundary(mode, id)
+				return key[:]
+			}
+			key := func(id uint32, suffix string) []byte {
+				return codec.EncodeBytes(append(codec.MakeKeyspacePrefix(mode, id), suffix...))
+			}
+			cases := []struct {
+				name               string
+				start, middle, end []byte
+				allow              bool
+			}{
+				{"within-keyspace", boundary(42), key(42, "m"), boundary(43), true},
+				{"complete-neighbors", boundary(42), boundary(43), boundary(44), true},
+				{"complete-spans", boundary(40), boundary(43), boundary(46), true},
+				{"partial-left", key(42, "a"), boundary(43), boundary(44), false},
+				{"partial-right", boundary(42), boundary(43), key(43, "b"), false},
+				{"complete-union-partial-sides", boundary(40), key(43, "m"), boundary(46), true},
+				{"partial-sides-with-complete-keyspaces", key(40, "a"), key(43, "m"), key(46, "z"), true},
+				{"left-only-partial-keyspace", key(42, "a"), key(43, "m"), boundary(45), false},
+				{"right-only-partial-keyspace", boundary(40), key(43, "m"), key(44, "z"), false},
+				{"complete-union-without-complete-right", boundary(42), key(43, "m"), boundary(44), false},
+				{"maximum-id", boundary(keyspaceconstant.MaxValidKeyspaceID - 1), boundary(keyspaceconstant.MaxValidKeyspaceID), boundary(keyspaceconstant.MaxValidKeyspaceID + 1), true},
+				{"first-id", boundary(0), boundary(1), boundary(2), true},
+				{"unbounded-left", nil, boundary(42), boundary(43), false},
+				{"unbounded-right", boundary(42), boundary(43), nil, false},
+				{"short-middle", boundary(42), boundary(43)[:4], boundary(44), false},
+				{"short-internal-end", boundary(42), key(42, "m"), boundary(43)[:4], true},
+				{"short-internal-start", boundary(43)[:4], append(boundary(43)[:4:4], 0), boundary(43), true},
+				{"outside-keyspaces", []byte("a"), []byte("b"), []byte("c"), true},
+				{"mode-crossing", codec.EncodeBytes(codec.MakeKeyspacePrefix(codec.RawKeyspaceModePrefix, 42)), boundary(43), codec.EncodeBytes(codec.MakeKeyspacePrefix(codec.TxnKeyspaceModePrefix, 44)), false},
+			}
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					re := require.New(t)
+					left := newRegionInfoWithBytes(1, tc.start, tc.middle)
+					right := newRegionInfoWithBytes(2, tc.middle, tc.end)
+					re.Equal(tc.allow, AllowMerge(cluster, left, right))
+					re.Equal(tc.allow, AllowMerge(cluster, right, left))
+				})
+			}
+		})
+	}
+}
+
+func TestAllowMergeKeyspaceConstraints(t *testing.T) {
+	const modeFlag = "github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"
+	require.NoError(t, failpoint.Enable(modeFlag, "return(true)"))
+	t.Cleanup(func() { require.NoError(t, failpoint.Disable(modeFlag)) })
+	re := require.New(t)
+	cluster := mockcluster.NewCluster(t.Context(), mockconfig.NewTestOptions())
+	cluster.SetEnableCrossTableMerge(true)
+	boundary := func(id uint32) []byte {
+		key := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, id)
+		return key[:]
+	}
+	start, middle, end := boundary(42), boundary(43), boundary(44)
+	left := newRegionInfoWithBytes(1, start, middle)
+	right := newRegionInfoWithBytes(2, middle, end)
+	for _, id := range []uint32{42, 43} {
+		re.NoError(cluster.GetRegionLabeler().SetLabelRule(keyspace.MakeTxnLabelRule(id)))
+	}
+	merged := left.Clone(core.WithEndKey(end))
+	sc := NewSplitChecker(cluster, cluster.RuleManager, cluster.GetRegionLabeler())
+	re.False(AllowMerge(cluster, left, right))
+	re.NotNil(sc.Check(merged))
+	re.NoError(cluster.GetRegionLabeler().DeleteLabelRule("keyspaces/42"))
+	re.False(AllowMerge(cluster, left, right))
+	re.NotNil(sc.Check(merged))
+	re.NoError(cluster.GetRegionLabeler().DeleteLabelRule("keyspaces/43"))
+	re.True(AllowMerge(cluster, left, right))
+	re.Nil(sc.Check(merged))
+
+	// A placement-rule boundary remains a hard constraint.
+	re.NoError(cluster.SetRule(&placement.Rule{
+		GroupID:     placement.DefaultGroupID,
+		ID:          "keyspace",
+		Index:       1,
+		Override:    true,
+		StartKeyHex: hex.EncodeToString(middle),
+		EndKeyHex:   hex.EncodeToString(end),
+		Role:        placement.Voter,
+		Count:       3,
+	}))
+	re.False(AllowMerge(cluster, left, right))
+	re.NotNil(sc.Check(merged))
+	re.NoError(cluster.RuleManager.DeleteRule(placement.DefaultGroupID, "keyspace"))
+	re.True(AllowMerge(cluster, left, right))
+	re.Nil(sc.Check(merged))
+
+	// merge_option=deny applies even if it has no boundary inside the range.
+	re.NoError(cluster.GetRegionLabeler().SetLabelRule(&labeler.LabelRule{
+		ID:       "deny",
+		Labels:   []labeler.RegionLabel{{Key: mergeOptionLabel, Value: mergeOptionValueDeny}},
+		RuleType: labeler.KeyRange,
+		Data:     keyutil.BuildKeyRangeMaps(hex.EncodeToString(start), hex.EncodeToString(end)),
+	}))
+	re.False(AllowMerge(cluster, left, right))
+	re.NoError(cluster.GetRegionLabeler().DeleteLabelRule("deny"))
 }
 
 func encodeKeyspaceRawKey(keyspaceID uint32, rawKey []byte) []byte {
