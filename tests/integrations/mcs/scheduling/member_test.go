@@ -20,38 +20,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
 )
-
-// firstMemberPDLeader makes the first member in PD's membership scan the leader,
-// so stopping it exercises the failed probe before any live member can be found.
-func firstMemberPDLeader(t *testing.T, pd *tests.TestCluster) *tests.TestServer {
-	t.Helper()
-	re := require.New(t)
-	leaderName := pd.WaitLeader()
-	re.NotEmpty(leaderName)
-	leader := pd.GetServer(leaderName)
-	members, err := etcdutil.ListEtcdMembers(t.Context(), leader.GetEtcdClient())
-	re.NoError(err)
-	re.Len(members.Members, 3)
-	for i := 1; i < len(members.Members); i++ {
-		re.Less(members.Members[i-1].ID, members.Members[i].ID)
-	}
-	firstID := members.Members[0].ID
-	if leader.GetServerID() != firstID {
-		testutil.Eventually(re, func() bool {
-			return leader.MoveEtcdLeader(leader.GetServerID(), firstID) == nil
-		})
-		leaderName = pd.WaitLeaderChange(leaderName)
-		re.NotEmpty(leaderName)
-		leader = pd.GetServer(leaderName)
-	}
-	re.Equal(firstID, leader.GetServerID())
-	t.Logf("PD leader %s is the first member in the scan: %x", leaderName, firstID)
-	return leader
-}
 
 func TestAllocIDAfterFirstPDMemberStops(t *testing.T) {
 	re := require.New(t)
@@ -59,9 +30,8 @@ func TestAllocIDAfterFirstPDMemberStops(t *testing.T) {
 	re.NoError(err)
 	t.Cleanup(pd.Destroy)
 	re.NoError(pd.RunInitialServers())
-	leader := firstMemberPDLeader(t, pd)
-	leaderName := pd.WaitLeader()
-	re.NotEmpty(leaderName)
+	leader := pd.MoveLeaderToFirstMember(re)
+	leaderName := leader.GetConfig().Name
 	re.NoError(leader.BootstrapCluster())
 	tc, err := tests.NewTestSchedulingCluster(t.Context(), 1, pd)
 	re.NoError(err)
@@ -71,6 +41,12 @@ func TestAllocIDAfterFirstPDMemberStops(t *testing.T) {
 	cluster := primary.GetCluster()
 	before := retryAllocID(re, cluster)
 	re.NotZero(before)
+	// The scheduling etcd client starts with the leader as its only endpoint.
+	// Stopping the leader before it learns the other members would make the
+	// member list itself fail, which is a different failure from the one under test.
+	testutil.Eventually(re, func() bool {
+		return len(primary.GetClient().Endpoints()) > 1
+	})
 
 	re.NoError(leader.Stop())
 	re.NotEmpty(pd.WaitLeaderChange(leaderName))
