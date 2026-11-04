@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
@@ -170,16 +171,23 @@ func (m *Manager) createGroupsWithSkipExisting(changes []GroupKeyRanges, skipExi
 	}
 
 	// Step 4: Create the change plan for the Group
-	saveOps := plan.CommitOps()
-	for _, g := range filteredGroups {
+	labelOps := plan.CommitOps()
+	groupOps := make([][]func(kv.Txn) error, 0, len(filteredGroups))
+	for i, g := range filteredGroups {
 		group := g
-		saveOps = append(saveOps, func(txn kv.Txn) error {
+		ops := make([]func(kv.Txn) error, 0, 2)
+		if labelRules[i] != nil {
+			ops = append(ops, labelOps[0])
+			labelOps = labelOps[1:]
+		}
+		ops = append(ops, func(txn kv.Txn) error {
 			return m.storage.SaveAffinityGroup(txn, group.ID, group)
 		})
+		groupOps = append(groupOps, ops)
 	}
 
 	// Step 5: Save the Group and Label information in storage.
-	if err := endpoint.RunBatchOpInTxn(m.ctx, m.storage, saveOps); err != nil {
+	if err := m.runGroupOpsInTxn(groupOps); err != nil {
 		log.Error("failed to add affinity groups",
 			zap.Int("total-groups", len(filteredChanges)),
 			zap.Error(err))
@@ -207,7 +215,7 @@ func (m *Manager) createGroupsWithSkipExisting(changes []GroupKeyRanges, skipExi
 	return nil
 }
 
-// DeleteAffinityGroups deletes multiple affinity groups in a single transaction.
+// DeleteAffinityGroups deletes multiple affinity groups and their label rules.
 // If force is false:
 //   - Returns error if any group does not exist
 //   - Returns error if any group has key ranges
@@ -268,16 +276,20 @@ func (m *Manager) DeleteAffinityGroups(groupIDs []string, force bool) error {
 	}
 
 	// Step 4: Create the change plan for the Group
-	saveOps := plan.CommitOps()
-	for _, id := range toDelete {
+	labelOps := plan.CommitOps()
+	groupOps := make([][]func(kv.Txn) error, 0, len(toDelete))
+	for i, id := range toDelete {
 		groupID := id
-		saveOps = append(saveOps, func(txn kv.Txn) error {
-			return m.storage.DeleteAffinityGroup(txn, groupID)
+		groupOps = append(groupOps, []func(kv.Txn) error{
+			labelOps[i],
+			func(txn kv.Txn) error {
+				return m.storage.DeleteAffinityGroup(txn, groupID)
+			},
 		})
 	}
 
 	// Step 5: Save the Group and Label information in storage.
-	if err := endpoint.RunBatchOpInTxn(m.ctx, m.storage, saveOps); err != nil {
+	if err := m.runGroupOpsInTxn(groupOps); err != nil {
 		log.Error("failed to delete affinity groups",
 			zap.Int("total-groups", len(toDelete)),
 			zap.Error(err))
@@ -294,6 +306,23 @@ func (m *Manager) DeleteAffinityGroups(groupIDs []string, force bool) error {
 
 	m.deleteGroups(toDelete)
 	return nil
+}
+
+// runGroupOpsInTxn keeps each group's one or two writes in the same transaction.
+// Count the individual operations so a group without a label rule cannot make
+// the next group's pair straddle the transaction limit.
+func (m *Manager) runGroupOpsInTxn(groupOps [][]func(kv.Txn) error) error {
+	batch := make([]func(kv.Txn) error, 0, etcdutil.MaxEtcdTxnOps)
+	for _, ops := range groupOps {
+		if len(batch)+len(ops) > etcdutil.MaxEtcdTxnOps {
+			if err := endpoint.RunBatchOpInTxn(m.ctx, m.storage, batch); err != nil {
+				return err
+			}
+			batch = batch[:0]
+		}
+		batch = append(batch, ops...)
+	}
+	return endpoint.RunBatchOpInTxn(m.ctx, m.storage, batch)
 }
 
 // UpdateAffinityGroupPeers updates the leader and voter stores of an affinity group and marks it available.
