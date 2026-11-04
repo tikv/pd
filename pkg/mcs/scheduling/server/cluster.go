@@ -871,6 +871,9 @@ func (c *Cluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 		return err
 	}
 	tracer.OnAllStageFinished()
+	if affinityManager := c.GetAffinityManager(); affinityManager != nil {
+		affinityManager.MaybeEnableSplit(region, c.GetHeartbeatStreams())
+	}
 	c.coordinator.GetOperatorController().Dispatch(region, operator.DispatchFromHeartBeat, c.coordinator.RecordOpStepWithTTL)
 	return nil
 }

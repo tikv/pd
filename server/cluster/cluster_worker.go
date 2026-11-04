@@ -28,7 +28,6 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/ratelimit"
-	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -69,6 +68,9 @@ func (c *RaftCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 
 	if c.IsServiceIndependent(constant.SchedulingServiceName) {
 		return nil
+	}
+	if affinityManager := c.GetAffinityManager(); affinityManager != nil {
+		affinityManager.MaybeEnableSplit(region, c.hbstreams)
 	}
 	c.coordinator.GetOperatorController().Dispatch(region, operator.DispatchFromHeartBeat, c.coordinator.RecordOpStepWithTTL)
 	return nil
@@ -138,8 +140,7 @@ func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 	}
 
 	region := c.GetRegion(reqRegion.GetId())
-	if affinityManager := c.GetAffinityManager(); affinityManager != nil && !affinityManager.AllowSplit(region, request.Reason) {
-		c.hbstreams.SendMsg(region, &hbstream.Operation{ChangeSplit: &pdpb.ChangeSplit{AutoSplitEnabled: false}})
+	if affinityManager := c.GetAffinityManager(); affinityManager != nil && !affinityManager.CheckSplit(region, request.GetReason(), c.hbstreams) {
 		return nil, errors.New("cannot split affinity region")
 	}
 

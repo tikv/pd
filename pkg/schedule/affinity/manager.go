@@ -24,6 +24,7 @@ import (
 
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/config"
@@ -78,6 +79,10 @@ type Manager struct {
 	// labelRuleBuffer is a buffer used during etcd synchronization.
 	// When synchronizing via etcd, LabelRule information may arrive earlier than group information.
 	labelRuleBuffer map[string]*labeler.LabelRule // {group_id} -> labelRule
+
+	// splitMutex orders denial and recovery notifications independently of metadata updates.
+	splitMutex         syncutil.Mutex
+	splitDeniedRegions cache.Cache // {region_id} -> expiration time
 }
 
 // NewManager creates a new affinity Manager.
@@ -97,6 +102,7 @@ func NewManager(ctx context.Context, storage endpoint.AffinityStorage, storeSetI
 		unavailableStores:   make(map[uint64]storeCondition),
 		keyRanges:           make(map[string]GroupKeyRanges),
 		labelRuleBuffer:     make(map[string]*labeler.LabelRule),
+		splitDeniedRegions:  cache.NewCache(splitDeniedRegionLimit, cache.LRUCache),
 	}
 	if err := m.initialize(); err != nil {
 		return nil, err
